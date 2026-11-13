@@ -22,7 +22,7 @@ typedef struct loom_serve_recognition_service_options_t {
   iree_string_view_t name;
   // Recognition requires transcripts and exposes HTTP transcription; activity
   // requires activity observations and accepts native inference only.
-  loom_serve_model_kind_t kind;
+  loom_service_kind_t kind;
   // Host-only queue capacity beyond the source's resident streams.
   iree_host_size_t pending_capacity;
   // Maximum copied source options for each stream.
@@ -43,7 +43,7 @@ typedef struct loom_serve_recognition_service_options_t {
 // documents independently of this owner. The generator/model outlives this
 // owner.
 iree_status_t loom_serve_recognition_service_allocate(
-    loom_serve_host_t* host, loom_serve_recognition_generator_t generator,
+    loom_runtime_host_t* host, loom_serve_recognition_generator_t generator,
     const loom_serve_recognition_service_options_t* options,
     loom_runtime_telemetry_stream_t* telemetry, iree_allocator_t host_allocator,
     loom_serve_recognition_service_t** out_service);

@@ -200,7 +200,7 @@ int Exporter(int, char**, const char* directory) {
   Transfer acknowledged;
   CheckStatus(
       iree_async_local_stream_receive(stream, iree_make_byte_span(&accept, 1),
-                                      0, nullptr, acknowledged.callback()));
+                                      0, acknowledged.callback(), nullptr));
   acknowledged.Wait(proactor);
   ROLE_CHECK(accept == 0xAC);
   const uint8_t ready = 0xEA;
@@ -247,7 +247,7 @@ int Importer(int, char**, const char* directory) {
   Transfer offered;
   CheckStatus(iree_async_local_stream_receive(
       stream, iree_make_byte_span(&process_id, sizeof(process_id)), 3,
-      resources, offered.callback()));
+      offered.callback(), resources));
   offered.Wait(proactor);
 
   // The PID is used only to prove process exit, never as resource-import
@@ -276,7 +276,7 @@ int Importer(int, char**, const char* directory) {
   Transfer published;
   CheckStatus(iree_async_local_stream_receive(stream,
                                               iree_make_byte_span(&ready, 1), 0,
-                                              nullptr, published.callback()));
+                                              published.callback(), nullptr));
   published.Wait(proactor);
   ROLE_CHECK(ready == 0xEA);
 
@@ -328,7 +328,7 @@ int Importer(int, char**, const char* directory) {
   uint8_t unexpected = 0;
   Transfer eof;
   CheckStatus(iree_async_local_stream_receive(
-      stream, iree_make_byte_span(&unexpected, 1), 0, nullptr, eof.callback()));
+      stream, iree_make_byte_span(&unexpected, 1), 0, eof.callback(), nullptr));
   while (!eof.done) {
     CheckStatus(
         iree_async_proactor_poll(proactor, iree_infinite_timeout(), nullptr));

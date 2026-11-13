@@ -27,7 +27,7 @@ extern "C" {
 #endif
 
 // ABI version for descriptor sets consumed by this header.
-#define LOOM_LOW_DESCRIPTOR_SET_ABI_VERSION 72u
+#define LOOM_LOW_DESCRIPTOR_SET_ABI_VERSION 74u
 
 // Sentinel for absent target-family or descriptor-set stable IDs.
 #define LOOM_LOW_STABLE_ID_NONE UINT64_C(0)
@@ -67,6 +67,17 @@ extern "C" {
 #define LOOM_LOW_TIMING_EVENT_NONE UINT16_MAX
 
 typedef uint8_t loom_low_operand_role_t;
+
+// Logical handle effects of target instructions. Consuming transfers and
+// releases use structural Low operations with ordinary ownership descriptors.
+typedef uint8_t loom_low_ownership_effect_t;
+enum loom_low_ownership_effect_e {
+  LOOM_LOW_OWNERSHIP_NONE = 0,
+  LOOM_LOW_OWNERSHIP_BORROW = 1,
+  LOOM_LOW_OWNERSHIP_RETAIN = 2,
+  LOOM_LOW_OWNERSHIP_OWNED = 3,
+  LOOM_LOW_OWNERSHIP_BORROWED = 4,
+};
 
 enum loom_low_operand_role_e {
   // Unknown or uninitialized operand role.
@@ -143,6 +154,8 @@ typedef uint16_t loom_low_operand_flags_t;
 // disjoint register parts supplied by the tied input without reading them for
 // execution, and writes only the result's declared register part. The source
 // establishes issue order and storage identity but not completion dependence.
+// A named source part must be defined. An unnamed source part preserves the
+// available unwritten parts without requiring any of them to be defined.
 #define LOOM_LOW_OPERAND_FLAG_STORAGE_CONTINUATION ((uint16_t)1u << 8)
 // Operand row describes zero or more trailing packet operands. Variadic rows
 // are explicit packet operands and must terminate the descriptor operand list.
@@ -161,6 +174,11 @@ typedef uint16_t loom_low_operand_flags_t;
 // not permit removing, duplicating, or speculating execution. Reads and
 // unmarked writes still observe source order; native write events remain.
 #define LOOM_LOW_OPERAND_FLAG_COMMUTATIVE_STATE_UPDATE ((uint16_t)1u << 12)
+// Implicit write whose value has no hidden reader in the complete descriptor
+// namespace, including register aliases. The generator derives this property;
+// explicit readers name SSA state results instead. Value reuse may ignore the
+// discarded write, while scheduling retains its STATE_WRITE hazard.
+#define LOOM_LOW_OPERAND_FLAG_UNOBSERVED_STATE_WRITE ((uint16_t)1u << 13)
 
 // Bitset of register-class alternative flags.
 typedef uint8_t loom_low_reg_class_alt_flags_t;
@@ -344,7 +362,8 @@ typedef enum loom_low_constraint_kind_e {
   LOOM_LOW_CONSTRAINT_KIND_UNKNOWN = 0,
   // Two descriptor operands must use the same assigned register.
   LOOM_LOW_CONSTRAINT_KIND_TIED = 1,
-  // The descriptor may commute two operands.
+  // Exchanging the two raw operand values preserves results and effects with
+  // all attributes unchanged. Receiving register constraints still apply.
   LOOM_LOW_CONSTRAINT_KIND_COMMUTABLE = 2,
   // Operand is destructively updated.
   LOOM_LOW_CONSTRAINT_KIND_DESTRUCTIVE = 3,
@@ -381,6 +400,10 @@ typedef enum loom_low_operand_form_match_kind_e {
   // Operand facts prove every scalar element/register unit is the same exact
   // i64 value. The selected value is carried into the replacement form.
   LOOM_LOW_OPERAND_FORM_MATCH_ALL_EQUAL_EXACT_I64 = 2,
+  // The source register class is accepted by the replacement operand whose
+  // descriptor-local index is match_i64. Generated only when static operand
+  // compatibility cannot prove the remap accepts every source class.
+  LOOM_LOW_OPERAND_FORM_MATCH_ACCEPTED_REGISTER_CLASS = 3,
 } loom_low_operand_form_match_kind_t;
 
 typedef enum loom_low_operand_form_immediate_action_e {
@@ -619,7 +642,7 @@ typedef uint32_t loom_low_instruction_class_flags_t;
 typedef struct loom_low_reg_class_t {
   // String-pool reference for the stable register-class name, or
   // LOOM_STRING_REF_NONE for a storage slot absent from this view.
-  // Absent slots have spill_class_id NONE and all other fields zero.
+  // Absent slots have all other fields zero.
   loom_string_ref_t name_string_ref;
   // Target bank identifier used by allocators and pressure reporting.
   uint16_t target_bank_id;
@@ -666,12 +689,17 @@ typedef struct loom_low_reg_class_t {
   // Dense one-based alias-set identifier shared by overlapping register
   // classes in a linear storage namespace, or zero when disjoint.
   uint16_t alias_set_id;
-  // Register class used for spill/reload values, or LOOM_LOW_REG_CLASS_NONE.
-  uint16_t spill_class_id;
+  // Memory bits occupied by each spilled allocation unit. This may exceed
+  // |alloc_unit_bits| when native transfers widen a register's payload.
+  uint16_t spill_unit_bits;
   // Bits defined by ordinary full-register writes for one allocation unit.
   loom_low_register_part_mask_t full_register_part_mask;
   // Storage space used when values from this class are spilled.
   uint8_t spill_slot_space;
+  // Log2 minimum slot alignment in the low nibble and maximum natural tuple
+  // alignment in the high nibble. Both describe byte alignment. Tuple slots
+  // align for up to four units, clamped to these target-owned limits.
+  uint8_t spill_alignment_log2;
   // Atomic storage units occupied by each explicit physical candidate. All
   // candidates in a class have equal width. Zero for linear register classes,
   // whose locations each occupy one unit in their storage namespace.
@@ -1245,23 +1273,30 @@ enum loom_low_descriptor_op_kind_e {
 };
 typedef uint8_t loom_low_descriptor_op_kind_t;
 
-typedef struct loom_low_descriptor_t {
-  // Durable descriptor identity derived from the descriptor key. This is
-  // stable across descriptor table reordering and unrelated descriptor
-  // additions; descriptor-set ordinals are only transient row addresses.
-  uint64_t stable_id;
+// Canonical spelling metadata shared by descriptors with the same authored
+// identity. Durable stable IDs remain ordinal-indexed companion data so the
+// hot structural row does not pay another catalog indirection.
+typedef struct loom_low_descriptor_identity_t {
   // String-pool reference for the stable descriptor key.
   loom_string_ref_t key_string_ref;
-  // String-pool reference for the target mnemonic or packet name.
-  loom_string_ref_t mnemonic_string_ref;
   // String-pool reference for the primary semantic tag.
   loom_string_ref_t semantic_tag_string_ref;
+} loom_low_descriptor_identity_t;
+
+static_assert(sizeof(loom_low_descriptor_identity_t) == 8,
+              "descriptor identities must remain compact table rows");
+
+typedef struct loom_low_descriptor_t {
+  // String-pool reference for the target mnemonic or packet name.
+  loom_string_ref_t mnemonic_string_ref;
+  // Index into the descriptor set's shared identity catalog.
+  uint16_t identity_ordinal;
   // First index in the set's operand_indices for this descriptor.
   uint16_t operand_start;
   // Total number of operand/result rows for this descriptor.
-  uint16_t operand_count;
+  uint8_t operand_count;
   // Number of leading operand rows that define results.
-  uint16_t result_count;
+  uint8_t result_count;
   // Target-owned encoding identifier.
   uint16_t encoding_id;
   // Index into the set's shared descriptor_layouts table.
@@ -1270,13 +1305,23 @@ typedef struct loom_low_descriptor_t {
   loom_low_descriptor_flags_t flags;
 } loom_low_descriptor_t;
 
-static_assert(sizeof(loom_low_descriptor_t) == 32,
-              "loom_low_descriptor_t must be 32 bytes");
+static_assert(sizeof(loom_low_descriptor_t) == 16,
+              "loom_low_descriptor_t must be 16 bytes");
+
+// Bitset of generated descriptor-layout properties.
+typedef uint8_t loom_low_descriptor_layout_flags_t;
+
+// At least one operand has architectural state relevant to value reuse.
+// Schedule-only state, discarded writes, and reads explicit in SSA are
+// excluded.
+#define LOOM_LOW_DESCRIPTOR_LAYOUT_FLAG_VALUE_STATE ((uint8_t)1u << 0)
 
 // Immutable structural spans shared by instruction identities and target views.
-// Identity, operand binding and encoding-ID queries stay in the descriptor row;
-// consumers of these spans use the descriptor's layout_index. Empty spans have
-// start zero so unused offsets do not distinguish otherwise identical layouts.
+// Operand binding and encoding-ID queries stay in the descriptor row;
+// consumers of these spans use the descriptor's layout_index. Stable IDs use
+// the ordinal-indexed companion array, while key and semantic-tag queries use
+// the shared identity catalog. Empty spans have start zero so unused offsets
+// do not distinguish otherwise identical layouts.
 typedef struct loom_low_descriptor_layout_t {
   // First feature-mask word required by this descriptor.
   uint16_t feature_mask_word_start;
@@ -1314,6 +1359,8 @@ typedef struct loom_low_descriptor_layout_t {
   uint8_t minimum_packet_operand_count;
   // Canonical low IR operation used to represent this descriptor packet.
   loom_low_descriptor_op_kind_t op_kind;
+  // Generated summary properties of the descriptor's operand/effect layout.
+  loom_low_descriptor_layout_flags_t flags;
 } loom_low_descriptor_layout_t;
 
 static_assert(sizeof(loom_low_descriptor_layout_t) == 26,
@@ -1338,13 +1385,15 @@ static_assert(sizeof(loom_low_descriptor_view_t) == 8,
               "loom_low_descriptor_view_t must be 8 bytes");
 
 typedef struct loom_low_operand_form_match_t {
-  // Descriptor-local operand index whose value facts select this form.
+  // Descriptor-local operand index whose value or register class selects this
+  // form.
   uint16_t source_operand_index;
   // Packet operand position corresponding to source_operand_index.
   uint16_t source_packet_operand_index;
-  // Predicate kind used to test the source operand facts.
+  // Predicate kind used to test the source operand facts or register class.
   loom_low_operand_form_match_kind_t match_kind;
-  // Predicate integer payload. ALL_EQUAL_I64 compares against this value.
+  // Exact value for ALL_EQUAL_I64, or replacement descriptor-local operand
+  // index for ACCEPTED_REGISTER_CLASS. Unused by ALL_EQUAL_EXACT_I64.
   int64_t match_i64;
 } loom_low_operand_form_match_t;
 
@@ -1661,10 +1710,18 @@ typedef struct loom_low_descriptor_set_t {
   loom_string_ref_t target_key_string_ref;
   // String-pool reference for the feature namespace key.
   loom_string_ref_t feature_key_string_ref;
+  // Shared descriptor identity slots indexed by each descriptor's identity
+  // ordinal. Generated catalogs fit in the uint16_t ordinal domain. Slots not
+  // referenced by a linked target family may be empty.
+  const loom_low_descriptor_identity_t* descriptor_identities;
+  // Durable stable IDs indexed directly by descriptor ordinal.
+  const uint64_t* descriptor_stable_ids;
   // Structural descriptor rows indexed by descriptor ordinal.
   const loom_low_descriptor_t* descriptors;
   // Interned structural layouts referenced by descriptor layout indices.
   const loom_low_descriptor_layout_t* descriptor_layouts;
+  // Exclusive upper bound of addressable descriptor identity ordinals.
+  uint32_t descriptor_identity_count;
   // Number of rows in the shared descriptor_layouts table.
   uint32_t descriptor_layout_count;
   // View-specific descriptor rows indexed by descriptor ordinal.
@@ -1723,6 +1780,12 @@ typedef struct loom_low_descriptor_set_t {
   uint32_t native_asm_value_count;
   // Shared operand/result rows referenced by operand_indices.
   const loom_low_operand_t* operands;
+  // Optional descriptor-indexed ownership span starts plus one. Zero denotes
+  // no handle effects; absent for sets with no handle instructions.
+  const uint16_t* ownership_offsets;
+  // Effect bytes in SSA result order followed by SSA operand order. Spans are
+  // interned and omit implicit machine operands; no per-operation allocation.
+  const loom_low_ownership_effect_t* ownership_effects;
   // Number of operand/result rows owned by this set.
   uint32_t operand_count;
   // Maximum operand count of one native descriptor, including implicit state.
@@ -1852,11 +1915,52 @@ typedef struct loom_low_descriptor_set_t {
   iree_alignas(16) loom_string_pool_t string_pool;
 } loom_low_descriptor_set_t;
 
+// Returns the shared identity metadata for a verified descriptor row.
+static IREE_ATTRIBUTE_ALWAYS_INLINE const loom_low_descriptor_identity_t*
+loom_low_descriptor_identity(const loom_low_descriptor_set_t* descriptor_set,
+                             const loom_low_descriptor_t* descriptor) {
+  return &descriptor_set->descriptor_identities[descriptor->identity_ordinal];
+}
+
+// Returns the durable stable ID for a verified descriptor row.
+static IREE_ATTRIBUTE_ALWAYS_INLINE uint64_t
+loom_low_descriptor_stable_id(const loom_low_descriptor_set_t* descriptor_set,
+                              const loom_low_descriptor_t* descriptor) {
+  const uint32_t descriptor_ordinal =
+      (uint32_t)(descriptor - descriptor_set->descriptors);
+  return descriptor_set->descriptor_stable_ids[descriptor_ordinal];
+}
+
+// Returns the durable stable ID for a verified descriptor ordinal.
+static IREE_ATTRIBUTE_ALWAYS_INLINE uint64_t loom_low_descriptor_stable_id_at(
+    const loom_low_descriptor_set_t* descriptor_set,
+    uint32_t descriptor_ordinal) {
+  return descriptor_set->descriptor_stable_ids[descriptor_ordinal];
+}
+
+// Returns the stable key reference for a verified descriptor row.
+static IREE_ATTRIBUTE_ALWAYS_INLINE loom_string_ref_t
+loom_low_descriptor_key_string_ref(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_low_descriptor_t* descriptor) {
+  return loom_low_descriptor_identity(descriptor_set, descriptor)
+      ->key_string_ref;
+}
+
+// Returns the semantic-tag reference for a verified descriptor row.
+static IREE_ATTRIBUTE_ALWAYS_INLINE loom_string_ref_t
+loom_low_descriptor_semantic_tag_string_ref(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_low_descriptor_t* descriptor) {
+  return loom_low_descriptor_identity(descriptor_set, descriptor)
+      ->semantic_tag_string_ref;
+}
+
 // Resolves the native assembly mnemonic selected by a verified asm form and
 // layout. Ordinary forms use their own mnemonic. Generated layouts instead
 // select the descriptor mnemonic, a byte prefix of the form mnemonic, or a
 // compact explicit-mnemonic pool row when those spellings differ.
-IREE_ATTRIBUTE_ALWAYS_INLINE static inline loom_string_ref_t
+static IREE_ATTRIBUTE_ALWAYS_INLINE loom_string_ref_t
 loom_low_asm_form_native_mnemonic_string_ref(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_descriptor_t* descriptor, const loom_low_asm_form_t* form,
@@ -1880,7 +1984,7 @@ loom_low_asm_form_native_mnemonic_string_ref(
 
 // Returns a verified descriptor's operand by descriptor-local index. Rows are
 // immutable and shared; the local index, not the row address, identifies a use.
-IREE_ATTRIBUTE_ALWAYS_INLINE static inline const loom_low_operand_t*
+static IREE_ATTRIBUTE_ALWAYS_INLINE const loom_low_operand_t*
 loom_low_descriptor_operand(const loom_low_descriptor_set_t* descriptor_set,
                             const loom_low_descriptor_t* descriptor,
                             uint16_t operand_index) {
@@ -1892,7 +1996,7 @@ loom_low_descriptor_operand(const loom_low_descriptor_set_t* descriptor_set,
 
 // Returns the operand alternative for |reg_class_id|, or NULL when the
 // operand does not accept that register class.
-IREE_ATTRIBUTE_ALWAYS_INLINE static inline const loom_low_reg_class_alt_t*
+static IREE_ATTRIBUTE_ALWAYS_INLINE const loom_low_reg_class_alt_t*
 loom_low_operand_reg_class_alt(const loom_low_descriptor_set_t* descriptor_set,
                                const loom_low_operand_t* operand,
                                uint16_t reg_class_id) {
@@ -1908,8 +2012,7 @@ loom_low_operand_reg_class_alt(const loom_low_descriptor_set_t* descriptor_set,
 }
 
 // Returns whether |descriptor_ordinal| is available in |descriptor_set|.
-IREE_ATTRIBUTE_ALWAYS_INLINE static inline bool
-loom_low_descriptor_set_has_descriptor(
+static IREE_ATTRIBUTE_ALWAYS_INLINE bool loom_low_descriptor_set_has_descriptor(
     const loom_low_descriptor_set_t* descriptor_set,
     uint32_t descriptor_ordinal) {
   if (descriptor_ordinal >= descriptor_set->descriptor_ordinal_count) {
@@ -1924,7 +2027,7 @@ loom_low_descriptor_set_has_descriptor(
 }
 
 // Returns the shared structural layout for a verified descriptor in this set.
-IREE_ATTRIBUTE_ALWAYS_INLINE static inline const loom_low_descriptor_layout_t*
+static IREE_ATTRIBUTE_ALWAYS_INLINE const loom_low_descriptor_layout_t*
 loom_low_descriptor_layout(const loom_low_descriptor_set_t* descriptor_set,
                            const loom_low_descriptor_t* descriptor) {
   return &descriptor_set->descriptor_layouts[descriptor->layout_index];
@@ -1932,7 +2035,7 @@ loom_low_descriptor_layout(const loom_low_descriptor_set_t* descriptor_set,
 
 // Returns the view-owned facts for |descriptor_ordinal|. The ordinal must be a
 // verified row in |descriptor_set|.
-IREE_ATTRIBUTE_ALWAYS_INLINE static inline const loom_low_descriptor_view_t*
+static IREE_ATTRIBUTE_ALWAYS_INLINE const loom_low_descriptor_view_t*
 loom_low_descriptor_set_descriptor_view_at(
     const loom_low_descriptor_set_t* descriptor_set,
     uint32_t descriptor_ordinal) {
@@ -1941,7 +2044,7 @@ loom_low_descriptor_set_descriptor_view_at(
 
 // Returns the view-owned facts corresponding to |descriptor|. The descriptor
 // must be a row in |descriptor_set->descriptors|.
-IREE_ATTRIBUTE_ALWAYS_INLINE static inline const loom_low_descriptor_view_t*
+static IREE_ATTRIBUTE_ALWAYS_INLINE const loom_low_descriptor_view_t*
 loom_low_descriptor_set_descriptor_view(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_descriptor_t* descriptor) {
@@ -1952,7 +2055,7 @@ loom_low_descriptor_set_descriptor_view(
 }
 
 // Resolves a canonical schedule-class ID into a model's physical row pool.
-IREE_ATTRIBUTE_ALWAYS_INLINE static inline uint16_t
+static IREE_ATTRIBUTE_ALWAYS_INLINE uint16_t
 loom_low_schedule_model_schedule_class_row_id(
     const loom_low_schedule_model_t* schedule_model, uint16_t canonical_id) {
   return schedule_model->schedule_class_row_ids == NULL
@@ -1962,7 +2065,7 @@ loom_low_schedule_model_schedule_class_row_id(
 
 // Returns the schedule behavior selected by |schedule_model| for a verified
 // descriptor view.
-IREE_ATTRIBUTE_ALWAYS_INLINE static inline const loom_low_schedule_class_t*
+static IREE_ATTRIBUTE_ALWAYS_INLINE const loom_low_schedule_class_t*
 loom_low_schedule_model_schedule_class(
     const loom_low_schedule_model_t* schedule_model,
     const loom_low_descriptor_view_t* descriptor_view) {
@@ -1972,7 +2075,7 @@ loom_low_schedule_model_schedule_class(
 }
 
 // Returns the stable semantic name for |canonical_id|.
-IREE_ATTRIBUTE_ALWAYS_INLINE static inline loom_string_ref_t
+static IREE_ATTRIBUTE_ALWAYS_INLINE loom_string_ref_t
 loom_low_descriptor_set_schedule_class_name_string_ref(
     const loom_low_descriptor_set_t* descriptor_set, uint16_t canonical_id) {
   return descriptor_set->schedule_class_name_string_refs[canonical_id];

@@ -1,0 +1,11 @@
+// RUN: verify
+// Runtime reference ABIs require every caller to participate in the selected
+// identity contract, so externally callable definitions remain rejected.
+// ERROR@+1: LOWERING/059 "runtime reference signatures require an internal ordinary function definition"
+void public_reference(unsigned& value) { ++value; }
+
+// ====
+// Bodyless declarations cannot establish the internal call graph contract.
+static void external_reference(unsigned& value);
+// ERROR@+1: LOWERING/059 "runtime reference signatures require an internal ordinary function definition"
+void caller(unsigned& value) { external_reference(value); }

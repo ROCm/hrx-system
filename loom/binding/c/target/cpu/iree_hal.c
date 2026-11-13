@@ -7,7 +7,7 @@
 #include "loomc/target/cpu/iree_hal.h"
 
 #include "diagnostic.h"
-#include "iree/hal/drivers/task/device_spec.h"
+#include "iree/hal/driver/task/device_spec.h"
 #include "loom/target/selection.h"
 #include "loomc/iree.h"
 #include "result.h"
@@ -108,8 +108,8 @@ static loomc_status_t loomc_cpu_iree_hal_select_target(
         loomc_target_profile_loom_target_profile(options->target_profile);
     iree_status_t iree_status = loom_target_environment_select_cpu_profile(
         loomc_target_environment_loom_target_environment(target_environment),
-        &cpu_spec.cpu_data, NULL, requested_profile, &selected_profile,
-        iree_allocator_from_loomc(allocator));
+        &cpu_spec.cpu_data, NULL, requested_profile,
+        iree_allocator_from_loomc(allocator), &selected_profile);
     if (!iree_status_is_ok(iree_status)) {
       status = loomc_cpu_iree_hal_fail_status(
           result, loomc_status_from_iree(iree_status));

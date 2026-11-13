@@ -19,6 +19,8 @@
   _(INVERSE_HYPERBOLIC_F32_EVALUATION, inverse_hyperbolic_f32_evaluation,    \
     "math.inverse_hyperbolic.f32_evaluation")                                \
   _(OP_NATIVE_ARITHMETIC, op_native_arithmetic, "math.op.native_arithmetic") \
+  _(RECIPE_APPROXIMATE_EXPONENTIAL, recipe_approximate_exponential,          \
+    "math.recipe.approximate_exponential")                                   \
   _(RECIPE_INVERSE_HYPERBOLIC_F32, recipe_inverse_hyperbolic_f32,            \
     "math.recipe.inverse_hyperbolic_f32")                                    \
   _(RECIPE_GELU_LOGISTIC_F32, recipe_gelu_logistic_f32,                      \
@@ -189,6 +191,13 @@ static const loom_target_math_policy_direct_rule_t
             LOOM_TARGET_MATH_RECIPE_UNKNOWN, LOOM_SPIRV_MATH_EVALUATION_NONE,
             LOOM_SPIRV_MATH_CONSTRAINT_TRANSCENDENTAL_AFN_F32,
             LOOM_SPIRV_MATH_CONSTRAINT_TRANSCENDENTAL_AFN),
+        [LOOM_TARGET_MATH_OP_EXPM1F] = LOOM_SPIRV_MATH_DIRECT_RULE(
+            LOOM_SCALAR_TYPE_SET_F32 | LOOM_SCALAR_TYPE_SET_F64,
+            LOOM_TARGET_MATH_FASTMATH_FLAG_AFN,
+            LOOM_TARGET_MATH_RECIPE_APPROXIMATE_EXPONENTIAL,
+            LOOM_SPIRV_MATH_EVALUATION_NONE,
+            LOOM_SPIRV_MATH_CONSTRAINT_RECIPE_APPROXIMATE_EXPONENTIAL,
+            LOOM_SPIRV_MATH_CONSTRAINT_TRANSCENDENTAL_AFN),
         [LOOM_TARGET_MATH_OP_LOGF] = LOOM_SPIRV_MATH_DIRECT_RULE(
             LOOM_SCALAR_TYPE_SET_F32, LOOM_TARGET_MATH_FASTMATH_FLAG_AFN,
             LOOM_TARGET_MATH_RECIPE_UNKNOWN, LOOM_SPIRV_MATH_EVALUATION_NONE,
@@ -263,6 +272,8 @@ static const loom_target_math_policy_direct_rule_t
 enum loom_spirv_math_rule_e {
   LOOM_SPIRV_MATH_RULE_ARITHMETIC_BF16 = 0,
   LOOM_SPIRV_MATH_RULE_QUOTIENT_NARROW,
+  LOOM_SPIRV_MATH_RULE_EXPONENTIAL_F64,
+  LOOM_SPIRV_MATH_RULE_EXPONENTIAL_NARROW,
   LOOM_SPIRV_MATH_RULE_INVERSE_NARROW,
   LOOM_SPIRV_MATH_RULE_TRIGONOMETRIC_NARROW,
 #define LOOM_SPIRV_MATH_ACTIVATION_RULE_ENUM(op_, recipe_, required_fastmath_, \
@@ -292,6 +303,28 @@ static const loom_target_math_policy_rule_t
                 .recipe = LOOM_TARGET_MATH_RECIPE_WIDEN_F32_ROUND,
                 .decision_constraint =
                     LOOM_SPIRV_MATH_CONSTRAINT_RECIPE_WIDEN_F32_ROUND,
+            },
+        [LOOM_SPIRV_MATH_RULE_EXPONENTIAL_F64] =
+            {
+                .match =
+                    LOOM_SPIRV_MATH_MATCH(LOOM_SCALAR_TYPE_SET_F64,
+                                          LOOM_TARGET_MATH_FASTMATH_FLAG_AFN),
+                .recipe = LOOM_TARGET_MATH_RECIPE_APPROXIMATE_EXPONENTIAL,
+                .decision_constraint =
+                    LOOM_SPIRV_MATH_CONSTRAINT_RECIPE_APPROXIMATE_EXPONENTIAL,
+                .permission_constraint =
+                    LOOM_SPIRV_MATH_CONSTRAINT_TRANSCENDENTAL_AFN,
+            },
+        [LOOM_SPIRV_MATH_RULE_EXPONENTIAL_NARROW] =
+            {
+                .match =
+                    LOOM_SPIRV_MATH_MATCH(LOOM_SCALAR_TYPE_SET_FLOAT_LE16,
+                                          LOOM_TARGET_MATH_FASTMATH_FLAG_AFN),
+                .recipe = LOOM_TARGET_MATH_RECIPE_WIDEN_F32_ROUND,
+                .decision_constraint =
+                    LOOM_SPIRV_MATH_CONSTRAINT_RECIPE_WIDEN_F32_ROUND,
+                .permission_constraint =
+                    LOOM_SPIRV_MATH_CONSTRAINT_TRANSCENDENTAL_AFN,
             },
         [LOOM_SPIRV_MATH_RULE_INVERSE_NARROW] =
             {
@@ -367,8 +400,15 @@ static const loom_target_math_policy_rule_span_t
 #define LOOM_SPIRV_MATH_FALLBACK(op_, constraint_) \
   [LOOM_TARGET_MATH_OP_##op_] =                    \
       LOOM_SPIRV_MATH_SPAN(0, 0, LOOM_SPIRV_MATH_CONSTRAINT_##constraint_)
-        LOOM_SPIRV_MATH_FALLBACK(EXP2F, TRANSCENDENTAL_F32),
-        LOOM_SPIRV_MATH_FALLBACK(EXPF, TRANSCENDENTAL_F32),
+        [LOOM_TARGET_MATH_OP_EXP2F] =
+            LOOM_SPIRV_MATH_SPAN(LOOM_SPIRV_MATH_RULE_EXPONENTIAL_F64, 2,
+                                 LOOM_SPIRV_MATH_CONSTRAINT_TRANSCENDENTAL_AFN),
+        [LOOM_TARGET_MATH_OP_EXPF] =
+            LOOM_SPIRV_MATH_SPAN(LOOM_SPIRV_MATH_RULE_EXPONENTIAL_F64, 2,
+                                 LOOM_SPIRV_MATH_CONSTRAINT_TRANSCENDENTAL_AFN),
+        [LOOM_TARGET_MATH_OP_EXPM1F] =
+            LOOM_SPIRV_MATH_SPAN(LOOM_SPIRV_MATH_RULE_EXPONENTIAL_NARROW, 1,
+                                 LOOM_SPIRV_MATH_CONSTRAINT_TRANSCENDENTAL_AFN),
         LOOM_SPIRV_MATH_FALLBACK(LOGF, TRANSCENDENTAL_F32),
         LOOM_SPIRV_MATH_FALLBACK(LOG2F, TRANSCENDENTAL_F32),
         LOOM_SPIRV_MATH_FALLBACK(SQRTF, ROOT_F16_F32_F64),
@@ -434,6 +474,6 @@ static const loom_target_math_policy_registry_entry_t
 void loom_spirv_math_policy_registry_initialize(
     loom_target_math_policy_registry_t* out_registry) {
   loom_target_math_policy_registry_initialize_from_entries(
-      out_registry, kSpirvMathPolicyEntries,
-      IREE_ARRAYSIZE(kSpirvMathPolicyEntries));
+      kSpirvMathPolicyEntries, IREE_ARRAYSIZE(kSpirvMathPolicyEntries),
+      out_registry);
 }

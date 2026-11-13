@@ -12,6 +12,7 @@
 #include "libamdf/src/allocator.h"
 #include "libamdf/src/gpu/umd/kfd/hdp.h"
 #include "libamdf/src/gpu/umd/kfd/instance.h"
+#include "libamdf/src/gpu/umd/kfd/target/user_queue.h"
 #include "libamdf/src/gpu/umd/kfd/user_queue_native.h"
 #include "libamdf/src/platform/linux/endpoint.h"
 #include "libamdf/src/platform/linux/host_cache.h"
@@ -74,7 +75,7 @@ amdf_status_t amdf_gpu_umd_device_create(
     status = amdf_gpu_kfd_hdp_create(device, &device->hdp);
   }
   if (amdf_status_is_ok(status)) {
-    *out_result = (amdf_gpu_umd_device_result_t){
+    amdf_gpu_umd_device_result_t result = {
         .id = {.words = {endpoint->info.id.words[0], (uintptr_t)device}},
         .reset_epoch = 1,
         .features = device->topology.memory_features |
@@ -83,7 +84,24 @@ amdf_status_t amdf_gpu_umd_device_create(
                     (native_lifetime == AMDF_NATIVE_LIFETIME_PROCESS
                          ? AMDF_GPU_DEVICE_FEATURE_HOST_REGISTRATION
                          : 0),
+        .memory =
+            {
+                .flags = AMDF_MEMORY_SCOPE_FLAG_AVAILABLE_BYTES |
+                         (device->topology.integrated
+                              ? AMDF_MEMORY_SCOPE_FLAG_SYSTEM_BACKED
+                              : 0),
+                .capacity_byte_length = device->topology.vram.total_byte_length,
+            },
     };
+    amdf_gpu_kfd_user_queue_plans_t plans;
+    amdf_gpu_kfd_target_user_queue_plans_initialize(
+        &device->topology, device->page_size, device->cache_line_size, &plans);
+    for (uint32_t i = 0; i < plans.count; ++i) {
+      result.queue_placements[i] = amdf_gpu_kfd_target_user_queue_placement(
+          &device->topology, device->page_size,
+          plans.values[i].family.command_type);
+    }
+    *out_result = result;
     *out_device = device;
   } else {
     // Connections belong to the instance; this device owns only metadata.

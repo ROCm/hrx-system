@@ -4,7 +4,8 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//build_tools/testing:build_defs.bzl", "iree_execution_test_suite")
+load("//build_tools/bazel:query.bzl", "iree_assert_dependency_boundary")
+load("//build_tools/testing:build_defs.bzl", "iree_cli_test")
 load("//loom/binding/c:shared.bzl", "loomc_cc_binary")
 
 package(
@@ -13,52 +14,54 @@ package(
     licenses = ["notice"],  # Apache 2.0
 )
 
+_COMMON_DEPS = [
+    "//loom/binding/c:loomc",
+    "//loom/src/loom/config:text_binding",
+    "//loom/src/loom/testing:target_environment",
+    "//loom/src/loom/tooling/cli:help",
+    "//loom/src/loom/tooling/cli:loomc_options",
+    "//loom/src/loom/tooling/cli:loomc_result",
+    "//loom/src/loom/tooling/config:input",
+    "//loom/src/loom/tooling/input:format",
+    "//loom/src/loom/tooling/input:loomc",
+    "//loom/src/loom/tooling/io:file",
+    "//loom/src/loom/tooling/io:module_format",
+    "//loom/src/loom/util:stream",
+    "//runtime/src/iree/base",
+    "//runtime/src/iree/base/internal:arena",
+    "//runtime/src/iree/base/tooling:flags",
+]
+
 loomc_cc_binary(
     name = "loom-link",
     srcs = ["loom-link.c"],
-    deps = [
-        "//loom/binding/c:loomc",
+    runtime_only = True,
+    deps = _COMMON_DEPS + [
         "//loom/binding/c/target/configured:target",
-        "//loom/src/loom/config:text_binding",
-        "//loom/src/loom/testing:target_environment",
-        "//loom/src/loom/tooling/cli:help",
-        "//loom/src/loom/tooling/cli:loomc_options",
-        "//loom/src/loom/tooling/cli:loomc_result",
-        "//loom/src/loom/tooling/config:input",
-        "//loom/src/loom/tooling/input:flags",
-        "//loom/src/loom/tooling/input:format",
-        "//loom/src/loom/tooling/input:loomc_configured",
-        "//loom/src/loom/tooling/io:file",
-        "//loom/src/loom/tooling/io:module_format",
-        "//loom/src/loom/util:stream",
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/base/internal:arena",
-        "//runtime/src/iree/base/tooling:flags",
     ],
 )
 
-iree_execution_test_suite(
-    name = "execution_test",
+iree_assert_dependency_boundary(
+    name = "loom_link_has_no_cxx_import_dependencies",
+    forbidden_dependencies = [
+        "//loom/binding/c/import/cxx",
+        "//loom/src/loom/tooling/input:loomc_configured",
+    ],
+    forbidden_subtrees = ["//loom/src/loom/import/cxx/..."],
+    message = "loom-link consumes Loom modules and must not depend on the C/C++ importer",
+    target = ":loom-link",
+)
+
+iree_cli_test(
+    name = "cli_test",
     data = [
-        "//loom/src/loom/link/testdata/provider_roots:direct.loom",
-        "//loom/src/loom/link/testdata/provider_roots:transitive.loom",
-        "//loom/src/loom/link/testdata/provider_roots:unused.loom",
-        "//loom/src/loom/link/testdata/template_selection:missing_provider.loom",
-        "//loom/src/loom/link/testdata/template_selection:root.loom",
-        "//loom/src/loom/tooling/input/testdata:duplicate_symbols.loom-test",
         "//loom/src/loom/tools/loom-link/testdata:dependency_component.loom",
         "//loom/src/loom/tools/loom-link/testdata:dependency_direct.loom",
         "//loom/src/loom/tools/loom-link/testdata:dependency_transitive.loom",
-        "//loom/src/loom/tools/loom-link/testdata:kernel_export_cases.loom",
-        "//loom/src/loom/tools/loom-link/testdata:kernel_exports.loom",
-        "//loom/src/loom/tools/loom-link/testdata:source_library.loom-test",
-        "//loom/src/loom/tools/loom-link/testdata:source_main.loom",
     ],
     manifests = ["loom-link.test.json"],
     tags = ["hostonly"],
     tools = {
-        "loom-format": "//loom/src/loom/tools/loom-format",
         "loom-link": ":loom-link",
-        "loom-opt": "//loom/src/loom/tools/loom-opt",
     },
 )

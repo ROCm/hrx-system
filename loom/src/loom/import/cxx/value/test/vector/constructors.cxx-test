@@ -1,0 +1,131 @@
+// RUN: roundtrip
+typedef int I4 __attribute__((vector_size(16)));
+static I4 offsets(int input) {
+  return I4{input, input + 1, input + 2, input + 3};
+}
+int constructor_return(int input, unsigned lane) {
+  return offsets(input)[lane];
+}
+
+// ----
+func.def public @constructor_return(%input: i32, %lane: i32) -> (i32) {
+  %3 = func.call pure @offsets(%input) : (i32) -> (vector<4xi32>)
+  %4 = index.cast %lane : i32 to index
+  %5 = vector.extract %3[%4] : vector<4xi32> -> i32
+  func.return %5 : i32
+}
+
+func.def @offsets(%input: i32) -> (vector<4xi32>) {
+  %8 = scalar.constant 1 : i32
+  %9 = scalar.addi %input, %8 : i32
+  %10 = scalar.constant 2 : i32
+  %11 = scalar.addi %input, %10 : i32
+  %12 = scalar.constant 3 : i32
+  %13 = scalar.addi %input, %12 : i32
+  %14 = vector.from_elements %input, %9, %11, %13 : vector<4xi32>
+  func.return %14 : vector<4xi32>
+}
+
+// ====
+// RUN: roundtrip
+typedef unsigned U4 __attribute__((vector_size(16)));
+static U4 add(U4 first, U4 second) { return first + second; }
+unsigned constructor_argument(unsigned input, unsigned lane) {
+  return add(U4{input, 7u}, U4{})[lane];
+}
+
+// ----
+func.def public @constructor_argument(%input: i32, %lane: i32) -> (i32) {
+  %3 = vector.constanti [0, 7, 0, 0] : vector<4xi32>
+  %4 = vector.insert %input into %3[0] : i32, vector<4xi32>
+  %5 = vector.constanti [0, 0, 0, 0] : vector<4xi32>
+  %6 = func.call pure @add(%4, %5) : (vector<4xi32>, vector<4xi32>) -> (vector<4xi32>)
+  %7 = index.cast %lane : i32 to index
+  %8 = vector.extract %6[%7] : vector<4xi32> -> i32
+  func.return %8 : i32
+}
+
+func.def @add(%first: vector<4xi32>, %second: vector<4xi32>) -> (vector<4xi32>) {
+  %12 = vector.addi %first, %second : vector<4xi32>
+  func.return %12 : vector<4xi32>
+}
+
+// ====
+// RUN: roundtrip
+typedef unsigned E4 __attribute__((ext_vector_type(4)));
+template <typename Vector>
+static Vector first(unsigned input) {
+  return Vector{input};
+}
+unsigned constructor_single(unsigned input, unsigned lane) {
+  return first<E4>(input)[lane];
+}
+
+// ----
+func.def public @constructor_single(%input: i32, %lane: i32) -> (i32) {
+  %3 = func.call pure @first_unsigned_int___attribute____ext_vector_type_4___(%input) : (i32) -> (vector<4xi32>)
+  %4 = index.cast %lane : i32 to index
+  %5 = vector.extract %3[%4] : vector<4xi32> -> i32
+  func.return %5 : i32
+}
+
+func.def @first_unsigned_int___attribute____ext_vector_type_4___(%input: i32) -> (vector<4xi32>) {
+  %8 = scalar.constant 0 : i32
+  %9 = vector.from_elements %input, %8, %8, %8 : vector<4xi32>
+  func.return %9 : vector<4xi32>
+}
+
+// ====
+// RUN: roundtrip
+typedef unsigned char B16 __attribute__((vector_size(16)));
+unsigned constructor_narrow(unsigned input, unsigned lane) {
+  return B16{(unsigned char)input, 255u, 128u}[lane];
+}
+
+// ----
+func.def public @constructor_narrow(%input: i32, %lane: i32) -> (i32) {
+  %3 = vector.constanti [0, -1, -128, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] : vector<16xi8>
+  %4 = scalar.trunci %input : i32 to i8
+  %5 = vector.insert %4 into %3[0] : i8, vector<16xi8>
+  %6 = index.cast %lane : i32 to index
+  %7 = vector.extract %5[%6] : vector<16xi8> -> i8
+  %8 = scalar.extui %7 : i8 to i32
+  func.return %8 : i32
+}
+
+// ====
+// RUN: roundtrip
+typedef unsigned U4 __attribute__((vector_size(16)));
+typedef float F4 __attribute__((vector_size(16)));
+unsigned constructor_float(int input, unsigned lane) {
+  return __builtin_bit_cast(U4, F4{float(input), -0.0f, 1.5f})[lane];
+}
+
+// ----
+func.def public @constructor_float(%input: i32, %lane: i32) -> (i32) {
+  %3 = vector.constantf [0.0, -0.0, 1.5, 0.0] : vector<4xf32>
+  %4 = scalar.sitofp %input : i32 to f32
+  %5 = vector.insert %4 into %3[0] : f32, vector<4xf32>
+  %6 = vector.bitcast %5 : vector<4xf32> to vector<4xi32>
+  %7 = index.cast %lane : i32 to index
+  %8 = vector.extract %6[%7] : vector<4xi32> -> i32
+  func.return %8 : i32
+}
+
+// ====
+// RUN: roundtrip
+typedef unsigned U4 __attribute__((vector_size(16)));
+unsigned constructor_nested(unsigned input, unsigned lane) {
+  return (U4{input, 1u, 2u, 3u} + U4{9u, 8u, 7u, 6u})[lane];
+}
+
+// ----
+func.def public @constructor_nested(%input: i32, %lane: i32) -> (i32) {
+  %3 = vector.constanti [0, 1, 2, 3] : vector<4xi32>
+  %4 = vector.insert %input into %3[0] : i32, vector<4xi32>
+  %5 = vector.constanti [9, 8, 7, 6] : vector<4xi32>
+  %6 = vector.addi %4, %5 : vector<4xi32>
+  %7 = index.cast %lane : i32 to index
+  %8 = vector.extract %6[%7] : vector<4xi32> -> i32
+  func.return %8 : i32
+}

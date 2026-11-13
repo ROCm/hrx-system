@@ -10,6 +10,8 @@ loom_check_test_suite(
     name = "test",
     srcs = [
         "admissions.loom-test",
+        "collective.loom-test",
+        "continuations.loom-test",
         "invocation_stability.loom-test",
         "invocation_storage.loom-test",
         "invocation_workers.loom-test",
@@ -17,8 +19,14 @@ loom_check_test_suite(
         "schedule.loom-test",
         "transport.loom-test",
         "transport_call_spaces.loom-test",
+        "transport_captures.loom-test",
         "transport_control.loom-test",
+        "transport_copy_stream.loom-test",
+        "transport_input.loom-test",
+        "transport_phases.loom-test",
+        "transport_prefix_cycles.loom-test",
         "transport_replay.loom-test",
+        "transport_source_partitions.loom-test",
         "transport_stability.loom-test",
     ],
 )

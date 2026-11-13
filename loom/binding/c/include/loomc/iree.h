@@ -136,6 +136,9 @@ IREE_STATIC_ASSERT_ENUM_EQ(LOOMC_ALLOCATOR_COMMAND_REALLOC,
 IREE_STATIC_ASSERT_ENUM_EQ(LOOMC_ALLOCATOR_COMMAND_FREE,
                            IREE_ALLOCATOR_COMMAND_FREE,
                            "allocator free commands must match");
+IREE_STATIC_ASSERT_ENUM_EQ(LOOMC_ALLOCATOR_COMMAND_TRIM,
+                           IREE_ALLOCATOR_COMMAND_TRIM,
+                           "allocator trim commands must match");
 LOOMC_IREE_STATIC_ASSERT(sizeof(loomc_allocator_alloc_params_t) ==
                              sizeof(iree_allocator_alloc_params_t),
                          "allocator parameter structures must match");

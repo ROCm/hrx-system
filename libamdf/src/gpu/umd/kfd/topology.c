@@ -15,6 +15,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
+#include <sys/utsname.h>
 
 #include "libamdf/src/allocator.h"
 #include "libamdf/src/platform/linux/endpoint.h"
@@ -23,6 +24,8 @@
 static amdf_status_t amdf_gpu_kfd_read_attribute(int directory,
                                                  const char* name, char* text,
                                                  size_t capacity) {
+  // Every exit leaves a valid empty or NUL-terminated string.
+  text[0] = 0;
   int descriptor = openat(directory, name, O_RDONLY | O_CLOEXEC);
   if (descriptor < 0) {
     return amdf_linux_error(errno);
@@ -76,29 +79,116 @@ static amdf_status_t amdf_gpu_kfd_read_number(int directory, const char* name,
   return AMDF_STATUS_OK;
 }
 
-static amdf_status_t amdf_gpu_kfd_read_driver_version(
+// Linux f145d5b3f740 and its stable backports align shader-rung SDMA
+// doorbells. Release lines without that backport remain affected regardless
+// of their patch number. Vendor modules have a separate patch history.
+static bool amdf_gpu_kfd_kernel_has_sdma_doorbell_alignment(
+    const char* release) {
+  uint32_t version[3];
+  const char* cursor = release;
+  for (size_t i = 0; i < 3; ++i) {
+    char* end = NULL;
+    errno = 0;
+    const unsigned long value = strtoul(cursor, &end, 10);
+    if (cursor[0] < '0' || cursor[0] > '9' || errno || value > UINT32_MAX ||
+        (i < 2 && *end != '.')) {
+      return false;
+    }
+    version[i] = (uint32_t)value;
+    cursor = i < 2 ? end + 1 : end;
+  }
+  if (*cursor != 0 && *cursor != '-' && *cursor != '+') {
+    return false;
+  }
+  if (version[0] > 7 || (version[0] == 7 && version[1] > 3)) {
+    return true;
+  }
+  if (version[0] == 7 && version[1] == 3) {
+    if (version[2] != 0 || strncmp(cursor, "-rc", 3) != 0) {
+      return true;
+    }
+    char* end = NULL;
+    errno = 0;
+    const unsigned long candidate = strtoul(cursor + 3, &end, 10);
+    return cursor[3] >= '0' && cursor[3] <= '9' && !errno && candidate >= 7 &&
+           (*end == 0 || *end == '-' || *end == '+');
+  }
+  uint32_t first_fixed_patch = UINT32_MAX;
+  if (version[0] == 7 && version[1] == 2) {
+    first_fixed_patch = 11;
+  } else if (version[0] == 6) {
+    switch (version[1]) {
+      case 6:
+        first_fixed_patch = 160;
+        break;
+      case 12:
+        first_fixed_patch = 113;
+        break;
+      case 18:
+        first_fixed_patch = 57;
+        break;
+    }
+  }
+  return first_fixed_patch != UINT32_MAX &&
+         (version[2] > first_fixed_patch ||
+          (version[2] == first_fixed_patch && strncmp(cursor, "-rc", 3) != 0));
+}
+
+static amdf_status_t amdf_gpu_kfd_read_sdma_device_publication(
     const amdf_platform_endpoint_t* endpoint,
     amdf_gpu_kfd_topology_t* topology) {
-  char version[sizeof(topology->driver_version)];
+  const amdf_gpu_kfd_ip_version_t gc = topology->gc_ip;
+  const amdf_gpu_endpoint_properties_t* properties = &topology->properties;
+  // Compiler targets gfx940-942 alias GC9.4.3/9.4.4. Missing exact discovery
+  // must not admit the same affected devices through their compiler alias.
+  topology->sdma.device_producer_restricted =
+      gc.exact
+          ? gc.major == 9 &&
+                ((gc.minor == 4 && (gc.revision == 3 || gc.revision == 4)) ||
+                 (gc.minor == 5 && gc.revision == 0))
+          : properties->gfx_ip.major == 9 &&
+                ((properties->gfx_ip.minor == 4 &&
+                  properties->gfx_ip.stepping <= 2) ||
+                 (properties->gfx_ip.minor == 5 &&
+                  properties->gfx_ip.stepping == 0));
+  if (!topology->sdma.device_producer_restricted) {
+    return AMDF_STATUS_OK;
+  }
+  char version[64];
   const amdf_status_t status = amdf_gpu_kfd_read_attribute(
       endpoint->instance->sysfs_descriptor, "module/amdgpu/version", version,
       sizeof(version));
-  if (status == amdf_linux_error(ENOENT) ||
-      status == amdf_linux_error(EACCES) ||
+  if (amdf_status_is_ok(status) || status == amdf_linux_error(EACCES) ||
       status == amdf_linux_error(EOVERFLOW)) {
-    // In-tree modules need not publish a version, and containers may hide it.
-    // An overlong identifier cannot match a shorter exact denylist entry.
-    // None of these observations establishes a known driver restriction.
+    // Upstream amdgpu has no MODULE_VERSION. Packaged drivers do, and no
+    // published vendor release is qualified with the alignment repair.
+    // Missing or inaccessible identity is not evidence of a fixed driver.
     return AMDF_STATUS_OK;
   }
-  if (!amdf_status_is_ok(status)) {
+  if (status != amdf_linux_error(ENOENT)) {
     return status;
   }
-  size_t length = strlen(version);
-  if (length != 0 && version[length - 1] == '\n') {
-    version[--length] = 0;
+  char taint[64];
+  const amdf_status_t taint_status =
+      amdf_gpu_kfd_read_attribute(endpoint->instance->sysfs_descriptor,
+                                  "module/amdgpu/taint", taint, sizeof(taint));
+  if (taint_status == amdf_linux_error(ENOENT) ||
+      taint_status == amdf_linux_error(EACCES) ||
+      taint_status == amdf_linux_error(EOVERFLOW)) {
+    return AMDF_STATUS_OK;
   }
-  memcpy(topology->driver_version, version, length + 1);
+  if (!amdf_status_is_ok(taint_status)) {
+    return taint_status;
+  }
+  if (strchr(taint, 'O') != NULL) {
+    return AMDF_STATUS_OK;
+  }
+  struct utsname kernel;
+  if (uname(&kernel) != 0) {
+    return amdf_linux_error(errno);
+  }
+  topology->sdma.device_producer_restricted =
+      !amdf_gpu_kfd_kernel_has_sdma_doorbell_alignment(kernel.release);
   return AMDF_STATUS_OK;
 }
 
@@ -492,7 +582,10 @@ static amdf_status_t amdf_gpu_kfd_read_memory_peers(
     snprintf(path, sizeof(path), "%u/gpu_id", link.destination);
     uint32_t gpu_id = 0;
     status = amdf_gpu_kfd_read_number(nodes, path, &gpu_id);
-    if (amdf_status_is_ok(status) && gpu_id != 0) {
+    if (status == amdf_linux_error(EPERM)) {
+      // Backing outside the process's device cgroup is not a peer route.
+      status = AMDF_STATUS_OK;
+    } else if (amdf_status_is_ok(status) && gpu_id != 0) {
       topology->memory_peers.gpu_ids[topology->memory_peers.count++] = gpu_id;
     }
   }
@@ -517,6 +610,11 @@ static amdf_status_t amdf_gpu_kfd_read_host_access(
       char path[64];
       snprintf(path, sizeof(path), "%u/gpu_id", link.destination);
       status = amdf_gpu_kfd_read_number(nodes, path, &gpu_id);
+      if (status == amdf_linux_error(EPERM)) {
+        // CPU nodes remain visible. A denied GPU is not a zero-ID CPU route.
+        status = AMDF_STATUS_OK;
+        continue;
+      }
     }
     if (amdf_status_is_ok(status) && gpu_id == 0) {
       ++cpu_link_count;
@@ -649,25 +747,30 @@ amdf_status_t amdf_gpu_kfd_topology_initialize(
   amdf_status_t status = amdf_gpu_kfd_read_number(topology_directory,
                                                   "generation_id", &generation);
   int nodes = -1;
+  int nodes_directory = -1;
+  DIR* directory = NULL;
+  amdf_gpu_kfd_topology_t topology = {0};
+  bool found = false;
   if (amdf_status_is_ok(status)) {
     nodes =
         openat(topology_directory, "nodes", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
     if (nodes < 0) {
       status = amdf_linux_error(errno);
-    }
-  }
-  DIR* directory = NULL;
-  if (amdf_status_is_ok(status)) {
-    directory = fdopendir(nodes);
-    if (directory == NULL) {
-      status = amdf_linux_error(errno);
     } else {
-      nodes = -1;
+      directory = fdopendir(nodes);
+      if (directory == NULL) {
+        status = amdf_linux_error(errno);
+      } else {
+        nodes = -1;
+        nodes_directory = dirfd(directory);
+        if (nodes_directory < 0) {
+          status = amdf_linux_error(errno);
+        }
+      }
     }
   }
-  amdf_gpu_kfd_topology_t topology = {0};
-  bool found = false;
-  while (amdf_status_is_ok(status) && !found) {
+  while (directory != NULL && nodes_directory >= 0 &&
+         amdf_status_is_ok(status) && !found) {
     errno = 0;
     const struct dirent* entry = readdir(directory);
     if (entry == NULL) {
@@ -680,7 +783,7 @@ amdf_status_t amdf_gpu_kfd_topology_initialize(
         strspn(entry->d_name, "0123456789") != strlen(entry->d_name)) {
       continue;
     }
-    int node = openat(dirfd(directory), entry->d_name,
+    int node = openat(nodes_directory, entry->d_name,
                       O_RDONLY | O_DIRECTORY | O_CLOEXEC);
     if (node < 0) {
       status = amdf_linux_error(errno);
@@ -688,7 +791,10 @@ amdf_status_t amdf_gpu_kfd_topology_initialize(
     }
     uint32_t gpu_id = 0;
     status = amdf_gpu_kfd_read_number(node, "gpu_id", &gpu_id);
-    if (amdf_status_is_ok(status) && gpu_id != 0) {
+    if (status == amdf_linux_error(EPERM)) {
+      // KFD denies gpu_id reads for GPUs excluded by the device cgroup.
+      status = AMDF_STATUS_OK;
+    } else if (amdf_status_is_ok(status) && gpu_id != 0) {
       uint32_t io_link_count = 0;
       status = amdf_gpu_kfd_read_node(node, endpoint, &topology, &io_link_count,
                                       &found);
@@ -700,11 +806,11 @@ amdf_status_t amdf_gpu_kfd_topology_initialize(
         if (errno || *end != 0 || node_ordinal > UINT32_MAX) {
           status = amdf_linux_error(EPROTO);
         } else {
-          status = amdf_gpu_kfd_read_memory_peers(dirfd(directory), node,
+          status = amdf_gpu_kfd_read_memory_peers(nodes_directory, node,
                                                   (uint32_t)node_ordinal,
                                                   host_allocator, &topology);
           if (amdf_status_is_ok(status)) {
-            status = amdf_gpu_kfd_read_host_access(dirfd(directory), node,
+            status = amdf_gpu_kfd_read_host_access(nodes_directory, node,
                                                    (uint32_t)node_ordinal,
                                                    io_link_count, &topology);
           }
@@ -732,7 +838,7 @@ amdf_status_t amdf_gpu_kfd_topology_initialize(
     status = amdf_gpu_kfd_read_scalar_register_features(endpoint, &topology);
   }
   if (amdf_status_is_ok(status) && found) {
-    status = amdf_gpu_kfd_read_driver_version(endpoint, &topology);
+    status = amdf_gpu_kfd_read_sdma_device_publication(endpoint, &topology);
   }
   uint32_t final_generation = 0;
   if (amdf_status_is_ok(status)) {

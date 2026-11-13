@@ -6,12 +6,42 @@
 
 # Hardware queue identity and operation CTS tests.
 
+load("//build_tools/bazel:cmake.bzl", "iree_cmake_extra_content")
 load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
 
 package(
     default_visibility = ["//visibility:public"],
     features = ["layering_check"],
     licenses = ["notice"],
+)
+
+# Shared workload implementation; driver suites supply their device selection.
+iree_cmake_extra_content(
+    content = "if(IREE_BUILD_BENCHMARKS)",
+    inline = True,
+)
+
+iree_runtime_cc_library(
+    name = "queue_benchmark",
+    testonly = True,
+    srcs = ["queue_benchmark.cc"],
+    deps = [
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/async/util:proactor_pool",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/tooling:flags",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/io:file_handle",
+        "//runtime/src/iree/testing:temp_file",
+        "//runtime/src/iree/tooling:device_util",
+        "//third_party:google_benchmark",
+    ],
+    alwayslink = True,
+)
+
+iree_cmake_extra_content(
+    content = "endif()",
+    inline = True,
 )
 
 iree_runtime_cc_library(

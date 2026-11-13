@@ -4,9 +4,11 @@ These `testonly` libraries support native lifecycle tests and model-authoring
 checks. The server has no Python dependency, and this package is not a client
 SDK. Integration tests stay beside the server or service they exercise.
 
-`model.h` owns decoded model documents for native tests. `stalled_stderr.h`
-reproduces a full Linux stderr pipe so a lifecycle test can prove that a blocked
-diagnostic sink cannot stop inference on its only worker.
+`model.h` owns decoded server model documents for native tests. Shared host,
+device, compiler, and JIT fixtures live in `loom/runtime/testing`, without a
+server dependency. That package's `stalled_stderr.h` reproduces a full Linux
+stderr pipe so a lifecycle test can prove that a blocked diagnostic sink cannot
+stop inference on its only worker.
 
 The test-only native text request observer loads a VM policy and tokenizer,
 prepares a real chat request, and reports its tokens and completed transcript.

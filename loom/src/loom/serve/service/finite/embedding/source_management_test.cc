@@ -17,28 +17,29 @@
 
 #include "iree/testing/status_matchers.h"
 #include "iree/testing/temp_file.h"
+#include "loom/runtime/testing/stalled_stderr.h"
 #include "loom/serve/service/finite/embedding/source_service_test_fixture.h"
 #include "loom/serve/testing/model.h"
 #include "loom/serve/testing/package.h"
-#include "loom/serve/testing/stalled_stderr.h"
 
 namespace loom_serve::testing::embedding {
 
-using loom_serve::testing::StalledStderr;
+using loom_runtime::testing::StalledStderr;
 
 TEST_F(SourceEmbeddingServiceTest,
        ReconfiguresCommandsWithoutPreparingParametersAgain) {
   const std::string directory =
       iree::testing::MakeTempFilePath("variant_weights");
   ASSERT_NO_FATAL_FAILURE(WriteCheckpointPackage(directory));
-  interface_.set_observer(interface_.self, {});
-  loom_serve_finite_service_free(std::exchange(service_, nullptr));
-  IREE_ASSERT_OK(loom_serve_finite_model_free(std::exchange(model_, nullptr)));
+  interface_.runtime.vtable->set_observer(interface_.runtime.self, {});
+  loom_service_finite_service_free(std::exchange(service_, nullptr));
+  IREE_ASSERT_OK(
+      loom_service_finite_model_free(std::exchange(model_, nullptr)));
   ASSERT_NO_FATAL_FAILURE(CreateModel(directory));
   ASSERT_NO_FATAL_FAILURE(CreateService(0));
-  auto* residency = loom_serve_finite_model_residency(model_);
-  IREE_ASSERT_OK(loom_serve_residency_activate(residency));
-  const auto weights = loom_serve_residency_activity(residency);
+  auto* residency = loom_service_finite_model_residency(model_);
+  IREE_ASSERT_OK(loom_runtime_residency_activate(residency));
+  const auto weights = loom_runtime_residency_activity(residency);
   StartRouter();
   const auto inventory =
       Read(Send({}, "/v1/models/variants", "GET", "X-Loom-Model: fixture\r\n"));
@@ -72,7 +73,7 @@ TEST_F(SourceEmbeddingServiceTest,
             std::string::npos);
   loom_serve_http_server_request_stop(server_);
   IREE_ASSERT_OK(http_.Join());
-  const auto retained = loom_serve_residency_activity(residency);
+  const auto retained = loom_runtime_residency_activity(residency);
   EXPECT_EQ(retained.activations, weights.activations);
   EXPECT_EQ(retained.read_bytes, weights.read_bytes);
   EXPECT_EQ(retained.prepared_bytes, weights.prepared_bytes);
@@ -154,7 +155,7 @@ TEST_F(SourceEmbeddingServiceTest,
   const auto registered = Read(Send(declaration, "/v1/models/register"));
   ASSERT_EQ(registered.find("HTTP/1.1 202"), 0u) << registered;
   const auto response = Read(Send(R"({"model":"large","input":"a"})"));
-  if (loom_serve_pool_memory(storage_owner_)) {
+  if (loom_runtime_pool_memory(storage_owner_)) {
     ASSERT_EQ(response.find("HTTP/1.1 503"), 0u) << response;
     EXPECT_NE(response.find("invocation working set"), std::string::npos);
     const auto state = ModelStatus("large");

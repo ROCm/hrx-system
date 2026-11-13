@@ -24,7 +24,7 @@ loom_cc_library(
         "//runtime/src/iree/base",
         "//runtime/src/iree/base:core_headers",
         "//runtime/src/iree/base/internal:arena",
-        "//runtime/src/iree/hal/drivers/task/executable/library:abi",
+        "//runtime/src/iree/hal/driver/task/executable/library:abi",
     ],
 )
 
@@ -46,7 +46,7 @@ loom_cc_library(
     hdrs = ["state_layout.h"],
     deps = [
         "//runtime/src/iree/base",
-        "//runtime/src/iree/hal/drivers/task/executable/library:abi",
+        "//runtime/src/iree/hal/driver/task/executable/library:abi",
     ],
 )
 
@@ -55,7 +55,7 @@ loom_cc_test(
     srcs = ["state_layout_test.cc"],
     deps = [
         ":state_layout",
-        "//runtime/src/iree/hal/drivers/task/executable/library:abi",
+        "//runtime/src/iree/hal/driver/task/executable/library:abi",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
@@ -73,7 +73,7 @@ loom_cc_binary(
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/tooling:flags",
         "//runtime/src/iree/hal",
-        "//runtime/src/iree/hal/drivers",
+        "//runtime/src/iree/hal/driver",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

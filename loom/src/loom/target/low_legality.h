@@ -95,6 +95,14 @@ typedef struct loom_target_low_legality_type_supported_callback_t {
   void* user_data;
 } loom_target_low_legality_type_supported_callback_t;
 
+typedef struct loom_target_low_legality_defer_missing_contract_callback_t {
+  // Returns whether source planning can defer a missing target recipe until
+  // materialization demand is established.
+  bool (*fn)(void* user_data, const loom_op_t* op);
+  // Borrowed source-planning owner passed to |fn|.
+  void* user_data;
+} loom_target_low_legality_defer_missing_contract_callback_t;
+
 struct loom_target_low_legality_provider_t {
   // Stable provider name available to callbacks when emitting diagnostics.
   iree_string_view_t name;
@@ -150,6 +158,10 @@ typedef struct loom_target_low_legality_options_t {
   // consulted before target-local providers so table-backed contracts stay the
   // source of truth for table-backed source-to-low emission.
   loom_target_contract_query_callback_t contract_query;
+  // Optional source planner that can defer missing recipes until demand is
+  // known. Domain, type, structural, and explicit rejection checks still run.
+  loom_target_low_legality_defer_missing_contract_callback_t
+      defer_missing_contract;
   // Optional target-owned source type mapping predicate. Missing keeps the
   // verifier limited to target-independent low-compatible types and registered
   // type semantics.

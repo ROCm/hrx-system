@@ -43,7 +43,7 @@ amdf_cc_library(
     hdrs = ["native_identity.h"],
     visibility = [
         "//libamdf/cts:__subpackages__",
-        "//runtime/src/iree/hal/drivers/amd/gpu/cts:__pkg__",
+        "//runtime/src/iree/hal/driver/amd/gpu/cts:__pkg__",
     ],
 )
 
@@ -52,6 +52,29 @@ amdf_cc_test(
     srcs = ["native_identity_test.cc"],
     deps = [
         ":native_identity",
+        "//third_party:google_test",
+        "//third_party:google_test_main",
+    ],
+)
+
+amdf_cc_library(
+    name = "file_storage",
+    testonly = True,
+    srcs = ["file_storage.cc"],
+    hdrs = ["file_storage.h"],
+    target_compatible_with = ["@platforms//os:linux"],
+    deps = [
+        "//third_party:google_test",
+        "//third_party:linux_io_uapi",
+    ],
+)
+
+amdf_cc_test(
+    name = "file_storage_test",
+    srcs = ["file_storage_test.cc"],
+    target_compatible_with = ["@platforms//os:linux"],
+    deps = [
+        ":file_storage",
         "//third_party:google_test",
         "//third_party:google_test_main",
     ],

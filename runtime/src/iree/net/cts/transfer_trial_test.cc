@@ -20,7 +20,7 @@ class TransferTrialTest
   void Run(const TransferTrialOptions& options) {
     TransferTrialResult result;
     iree_status_t status = RunTransferTrial(
-        GetTransportBackend(), GetParam().factory, options, &result);
+        GetTransportBackend(), GetParam().factory, options, {}, &result);
     if (!result.available && iree_status_is_unavailable(status)) {
       const std::string reason = iree::Status::ToString(status);
       iree_status_free(status);

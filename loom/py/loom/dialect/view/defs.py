@@ -18,7 +18,7 @@ from loom.assembly import (
     TemplateParamFlags,
     TypeOf,
 )
-from loom.dialect.atomic import AtomicKind, AtomicLoadOrdering, AtomicMemoryFlags, AtomicOrdering, AtomicScope, AtomicStoreOrdering
+from loom.dialect.atomic import AtomicAccessFlags, AtomicKind, AtomicLoadOrdering, AtomicMemoryFlags, AtomicOrdering, AtomicScope, AtomicStoreOrdering
 from loom.dialect.cache import CacheScope, CacheTemporal
 from loom.dialect.memory import MemoryAccessFlags
 from loom.dsl import (
@@ -27,7 +27,6 @@ from loom.dsl import (
     ATTR_TYPE_FLAGS,
     ATTR_TYPE_I64_ARRAY,
     BYTE_PATTERN_SCALAR,
-    FACT_IDENTITY,
     HINT,
     INDEX,
     OBSERVABLE_EFFECT,
@@ -56,6 +55,7 @@ from loom.dsl import (
     TotalBitCountEqual,
     Writes,
     value_duplication_op,
+    value_refinement_op,
 )
 
 # ============================================================================
@@ -225,7 +225,7 @@ view_subview = Op(
 # view.refine — type/fact refinement for an existing view
 # ============================================================================
 
-view_refine = Op(
+view_refine = value_refinement_op(
     name="view.refine",
     group=view_ops,
     doc=(
@@ -235,23 +235,8 @@ view_refine = Op(
         "requirements. An alignment qualifier changes the requirement of "
         "subsequent executed accesses, not an unconditional address fact."
     ),
-    operands=[Operand("source", VIEW, doc="Source view to refine.")],
-    results=[Result("result", VIEW, doc="Same view with refined type information.")],
-    constraints=[
-        SameElementType("source", "result"),
-        RanksMatch("source", "result"),
-    ],
-    traits=[PURE, REFINABLE_RESULT_TYPE_REFS, FACT_IDENTITY],
-    verify="loom_view_refine_verify",
+    carrier=VIEW,
     facts="loom_view_reinterpret_facts",
-    type_transfer="loom_view_refine_type_transfer",
-    format=[
-        Ref("source"),
-        COLON,
-        TypeOf("source"),
-        ARROW,
-        ResultType("result"),
-    ],
     examples=[
         "%refined = view.refine %view : view<[%M]xf32, %layout> -> view<16xf32>",
     ],
@@ -376,6 +361,7 @@ def _atomic_memory_attrs() -> list[AttrDef]:
 
 def _atomic_cmpxchg_memory_attrs() -> list[AttrDef]:
     return [
+        AttrDef("memory_flags", ATTR_TYPE_FLAGS, optional=True, enum_def=AtomicAccessFlags),
         AttrDef(
             "success_ordering",
             ATTR_TYPE_ENUM,
@@ -515,6 +501,7 @@ view_atomic_cmpxchg = Op(
     verify="loom_view_atomic_cmpxchg_verify",
     facts="loom_view_atomic_observation_facts",
     format=[
+        Flags("memory_flags"),
         Ref("expected"),
         COMMA,
         Ref("replacement"),
@@ -582,6 +569,7 @@ view_prefetch = Op(
 
 def _atomic_load_store_attrs(ordering: EnumDef) -> list[AttrDef]:
     return [
+        AttrDef("memory_flags", ATTR_TYPE_FLAGS, optional=True, enum_def=AtomicAccessFlags),
         AttrDef("ordering", ATTR_TYPE_ENUM, enum_def=ordering, doc="Required atomic memory ordering."),
         AttrDef("scope", ATTR_TYPE_ENUM, enum_def=AtomicScope, doc="Required atomic synchronization scope."),
         *_indexed_memory_attrs(),
@@ -611,7 +599,7 @@ view_atomic_load = Op(
     effective_traits="loom_view_atomic_load_effective_traits",
     verify="loom_view_atomic_load_verify",
     facts="loom_view_atomic_observation_facts",
-    format=[Ref("view"), IndexList("indices", "static_indices"), AttrDict(), COLON, TypeOf("view"), ARROW, ResultType("result")],
+    format=[Flags("memory_flags"), Ref("view"), IndexList("indices", "static_indices"), AttrDict(), COLON, TypeOf("view"), ARROW, ResultType("result")],
     examples=[
         "%generation = view.atomic.load %progress[0] {ordering = acquire, scope = system} : view<1xi32> -> i32",
     ],
@@ -640,7 +628,7 @@ view_atomic_store = Op(
     interfaces=[CachePolicyInterface(), _memory_access_interface(value="value", atomic_ordering="ordering", atomic_scope="scope")],
     effective_traits="loom_view_atomic_store_effective_traits",
     verify="loom_view_atomic_store_verify",
-    format=[Ref("value"), COMMA, Ref("view"), IndexList("indices", "static_indices"), AttrDict(), COLON, TypeOf("value"), COMMA, TypeOf("view")],
+    format=[Flags("memory_flags"), Ref("value"), COMMA, Ref("view"), IndexList("indices", "static_indices"), AttrDict(), COLON, TypeOf("value"), COMMA, TypeOf("view")],
     examples=[
         "view.atomic.store %generation, %progress[0] {ordering = release, scope = system} : i32, view<1xi32>",
     ],

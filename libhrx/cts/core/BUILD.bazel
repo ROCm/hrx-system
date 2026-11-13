@@ -13,16 +13,24 @@ package(
 )
 
 hrx_cc_library(
+    name = "loader",
+    testonly = True,
+    srcs = ["hrx_loader.cpp"],
+    hdrs = ["hrx_loader.hpp"],
+    cxxopts = select({
+        "//build_tools/bazel:cc_compiler_clang_cl": [],
+        "//build_tools/bazel:cc_compiler_msvc": [],
+        "//conditions:default": ["-fexceptions"],
+    }),
+    includes = ["."],
+    deps = ["//build_tools/bazel:dl"],
+)
+
+hrx_cc_library(
     name = "harness",
     testonly = True,
-    srcs = [
-        "hrx_loader.cpp",
-        "main.cpp",
-    ],
-    hdrs = [
-        "hrx_loader.hpp",
-        "hrx_test_fixture.hpp",
-    ],
+    srcs = ["main.cpp"],
+    hdrs = ["hrx_test_fixture.hpp"],
     cxxopts = select({
         "//build_tools/bazel:cc_compiler_clang_cl": [],
         "//build_tools/bazel:cc_compiler_msvc": [],
@@ -30,7 +38,7 @@ hrx_cc_library(
     }),
     includes = ["."],
     deps = [
-        "//build_tools/bazel:dl",
+        ":loader",
         "//third_party:catch2",
     ],
 )

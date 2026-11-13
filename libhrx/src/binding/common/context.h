@@ -11,12 +11,12 @@
 #include "common/capture_admission.h"
 #include "common/completion.h"
 #include "common/event.h"
-#include "common/event_timestamp_pool.h"
 #include "common/registry.h"
 #include "iree/base/api.h"
 #include "iree/base/threading/mutex.h"
 #include "iree/base/threading/notification.h"
 #include "iree/hal/api.h"
+#include "libhrx/src/libhrx/event_timestamp.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -41,7 +41,8 @@ typedef iree_host_size_t iree_hal_streaming_device_ordinal_t;
 
 // Scheduling policy.
 typedef enum iree_hal_streaming_scheduling_mode_e {
-  // Bounded active progress before yielding to the backend's blocking wait.
+  // Favor active progress for low-latency stream synchronization. Callers that
+  // prefer to release the CPU select YIELD or BLOCKING_SYNC explicitly.
   IREE_HAL_STREAMING_SCHEDULING_MODE_AUTO = 0,
   // Spin wait (busy wait).
   IREE_HAL_STREAMING_SCHEDULING_MODE_SPIN,
@@ -99,10 +100,10 @@ struct iree_hal_streaming_context_t {
   // Facts converting the ticks this context's event records capture, or a
   // zeroed domain when the device advertises none. Constant for the context's
   // life: the device spec is immutable.
-  iree_hal_streaming_timestamp_domain_t timestamp_domain;
+  hrx_event_timestamp_domain_t timestamp_domain;
   // Suballocator for the tick slots this context's event records write into.
   // Unused, and never grown, when |timestamp_domain| is zeroed.
-  iree_hal_streaming_event_timestamp_pool_t timestamp_pool;
+  hrx_event_timestamp_pool_t timestamp_pool;
 
   // Encoded context flags, accessed atomically through the flag accessors.
   iree_atomic_uint32_t flags;

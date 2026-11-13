@@ -211,7 +211,7 @@ static iree_status_t loom_aie2p_configuration_plan_load(
     return iree_ok_status();
   }
   bool helpers_admitted = false;
-  IREE_RETURN_IF_ERROR(loom_aie2p_program_source_admit_direct_helpers(
+  IREE_RETURN_IF_ERROR(loom_aie2p_program_source_admit_helpers(
       emitter->program_sources, source, &helpers_admitted));
   if (!helpers_admitted) {
     ++emitter->error_count;
@@ -242,42 +242,49 @@ static iree_status_t loom_aie2p_configuration_compile_worker(
     IREE_RETURN_IF_ERROR(iree_arena_allocate(request->scratch_arena,
                                              sizeof(*worker), (void**)&worker));
     *worker = (loom_aie2p_leaf_contribution_t){0};
-    loom_op_t* function = (loom_op_t*)source->function_op;
+    const loom_aie2p_program_clone_function_t* cloned =
+        worker_set->clone.functions_by_source[symbol.symbol_id];
+    loom_op_t* function =
+        worker_set->clone.module->symbols.entries[cloned->entry.symbol_id]
+            .defining_op;
     const loom_low_function_requirements_t* requirements =
         &source->requirements;
-    loom_aie2p_program_helper_t* direct_helpers = NULL;
-    if (requirements->direct_callees.count != 0) {
+    loom_aie2p_program_helper_t* helpers = NULL;
+    if (source->helpers.count != 0) {
       IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-          request->scratch_arena, requirements->direct_callees.count,
-          sizeof(*direct_helpers), (void**)&direct_helpers));
+          request->scratch_arena, source->helpers.count, sizeof(*helpers),
+          (void**)&helpers));
     }
-    for (iree_host_size_t i = 0; i < requirements->direct_callees.count; ++i) {
-      const loom_symbol_ref_t helper_ref =
-          requirements->direct_callees.values[i].symbol;
-      const loom_aie2p_program_source_function_t* helper =
-          loom_aie2p_program_source_table_lookup(emitter->program_sources,
-                                                 helper_ref);
-      direct_helpers[i] = (loom_aie2p_program_helper_t){
-          .function = helper_ref,
-          .function_target_facts = helper->target.target_facts,
+    for (iree_host_size_t i = 0; i < source->helpers.count; ++i) {
+      const loom_symbol_ref_t helper_ref = source->helpers.values[i];
+      const loom_aie2p_program_clone_function_t* helper =
+          worker_set->clone.functions_by_source[helper_ref.symbol_id];
+      helpers[i] = (loom_aie2p_program_helper_t){
+          .function = helper->entry,
+          .direct_callees = helper->direct_callees,
+          .may_return = helper->may_return,
+          .function_target_facts = helper->function_target_facts,
           .memory_accesses = helper->memory_accesses,
           .loop_execution = helper->loop_execution,
       };
     }
+    loom_low_read_only_data_set_t program_data;
+    IREE_RETURN_IF_ERROR(loom_aie2p_program_clone_project_data(
+        &worker_set->clone, source->program_data, &program_data));
     loom_target_compile_report_t report;
     loom_target_compile_report_t* report_ptr = NULL;
     if (request->compile_report) {
-      loom_target_compile_report_initialize(&report,
-                                            request->compile_report->allocator);
+      loom_target_compile_report_initialize(request->compile_report->allocator,
+                                            &report);
       report.requested_detail_flags =
           request->compile_report->requested_detail_flags;
       report_ptr = &report;
     }
     const loom_aie2p_leaf_compile_options_t options = {
         .descriptor_registry = request->low_descriptor_registry,
-        .function_target_facts = source->target.target_facts,
-        .memory_accesses = source->memory_accesses,
-        .loop_execution = source->loop_execution,
+        .function_target_facts = cloned->function_target_facts,
+        .memory_accesses = cloned->memory_accesses,
+        .loop_execution = cloned->loop_execution,
         .diagnostic_emitter = request->diagnostic_emitter,
         .compile_report = report_ptr,
     };
@@ -285,10 +292,10 @@ static iree_status_t loom_aie2p_configuration_compile_worker(
     iree_status_t status = loom_aie2p_program_compile(
         compiler, function, requirements->return_count != 0,
         (loom_aie2p_program_helper_list_t){
-            .values = direct_helpers,
-            .count = requirements->direct_callees.count,
+            .values = helpers,
+            .count = source->helpers.count,
         },
-        &options, &compiled, worker);
+        &program_data, &options, &compiled, worker);
     if (report_ptr) {
       iree_status_t report_status =
           compiled ? loom_target_compile_report_record_entry_report(
@@ -418,7 +425,8 @@ static iree_status_t loom_aie2p_configuration_phase_emit(
                                                    sizeof(*emitter->loads),
                                                    (void**)&emitter->loads));
     const iree_host_size_t memory_count =
-        emitter->entry->column_count * emitter->family->row_count;
+        (iree_host_size_t)emitter->entry->column_count *
+        emitter->family->row_count;
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, memory_count,
                                                    sizeof(*emitter->memories),
                                                    (void**)&emitter->memories));
@@ -644,6 +652,13 @@ static iree_status_t loom_aie2p_configuration_phase_emit(
         const bool descriptor =
             opcode ==
             AIE2P_CONFIGURATION_DESCRIPTOR_REF_CONFIGURATION_SHIM_DESCRIPTOR;
+        const uint32_t flags = WORD(descriptor ? 3 : 2);
+        if (flags & 0xffff) {
+          const loom_diagnostic_param_t params[] = {loom_param_u32(flags)};
+          status = loom_aie2p_configuration_diagnose(
+              emitter, op, LOOM_ERR_XDNA_047, params, IREE_ARRAYSIZE(params));
+          continue;
+        }
         const iree_host_size_t count = descriptor ? 8 : 2;
         uint32_t* words = NULL;
         IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
@@ -654,12 +669,8 @@ static iree_status_t loom_aie2p_configuration_phase_emit(
           for (iree_host_size_t j = 2; j < 8; ++j) {
             words[j] = WORD(j + 1);
           }
-          if (words[2] & 0xffff) {
-            const loom_diagnostic_param_t params[] = {loom_param_u32(words[2])};
-            status = loom_aie2p_configuration_diagnose(
-                emitter, op, LOOM_ERR_XDNA_047, params, IREE_ARRAYSIZE(params));
-            continue;
-          }
+        } else {
+          words[1] = flags;
         }
         record.type = LOOM_AIE2P_PROGRAM_RECORD_REGISTER_BLOCK_WRITE32;
         record.value.register_block_write32 =
@@ -907,6 +918,68 @@ iree_status_t loom_aie2p_configuration_plan_build(
   *out_plan = plan;
   *out_valid = true;
   return iree_ok_status();
+}
+
+iree_status_t loom_aie2p_configuration_workers_initialize(
+    const loom_module_t* source_module, loom_module_t* module,
+    loom_aie2p_configuration_plan_t* const* plans, iree_host_size_t plan_count,
+    iree_arena_allocator_t* arena,
+    loom_aie2p_configuration_worker_set_t* out_workers) {
+  *out_workers = (loom_aie2p_configuration_worker_set_t){0};
+  IREE_RETURN_IF_ERROR(loom_aie2p_program_clone_initialize(
+      source_module, module, arena, &out_workers->clone));
+  loom_aie2p_program_clone_t* clone = &out_workers->clone;
+  // Reserve the complete artifact inventory before projecting reciprocal data
+  // bank constraints or cloning bodies containing forward helper references.
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0; i < plan_count && iree_status_is_ok(status);
+       ++i) {
+    const loom_aie2p_configuration_plan_t* plan = plans[i];
+    if (plan == NULL) {
+      continue;
+    }
+    for (iree_host_size_t j = 0;
+         j < plan->entry->tile_count && iree_status_is_ok(status); ++j) {
+      const loom_aie2p_program_source_function_t* source =
+          plan->loads[j].source;
+      status = loom_aie2p_program_clone_reserve_function(clone, source);
+      if (iree_status_is_ok(status)) {
+        status =
+            loom_aie2p_program_clone_reserve_data(clone, source->program_data);
+      }
+      const loom_symbol_ref_array_t* helpers = &source->helpers;
+      for (iree_host_size_t k = 0;
+           k < helpers->count && iree_status_is_ok(status); ++k) {
+        status = loom_aie2p_program_clone_reserve_function(
+            clone, loom_aie2p_program_source_table_lookup(plan->program_sources,
+                                                          helpers->values[k]));
+      }
+    }
+  }
+  for (iree_host_size_t i = 0; i < plan_count && iree_status_is_ok(status);
+       ++i) {
+    const loom_aie2p_configuration_plan_t* plan = plans[i];
+    if (plan == NULL) {
+      continue;
+    }
+    for (iree_host_size_t j = 0;
+         j < plan->entry->tile_count && iree_status_is_ok(status); ++j) {
+      const loom_aie2p_program_source_function_t* source =
+          plan->loads[j].source;
+      status = loom_aie2p_program_clone_data(clone, source->program_data);
+      const loom_symbol_ref_array_t* helpers = &source->helpers;
+      for (iree_host_size_t k = 0;
+           k < helpers->count && iree_status_is_ok(status); ++k) {
+        status = loom_aie2p_program_clone_function(
+            clone, loom_aie2p_program_source_table_lookup(plan->program_sources,
+                                                          helpers->values[k]));
+      }
+      if (iree_status_is_ok(status)) {
+        status = loom_aie2p_program_clone_function(clone, source);
+      }
+    }
+  }
+  return status;
 }
 
 iree_status_t loom_aie2p_configuration_plan_materialize(

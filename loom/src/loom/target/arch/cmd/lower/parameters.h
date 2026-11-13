@@ -13,6 +13,7 @@
 #include "iree/base/internal/arena.h"
 #include "loom/error/emitter.h"
 #include "loom/ir/ir.h"
+#include "loom/runtime/command/program.h"
 #include "loom/target/arch/cmd/abi_layout.h"
 #include "loom/util/fact_table.h"
 
@@ -20,61 +21,28 @@
 extern "C" {
 #endif
 
-// One concrete immutable parameter required by a command-program root.
-typedef struct loom_cmd_parameter_requirement_t {
-  // Fully substituted parameter key owned by the containing table.
-  iree_string_view_t key;
-
-  // Source command-program storage-binding ordinal selecting the root group.
-  uint16_t source_binding_ordinal;
-
-  // Dense fixed-buffer table index assigned to the source root.
-  uint32_t fixed_buffer_index;
-
-  // Byte offset of the parameter relative to the fixed-buffer range.
-  uint64_t byte_offset;
-
-  // Maximum byte extent requested by views of this parameter.
-  uint64_t byte_length;
-
-  // Minimum required alignment of the placed parameter payload.
-  uint64_t minimum_alignment;
-} loom_cmd_parameter_requirement_t;
-
-// Aggregate requirement for one fixed parameter-buffer root.
-typedef struct loom_cmd_parameter_root_requirement_t {
-  // Source command-program storage-binding ordinal selecting this root.
-  uint16_t source_binding_ordinal;
-
-  // Dense fixed-buffer table index assigned to this root.
-  uint32_t fixed_buffer_index;
-
-  // Minimum byte length required to contain every assigned parameter.
-  uint64_t required_byte_length;
-
-  // Minimum required alignment of the supplied fixed-buffer range.
-  uint64_t minimum_alignment;
-} loom_cmd_parameter_root_requirement_t;
-
 // Owned parameter requirements and their canonical default placement.
 //
 // Entries retain no source IR identity. Keys and tables remain valid until
 // deinitialization even after the source module has been released.
 typedef struct loom_cmd_parameter_requirement_table_t {
   // Fixed roots in fixed-buffer table order.
-  loom_cmd_parameter_root_requirement_t* roots;
+  loom_cmd_program_parameter_root_t* roots;
 
   // Number of entries in |roots|.
   iree_host_size_t root_count;
 
   // Unique root/key parameters in first source occurrence order.
-  loom_cmd_parameter_requirement_t* entries;
+  loom_cmd_program_parameter_t* entries;
 
   // Number of entries in |entries|.
   iree_host_size_t count;
 
   // Owned backing storage referenced by |entries[*].key|.
   char* key_storage;
+
+  // Exact concatenated byte length of the canonical parameter keys.
+  iree_host_size_t key_storage_length;
 } loom_cmd_parameter_requirement_table_t;
 
 // Scratch-owned placement facts consumed by command low conversion.

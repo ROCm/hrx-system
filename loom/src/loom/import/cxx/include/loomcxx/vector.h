@@ -30,7 +30,10 @@ namespace loom::type {
 // spelling for static rank-one values; this type retains dependent dimensions
 // through functions, records, templates, and structured control flow.
 template <class Shape, class T>
-class [[loom::type("vector")]] vector {};
+class [[loom::type("vector")]] vector {
+ public:
+  using shape_type = Shape;
+};
 
 // Lanewise arithmetic preserves Shape and T. For dependent shapes, binary
 // results retain the left value's dynamic dimensions and assert that the right
@@ -98,10 +101,8 @@ struct vector_traits<loom::type::vector<loom::type::shape<Extents...>, T>> {
   // Number of logical axes, including those with dependent extents.
   static constexpr loom::type::size_type rank = sizeof...(Extents);
   using element_type = T;
-  using dimensions_type = loom::type::indices<(
-      loom::type::size_type{0} + ... +
-      (Extents == loom::type::dynamic ? loom::type::size_type{1}
-                                      : loom::type::size_type{0}))>;
+  using dimensions_type =
+      loom::type::indices<loom::type::shape<Extents...>::dynamic_count>;
 };
 
 template <class Vector>
@@ -114,6 +115,17 @@ using vector_dimensions = typename vector_traits<Vector>::dimensions_type;
 
 namespace loom::vector {
 
+// Asserts that source describes Result's lane grid without a conversion, copy,
+// or runtime check. Rank and lane type stay exact. An incorrect dynamic shape
+// assertion makes the program invalid; contradictory static extents diagnose.
+template <class Result, class Source>
+[[loom::op("vector.refine")]] Result refine(Source source);
+
+// Supplies one native index per dynamic result axis, in source-axis order.
+template <class Result, class Source>
+[[loom::op("vector.refine")]] Result refine(
+    Source source, loom::detail::vector_dimensions<Result> dimensions);
+
 // Replicates one scalar across a semantic vector. Dimensions supplies one
 // index for each dynamic result axis in source-axis order.
 template <class Result>
@@ -124,8 +136,8 @@ template <class Result>
 // Loads one contiguous native C++ vector at a full-rank logical origin. Result
 // selects its static register shape while the view supplies element type,
 // layout, extents, alignment, and observation semantics.
-template <class Result, class T, loom::type::size_type... Extents,
-          class Encoding,
+template <class Result, loom::memory_access Access = loom::memory_access::none,
+          class T, loom::type::size_type... Extents, class Encoding,
           class Origin = loom::type::coordinates<sizeof...(Extents)>>
 [[loom::op("vector.load")]] Result load(
     loom::type::view<loom::type::shape<Extents...>, T, Encoding> source,
@@ -133,8 +145,8 @@ template <class Result, class T, loom::type::size_type... Extents,
 
 // Loads one semantic vector at a full-rank logical origin. Dimensions supplies
 // one index for each dynamic result axis in source-axis order.
-template <class Result, class T, loom::type::size_type... Extents,
-          class Encoding,
+template <class Result, loom::memory_access Access = loom::memory_access::none,
+          class T, loom::type::size_type... Extents, class Encoding,
           class Origin = loom::type::coordinates<sizeof...(Extents)>>
 [[loom::op("vector.load")]] Result load(
     loom::type::view<loom::type::shape<Extents...>, T, Encoding> source,
@@ -143,8 +155,8 @@ template <class Result, class T, loom::type::size_type... Extents,
 // Stores one contiguous vector at a full-rank logical origin. A semantic value
 // carries its dynamic dimensions. Const destination element types are rejected
 // during source admission.
-template <class Vector, class T, loom::type::size_type... Extents,
-          class Encoding,
+template <loom::memory_access Access = loom::memory_access::none, class Vector,
+          class T, loom::type::size_type... Extents, class Encoding,
           class Origin = loom::type::coordinates<sizeof...(Extents)>>
 [[loom::op("vector.store")]] void store(
     Vector value,

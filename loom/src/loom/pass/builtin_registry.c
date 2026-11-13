@@ -10,6 +10,7 @@
 
 #include "loom/codegen/low/pipeline/pass_environment.h"
 #include "loom/codegen/low/transforms/allocation.h"
+#include "loom/codegen/low/transforms/borrow_lifetime.h"
 #include "loom/codegen/low/transforms/cfg_tuple_decomposition.h"
 #include "loom/codegen/low/transforms/cse.h"
 #include "loom/codegen/low/transforms/dce.h"
@@ -47,6 +48,7 @@
 #include "loom/transforms/math/legalize.h"
 #include "loom/transforms/ownership/ownership_lifetime.h"
 #include "loom/transforms/pipeline/outline.h"
+#include "loom/transforms/pipeline/workgroup.h"
 #include "loom/transforms/scf/scf_pipeline.h"
 #include "loom/transforms/scf/scf_to_cfg.h"
 #include "loom/transforms/scf/scf_unroll.h"
@@ -92,6 +94,18 @@ static const loom_pass_option_enum_value_t kInlineCallablesStageValues[] = {
 };
 
 static const loom_pass_option_schema_t kInlineCallablesOptionSchema[] = {
+    {
+        .name = IREE_SVL("budget"),
+        .kind = LOOM_PASS_OPTION_SCHEMA_UINT32,
+        .minimum_uint32 = 0,
+        .maximum_uint32 = UINT32_MAX,
+    },
+    {
+        .name = IREE_SVL("hot-budget"),
+        .kind = LOOM_PASS_OPTION_SCHEMA_UINT32,
+        .minimum_uint32 = 0,
+        .maximum_uint32 = UINT32_MAX,
+    },
     {
         .name = IREE_SVL("policy"),
         .kind = LOOM_PASS_OPTION_SCHEMA_ENUM,
@@ -521,6 +535,11 @@ static const loom_pass_descriptor_t kBuiltinPassDescriptors[] = {
         .function_run = loom_loop_fusion_run,
     },
     {
+        .key = IREE_SVL("low-borrow-lifetime"),
+        .info = loom_low_borrow_lifetime_pass_info,
+        .module_run = loom_low_borrow_lifetime_run,
+    },
+    {
         .key = IREE_SVL("low-cse"),
         .info = loom_low_cse_pass_info,
         .function_run = loom_low_cse_run,
@@ -616,6 +635,11 @@ static const loom_pass_descriptor_t kBuiltinPassDescriptors[] = {
         .key = IREE_SVL("promote-private-fragments"),
         .info = loom_promote_private_fragments_pass_info,
         .function_run = loom_promote_private_fragments_run,
+    },
+    {
+        .key = IREE_SVL("realize-pipeline-workgroup"),
+        .info = loom_pipeline_workgroup_pass_info,
+        .function_run = loom_pipeline_workgroup_run,
     },
     {
         .key = IREE_SVL("refine-boundaries"),

@@ -1,0 +1,65 @@
+// RUN: pass target=spirv:vulkan1.3+bda specialize-target-callgraph,source-to-low{control-flow=structured-low}
+
+func.def public @read_view(%input: buffer) -> (f32) {
+  %base = index.constant 0 : offset
+  %source = buffer.view %input[%base] : buffer -> view<4xf32>
+  %value = func.call @view_argument(%source) : (view<4xf32>) -> (f32)
+  func.return %value : f32
+}
+
+// Retained views cannot inherit the caller's pointer storage representation.
+// ERROR@+1: TARGET/033 {field_name="argument", actual_type="view<4xf32>"}
+func.def @view_argument(%input: view<4xf32>) -> (f32) {
+  %value = view.load %input[0] : view<4xf32> -> f32
+  func.return %value : f32
+}
+
+// ====
+
+func.def public @pass_buffer(%input: buffer) {
+  func.call @buffer_argument(%input) : (buffer)
+  func.return
+}
+
+// Buffers have the same boundary requirement, even without a dereference.
+// ERROR@+1: TARGET/033 {field_name="argument", actual_type="buffer"}
+func.def @buffer_argument(%input: buffer) {
+  func.return
+}
+
+// ====
+
+// Storage results are not ordinary numeric function return values either.
+// ERROR@+1: SPIRV/016
+func.def public @buffer_result() -> (buffer) {
+  %result = buffer.null : buffer
+  func.return %result : buffer
+}
+
+// ====
+
+// RUN: pass target=spirv:vulkan1.3+bda+hal specialize-target-callgraph,source-to-low{control-flow=structured-low}
+
+// A structured exit retains its callable boundary. The view argument must
+// receive an ordinary unsupported-signature diagnostic before body planning.
+kernel.def @read_guarded() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer, %skip: i1) {
+  %base = index.constant 0 : offset
+  %source = buffer.view %input[%base] : buffer -> view<1xf32>
+  %destination = buffer.view %output[%base] : buffer -> view<1xf32>
+  %value = func.call @guarded(%source, %skip) : (view<1xf32>, i1) -> (f32)
+  view.store %value, %destination[0] : f32, view<1xf32>
+  kernel.return
+}
+
+// ERROR@+1: TARGET/033 {field_name="argument", actual_type="view<1xf32>"}
+func.def inline @guarded(%input: view<1xf32>, %skip: i1) -> (f32) {
+  func.exit %skip : i1 {
+    %fallback = scalar.constant 0.0 : f32
+    func.return %fallback : f32
+  }
+  %value = view.load %input[0] : view<1xf32> -> f32
+  func.return %value : f32
+}

@@ -8,6 +8,7 @@
 
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/codegen/low/rematerialization_facts.h"
 
 namespace loom {
 namespace {
@@ -35,12 +36,53 @@ TEST(LowAllocationSpillPlanTest, ComputesByteLayout) {
         .value_id = LOOM_VALUE_ID_INVALID,
         .unit_count = test_case.unit_count,
     };
+    const loom_low_reg_class_t reg_class = {
+        .spill_unit_bits = test_case.alloc_unit_bits,
+        .spill_alignment_log2 = 0x40,
+    };
     uint32_t byte_size = 0;
     uint32_t byte_alignment = 0;
     IREE_ASSERT_OK(loom_low_allocation_spill_plan_layout(
-        &assignment, test_case.alloc_unit_bits, &byte_size, &byte_alignment));
+        &assignment, &reg_class, &byte_size, &byte_alignment));
     EXPECT_EQ(byte_size, test_case.byte_size);
     EXPECT_EQ(byte_alignment, test_case.byte_alignment);
+  }
+}
+
+TEST(LowAllocationSpillPlanTest, UsesNativeMemoryWidthAndAlignment) {
+  struct LayoutCase {
+    // Register payload width in bits.
+    uint16_t register_bits;
+    // Memory width of one spilled allocation unit in bits.
+    uint16_t spill_bits;
+    // Native slot alignment in bytes, expressed as log2.
+    uint8_t alignment_log2;
+    // Number of allocation units in the value.
+    uint32_t unit_count;
+    // Exact payload extent, excluding inter-slot padding.
+    uint32_t expected_bytes;
+  };
+  const LayoutCase cases[] = {
+      {20, 32, 2, 1, 4},     {80, 128, 2, 1, 16},   {160, 256, 2, 1, 32},
+      {256, 256, 5, 4, 128}, {512, 512, 6, 2, 128}, {576, 576, 6, 1, 72},
+      {576, 576, 6, 2, 144},
+  };
+  for (const auto& test_case : cases) {
+    const loom_low_reg_class_t reg_class = {
+        .alloc_unit_bits = test_case.register_bits,
+        .spill_unit_bits = test_case.spill_bits,
+        .spill_alignment_log2 = static_cast<uint8_t>(
+            test_case.alignment_log2 | (test_case.alignment_log2 << 4)),
+    };
+    const loom_low_allocation_assignment_t assignment = {
+        .unit_count = test_case.unit_count,
+    };
+    uint32_t byte_size = 0;
+    uint32_t byte_alignment = 0;
+    IREE_ASSERT_OK(loom_low_allocation_spill_plan_layout(
+        &assignment, &reg_class, &byte_size, &byte_alignment));
+    EXPECT_EQ(byte_size, test_case.expected_bytes);
+    EXPECT_EQ(byte_alignment, 1u << test_case.alignment_log2);
   }
 }
 
@@ -70,6 +112,34 @@ TEST(LowAllocationSpillPlanTest, GroupsSlicesByTrafficAndDensity) {
                   test_case.spill_byte_size),
               test_case.use_full_reload);
   }
+}
+
+TEST(LowAllocationSpillPlanTest, ChargesReconstructionWithoutMemoryTraffic) {
+  loom_low_allocation_spill_plan_traffic_t traffic = {
+      .store_count = 1,
+      .store_bytes = 4,
+      .reload_count = 34,
+      .reload_bytes = 136,
+  };
+  const uint8_t closed = LOOM_LOW_REMATERIALIZATION_VALUE_CLOSED;
+  const uint8_t stable = LOOM_LOW_REMATERIALIZATION_VALUE_STABLE_CAPTURE;
+  EXPECT_EQ(loom_low_allocation_spill_plan_traffic_cost(&traffic, 0), 140u);
+  EXPECT_EQ(loom_low_allocation_spill_plan_traffic_cost(&traffic, closed),
+            140u);
+  EXPECT_EQ(loom_low_allocation_spill_plan_traffic_cost(&traffic, stable),
+            140u);
+  EXPECT_EQ(
+      loom_low_allocation_spill_plan_traffic_cost(&traffic, closed | stable),
+      0u);
+  // A narrow observation still needs its original payload even when the
+  // complete producer can be reconstructed independently.
+  traffic.has_narrow_uses = true;
+  EXPECT_EQ(
+      loom_low_allocation_spill_plan_traffic_cost(&traffic, closed | stable),
+      140u);
+  traffic.store_bytes = UINT64_MAX - 3;
+  EXPECT_EQ(loom_low_allocation_spill_plan_traffic_cost(&traffic, 0),
+            UINT64_MAX);
 }
 
 TEST(LowAllocationSpillPlanTest, RecordsSpillRemarks) {

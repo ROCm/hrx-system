@@ -75,7 +75,7 @@ static iree_status_t iree_hip_function_handle_allocate_token(
   }
   const uintptr_t id = (uintptr_t)iree_hip_function_handle_next_id++;
 #if UINTPTR_MAX > UINT32_MAX
-  *out_handle = id | IREE_HAL_STREAMING_SYMBOL_TAG_VALUE;
+  *out_handle = id | IREE_HIP_FUNCTION_HANDLE_TAG_VALUE;
 #else
   *out_handle = id | UINT32_C(0x80000000);
 #endif  // UINTPTR_MAX > UINT32_MAX

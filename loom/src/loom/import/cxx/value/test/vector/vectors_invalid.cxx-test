@@ -1,0 +1,107 @@
+// RUN: verify
+// Unsupported vector forms diagnose at source admission.
+typedef bool V __attribute__((ext_vector_type(16)));
+// ERROR@+1: LOWERING/059 "vectors require non-boolean scalar lanes"
+V f(V x) { return x; }
+
+// ====
+// Unsupported vector forms diagnose at source admission.
+typedef int V __attribute__((vector_size(16)));
+// ERROR@+1: LOWERING/059 "vector logical operators require lane-wise evaluation"
+V f(V x, V y) { return x && y; }
+
+// ====
+// Unsupported vector forms diagnose at source admission.
+typedef int V __attribute__((vector_size(16)));
+// ERROR@+1: LOWERING/059 "vector conditions require lane-wise selection"
+V f(V x, V y) { return x ? x : y; }
+
+// ====
+// Braced vector construction rejects invalid initializers.
+typedef int V __attribute__((vector_size(16)));
+// ERROR@+1: PARSE/036 "excess elements in vector initializer"
+V f() { return V{1, 2, 3, 4, 5}; }
+
+// ====
+// Braced vector construction rejects invalid initializers.
+typedef unsigned V __attribute__((ext_vector_type(4)));
+// ERROR@+1: PARSE/036 "excess elements in vector initializer"
+V f() { return V{1u, 2u, 3u, 4u, 5u}; }
+
+// ====
+// Braced vector construction rejects invalid initializers.
+typedef unsigned char V __attribute__((vector_size(16)));
+// ERROR@+1: PARSE/036 "narrowing conversion from 'int' to 'unsigned char' in braced-init-list"
+V f() { return V{256}; }
+
+// ====
+// Braced vector construction rejects invalid initializers.
+typedef int V __attribute__((vector_size(16)));
+// ERROR@+1: PARSE/036 "narrowing conversion from 'float' to 'int' in braced-init-list"
+V f(float x) { return V{x, 0, 0, 0}; }
+
+// ====
+// A vector reinterpretation cannot reuse numerical lane constants.
+using Int4 = int __attribute__((vector_size(16)));
+using Float4 = float __attribute__((vector_size(16)));
+// ERROR@+1: PARSE/036 "constexpr variable must be initialized"
+constexpr Int4 bits = (Int4)Float4{1.0f, 2.0f, 3.0f, 4.0f};
+
+// ====
+using Half3 = _Float16 __attribute__((ext_vector_type(3)));
+using Bytes8 = unsigned char __attribute__((ext_vector_type(8)));
+// ERROR@+1: LOWERING/059 "vector reinterpretation requires equal value bit widths"
+Bytes8 invalid(Half3 value) { return (Bytes8)value; }
+
+// ====
+#include <loomcxx/vector.h>
+using Float4 = float __attribute__((ext_vector_type(4)));
+// ERROR@+1: LOWERING/059 "vector.slice requires source and result vectors"
+int invalid(Float4 source) { return loom::vector::slice<int>(source, 0); }
+
+// ====
+#include <loomcxx/vector.h>
+using Float4 = float __attribute__((ext_vector_type(4)));
+using Int2 = int __attribute__((ext_vector_type(2)));
+// ERROR@+1: LOWERING/059 "vector.slice result must preserve the element type and fit within the source"
+Int2 invalid(Float4 source) { return loom::vector::slice<Int2>(source, 0); }
+
+// ====
+#include <loomcxx/vector.h>
+using Float4 = float __attribute__((ext_vector_type(4)));
+using Float8 = float __attribute__((ext_vector_type(8)));
+// ERROR@+1: LOWERING/059 "vector.slice result must preserve the element type and fit within the source"
+Float8 invalid(Float4 source) { return loom::vector::slice<Float8>(source, 0); }
+
+// ====
+using Float4 = float __attribute__((ext_vector_type(4)));
+// ERROR@+1: LOWERING/059 "vector.slice offset requires an integer value"
+[[loom::op("vector.slice")]] Float4 invalid(Float4, float);
+Float4 call(Float4 source) { return invalid(source, 0.0f); }
+
+// ====
+#include <loomcxx/vector.h>
+using Float4 = float __attribute__((ext_vector_type(4)));
+// ERROR@+1: LOWERING/059 "vector absolute value element type does not match the operation category"
+Float4 invalid(Float4 value) { return loom::vector::absi(value); }
+
+// ====
+#include <loomcxx/vector.h>
+using Int4 = int __attribute__((ext_vector_type(4)));
+// ERROR@+1: LOWERING/059 "vector absolute value element type does not match the operation category"
+Int4 invalid(Int4 value) { return loom::vector::absf(value); }
+
+// ====
+#include <loomcxx/vector.h>
+using Int4 = int __attribute__((ext_vector_type(4)));
+// ERROR@+2: LOWERING/059 "floating vector extremum requires one floating-point vector type for its operands and result"
+Int4 invalid(Int4 left, Int4 right) {
+  return loom::vector::minnumf(left, right);
+}
+
+// ====
+// Native component values preserve whole-vector storage and are not
+// independently addressable source objects.
+using UInt4 = unsigned __attribute__((ext_vector_type(4)));
+// ERROR@+1: LOWERING/059 "extended-vector components are not addressable"
+unsigned* invalid(UInt4* values) { return &values->x; }

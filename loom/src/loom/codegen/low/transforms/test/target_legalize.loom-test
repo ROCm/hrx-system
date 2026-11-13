@@ -665,12 +665,12 @@ func.def target(@test_target) @narrow_unsigned_operands(%left: i8, %right: i8, %
 }
 
 // ====
-// RUN: with-checks pass target-legalize{mode=final,policy=reference-only},canonicalize,dce
+// RUN: pass target-legalize{mode=final,policy=reference-only},canonicalize,dce
 
 test.target<low_core> @test_target
 
-// Generic canonicalization may move a proven left shift before zero extension.
 // The target fallback must remain in the supported i32 domain after cleanup.
+// Proven-positive extension needs no sign-restoration shifts.
 func.def target(@test_target) @narrow_shift_survives_cleanup(%input: i8, %amount: i8) -> (i8) {
   %bounded = scalar.assume %input [range(%input, 0, 1)] : i8
   %exact_amount = scalar.assume %amount [range(%amount, 7, 7)] : i8
@@ -678,9 +678,18 @@ func.def target(@test_target) @narrow_shift_survives_cleanup(%input: i8, %amount
   func.return %shifted : i8
 }
 
+
 // ----
-CHECK: * = scalar.shli * : i32
-CHECK-NOT: * = scalar.shli * : i8
+test.target<low_core> @test_target
+
+func.def target(@test_target) @narrow_shift_survives_cleanup(%input: i8, %amount: i8) -> (i8) {
+  %bounded = scalar.assume %input [range(%input, 0, 1)] : i8
+  %11 = scalar.extui %bounded : i8 to i32
+  %12 = scalar.constant 7 : i32
+  %8 = scalar.shli %11, %12 : i32
+  %shifted = scalar.trunci %8 : i32 to i8
+  func.return %shifted : i8
+}
 
 // ====
 // RUN: pass target-legalize{mode=final,policy=reference-only},dce
@@ -854,23 +863,22 @@ func.def target(@target) @share_before_lane_expansion(%lhs: vector<2xi64>, %rhs:
 test.target<low_core> @target
 
 // Complete legalization expands the shared program once, retaining both uses.
-func.def target(@target) @expand_shared_lanes(%lhs: vector<2xi64>, %rhs: vector<2xi64>) -> (vector<2xi64>, vector<2xi64>) {
-  %first = vector.divsi %lhs, %rhs : vector<2xi64>
-  %second = vector.divsi %lhs, %rhs : vector<2xi64>
-  func.return %first, %second : vector<2xi64>, vector<2xi64>
+func.def target(@target) @expand_shared_lanes(%lhs: vector<2xi32>, %rhs: vector<2xi32>) -> (vector<2xi32>, vector<2xi32>) {
+  %first = vector.divsi %lhs, %rhs : vector<2xi32>
+  %second = vector.divsi %lhs, %rhs : vector<2xi32>
+  func.return %first, %second : vector<2xi32>, vector<2xi32>
 }
 
 // ----
 test.target<low_core> @target
 
-func.def target(@target) @expand_shared_lanes(%lhs: vector<2xi64>, %rhs: vector<2xi64>) -> (vector<2xi64>, vector<2xi64>) {
-  %6 = vector.extract %lhs[0] : vector<2xi64> -> i64
-  %7 = vector.extract %rhs[0] : vector<2xi64> -> i64
-  %8 = scalar.divsi %6, %7 : i64
-  %9 = vector.extract %lhs[1] : vector<2xi64> -> i64
-  %10 = vector.extract %rhs[1] : vector<2xi64> -> i64
-  %11 = scalar.divsi %9, %10 : i64
-  %13 = vector.splat %8 : vector<2xi64>
-  %first = vector.insert %11 into %13[1] : i64, vector<2xi64>
-  func.return %first, %first : vector<2xi64>, vector<2xi64>
+func.def target(@target) @expand_shared_lanes(%lhs: vector<2xi32>, %rhs: vector<2xi32>) -> (vector<2xi32>, vector<2xi32>) {
+  %6 = vector.extract %lhs[0] : vector<2xi32> -> i32
+  %7 = vector.extract %rhs[0] : vector<2xi32> -> i32
+  %8 = scalar.divsi %6, %7 : i32
+  %9 = vector.extract %lhs[1] : vector<2xi32> -> i32
+  %10 = vector.extract %rhs[1] : vector<2xi32> -> i32
+  %11 = scalar.divsi %9, %10 : i32
+  %first = vector.from_elements %8, %11 : vector<2xi32>
+  func.return %first, %first : vector<2xi32>, vector<2xi32>
 }

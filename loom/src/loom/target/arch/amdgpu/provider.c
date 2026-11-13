@@ -7,7 +7,9 @@
 #include "loom/target/arch/amdgpu/provider.h"
 
 #include "loom/ir/module.h"
+#include "loom/ops/callable_effects.h"
 #include "loom/pass/builder.h"
+#include "loom/target/arch/amdgpu/abi/call_abi.h"
 #include "loom/target/arch/amdgpu/descriptors/low_registry.h"
 #include "loom/target/arch/amdgpu/diagnostics/packet_diagnostics.h"
 #include "loom/target/arch/amdgpu/legalization.h"
@@ -20,7 +22,8 @@
 #include "loom/target/arch/amdgpu/ops/target.h"
 #include "loom/target/arch/amdgpu/pass_registry.h"
 #include "loom/target/arch/amdgpu/profile.h"
-#include "loom/transforms/scalar/wide_remainder_legalization.h"
+#include "loom/transforms/pipeline/workgroup.h"
+#include "loom/transforms/scalar/wide_division_legalization.h"
 
 static const loom_target_low_legality_provider_t*
     kLoomAmdgpuLowLegalityProviders[] = {
@@ -30,7 +33,7 @@ static const loom_target_low_legality_provider_t*
 static const loom_target_legalizer_provider_t* kLoomAmdgpuLegalizerProviders[] =
     {
         &loom_amdgpu_target_legalizer_provider_storage,
-        &loom_scalar_wide_remainder_legalizer_provider_storage,
+        &loom_scalar_wide_division_legalizer_provider_storage,
 };
 
 static const loom_target_low_packet_diagnostic_provider_t*
@@ -107,6 +110,11 @@ static iree_status_t loom_amdgpu_provider_build_source_finalization(
 
 static iree_status_t loom_amdgpu_provider_contribute_pipeline(
     const loom_target_pipeline_contribution_t* contribution) {
+  if (contribution->phase ==
+      LOOM_TARGET_PIPELINE_PHASE_SOURCE_EXECUTION_LOWERING) {
+    return loom_pipeline_workgroup_build_pipeline(contribution->builder,
+                                                  IREE_SV("amdgpu"));
+  }
   loom_pass_ir_body_build_fn_t build_body = NULL;
   if (contribution->phase == LOOM_TARGET_PIPELINE_PHASE_SOURCE_TO_LOW) {
     // Shared source preparation has finished threading branch conditions.
@@ -156,33 +164,71 @@ static loom_target_call_policy_t loom_amdgpu_select_call_policy(
     loom_call_like_kind_t kind, loom_call_like_t call,
     loom_func_like_t callee) {
   (void)resolved_target;
+  (void)call;
   if (kind != LOOM_CALL_LIKE_KIND_SEMANTIC &&
       kind != LOOM_CALL_LIKE_KIND_LOW_INTERNAL) {
     return LOOM_TARGET_CALL_POLICY_REQUIRE_INLINE;
   }
-  if (kind == LOOM_CALL_LIKE_KIND_SEMANTIC) {
-    // A borrowed buffer has an address carrier and may cross into a helper as
-    // an argument. A buffer result also transports allocation identity and
-    // alias/lifetime state, which the fixed register ABI does not represent.
-    // Keep those calls semantic so required inlining owns that state.
+  if (!loom_func_like_body(callee)) {
+    return LOOM_TARGET_CALL_POLICY_REQUIRE_INLINE;
+  }
+  if (kind == LOOM_CALL_LIKE_KIND_SEMANTIC &&
+      loom_callable_effects_may_create_resources(callee)) {
+    // Helpers without resource creation return borrowed references, including
+    // helpers that write to caller-owned storage. Other reference returns stay
+    // semantic until inlining exposes their allocation and lifetime effects.
+    // Apply the same policy before and after view-to-buffer projection.
     const loom_value_id_t* results = loom_op_const_results(callee.op);
     for (uint16_t i = 0; i < callee.op->result_count; ++i) {
-      if (loom_type_is_buffer(loom_module_value_type(module, results[i]))) {
+      const loom_type_t result_type =
+          loom_module_value_type(module, results[i]);
+      if (loom_type_is_buffer(result_type) || loom_type_is_view(result_type)) {
         return LOOM_TARGET_CALL_POLICY_REQUIRE_INLINE;
       }
     }
   }
-  const bool explicit_noinline =
-      loom_call_like_inline_policy(call) == LOOM_INLINE_POLICY_NOINLINE ||
-      loom_func_like_inline_policy(callee) == LOOM_INLINE_POLICY_NOINLINE;
-  return explicit_noinline ? LOOM_TARGET_CALL_POLICY_DIRECT
-                           : LOOM_TARGET_CALL_POLICY_REQUIRE_INLINE;
+  if (kind == LOOM_CALL_LIKE_KIND_SEMANTIC) {
+    return LOOM_TARGET_CALL_POLICY_REQUIRE_LEAF;
+  }
+
+  // Physical carriers are known at the Low boundary. Use the same classifier
+  // as native emission, with independent argument and result register banks.
+  // An authored generic representation can execute on a more specific target;
+  // its register types belong to the representation, not that target's config.
+  const uint64_t descriptor_set_id =
+      loom_low_descriptor_stable_id_from_key(loom_string_table_get(
+          &module->strings, loom_func_like_repr_contract(callee)));
+  loom_amdgpu_call_abi_requirements_t arguments = {0};
+  uint16_t argument_count = 0;
+  const loom_value_id_t* argument_ids =
+      loom_func_like_arg_ids(callee, &argument_count);
+  for (uint16_t i = 0; i < argument_count; ++i) {
+    if (!loom_amdgpu_call_abi_add_low_type(
+            descriptor_set_id, loom_module_value_type(module, argument_ids[i]),
+            &arguments) ||
+        !loom_amdgpu_call_abi_requirements_fit(arguments)) {
+      return LOOM_TARGET_CALL_POLICY_REQUIRE_INLINE;
+    }
+  }
+  loom_amdgpu_call_abi_requirements_t results = {0};
+  const loom_value_id_t* result_ids = loom_op_const_results(callee.op);
+  for (uint16_t i = 0; i < callee.op->result_count; ++i) {
+    if (!loom_amdgpu_call_abi_add_low_type(
+            descriptor_set_id, loom_module_value_type(module, result_ids[i]),
+            &results) ||
+        !loom_amdgpu_call_abi_requirements_fit(results)) {
+      return LOOM_TARGET_CALL_POLICY_REQUIRE_INLINE;
+    }
+  }
+  return LOOM_TARGET_CALL_POLICY_REQUIRE_LEAF |
+         LOOM_TARGET_CALL_POLICY_NO_WORKGROUP_STORAGE;
 }
 
 const loom_target_provider_t loom_amdgpu_target_provider = {
     .profile_type = &loom_amdgpu_target_profile_type,
     .materialize_definition = loom_amdgpu_target_materialize_definition,
     .select_call_policy = loom_amdgpu_select_call_policy,
+    .view_boundary_carrier = LOOM_TARGET_VIEW_BOUNDARY_CARRIER_BUFFER_OFFSET,
     .loop_predicate_carrier = LOOM_TARGET_LOOP_PREDICATE_CARRIER_I32,
     .loop_predicate_max_vector_element_count =
         LOOM_AMDGPU_MAX_SCALARIZED_32BIT_LANES,

@@ -8,6 +8,7 @@
 #define LOOM_IMPORT_CXX_VALUE_INITIALIZATION_H_
 
 #include <cxx/ast_fwd.h>
+#include <cxx/const_value.h>
 #include <cxx/symbols_fwd.h>
 
 #include <array>
@@ -16,10 +17,13 @@
 #include <span>
 
 #include "loom/import/cxx/source/constants.h"
+#include "loom/import/cxx/source/expressions.h"
 #include "loom/import/cxx/value/objects.h"
 #include "loom/import/cxx/value/vector.h"
 
 namespace loom::cxx_import {
+
+struct InitializerList;
 
 // Source aggregate initialization has two destinations: immutable components
 // and addressable objects. In-place initialization publishes each completed
@@ -38,6 +42,9 @@ class Initialization {
       size_t mark;
       // Enclosing full expression restored after this one completes.
       std::optional<size_t> parent_mark;
+      // Whether the enclosing initializer transfers its surviving temporaries
+      // to lexical cleanup instead of destroying them at expression completion.
+      bool parent_extends_temporaries = false;
     };
 
     virtual Value expression(cxx::ExpressionAST* expression) = 0;
@@ -46,9 +53,9 @@ class Initialization {
     // Transfers a completed prvalue result into its destination object. Side
     // temporaries evaluated while producing it remain owned by their enclosing
     // full expression.
-    virtual void adopt(cxx::ExpressionAST* expression, Value value) = 0;
-    // Member initializer expressions are independent full expressions even
-    // though their destination subobjects share one constructor receiver.
+    virtual void adopt(cxx::ExpressionAST* expression) = 0;
+    // Member initializers and omitted/copy array-element default arguments
+    // finish their temporaries independently of the containing construction.
     virtual FullExpression begin_full_expression() = 0;
     virtual void finish_full_expression(FullExpression expression) = 0;
     // Captures the durable storage identity selected by one reference
@@ -63,23 +70,48 @@ class Initialization {
     virtual void enter_storage_receiver(const RecordPartition& record,
                                         StorageProjection destination,
                                         const cxx::Type* object_type) = 0;
-    virtual void publish_receiver_member(cxx::FieldSymbol* field,
-                                         Value value) = 0;
-    virtual void complete_storage_receiver_member(cxx::FieldSymbol* field) = 0;
-    virtual Value receiver_member(cxx::FieldSymbol* field, cxx::AST* owner) = 0;
+    // Explicit aggregate clauses evaluate in their lexical current-object
+    // context, not the result object under construction. Temporarily hides the
+    // innermost construction receiver when an enclosing receiver exists.
+    virtual bool suspend_current_receiver() = 0;
+    virtual void resume_current_receiver() = 0;
+    virtual void publish_receiver_member(cxx::Symbol* field, Value value) = 0;
+    virtual void complete_receiver_member(cxx::Symbol* field) = 0;
+    virtual Value receiver_member(cxx::Symbol* field, cxx::AST* owner) = 0;
     virtual void leave_receiver() = 0;
     // Branch construction retains the translator's automatic-binding joins.
     virtual void conditional_object(StorageProjection destination,
                                     const cxx::Type* type,
                                     cxx::ConditionalExpressionAST* expression,
                                     bool retained) = 0;
-    // Invokes one user-provided constructor with the exact destination object
+    // Invokes one selected constructor with the exact destination object
     // and explicit source arguments. The constructor definition owns member
     // initialization followed by ordinary body translation.
     virtual void call_constructor(
         StorageProjection destination, const RecordPartition& record,
         const cxx::Type* object_type, cxx::FunctionSymbol* constructor,
         std::span<cxx::ExpressionAST* const> arguments, cxx::AST* owner) = 0;
+    // Constructs one complete semantic value through the selected constructor.
+    // The evaluator selects value or storage receiver transport from retained
+    // callable analysis and returns the final flattened record either way.
+    virtual Value construct_value(
+        const RecordPartition& record, const cxx::Type* object_type,
+        cxx::FunctionSymbol* constructor,
+        std::span<cxx::ExpressionAST* const> arguments, cxx::AST* owner) = 0;
+    // Array copies use their retained element call and projected source
+    // storage. The source reference precedes the completed default arguments.
+    virtual const ArrayCopyInitialization* array_copy(cxx::AST* owner) = 0;
+    // Retained backing construction, absent for an ordinary aggregate list.
+    virtual const InitializerList* initializer_list(
+        cxx::BracedInitListAST* expression) const = 0;
+    // Constructs an anonymous const array directly in its final storage and
+    // retains that storage in the ordinary temporary cleanup mechanism.
+    virtual Pointer materialize_array(cxx::BracedInitListAST* expression) = 0;
+    virtual void call_copy_constructor(
+        StorageProjection destination, const RecordPartition& record,
+        cxx::FunctionSymbol* constructor, StorageProjection source,
+        std::span<cxx::ExpressionAST* const> default_arguments,
+        cxx::AST* owner) = 0;
 
    protected:
     ~Evaluation() = default;
@@ -110,6 +142,14 @@ class Initialization {
   Value value(const cxx::Type* type, cxx::ExpressionAST* initializer,
               cxx::FunctionSymbol* constructor, cxx::AST* owner,
               std::optional<Value> retained = std::nullopt);
+  // Constructs one frontend-synthesized closure by evaluating captures in
+  // source order and assembling their semantic fields in record order.
+  Value closure(cxx::LambdaExpressionAST* expression);
+  // Materializes one frontend-evaluated constant through the same admitted
+  // component structure used by ordinary values. Aggregate traversal follows
+  // source types and field identities; source object bytes are never decoded.
+  Value constant(const cxx::ConstValue& value, const cxx::Type* type,
+                 cxx::AST* owner);
   // Captures a character-array string initializer using the source ABI's code
   // units, terminator, and zero fill. Other initializer forms return no value.
   std::optional<ObjectRepresentation> literal(const cxx::Type* type,
@@ -126,18 +166,32 @@ class Initialization {
               cxx::ExpressionAST* initializer, cxx::FunctionSymbol* constructor,
               cxx::AST* owner, bool retained = false);
   // Applies the frontend-owned member initialization plan at the entry of a
-  // retained user-provided constructor. The ordinary function translator then
+  // retained constructor. The ordinary function translator then
   // executes its compound body against the same storage receiver.
   void constructor_receiver(StorageProjection destination,
                             const RecordPartition& record,
                             const cxx::Type* object_type,
-                            cxx::FunctionSymbol* constructor, cxx::AST* owner);
+                            cxx::FunctionSymbol* constructor,
+                            cxx::List<cxx::MemInitializerAST*>* initializers,
+                            cxx::AST* owner);
+  // Applies a retained constructor initialization plan to the active semantic
+  // receiver. Its ordinary function body then observes and mutates those same
+  // completed field bindings.
+  void value_constructor_receiver(
+      const RecordPartition& record, const cxx::Type* object_type,
+      cxx::FunctionSymbol* constructor,
+      cxx::List<cxx::MemInitializerAST*>* initializers, cxx::AST* owner);
 
  private:
+  // Copies or moves each array leaf using its retained nontrivial constructor.
+  void copy_array(StorageProjection destination, const cxx::Type* type,
+                  StorageProjection source, const ArrayCopyInitialization& plan,
+                  cxx::AST* owner);
   Value from_elements(const cxx::Type* type,
                       cxx::List<cxx::ExpressionAST*>* elements,
                       cxx::VariableSymbol* implicit_element,
-                      cxx::FunctionSymbol* constructor, cxx::AST* owner,
+                      cxx::FunctionSymbol* constructor,
+                      cxx::ExpressionAST* initializer, cxx::AST* owner,
                       std::optional<Value> retained);
   // Constructs a native vector from its complete source initializer. Pure
   // constant lanes are retained as frontend values so the producer can choose
@@ -152,7 +206,11 @@ class Initialization {
       const cxx::Type* type, cxx::List<cxx::ExpressionAST*>* elements,
       cxx::AST* owner);
   loom_string_id_t zero_name(loom_scalar_type_t scalar_type);
+  Value materialize_constant(const cxx::ConstValue& value,
+                             const cxx::Type* type, cxx::AST* owner);
   Value zero(const cxx::Type* type, cxx::AST* owner);
+  Value initializer_list(const InitializerList& list, const cxx::Type* type,
+                         cxx::AST* owner);
   Value default_record(const RecordPartition& record,
                        cxx::FunctionSymbol* constructor, bool zero_initialize,
                        cxx::AST* owner, std::optional<Value> retained);

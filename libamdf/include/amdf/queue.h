@@ -235,13 +235,6 @@ typedef struct amdf_queue_family_info_t {
   /// Supported user-queue scheduling priorities, or zero without user
   /// publication. Kernel queue creation has no priority selector.
   amdf_queue_priority_capabilities_t priority_capabilities;
-  /// Supported explicit primary-ring placements for user publication.
-  amdf_queue_placement_capabilities_t placement_capabilities;
-  /// Host publication requirements indexed by amdf_queue_placement_t.
-  /// DEFAULT describes the provider's chosen placement. Unsupported explicit
-  /// placements and families without direct host publication report UNKNOWN.
-  amdf_queue_host_publication_flags_t
-      host_publication[AMDF_QUEUE_PLACEMENT_COUNT];
   /// Optional sidecar metadata format.
   amdf_queue_metadata_format_t metadata;
   /// Minimum supported power-of-two primary user ring length in bytes.
@@ -251,6 +244,29 @@ typedef struct amdf_queue_family_info_t {
   /// Required primary user ring length alignment in bytes.
   uint64_t ring_byte_length_alignment;
 } amdf_queue_family_info_t;
+
+/// Complete queue-storage contract qualified by explicit device creation.
+///
+/// Endpoint discovery describes command formats and expected services. Ring
+/// placement and host-publication costs additionally depend on the native
+/// connection, including virtualization and register-mapping admission.
+typedef struct amdf_queue_family_placement_info_t {
+  /// Must be `AMDF_STRUCTURE_TYPE_QUEUE_FAMILY_PLACEMENT_INFO`.
+  amdf_structure_type_t type;
+  /// Must be at least `sizeof(amdf_queue_family_placement_info_t)`.
+  uint32_t structure_size;
+  /// Optional output extension chain. No extensions are currently defined.
+  void* next;
+  /// Endpoint-local ordinal identifying this queue family.
+  uint32_t ordinal;
+  /// Supported explicit primary-ring placements for user publication.
+  amdf_queue_placement_capabilities_t placement_capabilities;
+  /// Host-publication requirements indexed by amdf_queue_placement_t.
+  /// DEFAULT describes the provider's chosen placement. Unsupported explicit
+  /// placements and families without direct host publication report UNKNOWN.
+  amdf_queue_host_publication_flags_t
+      host_publication[AMDF_QUEUE_PLACEMENT_COUNT];
+} amdf_queue_family_placement_info_t;
 
 /// An infinite timeout accepted by operations that explicitly wait.
 #define AMDF_TIMEOUT_INFINITE UINT64_MAX

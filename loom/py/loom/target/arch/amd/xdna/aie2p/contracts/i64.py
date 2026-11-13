@@ -106,10 +106,12 @@ def _split_pair(
     )
 
 
-def _concat_pair(low: ValueRef, high: ValueRef) -> EmitRegisterConcat:
+def _concat_pair(
+    low: ValueRef, high: ValueRef, result_name: str = "result"
+) -> EmitRegisterConcat:
     return EmitRegisterConcat(
         sources=(low, high),
-        result=ValueRef.result("result"),
+        result=ValueRef.result(result_name),
     )
 
 
@@ -128,6 +130,33 @@ def _pair_bitwise_rule(source_op: Op, operation: str) -> DescriptorRule:
             *rhs_emits,
             *program.emits,
             _concat_pair(result_low, result_high),
+        ),
+    )
+
+
+def _pair_word_join_rule(source_op: Op, low: str, high: str) -> DescriptorRule:
+    """Disjoint bitwise word fields need only register composition."""
+    low_word = ValueRef.temporary("low_word")
+    high_word = ValueRef.temporary("high_word")
+    return DescriptorRule(
+        source_op=source_op,
+        priority=1,
+        guards=(
+            *_typed_guards(("lhs", "rhs", "result"), _I64),
+            Guard.value_i64_range(low, 0, 2**32 - 1),
+            Guard.value_divisible_by(high, 2**32),
+        ),
+        emit=(
+            EmitRegisterSlice(
+                source=ValueRef.operand(low), result=low_word, unit_count=1
+            ),
+            EmitRegisterSlice(
+                source=ValueRef.operand(high),
+                result=high_word,
+                unit_offset=1,
+                unit_count=1,
+            ),
+            _concat_pair(low_word, high_word),
         ),
     )
 
@@ -198,6 +227,9 @@ def _pair_add_sub_rule(
     source_op: Op,
     low_operation: str,
     high_operation: str,
+    *,
+    value_result: str = "result",
+    flag_result: str | None = None,
 ) -> DescriptorRule:
     lhs_emits, lhs_low, lhs_high = _split_pair(ValueRef.operand("lhs"), "lhs")
     rhs_emits, rhs_low, rhs_high = _split_pair(ValueRef.operand("rhs"), "rhs")
@@ -207,10 +239,25 @@ def _pair_add_sub_rule(
     result_high = ValueRef.temporary("result_high")
     carry_low = ValueRef.temporary("carry_low")
     carry_high = ValueRef.temporary("carry_high")
+    flag_guard: tuple[Guard, ...] = ()
+    flag_materialization: tuple[EmitDescriptorOp, ...] = ()
+    if flag_result is not None:
+        carry_to_scalar = _descriptor("amd.xdna.aie2p.move.carry-to-scalar")
+        flag_guard = (Guard.value_type(flag_result, _I1),)
+        flag_materialization = (
+            EmitDescriptorOp(
+                descriptor=carry_to_scalar,
+                results={"dst": ValueRef.result(flag_result)},
+                form=DescriptorEmitForm.OP,
+            ),
+        )
     return DescriptorRule(
         source_op=source_op,
         descriptor=high_descriptor,
-        guards=_typed_guards(("lhs", "rhs", "result"), _I64),
+        guards=(
+            *_typed_guards(("lhs", "rhs", value_result), _I64),
+            *flag_guard,
+        ),
         emit=(
             *lhs_emits,
             *rhs_emits,
@@ -232,7 +279,8 @@ def _pair_add_sub_rule(
                     "carry_out": DescriptorResultType(),
                 },
             ),
-            _concat_pair(result_low, result_high),
+            _concat_pair(result_low, result_high, value_result),
+            *flag_materialization,
         ),
     )
 
@@ -467,12 +515,19 @@ def _pair_multiply_rule() -> DescriptorRule:
     )
 
 
-def _pair_unsigned_remainder_by_word_rule() -> DescriptorRule:
+def _pair_unsigned_division_by_word_rule(
+    source_op: Op, *, divisor_maximum: int
+) -> DescriptorRule:
     """Continues the native divider state across both dividend words."""
+    has_quotient = source_op != scalar_arithmetic.scalar_remui
+    has_remainder = source_op != scalar_arithmetic.scalar_divui
+    paired = source_op == scalar_arithmetic.scalar_divremui
+    result_names = ("quotient", "remainder") if paired else ("result",)
     lhs_emits, lhs_low, lhs_high = _split_pair(ValueRef.operand("lhs"), "lhs")
     divisor = ValueRef.temporary("divisor")
     zero = ValueRef.temporary("zero")
     move_to_state = _descriptor("amd.xdna.aie2p.move.to.division-state")
+    move_from_state = _descriptor("amd.xdna.aie2p.move.from.division-state")
     divide_step = _descriptor("amd.xdna.aie2p.divide.step.unsigned.i32")
     zero_descriptor = _descriptor("amd.xdna.aie2p.constant.i32.short")
     emits: list[EmitRegisterSlice | EmitDescriptorOp | EmitRegisterConcat] = [
@@ -499,23 +554,92 @@ def _pair_unsigned_remainder_by_word_rule() -> DescriptorRule:
                 form=DescriptorEmitForm.OP,
             )
         )
-        state, remainder = append_runtime_unsigned_division_steps(
+        state, remainder, quotient_correction = append_runtime_unsigned_division_steps(
             emits,
             initial_state=state,
             initial_remainder=remainder,
             divisor=divisor,
             temporary_prefix=f"{word_name}_division_",
+            full_remainder=word_name == "low" and divisor_maximum > 2**31,
+            return_quotient=has_quotient,
         )
-    emits.append(_concat_pair(remainder, zero))
+        if has_quotient:
+            quotient_name = f"quotient_{word_name}"
+            raw_quotient = ValueRef.temporary(
+                f"raw_{quotient_name}" if quotient_correction else quotient_name
+            )
+            emits.append(
+                EmitDescriptorOp(
+                    descriptor=move_from_state,
+                    operands={"src": state},
+                    results={"dst": raw_quotient},
+                    result_types={"dst": DescriptorResultType()},
+                    form=DescriptorEmitForm.OP,
+                )
+            )
+            if quotient_correction:
+                program = ScalarProgram()
+                program.binary(
+                    quotient_name, "or.i32", raw_quotient, quotient_correction
+                )
+                emits.extend(program.emits)
+    if has_quotient:
+        emits.append(
+            EmitRegisterConcat(
+                sources=(
+                    ValueRef.temporary("quotient_low"),
+                    ValueRef.temporary("quotient_high"),
+                ),
+                result=ValueRef.result("quotient" if paired else "result"),
+            )
+        )
+    if has_remainder:
+        emits.append(
+            EmitRegisterConcat(
+                sources=(remainder, zero),
+                result=ValueRef.result("remainder" if paired else "result"),
+            )
+        )
     return DescriptorRule(
-        source_op=scalar_arithmetic.scalar_remui,
+        source_op=source_op,
         descriptor=divide_step,
-        priority=1,
+        priority=2 if divisor_maximum <= 2**31 else 1,
         guards=(
-            *_typed_guards(("lhs", "rhs", "result"), _I64),
-            Guard.value_i64_range("rhs", 1, 2**32 - 1),
+            *_typed_guards(("lhs", "rhs", *result_names), _I64),
+            Guard.value_i64_range("rhs", 1, divisor_maximum),
         ),
         emit=tuple(emits),
+    )
+
+
+def _pair_word_shift_rule(source_op: Op) -> DescriptorRule:
+    """A whole-word shift selects one word and supplies only its fill."""
+    is_left = source_op is scalar_bitwise.scalar_shli
+    word = ValueRef.temporary("word")
+    program = ScalarProgram()
+    if source_op is scalar_bitwise.scalar_shrsi:
+        sign_count = program.constant("sign_count", -31)
+        fill = program.binary("sign_fill", "ashl.i32", word, sign_count)
+    else:
+        fill = program.constant("zero", 0)
+    return DescriptorRule(
+        source_op=source_op,
+        descriptor=program.emits[-1].descriptor,
+        priority=3,
+        guards=(
+            *_typed_guards(("lhs", "rhs", "result"), _I64),
+            Guard.value_i64_range("rhs", 32, 32),
+        ),
+        emit=(
+            EmitRegisterSlice(
+                source=ValueRef.operand("lhs"),
+                result=word,
+                unit_offset=0 if is_left else 1,
+                unit_count=1,
+            ),
+            *program.emits,
+            _concat_pair(fill, word) if is_left else _concat_pair(word, fill),
+        ),
     )
 
 
@@ -1232,13 +1356,41 @@ AIE2P_I64_RULES = (
     _pair_bitwise_rule(scalar_bitwise.scalar_andi, "and.i32"),
     _pair_bitwise_rule(scalar_bitwise.scalar_ori, "or.i32"),
     _pair_bitwise_rule(scalar_bitwise.scalar_xori, "xor.i32"),
+    *(
+        _pair_word_join_rule(source_op, low, high)
+        for source_op in (scalar_bitwise.scalar_ori, scalar_bitwise.scalar_xori)
+        for low, high in (("lhs", "rhs"), ("rhs", "lhs"))
+    ),
     _pair_add_sub_rule(
         scalar_arithmetic.scalar_addi,
         "add.carry_out.i32",
         "add.carry.i32",
     ),
-    _pair_unsigned_remainder_by_word_rule(),
+    _pair_add_sub_rule(
+        scalar_arithmetic.scalar_addcarryui,
+        "add.carry_out.i32",
+        "add.carry.i32",
+        value_result="sum",
+        flag_result="carry",
+    ),
+    *(
+        _pair_unsigned_division_by_word_rule(source_op, divisor_maximum=divisor_maximum)
+        for source_op in (
+            scalar_arithmetic.scalar_divui,
+            scalar_arithmetic.scalar_remui,
+            scalar_arithmetic.scalar_divremui,
+        )
+        for divisor_maximum in (2**31, 2**32 - 1)
+    ),
     _pair_multiply_rule(),
+    *(
+        _pair_word_shift_rule(source_op)
+        for source_op in (
+            scalar_bitwise.scalar_shli,
+            scalar_bitwise.scalar_shrui,
+            scalar_bitwise.scalar_shrsi,
+        )
+    ),
     *(_pair_bounded_left_shift_rule(word_index) for word_index in range(2)),
     _pair_left_shift_rule(),
     *(
@@ -1253,6 +1405,13 @@ AIE2P_I64_RULES = (
         scalar_arithmetic.scalar_subi,
         "sub.borrow_out.i32",
         "sub.borrow.i32",
+    ),
+    _pair_add_sub_rule(
+        scalar_arithmetic.scalar_subborrowui,
+        "sub.borrow_out.i32",
+        "sub.borrow.i32",
+        value_result="difference",
+        flag_result="borrow",
     ),
     *(
         _pair_compare_rule(predicate)

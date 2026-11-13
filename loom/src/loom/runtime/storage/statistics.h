@@ -34,9 +34,10 @@ typedef struct loom_runtime_storage_usage_t {
 typedef struct loom_runtime_storage_statistics_t {
   // Reserved virtual bytes, including final slab alignment.
   uint64_t reserved_bytes;
-  // Unique backing bytes; pool-wide queries include cached idle slabs and
-  // pending or abandoned native retirement. Per-reservation groups contain
-  // only live slabs.
+  // Unique backing bytes; pool-wide queries report actual native commitment,
+  // including cached idle slabs, unpublished acquisitions, and pending or
+  // abandoned native retirement. Per-reservation groups contain only published
+  // live slabs.
   uint64_t committed_bytes;
   // Pool-only committed charge whose native backing could not be returned.
   // Monotonic; neither reusable nor pending, and not attributed to live roots.
@@ -44,7 +45,9 @@ typedef struct loom_runtime_storage_statistics_t {
   // Physically committed idle slabs available to any reservation in the pool.
   // Only pool-wide queries include this shared cache; per-reservation is zero.
   uint64_t cached_bytes;
-  // Budget charged to accepted native commitments not yet published by owner.
+  // Logical bytes in accepted commitments not yet published by the owner.
+  // Not additive with pool-wide committed_bytes: their native backing may
+  // already exist while mapping or owner publication is pending.
   uint64_t pending_bytes;
   // Backing selected for return. Per-buffer accounting ends at logical return;
   // pool-wide accounting also includes outstanding native release.

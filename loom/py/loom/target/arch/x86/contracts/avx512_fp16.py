@@ -33,6 +33,7 @@ from loom.target.arch.x86.contracts.float_roots import (
     scalar_float_root_rules,
     vector_float_root_rules,
 )
+from loom.target.arch.x86.contracts.float_rounding import float_rounding_rules
 from loom.target.arch.x86.contracts.floating_extrema import (
     avx512_fp16_float_extrema_rules,
 )
@@ -65,9 +66,11 @@ from loom.target.arch.x86.contracts.vector_construction import (
 from loom.target.arch.x86.descriptors import X86_AVX512_FEATURES_DESCRIPTOR_SET
 from loom.target.arch.x86.feature_bits import FEATURE_AVX512_FP16
 from loom.target.arch.x86.vector_families import (
+    AVX512_CARRIER_VECTOR_BIT_WIDTHS,
     AVX512_FP16_FLOAT_BINARY_FAMILIES,
     AVX512_FP16_FLOAT_FMA_MNEMONIC,
     AVX512_FP16_FLOAT_ROOT_FAMILIES,
+    AVX512_FP16_FLOAT_ROUNDING_FAMILIES,
     AVX512_FP16_SCALAR_FLOAT_BINARY_FAMILIES,
     AVX512_FP16_SCALAR_FLOAT_FMA_MNEMONIC,
     AVX512_FP16_SCALAR_FLOAT_ROOT_FAMILIES,
@@ -261,7 +264,12 @@ def _vector_conversion_rules() -> tuple[DescriptorRule, ...]:
                 priority=1,
             )
         )
-    return unary_descriptor_rules(cases, form=DescriptorEmitForm.OP)
+    return tuple(
+        replace(
+            rule, guards=(*rule.guards, Guard.descriptor_available(rule.descriptor))
+        )
+        for rule in unary_descriptor_rules(cases, form=DescriptorEmitForm.OP)
+    )
 
 
 def _vector_rules() -> tuple[DescriptorRule, ...]:
@@ -321,26 +329,38 @@ def _cases() -> Sequence[ContractCase]:
     cases = (
         *_scalar_rules(),
         *_vector_rules(),
+        *float_rounding_rules(
+            _descriptor,
+            descriptor_key_prefix="x86.avx512_fp16",
+            families=AVX512_FP16_FLOAT_ROUNDING_FAMILIES,
+            vector_bit_widths=AVX512_CARRIER_VECTOR_BIT_WIDTHS,
+            priority=1,
+        ),
         *avx512_fp16_float_extrema_rules(_descriptor),
         *avx512_fp16_float_reduction_rules(_descriptor),
         *avx512_fp16_float_dot_rules(_descriptor),
         *_transport_rules(),
     )
-    # Transport and bit operations use base instructions, but their XMM half
-    # representation belongs to this feature. Native FP16 rows already carry
-    # the feature requirement on their primary descriptor.
+    # Primary descriptors remain queryable when unavailable so diagnostics can
+    # explain missing features. Matching must explicitly require availability
+    # to let the shared widening/decomposition paths handle those inputs.
+    # Base transport instructions also depend on the native half carrier.
     native_half = _descriptor("x86.avx512_fp16.vcvtsh2ss.xmm")
-    return tuple(
-        case
-        if isinstance(case, DescriptorRule)
-        and case.descriptor is not None
-        and case.descriptor.feature_mask_words
-        and case.descriptor.feature_mask_words[0] & FEATURE_AVX512_FP16
-        else replace(
-            case, guards=(*case.guards, Guard.descriptor_available(native_half))
+    guarded_cases = []
+    for case in cases:
+        required_descriptor = (
+            case.descriptor
+            if isinstance(case, DescriptorRule)
+            and case.descriptor is not None
+            and case.descriptor.feature_mask_words
+            and case.descriptor.feature_mask_words[0] & FEATURE_AVX512_FP16
+            else native_half
         )
-        for case in cases
-    )
+        availability = Guard.descriptor_available(required_descriptor)
+        if availability not in case.guards:
+            case = replace(case, guards=(*case.guards, availability))
+        guarded_cases.append(case)
+    return tuple(guarded_cases)
 
 
 X86_AVX512_FP16_CONTRACT_DIALECT_OPS = {

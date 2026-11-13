@@ -31,7 +31,7 @@ iree_status_t loom_template_apply_verify(const loom_module_t* module,
   return loom_function_call_contract_verify(
       module, op, loom_template_apply_family(op),
       loom_template_apply_operands(op), loom_template_apply_results(op),
-      /*argument_match_flags=*/0, emitter);
+      LOOM_FUNCTION_CALL_ARGUMENT_MATCH_FLAG_TEMPLATE_INPUTS, emitter);
 }
 
 iree_status_t loom_template_call_verify(const loom_module_t* module,

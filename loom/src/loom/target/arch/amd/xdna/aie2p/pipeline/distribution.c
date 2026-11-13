@@ -4,19 +4,26 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include "loom/target/arch/amd/xdna/aie2p/pipeline/distribution.h"
+
 #include "iree/base/internal/math.h"
 #include "loom/analysis/storage_geometry.h"
 #include "loom/ops/channel/ops.h"
-#include "loom/target/arch/amd/xdna/aie2p/pipeline/native.h"
+#include "loom/target/arch/amd/xdna/aie2p/pipeline/channel_state.h"
+#include "loom/target/arch/amd/xdna/aie2p/pipeline/input.h"
+#include "loom/target/arch/amd/xdna/aie2p/pipeline/payload.h"
+#include "loom/target/arch/amd/xdna/aie2p/pipeline/refill.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/switch.h"
 #include "loom/target/arch/amd/xdna/array/registers.h"
 
-static iree_status_t loom_aie2p_native_select_distribution_endpoint(
+iree_status_t loom_aie2p_native_select_channel_endpoint(
     loom_aie2p_native_context_t* context,
+    const loom_pipeline_invocations_t* invocations,
+    const loom_pipeline_invocation_t* invocation,
     const loom_aie2p_native_channel_t* channel,
     loom_xdna_dma_direction_t direction, uint32_t repetitions,
-    uint32_t credit_interval,
-    const loom_aie2p_native_distribution_endpoint_t* shared,
+    uint32_t credit_interval, uint32_t reserved_tasks, uint8_t engine,
+    const loom_aie2p_native_channel_t* progress_channel,
     loom_aie2p_native_distribution_endpoint_t* out_endpoint,
     iree_string_view_t* out_reason, bool* out_valid) {
   *out_valid = false;
@@ -24,11 +31,12 @@ static iree_status_t loom_aie2p_native_select_distribution_endpoint(
   const loom_xdna_dma_facts_t* dma = &tile->facts->dma;
   const loom_aie2p_native_memory_layout_t* layout = tile->memory_layout;
   const bool sender = direction == LOOM_XDNA_DMA_DIRECTION_MEMORY_TO_STREAM;
-  const uint32_t batch_records = sender ? channel->replay.record_count : 0;
+  const uint32_t batch_records = channel->replay.record_count;
   // Receiver lengths delimit their records independently of the sender's
   // packet boundary. A retained contiguous batch therefore needs one complete
   // transfer per replay. A single retained lifetime brackets the whole finite
-  // sequence; autonomous repeated lifetimes use one credit per replay.
+  // sequence; autonomous repeated lifetimes use one credit per replay. A
+  // retained input receiver publishes only after the complete batch arrives.
   const uint64_t transfer_bytes = (uint64_t)channel->record_byte_length *
                                   (batch_records ? batch_records : 1);
   if (!channel->record_dense ||
@@ -51,66 +59,112 @@ static iree_status_t loom_aie2p_native_select_distribution_endpoint(
         IREE_SV("a channel record length representable by its memory DMA");
     return iree_ok_status();
   }
-  const uint64_t step_units =
-      channel->byte_stride / dma->transfer_length_granularity;
+  // A retained batch is one contiguous transfer. Single-slot transfers also
+  // return to the same address, regardless of the logical record stride.
+  const uint32_t capacity = batch_records ? 1 : channel->source->capacity;
+  const uint32_t byte_stride = capacity > 1 ? channel->byte_stride : 0;
+  const uint64_t step_units = byte_stride / dma->transfer_length_granularity;
   if (channel->byte_offset % dma->address_alignment ||
-      channel->byte_stride % dma->transfer_length_granularity ||
-      channel->source->capacity > (UINT64_C(1) << dma->iteration_bits) ||
+      byte_stride % dma->transfer_length_granularity ||
+      capacity > (UINT64_C(1) << dma->iteration_bits) ||
       step_units > (UINT64_C(1) << dma->step_size_bits)) {
     *out_reason = IREE_SV(
         "DMA-aligned channel storage with a representable "
         "rotating slot stride");
     return iree_ok_status();
   }
-  uint8_t* next_engine = direction == LOOM_XDNA_DMA_DIRECTION_MEMORY_TO_STREAM
-                             ? &tile->next_mm2s
-                             : &tile->next_s2mm;
-  const uint8_t engine = shared ? shared->engine : *next_engine;
-  uint16_t descriptor_base, descriptor_count;
-  uint16_t* next_descriptor = loom_aie2p_native_descriptor_bank(
-      tile, engine, &descriptor_base, &descriptor_count);
-  if (engine == dma->channel_count_per_direction ||
-      *next_descriptor == descriptor_count) {
-    *out_reason = IREE_SV("an available on-chip DMA engine and descriptor");
-    return iree_ok_status();
-  }
   uint32_t words[8] = {0};
   words[0] = length_units - dma->transfer_length_offset;
+  // A retained receiver publishes the complete batch only after every record
+  // arrives. Repeated admissions need one credit for each downstream replay;
+  // acquiring that same quantum prevents replacement during a later replay.
+  const uint32_t lock_credits =
+      !sender && batch_records ? channel->replay.credits : 1;
   words[layout->lock_word] =
       loom_xdna_register_field_encode(
           layout->locks.acquire_id,
           layout->local_lock_base +
               (sender ? channel->ready_lock : channel->free_lock)) |
-      loom_xdna_register_field_encode(layout->locks.acquire_value, -1) |
+      loom_xdna_register_field_encode(layout->locks.acquire_value,
+                                      -(int32_t)lock_credits) |
       loom_xdna_register_field_encode(layout->locks.acquire_enable, 1) |
       loom_xdna_register_field_encode(
           layout->locks.release_id,
           layout->local_lock_base +
               (sender ? channel->free_lock : channel->ready_lock)) |
-      loom_xdna_register_field_encode(layout->locks.release_value, 1) |
+      loom_xdna_register_field_encode(layout->locks.release_value,
+                                      lock_credits) |
       loom_xdna_register_field_encode(layout->locks.valid, 1);
   *out_endpoint = (loom_aie2p_native_distribution_endpoint_t){
       .channel = channel, .tile = tile, .engine = engine};
-  if (!shared) {
-    ++*next_engine;
+  const loom_pipeline_invocation_t* owner =
+      invocations->channels[channel - context->channels].invocation;
+  const uint32_t controller =
+      sender ? channel->cursor.writer.worker : channel->cursor.reader.worker;
+  const iree_host_size_t controller_engine =
+      controller == UINT32_MAX ? IREE_HOST_SIZE_MAX
+                               : context->core_engines[controller];
+  const bool private_geometry =
+      invocations->lifetimes.has_serial && owner == invocation &&
+      invocation != invocations->entries[0] &&
+      controller_engine != IREE_HOST_SIZE_MAX &&
+      invocations->workers[controller].invocation == invocation;
+  uint16_t descriptor_base, descriptor_count;
+  uint16_t* next_descriptor = loom_aie2p_native_descriptor_bank(
+      tile, engine, &descriptor_base, &descriptor_count);
+  loom_aie2p_native_endpoint_storage_t** ranges =
+      &tile->descriptor_storage[next_descriptor - tile->descriptor_counts];
+  if (private_geometry && reserved_tasks < dma->task_queue_depth) {
+    loom_xdna_dma_facts_t available = *dma;
+    available.task_queue_depth -= reserved_tasks;
+    for (loom_aie2p_native_endpoint_storage_t* storage = *ranges; storage;
+         storage = storage->next) {
+      if (storage->last->ordinal >= invocation->ordinal ||
+          storage->controller_engine != controller_engine) {
+        continue;
+      }
+      const loom_aie2p_native_dma_sequence_t* first = &storage->first->sequence;
+      IREE_RETURN_IF_ERROR(loom_aie2p_native_build_sequence(
+          &available, layout, first->descriptor, storage->descriptor_count,
+          direction, batch_records ? repetitions / batch_records : repetitions,
+          capacity, channel->byte_offset, byte_stride, credit_interval, words,
+          context->pass->arena, &out_endpoint->sequence, out_reason,
+          out_valid));
+      if (*out_valid) {
+        out_endpoint->storage = storage;
+        storage->last = invocation;
+        out_endpoint->next_geometry = storage->geometries;
+        storage->geometries = out_endpoint;
+        return iree_ok_status();
+      }
+    }
   }
-  return loom_aie2p_native_select_sequence(
+  IREE_RETURN_IF_ERROR(loom_aie2p_native_select_sequence(
       context, tile, out_endpoint->engine, direction,
-      batch_records ? repetitions / batch_records : repetitions,
-      batch_records ? 1 : channel->source->capacity, channel->byte_offset,
-      batch_records ? 0 : channel->byte_stride, credit_interval, words,
-      &out_endpoint->sequence, out_reason, out_valid);
+      batch_records ? NULL : progress_channel,
+      batch_records ? repetitions / batch_records : repetitions, capacity,
+      channel->byte_offset, byte_stride, credit_interval, reserved_tasks, words,
+      &out_endpoint->sequence, out_reason, out_valid));
+  if (*out_valid && private_geometry) {
+    loom_aie2p_native_endpoint_storage_t* storage;
+    IREE_RETURN_IF_ERROR(iree_arena_allocate(
+        context->pass->arena, sizeof(*storage), (void**)&storage));
+    loom_aie2p_native_endpoint_storage_t** position = ranges;
+    while (*position && (*position)->descriptor_count <=
+                            out_endpoint->sequence.descriptor_count) {
+      position = &(*position)->next;
+    }
+    *storage = (loom_aie2p_native_endpoint_storage_t){
+        .next = *position,
+        .first = out_endpoint,
+        .geometries = out_endpoint,
+        .descriptor_count = out_endpoint->sequence.descriptor_count,
+        .controller_engine = controller_engine,
+        .last = invocation};
+    *position = out_endpoint->storage = storage;
+  }
+  return iree_ok_status();
 }
-
-// A contiguous source range delivered to one immutable packet class.
-typedef struct loom_aie2p_native_distribution_range_t {
-  // First source record within the retained batch.
-  uint32_t first;
-  // Consecutive records coalesced into one DMA packet.
-  uint32_t count;
-  // Index in the distribution's retained packet-class table.
-  uint8_t packet;
-} loom_aie2p_native_distribution_range_t;
 
 static bool loom_aie2p_native_distribution_destinations_equal(
     const loom_aie2p_native_distribution_packet_t* a,
@@ -121,8 +175,7 @@ static bool loom_aie2p_native_distribution_destinations_equal(
   for (iree_host_size_t i = 0; i < a->destination_count; ++i) {
     bool found = false;
     for (iree_host_size_t j = 0; j < b->destination_count; ++j) {
-      if (a->destinations[i].destination->channel ==
-          b->destinations[j].destination->channel) {
+      if (a->receivers[i] == b->receivers[j]) {
         found = true;
         break;
       }
@@ -134,43 +187,196 @@ static bool loom_aie2p_native_distribution_destinations_equal(
   return true;
 }
 
+// Retains logical receiver correspondence before physical path selection.
+// Existing phases keep their established order even when first use reverses.
+static iree_status_t loom_aie2p_native_packet_receivers(
+    loom_aie2p_native_context_t* context,
+    const loom_pipeline_realization_t* realization,
+    const loom_pipeline_transport_t* transport,
+    const loom_pipeline_transport_batch_t* batch,
+    const loom_aie2p_native_distribution_t* shared,
+    loom_aie2p_native_distribution_t* distribution, uint32_t** out_totals,
+    uint32_t** out_copy_receivers) {
+  iree_arena_allocator_t* arena = context->pass->arena;
+  const loom_pipeline_transport_copy_t* copies =
+      transport->copy_stream ? transport->copy_stream->copies : batch->copies;
+  const iree_host_size_t copy_count = transport->copy_stream
+                                          ? transport->copy_stream->copy_count
+                                          : batch->copy_count;
+  const iree_host_size_t channel_count = realization->invocations.channel_count;
+  uint32_t* totals;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, channel_count, sizeof(*totals), (void**)&totals));
+  memset(totals, 0, channel_count * sizeof(*totals));
+  if (shared) {
+    distribution->receiver_ordinals = shared->receiver_ordinals;
+  } else {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        arena, channel_count, sizeof(*distribution->receiver_ordinals),
+        (void**)&distribution->receiver_ordinals));
+    memset(distribution->receiver_ordinals, UINT8_MAX,
+           channel_count * sizeof(*distribution->receiver_ordinals));
+  }
+  uint32_t* ordinals = distribution->receiver_ordinals;
+  uint32_t* copy_receivers;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, copy_count, sizeof(*copy_receivers), (void**)&copy_receivers));
+  for (iree_host_size_t i = 0; i < copy_count; ++i) {
+    const loom_pipeline_transport_copy_t* copy = &copies[i];
+    const iree_host_size_t index = loom_pipeline_invocations_channel_index(
+        &realization->invocations, copy->destination->channel);
+    if (!totals[index]) {
+      if (shared && shared->receiver_ordinals[index] == UINT32_MAX) {
+        return loom_aie2p_native_reject(
+            context, copy->destination->copy,
+            IREE_SV("the same packet destinations in every shared multicast "
+                    "phase"));
+      }
+      if (!shared) {
+        ordinals[index] = (uint32_t)distribution->receiver_count;
+      }
+      ++distribution->receiver_count;
+    }
+    totals[index] += (uint32_t)copy->executions;
+    copy_receivers[i] = ordinals[index];
+  }
+  if (shared && shared->receiver_count != distribution->receiver_count) {
+    return loom_aie2p_native_reject(
+        context, batch->records->admission->op,
+        IREE_SV(
+            "the same packet destinations in every shared multicast phase"));
+  }
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, distribution->receiver_count, sizeof(*distribution->receivers),
+      (void**)&distribution->receivers));
+  for (iree_host_size_t i = 0; i < channel_count; ++i) {
+    if (totals[i]) {
+      distribution->receivers[ordinals[i]] =
+          (loom_aie2p_native_distribution_endpoint_t){
+              .channel = &context->channels[i]};
+    }
+  }
+  *out_totals = totals;
+  *out_copy_receivers = copy_receivers;
+  return iree_ok_status();
+}
+
+// A common admitted instruction engine proves complete child nonoverlap.
+// Topology selects compatible wires; addresses never establish ordering.
+static iree_host_size_t loom_aie2p_native_distribution_controller(
+    const loom_aie2p_native_context_t* context,
+    const loom_pipeline_invocations_t* invocations,
+    const loom_aie2p_native_distribution_t* distribution,
+    const loom_aie2p_native_channel_t* source) {
+  const loom_pipeline_invocation_t* invocation = distribution->invocation;
+  if (!invocations->lifetimes.has_serial ||
+      invocation == invocations->entries[0]) {
+    return IREE_HOST_SIZE_MAX;
+  }
+  const uint32_t controller = source->cursor.writer.worker;
+  if (controller == UINT32_MAX ||
+      invocations->workers[controller].invocation != invocation) {
+    return IREE_HOST_SIZE_MAX;
+  }
+  for (iree_host_size_t i = 0; i <= distribution->receiver_count; ++i) {
+    const loom_aie2p_native_channel_t* channel =
+        i ? distribution->receivers[i - 1].channel : source;
+    if (invocations->channels[channel - context->channels].invocation !=
+        invocation) {
+      return IREE_HOST_SIZE_MAX;
+    }
+  }
+  return context->core_engines[controller];
+}
+
+static loom_aie2p_native_distribution_t*
+loom_aie2p_native_reuse_distribution_path(
+    const loom_aie2p_native_context_t* context,
+    const loom_aie2p_native_tile_t* tile,
+    const loom_aie2p_native_distribution_t* distribution,
+    iree_host_size_t controller) {
+  if (controller == IREE_HOST_SIZE_MAX) {
+    return NULL;
+  }
+  for (loom_aie2p_native_distribution_path_t* path = tile->distribution_paths;
+       path; path = path->next) {
+    const loom_aie2p_native_distribution_t* first = path->first;
+    if (path->controller_engine != controller ||
+        path->last->ordinal >= distribution->invocation->ordinal ||
+        (!first->repetitions) != (!distribution->repetitions) ||
+        first->receiver_count != distribution->receiver_count ||
+        first->sender.engine != distribution->sender.engine) {
+      continue;
+    }
+    iree_host_size_t i = 0;
+    while (
+        i < distribution->receiver_count &&
+        first->receivers[i].tile ==
+            context
+                ->pool_tiles[distribution->receivers[i].channel->pool_index] &&
+        first->receivers[i].engine == distribution->receivers[i].engine) {
+      ++i;
+    }
+    if (i == distribution->receiver_count) {
+      return path->first;
+    }
+  }
+  return NULL;
+}
+
 static bool loom_aie2p_native_distribution_program_equal(
     const loom_pipeline_transport_t* a_transport,
     const loom_pipeline_transport_batch_t* a,
     const loom_pipeline_transport_t* b_transport,
     const loom_pipeline_transport_batch_t* b) {
-  if (a->record_count != b->record_count || a->copy_count != b->copy_count ||
-      a->replays != b->replays) {
+  const loom_pipeline_transport_copy_stream_t* a_stream =
+      a_transport->copy_stream;
+  const loom_pipeline_transport_copy_stream_t* b_stream =
+      b_transport->copy_stream;
+  if ((a_stream != NULL) != (b_stream != NULL) ||
+      a->record_count != b->record_count || a->replays != b->replays ||
+      (a_stream && (a_stream->records != b_stream->records ||
+                    a_stream->repetitions != b_stream->repetitions))) {
     return false;
   }
-  for (iree_host_size_t i = 0; i < a->copy_count; ++i) {
-    if (a->copies[i].source - a->records != b->copies[i].source - b->records ||
-        a->copies[i].destination->channel !=
-            b->copies[i].destination->channel ||
-        a->copies[i].executions != b->copies[i].executions) {
+  const loom_pipeline_transport_copy_t* a_copies =
+      a_stream ? a_stream->copies : a->copies;
+  const loom_pipeline_transport_copy_t* b_copies =
+      b_stream ? b_stream->copies : b->copies;
+  const iree_host_size_t count =
+      a_stream ? a_stream->copy_count : a->copy_count;
+  if (count != (b_stream ? b_stream->copy_count : b->copy_count)) {
+    return false;
+  }
+  const uint16_t a_boundary =
+      a_stream ? a_stream->scope : a->records->admission_scope;
+  const uint16_t b_boundary =
+      b_stream ? b_stream->scope : b->records->admission_scope;
+  for (iree_host_size_t i = 0; i < count; ++i) {
+    if (a_copies[i].source - a->records != b_copies[i].source - b->records ||
+        a_copies[i].destination->channel != b_copies[i].destination->channel ||
+        a_copies[i].executions != b_copies[i].executions) {
       return false;
     }
-    if (a->replays) {
+    if (!a_stream && a->replays) {
       continue;
     }
-    uint16_t a_scope = a->copies[i].scope;
-    uint16_t b_scope = b->copies[i].scope;
-    while (a_scope != a->records->admission_scope &&
-           b_scope != b->records->admission_scope) {
+    uint16_t a_scope = a_copies[i].scope;
+    uint16_t b_scope = b_copies[i].scope;
+    while (a_scope != a_boundary && b_scope != b_boundary) {
       const loom_pipeline_transport_loop_t* a_loop =
           &a_transport->copy_loops[a_scope];
       const loom_pipeline_transport_loop_t* b_loop =
           &b_transport->copy_loops[b_scope];
-      if (a_loop->begin - a->copies != b_loop->begin - b->copies ||
-          a_loop->end - a->copies != b_loop->end - b->copies ||
+      if (a_loop->begin - a_copies != b_loop->begin - b_copies ||
+          a_loop->end - a_copies != b_loop->end - b_copies ||
           a_loop->iterations != b_loop->iterations) {
         return false;
       }
       a_scope = a_loop->parent;
       b_scope = b_loop->parent;
     }
-    if (a_scope != a->records->admission_scope ||
-        b_scope != b->records->admission_scope) {
+    if (a_scope != a_boundary || b_scope != b_boundary) {
       return false;
     }
   }
@@ -182,9 +388,9 @@ static bool loom_aie2p_native_distribution_program_equal(
 // to packet selection without recovering or expanding source control flow.
 static const loom_pipeline_transport_copy_t*
 loom_aie2p_native_distribution_next_copy(
-    const loom_pipeline_transport_batch_t* batch,
+    const loom_pipeline_transport_batch_t* batch, bool streaming,
     loom_pipeline_transport_copy_cursor_t* cursor, uint64_t* remaining) {
-  if (!batch->replays) {
+  if (streaming || !batch->replays) {
     return loom_pipeline_transport_copy_cursor_next(cursor);
   }
   if (!*remaining) {
@@ -198,37 +404,27 @@ loom_aie2p_native_distribution_next_copy(
   return copy;
 }
 
-// Selects a complete retained source lifetime with independent receiver counts.
-// Physical packets coalesce adjacent records only when their destination sets
-// agree; source admission and reclamation bracket the entire descriptor chain.
-static iree_status_t loom_aie2p_native_select_packet_distribution(
+// Forms the packet itinerary once from retained transport order. Physical
+// selection consumes its classes and ranges without replaying the copy cursor.
+static iree_status_t loom_aie2p_native_form_packet_program(
     loom_aie2p_native_context_t* context,
-    const loom_pipeline_realization_t* realization,
     const loom_pipeline_transport_t* transport,
     const loom_pipeline_transport_batch_t* batch,
     const loom_aie2p_native_channel_t* channel,
-    loom_aie2p_native_distribution_t* path, uint32_t* next_source,
-    loom_aie2p_native_distribution_t* distribution, bool* out_valid) {
+    loom_aie2p_native_distribution_t* distribution,
+    const uint32_t* copy_receivers,
+    loom_aie2p_native_packet_program_t* out_program, bool* out_valid) {
   *out_valid = false;
   const loom_pipeline_transport_cohort_t* first = batch->records;
-  if (!first->release) {
+  const loom_pipeline_transport_copy_stream_t* stream = transport->copy_stream;
+  if (!stream && !first->release) {
     return loom_aie2p_native_reject(
         context, first->admission->op,
         IREE_SV("a complete retained source lifetime per packet program"));
   }
-  loom_aie2p_native_tile_t* tile = context->pool_tiles[channel->pool_index];
+  const loom_aie2p_native_tile_t* tile =
+      context->pool_tiles[channel->pool_index];
   const loom_xdna_dma_facts_t* dma = &tile->facts->dma;
-  const loom_aie2p_native_memory_layout_t* layout = tile->memory_layout;
-  const uint8_t engine = path ? path->sender.engine : tile->next_mm2s;
-  uint16_t descriptor_base, descriptor_capacity;
-  uint16_t* used = loom_aie2p_native_descriptor_bank(
-      tile, engine, &descriptor_base, &descriptor_capacity);
-  if (engine == dma->channel_count_per_direction ||
-      *used == descriptor_capacity) {
-    return loom_aie2p_native_reject(
-        context, first->admission->op,
-        IREE_SV("an available on-chip DMA engine and descriptor"));
-  }
   const uint64_t maximum_bytes =
       ((uint64_t)dma->maximum_encoded_transfer_length +
        dma->transfer_length_offset) *
@@ -238,143 +434,85 @@ static iree_status_t loom_aie2p_native_select_packet_distribution(
       channel->byte_offset % dma->address_alignment) {
     return loom_aie2p_native_reject(
         context, first->admission->op,
-        IREE_SV(
-            "DMA-aligned retained records with representable packet lengths"));
+        IREE_SV("DMA-aligned records with representable packet lengths"));
   }
   const uint32_t maximum_records = maximum_bytes / channel->record_byte_length;
-  const uint32_t task_count = (uint32_t)iree_host_size_ceil_div(
-      first->admissions, dma->maximum_task_repeat_count);
+  const uint32_t rotation =
+      stream ? channel->source->capacity /
+                   iree_math_gcd_u64(channel->source->capacity, stream->records)
+             : 1;
+  const uint64_t cycles = stream ? stream->repetitions : first->admissions;
+  const uint64_t full_cycles = cycles / rotation;
+  const uint32_t tail_cycles = cycles % rotation;
+  const uint64_t task_count =
+      iree_host_size_ceil_div(full_cycles, dma->maximum_task_repeat_count) +
+      (tail_cycles != 0);
   if (task_count > dma->task_queue_depth) {
     return loom_aie2p_native_reject(
         context, first->admission->op,
-        IREE_SV(
-            "all retained packet lifetimes within the finite DMA task queue"));
+        IREE_SV("all packet lifetimes within the finite DMA task queue"));
   }
   iree_arena_allocator_t* arena = context->pass->arena;
-  loom_aie2p_native_distribution_t* packet_path = path ? path : distribution;
-  uint32_t* totals;
-  const iree_host_size_t channel_count = realization->invocations.channel_count;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      arena, channel_count, sizeof(*totals), (void**)&totals));
-  if (!path) {
-    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        arena, channel_count, sizeof(*packet_path->receiver_ordinals),
-        (void**)&packet_path->receiver_ordinals));
-    memset(packet_path->receiver_ordinals, UINT8_MAX,
-           channel_count * sizeof(*packet_path->receiver_ordinals));
-  }
-  uint32_t* ordinals = packet_path->receiver_ordinals;
-  memset(totals, 0, channel_count * sizeof(*totals));
-  for (iree_host_size_t i = 0; i < batch->copy_count; ++i) {
-    const loom_pipeline_transport_copy_t* copy = &batch->copies[i];
-    const iree_host_size_t index = loom_pipeline_invocations_channel_index(
-        &realization->invocations, copy->destination->channel);
-    if (!totals[index]) {
-      if (path && ordinals[index] == UINT32_MAX) {
-        return loom_aie2p_native_reject(
-            context, copy->destination->copy,
-            IREE_SV("the same packet destinations in every shared multicast "
-                    "phase"));
-      }
-      if (!path) {
-        ordinals[index] = (uint32_t)distribution->receiver_count;
-      }
-      ++distribution->receiver_count;
-    }
-    totals[index] += (uint32_t)copy->executions;
-  }
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      arena, distribution->receiver_count, sizeof(*distribution->receivers),
-      (void**)&distribution->receivers));
-  if (path && path->receiver_count != distribution->receiver_count) {
-    return loom_aie2p_native_reject(
-        context, first->admission->op,
-        IREE_SV(
-            "the same packet destinations in every shared multicast phase"));
-  }
-  distribution->sender =
-      (loom_aie2p_native_distribution_endpoint_t){.channel = channel,
-                                                  .tile = tile,
-                                                  .engine = engine,
-                                                  .wait_for_idle = true};
-  if (!path) {
-    ++tile->next_mm2s;
-  }
-  for (iree_host_size_t i = 0; i < channel_count; ++i) {
-    if (!totals[i]) {
-      continue;
-    }
-    const uint32_t ordinal = ordinals[i];
-    const loom_aie2p_native_channel_t* receiver_channel = &context->channels[i];
-    if ((path || transport->batch_count > 1) &&
-        totals[i] % receiver_channel->source->capacity) {
-      return loom_aie2p_native_reject(
-          context, first->admission->op,
-          IREE_SV("complete destination-ring turns on the same packet path"));
-    }
-    iree_string_view_t reason;
-    bool valid = false;
-    IREE_RETURN_IF_ERROR(loom_aie2p_native_select_distribution_endpoint(
-        context, receiver_channel, LOOM_XDNA_DMA_DIRECTION_STREAM_TO_MEMORY,
-        totals[i], 1, path ? &path->receivers[ordinal] : NULL,
-        &distribution->receivers[ordinal], &reason, &valid));
-    if (!valid) {
-      return loom_aie2p_native_reject(context, first->admission->op, reason);
-    }
-    loom_aie2p_native_distribution_endpoint_t* receiver =
-        &distribution->receivers[ordinal];
-    receiver->wait_for_idle = true;
-    if ((tile->facts->kind == LOOM_XDNA_TILE_KIND_MEMORY &&
-         tile->coordinate.column != receiver->tile->coordinate.column) ||
-        (tile == receiver->tile && (engine >= dma->loopback_channel_count ||
-                                    engine != receiver->engine))) {
-      return loom_aie2p_native_reject(
-          context, first->admission->op,
-          IREE_SV(
-              "same-column SRAM routes and matching same-tile DMA channels"));
-    }
-  }
-  // Packet identities belong to the physical path, so every phase can select
-  // a different subset without reprogramming filters or renumbering earlier
-  // descriptors. Filter/arbiter admission enforces the smaller switch limits.
-  if (!path) {
+  loom_aie2p_native_distribution_path_t* packet_path = distribution->path;
+  // Retain logical destination classes before queues are assigned. Physical
+  // payload formation maps these to the selected sender's packet namespace.
+  if (!packet_path->packets) {
     IREE_RETURN_IF_ERROR(
         iree_arena_allocate_array(arena, 32, sizeof(*packet_path->packets),
                                   (void**)&packet_path->packets));
-    packet_path->source_route = (*next_source)++;
   }
-  const uint8_t first_packet = packet_path->packet_count;
   loom_aie2p_native_distribution_range_t* ranges;
-  const uint16_t available = descriptor_capacity - *used;
+  const uint16_t available =
+      dma->buffer_descriptor_count /
+      (tile->facts->kind == LOOM_XDNA_TILE_KIND_MEMORY ? 2 : 1);
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       arena, available, sizeof(*ranges), (void**)&ranges));
+  uint32_t* visit_receivers;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, distribution->receiver_count, sizeof(*visit_receivers),
+      (void**)&visit_receivers));
   uint16_t range_count = 0;
+  uint16_t period_range_count = 0;
+  uint32_t source_record = 0;
+  const uint32_t emitted_cycles = (full_cycles ? rotation : 0) + tail_cycles;
+  uint32_t cycle = 0;
+  const loom_pipeline_transport_copy_t* copies =
+      stream ? stream->copies : batch->copies;
   loom_pipeline_transport_copy_cursor_t cursor = {
       .next = batch->copies, .end = batch->copies + batch->copy_count};
   uint64_t remaining = batch->replays;
-  if (!batch->replays) {
+  if (stream) {
+    IREE_RETURN_IF_ERROR(loom_pipeline_transport_stream_cursor_initialize(
+        transport, arena, &cursor));
+  } else if (!batch->replays) {
     IREE_RETURN_IF_ERROR(loom_pipeline_transport_copy_cursor_initialize(
         transport, batch, arena, &cursor));
   }
   const loom_pipeline_transport_copy_t* copy =
-      loom_aie2p_native_distribution_next_copy(batch, &cursor, &remaining);
+      loom_aie2p_native_distribution_next_copy(batch, stream != NULL, &cursor,
+                                               &remaining);
   while (copy) {
-    loom_aie2p_native_distribution_packet_t visit = {.destinations = copy,
-                                                     .destination_count = 1};
+    loom_aie2p_native_distribution_packet_t visit = {
+        .destinations = copy,
+        .receivers = visit_receivers,
+        .destination_count = 1};
+    visit_receivers[0] = copy_receivers[copy - copies];
     const loom_pipeline_transport_copy_t* next =
-        loom_aie2p_native_distribution_next_copy(batch, &cursor, &remaining);
+        loom_aie2p_native_distribution_next_copy(batch, stream != NULL, &cursor,
+                                                 &remaining);
     while (next && next == copy + visit.destination_count &&
            next->source == copy->source && next->scope == copy->scope) {
       bool repeated = false;
+      const uint32_t receiver = copy_receivers[next - copies];
       for (iree_host_size_t k = 0; k < visit.destination_count; ++k) {
-        repeated |= copy[k].destination->channel == next->destination->channel;
+        repeated |= visit_receivers[k] == receiver;
       }
       if (repeated) {
         break;
       }
-      ++visit.destination_count;
-      next =
-          loom_aie2p_native_distribution_next_copy(batch, &cursor, &remaining);
+      visit_receivers[visit.destination_count++] = receiver;
+      next = loom_aie2p_native_distribution_next_copy(batch, stream != NULL,
+                                                      &cursor, &remaining);
     }
     uint8_t packet = 0;
     for (; packet < packet_path->packet_count; ++packet) {
@@ -389,10 +527,24 @@ static iree_status_t loom_aie2p_native_select_packet_distribution(
             context, copy->destination->copy,
             IREE_SV("packet destination classes within the hardware ID range"));
       }
+      uint32_t* receivers;
+      IREE_RETURN_IF_ERROR(
+          iree_arena_allocate_array(arena, visit.destination_count,
+                                    sizeof(*receivers), (void**)&receivers));
+      memcpy(receivers, visit_receivers,
+             visit.destination_count * sizeof(*receivers));
+      visit.receivers = receivers;
       packet_path->packets[packet_path->packet_count++] = visit;
     }
-    const uint32_t record = (uint32_t)(copy->source - batch->records);
-    if (range_count && ranges[range_count - 1].packet == packet &&
+    const uint32_t record = stream ? source_record % channel->source->capacity
+                                   : (uint32_t)(copy->source - batch->records);
+    const bool acquire =
+        stream && copy->destination == copy->source->destinations;
+    const bool release =
+        stream &&
+        copy[visit.destination_count - 1].destination + 1 ==
+            copy->source->destinations + copy->source->destination_count;
+    if (!stream && range_count && ranges[range_count - 1].packet == packet &&
         ranges[range_count - 1].first + ranges[range_count - 1].count ==
             record &&
         ranges[range_count - 1].count < maximum_records) {
@@ -404,57 +556,158 @@ static iree_status_t loom_aie2p_native_select_packet_distribution(
             IREE_SV("a complete ordered packet program within its DMA "
                     "descriptor bank"));
       }
-      ranges[range_count++] = (loom_aie2p_native_distribution_range_t){
-          .first = record, .count = 1, .packet = packet};
+      ranges[range_count++] =
+          (loom_aie2p_native_distribution_range_t){.first = record,
+                                                   .count = 1,
+                                                   .packet = packet,
+                                                   .acquire = acquire,
+                                                   .release = release};
+    }
+    source_record += release;
+    if (stream && !next) {
+      ++cycle;
+      if (full_cycles && cycle == rotation) {
+        period_range_count = range_count;
+      }
+      if (cycle < emitted_cycles) {
+        cursor.next = copies;
+        next = loom_aie2p_native_distribution_next_copy(batch, true, &cursor,
+                                                        &remaining);
+      }
     }
     copy = next;
   }
-  for (uint8_t i = first_packet; i < packet_path->packet_count; ++i) {
-    const loom_aie2p_native_distribution_packet_t* packet =
-        &packet_path->packets[i];
-    for (iree_host_size_t j = 0; j < packet->destination_count; ++j) {
-      const loom_pipeline_transport_destination_t* destination =
-          packet->destinations[j].destination;
-      const iree_host_size_t index = loom_pipeline_invocations_channel_index(
-          &realization->invocations, destination->channel);
-      const loom_aie2p_native_distribution_endpoint_t* receiver =
-          &distribution->receivers[ordinals[index]];
-      const iree_host_size_t route_first = context->routing.route_count;
-      if (!loom_aie2p_array_route_workers(
-              &context->routing, (*next_source)++, packet_path->source_route,
-              tile->coordinate, engine, receiver->tile->coordinate,
-              receiver->engine, true)) {
-        return loom_aie2p_native_reject(
-            context, destination->copy,
-            IREE_SV("available on-die packet multicast links"));
-      }
-      loom_aie2p_native_route_label(context, route_first, i);
+  if (!stream) {
+    period_range_count = range_count;
+    ranges[0].acquire = true;
+    ranges[range_count - 1].release = true;
+  }
+  *out_program = (loom_aie2p_native_packet_program_t){
+      .ranges = ranges,
+      .range_count = range_count,
+      .period_range_count = period_range_count,
+      .period_repetitions = (uint32_t)full_cycles,
+      .terminal_slot = stream ? source_record % channel->source->capacity : 0,
+      .task_count = (uint8_t)task_count};
+  *out_valid = true;
+  return iree_ok_status();
+}
+
+// Selects physical endpoints and encodes the formed packet itinerary. Source
+// credit boundaries and ring rotation are already fixed by program formation;
+// receiver rings advance independently according to their delivery counts.
+static iree_status_t loom_aie2p_native_select_packet_distribution(
+    loom_aie2p_native_context_t* context,
+    const loom_pipeline_realization_t* realization,
+    const loom_pipeline_transport_t* transport,
+    const loom_pipeline_transport_batch_t* batch,
+    const loom_aie2p_native_channel_t* channel,
+    loom_aie2p_native_distribution_t* path, uint32_t* next_source,
+    loom_aie2p_native_distribution_t* distribution, const uint32_t* totals,
+    const loom_aie2p_native_packet_program_t* program,
+    loom_aie2p_native_payload_class_t* const* payloads, bool* out_valid) {
+  *out_valid = false;
+  const loom_pipeline_transport_cohort_t* first = batch->records;
+  loom_aie2p_native_tile_t* tile = context->pool_tiles[channel->pool_index];
+  const loom_xdna_dma_facts_t* dma = &tile->facts->dma;
+  const loom_aie2p_native_memory_layout_t* layout = tile->memory_layout;
+  const uint8_t engine = distribution->sender.engine;
+  uint16_t descriptor_base, descriptor_capacity;
+  uint16_t* used = loom_aie2p_native_descriptor_bank(
+      tile, engine, &descriptor_base, &descriptor_capacity);
+  if (*used == descriptor_capacity) {
+    return loom_aie2p_native_reject(
+        context, first->admission->op,
+        IREE_SV("an available on-chip DMA engine and descriptor"));
+  }
+  iree_arena_allocator_t* arena = context->pass->arena;
+  const iree_host_size_t channel_count = realization->invocations.channel_count;
+  const uint32_t* ordinals = distribution->receiver_ordinals;
+  distribution->sender =
+      (loom_aie2p_native_distribution_endpoint_t){.channel = channel,
+                                                  .tile = tile,
+                                                  .engine = engine,
+                                                  .wait_for_idle = true};
+  for (iree_host_size_t i = 0; i < channel_count; ++i) {
+    if (!totals[i]) {
+      continue;
+    }
+    const uint32_t ordinal = ordinals[i];
+    const loom_aie2p_native_channel_t* receiver_channel = &context->channels[i];
+    if (((path ||
+          (transport->copy_stream ? distribution->invocation->ordinal != 0
+                                  : transport->batch_count > 1)) &&
+         totals[i] % receiver_channel->source->capacity) ||
+        (path && path->receivers[ordinal].sequence.terminal_slot)) {
+      return loom_aie2p_native_reject(
+          context, first->admission->op,
+          IREE_SV("complete destination-ring turns on the same packet path"));
+    }
+    iree_string_view_t reason;
+    bool valid = false;
+    IREE_RETURN_IF_ERROR(loom_aie2p_native_select_channel_endpoint(
+        context, &realization->invocations, distribution->invocation,
+        receiver_channel, LOOM_XDNA_DMA_DIRECTION_STREAM_TO_MEMORY, totals[i],
+        1, 0, distribution->receivers[ordinal].engine,
+        path ? NULL : receiver_channel, &distribution->receivers[ordinal],
+        &reason, &valid));
+    if (!valid) {
+      return loom_aie2p_native_reject(context, first->admission->op, reason);
+    }
+    loom_aie2p_native_distribution_endpoint_t* receiver =
+        &distribution->receivers[ordinal];
+    receiver->wait_for_idle = true;
+    if (tile == receiver->tile &&
+        (engine >= dma->loopback_channel_count || engine != receiver->engine)) {
+      return loom_aie2p_native_reject(
+          context, first->admission->op,
+          IREE_SV("matching same-tile DMA channels"));
+    }
+  }
+  const uint16_t range_count = program->range_count;
+  const uint8_t task_count = program->task_count;
+  const loom_aie2p_native_distribution_range_t* ranges = program->ranges;
+  if (range_count > descriptor_capacity - *used) {
+    return loom_aie2p_native_reject(context, first->admission->op,
+                                    IREE_SV("a complete ordered packet program "
+                                            "within its DMA descriptor bank"));
+  }
+  for (uint16_t i = 0; i < range_count; ++i) {
+    bool valid;
+    IREE_RETURN_IF_ERROR(loom_aie2p_native_route_payload(
+        context, payloads[ranges[i].packet], first->admission->op, next_source,
+        &valid));
+    if (!valid) {
+      return iree_ok_status();
     }
   }
   loom_aie2p_native_dma_sequence_t* sequence = &distribution->sender.sequence;
-  *sequence =
-      (loom_aie2p_native_dma_sequence_t){.descriptor = descriptor_base + *used,
-                                         .descriptor_count = range_count,
-                                         .task_count = (uint8_t)task_count};
+  *sequence = (loom_aie2p_native_dma_sequence_t){
+      .descriptor = descriptor_base + *used,
+      .descriptor_count = range_count,
+      .terminal_slot = program->terminal_slot,
+      .task_count = (uint8_t)task_count};
   IREE_RETURN_IF_ERROR(
       iree_arena_allocate(arena,
                           range_count * sizeof(*sequence->words) +
                               task_count * sizeof(*sequence->tasks),
                           (void**)&sequence->words));
   sequence->tasks = (uint32_t*)(sequence->words + range_count);
-  uint32_t admissions = (uint32_t)first->admissions;
+  uint32_t admissions = program->period_repetitions;
   for (uint32_t i = 0; i < task_count; ++i) {
-    const uint32_t count = iree_min(admissions, dma->maximum_task_repeat_count);
+    const bool tail = admissions == 0;
+    const uint32_t count =
+        tail ? 1 : iree_min(admissions, dma->maximum_task_repeat_count);
     sequence->tasks[i] =
         loom_xdna_register_field_encode(
             layout->directions[LOOM_XDNA_DMA_DIRECTION_MEMORY_TO_STREAM - 1]
                 .start,
-            sequence->descriptor) |
+            sequence->descriptor + (tail ? program->period_range_count : 0)) |
         loom_xdna_register_field_encode(
             layout->directions[LOOM_XDNA_DMA_DIRECTION_MEMORY_TO_STREAM - 1]
                 .repeat,
             count - 1);
-    admissions -= count;
+    admissions -= tail ? 0 : count;
   }
   for (uint16_t i = 0; i < range_count; ++i) {
     uint32_t* words = sequence->words[i];
@@ -467,12 +720,10 @@ static iree_status_t loom_aie2p_native_select_packet_distribution(
         layout->address, (layout->local_address_base + channel->byte_offset +
                           range->first * channel->byte_stride) >>
                              dma->address_encoding_shift);
-    words[layout->packet.word] |=
-        loom_xdna_register_field_encode(layout->packet.enable, 1) |
-        loom_xdna_register_field_encode(layout->packet.id, range->packet);
+    loom_aie2p_native_frame_payload(payloads[range->packet], words);
     words[layout->lock_word] |=
         loom_xdna_register_field_encode(layout->locks.valid, 1);
-    if (!i) {
+    if (range->acquire) {
       words[layout->lock_word] |=
           loom_xdna_register_field_encode(
               layout->locks.acquire_id,
@@ -480,13 +731,14 @@ static iree_status_t loom_aie2p_native_select_packet_distribution(
           loom_xdna_register_field_encode(layout->locks.acquire_value, -1) |
           loom_xdna_register_field_encode(layout->locks.acquire_enable, 1);
     }
-    if (i + 1 == range_count) {
+    if (range->release) {
       words[layout->lock_word] |=
           loom_xdna_register_field_encode(
               layout->locks.release_id,
               layout->local_lock_base + channel->free_lock) |
           loom_xdna_register_field_encode(layout->locks.release_value, 1);
-    } else {
+    }
+    if (i + 1 != range_count && i + 1 != program->period_range_count) {
       words[layout->chain.word] |=
           loom_xdna_register_field_encode(layout->chain.next,
                                           sequence->descriptor + i + 1) |
@@ -498,10 +750,156 @@ static iree_status_t loom_aie2p_native_select_packet_distribution(
   return iree_ok_status();
 }
 
-iree_status_t loom_aie2p_native_select_worker_distributions(
+// Circuit geometry owns the destination storage and semaphore identities as
+// well as its transfer count. Ordered phases can share a wire without sharing
+// those descriptors.
+static bool loom_aie2p_native_distribution_geometry_equal(
+    const loom_aie2p_native_distribution_t* distribution,
+    const loom_pipeline_transport_cohort_t* cohort, uint32_t repetitions) {
+  if (distribution->repetitions != repetitions ||
+      distribution->receiver_count != cohort->destination_count) {
+    return false;
+  }
+  for (iree_host_size_t i = 0; i < cohort->destination_count; ++i) {
+    if (distribution->source->records->destinations[i].channel !=
+        cohort->destinations[i].channel) {
+      return false;
+    }
+  }
+  return true;
+}
+
+loom_aie2p_native_distribution_t* loom_aie2p_native_reusable_distribution(
+    const loom_aie2p_native_worker_t* owner,
+    const loom_aie2p_native_channel_t* source,
+    const loom_pipeline_transport_t* transport,
+    const loom_pipeline_transport_batch_t* batch, uint32_t repetitions) {
+  for (loom_aie2p_native_distribution_t* candidate = owner->distributions;
+       candidate; candidate = candidate->next) {
+    if (candidate->sender.channel == source &&
+        (owner->distribution_packets
+             ? loom_aie2p_native_distribution_program_equal(
+                   candidate->transport, candidate->source, transport, batch)
+             : loom_aie2p_native_distribution_geometry_equal(
+                   candidate, batch->records, repetitions))) {
+      return candidate;
+    }
+  }
+  return NULL;
+}
+
+static bool loom_aie2p_native_distribution_queues_equal(
+    const loom_aie2p_native_distribution_t* a,
+    const loom_aie2p_native_distribution_t* b) {
+  if (a->sender.engine != b->sender.engine ||
+      a->receiver_count != b->receiver_count) {
+    return false;
+  }
+  for (iree_host_size_t i = 0; i < a->receiver_count; ++i) {
+    if (a->receivers[i].engine != b->receivers[i].engine) {
+      return false;
+    }
+  }
+  return true;
+}
+
+static const loom_aie2p_native_channel_t*
+loom_aie2p_native_distribution_phase_channel(
+    const loom_aie2p_native_context_t* context,
+    const loom_pipeline_realization_t* realization,
+    const loom_pipeline_transport_cohort_t* cohort, iree_host_size_t endpoint) {
+  return loom_aie2p_native_channel(
+      context, realization,
+      endpoint ? cohort->destinations[endpoint - 1].channel
+               : cohort->admission->channel);
+}
+
+static iree_status_t loom_aie2p_native_distribution_windows(
     loom_aie2p_native_context_t* context,
     const loom_pipeline_realization_t* realization,
-    iree_host_size_t worker_index, uint32_t* next_source, bool* out_valid) {
+    const loom_pipeline_transport_t* transport, uint32_t** out_windows) {
+  *out_windows = NULL;
+  if (!transport->prefix_cycles) {
+    return iree_ok_status();
+  }
+  const iree_host_size_t tail = transport->batch_count - 1;
+  const loom_pipeline_transport_cohort_t* bulk =
+      transport->batches[tail].records;
+  for (iree_host_size_t i = 0; i < tail; ++i) {
+    if (transport->batches[i].records->destination_count !=
+        bulk->destination_count) {
+      return iree_ok_status();
+    }
+  }
+  uint32_t* windows;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      context->pass->arena, bulk->destination_count + 1, sizeof(*windows),
+      (void**)&windows));
+  for (iree_host_size_t i = 0; i <= bulk->destination_count; ++i) {
+    const loom_aie2p_native_channel_t* channel =
+        loom_aie2p_native_distribution_phase_channel(context, realization, bulk,
+                                                     i);
+    windows[i] = loom_aie2p_native_phased_window(
+        context, channel, tail, (uint32_t)transport->prefix_cycles,
+        (uint32_t)(bulk->admissions / transport->prefix_cycles));
+    if (!windows[i]) {
+      return iree_ok_status();
+    }
+    for (iree_host_size_t j = 0; j < tail; ++j) {
+      if (loom_aie2p_native_distribution_phase_channel(
+              context, realization, transport->batches[j].records, i)
+              ->pool_index != channel->pool_index) {
+        return iree_ok_status();
+      }
+    }
+  }
+  *out_windows = windows;
+  return iree_ok_status();
+}
+
+static iree_status_t loom_aie2p_native_distribution_refills(
+    loom_aie2p_native_context_t* context,
+    const loom_pipeline_transport_t* transport, const uint32_t* windows,
+    const loom_aie2p_native_distribution_t* first,
+    const loom_aie2p_native_distribution_t* bulk) {
+  for (iree_host_size_t i = 0; i <= bulk->receiver_count; ++i) {
+    if (bulk->repetitions <= windows[i]) {
+      continue;
+    }
+    const loom_aie2p_native_distribution_endpoint_t* endpoint =
+        i ? &bulk->receivers[i - 1] : &bulk->sender;
+    loom_aie2p_native_refill_queue_t* queue;
+    IREE_RETURN_IF_ERROR(loom_aie2p_native_add_refill(
+        context, endpoint->tile, endpoint->engine,
+        i ? LOOM_XDNA_DMA_DIRECTION_STREAM_TO_MEMORY
+          : LOOM_XDNA_DMA_DIRECTION_MEMORY_TO_STREAM,
+        endpoint->channel, bulk->repetitions, windows[i], &endpoint->sequence,
+        &queue));
+    if (transport->prefix_cycles == 1) {
+      continue;
+    }
+    const iree_host_size_t count = transport->batch_count - 1;
+    uint32_t* prefixes;
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        context->pass->arena, count, sizeof(*prefixes), (void**)&prefixes));
+    const loom_aie2p_native_distribution_t* phase = first;
+    for (iree_host_size_t j = 0; j < count; ++j, phase = phase->next) {
+      const loom_aie2p_native_distribution_endpoint_t* prefix =
+          i ? &phase->receivers[i - 1] : &phase->sender;
+      prefixes[j] = prefix->sequence.tasks[0];
+    }
+    queue->prefixes = prefixes;
+    queue->prefix_count = (uint32_t)count;
+    queue->cycle_windows =
+        (uint32_t)(bulk->repetitions / transport->prefix_cycles) / windows[i];
+  }
+  return iree_ok_status();
+}
+
+iree_status_t loom_aie2p_native_form_worker_distributions(
+    loom_aie2p_native_context_t* context,
+    const loom_pipeline_realization_t* realization,
+    iree_host_size_t worker_index, bool* out_valid) {
   *out_valid = false;
   const loom_pipeline_worker_t* source = &realization->workers[worker_index];
   loom_aie2p_native_worker_t* worker = &context->workers[worker_index];
@@ -512,10 +910,17 @@ iree_status_t loom_aie2p_native_select_worker_distributions(
       &context
            ->workers[context->distribution_execution
                          .workers[context->distribution_engines[worker_index]]];
-  loom_aie2p_native_distribution_t** tail = &owner->distributions;
-  while (*tail) {
-    tail = &(*tail)->next;
-  }
+  const bool streaming = source->transport.copy_stream != NULL;
+  const iree_host_size_t phase_count =
+      streaming ? 1 : source->transport.batch_count;
+  loom_aie2p_native_distribution_plan_t* plan;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate(
+      context->pass->arena,
+      sizeof(*plan) + phase_count * sizeof(*plan->batches), (void**)&plan));
+  *plan = (loom_aie2p_native_distribution_plan_t){
+      .batches = (loom_aie2p_native_distribution_batch_t*)(plan + 1)};
+  worker->distribution_plan = plan;
+  loom_aie2p_native_distribution_t** tail = &plan->geometries;
   loom_aie2p_native_distribution_phase_t** phase_tail =
       &worker->distribution_phases;
   loom_aie2p_native_distribution_phase_t* previous_phase = NULL;
@@ -523,8 +928,8 @@ iree_status_t loom_aie2p_native_select_worker_distributions(
   // this worker uses that endpoint in more than one phase. Independent
   // distributions retain their autonomous paths.
   const bool packet_program = owner->distribution_packets;
-  bool ordered = child || (packet_program && source->transport.batch_count > 1);
-  for (iree_host_size_t i = 0; i < source->transport.batch_count; ++i) {
+  bool ordered = child || (!streaming && packet_program && phase_count > 1);
+  for (iree_host_size_t i = 0; !streaming && i < phase_count; ++i) {
     const loom_pipeline_transport_batch_t* batch =
         &source->transport.batches[i];
     const loom_pipeline_transport_cohort_t* cohort = batch->records;
@@ -542,7 +947,14 @@ iree_status_t loom_aie2p_native_select_worker_distributions(
                  cohort->transfers * batch->record_count;
     }
   }
-  for (iree_host_size_t i = 0; i < source->transport.batch_count; ++i) {
+  uint32_t* windows = NULL;
+  if (!packet_program && (!ordered || child)) {
+    IREE_RETURN_IF_ERROR(loom_aie2p_native_distribution_windows(
+        context, realization, &source->transport, &windows));
+  }
+  plan->windows = windows;
+  loom_aie2p_native_distribution_t* first_phase = NULL;
+  for (iree_host_size_t i = 0; i < phase_count; ++i) {
     const loom_pipeline_transport_batch_t* batch =
         &source->transport.batches[i];
     const loom_pipeline_transport_cohort_t* cohort = batch->records;
@@ -551,14 +963,17 @@ iree_status_t loom_aie2p_native_select_worker_distributions(
                                   cohort->admission->channel);
     const uint32_t repetitions =
         (uint32_t)(cohort->transfers * batch->record_count);
-    loom_aie2p_native_distribution_t* path =
-        ordered ? owner->distributions : NULL;
+    loom_aie2p_native_distribution_batch_t* selected = &plan->batches[i];
+    *selected = (loom_aie2p_native_distribution_batch_t){0};
+    loom_aie2p_native_distribution_t* path = ordered   ? plan->geometries
+                                             : windows ? first_phase
+                                                       : NULL;
     if (ordered) {
       const uint32_t producer = source_channel->cursor.writer.worker;
-      if (!cohort->release || cohort->admissions != 1 ||
-          producer == UINT32_MAX ||
+      if (producer == UINT32_MAX ||
           (!child &&
-           ((path && producer != path->sender.channel->cursor.writer.worker) ||
+           (!cohort->release || cohort->admissions != 1 ||
+            (path && producer != path->sender.channel->cursor.writer.worker) ||
             context->workers[producer].execution !=
                 LOOM_AIE2P_NATIVE_EXECUTION_CONFIGURATION))) {
         return loom_aie2p_native_reject(
@@ -571,38 +986,26 @@ iree_status_t loom_aie2p_native_select_worker_distributions(
       if ((!packet_program &&
            (cohort->destination_count != first->destination_count ||
             (path && cohort->destination_count != path->receiver_count))) ||
-          (path &&
-           source_channel->pool_index != path->sender.channel->pool_index)) {
+          (path && context->pool_tiles[source_channel->pool_index] !=
+                       path->sender.tile)) {
         return loom_aie2p_native_reject(
             context, cohort->admission->op,
             IREE_SV("one source memory tile and destination set for an "
                     "ordered multicast path"));
-      }
-      for (iree_host_size_t j = 0;
-           !packet_program && j < cohort->destination_count; ++j) {
-        if (cohort->destinations[j].channel != first->destinations[j].channel ||
-            (path &&
-             loom_aie2p_native_channel(context, realization,
-                                       cohort->destinations[j].channel) !=
-                 path->receivers[j].channel)) {
-          return loom_aie2p_native_reject(
-              context, cohort->destinations[j].copy,
-              IREE_SV("the same ordered destinations in every shared "
-                      "multicast phase"));
-        }
       }
     }
     // Geometry variants are bounded by the physical descriptor bank. A later
     // phase can reuse one only after its prior endpoints have retired.
     loom_aie2p_native_distribution_t* distribution = NULL;
     for (loom_aie2p_native_distribution_t* candidate =
-             ordered ? owner->distributions : NULL;
-         candidate; candidate = candidate->next) {
+             ordered ? plan->geometries : NULL;
+         candidate; candidate = candidate->next_demand) {
       if (candidate->sender.channel == source_channel &&
           (packet_program ? loom_aie2p_native_distribution_program_equal(
                                 candidate->transport, candidate->source,
                                 &source->transport, batch)
-                          : candidate->repetitions == repetitions)) {
+                          : loom_aie2p_native_distribution_geometry_equal(
+                                candidate, cohort, repetitions))) {
         distribution = candidate;
         break;
       }
@@ -611,112 +1014,76 @@ iree_status_t loom_aie2p_native_select_worker_distributions(
       IREE_RETURN_IF_ERROR(iree_arena_allocate(
           context->pass->arena, sizeof(*distribution), (void**)&distribution));
       *distribution = (loom_aie2p_native_distribution_t){
-          .path = path ? path : distribution,
+          .invocation = invocation,
           .source = batch,
           .transport = &source->transport,
           .receiver_count = packet_program ? 0 : cohort->destination_count,
           .repetitions = packet_program ? 0 : repetitions,
+          .ordered = ordered,
       };
+      uint32_t* totals = NULL;
+      uint32_t* copy_receivers = NULL;
       if (packet_program) {
-        bool valid = false;
-        IREE_RETURN_IF_ERROR(loom_aie2p_native_select_packet_distribution(
-            context, realization, &source->transport, batch, source_channel,
-            path, next_source, distribution, &valid));
-        if (!valid) {
-          return iree_ok_status();
-        }
+        IREE_RETURN_IF_ERROR(loom_aie2p_native_packet_receivers(
+            context, realization, &source->transport, batch, path, distribution,
+            &totals, &copy_receivers));
       } else {
         IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
             context->pass->arena, cohort->destination_count,
             sizeof(*distribution->receivers),
             (void**)&distribution->receivers));
-        iree_string_view_t reason;
-        bool valid = false;
-        IREE_RETURN_IF_ERROR(loom_aie2p_native_select_distribution_endpoint(
-            context, source_channel, LOOM_XDNA_DMA_DIRECTION_MEMORY_TO_STREAM,
-            distribution->repetitions,
-            (uint32_t)(cohort->admissions == 1 ? batch->replays : 1),
-            path ? &path->sender : NULL, &distribution->sender, &reason,
-            &valid));
-        if (!valid) {
-          return loom_aie2p_native_reject(context, cohort->admission->op,
-                                          reason);
-        }
-        const uint32_t source_route = path ? 0 : (*next_source)++;
         for (iree_host_size_t j = 0; j < cohort->destination_count; ++j) {
-          const loom_pipeline_transport_destination_t* destination =
-              &cohort->destinations[j];
-          const loom_aie2p_native_channel_t* destination_channel =
-              loom_aie2p_native_channel(context, realization,
-                                        destination->channel);
-          if (ordered && repetitions % destination_channel->source->capacity) {
-            return loom_aie2p_native_reject(
-                context, destination->copy,
-                IREE_SV("complete destination-ring turns at a shared multicast "
-                        "phase boundary"));
-          }
-          IREE_RETURN_IF_ERROR(loom_aie2p_native_select_distribution_endpoint(
-              context, destination_channel,
-              LOOM_XDNA_DMA_DIRECTION_STREAM_TO_MEMORY,
-              distribution->repetitions, 1, path ? &path->receivers[j] : NULL,
-              &distribution->receivers[j], &reason, &valid));
-          if (!valid) {
-            return loom_aie2p_native_reject(context, destination->copy, reason);
-          }
-          const loom_aie2p_native_distribution_endpoint_t* sender =
-              &distribution->sender;
-          loom_aie2p_native_distribution_endpoint_t* receiver =
-              &distribution->receivers[j];
-          // Existing core/configuration/egress completion retires a receiver
-          // only when that direct reader consumes every published record.
-          // Distribution readers have no independent completion anchor; observe
-          // their input DMA directly instead of reconstructing a transitive
-          // dependency graph.
-          const loom_aie2p_native_cursor_t* reader =
-              &destination_channel->cursor.reader;
-          receiver->wait_for_idle =
-              ordered || reader->worker == UINT32_MAX ||
-              reader->maximum_admissions != distribution->repetitions ||
-              !realization->workers[reader->worker].block_execution_counts ||
-              context->workers[reader->worker].execution ==
-                  LOOM_AIE2P_NATIVE_EXECUTION_DISTRIBUTION;
-          distribution->sender.wait_for_idle |= receiver->wait_for_idle;
-          if (sender->tile->facts->kind == LOOM_XDNA_TILE_KIND_MEMORY &&
-              sender->tile->coordinate.column !=
-                  receiver->tile->coordinate.column) {
-            return loom_aie2p_native_reject(
-                context, destination->copy,
-                IREE_SV("same-column channel-copy routes from SRAM storage"));
-          }
-          if (sender->tile == receiver->tile &&
-              (sender->engine >=
-                   sender->tile->facts->dma.loopback_channel_count ||
-               sender->engine != receiver->engine)) {
-            return loom_aie2p_native_reject(
-                context, destination->copy,
-                IREE_SV(
-                    "matching DMA channel indices for same-tile channel copy"));
-          }
-          if (path) {
-            continue;
-          }
-          const iree_host_size_t route_first = context->routing.route_count;
-          const uint32_t route = (*next_source)++;
-          if (!loom_aie2p_array_route_workers(
-                  &context->routing, route, source_route,
-                  distribution->sender.tile->coordinate,
-                  distribution->sender.engine,
-                  distribution->receivers[j].tile->coordinate,
-                  distribution->receivers[j].engine, false)) {
-            return loom_aie2p_native_reject(
-                context, destination->copy,
-                IREE_SV("available on-die multicast payload links"));
-          }
-          loom_aie2p_native_route_label(context, route_first, UINT8_MAX);
+          distribution->receivers[j] =
+              (loom_aie2p_native_distribution_endpoint_t){
+                  .channel = loom_aie2p_native_channel(
+                      context, realization, cohort->destinations[j].channel)};
+        }
+      }
+      distribution->sender.channel = source_channel;
+      distribution->sender.tile =
+          context->pool_tiles[source_channel->pool_index];
+      for (iree_host_size_t j = 0; j < distribution->receiver_count; ++j) {
+        distribution->receivers[j].tile =
+            context->pool_tiles[distribution->receivers[j].channel->pool_index];
+      }
+      const iree_host_size_t controller =
+          loom_aie2p_native_distribution_controller(
+              context, &realization->invocations, distribution, source_channel);
+      if (path) {
+        distribution->path = path->path;
+        if (distribution->path->controller_engine != controller) {
+          distribution->path->controller_engine = IREE_HOST_SIZE_MAX;
+        }
+        if (distribution->path->last->ordinal < invocation->ordinal) {
+          distribution->path->last = invocation;
+        }
+      } else {
+        IREE_RETURN_IF_ERROR(iree_arena_allocate(context->pass->arena,
+                                                 sizeof(*distribution->path),
+                                                 (void**)&distribution->path));
+        *distribution->path = (loom_aie2p_native_distribution_path_t){
+            .first = distribution,
+            .last = invocation,
+            .controller_engine = controller};
+        context->dma_queue_count += 1 + distribution->receiver_count;
+      }
+      selected->creates_geometry = true;
+      selected->packet_totals = totals;
+      if (packet_program) {
+        bool valid;
+        IREE_RETURN_IF_ERROR(loom_aie2p_native_form_packet_program(
+            context, &source->transport, batch, source_channel, distribution,
+            copy_receivers, &selected->packet_program, &valid));
+        if (!valid) {
+          return iree_ok_status();
         }
       }
       *tail = distribution;
-      tail = &distribution->next;
+      tail = &distribution->next_demand;
+    }
+    selected->distribution = distribution;
+    if (windows && !first_phase) {
+      first_phase = distribution;
     }
     if (ordered) {
       loom_aie2p_native_distribution_phase_t* phase;
@@ -735,6 +1102,233 @@ iree_status_t loom_aie2p_native_select_worker_distributions(
   return iree_ok_status();
 }
 
+iree_status_t loom_aie2p_native_select_worker_distributions(
+    loom_aie2p_native_context_t* context,
+    const loom_pipeline_realization_t* realization,
+    iree_host_size_t worker_index, uint32_t* next_source, bool* out_valid) {
+  *out_valid = false;
+  const loom_pipeline_worker_t* source = &realization->workers[worker_index];
+  const loom_aie2p_native_distribution_plan_t* plan =
+      context->workers[worker_index].distribution_plan;
+  const loom_pipeline_invocation_t* invocation =
+      realization->invocations.workers[worker_index].invocation;
+  const bool child = invocation->ordinal != 0;
+  loom_aie2p_native_worker_t* owner =
+      &context
+           ->workers[context->distribution_execution
+                         .workers[context->distribution_engines[worker_index]]];
+  const bool packet_program = owner->distribution_packets;
+  loom_aie2p_native_distribution_t** geometry_tail = &owner->distributions;
+  while (*geometry_tail) {
+    geometry_tail = &(*geometry_tail)->next;
+  }
+  uint32_t* queued_tasks = NULL;
+  if (child && !packet_program) {
+    const iree_host_size_t endpoint_count =
+        source->transport.batches[0].records->destination_count + 1;
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        context->pass->arena, endpoint_count, sizeof(*queued_tasks),
+        (void**)&queued_tasks));
+    memset(queued_tasks, 0, endpoint_count * sizeof(*queued_tasks));
+  }
+  const iree_host_size_t phase_count =
+      source->transport.copy_stream ? 1 : source->transport.batch_count;
+  const uint32_t* windows = plan->windows;
+  loom_aie2p_native_distribution_t* first_phase = NULL;
+  for (iree_host_size_t i = 0; i < phase_count; ++i) {
+    const loom_aie2p_native_distribution_batch_t* selected = &plan->batches[i];
+    loom_aie2p_native_distribution_t* distribution = selected->distribution;
+    loom_aie2p_native_payload_class_t* const* payloads =
+        distribution->path->payloads;
+    loom_aie2p_native_distribution_t* path = NULL;
+    const loom_pipeline_transport_batch_t* batch =
+        &source->transport.batches[i];
+    const loom_pipeline_transport_cohort_t* cohort = batch->records;
+    const loom_aie2p_native_channel_t* source_channel =
+        distribution->sender.channel;
+    const bool ordered = distribution->ordered;
+    const uint32_t repetitions =
+        (uint32_t)(cohort->transfers * batch->record_count);
+    const uint32_t* totals = selected->packet_totals;
+    if (selected->creates_geometry) {
+      loom_aie2p_native_distribution_t* existing =
+          ordered ? loom_aie2p_native_reusable_distribution(
+                        owner, source_channel, &source->transport, batch,
+                        repetitions)
+                  : NULL;
+      if (existing &&
+          loom_aie2p_native_distribution_queues_equal(existing, distribution)) {
+        distribution->path->selected = existing->path;
+        distribution->selected = existing;
+      } else {
+        loom_aie2p_native_distribution_path_t* demand = distribution->path;
+        if (!demand->selected) {
+          // Ordered phases on one admitted distribution engine preserve their
+          // channel cursors even when the channel outlives the child. Keep
+          // their path identity independently of private-controller sharing.
+          path = ordered ? owner->distributions : NULL;
+          if (path && (path->sender.tile != distribution->sender.tile ||
+                       !loom_aie2p_native_distribution_queues_equal(
+                           path, distribution))) {
+            path = NULL;
+          }
+          if (!path) {
+            path = loom_aie2p_native_reuse_distribution_path(
+                context, distribution->sender.tile, distribution,
+                demand->controller_engine);
+          }
+          demand->selected = path ? path->path : demand;
+          if (!path) {
+            loom_aie2p_native_distribution_path_t** position =
+                &distribution->sender.tile->distribution_paths;
+            while (*position) {
+              position = &(*position)->next;
+            }
+            *position = demand;
+          }
+        } else {
+          path = demand->selected->first;
+        }
+        distribution->path = demand->selected;
+        distribution->path->last = invocation;
+        distribution->next_geometry = distribution->path->geometries;
+        distribution->path->geometries = distribution;
+        distribution->selected = distribution;
+        *geometry_tail = distribution;
+        geometry_tail = &distribution->next;
+      }
+    }
+    const bool creates_geometry =
+        selected->creates_geometry && distribution->selected == distribution;
+    distribution = distribution->selected;
+    if (creates_geometry) {
+      if (packet_program) {
+        bool valid = false;
+        IREE_RETURN_IF_ERROR(loom_aie2p_native_select_packet_distribution(
+            context, realization, &source->transport, batch, source_channel,
+            path, next_source, distribution, totals, &selected->packet_program,
+            payloads, &valid));
+        if (!valid) {
+          return iree_ok_status();
+        }
+      } else {
+        iree_string_view_t reason;
+        bool valid = false;
+        const bool bulk = i + 1 == source->transport.batch_count;
+        IREE_RETURN_IF_ERROR(loom_aie2p_native_select_channel_endpoint(
+            context, &realization->invocations, invocation, source_channel,
+            LOOM_XDNA_DMA_DIRECTION_MEMORY_TO_STREAM,
+            windows ? (bulk ? windows[0] : 1) : distribution->repetitions,
+            (uint32_t)(cohort->admissions == 1 ? batch->replays : 1),
+            child ? queued_tasks[0] + source->transport.batch_count - i - 1 : 0,
+            distribution->sender.engine, path ? NULL : source_channel,
+            &distribution->sender, &reason, &valid));
+        if (!valid) {
+          return loom_aie2p_native_reject(context, cohort->admission->op,
+                                          reason);
+        }
+        for (uint16_t d = 0; d < distribution->sender.sequence.descriptor_count;
+             ++d) {
+          loom_aie2p_native_frame_payload(
+              payloads[0], distribution->sender.sequence.words[d]);
+        }
+        for (iree_host_size_t j = 0; j < cohort->destination_count; ++j) {
+          const loom_pipeline_transport_destination_t* destination =
+              &cohort->destinations[j];
+          const loom_aie2p_native_channel_t* destination_channel =
+              loom_aie2p_native_channel(context, realization,
+                                        destination->channel);
+          if (path && context->pool_tiles[destination_channel->pool_index] !=
+                          path->receivers[j].tile) {
+            return loom_aie2p_native_reject(
+                context, destination->copy,
+                IREE_SV("the same ordered physical destinations in every "
+                        "shared multicast phase"));
+          }
+          if (ordered && repetitions % destination_channel->source->capacity) {
+            return loom_aie2p_native_reject(
+                context, destination->copy,
+                IREE_SV("complete destination-ring turns at a shared multicast "
+                        "phase boundary"));
+          }
+          IREE_RETURN_IF_ERROR(loom_aie2p_native_select_channel_endpoint(
+              context, &realization->invocations, invocation,
+              destination_channel, LOOM_XDNA_DMA_DIRECTION_STREAM_TO_MEMORY,
+              windows ? (bulk ? windows[j + 1] : 1) : distribution->repetitions,
+              1,
+              child
+                  ? queued_tasks[j + 1] + source->transport.batch_count - i - 1
+                  : 0,
+              distribution->receivers[j].engine,
+              path ? NULL : destination_channel, &distribution->receivers[j],
+              &reason, &valid));
+          if (!valid) {
+            return loom_aie2p_native_reject(context, destination->copy, reason);
+          }
+          const loom_aie2p_native_distribution_endpoint_t* sender =
+              &distribution->sender;
+          loom_aie2p_native_distribution_endpoint_t* receiver =
+              &distribution->receivers[j];
+          receiver->wait_for_idle =
+              ordered || windows ||
+              !loom_aie2p_native_cursor_has_read_completion(
+                  context, &destination_channel->cursor.reader,
+                  distribution->repetitions);
+          distribution->sender.wait_for_idle |= receiver->wait_for_idle;
+          if (sender->tile == receiver->tile &&
+              (sender->engine >=
+                   sender->tile->facts->dma.loopback_channel_count ||
+               sender->engine != receiver->engine)) {
+            return loom_aie2p_native_reject(
+                context, destination->copy,
+                IREE_SV(
+                    "matching DMA channel indices for same-tile channel copy"));
+          }
+        }
+        IREE_RETURN_IF_ERROR(loom_aie2p_native_route_payload(
+            context, payloads[0], cohort->admission->op, next_source, &valid));
+        if (!valid) {
+          return iree_ok_status();
+        }
+        distribution->path->routes.first = payloads[0]->route_first;
+        distribution->path->routes.count = payloads[0]->route_count;
+        if (distribution->path->first == distribution) {
+          ++payloads[0]->distribution_path_count;
+        }
+      }
+    }
+    if (queued_tasks) {
+      for (iree_host_size_t j = 0; j <= distribution->receiver_count; ++j) {
+        const loom_aie2p_native_distribution_endpoint_t* endpoint =
+            j ? &distribution->receivers[j - 1] : &distribution->sender;
+        queued_tasks[j] += endpoint->sequence.task_count;
+        // Reused geometry may have been selected for a less occupied queue.
+        if (queued_tasks[j] > endpoint->tile->facts->dma.task_queue_depth) {
+          return loom_aie2p_native_reject(
+              context, cohort->admission->op,
+              IREE_SV("complete child phase tasks within DMA queue capacity"));
+        }
+      }
+    }
+    if (windows) {
+      if (!first_phase) {
+        first_phase = distribution;
+      }
+      if (i + 1 == source->transport.batch_count) {
+        IREE_RETURN_IF_ERROR(loom_aie2p_native_distribution_refills(
+            context, &source->transport, windows, first_phase, distribution));
+      }
+    }
+  }
+  for (loom_aie2p_native_distribution_phase_t* phase =
+           context->workers[worker_index].distribution_phases;
+       phase; phase = phase->next) {
+    phase->distribution = phase->distribution->selected;
+  }
+  *out_valid = true;
+  return iree_ok_status();
+}
+
 // The controller and distributor retain the same sequence of complete FIFO
 // turns. Bind those existing ownership events once; emission uses the selected
 // phase directly and never searches source code or infers cross-worker order.
@@ -743,83 +1337,100 @@ iree_status_t loom_aie2p_native_bind_distribution_phases(
     const loom_pipeline_realization_t* realization, bool* out_valid) {
   *out_valid = false;
   const iree_host_size_t count = realization->invocations.worker_count;
-  const iree_host_size_t controller_count =
-      realization->invocations.count * context->execution.engine_count;
+  const iree_host_size_t controller_count = realization->invocations.count;
   IREE_RETURN_IF_ERROR(
       iree_arena_allocate_array(context->pass->arena, controller_count,
                                 sizeof(*context->distribution_controllers),
                                 (void**)&context->distribution_controllers));
   for (iree_host_size_t i = 0; i < controller_count; ++i) {
-    context->distribution_controllers[i] = IREE_HOST_SIZE_MAX;
+    context->distribution_controllers[i] = NULL;
   }
   const loom_aie2p_native_distribution_phase_t** next;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(context->pass->arena, count,
                                                  sizeof(*next), (void**)&next));
+  loom_aie2p_native_distribution_command_t*** command_tails;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(context->pass->arena, count,
+                                                 sizeof(*command_tails),
+                                                 (void**)&command_tails));
   for (iree_host_size_t i = 0; i < count; ++i) {
+    command_tails[i] = &context->workers[i].distribution_commands;
+  }
+  // Preserve the existing reverse-declaration order of independent programs,
+  // while appending each program's phases in their required FIFO order.
+  for (iree_host_size_t remaining_workers = count; remaining_workers;
+       --remaining_workers) {
+    const iree_host_size_t i = remaining_workers - 1;
     next[i] = context->workers[i].distribution_phases;
     const loom_pipeline_invocation_t* invocation =
         realization->invocations.workers[i].invocation;
     if (!invocation->ordinal || !next[i]) {
       continue;
     }
-    const loom_aie2p_native_distribution_phase_t* phase = next[i];
-    if (phase->next) {
-      return loom_aie2p_native_reject(
-          context, phase->source->records->admission->op,
-          IREE_SV("one complete retained distribution lifetime per child"));
-    }
-    const loom_aie2p_native_distribution_t* distribution = phase->distribution;
-    for (iree_host_size_t j = 0; j <= distribution->receiver_count; ++j) {
-      const bool sender = j == 0;
-      const loom_aie2p_native_distribution_endpoint_t* endpoint =
-          sender ? &distribution->sender : &distribution->receivers[j - 1];
-      const uint32_t cursor = sender ? endpoint->channel->cursor.writer.worker
-                                     : endpoint->channel->cursor.reader.worker;
-      const iree_host_size_t engine = cursor == UINT32_MAX
-                                          ? IREE_HOST_SIZE_MAX
-                                          : context->core_engines[cursor];
-      iree_host_size_t controller =
-          engine == IREE_HOST_SIZE_MAX
-              ? IREE_HOST_SIZE_MAX
-              : context->execution.workers[invocation->ordinal *
-                                               context->execution.engine_count +
-                                           engine];
-      if (controller == IREE_HOST_SIZE_MAX && engine != IREE_HOST_SIZE_MAX &&
-          invocation->schedule) {
-        controller =
-            context->execution.workers[invocation->parent->ordinal *
-                                           context->execution.engine_count +
-                                       engine];
-        if (controller != IREE_HOST_SIZE_MAX &&
-            realization->invocations.workers[controller].invocation !=
-                invocation->parent) {
-          controller = IREE_HOST_SIZE_MAX;
+    for (const loom_aie2p_native_distribution_phase_t* phase = next[i]; phase;
+         phase = phase->next) {
+      loom_aie2p_native_distribution_t* distribution = phase->distribution;
+      // Preserve phase order in every shared queue while publishing receiver
+      // tasks before the corresponding sender, as for a single child phase.
+      for (iree_host_size_t remaining = distribution->receiver_count + 1;
+           remaining; --remaining) {
+        const iree_host_size_t j = remaining - 1;
+        const bool sender = j == 0;
+        loom_aie2p_native_distribution_endpoint_t* endpoint =
+            sender ? &distribution->sender : &distribution->receivers[j - 1];
+        uint32_t cursor = sender ? endpoint->channel->cursor.writer.worker
+                                 : endpoint->channel->cursor.reader.worker;
+        if (cursor != UINT32_MAX && context->workers[cursor].input) {
+          cursor = context->workers[cursor].input->controller;
         }
+        iree_host_size_t engine = cursor == UINT32_MAX
+                                      ? IREE_HOST_SIZE_MAX
+                                      : context->core_engines[cursor];
+        // Autonomous endpoints have no instruction cursor owner. Compute
+        // memory uses its local core; SRAM uses the distributor's placement.
+        // Both still require a participating core in this complete phase.
+        if (engine == IREE_HOST_SIZE_MAX) {
+          const loom_aie2p_native_tile_t* controller_tile =
+              endpoint->tile->facts->kind == LOOM_XDNA_TILE_KIND_COMPUTE
+                  ? endpoint->tile
+                  : context->workers[i].tile;
+          engine = (iree_host_size_t)(controller_tile - context->tiles);
+        }
+        iree_host_size_t controller = loom_pipeline_participants_worker(
+            context->execution.invocations[invocation->ordinal], engine);
+        if (controller == IREE_HOST_SIZE_MAX && invocation->schedule) {
+          controller = loom_pipeline_participants_worker(
+              context->execution.invocations[invocation->parent->ordinal],
+              engine);
+          if (controller != IREE_HOST_SIZE_MAX &&
+              realization->invocations.workers[controller].invocation !=
+                  invocation->parent) {
+            controller = IREE_HOST_SIZE_MAX;
+          }
+        }
+        // Nested phase controllers also execute the child's outer boundary.
+        if (controller == IREE_HOST_SIZE_MAX) {
+          return loom_aie2p_native_reject(
+              context, phase->source->records->admission->op,
+              IREE_SV("a producer and each receiver controlled by the complete "
+                      "child or its concurrent parent invocation"));
+        }
+        endpoint->controller_engine = engine;
+        IREE_RETURN_IF_ERROR(loom_pipeline_participants_insert(
+            context->pass->arena,
+            (loom_pipeline_participant_t){engine, controller},
+            &context->distribution_controllers[invocation->ordinal]));
+        loom_aie2p_native_distribution_command_t* command;
+        IREE_RETURN_IF_ERROR(iree_arena_allocate(
+            context->pass->arena, sizeof(*command), (void**)&command));
+        *command = (loom_aie2p_native_distribution_command_t){
+            .invocation = invocation,
+            .endpoint = endpoint,
+            .direction = sender ? LOOM_XDNA_DMA_DIRECTION_MEMORY_TO_STREAM
+                                : LOOM_XDNA_DMA_DIRECTION_STREAM_TO_MEMORY,
+            .retire = phase->next == NULL};
+        *command_tails[controller] = command;
+        command_tails[controller] = &command->next;
       }
-      if (controller == IREE_HOST_SIZE_MAX ||
-          (realization->invocations.workers[controller].invocation !=
-               invocation &&
-           realization->invocations.workers[controller].invocation !=
-               invocation->parent)) {
-        return loom_aie2p_native_reject(
-            context, phase->source->records->admission->op,
-            IREE_SV("a producer and each receiver controlled by the complete "
-                    "child or its concurrent parent invocation"));
-      }
-      context->distribution_controllers[invocation->ordinal *
-                                            context->execution.engine_count +
-                                        engine] = controller;
-      loom_aie2p_native_distribution_command_t* command;
-      IREE_RETURN_IF_ERROR(iree_arena_allocate(
-          context->pass->arena, sizeof(*command), (void**)&command));
-      loom_aie2p_native_worker_t* worker = &context->workers[controller];
-      *command = (loom_aie2p_native_distribution_command_t){
-          .next = worker->distribution_commands,
-          .invocation = invocation,
-          .endpoint = endpoint,
-          .direction = sender ? LOOM_XDNA_DMA_DIRECTION_MEMORY_TO_STREAM
-                              : LOOM_XDNA_DMA_DIRECTION_STREAM_TO_MEMORY};
-      worker->distribution_commands = command;
     }
     next[i] = NULL;
   }
@@ -831,7 +1442,8 @@ iree_status_t loom_aie2p_native_bind_distribution_phases(
     const loom_pipeline_worker_t* source = &realization->workers[i];
     for (iree_host_size_t j = 0; j < source->transport.count; ++j) {
       const loom_pipeline_transport_step_t* step = &source->transport.steps[j];
-      if (!loom_channel_publish_isa(step->op)) {
+      if (step->kind != LOOM_PIPELINE_TRANSPORT_STEP_CHANNEL ||
+          step->source.channel->kind != LOOM_CHANNEL_PLAN_ACTION_KIND_PUBLISH) {
         continue;
       }
       loom_aie2p_native_configuration_action_t* action =

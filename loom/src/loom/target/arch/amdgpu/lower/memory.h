@@ -232,12 +232,13 @@ bool loom_amdgpu_memory_access_plan_select(
     loom_amdgpu_memory_access_selection_t* out_selection,
     loom_amdgpu_memory_access_diagnostic_t* out_diagnostic);
 
-// Folds target-assigned workgroup/private alloca layout into a source memory
-// access so later offset materialization uses the same address domain as real
-// AMDGPU memory packets.
+// Resolves target-assigned workgroup/private alloca layout into a folded packet
+// offset or a retained private root address. The latter preserves a root that
+// whole-program callable layout may relocate after source lowering.
 bool loom_amdgpu_memory_access_include_alloca_root_byte_offset(
     const loom_amdgpu_source_alloca_layout_t* alloca_layout,
     loom_low_source_memory_access_plan_t* source,
+    bool* out_uses_dynamic_root_address,
     loom_amdgpu_memory_access_diagnostic_t* diagnostic);
 
 // Returns whether a canonical dynamic term can be realized in vector address
@@ -388,8 +389,8 @@ iree_status_t loom_amdgpu_select_memory_store_plan(
 
 // Completes descriptor bounds once all operand producers have selected their
 // actual carriers. Packet splits share one retained extent recipe.
-iree_status_t loom_amdgpu_finalize_memory_plan(
-    loom_low_lower_context_t* context, loom_amdgpu_memory_access_plan_t* plan);
+void loom_amdgpu_finalize_memory_plan(loom_low_lower_context_t* context,
+                                      loom_amdgpu_memory_access_plan_t* plan);
 
 // Lowers a source memory-load op to an AMDGPU memory packet.
 iree_status_t loom_amdgpu_lower_memory_load(

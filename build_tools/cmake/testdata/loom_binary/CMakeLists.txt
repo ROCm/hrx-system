@@ -17,12 +17,14 @@ if(LOOM_TEST_CROSS)
   set(CMAKE_CROSSCOMPILING TRUE)
 endif()
 if(NOT IREE_HOST_BIN_DIR)
+  add_executable(import_tool tool.c)
   add_executable(link_tool tool.c)
   add_executable(compile_tool tool.c)
+  add_executable(loom::tools::loom-import-cxx ALIAS import_tool)
   add_executable(loom::tools::loom-link ALIAS link_tool)
   add_executable(loom::tools::loom-compile ALIAS compile_tool)
   file(GENERATE OUTPUT "${CMAKE_BINARY_DIR}/tools-$<CONFIG>.txt"
-    CONTENT "$<TARGET_FILE:link_tool>\n$<TARGET_FILE:compile_tool>\n")
+    CONTENT "$<TARGET_FILE:import_tool>\n$<TARGET_FILE:link_tool>\n$<TARGET_FILE:compile_tool>\n")
 endif()
 
 loom_target_profile(NAME npu4 FAMILY amd.xdna.aie2p SELECTOR amd.xdna.strix.17f0_10)
@@ -34,8 +36,10 @@ loom_kernel_binary(NAME exported
 
 # Forward libraries preserve their transitive closure independently of source
 # assembly. The kernel producer is reached through an ordinary data consumer.
+loom_module(NAME cxx_library MODE merge OUTPUT_FORMAT bc
+  SRCS support.cxx DATA support.h INPUTOPTS "cxx:fp-model=fast" STRICT_DEPS)
 loom_module(NAME library MODE merge OUTPUT_FORMAT bc
-  SRCS library.loom LIBRARIES ::leaf STRICT_DEPS)
+  SRCS library.loom LIBRARIES ::leaf ::cxx_library STRICT_DEPS)
 loom_module(NAME leaf MODE merge OUTPUT_FORMAT bc SRCS leaf.loom STRICT_DEPS)
 add_custom_target(kernel_consumer DEPENDS "${CMAKE_BINARY_DIR}/explicit.xdna")
 iree_generated_output_add_consumer("${CMAKE_BINARY_DIR}/explicit.xdna" kernel_consumer)

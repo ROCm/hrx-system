@@ -113,6 +113,11 @@ iree_status_t loom_low_schedule_storage_lifetimes_initialize(
             LOOM_LOW_SCHEDULE_VALUE_FLAG_STORAGE_READ_TRACKED;
         needs_storage_read_tracking = true;
       }
+      if (iree_any_bit_set(relation->flags,
+                           LOOM_LOW_STORAGE_RELATION_FLAG_WRITES_STORAGE)) {
+        state->values[relation->source_ordinal].flags |=
+            LOOM_LOW_SCHEDULE_VALUE_FLAG_WRITTEN_IN_PLACE;
+      }
       if (loom_low_schedule_storage_relation_is_handoff(relation)) {
         state->values[relation->destination_ordinal].flags |=
             LOOM_LOW_SCHEDULE_VALUE_FLAG_STORAGE_READ_TRACKED;
@@ -193,7 +198,7 @@ void loom_low_schedule_storage_lifetimes_set_forwarded_values(
   const loom_low_schedule_block_t* block = &state->blocks[block_index];
   if (block->node_count == 0 ||
       !loom_low_schedule_strategy_uses_pressure(state->options->strategy) ||
-      (state->pressure_limits.unspillable_completion_domain_count == 0 &&
+      (state->pressure_limits.constrained_completion_domain_count == 0 &&
        state->pressure_limits.active_register_packing_resource_count == 0)) {
     return;
   }

@@ -121,8 +121,8 @@ TEST_F(BytecodeAttributeTest, NamedPredicatesValidateAndMaterialize) {
   loom_attribute_t attr = loom_attr_absent();
   IREE_ASSERT_OK(loom_bytecode_attribute_materialize_named(
       &materializer, &materialization_cursor, /*descriptor=*/nullptr,
-      LOOM_BYTECODE_ATTR_PREDICATE_LIST, &attr,
-      /*available_type_count=*/0));
+      LOOM_BYTECODE_ATTR_PREDICATE_LIST,
+      /*available_type_count=*/0, &attr));
 
   ASSERT_EQ(attr.kind, LOOM_ATTR_PREDICATE_LIST);
   ASSERT_EQ(attr.count, 1u);
@@ -196,8 +196,8 @@ TEST_F(BytecodeAttributeTest, RejectsAggregateCountsBeforeScratchAllocation) {
     IREE_EXPECT_STATUS_IS(
         IREE_STATUS_DEFERRED,
         loom_bytecode_attribute_decode_named(
-            &materializer, &cursor, test_case.descriptor, test_case.kind, &attr,
-            /*available_type_count=*/0));
+            &materializer, &cursor, test_case.descriptor, test_case.kind,
+            /*available_type_count=*/0, &attr));
 
     EXPECT_EQ(error_count_, previous_error_count + 1);
     EXPECT_EQ(scratch_arena_.used_allocation_size, 0u);
@@ -220,7 +220,7 @@ TEST_F(BytecodeAttributeTest, ByteFormsValidateAndMaterializeExactPayloads) {
       cursor = MakeCursor(data.data(), data.size());
       loom_attribute_t attribute;
       IREE_ASSERT_OK(loom_bytecode_attribute_materialize_named(
-          &materializer, &cursor, nullptr, kind, &attribute, 0));
+          &materializer, &cursor, nullptr, kind, 0, &attribute));
       EXPECT_EQ(loom_attr_is_utf8(attribute), kind == LOOM_BYTECODE_ATTR_UTF8);
       EXPECT_EQ(attribute.reserved_1, text.size);
       EXPECT_TRUE(iree_string_view_equal(
@@ -251,12 +251,12 @@ TEST_F(BytecodeAttributeTest, MalformedUtf8IsDiagnosedAtBothReaderBoundaries) {
     IREE_EXPECT_STATUS_IS(IREE_STATUS_DEFERRED,
                           loom_bytecode_attribute_materialize_named(
                               &materializer, &cursor, nullptr,
-                              LOOM_BYTECODE_ATTR_UTF8, &attribute, 0));
+                              LOOM_BYTECODE_ATTR_UTF8, 0, &attribute));
     EXPECT_EQ(error_count_, previous_errors + 2);
     cursor = MakeCursor(data.data(), data.size());
     IREE_ASSERT_OK(loom_bytecode_attribute_materialize_named(
-        &materializer, &cursor, nullptr, LOOM_BYTECODE_ATTR_BYTES, &attribute,
-        0));
+        &materializer, &cursor, nullptr, LOOM_BYTECODE_ATTR_BYTES, 0,
+        &attribute));
     EXPECT_EQ(error_count_, previous_errors + 2);
   }
 }
@@ -306,8 +306,8 @@ TEST_F(BytecodeAttributeTest, SsaPredicatesResolveThroughConcreteValueMap) {
   loom_attribute_t attr = loom_attr_absent();
   IREE_ASSERT_OK(loom_bytecode_attribute_materialize_ssa(
       &materializer, &cursor, /*descriptor=*/nullptr,
-      LOOM_BYTECODE_ATTR_PREDICATE_LIST, &attr,
-      /*available_type_count=*/0, &scope));
+      LOOM_BYTECODE_ATTR_PREDICATE_LIST,
+      /*available_type_count=*/0, &scope, &attr));
 
   ASSERT_EQ(attr.count, 1u);
   EXPECT_EQ(attr.predicate_list[0].args[0], value_id);
@@ -334,8 +334,8 @@ TEST_F(BytecodeAttributeTest, CompleteBindingsSurviveAttributeScratchReset) {
   loom_bytecode_reader_cursor_t first_cursor = MakeCursor(first, sizeof(first));
   loom_attribute_t first_attr = loom_attr_absent();
   IREE_ASSERT_OK(loom_bytecode_attribute_materialize_ssa(
-      &materializer, &first_cursor, nullptr, LOOM_BYTECODE_ATTR_TYPE,
-      &first_attr, 0, &scope));
+      &materializer, &first_cursor, nullptr, LOOM_BYTECODE_ATTR_TYPE, 0, &scope,
+      &first_attr));
   EXPECT_EQ(scratch_arena_.used_allocation_size, 0u);
   ASSERT_EQ(bindings.count, 1u);
   EXPECT_EQ(bindings.entries[0].type, first_attr.type_id);
@@ -346,8 +346,8 @@ TEST_F(BytecodeAttributeTest, CompleteBindingsSurviveAttributeScratchReset) {
       MakeCursor(second, sizeof(second));
   loom_attribute_t second_attr = loom_attr_absent();
   IREE_ASSERT_OK(loom_bytecode_attribute_materialize_ssa(
-      &materializer, &second_cursor, nullptr, LOOM_BYTECODE_ATTR_TYPE,
-      &second_attr, 0, &scope));
+      &materializer, &second_cursor, nullptr, LOOM_BYTECODE_ATTR_TYPE, 0,
+      &scope, &second_attr));
   EXPECT_EQ(first_attr.type_id, second_attr.type_id);
   EXPECT_EQ(bindings.count, 1u);
   iree_arena_deinitialize(&scope_arena);
@@ -395,7 +395,7 @@ TEST_F(BytecodeAttributeTest,
       IREE_STATUS_DEFERRED,
       loom_bytecode_attribute_materialize_ssa(
           &materializer, &cursor, /*descriptor=*/nullptr,
-          LOOM_BYTECODE_ATTR_TYPE, &attr, /*available_type_count=*/0, &scope));
+          LOOM_BYTECODE_ATTR_TYPE, /*available_type_count=*/0, &scope, &attr));
 
   EXPECT_EQ(error_count, 1u);
   EXPECT_STREQ(error_id, "ERR_BYTECODE_009");
@@ -443,8 +443,8 @@ TEST_F(BytecodeAttributeTest, ScopedRegisterRetainsCarrierAndBoundValueType) {
   loom_bytecode_reader_cursor_t cursor = MakeCursor(data, sizeof(data));
   loom_attribute_t attr = loom_attr_absent();
   IREE_ASSERT_OK(loom_bytecode_attribute_materialize_ssa(
-      &materializer, &cursor, nullptr, LOOM_BYTECODE_ATTR_TYPE, &attr, 0,
-      &scope));
+      &materializer, &cursor, nullptr, LOOM_BYTECODE_ATTR_TYPE, 0, &scope,
+      &attr));
   EXPECT_EQ(cursor.cursor.position, sizeof(data));
   EXPECT_EQ(bindings.count, 2u);
 
@@ -459,6 +459,185 @@ TEST_F(BytecodeAttributeTest, ScopedRegisterRetainsCarrierAndBoundValueType) {
   ASSERT_NE(value_type, nullptr);
   EXPECT_EQ(loom_type_kind(*value_type), LOOM_TYPE_VECTOR);
   EXPECT_EQ(loom_dim_value_id(loom_type_dim(*value_type, 0)), width);
+  EXPECT_EQ(error_count_, 0u);
+}
+
+TEST_F(BytecodeAttributeTest, ScopedWrappersShareCompletedChildren) {
+  loom_value_id_t width = LOOM_VALUE_ID_INVALID;
+  IREE_ASSERT_OK(loom_module_define_value(
+      module_, loom_type_scalar(LOOM_SCALAR_TYPE_INDEX), &width));
+  iree_arena_allocator_t scope_arena;
+  iree_arena_initialize(&block_pool_, &scope_arena);
+  loom_bytecode_type_bindings_t bindings = {.arena = &scope_arena};
+  const loom_bytecode_attribute_ssa_materialization_scope_t scope = {
+      .symbol_name = IREE_SV("function"),
+      .values = &width,
+      .value_count = 1,
+      .bindings = &bindings,
+  };
+  // Group, function, dialect, and register complete in that order. The
+  // function and dialect reuse the group, and a later attribute reuses the
+  // register without redeclaring any nodes.
+  const uint8_t data[] = {
+      1,
+      22,
+      4,
+      LOOM_BYTECODE_TYPE_GROUP,
+      1,
+      1,
+      1,
+      LOOM_BYTECODE_TYPE_FUNCTION,
+      1,
+      1,
+      1,
+      1,
+      LOOM_BYTECODE_TYPE_DIALECT,
+      1,
+      2,
+      3,
+      1,
+      LOOM_BYTECODE_TYPE_REGISTER,
+      1,
+      0x80,
+      0x80,
+      0x04,
+      5,
+      4,
+  };
+  loom_bytecode_attribute_materializer_t materializer = MakeMaterializer();
+  loom_bytecode_reader_cursor_t cursor = MakeCursor(data, sizeof(data));
+  loom_attribute_t attr = loom_attr_absent();
+  IREE_ASSERT_OK(loom_bytecode_attribute_materialize_ssa(
+      &materializer, &cursor, nullptr, LOOM_BYTECODE_ATTR_TYPE, 0, &scope,
+      &attr));
+  ASSERT_EQ(bindings.count, 4u);
+  EXPECT_EQ(cursor.cursor.position, sizeof(data));
+
+  const uint8_t reuse[] = {1, 2, 0, 4};
+  cursor = MakeCursor(reuse, sizeof(reuse));
+  loom_attribute_t reused = loom_attr_absent();
+  IREE_ASSERT_OK(loom_bytecode_attribute_materialize_ssa(
+      &materializer, &cursor, nullptr, LOOM_BYTECODE_ATTR_TYPE, 0, &scope,
+      &reused));
+  EXPECT_EQ(reused.type_id, attr.type_id);
+  EXPECT_EQ(bindings.count, 4u);
+  EXPECT_EQ(scratch_arena_.used_allocation_size, 0u);
+  iree_arena_deinitialize(&scope_arena);
+  iree_arena_block_pool_trim(&block_pool_);
+
+  const loom_type_t carrier =
+      loom_type_table_get(&module_->types, attr.type_id);
+  ASSERT_TRUE(loom_type_is_register(carrier));
+  EXPECT_EQ(loom_type_register_payload0(carrier), 1u);
+  EXPECT_EQ(loom_type_register_payload1(carrier), UINT64_C(1) << 16);
+  const loom_type_t* dialect = loom_type_register_value_type(carrier);
+  ASSERT_NE(dialect, nullptr);
+  ASSERT_TRUE(loom_type_is_dialect(*dialect));
+  EXPECT_EQ(loom_type_dialect_name_id(*dialect), 1u);
+  ASSERT_EQ(loom_type_dialect_param_count(*dialect), 2u);
+  const loom_type_t* parameters = loom_type_dialect_params(*dialect);
+  ASSERT_EQ(loom_type_kind(parameters[0]), LOOM_TYPE_FUNCTION);
+  const loom_func_type_data_t* signature = loom_type_func_data(parameters[0]);
+  ASSERT_EQ(signature->arg_count, 1u);
+  ASSERT_EQ(signature->result_count, 1u);
+  EXPECT_TRUE(loom_type_equal(signature->types[0], parameters[1]));
+  EXPECT_TRUE(loom_type_equal(signature->types[1], parameters[1]));
+  ASSERT_EQ(loom_type_kind(parameters[1]), LOOM_TYPE_GROUP);
+  EXPECT_EQ(loom_dim_value_id(loom_type_dim(parameters[1], 0)), width);
+  EXPECT_EQ(error_count_, 0u);
+}
+
+TEST_F(BytecodeAttributeTest, ScopedShapesBindDimensionsAndEncodingByRole) {
+  // Force native value IDs away from the small wire coordinates. The decoder
+  // must distinguish one-based dimension references, zero-based encoding
+  // references, unbound dimensions, and literal sizes.
+  for (int i = 0; i < 8; ++i) {
+    loom_value_id_t unused;
+    IREE_ASSERT_OK(loom_module_define_value(
+        module_, loom_type_scalar(LOOM_SCALAR_TYPE_INDEX), &unused));
+  }
+  loom_value_id_t values[3];
+  for (size_t i = 0; i < 3; ++i) {
+    IREE_ASSERT_OK(loom_module_define_value(
+        module_,
+        i == 2 ? loom_type_encoding_with_role(LOOM_ENCODING_ROLE_ADDRESS_LAYOUT)
+               : loom_type_scalar(LOOM_SCALAR_TYPE_INDEX),
+        &values[i]));
+  }
+  struct Carrier {
+    // Serialized kind byte in the complete scoped record.
+    uint8_t wire_kind;
+    // Corresponding native type kind after projection.
+    loom_type_kind_t kind;
+  };
+  const Carrier carriers[] = {
+      {LOOM_BYTECODE_TYPE_GROUP, LOOM_TYPE_GROUP},
+      {LOOM_BYTECODE_TYPE_TENSOR, LOOM_TYPE_TENSOR},
+      {LOOM_BYTECODE_TYPE_TILE, LOOM_TYPE_TILE},
+      {LOOM_BYTECODE_TYPE_VECTOR, LOOM_TYPE_VECTOR},
+      {LOOM_BYTECODE_TYPE_VIEW, LOOM_TYPE_VIEW},
+  };
+  for (const auto& carrier : carriers) {
+    for (uint8_t rank = 1; rank <= LOOM_TYPE_MAX_RANK; ++rank) {
+      SCOPED_TRACE(::testing::Message()
+                   << "kind=" << carrier.kind << " rank=" << +rank);
+      const bool has_encoding =
+          carrier.kind != LOOM_TYPE_GROUP && carrier.kind != LOOM_TYPE_VECTOR;
+      // At most ten header/root bytes and two bytes per dimension.
+      uint8_t data[10 + 2 * LOOM_TYPE_MAX_RANK] = {1, 0, 1, carrier.wire_kind};
+      iree_host_size_t data_length = 4;
+      if (carrier.kind != LOOM_TYPE_GROUP) {
+        data[data_length++] = LOOM_SCALAR_TYPE_F32;
+      }
+      data[data_length++] = rank;
+      if (carrier.kind != LOOM_TYPE_GROUP) {
+        data[data_length++] = has_encoding ? 2 : 0;
+        data[data_length++] = has_encoding ? 2 : 0;
+      }
+      if (carrier.kind == LOOM_TYPE_VIEW) {
+        data[data_length++] = 1;
+      }
+      for (uint8_t axis = 0; axis < rank; ++axis) {
+        data[data_length++] = (axis % 3) != 1;
+        data[data_length++] = axis % 3 == 0 ? 0 : axis % 3 == 1 ? 31 : 2;
+      }
+      data[data_length++] = 1;  // Root is the first completed node.
+      data[1] = uint8_t(data_length - 2);
+      iree_arena_allocator_t scope_arena;
+      iree_arena_initialize(&block_pool_, &scope_arena);
+      loom_bytecode_type_bindings_t bindings = {.arena = &scope_arena};
+      const loom_bytecode_attribute_ssa_materialization_scope_t scope = {
+          .symbol_name = IREE_SV("function"),
+          .values = values,
+          .value_count = IREE_ARRAYSIZE(values),
+          .bindings = &bindings,
+      };
+      auto materializer = MakeMaterializer();
+      auto cursor = MakeCursor(data, data_length);
+      loom_attribute_t attr = loom_attr_absent();
+      IREE_ASSERT_OK(loom_bytecode_attribute_materialize_ssa(
+          &materializer, &cursor, nullptr, LOOM_BYTECODE_ATTR_TYPE, 0, &scope,
+          &attr));
+      EXPECT_EQ(cursor.cursor.position, data_length);
+      iree_arena_deinitialize(&scope_arena);
+      iree_arena_reset(&scratch_arena_);
+      iree_arena_block_pool_trim(&block_pool_);
+      const auto type = loom_type_table_get(&module_->types, attr.type_id);
+      ASSERT_EQ(loom_type_kind(type), carrier.kind);
+      ASSERT_EQ(loom_type_rank(type), rank);
+      EXPECT_EQ(loom_type_has_ssa_encoding(type), has_encoding);
+      EXPECT_EQ(type.encoding_id, has_encoding ? values[2] : 0);
+      for (uint8_t axis = 0; axis < rank; ++axis) {
+        if (axis % 3 == 1) {
+          EXPECT_EQ(loom_type_dim(type, axis), loom_dim_pack_static(31));
+        } else {
+          EXPECT_EQ(loom_type_dim(type, axis),
+                    loom_dim_pack_dynamic(axis % 3 == 0 ? LOOM_VALUE_ID_INVALID
+                                                        : values[1]));
+        }
+      }
+    }
+  }
   EXPECT_EQ(error_count_, 0u);
 }
 
@@ -494,8 +673,8 @@ TEST_F(BytecodeAttributeTest, ScopedViewAlignmentValidatesBeforeNarrowing) {
     loom_attribute_t attr = loom_attr_absent();
     error_count_ = 0;
     iree_status_t status = loom_bytecode_attribute_materialize_ssa(
-        &materializer, &cursor, nullptr, LOOM_BYTECODE_ATTR_TYPE, &attr, 0,
-        &scope);
+        &materializer, &cursor, nullptr, LOOM_BYTECODE_ATTR_TYPE, 0, &scope,
+        &attr);
     if (alignment == 0 ||
         loom_type_view_alignment_is_valid(LOOM_SCALAR_TYPE_I64, alignment)) {
       IREE_EXPECT_OK(status);
@@ -557,8 +736,8 @@ TEST_F(BytecodeAttributeTest, ScopedDialectNameUsesFullStringOrdinal) {
   loom_bytecode_reader_cursor_t cursor = MakeCursor(data, sizeof(data));
   loom_attribute_t attr = loom_attr_absent();
   IREE_ASSERT_OK(loom_bytecode_attribute_materialize_ssa(
-      &materializer, &cursor, nullptr, LOOM_BYTECODE_ATTR_TYPE, &attr, 0,
-      &scope));
+      &materializer, &cursor, nullptr, LOOM_BYTECODE_ATTR_TYPE, 0, &scope,
+      &attr));
   iree_arena_deinitialize(&scope_arena);
   iree_arena_reset(&scratch_arena_);
   iree_arena_block_pool_trim(&block_pool_);

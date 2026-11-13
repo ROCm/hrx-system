@@ -120,10 +120,10 @@ static bool loom_serve_text_cache_can_reclaim(
 }
 
 iree_status_t loom_serve_text_cache_forecast(
-    void* self, const loom_serve_residency_forecast_t* request,
-    loom_serve_residency_projection_t* out_projection) {
+    void* self, const loom_runtime_residency_forecast_t* request,
+    loom_runtime_residency_projection_t* out_projection) {
   loom_serve_text_service_t* service = self;
-  *out_projection = (loom_serve_residency_projection_t){0};
+  *out_projection = (loom_runtime_residency_projection_t){0};
   if (!loom_serve_text_cache_can_reclaim(service)) {
     // No inspection of borrowed model state. Its entire pool charge remains
     // unclassified and therefore protected by the common forecast.
@@ -156,7 +156,7 @@ bool loom_serve_text_cache_reclaim_request(void* self) {
     return false;
   }
   service->pool.trim.pending = true;
-  loom_serve_text_readiness_notify(&service->readiness);
+  loom_runtime_readiness_notify(&service->readiness);
   return true;
 }
 
@@ -189,7 +189,7 @@ static iree_status_t loom_serve_text_reclaim_idle(
     // Sparse backing is already valid for admission. Fitting requests retain
     // their completion credit while maintenance accumulates across the cohort.
     loom_serve_text_reserve_result_t admission;
-    loom_serve_execution_frontier_t frontier;
+    loom_runtime_execution_frontier_t frontier;
     loom_serve_text_pending_continuation_t* continuation =
         &service->pending.prepared.request->continuation;
     status = continuation->session
@@ -214,7 +214,7 @@ static iree_status_t loom_serve_text_reclaim_idle(
         admission == LOOM_SERVE_TEXT_RESERVE_ACQUIRED) {
       // The previous frontier was consumed successfully before this call. An
       // unchanged pair needs no new wait.
-      const loom_serve_execution_frontier_t previous =
+      const loom_runtime_execution_frontier_t previous =
           service->completion.frontier;
       const bool complete = previous.semaphores[0] == frontier.semaphores[0] &&
                             previous.semaphores[1] == frontier.semaphores[1] &&
@@ -239,7 +239,7 @@ static iree_status_t loom_serve_text_reclaim_idle(
         service->completion.work != TEXT_WORK_NONE) {
       break;
     }
-    if (loom_serve_residency_cache_is_reclaiming(loom_serve_residency_cache(
+    if (loom_runtime_residency_cache_is_reclaiming(loom_runtime_residency_cache(
             loom_serve_text_model_residency(service->model)))) {
       *out_result = TEXT_ADMISSION_QUEUED;
       break;
@@ -458,9 +458,9 @@ static iree_status_t loom_serve_text_prepare_media(
         service->pending.values[service->pending.count - 1]->receipt.serial;
   }
   if (!service->projector) {
-    loom_serve_finite_model_t* model = NULL;
+    loom_service_finite_model_t* model = NULL;
     iree_status_t status =
-        loom_serve_finite_component_prepare(service->image, &model);
+        loom_service_finite_component_prepare(service->image, &model);
     if (!iree_status_is_ok(status)) {
       // Registration/source preparation is service availability, not a defect
       // in this HTTP payload. Preserve the component's original diagnostic.
@@ -480,8 +480,8 @@ static iree_status_t loom_serve_text_prepare_media(
                               "image queue extent overflow");
     }
     IREE_RETURN_IF_ERROR(loom_serve_text_media_projector_allocate(
-        model, capacity, service->readiness.cpu.executor,
-        service->readiness.device.proactor, service->readiness.observer,
+        model, capacity, service->readiness.executor,
+        service->readiness.proactor, service->readiness.observer,
         service->host_allocator, &service->projector));
   }
   loom_serve_text_media_projector_offer(
@@ -504,13 +504,13 @@ static iree_status_t loom_serve_text_reject_prepared(
 }
 
 iree_status_t loom_serve_text_complete_preparation(
-    loom_serve_text_service_t* service, loom_serve_service_flags_t flags,
+    loom_serve_text_service_t* service, loom_runtime_service_flags_t flags,
     iree_status_t status) {
   loom_serve_text_pending_request_t* pending =
       service->pending.prepared.request;
   const iree_host_size_t index = service->pending.prepared.index;
   const bool cancelled =
-      iree_any_bit_set(flags, LOOM_SERVE_SERVICE_FLAG_STOPPING) ||
+      iree_any_bit_set(flags, LOOM_RUNTIME_SERVICE_FLAG_STOPPING) ||
       !pending->consumer.vtable->is_open(pending->consumer.self);
   if (!iree_status_is_ok(status)) {
     switch (iree_status_code(status)) {
@@ -553,10 +553,10 @@ iree_status_t loom_serve_text_complete_preparation(
 }
 
 static iree_status_t loom_serve_text_admit_request(
-    loom_serve_text_service_t* service, loom_serve_service_flags_t flags) {
+    loom_serve_text_service_t* service, loom_runtime_service_flags_t flags) {
   loom_serve_text_pending_request_t* pending =
       service->pending.prepared.request;
-  if (iree_any_bit_set(flags, LOOM_SERVE_SERVICE_FLAG_STOPPING) ||
+  if (iree_any_bit_set(flags, LOOM_RUNTIME_SERVICE_FLAG_STOPPING) ||
       !pending->consumer.vtable->is_open(pending->consumer.self)) {
     loom_serve_text_reset_session(service, service->pending.prepared.session);
     loom_serve_text_pending_cancel(service, service->pending.prepared.index);
@@ -575,13 +575,13 @@ static iree_status_t loom_serve_text_admit_request(
 }
 
 iree_status_t loom_serve_text_complete_reservation(
-    loom_serve_text_service_t* service, loom_serve_service_flags_t flags) {
+    loom_serve_text_service_t* service, loom_runtime_service_flags_t flags) {
   loom_serve_text_row_complete_reserve(service->pending.prepared.session->row);
   return loom_serve_text_admit_request(service, flags);
 }
 
 iree_status_t loom_serve_text_admit_pending(loom_serve_text_service_t* service,
-                                            loom_serve_service_flags_t flags,
+                                            loom_runtime_service_flags_t flags,
                                             bool allow_preparation) {
   // Cancellation can leave a completed full-cache exchange without its
   // incoming admission. Settle that excess here, never in terminal teardown's
@@ -716,7 +716,7 @@ iree_status_t loom_serve_text_admit_pending(loom_serve_text_service_t* service,
         loom_serve_text_media_projector_start(service->projector);
       }
       bool active =
-          iree_any_bit_set(flags, LOOM_SERVE_SERVICE_FLAG_SHARED_ACTIVITY);
+          iree_any_bit_set(flags, LOOM_RUNTIME_SERVICE_FLAG_SHARED_ACTIVITY);
       active |= loom_serve_text_media_projector_is_pending(service->projector);
       for (iree_host_size_t i = 0; i < service->pending.count; ++i) {
         active |= service->pending.values[i] != pending &&
@@ -733,7 +733,7 @@ iree_status_t loom_serve_text_admit_pending(loom_serve_text_service_t* service,
         const bool probe = loom_serve_text_admission_blocked(
             &service->pending.admission, service->pending.count);
         if (previous != service->pending.admission.cursor) {
-          loom_serve_residency_cancel_admission(
+          loom_runtime_residency_cancel_admission(
               loom_serve_text_model_residency(service->model));
           memset(&service->pending.prepared, 0,
                  sizeof(service->pending.prepared));

@@ -7,7 +7,7 @@ project(iree_cmake_hal_cts_test C CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(IREE_BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}")
 set(IREE_PACKAGE_ROOT_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
-set(IREE_PACKAGE_ROOT_PREFIX "iree/hal/drivers/amd/gpu/cts")
+set(IREE_PACKAGE_ROOT_PREFIX "iree/hal/driver/amd/gpu/cts")
 # BUILD packages share a native scope while retaining distinct output roots.
 set(IREE_PACKAGE_BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}/cts")
 file(MAKE_DIRECTORY "${IREE_PACKAGE_BINARY_DIR}")
@@ -66,4 +66,4 @@ iree_cc_binary(NAME probe SRCS main.cc
 endif()
 iree_finalize_target_dependencies()
 file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/probe-$<CONFIG>.txt"
-  CONTENT "$<TARGET_FILE:iree_hal_drivers_amd_gpu_cts_probe>\n")
+  CONTENT "$<TARGET_FILE:iree_hal_driver_amd_gpu_cts_probe>\n")

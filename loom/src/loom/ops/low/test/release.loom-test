@@ -1,0 +1,72 @@
+// Managed release is ordinary source IR, including inside target assembly,
+// and survives the same binary roundtrip as other structural operations.
+// RUN: format bytecode
+type.decl import("provider", "object") @Object
+
+low.func.def target<vm.core> @release(%owner: reg<vm.ref : ref<@Object>>, %pointer: reg<vm.ref : ptr<@Object>>) asm {
+  low.release %owner : reg<vm.ref : ref<@Object>>
+  low.release %pointer : reg<vm.ref : ptr<@Object>>
+  return
+}
+
+// ====
+// A numerical register has no managed lifetime to release.
+// RUN: verify
+low.func.def target<vm.core> @numeric(%value: reg<vm.value>) asm {
+  // ERROR@+1: TYPE/003 {operand_name="value", actual_type="reg<vm.value>", expected_constraint="one complete ref or ptr register"}
+  low.release %value : reg<vm.value>
+  return
+}
+
+// ====
+// A register bank without a semantic payload cannot authorize destruction.
+// RUN: verify
+low.func.def target<vm.core> @untyped(%value: reg<vm.ref>) asm {
+  // ERROR@+1: TYPE/003 {operand_name="value", actual_type="reg<vm.ref>", expected_constraint="one complete ref or ptr register"}
+  low.release %value : reg<vm.ref>
+  return
+}
+
+// ====
+// A managed carrier is indivisible; arbitrary register ranges are invalid.
+// RUN: verify
+type.decl import("provider", "object") @Object
+low.func.def target<vm.core> @partition(%value: reg<vm.ref x2 : ptr<@Object>>) asm {
+  // ERROR@+1: TYPE/003 {operand_name="value", actual_type="reg<vm.ref x2 : ptr<@Object>>", expected_constraint="one complete ref or ptr register"}
+  low.release %value : reg<vm.ref x2 : ptr<@Object>>
+  return
+}
+
+// ====
+// Releasing a source owner invalidates every required storage alias.
+// RUN: verify
+type.decl import("provider", "object") @Object
+low.func.def target<vm.core> @owner_alias(%owner: reg<vm.ref : ref<@Object>>) asm {
+  %alias = low.assume %owner [] : reg<vm.ref : ref<@Object>>
+  low.release %owner : reg<vm.ref : ref<@Object>>
+  // ERROR@+1: DOMINANCE/002 {value_name="alias", consuming_op="low.release"}
+  low.release %alias : reg<vm.ref : ref<@Object>>
+  return
+}
+
+// ====
+// A borrowed handle is also invalid after its local carrier is released.
+// RUN: verify
+type.decl import("provider", "object") @Object
+low.func.def target<vm.core> @borrow_reuse(%pointer: reg<vm.ref : ptr<@Object>>) -> (reg<vm.ref : ptr<@Object>>) asm {
+  low.release %pointer : reg<vm.ref : ptr<@Object>>
+  // ERROR@+1: DOMINANCE/002 {value_name="pointer", consuming_op="low.release"}
+  return %pointer
+}
+
+// ====
+// The semantic payload does not turn a numerical register into a reference
+// bank; release must never reinterpret the corresponding reference ordinal.
+// RUN: verify
+type.decl import("provider", "object") @Object
+
+low.func.def target<vm.core> @wrong_bank(%value: reg<vm.value : ptr<@Object>>) asm {
+  // ERROR@+1: TYPE/003 {operand_name="value", actual_type="reg<vm.value : ptr<@Object>>", expected_constraint="managed reference register class"}
+  low.release %value : reg<vm.value : ptr<@Object>>
+  return
+}

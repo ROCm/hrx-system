@@ -6,7 +6,7 @@
 
 #include <utility>
 
-#include "loom/serve/runtime/execution/execution_testing.h"
+#include "loom/runtime/execution/execution_testing.h"
 #include "loom/serve/service/text/model_instance.h"
 #include "loom/serve/service/text/service_test_fixture.h"
 
@@ -26,15 +26,15 @@ class GroupTextServiceTest : public SourceTextServiceTest {
   // Drives the actual owner state machine, including draining every accepted
   // callback after cancellation. No scheduler worker blocks on this join.
   iree_status_t Prepare(size_t index, bool cancel,
-                        loom_serve_compilation_report_t* report,
+                        loom_runtime_compilation_report_t* report,
                         loom_serve_text_model_t** out_model) {
     const auto options = ModelOptions();
     iree_notification_t notification;
     iree_notification_initialize(&notification);
     loom_serve_text_load_t* load = nullptr;
     auto status = loom_serve_text_load_allocate(
-        loom_serve_device_group_at(group_, index),
-        loom_serve_device_group_pool_at(group_, index), &options,
+        loom_runtime_device_group_at(group_, index),
+        loom_runtime_device_group_pool_at(group_, index), &options,
         [](void* payload) {
           iree_notification_post(static_cast<iree_notification_t*>(payload),
                                  IREE_ALL_WAITERS);
@@ -74,10 +74,11 @@ class GroupTextServiceTest : public SourceTextServiceTest {
 
 TEST_F(GroupTextServiceTest,
        SharedNativeArtifactsSurviveOriginalAndCancelledPeerModels) {
-  ASSERT_EQ(loom_serve_device_group_count(group_), 2u);
-  EXPECT_NE(loom_serve_device_handle(loom_serve_device_group_at(group_, 0)),
-            loom_serve_device_handle(loom_serve_device_group_at(group_, 1)));
-  loom_serve_compilation_report_t first = {}, second = {}, cancelled = {};
+  ASSERT_EQ(loom_runtime_device_group_count(group_), 2u);
+  EXPECT_NE(
+      loom_runtime_device_handle(loom_runtime_device_group_at(group_, 0)),
+      loom_runtime_device_handle(loom_runtime_device_group_at(group_, 1)));
+  loom_runtime_compilation_report_t first = {}, second = {}, cancelled = {};
   IREE_ASSERT_OK(Prepare(0, false, &first, &original_));
   ASSERT_GT(first.kernels, 0u);
   IREE_ASSERT_OK(Prepare(1, false, &second, &model_));
@@ -91,7 +92,7 @@ TEST_F(GroupTextServiceTest,
   Start();
   const std::string prompt = "abxa";
   const int client = Send(Request(Message("user", prompt), 4));
-  const auto before = loom_serve_pool_statistics(storage_owner_);
+  const auto before = loom_runtime_pool_statistics(storage_owner_);
   IREE_ASSERT_STATUS_IS(IREE_STATUS_CANCELLED,
                         Prepare(0, true, &cancelled, &cancelled_));
   ASSERT_NE(cancelled_, nullptr);
@@ -99,7 +100,7 @@ TEST_F(GroupTextServiceTest,
   IREE_ASSERT_OK(
       loom_serve_text_model_free_retired(std::exchange(cancelled_, nullptr)));
   EXPECT_EQ(Content(Read(client)), Oracle::Complete(prompt, 4));
-  const auto after = loom_serve_pool_statistics(storage_owner_);
+  const auto after = loom_runtime_pool_statistics(storage_owner_);
   EXPECT_EQ(after.retained.reserved_bytes, before.retained.reserved_bytes);
   EXPECT_EQ(after.retained.committed_bytes, before.retained.committed_bytes);
   EXPECT_EQ(Content(Read(Send(Request(Message("user", "bax"), 4)))),
@@ -108,28 +109,29 @@ TEST_F(GroupTextServiceTest,
 
 TEST_F(GroupTextServiceTest,
        PlacedStagesRunOnBothFamiliesWithJoinedPublication) {
-  const loom_serve_pool_options_t pool_options = {};
-  IREE_ASSERT_OK(loom_serve_device_group_create_pool(
+  const loom_runtime_pool_options_t pool_options = {};
+  IREE_ASSERT_OK(loom_runtime_device_group_create_pool(
       group_, {IREE_SV("placed-text"), 3}, &pool_options, &storage_owner_));
   const loom_model_device_placement_t placement[] = {
       {IREE_SV("advance"), IREE_SV("device1")},
       {IREE_SV("group_residual"), IREE_SV("device1")},
       {IREE_SV("*"), IREE_SV("device0")}};
   auto options = ModelOptions();
-  options.group_mode = LOOM_SERVE_GROUP_MODE_TWO_BANK;
+  options.group_mode = LOOM_RUNTIME_GROUP_MODE_TWO_BANK;
   options.device_placement = {IREE_ARRAYSIZE(placement), placement};
   IREE_ASSERT_OK(loom_serve_text_model_allocate(
       device_, storage_owner_, &options, host_allocator_, &model_));
   EXPECT_EQ(model_->placement.count, 2u);
-  const auto* foreign_family = iree_hal_queue_family(
-      loom_serve_device_dispatch_queue(loom_serve_device_group_at(group_, 1)));
+  const auto* foreign_family =
+      iree_hal_queue_family(loom_runtime_device_dispatch_queue(
+          loom_runtime_device_group_at(group_, 1)));
   size_t foreign_stages = 0;
   for (size_t i = 0; i < model_->stage_count; ++i) {
     if (!model_->stages[i].execution) {
       continue;
     }
     ++foreign_stages;
-    EXPECT_EQ(loom_serve_jit_stage_queue_family(model_->stages[i].compiled),
+    EXPECT_EQ(loom_runtime_jit_stage_queue_family(model_->stages[i].compiled),
               foreign_family);
     EXPECT_EQ(iree_hal_command_buffer_queue_family(model_->stages[i].command),
               foreign_family);
@@ -143,13 +145,13 @@ TEST_F(GroupTextServiceTest,
                               .token_ids = tokens + 3,
                               .flags = LOOM_SERVICE_TEXT_SPAN_FLAG_SELECT,
                               .input_offset = 3};
-  loom_serve_execution_frontier_t frontier;
+  loom_runtime_execution_frontier_t frontier;
   IREE_ASSERT_OK(
       loom_serve_text_model_submit_epoch_pair(model_, 2, &a, 1, &b, &frontier));
   EXPECT_EQ(loom_serve_text_row_position(loom_serve_text_model_row(model_, 0)),
             0u);
   IREE_ASSERT_OK(
-      loom_serve_execution_wait(model_->execution, frontier.values[0]));
+      loom_runtime_execution_wait(model_->execution, frontier.values[0]));
   loom_serve_text_result_t result;
   IREE_ASSERT_OK(loom_serve_text_model_complete_epoch(model_, &result));
   Oracle oracle;
@@ -187,17 +189,17 @@ TEST_F(GroupTextServiceTest, PlacementRejectsUnknownRootsAndUnsharedPool) {
 
 TEST_F(GroupTextServiceTest,
        ForeignStageRejectionRetainsAcceptedGroupForRetirement) {
-  const loom_serve_pool_options_t pool_options = {};
-  IREE_ASSERT_OK(loom_serve_device_group_create_pool(
+  const loom_runtime_pool_options_t pool_options = {};
+  IREE_ASSERT_OK(loom_runtime_device_group_create_pool(
       group_, {IREE_SV("placed-failure"), 3}, &pool_options, &storage_owner_));
   const loom_model_device_placement_t placement = {IREE_SV("group_residual"),
                                                    IREE_SV("device1")};
   auto options = ModelOptions();
-  options.group_mode = LOOM_SERVE_GROUP_MODE_TWO_BANK;
+  options.group_mode = LOOM_RUNTIME_GROUP_MODE_TWO_BANK;
   options.device_placement = {1, &placement};
   IREE_ASSERT_OK(loom_serve_text_model_allocate(
       device_, storage_owner_, &options, host_allocator_, &model_));
-  loom_serve_execution_t* peer = nullptr;
+  loom_runtime_execution_t* peer = nullptr;
   for (size_t i = 0; i < model_->stage_count; ++i) {
     if (model_->stages[i].execution) {
       peer = model_->stages[i].execution;
@@ -205,7 +207,7 @@ TEST_F(GroupTextServiceTest,
   }
   ASSERT_NE(peer, nullptr);
   // Four uploads and two prefixes precede the first foreign residual.
-  IREE_ASSERT_OK(loom_serve_execution_reject_group_node_for_testing(peer, 6));
+  IREE_ASSERT_OK(loom_runtime_execution_reject_group_node_for_testing(peer, 6));
   const int32_t tokens[] = {0, 1, 2, 0, 1};
   loom_serve_text_span_t a = {
       .row_index = 0, .token_count = 3, .token_ids = tokens};
@@ -214,7 +216,7 @@ TEST_F(GroupTextServiceTest,
                               .token_ids = tokens + 3,
                               .flags = LOOM_SERVICE_TEXT_SPAN_FLAG_SELECT,
                               .input_offset = 3};
-  loom_serve_execution_frontier_t frontier;
+  loom_runtime_execution_frontier_t frontier;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INTERNAL,
       loom_serve_text_model_submit_epoch_pair(model_, 2, &a, 1, &b, &frontier));
@@ -225,8 +227,8 @@ TEST_F(GroupTextServiceTest,
 }
 
 TEST_F(GroupTextServiceTest, ModelCardPlacementFeedsTheNormalLoader) {
-  const loom_serve_pool_options_t pool_options = {};
-  IREE_ASSERT_OK(loom_serve_device_group_create_pool(
+  const loom_runtime_pool_options_t pool_options = {};
+  IREE_ASSERT_OK(loom_runtime_device_group_create_pool(
       group_, {IREE_SV("card-placement"), 3}, &pool_options, &storage_owner_));
   std::ifstream input(directory_ + "/native.card.json");
   ASSERT_TRUE(input.good());
@@ -257,18 +259,19 @@ TEST_F(GroupTextServiceTest, ModelCardPlacementFeedsTheNormalLoader) {
   IREE_ASSERT_OK(loom_serve_text_model_allocate(
       device_, storage_owner_, &options, host_allocator_, &model_));
   EXPECT_EQ(model_->placement.count, 2u);
-  loom_serve_execution_t* foreign = nullptr;
+  loom_runtime_execution_t* foreign = nullptr;
   for (size_t i = 0; i < model_->stage_count; ++i) {
     if (model_->stages[i].execution) {
       foreign = model_->stages[i].execution;
     }
   }
   ASSERT_NE(foreign, nullptr);
-  const auto before = loom_serve_execution_frontier(foreign);
+  const auto before = loom_runtime_execution_frontier(foreign);
   const int32_t tokens[] = {0, 1, 2};
   IREE_ASSERT_OK(loom_serve_text_row_prefill(
       loom_serve_text_model_row(model_, 0), 3, tokens));
-  EXPECT_GT(loom_serve_execution_frontier(foreign).values[0], before.values[0]);
+  EXPECT_GT(loom_runtime_execution_frontier(foreign).values[0],
+            before.values[0]);
   EXPECT_EQ(loom_serve_text_row_position(loom_serve_text_model_row(model_, 0)),
             3u);
 }
@@ -290,11 +293,11 @@ class FfnGroupTextServiceTest : public GroupTextServiceTest {
           prepare_, prepare_, "config.def @fixture.resident = false",
           "config.def @fixture.resident = true"));
     }
-    const loom_serve_pool_options_t pool_options = {
+    const loom_runtime_pool_options_t pool_options = {
         .uncached = resident, .uncached_device_mask = resident ? 1u : 0u};
     const auto name = iree_make_cstring_view(
         ::testing::UnitTest::GetInstance()->current_test_info()->name());
-    IREE_ASSERT_OK(loom_serve_device_group_create_pool(
+    IREE_ASSERT_OK(loom_runtime_device_group_create_pool(
         group_, {name, 3}, &pool_options, &storage_owner_));
     auto options = FfnOptions(draft);
     IREE_ASSERT_OK(loom_serve_text_model_allocate(
@@ -304,7 +307,7 @@ class FfnGroupTextServiceTest : public GroupTextServiceTest {
   loom_serve_text_options_t FfnOptions(bool draft) const {
     auto options = ModelOptions();
     options.sources.prepare = iree_make_cstring_view(prepare_.c_str());
-    options.group_mode = LOOM_SERVE_GROUP_MODE_TWO_BANK;
+    options.group_mode = LOOM_RUNTIME_GROUP_MODE_TWO_BANK;
     options.device_placement = {IREE_ARRAYSIZE(placement_), placement_};
     options.draft_depth = draft ? 3 : 0;
     return options;
@@ -319,9 +322,9 @@ class FfnGroupTextServiceTest : public GroupTextServiceTest {
                      .target = words.data(),
                      .length = words.size() * 4}};
     uint64_t value = 0;
-    IREE_EXPECT_OK(
-        loom_serve_execution_transfer(model->execution, 1, &download, &value));
-    IREE_EXPECT_OK(loom_serve_execution_wait(model->execution, value));
+    IREE_EXPECT_OK(loom_runtime_execution_transfer(model->execution, 1,
+                                                   &download, &value));
+    IREE_EXPECT_OK(loom_runtime_execution_wait(model->execution, value));
     return words;
   }
 
@@ -344,13 +347,13 @@ TEST_F(FfnGroupTextServiceTest,
                               .token_ids = tokens + 3,
                               .flags = LOOM_SERVICE_TEXT_SPAN_FLAG_SELECT,
                               .input_offset = 3};
-  loom_serve_execution_frontier_t frontier;
+  loom_runtime_execution_frontier_t frontier;
   IREE_ASSERT_OK(
       loom_serve_text_model_submit_epoch_pair(model_, 2, &a, 1, &b, &frontier));
   EXPECT_EQ(loom_serve_text_row_position(loom_serve_text_model_row(model_, 0)),
             0u);
   IREE_ASSERT_OK(
-      loom_serve_execution_wait(model_->execution, frontier.values[0]));
+      loom_runtime_execution_wait(model_->execution, frontier.values[0]));
   loom_serve_text_result_t result;
   IREE_ASSERT_OK(loom_serve_text_model_complete_epoch(model_, &result));
   Oracle oracle;
@@ -385,11 +388,11 @@ TEST_F(FfnGroupTextServiceTest,
         .token_ids = tokens + 3,
         .flags = LOOM_SERVICE_TEXT_SPAN_FLAG_SELECT,
         .input_offset = 3};
-    loom_serve_execution_frontier_t frontier;
+    loom_runtime_execution_frontier_t frontier;
     IREE_ASSERT_OK(loom_serve_text_model_submit_epoch_pair(model_, 2, &a, 1, &b,
                                                            &frontier));
     IREE_ASSERT_OK(
-        loom_serve_execution_wait(model_->execution, frontier.values[0]));
+        loom_runtime_execution_wait(model_->execution, frontier.values[0]));
     for (size_t bank = 0; bank < 2; ++bank) {
       iree_hal_buffer_mapping_t mapping = {};
       IREE_ASSERT_OK(iree_hal_buffer_map_range(
@@ -415,10 +418,10 @@ TEST_F(FfnGroupTextServiceTest,
 TEST_F(FfnGroupTextServiceTest,
        ResidentTextRejectsCachedConsumerEvenWhenProducerHasLiveAccess) {
   ASSERT_NO_FATAL_FAILURE(PrepareFfn(false, true));
-  const loom_serve_pool_options_t options = {.uncached = true,
-                                             .uncached_device_mask = 2};
-  loom_serve_pool_t* pool = nullptr;
-  IREE_ASSERT_OK(loom_serve_device_group_create_pool(
+  const loom_runtime_pool_options_t options = {.uncached = true,
+                                               .uncached_device_mask = 2};
+  loom_runtime_pool_t* pool = nullptr;
+  IREE_ASSERT_OK(loom_runtime_device_group_create_pool(
       group_, {IREE_SV("cached_consumer"), 3}, &options, &pool));
   auto model_options = FfnOptions(false);
   loom_serve_text_model_t* rejected = nullptr;
@@ -440,9 +443,9 @@ TEST_F(FfnGroupTextServiceTest,
                                     .token_ids = tokens + 3,
                                     .flags = LOOM_SERVICE_TEXT_SPAN_FLAG_SELECT,
                                     .input_offset = 3};
-  IREE_ASSERT_OK(
-      loom_serve_execution_reject_group_node_for_testing(model_->execution, 9));
-  loom_serve_execution_frontier_t frontier;
+  IREE_ASSERT_OK(loom_runtime_execution_reject_group_node_for_testing(
+      model_->execution, 9));
+  loom_runtime_execution_frontier_t frontier;
   IREE_ASSERT_STATUS_IS(
       IREE_STATUS_INTERNAL,
       loom_serve_text_model_submit_epoch_pair(model_, 2, &a, 1, &b, &frontier));
@@ -463,7 +466,7 @@ TEST_F(FfnGroupTextServiceTest,
 
 TEST_F(FfnGroupTextServiceTest, RejectedSecondaryRetiresWithoutPublication) {
   ASSERT_NO_FATAL_FAILURE(PrepareFfn());
-  loom_serve_execution_t* peer = nullptr;
+  loom_runtime_execution_t* peer = nullptr;
   for (size_t i = 0; i < model_->stage_count; ++i) {
     if (model_->stages[i].execution) {
       peer = model_->stages[i].execution;
@@ -471,7 +474,7 @@ TEST_F(FfnGroupTextServiceTest, RejectedSecondaryRetiresWithoutPublication) {
   }
   ASSERT_NE(peer, nullptr);
   // Four uploads, bank A prefix and its primary branch precede this node.
-  IREE_ASSERT_OK(loom_serve_execution_reject_group_node_for_testing(peer, 6));
+  IREE_ASSERT_OK(loom_runtime_execution_reject_group_node_for_testing(peer, 6));
   const int32_t tokens[] = {0, 1, 2, 2, 0};
   loom_serve_text_span_t a = {
       .row_index = 0, .token_count = 3, .token_ids = tokens};
@@ -479,7 +482,7 @@ TEST_F(FfnGroupTextServiceTest, RejectedSecondaryRetiresWithoutPublication) {
                               .token_count = 2,
                               .token_ids = tokens + 3,
                               .input_offset = 3};
-  loom_serve_execution_frontier_t frontier;
+  loom_runtime_execution_frontier_t frontier;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INTERNAL,
       loom_serve_text_model_submit_epoch_pair(model_, 2, &a, 1, &b, &frontier));
@@ -492,7 +495,7 @@ TEST_F(FfnGroupTextServiceTest, RejectedSecondaryRetiresWithoutPublication) {
 TEST_F(FfnGroupTextServiceTest, DraftCacheMatchesSingleAfterBothMerges) {
   ASSERT_NO_FATAL_FAILURE(PrepareFfn(true));
   auto options = FfnOptions(true);
-  options.group_mode = LOOM_SERVE_GROUP_MODE_SINGLE;
+  options.group_mode = LOOM_RUNTIME_GROUP_MODE_SINGLE;
   IREE_ASSERT_OK(loom_serve_text_model_allocate(
       device_, storage_owner_, &options, host_allocator_, &original_));
   const int32_t tokens[] = {0, 1, 2, 2, 0};
@@ -506,11 +509,11 @@ TEST_F(FfnGroupTextServiceTest, DraftCacheMatchesSingleAfterBothMerges) {
                               .token_ids = tokens + 3,
                               .flags = LOOM_SERVICE_TEXT_SPAN_FLAG_SELECT,
                               .input_offset = 3};
-  loom_serve_execution_frontier_t frontier;
+  loom_runtime_execution_frontier_t frontier;
   IREE_ASSERT_OK(
       loom_serve_text_model_submit_epoch_pair(model_, 2, &a, 1, &b, &frontier));
   IREE_ASSERT_OK(
-      loom_serve_execution_wait(model_->execution, frontier.values[0]));
+      loom_runtime_execution_wait(model_->execution, frontier.values[0]));
   IREE_ASSERT_OK(loom_serve_text_model_complete_epoch(model_, nullptr));
   EXPECT_EQ(DraftCache(model_), DraftCache(original_));
   auto* grouped = loom_serve_text_model_row(model_, 0);
@@ -538,11 +541,11 @@ TEST_F(GroupTextServiceTest,
         loom_serve_text_group_exchange_create(2, host_allocator_, &exchange));
     iree_hal_semaphore_t* ready = nullptr;
     IREE_ASSERT_OK(loom_serve_text_group_exchange_add(
-        exchange, loom_serve_device_handle(device_), buffer, 0, 192, &ready));
+        exchange, loom_runtime_device_handle(device_), buffer, 0, 192, &ready));
     iree_hal_semaphore_t* alias = nullptr;
     IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                           loom_serve_text_group_exchange_add(
-                              exchange, loom_serve_device_handle(device_),
+                              exchange, loom_runtime_device_handle(device_),
                               buffer, 0, 192, &alias));
     EXPECT_EQ(alias, nullptr);
     EXPECT_EQ(words[0], 1u);
@@ -588,7 +591,7 @@ TEST_F(GroupTextServiceTest,
     IREE_ASSERT_OK(
         loom_serve_text_group_exchange_create(1, host_allocator_, &exchange));
     IREE_ASSERT_OK(loom_serve_text_group_exchange_add_resident(
-        exchange, loom_serve_device_handle(device_), buffer, 0, 192, 256));
+        exchange, loom_runtime_device_handle(device_), buffer, 0, 192, 256));
     EXPECT_EQ(words[0], 0u);
     EXPECT_EQ(words[16], 0u);
     EXPECT_EQ(words[32], 0u);
@@ -597,8 +600,8 @@ TEST_F(GroupTextServiceTest,
     EXPECT_EQ(words[32], 1u);
     EXPECT_EQ(words[0], 0u);
     if (invocation == 1) {
-      iree_atomic_store(reinterpret_cast<iree_atomic_int32_t*>(words + 16),
-                         256, iree_memory_order_release);
+      iree_atomic_store(reinterpret_cast<iree_atomic_int32_t*>(words + 16), 256,
+                        iree_memory_order_release);
       IREE_ASSERT_OK(loom_serve_text_group_exchange_check(exchange));
       loom_serve_text_group_exchange_free(exchange);
       EXPECT_EQ(words[0], 0u);
@@ -631,7 +634,7 @@ TEST_F(GroupTextServiceTest,
       loom_serve_text_group_exchange_create(1, host_allocator_, &exchange));
   iree_hal_semaphore_t* ready = nullptr;
   IREE_ASSERT_OK(loom_serve_text_group_exchange_add(
-      exchange, loom_serve_device_handle(device_), buffer, 0, 192, &ready));
+      exchange, loom_runtime_device_handle(device_), buffer, 0, 192, &ready));
   IREE_ASSERT_OK(
       loom_serve_text_group_exchange_start(exchange, INT64_C(1000000)));
   IREE_EXPECT_STATUS_IS(

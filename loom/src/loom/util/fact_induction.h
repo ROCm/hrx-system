@@ -34,10 +34,20 @@ enum loom_value_fact_induction_flag_bits_e {
 };
 typedef uint8_t loom_value_fact_induction_flags_t;
 
+// Update family recognized for a controlling loop recurrence.
+enum loom_value_fact_induction_update_e {
+  // Add or subtract an invariant step under an ordered comparison guard.
+  LOOM_VALUE_FACT_INDUCTION_UPDATE_ADDITIVE = 0,
+  // Logically shift right by an invariant amount while the state is nonzero.
+  LOOM_VALUE_FACT_INDUCTION_UPDATE_SHRUI_TO_ZERO = 1,
+};
+typedef uint8_t loom_value_fact_induction_update_t;
+
 // A recognized header-tested recurrence. Its inputs are invariant within the
-// loop. The guard may observe either the current header value or the next
-// state produced by this same update. Additional exits preserve its iteration
-// bound, not an exact count.
+// loop. An additive guard may observe either the current header value or the
+// next state produced by the same update; a logical-shift guard observes the
+// current state. Additional exits preserve its iteration bound, not an exact
+// count.
 // The owning fact solver refreshes this equation after semantic edits; numeric
 // queries consume current table entries, never cached counts.
 typedef struct loom_value_fact_induction_t {
@@ -45,19 +55,23 @@ typedef struct loom_value_fact_induction_t {
   loom_value_id_t value;
   // Value entering the header from outside the loop.
   loom_value_fact_recurrence_operand_t initial_value;
-  // Invariant bound tested by the header guard.
+  // Invariant operand tested by the header guard. Logical-shift recurrences
+  // retain the literal zero establishing their nonzero continuation guard.
   loom_value_fact_recurrence_operand_t bound;
-  // Invariant operand added or subtracted by the backedge. An absent operand
-  // can still establish zero trips from a false entry guard.
+  // Invariant additive step or logical-right-shift amount. An absent additive
+  // step can still establish zero trips from a false entry guard.
   loom_value_fact_recurrence_operand_t step;
-  // Signedness, direction and inclusivity of the guard.
+  // Signedness, direction and inclusivity of an additive guard.
   loom_loop_bound_flags_t bound_flags;
   // Header termination and backedge operation semantics.
   loom_value_fact_induction_flags_t flags;
+  // Backedge update family governing numeric evaluation.
+  loom_value_fact_induction_update_t update;
 } loom_value_fact_induction_t;
 
 // Returns the current additive delta, interpreting the retained backedge sign.
-// Exact deltas retain modular i64 bits; ranged deltas use mathematical bounds.
+// The induction must use the additive update family. Exact deltas retain
+// modular i64 bits; ranged deltas use mathematical bounds.
 loom_value_facts_t loom_value_fact_induction_step_facts(
     const loom_value_fact_table_t* table,
     const loom_value_fact_induction_t* induction);

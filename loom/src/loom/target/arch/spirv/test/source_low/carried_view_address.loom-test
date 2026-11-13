@@ -1,0 +1,42 @@
+// RUN: emit source-low target=spirv:vulkan1.3+bda output=low control-flow=structured-low
+
+// The subview's pointer is needed by both the backedge and the loop result.
+func.def @advance(%input: view<2xi32>, %count: index) -> (i32) where [range(%count, 0, 4)] {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %initial_sum = scalar.constant 0 : i32
+  %last, %sum = scf.for %iteration = [%begin to %count step %step](%window = %input : view<2xi32>, %accumulator = %initial_sum : i32) -> (view<2xi32>, i32) {
+    %value = view.load %window[0] : view<2xi32> -> i32
+    %next_sum = scalar.addi %accumulator, %value : i32
+    view.store %next_sum, %window[1] : i32, view<2xi32>
+    %next = view.subview %window[1] : view<2xi32> -> view<2xi32>
+    scf.yield %next, %next_sum : view<2xi32>, i32
+  }
+  %tail = view.load %last[0] : view<2xi32> -> i32
+  %result = scalar.addi %sum, %tail : i32
+  func.return %result : i32
+}
+
+// ----
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @advance(%input: reg<spirv.ptr.storage_buffer>, %count: reg<spirv.id : index>) -> (reg<spirv.id : i32>) where [range(%count, 0, 4)] asm {
+  %begin = OpConstant.i32 0 : reg<spirv.id : index>
+  %step = OpConstant.i32 1 : reg<spirv.id : index>
+  %initial_sum = OpConstant.i32 0
+  %last, %sum = low.scf.for signed [%begin to %count step %step] iter_args(%input: reg<spirv.ptr.storage_buffer>, %initial_sum: reg<spirv.id : i32>) -> (reg<spirv.ptr.storage_buffer>, reg<spirv.id : i32>) do(%iteration: reg<spirv.id : index>, %window: reg<spirv.ptr.storage_buffer>, %accumulator: reg<spirv.id : i32>) {
+    %27 = OpConstant.offset64 0
+    %28 = OpPtrAccessChain.storage_buffer.i32.byte_offset %window, %27
+    %value = OpLoad.storage_buffer.i32 %28
+    %next_sum = OpIAdd %accumulator, %value
+    %31 = OpConstant.offset64 4
+    %32 = OpPtrAccessChain.storage_buffer.i32.byte_offset %window, %31
+    OpStore.storage_buffer.i32 %32, %next_sum
+    %34 = OpIAdd.storage_buffer.byte_offset %window, %31
+    %next = OpCopyObject.storage_buffer %34
+    low.scf.yield %next, %next_sum : reg<spirv.ptr.storage_buffer>, reg<spirv.id : i32>
+  }
+  %36 = OpConstant.offset64 0
+  %37 = OpPtrAccessChain.storage_buffer.i32.byte_offset %last, %36
+  %tail = OpLoad.storage_buffer.i32 %37
+  %result = OpIAdd %sum, %tail
+  return %result
+}

@@ -72,6 +72,9 @@ struct loom_value_fact_extension_entry_t {
   } payload;
 };
 
+static_assert(sizeof(loom_value_fact_extension_entry_t) == 120,
+              "fact extension entries must remain pool-sized");
+
 //===----------------------------------------------------------------------===//
 // Payload interning
 //===----------------------------------------------------------------------===//
@@ -83,8 +86,10 @@ static uint32_t loom_value_fact_hash_facts(loom_value_facts_t facts,
 
 static uint32_t loom_value_fact_hash_address_layout(
     loom_value_fact_address_layout_t layout, uint32_t hash) {
-  hash = loom_structural_hash_mix_u32(hash, (uint32_t)layout.kind);
-  hash = loom_structural_hash_mix_u32(hash, layout.rank);
+  hash = loom_structural_hash_mix_u32(
+      hash, layout.kind | ((uint32_t)layout.rank << 8) |
+                ((uint32_t)layout.family_id << 16));
+  hash = loom_structural_hash_mix_u32(hash, layout.static_spec_encoding_id);
   if (layout.kind == LOOM_VALUE_FACT_ADDRESS_LAYOUT_STRIDED &&
       layout.rank > 0 && layout.strides) {
     hash = loom_structural_hash_mix_bytes(
@@ -108,7 +113,9 @@ static uint32_t loom_value_fact_hash_storage_schema(
 static uint32_t loom_value_fact_hash_encoding_summary(
     loom_value_fact_encoding_summary_t summary, uint32_t hash) {
   hash = loom_structural_hash_mix_u32(hash, (uint32_t)summary.role);
-  hash = loom_structural_hash_mix_u32(hash, summary.static_spec_encoding_id);
+  hash = loom_structural_hash_mix_u32(
+      hash,
+      summary.static_spec_encoding_id | ((uint32_t)summary.family_id << 16));
   hash = loom_value_fact_hash_address_layout(summary.address_layout, hash);
   return loom_value_fact_hash_storage_schema(summary.storage_schema, hash);
 }
@@ -198,7 +205,9 @@ static bool loom_value_fact_view_reference_equal(
 static bool loom_value_fact_address_layout_equal(
     loom_value_fact_address_layout_t lhs,
     loom_value_fact_address_layout_t rhs) {
-  if (lhs.kind != rhs.kind || lhs.rank != rhs.rank) {
+  if (lhs.kind != rhs.kind || lhs.rank != rhs.rank ||
+      lhs.family_id != rhs.family_id ||
+      lhs.static_spec_encoding_id != rhs.static_spec_encoding_id) {
     return false;
   }
   if (lhs.kind != LOOM_VALUE_FACT_ADDRESS_LAYOUT_STRIDED) {
@@ -285,7 +294,7 @@ static bool loom_value_fact_storage_schema_equal(
 static bool loom_value_fact_encoding_summary_equal(
     loom_value_fact_encoding_summary_t lhs,
     loom_value_fact_encoding_summary_t rhs) {
-  return lhs.role == rhs.role &&
+  return lhs.role == rhs.role && lhs.family_id == rhs.family_id &&
          lhs.static_spec_encoding_id == rhs.static_spec_encoding_id &&
          loom_value_fact_address_layout_equal(lhs.address_layout,
                                               rhs.address_layout) &&
@@ -641,7 +650,9 @@ static bool loom_value_fact_table_address_layout_equal(
     loom_value_fact_address_layout_t lhs,
     const loom_value_fact_table_t* rhs_table,
     loom_value_fact_address_layout_t rhs) {
-  if (lhs.kind != rhs.kind || lhs.rank != rhs.rank) {
+  if (lhs.kind != rhs.kind || lhs.rank != rhs.rank ||
+      lhs.family_id != rhs.family_id ||
+      lhs.static_spec_encoding_id != rhs.static_spec_encoding_id) {
     return false;
   }
   if (lhs.kind != LOOM_VALUE_FACT_ADDRESS_LAYOUT_STRIDED) {
@@ -656,7 +667,7 @@ static bool loom_value_fact_table_encoding_summary_equal(
     loom_value_fact_encoding_summary_t lhs,
     const loom_value_fact_table_t* rhs_table,
     loom_value_fact_encoding_summary_t rhs) {
-  return lhs.role == rhs.role &&
+  return lhs.role == rhs.role && lhs.family_id == rhs.family_id &&
          lhs.static_spec_encoding_id == rhs.static_spec_encoding_id &&
          loom_value_fact_table_address_layout_equal(
              lhs_table, lhs.address_layout, rhs_table, rhs.address_layout) &&
@@ -1106,8 +1117,11 @@ iree_status_t loom_value_facts_make_encoding_summary(
     loom_fact_context_t* context, loom_value_fact_encoding_summary_t summary,
     loom_value_facts_t* out) {
   if (summary.role == LOOM_ENCODING_ROLE_UNKNOWN &&
+      summary.family_id == LOOM_ENCODING_FAMILY_ID_INVALID &&
       summary.static_spec_encoding_id == 0 &&
       summary.address_layout.kind == LOOM_VALUE_FACT_ADDRESS_LAYOUT_UNKNOWN &&
+      summary.address_layout.family_id == LOOM_ENCODING_FAMILY_ID_INVALID &&
+      summary.address_layout.static_spec_encoding_id == 0 &&
       summary.storage_schema.static_spec_encoding_id == 0 &&
       loom_value_fact_encoded_operand_schema_is_unknown(
           summary.storage_schema.encoded_operand)) {
@@ -1400,6 +1414,29 @@ iree_status_t loom_value_fact_table_meet_for_type(
         target, lhs_table, module, type, lhs, &cloned_extension));
     out_facts->extension_id = cloned_extension.extension_id;
   }
+  return iree_ok_status();
+}
+
+iree_status_t loom_value_fact_table_narrow_for_type(
+    loom_value_fact_table_t* target, const loom_module_t* module,
+    loom_type_t type, const loom_value_fact_table_t* previous_table,
+    loom_value_facts_t previous, const loom_value_fact_table_t* next_table,
+    loom_value_facts_t next, loom_value_facts_t* out_facts) {
+  *out_facts =
+      loom_value_facts_narrow(loom_type_element_type(type), previous, next);
+  const loom_value_fact_domain_t* domain =
+      loom_value_fact_domain_for_type(target, module, type);
+  if (previous.extension_id && next.extension_id && domain &&
+      domain->narrow_extension) {
+    return domain->narrow_extension(domain, module, type, target,
+                                    previous_table, previous, next_table, next,
+                                    out_facts);
+  }
+  loom_value_facts_t extension = loom_value_facts_unknown();
+  IREE_RETURN_IF_ERROR(loom_value_fact_table_clone_fact_for_type(
+      target, previous.extension_id ? previous_table : next_table, module, type,
+      previous.extension_id ? previous : next, &extension));
+  out_facts->extension_id = extension.extension_id;
   return iree_ok_status();
 }
 

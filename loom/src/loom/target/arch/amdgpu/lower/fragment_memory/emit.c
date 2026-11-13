@@ -14,6 +14,7 @@
 #include "loom/ir/types.h"
 #include "loom/ops/low/ops.h"
 #include "loom/ops/vector/fragment.h"
+#include "loom/target/arch/amdgpu/lower/buffer_descriptor.h"
 #include "loom/target/arch/amdgpu/lower/candidates/compare_candidates.h"
 #include "loom/target/arch/amdgpu/lower/constants.h"
 #include "loom/target/arch/amdgpu/lower/emit.h"
@@ -41,77 +42,6 @@ typedef struct loom_amdgpu_fragment_memory_pending_store_t {
   // Cross-lane result-fragment payload paired with low_source_register.
   loom_value_id_t low_paired_source_register;
 } loom_amdgpu_fragment_memory_pending_store_t;
-
-static iree_status_t loom_amdgpu_emit_fragment_memory_packed_b16_load_packet(
-    loom_low_lower_context_t* context, const loom_op_t* source_op,
-    const loom_amdgpu_fragment_memory_plan_t* plan,
-    const loom_amdgpu_fragment_memory_packet_plan_t* packet,
-    loom_amdgpu_fragment_memory_address_state_t* address_state,
-    loom_value_id_t low_packet_resource, loom_type_t vgpr_type,
-    loom_value_id_t low_soffset, loom_value_id_t* out_low_packet) {
-  *out_low_packet = LOOM_VALUE_ID_INVALID;
-  loom_amdgpu_fragment_memory_issued_access_t issued_accesses
-      [LOOM_AMDGPU_FRAGMENT_MEMORY_MAX_ISSUED_ACCESSES_PER_PACKET];
-  const uint16_t issued_access_count =
-      loom_amdgpu_fragment_memory_query_issued_accesses(plan, packet,
-                                                        issued_accesses);
-  IREE_ASSERT_EQ(issued_access_count,
-                 LOOM_AMDGPU_FRAGMENT_PACKED_B16_ELEMENT_COUNT);
-  if (plan->packed_b16_high_descriptor_ref != LOOM_AMDGPU_DESCRIPTOR_REF_NONE) {
-    const loom_amdgpu_fragment_memory_issued_access_t* low_access =
-        &issued_accesses[0];
-    loom_amdgpu_fragment_memory_address_t low_address;
-    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fragment_memory_vaddr(
-        context, source_op, plan, low_access->register_index,
-        low_access->element_index, low_access->descriptor_ref, address_state,
-        vgpr_type, &low_address));
-    loom_value_id_t low_partial_packet = LOOM_VALUE_ID_INVALID;
-    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fragment_load_packet(
-        context, source_op, plan, packet, low_access->element_index,
-        low_access->element_count, vgpr_type, &low_address, low_packet_resource,
-        low_soffset, &low_partial_packet));
-
-    const loom_amdgpu_fragment_memory_issued_access_t* high_access =
-        &issued_accesses[1];
-    loom_amdgpu_fragment_memory_address_t high_address;
-    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fragment_memory_vaddr(
-        context, source_op, plan, high_access->register_index,
-        high_access->element_index, high_access->descriptor_ref, address_state,
-        vgpr_type, &high_address));
-    return loom_amdgpu_emit_fragment_load_high_half_packet(
-        context, source_op, plan, packet, high_access->element_index,
-        high_access->element_count, vgpr_type, &high_address,
-        low_partial_packet, low_packet_resource, low_soffset, out_low_packet);
-  }
-
-  loom_value_id_t low_elements[LOOM_AMDGPU_FRAGMENT_PACKED_B16_ELEMENT_COUNT] =
-      {0};
-  for (uint16_t access_index = 0; access_index < issued_access_count;
-       ++access_index) {
-    const loom_amdgpu_fragment_memory_issued_access_t* access =
-        &issued_accesses[access_index];
-    loom_amdgpu_fragment_memory_address_t address;
-    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fragment_memory_vaddr(
-        context, source_op, plan, access->register_index, access->element_index,
-        access->descriptor_ref, address_state, vgpr_type, &address));
-    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fragment_load_packet(
-        context, source_op, plan, packet, access->element_index,
-        access->element_count, vgpr_type, &address, low_packet_resource,
-        low_soffset, &low_elements[access_index]));
-    IREE_RETURN_IF_ERROR(
-        loom_amdgpu_emit_fragment_memory_low_subword_load_packet(
-            context, source_op, low_elements[access_index], vgpr_type,
-            &low_elements[access_index]));
-  }
-
-  loom_value_id_t high_element = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_shift(
-      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_LSHLREV_B32_LIT, 16,
-      low_elements[1], vgpr_type, &high_element));
-  return loom_amdgpu_emit_binary(
-      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_OR_B32, low_elements[0],
-      high_element, vgpr_type, out_low_packet);
-}
 
 static iree_status_t
 loom_amdgpu_emit_fragment_memory_packed_16bit_result_load_packet(
@@ -166,22 +96,20 @@ loom_amdgpu_emit_fragment_memory_packed_16bit_result_load_packet(
       high_element, vgpr_type, out_low_packet);
 }
 
-static iree_status_t loom_amdgpu_emit_fragment_memory_packed_b16_store_element(
+static iree_status_t loom_amdgpu_emit_fragment_memory_packed_store_element(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_value_id_t low_payload_register, uint16_t element_index,
-    loom_type_t vgpr_type, loom_value_id_t* out_low_element) {
+    uint16_t element_bit_count, loom_type_t vgpr_type,
+    loom_value_id_t* out_low_element) {
   *out_low_element = LOOM_VALUE_ID_INVALID;
   if (element_index == 0) {
     return loom_amdgpu_materialize_low_vgpr_b32(
         context, source_op, low_payload_register, out_low_element);
   }
-  if (element_index == 1) {
-    return loom_amdgpu_emit_vgpr_shift(
-        context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_LSHRREV_B32_LIT, 16,
-        low_payload_register, vgpr_type, out_low_element);
-  }
-  IREE_ASSERT_UNREACHABLE("selected AMDGPU fragment packed b16 element");
-  IREE_BUILTIN_UNREACHABLE();
+  return loom_amdgpu_emit_vgpr_shift(
+      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_LSHRREV_B32_LIT,
+      element_index * element_bit_count, low_payload_register, vgpr_type,
+      out_low_element);
 }
 
 static iree_status_t loom_amdgpu_emit_fragment_memory_saveexec(
@@ -297,10 +225,9 @@ loom_amdgpu_emit_fragment_memory_crosslane_packed_b16_prepare_store(
           context, source_op, low_payload, packet->register_index / 2u,
           vgpr_type, &low_packed_register));
     }
-    IREE_RETURN_IF_ERROR(
-        loom_amdgpu_emit_fragment_memory_packed_b16_store_element(
-            context, source_op, low_packed_register,
-            packet->register_index & 1u, vgpr_type, &low_source_register));
+    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fragment_memory_packed_store_element(
+        context, source_op, low_packed_register, packet->register_index & 1u,
+        16, vgpr_type, &low_source_register));
   } else {
     low_source_register = low_payload;
     if (plan->register_count != 1) {
@@ -433,7 +360,7 @@ loom_amdgpu_emit_fragment_memory_flush_crosslane_packed_b16_stores(
                                       context, source_op, low_saved_exec));
 }
 
-static iree_status_t loom_amdgpu_emit_fragment_memory_packed_b16_store_packet(
+static iree_status_t loom_amdgpu_emit_fragment_memory_packed_store_packet(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_amdgpu_fragment_memory_plan_t* plan,
     const loom_amdgpu_fragment_memory_packet_plan_t* packet,
@@ -451,17 +378,14 @@ static iree_status_t loom_amdgpu_emit_fragment_memory_packed_b16_store_packet(
   const uint16_t issued_access_count =
       loom_amdgpu_fragment_memory_query_issued_accesses(plan, packet,
                                                         issued_accesses);
-  IREE_ASSERT_EQ(issued_access_count,
-                 LOOM_AMDGPU_FRAGMENT_PACKED_B16_ELEMENT_COUNT);
   for (uint16_t access_index = 0; access_index < issued_access_count;
        ++access_index) {
     const loom_amdgpu_fragment_memory_issued_access_t* access =
         &issued_accesses[access_index];
     loom_value_id_t low_element = LOOM_VALUE_ID_INVALID;
-    IREE_RETURN_IF_ERROR(
-        loom_amdgpu_emit_fragment_memory_packed_b16_store_element(
-            context, source_op, low_payload_register, access->element_index,
-            vgpr_type, &low_element));
+    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fragment_memory_packed_store_element(
+        context, source_op, low_payload_register, access->element_index,
+        plan->element_byte_count * 8u, vgpr_type, &low_element));
     loom_amdgpu_fragment_memory_address_t address;
     IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fragment_memory_vaddr(
         context, source_op, plan, access->register_index, access->element_index,
@@ -536,41 +460,9 @@ iree_status_t loom_amdgpu_lower_vector_fragment_load(
               &low_packets[packet_index]));
       continue;
     }
-    if (plan->packetization ==
-        LOOM_AMDGPU_FRAGMENT_MEMORY_PACKETIZATION_PACKED_B16) {
-      IREE_RETURN_IF_ERROR(
-          loom_amdgpu_emit_fragment_memory_packed_b16_load_packet(
-              context, source_op, plan, packet, &address_state,
-              low_packet_resource, vgpr_type, low_soffset,
-              &low_packets[packet_index]));
-      continue;
-    }
-    loom_type_t packet_type = loom_type_none();
-    IREE_RETURN_IF_ERROR(loom_amdgpu_fragment_memory_packet_type(
-        context, packet->packet_register_count, vgpr_type, &packet_type));
-    loom_amdgpu_fragment_memory_issued_access_t issued_accesses
-        [LOOM_AMDGPU_FRAGMENT_MEMORY_MAX_ISSUED_ACCESSES_PER_PACKET];
-    const uint16_t issued_access_count =
-        loom_amdgpu_fragment_memory_query_issued_accesses(plan, packet,
-                                                          issued_accesses);
-    IREE_ASSERT_EQ(issued_access_count, 1u);
-    const loom_amdgpu_fragment_memory_issued_access_t* access =
-        &issued_accesses[0];
-    loom_amdgpu_fragment_memory_address_t address;
-    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fragment_memory_vaddr(
-        context, source_op, plan, access->register_index, access->element_index,
-        access->descriptor_ref, &address_state, vgpr_type, &address));
-    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fragment_load_packet(
-        context, source_op, plan, packet, access->element_index,
-        access->element_count, packet_type, &address, low_packet_resource,
-        low_soffset, &low_packets[packet_index]));
-    if (plan->packetization ==
-        LOOM_AMDGPU_FRAGMENT_MEMORY_PACKETIZATION_SCALAR_B16) {
-      IREE_RETURN_IF_ERROR(
-          loom_amdgpu_emit_fragment_memory_low_subword_load_packet(
-              context, source_op, low_packets[packet_index], vgpr_type,
-              &low_packets[packet_index]));
-    }
+    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fragment_memory_load_packet(
+        context, source_op, plan, packet, &address_state, low_packet_resource,
+        vgpr_type, low_soffset, &low_packets[packet_index]));
   }
 
   if (plan->packet_count == 1) {
@@ -770,15 +662,14 @@ iree_status_t loom_amdgpu_lower_vector_fragment_store(
       loom_low_lower_lookup_value(context, plan->payload);
 
   if (plan->packetization ==
-      LOOM_AMDGPU_FRAGMENT_MEMORY_PACKETIZATION_PACKED_B16) {
+      LOOM_AMDGPU_FRAGMENT_MEMORY_PACKETIZATION_PACKED_SUBWORD) {
     for (uint16_t packet_index = 0; packet_index < plan->packet_count;
          ++packet_index) {
       const loom_amdgpu_fragment_memory_packet_plan_t* packet =
           &plan->packets[packet_index];
-      IREE_RETURN_IF_ERROR(
-          loom_amdgpu_emit_fragment_memory_packed_b16_store_packet(
-              context, source_op, plan, packet, &address_state, low_payload,
-              low_packet_resource, vgpr_type, low_soffset));
+      IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fragment_memory_packed_store_packet(
+          context, source_op, plan, packet, &address_state, low_payload,
+          low_packet_resource, vgpr_type, low_soffset));
     }
     return iree_ok_status();
   }
@@ -824,6 +715,8 @@ iree_status_t loom_amdgpu_lower_vector_fragment_store(
 void loom_amdgpu_mark_fragment_memory_address_storage_demands(
     loom_low_lower_context_t* context,
     const loom_amdgpu_fragment_memory_plan_t* plan) {
+  loom_amdgpu_mark_buffer_extent_storage_demands(context, &plan->source,
+                                                 plan->buffer_extent);
   if (plan->address_realization) {
     // The shared realization owner demands initializer inputs; canonical
     // periodic expressions remain analysis facts, not emitted arithmetic.

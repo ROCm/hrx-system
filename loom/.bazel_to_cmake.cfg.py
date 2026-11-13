@@ -133,8 +133,6 @@ _LOOM_CONFIG_CMAKE_OPTIONS = {
     "//loom/config/execute:x86_task_hal": "LOOM_ROUTE_X86_TASK_HAL",
     "//loom/config/import/cxx:embed_includes_enabled": "LOOM_IMPORT_CXX_EMBED_INCLUDES",
     "//loom/config/import:cxx": "LOOM_IMPORT_CXX",
-    "//loom/config/import:mlir": "LOOM_IMPORT_MLIR",
-    "//loom/config/import:tilelang": "LOOM_IMPORT_TILELANG",
     "//loom/config/serve:audio_decoding": "LOOM_SERVE_AUDIO_DECODING",
     "//loom/config/serve:flac": "LOOM_SERVE_AUDIO_CODEC_FLAC",
     "//loom/config/serve:gif": "LOOM_SERVE_IMAGE_CODEC_GIF",
@@ -1042,12 +1040,14 @@ class LoomBuildFileFunctions(
         src,
         args=None,
         data=None,
+        tools=None,
         env=None,
         tags=None,
         runner="//loom/src/loom/tools/loom-check:loom-check-test",
         target_compatible_with=None,
         **kwargs,
     ):
+        data = (data or []) + (tools or [])
         if self._should_skip_target(tags=tags, **kwargs):
             return
         target_compatible_with = self._apply_loom_target_compatible_with(
@@ -1141,6 +1141,7 @@ class LoomBuildFileFunctions(
         size="small",
         args=None,
         data=None,
+        tools=None,
         env=None,
         tags=None,
         runner="//loom/src/loom/tools/loom-check:loom-check-test",
@@ -1151,6 +1152,7 @@ class LoomBuildFileFunctions(
         **kwargs,
     ):
         del size
+        data = (data or []) + (tools or [])
         if self._should_skip_target(tags=tags, **kwargs):
             return
         target_compatible_with = self._apply_loom_target_compatible_with(

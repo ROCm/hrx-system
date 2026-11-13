@@ -1,50 +1,51 @@
 // Disjoint destination intervals preserve padding between every packet size.
 func.def @join_packets(%low: buffer, %high: buffer, %output: buffer) {
+  %stable_low, %destination = buffer.assume.noalias %low, %output : buffer, buffer
   %base = index.constant 0 : offset
   %offset0 = index.constant 0 : offset
-  %low_view0 = buffer.view %low[%base] : buffer -> view<1xi8>
+  %low_view0 = buffer.view %stable_low[%base] : buffer -> view<1xi8>
   %high_view0 = buffer.view %high[%base] : buffer -> view<1xi8>
-  %output_view0 = buffer.view %output[%offset0] : buffer -> view<2xi8>
+  %output_view0 = buffer.view %destination[%offset0] : buffer -> view<2xi8>
   %low0 = vector.load %low_view0[0] : view<1xi8> -> vector<1xi8>
   %high0 = vector.load %high_view0[0] : view<1xi8> -> vector<1xi8>
   %joined0 = vector.concat<0> %low0, %high0 : vector<1xi8>, vector<1xi8> -> vector<2xi8>
   vector.store %joined0, %output_view0[0] : vector<2xi8>, view<2xi8>
   %offset1 = index.constant 64 : offset
-  %low_view1 = buffer.view %low[%base] : buffer -> view<1xi16>
+  %low_view1 = buffer.view %stable_low[%base] : buffer -> view<1xi16>
   %high_view1 = buffer.view %high[%base] : buffer -> view<1xi16>
-  %output_view1 = buffer.view %output[%offset1] : buffer -> view<2xi16>
+  %output_view1 = buffer.view %destination[%offset1] : buffer -> view<2xi16>
   %low1 = vector.load %low_view1[0] : view<1xi16> -> vector<1xi16>
   %high1 = vector.load %high_view1[0] : view<1xi16> -> vector<1xi16>
   %joined1 = vector.concat<0> %low1, %high1 : vector<1xi16>, vector<1xi16> -> vector<2xi16>
   vector.store %joined1, %output_view1[0] : vector<2xi16>, view<2xi16>
   %offset2 = index.constant 128 : offset
-  %low_view2 = buffer.view %low[%base] : buffer -> view<1xi32>
+  %low_view2 = buffer.view %stable_low[%base] : buffer -> view<1xi32>
   %high_view2 = buffer.view %high[%base] : buffer -> view<1xi32>
-  %output_view2 = buffer.view %output[%offset2] : buffer -> view<2xi32>
+  %output_view2 = buffer.view %destination[%offset2] : buffer -> view<2xi32>
   %low2 = vector.load %low_view2[0] : view<1xi32> -> vector<1xi32>
   %high2 = vector.load %high_view2[0] : view<1xi32> -> vector<1xi32>
   %joined2 = vector.concat<0> %low2, %high2 : vector<1xi32>, vector<1xi32> -> vector<2xi32>
   vector.store %joined2, %output_view2[0] : vector<2xi32>, view<2xi32>
   %offset3 = index.constant 192 : offset
-  %low_view3 = buffer.view %low[%base] : buffer -> view<1xi64>
+  %low_view3 = buffer.view %stable_low[%base] : buffer -> view<1xi64>
   %high_view3 = buffer.view %high[%base] : buffer -> view<1xi64>
-  %output_view3 = buffer.view %output[%offset3] : buffer -> view<2xi64>
+  %output_view3 = buffer.view %destination[%offset3] : buffer -> view<2xi64>
   %low3 = vector.load %low_view3[0] : view<1xi64> -> vector<1xi64>
   %high3 = vector.load %high_view3[0] : view<1xi64> -> vector<1xi64>
   %joined3 = vector.concat<0> %low3, %high3 : vector<1xi64>, vector<1xi64> -> vector<2xi64>
   vector.store %joined3, %output_view3[0] : vector<2xi64>, view<2xi64>
   %offset4 = index.constant 256 : offset
-  %low_view4 = buffer.view %low[%base] : buffer -> view<8xf16>
+  %low_view4 = buffer.view %stable_low[%base] : buffer -> view<8xf16>
   %high_view4 = buffer.view %high[%base] : buffer -> view<8xf16>
-  %output_view4 = buffer.view %output[%offset4] : buffer -> view<16xf16>
+  %output_view4 = buffer.view %destination[%offset4] : buffer -> view<16xf16>
   %low4 = vector.load %low_view4[0] : view<8xf16> -> vector<8xf16>
   %high4 = vector.load %high_view4[0] : view<8xf16> -> vector<8xf16>
   %joined4 = vector.concat<0> %low4, %high4 : vector<8xf16>, vector<8xf16> -> vector<16xf16>
   vector.store %joined4, %output_view4[0] : vector<16xf16>, view<16xf16>
   %offset5 = index.constant 320 : offset
-  %low_view5 = buffer.view %low[%base] : buffer -> view<16xbf16>
+  %low_view5 = buffer.view %stable_low[%base] : buffer -> view<16xbf16>
   %high_view5 = buffer.view %high[%base] : buffer -> view<16xbf16>
-  %output_view5 = buffer.view %output[%offset5] : buffer -> view<32xbf16>
+  %output_view5 = buffer.view %destination[%offset5] : buffer -> view<32xbf16>
   %low5 = vector.load %low_view5[0] : view<16xbf16> -> vector<16xbf16>
   %high5 = vector.load %high_view5[0] : view<16xbf16> -> vector<16xbf16>
   %joined5 = vector.concat<0> %low5, %high5 : vector<16xbf16>, vector<16xbf16> -> vector<32xbf16>

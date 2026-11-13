@@ -7,6 +7,7 @@
 #ifndef IREE_HAL_SLAB_POOL_H_
 #define IREE_HAL_SLAB_POOL_H_
 
+#include "iree/hal/memory_budget.h"
 #include "iree/hal/memory_scope.h"
 #include "iree/hal/pool.h"
 
@@ -80,6 +81,35 @@ IREE_API_EXPORT iree_status_t iree_hal_slab_pool_create(
     iree_hal_device_group_t* group, iree_hal_pool_scope_t scope,
     const iree_hal_slab_pool_options_t* options,
     iree_allocator_t host_allocator, iree_hal_pool_t** out_pool);
+
+// Queries the native payload bytes required by a complete acquisition,
+// including source alignment, sanitizer storage, and native granularity.
+// Acquires no backing. The immutable source geometry allows callers to retain
+// costs for repeated parent sizes. Caches and suballocators are not native
+// sources.
+IREE_API_EXPORT iree_status_t iree_hal_slab_pool_query_allocation_cost(
+    iree_hal_pool_t* pool, iree_host_size_t request_count,
+    const iree_hal_pool_reservation_request_t* requests,
+    uint64_t* out_byte_length);
+
+// Acquires native backing using capacity admitted before submission. On success
+// this moves the entire credit before invoking any native work; the caller's
+// credit is cleared even when completion runs inline. A submission error leaves
+// the credit owned by the caller and does not invoke completion. Insufficient
+// credit is rejected before native work. Unused credit returns at acquisition
+// completion; each acquired native owner retains its actual charge until final
+// disposal, including cancellation and failed unpublished construction.
+//
+// Reservation/result arrays and requests remain alive through completion, as
+// for ordinary pool acquisition. Native backing is fresh and needs no requester
+// frontier. Materialization and release use the ordinary pool interfaces.
+IREE_API_EXPORT iree_status_t iree_hal_slab_pool_acquire_with_credit(
+    iree_hal_pool_t* pool, iree_host_size_t request_count,
+    const iree_hal_pool_reservation_request_t* requests,
+    iree_hal_memory_credit_t* credit,
+    iree_hal_pool_acquire_callback_t completion,
+    iree_hal_pool_reservation_t* out_reservations,
+    iree_hal_pool_acquire_info_t* out_infos);
 
 #ifdef __cplusplus
 }  // extern "C"

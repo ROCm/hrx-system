@@ -53,6 +53,17 @@ iree_status_t loom_amdgpu_emit_fragment_memory_low_subword_load_packet(
     loom_value_id_t low_packet, loom_type_t vgpr_type,
     loom_value_id_t* out_full_packet);
 
+// Loads a complete source packet, including independently addressed subwords
+// and broadcast construction. Conversion consumers receive the same packed bits
+// as native fragment payloads; observations describe only the physical reads.
+iree_status_t loom_amdgpu_emit_fragment_memory_load_packet(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_amdgpu_fragment_memory_plan_t* plan,
+    const loom_amdgpu_fragment_memory_packet_plan_t* packet,
+    loom_amdgpu_fragment_memory_address_state_t* address_state,
+    loom_value_id_t low_packet_resource, loom_type_t vgpr_type,
+    loom_value_id_t low_soffset, loom_value_id_t* out_low_packet);
+
 // Emits one selected fragment store packet and records its memory effects.
 iree_status_t loom_amdgpu_emit_fragment_store_packet(
     loom_low_lower_context_t* context, const loom_op_t* source_op,

@@ -59,6 +59,8 @@ typedef struct loom_pass_interpreter_diagnostic_counter_t {
   loom_pass_t* pass;
   // Module whose operations are referenced by unqualified diagnostics.
   const loom_module_t* module;
+  // Concrete function version whose export owns function-pass diagnostics.
+  const loom_function_version_t* function_version;
   // Caller-provided emitter that receives pass diagnostics.
   iree_diagnostic_emitter_t target;
   // Number of error diagnostics emitted by the current pass invocation.
@@ -186,6 +188,10 @@ static iree_status_t loom_pass_interpreter_count_diagnostic(
   loom_diagnostic_emission_t contextual_emission = *emission;
   if (!contextual_emission.module) {
     contextual_emission.module = counter->module;
+  }
+  if (iree_string_view_is_empty(contextual_emission.export_name)) {
+    contextual_emission.export_name =
+        loom_function_version_export_name(counter->function_version);
   }
   bool related_ops_need_context = false;
   for (iree_host_size_t i = 0; i < emission->related_op_count; ++i) {
@@ -410,6 +416,7 @@ static iree_status_t loom_pass_interpreter_invoke(
   iree_arena_initialize(state->options->block_pool, &instance_arena);
   loom_pass_interpreter_diagnostic_counter_t diagnostic_counter = {
       .module = state->module,
+      .function_version = frame->function_version,
       .target = state->options->diagnostic_emitter,
   };
   iree_diagnostic_emitter_t pass_diagnostic_emitter = {

@@ -7,6 +7,7 @@
 #include "loom/target/arch/amd/xdna/aie2p/descriptors/encoding.h"
 
 #include "iree/base/internal/math.h"
+#include "loom/target/arch/amd/xdna/aie2p/descriptors/core_descriptors.h"
 
 // Component projection shared by every physical register in one aggregate
 // move family.
@@ -199,6 +200,26 @@ loom_aie2p_move_route_step_t loom_aie2p_descriptor_move_route_step(
     step.profile_id = route_id;
   }
   return step;
+}
+
+uint32_t loom_aie2p_descriptor_select_constant_encoding(
+    uint32_t descriptor_ordinal, const int64_t* immediate_values) {
+  uint32_t short_ordinal;
+  switch (descriptor_ordinal) {
+    case AIE2P_CORE_DESCRIPTOR_REF_CONSTANT_I32:
+    case AIE2P_CORE_DESCRIPTOR_REF_MATERIALIZE_STATIC_BYTE_OFFSET_I32:
+      short_ordinal = AIE2P_CORE_DESCRIPTOR_REF_CONSTANT_I32_SHORT;
+      break;
+    case AIE2P_CORE_DESCRIPTOR_REF_MATERIALIZE_STATIC_ADDRESS_INDEX_I20:
+      short_ordinal =
+          AIE2P_CORE_DESCRIPTOR_REF_MATERIALIZE_STATIC_ADDRESS_INDEX_I20_SHORT;
+      break;
+    default:
+      return descriptor_ordinal;
+  }
+  return immediate_values[0] >= -1024 && immediate_values[0] <= 1023
+             ? short_ordinal
+             : descriptor_ordinal;
 }
 
 static void loom_aie2p_descriptor_append_field(

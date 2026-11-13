@@ -21,8 +21,8 @@ TEST(CompileReportPipelinePlanTest, GrowsInArenaWithoutRelocatingEarlierPlans) {
   iree_arena_initialize(&pool, &arena);
   for (bool details : {false, true}) {
     loom_target_compile_report_t report;
-    loom_target_compile_report_initialize(&report,
-                                          iree_arena_allocator(&arena));
+    loom_target_compile_report_initialize(iree_arena_allocator(&arena),
+                                          &report);
     report.requested_detail_flags =
         details ? LOOM_TARGET_COMPILE_REPORT_DETAIL_PIPELINE_PLAN_ROWS : 0;
     const loom_target_compile_report_pipeline_worker_row_t worker = {

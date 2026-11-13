@@ -507,8 +507,8 @@ static iree_status_t loom_low_allocation_coalescing_append_interval_at_location(
     uint16_t ignored_value_count,
     const loom_value_id_t* ignored_storage_lease_value_ids,
     uint16_t ignored_storage_lease_value_count, bool may_relocate_blocker,
-    bool* out_assigned,
-    const loom_low_allocation_content_identity_t* shared_content) {
+    const loom_low_allocation_content_identity_t* shared_content,
+    bool* out_assigned) {
   *out_assigned = false;
   if (location_base > UINT32_MAX - unit_count) {
     return iree_ok_status();
@@ -667,7 +667,7 @@ static iree_status_t loom_low_allocation_coalescing_append_relation_interval(
       source_assignment->location_kind, result_location_base,
       interval->unit_count, ignored_value_ids, ignored_value_count,
       ignored_storage_lease_value_ids, ignored_storage_lease_value_count,
-      /*may_relocate_blocker=*/false, out_assigned, /*shared_content=*/NULL);
+      /*may_relocate_blocker=*/false, /*shared_content=*/NULL, out_assigned);
 }
 
 static iree_status_t
@@ -726,7 +726,7 @@ loom_low_allocation_coalescing_append_relation_interval_if_source_assigned(
       interval->unit_count, ignored_value_ids, ignored_value_count,
       /*ignored_storage_lease_value_ids=*/NULL,
       /*ignored_storage_lease_value_count=*/0,
-      /*may_relocate_blocker=*/false, out_assigned, /*shared_content=*/NULL);
+      /*may_relocate_blocker=*/false, /*shared_content=*/NULL, out_assigned);
 }
 
 static iree_status_t loom_low_allocation_coalescing_assign_relation_interval(
@@ -981,7 +981,7 @@ static iree_status_t loom_low_allocation_coalescing_assign_concat_interval(
       context, interval, interval_reg_class_id, first_assignment->location_kind,
       result_assignment.location_base, interval->unit_count, ignored_value_ids,
       ignored_value_count, ignored_value_ids, ignored_storage_lease_value_count,
-      /*may_relocate_blocker=*/false, out_assigned, /*shared_content=*/NULL);
+      /*may_relocate_blocker=*/false, /*shared_content=*/NULL, out_assigned);
 }
 
 static bool loom_low_allocation_coalescing_relation_source_matches_interval(
@@ -1100,8 +1100,8 @@ loom_low_allocation_coalescing_assign_concat_source_from_result(
       &result_value_id,
       /*ignored_value_count=*/1, &result_value_id,
       /*ignored_storage_lease_value_count=*/1,
-      /*may_relocate_blocker=*/true, out_assigned,
-      context->search_context->unit_liveness->content_identity);
+      /*may_relocate_blocker=*/true,
+      context->search_context->unit_liveness->content_identity, out_assigned);
 }
 
 static bool loom_low_allocation_coalescing_edge_relation_covers_concat_source(
@@ -1195,9 +1195,18 @@ loom_low_allocation_coalescing_assign_concat_source_from_edge_destination(
     uint16_t ignored_value_count = 0;
     const loom_value_id_t destination_value_id =
         destination_assignment->value_id;
+    // The edge consumes the aggregate, but this candidate is one of its
+    // components. Prove overlap against that component's observations: the
+    // aggregate may die at the handoff while the component remains live in
+    // the destination, including on the next loop iteration.
+    loom_low_placement_relation_t component_edge = *edge_relation;
+    component_edge.source_ordinal = concat_relation->source_ordinal;
+    component_edge.source_unit_offset = concat_relation->source_unit_offset;
+    component_edge.result_unit_offset = destination_unit_offset;
+    component_edge.unit_count = concat_relation->unit_count;
     IREE_RETURN_IF_ERROR(
         loom_low_allocation_coalescing_select_ignored_counterpart_value(
-            context, interval, edge_relation, destination_assignment,
+            context, interval, &component_edge, destination_assignment,
             &destination_value_id, destination_unit_offset,
             concat_relation->unit_count, &ignored_value_ids,
             &ignored_value_count));
@@ -1210,8 +1219,9 @@ loom_low_allocation_coalescing_assign_concat_source_from_edge_destination(
             /*ignored_storage_lease_value_count=*/0,
             // A transitive preference must not displace an existing tuple's
             // component and disrupt the packing that already fits it.
-            /*may_relocate_blocker=*/!is_projected, out_assigned,
-            context->search_context->unit_liveness->content_identity));
+            /*may_relocate_blocker=*/!is_projected,
+            context->search_context->unit_liveness->content_identity,
+            out_assigned));
     if (*out_assigned) {
       return iree_ok_status();
     }
@@ -1512,8 +1522,9 @@ loom_low_allocation_coalescing_assign_concat_source_relation(
               /*ignored_value_count=*/0,
               /*ignored_storage_lease_value_ids=*/NULL,
               /*ignored_storage_lease_value_count=*/0,
-              /*may_relocate_blocker=*/false, &reserved,
-              context->search_context->unit_liveness->content_identity));
+              /*may_relocate_blocker=*/false,
+              context->search_context->unit_liveness->content_identity,
+              &reserved));
       if (reserved) {
         if (relation_source_retained) {
           *out_result = LOOM_LOW_ALLOCATION_CONCAT_SOURCE_RESULT_DEFERRED;
@@ -1578,8 +1589,9 @@ loom_low_allocation_coalescing_assign_concat_source_relation(
             /*ignored_value_count=*/0,
             /*ignored_storage_lease_value_ids=*/NULL,
             /*ignored_storage_lease_value_count=*/0,
-            /*may_relocate_blocker=*/true, &assigned,
-            context->search_context->unit_liveness->content_identity));
+            /*may_relocate_blocker=*/true,
+            context->search_context->unit_liveness->content_identity,
+            &assigned));
     if (assigned) {
       *out_result = LOOM_LOW_ALLOCATION_CONCAT_SOURCE_RESULT_ASSIGNED;
       return iree_ok_status();
@@ -1956,8 +1968,8 @@ static iree_status_t loom_low_allocation_coalescing_assign_edge_source_interval(
             interval->unit_count, ignored_value_ids, ignored_value_count,
             /*ignored_storage_lease_value_ids=*/NULL,
             /*ignored_storage_lease_value_count=*/0,
-            /*may_relocate_blocker=*/false, out_assigned,
-            /*shared_content=*/NULL));
+            /*may_relocate_blocker=*/false,
+            /*shared_content=*/NULL, out_assigned));
     if (*out_assigned) {
       return iree_ok_status();
     }
@@ -1977,8 +1989,8 @@ static iree_status_t loom_low_allocation_coalescing_assign_edge_source_interval(
             /*ignored_value_count=*/0,
             /*ignored_storage_lease_value_ids=*/NULL,
             /*ignored_storage_lease_value_count=*/0,
-            /*may_relocate_blocker=*/false, out_assigned,
-            /*shared_content=*/NULL));
+            /*may_relocate_blocker=*/false,
+            /*shared_content=*/NULL, out_assigned));
   }
   return iree_ok_status();
 }

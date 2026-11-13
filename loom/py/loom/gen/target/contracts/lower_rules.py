@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import heapq
 from collections.abc import Hashable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -87,6 +88,16 @@ class GeneratedLowerRuleSet:
     source: str
 
 
+@dataclass(frozen=True, slots=True)
+class _GuardRefStorage[RowT]:
+    """Generated guard rows and compact references with aligned program starts."""
+
+    rows: tuple[RowT, ...]
+    values: tuple[int, ...]
+    starts: tuple[int, ...]
+    offset_shift: int
+
+
 def _intern_rows[RowT: Hashable](
     rows: Sequence[RowT],
 ) -> tuple[tuple[RowT, ...], tuple[int, ...]]:
@@ -101,6 +112,54 @@ def _intern_rows[RowT: Hashable](
             unique_rows.append(row)
         row_refs.append(ordinal)
     return tuple(unique_rows), tuple(row_refs)
+
+
+def _encode_guard_ref_storage[RowT](
+    rows: tuple[RowT, ...],
+    refs: tuple[int, ...],
+    program_starts: Sequence[int],
+) -> _GuardRefStorage[RowT]:
+    """Encodes disjoint whole programs with compact refs and scaled u16 starts."""
+
+    frequencies = [0] * len(rows)
+    for ref in refs:
+        frequencies[ref] += 1
+    hot_ordinals = frozenset(
+        heapq.nlargest(
+            255,
+            range(len(rows)),
+            key=lambda ordinal: (frequencies[ordinal], -ordinal),
+        )
+    )
+    ordered_ordinals = (
+        *(ordinal for ordinal in range(len(rows)) if ordinal in hot_ordinals),
+        *(ordinal for ordinal in range(len(rows)) if ordinal not in hot_ordinals),
+    )
+    remapped_ordinals = [0] * len(rows)
+    for new_ordinal, old_ordinal in enumerate(ordered_ordinals):
+        remapped_ordinals[old_ordinal] = new_ordinal
+    encoded_refs = tuple((remapped_ordinals[ref],) if remapped_ordinals[ref] < 255 else (0xFF, remapped_ordinals[ref] & 0xFF, remapped_ordinals[ref] >> 8) for ref in refs)
+    boundaries = frozenset(program_starts)
+    # Each logical reference occupies at most three bytes. Word-aligned starts
+    # therefore cover every program in the validated u16 logical row domain.
+    for shift in range(3):
+        values: list[int] = []
+        starts: list[int] = []
+        alignment_mask = (1 << shift) - 1
+        for ordinal, encoded in enumerate(encoded_refs):
+            if ordinal in boundaries:
+                values.extend((0,) * (-len(values) & alignment_mask))
+            starts.append(len(values) >> shift)
+            values.extend(encoded)
+        starts.append(len(values) >> shift)
+        if all(starts[ordinal] <= _U16_MAX for ordinal in boundaries):
+            return _GuardRefStorage(
+                rows=tuple(rows[ordinal] for ordinal in ordered_ordinals),
+                values=tuple(values),
+                starts=tuple(starts),
+                offset_shift=shift,
+            )
+    raise ValueError("guard programs exceed the validated u16 logical row domain")
 
 
 def _primary_descriptor_feature_classes(
@@ -358,6 +417,13 @@ def _generate_source(
     ) = _primary_descriptor_feature_classes(table)
     descriptor_refs = {key: index for index, key in enumerate(descriptor_ref_keys)}
     report_key_ordinals = {key: index + 1 for index, key in enumerate(report_keys)}
+    unique_guards, logical_guard_refs = _intern_rows(table.guards)
+    guard_ref_storage = _encode_guard_ref_storage(
+        unique_guards,
+        logical_guard_refs,
+        tuple(row.guard_start for row in (*table.rules, *table.source_nodes)),
+    )
+    unique_guards = guard_ref_storage.rows
     wide_report_keys = tuple(
         (rule_index, report_key_ordinals[rule.report_key])
         for rule_index, rule in enumerate(table.rules)
@@ -424,7 +490,15 @@ def _generate_source(
         lower_rule_rows.emit_optional_array(
             source_nodes_name,
             "loom_low_lower_source_node_t",
-            [lower_rule_rows.source_node_row(row) for row in table.source_nodes],
+            [
+                lower_rule_rows.source_node_row(
+                    replace(
+                        row,
+                        guard_start=guard_ref_storage.starts[row.guard_start],
+                    )
+                )
+                for row in table.source_nodes
+            ],
         )
     )
 
@@ -596,7 +670,6 @@ def _generate_source(
         )
     )
 
-    unique_guards, guard_refs = _intern_rows(table.guards)
     storage_operand_schemas, _ = _intern_rows(tuple(row.storage_operand_schema for row in unique_guards if row.storage_operand_schema is not None))
     storage_operand_schema_ordinals = {schema: ordinal for ordinal, schema in enumerate(storage_operand_schemas)}
     storage_operand_schemas_name = f"k{c_table_prefix}StorageOperandSchemas"
@@ -645,7 +718,7 @@ def _generate_source(
         lower_rule_rows.emit_optional_value_array(
             guard_refs_name,
             "loom_low_lower_guard_ref_t",
-            [str(ref) for ref in guard_refs],
+            [f"UINT8_C(0x{ref:02X})" for ref in guard_ref_storage.values],
         )
     )
 
@@ -676,6 +749,7 @@ def _generate_source(
     # Descriptor identity belongs to the program position, so instructions with
     # identical bindings share one behavior row across types and opcode families.
     unique_emits, emit_refs = _intern_rows(tuple(replace(row, descriptor=None) for row in table.emits))
+    emit_ref_descriptor_bit_count = lower_rule_rows.emit_ref_descriptor_bit_count(descriptor_refs, table.emits)
     emits_name = f"k{c_table_prefix}Emits"
     lines.extend(
         lower_rule_rows.emit_optional_array(
@@ -689,8 +763,16 @@ def _generate_source(
     lines.extend(
         lower_rule_rows.emit_optional_array(
             emit_refs_name,
-            "loom_low_lower_emit_ref_t",
-            [lower_rule_rows.emit_ref_row(descriptor_refs, row, ref) for row, ref in zip(table.emits, emit_refs, strict=True)],
+            "loom_low_lower_emit_ref_storage_t",
+            [
+                lower_rule_rows.emit_ref_row(
+                    descriptor_refs,
+                    row,
+                    ref,
+                    descriptor_bit_count=emit_ref_descriptor_bit_count,
+                )
+                for row, ref in zip(table.emits, emit_refs, strict=True)
+            ],
         )
     )
 
@@ -729,7 +811,10 @@ def _generate_source(
             "loom_low_lower_rule_t",
             [
                 lower_rule_rows.rule_row(
-                    row,
+                    replace(
+                        row,
+                        guard_start=guard_ref_storage.starts[row.guard_start],
+                    ),
                     report_key_ordinals,
                     primary_descriptor_feature_class=feature_class,
                 )
@@ -804,8 +889,9 @@ def _generate_source(
             guards_name=guards_name,
             storage_operand_schemas=storage_operand_schemas,
             storage_operand_schemas_name=storage_operand_schemas_name,
-            guard_refs=guard_refs,
+            guard_refs=guard_ref_storage.values,
             guard_refs_name=guard_refs_name,
+            guard_ref_offset_shift=guard_ref_storage.offset_shift,
             literal_data_name=literal_data_name,
             attr_copies_name=attr_copies_name,
             tied_results_name=tied_results_name,
@@ -813,6 +899,7 @@ def _generate_source(
             emits_name=emits_name,
             emit_refs=emit_refs,
             emit_refs_name=emit_refs_name,
+            emit_ref_descriptor_bit_count=emit_ref_descriptor_bit_count,
             diagnostics_name=diagnostics_name,
         )
     )

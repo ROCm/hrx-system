@@ -52,6 +52,13 @@ static amdf_status_t amdf_gpu_memory_reservation_apply(
       native[i].source_byte_offset =
           memory->info.source_byte_offset + updates[i].source_byte_offset;
     }
+    if (updates[i].previous_memory != NULL) {
+      const amdf_memory_t* memory = updates[i].previous_memory;
+      const uint32_t owner =
+          memory->accesses[updates[i].previous_memory_access_ordinal]
+              .native_owner_ordinal;
+      native[i].previous_memory = memory->accesses[owner].native;
+    }
   }
   const amdf_gpu_umd_api_t* api =
       amdf_gpu_memory_reservation_api(base, access_ordinal);

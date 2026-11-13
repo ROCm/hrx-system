@@ -50,7 +50,8 @@ static iree_status_t loom_low_addressability_emit_error(
   const loom_low_descriptor_set_t* descriptor_set =
       schedule->target.descriptor_set;
   const iree_string_view_t packet_key = loom_low_descriptor_set_string(
-      descriptor_set, packet->descriptor->key_string_ref);
+      descriptor_set,
+      loom_low_descriptor_key_string_ref(descriptor_set, packet->descriptor));
   const iree_string_view_t operand_field = loom_low_descriptor_set_string(
       descriptor_set, operand->field_name_string_ref);
   loom_diagnostic_param_t params[] = {

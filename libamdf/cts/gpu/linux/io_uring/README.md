@@ -43,10 +43,10 @@ The source includes four distinct cases:
 
 - `BufferedCausalReadWriteReload` exercises kernel-copy visibility and the
   complete device-owned request/response chain.
-- `DirectCausalReadWriteReload` uses `O_DIRECT`, checks the filesystem's
-  `STATX_DIOALIGN` contract, and requires aligned registered buffers and file
-  extents. A tmpfs file or unavailable alignment contract produces an explicit
-  skip, never a buffered substitute.
+- `DirectCausalReadWriteReload` uses `O_DIRECT`, queries the filesystem's native
+  alignment contract, and requires aligned registered buffers and file extents.
+  The private file's page cache must be empty before and after execution. A tmpfs
+  file or unavailable alignment contract produces an explicit skip.
 - `PartialReadThenEofRetiresWithoutConsumingIncompletePayload` reads a half-block
   file. The GPU advances the file and buffer offsets after the positive short
   completion, observes EOF on the remainder, and terminates with `-ENODATA`
@@ -137,10 +137,27 @@ SQPOLL permission is independent of ordinary ring creation. A denial skips that
 path before GPU submission, while host-submission cases retain their own
 admission. Other setup errors, registration failures, and enablement failures
 remain test failures.
-Direct-storage cases additionally query the filesystem's `STATX_DIOALIGN`
-contract; an unavailable query or absent alignment contract skips those cases
-without substituting buffered I/O. No runtime decision compares kernel release
-strings, so backported support is exercised as well.
+Direct-storage cases use the [Linux file-storage helper](../file_storage.h),
+shared with the file-pool CTS. Alignment comes from `STATX_DIOALIGN`, or from
+`BTRFS_IOC_FS_INFO` sector geometry when Btrfs omits the statx contract. An absent
+contract skips those cases without substituting buffered I/O. No runtime
+decision compares kernel release strings, so backported support is exercised.
+
+Before seeding a private Btrfs file, the helper clears inherited compression
+policy and enables NOCOW on the empty inode, which also disables data checksums.
+This matters because Btrfs can route checksummed writes through its page cache
+even when the file has `O_DIRECT` set. The helper flushes and evicts the seed,
+then checks cache residency without reading file bytes. After all GPU and file
+operations retire, it checks residency again before buffered verification of
+the complete payload. An empty cache is evidence of the exercised storage path;
+it does not establish write durability or exclude every native bounce buffer.
+The Btrfs [checksumming contract](https://btrfs.readthedocs.io/en/stable/Checksumming.html)
+describes the native write behavior.
+
+Direct short-input cases use a one-page file and a two-page request. The positive
+short completion and the following EOF retry both satisfy sector alignment;
+incomplete input still cannot be consumed. Buffered-only EOF fixtures retain
+sub-page coverage.
 
 The [shared native fixture](file_io_fixture.h) owns cold registration, idle
 wakes, and queue-first teardown. The ring starts disabled. The host registers

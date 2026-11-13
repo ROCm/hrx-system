@@ -57,17 +57,33 @@ typedef struct loom_vector_packet_partition_reduce_plan_t {
   bool leaf_reduction_is_native;
 } loom_vector_packet_partition_reduce_plan_t;
 
+typedef uint8_t loom_vector_packet_source_action_t;
+enum loom_vector_packet_source_action_e {
+  // Rebuilds an ordinary memory load at the packet origin.
+  LOOM_VECTOR_PACKET_SOURCE_ACTION_MEMORY_LOAD = 0,
+  // Rebuilds a vector.from_elements from a static operand range.
+  LOOM_VECTOR_PACKET_SOURCE_ACTION_FROM_ELEMENTS = 1,
+  // Rebuilds an immediate integer or floating-point splat.
+  LOOM_VECTOR_PACKET_SOURCE_ACTION_LITERAL_SPLAT = 2,
+  // Rebuilds a typed poison vector.
+  LOOM_VECTOR_PACKET_SOURCE_ACTION_POISON = 3,
+  // Rebuilds an operand-backed vector splat.
+  LOOM_VECTOR_PACKET_SOURCE_ACTION_SPLAT = 4,
+  // Clones a pure producer with packet operands and result types.
+  LOOM_VECTOR_PACKET_SOURCE_ACTION_OPERATION = UINT8_MAX,
+};
+
 typedef enum loom_vector_packet_source_mode_e {
-  // Rebuilds an ordinary load or pure producer for each packet.
+  // Rebuilds the authored producer for each packet.
   LOOM_VECTOR_PACKET_SOURCE_MODE_STREAMED = 0,
-  // Rebuilds a vector.from_elements operand range for a static packet offset.
-  LOOM_VECTOR_PACKET_SOURCE_MODE_STATIC_ELEMENTS = 1,
   // Legalizes a load at its original position before rewriting its consumer.
-  LOOM_VECTOR_PACKET_SOURCE_MODE_PRESERVE_LOAD = 2,
+  LOOM_VECTOR_PACKET_SOURCE_MODE_PRESERVE_LOAD = 1,
   // Reads packets from a retained regular vector partition.
-  LOOM_VECTOR_PACKET_SOURCE_MODE_SNAPSHOT = 3,
+  LOOM_VECTOR_PACKET_SOURCE_MODE_SNAPSHOT = 2,
   // Reads static slices from an existing SSA value owned outside the graph.
-  LOOM_VECTOR_PACKET_SOURCE_MODE_CAPTURED = 4,
+  LOOM_VECTOR_PACKET_SOURCE_MODE_CAPTURED = 3,
+  // Streams a private snapshot created and consumed by this packet plan.
+  LOOM_VECTOR_PACKET_SOURCE_MODE_STAGED = 4,
 } loom_vector_packet_source_mode_t;
 
 typedef enum loom_vector_packet_selection_flag_bits_e {
@@ -93,15 +109,21 @@ typedef struct loom_vector_packetized_value_t {
   // One-based child indices for source-ID bits above the root directory bits.
   // Zero denotes an absent branch; indices survive record-array growth.
   uint32_t children[2];
+  // Immutable action used to rebuild streamed source packets.
+  loom_vector_packet_source_action_t source_action;
   // Original oversized source type.
   loom_type_t source_type;
   // Packet materialization mode for this source value.
   loom_vector_packet_source_mode_t source_mode;
+  // Immutable private view owned by this plan when source_mode is STAGED.
+  loom_value_id_t staging_view;
   // Authored packet tuple retained for snapshot materialization.
   loom_value_fact_vector_partition_t source_partition;
   // Native packet materialized for the current physical loop iteration.
   loom_vector_packet_value_t packet;
 } loom_vector_packetized_value_t;
+static_assert(sizeof(loom_vector_packetized_value_t) <= 96,
+              "packetized values must remain compact");
 
 // A 64-byte directory selects the first four bits without tree traversal.
 #define LOOM_VECTOR_PACKET_INDEX_ROOT_BITS 4u

@@ -34,24 +34,34 @@ func.decl @consume(%width: index, %payload: view<[%width]xi32>, %state: buffer)
 pipeline.def<kernel> public target(@device) @root(%width: index) run(%payload: view<[%width]xi32>, %pool: pool) {
   %bytes = index.constant 32 : offset
   pipeline.serial {
-    pipeline.compose @__pipeline_concurrent_1(%bytes, %width, %payload) : (offset, index, view<[%width]xi32>)
+    pipeline.compose @__pipeline_concurrent_3(%bytes, %width, %payload) : (offset, index, view<[%width]xi32>)
   }
 }
 
-pipeline.def target(@device) @__pipeline_concurrent_0() run(%width: index, %payload: view<[%width]xi32>, %state: buffer) {
+func.def inline @__pipeline_strand_0(%width: index, %payload: view<[%width]xi32>, %state: buffer) {
+  func.call @consume(%width, %payload, %state) : (index, view<[%width]xi32>, buffer)
+  func.return
+}
+
+pipeline.def target(@device) @__pipeline_concurrent_1() run(%width: index, %payload: view<[%width]xi32>, %state: buffer) {
   pipeline.strand workers([1], [1], [1]) {
-    func.call @consume(%width, %payload, %state) : (index, view<[%width]xi32>, buffer)
+    func.call @__pipeline_strand_0(%width, %payload, %state) : (index, view<[%width]xi32>, buffer)
   }
 }
 
-pipeline.def target(@device) @__pipeline_concurrent_1() run(%bytes: offset, %width: index, %payload: view<[%width]xi32>) {
+func.def inline @__pipeline_strand_2(%width: index, %payload: view<[%width]xi32>, %state: buffer) {
+  func.call @consume(%width, %payload, %state) : (index, view<[%width]xi32>, buffer)
+  func.return
+}
+
+pipeline.def target(@device) @__pipeline_concurrent_3() run(%bytes: offset, %width: index, %payload: view<[%width]xi32>) {
   %local_pool = pipeline.memory<workgroup>[0] : pool
   %state = buffer.alloca<workgroup> pool(%local_pool) align(16) %bytes : buffer
   pipeline.strand workers([0], [1], [1]) {
-    func.call @consume(%width, %payload, %state) : (index, view<[%width]xi32>, buffer)
+    func.call @__pipeline_strand_2(%width, %payload, %state) : (index, view<[%width]xi32>, buffer)
   }
   pipeline.serial {
-    pipeline.compose @__pipeline_concurrent_0(%width, %payload, %state) : (index, view<[%width]xi32>, buffer)
+    pipeline.compose @__pipeline_concurrent_1(%width, %payload, %state) : (index, view<[%width]xi32>, buffer)
   }
 }
 

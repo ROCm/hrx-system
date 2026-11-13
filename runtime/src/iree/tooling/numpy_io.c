@@ -330,7 +330,7 @@ IREE_API_EXPORT iree_status_t iree_numpy_npy_load_ndarray(
   // object. We implement a basic scanning parser here and try to deal with it.
   iree_status_t status = iree_ok_status();
   iree_host_size_t shape_rank = 0;
-  iree_hal_dim_t* shape = NULL;
+  iree_hal_dim_t shape[128];
   iree_hal_element_type_t element_type = IREE_HAL_ELEMENT_TYPE_NONE;
   iree_hal_encoding_type_t encoding_type = IREE_HAL_ENCODING_TYPE_OPAQUE;
   iree_string_view_consume_prefix(&header, IREE_SV("{"));
@@ -354,12 +354,11 @@ IREE_API_EXPORT iree_status_t iree_numpy_npy_load_ndarray(
       }
     } else if (iree_string_view_equal(key, IREE_SV("shape"))) {
       shape_rank = iree_numpy_parse_shape_rank(value);
-      if (shape_rank > 128) {
+      if (shape_rank > IREE_ARRAYSIZE(shape)) {
         status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                                   "shape rank %" PRIhsz
                                   " too large; be reasonable please");
       } else {
-        shape = iree_alloca(shape_rank * sizeof(*shape));
         status = iree_numpy_parse_shape_dims(value, shape_rank, shape);
       }
     }

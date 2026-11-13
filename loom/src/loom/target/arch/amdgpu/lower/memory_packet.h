@@ -78,6 +78,14 @@ bool loom_amdgpu_descriptor_offset_immediate_info(
     loom_low_immediate_kind_t expected_kind,
     loom_amdgpu_descriptor_offset_immediate_info_t* out_info);
 
+// Splits a global scalar-base packet's static offset between its immediate and
+// base address. Only vector contributions must fit u32; scalar contributions
+// retain their full width. Shared by ordinary memory and atomic updates.
+bool loom_amdgpu_memory_access_split_global_saddr_static_offset(
+    loom_amdgpu_memory_access_t* access,
+    const loom_amdgpu_descriptor_offset_immediate_info_t* offset_info,
+    loom_amdgpu_memory_access_diagnostic_t* diagnostic);
+
 // Records the first source dynamic term relevant to a flat-address rejection.
 void loom_amdgpu_memory_access_record_flat_dynamic_address_rejection(
     const loom_module_t* module,

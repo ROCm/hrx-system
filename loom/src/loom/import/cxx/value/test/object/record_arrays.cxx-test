@@ -1,0 +1,358 @@
+// RUN: pass canonicalize,cse,dce
+// Arrays decay to borrowed pointers. The two fields retain separate origins.
+struct Block {
+  unsigned tag;
+  unsigned char scales[4];
+  unsigned char quants[128];
+};
+static unsigned read(const unsigned char* values, unsigned index) {
+  return values[index];
+}
+unsigned decode(const Block* blocks, unsigned block, unsigned index) {
+  return read(blocks[block].scales, index / 32) + blocks[block].quants[index];
+}
+
+// ----
+func.def public @decode(%blocks: buffer, %blocks_byte_offset: offset, %block: i32, %index: i32) -> (i32) {
+  %5 = scalar.extui %block : i32 to i64
+  %6 = scalar.constant 136 : i64
+  %7 = scalar.muli %5, %6 : i64
+  %8 = index.cast %blocks_byte_offset : offset to i64
+  %9 = scalar.addi %8, %7 : i64
+  %10 = scalar.assume %9 [range(%9, 0, 9223372036854775807)] : i64
+  %11 = index.cast %10 : i64 to offset
+  %12 = index.constant 4 : offset
+  %scales_byte_offset = index.add %11, %12 : offset
+  %51 = scalar.constant 5 : i32
+  %52 = scalar.shrui %index, %51 : i32
+  %16 = func.call readonly @read(%blocks, %scales_byte_offset, %52) : (buffer, offset, i32) -> (i32)
+  %24 = index.constant 8 : offset
+  %quants_byte_offset = index.add %11, %24 : offset
+  %26 = scalar.extui %index : i32 to i64
+  %29 = index.cast %quants_byte_offset : offset to i64
+  %30 = scalar.addi %29, %26 : i64
+  %31 = scalar.assume %30 [range(%30, 0, 9223372036854775807)] : i64
+  %32 = index.cast %31 : i64 to offset
+  %33 = buffer.view %blocks[%32] : buffer -> view<1xi8>
+  %34 = view.load<root_in_bounds> %33[0] : view<1xi8> -> i8
+  %35 = scalar.extui %34 : i8 to i32
+  %36 = scalar.addi %16, %35 : i32
+  func.return %36 : i32
+}
+
+func.def @read(%values: buffer, %values_byte_offset: offset, %index: i32) -> (i32) {
+  %41 = scalar.extui %index : i32 to i64
+  %44 = index.cast %values_byte_offset : offset to i64
+  %45 = scalar.addi %44, %41 : i64
+  %46 = scalar.assume %45 [range(%45, 0, 9223372036854775807)] : i64
+  %47 = index.cast %46 : i64 to offset
+  %48 = buffer.view %values[%47] : buffer -> view<1xi8>
+  %49 = view.load<root_in_bounds> %48[0] : view<1xi8> -> i8
+  %50 = scalar.extui %49 : i8 to i32
+  func.return %50 : i32
+}
+
+// ====
+// Each subscript consumes one array extent, including pointer-to-array steps.
+struct Matrix { unsigned tag; short values[3][5]; };
+short* row(Matrix* matrices, unsigned matrix, unsigned index) {
+  return *(matrices[matrix].values + index);
+}
+short element(Matrix* matrices, unsigned matrix, unsigned index) {
+  auto* rows = &matrices[matrix].values;
+  return (*rows)[index][4];
+}
+void update(short (*rows)[5], unsigned row, unsigned column, short value) {
+  rows[row][column] = value;
+}
+
+// ----
+func.def public @row(%matrices: buffer, %matrices_byte_offset: offset, %matrix: i32, %index: i32) -> (buffer, offset) {
+  %6 = scalar.extui %matrix : i32 to i64
+  %7 = scalar.constant 36 : i64
+  %8 = scalar.muli %6, %7 : i64
+  %9 = index.cast %matrices_byte_offset : offset to i64
+  %10 = scalar.addi %9, %8 : i64
+  %11 = scalar.assume %10 [range(%10, 0, 9223372036854775807)] : i64
+  %12 = index.cast %11 : i64 to offset
+  %13 = index.constant 4 : offset
+  %values_byte_offset = index.add %12, %13 : offset
+  %15 = scalar.extui %index : i32 to i64
+  %16 = scalar.constant 10 : i64
+  %17 = scalar.muli %15, %16 : i64
+  %18 = index.cast %values_byte_offset : offset to i64
+  %19 = scalar.addi %18, %17 : i64
+  %20 = scalar.assume %19 [range(%19, 0, 9223372036854775807)] : i64
+  %21 = index.cast %20 : i64 to offset
+  func.return %matrices, %21 : buffer, offset
+}
+
+func.def public @element(%matrices: buffer, %matrices_byte_offset: offset, %matrix: i32, %index: i32) -> (i16) {
+  %27 = scalar.extui %matrix : i32 to i64
+  %28 = scalar.constant 36 : i64
+  %29 = scalar.muli %27, %28 : i64
+  %30 = index.cast %matrices_byte_offset : offset to i64
+  %31 = scalar.addi %30, %29 : i64
+  %32 = scalar.assume %31 [range(%31, 0, 9223372036854775807)] : i64
+  %33 = index.cast %32 : i64 to offset
+  %34 = index.constant 4 : offset
+  %rows_byte_offset = index.add %33, %34 : offset
+  %36 = scalar.extui %index : i32 to i64
+  %37 = scalar.constant 10 : i64
+  %38 = scalar.muli %36, %37 : i64
+  %39 = index.cast %rows_byte_offset : offset to i64
+  %40 = scalar.addi %39, %38 : i64
+  %41 = scalar.assume %40 [range(%40, 0, 9223372036854775807)] : i64
+  %42 = index.cast %41 : i64 to offset
+  %73 = scalar.constant 8 : i64
+  %47 = index.cast %42 : offset to i64
+  %48 = scalar.addi %47, %73 : i64
+  %49 = scalar.assume %48 [range(%48, 0, 9223372036854775807)] : i64
+  %50 = index.cast %49 : i64 to offset
+  %51 = buffer.view %matrices[%50] : buffer -> view<1xi16>
+  %52 = view.load<root_in_bounds> %51[0] : view<1xi16> -> i16
+  func.return %52 : i16
+}
+
+func.def public @update(%rows: buffer, %rows_byte_offset: offset, %row: i32, %column: i32, %value: i16) {
+  %58 = scalar.extui %row : i32 to i64
+  %59 = scalar.constant 10 : i64
+  %60 = scalar.muli %58, %59 : i64
+  %61 = index.cast %rows_byte_offset : offset to i64
+  %62 = scalar.addi %61, %60 : i64
+  %63 = scalar.assume %62 [range(%62, 0, 9223372036854775807)] : i64
+  %64 = index.cast %63 : i64 to offset
+  %65 = scalar.extui %column : i32 to i64
+  %74 = scalar.constant 1 : i64
+  %75 = scalar.shli %65, %74 : i64
+  %68 = index.cast %64 : offset to i64
+  %69 = scalar.addi %68, %75 : i64
+  %70 = scalar.assume %69 [range(%69, 0, 9223372036854775807)] : i64
+  %71 = index.cast %70 : i64 to offset
+  %72 = buffer.view %rows[%71] : buffer -> view<1xi16>
+  view.store<root_in_bounds> %value, %72[0] : i16, view<1xi16>
+  func.return
+}
+
+// ====
+// Array elements keep nested record layout and whole-vector load/store types.
+using Float4 = float __attribute__((ext_vector_type(4)));
+struct Record { unsigned tag; Float4 values[2]; };
+struct Batch { unsigned count; Record records[3]; };
+Float4 update(Batch* batches, unsigned batch, unsigned record, unsigned index) {
+  auto* values = batches[batch].records[record].values;
+  values[index] += Float4{1.0f, 2.0f, 3.0f, 4.0f};
+  return values[index];
+}
+
+// ----
+func.def public @update(%batches: buffer, %batches_byte_offset: offset, %batch: i32, %record: i32, %index: i32) -> (vector<4xf32>) {
+  %6 = scalar.extui %batch : i32 to i64
+  %7 = scalar.constant 160 : i64
+  %8 = scalar.muli %6, %7 : i64
+  %9 = index.cast %batches_byte_offset : offset to i64
+  %10 = scalar.addi %9, %8 : i64
+  %11 = scalar.assume %10 [range(%10, 0, 9223372036854775807)] : i64
+  %12 = index.cast %11 : i64 to offset
+  %13 = index.constant 16 : offset
+  %records_byte_offset = index.add %12, %13 : offset
+  %15 = scalar.extui %record : i32 to i64
+  %16 = scalar.constant 48 : i64
+  %17 = scalar.muli %15, %16 : i64
+  %18 = index.cast %records_byte_offset : offset to i64
+  %19 = scalar.addi %18, %17 : i64
+  %20 = scalar.assume %19 [range(%19, 0, 9223372036854775807)] : i64
+  %21 = index.cast %20 : i64 to offset
+  %values_byte_offset = index.add %21, %13 : offset
+  %24 = vector.constantf [1.0, 2.0, 3.0, 4.0] : vector<4xf32>
+  %25 = scalar.extui %index : i32 to i64
+  %46 = scalar.constant 4 : i64
+  %47 = scalar.shli %25, %46 : i64
+  %28 = index.cast %values_byte_offset : offset to i64
+  %29 = scalar.addi %28, %47 : i64
+  %30 = scalar.assume %29 [range(%29, 0, 9223372036854775807)] : i64
+  %31 = index.cast %30 : i64 to offset
+  %32 = buffer.view %batches[%31] : buffer -> view<4xf32>
+  %33 = vector.load<root_in_bounds> %32[0] : view<4xf32> -> vector<4xf32>
+  %34 = vector.addf %33, %24 : vector<4xf32>
+  vector.store<root_in_bounds> %34, %32[0] : vector<4xf32>, view<4xf32>
+  %43 = vector.load<root_in_bounds> %32[0] : view<4xf32> -> vector<4xf32>
+  func.return %43 : vector<4xf32>
+}
+
+// ====
+// Volatile propagates through the array and its elements, including decay.
+struct Observed { unsigned tag; unsigned values[4]; };
+unsigned update(volatile Observed* records, unsigned record, unsigned index) {
+  auto* values = records[record].values;
+  unsigned previous = values[index]++;
+  return previous + records[record].values[index];
+}
+
+// ----
+func.def public @update(%records: buffer, %records_byte_offset: offset, %record: i32, %index: i32) -> (i32) {
+  %5 = scalar.extui %record : i32 to i64
+  %6 = scalar.constant 20 : i64
+  %7 = scalar.muli %5, %6 : i64
+  %8 = index.cast %records_byte_offset : offset to i64
+  %9 = scalar.addi %8, %7 : i64
+  %10 = scalar.assume %9 [range(%9, 0, 9223372036854775807)] : i64
+  %11 = index.cast %10 : i64 to offset
+  %12 = index.constant 4 : offset
+  %values_byte_offset = index.add %11, %12 : offset
+  %14 = scalar.extui %index : i32 to i64
+  %46 = scalar.constant 2 : i64
+  %47 = scalar.shli %14, %46 : i64
+  %17 = index.cast %values_byte_offset : offset to i64
+  %18 = scalar.addi %17, %47 : i64
+  %19 = scalar.assume %18 [range(%18, 0, 9223372036854775807)] : i64
+  %20 = index.cast %19 : i64 to offset
+  %21 = buffer.view %records[%20] : buffer -> view<1xi32>
+  %previous = view.load<volatile|root_in_bounds> %21[0] : view<1xi32> -> i32
+  %23 = scalar.constant 1 : i32
+  %24 = scalar.addi %previous, %23 : i32
+  view.store<volatile|root_in_bounds> %24, %21[0] : i32, view<1xi32>
+  %42 = view.load<volatile|root_in_bounds> %21[0] : view<1xi32> -> i32
+  %43 = scalar.addi %previous, %42 : i32
+  func.return %43 : i32
+}
+
+// ====
+// Addressing a shared array through a differently shaped alias retains origin.
+#include <loomcxx/kernel.h>
+[[loom::kernel, loom::workgroup_size(32, 1, 1)]]
+void shared_rows(unsigned* output) {
+  [[loom::workgroup]] unsigned words[64];
+  auto* rows = reinterpret_cast<unsigned (*)[32]>(&words);
+  unsigned index = loom::kernel::workitem::id.x;
+  rows[1][index] = index;
+  output[index] = words[index + 32];
+}
+
+// ----
+kernel.def @shared_rows() {
+  %workgroup_count_x = config.get @shared_rows.workgroup_count.x : index
+  %workgroup_count_y = config.get @shared_rows.workgroup_count.y : index
+  %workgroup_count_z = config.get @shared_rows.workgroup_count.z : index
+  %7 = index.constant 32 : index
+  %8 = index.constant 1 : index
+  kernel.launch.config workgroups(%workgroup_count_x, %workgroup_count_y, %workgroup_count_z) workgroup_size(%7, %8, %8) : index
+} launch(%output: buffer) {
+  %11 = index.constant 256 : offset
+  %words = buffer.alloca<workgroup> align(4) %11 : buffer
+  %words_byte_offset = index.constant 0 : offset
+  %words_view = buffer.view %words[%words_byte_offset] : buffer -> view<64xi32>
+  %workitem_id_x = kernel.workitem.id<x> : index
+  %index = index.cast %workitem_id_x : index to i32
+  %25 = scalar.extui %index : i32 to i64
+  %52 = scalar.constant 2 : i64
+  %53 = scalar.shli %25, %52 : i64
+  %51 = scalar.constant 128 : i64
+  %50 = scalar.addi %53, %51 : i64
+  %30 = scalar.assume %50 [range(%50, 0, 9223372036854775807)] : i64
+  %31 = index.cast %30 : i64 to offset
+  %32 = index.assume %31 [range(%31, 0, 252)] : offset
+  %33 = buffer.view %words[%32] : buffer -> view<1xi32>
+  view.store %index, %33[0] : i32, view<1xi32>
+  %34 = scalar.constant 32 : i32
+  %35 = scalar.addi %index, %34 : i32
+  %36 = scalar.extui %35 : i32 to i64
+  %37 = scalar.assume %36 [range(%36, 0, 63)] : i64
+  %38 = index.cast %37 : i64 to index
+  %39 = view.load %words_view[%38] : view<64xi32> -> i32
+  %45 = scalar.assume %53 [range(%53, 0, 9223372036854775807)] : i64
+  %46 = index.cast %45 : i64 to offset
+  %47 = buffer.view %output[%46] : buffer -> view<1xi32>
+  view.store<root_in_bounds> %39, %47[0] : i32, view<1xi32>
+  kernel.return
+}
+
+config.decl @shared_rows.workgroup_count.x : index
+
+config.decl @shared_rows.workgroup_count.y : index
+
+config.decl @shared_rows.workgroup_count.z : index
+
+// ====
+// Workgroup record arrays retain one aggregate allocation while each field is
+// projected with its C++ byte offset and scalar type.
+#include <loomcxx/kernel.h>
+struct SharedRecord {
+  // Leading byte payload exercises record padding before the next field.
+  unsigned char tag;
+  // Naturally aligned scalar payload.
+  unsigned sequence;
+  // Nested array payload addressed within each record element.
+  float values[2];
+};
+[[loom::kernel, loom::workgroup_size(4, 1, 1)]]
+void shared_records(unsigned* output, float* values) {
+  [[loom::workgroup]] SharedRecord records[4];
+  unsigned index = loom::kernel::workitem::id.x;
+  records[index].tag = 3;
+  records[index].sequence = index + 7;
+  records[index].values[1] = 2.0f;
+  output[index] = records[index].sequence + records[index].tag;
+  values[index] = records[index].values[1];
+}
+
+// ----
+kernel.def @shared_records() {
+  %workgroup_count_x = config.get @shared_records.workgroup_count.x : index
+  %workgroup_count_y = config.get @shared_records.workgroup_count.y : index
+  %workgroup_count_z = config.get @shared_records.workgroup_count.z : index
+  %8 = index.constant 4 : index
+  %9 = index.constant 1 : index
+  kernel.launch.config workgroups(%workgroup_count_x, %workgroup_count_y, %workgroup_count_z) workgroup_size(%8, %9, %9) : index
+} launch(%output: buffer, %values: buffer) {
+  %13 = index.constant 64 : offset
+  %records = buffer.alloca<workgroup> align(4) %13 : buffer
+  %workitem_id_x = kernel.workitem.id<x> : index
+  %index = index.cast %workitem_id_x : index to i32
+  %145 = scalar.constant 3 : i8
+  %21 = scalar.extui %index : i32 to i64
+  %143 = scalar.constant 4 : i64
+  %144 = scalar.shli %21, %143 : i64
+  %26 = scalar.assume %144 [range(%144, 0, 9223372036854775807)] : i64
+  %27 = index.cast %26 : i64 to offset
+  %30 = index.assume %27 [range(%27, 0, 63)] : offset
+  %31 = buffer.view %records[%30] : buffer -> view<1xi8>
+  view.store %145, %31[0] : i8, view<1xi8>
+  %32 = scalar.constant 7 : i32
+  %33 = scalar.addi %index, %32 : i32
+  %41 = index.constant 4 : offset
+  %42 = index.add %30, %41 : offset
+  %43 = index.assume %42 [range(%42, 0, 60)] : offset
+  %44 = buffer.view %records[%43] : buffer -> view<1xi32>
+  view.store %33, %44[0] : i32, view<1xi32>
+  %45 = scalar.constant 2.0 : f32
+  %53 = index.constant 8 : offset
+  %values_byte_offset = index.add %30, %53 : offset
+  %59 = index.cast %values_byte_offset : offset to i64
+  %60 = scalar.addi %59, %143 : i64
+  %61 = scalar.assume %60 [range(%60, 0, 9223372036854775807)] : i64
+  %62 = index.cast %61 : i64 to offset
+  %63 = index.assume %62 [range(%62, 0, 60)] : offset
+  %64 = buffer.view %records[%63] : buffer -> view<1xf32>
+  view.store %45, %64[0] : f32, view<1xf32>
+  %sequence = view.load %44[0] : view<1xi32> -> i32
+  %tag = view.load %31[0] : view<1xi8> -> i8
+  %89 = scalar.extui %tag : i8 to i32
+  %90 = scalar.addi %sequence, %89 : i32
+  %132 = scalar.constant 2 : i64
+  %133 = scalar.shli %21, %132 : i64
+  %96 = scalar.assume %133 [range(%133, 0, 9223372036854775807)] : i64
+  %97 = index.cast %96 : i64 to offset
+  %98 = buffer.view %output[%97] : buffer -> view<1xi32>
+  view.store<root_in_bounds> %90, %98[0] : i32, view<1xi32>
+  %118 = view.load %64[0] : view<1xf32> -> f32
+  %126 = buffer.view %values[%97] : buffer -> view<1xf32>
+  view.store<root_in_bounds> %118, %126[0] : f32, view<1xf32>
+  kernel.return
+}
+
+config.decl @shared_records.workgroup_count.x : index
+
+config.decl @shared_records.workgroup_count.y : index
+
+config.decl @shared_records.workgroup_count.z : index

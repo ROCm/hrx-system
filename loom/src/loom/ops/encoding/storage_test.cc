@@ -749,8 +749,12 @@ TEST(EncodingStorageQueryTest, ValueLayoutKeepsNumericAndSsaAxesSeparate) {
       loom_value_facts_make(4, 4096, 4), loom_value_facts_exact_i64(1)};
   loom_value_fact_encoding_summary_t summary = {
       .role = LOOM_ENCODING_ROLE_ADDRESS_LAYOUT,
-      .address_layout = {LOOM_VALUE_FACT_ADDRESS_LAYOUT_STRIDED,
-                         IREE_ARRAYSIZE(numeric_strides), numeric_strides},
+      .address_layout =
+          {
+              .kind = LOOM_VALUE_FACT_ADDRESS_LAYOUT_STRIDED,
+              .rank = IREE_ARRAYSIZE(numeric_strides),
+              .strides = numeric_strides,
+          },
   };
   loom_value_facts_t facts;
   IREE_ASSERT_OK(
@@ -807,10 +811,17 @@ TEST_F(EncodingStorageTest, InternExactComposedStorageSummary) {
   const loom_value_fact_encoding_summary_t summary = {
       .role = LOOM_ENCODING_ROLE_PHYSICAL_STORAGE,
       .static_spec_encoding_id = 0,
+      .family_id = loom_context_resolve_encoding_name(
+                       module->context, IREE_SV("encoding.storage"))
+                       .family_id,
       .address_layout =
           {
               .kind = LOOM_VALUE_FACT_ADDRESS_LAYOUT_STRIDED,
               .rank = IREE_ARRAYSIZE(stride_facts),
+              .family_id =
+                  loom_context_resolve_encoding_name(
+                      module->context, IREE_SV("encoding.layout.strided"))
+                      .family_id,
               .strides = stride_facts,
           },
       .storage_schema =

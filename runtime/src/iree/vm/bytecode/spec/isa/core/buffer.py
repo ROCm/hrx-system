@@ -162,11 +162,21 @@ BUFFER_ATOMIC_SCOPE_SELECTOR = _selector(
     ),
 )
 
+BUFFER_COMPARE_ADDRESS_SELECTOR = _selector(
+    "buffer.compare.address.predicate",
+    "Selects equality or inequality of two bounded buffer positions.",
+    (
+        ("eq", 0, "True when both positions identify the same address."),
+        ("ne", 1, "True when the positions identify different addresses."),
+    ),
+)
+
 BUFFER_SELECTORS = (
     BUFFER_ATOMIC_KIND_SELECTOR,
     BUFFER_ATOMIC_CARRIER_SELECTOR,
     BUFFER_ATOMIC_ORDERING_SELECTOR,
     BUFFER_ATOMIC_SCOPE_SELECTOR,
+    BUFFER_COMPARE_ADDRESS_SELECTOR,
 )
 
 BUFFER_FAMILY = InstructionFamily(
@@ -221,12 +231,20 @@ def _value(name: str, role: FieldRole, summary: str) -> InstructionField:
     return _field(name, U8, summary, role, FieldRule.REGISTER_VALUE)
 
 
-def _buffer_ref(name: str) -> InstructionField:
+def _buffer_ref(name: str, *, nullable: bool = False) -> InstructionField:
     return InstructionField(
-        Field(name, U8, "Required exact vm.buffer ref borrowed for this instruction."),
+        Field(
+            name,
+            U8,
+            f"{'Nullable' if nullable else 'Required'} exact vm.buffer ref borrowed for this instruction.",
+        ),
         FieldRole.OPERAND,
         FieldRuleUse(FieldRule.REGISTER_REF),
-        RuntimeRefPolicy("vm.buffer", RefNullPolicy.REQUIRED, RefOwnership.BORROW),
+        RuntimeRefPolicy(
+            "vm.buffer",
+            RefNullPolicy.NULLABLE if nullable else RefNullPolicy.REQUIRED,
+            RefOwnership.BORROW,
+        ),
     )
 
 
@@ -399,16 +417,7 @@ BUFFER_LENGTH = Instruction(
             FieldRole.RESULT,
             "Unsigned 64-bit byte-length result.",
         ),
-        InstructionField(
-            Field(
-                "buffer_r8",
-                U8,
-                "Nullable exact vm.buffer ref borrowed for this instruction.",
-            ),
-            FieldRole.OPERAND,
-            FieldRuleUse(FieldRule.REGISTER_REF),
-            RuntimeRefPolicy("vm.buffer", RefNullPolicy.NULLABLE, RefOwnership.BORROW),
-        ),
+        _buffer_ref("buffer_r8", nullable=True),
         _padding("zero_padding_u8"),
     ),
     semantics=None,
@@ -1292,6 +1301,80 @@ BUFFER_RODATA_LOAD = Instruction(
     ),
 )
 
+BUFFER_COMPARE_ADDRESS = Instruction(
+    opcode=0xE5,
+    mnemonic="buffer.compare.address",
+    since=CORE_0,
+    family=BUFFER_FAMILY,
+    summary="Tests equality or inequality of two bounded buffer positions.",
+    fields=(
+        _value("destination_v8", FieldRole.RESULT, "Canonical Boolean result."),
+        _buffer_ref("left_r8", nullable=True),
+        _value("left_offset_v8", FieldRole.OPERAND, "Unsigned left byte offset."),
+        _buffer_ref("right_r8", nullable=True),
+        _value("right_offset_v8", FieldRole.OPERAND, "Unsigned right byte offset."),
+        _field(
+            "predicate_u8",
+            U8,
+            "Closed equality or inequality selector.",
+            FieldRole.IMMEDIATE,
+            FieldRuleUse(FieldRule.SELECTOR, data=BUFFER_COMPARE_ADDRESS_SELECTOR),
+        ),
+        _padding("zero_padding_u8"),
+    ),
+    semantics=None,
+    behavior=(
+        "Compares positions in open buffers, including one-past endpoints, without "
+        "reading bytes or exposing native addresses. Independently wrapped aliases "
+        "compare by their selected positions, not wrapper identity. Null permits "
+        "only offset zero and differs from all nonnull buffers. An empty root "
+        "without native storage retains its own logical position, shared by its "
+        "subspans and distinct from other roots."
+    ),
+    success=(
+        "After all checks, destination_v8 receives complete-cell zero or one for "
+        "the selected predicate. No address, reference, or byte content is returned."
+    ),
+    assembly=(
+        "%v<destination> = buffer.compare.address %r<left>, %v<left_offset>, "
+        "%r<right>, %v<right_offset> {predicate}"
+    ),
+    pseudocode=(
+        "left = check_optional_deref(refs[left_r8], vm_buffer_type);\n"
+        "right = check_optional_deref(refs[right_r8], vm_buffer_type);\n"
+        "left_offset_u64 = values[left_offset_v8];\n"
+        "right_offset_u64 = values[right_offset_v8];\n"
+        "require checked_position(left, left_offset_u64);\n"
+        "require checked_position(right, right_offset_u64);\n"
+        "equal = same_buffer_position(left, left_offset_u64, right, right_offset_u64);\n"
+        "values[destination_v8] = canonical_bool(equal != (predicate_u8 == ne));\n"
+        "pc = pc + 8;"
+    ),
+    preconditions=(
+        "Each nonnull ref must be an exact open vm.buffer and each offset must "
+        "fit its buffer length; null requires offset zero. No READ/WRITE right "
+        "beyond root liveness is required.",
+    ),
+    failures=(
+        FailureCase(
+            "invalid_argument",
+            "A nonnull operand has a descriptor other than vm.buffer.",
+            "destination_v8 remains unchanged.",
+        ),
+        FailureCase(
+            "out_of_range",
+            "An offset exceeds its buffer length or is nonzero for null.",
+            "destination_v8 remains unchanged.",
+        ),
+        FailureCase(
+            "failed_precondition",
+            "Either nonnull root is closed, including through a subspan.",
+            "destination_v8 remains unchanged.",
+        ),
+    ),
+    ownership=("Both operands are borrowed without retain or release operations.",),
+)
+
 BUFFER_INSTRUCTIONS = (
     BUFFER_ALLOCATE,
     BUFFER_LENGTH,
@@ -1306,4 +1389,5 @@ BUFFER_INSTRUCTIONS = (
     BUFFER_COMPARE,
     BUFFER_COPY_RODATA,
     BUFFER_RODATA_LOAD,
+    BUFFER_COMPARE_ADDRESS,
 )

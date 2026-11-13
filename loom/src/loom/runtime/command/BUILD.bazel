@@ -1,0 +1,58 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library", "loom_cc_test")
+
+package(
+    default_visibility = ["//visibility:private"],
+    features = ["layering_check"],
+    licenses = ["notice"],
+)
+
+# The compiler produces these bytes; independent runtimes consume them without
+# retaining compiler IR, source, or process state.
+loom_cc_library(
+    name = "program",
+    srcs = [
+        "format.c",
+        "program.c",
+    ],
+    hdrs = [
+        "format.h",
+        "program.h",
+    ],
+    tags = ["LINKABLE_MORE_THAN_ONCE"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base:core_headers",
+    ],
+)
+
+loom_cc_library(
+    name = "hal_command_buffer",
+    srcs = ["hal_command_buffer.c"],
+    hdrs = ["hal_command_buffer.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":program",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base:core_headers",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+loom_cc_test(
+    name = "program_test",
+    srcs = ["program_test.cc"],
+    deps = [
+        ":program",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base:core_headers",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)

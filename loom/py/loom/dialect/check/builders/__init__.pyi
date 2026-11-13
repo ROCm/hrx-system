@@ -174,6 +174,7 @@ class CheckBuilder(DialectBuilder):
         atol: float,
         rtol: float,
         nan: str,
+        subnormal: str | None = ...,
         location_id: int | None = ...,
     ) -> None: ...
     def shape(

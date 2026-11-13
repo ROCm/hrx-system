@@ -1,0 +1,41 @@
+// RUN: format bytecode
+
+type.decl import("media", "image.frame") @Frame
+
+type.decl import("input", "decoder") @Decoder
+
+type.decl import("input", "decoder") @Alias
+
+type.decl import("other", "decoder") @Other
+
+// Nested signatures and body arguments retain the same exact identities.
+func.def @entry(%frame: ref<@Frame>, %decoder: ptr<@Decoder>, %callback: (ptr<@Decoder>) -> (ref<@Frame>)) -> (ref<@Frame>) {
+  func.return %frame : ref<@Frame>
+}
+
+func.def @unused(%other: ref<@Other>) -> (ref<@Other>) {
+  func.return %other : ref<@Other>
+}
+
+// ====
+// RUN: format bytecode
+
+type.decl import("media", "image.frame") @Client
+
+func.decl @consume(%frame: ref<@Client>, %callback: (ptr<@Client>) -> (ref<@Client>)) -> (ref<@Client>)
+
+func.def @entry(%frame: ref<@Client>, %callback: (ptr<@Client>) -> (ref<@Client>)) -> (ref<@Client>) {
+  %result = func.call @consume(%frame, %callback) : (ref<@Client>, (ptr<@Client>) -> (ref<@Client>)) -> (ref<@Client>)
+  func.return %result : ref<@Client>
+}
+
+// ====
+// RUN: format bytecode
+
+type.decl import("unused", "payload") @Other
+
+type.decl import("media", "image.frame") @Provider
+
+func.def public @consume(%frame: ref<@Provider>, %callback: (ptr<@Provider>) -> (ref<@Provider>)) -> (ref<@Provider>) {
+  func.return %frame : ref<@Provider>
+}

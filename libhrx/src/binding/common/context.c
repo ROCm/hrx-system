@@ -15,6 +15,7 @@
 #include "common/stream.h"
 #include "common/stream_queue.h"
 #include "libhrx/src/libhrx/mem_pool_backing.h"
+#include "libhrx/src/libhrx/runtime.h"
 
 //===----------------------------------------------------------------------===//
 // Global state
@@ -88,8 +89,6 @@ iree_status_t iree_hal_streaming_context_create(
   context->queue = NULL;
   context->device_allocator =
       iree_hal_device_allocator(device_entry->hal_device);
-  context->timestamp_domain = iree_hal_streaming_query_timestamp_domain(
-      iree_hal_device_spec(device_entry->hal_device));
   iree_hal_streaming_context_set_flags(context, flags);
   context->default_stream = NULL;
   context->next_capture_id = 1;
@@ -146,13 +145,17 @@ iree_status_t iree_hal_streaming_context_create(
   iree_status_t status = hrx_mem_pool_backing_retain_allocation_source(
       device_entry->hrx_device, HRX_MEMORY_TYPE_HOST_LOCAL,
       HRX_BUFFER_USAGE_DEFAULT, &timestamp_memory_pool);
-  iree_hal_streaming_event_timestamp_pool_initialize(
-      timestamp_memory_pool, host_allocator, &context->timestamp_pool);
+  hrx_event_timestamp_pool_initialize(timestamp_memory_pool, host_allocator,
+                                      &context->timestamp_pool);
   iree_hal_pool_release(timestamp_memory_pool);
 
   if (iree_status_is_ok(status)) {
     status = iree_hal_streaming_device_acquire_primary_queue(device_entry,
                                                              &context->queue);
+  }
+  if (iree_status_is_ok(status)) {
+    context->timestamp_domain = hrx_event_timestamp_domain_query(
+        iree_hal_queue_family_spec(iree_hal_queue_family(context->queue)));
   }
 
   // Create the context-wide event record timeline. Resource-partitioned
@@ -327,8 +330,7 @@ static void iree_hal_streaming_context_destroy(
   // A record draws its slot from the pool of the recording event's own context
   // and every event retains that context, so reaching here means every event
   // that could hold a slot from this pool is gone and every slot is back.
-  iree_hal_streaming_event_timestamp_pool_deinitialize(
-      &context->timestamp_pool);
+  hrx_event_timestamp_pool_deinitialize(&context->timestamp_pool);
   iree_hal_streaming_value_wait_lanes_deinitialize(context);
   iree_hal_streaming_capture_admission_deinitialize(
       &context->capture_admission);
@@ -400,12 +402,12 @@ void iree_hal_streaming_context_set_flags(
 iree_async_wait_flags_t iree_hal_streaming_context_wait_flags(
     iree_hal_streaming_context_t* context) {
   switch (iree_hal_streaming_context_flags(context).scheduling_mode) {
+    case IREE_HAL_STREAMING_SCHEDULING_MODE_AUTO:
     case IREE_HAL_STREAMING_SCHEDULING_MODE_SPIN:
       return IREE_ASYNC_WAIT_FLAG_ACTIVE;
     case IREE_HAL_STREAMING_SCHEDULING_MODE_BLOCKING_SYNC:
       return IREE_ASYNC_WAIT_FLAG_NONE;
     case IREE_HAL_STREAMING_SCHEDULING_MODE_YIELD:
-    case IREE_HAL_STREAMING_SCHEDULING_MODE_AUTO:
     default:
       return IREE_ASYNC_WAIT_FLAG_YIELD;
   }
@@ -1363,16 +1365,20 @@ iree_status_t iree_hal_streaming_context_synchronize_event_records(
 
 iree_status_t iree_hal_streaming_context_synchronize(
     iree_hal_streaming_context_t* context) {
-  return iree_hal_streaming_context_synchronize_streams(
+  iree_status_t status = iree_hal_streaming_context_synchronize_streams(
       context, /*include_non_blocking_streams=*/true,
       /*flush_before_wait=*/true);
+  return iree_status_join(
+      status, hrx_runtime_profile_flush(context->device_entry->hrx_device));
 }
 
 iree_status_t iree_hal_streaming_context_synchronize_legacy_default(
     iree_hal_streaming_context_t* context) {
-  return iree_hal_streaming_context_synchronize_streams(
+  iree_status_t status = iree_hal_streaming_context_synchronize_streams(
       context, /*include_non_blocking_streams=*/false,
       /*flush_before_wait=*/true);
+  return iree_status_join(
+      status, hrx_runtime_profile_flush(context->device_entry->hrx_device));
 }
 
 iree_status_t iree_hal_streaming_context_synchronize_all(void) {
@@ -1425,9 +1431,7 @@ iree_status_t iree_hal_streaming_context_synchronize_all(void) {
   // boundary for unretained resources.
   for (iree_host_size_t i = 0; i < context_count; ++i) {
     status = iree_status_join(
-        status, iree_hal_streaming_context_synchronize_streams(
-                    contexts[i], /*include_non_blocking_streams=*/true,
-                    /*flush_before_wait=*/true));
+        status, iree_hal_streaming_context_synchronize(contexts[i]));
   }
 
   for (iree_host_size_t i = 0; i < context_count; ++i) {

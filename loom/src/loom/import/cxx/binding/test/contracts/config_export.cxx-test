@@ -1,0 +1,110 @@
+// REQUIRES: loom-export-cxx
+// RUN: emit cxx
+#include <loomcxx/encoding_type.h>
+#include <loomcxx/index.h>
+#include <loomcxx/predicate.h>
+
+using Schema = loom::type::encoding<loom::encoding::role::schema>;
+struct Configuration {
+  loom::type::index input_size;
+  Schema schema;
+};
+
+[[loom::config("pipeline.input_size"), loom::where(loom::predicate::range(1, 65536) && loom::predicate::multiple_of(64))]]
+extern const loom::type::index input_size;
+[[loom::config("pipeline.schema")]] extern const Schema schema;
+
+Configuration configured() { return {input_size, schema}; }
+
+// ----
+#include <loomcxx/encoding_type.h>
+#include <loomcxx/index.h>
+#include <loomcxx/predicate.h>
+
+struct configured_result {
+  loom::type::index value0;
+  loom::type::encoding<loom::encoding::role::schema> value1;
+};
+
+[[loom::config("pipeline.input_size"), loom::where(loom::predicate::range(1, 65536) && loom::predicate::multiple_of(64))]]
+extern const loom::type::index input_size;
+[[loom::config("pipeline.schema")]]
+extern const loom::type::encoding<loom::encoding::role::schema> schema;
+
+[[loom::symbol("configured")]]
+configured_result configured();
+
+[[loom::symbol("configured")]]
+configured_result configured() {
+  return {input_size, schema};
+}
+
+// ====
+// REQUIRES: loom-export-cxx
+// RUN: emit cxx
+// Exact config defaults and their specialization contracts survive export.
+#include <loomcxx/index.h>
+#include <loomcxx/predicate.h>
+
+[[loom::config("pipeline.tile_size"), loom::where(loom::predicate::range(16, 256) && loom::predicate::multiple_of(16))]]
+const loom::type::index tile_size{64};
+
+loom::type::index default_tile_size() { return tile_size; }
+
+// ----
+#include <loomcxx/index.h>
+#include <loomcxx/predicate.h>
+
+[[loom::config("pipeline.tile_size"), loom::where(loom::predicate::range(16, 256) && loom::predicate::multiple_of(16))]]
+const loom::type::index tile_size = loom::type::index{64};
+
+[[loom::symbol("default_tile_size")]]
+loom::type::index default_tile_size();
+
+[[loom::symbol("default_tile_size")]]
+loom::type::index default_tile_size() {
+  return loom::type::index{64};
+}
+
+// ====
+// REQUIRES: loom-export-cxx
+// RUN: emit cxx
+// Predicate constants retain the declared C++ scalar family.
+#include <loomcxx/predicate.h>
+
+[[loom::config("pipeline.enabled"), loom::where(loom::predicate::eq(true))]]
+extern const bool enabled;
+[[loom::config("pipeline.scale"), loom::where(loom::predicate::eq(1.0f) && loom::predicate::finite())]]
+extern const float scale;
+[[loom::config("pipeline.byte"), loom::where(loom::predicate::range(static_cast<unsigned char>(1), static_cast<unsigned char>(127)))]]
+extern const unsigned char byte;
+
+float configured_scalars() {
+  if (enabled) return scale;
+  return static_cast<float>(byte);
+}
+
+// ----
+#include <loomcxx/numeric.h>
+#include <loomcxx/predicate.h>
+
+[[loom::config("pipeline.enabled"), loom::where(loom::predicate::eq(true))]]
+extern const bool enabled;
+[[loom::config("pipeline.scale"), loom::where(loom::predicate::eq(1.0f) && loom::predicate::finite())]]
+extern const float scale;
+[[loom::config("pipeline.byte"), loom::where(loom::predicate::range(static_cast<unsigned char>(1), static_cast<unsigned char>(127)))]]
+extern const unsigned char byte;
+
+[[loom::symbol("configured_scalars")]]
+float configured_scalars();
+
+[[loom::symbol("configured_scalars")]]
+float configured_scalars() {
+  float v5{};
+  if (enabled) {
+    v5 = scale;
+  } else {
+    v5 = loom::convert<float>(byte);
+  }
+  return v5;
+}

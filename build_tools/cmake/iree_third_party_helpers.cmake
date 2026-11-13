@@ -85,6 +85,14 @@ function(_iree_dependency_expand_download_urls out_var)
         "https://mirror.bazel.build/${CMAKE_MATCH_1}")
     endif()
 
+    # The Bazel and TensorFlow public buckets have complementary coverage and
+    # are independently addressable from GitHub and mirror.bazel.build.
+    if(_url MATCHES "^https://(github\\.com/.*)$")
+      list(APPEND _expanded_urls
+        "https://storage.googleapis.com/bazel-mirror/${CMAKE_MATCH_1}"
+        "https://storage.googleapis.com/mirror.tensorflow.org/${CMAKE_MATCH_1}")
+    endif()
+
     # Kernel.org is the independent canonical mirror for Torvalds' Linux tree.
     if(_url MATCHES
        "^https://raw\\.githubusercontent\\.com/torvalds/linux/([^/]+)/(.*)$")

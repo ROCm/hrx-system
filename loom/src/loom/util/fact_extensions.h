@@ -104,14 +104,15 @@ typedef struct loom_value_fact_vector_prefix_mask_t {
 } loom_value_fact_vector_prefix_mask_t;
 
 // Address-layout summary kind carried by encoding facts.
-typedef enum loom_value_fact_address_layout_kind_e {
+enum loom_value_fact_address_layout_kind_e {
   // No usable address-layout summary is known.
   LOOM_VALUE_FACT_ADDRESS_LAYOUT_UNKNOWN = 0,
   // Dense row-major layout. The consuming shaped type supplies rank/extents.
   LOOM_VALUE_FACT_ADDRESS_LAYOUT_DENSE = 1,
   // Explicit per-axis element strides.
   LOOM_VALUE_FACT_ADDRESS_LAYOUT_STRIDED = 2,
-} loom_value_fact_address_layout_kind_t;
+};
+typedef uint8_t loom_value_fact_address_layout_kind_t;
 
 // Summary of an address-layout encoding's logical-to-physical map.
 typedef struct loom_value_fact_address_layout_t {
@@ -121,6 +122,14 @@ typedef struct loom_value_fact_address_layout_t {
   // Number of stride facts in strides, at most LOOM_TYPE_MAX_RANK. Dense
   // layouts leave this zero because rank comes from the consuming shaped type.
   uint8_t rank;
+
+  // Context-local family identity, or zero when only addressing properties
+  // are known. Layout properties alone do not identify an encoding family.
+  loom_encoding_family_id_t family_id;
+
+  // One-based complete static layout specification, or zero when unknown.
+  // Retained separately from the enclosing physical storage specification.
+  uint16_t static_spec_encoding_id;
 
   // Borrowed per-axis element-stride facts for strided layouts. Query results
   // point into the owning fact table.
@@ -379,6 +388,10 @@ typedef struct loom_value_fact_encoding_summary_t {
   // Zero means no exact static replacement is known.
   uint16_t static_spec_encoding_id;
 
+  // Context-local encoding family identity, or zero when unknown. A family
+  // remains known when its parameters vary or have only partial facts.
+  loom_encoding_family_id_t family_id;
+
   // Address-layout facts when this encoding directly is a layout or composes a
   // physical storage encoding with a known layout.
   loom_value_fact_address_layout_t address_layout;
@@ -442,6 +455,16 @@ struct loom_value_fact_domain_t {
       loom_value_facts_t previous, const loom_value_fact_table_t* next_table,
       loom_value_facts_t next, uint32_t feedback_round,
       loom_value_facts_t* inout_facts);
+
+  // Refines two sound extension overapproximations with finite descending
+  // height. Domains with independent fields narrow them separately. Without a
+  // callback, the first nonempty extension is retained unchanged.
+  iree_status_t (*narrow_extension)(
+      const loom_value_fact_domain_t* domain, const loom_module_t* module,
+      loom_type_t type, loom_value_fact_table_t* target,
+      const loom_value_fact_table_t* previous_table,
+      loom_value_facts_t previous, const loom_value_fact_table_t* next_table,
+      loom_value_facts_t next, loom_value_facts_t* inout_facts);
 };
 
 //===----------------------------------------------------------------------===//
@@ -512,6 +535,16 @@ iree_status_t loom_value_fact_table_widen_for_type(
     loom_value_facts_t previous, const loom_value_fact_table_t* next_table,
     loom_value_facts_t next, uint32_t feedback_round,
     loom_value_facts_t* out_facts);
+
+// Narrows sound overapproximations with finite descending height. This is the
+// descending counterpart of widening, used when boundaries begin at unknown.
+// Domains retain already bounded components while admitting previously absent
+// information. Both inputs must describe every execution of the same value.
+iree_status_t loom_value_fact_table_narrow_for_type(
+    loom_value_fact_table_t* target, const loom_module_t* module,
+    loom_type_t type, const loom_value_fact_table_t* previous_table,
+    loom_value_facts_t previous, const loom_value_fact_table_t* next_table,
+    loom_value_facts_t next, loom_value_facts_t* out_facts);
 
 //===----------------------------------------------------------------------===//
 // Fact extensions
@@ -635,7 +668,9 @@ bool loom_value_facts_query_view_reference(
 // Creates a bounded raw extension payload for type-owned fact domains. The
 // |payload_tag| namespace belongs to the value type domain; it is not a global
 // schema ID. Payloads larger than LOOM_VALUE_FACT_RAW_PAYLOAD_LENGTH_LIMIT
-// degrade to unknown facts.
+// degrade to unknown facts. Interning hashes and compares every payload byte;
+// the owning domain supplies a canonical representation without uninitialized
+// bytes or implicit structure padding.
 iree_status_t loom_value_facts_make_extension_payload(
     loom_fact_context_t* context, uint8_t payload_tag, const void* payload,
     iree_host_size_t payload_length, loom_value_facts_t* out);

@@ -39,92 +39,95 @@ func.def target(@target) @store_nested(%value: vector<64xi32>, %output: buffer, 
   func.return
 }
 
-func.def target(@target) @store_private_f32(%value: vector<64xf32>) {
+func.def target(@target) @store_private_f32(%value: vector<64xf32>) -> (f32) {
   %bytes = index.constant 512 : offset
   %output = buffer.alloca<private> align(64) %bytes : buffer
   %base = index.constant 256 : offset
   %view = buffer.view %output[%base] : buffer -> view<8x8xf32>
   %extent = index.constant 8 : index
   vector.fragment.store<result> %value, %view[0, 0] shape [%extent, %extent] : vector<64xf32>, view<8x8xf32>
-  func.return
+  %first = view.load %view[0, 0] : view<8x8xf32> -> f32
+  func.return %first : f32
 }
 
 // ----
 low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @store_immediate(%value: reg<aie2p.mbms x4>) asm {
   %aligned = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
-  %35 = slice %value[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc %35, %aligned, 256
-  %36 = slice %value[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc %36, %aligned, 320
-  %37 = slice %value[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc %37, %aligned, 384
-  %38 = slice %value[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc %38, %aligned, 448
+  %39 = slice %value[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %39, %aligned, 256
+  %40 = slice %value[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %40, %aligned, 320
+  %41 = slice %value[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %41, %aligned, 384
+  %42 = slice %value[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %42, %aligned, 448
   return
 }
 
 low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @store_materialized(%value: reg<aie2p.mbms x4>) asm {
   %aligned = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
-  %41 = copy %aligned : reg<aie2p.ep> -> reg<aie2p.ep>
-  %42 = mov.modifier.immediate 512
-  %43 = padda.modifier %41, %42
-  %44 = slice %value[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc %44, %43, 0
-  %45 = slice %value[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc %45, %43, 64
-  %46 = slice %value[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc %46, %43, 128
-  %47 = slice %value[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc %47, %43, 192
+  %45 = copy %aligned : reg<aie2p.ep> -> reg<aie2p.ep>
+  %46 = mov.modifier.immediate 512
+  %47 = paddb.modifier %45, %46
+  %48 = slice %value[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %48, %47, 0
+  %49 = slice %value[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %49, %47, 64
+  %50 = slice %value[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %50, %47, 128
+  %51 = slice %value[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %51, %47, 192
   return
 }
 
 low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @store_dynamic(%value: reg<aie2p.mbms x4>, %base: reg<aie2p.er>) asm {
   %aligned = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
-  %51 = copy %aligned : reg<aie2p.ep> -> reg<aie2p.ep>
-  %52 = mov.modifier %base
-  %53 = padda.modifier %51, %52
-  %54 = slice %value[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc %54, %53, 0
-  %55 = slice %value[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc %55, %53, 64
-  %56 = slice %value[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc %56, %53, 128
-  %57 = slice %value[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc %57, %53, 192
+  %55 = copy %aligned : reg<aie2p.ep> -> reg<aie2p.ep>
+  %56 = mov.modifier %base
+  %57 = paddb.modifier %55, %56
+  %58 = slice %value[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %58, %57, 0
+  %59 = slice %value[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %59, %57, 64
+  %60 = slice %value[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %60, %57, 128
+  %61 = slice %value[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %61, %57, 192
   return
 }
 
 low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @store_nested(%value: reg<aie2p.mbms x4>, %base: reg<aie2p.er>) asm {
   %aligned = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
-  %61 = copy %aligned : reg<aie2p.ep> -> reg<aie2p.ep>
-  %62 = mov.static-byte-offset 256
-  %63 = add.nc %base, %62
-  %64 = mov.modifier %63
-  %65 = padda.modifier %61, %64
-  %66 = slice %value[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc %66, %65, 0
-  %67 = slice %value[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc %67, %65, 64
-  %68 = slice %value[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc %68, %65, 128
-  %69 = slice %value[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc %69, %65, 192
+  %65 = copy %aligned : reg<aie2p.ep> -> reg<aie2p.ep>
+  %66 = mov.static-byte-offset 256
+  %67 = add.nc %base, %66
+  %68 = mov.modifier %67
+  %69 = paddb.modifier %65, %68
+  %70 = slice %value[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %70, %69, 0
+  %71 = slice %value[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %71, %69, 64
+  %72 = slice %value[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %72, %69, 128
+  %73 = slice %value[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %73, %69, 192
   return
 }
 
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @store_private_f32(%value: reg<aie2p.mbms x4>) asm {
-  %71 = storage {byte_alignment = 64, byte_length = 512} : low.storage<private>
-  %output = storage_address %71 : low.storage<private> -> reg<aie2p.ep>
-  %73 = slice %value[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc %73, %output, 256
-  %74 = slice %value[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc %74, %output, 320
-  %75 = slice %value[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc %75, %output, 384
-  %76 = slice %value[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc %76, %output, 448
-  return
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @store_private_f32(%value: reg<aie2p.mbms x4>) -> (reg<aie2p.er>) asm {
+  %76 = storage {byte_alignment = 64, byte_length = 512} : low.storage<private>
+  %output = storage_address %76 : low.storage<private> -> reg<aie2p.ep>
+  %78 = slice %value[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %78, %output, 256
+  %79 = slice %value[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %79, %output, 320
+  %80 = slice %value[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %80, %output, 384
+  %81 = slice %value[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %81, %output, 448
+  %82 = mov.static-address-index 256
+  %first = lda.i32.index %output, %82
+  return %first
 }
 
 // ====

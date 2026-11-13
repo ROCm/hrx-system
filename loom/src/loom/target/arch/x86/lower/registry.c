@@ -1109,6 +1109,8 @@ static const loom_low_lower_policy_t kX86Avx512FeaturesLowLowerPolicy = {
                            .user_data = NULL},
     .map_argument = {.fn = loom_x86_map_avx512_features_argument,
                      .user_data = NULL},
+    .source_type_supported = {.fn = loom_x86_source_type_supported,
+                              .user_data = NULL},
     .source_vector_carrier_supported =
         {
             .fn = loom_x86_avx512_source_vector_carrier_supported,
@@ -1192,5 +1194,5 @@ void loom_x86_low_lower_policy_registry_initialize(
       },
   };
   loom_low_lower_policy_registry_initialize_from_entries(
-      out_registry, kEntries, IREE_ARRAYSIZE(kEntries));
+      kEntries, IREE_ARRAYSIZE(kEntries), out_registry);
 }

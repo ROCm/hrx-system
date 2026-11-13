@@ -5,7 +5,7 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 load("//build_tools/bazel:executable.bzl", "iree_executable_test")
-load("//build_tools/testing:build_defs.bzl", "iree_execution_test_suite")
+load("//build_tools/testing:build_defs.bzl", "iree_cli_test")
 load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
 load("//loom/build_tools/bazel:python.bzl", "loom_py_test")
 
@@ -24,9 +24,11 @@ loom_py_test(
         "$(rootpath //loom/src/loom/tooling/execution/hal/testdata:command_scenario_dependent_stages.loom)",
         "$(rootpath :sequence_storage.loom)",
         "$(rootpath :host_derived_launch_values.loom)",
+        "$(rootpath :reused_products.loom)",
     ],
     data = [
         ":host_derived_launch_values.loom",
+        ":reused_products.loom",
         ":sequence_storage.loom",
         "//loom/src/loom/tooling/execution/hal/testdata:command_scenario_dependent_stages.loom",
         "//loom/src/loom/tooling/execution/hal/testdata:scenario_compare_hal_vm.loom",
@@ -59,7 +61,7 @@ iree_executable_test(
     ]) + ["@platforms//cpu:x86_64"],
 )
 
-iree_execution_test_suite(
+iree_cli_test(
     name = "benchmark_scenario_correctness_test",
     data = [
         "//loom/src/loom/tooling/execution/hal/testdata:command_scenario_dependent_stages.loom",

@@ -21,9 +21,12 @@
 #include "loom/format/text/parser.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
+#include "loom/link/testdata/link_index/link_index_testdata.h"
 #include "loom/ops/check/ops.h"
 #include "loom/ops/config/ops.h"
 #include "loom/ops/func/ops.h"
+#include "loom/ops/index/ops.h"
+#include "loom/ops/kernel/ops.h"
 #include "loom/ops/pipeline/ops.h"
 #include "loom/ops/target/ops.h"
 #include "loom/ops/template/ops.h"
@@ -44,6 +47,17 @@ std::string StringViewToString(iree_string_view_t value) {
   return std::string(value.data, value.size);
 }
 
+iree_string_view_t LinkIndexFixture(iree_string_view_t name) {
+  const iree_file_toc_t* files = loom_link_index_testdata_create();
+  for (iree_host_size_t i = 0; i < loom_link_index_testdata_size(); ++i) {
+    if (iree_string_view_equal(iree_make_cstring_view(files[i].name), name)) {
+      return iree_make_string_view(files[i].data, files[i].size);
+    }
+  }
+  ADD_FAILURE() << "link index fixture not embedded";
+  return iree_string_view_empty();
+}
+
 class ModuleIndexTest : public ::testing::Test {
  protected:
   void SetUp() override {
@@ -56,6 +70,10 @@ class ModuleIndexTest : public ::testing::Test {
                     loom_config_dialect_op_semantics);
     RegisterDialect(LOOM_DIALECT_FUNC, loom_func_dialect_vtables,
                     loom_func_dialect_op_semantics);
+    RegisterDialect(LOOM_DIALECT_INDEX, loom_index_dialect_vtables,
+                    loom_index_dialect_op_semantics);
+    RegisterDialect(LOOM_DIALECT_KERNEL, loom_kernel_dialect_vtables,
+                    loom_kernel_dialect_op_semantics);
     RegisterDialect(LOOM_DIALECT_PIPELINE, loom_pipeline_dialect_vtables,
                     loom_pipeline_dialect_op_semantics);
     RegisterDialect(LOOM_DIALECT_TARGET, loom_target_dialect_vtables,
@@ -478,6 +496,89 @@ func.def @ordinary() {
   verify_index(text_index.get());
 }
 
+TEST_F(ModuleIndexTest, PreservesKernelExportRolesAcrossProviderForms) {
+  const iree_string_view_t source =
+      LinkIndexFixture(IREE_SV("kernel_exports.loom"));
+  ASSERT_FALSE(iree_string_view_is_empty(source));
+  loom_module_t* module = Parse(source, IREE_SV("kernel_exports.loom"));
+  ASSERT_NE(module, nullptr);
+  const std::vector<uint8_t> bytes = WriteModule(module);
+
+  auto verify_index = [&](const loom_link_module_index_t* index) {
+    const loom_link_module_index_symbol_t* entry =
+        loom_link_module_index_lookup_global(index, IREE_SV("entry"));
+    const loom_link_module_index_symbol_t* renamed_entry =
+        loom_link_module_index_lookup_global(index, IREE_SV("renamed_entry"));
+    const loom_link_module_index_symbol_t* public_entry =
+        loom_link_module_index_lookup_global(index, IREE_SV("public_entry"));
+    const loom_link_module_index_symbol_t* renamed_public_entry =
+        loom_link_module_index_lookup_global(index,
+                                             IREE_SV("renamed_public_entry"));
+    ASSERT_NE(entry, nullptr);
+    ASSERT_NE(renamed_entry, nullptr);
+    ASSERT_NE(public_entry, nullptr);
+    ASSERT_NE(renamed_public_entry, nullptr);
+    EXPECT_EQ(entry->identity, LOOM_LINK_SYMBOL_IDENTITY_GLOBAL);
+    EXPECT_EQ(renamed_entry->identity, LOOM_LINK_SYMBOL_IDENTITY_GLOBAL);
+    EXPECT_EQ(public_entry->identity, LOOM_LINK_SYMBOL_IDENTITY_GLOBAL);
+    EXPECT_EQ(renamed_public_entry->identity, LOOM_LINK_SYMBOL_IDENTITY_GLOBAL);
+    EXPECT_TRUE(iree_all_bits_set(
+        entry->flags, LOOM_LINK_SYMBOL_FLAG_EXPORT |
+                          LOOM_LINK_SYMBOL_FLAG_CONCRETE_DEFINITION));
+    EXPECT_FALSE(iree_any_bit_set(entry->flags, LOOM_LINK_SYMBOL_FLAG_PUBLIC));
+    EXPECT_TRUE(iree_all_bits_set(
+        renamed_entry->flags, LOOM_LINK_SYMBOL_FLAG_EXPORT |
+                                  LOOM_LINK_SYMBOL_FLAG_CONCRETE_DEFINITION));
+    EXPECT_FALSE(
+        iree_any_bit_set(renamed_entry->flags, LOOM_LINK_SYMBOL_FLAG_PUBLIC));
+    EXPECT_TRUE(iree_all_bits_set(
+        public_entry->flags, LOOM_LINK_SYMBOL_FLAG_PUBLIC |
+                                 LOOM_LINK_SYMBOL_FLAG_EXPORT |
+                                 LOOM_LINK_SYMBOL_FLAG_CONCRETE_DEFINITION));
+    EXPECT_TRUE(iree_all_bits_set(
+        renamed_public_entry->flags,
+        LOOM_LINK_SYMBOL_FLAG_PUBLIC | LOOM_LINK_SYMBOL_FLAG_EXPORT |
+            LOOM_LINK_SYMBOL_FLAG_CONCRETE_DEFINITION));
+
+    const loom_link_module_index_module_t* indexed_module =
+        loom_link_module_index_module_at(index, 0);
+    ASSERT_NE(indexed_module, nullptr);
+    const loom_link_module_index_symbol_t* private_alias =
+        loom_link_module_index_lookup_private(index, indexed_module,
+                                              IREE_SV("unused_helper"));
+    ASSERT_NE(private_alias, nullptr);
+    EXPECT_EQ(private_alias->identity, LOOM_LINK_SYMBOL_IDENTITY_PRIVATE);
+    EXPECT_FALSE(iree_any_bit_set(
+        private_alias->flags,
+        LOOM_LINK_SYMBOL_FLAG_PUBLIC | LOOM_LINK_SYMBOL_FLAG_EXPORT));
+  };
+
+  const loom_link_module_index_add_options_t options = {
+      .provider_name = IREE_SV("input"),
+      .role = LOOM_LINK_PROVIDER_ROLE_INPUT,
+  };
+  IndexPtr materialized_index = CreateIndex();
+  IREE_ASSERT_OK(loom_link_module_index_add_materialized(
+      materialized_index.get(), module, &options,
+      /*out_provider_ordinal=*/nullptr));
+  verify_index(materialized_index.get());
+
+  IndexPtr bytecode_index = CreateIndex();
+  IREE_ASSERT_OK(loom_link_module_index_add_bytecode(
+      bytecode_index.get(),
+      iree_make_const_byte_span(bytes.data(), bytes.size()),
+      IREE_SV("kernel_exports.loombc"), /*index_options=*/nullptr, &options,
+      /*out_provider_ordinal=*/nullptr));
+  verify_index(bytecode_index.get());
+
+  IndexPtr text_index = CreateIndex();
+  IREE_ASSERT_OK(loom_link_module_index_add_text(
+      text_index.get(), source, IREE_SV("kernel_exports.loom"),
+      /*parse_options=*/nullptr, &options,
+      /*out_provider_ordinal=*/nullptr));
+  verify_index(text_index.get());
+}
+
 TEST_F(ModuleIndexTest, PreservesProductCarrierAcrossProviderForms) {
   const iree_string_view_t source = IREE_SV(R"(
 pipeline.def<kernel> @kernel_pipeline() run() {
@@ -664,6 +765,7 @@ template.def<@demo.contract> @provider(%x: i32) -> (i32) {
     EXPECT_EQ(family->providers.first_symbol_ordinal, provider->ordinal);
     EXPECT_EQ(family->providers.last_symbol_ordinal, provider->ordinal);
     EXPECT_EQ(family->providers.count, 1u);
+    EXPECT_FALSE(family->requires_bytecode_projection);
     EXPECT_EQ(provider->next.template_provider_ordinal,
               LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL);
   };
@@ -1068,18 +1170,22 @@ func.decl public @entry(%x: i32) -> (i32)
 
 TEST_F(ModuleIndexTest, OverlayExtendsTemplateProviderEnumeration) {
   loom_module_t* library = Parse(IREE_SV(R"(
+target.decl @library_target
+
 template.decl @demo.contract(%x: i32) -> (i32)
 
-template.def<@demo.contract> @library_provider(%x: i32) -> (i32) {
+template.def<@demo.contract> target(@library_target) @library_provider(%x: i32) -> (i32) {
   template.return %x : i32
 }
 
 template.decl @demo.empty(%x: i32) -> (i32)
 )"));
   loom_module_t* input = Parse(IREE_SV(R"(
+target.decl @input_target
+
 template.decl @demo.contract(%x: i32) -> (i32)
 
-template.def<@demo.contract> @input_provider(%x: i32) -> (i32) {
+template.def<@demo.contract> target(@input_target) @input_provider(%x: i32) -> (i32) {
   template.return %x : i32
 }
 
@@ -1090,82 +1196,112 @@ template.def<@demo.empty> @first_empty_provider(%x: i32) -> (i32) {
 }
 )"));
 
-  IndexPtr base_index = CreateIndex();
-  const loom_link_module_index_add_options_t library_options = {
-      .provider_name = IREE_SV("library"),
-      .role = LOOM_LINK_PROVIDER_ROLE_LIBRARY,
-  };
-  IREE_ASSERT_OK(loom_link_module_index_add_materialized(
-      base_index.get(), library, &library_options,
-      /*out_provider_ordinal=*/nullptr));
-  ASSERT_EQ(loom_link_module_index_template_family_count(base_index.get()), 2u);
-  const loom_link_module_index_template_family_t* base_family =
-      loom_link_module_index_template_family_at(base_index.get(), 0);
-  ASSERT_NE(base_family, nullptr);
-  ASSERT_EQ(base_family->providers.count, 1u);
-  const loom_link_module_index_symbol_t* library_provider =
-      loom_link_module_index_symbol_at(
-          base_index.get(), base_family->providers.first_symbol_ordinal);
-  ASSERT_NE(library_provider, nullptr);
+  const auto library_bytes = WriteModule(library);
+  const auto input_bytes = WriteModule(input);
+  for (bool library_is_bytecode : {false, true}) {
+    SCOPED_TRACE(library_is_bytecode);
+    for (bool input_is_bytecode : {false, true}) {
+      SCOPED_TRACE(input_is_bytecode);
+      IndexPtr base_index = CreateIndex();
+      const loom_link_module_index_add_options_t library_options = {
+          .provider_name = IREE_SV("library"),
+          .role = LOOM_LINK_PROVIDER_ROLE_LIBRARY,
+      };
+      if (library_is_bytecode) {
+        IREE_ASSERT_OK(loom_link_module_index_add_bytecode(
+            base_index.get(),
+            iree_make_const_byte_span(library_bytes.data(),
+                                      library_bytes.size()),
+            IREE_SV("library.loombc"), nullptr, &library_options, nullptr));
+      } else {
+        IREE_ASSERT_OK(loom_link_module_index_add_materialized(
+            base_index.get(), library, &library_options, nullptr));
+      }
+      ASSERT_EQ(loom_link_module_index_template_family_count(base_index.get()),
+                2u);
+      const loom_link_module_index_template_family_t* base_family =
+          loom_link_module_index_template_family_at(base_index.get(), 0);
+      ASSERT_NE(base_family, nullptr);
+      ASSERT_EQ(base_family->providers.count, 1u);
+      const loom_link_module_index_symbol_t* library_provider =
+          loom_link_module_index_symbol_at(
+              base_index.get(), base_family->providers.first_symbol_ordinal);
+      ASSERT_NE(library_provider, nullptr);
 
-  IndexPtr overlay = CreateOverlay(base_index.get());
-  const loom_link_module_index_add_options_t input_options = {
-      .provider_name = IREE_SV("input"),
-      .role = LOOM_LINK_PROVIDER_ROLE_INPUT,
-  };
-  IREE_ASSERT_OK(loom_link_module_index_add_materialized(
-      overlay.get(), input, &input_options,
-      /*out_provider_ordinal=*/nullptr));
+      IndexPtr overlay = CreateOverlay(base_index.get());
+      const loom_link_module_index_add_options_t input_options = {
+          .provider_name = IREE_SV("input"),
+          .role = LOOM_LINK_PROVIDER_ROLE_INPUT,
+      };
+      if (input_is_bytecode) {
+        IREE_ASSERT_OK(loom_link_module_index_add_bytecode(
+            overlay.get(),
+            iree_make_const_byte_span(input_bytes.data(), input_bytes.size()),
+            IREE_SV("input.loombc"), nullptr, &input_options, nullptr));
+      } else {
+        IREE_ASSERT_OK(loom_link_module_index_add_materialized(
+            overlay.get(), input, &input_options, nullptr));
+      }
 
-  ASSERT_EQ(loom_link_module_index_template_family_count(overlay.get()), 2u);
-  const loom_link_module_index_template_family_t* family =
-      loom_link_module_index_template_family_at(overlay.get(), 0);
-  ASSERT_NE(family, nullptr);
-  EXPECT_NE(family, base_family);
-  EXPECT_EQ(family->providers.count, 2u);
-  EXPECT_EQ(family->providers.first_symbol_ordinal, library_provider->ordinal);
+      ASSERT_EQ(loom_link_module_index_template_family_count(overlay.get()),
+                2u);
+      const loom_link_module_index_template_family_t* family =
+          loom_link_module_index_template_family_at(overlay.get(), 0);
+      ASSERT_NE(family, nullptr);
+      EXPECT_NE(family, base_family);
+      EXPECT_EQ(family->providers.count, 2u);
+      EXPECT_EQ(family->requires_bytecode_projection,
+                library_is_bytecode || input_is_bytecode);
+      EXPECT_EQ(family->providers.first_symbol_ordinal,
+                library_provider->ordinal);
 
-  const loom_link_module_index_module_t* input_module =
-      loom_link_module_index_module_at(overlay.get(), 1);
-  ASSERT_NE(input_module, nullptr);
-  const loom_link_module_index_symbol_t* input_provider =
-      loom_link_module_index_lookup_private(overlay.get(), input_module,
-                                            IREE_SV("input_provider"));
-  ASSERT_NE(input_provider, nullptr);
-  EXPECT_EQ(family->providers.last_symbol_ordinal, input_provider->ordinal);
-  EXPECT_EQ(loom_link_module_index_next_template_provider(overlay.get(),
-                                                          library_provider),
-            input_provider);
-  EXPECT_EQ(loom_link_module_index_next_template_provider(overlay.get(),
-                                                          input_provider),
-            nullptr);
+      const loom_link_module_index_module_t* input_module =
+          loom_link_module_index_module_at(overlay.get(), 1);
+      ASSERT_NE(input_module, nullptr);
+      const loom_link_module_index_symbol_t* input_provider =
+          loom_link_module_index_lookup_private(overlay.get(), input_module,
+                                                IREE_SV("input_provider"));
+      ASSERT_NE(input_provider, nullptr);
+      EXPECT_EQ(family->providers.last_symbol_ordinal, input_provider->ordinal);
+      EXPECT_EQ(loom_link_module_index_next_template_provider(overlay.get(),
+                                                              library_provider),
+                input_provider);
+      EXPECT_EQ(loom_link_module_index_next_template_provider(overlay.get(),
+                                                              input_provider),
+                nullptr);
 
-  const loom_link_module_index_template_family_t* base_empty_family =
-      loom_link_module_index_template_family_at(base_index.get(), 1);
-  const loom_link_module_index_template_family_t* empty_family =
-      loom_link_module_index_template_family_at(overlay.get(), 1);
-  ASSERT_NE(base_empty_family, nullptr);
-  ASSERT_NE(empty_family, nullptr);
-  EXPECT_EQ(base_empty_family->providers.count, 0u);
-  EXPECT_EQ(empty_family->providers.count, 1u);
-  const loom_link_module_index_symbol_t* first_empty_provider =
-      loom_link_module_index_lookup_private(overlay.get(), input_module,
-                                            IREE_SV("first_empty_provider"));
-  ASSERT_NE(first_empty_provider, nullptr);
-  EXPECT_EQ(empty_family->providers.first_symbol_ordinal,
-            first_empty_provider->ordinal);
-  EXPECT_EQ(empty_family->providers.last_symbol_ordinal,
-            first_empty_provider->ordinal);
-  EXPECT_EQ(loom_link_module_index_next_template_provider(overlay.get(),
-                                                          first_empty_provider),
-            nullptr);
+      const loom_link_module_index_template_family_t* base_empty_family =
+          loom_link_module_index_template_family_at(base_index.get(), 1);
+      const loom_link_module_index_template_family_t* empty_family =
+          loom_link_module_index_template_family_at(overlay.get(), 1);
+      ASSERT_NE(base_empty_family, nullptr);
+      ASSERT_NE(empty_family, nullptr);
+      EXPECT_EQ(base_empty_family->providers.count, 0u);
+      EXPECT_FALSE(base_empty_family->requires_bytecode_projection);
+      EXPECT_EQ(empty_family->providers.count, 1u);
+      EXPECT_FALSE(empty_family->requires_bytecode_projection);
+      const loom_link_module_index_symbol_t* first_empty_provider =
+          loom_link_module_index_lookup_private(
+              overlay.get(), input_module, IREE_SV("first_empty_provider"));
+      ASSERT_NE(first_empty_provider, nullptr);
+      EXPECT_EQ(empty_family->providers.first_symbol_ordinal,
+                first_empty_provider->ordinal);
+      EXPECT_EQ(empty_family->providers.last_symbol_ordinal,
+                first_empty_provider->ordinal);
+      EXPECT_EQ(loom_link_module_index_next_template_provider(
+                    overlay.get(), first_empty_provider),
+                nullptr);
 
-  EXPECT_EQ(loom_link_module_index_template_family_at(base_index.get(), 0),
-            base_family);
-  EXPECT_EQ(base_family->providers.count, 1u);
-  EXPECT_EQ(base_family->providers.last_symbol_ordinal,
-            library_provider->ordinal);
-  EXPECT_EQ(base_empty_family->providers.count, 0u);
+      EXPECT_EQ(loom_link_module_index_template_family_at(base_index.get(), 0),
+                base_family);
+      EXPECT_EQ(base_family->providers.count, 1u);
+      EXPECT_EQ(base_family->requires_bytecode_projection, library_is_bytecode);
+      EXPECT_EQ(base_family->providers.last_symbol_ordinal,
+                library_provider->ordinal);
+      EXPECT_EQ(base_empty_family->providers.count, 0u);
+      EXPECT_FALSE(base_empty_family->requires_bytecode_projection);
+    }
+  }
 }
 
 TEST_F(ModuleIndexTest, ImmutableBaseSupportsConcurrentRequestOverlays) {

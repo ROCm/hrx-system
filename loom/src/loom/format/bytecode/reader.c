@@ -14,8 +14,8 @@ static iree_status_t loom_bytecode_read_module_impl(
     loom_context_t* context, iree_arena_block_pool_t* block_pool,
     uint16_t module_ordinal, bool require_single_module,
     const loom_bytecode_read_options_t* options,
-    loom_bytecode_read_result_t* out_result, loom_module_t** out_module,
-    iree_allocator_t host_allocator) {
+    iree_allocator_t host_allocator, loom_bytecode_read_result_t* out_result,
+    loom_module_t** out_module) {
   *out_module = NULL;
 
   iree_arena_allocator_t arena;
@@ -86,22 +86,22 @@ iree_status_t loom_bytecode_read_module(
     iree_const_byte_span_t bytecode, iree_string_view_t filename,
     loom_context_t* context, iree_arena_block_pool_t* block_pool,
     const loom_bytecode_read_options_t* options,
-    loom_bytecode_read_result_t* out_result, loom_module_t** out_module,
-    iree_allocator_t host_allocator) {
+    iree_allocator_t host_allocator, loom_bytecode_read_result_t* out_result,
+    loom_module_t** out_module) {
   return loom_bytecode_read_module_impl(bytecode, filename, context, block_pool,
                                         /*module_ordinal=*/0,
                                         /*require_single_module=*/true, options,
-                                        out_result, out_module, host_allocator);
+                                        host_allocator, out_result, out_module);
 }
 
 iree_status_t loom_bytecode_read_module_ordinal(
     iree_const_byte_span_t bytecode, iree_string_view_t filename,
     loom_context_t* context, iree_arena_block_pool_t* block_pool,
     uint16_t module_ordinal, const loom_bytecode_read_options_t* options,
-    loom_bytecode_read_result_t* out_result, loom_module_t** out_module,
-    iree_allocator_t host_allocator) {
+    iree_allocator_t host_allocator, loom_bytecode_read_result_t* out_result,
+    loom_module_t** out_module) {
   return loom_bytecode_read_module_impl(
       bytecode, filename, context, block_pool, module_ordinal,
-      /*require_single_module=*/false, options, out_result, out_module,
-      host_allocator);
+      /*require_single_module=*/false, options, host_allocator, out_result,
+      out_module);
 }

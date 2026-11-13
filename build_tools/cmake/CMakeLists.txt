@@ -85,6 +85,13 @@ _iree_cmake_integration_test(
 
 _iree_cmake_integration_test(
   NAME
+    cmake_debug_info_test
+  SRCS
+    cmake_debug_info_test.py
+)
+
+_iree_cmake_integration_test(
+  NAME
     cmake_data_dependencies_test
   SRCS
     cmake_data_dependencies_test.py
@@ -102,6 +109,13 @@ _iree_cmake_integration_test(
     cmake_dependency_patches_test
   SRCS
     cmake_dependency_patches_test.py
+)
+
+_iree_cmake_integration_test(
+  NAME
+    cmake_spirv_tools_test
+  SRCS
+    cmake_spirv_tools_test.py
 )
 
 _iree_cmake_integration_test(
@@ -153,6 +167,13 @@ _iree_cmake_integration_test(
     cmake_loom_target_presets_test
   SRCS
     cmake_loom_target_presets_test.py
+)
+
+_iree_cmake_integration_test(
+  NAME
+    cmake_msvc_masm_test
+  SRCS
+    cmake_msvc_masm_test.py
 )
 
 _iree_cmake_integration_test(

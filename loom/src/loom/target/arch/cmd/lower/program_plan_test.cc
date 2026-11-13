@@ -28,11 +28,11 @@
 #include "loom/ops/test/registry.h"
 #include "loom/ops/view/ops.h"
 #include "loom/pass/builtin_registry.h"
+#include "loom/runtime/command/program.h"
 #include "loom/target/arch/cmd/artifact_set.h"
 #include "loom/target/arch/cmd/descriptors/descriptors.h"
 #include "loom/target/arch/cmd/lower/program_plan_index.h"
 #include "loom/target/arch/cmd/lower/serialize.h"
-#include "loom/target/arch/cmd/program.h"
 #include "loom/testing/diagnostic_matchers.h"
 #include "loom/testing/module_ptr.h"
 #include "loom/transforms/cleanup/configured.h"
@@ -292,8 +292,8 @@ command.def public @root() launch(%storage: buffer) {
       /*kernel_source=*/nullptr, /*live_kernel_entry_validator=*/nullptr,
       loom_pass_builtin_registry(),
       loom_cleanup_configured_pattern_provider_set(),
-      /*diagnostic_emitter=*/{}, &block_pool_, &valid, &plan,
-      iree_allocator_system()));
+      /*diagnostic_emitter=*/{}, &block_pool_, iree_allocator_system(), &valid,
+      &plan));
   ASSERT_TRUE(valid);
   ASSERT_EQ(plan.root_count, 1u);
   EXPECT_EQ(plan.roots[0].abi_layout.rebindable_binding_count, 1u);
@@ -474,7 +474,6 @@ command.def public @root() launch(%count_storage: buffer, %first_output: buffer,
   bool has_same_root = false;
   bool has_buffer_view = false;
   bool has_subview = false;
-  bool has_refine = false;
   bool has_bitcast = false;
   loom_block_t* body_block =
       loom_region_entry_block(loom_kernel_def_body(generated_kernel));
@@ -492,7 +491,6 @@ command.def public @root() launch(%count_storage: buffer, %first_output: buffer,
     has_same_root |= loom_buffer_assume_same_root_isa(body_op);
     has_buffer_view |= loom_buffer_view_isa(body_op);
     has_subview |= loom_view_subview_isa(body_op);
-    has_refine |= loom_view_refine_isa(body_op);
     has_bitcast |= loom_view_bitcast_isa(body_op);
   }
   EXPECT_EQ(load_count, 4u);
@@ -503,7 +501,6 @@ command.def public @root() launch(%count_storage: buffer, %first_output: buffer,
   EXPECT_TRUE(has_same_root);
   EXPECT_TRUE(has_buffer_view);
   EXPECT_TRUE(has_subview);
-  EXPECT_TRUE(has_refine);
   EXPECT_TRUE(has_bitcast);
 
   ASSERT_EQ(plan.root_count, 1u);
@@ -515,8 +512,8 @@ command.def public @root() launch(%count_storage: buffer, %first_output: buffer,
   EXPECT_EQ(plan.roots[0].transient.minimum_alignment, 4u);
 
   iree_byte_span_t data = iree_byte_span_empty();
-  IREE_ASSERT_OK(loom_cmd_program_plan_serialize_root(&plan, 0, &data,
-                                                      iree_allocator_system()));
+  IREE_ASSERT_OK(loom_cmd_program_plan_serialize_root(
+      &plan, 0, iree_allocator_system(), &data));
   loom_cmd_program_t program = {};
   IREE_ASSERT_OK(loom_cmd_program_parse(
       iree_make_const_byte_span(data.data, data.data_length), &program));
@@ -706,8 +703,8 @@ command.def public @root() launch() {
       &materialization, &root_ref, /*program_count=*/1,
       /*kernel_source=*/nullptr, /*live_kernel_entry_validator=*/nullptr,
       loom_pass_builtin_registry(), &provider_set,
-      /*diagnostic_emitter=*/{}, &block_pool_, &valid, &plan,
-      iree_allocator_system()));
+      /*diagnostic_emitter=*/{}, &block_pool_, iree_allocator_system(), &valid,
+      &plan));
 
   ASSERT_TRUE(valid);
   EXPECT_GT(visit_state.count, 0u);
@@ -749,8 +746,8 @@ command.def public @increment_twice() launch(%source: buffer, %scratch: buffer, 
       /*kernel_source=*/nullptr, /*live_kernel_entry_validator=*/nullptr,
       loom_pass_builtin_registry(),
       loom_cleanup_configured_pattern_provider_set(),
-      /*diagnostic_emitter=*/{}, &block_pool_, &valid, &plan,
-      iree_allocator_system()));
+      /*diagnostic_emitter=*/{}, &block_pool_, iree_allocator_system(), &valid,
+      &plan));
   ASSERT_TRUE(valid);
   EXPECT_EQ(materialization.module, nullptr);
 
@@ -783,8 +780,8 @@ command.def public @increment_twice() launch(%source: buffer, %scratch: buffer, 
   EXPECT_EQ(mixed.entry_requirement_indices[1], 1u);
 
   loom_cmd_program_artifact_set_t artifact_set = {};
-  IREE_ASSERT_OK(loom_cmd_program_artifact_set_build(&plan, &artifact_set,
-                                                     iree_allocator_system()));
+  IREE_ASSERT_OK(loom_cmd_program_artifact_set_build(
+      &plan, iree_allocator_system(), &artifact_set));
   ASSERT_EQ(artifact_set.programs.count, 2u);
   EXPECT_TRUE(iree_string_view_equal(artifact_set.programs.values[0].symbol,
                                      IREE_SV("increment_twice")));
@@ -915,8 +912,8 @@ command.def public @selected_schedule() launch(%storage: buffer) {
   const loom_cmd_program_root_t& root = plan.roots[0];
   ASSERT_EQ(root.entry_requirement_count, 1u);
   iree_byte_span_t data = iree_byte_span_empty();
-  IREE_ASSERT_OK(loom_cmd_program_plan_serialize_root(&plan, 0, &data,
-                                                      iree_allocator_system()));
+  IREE_ASSERT_OK(loom_cmd_program_plan_serialize_root(
+      &plan, 0, iree_allocator_system(), &data));
   loom_cmd_program_t program = {};
   IREE_ASSERT_OK(loom_cmd_program_parse(
       iree_make_const_byte_span(data.data, data.data_length), &program));
@@ -1302,8 +1299,8 @@ command.def public @parameterized() launch(%parameters: buffer, %target: buffer)
       /*kernel_source=*/nullptr, /*live_kernel_entry_validator=*/nullptr,
       loom_pass_builtin_registry(),
       loom_cleanup_configured_pattern_provider_set(),
-      /*diagnostic_emitter=*/{}, &block_pool_, &valid, &plan,
-      iree_allocator_system()));
+      /*diagnostic_emitter=*/{}, &block_pool_, iree_allocator_system(), &valid,
+      &plan));
   ASSERT_TRUE(valid);
   EXPECT_EQ(materialization.module, nullptr);
 
@@ -1318,34 +1315,32 @@ command.def public @parameterized() launch(%parameters: buffer, %target: buffer)
   EXPECT_EQ(root.launch_bindings[1].root_index, 0u);
   ASSERT_EQ(root.parameters.root_count, 1u);
   ASSERT_NE(root.parameters.roots, nullptr);
-  EXPECT_EQ(root.parameters.roots[0].source_binding_ordinal, 0u);
   EXPECT_EQ(root.parameters.roots[0].fixed_buffer_index, 0u);
   EXPECT_EQ(root.parameters.roots[0].required_byte_length, 272u);
   EXPECT_EQ(root.parameters.roots[0].minimum_alignment, 256u);
 
   ASSERT_EQ(root.parameters.count, 2u);
   ASSERT_NE(root.parameters.entries, nullptr);
-  const loom_cmd_parameter_requirement_t& lhs = root.parameters.entries[0];
+  const loom_cmd_program_parameter_t& lhs = root.parameters.entries[0];
   EXPECT_TRUE(iree_string_view_equal(lhs.key, IREE_SV("blk.3.lhs")));
-  EXPECT_EQ(lhs.source_binding_ordinal, 0u);
   EXPECT_EQ(lhs.fixed_buffer_index, 0u);
   EXPECT_EQ(lhs.byte_offset, 0u);
   EXPECT_EQ(lhs.byte_length, 12u);
   EXPECT_EQ(lhs.minimum_alignment, 256u);
-  const loom_cmd_parameter_requirement_t& rhs = root.parameters.entries[1];
+  const loom_cmd_program_parameter_t& rhs = root.parameters.entries[1];
   EXPECT_TRUE(iree_string_view_equal(rhs.key, IREE_SV("shared.rhs")));
-  EXPECT_EQ(rhs.source_binding_ordinal, 0u);
   EXPECT_EQ(rhs.fixed_buffer_index, 0u);
   EXPECT_EQ(rhs.byte_offset, 256u);
   EXPECT_EQ(rhs.byte_length, 16u);
   EXPECT_EQ(rhs.minimum_alignment, 256u);
+  EXPECT_EQ(root.parameters.key_storage_length, 19u);
   EXPECT_EQ(root.transient.binding_index, UINT32_MAX);
   EXPECT_EQ(root.transient.required_byte_length, 0u);
   EXPECT_EQ(root.transient.minimum_alignment, 0u);
 
   iree_byte_span_t data = iree_byte_span_empty();
-  IREE_ASSERT_OK(loom_cmd_program_plan_serialize_root(&plan, 0, &data,
-                                                      iree_allocator_system()));
+  IREE_ASSERT_OK(loom_cmd_program_plan_serialize_root(
+      &plan, 0, iree_allocator_system(), &data));
   loom_cmd_program_t program = {};
   IREE_ASSERT_OK(loom_cmd_program_parse(
       iree_make_const_byte_span(data.data, data.data_length), &program));
@@ -1398,8 +1393,8 @@ command.def public @bodyless() launch(%output: buffer) {
       /*kernel_source=*/nullptr, /*live_kernel_entry_validator=*/nullptr,
       loom_pass_builtin_registry(),
       loom_cleanup_configured_pattern_provider_set(),
-      /*diagnostic_emitter=*/{}, &block_pool_, &valid, &plan,
-      iree_allocator_system()));
+      /*diagnostic_emitter=*/{}, &block_pool_, iree_allocator_system(), &valid,
+      &plan));
   ASSERT_TRUE(valid);
   EXPECT_EQ(materialization.module, nullptr);
 
@@ -1422,8 +1417,8 @@ command.def public @bodyless() launch(%output: buffer) {
   EXPECT_EQ(root.launch_counts.minimum_alignment, 0u);
 
   iree_byte_span_t data = iree_byte_span_empty();
-  IREE_ASSERT_OK(loom_cmd_program_plan_serialize_root(&plan, 0, &data,
-                                                      iree_allocator_system()));
+  IREE_ASSERT_OK(loom_cmd_program_plan_serialize_root(
+      &plan, 0, iree_allocator_system(), &data));
   loom_cmd_program_t program = {};
   IREE_ASSERT_OK(loom_cmd_program_parse(
       iree_make_const_byte_span(data.data, data.data_length), &program));
@@ -1519,8 +1514,8 @@ command.def public @dynamic_root() launch() {
       /*kernel_source=*/nullptr, /*live_kernel_entry_validator=*/nullptr,
       loom_pass_builtin_registry(),
       loom_cleanup_configured_pattern_provider_set(),
-      /*diagnostic_emitter=*/{}, &block_pool_, &valid, &plan,
-      iree_allocator_system()));
+      /*diagnostic_emitter=*/{}, &block_pool_, iree_allocator_system(), &valid,
+      &plan));
   ASSERT_TRUE(valid);
   EXPECT_EQ(materialization.module, nullptr);
 
@@ -1531,7 +1526,7 @@ command.def public @dynamic_root() launch() {
   EXPECT_EQ(invocation_root.launch_counts.minimum_alignment, 0u);
   iree_byte_span_t invocation_data = iree_byte_span_empty();
   IREE_ASSERT_OK(loom_cmd_program_plan_serialize_root(
-      &plan, 0, &invocation_data, iree_allocator_system()));
+      &plan, 0, iree_allocator_system(), &invocation_data));
   loom_cmd_program_t invocation_program = {};
   IREE_ASSERT_OK(loom_cmd_program_parse(
       iree_make_const_byte_span(invocation_data.data,
@@ -1553,8 +1548,8 @@ command.def public @dynamic_root() launch() {
   EXPECT_EQ(dynamic_root.launch_counts.binding_index, UINT32_MAX);
   EXPECT_EQ(dynamic_root.transient.binding_index, 0u);
   iree_byte_span_t dynamic_data = iree_byte_span_empty();
-  IREE_ASSERT_OK(loom_cmd_program_plan_serialize_root(&plan, 1, &dynamic_data,
-                                                      iree_allocator_system()));
+  IREE_ASSERT_OK(loom_cmd_program_plan_serialize_root(
+      &plan, 1, iree_allocator_system(), &dynamic_data));
   loom_cmd_program_t dynamic_program = {};
   IREE_ASSERT_OK(loom_cmd_program_parse(
       iree_make_const_byte_span(dynamic_data.data, dynamic_data.data_length),
@@ -1606,8 +1601,8 @@ low.func.def target<cmd.core> abi(command_program) @moved_binding() {
   };
 
   iree_byte_span_t data = iree_byte_span_empty();
-  IREE_ASSERT_OK(loom_cmd_program_plan_serialize_root(&plan, 0, &data,
-                                                      iree_allocator_system()));
+  IREE_ASSERT_OK(loom_cmd_program_plan_serialize_root(
+      &plan, 0, iree_allocator_system(), &data));
   loom_cmd_program_t program = {};
   IREE_ASSERT_OK(loom_cmd_program_parse(
       iree_make_const_byte_span(data.data, data.data_length), &program));

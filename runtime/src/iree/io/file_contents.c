@@ -34,6 +34,10 @@ IREE_API_EXPORT void iree_io_file_contents_free(
 static iree_status_t iree_io_file_contents_allocator_ctl(
     void* self, iree_allocator_command_t command, const void* params,
     void** inout_ptr) {
+  if (command == IREE_ALLOCATOR_COMMAND_TRIM) {
+    // All owned storage belongs to the still-live file contents.
+    return iree_ok_status();
+  }
   if (command != IREE_ALLOCATOR_COMMAND_FREE) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "file contents deallocator must only be used to "

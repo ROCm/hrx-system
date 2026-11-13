@@ -1,0 +1,262 @@
+// RUN: pass canonicalize,cse,dce
+// Two independently constrained parameters retain their identity in
+// a noncommutative weighted result.
+#include <hip/hip_runtime.h>
+[[loom::inline]] unsigned bound_pair(unsigned first, unsigned second) {
+  __builtin_assume(first < 256u && second < 256u);
+  return first * 257u + second;
+}
+// ----
+func.def public inline @bound_pair(%first$0: i32, %second$1: i32) -> (i32) {
+  %first$3 = scalar.assume %first$0 [range(%first$0, 0, 255)] : i32
+  %second$4 = scalar.assume %second$1 [range(%second$1, 0, 255)] : i32
+  %5 = scalar.constant 257 : i32
+  %6 = scalar.muli %first$3, %5 : i32
+  %7 = scalar.addi %6, %second$4 : i32
+  func.return %7 : i32
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// A conjunction with seven subjects refines every binding independently
+// before each contributes its distinct weight.
+#include <loomcxx/kernel.h>
+[[loom::inline]] unsigned bound_seven(unsigned a, unsigned b, unsigned c,
+                                      unsigned d, unsigned e, unsigned f,
+                                      unsigned g) {
+  loom::assume(a < 256u && b < 256u && c < 256u && d < 256u && e < 256u &&
+               f < 256u && g < 256u);
+  return a + 2u * b + 3u * c + 5u * d + 7u * e + 11u * f + 13u * g;
+}
+// ----
+func.def public inline @bound_seven(%a$0: i32, %b$1: i32, %c$2: i32, %d$3: i32, %e$4: i32, %f$5: i32, %g$6: i32) -> (i32) {
+  %a$8 = scalar.assume %a$0 [range(%a$0, 0, 255)] : i32
+  %b$9 = scalar.assume %b$1 [range(%b$1, 0, 255)] : i32
+  %c$10 = scalar.assume %c$2 [range(%c$2, 0, 255)] : i32
+  %d$11 = scalar.assume %d$3 [range(%d$3, 0, 255)] : i32
+  %e$12 = scalar.assume %e$4 [range(%e$4, 0, 255)] : i32
+  %f$13 = scalar.assume %f$5 [range(%f$5, 0, 255)] : i32
+  %g$14 = scalar.assume %g$6 [range(%g$6, 0, 255)] : i32
+  %33 = scalar.constant 1 : i32
+  %34 = scalar.shli %b$9, %33 : i32
+  %17 = scalar.addi %a$8, %34 : i32
+  %18 = scalar.constant 3 : i32
+  %19 = scalar.muli %18, %c$10 : i32
+  %20 = scalar.addi %17, %19 : i32
+  %21 = scalar.constant 5 : i32
+  %22 = scalar.muli %21, %d$11 : i32
+  %23 = scalar.addi %20, %22 : i32
+  %24 = scalar.constant 7 : i32
+  %25 = scalar.muli %24, %e$12 : i32
+  %26 = scalar.addi %23, %25 : i32
+  %27 = scalar.constant 11 : i32
+  %28 = scalar.muli %27, %f$13 : i32
+  %29 = scalar.addi %26, %28 : i32
+  %30 = scalar.constant 13 : i32
+  %31 = scalar.muli %30, %g$14 : i32
+  %32 = scalar.addi %29, %31 : i32
+  func.return %32 : i32
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// Repeated constraints compose through a substituted template helper
+// and the caller retains the specialization rather than a runtime template.
+#include <loomcxx/kernel.h>
+template <unsigned Limit>
+[[loom::inline]] unsigned refine(unsigned value) {
+  loom::assume(((value < 256u) && ((value) < (1u << Limit))) && value < 64u);
+  return value * 17u;
+}
+
+[[loom::inline]] unsigned bound_repeated(unsigned value) {
+  return refine<5>(value);
+}
+// ----
+func.def public inline @bound_repeated(%value: i32) -> (i32) {
+  %2 = func.call pure @refine_5(%value) : (i32) -> (i32)
+  func.return %2 : i32
+}
+
+func.def inline @refine_5(%value$3: i32) -> (i32) {
+  %value$5 = scalar.assume %value$3 [range(%value$3, 0, 255)] : i32
+  %value$6 = scalar.assume %value$5 [range(%value$5, 0, 31)] : i32
+  %8 = scalar.constant 17 : i32
+  %9 = scalar.muli %value$6, %8 : i32
+  func.return %9 : i32
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// A bound derived from capacity, element size, and stride is evaluated
+// in the source integer domain before becoming a range.
+#include <loomcxx/kernel.h>
+[[loom::inline]] unsigned bound_capacity(unsigned value) {
+  constexpr unsigned capacity = 28672;
+  constexpr unsigned stride = 16;
+  loom::assume(value <
+               ((capacity / sizeof(unsigned) - 16u - 320u) / stride + 1u));
+  return value * 16u + 336u;
+}
+// ----
+func.def public inline @bound_capacity(%value$0: i32) -> (i32) {
+  %4 = scalar.extui %value$0 : i32 to i64
+  %5 = scalar.assume %4 [range(%4, 0, 427)] : i64
+  %value$6 = scalar.trunci %5 : i64 to i32
+  %11 = scalar.constant 4 : i32
+  %12 = scalar.shli %value$6, %11 : i32
+  %9 = scalar.constant 336 : i32
+  %10 = scalar.addi %12, %9 : i32
+  func.return %10 : i32
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// A narrowing cast in a bound uses the converted constant value.
+#include <loomcxx/kernel.h>
+[[loom::inline]] unsigned bound_cast(unsigned value) {
+  loom::assume(value < static_cast<unsigned char>(272u));
+  return value + 5u;
+}
+// ----
+func.def public inline @bound_cast(%value$0: i32) -> (i32) {
+  %value$2 = scalar.assume %value$0 [range(%value$0, 0, 15)] : i32
+  %3 = scalar.constant 5 : i32
+  %4 = scalar.addi %value$2, %3 : i32
+  func.return %4 : i32
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// A promoted unsigned byte remains nonnegative and retains its high-bit
+// branch after the assumption.
+#include <loomcxx/kernel.h>
+[[loom::inline]] unsigned bound_byte(unsigned char value) {
+  loom::assume(value < 256u);
+  return value + (value >= 128u ? 1024u : 0u);
+}
+// ----
+func.def public inline @bound_byte(%value$0: i8) -> (i32) {
+  %2 = scalar.extui %value$0 : i8 to i32
+  %3 = scalar.assume %2 [range(%2, 0, 255)] : i32
+  %value$4 = scalar.trunci %3 : i32 to i8
+  %5 = scalar.extui %value$4 : i8 to i32
+  %7 = scalar.constant 128 : i32
+  %8 = scalar.cmpi uge, %5, %7 : i32
+  %10 = scalar.constant 1024 : i32
+  %11 = scalar.constant 0 : i32
+  %13 = scf.select %8, %10, %11 : i32
+  %12 = scalar.addi %5, %13 : i32
+  func.return %12 : i32
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// Unsigned constant addition wraps before comparison with a wide value;
+// the arithmetic result narrows only at the explicit return cast.
+#include <loomcxx/kernel.h>
+[[loom::inline]] unsigned bound_wide(unsigned long long value) {
+  loom::assume(value < (0xffffffffu + 257u));
+  return (unsigned)(value * 3u);
+}
+// ----
+func.def public inline @bound_wide(%value$0: i64) -> (i32) {
+  %value$2 = scalar.assume %value$0 [range(%value$0, 0, 255)] : i64
+  %7 = scalar.constant 3 : i64
+  %5 = scalar.muli %value$2, %7 : i64
+  %6 = scalar.trunci %5 : i64 to i32
+  func.return %6 : i32
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// sizeof does not execute its increment operand while constructing
+// the bound, so the returned source value is unchanged.
+#include <loomcxx/kernel.h>
+[[loom::inline]] unsigned bound_size(unsigned value) {
+  loom::assume(value < sizeof(++value) * 4u);
+  return value;
+}
+// ----
+func.def public inline @bound_size(%value$0: i32) -> (i32) {
+  %2 = scalar.extui %value$0 : i32 to i64
+  %3 = scalar.assume %2 [range(%2, 0, 15)] : i64
+  %value$4 = scalar.trunci %3 : i64 to i32
+  func.return %value$4 : i32
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// A branch-local assumption cannot refine the other branch; both
+// return expressions retain their distinct source behavior.
+#include <loomcxx/kernel.h>
+[[loom::inline]] unsigned bound_scoped(unsigned value) {
+  if (value < 256u) {
+    loom::assume(value < 256u);
+    return value + 1u;
+  }
+  return value + 3u;
+}
+// ----
+func.def public inline @bound_scoped(%value: i32) -> (i32) {
+  %2 = scalar.constant 256 : i32
+  %3 = scalar.cmpi ult, %value, %2 : i32
+  %6 = scalar.constant 1 : i32
+  %8 = scalar.constant 3 : i32
+  %14 = scf.select %3, %6, %8 : i32
+  %12 = scalar.addi %value, %14 : i32
+  func.return %12 : i32
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// An inclusive upper bound preserves its last allowed value.
+#include <loomcxx/kernel.h>
+[[loom::inline]] unsigned bound_inclusive(unsigned tokens) {
+  constexpr unsigned capacity = 427u;
+  loom::assume(tokens <= capacity);
+  return tokens * 19u + 3u;
+}
+// ----
+func.def public inline @bound_inclusive(%tokens$0: i32) -> (i32) {
+  %tokens$3 = scalar.assume %tokens$0 [range(%tokens$0, 0, 427)] : i32
+  %4 = scalar.constant 19 : i32
+  %5 = scalar.muli %tokens$3, %4 : i32
+  %6 = scalar.constant 3 : i32
+  %7 = scalar.addi %5, %6 : i32
+  func.return %7 : i32
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// Signed positivity and a dependent upper bound refine both subjects
+// before their weighted result.
+#include <loomcxx/kernel.h>
+[[loom::inline]] int bound_signed(int hidden, int capacity) {
+  loom::assume(hidden > 0 && hidden <= capacity);
+  return hidden * 23 + capacity;
+}
+// ----
+func.def public inline @bound_signed(%hidden$0: i32, %capacity$1: i32) -> (i32) {
+  %hidden$3 = scalar.assume %hidden$0 [gt(%hidden$0, 0)] : i32
+  %hidden$4, %capacity$5 = scalar.assume %hidden$3, %capacity$1 [le(%hidden$3, %capacity$1)] : i32, i32
+  %6 = scalar.constant 23 : i32
+  %7 = scalar.muli %hidden$4, %6 : i32
+  %8 = scalar.addi %7, %capacity$5 : i32
+  func.return %8 : i32
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// Unsigned ordering remains unsigned across the carrier sign bit.
+#include <loomcxx/kernel.h>
+[[loom::inline]] unsigned bound_unsigned(unsigned tokens, unsigned capacity) {
+  loom::assume(tokens <= capacity);
+  return tokens ^ capacity;
+}
+// ----
+func.def public inline @bound_unsigned(%tokens$0: i32, %capacity$1: i32) -> (i32) {
+  %tokens$3, %capacity$4 = scalar.assume %tokens$0, %capacity$1 [ule(%tokens$0, %capacity$1)] : i32, i32
+  %5 = scalar.xori %tokens$3, %capacity$4 : i32
+  func.return %5 : i32
+}

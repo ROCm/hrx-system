@@ -223,13 +223,16 @@ static iree_status_t loom_scf_pipeline_resolve_facts(
       continue;
     }
     loom_memory_access_t access = loom_memory_access_cast(module, entry->op);
-    loom_value_fact_view_reference_t reference = {0};
-    if (loom_value_facts_query_view_reference(
-            &facts->context,
-            loom_value_fact_table_lookup(facts,
-                                         loom_memory_access_view(access)),
-            &reference)) {
-      entry->space = reference.memory_space;
+    const loom_value_facts_t access_facts =
+        loom_value_fact_table_lookup(facts, loom_memory_access_view(access));
+    loom_value_fact_view_reference_t view_reference;
+    loom_value_fact_buffer_reference_t buffer_reference;
+    if (loom_value_facts_query_view_reference(&facts->context, access_facts,
+                                              &view_reference)) {
+      entry->space = view_reference.memory_space;
+    } else if (loom_value_facts_query_buffer_reference(
+                   &facts->context, access_facts, &buffer_reference)) {
+      entry->space = buffer_reference.memory_space;
     }
     if (loom_scf_memory_space_is_read_ahead_source(entry->space) &&
         loom_memory_access_operation_kind(access) ==
@@ -619,6 +622,7 @@ static iree_status_t loom_scf_pipeline_copy_op_presentation(
     loom_op_t* target) {
   target->instance_flags = source->instance_flags;
   target->traits = source->traits;
+  target->intrinsic_read_spaces = source->intrinsic_read_spaces;
   target->intrinsic_write_spaces = source->intrinsic_write_spaces;
   target->flags |= source->flags & LOOM_OP_SOURCE_PRESENTATION_FLAG_MASK;
   iree_host_size_t comment_count = 0;
@@ -1120,7 +1124,8 @@ static iree_status_t loom_scf_pipeline_emit_long_path(
   if (record_count > 1 && record_width != 0) {
     memcpy(next_state + carried_count,
            main_block->arg_ids + 1 + carried_count + record_width,
-           (record_count - 1) * record_width * sizeof(*next_state));
+           (iree_host_size_t)(record_count - 1) * record_width *
+               sizeof(*next_state));
   }
   loom_op_t* yield = NULL;
   IREE_RETURN_IF_ERROR(loom_scf_yield_build(builder, next_state, state_count,

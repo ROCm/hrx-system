@@ -12,6 +12,8 @@
 #include <cxx/types_fwd.h>
 
 #include <cstdint>
+#include <span>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -49,15 +51,23 @@ class ImmutableObjects {
         names_(names),
         module_(module) {}
 
-  // Admits or reuses one namespace-scope constant object. Unsupported lifetime,
-  // identity, mutability, or representation semantics diagnose at the source
-  // use that reached the object.
+  // Admits or reuses one constant object. Local declarations are validated
+  // before translating their function; only reached storage uses retain bytes.
+  // Unsupported representation semantics diagnose at the owning source use.
   ImmutableObject reference(cxx::VariableSymbol* variable, cxx::AST* owner);
 
   // Retains a namespace-scope strong external definition even when no local
   // expression reaches it. Declarations, inline definitions, and private
   // definitions remain lazy.
   void retain_definition(cxx::VariableSymbol* variable, cxx::AST* owner);
+
+  // Validates static declarations and retains their analyzed lexical
+  // identities. Payloads are materialized only when translation reaches a
+  // storage use. Inline and template function objects share source identity
+  // across modules; objects belonging to internal or singly defined functions
+  // stay private.
+  void retain_locals(cxx::FunctionSymbol* function,
+                     std::span<cxx::InitDeclaratorAST* const> declarations);
 
   // Emits every reached object declaration or definition into the module
   // insertion block.
@@ -69,6 +79,21 @@ class ImmutableObjects {
     PrivateDefinition,
     PublicDefinition,
     LinkOnceDefinition,
+  };
+
+  struct Declaration {
+    // Defining source symbol, or null for an external declaration.
+    cxx::VariableSymbol* definition;
+    // Complete source type already admitted for immutable storage.
+    const cxx::Type* type;
+    // Source ABI alignment, including explicit declaration alignment.
+    int64_t alignment;
+    // Source linkage projected into the eventual emitted symbol.
+    EmissionKind kind;
+    // Selected name, made unique for private objects on materialization.
+    std::string spelling;
+    // Source declaration or use that owns admission diagnostics.
+    cxx::AST* source;
   };
 
   struct Emission {
@@ -84,6 +109,13 @@ class ImmutableObjects {
     cxx::AST* source;
   };
 
+  // Validates source storage without allocating output symbols or payloads.
+  Declaration declare(cxx::VariableSymbol* variable, cxx::AST* owner,
+                      EmissionKind kind, std::string spelling);
+  // Materializes the source ABI bytes and retains one reached source object.
+  ImmutableObject materialize(cxx::VariableSymbol* variable,
+                              Declaration declaration);
+
   // Source frontend and data model used for semantic admission and layout.
   cxx::TranslationUnit& unit_;
   // Public source rejection boundary.
@@ -96,6 +128,8 @@ class ImmutableObjects {
   loom_module_t* module_;
   // Canonical source identity to retained emission ordinal.
   std::unordered_map<cxx::VariableSymbol*, size_t> variables_;
+  // Admitted local declarations whose bytes are retained only on demand.
+  std::unordered_map<cxx::VariableSymbol*, Declaration> locals_;
   // Encounter-ordered retained objects.
   std::vector<Emission> emissions_;
 };

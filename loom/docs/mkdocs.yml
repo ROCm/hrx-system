@@ -1,8 +1,8 @@
 # Copyright 2026 The IREE Authors
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-site_name: Loom Programming Guide
-site_description: Author, specialize, test, benchmark, and embed Loom programs.
+site_name: Loom
+site_description: A language, compiler, and runtime for CPUs, GPUs, and NPUs. Build and host programmable models with Loom.
 site_url: https://rocm.github.io/hrx-system/loom/
 repo_url: https://github.com/ROCm/hrx-system
 repo_name: ROCm/hrx-system
@@ -98,6 +98,8 @@ nav:
           - GGML and llama.cpp: workflows/oracles/ggml-llama-cpp.md
   - Integration:
       - Integration map: integration/index.md
+      - Construct importer output in Python: integration/python-importer.md
+      - Runtime-provided objects: integration/runtime-objects.md
       - Compose modules in memory: integration/module-composition.md
       - Parallelize kernel JIT compilation: integration/product-frontier.md
       - Use the JIT task pool: integration/jit-task-pool.md
@@ -119,6 +121,7 @@ nav:
           - Connect model clients: serving/workflows/connect-model-clients.md
           - Develop models on a live server: serving/workflows/live-model-development.md
   - Targets:
+      - Target support: targets/index.md
       - Resident pipelines on XDNA: targets/xdna-pipelines.md
   - Reference:
       - Reference map: reference/index.md

@@ -200,6 +200,7 @@ _TargetKind = EnumDef(
         EnumCase("low_core", 1, doc="Generic target-low test core."),
         EnumCase("quirky", 2, doc="Synthetic edge-case target."),
         EnumCase("device", 3, doc="Device environment containing low_core workers."),
+        EnumCase("low_leaf", 4, doc="Core with a leaf-only native callable ABI."),
     ],
     doc="Synthetic target kind for target-like interface tests.",
     c_type="loom_test_target_kind_t",
@@ -850,6 +851,18 @@ test_fact_subgroup_uniform = Op(
     facts="loom_test_fact_subgroup_uniform_facts",
     format=[Ref("value"), COLON, TypeOf("value"), ARROW, ResultType("result")],
     examples=["%uniform = test.fact_subgroup_uniform %x : index -> i1"],
+)
+
+test_fact_observation_scope = Op(
+    "test.fact_observation_scope",
+    group=test_ops,
+    doc=("Exposes the uniform scope proved at this use: 0 for unknown, 1 for subgroup, 2 for workgroup, and 3 for cluster."),
+    operands=[Operand("value", ANY)],
+    results=[Result("result", INTEGER)],
+    traits=[PURE],
+    facts="loom_test_fact_observation_scope_facts",
+    format=[Ref("value"), COLON, TypeOf("value"), ARROW, ResultType("result")],
+    examples=["%scope = test.fact_observation_scope %x : index -> i32"],
 )
 
 test_fact_workgroup_uniform = Op(
@@ -3370,4 +3383,5 @@ ALL_TEST_OPS: tuple[Op, ...] = (
     test_fact_exact_float_types,
     test_f64_array_attrs,
     test_string_array_attrs,
+    test_fact_observation_scope,
 )

@@ -24,6 +24,8 @@ typedef struct loom_test_pipeline_t {
   loom_pipeline_execution_t execution;
   // Synthetic device operations visible in the projected program.
   loom_symbol_ref_t boundaries[2];
+  // Unique declaration suffix for synthetic collective transport operations.
+  uint32_t next_collective;
 } loom_test_pipeline_t;
 
 static iree_status_t loom_test_pipeline_select(
@@ -64,6 +66,13 @@ static iree_status_t loom_test_pipeline_select(
   return iree_ok_status();
 }
 
+static bool loom_test_pipeline_has_worker_body(const void* user_data,
+                                               iree_host_size_t worker_index) {
+  (void)user_data;
+  (void)worker_index;
+  return true;
+}
+
 static iree_status_t loom_test_pipeline_worker(
     void* user_data, loom_rewriter_t* rewriter,
     const loom_pipeline_realization_t* realization, iree_host_size_t worker) {
@@ -77,8 +86,10 @@ static iree_status_t loom_test_pipeline_worker(
 static iree_status_t loom_test_pipeline_boundary(
     void* user_data, loom_builder_t* builder, iree_host_size_t engine,
     const loom_pipeline_invocation_schedule_t* scope,
-    const loom_pipeline_invocation_t* child, bool before) {
+    const loom_pipeline_invocation_t* child, bool before,
+    const loom_value_id_t* state_arguments) {
   (void)child;
+  (void)state_arguments;
   if (!scope) {
     return iree_ok_status();
   }
@@ -92,6 +103,108 @@ static iree_status_t loom_test_pipeline_boundary(
   return loom_func_call_build(builder, 0, 0, 0, 0, state->boundaries[before],
                               &argument, 1, NULL, 0, NULL, 0,
                               LOOM_LOCATION_UNKNOWN, &call);
+}
+
+static iree_status_t loom_test_pipeline_collective_call(
+    loom_test_pipeline_t* state, loom_builder_t* builder, const char* role,
+    const loom_value_id_t* arguments, iree_host_size_t argument_count,
+    const loom_type_t* result_types, iree_host_size_t result_count,
+    loom_op_t** out_call) {
+  loom_module_t* module = builder->module;
+  char text[64];
+  iree_snprintf(text, sizeof(text), "__test_collective_%s_%u", role,
+                state->next_collective++);
+  loom_string_id_t name;
+  IREE_RETURN_IF_ERROR(
+      loom_module_intern_string(module, iree_make_cstring_view(text), &name));
+  loom_symbol_ref_t symbol = {0};
+  IREE_RETURN_IF_ERROR(loom_module_add_symbol(module, name, &symbol.symbol_id));
+  loom_type_t* argument_types = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      state->pass->arena, argument_count, sizeof(*argument_types),
+      (void**)&argument_types));
+  for (iree_host_size_t i = 0; i < argument_count; ++i) {
+    argument_types[i] = loom_module_value_type(module, arguments[i]);
+  }
+  loom_builder_t declaration_builder = *builder;
+  loom_builder_enter_region(&declaration_builder, NULL, module->body);
+  loom_op_t* declaration = NULL;
+  IREE_RETURN_IF_ERROR(loom_func_decl_build(
+      &declaration_builder, 0, 0, 0, LOOM_STRING_ID_INVALID,
+      LOOM_STRING_ID_INVALID, 0, 0, 0, 0, loom_symbol_ref_null(),
+      loom_attr_absent(), 0, loom_named_attr_slice_empty(),
+      LOOM_STRING_ID_INVALID, loom_named_attr_slice_empty(), symbol,
+      argument_types, argument_count, result_types, result_count, NULL, 0, NULL,
+      0, LOOM_LOCATION_UNKNOWN, &declaration));
+  return loom_func_call_build(builder, 0, 0, 0, 0, symbol, arguments,
+                              argument_count, result_types, result_count, NULL,
+                              0, LOOM_LOCATION_UNKNOWN, out_call);
+}
+
+static iree_host_size_t loom_test_pipeline_collective_reader(
+    loom_test_pipeline_t* state,
+    const loom_pipeline_invocation_schedule_t* scope) {
+  const loom_pipeline_execution_schedule_t* participants =
+      loom_pipeline_execution_schedule(&state->execution, scope);
+  return loom_pipeline_participants_worker(participants->participants, 0) !=
+                 IREE_HOST_SIZE_MAX
+             ? 0
+             : 1;
+}
+
+static iree_status_t loom_test_pipeline_collective_begin(
+    void* user_data, loom_builder_t* builder, iree_host_size_t engine,
+    const loom_pipeline_invocation_schedule_t* scope,
+    const loom_pipeline_collective_t* collective,
+    const loom_value_id_t* state_arguments, loom_type_t payload_type,
+    loom_value_id_t* out_payload) {
+  (void)collective;
+  (void)state_arguments;
+  loom_test_pipeline_t* state = user_data;
+  *out_payload = LOOM_VALUE_ID_INVALID;
+  if (engine == loom_test_pipeline_collective_reader(state, scope)) {
+    loom_op_t* call = NULL;
+    IREE_RETURN_IF_ERROR(loom_test_pipeline_collective_call(
+        state, builder, "acquire", NULL, 0, &payload_type, 1, &call));
+    *out_payload = loom_op_results(call)[0];
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_test_pipeline_collective_end(
+    void* user_data, loom_builder_t* builder, iree_host_size_t engine,
+    const loom_pipeline_invocation_schedule_t* scope,
+    const loom_pipeline_collective_t* collective, loom_value_id_t* values) {
+  loom_test_pipeline_t* state = user_data;
+  const bool reader =
+      engine == loom_test_pipeline_collective_reader(state, scope);
+  const iree_host_size_t count = collective->result_count;
+  loom_op_t* call = NULL;
+  if (reader) {
+    IREE_RETURN_IF_ERROR(loom_test_pipeline_collective_call(
+        state, builder, "send", values, count, NULL, 0, &call));
+  } else {
+    loom_type_t* types = NULL;
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        state->pass->arena, count, sizeof(*types), (void**)&types));
+    for (iree_host_size_t i = 0; i < count; ++i) {
+      const loom_pipeline_collective_result_t* result = &collective->results[i];
+      types[i] = loom_module_value_type(
+          builder->module,
+          loom_op_results(
+              collective->operations[result->operation])[result->result]);
+    }
+    IREE_RETURN_IF_ERROR(loom_test_pipeline_collective_call(
+        state, builder, "receive", NULL, 0, types, count, &call));
+    memcpy(values, loom_op_results(call), count * sizeof(*values));
+  }
+  IREE_RETURN_IF_ERROR(loom_test_pipeline_boundary(user_data, builder, engine,
+                                                   scope, NULL, false, NULL));
+  if (reader) {
+    IREE_RETURN_IF_ERROR(loom_test_pipeline_collective_call(
+        state, builder, "release", NULL, 0, NULL, 0, &call));
+  }
+  return iree_ok_status();
 }
 
 static iree_status_t loom_test_pipeline_entry(
@@ -119,16 +232,17 @@ static iree_status_t loom_test_pipeline_entry(
   }
   const loom_pipeline_control_options_t options = {
       .worker_engines = state->engines,
-      .emit = {.boundary = loom_test_pipeline_boundary, .user_data = state}};
+      .emit = {.boundary = loom_test_pipeline_boundary,
+               .collective_begin = loom_test_pipeline_collective_begin,
+               .collective_end = loom_test_pipeline_collective_end,
+               .user_data = state}};
   loom_pipeline_control_function_t* functions = NULL;
   IREE_RETURN_IF_ERROR(loom_pipeline_control_materialize(
       rewriter, realization, &state->execution, &options, &functions));
-  for (iree_host_size_t i = 0; i < state->execution.engine_count; ++i) {
-    if (loom_func_like_isa(functions[i].function)) {
-      IREE_RETURN_IF_ERROR(
-          loom_rewriter_set_attr(rewriter, functions[i].function.op, 1,
-                                 loom_attr_enum(LOOM_FUNC_VISIBILITY_PUBLIC)));
-    }
+  for (iree_host_size_t i = 0; i < state->execution.offsets[1]; ++i) {
+    IREE_RETURN_IF_ERROR(
+        loom_rewriter_set_attr(rewriter, functions[i].function.op, 1,
+                               loom_attr_enum(LOOM_FUNC_VISIBILITY_PUBLIC)));
   }
   return loom_rewriter_erase(rewriter, realization->function.op);
 }
@@ -144,6 +258,7 @@ static iree_status_t loom_test_pipeline_run(loom_pass_t* pass,
   const loom_pipeline_realization_inventory_t inventory = {0};
   const loom_pipeline_realization_callback_t callbacks = {
       .select = loom_test_pipeline_select,
+      .has_worker_body = loom_test_pipeline_has_worker_body,
       .worker = loom_test_pipeline_worker,
       .entry = loom_test_pipeline_entry,
       .user_data = &state};

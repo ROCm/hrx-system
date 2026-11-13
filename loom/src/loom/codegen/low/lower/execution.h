@@ -10,7 +10,7 @@
 #define LOOM_CODEGEN_LOW_LOWER_EXECUTION_H_
 
 #include "iree/base/api.h"
-#include "iree/base/bitmap.h"
+#include "loom/util/cfg_execution.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -21,10 +21,8 @@ typedef struct loom_low_lower_context_t loom_low_lower_context_t;
 // Cached execution counts for the immutable source-function body. The owning
 // lowering context retains this state until function lowering completes.
 typedef struct loom_low_lower_execution_counts_t {
-  // Loop-derived multiplier indexed by source body block ordinal.
-  const uint64_t* block_multipliers;
-  // Blocks whose execution depends on an unmodeled control selector.
-  iree_bitmap_t unmodeled_blocks;
+  // Shared loop/control result indexed by source body block ordinal.
+  loom_cfg_execution_counts_t blocks;
   // True after analysis has completed, including an unknown result.
   bool initialized;
 } loom_low_lower_execution_counts_t;

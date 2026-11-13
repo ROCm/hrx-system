@@ -592,8 +592,6 @@ def _view_register_classes(
             != storage_class
         ):
             raise ValueError(f"descriptor set view '{view_spec.key}' register class '{reg_class.name}' differs from storage outside allocation capacity or fixed locations")
-        if reg_class.spill_class is not None and reg_class.spill_class not in classes_by_name:
-            raise ValueError(f"descriptor set view '{view_spec.key}' register class '{reg_class.name}' references absent spill class '{reg_class.spill_class}'")
 
     # Shared operand and schedule tables may contain rows for other views.
     # Only the selected descriptors can reference the classes exposed here.

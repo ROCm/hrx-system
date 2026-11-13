@@ -18,13 +18,20 @@ package(
 loom_check_test_suite(
     name = "lowering_test",
     srcs = [
-        "child_distribution.loom-test",
-        "child_join.loom-test",
-        "dma_submit_sharing.loom-test",
         "external_metadata.loom-test",
-        "shared_entry_calls.loom-test",
+        "packet_iterator_constraints.loom-test",
+        "phased_controller.loom-test",
     ],
     target_compatible_with = loom_config_compatible_with(["//loom/config/arch:aie2p"]),
+)
+
+loom_check_test_suite(
+    name = "source_admission_test",
+    srcs = ["retained_capacity.cxx-test"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/arch:aie2p",
+        "//loom/config/import:cxx",
+    ]),
 )
 
 _XDNA_ONE_COLUMN_PROFILE = loom_execution_profile(
@@ -64,15 +71,121 @@ loom_test(
     name = "one_column_test",
     srcs = [
         "child_cursors.loom",
+        "collective_cursors.loom",
+        "collective_readers.loom",
         "concurrent_distribution.loom",
+        "conditional_admission.loom",
+        "dynamic_packet_addresses.loom",
         "finite_ingress.loom",
+        "input_origins.loom",
         "ordered_prefix.loom",
         "ordered_replay.loom",
-        "packet_phases.loom",
+        "packet_iterator_lifetimes.loom",
         "partial_record.loom",
+        "phased_queues.loom",
         "retained_lifetime.loom",
         "retained_replay.loom",
+        "reusable_sram.loom",
+        "single_phase_input.loom",
+        "single_slot.loom",
+        "storage_captures.loom",
     ],
+    benchmark_smoke = False,
+    execution_profiles = [_XDNA_ONE_COLUMN_PROFILE],
+    target_compatible_with = loom_config_compatible_with(["//loom/config/execute:vm_iree_vm"]),
+)
+
+loom_test(
+    name = "finite_input_phases_test",
+    srcs = ["finite_input_phases.loom"],
+    benchmark_smoke = False,
+    execution_profiles = [_XDNA_ONE_COLUMN_PROFILE],
+    target_compatible_with = loom_config_compatible_with(["//loom/config/execute:vm_iree_vm"]),
+    variants = {
+        "distinct_prefixes": {"case": "finite_phased_input_reentry"},
+        "prefix_fifo": {"case": "finite_prefix_cycle_reentry"},
+    },
+)
+
+loom_test(
+    name = "serial_input_paths_test",
+    srcs = ["serial_input_paths.loom"],
+    benchmark_smoke = False,
+    execution_profiles = [_XDNA_ONE_COLUMN_PROFILE],
+    target_compatible_with = loom_config_compatible_with(["//loom/config/execute:vm_iree_vm"]),
+)
+
+loom_test(
+    name = "retained_input_test",
+    srcs = ["retained_input.loom"],
+    benchmark_smoke = False,
+    execution_profiles = [_XDNA_ONE_COLUMN_PROFILE],
+    target_compatible_with = loom_config_compatible_with(["//loom/config/execute:vm_iree_vm"]),
+)
+
+loom_test(
+    name = "retained_stream_test",
+    srcs = ["retained_stream.loom"],
+    benchmark_smoke = False,
+    execution_profiles = [_XDNA_ONE_COLUMN_PROFILE],
+    target_compatible_with = loom_config_compatible_with(["//loom/config/execute:vm_iree_vm"]),
+)
+
+loom_test(
+    name = "stable_input_test",
+    srcs = ["stable_input.loom"],
+    benchmark_smoke = False,
+    execution_profiles = [_XDNA_ONE_COLUMN_PROFILE],
+    target_compatible_with = loom_config_compatible_with(["//loom/config/execute:vm_iree_vm"]),
+)
+
+loom_test(
+    name = "granted_results_test",
+    srcs = ["granted_results.loom"],
+    benchmark_smoke = False,
+    execution_profiles = [_XDNA_ONE_COLUMN_PROFILE],
+    target_compatible_with = loom_config_compatible_with(["//loom/config/execute:vm_iree_vm"]),
+)
+
+loom_test(
+    name = "distribution_lifetimes_test",
+    srcs = ["distribution_lifetimes.loom"],
+    benchmark_smoke = False,
+    execution_profiles = [_XDNA_ONE_COLUMN_PROFILE],
+    target_compatible_with = loom_config_compatible_with(["//loom/config/execute:vm_iree_vm"]),
+    variants = {
+        "finite_child": {"case": "finite_child_completion"},
+        "serial_geometry": {"case": "serial_geometry_reentry"},
+    },
+)
+
+loom_test(
+    name = "child_result_sharing_test",
+    srcs = ["child_result_sharing.loom"],
+    benchmark_smoke = False,
+    execution_profiles = [_XDNA_ONE_COLUMN_PROFILE],
+    target_compatible_with = loom_config_compatible_with(["//loom/config/execute:vm_iree_vm"]),
+)
+
+loom_test(
+    name = "private_credit_lifetimes_test",
+    srcs = ["private_credit_lifetimes.loom"],
+    benchmark_smoke = False,
+    execution_profiles = [_XDNA_ONE_COLUMN_PROFILE],
+    target_compatible_with = loom_config_compatible_with(["//loom/config/execute:vm_iree_vm"]),
+    variants = {
+        "concurrent_owner": {"case": "concurrent_owner_credits"},
+        "conditional_owner": {"case": "conditional_owner_credits"},
+        "nested_writers": {"case": "nested_writers_credits"},
+        "partial_reader": {"case": "partial_reader_credits"},
+        "sram_archive": {"case": "sram_archive_credits"},
+        "unread_tail": {"case": "unread_tail_credits"},
+    },
+)
+
+loom_test(
+    name = "semaphore_lifetimes_test",
+    srcs = ["semaphore_lifetimes.loom"],
     benchmark_smoke = False,
     execution_profiles = [_XDNA_ONE_COLUMN_PROFILE],
     target_compatible_with = loom_config_compatible_with(["//loom/config/execute:vm_iree_vm"]),
@@ -83,7 +196,12 @@ loom_test(
     srcs = [
         "channel_fanout.loom",
         "joined_phases.loom",
+        "ordered_geometry.loom",
+        "packet_phases.loom",
+        "packet_stream.loom",
+        "retained_copy.loom",
         "retained_handoff.loom",
+        "shim_placement.loom",
     ],
     benchmark_smoke = False,
     execution_profiles = [_XDNA_TWO_COLUMN_PROFILE],
@@ -93,6 +211,14 @@ loom_test(
 loom_test_module(
     name = "channel_sram_module",
     srcs = ["channel_sram.loom"],
+)
+
+loom_test(
+    name = "shim_pressure_test",
+    srcs = ["shim_pressure.loom"],
+    benchmark_smoke = False,
+    execution_profiles = [_XDNA_THREE_COLUMN_PROFILE],
+    target_compatible_with = loom_config_compatible_with(["//loom/config/execute:vm_iree_vm"]),
 )
 
 loom_test(

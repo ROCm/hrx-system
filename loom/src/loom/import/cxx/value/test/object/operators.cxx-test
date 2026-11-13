@@ -1,0 +1,554 @@
+// RUN: roundtrip
+// INPUT: cxx root=arithmetic_values
+// Member and free operators flatten record operands and results.
+#include "operator_values.cxx"
+
+// ----
+func.def public @arithmetic_values() -> (i32) {
+  %left_x = scalar.constant 2 : i32
+  %left_y = scalar.constant 3 : i32
+  %right_x = scalar.constant 5 : i32
+  %right_y = scalar.constant 7 : i32
+  %sum_x, %sum_y = func.call pure @Pair__operator_add_value(%left_x, %left_y, %right_x, %right_y) : (i32, i32, i32, i32) -> (i32, i32)
+  %7 = scalar.constant 3 : i32
+  %scaled_x, %scaled_y = func.call pure @operator_multiply(%7, %sum_x, %sum_y) : (i32, i32, i32) -> (i32, i32)
+  %negated_x, %negated_y = func.call pure @Pair__operator_negate_value(%scaled_x, %scaled_y) : (i32, i32) -> (i32, i32)
+  %12 = scalar.constant 7 : i32
+  %13 = scalar.constant 10 : i32
+  %14 = func.call pure @operator_equal(%sum_x, %sum_y, %12, %13) : (i32, i32, i32, i32) -> (i1)
+  %15 = scf.if %14 -> (i32) {
+    %16 = scalar.constant 1 : i32
+    scf.yield %16 : i32
+  } else {
+    %17 = scalar.constant 0 : i32
+    scf.yield %17 : i32
+  }
+  %18 = scalar.constant 21 : i32
+  %19 = scalar.constant 30 : i32
+  %20 = func.call pure @operator_equal(%scaled_x, %scaled_y, %18, %19) : (i32, i32, i32, i32) -> (i1)
+  %21 = scf.if %20 -> (i32) {
+    %22 = scalar.constant 2 : i32
+    scf.yield %22 : i32
+  } else {
+    %23 = scalar.constant 0 : i32
+    scf.yield %23 : i32
+  }
+  %24 = scalar.ori %15, %21 : i32
+  %25 = scalar.constant 0 : i32
+  %26 = scalar.constant 21 : i32
+  %27 = scalar.subi %25, %26 : i32
+  %28 = scalar.cmpi eq, %negated_x, %27 : i32
+  %29 = scf.if %28 -> (i1) {
+    %30 = scalar.constant 0 : i32
+    %31 = scalar.constant 30 : i32
+    %32 = scalar.subi %30, %31 : i32
+    %33 = scalar.cmpi eq, %negated_y, %32 : i32
+    scf.yield %33 : i1
+  } else {
+    scf.yield %28 : i1
+  }
+  %34 = scf.if %29 -> (i32) {
+    %35 = scalar.constant 4 : i32
+    scf.yield %35 : i32
+  } else {
+    %36 = scalar.constant 0 : i32
+    scf.yield %36 : i32
+  }
+  %37 = scalar.ori %24, %34 : i32
+  func.return %37 : i32
+}
+
+func.def @Pair__operator_add_value(%this_x: i32, %this_y: i32, %other_x: i32, %other_y: i32) -> (i32, i32) {
+  %zero$i32$44 = scalar.constant 0 : i32
+  %zero$i32$45 = scalar.constant 0 : i32
+  %result_x = scalar.addi %this_x, %other_x : i32
+  %result_y = scalar.addi %this_y, %other_y : i32
+  func.return %result_x, %result_y : i32, i32
+}
+
+func.def @operator_multiply(%scale: i32, %value_x: i32, %value_y: i32) -> (i32, i32) {
+  %53 = scalar.muli %scale, %value_x : i32
+  %54 = scalar.muli %scale, %value_y : i32
+  func.return %53, %54 : i32, i32
+}
+
+func.def @Pair__operator_negate_value(%this_x: i32, %this_y: i32) -> (i32, i32) {
+  %zero$i32$59 = scalar.constant 0 : i32
+  %zero$i32$60 = scalar.constant 0 : i32
+  %61 = scalar.constant 0 : i32
+  %result_x = scalar.subi %61, %this_x : i32
+  %63 = scalar.constant 0 : i32
+  %result_y = scalar.subi %63, %this_y : i32
+  func.return %result_x, %result_y : i32, i32
+}
+
+func.def @operator_equal(%left_x: i32, %left_y: i32, %right_x: i32, %right_y: i32) -> (i1) {
+  %70 = scalar.cmpi eq, %left_x, %right_x : i32
+  %71 = scf.if %70 -> (i1) {
+    %72 = scalar.cmpi eq, %left_y, %right_y : i32
+    scf.yield %72 : i1
+  } else {
+    scf.yield %70 : i1
+  }
+  func.return %71 : i1
+}
+
+// ====
+// RUN: roundtrip
+// INPUT: cxx root=member_update_values
+// Prefix, postfix, and compound assignment preserve receiver writeback.
+#include "operator_values.cxx"
+
+// ----
+func.def public @member_update_values() -> (i32) {
+  %value_x$1 = scalar.constant 5 : i32
+  %value_y$2 = scalar.constant 9 : i32
+  %3 = scalar.constant 0 : i32
+  %previous_x, %previous_y, %value_x$6, %value_y$7 = func.call pure @Pair__operator_post_increment_value(%value_x$1, %value_y$2, %3) : (i32, i32, i32) -> (i32, i32, i32, i32)
+  %value_x$8, %value_y$9 = func.call pure @Pair__operator_pre_increment_value(%value_x$6, %value_y$7) : (i32, i32) -> (i32, i32)
+  %10 = scalar.constant 10 : i32
+  %11 = scalar.muli %previous_y, %10 : i32
+  %12 = scalar.addi %previous_x, %11 : i32
+  %13 = scalar.constant 100 : i32
+  %14 = scalar.muli %value_x$8, %13 : i32
+  %15 = scalar.addi %12, %14 : i32
+  %16 = scalar.constant 1000 : i32
+  %17 = scalar.muli %value_y$9, %16 : i32
+  %observed = scalar.addi %15, %17 : i32
+  %value_x$19, %value_y$20 = func.call pure @Pair__operator_add_assign_value(%value_x$8, %value_y$9, %previous_x, %previous_y) : (i32, i32, i32, i32) -> (i32, i32)
+  %21 = scalar.constant 10000 : i32
+  %22 = scalar.muli %value_x$19, %21 : i32
+  %23 = scalar.addi %observed, %22 : i32
+  %24 = scalar.constant 1000000 : i32
+  %25 = scalar.muli %value_y$20, %24 : i32
+  %26 = scalar.addi %23, %25 : i32
+  func.return %26 : i32
+}
+
+func.def @Pair__operator_post_increment_value(%this_x: i32, %this_y: i32, %29: i32) -> (i32, i32, i32, i32) {
+  %zero$i32$34 = scalar.constant 0 : i32
+  %zero$i32$35 = scalar.constant 0 : i32
+  %36 = scalar.constant 1 : i32
+  %x = scalar.addi %this_x, %36 : i32
+  %38 = scalar.constant 1 : i32
+  %y = scalar.addi %this_y, %38 : i32
+  func.return %this_x, %this_y, %x, %y : i32, i32, i32, i32
+}
+
+func.def @Pair__operator_pre_increment_value(%this_x: i32, %this_y: i32) -> (i32, i32) {
+  %44 = scalar.constant 1 : i32
+  %x = scalar.addi %this_x, %44 : i32
+  %46 = scalar.constant 1 : i32
+  %y = scalar.addi %this_y, %46 : i32
+  func.return %x, %y : i32, i32
+}
+
+func.def @Pair__operator_add_assign_value(%this_x: i32, %this_y: i32, %other_x: i32, %other_y: i32) -> (i32, i32) {
+  %x = scalar.addi %this_x, %other_x : i32
+  %y = scalar.addi %this_y, %other_y : i32
+  func.return %x, %y : i32, i32
+}
+
+// ====
+// RUN: roundtrip
+// INPUT: cxx root=stored_member_result
+// Direct, volatile-stored, chained, and mutable temporary results retain identity.
+#include "operator_values.cxx"
+
+// ----
+func.def public @stored_member_result() -> (i32) {
+  %left_x = scalar.constant 3 : i32
+  %left_y = scalar.constant 5 : i32
+  %right_x = scalar.constant 7 : i32
+  %right_y = scalar.constant 11 : i32
+  %direct_x, %direct_y = func.call pure @Pair__direct_add_value(%left_x, %left_y, %right_x, %right_y) : (i32, i32, i32, i32) -> (i32, i32)
+  %stored_x, %stored_y = func.call @Pair__stored_add_value(%left_x, %left_y, %right_x, %right_y) : (i32, i32, i32, i32) -> (i32, i32)
+  %9, %10 = func.call pure @Pair__operator_add_value(%left_x, %left_y, %right_x, %right_y) : (i32, i32, i32, i32) -> (i32, i32)
+  %chained_x, %chained_y = func.call pure @Pair__operator_add_value(%9, %10, %left_x, %left_y) : (i32, i32, i32, i32) -> (i32, i32)
+  %13, %14 = func.call pure @Pair__operator_add_value(%left_x, %left_y, %right_x, %right_y) : (i32, i32, i32, i32) -> (i32, i32)
+  %mutable_chain_x, %mutable_chain_y = func.call pure @Pair__operator_add_assign_value(%13, %14, %left_x, %left_y) : (i32, i32, i32, i32) -> (i32, i32)
+  %17 = scalar.addi %direct_x, %direct_y : i32
+  %18 = scalar.addi %17, %stored_x : i32
+  %19 = scalar.addi %18, %stored_y : i32
+  %20 = scalar.addi %19, %chained_x : i32
+  %21 = scalar.addi %20, %chained_y : i32
+  %22 = scalar.addi %21, %mutable_chain_x : i32
+  %23 = scalar.addi %22, %mutable_chain_y : i32
+  func.return %23 : i32
+}
+
+func.def @Pair__direct_add_value(%this_x: i32, %this_y: i32, %other_x: i32, %other_y: i32) -> (i32, i32) {
+  %30 = scalar.addi %this_x, %other_x : i32
+  %31 = scalar.addi %this_y, %other_y : i32
+  func.return %30, %31 : i32, i32
+}
+
+func.def @Pair__stored_add_value(%this_x: i32, %this_y: i32, %other_x: i32, %other_y: i32) -> (i32, i32) {
+  %38 = index.constant 8 : offset
+  %result_storage = buffer.alloca<private> align(4) %38 : buffer
+  %result_storage_byte_offset = index.constant 0 : offset
+  %result_view = buffer.view %result_storage[%result_storage_byte_offset] : buffer -> view<8xi8>
+  %42 = index.constant 0 : offset
+  %43 = index.add %result_storage_byte_offset, %42 : offset
+  %44 = scalar.addi %this_x, %other_x : i32
+  %45 = index.assume %43 [range(%43, 0, 4)] : offset
+  %46 = buffer.view %result_storage[%45] : buffer -> view<1xi32>
+  view.store<volatile> %44, %46[0] : i32, view<1xi32>
+  %47 = index.constant 4 : offset
+  %48 = index.add %result_storage_byte_offset, %47 : offset
+  %49 = scalar.addi %this_y, %other_y : i32
+  %50 = index.assume %48 [range(%48, 0, 4)] : offset
+  %51 = buffer.view %result_storage[%50] : buffer -> view<1xi32>
+  view.store<volatile> %49, %51[0] : i32, view<1xi32>
+  %52 = index.constant 0 : offset
+  %53 = index.add %result_storage_byte_offset, %52 : offset
+  %54 = index.assume %53 [range(%53, 0, 4)] : offset
+  %55 = buffer.view %result_storage[%54] : buffer -> view<1xi32>
+  %x = view.load<volatile> %55[0] : view<1xi32> -> i32
+  %57 = index.constant 4 : offset
+  %58 = index.add %result_storage_byte_offset, %57 : offset
+  %59 = index.assume %58 [range(%58, 0, 4)] : offset
+  %60 = buffer.view %result_storage[%59] : buffer -> view<1xi32>
+  %y = view.load<volatile> %60[0] : view<1xi32> -> i32
+  func.return %x, %y : i32, i32
+}
+
+func.def @Pair__operator_add_value(%this_x: i32, %this_y: i32, %other_x: i32, %other_y: i32) -> (i32, i32) {
+  %zero$i32$68 = scalar.constant 0 : i32
+  %zero$i32$69 = scalar.constant 0 : i32
+  %result_x = scalar.addi %this_x, %other_x : i32
+  %result_y = scalar.addi %this_y, %other_y : i32
+  func.return %result_x, %result_y : i32, i32
+}
+
+func.def @Pair__operator_add_assign_value(%this_x: i32, %this_y: i32, %other_x: i32, %other_y: i32) -> (i32, i32) {
+  %x = scalar.addi %this_x, %other_x : i32
+  %y = scalar.addi %this_y, %other_y : i32
+  func.return %x, %y : i32, i32
+}
+
+// ====
+// RUN: roundtrip
+// INPUT: cxx root=member_order root=temporary_reference
+// One member has value and storage receiver forms; RHS effects precede its update.
+#include "operator_values.cxx"
+
+// ----
+func.def public @member_order() -> (i32) {
+  %value_value$1 = scalar.constant 1 : i32
+  %2, %value_value$3 = func.call pure @mutate() : () -> (i32, i32)
+  %value_value$4 = func.call pure @MemberOrder__operator_add_assign_value(%value_value$3, %2) : (i32, i32) -> (i32)
+  func.return %value_value$4 : i32
+}
+
+func.def public @temporary_reference() -> (i32) {
+  %6 = scalar.constant 3 : i32
+  %7 = scalar.constant 2 : i32
+  %8 = scalar.constant 5 : i32
+  %9 = func.call pure @MemberOrder__operator_add_assign_value(%8, %7) : (i32, i32) -> (i32)
+  %10 = index.constant 4 : offset
+  %11 = buffer.alloca<private> align(4) %10 : buffer
+  %12 = index.constant 0 : offset
+  %13 = buffer.view %11[%12] : buffer -> view<4xi8>
+  %14 = index.constant 0 : offset
+  %15 = index.add %12, %14 : offset
+  %16 = index.assume %15 [range(%15, 0, 0)] : offset
+  %17 = buffer.view %11[%16] : buffer -> view<1xi32>
+  view.store %9, %17[0] : i32, view<1xi32>
+  %18 = index.constant 0 : offset
+  %19 = index.add %12, %18 : offset
+  %20 = index.assume %19 [range(%19, 0, 0)] : offset
+  %21 = buffer.view %11[%20] : buffer -> view<1xi32>
+  %22 = view.load %21[0] : view<1xi32> -> i32
+  %23 = scalar.addi %22, %6 : i32
+  %24 = index.assume %19 [range(%19, 0, 0)] : offset
+  %25 = buffer.view %11[%24] : buffer -> view<1xi32>
+  view.store %23, %25[0] : i32, view<1xi32>
+  func.return %23 : i32
+}
+
+func.def @mutate() -> (i32, i32) {
+  %value_value = scalar.constant 7 : i32
+  %29 = scalar.constant 3 : i32
+  func.return %29, %value_value : i32, i32
+}
+
+func.def @MemberOrder__operator_add_assign_value(%this_value: i32, %amount: i32) -> (i32) {
+  %value = scalar.addi %this_value, %amount : i32
+  func.return %value : i32
+}
+
+// ====
+// RUN: roundtrip
+// INPUT: cxx root=free_order
+// A free operator receives the receiver state produced by the RHS effect.
+#include "operator_values.cxx"
+
+// ----
+func.def public @free_order() -> (i32) {
+  %value_value$1 = scalar.constant 2 : i32
+  %2, %value_value$3 = func.call pure @mutate_free() : () -> (i32, i32)
+  %4, %value_value$5 = func.call pure @operator_add_assign(%value_value$3, %2) : (i32, i32) -> (i32, i32)
+  func.return %value_value$5 : i32
+}
+
+func.def @mutate_free() -> (i32, i32) {
+  %value_value = scalar.constant 11 : i32
+  %9 = scalar.constant 4 : i32
+  func.return %9, %value_value : i32, i32
+}
+
+func.def @operator_add_assign(%left_value$10: i32, %right: i32) -> (i32, i32) {
+  %left_value$14 = scalar.addi %left_value$10, %right : i32
+  func.return %left_value$14, %left_value$14 : i32, i32
+}
+
+// ====
+// RUN: roundtrip
+// INPUT: cxx root=free_increment_values
+// Free prefix and postfix operators distinguish old and updated values.
+#include "operator_values.cxx"
+
+// ----
+func.def public @free_increment_values() -> (i32) {
+  %value_value$1 = scalar.constant 8 : i32
+  %2 = scalar.constant 0 : i32
+  %previous_value, %value_value$4 = func.call pure @operator_post_increment(%value_value$1, %2) : (i32, i32) -> (i32, i32)
+  %updated_value, %value_value$6 = func.call pure @operator_pre_increment(%value_value$4) : (i32) -> (i32, i32)
+  %7 = scalar.constant 100 : i32
+  %8 = scalar.muli %previous_value, %7 : i32
+  %9 = scalar.constant 10 : i32
+  %10 = scalar.muli %updated_value, %9 : i32
+  %11 = scalar.addi %8, %10 : i32
+  %12 = scalar.addi %11, %value_value$6 : i32
+  func.return %12 : i32
+}
+
+func.def @operator_post_increment(%value_value$13: i32, %14: i32) -> (i32, i32) {
+  %17 = scalar.constant 1 : i32
+  %value_value$18 = scalar.addi %value_value$13, %17 : i32
+  func.return %value_value$13, %value_value$18 : i32, i32
+}
+
+func.def @operator_pre_increment(%value_value$19: i32) -> (i32, i32) {
+  %22 = scalar.constant 1 : i32
+  %value_value$23 = scalar.addi %value_value$19, %22 : i32
+  func.return %value_value$23, %value_value$23 : i32, i32
+}
+
+// ====
+// RUN: roundtrip
+// INPUT: cxx root=void_update
+// A void result still writes back the modified receiver.
+#include "operator_values.cxx"
+
+// ----
+func.def public @void_update() -> (i32) {
+  %sink_value$1 = scalar.constant 9 : i32
+  %2 = scalar.constant 4 : i32
+  %sink_value$3 = func.call pure @Sink__operator_add_assign_value(%sink_value$1, %2) : (i32, i32) -> (i32)
+  func.return %sink_value$3 : i32
+}
+
+func.def @Sink__operator_add_assign_value(%this_value: i32, %amount: i32) -> (i32) {
+  %value = scalar.addi %this_value, %amount : i32
+  func.return %value : i32
+}
+
+// ====
+// RUN: roundtrip
+// INPUT: cxx root=nonreceiver_reference
+// The returned reference aliases the other argument, not the receiver.
+#include "operator_values.cxx"
+
+// ----
+func.def public @nonreceiver_reference() -> (i32) {
+  %selector_own = scalar.constant 2 : i32
+  %other$2 = scalar.constant 4 : i32
+  %3 = scalar.constant 3 : i32
+  func.call pure @ReferenceSelector__operator_add_assign_value(%selector_own, %other$2) : (i32, i32)
+  %other$4 = scalar.addi %other$2, %3 : i32
+  %5 = scalar.constant 10 : i32
+  %6 = scalar.muli %selector_own, %5 : i32
+  %7 = scalar.addi %6, %other$4 : i32
+  func.return %7 : i32
+}
+
+func.def @ReferenceSelector__operator_add_assign_value(%this_own: i32, %other: i32) {
+  func.return
+}
+
+// ====
+// RUN: roundtrip
+// INPUT: cxx root=accumulate_pairs
+// Record operators compose over kernel buffer elements.
+#include "operator_values.cxx"
+
+// ----
+kernel.def @accumulate_pairs() {
+  %2 = index.constant 1 : index
+  %3 = index.constant 1 : index
+  %4 = index.constant 1 : index
+  %5 = index.constant 64 : index
+  %6 = index.constant 1 : index
+  %7 = index.constant 1 : index
+  kernel.launch.config workgroups(%2, %3, %4) workgroup_size(%5, %6, %7) : index
+} launch(%input: buffer, %output: buffer) {
+  %input_byte_offset = index.constant 0 : offset
+  %output_byte_offset = index.constant 0 : offset
+  %workitem_id_x = kernel.workitem.id<x> : index
+  %lane = index.cast %workitem_id_x : index to i32
+  %12 = scalar.constant 2 : i32
+  %base = scalar.muli %lane, %12 : i32
+  %14 = scalar.extui %base : i32 to i64
+  %15 = scalar.constant 4 : i64
+  %16 = scalar.muli %14, %15 : i64
+  %17 = index.cast %input_byte_offset : offset to i64
+  %18 = scalar.addi %17, %16 : i64
+  %19 = scalar.assume %18 [range(%18, 0, 9223372036854775807)] : i64
+  %20 = index.cast %19 : i64 to offset
+  %21 = buffer.view %input[%20] : buffer -> view<1xi32>
+  %value_x = view.load<root_in_bounds> %21[0] : view<1xi32> -> i32
+  %23 = scalar.constant 1 : i32
+  %24 = scalar.addi %base, %23 : i32
+  %25 = scalar.extui %24 : i32 to i64
+  %26 = scalar.constant 4 : i64
+  %27 = scalar.muli %25, %26 : i64
+  %28 = index.cast %input_byte_offset : offset to i64
+  %29 = scalar.addi %28, %27 : i64
+  %30 = scalar.assume %29 [range(%29, 0, 9223372036854775807)] : i64
+  %31 = index.cast %30 : i64 to offset
+  %32 = buffer.view %input[%31] : buffer -> view<1xi32>
+  %value_y = view.load<root_in_bounds> %32[0] : view<1xi32> -> i32
+  %bias_x = scalar.constant 1 : i32
+  %bias_y = scalar.constant 2 : i32
+  %36 = scalar.constant 3 : i32
+  %37, %38 = func.call pure @Pair__operator_add_value(%value_x, %value_y, %bias_x, %bias_y) : (i32, i32, i32, i32) -> (i32, i32)
+  %result_x, %result_y = func.call pure @operator_multiply(%36, %37, %38) : (i32, i32, i32) -> (i32, i32)
+  %41 = scalar.extui %base : i32 to i64
+  %42 = scalar.constant 4 : i64
+  %43 = scalar.muli %41, %42 : i64
+  %44 = index.cast %output_byte_offset : offset to i64
+  %45 = scalar.addi %44, %43 : i64
+  %46 = scalar.assume %45 [range(%45, 0, 9223372036854775807)] : i64
+  %47 = index.cast %46 : i64 to offset
+  %48 = buffer.view %output[%47] : buffer -> view<1xi32>
+  view.store<root_in_bounds> %result_x, %48[0] : i32, view<1xi32>
+  %49 = scalar.constant 1 : i32
+  %50 = scalar.addi %base, %49 : i32
+  %51 = scalar.extui %50 : i32 to i64
+  %52 = scalar.constant 4 : i64
+  %53 = scalar.muli %51, %52 : i64
+  %54 = index.cast %output_byte_offset : offset to i64
+  %55 = scalar.addi %54, %53 : i64
+  %56 = scalar.assume %55 [range(%55, 0, 9223372036854775807)] : i64
+  %57 = index.cast %56 : i64 to offset
+  %58 = buffer.view %output[%57] : buffer -> view<1xi32>
+  view.store<root_in_bounds> %result_y, %58[0] : i32, view<1xi32>
+  kernel.return
+}
+
+func.def @Pair__operator_add_value(%this_x: i32, %this_y: i32, %other_x: i32, %other_y: i32) -> (i32, i32) {
+  %zero$i32$65 = scalar.constant 0 : i32
+  %zero$i32$66 = scalar.constant 0 : i32
+  %result_x = scalar.addi %this_x, %other_x : i32
+  %result_y = scalar.addi %this_y, %other_y : i32
+  func.return %result_x, %result_y : i32, i32
+}
+
+func.def @operator_multiply(%scale: i32, %value_x: i32, %value_y: i32) -> (i32, i32) {
+  %74 = scalar.muli %scale, %value_x : i32
+  %75 = scalar.muli %scale, %value_y : i32
+  func.return %74, %75 : i32, i32
+}
+
+// ====
+// RUN: roundtrip
+// INPUT: cxx root=temporary_destruction
+// A returned receiver reference retains the full-expression destruction point.
+#include "operator_values.cxx"
+
+// ----
+func.def public @temporary_destruction() -> (i32) {
+  %1 = index.constant 4 : offset
+  %observed_storage = buffer.alloca<private> align(4) %1 : buffer
+  %observed_storage_byte_offset = index.constant 0 : offset
+  %observed_view = buffer.view %observed_storage[%observed_storage_byte_offset] : buffer -> view<1xi32>
+  %5 = scalar.constant 0 : i32
+  view.store %5, %observed_view[0] : i32, view<1xi32>
+  %6 = scalar.constant 5 : i32
+  %7 = func.call pure @TemporaryObserved__bump_value(%6, %observed_storage, %observed_storage_byte_offset) : (i32, buffer, offset) -> (i32)
+  func.call @TemporaryObserved___TemporaryObserved_value(%7, %observed_storage, %observed_storage_byte_offset) : (i32, buffer, offset)
+  %observed = view.load %observed_view[0] : view<1xi32> -> i32
+  func.return %observed : i32
+}
+
+func.def @TemporaryObserved__bump_value(%this_value: i32, %this_observed: buffer, %this_observed_byte_offset: offset) -> (i32) {
+  %13 = scalar.constant 1 : i32
+  %value = scalar.addi %this_value, %13 : i32
+  func.return %value : i32
+}
+
+func.def inline @TemporaryObserved___TemporaryObserved_value(%this_value: i32, %this_observed: buffer, %this_observed_byte_offset: offset) {
+  %18 = buffer.view %this_observed[%this_observed_byte_offset] : buffer -> view<1xi32>
+  view.store<root_in_bounds> %this_value, %18[0] : i32, view<1xi32>
+  func.return
+}
+
+// ====
+// RUN: roundtrip
+// INPUT: cxx root=selected_operator_result
+// Overloaded calls use the same finite-origin result contract as ordinary
+// calls and preserve the selected caller destination for mutation.
+struct ReferenceSelector {
+  bool invert;
+
+  unsigned& operator()(bool condition, unsigned& left, unsigned& right) const {
+    return condition != invert ? left : right;
+  }
+};
+
+unsigned selected_operator_result(bool condition, unsigned left,
+                                  unsigned right, unsigned replacement) {
+  ReferenceSelector selector{false};
+  selector(condition, left, right) = replacement;
+  return left * 10u + right;
+}
+
+// ----
+func.def public @selected_operator_result(%condition: i1, %left$1: i32, %right$2: i32, %replacement: i32) -> (i32) {
+  %selector_invert = scalar.constant 0 : i1
+  %6 = func.call pure @ReferenceSelector__operator_call_value(%selector_invert, %condition, %left$1, %right$2) : (i1, i1, i32, i32) -> (i32)
+  %7 = scalar.constant 0 : i32
+  %8 = scalar.cmpi eq, %6, %7 : i32
+  %left$9 = scf.if %8 -> (i32) {
+    scf.yield %replacement : i32
+  } else {
+    scf.yield %left$1 : i32
+  }
+  %10 = scalar.constant 0 : i32
+  %11 = scalar.cmpi eq, %6, %10 : i32
+  %right$12 = scf.if %11 -> (i32) {
+    scf.yield %right$2 : i32
+  } else {
+    scf.yield %replacement : i32
+  }
+  %13 = scalar.constant 10 : i32
+  %14 = scalar.muli %left$9, %13 : i32
+  %15 = scalar.addi %14, %right$12 : i32
+  func.return %15 : i32
+}
+
+func.def @ReferenceSelector__operator_call_value(%this_invert: i1, %condition: i1, %left: i32, %right: i32) -> (i32) {
+  %21 = scalar.extui %condition : i1 to i32
+  %22 = scalar.extui %this_invert : i1 to i32
+  %23 = scalar.cmpi ne, %21, %22 : i32
+  %26 = scf.if %23 -> (i32) {
+    %24 = scalar.constant 0 : i32
+    scf.yield %24 : i32
+  } else {
+    %25 = scalar.constant 1 : i32
+    scf.yield %25 : i32
+  }
+  func.return %26 : i32
+}

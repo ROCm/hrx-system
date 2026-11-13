@@ -40,7 +40,7 @@ typedef uint8_t loom_low_lower_representation_boundary_flags_t;
 typedef enum loom_low_lower_representation_callable_boundary_kind_e {
   // Active source FuncLike operation.
   LOOM_LOW_LOWER_REPRESENTATION_CALLABLE_DEFINITION = 0,
-  // Direct semantic CallLike operation.
+  // Direct semantic call or explicit semantic-to-native invocation.
   LOOM_LOW_LOWER_REPRESENTATION_CALLABLE_CALL = 1,
   // Direct terminator of the active source FuncLike body.
   LOOM_LOW_LOWER_REPRESENTATION_CALLABLE_EXIT = 2,
@@ -111,9 +111,9 @@ typedef struct loom_low_lower_representation_provider_t {
   // the target action. Failures and exact alternatives are recorded through
   // |recorder|.
   loom_low_lower_representation_boundary_fn_t observe_boundary;
-  // Observes generic FuncLike definitions and exits and direct semantic
-  // CallLike operations. This keeps target policy independent of concrete
-  // callable dialects.
+  // Observes generic FuncLike definitions and exits, direct semantic calls,
+  // and semantic-to-native invocations through CallLike. Target policy is
+  // independent of concrete callable dialects.
   loom_low_lower_representation_callable_boundary_fn_t
       observe_callable_boundary;
   // Observes each operand use that was not claimed by an accepted common
@@ -193,6 +193,18 @@ void loom_low_lower_representation_observer_observe(
     const loom_op_t* source_op);
 iree_status_t loom_low_lower_representation_observer_end(
     void* observer_state, loom_low_lower_context_t* context);
+
+// Borrows the solved function-local plan, or NULL before observation completes.
+// The plan and its selected representations remain valid for the active source
+// function. Dependent analyses include this identity in their cache scope.
+loom_low_representation_plan_t* loom_low_lower_representation_plan_if_ready(
+    loom_low_lower_context_t* context);
+
+// Borrows the same solved plan through a contract query's target-state scope.
+// A scope without representation observation returns NULL.
+iree_status_t loom_low_lower_representation_query_plan(
+    const loom_target_contract_query_environment_t* environment,
+    loom_low_representation_plan_t** out_plan);
 
 // Returns the selected representation for |source_value_id|, or NONE when its
 // component remained unconstrained. The representation observer must have

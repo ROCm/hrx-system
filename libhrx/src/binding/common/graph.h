@@ -10,6 +10,7 @@
 #include "common/host_callback.h"
 #include "common/memory.h"
 #include "common/stream.h"
+#include "graph_analysis.h"
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
 
@@ -59,6 +60,10 @@ typedef enum iree_hal_streaming_graph_node_flag_bits_e {
   IREE_HAL_STREAMING_GRAPH_NODE_FLAG_HIDDEN = 1u << 0,
   // Node is disabled in an executable graph and omitted from scheduling.
   IREE_HAL_STREAMING_GRAPH_NODE_FLAG_DISABLED = 1u << 1,
+  // Temporary membership mark, cleared before dependency validation returns.
+  IREE_HAL_STREAMING_GRAPH_NODE_FLAG_VALIDATING_DEPENDENCY = 1u << 2,
+  // Added dependencies are reached through a lazily allocated membership index.
+  IREE_HAL_STREAMING_GRAPH_NODE_FLAG_INDEXED_DEPENDENCIES = 1u << 3,
 } iree_hal_streaming_graph_node_flag_bits_t;
 
 // Returns true if the node type can be recorded into a command buffer.
@@ -305,14 +310,15 @@ typedef struct iree_hal_streaming_graph_mem_alloc_node_attrs_t {
   // Original allocation owner for a cloned node, borrowed through the retained
   // template chain. NULL means this node's graph owns the allocation.
   iree_hal_streaming_graph_t* allocation_owner;
-  // True when |dptr| is owned by this graph template and must be released with
-  // the node.
-  bool owns_device_allocation;
+  // Retained stable address and its independent physical allocation lifetime.
+  struct iree_hal_streaming_graph_allocation_t* allocation;
 } iree_hal_streaming_graph_mem_alloc_node_attrs_t;
 
 typedef struct iree_hal_streaming_graph_mem_free_node_attrs_t {
   // Device pointer associated with the memory free node.
   void* dptr;
+  // Retained address owner, including frees of allocations from another graph.
+  struct iree_hal_streaming_graph_allocation_t* allocation;
 } iree_hal_streaming_graph_mem_free_node_attrs_t;
 
 typedef struct iree_hal_streaming_graph_batch_mem_op_node_attrs_t {
@@ -338,6 +344,31 @@ typedef struct iree_hal_streaming_graph_batch_mem_op_node_attrs_t {
   hrx_buffer_t* owners;
 } iree_hal_streaming_graph_batch_mem_op_node_attrs_t;
 
+// Incoming dependency added after the destination node was constructed.
+// The destination owns the list, so each record only stores its predecessor.
+typedef struct iree_hal_streaming_graph_dependency_t {
+  // Next added dependency of the same destination node.
+  struct iree_hal_streaming_graph_dependency_t* next;
+  // Borrowed predecessor owned by the same graph.
+  iree_hal_streaming_graph_node_t* from;
+} iree_hal_streaming_graph_dependency_t;
+
+// Exact membership for a frequently mutated wide predecessor set. The list
+// remains authoritative for enumeration; cloning does not copy this index.
+// Removing the last predecessor releases the index, preserving pointer-based
+// dependency-presence queries without a lookup through the index.
+typedef struct iree_hal_streaming_graph_dependency_index_t {
+  // Arena-owned added dependencies in their original enumeration order.
+  iree_hal_streaming_graph_dependency_t* head;
+  // Number of embedded and added predecessors represented in |slots|.
+  iree_host_size_t count;
+  // Power-of-two slot count, with at least one quarter of the slots empty.
+  iree_host_size_t capacity;
+  // Stable source indices plus one; zero terminates a linear-probe chain.
+  // Node publication excludes UINT32_MAX, so every encoded identity is nonzero.
+  uint32_t slots[];
+} iree_hal_streaming_graph_dependency_index_t;
+
 // Graph node structure.
 // Memory layout:
 // [iree_hal_streaming_graph_node_t]
@@ -345,20 +376,28 @@ typedef struct iree_hal_streaming_graph_batch_mem_op_node_attrs_t {
 // [padding to iree_max_align_t]
 // [extra_data (e.g., packed kernel arguments)]
 typedef struct iree_hal_streaming_graph_node_t {
-  // Graph that owns the node while it remains part of a graph template.
+  // Owning graph after publication, NULL after removal or construction
+  // rollback. Node storage remains valid until that graph's arena is destroyed.
   iree_hal_streaming_graph_t* graph;
   // Type of the node indicating which attribute data is valid.
   iree_hal_streaming_graph_node_type_t type;
   // Flags controlling graph node visibility and behavior.
-  uint32_t flags;
+  uint8_t flags;
+  // Number of embedded dependency pointers in |dependencies|.
+  uint32_t dependency_count;
+  // INDEXED_DEPENDENCIES selects the index without enlarging the node header.
+  union {
+    // Arena-owned incoming dependencies attached after node construction.
+    iree_hal_streaming_graph_dependency_t* additional_dependencies;
+    // Host-allocated membership index containing the same incoming list.
+    iree_hal_streaming_graph_dependency_index_t* dependency_index;
+  };
   // Dense index used by graph analysis while the node is active.
   uint32_t node_index;
   // Stable source node index used to find original nodes in cloned graphs.
   uint32_t clone_source_node_index;
   // Process-unique identifier used for graph debug output.
   uint64_t debug_id;
-  // Number of embedded dependency pointers in |dependencies|.
-  uint32_t dependency_count;
 
   // Node-specific data.
   union {
@@ -378,6 +417,52 @@ typedef struct iree_hal_streaming_graph_node_t {
   // backing node blocks.
   iree_hal_streaming_graph_node_t* dependencies[];
 } iree_hal_streaming_graph_node_t;
+
+// Publication assigns the owner; removal and rollback clear it while leaving
+// the handle's arena storage alive until graph destruction.
+static inline bool iree_hal_streaming_graph_node_is_active_in_graph(
+    const iree_hal_streaming_graph_t* graph,
+    const iree_hal_streaming_graph_node_t* node) {
+  return node && node->graph == graph;
+}
+
+static inline iree_hal_streaming_graph_dependency_t*
+iree_hal_streaming_graph_additional_dependencies(
+    const iree_hal_streaming_graph_node_t* node) {
+  return node->flags & IREE_HAL_STREAMING_GRAPH_NODE_FLAG_INDEXED_DEPENDENCIES
+             ? node->dependency_index->head
+             : node->additional_dependencies;
+}
+
+// Mutable head used by construction and removal, with graph access serialized.
+static inline iree_hal_streaming_graph_dependency_t**
+iree_hal_streaming_graph_additional_dependency_head(
+    iree_hal_streaming_graph_node_t* node) {
+  return node->flags & IREE_HAL_STREAMING_GRAPH_NODE_FLAG_INDEXED_DEPENDENCIES
+             ? &node->dependency_index->head
+             : &node->additional_dependencies;
+}
+
+// Validates an external predecessor array without retaining scratch or changing
+// its order. Caller serialization also covers temporary predecessor flags.
+iree_status_t iree_hal_streaming_graph_validate_dependencies(
+    const iree_hal_streaming_graph_t* graph,
+    iree_hal_streaming_graph_node_t** dependencies,
+    iree_host_size_t dependency_count);
+
+// Releases only the optional index, preserving the authoritative incoming list.
+void iree_hal_streaming_graph_release_dependency_index(
+    iree_hal_streaming_graph_node_t* node);
+
+// Detaches every incoming and outgoing reference before retiring a known node.
+void iree_hal_streaming_graph_remove_dependency_refs(
+    iree_hal_streaming_graph_t* graph, iree_hal_streaming_graph_node_t* node);
+
+// Validates all requested removals before publishing any topology changes.
+iree_status_t iree_hal_streaming_graph_remove_dependencies(
+    iree_hal_streaming_graph_t* graph,
+    iree_hal_streaming_graph_node_t** from_nodes,
+    iree_hal_streaming_graph_node_t** to_nodes, iree_host_size_t count);
 
 //===----------------------------------------------------------------------===//
 // Graph management
@@ -570,6 +655,11 @@ bool iree_hal_streaming_graph_exec_try_retain_live(
     iree_hal_streaming_graph_exec_t* exec);
 bool iree_hal_streaming_graph_exec_is_live(
     iree_hal_streaming_graph_exec_t* exec);
+
+// Invalidates the handle, joins its accepted launches, and releases the
+// handle's reference on success. Independent work and later stream operations
+// are not joined. A failed wait leaves the handle live and its reference
+// unchanged.
 iree_status_t iree_hal_streaming_graph_exec_destroy_handle(
     iree_hal_streaming_graph_exec_t* exec);
 
@@ -605,20 +695,6 @@ iree_status_t iree_hal_streaming_graph_exec_update(
     iree_hal_streaming_graph_node_t** out_error_node,
     iree_hal_streaming_graph_exec_update_result_t* out_result);
 
-uint64_t iree_hal_streaming_graph_memory_used_current(
-    iree_hal_streaming_device_t* device);
-uint64_t iree_hal_streaming_graph_memory_used_high(
-    iree_hal_streaming_device_t* device);
-uint64_t iree_hal_streaming_graph_memory_reserved_current(
-    iree_hal_streaming_device_t* device);
-uint64_t iree_hal_streaming_graph_memory_reserved_high(
-    iree_hal_streaming_device_t* device);
-void iree_hal_streaming_graph_memory_reset_used_high(
-    iree_hal_streaming_device_t* device);
-void iree_hal_streaming_graph_memory_reset_reserved_high(
-    iree_hal_streaming_device_t* device);
-void iree_hal_streaming_graph_memory_trim(iree_hal_streaming_device_t* device);
-
 //===----------------------------------------------------------------------===//
 // Stream capture
 //===----------------------------------------------------------------------===//
@@ -644,10 +720,6 @@ iree_status_t iree_hal_streaming_capture_status(
     iree_hal_streaming_capture_status_t* out_status,
     unsigned long long* out_id);
 
-// Synchronization: none (queries capture state).
-iree_status_t iree_hal_streaming_is_capturing(
-    iree_hal_streaming_stream_t* stream, bool* out_is_capturing);
-
 // Synchronization: none (updates dependencies).
 iree_status_t iree_hal_streaming_update_capture_dependencies(
     iree_hal_streaming_stream_t* stream,
@@ -667,11 +739,14 @@ typedef struct iree_hal_streaming_node_block_t {
   iree_hal_streaming_graph_node_t* nodes[];
 } iree_hal_streaming_node_block_t;
 
-// Edge structure for additional dependencies added after node creation.
+// Temporary scheduling edge that augments the template's own dependencies.
 typedef struct iree_hal_streaming_graph_edge_t {
+  // Next edge in the scheduling augmentation list.
   struct iree_hal_streaming_graph_edge_t* next;
-  iree_hal_streaming_graph_node_t* from;  // Dependency (must complete first)
-  iree_hal_streaming_graph_node_t* to;    // Dependent (waits for 'from')
+  // Borrowed predecessor that must complete first.
+  iree_hal_streaming_graph_node_t* from;
+  // Borrowed dependent that waits for the predecessor.
+  iree_hal_streaming_graph_node_t* to;
 } iree_hal_streaming_graph_edge_t;
 
 typedef iree_status_t (*iree_hal_streaming_graph_user_object_retain_fn_t)(
@@ -741,13 +816,7 @@ typedef struct iree_hal_streaming_graph_t {
   // Next stable source ID assigned to graph nodes created in this template.
   uint32_t next_clone_source_node_index;
 
-  // Root nodes stored in chained blocks.
-  iree_hal_streaming_node_block_t* root_blocks;
-  iree_hal_streaming_node_block_t* current_root_block;
-  iree_host_size_t root_count;
-
-  // Additional edges added after node creation via hipGraphAddDependencies.
-  iree_hal_streaming_graph_edge_t* additional_edges;
+  // Total added dependencies in the nodes' incoming lists.
   iree_host_size_t additional_edge_count;
 
   // Retained source of an executable snapshot or allocation-bearing child.
@@ -831,39 +900,6 @@ iree_status_t iree_hal_streaming_capture_join_graph(
 // was removed. Lock order: graph/session -> context stream-list -> stream.
 bool iree_hal_streaming_capture_unregister_stream(
     iree_hal_streaming_context_t* context, iree_hal_streaming_stream_t* stream);
-// Type of partition - determines how nodes are executed.
-enum iree_hal_streaming_graph_partition_type_e {
-  // Can go in command buffer (count 1 may also be optimizable into a queue op).
-  IREE_HAL_STREAMING_GRAPH_PARTITION_TYPE_RECORDABLE = 0,
-  // Must be separate host call.
-  IREE_HAL_STREAMING_GRAPH_PARTITION_TYPE_HOST_CALL,
-  // Must be launched as a nested executable graph.
-  IREE_HAL_STREAMING_GRAPH_PARTITION_TYPE_GRAPH,
-  // Must be submitted as a direct queue dispatch operation.
-  IREE_HAL_STREAMING_GRAPH_PARTITION_TYPE_DISPATCH,
-  // Barrier node.
-  IREE_HAL_STREAMING_GRAPH_PARTITION_TYPE_EMPTY,
-};
-typedef uint8_t iree_hal_streaming_graph_partition_type_t;
-
-// Describes a partition of nodes that can be executed together.
-typedef struct iree_hal_streaming_graph_partition_t {
-  // Index into sorted_nodes array.
-  uint32_t start_index;
-  uint32_t count;
-  iree_hal_streaming_graph_partition_type_t type;
-  // Number of independent workstreams (~1-4).
-  uint8_t stream_count;
-} iree_hal_streaming_graph_partition_t;
-
-// Chained block for growing partition arrays without reallocation.
-typedef struct iree_hal_streaming_graph_partition_block_t {
-  struct iree_hal_streaming_graph_partition_block_t* next;
-  iree_host_size_t capacity;
-  iree_host_size_t count;
-  iree_hal_streaming_graph_partition_t partitions[];
-} iree_hal_streaming_graph_partition_block_t;
-
 // Creates private execution state. Children borrow their root's stable
 // |execution_owner| identity; NULL starts a new independent executable.
 iree_status_t iree_hal_streaming_graph_exec_create(
@@ -902,71 +938,19 @@ bool iree_hal_streaming_graph_exec_owns_node(
     iree_hal_streaming_graph_exec_t* exec,
     iree_hal_streaming_graph_node_t* node);
 
-// Augmented node for sorting and partitioning.
-typedef struct iree_hal_streaming_graph_sort_node_t {
-  // Pointer to original node.
-  iree_hal_streaming_graph_node_t* node;
-  // Index in original linked list.
-  uint32_t original_index;
-  // Position in topological order.
-  uint32_t sorted_index;
-  // Maximum sorted index of all dependencies.
-  uint32_t max_dependency_index;
-  // Assigned partition ID.
-  uint32_t partition_id;
-  // For topological sort.
-  uint16_t in_degree;
-  // Cached from node->type.
-  uint8_t type;
-  // Workstream within partition (~4).
-  uint8_t stream_id;
-} iree_hal_streaming_graph_sort_node_t;
-static_assert(sizeof(iree_hal_streaming_graph_sort_node_t) <= 32,
-              "really want 2 per cache line");
-
-// A produced schedule.
-// References are into the arena used during scheduling and only valid as long
-// as it is.
-typedef struct iree_hal_streaming_graph_schedule_t {
-  // Sorted nodes with some additional information from analysis.
-  iree_hal_streaming_graph_sort_node_t* sorted_nodes;
-  // A map of original unsorted graph node_index to sorted_nodes index.
-  uint32_t* node_index_map;
-  // Partition descriptors in execution order.
-  iree_hal_streaming_graph_partition_t* partitions;
-  // Total number of partitions.
-  iree_host_size_t partition_count;
-  // Total number of blocks across all partitions.
-  iree_host_size_t block_count;
-} iree_hal_streaming_graph_schedule_t;
-
 // Adds execution dependencies across complete copy operations, including their
-// host preparation/completion helpers. The returned list shares the graph's
-// immutable additional edges and allocates only new edges from |arena|.
+// host preparation/completion helpers. The returned list contains only the
+// augmentation edges allocated from |arena|; template edges remain in nodes.
 iree_status_t iree_hal_streaming_graph_schedule_copy_dependencies(
     iree_hal_streaming_graph_t* graph, iree_arena_allocator_t* arena,
     iree_hal_streaming_graph_edge_t** out_edges);
 
-// Unified scheduler that performs topological sorting, partitioning, and
-// workstream detection in an efficient three-phase algorithm.
-//
-// Phase 1: Linearize nodes and detect if already sorted
-// Phase 2: Topological sort if needed (with fast path)
-// Phase 3: Partition into executable blocks with workstream detection
-//
-// Returns sorted nodes array and partition descriptors with workstream info
-// allocated from the provided |arena|.
-// |out_total_block_count| is the total number of graph blocks required
-// calculated as the number of non-recordable partitions + the total number of
-// streams in all recordable partitions.
-// |additional_edges| is an optional linked list of extra dependencies added
-// after node creation (can be NULL if none).
+// Normalizes frontend classification/dependencies for shared HRX analysis.
 iree_status_t iree_hal_streaming_graph_schedule_nodes(
     iree_hal_streaming_node_block_t* node_blocks, iree_host_size_t node_count,
     const uint8_t* disabled_nodes, iree_host_size_t disabled_node_count,
-    iree_hal_streaming_graph_edge_t* additional_edges,
-    iree_arena_allocator_t* arena,
-    iree_hal_streaming_graph_schedule_t* out_schedule);
+    iree_hal_streaming_graph_edge_t* extra_edges, iree_arena_allocator_t* arena,
+    hrx_graph_schedule_t* out_schedule);
 
 // Checks whether |child_graph| may be the child graph of a node in
 // |parent_graph|: the two must be distinct, must belong to the same context,
@@ -999,8 +983,6 @@ iree_status_t iree_hal_streaming_graph_prepare_copy_staging(
 typedef struct iree_hal_streaming_graph_copy_checkpoint_t {
   // Number of nodes preceding the copy and its helpers.
   iree_host_size_t node_count;
-  // Number of root nodes preceding construction.
-  iree_host_size_t root_count;
   // Number of attached helpers preceding construction.
   iree_host_size_t helper_count;
 } iree_hal_streaming_graph_copy_checkpoint_t;
@@ -1011,7 +993,6 @@ iree_hal_streaming_graph_copy_checkpoint(
     const iree_hal_streaming_graph_t* graph) {
   return (iree_hal_streaming_graph_copy_checkpoint_t){
       .node_count = graph->node_count,
-      .root_count = graph->root_count,
       .helper_count = graph->copy_helper_count,
   };
 }

@@ -21,7 +21,7 @@ from build_tools.devtools import bazel_test_selection, project_presubmit
 PROJECT_NAME = "runtime"
 PROJECT_ROOT = "runtime/"
 CMAKE_TEST_REGEX = "^iree/"
-CMAKE_TEST_EXCLUDE_REGEX = "^iree/hal/drivers/task/executable/elf/elf_module_test$"
+CMAKE_TEST_EXCLUDE_REGEX = "^iree/hal/driver/task/executable/elf/elf_module_test$"
 GLOBAL_CMAKE_TRIGGERS = (
     "BUILD.bazel",
     "MODULE.bazel",
@@ -30,7 +30,7 @@ GLOBAL_CMAKE_TRIGGERS = (
     "requirements",
 )
 BAZEL_TEST_EXCLUDES = (
-    "-//runtime/src/iree/hal/drivers/task/executable/elf:elf_module_test",
+    "-//runtime/src/iree/hal/driver/task/executable/elf:elf_module_test",
 )
 
 

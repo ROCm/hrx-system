@@ -21,7 +21,7 @@ typedef struct loom_low_allocation_ordinal_components_t {
   // Component index by local value ordinal, or UINT32_MAX when unconstrained.
   uint32_t* indices_by_value_ordinal;
   // Packed member ranges indexed by component.
-  loom_low_placement_value_range_t* ranges;
+  loom_low_placement_ordinal_component_range_t* ranges;
   // Local value ordinals packed by |ranges|.
   loom_value_ordinal_t* members;
   // Number of entries in |ranges|.

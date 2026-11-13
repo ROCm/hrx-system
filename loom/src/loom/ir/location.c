@@ -61,28 +61,68 @@ loom_location_entry_t loom_location_file_range(loom_source_id_t source_id,
                                                uint32_t start_col,
                                                uint32_t end_line,
                                                uint32_t end_col) {
-  loom_location_entry_t entry = {.kind = LOOM_LOCATION_FILE};
-  entry.file.source_id = source_id;
-  entry.file.field_span_count = 0;
-  entry.file.field_span_format = LOOM_LOCATION_FIELD_SPAN_FORMAT_NONE;
-  entry.file.start_line = start_line;
-  entry.file.start_col = start_col;
-  entry.file.end_line = end_line;
-  entry.file.end_col = end_col;
-  entry.file.field_span_data = NULL;
-  return entry;
+  return (loom_location_entry_t){
+      .file =
+          {
+              .kind = LOOM_LOCATION_FILE,
+              .flags = 0,
+              .source_id = source_id,
+              .field_span_count = 0,
+              .field_span_format = LOOM_LOCATION_FIELD_SPAN_FORMAT_NONE,
+              .reserved = 0,
+              .start_line = start_line,
+              .start_col = start_col,
+              .end_line = end_line,
+              .end_col = end_col,
+              .field_span_data = NULL,
+          },
+  };
+}
+
+loom_location_entry_t loom_location_fused(loom_location_id_t* children,
+                                          uint32_t count) {
+  return (loom_location_entry_t){
+      .fused =
+          {
+              .kind = LOOM_LOCATION_FUSED,
+              .flags = 0,
+              .reserved = 0,
+              .count = count,
+              .children = children,
+          },
+  };
+}
+
+loom_location_entry_t loom_location_opaque(loom_source_id_t source_id,
+                                           const uint8_t* data,
+                                           uint32_t data_length) {
+  return (loom_location_entry_t){
+      .opaque =
+          {
+              .kind = LOOM_LOCATION_OPAQUE,
+              .flags = 0,
+              .source_id = source_id,
+              .data_length = data_length,
+              .data = data,
+          },
+  };
 }
 
 loom_location_entry_t loom_location_tagged(loom_location_tag_t tag,
                                            loom_location_id_t child,
                                            const uint8_t* data,
                                            uint32_t data_length) {
-  loom_location_entry_t entry = {.kind = LOOM_LOCATION_TAGGED};
-  entry.tagged.tag = tag;
-  entry.tagged.data_length = data_length;
-  entry.tagged.child = child;
-  entry.tagged.data = data;
-  return entry;
+  return (loom_location_entry_t){
+      .tagged =
+          {
+              .kind = LOOM_LOCATION_TAGGED,
+              .flags = 0,
+              .tag = tag,
+              .data_length = data_length,
+              .child = child,
+              .data = data,
+          },
+  };
 }
 
 iree_string_view_t loom_location_tag_name(loom_location_tag_t tag) {

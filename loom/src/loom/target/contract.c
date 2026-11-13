@@ -62,7 +62,10 @@ loom_type_t loom_target_contract_query_projected_value_type(
   const uint32_t projected_lane_count =
       loom_target_contract_query_vector_lane_count(projection,
                                                    (uint32_t)lane_count);
-  if (projected_lane_count == lane_count) {
+  if (projected_lane_count == lane_count &&
+      (loom_type_rank(authored_type) == 1 ||
+       (lane_count != projection.source_lane_count &&
+        lane_count != projection.secondary_source_lane_count))) {
     return authored_type;
   }
   return loom_type_shaped_1d(

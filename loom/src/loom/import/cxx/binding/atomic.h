@@ -60,6 +60,7 @@ class AtomicIntrinsic {
                   loom_atomic_ordering_t ordering,
                   loom_atomic_ordering_t failure_ordering,
                   loom_atomic_scope_t scope,
+                  loom_memory_access_flags_t memory_flags = 0,
                   const ViewPartition* source_view = nullptr,
                   uint32_t unsigned_index_mask = 0)
       : operation_(operation),
@@ -69,6 +70,7 @@ class AtomicIntrinsic {
         ordering_(ordering),
         failure_ordering_(failure_ordering),
         scope_(scope),
+        memory_flags_(memory_flags),
         source_view_(source_view),
         unsigned_index_mask_(unsigned_index_mask) {}
 
@@ -86,6 +88,8 @@ class AtomicIntrinsic {
   loom_atomic_ordering_t failure_ordering_;
   // Explicit source synchronization scope, preserved without narrowing.
   loom_atomic_scope_t scope_;
+  // Explicit physical-root proof selected by the source specialization.
+  loom_memory_access_flags_t memory_flags_;
   // Typed source view contract, or null when this binding consumes a pointer.
   const ViewPartition* source_view_;
   // View-index arguments whose fixed-width C++ interpretation is unsigned.

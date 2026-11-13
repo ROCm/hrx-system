@@ -80,16 +80,23 @@ static iree_status_t loom_vm_check_emit(
   loom_vm_check_request_t vm_request;
   IREE_RETURN_IF_ERROR(
       loom_vm_check_parse_request(request->target_options, &vm_request));
+  loomc_target_profile_t* target_profile = NULL;
+  if (!iree_string_view_is_empty(vm_request.target)) {
+    IREE_RETURN_IF_ERROR(loom_check_compile_session_select_target_profile(
+        request->environment->compile_session, vm_request.target,
+        &target_profile));
+  }
   const loom_check_compile_artifact_options_t compile_options = {
       .artifact_format = IREE_SV("vm"),
       .root = vm_request.function_name,
-      .target = vm_request.target,
+      .target_profile = target_profile,
       .lower_source_to_low = true,
       .control_flow_lowering = LOOMC_TARGET_CONTROL_FLOW_LOWERING_CFG,
   };
   loomc_result_t* compile_result = NULL;
   iree_status_t status =
       loom_check_compile_artifact(request, &compile_options, &compile_result);
+  loomc_target_profile_release(target_profile);
   const loomc_artifact_t* artifact = NULL;
   if (iree_status_is_ok(status) && compile_result != NULL) {
     status = loom_check_compile_select_artifact(

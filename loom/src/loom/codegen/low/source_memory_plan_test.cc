@@ -203,6 +203,81 @@ TEST_F(SourceMemoryPlanTest, StaticDenseLoadIncludesViewBase) {
   EXPECT_EQ(plan.dynamic_view_base_term_count, 0u);
 }
 
+TEST_F(SourceMemoryPlanTest, MaterializedCarrierKeepsStorageProvenance) {
+  const auto root = DefineBufferArg();
+  const auto view_type = loom_type_shaped_1d(
+      LOOM_TYPE_VIEW, LOOM_SCALAR_TYPE_F32, loom_dim_pack_static(32), 0);
+  const auto carrier = DefineArg(view_type);
+  const int64_t indices[] = {0, 4, 16};
+  const uint32_t alignments[] = {64, 16, 64};
+  loom_op_t* loads[IREE_ARRAYSIZE(indices)] = {};
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(indices); ++i) {
+    IREE_ASSERT_OK(loom_vector_load_build(&builder_, 0, 0, carrier, nullptr, 0,
+                                          &indices[i], 1, 0, 0, VectorType1D(4),
+                                          LOOM_LOCATION_UNKNOWN, &loads[i]));
+  }
+  loom_value_fact_table_t facts = {};
+  ComputeFacts(&facts);
+  auto root_facts = loom_value_fact_table_lookup(&facts, root);
+  loom_value_facts_mark_uniform_at_scope(
+      &root_facts, LOOM_VALUE_FACT_UNIFORM_SCOPE_WORKGROUP);
+  IREE_ASSERT_OK(loom_value_fact_table_define(&facts, root, root_facts));
+
+  // A loop's pointer is materialized even when its varying displacement from
+  // the original storage has only range/divisibility facts, not an SSA offset.
+  const loom_value_fact_view_reference_t reference = {
+      .base_byte_offset = loom_value_facts_make(0, 8192, 64),
+      .footprint_byte_length = loom_value_facts_exact_i64(128),
+      .minimum_alignment = 64,
+      .root_minimum_alignment = 64,
+      .root_value_id = root,
+      .buffer_value_id = LOOM_VALUE_ID_INVALID,
+      .alias_scope_id = 7,
+      .static_element_byte_count = 4,
+      .memory_space = LOOM_VALUE_FACT_MEMORY_SPACE_GLOBAL,
+  };
+  auto carrier_facts = loom_value_facts_unknown();
+  IREE_ASSERT_OK(loom_value_facts_make_view_reference(&facts.context, reference,
+                                                      &carrier_facts));
+  loom_value_facts_mark_uniform_at_scope(
+      &carrier_facts, LOOM_VALUE_FACT_UNIFORM_SCOPE_SUBGROUP);
+  IREE_ASSERT_OK(loom_value_fact_table_define(&facts, carrier, carrier_facts));
+
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(indices); ++i) {
+    SCOPED_TRACE(indices[i]);
+    loom_low_source_memory_access_plan_t plan = {};
+    loom_low_source_memory_access_diagnostic_t diagnostic = {};
+    ASSERT_TRUE(BuildPlan(&facts, loads[i], &plan, &diagnostic));
+    ASSERT_NE(plan.materialized_base_region, nullptr);
+    EXPECT_EQ(plan.root_value_id, root);
+    EXPECT_EQ(plan.alias_scope_id, reference.alias_scope_id);
+    EXPECT_EQ(loom_low_source_memory_access_address_value_id(&plan), carrier);
+    EXPECT_EQ(plan.static_byte_offset, indices[i] * 4);
+    EXPECT_EQ(plan.dynamic_term_count, 0);
+    EXPECT_EQ(plan.minimum_alignment, alignments[i]);
+    EXPECT_EQ(plan.root_uniform_scope, LOOM_VALUE_FACT_UNIFORM_SCOPE_WORKGROUP);
+    EXPECT_EQ(loom_low_source_memory_access_uniform_scope(&plan),
+              LOOM_VALUE_FACT_UNIFORM_SCOPE_SUBGROUP);
+
+    // The pointer already contains allocation placement. Adding that placement
+    // again would shift every access, while claiming precise alias intervals
+    // would confuse the carrier's displacement with storage-relative bytes.
+    ASSERT_TRUE(loom_low_source_memory_access_plan_include_root_byte_offset(
+        &plan, 256));
+    EXPECT_EQ(plan.static_byte_offset, indices[i] * 4);
+    EXPECT_EQ(plan.physical_root_byte_offset, 0);
+    loom_low_byte_interval_t interval = {};
+    loom_low_memory_access_summary_t summary = {};
+    loom_low_source_memory_access_plan_make_summary(&plan, &interval, &summary);
+    EXPECT_EQ(summary.memory_space, LOOM_LOW_MEMORY_SPACE_GLOBAL);
+    EXPECT_EQ(summary.alias_root_id, reference.alias_scope_id);
+    EXPECT_EQ(summary.precision_flags,
+              LOOM_LOW_MEMORY_ACCESS_PRECISION_SPACE |
+                  LOOM_LOW_MEMORY_ACCESS_PRECISION_ROOT);
+    EXPECT_EQ(summary.byte_interval, nullptr);
+  }
+}
+
 TEST_F(SourceMemoryPlanTest, ReducedAlignmentAppliesOnlyToTypedAccess) {
   const auto buffer = DefineBufferArg();
   const auto base_offset = DefineOffsetArg();
@@ -552,7 +627,7 @@ TEST_F(SourceMemoryPlanTest, RetainsRuntimeStrideAtFoldedZeroOrigin) {
   loom_low_source_memory_axis_byte_stride_t strides[2];
   loom_low_source_memory_access_plan_t plan = {};
   loom_low_source_memory_access_diagnostic_t diagnostic = {};
-  ASSERT_TRUE(BuildPlan(&facts, load_op, &plan, &diagnostic, strides));
+  ASSERT_TRUE(BuildPlan(&facts, load_op, strides, &plan, &diagnostic));
   EXPECT_EQ(plan.dynamic_term_count, 0u);
   EXPECT_EQ(plan.static_byte_offset, 0);
   ASSERT_EQ(plan.view_rank, 2u);
@@ -746,11 +821,12 @@ TEST_F(SourceMemoryPlanTest, ViewMemoryOperationKindUsesInterfaceShape) {
       LOOM_LOCATION_UNKNOWN, &atomic_rmw_op));
   loom_op_t* atomic_cmpxchg_op = nullptr;
   IREE_ASSERT_OK(loom_view_atomic_cmpxchg_build(
-      &builder_, 0, value, replacement, loom_buffer_view_result(view_op),
-      nullptr, 0, static_indices, IREE_ARRAYSIZE(static_indices),
-      LOOM_ATOMIC_ORDERING_ACQ_REL, LOOM_ATOMIC_ORDERING_ACQUIRE,
-      LOOM_ATOMIC_SCOPE_WORKGROUP, 0, 0, loom_type_scalar(LOOM_SCALAR_TYPE_I32),
-      LOOM_LOCATION_UNKNOWN, &atomic_cmpxchg_op));
+      &builder_, 0, /*instance_flags=*/0, value, replacement,
+      loom_buffer_view_result(view_op), nullptr, 0, static_indices,
+      IREE_ARRAYSIZE(static_indices), LOOM_ATOMIC_ORDERING_ACQ_REL,
+      LOOM_ATOMIC_ORDERING_ACQUIRE, LOOM_ATOMIC_SCOPE_WORKGROUP, 0, 0,
+      loom_type_scalar(LOOM_SCALAR_TYPE_I32), LOOM_LOCATION_UNKNOWN,
+      &atomic_cmpxchg_op));
   loom_op_t* prefetch_op = nullptr;
   IREE_ASSERT_OK(loom_view_prefetch_build(
       &builder_, loom_buffer_view_result(view_op), nullptr, 0, static_indices,
@@ -992,6 +1068,54 @@ TEST_F(SourceMemoryPlanTest, DynamicDenseLoadFactorsScaledViewBase) {
   EXPECT_EQ(plan.dynamic_view_base_byte_facts.range_lo, 0);
   EXPECT_EQ(plan.dynamic_view_base_byte_facts.range_hi, 4092);
   EXPECT_EQ(plan.dynamic_view_base_byte_facts.known_divisor, 4);
+}
+
+TEST_F(SourceMemoryPlanTest, RootBoundsPromiseConstrainsDynamicViewBase) {
+  const loom_value_id_t byte_length =
+      loom_index_constant_result(BuildOffsetConstant(64));
+  loom_op_t* alloca_op = nullptr;
+  IREE_ASSERT_OK(loom_buffer_alloca_build(
+      &builder_, /*build_flags=*/0, LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE,
+      LOOM_VALUE_ID_INVALID, /*minimum_alignment=*/4, byte_length,
+      loom_type_buffer(), LOOM_LOCATION_UNKNOWN, &alloca_op));
+  const loom_value_id_t raw_element = DefineIndexArg();
+  const loom_value_id_t element =
+      BuildIndexAssumeRange(raw_element, 0, INT32_MAX);
+  const loom_value_id_t layout = BuildDenseLayout();
+  const loom_value_id_t byte_stride =
+      loom_index_constant_result(BuildOffsetConstant(4));
+  loom_op_t* byte_offset_op = nullptr;
+  IREE_ASSERT_OK(
+      loom_index_scale_build(&builder_, element, byte_stride,
+                             loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET),
+                             LOOM_LOCATION_UNKNOWN, &byte_offset_op));
+
+  loom_op_t* view_op = nullptr;
+  IREE_ASSERT_OK(
+      loom_buffer_view_build(&builder_, loom_buffer_alloca_result(alloca_op),
+                             loom_index_scale_result(byte_offset_op),
+                             ViewType1D(LOOM_SCALAR_TYPE_I32, 1, layout),
+                             LOOM_LOCATION_UNKNOWN, &view_op));
+  const int64_t static_indices[] = {0};
+  loom_op_t* load_op = nullptr;
+  IREE_ASSERT_OK(loom_view_load_build(
+      &builder_, 0, LOOM_MEMORY_ACCESS_FLAG_ROOT_IN_BOUNDS,
+      loom_buffer_view_result(view_op), nullptr, 0, static_indices,
+      IREE_ARRAYSIZE(static_indices), 0, 0,
+      loom_type_scalar(LOOM_SCALAR_TYPE_I32), LOOM_LOCATION_UNKNOWN, &load_op));
+
+  loom_value_fact_table_t facts = {0};
+  ComputeFacts(&facts);
+  loom_low_source_memory_access_plan_t plan = {};
+  loom_low_source_memory_access_diagnostic_t diagnostic = {0};
+  ASSERT_TRUE(BuildPlan(&facts, load_op, &plan, &diagnostic));
+  ASSERT_EQ(plan.dynamic_term_count, 1u);
+  EXPECT_EQ(plan.dynamic_view_base_term_count, 1u);
+  EXPECT_EQ(plan.dynamic_view_base_byte_facts.range_lo, 0);
+  EXPECT_EQ(plan.dynamic_view_base_byte_facts.range_hi, 63);
+  EXPECT_TRUE(loom_low_source_memory_dynamic_offset_fits_unsigned_bit_count(
+      &plan, plan.static_byte_offset, 32));
+  EXPECT_EQ(plan.access_flags, 0u);
 }
 
 TEST_F(SourceMemoryPlanTest, DynamicDenseLoadPreservesWidePowerOfTwoStride) {

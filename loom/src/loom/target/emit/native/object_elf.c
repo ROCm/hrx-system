@@ -112,7 +112,7 @@ iree_status_t loom_native_object_write_elf64le(
     iree_arena_allocator_t* arena) {
   loom_native_section_contribution_assembly_t assembly = {0};
   IREE_RETURN_IF_ERROR(loom_native_assemble_section_contributions(
-      contribution->sections, contribution->section_count, &assembly, arena));
+      contribution->sections, contribution->section_count, arena, &assembly));
   // Five additional entries are the null and section-name sections (inserted
   // by the serializer), symbol table, string table, and stack declaration.
   // Extended section indices are not part of this ELF writer's format.
@@ -225,6 +225,6 @@ iree_status_t loom_native_object_write_elf64le(
       .section_count = section_count,
   };
   loom_native_elf_layout_t layout = {0};
-  IREE_RETURN_IF_ERROR(loom_native_elf64le_build_layout(&file, &layout, arena));
+  IREE_RETURN_IF_ERROR(loom_native_elf64le_build_layout(&file, arena, &layout));
   return loom_native_elf64le_write_file(&file, &layout, stream);
 }

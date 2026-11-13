@@ -75,23 +75,20 @@ func.def @wide_shift_word_boundaries(%value: i64) -> (i64, i64, i64, i64) {
 // ----
 low.func.def target<amd.xdna.aie2p.core> abi(object_function) @wide_shift_word_boundaries(%value: reg<aie2p.er x2>) -> (reg<aie2p.er x2>, reg<aie2p.er x2>, reg<aie2p.er x2>, reg<aie2p.er x2>) asm {
   %18 = mov.i32 31
-  %21 = mov.i32 32
-  %24 = mov.i32 63
-  %27 = slice %value[0] : reg<aie2p.er x2> -> reg<aie2p.er>
-  %28 = slice %value[1] : reg<aie2p.er x2> -> reg<aie2p.er>
-  %30 = add.nc.immediate %18, -32
-  %31 = lshl %27, %18
-  %32 = lshl %28, %18
-  %33 = lshl %27, %30
-  %34 = or %32, %33
-  %low_edge = concat(%31, %34) : (reg<aie2p.er>, reg<aie2p.er>) -> reg<aie2p.er x2>
+  %21 = mov.i32 63
+  %24 = slice %value[0] : reg<aie2p.er x2> -> reg<aie2p.er>
+  %25 = slice %value[1] : reg<aie2p.er x2> -> reg<aie2p.er>
+  %27 = add.nc.immediate %18, -32
+  %28 = lshl %24, %18
+  %29 = lshl %25, %18
+  %30 = lshl %24, %27
+  %31 = or %29, %30
+  %low_edge = concat(%28, %31) : (reg<aie2p.er>, reg<aie2p.er>) -> reg<aie2p.er x2>
+  %34 = mov.short 0
+  %high_edge = concat(%34, %24) : (reg<aie2p.er>, reg<aie2p.er>) -> reg<aie2p.er x2>
   %39 = add.nc.immediate %21, -32
-  %40 = mov.short 0
-  %41 = lshl %27, %39
-  %high_edge = concat(%40, %41) : (reg<aie2p.er>, reg<aie2p.er>) -> reg<aie2p.er x2>
-  %46 = add.nc.immediate %24, -32
-  %48 = lshl %27, %46
-  %top_bit = concat(%40, %48) : (reg<aie2p.er>, reg<aie2p.er>) -> reg<aie2p.er x2>
+  %41 = lshl %24, %39
+  %top_bit = concat(%34, %41) : (reg<aie2p.er>, reg<aie2p.er>) -> reg<aie2p.er x2>
   return %value, %low_edge, %high_edge, %top_bit
 }
 
@@ -205,40 +202,35 @@ func.def @wide_right_shift_word_boundaries(%value: i64) -> (i64, i64, i64, i64, 
 // ----
 low.func.def target<amd.xdna.aie2p.core> abi(object_function) @wide_right_shift_word_boundaries(%value: reg<aie2p.er x2>) -> (reg<aie2p.er x2>, reg<aie2p.er x2>, reg<aie2p.er x2>, reg<aie2p.er x2>, reg<aie2p.er x2>, reg<aie2p.er x2>, reg<aie2p.er x2>, reg<aie2p.er x2>) asm {
   %30 = mov.i32 31
-  %33 = mov.i32 32
-  %36 = mov.i32 63
-  %39 = slice %value[0] : reg<aie2p.er x2> -> reg<aie2p.er>
-  %40 = slice %value[1] : reg<aie2p.er x2> -> reg<aie2p.er>
-  %42 = mov.short 0
-  %43 = sub %42, %30
-  %44 = lshl %40, %43
-  %45 = add.nc.immediate %43, 32
-  %46 = lshl %40, %45
-  %47 = lshl %39, %43
-  %48 = or %47, %46
-  %logical_low_edge = concat(%48, %44) : (reg<aie2p.er>, reg<aie2p.er>) -> reg<aie2p.er x2>
-  %54 = sub %42, %30
-  %55 = ashl %40, %54
-  %56 = add.nc.immediate %54, 32
-  %57 = lshl %40, %56
-  %58 = lshl %39, %54
-  %59 = or %58, %57
-  %signed_low_edge = concat(%59, %55) : (reg<aie2p.er>, reg<aie2p.er>) -> reg<aie2p.er x2>
-  %64 = mov.short 32
-  %65 = sub %64, %33
-  %66 = lshl %40, %65
-  %logical_high_edge = concat(%66, %42) : (reg<aie2p.er>, reg<aie2p.er>) -> reg<aie2p.er x2>
-  %73 = sub %64, %33
-  %74 = ashl %40, %73
-  %75 = mov.short -31
-  %76 = ashl %40, %75
-  %signed_high_edge = concat(%74, %76) : (reg<aie2p.er>, reg<aie2p.er>) -> reg<aie2p.er x2>
-  %82 = sub %64, %36
-  %83 = lshl %40, %82
-  %logical_top = concat(%83, %42) : (reg<aie2p.er>, reg<aie2p.er>) -> reg<aie2p.er x2>
-  %90 = sub %64, %36
-  %91 = ashl %40, %90
-  %signed_top = concat(%91, %76) : (reg<aie2p.er>, reg<aie2p.er>) -> reg<aie2p.er x2>
+  %33 = mov.i32 63
+  %36 = slice %value[0] : reg<aie2p.er x2> -> reg<aie2p.er>
+  %37 = slice %value[1] : reg<aie2p.er x2> -> reg<aie2p.er>
+  %39 = mov.short 0
+  %40 = sub %39, %30
+  %41 = lshl %37, %40
+  %42 = add.nc.immediate %40, 32
+  %43 = lshl %37, %42
+  %44 = lshl %36, %40
+  %45 = or %44, %43
+  %logical_low_edge = concat(%45, %41) : (reg<aie2p.er>, reg<aie2p.er>) -> reg<aie2p.er x2>
+  %51 = sub %39, %30
+  %52 = ashl %37, %51
+  %53 = add.nc.immediate %51, 32
+  %54 = lshl %37, %53
+  %55 = lshl %36, %51
+  %56 = or %55, %54
+  %signed_low_edge = concat(%56, %52) : (reg<aie2p.er>, reg<aie2p.er>) -> reg<aie2p.er x2>
+  %logical_high_edge = concat(%37, %39) : (reg<aie2p.er>, reg<aie2p.er>) -> reg<aie2p.er x2>
+  %62 = mov.short -31
+  %63 = ashl %37, %62
+  %signed_high_edge = concat(%37, %63) : (reg<aie2p.er>, reg<aie2p.er>) -> reg<aie2p.er x2>
+  %68 = mov.short 32
+  %69 = sub %68, %33
+  %70 = lshl %37, %69
+  %logical_top = concat(%70, %39) : (reg<aie2p.er>, reg<aie2p.er>) -> reg<aie2p.er x2>
+  %77 = sub %68, %33
+  %78 = ashl %37, %77
+  %signed_top = concat(%78, %63) : (reg<aie2p.er>, reg<aie2p.er>) -> reg<aie2p.er x2>
   return %value, %value, %logical_low_edge, %signed_low_edge, %logical_high_edge, %signed_high_edge, %logical_top, %signed_top
 }
 
@@ -487,4 +479,28 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @wide_shift_value_
   %36 = sel.nez %30, %27, %35
   %result = concat(%34, %36) : (reg<aie2p.er>, reg<aie2p.er>) -> reg<aie2p.er x2>
   return %result
+}
+
+// ====
+
+// A retained exact count selects word transport even without a constant op.
+func.def @wide_word_shift_known_count(%value: i64, %count_input: i64) -> (i64, i64, i64) {
+  %count = scalar.assume %count_input [range(%count_input, 32, 32)] : i64
+  %left = scalar.shli %value, %count : i64
+  %logical = scalar.shrui %value, %count : i64
+  %signed = scalar.shrsi %value, %count : i64
+  func.return %left, %logical, %signed : i64, i64, i64
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @wide_word_shift_known_count(%value: reg<aie2p.er x2>, %count_input: reg<aie2p.er x2>) -> (reg<aie2p.er x2>, reg<aie2p.er x2>, reg<aie2p.er x2>) asm {
+  %15 = slice %value[0] : reg<aie2p.er x2> -> reg<aie2p.er>
+  %16 = mov.short 0
+  %left = concat(%16, %15) : (reg<aie2p.er>, reg<aie2p.er>) -> reg<aie2p.er x2>
+  %18 = slice %value[1] : reg<aie2p.er x2> -> reg<aie2p.er>
+  %logical = concat(%18, %16) : (reg<aie2p.er>, reg<aie2p.er>) -> reg<aie2p.er x2>
+  %22 = mov.short -31
+  %23 = ashl %18, %22
+  %signed = concat(%18, %23) : (reg<aie2p.er>, reg<aie2p.er>) -> reg<aie2p.er x2>
+  return %left, %logical, %signed
 }

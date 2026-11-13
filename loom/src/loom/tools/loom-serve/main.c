@@ -11,18 +11,21 @@
 
 #include "iree/async/proactor.h"
 #include "iree/base/tooling/flags.h"
+#include "iree/tooling/device_profiling.h"
 #include "loom/serve/server/configuration.h"
 #include "loom/serve/server/model_registration.h"
 #include "loom/serve/server/router.h"
 #include "loom/serve/transport/http/listener.h"
 #include "loom/tooling/cli/help.h"
+#include "loom/tooling/io/file.h"
 #include "loom/tools/loom-serve/signals.h"
 #include "loom/util/json.h"
 #include "loom/util/stream.h"
 
 IREE_FLAG_LIST(
     string, model,
-    "Model card or serving deployment JSON; repeat to register multiple "
+    "Model card, serving deployment JSON, or directory containing model.json; "
+    "repeat to register multiple "
     "models. "
     "Omit to start empty. Relative arguments use the working directory; "
     "paths within each document use its directory.");
@@ -130,7 +133,9 @@ static int loom_serve_main_agents_markdown(void) {
              "`--device=amdgpu:?feedback`. Combine services with `&`; "
              "address-sanitized devices require fixed backing.\n\n"
              "## Register models\n\n"
-             "Pass a fetched model card with `--model=path/model.json`. "
+             "Pass a fetched model directory with `--model=path`, or an "
+             "explicit card with `--model=path/model.json`. Directories select "
+             "their model.json. "
              "Its model ID becomes the request's model name, and its selected "
              "preset supplies the service and execution settings. A card with "
              "several presets requires `--preset=NAME` with one `--model`. "
@@ -230,6 +235,25 @@ static int loom_serve_main_version(
              : EXIT_SUCCESS;
 }
 
+static iree_status_t loom_serve_main_load_model(
+    iree_string_view_t path, iree_string_view_t preset,
+    iree_allocator_t host_allocator,
+    loom_serve_model_configuration_t* out_configuration) {
+  bool is_directory = false;
+  IREE_RETURN_IF_ERROR(
+      loom_tooling_file_path_is_directory(path, host_allocator, &is_directory));
+  char* document_path = NULL;
+  if (is_directory) {
+    IREE_RETURN_IF_ERROR(loom_tooling_file_path_join(
+        path, IREE_SV("model.json"), host_allocator, &document_path));
+    path = iree_make_cstring_view(document_path);
+  }
+  iree_status_t status = loom_serve_model_configuration_load(
+      path, preset, host_allocator, out_configuration);
+  iree_allocator_free(host_allocator, document_path);
+  return status;
+}
+
 int loom_serve_main(int argc, char** argv,
                     const loom_serve_configuration_t* configuration) {
   static char usage[4096];
@@ -241,7 +265,7 @@ int loom_serve_main(int argc, char** argv,
       "workers.\n"
       "\n"
       "Usage:\n"
-      "  loom-serve --device=URI [--model=path/model.json ...] [options]\n"
+      "  loom-serve --device=URI [--model=path ...] [options]\n"
       "  loom-serve --devices=devices.json [--model=path/deployment.json ...]\n"
       "  loom-serve --device=task --pool_backing=fixed "
       "--listen=127.0.0.1:8080\n"
@@ -318,9 +342,9 @@ int loom_serve_main(int argc, char** argv,
   }
   for (iree_host_size_t i = 0; i < models.count && iree_status_is_ok(status);
        ++i) {
-    status = loom_serve_model_configuration_load(
-        models.values[i], iree_make_cstring_view(FLAG_preset), host_allocator,
-        &configurations[i]);
+    status = loom_serve_main_load_model(models.values[i],
+                                        iree_make_cstring_view(FLAG_preset),
+                                        host_allocator, &configurations[i]);
   }
   if (iree_status_is_ok(status)) {
     status = iree_async_signal_block_default();
@@ -328,9 +352,10 @@ int loom_serve_main(int argc, char** argv,
   if (iree_status_is_ok(status)) {
     status = iree_async_signal_ignore_broken_pipe();
   }
-  loom_serve_device_group_t* group = NULL;
+  loom_runtime_device_group_t* group = NULL;
+  iree_hal_profiling_from_flags_t* profiling = NULL;
   loom_serve_device_configuration_t devices = {0};
-  loom_serve_host_t* host = NULL;
+  loom_runtime_host_t* host = NULL;
   loom_serve_http_server_t* server = NULL;
   loom_serve_http_listener_t** listeners = NULL;
   loom_serve_signals_t* signals = NULL;
@@ -346,7 +371,8 @@ int loom_serve_main(int argc, char** argv,
   }
   if (iree_status_is_ok(status)) {
     status = loom_serve_device_group_allocate_from_flags(
-        host, configuration->driver_registry, host_allocator, &devices, &group);
+        host, configuration->driver_registry, host_allocator, &devices, &group,
+        &profiling);
   }
   if (iree_status_is_ok(status)) {
     registration_options.device_group = group;
@@ -361,7 +387,7 @@ int loom_serve_main(int argc, char** argv,
        ++i) {
     loom_serve_model_configuration_t* entry = &configurations[i];
     entry->legacy_two_bank =
-        models.count == 1 && loom_serve_host_legacy_two_bank(host);
+        models.count == 1 && loom_runtime_host_legacy_two_bank(host);
     if (entry->legacy_two_bank) {
       fprintf(stderr,
               "LOOM_SERVE_TWO_BANK is deprecated; select group_mode in the "
@@ -377,12 +403,13 @@ int loom_serve_main(int argc, char** argv,
     options.allowed_origins = FLAG_http_allowed_origin_list();
     options.request_limits.body_byte_capacity =
         (iree_host_size_t)FLAG_request_body_bytes;
-    status = loom_serve_http_server_allocate(
-        loom_serve_host_proactor_pool(host), &options, host_allocator, &server);
+    status =
+        loom_serve_http_server_allocate(loom_runtime_host_proactor_pool(host),
+                                        &options, host_allocator, &server);
   }
   if (iree_status_is_ok(status)) {
     status = loom_serve_signals_allocate(
-        loom_serve_host_proactor_pool(host),
+        loom_runtime_host_proactor_pool(host),
         (iree_async_signal_callback_t){loom_serve_main_shutdown_requested,
                                        server},
         host_allocator, &signals);
@@ -402,7 +429,7 @@ int loom_serve_main(int argc, char** argv,
   }
   if (iree_status_is_ok(status)) {
     status = loom_serve_router_run(
-        loom_serve_host_executor(host), server, registry,
+        loom_runtime_host_executor(host), server, registry,
         (loom_serve_router_options_t){
             .request_quota = (iree_host_size_t)FLAG_connections,
             .resources = {.device_group = group,
@@ -428,12 +455,14 @@ int loom_serve_main(int argc, char** argv,
   // A failed platform release retains its parents until process exit. It does
   // not authorize destroying a shared device or invalidating borrowed names.
   if (!retained_resources) {
-    iree_status_t group_status = loom_serve_device_group_free(group);
+    status =
+        iree_status_join(status, iree_hal_end_profiling_from_flags(profiling));
+    iree_status_t group_status = loom_runtime_device_group_free(group);
     retained_resources = !iree_status_is_ok(group_status);
     status = iree_status_join(status, group_status);
   }
   if (!retained_resources) {
-    loom_serve_host_release(host);
+    loom_runtime_host_release(host);
   }
   loom_serve_device_configuration_deinitialize(&devices);
   for (iree_host_size_t i = 0; configurations && i < models.count; ++i) {

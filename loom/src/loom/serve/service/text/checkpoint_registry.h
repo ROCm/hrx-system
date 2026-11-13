@@ -81,7 +81,7 @@ loom_serve_text_checkpoint_registry_available(
 iree_status_t loom_serve_text_checkpoint_entry_submit_pin(
     loom_serve_text_checkpoint_entry_t* entry, loom_serve_text_row_t* row,
     const loom_serve_text_chat_completion_t* completion,
-    loom_serve_execution_frontier_t* out_frontier);
+    loom_runtime_execution_frontier_t* out_frontier);
 
 // Publishes a successfully ready pin under a validated, unique identifier.
 void loom_serve_text_checkpoint_entry_publish(

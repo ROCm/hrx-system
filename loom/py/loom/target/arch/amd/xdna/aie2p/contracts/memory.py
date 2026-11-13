@@ -330,7 +330,7 @@ def _view_carrier_zero_rule(source_op: Op) -> DescriptorRule:
 
 
 def _view_carrier_immediate_rule(source_op: Op) -> DescriptorRule:
-    descriptor = _descriptor("amd.xdna.aie2p.address.add.a.immediate")
+    descriptor = _descriptor("amd.xdna.aie2p.address.add.b.immediate")
     (immediate,) = descriptor.immediates
     source_memory = _view_carrier_constraint(
         static_byte_offset_minimum=immediate.signed_min,
@@ -419,7 +419,7 @@ def _pointer_offset_emits(
                 form=DescriptorEmitForm.CONST,
             )
         )
-    descriptor = _descriptor("amd.xdna.aie2p.address.add.a.register")
+    descriptor = _descriptor("amd.xdna.aie2p.address.add.b.register")
     emits.append(
         EmitDescriptorOp(
             descriptor=descriptor,
@@ -450,7 +450,7 @@ def _view_carrier_register_rule(
     )
     return DescriptorRule(
         source_op=source_op,
-        descriptor=_descriptor("amd.xdna.aie2p.address.add.a.register"),
+        descriptor=_descriptor("amd.xdna.aie2p.address.add.b.register"),
         guards=(Guard.value_type("result", _VIEW_TYPE),),
         emit=_pointer_address_emits(
             source_memory,
@@ -501,16 +501,17 @@ def _register_address_emits(
         emits.append(
             EmitDescriptorOp(
                 descriptor=_descriptor(
-                    "amd.xdna.aie2p.materialize.static-byte-offset.i32"
+                    "amd.xdna.aie2p.materialize.static-address-index.i20"
                 ),
-                results={"dst": byte_offset},
-                result_types={"dst": _OFFSET},
+                results={"dst": address_index},
+                result_types={"dst": DescriptorResultType()},
                 immediates={"i": static_byte_offset},
                 source_memory=source_memory,
                 form=DescriptorEmitForm.OP,
             )
         )
-    elif (
+        return tuple(emits), address_index
+    if (
         address_form is _MemoryAddressForm.DYNAMIC_ZERO_STATIC
         and additional_static_byte_offset == 0
     ):
@@ -1795,6 +1796,86 @@ def _matrix_fragment_store_rules() -> tuple[DescriptorRule, ...]:
 
 
 AIE2P_VIEW_CARRIER_RULES = _view_carrier_rules()
+
+
+def _buffer_compare_address_rules() -> tuple[DescriptorRule, ...]:
+    emits = []
+    for side in ("lhs", "rhs"):
+        emits.extend(
+            (
+                EmitRegisterCopy(
+                    source=ValueRef.operand(side),
+                    result=ValueRef.temporary(f"{side}_base"),
+                    result_type=_I32,
+                ),
+                EmitDescriptorOp(
+                    descriptor=_descriptor("amd.xdna.aie2p.add.i32"),
+                    operands={
+                        "s0": ValueRef.temporary(f"{side}_base"),
+                        "s1": ValueRef.operand(f"{side}_offset"),
+                    },
+                    results={"d0": ValueRef.temporary(f"{side}_address")},
+                    result_types={"d0": _I32},
+                    form=DescriptorEmitForm.OP,
+                ),
+            )
+        )
+    return tuple(
+        DescriptorRule(
+            source_op=buffer.buffer_compare_address,
+            guards=(Guard.enum_attr_equals("predicate", predicate),),
+            emit=(
+                *emits,
+                EmitDescriptorOp(
+                    descriptor=_descriptor(f"amd.xdna.aie2p.cmp.{predicate}.i32"),
+                    operands={
+                        "s0": ValueRef.temporary("lhs_address"),
+                        "s1": ValueRef.temporary("rhs_address"),
+                    },
+                    results={"d0": ValueRef.result("result")},
+                    form=DescriptorEmitForm.OP,
+                ),
+            ),
+        )
+        for predicate in ("eq", "ne")
+    )
+
+
+AIE2P_BUFFER_VALUE_RULES: tuple[DescriptorRule, ...] = (
+    *_buffer_compare_address_rules(),
+    DescriptorRule(
+        source_op=buffer.buffer_null,
+        emit=(
+            EmitDescriptorOp(
+                descriptor=_descriptor("amd.xdna.aie2p.constant.i32.short"),
+                results={"dst": ValueRef.temporary("zero")},
+                result_types={"dst": _I32},
+                immediates={"i": 0},
+                form=DescriptorEmitForm.CONST,
+            ),
+            EmitRegisterCopy(
+                source=ValueRef.temporary("zero"),
+                result=ValueRef.result("result"),
+            ),
+        ),
+    ),
+    DescriptorRule(
+        source_op=buffer.buffer_compare_null,
+        emit=(
+            EmitRegisterCopy(
+                source=ValueRef.operand("buffer"),
+                result=ValueRef.temporary("address"),
+                result_type=_I32,
+            ),
+            EmitDescriptorOp(
+                descriptor=_descriptor("amd.xdna.aie2p.cmp.eqz.i32"),
+                operands={"s0": ValueRef.temporary("address")},
+                results={"d0": ValueRef.result("result")},
+                form=DescriptorEmitForm.OP,
+            ),
+        ),
+    ),
+)
 
 
 AIE2P_MEMORY_RULES: tuple[DescriptorRule, ...] = (

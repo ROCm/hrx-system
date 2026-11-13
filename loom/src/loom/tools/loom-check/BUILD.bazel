@@ -1,5 +1,5 @@
 load("//build_tools/bazel:query.bzl", "iree_assert_dependency_boundary")
-load("//build_tools/testing:build_defs.bzl", "iree_execution_test_suite")
+load("//build_tools/testing:build_defs.bzl", "iree_cli_test")
 load("//loom/binding/c:shared.bzl", "loomc_cc_binary")
 load(
     "//loom/build_tools/bazel:build_defs.bzl",
@@ -128,6 +128,13 @@ _ARTIFACT_VM_BINARY_CHECK_DEPS = iree_select({
     "//conditions:default": [],
 })
 
+_ARTIFACT_VM_BINARY_CHECK_TEST_DEPS = iree_select({
+    "//loom/config/emit:vm_binary": [
+        "//loom/src/loom/tooling/target/vm/check:object_lifetime",
+    ],
+    "//conditions:default": [],
+})
+
 _ARTIFACT_WASM_BINARY_CHECK_COPTS = iree_select({
     "//loom/config/emit:wasm_binary": [
         "-DLOOM_CHECK_HAVE_ARTIFACT_WASM_BINARY=1",
@@ -188,6 +195,7 @@ _LOOM_CHECK_TEST_PROVIDER_DEPS = (
     _ARCH_AMDGPU_CHECK_TEST_DEPS +
     _ARTIFACT_AIE2P_ELF_CHECK_TEST_DEPS +
     _ARTIFACT_AMDGPU_ELF_CHECK_TEST_DEPS +
+    _ARTIFACT_VM_BINARY_CHECK_TEST_DEPS +
     _ARTIFACT_X86_ELF_CHECK_TEST_DEPS
 )
 
@@ -390,7 +398,7 @@ loom_cc_test(
     ],
 )
 
-iree_execution_test_suite(
+iree_cli_test(
     name = "execution_test",
     manifests = ["loom-check.test.json"],
     tags = ["hostonly"],

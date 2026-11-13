@@ -27,6 +27,14 @@ void amdf_gpu_kfd_target_user_queue_plans_initialize(
     const amdf_gpu_kfd_topology_t* topology, size_t page_size,
     uint32_t cache_line_size, amdf_gpu_kfd_user_queue_plans_t* out_plans);
 
+// Returns the ring-placement contract from a live connection's native facts.
+// Unlike format selection, this requires qualified package and VF identity.
+// The command type determines whether commit lives in the ring or in a
+// separately mapped producer index.
+amdf_queue_family_placement_info_t amdf_gpu_kfd_target_user_queue_placement(
+    const amdf_gpu_kfd_topology_t* topology, size_t page_size,
+    amdf_queue_command_type_t command_type);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif  // __cplusplus

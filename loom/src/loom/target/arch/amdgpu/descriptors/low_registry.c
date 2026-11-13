@@ -20,6 +20,6 @@ static const loom_low_descriptor_set_provider_t kLowDescriptorSetProviders[] = {
 void loom_amdgpu_low_descriptor_registry_initialize(
     loom_target_low_descriptor_registry_t* out_registry) {
   loom_target_low_descriptor_registry_initialize_from_tables(
-      out_registry, kLowDescriptorSetProviders,
-      IREE_ARRAYSIZE(kLowDescriptorSetProviders));
+      kLowDescriptorSetProviders, IREE_ARRAYSIZE(kLowDescriptorSetProviders),
+      out_registry);
 }

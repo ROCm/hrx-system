@@ -1,0 +1,170 @@
+// RUN: pass unroll-scf-for,dce
+
+// These are the mathematical bounds of sign-restored remainder: its signed
+// value is at most its nonnegative magnitude, which is below the divisor.
+// The divisor's widening precedes the guard and its sign restoration.
+func.def @signed_magnitude(%raw: i64, %dividend: i64, %divisor: i64) {
+  %narrow = scalar.trunci %divisor : i64 to i8
+  %wide = scalar.extsi %narrow : i8 to i64
+  %c0 = scalar.constant 0 : i64
+  %limit = scalar.constant 16 : i64
+  %positive = scalar.cmpi sgt, %divisor, %c0 : i64
+  %small = scalar.cmpi sle, %divisor, %limit : i64
+  %valid = scalar.andi %positive, %small : i1
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  scf.if %valid {
+    %shift = scalar.constant 63 : i64
+    %sign = scalar.shrsi %dividend, %shift : i64
+    %divisor_sign = scalar.shrsi %wide, %shift : i64
+    %flipped_divisor = scalar.xori %wide, %divisor_sign : i64
+    %divisor_magnitude = scalar.subi %flipped_divisor, %divisor_sign : i64
+    %magnitude = scalar.assume %raw [ge(%raw, 0), ult(%raw, %divisor_magnitude)] : i64
+    %flipped = scalar.xori %magnitude, %sign : i64
+    %restored = scalar.subi %flipped, %sign : i64
+    %signed = scalar.assume %restored [le(%restored, %magnitude)] : i64
+    %nonnegative = scalar.cmpi sge, %signed, %c0 : i64
+    scf.if %nonnegative {
+      %position = index.cast %signed : i64 to index
+      %extent = index.cast %divisor : i64 to index
+      %distance = index.sub %extent, %position : index
+      %ordered = test.fact_positive %distance : index -> i1
+      %count = index.cast %ordered : i1 to index
+      scf.for %iteration = [%begin to %count step %step] unroll {
+        test.use %iteration : index
+      }
+    }
+  }
+  func.return
+}
+
+// ----
+func.def @signed_magnitude(%raw: i64, %dividend: i64, %divisor: i64) {
+  %narrow = scalar.trunci %divisor : i64 to i8
+  %wide = scalar.extsi %narrow : i8 to i64
+  %c0 = scalar.constant 0 : i64
+  %limit = scalar.constant 16 : i64
+  %positive = scalar.cmpi sgt, %divisor, %c0 : i64
+  %small = scalar.cmpi sle, %divisor, %limit : i64
+  %valid = scalar.andi %positive, %small : i1
+  scf.if %valid {
+    %shift = scalar.constant 63 : i64
+    %sign = scalar.shrsi %dividend, %shift : i64
+    %divisor_sign = scalar.shrsi %wide, %shift : i64
+    %flipped_divisor = scalar.xori %wide, %divisor_sign : i64
+    %divisor_magnitude = scalar.subi %flipped_divisor, %divisor_sign : i64
+    %magnitude = scalar.assume %raw [ge(%raw, 0), ult(%raw, %divisor_magnitude)] : i64
+    %flipped = scalar.xori %magnitude, %sign : i64
+    %restored = scalar.subi %flipped, %sign : i64
+    %signed = scalar.assume %restored [le(%restored, %magnitude)] : i64
+    %nonnegative = scalar.cmpi sge, %signed, %c0 : i64
+    scf.if %nonnegative {
+      %iteration_0 = index.constant 0 : index
+      test.use %iteration_0 : index
+    }
+  }
+  func.return
+}
+
+// ====
+
+// Strictness composes in either direction and with reversed predicate
+// operands. The incoming values remain unconstrained outside the aliases.
+func.def @lower_chain(%raw: index, %middle: index, %limit_bits: index) {
+  %limit = index.assume %limit_bits [range(%limit_bits, -64, 64)] : index
+  %lower = index.assume %middle [ge(%middle, %limit)] : index
+  %value = index.assume %raw [range(%raw, -64, 64), lt(%lower, %raw)] : index
+  %distance = index.sub %value, %limit : index
+  %positive = test.fact_positive %distance : index -> i1
+  %outside_distance = index.sub %raw, %limit : index
+  %outside_positive = test.fact_positive %outside_distance : index -> i1
+  %count = index.cast %positive : i1 to index
+  %outside_count = index.cast %outside_positive : i1 to index
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  scf.for %inside = [%begin to %count step %step] unroll {
+    test.use %inside : index
+  }
+  scf.for %outside = [%begin to %outside_count step %step] unroll {
+    test.use %outside : index
+  }
+  func.return
+}
+
+// ----
+func.def @lower_chain(%raw: index, %middle: index, %limit_bits: index) {
+  %inside_0 = index.constant 0 : index
+  test.use %inside_0 : index
+  func.return
+}
+
+// ====
+
+// RUN: pass canonicalize,unroll-scf-for,dce
+
+// An exact middle value folds normally. Its relation moves to the dynamic
+// endpoint, so the composed proof remains usable after the alias disappears.
+func.def @folded_middle(%raw: index, %middle: index, %limit_bits: index) {
+  %limit = index.assume %limit_bits [range(%limit_bits, -64, 64)] : index
+  %bound = index.assume %middle [eq(%middle, 5), lt(%middle, %limit)] : index
+  %value = index.assume %raw [range(%raw, -64, 64), le(%raw, %bound)] : index
+  %distance = index.sub %limit, %value : index
+  %positive = test.fact_positive %distance : index -> i1
+  %count = index.cast %positive : i1 to index
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  scf.for %iteration = [%begin to %count step %step] unroll {
+    test.use %iteration : index
+  }
+  func.return
+}
+
+// ----
+func.def @folded_middle(%raw: index, %middle: index, %limit_bits: index) {
+  %begin = index.constant 0 : index
+  test.use %begin : index
+  func.return
+}
+
+// ====
+
+// RUN: pass unroll-scf-for,dce
+
+// The first carried endpoint has a relation, but later iterations receive an
+// unrestricted endpoint. Recomputing the alias must withdraw its old closure.
+func.def @changing_endpoint(%raw: index, %middle: index, %limit_bits: index) {
+  %limit = index.assume %limit_bits [range(%limit_bits, -64, 64)] : index
+  %initial = index.assume %middle [lt(%middle, %limit)] : index
+  %begin = index.constant 0 : index
+  %end = index.constant 2 : index
+  %step = index.constant 1 : index
+  %final = scf.for %iteration = [%begin to %end step %step](%bound = %initial : index) -> (index) {
+    %value = index.assume %raw [range(%raw, -64, 64), le(%raw, %bound)] : index
+    %distance = index.sub %limit, %value : index
+    %positive = test.fact_positive %distance : index -> i1
+    test.use %positive : i1
+    %count = index.cast %positive : i1 to index
+    scf.for %observed = [%begin to %count step %step] unroll {
+      test.use %observed : index
+    }
+    scf.yield %raw : index
+  }
+  func.return
+}
+
+// ----
+func.def @changing_endpoint(%raw: index, %middle: index, %limit_bits: index) {
+  %limit = index.assume %limit_bits [range(%limit_bits, -64, 64)] : index
+  %initial = index.assume %middle [lt(%middle, %limit)] : index
+  %begin = index.constant 0 : index
+  %end = index.constant 2 : index
+  %step = index.constant 1 : index
+  %final = scf.for %iteration = [%begin to %end step %step](%bound = %initial : index) -> (index) {
+    %value = index.assume %raw [range(%raw, -64, 64), le(%raw, %bound)] : index
+    %distance = index.sub %limit, %value : index
+    %positive = test.fact_positive %distance : index -> i1
+    test.use %positive : i1
+    scf.yield %raw : index
+  }
+  func.return
+}

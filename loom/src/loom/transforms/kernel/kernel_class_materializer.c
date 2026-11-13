@@ -8,6 +8,7 @@
 
 #include <string.h>
 
+#include "loom/ir/input_contract.h"
 #include "loom/ir/module.h"
 #include "loom/ir/scalar_type.h"
 #include "loom/ops/index/ops.h"
@@ -17,6 +18,7 @@
 #include "loom/rewrite/module_projection.h"
 #include "loom/rewrite/rewriter.h"
 #include "loom/transforms/symbol/template_rewrite.h"
+#include "loom/util/adaptive_sort.h"
 #include "loom/util/predicate_facts.h"
 
 void loom_kernel_class_product_deinitialize(
@@ -45,10 +47,10 @@ typedef struct loom_kernel_class_assume_group_t {
   loom_predicate_t* predicates;
 
   // Number of initialized values and result types.
-  uint16_t value_count;
+  uint32_t value_count;
 
   // Maximum number of values available in the scratch slices.
-  uint16_t value_capacity;
+  uint32_t value_capacity;
 
   // Number of initialized predicates.
   uint32_t predicate_count;
@@ -82,7 +84,7 @@ static loom_kernel_class_assume_domain_t loom_kernel_class_value_assume_domain(
 static void loom_kernel_class_assume_group_add_value(
     const loom_module_t* module, loom_value_id_t value_id,
     loom_kernel_class_assume_group_t* group) {
-  for (uint16_t i = 0; i < group->value_count; ++i) {
+  for (uint32_t i = 0; i < group->value_count; ++i) {
     if (group->values[i] == value_id) {
       return;
     }
@@ -145,14 +147,31 @@ static void loom_kernel_class_append_conjunction(
     loom_decision_program_conjunction_t conjunction,
     loom_predicate_t* predicate_storage, uint32_t* index_cursor,
     uint32_t* scalar_cursor, loom_kernel_class_assume_group_t groups[2]) {
-  const uint32_t predicate_end =
-      conjunction.first_predicate + conjunction.predicate_count;
-  for (uint32_t i = conjunction.first_predicate; i < predicate_end; ++i) {
+  const uint32_t count =
+      conjunction.predicate_count + conjunction.feature_count;
+  for (uint32_t i = 0; i < count; ++i) {
     loom_predicate_t predicate;
-    const loom_kernel_class_assume_domain_t domain =
-        loom_kernel_class_materialize_predicate(
-            decision, target_module, target_arguments,
-            &decision->model->program.predicates[i], &predicate);
+    loom_kernel_class_assume_domain_t domain;
+    if (i < conjunction.predicate_count) {
+      domain = loom_kernel_class_materialize_predicate(
+          decision, target_module, target_arguments,
+          &decision->model->program.predicates[conjunction.first_predicate + i],
+          &predicate);
+    } else {
+      const loom_template_decision_feature_t* feature =
+          &decision->model->features[conjunction.first_feature + i -
+                                     conjunction.predicate_count];
+      if (feature->kind != LOOM_TEMPLATE_DECISION_FEATURE_INPUT ||
+          feature->value.input.axis == UINT8_MAX) {
+        continue;
+      }
+      predicate = loom_input_requirement_dimension_predicate(
+          target_module, target_arguments.values, &feature->value.input);
+      domain = predicate.arg_tags[0] == LOOM_PRED_ARG_VALUE ||
+                       predicate.arg_tags[1] == LOOM_PRED_ARG_VALUE
+                   ? LOOM_KERNEL_CLASS_ASSUME_DOMAIN_INDEX
+                   : LOOM_KERNEL_CLASS_ASSUME_DOMAIN_NONE;
+    }
     if (domain == LOOM_KERNEL_CLASS_ASSUME_DOMAIN_NONE) {
       continue;
     }
@@ -184,10 +203,10 @@ static iree_status_t loom_kernel_class_build_assume(
   if (group->predicate_count == 0) {
     return iree_ok_status();
   }
-  if (group->predicate_count > UINT16_MAX) {
+  if (group->predicate_count > UINT16_MAX || group->value_count > UINT16_MAX) {
     return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                            "kernel class assumption exceeds the predicate "
-                            "attribute limit");
+                            "kernel class assumption exceeds the operand or "
+                            "predicate limit");
   }
 
   loom_builder_set_before(&rewriter->builder, apply_op);
@@ -210,7 +229,7 @@ static iree_status_t loom_kernel_class_build_assume(
           ? loom_index_assume_results(assume_op)
           : loom_scalar_assume_results(assume_op);
   IREE_ASSERT(assumed_values.count == group->value_count);
-  for (uint16_t i = 0; i < group->value_count; ++i) {
+  for (uint32_t i = 0; i < group->value_count; ++i) {
     IREE_RETURN_IF_ERROR(loom_rewriter_try_set_derived_value_name(
         rewriter, group->values[i], assumed_values.values[i],
         IREE_SV("specialized")));
@@ -220,7 +239,9 @@ static iree_status_t loom_kernel_class_build_assume(
       }
     }
   }
-  return iree_ok_status();
+  return loom_template_rewrite_assumed_inputs(
+      rewriter, apply_op, group->values, assumed_values.values,
+      (uint16_t)group->value_count, call_operands);
 }
 
 static iree_status_t loom_kernel_class_rewrite_application(
@@ -261,7 +282,13 @@ static iree_status_t loom_kernel_class_rewrite_application(
         decision->model->program.choices[action->choice_ordinal].conjunction;
     const uint32_t maximum_predicate_count =
         decision->model->program.hard_requirements.predicate_count +
-        action_conjunction.predicate_count;
+        action_conjunction.predicate_count +
+        decision->model->program.hard_requirements.feature_count +
+        action_conjunction.feature_count;
+    const uint32_t value_capacity =
+        target_arguments.count +
+        2 * (decision->model->program.hard_requirements.feature_count +
+             action_conjunction.feature_count);
     loom_predicate_t* predicate_storage = NULL;
     loom_value_id_t* group_values = NULL;
     loom_type_t* group_types = NULL;
@@ -270,12 +297,12 @@ static iree_status_t loom_kernel_class_rewrite_application(
           rewriter->arena, maximum_predicate_count, sizeof(*predicate_storage),
           (void**)&predicate_storage));
     }
-    if (target_arguments.count > 0) {
+    if (value_capacity > 0) {
       IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-          rewriter->arena, target_arguments.count * 2, sizeof(*group_values),
+          rewriter->arena, value_capacity * 2, sizeof(*group_values),
           (void**)&group_values));
       IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-          rewriter->arena, target_arguments.count * 2, sizeof(*group_types),
+          rewriter->arena, value_capacity * 2, sizeof(*group_types),
           (void**)&group_types));
     }
 
@@ -284,17 +311,14 @@ static iree_status_t loom_kernel_class_rewrite_application(
             .values = group_values,
             .result_types = group_types,
             .predicates = predicate_storage,
-            .value_capacity = target_arguments.count,
+            .value_capacity = value_capacity,
             .domain = LOOM_KERNEL_CLASS_ASSUME_DOMAIN_INDEX,
         },
         {
-            .values = target_arguments.count > 0
-                          ? group_values + target_arguments.count
-                          : NULL,
-            .result_types = target_arguments.count > 0
-                                ? group_types + target_arguments.count
-                                : NULL,
-            .value_capacity = target_arguments.count,
+            .values = value_capacity > 0 ? group_values + value_capacity : NULL,
+            .result_types =
+                value_capacity > 0 ? group_types + value_capacity : NULL,
+            .value_capacity = value_capacity,
             .domain = LOOM_KERNEL_CLASS_ASSUME_DOMAIN_SCALAR,
         },
     };
@@ -425,6 +449,18 @@ static iree_status_t loom_kernel_class_materialize_shape_values(
   return iree_ok_status();
 }
 
+static bool loom_kernel_class_trace_precedes(
+    const loom_kernel_class_trace_t* traces,
+    const loom_kernel_class_trace_id_t* lhs,
+    const loom_kernel_class_trace_id_t* rhs) {
+  return traces[*lhs].decision_ordinal < traces[*rhs].decision_ordinal;
+}
+
+LOOM_DEFINE_ADAPTIVE_SORT_WITH_CONTEXT(loom_kernel_class_sort_trace_ids,
+                                       loom_kernel_class_trace_id_t,
+                                       const loom_kernel_class_trace_t*,
+                                       loom_kernel_class_trace_precedes)
+
 iree_status_t loom_kernel_class_materialize(
     const loom_kernel_class_classifier_t* classifier,
     const loom_kernel_class_collection_t* collection,
@@ -465,15 +501,26 @@ iree_status_t loom_kernel_class_materialize(
     IREE_ASSERT(trace->action_ordinal < decision->model->providers.count);
     IREE_ASSERT(collection->decision_results[trace->decision_ordinal].state ==
                 LOOM_KERNEL_CLASS_DECISION_ACCEPTED);
-    const uint32_t projection_ordinal = --trace_cursor;
-    operation_projections[projection_ordinal].source_op =
-        decision->demand->apply_op;
-    operation_projections[projection_ordinal].target_op = NULL;
-    selected_trace_ids[projection_ordinal] = trace_id;
+    selected_trace_ids[--trace_cursor] = trace_id;
 
     trace_id = trace->parent_trace_id;
   }
   IREE_ASSERT(!iree_status_is_ok(status) || trace_cursor == 0);
+
+  if (iree_status_is_ok(status)) {
+    // The clone observer consumes source-order projections. Classification
+    // order may reserve required decisions before admitting optional ones.
+    loom_kernel_class_sort_trace_ids(collection->traces, selected_trace_ids,
+                                     collection->accepted_decision_count);
+    for (uint32_t i = 0; i < collection->accepted_decision_count; ++i) {
+      const loom_kernel_class_trace_t* trace =
+          &collection->traces[selected_trace_ids[i]];
+      operation_projections[i] = (loom_ir_remap_op_projection_t){
+          .source_op =
+              classifier->decisions[trace->decision_ordinal].application,
+      };
+    }
+  }
 
   loom_ir_module_projection_t module_projection = {0};
   loom_module_t* target_module = NULL;

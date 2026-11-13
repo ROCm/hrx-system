@@ -784,10 +784,11 @@ static bool loom_vector_to_scalar_fragment_store_source_is_supported(
   }
   const loom_trait_flags_t traits =
       loom_op_effective_traits(state->rewriter->module, def_op);
-  if (loom_traits_are_value_alias(traits)) {
-    IREE_ASSERT(def_op->operand_count >= 1);
+  const loom_value_id_t identity_source = loom_vector_to_scalar_identity_source(
+      state->rewriter->module, value, def_op, traits);
+  if (identity_source != LOOM_VALUE_ID_INVALID) {
     return loom_vector_to_scalar_fragment_store_source_is_supported(
-        state, loom_op_const_operands(def_op)[0]);
+        state, identity_source);
   }
   if (loom_vector_fragment_load_isa(def_op)) {
     return loom_vector_to_scalar_read_can_rematerialize_at(
@@ -836,10 +837,11 @@ static uint32_t loom_vector_to_scalar_fragment_store_source_rejection_bits(
   }
   const loom_trait_flags_t traits =
       loom_op_effective_traits(state->rewriter->module, def_op);
-  if (loom_traits_are_value_alias(traits)) {
-    IREE_ASSERT(def_op->operand_count >= 1);
+  const loom_value_id_t identity_source = loom_vector_to_scalar_identity_source(
+      state->rewriter->module, value, def_op, traits);
+  if (identity_source != LOOM_VALUE_ID_INVALID) {
     return loom_vector_to_scalar_fragment_store_source_rejection_bits(
-        state, loom_op_const_operands(def_op)[0]);
+        state, identity_source);
   }
   if (loom_vector_fragment_load_isa(def_op)) {
     return loom_vector_to_scalar_read_can_rematerialize_at(
@@ -890,9 +892,9 @@ static iree_status_t loom_vector_to_scalar_materialize_fragment_store_lane(
     loom_vector_to_scalar_state_t* state,
     loom_vector_to_scalar_index_list_t indices, loom_value_id_t* out_lane) {
   bool materialized = false;
+  loom_value_id_t source = loom_vector_to_scalar_store_value(state);
   IREE_RETURN_IF_ERROR(loom_vector_to_scalar_try_materialize_def_lane(
-      state, loom_vector_to_scalar_store_value(state), state->vector_type,
-      indices, &materialized, out_lane));
+      state, &source, indices, &materialized, out_lane));
   IREE_ASSERT(materialized,
               "vector.fragment.store reference support must match lane "
               "materialization");
@@ -1602,10 +1604,11 @@ static iree_status_t loom_vector_to_scalar_build_view_atomic_cmpxchg_lane(
   loom_vector_memory_cache_policy_t cache_policy =
       loom_vector_to_scalar_memory_cache_policy(state);
   IREE_RETURN_IF_ERROR(loom_view_atomic_cmpxchg_build(
-      &state->rewriter->builder, cache_policy.build_flags, expected_lane,
-      replacement_lane, loom_vector_to_scalar_memory_view(state),
-      view_indices.dynamic_indices, view_indices.dynamic_index_count,
-      view_indices.static_indices, view_indices.static_index_count,
+      &state->rewriter->builder, cache_policy.build_flags,
+      loom_memory_access_flags(access), expected_lane, replacement_lane,
+      loom_vector_to_scalar_memory_view(state), view_indices.dynamic_indices,
+      view_indices.dynamic_index_count, view_indices.static_indices,
+      view_indices.static_index_count,
       loom_vector_to_scalar_enum_attr_value(
           loom_memory_access_atomic_success_ordering(access)),
       loom_vector_to_scalar_enum_attr_value(

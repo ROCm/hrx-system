@@ -1,0 +1,99 @@
+// RUN: verify
+// Scalar list failures own their diagnostics just like vector elements.
+// ERROR@+1: PARSE/036 "cannot initialize type 'int' with expression of type 'const int*'"
+void entry(int* output, const int* pointer) { *output = {pointer}; }
+
+// ====
+// Array initializers retain the array-specific element diagnostic.
+void entry(const int* pointer) {
+  // ERROR@+1: PARSE/036 "cannot initialize array element of type 'int' with expression of type 'const int*'"
+  int values[] = {pointer};
+}
+
+// ====
+// A prior initializer error cannot suppress an independent conversion failure.
+void entry(int* output, const int* pointer) {
+  // ERROR@+1: PARSE/036 "cannot initialize type 'int' with expression of type 'const int*'"
+  *output = {pointer};
+  // ERROR@+1: PARSE/036 "cannot assign expression of type 'const int*' to 'int'"
+  *output = pointer;
+  // ERROR@+1: PARSE/036 "cannot assign to an rvalue of type 'int'"
+  1 = {2};
+}
+
+// ====
+// Narrowing remains an initializer error.
+// ERROR@+1: PARSE/036 "narrowing conversion from 'float' to 'int' in braced-init-list"
+void entry(int* output, float value) { *output = {value}; }
+
+// ====
+// Integer diagnostics retain the complete source value and failure reason.
+// ERROR@+1: PARSE/036 "narrowing conversion from 'unsigned long long' to 'float' in braced-init-list: integer constant 18446744073709551615 is not exactly representable by 'float'"
+void entry(float* output) { *output = {0xffffffffffffffffULL}; }
+
+// ====
+// IEEE format diagnostics name the rounding-overflow boundary.
+// ERROR@+1: PARSE/036 "narrowing conversion from 'float' to '_Float16' in braced-init-list: constant value 65520 rounds to infinity in '_Float16'; maximum finite value is 65504"
+void entry(_Float16* output) { *output = {65520.0f}; }
+
+// ====
+// Finite-only format diagnostics name their actual symmetric range.
+// ERROR@+1: PARSE/036 "narrowing conversion from 'float' to '__float8_e4m3fn' in braced-init-list: constant value -449 is outside the finite range of '__float8_e4m3fn'; maximum magnitude is 448"
+void entry(__float8_e4m3fn* output) { *output = {-449.0f}; }
+
+// ====
+// Excess scalar elements keep their owning diagnostic.
+// ERROR@+1: PARSE/036 "excess elements in scalar initializer"
+void entry(int* output) { *output = {1, 2}; }
+
+// ====
+// Library-list clauses keep the frontend's narrowing diagnostics.
+#include <initializer_list>
+void entry(float value) {
+  // ERROR@+1: PARSE/036 "narrowing conversion from 'float' to 'int' in braced-init-list"
+  std::initializer_list<int> values{value};
+}
+
+// ====
+// The backing array's elements are const regardless of the list's cv type.
+#include <initializer_list>
+void entry(int value) {
+  std::initializer_list<int> values{value};
+  // ERROR@+1: LOWERING/059 "mutation requires a non-const destination"
+  *values.begin() = 2;
+}
+
+// ====
+// Library representations must carry an element pointer and count/end pair.
+namespace std {
+template<class E> class initializer_list { unsigned count; const E* begin; };
+}
+void entry(int value) {
+  // ERROR@+1: LOWERING/059 "initializer_list requires a const-element pointer followed by an element count or end pointer"
+  std::initializer_list<int> values{value};
+}
+
+// ====
+// Addressable elements cannot serialize opaque references into byte storage.
+#include <initializer_list>
+void entry(int* value) {
+  // ERROR@+1: LOWERING/059 "stored pointers and references require an object storage representation"
+  std::initializer_list<int*> values{value};
+}
+
+// ====
+// The same storage contract applies recursively to record elements.
+#include <initializer_list>
+struct Borrowed { const int& value; };
+void entry(int value) {
+  // ERROR@+1: LOWERING/059 "stored pointers and references require an object storage representation"
+  std::initializer_list<Borrowed> values{{value}};
+}
+
+// ====
+// An inner list is itself a reference-bearing object, not a byte payload.
+#include <initializer_list>
+void entry(int value) {
+  // ERROR@+1: LOWERING/059 "stored pointers and references require an object storage representation"
+  std::initializer_list<std::initializer_list<int>> values{{value}};
+}

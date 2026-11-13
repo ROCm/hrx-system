@@ -14,8 +14,8 @@
 #include "loom/ops/index/ops.h"
 #include "loom/ops/op_defs.h"
 #include "loom/ops/scalar/ops.h"
-#include "loom/target/arch/cmd/hal_command_buffer.h"
-#include "loom/target/arch/cmd/program.h"
+#include "loom/runtime/command/hal_command_buffer.h"
+#include "loom/runtime/command/program.h"
 #include "loom/tooling/execution/hal/artifact.h"
 #include "loom/tooling/execution/hal/invocation.h"
 #include "loom/tooling/execution/hal/testbench_staging.h"
@@ -552,6 +552,9 @@ static iree_status_t loom_run_hal_command_scenario_compile_request(
   }
 
   loomc_string_view_t* roots = NULL;
+  IREE_RETURN_IF_ERROR(loom_run_hal_testbench_context_emit_progress(
+      provider_options->context,
+      LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_COMPILE));
   IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
       product->host_allocator, root_count, sizeof(*roots), (void**)&roots));
   memset(roots, 0, root_count * sizeof(*roots));
@@ -635,6 +638,11 @@ static iree_status_t loom_run_hal_command_scenario_compile_request(
         result, &executable_artifact);
   }
   iree_hal_executable_t* executable = NULL;
+  if (iree_status_is_ok(status)) {
+    status = loom_run_hal_testbench_context_emit_progress(
+        provider_options->context,
+        LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_EXECUTABLE_LOAD);
+  }
   if (iree_status_is_ok(status)) {
     const loom_device_artifact_t device_artifact = {
         .executable_target = product->executable_target,
@@ -995,9 +1003,17 @@ static iree_status_t loom_run_hal_command_scenario_calls_initialize(
   loom_run_hal_testbench_context_t* context =
       product->profile->provider_options.context;
   if (iree_status_is_ok(status)) {
-    status = loom_run_hal_testbench_staging_initialize(
-        &context->runtime, source_binding_count, out_calls->source_bindings,
-        product->host_allocator, &out_calls->staging);
+    status = loom_run_hal_testbench_context_emit_progress(
+        context, LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_STAGE);
+    if (iree_status_is_ok(status)) {
+      status = loom_run_hal_testbench_staging_initialize(
+          &context->runtime, source_binding_count, out_calls->source_bindings,
+          product->host_allocator, &out_calls->staging);
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_run_hal_testbench_context_emit_progress(
+        context, LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_DISPATCH_PREPARE);
   }
 
   for (iree_host_size_t call_index = 0;
@@ -1088,7 +1104,8 @@ static iree_status_t loom_run_hal_command_scenario_calls_execute(
       &product->program.requirements;
   loom_run_hal_testbench_context_t* context =
       product->profile->provider_options.context;
-  iree_status_t status = iree_ok_status();
+  iree_status_t status = loom_run_hal_testbench_context_emit_progress(
+      context, LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_DISPATCH);
   for (iree_host_size_t call_index = 0;
        iree_status_is_ok(status) && call_index < calls->call_count;
        ++call_index) {
@@ -1123,6 +1140,10 @@ static iree_status_t loom_run_hal_command_scenario_calls_execute(
                     iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
   }
   if (iree_status_is_ok(status)) {
+    status = loom_run_hal_testbench_context_emit_progress(
+        context, LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_READBACK);
+  }
+  if (iree_status_is_ok(status)) {
     status = loom_run_hal_testbench_staging_readback(&context->runtime,
                                                      &calls->staging);
   }
@@ -1134,26 +1155,36 @@ static iree_status_t loom_run_hal_command_scenario_product_execute(
     iree_host_size_t call_count, loom_testbench_product_call_t* calls) {
   loom_run_hal_command_scenario_product_t* product =
       (loom_run_hal_command_scenario_product_t*)user_data;
-  if (invocation != product->subject) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "command scenario invocation does not match its prepared product");
-  }
+  (void)invocation;
   if (call_count == 0) {
     return iree_ok_status();
   }
   loom_run_hal_command_scenario_calls_t prepared_calls = {0};
-  iree_status_t status = loom_run_hal_command_scenario_calls_initialize(
-      product, call_count, calls, IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
-      LOOM_RUN_HAL_COMMAND_SCENARIO_CALL_FLAG_COMPLETION_SEMAPHORES,
-      &prepared_calls);
+  loom_run_hal_testbench_context_t* context =
+      product->profile->provider_options.context;
+  iree_status_t status = loom_run_hal_testbench_context_emit_progress(
+      context, LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_MATERIALIZE);
+  if (iree_status_is_ok(status)) {
+    status = loom_run_hal_command_scenario_calls_initialize(
+        product, call_count, calls, IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
+        LOOM_RUN_HAL_COMMAND_SCENARIO_CALL_FLAG_COMPLETION_SEMAPHORES,
+        &prepared_calls);
+  }
   if (iree_status_is_ok(status)) {
     status =
         loom_run_hal_command_scenario_calls_execute(product, &prepared_calls);
   }
-  return iree_status_join(
+  status = iree_status_join(
+      status, loom_run_hal_testbench_context_emit_progress(
+                  context, LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_RETIRE));
+  status = iree_status_join(
       status,
       loom_run_hal_command_scenario_calls_deinitialize(&prepared_calls));
+  if (iree_status_is_ok(status)) {
+    status = loom_run_hal_testbench_context_emit_progress(
+        context, LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_COMPLETE);
+  }
+  return status;
 }
 
 static iree_status_t loom_run_hal_command_scenario_benchmark_calls(
@@ -1228,11 +1259,7 @@ static iree_status_t loom_run_hal_command_scenario_product_benchmark(
   loom_run_benchmark_result_initialize(out_result);
   loom_run_hal_command_scenario_product_t* product =
       (loom_run_hal_command_scenario_product_t*)user_data;
-  if (invocation != product->subject) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "command scenario benchmark does not match its prepared product");
-  }
+  (void)invocation;
   loom_run_hal_benchmark_options_t hal_options;
   loom_run_hal_benchmark_options_initialize(&hal_options);
   hal_options.timing = *options;
@@ -1387,6 +1414,9 @@ iree_status_t loom_run_hal_testbench_command_scenario_product_prepare(
         "command scenario profile is not bound to the invocation module");
   }
 
+  IREE_RETURN_IF_ERROR(loom_run_hal_testbench_context_emit_progress(
+      provider_options->context,
+      LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_MATERIALIZE));
   loom_run_hal_command_scenario_product_t* product = NULL;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc(host_allocator, sizeof(*product),
                                              (void**)&product));
@@ -1409,6 +1439,11 @@ iree_status_t loom_run_hal_testbench_command_scenario_product_prepare(
 
   loomc_product_t* command_product = NULL;
   loomc_result_t* result = NULL;
+  if (iree_status_is_ok(status)) {
+    status = loom_run_hal_testbench_context_emit_progress(
+        provider_options->context,
+        LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_COMPILE);
+  }
   if (iree_status_is_ok(status)) {
     const loomc_cmd_program_module_options_t options = {
         .type = LOOMC_STRUCTURE_TYPE_CMD_PROGRAM_MODULE_OPTIONS,
@@ -1476,11 +1511,11 @@ iree_status_t loom_run_hal_testbench_benchmark_command_scenario_product(
     const loom_run_hal_benchmark_options_t* options,
     iree_allocator_t host_allocator,
     loom_run_hal_testbench_scenario_benchmark_result_t* out_result) {
-  if (!loom_run_hal_testbench_is_command_scenario_product(prepared_product) ||
-      invocation != prepared_product->invocation) {
+  (void)invocation;
+  if (!loom_run_hal_testbench_is_command_scenario_product(prepared_product)) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
-        "command scenario benchmark does not match its prepared product");
+        "prepared scenario product is not a command product");
   }
   loom_run_hal_command_scenario_product_t* product =
       (loom_run_hal_command_scenario_product_t*)prepared_product->user_data;
@@ -1494,11 +1529,10 @@ iree_status_t loom_run_hal_testbench_query_command_scenario_input_layout(
     loom_testbench_product_call_t* call,
     loom_run_hal_testbench_scenario_input_layout_t* out_layout) {
   *out_layout = (loom_run_hal_testbench_scenario_input_layout_t){0};
-  if (!loom_run_hal_testbench_is_command_scenario_product(prepared_product) ||
-      invocation != prepared_product->invocation) {
+  if (!loom_run_hal_testbench_is_command_scenario_product(prepared_product)) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
-        "command scenario layout query does not match its prepared product");
+        "prepared scenario product is not a command product");
   }
   uint64_t binding_bytes = 0;
   IREE_RETURN_IF_ERROR(loom_run_hal_command_scenario_validate_call(

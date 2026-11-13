@@ -4,9 +4,9 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include "loom/runtime/testing/native_allocator.h"
 #include "loom/serve/service/text/service_test_fixture.h"
 #include "loom/serve/service/text/session.h"
-#include "loom/serve/testing/native_allocator.h"
 
 namespace {
 
@@ -19,7 +19,7 @@ TEST_F(SourceTextServiceTest, IdleSessionOwnsOnlyOutputStorage) {
   for (const auto mode :
        {LOOM_SERVE_TEXT_MODE_ENCODE, LOOM_SERVE_TEXT_MODE_GENERATE}) {
     SCOPED_TRACE(mode);
-    loom_serve::testing::NativeAllocator allocator;
+    loom_runtime::testing::NativeAllocator allocator;
     loom_serve_text_session_t session = {};
     auto status = loom_serve_text_session_initialize(
         mode, loom_serve_text_model_tokenizer(model_), allocator.allocator(),
@@ -76,17 +76,18 @@ class TextServiceCapacityTest : public SourceTextServiceTest {
     if (service_) {
       // Even an assertion failure joins accepted CPU/device work before free.
       AdvanceUntil(
-          interface_, [&] { return Idle(); }, LOOM_SERVE_SERVICE_FLAG_STOPPING);
-      interface_.set_observer(interface_.self, {});
+          interface_, [&] { return Idle(); },
+          LOOM_RUNTIME_SERVICE_FLAG_STOPPING);
+      interface_.runtime.vtable->set_observer(interface_.runtime.self, {});
       loom_serve_text_service_free(service_, IREE_STATUS_OK);
     }
     SourceTextServiceTest::TearDown();
   }
 
   bool Idle() const {
-    return !interface_.is_pending(interface_.self) &&
-           !interface_.is_active(interface_.self) &&
-           !interface_.snapshot(interface_.self).queued_requests;
+    return !interface_.runtime.vtable->is_pending(interface_.runtime.self) &&
+           !interface_.runtime.vtable->is_active(interface_.runtime.self) &&
+           !interface_.snapshot(interface_.runtime.self).queued_requests;
   }
 
   void Submit(size_t count, std::vector<int>* clients) {
@@ -113,11 +114,11 @@ TEST_F(TextServiceCapacityTest, HttpDemandGrowsWithoutDuplicatingTheModel) {
   std::vector<int> clients;
   ASSERT_NO_FATAL_FAILURE(Submit(100, &clients));
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface_, [&] {
-    return interface_.snapshot(interface_.self).active_requests ==
+    return interface_.snapshot(interface_.runtime.self).active_requests ==
                clients.size() ||
            interface_.telemetry.counters->completed;
   }));
-  EXPECT_EQ(interface_.snapshot(interface_.self).active_requests, 100u);
+  EXPECT_EQ(interface_.snapshot(interface_.runtime.self).active_requests, 100u);
   EXPECT_EQ(interface_.telemetry.counters->completed, 0u);
   EXPECT_GE(loom_serve_text_model_row_count(model_), 100u);
   const auto first_outputs = [&] {
@@ -161,10 +162,11 @@ TEST_F(TextServiceCapacityTest, StoppingJoinsAcceptedCapacityGrowth) {
   std::vector<int> clients;
   ASSERT_NO_FATAL_FAILURE(Submit(5, &clients));
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface_, [&] {
-    return std::string(interface_.snapshot(interface_.self).phase) == "grow";
+    return std::string(interface_.snapshot(interface_.runtime.self).phase) ==
+           "grow";
   }));
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil(
-      interface_, [&] { return Idle(); }, LOOM_SERVE_SERVICE_FLAG_STOPPING));
+      interface_, [&] { return Idle(); }, LOOM_RUNTIME_SERVICE_FLAG_STOPPING));
   // Stopping joins the host task and discards its unbound session records;
   // there is no reason to acquire native storage for cancelled demand.
   EXPECT_EQ(loom_serve_text_model_row_count(model_), 4u);
@@ -209,16 +211,19 @@ TEST_P(LimitedTextServiceCapacityTest,
   std::vector<int> clients;
   ASSERT_NO_FATAL_FAILURE(Submit(13, &clients));
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface_, [&] {
-    return interface_.snapshot(interface_.self).active_requests == GetParam() ||
+    return interface_.snapshot(interface_.runtime.self).active_requests ==
+               GetParam() ||
            interface_.telemetry.counters->completed;
   }));
-  EXPECT_EQ(interface_.snapshot(interface_.self).active_requests, GetParam());
-  EXPECT_EQ(interface_.snapshot(interface_.self).queued_requests,
+  EXPECT_EQ(interface_.snapshot(interface_.runtime.self).active_requests,
+            GetParam());
+  EXPECT_EQ(interface_.snapshot(interface_.runtime.self).queued_requests,
             clients.size() - GetParam());
   EXPECT_EQ(interface_.telemetry.counters->completed, 0u);
   EXPECT_EQ(loom_serve_text_model_row_count(model_), GetParam());
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface_, [&] {
-    EXPECT_LE(interface_.snapshot(interface_.self).active_requests, GetParam());
+    EXPECT_LE(interface_.snapshot(interface_.runtime.self).active_requests,
+              GetParam());
     EXPECT_EQ(loom_serve_text_model_row_count(model_), GetParam());
     return Idle();
   }));

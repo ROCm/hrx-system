@@ -105,7 +105,7 @@ TEST_P(Pm4RetirementTest, PublishesShaderResultsBeforeReusingCompletionSlots) {
   GpuCommandQueue* queue = nullptr;
   // Every epoch uses a distinct finite command range. Completion slots and
   // operands are reused; this case does not claim primary-ring wrap coverage.
-  ASSERT_NO_FATAL_FAILURE(CreateQueue(&queue, 65536));
+  ASSERT_NO_FATAL_FAILURE(CreateQueue(65536, &queue));
   ASSERT_GT(queue->words().size(), kEpochCount * kMaximumSlotCount * 64u);
   Pm4CommandWriter commands(queue->words().data(), *pm4_profile_);
   for (uint32_t epoch = 0; epoch < kEpochCount; ++epoch) {
@@ -325,9 +325,8 @@ TEST_P(Pm4RetirementReuseTest,
   // Eight records constrain retirement capacity; thirty-two let the small
   // primary ring fill first. Both use the same event-driven progress protocol.
   GpuUserQueue* queue = nullptr;
-  ASSERT_NO_FATAL_FAILURE(
-      CreateQueue(family_, &queue, AMDF_QUEUE_PRODUCER_MODE_SINGLE, {},
-                  AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER, 4096));
+  ASSERT_NO_FATAL_FAILURE(CreateQueue(
+      family_, GpuUserQueueOptions{.ring_byte_length = 4096}, &queue));
   auto* ring = reinterpret_cast<uint32_t*>(queue->host.ring_address);
   const uint64_t capacity = queue->host.ring_byte_length / sizeof(uint32_t);
   std::array<uint64_t, kMaximumRecordCount> release_positions = {};

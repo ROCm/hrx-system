@@ -226,7 +226,7 @@ TEST(TargetSpirvVulkaninfoTest, ImportsGpuinfoProfileWrapper) {
             "shaderBufferInt64Atomics": true,
             "shaderSharedInt64Atomics": true
           },
-          "VkPhysicalDevice16BitStorageFeatures": {
+          "VkPhysicalDeviceVulkan11Features": {
             "storageBuffer16BitAccess": true
           },
           "VkPhysicalDeviceCooperativeMatrixFeaturesKHR": {
@@ -536,6 +536,98 @@ TEST(TargetSpirvVulkaninfoTest, ImportsComputeSubgroupSizeControlFamily) {
                          control && compute ? 16 : 0);
       }
     }
+  }
+}
+
+TEST(TargetSpirvVulkaninfoTest, ImportsStorageFeatureStructFamily) {
+  TargetEnvironmentPtr environment = CreateSpirvTargetEnvironment();
+  for (const std::string spelling : {"Vulkan11", "16BitStorage"}) {
+    for (const std::string container : {"features", "extended_features"}) {
+      for (const std::string value : {"true", "false", "null", ""}) {
+        SCOPED_TRACE(spelling);
+        SCOPED_TRACE(container);
+        SCOPED_TRACE(value);
+        const std::string field =
+            value.empty() ? "" : "\"storageBuffer16BitAccess\":" + value;
+        const std::string json =
+            "{\"devices\":[{\"properties\":{\"apiVersion\":4206592},\"" +
+            container + "\":{\"VkPhysicalDevice" + spelling + "Features\":{" +
+            field + "}}}]}";
+        SourcePtr source = CreateJsonSource("storage.json", json.c_str());
+        TargetProfilePtr profile =
+            ImportVulkaninfoProfile(environment.get(), source.get(), nullptr);
+        const loomc_target_fact_state_t expected =
+            value == "true"    ? LOOMC_TARGET_FACT_STATE_TRUE
+            : value == "false" ? LOOMC_TARGET_FACT_STATE_FALSE
+                               : LOOMC_TARGET_FACT_STATE_UNKNOWN;
+        ExpectFeatureState(profile.get(),
+                           LOOMC_SPIRV_FEATURE_STORAGE_BUFFER_16BIT_ACCESS,
+                           expected);
+      }
+    }
+  }
+}
+
+TEST(TargetSpirvVulkaninfoTest, IntegerDotFeatureStructFamily) {
+  TargetEnvironmentPtr environment = CreateSpirvTargetEnvironment();
+  for (const std::string spelling :
+       {"Vulkan13Features", "ShaderIntegerDotProductFeatures",
+        "ShaderIntegerDotProductFeaturesKHR"}) {
+    for (const std::string container : {"features", "extended_features"}) {
+      for (const std::string value : {"true", "false", "null", ""}) {
+        SCOPED_TRACE(spelling);
+        SCOPED_TRACE(container);
+        SCOPED_TRACE(value);
+        const std::string field =
+            value.empty() ? "" : "\"shaderIntegerDotProduct\":" + value;
+        const std::string json =
+            "{\"devices\":[{\"properties\":{\"apiVersion\":4206592},\"" +
+            container +
+            "\":{\"VkPhysicalDeviceVulkan12Features\":{\"shaderInt8\":true},"
+            "\"VkPhysicalDevice" +
+            spelling + "\":{" + field + "}}}]}";
+        SourcePtr source = CreateJsonSource("dot.json", json.c_str());
+        TargetProfilePtr profile =
+            ImportVulkaninfoProfile(environment.get(), source.get(), nullptr);
+        const loomc_target_fact_state_t expected =
+            value == "true"    ? LOOMC_TARGET_FACT_STATE_TRUE
+            : value == "false" ? LOOMC_TARGET_FACT_STATE_FALSE
+                               : LOOMC_TARGET_FACT_STATE_UNKNOWN;
+        for (loomc_spirv_feature_t feature :
+             {LOOMC_SPIRV_FEATURE_INTEGER_DOT_PRODUCT,
+              LOOMC_SPIRV_FEATURE_INTEGER_DOT_PRODUCT_INPUT_ALL,
+              LOOMC_SPIRV_FEATURE_INTEGER_DOT_PRODUCT_INPUT4X8_BIT,
+              LOOMC_SPIRV_FEATURE_INTEGER_DOT_PRODUCT_INPUT4X8_BIT_PACKED}) {
+          ExpectFeatureState(profile.get(), feature, expected);
+        }
+      }
+    }
+  }
+}
+
+TEST(TargetSpirvVulkaninfoTest, PackedIntegerDotDoesNotRequireInt8) {
+  TargetEnvironmentPtr environment = CreateSpirvTargetEnvironment();
+  for (const std::string int8 : {"false", "null"}) {
+    const std::string json =
+        "{\"devices\":[{\"properties\":{\"apiVersion\":4206592},\"features\":{"
+        "\"VkPhysicalDeviceVulkan12Features\":{\"shaderInt8\":" +
+        int8 +
+        "},"
+        "\"VkPhysicalDeviceVulkan13Features\":{\"shaderIntegerDotProduct\":"
+        "true}}}]}";
+    SourcePtr source = CreateJsonSource("packed-dot.json", json.c_str());
+    TargetProfilePtr profile =
+        ImportVulkaninfoProfile(environment.get(), source.get(), nullptr);
+    ExpectFeatureState(profile.get(), LOOMC_SPIRV_FEATURE_INTEGER_DOT_PRODUCT,
+                       LOOMC_TARGET_FACT_STATE_TRUE);
+    ExpectFeatureState(
+        profile.get(),
+        LOOMC_SPIRV_FEATURE_INTEGER_DOT_PRODUCT_INPUT4X8_BIT_PACKED,
+        LOOMC_TARGET_FACT_STATE_TRUE);
+    ExpectFeatureState(profile.get(),
+                       LOOMC_SPIRV_FEATURE_INTEGER_DOT_PRODUCT_INPUT4X8_BIT,
+                       int8 == "false" ? LOOMC_TARGET_FACT_STATE_FALSE
+                                       : LOOMC_TARGET_FACT_STATE_UNKNOWN);
   }
 }
 

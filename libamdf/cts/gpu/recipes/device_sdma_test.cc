@@ -94,10 +94,13 @@ TEST_P(DeviceGeneratedSdmaBatchTest, SeparateCommandAndPayloadCredits) {
   GpuUserQueue* producer = nullptr;
   GpuUserQueue* transfer = nullptr;
   ASSERT_NO_FATAL_FAILURE(CreateQueue(&producer));
-  ASSERT_NO_FATAL_FAILURE(
-      CreateQueue(sdma_family_, &transfer, AMDF_QUEUE_PRODUCER_MODE_SINGLE, {},
-                  AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER |
-                      AMDF_USER_QUEUE_CAPABILITY_DEVICE_PRODUCER));
+  ASSERT_NO_FATAL_FAILURE(CreateQueue(
+      sdma_family_,
+      GpuUserQueueOptions{
+          .required_capabilities = AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER |
+                                   AMDF_USER_QUEUE_CAPABILITY_DEVICE_PRODUCER,
+      },
+      &transfer));
   const auto& mapping = transfer->producer.info;
   ASSERT_GE(mapping.ring_byte_length, 4096u);
   ASSERT_LE(mapping.ring_byte_length, UINT64_C(1) << 32);
@@ -244,7 +247,12 @@ TEST_P(DeviceGeneratedSdmaBatchTest, SeparateCommandAndPayloadCredits) {
   GpuStoreRelease(producer->host.write_index_address, packet_index + 1);
   ASSERT_TRUE(aql::Publish(*producer, packet_index++, dispatch));
   ASSERT_TRUE(
-      GpuWaitEqual<int64_t>(reinterpret_cast<uintptr_t>(&signal.value), 0));
+      GpuWaitEqual<int64_t>(reinterpret_cast<uintptr_t>(&signal.value), 0))
+      << DescribeNativeProgress(
+             *transfer, reinterpret_cast<uintptr_t>(completion),
+             test_case.round_count, frontiers.back(), producer)
+      << "\n  first batch end="
+      << frontiers[std::min(test_case.round_count, kBatchSize)];
   std::memcpy(observed_records.data(), records->host.pointer,
               record_byte_length);
   std::memcpy(observed_destination.data(), destination->host.pointer,

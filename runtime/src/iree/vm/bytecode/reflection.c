@@ -28,6 +28,9 @@ IREE_STATIC_ASSERT_ENUM_EQ(IREE_VM_BYTECODE_SIGNATURE_KIND_F64,
 IREE_STATIC_ASSERT_ENUM_EQ(IREE_VM_BYTECODE_SIGNATURE_KIND_REF,
                            IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF,
                            "wire and generic ref kinds must match");
+IREE_STATIC_ASSERT_ENUM_EQ(IREE_VM_BYTECODE_SIGNATURE_KIND_PTR,
+                           IREE_VM_MODULE_SIGNATURE_TYPE_KIND_PTR,
+                           "wire and generic ptr kinds must match");
 IREE_STATIC_ASSERT_ENUM_EQ(IREE_VM_BYTECODE_SIGNATURE_KIND_FUNCTION,
                            IREE_VM_MODULE_SIGNATURE_TYPE_KIND_FUNCTION,
                            "wire and generic function kinds must match");

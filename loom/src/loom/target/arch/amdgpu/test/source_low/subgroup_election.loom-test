@@ -1,0 +1,65 @@
+// RUN: emit source-low output=low
+
+// One subgroup elects the first eligible stream and broadcasts its cursor.
+// A nonempty ballot makes the first set bit a valid broadcast lane.
+amdgpu.target<gfx1151> @gpu
+
+kernel.def target(@gpu) @elect() {
+  %unit = index.constant 1 : index
+  %width = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %lane = kernel.workitem.id<x> : index
+  %eligible_lanes = index.constant 8 : index
+  %c0 = scalar.constant 0 : i32
+  %source = buffer.view %input[%base] : buffer -> view<32x2xi32>
+  %destination = buffer.view %output[%base] : buffer -> view<32xi32>
+  %live = index.cmp ult, %lane, %eligible_lanes : index
+  %ready = view.load %source[%lane, 0] : view<32x2xi32> -> i32
+  %cursor = view.load %source[%lane, 1] : view<32x2xi32> -> i32
+  %published = scalar.cmpi ne, %ready, %c0 : i32
+  %eligible = scalar.andi %live, %published : i1
+  %mask = kernel.subgroup.vote.ballot %eligible : i1 -> i32
+  %has_work = scalar.cmpi ne, %mask, %c0 : i32
+  cfg.cond_br %has_work, ^select, ^empty
+^select:
+  %selected = scalar.cttzi %mask : i32
+  %value = kernel.subgroup.broadcast %cursor from %selected : i32, i32
+  cfg.br ^store(%value: i32)
+^empty:
+  cfg.br ^store(%c0: i32)
+^store(%chosen: i32):
+  view.store %chosen, %destination[%lane] : i32, view<32xi32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.rdna3_5.core>(@gpu) abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 2, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @elect() asm {
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %source = resource<hal_binding> {extent = 256, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %destination = resource<hal_binding> {extent = 128, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %c0 = s_mov_b32 0
+  %live = v_cmp_lt_u32_src1_inline %lane {rhs = 8}
+  %32 = v_lshlrev_b32_src0_inline %lane, 3
+  %ready = global_load_b32_saddr %32, %source
+  %cursor = global_load_b32_saddr %32, %source {offset = 4}
+  %published = v_cmp_ne_i32_src1_inline %ready {rhs = 0}
+  %eligible = s_and_b64 %live, %published
+  %38 = s_mov_b64_exec_read
+  %39 = s_and_b64 %eligible, %38
+  %mask = slice %39[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %has_work = s_cmp_lg_i32 %mask, %c0
+  low.cond_br %has_work, ^select, ^empty : reg<amdgpu.scc>
+^select:
+  %selected = s_ctz_i32_b32 %mask
+  %value = v_readlane_b32_src1_sgpr %cursor, %selected
+  low.br ^store(%value: reg<amdgpu.sgpr>)
+^empty:
+  low.br ^store(%c0: reg<amdgpu.sgpr>)
+^store(%chosen: reg<amdgpu.sgpr>):
+  %44 = v_mov_b32_copy %chosen
+  %45 = v_lshlrev_b32_src0_inline %lane, 2
+  global_store_b32_saddr %45, %44, %destination
+  return
+}

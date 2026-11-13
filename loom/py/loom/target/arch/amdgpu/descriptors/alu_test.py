@@ -12,7 +12,100 @@ from loom.target.arch.amdgpu.descriptors import _REG_SGPR, _REG_VGPR
 from loom.target.arch.amdgpu.descriptors.api import (
     _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS,
 )
-from loom.target.low_descriptors import OperandAddressMapKind, OperandRole, RegClassAlt
+from loom.target.low_descriptors import (
+    ConstraintKind,
+    DescriptorOpKind,
+    EffectKind,
+    OperandAddressMapKind,
+    OperandFormImmediateAction,
+    OperandFormMatchKind,
+    OperandRole,
+    RegClassAlt,
+)
+
+
+@pytest.mark.parametrize("target", _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS)
+def test_word_copy_selects_constant_packet_from_exact_payload(target: str) -> None:
+    overlays = {
+        overlay.descriptor_key: overlay
+        for overlay in _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS[target].overlay_rows()
+    }
+    copy = overlays["amdgpu.v_mov_b32_copy"]
+    literal = overlays["amdgpu.v_mov_b32"]
+    (form,) = copy.operand_forms
+    assert form.replacement_descriptor == literal.descriptor_key
+    assert literal.op_kind is DescriptorOpKind.CONST
+    assert form.immediate_action is OperandFormImmediateAction.SET_MATCHED_I64
+    assert form.immediate_field == "imm32"
+    assert form.immediate_source_operand == "src"
+    (match,) = form.matches
+    assert match.source_operand == "src"
+    assert match.match_kind is OperandFormMatchKind.ALL_EQUAL_EXACT_I64
+
+
+@pytest.mark.parametrize("target", _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS)
+@pytest.mark.parametrize(
+    "operation",
+    [
+        "add_u32",
+        "add_f32",
+        "mul_f32",
+        "min_f32",
+        "max_f32",
+        "min_i32",
+        "max_i32",
+        "min_u32",
+        "max_u32",
+        "and_b32",
+        "or_b32",
+        "xor_b32",
+    ],
+)
+def test_commutative_immediate_family_declares_asymmetric_receiving_classes(
+    target: str, operation: str
+) -> None:
+    overlays = {
+        overlay.descriptor_key: overlay
+        for overlay in _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS[target].overlay_rows()
+    }
+    descriptor = overlays[f"amdgpu.v_{operation}"]
+    assert [
+        (item.lhs_operand_index, item.rhs_operand_index)
+        for item in descriptor.constraints
+        if item.kind is ConstraintKind.COMMUTABLE
+    ] == [(1, 2)]
+    left, right = (row.descriptor_operand for row in descriptor.operands[1:])
+    assert {alt.reg_class for alt in left.reg_alts} == {_REG_SGPR, _REG_VGPR}
+    assert {alt.reg_class for alt in right.reg_alts} == {_REG_VGPR}
+    assert descriptor.immediates == ()
+    assert len(descriptor.operand_forms) == 2
+    for form in descriptor.operand_forms:
+        assert form.immediate_source_operand == left.field_name
+        replacement = overlays[form.replacement_descriptor]
+        assert replacement.operands[1].descriptor_operand.reg_alts == right.reg_alts
+
+
+@pytest.mark.parametrize("target", _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS)
+def test_half_wave_exchange_has_a_convergent_vgpr_contract(target: str) -> None:
+    overlays = {
+        overlay.descriptor_key: overlay
+        for overlay in _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS[target].overlay_rows()
+    }
+    exchange = overlays.get("amdgpu.v_permlane64_b32")
+    if target.startswith(("cdna", "gfx9_4")):
+        assert exchange is None
+        return
+    assert exchange is not None
+    assert exchange.instruction_name == "V_PERMLANE64_B32"
+    assert exchange.encoding_name == "ENC_VOP1"
+    result, source = (row.descriptor_operand for row in exchange.operands)
+    assert result.role is OperandRole.RESULT
+    assert source.role is OperandRole.OPERAND
+    assert result.reg_alts == source.reg_alts == (RegClassAlt(_REG_VGPR),)
+    assert result.unit_count == source.unit_count == 1
+    # The ISA snapshots both halves before writing, including when D == S0.
+    assert exchange.constraints == ()
+    assert tuple(effect.kind for effect in exchange.effects) == (EffectKind.CONVERGENT,)
 
 
 @pytest.mark.parametrize("target", _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS)

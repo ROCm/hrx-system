@@ -5,7 +5,7 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 load("//build_tools/bazel:test_resources.bzl", "GPU_DEVICE_RESOURCE_GROUP")
-load("//build_tools/testing:build_defs.bzl", "iree_execution_test_suite")
+load("//build_tools/testing:build_defs.bzl", "iree_cli_test")
 load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
 
 package(
@@ -18,7 +18,7 @@ _XDNA_COMPILE_COMPATIBLE_WITH = loom_config_compatible_with([
     "//loom/config/emit:aie2p_elf",
 ])
 
-iree_execution_test_suite(
+iree_cli_test(
     name = "loom_compile_execution_test",
     data = ["//loom/src/loom/tooling/target/amd/xdna/testdata:resident_xdna.loom"],
     manifests = ["loom-compile.test.json"],
@@ -29,7 +29,7 @@ iree_execution_test_suite(
     },
 )
 
-iree_execution_test_suite(
+iree_cli_test(
     name = "loom_opt_trace",
     data = ["//loom/src/loom/tooling/target/amd/xdna/testdata:resident_publication.loom"],
     manifests = ["loom-opt.test.json"],
@@ -40,7 +40,7 @@ iree_execution_test_suite(
     },
 )
 
-iree_execution_test_suite(
+iree_cli_test(
     name = "loom_benchmark_execution_test",
     data = ["//loom/target/amd/xdna/test/native:hal_execution.loom"],
     manifests = ["loom-benchmark.test.json"],

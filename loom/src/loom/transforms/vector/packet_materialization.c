@@ -18,7 +18,6 @@
 #include "loom/ops/scalar/combining.h"
 #include "loom/ops/scf/ops.h"
 #include "loom/ops/vector/combining.h"
-#include "loom/ops/vector/construction.h"
 #include "loom/ops/vector/memory.h"
 #include "loom/ops/vector/ops.h"
 #include "loom/ops/view/ops.h"
@@ -133,7 +132,6 @@ static iree_status_t loom_vector_packet_preserve_memory_loads_impl(
     const loom_value_t* value = loom_module_value(
         packetization->context->module, packetized_value->source);
     loom_op_t* load_op = loom_value_def_op(value);
-    IREE_ASSERT_TRUE(loom_vector_load_isa(load_op));
     // A single authored vector load is already an immutable one-packet
     // snapshot. Replacing it with an identical load would falsely report
     // rewrite progress forever; retain the existing SSA value as the regular
@@ -600,7 +598,9 @@ bool loom_vector_packet_dynamic_materialization_operation_count(
         &packetization->values[i];
     iree_host_size_t value_operation_count = 1u;
     if (packetized_value->source_mode ==
-        LOOM_VECTOR_PACKET_SOURCE_MODE_STATIC_ELEMENTS) {
+            LOOM_VECTOR_PACKET_SOURCE_MODE_STREAMED &&
+        packetized_value->source_action ==
+            LOOM_VECTOR_PACKET_SOURCE_ACTION_FROM_ELEMENTS) {
       uint32_t source_lane_count = 0;
       if (!loom_vector_packet_static_lane_count(packetized_value->source_type,
                                                 &source_lane_count) ||
@@ -648,6 +648,14 @@ static iree_status_t loom_vector_packet_materialize_value(
   loom_target_legalization_record_component_packet_materialization(
       packetization->context);
   loom_vector_packet_reset_value(packetized_value);
+  if (packetized_value->source_mode == LOOM_VECTOR_PACKET_SOURCE_MODE_STAGED) {
+    const loom_op_t* source_op = loom_value_def_op(loom_module_value(
+        packetization->context->module, packetized_value->source));
+    return loom_vector_packet_staging_load(
+        packetization, packetized_value->staging_view,
+        packetized_value->source_type, slice, source_op,
+        &packetized_value->packet);
+  }
   if (packetized_value->source_mode ==
       LOOM_VECTOR_PACKET_SOURCE_MODE_SNAPSHOT) {
     return loom_vector_packet_materialize_snapshot(packetization, slice,
@@ -662,24 +670,38 @@ static iree_status_t loom_vector_packet_materialize_value(
   const loom_value_t* value =
       loom_module_value(context->module, packetized_value->source);
   loom_op_t* op = loom_value_def_op(value);
-  if (loom_vector_load_isa(op)) {
+  if (packetized_value->source_action ==
+      LOOM_VECTOR_PACKET_SOURCE_ACTION_OPERATION) {
+    return loom_vector_packet_materialize_simple_op(packetization, op, slice,
+                                                    packetized_value);
+  }
+  if (packetized_value->source_action ==
+      LOOM_VECTOR_PACKET_SOURCE_ACTION_MEMORY_LOAD) {
     return loom_vector_packet_materialize_memory_load(packetization, op, slice,
                                                       packetized_value);
-  } else if (loom_vector_literal_splat_isa(op)) {
+  }
+  if (packetized_value->source_action ==
+      LOOM_VECTOR_PACKET_SOURCE_ACTION_LITERAL_SPLAT) {
     return loom_vector_packet_materialize_literal_splat(
         packetization, op, slice, packetized_value);
-  } else if (loom_vector_poison_isa(op)) {
-    return loom_vector_packet_materialize_poison(packetization, op, slice,
-                                                 packetized_value);
-  } else if (loom_vector_splat_isa(op)) {
+  }
+  if (packetized_value->source_action ==
+      LOOM_VECTOR_PACKET_SOURCE_ACTION_SPLAT) {
     return loom_vector_packet_materialize_splat(packetization, op, slice,
                                                 packetized_value);
-  } else if (loom_vector_from_elements_isa(op)) {
+  }
+  if (packetized_value->source_action ==
+      LOOM_VECTOR_PACKET_SOURCE_ACTION_FROM_ELEMENTS) {
     return loom_vector_packet_materialize_from_elements(
         packetization, op, slice, packetized_value);
   }
-  return loom_vector_packet_materialize_simple_op(packetization, op, slice,
-                                                  packetized_value);
+  if (packetized_value->source_action ==
+      LOOM_VECTOR_PACKET_SOURCE_ACTION_POISON) {
+    return loom_vector_packet_materialize_poison(packetization, op, slice,
+                                                 packetized_value);
+  }
+  IREE_ASSERT_UNREACHABLE("invalid vector packet source action");
+  IREE_BUILTIN_UNREACHABLE();
 }
 
 iree_status_t loom_vector_packet_materialize(
@@ -982,6 +1004,79 @@ iree_status_t loom_vector_packet_staging_store(
       source_op->location, &staging_store_op);
 }
 
+static iree_status_t loom_vector_packet_stage_snapshot(
+    loom_vector_packetization_t* packetization,
+    const loom_vector_packet_shape_t* shape,
+    loom_vector_packetized_value_t* packetized_value, loom_op_t* snapshot_op,
+    bool dynamic_windows_only, loom_value_id_t* out_staging_view) {
+  loom_builder_t* builder = &packetization->context->rewriter->builder;
+  if (dynamic_windows_only) {
+    loom_builder_set_before(builder, snapshot_op->parent_block->first_op);
+  } else {
+    loom_builder_set_after(builder, snapshot_op);
+  }
+  loom_value_id_t staging_view = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_vector_packet_build_staging_view(
+      packetization, packetized_value->source_type, shape, snapshot_op,
+      &staging_view));
+  for (uint32_t chunk_index = 0; chunk_index < shape->chunk_count;
+       ++chunk_index) {
+    const uint32_t lane_offset = chunk_index * shape->chunk_lane_count;
+    const loom_vector_packet_slice_t slice = {
+        .dynamic_lane_offset = LOOM_VALUE_ID_INVALID,
+        .static_lane_offset = lane_offset,
+        .lane_count =
+            iree_min(shape->lane_count - lane_offset, shape->chunk_lane_count),
+    };
+    if (dynamic_windows_only) {
+      // The selected chunk divides the regular captured packet width. Store
+      // it as soon as that packet exists instead of extending every packet's
+      // lifetime to the aggregate definition.
+      const loom_value_fact_vector_partition_t partition =
+          packetized_value->source_partition;
+      const uint32_t packet_index = lane_offset / partition.snapshot_lane_count;
+      const loom_value_t* packet_value =
+          loom_module_value(packetization->context->module,
+                            partition.snapshot_components[packet_index].value);
+      if (loom_value_is_block_arg(packet_value)) {
+        loom_builder_set_before(builder, snapshot_op);
+      } else {
+        loom_builder_set_after(builder, loom_value_def_op(packet_value));
+      }
+    }
+    loom_vector_packet_reset_value(packetized_value);
+    IREE_RETURN_IF_ERROR(loom_vector_packet_materialize_snapshot(
+        packetization, &slice, packetized_value));
+    IREE_RETURN_IF_ERROR(loom_vector_packet_staging_store(
+        packetization, staging_view, &slice, packetized_value->packet,
+        snapshot_op));
+  }
+
+  *out_staging_view = staging_view;
+  return iree_ok_status();
+}
+
+iree_status_t loom_vector_packet_stage_snapshots(
+    loom_vector_packetization_t* packetization,
+    const loom_vector_packet_shape_t* shape) {
+  loom_builder_t* builder = &packetization->context->rewriter->builder;
+  const loom_builder_ip_t saved_ip = loom_builder_save(builder);
+  for (uint32_t i = 0; i < packetization->value_count; ++i) {
+    loom_vector_packetized_value_t* value = &packetization->values[i];
+    if (value->source_mode != LOOM_VECTOR_PACKET_SOURCE_MODE_SNAPSHOT) {
+      continue;
+    }
+    loom_op_t* source_op = loom_value_def_op(
+        loom_module_value(packetization->context->module, value->source));
+    IREE_RETURN_IF_ERROR(loom_vector_packet_stage_snapshot(
+        packetization, shape, value, source_op, /*dynamic_windows_only=*/false,
+        &value->staging_view));
+    value->source_mode = LOOM_VECTOR_PACKET_SOURCE_MODE_STAGED;
+  }
+  loom_builder_restore(builder, saved_ip);
+  return iree_ok_status();
+}
+
 // Reifies packet snapshots as immutable private storage at their definition.
 // Each selected consumer receives its own oversized load so later packetization
 // can stream from the shared storage. Restricting redirection to dynamic
@@ -1032,50 +1127,14 @@ iree_status_t loom_vector_packet_canonicalize_snapshots(
       continue;
     }
 
+    loom_target_legalization_record_component_packet_materialization(
+        packetization->context);
     loom_op_t* snapshot_op = loom_value_def_op(snapshot_value);
     IREE_ASSERT(snapshot_op != NULL);
-    if (dynamic_windows_only) {
-      loom_builder_set_before(builder, snapshot_op->parent_block->first_op);
-    } else {
-      loom_builder_set_after(builder, snapshot_op);
-    }
     loom_value_id_t staging_view = LOOM_VALUE_ID_INVALID;
-    IREE_RETURN_IF_ERROR(loom_vector_packet_build_staging_view(
-        packetization, packetized_value->source_type, shape, snapshot_op,
-        &staging_view));
-    for (uint32_t chunk_index = 0; chunk_index < shape->chunk_count;
-         ++chunk_index) {
-      const uint32_t lane_offset = chunk_index * shape->chunk_lane_count;
-      const loom_vector_packet_slice_t slice = {
-          .dynamic_lane_offset = LOOM_VALUE_ID_INVALID,
-          .static_lane_offset = lane_offset,
-          .lane_count = iree_min(shape->lane_count - lane_offset,
-                                 shape->chunk_lane_count),
-      };
-      if (dynamic_windows_only) {
-        // The selected chunk divides the regular captured packet width. Store
-        // it as soon as that packet exists instead of extending every packet's
-        // lifetime to the aggregate definition.
-        const loom_value_fact_vector_partition_t partition =
-            packetized_value->source_partition;
-        const uint32_t packet_index =
-            lane_offset / partition.snapshot_lane_count;
-        const loom_value_t* packet_value = loom_module_value(
-            packetization->context->module,
-            partition.snapshot_components[packet_index].value);
-        if (loom_value_is_block_arg(packet_value)) {
-          loom_builder_set_before(builder, snapshot_op);
-        } else {
-          loom_builder_set_after(builder, loom_value_def_op(packet_value));
-        }
-      }
-      loom_vector_packet_reset_value(packetized_value);
-      IREE_RETURN_IF_ERROR(loom_vector_packet_materialize_snapshot(
-          packetization, &slice, packetized_value));
-      IREE_RETURN_IF_ERROR(loom_vector_packet_staging_store(
-          packetization, staging_view, &slice, packetized_value->packet,
-          snapshot_op));
-    }
+    IREE_RETURN_IF_ERROR(loom_vector_packet_stage_snapshot(
+        packetization, shape, packetized_value, snapshot_op,
+        dynamic_windows_only, &staging_view));
 
     const loom_vector_packet_slice_t snapshot_slice = {
         .dynamic_lane_offset = LOOM_VALUE_ID_INVALID,
@@ -1257,7 +1316,9 @@ bool loom_vector_packet_requires_static_slices(
     const loom_vector_packetization_t* packetization) {
   for (uint32_t i = 0; i < packetization->value_count; ++i) {
     if (packetization->values[i].source_mode ==
-        LOOM_VECTOR_PACKET_SOURCE_MODE_STATIC_ELEMENTS) {
+            LOOM_VECTOR_PACKET_SOURCE_MODE_STREAMED &&
+        packetization->values[i].source_action ==
+            LOOM_VECTOR_PACKET_SOURCE_ACTION_FROM_ELEMENTS) {
       return true;
     }
   }
@@ -1758,8 +1819,10 @@ iree_status_t loom_vector_packet_erase_dead_sources(
     }
     bool erased = false;
     IREE_RETURN_IF_ERROR(loom_rewriter_erase_if_dead(rewriter, op, &erased));
-    if (!erased || packetized_value->source_mode !=
-                       LOOM_VECTOR_PACKET_SOURCE_MODE_SNAPSHOT) {
+    if (!erased || (packetized_value->source_mode !=
+                        LOOM_VECTOR_PACKET_SOURCE_MODE_SNAPSHOT &&
+                    packetized_value->source_mode !=
+                        LOOM_VECTOR_PACKET_SOURCE_MODE_STAGED)) {
       continue;
     }
     // A retained partition may itself be a balanced concat tree. Remove its

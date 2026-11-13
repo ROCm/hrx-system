@@ -14,6 +14,7 @@
 #include "loom/error/x86_error_catalog.h"
 #include "loom/ir/context.h"
 #include "loom/ops/low/ops.h"
+#include "loom/ops/low/storage.h"
 #include "loom/target/arch/x86/register_classes.h"
 #include "loom/target/emit/native/x86/transport.h"
 
@@ -887,20 +888,25 @@ static iree_status_t loom_x86_function_packet(
     }
     operands.inputs[i] = loom_x86_function_register(input);
   }
-  if (packet->node->result_count) {
+  for (uint16_t i = 0; i < packet->node->result_count; ++i) {
     const loom_low_allocation_assignment_t* result =
-        loom_low_packet_result_assignment(&frame->allocation, packet, 0);
+        loom_low_packet_result_assignment(&frame->allocation, packet, i);
     if (may_dirty_upper_vector_state) {
       loom_x86_function_note_upper_vector_state(
           function, result->descriptor_reg_class_id, result->location_base);
     }
-    operands.result = loom_x86_function_register(result);
+    const uint8_t result_register = loom_x86_function_register(result);
+    if (i == 0) {
+      operands.result = result_register;
+    } else {
+      operands.secondary = result_register;
+    }
     const loom_x86_register_class_t result_class =
         loom_x86_logical_register_class(result->descriptor_reg_class_id);
     if (result_class == LOOM_X86_REGISTER_CLASS_GPR32 ||
         result_class == LOOM_X86_REGISTER_CLASS_GPR64) {
       const uint16_t preserved = (1u << 3) | (1u << 5) | (0xfu << 12);
-      function->saved_registers |= (1u << operands.result) & preserved;
+      function->saved_registers |= (1u << result_register) & preserved;
     }
   }
   uint32_t reference = UINT32_MAX;
@@ -916,10 +922,15 @@ static iree_status_t loom_x86_function_packet(
       reference = loom_attr_as_symbol(immediate).symbol_id;
       ++function->symbol_fixup_count;
     } else if (is_compare_branch && descriptor_layout->immediate_count == 1) {
-      operands.secondary_immediate = (uint8_t)immediate.i64;
+      operands.secondary = (uint8_t)immediate.i64;
     } else {
       operands.immediate = immediate.i64;
     }
+  } else if (descriptor_layout->encoding_field_value_count) {
+    const loom_low_encoding_field_value_t* field =
+        &frame->target.descriptor_set->encoding_field_values
+             [descriptor_layout->encoding_field_value_start];
+    operands.immediate = field->value;
   }
   if (descriptor_layout->immediate_count == 2) {
     const int64_t second_immediate =
@@ -930,11 +941,10 @@ static iree_status_t loom_x86_function_packet(
             LOOM_X86_ENCODING_FORM_COMPARE_IMMEDIATE_PREDICATE ||
         descriptor_layout->encoding_format_id ==
             LOOM_X86_ENCODING_FORM_COMPARE_IMMEDIATE_BRANCH) {
-      operands.secondary_immediate = (uint8_t)second_immediate;
+      operands.secondary = (uint8_t)second_immediate;
     } else {
-      operands.secondary_immediate =
-          (uint8_t)iree_math_count_trailing_zeros_u32(
-              (uint32_t)second_immediate);
+      operands.secondary = (uint8_t)iree_math_count_trailing_zeros_u32(
+          (uint32_t)second_immediate);
       operands.has_index = true;
     }
   }
@@ -951,7 +961,7 @@ static iree_status_t loom_x86_function_packet(
     // Every x86 condition code is adjacent to its logical inverse, with the
     // low bit selecting between them. Invert when the true edge falls through
     // so the encoded branch always targets the non-fallthrough successor.
-    operands.secondary_immediate ^= true_falls_through;
+    operands.secondary ^= true_falls_through;
     reference = targets[true_falls_through ? 1 : 0];
     loom_x86_function_append(function, descriptor_layout->encoding_format_id,
                              descriptor->encoding_id, operands, reference);
@@ -971,15 +981,14 @@ static iree_status_t loom_x86_function_storage(
     loom_x86_function_builder_t* builder) {
   const loom_op_t* op = packet->node->op;
   const bool is_address = loom_low_storage_address_isa(op);
-  const bool is_store = loom_low_spill_isa(op);
+  const bool is_store = loom_low_storage_store_isa(op);
   const loom_value_id_t storage_value =
       is_address ? loom_low_storage_address_storage(op)
-                 : (is_store ? loom_low_spill_storage(op)
-                             : loom_low_reload_storage(op));
-  const uint64_t relative_offset =
-      is_address
-          ? loom_low_storage_address_offset(op)
-          : (is_store ? loom_low_spill_offset(op) : loom_low_reload_offset(op));
+                 : (is_store ? loom_low_storage_store_storage(op)
+                             : loom_low_storage_load_storage(op));
+  const uint64_t relative_offset = is_address
+                                       ? loom_low_storage_address_offset(op)
+                                       : loom_low_storage_transfer_offset(op);
   const loom_low_storage_layout_t* layout =
       &frame->schedule.requirements.storage_layout;
   loom_low_storage_layout_reference_t reference;
@@ -1049,7 +1058,7 @@ static iree_status_t loom_x86_function_storage(
         is_store ? LOOM_X86_STORAGE_TRANSFER_STORE
                  : LOOM_X86_STORAGE_TRANSFER_LOAD,
         location.descriptor_reg_class_id, location.location, 4,
-        (int32_t)(byte_offset + unit * unit_bytes), &instruction);
+        (int32_t)(byte_offset + (uint64_t)unit * unit_bytes), &instruction);
     loom_x86_function_append_transport(builder->function, &instruction);
   }
   return iree_ok_status();
@@ -1065,7 +1074,8 @@ static iree_status_t loom_x86_function_structural(
       loom_low_storage_view_isa(node->op)) {
     return iree_ok_status();
   }
-  if (loom_low_spill_isa(node->op) || loom_low_reload_isa(node->op) ||
+  if (loom_low_storage_store_isa(node->op) ||
+      loom_low_storage_load_isa(node->op) ||
       loom_low_storage_address_isa(node->op)) {
     return loom_x86_function_storage(frame, packet, builder);
   }
@@ -1125,8 +1135,8 @@ static iree_status_t loom_x86_function_structural(
     }
     return iree_ok_status();
   }
-  if (loom_low_copy_isa(node->op) || loom_low_move_isa(node->op) ||
-      loom_low_slice_isa(node->op) || loom_low_concat_isa(node->op)) {
+  if (loom_low_register_transfer_kind(node->op) !=
+      LOOM_LOW_REGISTER_TRANSFER_NONE) {
     const loom_low_allocation_packet_move_group_t* group =
         loom_low_allocation_find_packet_move_group_by_source_ordinal(
             &frame->allocation, packet->node_index);
@@ -1485,8 +1495,8 @@ iree_status_t loom_x86_function_write(const loom_x86_function_t* function,
                                       iree_host_size_t section_index,
                                       loom_native_object_fixup_t* symbol_fixups,
                                       iree_io_stream_t* stream,
-                                      uint64_t* out_instruction_count,
-                                      iree_arena_allocator_t* arena) {
+                                      iree_arena_allocator_t* arena,
+                                      uint64_t* out_instruction_count) {
   if (out_instruction_count) {
     *out_instruction_count = 0;
   }

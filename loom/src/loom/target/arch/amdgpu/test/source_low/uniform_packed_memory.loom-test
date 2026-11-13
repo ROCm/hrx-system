@@ -221,7 +221,7 @@ CHECK-NOT: * = s_load_dword*
 
 // ====
 
-// Potentially aliasing writes prevent treating the input as stable.
+// A later potentially aliasing write does not change the entry contents read.
 kernel.def @mutable_bytes() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
@@ -237,12 +237,13 @@ kernel.def @mutable_bytes() {
 }
 
 // ----
-CHECK: %value = global_load_*
-CHECK-NOT: * = s_load_dword*
+CHECK: %value = s_load_dwordx4 *, *
+CHECK-NOT: * = global_load_*
 
 // ====
 
-// Volatile retains both reads without requesting an acquire or cache policy.
+// Volatile retains an independent read for every executing workitem.
+// Uniform addresses do not permit replacing these reads with a scalar access.
 kernel.def @volatile_bytes() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
@@ -261,5 +262,6 @@ kernel.def @volatile_bytes() {
 }
 
 // ----
-CHECK: %first = s_load_dwordx4<volatile> *, *
-CHECK: %second = s_load_dwordx4<volatile> *, *
+CHECK: %first = global_load_b128_saddr<volatile> *, *
+CHECK: %second = global_load_b128_saddr<volatile> *, *
+CHECK-NOT: * = s_load_dword*

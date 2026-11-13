@@ -192,12 +192,12 @@ TEST_F(ReferenceTransferTest, ViewOriginsPreserveCoordinatesAcrossTables) {
       .footprint_byte_length = loom_value_facts_exact_i64(32),
       .minimum_alignment = 16,
       .root_minimum_alignment = 64,
-      .static_element_byte_count = 4,
-      .memory_space = LOOM_VALUE_FACT_MEMORY_SPACE_GLOBAL,
+      .origin = {1, 0, LOOM_VALUE_FACT_REFERENCE_ORIGIN_ENTRY, buffer},
       .root_value_id = buffer,
       .buffer_value_id = buffer,
       .alias_scope_id = LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE,
-      .origin = {1, 0, LOOM_VALUE_FACT_REFERENCE_ORIGIN_ENTRY, buffer},
+      .static_element_byte_count = 4,
+      .memory_space = LOOM_VALUE_FACT_MEMORY_SPACE_GLOBAL,
   };
   loom_value_facts_t source;
   IREE_ASSERT_OK(loom_value_facts_make_view_reference(
@@ -246,20 +246,20 @@ TEST_F(ReferenceTransferTest, CallArgumentRebasesPassedViewAddress) {
       .footprint_byte_length = loom_value_facts_exact_i64(32),
       .minimum_alignment = 16,
       .root_minimum_alignment = 64,
-      .static_element_byte_count = 1,
-      .memory_space = LOOM_VALUE_FACT_MEMORY_SPACE_GLOBAL,
+      .origin = {1, 0, LOOM_VALUE_FACT_REFERENCE_ORIGIN_ENTRY, caller_buffer},
       .root_value_id = caller_buffer,
       .buffer_value_id = caller_buffer,
       .alias_scope_id = caller_buffer,
+      .static_element_byte_count = 1,
+      .memory_space = LOOM_VALUE_FACT_MEMORY_SPACE_GLOBAL,
       .nullability = LOOM_VALUE_FACT_REFERENCE_NULLABILITY_NON_NULL,
-      .origin = {1, 0, LOOM_VALUE_FACT_REFERENCE_ORIGIN_ENTRY, caller_buffer},
   };
   loom_value_facts_t facts;
   IREE_ASSERT_OK(loom_value_facts_make_view_reference(
       &facts_.context, source_reference, &facts));
   const loom_value_fact_reference_origin_t callee_origin = {
       2, 0, LOOM_VALUE_FACT_REFERENCE_ORIGIN_ENTRY, callee_argument};
-  IREE_ASSERT_OK(loom_value_facts_rebase_call_argument(
+  IREE_ASSERT_OK(loom_value_facts_rebase_reference(
       &facts_.context, callee_argument, callee_origin, &facts));
 
   loom_value_fact_view_reference_t reference;
@@ -296,7 +296,7 @@ TEST_F(ReferenceTransferTest, CallArgumentRebasesBufferIdentity) {
       &facts_.context, source_reference, &facts));
   const loom_value_fact_reference_origin_t callee_origin = {
       2, 0, LOOM_VALUE_FACT_REFERENCE_ORIGIN_ENTRY, callee_argument};
-  IREE_ASSERT_OK(loom_value_facts_rebase_call_argument(
+  IREE_ASSERT_OK(loom_value_facts_rebase_reference(
       &facts_.context, callee_argument, callee_origin, &facts));
 
   loom_value_fact_buffer_reference_t reference;
@@ -311,6 +311,35 @@ TEST_F(ReferenceTransferTest, CallArgumentRebasesBufferIdentity) {
             LOOM_VALUE_FACT_REFERENCE_NULLABILITY_NON_NULL);
   EXPECT_TRUE(
       loom_value_fact_reference_origin_equal(reference.origin, callee_origin));
+}
+
+TEST_F(ReferenceTransferTest, CallResultRetainsStorageWithoutCalleeIdentity) {
+  const auto callee_buffer = Argument(loom_type_buffer());
+  const auto caller_result = Argument(loom_type_buffer());
+  loom_value_fact_buffer_reference_t source_reference = {
+      .maximum_byte_extent = loom_value_facts_exact_i64(256),
+      .minimum_alignment = 64,
+      .memory_space = LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE,
+      .root_value_id = callee_buffer,
+      .alias_scope_id = callee_buffer,
+      .nullability = LOOM_VALUE_FACT_REFERENCE_NULLABILITY_NON_NULL,
+      .origin = {2, 0, LOOM_VALUE_FACT_REFERENCE_ORIGIN_ENTRY, callee_buffer},
+  };
+  loom_value_facts_t facts;
+  IREE_ASSERT_OK(loom_value_facts_make_buffer_reference(
+      &facts_.context, source_reference, &facts));
+  IREE_ASSERT_OK(loom_value_facts_rebase_reference(&facts_.context,
+                                                   caller_result, {}, &facts));
+  loom_value_fact_buffer_reference_t result;
+  ASSERT_TRUE(
+      loom_value_facts_query_buffer_reference(&facts_.context, facts, &result));
+  EXPECT_EQ(result.maximum_byte_extent.range_hi, 256);
+  EXPECT_EQ(result.minimum_alignment, 64);
+  EXPECT_EQ(result.memory_space, LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE);
+  EXPECT_EQ(result.root_value_id, caller_result);
+  EXPECT_EQ(result.alias_scope_id, LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE);
+  EXPECT_EQ(result.origin.kind, LOOM_VALUE_FACT_REFERENCE_ORIGIN_UNKNOWN);
+  EXPECT_EQ(result.nullability, LOOM_VALUE_FACT_REFERENCE_NULLABILITY_NON_NULL);
 }
 
 }  // namespace

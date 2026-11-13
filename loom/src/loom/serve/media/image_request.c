@@ -241,7 +241,7 @@ iree_status_t loom_serve_media_image_request_create_batch(
     }
   }
   iree_status_t status = loom_serve_media_image_decode_batch(
-      selected_count, inputs, pixels, statuses, host_allocator);
+      selected_count, inputs, pixels, host_allocator, statuses);
   for (iree_host_size_t i = 0; i < selected_count; ++i) {
     out_statuses[indices[i]] =
         iree_status_join(out_statuses[indices[i]], statuses[i]);

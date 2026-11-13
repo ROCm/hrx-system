@@ -5,7 +5,8 @@
 aie2p.target<configuration> @configuration {device_profile = "amd.xdna.strix_halo.17f0_11"}
 
 low.func.def target<amd.xdna.aie2p.configuration>(@configuration) @write_span(%address: reg<aie2p.config.scalar : i64>, %span: reg<aie2p.config.span>) asm {
-  write.address %address, %span
+  %address_flags = constant 0 : reg<aie2p.config.scalar : i64>
+  write.address %address, %span, %address_flags
   return
 }
 
@@ -26,7 +27,7 @@ low.func.def public retain target<amd.xdna.aie2p.configuration>(@configuration) 
   %returned_address, %returned_binding, %returned_span = low.func.call @forward(%address, %binding, %span) : (reg<aie2p.config.scalar : i64>, reg<aie2p.config.binding>, reg<aie2p.config.span>) -> (reg<aie2p.config.scalar : i64>, reg<aie2p.config.binding>, reg<aie2p.config.span>)
   %second_span = range %returned_binding, %extent, %extent
   low.func.call @write_span(%second_address, %second_span) : (reg<aie2p.config.scalar : i64>, reg<aie2p.config.span>)
-  write.address %returned_address, %returned_span
+  write.address %returned_address, %returned_span, %zero
   return
 }
 
@@ -40,10 +41,10 @@ low.func.def public retain target<amd.xdna.aie2p.configuration>(@configuration) 
   %second_address = constant 118816 : reg<aie2p.config.scalar : i64>
   %binding = binding %zero, %read, %bytes, %extent
   %span = range %binding, %zero, %extent
-  write.address %address, %span
+  write.address %address, %span, %zero
   %second_span = range %binding, %extent, %extent
-  write.address %second_address, %second_span
-  write.address %address, %span
+  write.address %second_address, %second_span, %zero
+  write.address %address, %span, %zero
   return
 }
 

@@ -10,12 +10,14 @@
 #include <cxx/ast_interpreter.h>
 #include <cxx/ast_visitor.h>
 #include <cxx/literals.h>
+#include <cxx/names.h>
 #include <cxx/symbols.h>
 #include <cxx/translation_unit.h>
 
 #include <utility>
 
 #include "iree/base/internal/unicode.h"
+#include "loom/import/cxx/source/frontend.h"
 
 namespace loom::cxx_import {
 namespace {
@@ -151,6 +153,108 @@ std::optional<ObjectRepresentation> object_representation(
 std::optional<cxx::ConstValue> scalar_constant(cxx::TranslationUnit& unit,
                                                cxx::ExpressionAST* expression) {
   return PureConstant(unit, ConstantDomain::Scalar).evaluate(expression);
+}
+
+std::optional<cxx::ConstValue> floating_builtin_constant(
+    cxx::TranslationUnit& unit, Diagnostics& diagnostics,
+    cxx::CallExpressionAST* call) {
+  auto* base = call->baseExpression;
+  while (auto* nested = cxx::ast_cast<cxx::NestedExpressionAST>(base)) {
+    base = nested->expression;
+  }
+  auto* callee = cxx::ast_cast<cxx::IdExpressionAST>(base);
+  using Builtin = cxx::BuiltinFunctionKind;
+  switch (cxx::resolveBuiltinFunctionKind(callee)) {
+    case Builtin::T___BUILTIN_INF:
+    case Builtin::T___BUILTIN_INFF:
+    case Builtin::T___BUILTIN_INFL:
+    case Builtin::T___BUILTIN_HUGE_VAL:
+    case Builtin::T___BUILTIN_HUGE_VALF:
+    case Builtin::T___BUILTIN_HUGE_VALL:
+    case Builtin::T___BUILTIN_NAN:
+    case Builtin::T___BUILTIN_NANF:
+    case Builtin::T___BUILTIN_NANL:
+      break;
+    case Builtin::T___BUILTIN_NANS:
+    case Builtin::T___BUILTIN_NANSF:
+    case Builtin::T___BUILTIN_NANSL:
+      diagnostics.reject(unit, call,
+                         "signaling NaN builtins require frontend constant "
+                         "evaluation support; use __builtin_bit_cast to "
+                         "specify the representation bits");
+    default:
+      return std::nullopt;
+  }
+  cxx::ASTInterpreter interpreter(&unit);
+  auto value = interpreter.evaluate(call);
+  if (!value) {
+    diagnostics.reject(
+        unit, call,
+        "NaN builtin requires a constant null-terminated integer payload "
+        "string");
+  }
+  return value;
+}
+
+bool null_pointer_expression(cxx::TranslationUnit& unit,
+                             cxx::ExpressionAST* expression) {
+  auto traits = unit.typeTraits();
+  for (;;) {
+    if (traits.is_null_pointer(expression->type)) {
+      return true;
+    }
+    if (auto* nested = cxx::ast_cast<cxx::NestedExpressionAST>(expression)) {
+      expression = nested->expression;
+      continue;
+    }
+    if (!traits.is_pointer(expression->type)) {
+      auto value = scalar_constant(unit, expression);
+      auto* integer = value ? std::get_if<cxx::ConstInt>(&*value) : nullptr;
+      return integer && integer->isZero();
+    }
+    if (auto* cast = cxx::ast_cast<cxx::ImplicitCastExpressionAST>(expression);
+        cast && !cast->conversionFunction) {
+      expression = cast->expression;
+      continue;
+    }
+    if (auto* cast = cxx::ast_cast<cxx::CastExpressionAST>(expression)) {
+      expression = cast->expression;
+      continue;
+    }
+    if (auto* cast = cxx::ast_cast<cxx::CppCastExpressionAST>(expression)) {
+      expression = cast->expression;
+      continue;
+    }
+    if (auto* construction =
+            cxx::ast_cast<cxx::TypeConstructionAST>(expression)) {
+      if (!construction->expressionList) {
+        return true;
+      }
+      expression = construction->expressionList->value;
+      continue;
+    }
+    if (auto* construction =
+            cxx::ast_cast<cxx::BracedTypeConstructionAST>(expression)) {
+      auto* elements = construction->bracedInitList->expressionList;
+      if (!elements) {
+        return true;
+      }
+      expression = elements->value;
+      continue;
+    }
+    const cxx::ConstValue* value = nullptr;
+    if (auto* constant = cxx::ast_cast<cxx::ConstExpressionAST>(expression)) {
+      value = constant->constValue ? &*constant->constValue : nullptr;
+    } else if (auto* id = cxx::ast_cast<cxx::IdExpressionAST>(expression)) {
+      auto* variable = cxx::symbol_cast<cxx::VariableSymbol>(id->symbol);
+      if (variable && variable->constValue() &&
+          (variable->isConstexpr() || traits.is_const(variable->type()))) {
+        value = &*variable->constValue();
+      }
+    }
+    auto* integer = value ? std::get_if<cxx::ConstInt>(value) : nullptr;
+    return integer && integer->isZero();
+  }
 }
 
 std::optional<std::intmax_t> integer_constant(cxx::TranslationUnit& unit,

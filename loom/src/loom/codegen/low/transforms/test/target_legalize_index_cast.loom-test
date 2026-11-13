@@ -1,0 +1,88 @@
+// RUN: pass target-legalize{mode=complete,policy=reference-only},dce
+
+test.target<low_core> @test_target
+
+// A Boolean enters both domains unsigned; byte and halfword payloads enter
+// index signed and offset unsigned. The conversion stays explicit.
+func.def target(@test_target) @enter_address(%predicate: i1, %byte: i8, %halfword: i16) -> (index, offset, index, offset, index, offset) {
+  %predicate_index = index.cast %predicate : i1 to index
+  %predicate_offset = index.cast %predicate : i1 to offset
+  %byte_index = index.cast %byte : i8 to index
+  %byte_offset = index.cast %byte : i8 to offset
+  %halfword_index = index.cast %halfword : i16 to index
+  %halfword_offset = index.cast %halfword : i16 to offset
+  func.return %predicate_index, %predicate_offset, %byte_index, %byte_offset, %halfword_index, %halfword_offset : index, offset, index, offset, index, offset
+}
+
+// Leaving either domain truncates the low bits, including the low Boolean bit.
+func.def target(@test_target) @leave_address(%coordinate: index, %address: offset) -> (i1, i8, i16, i1, i8, i16) {
+  %predicate = index.cast %coordinate : index to i1
+  %byte = index.cast %coordinate : index to i8
+  %halfword = index.cast %coordinate : index to i16
+  %address_predicate = index.cast %address : offset to i1
+  %address_byte = index.cast %address : offset to i8
+  %address_halfword = index.cast %address : offset to i16
+  func.return %predicate, %byte, %halfword, %address_predicate, %address_byte, %address_halfword : i1, i8, i16, i1, i8, i16
+}
+
+// Native-width address casts are already a sufficient primitive.
+func.def target(@test_target) @native_carriers(%word: i32, %pair: i64, %coordinate: index) -> (index, offset, i32, i64) {
+  %word_index = index.cast %word : i32 to index
+  %pair_offset = index.cast %pair : i64 to offset
+  %index_word = index.cast %coordinate : index to i32
+  %index_pair = index.cast %coordinate : index to i64
+  func.return %word_index, %pair_offset, %index_word, %index_pair : index, offset, i32, i64
+}
+
+// ----
+test.target<low_core> @test_target
+
+func.def target(@test_target) @enter_address(%predicate: i1, %byte: i8, %halfword: i16) -> (index, offset, index, offset, index, offset) {
+  %63 = scalar.constant 1 : i32
+  %64 = scalar.constant 0 : i32
+  %65 = scf.select %predicate, %63, %64 : i32
+  %predicate_index = index.cast %65 : i32 to index
+  %58 = scalar.constant 1 : i32
+  %59 = scalar.constant 0 : i32
+  %60 = scf.select %predicate, %58, %59 : i32
+  %predicate_offset = index.cast %60 : i32 to offset
+  %52 = scalar.extui %byte : i8 to i32
+  %53 = scalar.constant 24 : i32
+  %54 = scalar.shli %52, %53 : i32
+  %55 = scalar.shrsi %54, %53 : i32
+  %byte_index = index.cast %55 : i32 to index
+  %48 = scalar.extui %byte : i8 to i32
+  %byte_offset = index.cast %48 : i32 to offset
+  %44 = scalar.extui %halfword : i16 to i32
+  %45 = scalar.constant 16 : i32
+  %46 = scalar.shli %44, %45 : i32
+  %47 = scalar.shrsi %46, %45 : i32
+  %halfword_index = index.cast %47 : i32 to index
+  %40 = scalar.extui %halfword : i16 to i32
+  %halfword_offset = index.cast %40 : i32 to offset
+  func.return %predicate_index, %predicate_offset, %byte_index, %byte_offset, %halfword_index, %halfword_offset : index, offset, index, offset, index, offset
+}
+
+func.def target(@test_target) @leave_address(%coordinate: index, %address: offset) -> (i1, i8, i16, i1, i8, i16) {
+  %76 = index.cast %coordinate : index to i32
+  %predicate = scalar.trunci %76 : i32 to i1
+  %74 = index.cast %coordinate : index to i32
+  %byte = scalar.trunci %74 : i32 to i8
+  %72 = index.cast %coordinate : index to i32
+  %halfword = scalar.trunci %72 : i32 to i16
+  %70 = index.cast %address : offset to i32
+  %address_predicate = scalar.trunci %70 : i32 to i1
+  %68 = index.cast %address : offset to i32
+  %address_byte = scalar.trunci %68 : i32 to i8
+  %66 = index.cast %address : offset to i32
+  %address_halfword = scalar.trunci %66 : i32 to i16
+  func.return %predicate, %byte, %halfword, %address_predicate, %address_byte, %address_halfword : i1, i8, i16, i1, i8, i16
+}
+
+func.def target(@test_target) @native_carriers(%word: i32, %pair: i64, %coordinate: index) -> (index, offset, i32, i64) {
+  %word_index = index.cast %word : i32 to index
+  %pair_offset = index.cast %pair : i64 to offset
+  %index_word = index.cast %coordinate : index to i32
+  %index_pair = index.cast %coordinate : index to i64
+  func.return %word_index, %pair_offset, %index_word, %index_pair : index, offset, i32, i64
+}

@@ -72,7 +72,9 @@ typedef iree_status_t (*loom_target_materialize_definition_fn_t)(
     loom_builder_t* builder, const loom_resolved_target_t* resolved_target,
     loom_symbol_ref_t symbol, loom_location_id_t location);
 
-// Target disposition for semantic calls and retained low.func.call edges.
+// Target constraints for semantic calls and retained low.func.call edges.
+// Flags compose; absence of REQUIRE_INLINE admits a direct boundary subject
+// to the remaining constraints.
 typedef enum loom_target_call_policy_e {
   // The target can preserve and emit the direct call boundary.
   LOOM_TARGET_CALL_POLICY_DIRECT = 0,
@@ -80,6 +82,15 @@ typedef enum loom_target_call_policy_e {
   // physical representation selection; authored Low edges inline after
   // normalization.
   LOOM_TARGET_CALL_POLICY_REQUIRE_INLINE = 1,
+  // A retained callee must contain no native calls after inline selection.
+  // The shared planner chooses a legal cut through the call graph.
+  LOOM_TARGET_CALL_POLICY_REQUIRE_LEAF = 2,
+  // A retained Low callee cannot declare entry resources.
+  LOOM_TARGET_CALL_POLICY_NO_RESOURCES = 4,
+  // A retained Low callee cannot reserve storage of any memory space.
+  LOOM_TARGET_CALL_POLICY_NO_STORAGE = 8,
+  // A retained Low callee cannot reserve nonempty workgroup storage.
+  LOOM_TARGET_CALL_POLICY_NO_WORKGROUP_STORAGE = 16,
 } loom_target_call_policy_t;
 
 // Physical carrier for lane predicates that cross loop boundaries.
@@ -371,8 +382,8 @@ typedef iree_status_t (*loom_target_provider_select_profile_fn_t)(
 // by its caller.
 typedef iree_status_t (*loom_target_provider_select_cpu_profile_fn_t)(
     const iree_cpu_data_t* cpu_data, const loom_target_facts_t* requirement,
-    const loom_target_profile_t* profile,
-    loom_target_profile_selection_t* out_selection, iree_allocator_t allocator);
+    const loom_target_profile_t* profile, iree_allocator_t allocator,
+    loom_target_profile_selection_t* out_selection);
 
 // Target-owned compiler capability contribution linked into a tool or driver.
 struct loom_target_provider_t {
@@ -418,6 +429,12 @@ struct loom_target_provider_t {
   const loom_pass_registry_t* pass_registry;
   // Optional pass-pipeline contribution callback.
   loom_target_provider_pipeline_contribution_fn_t contribute_pipeline;
+  // True when execution-resource planning needs loop policies expanded and
+  // control flow lowered while strands still borrow construction storage.
+  // Common preparation owns those transforms before outlining. Ordinary
+  // workgroup realization instead preserves structured worker bodies for the
+  // kernel pipeline, which expands their loop policies once after inlining.
+  bool requires_lexical_worker_preparation;
   // Optional per-caller call policy selector. Missing permits direct calls.
   // This is an emission requirement, not an authored hint.
   loom_target_select_call_policy_fn_t select_call_policy;
@@ -453,6 +470,15 @@ struct loom_target_provider_t {
   // Optional projection from execution-device CPU facts to a native profile.
   loom_target_provider_select_cpu_profile_fn_t select_cpu_profile;
 };
+
+// Returns the target-family fact representation owned by |provider|, or NULL
+// for providers contributing mechanics without owning a target family.
+static inline const loom_target_fact_type_t* loom_target_provider_fact_type(
+    const loom_target_provider_t* provider) {
+  return provider->target_fact_type != NULL ? provider->target_fact_type
+         : provider->profile_type != NULL   ? provider->profile_type->fact_type
+                                            : NULL;
+}
 
 // Selects the emission policy for one call in |resolved_target|. Providers
 // without a selector permit direct calls.

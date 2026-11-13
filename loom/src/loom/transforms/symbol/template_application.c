@@ -72,13 +72,12 @@ void loom_template_application_select(
   if (scratch->provider_evidence != NULL) {
     loom_template_decision_model_evaluate_all(
         model, site, resolution_policy, scratch->provider_evidence,
-        &scratch->summary, scratch->live_provider_ordinals,
+        scratch->live_provider_ordinals, &scratch->summary,
         &scratch->live_provider_count, &result);
   } else {
     loom_template_decision_model_evaluate(
-        model, site, resolution_policy, &scratch->summary,
-        scratch->live_provider_ordinals, &scratch->live_provider_count,
-        &result);
+        model, site, resolution_policy, scratch->live_provider_ordinals,
+        &scratch->summary, &scratch->live_provider_count, &result);
   }
   const bool family_unresolved =
       result.kind == LOOM_DECISION_PROGRAM_RESULT_UNRESOLVED &&
@@ -191,6 +190,7 @@ static iree_status_t loom_template_application_load_contract_from_facts(
       .target_symbol = facts->target_symbol,
       .argument_ids = facts->argument_ids,
       .result_ids = facts->result_ids,
+      .input_contract = loom_func_symbol_input_contract(facts),
       .predicates = facts->predicates,
       .target_conditions = facts->target_conditions,
       .argument_count = facts->argument_count,
@@ -237,8 +237,8 @@ iree_status_t loom_template_application_load_call(
 void loom_template_application_check_call(
     const loom_module_t* module, const loom_template_application_call_t* call,
     const loom_template_decision_site_t* site,
-    loom_template_provider_classification_t* out_provider_classification,
-    loom_template_application_result_t* entry) {
+    loom_template_application_result_t* entry,
+    loom_template_provider_classification_t* out_provider_classification) {
   loom_template_application_initialize(module, site->application_op,
                                        call->provider_facts->template_family,
                                        entry);
@@ -332,7 +332,12 @@ static loom_func_like_t loom_template_application_blocker_contract_function(
   const loom_template_provider_summary_t* provider =
       entry->unresolved_provider ? entry->unresolved_provider
                                  : entry->selected_provider;
-  return provider ? provider->function : (loom_func_like_t){0};
+  if (!provider || !loom_symbol_ref_is_valid(provider->symbol)) {
+    return (loom_func_like_t){0};
+  }
+  const loom_symbol_t* provider_symbol =
+      &provider->module->symbols.entries[provider->symbol.symbol_id];
+  return loom_func_like_cast(provider->module, provider_symbol->defining_op);
 }
 
 static iree_string_view_t loom_template_application_blocker_contract_name(

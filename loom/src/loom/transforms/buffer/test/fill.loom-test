@@ -46,14 +46,14 @@ func.def @loop_and_tail(%target: buffer, %pattern: i16) {
   %7 = scalar.shli %5, %6 : i32
   %8 = scalar.ori %5, %7 : i32
   %9 = index.constant 64 : offset
-  %20 = vector.splat %8 : vector<8xi32>
+  %10 = vector.splat %8 : vector<8xi32>
   %12 = index.constant 32 : offset
   scf.for %13 = [%4 to %9 step %12] {
     %15 = buffer.view %target[%13] : buffer -> view<8xi32, align(1)>
-    vector.store %20, %15[0] : vector<8xi32>, view<8xi32, align(1)>
+    vector.store %10, %15[0] : vector<8xi32>, view<8xi32, align(1)>
   }
-  %19 = index.constant 64 : offset
-  buffer.store.i8 %8, %target[%19]
+  %18 = index.constant 64 : offset
+  buffer.store.i8 %8, %target[%18]
   func.return
 }
 
@@ -67,5 +67,71 @@ func.def @empty(%target: buffer, %offset: offset, %pattern: i64) {
 
 // ----
 func.def @empty(%target: buffer, %offset: offset, %pattern: i64) {
+  func.return
+}
+
+// ====
+// RUN: pass target=x86:avx2 target-legalize{mode=final},canonicalize,cse,dce
+
+// Vector and wide scalar transfers share the repeated i32 carrier. The short
+// suffixes retain the original byte.
+func.def @byte_pattern_across_transfers(%target: buffer, %pattern: i8) {
+  %origin = index.constant 0 : offset
+  %length = index.constant 31 : offset
+  buffer.fill %pattern, %target[%origin], %length : i8
+  func.return
+}
+
+// ----
+func.def @byte_pattern_across_transfers(%target: buffer, %pattern: i8) {
+  %5 = scalar.extui %pattern : i8 to i32
+  %7 = scalar.constant 8 : i32
+  %8 = scalar.shli %5, %7 : i32
+  %9 = scalar.ori %5, %8 : i32
+  %10 = scalar.constant 16 : i32
+  %11 = scalar.shli %9, %10 : i32
+  %12 = scalar.ori %9, %11 : i32
+  %13 = vector.splat %12 : vector<4xi32>
+  %57 = index.constant 0 : offset
+  %16 = buffer.view %target[%57] : buffer -> view<4xi32, align(1)>
+  vector.store %13, %16[0] : vector<4xi32>, view<4xi32, align(1)>
+  %24 = scalar.extui %12 : i32 to i64
+  %25 = scalar.constant 32 : i64
+  %26 = scalar.shli %24, %25 : i64
+  %27 = scalar.ori %24, %26 : i64
+  %56 = index.constant 16 : offset
+  %29 = buffer.view %target[%56] : buffer -> view<1xi64, align(1)>
+  view.store %27, %29[0] : i64, view<1xi64, align(1)>
+  %55 = index.constant 24 : offset
+  %38 = buffer.view %target[%55] : buffer -> view<1xi32, align(1)>
+  view.store %12, %38[0] : i32, view<1xi32, align(1)>
+  %40 = scalar.trunci %5 : i32 to i16
+  %48 = scalar.extsi %40 : i16 to i32
+  %50 = scalar.shli %48, %7 : i32
+  %51 = scalar.trunci %50 : i32 to i16
+  %43 = scalar.ori %40, %51 : i16
+  %53 = index.constant 28 : offset
+  %45 = buffer.view %target[%53] : buffer -> view<1xi16, align(1)>
+  view.store %43, %45[0] : i16, view<1xi16, align(1)>
+  %52 = index.constant 30 : offset
+  buffer.store.i8 %5, %target[%52]
+  func.return
+}
+
+// ====
+
+// A byte-only fill needs no replication.
+func.def @single_byte_pattern(%target: buffer, %pattern: i8) {
+  %origin = index.constant 0 : offset
+  %length = index.constant 1 : offset
+  buffer.fill %pattern, %target[%origin], %length : i8
+  func.return
+}
+
+// ----
+func.def @single_byte_pattern(%target: buffer, %pattern: i8) {
+  %5 = scalar.extui %pattern : i8 to i32
+  %8 = index.constant 0 : offset
+  buffer.store.i8 %5, %target[%8]
   func.return
 }

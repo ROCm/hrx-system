@@ -248,8 +248,7 @@ class FileTest : public CtsTestBase<> {
   }
 
   iree_status_t CreateHostFileStoragePool(
-      iree_hal_pool_t** out_pool, iree_hal_slab_pool_owned_mode_t owned_mode =
-                                      IREE_HAL_SLAB_POOL_IMPORT_ONLY) {
+      iree_hal_slab_pool_owned_mode_t owned_mode, iree_hal_pool_t** out_pool) {
     *out_pool = nullptr;
     const iree_hal_pool_family_access_t family_access = {
         .family = iree_hal_queue_family(transfer_queue_),
@@ -279,7 +278,8 @@ class FileTest : public CtsTestBase<> {
   iree_status_t GetHostFileStoragePool(iree_hal_pool_t** out_pool) {
     *out_pool = nullptr;
     if (!file_storage_pool_queried_) {
-      iree_status_t status = CreateHostFileStoragePool(&file_storage_pool_);
+      iree_status_t status = CreateHostFileStoragePool(
+          IREE_HAL_SLAB_POOL_IMPORT_ONLY, &file_storage_pool_);
       if (iree_status_is_unavailable(status) ||
           iree_status_is_unimplemented(status)) {
         iree_status_free(status);
@@ -354,8 +354,8 @@ class FileTest : public CtsTestBase<> {
 
   iree_status_t CreateBorrowedMemoryTestFile(iree_hal_memory_access_t access,
                                              iree_byte_span_t contents,
-                                             TestFile* out_file,
-                                             bool host_only = false) {
+                                             bool host_only,
+                                             TestFile* out_file) {
     out_file->Reset();
     iree_hal_pool_t* storage_pool = nullptr;
     if (!host_only) {
@@ -466,13 +466,14 @@ class FileTest : public CtsTestBase<> {
     out_file->Reset();
     switch (provider.kind) {
       case FileProviderKind::kMemory:
-        return CreateMemoryTestFile(access, initial_contents, out_file,
-                                    /*host_only=*/false);
+        return CreateMemoryTestFile(access, initial_contents,
+                                    /*host_only=*/false, out_file);
       case FileProviderKind::kHostOnlyMemory:
-        return CreateMemoryTestFile(access, initial_contents, out_file,
-                                    /*host_only=*/true);
+        return CreateMemoryTestFile(access, initial_contents,
+                                    /*host_only=*/true, out_file);
       case FileProviderKind::kNative:
-        return CreateNativeTestFile(access, initial_contents, out_file);
+        return CreateNativeTestFile(access, initial_contents,
+                                    /*additional_mode=*/0, out_file);
     }
     return iree_status_from_code(IREE_STATUS_UNIMPLEMENTED);
   }
@@ -493,8 +494,8 @@ class FileTest : public CtsTestBase<> {
 
   iree_status_t CreateMemoryTestFile(
       iree_hal_memory_access_t access,
-      const std::vector<uint8_t>& initial_contents, TestFile* out_file,
-      bool host_only) {
+      const std::vector<uint8_t>& initial_contents, bool host_only,
+      TestFile* out_file) {
     iree_hal_pool_t* storage_pool = nullptr;
     if (!host_only) {
       IREE_RETURN_IF_ERROR(GetHostFileStoragePool(&storage_pool));
@@ -563,8 +564,8 @@ class FileTest : public CtsTestBase<> {
  protected:
   iree_status_t CreateNativeTestFile(
       iree_hal_memory_access_t access,
-      const std::vector<uint8_t>& initial_contents, TestFile* out_file,
-      iree_io_file_mode_t additional_mode = 0) {
+      const std::vector<uint8_t>& initial_contents,
+      iree_io_file_mode_t additional_mode, TestFile* out_file) {
     iree::testing::TempFilePath path("iree_hal_cts_file");
     IREE_RETURN_IF_ERROR(iree_io_file_contents_write(
         path.path_view(),
@@ -612,7 +613,7 @@ TEST_P(AsyncFileTest, DirectFileRoundTripUsesReportedRequirements) {
   TestFile file;
   iree::Status status = CreateNativeTestFile(
       IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE, expected,
-      &file, IREE_IO_FILE_MODE_DIRECT);
+      IREE_IO_FILE_MODE_DIRECT, &file);
   if (status.code() == iree::StatusCode::kUnavailable ||
       status.code() == iree::StatusCode::kUnimplemented) {
     GTEST_SKIP() << FormatSkipStatus(status);
@@ -739,7 +740,7 @@ TEST_P(FileTest, MemoryFileUsesExplicitStoragePool) {
     SCOPED_TRACE(owned_mode);
     Ref<iree_hal_pool_t> storage_pool;
     iree_status_t pool_status =
-        CreateHostFileStoragePool(storage_pool.out(), owned_mode);
+        CreateHostFileStoragePool(owned_mode, storage_pool.out());
     if (iree_status_is_unavailable(pool_status) ||
         iree_status_is_unimplemented(pool_status)) {
       iree_status_free(pool_status);
@@ -1216,13 +1217,13 @@ void AsyncFileTest::CheckMemoryFileChainRetainsDeferredResources(
       IREE_HAL_MEMORY_ACCESS_READ,
       iree_make_byte_span(source_contents.get(),
                           static_cast<iree_host_size_t>(file_length)),
-      &source_file, host_only));
+      host_only, &source_file));
   TestFile target_file;
   IREE_ASSERT_OK(CreateBorrowedMemoryTestFile(
       IREE_HAL_MEMORY_ACCESS_WRITE,
       iree_make_byte_span(target_contents.get(),
                           static_cast<iree_host_size_t>(file_length)),
-      &target_file, host_only));
+      host_only, &target_file));
 
   Ref<iree_hal_buffer_t> allocation = CreateZeroedBuffer(allocation_length);
   Ref<iree_hal_buffer_t> subspan;
@@ -1296,7 +1297,7 @@ TEST_P(AsyncFileTest, NativeFileChainRetainsDeferredResources) {
   TestFile source_file, target_file;
   iree::Status file_status = CreateNativeTestFile(
       IREE_HAL_MEMORY_ACCESS_ALL, std::vector<uint8_t>(file_length, 0x11),
-      &source_file);
+      /*additional_mode=*/0, &source_file);
   if (file_status.code() == iree::StatusCode::kUnavailable ||
       file_status.code() == iree::StatusCode::kUnimplemented) {
     GTEST_SKIP() << FormatSkipStatus(file_status);
@@ -1304,7 +1305,7 @@ TEST_P(AsyncFileTest, NativeFileChainRetainsDeferredResources) {
   IREE_ASSERT_OK(file_status);
   IREE_ASSERT_OK(CreateNativeTestFile(IREE_HAL_MEMORY_ACCESS_WRITE,
                                       std::vector<uint8_t>(file_length, 0xC7),
-                                      &target_file));
+                                      /*additional_mode=*/0, &target_file));
   iree_hal_pool_t* pool = nullptr;
   IREE_ASSERT_OK(GetDevicePool(&pool));
   Ref<iree_hal_buffer_t> buffer;
@@ -1360,8 +1361,8 @@ TEST_P(AsyncFileTest, NativeFileChainRetainsDeferredResources) {
 TEST_P(AsyncFileTest, TruncatedFileFailsItsConsumer) {
   const auto contents = MakeDeterministicBytes(128);
   TestFile file;
-  iree::Status file_status =
-      CreateNativeTestFile(IREE_HAL_MEMORY_ACCESS_READ, contents, &file);
+  iree::Status file_status = CreateNativeTestFile(
+      IREE_HAL_MEMORY_ACCESS_READ, contents, /*additional_mode=*/0, &file);
   if (file_status.code() == iree::StatusCode::kUnavailable ||
       file_status.code() == iree::StatusCode::kUnimplemented) {
     GTEST_SKIP() << FormatSkipStatus(file_status);

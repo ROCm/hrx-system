@@ -179,14 +179,16 @@ TEST_P(BufferRangeTest, InheritsExactHistoryThroughSplitsAndRollback) {
   iree_hal_pool_acquire_info_t source_info;
   iree_hal_pool_acquire_result_t result;
   IREE_ASSERT_OK(iree_hal_pool_acquire_reservations_sync(
-      source_pool_, 1, &source_request, nullptr, &source_reservation,
-      &source_info, &result, IREE_HAL_POOL_RESERVE_FLAG_NONE));
+      source_pool_, 1, &source_request, nullptr,
+      IREE_HAL_POOL_RESERVE_FLAG_NONE, &source_reservation, &source_info,
+      &result));
   ASSERT_EQ(IREE_HAL_POOL_ACQUIRE_OK_FRESH, result);
   iree_hal_pool_release_reservations(source_pool_, 1, &source_reservation,
                                      history);
   IREE_ASSERT_OK(iree_hal_pool_acquire_reservations_sync(
-      source_pool_, 1, &source_request, history, &source_reservation,
-      &source_info, &result, IREE_HAL_POOL_RESERVE_FLAG_NONE));
+      source_pool_, 1, &source_request, history,
+      IREE_HAL_POOL_RESERVE_FLAG_NONE, &source_reservation, &source_info,
+      &result));
   ASSERT_EQ(IREE_HAL_POOL_ACQUIRE_OK, result);
   iree_hal_buffer_t* source = nullptr;
   IREE_ASSERT_OK(iree_hal_pool_materialize_reservations(
@@ -204,8 +206,9 @@ TEST_P(BufferRangeTest, InheritsExactHistoryThroughSplitsAndRollback) {
   iree_hal_pool_acquire_info_t info;
   IREE_ASSERT_OK(CreateChild(source, 128, 1024, 1, &child));
   IREE_ASSERT_OK(iree_hal_pool_acquire_reservations_sync(
-      child, 1, &request, nullptr, &reservation, &info, &result,
-      IREE_HAL_POOL_RESERVE_FLAG_ALLOW_WAIT_FRONTIER));
+      child, 1, &request, nullptr,
+      IREE_HAL_POOL_RESERVE_FLAG_ALLOW_WAIT_FRONTIER, &reservation, &info,
+      &result));
   ASSERT_EQ(result, IREE_HAL_POOL_ACQUIRE_OK_NEEDS_WAIT);
   ASSERT_EQ(info.reuse_frontier->entry_count, 1u);
   iree_async_single_frontier_t compact;
@@ -224,16 +227,17 @@ TEST_P(BufferRangeTest, InheritsExactHistoryThroughSplitsAndRollback) {
 
   IREE_ASSERT_OK(CreateChild(source, 128, 1024, 2, &child));
   IREE_ASSERT_OK(iree_hal_pool_acquire_reservations_sync(
-      child, 1, &request, nullptr, &reservation, &info, &result,
-      IREE_HAL_POOL_RESERVE_FLAG_NONE));
+      child, 1, &request, nullptr, IREE_HAL_POOL_RESERVE_FLAG_NONE,
+      &reservation, &info, &result));
   EXPECT_EQ(IREE_HAL_POOL_ACQUIRE_EXHAUSTED, result);
 
   // Both the first range and the untouched remainder inherit the source axes.
   std::array<iree_hal_pool_reservation_t, 2> held;
   for (auto& element : held) {
     IREE_ASSERT_OK(iree_hal_pool_acquire_reservations_sync(
-        child, 1, &request, nullptr, &element, &info, &result,
-        IREE_HAL_POOL_RESERVE_FLAG_ALLOW_WAIT_FRONTIER));
+        child, 1, &request, nullptr,
+        IREE_HAL_POOL_RESERVE_FLAG_ALLOW_WAIT_FRONTIER, &element, &info,
+        &result));
     ASSERT_EQ(IREE_HAL_POOL_ACQUIRE_OK_NEEDS_WAIT, result);
     ASSERT_NE(nullptr, info.reuse_frontier);
     EXPECT_EQ(IREE_ASYNC_FRONTIER_EQUAL,
@@ -249,16 +253,18 @@ TEST_P(BufferRangeTest, InheritsExactHistoryThroughSplitsAndRollback) {
   std::array<iree_hal_pool_reservation_t, 5> reservations = {};
   std::array<iree_hal_pool_acquire_info_t, 5> infos;
   IREE_ASSERT_OK(iree_hal_pool_acquire_reservations_sync(
-      child, requests.size(), requests.data(), nullptr, reservations.data(),
-      infos.data(), &result, IREE_HAL_POOL_RESERVE_FLAG_ALLOW_WAIT_FRONTIER));
+      child, requests.size(), requests.data(), nullptr,
+      IREE_HAL_POOL_RESERVE_FLAG_ALLOW_WAIT_FRONTIER, reservations.data(),
+      infos.data(), &result));
   EXPECT_EQ(IREE_HAL_POOL_ACQUIRE_EXHAUSTED, result);
   iree_hal_buffer_t* pending = nullptr;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_DEADLINE_EXCEEDED,
                         Allocate(child, 256, &pending));
   EXPECT_EQ(nullptr, pending);
   IREE_ASSERT_OK(iree_hal_pool_acquire_reservations_sync(
-      child, 1, &request, nullptr, &reservation, &info, &result,
-      IREE_HAL_POOL_RESERVE_FLAG_ALLOW_WAIT_FRONTIER));
+      child, 1, &request, nullptr,
+      IREE_HAL_POOL_RESERVE_FLAG_ALLOW_WAIT_FRONTIER, &reservation, &info,
+      &result));
   ASSERT_EQ(IREE_HAL_POOL_ACQUIRE_OK_NEEDS_WAIT, result);
   EXPECT_EQ(IREE_ASYNC_FRONTIER_EQUAL,
             iree_async_frontier_compare(history, info.reuse_frontier));
@@ -302,8 +308,8 @@ TEST_P(BufferRangeTest, CapturesExactPreparedRangeWithoutAnotherBuffer) {
   iree_hal_pool_acquire_info_t info;
   iree_hal_pool_acquire_result_t result;
   IREE_ASSERT_OK(iree_hal_pool_acquire_reservations_sync(
-      child, 1, &request, nullptr, &reservation, &info, &result,
-      IREE_HAL_POOL_RESERVE_FLAG_NONE));
+      child, 1, &request, nullptr, IREE_HAL_POOL_RESERVE_FLAG_NONE,
+      &reservation, &info, &result));
   ASSERT_EQ(result, IREE_HAL_POOL_ACQUIRE_OK_FRESH);
   iree_hal_pool_reservation_view_t view;
   ASSERT_TRUE(
@@ -359,8 +365,8 @@ TEST_P(BufferRangeTest, CapturesNativeReservationWithoutRoundingItsTail) {
   iree_hal_pool_acquire_info_t info;
   iree_hal_pool_acquire_result_t result;
   IREE_ASSERT_OK(iree_hal_pool_acquire_reservations_sync(
-      native, 1, &request, nullptr, &reservation, &info, &result,
-      IREE_HAL_POOL_RESERVE_FLAG_NONE));
+      native, 1, &request, nullptr, IREE_HAL_POOL_RESERVE_FLAG_NONE,
+      &reservation, &info, &result));
   ASSERT_EQ(result, IREE_HAL_POOL_ACQUIRE_OK_FRESH);
   iree_hal_pool_buffer_range_t range;
   IREE_ASSERT_OK(iree_hal_pool_buffer_range_capture(native, &request,

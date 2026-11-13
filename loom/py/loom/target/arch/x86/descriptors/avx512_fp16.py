@@ -19,6 +19,7 @@ from loom.target.arch.x86.vector_families import (
     AVX512_FP16_FLOAT_EXTREMA_MNEMONICS,
     AVX512_FP16_FLOAT_FMA_MNEMONIC,
     AVX512_FP16_FLOAT_ROOT_FAMILIES,
+    AVX512_FP16_FLOAT_ROUNDING_FAMILIES,
     AVX512_FP16_SCALAR_FLOAT_BINARY_FAMILIES,
     AVX512_FP16_SCALAR_FLOAT_COMPARE_MNEMONIC,
     AVX512_FP16_SCALAR_FLOAT_EXTREMA_MNEMONICS,
@@ -50,6 +51,7 @@ from .common import (
     _xmm_operand,
     _xmm_result,
 )
+from .float_rounding import float_rounding_descriptors
 
 _REGISTER_SUFFIXES = {64: "xmm", 128: "xmm", 256: "ymm", 512: "zmm"}
 _VECTOR_BIT_WIDTHS = (128, 256, 512)
@@ -348,6 +350,13 @@ def _descriptors() -> tuple[Descriptor, ...]:
     )
     return (
         *packed_binary,
+        *float_rounding_descriptors(
+            key_prefix="x86.avx512_fp16",
+            families=AVX512_FP16_FLOAT_ROUNDING_FAMILIES,
+            vector_bit_widths=_VECTOR_BIT_WIDTHS,
+            evex=True,
+            required_feature_bits=FEATURE_AVX512_FP16,
+        ),
         *scalar_binary,
         *packed_root,
         *scalar_root,

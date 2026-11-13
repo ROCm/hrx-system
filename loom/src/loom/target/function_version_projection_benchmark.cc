@@ -41,8 +41,8 @@ static iree_status_t MaterializeTestTargetDefinition(
     loom_builder_t* builder, const loom_resolved_target_t* resolved_target,
     loom_symbol_ref_t symbol, loom_location_id_t location) {
   const loom_target_facts_t* facts = resolved_target->facts;
-  static_assert(LOOM_TARGET_FACT_FIELD_COUNT_ == 30,
-                "test target flags reserve the first 30 bits for common "
+  static_assert(LOOM_TARGET_FACT_FIELD_COUNT_ == 31,
+                "test target flags reserve the first 31 bits for common "
                 "target facts");
   static_assert(LOOM_TEST_TARGET_BUILD_FLAG_HAS_CODEGEN_FORMAT ==
                     (1u << LOOM_TARGET_FACT_FIELD_CODEGEN_FORMAT),
@@ -79,20 +79,21 @@ static iree_status_t MaterializeTestTargetDefinition(
       snapshot->offset_bitwidth, snapshot->max_workgroup_size.x,
       snapshot->max_workgroup_size.y, snapshot->max_workgroup_size.z,
       snapshot->max_flat_workgroup_size, snapshot->max_workgroup_storage_bytes,
-      snapshot->subgroup_size, snapshot->max_grid_size.x,
-      snapshot->max_grid_size.y, snapshot->max_grid_size.z,
-      snapshot->max_flat_grid_size, snapshot->max_workgroup_count.x,
-      snapshot->max_workgroup_count.y, snapshot->max_workgroup_count.z,
-      snapshot->memory_spaces.generic, snapshot->memory_spaces.global,
-      snapshot->memory_spaces.workgroup, snapshot->memory_spaces.constant,
-      snapshot->memory_spaces.private_memory, snapshot->memory_spaces.host,
-      snapshot->memory_spaces.descriptor, export_plan->abi_kind, export_symbol,
-      export_plan->linkage, contract_set_key, config->contract_feature_bits,
-      location, &target_op);
+      snapshot->subgroup_size, snapshot->execution_unit_count,
+      snapshot->max_grid_size.x, snapshot->max_grid_size.y,
+      snapshot->max_grid_size.z, snapshot->max_flat_grid_size,
+      snapshot->max_workgroup_count.x, snapshot->max_workgroup_count.y,
+      snapshot->max_workgroup_count.z, snapshot->memory_spaces.generic,
+      snapshot->memory_spaces.global, snapshot->memory_spaces.workgroup,
+      snapshot->memory_spaces.constant, snapshot->memory_spaces.private_memory,
+      snapshot->memory_spaces.host, snapshot->memory_spaces.descriptor,
+      export_plan->abi_kind, export_symbol, export_plan->linkage,
+      contract_set_key, config->contract_feature_bits, location, &target_op);
 }
 
 static const loom_target_profile_type_t kTestProfileType = {
     .name = IREE_SVL("function-version-projection-benchmark"),
+    .storage_size = sizeof(loom_target_profile_t),
     .fact_type = &loom_test_target_fact_type,
     .equal = loom_target_profile_equal_common,
 };

@@ -199,7 +199,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     char* compose_buffer = new char[size + 1];
     iree_host_size_t out_length = 0;
     iree_status_t status =
-        iree_unicode_compose(input, compose_buffer, size + 1, &out_length);
+        iree_unicode_compose(input, size + 1, compose_buffer, &out_length);
     iree_status_code_t status_code = iree_status_consume_code(status);
 
     // Status must be OK or RESOURCE_EXHAUSTED (for very long combining seqs).

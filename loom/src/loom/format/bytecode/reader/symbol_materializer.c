@@ -144,21 +144,21 @@ static iree_status_t loom_bytecode_symbol_policy_materialize_attribute_named(
   loom_bytecode_attribute_materializer_t attributes =
       loom_bytecode_symbol_attribute_materializer(materializer);
   return loom_bytecode_attribute_materialize_named(
-      &attributes, cursor, descriptor, kind, out_attr,
-      materializer->view.types.count);
+      &attributes, cursor, descriptor, kind, materializer->view.types.count,
+      out_attr);
 }
 
 static iree_status_t loom_bytecode_symbol_policy_materialize_attribute_ssa(
     loom_bytecode_symbol_policy_materializer_t* materializer,
     loom_bytecode_reader_cursor_t* cursor,
     const loom_attr_descriptor_t* descriptor, loom_bytecode_attr_kind_t kind,
-    loom_attribute_t* out_attr,
-    const loom_bytecode_attribute_ssa_materialization_scope_t* ssa_scope) {
+    const loom_bytecode_attribute_ssa_materialization_scope_t* ssa_scope,
+    loom_attribute_t* out_attr) {
   loom_bytecode_attribute_materializer_t attributes =
       loom_bytecode_symbol_attribute_materializer(materializer);
   return loom_bytecode_attribute_materialize_ssa(
-      &attributes, cursor, descriptor, kind, out_attr,
-      materializer->view.types.count, ssa_scope);
+      &attributes, cursor, descriptor, kind, materializer->view.types.count,
+      ssa_scope, out_attr);
 }
 
 static iree_status_t loom_bytecode_symbol_policy_materialize_region(

@@ -1,0 +1,149 @@
+// RUN: emit spirv-low target=spirv:vulkan1.3+bda+extended-types features=INTEGER_DOT_PRODUCT,INTEGER_DOT_PRODUCT_INPUT4X8_BIT control-flow=structured-low
+
+func.def @dot_s8s8(%lhs: i32, %rhs: i32, %accumulator: i32) -> (i32) {
+  %left_word = vector.from_elements %lhs : vector<1xi32>
+  %right_word = vector.from_elements %rhs : vector<1xi32>
+  %left = vector.bitcast %left_word : vector<1xi32> to vector<4xi8>
+  %right = vector.bitcast %right_word : vector<1xi32> to vector<4xi8>
+  %acc = vector.from_elements %accumulator : vector<1xi32>
+  %dot = vector.dot4i<s8s8> %left, %right, %acc : vector<4xi8>, vector<4xi8>, vector<1xi32>
+  %result = vector.extract %dot[0] : vector<1xi32> -> i32
+  func.return %result : i32
+}
+
+// ----
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @dot_s8s8(%left_word: reg<spirv.id : i32>, %right_word: reg<spirv.id : i32>, %acc: reg<spirv.id : i32>) -> (reg<spirv.id : i32>) asm {
+  %left = OpBitcast.i32.v4i8 %left_word
+  %right = OpBitcast.i32.v4i8 %right_word
+  %20 = OpSDot.v4i8 %left, %right : reg<spirv.id>
+  %result = OpIAdd %20, %acc
+  return %result
+}
+
+// ====
+// RUN: emit spirv-low target=spirv:vulkan1.3+bda+extended-types features=INTEGER_DOT_PRODUCT,INTEGER_DOT_PRODUCT_INPUT4X8_BIT control-flow=structured-low
+
+func.def @dot_u8u8(%lhs: i32, %rhs: i32, %accumulator: i32) -> (i32) {
+  %left_word = vector.from_elements %lhs : vector<1xi32>
+  %right_word = vector.from_elements %rhs : vector<1xi32>
+  %left = vector.bitcast %left_word : vector<1xi32> to vector<4xi8>
+  %right = vector.bitcast %right_word : vector<1xi32> to vector<4xi8>
+  %acc = vector.from_elements %accumulator : vector<1xi32>
+  %dot = vector.dot4i<u8u8> %left, %right, %acc : vector<4xi8>, vector<4xi8>, vector<1xi32>
+  %result = vector.extract %dot[0] : vector<1xi32> -> i32
+  func.return %result : i32
+}
+
+// ----
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @dot_u8u8(%left_word: reg<spirv.id : i32>, %right_word: reg<spirv.id : i32>, %acc: reg<spirv.id : i32>) -> (reg<spirv.id : i32>) asm {
+  %left = OpBitcast.i32.v4i8 %left_word
+  %right = OpBitcast.i32.v4i8 %right_word
+  %20 = OpBitcast.v4i8.v4u8 %left
+  %21 = OpBitcast.v4i8.v4u8 %right
+  %22 = OpUDot.v4i8 %20, %21
+  %23 = OpBitcast.u32.i32 %22 : reg<spirv.id>
+  %result = OpIAdd %23, %acc
+  return %result
+}
+
+// ====
+// RUN: emit spirv-low target=spirv:vulkan1.3+bda+extended-types features=INTEGER_DOT_PRODUCT,INTEGER_DOT_PRODUCT_INPUT4X8_BIT control-flow=structured-low
+
+func.def @dot_s8u8(%lhs: i32, %rhs: i32, %accumulator: i32) -> (i32) {
+  %left_word = vector.from_elements %lhs : vector<1xi32>
+  %right_word = vector.from_elements %rhs : vector<1xi32>
+  %left = vector.bitcast %left_word : vector<1xi32> to vector<4xi8>
+  %right = vector.bitcast %right_word : vector<1xi32> to vector<4xi8>
+  %acc = vector.from_elements %accumulator : vector<1xi32>
+  %dot = vector.dot4i<s8u8> %left, %right, %acc : vector<4xi8>, vector<4xi8>, vector<1xi32>
+  %result = vector.extract %dot[0] : vector<1xi32> -> i32
+  func.return %result : i32
+}
+
+// ----
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @dot_s8u8(%left_word: reg<spirv.id : i32>, %right_word: reg<spirv.id : i32>, %acc: reg<spirv.id : i32>) -> (reg<spirv.id : i32>) asm {
+  %left = OpBitcast.i32.v4i8 %left_word
+  %right = OpBitcast.i32.v4i8 %right_word
+  %20 = OpBitcast.v4i8.v4u8 %right
+  %21 = OpSUDot.v4i8 %left, %20 : reg<spirv.id>
+  %result = OpIAdd %21, %acc
+  return %result
+}
+
+// ====
+// RUN: emit spirv-low target=spirv:vulkan1.3+bda+extended-types features=INTEGER_DOT_PRODUCT,INTEGER_DOT_PRODUCT_INPUT4X8_BIT control-flow=structured-low
+
+func.def @dot_u8s8(%lhs: i32, %rhs: i32, %accumulator: i32) -> (i32) {
+  %left_word = vector.from_elements %lhs : vector<1xi32>
+  %right_word = vector.from_elements %rhs : vector<1xi32>
+  %left = vector.bitcast %left_word : vector<1xi32> to vector<4xi8>
+  %right = vector.bitcast %right_word : vector<1xi32> to vector<4xi8>
+  %acc = vector.from_elements %accumulator : vector<1xi32>
+  %dot = vector.dot4i<u8s8> %left, %right, %acc : vector<4xi8>, vector<4xi8>, vector<1xi32>
+  %result = vector.extract %dot[0] : vector<1xi32> -> i32
+  func.return %result : i32
+}
+
+// ----
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @dot_u8s8(%left_word: reg<spirv.id : i32>, %right_word: reg<spirv.id : i32>, %acc: reg<spirv.id : i32>) -> (reg<spirv.id : i32>) asm {
+  %left = OpBitcast.i32.v4i8 %left_word
+  %right = OpBitcast.i32.v4i8 %right_word
+  %20 = OpBitcast.v4i8.v4u8 %left
+  %21 = OpSUDot.v4i8 %right, %20 : reg<spirv.id>
+  %result = OpIAdd %21, %acc
+  return %result
+}
+
+// ====
+// RUN: emit spirv-low target=spirv:vulkan1.3+bda+extended-types features=INTEGER_DOT_PRODUCT,INTEGER_DOT_PRODUCT_INPUT4X8_BIT control-flow=structured-low
+
+func.def @affine_dot(%lhs0: i32, %lhs1: i32, %lhs2: i32, %lhs3: i32, %rhs0: i32, %rhs1: i32, %rhs2: i32, %rhs3: i32) -> (i32) {
+  %left_word0 = vector.from_elements %lhs0 : vector<1xi32>
+  %left_packet0 = vector.bitcast %left_word0 : vector<1xi32> to vector<4xi8>
+  %left_word1 = vector.from_elements %lhs1 : vector<1xi32>
+  %left_packet1 = vector.bitcast %left_word1 : vector<1xi32> to vector<4xi8>
+  %left_word2 = vector.from_elements %lhs2 : vector<1xi32>
+  %left_packet2 = vector.bitcast %left_word2 : vector<1xi32> to vector<4xi8>
+  %left_word3 = vector.from_elements %lhs3 : vector<1xi32>
+  %left_packet3 = vector.bitcast %left_word3 : vector<1xi32> to vector<4xi8>
+  %left = vector.concat<0> %left_packet0, %left_packet1, %left_packet2, %left_packet3 : vector<4xi8>, vector<4xi8>, vector<4xi8>, vector<4xi8> -> vector<16xi8>
+  %right_word0 = vector.from_elements %rhs0 : vector<1xi32>
+  %right_packet0 = vector.bitcast %right_word0 : vector<1xi32> to vector<4xi8>
+  %right_word1 = vector.from_elements %rhs1 : vector<1xi32>
+  %right_packet1 = vector.bitcast %right_word1 : vector<1xi32> to vector<4xi8>
+  %right_word2 = vector.from_elements %rhs2 : vector<1xi32>
+  %right_packet2 = vector.bitcast %right_word2 : vector<1xi32> to vector<4xi8>
+  %right_word3 = vector.from_elements %rhs3 : vector<1xi32>
+  %right_packet3 = vector.bitcast %right_word3 : vector<1xi32> to vector<4xi8>
+  %right = vector.concat<0> %right_packet0, %right_packet1, %right_packet2, %right_packet3 : vector<4xi8>, vector<4xi8>, vector<4xi8>, vector<4xi8> -> vector<16xi8>
+  %accumulator = vector.splati 0 : vector<4xi32>
+  %dot = vector.dot4i<s8s8> %left, %right, %accumulator : vector<16xi8>, vector<16xi8>, vector<4xi32>
+  %reduction_init = scalar.constant 0 : i32
+  %sum = vector.reduce<addi> %dot, %reduction_init : vector<4xi32>, i32
+  func.return %sum : i32
+}
+
+// ----
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @affine_dot(%left_word0: reg<spirv.id : i32>, %left_word1: reg<spirv.id : i32>, %left_word2: reg<spirv.id : i32>, %left_word3: reg<spirv.id : i32>, %right_word0: reg<spirv.id : i32>, %right_word1: reg<spirv.id : i32>, %right_word2: reg<spirv.id : i32>, %right_word3: reg<spirv.id : i32>) -> (reg<spirv.id : i32>) asm {
+  %left_packet0 = OpBitcast.i32.v4i8 %left_word0
+  %left_packet1 = OpBitcast.i32.v4i8 %left_word1
+  %left_packet2 = OpBitcast.i32.v4i8 %left_word2
+  %left_packet3 = OpBitcast.i32.v4i8 %left_word3
+  %right_packet0 = OpBitcast.i32.v4i8 %right_word0
+  %right_packet1 = OpBitcast.i32.v4i8 %right_word1
+  %right_packet2 = OpBitcast.i32.v4i8 %right_word2
+  %right_packet3 = OpBitcast.i32.v4i8 %right_word3
+  %114 = OpConstant.i32 0 : reg<spirv.id>
+  %115 = OpSDot.v4i8 %left_packet0, %right_packet0 : reg<spirv.id>
+  %116 = OpIAdd %115, %114
+  %117 = OpSDot.v4i8 %left_packet1, %right_packet1 : reg<spirv.id>
+  %118 = OpIAdd %117, %114
+  %119 = OpSDot.v4i8 %left_packet2, %right_packet2 : reg<spirv.id>
+  %120 = OpIAdd %119, %114
+  %121 = OpSDot.v4i8 %left_packet3, %right_packet3 : reg<spirv.id>
+  %122 = OpIAdd %121, %114
+  %123 = OpIAdd %116, %118
+  %124 = OpIAdd %123, %120
+  %sum = OpIAdd %124, %122
+  return %sum
+}

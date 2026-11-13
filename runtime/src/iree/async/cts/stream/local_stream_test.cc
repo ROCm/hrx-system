@@ -147,7 +147,7 @@ TEST_P(LocalStreamTest, ExactTransferAndSlotReuse) {
     TransferResult received;
     IREE_ASSERT_OK(iree_async_local_stream_receive(
         streams_[0], iree_make_byte_span(target.data(), target.size()), 0,
-        nullptr, received.callback()));
+        received.callback(), nullptr));
     IREE_ASSERT_OK(iree_async_local_stream_send(
         streams_[1], iree_make_const_byte_span(source.data(), source.size()), 0,
         nullptr, sent.callback()));
@@ -165,8 +165,8 @@ TEST_P(LocalStreamTest, ReceiveCancellationWithSilentPeer) {
   uint8_t target = 0;
   TransferResult received;
   IREE_ASSERT_OK(iree_async_local_stream_receive(
-      streams_[0], iree_make_byte_span(&target, 1), 0, nullptr,
-      received.callback()));
+      streams_[0], iree_make_byte_span(&target, 1), 0, received.callback(),
+      nullptr));
   PollImmediate();
   EXPECT_EQ(received.calls, 0);
   EXPECT_EQ(proactor_->progress_list, nullptr);
@@ -194,8 +194,8 @@ TEST_P(LocalStreamTest, CancellationBeforeFirstPoll) {
   uint8_t target = 0;
   TransferResult received;
   IREE_ASSERT_OK(iree_async_local_stream_receive(
-      streams_[0], iree_make_byte_span(&target, 1), 0, nullptr,
-      received.callback()));
+      streams_[0], iree_make_byte_span(&target, 1), 0, received.callback(),
+      nullptr));
   Close(streams_[0]);
   EXPECT_EQ(received.calls, 1);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_CANCELLED, received.TakeStatus());
@@ -207,19 +207,19 @@ TEST_P(LocalStreamTest, RejectionDoesNotConsumeTransferSlot) {
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         iree_async_local_stream_receive(
                             streams_[0], iree_make_byte_span(&target, 0), 0,
-                            nullptr, received.callback()));
+                            received.callback(), nullptr));
   iree_async_primitive_t handles[4] = {};
   IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
                         iree_async_local_stream_receive(
                             streams_[0], iree_make_byte_span(&target, 1), 4,
-                            handles, received.callback()));
+                            received.callback(), handles));
   IREE_ASSERT_OK(iree_async_local_stream_receive(
-      streams_[0], iree_make_byte_span(&target, 1), 0, nullptr,
-      received.callback()));
+      streams_[0], iree_make_byte_span(&target, 1), 0, received.callback(),
+      nullptr));
   IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
                         iree_async_local_stream_receive(
                             streams_[0], iree_make_byte_span(&target, 1), 0,
-                            nullptr, received.callback()));
+                            received.callback(), nullptr));
   EXPECT_EQ(received.calls, 0);
   Close(streams_[0]);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_CANCELLED, received.TakeStatus());
@@ -231,14 +231,14 @@ TEST_P(LocalStreamTest, PeerEofPoisonsTransferAdmission) {
   uint8_t target = 0;
   TransferResult received;
   IREE_ASSERT_OK(iree_async_local_stream_receive(
-      streams_[0], iree_make_byte_span(&target, 1), 0, nullptr,
-      received.callback()));
+      streams_[0], iree_make_byte_span(&target, 1), 0, received.callback(),
+      nullptr));
   PollUntilCondition([&] { return received.calls; });
   IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE, received.TakeStatus());
   IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
                         iree_async_local_stream_receive(
                             streams_[0], iree_make_byte_span(&target, 1), 0,
-                            nullptr, received.callback()));
+                            received.callback(), nullptr));
   EXPECT_EQ(received.calls, 1);
 }
 
@@ -254,15 +254,16 @@ TEST_P(LocalStreamTest, TerminalCallbackCanStartNextTransfer) {
     TransferResult result;
   } chain{streams_[0]};
   IREE_ASSERT_OK(iree_async_local_stream_receive(
-      streams_[0], iree_make_byte_span(&chain.first, 1), 0, nullptr,
+      streams_[0], iree_make_byte_span(&chain.first, 1), 0,
       {+[](void* user_data, iree_status_t status) {
          IREE_ASSERT_OK(status);
          auto* chain = static_cast<Chain*>(user_data);
          IREE_ASSERT_OK(iree_async_local_stream_receive(
-             chain->stream, iree_make_byte_span(&chain->second, 1), 0, nullptr,
-             chain->result.callback()));
+             chain->stream, iree_make_byte_span(&chain->second, 1), 0,
+             chain->result.callback(), nullptr));
        },
-       &chain}));
+       &chain},
+      nullptr));
   const uint8_t source[2] = {42, 37};
   TransferResult sent;
   IREE_ASSERT_OK(iree_async_local_stream_send(
@@ -354,7 +355,7 @@ TEST_P(LocalStreamRightsTest, RightsMayArriveOnEveryFragment) {
   TransferResult received;
   IREE_ASSERT_OK(iree_async_local_stream_receive(
       streams_[0], iree_make_byte_span(target, sizeof(target)), 3,
-      received_handles, received.callback()));
+      received.callback(), received_handles));
   Fragment("a", 1, 0, 1);
   Fragment("bcd", 3, 0, 0);
   Fragment("efgh", 4, 1, 2);
@@ -390,7 +391,7 @@ TEST_P(LocalStreamRightsTest, PartialSendAttachesResourcesOnlyOnce) {
   iree_async_primitive_t handles[3] = {};
   IREE_ASSERT_OK(iree_async_local_stream_receive(
       streams_[0], iree_make_byte_span(target.data(), target.size()), 3,
-      handles, received.callback()));
+      received.callback(), handles));
   PollUntilCondition([&] { return sent.calls && received.calls; });
   IREE_ASSERT_OK(sent.TakeStatus());
   IREE_ASSERT_OK(received.TakeStatus());
@@ -407,8 +408,8 @@ TEST_P(LocalStreamRightsTest, OverflowAndTruncationRetireEveryInstalledRight) {
     iree_async_primitive_t received_handles[3] = {};
     TransferResult received;
     IREE_ASSERT_OK(iree_async_local_stream_receive(
-        streams_[0], iree_make_byte_span(&target, 1), 3, received_handles,
-        received.callback()));
+        streams_[0], iree_make_byte_span(&target, 1), 3, received.callback(),
+        received_handles));
     Fragment("a", 1, 0, count);
     PollUntilCondition([&] { return received.calls; });
     IREE_EXPECT_STATUS_IS(IREE_STATUS_DATA_LOSS, received.TakeStatus());
@@ -427,8 +428,8 @@ TEST_P(LocalStreamRightsTest, LateExcessRightRetiresEarlierBundle) {
   iree_async_primitive_t received_handles[3] = {};
   TransferResult received;
   IREE_ASSERT_OK(iree_async_local_stream_receive(
-      streams_[0], iree_make_byte_span(target, 2), 3, received_handles,
-      received.callback()));
+      streams_[0], iree_make_byte_span(target, 2), 3, received.callback(),
+      received_handles));
   Fragment("a", 1, 0, 3);
   EXPECT_EQ(received.calls, 0);
   Fragment("b", 1, 3, 1);
@@ -445,8 +446,8 @@ TEST_P(LocalStreamRightsTest, MissingResourceRetiresPartialBundle) {
   iree_async_primitive_t received_handles[3] = {};
   TransferResult received;
   IREE_ASSERT_OK(iree_async_local_stream_receive(
-      streams_[0], iree_make_byte_span(&target, 1), 3, received_handles,
-      received.callback()));
+      streams_[0], iree_make_byte_span(&target, 1), 3, received.callback(),
+      received_handles));
   Fragment("a", 1, 0, 2);
   PollUntilCondition([&] { return received.calls; });
   IREE_EXPECT_STATUS_IS(IREE_STATUS_DATA_LOSS, received.TakeStatus());
@@ -461,8 +462,8 @@ TEST_P(LocalStreamRightsTest, CancelAfterPartialReceiptRetiresBundle) {
   iree_async_primitive_t received_handles[3] = {};
   TransferResult received;
   IREE_ASSERT_OK(iree_async_local_stream_receive(
-      streams_[0], iree_make_byte_span(target, 2), 3, received_handles,
-      received.callback()));
+      streams_[0], iree_make_byte_span(target, 2), 3, received.callback(),
+      received_handles));
   Fragment("a", 1, 0, 3);
   EXPECT_EQ(received.calls, 0);
   Close(streams_[0]);
@@ -478,8 +479,8 @@ TEST_P(LocalStreamRightsTest, EofAfterPartialReceiptRetiresBundle) {
   iree_async_primitive_t received_handles[3] = {};
   TransferResult received;
   IREE_ASSERT_OK(iree_async_local_stream_receive(
-      streams_[0], iree_make_byte_span(target, 2), 3, received_handles,
-      received.callback()));
+      streams_[0], iree_make_byte_span(target, 2), 3, received.callback(),
+      received_handles));
   Fragment("a", 1, 0, 3);
   Close(streams_[1]);
   iree_async_primitive_close(&channels_[1]);
@@ -514,8 +515,8 @@ TEST_P(LocalStreamTest, CompletedNativeReadWinsDeactivation) {
   uint8_t target = 0;
   TransferResult received;
   IREE_ASSERT_OK(iree_async_local_stream_receive(
-      streams_[1], iree_make_byte_span(&target, 1), 0, nullptr,
-      received.callback()));
+      streams_[1], iree_make_byte_span(&target, 1), 0, received.callback(),
+      nullptr));
   PollImmediate();
   EXPECT_EQ(received.calls, 0);
   ASSERT_EQ(proactor_->progress_list, nullptr);
@@ -545,8 +546,8 @@ TEST_P(LocalStreamTest, PartialImportFailureClosesEarlierResources) {
   iree_async_primitive_t handles[3] = {};
   TransferResult received;
   IREE_ASSERT_OK(iree_async_local_stream_receive(
-      streams_[1], iree_make_byte_span(&target, 1), 3, handles,
-      received.callback()));
+      streams_[1], iree_make_byte_span(&target, 1), 3, received.callback(),
+      handles));
   WritePipeBytes(channels_[0], prefix, sizeof(prefix));
   PollUntilCondition([&] { return received.calls; });
   IREE_EXPECT_STATUS_IS(IREE_STATUS_DATA_LOSS, received.TakeStatus());
@@ -570,8 +571,8 @@ TEST_P(LocalStreamTest, CancelAfterImportWhileBodyIsPendingClosesResources) {
   DWORD before = 0;
   ASSERT_TRUE(GetProcessHandleCount(GetCurrentProcess(), &before));
   IREE_ASSERT_OK(iree_async_local_stream_receive(
-      streams_[1], iree_make_byte_span(&target, 1), 3, handles,
-      received.callback()));
+      streams_[1], iree_make_byte_span(&target, 1), 3, received.callback(),
+      handles));
   WritePipeBytes(channels_[0], prefix, sizeof(prefix));
   // Observe ownership only, without using the tentative imports. No body byte
   // is sent, so the next native read remains pending until local cancellation.
@@ -645,8 +646,8 @@ TEST_P(LocalStreamTest, ImportedEventsRemainUsableAfterSourceClose) {
       streams_[0], iree_make_const_byte_span(&byte, 1), 3, source,
       sent.callback()));
   IREE_ASSERT_OK(iree_async_local_stream_receive(
-      streams_[1], iree_make_byte_span(&received_byte, 1), 3, target,
-      received.callback()));
+      streams_[1], iree_make_byte_span(&received_byte, 1), 3,
+      received.callback(), target));
   PollUntilCondition([&] { return sent.calls && received.calls; });
   IREE_ASSERT_OK(sent.TakeStatus());
   IREE_ASSERT_OK(received.TakeStatus());

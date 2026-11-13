@@ -149,6 +149,9 @@ TEST_F(ChannelPlanTest, SharedStorageDoesNotMergeChannelBindings) {
   IREE_ASSERT_OK(loom_func_return_build(&builder_, nullptr, 0,
                                         LOOM_LOCATION_UNKNOWN, &exit));
   const auto plan = Analyze(function, {});
+  ASSERT_EQ(plan.action_count, 2u);
+  EXPECT_EQ(plan.actions[0].kind, LOOM_CHANNEL_PLAN_ACTION_KIND_BIND);
+  EXPECT_EQ(plan.actions[1].kind, LOOM_CHANNEL_PLAN_ACTION_KIND_BIND);
   const auto* first_identity =
       loom_channel_plan_channel(&plan, loom_channel_bind_result(first));
   const auto* second_identity =
@@ -221,7 +224,10 @@ TEST_F(ChannelPlanTest, CallableSummaryTracksNewReadsFromFormalChannels) {
     EXPECT_EQ(loom_channel_plan_channel(&plan, reads[i]), expected);
     EXPECT_EQ(loom_channel_plan_admission(&plan, reads[i]),
               LOOM_VALUE_ID_INVALID);
+    EXPECT_EQ(plan.actions[2 * i].kind, LOOM_CHANNEL_PLAN_ACTION_KIND_CALL);
     EXPECT_EQ(plan.actions[2 * i].callable, &summary);
+    EXPECT_EQ(plan.actions[2 * i + 1].kind,
+              LOOM_CHANNEL_PLAN_ACTION_KIND_RELEASE);
     EXPECT_EQ(plan.actions[2 * i + 1].channel, expected);
   }
 }
@@ -314,6 +320,46 @@ TEST_F(ChannelPlanTest, ChannelEqualityDoesNotEstablishAnAdmissionAtAJoin) {
   EXPECT_EQ(loom_channel_plan_channel(&plan, selected), &identity);
   EXPECT_EQ(loom_channel_plan_admission(&plan, selected),
             LOOM_VALUE_ID_INVALID);
+}
+
+TEST_F(ChannelPlanTest, AdmissionRelationUsesTheConsumingValueDomain) {
+  loom_channel_plan_t plans[2];
+  loom_local_value_domain_t domains[2];
+  loom_value_id_t channels[2];
+  loom_value_id_t reads[2];
+  const char* names[] = {"source", "instance"};
+  loom_channel_identity_t identities[2];
+  for (size_t i = 0; i < 2; ++i) {
+    auto* function = Function(names[i], {channel_type_}, {read_type_});
+    channels[i] =
+        loom_region_entry_block(loom_func_def_body(function))->arg_ids[0];
+    loom_op_t* accept;
+    IREE_ASSERT_OK(loom_channel_accept_build(&builder_, 0, 0, channels[i],
+                                             read_type_, LOOM_LOCATION_UNKNOWN,
+                                             &accept));
+    reads[i] = loom_channel_accept_read(accept);
+    loom_op_t* exit;
+    IREE_ASSERT_OK(loom_func_return_build(&builder_, &reads[i], 1,
+                                          LOOM_LOCATION_UNKNOWN, &exit));
+    identities[i] = {channels[i]};
+    plans[i] = Analyze(function, {{channels[i], &identities[i]}});
+    loom_local_value_domain_release(&domain_);
+    domains[i] = domain_;
+    plans[i].value_domain = &domains[i];
+  }
+
+  // Equal ordinal structure permits sharing the retained admission relation.
+  // Its query must resolve in the consuming body's domain, not the source's
+  // module-global SSA numbering. The channel itself is not an admission.
+  plans[1].admissions = plans[0].admissions;
+  EXPECT_NE(reads[0], reads[1]);
+  for (size_t i : {1u, 0u, 1u}) {
+    loom_local_value_domain_restore(&domains[i]);
+    EXPECT_EQ(loom_channel_plan_admission(&plans[i], reads[i]), reads[i]);
+    EXPECT_EQ(loom_channel_plan_admission(&plans[i], channels[i]),
+              LOOM_VALUE_ID_INVALID);
+    loom_local_value_domain_release(&domains[i]);
+  }
 }
 
 }  // namespace

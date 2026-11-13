@@ -65,8 +65,8 @@ bool loom_tooling_cli_pipeline_uses_default(iree_string_view_t pipeline) {
 iree_status_t loom_tooling_cli_prepare_loomc_pass_program(
     loomc_context_t* context, const loomc_module_t* module,
     iree_string_view_t pipeline, iree_string_view_t identifier,
-    loomc_pass_program_t** out_pass_program, loomc_result_t** out_result,
-    iree_allocator_t host_allocator) {
+    iree_allocator_t host_allocator, loomc_pass_program_t** out_pass_program,
+    loomc_result_t** out_result) {
   *out_pass_program = NULL;
   *out_result = NULL;
   pipeline = iree_string_view_trim(pipeline);

@@ -123,7 +123,7 @@ iree_status_t loom_parse_keyword(loom_parser_t* parser, uint16_t keyword_id) {
 // Op finalization from accumulator to loom_op_t.
 //===----------------------------------------------------------------------===//
 
-static void loom_parser_set_region_parent_op(loom_region_t* region,
+static void loom_parser_set_child_parent_ops(loom_region_t* region,
                                              loom_op_t* parent_op) {
   if (!region) {
     return;
@@ -490,15 +490,12 @@ static iree_status_t loom_finalize_op(
     }
   }
 
-  // Copy regions.
-  if (parsed->region_count > 0) {
-    memcpy(loom_op_regions(op), parsed->regions,
-           parsed->region_count * sizeof(loom_region_t*));
-    for (uint8_t i = 0; i < parsed->region_count; ++i) {
-      loom_parser_set_region_parent_op(parsed->regions[i], op);
-      if (parser->finalize_operations && parsed->regions[i]) {
-        loom_module_record_region_summaries(op, parsed->regions[i]);
-      }
+  // Attach regions assembled before their owning operation was allocated.
+  for (uint8_t i = 0; i < parsed->region_count; ++i) {
+    loom_op_set_region(op, i, parsed->regions[i]);
+    loom_parser_set_child_parent_ops(parsed->regions[i], op);
+    if (parser->finalize_operations && parsed->regions[i]) {
+      loom_module_record_region_summaries(op, parsed->regions[i]);
     }
   }
 
@@ -524,6 +521,7 @@ static iree_status_t loom_finalize_op(
   loom_op_refresh_effective_traits(parser->module, op);
   if (parsed->has_effective_traits) {
     op->traits = parsed->effective_traits;
+    op->intrinsic_read_spaces = parsed->intrinsic_read_spaces;
     op->intrinsic_write_spaces = parsed->intrinsic_write_spaces;
     IREE_RETURN_IF_ERROR(loom_low_repr_resolve_packet_attributes(
         &parser->low_asm_environment.low_repr, parser->low_repr.descriptor_set,

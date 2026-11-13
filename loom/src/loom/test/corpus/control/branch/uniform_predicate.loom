@@ -246,3 +246,206 @@ check.scenario @uniform_boolean_selection_values {
   }
   check.return
 }
+
+// Retained calls share one signature across uniform and lane-dependent callers.
+// A second helper has only uniform inputs but computes a vector in its arms.
+func.def noinline @choose_call_payload(%condition: i1, %first: vector<3xf32>, %second: vector<3xf32>) -> (vector<3xf32>) {
+  %result = scf.if %condition -> (vector<3xf32>) {
+    scf.yield %first : vector<3xf32>
+  } else {
+    scf.yield %second : vector<3xf32>
+  }
+  func.return %result : vector<3xf32>
+}
+
+func.def noinline @scale_call_payload(%condition: i1, %values: vector<3xf32>) -> (vector<3xf32>) {
+  %result = scf.if %condition -> (vector<3xf32>) {
+    %doubled = vector.addf %values, %values : vector<3xf32>
+    scf.yield %doubled : vector<3xf32>
+  } else {
+    scf.yield %values : vector<3xf32>
+  }
+  func.return %result : vector<3xf32>
+}
+
+kernel.def @call_argument_distribution() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%selector: i32, %first: f32, %second: f32, %begin: index, %end: index, %output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %after_begin = index.cmp uge, %lane, %begin : index
+  %before_end = index.cmp ult, %lane, %end : index
+  %active = scalar.andi %after_begin, %before_end : i1
+  scf.if %active {
+    %selector_threshold = scalar.constant 0 : i32
+    %uniform = scalar.cmpi sgt, %selector, %selector_threshold : i32
+    %half = index.constant 32 : index
+    %varying = index.cmp ult, %lane, %half : index
+    %number = index.cast %lane : index to i32
+    %position = scalar.uitofp %number : i32 to f32
+    %first_values = vector.from_elements %first, %second, %first : vector<3xf32>
+    %second_values = vector.from_elements %second, %first, %second : vector<3xf32>
+    %lane_values = vector.from_elements %position, %first, %second : vector<3xf32>
+    %scaled = func.call @scale_call_payload(%uniform, %first_values) : (i1, vector<3xf32>) -> (vector<3xf32>)
+    %selected = func.call @choose_call_payload(%uniform, %first_values, %second_values) : (i1, vector<3xf32>, vector<3xf32>) -> (vector<3xf32>)
+    %mixed = func.call @choose_call_payload(%varying, %lane_values, %second_values) : (i1, vector<3xf32>, vector<3xf32>) -> (vector<3xf32>)
+    %base = index.constant 0 : offset
+    %results = buffer.view %output[%base] : buffer -> view<64x9xf32>
+    vector.store %scaled, %results[%lane, 0] : vector<3xf32>, view<64x9xf32>
+    vector.store %selected, %results[%lane, 3] : vector<3xf32>, view<64x9xf32>
+    vector.store %mixed, %results[%lane, 6] : vector<3xf32>, view<64x9xf32>
+  }
+  kernel.return
+}
+
+func.def @call_argument_distribution_oracle(%selector: i32, %first: f32, %second: f32, %begin: index, %end: index, %output: buffer) {
+  %selector_threshold = scalar.constant 0 : i32
+  %uniform = scalar.cmpi sgt, %selector, %selector_threshold : i32
+  %base = index.constant 0 : offset
+  %results = buffer.view %output[%base] : buffer -> view<64x9xf32>
+  %start = index.constant 0 : index
+  %width = index.constant 64 : index
+  %step = index.constant 1 : index
+  %half = index.constant 32 : index
+  %payload_width = index.constant 3 : index
+  scf.for %lane = [%start to %width step %step] {
+    %after_begin = index.cmp uge, %lane, %begin : index
+    %before_end = index.cmp ult, %lane, %end : index
+    %active = scalar.andi %after_begin, %before_end : i1
+    scf.if %active {
+      %varying = index.cmp ult, %lane, %half : index
+      %number = index.cast %lane : index to i32
+      %position = scalar.uitofp %number : i32 to f32
+      scf.for %element = [%start to %payload_width step %step] {
+        %middle = index.cmp eq, %element, %step : index
+        %left = scf.select %middle, %second, %first : f32
+        %right = scf.select %middle, %first, %second : f32
+        %doubled = scalar.addf %left, %left : f32
+        %scaled = scf.select %uniform, %doubled, %left : f32
+        %selected = scf.select %uniform, %left, %right : f32
+        %first_element = index.cmp eq, %element, %start : index
+        %tail = scf.select %middle, %first, %second : f32
+        %lane_value = scf.select %first_element, %position, %tail : f32
+        %mixed = scf.select %varying, %lane_value, %right : f32
+        %selected_column = index.add %element, %payload_width : index
+        %mixed_column = index.add %selected_column, %payload_width : index
+        view.store %scaled, %results[%lane, %element] : f32, view<64x9xf32>
+        view.store %selected, %results[%lane, %selected_column] : f32, view<64x9xf32>
+        view.store %mixed, %results[%lane, %mixed_column] : f32, view<64x9xf32>
+      }
+    }
+  }
+  func.return
+}
+
+func.def @call_argument_distribution_inputs(%trial: index) -> (i32, index, index) {
+  %condition_count = index.constant 2 : index
+  %bit = index.rem %trial, %condition_count : index
+  %selector = index.cast %bit : index to i32
+  %range = index.div %trial, %condition_count : index
+  %begin, %end = scf.switch %range -> (index, index) {
+    case 0 {
+      %begin = index.constant 0 : index
+      %end = index.constant 64 : index
+      scf.yield %begin, %end : index, index
+    }
+    case 1 {
+      %begin = index.constant 17 : index
+      %end = index.constant 53 : index
+      scf.yield %begin, %end : index, index
+    }
+    case 2 {
+      %begin = index.constant 32 : index
+      %end = index.constant 64 : index
+      scf.yield %begin, %end : index, index
+    }
+    default {
+      %begin = index.constant 33 : index
+      scf.yield %begin, %begin : index, index
+    }
+  }
+  func.return %selector, %begin, %end : i32, index, index
+}
+
+check.scenario @call_argument_distribution_values {
+  check.trial[8](%trial: index, %entropy: check.entropy) {
+    %selector, %begin, %end = check.generate<@call_argument_distribution_inputs>(%trial) : (index) -> (i32, index, index)
+    %first = check.literal value(2.0) : f32
+    %second = check.literal value(-3.5) : f32
+    %output = check.generate.fill value(-777.0) : tensor<64x9xf32>
+    check.compare<@call_argument_distribution, @call_argument_distribution_oracle>(%selector, %first, %second, %begin, %end, %output) : (i32, f32, f32, index, index, tensor<64x9xf32>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<64x9xf32>
+    }
+  }
+  check.return
+}
+
+// Uniform loop control must not overwrite the three independent Boolean values
+// rotating through its backedge. Constants and a runtime comparison share the
+// same carried representation, and every final component is observable.
+kernel.def @uniform_predicate_rotation() {
+  %c1 = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%width, %c1, %c1) : index
+} launch(%count: index, %output: buffer) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %true = scalar.constant true : i1
+  %false = scalar.constant false : i1
+  %parity = index.andi %count, %c1 : index
+  %compared = index.cmp ne, %parity, %c0 : index
+  %first, %second, %third = scf.for %iteration = [%c0 to %count step %c1](%head = %true : i1, %middle = %false : i1, %tail = %compared : i1) -> (i1, i1, i1) {
+    scf.yield %middle, %tail, %head : i1, i1, i1
+  }
+  %base = index.constant 0 : offset
+  %lane = kernel.workitem.id<x> : index
+  %view = buffer.view %output[%base] : buffer -> view<3x64xi32>
+  %first_word = scalar.extui %first : i1 to i32
+  %second_word = scalar.extui %second : i1 to i32
+  %third_word = scalar.extui %third : i1 to i32
+  view.store %first_word, %view[0, %lane] : i32, view<3x64xi32>
+  view.store %second_word, %view[1, %lane] : i32, view<3x64xi32>
+  view.store %third_word, %view[2, %lane] : i32, view<3x64xi32>
+  kernel.return
+}
+
+func.def @uniform_predicate_rotation_oracle(%count: index, %output: buffer) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c3 = index.constant 3 : index
+  %width = index.constant 64 : index
+  %c0_i32 = scalar.constant 0 : i32
+  %c1_i32 = scalar.constant 1 : i32
+  %base = index.constant 0 : offset
+  %view = buffer.view %output[%base] : buffer -> view<3x64xi32>
+  %parity = index.rem %count, %c2 : index
+  %compared = index.cast %parity : index to i32
+  %rotation = index.rem %count, %c3 : index
+  %unchanged = index.cmp eq, %rotation, %c0 : index
+  %once = index.cmp eq, %rotation, %c1 : index
+  %first_rotated = scf.select %once, %c0_i32, %compared : i32
+  %second_rotated = scf.select %once, %compared, %c1_i32 : i32
+  %third_rotated = scf.select %once, %c1_i32, %c0_i32 : i32
+  %first = scf.select %unchanged, %c1_i32, %first_rotated : i32
+  %second = scf.select %unchanged, %c0_i32, %second_rotated : i32
+  %third = scf.select %unchanged, %compared, %third_rotated : i32
+  scf.for %lane = [%c0 to %width step %c1] {
+    view.store %first, %view[0, %lane] : i32, view<3x64xi32>
+    view.store %second, %view[1, %lane] : i32, view<3x64xi32>
+    view.store %third, %view[2, %lane] : i32, view<3x64xi32>
+  }
+  func.return
+}
+
+check.scenario @uniform_predicate_rotation_values {
+  check.trial[7](%count: index, %entropy: check.entropy) {
+    %storage = check.generate.fill value(-123) : tensor<200xi32>
+    %output = check.tensor.view %storage offset(16) : tensor<200xi32> -> tensor<3x64xi32>
+    check.compare<@uniform_predicate_rotation, @uniform_predicate_rotation_oracle>(%count, %output) : (index, tensor<3x64xi32>) -> () {
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<200xi32>
+    }
+  }
+  check.return
+}

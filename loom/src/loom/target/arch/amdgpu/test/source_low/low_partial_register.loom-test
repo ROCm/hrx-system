@@ -151,3 +151,49 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @brain_broadcast_parts(%
   %result = v_pk_mul_bf16.broadcast_rhs %sum, %half
   return %result
 }
+
+// ====
+
+amdgpu.target<gfx1151> @target
+
+// Scalar extraction observes only the defined halfword and defines every
+// output bit, for both zero and sign extension.
+low.func.def target<amdgpu.rdna3_5.core>(@target) @scalar_halfword_extensions(%input: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) asm {
+  %half = s_cvt_f16_f32 %input
+  %unsigned_byte = s_bfe_u32_lit_low16 %half {imm32 = 524288}
+  %signed_byte = s_bfe_i32_lit_low16 %half {imm32 = 524288}
+  %unsigned_half = s_bfe_u32_lit_low16 %half
+  %signed_half = s_bfe_i32_lit_low16 %half
+  return %unsigned_byte, %signed_byte, %unsigned_half, %signed_half
+}
+
+// ====
+
+amdgpu.target<gfx1151> @target
+
+low.func.def target<amdgpu.rdna3_5.core>(@target) @scalar_full_field_requires_full_word(%input: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
+  %half = s_cvt_f16_f32 %input
+  // ERROR@+1: DOMINANCE/011 {op_name="amdgpu.s_bfe_u32.lit", field_name="value"}
+  %value = s_bfe_u32_lit %half, 2097152
+  return %value
+}
+
+// ====
+
+amdgpu.target<gfx1151> @target
+
+low.func.def target<amdgpu.rdna3_5.core>(@target) @scalar_partial_field_offset(%input: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
+  // ERROR@+1: STRUCTURE/014 {attr_name="imm32", actual_value="524289"}
+  %value = s_bfe_u32_lit_low16 %input {imm32 = 524289}
+  return %value
+}
+
+// ====
+
+amdgpu.target<gfx1151> @target
+
+low.func.def target<amdgpu.rdna3_5.core>(@target) @scalar_partial_field_width(%input: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
+  // ERROR@+1: STRUCTURE/014 {attr_name="imm32", actual_value="1114112"}
+  %value = s_bfe_i32_lit_low16 %input {imm32 = 1114112}
+  return %value
+}

@@ -3,7 +3,7 @@
 Loom compiles tile programs and their array transport into a native `.xdna`
 executable. The product contains AIE2P instructions, initialized data, array
 configuration, explicit storage and binding requirements, and native invocation
-ranges. The [XDNA HAL](../../../../../../../runtime/src/iree/hal/drivers/amd/xdna/README.md)
+ranges. The [XDNA HAL](../../../../../../../runtime/src/iree/hal/driver/amd/xdna/README.md)
 loads and executes it through
 [libamdf](../../../../../../../libamdf/docs/xdna.md); compilation does not invoke
 the AIE SDK, LLVM, Python, or an external linker.
@@ -21,8 +21,8 @@ worker coordinates and memory pools select placement before native emission.
 | --- | --- |
 | Write a streamed program or author AIE2P Low | [Source lowering examples](aie2p/test/source_low/) and [Low descriptor fixtures](aie2p/test/descriptors/) |
 | Embed the compiler | [Public XDNA C binding](../../../../../../binding/c/include/loomc/target/amd/xdna.h) |
-| Understand the executable contract | [Native image format and lifecycle](../../../../../../../runtime/src/iree/hal/drivers/amd/xdna/image/README.md) |
-| Load and execute a compiled image | [XDNA HAL and normal Loom test workflow](../../../../../../../runtime/src/iree/hal/drivers/amd/xdna/README.md) |
+| Understand the executable contract | [Native image format and lifecycle](../../../../../../../runtime/src/iree/hal/driver/amd/xdna/image/README.md) |
+| Load and execute a compiled image | [XDNA HAL and normal Loom test workflow](../../../../../../../runtime/src/iree/hal/driver/amd/xdna/README.md) |
 | Compare compiler work across targets | [Shared benchmark workloads](../../../../../../binding/c/benchmark/kernels/README.md) |
 
 ## Target identity
@@ -137,8 +137,12 @@ reusable storage, rather than this aggregate-prefix ring. Likewise, control
 joins requiring runtime completion state need a record-aware realization.
 The native selector diagnoses those requirements before emitting the program;
 they are not invalid generic channel semantics. The
-[completion fixtures](aie2p/test/native_completion.loom-test) exercise reordered
-publication, reclamation, loop rotation and branch-local completion.
+[channel completion tests](../../../../analysis/channel_completion_test.cc)
+exercise reordered publication, reclamation, loop rotation, and branch-local
+completion. The [native cursor tests](aie2p/pipeline/channel_state_test.cc)
+check when direct reader completion can retire a DMA endpoint; the
+[conditional admission programs](aie2p/pipeline/test/conditional_admission.loom)
+check complete and partial consumption against independent output oracles.
 
 For directly authored physical array programs, the
 [array plan](aie2p/array/plan.h) owns worker placement, endpoint storage,
@@ -155,6 +159,44 @@ allocation. The target's [bundle planner](aie2p/emit/bundle_plan.h) applies
 AIE2P slots, hazards, timing, and encoding constraints. The result fits the
 selected tile's instruction and data budgets; code growth is a physical
 resource cost, not just a compile-time statistic.
+
+### Function stack frames
+
+Register pressure can spill ordinary values into tile SRAM. The shared
+allocator selects values, shares slots across disjoint lifetimes, and retains
+the logical register ranges and defined parts for each transfer. Native
+[spill recipes](aie2p/emit/spill.h) encode scalar, address, vector, accumulator,
+predicate, dimension, FIFO, and block-floating-point payloads using their
+actual memory widths and alignments. A 20-bit address register occupies four
+memory bytes; a block-floating-point register packs its mantissas and exponent
+planes into 72 bytes. Partial transfers preserve the other defined parts.
+
+Each function has an upward-growing [stack frame](aie2p/emit/stack_frame.h).
+Entry advances SP by the aligned frame size, spill slots use negative offsets
+from SP, and every return releases that frame. The supported call graph is a
+resident worker calling direct leaf helpers. The worker reserves its own frame
+plus the largest helper frame, so sequential helper calls reuse the same
+backing while preserving the caller's live values. Placement charges that
+complete bound against the tile's other storage before producing the image.
+Functions needing no stack storage contribute no frame bytes.
+
+Stack backing shares the tile's SRAM with authored buffers, channel rings,
+constants, and other worker storage. It consumes only the space left after
+those reservations; it cannot replace or overlap them. For a 64 KiB tile,
+64,832 bytes of resident data plus 640 bytes of worker storage leaves exactly
+64 bytes for a helper's frame. Reserving another 64 bytes makes that program
+fail compilation with `XDNA/049`, identifying the tile and reporting 65,600
+required bytes versus 65,536 available. Configuration declarations participate
+even when they follow `program.load`. Direct array emission preserves its
+planned non-stack addresses and places the final stack after allocation.
+Compile reports include the final placed stack, including generated spills.
+
+Spill support preserves physical register constraints and architectural-state
+ownership. Link and carry state retain their call and instruction ordering
+contracts. Constant initialization can be reconstructed beside its users to
+avoid stack traffic; runtime-input computations retain their loop execution
+domain. Compile reports include materialized spill traffic and its source
+origins after temporary allocation state has been released.
 
 ## Detached leaves and placement
 
@@ -219,7 +261,7 @@ mandatory host dispatch per tile function.
 The format has no fixed ARRAY/CONTROL split, XRT argument-patching contract, or
 precompiled PDI dependency. libamdf owns device/context establishment and family
 bootstrap. Loom owns the executable protocol, and the caller owns its completion
-frontier and backing lifetime. The [image specification](../../../../../../../runtime/src/iree/hal/drivers/amd/xdna/image/README.md)
+frontier and backing lifetime. The [image specification](../../../../../../../runtime/src/iree/hal/driver/amd/xdna/image/README.md)
 defines this boundary precisely.
 
 ## Support and evidence
@@ -240,7 +282,7 @@ unsupported cases instead of silently changing floating-point behavior.
 
 Compiler transformations and diagnostics are exercised through `.loom-test`
 fixtures. C tests cover API and representation contracts. The
-[native HAL CTS](../../../../../../../runtime/src/iree/hal/drivers/amd/xdna/cts/)
+[native HAL CTS](../../../../../../../runtime/src/iree/hal/driver/amd/xdna/cts/)
 verifies loading, binding, repeated execution, numerical outputs, and resource
 lifetimes through libamdf on matching hardware. The
 [normal Loom HAL scenario](../../../../../../target/amd/xdna/test/native/hal_execution.loom)

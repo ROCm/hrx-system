@@ -1,6 +1,6 @@
-// Native conversion scales remain explicit fixed-register inputs. Each
-// operation writes conversion or nonlinear exception state, so CSE preserves
-// repeated operations even when their data and scales are identical.
+// Native conversion scales remain explicit fixed-register inputs. Unobserved
+// conversion/exception clobbers allow identical values to be reused, while
+// different operation/scale bindings remain distinct.
 // RUN: with-low-asm pass low-cse,low-dce
 
 low.func.def target<amd.xdna.aie2p.core> @native_conversions(%value: reg<aie2p.er>, %input_scale: reg<aie2p.ms2>, %output_scale: reg<aie2p.ms3>) -> (reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>) asm {
@@ -28,6 +28,5 @@ low.func.def target<amd.xdna.aie2p.core> @native_conversions(%value: reg<aie2p.e
   %root_input = sqrt.fx2flt %value, %input_scale
   %root_output = sqrt.flt2fx %output_scale, %value
   %root_both = sqrt.fx2flt.flt2fx %output_scale, %value, %input_scale
-  %repeated = sqrt.fx2flt.flt2fx %output_scale, %value, %input_scale
-  return %inverse_input, %inverse_output, %inverse_both, %inverse_root_input, %inverse_root_output, %inverse_root_both, %root_input, %root_output, %root_both, %repeated
+  return %inverse_input, %inverse_output, %inverse_both, %inverse_root_input, %inverse_root_output, %inverse_root_both, %root_input, %root_output, %root_both, %root_both
 }

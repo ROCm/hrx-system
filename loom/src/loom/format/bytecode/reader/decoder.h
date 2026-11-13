@@ -109,7 +109,7 @@ iree_status_t loom_bytecode_reader_emit_count_exceeds(
 // Validates that |count| entries and required trailing bytes can fit in the
 // unread cursor range. The division-based bound avoids multiplying an
 // untrusted count and must run before any count-sized allocation.
-IREE_ATTRIBUTE_ALWAYS_INLINE static inline iree_status_t
+static IREE_ATTRIBUTE_ALWAYS_INLINE iree_status_t
 loom_bytecode_reader_validate_count_bytes(
     loom_bytecode_reader_decoder_t* decoder,
     const loom_bytecode_reader_cursor_t* cursor, iree_string_view_t table_name,
@@ -191,7 +191,7 @@ static inline iree_status_t loom_bytecode_reader_read_u64_le(
 
 // Reads a canonical unsigned LEB128 integer with guaranteed successful-path
 // inlining for measured parser inner loops.
-IREE_ATTRIBUTE_ALWAYS_INLINE static inline iree_status_t
+static IREE_ATTRIBUTE_ALWAYS_INLINE iree_status_t
 loom_bytecode_reader_read_uvarint_inline(
     loom_bytecode_reader_decoder_t* decoder,
     loom_bytecode_reader_cursor_t* cursor, uint64_t* out_value) {

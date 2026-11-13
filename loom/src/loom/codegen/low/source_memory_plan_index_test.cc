@@ -4,10 +4,101 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include "loom/analysis/symbolic_expr_proof.h"
 #include "loom/codegen/low/source_memory_plan_test_fixture.h"
 
 namespace loom {
 namespace {
+
+TEST_F(SourceMemoryPlanTest, ConditionalProofPreservesAnalyzedAddress) {
+  const auto buffer = DefineBufferArg();
+  const auto row = BuildIndexAssumeRange(DefineIndexArg(), 0, 1023);
+  const auto index_type = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
+  loom_value_id_t condition = LOOM_VALUE_ID_INVALID;
+  IREE_ASSERT_OK(loom_builder_define_block_arg(
+      &builder_, loom_region_entry_block(loom_func_like_body(function_)),
+      loom_type_scalar(LOOM_SCALAR_TYPE_I1), &condition));
+  const auto zero = loom_index_constant_result(BuildIndexConstant(0));
+  const auto one = loom_index_constant_result(BuildIndexConstant(1));
+  const auto three = loom_index_constant_result(BuildIndexConstant(3));
+  loom_op_t* scaled = nullptr;
+  IREE_ASSERT_OK(loom_index_mul_build(&builder_, row, three,
+                                      LOOM_LOCATION_UNKNOWN, &scaled));
+  loom_op_t* address = nullptr;
+  IREE_ASSERT_OK(loom_index_add_build(&builder_, loom_index_mul_result(scaled),
+                                      one, index_type, LOOM_LOCATION_UNKNOWN,
+                                      &address));
+  const auto base = loom_index_constant_result(BuildOffsetConstant(0));
+  const auto layout = BuildDenseLayout();
+  loom_op_t* view = nullptr;
+  IREE_ASSERT_OK(loom_buffer_view_build(&builder_, buffer, base,
+                                        ViewType1D(3072, layout),
+                                        LOOM_LOCATION_UNKNOWN, &view));
+  const auto coordinate = loom_index_add_result(address);
+  const int64_t dynamic = INT64_MIN;
+  loom_op_t* load = nullptr;
+  IREE_ASSERT_OK(loom_view_load_build(
+      &builder_, 0, 0, loom_buffer_view_result(view), &coordinate, 1, &dynamic,
+      1, 0, 0, loom_type_scalar(LOOM_SCALAR_TYPE_F32), LOOM_LOCATION_UNKNOWN,
+      &load));
+
+  loom_op_t* first = nullptr;
+  loom_op_t* second = nullptr;
+  IREE_ASSERT_OK(loom_scf_select_build(&builder_, condition, one, zero,
+                                       index_type, LOOM_LOCATION_UNKNOWN,
+                                       &first));
+  IREE_ASSERT_OK(loom_scf_select_build(&builder_, condition, zero, one,
+                                       index_type, LOOM_LOCATION_UNKNOWN,
+                                       &second));
+  loom_op_t* sum_op = nullptr;
+  IREE_ASSERT_OK(loom_index_add_build(
+      &builder_, loom_scf_select_result(first), loom_scf_select_result(second),
+      index_type, LOOM_LOCATION_UNKNOWN, &sum_op));
+
+  loom_value_fact_table_t facts = {};
+  ComputeFacts(&facts);
+  loom_local_value_domain_t domain = {};
+  IREE_ASSERT_OK(loom_local_value_domain_acquire_for_region(
+      module_, loom_func_like_body(function_), &analysis_arena_, &domain));
+  loom_symbolic_expr_context_t expressions = {};
+  loom_symbolic_expr_context_initialize(module_, &domain, &facts,
+                                        &analysis_arena_, &expressions);
+  loom_view_region_table_t regions = {};
+  IREE_ASSERT_OK(
+      loom_view_region_table_initialize(&domain, &expressions, &regions));
+  IREE_ASSERT_OK(loom_view_region_table_analyze(&regions));
+  loom_low_source_memory_access_plan_t before = {};
+  loom_low_source_memory_access_diagnostic_t diagnostic = {};
+  ASSERT_TRUE(loom_low_source_memory_access_plan_build(&regions, load, nullptr,
+                                                       &before, &diagnostic));
+  EXPECT_EQ(before.static_byte_offset, 4);
+  ASSERT_EQ(before.dynamic_term_count, 1u);
+  EXPECT_EQ(before.dynamic_terms[0].byte_stride, 12);
+
+  loom_symbolic_expr_t sum = {};
+  IREE_ASSERT_OK(loom_symbolic_expr_from_value(
+      &expressions, loom_index_add_result(sum_op), &sum));
+  for (const auto bound : {1, 2}) {
+    loom_symbolic_expr_t minimum = {};
+    loom_symbolic_expr_constant(bound, &minimum);
+    loom_symbolic_proof_result_t proof = LOOM_SYMBOLIC_PROOF_UNKNOWN;
+    IREE_ASSERT_OK(
+        loom_symbolic_expr_prove_le(&expressions, &minimum, &sum, &proof));
+    EXPECT_EQ(proof, bound == 1 ? LOOM_SYMBOLIC_PROOF_TRUE
+                                : LOOM_SYMBOLIC_PROOF_UNKNOWN);
+    // Rule selection and memory planning share this analysis. Memory planning
+    // consumes it without re-expanding source values after a trial proof.
+    loom_low_source_memory_access_plan_t after = {};
+    ASSERT_TRUE(loom_low_source_memory_access_plan_build(
+        &regions, load, nullptr, &after, &diagnostic));
+    EXPECT_EQ(after.static_byte_offset, 4);
+    EXPECT_TRUE(after.source_index_static_offset_extracted);
+    ASSERT_EQ(after.dynamic_term_count, 1u);
+    EXPECT_EQ(after.dynamic_terms[0].index, before.dynamic_terms[0].index);
+    EXPECT_EQ(after.dynamic_terms[0].byte_stride, 12);
+  }
+  loom_local_value_domain_release(&domain);
+}
 
 TEST_F(SourceMemoryPlanTest, StaticDenseScalarLoadUsesMemoryAccessFacet) {
   loom_value_id_t buffer = DefineBufferArg();

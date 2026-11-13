@@ -16,6 +16,7 @@ loom_check_test_suite(
     name = "test",
     srcs = [
         "branch_fact_bindings.loom-test",
+        "branch_fact_casts.loom-test",
         "branch_fact_convergence.loom-test",
         "loop_widening.loom-test",
         "scf_for_termination.loom-test",
@@ -44,8 +45,11 @@ loom_check_test_suite(
         "scf_unroll_dependent_types.loom-test",
         "scf_unroll_fences.loom-test",
         "scf_unroll_payload.loom-test",
+        "scf_unroll_preparation.loom-test",
+        "scf_unroll_read_frontier.loom-test",
         "scf_unroll_regions.loom-test",
         "scf_unroll_report.loom-test",
         "scf_unroll_scope.loom-test",
+        "scf_unroll_source_domain.loom-test",
     ],
 )

@@ -183,6 +183,20 @@ def _fifo_store_descriptor_specs(
                 memory_width_bits=512,
             )
         )
+    # At available=0 no incoming FIFO byte participates in the transfer. The
+    # reset form defines its storage directly; callers establish the empty
+    # position before issuing it. No destination load initializes this state.
+    result.extend(
+        replace(
+            spec,
+            key=spec.key + ".empty",
+            semantic_tag=spec.semantic_tag + ".empty",
+            asm_mnemonic=spec.asm_mnemonic + ".empty",
+            overwritten_inputs=("fifo_reg",),
+        )
+        for spec in tuple(result)
+        if spec.semantic_tag.startswith("memory.store.fifo.push.")
+    )
     return tuple(result)
 
 

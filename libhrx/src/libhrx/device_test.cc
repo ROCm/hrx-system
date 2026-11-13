@@ -72,24 +72,6 @@ TEST(DeviceMemoryCapacityTest, CountsLocalPhysicalHeapsOnce) {
   iree_hal_device_release(device);
 }
 
-TEST(DeviceMemoryCapacityTest, OrdinaryBackendDoesNotExposeLegacyAllocatorVmm) {
-  hrx_allocator_s allocator = {};
-  bool supported = true;
-  size_t minimum = 123;
-  size_t recommended = 456;
-  IREE_ASSERT_OK(hrx_status_to_iree(hrx_allocator_query_virtual_memory(
-      &allocator, HRX_MEMORY_TYPE_DEVICE_LOCAL, &supported, &minimum,
-      &recommended)));
-  EXPECT_FALSE(supported);
-  EXPECT_EQ(minimum, 0u);
-  EXPECT_EQ(recommended, 0u);
-  hrx_buffer_t reservation = nullptr;
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_UNAVAILABLE,
-                        hrx_status_to_iree(hrx_allocator_virtual_memory_reserve(
-                            &allocator, 0, 65536, &reservation)));
-  EXPECT_EQ(reservation, nullptr);
-}
-
 iree_hal_topology_edge_t MakePeerEdge(
     iree_hal_topology_interop_mode_t noncoherent_read,
     iree_hal_topology_interop_mode_t noncoherent_write,

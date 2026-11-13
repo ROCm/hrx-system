@@ -5,7 +5,7 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 load("//build_tools/bazel:query.bzl", "iree_assert_dependency_boundary")
-load("//build_tools/testing:build_defs.bzl", "iree_execution_test_suite")
+load("//build_tools/testing:build_defs.bzl", "iree_cli_test")
 load("//loom/binding/c:shared.bzl", "loomc_cc_binary")
 
 package(
@@ -40,13 +40,13 @@ iree_assert_dependency_boundary(
     name = "loom_compile_no_hal_runtime_dependencies",
     # The versioned, standalone library schema is a compiler interface. Runtime
     # implementations, including the task device and ELF loader, remain excluded.
-    allowed_dependencies = ["//runtime/src/iree/hal/drivers/task/executable/library:abi"],
+    allowed_dependencies = ["//runtime/src/iree/hal/driver/task/executable/library:abi"],
     forbidden_subtrees = ["//runtime/src/iree/hal/..."],
     message = "The compiler may consume the standalone executable ABI schema, but not HAL runtime implementations",
     target = ":loom-compile",
 )
 
-iree_execution_test_suite(
+iree_cli_test(
     name = "execution_test",
     manifests = ["loom-compile.test.json"],
     tags = ["hostonly"],

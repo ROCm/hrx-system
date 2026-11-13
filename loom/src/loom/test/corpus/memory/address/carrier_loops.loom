@@ -107,3 +107,88 @@ check.scenario @address_carrier_loop_values {
   }
   check.return
 }
+
+// The uniform cursor and per-lane winner start at the same byte offset. Casts
+// through fixed-width arithmetic preserve the cursor independently of the
+// selected address carried by the same loop.
+kernel.def @shared_address_seed() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %row_stride = index.constant 24 : index
+  %row_bytes = index.mul %lane, %row_stride : index
+  %row_offset = index.cast %row_bytes : index to offset
+  %extent = index.constant 24 : offset
+  %origin = index.constant 0 : offset
+  %step = scalar.constant 8 : i64
+  %final_cursor, %winner = scf.while(%cursor = %origin : offset, %current = %origin : offset) -> (offset, offset) {
+    %word = index.cast %cursor : offset to i64
+    %advanced = scalar.addi %word, %step : i64
+    %positive = scalar.assume %advanced [range(%advanced, 0, 9223372036854775807)] : i64
+    %next = index.cast %positive : i64 to offset
+    %more = index.cmp ne, %next, %extent : offset
+    scf.condition %more, %next, %current : i1, offset, offset
+  } do(%cursor: offset, %current: offset) {
+    %current_offset = index.add %row_offset, %current : offset
+    %next_offset = index.add %row_offset, %cursor : offset
+    %current_view = buffer.view %input[%current_offset] : buffer -> view<1xi64>
+    %next_view = buffer.view %input[%next_offset] : buffer -> view<1xi64>
+    %current_value = view.load<root_in_bounds> %current_view[0] : view<1xi64> -> i64
+    %next_value = view.load<root_in_bounds> %next_view[0] : view<1xi64> -> i64
+    %choose = scalar.cmpi slt, %current_value, %next_value : i64
+    %selected = scf.select %choose, %cursor, %current : offset
+    scf.yield %cursor, %selected : offset, offset
+  }
+  %winner_offset = index.add %row_offset, %winner : offset
+  %winner_view = buffer.view %input[%winner_offset] : buffer -> view<1xi64>
+  %value = view.load<root_in_bounds> %winner_view[0] : view<1xi64> -> i64
+  %winner_word = index.cast %winner : offset to i64
+  %results = buffer.view %output[%origin] : buffer -> view<64x2xi64>
+  view.store %value, %results[%lane, 0] : i64, view<64x2xi64>
+  view.store %winner_word, %results[%lane, 1] : i64, view<64x2xi64>
+  kernel.return
+}
+
+// Direct comparisons of the three values provide an independent oracle for
+// both the maximum and its first-occurrence address, without pointer recurrence.
+func.def @shared_address_seed_oracle(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %results = buffer.view %output[%origin] : buffer -> view<64x2xi64>
+  %values = buffer.view %input[%origin] : buffer -> view<64x3xi64>
+  %begin = index.constant 0 : index
+  %end = index.constant 64 : index
+  %step = index.constant 1 : index
+  %first_offset = scalar.constant 0 : i64
+  %second_offset = scalar.constant 8 : i64
+  %third_offset = scalar.constant 16 : i64
+  scf.for %lane = [%begin to %end step %step] {
+    %first_value = view.load %values[%lane, 0] : view<64x3xi64> -> i64
+    %b = view.load %values[%lane, 1] : view<64x3xi64> -> i64
+    %c = view.load %values[%lane, 2] : view<64x3xi64> -> i64
+    %choose_b = scalar.cmpi slt, %first_value, %b : i64
+    %ab = scf.select %choose_b, %b, %first_value : i64
+    %ab_offset = scf.select %choose_b, %second_offset, %first_offset : i64
+    %choose_c = scalar.cmpi slt, %ab, %c : i64
+    %value = scf.select %choose_c, %c, %ab : i64
+    %winner = scf.select %choose_c, %third_offset, %ab_offset : i64
+    view.store %value, %results[%lane, 0] : i64, view<64x2xi64>
+    view.store %winner, %results[%lane, 1] : i64, view<64x2xi64>
+  }
+  func.return
+}
+
+check.scenario @shared_address_seed_values {
+  check.trial[3](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-2 to 2) : tensor<64x3xi64>
+    %storage = check.generate.fill value(-123) : tensor<160xi64>
+    %output = check.tensor.view %storage offset(128) : tensor<160xi64> -> tensor<64x2xi64>
+    check.compare<@shared_address_seed, @shared_address_seed_oracle>(%input, %output) : (tensor<64x3xi64>, tensor<64x2xi64>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<64x3xi64>
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<160xi64>
+    }
+  }
+  check.return
+}

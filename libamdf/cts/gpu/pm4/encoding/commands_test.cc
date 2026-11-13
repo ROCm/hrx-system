@@ -77,8 +77,8 @@ TEST(Pm4EncodingTest, TargetProfilesEncodeCacheAndRegisterDifferences) {
     EXPECT_EQ(words[11], 0x30u);
     EXPECT_EQ(words[8], 0x8084u);
     const std::array<uint32_t, 10> acquire = {
-        0xc0004600, 0x407, 0xc0065800, 0,   UINT32_MAX,
-        0xff,       0,     0,          0xa, test.acquire,
+        0xc0004600, 0x80000407, 0xc0065800, 0,   UINT32_MAX,
+        0xff,       0,          0,          0xa, test.acquire,
     };
     ExpectWords(words.data() + 27, acquire);
     const std::array<uint32_t, 8> release = {
@@ -1092,7 +1092,7 @@ TEST(Pm4EncodingTest, MemoryWaitUsesFullAddressAndDwordPacketCount) {
   // WAIT_REG_MEM's type-3 count excludes two DWORDs; memory/equal control
   // and the full address are separate fields in the MEC wire format.
   const std::array<uint32_t, 7> expected = {
-      0xc0053c00, 0x13, 0x87654320, 0x12345678, 17, 0xffffffff, 4};
+      0xc0053c00, 0x13, 0x87654320, 0x12345678, 17, 0xffffffff, 0x80000004};
   ASSERT_EQ(commands.word_count(), expected.size());
   for (size_t i = 0; i < expected.size(); ++i) {
     EXPECT_EQ(words[i], expected[i]) << i;
@@ -1106,7 +1106,7 @@ TEST(Pm4EncodingTest, MemoryWaitUsesFullAddressAndDwordPacketCount) {
   EXPECT_EQ(words.back(), 0u);
 }
 
-TEST(Pm4EncodingTest, MaskedMemoryWaitsKeepOrdinaryMecExecution) {
+TEST(Pm4EncodingTest, MaskedMemoryWaitsUseMecPollingOffload) {
   std::array<uint32_t, 22> words = {};
   words.back() = 0x24681357;
   Pm4CommandWriter commands(words.data(), Profile(11, 0));
@@ -1117,9 +1117,10 @@ TEST(Pm4EncodingTest, MaskedMemoryWaitsKeepOrdinaryMecExecution) {
   commands.WaitMemory32(UINT64_C(0x00009abcedcba984), 0x80000001,
                         Pm4MemoryComparison::kGreaterOrEqual);
   const std::array<uint32_t, 21> expected = {
-      0xc0053c00, 0x13, 0x87654324, 0x00001234, 0x80000000, 0xff000000, 4,
-      0xc0053c00, 0x14, 0xfedcba94, 0x00005678, 0,          0x80000000, 4,
-      0xc0053c00, 0x15, 0xedcba984, 0x00009abc, 0x80000001, UINT32_MAX, 4};
+      0xc0053c00, 0x13,       0x87654324, 0x00001234, 0x80000000, 0xff000000,
+      0x80000004, 0xc0053c00, 0x14,       0xfedcba94, 0x00005678, 0,
+      0x80000000, 0x80000004, 0xc0053c00, 0x15,       0xedcba984, 0x00009abc,
+      0x80000001, UINT32_MAX, 0x80000004};
   ASSERT_EQ(commands.word_count(), expected.size());
   ExpectWords(words.data(), expected);
   EXPECT_EQ(words.back(), 0x24681357u);
@@ -1157,7 +1158,7 @@ TEST(Pm4EncodingTest, EveryMemoryComparisonPreservesBothPacketLayouts) {
                             UINT64_C(0x00ffff00ffff0000));
       const std::array<uint32_t, 16> expected = {
           0xc0053c00,   test.control, 0x87654324, 0x00001234,
-          0x00400000,   0x00ffff00,   4,          0xc0079300,
+          0x00400000,   0x00ffff00,   0x80000004, 0xc0079300,
           test.control, 0xfedcba98,   0x00005678, 0x13570000,
           0x00400000,   0xffff0000,   0x00ffff00, 4};
       ASSERT_EQ(commands.word_count(), expected.size());
@@ -1177,11 +1178,11 @@ TEST(Pm4EncodingTest, LessThanWaitsPreserveBothOperandWidths) {
   commands.WaitMemory64(
       UINT64_C(0x00005678fedcba98), UINT64_C(0x3fffffffffffffff),
       Pm4MemoryComparison::kLess, UINT64_C(0x7fffffffffffffff));
-  // MEC function 1 is LT; function 2 would permit equality. Both forms use
-  // ordinary memory waits with the ACE offload bit clear.
+  // MEC function 1 is LT; function 2 would permit equality. Only the DWORD
+  // form uses ACE polling offload; the 64-bit form retains ordinary polling.
   const std::array<uint32_t, 16> expected = {
       0xc0053c00, 0x11,       0x87654324, 0x00001234, 0x40000000, 0xffffffff,
-      4,          0xc0079300, 0x11,       0xfedcba98, 0x00005678, 0xffffffff,
+      0x80000004, 0xc0079300, 0x11,       0xfedcba98, 0x00005678, 0xffffffff,
       0x3fffffff, 0xffffffff, 0x7fffffff, 4};
   ASSERT_EQ(commands.word_count(), expected.size());
   ExpectWords(words.data(), expected);
@@ -1200,6 +1201,26 @@ TEST(Pm4EncodingTest, WideWaitSeparatesReferenceAndMaskHalves) {
                                             0xffff0000, 0xffff0000, 4};
   ASSERT_EQ(commands.word_count(), expected.size());
   ExpectWords(words.data(), expected);
+  EXPECT_EQ(words.back(), 0x24681357u);
+}
+
+TEST(Pm4EncodingTest, AqlIndirectBufferWaitsRetainOrdinaryPolling) {
+  std::array<uint32_t, 18> words;
+  words.fill(0x24681357);
+  size_t word_count = pm4::WaitMemory32(
+      words.data() + 1, UINT64_C(0x0000123487654324), 0x00400000,
+      Pm4MemoryComparison::kNotEqual, 0x00ffff00, pm4::WaitOffload::kDisabled);
+  word_count += pm4::WaitMemory64(
+      words.data() + 1 + word_count, UINT64_C(0x00005678fedcba98),
+      UINT64_C(0x0040000013570000), Pm4MemoryComparison::kGreaterOrEqual,
+      UINT64_C(0x00ffff00ffff0000));
+  const std::array<uint32_t, 16> expected = {
+      0xc0053c00, 0x14,       0x87654324, 0x00001234, 0x00400000, 0x00ffff00,
+      4,          0xc0079300, 0x15,       0xfedcba98, 0x00005678, 0x13570000,
+      0x00400000, 0xffff0000, 0x00ffff00, 4};
+  ASSERT_EQ(word_count, expected.size());
+  ExpectWords(words.data() + 1, expected);
+  EXPECT_EQ(words.front(), 0x24681357u);
   EXPECT_EQ(words.back(), 0x24681357u);
 }
 
@@ -1240,7 +1261,7 @@ TEST(Pm4EncodingTest, SystemBarrierKeepsMecSizeAndGcrFieldsSeparate) {
   // The MEC size-high field is eight bits. The remaining high bits stay
   // reserved even though some graphics-engine forms have a wider field.
   const std::array<uint32_t, 10> expected = {
-      0xc0004600, 0x00000407, 0xc0065800, 0,          UINT32_MAX,
+      0xc0004600, 0x80000407, 0xc0065800, 0,          UINT32_MAX,
       0x000000ff, 0,          0,          0x0000000a, 0x0000c3a1};
   ASSERT_EQ(commands.word_count(), expected.size());
   ExpectWords(words.data(), expected);

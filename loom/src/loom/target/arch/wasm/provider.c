@@ -36,6 +36,7 @@ static iree_status_t loom_wasm_profile_project_facts(
 
 static const loom_target_profile_type_t kProfileType = {
     .name = IREE_SVL("wasm"),
+    .storage_size = sizeof(loom_target_profile_t),
     .fact_type = &loom_wasm_target_fact_type,
     .project_facts = loom_wasm_profile_project_facts,
     .equal = loom_target_profile_equal_common,
@@ -62,8 +63,8 @@ static iree_status_t loom_wasm_materialize_definition(
     loom_builder_t* builder, const loom_resolved_target_t* resolved_target,
     loom_symbol_ref_t symbol, loom_location_id_t location) {
   const loom_target_facts_t* facts = resolved_target->facts;
-  static_assert(LOOM_TARGET_FACT_FIELD_COUNT_ == 30,
-                "wasm target flags reserve the first 30 bits for common "
+  static_assert(LOOM_TARGET_FACT_FIELD_COUNT_ == 31,
+                "wasm target flags reserve the first 31 bits for common "
                 "target facts");
   static_assert(LOOM_WASM_TARGET_BUILD_FLAG_HAS_CODEGEN_FORMAT ==
                     (1u << LOOM_TARGET_FACT_FIELD_CODEGEN_FORMAT),
@@ -99,16 +100,16 @@ static iree_status_t loom_wasm_materialize_definition(
       snapshot->offset_bitwidth, snapshot->max_workgroup_size.x,
       snapshot->max_workgroup_size.y, snapshot->max_workgroup_size.z,
       snapshot->max_flat_workgroup_size, snapshot->max_workgroup_storage_bytes,
-      snapshot->subgroup_size, snapshot->max_grid_size.x,
-      snapshot->max_grid_size.y, snapshot->max_grid_size.z,
-      snapshot->max_flat_grid_size, snapshot->max_workgroup_count.x,
-      snapshot->max_workgroup_count.y, snapshot->max_workgroup_count.z,
-      snapshot->memory_spaces.generic, snapshot->memory_spaces.global,
-      snapshot->memory_spaces.workgroup, snapshot->memory_spaces.constant,
-      snapshot->memory_spaces.private_memory, snapshot->memory_spaces.host,
-      snapshot->memory_spaces.descriptor, export_plan->abi_kind, export_symbol,
-      export_plan->linkage, contract_set_key, config->contract_feature_bits,
-      location, &target_op);
+      snapshot->subgroup_size, snapshot->execution_unit_count,
+      snapshot->max_grid_size.x, snapshot->max_grid_size.y,
+      snapshot->max_grid_size.z, snapshot->max_flat_grid_size,
+      snapshot->max_workgroup_count.x, snapshot->max_workgroup_count.y,
+      snapshot->max_workgroup_count.z, snapshot->memory_spaces.generic,
+      snapshot->memory_spaces.global, snapshot->memory_spaces.workgroup,
+      snapshot->memory_spaces.constant, snapshot->memory_spaces.private_memory,
+      snapshot->memory_spaces.host, snapshot->memory_spaces.descriptor,
+      export_plan->abi_kind, export_symbol, export_plan->linkage,
+      contract_set_key, config->contract_feature_bits, location, &target_op);
 }
 
 static const loom_low_verify_provider_t* const kLoomWasmLowVerifyProviders[] = {
@@ -525,11 +526,39 @@ static const loom_target_legalizer_provider_t* const
         &kLoomWasmLegalizerProvider,
 };
 
+static loom_target_call_policy_t loom_wasm_select_call_policy(
+    const loom_resolved_target_t* resolved_target, const loom_module_t* module,
+    loom_call_like_kind_t kind, loom_call_like_t call,
+    loom_func_like_t callee) {
+  (void)resolved_target;
+  (void)call;
+  if (kind != LOOM_CALL_LIKE_KIND_SEMANTIC || !module ||
+      !loom_func_like_isa(callee)) {
+    return LOOM_TARGET_CALL_POLICY_DIRECT;
+  }
+
+  uint16_t argument_count = 0;
+  const loom_value_id_t* arguments =
+      loom_func_like_arg_ids(callee, &argument_count);
+  const loom_value_id_t* results = loom_op_const_results(callee.op);
+  const iree_host_size_t value_count =
+      (iree_host_size_t)argument_count + callee.op->result_count;
+  for (iree_host_size_t i = 0; i < value_count; ++i) {
+    const loom_value_id_t value =
+        i < argument_count ? arguments[i] : results[i - argument_count];
+    if (!loom_wasm_source_type_is_callable(
+            loom_module_value_type(module, value))) {
+      return LOOM_TARGET_CALL_POLICY_REQUIRE_INLINE;
+    }
+  }
+  return LOOM_TARGET_CALL_POLICY_DIRECT;
+}
+
 const loom_target_provider_t loom_wasm_target_provider = {
     .profile_type = &kProfileType,
     .select_profile = loom_wasm_select_profile,
     .materialize_definition = loom_wasm_materialize_definition,
-    .select_call_policy = loom_target_select_call_policy_direct,
+    .select_call_policy = loom_wasm_select_call_policy,
     .register_context = loom_wasm_ops_register_dialect,
     .initialize_low_descriptor_registry =
         loom_wasm_low_descriptor_registry_initialize,

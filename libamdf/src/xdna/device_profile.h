@@ -67,9 +67,11 @@ typedef struct amdf_xdna_device_profile_t {
 bool amdf_xdna_query_endpoint_info(const amdf_endpoint_info_t* endpoint_info,
                                    amdf_xdna_endpoint_info_t* out_info);
 
-// Initializes architecture encodings for native device creation. Geometry and
-// scheduling are resolved by activation before the owner is published. The
-// profile borrows `device_info`, which must outlive every native child.
+// Initializes complete architecture and memory encodings for device creation.
+// Passive recognition alone is insufficient; an unavailable device profile
+// returns false without modifying either output. Geometry and scheduling are
+// resolved by activation before the owner is published. The profile borrows
+// `device_info`, which must outlive every native child.
 bool amdf_xdna_device_profile_initialize(
     const amdf_endpoint_info_t* endpoint_info,
     amdf_xdna_device_info_t* device_info,

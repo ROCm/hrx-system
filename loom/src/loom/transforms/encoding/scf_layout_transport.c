@@ -136,6 +136,8 @@ typedef struct loom_scf_layout_candidate_t {
   uint8_t rank;
   // Number of non-exact axes carried by the structured operation.
   uint8_t dynamic_count;
+  // Structured operation kind retained once during collection.
+  loom_op_kind_t operation_kind;
   // Whether every source can provide this descriptor.
   bool selected;
   // Dependency-driven operation rewrite state.
@@ -172,31 +174,6 @@ typedef struct loom_scf_layout_transport_plan_t {
   // Whether any structured operation was rewritten.
   bool changed;
 } loom_scf_layout_transport_plan_t;
-
-static bool loom_scf_layout_is_supported_operation(const loom_op_t* op) {
-  return loom_scf_if_isa(op) || loom_scf_switch_isa(op) ||
-         loom_scf_select_isa(op) || loom_scf_lookup_isa(op) ||
-         loom_scf_for_isa(op) || loom_scf_while_isa(op);
-}
-
-static iree_host_size_t loom_scf_layout_source_count(const loom_op_t* op) {
-  if (loom_scf_if_isa(op) || loom_scf_switch_isa(op)) {
-    return op->region_count;
-  }
-  if (loom_scf_select_isa(op)) {
-    return 2;
-  }
-  if (loom_scf_lookup_isa(op)) {
-    return (iree_host_size_t)loom_scf_lookup_case_keys(op).count + 1;
-  }
-  if (loom_scf_for_isa(op)) {
-    return 2;
-  }
-  if (loom_scf_while_isa(op)) {
-    return 3;
-  }
-  return 0;
-}
 
 static bool loom_scf_layout_describe(
     const loom_scf_layout_transport_plan_t* plan, loom_value_id_t value_id,
@@ -294,6 +271,7 @@ loom_scf_layout_while_is_supported(const loom_scf_layout_transport_plan_t* plan,
 
 static iree_status_t loom_scf_layout_add_candidate(
     loom_scf_layout_transport_plan_t* plan, loom_op_t* op,
+    loom_op_kind_t operation_kind, iree_host_size_t source_count,
     uint16_t result_index) {
   if (!loom_scf_layout_result_is_candidate(plan, op, result_index)) {
     return iree_ok_status();
@@ -311,8 +289,9 @@ static iree_status_t loom_scf_layout_add_candidate(
       .result = result,
       .type = type,
       .first_dependent = IREE_HOST_SIZE_MAX,
-      .source_count = loom_scf_layout_source_count(op),
+      .source_count = source_count,
       .result_index = result_index,
+      .operation_kind = operation_kind,
   };
   return iree_ok_status();
 }
@@ -329,20 +308,29 @@ static void loom_scf_layout_describe_candidates(
     described.op = collected.op;
     described.result_index = collected.result_index;
     described.source_count = collected.source_count;
-    if (loom_scf_for_isa(collected.op)) {
-      loom_block_t* body =
-          loom_region_entry_block(loom_scf_for_body(collected.op));
-      IREE_ASSERT(body);
-      described.entry_value =
-          loom_block_arg_id(body, (uint16_t)(1 + collected.result_index));
-    } else if (loom_scf_while_isa(collected.op)) {
-      loom_block_t* before =
-          loom_region_entry_block(loom_scf_while_before(collected.op));
-      loom_block_t* after =
-          loom_region_entry_block(loom_scf_while_after(collected.op));
-      IREE_ASSERT(before && after);
-      described.entry_value = loom_block_arg_id(before, collected.result_index);
-      described.body_value = loom_block_arg_id(after, collected.result_index);
+    described.operation_kind = collected.operation_kind;
+    switch (collected.operation_kind) {
+      case LOOM_OP_SCF_FOR: {
+        loom_block_t* body =
+            loom_region_entry_block(loom_scf_for_body(collected.op));
+        IREE_ASSERT(body);
+        described.entry_value =
+            loom_block_arg_id(body, (uint16_t)(1 + collected.result_index));
+        break;
+      }
+      case LOOM_OP_SCF_WHILE: {
+        loom_block_t* before =
+            loom_region_entry_block(loom_scf_while_before(collected.op));
+        loom_block_t* after =
+            loom_region_entry_block(loom_scf_while_after(collected.op));
+        IREE_ASSERT(before && after);
+        described.entry_value =
+            loom_block_arg_id(before, collected.result_index);
+        described.body_value = loom_block_arg_id(after, collected.result_index);
+        break;
+      }
+      default:
+        break;
     }
     plan->candidates[described_count++] = described;
   }
@@ -367,14 +355,32 @@ static iree_status_t loom_scf_layout_collect(void* user_data, loom_op_t* op,
   (void)context;
   loom_scf_layout_transport_plan_t* plan = user_data;
   *out_result = LOOM_WALK_CONTINUE;
-  if (!loom_scf_layout_is_supported_operation(op)) {
-    return iree_ok_status();
-  }
-  if (loom_scf_while_isa(op) && !loom_scf_layout_while_is_supported(plan, op)) {
-    return iree_ok_status();
+  const loom_op_kind_t operation_kind = op->kind;
+  iree_host_size_t source_count = 0;
+  switch (operation_kind) {
+    case LOOM_OP_SCF_IF:
+    case LOOM_OP_SCF_SWITCH:
+      source_count = op->region_count;
+      break;
+    case LOOM_OP_SCF_SELECT:
+    case LOOM_OP_SCF_FOR:
+      source_count = 2;
+      break;
+    case LOOM_OP_SCF_LOOKUP:
+      source_count = (iree_host_size_t)loom_scf_lookup_case_keys(op).count + 1;
+      break;
+    case LOOM_OP_SCF_WHILE:
+      if (!loom_scf_layout_while_is_supported(plan, op)) {
+        return iree_ok_status();
+      }
+      source_count = 3;
+      break;
+    default:
+      return iree_ok_status();
   }
   for (uint16_t i = 0; i < op->result_count; ++i) {
-    IREE_RETURN_IF_ERROR(loom_scf_layout_add_candidate(plan, op, i));
+    IREE_RETURN_IF_ERROR(loom_scf_layout_add_candidate(plan, op, operation_kind,
+                                                       source_count, i));
   }
   return iree_ok_status();
 }
@@ -530,68 +536,75 @@ static bool loom_scf_layout_candidate_source(
     const loom_scf_layout_candidate_t* candidate, iree_host_size_t source_index,
     loom_value_id_t* out_source) {
   loom_op_t* op = candidate->op;
-  if (loom_scf_if_isa(op) || loom_scf_switch_isa(op)) {
-    loom_op_t* yield =
-        loom_scf_region_terminator(loom_op_regions(op)[(uint8_t)source_index]);
-    if (!yield || candidate->result_index >= yield->operand_count) {
-      return false;
-    }
-    *out_source = loom_op_const_operands(yield)[candidate->result_index];
-    return true;
-  }
-  if (loom_scf_select_isa(op)) {
-    *out_source = source_index == 0 ? loom_scf_select_true_value(op)
-                                    : loom_scf_select_false_value(op);
-    return true;
-  }
-  if (loom_scf_lookup_isa(op)) {
-    const loom_value_slice_t values = loom_scf_lookup_values(op);
-    const iree_host_size_t value_index =
-        source_index * op->result_count + candidate->result_index;
-    if (value_index >= values.count) {
-      return false;
-    }
-    *out_source = values.values[value_index];
-    return true;
-  }
-  if (loom_scf_for_isa(op)) {
-    if (source_index == 0) {
-      *out_source = loom_scf_for_iter_args(op).values[candidate->result_index];
-      return true;
-    }
-    loom_op_t* yield = loom_scf_region_terminator(loom_scf_for_body(op));
-    if (!yield || candidate->result_index >= yield->operand_count) {
-      return false;
-    }
-    *out_source = loom_scf_yield_values(yield).values[candidate->result_index];
-    return true;
-  }
-  if (loom_scf_while_isa(op)) {
-    if (source_index == 0) {
-      *out_source =
-          loom_scf_while_iter_args(op).values[candidate->result_index];
-      return true;
-    }
-    if (source_index == 1) {
-      loom_block_t* before = loom_region_entry_block(loom_scf_while_before(op));
-      loom_op_t* condition = before ? before->last_op : NULL;
-      if (!condition || !loom_scf_condition_isa(condition) ||
-          candidate->result_index >=
-              loom_scf_condition_forwarded(condition).count) {
+  switch (candidate->operation_kind) {
+    case LOOM_OP_SCF_IF:
+    case LOOM_OP_SCF_SWITCH: {
+      loom_op_t* yield = loom_scf_region_terminator(
+          loom_op_regions(op)[(uint8_t)source_index]);
+      if (!yield || candidate->result_index >= yield->operand_count) {
         return false;
       }
-      *out_source = loom_scf_condition_forwarded(condition)
-                        .values[candidate->result_index];
+      *out_source = loom_op_const_operands(yield)[candidate->result_index];
       return true;
     }
-    loom_op_t* yield = loom_scf_region_terminator(loom_scf_while_after(op));
-    if (!yield || candidate->result_index >= yield->operand_count) {
-      return false;
+    case LOOM_OP_SCF_SELECT:
+      *out_source = source_index == 0 ? loom_scf_select_true_value(op)
+                                      : loom_scf_select_false_value(op);
+      return true;
+    case LOOM_OP_SCF_LOOKUP: {
+      const loom_value_slice_t values = loom_scf_lookup_values(op);
+      const iree_host_size_t value_index =
+          source_index * op->result_count + candidate->result_index;
+      if (value_index >= values.count) {
+        return false;
+      }
+      *out_source = values.values[value_index];
+      return true;
     }
-    *out_source = loom_scf_yield_values(yield).values[candidate->result_index];
-    return true;
+    case LOOM_OP_SCF_FOR: {
+      if (source_index == 0) {
+        *out_source =
+            loom_scf_for_iter_args(op).values[candidate->result_index];
+        return true;
+      }
+      loom_op_t* yield = loom_scf_region_terminator(loom_scf_for_body(op));
+      if (!yield || candidate->result_index >= yield->operand_count) {
+        return false;
+      }
+      *out_source =
+          loom_scf_yield_values(yield).values[candidate->result_index];
+      return true;
+    }
+    case LOOM_OP_SCF_WHILE: {
+      if (source_index == 0) {
+        *out_source =
+            loom_scf_while_iter_args(op).values[candidate->result_index];
+        return true;
+      }
+      if (source_index == 1) {
+        loom_block_t* before =
+            loom_region_entry_block(loom_scf_while_before(op));
+        loom_op_t* condition = before ? before->last_op : NULL;
+        if (!condition || !loom_scf_condition_isa(condition) ||
+            candidate->result_index >=
+                loom_scf_condition_forwarded(condition).count) {
+          return false;
+        }
+        *out_source = loom_scf_condition_forwarded(condition)
+                          .values[candidate->result_index];
+        return true;
+      }
+      loom_op_t* yield = loom_scf_region_terminator(loom_scf_while_after(op));
+      if (!yield || candidate->result_index >= yield->operand_count) {
+        return false;
+      }
+      *out_source =
+          loom_scf_yield_values(yield).values[candidate->result_index];
+      return true;
+    }
+    default:
+      IREE_BUILTIN_UNREACHABLE();
   }
-  return false;
 }
 
 static bool loom_scf_layout_operation_owns_value(const loom_module_t* module,
@@ -1079,30 +1092,40 @@ static iree_status_t loom_scf_layout_adjust_tied_results(
 
 static iree_status_t loom_scf_layout_build_region_selection(
     loom_scf_layout_transport_plan_t* plan, loom_op_t* old_op,
-    const loom_type_t* result_types, uint16_t result_count,
-    const loom_tied_result_t* tied_results, loom_op_t** out_new_op) {
+    loom_op_kind_t operation_kind, const loom_type_t* result_types,
+    uint16_t result_count, const loom_tied_result_t* tied_results,
+    loom_op_t** out_new_op) {
   loom_builder_t* builder = &plan->rewriter->builder;
-  if (loom_scf_if_isa(old_op)) {
-    const loom_scf_if_build_flags_t flags =
-        loom_scf_if_else_region(old_op) ? LOOM_SCF_IF_BUILD_FLAG_HAS_ELSE_REGION
-                                        : 0;
-    IREE_RETURN_IF_ERROR(loom_scf_if_build(
-        builder, flags, loom_scf_if_condition(old_op), result_types,
-        result_count, tied_results, old_op->tied_result_count, old_op->location,
-        out_new_op));
-  } else {
-    const loom_attribute_t case_keys = loom_scf_switch_case_keys(old_op);
-    IREE_RETURN_IF_ERROR(loom_scf_switch_build(
-        builder, loom_scf_switch_selector(old_op), result_types, result_count,
-        tied_results, old_op->tied_result_count, case_keys.i64_array,
-        case_keys.count, old_op->location, out_new_op));
+  switch (operation_kind) {
+    case LOOM_OP_SCF_IF: {
+      const loom_scf_if_build_flags_t flags =
+          loom_scf_if_else_region(old_op)
+              ? LOOM_SCF_IF_BUILD_FLAG_HAS_ELSE_REGION
+              : 0;
+      IREE_RETURN_IF_ERROR(loom_scf_if_build(
+          builder, flags, loom_scf_if_condition(old_op), result_types,
+          result_count, tied_results, old_op->tied_result_count,
+          old_op->location, out_new_op));
+      break;
+    }
+    case LOOM_OP_SCF_SWITCH: {
+      const loom_attribute_t case_keys = loom_scf_switch_case_keys(old_op);
+      IREE_RETURN_IF_ERROR(loom_scf_switch_build(
+          builder, loom_scf_switch_selector(old_op), result_types, result_count,
+          tied_results, old_op->tied_result_count, case_keys.i64_array,
+          case_keys.count, old_op->location, out_new_op));
+      break;
+    }
+    default:
+      IREE_BUILTIN_UNREACHABLE();
   }
   (*out_new_op)->instance_flags = old_op->instance_flags;
   return loom_scf_layout_copy_comments(plan->module, old_op, *out_new_op);
 }
 
 static iree_status_t loom_scf_layout_rebuild_region_selection(
-    loom_scf_layout_transport_plan_t* plan, loom_op_t* old_op) {
+    loom_scf_layout_transport_plan_t* plan, loom_op_kind_t operation_kind,
+    loom_op_t* old_op) {
   uint16_t* new_indices = NULL;
   loom_type_t* result_types = NULL;
   uint16_t result_count = 0;
@@ -1119,7 +1142,8 @@ static iree_status_t loom_scf_layout_rebuild_region_selection(
       loom_rewriter_value_checkpoint(plan->rewriter);
   loom_op_t* new_op = NULL;
   iree_status_t status = loom_scf_layout_build_region_selection(
-      plan, old_op, result_types, result_count, tied_results, &new_op);
+      plan, old_op, operation_kind, result_types, result_count, tied_results,
+      &new_op);
   loom_builder_restore(&plan->rewriter->builder, saved_ip);
   IREE_RETURN_IF_ERROR(status);
 
@@ -1663,23 +1687,39 @@ static iree_status_t loom_scf_layout_ensure_operation(
   }
 
   loom_op_t* op = plan->candidates[begin].op;
-  if (!loom_scf_for_isa(op) && !loom_scf_while_isa(op)) {
+  const loom_op_kind_t operation_kind = plan->candidates[begin].operation_kind;
+  if (operation_kind != LOOM_OP_SCF_FOR &&
+      operation_kind != LOOM_OP_SCF_WHILE) {
     IREE_RETURN_IF_ERROR(loom_scf_layout_ensure_projection_dependencies(
         plan, begin, end, 0, plan->candidates[begin].source_count));
   }
-  if (loom_scf_if_isa(op) || loom_scf_switch_isa(op)) {
-    IREE_RETURN_IF_ERROR(loom_scf_layout_rebuild_region_selection(plan, op));
-  } else if (loom_scf_select_isa(op)) {
-    IREE_ASSERT_EQ(end - begin, 1u);
-    IREE_RETURN_IF_ERROR(
-        loom_scf_layout_rebuild_select(plan, &plan->candidates[begin]));
-  } else if (loom_scf_lookup_isa(op)) {
-    IREE_RETURN_IF_ERROR(loom_scf_layout_rebuild_lookup(plan, op));
-  } else if (loom_scf_for_isa(op)) {
-    IREE_RETURN_IF_ERROR(loom_scf_layout_rebuild_for(plan, op, begin, end));
-  } else {
-    IREE_ASSERT(loom_scf_while_isa(op));
-    IREE_RETURN_IF_ERROR(loom_scf_layout_rebuild_while(plan, op, begin, end));
+  switch (operation_kind) {
+    case LOOM_OP_SCF_IF:
+    case LOOM_OP_SCF_SWITCH: {
+      IREE_RETURN_IF_ERROR(
+          loom_scf_layout_rebuild_region_selection(plan, operation_kind, op));
+      break;
+    }
+    case LOOM_OP_SCF_SELECT: {
+      IREE_ASSERT_EQ(end - begin, 1u);
+      IREE_RETURN_IF_ERROR(
+          loom_scf_layout_rebuild_select(plan, &plan->candidates[begin]));
+      break;
+    }
+    case LOOM_OP_SCF_LOOKUP: {
+      IREE_RETURN_IF_ERROR(loom_scf_layout_rebuild_lookup(plan, op));
+      break;
+    }
+    case LOOM_OP_SCF_FOR: {
+      IREE_RETURN_IF_ERROR(loom_scf_layout_rebuild_for(plan, op, begin, end));
+      break;
+    }
+    case LOOM_OP_SCF_WHILE: {
+      IREE_RETURN_IF_ERROR(loom_scf_layout_rebuild_while(plan, op, begin, end));
+      break;
+    }
+    default:
+      IREE_BUILTIN_UNREACHABLE();
   }
 
   loom_scf_layout_transport_statistics_t* statistics =

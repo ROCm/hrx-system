@@ -64,13 +64,27 @@ bool loom_ownership_value_matches(
 }
 
 bool loom_ownership_operand_effect_at(
-    const loom_module_t* module, const loom_op_t* op, uint16_t operand_index,
-    loom_ownership_operand_effect_t* out_effect) {
+    const loom_module_t* module,
+    const loom_ownership_effect_provider_t* provider, const loom_op_t* op,
+    uint16_t operand_index, loom_ownership_operand_effect_t* out_effect) {
   if (out_effect) {
     memset(out_effect, 0, sizeof(*out_effect));
   }
   if (!module || !op || !out_effect || operand_index >= op->operand_count) {
     return false;
+  }
+  const uint8_t provided =
+      provider && provider->query
+          ? provider->query(op, false, operand_index, provider->user_data)
+          : 0;
+  if (provided) {
+    *out_effect = (loom_ownership_operand_effect_t){
+        .operand_index = operand_index,
+        .value_id = loom_op_const_operands(op)[operand_index],
+        .effect = provided,
+        .carrier = LOOM_OWNERSHIP_CARRIER_BY_VALUE,
+    };
+    return true;
   }
   const loom_operand_descriptor_t* descriptor = NULL;
   uint8_t field_index = 0;
@@ -94,13 +108,27 @@ bool loom_ownership_operand_effect_at(
 }
 
 bool loom_ownership_result_effect_at(
-    const loom_module_t* module, const loom_op_t* op, uint16_t result_index,
-    loom_ownership_result_effect_t* out_effect) {
+    const loom_module_t* module,
+    const loom_ownership_effect_provider_t* provider, const loom_op_t* op,
+    uint16_t result_index, loom_ownership_result_effect_t* out_effect) {
   if (out_effect) {
     memset(out_effect, 0, sizeof(*out_effect));
   }
   if (!module || !op || !out_effect || result_index >= op->result_count) {
     return false;
+  }
+  const uint8_t provided =
+      provider && provider->query
+          ? provider->query(op, true, result_index, provider->user_data)
+          : 0;
+  if (provided) {
+    *out_effect = (loom_ownership_result_effect_t){
+        .result_index = result_index,
+        .source_operand_index = LOOM_OWNERSHIP_SOURCE_OPERAND_NONE,
+        .value_id = loom_op_const_results(op)[result_index],
+        .effect = provided,
+    };
+    return true;
   }
   const loom_result_descriptor_t* descriptor = NULL;
   uint8_t field_index = 0;
@@ -111,7 +139,14 @@ bool loom_ownership_result_effect_at(
   }
   loom_result_ownership_effect_t effect = descriptor->ownership_effect;
   uint16_t source_operand_index = LOOM_OWNERSHIP_SOURCE_OPERAND_NONE;
+  if (loom_value_duplication_isa(module, op)) {
+    // The interface verifies a complete, positionally matching closed tuple.
+    // Each duplicate has its own identity and the same ownership mode.
+    effect = LOOM_RESULT_OWNERSHIP_COPIED;
+    source_operand_index = result_index;
+  }
   if (effect != LOOM_RESULT_OWNERSHIP_NONE &&
+      source_operand_index == LOOM_OWNERSHIP_SOURCE_OPERAND_NONE &&
       descriptor->ownership_source_operand_index !=
           LOOM_RESULT_OWNERSHIP_SOURCE_FIELD_NONE) {
     source_operand_index = descriptor->ownership_source_operand_index;

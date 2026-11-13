@@ -88,6 +88,22 @@ iree_runtime_cc_test(
 #===------------------------------------------------------------------------===#
 
 iree_runtime_cc_library(
+    name = "memory_copy",
+    hdrs = ["memory_copy.h"],
+    deps = ["//runtime/src/iree/base:core_headers"],
+)
+
+iree_runtime_cc_test(
+    name = "memory_copy_test",
+    srcs = ["memory_copy_test.cc"],
+    deps = [
+        ":memory_copy",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "base64",
     srcs = ["base64.c"],
     hdrs = ["base64.h"],
@@ -143,6 +159,20 @@ iree_runtime_cc_test(
         ":arena",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "arena_msan_test",
+    srcs = ["arena_msan_test.c"],
+    tags = ["msan"],
+    target_compatible_with = select({
+        "//build_tools/bazel:memory_sanitizer_target": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":arena",
+        "//runtime/src/iree/base",
     ],
 )
 

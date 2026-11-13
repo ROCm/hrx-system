@@ -35,9 +35,9 @@ loom-import-cxx specialized.cxx --to=bc --output=edited.loombc
 ```
 
 Without `--root`, every top-level definition must have a C++ projection so the
-tool cannot silently omit program semantics. Repeated `--root=@kernel` options
-select kernels from a mixed module and retain only their referenced target
-definitions. Selected kernels remain in module order.
+tool cannot silently omit program semantics. Repeated `--root=@symbol` options
+select callable definitions from a mixed module and retain their referenced
+helpers and target definitions. Selected definitions remain in module order.
 
 The projection reconstructs ordinary C++ expressions, mutable loop-carried
 state, views, launch contracts, target records, and Loom scheduling attributes.
@@ -71,6 +71,48 @@ identity when its C++ identifier needs a different spelling. Reimport therefore
 keeps both the external binding and calls to that declaration. Opaque signature
 types without a validated C++ carrier produce a diagnostic; they are never
 replaced with `auto`, which would change the function's type and template status.
+
+Ordinary function buffers use `loom::type::buffer<T>` to transport one storage
+root. Immutable storage retains `const` through helper arguments, returned
+roots, selections, and loop-carried values. A helper called with both immutable
+and writable storage can produce separate concrete C++ signatures. Only the
+qualifier combinations reached by calls are emitted, while public linkage
+entries retain their original externally callable signature. Multiple results
+keep each root's qualification independently:
+
+```cpp
+struct pair_result {
+  loom::type::buffer<const unsigned char> value0;
+  loom::type::buffer<unsigned char> value1;
+};
+```
+
+A result selecting between immutable and writable storage is const; the
+original writable input remains writable. These source types neither copy the
+storage nor add a pointer offset to the IR buffer value. Writes through an
+immutable result and immutable arguments to an opaque external declaration
+without a compatible access contract produce diagnostics.
+
+Branch results use typed declarations, with each continuing arm supplying the
+value. Resource declarations create no placeholder allocation or null payload:
+
+```cpp
+loom::type::buffer<const unsigned char> selected;
+if (condition) {
+  selected = first;
+} else {
+  selected = second;
+}
+```
+
+Reimport reconstructs an immutable SSA result. Numeric result declarations use
+explicit zero initialization, which becomes dead when the arms assign their
+values. Loops can also construct results whose types or count differ from their
+incoming state. The general condition-loop projection uses a `do` loop for its
+mandatory first phase and guards the repeating body with the computed condition.
+This preserves a result produced before the first condition check, including
+when the repeating body never executes. Branch effects, returns, and cleanup
+remain in their original callable scope.
 
 ## Resident pipelines and ordered phases
 
@@ -108,6 +150,54 @@ to pipeline construction, outside strand bodies. Their braces establish a
 lexical scope with no results, so they cannot update enclosing automatic values,
 return from the function, or exit an enclosing loop. The same attribute in a
 command program retains its command dependency semantics.
+
+## Floating constants
+
+`__builtin_inf()` and `__builtin_huge_val()` produce positive `f64` infinity;
+their `f` forms produce `f32` infinity. They work in ordinary expressions,
+templates, and constant evaluation, with or without the HIP facade:
+
+```cpp
+double infinity() { return __builtin_inf(); }
+float negative_infinity() { return -__builtin_inff(); }
+```
+
+`__builtin_nan()` and `__builtin_nanf()` preserve quiet-NaN payload bits from a
+constant integer string, including a string reached through a constexpr array
+or pointer. Runtime or side-effecting payload expressions receive a source
+diagnostic. Signaling-NaN builtin evaluation is not implemented by the frontend;
+an explicit `__builtin_bit_cast` can express those representation bits.
+
+The `l` forms participate in frontend constant evaluation. Runtime `long double`
+values have no High scalar representation and receive the same unsupported-type
+diagnostic as other uses of `long double`. A constexpr conversion to `float` or
+`double` produces a supported runtime constant.
+
+## Standard-library math
+
+Standard math declarations and compiler builtins lower directly to typed scalar operations. With standard-library headers on the configured include paths, ordinary `<cmath>` calls need no wrapper header:
+
+```cpp
+#include <cmath>
+
+double norm(double x, double y) {
+  return std::sqrt(std::fma(x, x, y * y));
+}
+```
+
+The imported body retains double precision throughout:
+
+```loom
+%yy = scalar.mulf %y, %y : f64
+%squared = scalar.fmaf %x, %x, %yy : f64
+%result = scalar.sqrtf %squared : f64
+```
+
+The float and double families include `acos`, `acosh`, `asin`, `asinh`, `atan`, `atan2`, `atanh`, `cbrt`, `ceil`, `copysign`, `cos`, `cosh`, `erf`, `erfc`, `exp`, `exp2`, `expm1`, `fabs`, `floor`, `fma`, `fmax`, `fmin`, `fmod`, `log`, `log10`, `log1p`, `log2`, `pow`, `round`, `roundeven`, `sin`, `sinh`, `sqrt`, `tan`, `tanh`, and `trunc`. The C spelling's trailing `f` selects float; prefixing it with `__builtin_` selects the compiler builtin. `ldexp` and `scalbn` take an integer exponent, and `frexp` writes its exponent through the supplied `int*`. Integer `abs`, `labs`, and `llabs` preserve the selected source data model's widths.
+
+Library recognition requires a bodyless C-linkage declaration with the standard function's exact signature. A source definition or explicit `loom::import`/`loom::symbol` binding keeps its authored meaning, as do C++ overloads and nonstandard signatures. Once recognized, a call becomes a Loom operation and does not require a linked C math library.
+
+Calls use the same operation semantics and floating-point permissions as the corresponding `loom::scalar` functions. They do not maintain `errno` or a host floating-point environment. Recognized unsupported math receives a source diagnostic naming the function; runtime long-double math is rejected instead of narrowed. Exported C++ uses the explicit scalar projections, including `loom::scalar::absi` for integer absolute value and `loom::scalar::frexpf` plus an explicit exponent store.
 
 ## Explicit 16-bit floating-point types
 
@@ -675,12 +765,13 @@ directives are reserved by the shared envelope, including inside multiline
 source constructs. Other C++ comments, macro continuations, and raw strings
 remain untouched.
 
-The importer-owned integration suite is
-`//loom/src/loom/import/cxx/tooling/test:test`. Authored source lowering goldens
-run through `//loom/src/loom/import/cxx/test:compiler_test`; native API tests
-cover ownership, source providers, and failure propagation. The
-[execution corpus](test/README.md) uses ordinary `loom_test` targets with
-independent numerical oracles.
+The importer-owned tooling suite is
+`//loom/src/loom/import/cxx/tooling/test:test`. Source semantics, diagnostics,
+and source projections live in focused packages beside their owning components;
+the [test guide](test/README.md) indexes those packages and their updater
+workflow. Native API tests cover ownership, source providers, and failure
+propagation. Backend lowering, numerical execution, and target qualification
+have separate owners and do not add runtime dependencies to importer tests.
 
 ## Callable symbol names
 
@@ -729,6 +820,79 @@ no function symbol to rename. Names contain ASCII letters, digits, `_`, `$`, `.`
 or `-`, with no leading `@`. Functions and configuration values share one Loom
 namespace; conflicting exact names diagnose instead of receiving an automatic
 suffix.
+
+## Callable placement policy
+
+Callable policy uses the same vocabulary in C++ and Loom IR. `loom::inline`
+requires expansion at the current IR stage, while `loom::noinline` requires a
+real callable boundary. A target that cannot represent an authored retained
+boundary diagnoses `noinline` instead of silently discarding it. The ordinary
+C++ `inline` keyword retains its language linkage meaning and does not imply
+Loom's placement policy.
+
+`loom::hot` and `loom::cold` carry execution-temperature hints independently
+of that binding decision. A hot function may spend more code size to remove
+call overhead; a cold function retains its boundary unless another explicit or
+target requirement forces expansion. Each policy pair is mutually exclusive:
+
+```cpp
+[[loom::inline, loom::hot]] unsigned clamp_lane(unsigned value) {
+  return value < 64u ? value : 63u;
+}
+
+[[loom::noinline, loom::cold]] unsigned report_invalid_lane(unsigned value) {
+  return value;
+}
+```
+
+The `LOOM_INLINE` facade macro combines `[[loom::inline]]` with the ordinary
+C++ `inline` keyword for header helpers. Direct attributes remain available
+when linkage and placement need separate control.
+
+For a large helper called from several places, `loom::noinline` preserves a
+callable boundary instead of copying its loops into every caller:
+
+```cpp
+[[loom::noinline]] static float advance(float value, unsigned count) {
+  for (unsigned iteration = 0; iteration < count; ++iteration) {
+    value = value * 1.001f + 0.5f;
+  }
+  return value;
+}
+
+float integrate(float value, const int* counts) {
+  value = advance(value, counts[0]);
+  return advance(value, counts[1]);
+}
+```
+
+Unannotated helpers participate in the shared size budget, including on AMDGPU
+and AIE2P cores. Large or frequently called helpers can remain shared without
+annotations. The compiler keeps those decisions compatible with the target:
+oversized physical argument lists and unsupported helper storage force
+expansion. `loom::noinline` instead diagnoses an incompatible boundary.
+
+SPIR-V retains ordinary scalar and static-vector helpers, including nested
+calls. Buffer/view signatures and helpers that may create storage still expand
+so storage planning sees their accesses in the caller. Cooperative-matrix
+fragments must stay within one callable body: Loom template expansion and
+`[[loom::inline]]` helpers preserve their matrix roles and shapes. A fragment
+crossing a remaining call or return produces a diagnostic instead of being
+treated as an ordinary vector argument or result.
+
+AMDGPU and AIE2P native helpers may contain loops and branches, but must be
+leaves after inlining. In a chain `kernel → outer → inner`, the compiler can
+expand `outer` and retain `inner`, or expand `inner` and retain `outer`.
+`loom::noinline` on `outer` selects the second choice; another `loom::noinline`
+on `inner` makes that graph invalid. No subordinate annotation is needed for
+ordinary helpers. AIE2P array construction and configuration still expand
+calls where realization needs their effects in the enclosing program.
+
+The shared inlining budgets apply where the selected target permits optional
+inlining. They do not override a target's required expansion or an authored
+`loom::inline` / `loom::noinline` contract. The
+[function guide](../../../../docs/src/guide/functions-and-control.md#function-modifiers-state-contracts)
+describes those budgets and custom pass options.
 
 ## Translation-unit and runtime imports
 
@@ -835,6 +999,30 @@ read-only data symbols do not add a second type system or compare inline
 payload bodies while linking. Linkable object template specializations remain
 unsupported because their readable source name does not identify a concrete
 specialization.
+
+Function-local `static constexpr` and constant-initialized `static const`
+objects use the same immutable storage:
+
+```cpp
+template <unsigned Bias>
+unsigned coefficient(unsigned index) {
+  alignas(64) static constexpr unsigned table[4] = {
+      Bias, Bias + 1, Bias + 2, Bias + 3};
+  return table[index & 3u];
+}
+```
+
+Each specialization owns one table, with no per-call allocation or copying.
+Matching inline/template definitions share their local objects across linked
+modules. Internal functions and specializations on translation-unit-local
+objects keep their storage private. Separate lexical scopes retain separate
+objects even when their declarations use the same name. Folded scalar constants
+and unused tables do not emit storage.
+
+Local static storage must be nonvolatile, deeply const, constant-initialized,
+and trivially copyable. Thread-local storage, dynamic initialization,
+destructor registration, and embedded object addresses are rejected; a static
+immutable object also cannot have workgroup scope.
 
 Character arrays initialized by narrow or `u8` string literals retain readable
 UTF-8 payloads when their bytes form valid UTF-8:
@@ -1200,19 +1388,22 @@ overstating the root's alignment.
 ## Typed views and layouts
 
 `<loomcxx/view.h>` exposes Loom views without hiding their shape and encoding
-behind a pointer intrinsic. `view<shape<...>, element, role>` follows the same
-left-to-right order as a Loom IR shaped type. Ranks one through fifteen are
-supported. Static extents remain template arguments; `loom::type::dynamic`
-marks each extent supplied when the view is formed. Layout values live in the
-matching `loom::encoding` namespace and can be dense or use runtime element
-strides.
+behind a pointer intrinsic. `view<shape<...>, element, encoding>` follows the
+same left-to-right order as a Loom IR shaped type. Ranks one through fifteen
+are supported. Static extents remain template arguments;
+`loom::type::dynamic` marks each extent supplied when the view is formed.
+Encoding types name the role and rank of the transported encoding value.
+Layout values live in the matching `loom::encoding` namespace and can be dense
+or use runtime element strides.
 
 ```cpp
 #include <loomcxx/view.h>
 
 namespace loomt = loom::type;
-using rows32 =
-    loomt::view<loomt::shape<loomt::dynamic, 32>, const float>;
+using layout2 =
+    loomt::encoding<loom::encoding::role::layout, 2>;
+using rows32 = loomt::view<loomt::shape<loomt::dynamic, 32>, const float,
+                           layout2>;
 
 rows32 suffix(rows32 source, unsigned first, unsigned remaining) {
   return loom::view::subview(source, {first, 0}, {remaining});
@@ -1231,6 +1422,11 @@ void copy_element(const float* input, float* output, unsigned rows,
                     column);
 }
 ```
+
+Omitting the encoding type denotes an ordinary unencoded view; it does not
+infer a dense layout. `loom::buffer::view(data, dimensions)` forms that plain
+view, while passing a layout or storage value forms a view carrying the
+matching encoding type.
 
 The deduced `subview` overload retains the source's static/dynamic extent
 pattern. An explicit `subview<loom::type::dynamic, 16>(...)` selects a different
@@ -1279,20 +1475,22 @@ float read_view(View source) {
 specialization deduces its own return type. The generic reader accepts either
 type, and Loom retains the shape and layout facts through the helper calls.
 
-Physical storage uses the same view type with an explicit storage role. The
-actual encoding remains an ordinary SSA value composed from a layout and
-schema; only its semantic role is part of the C++ type. This keeps helper
-signatures precise without trying to put a runtime value in a template
-argument:
+Physical storage uses the same view type with an explicit storage encoding
+type. The actual encoding remains an ordinary SSA value composed from a layout
+and schema; only its semantic role and rank are part of the C++ type. This
+keeps helper signatures precise without trying to put a runtime value in a
+template argument:
 
 ```cpp
 #include <loomcxx/encoding.h>
 #include <loomcxx/numeric.h>
 
 using Weight = loom::type::float8_e4m3fn_t;
+using Storage3 =
+    loom::type::encoding<loom::encoding::role::storage, 3>;
 using Weights = loom::type::view<
     loom::type::shape<loom::type::dynamic, loom::type::dynamic, 16>,
-    const Weight, loom::encoding::role::storage>;
+    const Weight, Storage3>;
 
 Weights weights(const Weight* data, unsigned rows, unsigned tiles) {
   auto layout = loom::encoding::layout::dense<3>();
@@ -1310,6 +1508,74 @@ the view rank. Schema and numeric-transform encodings have rank zero. A view
 accepts only layout or storage because either must own its address mapping;
 runtime scales, zero points and codebooks stay explicit operands of the decode
 or matrix operation that consumes them.
+
+## Explicit shape assertions
+
+A helper that consumes a fixed packet can be called from shape-parameterized
+code with an explicit assertion at the boundary:
+
+```cpp
+#include <loomcxx/vector.h>
+
+using Packet = unsigned __attribute__((ext_vector_type(4)));
+using Values = loom::type::vector<
+    loom::type::shape<loom::type::dynamic>, unsigned>;
+
+[[loom::inline]] unsigned sum_packet(Packet packet) {
+  return packet[0] + packet[1] + packet[2] + packet[3];
+}
+
+// The caller guarantees that values contains exactly four lanes.
+[[loom::inline]] unsigned sum_four(Values values) {
+  return sum_packet(loom::vector::refine<Packet>(values));
+}
+
+[[loom::inline]] Values expose_packet(Packet packet, loom::type::index width) {
+  return loom::vector::refine<Values>(packet, {width});
+}
+```
+
+`refine<Result>` asserts a different shape description of the same value. It
+preserves rank and the exact source element type; it does not change element
+bits, reorder lanes, allocate storage, or insert a runtime check. Contradictory
+static extents diagnose. A dynamic assertion is the caller's responsibility:
+`sum_four` requires four lanes, and `expose_packet` requires `width == 4`.
+An incorrect assertion makes the program invalid. Ordinary function calls
+continue to require exact types; facts do not insert these assertions implicitly.
+
+A dependent result supplies one `loom::type::index` per dynamic axis, in axis
+order, with no entry for a static axis. Native rank-one vectors and rank-generic
+semantic vectors can cross this boundary. Explicitly refining a dependent vector
+to a static grid also permits the existing `loom::vector::bitcast<Result>` when
+its source and result have equal total bit counts. Bitcasting remains a separate
+operation with a separate representation contract.
+
+Views expose the same assertion through `loom::view::refine<Result>`:
+
+```cpp
+using Layout = loom::type::encoding<loom::encoding::role::layout, 2>;
+using Rows = loom::type::view<
+    loom::type::shape<loom::type::dynamic, 32>, const float, Layout>;
+using Block = loom::type::view<loom::type::shape<4, 32>, const float, Layout>;
+
+Block four_rows(Rows source) {
+  return loom::view::refine<Block>(source);
+}
+```
+
+This preserves the borrowed allocation, byte origin, access qualifiers, and the
+encoding already carried by `source`. An explicit final encoding argument
+asserts a replacement encoding identity; it never repacks storage. An unencoded
+result asserts the ordinary unencoded representation. Every asserted shape and
+mapping must describe the same elements. Refinement cannot cast away `const`
+or `volatile`.
+
+`<loomcxx/pipeline.h>` exposes `loom::tile::refine<Result>` with the same explicit
+dimensions and optional encoding argument for logical tiles. Layout/storage
+encodings carry the tile rank; schema/transform encodings have rank zero.
+Dependent vectors, views, and tiles keep their dimensions and attached encodings
+through ordinary helpers and structured control flow. C++ export/reimport
+preserves these explicit assertions and whole-value transport.
 
 ## Integer bit counts
 
@@ -1330,6 +1596,28 @@ unsigned first_ready_lane(unsigned mask) {
 This imports as `scalar.cttzi ... : i32`, using the same shared target lowering
 as authored High. Signed values count representation bits. Floating-point math
 permissions do not apply to these integer operations.
+
+## Multiprecision integer arithmetic
+
+The importer recognizes the Clang and GCC unsigned add-with-carry and
+subtract-with-borrow builtin families:
+
+```cpp
+unsigned sum = __builtin_addc(lhs, rhs, carry_in, &carry_out);
+unsigned difference = __builtin_subc(lhs, rhs, borrow_in, &borrow_out);
+```
+
+The `b`, `s`, unadorned, `l`, and `ll` suffixes select `unsigned char`,
+`unsigned short`, `unsigned int`, `unsigned long`, and `unsigned long long`.
+`unsigned long` follows the configured C++ data model, so the `l` forms use
+i64 under LP64 and i32 under LLP64.
+
+The carry or borrow input has the same full-width unsigned type as the other
+operands; it is not restricted to zero or one. Loom preserves the builtin
+contract by composing two `scalar.addcarryui` or `scalar.subborrowui`
+operations and combining their flags. The result wraps to the source width,
+and the output pointer receives zero or one in that same unsigned type. Each
+argument is evaluated once before the arithmetic and output store.
 
 ## Integer atomics
 
@@ -1500,15 +1788,15 @@ inactive lanes and partial subgroups do not supply an implicit identity.
 #include <loomcxx/kernel.h>
 using UInt4 = unsigned __attribute__((ext_vector_type(4)));
 
-[[loom::force_inline]] UInt4 exchange(UInt4 local, unsigned elected_lane) {
+[[loom::inline]] UInt4 exchange(UInt4 local, unsigned elected_lane) {
   return loom::kernel::subgroup::broadcast(local, elected_lane);
 }
 
-[[loom::force_inline]] unsigned long long ready_streams(bool ready) {
+[[loom::inline]] unsigned long long ready_streams(bool ready) {
   return loom::kernel::subgroup::vote::ballot(ready);
 }
 
-[[loom::force_inline]] UInt4 predecessor_or(UInt4 local, UInt4 identity) {
+[[loom::inline]] UInt4 predecessor_or(UInt4 local, UInt4 identity) {
   auto previous = loom::kernel::subgroup::shuffle_up(
       local, 1u, loom::kernel::subgroup::size());
   return previous.valid ? previous.value : identity;
@@ -1521,7 +1809,7 @@ These become `kernel.subgroup.broadcast ... : vector<4xi32>, i32`,
 both High results directly to the source record. Declarations use ordinary
 `[[loom::op("kernel.subgroup.broadcast")]]` bindings; custom names and concrete
 template instances use the same admission path. Calls require a kernel body or
-a `loom::force_inline` helper. Each argument is evaluated once, and the shared
+a `loom::inline` helper. Each argument is evaluated once, and the shared
 compiler owns convergence, value facts, and target lowering.
 
 Collectives do not imply memory synchronization. An execution rendezvous names
@@ -1639,7 +1927,67 @@ them even when an explicit root list does not reach their implementation
 symbols, while unselected providers and their transitive helpers disappear
 during linking.
 
-The provider signature must exactly match its family after C++ type resolution.
+`loom::template_apply<target_value>()` names the same family explicitly. This
+allows a generic C++ helper to receive a family as a template argument without
+forming a runtime function pointer:
+
+```cpp
+#include <loomcxx/template.h>
+
+template <auto Family, class Value>
+auto apply_family(Value value) {
+  return loom::template_apply<Family>(value);
+}
+```
+
+The family declaration determines the result type, including record components
+and dependent view extents or encodings. Arguments retain their deduced source
+types. Matching can use declared input dimensions and complete encodings; the
+explicit helper does not perform ordinary C++ argument conversions. Arguments
+are evaluated once. The template header also supplies `LOOM_TEMPLATE_DECL` and
+`LOOM_TEMPLATE_DEF` independently of the kernel facade.
+
+Shaped provider inputs keep the family's carrier kind, rank, element type,
+qualifiers, and encoding role, while dimensions and complete encodings can add
+applicability requirements. Results and other source types remain exact. For
+example, a family with dynamic outer dimensions can select a fixed-shape body:
+
+```cpp
+#include <loomcxx/template.h>
+#include <loomcxx/view.h>
+
+namespace t = loom::type;
+using Dynamic = t::view<t::shape<t::dynamic, 8, t::dynamic>, const float>;
+using Fixed = t::view<t::shape<4, 8, 6>, const float>;
+
+LOOM_TEMPLATE_DECL("guide.read_corner") float read_corner(Dynamic value);
+
+LOOM_TEMPLATE_DEF(read_corner)
+float read_fixed_corner(Fixed value) {
+  return loom::view::load(value, 3u, 7u, 5u);
+}
+
+float entry(Fixed value) {
+  return loom::template_apply<read_corner>(value);
+}
+```
+
+The explicit application carries the actual view and its extents into Loom;
+selection proves the provider's `4x8x6` requirement. The provider body receives
+its declared fixed shape. Calling `read_corner(value)` directly still follows
+ordinary C++ overload resolution, which can reject differing source types
+before Loom template matching runs. `template_apply` is the explicit spelling
+for that matching boundary. Its result type always comes from the family;
+assignment context does not choose a provider.
+
+The same transport supports tensors, tiles, semantic vectors, native C++
+vectors, and encoding-bearing views/tiles. A plain view has native dense layout
+and can satisfy a layout-bearing family; it cannot invent a missing storage
+schema. Complete encoding identity is preserved even when two encodings expose
+the same addresses. Dynamic extents and encoding components occupy the family's
+stable argument coordinates, so scalar `where` clauses retain their meaning
+when a provider has a more specific shape.
+
 The family also owns the calling convention: a `LOOM_DEVICE LOOM_TEMPLATE_DECL`
 declaration makes every provider device code without repeating `LOOM_DEVICE`.
 Provider declarations and definitions may repeat the same family, target and
@@ -2005,18 +2353,25 @@ Repository-authored C++ programs use `.cxx`; compiler expectation fixtures use
 `.cxx-test`. Kernels, helpers, check cases and benchmarks can share one `.cxx`
 translation unit.
 
-`loom-link`, `loom-test`, `loom-benchmark`, and `loom-run` share
-the optional input provider used by `loom-check`. Enabled binaries recognize
-`.c`, `.cc`, `.cpp`, and `.cxx`; explicit `--input-format=cxx` handles another
-filename or stdin. `--input-options='cxx:std=c++23 D=COUNT=8 I=include'` applies
-options to C++ inputs, including `--library` sources. Include directories are
+`loom-import-cxx`, `loom-test`, `loom-benchmark`, and `loom-run` share the
+optional input provider used by `loom-check`. Enabled source-consuming binaries
+recognize `.c`, `.cc`, `.cpp`, and `.cxx`; explicit `--input-format=cxx`
+handles another filename or stdin. Multi-input tools accept
+`--input-options='cxx:std=c++23 D=COUNT=8 I=include'`. Include directories are
 relative to the source file. A `.c` suffix selects the provider; use `std=c11`
 or another supported C standard to select C language semantics.
+
+`loom-link` consumes only Loom text and bytecode modules. Bazel and CMake source
+rules run `loom-import-cxx` for each C/C++ translation unit, then pass those
+modules and any authored Loom inputs to the single linker action. Importer
+options belong to that frontend action and never expand the linker's dependency
+graph.
 
 Source inputs can also be linked once and executed as bytecode:
 
 ```sh
-loom-link checks.cxx --mode=link --include-input-tests \
+loom-import-cxx checks.cxx --to=bc --output=checks.imported.loombc
+loom-link checks.imported.loombc --mode=link --include-input-tests \
   --to=bc --output=checks.loombc
 loom-test checks.loombc
 ```
@@ -2030,9 +2385,9 @@ include resolution.
 
 The input provider changes admission, not execution semantics. `loom-run`
 accepts C++ kernel programs for its HAL workflow; scalar check cases use
-`loom-test`. Building without the C++ importer removes C++ input support
-from these tools. Other importers can participate through the same optional
-provider contract.
+`loom-test`. Building without the C++ importer removes C++ input support from
+source-consuming tools and rules. Other frontends can produce Loom modules at
+the same boundary without becoming linker dependencies.
 
 ## Source constructs
 
@@ -2115,13 +2470,44 @@ while transporting zero values; a two-scalar record remains distinct from a
 pointer. Kernel parameters continue to use the ordinary launch binding ABI and
 reject record parameters.
 
-Admitted records are complete, baseless, non-union types with trivial copying
-and destruction. Fields recursively admit scalar, vector, pointer, record, and
-fixed-array values. Braced and parenthesized aggregate construction preserve
-positional, designated, and omitted-field initialization. Implicit default
+Admitted records are complete, non-union types with nonvirtual bases and no
+virtual members. Copy, move, and destruction may execute ordinary source bodies. Fields
+recursively admit scalar, vector, pointer, record, and fixed-array values. Braced
+and parenthesized aggregate construction preserve positional, designated, and
+omitted-field initialization. Implicit default
 construction such as `Result()` executes the frontend's declaration-order
-member-initialization plan, including nested records and arrays. Bitfields and
-nontrivial lifecycle operations remain outside the SSA record contract.
+member-initialization plan, including nested records and arrays. Bitfields
+require an additional object representation and receive source diagnostics.
+
+Nonvirtual inheritance uses the same value and storage model as composition.
+Direct bases precede fields in aggregate initialization and callable signatures;
+destruction visits fields and then bases in reverse order. Inherited fields,
+methods, operators, and constructors retain the base selected by C++ lookup:
+
+```cpp
+struct Base { double a[3]; };
+struct Grad : Base { double scale; };
+
+double coefficient(double input) {
+  Grad value{{{input, 2.0, 3.0}}, 4.0};
+  return value.a[0] * value.scale + value.a[1];
+}
+```
+
+Ordinary private-storage promotion reduces this example to a multiply and an
+add, just as it does for a nested `Base` field. Multiple and repeated bases
+retain separate identities, including empty bases. Access control, qualified
+member selection, and template substitution follow the frontend's C++ rules.
+Copies of a base subobject copy its represented fields; a derived field in
+reused base tail padding remains untouched.
+
+Derived-to-base references select the existing subobject. An explicit
+base-to-derived reference cast retains the enclosing object's storage and
+requires a live object of the requested derived type, as in C++. Inherited
+access through a derived pointer is supported. Standalone derived/base pointer
+conversions receive a diagnostic until buffer identity can preserve null during
+address adjustment. Virtual bases and virtual dispatch require a dynamic
+object representation and receive source diagnostics.
 
 A record can also define its own constructors. The selected constructor runs
 its declaration-ordered member initializers and then its ordinary C++ body
@@ -2146,18 +2532,268 @@ float coefficient(float scale, unsigned lane) {
 
 Constructors are private inline callables with a storage receiver rather than
 exported C ABI functions. Ordinary inlining and private-fragment promotion
-return statically addressed objects to SSA values. Delegating constructors,
-base subobjects, unions, and nontrivial destruction remain rejected because
-they require lifecycle semantics beyond one destination initialization. The
-receiver must also have a source-layout object representation: records that
-store pointers, references, or semantic Loom values remain SSA aggregates and
-cannot use this constructor form.
+return statically addressed objects to SSA values. A delegating constructor
+invokes the frontend-selected target on that same storage receiver, completes
+the target's initialization and body, and then executes its own body. Chained,
+parenthesized, and braced delegation retain converted and default arguments
+from the frontend's initialization plan.
+
+Unions require an additional object representation and receive source diagnostics.
+The receiver must also have a source-layout object representation: records
+that store pointers, references, or semantic Loom values remain SSA aggregates
+and cannot use this constructor form.
 
 Automatic record objects become private storage when their identity is required.
 Their field and array-element addresses share that storage, while unaddressed
 records remain partitioned SSA values. Aggregate copies preserve value semantics
 in either representation, and shared private-storage promotion can remove the
 allocation after inlining.
+
+### Private reference helpers and methods
+
+Private helpers transport the fields they read and return the fields they
+update. Other fields can remain uninitialized, including fields whose values
+cannot be stored as raw bytes:
+
+```cpp
+struct Slice { float* data; unsigned length; };
+[[loom::noinline]] static void initialize(Slice& slice, unsigned length) {
+  slice.length = length;
+}
+[[loom::noinline]] static unsigned length(const Slice& slice) {
+  return slice.length;
+}
+unsigned measured(unsigned count) {
+  Slice slice;
+  initialize(slice, count);
+  return length(slice);
+}
+```
+
+The private `initialize` takes one `i32` and returns the initialized `i32`;
+`length` also takes and returns one `i32`. Neither reads `slice.data`, allocates
+storage for `slice`, or requires inlining. Forwarding calls and control-flow
+joins use the same field contracts. A conditional update takes the previous
+field value when an untaken path must preserve it. Pointer buffer/offset pairs
+and views with their dimensions and encodings remain complete value groups.
+Public signatures, source predicates, and reference-returning helpers preserve
+their complete source contracts. Observable addresses and overlapping
+arguments retain the shared storage needed to preserve object identity.
+
+Methods and destructors use the same field contracts:
+
+```cpp
+struct Cursor {
+  const float* data;
+  unsigned position;
+  unsigned* output;
+  void reset() { position = 0; }
+  ~Cursor() { *output = position; }
+};
+void initialize(unsigned* output) {
+  Cursor cursor;
+  cursor.output = output;
+  cursor.reset();
+}
+```
+
+`reset()` needs no receiver inputs and returns the new position. The destructor
+takes that position and the output pointer's buffer/offset pair. The unused
+`data` field stays uninitialized, and `cursor` needs no allocation. Cleanup
+reads the current fields at scope exit, including early returns, `break`, and
+`continue`; nested members and bases retain their destruction order. Reading
+an uninitialized field still produces a source diagnostic. Exported C++ uses
+explicit helper calls and results to preserve this behavior.
+
+### Selected references
+
+A local reference can select an automatic object, a field, or a base subobject
+at runtime. The selection is evaluated once. Later reads observe that object's
+current contents, while an earlier value copy keeps its snapshot:
+
+```cpp
+struct Cell { unsigned payload; };
+
+[[loom::noinline]] static void replace(Cell& cell, unsigned next) {
+  cell.payload = next;
+}
+
+unsigned selected(bool choose_first) {
+  Cell first{11u}, second{12u};
+  Cell& cell = choose_first ? first : second;
+  const unsigned& watched = cell.payload;
+  unsigned snapshot = cell.payload;
+  replace(cell, 33u);
+  choose_first = !choose_first;
+  return watched * 100u + snapshot;
+}
+```
+
+`selected(true)` returns `3311`; `selected(false)` returns `3312`. Changing
+the predicate afterward does not redirect `cell` or `watched`. The same
+identity rules apply to records containing semantic Loom values such as
+buffers and views. Those values keep their native component representation.
+
+Nested conditionals execute only the selected arms. Member calls and overloaded
+operators use the same reference handling as ordinary helpers. A helper that
+returns its receiver or one exact reference argument preserves that evaluated
+destination, including a later field projection. For example, an assignment
+through `object.self().pair.second` updates the caller's `pair` field while
+preserving the neighboring fields. A mutable reference parameter contributes
+updated results only when its callable body can write through it.
+
+Independent selections remain one ordinary helper call. The caller reads the
+selected inputs and writes each returned field to its selected destination.
+Untouched fields need no initialized value, and other aliases continue to name
+their original objects. Source objects retain their own lifetimes throughout;
+selection does not create another C++ object.
+Exported C++ expresses these updates with ordinary values and results, preserving
+the behavior when reimported.
+
+Selection preserves the existing call admission rules. Potentially overlapping
+reference arguments, escaping identities, and pointer access require an
+addressable object representation; semantic Loom payloads cannot be stored as
+raw C++ object bytes. Reference results that cannot be related to an admitted
+source destination receive a diagnostic.
+
+### Copy, move, and destruction
+
+Copying and moving execute the constructor or assignment operator selected by
+C++ overload resolution. Mutable, const, and rvalue sources retain their
+selected overloads. An xvalue cast changes the source category; the move body
+owns any transfer and source clearing:
+
+```cpp
+struct State {
+  // Moving transfers this state and clears the source.
+  unsigned value;
+
+  explicit State(unsigned value) : value(value) {}
+  State(const State&) = default;
+  State(State&& other) : value(other.value) { other.value = 0; }
+  State& operator=(const State&) = default;
+  State& operator=(State&& other) {
+    unsigned incoming = other.value;
+    other.value = 0;
+    value = incoming;
+    return *this;
+  }
+};
+```
+
+Defaulted special members execute their frontend-selected member operations
+in declaration order, including multidimensional arrays and captured objects.
+Each array element evaluates its constructor's default arguments and retires
+those temporaries before constructing the next element. Deleted or inaccessible
+members remain source errors. Trivial record families keep direct component
+transport; other records use ordinary callable bodies and the same reference
+identity and alias handling as member functions.
+
+Assignment notation evaluates the right operand before the destination. A
+returned reference still names that destination, so `(left = right).value`
+observes and can mutate the assigned object. Copy and move constructors use the
+exact destination storage; ordinary inlining and promotion can eliminate that
+storage when no identity escapes.
+
+Automatic objects and by-value parameters run their destructors at normal
+source lifetime boundaries. Full-expression temporaries retire after the
+expression, and copied or moved closure captures belong to the resulting
+closure. Guaranteed copy elision transfers the completed object into its
+result without another constructor or destructor. Exported C++ retains the
+resulting calls, effects, and cleanup, independently of the original class
+spelling.
+
+Each temporary has its own lifetime even when its initial value equals another
+object's value. Calls that update a temporary through a reference preserve that
+object's latest state for destruction, including references into a base class:
+
+```cpp
+void retire(unsigned value);
+
+struct Sample {
+  unsigned value;
+  Sample& replace(unsigned next) {
+    value = next;
+    return *this;
+  }
+  ~Sample() { retire(value); }
+};
+
+void submit() {
+  Sample{7}.replace(9);  // retire(9) runs at the end of this statement.
+}
+```
+
+Direct reference binding can extend a temporary through the reference's scope.
+A function returning a reference to that object does not extend its lifetime.
+An immediately invoked lambda destroys its owned captures when the temporary
+closure's full expression ends, after the invocation returns.
+
+Braced aggregate initialization also extends temporaries bound to reference
+members. That lifetime follows the containing object through nested records,
+bases, and array fields, even when the containing type has a trivial destructor:
+
+```cpp
+struct BorrowedSample {
+  // The aggregate initialization determines this referent's lifetime.
+  const Sample& sample;
+};
+
+void consume(unsigned value);
+
+void submit(bool first) {
+  BorrowedSample selected{first ? Sample{1} : Sample{2}};
+  consume(selected.sample.value);
+}  // The selected Sample retires here, after consume.
+```
+
+A conditional prvalue constructs one selected result object; a conditional
+glvalue selects an existing object's identity. Both preserve the source
+destruction boundary. Copies of reference members remain aliases and do not
+create another referent or transfer its cleanup. Side temporaries and temporary
+arguments to a helper still end at their enclosing full expression.
+
+Parenthesized aggregate initialization has C++'s shorter lifetime rule:
+`BorrowedSample expired(Sample{9});` destroys the sample at the semicolon, so
+its reference member cannot be used afterward. The frontend retains the
+initialization form through normalization and template instantiation, allowing
+cleanup analysis to preserve this distinction without inspecting source text.
+
+Array initialization preserves the distinction between explicit element clauses
+and omitted elements. A default argument used to construct an omitted element
+is destroyed before the next element starts construction. The same rule applies
+to default arguments of element copy constructors when copying a complete array.
+Temporaries written in explicit element initializers retain their enclosing
+full-expression lifetime. Binding a reference to an element of a temporary
+array extends the lifetime of the complete array.
+
+`std::initializer_list<T>` constructs a const backing array in source order.
+Each element is initialized directly at its final address, including when its
+constructor exposes `this`. A local list initialized from braces, or a local
+reference bound to that temporary list, keeps the array through its scope. A
+list used as a call argument keeps it through that full expression. Copying the
+list copies its nonowning range without extending the array's lifetime.
+Nontrivial elements are destroyed in reverse order:
+
+```cpp
+#include <initializer_list>
+
+static long largest(std::initializer_list<long> values) {
+  long result = *values.begin();
+  for (long value : values) if (result < value) result = value;
+  return result;
+}
+
+long select(long a, long b, long c) { return largest({a, b, c}); }
+```
+
+The list itself stays in SSA as a buffer identity, byte offset, and count (or
+end pointer for caller-provided pointer-pair library layouts). Its elements use
+ordinary private array storage, which standard inlining and promotion can
+eliminate. Scalars, vectors, and records without pointer or reference fields
+are addressable element types. Pointer-containing elements and nested lists
+require reference-bearing object storage and receive a source diagnostic;
+opaque references are never stored as readable pointer bytes.
 
 ### Ordinary overloaded operators
 
@@ -2206,14 +2842,54 @@ The record components remain explicit at the call boundary:
 ```
 
 Binary and unary operators, compound assignments, and prefix and postfix
-increment or decrement support member and free definitions. Mutable reference
-arguments and receivers use tied callable results, so `value += bias` updates
-the caller's SSA value. A reference result that aliases `*this` reuses that tied
-result. When every return aliases one reference parameter, the result reuses the
-once-evaluated argument; this includes move-shaped templates instantiated from
-lvalue arguments. Using either form as an object identity materializes storage
-only where the source semantics require it. Source evaluation order, including
-the distinct compound-assignment and postfix rules, is retained.
+increment or decrement support member and free definitions. Reference arguments
+and receivers represented in SSA return ordinary results, so `value += bias`
+updates the caller's source binding without consuming its earlier value. A
+reference result that aliases `*this` reuses the updated binding. When every
+return aliases one reference parameter, the result reuses the once-evaluated
+argument; this includes move-shaped templates instantiated from lvalue
+arguments. Using either form as an object identity materializes storage only
+where the source semantics require it. Source evaluation order, including the
+distinct compound-assignment and postfix rules, is retained.
+
+Completed value evaluations keep their earlier value when a later operand
+mutates the source object. For example, shift operands are evaluated left to
+right:
+
+```cpp
+unsigned replace(unsigned& value) { value = 22; return 0; }
+unsigned saved(unsigned value) { return value << replace(value); }
+```
+
+Calling `saved(11)` returns 11. The original value remains available to the
+shift while `replace` returns the new source binding as another ordinary result:
+
+```loom
+%shift, %updated = func.call pure @replace(%original) : (i32) -> (i32, i32)
+%result = scalar.shli %original, %shift : i32
+```
+
+The same rule covers earlier aggregate members, closure captures, and complete
+pointer or shaped-value tuples. Dependent dimensions and layouts travel with
+their returned values. A reference argument instead names its current object
+and observes the completed argument updates. Ordinary SSA values require no
+extra duplicate operations or liveness repair to preserve these completed
+evaluations. Managed reference ownership continues to follow the native
+operation and type contracts.
+
+C++ export represents these internal helpers with value parameters and ordinary
+returns, using a result record when needed. Reimport preserves their behavior
+without reconstructing the original mutable reference signature. Authored
+destructive function ties have no equivalent C++ reference spelling and produce
+an export diagnostic instead of silently losing their contract.
+
+Each returned or passed shaped value includes its ordered dimensions and layout.
+An independently returned size remains a separate record field even when its
+value is also a view's dimension. Reusing a view in several call arguments
+preserves each argument position. Function parameters still represent complete
+source values: an authored IR signature that shares one dimension between two
+formal views cannot be exported as two independent C++ parameters, because that
+would discard the equality required by the IR signature.
 
 `[[loom::op]]` declarations continue to bind facade operations directly to a
 specific High operation and take precedence over an ordinary function body.
@@ -2275,11 +2951,13 @@ Memory records admit scalar, enum, vector and nested named fields,
 including fixed arrays of those types and multidimensional arrays. Array
 members decay to borrowed pointers, so ordinary helpers can consume them.
 Indexing and pointer-to-array arithmetic preserve each source extent's stride.
-The admitted object must be a complete aggregate with trivial copying and
-destruction, without bases, unions, bitfields or `no_unique_address`. Stored
+The admitted object must be complete, without virtual bases, unions, virtual members,
+bitfields, or `no_unique_address`. Selected copy/move bodies and source cleanup
+apply to these objects as they do to other admitted records. Stored
 pointers, references and Loom view/encoding objects require additional
-memory representations and receive source diagnostics. Whole-record loads and
-stores also diagnose: the by-value SSA partition is not an object-copy operation.
+memory representations and receive source diagnostics. Object copies execute
+their selected special members; trivial component transport copies represented
+fields, independently of padding bytes.
 Volatile record pointers and volatile fields retain observable accesses through
 nested members and array elements.
 
@@ -2376,7 +3054,8 @@ offset retains the source `size_t` width.
 Bitfield layouts retain actual bit positions, including fields crossing their
 declared storage units and zero-width alignment boundaries. Layout queries are
 independent of value admission; bitfield memory operations remain unsupported.
-Packed base classes, virtual members, Microsoft bitfield ABI layouts, aligned
+Packed bases retain their source offsets and alignment. Virtual members,
+Microsoft bitfield ABI layouts, aligned
 typedefs, and GNU `aligned` without an explicit argument produce source diagnostics.
 
 Explicit fixed vectors retain their lanes and element widths in High IR:
@@ -2392,7 +3071,7 @@ u32x16 replace_depth(u32x16 previous, u32x16 depth) {
 This imports as `vector<16xi32>` arguments, vector constants, `vector.andi` and
 `vector.ori`. Vector pointers use contiguous `vector.load` and `vector.store`,
 with source object sizes determining pointer strides. The
-`test/vector_depth.cxx` example combines a vector depth recurrence with a scalar
+`value/test/vector/vector_spans.cxx-test` fixture combines a vector depth recurrence with a scalar
 tail and ordinary pointer reinterpretation.
 
 GNU `vector_size` and Clang `ext_vector_type` forms admit arithmetic, bitwise
@@ -2422,12 +3101,15 @@ u32x4 fill(u32x4 values, unsigned begin) {
 }
 ```
 
-A lane of a vector stored in memory uses one vector load and one vector store
-around the functional insertion. Nested record fields update only their vector
-component. The vector object and lane selector are each evaluated once, so
-side effects retain the source evaluation order for plain and compound updates.
-Native vectors are the register-resident spelling for dynamically selected
-fixed lanes; C++ arrays retain their object-storage and aliasing contract.
+An indexed lane of a vector stored in memory uses a scalar element access.
+Nested record fields update only their vector component. The vector object and
+lane selector are each evaluated once, so side effects retain the source
+evaluation order for plain and compound updates. A saved lane reference retains
+both its selected vector and its evaluated index, including a conditional
+between different vector widths. Later changes to the index variable do not
+redirect that reference. Native vectors are the register-resident spelling for
+dynamically selected fixed lanes; C++ arrays retain their object-storage and
+aliasing contract.
 
 `loom::vector::slice<Result>(source, offsets)` extracts a register subvector
 while preserving rank and element type. Native vectors and semantic
@@ -2551,7 +3233,7 @@ operands of `scf.for`. Mutation of a binding inside the loop does not change
 its schedule. Source widths, promotions, and signedness are preserved.
 
 ```cpp
-LOOM_FORCE_INLINE int sum(const int* input, unsigned columns,
+LOOM_INLINE int sum(const int* input, unsigned columns,
                           unsigned factor, unsigned depth) {
   int total = 0;
   [[loom::unroll(factor), loom::pipeline(depth)]]
@@ -2626,10 +3308,23 @@ immutable caller-owned headers, including a shared source cache. Each invocation
 owns its mutable preprocessing and semantic state. Header hits and misses are
 reused within an invocation. Diagnostic sinks copy any bytes they retain.
 
-The importer embeds `<stdfloat>`, `loomcxx/` and `hip/` source headers by default.
+The importer embeds `<initializer_list>`, `<stdfloat>`, `<type_traits>`,
+`loomcxx/` and `hip/` source headers by default.
 User and system include paths take precedence over the embedded system root. The HIP
 facade maps topology, synchronization, scalar half conversions and math onto
 the Loom vocabulary; it does not load the HIP runtime or a host SDK.
+
+The embedded `<initializer_list>` provides the standard list type and its
+`size`, `begin`, and `end` methods, plus free `std::begin` and `std::end`
+overloads. It supports ordinary list deduction, braced range loops, and
+constant evaluation without additional headers.
+
+The embedded `<type_traits>` provides `std::enable_if` and `std::enable_if_t`,
+including the default `void` result and substitution failure for false
+conditions. The HIP facade includes it for device headers that use these
+traits. These are ordinary source templates: return types, function parameters,
+and template parameters all use the frontend's normal substitution rules.
+Other standard-library facilities require caller-supplied headers.
 
 `--builtin-includes=false --I=loom/src/loom/import/cxx/include` uses the external
 headers. Building with `--//loom/config/import/cxx:embed_includes=false`, or
@@ -2757,6 +3452,46 @@ single-buffer binding ABI. Signed displacements are combined with the current
 origin before entering the nonnegative offset domain, so an interior pointer
 can move backward within its allocation.
 
+Optional pointers use ordinary C++ null spellings: `nullptr`, zero conversion,
+and value initialization. Comparisons against null, `!pointer`, and implicit or
+explicit Boolean conversion inspect storage identity without loading memory:
+
+```cpp
+int read_optional(const int* input, bool use) {
+  const int* selected = use ? input : nullptr;
+  return selected ? *selected : 0;
+}
+```
+
+Null values survive helper calls, returns, branches, loops, and pointer-bearing
+SSA records. Native callers can supply a null pointer directly. The VM carries
+an opaque null reference, never a native address encoded as an integer. A valid
+empty buffer is nonnull. The imported `buffer.null` and `buffer.compare.null`
+operations fold when their nullability is known, while a mixed null/live choice
+retains its runtime test. Exported C++ spells these operations
+`loom::buffer::null<T>()` and `loom::buffer::compare::null(buffer)`.
+
+Equality and inequality between live pointers preserve both byte positions:
+
+```cpp
+bool same_element(const int* left, const int* right) {
+  return left + 1 == right;
+}
+```
+
+The importer emits `buffer.compare.address eq` or `ne` with both buffer/offset
+pairs. Independently supplied buffers may alias or describe overlapping storage;
+equality compares their selected positions, not their wrapper identities. When
+cleanup proves a common byte origin, it reduces the operation to `index.cmp`
+on the offsets. This also enables ordinary pointer-iterator termination after
+inlining a helper whose `first` and `last` arguments came from one array.
+
+Exported C++ preserves unresolved comparisons through
+`loom::buffer::compare::address<loom::buffer::compare::predicate::eq>` or `ne`.
+The explicit facade takes two typed buffers and two `loom::type::offset` values.
+Dereferencing null remains invalid. Ordered pointer comparisons and pointer
+subtraction have separate semantics and remain diagnosed.
+
 `void*`, qualified void pointers, and pointers to forward-declared objects use
 the same representation. Copies, casts, helpers, branches, loops, and SSA record
 fields preserve the buffer and byte origin without requiring a pointee layout.
@@ -2803,7 +3538,7 @@ reads, writes, and aliases. Ordinary helpers can update local state through
 pointers, including across branches and loops:
 
 ```cpp
-[[loom::force_inline]] void increment(unsigned* value) { ++*value; }
+[[loom::inline]] void increment(unsigned* value) { ++*value; }
 
 unsigned update(unsigned input, bool enabled) {
   unsigned value = input;
@@ -2811,6 +3546,50 @@ unsigned update(unsigned input, bool enabled) {
   return value;
 }
 ```
+
+Semantic handles can be declared before choosing their value. A branch joins
+only values established on every continuing arm:
+
+```cpp
+#include <loomcxx/buffer.h>
+using Buffer = loom::type::buffer<const unsigned char>;
+
+Buffer select(Buffer first, Buffer second, bool condition) {
+  Buffer result;
+  if (condition) result = first;
+  else result = second;
+  return result;
+}
+```
+
+The declaration creates neither an allocation nor a default resource. The
+selection imports as an ordinary SSA region result. The same rule applies to
+pointers, views, encodings, pipeline handles, and records containing them. A
+view's dynamic dimensions and encoding stay with its payload at every join.
+
+C++ export preserves that complete value through branches, loops, returns, and
+staged calls. Selecting between views of different lengths or layouts copies
+the selected view as a whole. Dimensions and layouts used separately in
+arithmetic, predicates, or new view construction retain their own expressions.
+Transporting a complete view requires no separate C++ assignments for its
+otherwise unobserved metadata.
+Authored IR that independently observes a dependency hidden inside a source
+parameter needs a corresponding source expression. If none exists, export
+identifies the dependency and its containing value instead of adding a parameter
+or changing the function's contract.
+
+Record members can be initialized independently. Reading an initialized member
+does not require the other members, and a loop can carry an initialized counter
+while first constructing a buffer member in its body. A `do` loop executes that
+first body before producing its result; a possibly zero-trip `while` or `for`
+loop cannot establish an otherwise missing value for a subsequent read.
+
+A read before initialization produces a source diagnostic. Returning or passing
+a complete semantic record, including supplying its destructor's value
+receiver, requires all transported members to be initialized. Native objects
+retain their ordinary addressable-storage behavior, including guarded reads,
+default member initializers, and destructors that observe only initialized
+fields.
 
 Automatic storage supports the same scalar and vector types as
 typed pointer storage. The importer emits `buffer.alloca<private>` at the
@@ -2859,9 +3638,8 @@ additional type projections and produces a source diagnostic. Pointer
 differences, comparisons, and truth conversions also produce source diagnostics.
 Distinct-root choices import as ordinary buffer values; executing them requires
 the selected Loom target to support buffer transport through those control-flow
-edges. Nonaggregate construction, nontrivial destruction, exceptions, and
-indirect calls need additional storage and control-flow projections before they
-can be imported.
+edges. Exceptions and indirect calls require additional control-flow
+projections and receive source diagnostics.
 
 Volatile scalar and vector accesses through pointers, automatic objects, and
 workgroup objects become `view.load/store<volatile>` and
@@ -2920,26 +3698,24 @@ after an earlier return would change its effects. An authored incompatible
 schedule therefore receives a diagnostic instead of being silently discarded.
 
 Logical operators preserve contextual boolean conversions and evaluate their
-right operand only in the selected `scf.if` region. Guarded loads and effectful
-helpers are checked by native execution and device access sanitization. Some
-compositions still reach core AMDGPU control-flow restrictions: a guarded
-`while` condition can produce multiple loop exit edges, and `(a && b) || c`
-can produce a shared continuation that the current masked-branch planner
-rejects. Import preserves those source semantics; target compilation reports
-the unsupported control-flow shape.
+right operand only in the selected `scf.if` region. Exact source goldens check
+guarded loads, effectful helper ordering, discarded logical expressions, and
+shared continuations. Target legalization independently enforces the backend's
+control-flow requirements.
 
 ## Implementation boundaries
 
-The importer composes five native packages. Each owns declared library targets,
+The importer composes six native packages. Each owns declared library targets,
 header APIs, and direct API tests that do not link the aggregate importer.
 
 | Package | Contract |
 | --- | --- |
 | `source/` | One configured frontend invocation, provider and diagnostic handling, immutable facade lookup, and source locations copied into the output module. |
 | `value/` | Source type/layout projection, scalar/vector SSA and buffer/origin representations, arithmetic, and memory access construction from already evaluated operands. |
-| `control/` | An immutable analysis of ordered source writes, function/iteration exits and fallthrough, and nonwrapping counted-loop eligibility. This package has no IR dependency. |
+| `control/` | Source-owned reference origins, projected write effects, function/iteration exits, and counted-loop eligibility. The analysis consumes source facts; the separate region builder constructs conditional arms before their result signatures are known. |
 | `binding/` | Admission and construction for generated operation bindings, runtime imports, named scalar configs, kernel launch contracts, and explicit loop schedules. |
 | `symbol/` | Root selection, reachable function identities, deterministic linkage names, and native function declarations or definitions with explicit contracts. |
+| `lifetime/` | Cleanup scopes, temporary lifetimes, and destructor obligations across source control flow. |
 
 `import.cc` owns the native API's validation, exception boundary, module
 ownership, and final verification. `translation.cc` composes the packages: it

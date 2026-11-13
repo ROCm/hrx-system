@@ -11,6 +11,9 @@ from __future__ import annotations
 from loom.dialect.scalar import conversion as scalar_conversion
 from loom.dialect.vector import defs as vector
 from loom.dsl import Op
+from loom.target.arch.amd.xdna.aie2p.contracts.data_path import (
+    BF16_CONVERSION_ROUNDING,
+)
 from loom.target.arch.amd.xdna.aie2p.contracts.packet_conversion import (
     AIE2P_PACKET_CONVERSION_RULES,
 )
@@ -36,6 +39,7 @@ from loom.target.contracts import (
 )
 from loom.target.low_descriptors import Descriptor
 
+_I1 = Scalar("i1")
 _I8 = Scalar("i8")
 _I16 = Scalar("i16")
 _I32 = Scalar("i32")
@@ -318,6 +322,97 @@ def _bf16_to_f32_rule() -> DescriptorRule:
         ),
         emit=tuple(program.emits),
         report_key="exact_bf16_to_binary32",
+    )
+
+
+def _native_f32_to_bf16_rule(*, preserve_nan: bool) -> DescriptorRule:
+    """Uses the vector converter when binary32 subnormal inputs may flush."""
+
+    convert = _descriptor("amd.xdna.aie2p.convert.f32x16.to.bf16x16")
+    converted = (
+        ValueRef.temporary("converted_scalar")
+        if preserve_nan
+        else ValueRef.result("result")
+    )
+    correction = ScalarProgram()
+    if preserve_nan:
+        # VCONV maps NaNs to infinity. Reconstruct their semantic class after
+        # native rounding; the source contract leaves sign and payload free.
+        magnitude_mask = correction.constant("magnitude_mask", 0x7FFFFFFF)
+        infinity = correction.constant("infinity", 0x7F800000)
+        magnitude = correction.binary(
+            "magnitude", "and.i32", ValueRef.operand("input"), magnitude_mask
+        )
+        is_nan = correction.binary("is_nan", "cmp.ult.i32", infinity, magnitude)
+        quiet_nan = correction.constant("quiet_nan", 0x7FC0)
+        correction.select(None, quiet_nan, converted, is_nan)
+    return DescriptorRule(
+        source_op=scalar_conversion.scalar_fptrunc,
+        descriptor=convert,
+        guards=(
+            Guard.value_type("input", _F32),
+            Guard.value_type("result", _BF16),
+            *((Guard.value_not_nan("input"),) if not preserve_nan else ()),
+            Guard.value_not_subnormal_or_instance_flags_has_all(
+                "input", "subnormal", "daz"
+            ),
+        ),
+        emit=(
+            EmitDescriptorOp(
+                descriptor=_descriptor("amd.xdna.aie2p.splat.i32x16"),
+                operands={"src": ValueRef.operand("input")},
+                results={"dst": ValueRef.temporary("source_vector")},
+                result_types={"dst": DescriptorResultType()},
+                form=DescriptorEmitForm.OP,
+            ),
+            EmitDescriptorOp(
+                descriptor=_descriptor(
+                    "amd.xdna.aie2p.move.vector512.to.accumulator512"
+                ),
+                operands={"src": ValueRef.temporary("source_vector")},
+                results={"dst": ValueRef.temporary("source_accumulator")},
+                result_types={"dst": DescriptorResultType()},
+                form=DescriptorEmitForm.OP,
+            ),
+            EmitDescriptorOp(
+                descriptor=_descriptor("amd.xdna.aie2p.state.rounding.immediate"),
+                immediates={"i": BF16_CONVERSION_ROUNDING},
+                form=DescriptorEmitForm.OP,
+            ),
+            EmitDescriptorOp(
+                descriptor=convert,
+                operands={"src": ValueRef.temporary("source_accumulator")},
+                results={"dst": ValueRef.temporary("converted")},
+                result_types={"dst": DescriptorResultType()},
+                form=DescriptorEmitForm.OP,
+            ),
+            EmitRegisterSlice(
+                source=ValueRef.temporary("source_vector"),
+                result=ValueRef.temporary("unused_high"),
+                unit_offset=1,
+                unit_count=1,
+            ),
+            EmitRegisterConcat(
+                sources=(
+                    ValueRef.temporary("converted"),
+                    ValueRef.temporary("unused_high"),
+                ),
+                result=ValueRef.temporary("converted_vector"),
+                result_type=Vector("bf16", lanes=32),
+            ),
+            EmitDescriptorOp(
+                descriptor=_descriptor("amd.xdna.aie2p.extract.i16.immediate"),
+                operands={"s1": ValueRef.temporary("converted_vector")},
+                results={"dst": converted},
+                result_types={"dst": DescriptorResultType()} if preserve_nan else None,
+                immediates={"idx": 0},
+                form=DescriptorEmitForm.OP,
+            ),
+            *correction.emits,
+        ),
+        report_key=(
+            "native_binary32_to_bfloat16" + ("_preserve_nan" if preserve_nan else "")
+        ),
     )
 
 
@@ -1353,6 +1448,33 @@ def _integer_truncate_alias_rule(
     )
 
 
+def _integer_to_predicate_rule(input_type: Scalar) -> DescriptorRule:
+    source = ValueRef.operand("input")
+    prefix: tuple[EmitRegisterSlice, ...] = ()
+    if input_type == _I64:
+        source = ValueRef.temporary("low_word")
+        prefix = (
+            EmitRegisterSlice(
+                source=ValueRef.operand("input"),
+                result=source,
+                unit_count=1,
+            ),
+        )
+
+    program = ScalarProgram()
+    low_bit = program.constant("low_bit", 1)
+    program.binary(None, "and.i32", source, low_bit)
+    return DescriptorRule(
+        source_op=scalar_conversion.scalar_trunci,
+        descriptor=program.emits[-1].descriptor,
+        guards=(
+            Guard.value_type("input", input_type),
+            Guard.value_type("result", _I1),
+        ),
+        emit=(*prefix, *program.emits),
+    )
+
+
 def _integer_to_i64_rule(
     source_op: Op,
     input_type: Scalar,
@@ -1402,7 +1524,62 @@ def _i64_truncate_rule(result_type: Scalar) -> DescriptorRule:
     )
 
 
+def _wide_bf16_narrow_rule() -> DescriptorRule:
+    convert = _descriptor("amd.xdna.aie2p.convert.f32x32.to.bf16x32")
+    emits: list[ContractEmit] = [
+        EmitDescriptorOp(
+            descriptor=_descriptor("amd.xdna.aie2p.state.rounding.immediate"),
+            immediates={"i": BF16_CONVERSION_ROUNDING},
+            form=DescriptorEmitForm.OP,
+        )
+    ]
+    chunks = []
+    for half in range(2):
+        source = ValueRef.temporary(f"source_{half}")
+        result = ValueRef.temporary(f"bf16_{half}")
+        emits.append(
+            EmitRegisterSlice(
+                source=ValueRef.operand("input"),
+                result=source,
+                unit_offset=half * 2,
+                unit_count=2,
+            )
+        )
+        emits.append(
+            EmitDescriptorOp(
+                descriptor=convert,
+                operands={"src": source},
+                results={"dst": result},
+                result_types={"dst": DescriptorResultType()},
+                form=DescriptorEmitForm.OP,
+            )
+        )
+        chunks.append(result)
+    emits.append(EmitRegisterConcat(sources=chunks, result=ValueRef.result("result")))
+    return DescriptorRule(
+        source_op=vector.vector_fptrunc,
+        descriptor=convert,
+        guards=(
+            Guard.value_type(
+                "input",
+                Vector("f32", minimum_static_elements=33, maximum_static_elements=64),
+            ),
+            Guard.value_type(
+                "result",
+                Vector("bf16", minimum_static_elements=33, maximum_static_elements=64),
+            ),
+            Guard.value_not_nan("input"),
+            Guard.value_not_subnormal_or_instance_flags_has_all(
+                "input", "subnormal", "daz"
+            ),
+        ),
+        emit=tuple(emits),
+        report_key="native_binary32x33_64_to_bfloat16x33_64",
+    )
+
+
 AIE2P_CONVERSION_RULES = (
+    _wide_bf16_narrow_rule(),
     *AIE2P_PACKET_CONVERSION_RULES,
     *(
         _integer_extend_rule(source_op, input_type, result_type, operation)
@@ -1453,6 +1630,7 @@ AIE2P_CONVERSION_RULES = (
             (_I32, _I16),
         )
     ),
+    *(_integer_to_predicate_rule(input_type) for input_type in (_I8, _I16, _I32, _I64)),
     *(
         _integer_to_i64_rule(
             source_op,
@@ -1557,6 +1735,8 @@ AIE2P_CONVERSION_RULES = (
     _f32_to_unsigned_i32_rule(),
     _bf16_to_f32_rule(),
     _f32_to_bf16_rule(exact_finite_values=True, preserve_nan=False),
+    _native_f32_to_bf16_rule(preserve_nan=False),
+    _native_f32_to_bf16_rule(preserve_nan=True),
     _f32_to_bf16_rule(exact_finite_values=True),
     _f32_to_bf16_rule(),
     _f16_to_f32_rule(),

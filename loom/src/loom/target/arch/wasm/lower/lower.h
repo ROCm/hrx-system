@@ -20,6 +20,11 @@
 extern "C" {
 #endif
 
+// Returns whether |source_type| has one complete physical carrier in the Wasm
+// function ABI. Internal lowering may use wider tuple carriers that cannot
+// cross a direct call boundary.
+bool loom_wasm_source_type_is_callable(loom_type_t source_type);
+
 // Returns the package-local lowering policy for the Wasm scalar and SIMD
 // subset.
 //

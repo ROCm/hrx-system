@@ -243,7 +243,8 @@ class FabricReservationTest : public GpuXdnaDeviceFixture,
     host_ = static_cast<uint8_t*>(host.pointer);
   }
 
-  void Map(uint32_t ordinal, Binding binding) {
+  void Map(uint32_t ordinal, Binding binding,
+           const Binding* previous = nullptr) {
     const auto& backing = backings_[binding.backing];
     amdf_memory_mapping_update_t update = {
         .target_byte_offset = ordinal * unit_,
@@ -252,6 +253,9 @@ class FabricReservationTest : public GpuXdnaDeviceFixture,
         .memory_access_ordinal = 0,
         .access = host_access_,
         .source_byte_offset = binding.unit * unit_,
+        .previous_memory =
+            previous ? backings_[previous->backing].memory.memory : nullptr,
+        .previous_source_byte_offset = previous ? previous->unit * unit_ : 0,
     };
     // Shared translations update through either alias. Independent consumers
     // each receive an explicit mapping of the same retained physical pages.
@@ -260,6 +264,7 @@ class FabricReservationTest : public GpuXdnaDeviceFixture,
                   reservation_, shared && ordinal % 2 != 0 ? 2 : 0, 1, &update),
               AMDF_STATUS_OK);
     update.memory_access_ordinal = 1;
+    update.previous_memory_access_ordinal = previous ? 1 : 0;
     update.access = access_;
     ASSERT_EQ(api_->memory_reservation_update(reservation_, 1, 1, &update),
               AMDF_STATUS_OK);
@@ -267,6 +272,12 @@ class FabricReservationTest : public GpuXdnaDeviceFixture,
       update.memory = backing.storage.memory != nullptr ? backing.storage.memory
                                                         : backing.memory.memory;
       update.memory_access_ordinal = 0;
+      update.previous_memory_access_ordinal = 0;
+      if (previous) {
+        const auto& old = backings_[previous->backing];
+        update.previous_memory =
+            old.storage.memory ? old.storage.memory : old.memory.memory;
+      }
       update.access = host_access_;
       ASSERT_EQ(api_->memory_reservation_update(reservation_, 2, 1, &update),
                 AMDF_STATUS_OK);
@@ -670,7 +681,9 @@ TEST_P(FabricReservationTest, ReplacesBackingAcrossCpuGpuNpuExecution) {
     }
     for (uint32_t i = 0; i < 3; ++i) {
       if (epoch == 0 || epoch == 2 || i == epoch - 1) {
-        ASSERT_NO_FATAL_FAILURE(Map(i, epochs[epoch][i]));
+        ASSERT_NO_FATAL_FAILURE(
+            Map(i, epochs[epoch][i],
+                epoch && epoch != 2 ? &epochs[epoch - 1][i] : nullptr));
       }
     }
     auto* staging = static_cast<uint32_t*>(staging_.host.pointer);

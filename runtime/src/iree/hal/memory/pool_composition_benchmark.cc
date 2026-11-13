@@ -132,8 +132,7 @@ class PoolComposition {
   void Acquire(iree_hal_pool_t* pool, iree_host_size_t count) {
     bool completed = false;
     IREE_CHECK_OK(iree_hal_pool_acquire_reservations(
-        pool, count, requests_.data(), frontier(), reservations_.data(),
-        infos_.data(),
+        pool, count, requests_.data(), frontier(),
         {
             .fn =
                 [](void* user_data, iree_status_t status,
@@ -147,7 +146,7 @@ class PoolComposition {
                 },
             .user_data = &completed,
         },
-        IREE_HAL_POOL_RESERVE_FLAG_NONE));
+        IREE_HAL_POOL_RESERVE_FLAG_NONE, reservations_.data(), infos_.data()));
     // This benchmark uses prepared CPU storage with inline completion.
     if (!completed) {
       std::abort();

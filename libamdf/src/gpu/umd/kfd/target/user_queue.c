@@ -6,8 +6,6 @@
 
 #include "libamdf/src/gpu/umd/kfd/target/user_queue.h"
 
-#include <string.h>
-
 #include "libamdf/src/gpu/umd/kfd/hdp.h"
 #include "libamdf/src/gpu/umd/kfd/target/aql_queue.h"
 #include "libamdf/src/gpu/umd/kfd/target/pm4_queue.h"
@@ -15,58 +13,6 @@
 
 _Static_assert(AMDF_GPU_QUEUE_FAMILY_CAPACITY >= 3,
                "target queue plan capacity must fit AQL, PM4, and SDMA");
-
-// Restrictions remove individual services after native plans are qualified.
-// Discovery and construction consume the same effective capabilities.
-typedef struct amdf_gpu_kfd_queue_restriction_t {
-  // Exact native GC identity, independent of compiler target aliases.
-  amdf_gpu_kfd_ip_version_t gc_ip;
-  // Exact installed module version, independent of the host kernel release.
-  const char* driver_version;
-  // Queue family whose otherwise supported capabilities are restricted.
-  amdf_queue_command_type_t command_type;
-  // Direct publication capabilities invalidated by this native defect.
-  amdf_user_queue_capabilities_t denied_capabilities;
-} amdf_gpu_kfd_queue_restriction_t;
-
-static void amdf_gpu_kfd_restrict_user_queue_plans(
-    const amdf_gpu_kfd_topology_t* topology,
-    amdf_gpu_kfd_user_queue_plans_t* plans) {
-  // The ROCm 7.2 driver retains the unaligned SDMA engine doorbell bases
-  // repaired by Linux f145d5b3f740. Shader writes can reach the wrong engine;
-  // host writes are unaffected. Custom backports retaining this version are
-  // conservatively restricted too. Unknown versions do not match this table.
-  static const amdf_gpu_kfd_queue_restriction_t restrictions[] = {
-      {{9, 4, 3, true},
-       "6.16.13",
-       AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA,
-       AMDF_USER_QUEUE_CAPABILITY_DEVICE_PRODUCER},
-      {{9, 4, 4, true},
-       "6.16.13",
-       AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA,
-       AMDF_USER_QUEUE_CAPABILITY_DEVICE_PRODUCER},
-      {{9, 5, 0, true},
-       "6.16.13",
-       AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA,
-       AMDF_USER_QUEUE_CAPABILITY_DEVICE_PRODUCER},
-  };
-  for (size_t i = 0; i < sizeof(restrictions) / sizeof(restrictions[0]); ++i) {
-    const amdf_gpu_kfd_queue_restriction_t* restriction = &restrictions[i];
-    if (topology->gc_ip.exact != restriction->gc_ip.exact ||
-        topology->gc_ip.major != restriction->gc_ip.major ||
-        topology->gc_ip.minor != restriction->gc_ip.minor ||
-        topology->gc_ip.revision != restriction->gc_ip.revision ||
-        strcmp(topology->driver_version, restriction->driver_version) != 0) {
-      continue;
-    }
-    for (uint32_t j = 0; j < plans->count; ++j) {
-      amdf_gpu_queue_family_properties_t* family = &plans->values[j].family;
-      if (family->command_type == restriction->command_type) {
-        family->user_queue_capabilities &= ~restriction->denied_capabilities;
-      }
-    }
-  }
-}
 
 void amdf_gpu_kfd_target_user_queue_plans_initialize(
     const amdf_gpu_kfd_topology_t* topology, size_t page_size,
@@ -102,14 +48,6 @@ void amdf_gpu_kfd_target_user_queue_plans_initialize(
                                    &plan)) {
     plans.values[plans.count++] = plan;
   }
-  const amdf_queue_host_publication_flags_t local_publication =
-      topology->integrated ? AMDF_QUEUE_HOST_PUBLICATION_FLAG_KNOWN
-                           : amdf_gpu_kfd_hdp_host_publication(topology);
-  const bool host_visible_local =
-      topology->integrated ||
-      (topology->vram.total_byte_length != 0 &&
-       topology->vram.visible_byte_length >= topology->vram.total_byte_length &&
-       page_size <= 4096 && local_publication != 0);
   for (uint32_t i = 0; i < plans.count; ++i) {
     amdf_gpu_queue_family_properties_t* family = &plans.values[i].family;
     if (topology->properties.execution_resources.compute_units_per_resource !=
@@ -127,18 +65,43 @@ void amdf_gpu_kfd_target_user_queue_plans_initialize(
       family->user_queue_capabilities |=
           AMDF_USER_QUEUE_CAPABILITY_COOPERATIVE_DISPATCH;
     }
-    plans.values[i].family.placement_capabilities =
-        AMDF_QUEUE_PLACEMENT_CAPABILITY_HOST_LOCAL |
-        (host_visible_local ? AMDF_QUEUE_PLACEMENT_CAPABILITY_DEVICE_LOCAL : 0);
     plans.values[i].ring.placement = AMDF_QUEUE_PLACEMENT_HOST_LOCAL;
-    plans.values[i].family.host_publication[AMDF_QUEUE_PLACEMENT_DEFAULT] =
-        AMDF_QUEUE_HOST_PUBLICATION_FLAG_KNOWN;
-    plans.values[i].family.host_publication[AMDF_QUEUE_PLACEMENT_HOST_LOCAL] =
-        AMDF_QUEUE_HOST_PUBLICATION_FLAG_KNOWN;
-    plans.values[i].family.host_publication[AMDF_QUEUE_PLACEMENT_DEVICE_LOCAL] =
-        host_visible_local ? local_publication
-                           : AMDF_QUEUE_HOST_PUBLICATION_FLAG_UNKNOWN;
   }
-  amdf_gpu_kfd_restrict_user_queue_plans(topology, &plans);
   *out_plans = plans;
+}
+
+amdf_queue_family_placement_info_t amdf_gpu_kfd_target_user_queue_placement(
+    const amdf_gpu_kfd_topology_t* topology, size_t page_size,
+    amdf_queue_command_type_t command_type) {
+  const amdf_queue_host_publication_flags_t local_publication =
+      topology->integrated ? AMDF_QUEUE_HOST_PUBLICATION_FLAG_KNOWN
+                           : amdf_gpu_kfd_hdp_host_publication(topology);
+  const bool host_visible_local =
+      topology->integrated ||
+      (topology->vram.total_byte_length != 0 &&
+       topology->vram.visible_byte_length >= topology->vram.total_byte_length &&
+       page_size <= 4096 && local_publication != 0);
+  // AQL commits through a header in the same uncached ring as its body. Host
+  // store ordering suffices for that relation even when the backing moves.
+  // PM4 and SDMA commit through a separately mapped coherent write index.
+  const amdf_queue_host_publication_flags_t ring_publication =
+      command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL
+          ? AMDF_QUEUE_HOST_PUBLICATION_FLAG_KNOWN
+          : local_publication;
+  return (amdf_queue_family_placement_info_t){
+      .placement_capabilities =
+          AMDF_QUEUE_PLACEMENT_CAPABILITY_HOST_LOCAL |
+          (host_visible_local ? AMDF_QUEUE_PLACEMENT_CAPABILITY_DEVICE_LOCAL
+                              : 0),
+      .host_publication =
+          {
+              [AMDF_QUEUE_PLACEMENT_DEFAULT] =
+                  AMDF_QUEUE_HOST_PUBLICATION_FLAG_KNOWN,
+              [AMDF_QUEUE_PLACEMENT_HOST_LOCAL] =
+                  AMDF_QUEUE_HOST_PUBLICATION_FLAG_KNOWN,
+              [AMDF_QUEUE_PLACEMENT_DEVICE_LOCAL] =
+                  host_visible_local ? ring_publication
+                                     : AMDF_QUEUE_HOST_PUBLICATION_FLAG_UNKNOWN,
+          },
+  };
 }

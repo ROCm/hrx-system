@@ -93,4 +93,22 @@ TEST(TypeConstraintTest, Group) {
                                               LOOM_TYPE_CONSTRAINT_GROUP));
 }
 
+TEST(TypeConstraintTest, ManagedReferences) {
+  for (loom_reference_ownership_t ownership : {
+           LOOM_REFERENCE_OWNERSHIP_OWNED,
+           LOOM_REFERENCE_OWNERSHIP_BORROWED,
+       }) {
+    const loom_type_t type = loom_type_reference(ownership, 1, 2, 3);
+    EXPECT_TRUE(loom_type_satisfies_constraint(
+        type, LOOM_TYPE_CONSTRAINT_MANAGED_REFERENCE));
+    EXPECT_FALSE(
+        loom_type_satisfies_constraint(type, LOOM_TYPE_CONSTRAINT_SCALAR));
+  }
+  for (loom_type_t type : {loom_type_scalar(LOOM_SCALAR_TYPE_I64),
+                           loom_type_pool(), loom_type_buffer()}) {
+    EXPECT_FALSE(loom_type_satisfies_constraint(
+        type, LOOM_TYPE_CONSTRAINT_MANAGED_REFERENCE));
+  }
+}
+
 }  // namespace

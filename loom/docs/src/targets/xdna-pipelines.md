@@ -345,7 +345,7 @@ correctness or measured device throughput.
 
 The normal `loom-test` path can compile and execute buffer-bound XDNA
 pipelines through the
-[XDNA HAL](https://github.com/ROCm/hrx-system/tree/main/runtime/src/iree/hal/drivers/amd/xdna):
+[XDNA HAL](https://github.com/ROCm/hrx-system/tree/main/runtime/src/iree/hal/driver/amd/xdna):
 
 ```shell
 loom-test checked-pipeline.loom --device=xdna

@@ -1,0 +1,17 @@
+# Copyright 2026 The IREE Authors
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//loom/build_tools/bazel:loom_check.bzl", "loom_check_test_suite")
+
+package(default_visibility = ["//visibility:private"])
+
+loom_check_test_suite(
+    name = "test",
+    srcs = [
+        "borrow.loom-test",
+        "duplicate.loom-test",
+        "release.loom-test",
+        "roundtrip.loom-test",
+        "state.loom-test",
+    ],
+)

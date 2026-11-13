@@ -238,23 +238,6 @@ iree_status_t loom_amdgpu_select_dynamic_u32_division_plan(
   return iree_ok_status();
 }
 
-iree_status_t loom_amdgpu_finalize_dynamic_u32_division_plan(
-    loom_low_lower_context_t* context,
-    const loom_amdgpu_dynamic_u32_division_plan_t* plan) {
-  const loom_type_t result_type = loom_low_register_type(
-      loom_low_lower_context_descriptor_set(context)->stable_id,
-      plan->register_class_id, 1);
-  if (plan->quotient != LOOM_VALUE_ID_INVALID) {
-    IREE_RETURN_IF_ERROR(
-        loom_low_lower_plan_value_type(context, plan->quotient, result_type));
-  }
-  if (plan->remainder != LOOM_VALUE_ID_INVALID) {
-    IREE_RETURN_IF_ERROR(
-        loom_low_lower_plan_value_type(context, plan->remainder, result_type));
-  }
-  return iree_ok_status();
-}
-
 void loom_amdgpu_mark_dynamic_u32_division_plan_storage_demands(
     loom_low_lower_context_t* context,
     const loom_amdgpu_dynamic_u32_division_plan_t* plan) {
@@ -305,6 +288,73 @@ static iree_status_t loom_amdgpu_dynamic_division_emit_signed_magnitude(
       out_magnitude);
 }
 
+static const uint8_t loom_amdgpu_division_reciprocal_id;
+
+static iree_status_t loom_amdgpu_initialize_division_reciprocal(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const void* data, loom_value_id_t carried_value,
+    loom_value_id_t* out_value) {
+  (void)carried_value;
+  const loom_amdgpu_dynamic_u32_division_plan_t* plan =
+      (const loom_amdgpu_dynamic_u32_division_plan_t*)data;
+  const loom_type_t word_type = loom_low_register_type(
+      loom_low_lower_context_descriptor_set(context)->stable_id,
+      plan->register_class_id, 1);
+  loom_value_id_t divisor = loom_low_lower_lookup_value(context, plan->rhs);
+  IREE_RETURN_IF_ERROR(loom_amdgpu_materialize_low_numeric_carrier(
+      context, source_op, divisor, word_type, &divisor));
+  if (loom_amdgpu_integer_division_domain(source_op) ==
+      LOOM_AMDGPU_INTEGER_DIVISION_DOMAIN_SIGNED) {
+    loom_value_id_t sign = LOOM_VALUE_ID_INVALID;
+    IREE_RETURN_IF_ERROR(loom_amdgpu_dynamic_division_emit_sign(
+        context, source_op, plan->register_class_id, divisor, word_type,
+        &sign));
+    IREE_RETURN_IF_ERROR(loom_amdgpu_dynamic_division_emit_signed_magnitude(
+        context, source_op, plan->register_class_id, divisor, sign, word_type,
+        &divisor));
+  }
+  loom_amdgpu_runtime_u32_division_t division;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_prepare_runtime_u32_division(
+      context, source_op, plan->register_class_id, divisor, word_type,
+      &division));
+  *out_value = division.reciprocal;
+  return iree_ok_status();
+}
+
+iree_status_t loom_amdgpu_finalize_dynamic_u32_division_plan(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_amdgpu_dynamic_u32_division_plan_t* plan) {
+  const loom_type_t result_type = loom_low_register_type(
+      loom_low_lower_context_descriptor_set(context)->stable_id,
+      plan->register_class_id, 1);
+  if (plan->quotient != LOOM_VALUE_ID_INVALID) {
+    IREE_RETURN_IF_ERROR(
+        loom_low_lower_plan_value_type(context, plan->quotient, result_type));
+  }
+  if (plan->remainder != LOOM_VALUE_ID_INVALID) {
+    IREE_RETURN_IF_ERROR(
+        loom_low_lower_plan_value_type(context, plan->remainder, result_type));
+  }
+  const uint8_t domain = loom_amdgpu_integer_division_domain(source_op);
+  const loom_low_lower_realization_input_t input = {
+      .kind = LOOM_LOW_LOWER_REALIZATION_INPUT_SOURCE,
+      .value.identity = plan->rhs,
+  };
+  const loom_low_lower_realization_recipe_t recipe = {
+      .type = result_type,
+      .id =
+          (loom_low_lower_plan_id_t)(uintptr_t)&loom_amdgpu_division_reciprocal_id,
+      .key = iree_make_const_byte_span(&domain, sizeof(domain)),
+      .inputs = &input,
+      .input_count = 1,
+      .require_loop_motion = true,
+      .initialize = loom_amdgpu_initialize_division_reciprocal,
+      .data = plan,
+  };
+  return loom_low_lower_realization_request(context, source_op, NULL, &recipe,
+                                            &plan->reciprocal);
+}
+
 iree_status_t loom_amdgpu_lower_dynamic_u32_division(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_amdgpu_dynamic_u32_division_plan_t* plan) {
@@ -318,9 +368,9 @@ iree_status_t loom_amdgpu_lower_dynamic_u32_division(
     const loom_type_t required_type = loom_low_register_type(
         loom_low_lower_context_descriptor_set(context)->stable_id,
         plan->register_class_id, 1);
-    IREE_RETURN_IF_ERROR(loom_amdgpu_materialize_low_scalar_carrier(
+    IREE_RETURN_IF_ERROR(loom_amdgpu_materialize_low_numeric_carrier(
         context, source_op, dividend, required_type, &dividend));
-    IREE_RETURN_IF_ERROR(loom_amdgpu_materialize_low_scalar_carrier(
+    IREE_RETURN_IF_ERROR(loom_amdgpu_materialize_low_numeric_carrier(
         context, source_op, divisor, required_type, &divisor));
   } else if (plan->register_class_id == LOOM_AMDGPU_REG_CLASS_ID_VGPR) {
     IREE_RETURN_IF_ERROR(loom_amdgpu_materialize_low_vgpr_b32(
@@ -351,9 +401,24 @@ iree_status_t loom_amdgpu_lower_dynamic_u32_division(
   }
 
   loom_amdgpu_runtime_u32_division_t division;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_prepare_runtime_u32_division(
-      context, source_op, plan->register_class_id, divisor, word_type,
-      &division));
+  if (plan->reciprocal != NULL) {
+    division = (loom_amdgpu_runtime_u32_division_t){
+        .register_class_id = plan->register_class_id,
+        .word_type = word_type,
+        .divisor = divisor,
+        .reciprocal = loom_low_lower_realization_value(plan->reciprocal),
+    };
+    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_const_u32(
+        context, source_op,
+        plan->register_class_id == LOOM_AMDGPU_REG_CLASS_ID_SGPR
+            ? LOOM_AMDGPU_DESCRIPTOR_REF_S_MOV_B32
+            : LOOM_AMDGPU_DESCRIPTOR_REF_V_MOV_B32,
+        1, word_type, &division.one));
+  } else {
+    IREE_RETURN_IF_ERROR(loom_amdgpu_prepare_runtime_u32_division(
+        context, source_op, plan->register_class_id, divisor, word_type,
+        &division));
+  }
   loom_value_id_t quotient = LOOM_VALUE_ID_INVALID;
   loom_value_id_t remainder = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_amdgpu_emit_runtime_u32_division(

@@ -306,7 +306,7 @@ loom_low_representation_id_t loom_amdgpu_source_integer_representation_lookup(
   return representation;
 }
 
-static iree_status_t loom_amdgpu_normalize_narrow_integer_to_lane_type(
+iree_status_t loom_amdgpu_normalize_narrow_integer(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_value_id_t low_source, uint32_t source_bit_count,
     loom_low_representation_id_t source_representation,
@@ -346,19 +346,6 @@ static iree_status_t loom_amdgpu_normalize_narrow_integer_to_lane_type(
   return iree_ok_status();
 }
 
-iree_status_t loom_amdgpu_normalize_narrow_integer(
-    loom_low_lower_context_t* context, const loom_op_t* source_op,
-    loom_value_id_t low_source, uint32_t source_bit_count,
-    loom_low_representation_id_t source_representation,
-    loom_low_representation_id_t required_representation,
-    loom_value_id_t* out_low_result) {
-  loom_type_t lane_type = loom_type_none();
-  IREE_RETURN_IF_ERROR(loom_amdgpu_make_vgpr_type(context, &lane_type));
-  return loom_amdgpu_normalize_narrow_integer_to_lane_type(
-      context, source_op, low_source, source_bit_count, source_representation,
-      required_representation, lane_type, out_low_result);
-}
-
 iree_status_t loom_amdgpu_normalize_narrow_source_integer(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_value_id_t source_value, loom_value_id_t low_source,
@@ -370,7 +357,7 @@ iree_status_t loom_amdgpu_normalize_narrow_source_integer(
     *out_low_result = low_source;
     return iree_ok_status();
   }
-  return loom_amdgpu_normalize_narrow_integer_to_lane_type(
+  return loom_amdgpu_normalize_narrow_integer(
       context, source_op, low_source,
       loom_scalar_type_bitwidth(loom_type_element_type(source_type)),
       loom_amdgpu_source_integer_representation_lookup(context, source_value),

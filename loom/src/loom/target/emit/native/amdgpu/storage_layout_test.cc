@@ -77,7 +77,7 @@ class AmdgpuStorageLayoutTest : public ::testing::Test {
     IREE_ASSERT_OK(loom_low_func_def_build(
         &module_builder, LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_TARGET,
         /*visibility=*/0, /*retain=*/0, /*cc=*/0,
-        /*effect_contract=*/0, /*inline_policy=*/0,
+        /*effect_contract=*/0, /*temperature=*/0, /*inline_policy=*/0,
         /*allocation=*/0, /*schedule=*/0,
         /*descriptor_set=*/representation_contract, target_ref, /*abi=*/0,
         loom_named_attr_slice_t{}, loom_named_attr_slice_t{},
@@ -117,12 +117,14 @@ class AmdgpuStorageLayoutTest : public ::testing::Test {
     return loom_low_storage_view_result(op);
   }
 
-  iree_status_t BuildLayout(loom_amdgpu_storage_layout_t* out_layout) {
+  iree_status_t BuildLayout(
+      loom_amdgpu_storage_layout_segment_sizes_t segment_prefix,
+      loom_amdgpu_storage_layout_t* out_layout) {
     loom_low_storage_layout_t source_layout = {};
     IREE_RETURN_IF_ERROR(loom_low_storage_layout_builder_finish(
         &source_layout_builder_, &layout_arena_, &source_layout));
-    return loom_amdgpu_storage_layout_build(&source_layout, &layout_arena_,
-                                            out_layout);
+    return loom_amdgpu_storage_layout_build(&source_layout, segment_prefix,
+                                            &layout_arena_, out_layout);
   }
 
   void ExpectReservation(const loom_amdgpu_storage_layout_t& layout,
@@ -160,7 +162,7 @@ TEST_F(AmdgpuStorageLayoutTest,
       Reserve(LOOM_STORAGE_SPACE_WORKGROUP, 12, 4);
 
   loom_amdgpu_storage_layout_t layout = {};
-  IREE_EXPECT_OK(BuildLayout(&layout));
+  IREE_EXPECT_OK(BuildLayout({}, &layout));
   EXPECT_EQ(layout.segment_sizes.private_segment_fixed_size, 32u);
   EXPECT_EQ(layout.segment_sizes.group_segment_fixed_size, 12u);
   ExpectReservation(layout, scratch0, LOOM_STORAGE_SPACE_SCRATCH, 0, 8, 8);
@@ -189,7 +191,7 @@ TEST_F(AmdgpuStorageLayoutTest, ResolvesViewsAgainstProjectedOffsets) {
   const loom_value_id_t view = View(private_storage, 2, 4);
 
   loom_amdgpu_storage_layout_t layout = {};
-  IREE_EXPECT_OK(BuildLayout(&layout));
+  IREE_EXPECT_OK(BuildLayout({}, &layout));
   loom_amdgpu_storage_layout_reference_t reference = {};
   loom_amdgpu_storage_layout_lookup_reference(&layout, view, &reference);
   EXPECT_EQ(reference.reservation.space, LOOM_STORAGE_SPACE_PRIVATE);
@@ -200,24 +202,21 @@ TEST_F(AmdgpuStorageLayoutTest, ResolvesViewsAgainstProjectedOffsets) {
   ExpectReservation(layout, scratch, LOOM_STORAGE_SPACE_SCRATCH, 0, 8, 8);
 }
 
-TEST_F(AmdgpuStorageLayoutTest, AppendsFunctionLayoutsToSharedSegments) {
+TEST_F(AmdgpuStorageLayoutTest, PlacesFunctionStorageAfterSegmentPrefix) {
   const loom_value_id_t private_storage =
       Reserve(LOOM_STORAGE_SPACE_PRIVATE, 8, 8);
   const loom_value_id_t private_view = View(private_storage, 2, 4);
   const loom_value_id_t workgroup_storage =
       Reserve(LOOM_STORAGE_SPACE_WORKGROUP, 12, 4);
 
-  loom_amdgpu_storage_layout_t source_layout = {};
-  IREE_ASSERT_OK(BuildLayout(&source_layout));
-  loom_amdgpu_storage_layout_segment_sizes_t segment_sizes = {
+  const loom_amdgpu_storage_layout_segment_sizes_t segment_prefix = {
       .group_segment_fixed_size = 6,
       .private_segment_fixed_size = 3,
   };
   loom_amdgpu_storage_layout_t first_layout = {};
-  IREE_ASSERT_OK(loom_amdgpu_storage_layout_append(
-      &source_layout, &segment_sizes, &layout_arena_, &first_layout));
-  EXPECT_EQ(segment_sizes.group_segment_fixed_size, 20u);
-  EXPECT_EQ(segment_sizes.private_segment_fixed_size, 16u);
+  IREE_ASSERT_OK(BuildLayout(segment_prefix, &first_layout));
+  EXPECT_EQ(first_layout.segment_sizes.group_segment_fixed_size, 20u);
+  EXPECT_EQ(first_layout.segment_sizes.private_segment_fixed_size, 16u);
   ExpectReservation(first_layout, private_storage, LOOM_STORAGE_SPACE_PRIVATE,
                     8, 8, 8);
   ExpectReservation(first_layout, workgroup_storage,
@@ -229,21 +228,36 @@ TEST_F(AmdgpuStorageLayoutTest, AppendsFunctionLayoutsToSharedSegments) {
   EXPECT_EQ(first_view_reference.byte_offset, 2u);
 
   loom_amdgpu_storage_layout_t second_layout = {};
-  IREE_ASSERT_OK(loom_amdgpu_storage_layout_append(
-      &source_layout, &segment_sizes, &layout_arena_, &second_layout));
-  EXPECT_EQ(segment_sizes.group_segment_fixed_size, 32u);
-  EXPECT_EQ(segment_sizes.private_segment_fixed_size, 24u);
+  IREE_ASSERT_OK(BuildLayout(first_layout.segment_sizes, &second_layout));
+  EXPECT_EQ(second_layout.segment_sizes.group_segment_fixed_size, 32u);
+  EXPECT_EQ(second_layout.segment_sizes.private_segment_fixed_size, 24u);
   ExpectReservation(second_layout, private_storage, LOOM_STORAGE_SPACE_PRIVATE,
                     16, 8, 8);
   ExpectReservation(second_layout, workgroup_storage,
                     LOOM_STORAGE_SPACE_WORKGROUP, 20, 12, 4);
+  // Independent projections preserve the original placement and view index.
+  ExpectReservation(first_layout, private_view, LOOM_STORAGE_SPACE_PRIVATE, 8,
+                    8, 8);
+}
+
+TEST_F(AmdgpuStorageLayoutTest, RetainsPrefixWithoutLocalStorage) {
+  const loom_amdgpu_storage_layout_segment_sizes_t segment_prefix = {
+      .group_segment_fixed_size = 16,
+      .private_segment_fixed_size = 48,
+  };
+  loom_amdgpu_storage_layout_t layout = {};
+  IREE_ASSERT_OK(BuildLayout(segment_prefix, &layout));
+  EXPECT_EQ(layout.record_count, 0u);
+  EXPECT_EQ(layout.segment_sizes.group_segment_fixed_size, 16u);
+  EXPECT_EQ(layout.segment_sizes.private_segment_fixed_size, 48u);
 }
 
 TEST_F(AmdgpuStorageLayoutTest, RejectsStackStorage) {
   Reserve(LOOM_STORAGE_SPACE_STACK, 8, 4);
 
   loom_amdgpu_storage_layout_t layout = {};
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION, BuildLayout(&layout));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
+                        BuildLayout({}, &layout));
 }
 
 }  // namespace

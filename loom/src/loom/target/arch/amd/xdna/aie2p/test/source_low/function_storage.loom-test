@@ -37,25 +37,23 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @resident
 
 aie2p.target<core> @target
 
-func.def target(@target) @bounded_private_scalar_copy(%byte_length0: offset) {
+// Volatile observation keeps a private slot addressable while the range fact
+// supplies the allocation's upper bound.
+func.def target(@target) @bounded_private_scalar_observation(%byte_length0: offset, %initial: i32) -> (i32) {
   %byte_length = index.assume %byte_length0 [range(%byte_length0, 64, 128)] : offset
   %base = index.constant 0 : offset
-  %source = buffer.alloca<private> align(64) %byte_length : buffer
-  %output = buffer.alloca<private> align(64) %byte_length : buffer
-  %source_view = buffer.view %source[%base] : buffer -> view<1xi32>
-  %output_view = buffer.view %output[%base] : buffer -> view<1xi32>
-  %value = view.load %source_view[0] : view<1xi32> -> i32
-  view.store %value, %output_view[0] : i32, view<1xi32>
-  func.return
+  %storage = buffer.alloca<private> align(64) %byte_length : buffer
+  %view = buffer.view %storage[%base] : buffer -> view<1xi32>
+  view.store<volatile> %initial, %view[0] : i32, view<1xi32>
+  %value = view.load<volatile> %view[0] : view<1xi32> -> i32
+  func.return %value : i32
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @bounded_private_scalar_copy(%byte_length: reg<aie2p.er>) asm {
-  %9 = storage {byte_alignment = 64, byte_length = 128} : low.storage<private>
-  %source = storage_address %9 : low.storage<private> -> reg<aie2p.ep>
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @bounded_private_scalar_observation(%byte_length: reg<aie2p.er>, %initial: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
   %11 = storage {byte_alignment = 64, byte_length = 128} : low.storage<private>
-  %output = storage_address %11 : low.storage<private> -> reg<aie2p.ep>
-  %value = lda %source, 0
-  st %value, %output, 0
-  return
+  %storage = storage_address %11 : low.storage<private> -> reg<aie2p.ep>
+  st.volatile<volatile> %initial, %storage, 0
+  %value = lda.volatile<volatile> %storage, 0
+  return %value
 }

@@ -218,10 +218,11 @@ check.scenario @vector_i32_shift_values {
 }
 
 func.def @vector_i64_shifts(%input: buffer, %count_input: buffer, %output: buffer) {
+  %source, %count_source, %destination = buffer.assume.noalias %input, %count_input, %output : buffer, buffer, buffer
   %base = index.constant 0 : offset
-  %values_view = buffer.view %input[%base] : buffer -> view<8xi64>
-  %counts_view = buffer.view %count_input[%base] : buffer -> view<8xi64>
-  %results = buffer.view %output[%base] : buffer -> view<6x8xi64>
+  %values_view = buffer.view %source[%base] : buffer -> view<8xi64>
+  %counts_view = buffer.view %count_source[%base] : buffer -> view<8xi64>
+  %results = buffer.view %destination[%base] : buffer -> view<6x8xi64>
   %values = vector.load %values_view[0] : view<8xi64> -> vector<7xi64>
   %raw_counts = vector.load %counts_view[0] : view<8xi64> -> vector<7xi64>
   %count_mask = vector.splati 63 : vector<7xi64>

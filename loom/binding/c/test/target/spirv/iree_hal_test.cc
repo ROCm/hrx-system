@@ -12,7 +12,7 @@
 #include <vector>
 
 #include "iree/hal/api.h"
-#include "iree/hal/drivers/vulkan/device_spec.h"
+#include "iree/hal/driver/vulkan/device_spec.h"
 #include "iree/hal/utils/device_spec_builder.h"
 #include "iree/testing/gtest.h"
 #include "loomc/diagnostic.h"
@@ -119,18 +119,39 @@ iree_hal_vulkan_features_t RequiredVulkanFeatures() {
   };
 }
 
+struct VulkanDeviceSpecOptions {
+  // Number of entries in |cooperative_matrix_properties|.
+  iree_host_size_t cooperative_matrix_property_count = 0;
+  // Cooperative matrix properties reported by the device.
+  const iree_hal_vulkan_cooperative_matrix_property_t*
+      cooperative_matrix_properties = nullptr;
+  // Vulkan numerical and execution behavior flags.
+  iree_hal_vulkan_device_spec_flags_t device_spec_flags =
+      IREE_HAL_VULKAN_DEVICE_SPEC_FLAG_NONE;
+  // Vulkan subgroup operation bits reported by the device.
+  uint32_t subgroup_supported_operations = 0;
+  // PCI vendor identifier reported by the device.
+  uint32_t vendor_id = kNvidiaVendorId;
+  // Dispatch limits replacing the fixture defaults, when present.
+  const iree_hal_device_dispatch_spec_t* dispatch_override = nullptr;
+  // Maximum number of subgroups in one workgroup.
+  uint32_t maximum_workgroup_subgroup_count = 0;
+};
+
 iree_status_t CreateVulkanDeviceSpec(
     iree_hal_vulkan_features_t enabled_features, DeviceSpecFlags flags,
-    DeviceSpecPtr* out_device_spec,
-    iree_host_size_t cooperative_matrix_property_count = 0,
-    const iree_hal_vulkan_cooperative_matrix_property_t*
-        cooperative_matrix_properties = nullptr,
-    iree_hal_vulkan_device_spec_flags_t device_spec_flags =
-        IREE_HAL_VULKAN_DEVICE_SPEC_FLAG_NONE,
-    uint32_t subgroup_supported_operations = 0,
-    uint32_t vendor_id = kNvidiaVendorId,
-    const iree_hal_device_dispatch_spec_t* dispatch_override = nullptr,
-    uint32_t maximum_workgroup_subgroup_count = 0) {
+    const VulkanDeviceSpecOptions& options, DeviceSpecPtr* out_device_spec) {
+  const auto* cooperative_matrix_properties =
+      options.cooperative_matrix_properties;
+  const iree_host_size_t cooperative_matrix_property_count =
+      options.cooperative_matrix_property_count;
+  const auto device_spec_flags = options.device_spec_flags;
+  const uint32_t subgroup_supported_operations =
+      options.subgroup_supported_operations;
+  const uint32_t vendor_id = options.vendor_id;
+  const auto* dispatch_override = options.dispatch_override;
+  const uint32_t maximum_workgroup_subgroup_count =
+      options.maximum_workgroup_subgroup_count;
   out_device_spec->reset();
   iree_hal_vulkan_device_spec_t vulkan_spec = {
       .api_version = kVulkanApiVersion13,
@@ -246,6 +267,13 @@ iree_status_t CreateVulkanDeviceSpec(
     out_device_spec->reset(device_spec);
   }
   return status;
+}
+
+iree_status_t CreateVulkanDeviceSpec(
+    iree_hal_vulkan_features_t enabled_features, DeviceSpecFlags flags,
+    DeviceSpecPtr* out_device_spec) {
+  return CreateVulkanDeviceSpec(enabled_features, flags,
+                                VulkanDeviceSpecOptions{}, out_device_spec);
 }
 
 TargetEnvironmentPtr CreateSpirvTargetEnvironment() {
@@ -366,9 +394,8 @@ bool FindCooperativeMatrixRow(const loomc_target_profile_t* profile,
 
 TargetProfilePtr SelectTargetFromHal(
     loomc_target_environment_t* target_environment, FakeHalDevice* device,
-    loomc_result_t** out_result,
-    const iree_hal_executable_target_t** out_executable_target = nullptr,
-    loomc_target_profile_t* requested_profile = nullptr) {
+    loomc_target_profile_t* requested_profile, loomc_result_t** out_result,
+    const iree_hal_executable_target_t** out_executable_target = nullptr) {
   iree_hal_device_t* hal_device = reinterpret_cast<iree_hal_device_t*>(device);
   loomc_spirv_iree_hal_target_options_t options = {
       .type = LOOMC_STRUCTURE_TYPE_SPIRV_IREE_HAL_TARGET_OPTIONS,
@@ -390,6 +417,15 @@ TargetProfilePtr SelectTargetFromHal(
   return TargetProfilePtr(selection.target_profile);
 }
 
+TargetProfilePtr SelectTargetFromHal(
+    loomc_target_environment_t* target_environment, FakeHalDevice* device,
+    loomc_result_t** out_result,
+    const iree_hal_executable_target_t** out_executable_target = nullptr) {
+  return SelectTargetFromHal(target_environment, device,
+                             /*requested_profile=*/nullptr, out_result,
+                             out_executable_target);
+}
+
 TargetProfilePtr CreateRequestedProfile(
     loomc_target_environment_t* environment,
     const loomc_spirv_profile_options_t& options) {
@@ -409,7 +445,7 @@ void ExpectForcedSelection(loomc_target_environment_t* environment,
   loomc_result_t* result = nullptr;
   const iree_hal_executable_target_t* executable_target = nullptr;
   auto selected_profile = SelectTargetFromHal(
-      environment, device, &result, &executable_target, requested_profile);
+      environment, device, requested_profile, &result, &executable_target);
   ResultPtr result_ptr(result);
   if (expected_success) {
     ExpectSucceededResult(result);
@@ -494,12 +530,8 @@ TEST(LoomcSpirvIreeHalTargetTest, CreatesProfileFromHalFacts) {
 TEST(LoomcSpirvIreeHalTargetTest, DisablesBrokenAmdFloat64ToFloat16Conversion) {
   DeviceSpecPtr device_spec;
   IREE_ASSERT_OK(CreateVulkanDeviceSpec(
-      RequiredVulkanFeatures(), kCompleteDeviceSpecFlags, &device_spec,
-      /*cooperative_matrix_property_count=*/0,
-      /*cooperative_matrix_properties=*/nullptr,
-      /*device_spec_flags=*/IREE_HAL_VULKAN_DEVICE_SPEC_FLAG_NONE,
-      /*subgroup_supported_operations=*/0,
-      /*vendor_id=*/kAmdVendorId));
+      RequiredVulkanFeatures(), kCompleteDeviceSpecFlags,
+      VulkanDeviceSpecOptions{.vendor_id = kAmdVendorId}, &device_spec));
   FakeHalDevice device = {};
   InitializeFakeDevice(device_spec.get(), &device);
   TargetEnvironmentPtr target_environment = CreateSpirvTargetEnvironment();
@@ -522,21 +554,26 @@ TEST(LoomcSpirvIreeHalTargetTest, PreservesExtendedCompilerFeatureFamily) {
   enabled_features.general |=
       IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_FLOAT16 |
       IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_FLOAT64 |
+      IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_INT8 |
       IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_SUBGROUP_EXTENDED_TYPES |
+      IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_INTEGER_DOT_PRODUCT |
       IREE_HAL_VULKAN_FEATURE_ENABLE_VULKAN_MEMORY_MODEL |
       IREE_HAL_VULKAN_FEATURE_ENABLE_VULKAN_MEMORY_MODEL_DEVICE_SCOPE;
   enabled_features.atomics =
       IREE_HAL_VULKAN_SHADER_ATOMIC_FEATURE_ALL_RECOGNIZED;
   DeviceSpecPtr device_spec;
   IREE_ASSERT_OK(CreateVulkanDeviceSpec(
-      enabled_features, kCompleteDeviceSpecFlags, &device_spec,
-      /*cooperative_matrix_property_count=*/0,
-      /*cooperative_matrix_properties=*/nullptr, kAllFloatControlFlags,
-      /*subgroup_supported_operations=*/kVulkanSubgroupFeatureBallotBit |
-          kVulkanSubgroupFeatureVoteBit | kVulkanSubgroupFeatureArithmeticBit |
-          kVulkanSubgroupFeatureShuffleBit |
-          kVulkanSubgroupFeatureShuffleRelativeBit |
-          kVulkanSubgroupFeatureClusteredBit));
+      enabled_features, kCompleteDeviceSpecFlags,
+      VulkanDeviceSpecOptions{
+          .device_spec_flags = kAllFloatControlFlags,
+          .subgroup_supported_operations =
+              kVulkanSubgroupFeatureBallotBit | kVulkanSubgroupFeatureVoteBit |
+              kVulkanSubgroupFeatureArithmeticBit |
+              kVulkanSubgroupFeatureShuffleBit |
+              kVulkanSubgroupFeatureShuffleRelativeBit |
+              kVulkanSubgroupFeatureClusteredBit,
+      },
+      &device_spec));
   FakeHalDevice device = {};
   InitializeFakeDevice(device_spec.get(), &device);
   TargetEnvironmentPtr target_environment = CreateSpirvTargetEnvironment();
@@ -548,6 +585,10 @@ TEST(LoomcSpirvIreeHalTargetTest, PreservesExtendedCompilerFeatureFamily) {
   ASSERT_NE(profile.get(), nullptr);
   ExpectSucceededResult(result_ptr.get());
   const loomc_spirv_feature_t expected_features[] = {
+      LOOMC_SPIRV_FEATURE_INTEGER_DOT_PRODUCT,
+      LOOMC_SPIRV_FEATURE_INTEGER_DOT_PRODUCT_INPUT_ALL,
+      LOOMC_SPIRV_FEATURE_INTEGER_DOT_PRODUCT_INPUT4X8_BIT,
+      LOOMC_SPIRV_FEATURE_INTEGER_DOT_PRODUCT_INPUT4X8_BIT_PACKED,
       LOOMC_SPIRV_FEATURE_VULKAN_MEMORY_MODEL_DEVICE_SCOPE,
       LOOMC_SPIRV_FEATURE_STORAGE_BUFFER_INT64_ATOMICS,
       LOOMC_SPIRV_FEATURE_WORKGROUP_INT64_ATOMICS,
@@ -596,8 +637,12 @@ TEST(LoomcSpirvIreeHalTargetTest,
   };
   DeviceSpecPtr device_spec;
   IREE_ASSERT_OK(CreateVulkanDeviceSpec(
-      CooperativeMatrixVulkanFeatures(), kCompleteDeviceSpecFlags, &device_spec,
-      IREE_ARRAYSIZE(properties), properties));
+      CooperativeMatrixVulkanFeatures(), kCompleteDeviceSpecFlags,
+      VulkanDeviceSpecOptions{
+          .cooperative_matrix_property_count = IREE_ARRAYSIZE(properties),
+          .cooperative_matrix_properties = properties,
+      },
+      &device_spec));
   FakeHalDevice device = {};
   InitializeFakeDevice(device_spec.get(), &device);
   TargetEnvironmentPtr target_environment = CreateSpirvTargetEnvironment();
@@ -634,9 +679,13 @@ TEST(LoomcSpirvIreeHalTargetTest,
     property.c_type = component_type;
     property.result_type = component_type;
     DeviceSpecPtr device_spec;
-    IREE_ASSERT_OK(CreateVulkanDeviceSpec(CooperativeMatrixVulkanFeatures(),
-                                          kCompleteDeviceSpecFlags,
-                                          &device_spec, 1, &property));
+    IREE_ASSERT_OK(CreateVulkanDeviceSpec(
+        CooperativeMatrixVulkanFeatures(), kCompleteDeviceSpecFlags,
+        VulkanDeviceSpecOptions{
+            .cooperative_matrix_property_count = 1,
+            .cooperative_matrix_properties = &property,
+        },
+        &device_spec));
     FakeHalDevice device = {};
     InitializeFakeDevice(device_spec.get(), &device);
     TargetEnvironmentPtr target_environment = CreateSpirvTargetEnvironment();
@@ -670,7 +719,11 @@ TEST(LoomcSpirvIreeHalTargetTest,
     DeviceSpecPtr device_spec;
     IREE_ASSERT_OK(CreateVulkanDeviceSpec(
         CooperativeMatrixVulkanFeatures(), kCompleteDeviceSpecFlags,
-        &device_spec, IREE_ARRAYSIZE(properties), properties));
+        VulkanDeviceSpecOptions{
+            .cooperative_matrix_property_count = IREE_ARRAYSIZE(properties),
+            .cooperative_matrix_properties = properties,
+        },
+        &device_spec));
     FakeHalDevice device = {};
     InitializeFakeDevice(device_spec.get(), &device);
     TargetEnvironmentPtr target_environment = CreateSpirvTargetEnvironment();
@@ -903,13 +956,19 @@ TEST(LoomcSpirvIreeHalTargetTest, ForcedProfilesCheckTheCompleteFeatureFamily) {
   };
   DeviceSpecPtr rich_spec;
   IREE_ASSERT_OK(CreateVulkanDeviceSpec(
-      rich_features, kCompleteDeviceSpecFlags, &rich_spec,
-      IREE_ARRAYSIZE(properties), properties, kAllFloatControlFlags,
-      kVulkanSubgroupFeatureBallotBit | kVulkanSubgroupFeatureVoteBit |
-          kVulkanSubgroupFeatureArithmeticBit |
-          kVulkanSubgroupFeatureShuffleBit |
-          kVulkanSubgroupFeatureShuffleRelativeBit |
-          kVulkanSubgroupFeatureClusteredBit));
+      rich_features, kCompleteDeviceSpecFlags,
+      VulkanDeviceSpecOptions{
+          .cooperative_matrix_property_count = IREE_ARRAYSIZE(properties),
+          .cooperative_matrix_properties = properties,
+          .device_spec_flags = kAllFloatControlFlags,
+          .subgroup_supported_operations =
+              kVulkanSubgroupFeatureBallotBit | kVulkanSubgroupFeatureVoteBit |
+              kVulkanSubgroupFeatureArithmeticBit |
+              kVulkanSubgroupFeatureShuffleBit |
+              kVulkanSubgroupFeatureShuffleRelativeBit |
+              kVulkanSubgroupFeatureClusteredBit,
+      },
+      &rich_spec));
   DeviceSpecPtr baseline_spec;
   IREE_ASSERT_OK(CreateVulkanDeviceSpec(
       RequiredVulkanFeatures(), kCompleteDeviceSpecFlags, &baseline_spec));
@@ -927,6 +986,13 @@ TEST(LoomcSpirvIreeHalTargetTest, ForcedProfilesCheckTheCompleteFeatureFamily) {
           {.feature = dependency, .state = LOOMC_TARGET_FACT_STATE_TRUE});
     };
     switch (feature) {
+      case LOOMC_SPIRV_FEATURE_INTEGER_DOT_PRODUCT_INPUT4X8_BIT:
+        require(LOOMC_SPIRV_FEATURE_INT8);
+        [[fallthrough]];
+      case LOOMC_SPIRV_FEATURE_INTEGER_DOT_PRODUCT_INPUT_ALL:
+      case LOOMC_SPIRV_FEATURE_INTEGER_DOT_PRODUCT_INPUT4X8_BIT_PACKED:
+        require(LOOMC_SPIRV_FEATURE_INTEGER_DOT_PRODUCT);
+        break;
       case LOOMC_SPIRV_FEATURE_COOPERATIVE_VECTOR_TRAINING_NV:
         require(LOOMC_SPIRV_FEATURE_COOPERATIVE_VECTOR_NV);
         break;
@@ -1053,9 +1119,8 @@ TEST(LoomcSpirvIreeHalTargetTest,
 TEST(LoomcSpirvIreeHalTargetTest, ForcedProfilesCheckEveryLimit) {
   DeviceSpecPtr spec;
   IREE_ASSERT_OK(CreateVulkanDeviceSpec(
-      RequiredVulkanFeatures(), kCompleteDeviceSpecFlags, &spec, 0, nullptr,
-      IREE_HAL_VULKAN_DEVICE_SPEC_FLAG_NONE, 0, kNvidiaVendorId, nullptr,
-      /*maximum_workgroup_subgroup_count=*/8));
+      RequiredVulkanFeatures(), kCompleteDeviceSpecFlags,
+      VulkanDeviceSpecOptions{.maximum_workgroup_subgroup_count = 8}, &spec));
   FakeHalDevice device = {};
   InitializeFakeDevice(spec.get(), &device);
   auto environment = CreateSpirvTargetEnvironment();
@@ -1121,10 +1186,13 @@ TEST(LoomcSpirvIreeHalTargetTest,
       .execution = {.maximum_workgroup_local_memory_size = 32768},
   };
   DeviceSpecPtr spec;
-  IREE_ASSERT_OK(CreateVulkanDeviceSpec(
-      RequiredVulkanFeatures(), kCompleteDeviceSpecFlags, &spec, 0, nullptr,
-      IREE_HAL_VULKAN_DEVICE_SPEC_FLAG_NONE, 0, kNvidiaVendorId, &dispatch,
-      /*maximum_workgroup_subgroup_count=*/16));
+  IREE_ASSERT_OK(
+      CreateVulkanDeviceSpec(RequiredVulkanFeatures(), kCompleteDeviceSpecFlags,
+                             VulkanDeviceSpecOptions{
+                                 .dispatch_override = &dispatch,
+                                 .maximum_workgroup_subgroup_count = 16,
+                             },
+                             &spec));
   FakeHalDevice device = {};
   InitializeFakeDevice(spec.get(), &device);
   auto environment = CreateSpirvTargetEnvironment();
@@ -1177,8 +1245,8 @@ TEST(LoomcSpirvIreeHalTargetTest, DerivedGridLimitsSaturateWithoutWrapping) {
   };
   DeviceSpecPtr spec;
   IREE_ASSERT_OK(CreateVulkanDeviceSpec(
-      RequiredVulkanFeatures(), kCompleteDeviceSpecFlags, &spec, 0, nullptr,
-      IREE_HAL_VULKAN_DEVICE_SPEC_FLAG_NONE, 0, kNvidiaVendorId, &dispatch));
+      RequiredVulkanFeatures(), kCompleteDeviceSpecFlags,
+      VulkanDeviceSpecOptions{.dispatch_override = &dispatch}, &spec));
   FakeHalDevice device = {};
   InitializeFakeDevice(spec.get(), &device);
   auto environment = CreateSpirvTargetEnvironment();
@@ -1208,8 +1276,12 @@ TEST(LoomcSpirvIreeHalTargetTest, ForcedProfilesCheckPreparedCustomMatrixRows) {
       F16MatrixProperty(), custom_property};
   DeviceSpecPtr spec;
   IREE_ASSERT_OK(CreateVulkanDeviceSpec(
-      CooperativeMatrixVulkanFeatures(), kCompleteDeviceSpecFlags, &spec,
-      IREE_ARRAYSIZE(properties), properties));
+      CooperativeMatrixVulkanFeatures(), kCompleteDeviceSpecFlags,
+      VulkanDeviceSpecOptions{
+          .cooperative_matrix_property_count = IREE_ARRAYSIZE(properties),
+          .cooperative_matrix_properties = properties,
+      },
+      &spec));
   FakeHalDevice device = {};
   InitializeFakeDevice(spec.get(), &device);
   auto environment = CreateSpirvTargetEnvironment();

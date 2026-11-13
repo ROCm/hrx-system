@@ -663,20 +663,23 @@ static iree_status_t loom_aie2p_low_verify_op(
   if (state->target->descriptor_set->stable_id ==
       AIE2P_CONFIGURATION_DESCRIPTOR_SET_ID) {
     if (packet->kind == LOOM_LOW_DESCRIPTOR_PACKET_NONE) {
-      if (!loom_low_return_isa(packet->op) &&
-          !loom_low_unreachable_isa(packet->op) &&
-          !loom_low_assume_isa(packet->op) &&
-          !loom_low_func_call_isa(packet->op)) {
-        const loom_diagnostic_param_t params[] = {
-            loom_param_string(state->function_name),
-            loom_param_string(
-                loom_low_diagnostic_operation_name(state->module, packet->op)),
-        };
-        return loom_low_verify_context_emit(context, packet->op,
-                                            LOOM_ERR_XDNA_035, params,
-                                            IREE_ARRAYSIZE(params));
+      switch (packet->op->kind) {
+        case LOOM_OP_LOW_RETURN:
+        case LOOM_OP_LOW_UNREACHABLE:
+        case LOOM_OP_LOW_ASSUME:
+        case LOOM_OP_LOW_FUNC_CALL:
+          return iree_ok_status();
+        default:
+          break;
       }
-      return iree_ok_status();
+      const loom_diagnostic_param_t params[] = {
+          loom_param_string(state->function_name),
+          loom_param_string(
+              loom_low_diagnostic_operation_name(state->module, packet->op)),
+      };
+      return loom_low_verify_context_emit(context, packet->op,
+                                          LOOM_ERR_XDNA_035, params,
+                                          IREE_ARRAYSIZE(params));
     }
     loom_aie2p_low_record_configuration_command(state->contract, packet);
     if (packet->descriptor_ordinal ==

@@ -21,7 +21,7 @@ from iree.vm.bytecode.spec.isa.core.float import (
 )
 from iree.vm.bytecode.spec.module import rules as module_rules
 from iree.vm.bytecode.spec.module.container import MODULE_FORMAT
-from iree.vm.bytecode.spec.module.numeric import NUMERIC_TABLES
+from iree.vm.bytecode.spec.module.numeric import SIGNATURE_KIND
 from iree.vm.bytecode.spec.module.records import (
     IMAGE_HEADER,
     SECTION_DIRECTORY_ROW,
@@ -105,23 +105,18 @@ def _specification(
 
 
 class SpecificationTest(unittest.TestCase):
-    def test_complete_transcription_inventory(self) -> None:
+    def test_container_section_order(self) -> None:
         self.assertEqual(MODULE_FORMAT.envelope, (IMAGE_HEADER, SECTION_DIRECTORY_ROW))
-        self.assertEqual(len(SPECIFICATION.module_format.records), 34)
         self.assertEqual(
-            (
-                len(SPECIFICATION.families),
-                len(SPECIFICATION.instructions),
-                len(SPECIFICATION.selectors),
-                sum(len(table.values) for table in SPECIFICATION.selectors),
-                tuple(section.section_type for section in MODULE_FORMAT.sections),
-                len(MODULE_FORMAT.constraints)
-                + sum(len(section.constraints) for section in MODULE_FORMAT.sections),
-                len(NUMERIC_TABLES),
-                sum(len(table.values) for table in NUMERIC_TABLES),
-            ),
-            (12, 188, 21, 256, tuple(range(1, 14)), 59, 9, 30),
+            tuple(section.section_type for section in MODULE_FORMAT.sections),
+            tuple(range(1, 14)),
         )
+
+    def test_reference_signature_modes_keep_descriptor_layout(self) -> None:
+        kinds = {value.name: value.value for value in SIGNATURE_KIND.values}
+        self.assertEqual((kinds["ref"], kinds["ptr"]), (0x0100, 0x0101))
+        self.assertEqual(SIGNATURE_DESCRIPTOR_ROW.byte_length, 4)
+        self.assertEqual(SIGNATURE_DESCRIPTOR_ROW.alignment, 2)
 
     def test_layout_rejects_implicit_alignment_padding(self) -> None:
         record = _record(

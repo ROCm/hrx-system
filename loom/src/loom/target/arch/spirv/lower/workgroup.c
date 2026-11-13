@@ -15,6 +15,7 @@
 #include "loom/ops/buffer/ops.h"
 #include "loom/ops/kernel/ops.h"
 #include "loom/ops/low/ops.h"
+#include "loom/target/arch/spirv/descriptors/descriptors.h"
 #include "loom/target/arch/spirv/lower/workgroup_layout.h"
 #include "loom/target/arch/spirv/lower/workgroup_reduce.h"
 #include "loom/util/fact_table.h"
@@ -22,6 +23,7 @@
 typedef enum loom_spirv_workgroup_plan_kind_e {
   LOOM_SPIRV_WORKGROUP_PLAN_ALLOCA = 1,
   LOOM_SPIRV_WORKGROUP_PLAN_VIEW = 2,
+  LOOM_SPIRV_WORKGROUP_PLAN_COMPARE = 3,
 } loom_spirv_workgroup_plan_kind_t;
 
 typedef struct loom_spirv_workgroup_alloca_plan_t {
@@ -37,6 +39,11 @@ typedef struct loom_spirv_workgroup_view_plan_t {
   // Source storage-root value that has already lowered to low.storage.
   loom_value_id_t root_value_id;
 } loom_spirv_workgroup_view_plan_t;
+
+typedef struct loom_spirv_workgroup_compare_plan_t {
+  // Exact source allocation roots; INVALID denotes a different storage domain.
+  loom_value_id_t roots[2];
+} loom_spirv_workgroup_compare_plan_t;
 
 static bool loom_spirv_workgroup_i64_is_power_of_two(int64_t value) {
   return value > 0 && value <= UINT32_MAX &&
@@ -182,6 +189,61 @@ static iree_status_t loom_spirv_select_workgroup_view(
   return iree_ok_status();
 }
 
+static iree_status_t loom_spirv_select_workgroup_compare(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_low_lower_plan_t* out_plan) {
+  const loom_value_fact_table_t* facts =
+      loom_low_lower_context_fact_table(context);
+  const loom_module_t* module = loom_low_lower_context_module(context);
+  loom_spirv_workgroup_compare_plan_t plan = {
+      .roots = {LOOM_VALUE_ID_INVALID, LOOM_VALUE_ID_INVALID}};
+  bool has_workgroup = false;
+  bool supported = true;
+  const loom_value_id_t values[] = {loom_buffer_compare_address_lhs(source_op),
+                                    loom_buffer_compare_address_rhs(source_op)};
+  for (unsigned i = 0; i < 2; ++i) {
+    loom_value_fact_buffer_reference_t reference = {0};
+    if (!loom_value_facts_query_buffer_reference(
+            &facts->context, loom_value_fact_table_lookup(facts, values[i]),
+            &reference) ||
+        reference.memory_space != LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP) {
+      continue;
+    }
+    has_workgroup = true;
+    // Exact origin identity is stronger than sharing an allocation. It cannot
+    // substitute an unrelated byte origin introduced by same_root assertions.
+    const loom_value_id_t root =
+        loom_value_fact_table_query_identity(facts, values[i]);
+    const loom_value_t* value = loom_module_value(module, root);
+    if (loom_value_is_block_arg(value) ||
+        !loom_buffer_alloca_isa(loom_value_def_op(value))) {
+      supported = false;
+    } else {
+      plan.roots[i] = root;
+    }
+  }
+  if (!has_workgroup) {
+    return iree_ok_status();
+  }
+  if (!supported) {
+    return loom_spirv_workgroup_emit_rejected(
+        context, source_op, IREE_SV("workgroup_position"), loom_type_buffer(),
+        LOOM_SPIRV_WORKGROUP_PLAN_COMPARE, out_plan);
+  }
+  loom_spirv_workgroup_compare_plan_t* data = NULL;
+  IREE_RETURN_IF_ERROR(
+      loom_low_lower_allocate_plan_data(context, sizeof(*data), (void**)&data));
+  *data = plan;
+  loom_type_t result_type = loom_type_none();
+  IREE_RETURN_IF_ERROR(loom_low_lower_map_value(
+      context, source_op, loom_buffer_compare_address_result(source_op),
+      &result_type));
+  IREE_RETURN_IF_ERROR(loom_low_lower_plan_value_type(
+      context, loom_buffer_compare_address_result(source_op), result_type));
+  *out_plan = loom_low_lower_plan_make(LOOM_SPIRV_WORKGROUP_PLAN_COMPARE, data);
+  return iree_ok_status();
+}
+
 iree_status_t loom_spirv_select_workgroup_plan(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_low_lower_plan_t* out_plan) {
@@ -189,6 +251,8 @@ iree_status_t loom_spirv_select_workgroup_plan(
   switch (source_op->kind) {
     case LOOM_OP_BUFFER_ALLOCA:
       return loom_spirv_select_workgroup_alloca(context, source_op, out_plan);
+    case LOOM_OP_BUFFER_COMPARE_ADDRESS:
+      return loom_spirv_select_workgroup_compare(context, source_op, out_plan);
     case LOOM_OP_BUFFER_VIEW:
       return loom_spirv_select_workgroup_view(context, source_op, out_plan);
     default:
@@ -203,6 +267,20 @@ void loom_spirv_mark_workgroup_plan_storage_demands(
   switch ((loom_spirv_workgroup_plan_kind_t)plan.id) {
     case LOOM_SPIRV_WORKGROUP_PLAN_ALLOCA:
       return;
+    case LOOM_SPIRV_WORKGROUP_PLAN_COMPARE: {
+      const loom_spirv_workgroup_compare_plan_t* compare = plan.target_data;
+      for (unsigned i = 0; i < 2; ++i) {
+        if (compare->roots[i] != LOOM_VALUE_ID_INVALID) {
+          loom_low_lower_require_source_value_storage(context,
+                                                      compare->roots[i]);
+        }
+      }
+      loom_low_lower_require_source_value_storage(
+          context, loom_buffer_compare_address_lhs_offset(source_op));
+      loom_low_lower_require_source_value_storage(
+          context, loom_buffer_compare_address_rhs_offset(source_op));
+      return;
+    }
     case LOOM_SPIRV_WORKGROUP_PLAN_VIEW: {
       const loom_spirv_workgroup_view_plan_t* view_plan =
           (const loom_spirv_workgroup_view_plan_t*)plan.target_data;
@@ -314,6 +392,96 @@ static iree_status_t loom_spirv_lower_workgroup_view(
                                    loom_low_storage_address_result(address_op));
 }
 
+// Apply the arena offset retained by storage planning to an authored byte
+// position. No pointer bits or storage-layout reconstruction are required.
+static iree_status_t loom_spirv_lower_workgroup_position(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_value_id_t root, loom_value_id_t offset,
+    loom_value_id_t* out_position) {
+  *out_position = loom_low_lower_lookup_value(context, offset);
+  const uint64_t bias =
+      loom_spirv_workgroup_layout_root_byte_offset(context, root);
+  if (!bias) {
+    return iree_ok_status();
+  }
+  const loom_low_descriptor_set_t* descriptors =
+      loom_low_lower_context_descriptor_set(context);
+  const loom_type_t offset_type =
+      loom_low_lower_value_binding_type(context, offset);
+  loom_string_id_t key;
+  IREE_RETURN_IF_ERROR(loom_module_intern_string(
+      loom_low_lower_context_module(context), IREE_SV("offset64_value"), &key));
+  const loom_named_attr_t attribute = {.name_id = key,
+                                       .value = loom_attr_i64((int64_t)bias)};
+  const loom_low_lower_resolved_descriptor_t constant = {
+      .descriptor = loom_low_descriptor_set_descriptor_at(
+          descriptors, SPIRV_LOGICAL_CORE_DESCRIPTOR_REF_OP_CONSTANT_OFFSET64)};
+  loom_op_t* emitted = NULL;
+  IREE_RETURN_IF_ERROR(loom_low_lower_emit_resolved_descriptor_const(
+      context, &constant, loom_make_named_attr_slice(&attribute, 1),
+      offset_type, source_op->location, &emitted));
+  const loom_value_id_t operands[] = {*out_position,
+                                      loom_op_const_results(emitted)[0]};
+  const loom_low_lower_resolved_descriptor_t add = {
+      .descriptor = loom_low_descriptor_set_descriptor_at(
+          descriptors, SPIRV_LOGICAL_CORE_DESCRIPTOR_REF_OP_IADD_OFFSET64)};
+  IREE_RETURN_IF_ERROR(loom_low_lower_emit_resolved_descriptor_op(
+      context, &add, operands, 2, loom_named_attr_slice_empty(), &offset_type,
+      1, NULL, 0, source_op->location, &emitted));
+  *out_position = loom_op_const_results(emitted)[0];
+  return iree_ok_status();
+}
+
+static iree_status_t loom_spirv_lower_workgroup_compare(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_spirv_workgroup_compare_plan_t* plan) {
+  const loom_low_descriptor_set_t* descriptors =
+      loom_low_lower_context_descriptor_set(context);
+  const bool equal = loom_buffer_compare_address_predicate(source_op) ==
+                     LOOM_BUFFER_COMPARE_ADDRESS_PREDICATE_EQ;
+  const loom_value_id_t result = loom_buffer_compare_address_result(source_op);
+  const loom_type_t result_type =
+      loom_low_lower_value_binding_type(context, result);
+  loom_value_id_t storage[2] = {LOOM_VALUE_ID_INVALID, LOOM_VALUE_ID_INVALID};
+  for (unsigned i = 0; i < 2; ++i) {
+    if (plan->roots[i] != LOOM_VALUE_ID_INVALID) {
+      storage[i] = loom_low_lower_lookup_value(context, plan->roots[i]);
+    }
+  }
+  loom_op_t* emitted = NULL;
+  if (storage[0] == LOOM_VALUE_ID_INVALID ||
+      storage[1] == LOOM_VALUE_ID_INVALID || storage[0] != storage[1]) {
+    // Different logical storage objects have distinct positions. Packed roots
+    // share one object and use their retained byte origins below.
+    const loom_low_lower_resolved_descriptor_t descriptor = {
+        .descriptor = loom_low_descriptor_set_descriptor_at(
+            descriptors,
+            equal ? SPIRV_LOGICAL_CORE_DESCRIPTOR_REF_OP_CONSTANT_FALSE_BOOL
+                  : SPIRV_LOGICAL_CORE_DESCRIPTOR_REF_OP_CONSTANT_TRUE_BOOL)};
+    IREE_RETURN_IF_ERROR(loom_low_lower_emit_resolved_descriptor_const(
+        context, &descriptor, loom_named_attr_slice_empty(), result_type,
+        source_op->location, &emitted));
+  } else {
+    loom_value_id_t positions[2];
+    IREE_RETURN_IF_ERROR(loom_spirv_lower_workgroup_position(
+        context, source_op, plan->roots[0],
+        loom_buffer_compare_address_lhs_offset(source_op), &positions[0]));
+    IREE_RETURN_IF_ERROR(loom_spirv_lower_workgroup_position(
+        context, source_op, plan->roots[1],
+        loom_buffer_compare_address_rhs_offset(source_op), &positions[1]));
+    const loom_low_lower_resolved_descriptor_t compare = {
+        .descriptor = loom_low_descriptor_set_descriptor_at(
+            descriptors,
+            equal ? SPIRV_LOGICAL_CORE_DESCRIPTOR_REF_OP_I_EQUAL_OFFSET64
+                  : SPIRV_LOGICAL_CORE_DESCRIPTOR_REF_OP_I_NOT_EQUAL_OFFSET64)};
+    IREE_RETURN_IF_ERROR(loom_low_lower_emit_resolved_descriptor_op(
+        context, &compare, positions, 2, loom_named_attr_slice_empty(),
+        &result_type, 1, NULL, 0, source_op->location, &emitted));
+  }
+  return loom_low_lower_bind_value(context, result,
+                                   loom_op_const_results(emitted)[0]);
+}
+
 iree_status_t loom_spirv_lower_workgroup_op(loom_low_lower_context_t* context,
                                             const loom_op_t* source_op,
                                             loom_low_lower_plan_t plan) {
@@ -322,6 +490,9 @@ iree_status_t loom_spirv_lower_workgroup_op(loom_low_lower_context_t* context,
       return loom_spirv_lower_workgroup_alloca(
           context, source_op,
           (const loom_spirv_workgroup_alloca_plan_t*)plan.target_data);
+    case LOOM_SPIRV_WORKGROUP_PLAN_COMPARE:
+      return loom_spirv_lower_workgroup_compare(context, source_op,
+                                                plan.target_data);
     case LOOM_SPIRV_WORKGROUP_PLAN_VIEW:
       return loom_spirv_lower_workgroup_view(
           context, source_op,

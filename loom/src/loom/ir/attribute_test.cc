@@ -468,7 +468,7 @@ TEST(AttributeHash, EqualAttributesEqualHash) {
 TEST(AttributeHash, DifferentAttributesDifferentHash) {
   loom_attribute_t a = loom_attr_i64(42);
   loom_attribute_t b = loom_attr_i64(43);
-  // Not guaranteed by spec, but extremely likely with FNV-1a.
+  // Hash collisions are legal; these nearby values should remain distinct.
   EXPECT_NE(loom_attribute_hash(&a), loom_attribute_hash(&b));
 
   int64_t values_a[] = {1, 2, 3};
@@ -479,10 +479,33 @@ TEST(AttributeHash, DifferentAttributesDifferentHash) {
 }
 
 TEST(AttributeHash, DifferentKindsDifferentHash) {
-  loom_attribute_t i = loom_attr_i64(0);
-  loom_attribute_t b = loom_attr_bool(false);
-  // Both have zero payload but different kinds.
-  EXPECT_NE(loom_attribute_hash(&i), loom_attribute_hash(&b));
+  const loom_attribute_t values[] = {
+      loom_attr_absent(),       loom_attr_i64(0),
+      loom_attr_f64(0.0),       loom_attr_string(0),
+      loom_attr_bool(false),    loom_attr_enum(0),
+      loom_attr_scoped_enum(0), loom_attr_type(0),
+      loom_attr_encoding(0),    loom_attr_string_array(nullptr, 0),
+  };
+  // Absence, present empty aggregates, and zero scalar values are distinct.
+  for (size_t i = 0; i < IREE_ARRAYSIZE(values); ++i) {
+    for (size_t j = i + 1; j < IREE_ARRAYSIZE(values); ++j) {
+      EXPECT_FALSE(loom_attribute_equal(&values[i], &values[j]));
+      EXPECT_NE(loom_attribute_hash(&values[i]),
+                loom_attribute_hash(&values[j]));
+    }
+  }
+}
+
+TEST(AttributeHash, IntegerPayloadUsesEveryBit) {
+  const loom_attribute_t zero = loom_attr_i64(0);
+  for (uint32_t bit = 0; bit < 64; ++bit) {
+    const uint64_t bits = UINT64_C(1) << bit;
+    int64_t value;
+    memcpy(&value, &bits, sizeof(value));
+    const loom_attribute_t attribute = loom_attr_i64(value);
+    EXPECT_NE(loom_attribute_hash(&attribute), loom_attribute_hash(&zero))
+        << bit;
+  }
 }
 
 //===----------------------------------------------------------------------===//

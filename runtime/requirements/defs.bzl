@@ -12,12 +12,6 @@ load(
     "run_requirement",
 )
 
-HAL_AMDGPU = build_requirement(
-    id = "runtime.hal.amdgpu",
-    label = Label("//runtime/requirements:hal_amdgpu"),
-    enabled_by = Label("//runtime/config/hal:driver_amdgpu"),
-)
-
 HAL_EXECUTABLE_LOADER_EMBEDDED_ELF = build_requirement(
     id = "runtime.hal.executable_loader.embedded_elf",
     label = Label("//runtime/requirements:hal_executable_loader_embedded_elf"),
@@ -75,7 +69,6 @@ WEBGPU_DEVICE_RESOURCE = run_requirement(
 )
 
 REQUIREMENTS = [
-    HAL_AMDGPU,
     HAL_EXECUTABLE_LOADER_EMBEDDED_ELF,
     HAL_TASK,
     HAL_VULKAN,

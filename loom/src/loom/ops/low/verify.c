@@ -4,6 +4,8 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include "loom/ops/ref/verify.h"
+
 #include <stdint.h>
 
 #include "loom/error/emitter.h"
@@ -15,6 +17,7 @@
 #include "loom/ops/function_contract_verify.h"
 #include "loom/ops/low/ops.h"
 #include "loom/ops/low/schedule_scope.h"
+#include "loom/ops/low/storage.h"
 #include "loom/ops/successor_verify.h"
 #include "loom/target/registers.h"
 #include "loom/util/stable_id.h"
@@ -1321,6 +1324,19 @@ static iree_status_t loom_low_emit_call_callee_kind_mismatch(
                                       IREE_ARRAYSIZE(params));
 }
 
+loom_trait_flags_t loom_low_transfer_effective_traits(
+    const loom_module_t* module, const loom_op_t* op) {
+  loom_trait_flags_t traits = loom_op_vtable(module, op)->traits;
+  const loom_type_t* value_type = loom_type_register_value_type(
+      loom_module_value(module, loom_op_const_operands(op)[0])->type);
+  if (value_type && loom_type_is_reference(*value_type)) {
+    // Managed transfers acquire or relocate a release obligation, including
+    // ptr protection. Preserve these lifetimes through DCE and scheduling.
+    traits |= LOOM_TRAIT_OBSERVABLE_EFFECT;
+  }
+  return traits;
+}
+
 iree_status_t loom_low_copy_verify(const loom_module_t* module,
                                    const loom_op_t* op,
                                    iree_diagnostic_emitter_t emitter) {
@@ -1337,6 +1353,45 @@ iree_status_t loom_low_move_verify(const loom_module_t* module,
       module, op, loom_low_move_source(op), loom_low_move_result(op), emitter));
   return loom_low_verify_transfer_register_value_relation(
       module, op, loom_low_move_source(op), loom_low_move_result(op), emitter);
+}
+
+iree_status_t loom_low_borrow_verify(const loom_module_t* module,
+                                     const loom_op_t* op,
+                                     iree_diagnostic_emitter_t emitter) {
+  const loom_type_t owner_type =
+      loom_module_value_type(module, loom_low_borrow_owner(op));
+  const loom_type_t pointer_type =
+      loom_module_value_type(module, loom_low_borrow_pointer(op));
+  IREE_RETURN_IF_ERROR(loom_low_verify_same_register_unit_count(
+      module, op, loom_low_borrow_owner(op), loom_low_borrow_pointer(op),
+      emitter));
+  if (loom_low_register_type_unit_count(owner_type) != 1) {
+    return loom_low_emit_type_constraint_error(
+        op, LOOM_DIAGNOSTIC_FIELD_OPERAND, 0, IREE_SV("owner"), owner_type,
+        IREE_SV("one complete ref register"), emitter);
+  }
+  const loom_type_t* owner_value_type =
+      loom_type_register_value_type(owner_type);
+  const loom_type_t* pointer_value_type =
+      loom_type_register_value_type(pointer_type);
+  return loom_ref_verify_borrow_types(
+      op, owner_value_type ? *owner_value_type : loom_type_none(),
+      pointer_value_type ? *pointer_value_type : loom_type_none(), emitter);
+}
+
+iree_status_t loom_low_release_verify(const loom_module_t* module,
+                                      const loom_op_t* op,
+                                      iree_diagnostic_emitter_t emitter) {
+  const loom_type_t type =
+      loom_module_value_type(module, loom_low_release_value(op));
+  const loom_type_t* value_type = loom_type_register_value_type(type);
+  if (value_type != NULL && loom_type_is_reference(*value_type) &&
+      loom_low_register_type_unit_count(type) == 1) {
+    return iree_ok_status();
+  }
+  return loom_low_emit_type_constraint_error(
+      op, LOOM_DIAGNOSTIC_FIELD_OPERAND, 0, IREE_SV("value"), type,
+      IREE_SV("one complete ref or ptr register"), emitter);
 }
 
 iree_status_t loom_low_slice_verify(const loom_module_t* module,
@@ -1590,7 +1645,8 @@ iree_status_t loom_low_spill_verify(const loom_module_t* module,
                                     const loom_op_t* op,
                                     iree_diagnostic_emitter_t emitter) {
   return loom_low_verify_storage_use(
-      module, op, loom_low_spill_storage(op), 1, loom_low_spill_offset(op),
+      module, op, loom_low_storage_store_storage(op), 1,
+      loom_low_storage_transfer_offset(op),
       loom_low_spill_offset_diagnostic_ref(), emitter);
 }
 
@@ -1598,7 +1654,8 @@ iree_status_t loom_low_reload_verify(const loom_module_t* module,
                                      const loom_op_t* op,
                                      iree_diagnostic_emitter_t emitter) {
   return loom_low_verify_storage_use(
-      module, op, loom_low_reload_storage(op), 0, loom_low_reload_offset(op),
+      module, op, loom_low_storage_load_storage(op), 0,
+      loom_low_storage_transfer_offset(op),
       loom_low_reload_offset_diagnostic_ref(), emitter);
 }
 
@@ -1694,8 +1751,10 @@ loom_trait_flags_t loom_low_op_effective_traits(const loom_module_t* module,
                                                 const loom_op_t* op) {
   (void)module;
   // Descriptor traits remain intrinsic even when an access has no modifiers.
-  // Volatility strengthens this instance without changing the instruction.
-  if (iree_any_bit_set(op->instance_flags, LOOM_MEMORY_ACCESS_FLAG_VOLATILE)) {
+  // Physical observations remain visible independently of their result uses.
+  if (iree_any_bit_set(
+          op->instance_flags,
+          LOOM_MEMORY_ACCESS_FLAG_VOLATILE | LOOM_MEMORY_ACCESS_FLAG_ATOMIC)) {
     return (op->traits & ~LOOM_TRAIT_PURE) | LOOM_TRAIT_OBSERVABLE_EFFECT;
   }
   return op->traits;
@@ -1703,12 +1762,12 @@ loom_trait_flags_t loom_low_op_effective_traits(const loom_module_t* module,
 
 loom_trait_flags_t loom_low_func_call_effective_traits(
     const loom_module_t* module, const loom_op_t* op) {
-  (void)module;
-  return loom_callable_effects_traits(loom_low_func_call_effect_contract(op));
+  return loom_callable_effects_traits(module, op,
+                                      loom_low_func_call_effect_contract(op));
 }
 
 loom_trait_flags_t loom_low_invoke_effective_traits(const loom_module_t* module,
                                                     const loom_op_t* op) {
-  (void)module;
-  return loom_callable_effects_traits(loom_low_invoke_effect_contract(op));
+  return loom_callable_effects_traits(module, op,
+                                      loom_low_invoke_effect_contract(op));
 }

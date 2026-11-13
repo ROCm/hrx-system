@@ -233,6 +233,7 @@ static bool loom_spirv_target_profile_equal(const loom_target_profile_t* lhs,
 
 const loom_target_profile_type_t loom_spirv_target_profile_type = {
     .name = IREE_SVL("spirv"),
+    .storage_size = sizeof(loom_spirv_target_profile_t),
     .fact_type = &loom_spirv_target_fact_type,
     .project_facts = loom_spirv_target_profile_project_facts,
     .equal = loom_spirv_target_profile_equal,

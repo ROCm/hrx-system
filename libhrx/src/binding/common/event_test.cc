@@ -8,10 +8,8 @@
 
 #include <array>
 #include <atomic>
-#include <cmath>
 #include <cstdint>
 #include <cstring>
-#include <limits>
 #include <semaphore>
 #include <thread>
 #include <utility>
@@ -43,268 +41,6 @@ class ScopeExit {
 };
 template <typename Cleanup>
 ScopeExit(Cleanup) -> ScopeExit<Cleanup>;
-
-//===----------------------------------------------------------------------===//
-// Tick pair to duration
-//===----------------------------------------------------------------------===//
-
-constexpr uint64_t kGigahertz = 1000000000ull;
-
-// A kilohertz domain makes one tick one millisecond, so a duration reads back
-// as the tick count the conversion reduced the pair to.
-constexpr uint64_t kKilohertz = 1000ull;
-
-iree_hal_streaming_timestamp_domain_t Domain(uint64_t frequency_hz,
-                                             uint32_t valid_bits) {
-  iree_hal_streaming_timestamp_domain_t domain = {
-      .frequency_hz = frequency_hz,
-      .valid_bits = valid_bits,
-  };
-  return domain;
-}
-
-float ElapsedMs(iree_hal_streaming_timestamp_domain_t domain,
-                uint64_t start_tick, uint64_t stop_tick) {
-  return iree_hal_streaming_timestamp_domain_elapsed_ms(domain, start_tick,
-                                                        stop_tick);
-}
-
-TEST(TimestampDomainElapsedMsTest, ConvertsOnTheAdvertisedFrequency) {
-  EXPECT_FLOAT_EQ(1000.0f, ElapsedMs(Domain(kGigahertz, 64), 0, kGigahertz));
-  EXPECT_FLOAT_EQ(2000.0f,
-                  ElapsedMs(Domain(kGigahertz / 2, 64), 0, kGigahertz));
-  EXPECT_FLOAT_EQ(
-      1.0f, ElapsedMs(Domain(kGigahertz, 64), 1000, 1000 + kGigahertz / 1000));
-}
-
-TEST(TimestampDomainElapsedMsTest, ReportsZeroForIdenticalTicks) {
-  EXPECT_FLOAT_EQ(0.0f, ElapsedMs(Domain(kGigahertz, 64), 12345, 12345));
-}
-
-TEST(TimestampDomainElapsedMsTest, ReportsNegativeForAReversedPair) {
-  EXPECT_FLOAT_EQ(-1000.0f, ElapsedMs(Domain(kGigahertz, 64), kGigahertz, 0));
-}
-
-// A counter narrower than 64 bits wraps at its own width, so a pair straddling
-// the wrap is the interval between the two captures and not the counter range
-// minus it.
-TEST(TimestampDomainElapsedMsTest, ReducesAPairStraddlingAThirtyTwoBitWrap) {
-  EXPECT_FLOAT_EQ(
-      31.0f, ElapsedMs(Domain(kKilohertz, 32), 0xFFFFFFF0ull, 0x0000000Full));
-  EXPECT_FLOAT_EQ(
-      -31.0f, ElapsedMs(Domain(kKilohertz, 32), 0x0000000Full, 0xFFFFFFF0ull));
-}
-
-TEST(TimestampDomainElapsedMsTest, ReducesAPairStraddlingAFortyEightBitWrap) {
-  constexpr uint64_t kWidth = 1ull << 48;
-  EXPECT_FLOAT_EQ(15.0f,
-                  ElapsedMs(Domain(kKilohertz, 48), kWidth - 10ull, 5ull));
-  EXPECT_FLOAT_EQ(-15.0f,
-                  ElapsedMs(Domain(kKilohertz, 48), 5ull, kWidth - 10ull));
-}
-
-// At full width the reduction is the identity, so ticks the signed range cannot
-// hold convert as exactly as any others.
-TEST(TimestampDomainElapsedMsTest, HandlesTicksAboveTheSignedRange) {
-  constexpr uint64_t kHigh = std::numeric_limits<uint64_t>::max() - 4096ull;
-  EXPECT_FLOAT_EQ(1000.0f,
-                  ElapsedMs(Domain(kGigahertz, 64), kHigh - kGigahertz, kHigh));
-  EXPECT_FLOAT_EQ(-1000.0f,
-                  ElapsedMs(Domain(kGigahertz, 64), kHigh, kHigh - kGigahertz));
-}
-
-TEST(TimestampDomainElapsedMsTest, HandlesAnIntervalCrossingTheSignedBoundary) {
-  constexpr uint64_t kSignedMax =
-      static_cast<uint64_t>(std::numeric_limits<int64_t>::max());
-  EXPECT_FLOAT_EQ(1000.0f,
-                  ElapsedMs(Domain(kGigahertz, 64), kSignedMax - kGigahertz / 2,
-                            kSignedMax + kGigahertz / 2));
-}
-
-// Exactly half the counter range is the one difference with no int64_t
-// representation at full width; it reads as the most negative offset the
-// counter can express.
-TEST(TimestampDomainElapsedMsTest, HandlesHalfTheCounterRange) {
-  EXPECT_FLOAT_EQ(-9223372036854775808.0f,
-                  ElapsedMs(Domain(kKilohertz, 64), 0, 1ull << 63));
-  EXPECT_FLOAT_EQ(9223372036854775808.0f,
-                  ElapsedMs(Domain(kKilohertz, 64), 0, (1ull << 63) - 1ull));
-}
-
-// A zeroed domain names no clock, and this conversion is declared beside the
-// type it converts with, so a call carrying one has to stay inert: every pair
-// reduces to no ticks, and no frequency divides them into a duration. That
-// outcome is all a test can see here, since with no width every candidate for
-// the counter's top bit leaves the reduced pair on the same side of it.
-TEST(TimestampDomainElapsedMsTest, ReportsNoDurationForAZeroedDomain) {
-  EXPECT_TRUE(std::isnan(ElapsedMs(Domain(0, 0), 4096, 8192)));
-  EXPECT_TRUE(std::isnan(ElapsedMs(Domain(0, 0), 8192, 4096)));
-}
-
-//===----------------------------------------------------------------------===//
-// Which devices can be timed
-//===----------------------------------------------------------------------===//
-
-// Physical device bits are their own namespace and a spec built without an
-// identity facet advertises none, so any nonzero value names a valid set.
-constexpr iree_hal_physical_device_affinity_t kFirstPhysicalDevice = 1ull << 0;
-constexpr iree_hal_physical_device_affinity_t kSecondPhysicalDevice = 1ull << 1;
-constexpr iree_hal_queue_priority_t kNormalQueuePriority =
-    IREE_HAL_QUEUE_PRIORITY_NORMAL;
-
-iree_hal_queue_family_spec_t QueueFamily(
-    iree_hal_physical_device_affinity_t physical_device_affinity,
-    uint32_t timestamp_valid_bits, uint64_t timestamp_frequency_hz) {
-  iree_hal_queue_family_spec_t family = {
-      .name = iree_make_cstring_view("test"),
-      .provisioned_queue_count = 1,
-      .priority_count = 1,
-      .priorities = &kNormalQueuePriority,
-      .timestamp_valid_bits = timestamp_valid_bits,
-      .timestamp_frequency_hz = timestamp_frequency_hz,
-      .physical_device_affinity = physical_device_affinity,
-      .role_flags = IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH,
-  };
-  return family;
-}
-
-iree_hal_device_timing_spec_t Timing(iree_hal_device_timing_spec_flags_t flags,
-                                     uint32_t timestamp_valid_bits,
-                                     uint64_t timestamp_frequency_hz) {
-  iree_hal_device_timing_spec_t timing = {
-      .timestamp_valid_bits = timestamp_valid_bits,
-      .timestamp_frequency_hz = timestamp_frequency_hz,
-      .flags = flags,
-  };
-  return timing;
-}
-
-// Builds a spec carrying only the two facets the gate reads and answers it.
-iree_hal_streaming_timestamp_domain_t QueryDomain(
-    const iree_hal_queue_family_spec_t* families, iree_host_size_t family_count,
-    iree_hal_device_timing_spec_t timing) {
-  iree_hal_device_queue_spec_t queues = {
-      .family_count = family_count,
-      .families = families,
-  };
-  iree_hal_device_spec_params_t params = {.queues = &queues, .timing = &timing};
-  iree_hal_device_spec_t* spec = NULL;
-  IREE_EXPECT_OK(
-      iree_hal_device_spec_create(&params, iree_allocator_system(), &spec));
-  const iree_hal_streaming_timestamp_domain_t domain =
-      iree_hal_streaming_query_timestamp_domain(spec);
-  iree_hal_device_spec_release(spec);
-  return domain;
-}
-
-// The facts a single-GPU device publishes, which is every device this layer
-// builds: one family covering one physical device at 100 MHz.
-iree_hal_streaming_timestamp_domain_t QueryOneFamilyDomain(
-    uint32_t family_valid_bits, uint64_t family_frequency_hz,
-    iree_hal_device_timing_spec_flags_t timing_flags) {
-  const iree_hal_queue_family_spec_t family =
-      QueueFamily(kFirstPhysicalDevice, family_valid_bits, family_frequency_hz);
-  return QueryDomain(
-      &family, 1, Timing(timing_flags, family_valid_bits, family_frequency_hz));
-}
-
-TEST(QueryTimestampDomainTest, ReadsTheFactsOfTheSingleQueueFamily) {
-  const iree_hal_streaming_timestamp_domain_t domain = QueryOneFamilyDomain(
-      64, 100000000ull, IREE_HAL_DEVICE_TIMING_SPEC_FLAG_DEVICE_TIMESTAMPS);
-  EXPECT_EQ(100000000ull, domain.frequency_hz);
-  EXPECT_EQ(64u, domain.valid_bits);
-}
-
-// The family's own width is what a tick is converted with, so a narrow counter
-// is carried through rather than rounded up to the device-scope summary.
-TEST(QueryTimestampDomainTest, CarriesANarrowCounterWidth) {
-  const iree_hal_streaming_timestamp_domain_t domain = QueryOneFamilyDomain(
-      32, 100000000ull, IREE_HAL_DEVICE_TIMING_SPEC_FLAG_DEVICE_TIMESTAMPS);
-  EXPECT_EQ(100000000ull, domain.frequency_hz);
-  EXPECT_EQ(32u, domain.valid_bits);
-}
-
-TEST(QueryTimestampDomainTest, RejectsADeviceNotAdvertisingTimestamps) {
-  const iree_hal_streaming_timestamp_domain_t domain = QueryOneFamilyDomain(
-      64, 100000000ull, IREE_HAL_DEVICE_TIMING_SPEC_FLAG_NONE);
-  EXPECT_EQ(0ull, domain.frequency_hz);
-  EXPECT_EQ(0u, domain.valid_bits);
-}
-
-// Two families may capture in two domains, and which one a record resolves to
-// is internal to the implementation, so no pair of records is known comparable.
-TEST(QueryTimestampDomainTest, RejectsADeviceReportingSeveralQueueFamilies) {
-  const std::array<iree_hal_queue_family_spec_t, 2> families = {
-      QueueFamily(kFirstPhysicalDevice, 64, 100000000ull),
-      QueueFamily(kSecondPhysicalDevice, 64, 100000000ull),
-  };
-  const iree_hal_streaming_timestamp_domain_t domain =
-      QueryDomain(families.data(), families.size(),
-                  Timing(IREE_HAL_DEVICE_TIMING_SPEC_FLAG_DEVICE_TIMESTAMPS, 64,
-                         100000000ull));
-  EXPECT_EQ(0ull, domain.frequency_hz);
-  EXPECT_EQ(0u, domain.valid_bits);
-}
-
-// One family spanning two physical devices spans two independent counters.
-TEST(QueryTimestampDomainTest, RejectsAFamilySpanningTwoPhysicalDevices) {
-  const iree_hal_queue_family_spec_t family = QueueFamily(
-      kFirstPhysicalDevice | kSecondPhysicalDevice, 64, 100000000ull);
-  const iree_hal_streaming_timestamp_domain_t domain =
-      QueryDomain(&family, 1,
-                  Timing(IREE_HAL_DEVICE_TIMING_SPEC_FLAG_DEVICE_TIMESTAMPS, 64,
-                         100000000ull));
-  EXPECT_EQ(0ull, domain.frequency_hz);
-  EXPECT_EQ(0u, domain.valid_bits);
-}
-
-// The flag comes from the device-scope summary and the numbers from the family,
-// which is sound only while the two describe the same domain; a device whose
-// facets disagree names no numbers a tick can be converted with.
-TEST(QueryTimestampDomainTest, RejectsFacetsThatDisagreeAboutTheDomain) {
-  const iree_hal_queue_family_spec_t family =
-      QueueFamily(kFirstPhysicalDevice, 64, 100000000ull);
-  const iree_hal_streaming_timestamp_domain_t disagreeing_frequency =
-      QueryDomain(&family, 1,
-                  Timing(IREE_HAL_DEVICE_TIMING_SPEC_FLAG_DEVICE_TIMESTAMPS, 64,
-                         25000000ull));
-  EXPECT_EQ(0ull, disagreeing_frequency.frequency_hz);
-  EXPECT_EQ(0u, disagreeing_frequency.valid_bits);
-
-  const iree_hal_streaming_timestamp_domain_t disagreeing_width =
-      QueryDomain(&family, 1,
-                  Timing(IREE_HAL_DEVICE_TIMING_SPEC_FLAG_DEVICE_TIMESTAMPS, 32,
-                         100000000ull));
-  EXPECT_EQ(0ull, disagreeing_width.frequency_hz);
-  EXPECT_EQ(0u, disagreeing_width.valid_bits);
-}
-
-// A domain is populated or zeroed as a unit, so facts that cannot convert a
-// tick pair leave it zeroed rather than half-filled.
-TEST(QueryTimestampDomainTest, RejectsFamilyFactsThatCannotConvertATick) {
-  const iree_hal_streaming_timestamp_domain_t no_frequency =
-      QueryOneFamilyDomain(64, 0ull,
-                           IREE_HAL_DEVICE_TIMING_SPEC_FLAG_DEVICE_TIMESTAMPS);
-  EXPECT_EQ(0ull, no_frequency.frequency_hz);
-  EXPECT_EQ(0u, no_frequency.valid_bits);
-
-  const iree_hal_streaming_timestamp_domain_t no_width = QueryOneFamilyDomain(
-      0, 100000000ull, IREE_HAL_DEVICE_TIMING_SPEC_FLAG_DEVICE_TIMESTAMPS);
-  EXPECT_EQ(0ull, no_width.frequency_hz);
-  EXPECT_EQ(0u, no_width.valid_bits);
-
-  const iree_hal_streaming_timestamp_domain_t too_wide = QueryOneFamilyDomain(
-      65, 100000000ull, IREE_HAL_DEVICE_TIMING_SPEC_FLAG_DEVICE_TIMESTAMPS);
-  EXPECT_EQ(0ull, too_wide.frequency_hz);
-  EXPECT_EQ(0u, too_wide.valid_bits);
-}
-
-TEST(QueryTimestampDomainTest, RejectsADevicePublishingNoFacts) {
-  const iree_hal_streaming_timestamp_domain_t domain =
-      iree_hal_streaming_query_timestamp_domain(NULL);
-  EXPECT_EQ(0ull, domain.frequency_hz);
-  EXPECT_EQ(0u, domain.valid_bits);
-}
 
 //===----------------------------------------------------------------------===//
 // Streaming events on a real task device
@@ -342,6 +78,9 @@ struct FailingSnapshotAllocator {
 
 class CpuStreamingContextTest : public ::testing::Test {
  protected:
+  // Owns the task device and its runtime through fixture cleanup.
+  hrx_device_group_t group_ = nullptr;
+
   struct Gate {
     // Semaphore blocking submitted test work.
     iree_hal_semaphore_t* semaphore;
@@ -352,9 +91,14 @@ class CpuStreamingContextTest : public ::testing::Test {
   };
 
   void SetUp() override {
-    IREE_ASSERT_OK(HRX_CALL(hrx_cpu_initialize(/*flags=*/0)));
-    hrx_device_t hrx_device = nullptr;
-    IREE_ASSERT_OK(HRX_CALL(hrx_cpu_device_get(/*index=*/0, &hrx_device)));
+    hrx_runtime_t runtime = nullptr;
+    IREE_ASSERT_OK(HRX_CALL(
+        hrx_runtime_create(nullptr, hrx_host_allocator_system(), &runtime)));
+    const hrx_device_create_params_t params = {.uri = "task://"};
+    hrx_status_t status = hrx_device_group_create(runtime, 1, &params, &group_);
+    hrx_runtime_release(runtime);
+    IREE_ASSERT_OK(HRX_CALL(status));
+    hrx_device_t hrx_device = hrx_device_group_get_device(group_, 0);
 
     // Stands in for the registry entry global initialization builds around an
     // enumerated accelerator: contexts take their HAL device from the entry and
@@ -387,7 +131,8 @@ class CpuStreamingContextTest : public ::testing::Test {
     iree_arena_block_pool_deinitialize(&device_entry_.block_pool);
     iree_slim_mutex_deinitialize(&device_entry_.graph_memory_mutex);
     iree_slim_mutex_deinitialize(&device_entry_.primary_context_mutex);
-    IREE_EXPECT_OK(HRX_CALL(hrx_cpu_shutdown()));
+    hrx_device_group_release(group_);
+    group_ = nullptr;
   }
 
   iree_status_t CreateGate(uint64_t release_value,
@@ -487,14 +232,202 @@ class CpuStreamingContextTest : public ::testing::Test {
   iree_host_size_t gate_count_ = 0;
 };
 
-// The CPU device publishes no timing facet and its single queue family reports
-// no frequency and no width, so a context created on it reads a zeroed domain.
-// The fabricated specs above pin each rejection case; this fixture pins that
-// the result is propagated through context creation. Device-timing CTS covers
-// the positive path on devices that advertise a timestamp domain.
-TEST_F(CpuStreamingContextTest, LeavesTheDomainZeroedOnTheCpuDevice) {
-  EXPECT_EQ(0ull, context_->timestamp_domain.frequency_hz);
-  EXPECT_EQ(0u, context_->timestamp_domain.valid_bits);
+TEST_F(CpuStreamingContextTest, UsesTheTaskQueueNanosecondClock) {
+  EXPECT_EQ(1000000000ull, context_->timestamp_domain.frequency_hz);
+  EXPECT_EQ(64u, context_->timestamp_domain.valid_bits);
+}
+
+TEST_F(CpuStreamingContextTest, UntimedRecordOnAnEmptyStreamCompletes) {
+  iree_hal_streaming_event_t* event = nullptr;
+  iree_hal_streaming_recorded_point_t point = {};
+  ScopeExit cleanup([&] {
+    iree_hal_streaming_event_release_recorded_point(&point);
+    iree_hal_streaming_event_release(event);
+  });
+  IREE_ASSERT_OK(iree_hal_streaming_event_create(
+      context_, IREE_HAL_STREAMING_EVENT_FLAG_DISABLE_TIMING,
+      iree_allocator_system(), &event));
+  IREE_ASSERT_OK(iree_hal_streaming_event_record(
+      event, context_->default_stream, /*capture_external_record=*/false));
+  iree_hal_streaming_event_acquire_recorded_point(event, &point);
+  EXPECT_NE(nullptr, point.semaphore);
+  EXPECT_EQ(0u, point.value);
+  EXPECT_EQ(0u, context_->default_stream->pending_value);
+  EXPECT_EQ(nullptr, point.timestamp_slot);
+  IREE_ASSERT_OK(iree_hal_streaming_event_synchronize(event));
+  iree_hal_streaming_completion_state_t completion =
+      IREE_HAL_STREAMING_COMPLETION_STATE_PENDING;
+  IREE_ASSERT_OK(iree_hal_streaming_event_query(event, &completion));
+  EXPECT_EQ(IREE_HAL_STREAMING_COMPLETION_STATE_COMPLETE, completion);
+}
+
+TEST_F(CpuStreamingContextTest,
+       UntimedPointSurvivesRerecordAndStreamDestruction) {
+  iree_hal_streaming_stream_t* stream = nullptr;
+  iree_hal_streaming_event_t* event = nullptr;
+  iree_hal_streaming_recorded_point_t first = {};
+  iree_hal_streaming_recorded_point_t second = {};
+  ScopeExit cleanup([&] {
+    IREE_EXPECT_OK(ReleaseAllGates());
+    iree_hal_streaming_event_release_recorded_point(&second);
+    iree_hal_streaming_event_release_recorded_point(&first);
+    iree_hal_streaming_event_release(event);
+    iree_hal_streaming_stream_release(stream);
+  });
+  IREE_ASSERT_OK(CreateNonBlockingStream(context_, &stream));
+  IREE_ASSERT_OK(iree_hal_streaming_event_create(
+      context_, IREE_HAL_STREAMING_EVENT_FLAG_DISABLE_TIMING,
+      iree_allocator_system(), &event));
+  iree_hal_semaphore_t* gate = nullptr;
+  IREE_ASSERT_OK(CreateGate(/*release_value=*/2, &gate));
+  uint64_t gate_value = 1;
+  IREE_ASSERT_OK(iree_hal_streaming_stream_wait_semaphores(
+      stream, {1, &gate, &gate_value}));
+  const uint64_t first_tail = stream->pending_value;
+  IREE_ASSERT_OK(iree_hal_streaming_event_record(
+      event, stream, /*capture_external_record=*/false));
+  iree_hal_streaming_event_acquire_recorded_point(event, &first);
+  EXPECT_EQ(first_tail, first.value);
+  EXPECT_EQ(first_tail, stream->pending_value);
+
+  gate_value = 2;
+  IREE_ASSERT_OK(iree_hal_streaming_stream_wait_semaphores(
+      stream, {1, &gate, &gate_value}));
+  const uint64_t second_tail = stream->pending_value;
+  IREE_ASSERT_OK(iree_hal_streaming_event_record(
+      event, stream, /*capture_external_record=*/false));
+  iree_hal_streaming_event_acquire_recorded_point(event, &second);
+  EXPECT_EQ(second_tail, second.value);
+  EXPECT_EQ(second_tail, stream->pending_value);
+  EXPECT_EQ(first.semaphore, second.semaphore);
+  EXPECT_GT(second.value, first.value);
+  EXPECT_EQ(stream->stream_id, first.ordered_after_stream_id);
+  EXPECT_EQ(first.value, first.ordered_after_stream_value);
+  EXPECT_EQ(second.value, second.ordered_after_stream_value);
+  EXPECT_TRUE(first.requires_independent_queue);
+
+  IREE_ASSERT_OK(SignalGate(gate, 1));
+  IREE_ASSERT_OK(iree_hal_semaphore_wait(first.semaphore, first.value,
+                                         iree_infinite_timeout(),
+                                         IREE_ASYNC_WAIT_FLAG_NONE));
+  iree_hal_streaming_completion_state_t completion =
+      IREE_HAL_STREAMING_COMPLETION_STATE_COMPLETE;
+  IREE_ASSERT_OK(iree_hal_streaming_event_query(event, &completion));
+  EXPECT_EQ(IREE_HAL_STREAMING_COMPLETION_STATE_PENDING, completion);
+
+  IREE_ASSERT_OK(SignalGate(gate, 2));
+  IREE_ASSERT_OK(iree_hal_streaming_stream_synchronize(stream));
+  iree_hal_streaming_stream_release(stream);
+  stream = nullptr;
+  IREE_ASSERT_OK(iree_hal_streaming_event_synchronize(event));
+  IREE_ASSERT_OK(iree_hal_semaphore_wait(first.semaphore, first.value,
+                                         iree_infinite_timeout(),
+                                         IREE_ASYNC_WAIT_FLAG_NONE));
+}
+
+TEST_F(CpuStreamingContextTest,
+       RejectedCrossContextRecordPreservesUntimedPoint) {
+  iree_hal_streaming_context_t* other_context = nullptr;
+  iree_hal_streaming_event_t* event = nullptr;
+  iree_hal_streaming_recorded_point_t before = {};
+  iree_hal_streaming_recorded_point_t after = {};
+  ScopeExit cleanup([&] {
+    IREE_EXPECT_OK(ReleaseAllGates());
+    iree_hal_streaming_event_release_recorded_point(&after);
+    iree_hal_streaming_event_release_recorded_point(&before);
+    iree_hal_streaming_event_release(event);
+    iree_hal_streaming_context_release(other_context);
+  });
+  IREE_ASSERT_OK(iree_hal_streaming_context_create(
+      &device_entry_,
+      {.scheduling_mode = IREE_HAL_STREAMING_SCHEDULING_MODE_AUTO},
+      iree_allocator_system(), &other_context));
+  IREE_ASSERT_OK(iree_hal_streaming_event_create(
+      context_, IREE_HAL_STREAMING_EVENT_FLAG_DISABLE_TIMING,
+      iree_allocator_system(), &event));
+  iree_hal_semaphore_t* gate = nullptr;
+  IREE_ASSERT_OK(CreateGate(/*release_value=*/1, &gate));
+  uint64_t gate_value = 1;
+  IREE_ASSERT_OK(iree_hal_streaming_stream_wait_semaphores(
+      context_->default_stream, {1, &gate, &gate_value}));
+  IREE_ASSERT_OK(iree_hal_streaming_event_record(
+      event, context_->default_stream, /*capture_external_record=*/false));
+  iree_hal_streaming_event_acquire_recorded_point(event, &before);
+  IREE_ASSERT_OK(
+      iree_hal_streaming_stream_begin(other_context->default_stream));
+  auto* pending_recording = other_context->default_stream->command_buffer;
+  ASSERT_NE(nullptr, pending_recording);
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INCOMPATIBLE,
+      iree_hal_streaming_event_record(event, other_context->default_stream,
+                                      /*capture_external_record=*/false));
+  EXPECT_EQ(pending_recording, other_context->default_stream->command_buffer);
+  EXPECT_EQ(0u, other_context->default_stream->pending_value);
+  iree_hal_streaming_event_acquire_recorded_point(event, &after);
+  EXPECT_EQ(before.semaphore, after.semaphore);
+  EXPECT_EQ(before.value, after.value);
+  EXPECT_EQ(before.ordered_after_stream_id, after.ordered_after_stream_id);
+  iree_hal_streaming_completion_state_t completion =
+      IREE_HAL_STREAMING_COMPLETION_STATE_COMPLETE;
+  IREE_ASSERT_OK(iree_hal_streaming_event_query(event, &completion));
+  EXPECT_EQ(IREE_HAL_STREAMING_COMPLETION_STATE_PENDING, completion);
+  IREE_ASSERT_OK(SignalGate(gate, 1));
+  IREE_ASSERT_OK(iree_hal_streaming_event_synchronize(event));
+}
+
+TEST_F(CpuStreamingContextTest, UntimedPointPropagatesHostOperationFailure) {
+  struct HostOperation {
+    // Announces that the host operation owns its pending stream point.
+    std::binary_semaphore entered{0};
+    // Holds completion until the event has recorded that stream point.
+    std::binary_semaphore release{0};
+  } operation;
+  iree_hal_streaming_stream_t* stream = nullptr;
+  iree_hal_streaming_event_t* event = nullptr;
+  std::thread thread;
+  bool released = false;
+  ScopeExit cleanup([&] {
+    if (thread.joinable()) {
+      if (!released) {
+        operation.release.release();
+      }
+      thread.join();
+    }
+    iree_hal_streaming_event_release(event);
+    iree_hal_streaming_stream_release(stream);
+  });
+  IREE_ASSERT_OK(CreateNonBlockingStream(context_, &stream));
+  IREE_ASSERT_OK(iree_hal_streaming_event_create(
+      context_, IREE_HAL_STREAMING_EVENT_FLAG_DISABLE_TIMING,
+      iree_allocator_system(), &event));
+  thread = std::thread([&] {
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_DATA_LOSS,
+        iree_hal_streaming_execute_host_operation(
+            stream,
+            [](void* user_data) -> iree_status_t {
+              auto* operation = static_cast<HostOperation*>(user_data);
+              operation->entered.release();
+              operation->release.acquire();
+              return iree_make_status(IREE_STATUS_DATA_LOSS,
+                                      "host operation failed");
+            },
+            &operation));
+  });
+  operation.entered.acquire();
+  IREE_ASSERT_OK(iree_hal_streaming_event_record(
+      event, stream, /*capture_external_record=*/false));
+  iree_hal_streaming_completion_state_t completion =
+      IREE_HAL_STREAMING_COMPLETION_STATE_COMPLETE;
+  IREE_ASSERT_OK(iree_hal_streaming_event_query(event, &completion));
+  EXPECT_EQ(IREE_HAL_STREAMING_COMPLETION_STATE_PENDING, completion);
+  operation.release.release();
+  released = true;
+  thread.join();
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_DATA_LOSS,
+                        iree_hal_streaming_event_synchronize(event));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_DATA_LOSS,
+                        iree_hal_streaming_event_query(event, &completion));
 }
 
 TEST_F(CpuStreamingContextTest, RepeatedStreamJoinReusesAcceptedSourcePoint) {
@@ -535,12 +468,7 @@ TEST_F(CpuStreamingContextTest, RepeatedStreamJoinReusesAcceptedSourcePoint) {
   IREE_ASSERT_OK(iree_hal_streaming_stream_synchronize(consumer));
 }
 
-// A record on a context whose domain is zeroed captures no tick, so the pool it
-// would have drawn a slot from stays empty and the interval between two such
-// records names no clock to be measured on. This is the only reachable path to
-// that outcome anywhere in this tree: every device libhrx builds a context on
-// advertises a domain.
-TEST_F(CpuStreamingContextTest, DirectRecordsOnAnUntimedDeviceGoUntimed) {
+TEST_F(CpuStreamingContextTest, DirectRecordsMeasureTheTaskQueueInterval) {
   iree_hal_streaming_stream_t* stream = nullptr;
   IREE_ASSERT_OK(iree_hal_streaming_stream_create(
       context_, context_->queue, IREE_HAL_STREAMING_STREAM_FLAG_NONE,
@@ -560,16 +488,13 @@ TEST_F(CpuStreamingContextTest, DirectRecordsOnAnUntimedDeviceGoUntimed) {
       stop, stream, /*capture_external_record=*/false));
   IREE_ASSERT_OK(iree_hal_streaming_event_synchronize(stop));
 
-  EXPECT_EQ(nullptr, context_->timestamp_pool.slabs)
-      << "a record on a device advertising no domain acquired a tick slot";
-
   float ms = -1.0f;
   iree_hal_streaming_event_timing_t timing =
-      IREE_HAL_STREAMING_EVENT_TIMING_MEASURED;
+      IREE_HAL_STREAMING_EVENT_TIMING_UNTIMED;
   IREE_ASSERT_OK(
       iree_hal_streaming_event_elapsed_time(&ms, start, stop, &timing));
-  EXPECT_EQ(IREE_HAL_STREAMING_EVENT_TIMING_UNSUPPORTED, timing);
-  EXPECT_FLOAT_EQ(-1.0f, ms) << "an unmeasurable pair reported a duration";
+  EXPECT_EQ(IREE_HAL_STREAMING_EVENT_TIMING_MEASURED, timing);
+  EXPECT_GE(ms, 0.0f);
 
   iree_hal_streaming_event_release(stop);
   iree_hal_streaming_event_release(start);
@@ -940,10 +865,7 @@ TEST_F(CpuStreamingContextTest,
   EXPECT_EQ(IREE_STATUS_OK, second_status_code.load(std::memory_order_acquire));
 }
 
-// The records a graph launch enqueues run through the same helper as a direct
-// record, so a launch recording eleven events on this device acquires no slot
-// either.
-TEST_F(CpuStreamingContextTest, AGraphLaunchOnAnUntimedDeviceGoesUntimed) {
+TEST_F(CpuStreamingContextTest, GraphDisabledTimingRecordsOnlySignal) {
   static constexpr iree_host_size_t kEventCount = 11;
 
   iree_hal_streaming_stream_t* stream = nullptr;
@@ -958,8 +880,8 @@ TEST_F(CpuStreamingContextTest, AGraphLaunchOnAnUntimedDeviceGoesUntimed) {
   std::array<iree_hal_streaming_event_t*, kEventCount> events = {};
   for (iree_host_size_t i = 0; i < kEventCount; ++i) {
     IREE_ASSERT_OK(iree_hal_streaming_event_create(
-        context_, IREE_HAL_STREAMING_EVENT_FLAG_NONE, iree_allocator_system(),
-        &events[i]));
+        context_, IREE_HAL_STREAMING_EVENT_FLAG_DISABLE_TIMING,
+        iree_allocator_system(), &events[i]));
     iree_hal_streaming_graph_node_t* node = nullptr;
     IREE_ASSERT_OK(iree_hal_streaming_graph_add_event_node(
         graph, /*dependencies=*/nullptr, /*dependency_count=*/0,
@@ -977,7 +899,7 @@ TEST_F(CpuStreamingContextTest, AGraphLaunchOnAnUntimedDeviceGoesUntimed) {
   IREE_ASSERT_OK(iree_hal_streaming_stream_synchronize(stream));
 
   EXPECT_EQ(nullptr, context_->timestamp_pool.slabs)
-      << "a launch on a device advertising no domain acquired tick slots";
+      << "timing-disabled events acquired timestamp storage";
   for (iree_host_size_t i = 0; i < kEventCount; ++i) {
     iree_hal_streaming_completion_state_t completion_state =
         IREE_HAL_STREAMING_COMPLETION_STATE_PENDING;

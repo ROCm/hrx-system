@@ -26,7 +26,9 @@ static iree_status_t loom_low_requirements_descriptor_key(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_descriptor_t* descriptor, iree_string_view_t* out_key) {
   return loom_low_requirements_get_string(
-      descriptor_set, descriptor->key_string_ref, "key", out_key);
+      descriptor_set,
+      loom_low_descriptor_key_string_ref(descriptor_set, descriptor), "key",
+      out_key);
 }
 
 static iree_status_t loom_low_requirements_verify_core_tables(
@@ -183,12 +185,14 @@ static iree_status_t loom_low_requirements_verify_descriptor(
   if (iree_any_bit_set(requirements,
                        LOOM_LOW_DESCRIPTOR_REQUIREMENT_SEMANTIC_TAGS)) {
     iree_string_view_t semantic_tag = iree_string_view_empty();
-    IREE_RETURN_IF_ERROR(
-        loom_low_requirements_get_string(descriptor_set,
-                                         descriptor->semantic_tag_string_ref,
-                                         "semantic tag", &semantic_tag),
-        "low descriptor set '%.*s' descriptor '%.*s'", (int)set_key.size,
-        set_key.data, (int)descriptor_key.size, descriptor_key.data);
+    IREE_RETURN_IF_ERROR(loom_low_requirements_get_string(
+                             descriptor_set,
+                             loom_low_descriptor_semantic_tag_string_ref(
+                                 descriptor_set, descriptor),
+                             "semantic tag", &semantic_tag),
+                         "low descriptor set '%.*s' descriptor '%.*s'",
+                         (int)set_key.size, set_key.data,
+                         (int)descriptor_key.size, descriptor_key.data);
   }
   if (iree_any_bit_set(requirements,
                        LOOM_LOW_DESCRIPTOR_REQUIREMENT_OPERAND_REG_CLASSES)) {

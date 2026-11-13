@@ -12,18 +12,21 @@ import re
 from collections.abc import Sequence
 from dataclasses import replace
 
-from loom.format.cxx.configs import CxxConfigRenderer
+from loom.format.cxx.buffer_access import BufferAccessPlan
 from loom.format.cxx.context import (
     _memory_space,
     _strip_outer_parentheses,
+    cxx_string_literal,
     is_pure_operation,
     is_target_operation,
     walk_operations,
 )
 from loom.format.cxx.errors import CxxRenderError
+from loom.format.cxx.functions import CxxFunctionRenderer
 from loom.format.cxx.naming import clean_identifier, loop_carrier_stem
 from loom.format.cxx.translation_unit import render_preamble
 from loom.format.cxx.types import KERNEL_COORDINATE_CPP_TYPE
+from loom.format.cxx.value_transport import plan_value_transport
 from loom.format.cxx.view_access import plan_view_access
 from loom.ir import (
     Block,
@@ -41,34 +44,10 @@ from loom.ir import (
     ShapedType,
     StaticDim,
     TypeKind,
-    Utf8Attr,
 )
 
 
-def _string_literal(contents: bytes | Utf8Attr) -> str:
-    """Quotes exact payload code units without greedy hexadecimal escapes."""
-    text = (
-        contents.value if isinstance(contents, Utf8Attr) else contents.decode("latin1")
-    )
-    prefix = "u8" if isinstance(contents, Utf8Attr) else ""
-    escaped = []
-    for character in text:
-        if character in {'"', "\\"}:
-            escaped.append("\\" + character)
-        elif character in {"\n", "\r", "\t"}:
-            escaped.append({"\n": "\\n", "\r": "\\r", "\t": "\\t"}[character])
-        elif (
-            ord(character) < 32
-            or ord(character) == 127
-            or (not prefix and ord(character) >= 128)
-        ):
-            escaped.append(f"\\{ord(character):03o}")
-        else:
-            escaped.append(character)
-    return prefix + '"' + "".join(escaped) + '"'
-
-
-class CxxRenderer(CxxConfigRenderer):
+class CxxRenderer(CxxFunctionRenderer):
     def _static_view_encoding_expression(
         self, operation: Operation, view_type: ShapedType
     ) -> str:
@@ -131,13 +110,15 @@ class CxxRenderer(CxxConfigRenderer):
 
         lhs_type = self.module.values[lhs].type
         rhs_type = self.module.values[rhs].type
+        if isinstance(lhs_type, BufferType) and isinstance(rhs_type, BufferType):
+            return self._buffer_element(lhs) == self._buffer_element(rhs)
         if repr(lhs_type) == repr(rhs_type):
             return True
         if not (
             isinstance(lhs_type, ShapedType)
-            and lhs_type.type_kind == TypeKind.VIEW
+            and lhs_type.type_kind in {TypeKind.VIEW, TypeKind.VECTOR, TypeKind.TILE}
             and isinstance(rhs_type, ShapedType)
-            and rhs_type.type_kind == TypeKind.VIEW
+            and rhs_type.type_kind == lhs_type.type_kind
         ):
             return False
 
@@ -196,6 +177,15 @@ class CxxRenderer(CxxConfigRenderer):
         arguments = [self.expression(resolved.value_id("view")), *indices]
         return ", ".join(arguments)
 
+    @staticmethod
+    def _append_memory_access_contract(
+        operation: Operation, selectors: list[str]
+    ) -> tuple[str, ...]:
+        if operation.attributes.get("memory_flags") == "root_in_bounds":
+            selectors.append("loom::memory_access::root_in_bounds")
+            return ("memory_flags",)
+        return ()
+
     def _emit_atomic_result(self, result: int, expression: str) -> None:
         if self.use_counts[result] == 0 and result not in self.assignment_targets:
             self.writer.line(f"(void){expression};")
@@ -212,11 +202,15 @@ class CxxRenderer(CxxConfigRenderer):
         if name == "view.atomic.cmpxchg":
             success = resolved.attr("success_ordering")
             failure = resolved.attr("failure_ordering")
+            selectors = [
+                f"loom::atomic::ordering::{success}",
+                f"loom::atomic::ordering::{failure}",
+                f"loom::atomic::scope::{scope}",
+            ]
+            projected_flags = self._append_memory_access_contract(operation, selectors)
+            template = ", ".join(selectors)
             expression = (
-                "loom::view::atomic::cmpxchg<"
-                f"loom::atomic::ordering::{success}, "
-                f"loom::atomic::ordering::{failure}, "
-                f"loom::atomic::scope::{scope}>("
+                f"loom::view::atomic::cmpxchg<{template}>("
                 f"{self.expression(resolved.value_id('expected'))}, "
                 f"{self.expression(resolved.value_id('replacement'))}, "
                 f"{access})"
@@ -227,42 +221,109 @@ class CxxRenderer(CxxConfigRenderer):
                 "failure_ordering",
                 "scope",
                 "static_indices",
+                *projected_flags,
             )
 
         ordering = resolved.attr("ordering")
         if name == "view.atomic.load":
-            expression = (
-                "loom::view::atomic::load<"
-                f"loom::atomic::ordering::{ordering}, "
-                f"loom::atomic::scope::{scope}>({access})"
-            )
+            selectors = [
+                f"loom::atomic::ordering::{ordering}",
+                f"loom::atomic::scope::{scope}",
+            ]
+            projected_flags = self._append_memory_access_contract(operation, selectors)
+            template = ", ".join(selectors)
+            expression = f"loom::view::atomic::load<{template}>({access})"
             self._emit_atomic_result(resolved.value_id("result"), expression)
-            return ("ordering", "scope", "static_indices")
+            return (
+                "ordering",
+                "scope",
+                "static_indices",
+                *projected_flags,
+            )
         if name == "view.atomic.store":
+            selectors = [
+                f"loom::atomic::ordering::{ordering}",
+                f"loom::atomic::scope::{scope}",
+            ]
+            projected_flags = self._append_memory_access_contract(operation, selectors)
+            template = ", ".join(selectors)
             self.writer.line(
-                "loom::view::atomic::store<"
-                f"loom::atomic::ordering::{ordering}, "
-                f"loom::atomic::scope::{scope}>("
+                f"loom::view::atomic::store<{template}>("
                 f"{self.expression(resolved.value_id('value'))}, {access});"
             )
-            return ("ordering", "scope", "static_indices")
+            return (
+                "ordering",
+                "scope",
+                "static_indices",
+                *projected_flags,
+            )
 
         kind = resolved.attr("kind")
         member = "rmw" if name == "view.atomic.rmw" else "reduce"
+        selectors = [
+            f"loom::atomic::kind::{kind}",
+            f"loom::atomic::ordering::{ordering}",
+            f"loom::atomic::scope::{scope}",
+        ]
+        projected_flags = self._append_memory_access_contract(operation, selectors)
+        template = ", ".join(selectors)
         expression = (
-            f"loom::view::atomic::{member}<loom::atomic::kind::{kind}, "
-            f"loom::atomic::ordering::{ordering}, "
-            f"loom::atomic::scope::{scope}>("
+            f"loom::view::atomic::{member}<{template}>("
             f"{self.expression(resolved.value_id('value'))}, {access})"
         )
         if name == "view.atomic.rmw":
             self._emit_atomic_result(resolved.value_id("result"), expression)
         else:
             self.writer.line(f"{expression};")
-        return ("kind", "ordering", "scope", "static_indices")
+        return (
+            "kind",
+            "ordering",
+            "scope",
+            "static_indices",
+            *projected_flags,
+        )
 
     def _render_memory(self, operation: Operation) -> tuple[str, ...] | None:
         name = operation.name
+        if name == "buffer.null":
+            resolved = self._resolved(operation)
+            result = resolved.value_id("result")
+            element = self._buffer_element(result)
+            self._declare(
+                result,
+                f"loom::buffer::null<{element}>()",
+                declaration_type="auto",
+                expression_type=f"loom::type::buffer<{element}>",
+            )
+            return ()
+        if name == "buffer.compare.null":
+            resolved = self._resolved(operation)
+            operand = resolved.value_id("buffer")
+            argument = self._buffer_argument(operand, self._buffer_element(operand))
+            self._declare(
+                resolved.value_id("result"),
+                f"loom::buffer::compare::null({argument})",
+            )
+            return ()
+        if name == "buffer.compare.address":
+            resolved = self._resolved(operation)
+            arguments = []
+            for side in ("lhs", "rhs"):
+                root = resolved.value_id(side)
+                arguments.extend(
+                    (
+                        self._buffer_argument(root, self._buffer_element(root)),
+                        self.expression(resolved.value_id(f"{side}_offset")),
+                    )
+                )
+            predicate = resolved.attr("predicate")
+            self._declare(
+                resolved.value_id("result"),
+                "loom::buffer::compare::address<"
+                f"loom::buffer::compare::predicate::{predicate}>("
+                f"{', '.join(arguments)})",
+            )
+            return ("predicate",)
         projected = self._render_atomic(operation)
         if projected is not None:
             return projected
@@ -310,7 +371,7 @@ class CxxRenderer(CxxConfigRenderer):
                 callee = f"loom::buffer::alloca_init<{space}, {alignment}>"
                 attributes = ("contents", "memory_space", "base_alignment")
             result = resolved.value_id("result")
-            literal = _string_literal(resolved.attr("contents"))
+            literal = cxx_string_literal(resolved.attr("contents"))
             self._declare(result, f"{callee}({literal})", declaration_type="auto*")
             self.expression_types[result] = (
                 "const unsigned char*" if immutable else "unsigned char*"
@@ -381,6 +442,10 @@ class CxxRenderer(CxxConfigRenderer):
                 if self.view_access is not None
                 else root is not None and not self.buffer_info[root].mutable
             )
+            if not is_const and self.buffer_access.is_immutable(
+                buffer_id, self.buffer_projection
+            ):
+                raise CxxRenderError(operation, "immutable buffer storage is written")
             element = self.types.scalar(
                 result_type.element_type, result in self.view_signed
             )
@@ -451,11 +516,17 @@ class CxxRenderer(CxxConfigRenderer):
                 )
             )
             suffix = f", {indices}" if indices else ""
+            selectors: list[str] = []
+            projected_flags = self._append_memory_access_contract(operation, selectors)
+            template = f"<{selectors[0]}>" if selectors else ""
             self._declare(
                 operation.results[0],
-                f"loom::view::load({self.expression(view_id)}{suffix})",
+                f"loom::view::load{template}({self.expression(view_id)}{suffix})",
             )
-            return ("static_indices",)
+            return (
+                "static_indices",
+                *projected_flags,
+            )
         if name == "view.store":
             resolved = self._resolved(operation)
             indices = ", ".join(
@@ -468,8 +539,14 @@ class CxxRenderer(CxxConfigRenderer):
             suffix = f", {indices}" if indices else ""
             value = self.expression(resolved.value_id("value"))
             view = self.expression(resolved.value_id("view"))
-            self.writer.line(f"loom::view::store({value}, {view}{suffix});")
-            return ("static_indices",)
+            selectors = []
+            projected_flags = self._append_memory_access_contract(operation, selectors)
+            template = f"<{selectors[0]}>" if selectors else ""
+            self.writer.line(f"loom::view::store{template}({value}, {view}{suffix});")
+            return (
+                "static_indices",
+                *projected_flags,
+            )
         if name == "vector.load":
             resolved = self._resolved(operation)
             result = resolved.value_id("result")
@@ -479,11 +556,24 @@ class CxxRenderer(CxxConfigRenderer):
                 static_field="static_indices",
             )
             view = self.expression(resolved.value_id("view"))
+            selectors = [self.cpp_type(result)]
+            projected_flags = self._append_memory_access_contract(operation, selectors)
+            value_type = self.module.values[result].type
+            dimensions = (
+                f", {self.dynamic_dimensions(value_type)}"
+                if not value_type.is_all_static
+                else ""
+            )
             self._declare(
                 result,
-                f"loom::vector::load<{self.cpp_type(result)}>({view}, {origin})",
+                "loom::vector::load<"
+                + ", ".join(selectors)
+                + f">({view}, {origin}{dimensions})",
             )
-            return ("static_indices",)
+            return (
+                "static_indices",
+                *projected_flags,
+            )
         if name == "vector.store":
             resolved = self._resolved(operation)
             origin = self._mixed_index_record(
@@ -493,8 +583,16 @@ class CxxRenderer(CxxConfigRenderer):
             )
             value = self.expression(resolved.value_id("value"))
             view = self.expression(resolved.value_id("view"))
-            self.writer.line(f"loom::vector::store({value}, {view}, {origin});")
-            return ("static_indices",)
+            selectors = []
+            projected_flags = self._append_memory_access_contract(operation, selectors)
+            template = f"<{selectors[0]}>" if selectors else ""
+            self.writer.line(
+                f"loom::vector::store{template}({value}, {view}, {origin});"
+            )
+            return (
+                "static_indices",
+                *projected_flags,
+            )
         if name == "vector.fragment.store":
             resolved = self._resolved(operation)
             role = resolved.attr("role")
@@ -690,6 +788,8 @@ class CxxRenderer(CxxConfigRenderer):
                     self.expression(value) for value in operation.operands
                 )
                 self.writer.line(f"return {{{values}}};")
+            elif self.parent_operations[id(operation)].name == "func.exit":
+                self.writer.line("return;")
             return ()
         return None
 
@@ -700,6 +800,8 @@ class CxxRenderer(CxxConfigRenderer):
         if len(initial) != len(results):
             raise CxxRenderError(operation, "loop-carried result arity is inconsistent")
         for result, source in zip(results, initial, strict=True):
+            if result in self.suppressed_forwarding_values:
+                continue
             source_expression = self.expression(source)
             source_users = self.users[source]
             preferred_name = loop_carrier_stem(self.names[result])
@@ -714,11 +816,11 @@ class CxxRenderer(CxxConfigRenderer):
                 and source_users
                 and all(user is operation for user in source_users)
             )
-            if can_reuse_source:
+            if can_reuse_source and self._compatible_cxx_carrier(result, source):
                 self.expressions[result] = source_expression
                 self.expression_types[result] = self.expression_type(source)
             else:
-                self._declare(result, self._loop_initializer(source))
+                self._declare_loop_carrier(result, source)
 
         attributes: list[str] = []
         unroll = resolved.value_ids("unroll_factor")
@@ -823,40 +925,49 @@ class CxxRenderer(CxxConfigRenderer):
         self.expressions[induction] = induction_name
         self.expression_types[induction] = loop_type
         for block_arg, result in zip(block.arg_ids[1:], results, strict=True):
+            if result in self.suppressed_forwarding_values:
+                continue
             self.expressions[block_arg] = self.expression(result)
             self.expression_types[block_arg] = self.expression_type(result)
         self.writer.open(
             f"for ({loop_type} {induction_name} = {lower}; "
             f"{induction_name} < {upper}; {increment})"
         )
-        self._render_block(block, yield_targets=results)
+        self._render_block(block, yield_targets=self._transport_targets(results))
         self.writer.close()
 
-    def _while_result_initializer(self, result: int, initial: list[int]) -> str:
-        result_type = repr(self.module.values[result].type)
-        for source in initial:
-            if self._compatible_cxx_carrier(result, source):
-                return self._loop_initializer(source)
+    def _declare_structured_result(self, result: int) -> None:
+        """Declares the source value supplied by every continuing region edge."""
+
         value_type = self.module.values[result].type
+        type_name = self._function_result_component_type(result)
+        # Explicit initialization keeps ordinary numeric locals on the value
+        # path. Resource handles begin their lifetime without a payload.
+        initializer = ""
         if isinstance(value_type, ScalarType):
-            if result_type in {"index", "offset"}:
-                return self._literal(0, result)
-            return f"{self.cpp_type(result)}{{}}"
-        if (
+            initializer = "{0}" if repr(value_type) in {"index", "offset"} else "{}"
+        elif (
             isinstance(value_type, ShapedType)
             and value_type.type_kind == TypeKind.VECTOR
+            and value_type.rank == 1
+            and repr(value_type.element_type) != "i1"
         ):
-            return f"{self.cpp_type(result)}{{}}"
-        raise CxxRenderError(
-            None,
-            f"while result type {value_type!r} has no initializable C++ carrier",
-        )
+            initializer = "{}"
+        name = self.names[result]
+        self.expressions[result] = name
+        self.expression_types[result] = type_name
+        self.writer.line(f"{type_name} {name}{initializer};")
 
     def _assign_values(
         self, targets: Sequence[int | None], sources: Sequence[int]
     ) -> None:
         assignments = [
-            (self.expression(target), self.expression(source))
+            (
+                self.expression(target),
+                self._buffer_argument(source, self._buffer_element(target))
+                if isinstance(self.module.values[target].type, BufferType)
+                else self.numeric_argument(source, self.expression_type(target)),
+            )
             for target, source in zip(targets, sources, strict=True)
             if target is not None and self.expression(target) != self.expression(source)
         ]
@@ -874,46 +985,11 @@ class CxxRenderer(CxxConfigRenderer):
         for target, temporary in temporaries:
             self.writer.line(f"{target} = {temporary};")
 
-    def _while_forward_only_carriers(
-        self, before: Block, after: Block, results: Sequence[int]
-    ) -> set[int]:
-        """Finds loop columns represented only by structured forwarding."""
-
-        if not before.ops or not after.ops:
-            return set()
-        condition = before.ops[-1]
-        yield_operation = after.ops[-1]
-        if condition.name != "scf.condition" or yield_operation.name != "scf.yield":
-            return set()
-        if len(self._resolved(condition).value_ids("forwarded")) != len(results) or len(
-            yield_operation.operands
-        ) != len(results):
-            return set()
-        forward_only: set[int] = set()
-        carriers = zip(before.arg_ids, after.arg_ids, results, strict=True)
-        for index, (before_argument, after_argument, result) in enumerate(carriers):
-            if (
-                self.use_counts[result] != 0
-                or self.view_construction_type_users[result]
-            ):
-                continue
-            allowed_uses = {
-                (id(condition), index + 1),
-                (id(yield_operation), index),
-            }
-            before_closure = self._forwarding_closure(
-                before_argument, allowed_uses, set()
-            )
-            after_closure = self._forwarding_closure(
-                after_argument, allowed_uses, set()
-            )
-            if before_closure is None or after_closure is None:
-                continue
-            self.suppressed_forwarding_values.update(before_closure)
-            self.suppressed_forwarding_values.update(after_closure)
-            self.suppressed_forwarding_values.add(result)
-            forward_only.add(index)
-        return forward_only
+    def _transport_targets(self, values: Sequence[int]) -> list[int | None]:
+        return [
+            None if value in self.suppressed_forwarding_values else value
+            for value in values
+        ]
 
     def _while_condition_expression(self, before: Block) -> str | None:
         """Projects a pure identity-forwarding header into one C++ expression."""
@@ -962,37 +1038,6 @@ class CxxRenderer(CxxConfigRenderer):
         self.temporary_names = temporary_names
         return None
 
-    def _forwarding_closure(
-        self,
-        value_id: int,
-        allowed_uses: set[tuple[int, int]],
-        active: set[int],
-    ) -> set[int] | None:
-        """Returns values that only forward into the selected loop edge."""
-
-        if self.view_construction_type_users[value_id] or value_id in active:
-            return None
-        nested_active = {*active, value_id}
-        closure = {value_id}
-        for user, operand_index in self.uses[value_id]:
-            if (id(user), operand_index) in allowed_uses:
-                continue
-            parent = self.parent_operations.get(id(user))
-            if (
-                user.name != "scf.yield"
-                or parent is None
-                or parent.name != "scf.if"
-                or operand_index >= len(parent.results)
-            ):
-                return None
-            forwarded = self._forwarding_closure(
-                parent.results[operand_index], allowed_uses, nested_active
-            )
-            if forwarded is None:
-                return None
-            closure.update(forwarded)
-        return closure
-
     def _render_while(self, operation: Operation) -> None:
         resolved = self._resolved(operation)
         initial = resolved.value_ids("iter_args")
@@ -1028,46 +1073,36 @@ class CxxRenderer(CxxConfigRenderer):
                 self.names[result] = preferred_name
             claimed_names.add(self.names[result])
 
-        forward_only = self._while_forward_only_carriers(before, after, results)
         shared_carriers = len(initial) == len(results) and all(
-            index in forward_only or self._compatible_cxx_carrier(argument, result)
-            for index, (argument, result) in enumerate(
-                zip(before.arg_ids, results, strict=True)
+            (argument in self.suppressed_forwarding_values)
+            == (result in self.suppressed_forwarding_values)
+            and (
+                result in self.suppressed_forwarding_values
+                or self._compatible_cxx_carrier(argument, result)
             )
+            for argument, result in zip(before.arg_ids, results, strict=True)
         )
         if shared_carriers:
-            for index, (argument, result, source) in enumerate(
-                zip(before.arg_ids, results, initial, strict=True)
+            for argument, result, source in zip(
+                before.arg_ids, results, initial, strict=True
             ):
-                if index in forward_only:
+                if result in self.suppressed_forwarding_values:
                     continue
-                self._declare(result, self._loop_initializer(source))
+                self._declare_loop_carrier(result, source)
                 self.expressions[argument] = self.expression(result)
                 self.expression_types[argument] = self.expression_type(result)
-            header_targets: list[int | None] = [
-                None if index in forward_only else result
-                for index, result in enumerate(results)
-            ]
+            header_targets = self._transport_targets(results)
         else:
-            for index, (argument, source) in enumerate(
-                zip(before.arg_ids, initial, strict=True)
-            ):
-                if index in forward_only:
-                    continue
-                self._declare(argument, self._loop_initializer(source))
-            for index, result in enumerate(results):
-                if index in forward_only:
-                    continue
-                self._declare(result, self._while_result_initializer(result, initial))
-            header_targets = [
-                None if index in forward_only else argument
-                for index, argument in enumerate(before.arg_ids)
-            ]
+            for argument, source in zip(before.arg_ids, initial, strict=True):
+                if argument not in self.suppressed_forwarding_values:
+                    self._declare_loop_carrier(argument, source)
+            for result in results:
+                if result not in self.suppressed_forwarding_values:
+                    self._declare_structured_result(result)
+            header_targets = self._transport_targets(before.arg_ids)
 
-        for index, (argument, result) in enumerate(
-            zip(after.arg_ids, results, strict=True)
-        ):
-            if index in forward_only:
+        for argument, result in zip(after.arg_ids, results, strict=True):
+            if result in self.suppressed_forwarding_values:
                 continue
             self.expressions[argument] = self.expression(result)
             self.expression_types[argument] = self.expression_type(result)
@@ -1083,24 +1118,19 @@ class CxxRenderer(CxxConfigRenderer):
 
         continuation = self._temporary_name("loop_continues")
         self.writer.line(f"bool {continuation} = true;")
-        self.writer.open(f"while ({continuation})")
+        self.writer.open("do")
         self._render_block(
             before,
             condition_target=continuation,
-            condition_forward_targets=[
-                None if index in forward_only else result
-                for index, result in enumerate(results)
-            ],
+            condition_forward_targets=self._transport_targets(results),
         )
         self.writer.open(f"if ({continuation})")
         self._render_block(after, yield_targets=header_targets)
         self.writer.close()
-        self.writer.close()
+        self.writer.close(f" while ({continuation});")
 
-    def _render_if(self, operation: Operation) -> None:
-        resolved = self._resolved(operation)
-        results = resolved.value_ids("results")
-        for result in results:
+    def _declare_selection_results(self, operation: Operation) -> None:
+        for result in operation.results:
             if result in self.suppressed_forwarding_values:
                 continue
             assignment_target_id = self.assignment_targets.get(result)
@@ -1113,7 +1143,12 @@ class CxxRenderer(CxxConfigRenderer):
                     assignment_target_id
                 )
             else:
-                self._declare(result, f"{self.cpp_type(result)}{{}}")
+                self._declare_structured_result(result)
+
+    def _render_if(self, operation: Operation) -> None:
+        resolved = self._resolved(operation)
+        results = resolved.value_ids("results")
+        self._declare_selection_results(operation)
         then_region = resolved.region("then_region")
         else_region = resolved.region("else_region")
         if then_region is None or len(then_region.blocks) != 1:
@@ -1121,10 +1156,7 @@ class CxxRenderer(CxxConfigRenderer):
         condition = _strip_outer_parentheses(
             self.expression(resolved.value_id("condition"))
         )
-        yield_targets: list[int | None] = [
-            None if result in self.suppressed_forwarding_values else result
-            for result in results
-        ]
+        yield_targets = self._transport_targets(results)
         self.writer.open(f"if ({condition})")
         self._render_block(then_region.blocks[0], yield_targets=yield_targets)
         if else_region is None:
@@ -1148,25 +1180,54 @@ class CxxRenderer(CxxConfigRenderer):
         self._render_block(else_block, yield_targets=yield_targets)
         self.writer.close()
 
-    def _direct_yield_assignments(
-        self, block: Block, yield_targets: Sequence[int | None] | None
+    def _render_switch(self, operation: Operation) -> None:
+        resolved = self._resolved(operation)
+        self._declare_selection_results(operation)
+        selector = self.expression(resolved.value_id("selector"))
+        yield_targets = self._transport_targets(operation.results)
+        self.writer.open(f"switch (static_cast<long long>({selector}))")
+        for key, region in zip(
+            resolved.attr("case_keys"), resolved.regions("case_regions"), strict=True
+        ):
+            # Spell the signed minimum without a positive literal outside i64.
+            literal = (
+                "(-9223372036854775807ll - 1ll)" if key == -(1 << 63) else f"{key}ll"
+            )
+            self.writer.open(f"case {literal}:")
+            self._render_block(region.blocks[0], yield_targets=yield_targets)
+            self.writer.line("break;")
+            self.writer.close()
+        self.writer.open("default:")
+        self._render_block(
+            resolved.region("default_region").blocks[0], yield_targets=yield_targets
+        )
+        self.writer.line("break;")
+        self.writer.close()
+        self.writer.close()
+
+    def _direct_terminator_assignments(
+        self,
+        block: Block,
+        terminator_name: str,
+        targets: Sequence[int | None] | None,
     ) -> dict[int, int]:
-        if yield_targets is None or not block.ops:
+        if targets is None or not block.ops:
             return {}
-        yield_operation = block.ops[-1]
-        if yield_operation.name != "scf.yield" or len(yield_operation.operands) != len(
-            yield_targets
+        terminator = block.ops[-1]
+        if terminator.name != terminator_name or len(terminator.operands) != len(
+            targets
         ):
             return {}
         positions = {id(operation): index for index, operation in enumerate(block.ops)}
         assignments: dict[int, int] = {}
-        for source, target in zip(yield_operation.operands, yield_targets, strict=True):
+        for source, target in zip(terminator.operands, targets, strict=True):
             if target is None:
                 continue
             definition = self.definitions.get(source)
             target_expression = self.expression(target)
             if (
                 definition is None
+                or isinstance(self.module.values[source].type, BufferType)
                 or self.definition_blocks.get(source) is not block
                 or self.use_counts[source] != 1
                 or re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", target_expression) is None
@@ -1195,7 +1256,9 @@ class CxxRenderer(CxxConfigRenderer):
         condition_forward_targets: Sequence[int | None] | None = None,
         launch_configuration: bool = False,
     ) -> None:
-        direct_assignments = self._direct_yield_assignments(block, yield_targets)
+        direct_assignments = self._direct_terminator_assignments(
+            block, "scf.yield", yield_targets
+        )
         previous_assignments = self.assignment_targets
         self.assignment_targets = {**previous_assignments, **direct_assignments}
         try:
@@ -1216,20 +1279,15 @@ class CxxRenderer(CxxConfigRenderer):
                     continue
                 if operation.name == "func.return":
                     self._validate_projected_attributes(operation, ())
-                    results = self._flat_source_parameters(
-                        operation, list(operation.operands)
-                    )
-                    if not results:
-                        self.writer.line("return;")
-                    elif len(results) == 1:
-                        self.writer.line(
-                            f"return {self.expression(results[0].value_id)};"
-                        )
-                    else:
-                        values = ", ".join(
-                            self.expression(result.value_id) for result in results
-                        )
-                        self.writer.line(f"return {{{values}}};")
+                    self._render_function_return(operation)
+                    continue
+                if operation.name == "func.unreachable":
+                    self._validate_projected_attributes(operation, ())
+                    self.writer.line("__builtin_unreachable();")
+                    continue
+                if operation.name == "func.exit":
+                    self._validate_projected_attributes(operation, ())
+                    self._render_function_exit(operation)
                     continue
                 if operation.name == "func.call":
                     projected = self._render_function_call(operation)
@@ -1276,6 +1334,10 @@ class CxxRenderer(CxxConfigRenderer):
                 if operation.name == "scf.if":
                     self._validate_projected_attributes(operation, ())
                     self._render_if(operation)
+                    continue
+                if operation.name == "scf.switch":
+                    self._validate_projected_attributes(operation, ("case_keys",))
+                    self._render_switch(operation)
                     continue
                 if operation.name == "scf.while":
                     self._validate_projected_attributes(operation, ())
@@ -1338,7 +1400,14 @@ class CxxRenderer(CxxConfigRenderer):
         body = resolved.region("body")
         assert body is not None
         entry = body.blocks[0]
+        symbol = str(resolved.attr("callee"))
+        source_name = self.kernel_names[symbol]
         attributes = self._render_kernel_configuration(kernel)
+        if source_name != symbol:
+            attributes.insert(
+                1,
+                f"loom::symbol({cxx_string_literal(symbol.encode('utf-8'))})",
+            )
         self.temporary_names = set(self.scope_names[scope])
         self.rendered_assumptions_by_block.clear()
         if retain := self._retention_attribute(kernel):
@@ -1382,204 +1451,11 @@ class CxxRenderer(CxxConfigRenderer):
             buffer_elements.append(None)
             self.expressions[argument] = name
             self.expression_types[argument] = type_name
-        symbol = str(resolved.attr("callee"))
         self.kernel_buffer_elements[symbol] = tuple(buffer_elements)
         if parameters:
-            self.writer.open(f"void {symbol}({', '.join(parameters)})")
+            self.writer.open(f"void {source_name}({', '.join(parameters)})")
         else:
-            self.writer.open(f"void {symbol}()")
-        self._render_block(entry)
-        self.writer.close()
-
-    def _function_result_type(self, function: Operation) -> str:
-        results = self._flat_source_parameters(function, list(function.results))
-        if not results:
-            return "void"
-        if len(results) == 1:
-            return self.cpp_type(results[0].value_id)
-        symbol = str(self._resolved(function).attr("callee"))
-        fields = tuple(
-            (f"value{index}", self.cpp_type(result.value_id))
-            for index, result in enumerate(results)
-        )
-        return self._record_type(
-            clean_identifier(symbol, "function") + "_result", fields
-        )
-
-    def _render_function_call(self, operation: Operation) -> tuple[str, ...]:
-        resolved = self._resolved(operation)
-        symbol = str(resolved.attr("callee"))
-        callee = self.function_names.get(symbol)
-        if callee is None:
-            raise CxxRenderError(
-                operation, f"called function {symbol!r} is not present in the module"
-            )
-        expected_buffers = self.function_buffer_elements.get(symbol)
-        source_operands = self._flat_source_parameters(
-            operation, list(operation.operands)
-        )
-        arguments_list: list[str] = []
-        for index, parameter in enumerate(source_operands):
-            operand = parameter.value_id
-            expression = self.expression(operand)
-            expected_element = (
-                expected_buffers[index]
-                if expected_buffers is not None and index < len(expected_buffers)
-                else None
-            )
-            if expected_element is not None:
-                expected_type = f"loom::type::buffer<{expected_element}>"
-                source_type = self.expression_type(operand)
-                if source_type.endswith("*"):
-                    expression = f"loom::buffer::root({expression})"
-                    source_element = source_type[:-1].strip()
-                    if source_element != expected_element:
-                        expression = (
-                            f"loom::buffer::cast<{expected_element}>({expression})"
-                        )
-                elif source_type != expected_type:
-                    expression = f"loom::buffer::cast<{expected_element}>({expression})"
-            arguments_list.append(expression)
-        arguments = ", ".join(arguments_list)
-        call = f"{callee}({arguments})"
-        source_results = self._flat_source_parameters(
-            operation, list(operation.results)
-        )
-        if not source_results:
-            self.writer.line(f"{call};")
-        elif len(source_results) == 1:
-            self._declare(source_results[0].value_id, call)
-        else:
-            fields = tuple(
-                (f"value{index}", self.cpp_type(result.value_id))
-                for index, result in enumerate(source_results)
-            )
-            record_type = self._record_type(
-                clean_identifier(symbol, "function") + "_result", fields
-            )
-            record_name = self._temporary_name("call_result")
-            self.writer.line(f"{record_type} {record_name} = {call};")
-            for index, result in enumerate(source_results):
-                self._declare(result.value_id, f"{record_name}.value{index}")
-        projected_attributes = ["callee"]
-        effect_contract = resolved.attr("effect_contract")
-        if effect_contract in {"pure", "readonly"}:
-            # A C++ call carries its effect contract from the callable
-            # definition. The importer reconstructs the explicit func.call
-            # contract after the emitted definition is parsed and analyzed.
-            projected_attributes.append("effect_contract")
-        elif effect_contract is not None:
-            raise CxxRenderError(
-                operation,
-                "function call effect contract "
-                f"{effect_contract!r} has no C++ projection",
-            )
-        return tuple(projected_attributes)
-
-    def _function_attributes(self, function: Operation) -> list[str]:
-        resolved = self._resolved(function)
-        symbol = str(resolved.attr("callee"))
-        attributes = [f'loom::symbol("{symbol}")']
-        if (
-            function.name == "func.decl"
-            and (import_module := resolved.attr("import_module")) is not None
-        ):
-            arguments = [_string_literal(import_module.encode("utf-8"))]
-            import_symbol = resolved.attr("import_symbol")
-            if import_symbol is not None:
-                arguments.append(_string_literal(import_symbol.encode("utf-8")))
-            attributes.append(f"loom::import({', '.join(arguments)})")
-        if retain := self._retention_attribute(function):
-            attributes.append(retain)
-        target = resolved.attr("target")
-        if target is not None:
-            attributes.append(self._target_attribute(function, str(target)))
-        inline_policy = resolved.attr("inline_policy")
-        if inline_policy == "inline":
-            attributes.append("loom::force_inline")
-        elif inline_policy == "noinline":
-            attributes.append("loom::noinline")
-        elif inline_policy is not None:
-            raise CxxRenderError(
-                function,
-                f"function inline policy {inline_policy!r} has no C++ projection",
-            )
-        return attributes
-
-    def _function_signature(self, function: Operation, *, bind_parameters: bool) -> str:
-        resolved = self._resolved(function)
-        if function.name == "func.decl":
-            argument_ids = list(function.operands)
-        else:
-            body = resolved.region("body")
-            if body is None or len(body.blocks) != 1:
-                raise CxxRenderError(
-                    function, "function body must have one structured entry block"
-                )
-            argument_ids = list(body.blocks[0].arg_ids)
-        parameters: list[str] = []
-        buffer_elements: list[str | None] = []
-        source_parameters = self._flat_source_parameters(function, argument_ids)
-        for parameter in source_parameters:
-            argument = parameter.value_id
-            value_type = self.module.values[argument].type
-            if isinstance(value_type, BufferType):
-                element = self._parameter_element(argument)
-                type_name = f"loom::type::buffer<{element}>"
-                buffer_elements.append(element)
-            else:
-                type_name = self.cpp_type(argument)
-                buffer_elements.append(None)
-            name = self.names[argument]
-            parameters.append(f"{type_name} {name}")
-            if bind_parameters:
-                self.expressions[argument] = name
-                self.expression_types[argument] = type_name
-
-        symbol = str(resolved.attr("callee"))
-        self.function_buffer_elements[symbol] = tuple(buffer_elements)
-        visibility = resolved.attr("visibility")
-        storage = (
-            "" if function.name == "func.decl" or visibility == "public" else "static "
-        )
-        return (
-            f"{storage}{self._function_result_type(function)} "
-            f"{self.function_names[symbol]}(" + ", ".join(parameters) + ")"
-        )
-
-    def _render_function_declaration(self, function: Operation) -> None:
-        if function.name == "func.decl":
-            self._validate_projected_attributes(
-                function,
-                (
-                    "callee",
-                    "import_module",
-                    "import_symbol",
-                    "inline_policy",
-                    "retain",
-                    "target",
-                ),
-            )
-        self._analyze_buffers(function)
-        self.writer.attributes(self._function_attributes(function))
-        self.writer.line(
-            self._function_signature(function, bind_parameters=False) + ";"
-        )
-
-    def _render_function(self, function: Operation) -> None:
-        scope = self.operation_scopes[id(function)]
-        self.temporary_names = set(self.scope_names[scope])
-        self.rendered_assumptions_by_block.clear()
-        self._validate_projected_attributes(
-            function,
-            ("callee", "visibility", "inline_policy", "retain", "target"),
-        )
-        self._analyze_buffers(function)
-        body = self._resolved(function).region("body")
-        assert body is not None
-        self.writer.attributes(self._function_attributes(function))
-        self.writer.open(self._function_signature(function, bind_parameters=True))
-        entry = body.blocks[0]
+            self.writer.open(f"void {source_name}()")
         self._render_block(entry)
         self.writer.close()
 
@@ -1590,7 +1466,18 @@ class CxxRenderer(CxxConfigRenderer):
         commands: list[Operation],
         pipelines: list[Operation],
     ) -> None:
-        used_names = {str(self._resolved(kernel).attr("callee")) for kernel in kernels}
+        used_names: set[str] = set()
+        for kernel in kernels:
+            symbol = str(self._resolved(kernel).attr("callee"))
+            base = clean_identifier(symbol, "kernel")
+            name = base
+            ordinal = 2
+            while name in used_names:
+                name = f"{base}_{ordinal}"
+                ordinal += 1
+            used_names.add(name)
+            self.kernel_names[symbol] = name
+
         for function in functions:
             symbol = str(self._resolved(function).attr("callee"))
             base = clean_identifier(symbol, "function")
@@ -1629,7 +1516,7 @@ class CxxRenderer(CxxConfigRenderer):
 
         for kernel in kernels:
             symbol = str(self._resolved(kernel).attr("callee"))
-            base = clean_identifier(symbol, "kernel") + "_configuration"
+            base = self.kernel_names[symbol] + "_configuration"
             name = base
             ordinal = 2
             while name in used_names:
@@ -1726,17 +1613,29 @@ class CxxRenderer(CxxConfigRenderer):
                 "a top-level definition would be omitted from the C++ projection",
             )
         self._plan_callable_names(kernels, functions, commands, pipelines)
+        self._plan_kernel_configurations(kernels)
+        self.suppressed_forwarding_values = plan_value_transport(
+            self.module,
+            self._resolved,
+            self.parent_operations,
+            self._source_value_operands,
+        )
+        self.buffer_access = BufferAccessPlan(self.module, self._resolved)
+        self._plan_function_projections()
         self.view_access = plan_view_access(
             self.module, self._resolved, self._flat_source_parameters
         )
-        self._plan_kernel_configurations(kernels)
         self._plan_config_names()
         if self._render_configs():
             self.writer.line()
         for index, function in enumerate(functions):
             if index:
                 self.writer.line()
-            self._render_function_declaration(function)
+            symbol = str(self._resolved(function).attr("callee"))
+            for projection in self.buffer_access.projections[symbol]:
+                self.buffer_projection = projection
+                self._render_function_declaration(function)
+        self.buffer_projection = None
         if functions:
             self.writer.line()
         for index, pipeline in enumerate(pipelines):
@@ -1783,7 +1682,11 @@ class CxxRenderer(CxxConfigRenderer):
             if index:
                 self.writer.line()
             if callable_operation.name == "func.def":
-                self._render_function(callable_operation)
+                symbol = str(self._resolved(callable_operation).attr("callee"))
+                for projection in self.buffer_access.projections[symbol]:
+                    self.buffer_projection = projection
+                    self._render_function(callable_operation)
+                self.buffer_projection = None
             elif callable_operation.name == "command.def":
                 self._render_command_program(callable_operation)
             elif callable_operation.name == "pipeline.def":
@@ -1812,7 +1715,7 @@ class CxxRenderer(CxxConfigRenderer):
                 scalar_names.add(repr(value_type))
             elif isinstance(value_type, ShapedType):
                 scalar_names.add(repr(value_type.element_type))
-        uses_predicate_functions = any(
+        uses_predicate_functions = self.uses_predicate_functions or any(
             isinstance(
                 predicates := operation.attributes.get("predicates"), PredicateListAttr
             )

@@ -239,7 +239,7 @@ TEST_F(ImportTest, PlainViewsPreserveFunctionSignaturesAndDenseSubviews) {
   EXPECT_EQ(diagnostic_count_, 0);
 }
 
-TEST_F(ImportTest, MutableViewReferencesRetainTypeChangingTies) {
+TEST_F(ImportTest, MutableViewReferencesReturnIndependentDependentTuples) {
   const auto source = IREE_SV(
       "#include <loomcxx/view.h>\n"
       "namespace loomt = loom::type;\n"
@@ -260,17 +260,23 @@ TEST_F(ImportTest, MutableViewReferencesRetainTypeChangingTies) {
   ASSERT_TRUE(loom_func_def_isa(entry));
   auto* call = loom_region_entry_block(loom_func_def_body(entry))->first_op;
   ASSERT_TRUE(loom_func_call_isa(call));
-  ASSERT_EQ(call->tied_result_count, 3u);
-  EXPECT_FALSE(loom_op_tied_results(call)[0].has_type_change);
-  EXPECT_FALSE(loom_op_tied_results(call)[1].has_type_change);
-  EXPECT_TRUE(loom_op_tied_results(call)[2].has_type_change);
+  EXPECT_EQ(call->tied_result_count, 0u);
+  ASSERT_EQ(call->result_count, 3u);
+  const auto* call_results = loom_op_results(call);
+  auto returned_view = loom_module_value_type(module_, call_results[2]);
+  EXPECT_EQ(loom_type_dim_value_id_at(returned_view, 0), call_results[0]);
+  EXPECT_TRUE(loom_type_has_ssa_encoding(returned_view));
+  EXPECT_EQ(loom_type_encoding_value_id(returned_view), call_results[1]);
 
   auto* replace = loom_block_op(loom_module_block(module_), 1);
   ASSERT_TRUE(loom_func_def_isa(replace));
-  ASSERT_EQ(replace->tied_result_count, 3u);
-  EXPECT_FALSE(loom_op_tied_results(replace)[0].has_type_change);
-  EXPECT_FALSE(loom_op_tied_results(replace)[1].has_type_change);
-  EXPECT_TRUE(loom_op_tied_results(replace)[2].has_type_change);
+  EXPECT_EQ(replace->tied_result_count, 0u);
+  ASSERT_EQ(replace->result_count, 3u);
+  const auto* signature_results = loom_op_results(replace);
+  auto signature_view = loom_module_value_type(module_, signature_results[2]);
+  EXPECT_EQ(loom_type_dim_value_id_at(signature_view, 0), signature_results[0]);
+  EXPECT_TRUE(loom_type_has_ssa_encoding(signature_view));
+  EXPECT_EQ(loom_type_encoding_value_id(signature_view), signature_results[1]);
   EXPECT_EQ(diagnostic_count_, 0);
 }
 
@@ -554,7 +560,8 @@ TEST_F(ImportTest, RejectsUnknownLanguageStandard) {
 
 TEST_F(ImportTest, EmbeddedFacadeAndExternalProviderAgree) {
   const auto source = IREE_SV(
-      "#include <hip/hip_runtime.h>\n#include <hip/hip_fp16.h>\n"
+      "#include <hip/hip_runtime.h>\n#include <hip/hip_vector_types.h>\n"
+      "#include <hip/hip_fp16.h>\n"
       "#include <loomcxx/atomic.h>\n"
       "__global__ [[loom::workgroup_size(64, 1, 1), loom::workgroup_count(2, "
       "1, 1)]] "
@@ -577,16 +584,18 @@ TEST_F(ImportTest, EmbeddedFacadeAndExternalProviderAgree) {
   EXPECT_NE(embedded.find("kernel.def @entry"), std::string::npos);
   EXPECT_NE(embedded.find("scalar.expf<afn>"), std::string::npos);
   EXPECT_NE(embedded.find("kernel.subgroup.shuffle"), std::string::npos);
-  EXPECT_NE(embedded.find("view.atomic.rmw<addi>"), std::string::npos);
+  EXPECT_NE(embedded.find("view.atomic.rmw<addi, root_in_bounds>"),
+            std::string::npos);
 
   // The provider borrows the same immutable source bytes under an external
   // include root; preprocessing and binding resolution remain identical.
   for (const char* name :
-       {"hip/hip_runtime.h", "hip/hip_fp16.h", "loomcxx/kernel.h",
-        "loomcxx/atomic.h", "loomcxx/buffer.h", "loomcxx/cache.h",
-        "loomcxx/math.h", "loomcxx/predicate.h", "loomcxx/scalar.h",
-        "loomcxx/view.h", "loomcxx/encoding_type.h", "loomcxx/index.h",
-        "loomcxx/shape.h", "loomcxx/target.h", "loomcxx/target/amdgpu.h"}) {
+       {"type_traits", "hip/hip_runtime.h", "hip/hip_vector_types.h",
+        "hip/hip_fp16.h", "loomcxx/kernel.h", "loomcxx/atomic.h",
+        "loomcxx/buffer.h", "loomcxx/cache.h", "loomcxx/math.h",
+        "loomcxx/predicate.h", "loomcxx/scalar.h", "loomcxx/view.h",
+        "loomcxx/encoding_type.h", "loomcxx/index.h", "loomcxx/shape.h",
+        "loomcxx/target.h", "loomcxx/target/amdgpu.h", "loomcxx/template.h"}) {
     auto contents = loom::cxx_import::builtin_include(name);
     ASSERT_TRUE(contents.has_value());
     headers_[std::string("/edited/") + name] = *contents;
@@ -629,6 +638,33 @@ TEST_F(ImportTest, StandardFloatFacadeNeedsOnlyOneHeader) {
   EXPECT_EQ(Print(), embedded);
   EXPECT_EQ(source_requests_.size(), 1u);
   EXPECT_EQ(source_requests_.at("/numeric/stdfloat"), 1);
+}
+
+TEST_F(ImportTest, TemplateFacadeNeedsOnlyOneHeader) {
+  auto contents = loom::cxx_import::builtin_include("loomcxx/template.h");
+  if (!contents) {
+    GTEST_SKIP() << "Embedded includes are disabled";
+  }
+  const auto source = IREE_SV(
+      "#include <loomcxx/template.h>\n#include <loomcxx/template.h>\n"
+      "LOOM_TEMPLATE_DECL(\"test.transform\") unsigned transform(unsigned);\n"
+      "unsigned entry(unsigned value) { "
+      "return loom::template_apply<transform>(value); }\n");
+  IREE_ASSERT_OK(Import(source));
+  ASSERT_NE(module_, nullptr);
+  auto embedded = Print();
+
+  headers_["/templates/loomcxx/template.h"] = *contents;
+  const iree_string_view_t path = IREE_SV("/templates");
+  options_.include_paths = &path;
+  options_.include_path_count = 1;
+  options_.source_provider = {ProvideSource, this};
+  options_.flags |= LOOM_CXX_IMPORT_FLAG_NO_BUILTIN_INCLUDES;
+  IREE_ASSERT_OK(Import(source));
+  ASSERT_NE(module_, nullptr);
+  EXPECT_EQ(Print(), embedded);
+  EXPECT_EQ(source_requests_.size(), 1u);
+  EXPECT_EQ(source_requests_.at("/templates/loomcxx/template.h"), 1);
 }
 
 }  // namespace

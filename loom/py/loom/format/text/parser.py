@@ -1868,6 +1868,8 @@ def _parse_type_interior(
 
     if type_def.uses_attribute_parameters:
         try:
+            if type_def.ir_kind == "reference":
+                return type_def(module=module, **parsed_attrs)
             return type_def(**parsed_attrs)
         except (TypeError, ValueError) as error:
             raise ParseError(str(error), location, filename) from error
@@ -3709,6 +3711,8 @@ class Parser:
         tok = self._tokenizer
         result_name = None
         tied_operand = None
+        tied_operand_id = None
+        tied_operand_index = None
         if tok.at(TokenKind.SSA_VALUE):
             name_token = tok.next()
             if tok.try_consume(TokenKind.COLON):
@@ -3735,11 +3739,8 @@ class Parser:
                     tied_operand.location,
                     tok._filename,
                 )
-            parsed.tied_results.append(
-                IRTiedResult(
-                    result_index=len(parsed.result_types), operand_index=operand_index
-                )
-            )
+            tied_operand_id = operand_id
+            tied_operand_index = operand_index
 
         # Signature-local placeholders follow the enclosing declaration scope;
         # body result annotations retain immediate SSA lookup.
@@ -3749,6 +3750,16 @@ class Parser:
             else TypeParseMode.BODY
         )
         result_type = self._parse_type(tok, self._scope, result_mode)
+        if tied_operand_id is not None and tied_operand_index is not None:
+            parsed.tied_results.append(
+                IRTiedResult(
+                    result_index=len(parsed.result_types),
+                    operand_index=tied_operand_index,
+                    has_type_change=(
+                        self._module.values[tied_operand_id].type != result_type
+                    ),
+                )
+            )
         value_id = None
         if result_name is not None:
             try:

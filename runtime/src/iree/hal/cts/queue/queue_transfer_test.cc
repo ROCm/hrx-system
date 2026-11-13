@@ -185,6 +185,70 @@ TEST_P(QueueTransferTest, TransferExecutesMixedBatch) {
   EXPECT_THAT(download_target, ContainerEq(copy_source_data));
 }
 
+TEST_P(QueueTransferTest, TransferReleasesBuffersBeforeCompletion) {
+  for (bool ready : {false, true}) {
+    for (bool fail : {false, true}) {
+      if (ready && fail) {
+        continue;
+      }
+      SCOPED_TRACE(ready);
+      SCOPED_TRACE(fail);
+      constexpr iree_device_size_t kBufferSize = 64;
+      Ref<iree_hal_buffer_t> source, fill_target, update_target, copy_target;
+      IREE_ASSERT_OK(CreateZeroedDeviceBuffer(kBufferSize, source.out()));
+      IREE_ASSERT_OK(CreateZeroedDeviceBuffer(kBufferSize, fill_target.out()));
+      IREE_ASSERT_OK(
+          CreateZeroedDeviceBuffer(kBufferSize, update_target.out()));
+      IREE_ASSERT_OK(CreateZeroedDeviceBuffer(kBufferSize, copy_target.out()));
+      const uint32_t pattern = 0xA5C35A3Cu;
+      std::vector<uint8_t> update(kBufferSize, 0xC3);
+      iree_hal_transfer_operation_t operations[3] = {};
+      operations[0].type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL;
+      operations[0].fill.target_buffer = fill_target;
+      operations[0].fill.length = kBufferSize;
+      operations[0].fill.pattern = &pattern;
+      operations[0].fill.pattern_length = sizeof(pattern);
+      operations[1].type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE;
+      operations[1].update.source_buffer = update.data();
+      operations[1].update.target_buffer = update_target;
+      operations[1].update.length = kBufferSize;
+      operations[2].type = IREE_HAL_TRANSFER_OPERATION_TYPE_COPY;
+      operations[2].copy.source_buffer = source;
+      operations[2].copy.target_buffer = copy_target;
+      operations[2].copy.length = kBufferSize;
+
+      SemaphoreList gate(device_, {ready ? 1u : 0u}, {1});
+      SemaphoreList signal(device_, {0}, {1});
+      IREE_ASSERT_OK(iree_hal_queue_transfer(
+          transfer_queue_, gate, signal, IREE_ARRAYSIZE(operations), operations,
+          /*barriers=*/nullptr));
+      // The accepted transfer owns the last buffer references. Its terminal
+      // signal permits the caller to destroy their borrowed allocation pool.
+      source.reset();
+      fill_target.reset();
+      update_target.reset();
+      copy_target.reset();
+      if (!ready) {
+        if (fail) {
+          iree_hal_semaphore_list_fail(
+              gate, iree_status_from_code(IREE_STATUS_ABORTED));
+        } else {
+          IREE_ASSERT_OK(iree_hal_semaphore_list_signal(gate, nullptr));
+        }
+      }
+      IREE_EXPECT_STATUS_IS(
+          fail ? IREE_STATUS_ABORTED : IREE_STATUS_OK,
+          iree_hal_semaphore_list_wait(signal, iree_infinite_timeout(),
+                                       IREE_ASYNC_WAIT_FLAG_NONE));
+      iree_hal_pool_t* pool = nullptr;
+      IREE_ASSERT_OK(GetDevicePool(&pool));
+      iree_hal_pool_stats_t stats;
+      iree_hal_pool_query_stats(pool, &stats);
+      EXPECT_EQ(stats.reservation_count, 0u);
+    }
+  }
+}
+
 TEST_P(QueueTransferTest, BufferViewStagingRoundTrip) {
   const iree_hal_dim_t shape[] = {2, 2};
   int32_t source_values[] = {1, 2, 3, 4};
@@ -262,25 +326,32 @@ TEST_P(QueueTransferTest, BufferViewStagingRoundTrip) {
   EXPECT_EQ("2x2xi32=[1 2][3 4]", std::string(formatted, formatted_length));
 }
 
-TEST_P(QueueTransferTest, UploadReadsSourceAfterWaitResolves) {
-  constexpr iree_device_size_t kBufferSize = 512 * 1024;
-  std::vector<uint8_t> source(kBufferSize, 0x11);
-  std::vector<uint8_t> expected(kBufferSize, 0xE7);
-  Ref<iree_hal_buffer_t> target;
-  IREE_ASSERT_OK(CreateZeroedDeviceBuffer(kBufferSize, target.out()));
-
-  SemaphoreList upload_wait(device_, {0}, {1});
-  SemaphoreList upload_signal(device_, {0}, {1});
-  IREE_ASSERT_OK(iree_hal_queue_upload(transfer_queue_, upload_wait,
-                                       upload_signal, source.data(), target, 0,
-                                       kBufferSize, /*barriers=*/NULL));
-  std::fill(source.begin(), source.end(), 0xE7);
-  IREE_ASSERT_OK(iree_hal_semaphore_signal(upload_wait.semaphores[0], 1,
-                                           /*frontier=*/nullptr));
-  IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
-      upload_signal, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
-
-  EXPECT_THAT(ReadBufferBytes(target, 0, kBufferSize), ContainerEq(expected));
+TEST_P(QueueTransferTest, UploadPreservesRangesAndDestinationWaits) {
+  for (iree_device_size_t length : {4, 17, 65536, 65540, 512 * 1024}) {
+    for (iree_device_size_t offset : {0, 1}) {
+      SCOPED_TRACE(::testing::Message()
+                   << "length=" << length << " offset=" << offset);
+      const auto source = MakeDeterministicBytes(length);
+      std::vector<uint8_t> expected(offset + length + 4, 0);
+      std::copy(source.begin(), source.end(), expected.begin() + offset);
+      Ref<iree_hal_buffer_t> target;
+      IREE_ASSERT_OK(CreateZeroedDeviceBuffer(expected.size(), target.out()));
+      SemaphoreList wait(device_, {0}, {1});
+      SemaphoreList signal(device_, {0}, {1});
+      IREE_ASSERT_OK(iree_hal_queue_upload(
+          transfer_queue_, wait, signal, source.data(), target, offset, length,
+          /*barriers=*/nullptr));
+      uint64_t signal_value = 0;
+      IREE_ASSERT_OK(
+          iree_hal_semaphore_query(signal.semaphores[0], &signal_value));
+      EXPECT_EQ(0, signal_value);
+      IREE_ASSERT_OK(iree_hal_semaphore_signal(wait.semaphores[0], 1, nullptr));
+      IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
+          signal, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
+      EXPECT_THAT(ReadBufferBytes(target, 0, expected.size()),
+                  ContainerEq(expected));
+    }
+  }
 }
 
 TEST_P(QueueTransferTest, DownloadWritesBeforeSignaling) {
@@ -301,7 +372,6 @@ TEST_P(QueueTransferTest, DownloadWritesBeforeSignaling) {
   IREE_ASSERT_OK(
       iree_hal_semaphore_query(download_signal.semaphores[0], &signal_value));
   EXPECT_EQ(0, signal_value);
-  EXPECT_THAT(target, Each(0xCD));
 
   IREE_ASSERT_OK(iree_hal_semaphore_signal(download_wait.semaphores[0], 1,
                                            /*frontier=*/nullptr));

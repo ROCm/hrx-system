@@ -33,6 +33,25 @@ struct GpuQueueRequirements {
   amdf_user_queue_capabilities_t user_queue_capabilities = 0;
 };
 
+// Optional policy for one directly published user queue.
+struct GpuUserQueueOptions {
+  // Reservation protocol used by queue producers.
+  amdf_queue_producer_mode_t producer_mode = AMDF_QUEUE_PRODUCER_MODE_SINGLE;
+  // Initial compute scratch borrowed by the queue.
+  amdf_gpu_queue_scratch_t scratch = {};
+  // Publication and scheduling capabilities creation must achieve.
+  amdf_user_queue_capabilities_t required_capabilities =
+      AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER;
+  // Requested primary-ring capacity, or zero for the provider default.
+  uint64_t ring_byte_length = 0;
+  // Initial native queue options.
+  amdf_gpu_user_queue_flags_t flags = 0;
+  // Optional user-queue extension chain.
+  const void* next = nullptr;
+  // Required primary-ring locality.
+  amdf_queue_placement_t placement = AMDF_QUEUE_PLACEMENT_DEFAULT;
+};
+
 // Queries one passive endpoint without acquiring a native device. Success
 // publishes a match result; the family output changes only on a match.
 amdf_status_t FindGpuQueueFamily(const amdf_api_t* api,
@@ -54,33 +73,28 @@ class GpuCommandTest : public GpuDeviceFixture {
   // Defaults to queue/control backing. Payload cases supply their own flags;
   // host coherence alone does not establish a live control-memory policy.
   void CreateMemory(amdf_memory_access_t access, uint64_t byte_length,
-                    GpuMemory** out_memory,
-                    amdf_memory_flags_t flags = AMDF_MEMORY_FLAG_HOST_COHERENT |
-                                                AMDF_MEMORY_FLAG_QUEUE_STORAGE);
+                    amdf_memory_flags_t flags, GpuMemory** out_memory);
+  void CreateMemory(amdf_memory_access_t access, uint64_t byte_length,
+                    GpuMemory** out_memory);
   // Uses the exact profile and access inputs already queried by the caller.
   void CreateMemory(amdf_memory_scope_t* scope,
                     const amdf_memory_create_info_t& create_info,
                     GpuMemory** out_memory);
-  void CreateQueue(GpuUserQueue** out_queue,
-                   amdf_queue_producer_mode_t producer_mode =
-                       AMDF_QUEUE_PRODUCER_MODE_SINGLE,
-                   const amdf_gpu_queue_scratch_t& scratch = {});
-  void CreateQueue(
-      const amdf_queue_family_info_t& family, GpuUserQueue** out_queue,
-      amdf_queue_producer_mode_t producer_mode =
-          AMDF_QUEUE_PRODUCER_MODE_SINGLE,
-      const amdf_gpu_queue_scratch_t& scratch = {},
-      amdf_user_queue_capabilities_t required_capabilities =
-          AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER,
-      uint64_t ring_byte_length = 0, amdf_gpu_user_queue_flags_t flags = 0,
-      const void* next = nullptr,
-      amdf_queue_placement_t placement = AMDF_QUEUE_PLACEMENT_DEFAULT);
-  // Requests finite command storage; zero retains the native/default capacity.
-  void CreateQueue(GpuCommandQueue** out_queue,
-                   uint64_t command_byte_length = 0);
+  void CreateQueue(GpuUserQueue** out_queue);
+  void CreateQueue(const GpuUserQueueOptions& options,
+                   GpuUserQueue** out_queue);
   void CreateQueue(const amdf_queue_family_info_t& family,
-                   GpuCommandQueue** out_queue,
-                   uint64_t command_byte_length = 0);
+                   GpuUserQueue** out_queue);
+  void CreateQueue(const amdf_queue_family_info_t& family,
+                   const GpuUserQueueOptions& options,
+                   GpuUserQueue** out_queue);
+  // Requests finite command storage; zero retains the native/default capacity.
+  void CreateQueue(GpuCommandQueue** out_queue);
+  void CreateQueue(uint64_t command_byte_length, GpuCommandQueue** out_queue);
+  void CreateQueue(const amdf_queue_family_info_t& family,
+                   GpuCommandQueue** out_queue);
+  void CreateQueue(const amdf_queue_family_info_t& family,
+                   uint64_t command_byte_length, GpuCommandQueue** out_queue);
 
   // Exact family chosen passively before borrowing the cached native device.
   amdf_queue_family_info_t family_ = {};

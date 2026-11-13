@@ -9,6 +9,10 @@ on:
       profile:
         type: string
         default: Release
+    outputs:
+      documentation:
+        description: Whether this build produced the GitHub Pages artifact.
+        value: ${{ jobs.build.outputs.documentation }}
 
 permissions:
   actions: read
@@ -17,7 +21,9 @@ permissions:
 jobs:
   build:
     name: Linux + Windows x86-64 / Clang
-    runs-on: azure-linux-scale-rocm
+    runs-on: az-linux-scale-rocm-default-prod
+    outputs:
+      documentation: ${{ inputs.profile == 'Release' && steps.scope.outputs.loom_docs || 'false' }}
     # Two complete SDK builds normally take 5-9 minutes on this pool. Retain a
     # finite hang bound without treating ordinary fleet variance as a failure.
     timeout-minutes: 15
@@ -46,16 +52,21 @@ jobs:
             echo "WINSDK_ROOT=$PWD/build/loom-sdk/toolchain/sdk"
             echo "WINDOWS_COMPILER_RT_ROOT=$PWD/build/loom-sdk/toolchain/compiler-rt"
           } >> "$GITHUB_ENV"
+      - name: Select documentation build
+        id: scope
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: python3 build_tools/ci/change_scope.py --base "$BASE_SHA" >> "$GITHUB_OUTPUT"
       - name: Install compiler and host tools
         run: |
           case "$PROFILE" in Release|Tracy|Debug|ASAN) ;; *) exit 2 ;; esac
-          curl --fail --location --silent --show-error \
-            https://apt.llvm.org/llvm-snapshot.gpg.key --output "$RUNNER_TEMP/llvm.asc"
-          echo "8b2a587ffd672c4687e7581dad4b2f6c1bb2ad6b480cd9771ba2ff48e0b8c75d  $RUNNER_TEMP/llvm.asc" | sha256sum --check
-          sudo install -m 644 "$RUNNER_TEMP/llvm.asc" /usr/share/keyrings/llvm.asc
+          llvm_key_path=.github/scripts/llvm_snapshot_archive_key.asc
+          echo "8b2a587ffd672c4687e7581dad4b2f6c1bb2ad6b480cd9771ba2ff48e0b8c75d  $llvm_key_path" | sha256sum --check
+          sudo install -m 644 "$llvm_key_path" /usr/share/keyrings/llvm.asc
           echo 'deb [signed-by=/usr/share/keyrings/llvm.asc] https://apt.llvm.org/noble/ llvm-toolchain-noble-22 main' | sudo tee /etc/apt/sources.list.d/llvm.list
-          sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends \
+          apt_options=(-o Acquire::ForceIPv4=true -o Acquire::Retries=3)
+          sudo apt-get "${apt_options[@]}" update
+          sudo apt-get "${apt_options[@]}" install --yes --no-install-recommends \
             "clang-22=$LLVM_APT_VERSION" "lld-22=$LLVM_APT_VERSION" \
             "llvm-22=$LLVM_APT_VERSION" "libclang-rt-22-dev=$LLVM_APT_VERSION" \
             g++-13 patchelf p7zip-full python3-venv
@@ -95,6 +106,41 @@ jobs:
           # installed-product test clears to verify the wheel's own linkage.
           /usr/bin/python3 -m build_tools.ci.loom_wheel test \
             --inputs=build/loom-sdk/linux --output=wheel-artifact
+      - name: Qualify standalone Linux amdf-info from the SDK
+        if: inputs.profile == 'Release'
+        run: |
+          /usr/bin/python3 -m build_tools.ci.amdf_info_archive \
+            --wheel wheel-artifact/*.whl --output=amdf-info-artifact
+      - name: Build documentation C examples
+        if: inputs.profile == 'Release' && steps.scope.outputs.loom_docs == 'true'
+        run: |
+          bazel build --config=loom-sdk --config=opt \
+            --cxxopt=--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/13 \
+            --linkopt=--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/13 \
+            //loom/binding/c/example:jit_task_pool \
+            //loom/binding/c/example:link_modules \
+            //loom/binding/c/example:product_frontier
+      - name: Build documentation from the qualified SDK
+        if: inputs.profile == 'Release' && steps.scope.outputs.loom_docs == 'true'
+        env:
+          LOOM_DOCS_C_EXAMPLE_DIR: ${{ github.workspace }}/bazel-bin/loom/binding/c/example
+          LOOM_DOCS_TOOL_DIR: ${{ github.workspace }}/.venv/bin
+        run: |
+          /usr/bin/python3 dev.py setup --docs
+          .venv/bin/python -m pip install --no-deps wheel-artifact/*.whl
+          PYTHONPATH=loom/docs .venv/bin/python -m unittest \
+            loom_docs.highlight_test
+          .venv/bin/python loom/docs/build.py build \
+            --site-dir build/loom-pages/loom
+          test -f build/loom-pages/loom/index.html
+          test -f build/loom-pages/loom/reference/dialects/index.html
+          test -f build/loom-pages/loom/reference/c-api/generated/index.html
+      - name: Upload Pages artifact
+        if: inputs.profile == 'Release' && steps.scope.outputs.loom_docs == 'true'
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: build/loom-pages
+          retention-days: 7
       - name: Build and qualify standalone Linux server
         if: inputs.profile == 'Release'
         run: |
@@ -169,12 +215,14 @@ jobs:
           compression-level: 0
           retention-days: 14
           overwrite: true
-      - name: Upload qualified standalone Linux server
+      - name: Upload qualified standalone Linux executables
         if: inputs.profile == 'Release'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: loom-server-archive-linux-${{ inputs.profile }}
-          path: server-artifact/*.zip
+          name: loom-standalone-archive-linux-${{ inputs.profile }}
+          path: |
+            server-artifact/*.zip
+            amdf-info-artifact/*.zip
           if-no-files-found: error
           compression-level: 0
           retention-days: 14

@@ -65,7 +65,7 @@ TEST(LowLowerPolicyRegistryTest, ReturnsFirstDuplicateContractIdentity) {
   };
   loom_low_lower_policy_registry_t registry = {};
   loom_low_lower_policy_registry_initialize_from_entries(
-      &registry, entries, IREE_ARRAYSIZE(entries));
+      entries, IREE_ARRAYSIZE(entries), &registry);
 
   const loom_low_lower_policy_t* policy = loom_low_lower_policy_registry_lookup(
       &registry, UINT64_C(0x235c515ddcc8fd92));

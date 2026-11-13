@@ -1,0 +1,216 @@
+// RUN: roundtrip
+constexpr char kFloatPayload[] = "x1";
+constexpr unsigned kFloatPayloadBits = __builtin_bit_cast(unsigned, __builtin_nanf(kFloatPayload + 1));
+static_assert(kFloatPayloadBits == 0x7fc00001u);
+
+static constexpr unsigned long long local_double_payload_bits() {
+  const char payload[] = "x0x123";
+  return __builtin_bit_cast(unsigned long long, __builtin_nan(payload + 1));
+}
+constexpr unsigned long long kDoublePayloadBits = local_double_payload_bits();
+static_assert(kDoublePayloadBits == 0x7ff8000000000123ULL);
+
+constexpr char kLongDoublePayload[] = "x1";
+static_assert(__builtin_nanl(kLongDoublePayload + 1) != __builtin_nanl(kLongDoublePayload + 1));
+
+unsigned float_payload_bits() { return kFloatPayloadBits; }
+unsigned long long double_payload_bits() { return kDoublePayloadBits; }
+// ----
+func.def public @float_payload_bits() -> (i32) {
+  %kFloatPayloadBits = scalar.constant 2143289345 : i32
+  func.return %kFloatPayloadBits : i32
+}
+
+func.def public @double_payload_bits() -> (i64) {
+  %kDoublePayloadBits = scalar.constant 9221120237041090851 : i64
+  func.return %kDoublePayloadBits : i64
+}
+
+// ====
+// Builtins keep their declared types without requiring facade headers.
+float single_infinity() { return __builtin_inff(); }
+double double_infinity() { return __builtin_inf(); }
+float single_huge_value() { return __builtin_huge_valf(); }
+double double_huge_value() { return __builtin_huge_val(); }
+double negative_infinity() { return -__builtin_inf(); }
+double parenthesized() { return (__builtin_inf)(); }
+
+// ----
+func.def public @single_infinity() -> (f32) {
+  %1 = scalar.constant inf : f32
+  func.return %1 : f32
+}
+
+func.def public @double_infinity() -> (f64) {
+  %3 = scalar.constant inf : f64
+  func.return %3 : f64
+}
+
+func.def public @single_huge_value() -> (f32) {
+  %5 = scalar.constant inf : f32
+  func.return %5 : f32
+}
+
+func.def public @double_huge_value() -> (f64) {
+  %7 = scalar.constant inf : f64
+  func.return %7 : f64
+}
+
+func.def public @negative_infinity() -> (f64) {
+  %9 = scalar.constant inf : f64
+  %10 = scalar.negf %9 : f64
+  func.return %10 : f64
+}
+
+func.def public @parenthesized() -> (f64) {
+  %12 = scalar.constant inf : f64
+  func.return %12 : f64
+}
+
+// ====
+// The frontend also evaluates all three precisions in constant expressions.
+constexpr float kSingle = __builtin_inff();
+constexpr double kDouble = __builtin_inf();
+constexpr long double kLongDouble = __builtin_infl();
+static_assert(kSingle > 0x1.fffffep127f);
+static_assert(kDouble > 0x1.fffffffffffffp1023);
+static_assert(kLongDouble > 0x1.fffffffffffffp1023L);
+static_assert(kSingle == __builtin_huge_valf());
+static_assert(kDouble == __builtin_huge_val());
+static_assert(kLongDouble == __builtin_huge_vall());
+static_assert(__builtin_bit_cast(unsigned, kSingle) == 0x7f800000u);
+static_assert(__builtin_bit_cast(unsigned long long, kDouble) == 0x7ff0000000000000ull);
+static_assert(__builtin_bit_cast(unsigned long long, -kDouble) == 0xfff0000000000000ull);
+constexpr double kConverted = static_cast<double>(kLongDouble);
+double converted_long_double() { return kConverted; }
+
+// ----
+func.def public @converted_long_double() -> (f64) {
+  %kConverted = scalar.constant inf : f64
+  func.return %kConverted : f64
+}
+
+// ====
+// Ordinary calls use the same exact payload encoding as constexpr evaluation.
+constexpr char kPayload[] = "x0x123";
+float single_nan() { return __builtin_nanf(""); }
+double double_nan() { return __builtin_nan("0x123"); }
+float named_payload() { return __builtin_nanf(kPayload + 1); }
+
+// ----
+func.def public @single_nan() -> (f32) {
+  %1 = scalar.constant 2143289344 : i32
+  %2 = scalar.bitcast %1 : i32 to f32
+  func.return %2 : f32
+}
+
+func.def public @double_nan() -> (f64) {
+  %4 = scalar.constant 9221120237041090851 : i64
+  %5 = scalar.bitcast %4 : i64 to f64
+  func.return %5 : f64
+}
+
+func.def public @named_payload() -> (f32) {
+  %7 = scalar.constant 2143289635 : i32
+  %8 = scalar.bitcast %7 : i32 to f32
+  func.return %8 : f32
+}
+
+// ====
+// Template instantiation resolves builtins through the same source path.
+template <class Float>
+static Float infinity() {
+  if constexpr (__is_same(Float, float)) return __builtin_inff();
+  else return __builtin_inf();
+}
+float single() { return infinity<float>(); }
+double twice() { return infinity<double>(); }
+
+// ----
+func.def public @single() -> (f32) {
+  %1 = func.call pure @infinity_float() : () -> (f32)
+  func.return %1 : f32
+}
+
+func.def public @twice() -> (f64) {
+  %3 = func.call pure @infinity_double() : () -> (f64)
+  func.return %3 : f64
+}
+
+func.def @infinity_float() -> (f32) {
+  %5 = scalar.constant inf : f32
+  func.return %5 : f32
+}
+
+func.def @infinity_double() -> (f64) {
+  %7 = scalar.constant inf : f64
+  func.return %7 : f64
+}
+
+// ====
+// HIP does not replace the builtin: constexpr use and normal stores agree.
+#include <hip/hip_runtime.h>
+static_assert(__builtin_inff() == __builtin_huge_valf());
+extern "C" __global__ void builtin_inf_probe(double* output) {
+  *output = __builtin_inf();
+}
+extern "C" __global__ void builtin_inff_probe(float* output) {
+  *output = __builtin_inff();
+}
+
+// ----
+kernel.def @builtin_inf_probe() {
+  %workgroup_count_x = config.get @builtin_inf_probe.workgroup_count.x : index
+  %workgroup_count_y = config.get @builtin_inf_probe.workgroup_count.y : index
+  %workgroup_count_z = config.get @builtin_inf_probe.workgroup_count.z : index
+  %workgroup_size_x = config.get @builtin_inf_probe.workgroup_size.x : index
+  %workgroup_size_y = config.get @builtin_inf_probe.workgroup_size.y : index
+  %workgroup_size_z = config.get @builtin_inf_probe.workgroup_size.z : index
+  kernel.launch.config workgroups(%workgroup_count_x, %workgroup_count_y, %workgroup_count_z) workgroup_size(%workgroup_size_x, %workgroup_size_y, %workgroup_size_z) : index
+} launch(%output: buffer) {
+  %output_byte_offset = index.constant 0 : offset
+  %14 = scalar.constant inf : f64
+  %15 = buffer.view %output[%output_byte_offset] : buffer -> view<1xf64>
+  view.store<root_in_bounds> %14, %15[0] : f64, view<1xf64>
+  kernel.return
+}
+
+config.decl @builtin_inf_probe.workgroup_count.x : index
+
+config.decl @builtin_inf_probe.workgroup_count.y : index
+
+config.decl @builtin_inf_probe.workgroup_count.z : index
+
+config.decl @builtin_inf_probe.workgroup_size.x : index
+
+config.decl @builtin_inf_probe.workgroup_size.y : index
+
+config.decl @builtin_inf_probe.workgroup_size.z : index
+
+kernel.def @builtin_inff_probe() {
+  %workgroup_count_x = config.get @builtin_inff_probe.workgroup_count.x : index
+  %workgroup_count_y = config.get @builtin_inff_probe.workgroup_count.y : index
+  %workgroup_count_z = config.get @builtin_inff_probe.workgroup_count.z : index
+  %workgroup_size_x = config.get @builtin_inff_probe.workgroup_size.x : index
+  %workgroup_size_y = config.get @builtin_inff_probe.workgroup_size.y : index
+  %workgroup_size_z = config.get @builtin_inff_probe.workgroup_size.z : index
+  kernel.launch.config workgroups(%workgroup_count_x, %workgroup_count_y, %workgroup_count_z) workgroup_size(%workgroup_size_x, %workgroup_size_y, %workgroup_size_z) : index
+} launch(%output: buffer) {
+  %output_byte_offset = index.constant 0 : offset
+  %30 = scalar.constant inf : f32
+  %31 = buffer.view %output[%output_byte_offset] : buffer -> view<1xf32>
+  view.store<root_in_bounds> %30, %31[0] : f32, view<1xf32>
+  kernel.return
+}
+
+config.decl @builtin_inff_probe.workgroup_count.x : index
+
+config.decl @builtin_inff_probe.workgroup_count.y : index
+
+config.decl @builtin_inff_probe.workgroup_count.z : index
+
+config.decl @builtin_inff_probe.workgroup_size.x : index
+
+config.decl @builtin_inff_probe.workgroup_size.y : index
+
+config.decl @builtin_inff_probe.workgroup_size.z : index

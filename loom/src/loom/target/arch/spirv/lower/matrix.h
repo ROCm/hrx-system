@@ -11,8 +11,10 @@
 
 #include "loom/analysis/contract_vector.h"
 #include "loom/codegen/low/lower/lower.h"
+#include "loom/ops/vector/fragment.h"
 #include "loom/target/arch/spirv/isa.h"
 #include "loom/target/arch/spirv/scalar_types.h"
+#include "loom/target/arch/spirv/value_types.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -28,6 +30,27 @@ bool loom_spirv_matrix_component_type(
 // Source value typing and descriptor selection share this policy boundary so
 // their independently constructed matrix types cannot drift.
 loom_spirv_scope_t loom_spirv_matrix_scope(void);
+
+// Projects the producer-owned fragment interpretation for one source value.
+bool loom_spirv_matrix_fragment(const loom_value_fact_table_t* fact_table,
+                                loom_value_id_t source_value_id,
+                                loom_vector_fragment_fact_t* out_fragment);
+
+// Maps that interpretation to a native component, shape, scope, and use. Both
+// source contract selection and Low value mapping consume this projection.
+bool loom_spirv_matrix_fragment_type(const loom_module_t* module,
+                                     const loom_value_fact_table_t* fact_table,
+                                     loom_value_id_t source_value_id,
+                                     loom_vector_fragment_fact_t fragment,
+                                     loom_spirv_value_type_t* out_type);
+
+// Retains the shared matrix-contract diagnostic for unsupported authored input.
+iree_status_t loom_spirv_matrix_contract_query_reject(
+    const loom_target_contract_query_environment_t* environment,
+    const loom_op_t* source_op, iree_string_view_t matrix_constraint,
+    uint32_t source_rejection_bits, uint32_t target_rejection_bits,
+    uint32_t missing_feature_bits,
+    loom_target_contract_query_result_t* out_result);
 
 // Supplies SPIR-V options for shared descriptor-matrix source adapters.
 iree_status_t loom_spirv_descriptor_matrix_options(

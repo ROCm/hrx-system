@@ -8,8 +8,8 @@
 
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/codegen/low/schedule/completion_pressure.h"
 #include "loom/codegen/low/schedule/pressure.h"
-#include "loom/codegen/low/schedule/required_pressure.h"
 
 namespace loom {
 namespace {
@@ -28,7 +28,8 @@ class PressureAliasTest : public ::testing::Test {
 
   void CheckTransfer(uint32_t alias_unit_count,
                      loom_low_schedule_value_flags_t source_flags,
-                     uint32_t required_mask = 0, bool alias_dies = false) {
+                     uint32_t required_mask = 0, bool alias_dies = false,
+                     bool writable_result = false) {
     // An active source owns two units borrowed by a surviving alias. The
     // candidate consumes that source and produces a new alias of the survivor.
     // Wider survivors already own their remaining units privately.
@@ -42,14 +43,15 @@ class PressureAliasTest : public ::testing::Test {
     values[0].live_unit_count = 2;
     values[0].remaining_use_count = 1;
     values[0].flags |= source_flags;
-    values[2].flags = 0;
+    values[2].flags =
+        writable_result ? LOOM_LOW_SCHEDULE_VALUE_FLAG_WRITTEN_IN_PLACE : 0;
     if (alias_dies) {
       values[1].remaining_use_count = 1;
       values[1].flags |= LOOM_LOW_SCHEDULE_VALUE_FLAG_CANDIDATE_LATE_READ;
     }
     for (uint32_t i = 0; i < IREE_ARRAYSIZE(values); ++i) {
       if (required_mask & (1u << i)) {
-        values[i].flags |= LOOM_LOW_SCHEDULE_VALUE_FLAG_REQUIRES_REGISTER;
+        values[i].flags |= LOOM_LOW_SCHEDULE_VALUE_FLAG_CONSTRAINED_REGISTER;
       }
     }
     uint32_t value_producer_nodes[] = {
@@ -75,6 +77,7 @@ class PressureAliasTest : public ::testing::Test {
       rows[i].destination_ordinal = i + 1;
       rows[i].unit_count = values[i].unit_count;
       rows[i].kind = LOOM_LOW_STORAGE_RELATION_CONTIGUOUS_PART;
+      rows[i].flags = LOOM_LOW_STORAGE_RELATION_FLAG_PREFERRED;
     }
     loom_local_value_domain_t domain = {.value_count = IREE_ARRAYSIZE(values)};
     loom_low_schedule_build_state_t state = {
@@ -87,16 +90,16 @@ class PressureAliasTest : public ::testing::Test {
     };
     loom_low_schedule_pressure_state_t pressure = {};
     uint16_t completion_domains[] = {0};
-    state.pressure_limits.unspillable_completion_domain_ids_by_reg_class =
+    state.pressure_limits.constrained_completion_domain_ids_by_reg_class =
         completion_domains;
     loom_low_schedule_completion_domain_t completion = {
         .capacity = 8,
         .reg_class_id = 0,
     };
-    state.pressure_limits.unspillable_completion_domains = &completion;
-    state.pressure_limits.unspillable_completion_domain_count = 1;
-    loom_low_schedule_required_pressure_t required = {};
-    pressure.required_pressure = &required;
+    state.pressure_limits.constrained_completion_domains = &completion;
+    state.pressure_limits.constrained_completion_domain_count = 1;
+    loom_low_schedule_completion_pressure_t required = {};
+    pressure.completion_pressure = &required;
     IREE_ASSERT_OK(loom_low_schedule_pressure_alias_initialize(
         &state, &pressure.storage_aliases));
     values[1].live_unit_count =
@@ -138,7 +141,7 @@ class PressureAliasTest : public ::testing::Test {
     EXPECT_EQ(required.candidate_delta_units, transferred_required_units);
     EXPECT_EQ(required.candidate_write_delta_units,
               late ? 0 : transferred_required_units);
-    EXPECT_EQ(predicted, late ? 0u : alias_unit_count);
+    EXPECT_EQ(predicted, late || writable_result ? 0u : alias_unit_count);
     if (!late) {
       EXPECT_EQ(loom_low_schedule_pressure_alias_transfer_from_source(
                     &state, &pressure, 0),
@@ -161,7 +164,8 @@ class PressureAliasTest : public ::testing::Test {
 
   void CheckSourceBaseline(loom_low_storage_relation_kind_t kind,
                            uint16_t source_count, uint16_t relation_count,
-                           uint32_t shared_units) {
+                           uint32_t shared_units, bool writable_result = false,
+                           bool required_relation = false) {
     for (bool source_first : {false, true}) {
       SCOPED_TRACE(::testing::Message()
                    << "kind=" << static_cast<uint32_t>(kind) << " sources="
@@ -171,6 +175,9 @@ class PressureAliasTest : public ::testing::Test {
       values[0].unit_count = kind == LOOM_LOW_STORAGE_RELATION_SUBRANGE ? 4 : 2;
       values[1].unit_count = values[0].unit_count;
       values[2].unit_count = 2u * relation_count;
+      const loom_low_schedule_value_flags_t result_flags =
+          writable_result ? LOOM_LOW_SCHEDULE_VALUE_FLAG_WRITTEN_IN_PLACE : 0;
+      values[2].flags = result_flags;
       uint32_t producer_nodes[] = {LOOM_LOW_SCHEDULE_NODE_NONE,
                                    LOOM_LOW_SCHEDULE_NODE_NONE, 0};
       loom_low_schedule_node_t producer = {
@@ -196,6 +203,9 @@ class PressureAliasTest : public ::testing::Test {
         rows[i].destination_unit_offset = 2u * i;
         rows[i].unit_count = 2;
         rows[i].kind = kind;
+        rows[i].flags = required_relation
+                            ? LOOM_LOW_STORAGE_RELATION_FLAG_HARD
+                            : LOOM_LOW_STORAGE_RELATION_FLAG_PREFERRED;
         loom_low_schedule_node_operand_ordinals(&producer)[i] =
             rows[i].source_ordinal;
       }
@@ -257,13 +267,14 @@ class PressureAliasTest : public ::testing::Test {
         for (uint16_t i = 0; i < source_count; ++i) {
           EXPECT_EQ(pressure.storage_aliases.source_unit_counts[i], 0u);
         }
-        EXPECT_EQ(values[2].flags, LOOM_LOW_SCHEDULE_VALUE_FLAG_LIVE);
+        EXPECT_EQ(values[2].flags,
+                  result_flags | LOOM_LOW_SCHEDULE_VALUE_FLAG_LIVE);
       }
 
       // Block boundaries discard claims even when their result is still live.
       // The pressure owner clears value flags separately from the alias index.
       loom_low_schedule_pressure_alias_reset(&pressure.storage_aliases);
-      values[2].flags = LOOM_LOW_SCHEDULE_VALUE_FLAG_LIVE;
+      values[2].flags = result_flags | LOOM_LOW_SCHEDULE_VALUE_FLAG_LIVE;
       EXPECT_EQ(pressure.storage_aliases.source_count, 0u);
       for (uint16_t i = 0; i < source_count; ++i) {
         EXPECT_EQ(pressure.storage_aliases.source_unit_counts[i], 0u);
@@ -328,6 +339,29 @@ TEST_F(PressureAliasTest, SourceBaselineChargesSharedStorageOnce) {
   CheckSourceBaseline(LOOM_LOW_STORAGE_RELATION_CONTIGUOUS_PART, 2, 2, 4);
   CheckSourceBaseline(LOOM_LOW_STORAGE_RELATION_CONTIGUOUS_PART, 1, 2, 2);
   CheckSourceBaseline(LOOM_LOW_STORAGE_RELATION_DISJOINT_STORAGE, 1, 1, 0);
+}
+
+TEST_F(PressureAliasTest, WritableResultsOwnStorageAfterSourceTransfers) {
+  for (uint32_t alias_unit_count : {2u, 4u}) {
+    for (uint32_t required_mask = 0; required_mask < 8; ++required_mask) {
+      CheckTransfer(alias_unit_count, 0, required_mask, false, true);
+      CheckTransfer(alias_unit_count,
+                    LOOM_LOW_SCHEDULE_VALUE_FLAG_CANDIDATE_LATE_READ,
+                    required_mask, false, true);
+    }
+  }
+}
+
+TEST_F(PressureAliasTest, WritablePreferredResultsRetainIndependentPressure) {
+  CheckSourceBaseline(LOOM_LOW_STORAGE_RELATION_SAME_STORAGE, 1, 1, 0, true);
+  CheckSourceBaseline(LOOM_LOW_STORAGE_RELATION_SUBRANGE, 1, 1, 0, true);
+  CheckSourceBaseline(LOOM_LOW_STORAGE_RELATION_CONTIGUOUS_PART, 2, 2, 0, true);
+  CheckSourceBaseline(LOOM_LOW_STORAGE_RELATION_CONTIGUOUS_PART, 1, 2, 0, true);
+}
+
+TEST_F(PressureAliasTest, RequiredStorageStillSharesItsPressure) {
+  CheckSourceBaseline(LOOM_LOW_STORAGE_RELATION_SAME_STORAGE, 1, 1, 2, true,
+                      true);
 }
 
 }  // namespace

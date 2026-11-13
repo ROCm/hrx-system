@@ -16,6 +16,27 @@
 
 namespace {
 
+TEST(JoinProgramTest, SharingAmortizesNativeCallAndPlacementCosts) {
+  // The empty and one-edge programs never recover a call's own code cost.
+  for (size_t actions : {0u, 2u}) {
+    const loom_aie2p_join_program_t program = {.count = actions};
+    EXPECT_FALSE(
+        loom_aie2p_join_program_prefers_sharing(&program, IREE_HOST_SIZE_MAX));
+  }
+  // A two-edge join needs ten uses; a three-edge join needs six. Including
+  // the helper's return and placement cost keeps the tied case inline.
+  const loom_aie2p_join_program_t two_edges = {.count = 4};
+  EXPECT_FALSE(loom_aie2p_join_program_prefers_sharing(&two_edges, 9));
+  EXPECT_TRUE(loom_aie2p_join_program_prefers_sharing(&two_edges, 10));
+  const loom_aie2p_join_program_t three_edges = {.count = 6};
+  EXPECT_FALSE(loom_aie2p_join_program_prefers_sharing(&three_edges, 5));
+  EXPECT_TRUE(loom_aie2p_join_program_prefers_sharing(&three_edges, 6));
+  const loom_aie2p_join_program_t four_edges = {.count = 8};
+  EXPECT_FALSE(loom_aie2p_join_program_prefers_sharing(&four_edges, 3));
+  EXPECT_TRUE(loom_aie2p_join_program_prefers_sharing(&four_edges, 4));
+  EXPECT_FALSE(loom_aie2p_join_program_prefers_sharing(&four_edges, 1));
+}
+
 class JoinTest : public ::testing::Test {
  protected:
   void SetUp() override {

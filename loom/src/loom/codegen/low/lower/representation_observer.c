@@ -332,9 +332,12 @@ void loom_low_lower_representation_observer_observe(
     } else if (loom_low_lower_source_op_is_callable_exit(context, source_op)) {
       callable_kind = LOOM_LOW_LOWER_REPRESENTATION_CALLABLE_EXIT;
     } else if (iree_any_bit_set(source_op->traits,
-                                LOOM_TRAIT_CALLABLE_BOUNDARY) &&
-               loom_call_like_is_direct_semantic(loom_call_like_const_cast(
-                   loom_low_lower_context_module(context), source_op))) {
+                                LOOM_TRAIT_CALLABLE_BOUNDARY)) {
+      const loom_call_like_t call = loom_call_like_const_cast(
+          loom_low_lower_context_module(context), source_op);
+      is_callable_boundary =
+          loom_call_like_is_direct_semantic(call) ||
+          loom_call_like_kind(call) == LOOM_CALL_LIKE_KIND_LOW_INVOKE;
       callable_kind = LOOM_LOW_LOWER_REPRESENTATION_CALLABLE_CALL;
     } else {
       is_callable_boundary = false;
@@ -426,14 +429,34 @@ void loom_low_lower_representation_lookup(
       out_representation);
 }
 
+loom_low_representation_plan_t* loom_low_lower_representation_plan_if_ready(
+    loom_low_lower_context_t* context) {
+  loom_low_representation_plan_t* plan =
+      context->lowering->source_plan.representation_plan;
+  return plan != NULL && plan->solved ? plan : NULL;
+}
+
+iree_status_t loom_low_lower_representation_query_plan(
+    const loom_target_contract_query_environment_t* environment,
+    loom_low_representation_plan_t** out_plan) {
+  *out_plan = NULL;
+  loom_low_lower_representation_observer_state_t* state = NULL;
+  IREE_RETURN_IF_ERROR(loom_target_contract_query_get_or_allocate_target_state(
+      environment, &kLoomLowLowerRepresentationStateKey, sizeof(*state),
+      (void**)&state));
+  if (state != NULL && state->provider != NULL && state->plan.solved) {
+    *out_plan = &state->plan;
+  }
+  return iree_ok_status();
+}
+
 void loom_low_lower_representation_lookup_if_ready(
     loom_low_lower_context_t* context, loom_value_id_t source_value_id,
     loom_low_representation_id_t* out_representation) {
-  IREE_ASSERT_ARGUMENT(out_representation);
   *out_representation = LOOM_LOW_REPRESENTATION_ID_NONE;
   loom_low_representation_plan_t* plan =
-      context->lowering->source_plan.representation_plan;
-  if (plan == NULL || !plan->solved) {
+      loom_low_lower_representation_plan_if_ready(context);
+  if (plan == NULL) {
     return;
   }
   loom_low_lower_representation_plan_lookup(

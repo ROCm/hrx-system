@@ -30,7 +30,8 @@ struct loom_encoding_family_summary_request_t {
   // Module owning the encoding instance and any referenced strings or values.
   const loom_module_t* module;
 
-  // One-based static specification ID referenced by the instance.
+  // One-based complete static specification ID, or zero when the instance has
+  // dynamic parameters. The family and static parameters remain in |params|.
   uint16_t static_spec_encoding_id;
 
   // Descriptor-indexed static and dynamic family parameters.
@@ -84,8 +85,7 @@ void loom_encoding_resolve_nested_static_summaries(
 // Initializes one resolved family summary from generated constants and lets
 // the family callback augment parameterized or composed facts. This stays
 // inline because it is on every encoding fact/query path.
-IREE_ATTRIBUTE_ALWAYS_INLINE static inline void
-loom_encoding_summarize_resolved(
+static IREE_ATTRIBUTE_ALWAYS_INLINE void loom_encoding_summarize_resolved(
     const loom_encoding_vtable_t* vtable,
     const loom_encoding_family_summary_request_t* request,
     loom_encoding_family_summary_t* out_summary) {
@@ -101,6 +101,15 @@ loom_encoding_summarize_resolved(
   if (vtable->summarize) {
     vtable->summarize(request, out_summary);
   }
+  out_summary->encoding.family_id = request->params->spec->family.id;
+  out_summary->encoding.static_spec_encoding_id =
+      request->static_spec_encoding_id;
+  if (vtable->descriptor->role == LOOM_ENCODING_ROLE_ADDRESS_LAYOUT) {
+    out_summary->encoding.address_layout.family_id =
+        request->params->spec->family.id;
+    out_summary->encoding.address_layout.static_spec_encoding_id =
+        request->static_spec_encoding_id;
+  }
   if (vtable->descriptor->role == LOOM_ENCODING_ROLE_STORAGE_SCHEMA) {
     out_summary->encoding.storage_schema.static_spec_encoding_id =
         request->static_spec_encoding_id;
@@ -109,7 +118,7 @@ loom_encoding_summarize_resolved(
 
 // Resolves nested physical-storage composition only when selected by the
 // family callback.
-IREE_ATTRIBUTE_ALWAYS_INLINE static inline void
+static IREE_ATTRIBUTE_ALWAYS_INLINE void
 loom_encoding_resolve_nested_static_summaries_if_needed(
     const loom_encoding_family_summary_request_t* request,
     loom_encoding_family_summary_t* summary) {
@@ -130,7 +139,7 @@ void loom_encoding_summarize_verified_static(
 // Summarizes a verified encoding.define operation using its analyzed operand
 // facts. |operand_facts| may be NULL when the selected family does not compose
 // operand summaries.
-IREE_ATTRIBUTE_ALWAYS_INLINE static inline void
+static IREE_ATTRIBUTE_ALWAYS_INLINE void
 loom_encoding_summarize_verified_define(
     const loom_encoding_vtable_t* vtable, const loom_fact_context_t* context,
     const loom_module_t* module, const loom_op_t* op,
@@ -145,7 +154,11 @@ loom_encoding_summarize_verified_define(
       module, vtable->descriptor, param_view, dynamic_bindings, &params);
   const loom_encoding_family_summary_request_t request = {
       .module = module,
-      .static_spec_encoding_id = loom_encoding_define_spec(op),
+      .static_spec_encoding_id =
+          (uint16_t)(param_view->dynamic_values.count ||
+                             param_view->dynamic_names.count
+                         ? 0
+                         : loom_encoding_define_spec(op)),
       .params = &params,
       .operand_facts =
           {

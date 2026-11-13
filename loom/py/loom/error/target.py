@@ -1269,14 +1269,14 @@ ERR_TARGET_070 = ErrorDef(
     ),
 )
 
-# ERR_TARGET_071: Source-preserving operation cannot carry a reference register.
+# ERR_TARGET_071: Partitioning operation cannot carry a reference register.
 ERR_TARGET_071 = ErrorDef(
     domain=ErrorDomain.TARGET,
     code=71,
     severity=Severity.ERROR,
-    summary="Source-preserving operation cannot carry a reference register.",
+    summary="Partitioning operation cannot carry a reference register.",
     message=(
-        "low function '@{function_name}' uses source-preserving operation "
+        "low function '@{function_name}' uses partitioning operation "
         "'{op_name}' with reference register type {actual_type}"
     ),
     params=(
@@ -1285,8 +1285,8 @@ ERR_TARGET_071 = ErrorDef(
         ErrorParam("actual_type", ParamKind.TYPE),
     ),
     fix_hint=(
-        "Use low.move when ownership transfers, or use a target operation "
-        "that explicitly retains the reference before creating another value"
+        "Use low.move to transfer the complete handle or low.copy to duplicate "
+        "it; managed handles cannot be sliced or concatenated"
     ),
 )
 
@@ -1356,8 +1356,8 @@ ERR_TARGET_074 = ErrorDef(
         ErrorParam("expected_type", ParamKind.TYPE),
     ),
     fix_hint=(
-        "Use source values whose target-low mapping exactly matches the low "
-        "helper register signature"
+        "Match the helper register signature; argument carrier conversions "
+        "require source facts proving a supported lossless conversion"
     ),
 )
 
@@ -1529,14 +1529,14 @@ ERR_TARGET_090 = ErrorDef(
     severity=Severity.ERROR,
     summary="Memory access modifier applied to a non-memory packet.",
     message=(
-        "Low instruction '{descriptor}' in '@{function_name}' carries volatile "
+        "Low instruction '{descriptor}' in '@{function_name}' carries memory "
         "access semantics but its descriptor declares no memory read or write"
     ),
     params=(
         ErrorParam("descriptor", ParamKind.STRING),
         ErrorParam("function_name", ParamKind.STRING),
     ),
-    fix_hint="Apply volatile only to a descriptor-backed memory access.",
+    fix_hint="Apply memory access modifiers only to a descriptor-backed memory access.",
 )
 
 # ERR_TARGET_091: Returning paths have no common native result carrier.

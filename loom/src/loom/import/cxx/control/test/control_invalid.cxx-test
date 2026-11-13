@@ -1,0 +1,78 @@
+// RUN: verify
+// Structured iteration exits remain valid only inside a loop.
+// ERROR@+1: LOWERING/059 "unsupported statement: continue-statement"
+void entry() { continue; }
+
+// ====
+// Structured iteration exits remain valid only inside a loop.
+// ERROR@+1: LOWERING/059 "unsupported statement: break-statement"
+void entry() { break; }
+
+// ====
+// Runtime switches require a flat compound clause structure.
+void entry(int value) {
+  // ERROR@+1: LOWERING/059 "runtime switch requires a compound statement body"
+  switch (value) case 1: break;
+}
+
+// ====
+// Runtime switches require a flat compound clause structure.
+void entry(int value) {
+  switch (value) {
+    case 0:
+    if (value) {
+      // ERROR@+1: LOWERING/059 "case labels must be direct children of a compound switch body"
+      case 1: break;
+    }
+  }
+}
+
+// ====
+// Runtime switches do not execute an unlabeled source prefix.
+void entry(int value) {
+  switch (value) {
+    // ERROR@+1: LOWERING/059 "switch body statements require a preceding case or default label"
+    ++value;
+    case 1: break;
+  }
+}
+
+// ====
+// Rejects incomplete returns and unprojected exit joins.
+// ERROR@+1: LOWERING/059 "non-void function can reach its end without returning a value"
+int entry(int x) {
+  if (x) {
+    return 1;
+  }
+// WARNING@+1: PARSE/036 "non-void function does not return a value of type 'int' on every path"
+}
+
+// ====
+// Rejects incomplete returns and unprojected exit joins.
+// ERROR@+1: PARSE/036 "non-void function must return a value of type 'int'"
+int entry() { return; }
+
+// ====
+// Rejects incomplete returns and unprojected exit joins.
+// ERROR@+1: PARSE/036 "void function should not return a value"
+void entry() { return 1; }
+
+// ====
+// A scalar or pointer cannot supply a range's iteration boundary.
+void entry(int value) {
+  // ERROR@+1: PARSE/036 "range-based for requires an array or class range"
+  for (int element : value) {}
+}
+
+// ====
+void entry(int* values) {
+  // ERROR@+1: PARSE/036 "range-based for requires an array or class range"
+  for (int element : values) {}
+}
+
+// ====
+// An array range needs a source bound to construct its one-past-end iterator.
+void entry(int (&values)[]) {
+  // ERROR@+1: PARSE/036 "range-based for requires an array with a known bound"
+  for (int element : values) {}
+}

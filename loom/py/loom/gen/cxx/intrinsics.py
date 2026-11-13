@@ -24,8 +24,8 @@ _GENERATOR = "loom.gen.cxx.intrinsics"
 DESCRIPTION = "Loom C++ scalar declarations"
 REGENERATE_COMMAND = "python3 loom/py/loom/gen/run.py cxx_intrinsics --in-place"
 
-# Integer bit counts preserve the input width and have no source permissions.
-_INTEGER_PROJECTIONS = frozenset(("scalar.ctlzi", "scalar.cttzi", "scalar.ctpopi"))
+# These integer operations preserve the input width and have no permissions.
+_INTEGER_PROJECTIONS = frozenset(("scalar.absi", "scalar.ctlzi", "scalar.cttzi", "scalar.ctpopi"))
 
 
 def validate_scalar_projection(op: Op) -> None:
@@ -50,7 +50,7 @@ def validate_scalar_projection(op: Op) -> None:
 
 
 def scalar_projections() -> tuple[Op, ...]:
-    """Selects typed floating operations and integer bit counts, without
+    """Selects typed floating and integer operations, without
     inventing wrappers for regions, shaped types, or semantic attributes.
     """
     selected = []

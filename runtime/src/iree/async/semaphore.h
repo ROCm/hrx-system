@@ -465,8 +465,8 @@ static inline iree_status_t iree_async_semaphore_signal(
 // Not virtual — operates directly on the semaphore's frontier storage, which
 // is the same for all backends.
 IREE_API_EXPORT uint8_t iree_async_semaphore_query_frontier(
-    iree_async_semaphore_t* semaphore, iree_async_frontier_t* out_frontier,
-    uint8_t capacity);
+    iree_async_semaphore_t* semaphore, uint8_t capacity,
+    iree_async_frontier_t* out_frontier);
 
 // Permanently fails the semaphore. All current timepoints fire with |status|
 // and all future acquire_timepoint calls invoke the callback immediately with
@@ -696,9 +696,9 @@ IREE_API_EXPORT void iree_async_semaphore_dispatch_timepoints_failed(
 //
 // Returns IREE_STATUS_DEADLINE_EXCEEDED if the timeout expires before the
 // condition is met.
-// Returns the failure status code if any semaphore fails (regardless of mode).
-// The returned status carries only the code, not the full message — callers
-// should query individual semaphores to retrieve the complete failure status.
+// Returns an owned clone of the first observed failure if any semaphore fails
+// (regardless of mode). The complete diagnostic and attached payloads remain
+// valid after the caller releases the semaphores.
 //
 // Handles all timepoint management internally: no event pools, wait sets, or
 // per-semaphore ceremony needed. For small counts (<=8 semaphores), uses

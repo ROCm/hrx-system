@@ -20,6 +20,28 @@ static iree_status_t loom_ir_remap_leaf_type(loom_ir_remap_t* remap,
   loom_type_t target_type = source_type;
   bool needs_interned_payload = false;
   loom_overflow_dim_t target_overflow_dims[LOOM_TYPE_MAX_RANK] = {0};
+  if (loom_type_is_reference(source_type)) {
+    loom_string_id_t namespace_id = LOOM_STRING_ID_INVALID;
+    loom_string_id_t name_id = LOOM_STRING_ID_INVALID;
+    IREE_RETURN_IF_ERROR(loom_ir_remap_string_id(
+        remap, loom_type_reference_namespace_id(source_type),
+        /*allow_invalid=*/false, &namespace_id));
+    IREE_RETURN_IF_ERROR(
+        loom_ir_remap_string_id(remap, loom_type_reference_name_id(source_type),
+                                /*allow_invalid=*/false, &name_id));
+    const loom_symbol_ref_t source_declaration = {
+        .module_id = 0,
+        .symbol_id = loom_type_reference_declaration_id(source_type),
+    };
+    loom_symbol_ref_t target_declaration;
+    IREE_RETURN_IF_ERROR(loom_ir_remap_symbol_ref(remap, source_declaration,
+                                                  &target_declaration));
+    target_type = loom_type_reference(
+        loom_type_reference_ownership(source_type), namespace_id, name_id,
+        target_declaration.symbol_id);
+    return loom_module_intern_type(remap->target_module, target_type,
+                                   out_target_type);
+  }
   if (loom_type_has_dimensions(source_type)) {
     uint8_t rank = loom_type_rank(source_type);
     if (loom_type_has_inline_dims(source_type)) {
@@ -784,6 +806,14 @@ static iree_status_t loom_payload_finish_encoding(loom_payload_walk_t* walk) {
                                                false, &target.name_id));
   IREE_RETURN_IF_ERROR(loom_ir_remap_string_id(walk->remap, source->alias_id,
                                                true, &target.alias_id));
+  // File-local display names do not constrain imported structural identity.
+  // An occupied name already belongs to a canonical row: interning below
+  // either reuses that row or keeps the distinct incoming encoding anonymous.
+  if (target.alias_id != LOOM_STRING_ID_INVALID &&
+      loom_module_find_encoding_alias(walk->remap->target_module,
+                                      target.alias_id) != 0) {
+    target.alias_id = LOOM_STRING_ID_INVALID;
+  }
   uint16_t result;
   IREE_RETURN_IF_ERROR(
       loom_module_add_encoding(walk->remap->target_module, &target, &result));

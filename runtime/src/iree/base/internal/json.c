@@ -15,9 +15,9 @@
 //===----------------------------------------------------------------------===//
 
 // Forward declaration for mutual recursion.
-static iree_status_t iree_json_consume_value_impl(iree_string_view_t* str,
-                                                  iree_string_view_t* out_value,
-                                                  iree_host_size_t depth);
+static iree_status_t iree_json_consume_value_impl(
+    iree_string_view_t* str, iree_host_size_t depth,
+    iree_string_view_t* out_value);
 
 // Maximum nesting depth for JSON structures (objects/arrays).
 // This prevents stack overflow from adversarial inputs.
@@ -272,8 +272,8 @@ iree_status_t iree_json_consume_string(iree_string_view_t* str,
 }
 
 static iree_status_t iree_json_consume_object_impl(
-    iree_string_view_t* str, iree_string_view_t* out_value,
-    iree_host_size_t depth) {
+    iree_string_view_t* str, iree_host_size_t depth,
+    iree_string_view_t* out_value) {
   if (depth >= IREE_JSON_MAX_DEPTH) {
     return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                             "JSON nesting depth exceeds maximum of %d",
@@ -301,7 +301,7 @@ static iree_status_t iree_json_consume_object_impl(
     }
     // Scan ahead to get the value span.
     iree_string_view_t value = iree_string_view_empty();
-    IREE_RETURN_IF_ERROR(iree_json_consume_value_impl(str, &value, depth + 1));
+    IREE_RETURN_IF_ERROR(iree_json_consume_value_impl(str, depth + 1, &value));
     // Skip whitespace/comments before comma or closing brace.
     IREE_RETURN_IF_ERROR(iree_json_skip_whitespace_and_comments(str));
     // If there's a comma then continue to next member (trailing commas
@@ -324,12 +324,12 @@ static iree_status_t iree_json_consume_object_impl(
 iree_status_t iree_json_consume_object(iree_string_view_t* str,
                                        iree_string_view_t* out_value) {
   iree_json_skip_bom(str);
-  return iree_json_consume_object_impl(str, out_value, /*depth=*/0);
+  return iree_json_consume_object_impl(str, /*depth=*/0, out_value);
 }
 
-static iree_status_t iree_json_consume_array_impl(iree_string_view_t* str,
-                                                  iree_string_view_t* out_value,
-                                                  iree_host_size_t depth) {
+static iree_status_t iree_json_consume_array_impl(
+    iree_string_view_t* str, iree_host_size_t depth,
+    iree_string_view_t* out_value) {
   if (depth >= IREE_JSON_MAX_DEPTH) {
     return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                             "JSON nesting depth exceeds maximum of %d",
@@ -348,7 +348,7 @@ static iree_status_t iree_json_consume_array_impl(iree_string_view_t* str,
     }
     // Get the array element.
     iree_string_view_t value = iree_string_view_empty();
-    IREE_RETURN_IF_ERROR(iree_json_consume_value_impl(str, &value, depth + 1));
+    IREE_RETURN_IF_ERROR(iree_json_consume_value_impl(str, depth + 1, &value));
     // Skip whitespace/comments before comma or closing bracket.
     IREE_RETURN_IF_ERROR(iree_json_skip_whitespace_and_comments(str));
     // If there's a comma then continue to next element (trailing commas
@@ -372,12 +372,12 @@ static iree_status_t iree_json_consume_array_impl(iree_string_view_t* str,
 iree_status_t iree_json_consume_array(iree_string_view_t* str,
                                       iree_string_view_t* out_value) {
   iree_json_skip_bom(str);
-  return iree_json_consume_array_impl(str, out_value, /*depth=*/0);
+  return iree_json_consume_array_impl(str, /*depth=*/0, out_value);
 }
 
-static iree_status_t iree_json_consume_value_impl(iree_string_view_t* str,
-                                                  iree_string_view_t* out_value,
-                                                  iree_host_size_t depth) {
+static iree_status_t iree_json_consume_value_impl(
+    iree_string_view_t* str, iree_host_size_t depth,
+    iree_string_view_t* out_value) {
   *out_value = iree_string_view_empty();
   IREE_RETURN_IF_ERROR(iree_json_skip_whitespace_and_comments(str));
   if (str->size == 0) {
@@ -388,9 +388,9 @@ static iree_status_t iree_json_consume_value_impl(iree_string_view_t* str,
     case '"':
       return iree_json_consume_string(str, out_value);
     case '{':
-      return iree_json_consume_object_impl(str, out_value, depth);
+      return iree_json_consume_object_impl(str, depth, out_value);
     case '[':
-      return iree_json_consume_array_impl(str, out_value, depth);
+      return iree_json_consume_array_impl(str, depth, out_value);
     case 't':
       return iree_json_consume_keyword(str, IREE_SV("true"), out_value);
     case 'f':
@@ -405,7 +405,7 @@ static iree_status_t iree_json_consume_value_impl(iree_string_view_t* str,
 iree_status_t iree_json_consume_value(iree_string_view_t* str,
                                       iree_string_view_t* out_value) {
   iree_json_skip_bom(str);
-  return iree_json_consume_value_impl(str, out_value, /*depth=*/0);
+  return iree_json_consume_value_impl(str, /*depth=*/0, out_value);
 }
 
 //===----------------------------------------------------------------------===//

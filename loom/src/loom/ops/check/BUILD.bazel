@@ -14,7 +14,10 @@ package(
 
 loom_cc_library(
     name = "op_defs",
-    hdrs = ["ops.h"],
+    hdrs = [
+        "expectation.h",
+        "ops.h",
+    ],
     textual_hdrs = ["ops.inc"],
     deps = ["//loom/src/loom/ops:headers"],
 )
@@ -49,6 +52,7 @@ loom_generated_cc_library(
     textual_hdrs = ["ops.inc"],
     deps = [
         ":builders",
+        ":op_defs",
         "//loom/src/loom/error:emitter",
         "//loom/src/loom/error:error_defs",
         "//loom/src/loom/error:parameter",
@@ -64,6 +68,7 @@ loom_cc_test(
     srcs = ["ops_test.cc"],
     deps = [
         ":check",
+        ":op_defs",
         "//loom/src/loom/format/bytecode:reader",
         "//loom/src/loom/format/bytecode:writer",
         "//loom/src/loom/ir",

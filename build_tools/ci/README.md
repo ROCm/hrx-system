@@ -67,24 +67,49 @@ python build_tools/devtools/ci.py iree-bazel-xdna-asan
 python build_tools/devtools/ci.py iree-cmake-cpu-ubsan
 ```
 
+`iree-bazel-cpu-msan` runs the `msan` test category on a CPU runner. The category
+covers Loom's `loom-check` fixtures, native arena lifetime/origin controls, and
+VM scenario execution. Test definitions own membership: `loom_check_test`
+applies the tag to its fixtures, and other qualified subjects opt in beside
+their test declaration. The profile builds only the selected test closures and
+uses the same run-requirement admission as other CPU jobs. The CPU sanitizer
+aggregate includes this profile.
+
+MSAN instruments the host compiler and VM interpreter, including compilation
+for GPU targets. GPU execution and generated native code are outside that
+instrumentation. The default CPU configuration leaves optional importers
+disabled, and C++ unit tests are outside the qualified category because the
+runner does not provide an instrumented C++ standard library. External tools
+such as `spirv-val` use the separate execution configuration. Bazel's MSAN
+configuration also undefines inherited `_FORTIFY_SOURCE`: late ThinLTO lowering
+of fortified memory calls can otherwise leave destination shadow poisoned.
+Origin tracking and optimization remain enabled when combining MSAN with `opt`.
+CMake MSAN commands retain their build-only scope.
+
 `--target` can narrow profiles that accept Bazel target patterns. CMake profiles
 select their tests through CTest names and labels. `--verbose` prints the
-underlying commands; `--keep-going` runs independent phases after a failure and
-reports the failed phases at the end.
+underlying commands. Bazel CI commands stop at the first failed test by default.
+`--keep-going` continues independent build actions, tests, and phases after a
+failure and reports the failed phases at the end. Linux accelerator jobs use
+the default so a native failure reaches artifact and kernel-log collection
+before further tests can obscure the initiating failure. CPU jobs retain
+`--keep-going` to report independent failures together.
 
-The native Windows GPU profile requires an exact GPU target:
+The native Windows GPU profile accepts an explicit GPU target or family selector:
 
 ```powershell
-python build_tools/devtools/ci.py iree-bazel-amdgpu-native-asan --amdgpu-target gfx1201
+python build_tools/devtools/ci.py iree-bazel-amdgpu-native-asan --amdgpu-target gfx120X-all
 ```
 
 This profile uses native libamdf GPU queues without requiring ROCr or an NPU.
+The same selector controls compiled targets and native qualification. A family
+admits any of its physical targets; required execution cases still fail when no
+matching GPU can run them.
 The `iree-bazel-amd-client[-asan]` profiles cover the GPU/NPU client configuration;
 their admitted resources depend on the host platform. The Linux
 `iree-bazel-amdgpu[-<sanitizer>]` and `iree-cmake-amdgpu[-<sanitizer>]` profiles
-also use native libamdf GPU queues, with the legacy AMDGPU HAL disabled. They
-retain the ROCm device compiler for HIP code-object fixtures; execution does
-not load the ROCr-backed HAL.
+also use native libamdf GPU queues. They retain the ROCm device compiler for
+HIP code-object fixtures; native execution is provided by libamdf.
 The [profile definitions](../devtools/ci_config.py) specify the package scope
 and resources for each.
 
@@ -100,7 +125,20 @@ modify libamdf's topology.
 Compiler-only AMDGPU checks use `iree-bazel-loom-amdgpu` or
 `iree-cmake-loom-amdgpu`; they need no GPU. Repository-wide compile checks use
 `iree-bazel-repository-build`. Platform-incompatible targets are excluded by
-their build constraints.
+their build constraints. The Linux GCC lane uses GCC Toolset 15 and its matching
+GNU gold linker inside the manylinux image with `--compilation-mode opt`,
+preserving the glibc compatibility floor while checking optimization-dependent
+diagnostics. The mode applies to the build invocation without changing the
+worktree's configured defaults:
+
+```bash
+python build_tools/devtools/ci.py iree-bazel-repository-build --compilation-mode opt
+```
+
+This build compiles every platform-compatible target but leaves finished
+executable runfiles lazy. Bazel still materializes runfiles required by local
+build actions; execution and runfiles coverage remain with the integration
+lanes.
 
 ## Hardware and test admission
 

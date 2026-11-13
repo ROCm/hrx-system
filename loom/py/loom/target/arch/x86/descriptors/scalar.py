@@ -119,6 +119,7 @@ _NON_TRAPPING_SCALAR_FORMS = frozenset(
         Form.SHIFT_COUNT,
         Form.UNARY_R_RM,
         Form.UNARY_F3_R_RM,
+        Form.BINARY_CARRY_OUT,
         Form.SELECT,
         Form.SUBTRACT_IF_UGE,
         Form.COMPARE,
@@ -471,6 +472,50 @@ def _gpr_destructive_binary_descriptor(
         asm_forms=_asm(
             mnemonic=f"{mnemonic}.{asm_suffix}",
             results=("dst",),
+            operands=("lhs", "rhs"),
+        ),
+        schedule_class=_SCHEDULE_SCALAR,
+        flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    )
+
+
+def _gpr_unsigned_carry_borrow_descriptor(operation: str, bit_count: int) -> Descriptor:
+    """Returns an add/sub descriptor that materializes carry or borrow."""
+    is_subtraction = operation == "sub"
+    value_result = _gpr64_result("value") if bit_count == 64 else _gpr32_result("value")
+    operand = _gpr64_operand if bit_count == 64 else _gpr32_operand
+    opcode = (
+        0x28
+        if is_subtraction and bit_count == 8
+        else 0x29
+        if is_subtraction
+        else 0x00
+        if bit_count == 8
+        else 0x01
+    )
+    overflow_name = "borrow" if is_subtraction else "carry"
+    return Descriptor(
+        key=f"x86.scalar.{operation}.{overflow_name}.gpr{bit_count}",
+        encoding_format_id=Form.BINARY_CARRY_OUT,
+        encoding_id=encoding(opcode, flags=_gpr_width_flags(bit_count)),
+        mnemonic=operation,
+        semantic_tag=(
+            f"integer.{operation}."
+            f"{'borrow_out' if is_subtraction else 'carry_out'}.i{bit_count}"
+        ),
+        operands=(
+            value_result,
+            _gpr32_result("overflow"),
+            operand("lhs"),
+            operand("rhs"),
+        ),
+        constraints=(
+            Constraint(ConstraintKind.TIED, 0, 2),
+            Constraint(ConstraintKind.DESTRUCTIVE, 0, 2),
+        ),
+        asm_forms=_asm(
+            mnemonic=f"{operation}.{overflow_name}.gpr{bit_count}",
+            results=("value", "overflow"),
             operands=("lhs", "rhs"),
         ),
         schedule_class=_SCHEDULE_SCALAR,
@@ -1020,6 +1065,11 @@ _X86_SCALAR_SUFFIX_DESCRIPTORS = (
         opcode=0x29,
         mnemonic="sub",
         semantic_tag="integer.sub.i32",
+    ),
+    *(
+        _gpr_unsigned_carry_borrow_descriptor(operation, bit_count)
+        for operation in ("add", "sub")
+        for bit_count in (8, 16, 32, 64)
     ),
     *(
         _gpr_destructive_unary_descriptor(

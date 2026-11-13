@@ -655,14 +655,6 @@ static bool loom_amdgpu_fragment_memory_register_static_offset(
   if (element_index >= plan->address_layout.payload_elements_per_register) {
     return false;
   }
-  if (plan->address_layout.packed_element_byte_stride == 0) {
-    for (uint8_t view_axis = 0; view_axis < plan->view_rank; ++view_axis) {
-      if (plan->runtime_axes[view_axis].packed_element_coordinate_stride != 0) {
-        return true;
-      }
-    }
-    return false;
-  }
   const uint64_t element_static_offset =
       (uint64_t)element_index * plan->address_layout.packed_element_byte_stride;
   if (*out_static_byte_offset > UINT64_MAX - element_static_offset) {

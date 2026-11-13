@@ -28,16 +28,22 @@ information identifies its architecture and compiler target; its native array
 geometry, context admission and instruction limits come from the live device
 query after explicit activation. GPU family information includes the hardware
 facts available through passive native metadata. Queue families describe native
-submission mechanisms; memory profiles require the live devices that will
-consume the storage. Returned records are complete: zero describes
-an absent capability, not a field waiting for an expensive query.
+submission mechanisms and static limits. Ring placement and host-publication
+costs come from `device_query_queue_family_placement_info` after explicit device
+creation; memory profiles require the live devices that will consume the storage.
+Returned records are complete: zero describes an absent capability, not a field
+waiting for an expensive query.
 
 For example, a HAL selecting shared CPU/GPU/NPU storage first filters hardware
 by identity and architecture, then explicitly creates the selected devices.
 It calls `memory_scope_query_device_profile` with their complete access set to
 obtain native allocation, registration and sharing capabilities. The caller
 can reject an unsuitable contract before acquiring memory. The query reserves
-no memory and does not guarantee allocation success.
+no memory and does not guarantee allocation success. Peer-memory qualification
+uses those live consumers too: a physical link or matching device architecture
+alone does not establish that one device can access another's backing. The
+profile admits the requested consumer set; `memory_scope_query_pair_info`
+qualifies visibility and atomic reach between their exact execution sites.
 
 CPU participation uses system-memory scopes and host mappings. There is no
 synthetic CPU endpoint or device to activate. Native-private scopes, such as an
@@ -84,6 +90,19 @@ passive discovery. It identifies an actual native device when multiple
 endpoints have identical PCI product IDs. The opaque `id` continues to select
 libamdf endpoints; the diagnostic name is intended for display.
 
+Linux GPU names come from a compiled snapshot of libdrm's `amdgpu.ids`, using
+the PCI device and revision and any board-specific subsystem entry. For
+example, `1002:1586:C1` reports `AMD Radeon 8060S Graphics`; other revisions
+can name different products. Linux endpoints without a registry name,
+including XDNA, retain their numeric diagnostic names. Native Windows retains
+the driver description. Names are neither unique identifiers nor capability
+selectors.
+
+The build generates a compact, deduplicated registry from the checksummed
+libdrm source dependency. Lookup performs no allocation, file access, or
+runtime parsing. Updating the dependency refreshes the names for both native
+Linux and Linux DXG; installed `amdgpu.ids` files do not affect this snapshot.
+
 For a Linux GPU, the identity contains its DRM render-node major and minor
 numbers. A Vulkan consumer can compare these with
 `VkPhysicalDeviceDrmPropertiesEXT.renderMajor` and `renderMinor` when `hasRender`
@@ -110,6 +129,14 @@ opening a render, KFD or accelerator execution file. Explicit device creation
 qualifies the native interface and obtains actual memory limits before VM
 initialization. GPU address ranges and integrated-versus-discrete placement come
 from the native device query, without PCI or GFX memory tables.
+
+Linux enumeration omits endpoints whose device nodes deny read/write access
+to the process, including device-cgroup restrictions imposed by job schedulers
+and containers. The kernel permission query opens no execution file. KFD
+topology queries likewise omit cgroup-hidden GPUs and peer destinations; a
+hidden GPU never becomes a CPU memory route. Other native failures retain
+their diagnostics. Missing device nodes do not hide available sysfs metadata,
+and permissions can change after enumeration, so activation remains fallible.
 
 Windows opens KMT adapters for metadata queries. Those handles and the graphics
 kernel's process bookkeeping are distinct from the driver process context and
@@ -152,6 +179,14 @@ family requires the KMT operations needed by its native path.
 performs no system call, and neither initializes nor waits for a device. A HAL
 can select by representation and publication mode instead of branching on the
 operating system.
+
+After activation, `device_query_queue_family_placement_info` reports the same
+family ordinal's supported ring placements and host-publication requirements.
+Those facts include native virtualization restrictions and whether publication
+requires a device-control read or kernel call. Device creation establishes the
+complete immutable record; the query takes no lock, performs no allocation or
+system call, and initializes no state. A runtime uses it before choosing and
+creating its queues. Kernel-only families expose no user-ring placement choices.
 
 ## Lifetime remains explicit
 

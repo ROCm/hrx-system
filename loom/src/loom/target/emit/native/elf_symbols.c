@@ -6,9 +6,9 @@
 
 #include "loom/target/emit/native/elf_symbols.h"
 
-iree_status_t loom_native_elf_hash_initialize(iree_host_size_t symbol_count,
-                                              loom_native_elf_hash_t* out_hash,
-                                              iree_arena_allocator_t* arena) {
+iree_status_t loom_native_elf_hash_initialize(
+    iree_host_size_t symbol_count, iree_arena_allocator_t* arena,
+    loom_native_elf_hash_t* out_hash) {
   *out_hash = (loom_native_elf_hash_t){0};
   iree_host_size_t byte_length = 0;
   if (symbol_count > UINT32_MAX ||

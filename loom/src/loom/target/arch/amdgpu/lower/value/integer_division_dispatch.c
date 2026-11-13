@@ -25,15 +25,15 @@ iree_status_t loom_amdgpu_select_integer_division_plan(
 }
 
 iree_status_t loom_amdgpu_finalize_integer_division_plan(
-    loom_low_lower_context_t* context,
-    const loom_amdgpu_integer_division_plan_t* plan) {
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_amdgpu_integer_division_plan_t* plan) {
   switch (plan->kind) {
     case LOOM_AMDGPU_INTEGER_DIVISION_PLAN_CONSTANT_WIDE:
       return loom_amdgpu_finalize_wide_division_plan(
           context, &plan->payload.constant_wide);
     case LOOM_AMDGPU_INTEGER_DIVISION_PLAN_DYNAMIC_U32:
       return loom_amdgpu_finalize_dynamic_u32_division_plan(
-          context, &plan->payload.dynamic_u32);
+          context, source_op, &plan->payload.dynamic_u32);
     default:
       IREE_ASSERT_UNREACHABLE("unknown AMDGPU integer division plan kind");
       IREE_BUILTIN_UNREACHABLE();

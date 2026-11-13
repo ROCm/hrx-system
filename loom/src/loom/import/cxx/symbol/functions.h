@@ -30,6 +30,7 @@
 #include "loom/import/cxx/binding/target_definitions.h"
 #include "loom/import/cxx/binding/template_definitions.h"
 #include "loom/import/cxx/control/analysis.h"
+#include "loom/import/cxx/control/call_fields.h"
 #include "loom/import/cxx/source/locations.h"
 #include "loom/import/cxx/symbol/names.h"
 #include "loom/import/cxx/value/signature.h"
@@ -71,6 +72,8 @@ struct FunctionInstance {
   ImplicitObjectABI receiver_abi;
 };
 
+struct ParameterProjection;
+
 // Admitted implicit object bound ahead of every explicit source parameter.
 struct ImplicitObjectParameter {
   // Native transport selected by the call site's owned representation.
@@ -78,26 +81,48 @@ struct ImplicitObjectParameter {
   // Cv-qualified complete source object type governing member observations.
   const cxx::Type* object_type;
   // Exact top-level fields replaced by a value receiver, in declaration order.
-  std::span<cxx::FieldSymbol* const> written_fields;
+  std::span<cxx::Symbol* const> written_fields;
+  // Sparse receiver contract, absent for complete-value and storage transport.
+  const ParameterProjection* projection = nullptr;
 };
 
-enum class ReferenceABI {
+enum class IndirectParameterABI {
   // Nonescaping referent transported as flattened values with exact writeback.
   Value,
   // Durable identity transported as the existing buffer-plus-offset pointer.
   Storage,
 };
 
-// One source lvalue-reference parameter projected through its selected ABI.
-// Parameters remain in source order and are indexed by semantic ordinal so
-// redeclarations need not share parameter symbol identities.
-struct ReferenceParameter {
+// One callable's independently projected input and output source groups.
+struct ParameterProjection {
+  // Complete source groups required on entry, in source component order.
+  std::vector<ValueProjection> inputs;
+  // Complete source groups replaced on return, in source component order.
+  std::vector<ValueProjection> outputs;
+  // Flattened input extent retained for call argument/result correspondence.
+  size_t input_component_count = 0;
+  // Flattened output extent retained for result assembly.
+  size_t output_component_count = 0;
+};
+
+// One source parameter whose object is passed indirectly in C++, projected
+// through its selected native ABI. Parameters remain in source order and are
+// indexed by semantic ordinal so redeclarations need not share parameter
+// symbol identities.
+struct IndirectParameter {
   // Ordinal in the source function parameter list.
   size_t ordinal;
+  // Complete object transported by the selected indirect ABI.
+  const cxx::Type* object_type;
+  // Whether the source parameter is a nonescaping pointer borrow rather than
+  // a C++ reference.
+  bool borrowed_pointer;
   // Native identity transport selected by the retained callable analysis.
-  ReferenceABI abi;
+  IndirectParameterABI abi;
   // Whether a value ABI callee returns and the caller writes back the result.
   bool mutable_access;
+  // Sparse source contract, absent when the complete existing ABI is needed.
+  std::unique_ptr<const ParameterProjection> projection;
 };
 
 // Admitted definition ready for recursive body construction. The source owns
@@ -118,14 +143,16 @@ struct FunctionBody {
   FunctionKind kind;
   // Incoming pointer contracts in source parameter order, empty when absent.
   std::span<const ParameterContract> parameter_contracts;
-  // Admitted non-escaping value references in source parameter order.
-  std::span<const ReferenceParameter> reference_parameters;
+  // Admitted non-escaping indirect parameters in source parameter order.
+  std::span<const IndirectParameter> indirect_parameters;
   // Implicit object transport for a reached non-static member definition.
   std::optional<ImplicitObjectParameter> implicit_object;
   // Retained whole-function source facts shared with body translation.
   const ControlFlow* control;
   // Source/native argument permutation for a staged callable body.
   const StagedSignatureProjection* staged_signature = nullptr;
+  // Family owning native argument groups when provider source shapes differ.
+  const cxx::FunctionSymbol* template_family = nullptr;
 };
 
 // Native definition and any source-owned launch configuration body that must
@@ -181,7 +208,7 @@ class Functions {
       cxx::FunctionSymbol* function, cxx::AST* owner = nullptr,
       ImplicitObjectABI receiver_abi = ImplicitObjectABI::None);
   // Returns the concrete definition retained for a semantic declaration, or
-  // the frontend-owned definition of a reached concrete template instance.
+  // the frontend-owned definition of a reached member or template instance.
   cxx::FunctionSymbol* definition(cxx::FunctionSymbol* function) const;
   // Source case identity retained during declaration admission.
   bool is_check_case(cxx::FunctionSymbol* function) const;
@@ -208,8 +235,8 @@ class Functions {
   // module insertion point. The caller then enters and fills the returned body.
   DefinedFunction define(FunctionInstance instance, Types& types,
                          Locations& locations, loom_builder_t* builder);
-  // Returns the retained value-reference ABI for a reached function.
-  std::span<const ReferenceParameter> reference_parameters(
+  // Returns the retained indirect-parameter ABI for a reached function.
+  std::span<const IndirectParameter> indirect_parameters(
       cxx::FunctionSymbol* symbol) const;
   // Whether calls must transport the implicit object as durable storage.
   bool receiver_requires_storage(cxx::FunctionSymbol* symbol) const;
@@ -218,8 +245,15 @@ class Functions {
   // Exact source parameter aliased by every reference result, when one exists.
   std::optional<size_t> reference_return_parameter(
       cxx::FunctionSymbol* symbol) const;
+  // Caller-owned subobjects selected by a projected reference result when the
+  // active callable ABI can reconstruct every origin.
+  std::span<const ReferenceResultOrigin> projected_reference_return_origins(
+      cxx::FunctionSymbol* symbol, ImplicitObjectABI receiver_abi) const;
   // Exact top-level implicit-object fields replaced by the definition.
-  std::span<cxx::FieldSymbol* const> receiver_writes(
+  std::span<cxx::Symbol* const> receiver_writes(
+      cxx::FunctionSymbol* symbol) const;
+  // Value receiver groups established before any body is translated.
+  const ParameterProjection* receiver_projection(
       cxx::FunctionSymbol* symbol) const;
 
  private:
@@ -234,11 +268,6 @@ class Functions {
   loom_symbol_ref_t retain(FunctionInstance instance, cxx::AST* owner);
   void admit_reference_parameters(cxx::FunctionSymbol* symbol,
                                   cxx::AST* source);
-  struct AnalyzedCall {
-    ControlFlow* caller;
-    const DirectCall* call;
-    ControlFlow* callee;
-  };
   using AnalyzedFunction = std::pair<cxx::FunctionSymbol*, ControlFlow*>;
   void prepare_analysis(cxx::FunctionSymbol* symbol, Types& types,
                         std::vector<AnalyzedFunction>& functions,
@@ -250,7 +279,6 @@ class Functions {
       FunctionInstance instance, cxx::AST* source, Types& types,
       loom_builder_t* builder, std::vector<loom_type_t>& arguments,
       std::vector<loom_type_t>& results,
-      std::vector<loom_tied_result_t>& tied_results,
       std::vector<loom_predicate_t>& predicates);
   void collect(cxx::List<cxx::DeclarationAST*>* declarations,
                DeclarationScope scope,
@@ -350,9 +378,12 @@ class Functions {
   std::unordered_set<cxx::FunctionSymbol*> exported_;
   // Reached bodyless declarations whose names must remain stable for linking.
   std::unordered_set<cxx::FunctionSymbol*> external_;
-  // Nonempty value-reference ABIs indexed by canonical declaration identity.
-  std::unordered_map<cxx::FunctionSymbol*, std::vector<ReferenceParameter>>
-      reference_parameters_;
+  // Nonempty indirect-parameter ABIs indexed by canonical declaration identity.
+  std::unordered_map<cxx::FunctionSymbol*, std::vector<IndirectParameter>>
+      indirect_parameters_;
+  // Sparse implicit-object contracts indexed by canonical source identity.
+  std::unordered_map<cxx::FunctionSymbol*, ParameterProjection>
+      receiver_projections_;
   // Whole-function analyses retained by canonical semantic identity. Each body
   // is walked once; signature construction and translation query these facts.
   std::unordered_map<cxx::FunctionSymbol*, std::unique_ptr<ControlFlow>>

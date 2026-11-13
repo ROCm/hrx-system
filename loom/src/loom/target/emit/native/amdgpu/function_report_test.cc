@@ -16,7 +16,7 @@ namespace {
 class AmdgpuFunctionReportTest : public ::testing::Test {
  protected:
   void SetUp() override {
-    loom_target_compile_report_initialize(&report_, iree_allocator_system());
+    loom_target_compile_report_initialize(iree_allocator_system(), &report_);
     report_.requested_detail_flags =
         LOOM_TARGET_COMPILE_REPORT_DETAIL_WAIT_PLAN;
     schedule_.nodes = nodes_;

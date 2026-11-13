@@ -1,0 +1,1 @@
+i{"model":"image","prompt":"a red cube","size":"1024x1024"}

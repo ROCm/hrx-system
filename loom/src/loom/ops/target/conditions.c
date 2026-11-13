@@ -8,6 +8,25 @@
 #include "loom/target/condition.h"
 #include "loom/util/fact_table.h"
 
+iree_status_t loom_target_execution_unit_count_facts(
+    loom_fact_context_t* context, const loom_module_t* module,
+    const loom_op_t* op, const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts) {
+  (void)module;
+  (void)op;
+  (void)operand_facts;
+  const loom_target_facts_t* target_facts = context->target_facts;
+  const uint32_t unit_count =
+      target_facts != NULL
+          ? target_facts->storage.bundle.snapshot->execution_unit_count
+          : 0;
+  result_facts[0] = unit_count != 0
+                        ? loom_value_facts_exact_i64((int64_t)unit_count)
+                        : loom_value_facts_make(1, UINT32_MAX, 1);
+  loom_value_facts_mark_cluster_uniform(&result_facts[0]);
+  return iree_ok_status();
+}
+
 iree_status_t loom_target_subgroup_size_facts(
     loom_fact_context_t* context, const loom_module_t* module,
     const loom_op_t* op, const loom_value_facts_t* operand_facts,

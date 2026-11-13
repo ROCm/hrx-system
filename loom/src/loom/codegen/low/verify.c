@@ -1163,19 +1163,16 @@ loom_low_verify_descriptor_operand_part_mask(
           &descriptor_register_class_id, &descriptor_register_class);
   IREE_ASSERT(found_descriptor_register_class,
               "verified low descriptor operand register class");
-  const loom_low_reg_class_alt_t* alternative = loom_low_operand_reg_class_alt(
-      descriptor_set, descriptor_operand, descriptor_register_class_id);
-  IREE_ASSERT(alternative != NULL,
-              "verified low descriptor operand register-class alternative");
-  if (alternative->register_part_id == LOOM_LOW_REGISTER_PART_NONE) {
-    return descriptor_register_class->full_register_part_mask;
+  if (descriptor_operand->role != LOOM_LOW_OPERAND_ROLE_RESULT &&
+      iree_all_bits_set(descriptor_operand->flags,
+                        LOOM_LOW_OPERAND_FLAG_STORAGE_CONTINUATION) &&
+      loom_low_operand_reg_class_alt(descriptor_set, descriptor_operand,
+                                     descriptor_register_class_id)
+              ->register_part_id == LOOM_LOW_REGISTER_PART_NONE) {
+    return 0;
   }
-  IREE_ASSERT_LT(alternative->register_part_id,
-                 descriptor_set->register_part_count);
-  const loom_low_register_part_t* register_part =
-      &descriptor_set->register_parts[alternative->register_part_id];
-  IREE_ASSERT_EQ(descriptor_register_class_id, register_part->reg_class_id);
-  return register_part->mask;
+  return loom_low_register_parts_operand_mask(
+      descriptor_set, descriptor_operand, descriptor_register_class_id);
 }
 
 static iree_status_t loom_low_verify_emit_resource_register_class_missing(
@@ -1714,15 +1711,36 @@ static iree_status_t loom_low_verify_structural_register_parts(
   return loom_low_verify_define_full_register_results(function_state, op);
 }
 
-static bool loom_low_verify_is_source_preserving_structural_op(
-    const loom_op_t* op) {
-  return loom_low_copy_isa(op) || loom_low_slice_isa(op) ||
-         loom_low_concat_isa(op);
+static bool loom_low_verify_is_partitioning_structural_op(const loom_op_t* op) {
+  return loom_low_slice_isa(op) || loom_low_concat_isa(op);
 }
 
-static iree_status_t loom_low_verify_reference_source_preserving_ops(
+static iree_status_t loom_low_verify_release_register(
     loom_low_function_verify_state_t* function_state, const loom_op_t* op) {
-  if (!loom_low_verify_is_source_preserving_structural_op(op)) {
+  if (!loom_low_release_isa(op)) {
+    return iree_ok_status();
+  }
+  const loom_type_t type = loom_module_value_type(function_state->state->module,
+                                                  loom_low_release_value(op));
+  if (loom_low_register_type_resolver_has_class_flags(
+          &function_state->register_type_resolver, type,
+          LOOM_LOW_REG_CLASS_FLAG_REFERENCE)) {
+    return iree_ok_status();
+  }
+  const loom_diagnostic_param_t params[] = {
+      loom_param_with_field_ref(
+          loom_param_string(IREE_SV("value")),
+          loom_diagnostic_field_ref(LOOM_DIAGNOSTIC_FIELD_OPERAND, 0)),
+      loom_param_type(type),
+      loom_param_string(IREE_SV("managed reference register class")),
+  };
+  return loom_low_verify_emit(function_state->state, op, LOOM_ERR_TYPE_003,
+                              params, IREE_ARRAYSIZE(params), NULL, 0);
+}
+
+static iree_status_t loom_low_verify_reference_partitioning_ops(
+    loom_low_function_verify_state_t* function_state, const loom_op_t* op) {
+  if (!loom_low_verify_is_partitioning_structural_op(op)) {
     return iree_ok_status();
   }
   const loom_module_t* module = function_state->state->module;
@@ -1882,8 +1900,9 @@ static iree_status_t loom_low_verify_descriptor_features(
 static iree_status_t loom_low_verify_packet_access_flags(
     loom_low_function_verify_state_t* function_state,
     const loom_low_descriptor_packet_t* packet) {
-  if (!iree_any_bit_set(packet->op->instance_flags,
-                        LOOM_MEMORY_ACCESS_FLAG_VOLATILE)) {
+  if (!iree_any_bit_set(
+          packet->op->instance_flags,
+          LOOM_MEMORY_ACCESS_FLAG_VOLATILE | LOOM_MEMORY_ACCESS_FLAG_ATOMIC)) {
     return iree_ok_status();
   }
   const loom_low_descriptor_set_t* descriptor_set =
@@ -2186,7 +2205,8 @@ static iree_status_t loom_low_verify_walk_op(void* user_data, loom_op_t* op,
       IREE_RETURN_IF_ERROR(loom_low_verify_resource(function_state, op));
     }
     IREE_RETURN_IF_ERROR(
-        loom_low_verify_reference_source_preserving_ops(function_state, op));
+        loom_low_verify_reference_partitioning_ops(function_state, op));
+    IREE_RETURN_IF_ERROR(loom_low_verify_release_register(function_state, op));
     IREE_RETURN_IF_ERROR(
         loom_low_verify_structural_register_parts(function_state, op));
     if (loom_traits_are_compile_time_only(op->traits) &&

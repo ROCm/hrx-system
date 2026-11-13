@@ -35,18 +35,17 @@ typedef struct loom_amdgpu_vector_shuffle_plan_t {
   // Selected lowering strategy for the source and lane map.
   loom_amdgpu_vector_shuffle_kind_t kind;
   // Number of logical elements shared by the source and result.
-  uint8_t element_count;
+  uint32_t element_count;
   // Number of 32-bit register units occupied by one logical element.
   uint8_t element_register_count;
   // Number of payload bits occupied by one logical element.
   uint8_t element_bit_count;
-  // Source logical element selected for each result logical element.
-  uint8_t source_element_indices[LOOM_AMDGPU_MAX_VECTOR_STORAGE_ELEMENTS];
+  // Verified immutable lane map borrowed from the source operation, which
+  // remains alive through plan selection and emission.
+  const int64_t* source_element_indices;
 } loom_amdgpu_vector_shuffle_plan_t;
-static_assert(sizeof(loom_amdgpu_vector_shuffle_plan_t) == 80,
+static_assert(sizeof(loom_amdgpu_vector_shuffle_plan_t) <= 32,
               "AMDGPU vector shuffle plans must stay cache dense");
-static_assert(LOOM_AMDGPU_MAX_VECTOR_STORAGE_ELEMENTS <= UINT8_MAX,
-              "vector element counts must fit compact shuffle plans");
 
 // Selects an AMDGPU vector.bitcast register reinterpretation plan.
 iree_status_t loom_amdgpu_select_vector_bitcast_plan(
@@ -110,9 +109,9 @@ iree_status_t loom_amdgpu_lower_vector_shuffle(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_amdgpu_vector_shuffle_plan_t* plan);
 
-// Returns true when vector.shuffle has a native plan for the target descriptor
-// set and therefore needs no source legalization.
-bool loom_amdgpu_vector_shuffle_can_lower(
+// Returns true when a shuffle or transpose has a native plan and therefore
+// needs no source legalization.
+bool loom_amdgpu_vector_permutation_can_lower(
     const loom_module_t* module,
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_op_t* source_op);

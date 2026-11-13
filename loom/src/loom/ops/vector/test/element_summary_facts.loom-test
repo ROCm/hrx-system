@@ -1,0 +1,144 @@
+// RUN: pass canonicalize
+
+// Reshaping retains properties shared by every lane without enumerating lanes.
+func.def @finite_matrix_views(%lhs: vector<4x8xf32>, %rhs: vector<4x8xf32>) -> (vector<2x16xi1>) {
+  %difference = vector.subf<nnan|ninf> %lhs, %rhs : vector<4x8xf32>
+  %transposed = vector.transpose<[1, 0]> %difference : vector<4x8xf32> -> vector<8x4xf32>
+  %flat = vector.bitcast %transposed : vector<8x4xf32> to vector<32xf32>
+  %packet = vector.slice %flat[16] : vector<32xf32> -> vector<16xf32>
+  %rows = vector.broadcast %packet : vector<16xf32> -> vector<2x16xf32>
+  %finite = vector.isfinitef %rows : vector<2x16xf32> -> vector<2x16xi1>
+  func.return %finite : vector<2x16xi1>
+}
+
+// ----
+func.def @finite_matrix_views(%lhs: vector<4x8xf32>, %rhs: vector<4x8xf32>) -> (vector<2x16xi1>) {
+  %finite = vector.splati 1 : vector<2x16xi1>
+  func.return %finite : vector<2x16xi1>
+}
+
+// ====
+
+func.def @finite_dynamic_slice(%lhs: vector<64xf32>, %rhs: vector<64xf32>, %offset: index) -> (vector<32xi1>) where [range(%offset, 0, 32)] {
+  %difference = vector.subf<nnan|ninf> %lhs, %rhs : vector<64xf32>
+  %packet = vector.slice %difference[%offset] : vector<64xf32> -> vector<32xf32>
+  %finite = vector.isfinitef %packet : vector<32xf32> -> vector<32xi1>
+  func.return %finite : vector<32xi1>
+}
+
+// ----
+func.def @finite_dynamic_slice(%lhs: vector<64xf32>, %rhs: vector<64xf32>, %offset: index) -> (vector<32xi1>) where [range(%offset, 0, 32)] {
+  %finite = vector.splati 1 : vector<32xi1>
+  func.return %finite : vector<32xi1>
+}
+
+// ====
+
+func.def @finite_combination(%lhs: vector<32xf32>, %rhs: vector<32xf32>) -> (vector<128xi1>) {
+  %sum = vector.addf<nnan|ninf> %lhs, %rhs : vector<32xf32>
+  %difference = vector.subf<nnan|ninf> %lhs, %rhs : vector<32xf32>
+  %concatenated = vector.concat<0> %sum, %difference : vector<32xf32>, vector<32xf32> -> vector<64xf32>
+  %interleaved = vector.interleave<0> %sum, %difference : vector<32xf32>, vector<32xf32> -> vector<64xf32>
+  %combined = vector.concat<0> %concatenated, %interleaved : vector<64xf32>, vector<64xf32> -> vector<128xf32>
+  %finite = vector.isfinitef %combined : vector<128xf32> -> vector<128xi1>
+  func.return %finite : vector<128xi1>
+}
+
+// ----
+func.def @finite_combination(%lhs: vector<32xf32>, %rhs: vector<32xf32>) -> (vector<128xi1>) {
+  %finite = vector.splati 1 : vector<128xi1>
+  func.return %finite : vector<128xi1>
+}
+
+// ====
+
+// A no-NaN promise allows infinity and does not establish equal lane values.
+func.def @independent_properties(%lhs: vector<64xf32>, %rhs: vector<64xf32>) -> (vector<16xi1>, vector<16xi1>, i1) {
+  %difference = vector.subf<nnan> %lhs, %rhs : vector<64xf32>
+  %packet = vector.slice %difference[16] : vector<64xf32> -> vector<16xf32>
+  %nan = vector.isnanf %packet : vector<16xf32> -> vector<16xi1>
+  %finite = vector.isfinitef %packet : vector<16xf32> -> vector<16xi1>
+  %first = vector.extract %packet[0] : vector<16xf32> -> f32
+  %second = vector.extract %packet[1] : vector<16xf32> -> f32
+  %same = scalar.cmpf oeq, %first, %second : f32
+  func.return %nan, %finite, %same : vector<16xi1>, vector<16xi1>, i1
+}
+
+// ----
+func.def @independent_properties(%lhs: vector<64xf32>, %rhs: vector<64xf32>) -> (vector<16xi1>, vector<16xi1>, i1) {
+  %difference = vector.subf<nnan> %lhs, %rhs : vector<64xf32>
+  %packet = vector.slice %difference[16] : vector<64xf32> -> vector<16xf32>
+  %nan = vector.splati 0 : vector<16xi1>
+  %finite = vector.isfinitef %packet : vector<16xf32> -> vector<16xi1>
+  %first = vector.extract %difference[16] : vector<64xf32> -> f32
+  %second = vector.extract %difference[17] : vector<64xf32> -> f32
+  %same = scalar.cmpf oeq, %first, %second : f32
+  func.return %nan, %finite, %same : vector<16xi1>, vector<16xi1>, i1
+}
+
+// ====
+
+// An unknown source must not inherit the other input's numerical guarantees.
+func.def @mixed_combination(%lhs: vector<32xf32>, %rhs: vector<32xf32>) -> (vector<64xi1>) {
+  %finite_values = vector.addf<nnan|ninf> %lhs, %rhs : vector<32xf32>
+  %combined = vector.concat<0> %finite_values, %rhs : vector<32xf32>, vector<32xf32> -> vector<64xf32>
+  %finite = vector.isfinitef %combined : vector<64xf32> -> vector<64xi1>
+  func.return %finite : vector<64xi1>
+}
+
+// ----
+func.def @mixed_combination(%lhs: vector<32xf32>, %rhs: vector<32xf32>) -> (vector<64xi1>) {
+  %finite_values = vector.addf<nnan|ninf> %lhs, %rhs : vector<32xf32>
+  %combined = vector.concat<0> %finite_values, %rhs : vector<32xf32>, vector<32xf32> -> vector<64xf32>
+  %finite = vector.isfinitef %combined : vector<64xf32> -> vector<64xi1>
+  func.return %finite : vector<64xi1>
+}
+
+// ====
+
+func.def @finite_reordering(%lhs: vector<64xf32>, %rhs: vector<64xf32>, %position: index) -> (vector<32xi1>, vector<2x32xi1>) where [range(%position, 0, 1)] {
+  %difference = vector.subf<nnan|ninf> %lhs, %rhs : vector<64xf32>
+  %even, %odd = vector.deinterleave<0> %difference : vector<64xf32> -> vector<32xf32>, vector<32xf32>
+  %reversed = vector.shuffle<[31, 30, 29, 28, 27, 26, 25, 24, 23, 22, 21, 20, 19, 18, 17, 16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0]> %even : vector<32xf32>
+  %matrix = vector.broadcast %odd : vector<32xf32> -> vector<2x32xf32>
+  %updated = vector.insert %reversed into %matrix[%position] : vector<32xf32>, vector<2x32xf32>
+  %finite_even = vector.isfinitef %reversed : vector<32xf32> -> vector<32xi1>
+  %finite_updated = vector.isfinitef %updated : vector<2x32xf32> -> vector<2x32xi1>
+  func.return %finite_even, %finite_updated : vector<32xi1>, vector<2x32xi1>
+}
+
+// ----
+func.def @finite_reordering(%lhs: vector<64xf32>, %rhs: vector<64xf32>, %position: index) -> (vector<32xi1>, vector<2x32xi1>) where [range(%position, 0, 1)] {
+  %finite_even = vector.splati 1 : vector<32xi1>
+  %finite_updated = vector.splati 1 : vector<2x32xi1>
+  func.return %finite_even, %finite_updated : vector<32xi1>, vector<2x32xi1>
+}
+
+// ====
+
+// Integer ranges follow the same element-selection contract as float classes.
+func.def @byte_range(%input: vector<64xi8>) -> (vector<8x8xi1>) {
+  %wide = vector.extui %input : vector<64xi8> to vector<64xi32>
+  %even, %odd = vector.deinterleave<0> %wide : vector<64xi32> -> vector<32xi32>, vector<32xi32>
+  %combined = vector.concat<0> %even, %odd : vector<32xi32>, vector<32xi32> -> vector<64xi32>
+  %matrix = vector.bitcast %combined : vector<64xi32> to vector<8x8xi32>
+  %limit = vector.splati 256 : vector<8x8xi32>
+  %in_range = vector.cmpi ult, %matrix, %limit : vector<8x8xi32> -> vector<8x8xi1>
+  func.return %in_range : vector<8x8xi1>
+}
+
+// ----
+func.def @byte_range(%input: vector<64xi8>) -> (vector<8x8xi1>) {
+  %in_range = vector.splati 1 : vector<8x8xi1>
+  func.return %in_range : vector<8x8xi1>
+}
+
+// ====
+
+// Bit reinterpretation changes numeric meaning even when storage size agrees.
+func.def @reinterpreted_classes(%lhs: vector<32xf32>, %rhs: vector<32xf32>) -> (vector<64xi1>) {
+  %difference = vector.subf<nnan|ninf> %lhs, %rhs : vector<32xf32>
+  %halves = vector.bitcast %difference : vector<32xf32> to vector<64xf16>
+  %finite = vector.isfinitef %halves : vector<64xf16> -> vector<64xi1>
+  func.return %finite : vector<64xi1>
+}

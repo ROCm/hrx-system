@@ -90,7 +90,7 @@ def test_check_families_preserve_source_and_build_policy_coverage():
 @pytest.mark.parametrize(
     "path",
     [
-        "loom/src/loom/serve/runtime/program/testdata/compilation/invalid.loom",
+        "loom/src/loom/runtime/program/testdata/compilation/invalid.loom",
         "loom/src/loom/tools/loom-benchmark/testdata/duplicate_symbol.loom",
     ],
 )

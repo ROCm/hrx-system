@@ -7,7 +7,7 @@
 #ifndef LOOM_SERVE_SERVICE_TEXT_EPOCH_UPLOAD_H_
 #define LOOM_SERVE_SERVICE_TEXT_EPOCH_UPLOAD_H_
 
-#include "loom/serve/runtime/execution/execution.h"
+#include "loom/runtime/execution/execution.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -34,7 +34,7 @@ enum {
 // including partial submission failure. The plan itself may be reused after
 // return.
 iree_status_t loom_serve_text_epoch_upload(
-    loom_serve_execution_t* execution, iree_const_byte_span_t plan,
+    loom_runtime_execution_t* execution, iree_const_byte_span_t plan,
     const iree_const_byte_span_t packets[LOOM_SERVE_TEXT_UPLOAD_PACKET_COUNT],
     iree_hal_buffer_t* const targets[LOOM_SERVE_TEXT_UPLOAD_PACKET_COUNT]);
 

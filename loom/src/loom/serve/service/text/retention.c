@@ -78,8 +78,8 @@ static void loom_serve_text_retention_select(loom_serve_text_state_t* state,
                                              iree_host_size_t allocation,
                                              uint64_t offset, uint64_t length) {
   if (state->memory.buffers[allocation]) {
-    loom_serve_virtual_buffer_select_backing(state->memory.buffers[allocation],
-                                             offset, length);
+    loom_runtime_virtual_buffer_select_backing(
+        state->memory.buffers[allocation], offset, length);
   }
 }
 
@@ -118,15 +118,6 @@ static void loom_serve_text_retention_remove_plan(
   }
 }
 
-static iree_host_size_t loom_serve_text_retention_allocation(
-    const loom_serve_text_state_t* state, loom_serve_virtual_buffer_t* buffer) {
-  iree_host_size_t index = 0;
-  while (state->memory.buffers[index] != buffer) {
-    ++index;
-  }
-  return index;
-}
-
 static iree_status_t loom_serve_text_retention_required_view(
     loom_serve_text_retention_t* query, iree_hal_buffer_t* view) {
   return view ? loom_serve_text_retention_append(
@@ -144,10 +135,10 @@ static iree_status_t loom_serve_text_retention_request(
   if (!replan) {
     for (iree_host_size_t i = 0;
          i < request->commitment_count && iree_status_is_ok(status); ++i) {
-      const loom_serve_memory_range_t* range = &request->commitments[i];
+      const loom_runtime_memory_range_t* range = &request->commitments[i];
       status = loom_serve_text_retention_append(
-          query, loom_serve_text_retention_allocation(state, range->buffer),
-          range->offset, range->length, range->length);
+          query, request->commitment_allocations[i], range->offset,
+          range->length, range->length);
     }
     return status;
   }
@@ -185,9 +176,9 @@ static iree_status_t loom_serve_text_retention_request(
 iree_status_t loom_serve_text_retention_forecast(
     loom_serve_text_model_t* model,
     const loom_serve_text_state_reservation_t* request, bool replan,
-    loom_serve_residency_projection_t* out_projection) {
+    loom_runtime_residency_projection_t* out_projection) {
   loom_serve_text_state_t* state = &model->state;
-  *out_projection = (loom_serve_residency_projection_t){
+  *out_projection = (loom_runtime_residency_projection_t){
       .resident_bytes = state->memory.statistics.committed_bytes +
                         state->memory.statistics.pending_bytes};
   if (!state->memory.pool || (!request && !out_projection->resident_bytes)) {
@@ -263,9 +254,9 @@ iree_status_t loom_serve_text_retention_forecast(
     // backing borrowed by its immutable ranges still cannot be discarded.
     loom_serve_text_retention_remove_plan(plan, references, recurrent);
     for (iree_host_size_t i = 0; i < plan->commitment_count; ++i) {
-      const loom_serve_memory_range_t* range = &plan->commitments[i];
-      loom_serve_virtual_buffer_select_backing(range->buffer, range->offset,
-                                               range->length);
+      const loom_runtime_memory_range_t* range = &plan->commitments[i];
+      loom_runtime_virtual_buffer_select_backing(range->buffer, range->offset,
+                                                 range->length);
     }
   }
   uint64_t block_count = 0, recurrent_count = 0;
@@ -294,7 +285,8 @@ iree_status_t loom_serve_text_retention_forecast(
 
   loom_serve_text_retention_t query = {
       .state = state,
-      .mapping_size = loom_serve_pool_state_geometry(state->pool).mapping_size};
+      .mapping_size =
+          loom_runtime_pool_state_geometry(state->pool).mapping_size};
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0; i < LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT;
        ++i) {
@@ -303,7 +295,7 @@ iree_status_t loom_serve_text_retention_forecast(
     }
     query.allocation = i;
     status =
-        iree_status_join(status, loom_serve_virtual_buffer_visit_backing(
+        iree_status_join(status, loom_runtime_virtual_buffer_visit_backing(
                                      state->memory.buffers[i],
                                      iree_status_is_ok(status)
                                          ? loom_serve_text_retention_backing

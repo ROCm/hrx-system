@@ -119,7 +119,7 @@ typedef struct amdf_gpu_execution_resource_geometry_t {
 
 /// Immutable target identity and compute topology of one GPU endpoint.
 ///
-/// This record contains live provider-qualified hardware facts. It does not
+/// This record contains passively qualified native hardware facts. It does not
 /// select an executable format, process-level target features, memory policy,
 /// or queue implementation.
 typedef struct amdf_gpu_endpoint_info_t {
@@ -463,6 +463,9 @@ enum amdf_gpu_sdma_format_feature_bits_e {
 /// producer executes the mapping's host_publish_executor before the header
 /// store, including its direct fence or native flush;
 /// this orders write-combined ring stores even while firmware polls that slot.
+/// This release qualifies the packet body and its header in the same ring
+/// backing. Separately referenced kernargs, signals, and other payloads retain
+/// their own producer/consumer visibility requirements.
 /// It then executes a host-to-device store fence (SFENCE on x86-64)
 /// before storing the packet's reservation index to the write-only 64-bit
 /// MMIO doorbell. A C/C++ release store alone does not supply that fence.

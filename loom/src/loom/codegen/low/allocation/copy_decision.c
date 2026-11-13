@@ -8,7 +8,6 @@
 
 #include <string.h>
 
-#include "loom/codegen/low/allocation/move_topology.h"
 #include "loom/codegen/low/allocation/storage.h"
 #include "loom/ops/low/ops.h"
 

@@ -28,9 +28,7 @@ load(
 )
 load(
     "//runtime/requirements:defs.bzl",
-    "AMDGPU_RESOURCE",
     "HAL_AMD",
-    "HAL_AMDGPU",
     "HAL_AMD_GPU",
     "HAL_AMD_XDNA",
     "HAL_VULKAN",
@@ -40,87 +38,71 @@ load(
 
 PACKAGE_POLICIES = [
     package_policy(
-        packages = ["runtime/src/iree/hal/drivers/amd/gpu/cts"],
+        packages = ["runtime/src/iree/hal/driver/amd/gpu/cts"],
         build_requirements = [HAL_AMD_GPU, LIBAMDF, LIBAMDF_GPU],
         run_requirements = [LIBAMDF_GPU_RESOURCE],
         resource_group = GPU_DEVICE_RESOURCE_GROUP,
     ),
     package_policy(
-        packages = ["runtime/src/iree/hal/drivers/amd/cts"],
+        packages = ["runtime/src/iree/hal/driver/amd/cts"],
         build_requirements = [LIBAMDF],
         resource_group = GPU_DEVICE_RESOURCE_GROUP,
     ),
     package_policy(
         packages = [
-            "runtime/src/iree/hal/drivers/amd/fabric/cts",
-            "runtime/src/iree/hal/drivers/amd/fabric/cts/linux",
+            "runtime/src/iree/hal/driver/amd/fabric/cts",
+            "runtime/src/iree/hal/driver/amd/fabric/cts/linux",
         ],
         build_requirements = [LIBAMDF, LIBAMDF_GPU],
         run_requirements = [LIBAMDF_GPU_RESOURCE],
         resource_group = GPU_DEVICE_RESOURCE_GROUP,
     ),
     package_policy(
-        packages = ["runtime/src/iree/hal/drivers/amd/registration"],
+        packages = ["runtime/src/iree/hal/driver/amd/registration"],
         build_requirements = [HAL_AMD, LIBAMDF],
     ),
     package_policy(
-        packages = ["runtime/src/iree/hal/drivers/amd/xdna/cts"],
+        packages = ["runtime/src/iree/hal/driver/amd/xdna/cts"],
         build_requirements = [HAL_AMD_XDNA, LIBAMDF, LIBAMDF_XDNA],
         run_requirements = [XDNA_RESOURCE],
         resource_group = GPU_DEVICE_RESOURCE_GROUP,
     ),
     package_policy(
         packages = [
-            "runtime/src/iree/hal/drivers/amd",
-            "runtime/src/iree/hal/drivers/amd/fabric",
+            "runtime/src/iree/hal/driver/amd",
+            "runtime/src/iree/hal/driver/amd/fabric",
         ],
         build_requirements = [LIBAMDF],
     ),
     package_policy(
         packages = [
-            "runtime/src/iree/hal/drivers/amd/xdna",
-            "runtime/src/iree/hal/drivers/amd/xdna/testing",
+            "runtime/src/iree/hal/driver/amd/xdna",
+            "runtime/src/iree/hal/driver/amd/xdna/testing",
         ],
         build_requirements = [HAL_AMD_XDNA, LIBAMDF],
     ),
     package_policy(
         packages = [
-            "runtime/src/iree/hal/drivers/amd/gpu/queue/pm4/kmq",
-            "runtime/src/iree/hal/drivers/amd/gpu/queue/pm4/umq",
+            "runtime/src/iree/hal/driver/amd/gpu/queue/pm4/kmq",
+            "runtime/src/iree/hal/driver/amd/gpu/queue/pm4/umq",
         ],
         build_requirements = [HAL_AMD_GPU, LIBAMDF],
     ),
     package_policy(
-        packages = ["runtime/src/iree/hal/drivers/amdgpu/..."],
-        excluded_packages = [
-            "runtime/src/iree/hal/drivers/amdgpu/abi",
-        ],
-        build_requirements = [HAL_AMDGPU],
-    ),
-    package_policy(
-        packages = ["runtime/src/iree/hal/drivers/amdgpu/..."],
-        excluded_packages = [
-            "runtime/src/iree/hal/drivers/amdgpu/abi",
-            "runtime/src/iree/hal/drivers/amdgpu/target/...",
-        ],
-        run_requirements = [AMDGPU_RESOURCE],
-        resource_group = GPU_DEVICE_RESOURCE_GROUP,
-    ),
-    package_policy(
-        packages = ["runtime/src/iree/hal/drivers/vulkan/..."],
+        packages = ["runtime/src/iree/hal/driver/vulkan/..."],
         build_requirements = [HAL_VULKAN],
     ),
     package_policy(
-        packages = ["runtime/src/iree/hal/drivers/vulkan/cts/..."],
+        packages = ["runtime/src/iree/hal/driver/vulkan/cts/..."],
         run_requirements = [VULKAN_DEVICE_RESOURCE],
         resource_group = GPU_DEVICE_RESOURCE_GROUP,
     ),
     package_policy(
-        packages = ["runtime/src/iree/hal/drivers/webgpu/..."],
+        packages = ["runtime/src/iree/hal/driver/webgpu/..."],
         build_requirements = [HAL_WEBGPU],
     ),
     package_policy(
-        packages = ["runtime/src/iree/hal/drivers/webgpu/cts/..."],
+        packages = ["runtime/src/iree/hal/driver/webgpu/cts/..."],
         run_requirements = [WEBGPU_DEVICE_RESOURCE],
         resource_group = GPU_DEVICE_RESOURCE_GROUP,
     ),

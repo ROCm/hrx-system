@@ -66,8 +66,7 @@ TEST_F(AqlDispatchTest, DisjointSelectionsConfineEveryDispatch) {
         .resource_ordinals = ordinals.data(),
     };
     ASSERT_NO_FATAL_FAILURE(GpuCommandTest::CreateQueue(
-        family_, &queues[slot], AMDF_QUEUE_PRODUCER_MODE_SINGLE, {},
-        AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER, 0, 0, &selection));
+        family_, GpuUserQueueOptions{.next = &selection}, &queues[slot]));
     ASSERT_NO_FATAL_FAILURE(
         CreateMemory(AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE,
                      kGroupCount * sizeof(protocol::Record), &outputs[slot]));

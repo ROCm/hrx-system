@@ -14,8 +14,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @vop3_literal_rematerializes_rem
 amdgpu.target<gfx1100> @target
 
 low.func.def target<amdgpu.rdna3.core>(@target) @vop3_literal_rematerializes_remaining_constant(%factor: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
-  %addend = v_mov_b32 127
-  %kept = v_mov_b32_copy %addend
+  %kept = v_mov_b32 127
   %addend_remat = v_mov_b32 127
   %result = v_mad_u32_u24_src1_lit %factor, %addend_remat, 128
   return %kept, %result
@@ -39,7 +38,7 @@ amdgpu.target<gfx1100> @target
 low.func.def target<amdgpu.rdna3.core>(@target) @vop3_literal_preserves_remaining_constant_with_later_use(%factor: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
   %addend = v_mov_b32 127
   %result = v_mad_u32_u24_src1_lit %factor, %addend, 128
-  %later = v_mov_b32_copy %addend
+  %later = v_mov_b32 127
   return %result, %later
 }
 
@@ -59,8 +58,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @vop3_literal_reuses_duplicate_r
 amdgpu.target<gfx1100> @target
 
 low.func.def target<amdgpu.rdna3.core>(@target) @vop3_literal_reuses_duplicate_rematerialized_operand(%factor: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
-  %addend = v_mov_b32 127
-  %kept = v_mov_b32_copy %addend
+  %kept = v_mov_b32 127
   %addend_remat = v_mov_b32 127
   %result = v_mad_u32_u24_src0_lit %addend_remat, %addend_remat, 128
   return %kept, %result

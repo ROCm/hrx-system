@@ -6,6 +6,12 @@ low.func.def allocation(assigned) schedule(constrained) target<test.low.core>(@t
   low.return %sum : reg<test.i32>
 }
 
+low.func.def target<test.low.core>(@test_target) @test_scoped_memory(%source: reg<test.ptr>, %destination: reg<test.ptr>) {
+  %value = low.op<test.load.workgroup.v4i32>(%source) : (reg<test.ptr>) -> reg<test.i32 x4>
+  low.op<test.store.global.v4i32>(%destination, %value) : (reg<test.ptr>, reg<test.i32 x4>)
+  low.return
+}
+
 low.func.def target<test.low.core>(@test_target) @test_slot_roundtrip(%input: reg<test.i32>) -> (reg<test.i32>) {
   %storage = low.storage.reserve {byte_alignment = 4, byte_length = 4} : low.storage<scratch>
   low.spill %input, %storage : reg<test.i32>, low.storage<scratch>

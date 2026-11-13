@@ -1,0 +1,79 @@
+// RUN: verify
+// Rejects mutation of const objects and bindings.
+// ERROR@+1: LOWERING/059 "mutation requires a non-const destination"
+void store(const int* p) { p[0u] = 1; }
+
+// ====
+// RUN: verify
+// Rejects mutation of const objects and bindings.
+int entry() {
+  const int value = 1;
+  // ERROR@+1: LOWERING/059 "mutation requires a non-const destination"
+  value = 2;
+  return value;
+}
+
+// ====
+// RUN: verify
+// Rejects mutation of const objects and bindings.
+int entry() {
+  const int value = 1;
+  // ERROR@+1: LOWERING/059 "mutation requires a non-const destination"
+  value += 2;
+  return value;
+}
+
+// ====
+// RUN: verify
+// Rejects mutation of const objects and bindings.
+// ERROR@+1: LOWERING/059 "mutation requires a non-const destination"
+void entry(int* const p, int* q) { p = q; }
+
+// ====
+// RUN: verify
+// Rejects mutation of const objects and bindings.
+// ERROR@+1: LOWERING/059 "mutation requires a non-const destination"
+void entry(int* const p) { p += 1; }
+
+// ====
+// RUN: verify
+// Rejects mutation of const objects and bindings.
+int entry() {
+  const int value = 1;
+  // ERROR@+1: PARSE/036 "cannot increment a value of type 'const int'"
+  ++value;
+  return value;
+}
+
+// ====
+// RUN: roundtrip
+// Const bindings permit reads and writes through mutable pointees.
+int entry(int* const output, const int* input) {
+  const int value = input[0u];
+  output[0u] = value;
+  return value;
+}
+// ----
+func.def public @entry(%output: buffer, %output_byte_offset: offset, %input: buffer, %input_byte_offset: offset) -> (i32) {
+  %5 = scalar.constant 0 : i32
+  %6 = scalar.extui %5 : i32 to i64
+  %7 = scalar.constant 4 : i64
+  %8 = scalar.muli %6, %7 : i64
+  %9 = index.cast %input_byte_offset : offset to i64
+  %10 = scalar.addi %9, %8 : i64
+  %11 = scalar.assume %10 [range(%10, 0, 9223372036854775807)] : i64
+  %12 = index.cast %11 : i64 to offset
+  %13 = buffer.view %input[%12] : buffer -> view<1xi32>
+  %value = view.load<root_in_bounds> %13[0] : view<1xi32> -> i32
+  %15 = scalar.constant 0 : i32
+  %16 = scalar.extui %15 : i32 to i64
+  %17 = scalar.constant 4 : i64
+  %18 = scalar.muli %16, %17 : i64
+  %19 = index.cast %output_byte_offset : offset to i64
+  %20 = scalar.addi %19, %18 : i64
+  %21 = scalar.assume %20 [range(%20, 0, 9223372036854775807)] : i64
+  %22 = index.cast %21 : i64 to offset
+  %23 = buffer.view %output[%22] : buffer -> view<1xi32>
+  view.store<root_in_bounds> %value, %23[0] : i32, view<1xi32>
+  func.return %value : i32
+}

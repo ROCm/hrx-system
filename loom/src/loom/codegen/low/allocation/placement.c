@@ -232,6 +232,9 @@ static iree_status_t loom_low_placement_collect_relation(
   *collected_relation = *relation;
   if (relation->kind >= LOOM_LOW_PLACEMENT_RELATION_SAME_STORAGE &&
       relation->kind <= LOOM_LOW_PLACEMENT_RELATION_CONTIGUOUS_PART &&
+      !iree_any_bit_set(
+          relation->flags,
+          LOOM_LOW_PLACEMENT_RELATION_FLAG_INDEPENDENT_LIFETIMES) &&
       loom_low_placement_cause_can_alias(relation->cause)) {
     collected_relation->flags |=
         LOOM_LOW_PLACEMENT_RELATION_FLAG_CAN_ALIAS_STORAGE;
@@ -871,6 +874,18 @@ static iree_status_t loom_low_placement_collect_op_relations(
         .priority = 1,
         .source_operand_index = storage_relation.source_operand_index,
     };
+    if ((placement_relation.cause == LOOM_LOW_PLACEMENT_CAUSE_LOW_COPY ||
+         loom_low_placement_cause_is_edge(placement_relation.cause)) &&
+        !iree_any_bit_set(placement_relation.flags,
+                          LOOM_LOW_PLACEMENT_RELATION_FLAG_HARD) &&
+        iree_any_bit_set(
+            state->descriptor_set
+                ->reg_classes[result_interval->value_class.register_class_id]
+                .flags,
+            LOOM_LOW_REG_CLASS_FLAG_REFERENCE)) {
+      placement_relation.flags |=
+          LOOM_LOW_PLACEMENT_RELATION_FLAG_INDEPENDENT_LIFETIMES;
+    }
     if (placement_relation.cause == LOOM_LOW_PLACEMENT_CAUSE_LOW_CONCAT) {
       if (placement_relation.result_unit_offset == 0) {
         materialize_concat = loom_low_placement_concat_has_packet_uses(
@@ -887,7 +902,10 @@ static iree_status_t loom_low_placement_collect_op_relations(
       // A structured edge can forward a capture that remains observable after
       // this handoff, including the next iteration of an enclosing loop.
       // Only a consumed source permits ignoring its storage interference.
-      if (source_interval->end_point <= operation_point->end_point) {
+      if (source_interval->end_point <= operation_point->end_point &&
+          !iree_any_bit_set(
+              placement_relation.flags,
+              LOOM_LOW_PLACEMENT_RELATION_FLAG_INDEPENDENT_LIFETIMES)) {
         placement_relation.flags |=
             LOOM_LOW_PLACEMENT_RELATION_FLAG_CAN_ALIAS_STORAGE;
       }

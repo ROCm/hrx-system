@@ -34,12 +34,10 @@ low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = 
   %21 = mov.imm32 -2147483648
   %22 = vmovd.xmm.gpr32 %21
   %minimum = avx2.vpbroadcastd.xmm %22
-  %24 = mov.imm32 -1
-  %25 = vmovd.xmm.gpr32 %24
-  %all_bits = avx2.vpbroadcastd.xmm %25
-  %27 = mov.imm32 2147483647
-  %28 = vmovd.xmm.gpr32 %27
-  %maximum = avx2.vpbroadcastd.xmm %28
+  %all_bits = vpcmpeqd.ones.xmm
+  %25 = mov.imm32 2147483647
+  %26 = vmovd.xmm.gpr32 %25
+  %maximum = avx2.vpbroadcastd.xmm %26
   return %unit_value, %negative, %minimum, %all_bits, %maximum
 }
 
@@ -93,9 +91,7 @@ low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = 
   %10 = mov.imm32 2147483647
   %11 = vmovd.xmm.gpr32 %10
   %i32 = avx2.vpbroadcastd.xmm %11
-  %13 = mov.imm64 -1
-  %14 = vmovq.xmm.gpr64 %13
-  %i64 = avx2.vpbroadcastq.xmm %14
+  %i64 = vpcmpeqd.ones.xmm
   return %i32, %i64
 }
 

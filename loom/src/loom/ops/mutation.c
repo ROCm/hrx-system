@@ -78,13 +78,12 @@ bool loom_op_results_unused(const loom_module_t* module, const loom_op_t* op) {
   return true;
 }
 
-bool loom_op_is_trivially_dead(const loom_module_t* module,
+bool loom_op_is_dead_if_unused(const loom_module_t* module,
                                const loom_op_t* op) {
-  if (op->result_count == 0) {
-    return false;
-  }
   loom_trait_flags_t traits = loom_op_effective_traits(module, op);
-  if (iree_any_bit_set(traits, LOOM_TRAIT_HINT | LOOM_TRAIT_SYMBOL_DEFINE)) {
+  if ((op->result_count == 0 && !(traits & LOOM_TRAIT_PURE)) ||
+      iree_any_bit_set(traits, LOOM_TRAIT_HINT | LOOM_TRAIT_SYMBOL_DEFINE |
+                                   LOOM_TRAIT_TERMINATOR)) {
     return false;
   }
   if (loom_traits_are_convergent(traits)) {
@@ -108,7 +107,13 @@ bool loom_op_is_trivially_dead(const loom_module_t* module,
   if (loom_op_regions_have_hints(op)) {
     return false;
   }
-  return loom_op_results_unused(module, op);
+  return true;
+}
+
+bool loom_op_is_trivially_dead(const loom_module_t* module,
+                               const loom_op_t* op) {
+  return loom_op_is_dead_if_unused(module, op) &&
+         loom_op_results_unused(module, op);
 }
 
 iree_status_t loom_op_remove_results(loom_module_t* module, loom_op_t* op,
@@ -215,6 +220,11 @@ iree_status_t loom_op_remove_results(loom_module_t* module, loom_op_t* op,
         loom_value_def_make_op(op, new_index);
   }
 
+  if (kept_count == 0 && op->block_ordinal != 0) {
+    IREE_ASSERT(op->parent_block != NULL);
+    IREE_ASSERT(op->parent_block->result_operation_count > 0);
+    --op->parent_block->result_operation_count;
+  }
   op->result_count = kept_count;
   op->tied_result_count = kept_tied_count;
 

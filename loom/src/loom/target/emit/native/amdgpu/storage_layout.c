@@ -72,6 +72,7 @@ static iree_status_t loom_amdgpu_storage_layout_project_record(
 
 iree_status_t loom_amdgpu_storage_layout_build(
     const loom_low_storage_layout_t* source_layout,
+    loom_amdgpu_storage_layout_segment_sizes_t segment_prefix,
     iree_arena_allocator_t* arena, loom_amdgpu_storage_layout_t* out_layout) {
   loom_amdgpu_storage_layout_record_t* records = NULL;
   if (source_layout->record_count != 0) {
@@ -79,36 +80,13 @@ iree_status_t loom_amdgpu_storage_layout_build(
         iree_arena_allocate_array(arena, source_layout->record_count,
                                   sizeof(*records), (void**)&records));
   }
-  loom_amdgpu_storage_layout_segment_sizes_t sizes = {0};
+  loom_amdgpu_storage_layout_segment_sizes_t sizes = segment_prefix;
   for (iree_host_size_t i = 0; i < source_layout->record_count; ++i) {
     IREE_RETURN_IF_ERROR(loom_amdgpu_storage_layout_project_record(
         &source_layout->records[i], &sizes, &records[i]));
   }
   *out_layout = (loom_amdgpu_storage_layout_t){
       .segment_sizes = sizes,
-      .records = records,
-      .record_count = source_layout->record_count,
-      .index = source_layout->index,
-  };
-  return iree_ok_status();
-}
-
-iree_status_t loom_amdgpu_storage_layout_append(
-    const loom_amdgpu_storage_layout_t* source_layout,
-    loom_amdgpu_storage_layout_segment_sizes_t* segment_sizes,
-    iree_arena_allocator_t* arena, loom_amdgpu_storage_layout_t* out_layout) {
-  loom_amdgpu_storage_layout_record_t* records = NULL;
-  if (source_layout->record_count != 0) {
-    IREE_RETURN_IF_ERROR(
-        iree_arena_allocate_array(arena, source_layout->record_count,
-                                  sizeof(*records), (void**)&records));
-  }
-  for (iree_host_size_t i = 0; i < source_layout->record_count; ++i) {
-    IREE_RETURN_IF_ERROR(loom_amdgpu_storage_layout_project_record(
-        &source_layout->records[i], segment_sizes, &records[i]));
-  }
-  *out_layout = (loom_amdgpu_storage_layout_t){
-      .segment_sizes = *segment_sizes,
       .records = records,
       .record_count = source_layout->record_count,
       .index = source_layout->index,

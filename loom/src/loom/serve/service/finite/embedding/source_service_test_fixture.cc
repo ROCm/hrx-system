@@ -10,6 +10,7 @@
 #include <unistd.h>
 
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -18,12 +19,13 @@
 #include "iree/base/internal/json.h"
 #include "iree/testing/status_matchers.h"
 #include "iree/testing/temp_file.h"
+#include "loom/runtime/testing/application.h"
 #include "loom/serve/server/model_registration.h"
 #include "loom/serve/server/router.h"
-#include "loom/serve/service/finite/embedding/protocol.h"
+#include "loom/serve/service/finite/http.h"
 #include "loom/serve/testing/model.h"
 #include "loom/serve/testing/package.h"
-#include "loom/serve/testing/service_application.h"
+#include "loom/service/finite/embedding/protocol.h"
 
 namespace loom_serve::testing::embedding {
 
@@ -46,15 +48,16 @@ iree_status_t loom_serve_test_embedding_model_lifecycle_t::Drain(
   auto* self = static_cast<loom_serve_test_embedding_model_lifecycle_t*>(
       process->user_data);
   self->status = iree_status_join(
-      self->status, loom_serve_workspace_advance(self->workspace));
+      self->status, loom_runtime_workspace_advance(self->workspace));
   if (!self->complete && self->retiring) {
     if (!self->retirement_started) {
       self->retirement_started = true;
-      loom_serve_finite_model_retire(self->model, Wake, self);
+      loom_service_finite_model_retire(self->model, Wake, self);
     }
-    self->complete = loom_serve_finite_model_is_retired(self->model);
+    self->complete = loom_service_finite_model_is_retired(self->model);
     if (self->complete) {
-      iree_status_t status = loom_serve_finite_model_free_retired(self->model);
+      iree_status_t status =
+          loom_service_finite_model_free_retired(self->model);
       if (iree_status_is_ok(status)) {
         self->model = nullptr;
       }
@@ -63,42 +66,44 @@ iree_status_t loom_serve_test_embedding_model_lifecycle_t::Drain(
   } else if (!self->complete) {
     self->status = iree_status_join(
         self->status,
-        loom_serve_finite_load_advance(self->load, 0, &self->complete));
+        loom_service_finite_load_advance(self->load, 0, &self->complete));
     if (self->cancel_after_start && !self->complete) {
       // The first CPU task has been accepted, even with only one worker.
       self->status = iree_status_join(
-          self->status,
-          loom_serve_finite_load_advance(
-              self->load, LOOM_SERVE_FINITE_LOAD_FLAG_CANCEL, &self->complete));
+          self->status, loom_service_finite_load_advance(
+                            self->load, LOOM_SERVICE_FINITE_LOAD_FLAG_CANCEL,
+                            &self->complete));
     }
     if (self->complete) {
-      self->report = *loom_serve_finite_load_report(self->load);
+      self->report = *loom_service_finite_load_report(self->load);
       if (iree_status_is_ok(self->status)) {
-        self->model = loom_serve_finite_load_take_model(self->load);
+        self->model = loom_service_finite_load_take_model(self->load);
       }
       self->status = iree_status_join(
           self->status,
-          loom_serve_finite_load_free(std::exchange(self->load, nullptr)));
+          loom_service_finite_load_free(std::exchange(self->load, nullptr)));
     }
   }
-  bool pending = loom_serve_workspace_is_pending(self->workspace);
+  bool pending = loom_runtime_workspace_is_pending(self->workspace);
   if (self->service) {
     const auto flags =
-        self->complete ? 0 : LOOM_SERVE_SERVICE_FLAG_SHARED_ACTIVITY;
+        self->complete ? 0 : LOOM_RUNTIME_SERVICE_FLAG_SHARED_ACTIVITY;
     self->status = iree_status_join(
         self->status,
-        self->service->advance(self->service->self, flags, &result->did_work));
-    pending |= self->service->is_pending(self->service->self);
+        self->service->runtime.vtable->advance(self->service->runtime.self,
+                                               flags, &result->did_work));
+    pending |=
+        self->service->runtime.vtable->is_pending(self->service->runtime.self);
   }
   if (self->pool) {
-    pending |= loom_serve_memory_pool_is_pending(self->pool);
+    pending |= loom_runtime_memory_pool_is_pending(self->pool);
   }
   result->completed = self->complete && !pending;
   if (result->completed && self->pool) {
-    loom_serve_memory_pool_set_observer(self->pool, nullptr, nullptr);
+    loom_runtime_memory_pool_set_observer(self->pool, nullptr, nullptr);
   }
   if (result->completed) {
-    loom_serve_workspace_set_observer(self->workspace, {});
+    loom_runtime_workspace_set_observer(self->workspace, {});
   }
   return iree_ok_status();
 }
@@ -113,40 +118,40 @@ void loom_serve_test_embedding_model_lifecycle_t::Release(
 }
 
 iree_status_t loom_serve_test_embedding_model_lifecycle_t::Run(
-    loom_serve_device_t* device, loom_serve_pool_t* storage_owner,
-    const loom_serve_finite_model_options_t& options,
+    loom_runtime_device_t* device, loom_runtime_pool_t* storage_owner,
+    const loom_service_finite_model_options_t& options,
     iree_allocator_t host_allocator) {
-  IREE_RETURN_IF_ERROR(loom_serve_finite_load_allocate(
+  IREE_RETURN_IF_ERROR(loom_service_finite_load_allocate(
       device, storage_owner, &options, Wake, this, host_allocator, &load));
   return RunOwner(device, storage_owner);
 }
 
 iree_status_t loom_serve_test_embedding_model_lifecycle_t::Retire(
-    loom_serve_device_t* device, loom_serve_pool_t* storage_owner) {
+    loom_runtime_device_t* device, loom_runtime_pool_t* storage_owner) {
   retiring = true;
   return RunOwner(device, storage_owner);
 }
 
 iree_status_t loom_serve_test_embedding_model_lifecycle_t::RunOwner(
-    loom_serve_device_t* device, loom_serve_pool_t* storage_owner) {
-  executor = loom_serve_host_executor(loom_serve_device_host(device));
+    loom_runtime_device_t* device, loom_runtime_pool_t* storage_owner) {
+  executor = loom_runtime_host_executor(loom_runtime_device_host(device));
   iree_task_process_initialize(Drain, 0, 1, &process);
   process.user_data = this;
   process.release_fn = Release;
   if (service) {
-    service->set_observer(service->self, {Wake, this});
+    service->runtime.vtable->set_observer(service->runtime.self, {Wake, this});
   }
-  pool = loom_serve_pool_memory(storage_owner);
-  workspace = loom_serve_pool_workspace(storage_owner);
-  loom_serve_workspace_set_observer(workspace, {Wake, this});
+  pool = loom_runtime_pool_memory(storage_owner);
+  workspace = loom_runtime_pool_workspace(storage_owner);
+  loom_runtime_workspace_set_observer(workspace, {Wake, this});
   if (pool) {
-    loom_serve_memory_pool_set_observer(pool, Wake, this);
+    loom_runtime_memory_pool_set_observer(pool, Wake, this);
   }
   Wake(this);
   std::unique_lock<std::mutex> lock(mutex);
   condition.wait(lock, [&] { return released; });
   if (service) {
-    service->set_observer(service->self, {});
+    service->runtime.vtable->set_observer(service->runtime.self, {});
   }
   return status;
 }
@@ -157,23 +162,23 @@ uint64_t SourceEmbeddingServiceTest::BatchUnits() const { return 64; }
 
 void SourceEmbeddingServiceTest::SetUp() {
   iree_notification_initialize(&notification_);
-  auto application_options = loom_serve_test_application_options_default();
+  auto application_options = loom_runtime_test_application_options_default();
   application_options.device_count = DeviceCount();
-  if (application_options.backing == LOOM_SERVE_POOL_BACKING_ELASTIC) {
+  if (application_options.backing == LOOM_RUNTIME_POOL_BACKING_ELASTIC) {
     // One parameter slab plus one shared workspace slab fits. The concurrent
     // pressure cases use 32-unit invocations so two pack into that workspace.
     // Two parameter slabs plus invocation workspace do not fit.
     application_options.slab_size = 4096;
     application_options.memory_limit = 8192;
   }
-  loom_serve_test_application_t* application = nullptr;
-  IREE_ASSERT_OK(loom_serve_test_application_acquire(
+  loom_runtime_test_application_t* application = nullptr;
+  IREE_ASSERT_OK(loom_runtime_test_application_acquire(
       &application_options, host_allocator_, &application));
-  host_ = loom_serve_test_application_host(application);
-  group_ = loom_serve_test_application_device_group(application);
+  host_ = loom_runtime_test_application_host(application);
+  group_ = loom_runtime_test_application_device_group(application);
   device_ =
-      loom_serve_test_application_device_at(application, DeviceCount() - 1);
-  storage_owner_ = loom_serve_device_group_pool_at(group_, DeviceCount() - 1);
+      loom_runtime_test_application_device_at(application, DeviceCount() - 1);
+  storage_owner_ = loom_runtime_device_group_pool_at(group_, DeviceCount() - 1);
   const char* source_path = std::getenv("LOOM_SERVE_TEST_MODEL_SOURCE");
   ASSERT_NE(source_path, nullptr);
   const std::string source = source_path;
@@ -186,7 +191,7 @@ void SourceEmbeddingServiceTest::SetUp() {
   }
   auto options = loom_serve_http_server_options_default();
   IREE_ASSERT_OK(
-      loom_serve_http_server_allocate(loom_serve_host_proactor_pool(host_),
+      loom_serve_http_server_allocate(loom_runtime_host_proactor_pool(host_),
                                       &options, host_allocator_, &server_));
   auto listener_options = loom_serve_http_listener_options_default();
   listener_options.address = IREE_SV("127.0.0.1:0");
@@ -214,7 +219,7 @@ void SourceEmbeddingServiceTest::CreateModel(const std::string& directory) {
   IREE_ASSERT_OK(document.Load(directory + "/model.json"));
   const std::string options =
       "{\"batch_units\":" + std::to_string(BatchUnits()) + "}";
-  const loom_serve_finite_model_options_t model_options = {
+  const loom_service_finite_model_options_t model_options = {
       .sources = document.value().sources,
       .asset_directory = IREE_SV("."),
       .options = iree_make_string_view(options.data(), options.size()),
@@ -222,30 +227,31 @@ void SourceEmbeddingServiceTest::CreateModel(const std::string& directory) {
   loom_serve_test_embedding_model_lifecycle_t load;
   IREE_ASSERT_OK(load.Run(device_, storage_owner_, model_options));
   model_ = load.model;
-  EXPECT_EQ(loom_serve_finite_model_batch_limit(model_), BatchUnits());
+  EXPECT_EQ(loom_service_finite_model_batch_limit(model_), BatchUnits());
 }
 
 void SourceEmbeddingServiceTest::CreateService(
     iree_duration_t heartbeat_interval) {
-  IREE_ASSERT_OK(loom_serve_finite_service_allocate(
-      host_, model_, loom_serve_embedding_protocol(), IREE_SV("fixture"), 16,
-      16, heartbeat_interval, nullptr, host_allocator_, &service_));
-  interface_ = loom_serve_finite_service_interface(service_);
-  EXPECT_EQ(interface_.capacity_domain,
-            loom_serve_pool_residency_cache(storage_owner_));
-  const loom_serve_wake_callback_t observer = {
+  IREE_ASSERT_OK(loom_service_finite_service_allocate(
+      host_, loom_service_finite_model_generator(model_),
+      loom_service_embedding_protocol(), IREE_SV("fixture"), 16, 16,
+      heartbeat_interval, nullptr, host_allocator_, &service_));
+  interface_ = loom_serve_finite_http_interface(service_);
+  EXPECT_EQ(interface_.runtime.capacity_domain,
+            loom_runtime_pool_residency_cache(storage_owner_));
+  const loom_runtime_wake_callback_t observer = {
       [](void* self) {
         auto* test = static_cast<SourceEmbeddingServiceTest*>(self);
         test->wakes_.fetch_add(1);
         iree_notification_post(&test->notification_, IREE_ALL_WAITERS);
       },
       this};
-  interface_.set_observer(interface_.self, observer);
-  loom_serve_workspace_set_observer(loom_serve_pool_workspace(storage_owner_),
-                                    observer);
-  if (auto* pool = loom_serve_pool_memory(storage_owner_)) {
-    loom_serve_memory_pool_set_observer(pool, observer.wake,
-                                        observer.user_data);
+  interface_.runtime.vtable->set_observer(interface_.runtime.self, observer);
+  loom_runtime_workspace_set_observer(
+      loom_runtime_pool_workspace(storage_owner_), observer);
+  if (auto* pool = loom_runtime_pool_memory(storage_owner_)) {
+    loom_runtime_memory_pool_set_observer(pool, observer.wake,
+                                          observer.user_data);
   }
 }
 
@@ -255,17 +261,17 @@ void SourceEmbeddingServiceTest::TearDown() {
     IREE_EXPECT_OK(http_.Join());
   }
   if (service_) {
-    interface_.set_observer(interface_.self, {});
-    loom_serve_finite_service_free(service_);
+    interface_.runtime.vtable->set_observer(interface_.runtime.self, {});
+    loom_service_finite_service_free(service_);
   }
   IREE_EXPECT_OK(loom_serve_http_listener_free(listener_));
   loom_serve_http_server_free(server_);
-  IREE_EXPECT_OK(loom_serve_finite_model_free(model_));
-  IREE_EXPECT_OK(loom_serve_finite_model_free(retained_));
-  loom_serve_workspace_set_observer(loom_serve_pool_workspace(storage_owner_),
-                                    {});
-  if (auto* pool = loom_serve_pool_memory(storage_owner_)) {
-    loom_serve_memory_pool_set_observer(pool, nullptr, nullptr);
+  IREE_EXPECT_OK(loom_service_finite_model_free(model_));
+  IREE_EXPECT_OK(loom_service_finite_model_free(retained_));
+  loom_runtime_workspace_set_observer(
+      loom_runtime_pool_workspace(storage_owner_), {});
+  if (auto* pool = loom_runtime_pool_memory(storage_owner_)) {
+    loom_runtime_memory_pool_set_observer(pool, nullptr, nullptr);
   }
   iree_notification_deinitialize(&notification_);
 }
@@ -304,22 +310,24 @@ void SourceEmbeddingServiceTest::Accept(
   const loom_serve_http_request_t* request = nullptr;
   loom_serve_http_connection_t* connection = nullptr;
   IREE_ASSERT_OK(http_.TakeRequest(client, &connection, &request));
-  IREE_ASSERT_OK(interface_.accept(interface_.self, connection, request, 0));
+  IREE_ASSERT_OK(
+      interface_.accept(interface_.runtime.self, connection, request, 0));
   if (out_connection) {
     *out_connection = connection;
   }
 }
 
-bool SourceEmbeddingServiceTest::Step(loom_serve_service_flags_t flags) {
+bool SourceEmbeddingServiceTest::Step(loom_runtime_service_flags_t flags) {
   const uint64_t previous = wakes_.load();
-  auto* workspace = loom_serve_pool_workspace(storage_owner_);
-  IREE_EXPECT_OK(loom_serve_workspace_advance(workspace));
+  auto* workspace = loom_runtime_pool_workspace(storage_owner_);
+  IREE_EXPECT_OK(loom_runtime_workspace_advance(workspace));
   bool progress = false;
-  IREE_EXPECT_OK(interface_.advance(interface_.self, flags, &progress));
-  auto* pool = loom_serve_pool_memory(storage_owner_);
-  if (interface_.is_active(interface_.self) ||
-      loom_serve_workspace_is_pending(workspace) ||
-      (pool && loom_serve_memory_pool_is_pending(pool))) {
+  IREE_EXPECT_OK(interface_.runtime.vtable->advance(interface_.runtime.self,
+                                                    flags, &progress));
+  auto* pool = loom_runtime_pool_memory(storage_owner_);
+  if (interface_.runtime.vtable->is_active(interface_.runtime.self) ||
+      loom_runtime_workspace_is_pending(workspace) ||
+      (pool && loom_runtime_memory_pool_is_pending(pool))) {
     struct loom_serve_test_embedding_wait_t {
       // Shared release counter.
       std::atomic<uint64_t>* wakes;
@@ -347,7 +355,7 @@ void SourceEmbeddingServiceTest::Drain() {
 }
 
 void SourceEmbeddingServiceTest::CheckAbandonedCohort(
-    loom_serve_service_flags_t flags, const char* expected) {
+    loom_runtime_service_flags_t flags, const char* expected) {
   const char* bodies[] = {R"({"model":"fixture","input":"a"})",
                           R"({"model":"fixture","input":"bbb"})"};
   int clients[IREE_ARRAYSIZE(bodies)] = {};
@@ -356,12 +364,12 @@ void SourceEmbeddingServiceTest::CheckAbandonedCohort(
     clients[i] = Send(bodies[i]);
     ASSERT_NO_FATAL_FAILURE(Accept(clients[i], &connections[i]));
   }
-  ASSERT_TRUE(Step());  // CPU request preparation.
-  ASSERT_TRUE(Step());  // Source batch preparation.
-  ASSERT_TRUE(Step());  // Accepted device work; readiness may still be pending.
-  ASSERT_STREQ(interface_.snapshot(interface_.self).phase, "running");
+  while (std::strcmp(interface_.snapshot(interface_.runtime.self).phase,
+                     "running") != 0) {
+    ASSERT_TRUE(Step());
+  }
 
-  if (!iree_any_bit_set(flags, LOOM_SERVE_SERVICE_FLAG_STOPPING)) {
+  if (!iree_any_bit_set(flags, LOOM_RUNTIME_SERVICE_FLAG_STOPPING)) {
     for (size_t i = 0; i < IREE_ARRAYSIZE(clients); ++i) {
       const linger reset = {1, 0};
       ASSERT_EQ(
@@ -380,22 +388,22 @@ void SourceEmbeddingServiceTest::CheckAbandonedCohort(
 
   // Successful completion still counts the whole device cohort. No response
   // consumer survives, so no CPU encoder should acquire these result views.
-  while (interface_.is_pending(interface_.self)) {
+  while (interface_.runtime.vtable->is_pending(interface_.runtime.self)) {
     ASSERT_TRUE(Step(flags));
   }
-  EXPECT_STREQ(interface_.snapshot(interface_.self).phase, "idle");
-  EXPECT_EQ(interface_.snapshot(interface_.self).active_requests, 0u);
-  EXPECT_FALSE(interface_.is_pending(interface_.self));
+  EXPECT_STREQ(interface_.snapshot(interface_.runtime.self).phase, "idle");
+  EXPECT_EQ(interface_.snapshot(interface_.runtime.self).active_requests, 0u);
+  EXPECT_FALSE(interface_.runtime.vtable->is_pending(interface_.runtime.self));
   EXPECT_EQ(interface_.telemetry.counters->cancelled, 2u);
   EXPECT_EQ(interface_.telemetry.counters->input_tokens, 4u);
   EXPECT_EQ(interface_.telemetry.counters->batches, 1u);
   Drain();
-  if (iree_any_bit_set(flags, LOOM_SERVE_SERVICE_FLAG_STOPPING)) {
+  if (iree_any_bit_set(flags, LOOM_RUNTIME_SERVICE_FLAG_STOPPING)) {
     for (int client : clients) {
       EXPECT_TRUE(Read(client, /*allow_empty=*/true).empty());
     }
-    interface_.set_observer(interface_.self, {});
-    loom_serve_finite_service_free(std::exchange(service_, nullptr));
+    interface_.runtime.vtable->set_observer(interface_.runtime.self, {});
+    loom_service_finite_service_free(std::exchange(service_, nullptr));
     ASSERT_NO_FATAL_FAILURE(CreateService(0));
   }
 
@@ -408,13 +416,13 @@ void SourceEmbeddingServiceTest::CheckAbandonedCohort(
 }
 
 void SourceEmbeddingServiceTest::StartRouter() {
-  interface_.set_observer(interface_.self, {});
+  interface_.runtime.vtable->set_observer(interface_.runtime.self, {});
   http_.Start([this]() -> iree_status_t {
     loom_serve_registry_t* registry = nullptr;
     IREE_RETURN_IF_ERROR(loom_serve_registry_allocate(
         1, &interface_, 0, {}, host_allocator_, &registry));
     iree_status_t status = loom_serve_router_run(
-        loom_serve_host_executor(host_), server_, registry,
+        loom_runtime_host_executor(host_), server_, registry,
         {
             .request_quota = 16,
             .holding_capacity = 8,
@@ -427,7 +435,7 @@ void SourceEmbeddingServiceTest::StartRouter() {
 
 void SourceEmbeddingServiceTest::StartManagedRouter(iree_host_size_t capacity) {
   if (service_) {
-    interface_.set_observer(interface_.self, {});
+    interface_.runtime.vtable->set_observer(interface_.runtime.self, {});
   }
   http_.Start([this, capacity]() -> iree_status_t {
     const loom_serve_model_registration_options_t options = {
@@ -440,7 +448,7 @@ void SourceEmbeddingServiceTest::StartManagedRouter(iree_host_size_t capacity) {
         loom_serve_model_registration_factory(&options), host_allocator_,
         &registry));
     iree_status_t status = loom_serve_router_run(
-        loom_serve_host_executor(host_), server_, registry,
+        loom_runtime_host_executor(host_), server_, registry,
         {
             .request_quota = 16,
             .holding_capacity = 8,
@@ -528,7 +536,7 @@ void SourceEmbeddingServiceTest::CheckInvalidSubmissionRetirement(
   EXPECT_EQ(retired_counters_.cancelled, 0u);
   // Queue allocation records may still own backing after model retirement.
   // Trim is nonblocking; group destruction joins the remaining records.
-  IREE_ASSERT_OK(loom_serve_pool_trim(storage_owner_, 0));
+  IREE_ASSERT_OK(loom_runtime_pool_trim(storage_owner_, 0));
 }
 
 uint64_t SourceEmbeddingServiceTest::CompletedRequests() {
@@ -704,10 +712,11 @@ void SourceEmbeddingServiceTest::UseDirectPackage() {
   manifest.close();
   ASSERT_TRUE(manifest.good());
   if (service_) {
-    interface_.set_observer(interface_.self, {});
-    loom_serve_finite_service_free(std::exchange(service_, nullptr));
+    interface_.runtime.vtable->set_observer(interface_.runtime.self, {});
+    loom_service_finite_service_free(std::exchange(service_, nullptr));
   }
-  IREE_ASSERT_OK(loom_serve_finite_model_free(std::exchange(model_, nullptr)));
+  IREE_ASSERT_OK(
+      loom_service_finite_model_free(std::exchange(model_, nullptr)));
   ASSERT_NO_FATAL_FAILURE(CreateModel(target));
   ASSERT_NO_FATAL_FAILURE(CreateService(0));
 }

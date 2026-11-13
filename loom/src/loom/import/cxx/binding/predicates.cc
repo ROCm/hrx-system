@@ -305,7 +305,9 @@ class MaterializablePredicateExpression {
 
   bool admit_member(cxx::MemberExpressionAST* member) {
     auto* field = cxx::symbol_cast<cxx::FieldSymbol>(member->symbol);
-    if (!field || field->isStatic()) {
+    const bool is_vector_component =
+        member->vectorComponentKind != cxx::VectorComponentKind::kNone;
+    if (!is_vector_component && (!field || field->isStatic())) {
       return false;
     }
     if (member->accessOp == cxx::TokenKind::T_DOT) {
@@ -360,6 +362,23 @@ class MaterializablePredicateExpression {
     if (auto* initializer =
             cxx::ast_cast<cxx::EqualInitializerAST>(expression)) {
       return admit(initializer->expression);
+    }
+    if (address_source_type(unit_, expression->type)) {
+      cxx::List<cxx::ExpressionAST*>* arguments = nullptr;
+      if (auto* construction =
+              cxx::ast_cast<cxx::TypeConstructionAST>(expression)) {
+        arguments = construction->expressionList;
+      } else if (auto* construction =
+                     cxx::ast_cast<cxx::BracedTypeConstructionAST>(
+                         expression)) {
+        arguments = construction->bracedInitList->expressionList;
+      }
+      if (arguments && !arguments->next) {
+        // Semantic index/offset construction is an integer conversion, not
+        // an arbitrary source constructor. Its operand must still be total.
+        return unit_.typeTraits().is_integral_or_enum(arguments->value->type) &&
+               admit(arguments->value);
+      }
     }
     if (auto* constant = cxx::ast_cast<cxx::ConstExpressionAST>(expression)) {
       return constant->constValue &&
@@ -419,7 +438,7 @@ std::optional<PredicateValue> predicate_value(
     cxx::ExpressionAST* expression,
     PredicateExpressionPolicy expression_policy) {
   auto* identity = unwrap_expression(expression);
-  std::vector<cxx::FieldSymbol*> members;
+  std::vector<cxx::Symbol*> members;
   while (auto* member = cxx::ast_cast<cxx::MemberExpressionAST>(identity)) {
     auto* field = cxx::symbol_cast<cxx::FieldSymbol>(member->symbol);
     if (!field || field->isStatic() ||
@@ -434,6 +453,11 @@ std::optional<PredicateValue> predicate_value(
           "predicate member paths require direct non-static record fields");
     }
     members.push_back(field);
+    const size_t prefix_begin = members.size();
+    for (auto* step : cxx::ListView{member->subobjectPath}) {
+      members.push_back(step);
+    }
+    std::reverse(members.begin() + prefix_begin, members.end());
     identity = unwrap_expression(member->baseExpression);
   }
   std::reverse(members.begin(), members.end());

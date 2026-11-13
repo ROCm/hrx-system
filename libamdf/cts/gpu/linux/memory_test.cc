@@ -470,8 +470,7 @@ TEST_F(GpuLinuxMemoryTest, BufferedFileIoUsesOwnedSystemMemory) {
 
   // An ordinary file descriptor copies directly to and from the native view;
   // no stdio payload buffer or page registration mediates either operation.
-  std::unique_ptr<FILE, decltype(&std::fclose)> file(std::tmpfile(),
-                                                     &std::fclose);
+  std::unique_ptr<FILE, int (*)(FILE*)> file(std::tmpfile(), &std::fclose);
   ASSERT_NE(file, nullptr) << std::strerror(errno);
   const int descriptor = fileno(file.get());
   std::array<uint8_t, 4097> expected;
@@ -905,7 +904,7 @@ TEST_F(GpuHostNumaMemoryTest, CopiesUsingPagesOnEveryAllowedHostNode) {
       std::bit_ceil(std::max(family_.minimum_ring_byte_length,
                              command_word_capacity * sizeof(uint32_t)));
   GpuCommandQueue* queue = nullptr;
-  ASSERT_NO_FATAL_FAILURE(CreateQueue(&queue, command_byte_length));
+  ASSERT_NO_FATAL_FAILURE(CreateQueue(command_byte_length, &queue));
   SdmaCommandWriter commands(queue->words().data(), family_.format_features);
   const bool user_gcr =
       (family_.format_features & AMDF_GPU_SDMA_FORMAT_FEATURE_USER_GCR) != 0;

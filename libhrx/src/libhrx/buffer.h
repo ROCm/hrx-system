@@ -23,11 +23,8 @@ typedef struct hrx_buffer_s {
   // HAL buffer owning the underlying allocation.
   iree_hal_buffer_t* hal_buffer;
 
-  // HAL pool that materialized |hal_buffer|.
-  iree_hal_pool_t* hal_pool;
-
-  // Device associated with the buffer's allocation.
-  hrx_device_t device;
+  // Retained sealed group defining the allocation's memory scopes.
+  hrx_device_group_t group;
 
   // Memory properties selected for the allocation.
   hrx_memory_type_t mem_type;
@@ -35,11 +32,12 @@ typedef struct hrx_buffer_s {
   // User-visible allocation length in bytes.
   size_t size;
 
-  // Optional bounded pool that charged |allocation_budget_size|.
-  hrx_mem_pool_t allocation_budget_pool;
+  // Optional in-tree owner's state, valid until |release_callback| returns.
+  void* release_user_data;
 
-  // Bytes charged against |allocation_budget_pool|.
-  size_t allocation_budget_size;
+  // Synchronous final-release hook after native backing is released. Receives
+  // |release_user_data| and the immutable logical |size|; never queued as work.
+  void (*release_callback)(void* user_data, size_t byte_length);
 
   // Active scoped mapping, valid only while |is_mapped| is true.
   iree_hal_buffer_mapping_t mapping;
@@ -53,12 +51,13 @@ typedef struct hrx_buffer_s {
 } hrx_buffer_s;
 
 // Creates an HRX buffer wrapping |hal_buffer| for in-tree interop. The buffer
-// retains both |hal_buffer| and |device|; the caller owns the returned handle.
+// retains both |hal_buffer| and |group|; the caller owns the returned handle.
+// Allocation pools remain caller-owned and must outlive the buffer.
 // |hal_buffer| may be NULL for host-only allocations.
 // |device_ptr| is an optional whole-buffer device address whose validity the
 // caller guarantees for the lifetime of the wrapper. It is never a scoped map.
 iree_status_t hrx_buffer_create_from_hal(iree_hal_buffer_t* hal_buffer,
-                                         hrx_device_t device,
+                                         hrx_device_group_t group,
                                          hrx_memory_type_t mem_type,
                                          size_t size, void* device_ptr,
                                          hrx_buffer_t* out_buffer);

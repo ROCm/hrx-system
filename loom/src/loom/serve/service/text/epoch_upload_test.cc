@@ -68,8 +68,8 @@ TEST_F(SourceEpochUploadTest, LivePacketsPreserveUnusedHostAndDeviceCapacity) {
                   .pattern_length = sizeof(device_canary_),
               },
       };
-      IREE_ASSERT_OK(loom_serve_execution_transfer(model_->execution, 1, &fill,
-                                                   &completion));
+      IREE_ASSERT_OK(loom_runtime_execution_transfer(model_->execution, 1,
+                                                     &fill, &completion));
     }
     std::array<std::vector<int32_t>, 4> inputs;
     std::array<loom_serve_text_span_t, 4> spans;
@@ -102,10 +102,10 @@ TEST_F(SourceEpochUploadTest, LivePacketsPreserveUnusedHostAndDeviceCapacity) {
                   .length = downloaded_[slot].size(),
               },
       };
-      IREE_ASSERT_OK(loom_serve_execution_transfer(model_->execution, 1,
-                                                   &download, &completion));
+      IREE_ASSERT_OK(loom_runtime_execution_transfer(model_->execution, 1,
+                                                     &download, &completion));
     }
-    IREE_ASSERT_OK(loom_serve_execution_wait(model_->execution, completion));
+    IREE_ASSERT_OK(loom_runtime_execution_wait(model_->execution, completion));
     for (size_t slot = 0; slot < host.size(); ++slot) {
       EXPECT_EQ(std::memcmp(downloaded_[slot].data(), host[slot].data,
                             live_lengths[slot]),
@@ -126,10 +126,10 @@ class EpochUploadTest : public SourceTextServiceTest {
 
   void SetUp() override {
     ASSERT_NO_FATAL_FAILURE(SourceTextServiceTest::SetUp());
-    IREE_ASSERT_OK(loom_serve_device_create_execution(device_, storage_owner_,
-                                                      &execution_));
+    IREE_ASSERT_OK(loom_runtime_device_create_execution(device_, storage_owner_,
+                                                        &execution_));
     IREE_ASSERT_OK(
-        loom_serve_execution_reserve_workspace(execution_, kCapacity, 256));
+        loom_runtime_execution_reserve_workspace(execution_, kCapacity, 256));
     uint64_t completion = 0;
     for (size_t slot = 0; slot < targets_.size(); ++slot) {
       host_[slot].resize(kCapacity, static_cast<uint8_t>(0x31 + slot));
@@ -138,8 +138,8 @@ class EpochUploadTest : public SourceTextServiceTest {
           iree_make_const_byte_span(host_[slot].data(), host_[slot].size());
       const auto request =
           iree_hal_make_pool_reservation_request(kCapacity, 256);
-      IREE_ASSERT_OK(loom_serve_execution_alloca(execution_, 1, &request,
-                                                 &targets_[slot]));
+      IREE_ASSERT_OK(loom_runtime_execution_alloca(execution_, 1, &request,
+                                                   &targets_[slot]));
       const iree_hal_transfer_operation_t fill = {
           .type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL,
           .fill =
@@ -151,9 +151,9 @@ class EpochUploadTest : public SourceTextServiceTest {
               },
       };
       IREE_ASSERT_OK(
-          loom_serve_execution_transfer(execution_, 1, &fill, &completion));
+          loom_runtime_execution_transfer(execution_, 1, &fill, &completion));
     }
-    IREE_ASSERT_OK(loom_serve_execution_wait(execution_, completion));
+    IREE_ASSERT_OK(loom_runtime_execution_wait(execution_, completion));
   }
 
   void TearDown() override {
@@ -164,9 +164,9 @@ class EpochUploadTest : public SourceTextServiceTest {
       iree_hal_buffer_release(target);
     }
     if (execution_) {
-      IREE_EXPECT_OK(loom_serve_execution_drain(execution_));
+      IREE_EXPECT_OK(loom_runtime_execution_drain(execution_));
     }
-    loom_serve_execution_release(execution_);
+    loom_runtime_execution_release(execution_);
     iree_hal_semaphore_release(gate_);
     SourceTextServiceTest::TearDown();
   }
@@ -206,9 +206,9 @@ class EpochUploadTest : public SourceTextServiceTest {
       };
     }
     uint64_t completion = 0;
-    IREE_ASSERT_OK(loom_serve_execution_transfer(
+    IREE_ASSERT_OK(loom_runtime_execution_transfer(
         execution_, IREE_ARRAYSIZE(operations), operations, &completion));
-    IREE_ASSERT_OK(loom_serve_execution_wait(execution_, completion));
+    IREE_ASSERT_OK(loom_runtime_execution_wait(execution_, completion));
   }
 
   // Capacity includes a discontiguous payload and untouched trailing storage.
@@ -226,7 +226,7 @@ class EpochUploadTest : public SourceTextServiceTest {
   // Source plan storage need not survive the submission call.
   std::vector<uint8_t> plan_;
   // Real command/transfer timeline, with no mock submission layer.
-  loom_serve_execution_t* execution_ = nullptr;
+  loom_runtime_execution_t* execution_ = nullptr;
   // Explicitly controlled queue readiness for borrowed lifetime coverage.
   iree_hal_semaphore_t* gate_ = nullptr;
 };
@@ -283,9 +283,9 @@ TEST_F(EpochUploadTest, ValidatesWholePlanBeforePublishingAnyRange) {
       Range(0, i, 1);
     }
     Range(range[0], range[1], range[2], range[3], range[4]);
-    const auto before = loom_serve_execution_frontier(execution_);
+    const auto before = loom_runtime_execution_frontier(execution_);
     IREE_EXPECT_STATUS_IS(expected[index], Submit());
-    const auto after = loom_serve_execution_frontier(execution_);
+    const auto after = loom_runtime_execution_frontier(execution_);
     EXPECT_EQ(before.values[0], after.values[0]);
   }
   plan_.assign(39, 0);
@@ -299,12 +299,12 @@ TEST_F(EpochUploadTest, ValidatesWholePlanBeforePublishingAnyRange) {
 }
 
 TEST_F(EpochUploadTest, EmptyRangesDoNotSubmitWork) {
-  const auto before = loom_serve_execution_frontier(execution_);
+  const auto before = loom_runtime_execution_frontier(execution_);
   IREE_ASSERT_OK(Submit());
   Range(0, kCapacity, 0);
   Range(1, 0, 0);
   IREE_ASSERT_OK(Submit());
-  const auto after = loom_serve_execution_frontier(execution_);
+  const auto after = loom_runtime_execution_frontier(execution_);
   EXPECT_EQ(before.values[0], after.values[0]);
   ASSERT_NO_FATAL_FAILURE(Download());
   for (const auto& bytes : result_) {
@@ -334,10 +334,11 @@ TEST_F(EpochUploadTest, HostAndDeviceBoundsAreIndependent) {
 
 TEST_F(EpochUploadTest, MultipleBatchesBorrowPayloadButNotPlan) {
   IREE_ASSERT_OK(iree_hal_semaphore_create(
-      loom_serve_device_handle(device_), IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
-      IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &gate_));
+      loom_runtime_device_handle(device_), IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
+      0, IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &gate_));
   uint64_t value = 1;
-  IREE_ASSERT_OK(loom_serve_execution_barrier(execution_, {1, &gate_, &value}));
+  IREE_ASSERT_OK(
+      loom_runtime_execution_barrier(execution_, {1, &gate_, &value}));
   for (size_t slot = 0; slot < targets_.size(); ++slot) {
     for (size_t i = slot; i < 130; i += 2) {
       Range(slot, i * 2, 1);

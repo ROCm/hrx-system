@@ -1294,6 +1294,25 @@ ERR_BACKEND_057 = ErrorDef(
     ),
 )
 
+ERR_BACKEND_058 = ErrorDef(
+    domain=ErrorDomain.BACKEND,
+    code=58,
+    severity=Severity.ERROR,
+    summary="Spill transport cannot preserve a partially defined register.",
+    message=(
+        "cannot spill {value_class} value '{value_name}' in '@{function_name}': "
+        "only register parts {defined_parts} are defined, but the selected "
+        "transport requires a complete register"
+    ),
+    params=(
+        ErrorParam("function_name", ParamKind.STRING),
+        ErrorParam("value_name", ParamKind.STRING),
+        ErrorParam("value_class", ParamKind.STRING),
+        ErrorParam("defined_parts", ParamKind.U32),
+    ),
+    fix_hint="Select native spill transfers that preserve individual register parts",
+)
+
 ALL_BACKEND_ERRORS: tuple[ErrorDef, ...] = (
     ERR_BACKEND_003,
     ERR_BACKEND_005,
@@ -1343,4 +1362,5 @@ ALL_BACKEND_ERRORS: tuple[ErrorDef, ...] = (
     ERR_BACKEND_055,
     ERR_BACKEND_056,
     ERR_BACKEND_057,
+    ERR_BACKEND_058,
 )

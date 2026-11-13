@@ -16,7 +16,7 @@ namespace {
 
 TEST(StreamingTlsTest, SetGetCurrentThread) {
   iree_hal_streaming_tls_key_t key = IREE_HAL_STREAMING_TLS_KEY_INVALID;
-  IREE_ASSERT_OK(iree_hal_streaming_tls_key_create(&key, nullptr));
+  IREE_ASSERT_OK(iree_hal_streaming_tls_key_create(nullptr, &key));
 
   int main_value = 1;
   int thread_value = 2;
@@ -39,10 +39,11 @@ TEST(StreamingTlsTest, SetGetCurrentThread) {
 TEST(StreamingTlsTest, DestructorRunsOnThreadExit) {
   iree_hal_streaming_tls_key_t key = IREE_HAL_STREAMING_TLS_KEY_INVALID;
   IREE_ASSERT_OK(iree_hal_streaming_tls_key_create(
-      &key, +[](void* value) {
+      +[](void* value) {
         auto* destructor_count = static_cast<std::atomic<int>*>(value);
         destructor_count->fetch_add(1, std::memory_order_acq_rel);
-      }));
+      },
+      &key));
 
   std::atomic<int> destructor_count{0};
   std::thread thread([&]() {
@@ -60,11 +61,11 @@ TEST(StreamingTlsTest, CapacityExhausted) {
   iree_hal_streaming_tls_key_t keys[IREE_HAL_STREAMING_TLS_KEY_CAPACITY] = {
       IREE_HAL_STREAMING_TLS_KEY_INVALID};
   for (iree_host_size_t i = 0; i < IREE_HAL_STREAMING_TLS_KEY_CAPACITY; ++i) {
-    IREE_ASSERT_OK(iree_hal_streaming_tls_key_create(&keys[i], nullptr));
+    IREE_ASSERT_OK(iree_hal_streaming_tls_key_create(nullptr, &keys[i]));
   }
 
   iree_hal_streaming_tls_key_t extra_key = IREE_HAL_STREAMING_TLS_KEY_INVALID;
-  iree_status_t status = iree_hal_streaming_tls_key_create(&extra_key, nullptr);
+  iree_status_t status = iree_hal_streaming_tls_key_create(nullptr, &extra_key);
   EXPECT_EQ(IREE_STATUS_RESOURCE_EXHAUSTED, iree_status_code(status));
   iree_status_ignore(status);
   EXPECT_EQ(IREE_HAL_STREAMING_TLS_KEY_INVALID, extra_key);

@@ -123,6 +123,110 @@ step in build actions.
 Header diagnostics cover first-party source and generated code. External and
 vendored third-party headers retain their own style policy.
 
+### `iree-isa-dispatch-chain`
+
+Concrete `*_isa` calls in C and `isa<T>` calls in C++ are bounded across each
+maximal `if`/`else if` chain. Compound conditions count each predicate, so
+grouping a concrete allowlist into one branch does not hide a growing family.
+The `MaximumIsaPredicates` option defaults to three and diagnoses the fourth
+predicate. Repository analysis enables the check for every analyzed C and C++
+source.
+
+A binary or ternary distinction can remain direct when it expresses local
+control flow more clearly than another abstraction. A fourth case usually
+means that the code is answering a semantic question through concrete
+operation identity. The replacement follows the owner of that answer rather
+than hiding the same list in a helper.
+
+The replacement shape follows this decision ladder:
+
+1. An exact, finite policy consumed immediately by its owner uses one
+   exhaustive `switch` on the operation kind. Target legality and diagnostic
+   admission are ordinary examples. The switch stays at the policy boundary;
+   callers do not duplicate it.
+2. An extensible semantic role shared across dialects uses an existing trait
+   or interface. A missing shared role is an interface-design problem, not a
+   reason to keep extending the identity list.
+3. A planning or collection stage that has already selected behavior retains a
+   compact semantic kind with its plan or candidate. Later stages consume that
+   result without reclassifying the source operation.
+4. A finite family carrying per-kind data uses one owner-local classifier and
+   a compact immutable descriptor or action kind. Dense dialect-local indexing
+   is the ordinary representation; a sparse cross-dialect family uses a
+   measured bounded lookup.
+
+An existing interface or trait owns extensible cross-dialect semantics:
+
+```c
+if (loom_op_has_trait(module, op, LOOM_TRAIT_TERMINATOR)) {
+  // Handle the semantic role without naming every terminator spelling.
+}
+
+const loom_memory_access_t access = loom_memory_access_cast(module, op);
+if (loom_memory_access_isa(access)) {
+  switch (loom_memory_access_operation_kind(access)) {
+    case LOOM_MEMORY_ACCESS_OPERATION_LOAD:
+      // Query operand and attribute roles through |access|.
+      break;
+    case LOOM_MEMORY_ACCESS_OPERATION_STORE:
+      break;
+  }
+}
+```
+
+A retained planning kind keeps later analysis, reporting, and emission from
+reconstructing the decision from the source operation:
+
+```c
+switch ((target_plan_kind_t)plan.id) {
+  case TARGET_PLAN_GATHER:
+    return target_emit_gather(context, source_op, plan);
+  case TARGET_PLAN_SHUFFLE:
+    return target_emit_shuffle(context, source_op, plan);
+  default:
+    IREE_ASSERT_UNREACHABLE("unknown target plan kind");
+    IREE_BUILTIN_UNREACHABLE();
+}
+```
+
+Static tables carry data, not callback programs, and do not allocate. One
+exhaustive switch can classify a finite local family when it is smaller and
+faster than a table, but downstream consumers still use the retained semantic
+result rather than copying the switch.
+
+Independent rewrites rooted at concrete operations belong in
+`loom_rewrite_pattern_registry_t`, which composes providers once and dispatches
+directly by `loom_op_kind_t`. A private list of concrete roots is not another
+rewrite registry.
+
+The warning has no automatic fix because syntax cannot identify the semantic
+owner. A rare intentional exception uses the ordinary narrow
+`NOLINT(iree-isa-dispatch-chain)` spelling on the chain root; there is no path
+allowlist. Review of a replacement accounts for lookup complexity, retained
+and vtable bytes, allocation, JIT cost, compiler size, and exact output or
+diagnostic behavior.
+
+### `iree-output-parameter-order`
+
+Parameters named `out_*` form the final contiguous group of parameters in a
+function signature. Inputs, mutable state, flags, and allocators precede that
+group. Multiple outputs retain their natural order within it:
+
+```c
+bool poll(void* user_data, status_t status, scope_t* scope,
+          wait_t* out_wait, copy_t* out_copy);
+```
+
+The check covers function declarations and definitions, callback typedefs,
+function-pointer fields and parameters, C++ methods, and lambdas. It reports
+the first output followed by a non-output parameter. It offers no automatic
+fix because changing a signature also requires updating its callers and every
+implementation of a callback contract.
+
+The repository policy enables the check for every analyzed C and C++ source.
+Changing a public or callback signature therefore requires updating the entire
+contract and all callers in the same change.
+
 ### `iree-assert-output-call`
 
 `iree-assert-output-call` diagnoses calls with writable `out_*` parameters

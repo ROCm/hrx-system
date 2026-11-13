@@ -1,0 +1,79 @@
+// RUN: emit cxx roundtrip
+// REQUIRES: loom-export-cxx
+#include <loomcxx/buffer.h>
+#include <loomcxx/index.h>
+
+using Buffer = loom::type::buffer<const int>;
+Buffer optional(Buffer input, bool use) {
+  return use ? input : loom::buffer::null<const int>();
+}
+bool missing(Buffer input) { return loom::buffer::compare::null(input); }
+bool same(const int* first, const int* second) { return first == second; }
+bool different(Buffer first, loom::type::offset first_offset, Buffer second, loom::type::offset second_offset) {
+  return loom::buffer::compare::address<loom::buffer::compare::predicate::ne>(first, first_offset, second, second_offset);
+}
+int guarded(const int* input) { return input ? input[0] : 7; }
+// ----
+#include <loomcxx/numeric.h>
+#include <loomcxx/predicate.h>
+#include <loomcxx/view.h>
+
+[[loom::symbol("optional")]]
+loom::type::buffer<unsigned char> optional(loom::type::buffer<unsigned char> input, bool use);
+
+[[loom::symbol("missing")]]
+bool missing(loom::type::buffer<unsigned char> input);
+
+[[loom::symbol("same")]]
+bool same(loom::type::buffer<unsigned char> first, loom::type::offset first_byte_offset, loom::type::buffer<unsigned char> second, loom::type::offset second_byte_offset);
+
+[[loom::symbol("different")]]
+bool different(loom::type::buffer<unsigned char> first, loom::type::offset first_offset, loom::type::buffer<unsigned char> second, loom::type::offset second_offset);
+
+[[loom::symbol("guarded")]]
+unsigned guarded(loom::type::buffer<unsigned> input, loom::type::offset input_byte_offset);
+
+[[loom::symbol("optional")]]
+loom::type::buffer<unsigned char> optional(loom::type::buffer<unsigned char> input, bool use) {
+  loom::type::buffer<unsigned char> v3;
+  if (use) {
+    v3 = input;
+  } else {
+    auto v4 = loom::buffer::null<unsigned char>();
+    v3 = v4;
+  }
+  return v3;
+}
+
+[[loom::symbol("missing")]]
+bool missing(loom::type::buffer<unsigned char> input) {
+  bool v7 = loom::buffer::compare::null(input);
+  return v7;
+}
+
+[[loom::symbol("same")]]
+bool same(loom::type::buffer<unsigned char> first, loom::type::offset first_byte_offset, loom::type::buffer<unsigned char> second, loom::type::offset second_byte_offset) {
+  bool v13 = loom::buffer::compare::address<loom::buffer::compare::predicate::eq>(first, first_byte_offset, second, second_byte_offset);
+  return v13;
+}
+
+[[loom::symbol("different")]]
+bool different(loom::type::buffer<unsigned char> first, loom::type::offset first_offset, loom::type::buffer<unsigned char> second, loom::type::offset second_offset) {
+  bool v19 = loom::buffer::compare::address<loom::buffer::compare::predicate::ne>(first, first_offset, second, second_offset);
+  return v19;
+}
+
+[[loom::symbol("guarded")]]
+unsigned guarded(loom::type::buffer<unsigned> input, loom::type::offset input_byte_offset) {
+  bool v23 = loom::buffer::compare::null(loom::buffer::cast<unsigned char>(input));
+  unsigned v26{};
+  if (v23 ^ 1) {
+    unsigned long long v32 = loom::offset::cast<unsigned long long>(input_byte_offset) + (loom::convert<long long>(0) * 4ull);
+    loom::assume(v32 <= 9223372036854775807ull);
+    auto v35 = loom::buffer::view<1>(loom::buffer::cast<const unsigned>(input), loom::offset::cast(v32), {});
+    v26 = loom::view::load<loom::memory_access::root_in_bounds>(v35, 0);
+  } else {
+    v26 = 7u;
+  }
+  return v26;
+}

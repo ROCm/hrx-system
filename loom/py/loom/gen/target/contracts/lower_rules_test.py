@@ -25,6 +25,7 @@ from loom.gen.target.contracts.lower_rule_rows import (
     diagnostic_has_implicit_target_context,
     diagnostic_stored_params,
     diagnostic_value_row,
+    emit_ref_descriptor_bit_count,
     emit_ref_row,
     emit_row,
     guard_payload_row,
@@ -44,6 +45,7 @@ from loom.gen.target.contracts.lower_rule_rows import (
 )
 from loom.gen.target.contracts.lower_rules import (
     _collect_report_keys,
+    _encode_guard_ref_storage,
     _intern_diagnostic_params,
     _intern_optional_rows,
     _intern_rows,
@@ -976,9 +978,8 @@ def test_emit_references_keep_descriptor_identity_out_of_shared_behavior() -> No
         kind=LowerEmitKind.DESCRIPTOR_OP,
         descriptor=TEST_LOW_ADD_I32_DESCRIPTOR,
     )
-    assert emit_ref_row(descriptor_refs, descriptor_emit, 7) == [
-        ".descriptor_ref = 3",
-        ".emit_index = 7",
+    assert emit_ref_row(descriptor_refs, descriptor_emit, 7, descriptor_bit_count=3) == [
+        ".bytes = {0x3c, 0x00, 0x00}",
     ]
     assert emit_row(descriptor_emit) == [".kind = LOOM_LOW_LOWER_EMIT_DESCRIPTOR_OP"]
     for kind in (
@@ -987,10 +988,54 @@ def test_emit_references_keep_descriptor_identity_out_of_shared_behavior() -> No
         LowerEmitKind.REGISTER_COPY,
         LowerEmitKind.REGISTER_MOVE,
     ):
-        assert emit_ref_row({}, LowerEmit(kind=kind), 5) == [
-            ".descriptor_ref = 65535",
-            ".emit_index = 5",
+        assert emit_ref_row({}, LowerEmit(kind=kind), 5, descriptor_bit_count=1) == [
+            ".bytes = {0x0a, 0x00, 0x00}",
         ]
+
+
+def test_emit_references_fill_their_selected_three_byte_layout() -> None:
+    descriptor = TEST_LOW_ADD_I32_DESCRIPTOR
+    descriptor_refs = {descriptor.key: 4094}
+    descriptor_emit = LowerEmit(
+        kind=LowerEmitKind.DESCRIPTOR_OP,
+        descriptor=descriptor,
+    )
+    rows = (LowerEmit(kind=LowerEmitKind.REGISTER_COPY), descriptor_emit)
+    assert emit_ref_descriptor_bit_count(descriptor_refs, rows) == 12
+    assert emit_ref_row(
+        descriptor_refs,
+        descriptor_emit,
+        4095,
+        descriptor_bit_count=12,
+    ) == [
+        ".bytes = {0xff, 0xff, 0xff}",
+    ]
+
+    try:
+        emit_ref_row(
+            descriptor_refs,
+            descriptor_emit,
+            4096,
+            descriptor_bit_count=12,
+        )
+    except ValueError as error:
+        behavior_error = error
+    else:
+        raise AssertionError("expected the emit behavior field bound to be enforced")
+    assert str(behavior_error) == "emit behavior reference exceeds its packed field"
+
+    try:
+        emit_ref_row(
+            descriptor_refs,
+            descriptor_emit,
+            0,
+            descriptor_bit_count=11,
+        )
+    except ValueError as error:
+        descriptor_error = error
+    else:
+        raise AssertionError("expected the descriptor field bound to be enforced")
+    assert str(descriptor_error) == "emit descriptor reference exceeds its packed field"
 
 
 def test_generated_tables_share_bindings_without_merging_descriptors() -> None:
@@ -1020,12 +1065,12 @@ def test_generated_tables_share_bindings_without_merging_descriptors() -> None:
     compiled = compile_lower_rule_set(contract, dialect_ops={"scalar": ALL_SCALAR_OPS})
     generated = generate_lower_rule_set_from_compiled(contract, compiled=compiled)
     emit_rows = generated.source.split("static const loom_low_lower_emit_t ", 1)[1].split("};", 1)[0]
-    emit_refs = generated.source.split("static const loom_low_lower_emit_ref_t ", 1)[1].split("};", 1)[0]
+    emit_refs = generated.source.split("static const loom_low_lower_emit_ref_storage_t ", 1)[1].split("};", 1)[0]
     assert emit_rows.count(".kind = ") == 1
     assert ".descriptor_ref" not in emit_rows
-    assert emit_refs.count(".emit_index = 0,") == 2
-    assert emit_refs.count(".descriptor_ref = 0,") == 1
-    assert emit_refs.count(".descriptor_ref = 1,") == 1
+    assert emit_refs.count(".bytes = {0x01, 0x00, 0x00},") == 1
+    assert emit_refs.count(".bytes = {0x02, 0x00, 0x00},") == 1
+    assert ".emit_ref_descriptor_bit_count = 2," in generated.source
 
     # A different operand-copy contract must retain its own behavior row even
     # when the descriptor and every other field match an existing emit.
@@ -1036,11 +1081,12 @@ def test_generated_tables_share_bindings_without_merging_descriptors() -> None:
     changed = replace(contract, cases=(*contract.cases, copied_case))
     generated = generate_lower_rule_set(changed, dialect_ops={"scalar": ALL_SCALAR_OPS})
     emit_rows = generated.source.split("static const loom_low_lower_emit_t ", 1)[1].split("};", 1)[0]
-    emit_refs = generated.source.split("static const loom_low_lower_emit_ref_t ", 1)[1].split("};", 1)[0]
+    emit_refs = generated.source.split("static const loom_low_lower_emit_ref_storage_t ", 1)[1].split("};", 1)[0]
     assert emit_rows.count(".kind = ") == 2
     assert emit_rows.count(".copy_operand_mask = 1,") == 1
-    assert emit_refs.count(".emit_index = 0,") == 2
-    assert emit_refs.count(".emit_index = 1,") == 1
+    assert emit_refs.count(".bytes = {0x01, 0x00, 0x00},") == 1
+    assert emit_refs.count(".bytes = {0x02, 0x00, 0x00},") == 1
+    assert emit_refs.count(".bytes = {0x05, 0x00, 0x00},") == 1
 
 
 def test_emit_row_spells_target_operand_materialization() -> None:
@@ -1546,7 +1592,7 @@ def test_generate_lower_rule_set_emits_report_key_ordinals() -> None:
     assert ".report_key_ordinal = 1," in generated.source
     assert ".report_key_string_refs = " in generated.source
     assert ".report_key_count = IREE_ARRAYSIZE(" in generated.source
-    assert "static const loom_low_lower_emit_ref_t" in generated.source
+    assert "static const loom_low_lower_emit_ref_storage_t" in generated.source
     assert ".emit_refs = " in generated.source
     assert ".emit_ref_count = IREE_ARRAYSIZE(" in generated.source
     stable_id = descriptor_stable_id(TEST_LOW_ADD_F32_DESCRIPTOR.key)
@@ -1726,6 +1772,15 @@ def test_guard_row_preserves_power_of_two_addend() -> None:
     ):
         row = LowerGuard(kind=GuardKind.VALUE_EXACT_POWER_OF_TWO_I64, addend=addend)
         assert guard_payload_row(row) == [f".addend = {literal}"]
+
+
+def test_guard_row_preserves_value_divisibility() -> None:
+    row = LowerGuard(kind=GuardKind.VALUE_DIVISIBLE_BY, value_ref_index=3, u64=2**32)
+    fields = guard_row({}, row, payload_ordinal=1)
+    assert ".kind = LOOM_LOW_LOWER_GUARD_VALUE_DIVISIBLE_BY" in fields
+    assert ".selector.value.value_ref_index = 3" in fields
+    assert ".payload_ordinal = 1" in fields
+    assert guard_payload_row(row) == [".u64 = UINT64_C(4294967296)"]
 
 
 def test_guard_row_preserves_float_power_of_two_exponent_range() -> None:
@@ -2249,6 +2304,43 @@ def test_generated_tables_intern_guards_and_diagnostic_params() -> None:
     assert tuple(row for row, _ in unique_params) == (params[0], params[2])
     assert tuple(source_index for _, source_index in unique_params) == (0, 2)
     assert param_refs == (0, 0, 1)
+
+
+def test_guard_ref_storage_keeps_the_most_used_rows_byte_addressable() -> None:
+    rows = tuple(range(256))
+    refs = (*range(256), *(255 for _ in range(10)))
+    storage = _encode_guard_ref_storage(rows, refs, (0,))
+
+    assert storage.offset_shift == 0
+    assert storage.rows[:255] == (*range(254), 255)
+    assert storage.rows[255] == 254
+    assert storage.values[254:258] == (0xFF, 0xFF, 0x00, 0xFE)
+    assert storage.starts[254:257] == (254, 257, 258)
+    assert storage.values[258:] == (0xFE,) * 10
+
+
+def test_guard_program_offsets_cover_compact_byte_halfword_and_word_units() -> None:
+    for row_count, expected_shift in ((255, 0), (256, 1), (1024, 2)):
+        rows = tuple(range(row_count))
+        refs = tuple(index % row_count for index in range(65535))
+        program_starts = tuple(range(0, len(refs), 17))
+        storage = _encode_guard_ref_storage(rows, refs, program_starts)
+        assert storage.offset_shift == expected_shift
+        for start in program_starts:
+            cursor = storage.starts[start] << storage.offset_shift
+            assert storage.starts[start] <= 65535
+            decoded = []
+            for _ in range(min(17, len(refs) - start)):
+                ordinal = storage.values[cursor]
+                cursor += 1
+                if ordinal == 255:
+                    ordinal = storage.values[cursor] | (storage.values[cursor + 1] << 8)
+                    cursor += 2
+                decoded.append(storage.rows[ordinal])
+            assert tuple(decoded) == refs[start : start + 17]
+        # Alignment changes only program starts, not every compact reference.
+        if row_count == 256:
+            assert len(storage.values) < 2 * len(refs)
 
 
 def test_generated_tables_intern_source_memory_shapes() -> None:

@@ -32,7 +32,7 @@ uint64_t LiveMask(const uint32_t* actions, uint32_t action_count) {
   return mask;
 }
 
-TEST(DecisionProgramTest, SelectsScalarPredicateChoiceFromSsaFacts) {
+TEST(DecisionProgramTest, SelectsScalarPredicateChoiceFromIndexedFacts) {
   const int64_t constants[] = {128, 32};
   const loom_decision_program_predicate_t predicates[] = {
       {
@@ -88,27 +88,19 @@ TEST(DecisionProgramTest, SelectsScalarPredicateChoiceFromSsaFacts) {
       .priority_group_count = 2,
   };
 
-  std::array<loom_value_facts_t, 16> fact_entries = {};
-  fact_entries[3] = loom_value_facts_exact_i64(128);
-  fact_entries[11] = loom_value_facts_exact_i64(64);
-  const loom_value_fact_table_t fact_table = {
-      .arena = {},
-      .transient_arena = {},
-      .entries = fact_entries.data(),
-      .first_value_id = 0,
-      .count = {},
-      .capacity = fact_entries.size(),
-  };
+  loom_value_facts_t indexed_facts[12] = {};
+  indexed_facts[3] = loom_value_facts_exact_i64(128);
+  indexed_facts[11] = loom_value_facts_exact_i64(64);
   const loom_value_id_t arguments[] = {3, 11};
-  const loom_decision_program_binding_t binding = {
-      .facts = &fact_table,
+  const loom_decision_program_indexed_binding_t binding = {
+      .facts = indexed_facts,
       .argument_values = arguments,
   };
 
   uint32_t live_actions[2] = {};
   uint32_t live_action_count = 0;
   loom_decision_program_result_t result = {};
-  loom_decision_program_evaluate(
+  loom_decision_program_evaluate_indexed(
       &program, &binding, /*feature_evaluator=*/{},
       loom_decision_program_predicate_refiner_empty(),
       LOOM_DECISION_PROGRAM_DEFER_UNRESOLVED, live_actions, &live_action_count,
@@ -118,8 +110,8 @@ TEST(DecisionProgramTest, SelectsScalarPredicateChoiceFromSsaFacts) {
   ASSERT_EQ(live_action_count, 1u);
   EXPECT_EQ(live_actions[0], 7u);
 
-  fact_entries[3] = loom_value_facts_exact_i64(64);
-  loom_decision_program_evaluate(
+  indexed_facts[3] = loom_value_facts_exact_i64(64);
+  loom_decision_program_evaluate_indexed(
       &program, &binding, /*feature_evaluator=*/{},
       loom_decision_program_predicate_refiner_empty(),
       LOOM_DECISION_PROGRAM_DEFER_UNRESOLVED, live_actions, &live_action_count,
@@ -199,6 +191,31 @@ TEST(DecisionProgramTest, PreservesSsaIdentityAcrossSignaturePositions) {
     if (pair[1] != 3) {
       EXPECT_EQ(result.action_ordinal, 0u);
     }
+  }
+
+  const loom_value_facts_t indexed_facts[] = {
+      loom_value_facts_unknown(),
+      loom_value_facts_unknown(),
+  };
+  const loom_value_id_t indexed_arguments[][2] = {{0, 0}, {0, 1}};
+  for (const auto& pair : indexed_arguments) {
+    SCOPED_TRACE(::testing::Message()
+                 << "indexed " << pair[0] << ", " << pair[1]);
+    const loom_decision_program_indexed_binding_t binding = {
+        .facts = indexed_facts,
+        .argument_values = pair,
+    };
+    uint32_t live_action = UINT32_MAX;
+    uint32_t live_action_count = 0;
+    loom_decision_program_result_t result = {};
+    loom_decision_program_evaluate_indexed(
+        &program, &binding, /*feature_evaluator=*/{},
+        loom_decision_program_predicate_refiner_empty(),
+        LOOM_DECISION_PROGRAM_DEFER_UNRESOLVED, &live_action,
+        &live_action_count, &result);
+    EXPECT_EQ(result.kind, pair[0] == pair[1]
+                               ? LOOM_DECISION_PROGRAM_RESULT_SELECTED
+                               : LOOM_DECISION_PROGRAM_RESULT_UNRESOLVED);
   }
   iree_arena_deinitialize(&arena);
   iree_arena_block_pool_deinitialize(&pool);

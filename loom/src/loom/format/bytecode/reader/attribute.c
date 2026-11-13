@@ -12,7 +12,6 @@
 #include "loom/error/error_catalog.h"
 #include "loom/format/bytecode/reader/type.h"
 #include "loom/ir/parameterized_type.h"
-#include "loom/ops/type_registry.h"
 
 iree_status_t loom_bytecode_attribute_read_bytes(
     loom_bytecode_reader_decoder_t* decoder,
@@ -64,6 +63,9 @@ typedef struct loom_bytecode_attribute_validation_scope_t {
   loom_bytecode_attribute_value_domain_t value_domain;
   // SSA validation bounds when |value_domain| selects SSA numbers.
   loom_bytecode_attribute_ssa_validation_scope_t ssa;
+  // Completed-node bound for TYPE parameters in a scoped record, or NULL
+  // when TYPE attributes carry their ordinary type-reference grammar.
+  const uint64_t* completed_type_count;
 } loom_bytecode_attribute_validation_scope_t;
 
 static iree_status_t loom_bytecode_attribute_validate_string_ref(
@@ -328,6 +330,49 @@ static iree_status_t loom_bytecode_attribute_retain_predicate_list(
   return iree_ok_status();
 }
 
+iree_status_t loom_bytecode_attribute_validate_kind(
+    loom_bytecode_reader_decoder_t* decoder,
+    const loom_bytecode_reader_cursor_t* cursor,
+    const loom_attr_descriptor_t* descriptor, loom_bytecode_attr_kind_t kind) {
+  // Wire kinds and native attribute kinds have independent numbering. UTF8
+  // carries the BYTES payload kind with an additional validated form flag.
+  static const uint8_t native_kinds[] = {
+      [LOOM_BYTECODE_ATTR_I64] = LOOM_ATTR_I64,
+      [LOOM_BYTECODE_ATTR_F64] = LOOM_ATTR_F64,
+      [LOOM_BYTECODE_ATTR_STRING] = LOOM_ATTR_STRING,
+      [LOOM_BYTECODE_ATTR_BOOL] = LOOM_ATTR_BOOL,
+      [LOOM_BYTECODE_ATTR_ENUM] = LOOM_ATTR_ENUM,
+      [LOOM_BYTECODE_ATTR_I64_ARRAY] = LOOM_ATTR_I64_ARRAY,
+      [LOOM_BYTECODE_ATTR_SYMBOL] = LOOM_ATTR_SYMBOL,
+      [LOOM_BYTECODE_ATTR_TYPE] = LOOM_ATTR_TYPE,
+      [LOOM_BYTECODE_ATTR_PREDICATE_LIST] = LOOM_ATTR_PREDICATE_LIST,
+      [LOOM_BYTECODE_ATTR_DICT] = LOOM_ATTR_DICT,
+      [LOOM_BYTECODE_ATTR_ENCODING] = LOOM_ATTR_ENCODING,
+      [LOOM_BYTECODE_ATTR_BYTES] = LOOM_ATTR_BYTES,
+      [LOOM_BYTECODE_ATTR_SCOPED_ENUM] = LOOM_ATTR_SCOPED_ENUM,
+      [LOOM_BYTECODE_ATTR_ENUM_ARRAY] = LOOM_ATTR_ENUM_ARRAY,
+      [LOOM_BYTECODE_ATTR_PARAMETERIZED] = LOOM_ATTR_PARAMETERIZED,
+      [LOOM_BYTECODE_ATTR_PARAMETERIZED_ARRAY] = LOOM_ATTR_PARAMETERIZED_ARRAY,
+      [LOOM_BYTECODE_ATTR_SIGNED_ENUM_SET] = LOOM_ATTR_SIGNED_ENUM_SET,
+      [LOOM_BYTECODE_ATTR_SYMBOL_ARRAY] = LOOM_ATTR_SYMBOL_ARRAY,
+      [LOOM_BYTECODE_ATTR_SYMBOL_SET] = LOOM_ATTR_SYMBOL_SET,
+      [LOOM_BYTECODE_ATTR_STRING_ARRAY] = LOOM_ATTR_STRING_ARRAY,
+      [LOOM_BYTECODE_ATTR_UTF8] = LOOM_ATTR_BYTES,
+      [LOOM_BYTECODE_ATTR_F64_ARRAY] = LOOM_ATTR_F64_ARRAY,
+  };
+  static_assert(IREE_ARRAYSIZE(native_kinds) == LOOM_BYTECODE_ATTR_COUNT,
+                "every wire kind must have a native attribute kind");
+  if (descriptor && !loom_attr_descriptor_accepts_kind(
+                        descriptor, (loom_attr_kind_t)native_kinds[kind])) {
+    return loom_bytecode_reader_emit_invalid_field(
+        decoder, cursor->range_name, IREE_SV("attribute"), 0,
+        IREE_SV("value_kind"),
+        loom_bytecode_reader_cursor_absolute_position(cursor),
+        IREE_SV("attribute_kind_does_not_match_its_descriptor"));
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_bytecode_attribute_validate_at_depth(
     loom_bytecode_attribute_validator_t* validator,
     loom_bytecode_reader_cursor_t* cursor,
@@ -335,6 +380,8 @@ static iree_status_t loom_bytecode_attribute_validate_at_depth(
     iree_host_size_t available_type_count,
     const loom_bytecode_attribute_validation_scope_t* scope,
     uint8_t aggregate_depth) {
+  IREE_RETURN_IF_ERROR(loom_bytecode_attribute_validate_kind(
+      validator->decoder, cursor, descriptor, kind));
   switch (kind) {
     case LOOM_BYTECODE_ATTR_I64: {
       int64_t value = 0;
@@ -520,6 +567,11 @@ static iree_status_t loom_bytecode_attribute_validate_at_depth(
       uint64_t type_id = 0;
       IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(validator->decoder,
                                                              cursor, &type_id));
+      if (scope->completed_type_count) {
+        return loom_bytecode_type_validate_completed_reference(
+            validator->decoder, cursor, type_id, available_type_count,
+            *scope->completed_type_count);
+      }
       if (scope->value_domain == LOOM_BYTECODE_ATTRIBUTE_VALUE_DOMAIN_SSA) {
         if (type_id != 1) {
           IREE_RETURN_IF_ERROR(loom_bytecode_attribute_validate_type_ref(
@@ -746,6 +798,36 @@ iree_status_t loom_bytecode_attribute_validate_type_parameter(
   };
   return loom_bytecode_attribute_validate_at_depth(
       validator, cursor, descriptor, kind, available_type_count, &scope, 0);
+}
+
+iree_status_t loom_bytecode_attribute_validate_complete_type(
+    loom_bytecode_attribute_validator_t* validator,
+    loom_bytecode_reader_cursor_t* cursor,
+    const loom_bytecode_attribute_ssa_validation_scope_t* ssa_scope,
+    uint64_t completed_type_count) {
+  const loom_bytecode_reader_module_view_t* view = validator->module_view;
+  loom_bytecode_type_parameters_t parameters;
+  IREE_RETURN_IF_ERROR(loom_bytecode_type_parameters_begin(
+      validator->decoder, cursor, validator->context, view->strings.values,
+      view->strings.count, /*type_id=*/0, &parameters));
+  const loom_bytecode_attribute_validation_scope_t scope = {
+      .value_domain = LOOM_BYTECODE_ATTRIBUTE_VALUE_DOMAIN_SSA,
+      .ssa = *ssa_scope,
+      .completed_type_count = &completed_type_count,
+  };
+  for (uint8_t i = 0; i < parameters.present_count; ++i) {
+    uint8_t index = 0;
+    IREE_RETURN_IF_ERROR(loom_bytecode_type_parameters_next(
+        validator->decoder, cursor, &parameters, &index));
+    loom_bytecode_attr_kind_t kind;
+    IREE_RETURN_IF_ERROR(
+        loom_bytecode_attribute_read_kind(validator->decoder, cursor, &kind));
+    IREE_RETURN_IF_ERROR(loom_bytecode_attribute_validate_at_depth(
+        validator, cursor, &parameters.descriptor->parameter_descriptors[index],
+        kind, view->types.count, &scope, /*aggregate_depth=*/0));
+  }
+  return loom_bytecode_type_parameters_finish(validator->decoder, cursor,
+                                              &parameters);
 }
 
 iree_status_t loom_bytecode_attribute_validate_ssa(

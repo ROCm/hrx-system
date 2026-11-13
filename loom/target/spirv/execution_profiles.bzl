@@ -12,8 +12,11 @@ load("//loom/build_tools/bazel:defs.bzl", "loom_execution_profile")
 load(
     "//loom/requirements:defs.bzl",
     "ARCH_SPIRV",
+    "ARCH_VM",
     "ARTIFACT_SPIRV_BINARY",
+    "ARTIFACT_VM_BINARY",
     "EXECUTE_IREE_HAL",
+    "EXECUTE_IREE_VM",
 )
 load(
     "//runtime/requirements:defs.bzl",
@@ -27,8 +30,11 @@ def _spirv_vulkan_hardware_profile(
         name = name,
         build_requirements = [
             ARCH_SPIRV,
+            ARCH_VM,
             ARTIFACT_SPIRV_BINARY,
+            ARTIFACT_VM_BINARY,
             EXECUTE_IREE_HAL,
+            EXECUTE_IREE_VM,
             HAL_VULKAN,
         ],
         executor = "hardware",

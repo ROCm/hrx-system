@@ -26,7 +26,7 @@ from loom.dialect.view import ALL_VIEW_OPS
 from loom.dialect.view import defs as view
 from loom.target.arch.amd.xdna.aie2p.contracts import core as core_rules
 from loom.target.arch.amd.xdna.aie2p.contracts.bfp import (
-    AIE2P_BFP_ENCODE_RULE,
+    AIE2P_BFP_ENCODE_RULES,
     AIE2P_BFP_FRAGMENT_RULES,
 )
 from loom.target.arch.amd.xdna.aie2p.contracts.conversion import (
@@ -42,6 +42,9 @@ from loom.target.arch.amd.xdna.aie2p.contracts.floating import (
 )
 from loom.target.arch.amd.xdna.aie2p.contracts.floating_dot import (
     AIE2P_FLOATING_DOT_RULES,
+)
+from loom.target.arch.amd.xdna.aie2p.contracts.floating_fma import (
+    AIE2P_FLOATING_FMA_RULES,
 )
 from loom.target.arch.amd.xdna.aie2p.contracts.floating_sign import (
     AIE2P_FLOATING_SIGN_RULES,
@@ -61,6 +64,7 @@ from loom.target.arch.amd.xdna.aie2p.contracts.integer_shift import (
     AIE2P_INTEGER_SHIFT_RULES,
 )
 from loom.target.arch.amd.xdna.aie2p.contracts.memory import (
+    AIE2P_BUFFER_VALUE_RULES,
     AIE2P_MEMORY_RULES,
     AIE2P_VIEW_CARRIER_RULES,
     AIE2P_VIEW_ELEMENT_TYPES,
@@ -125,13 +129,14 @@ def aie2p_core_cases() -> Sequence[ContractCase]:
             result=ValueRef.result("result"),
         ),
         *AIE2P_VIEW_CARRIER_RULES,
+        *AIE2P_BUFFER_VALUE_RULES,
         RecipeRule(source_op=global_load),
         *AIE2P_BF16_MATRIX_RULES,
         DescriptorMatrixRule(
             source_op=vector.vector_mma,
             source="vector_mma",
         ),
-        AIE2P_BFP_ENCODE_RULE,
+        *AIE2P_BFP_ENCODE_RULES,
         *AIE2P_BFP_FRAGMENT_RULES,
         *AIE2P_PACKED_DOT_RULES,
         *AIE2P_INTEGER_COUNT_RULES,
@@ -859,6 +864,7 @@ def aie2p_core_cases() -> Sequence[ContractCase]:
         *AIE2P_NONLINEAR_RULES,
         core_rules._matrix_accumulator_zero_rule(),
         *AIE2P_FLOATING_RULES,
+        *AIE2P_FLOATING_FMA_RULES,
         *AIE2P_FLOATING_DOT_RULES,
         *AIE2P_POWER_OF_TWO_SCALE_RULES,
         *(

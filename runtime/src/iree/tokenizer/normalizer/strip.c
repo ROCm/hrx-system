@@ -287,12 +287,7 @@ static iree_status_t iree_tokenizer_normalizer_strip_state_process(
     if (iree_tokenizer_strip_is_ascii(byte)) {
       is_ws = iree_tokenizer_strip_is_ascii_whitespace(byte);
     } else {
-      // UTF-8 multi-byte sequence.
-      seq_length = iree_unicode_utf8_sequence_length(byte);
       iree_host_size_t available = (iree_host_size_t)(in_end - in_ptr);
-      IREE_ASSERT(available >= seq_length,
-                  "incomplete UTF-8 at end of normalizer input violates "
-                  "interface contract");
       iree_string_view_t remaining =
           iree_make_string_view((const char*)in_ptr, available);
       iree_host_size_t position = 0;

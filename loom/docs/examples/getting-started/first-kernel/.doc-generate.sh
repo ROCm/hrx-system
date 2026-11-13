@@ -6,35 +6,27 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 # Runs the hardware-independent portion of the public quickstart, verifies its
-# products, and stages the exact source and Bazel declaration included by the
-# page.
+# products, and stages both source forms and the Bazel declaration included by
+# the page.
 
 set -euo pipefail
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+# shellcheck source=loom/docs/examples/example.shlib
+source "${script_dir}/../../example.shlib"
+repo_root="${LOOM_EXAMPLE_REPO_ROOT}"
 
 if [[ "$#" -gt 1 ]]; then
   printf 'usage: %s [output-directory]\n' "$0" >&2
   exit 64
 fi
 
-if [[ -n "${RUNFILES_DIR:-}" ]]; then
-  workspace="${TEST_WORKSPACE:-_main}"
-  repo_root="${RUNFILES_DIR}/${workspace}"
-  export LOOM_FORMAT="${repo_root}/loom/src/loom/tools/loom-format/loom-format"
-  export LOOM_COMPILE="${repo_root}/loom/src/loom/tools/loom-compile/loom-compile"
-  export LOOM_BENCHMARK="${repo_root}/loom/src/loom/tools/loom-benchmark/loom-benchmark"
-else
-  repo_root="$(cd -- "${script_dir}/../../../../.." && pwd -P)"
-  "${repo_root}/build_tools/bin/iree-bazel-build" \
-    --config=asan \
-    //loom/src/loom/tools/loom-format:loom-format \
-    //loom/src/loom/tools/loom-compile:loom-compile \
-    //loom/src/loom/tools/loom-benchmark:loom-benchmark
-  export LOOM_FORMAT="${repo_root}/bazel-bin/loom/src/loom/tools/loom-format/loom-format"
-  export LOOM_COMPILE="${repo_root}/bazel-bin/loom/src/loom/tools/loom-compile/loom-compile"
-  export LOOM_BENCHMARK="${repo_root}/bazel-bin/loom/src/loom/tools/loom-benchmark/loom-benchmark"
-fi
+loom_example_configure_inputs \
+  --config=loom-importer-cxx \
+  tool:loom-format \
+  tool:loom-import-cxx \
+  tool:loom-compile \
+  tool:loom-benchmark
 
 source_file="${script_dir}/saxpy.loom"
 build_file="${script_dir}/BUILD.bazel"
@@ -55,11 +47,17 @@ grep -Fq '"benchmark":"saxpy_f32_64k"' \
   "${artifact_root}/saxpy-plan.json"
 grep -Fq '"element_count":65536' "${artifact_root}/saxpy-plan.json"
 test -s "${artifact_root}/saxpy.hsaco"
+grep -Fq '"benchmark":"saxpy_f32_64k"' \
+  "${artifact_root}/saxpy-cxx-plan.json"
+grep -Fq '"case":"saxpy_f32_65536"' "${artifact_root}/saxpy-cxx-plan.json"
+test -s "${artifact_root}/saxpy-cxx.hsaco"
 
 cp -- "${source_file}" "${output_dir}/saxpy.loom"
+cp -- "${script_dir}/saxpy.cxx" "${output_dir}/saxpy.cxx"
 cp -- "${build_file}" "${output_dir}/BUILD.bazel"
 
 printf 'Generated documentation snippets:\n'
 printf '  %s\n' \
   "${output_dir}/saxpy.loom" \
+  "${output_dir}/saxpy.cxx" \
   "${output_dir}/BUILD.bazel"

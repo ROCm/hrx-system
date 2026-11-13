@@ -1,0 +1,198 @@
+// RUN: pass canonicalize
+
+// Constructor values and static specifications describe the same exact layout.
+func.def @constructor_identity() -> (i1, i1, i1, i1, i1) {
+  %dense = encoding.layout.dense : encoding<layout>
+  %strided = encoding.layout.strided [4, 1] : encoding<layout>
+  %same_dense = encoding.isa<#encoding.layout.dense> %dense : encoding<layout>
+  %same_strided = encoding.isa<#encoding.layout.strided<strides=[4, 1]>> %strided : encoding<layout>
+  %different_stride = encoding.isa<#encoding.layout.strided<strides=[8, 1]>> %strided : encoding<layout>
+  %different_rank = encoding.isa<#encoding.layout.strided<strides=[1]>> %strided : encoding<layout>
+  %different_family = encoding.isa<#encoding.layout.dense> %strided : encoding<layout>
+  func.return %same_dense, %same_strided, %different_stride, %different_rank, %different_family : i1, i1, i1, i1, i1
+}
+
+// ----
+func.def @constructor_identity() -> (i1, i1, i1, i1, i1) {
+  %same_dense = scalar.constant true : i1
+  %same_strided = scalar.constant true : i1
+  %different_stride = scalar.constant false : i1
+  %different_rank = scalar.constant false : i1
+  %different_family = scalar.constant false : i1
+  func.return %same_dense, %same_strided, %different_stride, %different_rank, %different_family : i1, i1, i1, i1, i1
+}
+
+// ====
+
+// An unknown stride prevents equality, but a different known axis or family
+// still proves inequality.
+func.def @partial_constructor_identity(%stride: index) -> (i1, i1, i1) {
+  %layout = encoding.layout.strided [%stride, 1] : encoding<layout>
+  %possible = encoding.isa<#encoding.layout.strided<strides=[4, 1]>> %layout : encoding<layout>
+  %wrong_axis = encoding.isa<#encoding.layout.strided<strides=[4, 2]>> %layout : encoding<layout>
+  %wrong_family = encoding.isa<#encoding.layout.dense> %layout : encoding<layout>
+  func.return %possible, %wrong_axis, %wrong_family : i1, i1, i1
+}
+
+// ----
+func.def @partial_constructor_identity(%stride: index) -> (i1, i1, i1) {
+  %layout = encoding.layout.strided [%stride, 1] : encoding<layout>
+  %possible = encoding.isa<#encoding.layout.strided<strides=[4, 1]>> %layout : encoding<layout>
+  %wrong_axis = scalar.constant false : i1
+  %wrong_family = scalar.constant false : i1
+  func.return %possible, %wrong_axis, %wrong_family : i1, i1, i1
+}
+
+// ====
+
+// Layout properties refine the same value without inventing a family identity.
+func.def @assumed_layout_properties(%layout: encoding<layout>) -> (i1, i1) {
+  %dense = encoding.layout.assume.dense %layout : encoding<layout>
+  %strided = encoding.layout.assume.strided %layout {rank = 0} : encoding<layout>
+  %dense_identity = encoding.isa<#encoding.layout.dense> %dense : encoding<layout>
+  %strided_identity = encoding.isa<#encoding.layout.strided<strides=[]>> %strided : encoding<layout>
+  func.return %dense_identity, %strided_identity : i1, i1
+}
+
+// ----
+func.def @assumed_layout_properties(%layout: encoding<layout>) -> (i1, i1) {
+  %dense = encoding.layout.assume.dense %layout : encoding<layout>
+  %strided = encoding.layout.assume.strided %layout {rank = 0} : encoding<layout>
+  %dense_identity = encoding.isa<#encoding.layout.dense> %dense : encoding<layout>
+  %strided_identity = encoding.isa<#encoding.layout.strided<strides=[]>> %strided : encoding<layout>
+  func.return %dense_identity, %strided_identity : i1, i1
+}
+
+// ====
+
+// The same assumptions preserve an identity already carried by their operand.
+func.def @assumed_constructor_identity() -> (i1, i1) {
+  %dense = encoding.layout.dense : encoding<layout>
+  %strided = encoding.layout.strided [4, 1] : encoding<layout>
+  %dense2 = encoding.layout.assume.dense %dense : encoding<layout>
+  %strided2 = encoding.layout.assume.strided %strided {rank = 2} : encoding<layout>
+  %dense_identity = encoding.isa<#encoding.layout.dense> %dense2 : encoding<layout>
+  %strided_identity = encoding.isa<#encoding.layout.strided<strides=[4, 1]>> %strided2 : encoding<layout>
+  func.return %dense_identity, %strided_identity : i1, i1
+}
+
+// ----
+func.def @assumed_constructor_identity() -> (i1, i1) {
+  %dense_identity = scalar.constant true : i1
+  %strided_identity = scalar.constant true : i1
+  func.return %dense_identity, %strided_identity : i1, i1
+}
+
+// ====
+
+// Dynamic composition retains the exact identities of its constituent values.
+func.def @composed_constructor_identity() -> (i1, i1, i1) {
+  %layout = encoding.layout.strided [4, 1] : encoding<layout>
+  %schema = encoding.define #ggml.q4_0 : encoding<schema>
+  %storage = encoding.define #encoding.storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
+  %same = encoding.isa<#encoding.storage<layout=#encoding.layout.strided<strides=[4, 1]>, schema=#ggml.q4_0>> %storage : encoding<storage>
+  %wrong_layout = encoding.isa<#encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q4_0>> %storage : encoding<storage>
+  %wrong_schema = encoding.isa<#encoding.storage<layout=#encoding.layout.strided<strides=[4, 1]>, schema=#ggml.q8_0>> %storage : encoding<storage>
+  func.return %same, %wrong_layout, %wrong_schema : i1, i1, i1
+}
+
+// ----
+func.def @composed_constructor_identity() -> (i1, i1, i1) {
+  %same = scalar.constant true : i1
+  %wrong_layout = scalar.constant false : i1
+  %wrong_schema = scalar.constant false : i1
+  func.return %same, %wrong_layout, %wrong_schema : i1, i1, i1
+}
+
+// ====
+
+// Both rank boundaries have complete constructor identities.
+func.def @constructor_rank_boundaries() -> (i1, i1) {
+  %empty = encoding.layout.strided [] : encoding<layout>
+  %full = encoding.layout.strided [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14] : encoding<layout>
+  %empty_identity = encoding.isa<#encoding.layout.strided<strides=[]>> %empty : encoding<layout>
+  %full_identity = encoding.isa<#encoding.layout.strided<strides=[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]>> %full : encoding<layout>
+  func.return %empty_identity, %full_identity : i1, i1
+}
+
+// ----
+func.def @constructor_rank_boundaries() -> (i1, i1) {
+  %empty_identity = scalar.constant true : i1
+  %full_identity = scalar.constant true : i1
+  func.return %empty_identity, %full_identity : i1, i1
+}
+
+// ====
+
+// A join preserves common family and axis facts without selecting one arm.
+func.def @joined_constructor_identity(%condition: i1) -> (i1, i1, i1) {
+  %layout = scf.if %condition -> (encoding<layout>) {
+    %small = encoding.layout.strided [4, 1] : encoding<layout>
+    scf.yield %small : encoding<layout>
+  } else {
+    %large = encoding.layout.strided [8, 1] : encoding<layout>
+    scf.yield %large : encoding<layout>
+  }
+  %possible = encoding.isa<#encoding.layout.strided<strides=[4, 1]>> %layout : encoding<layout>
+  %wrong_axis = encoding.isa<#encoding.layout.strided<strides=[4, 2]>> %layout : encoding<layout>
+  %wrong_family = encoding.isa<#encoding.layout.dense> %layout : encoding<layout>
+  func.return %possible, %wrong_axis, %wrong_family : i1, i1, i1
+}
+
+// ----
+func.def @joined_constructor_identity(%condition: i1) -> (i1, i1, i1) {
+  %layout = scf.if %condition -> (encoding<layout>) {
+    %small = encoding.layout.strided [4, 1] : encoding<layout>
+    scf.yield %small : encoding<layout>
+  } else {
+    %large = encoding.layout.strided [8, 1] : encoding<layout>
+    scf.yield %large : encoding<layout>
+  }
+  %possible = encoding.isa<#encoding.layout.strided<strides=[4, 1]>> %layout : encoding<layout>
+  %wrong_axis = scalar.constant false : i1
+  %wrong_family = scalar.constant false : i1
+  func.return %possible, %wrong_axis, %wrong_family : i1, i1, i1
+}
+
+// ====
+
+// Different incoming families leave exact identity unresolved.
+func.def @joined_layout_families(%condition: i1) -> (i1) {
+  %layout = scf.if %condition -> (encoding<layout>) {
+    %dense = encoding.layout.dense : encoding<layout>
+    scf.yield %dense : encoding<layout>
+  } else {
+    %strided = encoding.layout.strided [] : encoding<layout>
+    scf.yield %strided : encoding<layout>
+  }
+  %possible = encoding.isa<#encoding.layout.dense> %layout : encoding<layout>
+  func.return %possible : i1
+}
+
+// ====
+
+// A known constituent can prove a mismatch even when the other is unknown.
+func.def @partial_composed_identity(%layout: encoding<layout>, %schema: encoding<schema>) -> (i1, i1, i1, i1) {
+  %known_layout = encoding.layout.dense : encoding<layout>
+  %known_schema = encoding.define #ggml.q4_0 : encoding<schema>
+  %dynamic_layout = encoding.define #encoding.storage {layout = %layout : encoding<layout>, schema = %known_schema : encoding<schema>} : encoding<storage>
+  %dynamic_schema = encoding.define #encoding.storage {layout = %known_layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
+  %possible_layout = encoding.isa<#encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q4_0>> %dynamic_layout : encoding<storage>
+  %possible_schema = encoding.isa<#encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q4_0>> %dynamic_schema : encoding<storage>
+  %wrong_schema = encoding.isa<#encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q8_0>> %dynamic_layout : encoding<storage>
+  %wrong_layout = encoding.isa<#encoding.storage<layout=#encoding.layout.strided<strides=[1]>, schema=#ggml.q4_0>> %dynamic_schema : encoding<storage>
+  func.return %possible_layout, %possible_schema, %wrong_schema, %wrong_layout : i1, i1, i1, i1
+}
+
+// ----
+func.def @partial_composed_identity(%layout: encoding<layout>, %schema: encoding<schema>) -> (i1, i1, i1, i1) {
+  %known_layout = encoding.layout.dense : encoding<layout>
+  %known_schema = encoding.define #ggml.q4_0 : encoding<schema>
+  %dynamic_layout = encoding.define #encoding.storage {layout = %layout : encoding<layout>, schema = %known_schema : encoding<schema>} : encoding<storage>
+  %dynamic_schema = encoding.define #encoding.storage {layout = %known_layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
+  %possible_layout = encoding.isa<#encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q4_0>> %dynamic_layout : encoding<storage>
+  %possible_schema = encoding.isa<#encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q4_0>> %dynamic_schema : encoding<storage>
+  %wrong_schema = scalar.constant false : i1
+  %wrong_layout = scalar.constant false : i1
+  func.return %possible_layout, %possible_schema, %wrong_schema, %wrong_layout : i1, i1, i1, i1
+}

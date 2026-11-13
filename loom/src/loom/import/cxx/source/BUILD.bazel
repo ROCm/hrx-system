@@ -24,6 +24,7 @@ iree_c_embed_data(
     srcs = [
         "//loom/src/loom/import/cxx:include/initializer_list",
         "//loom/src/loom/import/cxx:include/stdfloat",
+        "//loom/src/loom/import/cxx:include/type_traits",
     ],
     c_file_output = "embedded_standard_headers.c",
     flatten = True,
@@ -54,6 +55,7 @@ iree_c_embed_data(
         "//loom/src/loom/import/cxx:include/loomcxx/target.h",
         "//loom/src/loom/import/cxx:include/loomcxx/target/aie2p.h",
         "//loom/src/loom/import/cxx:include/loomcxx/target/amdgpu.h",
+        "//loom/src/loom/import/cxx:include/loomcxx/template.h",
         "//loom/src/loom/import/cxx:include/loomcxx/vector.h",
         "//loom/src/loom/import/cxx:include/loomcxx/view.h",
     ],
@@ -70,6 +72,7 @@ iree_c_embed_data(
     srcs = [
         "//loom/src/loom/import/cxx:include/hip/hip_fp16.h",
         "//loom/src/loom/import/cxx:include/hip/hip_runtime.h",
+        "//loom/src/loom/import/cxx:include/hip/hip_vector_types.h",
     ],
     c_file_output = "embedded_hip_headers.c",
     flatten = True,
@@ -199,6 +202,57 @@ loom_cc_test(
     ],
 )
 
+loom_cc_library(
+    name = "initializer_lists",
+    srcs = ["initializer_lists.cc"],
+    hdrs = ["initializer_lists.h"],
+    cxx_features = CXX_COMPILER_OPTIONS["cxx_features"],
+    cxx_standard = CXX_COMPILER_OPTIONS["cxx_standard"],
+    deps = [
+        ":frontend",
+        "//third_party:cxx_parser",
+    ],
+)
+
+loom_cc_library(
+    name = "range_loops",
+    srcs = ["range_loops.cc"],
+    hdrs = ["range_loops.h"],
+    cxx_features = CXX_COMPILER_OPTIONS["cxx_features"],
+    cxx_standard = CXX_COMPILER_OPTIONS["cxx_standard"],
+    deps = ["//third_party:cxx_parser"],
+)
+
+loom_cc_test(
+    name = "initializer_lists_test",
+    srcs = ["initializer_lists_test.cc"],
+    cxx_features = CXX_COMPILER_OPTIONS["cxx_features"],
+    cxx_standard = CXX_COMPILER_OPTIONS["cxx_standard"],
+    deps = [
+        ":initializer_lists",
+        ":options",
+        ":source",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//third_party:cxx_parser",
+    ],
+)
+
+loom_cc_test(
+    name = "range_loops_test",
+    srcs = ["range_loops_test.cc"],
+    cxx_features = CXX_COMPILER_OPTIONS["cxx_features"],
+    cxx_standard = CXX_COMPILER_OPTIONS["cxx_standard"],
+    deps = [
+        ":options",
+        ":range_loops",
+        ":source",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//third_party:cxx_parser",
+    ],
+)
+
 loom_cc_test(
     name = "dependency_test",
     srcs = ["dependency_test.cc"],
@@ -248,9 +302,19 @@ loom_cc_library(
     cxx_features = CXX_COMPILER_OPTIONS["cxx_features"],
     cxx_standard = CXX_COMPILER_OPTIONS["cxx_standard"],
     deps = [
+        ":frontend",
         "//runtime/src/iree/base/internal:unicode",
         "//third_party:cxx_parser",
     ],
+)
+
+loom_cc_library(
+    name = "objects",
+    srcs = ["objects.cc"],
+    hdrs = ["objects.h"],
+    cxx_features = CXX_COMPILER_OPTIONS["cxx_features"],
+    cxx_standard = CXX_COMPILER_OPTIONS["cxx_standard"],
+    deps = ["//third_party:cxx_parser"],
 )
 
 loom_cc_library(
@@ -259,7 +323,10 @@ loom_cc_library(
     hdrs = ["expressions.h"],
     cxx_features = CXX_COMPILER_OPTIONS["cxx_features"],
     cxx_standard = CXX_COMPILER_OPTIONS["cxx_standard"],
-    deps = ["//third_party:cxx_parser"],
+    deps = [
+        ":objects",
+        "//third_party:cxx_parser",
+    ],
 )
 
 loom_cc_test(

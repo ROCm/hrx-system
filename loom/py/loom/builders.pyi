@@ -23,6 +23,7 @@ from loom.dialect.low.builders import LowBuilder
 from loom.dialect.pass_.builders import PassBuilder
 from loom.dialect.pipeline.builders import PipelineBuilder
 from loom.dialect.pool.builders import PoolBuilder
+from loom.dialect.ref.builders import RefBuilder
 from loom.dialect.sanitizer.builders import SanitizerBuilder
 from loom.dialect.scalar.builders import ScalarBuilder
 from loom.dialect.scf.builders import ScfBuilder
@@ -30,6 +31,7 @@ from loom.dialect.target.builders import TargetBuilder
 from loom.dialect.tensor.builders import TensorBuilder
 from loom.dialect.test.builders import TestBuilder
 from loom.dialect.tile.builders import TileBuilder
+from loom.dialect.type.builders import TypeBuilder
 from loom.dialect.vector.builders import VectorBuilder
 from loom.dialect.view.builders import ViewBuilder
 from loom.dsl import Op, TypeDef
@@ -85,6 +87,8 @@ class LoomBuilder:
     @property
     def pool(self) -> PoolBuilder: ...
     @property
+    def ref(self) -> RefBuilder: ...
+    @property
     def sanitizer(self) -> SanitizerBuilder: ...
     @property
     def scalar(self) -> ScalarBuilder: ...
@@ -98,6 +102,8 @@ class LoomBuilder:
     def test(self) -> TestBuilder: ...
     @property
     def tile(self) -> TileBuilder: ...
+    @property
+    def type(self) -> TypeBuilder: ...
     @property
     def vector(self) -> VectorBuilder: ...
     @property

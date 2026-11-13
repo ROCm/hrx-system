@@ -11,7 +11,7 @@ func.def target(@target) @i64x4_unsigned_compare_return(%lhs: vector<4xi64>, %rh
 
 // ----
 low.func.def target<x86.avx2.core>(@target) abi(object_function) abi_layout({signature = (vector<4xi64>, vector<4xi64>) -> (vector<4xi1>)}) @i64x4_unsigned_compare_return(%lhs: reg<x86.ymm>, %rhs: reg<x86.ymm>) -> (reg<x86.xmm>) asm {
-  %7 = vpcmpeqq.ymm %lhs, %lhs
+  %7 = vpcmpeqd.ones.ymm
   %8 = vpsllq.ymm %7, 63
   %9 = vpxor.ymm %lhs, %8
   %10 = vpxor.ymm %rhs, %8
@@ -70,7 +70,7 @@ low.func.def target<x86.avx2.core>(@target) abi(object_function) abi_layout({sig
   %12 = vpminub.xmm %lhs, %rhs
   %13 = vpcmpeqb.xmm %12, %lhs
   %14 = vpcmpeqb.xmm %lhs, %rhs
-  %15 = vpcmpeqb.xmm %lhs, %lhs
+  %15 = vpcmpeqd.ones.xmm
   %16 = vpxor.xmm %14, %15
   %17 = vpand.xmm %13, %16
   %condition = vpmovsxbw.ymm %17

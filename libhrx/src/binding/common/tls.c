@@ -49,8 +49,8 @@ static void*
     iree_hal_streaming_tls_values[IREE_HAL_STREAMING_TLS_KEY_CAPACITY] = {0};
 
 IREE_API_EXPORT iree_status_t iree_hal_streaming_tls_key_create(
-    iree_hal_streaming_tls_key_t* out_key,
-    iree_hal_streaming_tls_destructor_t destructor) {
+    iree_hal_streaming_tls_destructor_t destructor,
+    iree_hal_streaming_tls_key_t* out_key) {
   IREE_ASSERT_ARGUMENT(out_key);
   *out_key = IREE_HAL_STREAMING_TLS_KEY_INVALID;
   for (iree_hal_streaming_tls_key_t key = 0;
@@ -151,8 +151,8 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved) {
 }
 
 IREE_API_EXPORT iree_status_t iree_hal_streaming_tls_key_create(
-    iree_hal_streaming_tls_key_t* out_key,
-    iree_hal_streaming_tls_destructor_t destructor) {
+    iree_hal_streaming_tls_destructor_t destructor,
+    iree_hal_streaming_tls_key_t* out_key) {
   IREE_ASSERT_ARGUMENT(out_key);
   *out_key = IREE_HAL_STREAMING_TLS_KEY_INVALID;
   for (iree_hal_streaming_tls_key_t key = 0;
@@ -214,8 +214,8 @@ iree_hal_streaming_tls_set(iree_hal_streaming_tls_key_t key, void* value) {
 #else
 
 IREE_API_EXPORT iree_status_t iree_hal_streaming_tls_key_create(
-    iree_hal_streaming_tls_key_t* out_key,
-    iree_hal_streaming_tls_destructor_t destructor) {
+    iree_hal_streaming_tls_destructor_t destructor,
+    iree_hal_streaming_tls_key_t* out_key) {
   IREE_ASSERT_ARGUMENT(out_key);
   *out_key = IREE_HAL_STREAMING_TLS_KEY_INVALID;
   for (iree_hal_streaming_tls_key_t key = 0;

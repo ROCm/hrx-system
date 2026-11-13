@@ -129,6 +129,20 @@ typedef struct amdf_api_t {
       amdf_endpoint_t* endpoint, uint32_t queue_family_ordinal,
       amdf_queue_family_info_t* out_info);
 
+  /// Copies the complete placement contract established at device creation.
+  ///
+  /// The ordinal names a family from the device's endpoint. Families without
+  /// user publication report no explicit placements and UNKNOWN publication
+  /// requirements. This is an immutable device-lifetime snapshot, not a
+  /// resource reservation. The caller initializes the output header and
+  /// extension chain. Failure leaves all output bytes unchanged.
+  ///
+  /// This thread-safe query performs no allocation, system call, locking,
+  /// device initialization or lazy setup, including on the first call.
+  amdf_status_t(AMDF_CALL* device_query_queue_family_placement_info)(
+      amdf_device_t* device, uint32_t queue_family_ordinal,
+      amdf_queue_family_placement_info_t* out_info);
+
   /// Destroys a materialized device after its dependent resources are released.
   ///
   /// The caller must have exclusive access. Returns
@@ -162,8 +176,10 @@ typedef struct amdf_api_t {
   /// Returned physical scopes are owned by the device's endpoint and remain
   /// valid while that endpoint lives. Allocations require their storage device
   /// in the live access set. Context-private scopes come from their extension.
-  /// This reads achieved profiles without allocation, native queries, locking
-  /// or lazy setup; it creates no resources.
+  /// Device creation establishes complete immutable physical-scope metadata
+  /// before returning. Later devices through that endpoint reuse the
+  /// descriptor. This reads achieved profiles without allocation, native
+  /// queries, locking or lazy setup; it creates no resources.
   amdf_status_t(AMDF_CALL* device_enumerate_memory_scopes)(
       amdf_device_t* device, uint32_t capacity, amdf_memory_scope_t** scopes,
       uint32_t* out_count);
@@ -519,8 +535,9 @@ typedef struct amdf_api_t {
   /// a valid header or producer index. It performs the native release and CPU
   /// ordering, without reading command-ring contents, accepting commands,
   /// notifying the device, waiting for execution, allocating, or taking a host
-  /// lock. The family's host_publication describes native device reads and
-  /// kernel calls. Other executors and device mappings return UNSUPPORTED.
+  /// lock. device_query_queue_family_placement_info reports native device reads
+  /// and kernel calls for each placement. Other executors and device mappings
+  /// return UNSUPPORTED.
   ///
   /// Native failure terminally fails the queue and is retained by subsequent
   /// status queries and waits. It never proves completion or permits storage
@@ -773,9 +790,11 @@ typedef struct amdf_api_t {
   /// Validation failure changes nothing. A native failure can leave partial
   /// mappings and makes the affected native mapping group unusable except for
   /// full-group detach or terminal destruction. Old and proposed backing stay
-  /// alive until checked removal succeeds. The library retains no source
-  /// objects or backing identities. A provider may retain native view handles
-  /// in pre-sized reservation-local storage to support independent removal.
+  /// alive until checked removal succeeds. Each update describes its previous
+  /// and desired backing; the caller owns that installed-state information.
+  /// The library retains no source objects or backing identities after update
+  /// completion and maintains no installed-source index. Native view handles
+  /// required for address-space operations remain reservation-owned.
   /// This cold operation may allocate temporary descriptors, register native
   /// views, lock native VM mutation and wait for mapping readiness. None of
   /// this work occurs on dispatch. Zero updates is empty on a healthy

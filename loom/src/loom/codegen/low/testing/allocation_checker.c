@@ -64,13 +64,24 @@ static void loom_low_allocation_checker_record(
   }
 }
 
-static bool loom_low_allocation_checker_assignment_start_shape_is_valid(
+static bool loom_low_allocation_checker_assignment_shape_is_valid(
     const loom_low_allocation_assignment_t* assignment,
     const loom_liveness_interval_t* interval) {
   const loom_low_allocation_assignment_flags_t unknown_flags =
       assignment->flags &
-      (loom_low_allocation_assignment_flags_t)~LOOM_LOW_ALLOCATION_ASSIGNMENT_FLAG_REFINED_UNIT_STARTS;
+      (loom_low_allocation_assignment_flags_t)~LOOM_LOW_ALLOCATION_ASSIGNMENT_FLAG_ALL;
   if (unknown_flags != 0) {
+    return false;
+  }
+  if (iree_any_bit_set(
+          assignment->flags,
+          LOOM_LOW_ALLOCATION_ASSIGNMENT_FLAG_EXPANDED_EXECUTION_DEFINITION) &&
+      assignment->start_point != interval->definition_point) {
+    return false;
+  }
+  if (iree_any_bit_set(assignment->flags,
+                       LOOM_LOW_ALLOCATION_ASSIGNMENT_FLAG_REQUIRES_REGISTER) &&
+      !loom_low_allocation_assignment_is_register_like(assignment)) {
     return false;
   }
   if (!iree_any_bit_set(
@@ -339,8 +350,8 @@ static iree_status_t loom_low_allocation_checker_assignments(
     }
     seen[assignment_index] = 1;
     if (interval == NULL ||
-        !loom_low_allocation_checker_assignment_start_shape_is_valid(
-            assignment, interval) ||
+        !loom_low_allocation_checker_assignment_shape_is_valid(assignment,
+                                                               interval) ||
         assignment->end_point <
             loom_low_allocation_checker_storage_end_point(interval) ||
         assignment->unit_count != interval->unit_count ||

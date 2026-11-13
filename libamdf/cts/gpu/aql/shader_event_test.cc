@@ -30,14 +30,16 @@ TEST_F(AqlShaderEventTest, PublishesAndWakesWithoutCompletionSignalEvents) {
   GpuMemory* arguments = nullptr;
   GpuMemory* completion = nullptr;
   ASSERT_NO_FATAL_FAILURE(CreateMemory(
-      AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE, 4096, &records,
-      AMDF_MEMORY_FLAG_HOST_COHERENT | AMDF_MEMORY_FLAG_QUEUE_STORAGE));
+      AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE, 4096,
+      AMDF_MEMORY_FLAG_HOST_COHERENT | AMDF_MEMORY_FLAG_QUEUE_STORAGE,
+      &records));
   ASSERT_NO_FATAL_FAILURE(CreateMemory(AMDF_MEMORY_ACCESS_READ, 4096,
-                                       &arguments,
-                                       AMDF_MEMORY_FLAG_HOST_COHERENT));
+                                       AMDF_MEMORY_FLAG_HOST_COHERENT,
+                                       &arguments));
   ASSERT_NO_FATAL_FAILURE(CreateMemory(
-      AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE, 4096, &completion,
-      AMDF_MEMORY_FLAG_HOST_COHERENT | AMDF_MEMORY_FLAG_QUEUE_STORAGE));
+      AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE, 4096,
+      AMDF_MEMORY_FLAG_HOST_COHERENT | AMDF_MEMORY_FLAG_QUEUE_STORAGE,
+      &completion));
   constexpr uint64_t kGuard = UINT64_C(0xfedcba9876543210);
   std::array<protocol::Record, 3> expected;
   expected.fill({kGuard, kGuard});

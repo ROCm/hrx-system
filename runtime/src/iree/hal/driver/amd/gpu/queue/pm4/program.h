@@ -1,0 +1,147 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+#ifndef IREE_HAL_DRIVER_AMD_GPU_QUEUE_PM4_PROGRAM_H_
+#define IREE_HAL_DRIVER_AMD_GPU_QUEUE_PM4_PROGRAM_H_
+
+#include "iree/hal/driver/amd/gpu/code.h"
+#include "iree/hal/driver/amd/gpu/queue/blit.h"
+#include "iree/hal/driver/amd/gpu/queue/control_program.h"
+#include "iree/hal/driver/amd/gpu/queue/input_memory.h"
+#include "iree/hal/driver/amd/gpu/queue/pm4/barrier.h"
+#include "iree/hal/driver/amd/gpu/queue/pm4/launch.h"
+#include "iree/hal/driver/amd/gpu/queue/program.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif  // __cplusplus
+
+// Concrete PM4 executor. Programs recorded against storage borrow these fixed
+// launches; the encoder recovers this owner from its embedded storage.
+typedef struct iree_hal_amd_gpu_pm4_program_pool_t {
+  // Shared placement, causal instance ownership, and explicit trim registry.
+  iree_hal_amd_gpu_program_pool_t storage;
+  // CPU-produced shader input policy, independent of executable program
+  // storage.
+  iree_hal_amd_gpu_input_memory_t inputs;
+  // Owned instruction bytes shared by every recording and invocation.
+  iree_hal_amd_fabric_memory_t code;
+  // Optional builtin initialization backing, retired before device publication.
+  iree_hal_amd_gpu_code_upload_t* code_upload;
+  // Prepared parallel relocation kernel.
+  iree_hal_amd_gpu_pm4_launch_t fixup;
+  // Prepared dynamic-extent copy/fill kernel.
+  iree_hal_amd_gpu_pm4_launch_t blit;
+  // Scalar atomic launches indexed by instruction scope and integer width.
+  iree_hal_amd_gpu_pm4_launch_t control[IREE_HAL_AMD_GPU_CONTROL_PROGRAM_COUNT];
+  // KERNEL submission enters IB1 and needs an explicit exit continuation.
+  bool chain;
+} iree_hal_amd_gpu_pm4_program_pool_t;
+
+// Cold construction; failure leaves a deinitializable partial owner.
+// The owner publishes code with iree_hal_amd_gpu_code_publish before use.
+iree_status_t iree_hal_amd_gpu_pm4_program_pool_initialize(
+    iree_hal_amd_gpu_context_t* context, uint32_t native_family_ordinal,
+    uint32_t queue_count, bool chain, iree_allocator_t host_allocator,
+    iree_hal_amd_gpu_pm4_program_pool_t* out_pool);
+void iree_hal_amd_gpu_pm4_program_pool_deinitialize(
+    iree_hal_amd_gpu_pm4_program_pool_t* pool);
+
+// A sealed block's native entry. Block identities and extents are independent
+// of invocation placement; successor packets and private-data pointers are
+// ordinary fixups relative to the selected instance's base. An exit can return
+// to a USER ring or chain to an invocation-private KERNEL continuation.
+typedef struct iree_hal_amd_gpu_pm4_program_block_t {
+  // DWORD-aligned entry relative to instance byte zero.
+  uint32_t offset;
+  // Native extent including padding before the final exit packet.
+  uint32_t word_count;
+} iree_hal_amd_gpu_pm4_program_block_t;
+
+// Fixed builtin ABI for one invocation. The queue owns these arguments until
+// native retirement; dense fixup values have separate storage and an explicit
+// address. Program emission writes only these actual builtin arguments.
+typedef struct iree_hal_amd_gpu_pm4_program_arguments_t {
+  // Independent full-word replacements for this instance.
+  iree_hal_amd_gpu_fixup_arguments_t fixup;
+  // Cold initialization or overlap clone, used only for a large native copy.
+  iree_hal_amd_gpu_blit_arguments_t copy;
+} iree_hal_amd_gpu_pm4_program_arguments_t;
+
+// Four pointer replacements reuse retired recorder storage without a separate
+// allocation. Keeping this small bounds CPU work and primary-ring traffic;
+// larger or byte-unaligned tables use the parallel shader replacement path.
+enum {
+  IREE_HAL_AMD_GPU_PM4_PACKET_FIXUP_CAPACITY = 8,
+  IREE_HAL_AMD_GPU_PM4_PACKET_FIXUP_VALUE_CAPACITY =
+      IREE_HAL_AMD_GPU_PM4_PACKET_FIXUP_CAPACITY + 5,
+  IREE_HAL_AMD_GPU_PM4_PACKET_FIXUP_WORD_CAPACITY =
+      IREE_HAL_AMD_GPU_PM4_PACKET_FIXUP_CAPACITY * 5,
+};
+
+// Returns the confirmed WRITE_DATA extent for an admitted small table, or
+// zero when a destination needs the shader's byte-aligned store semantics.
+// Adjacent replacement words share one packet. Called only during sealing.
+uint32_t iree_hal_amd_gpu_pm4_fixup_packet_word_count(
+    const iree_hal_amd_gpu_fixup_t* entries, uint32_t entry_count);
+
+// Evaluates the bounded recorded replacements using CPU-cacheable values and
+// emits confirmed immediate writes. Neither the target nor output is read.
+// All destinations are DWORD aligned as established by the sealing plan.
+uint32_t* iree_hal_amd_gpu_pm4_fixup_packets_emit(
+    const iree_hal_amd_gpu_fixup_t* entries, uint32_t entry_count,
+    const uint64_t* values, uint64_t target_address, uint32_t* words);
+
+// Native invocation extent, excluding caller-owned waits, optional padding,
+// and retirement. The reservation remains exclusive through emission, so the
+// same initialized/join facts govern both sizing and encoding. fixup_count is
+// zero when this invocation preserves previously applied invariant repairs.
+uint32_t iree_hal_amd_gpu_pm4_program_word_count(
+    const iree_hal_amd_gpu_program_t* program,
+    const iree_hal_amd_gpu_program_instance_t* instance,
+    const iree_hal_amd_gpu_pm4_barrier_profile_t* profile, uint32_t fixup_count,
+    uint32_t fixup_word_count);
+
+// Publishes host input, initializes a cold placement, applies all fixups, and
+// enters the resident block. Actual producer/consumer cache paths determine
+// visibility. Padding precedes the final entry, including terminal CHAIN.
+// A bounded, already encoded fixup sequence replaces the shader when supplied.
+// No recorded command or unbounded fixup table is walked on the host here.
+uint32_t* iree_hal_amd_gpu_pm4_program_emit(
+    const iree_hal_amd_gpu_program_t* program,
+    const iree_hal_amd_gpu_program_instance_t* instance,
+    iree_hal_amd_gpu_pm4_program_block_t entry,
+    const iree_hal_amd_gpu_pm4_barrier_profile_t* profile,
+    uint64_t argument_address, uint64_t values_address,
+    iree_hal_amd_gpu_pm4_program_arguments_t* arguments, uint32_t fixup_count,
+    uint32_t fixup_word_count, const uint32_t* fixup_words, uint32_t padding,
+    uint32_t* words);
+
+// Emits a launch for a nonempty, admitted fixup table. Workgroups contain 64
+// lanes, with one complete DWORD per lane. The caller owns visibility before
+// the dispatch and the shader-write -> command-fetch boundary afterward.
+uint32_t* iree_hal_amd_gpu_pm4_fixup_emit(
+    uint32_t* words, const iree_hal_amd_gpu_pm4_launch_t* launch,
+    uint64_t arguments_address, uint32_t entry_count);
+
+// Emits a fixed 256-group copy/fill launch covering an admitted byte extent.
+// Address fixups target the kernarg SGPR pair at DWORD 24. The caller owns
+// visibility and lifetime, as for any recorded shader dispatch.
+uint32_t* iree_hal_amd_gpu_pm4_blit_emit(
+    uint32_t* words, const iree_hal_amd_gpu_pm4_launch_t* launch,
+    uint64_t argument_address);
+
+// One workitem scalar launch. Its target is a separate argument fixup; the
+// kernarg address is the same DWORD-24 pair used by the other small builtins.
+uint32_t* iree_hal_amd_gpu_pm4_control_program_emit(
+    uint32_t* words, const iree_hal_amd_gpu_pm4_launch_t* launch,
+    uint64_t argument_address);
+
+#ifdef __cplusplus
+}  // extern "C"
+#endif  // __cplusplus
+
+#endif  // IREE_HAL_DRIVER_AMD_GPU_QUEUE_PM4_PROGRAM_H_

@@ -11,6 +11,7 @@
 
 #include "iree/base/api.h"
 #include "loom/ir/ir.h"
+#include "loom/util/fact_cast.h"
 #include "loom/util/fact_layout.h"
 
 #ifdef __cplusplus
@@ -28,6 +29,7 @@ enum loom_value_fact_origin_bits_t {
   LOOM_VALUE_FACT_ORIGIN_CONTEXTUAL_QUERY = 1u << 4,
   LOOM_VALUE_FACT_ORIGIN_LAYOUT = 1u << 5,
   LOOM_VALUE_FACT_ORIGIN_EXACT_SCALAR = 1u << 6,
+  LOOM_VALUE_FACT_ORIGIN_INTEGER_CAST = 1u << 7,
 };
 
 // One ordinary operation's complete origin publication. Definitions replace
@@ -40,6 +42,11 @@ typedef struct loom_value_fact_origin_publication_t {
   const loom_module_t* module;
   // Operation whose results are being inferred.
   const loom_op_t* op;
+  // Optional numeric equivalents supplied by scoped operand refinement.
+  // Borrowed for the duration of inference; NULL adds no endpoints beyond
+  // the IR operands. These may have different storage types and cannot
+  // replace IR operands.
+  const loom_value_id_t* numeric_operands;
   // Reusable family-bit scratch indexed by result ordinal.
   uint8_t* published;
   // Optional shared accumulator for numeric and auxiliary changes.
@@ -156,6 +163,8 @@ typedef struct loom_value_fact_origin_snapshot_t {
   loom_value_fact_contextual_query_origin_t contextual_query;
   // Immutable exact layout recipe, valid until scope clear.
   loom_value_fact_layout_origin_t layout_origin;
+  // Exact integer payload interpretations, including their transitive source.
+  loom_value_fact_integer_cast_t integer_cast;
 } loom_value_fact_origin_snapshot_t;
 
 // Captures every origin family, including absent proofs. The snapshot remains
@@ -244,6 +253,25 @@ bool loom_value_fact_table_query_exact_lane_origin(
 iree_status_t loom_value_fact_table_define_exact_scalar_origin(
     loom_value_fact_table_t* table, loom_value_id_t value_id,
     loom_value_fact_exact_scalar_origin_t origin);
+
+// Publishes that one result equals an operand in the active inference scope.
+// Retains the scoped numeric representative and the actual operand's local
+// integer relations. These are numeric identities, not SSA substitutions.
+// A negative operand ordinal withdraws both products. Without an active
+// publication this is a numeric-only inference call and publishes nothing.
+iree_status_t loom_value_fact_table_define_operand_identity(
+    loom_fact_context_t* context, uint16_t result_ordinal,
+    int32_t operand_ordinal);
+
+// Publishes an operand identity for a binary operation with the specified
+// right neutral element, or either neutral operand when symmetric. The caller
+// supplies the operation's mathematical identity and already-interpreted
+// operand facts. Result ordinal zero also covers the arithmetic result of
+// carry/borrow and quotient/remainder. Even an exact operand can carry a
+// relation to a dynamic bound, independently of its numeric interval.
+iree_status_t loom_value_fact_table_define_binary_identity(
+    loom_fact_context_t* context, const loom_value_facts_t* operand_facts,
+    int64_t neutral, bool symmetric);
 
 // Returns the exact scalar value source for |value_id|. The query validates
 // that both values are scalar; their representation types may differ.

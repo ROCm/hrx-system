@@ -20,6 +20,7 @@ loom_check_test_suite(
         "hal_materialization_diagnostics.loom-test",
         "hal_query.loom-test",
         "instruction_immediates.loom-test",
+        "integer_unary_facts.loom-test",
         "low_avx512_bf16.loom-test",
         "low_bmi2_variable_shift.loom-test",
         "target_feature_diagnostics.loom-test",

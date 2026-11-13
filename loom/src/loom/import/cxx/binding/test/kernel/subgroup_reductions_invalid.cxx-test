@@ -1,0 +1,81 @@
+// RUN: verify
+#include <loomcxx/kernel.h>
+
+LOOM_INLINE unsigned wrong_domain(unsigned value) {
+  // ERROR@+1: LOWERING/059 "kernel collective combining kind does not match the value type"
+  return loom::kernel::subgroup::reduce::addf(value);
+}
+
+// ====
+#include <loomcxx/kernel.h>
+
+LOOM_INLINE unsigned wrong_signedness(unsigned value) {
+  // ERROR@+1: LOWERING/059 "kernel collective signedness does not match the combining kind"
+  return loom::kernel::subgroup::reduce::minsi(value);
+}
+
+// ====
+#include <loomcxx/kernel.h>
+
+LOOM_INLINE int wrong_unsignedness(int value) {
+  // ERROR@+1: LOWERING/059 "kernel collective signedness does not match the combining kind"
+  return loom::kernel::subgroup::reduce::maxui(value);
+}
+
+// ====
+#include <loomcxx/kernel.h>
+
+LOOM_INLINE bool reduce_predicate(bool value) {
+  // ERROR@+1: LOWERING/059 "kernel collective combining kind does not match the value type"
+  return loom::kernel::subgroup::reduce::andi(value);
+}
+
+// ====
+#include <loomcxx/kernel.h>
+
+LOOM_INLINE float stride_without_size(float value) {
+  // ERROR@+1: LOWERING/059 "kernel collective cluster stride requires a cluster size"
+  return loom::kernel::subgroup::reduce::addf<0, 2>(value);
+}
+
+// ====
+#include <loomcxx/kernel.h>
+
+LOOM_INLINE float oversized_cluster(float value) {
+  // ERROR@+1: LOWERING/059 "kernel collective cluster arguments must be unsigned 32-bit constants"
+  return loom::kernel::subgroup::reduce::addf<0x100000000ull>(value);
+}
+
+// ====
+// Custom declarations receive the same semantic validation as loomcxx.
+// ERROR@+1: LOWERING/059 "unsupported kernel collective combining kind"
+[[loom::op("kernel.subgroup.reduce", "unknown")]] float reduce(float);
+
+// ====
+// Custom declarations must preserve the input type.
+// ERROR@+1: LOWERING/059 "kernel collective requires matching scalar or rank-one vector value and result types"
+[[loom::op("kernel.subgroup.reduce", "addf")]] float reduce(int);
+
+// ====
+// Custom declarations take exactly one input.
+// ERROR@+1: LOWERING/059 "kernel collective declaration has the wrong operand count"
+[[loom::op("kernel.subgroup.reduce", "addf")]] float reduce(float, float);
+
+// ====
+#include <loomcxx/kernel.h>
+
+LOOM_INLINE float invalid_arithmetic(float value) {
+  // ERROR@+1: LOWERING/059 "kernel collective arithmetic must be native or preserve"
+  return loom::kernel::workgroup::reduce::addf<static_cast<loom::kernel::collective_math>(2)>(value);
+}
+
+// ====
+#include <loomcxx/kernel.h>
+
+template <loom::kernel::collective_math Math, class T>
+[[loom::op("kernel.workgroup.reduce", "addi")]] T integer_reduce(T value);
+
+LOOM_INLINE int invalid_integer_arithmetic(int value) {
+  // ERROR@+1: LOWERING/059 "preservation requirements apply only to floating-point collectives"
+  return integer_reduce<loom::kernel::collective_math::preserve>(value);
+}

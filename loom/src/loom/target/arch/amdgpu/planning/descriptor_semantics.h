@@ -26,6 +26,17 @@ loom_low_schedule_structural_model_t
 loom_amdgpu_descriptor_storage_address_model(
     const loom_low_descriptor_set_t* descriptor_set);
 
+// Number of native instructions in a descriptor's indivisible expansion.
+static inline uint32_t loom_amdgpu_descriptor_instruction_count(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_low_descriptor_t* descriptor) {
+  return descriptor == loom_amdgpu_descriptor_ref_descriptor(
+                           descriptor_set,
+                           LOOM_AMDGPU_DESCRIPTOR_REF_S_MOV_B64_SYMBOL)
+             ? 3u
+             : 1u;
+}
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif

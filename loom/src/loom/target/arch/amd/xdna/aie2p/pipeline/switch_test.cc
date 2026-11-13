@@ -14,7 +14,9 @@
 #include "iree/testing/status_matchers.h"
 #include "loom/pass/types.h"
 #include "loom/target/arch/amd/xdna/aie2p/array/route.h"
+#include "loom/target/arch/amd/xdna/aie2p/pipeline/connectivity.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/native.h"
+#include "loom/target/arch/amd/xdna/aie2p/pipeline/sharing.h"
 #include "loom/target/arch/amd/xdna/array/facts.h"
 #include "loom/target/arch/amd/xdna/array/registers.h"
 #include "loom/testing/diagnostic_matchers.h"
@@ -23,7 +25,10 @@ namespace {
 
 class Aie2pSwitchTest : public ::testing::TestWithParam<loom_xdna_tile_kind_t> {
  protected:
-  void SetUp() override {
+  void SetUp() override { Initialize(GetParam()); }
+
+  void Initialize(loom_xdna_tile_kind_t kind) {
+    kind_ = kind;
     iree_arena_block_pool_initialize(4096, iree_allocator_system(), &pool_);
     iree_arena_initialize(&pool_, &arena_);
     pass_.arena = &arena_;
@@ -32,16 +37,20 @@ class Aie2pSwitchTest : public ::testing::TestWithParam<loom_xdna_tile_kind_t> {
     context_.family = loom_xdna_npu2_array_family();
     tiles_.resize(context_.family->column_count * context_.family->row_count);
     context_.tiles = tiles_.data();
-    coordinate_ = {1,
-                   loom_xdna_array_tile_kind_facts(context_.family, GetParam())
-                       ->first_row};
-    auto& tile = tiles_[coordinate_.column * context_.family->row_count +
-                        coordinate_.row];
-    tile.coordinate = coordinate_;
-    tile.facts = loom_xdna_array_tile_facts(context_.family, coordinate_);
-    // Each test uses at most one route per packet ID, with no inter-tile hops.
+    coordinate_ = {
+        1, loom_xdna_array_tile_kind_facts(context_.family, kind_)->first_row};
+    for (uint16_t column = 0; column < context_.family->column_count;
+         ++column) {
+      for (uint16_t row = 0; row < context_.family->row_count; ++row) {
+        auto& tile = tiles_[column * context_.family->row_count + row];
+        tile.coordinate = {column, row};
+        tile.facts =
+            loom_xdna_array_tile_facts(context_.family, tile.coordinate);
+      }
+    }
+    // Include all 32 packet IDs and their multicast branches.
     IREE_ASSERT_OK(loom_aie2p_array_route_builder_initialize(
-        context_.family, 32, 32, &arena_, &context_.routing));
+        context_.family, 128, &arena_, &context_.routing));
   }
 
   void TearDown() override {
@@ -52,15 +61,18 @@ class Aie2pSwitchTest : public ::testing::TestWithParam<loom_xdna_tile_kind_t> {
   void AddRoute(loom_xdna_stream_port_t source, uint8_t source_channel,
                 loom_xdna_stream_port_t destination,
                 uint8_t destination_channel, uint8_t packet) {
-    const auto index = static_cast<uint32_t>(routes_.size());
+    const auto index = static_cast<uint32_t>(context_.routing.route_count);
+    loom_aie2p_array_route_tree_t tree = {};
     ASSERT_TRUE(loom_aie2p_array_route_stream(
-        &context_.routing, index, index, coordinate_, source, source_channel,
+        &context_.routing, index, &tree, coordinate_, source, source_channel,
         coordinate_, destination, destination_channel, packet != UINT8_MAX));
-    ASSERT_EQ(context_.routing.route_count, index + 1);
-    routes_.push_back({&context_.routing.routes[index], packet});
+    routes_.resize(context_.routing.route_count);
+    for (size_t i = index; i < context_.routing.route_count; ++i) {
+      routes_[i] = {&context_.routing.routes[i], packet, UINT32_MAX};
+    }
   }
 
-  void Build(bool expected_valid) {
+  void Build(bool expected_valid, size_t expected_switches = 1) {
     context_.routes = routes_.data();
     bool valid = false;
     IREE_ASSERT_OK(
@@ -68,7 +80,12 @@ class Aie2pSwitchTest : public ::testing::TestWithParam<loom_xdna_tile_kind_t> {
     ASSERT_EQ(valid, expected_valid);
     if (expected_valid) {
       ASSERT_NE(context_.switches, nullptr);
-      EXPECT_EQ(context_.switches->next, nullptr);
+      size_t switch_count = 0;
+      for (auto* current = context_.switches; current;
+           current = current->next) {
+        ++switch_count;
+      }
+      EXPECT_EQ(switch_count, expected_switches);
       EXPECT_TRUE(diagnostics_.emissions.empty());
     } else {
       ASSERT_EQ(diagnostics_.emissions.size(), 1u);
@@ -77,8 +94,8 @@ class Aie2pSwitchTest : public ::testing::TestWithParam<loom_xdna_tile_kind_t> {
 
   uint16_t Ordinal(loom_xdna_stream_direction_t direction,
                    loom_xdna_stream_port_t port, uint8_t channel) {
-    return loom_xdna_array_stream_port_range(context_.family, GetParam(),
-                                             direction, port)
+    return loom_xdna_array_stream_port_range(context_.family, kind_, direction,
+                                             port)
                ->ordinal +
            channel;
   }
@@ -87,16 +104,25 @@ class Aie2pSwitchTest : public ::testing::TestWithParam<loom_xdna_tile_kind_t> {
     return context_.switches->banks[bank].words[ordinal];
   }
 
-  // Register fields have the same layout for all three tile roles.
-  uint32_t Decode(uint32_t word, loom_xdna_register_field_id_t field) {
-    const loom_xdna_register_field_info_t info =
-        loom_xdna_register_field_info(field);
-    return (word >> info.least_significant_bit) &
-           (UINT32_MAX >> (32 - info.bit_width));
+  void ExpectCircuit(loom_xdna_stream_port_t source, uint8_t source_channel,
+                     loom_xdna_stream_port_t destination,
+                     uint8_t destination_channel) {
+    const uint16_t slave =
+        Ordinal(LOOM_XDNA_STREAM_DIRECTION_SLAVE, source, source_channel);
+    const uint16_t master = Ordinal(LOOM_XDNA_STREAM_DIRECTION_MASTER,
+                                    destination, destination_channel);
+    EXPECT_EQ(Word(LOOM_AIE2P_NATIVE_SWITCH_BANK_MASTERS, master),
+              (1u << 31) | slave);
+    EXPECT_EQ(Word(LOOM_AIE2P_NATIVE_SWITCH_BANK_SLAVES, slave), 1u << 31);
+    for (uint16_t slot = 0; slot < 4; ++slot) {
+      EXPECT_EQ(Word(LOOM_AIE2P_NATIVE_SWITCH_BANK_FILTERS, slave * 4 + slot),
+                0u);
+    }
   }
 
   uint32_t PacketDestinations(loom_xdna_stream_port_t source,
-                              uint8_t source_channel, uint8_t packet) {
+                              uint8_t source_channel, uint8_t packet,
+                              uint32_t expected_matches = 1) {
     const uint16_t slave =
         Ordinal(LOOM_XDNA_STREAM_DIRECTION_SLAVE, source, source_channel);
     uint32_t destinations = 0;
@@ -104,7 +130,8 @@ class Aie2pSwitchTest : public ::testing::TestWithParam<loom_xdna_tile_kind_t> {
     for (uint16_t slot = 0; slot < 4; ++slot) {
       const uint32_t filter =
           Word(LOOM_AIE2P_NATIVE_SWITCH_BANK_FILTERS, slave * 4 + slot);
-      if (!(filter & (1u << 8)) || (filter >> 24) != packet) {
+      const uint32_t mask = (filter >> 16) & 31;
+      if (!(filter & (1u << 8)) || ((filter >> 24) & mask) != (packet & mask)) {
         continue;
       }
       ++matches;
@@ -120,7 +147,7 @@ class Aie2pSwitchTest : public ::testing::TestWithParam<loom_xdna_tile_kind_t> {
         }
       }
     }
-    EXPECT_EQ(matches, 1u);
+    EXPECT_EQ(matches, expected_matches);
     return destinations;
   }
 
@@ -134,117 +161,614 @@ class Aie2pSwitchTest : public ::testing::TestWithParam<loom_xdna_tile_kind_t> {
   loom_pass_t pass_ = {};
   // Physical route and retained switch owners.
   loom_aie2p_native_context_t context_ = {};
-  // Column-major tile inventory, with the selected switch initialized.
+  // Column-major tile inventory for every switch traversed by the routes.
   std::vector<loom_aie2p_native_tile_t> tiles_;
   // Packet identities attached to the physical route builder's edges.
   std::vector<loom_aie2p_native_route_t> routes_;
   // Interior column on the selected tile role's first row.
   loom_xdna_tile_coordinate_t coordinate_ = {};
+  // Tile role selected by the parameterized packet tests or control fixture.
+  loom_xdna_tile_kind_t kind_ = LOOM_XDNA_TILE_KIND_COMPUTE;
 };
 
-TEST_P(Aie2pSwitchTest, AllDestinationsUsePhysicalArbitersAndReuseSelections) {
-  std::array<uint8_t, 32> source_uses = {};
-  const auto* family = context_.family;
-  for (uint8_t i = 0; i < family->stream_port_count; ++i) {
-    const auto& destination = family->stream_ports[i];
-    if (destination.tile_kind != GetParam() ||
-        destination.direction != LOOM_XDNA_STREAM_DIRECTION_MASTER) {
-      continue;
-    }
-    for (uint8_t channel = 0; channel < destination.count; ++channel) {
-      // Choose an actual legal source with room for another packet filter.
-      const loom_xdna_stream_port_range_t* source = nullptr;
-      uint8_t source_channel = 0;
-      uint8_t least_uses = 4;
-      for (uint8_t j = 0; j < family->stream_port_count; ++j) {
-        const auto& candidate = family->stream_ports[j];
-        if (candidate.tile_kind != GetParam() ||
-            candidate.direction != LOOM_XDNA_STREAM_DIRECTION_SLAVE) {
-          continue;
-        }
-        for (uint8_t k = 0; k < candidate.count; ++k) {
-          if (source_uses[candidate.ordinal + k] < least_uses &&
-              (loom_xdna_array_stream_destination_channels(family, &candidate,
-                                                           k, &destination) &
-               (uint32_t{1} << channel))) {
-            source = &candidate;
-            source_channel = k;
-            least_uses = source_uses[candidate.ordinal + k];
-          }
-        }
-      }
-      ASSERT_NE(source, nullptr);
-      AddRoute(source->port, source_channel, destination.port, channel,
-               static_cast<uint8_t>(routes_.size()));
-      ++source_uses[source->ordinal + source_channel];
+class Aie2pControlSwitchTest : public Aie2pSwitchTest {
+ protected:
+  void SetUp() override {
+    Initialize(LOOM_XDNA_TILE_KIND_COMPUTE);
+    const size_t endpoint_count = tiles_.size() * 2;
+    sources_.resize(endpoint_count);
+    destinations_.resize(endpoint_count, UINT32_MAX);
+    context_.control_sources = sources_.data();
+    context_.control_destination_sources = destinations_.data();
+    routes_.resize(128);
+    context_.routes = routes_.data();
+    connections_.resize(128);
+    context_.control_connections = connections_.data();
+  }
+
+  void AddControl(loom_xdna_tile_coordinate_t source,
+                  loom_xdna_stream_port_t source_port,
+                  loom_xdna_tile_coordinate_t destination,
+                  loom_xdna_stream_port_t destination_port, uint8_t packet,
+                  loom_aie2p_native_delivery_t* delivery = nullptr) {
+    ASSERT_TRUE(loom_aie2p_native_packet_route(
+        &context_, &next_source_, source, source_port, destination,
+        destination_port, packet, delivery));
+  }
+
+  void Build(bool expected_valid, size_t expected_switches = 1) {
+    ASSERT_NO_FATAL_FAILURE(
+        Aie2pSwitchTest::Build(expected_valid, expected_switches));
+    if (expected_valid) {
+      // Check complete destination sets and retained framing independently of
+      // the selected edges, including mixed circuit/packet paths.
+      IREE_ASSERT_OK(loom_aie2p_native_connections_verify(&context_));
     }
   }
-  const size_t destination_count = routes_.size();
-  const size_t expected_counts[] = {22, 17, 23};
-  ASSERT_EQ(destination_count, expected_counts[GetParam() - 1]);
 
-  // Another packet ID targeting an existing destination keeps its selection.
-  const auto first = *routes_.front().edge;
-  ASSERT_LT(source_uses[Ordinal(LOOM_XDNA_STREAM_DIRECTION_SLAVE,
-                                first.source_port, first.source_channel)],
-            4u);
-  AddRoute(first.source_port, first.source_channel, first.destination_port,
-           first.destination_channel, 31);
+  void AddPayloads(uint32_t count, loom_aie2p_native_delivery_t* delivery) {
+    const loom_xdna_tile_coordinate_t sources[] = {
+        {0, 3}, {0, 3}, {0, 4}, {0, 5}};
+    const uint8_t engines[] = {0, 1, 0, 0};
+    for (uint32_t i = 0; i < count; ++i) {
+      const size_t first = context_.routing.route_count;
+      const uint32_t source = next_source_++;
+      loom_aie2p_array_route_tree_t tree = {};
+      // The first DMA path carries packets; the others occupy the remaining
+      // southbound lanes without sharing them with control traffic.
+      ASSERT_TRUE(loom_aie2p_array_route_workers(&context_.routing, source,
+                                                 &tree, sources[i], engines[i],
+                                                 {0, 1}, i, i == 0));
+      loom_aie2p_native_route_label(&context_, first, i == 0 ? 16 : UINT8_MAX,
+                                    UINT32_MAX);
+      if (i == 0) {
+        IREE_ASSERT_OK(loom_aie2p_array_route_sharing_initialize(
+            &context_.routing, first, context_.routing.route_count - first,
+            {0, 1}, &arena_, &delivery->sharing));
+      }
+    }
+    deliveries_.resize(tiles_.size());
+    deliveries_[1] = delivery;
+    context_.deliveries = deliveries_.data();
+  }
+
+  uint32_t PortWord(loom_xdna_tile_coordinate_t coordinate,
+                    loom_aie2p_native_switch_bank_t bank,
+                    loom_xdna_stream_port_t port) {
+    const auto kind =
+        loom_xdna_array_tile_facts(context_.family, coordinate)->kind;
+    const loom_xdna_register_field_id_t fields[] = {
+        LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_STREAM_MASTER_CONFIG_ENABLE,
+        LOOM_XDNA_REGISTER_FIELD_MEMORY_TILE_STREAM_MASTER_CONFIG_ENABLE,
+        LOOM_XDNA_REGISTER_FIELD_CORE_STREAM_MASTER_CONFIG_ENABLE};
+    const uint16_t indices[] = {0, 0};
+    const uint32_t address =
+        static_cast<uint32_t>(loom_xdna_register_field_address(
+            context_.family, fields[kind - 1], coordinate, indices));
+    for (auto* current = context_.switches; current; current = current->next) {
+      if (current->banks[LOOM_AIE2P_NATIVE_SWITCH_BANK_MASTERS].address !=
+          address) {
+        continue;
+      }
+      const auto direction = bank == LOOM_AIE2P_NATIVE_SWITCH_BANK_MASTERS
+                                 ? LOOM_XDNA_STREAM_DIRECTION_MASTER
+                                 : LOOM_XDNA_STREAM_DIRECTION_SLAVE;
+      const uint16_t ordinal = loom_xdna_array_stream_port_range(
+                                   context_.family, kind, direction, port)
+                                   ->ordinal;
+      return current->banks[bank].words[ordinal];
+    }
+    ADD_FAILURE() << "missing routed switch";
+    return 0;
+  }
+
+  // Native routing retains these complete stream endpoint facts.
+  std::vector<loom_aie2p_native_control_source_t> sources_;
+  // Intended deliveries retained separately from physical switch choices.
+  std::vector<loom_aie2p_native_control_connection_t> connections_;
+  // A destination stays private only while every use names the same source.
+  std::vector<uint32_t> destinations_;
+  // Eligible payload paths indexed by destination tile.
+  std::vector<loom_aie2p_native_delivery_t*> deliveries_;
+  // Canonical source identity for each route requested by this fixture.
+  uint32_t next_source_ = 0;
+};
+
+TEST_F(Aie2pControlSwitchTest, PrivateCommandAndReplyKeepFramingOnCircuits) {
+  AddControl(coordinate_, LOOM_XDNA_STREAM_PORT_CORE, coordinate_,
+             LOOM_XDNA_STREAM_PORT_TILE_CONTROL, 0);
+  AddControl(coordinate_, LOOM_XDNA_STREAM_PORT_TILE_CONTROL, coordinate_,
+             LOOM_XDNA_STREAM_PORT_CORE, 5);
   ASSERT_NO_FATAL_FAILURE(Build(true));
-
-  // Six physical arbiters, each with four selections. The seventh, thirteenth,
-  // and nineteenth destinations reuse arbiter zero instead of encoding 6/7.
-  const std::array<uint8_t, 24> expected_arbiters = {
-      0, 1, 2, 3, 4, 5, 0, 1, 2, 3, 4, 5, 0, 1, 2, 3, 4, 5, 0, 1, 2, 3, 4, 5};
-  const std::array<uint8_t, 24> expected_selections = {
-      0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3};
-  source_uses.fill(0);
-  for (size_t i = 0; i < routes_.size(); ++i) {
-    SCOPED_TRACE(i);
-    const auto& route = routes_[i];
-    const auto& edge = *route.edge;
-    const size_t selection = i == destination_count ? 0 : i;
-    const auto arbiter = expected_arbiters[selection];
-    const auto master_select = expected_selections[selection];
-    const auto master =
-        Ordinal(LOOM_XDNA_STREAM_DIRECTION_MASTER, edge.destination_port,
-                edge.destination_channel);
-    const auto slave = Ordinal(LOOM_XDNA_STREAM_DIRECTION_SLAVE,
-                               edge.source_port, edge.source_channel);
-    const auto master_word =
-        Word(LOOM_AIE2P_NATIVE_SWITCH_BANK_MASTERS, master);
-    EXPECT_EQ(
-        Decode(
-            master_word,
-            LOOM_XDNA_REGISTER_FIELD_CORE_STREAM_MASTER_CONFIG_CONFIGURATION),
-        arbiter | (uint32_t{1} << (master_select + 3)));
-    const auto filter_word = Word(LOOM_AIE2P_NATIVE_SWITCH_BANK_FILTERS,
-                                  slave * 4 + source_uses[slave]++);
-    EXPECT_EQ(Decode(filter_word,
-                     LOOM_XDNA_REGISTER_FIELD_CORE_STREAM_SLAVE_SLOT_ARBITER),
-              arbiter);
-    EXPECT_EQ(
-        Decode(filter_word,
-               LOOM_XDNA_REGISTER_FIELD_CORE_STREAM_SLAVE_SLOT_MASTER_SELECT),
-        master_select);
-    EXPECT_EQ(Decode(filter_word,
-                     LOOM_XDNA_REGISTER_FIELD_CORE_STREAM_SLAVE_SLOT_PACKET_ID),
-              route.packet);
-    EXPECT_EQ(Decode(filter_word,
-                     LOOM_XDNA_REGISTER_FIELD_CORE_STREAM_SLAVE_SLOT_ENABLE),
-              1u);
+  for (const auto source :
+       {LOOM_XDNA_STREAM_PORT_CORE, LOOM_XDNA_STREAM_PORT_TILE_CONTROL}) {
+    const auto destination = source == LOOM_XDNA_STREAM_PORT_CORE
+                                 ? LOOM_XDNA_STREAM_PORT_TILE_CONTROL
+                                 : LOOM_XDNA_STREAM_PORT_CORE;
+    const uint32_t slave = Ordinal(LOOM_XDNA_STREAM_DIRECTION_SLAVE, source, 0);
+    const uint32_t master =
+        Ordinal(LOOM_XDNA_STREAM_DIRECTION_MASTER, destination, 0);
+    const uint32_t word = Word(LOOM_AIE2P_NATIVE_SWITCH_BANK_MASTERS, master);
+    EXPECT_NE(word & (1u << 31), 0u);
+    EXPECT_EQ(word & (1u << 30), 0u);
+    EXPECT_EQ(word & (1u << 7), 0u);
+    EXPECT_EQ(word & 31, slave);
+    EXPECT_EQ(Word(LOOM_AIE2P_NATIVE_SWITCH_BANK_SLAVES, slave) & (1u << 30),
+              0u);
+    for (uint32_t slot = 0; slot < 4; ++slot) {
+      EXPECT_EQ(Word(LOOM_AIE2P_NATIVE_SWITCH_BANK_FILTERS, slave * 4 + slot),
+                0u);
+    }
   }
 }
 
-TEST_P(Aie2pSwitchTest, FifthPacketFilterRejectsTheRoutePlan) {
-  for (uint8_t packet = 0; packet < 5; ++packet) {
-    AddRoute(LOOM_XDNA_STREAM_PORT_SOUTH, 0, LOOM_XDNA_STREAM_PORT_NORTH, 0,
-             packet);
+TEST_F(Aie2pControlSwitchTest, RepeatedReplyIdsRetainOnePrivatePhysicalRoute) {
+  for (uint8_t packet : {3, 7}) {
+    AddControl(coordinate_, LOOM_XDNA_STREAM_PORT_TILE_CONTROL, coordinate_,
+               LOOM_XDNA_STREAM_PORT_CORE, packet);
   }
+  ASSERT_NO_FATAL_FAILURE(Build(true));
+  EXPECT_EQ(PortWord(coordinate_, LOOM_AIE2P_NATIVE_SWITCH_BANK_MASTERS,
+                     LOOM_XDNA_STREAM_PORT_CORE) &
+                (1u << 30),
+            0u);
+}
+
+TEST_F(Aie2pControlSwitchTest, PrivateFramingCrossesEveryTileRole) {
+  const loom_xdna_tile_coordinate_t shim = {coordinate_.column, 0};
+  AddControl(coordinate_, LOOM_XDNA_STREAM_PORT_CORE, shim,
+             LOOM_XDNA_STREAM_PORT_TILE_CONTROL, 0);
+  AddControl(shim, LOOM_XDNA_STREAM_PORT_TILE_CONTROL, coordinate_,
+             LOOM_XDNA_STREAM_PORT_CORE, 5);
+  ASSERT_NO_FATAL_FAILURE(Build(true, 3));
+  for (auto* current = context_.switches; current; current = current->next) {
+    const auto& masters = current->banks[LOOM_AIE2P_NATIVE_SWITCH_BANK_MASTERS];
+    for (uint16_t master = 0; master < masters.word_count; ++master) {
+      // Every hop forwards complete words without packet mode or header drop.
+      EXPECT_EQ(masters.words[master] & ((1u << 30) | (1u << 7)), 0u);
+    }
+    const auto& filters = current->banks[LOOM_AIE2P_NATIVE_SWITCH_BANK_FILTERS];
+    for (uint16_t slot = 0; slot < filters.word_count; ++slot) {
+      EXPECT_EQ(filters.words[slot], 0u);
+    }
+  }
+}
+
+TEST_F(Aie2pControlSwitchTest,
+       PrivateControlLeavesAllArbitersForPacketTraffic) {
+  for (uint8_t channel = 0; channel < 6; ++channel) {
+    AddRoute(LOOM_XDNA_STREAM_PORT_SOUTH, channel, LOOM_XDNA_STREAM_PORT_NORTH,
+             channel, 0);
+    AddRoute(LOOM_XDNA_STREAM_PORT_SOUTH, channel, LOOM_XDNA_STREAM_PORT_NORTH,
+             (channel + 1) % 6, 1);
+  }
+  next_source_ = 12;
+  AddControl(coordinate_, LOOM_XDNA_STREAM_PORT_CORE, coordinate_,
+             LOOM_XDNA_STREAM_PORT_TILE_CONTROL, 0);
+  ASSERT_NO_FATAL_FAILURE(Build(true));
+  const uint16_t north = Ordinal(LOOM_XDNA_STREAM_DIRECTION_MASTER,
+                                 LOOM_XDNA_STREAM_PORT_NORTH, 0);
+  for (uint8_t channel = 0; channel < 6; ++channel) {
+    EXPECT_EQ(PacketDestinations(LOOM_XDNA_STREAM_PORT_SOUTH, channel, 0),
+              1u << (north + channel));
+    EXPECT_EQ(PacketDestinations(LOOM_XDNA_STREAM_PORT_SOUTH, channel, 1),
+              1u << (north + (channel + 1) % 6));
+  }
+  EXPECT_EQ(PortWord(coordinate_, LOOM_AIE2P_NATIVE_SWITCH_BANK_MASTERS,
+                     LOOM_XDNA_STREAM_PORT_TILE_CONTROL) &
+                (1u << 30),
+            0u);
+}
+
+TEST_F(Aie2pControlSwitchTest,
+       ControlForkKeepsSelectionAndPrivateTailUsesCircuit) {
+  const loom_xdna_tile_coordinate_t neighbor = {2, coordinate_.row};
+  AddControl(coordinate_, LOOM_XDNA_STREAM_PORT_CORE, coordinate_,
+             LOOM_XDNA_STREAM_PORT_TILE_CONTROL, 0);
+  AddControl(coordinate_, LOOM_XDNA_STREAM_PORT_CORE, neighbor,
+             LOOM_XDNA_STREAM_PORT_TILE_CONTROL, 1);
+  AddControl(coordinate_, LOOM_XDNA_STREAM_PORT_CORE, coordinate_,
+             LOOM_XDNA_STREAM_PORT_TILE_CONTROL, 2);
+  ASSERT_NO_FATAL_FAILURE(Build(true, 2));
+  EXPECT_NE(PortWord(coordinate_, LOOM_AIE2P_NATIVE_SWITCH_BANK_MASTERS,
+                     LOOM_XDNA_STREAM_PORT_TILE_CONTROL) &
+                (1u << 30),
+            0u);
+  EXPECT_EQ(PortWord(neighbor, LOOM_AIE2P_NATIVE_SWITCH_BANK_MASTERS,
+                     LOOM_XDNA_STREAM_PORT_TILE_CONTROL) &
+                (1u << 30),
+            0u);
+}
+
+TEST_F(Aie2pControlSwitchTest,
+       PrivatePrefixCrossesShimAndMemoryBeforeCoreFork) {
+  const loom_xdna_tile_coordinate_t shim = {1, 0};
+  for (uint16_t row : {2, 3}) {
+    AddControl(shim, LOOM_XDNA_STREAM_PORT_TILE_CONTROL, {1, row},
+               LOOM_XDNA_STREAM_PORT_CORE, static_cast<uint8_t>(row));
+  }
+  ASSERT_NO_FATAL_FAILURE(Build(true, 4));
+  for (uint16_t row : {0, 1}) {
+    const uint32_t word =
+        PortWord({1, row}, LOOM_AIE2P_NATIVE_SWITCH_BANK_MASTERS,
+                 LOOM_XDNA_STREAM_PORT_NORTH);
+    EXPECT_NE(word & (1u << 31), 0u);
+    EXPECT_EQ(word & ((1u << 30) | (1u << 7)), 0u);
+  }
+  EXPECT_NE(PortWord({1, 2}, LOOM_AIE2P_NATIVE_SWITCH_BANK_MASTERS,
+                     LOOM_XDNA_STREAM_PORT_CORE) &
+                (1u << 30),
+            0u);
+  EXPECT_EQ(PortWord({1, 3}, LOOM_AIE2P_NATIVE_SWITCH_BANK_MASTERS,
+                     LOOM_XDNA_STREAM_PORT_CORE) &
+                (1u << 30),
+            0u);
+}
+
+TEST_F(Aie2pControlSwitchTest, SharedMulticastClassesUseFramedCircuits) {
+  for (uint8_t packet : {1, 4}) {
+    for (uint16_t row : {2, 3}) {
+      AddControl({1, 0}, LOOM_XDNA_STREAM_PORT_TILE_CONTROL, {1, row},
+                 LOOM_XDNA_STREAM_PORT_CORE, packet);
+    }
+  }
+  ASSERT_NO_FATAL_FAILURE(Build(true, 4));
+  for (auto* current = context_.switches; current; current = current->next) {
+    const auto& masters = current->banks[LOOM_AIE2P_NATIVE_SWITCH_BANK_MASTERS];
+    for (uint16_t master = 0; master < masters.word_count; ++master) {
+      EXPECT_EQ(masters.words[master] & ((1u << 30) | (1u << 7)), 0u);
+    }
+    const auto& filters = current->banks[LOOM_AIE2P_NATIVE_SWITCH_BANK_FILTERS];
+    for (uint16_t slot = 0; slot < filters.word_count; ++slot) {
+      EXPECT_EQ(filters.words[slot], 0u);
+    }
+  }
+}
+
+TEST_F(Aie2pControlSwitchTest, PrivateControlAndPayloadShareNoArbiters) {
+  for (uint16_t row : {3, 4}) {
+    AddControl(coordinate_, LOOM_XDNA_STREAM_PORT_CORE, {1, row},
+               LOOM_XDNA_STREAM_PORT_TILE_CONTROL, static_cast<uint8_t>(row));
+  }
+  // The control prefix takes north[0]. Six independent payload streams
+  // remain transparent circuits beside that prefix.
+  for (uint8_t channel = 0; channel < 6; ++channel) {
+    AddRoute(
+        LOOM_XDNA_STREAM_PORT_SOUTH, channel,
+        channel < 5 ? LOOM_XDNA_STREAM_PORT_NORTH : LOOM_XDNA_STREAM_PORT_EAST,
+        channel < 5 ? channel + 1 : 0, 0);
+  }
+  ASSERT_NO_FATAL_FAILURE(Build(true, 3));
+  EXPECT_EQ(PortWord(coordinate_, LOOM_AIE2P_NATIVE_SWITCH_BANK_MASTERS,
+                     LOOM_XDNA_STREAM_PORT_NORTH) &
+                (1u << 30),
+            0u);
+  for (uint8_t channel = 0; channel < 6; ++channel) {
+    ExpectCircuit(
+        LOOM_XDNA_STREAM_PORT_SOUTH, channel,
+        channel < 5 ? LOOM_XDNA_STREAM_PORT_NORTH : LOOM_XDNA_STREAM_PORT_EAST,
+        channel < 5 ? channel + 1 : 0);
+  }
+}
+
+TEST_F(Aie2pControlSwitchTest, SharedCompletionEndpointKeepsPacketArbitration) {
+  const loom_xdna_tile_coordinate_t neighbor = {2, coordinate_.row};
+  AddControl(coordinate_, LOOM_XDNA_STREAM_PORT_TILE_CONTROL, coordinate_,
+             LOOM_XDNA_STREAM_PORT_CORE, 3);
+  AddControl(neighbor, LOOM_XDNA_STREAM_PORT_TILE_CONTROL, coordinate_,
+             LOOM_XDNA_STREAM_PORT_CORE, 4);
+  AddControl(coordinate_, LOOM_XDNA_STREAM_PORT_TILE_CONTROL, coordinate_,
+             LOOM_XDNA_STREAM_PORT_CORE, 5);
+  ASSERT_NO_FATAL_FAILURE(Build(true, 2));
+  EXPECT_NE(PortWord(coordinate_, LOOM_AIE2P_NATIVE_SWITCH_BANK_MASTERS,
+                     LOOM_XDNA_STREAM_PORT_CORE) &
+                (1u << 30),
+            0u);
+}
+
+TEST_F(Aie2pControlSwitchTest, FirmwareCompletionRetainsPacketFramingContract) {
+  const loom_xdna_tile_coordinate_t shim = {1, 0};
+  AddControl(shim, LOOM_XDNA_STREAM_PORT_TILE_CONTROL, shim,
+             LOOM_XDNA_STREAM_PORT_SOUTH, 0);
+  ASSERT_NO_FATAL_FAILURE(Build(true));
+  EXPECT_NE(PortWord(shim, LOOM_AIE2P_NATIVE_SWITCH_BANK_MASTERS,
+                     LOOM_XDNA_STREAM_PORT_SOUTH) &
+                (1u << 30),
+            0u);
+}
+
+TEST_F(Aie2pControlSwitchTest, AvailableLaneKeepsControlPrivateBesidePayload) {
+  loom_aie2p_native_delivery_t delivery = {};
+  ASSERT_NO_FATAL_FAILURE(AddPayloads(1, &delivery));
+  AddControl({0, 3}, LOOM_XDNA_STREAM_PORT_CORE, {0, 1},
+             LOOM_XDNA_STREAM_PORT_TILE_CONTROL, 0, &delivery);
+  EXPECT_FALSE(delivery.sharing.used);
+  ASSERT_NO_FATAL_FAILURE(Build(true, 3));
+  EXPECT_EQ(PortWord({0, 1}, LOOM_AIE2P_NATIVE_SWITCH_BANK_MASTERS,
+                     LOOM_XDNA_STREAM_PORT_TILE_CONTROL) &
+                (1u << 30),
+            0u);
+}
+
+TEST_F(Aie2pControlSwitchTest, BorrowedPayloadLaneKeepsControlPacketFiltering) {
+  loom_aie2p_native_delivery_t delivery = {};
+  ASSERT_NO_FATAL_FAILURE(AddPayloads(4, &delivery));
+  for (uint8_t packet : {0, 1}) {
+    AddControl({0, 4}, LOOM_XDNA_STREAM_PORT_CORE, {0, 1},
+               LOOM_XDNA_STREAM_PORT_TILE_CONTROL, packet, &delivery);
+  }
+  EXPECT_TRUE(delivery.sharing.used);
+  ASSERT_NO_FATAL_FAILURE(Build(true, 5));
+  EXPECT_NE(PortWord({0, 1}, LOOM_AIE2P_NATIVE_SWITCH_BANK_MASTERS,
+                     LOOM_XDNA_STREAM_PORT_TILE_CONTROL) &
+                (1u << 30),
+            0u);
+  // The command endpoint still receives its header; only the payload DMA
+  // endpoint strips framing on the shared arrival stream.
+  EXPECT_EQ(PortWord({0, 1}, LOOM_AIE2P_NATIVE_SWITCH_BANK_MASTERS,
+                     LOOM_XDNA_STREAM_PORT_TILE_CONTROL) &
+                (1u << 7),
+            0u);
+  EXPECT_NE(PortWord({0, 1}, LOOM_AIE2P_NATIVE_SWITCH_BANK_MASTERS,
+                     LOOM_XDNA_STREAM_PORT_DMA) &
+                (1u << 7),
+            0u);
+}
+
+TEST_P(Aie2pSwitchTest, OneInputSharesAnArbiterAcrossDestinationSets) {
+  const auto source = GetParam() == LOOM_XDNA_TILE_KIND_MEMORY
+                          ? LOOM_XDNA_STREAM_PORT_DMA
+                          : LOOM_XDNA_STREAM_PORT_SOUTH;
+  for (uint8_t packet = 0; packet < 4; ++packet) {
+    AddRoute(source, 0, LOOM_XDNA_STREAM_PORT_NORTH, packet, packet);
+  }
+  // A second identity for the first set compresses into the same input filter.
+  AddRoute(source, 0, LOOM_XDNA_STREAM_PORT_NORTH, 0, 16);
+  ASSERT_NO_FATAL_FAILURE(Build(true));
+  const uint16_t north = Ordinal(LOOM_XDNA_STREAM_DIRECTION_MASTER,
+                                 LOOM_XDNA_STREAM_PORT_NORTH, 0);
+  const uint32_t arbiter =
+      Word(LOOM_AIE2P_NATIVE_SWITCH_BANK_MASTERS, north) & 7;
+  EXPECT_LT(arbiter, 6u);
+  for (uint8_t channel = 0; channel < 4; ++channel) {
+    EXPECT_EQ(Word(LOOM_AIE2P_NATIVE_SWITCH_BANK_MASTERS, north + channel) & 7,
+              arbiter);
+  }
+  for (uint8_t packet = 0; packet < 32; ++packet) {
+    SCOPED_TRACE(packet);
+    const bool admitted = packet < 4 || packet == 16;
+    EXPECT_EQ(PacketDestinations(source, 0, packet, admitted ? 1 : 0),
+              admitted ? 1u << (north + (packet & 3)) : 0);
+  }
+}
+
+TEST_P(Aie2pSwitchTest, IndependentInputsKeepIndependentArbiters) {
+  const auto source = GetParam() == LOOM_XDNA_TILE_KIND_MEMORY
+                          ? LOOM_XDNA_STREAM_PORT_DMA
+                          : LOOM_XDNA_STREAM_PORT_SOUTH;
+  for (uint8_t input = 0; input < 3; ++input) {
+    for (uint8_t packet = 0; packet < 2; ++packet) {
+      AddRoute(source, input, LOOM_XDNA_STREAM_PORT_NORTH, input * 2 + packet,
+               packet);
+    }
+  }
+  // A seventh destination must share with its own input, not with the first
+  // arbiter that happens to have an unused master selection.
+  AddRoute(source, 1, LOOM_XDNA_STREAM_PORT_TILE_CONTROL, 0, 2);
+  ASSERT_NO_FATAL_FAILURE(Build(true));
+  const uint16_t north = Ordinal(LOOM_XDNA_STREAM_DIRECTION_MASTER,
+                                 LOOM_XDNA_STREAM_PORT_NORTH, 0);
+  uint32_t arbiters = 0;
+  for (uint8_t input = 0; input < 3; ++input) {
+    const uint32_t arbiter =
+        Word(LOOM_AIE2P_NATIVE_SWITCH_BANK_MASTERS, north + input * 2) & 7;
+    ASSERT_LT(arbiter, 6u);
+    EXPECT_EQ(arbiters & (1u << arbiter), 0u);
+    arbiters |= 1u << arbiter;
+    for (uint8_t packet = 0; packet < 2; ++packet) {
+      EXPECT_EQ(PacketDestinations(source, input, packet),
+                1u << (north + input * 2 + packet));
+      EXPECT_EQ(Word(LOOM_AIE2P_NATIVE_SWITCH_BANK_MASTERS,
+                     north + input * 2 + packet) &
+                    7,
+                arbiter);
+    }
+  }
+  const uint16_t control = Ordinal(LOOM_XDNA_STREAM_DIRECTION_MASTER,
+                                   LOOM_XDNA_STREAM_PORT_TILE_CONTROL, 0);
+  EXPECT_EQ(Word(LOOM_AIE2P_NATIVE_SWITCH_BANK_MASTERS, control) & 7,
+            Word(LOOM_AIE2P_NATIVE_SWITCH_BANK_MASTERS, north + 2) & 7);
+  EXPECT_EQ(PacketDestinations(source, 1, 2), 1u << control);
+}
+
+TEST_P(Aie2pSwitchTest, MultipleInputComponentsCannotShareArbiters) {
+  const auto source = GetParam() == LOOM_XDNA_TILE_KIND_MEMORY
+                          ? LOOM_XDNA_STREAM_PORT_DMA
+                          : LOOM_XDNA_STREAM_PORT_SOUTH;
+  for (uint8_t input = 0; input < 2; ++input) {
+    AddRoute(source, input, LOOM_XDNA_STREAM_PORT_NORTH, 0, 0);
+    AddRoute(source, input, LOOM_XDNA_STREAM_PORT_NORTH, 1, 1);
+  }
+  AddRoute(source, 0, LOOM_XDNA_STREAM_PORT_NORTH, 2, 2);
+  ASSERT_NO_FATAL_FAILURE(Build(true));
+  const uint16_t north = Ordinal(LOOM_XDNA_STREAM_DIRECTION_MASTER,
+                                 LOOM_XDNA_STREAM_PORT_NORTH, 0);
+  uint32_t arbiters = 0;
+  for (uint8_t channel = 0; channel < 3; ++channel) {
+    const uint32_t arbiter =
+        Word(LOOM_AIE2P_NATIVE_SWITCH_BANK_MASTERS, north + channel) & 7;
+    ASSERT_LT(arbiter, 6u);
+    EXPECT_EQ(arbiters & (1u << arbiter), 0u);
+    arbiters |= 1u << arbiter;
+    EXPECT_EQ(PacketDestinations(source, 0, channel), 1u << (north + channel));
+    if (channel < 2) {
+      EXPECT_EQ(PacketDestinations(source, 1, channel),
+                1u << (north + channel));
+    }
+  }
+}
+
+TEST_P(Aie2pSwitchTest, SevenIndependentComponentsRejectTheRoutePlan) {
+  const auto source = GetParam() == LOOM_XDNA_TILE_KIND_MEMORY
+                          ? LOOM_XDNA_STREAM_PORT_DMA
+                          : LOOM_XDNA_STREAM_PORT_SOUTH;
+  for (uint8_t channel = 0; channel < 6; ++channel) {
+    AddRoute(source, channel, LOOM_XDNA_STREAM_PORT_NORTH, channel, 0);
+    AddRoute(source, channel, LOOM_XDNA_STREAM_PORT_TILE_CONTROL, 0, 1);
+  }
+  // Each input selects between its private north output and the common
+  // command endpoint. Six independent input components and the shared join
+  // need seven arbiters; no input can become a transparent circuit.
   ASSERT_NO_FATAL_FAILURE(Build(false));
   EXPECT_EQ(diagnostics_.emissions.front().string_params,
             std::vector<std::string>{
-                "available packet filters and multicast master selections"});
+                "available packet filters and independent multicast arbiters"});
+}
+
+TEST_P(Aie2pSwitchTest, PrivateMulticastPreservesAllFramedPacketClasses) {
+  const auto source = GetParam() == LOOM_XDNA_TILE_KIND_MEMORY
+                          ? LOOM_XDNA_STREAM_PORT_DMA
+                          : LOOM_XDNA_STREAM_PORT_SOUTH;
+  // These identities would require five irreducible filters. Their common
+  // private path need not inspect or change the header at all.
+  for (uint8_t packet : {0, 3, 5, 6, 9}) {
+    for (uint8_t channel = 0; channel < 2; ++channel) {
+      AddRoute(source, 0, LOOM_XDNA_STREAM_PORT_NORTH, channel, packet);
+    }
+  }
+  ASSERT_NO_FATAL_FAILURE(Build(true));
+  for (uint8_t channel = 0; channel < 2; ++channel) {
+    ExpectCircuit(source, 0, LOOM_XDNA_STREAM_PORT_NORTH, channel);
+  }
+}
+
+TEST_P(Aie2pSwitchTest,
+       SharedDestinationCompressesPacketIdsWithoutOvermatching) {
+  const auto source = GetParam() == LOOM_XDNA_TILE_KIND_MEMORY
+                          ? LOOM_XDNA_STREAM_PORT_DMA
+                          : LOOM_XDNA_STREAM_PORT_SOUTH;
+  for (uint8_t packet = 0; packet < 5; ++packet) {
+    AddRoute(source, 0, LOOM_XDNA_STREAM_PORT_NORTH, 0, packet);
+  }
+  AddRoute(source, 1, LOOM_XDNA_STREAM_PORT_NORTH, 0, 0);
+  ASSERT_NO_FATAL_FAILURE(Build(true));
+  const uint16_t north = Ordinal(LOOM_XDNA_STREAM_DIRECTION_MASTER,
+                                 LOOM_XDNA_STREAM_PORT_NORTH, 0);
+  for (uint8_t packet = 0; packet < 32; ++packet) {
+    SCOPED_TRACE(packet);
+    const bool admitted = packet < 5;
+    EXPECT_EQ(PacketDestinations(source, 0, packet, admitted ? 1 : 0),
+              admitted ? 1u << north : 0);
+  }
+}
+
+TEST_P(Aie2pSwitchTest, FullPacketNamespaceUsesOneFilter) {
+  const auto source = GetParam() == LOOM_XDNA_TILE_KIND_MEMORY
+                          ? LOOM_XDNA_STREAM_PORT_DMA
+                          : LOOM_XDNA_STREAM_PORT_SOUTH;
+  for (uint8_t packet = 0; packet < 32; ++packet) {
+    AddRoute(source, 0, LOOM_XDNA_STREAM_PORT_NORTH, 0, packet);
+  }
+  AddRoute(source, 1, LOOM_XDNA_STREAM_PORT_NORTH, 0, 0);
+  ASSERT_NO_FATAL_FAILURE(Build(true));
+  const uint16_t north = Ordinal(LOOM_XDNA_STREAM_DIRECTION_MASTER,
+                                 LOOM_XDNA_STREAM_PORT_NORTH, 0);
+  const uint16_t input = Ordinal(LOOM_XDNA_STREAM_DIRECTION_SLAVE, source, 0);
+  EXPECT_EQ(Word(LOOM_AIE2P_NATIVE_SWITCH_BANK_FILTERS, input * 4), 1u << 8);
+  for (uint8_t packet = 0; packet < 32; ++packet) {
+    SCOPED_TRACE(packet);
+    EXPECT_EQ(PacketDestinations(source, 0, packet), 1u << north);
+  }
+}
+
+TEST_P(Aie2pSwitchTest, MaskedFiltersPreserveCompleteMulticastSets) {
+  const auto source = GetParam() == LOOM_XDNA_TILE_KIND_MEMORY
+                          ? LOOM_XDNA_STREAM_PORT_DMA
+                          : LOOM_XDNA_STREAM_PORT_SOUTH;
+  std::array<uint32_t, 32> destinations = {};
+  destinations[0] = destinations[1] = 3;
+  destinations[2] = destinations[3] = 4;
+  destinations[16] = 7;
+  // Interleave destination branches: compression must wait until every
+  // packet ID's entire multicast set is known.
+  for (uint8_t channel = 0; channel < 3; ++channel) {
+    for (uint8_t packet = 0; packet < 32; ++packet) {
+      if (destinations[packet] & (1u << channel)) {
+        AddRoute(source, 0, LOOM_XDNA_STREAM_PORT_NORTH, channel, packet);
+      }
+    }
+  }
+  ASSERT_NO_FATAL_FAILURE(Build(true));
+  const uint16_t north = Ordinal(LOOM_XDNA_STREAM_DIRECTION_MASTER,
+                                 LOOM_XDNA_STREAM_PORT_NORTH, 0);
+  for (uint8_t packet = 0; packet < 32; ++packet) {
+    SCOPED_TRACE(packet);
+    EXPECT_EQ(
+        PacketDestinations(source, 0, packet, destinations[packet] ? 1 : 0),
+        destinations[packet] << north);
+  }
+}
+
+TEST_P(Aie2pSwitchTest, NoncontiguousMaskBitsKeepInputsIndependent) {
+  const auto source = GetParam() == LOOM_XDNA_TILE_KIND_MEMORY
+                          ? LOOM_XDNA_STREAM_PORT_DMA
+                          : LOOM_XDNA_STREAM_PORT_SOUTH;
+  for (uint8_t packet = 0; packet < 32; ++packet) {
+    if ((packet & 5) == 1) {
+      AddRoute(source, 0, LOOM_XDNA_STREAM_PORT_NORTH, 0, packet);
+    }
+  }
+  AddRoute(source, 1, LOOM_XDNA_STREAM_PORT_NORTH, 0, 31);
+  ASSERT_NO_FATAL_FAILURE(Build(true));
+  const uint16_t north = Ordinal(LOOM_XDNA_STREAM_DIRECTION_MASTER,
+                                 LOOM_XDNA_STREAM_PORT_NORTH, 0);
+  for (uint8_t packet = 0; packet < 32; ++packet) {
+    SCOPED_TRACE(packet);
+    const bool admitted = (packet & 5) == 1;
+    EXPECT_EQ(PacketDestinations(source, 0, packet, admitted ? 1 : 0),
+              admitted ? 1u << north : 0);
+    EXPECT_EQ(PacketDestinations(source, 1, packet, packet == 31 ? 1 : 0),
+              packet == 31 ? 1u << north : 0);
+  }
+}
+
+TEST_P(Aie2pSwitchTest, FiveIrreducibleFiltersRejectTheRoutePlan) {
+  const auto source = GetParam() == LOOM_XDNA_TILE_KIND_MEMORY
+                          ? LOOM_XDNA_STREAM_PORT_DMA
+                          : LOOM_XDNA_STREAM_PORT_SOUTH;
+  // No pair differs in only one ID bit, so every ID needs its own filter.
+  for (uint8_t packet : {0, 3, 5, 6, 9}) {
+    AddRoute(source, 0, LOOM_XDNA_STREAM_PORT_NORTH, 0, packet);
+  }
+  AddRoute(source, 1, LOOM_XDNA_STREAM_PORT_NORTH, 0, 0);
+  ASSERT_NO_FATAL_FAILURE(Build(false));
+  EXPECT_EQ(diagnostics_.emissions.front().string_params,
+            std::vector<std::string>{
+                "available packet filters and independent multicast arbiters"});
+}
+
+TEST_P(Aie2pSwitchTest, MinimumCoverCanReconsiderAnEarlierMask) {
+  const auto source = GetParam() == LOOM_XDNA_TILE_KIND_MEMORY
+                          ? LOOM_XDNA_STREAM_PORT_DMA
+                          : LOOM_XDNA_STREAM_PORT_SOUTH;
+  // Greedily covering IDs 0/1 first leaves four singletons. Covering 0/8 and
+  // 1/3 instead leaves only IDs 5/6, fitting the four physical filters.
+  constexpr uint32_t packets = 0x16b;
+  for (uint8_t packet = 0; packet < 32; ++packet) {
+    if (packets & (1u << packet)) {
+      AddRoute(source, 0, LOOM_XDNA_STREAM_PORT_NORTH, 0, packet);
+    }
+  }
+  AddRoute(source, 1, LOOM_XDNA_STREAM_PORT_NORTH, 0, 0);
+  ASSERT_NO_FATAL_FAILURE(Build(true));
+  const uint16_t north = Ordinal(LOOM_XDNA_STREAM_DIRECTION_MASTER,
+                                 LOOM_XDNA_STREAM_PORT_NORTH, 0);
+  for (uint8_t packet = 0; packet < 32; ++packet) {
+    SCOPED_TRACE(packet);
+    const bool admitted = (packets & (1u << packet)) != 0;
+    EXPECT_EQ(PacketDestinations(source, 0, packet, admitted ? 1 : 0),
+              admitted ? 1u << north : 0);
+  }
 }
 
 TEST_P(Aie2pSwitchTest, OverlappingMulticastsKeepCompleteDestinationSets) {
@@ -273,18 +797,21 @@ TEST_P(Aie2pSwitchTest, OnlyDmaPayloadEndpointsRemovePacketHeaders) {
   const auto source = GetParam() == LOOM_XDNA_TILE_KIND_MEMORY
                           ? LOOM_XDNA_STREAM_PORT_DMA
                           : LOOM_XDNA_STREAM_PORT_SOUTH;
-  const bool payload = GetParam() != LOOM_XDNA_TILE_KIND_SHIM_NOC;
-  const auto endpoint =
-      payload ? LOOM_XDNA_STREAM_PORT_DMA : LOOM_XDNA_STREAM_PORT_TILE_CONTROL;
-  AddRoute(source, 0, endpoint, 0, 1);
+  AddRoute(source, 0, LOOM_XDNA_STREAM_PORT_DMA, 0, 1);
+  const bool shim = GetParam() == LOOM_XDNA_TILE_KIND_SHIM_NOC;
+  const auto& endpoint =
+      context_.routing.routes[context_.routing.route_count - (shim ? 2 : 1)];
+  EXPECT_TRUE(endpoint.dma_destination);
+  const uint16_t dma =
+      Ordinal(LOOM_XDNA_STREAM_DIRECTION_MASTER, endpoint.destination_port,
+              endpoint.destination_channel);
   AddRoute(source, 0, LOOM_XDNA_STREAM_PORT_NORTH, 0, 1);
   ASSERT_NO_FATAL_FAILURE(Build(true));
-  const uint16_t dma = Ordinal(LOOM_XDNA_STREAM_DIRECTION_MASTER, endpoint, 0);
   const uint16_t north = Ordinal(LOOM_XDNA_STREAM_DIRECTION_MASTER,
                                  LOOM_XDNA_STREAM_PORT_NORTH, 0);
   EXPECT_EQ(PacketDestinations(source, 0, 1), (1u << dma) | (1u << north));
   EXPECT_EQ(Word(LOOM_AIE2P_NATIVE_SWITCH_BANK_MASTERS, dma) & (1u << 7),
-            payload ? 1u << 7 : 0u);
+            1u << 7);
   EXPECT_EQ(Word(LOOM_AIE2P_NATIVE_SWITCH_BANK_MASTERS, north) & (1u << 7), 0u);
 }
 
@@ -304,7 +831,7 @@ TEST_P(Aie2pSwitchTest, ConnectedDestinationSetsMustFitOneArbiter) {
   ASSERT_NO_FATAL_FAILURE(Build(false));
   EXPECT_EQ(diagnostics_.emissions.front().string_params,
             std::vector<std::string>{
-                "available packet filters and multicast master selections"});
+                "available packet filters and independent multicast arbiters"});
 }
 
 INSTANTIATE_TEST_SUITE_P(TileKinds, Aie2pSwitchTest,

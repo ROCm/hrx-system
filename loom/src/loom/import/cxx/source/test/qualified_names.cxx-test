@@ -1,0 +1,138 @@
+// RUN: roundtrip
+// INPUT: cxx data-model=lp64
+// A dependent prefix must not bind a later component to an unrelated global.
+struct Deep {
+  using type = float;
+};
+struct Item {
+  struct Inner {
+    struct Deep {
+      using type = long long;
+      static constexpr int value = 17;
+    };
+  };
+};
+template <class T>
+using Result = typename T::Inner::Deep::type;
+static_assert(__is_same(Result<Item>, long long));
+
+Result<Item> identity(Result<Item> value) { return value; }
+unsigned width() { return sizeof(Result<Item>); }
+
+template <class T>
+constexpr int nested_value() {
+  return T::Inner::Deep::value;
+}
+int value() { return nested_value<Item>(); }
+
+// ----
+func.def public @identity(%value: i64) -> (i64) {
+  func.return %value : i64
+}
+
+func.def public @width() -> (i32) {
+  %3 = scalar.constant 8 : i64
+  %4 = scalar.trunci %3 : i64 to i32
+  func.return %4 : i32
+}
+
+func.def public @value() -> (i32) {
+  %6 = func.call pure @nested_value___Item() : () -> (i32)
+  func.return %6 : i32
+}
+
+func.def @nested_value___Item() -> (i32) {
+  %8 = scalar.constant 17 : i32
+  func.return %8 : i32
+}
+
+// ====
+// RUN: roundtrip
+// INPUT: cxx data-model=lp64
+// Member alias templates discovered during substitution retain their scope.
+struct Deep {
+  using type = float;
+};
+struct Item {
+  struct Inner {
+    struct Deep {
+      using type = unsigned;
+    };
+  };
+};
+struct Provider {
+  template <class T>
+  using Rebind = T;
+};
+template <class T, class U>
+using Result = typename T::template Rebind<U>::Inner::Deep::type;
+static_assert(__is_same(Result<Provider, Item>, unsigned));
+Result<Provider, Item> entry(Result<Provider, Item> value) {
+  return value + sizeof(Result<Provider, Item>);
+}
+
+// ----
+func.def public @entry(%value: i32) -> (i32) {
+  %2 = scalar.extui %value : i32 to i64
+  %3 = scalar.constant 4 : i64
+  %4 = scalar.addi %2, %3 : i64
+  %5 = scalar.trunci %4 : i64 to i32
+  func.return %5 : i32
+}
+
+// ====
+// RUN: roundtrip
+// INPUT: cxx data-model=lp64
+// An alias can remain dependent while an enclosing template is instantiated.
+struct Item {
+  using type = long long;
+};
+template <class T>
+struct Holder {
+  using Alias = T;
+  using Result = typename Alias::type;
+};
+template <class T>
+using Identity = T;
+template <class T>
+using Result = typename Holder<Identity<T>>::Result;
+static_assert(__is_same(Result<Item>, long long));
+Result<Item> entry(Result<Item> value) { return value + 1; }
+
+// ----
+func.def public @entry(%value: i64) -> (i64) {
+  %2 = scalar.constant 1 : i32
+  %3 = scalar.extsi %2 : i32 to i64
+  %4 = scalar.addi %value, %3 : i64
+  func.return %4 : i64
+}
+
+// ====
+// A template-template prefix stays dependent even with concrete arguments.
+template <bool Value> struct Boolean { static constexpr bool value = Value; };
+template <class... Ts> struct All { static constexpr bool value = (Ts::value && ...); };
+template <class... Ts>
+struct Tuple {
+  template <template <class...> class A = All, bool = A<Boolean<true>>::value>
+  constexpr Tuple(const Ts&...) : count(sizeof...(Ts)) {}
+  int count;
+};
+static_assert(Tuple<int>(1).count == 1);
+int entry(int value) {
+  constexpr Tuple<int, float> tuple(1, 2.0f);
+  return value + tuple.count;
+}
+// ----
+func.def public @entry(%value: i32) -> (i32) {
+  %2 = scalar.constant 1 : i32
+  %3 = scalar.constant 2.0 : f32
+  %tuple_count = func.call pure @Tuple__Tuple___All_1_value() : () -> (i32)
+  %5 = scalar.addi %value, %tuple_count : i32
+  func.return %5 : i32
+}
+
+func.def inline @Tuple__Tuple___All_1_value() -> (i32) {
+  %7 = scalar.constant 2 : i64
+  %8 = scalar.trunci %7 : i64 to i32
+  func.return %8 : i32
+}

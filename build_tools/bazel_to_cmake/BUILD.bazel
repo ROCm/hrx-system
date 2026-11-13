@@ -21,7 +21,10 @@ exports_files(
 py_library(
     name = "dependency_metadata",
     srcs = ["deps.py"],
-    visibility = ["//build_tools/third_party:__pkg__"],
+    visibility = [
+        "//build_tools/dependencies:__pkg__",
+        "//build_tools/third_party:__pkg__",
+    ],
 )
 
 py_library(

@@ -799,9 +799,9 @@ loom_low_allocation_concat_reservation_find_location_for_source(
       }
     }
     if (loom_low_allocation_search_assignment_conflicts(
-            context, &reservation, sources->ignored_value_ids,
-            sources->ignored_value_count, sources->ignored_value_ids,
-            sources->ignored_value_count,
+            context, &reservation, /*check_active_assignments=*/true,
+            sources->ignored_value_ids, sources->ignored_value_count,
+            sources->ignored_value_ids, sources->ignored_value_count,
             LOOM_LOW_ALLOCATION_STORAGE_RELEASE_FOR_PRESSURE,
             context->unit_liveness->content_identity) ||
         (source_can_alias_result &&

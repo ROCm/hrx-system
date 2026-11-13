@@ -1,0 +1,383 @@
+// The public source lowering preserves exact handle modes and predicate wiring.
+// RUN: emit source-low output=low
+vm.target<core> @vm
+
+type.decl import("lifetime", "object") @Object
+
+func.def target(@vm) @inspect(%owner: ref<@Object>, %pointer: ptr<@Object>) -> (i1, i1, i1) {
+  %empty_owner = ref.null : ref<@Object>
+  %empty_pointer = ref.null : ptr<@Object>
+  %missing = ref.compare.null %pointer : ptr<@Object>
+  %same = ref.compare.eq %owner, %pointer : ref<@Object>, ptr<@Object>
+  %both_empty = ref.compare.eq %empty_owner, %empty_pointer : ref<@Object>, ptr<@Object>
+  ref.release %owner : ref<@Object>
+  ref.release %empty_owner : ref<@Object>
+  func.return %missing, %same, %both_empty : i1, i1, i1
+}
+
+// ----
+low.func.def target<vm.core>(@vm) abi(vm_function) @inspect(%owner: reg<vm.ref : ref<@Object>>, %pointer: reg<vm.ref : ptr<@Object>>) -> (reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>) asm {
+  %empty_owner = ref.null : reg<vm.ref : ref<@Object>>
+  %empty_pointer = ref.null : reg<vm.ref : ptr<@Object>>
+  %missing = ref.compare.null %pointer
+  %same = ref.compare.eq %owner, %pointer
+  low.release %pointer : reg<vm.ref : ptr<@Object>>
+  %both_empty = ref.compare.eq %empty_owner, %empty_pointer
+  low.release %empty_pointer : reg<vm.ref : ptr<@Object>>
+  low.release %owner : reg<vm.ref : ref<@Object>>
+  low.release %empty_owner : reg<vm.ref : ref<@Object>>
+  return %missing, %same, %both_empty
+}
+
+// ====
+
+// Both null modes cross a non-inlined return and the native ABI. Copies,
+// observations, and releases never allocate a payload or run a finalizer.
+// RUN: emit vm-object-lifetime
+type.decl import("lifetime", "object") @Object
+
+func.decl import("lifetime", "event") @event(%value: i32)
+
+func.decl import("lifetime", "consume") @consume(%owner: ref<@Object>)
+
+func.decl import("lifetime", "read") @read(%pointer: ptr<@Object>)
+
+func.decl import("lifetime", "observe") @observe()
+
+func.def @record(%condition: i1) {
+  %value = scalar.extui %condition : i1 to i32
+  func.call @event(%value) : (i32)
+  func.return
+}
+
+func.def noinline @empty() -> (ref<@Object>, ptr<@Object>) {
+  %owner = ref.null : ref<@Object>
+  %pointer = ref.null : ptr<@Object>
+  func.return %owner, %pointer : ref<@Object>, ptr<@Object>
+}
+
+func.def public @run() {
+  %owner, %pointer = func.call @empty() : () -> (ref<@Object>, ptr<@Object>)
+  %copy = ref.duplicate %owner : ref<@Object>
+  %saved = ref.duplicate %pointer : ptr<@Object>
+  ref.release %owner : ref<@Object>
+  %empty_owner = ref.compare.null %copy : ref<@Object>
+  %empty_pointer = ref.compare.null %pointer : ptr<@Object>
+  %owners = ref.compare.eq %copy, %copy : ref<@Object>, ref<@Object>
+  %pointers = ref.compare.eq %pointer, %saved : ptr<@Object>, ptr<@Object>
+  %owner_pointer = ref.compare.eq %copy, %pointer : ref<@Object>, ptr<@Object>
+  %pointer_owner = ref.compare.eq %pointer, %copy : ptr<@Object>, ref<@Object>
+  func.call @record(%empty_owner) : (i1)
+  func.call @record(%empty_pointer) : (i1)
+  func.call @record(%owners) : (i1)
+  func.call @record(%pointers) : (i1)
+  func.call @record(%owner_pointer) : (i1)
+  func.call @record(%pointer_owner) : (i1)
+  func.call @consume(%copy) : (ref<@Object>)
+  func.call @read(%saved) : (ptr<@Object>)
+  func.call @observe() : ()
+  func.return
+}
+
+// ----
+event 1
+event 1
+event 1
+event 1
+event 1
+event 1
+consume -1
+read -1
+live 0
+OK 0
+retired 0
+
+// ====
+
+// Equality observes identity, not payload contents or ownership mode. The two
+// independent objects deliberately contain the same payload value.
+// RUN: emit vm-object-lifetime
+type.decl import("lifetime", "object") @Object
+
+type.decl import("lifetime", "object") @Alias
+
+func.decl import("lifetime", "create") @create(%id: i32) -> (ref<@Object>, ptr<@Object>)
+
+func.decl import("lifetime", "count") @count(%pointer: ptr<@Object>)
+
+func.decl import("lifetime", "event") @event(%value: i32)
+
+func.decl import("lifetime", "observe") @observe()
+
+func.def @record(%condition: i1) {
+  %value = scalar.extui %condition : i1 to i32
+  func.call @event(%value) : (i32)
+  func.return
+}
+
+func.def public @run() {
+  %id = scalar.constant 7 : i32
+  %owner, %unused = func.call @create(%id) : (i32) -> (ref<@Object>, ptr<@Object>)
+  %other, %other_unused = func.call @create(%id) : (i32) -> (ref<@Object>, ptr<@Object>)
+  %copy = ref.duplicate %owner : ref<@Object>
+  %pointer = ref.borrow %owner : ref<@Object> -> ptr<@Object>
+  %other_pointer = ref.borrow %other : ref<@Object> -> ptr<@Object>
+  %empty_owner = ref.null : ref<@Object>
+  %empty_pointer = ref.null : ptr<@Object>
+  %owners = ref.compare.eq %owner, %copy : ref<@Object>, ref<@Object>
+  %owner_pointer = ref.compare.eq %owner, %pointer : ref<@Object>, ptr<@Object>
+  %pointer_owner = ref.compare.eq %pointer, %copy : ptr<@Object>, ref<@Object>
+  %pointers = ref.compare.eq %pointer, %pointer : ptr<@Object>, ptr<@Object>
+  %different = ref.compare.eq %pointer, %other_pointer : ptr<@Object>, ptr<@Object>
+  %null_live = ref.compare.eq %empty_owner, %pointer : ref<@Object>, ptr<@Object>
+  %live_null = ref.compare.eq %owner, %empty_pointer : ref<@Object>, ptr<@Object>
+  %owner_missing = ref.compare.null %owner : ref<@Object>
+  %pointer_missing = ref.compare.null %pointer : ptr<@Object>
+  func.call @record(%owners) : (i1)
+  func.call @record(%owner_pointer) : (i1)
+  func.call @record(%pointer_owner) : (i1)
+  func.call @record(%pointers) : (i1)
+  func.call @record(%different) : (i1)
+  func.call @record(%null_live) : (i1)
+  func.call @record(%live_null) : (i1)
+  func.call @record(%owner_missing) : (i1)
+  func.call @record(%pointer_missing) : (i1)
+  func.call @count(%pointer) : (ptr<@Object>)
+  func.call @count(%other_pointer) : (ptr<@Object>)
+  ref.release %owner : ref<@Object>
+  func.call @observe() : ()
+  ref.release %copy : ref<@Object>
+  ref.release %other : ref<@Object>
+  ref.release %empty_owner : ref<@Object>
+  func.call @observe() : ()
+  func.return
+}
+
+// ----
+create 7
+create 7
+event 1
+event 1
+event 1
+event 1
+event 0
+event 0
+event 0
+event 0
+event 0
+references 2
+references 1
+live 2
+destroy 7
+destroy 7
+live 0
+OK 0
+retired 0
+
+// ====
+
+// A saved pointer protects its payload through an identity observation after
+// its owner ends. Final-use retirement precedes the unrelated native observer.
+// RUN: emit vm-object-lifetime
+type.decl import("lifetime", "object") @Object
+
+func.decl import("lifetime", "create") @create(%id: i32) -> (ref<@Object>, ptr<@Object>)
+
+func.decl import("lifetime", "event") @event(%value: i32)
+
+func.decl import("lifetime", "observe") @observe()
+
+func.def public @run() {
+  %id = scalar.constant 9 : i32
+  %owner, %unused = func.call @create(%id) : (i32) -> (ref<@Object>, ptr<@Object>)
+  %empty = ref.null : ptr<@Object>
+  // REMARK@+1: DOMINANCE/021
+  %saved = ref.borrow %owner : ref<@Object> -> ptr<@Object>
+  ref.release %owner : ref<@Object>
+  func.call @observe() : ()
+  %same = ref.compare.eq %saved, %empty : ptr<@Object>, ptr<@Object>
+  func.call @observe() : ()
+  %value = scalar.extui %same : i1 to i32
+  func.call @event(%value) : (i32)
+  func.return
+}
+
+// ----
+create 9
+live 1
+destroy 9
+live 0
+event 0
+OK 0
+retired 0
+
+// ====
+
+// Nullable factories can choose a live object or typed null with ordinary CFG.
+// Both paths execute, returning ownership through a non-inlined call.
+// RUN: emit vm-object-lifetime
+type.decl import("lifetime", "object") @Object
+
+func.decl import("lifetime", "create") @create(%id: i32) -> (ref<@Object>, ptr<@Object>)
+
+func.decl import("lifetime", "event") @event(%value: i32)
+
+func.def noinline @maybe(%present: i1) -> (ref<@Object>) {
+  cfg.cond_br %present, ^present, ^missing
+^present:
+  %id = scalar.constant 11 : i32
+  %owner, %unused = func.call @create(%id) : (i32) -> (ref<@Object>, ptr<@Object>)
+  cfg.br ^join(%owner: ref<@Object>)
+^missing:
+  %empty = ref.null : ref<@Object>
+  cfg.br ^join(%empty: ref<@Object>)
+^join(%result: ref<@Object>):
+  func.return %result : ref<@Object>
+}
+
+func.def noinline @report(%owner: ref<@Object>) {
+  %empty = ref.compare.null %owner : ref<@Object>
+  cfg.cond_br %empty, ^missing, ^present
+^missing:
+  %no = scalar.constant 0 : i32
+  func.call @event(%no) : (i32)
+  cfg.br ^done
+^present:
+  %yes = scalar.constant 1 : i32
+  func.call @event(%yes) : (i32)
+  cfg.br ^done
+^done:
+  ref.release %owner : ref<@Object>
+  func.return
+}
+
+func.def public @run() {
+  %yes = scalar.constant true : i1
+  %no = scalar.constant false : i1
+  %present = func.call @maybe(%yes) : (i1) -> (ref<@Object>)
+  func.call @report(%present) : (ref<@Object>)
+  %missing = func.call @maybe(%no) : (i1) -> (ref<@Object>)
+  func.call @report(%missing) : (ref<@Object>)
+  func.return
+}
+
+// ----
+create 11
+event 1
+destroy 11
+event 0
+OK 0
+retired 0
+
+// ====
+
+// Terminal abort cleans real and null owners without running the normal tail.
+// RUN: emit vm-object-lifetime
+type.decl import("lifetime", "object") @Object
+
+func.decl import("lifetime", "create") @create(%id: i32) -> (ref<@Object>, ptr<@Object>)
+
+func.decl import("lifetime", "fail") @fail()
+
+func.def public @run() {
+  %empty = ref.null : ref<@Object>
+  %id = scalar.constant 12 : i32
+  %owner, %unused = func.call @create(%id) : (i32) -> (ref<@Object>, ptr<@Object>)
+  func.call @fail() : ()
+  ref.release %owner : ref<@Object>
+  ref.release %empty : ref<@Object>
+  func.return
+}
+
+// ----
+create 12
+fail 1
+destroy 12
+ABORTED 0
+retired 0
+
+// ====
+
+// An observed null source owner still requires consumption at executable admission.
+// RUN: emit vm-object-lifetime
+type.decl import("lifetime", "object") @Object
+
+func.decl import("lifetime", "read") @read(%pointer: ptr<@Object>)
+
+func.def public @run() {
+  %forgotten = ref.null : ref<@Object>
+  %pointer = ref.borrow %forgotten : ref<@Object> -> ptr<@Object>
+  func.call @read(%pointer) : (ptr<@Object>)
+  // ERROR@+1: DOMINANCE/014 {value_name="forgotten"}
+  func.return
+}
+
+// ====
+
+// Authored assembly retains typed nulls and the complete operand wiring.
+// RUN: roundtrip
+vm.target<core> @vm
+
+type.decl import("lifetime", "object") @Object
+
+low.func.def target<vm.core>(@vm) abi(vm_function) @empty() -> (reg<vm.ref : ref<@Object>>, reg<vm.ref : ptr<@Object>>, reg<vm.value : i1>, reg<vm.value : i1>) asm {
+  %owner = ref.null : reg<vm.ref : ref<@Object>>
+  %pointer = ref.null : reg<vm.ref : ptr<@Object>>
+  %missing = ref.compare.null %owner
+  %same = ref.compare.eq %owner, %pointer
+  return %owner, %pointer, %missing, %same
+}
+
+// ====
+
+// Authored Low uses the same descriptors and mandatory ownership admission.
+// Distinct null owners must not be CSE'd into one consumed identity.
+// RUN: emit vm-object-lifetime
+vm.target<core> @vm
+
+type.decl import("lifetime", "object") @Object
+
+low.func.decl import(native, "event", module = "lifetime") target<vm.core>(@vm) abi(vm_function) @event(%value: reg<vm.value : i32>)
+
+low.func.def public target<vm.core>(@vm) abi(vm_function) @run() asm {
+  %first = ref.null : reg<vm.ref : ref<@Object>>
+  %second = ref.null : reg<vm.ref : ref<@Object>>
+  %empty = ref.compare.null %first
+  %same = ref.compare.eq %first, %second
+  %both = integer.and.i32 %empty, %same : reg<vm.value : i1>
+  low.cond_br %both, ^equal, ^different : reg<vm.value : i1>
+^equal:
+  %yes = constant.i32 1
+  low.func.call @event(%yes) : (reg<vm.value : i32>)
+  low.br ^done
+^different:
+  %no = constant.i32 0
+  low.func.call @event(%no) : (reg<vm.value : i32>)
+  low.br ^done
+^done:
+  low.release %first : reg<vm.ref : ref<@Object>>
+  low.release %second : reg<vm.ref : ref<@Object>>
+  return
+}
+
+// ----
+event 1
+OK 0
+retired 0
+
+// ====
+
+// Observation cannot revive a retired pointer, even though equality never
+// dereferences the payload. The managed-handle lifetime ends at release.
+// RUN: emit vm-object-lifetime
+vm.target<core> @vm
+
+type.decl import("lifetime", "object") @Object
+
+low.func.def public target<vm.core>(@vm) abi(vm_function) @run() -> (reg<vm.value : i1>) asm {
+  %pointer = ref.null : reg<vm.ref : ptr<@Object>>
+  low.release %pointer : reg<vm.ref : ptr<@Object>>
+  // ERROR@+1: DOMINANCE/002 {value_name="pointer"}
+  %missing = ref.compare.null %pointer
+  return %missing
+}

@@ -355,6 +355,20 @@ loom_cc_test(
 )
 
 loom_cc_test(
+    name = "target_profile_test",
+    srcs = ["target_profile_test.cc"],
+    deps = [
+        ":test_util",
+        "//loom/binding/c:loomc",
+        "//loom/binding/c/target/configured:target",
+        "//loom/src/loom/target:profile",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
     name = "target_test",
     srcs = ["target_test.cc"],
     deps = [

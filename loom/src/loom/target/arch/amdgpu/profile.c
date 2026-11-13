@@ -48,6 +48,7 @@ static bool loom_amdgpu_target_profile_equal(const loom_target_profile_t* lhs,
 
 const loom_target_profile_type_t loom_amdgpu_target_profile_type = {
     .name = IREE_SVL("amdgpu"),
+    .storage_size = sizeof(loom_amdgpu_target_profile_t),
     .fact_type = &loom_amdgpu_target_fact_type,
     .project_facts = loom_amdgpu_target_profile_project_facts,
     .equal = loom_amdgpu_target_profile_equal,

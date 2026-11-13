@@ -110,7 +110,7 @@ iree_status_t loom_cmd_program_plan_publish_kernel_requests(
   IREE_ASSERT_ARGUMENT(plan_module);
   IREE_ASSERT_ARGUMENT(source_facts);
   IREE_ASSERT_ARGUMENT(kernel_source);
-  IREE_ASSERT_ARGUMENT(kernel_source->producer);
+  IREE_ASSERT_ARGUMENT(kernel_source->provider.publish);
   IREE_ASSERT_ARGUMENT(kernel_source->environment);
   IREE_ASSERT_ARGUMENT(kernel_source->source_definitions.values);
   IREE_ASSERT_ARGUMENT(kernel_source->sink.publish);
@@ -228,21 +228,20 @@ iree_status_t loom_cmd_program_plan_publish_kernel_requests(
         .requirement_by_class = requirement_by_class,
         .class_capacity = site_count,
     };
-    loom_kernel_class_collection_t collection = {0};
-    IREE_RETURN_IF_ERROR(loom_kernel_request_producer_publish(
-        kernel_source->producer, kernel_source->environment,
+    const loom_decision_class_ordinal_t* site_classes = NULL;
+    IREE_RETURN_IF_ERROR(kernel_source->provider.publish(
+        kernel_source->provider.user_data, kernel_source->environment,
         source_symbol_ordinal, plan_module, &sites[site_offset], site_count,
         &kernel_source->collection_options,
         (loom_kernel_request_sink_t){
             .publish = loom_cmd_program_kernel_request_publish,
             .user_data = &bridge,
         },
-        scratch_arena, &collection));
+        scratch_arena, &site_classes));
     for (iree_host_size_t site_index = 0; site_index < site_count;
          ++site_index) {
       const loom_decision_class_ordinal_t class_ordinal =
-          collection.site_classes[site_index];
-      IREE_ASSERT_LT(class_ordinal, collection.class_count);
+          site_classes[site_index];
       *requirement_locations[site_offset + site_index] =
           requirement_by_class[class_ordinal];
     }

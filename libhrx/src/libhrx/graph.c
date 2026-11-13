@@ -19,28 +19,37 @@ static iree_status_t hrx_graph_allocate_node(iree_allocator_t allocator,
     *out_extra_data = NULL;
   }
 
-  const iree_host_size_t node_size = sizeof(hrx_graph_node_s);
-  const iree_host_size_t deps_size =
-      dependency_count * sizeof(hrx_graph_node_s*);
-  iree_host_size_t total_size = node_size + deps_size;
-
-  if (extra_data_size > 0) {
-    total_size = iree_host_align(total_size, iree_max_align_t);
-    const iree_host_size_t extra_data_offset = total_size;
-    total_size += extra_data_size;
-
-    hrx_graph_node_s* node = NULL;
-    IREE_RETURN_IF_ERROR(
-        iree_allocator_malloc(allocator, total_size, (void**)&node));
-    *out_node = node;
-    if (out_extra_data) {
-      *out_extra_data = (uint8_t*)node + extra_data_offset;
+  iree_host_size_t dependencies_size = 0;
+  iree_host_size_t total_size = 0;
+  if (dependency_count > UINT32_MAX ||
+      !iree_host_size_checked_mul(dependency_count, sizeof(hrx_graph_node_s*),
+                                  &dependencies_size) ||
+      !iree_host_size_checked_add(sizeof(hrx_graph_node_s), dependencies_size,
+                                  &total_size)) {
+    return iree_make_status(
+        IREE_STATUS_RESOURCE_EXHAUSTED,
+        "graph node dependencies exceed addressable storage");
+  }
+  iree_host_size_t extra_data_offset = 0;
+  if (extra_data_size) {
+    if (!iree_host_size_checked_add(total_size, iree_max_align_t - 1,
+                                    &total_size)) {
+      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                              "graph node payload alignment overflow");
     }
-  } else {
-    hrx_graph_node_s* node = NULL;
-    IREE_RETURN_IF_ERROR(
-        iree_allocator_malloc(allocator, total_size, (void**)&node));
-    *out_node = node;
+    extra_data_offset = total_size & ~(iree_max_align_t - 1);
+    if (!iree_host_size_checked_add(extra_data_offset, extra_data_size,
+                                    &total_size)) {
+      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                              "graph node payload exceeds addressable storage");
+    }
+  }
+  hrx_graph_node_s* node = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_allocator_malloc(allocator, total_size, (void**)&node));
+  *out_node = node;
+  if (out_extra_data && extra_data_size) {
+    *out_extra_data = (uint8_t*)node + extra_data_offset;
   }
 
   return iree_ok_status();
@@ -65,6 +74,10 @@ static iree_status_t hrx_graph_allocate_node_block(
 
 static iree_status_t hrx_graph_add_node_internal(hrx_graph_s* graph,
                                                  hrx_graph_node_s* node) {
+  if (graph->node_count >= UINT32_MAX) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "graph node ordinals exhausted");
+  }
   node->node_index = (uint32_t)graph->node_count;
 
   if (!graph->current_node_block ||
@@ -85,40 +98,16 @@ static iree_status_t hrx_graph_add_node_internal(hrx_graph_s* graph,
   graph->current_node_block->nodes[graph->current_node_block->count++] = node;
   ++graph->node_count;
 
-  if (node->dependency_count == 0) {
-    if (!graph->current_root_block || graph->current_root_block->count >=
-                                          graph->current_root_block->capacity) {
-      const iree_host_size_t block_capacity = 8;
-      hrx_graph_node_block_t* new_block = NULL;
-      IREE_RETURN_IF_ERROR(hrx_graph_allocate_node_block(
-          graph->arena_allocator, block_capacity, &new_block));
-
-      if (graph->current_root_block) {
-        graph->current_root_block->next = new_block;
-      } else {
-        graph->root_blocks = new_block;
-      }
-      graph->current_root_block = new_block;
-    }
-
-    graph->current_root_block->nodes[graph->current_root_block->count++] = node;
-    ++graph->root_count;
-  }
-
   return iree_ok_status();
 }
 
-// Captures one buffer and the allocation pool it borrows for the graph
-// lifetime. Pools live in a separate set so graph destruction can release all
-// buffers before releasing any pool.
-static iree_status_t hrx_graph_capture_buffer_resources(hrx_graph_s* graph,
-                                                        hrx_buffer_t buffer) {
+// Captures the explicit native buffer handle. Its source pool and allocation
+// epoch remain the caller's responsibility.
+static iree_status_t hrx_graph_capture_buffer(hrx_graph_s* graph,
+                                              hrx_buffer_t buffer) {
   if (!buffer) {
     return iree_ok_status();
   }
-  void* pool_resource = buffer->hal_pool;
-  IREE_RETURN_IF_ERROR(iree_hal_resource_set_insert(graph->allocation_pool_set,
-                                                    1, &pool_resource));
   void* buffer_resource = buffer->hal_buffer;
   return iree_hal_resource_set_insert(graph->node_resource_set, 1,
                                       &buffer_resource);
@@ -144,30 +133,22 @@ hrx_status_t hrx_graph_create(hrx_device_t device, uint32_t flags,
 
   iree_atomic_ref_count_init(&graph->ref_count);
   graph->device = device;
+  hrx_device_retain(device);
 
   iree_arena_initialize(&device->block_pool, &graph->arena);
   graph->arena_allocator = iree_arena_allocator(&graph->arena);
 
   graph->node_resource_set = NULL;
-  graph->allocation_pool_set = NULL;
 
   graph->node_blocks = NULL;
   graph->current_node_block = NULL;
   graph->node_count = 0;
-  graph->root_blocks = NULL;
-  graph->current_root_block = NULL;
-  graph->root_count = 0;
   graph->additional_edges = NULL;
   graph->additional_edge_count = 0;
   graph->flags = flags;
-  iree_slim_mutex_initialize(&graph->mutex);
 
   iree_status_t status = iree_hal_resource_set_allocate(
       &device->block_pool, &graph->node_resource_set);
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_resource_set_allocate(&device->block_pool,
-                                            &graph->allocation_pool_set);
-  }
   if (iree_status_is_ok(status)) {
     *out_graph = graph;
   } else {
@@ -181,9 +162,8 @@ static void hrx_graph_destroy(hrx_graph_s* graph) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
   iree_hal_resource_set_free(graph->node_resource_set);
-  iree_hal_resource_set_free(graph->allocation_pool_set);
   iree_arena_deinitialize(&graph->arena);
-  iree_slim_mutex_deinitialize(&graph->mutex);
+  hrx_device_release(graph->device);
   iree_allocator_free(iree_allocator_system(), graph);
 
   IREE_TRACE_ZONE_END(z0);
@@ -273,6 +253,13 @@ hrx_status_t hrx_graph_add_kernel_node(
   IREE_ASSERT_ARGUMENT(attrs->executable);
   IREE_TRACE_ZONE_BEGIN(z0);
 
+  iree_hal_dispatch_flags_t hal_flags = IREE_HAL_DISPATCH_FLAG_NONE;
+  hrx_status_t flag_status =
+      hrx_iree_dispatch_flags_from_hrx(attrs->flags, &hal_flags);
+  if (!hrx_status_is_ok(flag_status)) {
+    HRX_RETURN_AND_END_ZONE(z0, flag_status);
+  }
+
   const iree_host_size_t constants_size =
       iree_host_align(attrs->constants_size, iree_max_align_t);
   const iree_host_size_t bindings_size = iree_host_align(
@@ -295,7 +282,7 @@ hrx_status_t hrx_graph_add_kernel_node(
   k->export_ordinal = attrs->export_ordinal;
   memcpy(k->grid_dim, attrs->config.workgroup_count, sizeof(k->grid_dim));
   memcpy(k->block_dim, attrs->config.workgroup_size, sizeof(k->block_dim));
-  k->shared_memory_bytes = 0;
+  k->flags = hal_flags;
 
   void* constants_copy = extra_data;
   if (attrs->constants_size > 0 && attrs->constants) {
@@ -322,8 +309,7 @@ hrx_status_t hrx_graph_add_kernel_node(
                                                       1, &executable_resource);
   for (size_t i = 0; i < attrs->binding_count && iree_status_is_ok(status);
        ++i) {
-    status =
-        hrx_graph_capture_buffer_resources(graph, attrs->bindings[i].buffer);
+    status = hrx_graph_capture_buffer(graph, attrs->bindings[i].buffer);
   }
   if (iree_status_is_ok(status)) {
     status = hrx_graph_add_node_internal(graph, node);
@@ -341,9 +327,9 @@ static hrx_status_t hrx_graph_validate_buffer_ref(hrx_graph_t graph,
   if (!ref.buffer) {
     return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, name);
   }
-  if (ref.buffer->device != graph->device) {
+  if (ref.buffer->group != graph->device->group) {
     return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
-                           "graph buffer belongs to another device");
+                           "graph buffer belongs to another device group");
   }
   if (ref.length == 0 || ref.offset > ref.buffer->size ||
       ref.length > ref.buffer->size - ref.offset) {
@@ -383,9 +369,9 @@ static hrx_status_t hrx_graph_add_copy_buffer_node_internal(
   m->size = src.length;
   m->flags = 0;
 
-  iree_status_t status = hrx_graph_capture_buffer_resources(graph, src.buffer);
+  iree_status_t status = hrx_graph_capture_buffer(graph, src.buffer);
   if (iree_status_is_ok(status)) {
-    status = hrx_graph_capture_buffer_resources(graph, dst.buffer);
+    status = hrx_graph_capture_buffer(graph, dst.buffer);
   }
   if (iree_status_is_ok(status)) {
     status = hrx_graph_add_node_internal(graph, node);
@@ -424,7 +410,7 @@ static hrx_status_t hrx_graph_add_fill_buffer_node_internal(
   m->count = dst.length;
   m->flags = 0;
 
-  iree_status_t status = hrx_graph_capture_buffer_resources(graph, dst.buffer);
+  iree_status_t status = hrx_graph_capture_buffer(graph, dst.buffer);
   if (iree_status_is_ok(status)) {
     status = hrx_graph_add_node_internal(graph, node);
   }
@@ -559,7 +545,7 @@ hrx_status_t hrx_graph_add_host_call_node(
   }
 
   hrx_graph_host_call_node_attrs_internal_t* h = &node->attrs.host;
-  h->fn = (void (*)(void*))attrs->fn;
+  h->fn = attrs->fn;
   h->user_data = attrs->user_data;
 
   iree_status_t status = hrx_graph_add_node_internal(graph, node);
@@ -606,89 +592,84 @@ hrx_status_t hrx_graph_add_dependencies(hrx_graph_t graph,
   return hrx_ok_status();
 }
 
-//===----------------------------------------------------------------------===//
-// Instantiation
-//===----------------------------------------------------------------------===//
-
-hrx_status_t hrx_graph_instantiate(hrx_graph_t graph, uint32_t flags,
-                                   hrx_graph_exec_t* out_exec) {
-  IREE_ASSERT_ARGUMENT(graph);
-  IREE_ASSERT_ARGUMENT(out_exec);
-  *out_exec = NULL;
-  IREE_TRACE_ZONE_BEGIN(z0);
-
-  hrx_graph_exec_s* exec = NULL;
-  HRX_RETURN_AND_END_ZONE_IF_IREE_ERROR(
-      z0, iree_allocator_malloc(iree_allocator_system(), sizeof(*exec),
-                                (void**)&exec));
-
-  iree_atomic_ref_count_init(&exec->ref_count);
-  exec->device = graph->device;
-  exec->graph = graph;
-  hrx_graph_retain(graph);
-  iree_arena_initialize(&graph->device->block_pool, &exec->arena_allocator);
-  exec->blocks = NULL;
-  exec->block_count = 0;
-  exec->semaphores = NULL;
-  exec->semaphore_count = 0;
-  exec->semaphore_base_values = NULL;
-  exec->resource_set = NULL;
-  exec->flags = flags;
-  iree_slim_mutex_initialize(&exec->mutex);
-
-  iree_status_t status = iree_hal_resource_set_allocate(
-      &graph->device->block_pool, &exec->resource_set);
-
+// Normalization is the native graph input boundary. The shared analyzer
+// receives dense, in-graph ordinals and does not repeat handle validation at
+// every phase.
+iree_status_t hrx_graph_schedule_nodes(hrx_graph_node_block_t* node_blocks,
+                                       iree_host_size_t node_count,
+                                       hrx_graph_edge_t* additional_edges,
+                                       iree_arena_allocator_t* arena,
+                                       hrx_graph_schedule_t* out_schedule) {
+  hrx_graph_analysis_t analysis;
+  IREE_RETURN_IF_ERROR(
+      hrx_graph_analysis_initialize(node_count, arena, &analysis));
+  uint64_t edge_count = 0;
+  for (hrx_graph_node_block_t* block = node_blocks; block;
+       block = block->next) {
+    for (iree_host_size_t i = 0; i < block->count; ++i) {
+      hrx_graph_node_s* node = block->nodes[i];
+      const uint32_t index = node->node_index;
+      analysis.sources[index] = node;
+      analysis.offsets[index + 1] = node->dependency_count;
+      edge_count += node->dependency_count;
+      analysis.flags[index] =
+          hrx_graph_node_is_recordable(node->type)
+              ? HRX_GRAPH_ANALYSIS_NODE_RECORDABLE
+          : node->type == HRX_GRAPH_NODE_TYPE_INTERNAL_HOST_CALL
+              ? HRX_GRAPH_ANALYSIS_NODE_ISOLATED
+              : HRX_GRAPH_ANALYSIS_NODE_EMPTY;
+    }
+  }
+  iree_status_t status = iree_ok_status();
+  for (const hrx_graph_edge_t* edge = additional_edges;
+       iree_status_is_ok(status) && edge; edge = edge->next) {
+    if (!edge->from || !edge->to || edge->from->node_index >= node_count ||
+        edge->to->node_index >= node_count ||
+        analysis.sources[edge->from->node_index] != edge->from ||
+        analysis.sources[edge->to->node_index] != edge->to) {
+      status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "dependency node does not belong to the graph");
+    } else {
+      ++analysis.offsets[edge->to->node_index + 1];
+      ++edge_count;
+    }
+  }
+  IREE_RETURN_IF_ERROR(status);
+  if (edge_count > UINT32_MAX) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "graph has too many dependencies");
+  }
+  IREE_RETURN_IF_ERROR(
+      hrx_graph_analysis_allocate_dependencies(&analysis, arena));
+  bool is_topologically_ordered = true;
+  for (uint32_t i = 0; iree_status_is_ok(status) && i < analysis.node_count;
+       ++i) {
+    const hrx_graph_node_s* node = analysis.sources[i];
+    for (uint32_t j = 0;
+         iree_status_is_ok(status) && j < node->dependency_count; ++j) {
+      const hrx_graph_node_s* predecessor = node->dependencies[j];
+      if (!predecessor || predecessor->node_index >= node_count ||
+          analysis.sources[predecessor->node_index] != predecessor) {
+        status =
+            iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                             "dependency node does not belong to the graph");
+      } else {
+        analysis.dependencies[analysis.order[i]++] = predecessor->node_index;
+        is_topologically_ordered &= predecessor->node_index < i;
+      }
+    }
+  }
+  for (const hrx_graph_edge_t* edge = additional_edges;
+       iree_status_is_ok(status) && edge; edge = edge->next) {
+    analysis.dependencies[analysis.order[edge->to->node_index]++] =
+        edge->from->node_index;
+    is_topologically_ordered &= edge->from->node_index < edge->to->node_index;
+  }
+  analysis.is_topologically_ordered = is_topologically_ordered;
   if (iree_status_is_ok(status)) {
-    iree_slim_mutex_lock(&graph->mutex);
-    status = hrx_graph_exec_instantiate_locked(exec, graph->node_blocks,
-                                               graph->node_count);
-    iree_slim_mutex_unlock(&graph->mutex);
+    status = hrx_graph_analyze(&analysis, arena, out_schedule);
   }
-
-  if (iree_status_is_ok(status)) {
-    *out_exec = exec;
-  } else {
-    hrx_graph_exec_release(exec);
-  }
-
-  IREE_TRACE_ZONE_END(z0);
-  return hrx_status_from_iree(status);
-}
-
-//===----------------------------------------------------------------------===//
-// Graph exec lifecycle
-//===----------------------------------------------------------------------===//
-
-static void hrx_graph_exec_destroy(hrx_graph_exec_s* exec) {
-  IREE_TRACE_ZONE_BEGIN(z0);
-
-  iree_hal_resource_set_free(exec->resource_set);
-  iree_arena_deinitialize(&exec->arena_allocator);
-  hrx_graph_release(exec->graph);
-  iree_slim_mutex_deinitialize(&exec->mutex);
-  iree_allocator_free(iree_allocator_system(), exec);
-
-  IREE_TRACE_ZONE_END(z0);
-}
-
-void hrx_graph_exec_retain(hrx_graph_exec_t exec) {
-  if (exec) {
-    iree_atomic_ref_count_inc(&exec->ref_count);
-  }
-}
-
-void hrx_graph_exec_release(hrx_graph_exec_t exec) {
-  if (exec && iree_atomic_ref_count_dec(&exec->ref_count) == 1) {
-    hrx_graph_exec_destroy(exec);
-  }
-}
-
-hrx_status_t hrx_graph_exec_update(hrx_graph_exec_t exec, hrx_graph_t graph) {
-  IREE_ASSERT_ARGUMENT(exec);
-  IREE_ASSERT_ARGUMENT(graph);
-  return hrx_make_status(HRX_STATUS_UNIMPLEMENTED,
-                         "graph update not yet implemented");
+  return status;
 }
 
 //===----------------------------------------------------------------------===//

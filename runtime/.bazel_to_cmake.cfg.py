@@ -66,7 +66,7 @@ class RuntimeBuildFileFunctions(
         kwargs = self._apply_runtime_cmake_policy(kwargs)
         if (
             self._package_name()
-            == "runtime/src/iree/hal/drivers/task/executable/loaders/registration"
+            == "runtime/src/iree/hal/driver/task/executable/loaders/registration"
         ):
             deps = deps + ["${IREE_HAL_EXECUTABLE_LOADER_EXTRA_DEPS}"]
         self.cc_library(deps=deps + ["//runtime/src:defines"], **kwargs)
@@ -203,41 +203,9 @@ class RuntimeBuildFileFunctions(
         )
         self._emit_platform_guard_end(compatibility)
 
-    def iree_hal_amd_gpu_cts_testdata(self, name, srcs, backend_names, **kwargs):
-        if not getattr(self, "_amd_gpu_cts_profiles_emitted", False):
-            self._amd_gpu_cts_profiles_emitted = True
-            capabilities = self._loaded_modules.symbol(
-                "//loom/build_tools/amdgpu:target_config.bzl",
-                "LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_TARGET",
-                self._build_dir,
-            )
-            self._converter.body += (
-                'include("${IREE_SOURCE_DIR}/runtime/build_tools/cmake/iree_runtime_amd_gpu_cts.cmake")\n\n'
-                "set(_IREE_HAL_AMD_GPU_CTS_TARGETS\n"
-                + "".join(
-                    f'  "{target}=LOOM_ARCH_AMDGPU_{capability.upper()}"\n'
-                    for target, capability in capabilities.items()
-                )
-                + ")\n\n"
-            )
+    def iree_hal_amd_gpu_cts_testdata(self, **kwargs):
         kwargs = self._apply_runtime_cmake_policy(kwargs)
-        compatibility = (kwargs.pop("target_compatible_with", None) or []) + [
-            "//loom/config/emit:amdgpu_elf"
-        ]
-        self._emit_platform_guard_begin(compatibility)
-        self._converter.body += (
-            "iree_hal_amd_gpu_cts_testdata(\n"
-            + self._convert_string_arg_block("NAME", name)
-            + self._convert_data_srcs_block(srcs, sort=False)
-            + self._convert_string_list_block("BACKEND_NAMES", backend_names)
-            + "  TARGETS ${_IREE_HAL_AMD_GPU_CTS_TARGETS}\n"
-            + ")\n\n"
-        )
-        self._emit_platform_guard_end(compatibility)
-
-    def iree_amdgpu_hal_cts_testdata(self, **kwargs):
-        kwargs = self._apply_runtime_cmake_policy(kwargs)
-        self._iree_amdgpu_hal_cts_testdata(**kwargs)
+        super().iree_hal_amd_gpu_cts_testdata(**kwargs)
 
     def iree_amdgpu_binary(self, **kwargs):
         kwargs = self._apply_runtime_cmake_policy(kwargs)
@@ -262,37 +230,6 @@ class RuntimeBuildFileFunctions(
     def iree_amdgpu_target_selectors_flag(self, *args, **kwargs):
         pass
 
-    def iree_hal_amdgpu_source_device_binaries(self, name):
-        module = (
-            "//runtime/src/iree/hal/drivers/amdgpu/device/binaries/source:targets.bzl"
-        )
-        inputs = list(
-            self._loaded_modules.symbol(module, "_GENERATOR_INPUTS", self._build_dir)
-        )
-        inputs += self._loaded_modules.symbol(
-            module, "_GENERATOR_SCRIPT_DEPS", self._build_dir
-        )
-        self._converter.body += (
-            "iree_hal_amdgpu_source_device_binaries(\n"
-            + self._convert_string_arg_block("NAME", name)
-            + self._convert_srcs_block(inputs, block_name="INPUTS")
-            + ")\n\n"
-        )
-
-    def iree_hal_amdgpu_device_binaries(
-        self,
-        name,
-        target_selectors_flag="//runtime/src/iree/hal/drivers/amdgpu:targets",
-        target="amdgcn-amd-amdhsa",
-    ):
-        self._converter.body += (
-            "iree_hal_amdgpu_device_binaries(\n"
-            + self._convert_string_arg_block("NAME", name)
-            + self._convert_string_arg_block("TARGET", target)
-            + self._convert_amdgpu_target_selectors_block(target_selectors_flag)
-            + ")\n\n"
-        )
-
 
 def convert_unmatched_target(converter, target):
     return ["iree::" + converter._convert_to_cmake_path(target)]
@@ -305,7 +242,7 @@ PROJECT_CONFIG = bazel_to_cmake_config.ProjectConfig(
     target_mappings={
         "//runtime/src:defines": ["iree::defines"],
         "//runtime/config/hal:external_driver_registry": [
-            "iree::hal::drivers::configured_external_driver_registry"
+            "iree::hal::driver::configured_external_driver_registry"
         ],
         "@iree_macos_toolchain//:Foundation": ['"-framework Foundation"'],
     },

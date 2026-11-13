@@ -106,8 +106,8 @@ Host registration, SQPOLL permission, LOCAL placement and the direct-I/O
 filesystem contract are independent capabilities. Their absence produces
 explicit skips before GPU submission. A qualification invocation can require
 an exact case with `--amdf_require_test`, for example
-`FileToSdma/FileStagedOwnershipTest.CopyReleasesSourceAndEveryReaderReleasesDestination/DirectLocal64KiBS1D2R2`.
+`FileToSdma/FileStagedOwnershipTest.CopyReleasesSourceAndEveryReaderReleasesDestination/DirectSystem64KiBS2D4R2`.
 A generic GPU resource tag does not establish disk-backed scratch. Direct cases
-require `O_DIRECT` and `STATX_DIOALIGN`; tmpfs is not substituted for disk-backed
-evidence. Correctness receipts establish byte ownership and progress, not
-throughput or a preferred scheduling policy.
+require `O_DIRECT` and the [shared filesystem alignment and cache contract](README.md#address-spaces-and-native-ownership);
+tmpfs is not substituted for disk-backed evidence. Correctness receipts establish
+byte ownership and progress, not throughput or a preferred scheduling policy.

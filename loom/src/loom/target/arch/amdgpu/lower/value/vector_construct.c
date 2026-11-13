@@ -760,7 +760,8 @@ static iree_status_t loom_amdgpu_emit_fma_mix_half_result_diagnostic(
     descriptor_name =
         descriptor_present
             ? loom_low_descriptor_set_string(
-                  descriptor_set, descriptor.descriptor->key_string_ref)
+                  descriptor_set, loom_low_descriptor_key_string_ref(
+                                      descriptor_set, descriptor.descriptor))
             : IREE_SV("<unavailable>");
   }
 
@@ -1249,17 +1250,17 @@ iree_status_t loom_amdgpu_finalize_vector_construct_plan(
       const loom_amdgpu_vector_from_elements_plan_t* vector = plan.target_data;
       result = vector->result;
       unit_count = vector->register_count;
-      if (vector->storage_kind == LOOM_AMDGPU_VECTOR_STORAGE_KIND_I1_MASK ||
-          vector->storage_kind == LOOM_AMDGPU_VECTOR_STORAGE_KIND_FULL_32BIT ||
-          vector->storage_kind == LOOM_AMDGPU_VECTOR_STORAGE_KIND_FULL_64BIT) {
+      if (vector->storage_kind == LOOM_AMDGPU_VECTOR_STORAGE_KIND_I1_MASK) {
+        register_class = LOOM_AMDGPU_REG_CLASS_ID_SGPR;
+      } else if (vector->storage_kind ==
+                     LOOM_AMDGPU_VECTOR_STORAGE_KIND_FULL_32BIT ||
+                 vector->storage_kind ==
+                     LOOM_AMDGPU_VECTOR_STORAGE_KIND_FULL_64BIT) {
         unit_count = 0;
         for (uint32_t i = 0; i < vector->element_count; ++i) {
           const loom_type_t element_type = loom_low_lower_value_binding_type(
               context, vector->payload.elements[i]);
           unit_count += loom_low_register_type_unit_count(element_type);
-          if (vector->storage_kind == LOOM_AMDGPU_VECTOR_STORAGE_KIND_I1_MASK) {
-            register_class = loom_low_register_type_class_id(element_type);
-          }
         }
       }
       break;
@@ -1582,6 +1583,8 @@ static iree_status_t loom_amdgpu_lower_vector_from_register_elements(
     elements[i] =
         loom_low_lower_lookup_value(context, plan->payload.elements[i]);
     if (plan->storage_kind == LOOM_AMDGPU_VECTOR_STORAGE_KIND_I1_MASK) {
+      IREE_RETURN_IF_ERROR(loom_amdgpu_materialize_low_native_i1_mask(
+          context, source_op, elements[i], &elements[i]));
       continue;
     }
     IREE_RETURN_IF_ERROR(loom_amdgpu_materialize_low_vgpr_b32_registers(

@@ -104,7 +104,7 @@ static loom_decision_truth_t loom_decision_predicate_evaluate_unsigned_relation(
   }
 }
 
-IREE_ATTRIBUTE_ALWAYS_INLINE static inline loom_decision_truth_t
+static IREE_ATTRIBUTE_ALWAYS_INLINE loom_decision_truth_t
 loom_decision_predicate_evaluate_relation(
     loom_predicate_kind_t predicate_kind,
     const loom_decision_predicate_operand_t* lhs,
@@ -302,7 +302,7 @@ static loom_decision_truth_t loom_decision_predicate_evaluate_finite(
   return LOOM_DECISION_TRUTH_UNKNOWN;
 }
 
-IREE_ATTRIBUTE_ALWAYS_INLINE extern inline loom_decision_truth_t
+extern IREE_ATTRIBUTE_ALWAYS_INLINE loom_decision_truth_t
 loom_decision_predicate_evaluate(
     loom_predicate_kind_t predicate_kind,
     const loom_decision_predicate_operand_t operands[3]) {

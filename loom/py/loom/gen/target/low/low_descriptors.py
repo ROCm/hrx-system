@@ -26,11 +26,59 @@ from loom.gen.target.low.compiled import (
     CompiledScheduleClassTable,
     CompiledScheduleModel,
     DescriptorAllowlist,
+    DescriptorIdentityDomain,
     DescriptorSetView,
     GeneratedDescriptorSet,
     GeneratedDescriptorSetFamily,
 )
-from loom.target.low_descriptors import DescriptorSet, ScheduleClass
+from loom.gen.target.low.native_assembly import NativeAsmValuePool
+from loom.target.low_descriptors import (
+    Descriptor,
+    DescriptorSet,
+    ScheduleClass,
+    descriptor_stable_id,
+)
+
+
+def descriptor_identity_domain(
+    descriptors: Sequence[Descriptor],
+    *,
+    keys: Sequence[str] | None = None,
+    table_symbol: str | None = None,
+    public_header: str | None = None,
+) -> DescriptorIdentityDomain:
+    """Builds and validates one ordered descriptor identity domain."""
+
+    descriptors_by_key: dict[str, Descriptor] = {}
+    for descriptor in descriptors:
+        previous = descriptors_by_key.get(descriptor.key)
+        if previous is not None and previous.semantic_tag != descriptor.semantic_tag:
+            raise ValueError(f"descriptor identity '{descriptor.key}' has inconsistent semantic tags")
+        descriptors_by_key[descriptor.key] = descriptor
+
+    if keys is None:
+        keys = tuple(descriptors_by_key)
+    else:
+        keys = tuple(keys)
+        missing_keys = descriptors_by_key.keys() - set(keys)
+        if missing_keys:
+            raise ValueError("descriptor identity domain is missing keys: " + ", ".join(sorted(missing_keys)))
+
+    validation.validate_u16_table_count(len(keys), "descriptor identity")
+    keys_by_stable_id: dict[int, str] = {}
+    for key in keys:
+        stable_id = descriptor_stable_id(key)
+        previous_key = keys_by_stable_id.get(stable_id)
+        if previous_key is not None:
+            raise ValueError(f"descriptor '{key}' stable ID collides with '{previous_key}'")
+        keys_by_stable_id[stable_id] = key
+    if (table_symbol is None) != (public_header is None):
+        raise ValueError("external descriptor identity domains require both a table symbol and public header")
+    return DescriptorIdentityDomain(
+        keys=tuple(keys),
+        table_symbol=table_symbol,
+        public_header=public_header,
+    )
 
 
 def _descriptor_set_string_values(spec: DescriptorSet) -> set[str]:
@@ -215,6 +263,7 @@ def generate_descriptor_set(
     primary_strings: CStringBank | None = None,
     shared_strings: CStringBank | None = None,
     required_schedule_class_names: Sequence[str] = (),
+    identity_domain: DescriptorIdentityDomain | None = None,
 ) -> GeneratedDescriptorSet:
     (
         model_schedule_class_names,
@@ -229,6 +278,8 @@ def generate_descriptor_set(
         required_resource_names=required_resource_names,
         required_timing_event_names=required_timing_event_names,
     )
+    if identity_domain is None:
+        identity_domain = descriptor_identity_domain(compiled.descriptors)
     if spec.schedule_models:
         view_spec = replace(spec, descriptors=tuple(compiled.descriptors))
         compiled, (view,) = _pool_family_schedule_classes(
@@ -242,6 +293,7 @@ def generate_descriptor_set(
                 views=(view,),
                 primary_strings=primary_strings,
                 shared_strings=shared_strings,
+                identity_domain=identity_domain,
             ),
         )
     return GeneratedDescriptorSet(
@@ -250,6 +302,7 @@ def generate_descriptor_set(
             compiled,
             shared_strings,
             primary_strings=primary_strings,
+            identity_domain=identity_domain,
         ),
     )
 
@@ -312,18 +365,24 @@ def generate_descriptor_set_family(
     *,
     primary_strings: CStringBank | None = None,
     shared_strings: CStringBank | None = None,
+    native_asm_values: NativeAsmValuePool | None = None,
+    identity_domain: DescriptorIdentityDomain | None = None,
 ) -> GeneratedDescriptorSetFamily:
     """Generates shared C storage and public headers for descriptor-set views."""
     compiled, descriptor_set_views = compile_descriptor_set_family(
         storage_spec,
         view_specs,
     )
+    if identity_domain is None:
+        identity_domain = descriptor_identity_domain(tuple(compiled.descriptors) + tuple(descriptor for view in descriptor_set_views for descriptor in view.descriptors))
     return GeneratedDescriptorSetFamily(
         source=c_emit.emit_source_for_views(
             compiled,
             views=descriptor_set_views,
             primary_strings=primary_strings,
             shared_strings=shared_strings,
+            native_asm_values=native_asm_values,
+            identity_domain=identity_domain,
         ),
         view_headers=tuple(
             c_emit.emit_header_for_spec(
@@ -344,12 +403,14 @@ def write_descriptor_set_to_paths(
     allowlist: DescriptorAllowlist | None = None,
     primary_strings: CStringBank | None = None,
     shared_strings: CStringBank | None = None,
+    identity_domain: DescriptorIdentityDomain | None = None,
 ) -> None:
     generated = generate_descriptor_set(
         spec,
         allowlist,
         primary_strings=primary_strings,
         shared_strings=shared_strings,
+        identity_domain=identity_domain,
     )
     write_text_file(header_path, generated.header)
     write_text_file(source_path, generated.source)

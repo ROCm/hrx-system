@@ -7,6 +7,7 @@
 #ifndef LOOMC_TARGET_CMD_H_
 #define LOOMC_TARGET_CMD_H_
 
+#include "loomc/target/cmd/compiler.h"
 #include "loomc/target/cmd/program.h"
 
 /// @file

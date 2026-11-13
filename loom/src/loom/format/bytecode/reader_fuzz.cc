@@ -126,7 +126,7 @@ static void fuzz_read_arbitrary_bytecode(const uint8_t* data, size_t size,
   loom_module_t* module = NULL;
   fuzz_ignore_status_or_trap(loom_bytecode_read_module(
       iree_make_const_byte_span(data, size), IREE_SV("fuzz.loombc"), &g_context,
-      block_pool, &options, &module_result, &module, iree_allocator_system()));
+      block_pool, &options, iree_allocator_system(), &module_result, &module));
   if (module && (control_byte & 1) != 0) {
     const loom_verify_options_t verify_options = {
         .sink = options.diagnostic_sink,
@@ -168,8 +168,8 @@ static void fuzz_read_generated_module(const uint8_t* data, size_t size,
   loom_module_t* read_module = NULL;
   fuzz_ignore_status_or_trap(loom_bytecode_read_module(
       iree_make_const_byte_span(first.data(), first.size()),
-      IREE_SV("generated.loombc"), &g_context, block_pool, &options, &result,
-      &read_module, iree_allocator_system()));
+      IREE_SV("generated.loombc"), &g_context, block_pool, &options,
+      iree_allocator_system(), &result, &read_module));
   if (result.error_count != 0 || !read_module) {
     __builtin_trap();
   }

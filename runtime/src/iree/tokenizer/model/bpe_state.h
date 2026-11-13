@@ -480,7 +480,7 @@ static inline iree_host_size_t iree_tokenizer_bpe_character_length(
 // For ByteLevel mode, each raw byte is converted to its ByteLevel UTF-8 form
 // (1-2 bytes) before feeding to the trie cursor.
 // Returns the matched token_id and the count of raw bytes consumed.
-IREE_ATTRIBUTE_ALWAYS_INLINE static inline void
+static IREE_ATTRIBUTE_ALWAYS_INLINE void
 iree_tokenizer_bpe_backtrack_longest_match(
     const iree_tokenizer_bpe_model_t* model, const uint8_t* data,
     iree_host_size_t size, int32_t* out_token_id,

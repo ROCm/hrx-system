@@ -68,6 +68,8 @@ enum : loom_string_ref_t {
 #define TEST_STRING_REF(field) TEST_STRING_##field
 
 struct TestTables {
+  loom_low_descriptor_identity_t descriptor_identities[3];
+  uint64_t descriptor_stable_ids[2];
   loom_low_descriptor_t descriptors[2];
   // Independently mutable layouts for table validation tests.
   loom_low_descriptor_layout_t descriptor_layouts[2];
@@ -118,7 +120,9 @@ void InitializeTestTables(TestTables* tables) {
   tables->reg_classes[0].name_string_ref = TEST_STRING_REF(reg_gpr);
   tables->reg_classes[0].flags = LOOM_LOW_REG_CLASS_FLAG_VIRTUAL_ONLY;
   tables->reg_classes[0].alloc_unit_bits = 32;
-  tables->reg_classes[0].spill_class_id = LOOM_LOW_REG_CLASS_NONE;
+  tables->reg_classes[0].spill_unit_bits =
+      tables->reg_classes[0].alloc_unit_bits;
+  tables->reg_classes[0].spill_alignment_log2 = 0x40;
   tables->reg_classes[0].spill_slot_space = LOOM_LOW_SPILL_SLOT_SPACE_STACK;
 
   for (loom_low_reg_class_alt_t& alternative : tables->reg_class_alts) {
@@ -206,12 +210,14 @@ void InitializeTestTables(TestTables* tables) {
 
   tables->feature_mask_words[0] = UINT64_C(0x5);
 
-  tables->descriptors[0].key_string_ref = TEST_STRING_REF(descriptor_const);
-  tables->descriptors[0].stable_id =
-      loom_low_descriptor_stable_id_from_key(IREE_SV("test.const.i32"));
-  tables->descriptors[0].mnemonic_string_ref = TEST_STRING_REF(mnemonic_const);
-  tables->descriptors[0].semantic_tag_string_ref =
+  tables->descriptor_identities[0].key_string_ref =
+      TEST_STRING_REF(descriptor_const);
+  tables->descriptor_identities[0].semantic_tag_string_ref =
       TEST_STRING_REF(semantic_const);
+  tables->descriptor_stable_ids[0] =
+      loom_low_descriptor_stable_id_from_key(IREE_SV("test.const.i32"));
+  tables->descriptors[0].identity_ordinal = 0;
+  tables->descriptors[0].mnemonic_string_ref = TEST_STRING_REF(mnemonic_const);
   tables->descriptors[0].operand_start = 0;
   tables->descriptors[0].operand_count = 1;
   tables->descriptors[0].result_count = 1;
@@ -223,13 +229,15 @@ void InitializeTestTables(TestTables* tables) {
   tables->descriptor_views[0].canonical_asm_form_ordinal =
       LOOM_LOW_ASM_FORM_ORDINAL_NONE;
 
-  tables->descriptors[1].key_string_ref = TEST_STRING_REF(descriptor_add);
+  tables->descriptor_identities[1].key_string_ref =
+      TEST_STRING_REF(descriptor_add);
   tables->descriptors[1].layout_index = 1;
-  tables->descriptors[1].stable_id =
-      loom_low_descriptor_stable_id_from_key(IREE_SV("test.add.i32"));
-  tables->descriptors[1].mnemonic_string_ref = TEST_STRING_REF(mnemonic_add);
-  tables->descriptors[1].semantic_tag_string_ref =
+  tables->descriptor_identities[1].semantic_tag_string_ref =
       TEST_STRING_REF(semantic_add);
+  tables->descriptor_stable_ids[1] =
+      loom_low_descriptor_stable_id_from_key(IREE_SV("test.add.i32"));
+  tables->descriptors[1].identity_ordinal = 1;
+  tables->descriptors[1].mnemonic_string_ref = TEST_STRING_REF(mnemonic_add);
   tables->descriptor_layouts[1].feature_mask_word_start = 0;
   tables->descriptor_layouts[1].feature_mask_word_count = 1;
   tables->descriptors[1].operand_start = 1;
@@ -242,7 +250,7 @@ void InitializeTestTables(TestTables* tables) {
       LOOM_LOW_ASM_FORM_ORDINAL_NONE;
 
   tables->descriptor_refs[0] =
-      tables->descriptors[0].stable_id < tables->descriptors[1].stable_id ? 0
+      tables->descriptor_stable_ids[0] < tables->descriptor_stable_ids[1] ? 0
                                                                           : 1;
   tables->descriptor_refs[1] = 1 - tables->descriptor_refs[0];
 
@@ -257,6 +265,9 @@ void InitializeTestTables(TestTables* tables) {
   tables->set.feature_key_string_ref = TEST_STRING_REF(feature_key);
   tables->set.string_pool.data[0] = kTestStrings;
   tables->set.string_pool.data_length[0] = sizeof(kTestStrings) - 1;
+  tables->set.descriptor_identities = tables->descriptor_identities;
+  tables->set.descriptor_stable_ids = tables->descriptor_stable_ids;
+  tables->set.descriptor_identity_count = 2;
   tables->set.descriptors = tables->descriptors;
   tables->set.descriptor_layouts = tables->descriptor_layouts;
   tables->set.descriptor_layout_count =
@@ -1085,6 +1096,15 @@ TEST(LowDescriptorsTest, RejectsUnprojectedStorageContinuationConstraint) {
                         loom_low_descriptor_set_verify(&tables.set));
 }
 
+TEST(LowDescriptorsTest, AcceptsStorageContinuationOfAvailableParts) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  ConfigureAddStorageContinuation(&tables);
+  tables.reg_class_alts[2].register_part_id = LOOM_LOW_REGISTER_PART_NONE;
+
+  IREE_ASSERT_OK(loom_low_descriptor_set_verify(&tables.set));
+}
+
 TEST(LowDescriptorsTest, RejectsOverlappingStorageContinuationParts) {
   TestTables tables;
   InitializeTestTables(&tables);
@@ -1896,9 +1916,49 @@ TEST(LowDescriptorsTest, RejectsScheduleClassMissingEffectFlag) {
 TEST(LowDescriptorsTest, RejectsDuplicateKeys) {
   TestTables tables;
   InitializeTestTables(&tables);
-  tables.descriptors[1].key_string_ref = tables.descriptors[0].key_string_ref;
+  tables.descriptor_identities[1].key_string_ref =
+      tables.descriptor_identities[0].key_string_ref;
 
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_low_descriptor_set_verify(&tables.set));
+}
+
+TEST(LowDescriptorsTest, RejectsMismatchedDescriptorStableId) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  tables.descriptor_stable_ids[1] = tables.descriptor_stable_ids[0];
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_low_descriptor_set_verify(&tables.set));
+}
+
+TEST(LowDescriptorsTest, AcceptsUnreferencedDescriptorIdentitySlots) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  tables.descriptor_identities[2] = tables.descriptor_identities[1];
+  tables.descriptor_identities[1] = {};
+  tables.descriptors[1].identity_ordinal = 2;
+  tables.set.descriptor_identity_count = 3;
+
+  IREE_EXPECT_OK(loom_low_descriptor_set_verify(&tables.set));
+}
+
+TEST(LowDescriptorsTest, RejectsReferencedEmptyDescriptorIdentitySlot) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  tables.descriptors[1].identity_ordinal = 2;
+  tables.set.descriptor_identity_count = 3;
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_low_descriptor_set_verify(&tables.set));
+}
+
+TEST(LowDescriptorsTest, RejectsOutOfRangeDescriptorIdentityOrdinal) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  tables.descriptors[1].identity_ordinal = 2;
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
                         loom_low_descriptor_set_verify(&tables.set));
 }
 

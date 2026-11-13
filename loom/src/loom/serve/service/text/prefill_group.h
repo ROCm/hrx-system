@@ -5,7 +5,7 @@
 
 #ifndef LOOM_SERVE_SERVICE_TEXT_PREFILL_GROUP_H_
 #define LOOM_SERVE_SERVICE_TEXT_PREFILL_GROUP_H_
-#include "loom/serve/runtime/program/module.h"
+#include "loom/runtime/program/module.h"
 #include "loom/serve/service/text/model.h"
 
 #ifdef __cplusplus
@@ -48,8 +48,9 @@ iree_status_t loom_serve_text_model_publish_state_bindings(
 //     Receives owned nine-u32 semantic plans and independent packet storage.
 //     Reserves B's position/source_position without committing row state. The
 //     complete packet extents are uploaded before either bank executes.
-//   text_publish_prefill_group_v1(plan_a, plan_b, outputs_b, progress)
-//     Runs once after successful joined readiness. Writes one ordinary progress
+//   text_publish_prefill_group_v1(state, plan_a, plan_b, outputs_b, progress)
+//     Runs once after successful joined readiness with the model-owned control
+//     state, as ordinary epoch publication does. Writes one ordinary progress
 //     record for the total known input and optional B selection. No partial
 //     group result is published. Source must not require mid-group host reads.
 // Storage extents come from the source's existing packed storage declaration.
@@ -92,11 +93,11 @@ typedef struct loom_serve_text_group_candidate_t {
   iree_allocator_t host_allocator;
   iree_host_size_t stage_count;
   // Owned replacement plan; NULL keeps the current plan.
-  loom_serve_execution_plan_t* plan;
+  loom_runtime_execution_plan_t* plan;
   // Whether stages replaces the model's leaf descriptors.
   bool rebind;
   // Owned retained descriptors; NULL with rebind selects stage_bindings.
-  loom_serve_stage_t* stages;
+  loom_runtime_stage_t* stages;
   // Owned tracked bank workspaces; NULL keeps the current workspaces.
   iree_hal_buffer_t* workspaces[2];
   // Request backing the replacement workspaces.
@@ -107,7 +108,7 @@ typedef struct loom_serve_text_group_candidate_t {
 // descriptors without touching device memory. Used by resident growth.
 iree_status_t loom_serve_text_prefill_group_prepare_plan(
     loom_serve_text_model_t* model, iree_vm_buffer_t* control_state,
-    loom_serve_execution_plan_t** out_plan);
+    loom_runtime_execution_plan_t** out_plan);
 
 // Prepares the plan, leaf descriptors and bank workspaces for selecting
 // |variant| (NULL restores the original stages). Requires a drained group.

@@ -223,8 +223,9 @@ class GpuFileLatencyTest : public GpuFileIoFixture,
     commands->BindCompute(program, arguments->device_address,
                           family_.format_features);
     commands->Dispatch(program, 1, 1, 1);
-    commands->SystemBarrier();
-    commands->WriteData32(completion->device_address, 1);
+    // Only the host needs completion. Publish the shader's stores at
+    // bottom-of-pipe without blocking the command processor on a compute join.
+    commands->ReleaseSystem32(completion->device_address, 1);
     commands->PadToEightWords();
     ASSERT_LT(commands->word_count(), queue->words().size());
     ASSERT_NO_FATAL_FAILURE(WaitIdle());
@@ -1252,9 +1253,8 @@ class GpuFileDemandTest : public GpuFileLatencyTest {
                                           background_arguments->device_address,
                                           family_.format_features);
           background_commands.Dispatch(program, 1, 1, 1);
-          background_commands.SystemBarrier();
-          background_commands.WriteData32(background_completion->device_address,
-                                          1);
+          background_commands.ReleaseSystem32(
+              background_completion->device_address, 1);
           background_commands.PadToEightWords();
           ASSERT_NO_FATAL_FAILURE(background_queue->Publish(
               api_, gpu_api_, background_commands.word_count()));

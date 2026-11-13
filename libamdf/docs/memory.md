@@ -86,6 +86,14 @@ are borrowed descriptors, not additional objects to destroy. Enumeration with
 zero capacity and null storage returns the required count with
 `BUFFER_TOO_SMALL` when any scopes exist.
 
+Explicit device creation establishes a physical scope's complete immutable
+metadata before exposing it. Later devices through the same endpoint reuse that
+descriptor without changing it. Destroying the device that first returned the
+scope does not invalidate the descriptor while its endpoint lives, but the
+descriptor retains no execution device. Allocations still require their actual
+storage device in the live access set and borrow those explicitly named devices.
+Scope queries perform no first-use initialization.
+
 For XDNA instruction storage, `context_enumerate_memory_scopes` returns a private
 scope borrowed from the explicitly created context. A HAL queries that scope
 with the context's device and EXECUTE access, allocates its instruction backing
@@ -515,6 +523,14 @@ honors the strongest requested unit among its consumers. The unit is distinct
 from both backing allocation size and requested base alignment. Every mapping
 offset and length must satisfy the returned geometry.
 
+Native Windows AMD GPU reservations expose a 64 KiB minimum mapping unit.
+Target ranges and prior and replacement source offsets use this unit; smaller
+edits fail admission instead of being rounded to affect neighboring mappings.
+Linux/WSL DXG retains its 4 KiB mapping unit. These are independently replaceable
+virtual ranges, not physical allocation sizes or a promise about hardware PTE
+size. Native Windows mapping descriptors still encode offsets and lengths in
+the DDI's 4 KiB units. Larger physical slabs can supply many mapping units.
+
 Backing uses the existing scope-taking construction operations. Each consumer
 that will supply replacement mappings requests
 `AMDF_MEMORY_FLAG_MAPPING_SOURCE` in its access requirements. Profile queries
@@ -556,6 +572,9 @@ amdf_memory_mapping_update_t replacement = {
     .memory_access_ordinal = slab_gpu_access,
     .access = admitted_access,
     .source_byte_offset = slab_offset,
+    .previous_memory = old_slab,
+    .previous_memory_access_ordinal = old_slab_gpu_access,
+    .previous_source_byte_offset = old_slab_offset,
 };
 status = api->memory_reservation_update(arena, arena_gpu_access, 1,
                                        &replacement);
@@ -563,6 +582,15 @@ status = api->memory_reservation_update(arena, arena_gpu_access, 1,
 
 `admitted_access` includes the intended permissions and the queried native
 `required_access` bits, within the source and reservation's supported access.
+The previous source describes the backing currently installed throughout this
+range; null declares a hole. The caller already owns that allocation and its
+mapping lifetime. Updates crossing prior or new source boundaries use separate
+entries, so the native provider receives every affected allocation directly.
+The library validates each source's admission and geometry without maintaining
+another inventory of installed mappings or verifying the declared prior state.
+The prior source may name another admitted logical device sharing the selected
+native mapping group, because that consumer may have installed the old backing.
+The desired source still names the selected live device's access.
 
 Success establishes the replacement's translation readiness before returning.
 The next operation on an existing queue can use the unchanged arena address.

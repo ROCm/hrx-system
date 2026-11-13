@@ -47,7 +47,7 @@ void iree_benchmark_use_ptr(char const volatile* x);
 #if defined(__cplusplus)
 }  // extern "C"
 template <typename T>
-inline IREE_ATTRIBUTE_ALWAYS_INLINE void iree_optimization_barrier(T&& value) {
+IREE_ATTRIBUTE_ALWAYS_INLINE void iree_optimization_barrier(T&& value) {
   iree_benchmark_use_ptr(&reinterpret_cast<char const volatile&>(value));
   iree_benchmark_clobber();
 }
@@ -61,11 +61,11 @@ extern "C" {
 
 #if defined(__cplusplus)
 }  // extern "C"
-inline IREE_ATTRIBUTE_ALWAYS_INLINE void iree_benchmark_clobber() {
+IREE_ATTRIBUTE_ALWAYS_INLINE void iree_benchmark_clobber() {
   asm volatile("" : : : "memory");
 }
 template <typename T>
-inline IREE_ATTRIBUTE_ALWAYS_INLINE void iree_optimization_barrier(T&& value) {
+IREE_ATTRIBUTE_ALWAYS_INLINE void iree_optimization_barrier(T&& value) {
   asm volatile("" : "+r,m"(value) : : "memory");
 }
 extern "C" {
@@ -78,32 +78,32 @@ extern "C" {
 
 #if defined(__cplusplus)
 }  // extern "C"
-inline IREE_ATTRIBUTE_ALWAYS_INLINE void iree_benchmark_clobber() {
+IREE_ATTRIBUTE_ALWAYS_INLINE void iree_benchmark_clobber() {
   asm volatile("" : : : "memory");
 }
 template <typename T>
-inline IREE_ATTRIBUTE_ALWAYS_INLINE
+IREE_ATTRIBUTE_ALWAYS_INLINE
     typename std::enable_if<std::is_trivially_copyable<T>::value &&
                             (sizeof(T) <= sizeof(T*))>::type
     iree_optimization_barrier(T& value) {
   asm volatile("" : "+m,r"(value) : : "memory");
 }
 template <typename T>
-inline IREE_ATTRIBUTE_ALWAYS_INLINE
+IREE_ATTRIBUTE_ALWAYS_INLINE
     typename std::enable_if<!std::is_trivially_copyable<T>::value ||
                             (sizeof(T) > sizeof(T*))>::type
     iree_optimization_barrier(T& value) {
   asm volatile("" : "+m"(value) : : "memory");
 }
 template <typename T>
-inline IREE_ATTRIBUTE_ALWAYS_INLINE
+IREE_ATTRIBUTE_ALWAYS_INLINE
     typename std::enable_if<std::is_trivially_copyable<T>::value &&
                             (sizeof(T) <= sizeof(T*))>::type
     iree_optimization_barrier(T&& value) {
   asm volatile("" : "+m,r"(value) : : "memory");
 }
 template <typename T>
-inline IREE_ATTRIBUTE_ALWAYS_INLINE
+IREE_ATTRIBUTE_ALWAYS_INLINE
     typename std::enable_if<!std::is_trivially_copyable<T>::value ||
                             (sizeof(T) > sizeof(T*))>::type
     iree_optimization_barrier(T&& value) {

@@ -153,9 +153,8 @@ func.def public target(@target) @read_projected_record() -> (i32) {
 // ----
 low.func.def public target<amd.xdna.aie2p.core>(@target) abi(object_function) @read_projected_record() -> (reg<aie2p.er>) asm {
   %base = mov.local-address 458752
-  %13 = mov.static-byte-offset 64
-  %14 = mov.address-index %13
-  %value = lda.i32.index %base, %14
+  %13 = mov.static-address-index 64
+  %value = lda.i32.index %base, %13
   return %value
 }
 

@@ -1,0 +1,112 @@
+// RUN: pass canonicalize,cse,dce
+// Qualified elements survive view copies, subviews and ordinary helper calls.
+#include <loomcxx/view.h>
+namespace loomt = loom::type;
+using observed_view =
+    loomt::view<loomt::shape<1, 4>, const volatile unsigned,
+                loomt::encoding<loom::encoding::role::layout, 2>>;
+static unsigned read(observed_view source) {
+  auto copy = source;
+  loom::view::load(copy, 0, 1);
+  unsigned first = loom::view::load(copy, 0, 1);
+  unsigned second = loom::view::load(copy, 0, 1);
+  return first + second;
+}
+void view_observations(const volatile unsigned* input, volatile unsigned* output) {
+  auto layout = loom::encoding::layout::dense<2>();
+  auto source = loom::buffer::view<2, 4>(input, {}, layout);
+  auto tail = loom::view::subview<1, 4>(source, {1, 0}, {});
+  auto destination = loom::buffer::view<1, 4>(output, {}, layout);
+  unsigned value = read(tail);
+  loom::view::store(value, destination, 0, 1);
+  loom::view::store(value, destination, 0, 1);
+}
+// ----
+func.def public @view_observations(%input: buffer, %input_byte_offset: offset, %output: buffer, %output_byte_offset: offset) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %source = buffer.view %input[%input_byte_offset] : buffer -> view<2x4xi32, %layout>
+  %47 = index.constant 1 : index
+  %46 = index.constant 0 : index
+  %tail = view.subview %source[%47, %46] : view<2x4xi32, %layout> -> view<1x4xi32, %layout>
+  %destination = buffer.view %output[%output_byte_offset] : buffer -> view<1x4xi32>
+  %value = func.call @read(%layout, %tail) : (encoding<layout>, view<1x4xi32, %layout>) -> (i32)
+  view.store<volatile> %value, %destination[%46, %47] : i32, view<1x4xi32>
+  view.store<volatile> %value, %destination[%46, %47] : i32, view<1x4xi32>
+  func.return
+}
+
+func.def @read(%source_layout: encoding<layout>, %source: view<1x4xi32, %source_layout>) -> (i32) {
+  %53 = index.constant 0 : index
+  %52 = index.constant 1 : index
+  %30 = view.load<volatile> %source[%53, %52] : view<1x4xi32, %source_layout> -> i32
+  %first = view.load<volatile> %source[%53, %52] : view<1x4xi32, %source_layout> -> i32
+  %second = view.load<volatile> %source[%53, %52] : view<1x4xi32, %source_layout> -> i32
+  %41 = scalar.addi %first, %second : i32
+  func.return %41 : i32
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// Dynamic origins and strides retain qualified observations through a
+// subview and helper call; both stores target only the selected output cell.
+#include <loomcxx/kernel.h>
+#include <loomcxx/view.h>
+template <class View>
+static unsigned read_view_twice(View source) {
+  loom::view::load(source, 0, 1);
+  unsigned first = loom::view::load(source, 0, 1);
+  unsigned second = loom::view::load(source, 0, 1);
+  return first + second;
+}
+
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void volatile_views(const volatile unsigned* input, volatile unsigned* output,
+                    unsigned origin, unsigned stride) {
+  loom::assume(origin < 16);
+  loom::assume(stride < 16);
+  auto layout = loom::encoding::layout::strided(stride, 1u);
+  auto source = loom::buffer::view<2, 4>(input + origin, {}, layout);
+  auto row = loom::view::subview<1, 4>(source, {1, 0}, {});
+  auto destination =
+      loom::buffer::view<1, 4>(output, {}, loom::encoding::layout::dense<2>());
+  unsigned value = read_view_twice(row);
+  loom::view::store(0u, destination, 0, 1);
+  loom::view::store(value, destination, 0, 1);
+}
+// ----
+kernel.def @volatile_views() {
+  %4 = index.constant 1 : index
+  kernel.launch.config workgroups(%4, %4, %4) workgroup_size(%4, %4, %4) : index
+} launch(%input: buffer, %output: buffer, %origin$2: i32, %stride$3: i32) {
+  %output_byte_offset = index.constant 0 : offset
+  %origin$12 = scalar.assume %origin$2 [range(%origin$2, 0, 15)] : i32
+  %stride$13 = scalar.assume %stride$3 [range(%stride$3, 0, 15)] : i32
+  %15 = scalar.extui %stride$13 : i32 to i64
+  %16 = index.cast %15 : i64 to index
+  %74 = index.constant 1 : index
+  %layout = encoding.layout.strided [%16, %74] : encoding<layout>
+  %20 = scalar.extui %origin$12 : i32 to i64
+  %72 = scalar.constant 2 : i64
+  %73 = scalar.shli %20, %72 : i64
+  %25 = scalar.assume %73 [range(%73, 0, 9223372036854775807)] : i64
+  %26 = index.cast %25 : i64 to offset
+  %source = buffer.view %input[%26] : buffer -> view<2x4xi32, %layout>
+  %70 = index.constant 0 : index
+  %row = view.subview %source[%74, %70] : view<2x4xi32, %layout> -> view<1x4xi32, %layout>
+  %destination = buffer.view %output[%output_byte_offset] : buffer -> view<1x4xi32>
+  %value = func.call @read_view_twice___loom__type__view___loom__type__shape_1__4___const_volatile_unsigned_int____loom__type__encoding_0__2__(%layout, %row) : (encoding<layout>, view<1x4xi32, %layout>) -> (i32)
+  %38 = scalar.constant 0 : i32
+  view.store<volatile> %38, %destination[%70, %74] : i32, view<1x4xi32>
+  view.store<volatile> %value, %destination[%70, %74] : i32, view<1x4xi32>
+  kernel.return
+}
+
+func.def @read_view_twice___loom__type__view___loom__type__shape_1__4___const_volatile_unsigned_int____loom__type__encoding_0__2__(%source_layout: encoding<layout>, %source: view<1x4xi32, %source_layout>) -> (i32) {
+  %80 = index.constant 0 : index
+  %79 = index.constant 1 : index
+  %54 = view.load<volatile> %source[%80, %79] : view<1x4xi32, %source_layout> -> i32
+  %first = view.load<volatile> %source[%80, %79] : view<1x4xi32, %source_layout> -> i32
+  %second = view.load<volatile> %source[%80, %79] : view<1x4xi32, %source_layout> -> i32
+  %65 = scalar.addi %first, %second : i32
+  func.return %65 : i32
+}

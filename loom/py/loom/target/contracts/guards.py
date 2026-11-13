@@ -24,6 +24,7 @@ from loom.dsl import (
     Op,
 )
 from loom.error.target import ERR_TARGET_003
+from loom.scalar_type import ScalarTypeKind
 from loom.target.contracts.diagnostics import (
     DiagnosticRef,
     string_param,
@@ -112,6 +113,7 @@ class GuardKind(Enum):
     I64_ARRAY_ELEMENTS_RANGE = "i64_array_elements_range"
     VALUE_SIGNED_BIT_COUNT = "value_signed_bit_count"
     VALUE_UNSIGNED_BIT_COUNT = "value_unsigned_bit_count"
+    VALUE_DIVISIBLE_BY = "value_divisible_by"
     VALUE_EXACT_I64 = "value_exact_i64"
     VALUE_NOT_EXACT_I64 = "value_not_exact_i64"
     VALUE_EXACT_POWER_OF_TWO_I64 = "value_exact_power_of_two_i64"
@@ -119,6 +121,7 @@ class GuardKind(Enum):
     VALUE_I32_DIVISOR_MAGIC_KIND = "value_i32_divisor_magic_kind"
     VALUE_EXACT_FLOAT = "value_exact_float"
     VALUE_FLOAT_EXACTLY_REPRESENTABLE_AS = "value_float_exactly_representable_as"
+    VALUE_EXACT_FLOAT_TYPE = "value_exact_float_type"
     VALUE_EXACT_POWER_OF_TWO_FLOAT = "value_exact_power_of_two_float"
     VALUE_NOT_NAN = "value_not_nan"
     VALUE_NOT_SUBNORMAL_OR_INSTANCE_FLAGS_HAS_ALL = (
@@ -168,7 +171,11 @@ def is_source_attr_guard_kind(kind: GuardKind) -> bool:
     return kind in _SOURCE_ATTR_GUARD_KINDS
 
 
-def _validate_guard_bit_width(kind: GuardKind, bit_width: int | None) -> None:
+def _validate_guard_numeric_format(
+    kind: GuardKind, bit_width: int | None, scalar_type: ScalarTypeKind | None
+) -> None:
+    if scalar_type is not None and kind != GuardKind.VALUE_EXACT_FLOAT_TYPE:
+        raise ValueError(f"{kind.value} guard cannot carry a scalar type")
     if kind == GuardKind.OPERAND_SEGMENT_EXACT_BITS:
         if bit_width not in (8, 16, 32, 64):
             raise ValueError(f"{kind.value} bit width must be 8, 16, 32, or 64")
@@ -215,6 +222,8 @@ class Guard:
     other_field: str | None = None
     attr_field: str | None = None
     type_pattern: TypePattern | None = None
+    # Fixed element format required by the exact-float predicate.
+    scalar_type: ScalarTypeKind | None = None
     value_ref: ValueRef | None = None
     attr_type: str | None = None
     enum_keyword: str | None = None
@@ -609,6 +618,21 @@ class Guard:
         )
 
     @classmethod
+    def value_divisible_by(
+        cls,
+        field: str,
+        divisor: int,
+        *,
+        diagnostic: GuardDiagnostic | None = None,
+    ) -> Self:
+        return cls(
+            kind=GuardKind.VALUE_DIVISIBLE_BY,
+            field=field,
+            count=divisor,
+            diagnostic=diagnostic,
+        )
+
+    @classmethod
     def value_exact_i64(
         cls,
         field: str,
@@ -682,6 +706,22 @@ class Guard:
         return cls(
             kind=GuardKind.VALUE_EXACT_FLOAT,
             field=field,
+            diagnostic=diagnostic,
+        )
+
+    @classmethod
+    def value_exact_float_type(
+        cls,
+        field: str,
+        scalar_type: ScalarTypeKind,
+        *,
+        diagnostic: GuardDiagnostic | None = None,
+    ) -> Self:
+        """Requires every finite lane to be exact in a fixed float format."""
+        return cls(
+            kind=GuardKind.VALUE_EXACT_FLOAT_TYPE,
+            field=field,
+            scalar_type=scalar_type,
             diagnostic=diagnostic,
         )
 
@@ -1065,7 +1105,7 @@ class Guard:
             raise ValueError(f"{self.kind.value} guard cannot carry enum keywords")
         if self.count is not None and self.count < 0:
             raise ValueError(f"{self.kind.value} count must be non-negative")
-        _validate_guard_bit_width(self.kind, self.bit_width)
+        _validate_guard_numeric_format(self.kind, self.bit_width, self.scalar_type)
         if self.element is not None and self.element < 0:
             raise ValueError(f"{self.kind.value} element must be non-negative")
         if (
@@ -1175,6 +1215,7 @@ class Guard:
         if self.kind in (
             GuardKind.VALUE_SIGNED_BIT_COUNT,
             GuardKind.VALUE_UNSIGNED_BIT_COUNT,
+            GuardKind.VALUE_DIVISIBLE_BY,
             GuardKind.VALUE_EXACT_I64,
             GuardKind.VALUE_NOT_EXACT_I64,
             GuardKind.VALUE_EXACT_POWER_OF_TWO_I64,
@@ -1182,6 +1223,7 @@ class Guard:
             GuardKind.VALUE_I32_DIVISOR_MAGIC_KIND,
             GuardKind.VALUE_EXACT_FLOAT,
             GuardKind.VALUE_FLOAT_EXACTLY_REPRESENTABLE_AS,
+            GuardKind.VALUE_EXACT_FLOAT_TYPE,
             GuardKind.VALUE_EXACT_POWER_OF_TWO_FLOAT,
             GuardKind.VALUE_NOT_NAN,
             GuardKind.VALUE_I64_RANGE,
@@ -1380,6 +1422,15 @@ def _validate_value_fact_guard(
     subject: str,
 ) -> None:
     _require_value(source_op, guard.field, subject)
+    if guard.kind == GuardKind.VALUE_EXACT_FLOAT_TYPE:
+        if (
+            not isinstance(guard.scalar_type, ScalarTypeKind)
+            or guard.scalar_type < ScalarTypeKind.F8E4M3
+        ):
+            raise ValueError(
+                f"{source_op.name}: {subject} requires a float scalar type"
+            )
+        return
     if guard.kind in (
         GuardKind.VALUE_I64_RANGE_LE,
         GuardKind.VALUE_I64_RANGE_GE,
@@ -1396,6 +1447,12 @@ def _validate_value_fact_guard(
     ):
         if guard.count is None or guard.count <= 0:
             raise ValueError(f"{source_op.name}: {subject} needs a positive bit count")
+        return
+    if guard.kind == GuardKind.VALUE_DIVISIBLE_BY:
+        if guard.count is None or not 0 < guard.count < 2**63:
+            raise ValueError(
+                f"{source_op.name}: {subject} needs a positive i64 divisor"
+            )
         return
     if guard.kind == GuardKind.VALUE_U32_DIVISOR_MAGIC_KIND:
         if guard.other_field is None:

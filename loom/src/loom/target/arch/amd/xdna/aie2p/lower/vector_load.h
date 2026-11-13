@@ -9,7 +9,7 @@
 #ifndef LOOM_TARGET_ARCH_AMD_XDNA_AIE2P_LOWER_VECTOR_LOAD_H_
 #define LOOM_TARGET_ARCH_AMD_XDNA_AIE2P_LOWER_VECTOR_LOAD_H_
 
-#include "loom/codegen/low/lower/lower.h"
+#include "loom/target/arch/amd/xdna/aie2p/lower/lower.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -21,9 +21,6 @@ iree_status_t loom_aie2p_query_vector_load_contract(
     const loom_target_contract_query_environment_t* environment,
     const loom_op_t* source_op,
     loom_target_contract_query_result_t* out_result);
-
-// Returns true when |plan| is owned by bounded vector-load lowering.
-bool loom_aie2p_vector_load_plan_isa(loom_low_lower_plan_t plan);
 
 // Prepares a bounded scalar-to-packet plan from retained source-memory facts.
 iree_status_t loom_aie2p_prepare_vector_load_plan(

@@ -21,6 +21,13 @@ package(
 _SPIRV_ROOT_VISIBILITY = ["//loom/src/loom/target/arch/spirv:__pkg__"]
 
 loom_generated_source(
+    name = "cooperative_arithmetic_rows_gen",
+    generator = "//loom/py/loom/gen/target/arch/spirv:cooperative_arithmetic",
+    output = "cooperative_arithmetic_rows.inl",
+    output_flag = "--tables",
+)
+
+loom_generated_source(
     name = "collective_rows_gen",
     generator = "//loom/py/loom/gen/target/arch/spirv:collective_rows",
     output = "collective_rows.inl",
@@ -38,6 +45,7 @@ loom_cc_library(
     name = "lower",
     srcs = [
         "collective_arithmetic.c",
+        "cooperative_arithmetic.c",
         "matrix.c",
         "registry.c",
         "workgroup.c",
@@ -46,6 +54,7 @@ loom_cc_library(
     ],
     hdrs = [
         "collective_arithmetic.h",
+        "cooperative_arithmetic.h",
         "lower.h",
         "matrix.h",
         "workgroup.h",
@@ -54,11 +63,13 @@ loom_cc_library(
     ],
     textual_hdrs = [
         ":collective_rows.inl",
+        ":cooperative_arithmetic_rows.inl",
         ":workgroup_reduce_rows.inl",
         "//loom/src/loom/target/arch/spirv/contracts:tables.inl",
     ],
     visibility = _SPIRV_ROOT_VISIBILITY,
     deps = [
+        ":index",
         "//loom/src/loom/analysis:contract_vector",
         "//loom/src/loom/analysis:source_storage_packing",
         "//loom/src/loom/analysis:storage_interference",
@@ -97,6 +108,32 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "index",
+    srcs = [
+        "index.c",
+        "index_operands.c",
+    ],
+    hdrs = [
+        "index.h",
+        "index_operands.h",
+    ],
+    visibility = ["//loom/src/loom/target/arch/spirv/contracts:__pkg__"],
+    deps = [
+        "//loom/src/loom/codegen/low/lower",
+        "//loom/src/loom/codegen/low/lower:representation_observer",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ir:facts",
+        "//loom/src/loom/ops/index",
+        "//loom/src/loom/ops/scf",
+        "//loom/src/loom/target:registers",
+        "//loom/src/loom/target/arch/spirv:registers",
+        "//loom/src/loom/target/arch/spirv/descriptors",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
     name = "cooperative_initializer",
     srcs = ["cooperative_initializer.c"],
     hdrs = ["cooperative_initializer.h"],
@@ -112,8 +149,26 @@ loom_cc_library(
 )
 
 loom_check_test_suite(
+    name = "buffer_position_tests",
+    srcs = ["buffer_positions_test.loom-test"],
+    tags = ["hostonly"],
+    target_compatible_with = loom_config_compatible_with(["//loom/config/emit:spirv_binary"]),
+)
+
+loom_check_test_suite(
+    name = "packed_memory_tests",
+    srcs = ["packed_memory_test.loom-test"],
+    tags = ["hostonly"],
+    target_compatible_with = loom_config_compatible_with(["//loom/config/emit:spirv_binary"]),
+)
+
+loom_check_test_suite(
     name = "index_tests",
-    srcs = ["index_test.loom-test"],
+    srcs = [
+        "index_control_test.loom-test",
+        "index_memory_test.loom-test",
+        "index_test.loom-test",
+    ],
     tags = ["hostonly"],
     target_compatible_with = loom_config_compatible_with(["//loom/config/emit:spirv_binary"]),
 )
@@ -147,8 +202,22 @@ loom_check_test_suite(
 )
 
 loom_check_test_suite(
+    name = "cooperative_arithmetic_tests",
+    srcs = ["cooperative_arithmetic_test.loom-test"],
+    tags = ["hostonly"],
+    target_compatible_with = loom_config_compatible_with(["//loom/config/emit:spirv_binary"]),
+)
+
+loom_check_test_suite(
     name = "cooperative_memory_tests",
     srcs = ["cooperative_memory_test.loom-test"],
+    tags = ["hostonly"],
+    target_compatible_with = loom_config_compatible_with(["//loom/config/emit:spirv_binary"]),
+)
+
+loom_check_test_suite(
+    name = "integer_dot_tests",
+    srcs = ["integer_dot_test.loom-test"],
     tags = ["hostonly"],
     target_compatible_with = loom_config_compatible_with(["//loom/config/emit:spirv_binary"]),
 )

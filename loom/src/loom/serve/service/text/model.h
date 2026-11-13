@@ -9,14 +9,14 @@
 
 #include "iree/base/api.h"
 #include "iree/tokenizer/tokenizer.h"
-#include "loom/serve/runtime/device/device.h"
-#include "loom/serve/runtime/execution/execution.h"
-#include "loom/serve/runtime/execution/plan.h"
-#include "loom/serve/runtime/parameter/weights.h"
-#include "loom/serve/runtime/program/compilation.h"
-#include "loom/serve/runtime/program/sources.h"
-#include "loom/serve/runtime/program/variant_pool.h"
-#include "loom/serve/runtime/storage/memory.h"
+#include "loom/runtime/device/device.h"
+#include "loom/runtime/execution/execution.h"
+#include "loom/runtime/execution/plan.h"
+#include "loom/runtime/parameter/weights.h"
+#include "loom/runtime/program/compilation.h"
+#include "loom/runtime/program/sources.h"
+#include "loom/runtime/program/variant_pool.h"
+#include "loom/runtime/storage/memory.h"
 #include "loom/serve/service/text/cache_policy.h"
 #include "loom/serve/service/text/capture.h"
 #include "loom/serve/service/text/chat.h"
@@ -61,9 +61,9 @@ typedef struct loom_serve_text_variant_t loom_serve_text_variant_t;
 // compiler pool. No parameters are allocated, read, prepared or activated by
 // this operation.
 iree_status_t loom_serve_text_model_compile_variant_async(
-    loom_serve_text_model_t* model, const loom_serve_sources_t* sources,
+    loom_serve_text_model_t* model, const loom_runtime_sources_t* sources,
     const loomc_sanitizer_options_t* sanitizer,
-    loom_serve_variant_completion_fn_t completion, void* user_data);
+    loom_runtime_variant_completion_fn_t completion, void* user_data);
 
 // Selects a ready same-model candidate at a completed model boundary, excluding
 // concurrent VM invocation. NULL restores the initial native stages. Existing
@@ -84,7 +84,7 @@ iree_status_t loom_serve_text_model_select_variant(
 void loom_serve_text_variant_free(loom_serve_text_variant_t* variant);
 
 // Borrowed immutable terminal compilation evidence, retained with the variant.
-const loom_serve_compilation_report_t* loom_serve_text_variant_report(
+const loom_runtime_compilation_report_t* loom_serve_text_variant_report(
     const loom_serve_text_variant_t* variant);
 
 typedef enum loom_serve_text_mode_e {
@@ -112,13 +112,13 @@ iree_status_t loom_serve_text_model_prepare_request(
 typedef struct loom_serve_text_options_t {
   // Explicit deployment choice. DEFAULT is SINGLE for native callers; the
   // server translates startup compatibility settings before model allocation.
-  loom_serve_group_mode_t group_mode;
+  loom_runtime_group_mode_t group_mode;
   // Registered plan ID; empty selects two_bank_v1 for explicit TWO_BANK.
   iree_string_view_t plan_provider;
   // Source root contract and request semantics, fixed for this residency.
   loom_serve_text_mode_t mode;
   // Explicit program inputs and local base, borrowed through load completion.
-  loom_serve_sources_t sources;
+  loom_runtime_sources_t sources;
   // Exact preparation roots mapped to logical names in the owning device
   // group. Nonempty native options override the selected v2 card mapping.
   // All selected devices must be consumers of the supplied storage pool.
@@ -305,7 +305,7 @@ iree_status_t loom_serve_text_row_submit_reserve(
     loom_serve_text_row_t* row, loom_serve_text_reserve_mode_t mode,
     const loom_serve_text_checkpoint_t* checkpoint, iree_host_size_t extent,
     loom_serve_text_reserve_result_t* out_result,
-    loom_serve_execution_frontier_t* out_frontier);
+    loom_runtime_execution_frontier_t* out_frontier);
 
 // Consumes an ACQUIRED reservation after successful ALL readiness. The
 // parameter pin, exact target/draft pages, private views, and recurrent writer
@@ -349,7 +349,7 @@ typedef struct loom_serve_text_trim_result_t {
 // failure is terminal and preserves accepted work for outer model destruction.
 iree_status_t loom_serve_text_model_submit_trim(
     loom_serve_text_model_t* model, loom_serve_text_trim_result_t* out_result,
-    loom_serve_execution_frontier_t* out_frontier);
+    loom_runtime_execution_frontier_t* out_frontier);
 
 // After successful ALL readiness, advances relocation or old-backing release.
 // False returns the next borrowed frontier to await before advancing again.
@@ -357,7 +357,7 @@ iree_status_t loom_serve_text_model_submit_trim(
 // this entry; native failures remain terminal and preserve retirement owners.
 iree_status_t loom_serve_text_model_complete_trim(
     loom_serve_text_model_t* model, loom_serve_text_trim_result_t* result,
-    bool* out_complete, loom_serve_execution_frontier_t* out_frontier);
+    bool* out_complete, loom_runtime_execution_frontier_t* out_frontier);
 
 // Synchronous outer-thread wrapper over submission and completion. Explicit
 // maintenance, not ordinary decoding or a task-worker entry point.
@@ -387,7 +387,7 @@ void loom_serve_text_resize_free(loom_serve_text_resize_t* resize);
 // for normal model retirement. The prepared result is consumed, not freed.
 iree_status_t loom_serve_text_model_submit_resize(
     loom_serve_text_model_t* model, loom_serve_text_resize_t* resize,
-    loom_serve_execution_frontier_t* out_frontier);
+    loom_runtime_execution_frontier_t* out_frontier);
 
 // Called after ALL resize readiness succeeds, before admitting new residents.
 void loom_serve_text_model_complete_resize(loom_serve_text_model_t* model);
@@ -406,7 +406,7 @@ typedef void (*loom_serve_text_load_wake_fn_t)(void* user_data);
 // Allocates an unstarted operation without source I/O, device reservation or
 // task submission. Option views remain borrowed until terminal advance.
 iree_status_t loom_serve_text_load_allocate(
-    loom_serve_device_t* device, loom_serve_pool_t* pool,
+    loom_runtime_device_t* device, loom_runtime_pool_t* pool,
     const loom_serve_text_options_t* options,
     loom_serve_text_load_wake_fn_t wake, void* user_data,
     iree_allocator_t host_allocator, loom_serve_text_load_t** out_load);
@@ -432,7 +432,7 @@ iree_status_t loom_serve_text_load_advance(loom_serve_text_load_t* load,
                                            bool* out_complete);
 
 // Terminal-only evidence, borrowed until take_model or destruction.
-const loom_serve_compilation_report_t* loom_serve_text_load_report(
+const loom_runtime_compilation_report_t* loom_serve_text_load_report(
     const loom_serve_text_load_t* load);
 
 // Transfers partial or complete model ownership on EVERY terminal outcome.
@@ -453,7 +453,7 @@ void loom_serve_text_load_free(loom_serve_text_load_t* load);
 // evidence is available through the owner-driven load interface; this wrapper
 // performs no process-global output.
 iree_status_t loom_serve_text_model_allocate(
-    loom_serve_device_t* device, loom_serve_pool_t* pool,
+    loom_runtime_device_t* device, loom_runtime_pool_t* pool,
     const loom_serve_text_options_t* options, iree_allocator_t host_allocator,
     loom_serve_text_model_t** out_model);
 
@@ -472,22 +472,25 @@ void loom_serve_text_model_retire(loom_serve_text_model_t* model,
 bool loom_serve_text_model_is_retired(loom_serve_text_model_t* model);
 
 // Consumes a retired model on success. A platform release failure preserves
-// remaining handles and metadata for owner-side retry. NULL is accepted.
+// remaining handles and metadata for owner-side retry. Load/service owners
+// collect warmup outcomes before retirement; those are not release failures.
+// NULL is accepted.
 iree_status_t loom_serve_text_model_free_retired(
     loom_serve_text_model_t* model);
 
 // Cold outer-owner teardown. Begins retirement and joins actual queue ownership
 // before final destruction; live removal uses the wake/query path. All borrowed
-// row/tokenizer pointers become invalid. NULL is accepted.
+// row/tokenizer pointers become invalid. Includes terminal warmup/execution
+// outcomes even when resource release succeeds. NULL is accepted.
 iree_status_t loom_serve_text_model_free(loom_serve_text_model_t* model);
 
 // Borrowed execution device, outliving model work and asynchronous preparation.
-loom_serve_device_t* loom_serve_text_model_device(
+loom_runtime_device_t* loom_serve_text_model_device(
     const loom_serve_text_model_t* model);
 
 // Borrowed storage and residency owner, independent of the execution device.
 // Its pressure operations share the serialized host owner with model work.
-loom_serve_pool_t* loom_serve_text_model_pool(
+loom_runtime_pool_t* loom_serve_text_model_pool(
     const loom_serve_text_model_t* model);
 
 // At a serialized model boundary, release/reload parameter backing while
@@ -504,7 +507,7 @@ iree_status_t loom_serve_text_model_deactivate(loom_serve_text_model_t* model,
 // Borrowed admission/retention handle. A caller can try_acquire before choosing
 // work, retaining the returned pin across invocations until release. Ordinary
 // capacity backpressure leaves all model state unchanged.
-loom_serve_residency_t* loom_serve_text_model_residency(
+loom_runtime_residency_t* loom_serve_text_model_residency(
     const loom_serve_text_model_t* model);
 
 // Borrowed demanded parameter warmup, or NULL for cold preparation. The service
@@ -617,7 +620,7 @@ iree_status_t loom_serve_text_model_submit_epoch(
     const uint32_t* output_limits,
     const loom_serve_text_continuation_t* continuation,
     loom_serve_text_capture_t** out_capture,
-    loom_serve_execution_frontier_t* out_frontier);
+    loom_runtime_execution_frontier_t* out_frontier);
 
 // Submits a source-declared two-bank group without a device wait. Only known,
 // contiguous input for one row is accepted; A cannot select. Both banks and the
@@ -637,7 +640,7 @@ iree_status_t loom_serve_text_model_submit_epoch_pair(
     loom_serve_text_model_t* model, iree_host_size_t first_shape,
     const loom_serve_text_span_t* first, iree_host_size_t second_shape,
     const loom_serve_text_span_t* second,
-    loom_serve_execution_frontier_t* out_frontier);
+    loom_runtime_execution_frontier_t* out_frontier);
 
 // Consumes one successfully completed epoch after both submitted frontiers
 // signal success. Source VM publication commits row positions, returns rejected
@@ -689,7 +692,7 @@ iree_status_t loom_serve_text_row_reset(loom_serve_text_row_t* row);
 // invalidates all outstanding handles.
 iree_status_t loom_serve_text_row_submit_pin(
     loom_serve_text_row_t* row, loom_serve_text_checkpoint_t** out_checkpoint,
-    loom_serve_execution_frontier_t* out_frontier);
+    loom_runtime_execution_frontier_t* out_frontier);
 
 // Synchronous outer-thread join over pin submission. Publishes a ready handle
 // only on successful completion; capacity denial and failure leave NULL.
@@ -728,7 +731,7 @@ void loom_serve_text_checkpoint_release(
 // Submission/readiness failure retains source backing for outer destruction.
 iree_status_t loom_serve_text_checkpoint_submit_suspend(
     loom_serve_text_checkpoint_t* checkpoint,
-    loom_serve_execution_frontier_t* out_frontier);
+    loom_runtime_execution_frontier_t* out_frontier);
 
 // Consumes successful ALL readiness and releases this endpoint's device IDs.
 // Other branches retain their own references. No allocation or wait occurs.
@@ -786,14 +789,15 @@ iree_host_size_t loom_serve_text_row_suspended_bytes(
 // may discard that prediction; decode consumes it.
 iree_status_t loom_serve_text_row_submit_prefill(
     loom_serve_text_row_t* row, iree_host_size_t count,
-    const int32_t* token_ids, loom_serve_execution_frontier_t* out_frontier);
+    const int32_t* token_ids, loom_runtime_execution_frontier_t* out_frontier);
 
 // Consumes the previously selected token and selects its successor using the
 // same ownership contract as submit_prefill. The caller has consumed successful
 // completion and chosen to continue; EOS policy belongs to it. Dense storage
 // uses the source's isolated decode command, not a one-token prefill.
 iree_status_t loom_serve_text_row_submit_decode(
-    loom_serve_text_row_t* row, loom_serve_execution_frontier_t* out_frontier);
+    loom_serve_text_row_t* row,
+    loom_runtime_execution_frontier_t* out_frontier);
 
 // Publishes a submitted single-row step after successful ALL readiness and
 // releases its parameter pin. No device wait occurs. Failure is terminal and

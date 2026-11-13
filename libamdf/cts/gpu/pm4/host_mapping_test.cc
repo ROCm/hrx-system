@@ -258,6 +258,10 @@ TEST_P(Pm4HostMappingTest, ReplacesCpuAndGpuViewsBeforeImmediateUse) {
           .memory = backings[owners[epoch][slot]]->memory,
           .access = accesses[0].access,
           .source_byte_offset = offsets[epoch][slot] * unit,
+          .previous_memory =
+              epoch ? backings[owners[epoch - 1][slot]]->memory : nullptr,
+          .previous_source_byte_offset =
+              epoch ? offsets[epoch - 1][slot] * unit : 0,
       };
     }
     ASSERT_EQ(api_->memory_reservation_update(reservation_, 0, updates.size(),

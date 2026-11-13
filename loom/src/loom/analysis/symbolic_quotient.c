@@ -41,9 +41,19 @@ static const loom_op_t* loom_symbolic_quotient_value_defining_op(
 }
 
 static bool loom_symbolic_quotient_def(
-    const loom_op_t* op, loom_symbolic_quotient_def_t* out_quotient) {
+    const loom_op_t* op, loom_value_id_t result,
+    loom_symbolic_quotient_def_t* out_quotient) {
   switch (op->kind) {
+    case LOOM_OP_INDEX_DIVREM:
+    case LOOM_OP_SCALAR_DIVREMSI:
+    case LOOM_OP_SCALAR_DIVREMUI:
+      if (loom_op_const_results(op)[0] != result) {
+        return false;
+      }
+      out_quotient->scale_kind = LOOM_SYMBOLIC_QUOTIENT_SCALE_DIVISOR;
+      break;
     case LOOM_OP_INDEX_DIV:
+    case LOOM_OP_SCALAR_DIVSI:
     case LOOM_OP_SCALAR_DIVUI:
       out_quotient->scale_kind = LOOM_SYMBOLIC_QUOTIENT_SCALE_DIVISOR;
       break;
@@ -304,11 +314,21 @@ static iree_status_t loom_symbolic_quotient_divisibility_scale(
   *out_scale = 0;
   *out_available = false;
   if (quotient->scale_kind == LOOM_SYMBOLIC_QUOTIENT_SCALE_DIVISOR) {
-    int64_t scale_value = 0;
-    IREE_RETURN_IF_ERROR(loom_symbolic_quotient_value_is_exact_i64(
-        context, quotient->scale_value, &scale_value, out_available));
-    *out_available = *out_available && scale_value > 0;
-    *out_scale = (uint64_t)scale_value;
+    loom_value_facts_t divisor_facts = {0};
+    IREE_RETURN_IF_ERROR(loom_symbolic_expr_context_lookup_facts(
+        context, quotient->scale_value, &divisor_facts));
+    if (loom_value_facts_is_exact(divisor_facts)) {
+      *out_scale = (uint64_t)divisor_facts.range_lo;
+      *out_available = true;
+    } else if (loom_value_facts_is_power_of_two(divisor_facts)) {
+      // Supported quotients have a positive divisor. Every possible power
+      // of two divides the largest one admitted by its interval, even when
+      // the interval's upper endpoint is not itself a power of two.
+      *out_scale = UINT64_C(1)
+                   << (63u - (uint32_t)iree_math_count_leading_zeros_u64(
+                                 (uint64_t)divisor_facts.range_hi));
+      *out_available = true;
+    }
     return iree_ok_status();
   }
 
@@ -396,7 +416,8 @@ static iree_status_t loom_symbolic_quotient_pair_proves_relation(
   const loom_op_t* right_op =
       loom_symbolic_quotient_value_defining_op(context, right_source);
   loom_symbolic_quotient_def_t right = {0};
-  if (!right_op || !loom_symbolic_quotient_def(right_op, &right)) {
+  if (!right_op ||
+      !loom_symbolic_quotient_def(right_op, right_source, &right)) {
     return iree_ok_status();
   }
 
@@ -633,7 +654,8 @@ iree_status_t loom_symbolic_expr_quotient_bound_proves_relation(
   const loom_op_t* quotient_op =
       loom_symbolic_quotient_value_defining_op(context, quotient_source);
   loom_symbolic_quotient_def_t quotient = {0};
-  if (!quotient_op || !loom_symbolic_quotient_def(quotient_op, &quotient)) {
+  if (!quotient_op ||
+      !loom_symbolic_quotient_def(quotient_op, quotient_source, &quotient)) {
     return iree_ok_status();
   }
 

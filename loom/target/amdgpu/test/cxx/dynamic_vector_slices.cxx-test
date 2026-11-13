@@ -25,36 +25,53 @@ using Packet = unsigned __attribute__((ext_vector_type(4)));
 low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 2, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @sum_packets() asm {
   %input = resource<hal_binding> {extent = 64, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %output = resource<hal_binding> {extent = 16, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %314 = v_mov_b32 0
-  %315 = global_load_b32_saddr %314, %input
-  %317 = global_load_b32_saddr %314, %input {offset = 4}
-  %319 = global_load_b32_saddr %314, %input {offset = 8}
-  %321 = global_load_b32_saddr %314, %input {offset = 12}
-  %323 = global_load_b32_saddr %314, %input {offset = 16}
-  %325 = global_load_b32_saddr %314, %input {offset = 20}
-  %327 = global_load_b32_saddr %314, %input {offset = 24}
-  %329 = global_load_b32_saddr %314, %input {offset = 28}
-  %331 = global_load_b32_saddr %314, %input {offset = 32}
-  %333 = global_load_b32_saddr %314, %input {offset = 36}
-  %335 = global_load_b32_saddr %314, %input {offset = 40}
-  %337 = global_load_b32_saddr %314, %input {offset = 44}
-  %339 = global_load_b32_saddr %314, %input {offset = 48}
-  %341 = global_load_b32_saddr %314, %input {offset = 52}
-  %343 = global_load_b32_saddr %314, %input {offset = 56}
-  %345 = global_load_b32_saddr %314, %input {offset = 60}
-  %350 = v_add_u32 %315, %323
-  %353 = v_add_u32 %317, %325
-  %356 = v_add_u32 %319, %327
-  %359 = v_add_u32 %321, %329
-  %364 = v_add_u32 %350, %331
-  %367 = v_add_u32 %353, %333
-  %370 = v_add_u32 %356, %335
-  %373 = v_add_u32 %359, %337
-  %378 = v_add_u32 %364, %339
-  %381 = v_add_u32 %367, %341
-  %384 = v_add_u32 %370, %343
-  %387 = v_add_u32 %373, %345
-  %sum_3 = concat(%378, %381, %384, %387) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
-  global_store_b128_saddr %314, %sum_3, %output
+  %314 = s_mov_b32 0
+  %315 = s_load_dword %input, %314
+  %317 = s_load_dword %input, %314 {offset = 4}
+  %319 = s_load_dword %input, %314 {offset = 8}
+  %321 = s_load_dword %input, %314 {offset = 12}
+  %323 = s_load_dword %input, %314 {offset = 16}
+  %325 = s_load_dword %input, %314 {offset = 20}
+  %327 = s_load_dword %input, %314 {offset = 24}
+  %329 = s_load_dword %input, %314 {offset = 28}
+  %331 = s_load_dword %input, %314 {offset = 32}
+  %333 = s_load_dword %input, %314 {offset = 36}
+  %335 = s_load_dword %input, %314 {offset = 40}
+  %337 = s_load_dword %input, %314 {offset = 44}
+  %339 = s_load_dword %input, %314 {offset = 48}
+  %341 = s_load_dword %input, %314 {offset = 52}
+  %343 = s_load_dword %input, %314 {offset = 56}
+  %345 = s_load_dword %input, %314 {offset = 60}
+  %346 = v_mov_b32_copy %315
+  %347 = v_mov_b32_copy %317
+  %348 = v_mov_b32_copy %319
+  %349 = v_mov_b32_copy %321
+  %351 = v_mov_b32_copy %323
+  %352 = v_mov_b32_copy %325
+  %353 = v_mov_b32_copy %327
+  %354 = v_mov_b32_copy %329
+  %358 = v_add_u32 %346, %351
+  %361 = v_add_u32 %347, %352
+  %364 = v_add_u32 %348, %353
+  %367 = v_add_u32 %349, %354
+  %369 = v_mov_b32_copy %331
+  %370 = v_mov_b32_copy %333
+  %371 = v_mov_b32_copy %335
+  %372 = v_mov_b32_copy %337
+  %376 = v_add_u32 %358, %369
+  %379 = v_add_u32 %361, %370
+  %382 = v_add_u32 %364, %371
+  %385 = v_add_u32 %367, %372
+  %387 = v_mov_b32_copy %339
+  %388 = v_mov_b32_copy %341
+  %389 = v_mov_b32_copy %343
+  %390 = v_mov_b32_copy %345
+  %394 = v_add_u32 %376, %387
+  %397 = v_add_u32 %379, %388
+  %400 = v_add_u32 %382, %389
+  %403 = v_add_u32 %385, %390
+  %sum_3 = concat(%394, %397, %400, %403) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  %405 = v_mov_b32 0
+  global_store_b128_saddr %405, %sum_3, %output
   return
 }

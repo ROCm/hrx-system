@@ -29,6 +29,22 @@ typedef struct loom_amdgpu_register_shape_t {
   uint32_t unit_count;
 } loom_amdgpu_register_shape_t;
 
+// Selects durable storage for a low.invoke result from its declared carrier
+// and the shared facts valid at every observation. A per-execution scalar
+// return needs lane storage when different lanes can observe different calls.
+// Shared call planning owns target projection, signature compatibility, and
+// conversion from the declared carrier to the selected source storage.
+// Unresolved or malformed call boundaries have no shape here and are diagnosed
+// by shared call planning, before Low construction.
+bool loom_amdgpu_source_invoke_result_shape(
+    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
+    loom_value_id_t source_value_id, loom_amdgpu_register_shape_t* out_shape);
+
+// Identifies the FuncLike body arguments whose representation is a callable
+// contract. Local control-flow arguments have no callable ABI.
+bool loom_amdgpu_source_value_is_entry_argument(const loom_module_t* module,
+                                                loom_value_id_t value_id);
+
 typedef uint8_t loom_amdgpu_source_value_analysis_bits_t;
 
 enum loom_amdgpu_source_value_analysis_bit_e {
@@ -38,6 +54,7 @@ enum loom_amdgpu_source_value_analysis_bit_e {
   LOOM_AMDGPU_SOURCE_VALUE_ANALYSIS_REGISTER_SHAPE = 1u << 3,
   LOOM_AMDGPU_SOURCE_VALUE_ANALYSIS_SGPR_I1_BOOL = 1u << 4,
   LOOM_AMDGPU_SOURCE_VALUE_ANALYSIS_SCC_I1_BOOL = 1u << 5,
+  LOOM_AMDGPU_SOURCE_VALUE_ANALYSIS_CROSSES_SCC_BOUNDARY = 1u << 6,
 };
 
 typedef struct loom_amdgpu_source_value_analysis_record_t {
@@ -58,6 +75,8 @@ typedef struct loom_amdgpu_source_value_analysis_t {
   const loom_local_value_domain_t* value_domain;
   // Borrowed active fact scope providing value records and source CFGs.
   const loom_value_fact_table_t* fact_table;
+  // Borrowed solved representation plan, or NULL before source observation.
+  loom_low_representation_plan_t* representation_plan;
   // Descriptor set governing target-specific source placement capabilities.
   const loom_low_descriptor_set_t* descriptor_set;
   // Cached target capabilities for descriptor_set.
@@ -173,6 +192,7 @@ bool loom_amdgpu_source_value_facts_prefer_vgpr(
 // available to the caller.
 bool loom_amdgpu_source_value_directly_prefers_vgpr(
     const loom_module_t* module, const loom_value_fact_table_t* fact_table,
+    loom_amdgpu_source_value_analysis_t* analysis,
     loom_value_id_t source_value_id, loom_value_id_t excluded_value_id);
 bool loom_amdgpu_op_results_prefer_vgpr(
     const loom_module_t* module, const loom_value_fact_table_t* fact_table,

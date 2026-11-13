@@ -1,0 +1,129 @@
+// RUN: pass inline-callables,canonicalize,cse,dce
+
+// Pointer equality preserves each independently passed byte origin.
+bool equal(const int* left, const int* right) { return left == right; }
+bool unequal(const void* left, const void* right) { return left != right; }
+bool qualification(int* left, const int* right) { return left == right; }
+bool selected(const int* left, const int* right, bool choose) {
+  return (choose ? left + 1 : right) == right;
+}
+bool same_base(const int* data, unsigned left, unsigned right) {
+  return data + left == data + right;
+}
+bool one_past(const int* begin, const int* end) { return begin + 3 == end; }
+
+// ----
+func.def public @equal(%left: buffer, %left_byte_offset: offset, %right: buffer, %right_byte_offset: offset) -> (i1) {
+  %5 = buffer.compare.address eq, %left[%left_byte_offset], %right[%right_byte_offset]
+  func.return %5 : i1
+}
+
+func.def public @unequal(%left: buffer, %left_byte_offset: offset, %right: buffer, %right_byte_offset: offset) -> (i1) {
+  %11 = buffer.compare.address ne, %left[%left_byte_offset], %right[%right_byte_offset]
+  func.return %11 : i1
+}
+
+func.def public @qualification(%left: buffer, %left_byte_offset: offset, %right: buffer, %right_byte_offset: offset) -> (i1) {
+  %17 = buffer.compare.address eq, %left[%left_byte_offset], %right[%right_byte_offset]
+  func.return %17 : i1
+}
+
+func.def public @selected(%left: buffer, %left_byte_offset: offset, %right: buffer, %right_byte_offset: offset, %choose: i1) -> (i1) {
+  %24, %25 = scf.if %choose -> (buffer, offset) {
+    %69 = scalar.constant 4 : i64
+    %30 = index.cast %left_byte_offset : offset to i64
+    %31 = scalar.addi %30, %69 : i64
+    %32 = scalar.assume %31 [range(%31, 0, 9223372036854775807)] : i64
+    %33 = index.cast %32 : i64 to offset
+    scf.yield %left, %33 : buffer, offset
+  } else {
+    scf.yield %right, %right_byte_offset : buffer, offset
+  }
+  %34 = buffer.compare.address eq, %24[%25], %right[%right_byte_offset]
+  func.return %34 : i1
+}
+
+func.def public @same_base(%data: buffer, %data_byte_offset: offset, %left: i32, %right: i32) -> (i1) {
+  %40 = scalar.extui %left : i32 to i64
+  %73 = scalar.constant 2 : i64
+  %74 = scalar.shli %40, %73 : i64
+  %43 = index.cast %data_byte_offset : offset to i64
+  %44 = scalar.addi %43, %74 : i64
+  %45 = scalar.assume %44 [range(%44, 0, 9223372036854775807)] : i64
+  %46 = index.cast %45 : i64 to offset
+  %47 = scalar.extui %right : i32 to i64
+  %72 = scalar.shli %47, %73 : i64
+  %51 = scalar.addi %43, %72 : i64
+  %52 = scalar.assume %51 [range(%51, 0, 9223372036854775807)] : i64
+  %53 = index.cast %52 : i64 to offset
+  %70 = index.cmp eq, %46, %53 : offset
+  func.return %70 : i1
+}
+
+func.def public @one_past(%begin: buffer, %begin_byte_offset: offset, %end: buffer, %end_byte_offset: offset) -> (i1) {
+  %75 = scalar.constant 12 : i64
+  %64 = index.cast %begin_byte_offset : offset to i64
+  %65 = scalar.addi %64, %75 : i64
+  %66 = scalar.assume %65 [range(%65, 0, 9223372036854775807)] : i64
+  %67 = index.cast %66 : i64 to offset
+  %68 = buffer.compare.address eq, %begin[%67], %end[%end_byte_offset]
+  func.return %68 : i1
+}
+
+// ====
+
+// The helper receives independent pointer pairs. Inlining can establish their
+// common root without requiring source annotations or an integer-loop rewrite.
+static const long* largest(const long* first, const long* last) {
+  const long* best = first;
+  for (const long* p = first + 1; p != last; ++p) {
+    if (*best < *p) best = p;
+  }
+  return best;
+}
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void k(long* out, long a, long b, long c) {
+  long values[3] = {a, b, c};
+  out[0] = *largest(values, values + 3);
+}
+
+// ----
+kernel.def @k() {
+  %4 = index.constant 1 : index
+  kernel.launch.config workgroups(%4, %4, %4) workgroup_size(%4, %4, %4) : index
+} launch(%out: buffer, %a: i64, %b: i64, %c: i64) {
+  %11 = index.constant 24 : offset
+  %values_storage = buffer.alloca<private> align(8) %11 : buffer
+  %values_storage_byte_offset = index.constant 0 : offset
+  %values_view = buffer.view %values_storage[%values_storage_byte_offset] : buffer -> view<3xi64>
+  %15 = index.constant 0 : index
+  view.store %a, %values_view[%15] : i64, view<3xi64>
+  %16 = index.constant 1 : index
+  view.store %b, %values_view[%16] : i64, view<3xi64>
+  %17 = index.constant 2 : index
+  view.store %c, %values_view[%17] : i64, view<3xi64>
+  %p_byte_offset$83 = index.constant 8 : offset
+  %best, %best_byte_offset, %p, %p_byte_offset$64 = scf.while(%best = %values_storage : buffer, %best_byte_offset = %values_storage_byte_offset : offset, %p = %values_storage : buffer, %p_byte_offset = %p_byte_offset$83 : offset) -> (buffer, offset, buffer, offset) {
+    %65 = buffer.compare.address ne, %p[%p_byte_offset], %values_storage[%11]
+    scf.condition %65, %best, %best_byte_offset, %p, %p_byte_offset : i1, buffer, offset, buffer, offset
+  } do(%best$57: buffer, %best_byte_offset$58: offset, %p: buffer, %p_byte_offset$60: offset) {
+    %66 = buffer.view %best$57[%best_byte_offset$58] : buffer -> view<1xi64>
+    %67 = view.load<root_in_bounds> %66[0] : view<1xi64> -> i64
+    %68 = buffer.view %p[%p_byte_offset$60] : buffer -> view<1xi64>
+    %69 = view.load<root_in_bounds> %68[0] : view<1xi64> -> i64
+    %70 = scalar.cmpi slt, %67, %69 : i64
+    %best$85 = scf.select %70, %p, %best$57 : buffer
+    %best_byte_offset$86 = scf.select %70, %p_byte_offset$60, %best_byte_offset$58 : offset
+    %82 = scalar.constant 8 : i64
+    %77 = index.cast %p_byte_offset$60 : offset to i64
+    %78 = scalar.addi %77, %82 : i64
+    %79 = scalar.assume %78 [range(%78, 0, 9223372036854775807)] : i64
+    %p_byte_offset$80 = index.cast %79 : i64 to offset
+    scf.yield %best$85, %best_byte_offset$86, %p, %p_byte_offset$80 : buffer, offset, buffer, offset
+  }
+  %28 = buffer.view %best[%best_byte_offset] : buffer -> view<1xi64>
+  %29 = view.load<root_in_bounds> %28[0] : view<1xi64> -> i64
+  %38 = buffer.view %out[%values_storage_byte_offset] : buffer -> view<1xi64>
+  view.store<root_in_bounds> %29, %38[0] : i64, view<1xi64>
+  kernel.return
+}

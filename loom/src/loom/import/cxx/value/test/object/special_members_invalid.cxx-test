@@ -1,0 +1,67 @@
+// RUN: verify
+// Deleted copy construction cannot be replaced by field transport.
+struct Owner {
+  // Payload whose changes make lifecycle effects observable.
+  unsigned value;
+  explicit Owner(unsigned value) : value(value) {}
+  Owner(const Owner&) = delete;
+};
+// ERROR@+1: PARSE/036 "use of deleted function 'Owner'"
+void run() { Owner source(7); Owner target(source); }
+
+// ====
+// An explicitly deleted move is not a request to copy instead.
+struct Owner {
+  // Payload whose changes make lifecycle effects observable.
+  unsigned value;
+  explicit Owner(unsigned value) : value(value) {}
+  Owner(const Owner&) = default;
+  Owner(Owner&&) = delete;
+};
+// ERROR@+1: PARSE/036 "use of deleted function 'Owner'"
+void run() { Owner source(7); Owner target(static_cast<Owner&&>(source)); }
+
+// ====
+struct Owner {
+  // Payload whose changes make lifecycle effects observable.
+  unsigned value;
+  Owner& operator=(const Owner&) = delete;
+};
+// ERROR@+1: PARSE/036 "use of deleted function 'operator ='"
+void run() { Owner first{1}; Owner second{2}; first = second; }
+
+// ====
+struct Owner {
+  // Payload whose changes make lifecycle effects observable.
+  unsigned value;
+  Owner& operator=(const Owner&) = default;
+  Owner& operator=(Owner&&) = delete;
+};
+// ERROR@+1: PARSE/036 "use of deleted function 'operator ='"
+void run() { Owner first{1}; Owner second{2}; first = static_cast<Owner&&>(second); }
+
+// ====
+// Defaulted members remain deleted when a member cannot be copied.
+struct Owner {
+  // Payload whose changes make lifecycle effects observable.
+  unsigned value;
+  Owner(const Owner&) = delete;
+};
+struct Pair {
+  // Deleted element copying makes the aggregate copy constructor deleted.
+  Owner values[2];
+};
+// ERROR@+1: PARSE/036 "use of deleted function 'Pair'"
+void run(const Pair& source) { Pair target(source); }
+
+// ====
+// Access checking remains a frontend obligation.
+class Owner {
+  // Payload whose changes make lifecycle effects observable.
+  unsigned value;
+  Owner(const Owner&) = default;
+ public:
+  explicit Owner(unsigned value) : value(value) {}
+};
+// ERROR@+1: PARSE/036 "calling a private constructor of class '::Owner'"
+void run() { Owner source(7); Owner target(source); }

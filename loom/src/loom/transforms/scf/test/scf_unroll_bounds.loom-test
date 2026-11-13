@@ -34,7 +34,7 @@ func.def @dynamic_interleaved_tile_indices_remain_in_bounds(%payload: buffer, %b
   %22 = index.add %37, %21 : index
   %23 = index.constant 3 : index
   %24 = index.add %37, %23 : index
-  %i$25, %i_1, %i_2, %i_3 = index.assume %37, %20, %22, %24 [lt(%37, %end), lt(%20, %end), lt(%22, %end), lt(%24, %end)] : index, index, index, index
+  %i$25, %i_1, %i_2, %i_3 = index.assume %37, %20, %22, %24 [range(%37, 0, 31), ge(%37, %loop_begin), lt(%37, %end), range(%20, 0, 31), ge(%20, %loop_begin), lt(%20, %end), range(%22, 0, 31), ge(%22, %loop_begin), lt(%22, %end), range(%24, 0, 31), ge(%24, %loop_begin), lt(%24, %end)] : index, index, index, index
   view.store %value, %view[%i$25] : i32, view<[%end]xi32>
   view.store %value, %view[%i_1] : i32, view<[%end]xi32>
   view.store %value, %view[%i_2] : i32, view<[%end]xi32>
@@ -161,17 +161,17 @@ func.def @dynamic_recurrence_nonunit_step(%payload: buffer, %base: offset, %end0
   %61 = index.assume %59 [range(%59, 0, 12), multiple_of(%59, 6), lt(%59, %26)] : index
   %31 = index.constant 3 : index
   %32 = index.add %61, %31 : index
-  %i$33, %i_3 = index.assume %61, %32 [lt(%61, %end), lt(%32, %end)] : index, index
+  %i$33, %i_3 = index.assume %61, %32 [range(%61, 0, 15), multiple_of(%61, 3), ge(%61, %begin), lt(%61, %end), range(%32, 0, 15), multiple_of(%32, 3), ge(%32, %begin), lt(%32, %end)] : index, index
   %packet$35 = vector.load %view[%i$33, %c0] : view<17x4xi32> -> vector<4xi32>
   %value$36 = view.load %view[%i$33, %c0] : view<17x4xi32> -> i32
+  scf.schedule.fence
   test.use %packet$35 : vector<4xi32>
+  %next$37 = scalar.addi %sum$60, %value$36 : i32
+  scf.schedule.fence
   %packet_1 = vector.load %view[%i_3, %c0] : view<17x4xi32> -> vector<4xi32>
   %value_1 = view.load %view[%i_3, %c0] : view<17x4xi32> -> i32
   test.use %packet_1 : vector<4xi32>
-  scf.schedule.fence
-  %next$39 = scalar.addi %sum$60, %value$36 : i32
-  scf.schedule.fence
-  %next_1 = scalar.addi %next$39, %value_1 : i32
+  %next_1 = scalar.addi %next$37, %value_1 : i32
   %63 = index.add %61, %16 : index
   cfg.br ^_bb1(%63: index, %next_1: i32)
 ^_bb3:

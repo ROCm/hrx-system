@@ -216,6 +216,88 @@ func.def @identity(%x: i32) -> (i32) {
   EXPECT_NE(text.find("func.def @identity"), std::string::npos);
 }
 
+TEST_F(LinkerTest, FileLocalEncodingAliasesDoNotConstrainImports) {
+  auto source = [](const char* function_name, int stride) {
+    return std::string("#layout = #encoding.layout.strided<strides=[") +
+           std::to_string(stride) + ", 1]>\n" +
+           "#schema = #encoding.i8<payload_elements=32, "
+           "payload_registers=8>\n" +
+           "#storage = #encoding.storage<layout=#layout, schema=#schema>\n" +
+           "func.def @" + function_name + "() -> (encoding<storage>) {\n" +
+           "  %value = encoding.define #storage : encoding<storage>\n" +
+           "  func.return %value : encoding<storage>\n}\n";
+  };
+  for (const int second_stride : {16, 32}) {
+    SCOPED_TRACE(second_stride);
+    const std::string first_source = source("first", 16);
+    const std::string second_source = source("second", second_stride);
+    auto first = ParseOwned(
+        iree_make_string_view(first_source.data(), first_source.size()));
+    auto second = ParseOwned(
+        iree_make_string_view(second_source.data(), second_source.size()));
+    ASSERT_NE(first, nullptr);
+    ASSERT_NE(second, nullptr);
+    Verify(first.get());
+    Verify(second.get());
+    loom_module_t* linked = Link({first.get(), second.get()});
+    first.reset();
+    second.reset();
+    Verify(linked);
+
+    uint16_t storage_ids[2] = {};
+    uint16_t layout_ids[2] = {};
+    uint16_t schema_ids[2] = {};
+    for (int i = 0; i < 2; ++i) {
+      const auto name = i == 0 ? IREE_SV("first") : IREE_SV("second");
+      const auto symbol = loom_module_find_symbol(
+          linked, loom_module_lookup_string(linked, name));
+      ASSERT_NE(symbol, LOOM_SYMBOL_ID_INVALID);
+      auto function = loom_func_like_cast(
+          linked, linked->symbols.entries[symbol].defining_op);
+      const auto* literal =
+          loom_region_entry_block(loom_func_like_body(function))->first_op;
+      const auto value = loom_op_const_attrs(literal)[0];
+      ASSERT_EQ(value.kind, LOOM_ATTR_ENCODING);
+      storage_ids[i] = value.encoding_id;
+      const auto* storage = loom_module_encoding(linked, storage_ids[i]);
+      ASSERT_EQ(storage->attribute_count, 2u);
+      layout_ids[i] = storage->attributes[0].value.encoding_id;
+      schema_ids[i] = storage->attributes[1].value.encoding_id;
+      const auto* layout = loom_module_encoding(linked, layout_ids[i]);
+      ASSERT_EQ(layout->attribute_count, 1u);
+      const auto strides = layout->attributes[0].value;
+      ASSERT_EQ(strides.kind, LOOM_ATTR_I64_ARRAY);
+      ASSERT_EQ(strides.count, 2u);
+      EXPECT_EQ(strides.i64_array[0], i == 0 ? 16 : second_stride);
+      EXPECT_EQ(strides.i64_array[1], 1);
+    }
+    EXPECT_EQ(schema_ids[0], schema_ids[1]);
+    EXPECT_EQ(storage_ids[0] == storage_ids[1], second_stride == 16);
+    EXPECT_EQ(layout_ids[0] == layout_ids[1], second_stride == 16);
+    EXPECT_EQ(loom_module_find_encoding_alias(
+                  linked, loom_module_lookup_string(linked, IREE_SV("layout"))),
+              layout_ids[0]);
+    EXPECT_EQ(
+        loom_module_find_encoding_alias(
+            linked, loom_module_lookup_string(linked, IREE_SV("storage"))),
+        storage_ids[0]);
+    if (second_stride != 16) {
+      EXPECT_EQ(loom_module_encoding(linked, storage_ids[1])->alias_id,
+                LOOM_STRING_ID_INVALID);
+      EXPECT_EQ(loom_module_encoding(linked, layout_ids[1])->alias_id,
+                LOOM_STRING_ID_INVALID);
+    }
+
+    // The retained names and anonymous records must print an unambiguous
+    // module after both original source namespaces have retired.
+    const std::string text = Print(linked);
+    auto reparsed = ParseOwned(iree_make_string_view(text.data(), text.size()));
+    ASSERT_NE(reparsed, nullptr);
+    Verify(reparsed.get());
+    EXPECT_EQ(Print(reparsed.get()), text);
+  }
+}
+
 TEST_F(LinkerTest, MergePreservesRequiredInlinePolicy) {
   loom_module_t* source = Parse(IREE_SV(R"(
 func.def inline @helper(%value: i32) -> (i32) {
@@ -1124,6 +1206,49 @@ func.def @helper(%x: i32) -> (i32) {
   Verify(linked_a);
   Verify(linked_b);
   EXPECT_EQ(Print(linked_a), Print(linked_b));
+}
+
+TEST_F(LinkerTest, PublishesCompleteSourceMappingWithoutLocations) {
+  loom_module_t* source = nullptr;
+  IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("source"),
+                                      &block_pool_, nullptr,
+                                      iree_allocator_system(), &source));
+  ModulePtr source_owner(source);
+  loom_source_id_t source_id = LOOM_SOURCE_ID_INVALID;
+  IREE_ASSERT_OK(
+      loom_module_register_source(source, IREE_SV("source.loom"), &source_id));
+  loom_source_id_t published_source_id = LOOM_SOURCE_ID_INVALID;
+  const loom_linker_options_t options = {
+      .source_callback =
+          {
+              .fn =
+                  [](void* user_data, const loom_module_t* source,
+                     const loom_module_t* target,
+                     const loom_source_id_t* target_sources) -> iree_status_t {
+                EXPECT_EQ(source->sources.count, 1u);
+                EXPECT_EQ(target->sources.count, 1u);
+                EXPECT_NE(target_sources, nullptr);
+                if (target_sources) {
+                  *static_cast<loom_source_id_t*>(user_data) =
+                      target_sources[0];
+                }
+                return iree_ok_status();
+              },
+              .user_data = &published_source_id,
+          },
+  };
+  loom_linker_t* linker = nullptr;
+  IREE_ASSERT_OK(loom_linker_allocate(&context_, &options, &block_pool_,
+                                      iree_allocator_system(), &linker));
+  IREE_ASSERT_OK(loom_linker_add_module(linker, source, nullptr));
+  source_owner.reset();
+  loom_module_t* linked = nullptr;
+  IREE_ASSERT_OK(loom_linker_finish(linker, &linked));
+  loom_linker_free(linker);
+  modules_.push_back(linked);
+  ASSERT_LT(published_source_id, linked->sources.count);
+  EXPECT_TRUE(iree_string_view_equal(
+      linked->sources.entries[published_source_id], IREE_SV("source.loom")));
 }
 
 TEST_F(LinkerTest, IncrementalLinkDoesNotReferenceReleasedSourceModules) {

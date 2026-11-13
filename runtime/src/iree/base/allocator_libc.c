@@ -8,6 +8,13 @@
 
 #include "iree/base/api.h"
 
+#if defined(IREE_PLATFORM_APPLE)
+#include <malloc/malloc.h>
+#elif defined(__GLIBC__) || defined(IREE_PLATFORM_WINDOWS) || \
+    defined(IREE_PLATFORM_ANDROID)
+#include <malloc.h>
+#endif
+
 //===----------------------------------------------------------------------===//
 // libc allocator implementation
 //===----------------------------------------------------------------------===//
@@ -85,6 +92,28 @@ static iree_status_t iree_allocator_libc_free(void** inout_ptr) {
   return iree_ok_status();
 }
 
+static iree_status_t iree_allocator_libc_trim(void) {
+#if defined(__GLIBC__)
+  // Zero means no storage was released, not failure.
+  malloc_trim(0);
+#elif defined(IREE_PLATFORM_APPLE)
+  malloc_zone_pressure_relief(NULL, 0);
+#elif defined(IREE_PLATFORM_WINDOWS)
+  if (_heapmin() != 0) {
+    return iree_make_status(IREE_STATUS_UNAVAILABLE,
+                            "CRT heap reclamation is unavailable");
+  }
+#elif defined(IREE_PLATFORM_ANDROID) && __ANDROID_API__ >= 28
+  if (mallopt(M_PURGE, 0) == 0) {
+    return iree_make_status(IREE_STATUS_UNAVAILABLE,
+                            "libc heap reclamation failed");
+  }
+#endif
+  // C libraries without an explicit reclamation primitive retain their normal
+  // free policy; the trim hint imposes no change on live allocation ownership.
+  return iree_ok_status();
+}
+
 IREE_API_EXPORT iree_status_t
 iree_allocator_libc_ctl(void* self, iree_allocator_command_t command,
                         const void* params, void** inout_ptr) {
@@ -96,6 +125,8 @@ iree_allocator_libc_ctl(void* self, iree_allocator_command_t command,
           command, (const iree_allocator_alloc_params_t*)params, inout_ptr);
     case IREE_ALLOCATOR_COMMAND_FREE:
       return iree_allocator_libc_free(inout_ptr);
+    case IREE_ALLOCATOR_COMMAND_TRIM:
+      return iree_allocator_libc_trim();
     default:
       return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
                               "unsupported libc allocator command");

@@ -43,7 +43,7 @@ loom_bytecode_body_allocate_scratch_array(
 
 // Uses fixed stack storage for ordinary operation records. Larger records take
 // the cold path above to prove their wire bytes before allocating scratch.
-IREE_ATTRIBUTE_ALWAYS_INLINE static inline iree_status_t
+static IREE_ATTRIBUTE_ALWAYS_INLINE iree_status_t
 loom_bytecode_body_prepare_scratch_array(
     loom_bytecode_reader_decoder_t* decoder,
     const loom_bytecode_reader_cursor_t* cursor, iree_string_view_t table_name,
@@ -288,8 +288,7 @@ IREE_ATTRIBUTE_NOINLINE static iree_status_t
 loom_bytecode_body_reader_read_op_record(
     loom_bytecode_body_reader_t* body_reader,
     loom_bytecode_reader_cursor_t* cursor, loom_builder_t* builder,
-    uint32_t depth,
-    loom_bytecode_body_op_record_t* out_record) {
+    uint32_t depth, loom_bytecode_body_op_record_t* out_record) {
   uint64_t op_offset = loom_bytecode_reader_cursor_absolute_position(cursor);
   uint64_t op_table_index_plus1 = 0;
   IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
@@ -515,6 +514,7 @@ loom_bytecode_body_reader_read_op_record(
   }
   loom_attribute_t* attrs = NULL;
   loom_trait_flags_t effective_traits = 0;
+  loom_memory_space_mask_t intrinsic_read_spaces = 0;
   loom_memory_space_mask_t intrinsic_write_spaces = 0;
   bool has_effective_traits = false;
   if (vtable->attribute_count > 0) {
@@ -596,12 +596,13 @@ loom_bytecode_body_reader_read_op_record(
       }
       attrs[attr_index] = loom_attr_scoped_enum(descriptor_value.ordinal);
       effective_traits = descriptor_value.effective_traits;
+      intrinsic_read_spaces = descriptor_value.intrinsic_read_spaces;
       intrinsic_write_spaces = descriptor_value.intrinsic_write_spaces;
       has_effective_traits = true;
     } else {
       IREE_RETURN_IF_ERROR(loom_bytecode_body_policy_materialize_attribute_ssa(
           body_reader->materializer, cursor, descriptor, value_kind,
-          &attrs[attr_index], &attribute_ssa_scope));
+          &attribute_ssa_scope, &attrs[attr_index]));
     }
   }
 
@@ -664,6 +665,7 @@ loom_bytecode_body_reader_read_op_record(
   }
   if (has_effective_traits) {
     op->traits = effective_traits;
+    op->intrinsic_read_spaces = intrinsic_read_spaces;
     op->intrinsic_write_spaces = intrinsic_write_spaces;
     IREE_RETURN_IF_ERROR(loom_low_repr_resolve_packet_attributes(
         loom_bytecode_body_policy_low_repr_environment(
@@ -692,7 +694,7 @@ static iree_status_t loom_bytecode_body_reader_read_op(
     loom_region_t* region = NULL;
     IREE_RETURN_IF_ERROR(loom_bytecode_body_reader_read_region(
         body_reader, cursor, builder, record.op, depth + 1, &region));
-    loom_op_regions(record.op)[i] = region;
+    loom_op_set_region(record.op, (uint8_t)i, region);
   }
   ++body_reader->counts.op_count;
   IREE_RETURN_IF_ERROR(loom_builder_finalize_op(builder, record.op));
@@ -951,7 +953,7 @@ iree_status_t LOOM_BYTECODE_BODY_MATERIALIZE_REGION(
     status = loom_bytecode_body_reader_read_region(
         &body_reader, &cursor, builder, parent_op, 0, &region);
     if (iree_status_is_ok(status)) {
-      loom_op_regions(parent_op)[region_index] = region;
+      loom_op_set_region(parent_op, region_index, region);
     }
   }
   if (iree_status_is_ok(status)) {

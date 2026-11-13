@@ -128,7 +128,6 @@ amdf_dxg_provider_result_t GpuAdapterOpen(
     amdf_dxg_provider_gpu_properties_t* out_properties,
     uint32_t* out_native_status) noexcept {
   if (open_info == nullptr || open_info->adapter_handle == 0 ||
-      open_info->device_handle == 0 ||
       open_info->native_transport.context == nullptr ||
       open_info->native_transport.invoke == nullptr ||
       host_allocator == nullptr || host_allocator->allocate == nullptr ||

@@ -11,37 +11,20 @@
 set -euo pipefail
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+# shellcheck source=loom/docs/examples/example.shlib
+source "${script_dir}/../example.shlib"
+repo_root="${LOOM_EXAMPLE_REPO_ROOT}"
 
 if [[ "$#" -gt 1 ]]; then
   printf 'usage: %s [output-directory]\n' "$0" >&2
   exit 64
 fi
 
-if [[ -n "${RUNFILES_DIR:-}" ]]; then
-  workspace="${TEST_WORKSPACE:-_main}"
-  repo_root="${RUNFILES_DIR}/${workspace}"
-  export LOOM_FORMAT="${repo_root}/loom/src/loom/tools/loom-format/loom-format"
-  export LOOM_LINK="${repo_root}/loom/src/loom/tools/loom-link/loom-link"
-  export LOOM_COMPILE="${repo_root}/loom/src/loom/tools/loom-compile/loom-compile"
-  loom_check="${repo_root}/loom/src/loom/tools/loom-check/loom-check"
-else
-  repo_root="$(cd -- "${script_dir}/../../../.." && pwd -P)"
-  "${repo_root}/build_tools/bin/iree-bazel-build" \
-    --config=asan \
-    //loom/src/loom/tools/loom-format:loom-format \
-    //loom/src/loom/tools/loom-link:loom-link \
-    //loom/src/loom/tools/loom-compile:loom-compile \
-    //loom/src/loom/tools/loom-check:loom-check
-  export LOOM_FORMAT="${repo_root}/bazel-bin/loom/src/loom/tools/loom-format/loom-format"
-  export LOOM_LINK="${repo_root}/bazel-bin/loom/src/loom/tools/loom-link/loom-link"
-  export LOOM_COMPILE="${repo_root}/bazel-bin/loom/src/loom/tools/loom-compile/loom-compile"
-  loom_check="${repo_root}/bazel-bin/loom/src/loom/tools/loom-check/loom-check"
-fi
-
-if [[ ! -x "${loom_check}" ]]; then
-  printf 'required Loom tool not found: %s\n' "${loom_check}" >&2
-  exit 127
-fi
+loom_example_configure_inputs \
+  tool:loom-format \
+  tool:loom-link \
+  tool:loom-compile \
+  tool:loom-check
 
 output_dir="${1:-${TEST_UNDECLARED_OUTPUTS_DIR:-${repo_root}/build/loom-docs/examples/elementwise-transform}}"
 mkdir -p -- "${output_dir}"
@@ -84,14 +67,14 @@ command_fixture="${temporary_root}/elementwise-transform-program.loom-test"
 
 update_log="${temporary_root}/command-program-update.log"
 set +e
-"${loom_check}" --update "${command_fixture}" >"${update_log}" 2>&1
+"${LOOM_CHECK}" --update "${command_fixture}" >"${update_log}" 2>&1
 update_status="$?"
 set -e
 if [[ "${update_status}" -ne 0 && "${update_status}" -ne 1 ]]; then
   sed -n '1,$p' "${update_log}" >&2
   exit "${update_status}"
 fi
-if ! "${loom_check}" "${command_fixture}"; then
+if ! "${LOOM_CHECK}" "${command_fixture}"; then
   sed -n '1,$p' "${update_log}" >&2
   exit 1
 fi

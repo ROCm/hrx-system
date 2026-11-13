@@ -474,3 +474,52 @@ low.func.def schedule(locked) target<amdgpu.rdna3.core>(@target) @many_sgpr_inpu
   s_or_b32 s7, s14, s15
   s_or_b32 s8, s16, s17
   s_endpgm
+
+// ====
+
+// The loop bound also supplies the high word of the backedge pair. That pair
+// dies at the edge, but the bound remains independently observable in the next
+// header. It cannot alias the incoming high word, which is initially zero.
+// RUN: emit low-allocation-query @loop_bound_component values=%one,%index,%high lifetimes=%one,%index,%high spill-free
+amdgpu.target<gfx1100> @target
+
+low.kernel.def target<amdgpu.rdna3.core>(@target) workgroup_size(1, 1, 1) @loop_bound_component() asm {
+  %kernarg = live_in<amdgpu.kernarg_segment_ptr> : reg<amdgpu.sgpr x2>
+  %start = s_load_dword_offset_only %kernarg
+  %output = s_load_dwordx2_offset_only %kernarg {offset = 8}
+  %zero = s_mov_b32 0
+  %initial = concat(%start, %zero) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  low.br ^preheader
+^preheader:
+  %one = s_mov_b32 1
+  %seven = s_mov_b32 7
+  low.br ^loop(%initial: reg<amdgpu.sgpr x2>, %zero: reg<amdgpu.sgpr>)
+^loop(%index: reg<amdgpu.sgpr x2>, %total: reg<amdgpu.sgpr>):
+  %low = slice %index[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %high = slice %index[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %low_less = s_cmp_lt_u32 %low, %one
+  %difference, %less = s_subb_u32_rhs_inline %high, %low_less, 0
+  low.cond_br %less, ^body, ^exit : reg<amdgpu.scc>
+^body:
+  %large_low = s_mov_b32 4294967294
+  %next = concat(%large_low, %one) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  low.br ^loop(%next: reg<amdgpu.sgpr x2>, %seven: reg<amdgpu.sgpr>)
+^exit:
+  %vzero = v_mov_b32 0
+  %result = v_mov_b32_copy %total
+  global_store_b32_saddr %vzero, %result, %output
+  %zero_result = v_mov_b32_copy %zero
+  global_store_b32_saddr %vzero, %zero_result, %output {offset = 8}
+  %original = v_mov_b32_copy %start
+  global_store_b32_saddr %vzero, %original, %output {offset = 4}
+  return
+}
+
+// ----
+value %one: amdgpu.sgpr -> physical_register[7:1]
+value %index: amdgpu.sgpr -> physical_register[0:2]
+value %high: amdgpu.sgpr -> physical_register[1:1]
+lifetime %one[0]: [8, 21)
+lifetime %index[0]: [11, 12)
+lifetime %index[1]: [11, 13)
+lifetime %high[0]: [13, 15)

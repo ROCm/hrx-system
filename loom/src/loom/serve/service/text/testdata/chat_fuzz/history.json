@@ -1,0 +1,1 @@
+{"model":"portable-chat","temperature":0.5,"seed":1,"messages":[{"role":"system","content":"answer briefly"},{"role":"user","content":"lookup x"},{"role":"assistant","content":null,"tool_calls":[{"id":"call","type":"function","function":{"name":"lookup","arguments":"{\"value\":\"x\"}"}}]},{"role":"tool","tool_call_id":"call","content":"x"}]}

@@ -1,0 +1,223 @@
+// RUN: pass canonicalize,cse,dce
+// Every update consumes the returned old/new value with its distinct ordering.
+unsigned builtin_fetch_values(volatile unsigned* storage) {
+  auto* word = storage + 1;
+  unsigned failures = 0;
+  failures += __atomic_exchange_n(word, 0xfffffffcu, __ATOMIC_SEQ_CST) != 37u;
+  failures += __atomic_fetch_add(word, 3u, __ATOMIC_RELAXED) != 0xfffffffcu;
+  failures += __atomic_add_fetch(word, 1u, __ATOMIC_ACQUIRE) != 0u;
+  failures += __atomic_fetch_sub(word, 1u, __ATOMIC_RELEASE) != 0u;
+  failures += __atomic_sub_fetch(word, 2u, __ATOMIC_ACQ_REL) != 0xfffffffdu;
+  failures += __atomic_fetch_and(word, 15u, __ATOMIC_RELAXED) != 0xfffffffdu;
+  failures += __atomic_and_fetch(word, 7u, __ATOMIC_RELAXED) != 5u;
+  failures += __atomic_fetch_or(word, 16u, __ATOMIC_RELAXED) != 5u;
+  failures += __atomic_or_fetch(word, 32u, __ATOMIC_RELAXED) != 53u;
+  failures += __atomic_fetch_xor(word, 3u, __ATOMIC_RELAXED) != 53u;
+  failures += __atomic_xor_fetch(word, 7u, __ATOMIC_RELAXED) != 49u;
+  return failures;
+}
+// ----
+func.def public @builtin_fetch_values(%storage: buffer, %storage_byte_offset: offset) -> (i32) {
+  %100 = scalar.constant 4 : i64
+  %7 = index.cast %storage_byte_offset : offset to i64
+  %8 = scalar.addi %7, %100 : i64
+  %9 = scalar.assume %8 [range(%8, 0, 9223372036854775807)] : i64
+  %word_byte_offset = index.cast %9 : i64 to offset
+  %12 = scalar.constant -4 : i32
+  %13 = buffer.view %storage[%word_byte_offset] : buffer -> view<1xi32>
+  %14 = view.atomic.rmw<xchgi, root_in_bounds> %12, %13[0] {ordering = seq_cst, scope = system} : i32, view<1xi32> -> i32
+  %15 = scalar.constant 37 : i32
+  %16 = scalar.cmpi ne, %14, %15 : i32
+  %17 = scalar.extui %16 : i1 to i32
+  %19 = scalar.constant 3 : i32
+  %21 = view.atomic.rmw<addi, root_in_bounds> %19, %13[0] {ordering = relaxed, scope = system} : i32, view<1xi32> -> i32
+  %23 = scalar.cmpi ne, %21, %12 : i32
+  %24 = scalar.extui %23 : i1 to i32
+  %96 = scalar.addi %17, %24 : i32
+  %26 = scalar.constant 1 : i32
+  %28 = view.atomic.rmw<addi, root_in_bounds> %26, %13[0] {ordering = acquire, scope = system} : i32, view<1xi32> -> i32
+  %29 = scalar.addi %28, %26 : i32
+  %30 = scalar.constant 0 : i32
+  %31 = scalar.cmpi ne, %29, %30 : i32
+  %32 = scalar.extui %31 : i1 to i32
+  %98 = scalar.addi %96, %32 : i32
+  %36 = view.atomic.rmw<subi, root_in_bounds> %26, %13[0] {ordering = release, scope = system} : i32, view<1xi32> -> i32
+  %38 = scalar.cmpi ne, %36, %30 : i32
+  %39 = scalar.extui %38 : i1 to i32
+  %failures$40 = scalar.addi %98, %39 : i32
+  %41 = scalar.constant 2 : i32
+  %43 = view.atomic.rmw<subi, root_in_bounds> %41, %13[0] {ordering = acq_rel, scope = system} : i32, view<1xi32> -> i32
+  %94 = scalar.constant -2 : i32
+  %95 = scalar.addi %43, %94 : i32
+  %45 = scalar.constant -3 : i32
+  %46 = scalar.cmpi ne, %95, %45 : i32
+  %47 = scalar.extui %46 : i1 to i32
+  %failures$48 = scalar.addi %failures$40, %47 : i32
+  %49 = scalar.constant 15 : i32
+  %51 = view.atomic.rmw<andi, root_in_bounds> %49, %13[0] {ordering = relaxed, scope = system} : i32, view<1xi32> -> i32
+  %53 = scalar.cmpi ne, %51, %45 : i32
+  %54 = scalar.extui %53 : i1 to i32
+  %failures$55 = scalar.addi %failures$48, %54 : i32
+  %56 = scalar.constant 7 : i32
+  %58 = view.atomic.rmw<andi, root_in_bounds> %56, %13[0] {ordering = relaxed, scope = system} : i32, view<1xi32> -> i32
+  %59 = scalar.andi %58, %56 : i32
+  %60 = scalar.constant 5 : i32
+  %61 = scalar.cmpi ne, %59, %60 : i32
+  %62 = scalar.extui %61 : i1 to i32
+  %failures$63 = scalar.addi %failures$55, %62 : i32
+  %64 = scalar.constant 16 : i32
+  %66 = view.atomic.rmw<ori, root_in_bounds> %64, %13[0] {ordering = relaxed, scope = system} : i32, view<1xi32> -> i32
+  %68 = scalar.cmpi ne, %66, %60 : i32
+  %69 = scalar.extui %68 : i1 to i32
+  %failures$70 = scalar.addi %failures$63, %69 : i32
+  %71 = scalar.constant 32 : i32
+  %73 = view.atomic.rmw<ori, root_in_bounds> %71, %13[0] {ordering = relaxed, scope = system} : i32, view<1xi32> -> i32
+  %74 = scalar.ori %73, %71 : i32
+  %75 = scalar.constant 53 : i32
+  %76 = scalar.cmpi ne, %74, %75 : i32
+  %77 = scalar.extui %76 : i1 to i32
+  %failures$78 = scalar.addi %failures$70, %77 : i32
+  %81 = view.atomic.rmw<xori, root_in_bounds> %19, %13[0] {ordering = relaxed, scope = system} : i32, view<1xi32> -> i32
+  %83 = scalar.cmpi ne, %81, %75 : i32
+  %84 = scalar.extui %83 : i1 to i32
+  %failures$85 = scalar.addi %failures$78, %84 : i32
+  %88 = view.atomic.rmw<xori, root_in_bounds> %56, %13[0] {ordering = relaxed, scope = system} : i32, view<1xi32> -> i32
+  %89 = scalar.xori %88, %56 : i32
+  %90 = scalar.constant 49 : i32
+  %91 = scalar.cmpi ne, %89, %90 : i32
+  %92 = scalar.extui %91 : i1 to i32
+  %failures$93 = scalar.addi %failures$85, %92 : i32
+  func.return %failures$93 : i32
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// Signed atomic returned-new arithmetic retains modular operations at i32 width.
+unsigned builtin_signed_wrap(int* storage) {
+  auto* word = storage + 1;
+  unsigned failures = 0;
+  __atomic_exchange_n(word, 2147483647, __ATOMIC_RELAXED);
+  failures +=
+      __atomic_add_fetch(word, 1, __ATOMIC_RELAXED) != (-2147483647 - 1);
+  failures += __atomic_sub_fetch(word, 1, __ATOMIC_RELAXED) != 2147483647;
+  return failures;
+}
+// ----
+func.def public @builtin_signed_wrap(%storage: buffer, %storage_byte_offset: offset) -> (i32) {
+  %40 = scalar.constant 4 : i64
+  %7 = index.cast %storage_byte_offset : offset to i64
+  %8 = scalar.addi %7, %40 : i64
+  %9 = scalar.assume %8 [range(%8, 0, 9223372036854775807)] : i64
+  %word_byte_offset = index.cast %9 : i64 to offset
+  %12 = scalar.constant 2147483647 : i32
+  %13 = buffer.view %storage[%word_byte_offset] : buffer -> view<1xi32>
+  %14 = view.atomic.rmw<xchgi, root_in_bounds> %12, %13[0] {ordering = relaxed, scope = system} : i32, view<1xi32> -> i32
+  %15 = scalar.constant 1 : i32
+  %17 = view.atomic.rmw<addi, root_in_bounds> %15, %13[0] {ordering = relaxed, scope = system} : i32, view<1xi32> -> i32
+  %18 = scalar.addi %17, %15 : i32
+  %39 = scalar.constant -2147483648 : i32
+  %24 = scalar.cmpi ne, %18, %39 : i32
+  %25 = scalar.extui %24 : i1 to i32
+  %29 = view.atomic.rmw<subi, root_in_bounds> %15, %13[0] {ordering = relaxed, scope = system} : i32, view<1xi32> -> i32
+  %37 = scalar.constant -1 : i32
+  %38 = scalar.addi %29, %37 : i32
+  %32 = scalar.cmpi ne, %38, %12 : i32
+  %33 = scalar.extui %32 : i1 to i32
+  %35 = scalar.addi %25, %33 : i32
+  func.return %35 : i32
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// High-half values and compare-exchange results remain i64 throughout the sequence.
+unsigned builtin_wide_values(unsigned long long* storage) {
+  auto* word = storage + 1;
+  auto* expected = storage + 2;
+  unsigned failures = 0;
+  failures += __atomic_exchange_n(word, 0xffffffffffffffffULL,
+                                  __ATOMIC_RELAXED) != 37ULL;
+  failures += __atomic_add_fetch(word, 1ULL, __ATOMIC_RELAXED) != 0ULL;
+  failures += __atomic_fetch_add(word, 37ULL, __ATOMIC_RELAXED) != 0ULL;
+  failures +=
+      !__atomic_compare_exchange_n(word, expected, 0x100000003ULL, false,
+                                   __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE);
+  failures += *expected != 37ULL;
+  failures += __atomic_compare_exchange_n(word, expected, 19ULL, true,
+                                          __ATOMIC_ACQUIRE, __ATOMIC_CONSUME);
+  failures += *expected != 0x100000003ULL;
+  failures += !__atomic_compare_exchange_n(word, word, 0x100000004ULL, false,
+                                           __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
+  return failures;
+}
+// ----
+func.def public @builtin_wide_values(%storage: buffer, %storage_byte_offset: offset) -> (i32) {
+  %95 = scalar.constant 8 : i64
+  %7 = index.cast %storage_byte_offset : offset to i64
+  %8 = scalar.addi %7, %95 : i64
+  %9 = scalar.assume %8 [range(%8, 0, 9223372036854775807)] : i64
+  %word_byte_offset = index.cast %9 : i64 to offset
+  %94 = scalar.constant 16 : i64
+  %16 = scalar.addi %7, %94 : i64
+  %17 = scalar.assume %16 [range(%16, 0, 9223372036854775807)] : i64
+  %expected_byte_offset = index.cast %17 : i64 to offset
+  %20 = scalar.constant -1 : i64
+  %21 = buffer.view %storage[%word_byte_offset] : buffer -> view<1xi64>
+  %22 = view.atomic.rmw<xchgi, root_in_bounds> %20, %21[0] {ordering = relaxed, scope = system} : i64, view<1xi64> -> i64
+  %23 = scalar.constant 37 : i64
+  %24 = scalar.cmpi ne, %22, %23 : i64
+  %25 = scalar.extui %24 : i1 to i32
+  %27 = scalar.constant 1 : i64
+  %29 = view.atomic.rmw<addi, root_in_bounds> %27, %21[0] {ordering = relaxed, scope = system} : i64, view<1xi64> -> i64
+  %30 = scalar.addi %29, %27 : i64
+  %31 = scalar.constant 0 : i64
+  %32 = scalar.cmpi ne, %30, %31 : i64
+  %33 = scalar.extui %32 : i1 to i32
+  %96 = scalar.addi %25, %33 : i32
+  %37 = view.atomic.rmw<addi, root_in_bounds> %23, %21[0] {ordering = relaxed, scope = system} : i64, view<1xi64> -> i64
+  %39 = scalar.cmpi ne, %37, %31 : i64
+  %40 = scalar.extui %39 : i1 to i32
+  %98 = scalar.addi %96, %40 : i32
+  %42 = scalar.constant 4294967299 : i64
+  %44 = buffer.view %storage[%expected_byte_offset] : buffer -> view<1xi64>
+  %45 = view.load<root_in_bounds> %44[0] : view<1xi64> -> i64
+  %47 = view.atomic.cmpxchg<root_in_bounds> %45, %42, %21[0] {failure_ordering = acquire, scope = system, success_ordering = acq_rel} : i64, view<1xi64> -> i64
+  %48 = scalar.cmpi eq, %47, %45 : i64
+  %49 = scalar.constant 1 : i1
+  %50 = scalar.xori %48, %49 : i1
+  scf.if %50 {
+    %91 = scalar.assume %47 [ne(%47, %45)] : i64
+    view.store<root_in_bounds> %91, %44[0] : i64, view<1xi64>
+  }
+  %53 = scalar.extui %50 : i1 to i32
+  %failures$54 = scalar.addi %98, %53 : i32
+  %56 = view.load<root_in_bounds> %44[0] : view<1xi64> -> i64
+  %58 = scalar.cmpi ne, %56, %23 : i64
+  %59 = scalar.extui %58 : i1 to i32
+  %failures$60 = scalar.addi %failures$54, %59 : i32
+  %61 = scalar.constant 19 : i64
+  %66 = view.atomic.cmpxchg<root_in_bounds> %56, %61, %21[0] {failure_ordering = acquire, scope = system, success_ordering = acquire} : i64, view<1xi64> -> i64
+  %67 = scalar.cmpi eq, %66, %56 : i64
+  %69 = scalar.xori %67, %49 : i1
+  scf.if %69 {
+    %92 = scalar.assume %66 [ne(%66, %56)] : i64
+    view.store<root_in_bounds> %92, %44[0] : i64, view<1xi64>
+  }
+  %70 = scalar.extui %67 : i1 to i32
+  %failures$71 = scalar.addi %failures$60, %70 : i32
+  %73 = view.load<root_in_bounds> %44[0] : view<1xi64> -> i64
+  %75 = scalar.cmpi ne, %73, %42 : i64
+  %76 = scalar.extui %75 : i1 to i32
+  %failures$77 = scalar.addi %failures$71, %76 : i32
+  %78 = scalar.constant 4294967300 : i64
+  %81 = view.load<root_in_bounds> %21[0] : view<1xi64> -> i64
+  %83 = view.atomic.cmpxchg<root_in_bounds> %81, %78, %21[0] {failure_ordering = seq_cst, scope = system, success_ordering = seq_cst} : i64, view<1xi64> -> i64
+  %84 = scalar.cmpi eq, %83, %81 : i64
+  %86 = scalar.xori %84, %49 : i1
+  scf.if %86 {
+    %93 = scalar.assume %83 [ne(%83, %81)] : i64
+    view.store<root_in_bounds> %93, %21[0] : i64, view<1xi64>
+  }
+  %89 = scalar.extui %86 : i1 to i32
+  %failures$90 = scalar.addi %failures$77, %89 : i32
+  func.return %failures$90 : i32
+}

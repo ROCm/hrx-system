@@ -37,7 +37,7 @@ bool has_unsigned_scalar_leaves(const RecordPartition& record, Types& types) {
     }
     if (member.partition->kind != ValueKind::SSA ||
         member.partition->component_count != 1 ||
-        !types.is_unsigned(types.unqualified(member.field->type()))) {
+        !types.is_unsigned(types.unqualified(member.type()))) {
       return false;
     }
   }

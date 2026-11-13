@@ -79,6 +79,11 @@ enum loom_low_placement_relation_flag_bits_e {
   // This concat part must be materialized at the concat's program point.
   // Other parts are transported directly by their decomposed edge reads.
   LOOM_LOW_PLACEMENT_RELATION_FLAG_MATERIALIZE_PART = 1u << 6,
+  // Copy and forwarding endpoints carry independently consumable states even
+  // when their payload bits match. Overlapping lifetimes cannot share a
+  // physical carrier, and this relation does not establish transitive content
+  // identity. Nonoverlapping lifetimes may still coalesce.
+  LOOM_LOW_PLACEMENT_RELATION_FLAG_INDEPENDENT_LIFETIMES = 1u << 7,
 };
 
 // Bitset of loom_low_placement_relation_flag_bits_e values.
@@ -230,6 +235,16 @@ typedef struct loom_low_placement_value_range_t {
   uint32_t count;
 } loom_low_placement_value_range_t;
 
+// One hard register-ordinal component, with distinct storage owners first.
+typedef struct loom_low_placement_ordinal_component_range_t {
+  // First member in the containing table's packed member array.
+  uint32_t start;
+  // Number of members, including tied-storage aliases.
+  uint32_t count;
+  // Prefix containing each distinct tied-storage origin exactly once.
+  uint32_t origin_count;
+} loom_low_placement_ordinal_component_range_t;
+
 // Borrowed members of one transitive hard register-ordinal component.
 typedef struct loom_low_placement_value_component_t {
   // Local value ordinals in the component, including tied-storage aliases.
@@ -238,6 +253,8 @@ typedef struct loom_low_placement_value_component_t {
   uint32_t count;
   // Dense component index, or UINT32_MAX when the value is unconstrained.
   uint32_t index;
+  // Prefix of |members| containing distinct tied-storage origins.
+  uint32_t origin_count;
 } loom_low_placement_value_component_t;
 
 // Operand requirements combined across every use of one live interval.
@@ -352,7 +369,8 @@ typedef struct loom_low_placement_table_t {
   // NULL denotes a function without hard register-ordinal constraints.
   const uint32_t* hard_register_ordinal_components_by_value_ordinal;
   // Packed member ranges indexed by hard register-ordinal component.
-  const loom_low_placement_value_range_t* hard_register_ordinal_ranges;
+  const loom_low_placement_ordinal_component_range_t*
+      hard_register_ordinal_ranges;
   // Local value ordinals packed by |hard_register_ordinal_ranges|. Every tied
   // alias is retained so allocation can relocate all published assignments.
   const loom_value_ordinal_t* hard_register_ordinal_members;

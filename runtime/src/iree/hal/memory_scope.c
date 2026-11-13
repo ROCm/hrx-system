@@ -56,9 +56,11 @@ IREE_API_EXPORT iree_status_t iree_hal_pool_scope_validate(
     if (iree_any_bit_set(access->usage, ~(IREE_HAL_BUFFER_USAGE_TRANSFER |
                                           IREE_HAL_BUFFER_USAGE_DISPATCH)) ||
         (access->interfaces >> IREE_HAL_BUFFER_INTERFACE_COUNT) ||
-        iree_any_bit_set(access->requirements,
-                         ~(IREE_HAL_POOL_ACCESS_REQUIRE_COHERENT_WITH_HOST |
-                           IREE_HAL_POOL_ACCESS_REQUIRE_UNCACHED)) ||
+        iree_any_bit_set(
+            access->requirements,
+            ~(IREE_HAL_POOL_ACCESS_REQUIRE_COHERENT_WITH_HOST |
+              IREE_HAL_POOL_ACCESS_REQUIRE_UNCACHED |
+              IREE_HAL_POOL_ACCESS_REQUIRE_HOST_ADDRESS_IDENTITY)) ||
         !iree_hal_atomic_operation_capabilities_are_valid(
             access->atomics.queue) ||
         !iree_hal_atomic_operation_capabilities_are_valid(
@@ -68,11 +70,14 @@ IREE_API_EXPORT iree_status_t iree_hal_pool_scope_validate(
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "invalid family access flags");
     }
-    if (iree_any_bit_set(access->requirements,
-                         IREE_HAL_POOL_ACCESS_REQUIRE_COHERENT_WITH_HOST) &&
+    if (iree_any_bit_set(
+            access->requirements,
+            IREE_HAL_POOL_ACCESS_REQUIRE_COHERENT_WITH_HOST |
+                IREE_HAL_POOL_ACCESS_REQUIRE_HOST_ADDRESS_IDENTITY) &&
         !scope.host.access) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "host coherence requires a public host mapping");
+                              "host coherence or address identity requires a "
+                              "public host mapping");
     }
     for (iree_host_size_t j = 0; j < i; ++j) {
       if (scope.families[j].family == access->family) {

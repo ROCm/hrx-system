@@ -50,6 +50,15 @@ static bool loom_wasm_type_is_scalar_f64(loom_type_t type) {
          loom_type_element_type(type) == LOOM_SCALAR_TYPE_F64;
 }
 
+bool loom_wasm_source_type_is_callable(loom_type_t source_type) {
+  return loom_type_is_buffer(source_type) || loom_type_is_view(source_type) ||
+         loom_wasm_type_is_i32_register(source_type) ||
+         loom_wasm_type_is_scalar_f32(source_type) ||
+         loom_wasm_type_is_scalar_i64(source_type) ||
+         loom_wasm_type_is_scalar_f64(source_type) ||
+         loom_wasm_vector_type_is_callable(source_type);
+}
+
 static bool loom_wasm_source_type_supported(void* user_data,
                                             const loom_module_t* module,
                                             loom_type_t source_type) {
@@ -207,8 +216,7 @@ static iree_status_t loom_wasm_map_argument(
       .abi_type = loom_type_none(),
       .body_type = loom_type_none(),
   };
-  if (loom_type_is_vector(source_type) &&
-      !loom_wasm_vector_type_is_callable(source_type)) {
+  if (!loom_wasm_source_type_is_callable(source_type)) {
     return iree_ok_status();
   }
   return loom_wasm_map_type(user_data, context, source_function_op, source_type,
@@ -295,7 +303,8 @@ static const loom_target_vector_packet_policy_t kWasmVectorPacketPolicy = {
     .native_lane_counts = kWasmVectorPacketLaneCounts,
     .index_bit_count = 32u,
     .offset_bit_count = 32u,
-    .flags = LOOM_TARGET_VECTOR_PACKET_POLICY_FLAG_DYNAMIC_WINDOW_REPLAY,
+    .flags = LOOM_TARGET_VECTOR_PACKET_POLICY_FLAG_DYNAMIC_WINDOW_REPLAY |
+             LOOM_TARGET_VECTOR_PACKET_POLICY_FLAG_NO_PRIVATE_STAGING,
     .structural_lane_limits = kWasmVectorPacketStructuralLaneLimits,
     .maximum_unpacketized_bit_count = 128u,
     .native_bit_count_count = IREE_ARRAYSIZE(kWasmVectorPacketBitCounts),
@@ -349,6 +358,8 @@ static const loom_low_lower_policy_t kWasmLowLowerPolicy = {
         {
             .fn = loom_wasm_query_vector_structural_contract,
             .user_data = NULL,
+            .first_terminal_rejection_op_kind = LOOM_OP_VECTOR_SLICE,
+            .terminal_rejection_op_kind_count = 1,
         },
     .preselect_op = {.fn = loom_wasm_preselect_op, .user_data = NULL},
     .mark_plan_storage_demands =
@@ -374,5 +385,5 @@ void loom_wasm_low_lower_policy_registry_initialize(
       },
   };
   loom_low_lower_policy_registry_initialize_from_entries(
-      out_registry, kEntries, IREE_ARRAYSIZE(kEntries));
+      kEntries, IREE_ARRAYSIZE(kEntries), out_registry);
 }

@@ -181,9 +181,8 @@ def sanitizer_configure_options(sanitizer: str) -> list[str]:
     ]
 
 
-def amdgpu_device_binary_source_options(rocm_root: Path) -> list[str]:
+def amdgpu_device_toolchain_options(rocm_root: Path) -> list[str]:
     return [
-        "IREE_HAL_AMDGPU_DEVICE_BINARY_BUILD_MODE=source",
         "IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN=rocm",
         f"IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_ROCM_PATH={rocm_root.as_posix()}",
     ]
@@ -247,7 +246,7 @@ def build_core(args: argparse.Namespace) -> None:
         "LIBHRX_BUILD_CTS=ON",
         "LIBHRX_BUILD_HIP_BINDING=ON",
         f"LIBHRX_BUILD_PASSTHROUGH={'ON' if args.passthrough else 'OFF'}",
-        f"IREE_HAL_DRIVER_AMDGPU={'ON' if args.amdgpu else 'OFF'}",
+        f"IREE_HAL_DRIVER_AMD_GPU={'ON' if args.amdgpu else 'OFF'}",
         f"IREE_ROCM_PATH={rocm_root}",
         "IREE_ENABLE_LIBBACKTRACE=OFF",
         f"IREE_ENABLE_ASSERTIONS={'ON' if args.assertions else 'OFF'}",
@@ -258,7 +257,7 @@ def build_core(args: argparse.Namespace) -> None:
     )
     cmake_defines.extend(sanitizer_configure_options(args.sanitizer))
     if args.amdgpu:
-        cmake_defines.extend(amdgpu_device_binary_source_options(rocm_root))
+        cmake_defines.extend(amdgpu_device_toolchain_options(rocm_root))
     cmake_defines.extend(cmake_options_from_env())
     cmake_defines.extend(args.cmake_option)
 
@@ -288,19 +287,20 @@ def build_core(args: argparse.Namespace) -> None:
 
     if public_install_dir.exists():
         remove_tree(public_install_dir)
-    run(
-        [
-            "cmake",
-            "--install",
-            build_dir,
-            "--prefix",
-            public_install_dir,
-            "--component",
-            args.public_component,
-        ],
-        cwd=REPO_ROOT,
-        env=env,
-    )
+    for component in dict.fromkeys((args.public_component, "AMDF")):
+        run(
+            [
+                "cmake",
+                "--install",
+                build_dir,
+                "--prefix",
+                public_install_dir,
+                "--component",
+                component,
+            ],
+            cwd=REPO_ROOT,
+            env=env,
+        )
 
 
 def test_core(args: argparse.Namespace) -> None:
@@ -350,7 +350,6 @@ def test_package(args: argparse.Namespace) -> None:
     hrx_smoke_build_dir = smoke_build_dir / "hrx"
     smoke_cmake_options = [
         "-GNinja",
-        f"-DCMAKE_PREFIX_PATH={install_root};{rocm_root}",
         f"-DCMAKE_C_COMPILER={rocm_tool(rocm_root, 'clang')}",
         f"-DCMAKE_CXX_COMPILER={rocm_tool(rocm_root, 'clang++')}",
         f"-DCMAKE_AR={rocm_tool(rocm_root, 'llvm-ar')}",
@@ -360,6 +359,39 @@ def test_package(args: argparse.Namespace) -> None:
         f"-DCMAKE_SHARED_LINKER_FLAGS={smoke_link_flags}",
         f"-DCMAKE_MODULE_LINKER_FLAGS={smoke_link_flags}",
     ]
+    # Resolve libamdf from the public package alone, without the composed ROCm
+    # dependencies. CTest exercises both linkage modes and the installed tool.
+    amdf_package_dir = args.public_install_dir.resolve() / "lib" / "cmake" / "amdf"
+    require_path(amdf_package_dir / "amdf-config.cmake", "installed libamdf config")
+    amdf_smoke_build_dir = smoke_build_dir / "amdf"
+    run(
+        [
+            "cmake",
+            "-S",
+            REPO_ROOT / "libamdf" / "build_tools" / "cmake" / "package_smoke",
+            "-B",
+            amdf_smoke_build_dir,
+            *smoke_cmake_options,
+            f"-DCMAKE_PREFIX_PATH={args.public_install_dir.resolve()}",
+            f"-Damdf_DIR={amdf_package_dir}",
+        ],
+        cwd=REPO_ROOT,
+        env=env,
+    )
+    run(["cmake", "--build", amdf_smoke_build_dir], cwd=REPO_ROOT, env=env)
+    amdf_env = dict(env)
+    amdf_env.pop("LD_LIBRARY_PATH", None)
+    run(
+        [
+            "ctest",
+            "--test-dir",
+            amdf_smoke_build_dir,
+            "--output-on-failure",
+            "--no-tests=error",
+        ],
+        cwd=REPO_ROOT,
+        env=amdf_env,
+    )
     run(
         [
             "cmake",
@@ -368,6 +400,7 @@ def test_package(args: argparse.Namespace) -> None:
             "-B",
             hrx_smoke_build_dir,
             *smoke_cmake_options,
+            f"-DCMAKE_PREFIX_PATH={install_root};{rocm_root}",
         ],
         cwd=REPO_ROOT,
         env=env,
@@ -385,6 +418,7 @@ def test_package(args: argparse.Namespace) -> None:
                 "-B",
                 loomc_smoke_build_dir,
                 *smoke_cmake_options,
+                f"-DCMAKE_PREFIX_PATH={install_root};{rocm_root}",
             ],
             cwd=REPO_ROOT,
             env=env,

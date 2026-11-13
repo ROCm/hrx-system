@@ -248,14 +248,51 @@ static iree_status_t loom_target_pipeline_build_combine_body(
   return loom_target_pipeline_build_run(builder, IREE_SV("combine"));
 }
 
-static iree_status_t
-loom_target_pipeline_build_cleanup_expanded_target_functions(
+static iree_status_t loom_target_pipeline_build_expanded_source_cleanup_body(
+    loom_builder_t* builder, void* user_data) {
+  IREE_RETURN_IF_ERROR(
+      loom_target_pipeline_build_combine_body(builder, user_data));
+  // Expansion exposes private storage that previously escaped into a callee.
+  // Combine first to remove unused call results before promotion classifies
+  // their reads. Subsequent cleanup can then erase dead calculations and loops
+  // retained by unobserved writes.
+  return loom_target_pipeline_build_run(builder,
+                                        IREE_SV("promote-private-fragments"));
+}
+
+static iree_status_t loom_target_pipeline_build_cse_body(
+    loom_builder_t* builder, void* user_data) {
+  (void)user_data;
+  return loom_target_pipeline_build_run(builder, IREE_SV("cse"));
+}
+
+static iree_status_t loom_target_pipeline_build_deduplicate_target_functions(
     loom_builder_t* builder, void* user_data) {
   (void)user_data;
   loom_op_t* for_op = NULL;
   return loom_target_pipeline_build_for_target_functions(
-      builder, IREE_SV("source"), loom_target_pipeline_build_combine_body, NULL,
+      builder, IREE_SV("source"), loom_target_pipeline_build_cse_body, NULL,
       &for_op);
+}
+
+static iree_status_t
+loom_target_pipeline_build_cleanup_expanded_target_functions(
+    loom_builder_t* builder, void* user_data) {
+  (void)user_data;
+  // Selected providers can expose more ordinary helpers. Give those helpers
+  // the caller's context before the next template-selection iteration.
+  IREE_RETURN_IF_ERROR(loom_target_pipeline_build_run(
+      builder, IREE_SV("specialize-target-callgraph")));
+  // Newly specialized helpers must participate in CSE before inlining costs
+  // their bodies; repeated constants and view construction are shared work.
+  loom_op_t* specialized_source_changed = NULL;
+  IREE_RETURN_IF_ERROR(loom_pass_ir_build_if_changed(
+      builder, loom_target_pipeline_build_deduplicate_target_functions, NULL,
+      &specialized_source_changed));
+  loom_op_t* for_op = NULL;
+  return loom_target_pipeline_build_for_target_functions(
+      builder, IREE_SV("source"),
+      loom_target_pipeline_build_expanded_source_cleanup_body, NULL, &for_op);
 }
 
 static iree_status_t loom_target_pipeline_build_source_to_low(
@@ -332,8 +369,20 @@ static iree_status_t loom_target_pipeline_contribute_phase(
     loom_builder_t* builder,
     const loom_target_pipeline_build_context_t* context,
     loom_target_pipeline_phase_t phase) {
-  return loom_target_environment_contribute_pipeline(
+  // A phase is one change boundary even when several providers contribute.
+  // Otherwise a trailing provider's no-op hides earlier mutations from the
+  // following `if changed` cleanup.
+  loom_pass_ir_scope_t scope;
+  IREE_RETURN_IF_ERROR(
+      loom_pass_ir_begin_repeat(builder, LOOM_PASS_REPEAT_BUILD_FLAG_HAS_COUNT,
+                                LOOM_PASS_REPEAT_MODE_FIXED, 1, 0, &scope));
+  iree_status_t status = loom_target_environment_contribute_pipeline(
       context->target_environment, phase, context->pass_environment, builder);
+  if (!iree_status_is_ok(status)) {
+    loom_pass_ir_abandon_scope(builder, &scope);
+    return status;
+  }
+  return loom_pass_ir_end_scope(builder, &scope);
 }
 
 static iree_status_t loom_target_pipeline_build_cleanup(
@@ -549,7 +598,8 @@ static iree_status_t loom_target_pipeline_build_inlined_source_cleanup_body(
     IREE_RETURN_IF_ERROR(
         loom_target_pipeline_build_run(builder, IREE_SV("cfg-simplify")));
   }
-  IREE_RETURN_IF_ERROR(loom_target_pipeline_build_combine_body(builder, NULL));
+  IREE_RETURN_IF_ERROR(
+      loom_target_pipeline_build_expanded_source_cleanup_body(builder, NULL));
   return loom_target_pipeline_build_run(builder, IREE_SV("cse"));
 }
 
@@ -661,6 +711,10 @@ static iree_status_t loom_target_pipeline_build_low_preparation(
 
 static iree_status_t loom_target_pipeline_build_expanded_source_body(
     loom_builder_t* builder, void* user_data) {
+  // Template applications in ordinary helpers consume the same invocation
+  // context as applications written directly in the entry.
+  IREE_RETURN_IF_ERROR(loom_target_pipeline_build_run(
+      builder, IREE_SV("specialize-target-callgraph")));
   loom_op_t* for_op = NULL;
   IREE_RETURN_IF_ERROR(loom_target_pipeline_build_for_target_functions(
       builder, IREE_SV("source"),
@@ -697,6 +751,29 @@ static iree_status_t loom_target_pipeline_build_lexical_worker_body(
   return loom_target_pipeline_build_cleanup(builder);
 }
 
+static iree_status_t loom_target_pipeline_build_required_lexical_workers(
+    loom_builder_t* builder, void* user_data) {
+  const loom_target_pipeline_build_context_t* context = user_data;
+  const loom_target_provider_set_t* providers =
+      context->target_environment->provider_set;
+  for (iree_host_size_t i = 0; i < providers->provider_count; ++i) {
+    const loom_target_provider_t* provider = providers->providers[i];
+    if (!provider->requires_lexical_worker_preparation) {
+      continue;
+    }
+    loom_named_attr_t family_attr;
+    IREE_RETURN_IF_ERROR(loom_target_pipeline_build_string_attr(
+        builder, IREE_SV("family"),
+        loom_target_provider_fact_type(provider)->name, &family_attr));
+    loom_op_t* where_op;
+    IREE_RETURN_IF_ERROR(loom_pass_ir_build_where(
+        builder, LOOM_PASS_WHERE_BUILD_FLAG_HAS_ATTRS, IREE_SV("target"),
+        loom_make_named_attr_slice(&family_attr, 1),
+        loom_target_pipeline_build_lexical_worker_body, user_data, &where_op));
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_target_pipeline_build_lexical_workers(
     loom_builder_t* builder, void* user_data) {
   loom_named_attr_t name_attr = {0};
@@ -706,7 +783,8 @@ static iree_status_t loom_target_pipeline_build_lexical_workers(
   return loom_pass_ir_build_where(
       builder, LOOM_PASS_WHERE_BUILD_FLAG_HAS_ATTRS, IREE_SV("op"),
       loom_make_named_attr_slice(&name_attr, 1),
-      loom_target_pipeline_build_lexical_worker_body, user_data, &where_op);
+      loom_target_pipeline_build_required_lexical_workers, user_data,
+      &where_op);
 }
 
 static iree_status_t loom_target_pipeline_build_execution_cleanup(
@@ -739,8 +817,12 @@ static iree_status_t loom_target_pipeline_build_finalize_refined_callgraph(
   // reconcile its function version before registering the new specializations.
   IREE_RETURN_IF_ERROR(
       loom_target_pipeline_build_run(builder, IREE_SV("symbol-dce")));
-  return loom_target_pipeline_build_run(builder,
-                                        IREE_SV("specialize-target-callgraph"));
+  IREE_RETURN_IF_ERROR(loom_target_pipeline_build_run(
+      builder, IREE_SV("specialize-target-callgraph")));
+  // Exact boundary facts become body constants. Remove newly unreachable
+  // branches and their edge assumptions before target legalization checks
+  // those assumptions against the refined facts.
+  return loom_target_pipeline_build_cleanup_target_functions(builder, NULL);
 }
 
 static iree_status_t loom_target_pipeline_build_refine_boundaries(
@@ -787,11 +869,6 @@ static iree_status_t loom_target_pipeline_build_source_low_body(
   loom_op_t* for_op = NULL;
   IREE_RETURN_IF_ERROR(
       loom_target_pipeline_build_expanded_source_body(builder, user_data));
-  // Authoring expansion has selected every resolvable provider and exposed
-  // its retained callees. Specialize the complete semantic call graph before
-  // any target-aware function pass observes those callees.
-  IREE_RETURN_IF_ERROR(loom_target_pipeline_build_run(
-      builder, IREE_SV("specialize-target-callgraph")));
   IREE_RETURN_IF_ERROR(loom_target_pipeline_build_preparatory_source_inlining(
       builder, user_data));
   IREE_RETURN_IF_ERROR(loom_target_pipeline_build_for_target_functions(
@@ -936,6 +1013,8 @@ static iree_status_t loom_target_pipeline_build_source_low_body(
   }
   IREE_RETURN_IF_ERROR(
       loom_target_pipeline_build_low_cleanup(builder, user_data));
+  IREE_RETURN_IF_ERROR(
+      loom_target_pipeline_build_run(builder, IREE_SV("low-borrow-lifetime")));
   return context->verify_source_low_output
              ? loom_target_pipeline_build_run(builder, IREE_SV("verify-low"))
              : iree_ok_status();

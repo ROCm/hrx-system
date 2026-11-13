@@ -459,6 +459,62 @@ TEST(MemoryTransitionRecipeTest, ValidatesEffectsAndQueueOperationShape) {
                         iree_hal_memory_transition_recipe_validate(nullptr));
 }
 
+TEST(MemoryTransitionRecipeTest, HostStagesComposeWithExplicitGlobalActions) {
+  const iree_hal_memory_barrier_t memory = {
+      .source_scope = IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE,
+      .target_scope = IREE_HAL_ACCESS_SCOPE_TRANSFER_READ,
+  };
+  const iree_hal_buffer_barrier_t range = {
+      .source_scope = memory.source_scope,
+      .target_scope = memory.target_scope,
+      .buffer_ref = iree_hal_make_indirect_buffer_ref(0, 0, 8),
+  };
+  const iree_hal_barrier_t dependencies[] = {
+      {},
+      {.memory_barrier_count = 1, .memory_barriers = &memory},
+      {.buffer_barrier_count = 1, .buffer_barriers = &range},
+  };
+  const iree_hal_barrier_flags_t expected[] = {
+      0,
+      IREE_HAL_BARRIER_FLAG_ACQUIRE_SYSTEM_SCOPE,
+      IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE,
+      IREE_HAL_BARRIER_FLAG_ACQUIRE_SYSTEM_SCOPE |
+          IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE,
+  };
+  for (uint32_t dependency = 0; dependency < IREE_ARRAYSIZE(dependencies);
+       ++dependency) {
+    SCOPED_TRACE(dependency);
+    for (uint32_t stages = 0; stages < 4; ++stages) {
+      for (uint32_t actions = 0; actions < 4; ++actions) {
+        SCOPED_TRACE(stages);
+        SCOPED_TRACE(actions);
+        iree_hal_barrier_t barrier = dependencies[dependency];
+        barrier.source_stage_mask =
+            IREE_HAL_EXECUTION_STAGE_DISPATCH |
+            ((stages & 1) ? IREE_HAL_EXECUTION_STAGE_HOST : 0u);
+        barrier.target_stage_mask =
+            IREE_HAL_EXECUTION_STAGE_TRANSFER |
+            ((stages & 2) ? IREE_HAL_EXECUTION_STAGE_HOST : 0u);
+        barrier.flags = expected[actions];
+        EXPECT_EQ(iree_hal_barrier_resolve_flags(&barrier),
+                  expected[dependency ? actions : stages | actions]);
+        EXPECT_EQ(iree_hal_barrier_resolve_cache_flags(&barrier),
+                  expected[stages | actions]);
+        barrier.flags = 0;
+        barrier.effects.bits =
+            ((actions & 1) ? IREE_HAL_MEMORY_EFFECT_GLOBAL_ACQUIRE_FROM_SYSTEM
+                           : 0) |
+            ((actions & 2) ? IREE_HAL_MEMORY_EFFECT_GLOBAL_RELEASE_TO_SYSTEM
+                           : 0);
+        EXPECT_EQ(iree_hal_barrier_resolve_flags(&barrier),
+                  expected[dependency ? actions : stages | actions]);
+        EXPECT_EQ(iree_hal_barrier_resolve_cache_flags(&barrier),
+                  expected[stages | actions]);
+      }
+    }
+  }
+}
+
 TEST(MemoryTransitionRecipeTest, QueueFamilyAdmitsItsHostExecutors) {
   iree_hal_queue_family_spec_t family_spec = {};
   iree_hal_queue_family_t family = {

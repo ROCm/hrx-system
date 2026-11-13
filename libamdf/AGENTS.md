@@ -69,8 +69,9 @@ Runtime-only consumers outside `libamdf/` retain their own subsystem prefix.
   the installed package. Its authored CMake belongs to build tooling and never
   participates in the repository product graph.
 - The public distribution consists of the shared library, the explicit static
-  library, and headers under `include/amdf/`. Tests and examples are not part
-  of the installed package.
+  library, headers under `include/amdf/`, and tools declared with
+  `amdf_cc_tool` under singular `tool/` packages. Tests and examples are not
+  part of the installed package.
 - Ordinary CTS corpora use one process-lifetime invocation of a runtime-loaded
   shared-library executable. Focused native-lifetime smokes exercise bounded
   instance ownership without duplicating every operation. The small

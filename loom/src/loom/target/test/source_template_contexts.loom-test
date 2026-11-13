@@ -1,0 +1,144 @@
+// RUN: emit source-low output=low
+
+test.target<low_core> @narrow {subgroup_size = 32}
+
+test.target<low_core> @wide {subgroup_size = 64}
+
+template.decl @width() -> (i32)
+
+template.def<@width> requires [#target.subgroup.size<32>] @width_narrow() -> (i32) {
+  %result = scalar.constant 32 : i32
+  template.return %result : i32
+}
+
+template.def<@width> requires [#target.subgroup.size<64>] @width_wide() -> (i32) {
+  %result = scalar.constant 64 : i32
+  template.return %result : i32
+}
+
+func.def noinline @helper(%value: i32) -> (i32) {
+  %width = template.apply<@width>() : () -> (i32)
+  %result = scalar.addi %value, %width : i32
+  func.return %result : i32
+}
+
+func.def @forward(%value: i32) -> (i32) {
+  %result = func.call @helper(%value) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+template.decl @outer(%value: i32) -> (i32)
+
+template.def<@outer> @outer_provider(%value: i32) -> (i32) {
+  %result = func.call @forward(%value) : (i32) -> (i32)
+  template.return %result : i32
+}
+
+// The first root exposes the helper before expansion. The second reaches it
+// only after selecting a provider, and must receive an independent version.
+func.def public target(@narrow) @first(%value: i32) -> (i32) {
+  %result = func.call @forward(%value) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+func.def public target(@narrow) @peer(%value: i32) -> (i32) {
+  %result = func.call @forward(%value) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+func.def public target(@wide) @second(%value: i32) -> (i32) {
+  %result = template.apply<@outer>(%value) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ----
+low.func.def noinline target<test.low.core> @helper(%value: reg<test.i32>) -> (reg<test.i32>) asm {
+  %result$40 = test.const.i32 64
+  %result$41 = test.add.i32 %value, %result$40
+  return %result$41
+}
+
+low.func.def noinline target<test.low.core> @helper_spec0(%value: reg<test.i32>) -> (reg<test.i32>) asm {
+  %result$53 = test.const.i32 32
+  %result$54 = test.add.i32 %value, %result$53
+  return %result$54
+}
+
+low.func.def public target<test.low.core>(@narrow) abi(object_function) @first(%value: reg<test.i32>) -> (reg<test.i32>) asm {
+  %result = low.func.call pure @helper_spec0(%value) : (reg<test.i32>) -> (reg<test.i32>)
+  return %result
+}
+
+low.func.def public target<test.low.core>(@narrow) abi(object_function) @peer(%value: reg<test.i32>) -> (reg<test.i32>) asm {
+  %result = low.func.call pure @helper_spec0(%value) : (reg<test.i32>) -> (reg<test.i32>)
+  return %result
+}
+
+low.func.def public target<test.low.core>(@wide) abi(object_function) @second(%value: reg<test.i32>) -> (reg<test.i32>) asm {
+  %result = low.func.call pure @helper(%value) : (reg<test.i32>) -> (reg<test.i32>)
+  return %result
+}
+
+// ====
+// An unselected provider's target is an applicability constraint. Its private
+// dependencies cannot be compiled or rejected in that context speculatively.
+test.target<low_core> @target
+
+test.target<quirky> @other
+
+template.decl @choose(%value: i32) -> (i32)
+
+template.def<@choose> target(@other) @unselected(%value: i32) -> (i32) {
+  %result = func.call @private_helper(%value) : (i32) -> (i32)
+  template.return %result : i32
+}
+
+func.def target(@target) @private_helper(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+template.def<@choose> target(@target) @selected(%value: i32) -> (i32) {
+  template.return %value : i32
+}
+
+func.def public target(@target) @entry(%value: i32) -> (i32) {
+  %result = template.apply<@choose>(%value) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ----
+low.func.def target<test.low.core>(@target) abi(object_function) @private_helper(%value: reg<test.i32>) -> (reg<test.i32>) asm {
+  return %value
+}
+
+low.func.def public target<test.low.core>(@target) abi(object_function) @entry(%value: reg<test.i32>) -> (reg<test.i32>) asm {
+  return %value
+}
+
+// ====
+// A public unbound caller keeps its generic dependency. Another caller's
+// selected target cannot discharge this open template application.
+test.target<low_core> @bound {subgroup_size = 32}
+
+template.decl @width() -> (i32)
+
+template.def<@width> requires [#target.subgroup.size<32>] @width32() -> (i32) {
+  %result = scalar.constant 32 : i32
+  template.return %result : i32
+}
+
+func.def noinline @helper() -> (i32) {
+  // ERROR@+1: LOWERING/048 {op_name="template.apply", phase_name="select-templates", contract_key="width", constraint_owner_name="width32", condition_name="target.subgroup.size"}
+  %width = template.apply<@width>() : () -> (i32)
+  func.return %width : i32
+}
+
+func.def public @unbound() -> (i32) {
+  %result = func.call @helper() : () -> (i32)
+  func.return %result : i32
+}
+
+func.def public target(@bound) @entry() -> (i32) {
+  %result = func.call @helper() : () -> (i32)
+  func.return %result : i32
+}

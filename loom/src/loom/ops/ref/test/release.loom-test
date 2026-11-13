@@ -1,0 +1,122 @@
+// Both handle modes end through the same consuming operation. Observable
+// release cannot disappear when no subsequent operation reads the payload.
+// RUN: pass dce,ownership-lifetime
+type.decl import("media", "frame") @Frame
+
+func.def @release(%owner: ref<@Frame>, %pointer: ptr<@Frame>) {
+  ref.release %owner : ref<@Frame>
+  ref.release %pointer : ptr<@Frame>
+  func.return
+}
+
+// ====
+
+// Text and binary transport preserve consumption and the exact handle mode.
+// RUN: format bytecode
+type.decl import("media", "frame") @Frame
+
+func.def @release(%owner: ref<@Frame>, %pointer: ptr<@Frame>) {
+  ref.release %owner : ref<@Frame>
+  ref.release %pointer : ptr<@Frame>
+  func.return
+}
+
+// ====
+
+// Releasing an independent copy leaves the original obligation intact.
+// RUN: pass ownership-lifetime
+type.decl import("media", "frame") @Frame
+
+func.def @missing_original(%owner: ref<@Frame>) {
+  %copy = ref.duplicate %owner : ref<@Frame>
+  ref.release %copy : ref<@Frame>
+  // ERROR@+1: DOMINANCE/014 {value_name="owner"}
+  func.return
+}
+
+// ====
+
+// A source owner cannot be consumed twice.
+// RUN: verify
+type.decl import("media", "frame") @Frame
+
+func.def @double_release(%owner: ref<@Frame>) {
+  ref.release %owner : ref<@Frame>
+  // ERROR@+1: DOMINANCE/002 {value_name="owner", consuming_op="ref.release"}
+  ref.release %owner : ref<@Frame>
+  func.return
+}
+
+// ====
+
+// Released pointers cannot escape through a return.
+// RUN: verify
+type.decl import("media", "frame") @Frame
+
+func.def @return_released(%pointer: ptr<@Frame>) -> (ptr<@Frame>) {
+  ref.release %pointer : ptr<@Frame>
+  // ERROR@+1: DOMINANCE/002 {value_name="pointer", consuming_op="ref.release"}
+  func.return %pointer : ptr<@Frame>
+}
+
+// ====
+
+// Protection must be acquired before its owner ends, never afterward.
+// RUN: verify
+type.decl import("media", "frame") @Frame
+
+func.def @borrow_released(%owner: ref<@Frame>) -> (ptr<@Frame>) {
+  ref.release %owner : ref<@Frame>
+  // ERROR@+1: DOMINANCE/002 {value_name="owner", consuming_op="ref.release"}
+  %pointer = ref.borrow %owner : ref<@Frame> -> ptr<@Frame>
+  func.return %pointer : ptr<@Frame>
+}
+
+// ====
+
+// Releasing one branch does not discharge the other branch's obligation.
+// RUN: pass ownership-lifetime
+type.decl import("media", "frame") @Frame
+
+func.def @missing_branch(%condition: i1, %owner: ref<@Frame>) {
+  cfg.cond_br %condition, ^release, ^keep
+^release:
+  ref.release %owner : ref<@Frame>
+  func.return
+^keep:
+  // ERROR@+1: DOMINANCE/014 {value_name="owner"}
+  func.return
+}
+
+// ====
+
+// Numerical bits are not managed handles.
+// RUN: verify
+func.def @numeric(%value: i64) {
+  // ERROR@+1: TYPE/003
+  ref.release %value : i64
+  func.return
+}
+
+// ====
+
+// Memory access remains separate from the managed payload family.
+// RUN: verify
+func.def @memory(%value: buffer) {
+  // ERROR@+1: TYPE/003
+  ref.release %value : buffer
+  func.return
+}
+
+// ====
+
+// The annotated operand cannot change the handle's nominal payload identity.
+// RUN: verify
+type.decl import("media", "frame") @Frame
+type.decl import("media", "decoder") @Decoder
+
+func.def @different_payload(%owner: ref<@Frame>) {
+  // ERROR@+1: TYPE/001
+  ref.release %owner : ref<@Decoder>
+  func.return
+}

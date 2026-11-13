@@ -8,8 +8,8 @@
 #include <cstring>
 
 #include "loom/runtime/telemetry/field.h"
+#include "loom/runtime/testing/worker_gate.h"
 #include "loom/serve/service/text/service_test_fixture.h"
-#include "loom/serve/testing/worker_gate.h"
 #include "loom/service/telemetry/latency.h"
 #include "loom/service/telemetry/record.h"
 
@@ -71,8 +71,8 @@ class FailedTextDiagnosticsTest : public SourceTextServiceTest {
   }
 
   bool Idle() {
-    const auto snapshot = interface_.snapshot(interface_.self);
-    return !interface_.is_pending(interface_.self) &&
+    const auto snapshot = interface_.snapshot(interface_.runtime.self);
+    return !interface_.runtime.vtable->is_pending(interface_.runtime.self) &&
            !snapshot.active_requests && !snapshot.queued_requests;
   }
 
@@ -155,7 +155,8 @@ TEST_F(FailedTextDiagnosticsTest, ModelFailureReachesActiveQueuedAndControl) {
       Send(Request(Message("user", "ab")), "X-Loom-Session: active\r\n");
   ASSERT_NO_FATAL_FAILURE(Accept(active, interface_, &connection));
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface_, [&] {
-    return std::string(interface_.snapshot(interface_.self).phase) == "execute";
+    return std::string(interface_.snapshot(interface_.runtime.self).phase) ==
+           "execute";
   }));
   const int queued = Send(Request(Message("user", "ax")));
   ASSERT_NO_FATAL_FAILURE(Accept(queued, interface_, &connection));
@@ -171,15 +172,16 @@ TEST_F(FailedTextDiagnosticsTest, ModelFailureReachesActiveQueuedAndControl) {
                   decltype(&loom_serve_text_checkpoint_control_close)>
       control_owner(control, loom_serve_text_checkpoint_control_close);
   ASSERT_NE(control, nullptr);
-  EXPECT_EQ(interface_.snapshot(interface_.self).active_requests, 1u);
-  EXPECT_EQ(interface_.snapshot(interface_.self).queued_requests, 2u);
+  EXPECT_EQ(interface_.snapshot(interface_.runtime.self).active_requests, 1u);
+  EXPECT_EQ(interface_.snapshot(interface_.runtime.self).queued_requests, 2u);
 
   auto* notification = loom_serve_http_server_notification(server_);
   size_t failures = 0;
   while (!Idle()) {
     const auto ticket = iree_notification_prepare_wait(notification);
     bool progress = false;
-    iree_status_t status = interface_.advance(interface_.self, 0, &progress);
+    iree_status_t status = interface_.runtime.vtable->advance(
+        interface_.runtime.self, 0, &progress);
     const bool failed = !iree_status_is_ok(status);
     if (failed) {
       ++failures;
@@ -226,9 +228,9 @@ TEST_F(SourceTextServiceTest, FirstOutputExcludesFramingAndEmptyCompletions) {
     const auto interface = loom_serve_text_service_interface(value);
     Observe(interface);
     const auto idle = [&] {
-      return !interface.is_pending(interface.self) &&
-             !interface.is_active(interface.self) &&
-             !interface.snapshot(interface.self).queued_requests;
+      return !interface.runtime.vtable->is_pending(interface.runtime.self) &&
+             !interface.runtime.vtable->is_active(interface.runtime.self) &&
+             !interface.snapshot(interface.runtime.self).queued_requests;
     };
     const auto request = [streaming](const char* prompt) {
       return std::string(R"({"model":"fixture-text","stream":)") +
@@ -240,7 +242,8 @@ TEST_F(SourceTextServiceTest, FirstOutputExcludesFramingAndEmptyCompletions) {
     const int first = Send(request("abxa"));
     ASSERT_NO_FATAL_FAILURE(Accept(first, interface, &connection));
     ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface, [&] {
-      return std::string(interface.snapshot(interface.self).phase) == "execute";
+      return std::string(interface.snapshot(interface.runtime.self).phase) ==
+             "execute";
     }));
     // Streaming headers and the assistant-role event have carrier acceptance,
     // but the owner has not consumed any model result yet.
@@ -297,7 +300,7 @@ TEST_F(SourceTextServiceTest, FirstOutputExcludesFramingAndEmptyCompletions) {
       // cancels; it cannot become a completed-only latency sample.
       EXPECT_EQ(FirstOutputCount(interface), 2u);
     }
-    interface.set_observer(interface.self, {});
+    interface.runtime.vtable->set_observer(interface.runtime.self, {});
   }
 }
 
@@ -331,7 +334,8 @@ TEST_F(SourceTextServiceTest, NonstreamingDisconnectRetiresAnAcceptedEpoch) {
   loom_serve_http_connection_t* connection = nullptr;
   ASSERT_NO_FATAL_FAILURE(Accept(client, interface, &connection));
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface, [&] {
-    return std::string(interface.snapshot(interface.self).phase) == "execute";
+    return std::string(interface.snapshot(interface.runtime.self).phase) ==
+           "execute";
   }));
   // The owner has submitted a real epoch but cannot consume its completion
   // until it runs again. Nonstreaming output must not have published headers.
@@ -350,9 +354,9 @@ TEST_F(SourceTextServiceTest, NonstreamingDisconnectRetiresAnAcceptedEpoch) {
       },
       connection, iree_infinite_timeout());
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface, [&] {
-    return !interface.is_pending(interface.self) &&
-           !interface.is_active(interface.self) &&
-           !interface.snapshot(interface.self).queued_requests;
+    return !interface.runtime.vtable->is_pending(interface.runtime.self) &&
+           !interface.runtime.vtable->is_active(interface.runtime.self) &&
+           !interface.snapshot(interface.runtime.self).queued_requests;
   }));
   EXPECT_EQ(interface.telemetry.counters->completed, 0u);
   EXPECT_EQ(interface.telemetry.counters->cancelled, 1u);
@@ -362,9 +366,9 @@ TEST_F(SourceTextServiceTest, NonstreamingDisconnectRetiresAnAcceptedEpoch) {
   const int next = Send(request);
   ASSERT_NO_FATAL_FAILURE(Accept(next, interface, &connection));
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface, [&] {
-    return !interface.is_pending(interface.self) &&
-           !interface.is_active(interface.self) &&
-           !interface.snapshot(interface.self).queued_requests;
+    return !interface.runtime.vtable->is_pending(interface.runtime.self) &&
+           !interface.runtime.vtable->is_active(interface.runtime.self) &&
+           !interface.snapshot(interface.runtime.self).queued_requests;
   }));
   const std::string response = Read(next);
   EXPECT_EQ(response.find("HTTP/1.1 200"), 0u) << response;
@@ -376,7 +380,7 @@ TEST_F(SourceTextServiceTest, NonstreamingDisconnectRetiresAnAcceptedEpoch) {
   EXPECT_EQ(interface.telemetry.counters->cancelled, 1u);
   EXPECT_EQ(interface.telemetry.counters->failed, 0u);
   EXPECT_EQ(FirstOutputCount(interface), 1u);
-  interface.set_observer(interface.self, {});
+  interface.runtime.vtable->set_observer(interface.runtime.self, {});
 }
 
 TEST_F(SourceTextServiceTest, CheckpointClaimSurvivesDisconnectAndStopping) {
@@ -394,9 +398,9 @@ TEST_F(SourceTextServiceTest, CheckpointClaimSurvivesDisconnectAndStopping) {
     const auto interface = loom_serve_text_service_interface(value);
     Observe(interface);
     const auto idle = [&] {
-      return !interface.is_pending(interface.self) &&
-             !interface.is_active(interface.self) &&
-             !interface.snapshot(interface.self).queued_requests;
+      return !interface.runtime.vtable->is_pending(interface.runtime.self) &&
+             !interface.runtime.vtable->is_active(interface.runtime.self) &&
+             !interface.snapshot(interface.runtime.self).queued_requests;
     };
     loom_serve_http_connection_t* connection = nullptr;
     const int generation =
@@ -413,8 +417,8 @@ TEST_F(SourceTextServiceTest, CheckpointClaimSurvivesDisconnectAndStopping) {
     // even if the device/proactor has already completed its work.
     // Request-backed names must survive peer failure until the endpoint can be
     // published.
-    ASSERT_TRUE(interface.is_pending(interface.self));
-    EXPECT_EQ(interface.snapshot(interface.self).active_requests, 1u);
+    ASSERT_TRUE(interface.runtime.vtable->is_pending(interface.runtime.self));
+    EXPECT_EQ(interface.snapshot(interface.runtime.self).active_requests, 1u);
     char byte = 0;
     EXPECT_EQ(recv(pin, &byte, 1, MSG_DONTWAIT), -1);
     EXPECT_TRUE(errno == EAGAIN || errno == EWOULDBLOCK);
@@ -432,7 +436,7 @@ TEST_F(SourceTextServiceTest, CheckpointClaimSurvivesDisconnectAndStopping) {
           connection, iree_infinite_timeout()));
     }
     ASSERT_NO_FATAL_FAILURE(AdvanceUntil(
-        interface, idle, stopping ? LOOM_SERVE_SERVICE_FLAG_STOPPING : 0));
+        interface, idle, stopping ? LOOM_RUNTIME_SERVICE_FLAG_STOPPING : 0));
     EXPECT_EQ(interface.telemetry.counters->completed, 1u);
     EXPECT_EQ(interface.telemetry.counters->cancelled, 1u);
     EXPECT_EQ(interface.telemetry.counters->failed, 0u);
@@ -456,7 +460,7 @@ TEST_F(SourceTextServiceTest, CheckpointClaimSurvivesDisconnectAndStopping) {
       EXPECT_EQ(interface.telemetry.counters->completed, 3u);
       EXPECT_EQ(interface.telemetry.counters->cancelled, 1u);
     }
-    interface.set_observer(interface.self, {});
+    interface.runtime.vtable->set_observer(interface.runtime.self, {});
   }
 }
 
@@ -475,7 +479,7 @@ TEST_F(RegisteredSourceTextServiceTest,
     ASSERT_TRUE(source.good());
   }
   StartManaged();
-  loom_serve::testing::StalledStderr stalled;
+  loom_runtime::testing::StalledStderr stalled;
   ASSERT_NO_FATAL_FAILURE(stalled.Begin());
   EXPECT_EQ(Read(Send(Declaration("fixture-text", directory_), "",
                       "/v1/models/register"))
@@ -510,7 +514,7 @@ TEST_F(RegisteredSourceTextServiceTest,
   StalledClient unregister;
   StalledClient status;
   {
-    loom_serve::testing::WorkerGate gate(loom_serve_host_executor(host_));
+    loom_runtime::testing::WorkerGate gate(loom_runtime_host_executor(host_));
     unregister.Send(server_, R"({"model":"broken"})", "/v1/models/unregister");
     unregister.WaitUntilRequestSent();
     status.Send(server_, "", "/v1/status", "GET");
@@ -569,9 +573,9 @@ TEST_F(SourceTextServiceTest, RejectedInputBacklogYieldsToReadyDecode) {
   loom_serve_http_connection_t* active = nullptr;
   ASSERT_NO_FATAL_FAILURE(AcceptLoopback(interface, &active));
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface, [&] {
-    const auto state = interface.snapshot(interface.self);
+    const auto state = interface.snapshot(interface.runtime.self);
     return state.active_requests == 1 &&
-           !interface.is_pending(interface.self) &&
+           !interface.runtime.vtable->is_pending(interface.runtime.self) &&
            std::string(state.phase) == "idle";
   }));
   ASSERT_EQ(interface.telemetry.counters->output_tokens, 1u);
@@ -587,7 +591,7 @@ TEST_F(SourceTextServiceTest, RejectedInputBacklogYieldsToReadyDecode) {
     ASSERT_NO_FATAL_FAILURE(Accept(rejected.back(), interface, &connection));
   }
   EXPECT_EQ(interface.telemetry.counters->rejected, 0u);
-  EXPECT_EQ(interface.snapshot(interface.self).queued_requests,
+  EXPECT_EQ(interface.snapshot(interface.runtime.self).queued_requests,
             rejected.size());
 
   // Return actual network credit before allowing the owner to run. There is
@@ -606,14 +610,15 @@ TEST_F(SourceTextServiceTest, RejectedInputBacklogYieldsToReadyDecode) {
       },
       active, iree_infinite_timeout());
   EXPECT_NO_FATAL_FAILURE(AdvanceUntil(interface, [&] {
-    return std::string(interface.snapshot(interface.self).phase) == "execute";
+    return std::string(interface.snapshot(interface.runtime.self).phase) ==
+           "execute";
   }));
   EXPECT_LT(interface.telemetry.counters->rejected, rejected.size());
-  EXPECT_GT(interface.snapshot(interface.self).queued_requests, 0u);
+  EXPECT_GT(interface.snapshot(interface.runtime.self).queued_requests, 0u);
   EXPECT_NO_FATAL_FAILURE(AdvanceUntil(interface, [&] {
-    return !interface.is_pending(interface.self) &&
-           !interface.is_active(interface.self) &&
-           !interface.snapshot(interface.self).queued_requests;
+    return !interface.runtime.vtable->is_pending(interface.runtime.self) &&
+           !interface.runtime.vtable->is_active(interface.runtime.self) &&
+           !interface.snapshot(interface.runtime.self).queued_requests;
   }));
   reader.join();
   EXPECT_EQ(Content(response), Oracle::Complete("abxa", 4));
@@ -635,8 +640,8 @@ TEST_F(SourceTextServiceTest, RejectedInputBacklogYieldsToReadyDecode) {
     ASSERT_NO_FATAL_FAILURE(Accept(rejected.back(), interface, &connection));
   }
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface, [&] {
-    return !interface.is_pending(interface.self) &&
-           !interface.snapshot(interface.self).queued_requests;
+    return !interface.runtime.vtable->is_pending(interface.runtime.self) &&
+           !interface.snapshot(interface.runtime.self).queued_requests;
   }));
   for (const int client : rejected) {
     EXPECT_EQ(Read(client).find("HTTP/1.1 400"), 0u);
@@ -644,7 +649,7 @@ TEST_F(SourceTextServiceTest, RejectedInputBacklogYieldsToReadyDecode) {
   EXPECT_EQ(interface.telemetry.counters->completed, 1u);
   EXPECT_EQ(interface.telemetry.counters->rejected,
             2 * options.pending_capacity);
-  interface.set_observer(interface.self, {});
+  interface.runtime.vtable->set_observer(interface.runtime.self, {});
 }
 
 TEST_F(SourceTextServiceTest, StoppingAccountsForQueuedControlAndCpuBorrowers) {
@@ -659,13 +664,13 @@ TEST_F(SourceTextServiceTest, StoppingAccountsForQueuedControlAndCpuBorrowers) {
                                                                       destroy);
   const auto interface = loom_serve_text_service_interface(service);
   auto* notification = loom_serve_http_server_notification(server_);
-  interface.set_observer(interface.self,
-                         {[](void* payload) {
-                            iree_notification_post(
-                                static_cast<iree_notification_t*>(payload),
-                                IREE_ALL_WAITERS);
-                          },
-                          notification});
+  interface.runtime.vtable->set_observer(
+      interface.runtime.self, {[](void* payload) {
+                                 iree_notification_post(
+                                     static_cast<iree_notification_t*>(payload),
+                                     IREE_ALL_WAITERS);
+                               },
+                               notification});
   const auto accept = [&](int client) {
     loom_serve_http_connection_t* connection = nullptr;
     ASSERT_NO_FATAL_FAILURE(Accept(client, interface, &connection));
@@ -681,15 +686,15 @@ TEST_F(SourceTextServiceTest, StoppingAccountsForQueuedControlAndCpuBorrowers) {
   const int queued =
       Send(Request(Message("user", "ab")), "X-Loom-Session: second\r\n");
   ASSERT_NO_FATAL_FAILURE(accept(queued));
-  EXPECT_EQ(interface.snapshot(interface.self).queued_requests, 3u);
+  EXPECT_EQ(interface.snapshot(interface.runtime.self).queued_requests, 3u);
   bool complete = false;
   while (!complete) {
     const auto ticket = iree_notification_prepare_wait(notification);
     bool progress = false;
-    IREE_ASSERT_OK(interface.advance(
-        interface.self, LOOM_SERVE_SERVICE_FLAG_STOPPING, &progress));
-    const auto state = interface.snapshot(interface.self);
-    complete = !interface.is_pending(interface.self) &&
+    IREE_ASSERT_OK(interface.runtime.vtable->advance(
+        interface.runtime.self, LOOM_RUNTIME_SERVICE_FLAG_STOPPING, &progress));
+    const auto state = interface.snapshot(interface.runtime.self);
+    complete = !interface.runtime.vtable->is_pending(interface.runtime.self) &&
                !state.queued_requests && !state.active_requests;
     if (complete || progress) {
       iree_notification_cancel_wait(notification);
@@ -704,7 +709,7 @@ TEST_F(SourceTextServiceTest, StoppingAccountsForQueuedControlAndCpuBorrowers) {
   EXPECT_TRUE(Read(generation, /*allow_empty=*/true).empty());
   EXPECT_TRUE(Read(control, /*allow_empty=*/true).empty());
   EXPECT_TRUE(Read(queued, /*allow_empty=*/true).empty());
-  EXPECT_FALSE(interface.is_active(interface.self));
+  EXPECT_FALSE(interface.runtime.vtable->is_active(interface.runtime.self));
 }
 
 TEST_F(SourceTextServiceTest, TelemetryWrapDoesNotBlockTextOrChangeCounters) {
@@ -748,7 +753,7 @@ TEST_F(SourceTextServiceTest, TelemetryWrapDoesNotBlockTextOrChangeCounters) {
       fast = next;
     }
   };
-  loom_serve::testing::StalledStderr stalled;
+  loom_runtime::testing::StalledStderr stalled;
   ASSERT_NO_FATAL_FAILURE(stalled.Begin());
   uint64_t input_tokens = 0;
   for (size_t wave = 0; wave < 10; ++wave) {
@@ -866,7 +871,7 @@ INSTANTIATE_TEST_SUITE_P(PackingPolicies, PackedTextServiceTest,
                                            LOOM_SERVICE_TEXT_PACKING_SEPARATE));
 
 TEST_F(SourceTextServiceTest, CancelledPreparationRetainsPartialOwnership) {
-  const auto before = loom_serve_pool_statistics(storage_owner_);
+  const auto before = loom_runtime_pool_statistics(storage_owner_);
   auto options = ModelOptions();
   iree_notification_t notification;
   iree_notification_initialize(&notification);
@@ -902,13 +907,13 @@ TEST_F(SourceTextServiceTest, CancelledPreparationRetainsPartialOwnership) {
   ASSERT_TRUE(loom_serve_text_model_is_retired(partial));
   IREE_ASSERT_OK(loom_serve_text_model_free_retired(partial));
   iree_notification_deinitialize(&notification);
-  const auto after = loom_serve_pool_statistics(storage_owner_);
+  const auto after = loom_runtime_pool_statistics(storage_owner_);
   EXPECT_EQ(after.retained.reserved_bytes, before.retained.reserved_bytes);
   EXPECT_EQ(after.retained.committed_bytes, before.retained.committed_bytes);
 }
 
 TEST_F(SourceTextServiceTest, TokenizerFailureRetiresCompiledModel) {
-  const auto before = loom_serve_pool_statistics(storage_owner_);
+  const auto before = loom_runtime_pool_statistics(storage_owner_);
   auto options = ModelOptions();
   options.tokenizer_path = IREE_SV("absent-tokenizer.json");
   loom_serve_text_model_t* model = nullptr;
@@ -917,7 +922,7 @@ TEST_F(SourceTextServiceTest, TokenizerFailureRetiresCompiledModel) {
       loom_serve_text_model_allocate(device_, storage_owner_, &options,
                                      host_allocator_, &model));
   EXPECT_EQ(model, nullptr);
-  const auto after = loom_serve_pool_statistics(storage_owner_);
+  const auto after = loom_runtime_pool_statistics(storage_owner_);
   EXPECT_EQ(after.retained.reserved_bytes, before.retained.reserved_bytes);
   EXPECT_EQ(after.retained.committed_bytes, before.retained.committed_bytes);
 
@@ -1011,8 +1016,8 @@ TEST_F(SourceTextServiceTest,
   std::unique_ptr<loom_serve_text_service_t, decltype(destroy)> service(
       value, destroy);
   auto interface = loom_serve_text_service_interface(value);
-  EXPECT_EQ(interface.capacity_domain,
-            loom_serve_pool_residency_cache(storage_owner_));
+  EXPECT_EQ(interface.runtime.capacity_domain,
+            loom_runtime_pool_residency_cache(storage_owner_));
   Observe(interface);
   auto* notification = loom_serve_http_server_notification(server_);
   uint64_t cursor = 0;
@@ -1061,14 +1066,16 @@ TEST_F(SourceTextServiceTest,
   // accepts it. A single-worker turn cannot run the preparation it just queued:
   // that borrowed head must survive, while both unborrowed tails retire now.
   loom_serve::testing::text::OwnerTurn::Run(
-      loom_serve_host_executor(host_), [&] {
+      loom_runtime_host_executor(host_), [&] {
         for (const auto& claim : claims) {
-          IREE_ASSERT_OK(interface.accept(interface.self, claim.connection,
-                                          claim.request, 0));
+          IREE_ASSERT_OK(interface.accept(interface.runtime.self,
+                                          claim.connection, claim.request, 0));
         }
-        EXPECT_EQ(interface.snapshot(interface.self).queued_requests, 3u);
+        EXPECT_EQ(interface.snapshot(interface.runtime.self).queued_requests,
+                  3u);
         bool progress = false;
-        IREE_ASSERT_OK(interface.advance(interface.self, 0, &progress));
+        IREE_ASSERT_OK(interface.runtime.vtable->advance(interface.runtime.self,
+                                                         0, &progress));
         // The first heartbeat precedes borrower collection. It must include
         // arrivals after preparation began, not just the initial FIFO head.
         read_snapshots();
@@ -1076,25 +1083,30 @@ TEST_F(SourceTextServiceTest,
         EXPECT_TRUE(progress);
         EXPECT_GE(interface.telemetry.counters->cancelled, 2u);
         EXPECT_EQ(interface.telemetry.counters->cancelled, 2u);
-        EXPECT_EQ(interface.snapshot(interface.self).queued_requests, 1u);
-        EXPECT_TRUE(interface.is_pending(interface.self));
+        EXPECT_EQ(interface.snapshot(interface.runtime.self).queued_requests,
+                  1u);
+        EXPECT_TRUE(
+            interface.runtime.vtable->is_pending(interface.runtime.self));
       });
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface, [&] {
     read_snapshots();
     return reported_queued == 0 &&
-           !interface.snapshot(interface.self).queued_requests;
+           !interface.snapshot(interface.runtime.self).queued_requests;
   }));
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil(
-      interface, [&] { return !interface.is_pending(interface.self); },
-      LOOM_SERVE_SERVICE_FLAG_STOPPING));
-  const auto cancelled = interface.snapshot(interface.self);
+      interface,
+      [&] {
+        return !interface.runtime.vtable->is_pending(interface.runtime.self);
+      },
+      LOOM_RUNTIME_SERVICE_FLAG_STOPPING));
+  const auto cancelled = interface.snapshot(interface.runtime.self);
   EXPECT_EQ(cancelled.queued_requests, 0u);
   EXPECT_EQ(cancelled.oldest_queued_age, 0);
   EXPECT_EQ(cancelled.oldest_active_age, 0);
-  EXPECT_FALSE(interface.is_pending(interface.self));
-  EXPECT_FALSE(interface.is_active(interface.self));
+  EXPECT_FALSE(interface.runtime.vtable->is_pending(interface.runtime.self));
+  EXPECT_FALSE(interface.runtime.vtable->is_active(interface.runtime.self));
   EXPECT_EQ(loom_serve_text_model_pool_usage(model_).available, 256u);
-  interface.set_observer(interface.self, {});
+  interface.runtime.vtable->set_observer(interface.runtime.self, {});
   const auto counters = *interface.telemetry.counters;
   EXPECT_EQ(counters.requests, 3u);
   EXPECT_EQ(counters.cancelled, 3u);

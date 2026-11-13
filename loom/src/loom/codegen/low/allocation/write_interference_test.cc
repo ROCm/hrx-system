@@ -96,7 +96,8 @@ class WriteInterferenceTest : public ::testing::Test {
     register_class_.name_string_ref = LOOM_STRING_REF(0, 0, 1);
     register_class_.alloc_unit_bits = 32;
     register_class_.allocatable_count = 32768;
-    register_class_.spill_class_id = LOOM_LOW_REG_CLASS_NONE;
+    register_class_.spill_unit_bits = register_class_.alloc_unit_bits;
+    register_class_.spill_alignment_log2 = 0x40;
     operands_[0].role = LOOM_LOW_OPERAND_ROLE_PREDICATE;
     operands_[1].role = LOOM_LOW_OPERAND_ROLE_RESULT;
     operands_[2].role = operands_[3].role = LOOM_LOW_OPERAND_ROLE_OPERAND;
@@ -169,7 +170,7 @@ class WriteInterferenceTest : public ::testing::Test {
     loom_symbol_id_t symbol;
     IREE_CHECK_OK(loom_module_add_symbol(module_, name, &symbol));
     IREE_CHECK_OK(loom_low_func_def_build(
-        &builder, 0, 0, 0, 0, 0, 0, 0, 0, name, {}, 0, {}, {},
+        &builder, 0, 0, 0, 0, 0, 0, 0, 0, 0, name, {}, 0, {}, {},
         LOOM_STRING_ID_INVALID, {}, loom_symbol_ref_t{0, symbol}, &type, 1,
         nullptr, 0, nullptr, 0, nullptr, 0, LOOM_LOCATION_UNKNOWN, &function_));
     loom_region_t* body = loom_low_func_def_body(function_);

@@ -1,0 +1,143 @@
+// RUN: roundtrip
+// One C++ translation unit can call link-time Loom functions and runtime
+// services through the same typed function surface.
+#include <loomcxx/index.h>
+class [[loom::type("hal.buffer")]] Buffer {};
+struct Description {
+  Buffer buffer;
+  loom::type::index size;
+};
+[[loom::import("hal", "buffer.describe")]]
+Description describe(Buffer buffer);
+[[loom::import("trace")]] void consume(Description description);
+[[loom::import("trace")]] void consume(Description description);
+[[loom::noinline]] unsigned linked(unsigned value);
+Description entry(Buffer buffer) {
+  Description description = describe(buffer);
+  consume(description);
+  linked((unsigned)description.size);
+  return description;
+}
+// ----
+func.def public @entry(%buffer: hal.buffer) -> (hal.buffer, index) {
+  %description_buffer, %description_size = func.call @describe(%buffer) : (hal.buffer) -> (hal.buffer, index)
+  func.call @consume(%description_buffer, %description_size) : (hal.buffer, index)
+  %5 = index.cast %description_size : index to i32
+  %6 = func.call @linked(%5) : (i32) -> (i32)
+  func.return %description_buffer, %description_size : hal.buffer, index
+}
+
+func.decl import("hal", "buffer.describe") @describe(%7: hal.buffer) -> (hal.buffer, index)
+
+func.decl import("trace") @consume(%10: hal.buffer, %11: index)
+
+func.decl noinline @linked(%12: i32) -> (i32)
+
+// ====
+// Dependent view types bind each declaration to its own argument and result
+// identities without recovering shape relationships from call sites.
+#include <loomcxx/view.h>
+namespace loomt = loom::type;
+using FloatView = loomt::view<
+    loomt::shape<loomt::dynamic>, float,
+    loomt::encoding<loom::encoding::role::layout, 1>>;
+[[loom::import("math")]] FloatView normalize(FloatView source);
+FloatView entry(FloatView source) { return normalize(source); }
+// ----
+func.def public @entry(%source_dim0: index, %source_layout: encoding<layout>, %source: view<[%source_dim0]xf32, %source_layout>) -> (%3: index, %4: encoding<layout>, view<[%3]xf32, %4>) {
+  %6, %7, %8 = func.call @normalize(%source_dim0, %source_layout, %source) : (index, encoding<layout>, view<[%source_dim0]xf32, %source_layout>) -> (index, encoding<layout>, view<[%6]xf32, %7>)
+  func.return %6, %7, %8 : index, encoding<layout>, view<[%6]xf32, %7>
+}
+
+func.decl import("math") @normalize(%9: index, %10: encoding<layout>, %11: view<[%9]xf32, %10>) -> (%12: index, %13: encoding<layout>, view<[%12]xf32, %13>)
+
+// ====
+// Callable predicates remain part of the external declaration contract.
+#include <loomcxx/predicate.h>
+[[loom::import("math")]]
+unsigned positive(unsigned value) [[loom::where(value > 0u)]];
+unsigned entry(unsigned value) { return positive(value); }
+// ----
+func.def public @entry(%value: i32) -> (i32) {
+  %2 = func.call @positive(%value) : (i32) -> (i32)
+  func.return %2 : i32
+}
+
+func.decl import("math") @positive(%3: i32) -> (i32) where [ne(%3, 0)]
+
+// ====
+// Exact Loom names make overload-independent declarations linkable across
+// separately imported C++ translation units.
+namespace library {
+[[loom::symbol("library.increment")]] unsigned increment(unsigned value);
+}
+unsigned entry(unsigned value) { return library::increment(value); }
+// ----
+func.def public @entry(%value: i32) -> (i32) {
+  %2 = func.call @library.increment(%value) : (i32) -> (i32)
+  func.return %2 : i32
+}
+
+func.decl @library.increment(%3: i32) -> (i32)
+
+// ====
+// Unreached prototypes do not add declarations or parse cost to the output.
+unsigned unused(unsigned value);
+unsigned entry(unsigned value) { return value + 1u; }
+// ----
+func.def public @entry(%value: i32) -> (i32) {
+  %2 = scalar.constant 1 : i32
+  %3 = scalar.addi %value, %2 : i32
+  func.return %3 : i32
+}
+
+// ====
+// Builtins may introduce canonical C declarations before the authored
+// prototypes. Their missing parameter symbols must not erase the source ABI.
+static double unused_root(double value) { return __builtin_sqrt(value); }
+static void* unused_copy(void* destination, const void* source, __SIZE_TYPE__ length) {
+  return __builtin_memcpy(destination, source, length);
+}
+extern "C" {
+[[loom::import("math")]] double sqrt(double);
+[[loom::import("memory")]] void* memcpy(void*, const void*, __SIZE_TYPE__);
+}
+double root(double value) { return sqrt(value); }
+void copy(char* destination, const char* source) { memcpy(destination, source, 8); }
+// ----
+func.def public @root(%value: f64) -> (f64) {
+  %2 = func.call @sqrt(%value) : (f64) -> (f64)
+  func.return %2 : f64
+}
+
+func.def public @copy(%destination: buffer, %destination_byte_offset: offset, %source: buffer, %source_byte_offset: offset) {
+  %7 = scalar.constant 8 : i32
+  %8 = scalar.extsi %7 : i32 to i64
+  %9, %10 = func.call @memcpy(%destination, %destination_byte_offset, %source, %source_byte_offset, %8) : (buffer, offset, buffer, offset, i64) -> (buffer, offset)
+  func.return
+}
+
+func.decl import("math") source_signature(#func.abi.c.signature<arguments = [0], results = [0], types = [#func.abi.c.type<floating, byte_length = 8, byte_alignment = 8, component_count = 1, format = f64>]>) @sqrt(%11: f64) -> (f64)
+
+func.decl import("memory") source_signature(#func.abi.c.signature<arguments = [0, 1, 2], results = [0], types = [#func.abi.c.type<pointer, byte_length = 8, byte_alignment = 8, component_count = 2>, #func.abi.c.type<pointer, byte_length = 8, byte_alignment = 8, component_count = 2>, #func.abi.c.type<unsigned_integer, byte_length = 8, byte_alignment = 8, component_count = 1, bitwidth = 64>]>) @memcpy(%13: buffer, %14: offset, %15: buffer, %16: offset, %17: i64) -> (buffer, offset)
+
+// ====
+// Calling an explicitly specialized member uses its retained definition.
+// A subsequent explicit instantiation cannot restore the primary body.
+template<class T> struct Converter {
+  static unsigned convert(T) { static_assert(sizeof(T) == 0); return 0; }
+};
+template<> unsigned Converter<unsigned>::convert(unsigned value) { return value + 7; }
+template unsigned Converter<unsigned>::convert(unsigned);
+unsigned entry(unsigned value) { return Converter<unsigned>::convert(value); }
+// ----
+func.def public @entry(%value: i32) -> (i32) {
+  %2 = func.call pure @Converter__convert(%value) : (i32) -> (i32)
+  func.return %2 : i32
+}
+
+func.def @Converter__convert(%value: i32) -> (i32) {
+  %5 = scalar.constant 7 : i32
+  %6 = scalar.addi %value, %5 : i32
+  func.return %6 : i32
+}

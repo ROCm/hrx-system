@@ -1,0 +1,83 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
+load("//loom/build_tools/bazel:loom_check.bzl", "loom_check_test", "loom_check_test_suite")
+
+package(
+    default_visibility = ["//visibility:private"],
+    licenses = ["notice"],
+)
+
+loom_check_test_suite(
+    name = "compiler_test",
+    srcs = [
+        "c_abi.cxx-test",
+        "c_abi_invalid.cxx-test",
+        "callable_effects.cxx-test",
+        "enable_if.cxx-test",
+        "function_declarations.cxx-test",
+        "function_declarations_invalid.cxx-test",
+        "functions.cxx-test",
+        "immutable_local_calls.cxx-test",
+        "immutable_objects.cxx-test",
+        "immutable_objects_invalid.cxx-test",
+        "immutable_strings.cxx-test",
+        "inline_strings.cxx-test",
+        "linkage.cxx-test",
+        "symbols.cxx-test",
+        "symbols_invalid.cxx-test",
+        "template_addresses.cxx-test",
+        "template_addresses_invalid.cxx-test",
+        "template_calls.cxx-test",
+        "template_conversions.cxx-test",
+        "template_conversions_invalid.cxx-test",
+        "template_values.cxx-test",
+        "template_values_roundtrip.cxx-test",
+        "view_calls.cxx-test",
+    ],
+    data = [
+        "function_specializations.cxx",
+        "immutable_object_link_left.cxx",
+        "immutable_object_link_right.cxx",
+        "immutable_object_link_tables.h",
+        "immutable_objects.cxx",
+    ],
+    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
+)
+
+loom_check_test(
+    name = "function_buffers_roundtrip_test",
+    src = "function_buffers_roundtrip.cxx-test",
+    data = ["//loom/py/loom/tools:loom-export-cxx"],
+    env = {
+        "LOOM_EXPORT_CXX": "$(rootpath //loom/py/loom/tools:loom-export-cxx)",
+    },
+    tags = ["skip-bazel_to_cmake"],
+    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
+)
+
+loom_check_test(
+    name = "value_writebacks_roundtrip_test",
+    src = "value_writebacks_roundtrip.cxx-test",
+    data = ["//loom/py/loom/tools:loom-export-cxx"],
+    env = {
+        "LOOM_EXPORT_CXX": "$(rootpath //loom/py/loom/tools:loom-export-cxx)",
+    },
+    tags = ["skip-bazel_to_cmake"],
+    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
+)
+
+loom_check_test(
+    name = "symbol_export_test",
+    src = "symbol_export.cxx-test",
+    data = ["//loom/py/loom/tools:loom-export-cxx"],
+    env = {
+        "LOOM_EXPORT_CXX": "$(rootpath //loom/py/loom/tools:loom-export-cxx)",
+    },
+    tags = ["skip-bazel_to_cmake"],
+    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
+)

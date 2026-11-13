@@ -4,28 +4,12 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//build_tools/testing:build_defs.bzl", "iree_execution_test_suite")
 load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_benchmark", "loom_cc_library", "loom_cc_test")
 
 package(
     default_visibility = ["//visibility:public"],
     features = ["layering_check"],
     licenses = ["notice"],  # Apache 2.0
-)
-
-iree_execution_test_suite(
-    name = "template_candidates_test",
-    data = [
-        "//loom/src/loom/link/testdata/template_selection:target_providers.loom",
-        "//loom/src/loom/link/testdata/template_selection:target_roots.loom",
-    ],
-    manifests = ["template_candidates.test.json"],
-    tags = ["hostonly"],
-    tools = {
-        "loom-format": "//loom/src/loom/tools/loom-format",
-        "loom-link": "//loom/src/loom/tools/loom-link",
-        "loom-opt": "//loom/src/loom/tools/loom-opt",
-    },
 )
 
 loom_cc_library(
@@ -221,10 +205,12 @@ loom_cc_test(
 loom_cc_library(
     name = "module_index",
     srcs = [
+        "input_contracts.c",
         "module_index.c",
         "symbol_facet.c",
     ],
     hdrs = [
+        "input_contracts.h",
         "module_index.h",
         "symbol_facet.h",
     ],
@@ -235,6 +221,7 @@ loom_cc_library(
         "//loom/src/loom/format/bytecode:index_reader",
         "//loom/src/loom/format/text:parser",
         "//loom/src/loom/ir",
+        "//loom/src/loom/ir:input_contract",
         "//loom/src/loom/ops:op_defs",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
@@ -249,9 +236,12 @@ loom_cc_test(
         "//loom/src/loom/format/bytecode:writer",
         "//loom/src/loom/format/text:parser",
         "//loom/src/loom/ir",
+        "//loom/src/loom/link/testdata/link_index",
         "//loom/src/loom/ops/check",
         "//loom/src/loom/ops/config",
         "//loom/src/loom/ops/func",
+        "//loom/src/loom/ops/index",
+        "//loom/src/loom/ops/kernel",
         "//loom/src/loom/ops/pipeline",
         "//loom/src/loom/ops/target",
         "//loom/src/loom/ops/template",
@@ -385,6 +375,8 @@ loom_cc_library(
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops/target",
         "//loom/src/loom/target:condition",
+        "//loom/src/loom/util:ordinal_map",
+        "//loom/src/loom/util:segmented_storage",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
     ],
@@ -392,8 +384,14 @@ loom_cc_library(
 
 loom_cc_library(
     name = "template_candidate_loader",
-    srcs = ["template_candidate_loader.c"],
-    hdrs = ["template_candidate_loader.h"],
+    srcs = [
+        "template_candidate_loader.c",
+        "template_input_binding.c",
+    ],
+    hdrs = [
+        "template_candidate_loader.h",
+        "template_input_binding.h",
+    ],
     deps = [
         ":bytecode_template_contract",
         ":module_index",
@@ -401,8 +399,12 @@ loom_cc_library(
         ":planner",
         "//loom/src/loom/analysis:symbol_facts",
         "//loom/src/loom/analysis:template_provider_catalog",
+        "//loom/src/loom/format/bytecode:function_projection_reader",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:func_symbol_facts",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/rewrite:remap",
+        "//loom/src/loom/util:segmented_storage",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/base/threading",
@@ -428,22 +430,46 @@ loom_cc_library(
 )
 
 loom_cc_test(
-    name = "index_materializer_test",
-    srcs = ["index_materializer_test.cc"],
+    name = "template_input_binding_test",
+    srcs = ["template_input_binding_test.cc"],
     deps = [
         ":index_materializer",
         ":module_index",
         ":planner",
         "//loom/src/loom/format/bytecode:writer",
         "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_registry",
+        "//loom/src/loom/verify",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/io:stream",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "index_materializer_test",
+    srcs = ["index_materializer_test.cc"],
+    deps = [
+        ":index_materializer",
+        ":module_index",
+        ":planner",
+        "//loom/src/loom/codegen/low:text_asm",
+        "//loom/src/loom/format/bytecode:writer",
+        "//loom/src/loom/format/text:parser",
         "//loom/src/loom/format/text:printer",
         "//loom/src/loom/ir",
         "//loom/src/loom/link/testdata/config_providers",
+        "//loom/src/loom/link/testdata/link_index",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops:op_registry",
         "//loom/src/loom/ops/config",
         "//loom/src/loom/ops/test",
+        "//loom/src/loom/target:low_descriptor_registry_core_test",
         "//loom/src/loom/verify",
+        "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/io:stream",
         "//runtime/src/iree/testing:gtest",

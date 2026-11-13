@@ -6,6 +6,8 @@
 
 #include "loom/target/arch/spirv/low_verify.h"
 
+#include <string.h>
+
 #include "iree/base/internal/arena.h"
 #include "loom/codegen/low/diagnostics.h"
 #include "loom/error/parameter.h"
@@ -20,20 +22,30 @@
 #include "loom/target/arch/spirv/registers.h"
 #include "loom/target/registers.h"
 
-typedef struct loom_spirv_low_value_type_entry_t {
-  // Value ID stored in this hash slot, or LOOM_VALUE_ID_INVALID when empty.
-  loom_value_id_t value_id;
-  // Exact SPIR-V value type attached to value_id.
-  loom_spirv_value_type_t value_type;
-} loom_spirv_low_value_type_entry_t;
+enum {
+  LOOM_SPIRV_LOW_VALUE_TYPE_PAGE_SHIFT = 7,
+  LOOM_SPIRV_LOW_VALUE_TYPE_PAGE_CAPACITY =
+      1u << LOOM_SPIRV_LOW_VALUE_TYPE_PAGE_SHIFT,
+  LOOM_SPIRV_LOW_VALUE_TYPE_PAGE_MASK =
+      LOOM_SPIRV_LOW_VALUE_TYPE_PAGE_CAPACITY - 1u,
+};
+
+typedef struct loom_spirv_low_value_type_page_t {
+  // Next page populated by the current function.
+  struct loom_spirv_low_value_type_page_t* next;
+  // Shared module directory slot publishing this page.
+  struct loom_spirv_low_value_type_page_t** directory_slot;
+  // Exact SPIR-V value types indexed by the low bits of their value IDs.
+  loom_spirv_value_type_t value_types[LOOM_SPIRV_LOW_VALUE_TYPE_PAGE_CAPACITY];
+} loom_spirv_low_value_type_page_t;
 
 typedef struct loom_spirv_low_value_type_table_t {
-  // Open-addressed value-id table.
-  loom_spirv_low_value_type_entry_t* entries;
-  // Power-of-two entry capacity.
-  iree_host_size_t capacity;
-  // Number of occupied entries.
-  iree_host_size_t count;
+  // Shared module directory of value-type pages indexed by module value ID.
+  loom_spirv_low_value_type_page_t** pages;
+  // Exact directory length covering the module's value ID domain.
+  iree_host_size_t page_count;
+  // Pages populated by the current function in reverse allocation order.
+  loom_spirv_low_value_type_page_t* page_list;
 } loom_spirv_low_value_type_table_t;
 
 typedef enum loom_spirv_low_verify_module_flag_bits_e {
@@ -43,6 +55,12 @@ typedef enum loom_spirv_low_verify_module_flag_bits_e {
 typedef uint32_t loom_spirv_low_verify_module_flags_t;
 
 typedef struct loom_spirv_low_verify_module_state_t {
+  // Scratch arena retained across every function verification.
+  iree_arena_allocator_t* arena;
+  // Shared value-type page directory, allocated on the first SPIR-V function.
+  loom_spirv_low_value_type_page_t** value_type_pages;
+  // Exact directory length covering the module's value ID domain.
+  iree_host_size_t value_type_page_count;
   // First SPIR-V function contract selected for this module.
   loom_spirv_module_contract_t contract;
   // Module-scope verifier state flags.
@@ -64,7 +82,7 @@ typedef struct loom_spirv_low_verify_state_t {
   iree_arena_allocator_t* arena;
   // Borrowed function symbol name for diagnostics.
   iree_string_view_t function_name;
-  // Exact SPIR-V value types indexed by compact hash table.
+  // Exact SPIR-V value types indexed by module value ID.
   loom_spirv_low_value_type_table_t value_types;
   // Resolved or authored function ABI, or UNKNOWN before one is selected.
   loom_target_abi_kind_t abi_kind;
@@ -85,115 +103,57 @@ typedef struct loom_spirv_low_verify_state_t {
 
 #define LOOM_SPIRV_LOW_VALUE_TYPE_NAME_CAPACITY 32
 
-static uint64_t loom_spirv_low_hash_value_id(loom_value_id_t value_id) {
-  uint64_t value = value_id;
-  value ^= value >> 33;
-  value *= UINT64_C(0xff51afd7ed558ccd);
-  value ^= value >> 33;
-  return value;
-}
-
-static iree_host_size_t loom_spirv_low_next_power_of_two(
-    iree_host_size_t value) {
-  iree_host_size_t power = 1;
-  while (power < value) {
-    power <<= 1;
-  }
-  return power;
-}
-
-static void loom_spirv_low_initialize_value_type_entries(
-    loom_spirv_low_value_type_entry_t* entries, iree_host_size_t count) {
-  for (iree_host_size_t i = 0; i < count; ++i) {
-    entries[i].value_id = LOOM_VALUE_ID_INVALID;
-  }
-}
-
-static iree_status_t loom_spirv_low_value_type_table_reserve(
-    loom_spirv_low_value_type_table_t* table, iree_host_size_t minimum_capacity,
-    iree_arena_allocator_t* arena) {
-  if (table->capacity >= minimum_capacity) {
-    return iree_ok_status();
-  }
-
-  const iree_host_size_t old_capacity = table->capacity;
-  loom_spirv_low_value_type_entry_t* old_entries = table->entries;
-  const iree_host_size_t new_capacity =
-      loom_spirv_low_next_power_of_two(iree_max(minimum_capacity, 16));
-  loom_spirv_low_value_type_entry_t* new_entries = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      arena, new_capacity, sizeof(*new_entries), (void**)&new_entries));
-  loom_spirv_low_initialize_value_type_entries(new_entries, new_capacity);
-
-  table->entries = new_entries;
-  table->capacity = new_capacity;
-  table->count = 0;
-  for (iree_host_size_t i = 0; i < old_capacity; ++i) {
-    const loom_spirv_low_value_type_entry_t* old_entry = &old_entries[i];
-    if (old_entry->value_id == LOOM_VALUE_ID_INVALID) {
-      continue;
-    }
-    uint64_t cursor = loom_spirv_low_hash_value_id(old_entry->value_id);
-    for (;;) {
-      loom_spirv_low_value_type_entry_t* new_entry =
-          &table->entries[cursor & (table->capacity - 1)];
-      if (new_entry->value_id == LOOM_VALUE_ID_INVALID) {
-        *new_entry = *old_entry;
-        ++table->count;
-        break;
-      }
-      ++cursor;
-    }
-  }
-  return iree_ok_status();
-}
-
 static iree_status_t loom_spirv_low_value_type_table_define(
     loom_spirv_low_value_type_table_t* table, loom_value_id_t value_id,
     loom_spirv_value_type_t value_type, iree_arena_allocator_t* arena) {
-  if ((table->count + 1) * 4 >= table->capacity * 3) {
-    IREE_RETURN_IF_ERROR(loom_spirv_low_value_type_table_reserve(
-        table, table->capacity == 0 ? 16 : table->capacity * 2, arena));
+  IREE_ASSERT(value_type.value_class != LOOM_SPIRV_VALUE_CLASS_UNKNOWN);
+  const iree_host_size_t page_index =
+      value_id >> LOOM_SPIRV_LOW_VALUE_TYPE_PAGE_SHIFT;
+  IREE_ASSERT(page_index < table->page_count);
+  loom_spirv_low_value_type_page_t* page = table->pages[page_index];
+  if (page == NULL) {
+    IREE_RETURN_IF_ERROR(
+        iree_arena_allocate(arena, sizeof(*page), (void**)&page));
+    page->next = table->page_list;
+    page->directory_slot = &table->pages[page_index];
+    memset(page->value_types, 0, sizeof(page->value_types));
+    table->page_list = page;
+    table->pages[page_index] = page;
   }
-  uint64_t cursor = loom_spirv_low_hash_value_id(value_id);
-  for (;;) {
-    loom_spirv_low_value_type_entry_t* entry =
-        &table->entries[cursor & (table->capacity - 1)];
-    if (entry->value_id == LOOM_VALUE_ID_INVALID) {
-      entry->value_id = value_id;
-      entry->value_type = value_type;
-      ++table->count;
-      return iree_ok_status();
-    }
-    if (entry->value_id == value_id) {
-      entry->value_type = value_type;
-      return iree_ok_status();
-    }
-    ++cursor;
-  }
+  page->value_types[value_id & LOOM_SPIRV_LOW_VALUE_TYPE_PAGE_MASK] =
+      value_type;
+  return iree_ok_status();
 }
 
 static bool loom_spirv_low_value_type_table_lookup(
     const loom_spirv_low_value_type_table_t* table, loom_value_id_t value_id,
     loom_spirv_value_type_t* out_value_type) {
-  if (table->capacity == 0) {
+  const iree_host_size_t page_index =
+      value_id >> LOOM_SPIRV_LOW_VALUE_TYPE_PAGE_SHIFT;
+  IREE_ASSERT(page_index < table->page_count);
+  const loom_spirv_low_value_type_page_t* page = table->pages[page_index];
+  if (page == NULL) {
     *out_value_type = (loom_spirv_value_type_t){0};
     return false;
   }
-  uint64_t cursor = loom_spirv_low_hash_value_id(value_id);
-  for (;;) {
-    const loom_spirv_low_value_type_entry_t* entry =
-        &table->entries[cursor & (table->capacity - 1)];
-    if (entry->value_id == LOOM_VALUE_ID_INVALID) {
-      *out_value_type = (loom_spirv_value_type_t){0};
-      return false;
-    }
-    if (entry->value_id == value_id) {
-      *out_value_type = entry->value_type;
-      return true;
-    }
-    ++cursor;
+  const loom_spirv_value_type_t value_type =
+      page->value_types[value_id & LOOM_SPIRV_LOW_VALUE_TYPE_PAGE_MASK];
+  if (value_type.value_class == LOOM_SPIRV_VALUE_CLASS_UNKNOWN) {
+    *out_value_type = (loom_spirv_value_type_t){0};
+    return false;
   }
+  *out_value_type = value_type;
+  return true;
+}
+
+static void loom_spirv_low_value_type_table_reset(
+    loom_spirv_low_value_type_table_t* table) {
+  loom_spirv_low_value_type_page_t* page = table->page_list;
+  while (page != NULL) {
+    *page->directory_slot = NULL;
+    page = page->next;
+  }
+  table->page_list = NULL;
 }
 
 static bool loom_spirv_low_type_is_named_opaque(const loom_module_t* module,
@@ -476,6 +436,9 @@ static bool loom_spirv_low_logical_scalar_matches_value_type(
       return value_type.value_class == LOOM_SPIRV_VALUE_CLASS_SCALAR &&
              value_type.scalar_type == LOOM_SPIRV_SCALAR_TYPE_S16;
     case LOOM_SCALAR_TYPE_INDEX:
+      return value_type.value_class == LOOM_SPIRV_VALUE_CLASS_SCALAR &&
+             (value_type.scalar_type == LOOM_SPIRV_SCALAR_TYPE_S32 ||
+              value_type.scalar_type == LOOM_SPIRV_SCALAR_TYPE_S64);
     case LOOM_SCALAR_TYPE_I32:
       return value_type.value_class == LOOM_SPIRV_VALUE_CLASS_SCALAR &&
              value_type.scalar_type == LOOM_SPIRV_SCALAR_TYPE_S32;
@@ -1446,12 +1409,32 @@ static iree_status_t loom_spirv_low_begin_module(
     loom_low_verify_module_context_t* context, void** out_provider_state) {
   (void)provider;
   *out_provider_state = NULL;
+  iree_arena_allocator_t* arena = loom_low_verify_module_context_arena(context);
   loom_spirv_low_verify_module_state_t* state = NULL;
   IREE_RETURN_IF_ERROR(
-      iree_arena_allocate(loom_low_verify_module_context_arena(context),
-                          sizeof(*state), (void**)&state));
-  *state = (loom_spirv_low_verify_module_state_t){0};
+      iree_arena_allocate(arena, sizeof(*state), (void**)&state));
+  *state = (loom_spirv_low_verify_module_state_t){
+      .arena = arena,
+  };
   *out_provider_state = state;
+  return iree_ok_status();
+}
+
+static iree_status_t loom_spirv_low_prepare_value_type_pages(
+    loom_spirv_low_verify_module_state_t* state, const loom_module_t* module) {
+  if (state->value_type_pages != NULL) {
+    return iree_ok_status();
+  }
+  state->value_type_page_count = iree_host_size_ceil_div(
+      module->values.count, LOOM_SPIRV_LOW_VALUE_TYPE_PAGE_CAPACITY);
+  if (state->value_type_page_count == 0) {
+    return iree_ok_status();
+  }
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      state->arena, state->value_type_page_count,
+      sizeof(*state->value_type_pages), (void**)&state->value_type_pages));
+  memset(state->value_type_pages, 0,
+         state->value_type_page_count * sizeof(*state->value_type_pages));
   return iree_ok_status();
 }
 
@@ -1496,6 +1479,12 @@ static iree_status_t loom_spirv_low_begin_function(
   iree_arena_allocator_t* arena = loom_low_verify_context_arena(context);
   const loom_module_t* module = loom_low_verify_context_module(context);
   const loom_op_t* function_op = loom_low_verify_context_function_op(context);
+  loom_spirv_low_verify_module_state_t* module_state =
+      (loom_spirv_low_verify_module_state_t*)
+          loom_low_verify_context_provider_module_state(context);
+  IREE_ASSERT_ARGUMENT(module_state);
+  IREE_RETURN_IF_ERROR(
+      loom_spirv_low_prepare_value_type_pages(module_state, module));
   const loom_target_bundle_t* bundle = loom_low_resolved_target_bundle(target);
   loom_target_abi_kind_t abi_kind;
   if (bundle != NULL) {
@@ -1516,6 +1505,11 @@ static iree_status_t loom_spirv_low_begin_function(
       .target = target,
       .arena = arena,
       .function_name = loom_low_diagnostic_function_name(module, function_op),
+      .value_types =
+          {
+              .pages = module_state->value_type_pages,
+              .page_count = module_state->value_type_page_count,
+          },
       .abi_kind = abi_kind,
   };
   *out_provider_state = state;
@@ -1615,8 +1609,11 @@ static iree_status_t loom_spirv_low_end_function(
   (void)provider;
   loom_spirv_low_verify_state_t* state =
       (loom_spirv_low_verify_state_t*)provider_state;
-  if (state == NULL || state->logical_signature == NULL ||
-      state->skip_body_checks) {
+  if (state == NULL) {
+    return iree_ok_status();
+  }
+  loom_spirv_low_value_type_table_reset(&state->value_types);
+  if (state->logical_signature == NULL || state->skip_body_checks) {
     return iree_ok_status();
   }
   if (!state->observed_bindings_match_signature) {

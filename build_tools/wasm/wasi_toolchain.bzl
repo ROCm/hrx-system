@@ -173,6 +173,9 @@ def wasi_cc_toolchain(
             # Keep the downward-growing stack below static data so exhaustion
             # traps at address zero instead of overwriting mutable globals.
             "-Wl,--stack-first",
+            # Hosted compilers need room for recursive IR rewrites. LLD's
+            # 64 KiB default exhausts on ordinary vector arithmetic graphs.
+            "-Wl,-z,stack-size=1048576",
         ],
     )
     cc_artifact_name_pattern(

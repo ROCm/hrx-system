@@ -16,23 +16,28 @@ bool loom_target_compile_report_descriptor_semantic_tag_is(
   if (descriptor_set == NULL || descriptor == NULL) {
     return false;
   }
-  if (descriptor->semantic_tag_string_ref == LOOM_STRING_REF_NONE) {
+  const loom_string_ref_t semantic_tag_string_ref =
+      loom_low_descriptor_semantic_tag_string_ref(descriptor_set, descriptor);
+  if (semantic_tag_string_ref == LOOM_STRING_REF_NONE) {
     return false;
   }
-  const iree_string_view_t semantic_tag = loom_low_descriptor_set_string(
-      descriptor_set, descriptor->semantic_tag_string_ref);
+  const iree_string_view_t semantic_tag =
+      loom_low_descriptor_set_string(descriptor_set, semantic_tag_string_ref);
   return iree_string_view_equal(semantic_tag, tag);
 }
 
 iree_string_view_t loom_target_compile_report_descriptor_semantic_tag(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_descriptor_t* descriptor) {
-  if (descriptor_set == NULL || descriptor == NULL ||
-      descriptor->semantic_tag_string_ref == LOOM_STRING_REF_NONE) {
+  if (descriptor_set == NULL || descriptor == NULL) {
     return iree_string_view_empty();
   }
-  return loom_low_descriptor_set_string(descriptor_set,
-                                        descriptor->semantic_tag_string_ref);
+  const loom_string_ref_t semantic_tag_string_ref =
+      loom_low_descriptor_semantic_tag_string_ref(descriptor_set, descriptor);
+  return semantic_tag_string_ref == LOOM_STRING_REF_NONE
+             ? iree_string_view_empty()
+             : loom_low_descriptor_set_string(descriptor_set,
+                                              semantic_tag_string_ref);
 }
 
 iree_string_view_t loom_target_compile_report_module_string(

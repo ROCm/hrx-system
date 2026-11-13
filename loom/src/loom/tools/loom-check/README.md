@@ -47,6 +47,26 @@ behavior. Stack-layout arithmetic and register encoding are native contracts;
 ABI lowering and instruction selection from authored operations are IR
 contracts. Exact output is useful in both kinds of test.
 
+VM object lifecycle fixtures use the test runner's `emit vm-object-lifetime`
+provider. It compiles the ordinary `@run()` entry through LoomC, loads the VM
+artifact, and links a native `lifetime` module with heap-allocated opaque
+objects. The output records actual payload reads, ownership consumption,
+finalizers, and live-object counts at observable boundaries. This checks
+destruction timing independently of register assignment and instruction
+spelling. The native provider and its event capture are test-only; compilation,
+linking, calls, and cleanup use the production APIs. The fixtures live beside
+the VM target's other artifact tests.
+
+The provider also exposes `event(i32)` to record guest observations. C++
+lifecycle fixtures use it to compare constructor, assignment, and destructor
+effects against native C++ without depending on the emitted register layout.
+
+`emit vm-object-lifetime borrowed-argument` supplies one native-owned object to
+`@run(ptr<@Object>)`, keeping the host owner live through the synchronous call.
+The provider's `count` method observes the actual intrusive reference count.
+This distinguishes borrowed transport from additional protection through the
+same compiled calls, storage operations, and native payload access.
+
 Combining an IR program with injected register assignments, rewritten internal
 tables, or a resource inventory invented by the runner crosses those boundaries.
 Such a fixture depends on both program semantics and private compiler state.
@@ -182,6 +202,14 @@ authored target bindings can use the existing whole-module form without a
 function or target option. Pipeline-text outputs describe the pipeline itself
 and do not accept specialization requests.
 
+Participation-sensitive fixtures use actual program contracts: kernel launch
+inputs establish uniformity, and lane-indexed loads supply varying values.
+Ordinary function parameters need caller or value facts to establish uniformity;
+the absence of callers supplies no such guarantee. Scalar source types
+describe per-invocation values, while shared facts determine whether work items
+agree. Fixtures for scalar registers, SCC lifetimes, or mixed register operands
+make those inputs explicit and check their operand wiring in exact output.
+
 The optional `diagnostics=memory`, `diagnostics=operand-forms`, or
 `diagnostics=all` selects lowering remarks without changing source normalization,
 legalization, or sanitizer policy. `diagnostics=none` is the default. Diagnostics
@@ -236,13 +264,16 @@ profile and emits directly; `input=source-low` additionally runs source
 preparation and lowering.
 
 SPIR-V lowering fixtures use `emit spirv-low` to compare Low IR without binary
-emission or external SPIR-V tools. They can refine a selected `target=` profile
-with named feature facts. `features=FLOAT16,COOPERATIVE_MATRIX_KHR,-INT16` uses
+emission or external SPIR-V tools. Both `spirv-low` and `spirv-dis` can refine a
+selected `target=` profile with named feature facts.
+`features=FLOAT16,COOPERATIVE_MATRIX_KHR,-INT16` uses
 the suffixes of the public `loomc_spirv_feature_t` constants; a leading `-`
 records an unavailable feature. Numeric limits use the public
 `loomc_spirv_limit_t` suffixes and decimal values, for example
 `limits=MAX_WORKGROUP_STORAGE_BYTES:512,MAX_WORKGROUP_SUBGROUP_COUNT:8`.
-The profile API validates these facts before compilation.
+The profile API validates these facts before compilation. The final artifact
+uses that same refined profile; add `validate` to `spirv-dis` and declare
+`// REQUIRES: spirv-dis, spirv-val` to check it with the external validator.
 
 `emit cxx` projects an admitted High module through the public
 `loom-export-cxx` tool. `emit cxx @kernel` selects one kernel from a mixed

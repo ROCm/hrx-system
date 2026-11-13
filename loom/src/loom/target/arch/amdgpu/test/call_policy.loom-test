@@ -1,0 +1,169 @@
+// RUN: pass specialize-target-callgraph,inline-callables{policy=target,budget=0,hot-budget=0}
+
+amdgpu.target<gfx11-generic> @target
+
+low.func.def target<amdgpu.gfx11.generic.core>(@target) @full_banks(%value0: reg<amdgpu.sgpr x26>, %value1: reg<amdgpu.vgpr x32>) -> (reg<amdgpu.sgpr x26>, reg<amdgpu.vgpr x32>) asm {
+  return %value0, %value1
+}
+
+low.func.def public target<amdgpu.gfx11.generic.core>(@target) @entry(%value0: reg<amdgpu.sgpr x26>, %value1: reg<amdgpu.vgpr x32>) -> (reg<amdgpu.sgpr x26>, reg<amdgpu.vgpr x32>) asm {
+  %result0, %result1 = low.func.call @full_banks(%value0, %value1) : (reg<amdgpu.sgpr x26>, reg<amdgpu.vgpr x32>) -> (reg<amdgpu.sgpr x26>, reg<amdgpu.vgpr x32>)
+  return %result0, %result1
+}
+
+// ----
+amdgpu.target<gfx11-generic> @target
+
+low.func.def target<amdgpu.gfx11.generic.core>(@target) @full_banks(%value0: reg<amdgpu.sgpr x26>, %value1: reg<amdgpu.vgpr x32>) -> (reg<amdgpu.sgpr x26>, reg<amdgpu.vgpr x32>) asm {
+  return %value0, %value1
+}
+
+low.func.def public target<amdgpu.gfx11.generic.core>(@target) @entry(%value0: reg<amdgpu.sgpr x26>, %value1: reg<amdgpu.vgpr x32>) -> (reg<amdgpu.sgpr x26>, reg<amdgpu.vgpr x32>) asm {
+  %result0, %result1 = low.func.call @full_banks(%value0, %value1) : (reg<amdgpu.sgpr x26>, reg<amdgpu.vgpr x32>) -> (reg<amdgpu.sgpr x26>, reg<amdgpu.vgpr x32>)
+  return %result0, %result1
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+low.func.def target<amdgpu.gfx11.generic.core>(@target) @scalar_overflow(%value0: reg<amdgpu.sgpr x27>) -> (reg<amdgpu.sgpr x27>) asm {
+  return %value0
+}
+
+low.func.def public target<amdgpu.gfx11.generic.core>(@target) @entry(%value0: reg<amdgpu.sgpr x27>) -> (reg<amdgpu.sgpr x27>) asm {
+  %result0 = low.func.call @scalar_overflow(%value0) : (reg<amdgpu.sgpr x27>) -> (reg<amdgpu.sgpr x27>)
+  return %result0
+}
+
+// ----
+amdgpu.target<gfx11-generic> @target
+
+low.func.def public target<amdgpu.gfx11.generic.core>(@target) @entry(%value0: reg<amdgpu.sgpr x27>) -> (reg<amdgpu.sgpr x27>) asm {
+  return %value0
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+low.func.def target<amdgpu.gfx11.generic.core>(@target) @vector_overflow(%value0: reg<amdgpu.vgpr x33>) -> (reg<amdgpu.vgpr x33>) asm {
+  return %value0
+}
+
+low.func.def public target<amdgpu.gfx11.generic.core>(@target) @entry(%value0: reg<amdgpu.vgpr x33>) -> (reg<amdgpu.vgpr x33>) asm {
+  %result0 = low.func.call @vector_overflow(%value0) : (reg<amdgpu.vgpr x33>) -> (reg<amdgpu.vgpr x33>)
+  return %result0
+}
+
+// ----
+amdgpu.target<gfx11-generic> @target
+
+low.func.def public target<amdgpu.gfx11.generic.core>(@target) @entry(%value0: reg<amdgpu.vgpr x33>) -> (reg<amdgpu.vgpr x33>) asm {
+  return %value0
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+low.func.def target<amdgpu.gfx11.generic.core>(@target) @result_overflow(%value0: reg<amdgpu.vgpr x16>) -> (reg<amdgpu.vgpr x16>, reg<amdgpu.vgpr x16>, reg<amdgpu.vgpr x16>) asm {
+  return %value0, %value0, %value0
+}
+
+low.func.def public target<amdgpu.gfx11.generic.core>(@target) @entry(%value0: reg<amdgpu.vgpr x16>) -> (reg<amdgpu.vgpr x16>, reg<amdgpu.vgpr x16>, reg<amdgpu.vgpr x16>) asm {
+  %result0, %result1, %result2 = low.func.call @result_overflow(%value0) : (reg<amdgpu.vgpr x16>) -> (reg<amdgpu.vgpr x16>, reg<amdgpu.vgpr x16>, reg<amdgpu.vgpr x16>)
+  return %result0, %result1, %result2
+}
+
+// ----
+amdgpu.target<gfx11-generic> @target
+
+low.func.def public target<amdgpu.gfx11.generic.core>(@target) @entry(%value0: reg<amdgpu.vgpr x16>) -> (reg<amdgpu.vgpr x16>, reg<amdgpu.vgpr x16>, reg<amdgpu.vgpr x16>) asm {
+  return %value0, %value0, %value0
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+low.func.def target<amdgpu.gfx11.generic.core>(@target) @condition_carrier(%value0: reg<amdgpu.scc>) -> (reg<amdgpu.scc>) asm {
+  return %value0
+}
+
+low.func.def public target<amdgpu.gfx11.generic.core>(@target) @entry(%value0: reg<amdgpu.scc>) -> (reg<amdgpu.scc>) asm {
+  %result0 = low.func.call @condition_carrier(%value0) : (reg<amdgpu.scc>) -> (reg<amdgpu.scc>)
+  return %result0
+}
+
+// ----
+amdgpu.target<gfx11-generic> @target
+
+low.func.def public target<amdgpu.gfx11.generic.core>(@target) @entry(%value0: reg<amdgpu.scc>) -> (reg<amdgpu.scc>) asm {
+  return %value0
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+low.func.def target<amdgpu.gfx11.generic.core>(@target) @private_storage(%value0: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %storage = storage {byte_alignment = 4, byte_length = 16} : low.storage<private>
+  return %value0
+}
+
+low.func.def public target<amdgpu.gfx11.generic.core>(@target) @entry(%value0: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %result0 = low.func.call @private_storage(%value0) : (reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>)
+  return %result0
+}
+
+// ----
+amdgpu.target<gfx11-generic> @target
+
+low.func.def target<amdgpu.gfx11.generic.core>(@target) @private_storage(%value0: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %storage = storage {byte_alignment = 4, byte_length = 16} : low.storage<private>
+  return %value0
+}
+
+low.func.def public target<amdgpu.gfx11.generic.core>(@target) @entry(%value0: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %result0 = low.func.call @private_storage(%value0) : (reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>)
+  return %result0
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+low.func.def target<amdgpu.gfx11.generic.core>(@target) @workgroup_storage(%value0: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %storage = storage {byte_alignment = 4, byte_length = 16} : low.storage<workgroup>
+  return %value0
+}
+
+low.func.def public target<amdgpu.gfx11.generic.core>(@target) @entry(%value0: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %result0 = low.func.call @workgroup_storage(%value0) : (reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>)
+  return %result0
+}
+
+// ----
+amdgpu.target<gfx11-generic> @target
+
+low.func.def public target<amdgpu.gfx11.generic.core>(@target) @entry(%value0: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %storage = storage {byte_alignment = 4, byte_length = 16} : low.storage<workgroup>
+  return %value0
+}
+
+// ====
+
+// Generic representation carriers stay valid when execution selects a device.
+amdgpu.target<gfx1100> @target
+
+low.func.def noinline target<amdgpu.gfx11.generic.core>(@target) @increment(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %c1 = v_mov_b32 1
+  %result = v_add_u32 %value, %c1
+  return %result
+}
+
+low.func.def public target<amdgpu.gfx11.generic.core>(@target) @entry(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %result = low.func.call @increment(%value) : (reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>)
+  return %result
+}

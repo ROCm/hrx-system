@@ -203,6 +203,7 @@ static void loom_op_record_operand_ownership(loom_module_t* module,
       case LOOM_OPERAND_OWNERSHIP_CONSUME:
       case LOOM_OPERAND_OWNERSHIP_RELEASE:
       case LOOM_OPERAND_OWNERSHIP_DISCARD:
+      case LOOM_OPERAND_OWNERSHIP_MOVE:
       case LOOM_OPERAND_OWNERSHIP_ESCAPE: {
         for (uint16_t i = 0; i < count; ++i) {
           loom_op_mark_operand_ownership(module, op, start + i,
@@ -307,6 +308,7 @@ static void loom_region_reset_summaries(loom_region_t* region) {
   region->observable_effect_count = 0;
   region->resource_identity_count = 0;
   region->memory_access_count = 0;
+  memset(region->read_space_counts, 0, sizeof(region->read_space_counts));
   memset(region->write_space_counts, 0, sizeof(region->write_space_counts));
   region->hint_source_count = 0;
   loom_block_t* block = NULL;
@@ -324,14 +326,15 @@ static void loom_region_reset_summaries(loom_region_t* region) {
 }
 
 // Walks all blocks in a region recursively, adding uses, setting def pointers,
-// setting parent pointers, and recording direct semantic summaries for each
-// op.
+// restoring structural ownership, and recording direct semantic summaries for
+// each op.
 static iree_status_t loom_region_compute_uses(loom_module_t* module,
                                               loom_region_t* region,
                                               loom_op_t* parent_op) {
   if (!region) {
     return iree_ok_status();
   }
+  region->parent_op = parent_op;
   loom_block_t* block = NULL;
   loom_region_for_each_block(region, block) {
     block->parent_region = region;
@@ -382,7 +385,7 @@ iree_status_t loom_module_compute_uses(loom_module_t* module) {
   loom_module_reset_attribute_uses(module);
   loom_region_reset_summaries(module->body);
   module->poison_op_count = 0;
-  module->semantic_call_op_count = 0;
+  module->source_call_op_count = 0;
   module->low_internal_call_op_count = 0;
   // Clear all use data and live definition data on every value. Definition
   // pointers to erased operations retain immutable producer semantics.

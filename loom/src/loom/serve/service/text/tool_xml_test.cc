@@ -12,7 +12,7 @@
 #include "iree/testing/status_matchers.h"
 #include "iree/vm/buffer.h"
 #include "iree/vm/sync.h"
-#include "loom/serve/runtime/program/program.h"
+#include "loom/runtime/program/program.h"
 
 namespace {
 
@@ -26,15 +26,15 @@ class ToolXmlTest : public ::testing::Test {
         &types_));
     IREE_ASSERT_OK(loom_serve_text_tool_xml_module_create(
         environment_, host_allocator_, &module_));
-    IREE_ASSERT_OK(loom_serve_program_link(module_, {nullptr, 0},
-                                           host_allocator_, &program_));
+    IREE_ASSERT_OK(loom_runtime_program_link(module_, {nullptr, 0},
+                                             host_allocator_, &program_));
     IREE_ASSERT_OK(iree_vm_process_lookup_function(
-        loom_serve_program_process(program_), IREE_SV("tools"),
+        loom_runtime_program_process(program_), IREE_SV("tools"),
         IREE_SV("parse_xml"), &parse_));
   }
 
   void TearDown() override {
-    loom_serve_program_free(program_);
+    loom_runtime_program_free(program_);
     iree_vm_module_release(module_);
     iree_vm_environment_free(environment_);
   }
@@ -48,19 +48,19 @@ class ToolXmlTest : public ::testing::Test {
     return iree_vm_buffer_variant_from_ptr_move(&types_, &buffer);
   }
 
-  iree_status_t Parse(iree_string_view_t text, std::string* out_calls,
-                      bool truncated = false) {
+  iree_status_t Parse(iree_string_view_t text, bool truncated,
+                      std::string* out_calls) {
     return Parse(text,
                  IREE_SV(
                      R"([{"type":"function","function":{"name":"search",
           "parameters":{"type":"object","properties":{
             "query":{"type":"string"},"limit":{"type":"integer"}},
             "required":["query"]}}}])"),
-                 out_calls, truncated);
+                 truncated, out_calls);
   }
 
   iree_status_t Parse(iree_string_view_t text, iree_string_view_t schemas,
-                      std::string* out_calls, bool truncated = false) {
+                      bool truncated, std::string* out_calls) {
     out_calls->clear();
     iree_vm_variant_t arguments[] = {
         Text(schemas),
@@ -69,7 +69,7 @@ class ToolXmlTest : public ::testing::Test {
     };
     iree_vm_variant_t result = iree_vm_variant_empty();
     auto status =
-        iree_vm_invoke(loom_serve_program_invocation(program_), parse_,
+        iree_vm_invoke(loom_runtime_program_invocation(program_), parse_,
                        iree_vm_variant_span_from_array(arguments),
                        iree_vm_variant_span_from_ptr(&result, 1));
     if (iree_status_is_ok(status)) {
@@ -93,6 +93,15 @@ class ToolXmlTest : public ::testing::Test {
     return status;
   }
 
+  iree_status_t Parse(iree_string_view_t text, std::string* out_calls) {
+    return Parse(text, /*truncated=*/false, out_calls);
+  }
+
+  iree_status_t Parse(iree_string_view_t text, iree_string_view_t schemas,
+                      std::string* out_calls) {
+    return Parse(text, schemas, /*truncated=*/false, out_calls);
+  }
+
   // Allocation policy for the real native module and its invocation.
   const iree_allocator_t host_allocator_ = iree_allocator_system();
   // Type owner outliving the module, program, and result buffers.
@@ -102,7 +111,7 @@ class ToolXmlTest : public ::testing::Test {
   // Production schema-aware codec, retained by the linked program.
   iree_vm_module_t* module_ = nullptr;
   // Shared invocation reused after both successful and failed completions.
-  loom_serve_program_t* program_ = nullptr;
+  loom_runtime_program_t* program_ = nullptr;
   // Native export resolved from the linked program.
   iree_vm_function_t parse_ = {};
 };
@@ -174,13 +183,13 @@ TEST_F(ToolXmlTest, TokenLimitAtEveryBytePublishesOnlyCompleteCalls) {
     SCOPED_TRACE(length);
     std::string calls;
     IREE_ASSERT_OK(
-        Parse(iree_make_string_view(call.data(), length), &calls, true));
+        Parse(iree_make_string_view(call.data(), length), true, &calls));
     EXPECT_EQ(calls, length == call.size() ? "[" + expected + "]" : "[]");
     // A complete prefix survives a later truncated call, without repairing or
     // publishing any of that last call's name or arguments.
     const std::string text = call + "\n" + call.substr(0, length);
     IREE_ASSERT_OK(
-        Parse(iree_make_string_view(text.data(), text.size()), &calls, true));
+        Parse(iree_make_string_view(text.data(), text.size()), true, &calls));
     EXPECT_EQ(calls, "[" + expected +
                          (length == call.size() ? "," + expected : "") + "]");
   }
@@ -201,11 +210,11 @@ TEST_F(ToolXmlTest, TokenLimitDoesNotHideMalformedFraming) {
       std::string calls;
       IREE_EXPECT_STATUS_IS(
           IREE_STATUS_INVALID_ARGUMENT,
-          Parse(iree_make_string_view(text.data(), text.size()), &calls,
-                truncated));
+          Parse(iree_make_string_view(text.data(), text.size()), truncated,
+                &calls));
       EXPECT_TRUE(calls.empty());
       IREE_ASSERT_OK(
-          Parse(iree_make_cstring_view(valid.c_str()), &calls, truncated));
+          Parse(iree_make_cstring_view(valid.c_str()), truncated, &calls));
       EXPECT_EQ(
           calls,
           R"([{"type":"function","function":{"name":"search","arguments":"{}"}}])");

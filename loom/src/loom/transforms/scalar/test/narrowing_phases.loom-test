@@ -8,3 +8,15 @@ func.def @wide_source_arithmetic(%left: i32, %right: i64) -> (i32) {
   %result = scalar.trunci %sum : i64 to i32
   func.return %result : i32
 }
+
+// ====
+
+// Cleanup must not recreate a narrow shift after target legalization has
+// selected the wide carrier, even when the product fits the original width.
+func.def @wide_shift_cleanup(%input: i8) -> (i32) {
+  %bounded = scalar.assume %input [range(%input, 0, 1)] : i8
+  %wide = scalar.extui %bounded : i8 to i32
+  %amount = scalar.constant 7 : i32
+  %shifted = scalar.shli %wide, %amount : i32
+  func.return %shifted : i32
+}

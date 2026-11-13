@@ -7,8 +7,8 @@
 #define LOOM_SERVE_SERVICE_TEXT_BANK_H_
 
 #include "iree/vm/buffer.h"
-#include "loom/serve/runtime/execution/group.h"
-#include "loom/serve/runtime/execution/retirement.h"
+#include "loom/runtime/execution/group.h"
+#include "loom/runtime/execution/retirement.h"
 
 #ifdef __cplusplus
 extern "C" {

@@ -138,7 +138,7 @@ TEST_F(CallPressureTest, CallClobbersReduceSharedPackingCapacity) {
       .count = 4,
   };
   loom_low_call_contract_t contract = {};
-  loom_low_schedule_call_pressure_limit_t limits[2] = {};
+  loom_low_schedule_call_pressure_limit_t limits[3] = {};
   EXPECT_EQ(loom_low_schedule_call_pressure_build_limits(&state, &contract, {},
                                                          limits),
             0u);
@@ -150,12 +150,10 @@ TEST_F(CallPressureTest, CallClobbersReduceSharedPackingCapacity) {
   for (bool hard_capacity : {false, true}) {
     resource.flags =
         hard_capacity ? LOOM_LOW_REGISTER_PACKING_RESOURCE_FLAG_UNSPILLABLE : 0;
-    ASSERT_EQ(loom_low_schedule_call_pressure_build_limits(&state, &contract,
-                                                           {}, nullptr),
-              IREE_ARRAYSIZE(limits));
-    ASSERT_EQ(loom_low_schedule_call_pressure_build_limits(&state, &contract,
-                                                           {}, limits),
-              IREE_ARRAYSIZE(limits));
+    const iree_host_size_t limit_count =
+        loom_low_schedule_call_pressure_build_limits(&state, &contract, {},
+                                                     limits);
+    ASSERT_EQ(limit_count, 2u);
     EXPECT_EQ(limits[0].source_kind,
               LOOM_LOW_SCHEDULE_PRESSURE_SOURCE_REGISTER_CLASS);
     EXPECT_EQ(limits[0].source_id, 0u);
@@ -173,15 +171,15 @@ TEST_F(CallPressureTest, CallClobbersReduceSharedPackingCapacity) {
           .pressure_cliff_units = LOOM_LOW_SCHEDULE_PRESSURE_CLIFF_NONE,
           .units_until_pressure_cliff = LOOM_LOW_SCHEDULE_PRESSURE_CLIFF_NONE,
       };
-      loom_low_schedule_call_pressure_score_limits(
-          &descriptors_, &pressure_, limits, IREE_ARRAYSIZE(limits), &score);
+      loom_low_schedule_call_pressure_score_limits(&descriptors_, &pressure_,
+                                                   limits, limit_count, &score);
       // Killing one of three narrow units frees a pair; killing one of four
       // leaves both pairs occupied. The other class retains one whole unit.
       const uint32_t debt = live_units == 4 ? 1 : 0;
       EXPECT_EQ(score.pressure_cliff_penalty, debt);
       const uint16_t debt_flag =
           hard_capacity
-              ? LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_EXCEEDS_UNSPILLABLE_CAPACITY
+              ? LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_EXCEEDS_CONSTRAINED_CAPACITY
               : LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_OPENS_REGISTER_DEBT;
       EXPECT_EQ(score.flags, debt ? debt_flag : 0);
       EXPECT_EQ(packed_units[0], 3u);

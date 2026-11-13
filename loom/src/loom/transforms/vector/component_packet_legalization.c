@@ -267,7 +267,19 @@ iree_status_t loom_vector_component_packet_op_has_vector_candidate(
     bool* out_has_candidate) {
   *out_has_candidate = false;
   uint32_t lane_count = 0;
-  if (!loom_vector_component_describe(context->module, op, &lane_count)) {
+  const bool is_load = loom_vector_load_isa(op);
+  if (is_load) {
+    if (!iree_any_bit_set(
+            context->vector_packet_policy->flags,
+            LOOM_TARGET_VECTOR_PACKET_POLICY_FLAG_MEMORY_ROOT_COMPONENTS) ||
+        !loom_vector_component_static_lane_count(
+            loom_module_value_type(context->module,
+                                   loom_vector_load_result(op)),
+            &lane_count)) {
+      return iree_ok_status();
+    }
+  } else if (!loom_vector_component_describe(context->module, op,
+                                             &lane_count)) {
     return iree_ok_status();
   }
   const loom_value_id_t result = loom_op_const_results(op)[0];
@@ -280,10 +292,16 @@ iree_status_t loom_vector_component_packet_op_has_vector_candidate(
     return iree_ok_status();
   }
   uint64_t candidate_bits = 0;
-  uint64_t producer_closure_candidate_bits = 0;
-  IREE_RETURN_IF_ERROR(loom_vector_packet_component_candidate_bits(
-      context, op, lane_count, &candidate_bits,
-      &producer_closure_candidate_bits));
+  if (is_load) {
+    IREE_RETURN_IF_ERROR(loom_vector_packet_load_candidate_bits(
+        context, op, context->vector_packet_policy,
+        loom_module_value_type(context->module, result), &candidate_bits));
+  } else {
+    uint64_t producer_closure_candidate_bits = 0;
+    IREE_RETURN_IF_ERROR(loom_vector_packet_component_candidate_bits(
+        context, op, lane_count, &candidate_bits,
+        &producer_closure_candidate_bits));
+  }
   for (uint8_t i = 0;
        i < context->vector_packet_policy->native_lane_count_count; ++i) {
     if (context->vector_packet_policy->native_lane_counts[i] > 1u &&

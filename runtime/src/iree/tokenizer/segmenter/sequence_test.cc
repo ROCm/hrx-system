@@ -805,7 +805,7 @@ TEST_F(SequenceSegmenterTest, SplitChainSpacePunctuation) {
 
   // " <" matches ` ?[\p{P}\p{S}]+` as a single segment (space + less-than).
   TestWithAllChunkSizes(segmenter.get(), IREE_SVL(" <"), {" <"},
-                        /*expect_pending_after_process=*/false);
+                        /*expect_pending_after_process=*/true);
 }
 
 // Tests the full GPT-2-style regex pattern through a Split chain.
@@ -831,7 +831,7 @@ TEST_F(SequenceSegmenterTest, SplitChainFullGpt2Pattern) {
 
   // " <" matches ` ?[\p{P}\p{S}]+` as a single segment.
   TestWithAllChunkSizes(segmenter.get(), IREE_SVL(" <"), {" <"},
-                        /*expect_pending_after_process=*/false);
+                        /*expect_pending_after_process=*/true);
 }
 
 //===----------------------------------------------------------------------===//

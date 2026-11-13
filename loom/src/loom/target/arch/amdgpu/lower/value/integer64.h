@@ -22,6 +22,14 @@ extern "C" {
 loom_amdgpu_integer_operand_form_t loom_amdgpu_select_integer_operand_form(
     loom_value_facts_t facts, uint8_t minimum_unit_count);
 
+// Returns whether an address comparison must normalize both operands to pairs
+// to preserve their numeric values. Positive word magnitudes can compare their
+// low words for equality or unsigned order, but signed order or a potentially
+// negative peer requires their zero-extended high words.
+bool loom_amdgpu_address_comparison_needs_pair(
+    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
+    const loom_op_t* source_op);
+
 // Materializes the selected integer operand in |register_class_id| (SGPR or
 // VGPR). Pair forms preserve a complete existing pair or extend a single word;
 // an unsigned-word form extracts the proven u32 payload. Emission consumes no
@@ -87,10 +95,10 @@ iree_status_t loom_amdgpu_select_index_cast_plan(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_amdgpu_index_cast_plan_t* out_plan, bool* out_selected);
 
-// Publishes the cast's selected width in its actual source or conversion bank.
+// Resolves address widening against the producer's retained carrier and
+// publishes the cast's selected width in its actual source or conversion bank.
 iree_status_t loom_amdgpu_finalize_index_cast_plan(
-    loom_low_lower_context_t* context,
-    const loom_amdgpu_index_cast_plan_t* plan);
+    loom_low_lower_context_t* context, loom_amdgpu_index_cast_plan_t* plan);
 
 // Lowers an AMDGPU index.cast plan.
 iree_status_t loom_amdgpu_lower_index_cast(

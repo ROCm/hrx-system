@@ -16,6 +16,7 @@
 
 #include "loom/import/cxx/source/error.h"
 #include "loom/ops/index/ops.h"
+#include "loom/ops/special_values.h"
 #include "loom/ops/vector/ops.h"
 
 namespace loom::cxx_import {
@@ -384,6 +385,25 @@ loom_value_id_t Vectors::extract(loom_value_id_t value, loom_value_id_t index,
   int64_t selector = INT64_MIN;
   check(loom_vector_extract_build(&builder_, value, &index, 1, &selector, 1,
                                   output, locations_.get(owner), &op));
+  return loom_op_results(op)[0];
+}
+
+loom_value_id_t Vectors::extract_static(loom_value_id_t value, int64_t index,
+                                        const cxx::Type* source_type,
+                                        cxx::AST* owner) {
+  auto* vector = types_.native_vector(source_type);
+  types_.get(source_type, owner);
+  auto output = types_.get(vector->elementType(), owner);
+  if (index == static_cast<int64_t>(vector->elementCount())) {
+    loom_value_id_t poison;
+    check(loom_poison_build(&builder_, output, locations_.get(owner), &poison));
+    return poison;
+  }
+  loom_op_t* op;
+  check(loom_vector_extract_build(&builder_, value,
+                                  /*indices=*/nullptr, /*indices_count=*/0,
+                                  &index, /*static_indices_count=*/1, output,
+                                  locations_.get(owner), &op));
   return loom_op_results(op)[0];
 }
 

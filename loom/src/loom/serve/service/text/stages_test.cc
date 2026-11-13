@@ -13,8 +13,8 @@
 #include <vector>
 
 #include "iree/testing/status_matchers.h"
-#include "loom/serve/testing/jit.h"
-#include "loom/serve/testing/native_allocator.h"
+#include "loom/runtime/testing/jit.h"
+#include "loom/runtime/testing/native_allocator.h"
 #include "loomc/iree.h"
 
 namespace {
@@ -62,7 +62,7 @@ class RecordingSink {
   bool inline_execution = false;
 };
 
-class TextStagesTest : public loom_serve::testing::JitTest {
+class TextStagesTest : public loom_runtime::testing::JitTest {
  protected:
   void SetUp() override {
     JitTest::SetUp();
@@ -76,24 +76,24 @@ class TextStagesTest : public loom_serve::testing::JitTest {
           loomc_make_cstring_view(delta.c_str())};
       const loomc_config_options_t config = {
           &binding, 1, {}, LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED};
-      loom_serve::testing::loom_serve_test_compilation_t compilation;
+      loom_runtime::testing::loom_runtime_test_compilation_t compilation;
       compilation.jit = jit_;
       compilation.root = IREE_SV("advance");
       compilation.config = &config;
       compilation.Start(
-          loom_serve_host_executor(loom_serve_device_host(device_owner_)));
+          loom_runtime_host_executor(loom_runtime_device_host(device_owner_)));
       IREE_ASSERT_OK(compilation.Await(&stages_[i].compiled));
-      stages_[i].program = *loom_serve_jit_stage_program(stages_[i].compiled);
+      stages_[i].program = *loom_runtime_jit_stage_program(stages_[i].compiled);
     }
     // Prepared products, not their source catalog, own the executable inputs.
-    loom_serve_jit_release(jit_);
+    loom_runtime_jit_release(jit_);
     jit_ = nullptr;
   }
 
   void ReleaseProgram() override {
     for (auto& stage : stages_) {
       iree_hal_command_buffer_release(stage.command);
-      loom_serve_jit_stage_free(stage.compiled);
+      loom_runtime_jit_stage_free(stage.compiled);
     }
     IREE_EXPECT_OK(status_);
   }
@@ -132,7 +132,7 @@ class TextStagesTest : public loom_serve::testing::JitTest {
 
   void Run() {
     IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
-        loom_serve_pool_storage(storage_owner_),
+        loom_runtime_pool_storage(storage_owner_),
         iree_hal_make_pool_reservation_request(sizeof(input_), 0),
         iree_infinite_timeout(), &buffer_));
     const iree_hal_transfer_operation_t upload = {
@@ -148,13 +148,13 @@ class TextStagesTest : public loom_serve::testing::JitTest {
       ASSERT_NE(stages_[i].command, nullptr);
       uint64_t completion = 0;
       IREE_ASSERT_OK(
-          loom_serve_execution_transfer(execution_, 1, &upload, &completion));
-      IREE_ASSERT_OK(loom_serve_execution_execute(
+          loom_runtime_execution_transfer(execution_, 1, &upload, &completion));
+      IREE_ASSERT_OK(loom_runtime_execution_execute(
           execution_, stages_[i].command, {1, &binding}, &completion));
+      IREE_ASSERT_OK(loom_runtime_execution_feedback(execution_, 1, &download,
+                                                     &completion));
       IREE_ASSERT_OK(
-          loom_serve_execution_feedback(execution_, 1, &download, &completion));
-      IREE_ASSERT_OK(
-          loom_serve_execution_feedback_wait(execution_, completion));
+          loom_runtime_execution_feedback_wait(execution_, completion));
       for (size_t element = 0; element < output_.size(); ++element) {
         EXPECT_EQ(output_[element], 100 + i + 1 + element);
       }
@@ -176,10 +176,10 @@ class TextStagesTest : public loom_serve::testing::JitTest {
 };
 
 TEST_P(TextStagesTest, SharedWorkersRecordIndependentPrograms) {
-  auto* host = loom_serve_device_host(device_owner_);
+  auto* host = loom_runtime_device_host(device_owner_);
   IREE_ASSERT_OK(StartRecording(
-      loom_serve_host_preparation_sink(host),
-      loomc_task_pool_worker_count(loom_serve_host_task_pool(host)),
+      loom_runtime_host_preparation_sink(host),
+      loomc_task_pool_worker_count(loom_runtime_host_task_pool(host)),
       iree_allocator_system()));
   IREE_ASSERT_OK(AwaitRecording());
   EXPECT_EQ(record_completions_, 1u);
@@ -246,7 +246,7 @@ TEST_P(TextStagesTest, RecordingFailureJoinsOtherAcceptedTasks) {
   ASSERT_EQ(sink.tasks.size(), 3u);
   // Command buffers belong to the device; temporary recording arrays may be
   // served entirely from the host's reusable arena blocks.
-  loom_serve::testing::NativeAllocator::ForDevice(device_owner_)
+  loom_runtime::testing::NativeAllocator::ForDevice(device_owner_)
       .FailNextAllocation(IREE_ALLOCATOR_COMMAND_CALLOC);
   sink.RetireOne();
   EXPECT_EQ(record_completions_, 0u);

@@ -232,6 +232,46 @@ TEST(Diagnostic, NoSource) {
   EXPECT_EQ(output.find(" | "), std::string::npos);
 }
 
+TEST(Diagnostic, ExportContextPrefixesGenericMessage) {
+  loom_diagnostic_param_t params[] = {
+      loom_param_string(IREE_SV("missing")),
+  };
+  loom_diagnostic_t diagnostic = {
+      .severity = LOOM_DIAGNOSTIC_ERROR,
+      .error = loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 1),
+      .params = params,
+      .param_count = IREE_ARRAYSIZE(params),
+      .export_name = IREE_SV("kernel.main"),
+  };
+
+  const std::string output = FormatDiagnostic(&diagnostic);
+  EXPECT_EQ(output,
+            "error [PARSE/001] in export 'kernel.main': undefined SSA value "
+            "'%missing'\n");
+}
+
+TEST(Diagnostic, MatchingExportParameterAvoidsDuplicatePrefix) {
+  loom_diagnostic_param_t params[] = {
+      loom_param_string(IREE_SV("amdgpu.gfx950")),
+      loom_param_string(IREE_SV("kernel.main")),
+      loom_param_string(IREE_SV("amdgpu.gfx950")),
+      loom_param_string(IREE_SV("kernel.main")),
+      loom_param_string(IREE_SV("source.op")),
+  };
+  loom_diagnostic_t diagnostic = {
+      .severity = LOOM_DIAGNOSTIC_ERROR,
+      .error = loom_error_def_lookup(LOOM_ERROR_DOMAIN_TARGET, 1),
+      .params = params,
+      .param_count = IREE_ARRAYSIZE(params),
+      .export_name = IREE_SV("kernel.main"),
+  };
+
+  const std::string output = FormatDiagnostic(&diagnostic);
+  EXPECT_NE(output.find("target 'amdgpu.gfx950' export 'kernel.main'"),
+            std::string::npos);
+  EXPECT_EQ(output.find("in export 'kernel.main'"), std::string::npos);
+}
+
 TEST(Diagnostic, LocationsDoNotRequireSourceText) {
   loom_diagnostic_param_t params[] = {loom_param_string(IREE_SV("x"))};
   loom_diagnostic_t diagnostic = {

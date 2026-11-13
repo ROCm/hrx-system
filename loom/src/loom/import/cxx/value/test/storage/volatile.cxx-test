@@ -1,0 +1,379 @@
+// RUN: pass canonicalize,cse,dce
+// Repeated observations survive cleanup even when their values are discarded.
+unsigned observations(const volatile unsigned* input, volatile unsigned* output) {
+  input[0];
+  static_cast<void>(input[0]);
+  (void)*input;
+  (void(*input));
+  unsigned first = input[0];
+  unsigned second = input[0];
+  output[0] = first;
+  output[0] = second;
+  return first + second;
+}
+// ----
+func.def public @observations(%input: buffer, %input_byte_offset: offset, %output: buffer, %output_byte_offset: offset) -> (i32) {
+  %9 = index.cast %input_byte_offset : offset to i64
+  %11 = scalar.assume %9 [range(%9, 0, 9223372036854775807)] : i64
+  %12 = index.cast %11 : i64 to offset
+  %13 = buffer.view %input[%12] : buffer -> view<1xi32>
+  %14 = view.load<volatile|root_in_bounds> %13[0] : view<1xi32> -> i32
+  %24 = view.load<volatile|root_in_bounds> %13[0] : view<1xi32> -> i32
+  %25 = buffer.view %input[%input_byte_offset] : buffer -> view<1xi32>
+  %26 = view.load<volatile|root_in_bounds> %25[0] : view<1xi32> -> i32
+  %28 = view.load<volatile|root_in_bounds> %25[0] : view<1xi32> -> i32
+  %first = view.load<volatile|root_in_bounds> %13[0] : view<1xi32> -> i32
+  %second = view.load<volatile|root_in_bounds> %13[0] : view<1xi32> -> i32
+  %53 = index.cast %output_byte_offset : offset to i64
+  %55 = scalar.assume %53 [range(%53, 0, 9223372036854775807)] : i64
+  %56 = index.cast %55 : i64 to offset
+  %57 = buffer.view %output[%56] : buffer -> view<1xi32>
+  view.store<volatile|root_in_bounds> %first, %57[0] : i32, view<1xi32>
+  view.store<volatile|root_in_bounds> %second, %57[0] : i32, view<1xi32>
+  %67 = scalar.addi %first, %second : i32
+  func.return %67 : i32
+}
+
+// ====
+// Ordinary reads still coalesce and unused reads disappear.
+unsigned ordinary(const unsigned* input, unsigned* output) {
+  input[0];
+  static_cast<void>(input[0]);
+  (void)*input;
+  (void(*input));
+  unsigned first = input[0];
+  unsigned second = input[0];
+  output[0] = first;
+  output[0] = second;
+  return first + second;
+}
+// ----
+func.def public @ordinary(%input: buffer, %input_byte_offset: offset, %output: buffer, %output_byte_offset: offset) -> (i32) {
+  %11 = index.cast %input_byte_offset : offset to i64
+  %13 = scalar.assume %11 [range(%11, 0, 9223372036854775807)] : i64
+  %14 = index.cast %13 : i64 to offset
+  %15 = buffer.view %input[%14] : buffer -> view<1xi32>
+  %first = view.load<root_in_bounds> %15[0] : view<1xi32> -> i32
+  %31 = index.cast %output_byte_offset : offset to i64
+  %33 = scalar.assume %31 [range(%31, 0, 9223372036854775807)] : i64
+  %34 = index.cast %33 : i64 to offset
+  %35 = buffer.view %output[%34] : buffer -> view<1xi32>
+  view.store<root_in_bounds> %first, %35[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %first, %35[0] : i32, view<1xi32>
+  %45 = scalar.addi %first, %first : i32
+  func.return %45 : i32
+}
+
+// ====
+// Pointer members and helper boundaries preserve the pointee qualifier.
+struct Source { const volatile unsigned* data; };
+static unsigned read(Source source) { return source.data[1]; }
+unsigned through_helper(const unsigned* input) {
+  Source source{input};
+  return read(source);
+}
+// ----
+func.def public @through_helper(%input: buffer, %input_byte_offset: offset) -> (i32) {
+  %3 = func.call @read(%input, %input_byte_offset) : (buffer, offset) -> (i32)
+  func.return %3 : i32
+}
+
+func.def @read(%source_data: buffer, %source_data_byte_offset: offset) -> (i32) {
+  %17 = scalar.constant 4 : i64
+  %11 = index.cast %source_data_byte_offset : offset to i64
+  %12 = scalar.addi %11, %17 : i64
+  %13 = scalar.assume %12 [range(%12, 0, 9223372036854775807)] : i64
+  %14 = index.cast %13 : i64 to offset
+  %15 = buffer.view %source_data[%14] : buffer -> view<1xi32>
+  %16 = view.load<volatile|root_in_bounds> %15[0] : view<1xi32> -> i32
+  func.return %16 : i32
+}
+
+// ====
+// Whole-vector observations retain every lane even with a scalar result.
+using Words = unsigned __attribute__((vector_size(16)));
+unsigned vector_observations(const volatile Words* input, volatile Words* output) {
+  *input;
+  Words value = input[0];
+  output[0] = value;
+  output[0] = value;
+  return value[2];
+}
+// ----
+func.def public @vector_observations(%input: buffer, %input_byte_offset: offset, %output: buffer, %output_byte_offset: offset) -> (i32) {
+  %5 = buffer.view %input[%input_byte_offset] : buffer -> view<4xi32>
+  %6 = vector.load<volatile|root_in_bounds> %5[0] : view<4xi32> -> vector<4xi32>
+  %11 = index.cast %input_byte_offset : offset to i64
+  %13 = scalar.assume %11 [range(%11, 0, 9223372036854775807)] : i64
+  %14 = index.cast %13 : i64 to offset
+  %15 = buffer.view %input[%14] : buffer -> view<4xi32>
+  %value = vector.load<volatile|root_in_bounds> %15[0] : view<4xi32> -> vector<4xi32>
+  %21 = index.cast %output_byte_offset : offset to i64
+  %23 = scalar.assume %21 [range(%21, 0, 9223372036854775807)] : i64
+  %24 = index.cast %23 : i64 to offset
+  %25 = buffer.view %output[%24] : buffer -> view<4xi32>
+  vector.store<volatile|root_in_bounds> %value, %25[0] : vector<4xi32>, view<4xi32>
+  vector.store<volatile|root_in_bounds> %value, %25[0] : vector<4xi32>, view<4xi32>
+  %38 = vector.extract %value[2] : vector<4xi32> -> i32
+  func.return %38 : i32
+}
+
+// ====
+// Top-level qualification belongs to the callee's parameter object rather than
+// its callable ABI. Initialization and every source read remain observable.
+unsigned parameter_observations(unsigned value);
+unsigned parameter_observations(volatile unsigned value) {
+  static_cast<void>(value);
+  return value;
+}
+using Words = unsigned __attribute__((vector_size(16)));
+Words vector_parameter_observations(volatile Words value) {
+  static_cast<void>(value);
+  return value;
+}
+bool boolean_parameter_observation(volatile bool value) { return value; }
+unsigned constant_parameter_observation(const volatile unsigned value) {
+  return value;
+}
+
+// ----
+func.def public @parameter_observations(%value$0: i32) -> (i32) {
+  %2 = index.constant 4 : offset
+  %value_storage = buffer.alloca<private> align(4) %2 : buffer
+  %value_storage_byte_offset = index.constant 0 : offset
+  %value_view = buffer.view %value_storage[%value_storage_byte_offset] : buffer -> view<1xi32>
+  view.store<volatile> %value$0, %value_view[0] : i32, view<1xi32>
+  %value$6 = view.load<volatile> %value_view[0] : view<1xi32> -> i32
+  %value$7 = view.load<volatile> %value_view[0] : view<1xi32> -> i32
+  func.return %value$7 : i32
+}
+
+func.def public @vector_parameter_observations(%value$8: vector<4xi32>) -> (vector<4xi32>) {
+  %10 = index.constant 16 : offset
+  %value_storage = buffer.alloca<private> align(16) %10 : buffer
+  %value_storage_byte_offset = index.constant 0 : offset
+  %value_view = buffer.view %value_storage[%value_storage_byte_offset] : buffer -> view<4xi32>
+  vector.store<volatile> %value$8, %value_view[0] : vector<4xi32>, view<4xi32>
+  %value$14 = vector.load<volatile> %value_view[0] : view<4xi32> -> vector<4xi32>
+  %value$15 = vector.load<volatile> %value_view[0] : view<4xi32> -> vector<4xi32>
+  func.return %value$15 : vector<4xi32>
+}
+
+func.def public @boolean_parameter_observation(%value$16: i1) -> (i1) {
+  %18 = index.constant 1 : offset
+  %value_storage = buffer.alloca<private> align(1) %18 : buffer
+  %value_storage_byte_offset = index.constant 0 : offset
+  %value_view = buffer.view %value_storage[%value_storage_byte_offset] : buffer -> view<1xi8>
+  %22 = scalar.extui %value$16 : i1 to i8
+  view.store<volatile> %22, %value_view[0] : i8, view<1xi8>
+  %23 = view.load<volatile> %value_view[0] : view<1xi8> -> i8
+  %24 = scalar.constant 0 : i8
+  %value$25 = scalar.cmpi ne, %23, %24 : i8
+  func.return %value$25 : i1
+}
+
+func.def public @constant_parameter_observation(%value$26: i32) -> (i32) {
+  %28 = index.constant 4 : offset
+  %value_storage = buffer.alloca<private> align(4) %28 : buffer
+  %value_storage_byte_offset = index.constant 0 : offset
+  %value_view = buffer.view %value_storage[%value_storage_byte_offset] : buffer -> view<1xi32>
+  view.store<volatile> %value$26, %value_view[0] : i32, view<1xi32>
+  %value$32 = view.load<volatile> %value_view[0] : view<1xi32> -> i32
+  func.return %value$32 : i32
+}
+
+// ====
+// Kernel value arguments use the same unqualified ABI and qualified local
+// objects as ordinary functions.
+#include <loomcxx/kernel.h>
+using Words = unsigned __attribute__((vector_size(16)));
+[[loom::kernel, loom::workgroup_size(1, 1, 1),
+  loom::workgroup_count(1, 1, 1)]]
+void parameter_observations(unsigned* output, Words* vector_output,
+                            volatile unsigned value, volatile Words vector) {
+  static_cast<void>(value);
+  output[0] = value;
+  static_cast<void>(vector);
+  vector_output[0] = vector;
+}
+
+// ----
+kernel.def @parameter_observations() {
+  %4 = index.constant 1 : index
+  kernel.launch.config workgroups(%4, %4, %4) workgroup_size(%4, %4, %4) : index
+} launch(%output: buffer, %vector_output: buffer, %value$2: i32, %vector$3: vector<4xi32>) {
+  %12 = index.constant 4 : offset
+  %value_storage = buffer.alloca<private> align(4) %12 : buffer
+  %value_storage_byte_offset = index.constant 0 : offset
+  %value_view = buffer.view %value_storage[%value_storage_byte_offset] : buffer -> view<1xi32>
+  view.store<volatile> %value$2, %value_view[0] : i32, view<1xi32>
+  %16 = index.constant 16 : offset
+  %vector_storage = buffer.alloca<private> align(16) %16 : buffer
+  %vector_view = buffer.view %vector_storage[%value_storage_byte_offset] : buffer -> view<4xi32>
+  vector.store<volatile> %vector$3, %vector_view[0] : vector<4xi32>, view<4xi32>
+  %value$20 = view.load<volatile> %value_view[0] : view<1xi32> -> i32
+  %value$21 = view.load<volatile> %value_view[0] : view<1xi32> -> i32
+  %30 = buffer.view %output[%value_storage_byte_offset] : buffer -> view<1xi32>
+  view.store<root_in_bounds> %value$21, %30[0] : i32, view<1xi32>
+  %vector$31 = vector.load<volatile> %vector_view[0] : view<4xi32> -> vector<4xi32>
+  %vector$32 = vector.load<volatile> %vector_view[0] : view<4xi32> -> vector<4xi32>
+  %41 = buffer.view %vector_output[%value_storage_byte_offset] : buffer -> view<4xi32>
+  vector.store<root_in_bounds> %vector$32, %41[0] : vector<4xi32>, view<4xi32>
+  kernel.return
+}
+
+// ====
+// Workgroup allocation supplies real storage for volatile scalar elements.
+#include <loomcxx/kernel.h>
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void shared_observations(unsigned* output, unsigned value) {
+  [[loom::workgroup]] volatile unsigned table[4];
+  table[2] = value;
+  table[2];
+  output[0] = table[2];
+}
+// ----
+kernel.def @shared_observations() {
+  %2 = index.constant 1 : index
+  kernel.launch.config workgroups(%2, %2, %2) workgroup_size(%2, %2, %2) : index
+} launch(%output: buffer, %value: i32) {
+  %9 = index.constant 16 : offset
+  %table = buffer.alloca<workgroup> align(4) %9 : buffer
+  %table_byte_offset = index.constant 0 : offset
+  %table_view = buffer.view %table[%table_byte_offset] : buffer -> view<4xi32>
+  %39 = index.constant 2 : index
+  view.store<volatile> %value, %table_view[%39] : i32, view<4xi32>
+  %21 = view.load<volatile> %table_view[%39] : view<4xi32> -> i32
+  %26 = view.load<volatile> %table_view[%39] : view<4xi32> -> i32
+  %35 = buffer.view %output[%table_byte_offset] : buffer -> view<1xi32>
+  view.store<root_in_bounds> %26, %35[0] : i32, view<1xi32>
+  kernel.return
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// A volatile scalar workgroup object retains every source observation.
+#include <loomcxx/kernel.h>
+[[loom::kernel, loom::workgroup_size(1, 1, 1),
+  loom::workgroup_count(1, 1, 1)]]
+void shared_scalar(unsigned* output, unsigned value) {
+  [[loom::workgroup]] volatile unsigned slot;
+  slot = value;
+  static_cast<void>(slot);
+  output[0] = slot;
+}
+// ----
+kernel.def @shared_scalar() {
+  %2 = index.constant 1 : index
+  kernel.launch.config workgroups(%2, %2, %2) workgroup_size(%2, %2, %2) : index
+} launch(%output: buffer, %value: i32) {
+  %9 = index.constant 4 : offset
+  %slot_storage = buffer.alloca<workgroup> align(4) %9 : buffer
+  %slot_storage_byte_offset = index.constant 0 : offset
+  %slot_view = buffer.view %slot_storage[%slot_storage_byte_offset] : buffer -> view<1xi32>
+  view.store<volatile> %value, %slot_view[0] : i32, view<1xi32>
+  %slot$13 = view.load<volatile> %slot_view[0] : view<1xi32> -> i32
+  %slot$14 = view.load<volatile> %slot_view[0] : view<1xi32> -> i32
+  %23 = buffer.view %output[%slot_storage_byte_offset] : buffer -> view<1xi32>
+  view.store<root_in_bounds> %slot$14, %23[0] : i32, view<1xi32>
+  kernel.return
+}
+
+// ====
+// Void returns share the discarded-value path without rereading assignments.
+void discarded_return(volatile unsigned* output) {
+  return static_cast<void>(*output = 7);
+}
+// ----
+func.def public @discarded_return(%output: buffer, %output_byte_offset: offset) {
+  %2 = scalar.constant 7 : i32
+  %3 = buffer.view %output[%output_byte_offset] : buffer -> view<1xi32>
+  view.store<volatile|root_in_bounds> %2, %3[0] : i32, view<1xi32>
+  func.return
+}
+
+// ====
+// INPUT: cxx std=c23
+// C discarded reads and stores use the same object qualification.
+unsigned c_observations(const volatile unsigned* input, volatile unsigned* output) {
+  (void)*input;
+  unsigned value = *input;
+  *output = value;
+  return value;
+}
+unsigned c_parameter_observation(volatile unsigned value) {
+  (void)value;
+  return value;
+}
+// ----
+func.def public source_signature(#func.abi.c.signature<arguments = [0, 1], results = [2], types = [#func.abi.c.type<pointer, byte_length = 8, byte_alignment = 8, component_count = 2>, #func.abi.c.type<pointer, byte_length = 8, byte_alignment = 8, component_count = 2>, #func.abi.c.type<unsigned_integer, byte_length = 4, byte_alignment = 4, component_count = 1, bitwidth = 32>]>) @c_observations(%input: buffer, %input_byte_offset: offset, %output: buffer, %output_byte_offset: offset) -> (i32) {
+  %5 = buffer.view %input[%input_byte_offset] : buffer -> view<1xi32>
+  %6 = view.load<volatile|root_in_bounds> %5[0] : view<1xi32> -> i32
+  %value = view.load<volatile|root_in_bounds> %5[0] : view<1xi32> -> i32
+  %9 = buffer.view %output[%output_byte_offset] : buffer -> view<1xi32>
+  view.store<volatile|root_in_bounds> %value, %9[0] : i32, view<1xi32>
+  func.return %value : i32
+}
+
+func.def public source_signature(#func.abi.c.signature<arguments = [0], results = [0], types = [#func.abi.c.type<unsigned_integer, byte_length = 4, byte_alignment = 4, component_count = 1, bitwidth = 32>]>) @c_parameter_observation(%value$10: i32) -> (i32) {
+  %12 = index.constant 4 : offset
+  %value_storage = buffer.alloca<private> align(4) %12 : buffer
+  %value_storage_byte_offset = index.constant 0 : offset
+  %value_view = buffer.view %value_storage[%value_storage_byte_offset] : buffer -> view<1xi32>
+  view.store<volatile> %value$10, %value_view[0] : i32, view<1xi32>
+  %value$16 = view.load<volatile> %value_view[0] : view<1xi32> -> i32
+  %value$17 = view.load<volatile> %value_view[0] : view<1xi32> -> i32
+  func.return %value$17 : i32
+}
+
+// ====
+// A volatile parameter is materialized with one observed store per field.
+struct Record { unsigned values[2]; };
+unsigned record_object(volatile Record input) { return input.values[1]; }
+
+// ----
+func.def public @record_object(%input_values_0: i32, %input_values_1: i32) -> (i32) {
+  %3 = index.constant 8 : offset
+  %input_storage = buffer.alloca<private> align(4) %3 : buffer
+  %30 = index.constant 0 : offset
+  %10 = buffer.view %input_storage[%30] : buffer -> view<1xi32>
+  view.store<volatile> %input_values_0, %10[0] : i32, view<1xi32>
+  %29 = index.constant 4 : offset
+  %14 = buffer.view %input_storage[%29] : buffer -> view<1xi32>
+  view.store<volatile> %input_values_1, %14[0] : i32, view<1xi32>
+  %27 = view.load<volatile> %14[0] : view<1xi32> -> i32
+  func.return %27 : i32
+}
+
+// ====
+// Qualifiers on an aggregate apply to each nested array initialization store.
+struct Record { unsigned values[2][2]; };
+unsigned record_initializer(unsigned input) {
+  volatile Record value{{{input, 7}, {11, 13}}};
+  return value.values[0][0] + value.values[1][1];
+}
+
+// ----
+func.def public @record_initializer(%input: i32) -> (i32) {
+  %2 = index.constant 16 : offset
+  %value_storage = buffer.alloca<private> align(4) %2 : buffer
+  %73 = index.constant 0 : offset
+  %9 = buffer.view %value_storage[%73] : buffer -> view<1xi32>
+  view.store<volatile> %input, %9[0] : i32, view<1xi32>
+  %12 = scalar.constant 7 : i32
+  %72 = index.constant 4 : offset
+  %14 = buffer.view %value_storage[%72] : buffer -> view<1xi32>
+  view.store<volatile> %12, %14[0] : i32, view<1xi32>
+  %17 = scalar.constant 11 : i32
+  %71 = index.constant 8 : offset
+  %19 = buffer.view %value_storage[%71] : buffer -> view<1xi32>
+  view.store<volatile> %17, %19[0] : i32, view<1xi32>
+  %22 = scalar.constant 13 : i32
+  %70 = index.constant 12 : offset
+  %24 = buffer.view %value_storage[%70] : buffer -> view<1xi32>
+  view.store<volatile> %22, %24[0] : i32, view<1xi32>
+  %45 = view.load<volatile> %9[0] : view<1xi32> -> i32
+  %66 = view.load<volatile> %24[0] : view<1xi32> -> i32
+  %67 = scalar.addi %45, %66 : i32
+  func.return %67 : i32
+}

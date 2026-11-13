@@ -1,0 +1,247 @@
+// RUN: pass canonicalize,cse,dce
+// An updated factor crosses an inline helper call as the schedule operand.
+#include <loomcxx/kernel.h>
+LOOM_INLINE static unsigned sum(unsigned count, unsigned factor) {
+  unsigned total = 0;
+  [[loom::unroll(factor)]]
+  for (unsigned index = 0; index < count; ++index) {
+    total += index;
+  }
+  return total;
+}
+
+unsigned schedule_call(unsigned count) {
+  unsigned factor = 4;
+  --factor;
+  return sum(count, factor);
+}
+// ----
+func.def public @schedule_call(%count: i32) -> (i32) {
+  %factor = scalar.constant 3 : i32
+  %5 = func.call pure @sum(%count, %factor) : (i32, i32) -> (i32)
+  func.return %5 : i32
+}
+
+func.def inline @sum(%count: i32, %factor: i32) -> (i32) {
+  %total$9 = scalar.constant 0 : i32
+  %22 = index.constant 0 : offset
+  %12 = index.cast %count : i32 to offset
+  %13 = index.constant 1 : offset
+  %14 = scalar.extui %factor : i32 to i64
+  %15 = index.cast %14 : i64 to index
+  %total$18 = scf.for %index = [%22 to %12 step %13](%total$17 = %total$9 : i32) -> (i32) unroll(%15) {
+    %19 = index.cast %index : offset to i32
+    %total$20 = scalar.addi %total$17, %19 : i32
+    scf.yield %total$20 : i32
+  }
+  func.return %total$18 : i32
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// The schedule snapshots the entry factor; loop mutations still feed the return.
+unsigned schedule_snapshot(unsigned count) {
+  unsigned factor = 3;
+  unsigned total = 0;
+  [[loom::unroll(factor)]]
+  for (unsigned index = 0; index < count; ++index) {
+    total += index;
+    ++factor;
+  }
+  return total + factor;
+}
+// ----
+func.def public @schedule_snapshot(%count: i32) -> (i32) {
+  %factor$2 = scalar.constant 3 : i32
+  %total$3 = scalar.constant 0 : i32
+  %21 = index.constant 0 : offset
+  %6 = index.cast %count : i32 to offset
+  %7 = index.constant 1 : offset
+  %20 = index.constant 3 : index
+  %total$13, %factor$14 = scf.for %index = [%21 to %6 step %7](%total$11 = %total$3 : i32, %factor$12 = %factor$2 : i32) -> (i32, i32) unroll(%20) {
+    %15 = index.cast %index : offset to i32
+    %total$16 = scalar.addi %total$11, %15 : i32
+    %17 = scalar.constant 1 : i32
+    %factor$18 = scalar.addi %factor$12, %17 : i32
+    scf.yield %total$16, %factor$18 : i32, i32
+  }
+  %19 = scalar.addi %total$13, %factor$14 : i32
+  func.return %19 : i32
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// Wide arithmetic is evaluated before converting the schedule operand to index.
+unsigned schedule_wide(unsigned count) {
+  unsigned long long factor = (1ULL << 32) + 3;
+  unsigned total = 0;
+  [[loom::unroll(factor - (1ULL << 32))]]
+  for (unsigned index = 0; index < count; ++index) {
+    total += index;
+  }
+  return total;
+}
+// ----
+func.def public @schedule_wide(%count: i32) -> (i32) {
+  %total$9 = scalar.constant 0 : i32
+  %26 = index.constant 0 : offset
+  %12 = index.cast %count : i32 to offset
+  %13 = index.constant 1 : offset
+  %25 = index.constant 3 : index
+  %total$22 = scf.for %index = [%26 to %12 step %13](%total$21 = %total$9 : i32) -> (i32) unroll(%25) {
+    %23 = index.cast %index : offset to i32
+    %total$24 = scalar.addi %total$21, %23 : i32
+    scf.yield %total$24 : i32
+  }
+  func.return %total$22 : i32
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// A narrow unsigned update uses the converted byte as the schedule factor.
+unsigned schedule_narrow(unsigned count) {
+  unsigned char factor = 131;
+  factor -= 128;
+  unsigned total = 0;
+  [[loom::unroll(factor)]]
+  for (unsigned index = 0; index < count; ++index) {
+    total += index;
+  }
+  return total;
+}
+// ----
+func.def public @schedule_narrow(%count: i32) -> (i32) {
+  %total$8 = scalar.constant 0 : i32
+  %21 = index.constant 0 : offset
+  %11 = index.cast %count : i32 to offset
+  %12 = index.constant 1 : offset
+  %20 = index.constant 3 : index
+  %total$17 = scf.for %index = [%21 to %11 step %12](%total$16 = %total$8 : i32) -> (i32) unroll(%20) {
+    %18 = index.cast %index : offset to i32
+    %total$19 = scalar.addi %total$16, %18 : i32
+    scf.yield %total$19 : i32
+  }
+  func.return %total$17 : i32
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// A signed-byte factor is promoted independently of the signed induction domain.
+unsigned schedule_signed(int count) {
+  signed char factor = -1;
+  factor += 4;
+  unsigned total = 0;
+  [[loom::unroll(factor)]]
+  for (int index = 0; index < count; ++index) {
+    total += index;
+  }
+  return total;
+}
+// ----
+func.def public @schedule_signed(%count: i32) -> (i32) {
+  %total$10 = scalar.constant 0 : i32
+  %22 = index.constant 0 : index
+  %13 = index.cast %count : i32 to index
+  %14 = index.constant 1 : index
+  %21 = index.constant 3 : index
+  %total$18 = scf.for %index = [%22 to %13 step %14](%total$17 = %total$10 : i32) -> (i32) unroll(%21) {
+    %19 = index.cast %index : index to i32
+    %total$20 = scalar.addi %total$17, %19 : i32
+    scf.yield %total$20 : i32
+  }
+  func.return %total$18 : i32
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// An unevaluated increment neither mutates the count nor changes the loop trip count.
+unsigned schedule_unevaluated(unsigned count) {
+  unsigned total = 0;
+  [[loom::unroll(sizeof(++count) / alignof(unsigned))]]
+  for (unsigned index = 0; index < count; ++index) {
+    total += index;
+  }
+  return total + count + sizeof(long) + 'A';
+}
+// ----
+func.def public @schedule_unevaluated(%count: i32) -> (i32) {
+  %total$2 = scalar.constant 0 : i32
+  %26 = index.constant 0 : offset
+  %5 = index.cast %count : i32 to offset
+  %6 = index.constant 1 : offset
+  %25 = index.constant 1 : index
+  %total$13 = scf.for %index = [%26 to %5 step %6](%total$12 = %total$2 : i32) -> (i32) unroll(%25) {
+    %14 = index.cast %index : offset to i32
+    %total$15 = scalar.addi %total$12, %14 : i32
+    scf.yield %total$15 : i32
+  }
+  %16 = scalar.addi %total$13, %count : i32
+  %17 = scalar.extui %16 : i32 to i64
+  %27 = scalar.constant 73 : i64
+  %28 = scalar.addi %17, %27 : i64
+  %23 = scalar.trunci %28 : i64 to i32
+  func.return %23 : i32
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// The for initializer runs before the schedule snapshots its source binding.
+unsigned schedule_initializer(unsigned count) {
+  int factor = -1;
+  unsigned total = 0;
+  [[loom::unroll(factor)]]
+  for (unsigned index = ++factor; index < count; ++index) {
+    total += index;
+  }
+  return total + factor;
+}
+// ----
+func.def public @schedule_initializer(%count: i32) -> (i32) {
+  %total$5 = scalar.constant 0 : i32
+  %21 = index.constant 0 : offset
+  %9 = index.cast %count : i32 to offset
+  %10 = index.constant 1 : offset
+  %20 = index.constant 0 : index
+  %total$25 = scf.for %index = [%21 to %9 step %10](%total$24 = %total$5 : i32) -> (i32) unroll(%20) {
+    %17 = index.cast %index : offset to i32
+    %total$18 = scalar.addi %total$24, %17 : i32
+    scf.yield %total$18 : i32
+  }
+  func.return %total$25 : i32
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// Zero unroll is retained through the inline helper as the serial policy.
+#include <loomcxx/kernel.h>
+LOOM_INLINE static unsigned sum(unsigned count, unsigned factor) {
+  unsigned total = 0;
+  [[loom::unroll(factor)]]
+  for (unsigned index = 0; index < count; ++index) {
+    total += index;
+  }
+  return total;
+}
+
+unsigned schedule_serial(unsigned count) { return sum(count, 0); }
+// ----
+func.def public @schedule_serial(%count: i32) -> (i32) {
+  %2 = scalar.constant 0 : i32
+  %3 = func.call pure @sum(%count, %2) : (i32, i32) -> (i32)
+  func.return %3 : i32
+}
+
+func.def inline @sum(%count: i32, %factor: i32) -> (i32) {
+  %total$7 = scalar.constant 0 : i32
+  %19 = index.constant 0 : offset
+  %10 = index.cast %count : i32 to offset
+  %11 = index.constant 1 : offset
+  %12 = scalar.extui %factor : i32 to i64
+  %13 = index.cast %12 : i64 to index
+  %total$16 = scf.for %index = [%19 to %10 step %11](%total$15 = %total$7 : i32) -> (i32) unroll(%13) {
+    %17 = index.cast %index : offset to i32
+    %total$18 = scalar.addi %total$15, %17 : i32
+    scf.yield %total$18 : i32
+  }
+  func.return %total$16 : i32
+}

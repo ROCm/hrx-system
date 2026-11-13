@@ -78,8 +78,8 @@ class SpirvModuleCompilerTest : public ::testing::Test {
             loom_spirv_logical_core_descriptor_set,
         };
     loom_target_low_descriptor_registry_initialize_from_tables(
-        &low_registry_, kDescriptorSetProviders,
-        IREE_ARRAYSIZE(kDescriptorSetProviders));
+        kDescriptorSetProviders, IREE_ARRAYSIZE(kDescriptorSetProviders),
+        &low_registry_);
   }
 
   void TearDown() override {

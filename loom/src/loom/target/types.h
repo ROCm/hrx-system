@@ -249,6 +249,10 @@ typedef struct loom_target_snapshot_t {
   // Fixed subgroup size in invocations. Zero means the target has not supplied
   // a target-wide fixed subgroup size.
   uint32_t subgroup_size;
+  // Available execution units in the deployment scope (for example CU, SM,
+  // or CPU worker). Zero means unknown. This is capacity, not kernel residency
+  // or a guarantee of equivalent throughput between targets.
+  uint32_t execution_unit_count;
   // Maximum API/hardware dispatched grid size per dimension, in workitems.
   // Zero dimensions mean the target has not supplied a tighter limit.
   loom_target_grid_size_t max_grid_size;

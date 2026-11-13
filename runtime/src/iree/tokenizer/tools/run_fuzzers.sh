@@ -9,7 +9,7 @@
 #
 # Two modes:
 #
-#   Integration fuzzing (--tokenizer_json):
+#   Integration fuzzing (real tokenizer configuration):
 #     Downloads HuggingFace tokenizer JSONs, then runs each integration fuzz
 #     target against each real tokenizer. Tests the full encode/decode pipeline
 #     with real vocabularies, merge tables, normalizers, and segmenters.
@@ -53,7 +53,7 @@ JOBS=$(( $(nproc) / 2 ))
 RUN_INTEGRATION=1
 RUN_COMPONENT=1
 
-# Integration fuzz targets (use fuzzing_util, accept --tokenizer_json).
+# Integration fuzz targets use fuzzing_util with inherited process settings.
 INTEGRATION_TARGETS=(
   "tokenizer_encode_fuzz"
   "tokenizer_decode_fuzz"
@@ -112,7 +112,7 @@ OPTIONS
 INTEGRATION TARGETS
     Encode, decode, roundtrip, batch encode/decode, ringbuffer fuzzers.
     Each runs against every downloaded HuggingFace tokenizer JSON with
-    --tokenizer_json and --track_offsets flags.
+    offset tracking enabled.
 
 COMPONENT TARGETS
     Normalizer, segmenter, decoder, model, format, vocab, postprocessor,
@@ -210,11 +210,11 @@ run_integration() {
       combo_index=$((combo_index + 1))
       echo "--- [$combo_index/$total_combos] $name x $target ---"
 
-      if ! "$IREE_BAZEL_FUZZ" \
+      if ! IREE_TOKENIZER_FUZZ_TOKENIZER_JSON="${json_path}" \
+        IREE_TOKENIZER_FUZZ_TRACK_OFFSETS=1 \
+        "$IREE_BAZEL_FUZZ" \
         "//runtime/src/iree/tokenizer:${target}" \
         -- \
-        "--tokenizer_json=${json_path}" \
-        "--track_offsets" \
         "-max_total_time=${DURATION}" \
         "-jobs=${JOBS}"; then
         echo ""

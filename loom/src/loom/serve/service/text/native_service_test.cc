@@ -5,8 +5,7 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 #include "iree/base/tooling/flags.h"
-#include "loom/serve/runtime/device/device.h"
-#include "loom/serve/server/resources.h"
+#include "loom/runtime/device/device.h"
 #include "loom/serve/service/text/checkpoint_control.h"
 #include "loom/serve/service/text/service_test_fixture.h"
 #include "loom/serve/service/text/stream.h"
@@ -71,14 +70,13 @@ class NativeTextRegistryTest : public RegisteredSourceTextServiceTest {
 
   void SetUp() override {
     ASSERT_NO_FATAL_FAILURE(RegisteredSourceTextServiceTest::SetUp());
-    resources_.device_group = group_;
-    loom_serve_resources_set_observer(
-        &resources_, {[](void* self) {
-                        iree_notification_post(
-                            static_cast<iree_notification_t*>(self),
-                            IREE_ALL_WAITERS);
-                      },
-                      loom_serve_http_server_notification(server_)});
+    loom_runtime_device_group_set_observer(
+        group_, {[](void* self) {
+                   iree_notification_post(
+                       static_cast<iree_notification_t*>(self),
+                       IREE_ALL_WAITERS);
+                 },
+                 loom_serve_http_server_notification(server_)});
     registration_options_.device_group = group_;
     IREE_ASSERT_OK(loom_serve_registry_allocate(
         0, nullptr, 1,
@@ -114,7 +112,7 @@ class NativeTextRegistryTest : public RegisteredSourceTextServiceTest {
       reader_.join();
     }
     IREE_EXPECT_OK(read_status_);
-    loom_serve_resources_set_observer(&resources_, {});
+    loom_runtime_device_group_set_observer(group_, {});
     RegisteredSourceTextServiceTest::TearDown();
   }
 
@@ -146,7 +144,7 @@ class NativeTextRegistryTest : public RegisteredSourceTextServiceTest {
   template <typename Predicate>
   void AdvanceRegistryUntil(Predicate ready) {
     auto* notification = loom_serve_http_server_notification(server_);
-    const loom_serve_wake_callback_t wake = {
+    const loom_runtime_wake_callback_t wake = {
         [](void* self) {
           iree_notification_post(static_cast<iree_notification_t*>(self),
                                  IREE_ALL_WAITERS);
@@ -155,13 +153,13 @@ class NativeTextRegistryTest : public RegisteredSourceTextServiceTest {
     while (!ready()) {
       const auto ticket = iree_notification_prepare_wait(notification);
       bool progress = false;
-      auto status = loom_serve_resources_advance(&resources_);
+      auto status = loom_runtime_device_group_advance(group_);
       if (iree_status_is_ok(status) &&
           Model()->phase == LOOM_SERVE_REGISTRATION_READY) {
         auto& service = Model()->service;
-        status = service.advance(service.self,
-                                 loom_serve_registry_service_flags(Model()),
-                                 &progress);
+        status = service.runtime.vtable->advance(
+            service.runtime.self, loom_serve_registry_service_flags(Model()),
+            &progress);
       }
       bool registry_progress = false;
       if (iree_status_is_ok(status)) {
@@ -188,9 +186,9 @@ class NativeTextRegistryTest : public RegisteredSourceTextServiceTest {
 
   bool Idle() {
     const auto& service = Model()->service;
-    return !service.is_pending(service.self) &&
-           !service.is_active(service.self) &&
-           !service.snapshot(service.self).queued_requests;
+    return !service.runtime.vtable->is_pending(service.runtime.self) &&
+           !service.runtime.vtable->is_active(service.runtime.self) &&
+           !service.snapshot(service.runtime.self).queued_requests;
   }
 
   iree_status_t Open(const std::string& body, const char* session,
@@ -392,8 +390,6 @@ class NativeTextRegistryTest : public RegisteredSourceTextServiceTest {
 
   // Factory borrows the process-wide physical group through model retirement.
   loom_serve_model_registration_options_t registration_options_ = {};
-  // Shared native allocation progress driven by the serialized serving owner.
-  loom_serve_resources_t resources_ = {};
   // Actual managed service, with no duplicate executor or model loop.
   loom_serve_registry_t* registry_ = nullptr;
   // Stable registry slot, reused only after the prior incarnation retires.
@@ -483,7 +479,7 @@ TEST_F(NativeTextRegistryTest, AbortRetiresAcceptedWorkBeforeReleasingInput) {
     const auto phase = loom_serve_registry_snapshot(Model()).phase;
     return std::string(phase) == "execute";
   }));
-  OwnerTurn::Run(loom_serve_host_executor(host_), [&] {
+  OwnerTurn::Run(loom_runtime_host_executor(host_), [&] {
     IREE_ASSERT_OK(Open(body_, "second", &second));
     ASSERT_NE(second, nullptr);
     EXPECT_EQ(Model()->service.telemetry.counters->batches, 0u);
@@ -591,8 +587,8 @@ TEST_F(NativeTextRegistryTest, StoppingSealsReadyServiceAdmission) {
   ASSERT_NO_FATAL_FAILURE(Prepare());
   bool progress = false;
   auto& service = Model()->service;
-  IREE_ASSERT_OK(service.advance(service.self, LOOM_SERVE_SERVICE_FLAG_STOPPING,
-                                 &progress));
+  IREE_ASSERT_OK(service.runtime.vtable->advance(
+      service.runtime.self, LOOM_RUNTIME_SERVICE_FLAG_STOPPING, &progress));
   NativeStream stream(nullptr, loom_serve_text_stream_close);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_UNAVAILABLE,
                         Open(body_, "after-stop", &stream));
@@ -750,10 +746,11 @@ TEST_F(NativeTextRegistryTest,
   ASSERT_NE(submitted, nullptr);
   auto& service = Model()->service;
   bool progress = false;
-  IREE_ASSERT_OK(service.advance(service.self, 0, &progress));
+  IREE_ASSERT_OK(
+      service.runtime.vtable->advance(service.runtime.self, 0, &progress));
   ASSERT_TRUE(progress);
   ASSERT_FALSE(loom_serve_text_checkpoint_control_is_complete(submitted.get()));
-  ASSERT_EQ(service.snapshot(service.self).active_requests, 1u);
+  ASSERT_EQ(service.snapshot(service.runtime.self).active_requests, 1u);
   submitted.reset();
   ASSERT_NO_FATAL_FAILURE(AdvanceRegistryUntil([&] { return Idle(); }));
 
@@ -967,7 +964,7 @@ TEST_F(NativeTextRegistryTest,
   ASSERT_NO_FATAL_FAILURE(AdvanceRegistryUntil([&] {
     return loom_serve_text_checkpoint_control_is_complete(suspended.get());
   }));
-  if (loom_serve_pool_memory(loom_serve_device_group_pool_at(group_, 0))) {
+  if (loom_runtime_pool_memory(loom_runtime_device_group_pool_at(group_, 0))) {
     IREE_ASSERT_OK(loom_serve_text_checkpoint_control_status(suspended.get()));
     const auto* result =
         loom_serve_text_checkpoint_control_result(suspended.get());

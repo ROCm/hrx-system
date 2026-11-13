@@ -7,7 +7,7 @@ func.def public @call_mixed_i32(%input: vector<1xi32>, %delta: i32) -> (i32, i32
   func.return %mixed, %uniform : i32, i32
 }
 
-func.def @add_i32(%value: i32, %delta: i32) -> (i32) {
+func.def noinline @add_i32(%value: i32, %delta: i32) -> (i32) {
   %wide_value = scalar.extui %value : i32 to i64
   %wide_delta = scalar.extui %delta : i32 to i64
   %sum = scalar.addi %wide_value, %wide_delta : i64
@@ -16,17 +16,14 @@ func.def @add_i32(%value: i32, %delta: i32) -> (i32) {
 }
 
 // ----
-low.func.def public target<vm.core> abi(vm_function) @call_mixed_i32(%19: reg<vm.value : i32>, %delta: reg<vm.value : i32>) -> (reg<vm.value : i32>, reg<vm.value : i32>) asm {
-  %mixed = low.func.call pure @add_i32(%19, %delta) : (reg<vm.value : i32>, reg<vm.value : i32>) -> (reg<vm.value : i32>)
+low.func.def public target<vm.core> abi(vm_function) @call_mixed_i32(%20: reg<vm.value : i32>, %delta: reg<vm.value : i32>) -> (reg<vm.value : i32>, reg<vm.value : i32>) asm {
+  %mixed = low.func.call pure @add_i32(%20, %delta) : (reg<vm.value : i32>, reg<vm.value : i32>) -> (reg<vm.value : i32>)
   %uniform = low.func.call pure @add_i32(%delta, %delta) : (reg<vm.value : i32>, reg<vm.value : i32>) -> (reg<vm.value : i32>)
   return %mixed, %uniform
 }
 
-low.func.def target<vm.core> @add_i32(%value: reg<vm.value : i32>, %delta: reg<vm.value : i32>) -> (reg<vm.value : i32>) asm {
-  %wide_value = conversion.integer %value, "u32.to.i64"
-  %wide_delta = conversion.integer %delta, "u32.to.i64"
-  %sum = integer.add.i64 %wide_value, %wide_delta
-  %result = conversion.integer %sum, "i64.to.i32" : reg<vm.value : i32>
+low.func.def noinline target<vm.core> @add_i32(%value: reg<vm.value : i32>, %delta: reg<vm.value : i32>) -> (reg<vm.value : i32>) asm {
+  %result = integer.add.i32 %value, %delta
   return %result
 }
 
@@ -39,7 +36,7 @@ func.def public @call_mixed_i64(%input: vector<1xi64>, %delta: i64) -> (i64, i64
   func.return %mixed, %uniform : i64, i64
 }
 
-func.def @add_i64(%value: i64, %delta: i64) -> (i64) {
+func.def noinline @add_i64(%value: i64, %delta: i64) -> (i64) {
   %result = scalar.addi %value, %delta : i64
   func.return %result : i64
 }
@@ -51,7 +48,7 @@ low.func.def public target<vm.core> abi(vm_function) @call_mixed_i64(%16: reg<vm
   return %mixed, %uniform
 }
 
-low.func.def target<vm.core> @add_i64(%value: reg<vm.value : i64>, %delta: reg<vm.value : i64>) -> (reg<vm.value : i64>) asm {
+low.func.def noinline target<vm.core> @add_i64(%value: reg<vm.value : i64>, %delta: reg<vm.value : i64>) -> (reg<vm.value : i64>) asm {
   %result = integer.add.i64 %value, %delta
   return %result
 }
@@ -94,7 +91,7 @@ func.def public @call_loop(%input: vector<1xi32>, %delta: i32, %count: index) ->
   func.return %result : i32
 }
 
-func.def @repeat_add(%values: vector<1xi32>, %delta: i32, %count: index) -> (vector<1xi32>) {
+func.def noinline @repeat_add(%values: vector<1xi32>, %delta: i32, %count: index) -> (vector<1xi32>) {
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
   %result = scf.for %i = [%c0 to %count step %c1](%current = %values : vector<1xi32>) -> (vector<1xi32>) {
@@ -106,7 +103,7 @@ func.def @repeat_add(%values: vector<1xi32>, %delta: i32, %count: index) -> (vec
   func.return %result : vector<1xi32>
 }
 
-func.def @advance_i32(%value: i32, %delta: i32) -> (i32) {
+func.def noinline @advance_i32(%value: i32, %delta: i32) -> (i32) {
   %result = scalar.addi %value, %delta : i32
   func.return %result : i32
 }
@@ -117,7 +114,7 @@ low.func.def public target<vm.core> abi(vm_function) @call_loop(%50: reg<vm.valu
   return %54
 }
 
-low.func.def target<vm.core> @repeat_add(%55: reg<vm.value : i32>, %delta: reg<vm.value : i32>, %count: reg<vm.value : i64>) -> (reg<vm.value : i32>) asm {
+low.func.def noinline target<vm.core> @repeat_add(%55: reg<vm.value : i32>, %delta: reg<vm.value : i32>, %count: reg<vm.value : i64>) -> (reg<vm.value : i32>) asm {
   %c0 = constant.i64 0
   %c1 = constant.i64 1
   low.br ^_bb1(%c0: reg<vm.value : i64>, %55: reg<vm.value : i32>)
@@ -132,7 +129,7 @@ low.func.def target<vm.core> @repeat_add(%55: reg<vm.value : i32>, %delta: reg<v
   return %current_slot_0
 }
 
-low.func.def target<vm.core> @advance_i32(%value: reg<vm.value : i32>, %delta: reg<vm.value : i32>) -> (reg<vm.value : i32>) asm {
+low.func.def noinline target<vm.core> @advance_i32(%value: reg<vm.value : i32>, %delta: reg<vm.value : i32>) -> (reg<vm.value : i32>) asm {
   %result = integer.add.i32 %value, %delta
   return %result
 }
@@ -282,7 +279,7 @@ func.def public @call_scalar(%value: i32, %delta: i32) -> (i32) {
   func.return %result : i32
 }
 
-func.def @scalar_add(%value: i32, %delta: i32) -> (i32) {
+func.def noinline @scalar_add(%value: i32, %delta: i32) -> (i32) {
   %result = scalar.addi %value, %delta : i32
   func.return %result : i32
 }
@@ -293,7 +290,7 @@ low.func.def public target<vm.core> abi(vm_function) @call_scalar(%value: reg<vm
   return %result
 }
 
-low.func.def target<vm.core> @scalar_add(%value: reg<vm.value : i32>, %delta: reg<vm.value : i32>) -> (reg<vm.value : i32>) asm {
+low.func.def noinline target<vm.core> @scalar_add(%value: reg<vm.value : i32>, %delta: reg<vm.value : i32>) -> (reg<vm.value : i32>) asm {
   %result = integer.add.i32 %value, %delta
   return %result
 }

@@ -1,0 +1,31 @@
+// RUN: with-checks emit spirv-dis target=spirv:vulkan1.3+bda+hal input=source-low limits=SUBGROUP_SIZE:64 validate
+// REQUIRES: spirv-dis, spirv-val
+
+// Profile transport through the checker reaches source specialization and
+// artifact emission. Only the launch query and subgroup metadata are asserted.
+kernel.def @profile_width() {
+  %unit = index.constant 1 : index
+  %width = target.subgroup.size : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch() {
+  kernel.return
+}
+
+// ----
+CHECK: OpExecutionMode %profile_width LocalSize 64 1 1
+CHECK: OpModuleProcessed "iree.vulkan.bda.v1[profile_width].subgroup_size=64"
+
+// ====
+
+// RUN: emit spirv-dis target=spirv:vulkan1.3+bda+hal input=source-low limits=MAX_WORKGROUP_SIZE_X:16 validate
+// REQUIRES: spirv-dis, spirv-val
+
+// Limits supplied through the checker constrain the compiled launch.
+// ERROR@+1: TARGET/024 {axis="x", size="32", limit="16"}
+kernel.def @oversized_workgroup() {
+  %unit = index.constant 1 : index
+  %width = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch() {
+  kernel.return
+}

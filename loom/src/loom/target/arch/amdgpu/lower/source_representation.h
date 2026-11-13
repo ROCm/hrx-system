@@ -15,16 +15,14 @@
 extern "C" {
 #endif
 
-// Function-local physical representations used for address values connected
-// by structural transport. Narrow values retain their independently selected
-// register bank. Wide values name the exact bank required by every value in
-// the connected carrier component.
+// Address width retained across structural transport. Each value keeps its
+// independently selected register bank: sharing a transport component does not
+// make a uniform cursor vary with another loop-carried value. Control-flow
+// boundaries convert register banks while preserving the component width.
 #define LOOM_AMDGPU_ADDRESS_REPRESENTATION_NARROW \
   ((loom_low_representation_id_t)UINT16_C(256))
-#define LOOM_AMDGPU_ADDRESS_REPRESENTATION_WIDE_SGPR \
+#define LOOM_AMDGPU_ADDRESS_REPRESENTATION_WIDE \
   ((loom_low_representation_id_t)UINT16_C(257))
-#define LOOM_AMDGPU_ADDRESS_REPRESENTATION_WIDE_VGPR \
-  ((loom_low_representation_id_t)UINT16_C(258))
 
 // Source-plan observer selecting exact target representations.
 extern const loom_low_lower_source_plan_observer_t

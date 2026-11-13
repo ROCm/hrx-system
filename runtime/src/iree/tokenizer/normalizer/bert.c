@@ -350,16 +350,6 @@ static iree_status_t iree_tokenizer_normalizer_bert_state_process(
     }
 
     // Non-ASCII byte encountered - decode full codepoint.
-    uint8_t lead_byte = *in_ptr;
-    iree_host_size_t seq_length = iree_unicode_utf8_sequence_length(lead_byte);
-    iree_host_size_t available = (iree_host_size_t)(in_end - in_ptr);
-
-    // Per normalizer contract, input must be on codepoint boundaries.
-    IREE_ASSERT(available >= seq_length,
-                "incomplete UTF-8 at end of normalizer input violates "
-                "interface contract");
-
-    // Decode the codepoint.
     iree_string_view_t remaining = {
         (const char*)in_ptr,
         (iree_host_size_t)(in_end - in_ptr),

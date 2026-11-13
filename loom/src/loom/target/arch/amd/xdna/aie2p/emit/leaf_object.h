@@ -81,7 +81,10 @@ typedef struct loom_aie2p_leaf_realization_t {
   const loom_aie2p_leaf_read_only_data_domain_t* read_only_data;
   // Number of records in |read_only_data|.
   iree_host_size_t read_only_data_count;
-  // Function stack-storage footprint.
+  // Aligned function frame acquired on entry. A helper borrows physical
+  // backing from its caller and therefore has no separate stack domain.
+  uint64_t stack_frame_byte_length;
+  // Complete stack-storage footprint owned by this entry program.
   loom_aie2p_leaf_storage_requirement_t stack;
   // Function scratch-storage footprint.
   loom_aie2p_leaf_storage_requirement_t scratch;

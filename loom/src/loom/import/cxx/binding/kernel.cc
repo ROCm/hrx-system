@@ -71,9 +71,9 @@ std::optional<SubgroupShuffleIntrinsic> SubgroupShuffleIntrinsic::resolve(
   }
   const auto* result = types.record(signature->returnType(), owner);
   if (!result || result->members.size() != 2 ||
-      types.unqualified(result->members[0].field->type()) !=
+      types.unqualified(result->members[0].type()) !=
           types.unqualified(parameters[0]) ||
-      types.unqualified(result->members[1].field->type())->kind() !=
+      types.unqualified(result->members[1].type())->kind() !=
           cxx::TypeKind::kBool) {
     diagnostics.reject(unit, owner,
                        "subgroup shuffle result must be a flat value/bool "

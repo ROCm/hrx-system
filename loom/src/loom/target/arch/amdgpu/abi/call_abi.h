@@ -112,10 +112,10 @@ loom_amdgpu_call_state_t loom_amdgpu_call_state_resolve(
     loom_amdgpu_call_state_provider_t provider, loom_symbol_ref_t callee);
 
 // Adds the physical direct-call carrier required by one target-low type.
-// Returns false unless the type is an SGPR or VGPR range from |descriptor_set|
-// and the accumulated unit count remains representable.
+// Returns false unless the type is an SGPR or VGPR range from
+// |descriptor_set_id| and the accumulated unit count remains representable.
 bool loom_amdgpu_call_abi_add_low_type(
-    const loom_low_descriptor_set_t* descriptor_set, loom_type_t low_type,
+    uint64_t descriptor_set_id, loom_type_t low_type,
     loom_amdgpu_call_abi_requirements_t* inout_requirements);
 
 // Returns true when one argument or result side fits the fixed register ABI.

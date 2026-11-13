@@ -1,0 +1,56 @@
+// RUN: emit source-low @accumulate target=amd.xdna.aie2p:core output=low
+
+// A direct view argument advances as a pointer. The store in one iteration
+// aliases the following iteration's load despite different local displacements.
+func.def noinline @advance(%input: view<2xi32>, %count: index) -> (i32) where [range(%count, 0, 4)] {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %initial_sum = scalar.constant 0 : i32
+  %last, %sum = scf.for %iteration = [%begin to %count step %step](%window = %input : view<2xi32>, %accumulator = %initial_sum : i32) -> (view<2xi32>, i32) {
+    %value = view.load %window[0] : view<2xi32> -> i32
+    %next_sum = scalar.addi %accumulator, %value : i32
+    view.store %next_sum, %window[1] : i32, view<2xi32>
+    %next = view.subview %window[1] : view<2xi32> -> view<2xi32>
+    scf.yield %next, %next_sum : view<2xi32>, i32
+  }
+  %tail = view.load %last[0] : view<2xi32> -> i32
+  %result = scalar.addi %sum, %tail : i32
+  func.return %result : i32
+}
+
+func.def @accumulate(%storage: buffer, %count: index) -> (i32) where [range(%count, 0, 4)] {
+  %origin = index.constant 0 : offset
+  %input = buffer.view %storage[%origin] : buffer -> view<2xi32>
+  %result = func.call @advance(%input, %count) : (view<2xi32>, index) -> (i32)
+  func.return %result : i32
+}
+
+// ----
+low.func.def noinline target<amd.xdna.aie2p.core> @advance(%input: reg<aie2p.ep>, %count: reg<aie2p.er>) -> (reg<aie2p.er>) where [range(%count, 0, 4)] asm {
+  %begin = mov.short 0
+  %step = mov.short 1
+  low.br ^_bb1(%begin: reg<aie2p.er>, %input: reg<aie2p.ep>, %begin: reg<aie2p.er>)
+^_bb1(%iteration: reg<aie2p.er>, %window: reg<aie2p.ep>, %accumulator: reg<aie2p.er>):
+  %39 = lt %iteration, %count
+  low.cond_br %39, ^_bb2, ^_bb3 : reg<aie2p.er>
+^_bb2:
+  %value = lda %window, 0
+  %next_sum = add.nc %accumulator, %value
+  st %next_sum, %window, 4
+  %42 = copy %window : reg<aie2p.ep> -> reg<aie2p.ep>
+  %43 = mova.modifier 4
+  %next = paddb.modifier %42, %43
+  %45 = add.nc %iteration, %step
+  low.br ^_bb1(%45: reg<aie2p.er>, %next: reg<aie2p.ep>, %next_sum: reg<aie2p.er>)
+^_bb3:
+  %tail = lda %window, 0
+  %result = add.nc %accumulator, %tail
+  return %result
+}
+
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @accumulate(%count: reg<aie2p.er>) -> (reg<aie2p.er>) where [range(%count, 0, 4)] asm {
+  %storage = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %input = copy %storage : reg<aie2p.ep> -> reg<aie2p.ep>
+  %result = low.func.call @advance(%input, %count) : (reg<aie2p.ep>, reg<aie2p.er>) -> (reg<aie2p.er>)
+  return %result
+}

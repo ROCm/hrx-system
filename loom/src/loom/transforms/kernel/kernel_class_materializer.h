@@ -12,7 +12,7 @@
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
 #include "loom/ir/ir.h"
-#include "loom/transforms/kernel/kernel_class_classifier.h"
+#include "loom/transforms/kernel/kernel_class_collection.h"
 
 #ifdef __cplusplus
 extern "C" {

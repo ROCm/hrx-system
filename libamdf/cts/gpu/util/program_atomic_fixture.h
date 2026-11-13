@@ -41,7 +41,7 @@ class GpuProgramAtomicTest
     // qualifies shader transactions independently of queue instruction support.
     ASSERT_NO_FATAL_FAILURE(
         this->CreateMemory(AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE,
-                           4096, &control_, BackingFlags()));
+                           4096, BackingFlags(), &control_));
     amdf_memory_atomic_capabilities_t control_operations = {};
     ASSERT_NO_FATAL_FAILURE(
         QueryProgramOperations(*control_, &control_operations));
@@ -69,7 +69,7 @@ class GpuProgramAtomicTest
     ASSERT_NO_FATAL_FAILURE(this->CreateMemory(
         AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE,
         (sizeof(Record) * (kProducerCount + 2) + 4095) & ~UINT64_C(4095),
-        &records_, BackingFlags()));
+        BackingFlags(), &records_));
     amdf_memory_atomic_capabilities_t record_operations = {};
     ASSERT_NO_FATAL_FAILURE(
         QueryProgramOperations(*records_, &record_operations));
@@ -83,8 +83,8 @@ class GpuProgramAtomicTest
     }
     // Arguments are immutable during execution and retain payload policy.
     ASSERT_NO_FATAL_FAILURE(this->CreateMemory(AMDF_MEMORY_ACCESS_READ, 4096,
-                                               &arguments_,
-                                               AMDF_MEMORY_FLAG_HOST_COHERENT));
+                                               AMDF_MEMORY_FLAG_HOST_COHERENT,
+                                               &arguments_));
     ASSERT_EQ(control_->info.memory_class, AMDF_MEMORY_CLASS_SYSTEM);
     if (UsesSystemScope()) {
       ASSERT_NE(control_->access_info.flags & AMDF_MEMORY_FLAG_HOST_COHERENT,

@@ -1,0 +1,47 @@
+// A condition loop may have different input and result groups. Its before
+// region always runs, even when its after region executes zero times.
+// RUN: emit vm-object-lifetime
+
+func.decl import("lifetime", "event") @event(%value: i32)
+
+func.def noinline @widen(%input: buffer, %repeat: i1) -> (i32) {
+  %byte_origin = index.constant 0 : offset
+  %small = buffer.view %input[%byte_origin] : buffer -> view<4xi8>
+  %large = buffer.view %input[%byte_origin] : buffer -> view<8xi8>
+  %result = scf.while(%again = %repeat : i1, %before = %small : view<4xi8>) -> (view<8xi8>) {
+    %first = view.load %before[0] : view<4xi8> -> i8
+    %first_event = scalar.extui %first : i8 to i32
+    func.call @event(%first_event) : (i32)
+    scf.condition %again, %large : i1, view<8xi8>
+  } do(%after: view<8xi8>) {
+    %last = view.load %after[7] : view<8xi8> -> i8
+    %last_event = scalar.extui %last : i8 to i32
+    func.call @event(%last_event) : (i32)
+    %false = scalar.constant false : i1
+    scf.yield %false, %small : i1, view<4xi8>
+  }
+  %last = view.load %result[7] : view<8xi8> -> i8
+  %value = scalar.extui %last : i8 to i32
+  func.return %value : i32
+}
+
+func.def public @run() {
+  %input = buffer.constant bytes("0b00000000000021") : buffer
+  %false = scalar.constant false : i1
+  %true = scalar.constant true : i1
+  %without_after = func.call @widen(%input, %false) : (buffer, i1) -> (i32)
+  func.call @event(%without_after) : (i32)
+  %with_after = func.call @widen(%input, %true) : (buffer, i1) -> (i32)
+  func.call @event(%with_after) : (i32)
+  func.return
+}
+
+// ----
+event 11
+event 33
+event 11
+event 33
+event 11
+event 33
+OK 0
+retired 0

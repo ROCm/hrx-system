@@ -120,7 +120,7 @@ typedef struct loom_amdgpu_encoded_instruction_stream_t {
 iree_status_t loom_amdgpu_encode_instruction_stream(
     const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,
-    iree_const_byte_span_t* out_text, iree_arena_allocator_t* arena);
+    iree_arena_allocator_t* arena, iree_const_byte_span_t* out_text);
 
 // Encodes one instruction stream with target-owned insertion plans built from
 // the same emission frame.
@@ -128,14 +128,14 @@ iree_status_t loom_amdgpu_encode_instruction_stream_with_options(
     const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,
     const loom_amdgpu_encode_instruction_stream_options_t* options,
-    iree_const_byte_span_t* out_text, iree_arena_allocator_t* arena);
+    iree_arena_allocator_t* arena, iree_const_byte_span_t* out_text);
 
 // Encodes one instruction stream and returns text plus relocation fixups.
 iree_status_t loom_amdgpu_encode_instruction_stream_result(
     const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,
-    loom_amdgpu_encoded_instruction_stream_t* out_stream,
-    iree_arena_allocator_t* arena);
+    iree_arena_allocator_t* arena,
+    loom_amdgpu_encoded_instruction_stream_t* out_stream);
 
 // Encodes one instruction stream with target-owned insertion plans built from
 // the same emission frame and returns text plus relocation fixups.
@@ -143,8 +143,8 @@ iree_status_t loom_amdgpu_encode_instruction_stream_result_with_options(
     const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,
     const loom_amdgpu_encode_instruction_stream_options_t* options,
-    loom_amdgpu_encoded_instruction_stream_t* out_stream,
-    iree_arena_allocator_t* arena);
+    iree_arena_allocator_t* arena,
+    loom_amdgpu_encoded_instruction_stream_t* out_stream);
 
 #ifdef __cplusplus
 }  // extern "C"

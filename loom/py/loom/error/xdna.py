@@ -733,9 +733,9 @@ ERR_XDNA_047 = ErrorDef(
     domain=ErrorDomain.XDNA,
     code=47,
     severity=Severity.ERROR,
-    summary="Shim descriptor flags overlap its relocated address.",
+    summary="Configuration flags overlap their relocated address.",
     message=(
-        "shim descriptor flags {flags} set low address bits "
+        "configuration flags {flags} set low address bits "
         "reserved for the range operand"
     ),
     params=(ErrorParam("flags", ParamKind.U32),),
@@ -959,24 +959,51 @@ ERR_XDNA_062 = ErrorDef(
     fix_hint="Select a device profile provided by the AIE2P target family.",
 )
 
-# ERR_XDNA_063: A retained AIE2P helper directly calls another function.
+# ERR_XDNA_063: A retained AIE2P call cycle has no finite stack bound.
 ERR_XDNA_063 = ErrorDef(
     domain=ErrorDomain.XDNA,
     code=63,
     severity=Severity.ERROR,
-    summary="Nested retained AIE2P helper calls are unsupported.",
+    summary="Recursive AIE2P calls have no finite stack bound.",
     message=(
-        "AIE2P retained helper '@{helper_name}' directly calls "
-        "'@{callee_name}', but the current native call contract requires "
-        "helpers to be leaves"
+        "AIE2P function '@{function_name}' participates in a retained call "
+        "cycle with no finite stack bound"
+    ),
+    params=(ErrorParam("function_name", ParamKind.STRING),),
+    fix_hint="Express bounded repetition with a loop instead of recursive calls.",
+)
+
+# ERR_XDNA_064: A function frame cannot be represented by native stack setup.
+ERR_XDNA_064 = ErrorDef(
+    domain=ErrorDomain.XDNA,
+    code=64,
+    severity=Severity.ERROR,
+    summary="AIE2P function stack frame exceeds the native adjustment range.",
+    message=(
+        "AIE2P function '@{function_name}' requires a {required_bytes}-byte "
+        "stack frame, but native frame adjustments support at most "
+        "{maximum_bytes} bytes"
     ),
     params=(
-        ErrorParam("helper_name", ParamKind.STRING),
-        ErrorParam("callee_name", ParamKind.STRING),
+        ErrorParam("function_name", ParamKind.STRING),
+        ErrorParam("required_bytes", ParamKind.U64),
+        ErrorParam("maximum_bytes", ParamKind.U64),
     ),
-    fix_hint=(
-        "Inline calls within the helper while retaining the entry-to-helper boundary."
+    fix_hint="Reduce function-local storage or register pressure.",
+)
+
+# ERR_XDNA_065: A native helper requires entry-only resource binding.
+ERR_XDNA_065 = ErrorDef(
+    domain=ErrorDomain.XDNA,
+    code=65,
+    severity=Severity.ERROR,
+    summary="AIE2P native helper requires entry-owned resources.",
+    message=(
+        "AIE2P retained helper '@{helper_name}' declares resource imports or "
+        "mutable storage; helpers receive their resources through arguments"
     ),
+    params=(ErrorParam("helper_name", ParamKind.STRING),),
+    fix_hint="Declare resources in the entry and pass their addresses to the helper.",
 )
 
 ALL_XDNA_ERRORS = (
@@ -1035,4 +1062,6 @@ ALL_XDNA_ERRORS = (
     ERR_XDNA_061,
     ERR_XDNA_062,
     ERR_XDNA_063,
+    ERR_XDNA_064,
+    ERR_XDNA_065,
 )

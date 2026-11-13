@@ -15,24 +15,26 @@
 #include <array>
 #include <cstddef>
 #include <optional>
+#include <vector>
 
 namespace loom::cxx_import {
 
-// Returns the source expression beneath any implicit conversion sequence.
+// Returns the source expression beneath implicit conversions that preserve
+// its selected subobject.
 cxx::ExpressionAST* strip_implicit_casts(cxx::ExpressionAST* expression);
 
 // Returns the semantic expression beneath implicit conversions, redundant
 // parentheses, and frontend wrappers around selected member initializers.
 cxx::ExpressionAST* unwrap_expression(cxx::ExpressionAST* expression);
 
-// Returns the operand of an explicit static cast to an rvalue reference, or
+// Returns the operand of an explicit static cast to a reference, or
 // null when the expression is not that source category projection.
-cxx::ExpressionAST* explicit_xvalue_operand(cxx::TranslationUnit& unit,
-                                            cxx::ExpressionAST* expression);
+cxx::ExpressionAST* explicit_reference_operand(cxx::TranslationUnit& unit,
+                                               cxx::ExpressionAST* expression);
 
 // Returns the object beneath transparent source wrappers and any explicit
-// xvalue category projections. Identity-preserving conversions are unwrapped;
-// a prvalue conversion remains as the producer of its temporary object.
+// reference category projections. Subobject adjustments and conversion calls
+// remain visible; a prvalue conversion remains the producer of its temporary.
 // Callers retain the original expression for cv and category rules selected by
 // the frontend.
 cxx::ExpressionAST* unwrap_object_identity(cxx::TranslationUnit& unit,
@@ -47,6 +49,28 @@ cxx::ImplicitCastExpressionAST* constructor_conversion(
 // Whether two resolved source functions denote the same canonical entity.
 bool same_function(cxx::FunctionSymbol* left, cxx::FunctionSymbol* right);
 
+// Explicit arguments of a selected constructor, including functional-cast
+// syntax. A construction expression is the call, not its own first argument.
+std::vector<cxx::ExpressionAST*> constructor_arguments(
+    cxx::ExpressionAST* initializer);
+
+// A nontrivial array-member copy has one source array and a selected leaf
+// constructor. Default arguments are frontend-completed once, then evaluated
+// independently for each leaf, just as in ordinary constructor calls.
+struct ArrayCopyInitialization {
+  // Source array with its original cv qualifiers and value category.
+  cxx::ExpressionAST* source;
+  // Selected nontrivial element constructor.
+  cxx::FunctionSymbol* constructor;
+  // Normalized arguments following the source-element reference.
+  std::vector<cxx::ExpressionAST*> default_arguments;
+};
+
+std::optional<ArrayCopyInitialization> array_copy_initialization(
+    cxx::TranslationUnit& unit, cxx::ScopeSymbol* scope, const cxx::Type* type,
+    cxx::ExpressionAST* initializer, cxx::FunctionSymbol* constructor,
+    cxx::AST* owner);
+
 // Returns the string literal initializing one object, including a single
 // braced clause and transparent expression wrappers, or null otherwise.
 const cxx::StringLiteral* string_initializer(cxx::ExpressionAST* initializer);
@@ -57,14 +81,30 @@ const cxx::StringLiteral* string_initializer(cxx::ExpressionAST* initializer);
 bool is_current_object(cxx::TranslationUnit& unit,
                        cxx::ExpressionAST* expression);
 
+// One non-static field reached through a closure's captured this pointer.
+// Frontend symbols retain both the synthesized pointer field and the original
+// object's nominal type; consumers need not recover either from expression
+// spelling.
+struct CapturedObjectMember {
+  // Synthesized closure field carrying the captured this pointer.
+  cxx::FieldSymbol* pointer_field;
+  // Unqualified class type declaring |member|.
+  const cxx::ClassType* object_type;
+};
+
+// Returns the captured object contract when |closure| captures this and
+// |member| belongs to that object. Static fields never use object identity.
+std::optional<CapturedObjectMember> captured_object_member(
+    cxx::TranslationUnit& unit, cxx::ClassSymbol* closure, cxx::Symbol* member);
+
 // Returns the directly named function called by |call|, or null for indirect
 // calls and other callable expressions.
 cxx::FunctionSymbol* direct_callee(cxx::CallExpressionAST* call);
 
 // Evaluation sequence imposed by the source operator notation. Forward visits
 // the receiver followed by explicit arguments, or only the explicit arguments
-// when no receiver exists. Compound assignment is the only admitted form that
-// evaluates in another order.
+// when no receiver exists. Assignment notation evaluates the right operand
+// before the destination.
 enum class OperatorEvaluationOrder {
   Forward,
   ArgumentsThenReceiver,
@@ -94,8 +134,8 @@ struct DirectOperatorCall {
 };
 
 // Returns the directly selected ordinary function and source operand contract
-// for unary, binary, compound-assignment, and postfix operator syntax. Builtin
-// operators and call/subscript syntax return no value.
+// for unary, binary, compound-assignment, postfix, and implicit conversion
+// operator syntax. Builtin operators and call/subscript syntax return no value.
 std::optional<DirectOperatorCall> direct_operator_call(
     cxx::ExpressionAST* expression);
 
@@ -103,10 +143,6 @@ std::optional<DirectOperatorCall> direct_operator_call(
 // function, or null when the function has no implicit object parameter.
 const cxx::Type* implicit_object_type(cxx::TranslationUnit& unit,
                                       cxx::FunctionSymbol* function);
-
-// Whether a call may replace value components of its implicit object. Const
-// functions only qualify when their record declares mutable fields.
-bool implicit_object_may_mutate(cxx::FunctionSymbol* function);
 
 // Returns the declaration syntax beneath a condition's contextual conversion,
 // or null when the condition is an ordinary expression.

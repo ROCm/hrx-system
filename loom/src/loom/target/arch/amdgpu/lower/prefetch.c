@@ -278,8 +278,9 @@ iree_status_t loom_amdgpu_record_view_prefetch_diagnostic(
       loom_target_low_legality_fact_table(context), descriptor_set,
       view_regions, analysis, source_op, &plan, &descriptor, &decision_key);
   const iree_string_view_t packet_key =
-      descriptor ? loom_low_descriptor_set_string(descriptor_set,
-                                                  descriptor->key_string_ref)
+      descriptor ? loom_low_descriptor_set_string(
+                       descriptor_set, loom_low_descriptor_key_string_ref(
+                                           descriptor_set, descriptor))
                  : IREE_SV("<none>");
   return loom_target_low_legality_record_memory_prefetch(
       context, source_op,

@@ -1,0 +1,124 @@
+// RUN: roundtrip
+#include <loomcxx/scalar.h>
+
+float formats(_Float16 half, __bf16 bfloat, float single, double wide) {
+  return float(loom::scalar::absf(half)) +
+         float(loom::scalar::absf(bfloat)) + loom::scalar::absf(single) +
+         float(loom::scalar::absf(wide));
+}
+
+float approximate(float value) {
+  return loom::scalar::approximate::expf(value);
+}
+
+__bf16 explicit_conversion(__bf16 value) {
+  return loom::scalar::mulf<__bf16>(value, 5.0f);
+}
+
+// ----
+func.def public @formats(%half: f16, %bfloat: bf16, %single: f32, %wide: f64) -> (f32) {
+  %5 = scalar.absf %half : f16
+  %6 = scalar.extf %5 : f16 to f32
+  %7 = scalar.absf %bfloat : bf16
+  %8 = scalar.extf %7 : bf16 to f32
+  %9 = scalar.addf %6, %8 : f32
+  %10 = scalar.absf %single : f32
+  %11 = scalar.addf %9, %10 : f32
+  %12 = scalar.absf %wide : f64
+  %13 = scalar.fptrunc %12 : f64 to f32
+  %14 = scalar.addf %11, %13 : f32
+  func.return %14 : f32
+}
+
+func.def public @approximate(%value: f32) -> (f32) {
+  %17 = scalar.expf<afn> %value : f32
+  func.return %17 : f32
+}
+
+func.def public @explicit_conversion(%value: bf16) -> (bf16) {
+  %20 = scalar.constant 5.0 : f32
+  %21 = scalar.fptrunc %20 : f32 to bf16
+  %22 = scalar.mulf %value, %21 : bf16
+  func.return %22 : bf16
+}
+
+// ====
+template <class Float>
+[[loom::op("scalar.divf", "arcp", "afn")]] Float divide(Float, Float);
+template <class Float>
+[[loom::op("scalar.divf", "arcp", "afn")]] Float divide(Float, Float);
+
+float single(float lhs, float rhs) { return divide(lhs, rhs); }
+double wide(double lhs, double rhs) { return divide(lhs, rhs); }
+
+// ----
+func.def public @single(%lhs: f32, %rhs: f32) -> (f32) {
+  %3 = scalar.divf<arcp|afn> %lhs, %rhs : f32
+  func.return %3 : f32
+}
+
+func.def public @wide(%lhs: f64, %rhs: f64) -> (f64) {
+  %7 = scalar.divf<arcp|afn> %lhs, %rhs : f64
+  func.return %7 : f64
+}
+
+// ====
+#include <loomcxx/scalar.h>
+
+float native_turns(float value) {
+  return loom::scalar::approximate::sinturnsf(value);
+}
+
+[[loom::fastmath]] float preserved_turns(float value) {
+  return loom::scalar::approximate::preserved::sinturnsf(value) +
+         loom::scalar::approximate::preserved::costurnsf(value);
+}
+
+_Float16 preserved_sine(_Float16 value) {
+  return loom::scalar::approximate::preserved::sinf(value);
+}
+
+__bf16 preserved_cosine(__bf16 value) {
+  return loom::scalar::approximate::preserved::cosf(value);
+}
+
+[[loom::inline]] static float preserved_helper(float value) {
+  return loom::scalar::approximate::preserved::sinturnsf(value);
+}
+
+[[loom::fastmath]] float relaxed_caller(float value) {
+  return preserved_helper(value);
+}
+
+// ----
+func.def public @native_turns(%value: f32) -> (f32) {
+  %2 = scalar.sinturnsf<afn> %value : f32
+  func.return %2 : f32
+}
+
+func.def public @preserved_turns(%value: f32) -> (f32) {
+  %5 = scalar.sinturnsf<reassoc|nnan|ninf|nsz|arcp|contract|afn|preserve> %value : f32
+  %6 = scalar.costurnsf<reassoc|nnan|ninf|nsz|arcp|contract|afn|preserve> %value : f32
+  %7 = scalar.addf<reassoc|nnan|ninf|nsz|arcp|contract|afn> %5, %6 : f32
+  func.return %7 : f32
+}
+
+func.def public @preserved_sine(%value: f16) -> (f16) {
+  %10 = scalar.sinf<afn|preserve> %value : f16
+  func.return %10 : f16
+}
+
+func.def public @preserved_cosine(%value: bf16) -> (bf16) {
+  %13 = scalar.cosf<afn|preserve> %value : bf16
+  func.return %13 : bf16
+}
+
+func.def public @relaxed_caller(%value: f32) -> (f32) {
+  %16 = func.call pure @preserved_helper(%value) : (f32) -> (f32)
+  func.return %16 : f32
+}
+
+func.def inline @preserved_helper(%value: f32) -> (f32) {
+  %19 = scalar.sinturnsf<afn|preserve> %value : f32
+  func.return %19 : f32
+}

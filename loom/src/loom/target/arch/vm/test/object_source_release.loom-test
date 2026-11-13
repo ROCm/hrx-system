@@ -1,0 +1,255 @@
+// Shared lowering retains explicit owner and pointer retirement in order.
+// RUN: emit source-low output=low
+vm.target<core> @vm
+
+type.decl import("lifetime", "object") @Object
+
+func.def target(@vm) @release(%owner: ref<@Object>, %pointer: ptr<@Object>) {
+  ref.release %owner : ref<@Object>
+  ref.release %pointer : ptr<@Object>
+  func.return
+}
+
+// ----
+low.func.def target<vm.core>(@vm) abi(vm_function) @release(%owner: reg<vm.ref : ref<@Object>>, %pointer: reg<vm.ref : ptr<@Object>>) asm {
+  low.release %owner : reg<vm.ref : ref<@Object>>
+  low.release %pointer : reg<vm.ref : ptr<@Object>>
+  return
+}
+
+// ====
+
+// A copied owner is independent. Its explicit release remains the finalization
+// boundary after its last borrowed read; the borrow requires no extra owner.
+// RUN: emit vm-object-lifetime
+type.decl import("lifetime", "object") @Object
+
+func.decl import("lifetime", "create") @create(%id: i32) -> (ref<@Object>, ptr<@Object>)
+
+func.decl import("lifetime", "count") @count(%pointer: ptr<@Object>)
+
+func.decl import("lifetime", "read") @read(%pointer: ptr<@Object>)
+
+func.decl import("lifetime", "observe") @observe()
+
+func.def public @run() {
+  %id = scalar.constant 1 : i32
+  %owner, %unused = func.call @create(%id) : (i32) -> (ref<@Object>, ptr<@Object>)
+  %copy = ref.duplicate %owner : ref<@Object>
+  ref.release %owner : ref<@Object>
+  func.call @observe() : ()
+  %pointer = ref.borrow %copy : ref<@Object> -> ptr<@Object>
+  func.call @count(%pointer) : (ptr<@Object>)
+  func.call @read(%pointer) : (ptr<@Object>)
+  ref.release %pointer : ptr<@Object>
+  func.call @observe() : ()
+  ref.release %copy : ref<@Object>
+  func.call @observe() : ()
+  func.return
+}
+
+// ----
+create 1
+live 1
+references 1
+read 1
+live 1
+destroy 1
+live 0
+OK 0
+retired 0
+
+// ====
+
+// A saved pointer protects the payload across source release and retires after
+// its final read, before an unrelated observer.
+// RUN: emit vm-object-lifetime
+type.decl import("lifetime", "object") @Object
+
+func.decl import("lifetime", "create") @create(%id: i32) -> (ref<@Object>, ptr<@Object>)
+
+func.decl import("lifetime", "read") @read(%pointer: ptr<@Object>)
+
+func.decl import("lifetime", "observe") @observe()
+
+func.def public @run() {
+  %id = scalar.constant 2 : i32
+  %owner, %unused = func.call @create(%id) : (i32) -> (ref<@Object>, ptr<@Object>)
+  // REMARK@+1: DOMINANCE/021
+  %pointer = ref.borrow %owner : ref<@Object> -> ptr<@Object>
+  ref.release %owner : ref<@Object>
+  func.call @read(%pointer) : (ptr<@Object>)
+  func.call @observe() : ()
+  func.return
+}
+
+// ----
+create 2
+read 2
+destroy 2
+live 0
+OK 0
+retired 0
+
+// ====
+
+// Explicit pointer release retires acquired protection without invalidating
+// independent copies. Both null modes have no payload effect.
+// RUN: emit vm-object-lifetime
+type.decl import("lifetime", "object") @Object
+
+func.decl import("lifetime", "create") @create(%id: i32) -> (ref<@Object>, ptr<@Object>)
+
+func.decl import("lifetime", "create_null") @create_null() -> (ref<@Object>, ptr<@Object>)
+
+func.decl import("lifetime", "observe") @observe()
+
+func.def public @run() {
+  %id = scalar.constant 3 : i32
+  %owner, %pointer = func.call @create(%id) : (i32) -> (ref<@Object>, ptr<@Object>)
+  %copy = ref.duplicate %pointer : ptr<@Object>
+  ref.release %owner : ref<@Object>
+  ref.release %pointer : ptr<@Object>
+  func.call @observe() : ()
+  ref.release %copy : ptr<@Object>
+  func.call @observe() : ()
+  %null_owner, %null_pointer = func.call @create_null() : () -> (ref<@Object>, ptr<@Object>)
+  ref.release %null_owner : ref<@Object>
+  ref.release %null_pointer : ptr<@Object>
+  func.call @observe() : ()
+  func.return
+}
+
+// ----
+create 3
+live 1
+destroy 3
+live 0
+live 0
+OK 0
+retired 0
+
+// ====
+
+// Each branch releases the unselected owner and transfers the selected one.
+// Both directions execute through a non-inlined call and its normal return.
+// RUN: emit vm-object-lifetime
+type.decl import("lifetime", "object") @Object
+
+func.decl import("lifetime", "create") @create(%id: i32) -> (ref<@Object>, ptr<@Object>)
+
+func.decl import("lifetime", "observe") @observe()
+
+func.def noinline @select(%condition: i1, %left: ref<@Object>, %right: ref<@Object>) -> (ref<@Object>) {
+  cfg.cond_br %condition, ^left, ^right
+^left:
+  ref.release %right : ref<@Object>
+  func.return %left : ref<@Object>
+^right:
+  ref.release %left : ref<@Object>
+  func.return %right : ref<@Object>
+}
+
+func.def public @run() {
+  %first = scalar.constant 4 : i32
+  %second = scalar.constant 5 : i32
+  %yes = scalar.constant true : i1
+  %no = scalar.constant false : i1
+  %left, %unused_left = func.call @create(%first) : (i32) -> (ref<@Object>, ptr<@Object>)
+  %right, %unused_right = func.call @create(%second) : (i32) -> (ref<@Object>, ptr<@Object>)
+  %selected_left = func.call @select(%yes, %left, %right) : (i1, ref<@Object>, ref<@Object>) -> (ref<@Object>)
+  func.call @observe() : ()
+  ref.release %selected_left : ref<@Object>
+  func.call @observe() : ()
+  %next_left, %unused_next_left = func.call @create(%first) : (i32) -> (ref<@Object>, ptr<@Object>)
+  %next_right, %unused_next_right = func.call @create(%second) : (i32) -> (ref<@Object>, ptr<@Object>)
+  %selected_right = func.call @select(%no, %next_left, %next_right) : (i1, ref<@Object>, ref<@Object>) -> (ref<@Object>)
+  func.call @observe() : ()
+  ref.release %selected_right : ref<@Object>
+  func.call @observe() : ()
+  func.return
+}
+
+// ----
+create 4
+create 5
+destroy 5
+live 1
+destroy 4
+live 0
+create 4
+create 5
+destroy 4
+live 1
+destroy 5
+live 0
+OK 0
+retired 0
+
+// ====
+
+// Terminal abort releases the remaining owner without releasing the owner
+// that source code already retired, or executing the subsequent normal path.
+// RUN: emit vm-object-lifetime
+type.decl import("lifetime", "object") @Object
+
+func.decl import("lifetime", "create") @create(%id: i32) -> (ref<@Object>, ptr<@Object>)
+
+func.decl import("lifetime", "fail") @fail()
+
+func.def public @run() {
+  %first = scalar.constant 6 : i32
+  %second = scalar.constant 7 : i32
+  %left, %unused_left = func.call @create(%first) : (i32) -> (ref<@Object>, ptr<@Object>)
+  %right, %unused_right = func.call @create(%second) : (i32) -> (ref<@Object>, ptr<@Object>)
+  ref.release %left : ref<@Object>
+  func.call @fail() : ()
+  ref.release %right : ref<@Object>
+  func.return
+}
+
+// ----
+create 6
+create 7
+destroy 6
+fail 1
+destroy 7
+ABORTED 0
+retired 0
+
+// ====
+
+// Releasing a borrowed callee parameter ends that local handle, not the
+// caller's independently live pointer.
+// RUN: emit vm-object-lifetime
+type.decl import("lifetime", "object") @Object
+
+func.decl import("lifetime", "create") @create(%id: i32) -> (ref<@Object>, ptr<@Object>)
+
+func.decl import("lifetime", "read") @read(%pointer: ptr<@Object>)
+
+func.decl import("lifetime", "observe") @observe()
+
+func.def noinline @drop(%pointer: ptr<@Object>) {
+  ref.release %pointer : ptr<@Object>
+  func.return
+}
+
+func.def public @run() {
+  %id = scalar.constant 8 : i32
+  %owner, %pointer = func.call @create(%id) : (i32) -> (ref<@Object>, ptr<@Object>)
+  ref.release %owner : ref<@Object>
+  func.call @drop(%pointer) : (ptr<@Object>)
+  func.call @read(%pointer) : (ptr<@Object>)
+  ref.release %pointer : ptr<@Object>
+  func.call @observe() : ()
+  func.return
+}
+
+// ----
+create 8
+read 8
+destroy 8
+live 0
+OK 0
+retired 0

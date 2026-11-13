@@ -8,6 +8,7 @@
 
 #include <string.h>
 
+#include "loom/ops/func_symbol_facts.h"
 #include "loom/ops/op_defs.h"
 #include "loom/ops/target/facts.h"
 #include "loom/ops/template/ops.h"
@@ -40,6 +41,7 @@ typedef enum loom_template_decision_signature_lookup_mode_e {
   LOOM_TEMPLATE_DECISION_SIGNATURE_LOOKUP_LINEAR = 0,
   LOOM_TEMPLATE_DECISION_SIGNATURE_LOOKUP_ORDERED = 1,
   LOOM_TEMPLATE_DECISION_SIGNATURE_LOOKUP_MAPPED = 2,
+  LOOM_TEMPLATE_DECISION_SIGNATURE_LOOKUP_ORDINAL = 3,
 } loom_template_decision_signature_lookup_mode_t;
 
 typedef struct loom_template_decision_operand_map_entry_t {
@@ -126,18 +128,20 @@ static iree_status_t loom_template_decision_add_count(iree_host_size_t amount,
 static iree_status_t loom_template_decision_count_contract(
     bool has_target_requirement, const loom_predicate_t* predicates,
     uint16_t predicate_count, const loom_target_condition_t* target_conditions,
-    uint16_t target_condition_count,
+    uint16_t target_condition_count, const loom_input_contract_t* inputs,
     loom_template_decision_build_family_t* build_family,
     uint32_t* out_value_reference_count) {
   *out_value_reference_count = 0;
   const uint32_t target_identity_count = has_target_requirement ? 1 : 0;
-  if ((uint32_t)target_condition_count + target_identity_count > UINT16_MAX) {
+  const uint32_t input_count = inputs ? inputs->count : 0;
+  if ((uint32_t)target_condition_count + target_identity_count + input_count >
+      UINT16_MAX) {
     return iree_make_status(
         IREE_STATUS_RESOURCE_EXHAUSTED,
         "template applicability contract has too many target requirements");
   }
   IREE_RETURN_IF_ERROR(loom_template_decision_add_count(
-      target_identity_count + target_condition_count,
+      target_identity_count + target_condition_count + input_count,
       &build_family->feature_count));
   IREE_RETURN_IF_ERROR(loom_template_decision_add_count(
       predicate_count, &build_family->predicate_count));
@@ -154,6 +158,9 @@ static iree_status_t loom_template_decision_count_contract(
     }
   }
 
+  if (input_count) {
+    build_family->model->flags |= LOOM_TEMPLATE_DECISION_MODEL_FLAG_HAS_INPUTS;
+  }
   if (predicate_count > 0) {
     build_family->model->flags |=
         LOOM_TEMPLATE_DECISION_MODEL_FLAG_HAS_SCALAR_PREDICATES;
@@ -268,7 +275,8 @@ static bool loom_template_decision_signature_needs_operand_map(
 static void loom_template_decision_prepare_signature_lookup(
     const loom_value_id_t* argument_ids, uint16_t argument_count,
     const loom_value_id_t* result_ids, uint16_t result_count,
-    const loom_predicate_t* predicates, uint16_t predicate_count,
+    bool predicates_use_ordinals, const loom_predicate_t* predicates,
+    uint16_t predicate_count,
     loom_template_decision_operand_map_entry_t* operand_map,
     loom_template_decision_signature_lookup_t* out_lookup) {
   *out_lookup = (loom_template_decision_signature_lookup_t){
@@ -278,6 +286,10 @@ static void loom_template_decision_prepare_signature_lookup(
       .result_count = result_count,
       .mode = LOOM_TEMPLATE_DECISION_SIGNATURE_LOOKUP_LINEAR,
   };
+  if (predicates_use_ordinals) {
+    out_lookup->mode = LOOM_TEMPLATE_DECISION_SIGNATURE_LOOKUP_ORDINAL;
+    return;
+  }
   const uint32_t signature_count = (uint32_t)argument_count + result_count;
   if (signature_count <= 8) {
     return;
@@ -420,6 +432,11 @@ loom_template_decision_compile_value_operand(
     case LOOM_TEMPLATE_DECISION_SIGNATURE_LOOKUP_MAPPED:
       return loom_template_decision_find_signature_operand_mapped(
           signature_lookup, value_id);
+    case LOOM_TEMPLATE_DECISION_SIGNATURE_LOOKUP_ORDINAL:
+      return value_id < signature_lookup->argument_count
+                 ? loom_decision_program_argument_ref(value_id)
+                 : loom_decision_program_result_ref(
+                       value_id - signature_lookup->argument_count);
   }
   IREE_ASSERT_UNREACHABLE("invalid template signature lookup mode");
   IREE_BUILTIN_UNREACHABLE();
@@ -430,22 +447,20 @@ static void loom_template_decision_compile_contract(
     loom_symbol_ref_t target_symbol, const loom_target_facts_t* target_facts,
     const loom_value_id_t* argument_ids, uint16_t argument_count,
     const loom_value_id_t* result_ids, uint16_t result_count,
-    const loom_predicate_t* source_predicates, uint16_t source_predicate_count,
+    bool predicates_use_ordinals, const loom_predicate_t* source_predicates,
+    uint16_t source_predicate_count,
     const loom_target_condition_t* target_conditions,
-    uint16_t target_condition_count,
+    uint16_t target_condition_count, const loom_input_contract_t* inputs,
     loom_template_decision_operand_map_entry_t* operand_map,
     loom_template_decision_build_cursor_t* cursor,
     loom_decision_program_conjunction_t* out_conjunction) {
-  loom_template_decision_signature_lookup_t signature_lookup;
-  loom_template_decision_prepare_signature_lookup(
-      argument_ids, argument_count, result_ids, result_count, source_predicates,
-      source_predicate_count, operand_map, &signature_lookup);
   *out_conjunction = (loom_decision_program_conjunction_t){
       .first_predicate = cursor->predicate_ordinal - cursor->predicate_ref_base,
       .first_feature = cursor->feature_ordinal - cursor->feature_ref_base,
       .predicate_count = source_predicate_count,
       .feature_count =
-          (uint16_t)(target_condition_count + (has_target_requirement ? 1 : 0)),
+          (uint16_t)(target_condition_count + (has_target_requirement ? 1 : 0) +
+                     (inputs ? inputs->count : 0)),
   };
 
   if (has_target_requirement) {
@@ -468,6 +483,23 @@ static void loom_template_decision_compile_contract(
     ++cursor->feature_ordinal;
   }
 
+  if (inputs) {
+    for (uint32_t i = 0; i < inputs->count; ++i) {
+      *cursor->features++ = (loom_template_decision_feature_t){
+          .kind = LOOM_TEMPLATE_DECISION_FEATURE_INPUT,
+          .value.input = inputs->values[i],
+      };
+      ++cursor->feature_ordinal;
+    }
+  }
+  if (source_predicate_count == 0) {
+    return;
+  }
+  loom_template_decision_signature_lookup_t signature_lookup;
+  loom_template_decision_prepare_signature_lookup(
+      argument_ids, argument_count, result_ids, result_count,
+      predicates_use_ordinals, source_predicates, source_predicate_count,
+      operand_map, &signature_lookup);
   for (uint16_t i = 0; i < source_predicate_count; ++i) {
     const loom_predicate_t* source = &source_predicates[i];
     loom_decision_program_predicate_t* predicate = cursor->predicates++;
@@ -495,8 +527,8 @@ static void loom_template_decision_build_family(
     loom_template_decision_ranked_choice_t* ranked_choices,
     loom_decision_program_choice_t* choices,
     loom_decision_program_priority_group_t* priority_groups,
-    uint32_t* out_priority_group_count,
-    loom_template_decision_build_cursor_t* cursor) {
+    loom_template_decision_build_cursor_t* cursor,
+    uint32_t* out_priority_group_count) {
   loom_template_decision_model_t* model = build_family->model;
 
   const uint32_t first_feature = cursor->feature_ordinal;
@@ -513,11 +545,12 @@ static void loom_template_decision_build_family(
       build_family->family_facts->argument_count,
       build_family->family_facts->result_ids,
       build_family->family_facts->result_count,
-      build_family->family_facts->predicates,
+      /*predicates_use_ordinals=*/false, build_family->family_facts->predicates,
       build_family->family_facts->predicate_count,
       build_family->family_facts->target_conditions,
-      build_family->family_facts->target_condition_count, operand_map, cursor,
-      &model->program.hard_requirements);
+      build_family->family_facts->target_condition_count,
+      loom_func_symbol_input_contract(build_family->family_facts), operand_map,
+      cursor, &model->program.hard_requirements);
 
   for (uint32_t i = 0; i < model->providers.count; ++i) {
     const loom_template_provider_summary_t* provider =
@@ -525,11 +558,16 @@ static void loom_template_decision_build_family(
     loom_decision_program_conjunction_t conjunction = {0};
     loom_template_decision_compile_contract(
         provider->has_target_requirement, provider->module,
-        provider->target_symbol, provider->target_facts, provider->argument_ids,
-        provider->argument_count, provider->result_ids, provider->result_count,
+        provider->target_symbol, provider->target_facts,
+        (provider->source_function ? provider->source_function->argument_ids
+                                   : NULL),
+        provider->argument_count,
+        (provider->source_function ? provider->source_function->result_ids
+                                   : NULL),
+        provider->result_count, provider->predicates_use_ordinals,
         provider->predicates, provider->predicate_count,
         provider->target_conditions, provider->target_condition_count,
-        operand_map, cursor, &conjunction);
+        provider->input_contract, operand_map, cursor, &conjunction);
     const loom_decision_program_choice_t choice = {
         .conjunction = conjunction,
         .action_ordinal = i,
@@ -698,8 +736,9 @@ iree_status_t loom_template_decision_model_catalog_build(
         build_family->family_facts->predicates,
         build_family->family_facts->predicate_count,
         build_family->family_facts->target_conditions,
-        build_family->family_facts->target_condition_count, build_family,
-        &family_value_reference_count));
+        build_family->family_facts->target_condition_count,
+        loom_func_symbol_input_contract(build_family->family_facts),
+        build_family, &family_value_reference_count));
     if (loom_template_decision_signature_needs_operand_map(
             build_family->family_facts->argument_ids,
             build_family->family_facts->argument_count,
@@ -726,12 +765,17 @@ iree_status_t loom_template_decision_model_catalog_build(
       IREE_RETURN_IF_ERROR(loom_template_decision_count_contract(
           provider->has_target_requirement, provider->predicates,
           provider->predicate_count, provider->target_conditions,
-          provider->target_condition_count, build_family,
-          &provider_value_reference_count));
-      if (loom_template_decision_signature_needs_operand_map(
-              provider->argument_ids, provider->argument_count,
-              provider->result_ids, provider->result_count,
-              provider_value_reference_count)) {
+          provider->target_condition_count, provider->input_contract,
+          build_family, &provider_value_reference_count));
+      if (!provider->predicates_use_ordinals &&
+          loom_template_decision_signature_needs_operand_map(
+              (provider->source_function
+                   ? provider->source_function->argument_ids
+                   : NULL),
+              provider->argument_count,
+              (provider->source_function ? provider->source_function->result_ids
+                                         : NULL),
+              provider->result_count, provider_value_reference_count)) {
         const uint32_t provider_signature_count =
             provider->argument_count + provider->result_count;
         maximum_operand_map_count =
@@ -815,7 +859,7 @@ iree_status_t loom_template_decision_model_catalog_build(
       loom_template_decision_build_family(
           &build_families[i], operand_map, ranked_choices,
           choices + choice_ordinal, priority_groups + priority_group_ordinal,
-          &family_priority_group_count, &cursor);
+          &cursor, &family_priority_group_count);
       choice_ordinal += build_families[i].model->program.choice_count;
       priority_group_ordinal += family_priority_group_count;
     }
@@ -866,7 +910,8 @@ loom_template_decision_model_application_fact_requirements(
     const loom_template_decision_model_t* model,
     const loom_template_demand_t* demand) {
   const bool has_scalar_predicates = iree_any_bit_set(
-      model->flags, LOOM_TEMPLATE_DECISION_MODEL_FLAG_HAS_SCALAR_PREDICATES);
+      model->flags, LOOM_TEMPLATE_DECISION_MODEL_FLAG_HAS_SCALAR_PREDICATES |
+                        LOOM_TEMPLATE_DECISION_MODEL_FLAG_HAS_INPUTS);
   loom_template_decision_fact_requirements_t requirements =
       has_scalar_predicates ? LOOM_TEMPLATE_DECISION_FACT_REQUIREMENT_VALUES
                             : 0;
@@ -939,6 +984,11 @@ static loom_decision_truth_t loom_template_decision_evaluate_feature(
       }
       return loom_template_decision_truth_from_feasibility(feasibility);
     }
+    case LOOM_TEMPLATE_DECISION_FEATURE_INPUT:
+      return loom_template_applicability_evaluate_input(
+          context->model->module,
+          loom_op_const_operands(context->site->application_op),
+          &feature->value.input, context->site->application_facts);
     case LOOM_TEMPLATE_DECISION_FEATURE_TARGET_CONDITION:
       return loom_template_decision_truth_from_feasibility(
           loom_template_applicability_evaluate_target_condition(
@@ -1007,8 +1057,9 @@ void loom_template_decision_model_evaluate(
     const loom_template_decision_model_t* model,
     const loom_template_decision_site_t* site,
     loom_decision_program_resolution_policy_t resolution_policy,
+    uint32_t* live_provider_ordinals,
     loom_template_decision_evidence_summary_t* out_summary,
-    uint32_t* live_provider_ordinals, uint32_t* out_live_provider_count,
+    uint32_t* out_live_provider_count,
     loom_decision_program_result_t* out_result) {
   *out_summary = (loom_template_decision_evidence_summary_t){
       .family_target_identity = LOOM_TEMPLATE_PROVIDER_MATCH,
@@ -1041,8 +1092,9 @@ void loom_template_decision_model_evaluate_all(
     const loom_template_decision_site_t* site,
     loom_decision_program_resolution_policy_t resolution_policy,
     loom_decision_program_choice_evidence_t* provider_evidence,
+    uint32_t* live_provider_ordinals,
     loom_template_decision_evidence_summary_t* out_summary,
-    uint32_t* live_provider_ordinals, uint32_t* out_live_provider_count,
+    uint32_t* out_live_provider_count,
     loom_decision_program_result_t* out_result) {
   *out_summary = (loom_template_decision_evidence_summary_t){
       .family_target_identity = LOOM_TEMPLATE_PROVIDER_MATCH,
@@ -1089,6 +1141,8 @@ loom_template_decision_model_constraint_info(
       &model->features[loom_decision_program_constraint_ordinal(constraint)];
   if (feature->kind == LOOM_TEMPLATE_DECISION_FEATURE_TARGET_IDENTITY) {
     info.reason = LOOM_TEMPLATE_PROVIDER_UNRESOLVED_TARGET_IDENTITY;
+  } else if (feature->kind == LOOM_TEMPLATE_DECISION_FEATURE_INPUT) {
+    info.reason = LOOM_TEMPLATE_PROVIDER_UNRESOLVED_INPUT;
   } else {
     info.reason = LOOM_TEMPLATE_PROVIDER_UNRESOLVED_TARGET_CONDITION;
     info.target_condition = feature->value.target_condition;

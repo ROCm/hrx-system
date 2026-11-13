@@ -290,12 +290,15 @@ def test_materialize_amdgpu_descriptor_overlays_from_xml_facts() -> None:
         "rhs",
     ]
     assert descriptors[0].encoding_format_id == AMDGPU_ENCODING_FORMAT_SOP2
+    assert descriptors[0].encoding_byte_count == 4
     assert descriptors[1].immediates[0].field_name == _U32_IMMEDIATE.field_name
     assert descriptors[1].immediates[0].encoding_field_id != 0
     assert descriptors[1].encoding_format_id == AMDGPU_ENCODING_FORMAT_VOP2_LITERAL
+    assert descriptors[1].encoding_byte_count is None
     assert descriptors[1].encoding_id == 37
     assert descriptors[1].operands[1].field_name == "rhs"
     assert descriptors[2].encoding_format_id == AMDGPU_ENCODING_FORMAT_VBUFFER
+    assert descriptors[2].encoding_byte_count == 8
     assert descriptors[2].encoding_id == 22
     assert descriptors[2].operands[2].role is OperandRole.RESOURCE
     assert descriptors[3].mnemonic == "s_wait_idle"
@@ -883,6 +886,7 @@ def test_materialize_accepts_synthetic_literal_on_literal_encoding_format() -> N
     )
 
     assert descriptor.encoding_format_id == AMDGPU_ENCODING_FORMAT_SOP2_LITERAL
+    assert descriptor.encoding_byte_count is None
     assert [operand.field_name for operand in descriptor.operands] == ["dst", "lhs"]
     assert [immediate.field_name for immediate in descriptor.immediates] == ["literal"]
 

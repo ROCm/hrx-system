@@ -751,7 +751,7 @@ static iree_status_t loom_compile_request_materialize_roots(
           .source_callback = {.fn = loom_source_table_project,
                               .user_data = sources},
       },
-      block_pool, source_module->allocator, out_module);
+      block_pool, source_module->host_allocator, out_module);
   if (!iree_status_is_ok(status)) {
     sources->table = input_sources;
   }
@@ -845,7 +845,7 @@ iree_status_t loom_compile_request_materialize(
         target_environment, specializations,
         (loom_target_declaration_binding_list_t){0},
         loom_target_entry_emitter(&diagnostic_emitter), block_pool,
-        (*out_module)->allocator, out_module, out_error_count);
+        (*out_module)->host_allocator, out_module, out_error_count);
     sources->table.module = *out_module;
   } else if (iree_status_is_ok(status) &&
              request->selection.kind == LOOM_COMPILE_ENTRY_KIND_MODULE) {

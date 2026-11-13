@@ -4,7 +4,13 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library", "loom_cc_test")
+load(
+    "//loom/build_tools/bazel:build_defs.bzl",
+    "loom_cc_fuzz",
+    "loom_cc_library",
+    "loom_cc_test",
+)
+load("//loom/build_tools/bazel:python.bzl", "loom_py_test")
 
 package(
     default_visibility = ["//loom/src/loom/serve:implementation"],
@@ -12,23 +18,85 @@ package(
     licenses = ["notice"],
 )
 
-exports_files(
-    ["executables_test.cc"],
-    visibility = ["//loom/src/loom/serve:implementation"],
+REQUEST_SCHEMA_FUZZ_SEEDS = [
+    "//loom/src/loom/serve/service/testdata/request_fuzz:decision.txt",
+    "//loom/src/loom/serve/service/testdata/request_fuzz:embedding.txt",
+    "//loom/src/loom/serve/service/testdata/request_fuzz:image.txt",
+    "//loom/src/loom/serve/service/testdata/request_fuzz:speech.txt",
+    "//loom/src/loom/serve/service/testdata/request_fuzz:transcription.txt",
+    "//loom/src/loom/serve/service/testdata/request_fuzz:voice_remove.txt",
+    "//loom/src/loom/serve/service/testdata/request_fuzz:voice_upload.txt",
+]
+
+loom_cc_library(
+    name = "endpoint",
+    srcs = ["endpoint.c"],
+    hdrs = ["endpoint.h"],
+    deps = ["//loom/src/loom/service:kind"],
+)
+
+loom_cc_test(
+    name = "endpoint_test",
+    srcs = ["endpoint_test.cc"],
+    deps = [
+        ":endpoint",
+        "//loom/src/loom/service:kind",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_fuzz(
+    name = "request_schema_fuzz",
+    srcs = ["request_schema_fuzz.cc"],
+    args = [
+        "-seed_inputs=" + ",".join([
+            "$(rootpath %s)" % seed
+            for seed in REQUEST_SCHEMA_FUZZ_SEEDS
+        ]),
+    ],
+    data = REQUEST_SCHEMA_FUZZ_SEEDS,
+    deps = [
+        "//loom/src/loom/serve/service/image:request",
+        "//loom/src/loom/serve/service/recognition:transcription",
+        "//loom/src/loom/serve/service/speech:request",
+        "//loom/src/loom/serve/service/speech:voice",
+        "//loom/src/loom/serve/service/speech:voice_http",
+        "//loom/src/loom/serve/transport/http:request",
+        "//loom/src/loom/service/finite/decision:protocol",
+        "//loom/src/loom/service/finite/embedding:protocol",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_py_test(
+    name = "request_schema_fuzz_test",
+    size = "small",
+    srcs = ["request_schema_fuzz_test.py"],
+    args = ["$(rootpath :request_schema_fuzz)"] + [
+        "$(rootpath %s)" % seed
+        for seed in REQUEST_SCHEMA_FUZZ_SEEDS
+    ],
+    data = [":request_schema_fuzz"] + REQUEST_SCHEMA_FUZZ_SEEDS,
+    tags = [
+        "manual",
+        "skip-bazel_to_cmake",
+    ],
 )
 
 loom_cc_library(
     name = "service",
     hdrs = ["service.h"],
     deps = [
-        ":inspection",
-        ":kind",
         ":reasoning",
-        ":reconfiguration",
+        "//loom/src/loom/runtime:service",
+        "//loom/src/loom/runtime:wake",
         "//loom/src/loom/runtime/telemetry:sample",
         "//loom/src/loom/runtime/telemetry:stream",
-        "//loom/src/loom/serve/runtime/host:wake",
         "//loom/src/loom/serve/transport/http:server",
+        "//loom/src/loom/service:inspection",
+        "//loom/src/loom/service:kind",
+        "//loom/src/loom/service:reconfiguration",
         "//loom/src/loom/service/telemetry:latency",
         "//loom/src/loom/service/telemetry:record",
         "//runtime/src/iree/base",
@@ -55,107 +123,12 @@ loom_cc_test(
 )
 
 loom_cc_library(
-    name = "kind",
-    srcs = ["kind.c"],
-    hdrs = ["kind.h"],
-    deps = ["//runtime/src/iree/base"],
-)
-
-loom_cc_test(
-    name = "kind_test",
-    srcs = ["kind_test.cc"],
-    deps = [
-        ":kind",
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/testing:gtest",
-        "//runtime/src/iree/testing:gtest_main",
-    ],
-)
-
-loom_cc_library(
-    name = "prepared_request",
-    srcs = ["prepared_request.c"],
-    hdrs = ["prepared_request.h"],
-    deps = [
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/vm",
-    ],
-)
-
-loom_cc_library(
-    name = "reconfiguration",
-    hdrs = ["reconfiguration.h"],
-    deps = [
-        "//loom/src/loom/serve/runtime/program:sources",
-        "//loom/src/loom/serve/runtime/program:variant_pool",
-        "//runtime/src/iree/base",
-    ],
-)
-
-loom_cc_test(
-    name = "prepared_request_test",
-    srcs = ["prepared_request_test.cc"],
-    deps = [
-        ":prepared_request",
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/testing:gtest",
-        "//runtime/src/iree/testing:gtest_main",
-        "//runtime/src/iree/vm",
-    ],
-)
-
-loom_cc_library(
-    name = "execution_reconfiguration",
-    srcs = ["execution_reconfiguration.c"],
-    hdrs = ["execution_reconfiguration.h"],
-    deps = [
-        ":reconfiguration",
-        "//loom/src/loom/serve/runtime/host:wake",
-        "//loom/src/loom/serve/runtime/program:compilation",
-        "//loom/src/loom/serve/runtime/program:sources",
-        "//loom/src/loom/serve/runtime/program:variant_pool",
-        "//runtime/src/iree/base",
-    ],
-)
-
-loom_cc_library(
-    name = "executables",
-    srcs = ["executables.c"],
-    hdrs = ["executables.h"],
-    deps = [
-        "//loom/binding/c:loomc",
-        "//loom/binding/c:task_pool",
-        "//loom/src/loom/serve/runtime/device",
-        "//loom/src/loom/serve/runtime/host",
-        "//loom/src/loom/serve/runtime/parameter:bank",
-        "//loom/src/loom/serve/runtime/parameter:module",
-        "//loom/src/loom/serve/runtime/parameter:residency",
-        "//loom/src/loom/serve/runtime/parameter:sources",
-        "//loom/src/loom/serve/runtime/parameter:weights",
-        "//loom/src/loom/serve/runtime/program:compilation",
-        "//loom/src/loom/serve/runtime/program:jit",
-        "//loom/src/loom/serve/runtime/program:module",
-        "//loom/src/loom/serve/runtime/program:parameter_layout",
-        "//loom/src/loom/serve/runtime/program:preparation",
-        "//loom/src/loom/serve/runtime/program:sources",
-        "//loom/src/loom/serve/runtime/program:stage_set",
-        "//loom/src/loom/serve/runtime/program:stage_table",
-        "//loom/src/loom/serve/runtime/program:variant_pool",
-        "//loom/src/loom/serve/runtime/storage:memory",
-        "//loom/src/loom/serve/service:execution_reconfiguration",
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/base/threading",
-        "//runtime/src/iree/hal",
-        "//runtime/src/iree/vm",
-    ],
-)
-
-loom_cc_library(
     name = "inspection",
     srcs = ["inspection.c"],
     hdrs = ["inspection.h"],
     deps = [
         "//loom/src/loom/serve/telemetry:record",
+        "//loom/src/loom/service:inspection",
         "//loom/src/loom/service/telemetry:record",
         "//loom/src/loom/util:json",
         "//loom/src/loom/util:stream",

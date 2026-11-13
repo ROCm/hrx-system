@@ -225,7 +225,8 @@ def test_atomic_exchange_ranges_share_bitwise_candidates() -> None:
     candidates = amdgpu_atomic_candidates.amdgpu_atomic_descriptor_candidates()
     ranges = {key: (first, count) for key, first, count in amdgpu_atomic_candidates._candidate_ranges(candidates)}
     exchange_ranges = {key: value for key, value in ranges.items() if key[3] == "LOOM_ATOMIC_KIND_XCHGI"}
-    assert len(exchange_ranges) == 4  # LDS, buffer, global-saddr, and flat.
+    # LDS, buffer, global-saddr, full global address, and generic flat address.
+    assert len(exchange_ranges) == 5
     for key, (first, count) in exchange_ranges.items():
         assert ranges[(*key[:3], "LOOM_ATOMIC_KIND_XCHGF")] == (first, count)
         assert {candidate.value_kind.c_name for candidate in candidates[first : first + count]} == {"LOOM_AMDGPU_ATOMIC_VALUE_KIND_B32", "LOOM_AMDGPU_ATOMIC_VALUE_KIND_B64"}

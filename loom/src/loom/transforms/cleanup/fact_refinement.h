@@ -17,9 +17,10 @@
 extern "C" {
 #endif
 
-// Consumes exact predicate-bearing identities retained by the rewriter's fact
-// table. Relations that still constrain dynamic values become path-local SSA
-// aliases, and indexed dominated references are retargeted to those aliases.
+// Consumes exact identities retained by the rewriter's fact table, including
+// their inherited counterpart relations. Relations that still constrain dynamic
+// values become path-local SSA aliases, and indexed dominated references are
+// retargeted to those aliases.
 // An empty journal returns without allocating or inspecting IR. Mutations are
 // published through the rewriter's ordinary flags and worklist notifications.
 iree_status_t loom_fact_refinement_preserve_pending(

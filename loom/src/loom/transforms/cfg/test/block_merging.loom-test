@@ -610,3 +610,39 @@ func.def @merge_reordered_loop_tails(%choice: i32, %selector: i32, %value: i32) 
 ^fallback:
   func.return %value : i32
 }
+
+// ====
+// RUN: with-low-asm pass cfg-simplify
+
+// Equivalent Low blocks may share one body even when the incoming direct
+// branches retain a physical-storage identity contract. Retargeting preserves
+// that positional contract without rebuilding either branch payload.
+test.target<low_core> @device
+
+low.func.def target<test.low.core>(@device) @merge_identity_destinations(%choose: reg<test.i32>, %value: reg<test.i32>) -> (reg<test.i32>) asm {
+  low.cond_br %choose, ^left, ^right : reg<test.i32>
+^left:
+  low.br.identity(0, 1) ^left_body(%value: reg<test.i32>)
+^right:
+  low.br.identity(0, 1) ^right_body(%value: reg<test.i32>)
+^left_body(%left_value: reg<test.i32>):
+  %left_sum = test.add.i32 %left_value, %value
+  return %left_sum
+^right_body(%right_value: reg<test.i32>):
+  %right_sum = test.add.i32 %right_value, %value
+  return %right_sum
+}
+
+// ----
+test.target<low_core> @device
+
+low.func.def target<test.low.core>(@device) @merge_identity_destinations(%choose: reg<test.i32>, %value: reg<test.i32>) -> (reg<test.i32>) asm {
+  low.cond_br %choose, ^left, ^right : reg<test.i32>
+^left:
+  low.br.identity(0, 1) ^left_body(%value: reg<test.i32>)
+^right:
+  low.br.identity(0, 1) ^left_body(%value: reg<test.i32>)
+^left_body(%left_value: reg<test.i32>):
+  %left_sum = test.add.i32 %left_value, %value
+  return %left_sum
+}

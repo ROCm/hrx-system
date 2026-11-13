@@ -123,9 +123,13 @@ An existing package can be registered at startup instead:
 
 ```sh
 loom-serve --device=task --pool_backing=fixed \
-  --model=/srv/models/vectors/model.json \
-  --model=/srv/models/scout/model.json
+  --model=/srv/models/vectors \
+  --model=/srv/models/scout
 ```
+
+Each directory selects its `model.json`. An explicit model-card or deployment
+JSON path is also accepted, and its relative file references use the document's
+directory.
 
 Each package must provide programs for the chosen device and the source
 interface of the installed server. A checkpoint alone is not a model package.

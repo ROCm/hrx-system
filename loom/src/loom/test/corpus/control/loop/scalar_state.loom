@@ -145,3 +145,92 @@ check.scenario @scalar_loop_state_values {
   }
   check.return
 }
+
+// Stored state covers fixed-width overflow and the signed i32 boundary.
+// Offset values stay within u32 so both 32-bit and 64-bit carriers agree.
+func.def @wide_stored_loop_state(%rounds: index, %seed: i64, %output: buffer) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %count = index.assume %rounds [range(%rounds, 0, 8)] : index
+  %narrow_seed = scalar.trunci %seed : i64 to i32
+  %narrow_factor = scalar.constant 33 : i32
+  %wide_factor = scalar.constant 37 : i64
+  %offset_seed = index.constant 2147483646 : offset
+  %offset_step = index.constant 3 : offset
+  %index_seed = index.constant -4 : index
+  %narrow, %wide, %offset, %position = scf.for %iv = [%begin to %count step %step](%narrow_state = %narrow_seed : i32, %wide_state = %seed : i64, %offset_state = %offset_seed : offset, %index_state = %index_seed : index) -> (i32, i64, offset, index) {
+    %next_narrow = scalar.muli %narrow_state, %narrow_factor : i32
+    %next_wide = scalar.muli %wide_state, %wide_factor : i64
+    %next_offset = index.add %offset_state, %offset_step : offset
+    %next_index = index.add %index_state, %step : index
+    scf.yield %next_narrow, %next_wide, %next_offset, %next_index : i32, i64, offset, index
+  }
+  %base = index.constant 0 : offset
+  %results = buffer.view %output[%base] : buffer -> view<4xi64>
+  %widened = scalar.extui %narrow : i32 to i64
+  %offset_bits = index.cast %offset : offset to i64
+  %index_bits = index.cast %position : index to i64
+  view.store %widened, %results[0] : i64, view<4xi64>
+  view.store %wide, %results[1] : i64, view<4xi64>
+  view.store %offset_bits, %results[2] : i64, view<4xi64>
+  view.store %index_bits, %results[3] : i64, view<4xi64>
+  func.return
+}
+
+check.scenario @wide_stored_loop_state_values {
+  check.trial[9](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %storage = check.generate.fill value(-889275714) : tensor<8xi64>
+    %output = check.tensor.view %storage offset(16) : tensor<8xi64> -> tensor<4xi64>
+    check.compare<@wide_stored_loop_state>(%trial, %seed, %output) : (index, i64, tensor<4xi64>) -> () {
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<8xi64>
+    }
+  }
+  check.return
+}
+
+// An independent predicate reaches the first condition evaluation unchanged.
+// The constant false backedge terminates the loop after at most one update; it
+// cannot determine whether that update occurs.
+func.def @one_shot_loop(%again: i1, %initial: i32, %replacement: i32, %output: buffer) {
+  %result = scf.while(%condition = %again : i1, %value = %initial : i32) -> (i32) {
+    scf.condition %condition, %value : i1, i32
+  } do(%current: i32) {
+    %false = scalar.constant false : i1
+    scf.yield %false, %replacement : i1, i32
+  }
+  %base = index.constant 0 : offset
+  %result_view = buffer.view %output[%base] : buffer -> view<1xi32>
+  view.store %result, %result_view[0] : i32, view<1xi32>
+  func.return
+}
+
+func.def @one_shot_loop_oracle(%again: i1, %initial: i32, %replacement: i32, %output: buffer) {
+  %result = scf.select %again, %replacement, %initial : i32
+  %base = index.constant 0 : offset
+  %result_view = buffer.view %output[%base] : buffer -> view<1xi32>
+  view.store %result, %result_view[0] : i32, view<1xi32>
+  func.return
+}
+
+check.scenario @one_shot_loop_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %again = check.literal value(false) : i1
+    %initial = check.literal value(22) : i32
+    %replacement = check.literal value(11) : i32
+    %output = check.generate.fill value(-1) : tensor<1xi32>
+    check.compare<@one_shot_loop, @one_shot_loop_oracle>(%again, %initial, %replacement, %output) : (i1, i32, i32, tensor<1xi32>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<1xi32>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %again = check.literal value(true) : i1
+    %initial = check.literal value(22) : i32
+    %replacement = check.literal value(11) : i32
+    %output = check.generate.fill value(-1) : tensor<1xi32>
+    check.compare<@one_shot_loop, @one_shot_loop_oracle>(%again, %initial, %replacement, %output) : (i1, i32, i32, tensor<1xi32>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<1xi32>
+    }
+  }
+  check.return
+}

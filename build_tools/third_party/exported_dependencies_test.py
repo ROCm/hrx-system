@@ -27,16 +27,23 @@ class ExportedDependenciesTest(unittest.TestCase):
                 self.assertIn(name, dependencies)
                 self.assertFalse(dependencies[name].dev_dependency)
 
-    def test_threaded_stack_trace_repair_is_owned_by_the_dependency(self):
+    def test_stack_trace_repairs_are_owned_by_the_dependency(self):
         fragment = Path(__file__).with_name("deps.MODULE.bazel").resolve()
         dependencies = deps.ModuleParser(fragment.parents[2]).parse(fragment)
         backtrace = next(dep for dep in dependencies if dep.name == "libbacktrace")
         # Module-owned repository rules run for imported modules too. A root
-        # single_version_override would silently drop this concurrency repair.
+        # single_version_override would silently drop these correctness repairs.
         self.assertEqual(backtrace.kind, "http_archive")
         self.assertEqual(
             backtrace.patches,
-            ("//build_tools/third_party/libbacktrace:threaded_cache_reads.patch",),
+            (
+                "//build_tools/third_party/libbacktrace:explicit_integer_conversions.patch",
+                "//build_tools/third_party/libbacktrace:threaded_cache_reads.patch",
+                "//build_tools/third_party/libbacktrace:ignore_nonruntime_symbols.patch",
+                "//build_tools/third_party/libbacktrace:zero_size_vectors.patch",
+                "//build_tools/third_party/libbacktrace:iterative_function_scopes.patch",
+                "//build_tools/third_party/libbacktrace:portable_test_warnings.patch",
+            ),
         )
         self.assertEqual(backtrace.patch_args, ("-p1",))
 

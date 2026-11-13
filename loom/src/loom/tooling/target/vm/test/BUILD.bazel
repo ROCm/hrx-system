@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//build_tools/testing:build_defs.bzl", "iree_execution_test_suite")
+load("//build_tools/testing:build_defs.bzl", "iree_cli_test")
 load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
 
 package(
@@ -12,7 +12,7 @@ package(
     licenses = ["notice"],
 )
 
-iree_execution_test_suite(
+iree_cli_test(
     name = "tools_test",
     data = ["//loom/src/loom/tooling/target/vm/testdata:" + name + ".loom" for name in [
         "duplicate_exports",

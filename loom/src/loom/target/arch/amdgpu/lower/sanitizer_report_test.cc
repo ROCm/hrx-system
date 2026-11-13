@@ -127,7 +127,7 @@ class AmdgpuSanitizerReportTest : public ::testing::Test {
         /*offset_bitwidth=*/0, /*max_workgroup_size_x=*/0,
         /*max_workgroup_size_y=*/0, /*max_workgroup_size_z=*/0,
         /*max_flat_workgroup_size=*/0, /*max_workgroup_storage_bytes=*/0,
-        /*subgroup_size=*/0,
+        /*subgroup_size=*/0, /*execution_unit_count=*/0,
         /*max_grid_size_x=*/0, /*max_grid_size_y=*/0,
         /*max_grid_size_z=*/0, /*max_flat_grid_size=*/0,
         /*max_workgroup_count_x=*/0, /*max_workgroup_count_y=*/0,
@@ -145,7 +145,8 @@ class AmdgpuSanitizerReportTest : public ::testing::Test {
     IREE_ASSERT_OK(loom_low_func_def_build(
         &builder_, LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_TARGET,
         /*visibility=*/0, /*retain=*/0, /*cc=*/0,
-        /*effect_contract=*/0, /*inline_policy=*/0, /*allocation=*/0,
+        /*effect_contract=*/0, /*temperature=*/0, /*inline_policy=*/0,
+        /*allocation=*/0,
         /*schedule=*/0,
         /*descriptor_set=*/contract_set_key, target, /*abi=*/0,
         loom_make_named_attr_slice(NULL, 0),

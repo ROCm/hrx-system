@@ -58,6 +58,10 @@ static iree_status_t loom_tooling_cli_print_loomc_diagnostic(
   if (!loomc_string_view_is_empty(diagnostic->code)) {
     fprintf(file, " [%.*s]", (int)diagnostic->code.size, diagnostic->code.data);
   }
+  if (!loomc_string_view_is_empty(diagnostic->export_name)) {
+    fprintf(file, " in export '%.*s'", (int)diagnostic->export_name.size,
+            diagnostic->export_name.data);
+  }
   fprintf(file, ": %.*s\n", (int)diagnostic->message.size,
           diagnostic->message.data);
   for (loomc_host_size_t i = 0; i < diagnostic->related_location_count; ++i) {

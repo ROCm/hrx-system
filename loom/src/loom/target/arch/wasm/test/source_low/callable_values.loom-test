@@ -35,7 +35,7 @@ func.def public @call_scalar(%value: i32, %delta: i32) -> (i32) {
   func.return %result : i32
 }
 
-func.def @scalar_add(%value: i32, %delta: i32) -> (i32) {
+func.def noinline @scalar_add(%value: i32, %delta: i32) -> (i32) {
   %result = scalar.addi %value, %delta : i32
   func.return %result : i32
 }
@@ -46,7 +46,7 @@ low.func.def public target<wasm.core.simd128> abi(wasm_function) @call_scalar(%v
   return %result
 }
 
-low.func.def target<wasm.core.simd128> @scalar_add(%value: reg<wasm.i32>, %delta: reg<wasm.i32>) -> (reg<wasm.i32>) asm {
+low.func.def noinline target<wasm.core.simd128> @scalar_add(%value: reg<wasm.i32>, %delta: reg<wasm.i32>) -> (reg<wasm.i32>) asm {
   %result = i32.add %value, %delta
   return %result
 }

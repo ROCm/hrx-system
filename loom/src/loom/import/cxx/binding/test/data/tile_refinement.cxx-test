@@ -1,0 +1,108 @@
+// RUN: emit cxx roundtrip
+// REQUIRES: loom-export-cxx
+// Address encodings retain logical rank; schema/transform carriers have rank zero.
+#include <loomcxx/pipeline.h>
+namespace t = loom::type;
+using loom::encoding::role;
+template <role Role, t::size_type Rank>
+using Rows = t::tile<t::shape<t::dynamic, 2, t::dynamic>, float, t::encoding<Role, Rank>>;
+template <role Role, t::size_type Rank>
+using Fixed = t::tile<t::shape<3, 2, 4>, float, t::encoding<Role, Rank>>;
+
+Fixed<role::layout, 3> layout(Rows<role::layout, 3> source) {
+  return loom::tile::refine<Fixed<role::layout, 3>>(source);
+}
+Fixed<role::storage, 3> storage(Rows<role::storage, 3> source) {
+  return loom::tile::refine<Fixed<role::storage, 3>>(source);
+}
+Fixed<role::schema, 0> schema(Rows<role::schema, 0> source) {
+  return loom::tile::refine<Fixed<role::schema, 0>>(source);
+}
+Fixed<role::transform, 0> transform(Rows<role::transform, 0> source) {
+  return loom::tile::refine<Fixed<role::transform, 0>>(source);
+}
+Rows<role::schema, 0> expose(Fixed<role::schema, 0> source, t::index planes, t::index columns) {
+  return loom::tile::refine<Rows<role::schema, 0>>(source, {planes, columns});
+}
+
+// ----
+#include <loomcxx/pipeline.h>
+
+[[loom::symbol("layout")]]
+loom::type::tile<loom::type::shape<3, 2, 4>, float, loom::type::encoding<loom::encoding::role::layout, 3>> layout(loom::type::tile<loom::type::shape<loom::type::dynamic, 2, loom::type::dynamic>, float, loom::type::encoding<loom::encoding::role::layout, 3>> source);
+
+[[loom::symbol("storage")]]
+loom::type::tile<loom::type::shape<3, 2, 4>, float, loom::type::encoding<loom::encoding::role::storage, 3>> storage(loom::type::tile<loom::type::shape<loom::type::dynamic, 2, loom::type::dynamic>, float, loom::type::encoding<loom::encoding::role::storage, 3>> source);
+
+[[loom::symbol("schema")]]
+loom::type::tile<loom::type::shape<3, 2, 4>, float, loom::type::encoding<loom::encoding::role::schema, 0>> schema(loom::type::tile<loom::type::shape<loom::type::dynamic, 2, loom::type::dynamic>, float, loom::type::encoding<loom::encoding::role::schema, 0>> source);
+
+[[loom::symbol("transform")]]
+loom::type::tile<loom::type::shape<3, 2, 4>, float, loom::type::encoding<loom::encoding::role::transform, 0>> transform(loom::type::tile<loom::type::shape<loom::type::dynamic, 2, loom::type::dynamic>, float, loom::type::encoding<loom::encoding::role::transform, 0>> source);
+
+[[loom::symbol("expose")]]
+loom::type::tile<loom::type::shape<loom::type::dynamic, 2, loom::type::dynamic>, float, loom::type::encoding<loom::encoding::role::schema, 0>> expose(loom::type::tile<loom::type::shape<3, 2, 4>, float, loom::type::encoding<loom::encoding::role::schema, 0>> source, loom::type::index planes, loom::type::index columns);
+
+[[loom::symbol("layout")]]
+loom::type::tile<loom::type::shape<3, 2, 4>, float, loom::type::encoding<loom::encoding::role::layout, 3>> layout(loom::type::tile<loom::type::shape<loom::type::dynamic, 2, loom::type::dynamic>, float, loom::type::encoding<loom::encoding::role::layout, 3>> source) {
+  auto v6 = loom::tile::refine<loom::type::tile<loom::type::shape<3, 2, 4>, float, loom::type::encoding<loom::encoding::role::layout, 3>>>(source);
+  return v6;
+}
+
+[[loom::symbol("storage")]]
+loom::type::tile<loom::type::shape<3, 2, 4>, float, loom::type::encoding<loom::encoding::role::storage, 3>> storage(loom::type::tile<loom::type::shape<loom::type::dynamic, 2, loom::type::dynamic>, float, loom::type::encoding<loom::encoding::role::storage, 3>> source) {
+  auto v13 = loom::tile::refine<loom::type::tile<loom::type::shape<3, 2, 4>, float, loom::type::encoding<loom::encoding::role::storage, 3>>>(source);
+  return v13;
+}
+
+[[loom::symbol("schema")]]
+loom::type::tile<loom::type::shape<3, 2, 4>, float, loom::type::encoding<loom::encoding::role::schema, 0>> schema(loom::type::tile<loom::type::shape<loom::type::dynamic, 2, loom::type::dynamic>, float, loom::type::encoding<loom::encoding::role::schema, 0>> source) {
+  auto v20 = loom::tile::refine<loom::type::tile<loom::type::shape<3, 2, 4>, float, loom::type::encoding<loom::encoding::role::schema, 0>>>(source);
+  return v20;
+}
+
+[[loom::symbol("transform")]]
+loom::type::tile<loom::type::shape<3, 2, 4>, float, loom::type::encoding<loom::encoding::role::transform, 0>> transform(loom::type::tile<loom::type::shape<loom::type::dynamic, 2, loom::type::dynamic>, float, loom::type::encoding<loom::encoding::role::transform, 0>> source) {
+  auto v27 = loom::tile::refine<loom::type::tile<loom::type::shape<3, 2, 4>, float, loom::type::encoding<loom::encoding::role::transform, 0>>>(source);
+  return v27;
+}
+
+[[loom::symbol("expose")]]
+loom::type::tile<loom::type::shape<loom::type::dynamic, 2, loom::type::dynamic>, float, loom::type::encoding<loom::encoding::role::schema, 0>> expose(loom::type::tile<loom::type::shape<3, 2, 4>, float, loom::type::encoding<loom::encoding::role::schema, 0>> source, loom::type::index planes, loom::type::index columns) {
+  auto v36 = loom::tile::refine<loom::type::tile<loom::type::shape<loom::type::dynamic, 2, loom::type::dynamic>, float, loom::type::encoding<loom::encoding::role::schema, 0>>>(source, loom::type::indices{planes, columns});
+  return v36;
+}
+
+// ====
+// RUN: emit cxx roundtrip
+// Explicit layout assertions and ordinary unencoded tile transport.
+#include <loomcxx/pipeline.h>
+namespace t = loom::type;
+using Layout = t::encoding<loom::encoding::role::layout, 2>;
+using Plain = t::tile<t::shape<3, 4>, float>;
+using Encoded = t::tile<t::shape<t::dynamic, 4>, float, Layout>;
+
+Encoded expose(Plain source, t::index rows) {
+  return loom::tile::refine<Encoded>(source, {rows}, loom::encoding::layout::dense<2>());
+}
+Plain plain(Encoded source) { return loom::tile::refine<Plain>(source); }
+// ----
+#include <loomcxx/pipeline.h>
+
+[[loom::symbol("expose")]]
+loom::type::tile<loom::type::shape<loom::type::dynamic, 4>, float, loom::type::encoding<loom::encoding::role::layout, 2>> expose(loom::type::tile<loom::type::shape<3, 4>, float> source, loom::type::index rows);
+
+[[loom::symbol("plain")]]
+loom::type::tile<loom::type::shape<3, 4>, float> plain(loom::type::tile<loom::type::shape<loom::type::dynamic, 4>, float, loom::type::encoding<loom::encoding::role::layout, 2>> source);
+
+[[loom::symbol("expose")]]
+loom::type::tile<loom::type::shape<loom::type::dynamic, 4>, float, loom::type::encoding<loom::encoding::role::layout, 2>> expose(loom::type::tile<loom::type::shape<3, 4>, float> source, loom::type::index rows) {
+  auto v6 = loom::tile::refine<loom::type::tile<loom::type::shape<loom::type::dynamic, 4>, float, loom::type::encoding<loom::encoding::role::layout, 2>>>(source, loom::type::indices{rows}, loom::encoding::layout::dense<2>());
+  return v6;
+}
+
+[[loom::symbol("plain")]]
+loom::type::tile<loom::type::shape<3, 4>, float> plain(loom::type::tile<loom::type::shape<loom::type::dynamic, 4>, float, loom::type::encoding<loom::encoding::role::layout, 2>> source) {
+  auto v11 = loom::tile::refine<loom::type::tile<loom::type::shape<3, 4>, float>>(source);
+  return v11;
+}

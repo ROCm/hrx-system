@@ -241,13 +241,13 @@ void Pm4ReaderReuseTest::Run() {
   GpuCommandQueue* refill_queue = nullptr;
   GpuCommandQueue* upload_queue = nullptr;
   std::array<GpuCommandQueue*, 2> reader_queues = {};
-  ASSERT_NO_FATAL_FAILURE(CreateQueue(&refill_queue, kCommandByteLength));
+  ASSERT_NO_FATAL_FAILURE(CreateQueue(kCommandByteLength, &refill_queue));
   ASSERT_NO_FATAL_FAILURE(
-      CreateQueue(sdma_family_, &upload_queue, kCommandByteLength));
+      CreateQueue(sdma_family_, kCommandByteLength, &upload_queue));
   std::vector<GpuCommandQueue*> queues = {refill_queue, upload_queue};
   for (uint32_t reader = 0; reader < test_case.reader_count; ++reader) {
     ASSERT_NO_FATAL_FAILURE(
-        CreateQueue(&reader_queues[reader], kCommandByteLength));
+        CreateQueue(kCommandByteLength, &reader_queues[reader]));
     queues.push_back(reader_queues[reader]);
   }
   for (size_t index = 0; index < queues.size(); ++index) {

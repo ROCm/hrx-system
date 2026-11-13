@@ -1,0 +1,83 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// Complete symbol addresses remain ordinary register values across allocation.
+// Each expansion owns its PC origin, even when allocation reuses the same pair.
+// RUN: emit amdgpu-assembly @load_records
+amdgpu.target<gfx1100> @target
+
+global.rodata.decl @iree_asan_config
+
+global.rodata.def @records = align(16) bytes("00020302010100000001010601010000")
+
+low.func.def target<amdgpu.rdna3.core>(@target) @load_records() asm {
+  %config = s_mov_b64_symbol {symbol = @iree_asan_config}
+  %record = s_mov_b64_symbol {symbol = @records, byte_offset = 8}
+  %shadow = s_load_dwordx2_offset_only %config {offset = 16}
+  %site = s_load_dwordx2_offset_only %record
+  return
+}
+
+// ----
+  s_getpc_b64 s[0:1]
+  s_add_u32 s0, s0, @iree_asan_config@rel32_lo
+  s_addc_u32 s1, s1, @iree_asan_config@rel32_hi
+  s_load_dwordx2 s[2:3], s[0:1], 16
+  s_getpc_b64 s[0:1]
+  s_add_u32 s0, s0, @records+8@rel32_lo
+  s_addc_u32 s1, s1, @records+8@rel32_hi
+  s_waitcnt vmcnt(63) lgkmcnt(0)
+  s_load_dwordx2 s[2:3], s[0:1], 0
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @load_record
+amdgpu.target<gfx942> @target
+
+global.rodata.def @records = align(16) bytes("00020302010100000001010601010000")
+
+low.func.def target<amdgpu.cdna3.core>(@target) @load_record() asm {
+  %record = s_mov_b64_symbol {symbol = @records, byte_offset = 8}
+  %site = s_load_dwordx2_offset_only %record
+  return
+}
+
+// ----
+  s_getpc_b64 s[0:1]
+  s_add_u32 s0, s0, @records+8@rel32_lo
+  s_addc_u32 s1, s1, @records+8@rel32_hi
+  s_load_dwordx2 s[2:3], s[0:1], 0
+  s_endpgm
+
+// ====
+
+// Symbol and offset semantics survive both authored assembly and generic Low.
+// RUN: roundtrip
+global.rodata.def @records = align(16) bytes("00020302010100000001010601010000")
+
+low.func.def target<amdgpu.rdna3.core> @record_address() -> (reg<amdgpu.sgpr x2>) asm {
+  %record = s_mov_b64_symbol {byte_offset = 8, symbol = @records}
+  return %record
+}
+
+low.func.def target<amdgpu.rdna3.core> @record_base() -> (reg<amdgpu.sgpr x2>) {
+  %record = low.op<amdgpu.s_mov_b64.symbol>() {symbol = @records, byte_offset = 0} : () -> reg<amdgpu.sgpr x2>
+  low.return %record : reg<amdgpu.sgpr x2>
+}
+
+// ----
+global.rodata.def @records = align(16) bytes("00020302010100000001010601010000")
+
+low.func.def target<amdgpu.rdna3.core> @record_address() -> (reg<amdgpu.sgpr x2>) asm {
+  %record = s_mov_b64_symbol {symbol = @records, byte_offset = 8}
+  return %record
+}
+
+low.func.def target<amdgpu.rdna3.core> @record_base() -> (reg<amdgpu.sgpr x2>) asm {
+  %record = s_mov_b64_symbol {symbol = @records}
+  return %record
+}

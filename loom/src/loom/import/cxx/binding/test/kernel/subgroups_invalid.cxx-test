@@ -1,0 +1,27 @@
+// RUN: verify
+#include <loomcxx/kernel.h>
+[[loom::kernel]] void entry(unsigned short* output) {
+  // ERROR@+1: LOWERING/059 "subgroup mask requires an i32 or i64 result"
+  output[0] = loom::kernel::subgroup::vote::ballot<unsigned short>(true);
+}
+
+// ====
+// Same-sized C++ types are not interchangeable value carriers.
+// ERROR@+1: LOWERING/059 "subgroup broadcast requires matching scalar or rank-one vector value and result types"
+[[loom::op("kernel.subgroup.broadcast.first")]] float broadcast(unsigned);
+
+// ====
+#include <loomcxx/kernel.h>
+void entry() {
+  // ERROR@+1: LOWERING/059 "kernel.barrier selector is not a permitted enum value"
+  loom::kernel::barrier<loom::memory_space::global,
+                        loom::atomic::scope::system,
+                        loom::atomic::ordering::acq_rel>();
+}
+
+// ====
+[[loom::op("kernel.subgroup.vote.any")]] bool any(bool);
+bool entry(bool predicate) {
+  // ERROR@+1: LOWERING/059 "kernel intrinsic requires a kernel or inline helper"
+  return any(predicate);
+}

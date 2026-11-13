@@ -37,15 +37,14 @@ const loom_pass_info_t* loom_vector_memory_footprint_pass_info(void) {
 static iree_status_t loom_vector_memory_footprint_fact_scope(
     loom_pass_t* pass, const loom_module_t* module, loom_func_like_t function,
     loom_pass_value_fact_scope_t* out_scope) {
-  *out_scope = loom_pass_value_fact_scope_function(function);
   const loom_target_facts_t* target_facts = NULL;
   bool resolved = false;
   IREE_RETURN_IF_ERROR(loom_target_pass_resolve_function_facts(
       pass, module, function, &resolved, &target_facts));
-  if (resolved) {
-    *out_scope =
-        loom_pass_value_fact_scope_function_for_target(function, target_facts);
-  }
+  // Verification leaves IR immutable, so definition-local relations established
+  // under guards are available throughout the complete footprint proof.
+  *out_scope = loom_pass_value_fact_scope_conditioned_function_for_target(
+      function, resolved ? target_facts : NULL);
   return iree_ok_status();
 }
 
@@ -55,8 +54,7 @@ iree_status_t loom_vector_memory_footprint_run(loom_pass_t* pass,
   if (!loom_func_like_body(function)) {
     return iree_ok_status();
   }
-  loom_pass_value_fact_scope_t fact_scope =
-      loom_pass_value_fact_scope_function(function);
+  loom_pass_value_fact_scope_t fact_scope;
   IREE_RETURN_IF_ERROR(loom_vector_memory_footprint_fact_scope(
       pass, module, function, &fact_scope));
 

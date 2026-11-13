@@ -20,11 +20,17 @@ from build_tools.devtools import run_requirements
 
 IREE_TARGET_DIRECTORIES = ("runtime", "loom")
 
-# Aggregate sanitizer commands run configurations with executable test coverage.
+# Broad sanitizer profiles shared by Bazel and CMake.
 SANITIZER_TEST_CONFIGS = ("asan", "ubsan", "tsan")
-# Explicit MSAN commands support local build checks. CI images lack the
-# instrumented host dependencies needed to run these tests.
-SANITIZER_BUILD_CONFIGS = ("msan",)
+# Positive tags restrict a CPU sanitizer to its qualified test closures. Empty
+# tags retain broad build/test coverage. MSAN subjects own the tag; external
+# helper processes do not need instrumented dependencies.
+BAZEL_CPU_SANITIZER_TEST_TAG_FILTERS = {
+    **{config: () for config in SANITIZER_TEST_CONFIGS},
+    "msan": ("msan",),
+}
+# CMake MSAN commands remain build checks until their execution scope is qualified.
+CMAKE_SANITIZER_BUILD_CONFIGS = ("msan",)
 # Tests whose production resource layout conflicts with host TSAN use this
 # conventional Bazel tag and CTest label.
 HOST_TSAN_INCOMPATIBLE_TEST_LABEL = "notsan"
@@ -46,25 +52,24 @@ CMAKE_SANITIZER_SMOKE_CTEST_REGEXES = (
 )
 # Full repository builds execute one smoke at each shipping product boundary:
 # Loom source compilation and execution through the runtime, and LibAMDF public
-# API negotiation through a dynamically loaded provider.
+# API negotiation through a dynamically loaded provider. The external-tool
+# configuration check keeps compiler instrumentation out of helper processes;
+# generated-package checks cover build-time tools and their dependency inputs.
 CMAKE_REPOSITORY_SMOKE_CTEST_REGEXES = (
     "^loom/tools/loom-run/execution_test$",
     "^libamdf/cts/core/query_dynamic$",
+    "^build_tools/cmake/cmake_spirv_tools_test$",
+    "^build_tools/cmake/cmake_generated_packages_test$",
+    "^build_tools/cmake/cmake_msvc_masm_test$",
+)
+CMAKE_HRX_REPOSITORY_SMOKE_CTEST_REGEXES = (
+    *CMAKE_REPOSITORY_SMOKE_CTEST_REGEXES,
+    "^libhrx/cts/tests/status/hrx_cts_status$",
 )
 BAZEL_REPOSITORY_DEVICE_TARGETS = (
-    "//runtime/src/iree/hal/drivers/amdgpu/util:pm4_dispatch_test_kernels",
+    "//runtime/src/iree/hal/driver/amd/gpu/image:hip_images",
 )
 BAZEL_REPOSITORY_TEST_TARGETS = ("//...",)
-IMPORTER_TILELANG_BAZEL_TEST_TARGETS = (
-    "//loom/py/loom/importers/check/tilelang:tilelang_test",
-    "//loom/py/loom/importers/tilelang:tilelang_test",
-    "//loom/py/loom/importers/tilelang:tilelang_import_test",
-)
-IMPORTER_TILELANG_CTEST_REGEXES = (
-    "^loom/py/loom/importers/check/tilelang/tilelang_test$",
-    "^loom/py/loom/importers/tilelang/tilelang_test$",
-    "^loom/py/loom/importers/tilelang/tilelang_import_test$",
-)
 
 
 @dataclass(frozen=True)
@@ -122,12 +127,12 @@ def ctest_exclude_regex(xfails: tuple[TestXfail, ...]) -> str:
 
 
 CPU_XFAILS = (
-    bazel_xfail("//runtime/src/iree/hal/drivers/task/executable/elf:elf_module_test"),
+    bazel_xfail("//runtime/src/iree/hal/driver/task/executable/elf:elf_module_test"),
 )
 CPU_SANITIZERS_XFAILS = (
     bazel_xfail("//runtime/src/iree/async/platform/io_uring/cts/..."),
     bazel_xfail("//runtime/src/iree/hal:string_util_test"),
-    bazel_xfail("//runtime/src/iree/hal/drivers/task/executable/elf/..."),
+    bazel_xfail("//runtime/src/iree/hal/driver/task/executable/elf/..."),
     bazel_xfail("//runtime/src/iree/hal/replay:execute_test"),
     bazel_xfail("//runtime/src/iree/tokenizer/..."),
     bazel_xfail("//runtime/src/iree/tooling/profile:cli_test"),
@@ -137,9 +142,8 @@ CPU_CTEST_EXCLUDE_REGEX = ctest_exclude_regex(CPU_XFAILS)
 CPU_SANITIZERS_XFAIL_TARGETS = bazel_xfail_targets(CPU_SANITIZERS_XFAILS)
 CPU_SANITIZERS_CTEST_EXCLUDE_REGEX = ctest_exclude_regex(CPU_SANITIZERS_XFAILS)
 CPU_BAZEL_TARGET_EXCLUDES = (
-    "-//runtime/src/iree/hal/drivers/amdgpu/...",
-    "-//runtime/src/iree/hal/drivers/vulkan/...",
-    "-//runtime/src/iree/hal/drivers/webgpu/...",
+    "-//runtime/src/iree/hal/driver/vulkan/...",
+    "-//runtime/src/iree/hal/driver/webgpu/...",
 )
 CPU_RESOURCE_TAG_EXCLUDES = run_requirements.bazel_exclusions(())
 # GPU jobs admit native endpoints. XDNA-only jobs retain their separate device
@@ -159,7 +163,12 @@ REPOSITORY_BAZEL_OPTIONS = (
     "--//build_tools/vulkan/config:enabled=true",
     "--//build_tools/d3d12/config:enabled=true",
 )
-NON_CPU_HAL_DRIVER_CTEST_REGEX = r"^iree/hal/drivers/(amdgpu|vulkan|webgpu)/"
+REPOSITORY_BUILD_BAZEL_OPTIONS = REPOSITORY_BAZEL_OPTIONS + (
+    # Build every target, but leave executable runfiles lazy unless a local
+    # build action needs them. Integration lanes own executable coverage.
+    "--nobuild_runfile_links",
+)
+NON_CPU_HAL_DRIVER_CTEST_REGEX = r"^iree/hal/driver/(vulkan|webgpu)/"
 
 AMDF_BAZEL_TARGETS = ("//libamdf/...",)
 AMDF_BUILD_REQUIREMENT_TAG = "iree-build-requirement=libamdf"
@@ -167,19 +176,21 @@ XDNA_RUN_REQUIREMENT_TAG = "iree-run-requirement=libamdf.resource.xdna"
 XDNA_CTEST_RESOURCE_LABEL = "runtime-resource=amd-xdna"
 AMDF_CTEST_REGEX = r"^libamdf/"
 XDNA_BAZEL_TARGETS = AMDF_BAZEL_TARGETS + (
-    "//runtime/src/iree/hal/drivers/amd/...",
+    "//runtime/src/iree/hal/driver/amd/...",
     "//loom/target/amd/xdna/...",
+    "//loom/src/loom/target/arch/amd/xdna/...",
     "//loom/src/loom/tooling/target/amd/xdna/...",
 )
 XDNA_BAZEL_TEST_TAG_FILTERS = (AMDF_BUILD_REQUIREMENT_TAG, XDNA_RUN_REQUIREMENT_TAG)
 XDNA_CMAKE_BUILD_TARGETS = (
     "libamdf/all",
-    "runtime/src/iree/hal/drivers/amd/all",
+    "runtime/src/iree/hal/driver/amd/all",
     "loom/target/amd/xdna/all",
+    "loom/src/loom/target/arch/amd/xdna/all",
     "loom/src/loom/tooling/target/amd/xdna/all",
 )
 XDNA_CTEST_PACKAGE_REGEX = (
-    r"^(iree/hal/drivers/amd|loom/(target|tooling/target)/amd/xdna)/"
+    r"^(iree/hal/driver/amd|loom/(target|target/arch|tooling/target)/amd/xdna)/"
 )
 # Compile both client families; Linux admits only XDNA hardware execution.
 # Common runtime components enter through the ELF consumers' dependencies.
@@ -192,12 +203,7 @@ AMD_CLIENT_BAZEL_OPTIONS = (
     "--//loom/config/import:enable=",
     "--//loom/config/emit:enable=elf,vm",
 )
-AMD_CLIENT_BAZEL_TARGETS = (
-    *AMDF_BAZEL_TARGETS,
-    "//runtime/src/iree/hal/drivers/amd/...",
-    "//loom/target/amd/xdna/...",
-    "//loom/src/loom/tooling/target/amd/xdna/...",
-)
+AMD_CLIENT_BAZEL_TARGETS = XDNA_BAZEL_TARGETS
 AMD_CLIENT_WINDOWS_BAZEL_OPTIONS = AMD_CLIENT_BAZEL_OPTIONS + (
     "--//build_tools/vulkan/config:enabled=true",
     "--//build_tools/d3d12/config:enabled=true",
@@ -206,7 +212,7 @@ AMD_CLIENT_WINDOWS_BAZEL_OPTIONS = AMD_CLIENT_BAZEL_OPTIONS + (
     "--//loom/config/emit:enable=elf,spirv,vm",
 )
 AMD_GPU_BAZEL_TARGETS = (
-    "//runtime/src/iree/hal/drivers/amd/...",
+    "//runtime/src/iree/hal/driver/amd/...",
     "//loom/src/loom/tooling/target/amdgpu/serve/...",
     "//loom/src/loom/tooling/target/amdgpu/test/...",
     "//loom/src/loom/target/emit/native/amdgpu/...",
@@ -241,7 +247,7 @@ AMD_CLIENT_GPU_BAZEL_OPTIONS = (
 AMD_CLIENT_WINDOWS_BAZEL_TARGETS = (
     AMD_CLIENT_BAZEL_TARGETS
     + (
-        "//runtime/src/iree/hal/drivers/vulkan/...",
+        "//runtime/src/iree/hal/driver/vulkan/...",
         "//loom/binding/c/test/target/spirv/...",
         "//loom/src/loom/tooling/target/spirv/...",
         "//loom/target/spirv/test/...",
@@ -256,9 +262,9 @@ AMD_CLIENT_WINDOWS_RESOURCES = (
         "d3d12.resource.device",
     )
 )
-AMDGPU_CMAKE_PACKAGE_REGEX = r"^iree/hal/drivers/amd/"
+AMDGPU_CMAKE_PACKAGE_REGEX = r"^iree/hal/driver/amd/"
 AMDGPU_CMAKE_BUILD_TARGETS = (
-    "runtime/src/iree/hal/drivers/amd/all",
+    "runtime/src/iree/hal/driver/amd/all",
     "libamdf/all",
 )
 AMDGPU_BAZEL_OPTIONS = (
@@ -298,9 +304,8 @@ AMDGPU_BAZEL_TEST_TAG_FILTERS = (
     AMD_GPU_RUN_REQUIREMENT_TAG,
 )
 AMDGPU_BAZEL_TARGET_EXCLUDES = (
-    "-//runtime/src/iree/hal/drivers/amdgpu/...",
-    "-//runtime/src/iree/hal/drivers/vulkan/...",
-    "-//runtime/src/iree/hal/drivers/webgpu/...",
+    "-//runtime/src/iree/hal/driver/vulkan/...",
+    "-//runtime/src/iree/hal/driver/webgpu/...",
 )
 RUNTIME_CTEST_RESOURCE_LABEL_PREFIX = "runtime-resource="
 CTEST_RESOURCE_LABEL_EXCLUDE_REGEX = RUNTIME_CTEST_RESOURCE_LABEL_PREFIX
@@ -335,26 +340,11 @@ AMDGPU_XFAILS = tuple(
         # the CXX import path does not provide before lowering.
         "assembly_invalid",
         "assembly_lowering",
-        # These CXX modules exercise scalar or vector FP narrowing forms for
-        # which the AMDGPU target has no legalization.
-        "bfloat16_test_execute_amdgpu_access_test",
-        "bfloat16_test_execute_amdgpu_test",
-        "float8_test_execute_amdgpu_access_test",
-        "float8_test_execute_amdgpu_test",
-        "vector_conversion_test_execute_amdgpu_access_test",
-        "vector_conversion_test_execute_amdgpu_test",
     )
 )
 AMDGPU_SANITIZERS_XFAILS = ()
 AMDGPU_TSAN_XFAILS = ()
 AMDGPU_BAZEL_XFAILS_BY_TARGET_SELECTOR = {
-    # gfx1151 currently hangs while waiting for manually instrumented ASAN
-    # feedback. Keep the remaining gfx1151 coverage active.
-    "gfx1151": (
-        bazel_xfail(
-            "//runtime/src/iree/hal/drivers/amdgpu/cts:manual_asan_executable_tests"
-        ),
-    ),
     # gfx120X currently hangs while initializing or executing device-side TSAN.
     # Keep every other Loom AMDGPU execution test active on the runner.
     "gfx120X-all": (bazel_xfail("//loom/target/amdgpu/test/sanitizer:tsan_test"),),
@@ -385,12 +375,9 @@ VULKAN_BAZEL_TEST_TAG_FILTERS = (
     VULKAN_BUILD_REQUIREMENT_TAG,
     VULKAN_RUN_REQUIREMENT_TAG,
 )
-VULKAN_BAZEL_TARGET_EXCLUDES = (
-    "-//runtime/src/iree/hal/drivers/amdgpu/...",
-    "-//runtime/src/iree/hal/drivers/webgpu/...",
-)
-VULKAN_CMAKE_DRIVER_TARGETS = ("runtime/src/iree/hal/drivers/vulkan/all",)
-VULKAN_CTEST_REGEX = r"^iree/hal/drivers/vulkan/"
+VULKAN_BAZEL_TARGET_EXCLUDES = ("-//runtime/src/iree/hal/driver/webgpu/...",)
+VULKAN_CMAKE_DRIVER_TARGETS = ("runtime/src/iree/hal/driver/vulkan/all",)
+VULKAN_CTEST_REGEX = r"^iree/hal/driver/vulkan/"
 VULKAN_CTEST_RESOURCE_LABEL_REGEX = "runtime-resource=vulkan-device"
 VULKAN_XFAILS = ()
 VULKAN_XFAIL_TARGETS = bazel_xfail_targets(VULKAN_XFAILS)

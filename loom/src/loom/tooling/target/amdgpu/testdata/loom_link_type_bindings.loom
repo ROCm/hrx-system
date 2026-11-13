@@ -1,9 +1,0 @@
-// Scoped register and TYPE-attribute bindings must survive selected loading.
-low.func.def target<amdgpu.rdna3.core> @register_type_binding(%width: reg<amdgpu.sgpr : index>, %value: reg<amdgpu.vgpr : vector<[%width]xf32>>) asm {
-  return
-}
-
-low.func.def target<amdgpu.rdna3.core> @resource_type_binding(%width: reg<amdgpu.sgpr : index>) asm {
-  %resource = resource<native_pointer> {index = 0, source_type = vector<[%width]xf32>} : reg<amdgpu.sgpr x2>
-  return
-}

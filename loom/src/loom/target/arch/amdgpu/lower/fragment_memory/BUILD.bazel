@@ -91,3 +91,8 @@ loom_check_test(
     name = "transpose_gfx950_loom_test",
     src = "transpose_gfx950.loom-test",
 )
+
+loom_check_test(
+    name = "broadcast_loom_test",
+    src = "broadcast.loom-test",
+)

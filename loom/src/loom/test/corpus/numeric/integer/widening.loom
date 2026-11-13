@@ -178,3 +178,56 @@ check.scenario @narrow_integer_values {
   }
   check.return
 }
+
+// Every narrow extension destination crosses a runtime store before the
+// oracle observes it, so intermediate widths cannot collapse into one cast.
+func.def @narrow_extension_destinations(%byte_input: buffer, %halfword_input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %word_base = index.constant 64 : offset
+  %wide_base = index.constant 320 : offset
+  %byte_source = buffer.view %byte_input[%base] : buffer -> view<16xi8>
+  %halfword_source = buffer.view %halfword_input[%base] : buffer -> view<16xi16>
+  %halves = buffer.view %output[%base] : buffer -> view<2x16xi16>
+  %words = buffer.view %output[%word_base] : buffer -> view<4x16xi32>
+  %wide = buffer.view %output[%wide_base] : buffer -> view<4x16xi64>
+  %begin = index.constant 0 : index
+  %end = index.constant 16 : index
+  %step = index.constant 1 : index
+  scf.for %i = [%begin to %end step %step] {
+    %byte = view.load %byte_source[%i] : view<16xi8> -> i8
+    %half = view.load %halfword_source[%i] : view<16xi16> -> i16
+    %byte_half_signed = scalar.extsi %byte : i8 to i16
+    %byte_half_unsigned = scalar.extui %byte : i8 to i16
+    %byte_word_signed = scalar.extsi %byte : i8 to i32
+    %byte_word_unsigned = scalar.extui %byte : i8 to i32
+    %half_word_signed = scalar.extsi %half : i16 to i32
+    %half_word_unsigned = scalar.extui %half : i16 to i32
+    %byte_wide_signed = scalar.extsi %byte : i8 to i64
+    %byte_wide_unsigned = scalar.extui %byte : i8 to i64
+    %half_wide_signed = scalar.extsi %half : i16 to i64
+    %half_wide_unsigned = scalar.extui %half : i16 to i64
+    view.store %byte_half_signed, %halves[0, %i] : i16, view<2x16xi16>
+    view.store %byte_half_unsigned, %halves[1, %i] : i16, view<2x16xi16>
+    view.store %byte_word_signed, %words[0, %i] : i32, view<4x16xi32>
+    view.store %byte_word_unsigned, %words[1, %i] : i32, view<4x16xi32>
+    view.store %half_word_signed, %words[2, %i] : i32, view<4x16xi32>
+    view.store %half_word_unsigned, %words[3, %i] : i32, view<4x16xi32>
+    view.store %byte_wide_signed, %wide[0, %i] : i64, view<4x16xi64>
+    view.store %byte_wide_unsigned, %wide[1, %i] : i64, view<4x16xi64>
+    view.store %half_wide_signed, %wide[2, %i] : i64, view<4x16xi64>
+    view.store %half_wide_unsigned, %wide[3, %i] : i64, view<4x16xi64>
+  }
+  func.return
+}
+
+check.scenario @narrow_extension_destination_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %bytes = check.generate.iota offset(-128) step(17) : tensor<16xi8>
+    %halfwords = check.generate.iota offset(-32768) step(4369) : tensor<16xi16>
+    %output = check.generate.fill value(-123) : tensor<104xi64>
+    check.compare<@narrow_extension_destinations>(%bytes, %halfwords, %output) : (tensor<16xi8>, tensor<16xi16>, tensor<104xi64>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<104xi64>
+    }
+  }
+  check.return
+}

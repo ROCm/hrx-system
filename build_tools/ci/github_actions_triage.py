@@ -17,10 +17,14 @@ from typing import Any
 
 INFRASTRUCTURE = "infrastructure"
 REPOSITORY = "repository"
-KNOWN_PRODUCT = "known_product"
-KNOWN_FLAKE = "known_flake"
 UNKNOWN = "unknown"
-TRACKED_ISSUES = ("hrx-78tqc", "hrx-b1gxf3", "hrx-vvf9c")
+TRACKED_ISSUES = (
+    "hrx-78tqc",
+    "hrx-b1gxf3",
+    "hrx-b8oh4d",
+    "hrx-m2tne4",
+    "hrx-vvf9c",
+)
 
 RUNNER_LOST_MESSAGE = (
     "The self-hosted runner lost communication with the server. Verify the "
@@ -53,6 +57,11 @@ class JobFinding:
     job_name: str
     job_url: str
     finding: Finding
+
+    @property
+    def identity(self) -> tuple[str, str, str, str, str | None]:
+        """Returns an observation identity scoped to one stable CI lane."""
+        return (self.job_name, *self.finding.identity)
 
 
 @dataclass(frozen=True)
@@ -206,6 +215,21 @@ def classify_failure(
         )
 
     if (
+        "Windows" in str(job.get("name", ""))
+        and failed_steps == ["Run IREE Bazel CI"]
+        and "UnrecoverableHttpException Unknown host:" in log
+        and "Error in download_and_extract:" in log
+    ):
+        return _tracked_finding(
+            open_issues=open_issues,
+            issue="hrx-m2tne4",
+            tracked_category=INFRASTRUCTURE,
+            code="windows_bazel_dependency_dns_failure",
+            subject="Windows Bazel dependency downloads",
+            summary="the Windows runner could not resolve a Bazel dependency host",
+        )
+
+    if (
         "profile event has no numeric dur:" in log
         and "'ph': 'i'" in log
         and "Summarize Bazel profile" in log
@@ -225,7 +249,7 @@ def classify_failure(
         return _tracked_finding(
             open_issues=open_issues,
             issue="hrx-78tqc",
-            tracked_category=KNOWN_PRODUCT,
+            tracked_category=REPOSITORY,
             code="amdgpu_unowned_completion_epoch",
             subject="AMDGPU host queue completion ownership",
             summary="the AMDGPU queue observed an unowned completion epoch",
@@ -239,7 +263,7 @@ def classify_failure(
         return _tracked_finding(
             open_issues=open_issues,
             issue="hrx-b1gxf3",
-            tracked_category=KNOWN_FLAKE,
+            tracked_category=REPOSITORY,
             code="speech_cold_retained_memory_accounting",
             subject="ColdStateTransitionsPreserveWarmWaveformProgress/0",
             summary="cold speech retained-memory accounting observed zero pending bytes",
@@ -257,6 +281,26 @@ def classify_failure(
             code="windows_application_control_denial",
             subject="Windows Application Control",
             summary="Windows policy denied a generated executable before launch",
+        )
+
+    if (
+        "Windows" in str(job.get("name", ""))
+        and failed_steps == ["Run IREE Bazel CI"]
+        and "error executing IreeGenerate command" in log
+        and "return io.open(self, mode, buffering, encoding, errors, newline)" in log
+        and re.search(
+            r"OSError: \[Errno 9\] Bad file descriptor: "
+            r"['\"]bazel-out[/\\]",
+            log,
+        )
+    ):
+        return _tracked_finding(
+            open_issues=open_issues,
+            issue="hrx-b8oh4d",
+            tracked_category=REPOSITORY,
+            code="windows_generator_output_open_ebadf",
+            subject="Windows Bazel generator output creation",
+            summary="a Windows Python generator could not open its declared output",
         )
 
     undefined_symbol_match = re.search(
@@ -343,17 +387,20 @@ def classify_failure(
 def group_findings(findings: Iterable[JobFinding]) -> list[FindingGroup]:
     """Groups only findings whose complete stable identities agree."""
 
-    groups: dict[tuple[str, str, str, str | None], list[JobFinding]] = defaultdict(list)
+    groups: dict[tuple[str, str, str, str, str | None], list[JobFinding]] = defaultdict(
+        list
+    )
     for job_finding in findings:
-        groups[job_finding.finding.identity].append(job_finding)
+        groups[job_finding.identity].append(job_finding)
     return [
         FindingGroup(group[0].finding, tuple(group))
         for _, group in sorted(
             groups.items(),
             key=lambda item: (
-                category_precedence(item[0][0]),
-                item[0][1],
+                category_precedence(item[0][1]),
                 item[0][2],
+                item[0][3],
+                item[0][0],
             ),
         )
     ]
@@ -363,9 +410,7 @@ def category_precedence(category: str) -> int:
     return {
         REPOSITORY: 0,
         UNKNOWN: 1,
-        KNOWN_PRODUCT: 2,
-        KNOWN_FLAKE: 3,
-        INFRASTRUCTURE: 4,
+        INFRASTRUCTURE: 2,
     }.get(category, 1)
 
 

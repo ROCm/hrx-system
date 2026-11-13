@@ -1,0 +1,276 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+#ifndef LOOM_RUNTIME_TESTING_NATIVE_ALLOCATOR_H_
+#define LOOM_RUNTIME_TESTING_NATIVE_ALLOCATOR_H_
+
+#include <algorithm>
+#include <condition_variable>
+#include <mutex>
+#include <thread>
+#include <vector>
+
+#include "loom/runtime/execution/execution.h"
+#include "loom/runtime/testing/device.h"
+
+namespace loom_runtime::testing {
+
+// Holds an allocator dependency on the native allocation worker. A cold source
+// acquisition identifies that worker before the test is exposed to consumers.
+// No HAL queue, pool, mapping, or completion callback is replaced.
+class NativeAllocator {
+ public:
+  struct AllocationMetrics {
+    // Successful allocation or reallocation requests since the last reset.
+    size_t request_count;
+    // Sum of requested allocation lengths, including complete realloc extents.
+    uint64_t requested_bytes;
+    // Largest individual allocation or reallocation request.
+    iree_host_size_t largest_request_bytes;
+  };
+
+  explicit NativeAllocator(iree_allocator_t allocator = iree_allocator_system())
+      : allocator_(allocator) {}
+  ~NativeAllocator() { AwaitReleased(); }
+  iree_allocator_t allocator() { return {this, Control}; }
+  // Public owners must be released before this join. Device destruction joins
+  // its workers before returning, so no native borrower can outlive this owner.
+  void AwaitReleased() {
+    std::unique_lock<std::mutex> lock(mutex_);
+    condition_.wait(
+        lock, [&] { return live_allocations_ == 0 && active_calls_ == 0; });
+  }
+  iree_status_t Observe(loom_runtime_device_t* device,
+                        loom_runtime_pool_t* pool) {
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      observing_ = true;
+    }
+    loom_runtime_execution_t* execution = nullptr;
+    iree_hal_buffer_t* probe = nullptr;
+    iree_status_t status =
+        loom_runtime_device_create_execution(device, pool, &execution);
+    if (iree_status_is_ok(status)) {
+      const auto request = iree_hal_make_pool_reservation_request(4096, 0);
+      status = loom_runtime_execution_alloca_from_pool(
+          execution, loom_runtime_pool_storage(pool), 1, &request, &probe);
+    }
+    if (iree_status_is_ok(status)) {
+      uint64_t value = 0;
+      status = loom_runtime_execution_dealloca(execution, probe, &value);
+    }
+    iree_hal_buffer_release(probe);
+    if (execution) {
+      status =
+          iree_status_join(status, loom_runtime_execution_drain(execution));
+    }
+    loom_runtime_execution_release(execution);
+    if (iree_status_is_ok(status)) {
+      status = loom_runtime_test_pool_trim_and_drain(pool, 0);
+    }
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      if (iree_status_is_ok(status) && observing_) {
+        status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                                  "test requires a native allocation worker");
+      }
+      observing_ = false;
+    }
+    return status;
+  }
+  static NativeAllocator& ForDevice(loom_runtime_device_t* device) {
+    auto allocator =
+        iree_hal_device_host_allocator(loom_runtime_device_handle(device));
+    // The fixture installs this allocator before creating the device.
+    IREE_ASSERT(allocator.ctl == Control);
+    return *static_cast<NativeAllocator*>(allocator.self);
+  }
+  void Arm(iree_allocator_command_t command) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    command_ = command;
+    armed_ = true;
+    ++generation_;
+  }
+  void WaitEntered() {
+    std::unique_lock<std::mutex> lock(mutex_);
+    condition_.wait(lock, [&] { return entered_generation_ == generation_; });
+  }
+  void FailNextAllocation(iree_allocator_command_t command,
+                          bool native_only = false) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    failure_.armed = true;
+    failure_.command = command;
+    failure_.native_only = native_only;
+  }
+  void ResetAllocationMetrics() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    allocation_metrics_ = {};
+  }
+  AllocationMetrics allocation_metrics() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return allocation_metrics_;
+  }
+  void Release() {
+    std::unique_lock<std::mutex> lock(mutex_);
+    armed_ = false;
+    released_generation_ = generation_;
+    condition_.notify_all();
+    condition_.wait(lock, [&] {
+      return entered_generation_ < generation_ ||
+             retired_generation_ == generation_;
+    });
+  }
+  // Releases the entered call and selects the next dependency atomically. The
+  // native worker cannot run through the second boundary between two holds.
+  void ReleaseAndArm(iree_allocator_command_t command) {
+    std::unique_lock<std::mutex> lock(mutex_);
+    const uint64_t previous = generation_;
+    released_generation_ = previous;
+    command_ = command;
+    armed_ = true;
+    ++generation_;
+    condition_.notify_all();
+    condition_.wait(lock, [&] { return retired_generation_ == previous; });
+  }
+
+ private:
+  static iree_status_t Control(void* user_data,
+                               iree_allocator_command_t command,
+                               const void* params, void** inout_pointer) {
+    auto* self = static_cast<NativeAllocator*>(user_data);
+    const bool allocating = command == IREE_ALLOCATOR_COMMAND_MALLOC ||
+                            command == IREE_ALLOCATOR_COMMAND_CALLOC ||
+                            command == IREE_ALLOCATOR_COMMAND_REALLOC;
+    const iree_host_size_t requested_bytes =
+        allocating ? static_cast<const iree_allocator_alloc_params_t*>(params)
+                         ->byte_length
+                   : 0;
+    const bool had_pointer = (command == IREE_ALLOCATOR_COMMAND_REALLOC ||
+                              command == IREE_ALLOCATOR_COMMAND_FREE) &&
+                             *inout_pointer != nullptr;
+    bool fail_allocation = false;
+    {
+      std::unique_lock<std::mutex> lock(self->mutex_);
+      ++self->active_calls_;
+      const auto thread = std::this_thread::get_id();
+      if (self->observing_ && thread != self->caller_ &&
+          command == IREE_ALLOCATOR_COMMAND_CALLOC) {
+        if (std::find(self->native_.begin(), self->native_.end(), thread) ==
+            self->native_.end()) {
+          self->native_.push_back(thread);
+        }
+        self->observing_ = false;
+      }
+      const bool native = std::find(self->native_.begin(), self->native_.end(),
+                                    thread) != self->native_.end();
+      if (self->failure_.armed && command == self->failure_.command &&
+          (!self->failure_.native_only || native)) {
+        self->failure_.armed = false;
+        fail_allocation = true;
+      }
+      if (self->armed_ && command == self->command_ && native) {
+        self->armed_ = false;
+        const uint64_t generation = self->generation_;
+        self->entered_generation_ = generation;
+        self->condition_.notify_all();
+        self->condition_.wait(
+            lock, [&] { return self->released_generation_ >= generation; });
+        self->retired_generation_ = generation;
+        self->condition_.notify_all();
+      }
+    }
+    iree_status_t status =
+        fail_allocation ? iree_status_from_code(IREE_STATUS_RESOURCE_EXHAUSTED)
+                        : self->allocator_.ctl(self->allocator_.self, command,
+                                               params, inout_pointer);
+    {
+      std::lock_guard<std::mutex> lock(self->mutex_);
+      if (iree_status_is_ok(status)) {
+        if (allocating) {
+          ++self->allocation_metrics_.request_count;
+          self->allocation_metrics_.requested_bytes += requested_bytes;
+          self->allocation_metrics_.largest_request_bytes = std::max(
+              self->allocation_metrics_.largest_request_bytes, requested_bytes);
+        }
+        if (command == IREE_ALLOCATOR_COMMAND_FREE) {
+          self->live_allocations_ -= had_pointer ? 1 : 0;
+        } else if (allocating && (command != IREE_ALLOCATOR_COMMAND_REALLOC ||
+                                  !had_pointer)) {
+          self->live_allocations_ += *inout_pointer ? 1 : 0;
+        }
+      }
+      --self->active_calls_;
+      self->condition_.notify_all();
+    }
+    return status;
+  }
+  // Borrowed underlying allocator outliving this fixture and its device.
+  iree_allocator_t allocator_;
+  // Serializes the selected allocator dependency and its lifetime.
+  std::mutex mutex_;
+  // Joins entry and release without timing assumptions.
+  std::condition_variable condition_;
+  // Successful allocations whose final FREE has not returned.
+  size_t live_allocations_ = 0;
+  // Allocator calls still using this fixture, including the final FREE.
+  size_t active_calls_ = 0;
+  // Resettable allocation-request traffic used by bounded metadata tests.
+  AllocationMetrics allocation_metrics_ = {};
+  // Caller capture allocations remain available while native work is held.
+  std::thread::id caller_ = std::this_thread::get_id();
+  // Worker observed through a real cold source allocation after device
+  // creation.
+  std::vector<std::thread::id> native_;
+  // Command selected for the next native allocator call.
+  iree_allocator_command_t command_ = IREE_ALLOCATOR_COMMAND_CALLOC;
+  // The initial source allocation has not yet identified its native worker.
+  bool observing_ = false;
+  // A matching native dependency is still being selected.
+  bool armed_ = false;
+  // One selected allocator dependency reports allocation failure.
+  struct {
+    // A matching allocator call has not consumed the failure yet.
+    bool armed = false;
+    // Allocation kind to fail without invoking the underlying allocator.
+    iree_allocator_command_t command = IREE_ALLOCATOR_COMMAND_CALLOC;
+    // Restricts matching to previously observed native allocation workers.
+    bool native_only = false;
+  } failure_;
+  // Monotonic identity of the selected dependency, including a handoff.
+  uint64_t generation_ = 0;
+  // Most recent selected dependency that entered the hold.
+  uint64_t entered_generation_ = 0;
+  // The outer test owner permits dependencies through this identity to resume.
+  uint64_t released_generation_ = 0;
+  // Most recent held dependency that observed its release.
+  uint64_t retired_generation_ = 0;
+};
+
+class ScopedNativeHold {
+ public:
+  ScopedNativeHold(NativeAllocator& allocator, iree_allocator_command_t command)
+      : allocator_(allocator) {
+    allocator_.Arm(command);
+  }
+  ScopedNativeHold(
+      loom_runtime_device_t* device,
+      iree_allocator_command_t command = IREE_ALLOCATOR_COMMAND_CALLOC)
+      : ScopedNativeHold(NativeAllocator::ForDevice(device), command) {}
+  ~ScopedNativeHold() { allocator_.Release(); }
+  void Release() { allocator_.Release(); }
+  void ReleaseAndArm(iree_allocator_command_t command) {
+    allocator_.ReleaseAndArm(command);
+  }
+  void WaitEntered() { allocator_.WaitEntered(); }
+
+ private:
+  // Borrowed allocator outliving both the hold and the device.
+  NativeAllocator& allocator_;
+};
+
+}  // namespace loom_runtime::testing
+
+#endif  // LOOM_RUNTIME_TESTING_NATIVE_ALLOCATOR_H_

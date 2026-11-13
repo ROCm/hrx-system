@@ -783,7 +783,7 @@ static uint64_t loom_cfg_value_identity_refinement_transition_hash(
 }
 
 // Signature computation is the per-state refinement hot path.
-IREE_ATTRIBUTE_ALWAYS_INLINE static inline uint64_t
+static IREE_ATTRIBUTE_ALWAYS_INLINE uint64_t
 loom_cfg_value_identity_refinement_compute_signature(
     const loom_cfg_value_identity_refinement_t* refinement, uint32_t state) {
   uint64_t signature =

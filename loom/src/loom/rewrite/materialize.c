@@ -155,14 +155,14 @@ static iree_status_t loom_ir_clone_op_operands(
   return iree_ok_status();
 }
 
-// Parallel source and target regions owned by one recursive clone frame.
+// Target region projection owned by one recursive clone frame.
 typedef struct loom_ir_clone_region_projection_t {
-  // Source region whose operations are being cloned.
-  const loom_region_t* source_region;
-  // Target region receiving the cloned blocks.
+  // Target region receiving blocks at the source region's ordinals.
   loom_region_t* target_region;
   // Target ordinal corresponding to source block zero.
   uint16_t target_block_index;
+  // Number of blocks in the source region.
+  uint16_t source_block_count;
 } loom_ir_clone_region_projection_t;
 
 static iree_status_t loom_ir_clone_op_successors(
@@ -171,17 +171,23 @@ static iree_status_t loom_ir_clone_op_successors(
     const loom_op_t* source_op, loom_block_t** target_successors) {
   loom_block_t* const* source_successors = loom_op_const_successors(source_op);
   for (uint8_t i = 0; i < source_op->successor_count; ++i) {
-    uint16_t block_index = 0;
-    if (region_projection &&
-        loom_region_try_block_index(region_projection->source_region,
-                                    source_successors[i], &block_index)) {
-      target_successors[i] = loom_region_block(
-          region_projection->target_region,
-          region_projection->target_block_index + block_index);
+    if (region_projection) {
+      target_successors[i] =
+          loom_region_block(region_projection->target_region,
+                            region_projection->target_block_index +
+                                source_successors[i]->region_index);
       continue;
     }
-    IREE_RETURN_IF_ERROR(loom_ir_remap_resolve_block(
-        remap, source_successors[i], &target_successors[i]));
+    if (!source_successors[i]) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "source successor block is NULL");
+    }
+    if (remap->source_module != remap->target_module) {
+      return iree_make_status(
+          IREE_STATUS_NOT_FOUND,
+          "source successor block has no target region projection");
+    }
+    target_successors[i] = source_successors[i];
   }
   return iree_ok_status();
 }
@@ -208,7 +214,25 @@ static iree_status_t loom_ir_clone_op_attrs(loom_ir_remap_t* remap,
                                             const loom_op_t* source_op,
                                             loom_attribute_t* target_attrs) {
   const loom_attribute_t* source_attrs = loom_op_const_attrs(source_op);
+  // Identity clones can retain immutable module-owned payloads when no symbol
+  // or SSA reference inside them needs remapping.
+  const bool can_reuse_payloads =
+      remap->source_module == remap->target_module &&
+      !remap->remap_same_module_symbols;
+  if (!can_reuse_payloads) {
+    for (uint8_t i = 0; i < source_op->attribute_count; ++i) {
+      IREE_RETURN_IF_ERROR(
+          loom_ir_remap_attribute(remap, source_attrs[i], &target_attrs[i]));
+    }
+    return iree_ok_status();
+  }
+  const loom_attribute_owner_id_t* source_owners =
+      loom_op_attribute_owners(source_op);
   for (uint8_t i = 0; i < source_op->attribute_count; ++i) {
+    if (source_owners[i] == 0) {
+      target_attrs[i] = source_attrs[i];
+      continue;
+    }
     IREE_RETURN_IF_ERROR(
         loom_ir_remap_attribute(remap, source_attrs[i], &target_attrs[i]));
   }
@@ -309,9 +333,9 @@ static iree_status_t loom_ir_clone_region_ops(
     loom_builder_t* builder, const loom_region_t* source_region,
     loom_ir_remap_t* remap, loom_region_t* target_region) {
   const loom_ir_clone_region_projection_t region_projection = {
-      .source_region = source_region,
       .target_region = target_region,
       .target_block_index = 0,
+      .source_block_count = source_region->block_count,
   };
   loom_builder_ip_t saved_ip = loom_builder_save(builder);
   loom_op_t* parent_op = builder->ip.parent_op;
@@ -405,8 +429,7 @@ static iree_status_t loom_ir_clone_op_impl(
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
         remap->arena, source_op->result_count, sizeof(loom_type_t),
         (void**)&target_result_types));
-    if (region_projection &&
-        region_projection->source_region->block_count > 1) {
+    if (region_projection && region_projection->source_block_count > 1) {
       const loom_value_id_t* source_results = loom_op_const_results(source_op);
       for (uint16_t i = 0; i < source_op->result_count; ++i) {
         target_results[i] = LOOM_VALUE_ID_INVALID;
@@ -473,6 +496,7 @@ static iree_status_t loom_ir_clone_op_impl(
   }
   target_op->instance_flags = source_op->instance_flags;
   target_op->traits = source_op->traits;
+  target_op->intrinsic_read_spaces = source_op->intrinsic_read_spaces;
   target_op->intrinsic_write_spaces = source_op->intrinsic_write_spaces;
   target_op->flags |= source_op->flags & LOOM_OP_SOURCE_PRESENTATION_FLAG_MASK;
   if (source_op->operand_count > 0) {
@@ -486,17 +510,8 @@ static iree_status_t loom_ir_clone_op_impl(
         (iree_host_size_t)source_op->successor_count * sizeof(loom_block_t*));
   }
   if (source_op->region_count > 0) {
-    memcpy(loom_op_regions(target_op), target_regions,
-           (iree_host_size_t)source_op->region_count * sizeof(loom_region_t*));
     for (uint8_t i = 0; i < source_op->region_count; ++i) {
-      if (!target_regions[i]) {
-        continue;
-      }
-      for (uint16_t block_index = 0;
-           block_index < target_regions[i]->block_count; ++block_index) {
-        target_regions[i]->blocks[block_index]->parent_region =
-            target_regions[i];
-      }
+      loom_op_set_region(target_op, i, target_regions[i]);
     }
   }
   if (source_op->result_count > 0) {
@@ -661,9 +676,9 @@ iree_status_t loom_ir_clone_region_blocks(loom_builder_t* builder,
       remap, source_region, target_region, target_block_index));
 
   const loom_ir_clone_region_projection_t region_projection = {
-      .source_region = source_region,
       .target_region = target_region,
       .target_block_index = target_block_index,
+      .source_block_count = source_region->block_count,
   };
   loom_builder_ip_t saved_ip = loom_builder_save(builder);
   loom_op_t* parent_op = builder->ip.parent_op;
@@ -763,19 +778,6 @@ static iree_status_t loom_ir_remap_op_operands_in_place(
   return iree_ok_status();
 }
 
-static iree_status_t loom_ir_remap_op_successors_in_place(
-    loom_op_t* op, loom_ir_remap_t* remap) {
-  loom_block_t** successors = loom_op_successors(op);
-  for (uint8_t i = 0; i < op->successor_count; ++i) {
-    loom_block_t* target_block = NULL;
-    if (!loom_ir_remap_try_lookup_block(remap, successors[i], &target_block)) {
-      continue;
-    }
-    successors[i] = target_block;
-  }
-  return iree_ok_status();
-}
-
 static iree_status_t loom_ir_remap_result_types_in_place(
     loom_rewriter_t* rewriter, loom_op_t* op, loom_ir_remap_t* remap) {
   const loom_value_id_t* results = loom_op_const_results(op);
@@ -828,19 +830,13 @@ static iree_status_t loom_ir_remap_block_arg_types_in_place(
   return iree_ok_status();
 }
 
-iree_status_t loom_ir_remap_op_references(loom_rewriter_t* rewriter,
-                                          loom_op_t* op,
-                                          loom_ir_remap_t* remap) {
-  if (remap->source_module != rewriter->module ||
-      remap->target_module != rewriter->module) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "in-place op reference remapping requires same-module remap");
-  }
-  IREE_RETURN_IF_ERROR(loom_ir_remap_op_subtree_values_to_self(remap, op));
-
+// Remaps an existing subtree after all of its definitions have been projected
+// into |remap|. Establishing the complete correspondence first allows forward
+// references while keeping this recursive payload walk linear.
+static iree_status_t loom_ir_remap_op_references_impl(loom_rewriter_t* rewriter,
+                                                      loom_op_t* op,
+                                                      loom_ir_remap_t* remap) {
   IREE_RETURN_IF_ERROR(loom_ir_remap_op_operands_in_place(rewriter, op, remap));
-  IREE_RETURN_IF_ERROR(loom_ir_remap_op_successors_in_place(op, remap));
   IREE_RETURN_IF_ERROR(
       loom_ir_remap_result_types_in_place(rewriter, op, remap));
   IREE_RETURN_IF_ERROR(loom_ir_remap_attrs_in_place(rewriter, op, remap));
@@ -859,11 +855,24 @@ iree_status_t loom_ir_remap_op_references(loom_rewriter_t* rewriter,
       loom_op_t* child_op = NULL;
       loom_block_for_each_op(block, child_op) {
         IREE_RETURN_IF_ERROR(
-            loom_ir_remap_op_references(rewriter, child_op, remap));
+            loom_ir_remap_op_references_impl(rewriter, child_op, remap));
       }
     }
   }
   return iree_ok_status();
+}
+
+iree_status_t loom_ir_remap_op_references(loom_rewriter_t* rewriter,
+                                          loom_op_t* op,
+                                          loom_ir_remap_t* remap) {
+  if (remap->source_module != rewriter->module ||
+      remap->target_module != rewriter->module) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "in-place op reference remapping requires same-module remap");
+  }
+  IREE_RETURN_IF_ERROR(loom_ir_remap_op_subtree_values_to_self(remap, op));
+  return loom_ir_remap_op_references_impl(rewriter, op, remap);
 }
 
 //===----------------------------------------------------------------------===//
@@ -1306,8 +1315,10 @@ iree_status_t loom_ir_move_block_ops_before(
       continue;
     }
 
+    // Capture preflight established self mappings for every definition in each
+    // moved subtree before mutation began.
     IREE_RETURN_IF_ERROR(
-        loom_ir_remap_op_references(rewriter, source_op, remap));
+        loom_ir_remap_op_references_impl(rewriter, source_op, remap));
     IREE_RETURN_IF_ERROR(
         loom_rewriter_move_before(rewriter, source_op, before_op));
     source_op = next_op;

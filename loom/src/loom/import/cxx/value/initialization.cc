@@ -9,17 +9,22 @@
 #include <cxx/ast.h>
 #include <cxx/ast_interpreter.h>
 #include <cxx/ast_rewriter.h>
+#include <cxx/control.h>
 #include <cxx/function_body.h>
 #include <cxx/initialization.h>
+#include <cxx/lambda_captures.h>
 #include <cxx/literals.h>
 #include <cxx/symbols.h>
 #include <cxx/types.h>
 
 #include <cstring>
+#include <unordered_map>
 #include <utility>
 
 #include "loom/import/cxx/source/error.h"
 #include "loom/import/cxx/source/expressions.h"
+#include "loom/import/cxx/source/initializer_lists.h"
+#include "loom/import/cxx/source/objects.h"
 #include "loom/ops/buffer/ops.h"
 #include "loom/ops/scalar/ops.h"
 
@@ -47,6 +52,27 @@ class ReceiverScope {
 
  private:
   Initialization::Evaluation& evaluation_;
+};
+
+// Exposes the receiver that was current before one aggregate result began
+// construction. Frontend-normalized default clauses deliberately retain the
+// result receiver and therefore do not use this scope.
+class LexicalReceiverScope {
+ public:
+  explicit LexicalReceiverScope(Initialization::Evaluation& evaluation)
+      : evaluation_(evaluation),
+        suspended_(evaluation.suspend_current_receiver()) {}
+  LexicalReceiverScope(const LexicalReceiverScope&) = delete;
+  LexicalReceiverScope& operator=(const LexicalReceiverScope&) = delete;
+  ~LexicalReceiverScope() {
+    if (suspended_) {
+      evaluation_.resume_current_receiver();
+    }
+  }
+
+ private:
+  Initialization::Evaluation& evaluation_;
+  bool suspended_;
 };
 
 // Importer-owned construction cost. Expression evaluation is common to both
@@ -77,10 +103,10 @@ bool vector_literal_can_encode(const cxx::ConstValue& value) {
 // only the destination policy; constructor synthesis, omitted members, and
 // default-member clauses remain source semantic facts.
 template <typename Callback>
-void for_each_default_initializer(cxx::TranslationUnit& unit,
-                                  Diagnostics& diagnostics,
-                                  cxx::FunctionSymbol* constructor,
-                                  cxx::AST* owner, Callback&& callback) {
+void for_each_subobject_initializer(cxx::TranslationUnit& unit,
+                                    Diagnostics& diagnostics,
+                                    cxx::FunctionSymbol* constructor,
+                                    cxx::AST* owner, Callback&& callback) {
   cxx::ASTRewriter::requireFunctionDefinition(&unit, constructor);
   auto* definition = constructor->resolvedDefinition()->declaration();
   auto* body = definition ? definition->functionBody : nullptr;
@@ -90,15 +116,31 @@ void for_each_default_initializer(cxx::TranslationUnit& unit,
                        "initialization plan");
   }
   for (auto* initializer : cxx::ListView{cxx::ctor_initializers(body)}) {
-    auto* field = cxx::symbol_cast<cxx::FieldSymbol>(initializer->symbol);
-    if (!field) {
-      diagnostics.reject(unit, initializer,
-                         "record value constructors cannot initialize bases "
-                         "or delegate");
-    }
+    auto* field = initializer->symbol;
     auto* source = cxx::memInitializerClause(unit.arena(), initializer);
     callback(field, source, initializer);
   }
+}
+
+// Without a selected element constructor, a synthesized member clause wraps
+// the whole array default in parentheses. Keep its original list so each
+// element initializes in place and later clauses see the completed prefix.
+// Constructor arguments can also carry default wrappers, but apply separately
+// to every array element instead of initializing the complete array.
+cxx::ExpressionAST* array_initializer(cxx::ExpressionAST* initializer,
+                                      cxx::FunctionSymbol* constructor) {
+  if (constructor) {
+    return initializer;
+  }
+  auto* paren = cxx::ast_cast<cxx::ParenInitializerAST>(initializer);
+  auto* elements = paren ? paren->expressionList : nullptr;
+  if (elements && !elements->next) {
+    if (auto* clause = cxx::ast_cast<cxx::DefaultInitializerExpressionAST>(
+            elements->value)) {
+      return cxx::Initializer(clause->expression).clause();
+    }
+  }
+  return initializer;
 }
 
 }  // namespace
@@ -127,13 +169,52 @@ Value Initialization::value(const cxx::Type* type,
                             cxx::ExpressionAST* initializer,
                             cxx::FunctionSymbol* constructor, cxx::AST* owner,
                             std::optional<Value> retained) {
+  auto* list = cxx::Initializer(initializer).bracedInitList();
+  if (!list) {
+    if (auto* construction =
+            cxx::ast_cast<cxx::BracedTypeConstructionAST>(initializer);
+        construction && !construction->constructorSymbol) {
+      list = construction->bracedInitList;
+    }
+  }
+  if (list && types_.unqualified(type) == types_.unqualified(list->type)) {
+    if (auto* plan = evaluation_.initializer_list(list)) {
+      return initializer_list(*plan, type, owner);
+    }
+  }
   if (auto* conversion = constructor_conversion(initializer);
-      conversion && types_.is_user_record_constructor(
+      conversion && types_.record_constructor_requires_call(
                         type, conversion->conversionFunction, owner)) {
     constructor = conversion->conversionFunction;
     initializer = conversion->expression;
   }
   type = types_.unqualified(type);
+  if (unit_.typeTraits().is_array(type)) {
+    initializer = array_initializer(initializer, constructor);
+    if (unit_.typeTraits().is_char_type(
+            unit_.typeTraits().get_element_type(type))) {
+      if (auto* string = string_initializer(initializer)) {
+        const auto* array = types_.array(type, owner);
+        auto* element_type = array->source->elementType();
+        std::vector<loom_value_id_t> components;
+        components.reserve(array->component_count);
+        for (size_t index = 0; index < array->source->size(); ++index) {
+          const int64_t code_unit =
+              index < string->charCount() ? string->charAt(index) : 0;
+          components.push_back(scalars_.constant(cxx::ConstValue{code_unit},
+                                                 element_type, owner));
+        }
+        return arena_.capture(*array, components);
+      }
+    }
+    if (evaluation_.array_copy(owner)) {
+      auto allocation = storage_.allocate(
+          type, LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE, 0, owner);
+      auto destination = storage_.project(allocation.pointer, type, owner);
+      object(destination, type, initializer, constructor, owner);
+      return objects_.load(destination, type, owner);
+    }
+  }
   cxx::List<cxx::ExpressionAST*>* elements = nullptr;
   cxx::VariableSymbol* implicit_element = nullptr;
   bool value_initialized = false;
@@ -156,7 +237,8 @@ Value Initialization::value(const cxx::Type* type,
                  cxx::ast_cast<cxx::ParenInitializerAST>(initializer)) {
     elements = list->expressionList;
     value_initialized = list->lparenLoc && !elements;
-  } else if (initializer) {
+  } else if (initializer && !types_.record_constructor_requires_call(
+                                type, constructor, owner)) {
     return evaluation_.convert(initializer, type, owner);
   }
 
@@ -164,17 +246,11 @@ Value Initialization::value(const cxx::Type* type,
   if (constructor && !array) {
     types_.admit_construction(constructor, type, owner);
   }
-  if (!array && types_.is_user_record_constructor(type, constructor, owner)) {
-    std::vector<cxx::ExpressionAST*> arguments;
-    for (auto* element : cxx::ListView{elements}) {
-      arguments.push_back(element);
-    }
-    auto allocation =
-        storage_.allocate(type, LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE, 0, owner);
-    auto destination = storage_.project(allocation.pointer, type, owner);
-    evaluation_.call_constructor(destination, *types_.record(type, owner), type,
-                                 constructor, arguments, owner);
-    return objects_.load(destination, type, owner);
+  if (!array &&
+      types_.record_constructor_requires_call(type, constructor, owner)) {
+    auto arguments = constructor_arguments(initializer);
+    return evaluation_.construct_value(*types_.record(type, owner), type,
+                                       constructor, arguments, owner);
   }
   if (auto* record = types_.record(type, owner);
       record && constructor &&
@@ -185,8 +261,254 @@ Value Initialization::value(const cxx::Type* type,
             unit_.typeTraits().requires_zero_initialization(type, constructor),
         owner, retained);
   }
-  return from_elements(type, elements, implicit_element, constructor, owner,
-                       retained);
+  return from_elements(type, elements, implicit_element, constructor,
+                       initializer, owner, retained);
+}
+
+Value Initialization::initializer_list(const InitializerList& list,
+                                       const cxx::Type* type, cxx::AST* owner) {
+  const auto* array = cxx::type_cast<cxx::BoundedArrayType>(list.backing->type);
+  const auto* record = types_.record(type, owner);
+  auto begin = Value(array->size() ? evaluation_.materialize_array(list.backing)
+                                   : storage_.null(owner));
+  std::vector<loom_value_id_t> components;
+  components.reserve(record->component_count);
+  begin.append_to(components);
+  auto traits = unit_.typeTraits();
+  if (traits.is_pointer(list.limit->type())) {
+    auto end = begin;
+    if (array->size()) {
+      auto* count_type = unit_.control()->getSizeType();
+      auto count = scalars_.constant(cxx::ConstValue{uint64_t(array->size())},
+                                     count_type, owner);
+      end = Value(storage_
+                      .advance(storage_.project(begin.pointer(),
+                                                array->elementType(), owner),
+                               count, list.begin->type(), count_type,
+                               cxx::TokenKind::T_PLUS, owner)
+                      .pointer);
+    }
+    end.append_to(components);
+  } else {
+    components.push_back(scalars_.constant(
+        cxx::ConstValue{uint64_t(array->size())}, list.limit->type(), owner));
+  }
+  return arena_.capture(*record, components);
+}
+
+Value Initialization::closure(cxx::LambdaExpressionAST* expression) {
+  const auto* record = types_.record(expression->type, expression);
+  if (!record || !record->source->isClosureType()) {
+    diagnostics_.reject(unit_, expression,
+                        "lambda expression requires an admitted closure type");
+  }
+
+  std::unordered_map<cxx::Symbol*, Value> captures;
+  captures.reserve(record->members.size());
+  for (auto* capture : cxx::ListView{expression->captureList}) {
+    if (cxx::is_pack_capture(capture)) {
+      diagnostics_.reject(unit_, capture,
+                          "lambda pack captures must be expanded by the C++ "
+                          "frontend");
+    }
+    auto* field = cxx::capture_field(capture);
+    auto* initializer = cxx::capture_initializer(capture);
+    if (!field || !initializer) {
+      diagnostics_.reject(unit_, capture,
+                          "lambda capture has no normalized field and "
+                          "initializer");
+    }
+    // Demand the semantic field now so a malformed frontend closure cannot
+    // silently add or omit value components during assembly.
+    types_.member(field, capture);
+    const bool is_reference =
+        unit_.typeTraits().is_lvalue_reference(field->type());
+    const bool pointer_snapshot =
+        is_reference && types_.pointer_reference_is_snapshot(field);
+    cxx::ExpressionAST* referent = nullptr;
+    if (is_reference) {
+      referent =
+          cxx::Initializer(initializer).referenceExpression(unit_.typeTraits());
+      if (!referent) {
+        diagnostics_.reject(unit_, capture,
+                            "lambda reference capture requires one "
+                            "initializer expression");
+      }
+    }
+    auto initialized =
+        referent
+            ? pointer_snapshot
+                  ? evaluation_.convert(
+                        referent,
+                        unit_.typeTraits().remove_reference(field->type()),
+                        capture)
+                  : evaluation_.reference(referent, capture)
+            : value(field->type(), initializer, field->constructor(), capture);
+    if (!is_reference || pointer_snapshot) {
+      evaluation_.adopt(initializer);
+    }
+    if (!captures.emplace(field, initialized).second) {
+      diagnostics_.reject(unit_, capture,
+                          "lambda capture initializes one field more than "
+                          "once");
+    }
+  }
+
+  std::vector<loom_value_id_t> components;
+  components.reserve(record->component_count);
+  for (const auto& member : record->members) {
+    auto found = captures.find(member.source);
+    if (found == captures.end()) {
+      diagnostics_.reject(unit_, expression,
+                          "lambda closure field has no capture initializer");
+    }
+    found->second.append_to(components);
+  }
+  return arena_.capture(*record, components);
+}
+
+Value Initialization::constant(const cxx::ConstValue& value,
+                               const cxx::Type* type, cxx::AST* owner) {
+  return materialize_constant(value, types_.unqualified(type), owner);
+}
+
+Value Initialization::materialize_constant(const cxx::ConstValue& value,
+                                           const cxx::Type* type,
+                                           cxx::AST* owner) {
+  // Address alternatives retain C++ storage identity rather than immutable
+  // value components. Reject them at the exact nested leaf that requires an
+  // addressable object; aggregate parents remain otherwise admissible.
+  if (std::holds_alternative<const cxx::StringLiteral*>(value) ||
+      std::holds_alternative<std::shared_ptr<cxx::ConstAddress>>(value) ||
+      std::holds_alternative<std::shared_ptr<cxx::ConstLabelAddress>>(value)) {
+    diagnostics_.reject(
+        unit_, owner,
+        "constant addresses require an addressable source object");
+  }
+  if (std::holds_alternative<cxx::IndeterminateValue>(value)) {
+    diagnostics_.reject(unit_, owner,
+                        "indeterminate constant values cannot be materialized");
+  }
+  if (std::holds_alternative<std::shared_ptr<cxx::Meta>>(value)) {
+    diagnostics_.reject(unit_, owner,
+                        "constant metadata cannot be materialized as a Loom "
+                        "value");
+  }
+
+  auto traits = unit_.typeTraits();
+  if (traits.is_arithmetic(type) || traits.is_enum(type)) {
+    return Value(scalars_.constant(value, type, owner));
+  }
+  if (traits.is_pointer(type) || traits.is_null_pointer(type)) {
+    auto* integer = std::get_if<cxx::ConstInt>(&value);
+    if (!integer || !integer->isZero()) {
+      diagnostics_.reject(unit_, owner,
+                          "constant pointer requires null or an addressable "
+                          "source object");
+    }
+    return storage_.null(owner);
+  }
+  if (types_.native_vector(type)) {
+    auto* retained = std::get_if<std::shared_ptr<cxx::InitializerList>>(&value);
+    if (!retained || !*retained) {
+      diagnostics_.reject(unit_, owner,
+                          "constant vector has no retained lane values");
+    }
+    std::array<loom_value_id_t, 1> components = {
+        vectors_.constant(value, type, owner)};
+    return arena_.capture(types_.partition(type, owner), components);
+  }
+
+  if (auto* array = types_.array(type, owner)) {
+    auto* retained = std::get_if<std::shared_ptr<cxx::InitializerList>>(&value);
+    if (!retained || !*retained) {
+      diagnostics_.reject(unit_, owner,
+                          "constant array has no retained element values");
+    }
+    if ((*retained)->elements.size() != array->source->size()) {
+      diagnostics_.reject(unit_, owner,
+                          "constant array element count does not match its "
+                          "source type");
+    }
+    std::vector<loom_value_id_t> components;
+    components.reserve(array->component_count);
+    const auto* element_type = array->source->elementType();
+    for (const auto& [element, retained_type] : (*retained)->elements) {
+      if (!retained_type ||
+          !unit_.typeTraits().is_same(types_.unqualified(retained_type),
+                                      types_.unqualified(element_type))) {
+        diagnostics_.reject(unit_, owner,
+                            "constant array element type does not match its "
+                            "source type");
+      }
+      materialize_constant(element, element_type, owner).append_to(components);
+    }
+    return arena_.capture(*array, components);
+  }
+
+  if (auto* record = types_.record(type, owner)) {
+    auto* retained = std::get_if<std::shared_ptr<cxx::ConstObject>>(&value);
+    if (!retained || !*retained) {
+      diagnostics_.reject(unit_, owner,
+                          "constant record has no retained member values");
+    }
+    if ((*retained)->isConstexprUnknown()) {
+      diagnostics_.reject(unit_, owner,
+                          "unknown constexpr objects cannot be materialized");
+    }
+    if (!(*retained)->type() ||
+        !unit_.typeTraits().is_same(types_.unqualified((*retained)->type()),
+                                    type)) {
+      diagnostics_.reject(unit_, owner,
+                          "constant record type does not match its source "
+                          "type");
+    }
+    std::unordered_map<const cxx::Symbol*, const cxx::ConstValue*>
+        retained_members;
+    retained_members.reserve((*retained)->members().size());
+    for (const auto& member : (*retained)->members()) {
+      auto* field = member.symbol;
+      if (!retained_members.emplace(field, &member.value).second) {
+        diagnostics_.reject(unit_, owner,
+                            "constant record contains a duplicate member");
+      }
+    }
+
+    std::vector<loom_value_id_t> components;
+    components.reserve(record->component_count);
+    for (const auto& member : record->members) {
+      auto found = retained_members.find(member.source);
+      if (found == retained_members.end()) {
+        diagnostics_.reject(unit_, owner,
+                            "constant record is missing an admitted member");
+      }
+      materialize_constant(*found->second, member.type(), owner)
+          .append_to(components);
+      retained_members.erase(found);
+    }
+    if (!retained_members.empty()) {
+      diagnostics_.reject(unit_, owner,
+                          "constant record contains an unadmitted member");
+    }
+    return arena_.capture(*record, components);
+  }
+
+  const auto& partition = types_.partition(type, owner);
+  if (partition.component_count != 1 ||
+      (partition.kind != ValueKind::SSA &&
+       partition.kind != ValueKind::Address)) {
+    diagnostics_.reject(unit_, owner,
+                        "constant value requires an admitted scalar, vector, "
+                        "array, or record type");
+  }
+  auto output = types_.get(type, owner);
+  if (loom_type_kind(output) != LOOM_TYPE_SCALAR) {
+    diagnostics_.reject(unit_, owner,
+                        "constant leaf requires an admitted scalar type");
+  }
+  std::array<loom_value_id_t, 1> components = {
+      scalars_.constant(value, type, owner)};
+  return arena_.capture(partition, components);
 }
 
 Value Initialization::zero(const cxx::Type* type, cxx::AST* owner) {
@@ -206,15 +528,18 @@ Value Initialization::zero(const cxx::Type* type, cxx::AST* owner) {
     std::vector<loom_value_id_t> components;
     components.reserve(record->component_count);
     for (const auto& member : record->members) {
-      if (unit_.typeTraits().is_reference(member.field->type())) {
+      if (unit_.typeTraits().is_reference(member.type())) {
         diagnostics_.reject(unit_, owner,
                             "reference members require an initializer");
       }
-      zero(member.field->type(), owner).append_to(components);
+      zero(member.type(), owner).append_to(components);
     }
     return arena_.capture(*record, components);
   }
   const auto& partition = types_.partition(type, owner);
+  if (partition.kind == ValueKind::Pointer) {
+    return storage_.null(owner);
+  }
   auto output = types_.get(type, owner);
   if (partition.kind != ValueKind::SSA ||
       loom_type_kind(output) != LOOM_TYPE_SCALAR) {
@@ -383,7 +708,7 @@ Value Initialization::finish_value_receiver(const RecordPartition& record,
   std::vector<loom_value_id_t> components;
   components.reserve(record.component_count);
   for (const auto& member : record.members) {
-    evaluation_.receiver_member(member.field, owner).append_to(components);
+    evaluation_.receiver_member(member.source, owner).append_to(components);
   }
   return arena_.capture(record, components);
 }
@@ -396,33 +721,33 @@ Value Initialization::default_record(const RecordPartition& record,
   if (retained && !zero_initialize) {
     for (const auto& member : record.members) {
       evaluation_.publish_receiver_member(
-          member.field,
+          member.source,
           retained->project(*member.partition, member.component_offset));
     }
   } else if (zero_initialize) {
     for (const auto& member : record.members) {
-      if (unit_.typeTraits().is_lvalue_reference(member.field->type())) {
+      if (unit_.typeTraits().is_lvalue_reference(member.type())) {
         continue;
       }
-      evaluation_.publish_receiver_member(member.field,
-                                          zero(member.field->type(), owner));
+      evaluation_.publish_receiver_member(member.source,
+                                          zero(member.type(), owner));
     }
   }
 
-  for_each_default_initializer(
+  for_each_subobject_initializer(
       unit_, diagnostics_, constructor, owner,
-      [&](cxx::FieldSymbol* field, cxx::ExpressionAST* source,
+      [&](cxx::Symbol* field, cxx::ExpressionAST* source,
           cxx::MemInitializerAST* initializer) {
         const bool is_reference =
-            unit_.typeTraits().is_lvalue_reference(field->type());
+            unit_.typeTraits().is_lvalue_reference(source_object_type(field));
         std::optional<Value> prior;
         if (!is_reference && (retained || zero_initialize)) {
           prior = evaluation_.receiver_member(field, initializer);
         }
         cxx::ExpressionAST* referent = nullptr;
         if (is_reference) {
-          cxx::Initializer reference(source);
-          referent = reference.singleExpression();
+          referent =
+              cxx::Initializer(source).referenceExpression(unit_.typeTraits());
           if (!referent) {
             diagnostics_.reject(unit_, source,
                                 "reference members require one initializer "
@@ -431,10 +756,10 @@ Value Initialization::default_record(const RecordPartition& record,
         }
         auto initialized =
             referent ? evaluation_.reference(referent, initializer)
-                     : value(field->type(), source, initializer->constructor,
-                             initializer, prior);
+                     : value(source_object_type(field), source,
+                             initializer->constructor, initializer, prior);
         if (!referent) {
-          evaluation_.adopt(source, initialized);
+          evaluation_.adopt(source);
         }
         evaluation_.publish_receiver_member(field, initialized);
       });
@@ -445,13 +770,24 @@ Value Initialization::from_elements(const cxx::Type* type,
                                     cxx::List<cxx::ExpressionAST*>* elements,
                                     cxx::VariableSymbol* implicit_element,
                                     cxx::FunctionSymbol* constructor,
+                                    cxx::ExpressionAST* initializer,
                                     cxx::AST* owner,
                                     std::optional<Value> retained) {
   type = types_.unqualified(type);
   if (auto* array = types_.array(type, owner)) {
     std::vector<loom_value_id_t> components;
     components.reserve(array->component_count);
+    auto* element_type = array->source->elementType();
+    const bool leaf = !unit_.typeTraits().is_array(element_type);
     for (size_t index = 0; index < array->source->size(); ++index) {
+      // A selected array constructor carries arguments for each leaf, not
+      // aggregate element clauses. Omitted elements also have their own
+      // default-argument temporary boundary, including a repeated source plan.
+      const bool explicit_clause = !constructor && elements;
+      std::optional<Evaluation::FullExpression> full_expression;
+      if (!explicit_clause && leaf) {
+        full_expression = evaluation_.begin_full_expression();
+      }
       std::optional<Value> prior;
       if (retained) {
         prior = retained->project(*array->element,
@@ -459,26 +795,28 @@ Value Initialization::from_elements(const cxx::Type* type,
       }
       cxx::ExpressionAST* initializing_expression = nullptr;
       Value initialized;
-      if (elements) {
+      if (constructor) {
+        initializing_expression = initializer;
+        initialized =
+            value(element_type, initializer, constructor, owner, prior);
+      } else if (elements) {
         initializing_expression = elements->value;
-        initialized = evaluation_.convert(elements->value,
-                                          array->source->elementType(), owner);
+        initialized = evaluation_.convert(elements->value, element_type, owner);
         elements = elements->next;
       } else if (implicit_element) {
         initializing_expression = implicit_element->initializer();
-        initialized =
-            value(array->source->elementType(), implicit_element->initializer(),
-                  implicit_element->constructor(), owner, prior);
-      } else if (constructor) {
-        initialized = value(array->source->elementType(), nullptr, constructor,
-                            owner, prior);
+        initialized = value(element_type, implicit_element->initializer(),
+                            implicit_element->constructor(), owner, prior);
       } else if (prior) {
         initialized = *prior;
       } else {
-        initialized = zero(array->source->elementType(), owner);
+        initialized = zero(element_type, owner);
       }
-      evaluation_.adopt(initializing_expression, initialized);
+      evaluation_.adopt(initializing_expression);
       initialized.append_to(components);
+      if (full_expression) {
+        evaluation_.finish_full_expression(*full_expression);
+      }
     }
     return arena_.capture(*array, components);
   }
@@ -488,27 +826,35 @@ Value Initialization::from_elements(const cxx::Type* type,
     if (elements && !elements->next &&
         types_.unqualified(elements->value->type) == types_.unqualified(type)) {
       auto initialized = evaluation_.expression(elements->value);
-      evaluation_.adopt(elements->value, initialized);
+      evaluation_.adopt(elements->value);
       return initialized;
     }
     ReceiverScope receiver(evaluation_, *record);
     for (const auto& member : record->members) {
       auto* initializing_expression = elements ? elements->value : nullptr;
       Value initialized;
-      if (unit_.typeTraits().is_lvalue_reference(member.field->type())) {
-        if (!elements) {
-          diagnostics_.reject(unit_, owner,
-                              "reference members require an initializer");
+      {
+        const bool default_clause =
+            elements && cxx::ast_cast<cxx::DefaultInitializerExpressionAST>(
+                            elements->value);
+        std::optional<LexicalReceiverScope> lexical_receiver;
+        if (elements && !default_clause) {
+          lexical_receiver.emplace(evaluation_);
         }
-        initialized = evaluation_.reference(elements->value, owner);
-      } else {
-        initialized = elements
-                          ? evaluation_.convert(elements->value,
-                                                member.field->type(), owner)
-                          : zero(member.field->type(), owner);
+        if (unit_.typeTraits().is_lvalue_reference(member.type())) {
+          if (!elements) {
+            diagnostics_.reject(unit_, owner,
+                                "reference members require an initializer");
+          }
+          initialized = evaluation_.reference(elements->value, owner);
+        } else {
+          initialized = elements ? evaluation_.convert(elements->value,
+                                                       member.type(), owner)
+                                 : zero(member.type(), owner);
+          evaluation_.adopt(initializing_expression);
+        }
       }
-      evaluation_.adopt(initializing_expression, initialized);
-      evaluation_.publish_receiver_member(member.field, initialized);
+      evaluation_.publish_receiver_member(member.source, initialized);
       if (elements) {
         elements = elements->next;
       }
@@ -534,7 +880,7 @@ Value Initialization::from_elements(const cxx::Type* type,
     if (elements && !elements->next &&
         types_.unqualified(elements->value->type) == types_.unqualified(type)) {
       auto initialized = evaluation_.expression(elements->value);
-      evaluation_.adopt(elements->value, initialized);
+      evaluation_.adopt(elements->value);
       return initialized;
     }
     diagnostics_.reject(
@@ -548,10 +894,12 @@ Value Initialization::from_elements(const cxx::Type* type,
   if (elements && !elements->next) {
     return evaluation_.convert(elements->value, type, owner);
   }
-  if (elements || loom_type_kind(output) != LOOM_TYPE_SCALAR) {
+  if (elements || (loom_type_kind(output) != LOOM_TYPE_SCALAR &&
+                   partition.kind != ValueKind::Pointer)) {
     diagnostics_.reject(
         unit_, owner,
-        "value initialization requires a scalar, vector or admitted record");
+        "value initialization requires a scalar, vector, pointer or admitted "
+        "record");
   }
   return zero(type, owner);
 }
@@ -566,20 +914,20 @@ void Initialization::default_storage_record(StorageProjection destination,
   ReceiverScope receiver(evaluation_, record, destination, object_type);
   if (zero_initialize) {
     for (const auto& member : record.members) {
-      auto member_type = objects_.member_type(object_type, member.field);
-      objects_.store(storage_.member(destination, member.field, owner),
+      auto member_type = objects_.member_type(object_type, member.source);
+      objects_.store(storage_.member(destination, member.source, owner),
                      zero(member_type, owner), member_type, owner);
-      evaluation_.complete_storage_receiver_member(member.field);
+      evaluation_.complete_receiver_member(member.source);
     }
   } else if (retained) {
     for (const auto& member : record.members) {
-      evaluation_.complete_storage_receiver_member(member.field);
+      evaluation_.complete_receiver_member(member.source);
     }
   }
 
-  for_each_default_initializer(
+  for_each_subobject_initializer(
       unit_, diagnostics_, constructor, owner,
-      [&](cxx::FieldSymbol* field, cxx::ExpressionAST* source,
+      [&](cxx::Symbol* field, cxx::ExpressionAST* source,
           cxx::MemInitializerAST* initializer) {
         auto mark = evaluation_.begin_full_expression();
         auto field_type = objects_.member_type(object_type, field);
@@ -587,7 +935,7 @@ void Initialization::default_storage_record(StorageProjection destination,
                source, initializer->constructor, initializer,
                zero_initialize || retained);
         evaluation_.finish_full_expression(mark);
-        evaluation_.complete_storage_receiver_member(field);
+        evaluation_.complete_receiver_member(field);
       });
 }
 
@@ -600,8 +948,18 @@ void Initialization::object(StorageProjection destination,
                             cxx::ExpressionAST* initializer,
                             cxx::FunctionSymbol* constructor, cxx::AST* owner,
                             bool retained) {
+  if (unit_.typeTraits().is_array(type)) {
+    initializer = array_initializer(initializer, constructor);
+    if (auto* copy = evaluation_.array_copy(owner)) {
+      auto source = evaluation_.reference(copy->source, owner);
+      copy_array(destination, type,
+                 storage_.project(source.pointer(), copy->source->type, owner),
+                 *copy, owner);
+      return;
+    }
+  }
   if (auto* conversion = constructor_conversion(initializer);
-      conversion && types_.is_user_record_constructor(
+      conversion && types_.record_constructor_requires_call(
                         type, conversion->conversionFunction, owner)) {
     constructor = conversion->conversionFunction;
     initializer = conversion->expression;
@@ -702,7 +1060,12 @@ void Initialization::object(StorageProjection destination,
   auto* object_type = type;
   auto* shape = types_.unqualified(type);
   if (!types_.array(shape, owner) &&
-      types_.is_user_record_constructor(shape, constructor, owner)) {
+      types_.record_constructor_requires_call(shape, constructor, owner)) {
+    if (!list && initializer) {
+      for (auto* argument : source.arguments()) {
+        elements.push_back(argument);
+      }
+    }
     evaluation_.call_constructor(destination, *types_.record(shape, owner),
                                  object_type, constructor, elements, owner);
     return;
@@ -719,17 +1082,28 @@ void Initialization::object(StorageProjection destination,
   }
   if (list) {
     if (auto* array = cxx::type_cast<cxx::BoundedArrayType>(shape)) {
+      auto* element_type = unit_.typeTraits().get_element_type(object_type);
+      const bool leaf = !unit_.typeTraits().is_array(element_type);
       for (size_t index = 0; index < array->size(); ++index) {
-        const bool explicit_clause = index < elements.size();
-        auto* clause = index < elements.size() ? elements[index] : nullptr;
-        auto* element_constructor = clause ? nullptr : constructor;
-        if (!clause && implicit_element) {
+        const bool explicit_clause = !constructor && index < elements.size();
+        auto* clause = constructor       ? initializer
+                       : explicit_clause ? elements[index]
+                                         : nullptr;
+        auto* element_constructor = constructor;
+        if (!constructor && !explicit_clause && implicit_element) {
           clause = implicit_element->initializer();
           element_constructor = implicit_element->constructor();
         }
-        object(storage_.element(destination, array, index, owner),
-               unit_.typeTraits().get_element_type(object_type), clause,
-               element_constructor, owner, retained && !explicit_clause);
+        std::optional<Evaluation::FullExpression> full_expression;
+        if (!explicit_clause && leaf) {
+          full_expression = evaluation_.begin_full_expression();
+        }
+        object(storage_.element(destination, array, index, owner), element_type,
+               clause, element_constructor, owner,
+               retained && !explicit_clause);
+        if (full_expression) {
+          evaluation_.finish_full_expression(*full_expression);
+        }
       }
       return;
     }
@@ -742,27 +1116,132 @@ void Initialization::object(StorageProjection destination,
       ReceiverScope receiver(evaluation_, *record, destination, object_type);
       for (size_t index = 0; index < record->members.size(); ++index) {
         const auto& member = record->members[index];
-        object(storage_.member(destination, member.field, owner),
-               objects_.member_type(object_type, member.field),
-               index < elements.size() ? elements[index] : nullptr, nullptr,
-               owner, false);
-        evaluation_.complete_storage_receiver_member(member.field);
+        {
+          auto* initializer =
+              index < elements.size() ? elements[index] : nullptr;
+          const bool default_clause =
+              initializer &&
+              cxx::ast_cast<cxx::DefaultInitializerExpressionAST>(initializer);
+          std::optional<LexicalReceiverScope> lexical_receiver;
+          if (initializer && !default_clause) {
+            lexical_receiver.emplace(evaluation_);
+          }
+          object(storage_.member(destination, member.source, owner),
+                 objects_.member_type(object_type, member.source), initializer,
+                 nullptr, owner, false);
+        }
+        evaluation_.complete_receiver_member(member.source);
       }
       return;
     }
   }
   auto initialized = value(shape, initializer, constructor, owner);
   objects_.store(destination, initialized, object_type, owner);
-  evaluation_.adopt(initializer, initialized);
+  evaluation_.adopt(initializer);
 }
 
-void Initialization::constructor_receiver(StorageProjection destination,
-                                          const RecordPartition& record,
-                                          const cxx::Type* object_type,
-                                          cxx::FunctionSymbol* constructor,
-                                          cxx::AST* owner) {
-  default_storage_record(destination, record, object_type, constructor,
-                         /*zero_initialize=*/false, /*retained=*/false, owner);
+void Initialization::copy_array(StorageProjection destination,
+                                const cxx::Type* type, StorageProjection source,
+                                const ArrayCopyInitialization& plan,
+                                cxx::AST* owner) {
+  if (auto* array =
+          cxx::type_cast<cxx::BoundedArrayType>(types_.unqualified(type))) {
+    for (size_t index = 0; index < array->size(); ++index) {
+      copy_array(storage_.element(destination, array, index, owner),
+                 unit_.typeTraits().get_element_type(type),
+                 storage_.element(source, array, index, owner), plan, owner);
+    }
+  } else {
+    auto mark = evaluation_.begin_full_expression();
+    evaluation_.call_copy_constructor(destination, *types_.record(type, owner),
+                                      plan.constructor, source,
+                                      plan.default_arguments, owner);
+    evaluation_.finish_full_expression(mark);
+  }
+}
+
+void Initialization::constructor_receiver(
+    StorageProjection destination, const RecordPartition& record,
+    const cxx::Type* object_type, cxx::FunctionSymbol* constructor,
+    cxx::List<cxx::MemInitializerAST*>* initializers, cxx::AST* owner) {
+  if (auto* delegate = constructor->delegatingConstructor()) {
+    types_.admit_construction(constructor, object_type, owner);
+    IREE_ASSERT(initializers && !initializers->next);
+    auto* initializer = initializers->value;
+    ReceiverScope receiver(evaluation_, record, destination, object_type);
+    auto* source = cxx::memInitializerClause(unit_.arena(), initializer);
+    auto mark = evaluation_.begin_full_expression();
+    object(destination, object_type, source, delegate, initializer);
+    evaluation_.finish_full_expression(mark);
+    for (const auto& member : record.members) {
+      evaluation_.complete_receiver_member(member.source);
+    }
+    return;
+  }
+  types_.admit_construction(constructor, object_type, owner);
+  ReceiverScope receiver(evaluation_, record, destination, object_type);
+  for (auto* initializer : cxx::ListView{initializers}) {
+    auto mark = evaluation_.begin_full_expression();
+    auto* field = initializer->symbol;
+    auto* source = cxx::memInitializerClause(unit_.arena(), initializer);
+    auto* field_type = objects_.member_type(object_type, field);
+    object(storage_.member(destination, field, initializer), field_type, source,
+           initializer->constructor, initializer);
+    evaluation_.finish_full_expression(mark);
+    evaluation_.complete_receiver_member(field);
+  }
+}
+
+void Initialization::value_constructor_receiver(
+    const RecordPartition& record, const cxx::Type* object_type,
+    cxx::FunctionSymbol* constructor,
+    cxx::List<cxx::MemInitializerAST*>* initializers, cxx::AST* owner) {
+  if (auto* delegate = constructor->delegatingConstructor()) {
+    types_.admit_construction(constructor, object_type, owner);
+    IREE_ASSERT(initializers && !initializers->next);
+    auto* initializer = initializers->value;
+    auto* source = cxx::memInitializerClause(unit_.arena(), initializer);
+    auto mark = evaluation_.begin_full_expression();
+    auto initialized = value(object_type, source, delegate, initializer);
+    evaluation_.finish_full_expression(mark);
+    for (const auto& member : record.members) {
+      evaluation_.publish_receiver_member(
+          member.source,
+          initialized.project(*member.partition, member.component_offset));
+    }
+    return;
+  }
+
+  types_.admit_construction(constructor, object_type, owner);
+  for (auto* initializer : cxx::ListView{initializers}) {
+    auto mark = evaluation_.begin_full_expression();
+    auto* field = initializer->symbol;
+    auto* source = cxx::memInitializerClause(unit_.arena(), initializer);
+    const auto* field_type = objects_.member_type(object_type, field);
+    Value initialized;
+    if (unit_.typeTraits().is_lvalue_reference(field_type)) {
+      auto* referent =
+          cxx::Initializer(source).referenceExpression(unit_.typeTraits());
+      if (!referent) {
+        diagnostics_.reject(unit_, source,
+                            "reference members require one initializer "
+                            "expression");
+      }
+      initialized = evaluation_.reference(referent, initializer);
+    } else {
+      initialized =
+          value(field_type, source, initializer->constructor, initializer);
+      evaluation_.adopt(source);
+    }
+    evaluation_.publish_receiver_member(field, initialized);
+    evaluation_.finish_full_expression(mark);
+  }
+  // Default-initialized scalar and array members have begun their lifetimes
+  // even when no payload was supplied. Body assignments populate their
+  // retained components; reads still require those components to be defined.
+  for (const auto& member : record.members) {
+    evaluation_.complete_receiver_member(member.source);
+  }
 }
 
 std::optional<ObjectRepresentation> Initialization::literal(
@@ -802,15 +1281,35 @@ void Initialization::storage(StorageAllocation allocation,
       return;
     }
     cxx::Initializer source(initializer);
+    auto* source_expression = source.singleExpression();
+    if (source_expression &&
+        unit_.typeTraits().is_array(source_expression->type) &&
+        types_.unqualified(source_expression->type) ==
+            types_.unqualified(type)) {
+      auto source_pointer = evaluation_.reference(source_expression, owner);
+      auto source_object = storage_.project(source_pointer.pointer(),
+                                            source_expression->type, owner);
+      auto value = objects_.load(source_object, source_expression->type, owner);
+      objects_.store(storage_.project(allocation.pointer, type, owner), value,
+                     type, owner);
+      return;
+    }
     if (!constructor && source.form() != cxx::InitializerForm::kList &&
         source.form() != cxx::InitializerForm::kParen) {
       diagnostics_.reject(
           unit_, owner, "automatic arrays require element-wise initialization");
     }
+    auto* element_type = unit_.typeTraits().get_element_type(type);
+    if (unit_.typeTraits().is_class(element_type) ||
+        unit_.typeTraits().is_array(element_type) ||
+        types_.native_vector(element_type)) {
+      object(storage_.project(allocation.pointer, type, owner), type,
+             initializer, constructor, owner);
+      return;
+    }
     auto elements = source.arguments();
     auto* braced = source.bracedInitList();
     auto* implicit_element = braced ? braced->implicitElement : nullptr;
-    auto* element_type = unit_.typeTraits().get_element_type(type);
     for (size_t index = 0; index < array->size(); ++index) {
       auto* clause = index < elements.size() ? elements[index] : nullptr;
       auto* element_constructor = clause ? nullptr : constructor;
@@ -818,20 +1317,11 @@ void Initialization::storage(StorageAllocation allocation,
         clause = implicit_element->initializer();
         element_constructor = implicit_element->constructor();
       }
-      if (unit_.typeTraits().is_class(element_type) ||
-          unit_.typeTraits().is_array(element_type) ||
-          types_.native_vector(element_type)) {
-        object(
-            storage_.element(storage_.project(allocation.pointer, type, owner),
-                             array, index, owner),
-            element_type, clause, element_constructor, owner);
-      } else {
-        auto element = value(element_type, clause, element_constructor, owner);
-        auto position = scalars_.integer(index, LOOM_SCALAR_TYPE_INDEX,
-                                         locations_.get(owner));
-        storage_.store({allocation.view, position}, element.ssa(), element_type,
-                       owner);
-      }
+      auto element = value(element_type, clause, element_constructor, owner);
+      auto position = scalars_.integer(index, LOOM_SCALAR_TYPE_INDEX,
+                                       locations_.get(owner));
+      storage_.store({allocation.view, position}, element.ssa(), element_type,
+                     owner);
     }
   } else if (unit_.typeTraits().is_class(type)) {
     object(storage_.project(allocation.pointer, type, owner), type, initializer,

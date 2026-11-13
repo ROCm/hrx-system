@@ -21,10 +21,15 @@ loom_check_test_suite(
     name = "test",
     srcs = [
         "callgraph_specialization.loom-test",
+        "execution_unit_count.loom-test",
+        "source_boundary_cleanup.loom-test",
         "source_motion.loom-test",
         "source_switch_projection.loom-test",
+        "source_target_aliases.loom-test",
+        "source_template_contexts.loom-test",
         "source_tied_carriers.loom-test",
         "strand_callgraph.loom-test",
+        "unrefined_facts.loom-test",
     ],
 )
 
@@ -108,6 +113,7 @@ loom_cc_library(
         "//loom/src/loom/pass:types",
         "//loom/src/loom/pass/test:registry",
         "//loom/src/loom/rewrite:rewriter",
+        "//loom/src/loom/target:facts",
         "//loom/src/loom/target:low_descriptor_registry_core_test",
         "//loom/src/loom/target:provider",
         "//loom/src/loom/target/test/lower:registry",

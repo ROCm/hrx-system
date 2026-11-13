@@ -571,6 +571,53 @@ def _emit_descriptor_op(
     )
 
 
+def integer_absolute_descriptor_rule(
+    source_op: Op,
+    value_type: TypePattern,
+    sign_emits: Sequence[EmitDescriptorOp],
+    exclusive_or: Descriptor,
+    subtract: Descriptor,
+) -> DescriptorRule:
+    """Composes wrapping absolute value from a target's signed-mask recipe.
+
+    ``sign_emits`` reads the source ``input`` and defines the all-zero or
+    all-one temporary ``sign`` with ``value_type``. Both arithmetic descriptors
+    use ``lhs``, ``rhs``, and ``dst`` fields. The final subtraction preserves
+    the source width's signed-minimum wrapping behavior.
+    """
+
+    return DescriptorRule(
+        source_op=source_op,
+        descriptor=subtract,
+        guards=(
+            Guard.value_type("input", value_type),
+            Guard.value_type("result", value_type),
+        ),
+        emit=(
+            *sign_emits,
+            EmitDescriptorOp(
+                descriptor=exclusive_or,
+                operands={
+                    "lhs": ValueRef.operand("input"),
+                    "rhs": ValueRef.temporary("sign"),
+                },
+                results={"dst": ValueRef.temporary("magnitude")},
+                result_types={"dst": value_type},
+                form=DescriptorEmitForm.OP,
+            ),
+            EmitDescriptorOp(
+                descriptor=subtract,
+                operands={
+                    "lhs": ValueRef.temporary("magnitude"),
+                    "rhs": ValueRef.temporary("sign"),
+                },
+                results={"dst": ValueRef.result("result")},
+                form=DescriptorEmitForm.OP,
+            ),
+        ),
+    )
+
+
 def _require_semantic_tag(
     descriptor: Descriptor,
     semantic_tag: str | None,

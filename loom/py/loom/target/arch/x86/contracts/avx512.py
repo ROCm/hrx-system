@@ -25,6 +25,7 @@ from loom.target.arch.x86.contracts.float_roots import (
     scalar_float_root_rules,
     vector_float_root_rules,
 )
+from loom.target.arch.x86.contracts.float_rounding import float_rounding_rules
 from loom.target.arch.x86.contracts.floating_extrema import (
     avx512_float_extrema_rules,
 )
@@ -65,6 +66,7 @@ from loom.target.arch.x86.descriptors import X86_AVX512_CORE_DESCRIPTOR_SET
 from loom.target.arch.x86.vector_families import (
     AVX512_CARRIER_VECTOR_BIT_WIDTHS,
     AVX512_FLOAT_ROOT_FAMILIES,
+    AVX512_FLOAT_ROUNDING_FAMILIES,
     AVX512_ROOT_VECTOR_BIT_WIDTHS,
     AVX512_SCALAR_FLOAT_ROOT_FAMILIES,
     AVX512_VECTOR_BIT_WIDTHS,
@@ -107,6 +109,13 @@ def _cases() -> Sequence[ContractCase]:
     )
     return (
         *avx512_integer_float_rules(_descriptor),
+        *float_rounding_rules(
+            _descriptor,
+            descriptor_key_prefix="x86.avx512",
+            families=AVX512_FLOAT_ROUNDING_FAMILIES,
+            vector_bit_widths=AVX512_CARRIER_VECTOR_BIT_WIDTHS,
+            priority=1,
+        ),
         *avx512_vector_integer_float_rules(_descriptor),
         *avx512_scalar_float_integer_rules(_descriptor),
         *avx512_vector_float_integer_rules(_descriptor),

@@ -26,9 +26,9 @@ class CtsDeviceCache {
   }
   amdf_native_lifetime_t native_lifetime() const { return native_lifetime_; }
 
-  // Optional canonical gfx target selected before any GPU is activated.
-  void SetGpuTarget(const char* target) { gpu_target_ = target; }
-  const std::string& gpu_target() const { return gpu_target_; }
+  // Optional canonical gfx targets accepted before any GPU is activated.
+  void AddGpuTarget(const char* target) { gpu_targets_.emplace_back(target); }
+  const std::vector<std::string>& gpu_targets() const { return gpu_targets_; }
 
   // Optional exact endpoint selected before any GPU fixture activates a device.
   void SetGpuEndpointId(amdf_endpoint_id_t id) { gpu_endpoint_id_ = id; }
@@ -94,8 +94,9 @@ class CtsDeviceCache {
 
   // Core table borrowed from the initialized CTS provider.
   const amdf_api_t* api_ = nullptr;
-  // Empty selects any endpoint; qualification can require a compiler target.
-  std::string gpu_target_;
+  // Empty admits any target; otherwise an endpoint must match one listed
+  // target.
+  std::vector<std::string> gpu_targets_;
   // Exact enumerated identity of the primary GPU, absent for normal discovery.
   std::optional<amdf_endpoint_id_t> gpu_endpoint_id_;
   // Exact reserved peer identity; absence never authorizes peer discovery.

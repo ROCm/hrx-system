@@ -17,6 +17,7 @@
 #include "loom/ir/module.h"
 #include "loom/ops/func/ops.h"
 #include "loom/ops/low/ops.h"
+#include "loom/ops/low/storage.h"
 #include "loom/ops/scalar/ops.h"
 #include "loom/target/test/descriptors.h"
 #include "loom/target/test/low_registry.h"
@@ -26,6 +27,25 @@
 
 namespace loom {
 namespace {
+
+loom_low_lower_emit_ref_storage_t PackEmitRef(
+    loom_low_lower_emit_ref_t emit_ref, uint8_t descriptor_bit_count) {
+  const uint32_t encoded_descriptor_ref =
+      emit_ref.descriptor_ref == LOOM_LOW_LOWER_DESCRIPTOR_REF_NONE
+          ? 0u
+          : (uint32_t)emit_ref.descriptor_ref + 1u;
+  const uint32_t packed_ref =
+      encoded_descriptor_ref |
+      ((uint32_t)emit_ref.emit_index << descriptor_bit_count);
+  return {
+      .bytes =
+          {
+              (uint8_t)packed_ref,
+              (uint8_t)(packed_ref >> 8),
+              (uint8_t)(packed_ref >> 16),
+          },
+  };
+}
 
 class LowLowerRuleEmitTest : public ::testing::Test {
  protected:
@@ -150,13 +170,23 @@ TEST_F(LowLowerRuleEmitTest, EmitsDescriptorAndRegisterTransferPrograms) {
                                    TEST_LOW_CORE_DESCRIPTOR_REF_TEST_ADD_I32) {
       ASSERT_EQ(emitted_add, nullptr);
       emitted_add = op;
-    } else if (loom_low_copy_isa(op)) {
-      ASSERT_EQ(emitted_copy, nullptr);
-      emitted_copy = op;
-    } else if (loom_low_move_isa(op)) {
-      ASSERT_LT(emitted_move_count, IREE_ARRAYSIZE(emitted_moves));
-      emitted_moves[emitted_move_count++] = op;
-    } else if (loom_low_return_isa(op)) {
+      continue;
+    }
+    switch (loom_low_register_transfer_kind(op)) {
+      case LOOM_LOW_REGISTER_TRANSFER_COPY:
+        ASSERT_EQ(emitted_copy, nullptr);
+        emitted_copy = op;
+        continue;
+      case LOOM_LOW_REGISTER_TRANSFER_MOVE:
+        ASSERT_LT(emitted_move_count, IREE_ARRAYSIZE(emitted_moves));
+        emitted_moves[emitted_move_count++] = op;
+        continue;
+      case LOOM_LOW_REGISTER_TRANSFER_SLICE:
+      case LOOM_LOW_REGISTER_TRANSFER_CONCAT:
+      case LOOM_LOW_REGISTER_TRANSFER_NONE:
+        break;
+    }
+    if (loom_low_return_isa(op)) {
       emitted_return = op;
     }
   }
@@ -252,7 +282,7 @@ TEST_P(LowLowerWideRuleEmitTest, PlansAndEmitsEveryOperandAndResult) {
       rule_set.rules, rule_set.rules + rule_set.rule_count);
   std::vector<loom_low_lower_emit_t> emits(
       rule_set.emits, rule_set.emits + rule_set.emit_count);
-  std::vector<loom_low_lower_emit_ref_t> emit_refs(
+  std::vector<loom_low_lower_emit_ref_storage_t> emit_refs(
       rule_set.emit_refs, rule_set.emit_refs + rule_set.emit_ref_count);
   std::vector<loom_low_lower_value_ref_t> value_refs(
       rule_set.value_refs, rule_set.value_refs + rule_set.value_ref_count);
@@ -266,12 +296,21 @@ TEST_P(LowLowerWideRuleEmitTest, PlansAndEmitsEveryOperandAndResult) {
             *out_can_materialize = true;
             return iree_ok_status();
           },
-      .result_type = loom_low_lower_value_binding_type,
+      .result_type =
+          [](const loom_low_lower_context_t* context, loom_value_id_t value,
+             const void* plan) {
+            EXPECT_EQ(*static_cast<const loom_value_id_t*>(plan), value);
+            return loom_low_lower_value_binding_type(context, value);
+          },
       .prepare =
           [](loom_low_lower_context_t* context, loom_value_id_t value,
              const void** out_plan) {
-            *out_plan = loom_module_value(
-                loom_low_lower_context_module(context), value);
+            loom_value_id_t* retained = nullptr;
+            IREE_RETURN_IF_ERROR(loom_low_lower_allocate_plan_data(
+                context, sizeof(*retained),
+                reinterpret_cast<void**>(&retained)));
+            *retained = value;
+            *out_plan = retained;
             return iree_ok_status();
           },
       .emit =
@@ -280,9 +319,8 @@ TEST_P(LowLowerWideRuleEmitTest, PlansAndEmitsEveryOperandAndResult) {
                   [](loom_low_lower_context_t* context, const loom_op_t*,
                      loom_value_id_t value, const void* plan,
                      loom_value_id_t* out_value) {
-                    EXPECT_EQ(plan, loom_module_value(
-                                        loom_low_lower_context_module(context),
-                                        value));
+                    EXPECT_EQ(*static_cast<const loom_value_id_t*>(plan),
+                              value);
                     *out_value = loom_low_lower_lookup_value(context, value);
                     return iree_ok_status();
                   },
@@ -293,10 +331,11 @@ TEST_P(LowLowerWideRuleEmitTest, PlansAndEmitsEveryOperandAndResult) {
     if (rule.emit_count != 1) {
       continue;
     }
-    auto emit_ref = emit_refs[rule.action.emit_start];
+    auto emit_ref =
+        loom_low_lower_rule_set_emit_ref_at(&rule_set, rule.action.emit_start);
     if (emit_ref.descriptor_ref == LOOM_LOW_LOWER_DESCRIPTOR_REF_NONE ||
         rule_set.descriptor_refs[emit_ref.descriptor_ref].stable_id !=
-            descriptor.stable_id) {
+            loom_low_descriptor_stable_id(&descriptor_set, &descriptor)) {
       continue;
     }
     auto emit = emits[emit_ref.emit_index];
@@ -330,7 +369,8 @@ TEST_P(LowLowerWideRuleEmitTest, PlansAndEmitsEveryOperandAndResult) {
     rule.action.emit_start = static_cast<uint16_t>(emit_refs.size());
     emit_ref.emit_index = static_cast<uint16_t>(emits.size());
     emits.push_back(emit);
-    emit_refs.push_back(emit_ref);
+    emit_refs.push_back(
+        PackEmitRef(emit_ref, rule_set.emit_ref_descriptor_bit_count));
     ++replaced_count;
   }
   ASSERT_GT(replaced_count, 0u);

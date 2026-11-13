@@ -10,7 +10,7 @@
 #include <stdint.h>
 
 #include "diagnostic.h"
-#include "iree/hal/drivers/vulkan/device_spec.h"
+#include "iree/hal/driver/vulkan/device_spec.h"
 #include "loom/target/arch/spirv/cooperative_properties.h"
 #include "loom/target/arch/spirv/features.h"
 #include "loom/target/arch/spirv/profile.h"
@@ -92,6 +92,19 @@ static const loomc_spirv_iree_hal_feature_row_t
             IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_INT8, INT8, "shader_int8"),
         LOOMC_SPIRV_IREE_HAL_GENERAL_FEATURE_ROW(
             IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_INT16, INT16, "shader_int16"),
+        LOOMC_SPIRV_IREE_HAL_GENERAL_FEATURE_ROW(
+            IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_INTEGER_DOT_PRODUCT,
+            INTEGER_DOT_PRODUCT, "shader_integer_dot_product"),
+        LOOMC_SPIRV_IREE_HAL_GENERAL_FEATURE_ROW(
+            IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_INTEGER_DOT_PRODUCT,
+            INTEGER_DOT_PRODUCT_INPUT_ALL, "shader_integer_dot_product"),
+        LOOMC_SPIRV_IREE_HAL_GENERAL_FEATURE_ROW(
+            IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_INTEGER_DOT_PRODUCT |
+                IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_INT8,
+            INTEGER_DOT_PRODUCT_INPUT4X8_BIT, "shader_integer_dot_product"),
+        LOOMC_SPIRV_IREE_HAL_GENERAL_FEATURE_ROW(
+            IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_INTEGER_DOT_PRODUCT,
+            INTEGER_DOT_PRODUCT_INPUT4X8_BIT_PACKED, "shader_integer_dot_product"),
         LOOMC_SPIRV_IREE_HAL_GENERAL_FEATURE_ROW(
             IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_SUBGROUP_EXTENDED_TYPES,
             SUBGROUP_EXTENDED_TYPES, "shader_subgroup_extended_types"),
@@ -530,8 +543,8 @@ static loomc_status_t loomc_spirv_iree_hal_load_device_specs(
 
 static loomc_status_t loomc_spirv_iree_hal_query_facts(
     const loomc_spirv_iree_hal_target_options_t* options,
-    loomc_spirv_iree_hal_profile_facts_t* out_facts,
-    iree_hal_vulkan_device_spec_t* out_vulkan_spec, loomc_result_t* result,
+    loomc_result_t* result, loomc_spirv_iree_hal_profile_facts_t* out_facts,
+    iree_hal_vulkan_device_spec_t* out_vulkan_spec,
     const iree_hal_executable_target_t** out_executable_target) {
   *out_facts = (loomc_spirv_iree_hal_profile_facts_t){0};
   for (uint32_t i = 1; i < LOOMC_SPIRV_FEATURE_COUNT; ++i) {
@@ -918,7 +931,7 @@ loomc_status_t loomc_target_select_spirv_iree_hal(
   iree_hal_vulkan_device_spec_t vulkan_spec = {0};
   const iree_hal_executable_target_t* executable_target = NULL;
   loomc_status_t status = loomc_spirv_iree_hal_query_facts(
-      options, &facts, &vulkan_spec, result, &executable_target);
+      options, result, &facts, &vulkan_spec, &executable_target);
   loomc_target_profile_t* target_profile = NULL;
   loomc_spirv_cooperative_matrix_row_t* matrix_rows = NULL;
   loomc_host_size_t matrix_row_count = 0;

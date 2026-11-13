@@ -152,6 +152,8 @@ typedef struct loom_aie2p_array_plan_builder_t {
   loom_aie2p_array_binding_plan_t* binding_plans;
   // Retained completion resources sharing the binding-plan allocation.
   loom_aie2p_array_completion_route_t* completion_routes;
+  // Physical sender prefixes indexed by the topology's canonical channel.
+  loom_aie2p_array_route_tree_t* route_trees;
   loom_aie2p_array_route_builder_t route_builder;
 
   iree_host_size_t group_cursor;
@@ -433,7 +435,7 @@ static iree_status_t loom_aie2p_array_extract_worker(
     return iree_ok_status();
   }
   bool helpers_admitted = false;
-  IREE_RETURN_IF_ERROR(loom_aie2p_program_source_admit_direct_helpers(
+  IREE_RETURN_IF_ERROR(loom_aie2p_program_source_admit_helpers(
       builder->program_sources, source, &helpers_admitted));
   if (!helpers_admitted) {
     builder->valid = false;
@@ -1197,8 +1199,7 @@ static bool loom_aie2p_array_read_only_data_proposal_conflicts(
     }
     const loom_low_read_only_data_requirement_t* prior_requirement =
         &builder->workers[worker_index]
-             .source->requirements
-             .read_only_data[placement->requirement_ordinal];
+             .source->program_data->values[placement->requirement_ordinal];
     if (!loom_aie2p_array_read_only_data_conflicts_with(
             requirement, prior_requirement->symbol)) {
       continue;
@@ -1260,6 +1261,8 @@ static iree_status_t loom_aie2p_array_plan_workers(
 
     loom_aie2p_array_tile_state_t* tile_state =
         loom_aie2p_array_tile_state(builder, worker->coordinate);
+    builder->worker_plans[i].local_memory_bank_cursors =
+        tile_state->resources.bank_cursors;
     for (uint32_t space_index = 0; space_index < LOOM_STORAGE_SPACE_COUNT_;
          ++space_index) {
       const loom_storage_space_t storage_space =
@@ -1300,22 +1303,20 @@ static iree_status_t loom_aie2p_array_plan_workers(
     }
   }
 
-  // Immutable leaf data is persistent worker state. Reserve it after every
+  // Immutable program data is persistent worker state. Reserve it after every
   // authored storage domain and before generated fold and channel storage.
   for (iree_host_size_t worker_index = 0;
        worker_index < builder->plan->worker_count; ++worker_index) {
     const loom_aie2p_array_worker_t* worker = &builder->workers[worker_index];
     builder->worker_plans[worker_index].first_read_only_data =
         (uint32_t)builder->read_only_data_cursor;
-    const loom_low_function_requirements_t* requirements =
-        &worker->source->requirements;
+    const loom_low_read_only_data_set_t* data = worker->source->program_data;
     loom_aie2p_array_tile_state_t* tile_state =
         loom_aie2p_array_tile_state(builder, worker->coordinate);
     for (iree_host_size_t requirement_ordinal = 0;
-         requirement_ordinal < requirements->read_only_data_count;
-         ++requirement_ordinal) {
+         requirement_ordinal < data->count; ++requirement_ordinal) {
       const loom_low_read_only_data_requirement_t* requirement =
-          &requirements->read_only_data[requirement_ordinal];
+          &data->values[requirement_ordinal];
       uint32_t owner_offset = 0;
       if (requirement->contents.data_length != 0) {
         loom_aie2p_array_local_memory_proposal_t proposal;
@@ -1940,14 +1941,14 @@ static iree_status_t loom_aie2p_array_plan_external_channel(
   const bool routed =
       ingress ? loom_aie2p_array_route_ingress(
                     &builder->route_builder, channel_index,
-                    channel->source_channel_index, shim_dma->coordinate,
-                    shim_dma->dma_channel, compute_dma->coordinate,
-                    compute_dma->dma_channel)
+                    &builder->route_trees[channel->source_channel_index],
+                    shim_dma->coordinate, shim_dma->dma_channel,
+                    compute_dma->coordinate, compute_dma->dma_channel)
               : loom_aie2p_array_route_egress(
                     &builder->route_builder, channel_index,
-                    channel->source_channel_index, compute_dma->coordinate,
-                    compute_dma->dma_channel, shim_dma->coordinate,
-                    shim_dma->dma_channel);
+                    &builder->route_trees[channel->source_channel_index],
+                    compute_dma->coordinate, compute_dma->dma_channel,
+                    shim_dma->coordinate, shim_dma->dma_channel);
   if (!routed) {
     return loom_aie2p_array_diagnose_route_capacity(builder, channel_index);
   }
@@ -2083,7 +2084,8 @@ static iree_status_t loom_aie2p_array_plan_routed_channel(
       builder, channel_index, sender, receiver,
       owns_sender_dma ? &sender_proposal.ring : NULL, &receiver_proposal.ring);
   if (!loom_aie2p_array_route_workers(
-          &builder->route_builder, channel_index, channel->source_channel_index,
+          &builder->route_builder, channel_index,
+          &builder->route_trees[channel->source_channel_index],
           sender_dma->coordinate, sender_dma->dma_channel,
           receiver_dma->coordinate, receiver_dma->dma_channel, false)) {
     return loom_aie2p_array_diagnose_route_capacity(builder, channel_index);
@@ -2276,7 +2278,7 @@ static iree_status_t loom_aie2p_array_admit_physical_cardinalities(
               .byte_length != 0;
     }
     out_cardinalities->read_only_data_count +=
-        (uint32_t)requirements->read_only_data_count;
+        (uint32_t)worker->source->program_data->count;
   }
   return iree_ok_status();
 }
@@ -2337,8 +2339,15 @@ static iree_status_t loom_aie2p_array_allocate_physical_plan(
       builder->arena, builder->plan->dma_channel_count,
       sizeof(*builder->dma_channels), (void**)&builder->dma_channels));
   IREE_RETURN_IF_ERROR(loom_aie2p_array_route_builder_initialize(
-      builder->family, builder->plan->channel_count, builder->plan->route_count,
-      builder->arena, &builder->route_builder));
+      builder->family, builder->plan->route_count, builder->arena,
+      &builder->route_builder));
+  IREE_RETURN_IF_ERROR(loom_aie2p_array_allocate_array(
+      builder->arena, builder->plan->channel_count,
+      sizeof(*builder->route_trees), (void**)&builder->route_trees));
+  if (builder->plan->channel_count) {
+    memset(builder->route_trees, 0,
+           builder->plan->channel_count * sizeof(*builder->route_trees));
+  }
   IREE_RETURN_IF_ERROR(loom_aie2p_array_allocate_array(
       builder->arena, builder->plan->binding_plan_count,
       sizeof(*builder->binding_plans) + sizeof(*builder->completion_routes),

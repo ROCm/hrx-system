@@ -283,7 +283,8 @@ static loom_memory_access_flags_t loom_low_lower_resolve_emit_access_flags(
     loom_memory_access_flags_t access_flags) {
   // Numerical requirements are consumed by descriptor selection. Only physical
   // access semantics remain on the selected Low memory instruction.
-  access_flags &= LOOM_MEMORY_ACCESS_FLAG_VOLATILE;
+  access_flags &=
+      LOOM_MEMORY_ACCESS_FLAG_VOLATILE | LOOM_MEMORY_ACCESS_FLAG_ATOMIC;
   if (access_flags == 0 || emit->source_memory_ordinal == 0) {
     return 0;
   }
@@ -1177,7 +1178,11 @@ static loom_type_t loom_low_lower_rule_plan_operand_type(
       context, rule_set, source, resolved, ordinal);
   if (ref->materializer_index != 0) {
     return loom_low_lower_rule_value_materializer(rule_set, ref)
-        ->result_type(context, value);
+        ->result_type(
+            context, value,
+            resolved->materializer_mask & (1u << ordinal)
+                ? loom_low_lower_resolved_emit_materializer(resolved, ordinal)
+                : NULL);
   }
   return loom_low_lower_value_binding_type(context, value);
 }
@@ -1515,16 +1520,18 @@ iree_status_t loom_low_lower_rule_plan_finalize(
     loom_low_lower_context_t* context,
     loom_low_lower_rule_source_memory_plan_builder_t* source_memory_builder,
     loom_low_lower_selected_plan_t* selected_plan) {
-  const loom_low_lower_rule_set_t* rule_set = selected_plan->rule_set;
-  const loom_low_lower_rule_t* rule = selected_plan->rule;
+  const loom_low_lower_rule_set_t* rule_set =
+      loom_low_lower_selected_plan_rule_set(selected_plan);
+  const loom_low_lower_rule_t* rule =
+      loom_low_lower_selected_plan_rule(selected_plan);
   const loom_op_t* source_op = selected_plan->source_op;
+  const loom_low_lower_selected_source_memory_t* source_memory =
+      loom_low_lower_selected_plan_source_memory(selected_plan);
   const loom_low_source_memory_access_plan_t* source_memory_access =
-      selected_plan->source_memory != NULL
-          ? &selected_plan->source_memory->access
-          : NULL;
+      source_memory != NULL ? &source_memory->access : NULL;
   const bool elided = iree_any_bit_set(selected_plan->flags,
                                        LOOM_LOW_LOWER_SELECTED_PLAN_ELIDED);
-  selected_plan->resolved_emits = NULL;
+  selected_plan->data.rule.resolved_emits = NULL;
   if (rule->emit_count == 0) {
     return elided ? iree_ok_status()
                   : loom_low_lower_rule_plan_alias_types(context, rule_set,
@@ -1560,26 +1567,27 @@ iree_status_t loom_low_lower_rule_plan_finalize(
   uint8_t* data = (uint8_t*)resolved_emits + rows_size;
   const loom_low_lower_rule_source_t source = {
       .source_op = source_op,
-      .source_nodes = selected_plan->data.source_nodes,
-      .source_node_count = selected_plan->source_node_count,
+      .source_nodes = loom_low_lower_selected_plan_source_nodes(selected_plan),
+      .source_node_count = selected_plan->selection.rule.source_node_count,
   };
   loom_low_lower_rule_match_context_t match_context;
   loom_low_lower_rule_match_context_initialize_from_lowering(
       context, /*view_regions=*/NULL, /*source_memory_state=*/NULL,
       &match_context);
   match_context.policy_rule_set_ordinal =
-      (uint16_t)(selected_plan->rule_set_index + 1u);
+      (uint16_t)(selected_plan->selection.rule.rule_set_index + 1u);
   uint32_t sequence_lane_count = 0;
   for (uint16_t i = 0; i < rule->emit_count; ++i) {
-    const loom_low_lower_emit_ref_t* emit_ref =
-        &rule_set->emit_refs[rule->action.emit_start + i];
-    const loom_low_lower_emit_t* emit = &rule_set->emits[emit_ref->emit_index];
+    const loom_low_lower_emit_ref_t emit_ref =
+        loom_low_lower_rule_set_emit_ref_at(
+            rule_set, (uint16_t)(rule->action.emit_start + i));
+    const loom_low_lower_emit_t* emit = &rule_set->emits[emit_ref.emit_index];
     loom_low_lower_resolved_emit_t* resolved = &resolved_emits[i];
     *resolved = (loom_low_lower_resolved_emit_t){.emit = emit};
-    if (emit_ref->descriptor_ref != LOOM_LOW_LOWER_DESCRIPTOR_REF_NONE) {
+    if (emit_ref.descriptor_ref != LOOM_LOW_LOWER_DESCRIPTOR_REF_NONE) {
       const loom_low_descriptor_t* descriptor = NULL;
       IREE_RETURN_IF_ERROR(loom_low_lower_rule_resolve_descriptor_ref(
-          &match_context, rule_set, emit_ref->descriptor_ref, &descriptor));
+          &match_context, rule_set, emit_ref.descriptor_ref, &descriptor));
       IREE_ASSERT(descriptor != NULL,
                   "generated target-low rule references a missing descriptor");
       resolved->descriptor.descriptor = descriptor;
@@ -1672,7 +1680,9 @@ iree_status_t loom_low_lower_rule_plan_finalize(
                   sequence_lane_count == lanes->lane_count);
       sequence_lane_count = iree_max(sequence_lane_count, lanes->lane_count);
       if (i + 1 == rule->emit_count) {
-        IREE_ASSERT_EQ(sequence_lane_count, lanes->lane_count);
+        // A store sequence can end with a scalar cursor/state update rather
+        // than a vector collector. Retain its complete sequence extent here.
+        lanes->lane_count = sequence_lane_count;
       }
     }
     const loom_low_lower_source_memory_address_materializer_t* materializer =
@@ -1695,6 +1705,6 @@ iree_status_t loom_low_lower_rule_plan_finalize(
     }
     data += data_size;
   }
-  selected_plan->resolved_emits = resolved_emits;
+  selected_plan->data.rule.resolved_emits = resolved_emits;
   return iree_ok_status();
 }

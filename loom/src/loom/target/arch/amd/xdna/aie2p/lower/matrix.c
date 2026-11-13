@@ -17,10 +17,6 @@
 #include "loom/target/arch/amd/xdna/aie2p/descriptors/core_descriptors.h"
 #include "loom/util/fact_table.h"
 
-typedef enum loom_aie2p_matrix_plan_kind_e {
-  LOOM_AIE2P_MATRIX_PLAN_MMA_M8N8K8 = 0x100,
-} loom_aie2p_matrix_plan_kind_t;
-
 typedef enum loom_aie2p_matrix_operation_e {
   LOOM_AIE2P_MATRIX_OPERATION_MULTIPLY = 0,
   LOOM_AIE2P_MATRIX_OPERATION_ACCUMULATE = 1,
@@ -363,12 +359,8 @@ static iree_status_t loom_aie2p_select_matrix_mma(
       context, AIE2P_CORE_REG_CLASS_ID_AIE2P_MBMS, 4, &result_type));
   IREE_RETURN_IF_ERROR(loom_low_lower_plan_value_type(
       context, loom_vector_mma_result(source_op), result_type));
-  *out_plan = loom_low_lower_plan_make(LOOM_AIE2P_MATRIX_PLAN_MMA_M8N8K8, plan);
+  *out_plan = loom_low_lower_plan_make(LOOM_AIE2P_PLAN_MATRIX_MMA_M8N8K8, plan);
   return iree_ok_status();
-}
-
-bool loom_aie2p_matrix_plan_isa(loom_low_lower_plan_t plan) {
-  return plan.id == LOOM_AIE2P_MATRIX_PLAN_MMA_M8N8K8;
 }
 
 iree_status_t loom_aie2p_select_matrix_plan(loom_low_lower_context_t* context,

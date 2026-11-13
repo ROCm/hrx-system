@@ -1,0 +1,96 @@
+// RUN: emit source-low target=amdgpu:gfx1201 output=low
+
+// Finite and zero-sign permissions do not exclude subnormal inputs.
+// Only approximate-function permission allows the native range restriction.
+func.def @single_roots(%input: f32) -> (f32, f32) {
+  %preserved = scalar.sqrtf<nnan|ninf|nsz> %input : f32
+  %approximate = scalar.sqrtf<afn> %input : f32
+  func.return %preserved, %approximate : f32, f32
+}
+
+// ----
+low.func.def target<amdgpu.rdna4.core> abi(hal_kernel) @single_roots(%input: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
+  %8 = s_mov_b32 144
+  %9 = v_cmp_class_f32 %input, %8
+  %10 = v_mul_f32_lit %input, 1266679808
+  %11 = v_cndmask_b32 %input, %10, %9
+  %12 = v_sqrt_f32 %11
+  %13 = v_mul_f32_lit %12, 964689920
+  %preserved = v_cndmask_b32 %12, %13, %9
+  %approximate = v_sqrt_f32 %input
+  return %preserved, %approximate
+}
+
+// ====
+
+// Each source lane carries its own scale predicate across the native root.
+func.def @vector_roots(%input: vector<2x2xf32>) -> (vector<2x2xf32>) {
+  %root = vector.sqrtf %input : vector<2x2xf32>
+  func.return %root : vector<2x2xf32>
+}
+
+// ----
+low.func.def target<amdgpu.rdna4.core> abi(hal_kernel) @vector_roots(%input: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>) asm {
+  %5 = s_mov_b32 144
+  %6 = slice %input[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %7 = v_cmp_class_f32 %6, %5
+  %8 = slice %input[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %9 = v_cmp_class_f32 %8, %5
+  %10 = slice %input[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %11 = v_cmp_class_f32 %10, %5
+  %12 = slice %input[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %13 = v_cmp_class_f32 %12, %5
+  %16 = v_mul_f32_lit %6, 1266679808
+  %18 = v_mul_f32_lit %8, 1266679808
+  %20 = v_mul_f32_lit %10, 1266679808
+  %22 = v_mul_f32_lit %12, 1266679808
+  %27 = v_cndmask_b32 %6, %16, %7
+  %31 = v_cndmask_b32 %8, %18, %9
+  %35 = v_cndmask_b32 %10, %20, %11
+  %39 = v_cndmask_b32 %12, %22, %13
+  %42 = v_sqrt_f32 %27
+  %44 = v_sqrt_f32 %31
+  %46 = v_sqrt_f32 %35
+  %48 = v_sqrt_f32 %39
+  %51 = v_mul_f32_lit %42, 964689920
+  %53 = v_mul_f32_lit %44, 964689920
+  %55 = v_mul_f32_lit %46, 964689920
+  %57 = v_mul_f32_lit %48, 964689920
+  %62 = v_cndmask_b32 %42, %51, %7
+  %66 = v_cndmask_b32 %44, %53, %9
+  %70 = v_cndmask_b32 %46, %55, %11
+  %74 = v_cndmask_b32 %48, %57, %13
+  %root = concat(%62, %66, %70, %74) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  return %root
+}
+
+// ====
+
+// Widened f16 and integer values cannot be f32 subnormals. Widened bf16
+// values can, so only that root needs normalization.
+func.def @widened_roots(%half: f16, %brain: bf16, %integer: i32) -> (f32, f32, f32) {
+  %half_wide = scalar.extf %half : f16 to f32
+  %brain_wide = scalar.extf %brain : bf16 to f32
+  %integer_wide = scalar.sitofp %integer : i32 to f32
+  %half_root = scalar.sqrtf %half_wide : f32
+  %brain_root = scalar.sqrtf %brain_wide : f32
+  %integer_root = scalar.sqrtf %integer_wide : f32
+  func.return %half_root, %brain_root, %integer_root : f32, f32, f32
+}
+
+// ----
+low.func.def target<amdgpu.rdna4.core> abi(hal_kernel) @widened_roots(%half: reg<amdgpu.vgpr>, %brain: reg<amdgpu.vgpr>, %integer: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
+  %half_wide = v_cvt_f32_f16 %half
+  %brain_wide = v_lshlrev_b32_src0_16_low16 %brain
+  %integer_wide = v_cvt_f32_i32 %integer
+  %half_root = v_sqrt_f32 %half_wide
+  %22 = s_mov_b32 144
+  %23 = v_cmp_class_f32 %brain_wide, %22
+  %24 = v_mul_f32_lit %brain_wide, 1266679808
+  %25 = v_cndmask_b32 %brain_wide, %24, %23
+  %26 = v_sqrt_f32 %25
+  %27 = v_mul_f32_lit %26, 964689920
+  %brain_root = v_cndmask_b32 %26, %27, %23
+  %integer_root = v_sqrt_f32 %integer_wide
+  return %half_root, %brain_root, %integer_root
+}

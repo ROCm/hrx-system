@@ -23,6 +23,7 @@ from loom.dialect.scalar import conversion as scalar_conversion
 from loom.dialect.vector import ALL_VECTOR_OPS
 from loom.dialect.vector import defs as vector
 from loom.dsl import ANY, PURE, EncodingOperandSummaryDef, Op, Operand
+from loom.scalar_type import ScalarTypeKind
 from loom.target.contracts import (
     LOWER_EMIT_FLAG_BIND_RESULTS_TO_REFS,
     LOWER_EMIT_FLAG_RECORD_SOURCE_MEMORY,
@@ -388,6 +389,15 @@ def test_compile_register_copy_from_selected_source_memory_root() -> None:
         vector_lane_byte_stride=4,
         static_byte_offset=0,
     )
+    equivalent_source_memory = SourceMemoryConstraint(
+        operation=SourceMemoryOperation.VIEW_CARRIER,
+        root_kind=SourceMemoryRootKind.ANY,
+        memory_spaces=("unknown", "global"),
+        element_byte_count=4,
+        vector_lane_count=1,
+        vector_lane_byte_stride=4,
+        static_byte_offset=0,
+    )
     fragment = ContractFragment(
         name="test.source-memory-root-copy",
         descriptor_set=TEST_LOW_CORE_DESCRIPTOR_SET,
@@ -397,8 +407,14 @@ def test_compile_register_copy_from_selected_source_memory_root() -> None:
                 emit=(
                     EmitRegisterCopy(
                         source=ValueRef.source_memory_root(),
-                        result=ValueRef.result("result"),
+                        result=ValueRef.temporary("root"),
+                        result_type=ValueRef.result("result"),
                         source_memory=source_memory,
+                    ),
+                    EmitRegisterCopy(
+                        source=ValueRef.source_memory_root(),
+                        result=ValueRef.result("result"),
+                        source_memory=equivalent_source_memory,
                     ),
                 ),
             ),
@@ -412,12 +428,12 @@ def test_compile_register_copy_from_selected_source_memory_root() -> None:
 
     assert len(compiled.source_memories) == 1
     assert compiled.source_memories[0].constraint is source_memory
-    assert len(compiled.emits) == 1
-    emit = compiled.emits[0]
-    assert emit.kind is LowerEmitKind.REGISTER_COPY
-    assert emit.source_memory_ordinal == 1
-    source = compiled.value_refs[emit.operand_ref_start]
-    assert source.kind is SourceValueKind.SOURCE_MEMORY_ROOT
+    assert len(compiled.emits) == 2
+    for emit in compiled.emits:
+        assert emit.kind is LowerEmitKind.REGISTER_COPY
+        assert emit.source_memory_ordinal == 1
+        source = compiled.value_refs[emit.operand_ref_start]
+        assert source.kind is SourceValueKind.SOURCE_MEMORY_ROOT
 
 
 @pytest.mark.parametrize("materialize", [False, True])
@@ -4335,6 +4351,26 @@ def test_compile_lower_rule_set_compiles_value_memory_space_guard() -> None:
     )
 
 
+def test_compile_lower_rule_set_compiles_value_divisibility_guard() -> None:
+    table = ContractFragment(
+        name="test.value-divisibility",
+        descriptor_set=TEST_LOW_CORE_DESCRIPTOR_SET,
+        cases=[
+            RecipeRule(
+                source_op=scalar_arithmetic.scalar_addi,
+                guards=(Guard.value_divisible_by("rhs", 2**32),),
+            )
+        ],
+    )
+    compiled = compile_lower_rule_set(table, dialect_ops={"scalar": ALL_SCALAR_OPS})
+    guard = compiled.guards[0]
+    assert guard.kind == GuardKind.VALUE_DIVISIBLE_BY
+    assert guard.u64 == 2**32
+    value = compiled.value_refs[guard.value_ref_index]
+    assert value.kind == SourceValueKind.OPERAND
+    assert value.index == 1
+
+
 def test_compile_lower_rule_set_compiles_target_subgroup_size_range_guard() -> None:
     table = ContractFragment(
         name="test.target-subgroup-size",
@@ -4505,6 +4541,35 @@ def test_compile_lower_rule_set_compiles_exact_float_type_guard() -> None:
         )
         == "finite_exactly_representable_as_result"
     )
+
+
+@pytest.mark.parametrize("element", tuple(ScalarTypeKind))
+def test_compile_literal_exact_float_type_guard(element: ScalarTypeKind) -> None:
+    guard = Guard.value_exact_float_type("a", element)
+    if element < ScalarTypeKind.F8E4M3:
+        with pytest.raises(ValueError, match="requires a float scalar type"):
+            guard.validate(vector.vector_fmaf)
+        return
+    table = ContractFragment(
+        name="test.literal-exact-float-type",
+        descriptor_set=TEST_LOW_CORE_DESCRIPTOR_SET,
+        cases=[
+            RecipeRule(
+                source_op=vector.vector_fmaf,
+                guards=(guard,),
+            )
+        ],
+    )
+    compiled = compile_lower_rule_set(table, dialect_ops={"vector": ALL_VECTOR_OPS})
+    guard = compiled.guards[0]
+    assert guard.kind == GuardKind.VALUE_EXACT_FLOAT_TYPE
+    assert guard.value_ref_index == 0
+    assert guard.u64_c_expression == f"LOOM_SCALAR_TYPE_{element.name}"
+
+
+def test_scalar_type_payload_requires_exact_float_guard() -> None:
+    with pytest.raises(ValueError, match="cannot carry a scalar type"):
+        replace(Guard.value_exact_float("a"), scalar_type=ScalarTypeKind.BF16)
 
 
 def test_compile_lower_rule_set_compiles_static_element_count_relation_guard() -> None:

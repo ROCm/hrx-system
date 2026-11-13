@@ -5,7 +5,8 @@
 
 This quickstart takes one source file from readable kernel code to checked
 AMDGPU execution and a real benchmark. The example computes SAXPY,
-`y = alpha * x + y`, over a runtime-sized `f32` vector.
+`y = alpha * x + y`, over a runtime-sized `f32` vector. It starts in Loom IR;
+the [same kernel in C++](#write-the-same-kernel-in-cpp) follows below.
 
 The same file owns three related things:
 
@@ -117,8 +118,51 @@ Benchmark with an optimized, uninstrumented tool build on an otherwise quiet
 device. The JSON report carries device identity, parameter values, timing
 policy, score distribution, and warnings needed to interpret the number.
 
-The checked-in example wraps the same steps and also emits a generic gfx11
-deployment artifact:
+## Write the same kernel in C++ { #write-the-same-kernel-in-cpp }
+
+Loom's C++ frontend accepts a subset of C++ and compiles it into Loom IR. The
+SDK includes the frontend and its headers, so this path uses the installed
+Loom tools too. Save the following as `saxpy.cxx`:
+
+```cpp title="saxpy.cxx"
+--8<-- "generated/examples/getting-started/first-kernel/saxpy.cxx:source"
+```
+
+`configure_saxpy` computes the launch geometry; the `loom::kernel` attribute
+attaches it to the device function. The body uses ordinary C++ pointers and
+control flow for the same one-element-per-work-item calculation. The
+`loom::noalias` annotations carry the same non-overlapping-buffer contract as
+`buffer.assume.noalias` in the IR version.
+
+The `SAXPY_CASE` macro shares the setup across six named `LOOM_CHECK_CASE`
+definitions, covering the same sizes and expected values as before.
+`loom::kernel::workload(element_count)` supplies the host-side launch
+calculation; the following arguments go to the device function.
+`LOOM_CHECK_BENCHMARK` selects the 65536-element case.
+
+Import the source, then use the same test and benchmark tools:
+
+```shell
+loom-import-cxx saxpy.cxx --output=saxpy-cxx.loom
+loom-test saxpy-cxx.loom --device=amdgpu
+loom-benchmark saxpy-cxx.loom \
+  --device=amdgpu \
+  --benchmark=@saxpy_f32_64k \
+  --measure=dispatch_complete \
+  --batch-size=64 \
+  --output=saxpy-cxx-benchmark.json
+```
+
+The generated `saxpy-cxx.loom` is ordinary, editable Loom source. It contains
+the kernel, launch calculation, checks, and benchmark together. The
+[C++ authoring reference](https://github.com/ROCm/hrx-system/blob/main/loom/src/loom/import/cxx/README.md)
+covers the supported language subset, templates, memory operations, and other
+authoring APIs.
+
+## Automate the example
+
+The checked-in example runs both source forms through the same steps and also
+emits generic gfx11 deployment artifacts:
 
 ```shell
 loom/docs/examples/getting-started/first-kernel/run.sh \

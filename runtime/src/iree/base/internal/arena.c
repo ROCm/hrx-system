@@ -200,6 +200,10 @@ iree_status_t iree_arena_block_pool_acquire(iree_arena_block_pool_t* block_pool,
   block->next = NULL;
   *out_block = block;
 
+  // Payload starts a new allocation lifetime even when the backing allocator
+  // or a previous owner initialized it. The free-list trailer remains defined.
+  IREE_MSAN_ALLOCATED_MEMORY(*out_ptr, block_pool->usable_block_size);
+
   IREE_ARENA_TRACE_ZONE_END(z0);
   return iree_ok_status();
 }
@@ -311,26 +315,26 @@ iree_arena_checkpoint_t iree_arena_checkpoint_save(
       .arena = arena,
       .allocation_head = arena->allocation_head,
       .block_head = arena->block_head,
-      .block_tail = arena->block_tail,
       .total_allocation_size = arena->total_allocation_size,
       .used_allocation_size = arena->used_allocation_size,
       .block_bytes_remaining = arena->block_bytes_remaining,
   };
 }
 
-void iree_arena_checkpoint_restore(const iree_arena_checkpoint_t* checkpoint) {
-  IREE_ASSERT_ARGUMENT(checkpoint);
-  IREE_ARENA_TRACE_ZONE_BEGIN(z0);
-
-  // The checkpoint itself may be stored in arena memory that this operation
-  // discards. Copy it before releasing any storage.
+// Restores a checkpoint after the arena acquired blocks or oversized
+// allocations. This path is kept out of line so same-block scratch rewinds do
+// not carry list traversal and release machinery in their instruction working
+// set.
+//
+// The checkpoint and arena may live in arena storage. The checkpoint is copied
+// before any mutation, and the arena state is published before blocks become
+// available to other threads so neither is accessed after release.
+static IREE_ATTRIBUTE_NOINLINE IREE_ATTRIBUTE_COLD void
+iree_arena_checkpoint_restore_acquired_storage(
+    const iree_arena_checkpoint_t* checkpoint) {
   const iree_arena_checkpoint_t saved_state = *checkpoint;
   iree_arena_allocator_t* arena = saved_state.arena;
-  IREE_ASSERT_ARGUMENT(arena);
 
-  // Identify the prefixes allocated after the checkpoint before publishing
-  // the restored arena state. The arena object itself may live in retained
-  // arena storage, so no arena fields are accessed after releasing blocks.
   iree_arena_oversized_allocation_t* released_allocation_head =
       arena->allocation_head;
   iree_arena_oversized_allocation_t* allocation = released_allocation_head;
@@ -352,11 +356,13 @@ void iree_arena_checkpoint_restore(const iree_arena_checkpoint_t* checkpoint) {
   } else {
     released_block_head = NULL;
   }
+  iree_arena_block_t* retained_block_tail =
+      saved_state.block_head != NULL ? arena->block_tail : NULL;
 
   iree_arena_block_pool_t* block_pool = arena->block_pool;
   arena->allocation_head = saved_state.allocation_head;
   arena->block_head = saved_state.block_head;
-  arena->block_tail = saved_state.block_tail;
+  arena->block_tail = retained_block_tail;
   arena->total_allocation_size = saved_state.total_allocation_size;
   arena->used_allocation_size = saved_state.used_allocation_size;
   arena->block_bytes_remaining = saved_state.block_bytes_remaining;
@@ -385,6 +391,50 @@ void iree_arena_checkpoint_restore(const iree_arena_checkpoint_t* checkpoint) {
     void* free_ptr =
         (uint8_t*)saved_state.block_head - saved_state.block_bytes_remaining;
     IREE_ASAN_POISON_MEMORY_REGION(free_ptr, saved_state.block_bytes_remaining);
+    IREE_MSAN_ALLOCATED_MEMORY(free_ptr, saved_state.block_bytes_remaining);
+  }
+}
+
+void iree_arena_checkpoint_restore(const iree_arena_checkpoint_t* checkpoint) {
+  IREE_ASSERT_ARGUMENT(checkpoint);
+  IREE_ARENA_TRACE_ZONE_BEGIN(z0);
+
+  iree_arena_allocator_t* arena = checkpoint->arena;
+  IREE_ASSERT_ARGUMENT(arena);
+
+  // Releasing acquired storage is uncommon for scratch checkpoints and may
+  // publish the arena's own containing block. Keep that ownership transition
+  // in the out-of-line path and return without touching the arena again.
+  if (IREE_UNLIKELY(arena->allocation_head != checkpoint->allocation_head ||
+                    arena->block_head != checkpoint->block_head)) {
+    iree_arena_checkpoint_restore_acquired_storage(checkpoint);
+    IREE_ARENA_TRACE_ZONE_END(z0);
+    return;
+  }
+
+  // No ownership lists changed, so total storage and list links are already
+  // identical to the checkpoint. Rewind only the bump-pointer accounting.
+  const iree_host_size_t used_allocation_size =
+      checkpoint->used_allocation_size;
+  const iree_host_size_t block_bytes_remaining =
+      checkpoint->block_bytes_remaining;
+  iree_arena_block_t* block_head = checkpoint->block_head;
+#if defined(IREE_SANITIZER_MEMORY)
+  const iree_host_size_t discarded_length =
+      block_bytes_remaining - arena->block_bytes_remaining;
+#endif  // IREE_SANITIZER_MEMORY
+  arena->used_allocation_size = used_allocation_size;
+  arena->block_bytes_remaining = block_bytes_remaining;
+  if (block_head != NULL && block_bytes_remaining != 0) {
+    void* free_ptr = (uint8_t*)block_head - block_bytes_remaining;
+    IREE_ASAN_POISON_MEMORY_REGION(free_ptr, block_bytes_remaining);
+#if defined(IREE_SANITIZER_MEMORY)
+    // Unused capacity is already uninitialized. Only the discarded allocations
+    // need new shadow and origins; small scratch rewinds do not touch the tail.
+    if (discarded_length != 0) {
+      IREE_MSAN_ALLOCATED_MEMORY(free_ptr, discarded_length);
+    }
+#endif  // IREE_SANITIZER_MEMORY
   }
 
   IREE_ARENA_TRACE_ZONE_END(z0);
@@ -434,10 +484,13 @@ iree_status_t iree_arena_allocate(iree_arena_allocator_t* arena,
                             iree_memory_order_relaxed);
     });
     *out_ptr = (uint8_t*)allocation + sizeof(iree_arena_oversized_allocation_t);
+    IREE_MSAN_ALLOCATED_MEMORY(*out_ptr, byte_length);
     IREE_TRACE_ZONE_END(z0);
     return iree_ok_status();
   }
 
+  // Acquired blocks and rewound capacity have uninitialized MSAN shadow, so
+  // bump allocations inherit it without a per-allocation annotation.
   // Check to see if the current block (if any) has space - if not, get another.
   if (arena->block_head == NULL ||
       arena->block_bytes_remaining < aligned_length) {
@@ -562,6 +615,40 @@ iree_status_t iree_arena_grow_array(iree_arena_allocator_t* arena,
   return status;
 }
 
+iree_status_t iree_arena_grow_array_block_fit(iree_arena_allocator_t* arena,
+                                              iree_host_size_t existing_count,
+                                              iree_host_size_t minimum_capacity,
+                                              iree_host_size_t element_size,
+                                              iree_host_size_t* inout_capacity,
+                                              void** inout_ptr) {
+  if (*inout_ptr != NULL && existing_count < *inout_capacity &&
+      minimum_capacity <= *inout_capacity) {
+    return iree_ok_status();
+  }
+  iree_host_size_t doubled_capacity = 0;
+  if (element_size != 0 &&
+      iree_host_size_checked_mul(*inout_capacity, 2, &doubled_capacity)) {
+    const iree_host_size_t block_capacity =
+        iree_arena_block_pool_max_allocation_size(arena->block_pool) /
+        element_size;
+    if (*inout_capacity < block_capacity &&
+        minimum_capacity <= block_capacity &&
+        doubled_capacity > block_capacity) {
+      void* new_ptr = NULL;
+      IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, block_capacity,
+                                                     element_size, &new_ptr));
+      if (*inout_ptr && existing_count > 0) {
+        memcpy(new_ptr, *inout_ptr, existing_count * element_size);
+      }
+      *inout_ptr = new_ptr;
+      *inout_capacity = block_capacity;
+      return iree_ok_status();
+    }
+  }
+  return iree_arena_grow_array(arena, existing_count, minimum_capacity,
+                               element_size, inout_capacity, inout_ptr);
+}
+
 static iree_status_t iree_arena_allocator_ctl(void* self,
                                               iree_allocator_command_t command,
                                               const void* params,
@@ -583,6 +670,9 @@ static iree_status_t iree_arena_allocator_ctl(void* self,
       // Do nothing: can't free from an arena.
       return iree_ok_status();
     }
+    case IREE_ALLOCATOR_COMMAND_TRIM:
+      iree_arena_block_pool_trim(arena->block_pool);
+      return iree_allocator_trim(arena->block_pool->block_allocator);
     default:
       // NOTE: we could try to support IREE_ALLOCATOR_COMMAND_REALLOC, but
       // it requires the original size to be able to do properly (without

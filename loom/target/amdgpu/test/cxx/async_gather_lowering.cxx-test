@@ -7,34 +7,81 @@ low.kernel.def target<amdgpu.cdna3.core> abi_layout({constant_count = 0, direct_
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input = resource<hal_binding> {extent = 65792, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %output = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %291 = storage {byte_alignment = 16, byte_length = 512} : low.storage<workgroup>
-  %293 = v_mov_b32 63
-  %neighbor = v_sub_u32 %293, %lane
-  %300 = v_mov_b32 4294967295
-  %301 = v_lshlrev_b32_src0_inline %lane, 2
-  ds_write_b32 %301, %300
-  %303 = v_mov_b32 4294967294
-  ds_write_b32 %301, %303 {offset = 256}
+  %479 = storage {byte_alignment = 16, byte_length = 512} : low.storage<workgroup>
+  %481 = v_mov_b32 63
+  %neighbor = v_sub_u32 %481, %lane
+  %488 = v_mov_b32 4294967295
+  %489 = v_lshlrev_b32_src0_inline %lane, 2
+  ds_write_b32 %489, %488
+  %491 = v_mov_b32 4294967294
+  ds_write_b32 %489, %491 {offset = 256}
   s_waitcnt {lgkmcnt = 0}
-  %306 = s_mov_b32_m0_imm 0
-  global_load_lds_dword_saddr %301, %input, %306
-  %308 = s_mov_b32 256
-  %309 = slice %input[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %310 = slice %input[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %311 = s_mov_b32 0
-  %312, %313 = s_add_co_u32 %309, %308
-  %314, %315 = s_addc_u32 %310, %311, %313
-  %316 = concat(%312, %314) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %317 = s_mov_b32_m0_imm 256
-  global_load_lds_dword_saddr %301, %316, %317
+  %494 = s_mov_b32_m0_imm 0
+  global_load_lds_dword_saddr %489, %input, %494
+  %496 = s_mov_b32 256
+  %497 = slice %input[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %498 = slice %input[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %499 = s_mov_b32 0
+  %500, %501 = s_add_co_u32 %497, %496
+  %502, %503 = s_addc_u32 %498, %499, %501
+  %504 = concat(%500, %502) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %505 = s_mov_b32_m0_imm 256
+  global_load_lds_dword_saddr %489, %504, %505
   s_waitcnt {vmcnt = 1}
   s_waitcnt {lgkmcnt = 0}
-  %321 = v_lshlrev_b32_src0_inline %neighbor, 2
-  %first = ds_read_b32 %321
+  %509 = v_lshlrev_b32_src0_inline %neighbor, 2
+  %first = ds_read_b32 %509
   s_waitcnt {vmcnt = 0}
   s_waitcnt {lgkmcnt = 0}
-  %second = ds_read_b32 %321 {offset = 256}
-  %325 = v_add_u32 %first, %second
-  global_store_dword_saddr %301, %325, %output
+  %second = ds_read_b32 %509 {offset = 256}
+  %513 = v_add_u32 %first, %second
+  global_store_dword_saddr %489, %513, %output
+  return
+}
+
+// ====
+
+// RUN: emit source-low @async_gather_masked target=amdgpu:gfx942 output=low
+// INPUT: cxx I=.
+#include "async_gather.cxx"
+
+// ----
+low.kernel.def target<amdgpu.cdna3.core> abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "active_lanes"}, direct_arg_offsets = [0], direct_arg_parameter_indices = [0], direct_arg_sizes = [4], parameter_count = 3, resource_count = 2, resource_offsets = [8, 16], resource_parameter_indices = [1, 2], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @async_gather_masked(%active_lanes: reg<amdgpu.sgpr>) asm {
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %input = resource<hal_binding> {extent = 512, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %output = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %486 = storage {byte_alignment = 16, byte_length = 512} : low.storage<workgroup>
+  %488 = v_mov_b32 63
+  %neighbor = v_sub_u32 %488, %lane
+  %495 = v_mov_b32 4294967295
+  %496 = v_lshlrev_b32_src0_inline %lane, 2
+  ds_write_b32 %496, %495
+  %498 = v_mov_b32 4294967294
+  ds_write_b32 %496, %498 {offset = 256}
+  s_waitcnt {lgkmcnt = 0}
+  %live = v_cmp_lt_u32 %lane, %active_lanes
+  %502 = s_mov_b32_m0_imm 0
+  global_load_lds_dword_saddr %496, %input, %502
+  %504 = s_mov_b32 256
+  %505 = slice %input[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %506 = slice %input[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %507 = s_mov_b32 0
+  %508, %509 = s_add_co_u32 %505, %504
+  %510, %511 = s_addc_u32 %506, %507, %509
+  %512 = concat(%508, %510) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %513 = s_mov_b32_m0_imm 256
+  %514, %515 = s_and_saveexec_b64 %live
+  global_load_lds_dword_saddr %496, %512, %513
+  s_mov_b64_exec %514
+  s_waitcnt {vmcnt = 0}
+  s_waitcnt {lgkmcnt = 0}
+  %519 = v_lshlrev_b32_src0_inline %neighbor, 2
+  %520 = ds_read_b32 %519
+  %525 = v_lshlrev_b32_src0_inline %lane, 2
+  global_store_dword_saddr %525, %520, %output
+  s_waitcnt {vmcnt = 0}
+  s_waitcnt {lgkmcnt = 0}
+  %527 = ds_read_b32 %519 {offset = 256}
+  global_store_dword_saddr %525, %527, %output {offset = 256}
   return
 }

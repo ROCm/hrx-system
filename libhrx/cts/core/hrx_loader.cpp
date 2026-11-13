@@ -114,19 +114,62 @@ void HrxLoader::load(const std::string& path) {
   LOAD_FULL(status_free_message, hrx_status_free_message);
   LOAD_FULL(status_ignore, hrx_status_ignore);
 
-  LOAD(gpu_initialize);
-  LOAD(gpu_shutdown);
-  LOAD(gpu_device_count);
-  LOAD(gpu_device_get);
-  LOAD(cpu_initialize);
-  LOAD(cpu_shutdown);
-  LOAD(cpu_device_count);
-  LOAD(cpu_device_get);
+  LOAD(runtime_create);
+  LOAD(runtime_retain);
+  LOAD(runtime_release);
+  LOAD(runtime_query_available_devices);
+  LOAD(device_group_create);
+  LOAD(device_group_retain);
+  LOAD(device_group_release);
+  LOAD(device_group_device_count);
+  LOAD(device_group_get_device);
+  LOAD(device_get_device_group);
+
+  LOAD(slab_pool_create);
+  LOAD(slab_cache_create);
+  LOAD(tlsf_pool_query_backing_request);
+  LOAD(fixed_block_pool_query_backing_request);
+  LOAD(tlsf_pool_create);
+  LOAD(fixed_block_pool_create);
+  LOAD(tlsf_pool_create_from_buffer);
+  LOAD(fixed_block_pool_create_from_buffer);
+  LOAD(mem_pool_retain);
+  LOAD(mem_pool_release);
+  LOAD(mem_pool_get_device_group);
+  LOAD(mem_pool_trim);
+  LOAD(mem_pool_query_capabilities);
+  LOAD(mem_pool_query_host_access);
+  LOAD(mem_pool_query_atomic_operations);
+  LOAD(mem_pool_query_zero_compute_atomic_operations);
+  LOAD(buffer_query_atomic_operations);
+  LOAD(buffer_query_zero_compute_atomic_operations);
+  LOAD(mem_pool_query_stats);
+  LOAD(mem_pool_transition_table);
+  LOAD(buffer_transition_table);
+  LOAD(memory_transition_prepare_pair);
+  LOAD(memory_transition_recipe);
+  LOAD(buffer_mapping_memory_barrier);
+  LOAD(device_group_topology_node_count);
+  LOAD(device_group_query_topology_node);
+  LOAD(queue_alloca);
+  LOAD(queue_dealloca);
 
   LOAD(device_get_property);
   LOAD(device_get_type);
   LOAD(device_retain);
   LOAD(device_release);
+
+  LOAD(device_queue_family_count);
+  LOAD(device_query_queue_family);
+  LOAD(device_query_queue_execution_resource);
+  LOAD(device_query_queue_execution_resource_group);
+  LOAD(device_get_queue);
+  LOAD(queue_acquire);
+  LOAD(queue_retain);
+  LOAD(queue_release);
+  LOAD(queue_get_device);
+  LOAD(queue_get_family_ordinal);
+  LOAD(queue_query_params);
 
   LOAD(semaphore_create);
   LOAD(semaphore_retain);
@@ -138,6 +181,7 @@ void HrxLoader::load(const std::string& path) {
   LOAD(stream_create);
   LOAD(stream_retain);
   LOAD(stream_release);
+  LOAD(stream_get_queue);
   LOAD(stream_synchronize);
   LOAD(stream_wait);
   LOAD(stream_query);
@@ -147,7 +191,16 @@ void HrxLoader::load(const std::string& path) {
   LOAD(stream_get_timeline_position);
   LOAD(stream_wait_on);
   LOAD(stream_dispatch);
-  LOAD(stream_execution_barrier);
+  LOAD(stream_barrier);
+
+  LOAD(event_create);
+  LOAD(event_retain);
+  LOAD(event_release);
+  LOAD(event_record);
+  LOAD(event_query);
+  LOAD(event_synchronize);
+  LOAD(event_elapsed_time);
+  LOAD(stream_wait_event);
 
   LOAD(device_allocator);
   LOAD(allocator_retain);
@@ -160,7 +213,7 @@ void HrxLoader::load(const std::string& path) {
   LOAD(buffer_release);
   LOAD(buffer_map);
   LOAD(buffer_unmap);
-  LOAD(buffer_get_device_ptr);
+  LOAD(buffer_query_address);
   LOAD(buffer_get_size);
 
   LOAD(synchronous_h2d);
@@ -186,6 +239,17 @@ void HrxLoader::load(const std::string& path) {
   LOAD(queue_dispatch);
   LOAD(queue_host_call);
 
+  LOAD(graph_create);
+  LOAD(graph_release);
+  LOAD(graph_add_kernel_node);
+  LOAD(graph_add_copy_buffer_node);
+  LOAD(graph_add_fill_buffer_node);
+  LOAD(graph_add_host_call_node);
+  LOAD(graph_instantiate);
+  LOAD(graph_exec_release);
+  LOAD(graph_exec_launch);
+  LOAD(graph_exec_update);
+
   LOAD(fence_create);
   LOAD(fence_create_at);
   LOAD(fence_retain);
@@ -201,32 +265,15 @@ void HrxLoader::load(const std::string& path) {
   LOAD(buffer_view_rank);
   LOAD(buffer_view_dim);
 
-  LOAD(allocator_query_virtual_memory);
-  LOAD(allocator_virtual_memory_reserve);
-  LOAD(allocator_virtual_memory_release);
-  LOAD(allocator_physical_memory_allocate);
-  LOAD(allocator_physical_memory_free);
-  LOAD(allocator_virtual_memory_map);
-  LOAD(allocator_virtual_memory_unmap);
-  LOAD(allocator_virtual_memory_protect);
-  LOAD(allocator_virtual_memory_protect_scoped);
-
-  LOAD(device_query_memory_scope);
+  LOAD(device_query_host_memory_scope);
+  LOAD(device_query_queue_family_memory_scope);
   LOAD(virtual_buffer_query_capabilities);
   LOAD(virtual_buffer_create);
   LOAD(virtual_buffer_query_info);
   LOAD(virtual_buffer_resolve_projection);
   LOAD(virtual_buffer_detach);
-  LOAD(allocator_query_mapping_requirements);
+  LOAD(mem_pool_query_mapping_requirements);
   LOAD(queue_map);
-
-  LOAD(mem_pool_create);
-  LOAD(mem_pool_retain);
-  LOAD(mem_pool_release);
-  LOAD(mem_pool_get_attribute);
-  LOAD(mem_pool_set_attribute);
-  LOAD(mem_pool_trim);
-  LOAD(mem_pool_allocate_buffer);
 
 #undef LOAD
 #undef LOAD_FULL

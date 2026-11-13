@@ -4,14 +4,26 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library", "loom_cc_test", "loom_config_compatible_with")
-load("//loom/build_tools/bazel:python.bzl", "loom_py_library")
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_fuzz", "loom_cc_library", "loom_cc_test", "loom_config_compatible_with")
+load("//loom/build_tools/bazel:python.bzl", "loom_py_library", "loom_py_test")
 
 package(
     default_visibility = ["//loom/src/loom/serve:implementation"],
     features = ["layering_check"],
     licenses = ["notice"],
 )
+
+MODEL_REGISTRATION_FUZZ_SEEDS = [
+    "//loom/src/loom/serve/server/testdata/registration_fuzz:activity.txt",
+    "//loom/src/loom/serve/server/testdata/registration_fuzz:decision.txt",
+    "//loom/src/loom/serve/server/testdata/registration_fuzz:embedding.txt",
+    "//loom/src/loom/serve/server/testdata/registration_fuzz:image.txt",
+    "//loom/src/loom/serve/server/testdata/registration_fuzz:package.txt",
+    "//loom/src/loom/serve/server/testdata/registration_fuzz:recognition.txt",
+    "//loom/src/loom/serve/server/testdata/registration_fuzz:sequence.txt",
+    "//loom/src/loom/serve/server/testdata/registration_fuzz:speech.txt",
+    "//loom/src/loom/serve/server/testdata/registration_fuzz:text.txt",
+]
 
 exports_files(
     [
@@ -38,7 +50,7 @@ loom_cc_library(
     srcs = ["device_configuration.c"],
     hdrs = ["device_configuration.h"],
     deps = [
-        "//loom/src/loom/serve/runtime/device",
+        "//loom/src/loom/runtime/device",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:json",
         "//runtime/src/iree/base/internal:unicode",
@@ -51,10 +63,23 @@ loom_cc_test(
     srcs = ["device_configuration_test.cc"],
     deps = [
         ":device_configuration",
-        "//loom/src/loom/serve/runtime/device",
+        "//loom/src/loom/runtime/device",
         "//runtime/src/iree/base",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "driver",
+    srcs = ["driver.c"],
+    hdrs = ["driver.h"],
+    deps = [
+        ":registry",
+        "//loom/src/loom/runtime:driver",
+        "//loom/src/loom/runtime:service",
+        "//loom/src/loom/runtime:wake",
+        "//runtime/src/iree/base",
     ],
 )
 
@@ -64,16 +89,17 @@ loom_cc_library(
     hdrs = ["router.h"],
     deps = [
         ":configuration",
+        ":driver",
         ":maintenance",
         ":registry",
         ":resources",
+        "//loom/src/loom/runtime:wake",
+        "//loom/src/loom/runtime/device",
+        "//loom/src/loom/runtime/parameter:residency",
+        "//loom/src/loom/runtime/program:compilation",
+        "//loom/src/loom/runtime/program:variant_pool",
         "//loom/src/loom/runtime/telemetry:stream",
         "//loom/src/loom/serve/dashboard:assets",
-        "//loom/src/loom/serve/runtime/device",
-        "//loom/src/loom/serve/runtime/host:wake",
-        "//loom/src/loom/serve/runtime/parameter:residency",
-        "//loom/src/loom/serve/runtime/program:compilation",
-        "//loom/src/loom/serve/runtime/program:variant_pool",
         "//loom/src/loom/serve/server/http:live",
         "//loom/src/loom/serve/server/http:logs",
         "//loom/src/loom/serve/server/http:metrics",
@@ -83,11 +109,11 @@ loom_cc_library(
         "//loom/src/loom/serve/server/http:variants",
         "//loom/src/loom/serve/service",
         "//loom/src/loom/serve/service:inspection",
-        "//loom/src/loom/serve/service:kind",
         "//loom/src/loom/serve/service:reasoning",
         "//loom/src/loom/serve/transport/http:multipart",
         "//loom/src/loom/serve/transport/http:request",
         "//loom/src/loom/serve/transport/http:server",
+        "//loom/src/loom/service:kind",
         "//loom/src/loom/service/telemetry:record",
         "//loom/src/loom/util:json",
         "//loom/src/loom/util:stream",
@@ -95,7 +121,23 @@ loom_cc_library(
         "//runtime/src/iree/base/internal:json",
         "//runtime/src/iree/base/threading",
         "//runtime/src/iree/task",
+        "//runtime/src/iree/task:owner",
         "//runtime/src/iree/tokenizer",
+    ],
+)
+
+loom_cc_test(
+    name = "driver_test",
+    srcs = ["driver_test.cc"],
+    deps = [
+        ":configuration",
+        ":driver",
+        ":registry",
+        "//loom/src/loom/runtime:wake",
+        "//loom/src/loom/serve/service",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 
@@ -104,10 +146,11 @@ loom_cc_library(
     srcs = ["maintenance.c"],
     hdrs = ["maintenance.h"],
     deps = [
-        "//loom/src/loom/serve/runtime/device",
-        "//loom/src/loom/serve/runtime/host",
-        "//loom/src/loom/serve/runtime/host:timer",
-        "//loom/src/loom/serve/runtime/host:wake",
+        "//loom/src/loom/runtime:wake",
+        "//loom/src/loom/runtime/device",
+        "//loom/src/loom/runtime/host",
+        "//loom/src/loom/runtime/host:reclamation",
+        "//loom/src/loom/runtime/host:timer",
         "//runtime/src/iree/async",
         "//runtime/src/iree/async/util:proactor_pool",
         "//runtime/src/iree/base",
@@ -123,8 +166,8 @@ loom_cc_library(
         ":resources",
         "//loom/src/loom/runtime/telemetry:stream",
         "//loom/src/loom/serve/service",
-        "//loom/src/loom/serve/service:kind",
         "//loom/src/loom/serve/telemetry:sample",
+        "//loom/src/loom/service:kind",
         "//loom/src/loom/service/telemetry:record",
         "//loom/src/loom/util:json",
         "//loom/src/loom/util:stream",
@@ -137,13 +180,12 @@ loom_cc_library(
     srcs = ["resources.c"],
     hdrs = ["resources.h"],
     deps = [
+        "//loom/src/loom/runtime/device",
+        "//loom/src/loom/runtime/execution:workspace",
+        "//loom/src/loom/runtime/parameter:residency",
+        "//loom/src/loom/runtime/storage:memory",
         "//loom/src/loom/runtime/storage:telemetry",
         "//loom/src/loom/runtime/telemetry:sample",
-        "//loom/src/loom/serve/runtime/device",
-        "//loom/src/loom/serve/runtime/execution:workspace",
-        "//loom/src/loom/serve/runtime/host:wake",
-        "//loom/src/loom/serve/runtime/parameter:residency",
-        "//loom/src/loom/serve/runtime/storage:memory",
         "//loom/src/loom/serve/telemetry:sample",
         "//loom/src/loom/serve/transport/http:listener",
         "//loom/src/loom/util:json",
@@ -180,8 +222,8 @@ loom_cc_test(
     ]),
     deps = [
         ":maintenance",
-        "//loom/src/loom/serve/runtime/device",
-        "//loom/src/loom/serve/runtime/host",
+        "//loom/src/loom/runtime/device",
+        "//loom/src/loom/runtime/host",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/testing:gtest",
@@ -199,9 +241,9 @@ loom_cc_test(
         ":observation",
         ":registry",
         ":resources",
-        "//loom/src/loom/serve/runtime/device",
-        "//loom/src/loom/serve/runtime/execution",
-        "//loom/src/loom/serve/runtime/host",
+        "//loom/src/loom/runtime/device",
+        "//loom/src/loom/runtime/execution",
+        "//loom/src/loom/runtime/host",
         "//loom/src/loom/util:stream",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:json",
@@ -212,44 +254,66 @@ loom_cc_test(
     ],
 )
 
+ROUTER_TEST_SRCS = [
+    "router_registration_test.cc",
+    "router_test.cc",
+    "router_test_fixture.h",
+    "router_variant_test.cc",
+]
+
+ROUTER_TEST_DEPS = [
+    ":registry",
+    ":router",
+    "//loom/src/loom/runtime:wake",
+    "//loom/src/loom/runtime/program:variant_pool",
+    "//loom/src/loom/runtime/telemetry:sample",
+    "//loom/src/loom/serve/dashboard:files",
+    "//loom/src/loom/serve/service:reasoning",
+    "//loom/src/loom/serve/transport/http:listener",
+    "//loom/src/loom/serve/transport/http:multipart",
+    "//loom/src/loom/serve/transport/http:request",
+    "//loom/src/loom/serve/transport/http:server",
+    "//loom/src/loom/service/telemetry:latency",
+    "//loom/src/loom/service/telemetry:record",
+    "//runtime/src/iree/async",
+    "//runtime/src/iree/async:platform",
+    "//runtime/src/iree/async/util:proactor_pool",
+    "//runtime/src/iree/base",
+    "//runtime/src/iree/net:carrier",
+    "//runtime/src/iree/net/carrier/loopback",
+    "//runtime/src/iree/task",
+    "//runtime/src/iree/testing:gtest",
+    "//runtime/src/iree/testing:gtest_main",
+    "//runtime/src/iree/tokenizer",
+    "//runtime/src/iree/tokenizer/format/huggingface:tokenizer_json",
+]
+
 loom_cc_test(
     name = "router_test",
-    srcs = [
-        "router_registration_test.cc",
-        "router_test.cc",
-        "router_test_fixture.h",
-        "router_variant_test.cc",
+    srcs = ROUTER_TEST_SRCS,
+    args = ["--gtest_filter=-*Stress*"],
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = ROUTER_TEST_DEPS,
+)
+
+loom_cc_test(
+    name = "router_stress_test",
+    size = "medium",
+    srcs = ROUTER_TEST_SRCS,
+    args = ["--gtest_filter=*Stress*"],
+    tags = [
+        "manual",
+        "skip-bazel_to_cmake",
+        "stress",
     ],
     target_compatible_with = select({
         "@platforms//os:linux": [],
         "//conditions:default": ["@platforms//:incompatible"],
     }),
-    deps = [
-        ":registry",
-        ":router",
-        "//loom/src/loom/runtime/telemetry:sample",
-        "//loom/src/loom/serve/dashboard:files",
-        "//loom/src/loom/serve/runtime/host:wake",
-        "//loom/src/loom/serve/runtime/program:variant_pool",
-        "//loom/src/loom/serve/service:reasoning",
-        "//loom/src/loom/serve/transport/http:listener",
-        "//loom/src/loom/serve/transport/http:multipart",
-        "//loom/src/loom/serve/transport/http:request",
-        "//loom/src/loom/serve/transport/http:server",
-        "//loom/src/loom/service/telemetry:latency",
-        "//loom/src/loom/service/telemetry:record",
-        "//runtime/src/iree/async",
-        "//runtime/src/iree/async:platform",
-        "//runtime/src/iree/async/util:proactor_pool",
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/net:carrier",
-        "//runtime/src/iree/net/carrier/loopback",
-        "//runtime/src/iree/task",
-        "//runtime/src/iree/testing:gtest",
-        "//runtime/src/iree/testing:gtest_main",
-        "//runtime/src/iree/tokenizer",
-        "//runtime/src/iree/tokenizer/format/huggingface:tokenizer_json",
-    ],
+    deps = ROUTER_TEST_DEPS,
 )
 
 loom_cc_library(
@@ -257,17 +321,51 @@ loom_cc_library(
     srcs = ["configuration.c"],
     hdrs = ["configuration.h"],
     deps = [
-        "//loom/src/loom/serve/runtime/device:pool",
-        "//loom/src/loom/serve/runtime/execution:plan",
-        "//loom/src/loom/serve/runtime/program:sources",
-        "//loom/src/loom/serve/runtime/program:variant_pool",
-        "//loom/src/loom/serve/service:kind",
+        "//loom/src/loom/runtime/device:pool",
+        "//loom/src/loom/runtime/execution:plan",
+        "//loom/src/loom/runtime/program:sources",
+        "//loom/src/loom/runtime/program:variant_pool",
         "//loom/src/loom/serve/service/text:cache_policy",
+        "//loom/src/loom/service:kind",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:json",
         "//runtime/src/iree/base/internal:path",
         "//runtime/src/iree/base/internal:unicode",
         "//runtime/src/iree/io:file_handle",
+    ],
+)
+
+loom_cc_fuzz(
+    name = "model_registration_fuzz",
+    srcs = ["model_registration_fuzz.cc"],
+    args = [
+        "-seed_inputs=" + ",".join([
+            "$(rootpath %s)" % seed
+            for seed in MODEL_REGISTRATION_FUZZ_SEEDS
+        ]),
+    ],
+    data = MODEL_REGISTRATION_FUZZ_SEEDS,
+    deps = [
+        ":configuration",
+        "//loom/src/loom/runtime/program:package",
+        "//loom/src/loom/serve/server/http:package",
+        "//loom/src/loom/serve/transport/http:request",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_py_test(
+    name = "model_registration_fuzz_test",
+    size = "small",
+    srcs = ["model_registration_fuzz_test.py"],
+    args = ["$(rootpath :model_registration_fuzz)"] + [
+        "$(rootpath %s)" % seed
+        for seed in MODEL_REGISTRATION_FUZZ_SEEDS
+    ],
+    data = [":model_registration_fuzz"] + MODEL_REGISTRATION_FUZZ_SEEDS,
+    tags = [
+        "manual",
+        "skip-bazel_to_cmake",
     ],
 )
 
@@ -279,7 +377,7 @@ loom_cc_library(
         ":configuration",
         "//loom/binding/c:loomc",
         "//loom/binding/c:task_pool",
-        "//loom/src/loom/serve/runtime/host:wake",
+        "//loom/src/loom/runtime:wake",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/threading",
     ],
@@ -292,15 +390,17 @@ loom_cc_library(
     deps = [
         ":configuration",
         ":model_resolution",
+        "//loom/src/loom/runtime:service",
+        "//loom/src/loom/runtime:wake",
+        "//loom/src/loom/runtime/host:clock",
+        "//loom/src/loom/runtime/parameter:activation",
+        "//loom/src/loom/runtime/parameter:residency",
+        "//loom/src/loom/runtime/program:compilation",
         "//loom/src/loom/runtime/telemetry:stream",
-        "//loom/src/loom/serve/runtime/host:clock",
-        "//loom/src/loom/serve/runtime/host:wake",
-        "//loom/src/loom/serve/runtime/parameter:activation",
-        "//loom/src/loom/serve/runtime/parameter:residency",
-        "//loom/src/loom/serve/runtime/program:compilation",
         "//loom/src/loom/serve/service",
-        "//loom/src/loom/serve/service:kind",
+        "//loom/src/loom/serve/service:endpoint",
         "//loom/src/loom/serve/service/text:checkpoint_control",
+        "//loom/src/loom/service:kind",
         "//loom/src/loom/service/telemetry:latency",
         "//loom/src/loom/service/telemetry:record",
         "//loom/src/loom/service/telemetry:tracing",
@@ -318,7 +418,7 @@ loom_cc_test(
         "//loom/binding/c:loomc",
         "//loom/binding/c:task_pool",
         "//loom/src/loom/model:card",
-        "//loom/src/loom/serve/runtime/program:package",
+        "//loom/src/loom/runtime/program:package",
         "//runtime/src/iree/base",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
@@ -332,19 +432,15 @@ loom_cc_library(
     deps = [
         ":configuration",
         ":registry",
-        "//loom/src/loom/serve/runtime/device",
-        "//loom/src/loom/serve/runtime/host",
-        "//loom/src/loom/serve/runtime/host:wake",
-        "//loom/src/loom/serve/runtime/parameter:activation",
-        "//loom/src/loom/serve/runtime/parameter:residency",
-        "//loom/src/loom/serve/runtime/program:compilation",
-        "//loom/src/loom/serve/runtime/storage:memory",
+        "//loom/src/loom/runtime:wake",
+        "//loom/src/loom/runtime/device",
+        "//loom/src/loom/runtime/host",
+        "//loom/src/loom/runtime/parameter:activation",
+        "//loom/src/loom/runtime/parameter:residency",
+        "//loom/src/loom/runtime/program:compilation",
+        "//loom/src/loom/runtime/storage:memory",
         "//loom/src/loom/serve/service",
-        "//loom/src/loom/serve/service/finite:component",
-        "//loom/src/loom/serve/service/finite:model",
-        "//loom/src/loom/serve/service/finite:service",
-        "//loom/src/loom/serve/service/finite/decision:protocol",
-        "//loom/src/loom/serve/service/finite/embedding:protocol",
+        "//loom/src/loom/serve/service/finite:http",
         "//loom/src/loom/serve/service/image:model",
         "//loom/src/loom/serve/service/image:service",
         "//loom/src/loom/serve/service/recognition:model",
@@ -356,6 +452,12 @@ loom_cc_library(
         "//loom/src/loom/serve/service/text:model",
         "//loom/src/loom/serve/service/text:schedule",
         "//loom/src/loom/serve/service/text:service",
+        "//loom/src/loom/service/finite:component",
+        "//loom/src/loom/service/finite:model",
+        "//loom/src/loom/service/finite:registration",
+        "//loom/src/loom/service/finite:service",
+        "//loom/src/loom/service/finite/decision:protocol",
+        "//loom/src/loom/service/finite/embedding:protocol",
         "//runtime/src/iree/base",
     ],
 )
@@ -391,15 +493,15 @@ loom_cc_library(
         ":configuration",
         ":model_registration",
         ":registry",
-        ":resources",
+        "//loom/src/loom/runtime/device",
+        "//loom/src/loom/runtime/host",
         "//loom/src/loom/runtime/telemetry:stream",
-        "//loom/src/loom/serve/runtime/host",
+        "//loom/src/loom/runtime/testing:application",
         "//loom/src/loom/serve/service",
         "//loom/src/loom/serve/service/speech:output",
         "//loom/src/loom/serve/service/speech:request",
         "//loom/src/loom/serve/service/speech:stream",
         "//loom/src/loom/serve/testing:http_harness",
-        "//loom/src/loom/serve/testing:service_application",
         "//loom/src/loom/serve/transport/http:listener",
         "//loom/src/loom/serve/transport/http:server",
         "//loom/src/loom/service/telemetry:record",
@@ -425,8 +527,9 @@ loom_cc_library(
         ":configuration",
         ":model_registration",
         ":registry",
-        ":resources",
-        "//loom/src/loom/serve/runtime/host",
+        "//loom/src/loom/runtime/device",
+        "//loom/src/loom/runtime/host",
+        "//loom/src/loom/runtime/testing:application",
         "//loom/src/loom/serve/service",
         "//loom/src/loom/serve/service/recognition:document",
         "//loom/src/loom/serve/service/recognition:input",
@@ -434,7 +537,6 @@ loom_cc_library(
         "//loom/src/loom/serve/service/recognition:stream",
         "//loom/src/loom/serve/service/recognition:transcription",
         "//loom/src/loom/serve/testing:http_harness",
-        "//loom/src/loom/serve/testing:service_application",
         "//loom/src/loom/serve/transport/http:listener",
         "//loom/src/loom/serve/transport/http:server",
         "//loom/src/loom/service/telemetry:record",

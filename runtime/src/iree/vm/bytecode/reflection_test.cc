@@ -14,9 +14,6 @@
 
 namespace {
 
-constexpr uint16_t kRunCallableTypeOrdinal = 3;
-constexpr uint16_t kRunExportOrdinal = 16;
-
 class BytecodeReflectionTest : public ::testing::Test {
  protected:
   void SetUp() override {
@@ -29,6 +26,18 @@ class BytecodeReflectionTest : public ::testing::Test {
     IREE_ASSERT_OK(iree_vm_bytecode_verify_module_structure(
         iree_const_cast_byte_span(fixture_.contents), &plan_));
     image_.layout = plan_.layout;
+    for (uint32_t i = 0; i < plan_.layout.exports.count; ++i) {
+      const auto& row = plan_.layout.exports.rows[i];
+      if (iree_string_view_equal(
+              iree_vm_bytecode_string_at(&plan_.layout.strings,
+                                         row.name_string_u16),
+              IREE_SV("run"))) {
+        run_export_ordinal_ = static_cast<uint16_t>(i);
+        run_callable_type_ordinal_ = row.callable_type_ordinal_u16;
+        break;
+      }
+    }
+    ASSERT_NE(run_export_ordinal_, UINT16_MAX);
   }
 
   void TearDown() override {
@@ -38,21 +47,26 @@ class BytecodeReflectionTest : public ::testing::Test {
   iree_vm_bytecode_module_fixture_t fixture_ = {};
   iree_vm_bytecode_module_plan_t plan_ = {};
   iree_vm_bytecode_image_t image_ = {};
+  // Export under test, resolved by its authored name in the shared fixture.
+  uint16_t run_export_ordinal_ = UINT16_MAX;
+  // Callable signature selected by that export's verified declaration.
+  uint16_t run_callable_type_ordinal_ = UINT16_MAX;
 };
 
 TEST_F(BytecodeReflectionTest, QueriesExportAndCallableDeclarations) {
   iree_vm_module_export_declaration_t export_declaration = {};
   iree_vm_bytecode_reflection_query_export(
-      &image_.base_module, kRunExportOrdinal, &export_declaration);
+      &image_.base_module, run_export_ordinal_, &export_declaration);
   EXPECT_TRUE(
       iree_string_view_equal(export_declaration.export_name, IREE_SV("run")));
-  EXPECT_EQ(export_declaration.callable_type_ordinal, kRunCallableTypeOrdinal);
+  EXPECT_EQ(export_declaration.callable_type_ordinal,
+            run_callable_type_ordinal_);
   EXPECT_EQ(export_declaration.function_ordinal, 1u);
   EXPECT_EQ(export_declaration.metadata_count, 1u);
 
   iree_vm_module_callable_type_declaration_t callable_type = {};
   iree_vm_bytecode_reflection_query_callable_type(
-      &image_.base_module, kRunCallableTypeOrdinal, &callable_type);
+      &image_.base_module, run_callable_type_ordinal_, &callable_type);
   ASSERT_EQ(callable_type.signature.arguments.count, 1u);
   ASSERT_EQ(callable_type.signature.results.count, 2u);
   EXPECT_EQ(callable_type.signature.arguments.value_count, 1u);
@@ -69,7 +83,7 @@ TEST_F(BytecodeReflectionTest, QueriesExportAndCallableDeclarations) {
 TEST_F(BytecodeReflectionTest, QueriesStableAuthoredPresentation) {
   iree_vm_signature_field_t fields[3] = {};
   const iree_vm_module_presentation_query_t query = {
-      {IREE_VM_MODULE_DECLARATION_KIND_EXPORT, kRunExportOrdinal},
+      {IREE_VM_MODULE_DECLARATION_KIND_EXPORT, run_export_ordinal_},
       {fields, IREE_ARRAYSIZE(fields)},
       iree_byte_span_empty(),
   };
@@ -108,7 +122,7 @@ TEST_F(BytecodeReflectionTest, QueriesTypedMetadataByScope) {
       IREE_SVL("lo\0om")));
 
   const iree_vm_module_metadata_query_t export_query = {
-      {IREE_VM_MODULE_METADATA_SCOPE_KIND_EXPORT, kRunExportOrdinal},
+      {IREE_VM_MODULE_METADATA_SCOPE_KIND_EXPORT, run_export_ordinal_},
       0,
   };
   iree_vm_metadata_entry_t export_entry = {};

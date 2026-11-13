@@ -1,0 +1,366 @@
+// RUN: roundtrip
+// Pair dots preserve source formats and explicitly widened accumulators.
+using Half8 = _Float16 __attribute__((ext_vector_type(8)));
+using BFloat8 = __bf16 __attribute__((ext_vector_type(8)));
+using Float4 = float __attribute__((ext_vector_type(4)));
+[[loom::op("vector.dot2f")]] Float4 half_dot(Half8, Half8, Float4);
+[[loom::op("vector.dot2f")]] Float4 bfloat_dot(BFloat8, BFloat8, Float4);
+Float4 formats(Half8 a, Half8 b, BFloat8 c, BFloat8 d, Float4 seed) {
+  return bfloat_dot(c, d, half_dot(a, b, seed));
+}
+
+// ----
+func.def public @formats(%a: vector<8xf16>, %b: vector<8xf16>, %c: vector<8xbf16>, %d: vector<8xbf16>, %seed: vector<4xf32>) -> (vector<4xf32>) {
+  %6 = vector.dot2f %a, %b, %seed : vector<8xf16>, vector<8xf16>, vector<4xf32>
+  %7 = vector.dot2f %c, %d, %6 : vector<8xbf16>, vector<8xbf16>, vector<4xf32>
+  func.return %7 : vector<4xf32>
+}
+
+// ====
+// The accumulator deduces the result; only used specializations are admitted.
+template <class Input, class Accumulator>
+[[loom::op("vector.dot2f")]] Accumulator dot(Input, Input, Accumulator);
+template <class Input, class Accumulator>
+[[loom::op("vector.dot2f")]] Accumulator dot(Input, Input, Accumulator);
+template <class Unused>
+[[loom::op("vector.dot2f")]] int lazy(Unused);
+using Half4 = _Float16 __attribute__((ext_vector_type(4)));
+using Float2 = float __attribute__((ext_vector_type(2)));
+using BFloat16 = __bf16 __attribute__((ext_vector_type(16)));
+using Float8 = float __attribute__((ext_vector_type(8)));
+Float2 half_pairs(Half4 a, Half4 b, Float2 seed) { return dot(a, b, seed); }
+Float8 bfloat_pairs(BFloat16 a, BFloat16 b, Float8 seed) {
+  return dot(a, b, dot(a, b, seed));
+}
+
+// ----
+func.def public @half_pairs(%a: vector<4xf16>, %b: vector<4xf16>, %seed: vector<2xf32>) -> (vector<2xf32>) {
+  %4 = vector.dot2f %a, %b, %seed : vector<4xf16>, vector<4xf16>, vector<2xf32>
+  func.return %4 : vector<2xf32>
+}
+
+func.def public @bfloat_pairs(%a: vector<16xbf16>, %b: vector<16xbf16>, %seed: vector<8xf32>) -> (vector<8xf32>) {
+  %9 = vector.dot2f %a, %b, %seed : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  %10 = vector.dot2f %a, %b, %9 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  func.return %10 : vector<8xf32>
+}
+
+// ====
+// Scalar dot results retain the element type and the explicit initial value.
+template <class Vector, class Scalar>
+[[loom::op("vector.dotf")]] Scalar dot(Vector, Vector, Scalar);
+using Half4 = _Float16 __attribute__((ext_vector_type(4)));
+using BFloat4 = __bf16 __attribute__((ext_vector_type(4)));
+using Float4 = float __attribute__((ext_vector_type(4)));
+using Double2 = double __attribute__((ext_vector_type(2)));
+_Float16 half_dot(Half4 a, Half4 b, _Float16 seed) { return dot(a, b, seed); }
+__bf16 bfloat_dot(BFloat4 a, BFloat4 b, __bf16 seed) { return dot(a, b, seed); }
+float single_dot(Float4 a, Float4 b, float seed) { return dot(a, b, seed); }
+double wide_dot(Double2 a, Double2 b, double seed) { return dot(a, b, seed); }
+
+// ----
+func.def public @half_dot(%a: vector<4xf16>, %b: vector<4xf16>, %seed: f16) -> (f16) {
+  %4 = vector.dotf %a, %b, %seed : vector<4xf16>, vector<4xf16>, f16
+  func.return %4 : f16
+}
+
+func.def public @bfloat_dot(%a: vector<4xbf16>, %b: vector<4xbf16>, %seed: bf16) -> (bf16) {
+  %9 = vector.dotf %a, %b, %seed : vector<4xbf16>, vector<4xbf16>, bf16
+  func.return %9 : bf16
+}
+
+func.def public @single_dot(%a: vector<4xf32>, %b: vector<4xf32>, %seed: f32) -> (f32) {
+  %14 = vector.dotf %a, %b, %seed : vector<4xf32>, vector<4xf32>, f32
+  func.return %14 : f32
+}
+
+func.def public @wide_dot(%a: vector<2xf64>, %b: vector<2xf64>, %seed: f64) -> (f64) {
+  %19 = vector.dotf %a, %b, %seed : vector<2xf64>, vector<2xf64>, f64
+  func.return %19 : f64
+}
+
+// ====
+// Each combining kind retains its distinct arithmetic and NaN semantics.
+#include <loomcxx/vector.h>
+using namespace loom::vector::reduce;
+using Int4 = int __attribute__((ext_vector_type(4)));
+using UInt4 = unsigned __attribute__((ext_vector_type(4)));
+using Float4 = float __attribute__((ext_vector_type(4)));
+int integers(Int4 v, int seed) {
+  return addi(v, muli(v, minsi(v, maxsi(v, andi(v, ori(v, xori(v, seed)))))));
+}
+unsigned unsigned_integers(UInt4 v, unsigned seed) {
+  return minui(v, maxui(v, seed));
+}
+float floats(Float4 v, float seed) {
+  return addf(v, mulf(v, minimumf(v, maximumf(v, minnumf(v, maxnumf(v, seed))))));
+}
+
+// ----
+func.def public @integers(%v: vector<4xi32>, %seed: i32) -> (i32) {
+  %3 = vector.reduce<xori> %v, %seed : vector<4xi32>, i32
+  %4 = vector.reduce<ori> %v, %3 : vector<4xi32>, i32
+  %5 = vector.reduce<andi> %v, %4 : vector<4xi32>, i32
+  %6 = vector.reduce<maxsi> %v, %5 : vector<4xi32>, i32
+  %7 = vector.reduce<minsi> %v, %6 : vector<4xi32>, i32
+  %8 = vector.reduce<muli> %v, %7 : vector<4xi32>, i32
+  %9 = vector.reduce<addi> %v, %8 : vector<4xi32>, i32
+  func.return %9 : i32
+}
+
+func.def public @unsigned_integers(%v: vector<4xi32>, %seed: i32) -> (i32) {
+  %13 = vector.reduce<maxui> %v, %seed : vector<4xi32>, i32
+  %14 = vector.reduce<minui> %v, %13 : vector<4xi32>, i32
+  func.return %14 : i32
+}
+
+func.def public @floats(%v: vector<4xf32>, %seed: f32) -> (f32) {
+  %18 = vector.reduce<maxnumf> %v, %seed : vector<4xf32>, f32
+  %19 = vector.reduce<minnumf> %v, %18 : vector<4xf32>, f32
+  %20 = vector.reduce<maximumf> %v, %19 : vector<4xf32>, f32
+  %21 = vector.reduce<minimumf> %v, %20 : vector<4xf32>, f32
+  %22 = vector.reduce<mulf> %v, %21 : vector<4xf32>, f32
+  %23 = vector.reduce<addf> %v, %22 : vector<4xf32>, f32
+  func.return %23 : f32
+}
+
+// ====
+// Permissions belong to the operation, independently of template deduction.
+template <class Vector, class Scalar>
+[[loom::op("vector.dotf", "reassoc", "contract")]] Scalar dot(Vector, Vector, Scalar);
+template <class Vector, class Scalar>
+[[loom::op("vector.reduce", "addf", "reassoc", "nsz")]] Scalar sum(Vector, Scalar);
+using Floats = float __attribute__((ext_vector_type(4)));
+float entry(Floats a, Floats b, float seed) { return sum(a, dot(a, b, seed)); }
+
+// ----
+func.def public @entry(%a: vector<4xf32>, %b: vector<4xf32>, %seed: f32) -> (f32) {
+  %4 = vector.dotf<reassoc|contract> %a, %b, %seed : vector<4xf32>, vector<4xf32>, f32
+  %5 = vector.reduce<addf, reassoc|nsz> %a, %4 : vector<4xf32>, f32
+  func.return %5 : f32
+}
+
+// ====
+// INPUT: cxx fp-model=fast
+// Invocation permissions reach floating operations without polluting integers.
+template <class Vector, class Scalar>
+[[loom::op("vector.reduce", "addi")]] Scalar sum_integer(Vector, Scalar);
+template <class Vector, class Scalar>
+[[loom::op("vector.reduce", "addf", "reassoc")]] Scalar sum(Vector, Scalar);
+template <class Vector, class Scalar>
+[[loom::op("vector.dotf")]] Scalar dot(Vector, Vector, Scalar);
+template <class Vector, class Accumulator>
+[[loom::op("vector.dot2f")]] Accumulator pairs(Vector, Vector, Accumulator);
+using Int4 = int __attribute__((ext_vector_type(4)));
+using Float4 = float __attribute__((ext_vector_type(4)));
+using Half8 = _Float16 __attribute__((ext_vector_type(8)));
+int integer_entry(Int4 v, int seed) { return sum_integer(v, seed); }
+float floating_entry(Half8 a, Half8 b, Float4 seed) {
+  auto partial = pairs(a, b, seed);
+  return sum(partial, dot(seed, partial, 3.0f));
+}
+
+// ----
+func.def public @integer_entry(%v: vector<4xi32>, %seed: i32) -> (i32) {
+  %3 = vector.reduce<addi> %v, %seed : vector<4xi32>, i32
+  func.return %3 : i32
+}
+
+func.def public @floating_entry(%a: vector<8xf16>, %b: vector<8xf16>, %seed: vector<4xf32>) -> (f32) {
+  %partial = vector.dot2f %a, %b, %seed : vector<8xf16>, vector<8xf16>, vector<4xf32>
+  %9 = scalar.constant 3.0 : f32
+  %10 = vector.dotf<reassoc|nnan|ninf|nsz|arcp|contract|afn> %seed, %partial, %9 : vector<4xf32>, vector<4xf32>, f32
+  %11 = vector.reduce<addf, reassoc|nnan|ninf|nsz|arcp|contract|afn> %partial, %10 : vector<4xf32>, f32
+  func.return %11 : f32
+}
+
+// ====
+#include <loomcxx/vector.h>
+using Half8 = _Float16 __attribute__((ext_vector_type(8)));
+using Float4 = float __attribute__((ext_vector_type(4)));
+float dot_chain(Half8 a, Half8 b, Float4 seed) {
+  auto partial = loom::vector::dot2f(a, b, seed);
+  return loom::vector::dotf(partial, seed, 3.0f);
+}
+
+// ----
+func.def public @dot_chain(%a: vector<8xf16>, %b: vector<8xf16>, %seed: vector<4xf32>) -> (f32) {
+  %partial = vector.dot2f %a, %b, %seed : vector<8xf16>, vector<8xf16>, vector<4xf32>
+  %5 = scalar.constant 3.0 : f32
+  %6 = vector.dotf %partial, %seed, %5 : vector<4xf32>, vector<4xf32>, f32
+  func.return %6 : f32
+}
+
+// ====
+// RUN: roundtrip
+// Ordered reductions retain the source lane order and explicit seed without reassociation.
+#include <loomcxx/vector.h>
+using Float4 = float __attribute__((ext_vector_type(4)));
+float ordered_sum(float first, float second, float third, float fourth, float seed) {
+  return loom::vector::reduce::addf(Float4{first, second, third, fourth}, seed);
+}
+float ordered_dot(float first, float second, float third, float fourth, float seed) {
+  return loom::vector::dotf(Float4{first, second, third, fourth},
+                           Float4{1.0f, 1.0f, 1.0f, 1.0f}, seed);
+}
+
+// ----
+func.def public @ordered_sum(%first: f32, %second: f32, %third: f32, %fourth: f32, %seed: f32) -> (f32) {
+  %6 = vector.from_elements %first, %second, %third, %fourth : vector<4xf32>
+  %7 = vector.reduce<addf> %6, %seed : vector<4xf32>, f32
+  func.return %7 : f32
+}
+
+func.def public @ordered_dot(%first: f32, %second: f32, %third: f32, %fourth: f32, %seed: f32) -> (f32) {
+  %14 = vector.from_elements %first, %second, %third, %fourth : vector<4xf32>
+  %15 = vector.constantf [1.0, 1.0, 1.0, 1.0] : vector<4xf32>
+  %16 = vector.dotf %14, %15, %seed : vector<4xf32>, vector<4xf32>, f32
+  func.return %16 : f32
+}
+
+// ====
+// RUN: roundtrip
+// The seeded operation remains dotf, whose accumulation contract is fused.
+#include <loomcxx/vector.h>
+using Float2 = float __attribute__((ext_vector_type(2)));
+float fused(float left, float right, float seed) {
+  return loom::vector::dotf(Float2{left, 0.0f}, Float2{right, 0.0f}, seed);
+}
+
+// ----
+func.def public @fused(%left: f32, %right: f32, %seed: f32) -> (f32) {
+  %4 = scalar.constant 0.0 : f32
+  %5 = vector.from_elements %left, %4 : vector<2xf32>
+  %6 = scalar.constant 0.0 : f32
+  %7 = vector.from_elements %right, %6 : vector<2xf32>
+  %8 = vector.dotf %5, %7, %seed : vector<2xf32>, vector<2xf32>, f32
+  func.return %8 : f32
+}
+
+// ====
+// RUN: roundtrip
+// Native pair dots and explicitly widened pairs wire the same corresponding seeds.
+#include <loomcxx/vector.h>
+#include <loomcxx/numeric.h>
+using Narrow4 = _Float16 __attribute__((ext_vector_type(4)));
+using Float4 = float __attribute__((ext_vector_type(4)));
+using Float2 = float __attribute__((ext_vector_type(2)));
+Float2 pairs(Narrow4 left, Narrow4 right, float first, float second) {
+  return loom::vector::dot2f(left, right, Float2{first, second});
+}
+Float2 widened_pairs(Narrow4 left, Narrow4 right, float first, float second) {
+  Float4 wide_left = loom::convert<Float4>(left);
+  Float4 wide_right = loom::convert<Float4>(right);
+  return {loom::vector::dotf(Float2{wide_left[0], wide_left[1]},
+                           Float2{wide_right[0], wide_right[1]}, first),
+          loom::vector::dotf(Float2{wide_left[2], wide_left[3]},
+                           Float2{wide_right[2], wide_right[3]}, second)};
+}
+
+// ----
+func.def public @pairs(%left: vector<4xf16>, %right: vector<4xf16>, %first: f32, %second: f32) -> (vector<2xf32>) {
+  %5 = vector.from_elements %first, %second : vector<2xf32>
+  %6 = vector.dot2f %left, %right, %5 : vector<4xf16>, vector<4xf16>, vector<2xf32>
+  func.return %6 : vector<2xf32>
+}
+
+func.def public @widened_pairs(%left: vector<4xf16>, %right: vector<4xf16>, %first: f32, %second: f32) -> (vector<2xf32>) {
+  %wide_left = vector.extf %left : vector<4xf16> to vector<4xf32>
+  %wide_right = vector.extf %right : vector<4xf16> to vector<4xf32>
+  %14 = scalar.constant 0 : i32
+  %15 = index.cast %14 : i32 to index
+  %16 = vector.extract %wide_left[%15] : vector<4xf32> -> f32
+  %17 = scalar.constant 1 : i32
+  %18 = index.cast %17 : i32 to index
+  %19 = vector.extract %wide_left[%18] : vector<4xf32> -> f32
+  %20 = vector.from_elements %16, %19 : vector<2xf32>
+  %21 = scalar.constant 0 : i32
+  %22 = index.cast %21 : i32 to index
+  %23 = vector.extract %wide_right[%22] : vector<4xf32> -> f32
+  %24 = scalar.constant 1 : i32
+  %25 = index.cast %24 : i32 to index
+  %26 = vector.extract %wide_right[%25] : vector<4xf32> -> f32
+  %27 = vector.from_elements %23, %26 : vector<2xf32>
+  %28 = vector.dotf %20, %27, %first : vector<2xf32>, vector<2xf32>, f32
+  %29 = scalar.constant 2 : i32
+  %30 = index.cast %29 : i32 to index
+  %31 = vector.extract %wide_left[%30] : vector<4xf32> -> f32
+  %32 = scalar.constant 3 : i32
+  %33 = index.cast %32 : i32 to index
+  %34 = vector.extract %wide_left[%33] : vector<4xf32> -> f32
+  %35 = vector.from_elements %31, %34 : vector<2xf32>
+  %36 = scalar.constant 2 : i32
+  %37 = index.cast %36 : i32 to index
+  %38 = vector.extract %wide_right[%37] : vector<4xf32> -> f32
+  %39 = scalar.constant 3 : i32
+  %40 = index.cast %39 : i32 to index
+  %41 = vector.extract %wide_right[%40] : vector<4xf32> -> f32
+  %42 = vector.from_elements %38, %41 : vector<2xf32>
+  %43 = vector.dotf %35, %42, %second : vector<2xf32>, vector<2xf32>, f32
+  %44 = vector.from_elements %28, %43 : vector<2xf32>
+  func.return %44 : vector<2xf32>
+}
+
+// ====
+// RUN: roundtrip
+// Native pair dots and explicitly widened pairs wire the same corresponding seeds.
+#include <loomcxx/vector.h>
+#include <loomcxx/numeric.h>
+using Narrow4 = __bf16 __attribute__((ext_vector_type(4)));
+using Float4 = float __attribute__((ext_vector_type(4)));
+using Float2 = float __attribute__((ext_vector_type(2)));
+Float2 pairs(Narrow4 left, Narrow4 right, float first, float second) {
+  return loom::vector::dot2f(left, right, Float2{first, second});
+}
+Float2 widened_pairs(Narrow4 left, Narrow4 right, float first, float second) {
+  Float4 wide_left = loom::convert<Float4>(left);
+  Float4 wide_right = loom::convert<Float4>(right);
+  return {loom::vector::dotf(Float2{wide_left[0], wide_left[1]},
+                           Float2{wide_right[0], wide_right[1]}, first),
+          loom::vector::dotf(Float2{wide_left[2], wide_left[3]},
+                           Float2{wide_right[2], wide_right[3]}, second)};
+}
+
+// ----
+func.def public @pairs(%left: vector<4xbf16>, %right: vector<4xbf16>, %first: f32, %second: f32) -> (vector<2xf32>) {
+  %5 = vector.from_elements %first, %second : vector<2xf32>
+  %6 = vector.dot2f %left, %right, %5 : vector<4xbf16>, vector<4xbf16>, vector<2xf32>
+  func.return %6 : vector<2xf32>
+}
+
+func.def public @widened_pairs(%left: vector<4xbf16>, %right: vector<4xbf16>, %first: f32, %second: f32) -> (vector<2xf32>) {
+  %wide_left = vector.extf %left : vector<4xbf16> to vector<4xf32>
+  %wide_right = vector.extf %right : vector<4xbf16> to vector<4xf32>
+  %14 = scalar.constant 0 : i32
+  %15 = index.cast %14 : i32 to index
+  %16 = vector.extract %wide_left[%15] : vector<4xf32> -> f32
+  %17 = scalar.constant 1 : i32
+  %18 = index.cast %17 : i32 to index
+  %19 = vector.extract %wide_left[%18] : vector<4xf32> -> f32
+  %20 = vector.from_elements %16, %19 : vector<2xf32>
+  %21 = scalar.constant 0 : i32
+  %22 = index.cast %21 : i32 to index
+  %23 = vector.extract %wide_right[%22] : vector<4xf32> -> f32
+  %24 = scalar.constant 1 : i32
+  %25 = index.cast %24 : i32 to index
+  %26 = vector.extract %wide_right[%25] : vector<4xf32> -> f32
+  %27 = vector.from_elements %23, %26 : vector<2xf32>
+  %28 = vector.dotf %20, %27, %first : vector<2xf32>, vector<2xf32>, f32
+  %29 = scalar.constant 2 : i32
+  %30 = index.cast %29 : i32 to index
+  %31 = vector.extract %wide_left[%30] : vector<4xf32> -> f32
+  %32 = scalar.constant 3 : i32
+  %33 = index.cast %32 : i32 to index
+  %34 = vector.extract %wide_left[%33] : vector<4xf32> -> f32
+  %35 = vector.from_elements %31, %34 : vector<2xf32>
+  %36 = scalar.constant 2 : i32
+  %37 = index.cast %36 : i32 to index
+  %38 = vector.extract %wide_right[%37] : vector<4xf32> -> f32
+  %39 = scalar.constant 3 : i32
+  %40 = index.cast %39 : i32 to index
+  %41 = vector.extract %wide_right[%40] : vector<4xf32> -> f32
+  %42 = vector.from_elements %38, %41 : vector<2xf32>
+  %43 = vector.dotf %35, %42, %second : vector<2xf32>, vector<2xf32>, f32
+  %44 = vector.from_elements %28, %43 : vector<2xf32>
+  func.return %44 : vector<2xf32>
+}

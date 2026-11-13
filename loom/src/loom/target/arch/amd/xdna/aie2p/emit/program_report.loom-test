@@ -45,5 +45,68 @@ low.func.def target<amd.xdna.aie2p.core>(@configuration_core_target) @duplicate_
 }
 
 // ----
-CHECK: COMPILE-REPORT: emission instructions=40 code_bytes=152 storage_bytes=162 body_instructions=40 entry_instructions=0 coissued_instructions=0 coissued_components=0
+CHECK: COMPILE-REPORT: emission instructions=40 code_bytes=136 storage_bytes=146 body_instructions=40 entry_instructions=0 coissued_instructions=0 coissued_components=0
 CHECK: COMPILE-REPORT: dynamic_instruction_mix descriptors=7 unknown=0 scalar_alu=6 * branch=4 *
+
+// ====
+// RUN: with-checks emit aie2p-xdna output=compile-report
+
+// The shared leaf executes seven times: two calls to pair, then a sequence
+// calling pair and once. Its one vector instruction is resident once, while
+// dynamic evidence must include every path through the diamond.
+aie2p.target<configuration> @configuration {device_profile = "amd.xdna.strix_halo.17f0_11"}
+
+aie2p.target<core> @core
+
+low.func.def public retain target<amd.xdna.aie2p.configuration>(@configuration) abi(array_program) @configure() asm {
+  %columns = constant 1 : reg<aie2p.config.scalar : i64>
+  entry %columns, @initialize, @invoke
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.configuration>(@configuration) @initialize() asm {
+  %column = constant 0 : reg<aie2p.config.scalar : i64>
+  %row = constant 2 : reg<aie2p.config.scalar : i64>
+  program.load %column, %row, @worker
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.configuration>(@configuration) @invoke() asm {
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@core) abi(object_function) @worker() asm {
+  low.func.call @pair() : ()
+  low.func.call @pair() : ()
+  low.func.call @sequence() : ()
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@core) @sequence() asm {
+  low.func.call @pair() : ()
+  low.func.call @once() : ()
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@core) @pair() asm {
+  low.func.call @double_row() : ()
+  low.func.call @double_row() : ()
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@core) @once() asm {
+  low.func.call @double_row() : ()
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@core) @double_row() asm {
+  %address = mov.local-address 458752
+  %value = vlda.512.i32x16 %address, 0
+  %doubled = vadd.32 %value, %value
+  vst.512.i32x16 %doubled, %address, 0
+  return
+}
+
+// ----
+CHECK: COMPILE-REPORT: static_instruction_mix * vector_alu=1 *
+CHECK: COMPILE-REPORT: dynamic_instruction_mix * unknown=0 * vector_alu=7 *

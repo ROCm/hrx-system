@@ -38,6 +38,12 @@ created them only after the application loads or copies them.
 
 ## Integration guides
 
+- [Construct importer output in Python](python-importer.md) shows the stable
+  boundary between a source-specific frontend and Loom's typed kernel builder,
+  including verification and text or bytecode serialization.
+- [Runtime-provided objects](runtime-objects.md) describes opaque native payload
+  types, owning and borrowed handles, exact callable binding, and lifetime
+  preservation through VM execution.
 - [Author serving model packages](../serving/model-programs.md) supplies model programs to
   a running multi-model server without a native per-model adapter or rebuild.
 - [Compose modules in memory](module-composition.md) shows both declaration-only

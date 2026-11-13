@@ -274,7 +274,7 @@ TEST(SpirvTargetProfileTest, PreservesExplicitZeroAndPresetValues) {
   EXPECT_EQ(facts->explicit_fields, explicit_fields);
   EXPECT_EQ(facts->storage.export_plan.linkage, LOOM_TARGET_LINKAGE_DEFAULT);
   EXPECT_EQ(facts->storage.snapshot.index_bitwidth, 32u);
-  EXPECT_EQ(facts->storage.snapshot.maximum_index_bitwidth, 32u);
+  EXPECT_EQ(facts->storage.snapshot.maximum_index_bitwidth, 64u);
   EXPECT_FALSE(loom_target_facts_field_is_explicit(
       facts, LOOM_TARGET_FACT_FIELD_DEFAULT_POINTER_BITWIDTH));
   const auto* spirv_facts = loom_spirv_target_facts_cast(facts);
@@ -433,7 +433,8 @@ TEST(SpirvTargetProfileTest, IndexCarrierCapabilityMustMatch) {
   EXPECT_TRUE(loom_target_snapshot_satisfies_specialization_requirement(
       &available, &required));
 
-  required.maximum_index_bitwidth = 64;
+  EXPECT_EQ(available.maximum_index_bitwidth, 64u);
+  available.maximum_index_bitwidth = 32;
   EXPECT_FALSE(loom_target_snapshot_satisfies_specialization_requirement(
       &available, &required));
 
@@ -466,6 +467,7 @@ TEST(SpirvTargetProfileTest, RejectsUnknownNamedProfile) {
 TEST(SpirvTargetProfileTest, CheckedCastRejectsAnotherFamily) {
   static const loom_target_profile_type_t kOtherProfileType = {
       .name = IREE_SVL("other"),
+      .storage_size = sizeof(loom_target_profile_t),
       .equal = loom_target_profile_equal_common,
   };
   const loom_target_profile_t other_profile = {

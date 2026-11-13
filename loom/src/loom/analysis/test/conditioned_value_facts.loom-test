@@ -1,0 +1,560 @@
+// RUN: pass unroll-scf-for,dce
+
+// An independent runtime branch activates conditioned inference. Refining its
+// facts must preserve the input's nonzero predicate, proving one loop iteration
+// after either carrier widening even though the input interval spans zero.
+func.def @byte_magnitude_count(%input: i8, %selector: i32) {
+  %bounded = scalar.assume %input [range(%input, -1, 1), ne(%input, 0)] : i8
+  %wide = scalar.extsi %bounded : i8 to i32
+  %magnitude = scalar.absi %wide : i32
+  %count = index.cast %magnitude : i32 to index
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %empty = scalar.constant 0 : i32
+  %selected = scalar.cmpi ne, %selector, %empty : i32
+  scf.if %selected {
+    scf.for %iteration = [%begin to %count step %step] unroll {
+      test.use %iteration : index
+    }
+  }
+  func.return
+}
+
+func.def @halfword_magnitude_count(%input: i16, %selector: i32) {
+  %bounded = scalar.assume %input [range(%input, -1, 1), ne(%input, 0)] : i16
+  %wide = scalar.extsi %bounded : i16 to i64
+  %magnitude = scalar.absi %wide : i64
+  %count = index.cast %magnitude : i64 to index
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %empty = scalar.constant 0 : i32
+  %selected = scalar.cmpi ne, %selector, %empty : i32
+  scf.if %selected {
+    scf.for %iteration = [%begin to %count step %step] unroll {
+      test.use %iteration : index
+    }
+  }
+  func.return
+}
+
+// ----
+func.def @byte_magnitude_count(%input: i8, %selector: i32) {
+  %empty = scalar.constant 0 : i32
+  %selected = scalar.cmpi ne, %selector, %empty : i32
+  scf.if %selected {
+    %iteration_0 = index.constant 0 : index
+    test.use %iteration_0 : index
+  }
+  func.return
+}
+
+func.def @halfword_magnitude_count(%input: i16, %selector: i32) {
+  %empty = scalar.constant 0 : i32
+  %selected = scalar.cmpi ne, %selector, %empty : i32
+  scf.if %selected {
+    %iteration_0 = index.constant 0 : index
+    test.use %iteration_0 : index
+  }
+  func.return
+}
+
+// ====
+
+// A lossless narrowing and widening retain the predicate on their numeric
+// identity even when its original input has no independent nonzero fact.
+func.def @roundtrip_magnitude_count(%input: i32, %selector: i32) {
+  %bounded = scalar.assume %input [range(%input, -1, 1), ne(%input, 0)] : i32
+  %narrow = scalar.trunci %bounded : i32 to i8
+  %wide = scalar.extsi %narrow : i8 to i32
+  %magnitude = scalar.absi %wide : i32
+  %count = index.cast %magnitude : i32 to index
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %empty = scalar.constant 0 : i32
+  %selected = scalar.cmpi ne, %selector, %empty : i32
+  scf.if %selected {
+    scf.for %iteration = [%begin to %count step %step] unroll {
+      test.use %iteration : index
+    }
+  }
+  func.return
+}
+
+// ----
+func.def @roundtrip_magnitude_count(%input: i32, %selector: i32) {
+  %empty = scalar.constant 0 : i32
+  %selected = scalar.cmpi ne, %selector, %empty : i32
+  scf.if %selected {
+    %iteration_0 = index.constant 0 : index
+    test.use %iteration_0 : index
+  }
+  func.return
+}
+
+// ====
+
+// The conversion precedes the branch; its source predicate applies only at
+// uses dominated by the guard. Both structured and CFG scopes use this owner.
+func.def @structured_guard(%input: i8) {
+  %bounded = scalar.assume %input [range(%input, -1, 1)] : i8
+  %wide = scalar.extsi %bounded : i8 to i32
+  %empty = scalar.constant 0 : i8
+  %live = scalar.cmpi ne, %bounded, %empty : i8
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  scf.if %live {
+    %magnitude = scalar.absi %wide : i32
+    %count = index.cast %magnitude : i32 to index
+    scf.for %iteration = [%begin to %count step %step] unroll {
+      test.use %iteration : index
+    }
+  }
+  func.return
+}
+
+func.def @cfg_guard(%input: i16) {
+  %bounded = scalar.assume %input [range(%input, -1, 1)] : i16
+  %wide = scalar.extsi %bounded : i16 to i32
+  %empty = scalar.constant 0 : i16
+  %live = scalar.cmpi ne, %bounded, %empty : i16
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  cfg.cond_br %live, ^selected, ^join
+^selected:
+  %magnitude = scalar.absi %wide : i32
+  %count = index.cast %magnitude : i32 to index
+  scf.for %iteration = [%begin to %count step %step] unroll {
+    test.use %iteration : index
+  }
+  cfg.br ^join
+^join:
+  func.return
+}
+
+// ----
+func.def @structured_guard(%input: i8) {
+  %bounded = scalar.assume %input [range(%input, -1, 1)] : i8
+  %empty = scalar.constant 0 : i8
+  %live = scalar.cmpi ne, %bounded, %empty : i8
+  scf.if %live {
+    %iteration_0 = index.constant 0 : index
+    test.use %iteration_0 : index
+  }
+  func.return
+}
+
+func.def @cfg_guard(%input: i16) {
+  %bounded = scalar.assume %input [range(%input, -1, 1)] : i16
+  %empty = scalar.constant 0 : i16
+  %live = scalar.cmpi ne, %bounded, %empty : i16
+  cfg.cond_br %live, ^selected, ^join
+^selected:
+  %iteration_0 = index.constant 0 : index
+  test.use %iteration_0 : index
+  cfg.br ^join
+^join:
+  func.return
+}
+
+// ====
+
+// Neither the guard nor an inner numeric identity can constrain the count
+// after control flow rejoins the zero-input path.
+func.def @guard_does_not_escape(%input: i8) {
+  %bounded = scalar.assume %input [range(%input, -1, 1)] : i8
+  %wide = scalar.extsi %bounded : i8 to i32
+  %empty = scalar.constant 0 : i8
+  %live = scalar.cmpi ne, %bounded, %empty : i8
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  scf.if %live {
+    %magnitude = scalar.absi %wide : i32
+    %count = index.cast %magnitude : i32 to index
+    scf.for %iteration = [%begin to %count step %step] unroll {
+      test.use %iteration : index
+    }
+  }
+  %magnitude = scalar.absi %wide : i32
+  %count = index.cast %magnitude : i32 to index
+  // ERROR@+1: STRUCTURE/014 {attr_name="unroll", expected_constraint="exact static trip count"}
+  scf.for %iteration = [%begin to %count step %step] unroll {
+    test.use %iteration : index
+  }
+  func.return
+}
+
+// ====
+
+// The interval alone admits zero, so its magnitude is not an exact trip count.
+func.def @zero_remains_possible(%input: i8, %selector: i32) {
+  %bounded = scalar.assume %input [range(%input, -1, 1)] : i8
+  %wide = scalar.extsi %bounded : i8 to i32
+  %magnitude = scalar.absi %wide : i32
+  %count = index.cast %magnitude : i32 to index
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %empty = scalar.constant 0 : i32
+  %selected = scalar.cmpi ne, %selector, %empty : i32
+  scf.if %selected {
+    // ERROR@+1: STRUCTURE/014 {attr_name="unroll", expected_constraint="exact static trip count"}
+    scf.for %iteration = [%begin to %count step %step] unroll {
+      test.use %iteration : index
+    }
+  }
+  func.return
+}
+
+// ====
+
+// Truncating a nonzero value can produce zero. A changing conversion cannot
+// forward the source's predicate into the narrower numeric domain.
+func.def @lossy_conversion(%input: i32, %selector: i32) {
+  %bounded = scalar.assume %input [range(%input, -256, 256), ne(%input, 0)] : i32
+  %narrow = scalar.trunci %bounded : i32 to i8
+  %wide = scalar.extsi %narrow : i8 to i32
+  %nonzero = test.fact_non_zero %wide : i32 -> i1
+  %count = index.cast %nonzero : i1 to index
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %empty = scalar.constant 0 : i32
+  %selected = scalar.cmpi ne, %selector, %empty : i32
+  scf.if %selected {
+    scf.for %iteration = [%begin to %count step %step] unroll {
+      test.use %iteration : index
+    }
+  }
+  func.return
+}
+
+// ----
+func.def @lossy_conversion(%input: i32, %selector: i32) {
+  func.return
+}
+
+// ====
+
+// Nonzero does not mean positive. Inspect the actual sign fact: wrapping
+// absolute value can still be negative when the input is the signed minimum.
+func.def @signed_minimum_remains_possible(%input: i8, %selector: i32) {
+  %bounded = scalar.assume %input [ne(%input, 0)] : i8
+  %magnitude = scalar.absi %bounded : i8
+  %nonnegative = test.fact_non_negative %magnitude : i8 -> i1
+  %count = index.cast %nonnegative : i1 to index
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %empty = scalar.constant 0 : i32
+  %selected = scalar.cmpi ne, %selector, %empty : i32
+  scf.if %selected {
+    scf.for %iteration = [%begin to %count step %step] unroll {
+      test.use %iteration : index
+    }
+  }
+  func.return
+}
+
+// ----
+func.def @signed_minimum_remains_possible(%input: i8, %selector: i32) {
+  func.return
+}
+
+// ====
+
+// Scoped transfer interprets the complete cast chain. The range reader turns
+// the proven upper endpoint into an exact unroll count, so the output checks
+// the proof's value rather than merely preserving the input operations.
+func.def @guarded_cast_chain(%input: i64) {
+  %word = scalar.trunci %input : i64 to i32
+  %halfword = scalar.trunci %word : i32 to i16
+  %byte = scalar.trunci %halfword : i16 to i8
+  %signed = scalar.extsi %byte : i8 to i16
+  %mixed = scalar.extui %signed : i16 to i32
+  %c0 = scalar.constant 0 : i64
+  %limit = scalar.constant 3 : i64
+  %positive = scalar.cmpi sgt, %input, %c0 : i64
+  %small = scalar.cmpi sle, %input, %limit : i64
+  %valid = scalar.andi %positive, %small : i1
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  scf.if %valid {
+    %high = test.fact_range_hi %mixed : i32 -> i64
+    %count = index.cast %high : i64 to index
+    scf.for %iteration = [%begin to %count step %step] unroll {
+      test.use %iteration : index
+    }
+  }
+  // The same pre-guard cast still admits zero after the join. A false
+  // nonzero observation produces no iterations here.
+  %nonzero = test.fact_non_zero %mixed : i32 -> i1
+  %outside_count = index.cast %nonzero : i1 to index
+  scf.for %outside = [%begin to %outside_count step %step] unroll {
+    test.use %outside : index
+  }
+  func.return
+}
+
+// ----
+func.def @guarded_cast_chain(%input: i64) {
+  %c0 = scalar.constant 0 : i64
+  %limit = scalar.constant 3 : i64
+  %positive = scalar.cmpi sgt, %input, %c0 : i64
+  %small = scalar.cmpi sle, %input, %limit : i64
+  %valid = scalar.andi %positive, %small : i1
+  scf.if %valid {
+    %iteration_0 = index.constant 0 : index
+    test.use %iteration_0 : index
+    %iteration_1 = index.constant 1 : index
+    test.use %iteration_1 : index
+    %iteration_2 = index.constant 2 : index
+    test.use %iteration_2 : index
+  }
+  func.return
+}
+
+// ====
+
+// A guard on the immediate conversion input must not disappear when the
+// owner also retains a transitive description rooted at the original input.
+func.def @guarded_intermediate(%input: i64) {
+  %byte = scalar.trunci %input : i64 to i8
+  %unsigned = scalar.extui %byte : i8 to i32
+  %c0 = scalar.constant 0 : i8
+  %limit = scalar.constant 2 : i8
+  %positive = scalar.cmpi sgt, %byte, %c0 : i8
+  %small = scalar.cmpi sle, %byte, %limit : i8
+  %valid = scalar.andi %positive, %small : i1
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  scf.if %valid {
+    %high = test.fact_range_hi %unsigned : i32 -> i64
+    %count = index.cast %high : i64 to index
+    scf.for %iteration = [%begin to %count step %step] unroll {
+      test.use %iteration : index
+    }
+  }
+  func.return
+}
+
+// ----
+func.def @guarded_intermediate(%input: i64) {
+  %byte = scalar.trunci %input : i64 to i8
+  %c0 = scalar.constant 0 : i8
+  %limit = scalar.constant 2 : i8
+  %positive = scalar.cmpi sgt, %byte, %c0 : i8
+  %small = scalar.cmpi sle, %byte, %limit : i8
+  %valid = scalar.andi %positive, %small : i1
+  scf.if %valid {
+    %iteration_0 = index.constant 0 : index
+    test.use %iteration_0 : index
+    %iteration_1 = index.constant 1 : index
+    test.use %iteration_1 : index
+  }
+  func.return
+}
+
+// ====
+
+// A nonzero source can narrow to zero. The guard covers 256..258, whose byte
+// payload has a different interval and cannot inherit nonzero or identity.
+func.def @guarded_wrapping_conversion(%input: i64) {
+  %byte = scalar.trunci %input : i64 to i8
+  %unsigned = scalar.extui %byte : i8 to i32
+  %lower = scalar.constant 256 : i64
+  %upper = scalar.constant 258 : i64
+  %above = scalar.cmpi sge, %input, %lower : i64
+  %below = scalar.cmpi sle, %input, %upper : i64
+  %valid = scalar.andi %above, %below : i1
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  scf.if %valid {
+    %high = test.fact_range_hi %unsigned : i32 -> i64
+    %count = index.cast %high : i64 to index
+    scf.for %iteration = [%begin to %count step %step] unroll {
+      test.use %iteration : index
+    }
+    %nonzero = test.fact_non_zero %unsigned : i32 -> i1
+    %nonzero_count = index.cast %nonzero : i1 to index
+    scf.for %unexpected = [%begin to %nonzero_count step %step] unroll {
+      test.use %unexpected : index
+    }
+  }
+  func.return
+}
+
+// ----
+func.def @guarded_wrapping_conversion(%input: i64) {
+  %lower = scalar.constant 256 : i64
+  %upper = scalar.constant 258 : i64
+  %above = scalar.cmpi sge, %input, %lower : i64
+  %below = scalar.cmpi sle, %input, %upper : i64
+  %valid = scalar.andi %above, %below : i1
+  scf.if %valid {
+    %iteration_0 = index.constant 0 : index
+    test.use %iteration_0 : index
+    %iteration_1 = index.constant 1 : index
+    test.use %iteration_1 : index
+  }
+  func.return
+}
+
+// ====
+
+// Signed i1 interpretation is -1 under a true guard, while unsigned i1 is 1.
+// The two conversions are nonzero but are not numeric identities of each other.
+func.def @guarded_predicate_casts(%input: i1) {
+  %signed = scalar.extsi %input : i1 to i8
+  %unsigned = scalar.extui %input : i1 to i8
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  scf.if %input {
+    %negative = scalar.negi %signed : i8
+    %signed_count = index.cast %negative : i8 to index
+    %unsigned_count = index.cast %unsigned : i8 to index
+    scf.for %signed_iteration = [%begin to %signed_count step %step] unroll {
+      test.use %signed_iteration : index
+    }
+    scf.for %unsigned_iteration = [%begin to %unsigned_count step %step] unroll {
+      test.use %unsigned_iteration : index
+    }
+  }
+  func.return
+}
+
+// ----
+func.def @guarded_predicate_casts(%input: i1) {
+  scf.if %input {
+    %signed_iteration_0 = index.constant 0 : index
+    test.use %signed_iteration_0 : index
+    %unsigned_iteration_0 = index.constant 0 : index
+    test.use %unsigned_iteration_0 : index
+  }
+  func.return
+}
+
+// ====
+
+// A signed byte and its unsigned extension are different for negative input.
+// An unknown comparison cannot authorize an exact unroll after the join.
+func.def @conversion_identity_does_not_escape(%input: i8, %bits: i32) {
+  %unsigned = scalar.extui %input : i8 to i32
+  %c0 = scalar.constant 0 : i8
+  %positive = scalar.cmpi sgt, %input, %c0 : i8
+  scf.if %positive {
+    %remainder = scalar.remui %bits, %unsigned : i32
+    test.use %remainder : i32
+  }
+  %source = index.cast %input : i8 to index
+  %converted = index.cast %unsigned : i32 to index
+  %equal = index.cmp eq, %source, %converted : index
+  %count = index.cast %equal : i1 to index
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  // ERROR@+1: STRUCTURE/014 {attr_name="unroll", expected_constraint="exact static trip count"}
+  scf.for %iteration = [%begin to %count step %step] unroll {
+    test.use %iteration : index
+  }
+  func.return
+}
+
+// ====
+
+// A forwarded block argument introduces a CFG identity between conversions.
+// The retained byte interpretation must compose with the later unsigned one,
+// including its wrapped range, without refining uses after the guarded region.
+func.def @forwarded_cast_chain(%input: i64) {
+  %byte = scalar.trunci %input : i64 to i8
+  cfg.br ^payload(%byte: i8)
+^payload(%forwarded: i8):
+  %signed = scalar.extsi %forwarded : i8 to i16
+  %mixed = scalar.extui %signed : i16 to i32
+  %lower = scalar.constant 256 : i64
+  %upper = scalar.constant 258 : i64
+  %above = scalar.cmpi sge, %input, %lower : i64
+  %below = scalar.cmpi sle, %input, %upper : i64
+  %valid = scalar.andi %above, %below : i1
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  scf.if %valid {
+    %high = test.fact_range_hi %mixed : i32 -> i64
+    %count = index.cast %high : i64 to index
+    scf.for %iteration = [%begin to %count step %step] unroll {
+      test.use %iteration : index
+    }
+  }
+  %nonzero = test.fact_non_zero %mixed : i32 -> i1
+  %outside_count = index.cast %nonzero : i1 to index
+  scf.for %outside = [%begin to %outside_count step %step] unroll {
+    test.use %outside : index
+  }
+  func.return
+}
+
+// ----
+func.def @forwarded_cast_chain(%input: i64) {
+  %byte = scalar.trunci %input : i64 to i8
+  cfg.br ^payload(%byte: i8)
+^payload(%forwarded: i8):
+  %lower = scalar.constant 256 : i64
+  %upper = scalar.constant 258 : i64
+  %above = scalar.cmpi sge, %input, %lower : i64
+  %below = scalar.cmpi sle, %input, %upper : i64
+  %valid = scalar.andi %above, %below : i1
+  scf.if %valid {
+    %iteration_0 = index.constant 0 : index
+    test.use %iteration_0 : index
+    %iteration_1 = index.constant 1 : index
+    test.use %iteration_1 : index
+  }
+  func.return
+}
+
+// ====
+
+// Different incoming payloads cannot be unified with one guarded source.
+func.def @merged_payloads(%input: i64, %other: i8, %choose: i1) {
+  %byte = scalar.trunci %input : i64 to i8
+  cfg.cond_br %choose, ^first, ^second
+^first:
+  cfg.br ^payload(%byte: i8)
+^second:
+  cfg.br ^payload(%other: i8)
+^payload(%forwarded: i8):
+  %unsigned = scalar.extui %forwarded : i8 to i32
+  %c0 = scalar.constant 0 : i64
+  %limit = scalar.constant 2 : i64
+  %positive = scalar.cmpi sgt, %input, %c0 : i64
+  %small = scalar.cmpi sle, %input, %limit : i64
+  %valid = scalar.andi %positive, %small : i1
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  scf.if %valid {
+    %high = test.fact_range_hi %unsigned : i32 -> i64
+    %full_byte = scalar.constant 255 : i64
+    %unrefined = scalar.cmpi eq, %high, %full_byte : i64
+    %count = index.cast %unrefined : i1 to index
+    scf.for %iteration = [%begin to %count step %step] unroll {
+      test.use %iteration : index
+    }
+  }
+  func.return
+}
+
+// ----
+func.def @merged_payloads(%input: i64, %other: i8, %choose: i1) {
+  %byte = scalar.trunci %input : i64 to i8
+  cfg.cond_br %choose, ^first, ^second
+^first:
+  cfg.br ^payload(%byte: i8)
+^second:
+  cfg.br ^payload(%other: i8)
+^payload(%forwarded: i8):
+  %c0 = scalar.constant 0 : i64
+  %limit = scalar.constant 2 : i64
+  %positive = scalar.cmpi sgt, %input, %c0 : i64
+  %small = scalar.cmpi sle, %input, %limit : i64
+  %valid = scalar.andi %positive, %small : i1
+  scf.if %valid {
+    %iteration_0 = index.constant 0 : index
+    test.use %iteration_0 : index
+  }
+  func.return
+}

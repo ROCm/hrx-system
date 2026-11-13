@@ -71,11 +71,11 @@ loom_amdgpu_call_state_t loom_amdgpu_call_state_resolve(
 }
 
 bool loom_amdgpu_call_abi_add_low_type(
-    const loom_low_descriptor_set_t* descriptor_set, loom_type_t low_type,
+    uint64_t descriptor_set_id, loom_type_t low_type,
     loom_amdgpu_call_abi_requirements_t* inout_requirements) {
-  if (!descriptor_set || !loom_low_type_is_register(low_type) ||
+  if (!loom_low_type_is_register(low_type) ||
       loom_low_register_type_descriptor_set_stable_id(low_type) !=
-          descriptor_set->stable_id) {
+          descriptor_set_id) {
     return false;
   }
   const uint32_t unit_count = loom_low_register_type_unit_count(low_type);
@@ -104,7 +104,7 @@ iree_status_t loom_amdgpu_call_abi_select_location(
   const loom_amdgpu_call_abi_requirements_t prior_requirements =
       *inout_requirements;
   loom_amdgpu_call_abi_requirements_t requirements = prior_requirements;
-  if (!loom_amdgpu_call_abi_add_low_type(descriptor_set, low_type,
+  if (!loom_amdgpu_call_abi_add_low_type(descriptor_set->stable_id, low_type,
                                          &requirements)) {
     return iree_make_status(
         IREE_STATUS_UNIMPLEMENTED,

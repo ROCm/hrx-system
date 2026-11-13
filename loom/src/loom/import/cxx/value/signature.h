@@ -169,7 +169,8 @@ BoundStagedSignature bind_staged_signature(
 // |require_result_types| is true, which supports different header/result
 // arities without changing the ordinary inferred path.
 BoundConditionLoopSignatures bind_condition_loop_signatures(
-    Types& types, std::span<const cxx::Type* const> sources, cxx::AST* owner,
+    Types& types, std::span<const cxx::Type* const> header_sources,
+    std::span<const cxx::Type* const> result_sources, cxx::AST* owner,
     loom_builder_t* builder,
     std::span<const loom_type_t> header_suffix_types = {},
     bool require_result_types = false);

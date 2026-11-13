@@ -141,6 +141,7 @@ loom_cc_library(
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops/buffer",
         "//loom/src/loom/ops/kernel",
+        "//loom/src/loom/util:cfg_graph",
         "//loom/src/loom/util:cfg_postdominance",
         "//loom/src/loom/util:fact_table",
         "//runtime/src/iree/base",
@@ -571,9 +572,11 @@ loom_cc_library(
     deps = [
         ":symbol_facts",
         "//loom/src/loom/ir",
+        "//loom/src/loom/ir:input_contract",
         "//loom/src/loom/ops:func_symbol_facts",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops/target",
+        "//loom/src/loom/target:condition",
         "//loom/src/loom/target:facts",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
@@ -588,6 +591,7 @@ loom_cc_test(
         ":template_provider_catalog",
         "//loom/src/loom/format/text:parser",
         "//loom/src/loom/ir",
+        "//loom/src/loom/ops:func_symbol_facts",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops/func",
         "//loom/src/loom/ops/target",
@@ -658,16 +662,21 @@ loom_cc_library(
     name = "ownership_lifetime",
     srcs = [
         "ownership_callable.c",
+        "ownership_cleanup.c",
         "ownership_lifetime.c",
+        "ownership_retirement.c",
     ],
     hdrs = [
         "ownership_callable.h",
+        "ownership_cleanup.h",
         "ownership_lifetime.h",
+        "ownership_retirement.h",
     ],
     deps = [
         ":liveness",
         ":ownership",
         ":scc",
+        ":value_relation",
         "//loom/src/loom/error:emitter",
         "//loom/src/loom/error:error_defs",
         "//loom/src/loom/error:parameter",
@@ -689,6 +698,7 @@ loom_cc_test(
         ":ownership",
         "//loom/src/loom/format/text:parser",
         "//loom/src/loom/ir",
+        "//loom/src/loom/ops/buffer",
         "//loom/src/loom/ops/func",
         "//loom/src/loom/ops/test",
         "//loom/src/loom/testing:module_ptr",
@@ -1503,16 +1513,31 @@ loom_cc_test(
 )
 
 loom_cc_library(
+    name = "symbolic_integer_cast",
+    srcs = ["symbolic_integer_cast.c"],
+    hdrs = ["symbolic_integer_cast.h"],
+    deps = [
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ir:facts",
+        "//loom/src/loom/ops/index",
+        "//loom/src/loom/ops/index:cast",
+        "//loom/src/loom/ops/scalar",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
     name = "symbolic_expr",
     srcs = [
         "symbolic_congruence.c",
         "symbolic_expr.c",
         "symbolic_expr_proof.c",
-        "symbolic_integer_cast.c",
         "symbolic_product.c",
         "symbolic_projection.c",
         "symbolic_quotient.c",
         "symbolic_quotient.h",
+        "symbolic_scope.c",
+        "symbolic_scope.h",
         "symbolic_value.c",
         "symbolic_value.h",
     ],
@@ -1520,7 +1545,6 @@ loom_cc_library(
         "symbolic_congruence.h",
         "symbolic_expr.h",
         "symbolic_expr_proof.h",
-        "symbolic_integer_cast.h",
         "symbolic_product.h",
         "symbolic_projection.h",
     ],
@@ -1529,6 +1553,7 @@ loom_cc_library(
         ":condition_fact_scope",
         ":condition_facts",
         ":integer_relation",
+        ":symbolic_integer_cast",
         "//loom/src/loom/ir",
         "//loom/src/loom/ir:facts",
         "//loom/src/loom/ops/index",
@@ -1603,6 +1628,7 @@ loom_cc_test(
         ":type_refinement",
         "//loom/src/loom/ir",
         "//loom/src/loom/ir:facts",
+        "//loom/src/loom/ops/encoding",
         "//loom/src/loom/util:fact_table",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",
@@ -1664,6 +1690,7 @@ loom_cc_test(
         ":condition_facts",
         ":symbolic_expr",
         ":symbolic_expr_test_fixture",
+        ":symbolic_integer_cast",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops/index",
@@ -1683,6 +1710,7 @@ loom_cc_test(
         ":condition_facts",
         ":symbolic_expr",
         ":symbolic_expr_test_fixture",
+        ":symbolic_integer_cast",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops/index",
@@ -1694,6 +1722,35 @@ loom_cc_test(
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "symbolic_expr_proof_lifetime_test",
+    srcs = ["symbolic_expr_proof_lifetime_test.cc"],
+    deps = [
+        ":symbolic_expr",
+        ":symbolic_expr_test_fixture",
+        ":symbolic_integer_cast",
+        "//loom/src/loom/ops/index",
+        "//loom/src/loom/ops/scf",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_benchmark(
+    name = "symbolic_expr_benchmark",
+    srcs = ["symbolic_expr_benchmark.cc"],
+    deps = [
+        ":symbolic_expr",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/index",
+        "//loom/src/loom/ops/scf",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:benchmark_main",
     ],
 )
 

@@ -21,13 +21,15 @@ extern "C" {
 
 typedef struct loom_kernel_request_producer_t loom_kernel_request_producer_t;
 typedef struct loom_kernel_request_source_t loom_kernel_request_source_t;
+typedef struct loom_kernel_request_preparation_t
+    loom_kernel_request_preparation_t;
 
 // One borrowed live-class request prepared for optional materialization.
 //
 // |source| is the callback-live source/configuration scope used for early
-// product resolution. |collection| and |class_ordinal| identify the exact
-// accepted decision trace within that scope. The record and everything it
-// references remain valid only for the duration of the publication callback.
+// product resolution. |class_ordinal| identifies the exact accepted decision
+// trace within that scope. The record and everything it references remain valid
+// only for the duration of the publication callback.
 typedef struct loom_kernel_request_t {
   // Exact index-wide kernel definition ordinal rooted by this request.
   iree_host_size_t source_symbol_ordinal;
@@ -40,9 +42,6 @@ typedef struct loom_kernel_request_t {
 
   // Callback-live source/configuration scope owned by the publication.
   const loom_kernel_request_source_t* source;
-
-  // Invocation-local class collection containing the selected trace.
-  const loom_kernel_class_collection_t* collection;
 } loom_kernel_request_t;
 
 // Visits one borrowed live-class request.
@@ -62,6 +61,85 @@ typedef struct loom_kernel_request_sink_t {
   // Opaque value passed to |publish|.
   void* user_data;
 } loom_kernel_request_sink_t;
+
+// Invocation-local provider of complete source-class publications. The callback
+// owns preparation lifetime through every sink callback. Requests borrow that
+// preparation; explicitly materialized products own independent storage. The
+// returned site map uses caller scratch and retains no preparation state. This
+// lets an embedding retain immutable prepared sources while custom
+// materialization environments keep their ordinary one-shot lifetime.
+typedef struct loom_kernel_request_provider_t {
+  // Publishes all classes after collecting the complete source-kernel site set.
+  iree_status_t (*publish)(
+      void* user_data,
+      const loom_link_plan_materialization_environment_t* environment,
+      iree_host_size_t source_symbol_ordinal, const loom_module_t* site_module,
+      const loom_kernel_class_site_t* sites, iree_host_size_t site_count,
+      const loom_kernel_class_collection_options_t* collection_options,
+      loom_kernel_request_sink_t sink, iree_arena_allocator_t* scratch_arena,
+      const loom_decision_class_ordinal_t** out_site_classes);
+
+  // Borrowed state valid for the enclosing command-product operation.
+  void* user_data;
+} loom_kernel_request_provider_t;
+
+// Prepares one immutable source independently of invocation scratch. Owns the
+// linked module, classifier analyses, and candidate-header backing. Borrows the
+// fixed index, context, and block pool until freed; the environment's callbacks
+// and user data are used only during this call and are never retained.
+iree_status_t loom_kernel_request_preparation_allocate(
+    const loom_link_module_index_t* index,
+    const loom_link_plan_materialization_environment_t* environment,
+    iree_host_size_t source_symbol_ordinal,
+    loom_kernel_request_preparation_t** out_preparation);
+
+// Releases every object owned by |preparation| before its backing pool retires.
+void loom_kernel_request_preparation_free(
+    loom_kernel_request_preparation_t* preparation);
+
+// Returns names from the finalized configuration dependency closure, including
+// defaults and unresolved declarations. Names belong to |preparation|. The
+// producer derives them from the final link plan and its symbol correspondence.
+iree_string_view_list_t loom_kernel_request_preparation_config_keys(
+    const loom_kernel_request_preparation_t* preparation);
+
+// Builds compact bound projections borrowing the immutable preparation. The
+// temporary bound module and construction facts retire before returning.
+iree_status_t loom_kernel_request_preparation_bind(
+    const loom_kernel_request_preparation_t* preparation,
+    const loom_module_t* site_module,
+    const loom_kernel_specialization_value_t* values,
+    iree_arena_allocator_t* arena,
+    loom_kernel_class_classifier_t* out_classifier);
+
+// Optional retained-plan owner for one synchronous publication. Acquired plans
+// remain immutable and live until release; invocation state stays in scratch.
+typedef struct loom_kernel_request_plan_provider_t {
+  // Acquires one plan for an already captured exact tuple.
+  iree_status_t (*acquire)(
+      void* user_data, const loom_module_t* site_module,
+      const loom_kernel_specialization_value_t* values, uint16_t value_count,
+      iree_arena_allocator_t* scratch_arena,
+      const loom_kernel_class_classifier_t** out_classifier, void** out_lease);
+  // Releases an acquired lease after collection and every callback finish.
+  void (*release)(void* user_data, void* lease);
+  // Publication-live cache and source owner.
+  void* user_data;
+} loom_kernel_request_plan_provider_t;
+
+// Collects invocation-local classes and publishes them from an immutable
+// source. Concurrent calls use distinct scratch arenas and independently owned
+// sinks. The returned site map uses |scratch_arena| and retains no preparation
+// state or site literals; failure leaves it NULL. An empty |plans| provider
+// uses one-shot binding with the same applicability and collection semantics.
+iree_status_t loom_kernel_request_preparation_publish(
+    const loom_kernel_request_preparation_t* preparation,
+    const loom_module_t* site_module, const loom_kernel_class_site_t* sites,
+    iree_host_size_t site_count,
+    const loom_kernel_class_collection_options_t* collection_options,
+    loom_kernel_request_plan_provider_t plans, loom_kernel_request_sink_t sink,
+    iree_arena_allocator_t* scratch_arena,
+    const loom_decision_class_ordinal_t** out_site_classes);
 
 // Allocates an invocation-local producer over an immutable provider index.
 //
@@ -98,11 +176,11 @@ iree_status_t loom_kernel_request_materialize(
 // because accepting a later site may conservatively collapse prior classes.
 // |environment| supplies invocation-local diagnostics and specialization.
 //
-// The returned collection is allocated from |scratch_arena| and remains valid
-// until that arena is reset. It maps the input sites to the published class
-// ordinals without retaining any product. Staged literal tuples borrow
-// |site_module|, which contains the site argument values, until the collection
-// is released. Ordinary kernels without staged arguments do not use it.
+// The returned site map is allocated from |scratch_arena| and remains valid
+// until that arena is reset. It maps every input site to a published class
+// ordinal without retaining products, source state, or site literals. Failure
+// leaves the map NULL. Staged literal tuples borrow |site_module| only through
+// publication; ordinary kernels without staged arguments do not use it.
 iree_status_t loom_kernel_request_producer_publish(
     loom_kernel_request_producer_t* producer,
     const loom_link_plan_materialization_environment_t* environment,
@@ -110,7 +188,7 @@ iree_status_t loom_kernel_request_producer_publish(
     const loom_kernel_class_site_t* sites, iree_host_size_t site_count,
     const loom_kernel_class_collection_options_t* collection_options,
     loom_kernel_request_sink_t sink, iree_arena_allocator_t* scratch_arena,
-    loom_kernel_class_collection_t* out_collection);
+    const loom_decision_class_ordinal_t** out_site_classes);
 
 #ifdef __cplusplus
 }  // extern "C"

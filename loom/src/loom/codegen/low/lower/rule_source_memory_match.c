@@ -283,10 +283,19 @@ static bool loom_low_lower_rule_source_memory_address_input_matches(
   if (scalar_type == LOOM_SCALAR_TYPE_INDEX) {
     // Unlike fixed integers, index has a target-selected source width. Its
     // mapped input must represent the value before coordinate arithmetic.
-    return loom_value_facts_fit_signed_bit_count(
-        loom_value_fact_table_lookup(match_context->fact_table,
-                                     source_value_id),
-        (uint8_t)match_context->bundle->snapshot->index_bitwidth);
+    const loom_value_facts_t facts = loom_value_fact_table_lookup(
+        match_context->fact_table, source_value_id);
+    if (loom_value_facts_fit_signed_bit_count(
+            facts, (uint8_t)match_context->bundle->snapshot->index_bitwidth)) {
+      return true;
+    }
+    const loom_low_lower_source_memory_integer_conversion_t* wide =
+        &address_materializer
+             ->integer_conversions[LOOM_SCALAR_TYPE_I64 - LOOM_SCALAR_TYPE_I1];
+    return loom_target_snapshot_maximum_index_bitwidth(
+               match_context->bundle->snapshot) == 64 &&
+           wide->descriptor_ref != LOOM_LOW_LOWER_DESCRIPTOR_REF_NONE &&
+           (wide->required_features & ~match_context->feature_bits) == 0;
   }
   if (address_materializer->coordinate_type ==
       LOOM_LOW_LOWER_SOURCE_MEMORY_ADDRESS_COORDINATE_INDEX) {
@@ -397,10 +406,9 @@ static bool loom_low_lower_rule_source_memory_address_matches(
           LOOM_LOW_LOWER_SOURCE_MEMORY_ADDRESS_COORDINATE_OFFSET &&
       access->dynamic_view_base_term_count != 0 &&
       access->dynamic_view_base_value_id != LOOM_VALUE_ID_INVALID) {
-    const loom_type_t view_base_type = loom_module_value_type(
-        match_context->module, access->dynamic_view_base_value_id);
-    if (!loom_type_equal(view_base_type,
-                         loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET))) {
+    if (!loom_low_lower_rule_source_memory_address_input_matches(
+            match_context, address_materializer,
+            access->dynamic_view_base_value_id)) {
       return loom_low_lower_rule_source_memory_reject(
           diagnostics,
           LOOM_LOW_SOURCE_MEMORY_REJECTION_REASON_ADDRESS_MATERIALIZATION,

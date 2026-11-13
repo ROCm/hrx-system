@@ -1,0 +1,107 @@
+// RUN: pass canonicalize,cse,dce
+// Symbolic stage count controls allocation size and a typed-view helper;
+// the barrier separates neighbor writes from final-stage reads.
+#include <loomcxx/check.h>
+#include <loomcxx/kernel.h>
+#include <loomcxx/predicate.h>
+#include <loomcxx/view.h>
+
+namespace loomt = loom::type;
+
+using StageView = loomt::view<loomt::shape<loomt::dynamic>, unsigned,
+                              loomt::encoding<loom::encoding::role::layout, 1>>;
+
+constexpr unsigned kWorkgroupSize = 32u;
+
+static LOOM_INLINE void store_stage(StageView stages, unsigned stage,
+                                    unsigned lane) {
+  unsigned consumer_lane = (lane + 1u) % kWorkgroupSize;
+  loom::view::store(stage + 8u + consumer_lane, stages,
+                    stage * kWorkgroupSize + consumer_lane);
+}
+
+// The finite source contract can exceed a target's physical capacity. Config
+// specialization owns value validity; target planning owns storage admission.
+[[loom::config("test.buffer.stage_count"),
+  loom::where(loom::predicate::range(1u, 100000u))]]
+extern const unsigned stage_count;
+
+[[loom::kernel, loom::workgroup_size(kWorkgroupSize, 1, 1),
+  loom::workgroup_count(1, 1, 1)]]
+void configured_workgroup_storage(unsigned* output) {
+  unsigned lane = loom::kernel::workitem::id.x;
+  auto* stages =
+      loom::buffer::alloca<unsigned, loom::memory_space::workgroup, 64>(
+          stage_count * kWorkgroupSize);
+  auto stage_view =
+      loom::buffer::view<loomt::dynamic>(stages, {stage_count * kWorkgroupSize},
+                                         loom::encoding::layout::dense<1>());
+  for (unsigned stage = 0; stage < stage_count; ++stage) {
+    store_stage(stage_view, stage, lane);
+  }
+  unsigned final_stage_base = (stage_count - 1u) * kWorkgroupSize;
+  loom::kernel::workgroup::barrier();
+  output[lane] = loom::view::load(stage_view, final_stage_base + lane);
+}
+// ----
+config.decl @test.buffer.stage_count : %0: i32 where [range(%0, 1, 100000)]
+
+kernel.def @configured_workgroup_storage() {
+  %2 = index.constant 1 : index
+  %5 = index.constant 32 : index
+  kernel.launch.config workgroups(%2, %2, %2) workgroup_size(%5, %2, %2) : index
+} launch(%output: buffer) {
+  %workitem_id_x = kernel.workitem.id<x> : index
+  %lane = index.cast %workitem_id_x : index to i32
+  %stage_count = config.get @test.buffer.stage_count : i32
+  %78 = scalar.constant 5 : i32
+  %79 = scalar.shli %stage_count, %78 : i32
+  %14 = scalar.extui %79 : i32 to i64
+  %15 = index.cast %14 : i64 to index
+  %16 = index.constant 4 : offset
+  %17 = index.scale %15, %16 : index, offset -> offset
+  %stages = buffer.alloca<workgroup> align(64) %17 : buffer
+  %stages_byte_offset = index.constant 0 : offset
+  %stage_view_layout = encoding.layout.dense : encoding<layout>
+  %stage_view = buffer.view %stages[%stages_byte_offset] : buffer -> view<[%15]xi32, %stage_view_layout>
+  %30 = index.cast %stage_count : i32 to offset
+  %31 = index.constant 1 : offset
+  scf.for %stage = [%stages_byte_offset to %30 step %31] {
+    %33 = index.cast %stage : offset to i32
+    func.call @store_stage(%15, %stage_view_layout, %stage_view, %33, %lane) : (index, encoding<layout>, view<[%15]xi32, %stage_view_layout>, i32, i32)
+  }
+  %74 = scalar.constant -1 : i32
+  %75 = scalar.addi %stage_count, %74 : i32
+  %final_stage_base = scalar.shli %75, %78 : i32
+  kernel.barrier<global> scope(workgroup) ordering(acq_rel)
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  %39 = scalar.addi %final_stage_base, %lane : i32
+  %40 = scalar.extui %39 : i32 to i64
+  %41 = index.cast %40 : i64 to index
+  %42 = view.load %stage_view[%41] : view<[%15]xi32, %stage_view_layout> -> i32
+  %43 = scalar.extui %lane : i32 to i64
+  %70 = scalar.constant 2 : i64
+  %71 = scalar.shli %43, %70 : i64
+  %48 = scalar.assume %71 [range(%71, 0, 9223372036854775807)] : i64
+  %49 = index.cast %48 : i64 to offset
+  %50 = buffer.view %output[%49] : buffer -> view<1xi32>
+  view.store<root_in_bounds> %42, %50[0] : i32, view<1xi32>
+  kernel.return
+}
+
+func.def inline @store_stage(%stages_dim0: index, %stages_layout: encoding<layout>, %stages: view<[%stages_dim0]xi32, %stages_layout>, %stage: i32, %lane: i32) {
+  %56 = scalar.constant 1 : i32
+  %57 = scalar.addi %lane, %56 : i32
+  %84 = scalar.constant 31 : i32
+  %consumer_lane = scalar.andi %57, %84 : i32
+  %60 = scalar.constant 8 : i32
+  %82 = scalar.addi %stage, %consumer_lane : i32
+  %83 = scalar.addi %82, %60 : i32
+  %80 = scalar.constant 5 : i32
+  %81 = scalar.shli %stage, %80 : i32
+  %65 = scalar.addi %81, %consumer_lane : i32
+  %66 = scalar.extui %65 : i32 to i64
+  %67 = index.cast %66 : i64 to index
+  view.store %83, %stages[%67] : i32, view<[%stages_dim0]xi32, %stages_layout>
+  func.return
+}

@@ -17,11 +17,11 @@
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "iree/vm/buffer.h"
-#include "loom/serve/runtime/device/device.h"
+#include "loom/runtime/device/device.h"
+#include "loom/runtime/testing/device.h"
 #include "loom/serve/server/router.h"
 #include "loom/serve/service/image/service.h"
 #include "loom/serve/telemetry/record.h"
-#include "loom/serve/testing/device.h"
 #include "loom/serve/testing/http_harness.h"
 #include "loom/serve/transport/http/listener.h"
 
@@ -53,9 +53,9 @@ struct loom_serve_test_image_gate_t {
   // Optional shared admission slot, mutated only by serialized owner turns.
   bool* occupied = nullptr;
   // Borrowed model execution domain held by an explicit queue dependency.
-  loom_serve_execution_t* execution = nullptr;
-  // Borrowed valid CHW F32 result, outliving the joined service.
-  float pixel[3] = {};
+  loom_runtime_execution_t* execution = nullptr;
+  // Borrowed valid RGBA8 result, outliving the joined service.
+  uint8_t pixel[4] = {128, 128, 128, 255};
   // Successful completions consumed by the scheduler, read after service join.
   uint32_t completed = 0;
   // Request-selected dependency outcome, published by CPU preparation.
@@ -63,13 +63,13 @@ struct loom_serve_test_image_gate_t {
   // Unsubmitted payloads discarded on denied admission, read after join.
   uint32_t discarded = 0;
 
-  static iree_status_t Admit(void* self,
-                             loom_serve_residency_admission_t* out_admission) {
+  static iree_status_t Admit(
+      void* self, loom_runtime_residency_admission_t* out_admission) {
     auto* gate = static_cast<loom_serve_test_image_gate_t*>(self);
     const bool admitted =
         gate->admission_available && (!gate->occupied || !*gate->occupied);
-    *out_admission = admitted ? LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED
-                              : LOOM_SERVE_RESIDENCY_ADMISSION_CAPACITY;
+    *out_admission = admitted ? LOOM_RUNTIME_RESIDENCY_ADMISSION_ACQUIRED
+                              : LOOM_RUNTIME_RESIDENCY_ADMISSION_CAPACITY;
     if (admitted) {
       if (gate->occupied) {
         *gate->occupied = true;
@@ -81,7 +81,7 @@ struct loom_serve_test_image_gate_t {
   }
   static iree_status_t Prepare(void* self,
                                const loom_serve_image_request_t* request,
-                               loom_serve_prepared_request_t* out_prepared) {
+                               loom_service_prepared_request_t* out_prepared) {
     *out_prepared = {.units = 1, .tag = 17};
     IREE_RETURN_IF_ERROR(iree_vm_buffer_create(16, 8, iree_allocator_system(),
                                                &out_prepared->bytes));
@@ -91,7 +91,7 @@ struct loom_serve_test_image_gate_t {
   }
   static iree_status_t PrepareBatch(
       void* self, iree_host_size_t count,
-      const loom_serve_prepared_request_t* requests, const iree_host_size_t*,
+      const loom_service_prepared_request_t* requests, const iree_host_size_t*,
       loom_service_image_prepared_t* out_prepared) {
     EXPECT_EQ(count, 1u);
     static_cast<loom_serve_test_image_gate_t*>(self)->admission_available =
@@ -106,10 +106,10 @@ struct loom_serve_test_image_gate_t {
     gate->Publish(kDiscarded);
   }
   static iree_status_t Submit(void* self, loom_serve_image_submit_flags_t flags,
-                              loom_serve_execution_frontier_t* out_frontier,
+                              loom_runtime_execution_frontier_t* out_frontier,
                               bool* out_complete) {
     auto* gate = static_cast<loom_serve_test_image_gate_t*>(self);
-    *out_frontier = loom_serve_execution_frontier(gate->execution);
+    *out_frontier = loom_runtime_execution_frontier(gate->execution);
     *out_complete = true;
     gate->Publish(kSubmitted);
     return iree_ok_status();
@@ -131,55 +131,55 @@ class ImageServiceFixture : public ::testing::Test {
  protected:
   static iree_status_t AllocateGroup(uint32_t worker_count,
                                      iree_host_size_t device_count,
-                                     loom_serve_device_group_t** out_group) {
+                                     loom_runtime_device_group_t** out_group) {
     *out_group = nullptr;
-    loom_serve_host_t* host = nullptr;
-    iree_status_t status = loom_serve_host_create(
+    loom_runtime_host_t* host = nullptr;
+    iree_status_t status = loom_runtime_host_create(
         worker_count, nullptr, iree_allocator_system(), &host);
     iree_hal_driver_t* driver = nullptr;
     if (iree_status_is_ok(status)) {
-      status = loom_serve_test_driver_acquire(host, &driver);
+      status = loom_runtime_test_driver_acquire(host, &driver);
     }
-    const auto uri = loom_serve_test_device()->device_uri;
-    const loom_serve_device_options_t options[] = {
+    const auto uri = loom_runtime_test_device()->device_uri;
+    const loom_runtime_device_options_t options[] = {
         {.driver = driver, .uri = uri, .name = IREE_SV("first")},
         {.driver = driver, .uri = uri, .name = IREE_SV("second")}};
     if (iree_status_is_ok(status)) {
-      status = loom_serve_device_group_allocate(
+      status = loom_runtime_device_group_allocate(
           host, device_count, options, iree_allocator_system(), out_group);
     }
-    const loom_serve_pool_options_t pool_options = {};
+    const loom_runtime_pool_options_t pool_options = {};
     for (iree_host_size_t i = 0; i < device_count && iree_status_is_ok(status);
          ++i) {
-      loom_serve_pool_t* pool = nullptr;
-      status = loom_serve_device_group_create_pool(
+      loom_runtime_pool_t* pool = nullptr;
+      status = loom_runtime_device_group_create_pool(
           *out_group, {options[i].name, UINT64_C(1) << i}, &pool_options,
           &pool);
     }
     iree_hal_driver_release(driver);
-    loom_serve_host_release(host);
+    loom_runtime_host_release(host);
     return status;
   }
 
-  void Initialize(loom_serve_device_group_t* group) {
+  void Initialize(loom_runtime_device_group_t* group) {
     group_ = group;
-    host_ = loom_serve_device_host(loom_serve_device_group_at(group_, 0));
-    for (iree_host_size_t i = 0; i < loom_serve_device_group_count(group_);
+    host_ = loom_runtime_device_host(loom_runtime_device_group_at(group_, 0));
+    for (iree_host_size_t i = 0; i < loom_runtime_device_group_count(group_);
          ++i) {
-      IREE_ASSERT_OK(loom_serve_device_create_execution(
-          loom_serve_device_group_at(group_, i),
-          loom_serve_device_group_pool_at(group_, i), &executions_[i]));
+      IREE_ASSERT_OK(loom_runtime_device_create_execution(
+          loom_runtime_device_group_at(group_, i),
+          loom_runtime_device_group_pool_at(group_, i), &executions_[i]));
     }
-    auto* device = loom_serve_device_group_at(group_, 0);
+    auto* device = loom_runtime_device_group_at(group_, 0);
     IREE_ASSERT_OK(iree_hal_semaphore_create(
-        loom_serve_device_handle(device), IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
-        IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &predecessor_));
+        loom_runtime_device_handle(device), IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
+        0, IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &predecessor_));
     uint64_t held = 1;
-    IREE_ASSERT_OK(loom_serve_execution_barrier(executions_[0],
-                                                {1, &predecessor_, &held}));
+    IREE_ASSERT_OK(loom_runtime_execution_barrier(executions_[0],
+                                                  {1, &predecessor_, &held}));
     const auto transport_options = loom_serve_http_server_options_default();
     IREE_ASSERT_OK(loom_serve_http_server_allocate(
-        loom_serve_host_proactor_pool(host_), &transport_options,
+        loom_runtime_host_proactor_pool(host_), &transport_options,
         host_allocator_, &server_));
     auto listener_options = loom_serve_http_listener_options_default();
     listener_options.address = IREE_SV("127.0.0.1:0");
@@ -202,15 +202,15 @@ class ImageServiceFixture : public ::testing::Test {
     loom_serve_http_server_free(server_);
     for (auto* execution : executions_) {
       if (execution) {
-        ExpectCompletion(loom_serve_execution_drain(execution));
-        loom_serve_execution_release(execution);
+        ExpectCompletion(loom_runtime_execution_drain(execution));
+        loom_runtime_execution_release(execution);
       }
     }
     iree_hal_semaphore_release(predecessor_);
-    for (iree_host_size_t i = 0; i < loom_serve_device_group_pool_count(group_);
-         ++i) {
-      IREE_EXPECT_OK(
-          loom_serve_pool_trim(loom_serve_device_group_pool_at(group_, i), 0));
+    for (iree_host_size_t i = 0;
+         i < loom_runtime_device_group_pool_count(group_); ++i) {
+      IREE_EXPECT_OK(loom_runtime_pool_trim(
+          loom_runtime_device_group_pool_at(group_, i), 0));
     }
   }
 
@@ -245,7 +245,7 @@ class ImageServiceFixture : public ::testing::Test {
         .batch_limit = 1,
         .prepare = loom_serve_test_image_gate_t::Prepare,
         .prepare_batch = loom_serve_test_image_gate_t::PrepareBatch,
-        .set_observer = [](void*, loom_serve_wake_callback_t) {},
+        .set_observer = [](void*, loom_runtime_wake_callback_t) {},
         .advance_batch =
             [](void*, bool, bool* out_complete) {
               *out_complete = true;
@@ -256,7 +256,7 @@ class ImageServiceFixture : public ::testing::Test {
         .submit = loom_serve_test_image_gate_t::Submit,
         .complete = loom_serve_test_image_gate_t::Complete,
         .capacity_domain =
-            loom_serve_pool_residency_cache(loom_serve_device_group_pool_at(
+            loom_runtime_pool_residency_cache(loom_runtime_device_group_pool_at(
                 group_, executions_[1] ? index : 0)),
     };
     const loom_serve_image_service_options_t options = {
@@ -277,7 +277,7 @@ class ImageServiceFixture : public ::testing::Test {
       IREE_RETURN_IF_ERROR(loom_serve_registry_allocate(
           count, services_, 0, {}, host_allocator_, &registry));
       iree_status_t status = loom_serve_router_run(
-          loom_serve_host_executor(host_), server_, registry,
+          loom_runtime_host_executor(host_), server_, registry,
           {.request_quota = request_quota, .holding_capacity = 8},
           host_allocator_);
       return iree_status_join(status, loom_serve_registry_free(registry));
@@ -312,8 +312,7 @@ class ImageServiceFixture : public ::testing::Test {
     return http_.Read(client.release(), false, out_response);
   }
 
-  iree_status_t WaitEvent(int client, const char* event, const char* field,
-                          std::string* out_record) {
+  iree_status_t WaitGeneratingHeartbeat(int client, std::string* out_record) {
     for (;;) {
       loom_runtime_telemetry_record_t value;
       if (loom_runtime_telemetry_stream_read(services_[0].telemetry.stream,
@@ -327,16 +326,17 @@ class ImageServiceFixture : public ::testing::Test {
         const std::string record(view.data, view.size);
         iree_string_builder_deinitialize(&output);
         IREE_RETURN_IF_ERROR(status);
-        if (record.find(event) != std::string::npos &&
-            record.find(field) != std::string::npos) {
+        if (record.find("\"event\":\"snapshot\"") != std::string::npos &&
+            record.find("\"phase\":\"generating\"") != std::string::npos) {
           *out_record = record;
           return iree_ok_status();
         }
       }
       IREE_RETURN_IF_ERROR(http_.CheckPending(client));
-      // Telemetry readers have independent cursors, not producer wake
-      // callbacks. A missing record never prevents observing socket or owner
-      // failure.
+      // Heartbeats recur while the device dependency is held, so a ring gap
+      // cannot lose the only notification. One-time events cannot serve as
+      // readiness gates on this overwriting stream. Observe socket and owner
+      // failure on every poll.
       std::this_thread::yield();
     }
   }
@@ -377,11 +377,11 @@ class ImageServiceFixture : public ::testing::Test {
   // Allocator shared by every fixture-owned production object.
   const iree_allocator_t host_allocator_ = iree_allocator_system();
   // Borrowed suite CPU executor and asynchronous I/O infrastructure.
-  loom_serve_host_t* host_ = nullptr;
+  loom_runtime_host_t* host_ = nullptr;
   // Borrowed suite group, optionally with a second independent placement.
-  loom_serve_device_group_t* group_ = nullptr;
+  loom_runtime_device_group_t* group_ = nullptr;
   // Independently drained execution timelines; the second may be absent.
-  loom_serve_execution_t* executions_[2] = {};
+  loom_runtime_execution_t* executions_[2] = {};
   // Explicitly held device predecessor, released before teardown joins work.
   iree_hal_semaphore_t* predecessor_ = nullptr;
   // The predecessor was signaled or failed exactly once.
@@ -416,7 +416,7 @@ class SharedImageServiceFixture : public ImageServiceFixture {
   }
 
   static void TearDownTestSuite() {
-    IREE_EXPECT_OK(loom_serve_device_group_free(shared_group_));
+    IREE_EXPECT_OK(loom_runtime_device_group_free(shared_group_));
     shared_group_ = nullptr;
   }
 
@@ -426,7 +426,7 @@ class SharedImageServiceFixture : public ImageServiceFixture {
 
  private:
   // One physical device topology shared by every case in the concrete suite.
-  inline static loom_serve_device_group_t* shared_group_ = nullptr;
+  inline static loom_runtime_device_group_t* shared_group_ = nullptr;
 };
 
 enum class CompletionMode { kResponse, kShutdown, kDeviceFailure };
@@ -444,7 +444,7 @@ class ImageServiceTestBase : public SharedImageServiceFixture<WorkerCount, 1> {
   using ImageServiceFixture::SendImage;
   using ImageServiceFixture::server_;
   using ImageServiceFixture::services_;
-  using ImageServiceFixture::WaitEvent;
+  using ImageServiceFixture::WaitGeneratingHeartbeat;
 
   void SetUp() override {
     ASSERT_NO_FATAL_FAILURE(this->InitializeSharedGroup());
@@ -456,7 +456,6 @@ class ImageServiceTestBase : public SharedImageServiceFixture<WorkerCount, 1> {
 
   void ExerciseCompletion(CompletionMode mode) {
     std::string response;
-    IREE_ASSERT_OK(WaitEvent(-1, "\"event\":\"stream_begin\"", "", &response));
     // Denial follows preparation but precedes the held device frontier.
     HttpClient denied;
     IREE_ASSERT_OK(SendImage("image-witness", 1, &denied));
@@ -465,8 +464,7 @@ class ImageServiceTestBase : public SharedImageServiceFixture<WorkerCount, 1> {
 
     HttpClient client;
     IREE_ASSERT_OK(SendImage("image-witness", 0, &client));
-    IREE_ASSERT_OK(WaitEvent(client.get(), "\"event\":\"snapshot\"",
-                             "\"phase\":\"generating\"", &response));
+    IREE_ASSERT_OK(WaitGeneratingHeartbeat(client.get(), &response));
     EXPECT_NE(response.find("\"request\":2"), std::string::npos);
     EXPECT_NE(response.find("\"completed\":0"), std::string::npos);
 
@@ -518,8 +516,10 @@ class ImageServiceTestBase : public SharedImageServiceFixture<WorkerCount, 1> {
 
     if (mode == CompletionMode::kShutdown) {
       loom_serve_http_server_request_stop(server_);
-      IREE_ASSERT_OK(WaitEvent(-1, "\"event\":\"image_shutdown\"",
-                               "\"request\":2", &response));
+      // Shutdown detaches the HTTP owner before draining device borrowers.
+      // Socket closure remains observable even if telemetry records wrap.
+      IREE_ASSERT_OK(http_.Read(client.release(), true, &response));
+      EXPECT_TRUE(response.empty());
     }
     ReleaseDependency(mode == CompletionMode::kDeviceFailure);
     if (mode == CompletionMode::kResponse) {
@@ -598,8 +598,7 @@ TEST_F(ImageServiceTest, TransportFailureTerminatesHeartbeatWait) {
       HttpClient client;
       IREE_ASSERT_OK(SendImage("image-witness", 0, &client));
       std::string record;
-      IREE_ASSERT_OK(WaitEvent(client.get(), "\"event\":\"snapshot\"",
-                               "\"phase\":\"generating\"", &record));
+      IREE_ASSERT_OK(WaitGeneratingHeartbeat(client.get(), &record));
     }();
   }
   ASSERT_EQ(failures.size(), 1);
@@ -637,15 +636,15 @@ class ImageAdmissionTestBase
     constexpr bool independent = DeviceCount == 2;
     ASSERT_NO_FATAL_FAILURE(this->InitializeSharedGroup());
     if (independent) {
-      auto* first = loom_serve_device_group_at(this->group_, 0);
-      auto* second = loom_serve_device_group_at(this->group_, 1);
-      EXPECT_EQ(loom_serve_device_group_count(this->group_), 2u);
-      EXPECT_EQ(loom_serve_device_group(first),
-                loom_serve_device_group(second));
-      EXPECT_NE(loom_serve_pool_residency_cache(
-                    loom_serve_device_group_pool_at(this->group_, 0)),
-                loom_serve_pool_residency_cache(
-                    loom_serve_device_group_pool_at(this->group_, 1)));
+      auto* first = loom_runtime_device_group_at(this->group_, 0);
+      auto* second = loom_runtime_device_group_at(this->group_, 1);
+      EXPECT_EQ(loom_runtime_device_group_count(this->group_), 2u);
+      EXPECT_EQ(loom_runtime_device_group(first),
+                loom_runtime_device_group(second));
+      EXPECT_NE(loom_runtime_pool_residency_cache(
+                    loom_runtime_device_group_pool_at(this->group_, 0)),
+                loom_runtime_pool_residency_cache(
+                    loom_runtime_device_group_pool_at(this->group_, 1)));
     }
     for (size_t i = 0; i < 2; ++i) {
       const bool separate = i == 1 && independent;

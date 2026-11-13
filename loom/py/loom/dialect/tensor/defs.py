@@ -6,12 +6,22 @@
 
 """Tensor operation definitions."""
 
-from loom.dsl import TENSOR, Dialect, Op, TypeDef, value_duplication_op
+from loom.dsl import TENSOR, Dialect, Op, TypeDef, value_duplication_op, value_refinement_op
 
 tensor_ops = Dialect(
     "tensor",
     dialect_id=0x04,
     doc="Logical tensor values and their structural operations.",
+)
+
+tensor_refine = value_refinement_op(
+    "tensor.refine",
+    group=tensor_ops,
+    carrier=TENSOR,
+    doc=(
+        "Assert more precise shape and encoding information for the same tensor elements. Source and result describe the same value and ownership identity; this operation performs no conversion or copy."
+    ),
+    examples=["%refined = tensor.refine %source : tensor<[%count]xf32> -> tensor<16xf32>"],
 )
 
 tensor_duplicate = value_duplication_op(
@@ -23,4 +33,4 @@ tensor_duplicate = value_duplication_op(
 )
 
 ALL_TENSOR_TYPES: tuple[TypeDef, ...] = ()
-ALL_TENSOR_OPS: tuple[Op, ...] = (tensor_duplicate,)
+ALL_TENSOR_OPS: tuple[Op, ...] = (tensor_refine, tensor_duplicate)

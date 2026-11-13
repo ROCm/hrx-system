@@ -1,0 +1,83 @@
+// RUN: roundtrip
+// C language linkage preserves the complete source object layout independently
+// of the ordinary flattened High value signature.
+using Float4 = float __attribute__((vector_size(16)));
+struct Packet {
+  Float4 lanes;
+  unsigned ids[2];
+  const float* base;
+};
+extern "C" Packet packet_identity(Packet packet, bool valid, double scale) {
+  return packet;
+}
+// ----
+func.def public source_signature(#func.abi.c.signature<arguments = [5, 6, 7], results = [5], types = [#func.abi.c.type<floating, byte_length = 4, byte_alignment = 4, component_count = 1, format = f32>, #func.abi.c.type<vector, byte_length = 16, byte_alignment = 16, component_count = 1, element_type = 0, element_count = 4>, #func.abi.c.type<unsigned_integer, byte_length = 4, byte_alignment = 4, component_count = 1, bitwidth = 32>, #func.abi.c.type<array, byte_length = 8, byte_alignment = 4, component_count = 2, element_type = 2, element_count = 2, element_stride = 4>, #func.abi.c.type<pointer, byte_length = 8, byte_alignment = 8, component_count = 2>, #func.abi.c.type<record, byte_length = 32, byte_alignment = 16, component_count = 5, name = "Packet", fields = [#func.abi.c.field<"lanes", type = 1, byte_offset = 0>, #func.abi.c.field<"ids", type = 3, byte_offset = 16>, #func.abi.c.field<"base", type = 4, byte_offset = 24>]>, #func.abi.c.type<boolean, byte_length = 1, byte_alignment = 1, component_count = 1>, #func.abi.c.type<floating, byte_length = 8, byte_alignment = 8, component_count = 1, format = f64>]>) @packet_identity(%packet_lanes: vector<4xf32>, %packet_ids_0: i32, %packet_ids_1: i32, %packet_base: buffer, %packet_base_byte_offset: offset, %valid: i1, %scale: f64) -> (vector<4xf32>, i32, i32, buffer, offset) {
+  func.return %packet_lanes, %packet_ids_0, %packet_ids_1, %packet_base, %packet_base_byte_offset : vector<4xf32>, i32, i32, buffer, offset
+}
+
+// ====
+// A reached C declaration carries the same source contract as a definition;
+// its C++ caller remains an ordinary Loom function.
+struct Pair { float x; unsigned y; };
+extern "C" Pair pair_swap(Pair value);
+Pair entry(Pair value) { return pair_swap(value); }
+// ----
+func.def public @entry(%value_x: f32, %value_y: i32) -> (f32, i32) {
+  %4, %5 = func.call @pair_swap(%value_x, %value_y) : (f32, i32) -> (f32, i32)
+  func.return %4, %5 : f32, i32
+}
+
+func.decl source_signature(#func.abi.c.signature<arguments = [2], results = [2], types = [#func.abi.c.type<floating, byte_length = 4, byte_alignment = 4, component_count = 1, format = f32>, #func.abi.c.type<unsigned_integer, byte_length = 4, byte_alignment = 4, component_count = 1, bitwidth = 32>, #func.abi.c.type<record, byte_length = 8, byte_alignment = 4, component_count = 2, name = "Pair", fields = [#func.abi.c.field<"x", type = 0, byte_offset = 0>, #func.abi.c.field<"y", type = 1, byte_offset = 4>]>]>) @pair_swap(%6: f32, %7: i32) -> (f32, i32)
+
+// ====
+// Ordinary construction and assignment do not require a nontrivial call ABI.
+struct Record {
+  int value;
+  Record(int input) : value(input) {}
+  Record& operator=(const Record& other) { value = other.value; return *this; }
+};
+extern "C" int read(Record input) { return input.value; }
+// ----
+func.def public source_signature(#func.abi.c.signature<arguments = [1], results = [0], types = [#func.abi.c.type<signed_integer, byte_length = 4, byte_alignment = 4, component_count = 1, bitwidth = 32>, #func.abi.c.type<record, byte_length = 4, byte_alignment = 4, component_count = 1, name = "Record", fields = [#func.abi.c.field<"value", type = 0, byte_offset = 0>]>]>) @read(%input_value: i32) -> (i32) {
+  func.return %input_value : i32
+}
+
+// ====
+// Pointer passing preserves the pointee's identity without transferring its
+// construction or destruction across the C call boundary.
+struct Record { int value; ~Record() {} };
+extern "C" int read(const Record* input) { return input->value; }
+// ----
+func.def public source_signature(#func.abi.c.signature<arguments = [0], results = [1], types = [#func.abi.c.type<pointer, byte_length = 8, byte_alignment = 8, component_count = 2>, #func.abi.c.type<signed_integer, byte_length = 4, byte_alignment = 4, component_count = 1, bitwidth = 32>]>) @read(%input: buffer, %input_byte_offset: offset) -> (i32) {
+  %3 = index.constant 0 : offset
+  %4 = index.add %input_byte_offset, %3 : offset
+  %5 = buffer.view %input[%4] : buffer -> view<1xi32>
+  %value = view.load<root_in_bounds> %5[0] : view<1xi32> -> i32
+  func.return %value : i32
+}
+
+// ====
+// Base padding can hold a derived field; ABI classification sees the actual
+// leaves inside the complete object instead of overlapping record extents.
+struct Base {
+  unsigned value;
+  unsigned char tag;
+  Base() : value(0), tag(0) {}
+};
+struct Derived : Base { unsigned char extra; };
+extern "C" Derived identity(Derived value) { return value; }
+// ----
+func.def public source_signature(#func.abi.c.signature<arguments = [2], results = [2], types = [#func.abi.c.type<unsigned_integer, byte_length = 4, byte_alignment = 4, component_count = 1, bitwidth = 32>, #func.abi.c.type<unsigned_integer, byte_length = 1, byte_alignment = 1, component_count = 1, bitwidth = 8>, #func.abi.c.type<record, byte_length = 8, byte_alignment = 4, component_count = 3, name = "Derived", fields = [#func.abi.c.field<"Base::value", type = 0, byte_offset = 0>, #func.abi.c.field<"Base::tag", type = 1, byte_offset = 4>, #func.abi.c.field<"extra", type = 1, byte_offset = 5>]>]>) @identity(%value_Base_value: i32, %value_Base_tag: i8, %value_extra: i8) -> (i32, i8, i8) {
+  func.return %value_Base_value, %value_Base_tag, %value_extra : i32, i8, i8
+}
+
+// ====
+// nullptr_t keeps the native pointer ABI and the opaque High buffer carrier.
+extern "C" decltype(nullptr) absent() { return nullptr; }
+
+// ----
+func.def public source_signature(#func.abi.c.signature<arguments = [], results = [0], types = [#func.abi.c.type<pointer, byte_length = 8, byte_alignment = 8, component_count = 2>]>) @absent() -> (buffer, offset) {
+  %2 = buffer.null : buffer
+  %3 = index.constant 0 : offset
+  func.return %2, %3 : buffer, offset
+}

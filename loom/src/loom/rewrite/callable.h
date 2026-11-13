@@ -142,6 +142,10 @@ typedef struct loom_callable_clone_options_t {
     // Number of selected operations.
     iree_host_size_t count;
   } op_projection;
+  // Optional retained correspondence for subsequent value/type projection.
+  // Storage, including the self-symbol substitution, lives in scratch_arena.
+  // Clone observers are not retained: their payload may be invocation-local.
+  loom_ir_remap_t* retained_remap;
 } loom_callable_clone_options_t;
 
 // Clones one same-module function-like definition as |target_ref|.
@@ -154,7 +158,7 @@ typedef struct loom_callable_clone_options_t {
 iree_status_t loom_callable_clone_definition(
     loom_builder_t* builder, loom_func_like_t source,
     loom_symbol_ref_t target_ref, const loom_callable_clone_options_t* options,
-    loom_func_like_t* out_cloned, iree_arena_allocator_t* scratch_arena);
+    iree_arena_allocator_t* scratch_arena, loom_func_like_t* out_cloned);
 
 #ifdef __cplusplus
 }

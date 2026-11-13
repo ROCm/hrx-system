@@ -85,6 +85,11 @@ typedef struct loom_low_lower_realization_recipe_t {
   const loom_low_lower_realization_input_t* inputs;
   // Number of populated input records.
   uint16_t input_count;
+  // Accept initialization only outside the requesting operation's innermost
+  // loop. Pure arithmetic with no other reuse benefit uses this to avoid
+  // moving work earlier without removing repeated execution. This is a
+  // request profitability constraint, not part of physical value identity.
+  bool require_loop_motion;
   // Pure arithmetic emitted once after all dependencies have become available.
   loom_low_lower_realization_emit_fn_t initialize;
   // Backedge arithmetic, or NULL for an invariant realization.
@@ -137,23 +142,29 @@ typedef struct loom_low_lower_realization_offer_t {
   void* data;
 } loom_low_lower_realization_offer_t;
 
-// Creates the shared owner and retains loop eligibility from existing facts.
-// It does not traverse operations or recover induction expressions. Offers,
-// interning tables, and placement work use |construction_arena|, which must
-// remain live until finalize returns. The frozen schedule borrows none of it.
+// Lazily creates the shared owner and retains loop eligibility from existing
+// facts. Construction borrows the source planner's scoped arena; the frozen
+// schedule borrows none of it. No source traversal is performed.
 iree_status_t loom_low_lower_realizations_create(
-    loom_low_lower_context_t* context,
-    iree_arena_allocator_t* construction_arena);
-
-// Selects and applies offers made during target source-memory preparation,
-// then marks every retained source input before source-graph selection. The
-// owner remains open for shared offers derived from exact selected rules.
-iree_status_t loom_low_lower_realizations_prepare_selection(
     loom_low_lower_context_t* context);
+
+// Selects pending offers and marks retained source inputs. Selection runs
+// before source-graph selection and again after exact rule selection. A true
+// |out_selected| requires storage refinement before callback finalization;
+// NULL discards that result. Construction stays open for live target plans.
+iree_status_t loom_low_lower_realizations_select(
+    loom_low_lower_context_t* context, bool* out_selected);
 
 // Returns the admitted innermost loop, or NULL outside the candidate domain.
 const loom_low_lower_realization_loop_t* loom_low_lower_realization_loop(
     const loom_low_lower_context_t* context, const loom_op_t* source_op);
+
+// Tests dependency availability at a prospective initialization boundary
+// without retaining physical state or creating source demands. Composite offers
+// use this for recipes constructed by their selected callback.
+bool loom_low_lower_realization_can_place(
+    const loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_low_lower_realization_recipe_t* recipe);
 
 // Offers a replacement whose shared loop cost must be amortized by distinct
 // direct calculations. The bounded domain is the dedicated latch block, which
@@ -165,10 +176,12 @@ iree_status_t loom_low_lower_realization_offer(
     const loom_low_lower_realization_offer_t* offer);
 
 // Interns a physical value and retains its source-use boundary. A NULL result
-// means the input definitions cannot be placed in the requested scope. Loop
+// means the dependencies or requested loop motion prevent placement. Loop
 // recipes initialize before entry and produce a supplemental header argument;
 // invariant recipes initialize immediately after their last dependency. Calls
-// are valid while realization construction remains open.
+// are valid while realization construction remains open. Requests during
+// callback finalization consume only source storage already demanded by that
+// live plan; they cannot revive elided source producers.
 iree_status_t loom_low_lower_realization_request(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_low_lower_realization_loop_t* loop,
@@ -182,11 +195,11 @@ iree_status_t loom_low_lower_realization_bind_source_value(
     const loom_low_lower_realization_t* realization,
     loom_value_id_t source_value_id);
 
-// Selects any remaining complete reuse groups, freezes placement/use
-// boundaries and marks source dependencies. No subsequent request is
-// permitted.
+// Freezes placement/use boundaries after selected callback finalization.
+// All offers have been selected and storage demands are final. No subsequent
+// request is permitted.
 iree_status_t loom_low_lower_realizations_finalize(
-    loom_low_lower_context_t* context, bool* out_storage_refinement_required);
+    loom_low_lower_context_t* context);
 
 // Creates supplemental block arguments after all authored arguments exist.
 iree_status_t loom_low_lower_realizations_map_blocks(

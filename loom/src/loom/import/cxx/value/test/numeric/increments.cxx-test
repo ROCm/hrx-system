@@ -1,0 +1,421 @@
+// RUN: roundtrip
+// Pre/post results observe byte truncation after each individual update.
+unsigned increment_byte(unsigned input) {
+  unsigned char value = (unsigned char)input;
+  unsigned previous = (value)++;
+  unsigned next = ++(value);
+  unsigned retreat = value--;
+  unsigned final = --value;
+  return previous | (next << 8) | (retreat << 16) | (final << 24);
+}
+// ----
+func.def public @increment_byte(%input: i32) -> (i32) {
+  %value$2 = scalar.trunci %input : i32 to i8
+  %3 = scalar.extui %value$2 : i8 to i32
+  %4 = scalar.constant 1 : i32
+  %5 = scalar.addi %3, %4 : i32
+  %value$6 = scalar.trunci %5 : i32 to i8
+  %previous = scalar.extui %value$2 : i8 to i32
+  %8 = scalar.extui %value$6 : i8 to i32
+  %9 = scalar.constant 1 : i32
+  %10 = scalar.addi %8, %9 : i32
+  %value$11 = scalar.trunci %10 : i32 to i8
+  %next = scalar.extui %value$11 : i8 to i32
+  %13 = scalar.extui %value$11 : i8 to i32
+  %14 = scalar.constant 1 : i32
+  %15 = scalar.subi %13, %14 : i32
+  %value$16 = scalar.trunci %15 : i32 to i8
+  %retreat = scalar.extui %value$11 : i8 to i32
+  %18 = scalar.extui %value$16 : i8 to i32
+  %19 = scalar.constant 1 : i32
+  %20 = scalar.subi %18, %19 : i32
+  %value$21 = scalar.trunci %20 : i32 to i8
+  %final = scalar.extui %value$21 : i8 to i32
+  %23 = scalar.constant 8 : i32
+  %24 = scalar.shli %next, %23 : i32
+  %25 = scalar.ori %previous, %24 : i32
+  %26 = scalar.constant 16 : i32
+  %27 = scalar.shli %retreat, %26 : i32
+  %28 = scalar.ori %25, %27 : i32
+  %29 = scalar.constant 24 : i32
+  %30 = scalar.shli %final, %29 : i32
+  %31 = scalar.ori %28, %30 : i32
+  func.return %31 : i32
+}
+
+// ====
+// RUN: roundtrip
+// Postdecrement returns the old signed value; predecrement returns the updated value.
+int decrement_short(int input) {
+  short value = (short)input;
+  int previous = value--;
+  int next = --value;
+  return previous * 65536 + next + 32768;
+}
+// ----
+func.def public @decrement_short(%input: i32) -> (i32) {
+  %value$2 = scalar.trunci %input : i32 to i16
+  %3 = scalar.extsi %value$2 : i16 to i32
+  %4 = scalar.constant 1 : i32
+  %5 = scalar.subi %3, %4 : i32
+  %value$6 = scalar.trunci %5 : i32 to i16
+  %previous = scalar.extsi %value$2 : i16 to i32
+  %8 = scalar.extsi %value$6 : i16 to i32
+  %9 = scalar.constant 1 : i32
+  %10 = scalar.subi %8, %9 : i32
+  %value$11 = scalar.trunci %10 : i32 to i16
+  %next = scalar.extsi %value$11 : i16 to i32
+  %13 = scalar.constant 65536 : i32
+  %14 = scalar.muli %previous, %13 : i32
+  %15 = scalar.addi %14, %next : i32
+  %16 = scalar.constant 32768 : i32
+  %17 = scalar.addi %15, %16 : i32
+  func.return %17 : i32
+}
+
+// ====
+// RUN: roundtrip
+// Chained updates keep the original and final wide values distinct.
+unsigned long long increment_wide(unsigned long long value) {
+  unsigned long long previous = value++;
+  unsigned long long next = ++value;
+  return previous ^ (next * 17ull) ^ (value * 3ull);
+}
+// ----
+func.def public @increment_wide(%value$0: i64) -> (i64) {
+  %2 = scalar.constant 1 : i64
+  %value$3 = scalar.addi %value$0, %2 : i64
+  %4 = scalar.constant 1 : i64
+  %value$5 = scalar.addi %value$3, %4 : i64
+  %6 = scalar.constant 17 : i64
+  %7 = scalar.muli %value$5, %6 : i64
+  %8 = scalar.xori %value$0, %7 : i64
+  %9 = scalar.constant 3 : i64
+  %10 = scalar.muli %value$5, %9 : i64
+  %11 = scalar.xori %8, %10 : i64
+  func.return %11 : i64
+}
+
+// ====
+// RUN: roundtrip
+// Each short-circuit join carries the update only when its operand was reached.
+unsigned increment_chain(unsigned value) {
+  unsigned visits = 0;
+  bool accepted = value < 256u && visits++ < 1u && value < 128u &&
+                  visits++ < 2u && value < 64u && visits++ < 3u &&
+                  value < 32u && visits++ < 4u && value < 16u &&
+                  visits++ < 5u && value < 8u && visits++ < 6u && value < 4u;
+  return visits + (accepted ? 256u : 0u);
+}
+// ----
+func.def public @increment_chain(%value: i32) -> (i32) {
+  %visits$2 = scalar.constant 0 : i32
+  %3 = scalar.constant 256 : i32
+  %4 = scalar.cmpi ult, %value, %3 : i32
+  %5, %visits$6 = scf.if %4 -> (i1, i32) {
+    %7 = scalar.constant 1 : i32
+    %visits = scalar.addi %visits$2, %7 : i32
+    %9 = scalar.constant 1 : i32
+    %10 = scalar.cmpi ult, %visits$2, %9 : i32
+    scf.yield %10, %visits : i1, i32
+  } else {
+    scf.yield %4, %visits$2 : i1, i32
+  }
+  %11, %visits$12 = scf.if %5 -> (i1, i32) {
+    %13 = scalar.constant 128 : i32
+    %14 = scalar.cmpi ult, %value, %13 : i32
+    scf.yield %14, %visits$6 : i1, i32
+  } else {
+    scf.yield %5, %visits$6 : i1, i32
+  }
+  %15, %visits$16 = scf.if %11 -> (i1, i32) {
+    %17 = scalar.constant 1 : i32
+    %visits = scalar.addi %visits$12, %17 : i32
+    %19 = scalar.constant 2 : i32
+    %20 = scalar.cmpi ult, %visits$12, %19 : i32
+    scf.yield %20, %visits : i1, i32
+  } else {
+    scf.yield %11, %visits$12 : i1, i32
+  }
+  %21, %visits$22 = scf.if %15 -> (i1, i32) {
+    %23 = scalar.constant 64 : i32
+    %24 = scalar.cmpi ult, %value, %23 : i32
+    scf.yield %24, %visits$16 : i1, i32
+  } else {
+    scf.yield %15, %visits$16 : i1, i32
+  }
+  %25, %visits$26 = scf.if %21 -> (i1, i32) {
+    %27 = scalar.constant 1 : i32
+    %visits = scalar.addi %visits$22, %27 : i32
+    %29 = scalar.constant 3 : i32
+    %30 = scalar.cmpi ult, %visits$22, %29 : i32
+    scf.yield %30, %visits : i1, i32
+  } else {
+    scf.yield %21, %visits$22 : i1, i32
+  }
+  %31, %visits$32 = scf.if %25 -> (i1, i32) {
+    %33 = scalar.constant 32 : i32
+    %34 = scalar.cmpi ult, %value, %33 : i32
+    scf.yield %34, %visits$26 : i1, i32
+  } else {
+    scf.yield %25, %visits$26 : i1, i32
+  }
+  %35, %visits$36 = scf.if %31 -> (i1, i32) {
+    %37 = scalar.constant 1 : i32
+    %visits = scalar.addi %visits$32, %37 : i32
+    %39 = scalar.constant 4 : i32
+    %40 = scalar.cmpi ult, %visits$32, %39 : i32
+    scf.yield %40, %visits : i1, i32
+  } else {
+    scf.yield %31, %visits$32 : i1, i32
+  }
+  %41, %visits$42 = scf.if %35 -> (i1, i32) {
+    %43 = scalar.constant 16 : i32
+    %44 = scalar.cmpi ult, %value, %43 : i32
+    scf.yield %44, %visits$36 : i1, i32
+  } else {
+    scf.yield %35, %visits$36 : i1, i32
+  }
+  %45, %visits$46 = scf.if %41 -> (i1, i32) {
+    %47 = scalar.constant 1 : i32
+    %visits = scalar.addi %visits$42, %47 : i32
+    %49 = scalar.constant 5 : i32
+    %50 = scalar.cmpi ult, %visits$42, %49 : i32
+    scf.yield %50, %visits : i1, i32
+  } else {
+    scf.yield %41, %visits$42 : i1, i32
+  }
+  %51, %visits$52 = scf.if %45 -> (i1, i32) {
+    %53 = scalar.constant 8 : i32
+    %54 = scalar.cmpi ult, %value, %53 : i32
+    scf.yield %54, %visits$46 : i1, i32
+  } else {
+    scf.yield %45, %visits$46 : i1, i32
+  }
+  %55, %visits$56 = scf.if %51 -> (i1, i32) {
+    %57 = scalar.constant 1 : i32
+    %visits = scalar.addi %visits$52, %57 : i32
+    %59 = scalar.constant 6 : i32
+    %60 = scalar.cmpi ult, %visits$52, %59 : i32
+    scf.yield %60, %visits : i1, i32
+  } else {
+    scf.yield %51, %visits$52 : i1, i32
+  }
+  %accepted, %visits$62 = scf.if %55 -> (i1, i32) {
+    %63 = scalar.constant 4 : i32
+    %64 = scalar.cmpi ult, %value, %63 : i32
+    scf.yield %64, %visits$56 : i1, i32
+  } else {
+    scf.yield %55, %visits$56 : i1, i32
+  }
+  %65 = scf.if %accepted -> (i32) {
+    %66 = scalar.constant 256 : i32
+    scf.yield %66 : i32
+  } else {
+    %67 = scalar.constant 0 : i32
+    scf.yield %67 : i32
+  }
+  %68 = scalar.addi %visits$62, %65 : i32
+  func.return %68 : i32
+}
+
+// ====
+// RUN: roundtrip
+// A true left operand preserves the unincremented state.
+unsigned increment_or(unsigned value, unsigned choose) {
+  unsigned visits = value;
+  bool accepted = choose || visits++ < 128u;
+  return visits * 2u + (unsigned)accepted;
+}
+// ----
+func.def public @increment_or(%value: i32, %choose: i32) -> (i32) {
+  %3 = scalar.constant 0 : i32
+  %4 = scalar.cmpi ne, %choose, %3 : i32
+  %accepted, %visits = scf.if %4 -> (i1, i32) {
+    scf.yield %4, %value : i1, i32
+  } else {
+    %7 = scalar.constant 1 : i32
+    %visits = scalar.addi %value, %7 : i32
+    %9 = scalar.constant 128 : i32
+    %10 = scalar.cmpi ult, %value, %9 : i32
+    scf.yield %10, %visits : i1, i32
+  }
+  %11 = scalar.constant 2 : i32
+  %12 = scalar.muli %visits, %11 : i32
+  %13 = scalar.extui %accepted : i1 to i32
+  %14 = scalar.addi %12, %13 : i32
+  func.return %14 : i32
+}
+
+// ====
+// RUN: roundtrip
+// Nested selections update only the selected narrow lvalue and join both states.
+unsigned increment_select(unsigned input, unsigned choose) {
+  unsigned char first = (unsigned char)input;
+  unsigned char second = (unsigned char)(input * 3u + 1u);
+  unsigned value = (choose & 1u) ? first++ : --second;
+  unsigned nested =
+      (choose & 2u) ? ((choose & 4u) ? ++first : second--) : first--;
+  return value | (nested << 8) | ((unsigned)first << 16) |
+         ((unsigned)second << 24);
+}
+// ----
+func.def public @increment_select(%input: i32, %choose: i32) -> (i32) {
+  %first$3 = scalar.trunci %input : i32 to i8
+  %4 = scalar.constant 3 : i32
+  %5 = scalar.muli %input, %4 : i32
+  %6 = scalar.constant 1 : i32
+  %7 = scalar.addi %5, %6 : i32
+  %second$8 = scalar.trunci %7 : i32 to i8
+  %9 = scalar.constant 1 : i32
+  %10 = scalar.andi %choose, %9 : i32
+  %11 = scalar.constant 0 : i32
+  %12 = scalar.cmpi ne, %10, %11 : i32
+  %13, %first$14, %second$15 = scf.if %12 -> (i8, i8, i8) {
+    %16 = scalar.extui %first$3 : i8 to i32
+    %17 = scalar.constant 1 : i32
+    %18 = scalar.addi %16, %17 : i32
+    %first = scalar.trunci %18 : i32 to i8
+    scf.yield %first$3, %first, %second$8 : i8, i8, i8
+  } else {
+    %20 = scalar.extui %second$8 : i8 to i32
+    %21 = scalar.constant 1 : i32
+    %22 = scalar.subi %20, %21 : i32
+    %second = scalar.trunci %22 : i32 to i8
+    scf.yield %second, %first$3, %second : i8, i8, i8
+  }
+  %value = scalar.extui %13 : i8 to i32
+  %25 = scalar.constant 2 : i32
+  %26 = scalar.andi %choose, %25 : i32
+  %27 = scalar.constant 0 : i32
+  %28 = scalar.cmpi ne, %26, %27 : i32
+  %29, %first$30, %second$31 = scf.if %28 -> (i8, i8, i8) {
+    %32 = scalar.constant 4 : i32
+    %33 = scalar.andi %choose, %32 : i32
+    %34 = scalar.constant 0 : i32
+    %35 = scalar.cmpi ne, %33, %34 : i32
+    %36, %first, %second = scf.if %35 -> (i8, i8, i8) {
+      %39 = scalar.extui %first$14 : i8 to i32
+      %40 = scalar.constant 1 : i32
+      %41 = scalar.addi %39, %40 : i32
+      %first = scalar.trunci %41 : i32 to i8
+      scf.yield %first, %first, %second$15 : i8, i8, i8
+    } else {
+      %43 = scalar.extui %second$15 : i8 to i32
+      %44 = scalar.constant 1 : i32
+      %45 = scalar.subi %43, %44 : i32
+      %second = scalar.trunci %45 : i32 to i8
+      scf.yield %second$15, %first$14, %second : i8, i8, i8
+    }
+    scf.yield %36, %first, %second : i8, i8, i8
+  } else {
+    %47 = scalar.extui %first$14 : i8 to i32
+    %48 = scalar.constant 1 : i32
+    %49 = scalar.subi %47, %48 : i32
+    %first = scalar.trunci %49 : i32 to i8
+    scf.yield %first$14, %first, %second$15 : i8, i8, i8
+  }
+  %nested = scalar.extui %29 : i8 to i32
+  %52 = scalar.constant 8 : i32
+  %53 = scalar.shli %nested, %52 : i32
+  %54 = scalar.ori %value, %53 : i32
+  %55 = scalar.extui %first$30 : i8 to i32
+  %56 = scalar.constant 16 : i32
+  %57 = scalar.shli %55, %56 : i32
+  %58 = scalar.ori %54, %57 : i32
+  %59 = scalar.extui %second$31 : i8 to i32
+  %60 = scalar.constant 24 : i32
+  %61 = scalar.shli %59, %60 : i32
+  %62 = scalar.ori %58, %61 : i32
+  func.return %62 : i32
+}
+
+// ====
+// RUN: roundtrip
+// The condition update precedes either arm and is visible in its result.
+unsigned increment_condition(unsigned value) {
+  unsigned selected = (value++ & 1u) ? ++value : value--;
+  return selected ^ (value * 17u);
+}
+// ----
+func.def public @increment_condition(%value$0: i32) -> (i32) {
+  %2 = scalar.constant 1 : i32
+  %value$3 = scalar.addi %value$0, %2 : i32
+  %4 = scalar.constant 1 : i32
+  %5 = scalar.andi %value$0, %4 : i32
+  %6 = scalar.constant 0 : i32
+  %7 = scalar.cmpi ne, %5, %6 : i32
+  %selected, %value$9 = scf.if %7 -> (i32, i32) {
+    %10 = scalar.constant 1 : i32
+    %value = scalar.addi %value$3, %10 : i32
+    scf.yield %value, %value : i32, i32
+  } else {
+    %12 = scalar.constant 1 : i32
+    %value = scalar.subi %value$3, %12 : i32
+    scf.yield %value$3, %value : i32, i32
+  }
+  %14 = scalar.constant 17 : i32
+  %15 = scalar.muli %value$9, %14 : i32
+  %16 = scalar.xori %selected, %15 : i32
+  func.return %16 : i32
+}
+
+// ====
+// RUN: roundtrip
+// The last false condition still increments the induction value.
+unsigned increment_while(unsigned count) {
+  unsigned index = 0;
+  unsigned total = 0;
+  while (index++ < count) {
+    total += index;
+  }
+  return total * 257u + index;
+}
+// ----
+func.def public @increment_while(%count: i32) -> (i32) {
+  %index$2 = scalar.constant 0 : i32
+  %total$3 = scalar.constant 0 : i32
+  %index$8, %total$9 = scf.while(%index$4 = %index$2 : i32, %total = %total$3 : i32) -> (i32, i32) {
+    %10 = scalar.constant 1 : i32
+    %index$11 = scalar.addi %index$4, %10 : i32
+    %12 = scalar.cmpi ult, %index$4, %count : i32
+    scf.condition %12, %index$11, %total : i1, i32, i32
+  } do(%index: i32, %total$7: i32) {
+    %total$13 = scalar.addi %total$7, %index : i32
+    scf.yield %index, %total$13 : i32, i32
+  }
+  %14 = scalar.constant 257 : i32
+  %15 = scalar.muli %total$9, %14 : i32
+  %16 = scalar.addi %15, %index$8 : i32
+  func.return %16 : i32
+}
+
+// ====
+// RUN: roundtrip
+// Post-test conditions update state after the first body execution.
+unsigned increment_do(unsigned count) {
+  unsigned index = 0;
+  unsigned total = 0;
+  do {
+    total += index;
+  } while (++index < count);
+  return total * 257u + index;
+}
+// ----
+func.def public @increment_do(%count: i32) -> (i32) {
+  %index$2 = scalar.constant 0 : i32
+  %total$3 = scalar.constant 0 : i32
+  %total$8, %index$9 = scf.while(%total$4 = %total$3 : i32, %index$5 = %index$2 : i32) -> (i32, i32) {
+    %total$10 = scalar.addi %total$4, %index$5 : i32
+    %11 = scalar.constant 1 : i32
+    %index$12 = scalar.addi %index$5, %11 : i32
+    %13 = scalar.cmpi ult, %index$12, %count : i32
+    scf.condition %13, %total$10, %index$12 : i1, i32, i32
+  } do(%total: i32, %index: i32) {
+    scf.yield %total, %index : i32, i32
+  }
+  %14 = scalar.constant 257 : i32
+  %15 = scalar.muli %total$8, %14 : i32
+  %16 = scalar.addi %15, %index$9 : i32
+  func.return %16 : i32
+}

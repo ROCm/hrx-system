@@ -5,7 +5,7 @@
 
 aie2p.target<core> @target
 
-// REMARK@+1: BACKEND/045 {function_name="broadcast_pressure", trigger_kind="allocation-failure", repaired_value_count="13", cloned_packet_count="13", rewritten_operand_count="13", retained_placement_count="0"}
+// REMARK@+1: BACKEND/045 {function_name="broadcast_pressure", trigger_kind="spill-plan", repaired_value_count="2", cloned_packet_count="2", rewritten_operand_count="2", retained_placement_count="0"}
 low.func.def target<amd.xdna.aie2p.core>(@target) @broadcast_pressure(%input: reg<aie2p.ep>, %output: reg<aie2p.ep>) asm {
   %scalar0 = mov.i32 1
   %vector0 = vbcst.32 %scalar0
@@ -64,7 +64,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) @broadcast_pressure(%input: re
 
 aie2p.target<core> @target
 
-// REMARK@+1: BACKEND/045 {function_name="dependent_cross_block", trigger_kind="allocation-failure", repaired_value_count="42", cloned_packet_count="42", rewritten_operand_count="42", retained_placement_count="0"}
+// REMARK@+1: BACKEND/045 {function_name="dependent_cross_block", trigger_kind="spill-plan", repaired_value_count="10", cloned_packet_count="10", rewritten_operand_count="10", retained_placement_count="0"}
 low.func.def target<amd.xdna.aie2p.core>(@target) @dependent_cross_block(%input: reg<aie2p.ep>, %output: reg<aie2p.ep>) asm {
   %scalar0 = mov.i32 1
   %vector0 = vbcst.32 %scalar0
@@ -187,11 +187,12 @@ low.func.def target<amd.xdna.aie2p.core>(@target) @dependent_cross_block(%input:
 // Shared zero padding has multiple consumers on both sides of an ownership
 // move. Setup ordering must preserve that fan-out and the source-order boundary
 // while keeping the rematerialized broadcasts out of persistent vector storage.
-// RUN: emit aie2p-leaf @bounded_padding diagnostics=predicted-spills
+// RUN: emit aie2p-leaf @bounded_padding diagnostics=predicted-spills report=emission
 
 aie2p.target<core> @target
 
-// REMARK@+1: BACKEND/045 {function_name="bounded_padding", trigger_kind="allocation-failure", repaired_value_count="13", cloned_packet_count="13", rewritten_operand_count="13", retained_placement_count="0"}
+// REMARK@+2: BACKEND/045 {function_name="bounded_padding", trigger_kind="spill-plan", repaired_value_count="4", cloned_packet_count="4", rewritten_operand_count="4", retained_placement_count="0"}
+// REMARK@+1: BACKEND/045 {function_name="bounded_padding", trigger_kind="spill-plan", repaired_value_count="1", cloned_packet_count="1", rewritten_operand_count="1", retained_placement_count="0"}
 low.func.def target<amd.xdna.aie2p.core>(@target) @bounded_padding(%input: reg<aie2p.ep>, %output: reg<aie2p.ep>) asm {
   %zeros = acc.clear.f32x64
   %mode = mova.i32 60
@@ -322,6 +323,10 @@ low.func.def target<amd.xdna.aie2p.core>(@target) @bounded_padding(%input: reg<a
 }
 
 // ----
+issue cycles: 182
+code bytes: 784
+coissued bundles: 24
+coissued components: 52
 
 // ====
 
@@ -333,7 +338,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) @bounded_padding(%input: reg<a
 
 aie2p.target<core> @target
 
-// REMARK@+1: BACKEND/045 {function_name="retained_scalar_stream", trigger_kind="allocation-failure", repaired_value_count="8", cloned_packet_count="14", rewritten_operand_count="14", retained_placement_count="0"}
+// REMARK@+1: BACKEND/045 {function_name="retained_scalar_stream", trigger_kind="spill-plan", repaired_value_count="8", cloned_packet_count="14", rewritten_operand_count="14", retained_placement_count="0"}
 low.func.def target<amd.xdna.aie2p.core>(@target) @retained_scalar_stream(%record_input: reg<aie2p.ep>, %stream_input: reg<aie2p.ep>, %stream_output: reg<aie2p.ep>, %record_output: reg<aie2p.ep>) asm {
   %retained0, %read1 = lda.i32.post %record_input, 4
   %retained1, %read2 = lda.i32.post %read1, 4
@@ -501,8 +506,8 @@ low.func.def target<amd.xdna.aie2p.core> @irreducible_private_indices(%position0
   %index4 = mov.address-index %position4
   %index5 = mov.address-index %position5
   %index6 = mov.address-index %position6
+  // ERROR@+1: BACKEND/005 "aie2p.edj" "budget 8" "peak 9" "spill-traffic-register-exhausted"
   %index7 = mov.address-index %position7
-  // ERROR@+1: BACKEND/005 "aie2p.edj" "budget 8" "peak 9" "unspillable-register-exhausted"
   %index8 = mov.address-index %position8
   return %index0, %index1, %index2, %index3, %index4, %index5, %index6, %index7, %index8
 }
@@ -517,14 +522,12 @@ low.func.def target<amd.xdna.aie2p.core> @irreducible_private_indices(%position0
 // vaddSign0 target state, so replay preserves their zero-extension mode.
 // RUN: emit aie2p-leaf @packed_extract_extend_pressure diagnostics=predicted-spills
 
-// Each failed frontier contributes a consumer-first batch. Rebuilding
-// allocation exposes the next set of extraction and extension repairs.
+// Each spill plan contributes a consumer-first replay batch. Rebuilding
+// allocation exposes the next extraction and extension repair.
 aie2p.target<core> @target
 
-// REMARK@+4: BACKEND/045 {function_name="packed_extract_extend_pressure", trigger_kind="allocation-failure", repaired_value_count="2", cloned_packet_count="2", rewritten_operand_count="2", retained_placement_count="0"}
-// REMARK@+3: BACKEND/045 {function_name="packed_extract_extend_pressure", trigger_kind="allocation-failure", repaired_value_count="2", cloned_packet_count="2", rewritten_operand_count="2", retained_placement_count="0"}
-// REMARK@+2: BACKEND/045 {function_name="packed_extract_extend_pressure", trigger_kind="allocation-failure", repaired_value_count="1", cloned_packet_count="1", rewritten_operand_count="1", retained_placement_count="0"}
-// REMARK@+1: BACKEND/045 {function_name="packed_extract_extend_pressure", trigger_kind="allocation-failure", repaired_value_count="1", cloned_packet_count="1", rewritten_operand_count="1", retained_placement_count="0"}
+// REMARK@+2: BACKEND/045 {function_name="packed_extract_extend_pressure", trigger_kind="spill-plan", repaired_value_count="1", cloned_packet_count="1", rewritten_operand_count="1", retained_placement_count="0"}
+// REMARK@+1: BACKEND/045 {function_name="packed_extract_extend_pressure", trigger_kind="spill-plan", repaired_value_count="1", cloned_packet_count="1", rewritten_operand_count="1", retained_placement_count="0"}
 low.func.def schedule(locked) target<amd.xdna.aie2p.core>(@target) @packed_extract_extend_pressure(%packed: reg<aie2p.vec256 x2>, %keep0: reg<aie2p.er x2>, %keep1: reg<aie2p.er x2>, %keep2: reg<aie2p.er x2>, %keep3: reg<aie2p.er x2>, %keep4: reg<aie2p.er x2>, %keep5: reg<aie2p.er x2>, %keep6: reg<aie2p.er x2>, %keep7: reg<aie2p.er x2>, %keep8: reg<aie2p.er x2>, %keep9: reg<aie2p.er x2>, %keep10: reg<aie2p.er x2>, %keep11: reg<aie2p.er x2>, %keep12: reg<aie2p.er x2>, %keep13: reg<aie2p.er x2>, %keep14: reg<aie2p.er x2>) -> (reg<aie2p.er>, reg<aie2p.er x2>, reg<aie2p.er x2>, reg<aie2p.er x2>, reg<aie2p.er x2>, reg<aie2p.er x2>, reg<aie2p.er x2>, reg<aie2p.er x2>, reg<aie2p.er x2>, reg<aie2p.er x2>, reg<aie2p.er x2>, reg<aie2p.er x2>, reg<aie2p.er x2>, reg<aie2p.er x2>, reg<aie2p.er x2>, reg<aie2p.er x2>) asm {
   %byte0 = vextract.8.imm %packed, 0
   %wide0 = extend.u8 %byte0
@@ -546,8 +549,8 @@ low.func.def schedule(locked) target<amd.xdna.aie2p.core>(@target) @packed_extra
 // rematerialization under scalar pressure. A private zero feeding a fixed-r27
 // select must wait for arithmetic to release ordinary storage; exposing the
 // fixed copy alone does not make that setup actionable while it incurs debt.
-// Repair replays one condition move and coissues the final select with the
-// first store, preserving issue cycles for one additional two-byte slot.
+// Retained private constants share their consumer's prerequisite ordering.
+// The emission summary bounds the resulting scalar schedule and code size.
 // RUN: emit aie2p-leaf @retained_scale_select report=emission
 
 aie2p.target<core> @target
@@ -731,10 +734,10 @@ low.func.def target<amd.xdna.aie2p.core>(@target) @retained_scale_select(%record
 }
 
 // ----
-issue cycles: 163
-code bytes: 746
-coissued bundles: 40
-coissued components: 80
+issue cycles: 168
+code bytes: 760
+coissued bundles: 37
+coissued components: 74
 
 // ====
 
@@ -784,6 +787,8 @@ code: 44 00 c0 00 07 00 3a 11 20 30 c0 01 00 30 82 00 3a 11 40 30 c0 01 00 30 82
 
 // Symbolic bases have the same EP pressure. Every rematerialized address keeps
 // its data identity, and its absolute relocation follows each worker placement.
+// The final pointer update consumes the output address, so pricing that value
+// as freely reconstructible would choose real stack traffic over these bases.
 // RUN: emit aie2p-xdna output=sections
 
 global.rodata.def @coefficient0 = align(4) bytes("01000000")
@@ -868,9 +873,9 @@ low.func.def target<amd.xdna.aie2p.core>(@core) abi(object_function) @read_coeff
 
 // ----
 .text.read_coefficients: address=0x00000000 bytes=250 initialized
-  4400c04007004480c0420700ba1022b0d00100d0822000000000000000000000000098110408ba1024b0d00100d0822000000000000000000000000098111408ba1026b0d00100d0822000000000000000000000000098112408ba1028b0d00100d0822000000000000000000000000098113408ba102ab0d00100d0822000000000000000000000000098114408ba102cb0d00100d0822000000000000000000000000098115408ba102eb0d00100d0822000000000000000000000000098116408ba1030b0d00100d082200000000000000000000000000c23e8f08c0398160401000000000000000018002810000098118408000000000000
+  4400c04007004480c0420700981604010000000000000000000000003a1122b0d00100308200981604010000000000000000000000003a1124b0d00100308202981604010000000000000000000000003a1126b0d00100308204981604010000000000000000000000003a1128b0d00100308206981604010000000000000000000000003a112ab0d00100308208981604010000000000000000000000003a112cb0d0010030820a981604010000000000000000000000003a112eb0d0010030820c98160401000000000000000000000000761030b0d001801174f08c0398160401000000000000000018002810000098118408000000000000
 .text.read_coefficients: address=0x00000000 bytes=250 initialized
-  4400c00007004480c0020700ba1022b0c00100d0822000000000000000000000000098110408ba1024b0c00100d0822000000000000000000000000098111408ba1026b0c00100d0822000000000000000000000000098112408ba1028b0c00100d0822000000000000000000000000098113408ba102ab0c00100d0822000000000000000000000000098114408ba102cb0c00100d0822000000000000000000000000098115408ba102eb0c00100d0822000000000000000000000000098116408ba1030b0c00100d082200000000000000000000000000c23e8f08c0398160401000000000000000018002810000098118408000000000000
+  4400c00007004480c0020700981604010000000000000000000000003a1122b0c00100308200981604010000000000000000000000003a1124b0c00100308202981604010000000000000000000000003a1126b0c00100308204981604010000000000000000000000003a1128b0c00100308206981604010000000000000000000000003a112ab0c00100308208981604010000000000000000000000003a112cb0c0010030820a981604010000000000000000000000003a112eb0c0010030820c98160401000000000000000000000000761030b0c001801174f08c0398160401000000000000000018002810000098118408000000000000
 .rodata.coefficient0: address=0x00074040 bytes=4 initialized
   01000000
 .rodata.coefficient1: address=0x00074044 bytes=4 initialized

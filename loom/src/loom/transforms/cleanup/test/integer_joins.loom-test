@@ -1,0 +1,243 @@
+// RUN: pass canonicalize
+
+// Every integer carrier retains guarantees shared by distinct alternatives.
+func.def @integer_carriers(%choose: i1) -> (i1, i1, i1, i1, i1, i1) {
+  %small_index = index.constant 4 : index
+  %large_index = index.constant 8 : index
+  %selected_index = scf.select %choose, %small_index, %large_index : index
+  %power_index = test.fact_power_of_two %selected_index : index -> i1
+  %small_offset = index.constant 4 : offset
+  %large_offset = index.constant 8 : offset
+  %selected_offset = scf.select %choose, %small_offset, %large_offset : offset
+  %power_offset = test.fact_power_of_two %selected_offset : offset -> i1
+  %small_i8 = scalar.constant 4 : i8
+  %large_i8 = scalar.constant 8 : i8
+  %selected_i8 = scf.select %choose, %small_i8, %large_i8 : i8
+  %power_i8 = test.fact_power_of_two %selected_i8 : i8 -> i1
+  %small_i16 = scalar.constant 4 : i16
+  %large_i16 = scalar.constant 8 : i16
+  %selected_i16 = scf.select %choose, %small_i16, %large_i16 : i16
+  %power_i16 = test.fact_power_of_two %selected_i16 : i16 -> i1
+  %small_i32 = scalar.constant 4 : i32
+  %large_i32 = scalar.constant 8 : i32
+  %selected_i32 = scf.select %choose, %small_i32, %large_i32 : i32
+  %power_i32 = test.fact_power_of_two %selected_i32 : i32 -> i1
+  %small_i64 = scalar.constant 4 : i64
+  %large_i64 = scalar.constant 8 : i64
+  %selected_i64 = scf.select %choose, %small_i64, %large_i64 : i64
+  %power_i64 = test.fact_power_of_two %selected_i64 : i64 -> i1
+  func.return %power_index, %power_offset, %power_i8, %power_i16, %power_i32, %power_i64 : i1, i1, i1, i1, i1, i1
+}
+
+// ----
+func.def @integer_carriers(%choose: i1) -> (i1, i1, i1, i1, i1, i1) {
+  %power_index = scalar.constant true : i1
+  %power_offset = scalar.constant true : i1
+  %power_i8 = scalar.constant true : i1
+  %power_i16 = scalar.constant true : i1
+  %power_i32 = scalar.constant true : i1
+  %power_i64 = scalar.constant true : i1
+  func.return %power_index, %power_offset, %power_i8, %power_i16, %power_i32, %power_i64 : i1, i1, i1, i1, i1, i1
+}
+
+// ====
+
+// Sign-changing alternatives exclude zero even though their joined interval
+// contains it. A later zero alternative must discard that guarantee.
+func.def @nonzero_selection(%input: i32, %choose: i1, %allow_zero: i1) -> (i1, i1) {
+  %negative = scalar.assume %input [range(%input, -16, -1)] : i32
+  %positive = scalar.constant 8 : i32
+  %c0 = scalar.constant 0 : i32
+  %selected = scf.select %choose, %negative, %positive : i32
+  %maybe_zero = scf.select %allow_zero, %selected, %c0 : i32
+  %nonzero = test.fact_non_zero %selected : i32 -> i1
+  %uncertain = test.fact_non_zero %maybe_zero : i32 -> i1
+  func.return %nonzero, %uncertain : i1, i1
+}
+
+// ----
+func.def @nonzero_selection(%input: i32, %choose: i1, %allow_zero: i1) -> (i1, i1) {
+  %nonzero = scalar.constant true : i1
+  %uncertain = scalar.constant false : i1
+  func.return %nonzero, %uncertain : i1, i1
+}
+
+// ====
+
+// A positive interval and divisibility alone do not imply power-of-two.
+func.def @unproven_alternatives(%input: index, %choose: i1) -> (i1, i1, i1) {
+  %power = index.constant 8 : index
+  %c0 = index.constant 0 : index
+  %other = index.assume %input [range(%input, 4, 16), multiple_of(%input, 4)] : index
+  %maybe_zero = scf.select %choose, %power, %c0 : index
+  %maybe_nonpower = scf.select %choose, %power, %other : index
+  %unknown = scf.select %choose, %power, %input : index
+  %zero_power = test.fact_power_of_two %maybe_zero : index -> i1
+  %other_power = test.fact_power_of_two %maybe_nonpower : index -> i1
+  %unknown_power = test.fact_power_of_two %unknown : index -> i1
+  func.return %zero_power, %other_power, %unknown_power : i1, i1, i1
+}
+
+// ----
+func.def @unproven_alternatives(%input: index, %choose: i1) -> (i1, i1, i1) {
+  %zero_power = scalar.constant false : i1
+  %other_power = scalar.constant false : i1
+  %unknown_power = scalar.constant false : i1
+  func.return %zero_power, %other_power, %unknown_power : i1, i1, i1
+}
+
+// ====
+
+func.def @if_widths(%input: index, %choose: i1) -> (i1) {
+  %amount = index.assume %input [range(%input, 0, 4)] : index
+  %unit = index.constant 1 : index
+  %width = scf.if %choose -> (index) {
+    %small = index.shli %unit, %amount : index
+    scf.yield %small : index
+  } else {
+    %large = index.constant 32 : index
+    scf.yield %large : index
+  }
+  %power = test.fact_power_of_two %width : index -> i1
+  func.return %power : i1
+}
+
+// ----
+func.def @if_widths(%input: index, %choose: i1) -> (i1) {
+  %power = scalar.constant true : i1
+  func.return %power : i1
+}
+
+// ====
+
+// CFG block arguments share the same predicate contract as structured yields.
+func.def @cfg_widths(%left_input: i16, %right_input: i16, %choose: i1) -> (i1) {
+  %left = scalar.assume %left_input [range(%left_input, 2, 8), power_of_two(%left_input)] : i16
+  %right = scalar.assume %right_input [range(%right_input, 16, 64), power_of_two(%right_input)] : i16
+  cfg.cond_br %choose, ^left, ^right
+^left:
+  cfg.br ^join(%left: i16)
+^right:
+  cfg.br ^join(%right: i16)
+^join(%width: i16):
+  %power = test.fact_power_of_two %width : i16 -> i1
+  func.return %power : i1
+}
+
+// ----
+func.def @cfg_widths(%left_input: i16, %right_input: i16, %choose: i1) -> (i1) {
+  %left = scalar.assume %left_input [range(%left_input, 2, 8), power_of_two(%left_input)] : i16
+  %right = scalar.assume %right_input [range(%right_input, 16, 64), power_of_two(%right_input)] : i16
+  cfg.cond_br %choose, ^left, ^right
+^left:
+  cfg.br ^join(%left: i16)
+^right:
+  cfg.br ^join(%right: i16)
+^join(%width: i16):
+  %power = scalar.constant true : i1
+  func.return %power : i1
+}
+
+// ====
+
+// Zero iterations preserve the seed; every backedge preserves power-of-two.
+func.def @carried_widths(%count: index, %choose: i1) -> (i1) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %seed = index.constant 4 : index
+  %other = index.constant 16 : index
+  %width = scf.for %iteration = [%begin to %count step %step](%carried = %seed : index) -> (index) {
+    %next = scf.select %choose, %carried, %other : index
+    scf.yield %next : index
+  }
+  %power = test.fact_power_of_two %width : index -> i1
+  func.return %power : i1
+}
+
+// ----
+func.def @carried_widths(%count: index, %choose: i1) -> (i1) {
+  %power = scalar.constant true : i1
+  func.return %power : i1
+}
+
+// ====
+
+func.def @carried_zero_arm(%count: index, %choose: i1) -> (i1, i1) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %seed = index.constant 4 : index
+  %width = scf.for %iteration = [%begin to %count step %step](%carried = %seed : index) -> (index) {
+    %next = scf.select %choose, %carried, %begin : index
+    scf.yield %next : index
+  }
+  %power = test.fact_power_of_two %width : index -> i1
+  %nonzero = test.fact_non_zero %width : index -> i1
+  func.return %power, %nonzero : i1, i1
+}
+
+// ----
+func.def @carried_zero_arm(%count: index, %choose: i1) -> (i1, i1) {
+  %power = scalar.constant false : i1
+  %nonzero = scalar.constant false : i1
+  func.return %power, %nonzero : i1, i1
+}
+
+// ====
+
+// Uniform and individual vector element summaries retain the same guarantees.
+func.def @vector_choices(%choose: i1, %other: i1) -> (i1, i1, i1, i1, i1) {
+  %small = vector.splati 4 : vector<4xi32>
+  %large = vector.splati 16 : vector<4xi32>
+  %uniform = scf.select %choose, %small, %large : vector<4xi32>
+  %left = vector.constanti [1, 2, 3, 4] : vector<4xi32>
+  %right = vector.constanti [8, 0, 4, 8] : vector<4xi32>
+  %mask = vector.from_elements %choose, %other, %choose, %other : vector<4xi1>
+  %selected = vector.select %mask, %left, %right : vector<4xi32>
+  %uniform_lane = vector.extract %uniform[2] : vector<4xi32> -> i32
+  %first = vector.extract %selected[0] : vector<4xi32> -> i32
+  %second = vector.extract %selected[1] : vector<4xi32> -> i32
+  %third = vector.extract %selected[2] : vector<4xi32> -> i32
+  %fourth = vector.extract %selected[3] : vector<4xi32> -> i32
+  %uniform_power = test.fact_power_of_two %uniform_lane : i32 -> i1
+  %first_power = test.fact_power_of_two %first : i32 -> i1
+  %second_power = test.fact_power_of_two %second : i32 -> i1
+  %third_power = test.fact_power_of_two %third : i32 -> i1
+  %fourth_power = test.fact_power_of_two %fourth : i32 -> i1
+  func.return %uniform_power, %first_power, %second_power, %third_power, %fourth_power : i1, i1, i1, i1, i1
+}
+
+// ----
+func.def @vector_choices(%choose: i1, %other: i1) -> (i1, i1, i1, i1, i1) {
+  %uniform_power = scalar.constant true : i1
+  %first_power = scalar.constant true : i1
+  %second_power = scalar.constant false : i1
+  %third_power = scalar.constant false : i1
+  %fourth_power = scalar.constant true : i1
+  func.return %uniform_power, %first_power, %second_power, %third_power, %fourth_power : i1, i1, i1, i1, i1
+}
+
+// ====
+
+// The while header joins the seed and backedge before exposing its exit value.
+func.def @while_widths(%count: index, %choose: i1) -> (i1) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %seed = index.constant 4 : index
+  %other = index.constant 16 : index
+  %terminal, %width = scf.while(%position = %begin : index, %before = %seed : index) -> (index, index) {
+    %more = index.cmp slt, %position, %count : index
+    scf.condition %more, %position, %before : i1, index, index
+  } do(%body_position: index, %body_width: index) {
+    %next_position = index.add %body_position, %step : index
+    %next_width = scf.select %choose, %body_width, %other : index
+    scf.yield %next_position, %next_width : index, index
+  }
+  %power = test.fact_power_of_two %width : index -> i1
+  func.return %power : i1
+}
+
+// ----
+func.def @while_widths(%count: index, %choose: i1) -> (i1) {
+  %power = scalar.constant true : i1
+  func.return %power : i1
+}

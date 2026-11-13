@@ -47,14 +47,14 @@ TEST_F(AutomaticCacheTextServiceTest,
   loom_serve_text_resize_t* resize = nullptr;
   IREE_ASSERT_OK(loom_serve_text_model_prepare_resize(model_, 8, &resize));
   ASSERT_NE(resize, nullptr);
-  loom_serve_execution_frontier_t frontier;
+  loom_runtime_execution_frontier_t frontier;
   auto status = loom_serve_text_model_submit_resize(model_, resize, &frontier);
   loom_serve_text_resize_free(resize);
   IREE_ASSERT_OK(status);
   for (size_t i = 0; i < IREE_ARRAYSIZE(frontier.semaphores); ++i) {
-    IREE_ASSERT_OK(
-        loom_serve_workspace_wait(loom_serve_pool_workspace(storage_owner_),
-                                  frontier.semaphores[i], frontier.values[i]));
+    IREE_ASSERT_OK(loom_runtime_workspace_wait(
+        loom_runtime_pool_workspace(storage_owner_), frontier.semaphores[i],
+        frontier.values[i]));
   }
   loom_serve_text_model_complete_resize(model_);
   EXPECT_EQ(loom_serve_text_model_row_count(model_), 8u);
@@ -379,7 +379,7 @@ TEST_F(RegisteredSourceTextServiceTest,
   StartManaged();
   EXPECT_NE(Read(Send("", "", "/v1/models", "GET")).find(R"("data":[])"),
             std::string::npos);
-  loom_serve::testing::StalledStderr stalled;
+  loom_runtime::testing::StalledStderr stalled;
   ASSERT_NO_FATAL_FAILURE(stalled.Begin());
   EXPECT_EQ(Read(Send(Declaration("fixture-text", directory_, "drained"), "",
                       "/v1/models/register"))

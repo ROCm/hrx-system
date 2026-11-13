@@ -160,11 +160,9 @@ typedef struct iree_struct_field_t {
 //   IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
 //       sizeof(header_t), &total,
 //       IREE_STRUCT_ARRAY_FIELD(num_states, 256, uint16_t, &trans_offset)));
-IREE_ATTRIBUTE_ALWAYS_INLINE static inline iree_status_t
-iree_struct_layout_calculate(iree_host_size_t base_size,
-                             const iree_struct_field_t* fields,
-                             iree_host_size_t field_count,
-                             iree_host_size_t* out_total) {
+static IREE_ATTRIBUTE_ALWAYS_INLINE iree_status_t iree_struct_layout_calculate(
+    iree_host_size_t base_size, const iree_struct_field_t* fields,
+    iree_host_size_t field_count, iree_host_size_t* out_total) {
   iree_host_size_t total = base_size;
   for (iree_host_size_t i = 0; i < field_count; ++i) {
     const iree_struct_field_t* field = &fields[i];
@@ -312,6 +310,17 @@ enum {
   //   inout_ptr: pointer to free
   IREE_ALLOCATOR_COMMAND_FREE = 3,
 
+  // Requests reclamation of unused allocator storage. Live allocations retain
+  // their addresses and contents. This is a cold-path hint: implementations may
+  // release cached pages to their parent or operating system, but no particular
+  // amount of reclamation is guaranteed. Allocators without reclaimable storage
+  // return OK without changing their allocation semantics.
+  //
+  // iree_allocator_ctl_fn_t:
+  //   params: unused (NULL)
+  //   inout_ptr: unused (NULL)
+  IREE_ALLOCATOR_COMMAND_TRIM = 4,
+
   // TODO(benvanik): add optional IREE_ALLOCATOR_COMMAND_BIND like mbind:
   // https://man7.org/linux/man-pages/man2/mbind.2.html
   // This would take a pointer/length and a NUMA node ID to bind the memory to.
@@ -379,6 +388,14 @@ iree_allocator_clone(iree_allocator_t allocator,
 // Frees a previously-allocated block of memory to the given allocator.
 // Safe to pass NULL (no-op).
 IREE_API_EXPORT void iree_allocator_free(iree_allocator_t allocator, void* ptr);
+
+// Requests reclamation of unused storage after a large allocation burst.
+// Preserves live allocations and may affect other users of the same underlying
+// heap. Thread-local caches may only be reclaimed for the calling thread.
+// This can be expensive and is intended for phase boundaries, not individual
+// allocations. A successful call does not guarantee that any bytes were freed.
+// A null allocator is a no-op; custom allocator failures are propagated.
+IREE_API_EXPORT iree_status_t iree_allocator_trim(iree_allocator_t allocator);
 
 //===----------------------------------------------------------------------===//
 // Array allocation helpers with overflow checking

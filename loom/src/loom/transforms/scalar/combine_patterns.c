@@ -12,6 +12,8 @@
 #include "loom/rewrite/rewriter.h"
 #include "loom/transforms/conversion/chain.h"
 #include "loom/transforms/scalar/narrowing.h"
+#include "loom/util/fact_table.h"
+#include "loom/util/predicate_facts.h"
 
 static loom_conversion_kind_t loom_scalar_combine_conversion_kind(
     const loom_op_t* op) {
@@ -131,6 +133,49 @@ static iree_status_t loom_scalar_combine_replace_with_conversion(
   return iree_ok_status();
 }
 
+static iree_status_t loom_scalar_combine_numeric_identity(
+    loom_op_t* op, loom_rewriter_t* rewriter, loom_conversion_kind_t outer_kind,
+    bool* out_changed) {
+  if (outer_kind != LOOM_CONVERSION_EXTSI &&
+      outer_kind != LOOM_CONVERSION_EXTUI &&
+      outer_kind != LOOM_CONVERSION_TRUNCI) {
+    return iree_ok_status();
+  }
+  const loom_value_id_t outer_input = loom_op_const_operands(op)[0];
+  const loom_value_id_t result = loom_op_const_results(op)[0];
+  const loom_value_id_t origin = loom_value_fact_table_query_numeric_identity(
+      rewriter->fact_table, result);
+  if (origin != result &&
+      loom_type_equal(loom_module_value_type(rewriter->module, result),
+                      loom_module_value_type(rewriter->module, origin))) {
+    // Numeric identity survives predicate carriers between conversions. Retain
+    // the input's scoped information while returning the same-typed origin.
+    const loom_type_t type = loom_module_value_type(rewriter->module, result);
+    loom_predicate_t
+        predicates[LOOM_VALUE_FACT_INTEGER_REFINEMENT_CAPACITY + 1];
+    uint16_t count = loom_value_facts_export_integer_refinements(
+        origin, loom_rewriter_value_facts(rewriter, origin),
+        loom_rewriter_value_facts(rewriter, result), predicates,
+        LOOM_VALUE_FACT_INTEGER_REFINEMENT_CAPACITY);
+    predicates[count++] = (loom_predicate_t){
+        .kind = LOOM_PREDICATE_EQ,
+        .arg_count = 2,
+        .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_VALUE},
+        .args = {origin, outer_input},
+    };
+    loom_builder_set_before(&rewriter->builder, op);
+    loom_op_t* assume = NULL;
+    IREE_RETURN_IF_ERROR(loom_scalar_assume_build(&rewriter->builder, &origin,
+                                                  1, predicates, count, &type,
+                                                  1, op->location, &assume));
+    IREE_RETURN_IF_ERROR(loom_scalar_combine_replace_with_value(
+        rewriter, op, loom_scalar_assume_results(assume).values[0]));
+    *out_changed = true;
+    return iree_ok_status();
+  }
+  return iree_ok_status();
+}
+
 iree_status_t loom_scalar_combine_conversion(loom_op_t* op,
                                              loom_rewriter_t* rewriter,
                                              bool allow_bitfield,
@@ -143,7 +188,8 @@ iree_status_t loom_scalar_combine_conversion(loom_op_t* op,
   loom_op_t* defining_op =
       loom_rewriter_value_defining_op(rewriter, outer_input);
   if (defining_op == NULL) {
-    return iree_ok_status();
+    return loom_scalar_combine_numeric_identity(op, rewriter, outer_kind,
+                                                out_changed);
   }
 
   const loom_conversion_kind_t inner_kind =
@@ -156,17 +202,32 @@ iree_status_t loom_scalar_combine_conversion(loom_op_t* op,
 
   const loom_conversion_chain_match_t match =
       loom_conversion_chain_match(outer_kind, inner_kind);
-  if (!allow_bitfield &&
-      (match.candidate == LOOM_CONVERSION_EXTRACT_SIGNED ||
-       match.candidate == LOOM_CONVERSION_EXTRACT_UNSIGNED)) {
-    return iree_ok_status();
+  if (match.candidate == LOOM_CONVERSION_EXTRACT_SIGNED ||
+      match.candidate == LOOM_CONVERSION_EXTRACT_UNSIGNED) {
+    const loom_value_id_t source = loom_op_const_operands(defining_op)[0];
+    // A proved lossless round trip keeps the original numeric value. Lowering
+    // it to bit extraction would discard that identity and its retained bounds.
+    if (loom_value_fact_table_query_numeric_identity(
+            rewriter->fact_table, loom_op_const_results(op)[0]) ==
+        loom_value_fact_table_query_numeric_identity(rewriter->fact_table,
+                                                     source)) {
+      return loom_scalar_combine_replace_with_conversion(
+          rewriter, op, outer_kind, source, out_changed);
+    }
+    if (!allow_bitfield) {
+      return iree_ok_status();
+    }
   }
   if (match.candidate == LOOM_CONVERSION_NONE) {
     if (outer_kind == LOOM_CONVERSION_TRUNCI) {
-      return loom_scalar_narrowing_truncate(rewriter, op, defining_op,
-                                            out_changed);
+      IREE_RETURN_IF_ERROR(loom_scalar_narrowing_truncate(
+          rewriter, op, defining_op, out_changed));
+      if (*out_changed) {
+        return iree_ok_status();
+      }
     }
-    return iree_ok_status();
+    return loom_scalar_combine_numeric_identity(op, rewriter, outer_kind,
+                                                out_changed);
   }
   if (iree_any_bit_set(match.flags, LOOM_CONVERSION_CHAIN_FLAG_NON_NEGATIVE) &&
       !loom_value_facts_is_non_negative(
@@ -202,6 +263,52 @@ static iree_status_t loom_scalar_conversion_chain_pattern(
   return loom_scalar_combine_conversion(op, rewriter, false, out_changed);
 }
 
+static iree_status_t loom_scalar_shift_narrowing_pattern(
+    const loom_rewrite_pattern_t* pattern, void* context, loom_op_t* op,
+    loom_rewriter_t* rewriter, bool* out_changed) {
+  (void)pattern;
+  (void)context;
+  *out_changed = false;
+  const loom_value_facts_t amount_facts =
+      loom_rewriter_value_facts(rewriter, loom_scalar_shli_rhs(op));
+  if (!loom_value_facts_is_exact(amount_facts)) {
+    return iree_ok_status();
+  }
+  loom_op_t* extension =
+      loom_rewriter_value_defining_op(rewriter, loom_scalar_shli_lhs(op));
+  if (!extension || !loom_scalar_extui_isa(extension)) {
+    return iree_ok_status();
+  }
+  const loom_value_id_t input = loom_scalar_extui_input(extension);
+  const loom_type_t input_type =
+      loom_module_value_type(rewriter->module, input);
+  const int32_t input_bitwidth =
+      loom_scalar_type_bitwidth(loom_type_element_type(input_type));
+  const int64_t amount = amount_facts.range_lo;
+  if (amount <= 0 || amount >= input_bitwidth ||
+      !loom_value_facts_fit_unsigned_bit_count(
+          loom_rewriter_value_facts(rewriter, input),
+          (uint8_t)(input_bitwidth - amount))) {
+    return iree_ok_status();
+  }
+
+  // The unsigned product fits the input width but may set its sign bit.
+  // Keep zero extension and drop both redundant wide no-wrap contracts.
+  loom_builder_set_before(&rewriter->builder, op);
+  loom_op_t* narrow_amount = NULL;
+  IREE_RETURN_IF_ERROR(
+      loom_scalar_constant_build(&rewriter->builder, loom_attr_i64(amount),
+                                 input_type, op->location, &narrow_amount));
+  loom_op_t* narrow_shift = NULL;
+  IREE_RETURN_IF_ERROR(
+      loom_scalar_shli_build(&rewriter->builder, /*overflow=*/0, input,
+                             loom_scalar_constant_result(narrow_amount),
+                             input_type, op->location, &narrow_shift));
+  return loom_scalar_combine_replace_with_conversion(
+      rewriter, op, LOOM_CONVERSION_EXTUI,
+      loom_scalar_shli_result(narrow_shift), out_changed);
+}
+
 static const loom_rewrite_pattern_t kScalarSourceCombinePatterns[] = {
     {
         .root_kind = LOOM_OP_SCALAR_EXTF,
@@ -222,6 +329,10 @@ static const loom_rewrite_pattern_t kScalarSourceCombinePatterns[] = {
     {
         .root_kind = LOOM_OP_SCALAR_TRUNCI,
         .match_and_rewrite = loom_scalar_conversion_chain_pattern,
+    },
+    {
+        .root_kind = LOOM_OP_SCALAR_SHLI,
+        .match_and_rewrite = loom_scalar_shift_narrowing_pattern,
     },
 };
 

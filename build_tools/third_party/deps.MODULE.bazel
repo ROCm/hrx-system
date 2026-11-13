@@ -44,7 +44,14 @@ http_archive(
     name = "libbacktrace",
     build_file = "//build_tools/third_party/libbacktrace:libbacktrace.BUILD.bazel",
     patch_args = ["-p1"],
-    patches = ["//build_tools/third_party/libbacktrace:threaded_cache_reads.patch"],
+    patches = [
+        "//build_tools/third_party/libbacktrace:explicit_integer_conversions.patch",
+        "//build_tools/third_party/libbacktrace:threaded_cache_reads.patch",
+        "//build_tools/third_party/libbacktrace:ignore_nonruntime_symbols.patch",
+        "//build_tools/third_party/libbacktrace:zero_size_vectors.patch",
+        "//build_tools/third_party/libbacktrace:iterative_function_scopes.patch",
+        "//build_tools/third_party/libbacktrace:portable_test_warnings.patch",
+    ],
     sha256 = "858b1225351052234f7e71f0f36622fc9ad33aac947db7816d0b443ae0dd33ce",
     strip_prefix = "libbacktrace-793921876c981ce49759114d7bb89bb89b2d3a2d",
     url = "https://github.com/ianlancetaylor/libbacktrace/archive/793921876c981ce49759114d7bb89bb89b2d3a2d.tar.gz",
@@ -53,9 +60,9 @@ http_archive(
 http_archive(
     name = "miniaudio",
     build_file = "//build_tools/third_party/miniaudio:miniaudio.BUILD.bazel",
-    sha256 = "b900edcffe979816e2560a0580b9b1216d674b4f17fbadeca8f777a7f8ab0274",
-    strip_prefix = "miniaudio-0.11.25",
-    url = "https://github.com/mackron/miniaudio/archive/refs/tags/0.11.25.tar.gz",
+    sha256 = "838ba55a21c9142adf7b76bdc4351e5cd8b7ae128f46b25ec25f94ae9969c600",
+    strip_prefix = "miniaudio-0.11.26",
+    url = "https://github.com/mackron/miniaudio/archive/refs/tags/0.11.26.tar.gz",
 )
 
 http_archive(
@@ -94,16 +101,19 @@ http_archive(
 http_archive(
     name = "cxx",
     build_file = "//build_tools/third_party/cxx:cxx.BUILD.bazel",
-    sha256 = "e6ba97bd69886c3ece1f22c401ae8bf2f9752d63814171f45a5a1a2fa523981c",
-    strip_prefix = "cplusplus-fe2e6ca0a16c013a292e4d0a88882b6f966d2470",
-    url = "https://github.com/benvanik/cplusplus/archive/fe2e6ca0a16c013a292e4d0a88882b6f966d2470.tar.gz",
+    sha256 = "026fc2028839ace7f0abe095ba6e186277e092cf0cccf6493b26539566d11f92",
+    strip_prefix = "cplusplus-24374a126221c764d78e0733b4afc48a607b3da6",
+    url = "https://github.com/benvanik/cplusplus/archive/24374a126221c764d78e0733b4afc48a607b3da6.tar.gz",
 )
 
 http_archive(
     name = "mimalloc",
     build_file = "//build_tools/third_party/mimalloc:mimalloc.BUILD.bazel",
     patch_args = ["-p1"],
-    patches = ["//build_tools/third_party/mimalloc:c_new_handler.patch"],
+    patches = [
+        "//build_tools/third_party/mimalloc:c_new_handler.patch",
+        "//build_tools/third_party/mimalloc:guarded_page_gcc_warning.patch",
+    ],
     sha256 = "3b4a15153a59905995f7070296ed604bb5ccc00cabb8b93446931aff77224d47",
     strip_prefix = "mimalloc-3.5.3",
     url = "https://github.com/microsoft/mimalloc/archive/refs/tags/v3.5.3.tar.gz",
@@ -124,12 +134,9 @@ http_archive(
 http_archive(
     name = "libdrm_headers",
     build_file = "//build_tools/third_party/linux_uapi:libdrm_headers.BUILD.bazel",
-    sha256 = "ac5e74d157830eb8bee44c6a6bf3ad49774ef0dd2a72bdad74a8f20308b52a95",
-    strip_prefix = "libdrm-2.4.134",
-    urls = [
-        "https://mirrors.edge.kernel.org/gentoo/distfiles/13/libdrm-2.4.134.tar.xz",
-        "https://dri.freedesktop.org/libdrm/libdrm-2.4.134.tar.xz",
-    ],
+    sha256 = "86732374758d8aabf64e92c9a34ab0dbf2b363c1860b3bdf98f7aad79193de90",
+    strip_prefix = "libdrm-33fab8cbca7f7581e955a675597d14412702edc4",
+    url = "https://gitlab.freedesktop.org/mesa/libdrm/-/archive/33fab8cbca7f7581e955a675597d14412702edc4/libdrm-33fab8cbca7f7581e955a675597d14412702edc4.tar.bz2",
 )
 
 # Linux 7.3-rc6 public protocol headers share one source revision.

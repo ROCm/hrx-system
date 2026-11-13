@@ -72,6 +72,20 @@ typedef enum loom_amdgpu_select_payload_kind_e {
   LOOM_AMDGPU_SELECT_PAYLOAD_KIND_I1_BOOL = 4,
 } loom_amdgpu_select_payload_kind_t;
 
+typedef uint8_t loom_amdgpu_select_data_flags_t;
+enum loom_amdgpu_select_data_flag_bits_e {
+  // Resize address payloads to the selected result carrier.
+  LOOM_AMDGPU_SELECT_DATA_ADDRESS = 1u << 0,
+  // Replicate the true operand's sign when widening a compact index.
+  LOOM_AMDGPU_SELECT_DATA_SIGN_EXTEND_TRUE = 1u << 1,
+  // Replicate the false operand's sign when widening a compact index.
+  LOOM_AMDGPU_SELECT_DATA_SIGN_EXTEND_FALSE = 1u << 2,
+  // Rematerialize a null true operand in the selected buffer's carrier.
+  LOOM_AMDGPU_SELECT_DATA_NULL_TRUE = 1u << 3,
+  // Rematerialize a null false operand in the selected buffer's carrier.
+  LOOM_AMDGPU_SELECT_DATA_NULL_FALSE = 1u << 4,
+};
+
 // Boolean operands either reuse their selected carrier or materialize the
 // active mask at this use. EXEC is read here, not captured at the definition.
 typedef enum loom_amdgpu_mask_operand_kind_e {
@@ -135,6 +149,8 @@ typedef struct loom_amdgpu_vector_select_plan_t {
       const loom_amdgpu_select_lane_plan_t* lanes;
       // Number of retained lane recipes; zero requires no allocation.
       uint8_t lane_count;
+      // Selected address normalization and signed operand extensions.
+      loom_amdgpu_select_data_flags_t flags;
     } data;
     // Boolean payloads combine native per-workitem masks.
     struct {

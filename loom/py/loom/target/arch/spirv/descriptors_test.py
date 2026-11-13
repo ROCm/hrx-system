@@ -23,6 +23,7 @@ from loom.target.arch.spirv.builtins import (
     BUILTIN_SCALAR_INDEX_QUERIES,
 )
 from loom.target.arch.spirv.cooperative_matrix import (
+    COOPERATIVE_MATRIX_ARITHMETIC,
     COOPERATIVE_MATRIX_CASES,
     COOPERATIVE_MATRIX_TYPES,
     cooperative_matrix_descriptor_key,
@@ -52,6 +53,7 @@ from loom.target.arch.spirv.ordinary_vector_float import (
 )
 from loom.target.arch.spirv.ordinary_vector_integer import (
     INTEGER_BIT_COUNT_INSTRUCTIONS,
+    INTEGER_DOT_INSTRUCTIONS,
     ORDINARY_VECTOR_INTEGER_INSTRUCTIONS,
 )
 from loom.target.arch.spirv.scalar_alu import (
@@ -83,6 +85,7 @@ from loom.target.arch.spirv.scalar_conversion import (
     LOW_SCALAR_CONVERSIONS,
 )
 from loom.target.arch.spirv.scalar_memory import (
+    PACKED_STORAGE_BUFFER_VECTORS,
     RAW_STORAGE_BUFFER_BYTE,
     STORAGE_BUFFER_SCALARS,
 )
@@ -118,6 +121,12 @@ def test_float_arithmetic_descriptors_carry_contraction_control() -> None:
             *ORDINARY_VECTOR_FLOAT_SCALE_INSTRUCTIONS,
         )
     )
+    expected_keys.update(
+        matrix_type.arithmetic_key(operation)
+        for matrix_type in COOPERATIVE_MATRIX_TYPES
+        for operation in COOPERATIVE_MATRIX_ARITHMETIC
+        if operation.supports(matrix_type) and operation.controls_contraction
+    )
     actual_keys = {
         descriptor.key
         for descriptor in descriptors.values()
@@ -127,7 +136,6 @@ def test_float_arithmetic_descriptors_carry_contraction_control() -> None:
         )
     }
 
-    assert len(expected_keys) == 69
     assert actual_keys == expected_keys
     for key in expected_keys:
         descriptor = descriptors[key]
@@ -396,10 +404,14 @@ def _extended_math_result_recipes() -> dict[str, AsmResultValueType]:
 def _cooperative_matrix_result_keys() -> list[str]:
     keys = [matrix_type.constructor_key for matrix_type in COOPERATIVE_MATRIX_TYPES]
     keys.extend(
-        matrix_type.memory_key(role, memory)
+        matrix_type.arithmetic_key(operation)
         for matrix_type in COOPERATIVE_MATRIX_TYPES
-        for role in matrix_type.source_roles
-        if role != "result"
+        for operation in COOPERATIVE_MATRIX_ARITHMETIC
+        if operation.supports(matrix_type)
+    )
+    keys.extend(
+        matrix_type.memory_key("load", memory)
+        for matrix_type in COOPERATIVE_MATRIX_TYPES
         for memory in cooperative_matrix_memory_variants(matrix_type.scalar)
     )
     keys.extend(
@@ -416,6 +428,17 @@ def _cooperative_matrix_result_keys() -> list[str]:
         for case in COOPERATIVE_MATRIX_CASES
     )
     return keys
+
+
+def _packed_memory_result_keys() -> set[str]:
+    return {
+        key
+        for packet in PACKED_STORAGE_BUFFER_VECTORS
+        for key in (
+            f"spirv.op_ptr_access_chain.storage_buffer.{packet.suffix}.byte_offset",
+            f"spirv.op_load.storage_buffer.{packet.suffix}",
+        )
+    }
 
 
 def test_result_asm_recipes_cover_every_spirv_descriptor_family() -> None:
@@ -483,6 +506,7 @@ def test_result_asm_recipes_cover_every_spirv_descriptor_family() -> None:
         *ORDINARY_VECTOR_FLOAT_PRESERVE_COMPARE_INSTRUCTIONS,
         *ORDINARY_VECTOR_INTEGER_INSTRUCTIONS,
         *INTEGER_BIT_COUNT_INSTRUCTIONS,
+        *INTEGER_DOT_INSTRUCTIONS,
         *ORDINARY_VECTOR_CONVERSION_INSTRUCTIONS,
         *ORDINARY_VECTOR_BIT_LAYOUT_INSTRUCTIONS,
         *SPIRV_SUBGROUP_BALLOT_PACKING_INSTRUCTIONS,
@@ -588,6 +612,11 @@ def test_result_asm_recipes_cover_every_spirv_descriptor_family() -> None:
     add_scalar_recipe("spirv.op_select.bool", "i1")
     add_carrier_only("spirv.op_select.offset64")
     add_carrier_only("spirv.op_select.storage_buffer")
+    add_carrier_only("spirv.op_constant.storage_buffer")
+    for suffix in ("iequal", "inotequal"):
+        add_scalar_recipe(f"spirv.op_{suffix}.storage_buffer", "i1")
+    add_carrier_only("spirv.op_copy_object.storage_buffer")
+    add_carrier_only("spirv.op_iadd.storage_buffer.byte_offset")
 
     for scalar in STORAGE_BUFFER_SCALARS:
         add_carrier_only(
@@ -603,6 +632,8 @@ def test_result_asm_recipes_cover_every_spirv_descriptor_family() -> None:
                 add_scalar_recipe(load_key, scalar.source_type)
             else:
                 add_carrier_only(load_key)
+
+    carrier_only_keys.update(_packed_memory_result_keys())
 
     for key, recipe in _atomic_result_recipes().items():
         add_recipe(key, recipe)
@@ -658,11 +689,11 @@ def test_workgroup_matrix_memory_needs_no_storage_buffer_features() -> None:
     )
     for matrix_type in COOPERATIVE_MATRIX_TYPES:
         scalar = matrix_type.scalar
-        for role in matrix_type.source_roles:
+        for operation in ("load", "store"):
             for memory in cooperative_matrix_memory_variants(scalar):
                 if memory.space != "workgroup":
                     continue
-                descriptor = descriptors[matrix_type.memory_key(role, memory)]
+                descriptor = descriptors[matrix_type.memory_key(operation, memory)]
                 features = descriptor.feature_mask_words[0]
                 assert features == matrix_type.feature_bits | memory.feature_bits
                 assert not features & storage_bits
@@ -688,3 +719,6 @@ def test_workgroup_matrix_memory_needs_no_storage_buffer_features() -> None:
                 )
                 assert memory_effect.memory_space == MemorySpace.WORKGROUP
                 assert memory_effect.width_bits == 0
+                assert memory_effect.kind == (
+                    EffectKind.READ if operation == "load" else EffectKind.WRITE
+                )

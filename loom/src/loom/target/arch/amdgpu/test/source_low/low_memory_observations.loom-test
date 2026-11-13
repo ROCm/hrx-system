@@ -121,3 +121,76 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @volatile_loop(%offset: reg<am
   s_cbranch_scc1 .Lbb1
 .Lbb2:
   s_endpgm
+
+// ====
+// Relaxed 64-bit observations issue as one cohort. Their first arithmetic
+// consumer waits for data; independent loads do not drain preceding loads.
+// RUN: emit amdgpu-assembly @atomic_cohort
+
+amdgpu.target<gfx942> @target
+
+low.func.def target<amdgpu.cdna3.core>(@target) @atomic_cohort(%offset: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr>) asm {
+  %first = global_load_dwordx2_saddr<atomic> %offset, %base {sc1 = 1} : reg<amdgpu.vgpr x2>
+  %second = global_load_dwordx2_saddr<atomic> %offset, %base {offset = 8, sc1 = 1} : reg<amdgpu.vgpr x2>
+  %third = global_load_dwordx2_saddr<atomic> %offset, %base {offset = 16, sc1 = 1} : reg<amdgpu.vgpr x2>
+  %fourth = global_load_dwordx2_saddr<atomic> %offset, %base {offset = 24, sc1 = 1} : reg<amdgpu.vgpr x2>
+  %a = slice %first[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %b = slice %second[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %c = slice %third[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %d = slice %fourth[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %ab = v_or_b32 %a, %b
+  %cd = v_or_b32 %c, %d
+  %result = v_or_b32 %ab, %cd
+  return %result
+}
+
+// ----
+  global_load_dwordx2 v[2:3], v0, s[0:1] offset:0 sc1
+  global_load_dwordx2 v[4:5], v0, s[0:1] offset:8 sc1
+  global_load_dwordx2 v[6:7], v0, s[0:1] offset:16 sc1
+  s_nop 0
+  global_load_dwordx2 v[0:1], v0, s[0:1] offset:24 sc1
+  s_waitcnt vmcnt(0) lgkmcnt(15)
+  v_or_b32 v0, v3, v5
+  v_or_b32 v1, v7, v1
+  v_or_b32 v0, v0, v1
+  s_endpgm
+
+// ====
+// Distinct same-address observations survive even with no SSA consumers.
+// RUN: emit amdgpu-assembly @unused_atomic_reads
+
+amdgpu.target<gfx1151> @target
+
+low.func.def target<amdgpu.rdna3_5.core>(@target) @unused_atomic_reads(%offset: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>) asm {
+  %first = global_load_b32_saddr<atomic> %offset, %base {glc = 1}
+  %second = global_load_b32_saddr<atomic> %offset, %base {glc = 1}
+  return
+}
+
+// ----
+  global_load_b32 v1, v0, s[0:1] offset:0 glc
+  global_load_b32 v0, v0, s[0:1] offset:0 glc
+  s_endpgm
+
+// ====
+// The observation remains inside the loop even when no loaded value escapes.
+// RUN: emit amdgpu-assembly @atomic_loop
+
+amdgpu.target<gfx1151> @target
+
+low.func.def target<amdgpu.rdna3_5.core>(@target) @atomic_loop(%offset: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>, %again: reg<amdgpu.scc>) asm {
+  low.br ^loop
+^loop:
+  %observed = global_load_b32_saddr<atomic> %offset, %base {glc = 1}
+  low.cond_br %again, ^loop, ^exit : reg<amdgpu.scc>
+^exit:
+  return
+}
+
+// ----
+.Lbb1:
+  global_load_b32 v1, v0, s[0:1] offset:0 glc
+  s_cbranch_scc1 .Lbb1
+.Lbb2:
+  s_endpgm

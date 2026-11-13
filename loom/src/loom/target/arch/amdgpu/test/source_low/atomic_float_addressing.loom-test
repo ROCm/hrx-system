@@ -1,0 +1,224 @@
+// RUN: emit source-low target=amdgpu:gfx942 output=low
+
+// Full vector addresses retain the native floating-point atomic policy.
+func.def @wide_f32(%storage: buffer, %offsets: buffer, %value: f32) -> (f32) {
+  %c0 = index.constant 0 : offset
+  %indices = buffer.view %offsets[%c0] : buffer -> view<1xi64>
+  %bits = view.load %indices[0] : view<1xi64> -> i64
+  %nonnegative = scalar.assume %bits [range(%bits, 0, 9223372036854775807)] : i64
+  %base = index.cast %nonnegative : i64 to offset
+  %global = buffer.assume.memory_space<global> %storage : buffer
+  %cells = buffer.view %global[%base] : buffer -> view<1xf32>
+  view.atomic.reduce<addf, noftz> %value, %cells[0] {ordering = relaxed, scope = device} : f32, view<1xf32>
+  %old = view.atomic.rmw<addf, noftz> %value, %cells[0] {ordering = relaxed, scope = device} : f32, view<1xf32> -> f32
+  func.return %old : f32
+}
+
+// ----
+low.func.def target<amdgpu.cdna3.core> abi(hal_kernel) @wide_f32(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %cells = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %indices = resource<hal_binding> {extent = 8, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %16 = slice %indices[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %17 = slice %indices[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %18 = v_mov_b32_copy %16
+  %19 = v_mov_b32_copy %17
+  %20 = concat(%18, %19) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %base = global_load_dwordx2_vaddr %20 : reg<amdgpu.vgpr x2>
+  %22 = slice %base[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %23 = slice %base[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %24 = slice %cells[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %25 = slice %cells[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %26, %27 = v_add_co_u32 %24, %22
+  %28 = v_mov_b32_copy %25
+  %29, %30 = v_addc_co_u32 %28, %23, %27
+  %31 = concat(%26, %29) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_atomic_add_f32_vaddr %31, %value
+  %41 = concat(%26, %29) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %old = global_atomic_add_f32_rtn_vaddr %41, %value : reg<amdgpu.vgpr>
+  return %old
+}
+
+// ====
+
+func.def @wide_f64(%storage: buffer, %offsets: buffer, %value: f64) -> (f64) {
+  %c0 = index.constant 0 : offset
+  %indices = buffer.view %offsets[%c0] : buffer -> view<1xi64>
+  %bits = view.load %indices[0] : view<1xi64> -> i64
+  %nonnegative = scalar.assume %bits [range(%bits, 0, 9223372036854775807)] : i64
+  %base = index.cast %nonnegative : i64 to offset
+  %global = buffer.assume.memory_space<global> %storage : buffer
+  %cells = buffer.view %global[%base] : buffer -> view<1xf64>
+  %old = view.atomic.rmw<addf, noftz> %value, %cells[0] {ordering = relaxed, scope = device} : f64, view<1xf64> -> f64
+  func.return %old : f64
+}
+
+// ----
+low.func.def target<amdgpu.cdna3.core> abi(hal_kernel) @wide_f64(%value: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm {
+  %cells = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %indices = resource<hal_binding> {extent = 8, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %16 = slice %indices[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %17 = slice %indices[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %18 = v_mov_b32_copy %16
+  %19 = v_mov_b32_copy %17
+  %20 = concat(%18, %19) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %base = global_load_dwordx2_vaddr %20 : reg<amdgpu.vgpr x2>
+  %22 = slice %base[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %23 = slice %base[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %24 = slice %cells[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %25 = slice %cells[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %26, %27 = v_add_co_u32 %24, %22
+  %28 = v_mov_b32_copy %25
+  %29, %30 = v_addc_co_u32 %28, %23, %27
+  %31 = concat(%26, %29) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %old = global_atomic_add_f64_rtn_vaddr %31, %value : reg<amdgpu.vgpr x2>
+  return %old
+}
+
+// ====
+// RUN: emit source-low target=amdgpu:gfx950 output=low
+
+// When native arithmetic cannot preserve subnormals, the synthesized CAS loop
+// consumes the same full global address without relaxing the source semantics.
+func.def @wide_noftz_f32(%storage: buffer, %offsets: buffer, %value: f32) -> (f32) {
+  %c0 = index.constant 0 : offset
+  %indices = buffer.view %offsets[%c0] : buffer -> view<1xi64>
+  %bits = view.load %indices[0] : view<1xi64> -> i64
+  %nonnegative = scalar.assume %bits [range(%bits, 0, 9223372036854775807)] : i64
+  %base = index.cast %nonnegative : i64 to offset
+  %global = buffer.assume.memory_space<global> %storage : buffer
+  %cells = buffer.view %global[%base] : buffer -> view<1xf32>
+  %old = view.atomic.rmw<addf, noftz> %value, %cells[0] {ordering = acq_rel, scope = device} : f32, view<1xf32> -> f32
+  func.return %old : f32
+}
+
+// ----
+low.func.def target<amdgpu.cdna4.core> abi(hal_kernel) @wide_noftz_f32(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %cells = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %indices = resource<hal_binding> {extent = 8, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %29 = slice %indices[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %30 = slice %indices[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %31 = v_mov_b32_copy %29
+  %32 = v_mov_b32_copy %30
+  %33 = concat(%31, %32) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %base = global_load_dwordx2_vaddr %33 : reg<amdgpu.vgpr x2>
+  %35 = v_mov_b32 0
+  %50 = s_mov_b64_exec_read
+  low.br ^_bb1(%35: reg<amdgpu.vgpr>)
+^_bb1(%25: reg<amdgpu.vgpr>):
+  %36 = v_add_f32 %25, %value
+  %37 = slice %base[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %38 = slice %base[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %39 = slice %cells[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %40 = slice %cells[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %41, %42 = v_add_co_u32 %39, %37
+  %43 = v_mov_b32_copy %40
+  %44, %45 = v_addc_co_u32 %43, %38, %42
+  %46 = concat(%41, %44) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  s_waitcnt {lgkmcnt = 0}
+  buffer_wbl2 {sc1 = 1}
+  s_waitcnt {vmcnt = 0}
+  %47 = concat(%36, %25) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %48 = global_atomic_cmpswap_rtn_vaddr %46, %47 : reg<amdgpu.vgpr>
+  s_waitcnt {vmcnt = 0}
+  buffer_inv {sc1 = 1}
+  %49 = v_cmp_ne_i32 %48, %25
+  %51, %52 = s_and_saveexec_b64 %49
+  low.cond_br %52, ^_bb2, ^_bb3 : reg<amdgpu.scc>
+^_bb2:
+  low.br ^_bb1(%48: reg<amdgpu.vgpr>)
+^_bb3:
+  s_mov_b64_exec %50
+  return %48
+}
+
+// ====
+// RUN: emit source-low target=amdgpu:gfx1200 output=low
+
+// The packed payload and the address are independent. A dword-aligned origin
+// need not fit a dword, for either supported packed floating-point format.
+func.def @wide_packed_f16(%storage: buffer, %offsets: buffer, %value: vector<2xf16>) -> (vector<2xf16>) {
+  %c0 = index.constant 0 : offset
+  %indices = buffer.view %offsets[%c0] : buffer -> view<1xi64>
+  %bits = view.load %indices[0] : view<1xi64> -> i64
+  %nonnegative = scalar.assume %bits [range(%bits, 0, 9223372036854775807)] : i64
+  %byte_offset = index.cast %nonnegative : i64 to offset
+  %base = index.assume %byte_offset [multiple_of(%byte_offset, 4)] : offset
+  %global = buffer.assume.memory_space<global> %storage : buffer
+  %aligned = buffer.assume.alignment %global {minimum_alignment = 4} : buffer
+  %cells = buffer.view %aligned[%base] : buffer -> view<2xf16>
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %lanes = vector.iota %begin step %step : vector<2xindex>
+  vector.atomic.reduce<addf> %value, %cells[0][%lanes] {ordering = relaxed, scope = device} : vector<2xf16>, view<2xf16>, vector<2xindex>
+  %old = vector.atomic.rmw<addf> %value, %cells[0][%lanes] {ordering = relaxed, scope = device} : vector<2xf16>, view<2xf16>, vector<2xindex>
+  func.return %old : vector<2xf16>
+}
+
+// ----
+low.func.def target<amdgpu.rdna4.core> abi(hal_kernel) @wide_packed_f16(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %cells = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %indices = resource<hal_binding> {extent = 8, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %24 = slice %indices[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %25 = slice %indices[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %26 = v_mov_b32_copy %24
+  %27 = v_mov_b32_copy %25
+  %28 = concat(%26, %27) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %base = global_load_b64_vaddr %28
+  %30 = slice %base[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %31 = slice %base[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %32 = slice %cells[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %33 = slice %cells[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %34, %35 = v_add_co_u32 %32, %30
+  %36 = v_mov_b32_copy %33
+  %37, %38 = v_add_co_ci_u32 %36, %31, %35
+  %39 = concat(%34, %37) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_atomic_pk_add_f16_vaddr %39, %value {scope = 2}
+  %49 = concat(%34, %37) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %old = global_atomic_pk_add_f16_rtn_vaddr %49, %value {scope = 2}
+  return %old
+}
+
+// ====
+// RUN: emit source-low target=amdgpu:gfx1200 output=low
+
+func.def @wide_packed_bf16(%storage: buffer, %offsets: buffer, %value: vector<2xbf16>) -> (vector<2xbf16>) {
+  %c0 = index.constant 0 : offset
+  %indices = buffer.view %offsets[%c0] : buffer -> view<1xi64>
+  %bits = view.load %indices[0] : view<1xi64> -> i64
+  %nonnegative = scalar.assume %bits [range(%bits, 0, 9223372036854775807)] : i64
+  %byte_offset = index.cast %nonnegative : i64 to offset
+  %base = index.assume %byte_offset [multiple_of(%byte_offset, 4)] : offset
+  %global = buffer.assume.memory_space<global> %storage : buffer
+  %aligned = buffer.assume.alignment %global {minimum_alignment = 4} : buffer
+  %cells = buffer.view %aligned[%base] : buffer -> view<2xbf16>
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %lanes = vector.iota %begin step %step : vector<2xindex>
+  vector.atomic.reduce<addf> %value, %cells[0][%lanes] {ordering = relaxed, scope = device} : vector<2xbf16>, view<2xbf16>, vector<2xindex>
+  %old = vector.atomic.rmw<addf> %value, %cells[0][%lanes] {ordering = relaxed, scope = device} : vector<2xbf16>, view<2xbf16>, vector<2xindex>
+  func.return %old : vector<2xbf16>
+}
+
+// ----
+low.func.def target<amdgpu.rdna4.core> abi(hal_kernel) @wide_packed_bf16(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %cells = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %indices = resource<hal_binding> {extent = 8, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %24 = slice %indices[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %25 = slice %indices[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %26 = v_mov_b32_copy %24
+  %27 = v_mov_b32_copy %25
+  %28 = concat(%26, %27) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %base = global_load_b64_vaddr %28
+  %30 = slice %base[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %31 = slice %base[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %32 = slice %cells[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %33 = slice %cells[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %34, %35 = v_add_co_u32 %32, %30
+  %36 = v_mov_b32_copy %33
+  %37, %38 = v_add_co_ci_u32 %36, %31, %35
+  %39 = concat(%34, %37) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_atomic_pk_add_bf16_vaddr %39, %value {scope = 2}
+  %49 = concat(%34, %37) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %old = global_atomic_pk_add_bf16_rtn_vaddr %49, %value {scope = 2}
+  return %old
+}

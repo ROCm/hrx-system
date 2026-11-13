@@ -22,6 +22,9 @@ Target tooling packages own command-line and host integration behavior, not
 Loom program semantics. Their BUILD files may consume explicit testdata through
 tool manifests, but must not instantiate Loom semantic build or test rules.
 
+Importer tests stop at verified IR. Importer BUILD files cannot select execution
+profiles, publish runtime test modules, or invoke Loom execution tools.
+
 The core Loom compiler must stay independent from command-line flag machinery.
 Only tools, tooling helpers, and tests may include `iree/base/tooling/flags.h`
 or define IREE flags.
@@ -45,6 +48,7 @@ import json
 import re
 import sys
 import tempfile
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
@@ -127,6 +131,16 @@ TOOLING_TARGET_SEMANTIC_RULE_PATTERN = re.compile(
     r"corpus_build|corpus_catalog|corpus_manifest|corpus_sources|"
     r"corpus_test|corpus_validate_catalog|scenario_test"
     r"))\s*\("
+)
+
+IMPORTER_EXECUTION_RULE_PATTERN = re.compile(
+    r"\b(?:loom_(?:library|module|test_module|test|kernel_library|kernel_binary|"
+    r"corpus_build|corpus_test|scenario_test|model|execution_profile)|"
+    r"execution_profiles)\b"
+)
+IMPORTER_EXECUTION_TOOL_PATTERN = re.compile(
+    r"//loom/src/loom/tools/(?:loom-(?:run|test|benchmark)|"
+    r"iree-(?:run|test|benchmark)-loom)(?=[:/\"'])"
 )
 
 TOOLING_FLAGS_INCLUDE_PATTERN = re.compile(
@@ -527,6 +541,33 @@ def _scan_tooling_target_ownership_text(
     return findings
 
 
+def _scan_importer_execution_text(
+    relative_path: str, text: str
+) -> list[tuple[int, str, str]]:
+    path = PurePosixPath(relative_path)
+    if (
+        path.parts[:4] != ("loom", "src", "loom", "import")
+        or path.name != "BUILD.bazel"
+    ):
+        return []
+
+    findings = []
+    for line_number, line in enumerate(text.splitlines(), start=1):
+        code = line.split("#", 1)[0]
+        if IMPORTER_EXECUTION_RULE_PATTERN.search(
+            code
+        ) or IMPORTER_EXECUTION_TOOL_PATTERN.search(code):
+            findings.append(
+                (
+                    line_number,
+                    "importer tests must stop at verified IR; execution belongs "
+                    "to the IR corpus and target qualification",
+                    code.strip(),
+                )
+            )
+    return findings
+
+
 def _scan_target_execution_text(
     relative_path: str, text: str
 ) -> list[tuple[int, str, str]]:
@@ -620,6 +661,7 @@ def _scan_source(relative_path: str, text: str) -> list[Finding]:
     for scan in (
         _scan_core_tooling_flags_text,
         _scan_tooling_target_ownership_text,
+        _scan_importer_execution_text,
         _scan_target_execution_text,
         _scan_spirv_backend_text,
     ):
@@ -645,52 +687,14 @@ def _source_inputs(manifest: Path | None) -> list[tuple[str, Path]]:
     ]
 
 
-def _expect_spirv_self_test(
-    name: str, relative_path: str, text: str, expected_messages: tuple[str, ...]
+def _expect_ownership_self_test(
+    scan: Callable[[str, str], list[tuple[int, str, str]]],
+    name: str,
+    relative_path: str,
+    text: str,
+    expected_messages: tuple[str, ...],
 ) -> bool:
-    findings = _scan_spirv_backend_text(relative_path, text)
-    messages = tuple(finding[1] for finding in findings)
-    if messages == expected_messages:
-        print(f"  PASS  {name}")
-        return True
-    print(f"  FAIL  {name}")
-    print(f"        expected: {expected_messages!r}")
-    print(f"        actual:   {messages!r}")
-    return False
-
-
-def _expect_core_tooling_flags_self_test(
-    name: str, relative_path: str, text: str, expected_messages: tuple[str, ...]
-) -> bool:
-    findings = _scan_core_tooling_flags_text(relative_path, text)
-    messages = tuple(finding[1] for finding in findings)
-    if messages == expected_messages:
-        print(f"  PASS  {name}")
-        return True
-    print(f"  FAIL  {name}")
-    print(f"        expected: {expected_messages!r}")
-    print(f"        actual:   {messages!r}")
-    return False
-
-
-def _expect_target_execution_self_test(
-    name: str, relative_path: str, text: str, expected_messages: tuple[str, ...]
-) -> bool:
-    findings = _scan_target_execution_text(relative_path, text)
-    messages = tuple(finding[1] for finding in findings)
-    if messages == expected_messages:
-        print(f"  PASS  {name}")
-        return True
-    print(f"  FAIL  {name}")
-    print(f"        expected: {expected_messages!r}")
-    print(f"        actual:   {messages!r}")
-    return False
-
-
-def _expect_tooling_target_ownership_self_test(
-    name: str, relative_path: str, text: str, expected_messages: tuple[str, ...]
-) -> bool:
-    findings = _scan_tooling_target_ownership_text(relative_path, text)
+    findings = scan(relative_path, text)
     messages = tuple(finding[1] for finding in findings)
     if messages == expected_messages:
         print(f"  PASS  {name}")
@@ -735,114 +739,198 @@ def _run_self_tests() -> int:
     ok = True
     print("loom-source-lint: self-test")
     ok &= _expect_utf8_source_read_self_test()
-    ok &= _expect_spirv_self_test(
+    ok &= _expect_ownership_self_test(
+        _scan_spirv_backend_text,
         "SPIR-V small source passes",
         "loom/src/loom/target/emit/spirv/packet_rows.c",
         "void f(void) {}\n",
         (),
     )
-    ok &= _expect_spirv_self_test(
+    ok &= _expect_ownership_self_test(
+        _scan_spirv_backend_text,
         "SPIR-V oversized source fails",
         "loom/src/loom/target/emit/spirv/module_emitter.c",
         "\n".join("line" for _ in range(SPIRV_BACKEND_SOURCE_LINE_LIMIT + 1)),
         ("SPIR-V backend source exceeds the reviewed file-size ceiling",),
     )
-    ok &= _expect_spirv_self_test(
+    ok &= _expect_ownership_self_test(
+        _scan_spirv_backend_text,
         "SPIR-V internal header path fails",
         "loom/src/loom/target/emit/spirv/lower/internal.h",
         "",
         ("SPIR-V backend must not use internal.h-style umbrella headers",),
     )
-    ok &= _expect_spirv_self_test(
+    ok &= _expect_ownership_self_test(
+        _scan_spirv_backend_text,
         "SPIR-V internal header include fails",
         "loom/src/loom/target/emit/spirv/packet.c",
         '#include "loom/target/emit/spirv/lower/internal.h"\n',
         ("SPIR-V backend must not include internal.h-style umbrellas",),
     )
-    ok &= _expect_spirv_self_test(
+    ok &= _expect_ownership_self_test(
+        _scan_spirv_backend_text,
         "non-SPIR-V internal header is out of scope",
         "runtime/src/iree/tooling/profile/internal.h",
         "",
         (),
     )
-    ok &= _expect_core_tooling_flags_self_test(
+    ok &= _expect_ownership_self_test(
+        _scan_core_tooling_flags_text,
         "core tooling flags include fails",
         "loom/src/loom/sanitizer/options.c",
         '#include "iree/base/tooling/flags.h"\n',
         ("core Loom compiler source must not include tooling flags",),
     )
-    ok &= _expect_core_tooling_flags_self_test(
+    ok &= _expect_ownership_self_test(
+        _scan_core_tooling_flags_text,
         "core IREE flag macro fails",
         "loom/src/loom/sanitizer/options.c",
         'IREE_FLAG(string, sanitizer, "none", "Sanitizers");\n',
         ("core Loom compiler source must not define command-line flags",),
     )
-    ok &= _expect_core_tooling_flags_self_test(
+    ok &= _expect_ownership_self_test(
+        _scan_core_tooling_flags_text,
         "tooling flags include is in scope",
         "loom/src/loom/tooling/sanitizer/options_cli.h",
         '#include "iree/base/tooling/flags.h"\n',
         (),
     )
-    ok &= _expect_core_tooling_flags_self_test(
+    ok &= _expect_ownership_self_test(
+        _scan_core_tooling_flags_text,
         "test flags include is in scope",
         "loom/src/loom/sanitizer/options_test.cc",
         '#include "iree/base/tooling/flags.h"\n',
         (),
     )
-    ok &= _expect_tooling_target_ownership_self_test(
+    for rule in (
+        "loom_test",
+        "loom_test_module",
+        "loom_library",
+        "loom_module",
+        "loom_kernel_library",
+        "loom_kernel_binary",
+        "loom_corpus_build",
+        "loom_corpus_test",
+        "loom_scenario_test",
+        "loom_model",
+        "loom_execution_profile",
+    ):
+        ok &= _expect_ownership_self_test(
+            _scan_importer_execution_text,
+            f"importer runtime rule {rule} fails",
+            "loom/src/loom/import/cxx/test/BUILD.bazel",
+            f'{rule}(name = "execute")\n',
+            (
+                "importer tests must stop at verified IR; execution belongs "
+                "to the IR corpus and target qualification",
+            ),
+        )
+    for label, text, fails in (
+        ("compiler assertion", 'loom_check_test(name = "import")\n', False),
+        ("comment", '# loom_test(name = "execute")\n', False),
+        (
+            "aliased runtime macro",
+            'load("//loom/build_tools/bazel:defs.bzl", run = "loom_test")\n',
+            True,
+        ),
+        ("VM profile", "execution_profiles = [VM_REFERENCE_PROFILE]\n", True),
+        ("CPU profile", "execution_profiles = [X86_TASK_HARDWARE_PROFILE]\n", True),
+        ("GPU profile", "execution_profiles = [AMD_GPU_HARDWARE_PROFILE]\n", True),
+        ("CLI runtime", 'src = "//loom/src/loom/tools/loom-run"\n', True),
+        ("import CLI", 'src = "//loom/src/loom/tools/loom-import-cxx"\n', False),
+    ):
+        ok &= _expect_ownership_self_test(
+            _scan_importer_execution_text,
+            f"importer boundary: {label}",
+            "loom/src/loom/import/cxx/test/BUILD.bazel",
+            text,
+            (
+                "importer tests must stop at verified IR; execution belongs "
+                "to the IR corpus and target qualification",
+            )
+            if fails
+            else (),
+        )
+    ok &= _expect_ownership_self_test(
+        _scan_importer_execution_text,
+        "importer tooling also stops at verified IR",
+        "loom/src/loom/import/cxx/tooling/BUILD.bazel",
+        'loom_test(name = "source_test")\n',
+        (
+            "importer tests must stop at verified IR; execution belongs "
+            "to the IR corpus and target qualification",
+        ),
+    )
+    ok &= _expect_ownership_self_test(
+        _scan_importer_execution_text,
+        "target execution remains target-owned",
+        "loom/target/x86/test/BUILD.bazel",
+        'loom_test(name = "execute")\n',
+        (),
+    )
+    ok &= _expect_ownership_self_test(
+        _scan_tooling_target_ownership_text,
         "target tooling manifest passes",
         "loom/src/loom/tooling/target/amdgpu/test/BUILD.bazel",
         (
-            "iree_execution_test_suite(\n"
+            "iree_cli_test(\n"
             '    name = "compile",\n'
             '    data = ["//loom/src/loom/tooling/target/amdgpu/testdata:input.loom"],\n'
             ")\n"
         ),
         (),
     )
-    ok &= _expect_tooling_target_ownership_self_test(
+    ok &= _expect_ownership_self_test(
+        _scan_tooling_target_ownership_text,
         "target tooling semantic test fails",
         "loom/src/loom/tooling/target/amdgpu/test/BUILD.bazel",
         'loom_test(name = "semantic", src = "input.loom")\n',
         ("target tooling packages must not own Loom semantic build or test rules",),
     )
-    ok &= _expect_tooling_target_ownership_self_test(
+    ok &= _expect_ownership_self_test(
+        _scan_tooling_target_ownership_text,
         "target tooling semantic library fails",
         "loom/src/loom/tooling/target/amdgpu/test/BUILD.bazel",
         'loom_library(name = "semantic", srcs = ["input.loom"])\n',
         ("target tooling packages must not own Loom semantic build or test rules",),
     )
-    ok &= _expect_tooling_target_ownership_self_test(
+    ok &= _expect_ownership_self_test(
+        _scan_tooling_target_ownership_text,
         "commented target tooling semantic rule passes",
         "loom/src/loom/tooling/target/amdgpu/test/BUILD.bazel",
         '# loom_corpus_test(name = "semantic")\n',
         (),
     )
-    ok &= _expect_tooling_target_ownership_self_test(
+    ok &= _expect_ownership_self_test(
+        _scan_tooling_target_ownership_text,
         "target semantic tests remain target-owned",
         "loom/src/loom/target/arch/amdgpu/test/BUILD.bazel",
         'loom_test(name = "semantic", src = "input.loom")\n',
         (),
     )
-    ok &= _expect_target_execution_self_test(
+    ok &= _expect_ownership_self_test(
+        _scan_target_execution_text,
         "target catalog qualification package passes",
         "loom/target/amdgpu/test/native/BUILD.bazel",
         'src = "//loom/src/loom/tools/loom-test"\n',
         (),
     )
-    ok &= _expect_target_execution_self_test(
+    ok &= _expect_ownership_self_test(
+        _scan_target_execution_text,
         "target-owned qualification package fails",
         "loom/src/loom/target/arch/amdgpu/test/BUILD.bazel",
         'src = "//loom/src/loom/tools/loom-test"\n',
         ("target packages must not own physical execution tests",),
     )
-    ok &= _expect_target_execution_self_test(
+    ok &= _expect_ownership_self_test(
+        _scan_target_execution_text,
         "target-owned qualification tool fails",
         "loom/src/loom/target/arch/amdgpu/test/BUILD.bazel",
         ('tools = {"loom-test": "//loom/src/loom/tools/loom-test"}\n'),
         ("target packages must not own physical execution tests",),
     )
-    ok &= _expect_target_execution_self_test(
+    ok &= _expect_ownership_self_test(
+        _scan_target_execution_text,
         "physical tool visibility grant passes",
         "loom/src/loom/target/arch/amdgpu/BUILD.bazel",
         (
@@ -851,19 +939,22 @@ def _run_self_tests() -> int:
         ),
         (),
     )
-    ok &= _expect_target_execution_self_test(
+    ok &= _expect_ownership_self_test(
+        _scan_target_execution_text,
         "execution package visibility grant passes",
         "loom/src/loom/target/arch/amdgpu/BUILD.bazel",
         ('_EXECUTION_VISIBILITY = ["//loom/src/loom/tooling/execution/hal:__pkg__"]\n'),
         (),
     )
-    ok &= _expect_target_execution_self_test(
+    ok &= _expect_ownership_self_test(
+        _scan_target_execution_text,
         "commented execution dependency passes",
         "loom/src/loom/target/arch/amdgpu/BUILD.bazel",
         ('# deps = [\n#     "//loom/src/loom/tooling/execution/hal:runtime",\n# ]\n'),
         (),
     )
-    ok &= _expect_target_execution_self_test(
+    ok &= _expect_ownership_self_test(
+        _scan_target_execution_text,
         "target execution-internal dependency fails",
         "loom/src/loom/target/arch/amdgpu/BUILD.bazel",
         ('deps = [\n    "//loom/src/loom/tooling/execution/hal:runtime",\n]\n'),
@@ -872,7 +963,8 @@ def _run_self_tests() -> int:
             "mechanism internals",
         ),
     )
-    ok &= _expect_target_execution_self_test(
+    ok &= _expect_ownership_self_test(
+        _scan_target_execution_text,
         "target execution-internal include fails",
         "loom/src/loom/target/arch/amdgpu/run.c",
         '#include "loom/tooling/execution/hal/runtime.h"\n',
@@ -881,7 +973,8 @@ def _run_self_tests() -> int:
             "mechanism internals",
         ),
     )
-    ok &= _expect_target_execution_self_test(
+    ok &= _expect_ownership_self_test(
+        _scan_target_execution_text,
         "target private execution stack fails",
         "loom/src/loom/target/arch/amdgpu/run.c",
         "void loom_run_hal_backend(void) {}\n",

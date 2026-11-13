@@ -7,9 +7,9 @@
 #include "loom/codegen/low/lower/lower.h"
 
 void loom_low_lower_policy_registry_initialize_from_entries(
-    loom_low_lower_policy_registry_t* out_registry,
     const loom_low_lower_policy_registry_entry_t* entries,
-    iree_host_size_t entry_count) {
+    iree_host_size_t entry_count,
+    loom_low_lower_policy_registry_t* out_registry) {
   *out_registry = (loom_low_lower_policy_registry_t){
       .entries = entries,
       .entry_count = entry_count,

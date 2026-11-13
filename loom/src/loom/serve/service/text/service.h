@@ -7,12 +7,12 @@
 #ifndef LOOM_SERVE_SERVICE_TEXT_SERVICE_H_
 #define LOOM_SERVE_SERVICE_TEXT_SERVICE_H_
 
-#include "loom/serve/service/finite/component.h"
 #include "loom/serve/service/service.h"
 #include "loom/serve/service/text/checkpoint_control.h"
 #include "loom/serve/service/text/model.h"
 #include "loom/serve/service/text/schedule.h"
 #include "loom/serve/service/text/stream.h"
+#include "loom/service/finite/component.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -25,7 +25,7 @@ typedef struct loom_serve_text_service_options_t {
   // Optional borrowed image component, outliving this service. Text creation,
   // activation and ordinary requests do not start its preparation. Accepted
   // preparation is advanced/joined by the service's serialized owner.
-  loom_serve_finite_component_t* image;
+  loom_service_finite_component_t* image;
   // Initial resident capacity, matching the model at service creation. The
   // directory grows as requests arrive; memory credit gates active requests.
   iree_host_size_t row_count;

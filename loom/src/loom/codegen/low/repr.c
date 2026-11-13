@@ -42,12 +42,14 @@ static bool loom_low_repr_resolve_descriptor_impl(
   }
   const loom_low_descriptor_t* descriptor =
       &descriptor_set->descriptors[ordinal];
+  loom_memory_space_mask_t read_spaces = 0;
   loom_memory_space_mask_t write_spaces = 0;
   const loom_trait_flags_t traits = loom_low_descriptor_effective_traits(
-      descriptor_set, descriptor, &write_spaces);
+      descriptor_set, descriptor, &read_spaces, &write_spaces);
   *out_value = (loom_low_repr_descriptor_value_t){
       .ordinal = ordinal,
       .effective_traits = traits,
+      .intrinsic_read_spaces = read_spaces,
       .intrinsic_write_spaces = write_spaces,
   };
   return true;
@@ -65,8 +67,9 @@ static iree_string_view_t loom_low_repr_descriptor_key_impl(
   if (!descriptor) {
     return iree_string_view_empty();
   }
-  return loom_low_descriptor_set_string(descriptor_set,
-                                        descriptor->key_string_ref);
+  return loom_low_descriptor_set_string(
+      descriptor_set,
+      loom_low_descriptor_key_string_ref(descriptor_set, descriptor));
 }
 
 static iree_status_t loom_low_repr_resolve_packet_attributes_impl(

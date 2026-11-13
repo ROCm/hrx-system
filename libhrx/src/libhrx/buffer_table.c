@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Buffer table: maps device/host pointers to hrx_buffer_t handles.
-// Unified implementation used by both libhrx and the HIP/CUDA bindings.
+// Unified implementation used by libhrx and the HIP binding.
 
 #include "buffer_table.h"
 
@@ -190,20 +190,63 @@ static void hrx_buffer_table_insert_range_locked(hrx_buffer_table_t* table,
   ++table->range_count;
 }
 
+// Removes an entry's aliases before the caller relocates the last dense entry.
+// All alias bases are unique and remain stable while the table lock is held.
 static void hrx_buffer_table_remove_entry_ranges_locked(
     hrx_buffer_table_t* table, size_t entry_index, size_t last_entry_index) {
-  size_t output_index = 0;
-  for (size_t i = 0; i < table->range_count; ++i) {
-    hrx_buffer_table_range_index_t range = table->range_index[i];
-    if (range.entry_index == entry_index) {
-      continue;
+  const hrx_buffer_table_entry_t* entry = &table->entries[entry_index];
+
+  size_t first_range =
+      hrx_buffer_table_range_lower_bound(table, entry->device_ptr);
+  const uint64_t host_address = (uint64_t)(uintptr_t)entry->host_ptr;
+  const bool has_host_alias =
+      entry->host_ptr && host_address != entry->device_ptr;
+  size_t second_range = table->range_count;
+  if (has_host_alias) {
+    second_range = hrx_buffer_table_range_lower_bound(table, host_address);
+    if (second_range < first_range) {
+      const size_t swap = first_range;
+      first_range = second_range;
+      second_range = swap;
     }
-    if (range.entry_index == last_entry_index) {
-      range.entry_index = entry_index;
-    }
-    table->range_index[output_index++] = range;
   }
-  table->range_count = output_index;
+  IREE_ASSERT(first_range < table->range_count &&
+              table->range_index[first_range].entry_index == entry_index);
+
+  // Preserve the prefix and move each surviving suffix record once. With two
+  // aliases, the middle segment crosses one gap and the final segment crosses
+  // both. Either segment may be empty, including removal at the end of the
+  // index.
+  if (has_host_alias) {
+    IREE_ASSERT(second_range < table->range_count &&
+                table->range_index[second_range].entry_index == entry_index);
+    memmove(&table->range_index[first_range],
+            &table->range_index[first_range + 1],
+            (second_range - first_range - 1) * sizeof(*table->range_index));
+    memmove(
+        &table->range_index[second_range - 1],
+        &table->range_index[second_range + 1],
+        (table->range_count - second_range - 1) * sizeof(*table->range_index));
+    table->range_count -= 2;
+  } else {
+    memmove(
+        &table->range_index[first_range], &table->range_index[first_range + 1],
+        (table->range_count - first_range - 1) * sizeof(*table->range_index));
+    --table->range_count;
+  }
+
+  // Update range mappings for the last entry being moved into this slot.
+  if (entry_index != last_entry_index) {
+    const hrx_buffer_table_entry_t* moved = &table->entries[last_entry_index];
+    size_t position =
+        hrx_buffer_table_range_lower_bound(table, moved->device_ptr);
+    table->range_index[position].entry_index = entry_index;
+    const uint64_t moved_host_address = (uint64_t)(uintptr_t)moved->host_ptr;
+    if (moved->host_ptr && moved_host_address != moved->device_ptr) {
+      position = hrx_buffer_table_range_lower_bound(table, moved_host_address);
+      table->range_index[position].entry_index = entry_index;
+    }
+  }
 }
 
 hrx_status_t hrx_buffer_table_insert(hrx_buffer_table_t* table,

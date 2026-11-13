@@ -15,8 +15,6 @@
 #include <optional>
 #include <span>
 #include <string_view>
-#include <utility>
-#include <vector>
 
 #include "loom/import/cxx/value/representation.h"
 #include "loom/ops/op_defs.h"
@@ -38,11 +36,28 @@ class TemplateApplyIntrinsic {
     cxx::FunctionSymbol* function = nullptr;
     // Lazily materialized declaration, absent until a reached call needs it.
     loom_op_t* declaration = nullptr;
+    // Borrowed frontend-owned semantic parameter types in source order.
+    std::span<const cxx::Type* const> parameter_types;
+    // Flattened High argument count established during source admission.
+    size_t argument_component_count = 0;
+    // Frontend-owned result type, or null for a void declaration.
+    const cxx::Type* result_type = nullptr;
+    // Source declaration location shared by every application binding.
+    loom_location_id_t declaration_location = LOOM_LOCATION_UNKNOWN;
   };
 
   static bool supports(std::string_view name) {
     return name == "template.apply";
   }
+
+  // Whether the binding names its family through a C++ template argument.
+  static bool is_explicit(const cxx::Attribute& attribute);
+
+  // Resolves the concrete helper's first template argument to a source
+  // function.
+  static cxx::FunctionSymbol* resolve_family_argument(
+      cxx::TranslationUnit& unit, Diagnostics& diagnostics,
+      cxx::FunctionSymbol* function, cxx::AST* owner);
 
   // Returns the family spelling after validating the operation arguments.
   static std::optional<std::string_view> admit(cxx::TranslationUnit& unit,
@@ -55,6 +70,14 @@ class TemplateApplyIntrinsic {
       cxx::TranslationUnit& unit, Diagnostics& diagnostics, Types& types,
       FunctionContracts& contracts, cxx::FunctionSymbol* function,
       Family* family, loom_location_id_t declaration_location, cxx::AST* owner);
+
+  // Admits one concrete explicit helper against this family's source signature.
+  // The returned binding borrows the same family schema without copying it.
+  TemplateApplyIntrinsic bind_application(cxx::TranslationUnit& unit,
+                                          Diagnostics& diagnostics,
+                                          Types& types,
+                                          cxx::FunctionSymbol* function,
+                                          cxx::AST* owner) const;
 
   // Emits one family application after the caller has evaluated each operand.
   std::optional<Value> call(std::span<const Value> arguments, Types& types,
@@ -76,26 +99,13 @@ class TemplateApplyIntrinsic {
   }
 
  private:
-  TemplateApplyIntrinsic(Family* family, FunctionContracts& contracts,
-                         std::vector<const cxx::Type*> parameter_types,
-                         const cxx::Type* result_type,
-                         loom_location_id_t declaration_location)
-      : family_(family),
-        contracts_(&contracts),
-        parameter_types_(std::move(parameter_types)),
-        result_type_(result_type),
-        declaration_location_(declaration_location) {}
+  TemplateApplyIntrinsic(Family* family, FunctionContracts& contracts)
+      : family_(family), contracts_(&contracts) {}
 
   // Link-selected family retained by the owning Intrinsics registry.
   Family* family_;
   // Invocation-owned callable contracts projected onto the family declaration.
   FunctionContracts* contracts_;
-  // Frontend-owned semantic parameter types in source order.
-  std::vector<const cxx::Type*> parameter_types_;
-  // Frontend-owned semantic result type, or null for a void declaration.
-  const cxx::Type* result_type_;
-  // Source declaration location retained for linker-facing diagnostics.
-  loom_location_id_t declaration_location_;
 };
 
 }  // namespace loom::cxx_import

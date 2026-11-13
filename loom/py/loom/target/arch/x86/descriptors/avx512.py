@@ -21,6 +21,7 @@ from loom.target.arch.x86.vector_families import (
     AVX512_FLOAT_INTEGER_I32_FORMS,
     AVX512_FLOAT_INTEGER_I64_FORMS,
     AVX512_FLOAT_ROOT_FAMILIES,
+    AVX512_FLOAT_ROUNDING_FAMILIES,
     AVX512_INTEGER_BINARY_FAMILIES,
     AVX512_INTEGER_COMPARE_MNEMONICS,
     AVX512_INTEGER_FLOAT_I32_FORMS,
@@ -110,6 +111,7 @@ from .common import (
     _vector_lane_units,
     _vector_mask_compare_descriptor,
     _vector_mask_select_descriptor,
+    _vector_ones_descriptor,
     _vector_operand,
     _vector_result,
     _vector_splat_descriptor,
@@ -125,6 +127,7 @@ from .float_integer import (
     scalar_float_integer_descriptors,
     vector_float_integer_descriptors,
 )
+from .float_rounding import float_rounding_descriptors
 from .half_conversion import half_conversion_descriptors
 from .integer_float import (
     integer_float_descriptors,
@@ -870,6 +873,18 @@ X86_AVX512_CORE_DESCRIPTOR_SET = DescriptorSet(
             scalar=False,
         ),
         *(
+            _avx512_descriptor(
+                _vector_ones_descriptor(
+                    vector_bit_width=width,
+                    key=f"x86.avx512.vpternlogd.ones.{suffix}",
+                    mnemonic="vpternlogd",
+                ),
+                native.VPTERNLOGD_ONES,
+                scalar=False,
+            )
+            for width, suffix in ((128, "xmm"), (256, "ymm"), (512, "zmm"))
+        ),
+        *(
             _zmm_widen_descriptor(
                 mnemonic,
                 512 * family.source.bit_width // family.result.bit_width,
@@ -1060,6 +1075,12 @@ X86_AVX512_CORE_DESCRIPTOR_SET = DescriptorSet(
                 native.AVX2_FLOAT_BINARY,
                 strict=True,
             )
+        ),
+        *float_rounding_descriptors(
+            key_prefix="x86.avx512",
+            families=AVX512_FLOAT_ROUNDING_FAMILIES,
+            vector_bit_widths=(128, 256, 512),
+            evex=True,
         ),
         *(
             _avx512_descriptor(

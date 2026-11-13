@@ -3,7 +3,7 @@
 func.def @atomic_reduce_static(%buffer: buffer, %byte_offset: offset, %value: vector<2xi32>, %offsets: vector<2xindex>) {
   %layout = encoding.layout.dense : encoding<layout>
   %view = buffer.view %buffer[%byte_offset] : buffer -> view<8xi32, %layout>
-  vector.atomic.reduce<addi> %value, %view[3][%offsets] {cache_scope = device, cache_temporal = non_temporal, ordering = relaxed, scope = workgroup} : vector<2xi32>, view<8xi32, %layout>, vector<2xindex>
+  vector.atomic.reduce<addi, root_in_bounds> %value, %view[3][%offsets] {cache_scope = device, cache_temporal = non_temporal, ordering = relaxed, scope = workgroup} : vector<2xi32>, view<8xi32, %layout>, vector<2xindex>
   func.return
 }
 
@@ -15,12 +15,12 @@ func.def @atomic_reduce_static(%buffer: buffer, %byte_offset: offset, %value: ve
   %7 = vector.extract %offsets[0] : vector<2xindex> -> index
   %8 = index.constant 3 : index
   %9 = index.add %8, %7 : index
-  view.atomic.reduce<addi> %6, %view[%9] {cache_scope = device, cache_temporal = non_temporal, ordering = relaxed, scope = workgroup} : i32, view<8xi32, %layout>
+  view.atomic.reduce<addi, root_in_bounds> %6, %view[%9] {cache_scope = device, cache_temporal = non_temporal, ordering = relaxed, scope = workgroup} : i32, view<8xi32, %layout>
   %10 = vector.extract %value[1] : vector<2xi32> -> i32
   %11 = vector.extract %offsets[1] : vector<2xindex> -> index
   %12 = index.constant 3 : index
   %13 = index.add %12, %11 : index
-  view.atomic.reduce<addi> %10, %view[%13] {cache_scope = device, cache_temporal = non_temporal, ordering = relaxed, scope = workgroup} : i32, view<8xi32, %layout>
+  view.atomic.reduce<addi, root_in_bounds> %10, %view[%13] {cache_scope = device, cache_temporal = non_temporal, ordering = relaxed, scope = workgroup} : i32, view<8xi32, %layout>
   func.return
 }
 
@@ -247,7 +247,7 @@ func.def @atomic_rmw_mask_dynamic(%n: index, %buffer: buffer, %byte_offset: offs
 func.def @atomic_cmpxchg_static(%buffer: buffer, %byte_offset: offset, %expected: vector<2xi32>, %replacement: vector<2xi32>, %offsets: vector<2xindex>) -> (vector<2xi32>) {
   %layout = encoding.layout.dense : encoding<layout>
   %view = buffer.view %buffer[%byte_offset] : buffer -> view<8xi32, %layout>
-  %old = vector.atomic.cmpxchg %expected, %replacement, %view[3][%offsets] {cache_scope = device, cache_temporal = non_temporal, failure_ordering = acquire, scope = workgroup, success_ordering = acq_rel} : vector<2xi32>, view<8xi32, %layout>, vector<2xindex> -> vector<2xi32>
+  %old = vector.atomic.cmpxchg<root_in_bounds> %expected, %replacement, %view[3][%offsets] {cache_scope = device, cache_temporal = non_temporal, failure_ordering = acquire, scope = workgroup, success_ordering = acq_rel} : vector<2xi32>, view<8xi32, %layout>, vector<2xindex> -> vector<2xi32>
   func.return %old : vector<2xi32>
 }
 
@@ -260,13 +260,13 @@ func.def @atomic_cmpxchg_static(%buffer: buffer, %byte_offset: offset, %expected
   %11 = vector.extract %offsets[0] : vector<2xindex> -> index
   %12 = index.constant 3 : index
   %13 = index.add %12, %11 : index
-  %14 = view.atomic.cmpxchg %9, %10, %view[%13] {cache_scope = device, cache_temporal = non_temporal, failure_ordering = acquire, scope = workgroup, success_ordering = acq_rel} : i32, view<8xi32, %layout> -> i32
+  %14 = view.atomic.cmpxchg<root_in_bounds> %9, %10, %view[%13] {cache_scope = device, cache_temporal = non_temporal, failure_ordering = acquire, scope = workgroup, success_ordering = acq_rel} : i32, view<8xi32, %layout> -> i32
   %15 = vector.extract %expected[1] : vector<2xi32> -> i32
   %16 = vector.extract %replacement[1] : vector<2xi32> -> i32
   %17 = vector.extract %offsets[1] : vector<2xindex> -> index
   %18 = index.constant 3 : index
   %19 = index.add %18, %17 : index
-  %20 = view.atomic.cmpxchg %15, %16, %view[%19] {cache_scope = device, cache_temporal = non_temporal, failure_ordering = acquire, scope = workgroup, success_ordering = acq_rel} : i32, view<8xi32, %layout> -> i32
+  %20 = view.atomic.cmpxchg<root_in_bounds> %15, %16, %view[%19] {cache_scope = device, cache_temporal = non_temporal, failure_ordering = acquire, scope = workgroup, success_ordering = acq_rel} : i32, view<8xi32, %layout> -> i32
   %old = vector.from_elements %14, %20 : vector<2xi32>
   func.return %old : vector<2xi32>
 }

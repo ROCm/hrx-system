@@ -1,0 +1,295 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+#include "iree/hal/driver/amd/gpu/queue/aql/ring.h"
+
+#include <array>
+#include <cstring>
+
+#include "iree/testing/gtest.h"
+
+namespace {
+
+class RingTest : public ::testing::Test {
+ protected:
+  void SetUp() override {
+    for (auto& packet : packets_) {
+      for (uint32_t& word : packet.words) {
+        word = 0xa5a5a5a5;
+      }
+      packet.words[0] = IREE_HAL_AMD_GPU_AQL_HEADER_INVALID;
+    }
+    iree_hal_amd_gpu_aql_ring_initialize(
+        packets_.data(), 0x123400001000, packets_.size(), &read_index_,
+        &write_index_, &doorbell_, AMDF_CACHE_TRANSITION_EXECUTOR_NONE, &ring_);
+  }
+
+  // Dependency-owned native storage; this fixture models consumption only.
+  std::array<iree_hal_amd_gpu_aql_packet_t, 8> packets_;
+  // Firmware-owned consumption index.
+  iree_atomic_int64_t read_index_ = IREE_ATOMIC_VAR_INIT(0);
+  // Native reservation index, published before a packet header.
+  iree_atomic_int64_t write_index_ = IREE_ATOMIC_VAR_INIT(0);
+  // Host-memory stand-in for the write-only native notification aperture.
+  uint64_t doorbell_ = UINT64_MAX;
+  // Actual publication implementation under test.
+  iree_hal_amd_gpu_aql_ring_t ring_;
+};
+
+TEST_F(RingTest, DeviceProducedHeaderRemainsInvalidAtHostNotification) {
+  uint64_t position = UINT64_MAX;
+  ASSERT_TRUE(iree_hal_amd_gpu_aql_ring_try_reserve(&ring_, 2, &position));
+  EXPECT_EQ(position, 0u);
+  EXPECT_EQ(iree_atomic_load(&write_index_, iree_memory_order_relaxed), 2);
+  const auto prepare = iree_hal_amd_gpu_aql_packet_barrier(
+      IREE_HAL_AMD_GPU_AQL_HEADER_BARRIER_AND, 0, nullptr, 0x123456780040);
+  auto target = prepare;
+  target.words[0] = IREE_HAL_AMD_GPU_AQL_HEADER_DISPATCH | (1u << 16);
+  iree_hal_amd_gpu_aql_ring_write_body(&ring_, position, &prepare);
+  iree_hal_amd_gpu_aql_ring_write_body(&ring_, position + 1, &target);
+  EXPECT_EQ(packets_[0].words[0], IREE_HAL_AMD_GPU_AQL_HEADER_INVALID);
+  EXPECT_EQ(packets_[1].words[0], IREE_HAL_AMD_GPU_AQL_HEADER_INVALID);
+  ASSERT_EQ(iree_hal_amd_gpu_aql_ring_publish_header(&ring_, nullptr, position,
+                                                     prepare.words[0]),
+            AMDF_STATUS_OK);
+  iree_hal_amd_gpu_aql_ring_notify(&ring_);
+  EXPECT_EQ(doorbell_, 1u);
+  EXPECT_EQ(std::memcmp(&packets_[0], &prepare, sizeof(prepare)), 0);
+  EXPECT_EQ(packets_[1].words[0], IREE_HAL_AMD_GPU_AQL_HEADER_INVALID);
+  EXPECT_EQ(std::memcmp(packets_[1].words + 1, target.words + 1, 60), 0);
+  // Native GPU fixup owns the second header; the host never rewrites it.
+}
+
+TEST_F(RingTest, NativeReleasePrecedesHeaderAndPreservesFailure) {
+  struct Publication {
+    // Emulated native command backing observed by the release dependency.
+    iree_hal_amd_gpu_aql_packet_t* packet;
+    // Native result supplied below the real publisher.
+    amdf_status_t status;
+    // Number of native release invocations.
+    uint32_t calls;
+  } publication = {packets_.data(), AMDF_STATUS_OK, 0};
+  const amdf_api_t api = {
+      .user_queue_mapping_flush =
+          [](amdf_user_queue_mapping_t* mapping) {
+            auto* publication = reinterpret_cast<Publication*>(mapping);
+            ++publication->calls;
+            EXPECT_EQ(publication->packet->words[0],
+                      IREE_HAL_AMD_GPU_AQL_HEADER_INVALID);
+            EXPECT_EQ(publication->packet->words[14], 0x12340000u);
+            return publication->status;
+          },
+  };
+  const iree_hal_amd_gpu_context_t context = {.api = &api};
+  const iree_hal_amd_gpu_user_queue_t storage = {
+      .context = &context,
+      .mapping = reinterpret_cast<amdf_user_queue_mapping_t*>(&publication),
+      .host_publish_executor = AMDF_CACHE_TRANSITION_EXECUTOR_HOST_API,
+  };
+  ring_.host_publish_executor = AMDF_CACHE_TRANSITION_EXECUTOR_HOST_API;
+  const auto packet = iree_hal_amd_gpu_aql_packet_barrier(
+      IREE_HAL_AMD_GPU_AQL_HEADER_BARRIER_AND, 0, nullptr, 0x12340000);
+  uint64_t position = 0;
+  ASSERT_TRUE(iree_hal_amd_gpu_aql_ring_try_reserve(&ring_, 2, &position));
+  iree_hal_amd_gpu_aql_ring_write_body(&ring_, position, &packet);
+  ASSERT_EQ(iree_hal_amd_gpu_aql_ring_publish_header(&ring_, &storage, position,
+                                                     packet.words[0]),
+            AMDF_STATUS_OK);
+  EXPECT_EQ(packets_[0].words[0], packet.words[0]);
+  EXPECT_EQ(publication.calls, 1u);
+
+  publication.packet = &packets_[1];
+  publication.status = amdf_make_api_status(AMDF_STATUS_CODE_DEVICE_LOST);
+  iree_hal_amd_gpu_aql_ring_write_body(&ring_, position + 1, &packet);
+  EXPECT_EQ(iree_hal_amd_gpu_aql_ring_publish_header(
+                &ring_, &storage, position + 1, packet.words[0]),
+            publication.status);
+  EXPECT_EQ(publication.calls, 2u);
+  EXPECT_EQ(packets_[1].words[0], IREE_HAL_AMD_GPU_AQL_HEADER_INVALID);
+  EXPECT_EQ(doorbell_, UINT64_MAX);
+  EXPECT_EQ(ring_.reserved, 2u);
+  EXPECT_EQ(iree_atomic_load(&write_index_, iree_memory_order_relaxed), 2);
+}
+
+TEST_F(RingTest, CapacityPressureChangesNoReservationOrNativeBytes) {
+  uint64_t position;
+  ASSERT_TRUE(iree_hal_amd_gpu_aql_ring_try_reserve(&ring_, 8, &position));
+  const auto saved_packets = packets_;
+  position = 900;
+  EXPECT_FALSE(iree_hal_amd_gpu_aql_ring_try_reserve(&ring_, 1, &position));
+  EXPECT_EQ(position, 900u);
+  EXPECT_EQ(ring_.reserved, 8u);
+  EXPECT_EQ(iree_atomic_load(&write_index_, iree_memory_order_relaxed), 8);
+  EXPECT_EQ(doorbell_, UINT64_MAX);
+  EXPECT_EQ(
+      std::memcmp(packets_.data(), saved_packets.data(), sizeof(packets_)), 0);
+  iree_atomic_store(&read_index_, 1, iree_memory_order_release);
+  ASSERT_TRUE(iree_hal_amd_gpu_aql_ring_try_reserve(&ring_, 1, &position));
+  EXPECT_EQ(position, 8u);
+  EXPECT_EQ(ring_.consumed, 1u);
+  EXPECT_EQ(iree_hal_amd_gpu_aql_ring_packet_address(&ring_, position),
+            0x123400001000u);
+}
+
+TEST_F(RingTest, BatchReleaseSeesWholeSpanBeforeFirstHeader) {
+  struct Publication {
+    // Actual reserved ring observed by the native release dependency.
+    const iree_hal_amd_gpu_aql_ring_t* ring;
+    // Immutable complete packets expected before the first header is published.
+    const iree_hal_amd_gpu_aql_packet_t* source;
+    // Monotonic first packet position of the reserved span.
+    uint64_t position;
+    // Number of packets covered by this release.
+    uint32_t count;
+    // Native result supplied below the real publisher.
+    amdf_status_t status;
+    // Number of native release invocations.
+    uint32_t calls;
+  } publication = {};
+  const amdf_api_t api = {
+      .user_queue_mapping_flush =
+          [](amdf_user_queue_mapping_t* mapping) {
+            auto* publication = reinterpret_cast<Publication*>(mapping);
+            ++publication->calls;
+            for (uint32_t i = 0; i < publication->count; ++i) {
+              const auto& packet =
+                  publication->ring->packets[(publication->position + i) &
+                                             (publication->ring->capacity - 1)];
+              EXPECT_EQ(packet.words[0],
+                        i ? publication->source[i].words[0]
+                          : IREE_HAL_AMD_GPU_AQL_HEADER_INVALID);
+              EXPECT_EQ(std::memcmp(packet.words + 1,
+                                    publication->source[i].words + 1, 60),
+                        0);
+            }
+            return publication->status;
+          },
+  };
+  const iree_hal_amd_gpu_context_t context = {.api = &api};
+  const iree_hal_amd_gpu_user_queue_t storage = {
+      .context = &context,
+      .mapping = reinterpret_cast<amdf_user_queue_mapping_t*>(&publication),
+      .host_publish_executor = AMDF_CACHE_TRANSITION_EXECUTOR_HOST_API,
+  };
+  std::array<iree_hal_amd_gpu_aql_packet_t, 8> source;
+  for (uint32_t i = 0; i < source.size(); ++i) {
+    source[i] = iree_hal_amd_gpu_aql_packet_barrier(
+        IREE_HAL_AMD_GPU_AQL_HEADER_BARRIER_AND |
+            IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED,
+        0, nullptr, (i + 1) * 64);
+  }
+  const auto saved_source = source;
+  const auto initial_packets = packets_;
+  enum class Completion { kRetained, kCleared, kReplaced };
+  for (auto completion :
+       {Completion::kRetained, Completion::kCleared, Completion::kReplaced}) {
+    const uint64_t address =
+        completion == Completion::kReplaced ? UINT64_C(0x123456780000) : 0;
+    constexpr uint32_t kStride = 128;
+    auto expected = source;
+    if (completion != Completion::kRetained) {
+      for (uint32_t i = 0; i < expected.size(); ++i) {
+        iree_unaligned_store_le_u64(expected[i].words + 14,
+                                    address ? address + i * kStride : 0);
+      }
+    }
+    for (amdf_status_t status :
+         {AMDF_STATUS_OK, amdf_make_api_status(AMDF_STATUS_CODE_DEVICE_LOST)}) {
+      for (uint32_t first = 0; first < packets_.size(); ++first) {
+        for (uint32_t count = 1; count <= packets_.size(); ++count) {
+          SCOPED_TRACE(::testing::Message() << "status=" << status << " first="
+                                            << first << " count=" << count);
+          packets_ = initial_packets;
+          ring_.reserved = ring_.consumed = first;
+          ring_.host_publish_executor = AMDF_CACHE_TRANSITION_EXECUTOR_HOST_API;
+          uint64_t position;
+          ASSERT_TRUE(
+              iree_hal_amd_gpu_aql_ring_try_reserve(&ring_, count, &position));
+          publication = {&ring_, expected.data(), position, count, status, 0};
+          if (completion != Completion::kRetained) {
+            EXPECT_EQ(iree_hal_amd_gpu_aql_ring_write_packets_with_completion(
+                          &ring_, &storage, position, count, source.data(),
+                          address, kStride),
+                      status);
+          } else {
+            EXPECT_EQ(iree_hal_amd_gpu_aql_ring_write_packets(
+                          &ring_, &storage, position, count, source.data()),
+                      status);
+          }
+          EXPECT_EQ(publication.calls, 1u);
+          EXPECT_EQ(packets_[first].words[0],
+                    amdf_status_is_ok(status)
+                        ? source[0].words[0]
+                        : IREE_HAL_AMD_GPU_AQL_HEADER_INVALID);
+          for (uint32_t i = count; i < packets_.size(); ++i) {
+            const uint32_t slot = (first + i) % packets_.size();
+            EXPECT_EQ(std::memcmp(&packets_[slot], &initial_packets[slot],
+                                  sizeof(packets_[slot])),
+                      0);
+          }
+          EXPECT_EQ(
+              std::memcmp(source.data(), saved_source.data(), sizeof(source)),
+              0);
+          EXPECT_EQ(doorbell_, UINT64_MAX);
+          EXPECT_EQ(ring_.reserved, first + count);
+          EXPECT_EQ(iree_atomic_load(&write_index_, iree_memory_order_relaxed),
+                    first + count);
+        }
+      }
+    }
+  }
+}
+
+TEST_F(RingTest, CachedCreditAvoidsConsumptionReadsUntilNeeded) {
+  uint64_t position;
+  ASSERT_TRUE(iree_hal_amd_gpu_aql_ring_try_reserve(&ring_, 3, &position));
+  iree_atomic_store(&read_index_, 3, iree_memory_order_release);
+  ASSERT_TRUE(iree_hal_amd_gpu_aql_ring_try_reserve(&ring_, 5, &position));
+  EXPECT_EQ(position, 3u);
+  EXPECT_EQ(ring_.consumed, 0u);
+  ASSERT_TRUE(iree_hal_amd_gpu_aql_ring_try_reserve(&ring_, 2, &position));
+  EXPECT_EQ(position, 8u);
+  EXPECT_EQ(ring_.consumed, 3u);
+  ASSERT_TRUE(iree_hal_amd_gpu_aql_ring_try_reserve(&ring_, 1, &position));
+  EXPECT_EQ(position, 10u);
+  EXPECT_FALSE(iree_hal_amd_gpu_aql_ring_try_reserve(&ring_, 1, &position));
+}
+
+TEST_F(RingTest, WrapPublishesWholeHeadersFromImmutableSource) {
+  uint64_t expected_position = 0;
+  for (uint32_t round = 0; round < 131; ++round) {
+    const uint32_t count = 1 + round % 7;
+    uint64_t position;
+    ASSERT_TRUE(
+        iree_hal_amd_gpu_aql_ring_try_reserve(&ring_, count, &position));
+    ASSERT_EQ(position, expected_position);
+    for (uint32_t i = 0; i < count; ++i) {
+      const auto packet = iree_hal_amd_gpu_aql_packet_barrier(
+          IREE_HAL_AMD_GPU_AQL_HEADER_BARRIER_AND |
+              IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED,
+          0, nullptr, (position + i + 1) * 64);
+      iree_hal_amd_gpu_aql_ring_write_body(&ring_, position + i, &packet);
+      ASSERT_EQ(iree_hal_amd_gpu_aql_ring_publish_header(
+                    &ring_, nullptr, position + i, packet.words[0]),
+                AMDF_STATUS_OK);
+      EXPECT_EQ(std::memcmp(&packets_[(position + i) % packets_.size()],
+                            &packet, sizeof(packet)),
+                0);
+    }
+    iree_hal_amd_gpu_aql_ring_notify(&ring_);
+    expected_position += count;
+    EXPECT_EQ(doorbell_, expected_position - 1);
+    // Firmware invalidates slots before it returns their consumption credit.
+    for (uint32_t i = 0; i < count; ++i) {
+      packets_[(position + i) % packets_.size()].words[0] =
+          IREE_HAL_AMD_GPU_AQL_HEADER_INVALID;
+    }
+    iree_atomic_store(&read_index_, expected_position,
+                      iree_memory_order_release);
+  }
+}
+
+}  // namespace

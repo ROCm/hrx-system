@@ -15,7 +15,7 @@ namespace {
 
 TEST(CompileReportTest, RetainsAndIndexesDirectCallEvidence) {
   loom_target_compile_report_t report;
-  loom_target_compile_report_initialize(&report, iree_allocator_system());
+  loom_target_compile_report_initialize(iree_allocator_system(), &report);
   const loom_symbol_ref_t caller = {.module_id = 0, .symbol_id = 3};
   const loom_symbol_ref_t callee = {.module_id = 0, .symbol_id = 7};
   const loom_target_compile_report_call_edge_t first = {
@@ -59,7 +59,7 @@ TEST(CompileReportTest, RetainsAndIndexesDirectCallEvidence) {
 
 TEST(CompileReportTest, MergesFunctionEvidenceIntoPhysicalProgram) {
   loom_target_compile_report_t program;
-  loom_target_compile_report_initialize(&program, iree_allocator_system());
+  loom_target_compile_report_initialize(iree_allocator_system(), &program);
   program.requested_detail_flags =
       LOOM_TARGET_COMPILE_REPORT_DETAIL_CONFIG_BINDING_ROWS;
   loom_target_compile_report_record_schedule(&program, 2, 2, 1, 0, 1, 0, 0, 0,
@@ -81,7 +81,7 @@ TEST(CompileReportTest, MergesFunctionEvidenceIntoPhysicalProgram) {
   loom_target_compile_report_record_workload(&program, &workload);
 
   loom_target_compile_report_t function;
-  loom_target_compile_report_initialize(&function, iree_allocator_system());
+  loom_target_compile_report_initialize(iree_allocator_system(), &function);
   function.requested_detail_flags =
       LOOM_TARGET_COMPILE_REPORT_DETAIL_CONFIG_BINDING_ROWS;
   loom_target_compile_report_record_schedule(&function, 3, 3, 2, 0, 2, 0, 0, 1,
@@ -198,7 +198,7 @@ TEST(CompileReportTest, MergesFunctionEvidenceIntoPhysicalProgram) {
 
 TEST(CompileReportTest, AccumulatesEvidenceWithoutEntryRows) {
   loom_target_compile_report_t source;
-  loom_target_compile_report_initialize(&source, iree_allocator_system());
+  loom_target_compile_report_initialize(iree_allocator_system(), &source);
   loom_target_compile_report_record_schedule(&source, 3, 3, 2, 0, 1, 0, 0, 0,
                                              0);
   loom_target_compile_report_record_legalization_summary(
@@ -207,7 +207,7 @@ TEST(CompileReportTest, AccumulatesEvidenceWithoutEntryRows) {
       /*scalarized=*/false, /*created_op_count=*/2);
 
   loom_target_compile_report_t merged;
-  loom_target_compile_report_initialize(&merged, iree_allocator_system());
+  loom_target_compile_report_initialize(iree_allocator_system(), &merged);
   IREE_ASSERT_OK(loom_target_compile_report_merge_evidence(&merged, &source));
   IREE_ASSERT_OK(loom_target_compile_report_merge_evidence(&merged, &source));
 
@@ -221,7 +221,7 @@ TEST(CompileReportTest, AccumulatesEvidenceWithoutEntryRows) {
 
 TEST(CompileReportTest, FormatsCallEvidenceOnlyInDetailMode) {
   loom_target_compile_report_t report;
-  loom_target_compile_report_initialize(&report, iree_allocator_system());
+  loom_target_compile_report_initialize(iree_allocator_system(), &report);
   const loom_target_compile_report_call_edge_t edge = {
       .flags = LOOM_TARGET_COMPILE_REPORT_CALL_EDGE_DYNAMIC_COUNT,
       .function_name = IREE_SVL("entry"),

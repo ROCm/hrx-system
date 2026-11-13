@@ -37,6 +37,7 @@
 #include "loom/ops/kernel/ops.h"
 #include "loom/ops/low/ops.h"
 #include "loom/ops/op_defs.h"
+#include "loom/ops/ref/ops.h"
 #include "loom/ops/scf/ops.h"
 #include "loom/ops/vector/ops.h"
 #include "loom/rewrite/remap.h"
@@ -143,7 +144,11 @@ static iree_status_t loom_low_lower_map_blocks(
       (void**)&context->block_map));
   memset(context->block_map, 0, block_count * sizeof(*context->block_map));
 
-  for (uint16_t i = 0; i < source_body->block_count; ++i) {
+  // Keep appended dominators before their consumers in native layout as well
+  // as emission. The retained order preserves source order among siblings.
+  const uint16_t* block_order = context->lowering->source_plan.block_order;
+  for (uint16_t position = 0; position < source_body->block_count; ++position) {
+    const uint16_t i = block_order ? block_order[position] : position;
     loom_block_t* source_block = loom_region_block(source_body, i);
     loom_block_t* low_block = NULL;
     if (i == 0) {
@@ -228,15 +233,29 @@ iree_status_t loom_low_lower_remap_values(loom_low_lower_context_t* context,
   }
   const bool is_callable_exit =
       loom_low_lower_source_op_is_callable_exit(context, source_op);
+  const bool is_nested_exit =
+      is_callable_exit && source_op->parent_block->parent_region !=
+                              loom_func_like_body(context->source_function);
+  const bool is_structured_payload =
+      is_nested_exit || loom_scf_for_isa(source_op) ||
+      loom_scf_while_isa(source_op) || loom_scf_yield_isa(source_op) ||
+      loom_scf_condition_isa(source_op);
+  const uint16_t operand_start = loom_scf_for_isa(source_op)         ? 3
+                                 : loom_scf_condition_isa(source_op) ? 1
+                                                                     : 0;
   loom_value_id_t* low_values = NULL;
   IREE_RETURN_IF_ERROR(loom_low_lower_allocate_emission_array(
       context, value_count, sizeof(*low_values), (void**)&low_values));
   for (iree_host_size_t i = 0; i < value_count; ++i) {
     low_values[i] = loom_low_lower_lookup_value(context, source_values[i]);
+    if (is_structured_payload) {
+      IREE_RETURN_IF_ERROR(loom_low_lower_structural_materialize_operand(
+          context, source_op, operand_start + (uint16_t)i, &low_values[i]));
+    }
     const loom_type_t required_low_type =
         required_types ? required_types[i]
                        : loom_module_value_type(context->module, low_values[i]);
-    if (is_callable_exit) {
+    if (is_callable_exit && !is_nested_exit) {
       IREE_RETURN_IF_ERROR(loom_low_lower_control_materialize_operand(
           context, source_op, i, required_low_type, &low_values[i]));
     }
@@ -455,6 +474,12 @@ static iree_status_t loom_low_lower_emit_scf_for(
       loom_low_lower_lookup_value(context, loom_scf_for_upper_bound(source_op));
   loom_value_id_t low_step =
       loom_low_lower_lookup_value(context, loom_scf_for_step(source_op));
+  IREE_RETURN_IF_ERROR(loom_low_lower_structural_materialize_operand(
+      context, source_op, 0, &low_lower_bound));
+  IREE_RETURN_IF_ERROR(loom_low_lower_structural_materialize_operand(
+      context, source_op, 1, &low_upper_bound));
+  IREE_RETURN_IF_ERROR(loom_low_lower_structural_materialize_operand(
+      context, source_op, 2, &low_step));
 
   loom_value_slice_t iter_args = loom_scf_for_iter_args(source_op);
   loom_value_id_t* low_iter_args = NULL;
@@ -516,6 +541,13 @@ static iree_status_t loom_low_lower_emit_scf_while(
   IREE_RETURN_IF_ERROR(loom_low_lower_structural_take_types(
       context, source_op, &result_types, &header_types));
 
+  // Incoming conversions define their own values. Finish them before reserving
+  // the identities consumed by the while builder's dependent type scheme.
+  loom_value_id_t* low_iter_args = NULL;
+  IREE_RETURN_IF_ERROR(loom_low_lower_remap_values(
+      context, source_op, iter_args.values, iter_args.count, header_types,
+      &low_iter_args));
+
   const iree_host_size_t identity_count =
       (iree_host_size_t)source_before->arg_count + source_op->result_count;
   loom_value_id_t* identities = NULL;
@@ -533,11 +565,6 @@ static iree_status_t loom_low_lower_emit_scf_while(
   IREE_RETURN_IF_ERROR(loom_low_lower_remap_type_scheme(
       context, loom_op_const_results(source_op), result_identities,
       source_op->result_count, result_types));
-
-  loom_value_id_t* low_iter_args = NULL;
-  IREE_RETURN_IF_ERROR(loom_low_lower_remap_values(
-      context, source_op, iter_args.values, iter_args.count, header_types,
-      &low_iter_args));
 
   loom_op_t* low_while_op = NULL;
   IREE_RETURN_IF_ERROR(loom_low_scf_while_build(
@@ -602,6 +629,17 @@ IREE_ATTRIBUTE_NOINLINE static iree_status_t loom_low_lower_structural_op(
                                                             traits)) {
     return loom_low_lower_emit_value_duplication(context, source_op);
   }
+  if (loom_ref_borrow_isa(source_op)) {
+    const loom_value_id_t source_pointer = loom_ref_borrow_pointer(source_op);
+    loom_op_t* borrow_op = NULL;
+    IREE_RETURN_IF_ERROR(loom_low_borrow_build(
+        loom_low_lower_context_builder(context),
+        loom_low_lower_lookup_value(context, loom_ref_borrow_owner(source_op)),
+        loom_low_lower_value_binding_type(context, source_pointer),
+        source_op->location, &borrow_op));
+    return loom_low_lower_bind_value(context, source_pointer,
+                                     loom_low_borrow_pointer(borrow_op));
+  }
   if (loom_low_lower_source_op_is_callable_exit(context, source_op)) {
     const loom_value_id_t* values = loom_op_const_operands(source_op);
     loom_value_id_t* low_values = NULL;
@@ -629,10 +667,15 @@ IREE_ATTRIBUTE_NOINLINE static iree_status_t loom_low_lower_structural_op(
                                      : source_op->operand_count,
                                  source_op->location, &low_return_op);
   }
-  if (loom_low_lower_source_call_is_structural(context->module, source_op)) {
-    return loom_low_lower_source_call(context, source_op);
-  }
   switch (source_op->kind) {
+    case LOOM_OP_REF_RELEASE: {
+      loom_op_t* release_op = NULL;
+      return loom_low_release_build(
+          &context->builder,
+          loom_low_lower_lookup_value(context,
+                                      loom_ref_release_value(source_op)),
+          source_op->location, &release_op);
+    }
     case LOOM_OP_BUFFER_ASSUME_SAME_ROOT: {
       return loom_low_lower_bind_or_elide_alias(
           context, loom_buffer_assume_same_root_buffer(source_op),
@@ -1044,14 +1087,15 @@ static iree_status_t loom_low_lower_emit_descriptor_matrix_plan(
 
 static const loom_op_t* loom_low_lower_selected_plan_emission_op(
     const loom_low_lower_selected_plan_t* selected_plan) {
-  if (selected_plan->emission_source_node_index == 0) {
+  if (selected_plan->selection.rule.emission_source_node_index == 0) {
     return selected_plan->source_op;
   }
-  IREE_ASSERT(selected_plan->data.source_nodes != NULL);
-  IREE_ASSERT_LT(selected_plan->emission_source_node_index,
-                 selected_plan->source_node_count);
-  return selected_plan->data
-      .source_nodes[selected_plan->emission_source_node_index];
+  const loom_op_t* const* source_nodes =
+      loom_low_lower_selected_plan_source_nodes(selected_plan);
+  IREE_ASSERT(source_nodes != NULL);
+  IREE_ASSERT_LT(selected_plan->selection.rule.emission_source_node_index,
+                 selected_plan->selection.rule.source_node_count);
+  return source_nodes[selected_plan->selection.rule.emission_source_node_index];
 }
 
 static iree_status_t loom_low_lower_emit_selected_plan(
@@ -1076,25 +1120,34 @@ static iree_status_t loom_low_lower_emit_selected_plan(
       !iree_allocator_is_null(context->options->report_allocator);
   const uint64_t before_op_count = context->report.emitted_op_count;
   if (selected_plan.kind == LOOM_LOW_LOWER_SELECTED_PLAN_RULE) {
-    IREE_ASSERT(selected_plan.rule_set != NULL);
-    IREE_ASSERT(selected_plan.rule != NULL);
+    const loom_low_lower_rule_set_t* rule_set =
+        loom_low_lower_selected_plan_rule_set(&selected_plan);
+    const loom_low_lower_rule_t* rule =
+        loom_low_lower_selected_plan_rule(&selected_plan);
+    IREE_ASSERT(rule_set != NULL);
+    IREE_ASSERT(rule != NULL);
     IREE_RETURN_IF_ERROR(loom_low_lower_rule_set_emit_rule(
-        context, selected_plan.rule_set, selected_plan.source_op,
-        selected_plan.rule, selected_plan.resolved_emits,
-        selected_plan.source_memory, selected_plan.data.source_nodes,
-        selected_plan.source_node_count));
+        context, rule_set, selected_plan.source_op, rule,
+        selected_plan.data.rule.resolved_emits,
+        loom_low_lower_selected_plan_source_memory(&selected_plan),
+        loom_low_lower_selected_plan_source_nodes(&selected_plan),
+        selected_plan.selection.rule.source_node_count));
   } else if (selected_plan.kind ==
              LOOM_LOW_LOWER_SELECTED_PLAN_DESCRIPTOR_MATRIX) {
-    IREE_ASSERT_FALSE(
-        loom_low_lower_plan_is_empty(selected_plan.data.target_plan));
+    const loom_low_lower_plan_t target_plan =
+        loom_low_lower_selected_plan_target(&selected_plan);
+    IREE_ASSERT_FALSE(loom_low_lower_plan_is_empty(target_plan));
     IREE_RETURN_IF_ERROR(loom_low_lower_emit_descriptor_matrix_plan(
         context, selected_plan.source_op,
         (const loom_low_lower_descriptor_matrix_plan_t*)
-            selected_plan.data.target_plan.target_data));
+            target_plan.target_data));
   } else if (selected_plan.kind ==
              LOOM_LOW_LOWER_SELECTED_PLAN_FUNCTION_STORAGE) {
     IREE_RETURN_IF_ERROR(loom_low_lower_function_storage_emit(
         context, selected_plan.source_op, selected_plan.data.function_storage));
+  } else if (selected_plan.kind == LOOM_LOW_LOWER_SELECTED_PLAN_CALL) {
+    IREE_RETURN_IF_ERROR(loom_low_lower_source_call(
+        context, selected_plan.source_op, selected_plan.data.call));
   } else if (selected_plan.kind == LOOM_LOW_LOWER_SELECTED_PLAN_INVOKE) {
     IREE_RETURN_IF_ERROR(loom_low_lower_source_invoke(
         context, selected_plan.source_op, selected_plan.data.invoke));
@@ -1108,12 +1161,13 @@ static iree_status_t loom_low_lower_emit_selected_plan(
         context, selected_plan.source_op, &handled));
     IREE_ASSERT(handled);
   } else {
-    IREE_ASSERT_FALSE(
-        loom_low_lower_plan_is_empty(selected_plan.data.target_plan));
+    const loom_low_lower_plan_t target_plan =
+        loom_low_lower_selected_plan_target(&selected_plan);
+    IREE_ASSERT_FALSE(loom_low_lower_plan_is_empty(target_plan));
     IREE_ASSERT(context->policy->emit_op.fn != NULL);
-    IREE_RETURN_IF_ERROR(context->policy->emit_op.fn(
-        context->policy->emit_op.user_data, context, selected_plan.source_op,
-        selected_plan.data.target_plan));
+    IREE_RETURN_IF_ERROR(
+        context->policy->emit_op.fn(context->policy->emit_op.user_data, context,
+                                    selected_plan.source_op, target_plan));
   }
   if (report_allocator_provided) {
     const uint64_t emitted_op_count =
@@ -1327,6 +1381,16 @@ static iree_status_t loom_low_lower_record_static_launch_config(
   return iree_ok_status();
 }
 
+static bool loom_low_lower_can_defer_missing_contract(void* user_data,
+                                                      const loom_op_t* op) {
+  const loom_low_lower_context_t* context =
+      (const loom_low_lower_context_t*)user_data;
+  return loom_op_semantics(context->module, op).phase ==
+             LOOM_OP_PHASE_EXECUTABLE &&
+         !loom_low_lower_source_value_storage_op_requires_emission(
+             op, loom_op_effective_traits(context->module, op));
+}
+
 // Plans borrow stable storage from the caller owning the lowering transaction.
 // The context and every construction analysis remain phase-local stack state.
 struct loom_low_lower_function_plan_t {
@@ -1412,7 +1476,7 @@ static iree_status_t loom_low_lower_function_plan_build(
         .value_domain = &context->lowering->value_domain,
         .value_identities = &context->function_analysis.value_identities,
         .participants = context->function_analysis.participant_zeros,
-        .emitter = options->emitter,
+        .emitter = context->diagnostic_emitter,
         .max_errors = options->max_errors,
     };
     status = loom_vector_memory_footprint_verify_function(
@@ -1431,7 +1495,7 @@ static iree_status_t loom_low_lower_function_plan_build(
         .storage_access = context->storage_access,
         .fact_table = context->fact_table,
         .value_domain = &context->lowering->value_domain,
-        .emitter = options->emitter,
+        .emitter = context->diagnostic_emitter,
         .phase_name = IREE_SV("source-low"),
     };
     status = loom_kernel_synchronization_legality_analyze_function(
@@ -1450,7 +1514,7 @@ static iree_status_t loom_low_lower_function_plan_build(
     const loom_kernel_barrier_lifetime_options_t barrier_lifetime_options = {
         .value_domain = &context->lowering->value_domain,
         .fact_table = context->fact_table,
-        .emitter = options->emitter,
+        .emitter = context->diagnostic_emitter,
         .phase_name = IREE_SV("source-low"),
     };
     status = loom_kernel_barrier_lifetime_verify_function(
@@ -1486,6 +1550,11 @@ static iree_status_t loom_low_lower_function_plan_build(
         .error_catalog = options->policy->error_catalog,
         .provider_list = options->legality_provider_list,
         .contract_query = loom_low_lower_source_query_callback(context),
+        .defer_missing_contract =
+            {
+                .fn = loom_low_lower_can_defer_missing_contract,
+                .user_data = context,
+            },
         .type_supported = context->policy->source_type_supported,
         .source_vector_carrier_supported =
             context->policy->source_vector_carrier_supported,
@@ -1496,7 +1565,7 @@ static iree_status_t loom_low_lower_function_plan_build(
                 ? LOOM_TARGET_LOW_STRUCTURAL_LEGALITY_ALLOW_SOURCE_SCF
                 : 0,
         .diagnostic_flags = options->legality_diagnostic_flags,
-        .emitter = options->emitter,
+        .emitter = context->diagnostic_emitter,
         .max_errors = options->max_errors,
     };
     status = loom_target_low_verify_function_legality(
@@ -1585,6 +1654,7 @@ iree_status_t loom_low_lower_plan_function(
       .module_state = options->module_state,
       .lowering = &plan->frame,
   };
+  loom_low_lower_context_scope_diagnostics(&context);
   iree_arena_initialize(module->arena.block_pool, &context.analysis_arena);
   loom_storage_access_scope_t storage_access;
   loom_storage_access_scope_initialize(module, &context.analysis_arena,
@@ -1693,6 +1763,7 @@ iree_status_t loom_low_lower_emit_function(loom_low_lower_function_plan_t* plan,
       .module_state = options.module_state,
       .lowering = &plan->frame,
   };
+  loom_low_lower_context_scope_diagnostics(&context);
   loom_local_value_domain_restore(&plan->frame.value_domain);
   iree_status_t status = loom_low_lower_function_plan_execute(&context);
   loom_local_value_domain_release(&plan->frame.value_domain);

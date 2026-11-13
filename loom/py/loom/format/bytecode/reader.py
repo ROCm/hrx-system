@@ -96,6 +96,8 @@ from loom.ir import (
     Predicate,
     PredicateArg,
     PredicateListAttr,
+    ReferenceOwnership,
+    ReferenceType,
     Region,
     RegisterType,
     ScalarType,
@@ -211,6 +213,8 @@ class BytecodeReader:
         self._strings: list[str] = []
         self._sources: list[str] = []
         self._types: list[Type] = []
+        # Exact keys expected by TYPES, validated against decoded declarations.
+        self._reference_bindings: dict[str, tuple[str, str]] = {}
         # Temporary equality facts for repeated signature/body definitions.
         self._type_identity = TypeIdentity()
         self._ops: list[str] = []
@@ -275,6 +279,11 @@ class BytecodeReader:
         symbols_data = sections.get(SECTION_SYMBOLS, (0, b""))
         if isinstance(symbols_data, tuple):
             self._read_symbols_section(symbols_data, ir_data, module)
+        for declaration, key in self._reference_bindings.items():
+            if module.type_declarations.get(declaration) != key:
+                raise BytecodeError(
+                    f"managed type key disagrees with declaration {declaration!r}"
+                )
         symbol_references_data = sections.get(SECTION_SYMBOL_REFERENCES)
         if symbol_references_data is None:
             raise BytecodeError("bytecode must have a SYMBOL_REFERENCES section")
@@ -804,6 +813,29 @@ class BytecodeReader:
                 ir_type = ScalarType(scalar_kind)
             case TypeKind.TILE | TypeKind.TENSOR | TypeKind.VECTOR | TypeKind.VIEW:
                 return self._read_shaped_type(data, offset, type_kind, values)
+            case TypeKind.REFERENCE:
+                ownership, offset = self._read_type_field(data, offset, None)
+                string_ids = []
+                for _ in range(3):
+                    string_id, offset = decode_varint(data, offset)
+                    if string_id >= len(self._strings):
+                        raise BytecodeError(
+                            "managed type string reference out of range"
+                        )
+                    string_ids.append(string_id)
+                namespace, name, declaration = (self._strings[i] for i in string_ids)
+                key = (namespace, name)
+                if self._reference_bindings.setdefault(declaration, key) != key:
+                    raise BytecodeError("managed type declaration has conflicting keys")
+                try:
+                    ir_type = ReferenceType(
+                        ReferenceOwnership(ownership),
+                        namespace,
+                        name,
+                        SymbolName(declaration),
+                    )
+                except ValueError as exc:
+                    raise BytecodeError(str(exc)) from exc
             case TypeKind.FUNCTION:
                 arg_count, offset = decode_varint(data, offset)
                 result_count, offset = decode_varint(data, offset)
@@ -1643,9 +1675,23 @@ class BytecodeReader:
             comments=op_comments,
             leading_blank_line=op_leading_blank_line,
         )
+        type_key = None
+        type_contract = symbol_def_for_op(self._op_decls_by_name, op_name).type_contract
+        if type_contract is not None:
+            namespace = op_attrs.get(type_contract.namespace)
+            payload_name = op_attrs.get(type_contract.name)
+            if any(
+                not isinstance(value, str) or not value or "\x00" in value
+                for value in (namespace, payload_name)
+            ):
+                raise BytecodeError(
+                    "managed type key requires nonempty NUL-free strings"
+                )
+            type_key = (namespace, payload_name)
         symbol = Symbol(
             name=name,
             kind=SymbolKind.RECORD,
+            type_key=type_key,
             flags=flags & _SYMBOL_IR_FLAGS,
             op=op,
             source_module=source_module,

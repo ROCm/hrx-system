@@ -25,6 +25,7 @@ from loom.target.arch.amd.xdna.aie2p.contracts.memory import (
     _memory_constraint,
     _memory_roots,
     _MemoryAddressForm,
+    _pointer_address_emits,
     _pointer_offset_emits,
     _register_address_emits,
 )
@@ -666,6 +667,119 @@ def _bfp_group_load_rule(
     )
 
 
+def _bfp_store_rule(
+    address_form: _MemoryAddressForm,
+    *,
+    static_modifier: Descriptor | None,
+    root_kind: SourceMemoryRootKind,
+    memory_spaces: tuple[str, ...],
+    volatile: bool,
+) -> DescriptorRule:
+    """Serializes native records through the FIFO with exact logical extents."""
+
+    memory = _memory_constraint(
+        SourceMemoryOperation.STORE,
+        address_form,
+        root_kind=root_kind,
+        memory_spaces=memory_spaces,
+        element_byte_count=1,
+        vector_lane_count=None,
+        minimum_alignment=8,
+        immediate_offset_minimum=0,
+        immediate_offset_maximum=0,
+    )
+    if static_modifier is not None:
+        (immediate,) = static_modifier.immediates
+        memory = replace(
+            memory,
+            static_byte_offset_minimum=immediate.signed_min,
+            static_byte_offset_maximum=immediate.unsigned_max,
+        )
+    base = ValueRef.source_memory_root()
+    emits: list[ContractEmit] = []
+    if address_form is not _MemoryAddressForm.IMMEDIATE:
+        base = ValueRef.temporary("store_base")
+        emits.extend(
+            _pointer_address_emits(
+                memory,
+                static_modifier=static_modifier,
+                result=base,
+                pointer_type=ValueRef.operand("view"),
+            )
+        )
+    pointer = ValueRef.temporary("store_pointer")
+    emits.append(
+        EmitDescriptorOp(
+            descriptor=_descriptor("amd.xdna.aie2p.move.store-fifo.pointer"),
+            operands={"src": base},
+            results={"dst": pointer},
+            result_types={"dst": DescriptorResultType()},
+            source_memory=memory,
+            form=DescriptorEmitForm.OP,
+        )
+    )
+    position = ValueRef.temporary("store_position")
+    fifo = ValueRef.temporary("store_fifo")
+    emits.append(
+        EmitDescriptorOp(
+            descriptor=_descriptor("amd.xdna.aie2p.constant.i32.store-fifo-position"),
+            immediates={"i": 0},
+            results={"dst": position},
+            result_types={"dst": DescriptorResultType()},
+            form=DescriptorEmitForm.CONST,
+        )
+    )
+    suffix = ".volatile" if volatile else ""
+    push = _descriptor("amd.xdna.aie2p.store.bfp16ebs8.fifo.push.empty" + suffix)
+    for descriptor, operands in (
+        (push, {"src": ValueRef.operand("value")}),
+        (
+            _descriptor("amd.xdna.aie2p.store.fifo.flush.512" + suffix),
+            {"fifo_reg": fifo},
+        ),
+    ):
+        emits.append(
+            EmitDescriptorOp(
+                descriptor=descriptor,
+                operands={**operands, "ptr": pointer, "avail": position},
+                results={
+                    "fifo_reg_out": fifo
+                    if descriptor is push
+                    else ValueRef.temporary("empty_fifo"),
+                    "ptr_out": pointer,
+                    "avail_out": position,
+                },
+                result_types={
+                    "fifo_reg_out": DescriptorResultType(),
+                    "ptr_out": DescriptorResultType(),
+                    "avail_out": DescriptorResultType(),
+                },
+                source_memory=memory,
+                form=DescriptorEmitForm.PER_LANE_SEQUENCE,
+            )
+        )
+    return DescriptorRule(
+        source_op=vector.vector_store,
+        descriptor=push,
+        guards=(
+            *(
+                (Guard.instance_flags_has_all("memory_flags", "volatile"),)
+                if volatile
+                else ()
+            ),
+            Guard.value_type(
+                "value", Vector("i8", minimum_lanes=72, maximum_lanes=72 * 65535)
+            ),
+            Guard.value_static_dim0_multiple("value", 72),
+            Guard.low_value_register_class("value", "aie2p.mexa"),
+        ),
+        emit=emits,
+        sequence_carried=(pointer.field, position.field),
+        priority=1,
+        report_key="native_memory_store_bfp16ebs8",
+    )
+
+
 def _fused_integer_widen_load_rule(
     address_form: _MemoryAddressForm,
     *,
@@ -1091,5 +1205,27 @@ AIE2P_BFP_GROUP_MEMORY_RULES: tuple[DescriptorRule, ...] = tuple(
 
 AIE2P_PACKET_MEMORY_RULES = (
     *AIE2P_BFP_GROUP_MEMORY_RULES,
+    *(
+        _bfp_store_rule(
+            address_form,
+            static_modifier=static_modifier,
+            root_kind=root_kind,
+            memory_spaces=memory_spaces,
+            volatile=volatile,
+        )
+        for volatile in (True, False)
+        for root_kind, memory_spaces in _memory_roots(SourceMemoryOperation.STORE)
+        for address_form, static_modifier in (
+            (_MemoryAddressForm.IMMEDIATE, None),
+            *(
+                (
+                    _MemoryAddressForm.MATERIALIZED_STATIC,
+                    _descriptor(f"amd.xdna.aie2p.constant.modifier.{form}"),
+                )
+                for form in ("mova", "movxm")
+            ),
+            (_MemoryAddressForm.DYNAMIC_FULL_STATIC, None),
+        )
+    ),
     *AIE2P_INDEXED_PACKET_MEMORY_RULES,
 )

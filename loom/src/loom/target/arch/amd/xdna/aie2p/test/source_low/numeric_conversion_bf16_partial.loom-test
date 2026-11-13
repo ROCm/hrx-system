@@ -95,11 +95,32 @@ func.def @narrow_partial_wide_bf16(%input: vector<24xf32>) -> (vector<24xbf16>) 
 // ----
 low.func.def target<amd.xdna.aie2p.core> abi(object_function) @narrow_partial_wide_bf16(%input: reg<aie2p.vec256 x4>) -> (reg<aie2p.vec256 x2>) asm {
   %5 = slice %input[0] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
-  %6 = vmov.vector512.to.accumulator512 %5
-  %7 = slice %input[2] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
-  %8 = vmov.vector512.to.accumulator512 %7
-  %9 = concat(%6, %8) : (reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x2>
+  %6 = slice %input[2] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
+  %7 = mov.i32 2147483647
+  %8 = vbcst.32 %7
+  %9 = mov.i32 2139095040
+  %10 = vbcst.32 %9
+  %11 = mov.i32 32704
+  %12 = vbcst.16 %11
   set.rounding 12
-  %result = vconv.bf16.fp32 %9
+  %33 = slice %input[1] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256>
+  %14 = vmov.vector512.to.accumulator512 %5
+  %15 = vconv.bf16.fp32x16 %14
+  %16 = concat(%15, %33) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %17 = vband %5, %8
+  %18 = vlt.u32x16.el.low32 %10, %17
+  %19 = predicate.complete.zero.high32 %18, 0
+  %20 = vsel.16.mask64 %16, %12, %19
+  %32 = slice %input[3] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256>
+  %22 = vmov.vector512.to.accumulator512 %6
+  %23 = vconv.bf16.fp32x16 %22
+  %24 = concat(%23, %32) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %25 = vband %6, %8
+  %26 = vlt.u32x16.el.low32 %10, %25
+  %27 = predicate.complete.zero.high32 %26, 0
+  %28 = vsel.16.mask64 %24, %12, %27
+  %29 = slice %20[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %30 = slice %28[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %result = concat(%29, %30) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
   return %result
 }

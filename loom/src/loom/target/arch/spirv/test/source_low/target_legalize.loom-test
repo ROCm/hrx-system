@@ -121,7 +121,7 @@ kernel.def @rejects_missing_cooperative_matrix_feature() {
   %init = vector.fragment<init> %init_data shape [%m, %n] : vector<8xf32>
   // ERROR@+1: TARGET/039 {source_contract="spirv.cooperative_matrix", matrix_constraint="spirv.cooperative_matrix.khr"}
   %result = vector.mma %lhs, %rhs, %init : vector<16xf16>, vector<16xf16>, vector<8xf32>
-  // ERROR@+1: TARGET/003 {constraint_key="descriptor_available", subject_name="spirv.op_cooperative_matrix_store_khr.result.f32.16x16.subgroup.storage_buffer"}
+  // ERROR@+1: TARGET/003 {constraint_key="descriptor_available", subject_name="spirv.op_cooperative_matrix_store_khr.accumulator.f32.16x16.subgroup.storage_buffer"}
   vector.fragment.store<result> %result, %destination[0, 0] shape [%m, %n] : vector<8xf32>, view<16x16xf32>
   kernel.return
 }
@@ -218,7 +218,7 @@ low.kernel.def target<spirv.logical.core> abi_layout({signature = (buffer, f16, 
   %28 = OpUConvert.offset64.u32 %27
   %29 = OpConstant.offset64 0
   %30 = OpPtrAccessChain.storage_buffer.f32.byte_offset %aligned, %29
-  OpCooperativeMatrixStoreKHR.result.f32.16x16.subgroup.storage_buffer %30, %result, %28, 0
+  OpCooperativeMatrixStoreKHR.accumulator.f32.16x16.subgroup.storage_buffer %30, %result, %28, 0
   return
 }
 
@@ -367,11 +367,12 @@ func.def @decomposes_rank_two_divrem(%a: i32, %b: i32, %c: i32, %d: i32, %diviso
 
 // ----
 func.def @decomposes_rank_two_divrem(%a: i32, %b: i32, %c: i32, %d: i32, %divisor: i32) -> (i32) {
-  %31 = scalar.divui %b, %divisor : i32
+  %32 = scalar.divui %b, %divisor : i32
   %28 = scalar.divui %c, %divisor : i32
   %29 = scalar.muli %28, %divisor : i32
   %30 = scalar.subi %c, %29 : i32
-  %result = scalar.xori %31, %30 : i32
+  %31 = scalar.assume %30 [ult(%30, %divisor)] : i32
+  %result = scalar.xori %32, %31 : i32
   func.return %result : i32
 }
 

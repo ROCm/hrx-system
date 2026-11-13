@@ -64,9 +64,8 @@ func.def @subvector_literal_patch(%row: vector<4xf32>) -> (vector<2x4xf32>) {
   %13 = scalar.constant 5.0 : f32
   %14 = scalar.constant 6.0 : f32
   %15 = scalar.constant 7.0 : f32
-  %base = vector.from_elements %8, %9, %10, %11, %12, %13, %14, %15 : vector<2x4xf32>
-  %4 = vector.bitcast %base : vector<2x4xf32> to vector<8xf32>
-  %5 = vector.slice %4[0] : vector<8xf32> -> vector<4xf32>
+  %base = vector.from_elements %8, %9, %10, %11, %12, %13, %14, %15 : vector<8xf32>
+  %5 = vector.slice %base[0] : vector<8xf32> -> vector<4xf32>
   %6 = vector.concat<0> %5, %row : vector<4xf32>, vector<4xf32> -> vector<8xf32>
   %result = vector.bitcast %6 : vector<8xf32> to vector<2x4xf32>
   func.return %result : vector<2x4xf32>

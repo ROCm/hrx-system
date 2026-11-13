@@ -8,6 +8,7 @@
 #define IREE_EXPERIMENTAL_STREAMING_MEMORY_H_
 
 #include "common/allocation_preparation.h"
+#include "common/mem_pool.h"
 #include "hrx_runtime.h"
 #include "iree/base/api.h"
 #include "iree/base/threading/mutex.h"
@@ -115,11 +116,14 @@ typedef struct iree_hal_streaming_buffer_t {
   // Whether this wrapper owns a reference to |context|.
   iree_hal_streaming_buffer_context_ownership_t context_ownership;
 
-  // HRX memory pool retained while |buffer| may borrow its HAL pool.
-  hrx_mem_pool_t allocation_pool;
+  // Compatibility pool retained while |buffer| may borrow its HAL pool.
+  iree_hal_streaming_mem_pool_t* allocation_pool;
 
   // True while this pool-backed buffer contributes to logical pool usage.
   bool is_pool_allocation_live;
+
+  // Borrowed graph-address owner; NULL for ordinary HIP allocations.
+  struct iree_hal_streaming_graph_allocation_t* graph_allocation;
 
   // Actual HAL memory capabilities; unified memory may be host and device
   // local.
@@ -189,6 +193,13 @@ typedef struct iree_hal_streaming_buffer_ref_t {
   iree_hal_streaming_buffer_t* buffer;
   iree_device_size_t offset;
 } iree_hal_streaming_buffer_ref_t;
+
+// Resolves the pointer convention used by HIP/CUDA arguments on |device|.
+// Scoped buffers select that device's default program family. In-tree imports
+// may supply a guaranteed address; unscoped buffers use native address export.
+// The caller completes allocation dependencies and retains the allocation.
+iree_status_t iree_hal_streaming_buffer_query_device_pointer(
+    hrx_buffer_t buffer, hrx_device_t device, void** out_pointer);
 
 // Immutable allocation metadata retained independently of the streaming
 // wrapper and buffer-table entry from which it was resolved.
@@ -308,14 +319,14 @@ iree_status_t iree_hal_streaming_memory_allocate_device(
 
 // Synchronization: none (allocates memory from a pool).
 iree_status_t iree_hal_streaming_memory_allocate_device_from_pool(
-    iree_hal_streaming_context_t* context, hrx_mem_pool_t pool,
+    iree_hal_streaming_context_t* context, iree_hal_streaming_mem_pool_t* pool,
     iree_device_size_t size, iree_hal_streaming_memory_flags_t flags,
     iree_hal_streaming_buffer_t** out_buffer);
 
 // Synchronization: stream-ordered. Reuses a pending same-stream free when
 // possible and otherwise allocates memory from |pool|.
 iree_status_t iree_hal_streaming_memory_allocate_device_from_pool_async(
-    iree_hal_streaming_context_t* context, hrx_mem_pool_t pool,
+    iree_hal_streaming_context_t* context, iree_hal_streaming_mem_pool_t* pool,
     iree_device_size_t size, iree_hal_streaming_memory_flags_t flags,
     iree_hal_streaming_stream_t* stream,
     iree_hal_streaming_buffer_t** out_buffer);
@@ -343,7 +354,8 @@ iree_status_t iree_hal_streaming_memory_free_device_async(
     iree_hal_streaming_context_t* context, iree_hal_streaming_deviceptr_t ptr,
     iree_hal_streaming_stream_t* stream);
 
-// Releases completed stream-ordered frees retained for conservative reuse.
+// Releases completed stream-ordered frees retained for conservative reuse. A
+// retained stream detached from its context leaves cleanup with the context.
 // Synchronization: stream (requires |stream| to be idle).
 iree_status_t iree_hal_streaming_memory_release_completed_async_frees(
     iree_hal_streaming_stream_t* stream);
@@ -356,12 +368,13 @@ iree_status_t iree_hal_streaming_memory_release_terminal_async_frees(
 // Releases completed stream-ordered frees retained by |pool|.
 // Synchronization: none (each free has reached its queued host callback).
 iree_status_t iree_hal_streaming_memory_release_completed_async_frees_from_pool(
-    hrx_mem_pool_t pool);
+    iree_hal_streaming_mem_pool_t* pool);
 
-// Synchronization: none (allocates host memory).
+// Synchronization: none (allocates host memory). |fine_grained| additionally
+// requires concurrent host/program system visibility from the native source.
 iree_status_t iree_hal_streaming_memory_allocate_host(
     iree_hal_streaming_context_t* context, iree_host_size_t size,
-    iree_hal_streaming_host_register_flags_t flags,
+    iree_hal_streaming_host_register_flags_t flags, bool fine_grained,
     iree_hal_streaming_buffer_t** out_buffer);
 
 // Synchronization: none (allocates host-visible device memory).
@@ -424,18 +437,12 @@ iree_status_t iree_hal_streaming_memory_memcpy(
     iree_hal_streaming_deviceptr_t src, iree_device_size_t size,
     iree_hal_streaming_stream_t* stream);
 
-// Performs P2P memory transfer.
-// Synchronization: stream or blocking (async if stream, sync if NULL stream).
-iree_status_t iree_hal_streaming_memcpy_peer(
-    iree_hal_streaming_context_t* dst_context,
-    iree_hal_streaming_deviceptr_t dst,
-    iree_hal_streaming_context_t* src_context,
-    iree_hal_streaming_deviceptr_t src, iree_device_size_t size,
-    iree_hal_streaming_stream_t* stream);
-
 // Outside capture, registered sources and small pageable snapshots remain
 // asynchronous when a stream is supplied. Large pageable sources stay borrowed
-// through a blocking transfer. NULL-stream copies complete on the caller.
+// through a blocking transfer. Device endpoints may belong to another context;
+// copies preserve the supplied stream's order. Endpoints on a different native
+// device use a blocking transfer in that order. NULL-stream copies join the
+// calling and owning contexts and complete on the caller.
 iree_status_t iree_hal_streaming_memcpy_host_to_device(
     iree_hal_streaming_context_t* context, iree_hal_streaming_deviceptr_t dst,
     const void* src, iree_device_size_t size,
@@ -443,7 +450,8 @@ iree_status_t iree_hal_streaming_memcpy_host_to_device(
 
 // Outside capture, registered host destinations remain asynchronous when a
 // stream is supplied. Unregistered host destinations and NULL-stream copies
-// complete on the caller.
+// complete on the caller. Device endpoint ownership and stream ordering follow
+// the same contract as host-to-device copies above.
 iree_status_t iree_hal_streaming_memcpy_device_to_host(
     iree_hal_streaming_context_t* context, void* dst,
     iree_hal_streaming_deviceptr_t src, iree_device_size_t size,
@@ -524,27 +532,16 @@ iree_status_t iree_hal_streaming_memcpy_device_to_device_2d(
     iree_host_size_t height, iree_hal_streaming_stream_t* stream);
 
 // Registers an HRX virtual-address reservation in the streaming pointer table.
-// The wrapper retains both |context| and |virtual_buffer|. The reservation
-// remains owned by the caller and must be released through the VMM allocator
-// after the wrapper is removed.
+// Exposes |logical_size| bytes, excluding any native page-alignment padding.
+// The wrapper retains both |context| and |virtual_buffer|; the caller retains
+// ownership of its original reservation reference.
 iree_status_t iree_hal_streaming_memory_wrap_virtual_reservation(
     iree_hal_streaming_context_t* context, hrx_buffer_t virtual_buffer,
-    iree_hal_streaming_buffer_t** out_buffer);
+    iree_device_size_t logical_size, iree_hal_streaming_buffer_t** out_buffer);
 
 // Removes and releases an externally owned buffer wrapper.
 void iree_hal_streaming_memory_release_wrapped_buffer(
     iree_hal_streaming_buffer_t* buffer);
-
-// Drops a virtual reservation wrapper's HRX/HAL reference before the allocator
-// attempts to consume the reservation. The pointer-table entry remains in place
-// until release succeeds, and concurrent use of an address being freed is not a
-// valid operation. The prepared wrapper must be restored or released below.
-void iree_hal_streaming_memory_prepare_virtual_reservation_release(
-    iree_hal_streaming_buffer_t* buffer);
-
-// Restores a prepared virtual reservation after the allocator rejects release.
-void iree_hal_streaming_memory_restore_virtual_reservation(
-    iree_hal_streaming_buffer_t* buffer, hrx_buffer_t virtual_buffer);
 
 #ifdef __cplusplus
 }  // extern "C"

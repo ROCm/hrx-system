@@ -1,0 +1,455 @@
+// RUN: pass canonicalize,cse,dce
+// Pointer-member qualification propagates through template helper calls.
+// Four input observations precede two output stores and an independent reload.
+template <class T>
+struct Source {
+  // Borrowed storage; the pointee qualifier determines each observation.
+  T* data;
+};
+
+template <class T>
+static unsigned read_twice(Source<T> source) {
+  source.data[0];
+  static_cast<void>(*source.data);
+  unsigned first = source.data[0];
+  unsigned second = source.data[0];
+  return first + second;
+}
+
+template <class Input, class Output>
+static unsigned observe_one(Input* input, Output* output) {
+  unsigned value = read_twice(Source<Input>{input});
+  output[0] = 0;
+  output[0] = value;
+  return output[0];
+}
+
+unsigned volatile_word(const volatile unsigned* input,
+                       volatile unsigned* output) {
+  return observe_one(input, output);
+}
+// ----
+func.def public @volatile_word(%input: buffer, %input_byte_offset: offset, %output: buffer, %output_byte_offset: offset) -> (i32) {
+  %5 = func.call @observe_one_const_volatile_unsigned_int_volatile_unsigned_int(%input, %input_byte_offset, %output, %output_byte_offset) : (buffer, offset, buffer, offset) -> (i32)
+  func.return %5 : i32
+}
+
+func.def @observe_one_const_volatile_unsigned_int_volatile_unsigned_int(%input: buffer, %input_byte_offset: offset, %output: buffer, %output_byte_offset: offset) -> (i32) {
+  %value = func.call @read_twice_const_volatile_unsigned_int(%input, %input_byte_offset) : (buffer, offset) -> (i32)
+  %12 = scalar.constant 0 : i32
+  %17 = index.cast %output_byte_offset : offset to i64
+  %19 = scalar.assume %17 [range(%17, 0, 9223372036854775807)] : i64
+  %20 = index.cast %19 : i64 to offset
+  %21 = buffer.view %output[%20] : buffer -> view<1xi32>
+  view.store<volatile|root_in_bounds> %12, %21[0] : i32, view<1xi32>
+  view.store<volatile|root_in_bounds> %value, %21[0] : i32, view<1xi32>
+  %40 = view.load<volatile|root_in_bounds> %21[0] : view<1xi32> -> i32
+  func.return %40 : i32
+}
+
+func.def @read_twice_const_volatile_unsigned_int(%source_data: buffer, %source_data_byte_offset: offset) -> (i32) {
+  %48 = index.cast %source_data_byte_offset : offset to i64
+  %50 = scalar.assume %48 [range(%48, 0, 9223372036854775807)] : i64
+  %51 = index.cast %50 : i64 to offset
+  %52 = buffer.view %source_data[%51] : buffer -> view<1xi32>
+  %53 = view.load<volatile|root_in_bounds> %52[0] : view<1xi32> -> i32
+  %54 = buffer.view %source_data[%source_data_byte_offset] : buffer -> view<1xi32>
+  %55 = view.load<volatile|root_in_bounds> %54[0] : view<1xi32> -> i32
+  %first = view.load<volatile|root_in_bounds> %52[0] : view<1xi32> -> i32
+  %second = view.load<volatile|root_in_bounds> %52[0] : view<1xi32> -> i32
+  %76 = scalar.addi %first, %second : i32
+  func.return %76 : i32
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// Predicated per-lane copying preserves the volatile specialization and
+// two separate output ranges, including a final observed-value transform.
+#include <loomcxx/kernel.h>
+template <class T>
+struct Source {
+  // Borrowed storage; the pointee qualifier determines each observation.
+  T* data;
+};
+
+template <class T>
+static unsigned read_twice(Source<T> source) {
+  source.data[0];
+  static_cast<void>(*source.data);
+  unsigned first = source.data[0];
+  unsigned second = source.data[0];
+  return first + second;
+}
+
+template <class Input, class Output>
+static unsigned observe_one(Input* input, Output* output) {
+  unsigned value = read_twice(Source<Input>{input});
+  output[0] = 0;
+  output[0] = value;
+  return output[0];
+}
+
+template <class Input, class Output>
+static void copy_observations(Input* input, Output* output, unsigned count,
+                              unsigned lane) {
+  loom::assume(count < 65);
+  if (lane < count) {
+    unsigned observed = observe_one(input + lane, output + lane);
+    output[64 + lane] = observed ^ 0xa5a55a5au;
+  }
+}
+
+[[loom::kernel, loom::workgroup_size(64, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void volatile_memory(const volatile unsigned* input, volatile unsigned* output,
+                     unsigned count) {
+  copy_observations(input, output, count, loom::kernel::workitem::id.x);
+}
+// ----
+kernel.def @volatile_memory() {
+  %3 = index.constant 1 : index
+  %6 = index.constant 64 : index
+  kernel.launch.config workgroups(%3, %3, %3) workgroup_size(%6, %3, %3) : index
+} launch(%input: buffer, %output: buffer, %count: i32) {
+  %input_byte_offset = index.constant 0 : offset
+  %workitem_id_x = kernel.workitem.id<x> : index
+  %12 = index.cast %workitem_id_x : index to i32
+  func.call @copy_observations_const_volatile_unsigned_int_volatile_unsigned_int(%input, %input_byte_offset, %output, %input_byte_offset, %count, %12) : (buffer, offset, buffer, offset, i32, i32)
+  kernel.return
+}
+
+func.def @copy_observations_const_volatile_unsigned_int_volatile_unsigned_int(%input: buffer, %input_byte_offset: offset, %output: buffer, %output_byte_offset: offset, %count$17: i32, %lane: i32) {
+  %count$19 = scalar.assume %count$17 [range(%count$17, 0, 64)] : i32
+  %20 = scalar.cmpi ult, %lane, %count$19 : i32
+  scf.if %20 {
+    %119 = scalar.assume %lane [ge(%lane, 0), lt(%lane, %count$19)] : i32
+    %21 = scalar.extui %119 : i32 to i64
+    %120 = scalar.assume %21 [lt(%21, %count$19)] : i64
+    %127 = scalar.constant 2 : i64
+    %128 = scalar.shli %120, %127 : i64
+    %24 = index.cast %input_byte_offset : offset to i64
+    %25 = scalar.addi %24, %128 : i64
+    %26 = scalar.assume %25 [range(%25, 0, 9223372036854775807)] : i64
+    %27 = index.cast %26 : i64 to offset
+    %31 = index.cast %output_byte_offset : offset to i64
+    %32 = scalar.addi %31, %128 : i64
+    %33 = scalar.assume %32 [range(%32, 0, 9223372036854775807)] : i64
+    %34 = index.cast %33 : i64 to offset
+    %observed = func.call @observe_one_const_volatile_unsigned_int_volatile_unsigned_int(%input, %27, %output, %34) : (buffer, offset, buffer, offset) -> (i32)
+    %36 = scalar.constant -1515890086 : i32
+    %37 = scalar.xori %observed, %36 : i32
+    %38 = scalar.constant 64 : i32
+    %124 = scalar.addi %119, %38 : i32
+    %40 = scalar.extui %124 : i32 to i64
+    %123 = scalar.shli %40, %127 : i64
+    %44 = scalar.addi %31, %123 : i64
+    %45 = scalar.assume %44 [range(%44, 0, 9223372036854775807)] : i64
+    %46 = index.cast %45 : i64 to offset
+    %47 = buffer.view %output[%46] : buffer -> view<1xi32>
+    view.store<volatile|root_in_bounds> %37, %47[0] : i32, view<1xi32>
+  }
+  func.return
+}
+
+func.def @observe_one_const_volatile_unsigned_int_volatile_unsigned_int(%input: buffer, %input_byte_offset: offset, %output: buffer, %output_byte_offset: offset) -> (i32) {
+  %value = func.call @read_twice_const_volatile_unsigned_int(%input, %input_byte_offset) : (buffer, offset) -> (i32)
+  %54 = scalar.constant 0 : i32
+  %59 = index.cast %output_byte_offset : offset to i64
+  %61 = scalar.assume %59 [range(%59, 0, 9223372036854775807)] : i64
+  %62 = index.cast %61 : i64 to offset
+  %63 = buffer.view %output[%62] : buffer -> view<1xi32>
+  view.store<volatile|root_in_bounds> %54, %63[0] : i32, view<1xi32>
+  view.store<volatile|root_in_bounds> %value, %63[0] : i32, view<1xi32>
+  %82 = view.load<volatile|root_in_bounds> %63[0] : view<1xi32> -> i32
+  func.return %82 : i32
+}
+
+func.def @read_twice_const_volatile_unsigned_int(%source_data: buffer, %source_data_byte_offset: offset) -> (i32) {
+  %90 = index.cast %source_data_byte_offset : offset to i64
+  %92 = scalar.assume %90 [range(%90, 0, 9223372036854775807)] : i64
+  %93 = index.cast %92 : i64 to offset
+  %94 = buffer.view %source_data[%93] : buffer -> view<1xi32>
+  %95 = view.load<volatile|root_in_bounds> %94[0] : view<1xi32> -> i32
+  %96 = buffer.view %source_data[%source_data_byte_offset] : buffer -> view<1xi32>
+  %97 = view.load<volatile|root_in_bounds> %96[0] : view<1xi32> -> i32
+  %first = view.load<volatile|root_in_bounds> %94[0] : view<1xi32> -> i32
+  %second = view.load<volatile|root_in_bounds> %94[0] : view<1xi32> -> i32
+  %118 = scalar.addi %first, %second : i32
+  func.return %118 : i32
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// The same template chain with ordinary storage permits unused reads to
+// disappear and duplicate reads to coalesce without changing its output roots.
+#include <loomcxx/kernel.h>
+template <class T>
+struct Source {
+  // Borrowed storage; the pointee qualifier determines each observation.
+  T* data;
+};
+
+template <class T>
+static unsigned read_twice(Source<T> source) {
+  source.data[0];
+  static_cast<void>(*source.data);
+  unsigned first = source.data[0];
+  unsigned second = source.data[0];
+  return first + second;
+}
+
+template <class Input, class Output>
+static unsigned observe_one(Input* input, Output* output) {
+  unsigned value = read_twice(Source<Input>{input});
+  output[0] = 0;
+  output[0] = value;
+  return output[0];
+}
+
+template <class Input, class Output>
+static void copy_observations(Input* input, Output* output, unsigned count,
+                              unsigned lane) {
+  loom::assume(count < 65);
+  if (lane < count) {
+    unsigned observed = observe_one(input + lane, output + lane);
+    output[64 + lane] = observed ^ 0xa5a55a5au;
+  }
+}
+
+[[loom::kernel, loom::workgroup_size(64, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void ordinary_memory(const unsigned* input, unsigned* output, unsigned count) {
+  copy_observations(input, output, count, loom::kernel::workitem::id.x);
+}
+// ----
+kernel.def @ordinary_memory() {
+  %3 = index.constant 1 : index
+  %6 = index.constant 64 : index
+  kernel.launch.config workgroups(%3, %3, %3) workgroup_size(%6, %3, %3) : index
+} launch(%input: buffer, %output: buffer, %count: i32) {
+  %input_byte_offset = index.constant 0 : offset
+  %workitem_id_x = kernel.workitem.id<x> : index
+  %12 = index.cast %workitem_id_x : index to i32
+  func.call @copy_observations_const_unsigned_int_unsigned_int(%input, %input_byte_offset, %output, %input_byte_offset, %count, %12) : (buffer, offset, buffer, offset, i32, i32)
+  kernel.return
+}
+
+func.def @copy_observations_const_unsigned_int_unsigned_int(%input: buffer, %input_byte_offset: offset, %output: buffer, %output_byte_offset: offset, %count$17: i32, %lane: i32) {
+  %count$19 = scalar.assume %count$17 [range(%count$17, 0, 64)] : i32
+  %20 = scalar.cmpi ult, %lane, %count$19 : i32
+  scf.if %20 {
+    %108 = scalar.assume %lane [ge(%lane, 0), lt(%lane, %count$19)] : i32
+    %21 = scalar.extui %108 : i32 to i64
+    %109 = scalar.assume %21 [lt(%21, %count$19)] : i64
+    %116 = scalar.constant 2 : i64
+    %117 = scalar.shli %109, %116 : i64
+    %24 = index.cast %input_byte_offset : offset to i64
+    %25 = scalar.addi %24, %117 : i64
+    %26 = scalar.assume %25 [range(%25, 0, 9223372036854775807)] : i64
+    %27 = index.cast %26 : i64 to offset
+    %31 = index.cast %output_byte_offset : offset to i64
+    %32 = scalar.addi %31, %117 : i64
+    %33 = scalar.assume %32 [range(%32, 0, 9223372036854775807)] : i64
+    %34 = index.cast %33 : i64 to offset
+    %observed = func.call @observe_one_const_unsigned_int_unsigned_int(%input, %27, %output, %34) : (buffer, offset, buffer, offset) -> (i32)
+    %36 = scalar.constant -1515890086 : i32
+    %37 = scalar.xori %observed, %36 : i32
+    %38 = scalar.constant 64 : i32
+    %113 = scalar.addi %108, %38 : i32
+    %40 = scalar.extui %113 : i32 to i64
+    %112 = scalar.shli %40, %116 : i64
+    %44 = scalar.addi %31, %112 : i64
+    %45 = scalar.assume %44 [range(%44, 0, 9223372036854775807)] : i64
+    %46 = index.cast %45 : i64 to offset
+    %47 = buffer.view %output[%46] : buffer -> view<1xi32>
+    view.store<root_in_bounds> %37, %47[0] : i32, view<1xi32>
+  }
+  func.return
+}
+
+func.def @observe_one_const_unsigned_int_unsigned_int(%input: buffer, %input_byte_offset: offset, %output: buffer, %output_byte_offset: offset) -> (i32) {
+  %value = func.call readonly @read_twice_const_unsigned_int(%input, %input_byte_offset) : (buffer, offset) -> (i32)
+  %54 = scalar.constant 0 : i32
+  %59 = index.cast %output_byte_offset : offset to i64
+  %61 = scalar.assume %59 [range(%59, 0, 9223372036854775807)] : i64
+  %62 = index.cast %61 : i64 to offset
+  %63 = buffer.view %output[%62] : buffer -> view<1xi32>
+  view.store<root_in_bounds> %54, %63[0] : i32, view<1xi32>
+  view.store<root_in_bounds> %value, %63[0] : i32, view<1xi32>
+  %82 = view.load<root_in_bounds> %63[0] : view<1xi32> -> i32
+  func.return %82 : i32
+}
+
+func.def @read_twice_const_unsigned_int(%source_data: buffer, %source_data_byte_offset: offset) -> (i32) {
+  %91 = index.cast %source_data_byte_offset : offset to i64
+  %93 = scalar.assume %91 [range(%91, 0, 9223372036854775807)] : i64
+  %94 = index.cast %93 : i64 to offset
+  %95 = buffer.view %source_data[%94] : buffer -> view<1xi32>
+  %first = view.load<root_in_bounds> %95[0] : view<1xi32> -> i32
+  %107 = scalar.addi %first, %first : i32
+  func.return %107 : i32
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// A loaded scalar becomes a qualified by-value parameter object; its
+// initialization and two reads are observed before the kernel stores the result.
+unsigned volatile_parameter(volatile unsigned value) {
+  static_cast<void>(value);
+  return value;
+}
+
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void volatile_scalar_parameter(const unsigned* input, unsigned* output) {
+  output[0] = volatile_parameter(input[0]);
+}
+// ----
+func.def public @volatile_parameter(%value$0: i32) -> (i32) {
+  %2 = index.constant 4 : offset
+  %value_storage = buffer.alloca<private> align(4) %2 : buffer
+  %value_storage_byte_offset = index.constant 0 : offset
+  %value_view = buffer.view %value_storage[%value_storage_byte_offset] : buffer -> view<1xi32>
+  view.store<volatile> %value$0, %value_view[0] : i32, view<1xi32>
+  %value$6 = view.load<volatile> %value_view[0] : view<1xi32> -> i32
+  %value$7 = view.load<volatile> %value_view[0] : view<1xi32> -> i32
+  func.return %value$7 : i32
+}
+
+kernel.def @volatile_scalar_parameter() {
+  %10 = index.constant 1 : index
+  kernel.launch.config workgroups(%10, %10, %10) workgroup_size(%10, %10, %10) : index
+} launch(%input: buffer, %output: buffer) {
+  %39 = index.constant 0 : offset
+  %26 = buffer.view %input[%39] : buffer -> view<1xi32>
+  %27 = view.load<root_in_bounds> %26[0] : view<1xi32> -> i32
+  %28 = func.call @volatile_parameter(%27) : (i32) -> (i32)
+  %37 = buffer.view %output[%39] : buffer -> view<1xi32>
+  view.store<root_in_bounds> %28, %37[0] : i32, view<1xi32>
+  kernel.return
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// Reinterpreting word buffers as vectors preserves four lanes through
+// a volatile by-value helper parameter and the final kernel store.
+using Words = unsigned __attribute__((vector_size(16)));
+
+static Words volatile_vector_parameter(volatile Words value) {
+  static_cast<void>(value);
+  return value;
+}
+
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void volatile_vector_parameter_kernel(const unsigned* input_words,
+                                      unsigned* output_words) {
+  const Words* input = reinterpret_cast<const Words*>(input_words);
+  Words* output = reinterpret_cast<Words*>(output_words);
+  output[0] = volatile_vector_parameter(input[0]);
+}
+// ----
+kernel.def @volatile_vector_parameter_kernel() {
+  %2 = index.constant 1 : index
+  kernel.launch.config workgroups(%2, %2, %2) workgroup_size(%2, %2, %2) : index
+} launch(%input_words: buffer, %output_words: buffer) {
+  %39 = index.constant 0 : offset
+  %18 = buffer.view %input_words[%39] : buffer -> view<4xi32>
+  %19 = vector.load<root_in_bounds> %18[0] : view<4xi32> -> vector<4xi32>
+  %20 = func.call @volatile_vector_parameter(%19) : (vector<4xi32>) -> (vector<4xi32>)
+  %29 = buffer.view %output_words[%39] : buffer -> view<4xi32>
+  vector.store<root_in_bounds> %20, %29[0] : vector<4xi32>, view<4xi32>
+  kernel.return
+}
+
+func.def @volatile_vector_parameter(%value$30: vector<4xi32>) -> (vector<4xi32>) {
+  %32 = index.constant 16 : offset
+  %value_storage = buffer.alloca<private> align(16) %32 : buffer
+  %value_storage_byte_offset = index.constant 0 : offset
+  %value_view = buffer.view %value_storage[%value_storage_byte_offset] : buffer -> view<4xi32>
+  vector.store<volatile> %value$30, %value_view[0] : vector<4xi32>, view<4xi32>
+  %value$36 = vector.load<volatile> %value_view[0] : view<4xi32> -> vector<4xi32>
+  %value$37 = vector.load<volatile> %value_view[0] : view<4xi32> -> vector<4xi32>
+  func.return %value$37 : vector<4xi32>
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// Whole-vector observations retain the discarded load and zero store
+// before publishing the independently loaded four-lane value.
+using Words = unsigned __attribute__((vector_size(16)));
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void volatile_vectors(const volatile unsigned* input_words,
+                      volatile unsigned* output_words) {
+  const volatile Words* input =
+      reinterpret_cast<const volatile Words*>(input_words);
+  volatile Words* output = reinterpret_cast<volatile Words*>(output_words);
+  static_cast<void>(*input);
+  Words value = input[0];
+  output[0] = Words{0, 0, 0, 0};
+  output[0] = value;
+}
+// ----
+kernel.def @volatile_vectors() {
+  %2 = index.constant 1 : index
+  kernel.launch.config workgroups(%2, %2, %2) workgroup_size(%2, %2, %2) : index
+} launch(%input_words: buffer, %output_words: buffer) {
+  %input_words_byte_offset = index.constant 0 : offset
+  %10 = buffer.view %input_words[%input_words_byte_offset] : buffer -> view<4xi32>
+  %11 = vector.load<volatile|root_in_bounds> %10[0] : view<4xi32> -> vector<4xi32>
+  %value = vector.load<volatile|root_in_bounds> %10[0] : view<4xi32> -> vector<4xi32>
+  %43 = vector.splati 0 : vector<4xi32>
+  %31 = buffer.view %output_words[%input_words_byte_offset] : buffer -> view<4xi32>
+  vector.store<volatile|root_in_bounds> %43, %31[0] : vector<4xi32>, view<4xi32>
+  vector.store<volatile|root_in_bounds> %value, %31[0] : vector<4xi32>, view<4xi32>
+  kernel.return
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// Each workitem owns one volatile shared element. Its discarded read,
+// update read, and final read remain distinct without cross-lane barriers.
+#include <loomcxx/kernel.h>
+[[loom::kernel, loom::workgroup_size(64, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void volatile_shared(const unsigned* input, unsigned* output) {
+  [[loom::workgroup]] volatile unsigned table[64];
+  unsigned lane = loom::kernel::workitem::id.x;
+  // Each invocation owns its element, so no cross-invocation ordering is
+  // needed.
+  table[lane] = input[lane];
+  table[lane];
+  unsigned first = table[lane];
+  table[lane] = first + 1u;
+  output[lane] = table[lane];
+}
+// ----
+kernel.def @volatile_shared() {
+  %2 = index.constant 1 : index
+  %5 = index.constant 64 : index
+  kernel.launch.config workgroups(%2, %2, %2) workgroup_size(%5, %2, %2) : index
+} launch(%input: buffer, %output: buffer) {
+  %10 = index.constant 256 : offset
+  %table = buffer.alloca<workgroup> align(4) %10 : buffer
+  %table_byte_offset = index.constant 0 : offset
+  %table_view = buffer.view %table[%table_byte_offset] : buffer -> view<64xi32>
+  %workitem_id_x = kernel.workitem.id<x> : index
+  %lane = index.cast %workitem_id_x : index to i32
+  %16 = scalar.extui %lane : i32 to i64
+  %55 = scalar.constant 2 : i64
+  %56 = scalar.shli %16, %55 : i64
+  %21 = scalar.assume %56 [range(%56, 0, 9223372036854775807)] : i64
+  %22 = index.cast %21 : i64 to offset
+  %23 = buffer.view %input[%22] : buffer -> view<1xi32>
+  %24 = view.load<root_in_bounds> %23[0] : view<1xi32> -> i32
+  %26 = scalar.assume %16 [range(%16, 0, 63)] : i64
+  %27 = index.cast %26 : i64 to index
+  view.store<volatile> %24, %table_view[%27] : i32, view<64xi32>
+  %31 = view.load<volatile> %table_view[%27] : view<64xi32> -> i32
+  %first = view.load<volatile> %table_view[%27] : view<64xi32> -> i32
+  %36 = scalar.constant 1 : i32
+  %37 = scalar.addi %first, %36 : i32
+  view.store<volatile> %37, %table_view[%27] : i32, view<64xi32>
+  %44 = view.load<volatile> %table_view[%27] : view<64xi32> -> i32
+  %54 = scalar.shli %26, %55 : i64
+  %50 = scalar.assume %54 [range(%54, 0, 9223372036854775807)] : i64
+  %51 = index.cast %50 : i64 to offset
+  %52 = buffer.view %output[%51] : buffer -> view<1xi32>
+  view.store<root_in_bounds> %44, %52[0] : i32, view<1xi32>
+  kernel.return
+}

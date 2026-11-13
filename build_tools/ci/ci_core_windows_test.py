@@ -530,7 +530,6 @@ class CiCoreWindowsTest(unittest.TestCase):
         self.assertIn("-DLIBHRX_BUILD_CTS=OFF", configure_cmd)
         self.assertIn("-DLIBHRX_BUILD_HIP_BINDING=OFF", configure_cmd)
         self.assertIn("-DLIBHRX_BUILD_PASSTHROUGH=OFF", configure_cmd)
-        self.assertIn("-DIREE_HAL_DRIVER_AMDGPU=OFF", configure_cmd)
 
     def test_test_core_builds_the_selected_source_ctest_closure(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -566,8 +565,13 @@ class CiCoreWindowsTest(unittest.TestCase):
                 ci_core_windows.test_core(args)
             self.assertEqual(step_type.call_args.kwargs["build_dir"], build_dir)
             self.assertEqual(step_type.call_args.kwargs["env"]["PATH"], "toolchain")
+            arguments = step_type.call_args.kwargs["arguments"].copy()
+            label_index = arguments.index("-LE")
+            label_exclude_regex = arguments.pop(label_index + 1)
+            arguments.pop(label_index)
+            self.assertRegex("manual", label_exclude_regex)
             self.assertEqual(
-                step_type.call_args.kwargs["arguments"],
+                arguments,
                 [
                     "--parallel",
                     "2",
@@ -575,8 +579,6 @@ class CiCoreWindowsTest(unittest.TestCase):
                     "^hrx/",
                     "-E",
                     "(^build_tools/cmake/)",
-                    "-LE",
-                    "manual",
                     "--no-tests=error",
                 ],
             )

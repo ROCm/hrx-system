@@ -258,3 +258,110 @@ func.def @exact_index_coordinate_digits(%position: index) -> (index, index) {
   %minor = index.rem %position, %radix : index
   func.return %major, %minor : index, index
 }
+
+// ====
+
+// The two result roles have distinct bounds. Every comparison orientation
+// must use the remainder, including when scalar input bits are unrestricted.
+// RUN: pass canonicalize
+
+func.def @index_remainder_relations(%input: index, %divisor_input: index) -> (index, index, i1, i1, i1, i1, i1, i1) {
+  %dividend = index.assume %input [range(%input, 0, 1023)] : index
+  %divisor = index.assume %divisor_input [range(%divisor_input, 1, 64)] : index
+  %quotient, %remainder = index.divrem %dividend, %divisor : index
+  %less = index.cmp slt, %remainder, %divisor : index
+  %at_least = index.cmp sge, %remainder, %divisor : index
+  %greater_reversed = index.cmp sgt, %divisor, %remainder : index
+  %at_most_reversed = index.cmp sle, %divisor, %remainder : index
+  %equal = index.cmp eq, %divisor, %remainder : index
+  %different = index.cmp ne, %divisor, %remainder : index
+  func.return %quotient, %remainder, %less, %at_least, %greater_reversed, %at_most_reversed, %equal, %different : index, index, i1, i1, i1, i1, i1, i1
+}
+
+// ----
+func.def @index_remainder_relations(%input: index, %divisor_input: index) -> (index, index, i1, i1, i1, i1, i1, i1) {
+  %dividend = index.assume %input [range(%input, 0, 1023)] : index
+  %divisor = index.assume %divisor_input [range(%divisor_input, 1, 64)] : index
+  %quotient, %remainder = index.divrem %dividend, %divisor : index
+  %less = scalar.constant true : i1
+  %at_least = scalar.constant false : i1
+  %greater_reversed = scalar.constant true : i1
+  %at_most_reversed = scalar.constant false : i1
+  %equal = scalar.constant false : i1
+  %different = scalar.constant true : i1
+  func.return %quotient, %remainder, %less, %at_least, %greater_reversed, %at_most_reversed, %equal, %different : index, index, i1, i1, i1, i1, i1, i1
+}
+
+// ====
+
+// RUN: pass canonicalize
+
+func.def @signed_remainder_relations(%input: i32, %divisor_input: i32) -> (i32, i32, i1, i1, i1, i1, i1, i1) {
+  %divisor = scalar.assume %divisor_input [range(%divisor_input, 1, 64)] : i32
+  %quotient, %remainder = scalar.divremsi %input, %divisor : i32
+  %less = scalar.cmpi slt, %remainder, %divisor : i32
+  %at_least = scalar.cmpi sge, %remainder, %divisor : i32
+  %greater_reversed = scalar.cmpi sgt, %divisor, %remainder : i32
+  %at_most_reversed = scalar.cmpi sle, %divisor, %remainder : i32
+  %equal = scalar.cmpi eq, %divisor, %remainder : i32
+  %different = scalar.cmpi ne, %divisor, %remainder : i32
+  func.return %quotient, %remainder, %less, %at_least, %greater_reversed, %at_most_reversed, %equal, %different : i32, i32, i1, i1, i1, i1, i1, i1
+}
+
+// ----
+func.def @signed_remainder_relations(%input: i32, %divisor_input: i32) -> (i32, i32, i1, i1, i1, i1, i1, i1) {
+  %divisor = scalar.assume %divisor_input [range(%divisor_input, 1, 64)] : i32
+  %quotient, %remainder = scalar.divremsi %input, %divisor : i32
+  %less = scalar.constant true : i1
+  %at_least = scalar.constant false : i1
+  %greater_reversed = scalar.constant true : i1
+  %at_most_reversed = scalar.constant false : i1
+  %equal = scalar.constant false : i1
+  %different = scalar.constant true : i1
+  func.return %quotient, %remainder, %less, %at_least, %greater_reversed, %at_most_reversed, %equal, %different : i32, i32, i1, i1, i1, i1, i1, i1
+}
+
+// ====
+
+// RUN: pass canonicalize
+
+func.def @unsigned_remainder_relations(%input: i64, %divisor_input: i64) -> (i64, i64, i1, i1, i1, i1, i1, i1) {
+  %divisor = scalar.assume %divisor_input [range(%divisor_input, 1, 64)] : i64
+  %quotient, %remainder = scalar.divremui %input, %divisor : i64
+  %less = scalar.cmpi slt, %remainder, %divisor : i64
+  %at_least = scalar.cmpi sge, %remainder, %divisor : i64
+  %greater_reversed = scalar.cmpi sgt, %divisor, %remainder : i64
+  %at_most_reversed = scalar.cmpi sle, %divisor, %remainder : i64
+  %equal = scalar.cmpi eq, %divisor, %remainder : i64
+  %different = scalar.cmpi ne, %divisor, %remainder : i64
+  func.return %quotient, %remainder, %less, %at_least, %greater_reversed, %at_most_reversed, %equal, %different : i64, i64, i1, i1, i1, i1, i1, i1
+}
+
+// ----
+func.def @unsigned_remainder_relations(%input: i64, %divisor_input: i64) -> (i64, i64, i1, i1, i1, i1, i1, i1) {
+  %divisor = scalar.assume %divisor_input [range(%divisor_input, 1, 64)] : i64
+  %quotient, %remainder = scalar.divremui %input, %divisor : i64
+  %less = scalar.constant true : i1
+  %at_least = scalar.constant false : i1
+  %greater_reversed = scalar.constant true : i1
+  %at_most_reversed = scalar.constant false : i1
+  %equal = scalar.constant false : i1
+  %different = scalar.constant true : i1
+  func.return %quotient, %remainder, %less, %at_least, %greater_reversed, %at_most_reversed, %equal, %different : i64, i64, i1, i1, i1, i1, i1, i1
+}
+
+// ====
+
+// RUN: pass canonicalize
+
+func.def @unsigned_divisor_sign_bit(%input: i32, %divisor_input: i32) -> (i32, i32, i1, i1, i1, i1, i1, i1) {
+  %divisor = scalar.assume %divisor_input [range(%divisor_input, -64, -1)] : i32
+  %quotient, %remainder = scalar.divremui %input, %divisor : i32
+  %less = scalar.cmpi slt, %remainder, %divisor : i32
+  %at_least = scalar.cmpi sge, %remainder, %divisor : i32
+  %greater_reversed = scalar.cmpi sgt, %divisor, %remainder : i32
+  %at_most_reversed = scalar.cmpi sle, %divisor, %remainder : i32
+  %equal = scalar.cmpi eq, %divisor, %remainder : i32
+  %different = scalar.cmpi ne, %divisor, %remainder : i32
+  func.return %quotient, %remainder, %less, %at_least, %greater_reversed, %at_most_reversed, %equal, %different : i32, i32, i1, i1, i1, i1, i1, i1
+}

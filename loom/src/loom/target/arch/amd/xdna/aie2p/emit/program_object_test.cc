@@ -8,6 +8,7 @@
 
 #include <array>
 #include <string>
+#include <vector>
 
 #include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
@@ -100,7 +101,8 @@ TEST(Aie2pProgramObjectTest, LeavesLargestAlignmentGapAfterFinalHelper) {
   iree_arena_initialize(&block_pool, &arena);
   loom_aie2p_program_object_t program = {};
   IREE_ASSERT_OK(loom_aie2p_program_object_merge(
-      contributions, IREE_ARRAYSIZE(contributions), &arena, &arena, &program));
+      contributions, IREE_ARRAYSIZE(contributions), /*data=*/nullptr,
+      /*data_count=*/0, &arena, &arena, &program));
 
   ASSERT_EQ(program.contribution.object.section_count, 4u);
   EXPECT_EQ(program.contribution.object.sections[0].contents.data,
@@ -188,7 +190,8 @@ TEST(Aie2pProgramObjectTest, SharesBodiesAndRebindsCallsWithSelfRelocations) {
   iree_arena_initialize(&block_pool, &arena);
   loom_aie2p_program_object_t program = {};
   IREE_ASSERT_OK(loom_aie2p_program_object_merge(
-      contributions, IREE_ARRAYSIZE(contributions), &arena, &arena, &program));
+      contributions, IREE_ARRAYSIZE(contributions), /*data=*/nullptr,
+      /*data_count=*/0, &arena, &arena, &program));
 
   EXPECT_EQ(program.canonical_indices[0], 0u);
   EXPECT_EQ(program.canonical_indices[1], 1u);
@@ -243,7 +246,8 @@ TEST(Aie2pProgramObjectTest, PreservesFirstIdentityAcrossInterleavedBodies) {
   iree_arena_initialize(&block_pool, &arena);
   loom_aie2p_program_object_t program = {};
   IREE_ASSERT_OK(loom_aie2p_program_object_merge(
-      contributions.data(), contributions.size(), &arena, &arena, &program));
+      contributions.data(), contributions.size(), /*data=*/nullptr,
+      /*data_count=*/0, &arena, &arena, &program));
   ASSERT_EQ(program.contribution.object.section_count, kBodyCount + 1);
   EXPECT_EQ(program.contribution.realization.code.byte_length,
             (kBodyCount + 1) * 16);
@@ -254,6 +258,79 @@ TEST(Aie2pProgramObjectTest, PreservesFirstIdentityAcrossInterleavedBodies) {
     EXPECT_EQ(program.contribution.object.symbols[i].section_contribution_index,
               first);
   }
+  iree_arena_deinitialize(&arena);
+  iree_arena_block_pool_deinitialize(&block_pool);
+}
+
+TEST(Aie2pProgramObjectTest, BindsNestedCallsBeforeAndAfterBodySharing) {
+  // Equal phase instructions call different math entries. The phases must
+  // remain distinct even though the two math entries share their native body.
+  // Names deliberately disagree with contribution order, and the root repeats
+  // one call using the same imported symbol.
+  const iree_string_view_t names[] = {
+      IREE_SV("root"),   IREE_SV("phase_z"), IREE_SV("phase_a"),
+      IREE_SV("math_z"), IREE_SV("math_a"),
+  };
+  const std::array<uint8_t, 24> code = {};
+  loom_native_section_contribution_t sections[5];
+  loom_native_object_symbol_t symbols[5][3];
+  loom_native_object_fixup_t fixups[5][3];
+  loom_aie2p_leaf_contribution_t contributions[5];
+  const size_t call_counts[] = {3, 1, 1, 0, 0};
+  const size_t callees[3][3] = {{1, 2, 1}, {3}, {4}};
+  for (size_t i = 0; i < IREE_ARRAYSIZE(contributions); ++i) {
+    const size_t code_length = i == 0 ? 24 : i < 3 ? 8 : 2;
+    contributions[i] = MakeHelper(names[i], code.data(), code_length,
+                                  &sections[i], &symbols[i][0]);
+    for (size_t j = 0; j < call_counts[i]; ++j) {
+      const size_t import_index = i == 0 && j == 1 ? 2 : 1;
+      symbols[i][import_index] = {
+          .name = names[callees[i][j]],
+          .section_contribution_index = IREE_HOST_SIZE_MAX,
+          .binding = LOOM_NATIVE_OBJECT_SYMBOL_BINDING_GLOBAL,
+          .kind = LOOM_NATIVE_OBJECT_SYMBOL_KIND_FUNCTION,
+      };
+      fixups[i][j] = {
+          .section_contribution_index = 0,
+          .section_offset = j * 8,
+          .relocation_kind =
+              LOOM_AIE2P_NATIVE_RELOCATION_KIND_CORE_CALL_ABSOLUTE,
+          .target_symbol_index = import_index,
+      };
+    }
+    contributions[i].object.symbol_count = i == 0 ? 3 : i < 3 ? 2 : 1;
+    contributions[i].object.fixups = fixups[i];
+    contributions[i].object.fixup_count = call_counts[i];
+  }
+
+  iree_arena_block_pool_t block_pool;
+  iree_arena_block_pool_initialize(4096, iree_allocator_system(), &block_pool);
+  iree_arena_allocator_t arena;
+  iree_arena_initialize(&block_pool, &arena);
+  loom_aie2p_program_object_t program = {};
+  IREE_ASSERT_OK(loom_aie2p_program_object_merge(
+      contributions, IREE_ARRAYSIZE(contributions), /*data=*/nullptr,
+      /*data_count=*/0, &arena, &arena, &program));
+  EXPECT_EQ(program.canonical_indices[1], 1u);
+  EXPECT_EQ(program.canonical_indices[2], 2u);
+  EXPECT_EQ(program.canonical_indices[3], 3u);
+  EXPECT_EQ(program.canonical_indices[4], 3u);
+  const auto& object = program.contribution.object;
+  ASSERT_EQ(object.section_count, 4u);
+  ASSERT_EQ(object.symbol_count, 9u);
+  ASSERT_EQ(object.fixup_count, 5u);
+  const size_t expected_targets[] = {3, 5, 3, 7, 8};
+  const size_t expected_sections[] = {1, 2, 1, 3, 3};
+  for (size_t i = 0; i < object.fixup_count; ++i) {
+    EXPECT_EQ(object.fixups[i].target_symbol_index, expected_targets[i]);
+    EXPECT_EQ(object.symbols[expected_targets[i]].section_contribution_index,
+              expected_sections[i]);
+  }
+  // Relinking into another program never mutates the detached input imports.
+  EXPECT_EQ(symbols[0][1].section_contribution_index, IREE_HOST_SIZE_MAX);
+  EXPECT_EQ(fixups[0][0].target_symbol_index, 1u);
+  EXPECT_EQ(fixups[1][0].target_symbol_index, 1u);
+  EXPECT_EQ(fixups[2][0].target_symbol_index, 1u);
   iree_arena_deinitialize(&arena);
   iree_arena_block_pool_deinitialize(&block_pool);
 }
@@ -298,7 +375,8 @@ TEST(Aie2pProgramObjectTest, PreservesDifferentInstructionsAndRelocations) {
   iree_arena_initialize(&block_pool, &arena);
   loom_aie2p_program_object_t program = {};
   IREE_ASSERT_OK(loom_aie2p_program_object_merge(
-      contributions, IREE_ARRAYSIZE(contributions), &arena, &arena, &program));
+      contributions, IREE_ARRAYSIZE(contributions), /*data=*/nullptr,
+      /*data_count=*/0, &arena, &arena, &program));
   EXPECT_EQ(program.contribution.object.section_count, 3u);
   EXPECT_EQ(program.contribution.realization.code.byte_length, 40u);
   EXPECT_EQ(program.contribution.object.symbols[1].section_contribution_index,
@@ -315,7 +393,8 @@ TEST(Aie2pProgramObjectTest, PreservesDifferentInstructionsAndRelocations) {
   contributions[1].object.fixup_count = 0;
   contributions[2].object.fixup_count = 0;
   IREE_ASSERT_OK(loom_aie2p_program_object_merge(
-      contributions, IREE_ARRAYSIZE(contributions), &arena, &arena, &program));
+      contributions, IREE_ARRAYSIZE(contributions), /*data=*/nullptr,
+      /*data_count=*/0, &arena, &arena, &program));
   EXPECT_EQ(program.contribution.object.section_count, 2u);
   EXPECT_EQ(program.contribution.realization.code.byte_length, 24u);
   EXPECT_EQ(program.contribution.object.symbols[0].section_contribution_index,
@@ -329,7 +408,8 @@ TEST(Aie2pProgramObjectTest, PreservesDifferentInstructionsAndRelocations) {
   sections[2].contents =
       iree_make_const_byte_span(different_code.data(), different_code.size());
   IREE_ASSERT_OK(loom_aie2p_program_object_merge(
-      contributions, IREE_ARRAYSIZE(contributions), &arena, &arena, &program));
+      contributions, IREE_ARRAYSIZE(contributions), /*data=*/nullptr,
+      /*data_count=*/0, &arena, &arena, &program));
   EXPECT_EQ(program.contribution.object.section_count, 3u);
   EXPECT_EQ(program.contribution.realization.code.byte_length, 40u);
   EXPECT_NE(program.contribution.object.symbols[1].section_contribution_index,
@@ -338,6 +418,180 @@ TEST(Aie2pProgramObjectTest, PreservesDifferentInstructionsAndRelocations) {
   iree_arena_deinitialize(&arena);
   iree_arena_block_pool_deinitialize(&block_pool);
 }
+
+class Aie2pProgramDataTest : public ::testing::TestWithParam<size_t> {};
+
+TEST_P(Aie2pProgramDataTest,
+       SharesDefinitionsWithoutLosingIdentityOrPlacement) {
+  const size_t data_count = GetParam();
+  const size_t contribution_count = 1 + 2 * data_count;
+  const std::array<uint8_t, 8> code = {};
+  const std::array<uint8_t, 4> bytes = {1, 2, 3, 4};
+  std::vector<std::string> data_names(data_count);
+  std::vector<std::string> function_names(contribution_count);
+  std::vector<std::array<uint32_t, 2>> conflicts(data_count);
+  std::vector<loom_aie2p_program_data_t> data(data_count);
+  for (size_t i = 0; i < data_count; ++i) {
+    // Deliberately differ from name order to exercise the sorted projection.
+    data_names[i] = "table_" + std::to_string((data_count - i) * 11);
+    conflicts[i] = {static_cast<uint32_t>((i + 1) % data_count),
+                    static_cast<uint32_t>((i + data_count - 1) % data_count)};
+    data[i] = {
+        .name =
+            iree_make_string_view(data_names[i].data(), data_names[i].size()),
+        .bank_conflicts = conflicts[i].data(),
+        .bank_conflict_count = 2,
+    };
+  }
+  std::vector<std::array<loom_native_section_contribution_t, 3>> sections(
+      contribution_count);
+  std::vector<std::array<loom_native_object_symbol_t, 3>> symbols(
+      contribution_count);
+  std::vector<std::array<loom_native_object_fixup_t, 2>> fixups(
+      contribution_count);
+  std::vector<loom_aie2p_leaf_read_only_data_domain_t> domains(
+      contribution_count);
+  std::vector<loom_aie2p_leaf_contribution_t> contributions(contribution_count);
+  for (size_t i = 0; i < contribution_count; ++i) {
+    const size_t ordinal = i == 0 ? 0 : (i - 1) % data_count;
+    function_names[i] = "function_" + std::to_string(i);
+    contributions[i] =
+        MakeHelper(iree_make_string_view(function_names[i].data(),
+                                         function_names[i].size()),
+                   code.data(), code.size(), &sections[i][0], &symbols[i][0]);
+    // Equal contents remain distinct definitions. The last one is empty but
+    // still has address identity and alignment.
+    sections[i][1] = {
+        .section_name = data[ordinal].name,
+        .storage = LOOM_NATIVE_SECTION_STORAGE_CONTENTS,
+        .access = LOOM_NATIVE_SECTION_ACCESS_READ,
+        .contribution_alignment = 32u << (ordinal % 3),
+        .contents = iree_make_const_byte_span(
+            bytes.data(), ordinal + 1 == data_count ? 0 : bytes.size()),
+    };
+    symbols[i][1] = {
+        .name = data[ordinal].name,
+        .section_contribution_index = 1,
+        .size = sections[i][1].contents.data_length,
+        .binding = LOOM_NATIVE_OBJECT_SYMBOL_BINDING_LOCAL,
+        .kind = LOOM_NATIVE_OBJECT_SYMBOL_KIND_DATA,
+    };
+    fixups[i][0] = {
+        .section_contribution_index = 0,
+        .section_offset = 0,
+        .relocation_kind =
+            LOOM_AIE2P_NATIVE_RELOCATION_KIND_LOCAL_ADDRESS_ABSOLUTE,
+        .target_symbol_index = 1,
+    };
+    // A leaf sees only its own definition; conflict edges cross leaf
+    // boundaries.
+    domains[i] = {.section_contribution_index = 1, .symbol_index = 1};
+    contributions[i].object.section_count = 2;
+    contributions[i].object.symbol_count = 2;
+    contributions[i].object.fixups = fixups[i].data();
+    contributions[i].object.fixup_count = 1;
+    contributions[i].realization.read_only_data = &domains[i];
+    contributions[i].realization.read_only_data_count = 1;
+    contributions[i].realization.capability_flags =
+        LOOM_AIE2P_LEAF_CAPABILITY_FLAG_READ_ONLY_DATA |
+        LOOM_AIE2P_LEAF_CAPABILITY_FLAG_NATIVE_FIXUPS;
+  }
+  sections[0][2] = {
+      .section_name = IREE_SV("private"),
+      .storage = LOOM_NATIVE_SECTION_STORAGE_RESERVATION,
+      .access =
+          LOOM_NATIVE_SECTION_ACCESS_READ | LOOM_NATIVE_SECTION_ACCESS_WRITE,
+      .contribution_alignment = 64,
+      .reservation_length = 64,
+  };
+  symbols[0][2] = {
+      .name = IREE_SV("private"),
+      .section_contribution_index = 2,
+      .size = 64,
+      .binding = LOOM_NATIVE_OBJECT_SYMBOL_BINDING_LOCAL,
+      .kind = LOOM_NATIVE_OBJECT_SYMBOL_KIND_DATA,
+  };
+  fixups[0][1] = fixups[0][0];
+  fixups[0][1].section_offset = 4;
+  fixups[0][1].target_symbol_index = 2;
+  const loom_aie2p_leaf_storage_domain_t storage = {
+      .storage_space = LOOM_STORAGE_SPACE_PRIVATE,
+      .section_contribution_index = 2,
+      .symbol_index = 2,
+  };
+  contributions[0].object.section_count = 3;
+  contributions[0].object.symbol_count = 3;
+  contributions[0].object.fixup_count = 2;
+  contributions[0].realization.private_storage = {64, 64};
+  contributions[0].realization.storage_domains = &storage;
+  contributions[0].realization.storage_domain_count = 1;
+  contributions[0].realization.capability_flags |=
+      LOOM_AIE2P_LEAF_CAPABILITY_FLAG_FUNCTION_STORAGE;
+
+  iree_arena_block_pool_t block_pool;
+  iree_arena_block_pool_initialize(4096, iree_allocator_system(), &block_pool);
+  iree_arena_allocator_t arena;
+  iree_arena_allocator_t scratch_arena;
+  iree_arena_initialize(&block_pool, &arena);
+  iree_arena_initialize(&block_pool, &scratch_arena);
+  loom_aie2p_program_object_t program = {};
+  IREE_ASSERT_OK(loom_aie2p_program_object_merge(
+      contributions.data(), contributions.size(), data.data(), data.size(),
+      &arena, &scratch_arena, &program));
+  for (size_t i = 1; i < contribution_count; ++i) {
+    EXPECT_EQ(program.canonical_indices[i], 1 + (i - 1) % data_count);
+  }
+  iree_arena_deinitialize(&scratch_arena);
+  // Final linking may outlive both the source inventory and its temporary
+  // native projection; conflict ordinals must belong to the result arena.
+  conflicts.clear();
+  conflicts.shrink_to_fit();
+  data.clear();
+  data.shrink_to_fit();
+  const auto& object = program.contribution.object;
+  const auto& realization = program.contribution.realization;
+  const size_t code_count = data_count + 1;
+  ASSERT_EQ(object.section_count, code_count + data_count + 1);
+  ASSERT_EQ(object.fixup_count, code_count + 1);
+  ASSERT_EQ(realization.read_only_data_count, data_count);
+  for (size_t i = 0; i < data_count; ++i) {
+    const auto& domain = realization.read_only_data[i];
+    EXPECT_EQ(domain.section_contribution_index, code_count + i);
+    EXPECT_EQ(object.sections[code_count + i].contribution_alignment,
+              32u << (i % 3));
+    EXPECT_EQ(object.sections[code_count + i].contents.data_length,
+              i + 1 == data_count ? 0 : bytes.size());
+    EXPECT_EQ(object.symbols[domain.symbol_index].section_contribution_index,
+              code_count + i);
+    ASSERT_EQ(domain.bank_conflict_count, 2u);
+    EXPECT_EQ(domain.bank_conflicts[0], (i + 1) % data_count);
+    EXPECT_EQ(domain.bank_conflicts[1], (i + data_count - 1) % data_count);
+  }
+  EXPECT_EQ(realization.storage_domains[0].section_contribution_index,
+            code_count + data_count);
+  EXPECT_EQ(object.symbols[2].section_contribution_index,
+            code_count + data_count);
+  EXPECT_EQ(object.sections[code_count + data_count].reservation_length, 64u);
+  EXPECT_EQ(object.fixups[0].target_symbol_index, 1u);
+  EXPECT_EQ(object.fixups[1].target_symbol_index, 2u);
+  for (size_t i = 1; i < contribution_count; ++i) {
+    const size_t ordinal = (i - 1) % data_count;
+    const size_t symbol_start = 3 + 2 * (i - 1);
+    EXPECT_EQ(object.symbols[symbol_start].section_contribution_index,
+              ordinal + 1);
+    EXPECT_EQ(object.symbols[symbol_start + 1].section_contribution_index,
+              code_count + ordinal);
+  }
+  for (size_t i = 0; i < data_count; ++i) {
+    EXPECT_EQ(object.fixups[i + 2].section_contribution_index, i + 1);
+    EXPECT_EQ(object.fixups[i + 2].target_symbol_index, 4 + 2 * i);
+  }
+  iree_arena_deinitialize(&arena);
+  iree_arena_block_pool_deinitialize(&block_pool);
+}
+
+INSTANTIATE_TEST_SUITE_P(InventorySizes, Aie2pProgramDataTest,
+                         ::testing::Values(3, 7));
 
 }  // namespace
 }  // namespace loom

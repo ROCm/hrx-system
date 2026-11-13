@@ -79,6 +79,13 @@ bool loom_amdgpu_source_alloca_layout_storage_requirement(
     loom_value_fact_memory_space_t memory_space,
     loom_amdgpu_source_alloca_storage_requirement_t* out_requirement);
 
+// Returns true when private allocation roots must remain explicit addresses.
+// Retained calls can place the caller's private segment after the shared leaf
+// frame, so folding a function-local root into a packet offset would lose the
+// later whole-program relocation.
+bool loom_amdgpu_source_alloca_layout_requires_private_root_address(
+    const loom_amdgpu_source_alloca_layout_t* layout);
+
 // Resolves the analyzed packed byte offset for a source buffer.alloca root in
 // the requested memory space. Returns false when the analysis cannot prove the
 // root has a statically encodable offset in that memory space.

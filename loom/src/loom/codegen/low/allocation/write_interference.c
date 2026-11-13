@@ -454,6 +454,9 @@ static iree_status_t loom_low_write_classify_copy_chains(
     const loom_low_placement_relation_t* relation = &placement->relations[r];
     if (relation->cause < LOOM_LOW_PLACEMENT_CAUSE_LOW_COPY ||
         relation->cause > LOOM_LOW_PLACEMENT_CAUSE_LOW_CONCAT ||
+        iree_any_bit_set(
+            relation->flags,
+            LOOM_LOW_PLACEMENT_RELATION_FLAG_INDEPENDENT_LIFETIMES) ||
         starts[relation->result_ordinal] == UINT32_MAX ||
         starts[relation->source_ordinal] == UINT32_MAX) {
       continue;

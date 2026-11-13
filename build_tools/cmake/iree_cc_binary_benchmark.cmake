@@ -21,6 +21,7 @@
 # SRCS: List of source files for the binary
 # DATA: List of other targets and files required for the binary
 # DEPS: List of other libraries to be linked in to the binary
+# INCLUDES: Additional include directories for the binary.
 # COPTS: List of private compile options for the binary
 # DEFINES: List of public defines for the binary
 # LINKOPTS: List of link options for the binary
@@ -45,7 +46,7 @@ function(iree_cc_binary_benchmark)
     _RULE
     "HOSTONLY;TESTONLY"
     "NAME;RESOURCE_GROUP"
-    "SRCS;COPTS;DEFINES;LINKOPTS;DATA;DEPS;ARGS;ENV;LABELS"
+    "SRCS;INCLUDES;COPTS;DEFINES;LINKOPTS;DATA;DEPS;ARGS;ENV;LABELS"
     ${ARGN}
   )
 
@@ -68,6 +69,8 @@ function(iree_cc_binary_benchmark)
       ${_RULE_DATA}
     DEPS
       ${_RULE_DEPS}
+    INCLUDES
+      ${_RULE_INCLUDES}
     COPTS
       ${_RULE_COPTS}
     DEFINES

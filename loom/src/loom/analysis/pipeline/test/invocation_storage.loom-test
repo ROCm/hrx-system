@@ -2,7 +2,8 @@
 
 // Both calls allocate a fresh local root and protocol from the same pool.
 // Their imported storage retains the root placement through a second child.
-// Equal source IDs in the two local constructions must not alias placements.
+// The local lifetimes are serialized and may share storage. The imported
+// root stays live throughout both children and cannot share their range.
 pipeline.def @leaf() run(%local: channel<tile<1xi32>>, %shared: channel<tile<1xi32>>) {
 }
 
@@ -32,7 +33,7 @@ pipeline.def public @test() run(%memory: pool) {
 inventory invocations=5 workers=0 channels=4
   protocol 0 = 1:%local pool=0 offset=64 bytes=64
   protocol 1 = 1:%shared pool=0 offset=0 bytes=64
-  protocol 2 = 3:%local pool=0 offset=128 bytes=64
+  protocol 2 = 3:%local pool=0 offset=64 bytes=64
   protocol 3 = 3:%shared pool=0 offset=0 bytes=64
 invocation 0 @test strands=0 channels=0
   joined block=0 step=0
@@ -47,3 +48,67 @@ invocation 3 @phase strands=0 channels=2
 invocation 4 @leaf strands=0 channels=0
   channel %local = 3:%local capacity=1 inventory=2
   channel %shared = 3:%shared capacity=1 inventory=3
+
+// ====
+// RUN: emit pipeline-invocations @test
+
+// The root, its concurrent child, and two independent serial scopes coexist.
+// Only alternatives inside each serial scope share ranges. Different sizes and
+// alignments make an incorrectly merged scope observable in the exact offsets.
+pipeline.def @small() run(%memory: pool) {
+  %bytes = index.constant 48 : offset
+  %origin = index.constant 0 : offset
+  %capacity = index.constant 1 : index
+  %storage = buffer.alloca<workgroup> pool(%memory) align(64) %bytes : buffer
+  %slots = buffer.view %storage[%origin] : buffer -> view<1x1xi32>
+  %local = channel.bind<fifo> %slots, %capacity : view<1x1xi32>, index -> channel<tile<1xi32>>
+}
+
+pipeline.def @large() run(%memory: pool) {
+  %bytes = index.constant 96 : offset
+  %origin = index.constant 0 : offset
+  %capacity = index.constant 1 : index
+  %storage = buffer.alloca<workgroup> pool(%memory) align(128) %bytes : buffer
+  %slots = buffer.view %storage[%origin] : buffer -> view<1x1xi32>
+  %local = channel.bind<fifo> %slots, %capacity : view<1x1xi32>, index -> channel<tile<1xi32>>
+}
+
+pipeline.def public @test() run(%memory: pool) {
+  %bytes = index.constant 32 : offset
+  %origin = index.constant 0 : offset
+  %capacity = index.constant 1 : index
+  %storage = buffer.alloca<workgroup> pool(%memory) align(16) %bytes : buffer
+  %slots = buffer.view %storage[%origin] : buffer -> view<1x1xi32>
+  %retained = channel.bind<fifo> %slots, %capacity : view<1x1xi32>, index -> channel<tile<1xi32>>
+  pipeline.compose @small(%memory) : (pool)
+  pipeline.serial {
+    pipeline.compose @small(%memory) : (pool)
+    pipeline.serial {
+      pipeline.compose @large(%memory) : (pool)
+    }
+  }
+  pipeline.serial {
+    pipeline.compose @small(%memory) : (pool)
+    pipeline.compose @small(%memory) : (pool)
+  }
+}
+
+// ----
+inventory invocations=6 workers=0 channels=6
+  protocol 0 = 0:%retained pool=0 offset=0 bytes=32
+  protocol 1 = 1:%local pool=0 offset=64 bytes=48
+  protocol 2 = 2:%local pool=0 offset=128 bytes=48
+  protocol 3 = 3:%local pool=0 offset=256 bytes=48
+  protocol 4 = 4:%local pool=0 offset=256 bytes=48
+  protocol 5 = 5:%local pool=0 offset=128 bytes=96
+invocation 0 @test strands=0 channels=1
+  concurrent 0
+invocation 1 @small strands=0 channels=1
+  joined block=0 step=0
+invocation 2 @small strands=0 channels=1
+  joined block=0 step=0
+invocation 5 @large strands=0 channels=1
+  joined block=0 step=0
+invocation 3 @small strands=0 channels=1
+  joined block=0 step=1
+invocation 4 @small strands=0 channels=1

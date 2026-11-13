@@ -11,6 +11,7 @@ from __future__ import annotations
 import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
+from functools import cache
 from itertools import pairwise, permutations
 
 from loom.target.low_descriptors import (
@@ -34,6 +35,7 @@ from loom.target.low_descriptors import (
     OperandAddressMapKind,
     OperandFlag,
     OperandRole,
+    OwnershipEffect,
     PhysicalRegister,
     PhysicalRegisterView,
     RegClass,
@@ -45,6 +47,23 @@ from loom.target.low_descriptors import (
     StorageLeaseAttachment,
     StorageLeaseFlag,
 )
+
+
+def index_descriptor_fields(
+    descriptor: Descriptor,
+) -> tuple[dict[str, int], dict[str, int]]:
+    operand_indices: dict[str, int] = {}
+    for i, operand in enumerate(descriptor.operands):
+        if operand.field_name in operand_indices:
+            raise ValueError(f"descriptor '{descriptor.key}' operand field '{operand.field_name}' is duplicated and cannot be used by descriptor forms")
+        operand_indices[operand.field_name] = i
+
+    immediate_indices: dict[str, int] = {}
+    for i, immediate in enumerate(descriptor.immediates):
+        if immediate.field_name in immediate_indices:
+            raise ValueError(f"descriptor '{descriptor.key}' immediate field '{immediate.field_name}' is duplicated and cannot be used by descriptor forms")
+        immediate_indices[immediate.field_name] = i
+    return operand_indices, immediate_indices
 
 
 @dataclass(frozen=True, slots=True)
@@ -322,9 +341,10 @@ def _solve_physical_component_order_pair(
     return visited_count == len(components)
 
 
+@cache
 def _physical_components_admit_placement(
-    components: Sequence[_PhysicalComponent],
-    base_domains: Sequence[_PhysicalBaseDomain],
+    components: tuple[_PhysicalComponent, ...],
+    base_domains: tuple[_PhysicalBaseDomain, ...],
 ) -> bool:
     pre_components = tuple(index for index, component in enumerate(components) if component.pre_width)
     post_components = tuple(index for index, component in enumerate(components) if component.post_width)
@@ -407,7 +427,6 @@ def _validate_same_register_ordinal_components(
             register_class = register_classes[operand.reg_alts[0].reg_class]
             required_flags = {
                 RegClassFlag.PHYSICAL,
-                RegClassFlag.UNSPILLABLE,
                 RegClassFlag.EXPLICIT_PHYSICAL_REGISTERS,
             }
             missing_flags = required_flags.difference(register_class.flags)
@@ -618,7 +637,7 @@ def validate_physical_descriptor_set(
         # by this proof. Every independent component that accepts a resource can
         # therefore select it in the same packet and must fit simultaneously.
         for resource_key, resource_capacity in resources.items():
-            resource_components = [component for component in components if resource_key in component.resource_keys]
+            resource_components = tuple(component for component in components if resource_key in component.resource_keys)
             if not resource_components:
                 continue
             # Exact physical domains were proved against their atomic storage
@@ -1393,6 +1412,11 @@ def validate_descriptor_layout_counts(
 ) -> None:
     """Checks descriptor-local arities stored in compact layout rows."""
 
+    if descriptor.encoding_byte_count is not None:
+        validate_u32(descriptor.encoding_byte_count, f"descriptor '{descriptor.key}' encoding byte count")
+        if descriptor.encoding_byte_count == 0:
+            raise ValueError(f"descriptor '{descriptor.key}' encoding byte count must be positive")
+
     counts = (
         ("minimum packet operand", operand_layout.minimum_packet_operand_count),
         ("feature mask word", len(descriptor.feature_mask_words)),
@@ -1428,7 +1452,7 @@ def validate_asm_layout_counts(
 
 
 def validate_descriptor_operands(descriptor: Descriptor) -> DescriptorOperandLayout:
-    validate_u16(
+    validate_u8(
         len(descriptor.operands),
         f"descriptor '{descriptor.key}' operand count",
     )
@@ -1440,6 +1464,10 @@ def validate_descriptor_operands(descriptor: Descriptor) -> DescriptorOperandLay
         if operand.role is OperandRole.OPERAND_RESULT:
             raise ValueError(f"descriptor '{descriptor.key}' operand '{operand.field_name}' uses OPERAND_RESULT; use separate result and operand rows plus an explicit constraint")
         is_result = operand.role is OperandRole.RESULT
+        if operand.ownership is not OwnershipEffect.NONE:
+            allowed = (OwnershipEffect.OWNED, OwnershipEffect.BORROWED) if is_result else (OwnershipEffect.BORROW, OwnershipEffect.RETAIN)
+            if operand.ownership not in allowed or (not is_result and not operand_role_is_packet_input(operand.role)) or OperandFlag.VARIADIC in operand.flags:
+                raise ValueError(f"descriptor '{descriptor.key}' operand '{operand.field_name}' has ownership incompatible with its SSA role")
         if is_result and seen_non_result:
             raise ValueError(f"descriptor '{descriptor.key}' has result operand '{operand.field_name}' after non-result operands")
         if is_result:
@@ -1539,6 +1567,10 @@ def validate_descriptor_operands(descriptor: Descriptor) -> DescriptorOperandLay
             raise ValueError(f"descriptor '{descriptor.key}' with variadic operands cannot declare storage leases")
         if descriptor.operand_forms:
             raise ValueError(f"descriptor '{descriptor.key}' with variadic operands cannot declare operand forms")
+    validate_u8(
+        result_count,
+        f"descriptor '{descriptor.key}' result count",
+    )
     return DescriptorOperandLayout(
         result_count=result_count,
         minimum_packet_operand_count=minimum_packet_operand_count,
@@ -1820,6 +1852,10 @@ def _validate_rematerializable_result(
         if OperandFlag.SCHEDULE_ONLY_STATE in operand.flags:
             continue
         if state_flags == {OperandFlag.STATE_READ}:
+            # Explicit state is an SSA recipe dependency. Replay reconstructs
+            # its producer rather than capturing ephemeral architectural state.
+            if operand_role_is_packet_input(operand.role):
+                continue
             # Replaying a state-dependent instruction is stable when no
             # instruction in the descriptor set can change that state storage.
             # The set-wide alias-aware check keeps this local promise honest as
@@ -1984,22 +2020,24 @@ def validate_descriptor_storage_continuations(
             raise ValueError(f"{description} and tied result must have equal unit counts")
         source_parts = {alternative.reg_class: alternative.register_part for alternative in operand.reg_alts if alternative.reg_class is not None}
         result_parts = {alternative.reg_class: alternative.register_part for alternative in result.reg_alts if alternative.reg_class is not None}
-        if (
-            not source_parts
-            or source_parts.keys() != result_parts.keys()
-            or any(part_name is None for part_name in source_parts.values())
-            or any(part_name is None for part_name in result_parts.values())
-        ):
+        if not source_parts or source_parts.keys() != result_parts.keys() or any(part_name is None for part_name in result_parts.values()):
             raise ValueError(f"{description} and tied result must name register parts for the same register classes")
         for register_class, source_part_name in source_parts.items():
             result_part_name = result_parts[register_class]
-            source_part = register_parts.get(source_part_name)
             result_part = register_parts.get(result_part_name)
-            if source_part is None:
-                raise ValueError(f"{description} references unknown register part '{source_part_name}'")
             if result_part is None:
                 raise ValueError(f"{description} tied result references unknown register part '{result_part_name}'")
-            if source_part.reg_class != register_class or result_part.reg_class != register_class:
+            if result_part.reg_class != register_class:
+                raise ValueError(f"{description} and tied result use register parts for the wrong register class")
+            # An unnamed input preserves whichever unwritten parts are defined,
+            # without requiring any of them to exist. Named inputs require the
+            # specified disjoint part, as ordinary partial-write forms do.
+            if source_part_name is None:
+                continue
+            source_part = register_parts.get(source_part_name)
+            if source_part is None:
+                raise ValueError(f"{description} references unknown register part '{source_part_name}'")
+            if source_part.reg_class != register_class:
                 raise ValueError(f"{description} and tied result use register parts for the wrong register class")
             if source_part.mask & result_part.mask:
                 raise ValueError(f"{description} and tied result have overlapping register parts")

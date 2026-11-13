@@ -67,3 +67,58 @@ low.func.def target<vm.core>(@vm) abi(vm_function) @compare(%a: reg<vm.value : i
   %result = integer.compare.i64 %a, %b, "ult"
   return %result
 }
+
+// ====
+
+// RUN: emit source-low target=vm:core output=low
+
+// The low result bits need no input normalization or intermediate widening.
+func.def @byte_binary_carriers(%lhs: i8, %rhs: i8, %count: i8) -> (i8, i8, i8, i8, i8, i8, i8) {
+  %sum = scalar.addi %lhs, %rhs : i8
+  %difference = scalar.subi %lhs, %rhs : i8
+  %product = scalar.muli %lhs, %rhs : i8
+  %conjunction = scalar.andi %lhs, %rhs : i8
+  %disjunction = scalar.ori %lhs, %rhs : i8
+  %exclusive = scalar.xori %lhs, %rhs : i8
+  %shifted = scalar.shli %lhs, %count : i8
+  func.return %sum, %difference, %product, %conjunction, %disjunction, %exclusive, %shifted : i8, i8, i8, i8, i8, i8, i8
+}
+
+// ----
+low.func.def target<vm.core> abi(vm_function) @byte_binary_carriers(%lhs: reg<vm.value : i8>, %rhs: reg<vm.value : i8>, %count: reg<vm.value : i8>) -> (reg<vm.value : i8>, reg<vm.value : i8>, reg<vm.value : i8>, reg<vm.value : i8>, reg<vm.value : i8>, reg<vm.value : i8>, reg<vm.value : i8>) asm {
+  %sum = integer.add.i32 %lhs, %rhs : reg<vm.value : i8>
+  %difference = integer.sub.i32 %lhs, %rhs : reg<vm.value : i8>
+  %product = integer.mul.i32 %lhs, %rhs : reg<vm.value : i8>
+  %conjunction = integer.and.i32 %lhs, %rhs : reg<vm.value : i8>
+  %disjunction = integer.or.i32 %lhs, %rhs : reg<vm.value : i8>
+  %exclusive = integer.xor.i32 %lhs, %rhs : reg<vm.value : i8>
+  %shifted = integer.shift.left.i32 %lhs, %count : reg<vm.value : i8>
+  return %sum, %difference, %product, %conjunction, %disjunction, %exclusive, %shifted
+}
+
+// ====
+
+// RUN: emit source-low target=vm:core output=low
+
+func.def @halfword_binary_carriers(%lhs: i16, %rhs: i16, %count: i16) -> (i16, i16, i16, i16, i16, i16, i16) {
+  %sum = scalar.addi %lhs, %rhs : i16
+  %difference = scalar.subi %lhs, %rhs : i16
+  %product = scalar.muli %lhs, %rhs : i16
+  %conjunction = scalar.andi %lhs, %rhs : i16
+  %disjunction = scalar.ori %lhs, %rhs : i16
+  %exclusive = scalar.xori %lhs, %rhs : i16
+  %shifted = scalar.shli %lhs, %count : i16
+  func.return %sum, %difference, %product, %conjunction, %disjunction, %exclusive, %shifted : i16, i16, i16, i16, i16, i16, i16
+}
+
+// ----
+low.func.def target<vm.core> abi(vm_function) @halfword_binary_carriers(%lhs: reg<vm.value : i16>, %rhs: reg<vm.value : i16>, %count: reg<vm.value : i16>) -> (reg<vm.value : i16>, reg<vm.value : i16>, reg<vm.value : i16>, reg<vm.value : i16>, reg<vm.value : i16>, reg<vm.value : i16>, reg<vm.value : i16>) asm {
+  %sum = integer.add.i32 %lhs, %rhs : reg<vm.value : i16>
+  %difference = integer.sub.i32 %lhs, %rhs : reg<vm.value : i16>
+  %product = integer.mul.i32 %lhs, %rhs : reg<vm.value : i16>
+  %conjunction = integer.and.i32 %lhs, %rhs : reg<vm.value : i16>
+  %disjunction = integer.or.i32 %lhs, %rhs : reg<vm.value : i16>
+  %exclusive = integer.xor.i32 %lhs, %rhs : reg<vm.value : i16>
+  %shifted = integer.shift.left.i32 %lhs, %count : reg<vm.value : i16>
+  return %sum, %difference, %product, %conjunction, %disjunction, %exclusive, %shifted
+}

@@ -111,3 +111,31 @@ low.func.def target<test.low.core>(@target) @missing_preserved_half(%address: re
   %full = test.write.high16.i32 %still_low, %address
   return %full
 }
+
+// ====
+
+// A non-reading storage continuation preserves only the parts already present.
+// Rewriting the low half is valid; writing the high half completes the value.
+// RUN: verify
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @available_parts(%address: reg<test.ptr>) -> (reg<test.i32>) asm {
+  %low_half = test.write.low16.i32 %address
+  %still_low = test.write.low16.continue.i32 %low_half, %address
+  %full = test.write.high16.continue.i32 %still_low, %address
+  return %full
+}
+
+// ====
+
+// Preserving available storage never makes the missing half readable.
+// RUN: verify
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @continuation_missing_read(%address: reg<test.ptr>) -> (reg<test.i32>) asm {
+  %low_half = test.write.low16.i32 %address
+  %still_low = test.write.low16.continue.i32 %low_half, %address
+  // ERROR@+1: DOMINANCE/011 {required_mask="2", defined_mask="1"}
+  %missing = test.read.high16.i32 %still_low
+  return %missing
+}

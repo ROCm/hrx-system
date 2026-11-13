@@ -107,8 +107,11 @@ iree_status_t loom_view_load_coalescing_rewrite(
   if (!next_op || !loom_view_load_isa(next_op)) {
     return iree_ok_status();
   }
-  if (loom_view_load_memory_flags(op) != 0 ||
-      loom_view_load_memory_flags(next_op) != 0) {
+  const loom_memory_access_flags_t memory_flags =
+      loom_view_load_memory_flags(op);
+  if (memory_flags != loom_view_load_memory_flags(next_op) ||
+      (memory_flags != 0 &&
+       memory_flags != LOOM_MEMORY_ACCESS_FLAG_ROOT_IN_BOUNDS)) {
     return iree_ok_status();
   }
 
@@ -188,7 +191,7 @@ iree_status_t loom_view_load_coalescing_rewrite(
   loom_value_id_t value_checkpoint = loom_rewriter_value_checkpoint(rewriter);
   loom_op_t* vector_load_op = NULL;
   IREE_RETURN_IF_ERROR(loom_vector_load_build(
-      &rewriter->builder, vector_load_build_flags, /*instance_flags=*/0, view,
+      &rewriter->builder, vector_load_build_flags, memory_flags, view,
       loom_view_load_indices(op).values, loom_view_load_indices(op).count,
       loom_view_load_static_indices(op).i64_array,
       loom_view_load_static_indices(op).count, cache_policy.cache_scope,

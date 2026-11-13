@@ -31,6 +31,7 @@ from loom.gen.target.arch.amdgpu.amdgpu_target_table_family import (  # noqa: E4
 from loom.gen.target.arch.amdgpu.amdgpu_target_table_outputs import (  # noqa: E402
     generate_amdgpu_target_table_outputs,
 )
+from loom.gen.target.low.native_assembly import NativeAsmValuePool  # noqa: E402
 from loom.target.arch.amdgpu.descriptors import (  # noqa: E402
     AMDGPU_DESCRIPTOR_SET_GENERATOR_TARGETS,
     build_amdgpu_core_descriptor_sets_from_specs,
@@ -95,6 +96,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         type=Path,
         help="Producer-owned secondary string-bank layout.",
     )
+    parser.add_argument("--native-asm-values", type=Path, help="Shared native recipe layout for the primary string targets.")
     args = parser.parse_args(argv)
 
     if not (len(args.target) == len(args.descriptor_source) == len(args.encoding_source)):
@@ -117,6 +119,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     primary_strings = CStringBank.read(args.primary_strings) if args.primary_strings else None
     shared_strings = CStringBank.read(args.shared_strings) if args.shared_strings else None
+    native_asm_values = NativeAsmValuePool.read(args.native_asm_values) if args.native_asm_values else None
     primary_string_targets = frozenset(args.primary_strings_target)
     for family, descriptor_source, encoding_source in zip(
         families,
@@ -132,6 +135,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             encoding_source_path=encoding_source,
             primary_strings=(primary_strings if family.storage_info.generator_target in primary_string_targets else None),
             shared_strings=shared_strings,
+            native_asm_values=(native_asm_values if family.storage_info.generator_target in primary_string_targets else None),
         )
     return 0
 

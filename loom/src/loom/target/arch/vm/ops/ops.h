@@ -37,10 +37,17 @@ typedef enum loom_vm_target_kind_e {
 LOOM_DEFINE_ISA(loom_vm_target_isa, LOOM_OP_VM_TARGET)
 LOOM_DEFINE_ATTR_SYMBOL(loom_vm_target_symbol, 0)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_vm_target_kind, 1, loom_vm_target_kind_t)
+LOOM_DEFINE_ATTR_I64(loom_vm_target_execution_unit_count, 2)
+enum loom_vm_target_build_flag_bits_e {
+  LOOM_VM_TARGET_BUILD_FLAG_HAS_EXECUTION_UNIT_COUNT = 1u << 0,
+};
+typedef uint32_t loom_vm_target_build_flags_t;
 iree_status_t loom_vm_target_build(
     loom_builder_t* builder,
+    loom_vm_target_build_flags_t build_flags,
     loom_vm_target_kind_t kind,
     loom_symbol_ref_t symbol,
+    loom_optional int64_t execution_unit_count,
     loom_location_id_t location,
     loom_op_t** out_op);
 iree_status_t loom_target_record_verify(

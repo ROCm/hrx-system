@@ -10,12 +10,14 @@
 #include <string.h>
 
 #include "loom/analysis/view_regions.h"
+#include "loom/codegen/low/lower/representation_observer.h"
 #include "loom/codegen/low/source_memory_plan.h"
 #include "loom/ir/context.h"
 #include "loom/ops/buffer/ops.h"
 #include "loom/ops/cfg/ops.h"
 #include "loom/ops/index/ops.h"
 #include "loom/ops/kernel/ops.h"
+#include "loom/ops/low/ops.h"
 #include "loom/ops/scalar/ops.h"
 #include "loom/ops/scf/ops.h"
 #include "loom/ops/vector/ops.h"
@@ -25,12 +27,165 @@
 #include "loom/target/arch/amdgpu/target_info_defs.h"
 #include "loom/util/cfg_graph.h"
 #include "loom/util/fact_table.h"
+#include "loom/util/walk.h"
 
 static int loom_amdgpu_source_value_analysis_state_key;
+
+bool loom_amdgpu_source_value_is_entry_argument(const loom_module_t* module,
+                                                loom_value_id_t value_id) {
+  const loom_value_t* value = loom_module_value(module, value_id);
+  if (!loom_value_is_block_arg(value)) {
+    return false;
+  }
+  const loom_block_t* block = loom_value_def_block(value);
+  const loom_region_t* region = block->parent_region;
+  return block == loom_region_const_entry_block(region) &&
+         region == loom_func_like_body(
+                       loom_func_like_const_cast(module, region->parent_op));
+}
+
+bool loom_amdgpu_source_invoke_result_shape(
+    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
+    loom_value_id_t source_value_id, loom_amdgpu_register_shape_t* out_shape) {
+  const loom_value_t* value = loom_module_value(module, source_value_id);
+  if (loom_value_is_block_arg(value)) {
+    return false;
+  }
+  const loom_op_t* op = loom_value_def_op(value);
+  if (op == NULL || !loom_low_invoke_isa(op)) {
+    return false;
+  }
+  const loom_symbol_ref_t callee = loom_low_invoke_callee(op);
+  if (callee.module_id != 0 || callee.symbol_id >= module->symbols.count) {
+    return false;
+  }
+  const loom_op_t* function =
+      module->symbols.entries[callee.symbol_id].defining_op;
+  if (function == NULL || !loom_low_func_def_isa(function)) {
+    return false;
+  }
+  const loom_value_slice_t results = loom_low_func_def_results(function);
+  const uint16_t index = loom_value_def_index(value);
+  if (index >= results.count) {
+    return false;
+  }
+  const loom_type_t type =
+      loom_module_value_type(module, results.values[index]);
+  *out_shape = (loom_amdgpu_register_shape_t){
+      .class_id = loom_low_register_type_class_id(type),
+      .unit_count = loom_low_register_type_unit_count(type),
+  };
+  const loom_type_t source_type =
+      loom_module_value_type(module, source_value_id);
+  if (!fact_table ||
+      !loom_value_facts_is_subgroup_uniform(
+          loom_value_fact_table_lookup(fact_table, source_value_id))) {
+    if (loom_amdgpu_type_is_i1(source_type)) {
+      if ((out_shape->class_id == LOOM_AMDGPU_REG_CLASS_ID_SCC ||
+           out_shape->class_id == LOOM_AMDGPU_REG_CLASS_ID_SGPR) &&
+          out_shape->unit_count == 1) {
+        *out_shape = (loom_amdgpu_register_shape_t){
+            .class_id = LOOM_AMDGPU_REG_CLASS_ID_SGPR, .unit_count = 2};
+      }
+    } else if (!loom_amdgpu_native_type_is_lane_mask(source_type, type) &&
+               out_shape->class_id == LOOM_AMDGPU_REG_CLASS_ID_SGPR) {
+      out_shape->class_id = LOOM_AMDGPU_REG_CLASS_ID_VGPR;
+    }
+  }
+  return true;
+}
+
+typedef struct loom_amdgpu_scc_boundary_analysis_t {
+  const loom_module_t* module;
+  loom_amdgpu_source_value_analysis_t* analysis;
+} loom_amdgpu_scc_boundary_analysis_t;
+
+static void loom_amdgpu_mark_value_crosses_scc_boundary(
+    loom_amdgpu_scc_boundary_analysis_t* state,
+    const loom_block_t* defining_block, uint64_t boundary_ordinal,
+    loom_value_id_t value_id) {
+  if (value_id >= state->module->values.count) {
+    return;
+  }
+  const loom_value_t* value = loom_module_value(state->module, value_id);
+  if (loom_value_is_block_arg(value)) {
+    return;
+  }
+  const loom_op_t* defining_op = loom_value_def_op(value);
+  if (defining_op == NULL || defining_op->parent_block != defining_block ||
+      defining_op->block_ordinal >= boundary_ordinal) {
+    return;
+  }
+  const loom_value_ordinal_t value_ordinal =
+      loom_local_value_domain_try_ordinal(state->analysis->value_domain,
+                                          value_id);
+  if (value_ordinal == LOOM_VALUE_ORDINAL_INVALID ||
+      value_ordinal >= state->analysis->record_count) {
+    return;
+  }
+  state->analysis->records[value_ordinal].value_bits |=
+      LOOM_AMDGPU_SOURCE_VALUE_ANALYSIS_CROSSES_SCC_BOUNDARY;
+}
+
+static iree_status_t loom_amdgpu_analyze_block_scc_boundaries(
+    void* user_data, loom_op_t* op, const loom_walk_context_t* context,
+    loom_walk_result_t* out_result) {
+  *out_result = LOOM_WALK_CONTINUE;
+  if (op != context->block->first_op) {
+    return iree_ok_status();
+  }
+
+  loom_amdgpu_scc_boundary_analysis_t* state =
+      (loom_amdgpu_scc_boundary_analysis_t*)user_data;
+  uint64_t boundary_ordinal = 0;
+  const loom_op_t* block_op = NULL;
+  loom_block_for_each_op(context->block, block_op) {
+    if (boundary_ordinal != 0) {
+      const loom_value_id_t* operands = loom_op_const_operands(block_op);
+      for (uint16_t i = 0; i < block_op->operand_count; ++i) {
+        loom_amdgpu_mark_value_crosses_scc_boundary(
+            state, context->block, boundary_ordinal, operands[i]);
+      }
+    }
+    if (block_op->region_count != 0 ||
+        iree_any_bit_set(block_op->traits, LOOM_TRAIT_CALLABLE_BOUNDARY)) {
+      boundary_ordinal = block_op->block_ordinal;
+    }
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_amdgpu_source_value_analyze_scc_boundaries(
+    loom_amdgpu_source_value_analysis_t* analysis) {
+  if (analysis->value_domain == NULL ||
+      !iree_any_bit_set(analysis->value_domain->operation_traits,
+                        LOOM_TRAIT_CALLABLE_BOUNDARY)) {
+    return iree_ok_status();
+  }
+
+  const loom_amdgpu_source_value_analysis_bits_t bit =
+      LOOM_AMDGPU_SOURCE_VALUE_ANALYSIS_CROSSES_SCC_BOUNDARY;
+  for (iree_host_size_t i = 0; i < analysis->record_count; ++i) {
+    analysis->records[i].known_bits |= bit;
+  }
+
+  loom_amdgpu_scc_boundary_analysis_t state = {
+      .module = analysis->value_domain->module,
+      .analysis = analysis,
+  };
+  loom_walk_result_t result = LOOM_WALK_CONTINUE;
+  return loom_walk_region(
+      state.module, (loom_region_t*)analysis->value_domain->region,
+      LOOM_WALK_PRE_ORDER,
+      (loom_walk_callback_t){loom_amdgpu_analyze_block_scc_boundaries, &state},
+      &result);
+}
+
 static iree_status_t loom_amdgpu_source_value_analysis_prepare(
     const loom_value_fact_table_t* fact_table,
     const loom_local_value_domain_t* value_domain,
     const loom_low_descriptor_set_t* descriptor_set,
+    loom_low_representation_plan_t* representation_plan,
     iree_arena_allocator_t* arena,
     loom_amdgpu_source_value_analysis_t* analysis) {
   if (analysis->descriptor_set != descriptor_set) {
@@ -50,6 +205,7 @@ static iree_status_t loom_amdgpu_source_value_analysis_prepare(
        analysis->record_count < value_domain->value_count)) {
     analysis->value_domain = value_domain;
     analysis->fact_table = fact_table;
+    analysis->representation_plan = representation_plan;
     analysis->records = NULL;
     analysis->record_count =
         value_domain != NULL ? value_domain->value_count : 0;
@@ -67,6 +223,27 @@ static iree_status_t loom_amdgpu_source_value_analysis_prepare(
           arena, analysis->record_count,
           sizeof(*analysis->query.provisional_ordinals),
           (void**)&analysis->query.provisional_ordinals));
+      iree_status_t status =
+          loom_amdgpu_source_value_analyze_scc_boundaries(analysis);
+      if (!iree_status_is_ok(status)) {
+        analysis->value_domain = NULL;
+        analysis->fact_table = NULL;
+        return status;
+      }
+    }
+  }
+  if (analysis->representation_plan != representation_plan) {
+    // Width selection can change a producer's native register bank. Drop
+    // dependent cached answers when observation publishes its solved plan,
+    // retaining the independently computed source control-boundary bits.
+    IREE_ASSERT_EQ(analysis->query.depth, 0u);
+    analysis->representation_plan = representation_plan;
+    for (iree_host_size_t i = 0; i < analysis->record_count; ++i) {
+      loom_amdgpu_source_value_analysis_record_t* record =
+          &analysis->records[i];
+      record->known_bits = 0;
+      record->value_bits &=
+          LOOM_AMDGPU_SOURCE_VALUE_ANALYSIS_CROSSES_SCC_BOUNDARY;
     }
   }
   return iree_ok_status();
@@ -84,6 +261,7 @@ iree_status_t loom_amdgpu_source_value_analysis_for_context(
       loom_low_lower_context_fact_table(context),
       loom_low_lower_context_value_domain(context),
       loom_low_lower_context_descriptor_set(context),
+      loom_low_lower_representation_plan_if_ready(context),
       loom_low_lower_context_function_arena(context), analysis));
   *out_analysis = analysis;
   return iree_ok_status();
@@ -100,7 +278,7 @@ iree_status_t loom_amdgpu_source_value_analysis_for_target_low_legality(
   IREE_RETURN_IF_ERROR(loom_amdgpu_source_value_analysis_prepare(
       loom_target_low_legality_fact_table(context),
       loom_target_low_legality_value_domain(context),
-      loom_target_low_legality_descriptor_set(context),
+      loom_target_low_legality_descriptor_set(context), NULL,
       loom_target_low_legality_scratch_arena(context), analysis));
   *out_analysis = analysis;
   return iree_ok_status();
@@ -121,9 +299,13 @@ iree_status_t loom_amdgpu_source_value_analysis_for_contract_query(
   if (analysis == NULL) {
     return iree_ok_status();
   }
+  loom_low_representation_plan_t* representation_plan = NULL;
+  IREE_RETURN_IF_ERROR(loom_low_lower_representation_query_plan(
+      environment, &representation_plan));
   IREE_RETURN_IF_ERROR(loom_amdgpu_source_value_analysis_prepare(
       environment->fact_table, environment->value_domain,
-      environment->descriptor_set, environment->arena, analysis));
+      environment->descriptor_set, representation_plan, environment->arena,
+      analysis));
   *out_analysis = analysis;
   return iree_ok_status();
 }

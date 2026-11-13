@@ -1,9 +1,0 @@
-// RUN: verify
-
-func.decl @callee(%input: i32) -> (i32)
-
-func.def @bad_call(%input: i64) -> (i32) {
-  // ERROR@+1: TYPE/001 {field_a="operand 0", field_b="contract argument 0", type_a="i64", type_b="i32"}
-  %result = func.call @callee(%input) : (i64) -> (i32)
-  func.return %result : i32
-}

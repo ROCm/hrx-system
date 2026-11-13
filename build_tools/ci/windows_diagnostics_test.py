@@ -23,7 +23,162 @@ from xml.sax.saxutils import escape
 from build_tools.ci import windows_diagnostics as diagnostics
 
 
+class FakeRegistry:
+    KEY_READ = 1
+    KEY_WRITE = 2
+    KEY_WOW64_64KEY = 4
+    HKEY_LOCAL_MACHINE = object()
+    REG_EXPAND_SZ = 10
+    REG_DWORD = 11
+
+    def __init__(self, keys=None):
+        self.keys = {} if keys is None else keys
+
+    def OpenKey(self, _root, path, _reserved=0, _access=0):
+        if path not in self.keys:
+            raise FileNotFoundError(path)
+        return path
+
+    def CreateKeyEx(self, _root, path, _reserved=0, _access=0):
+        parent = path.rpartition("\\")[0]
+        self.keys.setdefault(parent, {})
+        self.keys.setdefault(path, {})
+        return path
+
+    def QueryValueEx(self, key, name):
+        try:
+            return self.keys[key][name]
+        except KeyError:
+            raise FileNotFoundError(name) from None
+
+    def SetValueEx(self, key, name, _reserved, value_type, value):
+        self.keys[key][name] = (value, value_type)
+
+    def DeleteValue(self, key, name):
+        try:
+            del self.keys[key][name]
+        except KeyError:
+            raise FileNotFoundError(name) from None
+
+    def QueryInfoKey(self, key):
+        prefix = key + "\\"
+        child_count = sum(
+            path.startswith(prefix) and "\\" not in path[len(prefix) :]
+            for path in self.keys
+        )
+        return child_count, len(self.keys[key]), 0
+
+    def CloseKey(self, _key):
+        pass
+
+    def DeleteKeyEx(self, _root, path, _access=0, _reserved=0):
+        if any(key.startswith(path + "\\") for key in self.keys):
+            raise OSError(f"registry key has children: {path}")
+        del self.keys[path]
+
+
 class WindowsDiagnosticsTest(unittest.TestCase):
+    def test_local_dump_registry_is_bounded_and_removed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            registry = FakeRegistry()
+            dump_directory = Path(directory) / "dumps"
+
+            with mock.patch.object(diagnostics, "winreg", registry):
+                with diagnostics.local_dump_collection(dump_directory) as state:
+                    self.assertTrue(state["enabled"])
+                    self.assertTrue(dump_directory.is_dir())
+                    for executable in diagnostics.LOCAL_DUMP_EXECUTABLES:
+                        values = registry.keys[
+                            diagnostics.LOCAL_DUMPS_REGISTRY_PATH + "\\" + executable
+                        ]
+                        self.assertEqual(
+                            values,
+                            {
+                                "DumpFolder": (
+                                    str(dump_directory),
+                                    registry.REG_EXPAND_SZ,
+                                ),
+                                "DumpCount": (
+                                    diagnostics.LOCAL_DUMP_COUNT,
+                                    registry.REG_DWORD,
+                                ),
+                                "DumpType": (1, registry.REG_DWORD),
+                            },
+                        )
+
+            self.assertTrue(state["restored"])
+            self.assertEqual(registry.keys, {})
+
+    def test_local_dump_registry_restores_existing_values(self):
+        with tempfile.TemporaryDirectory() as directory:
+            executable = "compile_artifact.exe"
+            application_key = diagnostics.LOCAL_DUMPS_REGISTRY_PATH + "\\" + executable
+            prior_values = {
+                "DumpFolder": (r"C:\existing", 20),
+                "DumpCount": (7, 21),
+                "DumpType": (2, 21),
+            }
+            registry = FakeRegistry(
+                {
+                    diagnostics.LOCAL_DUMPS_REGISTRY_PATH: {},
+                    application_key: prior_values.copy(),
+                }
+            )
+
+            with (
+                mock.patch.object(diagnostics, "winreg", registry),
+                mock.patch.object(diagnostics, "LOCAL_DUMP_EXECUTABLES", (executable,)),
+            ):
+                with diagnostics.local_dump_collection(Path(directory) / "dumps"):
+                    pass
+
+            self.assertEqual(registry.keys[application_key], prior_values)
+
+    def test_local_dump_setup_failure_fails_a_successful_command(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            registry = FakeRegistry()
+            registry.OpenKey = mock.Mock(
+                side_effect=PermissionError("registry write denied")
+            )
+
+            with (
+                mock.patch.object(diagnostics, "winreg", registry),
+                contextlib.redirect_stderr(io.StringIO()) as stderr,
+                contextlib.redirect_stdout(io.StringIO()),
+            ):
+                result = diagnostics.run(
+                    [sys.executable, "-c", "pass"],
+                    cwd=root,
+                    env=None,
+                    artifact_dir=root / "artifacts",
+                    label="successful command",
+                )
+
+            self.assertEqual(result, 1)
+            self.assertIn("Local dump setup failed", stderr.getvalue())
+            phase = next((root / "artifacts").iterdir())
+            command = json.loads((phase / "command.json").read_text())
+            self.assertIn(
+                "registry write denied", command["local_dumps"]["setup_error"]
+            )
+
+    def test_local_dumps_are_inventoried_in_place(self):
+        with tempfile.TemporaryDirectory() as directory:
+            artifacts = Path(directory)
+            dump = artifacts / "crash-dumps" / "tool.exe.123.dmp"
+            dump.parent.mkdir()
+            dump.write_bytes(b"minidump")
+            capture = diagnostics.Capture(artifacts, {})
+
+            self.assertEqual(diagnostics.capture_local_dumps(capture), [str(dump)])
+            record = capture.files[str(dump)]
+            self.assertEqual(
+                record["artifact"], str(Path("crash-dumps") / "tool.exe.123.dmp")
+            )
+            self.assertEqual(record["sha256"], hashlib.sha256(b"minidump").hexdigest())
+            self.assertNotIn("copy", record)
+
     def test_process_output_and_status_survive_capture(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -188,6 +343,88 @@ class WindowsDiagnosticsTest(unittest.TestCase):
             self.assertNotIn("A_SECRET", manifest_text)
             self.assertNotIn("not captured", manifest_text)
 
+    def test_generator_output_ebadf_preserves_only_bazel_output_boundary(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output_root = root / "bazel-out"
+            generated = output_root / "x64_windows-opt-exec/bin/pkg/generated"
+            generated.mkdir(parents=True)
+            (generated / "sibling.h").write_text("retained output\n")
+            failed_output = generated / "catalog.c"
+            outside = root / "host-secret"
+            outside.write_text("must not be inspected\n")
+            artifacts = root / "artifacts"
+            artifacts.mkdir()
+            relative_output = str(failed_output.relative_to(root))
+            (artifacts / "output.log").write_text(
+                "path.write_text(contents, encoding='utf-8')\n"
+                "return io.open(self, mode, buffering, encoding, errors, newline)\n"
+                f"OSError: [Errno 9] Bad file descriptor: {relative_output!r}\n"
+                f"OSError: [Errno 9] Bad file descriptor: {str(outside)!r}\n"
+            )
+
+            diagnostics.capture_failure(
+                artifacts,
+                root,
+                {"PATH": ""},
+                None,
+                started_at=dt.datetime.now(dt.UTC),
+            )
+
+            manifest = json.loads((artifacts / "manifest.json").read_text())
+            files = {record["path"]: record for record in manifest["files"]}
+            self.assertIn(str(failed_output), files)
+            self.assertEqual(files[str(failed_output)]["errno"], 2)
+            self.assertNotIn(str(outside), files)
+            directories = {record["path"]: record for record in manifest["directories"]}
+            self.assertEqual(directories[str(generated)]["entries"], ["sibling.h"])
+            self.assertEqual(
+                directories[str(generated)]["resolved_path"], str(generated)
+            )
+            self.assertIn(str(output_root), directories)
+            self.assertNotIn(str(root), directories)
+            if os.name == "nt":
+                tools = {entry["output"]: entry for entry in manifest["tools"]}
+                for name in (
+                    "windows-file-access",
+                    "windows-volume-info",
+                    "windows-filter-instances",
+                ):
+                    output_name, tool = next(
+                        (output_name, tool)
+                        for output_name, tool in tools.items()
+                        if name in output_name
+                    )
+                    self.assertEqual(
+                        tool.get("returncode"),
+                        0,
+                        (tool, (artifacts / output_name).read_text(errors="replace")),
+                    )
+                access_output = next(
+                    artifacts / name for name in tools if "windows-file-access" in name
+                )
+                self.assertTrue(
+                    (artifacts / tools[access_output.name]["stderr_output"]).is_file()
+                )
+                access_text = access_output.read_text()
+                observations = []
+                for line_number, line in enumerate(access_text.splitlines(), start=1):
+                    try:
+                        observations.append(json.loads(line))
+                    except json.JSONDecodeError:
+                        self.fail(
+                            f"{access_output.name} line {line_number} is not JSON: "
+                            f"{line!r}\ncomplete output:\n{access_text}"
+                        )
+                file_access = [entry["file_access"] for entry in observations]
+                self.assertEqual(file_access[0]["read"]["winerror"], 2)
+                self.assertTrue(
+                    all(
+                        entry["read_directory"]["winerror"] == 0
+                        for entry in file_access[1:]
+                    )
+                )
+
     def test_failed_process_image_survives_rebuild_and_resource_query_failure(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -290,13 +527,21 @@ class WindowsDiagnosticsTest(unittest.TestCase):
             executable = root / "bazel-out/bin/tool & \N{GREEK SMALL LETTER LAMDA}.exe"
             module = root / "bazel-out/bin/runtime/library.dll"
             installed = root / "bazel-outside/system.dll"
+            program_data = root / "ProgramData"
+            wer_dump = program_data / "Microsoft/Windows/WER/Temp/WER.tmp.dmp"
+            unrelated_dump = wer_dump.with_name("unrelated.tmp.dmp")
             original = {
                 executable: b"executable image",
                 module: b"runtime image",
                 executable.with_suffix(".pdb"): b"executable symbols",
                 module.with_suffix(".pdb"): b"runtime symbols",
+                wer_dump: b"minidump",
             }
-            for path, contents in {**original, installed: b"installed image"}.items():
+            for path, contents in {
+                **original,
+                installed: b"installed image",
+                unrelated_dump: b"unrelated minidump",
+            }.items():
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_bytes(contents)
             event = (
@@ -308,12 +553,26 @@ class WindowsDiagnosticsTest(unittest.TestCase):
                 f'<Data Name="ModulePath">{escape(str(module))}</Data>'
                 "</EventData></Event>"
             )
+            wer_fields = [""] * 15
+            wer_fields[5] = "compile_artifact.exe"
+            wer_event = (
+                '<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">'
+                '<System><Provider Name="Windows Error Reporting"/>'
+                "<EventID>1001</EventID><Version>0</Version></System><EventData>"
+                + "".join(f"<Data>{value}</Data>" for value in wer_fields)
+                + f"<Data>\n{escape(str(wer_dump))}\n</Data>"
+                + "</EventData></Event>"
+            )
             # Repeated failures share images; installed modules must remain
             # identified in the raw events without being copied into artifacts.
             events = (
                 "<Events>"
                 + event
                 + event.replace(escape(str(module)), escape(str(installed)))
+                + wer_event
+                + wer_event.replace("compile_artifact.exe", "python.exe").replace(
+                    escape(str(wer_dump)), escape(str(unrelated_dump))
+                )
                 + "</Events>"
             ).encode("utf-16")
 
@@ -331,10 +590,12 @@ class WindowsDiagnosticsTest(unittest.TestCase):
                 mock.patch.object(subprocess, "run", side_effect=native_tool),
                 contextlib.redirect_stdout(io.StringIO()),
             ):
+                environment = os.environ.copy()
+                environment["PROGRAMDATA"] = str(program_data)
                 result = diagnostics.run(
                     [sys.executable, "-c", "raise SystemExit(3)"],
                     cwd=root,
-                    env=None,
+                    env=environment,
                     artifact_dir=root / "artifacts",
                     label="silent test failure",
                 )
@@ -362,6 +623,80 @@ class WindowsDiagnosticsTest(unittest.TestCase):
                 record = records[path]
                 self.assertEqual((phase / record["copy"]).read_bytes(), contents)
                 self.assertEqual(record["sha256"], hashlib.sha256(contents).hexdigest())
+
+    def test_classic_application_error_retains_build_owned_images(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            executable = root / "bazel-out/bin/compiler.exe"
+            module = root / "bazel-out/bin/compiler.dll"
+            installed = root / "system.dll"
+            other_provider = root / "bazel-out/bin/other.exe"
+            original = {
+                executable: b"compiler image",
+                module: b"compiler runtime",
+                executable.with_suffix(".pdb"): b"compiler symbols",
+            }
+            for path, contents in {
+                **original,
+                installed: b"system image",
+                other_provider: b"not an application error image",
+            }.items():
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(contents)
+            # Version-zero Application Error events on Windows CI contain
+            # unnamed insertion strings, including the two paths at 10 and 11.
+            fields = [
+                "compiler.exe",
+                "0.0.0.0",
+                "5bf93434",
+                "compiler.dll",
+                "0.0.0.0",
+                "5bf93434",
+                "c0000005",
+                "00000000002a7001",
+                "5b1c",
+                "01dd6dafec3f143a",
+                str(executable),
+                str(module),
+                "report-id",
+                "",
+                "",
+            ]
+            event = (
+                '<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">'
+                '<System><Provider Name="Application Error"/>'
+                '<EventID Qualifiers="0">1000</EventID><Version>0</Version>'
+                "</System><EventData>"
+                + "".join(f"<Data>{escape(value)}</Data>" for value in fields)
+                + "</EventData></Event>"
+            )
+            events = (
+                "<Events>"
+                + event
+                + event.replace(escape(str(module)), escape(str(installed)))
+                + event.replace("Application Error", "Windows Error Reporting")
+                .replace(">1000<", ">1001<")
+                .replace(escape(str(executable)), escape(str(other_provider)))
+                + "</Events>"
+            ).encode("utf-16")
+
+            def native_tool(argv, **kwargs):
+                kwargs["stdout"].write(events)
+                return subprocess.CompletedProcess(argv, 0)
+
+            artifacts = root / "artifacts"
+            artifacts.mkdir()
+            capture = diagnostics.Capture(artifacts, {})
+            with mock.patch.object(subprocess, "run", side_effect=native_tool):
+                diagnostics.capture_application_crashes(
+                    capture, root, None, dt.datetime.now(dt.UTC)
+                )
+            self.assertEqual(set(capture.files), {str(path) for path in original})
+            for path, contents in original.items():
+                self.assertEqual(
+                    (artifacts / capture.files[str(path)]["copy"]).read_bytes(),
+                    contents,
+                )
 
     def test_crash_images_precede_symbols_in_the_capture_budget(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -705,6 +1040,66 @@ class WindowsDiagnosticsTest(unittest.TestCase):
                         f"TimeCreated[@SystemTime >= '{timestamp}']", events["argv"][3]
                     )
 
+    def test_gpu_device_loss_captures_bounded_machine_history(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            capture = diagnostics.Capture(root, {})
+
+            def native_tool(argv, **kwargs):
+                kwargs["stdout"].write(
+                    b"<Events/>" if argv[0] == "wevtutil.exe" else b"{}"
+                )
+                return subprocess.CompletedProcess(argv, 0)
+
+            started_at = dt.datetime(2026, 11, 12, 20, 30, tzinfo=dt.UTC)
+            with mock.patch.object(subprocess, "run", side_effect=native_tool):
+                diagnostics.capture_gpu_device_loss(
+                    capture,
+                    root,
+                    "queue_status.terminal_status\n  Which is: 9\n",
+                    started_at,
+                )
+            self.assertEqual(
+                [tool["output"].split("-", 1)[1] for tool in capture.tools],
+                [
+                    "gpu-system-events.txt",
+                    "gpu-live-kernel-events.txt",
+                    "gpu-device-snapshot.txt",
+                ],
+            )
+            system_events, live_kernel_events, device_snapshot = capture.tools
+            self.assertEqual(
+                system_events["argv"][:3], ["wevtutil.exe", "qe", "System"]
+            )
+            self.assertIn("(Level=1 or Level=2 or Level=3)", system_events["argv"][3])
+            self.assertIn(
+                "TimeCreated[@SystemTime >= '2026-11-11T20:30:00.000Z']",
+                system_events["argv"][3],
+            )
+            self.assertIn("/c:256", system_events["argv"])
+            self.assertEqual(
+                live_kernel_events["argv"][:3],
+                ["wevtutil.exe", "qe", "Application"],
+            )
+            self.assertIn("Windows Error Reporting", live_kernel_events["argv"][3])
+            self.assertIn("EventID=1001", live_kernel_events["argv"][3])
+            self.assertIn("/c:64", live_kernel_events["argv"])
+            self.assertEqual(device_snapshot["argv"][0], "powershell.exe")
+            self.assertIn("Get-PnpDevice", device_snapshot["argv"][-1])
+            self.assertIn("DEVPKEY_Device_DriverVersion", device_snapshot["argv"][-1])
+            self.assertIn("LastBootUpTime", device_snapshot["argv"][-1])
+
+            unaffected = diagnostics.Capture(root, {})
+            with mock.patch.object(subprocess, "run") as run:
+                diagnostics.capture_gpu_device_loss(
+                    unaffected,
+                    root,
+                    "queue_status.terminal_status\n  Which is: 8\n",
+                    started_at,
+                )
+            run.assert_not_called()
+            self.assertEqual(unaffected.tools, [])
+
     @unittest.skipUnless(os.name == "nt", "requires native Windows event queries")
     def test_native_crash_query_preserves_silent_failure(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -770,6 +1165,33 @@ class WindowsDiagnosticsTest(unittest.TestCase):
             self.assertIsNone(output)
             self.assertEqual(capture.tools[0]["returncode"], 23)
             self.assertIn("tool error", (root / capture.tools[0]["output"]).read_text())
+
+    def test_protocol_tool_separates_stderr(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            capture = diagnostics.Capture(root, os.environ)
+            output = capture.tool(
+                [
+                    sys.executable,
+                    "-c",
+                    "import sys; "
+                    "print('{\"record\": 42}'); "
+                    "print('loader warning', file=sys.stderr)",
+                ],
+                root,
+                "protocol",
+                separate_stderr=True,
+            )
+
+            record = capture.tools[0]
+            self.assertEqual(output, root / record["output"])
+            self.assertEqual(
+                json.loads((root / record["output"]).read_text()), {"record": 42}
+            )
+            self.assertEqual(
+                (root / record["stderr_output"]).read_text().strip(),
+                "loader warning",
+            )
 
     def test_metadata_write_failure_preserves_build_failure(self):
         with tempfile.TemporaryDirectory() as directory:

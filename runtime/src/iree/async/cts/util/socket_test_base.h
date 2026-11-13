@@ -43,15 +43,15 @@ class SocketTestBase : public CtsTestBase<BaseType> {
   // Shared by SocketTest, MultishotTest, ErrorPropagationTest, etc.
   // Returns the listener socket; writes the bound address to |out_address|.
   iree_async_socket_t* CreateListener(iree_async_address_t* out_address) {
-    return CreateListenerWithOptions(out_address,
-                                     IREE_ASYNC_SOCKET_OPTION_REUSE_ADDR);
+    return CreateListenerWithOptions(IREE_ASYNC_SOCKET_OPTION_REUSE_ADDR,
+                                     out_address);
   }
 
   // Creates a TCP listener socket with custom options.
   // Options like IREE_ASYNC_SOCKET_OPTION_ZERO_COPY propagate to accepted
   // sockets.
   iree_async_socket_t* CreateListenerWithOptions(
-      iree_async_address_t* out_address, iree_async_socket_options_t options) {
+      iree_async_socket_options_t options, iree_async_address_t* out_address) {
     iree_async_socket_t* listener = nullptr;
     IREE_CHECK_OK(iree_async_socket_create(
         this->proactor_, IREE_ASYNC_SOCKET_TYPE_TCP,
@@ -109,9 +109,9 @@ class SocketTestBase : public CtsTestBase<BaseType> {
   void EstablishConnection(iree_async_socket_t** out_client,
                            iree_async_socket_t** out_server,
                            iree_async_socket_t** out_listener) {
-    EstablishConnectionWithOptions(out_client, out_server, out_listener,
-                                   IREE_ASYNC_SOCKET_OPTION_NO_DELAY,
-                                   IREE_ASYNC_SOCKET_OPTION_NONE);
+    EstablishConnectionWithOptions(IREE_ASYNC_SOCKET_OPTION_NO_DELAY,
+                                   IREE_ASYNC_SOCKET_OPTION_NONE, out_client,
+                                   out_server, out_listener);
   }
 
   // Establishes a connected client/server pair with custom socket options.
@@ -119,13 +119,13 @@ class SocketTestBase : public CtsTestBase<BaseType> {
   // |listener_options| are applied to the listener and inherited by accepted
   // sockets (e.g., IREE_ASYNC_SOCKET_OPTION_ZERO_COPY propagates to server).
   void EstablishConnectionWithOptions(
-      iree_async_socket_t** out_client, iree_async_socket_t** out_server,
-      iree_async_socket_t** out_listener,
       iree_async_socket_options_t client_options,
-      iree_async_socket_options_t listener_options) {
+      iree_async_socket_options_t listener_options,
+      iree_async_socket_t** out_client, iree_async_socket_t** out_server,
+      iree_async_socket_t** out_listener) {
     iree_async_address_t listen_address;
     *out_listener =
-        CreateListenerWithOptions(&listen_address, listener_options);
+        CreateListenerWithOptions(listener_options, &listen_address);
 
     iree_async_socket_accept_operation_t accept_op;
     CompletionTracker accept_tracker;

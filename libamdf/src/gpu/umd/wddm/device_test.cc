@@ -28,12 +28,15 @@ enum class Operation {
   kQueryStoreCapabilities,
   kCreateDevice,
   kCreatePagingQueue,
+  kQueryLocalCapacity,
   kDestroyPagingQueue,
   kDestroyDevice,
   kCloseAdapter,
 };
 
 struct FakeKmtState {
+  // Native result returned by physical-local capacity admission.
+  NTSTATUS local_capacity_status = kSuccess;
   // Native result returned by the GPU memory-capability query.
   NTSTATUS memory_capabilities_status = kSuccess;
   // Native result returned by the CPU-visible atomic-update-width query.
@@ -84,6 +87,16 @@ void AMDF_CALL Free(void* user_data, void* allocation) {
 
 NTSTATUS APIENTRY FakeQueryAdapterInfo(const D3DKMT_QUERYADAPTERINFO* query) {
   EXPECT_EQ(query->hAdapter, 0x08u);
+  if (query->Type == KMTQAITYPE_GETSEGMENTGROUPSIZE) {
+    current_state->operations.push_back(Operation::kQueryLocalCapacity);
+    EXPECT_EQ(query->PrivateDriverDataSize,
+              sizeof(D3DKMT_SEGMENTGROUPSIZEINFO));
+    auto* sizes =
+        static_cast<D3DKMT_SEGMENTGROUPSIZEINFO*>(query->pPrivateDriverData);
+    EXPECT_EQ(sizes->PhysicalAdapterIndex, 0u);
+    sizes->LocalMemory = UINT64_C(8) << 30;
+    return current_state->local_capacity_status;
+  }
   if (query->Type == KMTQAITYPE_WDDM_2_0_CAPS) {
     current_state->operations.push_back(Operation::kQueryStoreCapabilities);
     EXPECT_EQ(query->PrivateDriverDataSize, sizeof(D3DKMT_WDDM_2_0_CAPS));
@@ -378,6 +391,7 @@ TEST_P(WindowsGpuDeviceRollbackTest,
       amdf_gpu_umd_device_create(nullptr, endpoint_, instance_.host_allocator,
                                  GetParam(), &device, &result),
       AMDF_STATUS_OK);
+  EXPECT_EQ(result.memory.flags, AMDF_MEMORY_SCOPE_FLAG_SYSTEM_BACKED);
   EXPECT_EQ(amdf_gpu_umd_device_destroy(device),
             amdf_kmt_make_status(kFailure));
   EXPECT_EQ(state_.live_allocation_count, 2u);
@@ -386,6 +400,47 @@ TEST_P(WindowsGpuDeviceRollbackTest,
   EXPECT_EQ(amdf_test_wddm_provider_query_adapter_close_attempt_count(), 1u);
   EXPECT_EQ(state_.paging_queue_destroy_success_count, 1u);
   EXPECT_EQ(state_.device_destroy_success_count, 1u);
+  EXPECT_EQ(state_.live_allocation_count, 1u);
+}
+
+TEST_P(WindowsGpuDeviceRollbackTest,
+       DiscreteScopeCapacityIsCompleteBeforeDevicePublication) {
+  amdf_test_wddm_provider_set_adapter_close_failures(0);
+  amdf_test_wddm_provider_set_discrete(1);
+  state_.paging_sync_object = 0x30;
+  state_.paging_queue_destroy_failures_remaining = 0;
+  amdf_gpu_umd_device_t* device = nullptr;
+  amdf_gpu_umd_device_result_t result = {};
+  ASSERT_EQ(
+      amdf_gpu_umd_device_create(nullptr, endpoint_, instance_.host_allocator,
+                                 GetParam(), &device, &result),
+      AMDF_STATUS_OK);
+  EXPECT_EQ(result.memory.flags, 0u);
+  EXPECT_EQ(result.memory.capacity_byte_length, UINT64_C(8) << 30);
+  EXPECT_EQ(state_.operations.back(), Operation::kQueryLocalCapacity);
+  EXPECT_EQ(amdf_gpu_umd_device_destroy(device), AMDF_STATUS_OK);
+}
+
+TEST_P(WindowsGpuDeviceRollbackTest,
+       FailedScopeCapacityRollsBackWithoutPublishingDevice) {
+  amdf_test_wddm_provider_set_adapter_close_failures(0);
+  amdf_test_wddm_provider_set_discrete(1);
+  state_.paging_sync_object = 0x30;
+  state_.paging_queue_destroy_failures_remaining = 0;
+  state_.local_capacity_status = kFailure;
+  auto* device = reinterpret_cast<amdf_gpu_umd_device_t*>(uintptr_t{1});
+  amdf_gpu_umd_device_result_t result;
+  std::memset(&result, 0xA5, sizeof(result));
+  const auto original = result;
+  EXPECT_EQ(
+      amdf_gpu_umd_device_create(nullptr, endpoint_, instance_.host_allocator,
+                                 GetParam(), &device, &result),
+      amdf_kmt_make_status(kFailure));
+  EXPECT_EQ(reinterpret_cast<uintptr_t>(device), uintptr_t{1});
+  EXPECT_EQ(std::memcmp(&result, &original, sizeof(result)), 0);
+  EXPECT_EQ(state_.paging_queue_destroy_success_count, 1u);
+  EXPECT_EQ(state_.device_destroy_success_count, 1u);
+  EXPECT_EQ(amdf_test_wddm_provider_query_adapter_close_success_count(), 1u);
   EXPECT_EQ(state_.live_allocation_count, 1u);
 }
 

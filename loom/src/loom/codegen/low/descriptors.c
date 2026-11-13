@@ -548,7 +548,7 @@ uint32_t loom_low_descriptor_set_lookup_descriptor_by_id(
     const uint32_t mid = low + (high - low) / 2;
     const uint32_t ordinal = descriptor_set->descriptor_refs[mid];
     const uint64_t candidate_id =
-        descriptor_set->descriptors[ordinal].stable_id;
+        loom_low_descriptor_stable_id_at(descriptor_set, ordinal);
     if (candidate_id == stable_id) {
       return loom_low_descriptor_set_has_descriptor(descriptor_set, ordinal)
                  ? ordinal
@@ -571,7 +571,9 @@ uint32_t loom_low_descriptor_set_lookup_descriptor(
     return ordinal;
   }
   const iree_string_view_t candidate_key = loom_low_descriptor_set_string_view(
-      descriptor_set, descriptor_set->descriptors[ordinal].key_string_ref);
+      descriptor_set,
+      loom_low_descriptor_key_string_ref(
+          descriptor_set, &descriptor_set->descriptors[ordinal]));
   return iree_string_view_equal(candidate_key, key)
              ? ordinal
              : LOOM_LOW_DESCRIPTOR_ORDINAL_NONE;

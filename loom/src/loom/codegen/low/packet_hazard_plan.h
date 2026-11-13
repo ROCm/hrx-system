@@ -110,25 +110,25 @@ typedef struct loom_low_packet_hazard_plan_record_t {
   loom_low_packet_hazard_plan_record_kind_t kind;
   // Target-owned residual action identifier, or ACTION_NONE for diagnostics.
   uint16_t action_id;
-  // Borrowed stable target residual action name. Empty for diagnostics.
-  iree_string_view_t action_name;
   // Target-owned reason identifier.
   uint16_t reason_id;
+  // Borrowed stable target residual action name. Empty for diagnostics.
+  iree_string_view_t action_name;
   // Borrowed stable target reason name.
   iree_string_view_t reason_name;
   // Producer schedule-node index, or LOOM_LOW_SCHEDULE_NODE_NONE.
   uint32_t producer_node_index;
-  // Producer packet ordinal, or LOOM_LOW_PACKET_HAZARD_PLAN_PACKET_NONE.
-  iree_host_size_t producer_packet_index;
   // Scheduled ordinal of |producer_node_index|, or
   // LOOM_LOW_PACKET_HAZARD_PLAN_ORDINAL_NONE.
   uint32_t producer_scheduled_ordinal;
+  // Producer packet ordinal, or LOOM_LOW_PACKET_HAZARD_PLAN_PACKET_NONE.
+  iree_host_size_t producer_packet_index;
   // Consumer or insertion schedule-node index.
   uint32_t consumer_node_index;
-  // Consumer or insertion packet ordinal.
-  iree_host_size_t insertion_packet_index;
   // Region block containing the insertion point.
   uint32_t block_index;
+  // Consumer or insertion packet ordinal.
+  iree_host_size_t insertion_packet_index;
   // Scheduled ordinal of the insertion point within |block_index|.
   uint32_t scheduled_ordinal;
   // Target-owned progress-class identifier.

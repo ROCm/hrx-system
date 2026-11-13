@@ -1,0 +1,157 @@
+// One arithmetic core also drains its results from SRAM. DMA transfers the
+// payload without another instruction worker or a core-addressable SRAM copy.
+// Two slots wrap across 64 records; global completion precedes credit return.
+aie2p.target<array> @device
+
+pipeline.def<kernel> public retain target(@device) @sram_result() run(%input_arg: buffer, %output_arg: buffer) {
+  %input_unique, %output_unique = buffer.assume.noalias %input_arg, %output_arg : buffer, buffer
+  %input, %output = buffer.assume.alignment %input_unique, %output_unique {minimum_alignment = 4} : buffer, buffer
+  %origin = index.constant 0 : offset
+  %storage_bytes = index.constant 128 : offset
+  %record_bytes = index.constant 64 : offset
+  %begin = index.constant 0 : index
+  %capacity = index.constant 2 : index
+  %end = index.constant 64 : index
+  %step = index.constant 1 : index
+  %memory = pipeline.memory<workgroup>[0, 2] : pool
+  %sram = pipeline.memory<workgroup>[0, 1] : pool
+  %local_storage = buffer.alloca<workgroup> pool(%memory) align(4) %storage_bytes : buffer
+  %local_slots = buffer.view %local_storage[%origin] : buffer -> view<2x16xi32>
+  %local = channel.bind<fifo> %local_slots, %capacity : view<2x16xi32>, index -> channel<tile<16xi32>>
+  %result_storage = buffer.alloca<workgroup> pool(%sram) align(4) %storage_bytes : buffer
+  %result_slots = buffer.view %result_storage[%origin] : buffer -> view<2x16xi32>
+  %result = channel.bind<fifo> %result_slots, %capacity : view<2x16xi32>, index -> channel<tile<16xi32>>
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    scf.for %record = [%begin to %end step %step] {
+      %offset = index.scale %record, %record_bytes : index, offset -> offset
+      %external_input = buffer.view %input[%offset] : buffer -> view<16xi32>
+      %external_output = buffer.view %output[%offset] : buffer -> view<16xi32>
+      %write, %payload = channel.reserve %local : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
+      %ingress = kernel.async.copy %external_input to %payload {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<16xi32> to view<16xi32> -> kernel.async.token
+      %arrival = kernel.async.group %ingress : kernel.async.token -> kernel.async.group
+      kernel.async.wait %arrival {newer_groups = 0} : kernel.async.group
+      %value = view.load %payload[0] : view<16xi32> -> i32
+      %increment = scalar.constant 37 : i32
+      %updated = scalar.addi %value, %increment : i32
+      view.store %updated, %payload[0] : i32, view<16xi32>
+      channel.publish %write : write<tile<16xi32>>
+      %read, %ready = channel.acquire %result : channel<tile<16xi32>> -> (read<tile<16xi32>>, view<16xi32>)
+      %egress = kernel.async.copy %ready to %external_output {cache_scope = workgroup, cache_temporal = regular, direction = workgroup_to_global} : view<16xi32> to view<16xi32> -> kernel.async.token
+      %departure = kernel.async.group %egress : kernel.async.token -> kernel.async.group
+      kernel.async.wait %departure {newer_groups = 0} : kernel.async.group
+      channel.release %read : read<tile<16xi32>>
+    }
+  }
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    scf.for %record = [%begin to %end step %step] {
+      %read, %source = channel.acquire %local : channel<tile<16xi32>> -> (read<tile<16xi32>>, view<16xi32>)
+      %write, %destination = channel.reserve %result : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
+      channel.copy %read -> %write : read<tile<16xi32>>, write<tile<16xi32>>
+    }
+  }
+}
+
+// The same ownership protocol admits reusable SRAM writes from a compute core.
+// Ingress completes before publication, and DMA feeds the local arithmetic.
+pipeline.def<kernel> public retain target(@device) @sram_input() run(%input_arg: buffer, %output_arg: buffer) {
+  %input_unique, %output_unique = buffer.assume.noalias %input_arg, %output_arg : buffer, buffer
+  %input, %output = buffer.assume.alignment %input_unique, %output_unique {minimum_alignment = 4} : buffer, buffer
+  %origin = index.constant 0 : offset
+  %storage_bytes = index.constant 128 : offset
+  %record_bytes = index.constant 64 : offset
+  %begin = index.constant 0 : index
+  %capacity = index.constant 2 : index
+  %end = index.constant 64 : index
+  %step = index.constant 1 : index
+  %memory = pipeline.memory<workgroup>[0, 2] : pool
+  %sram = pipeline.memory<workgroup>[0, 1] : pool
+  %local_storage = buffer.alloca<workgroup> pool(%memory) align(4) %storage_bytes : buffer
+  %local_slots = buffer.view %local_storage[%origin] : buffer -> view<2x16xi32>
+  %local = channel.bind<fifo> %local_slots, %capacity : view<2x16xi32>, index -> channel<tile<16xi32>>
+  %result_storage = buffer.alloca<workgroup> pool(%sram) align(4) %storage_bytes : buffer
+  %result_slots = buffer.view %result_storage[%origin] : buffer -> view<2x16xi32>
+  %result = channel.bind<fifo> %result_slots, %capacity : view<2x16xi32>, index -> channel<tile<16xi32>>
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    scf.for %record = [%begin to %end step %step] {
+      %offset = index.scale %record, %record_bytes : index, offset -> offset
+      %external_input = buffer.view %input[%offset] : buffer -> view<16xi32>
+      %external_output = buffer.view %output[%offset] : buffer -> view<16xi32>
+      %write, %payload = channel.reserve %result : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
+      %ingress = kernel.async.copy %external_input to %payload {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<16xi32> to view<16xi32> -> kernel.async.token
+      %arrival = kernel.async.group %ingress : kernel.async.token -> kernel.async.group
+      kernel.async.wait %arrival {newer_groups = 0} : kernel.async.group
+      channel.publish %write : write<tile<16xi32>>
+      %read, %ready = channel.acquire %local : channel<tile<16xi32>> -> (read<tile<16xi32>>, view<16xi32>)
+      %value = view.load %ready[0] : view<16xi32> -> i32
+      %increment = scalar.constant 37 : i32
+      %updated = scalar.addi %value, %increment : i32
+      view.store %updated, %ready[0] : i32, view<16xi32>
+      %egress = kernel.async.copy %ready to %external_output {cache_scope = workgroup, cache_temporal = regular, direction = workgroup_to_global} : view<16xi32> to view<16xi32> -> kernel.async.token
+      %departure = kernel.async.group %egress : kernel.async.token -> kernel.async.group
+      kernel.async.wait %departure {newer_groups = 0} : kernel.async.group
+      channel.release %read : read<tile<16xi32>>
+    }
+  }
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    scf.for %record = [%begin to %end step %step] {
+      %read, %source = channel.acquire %result : channel<tile<16xi32>> -> (read<tile<16xi32>>, view<16xi32>)
+      %write, %destination = channel.reserve %local : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
+      channel.copy %read -> %write : read<tile<16xi32>>, write<tile<16xi32>>
+    }
+  }
+}
+
+// Dense external indexing is independent of SRAM credits, slot wraparound,
+// local/remote ownership, and DMA addressing.
+func.def @reference(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %word_count = index.constant 1024 : index
+  %record_count = index.constant 64 : index
+  %record_words = index.constant 16 : index
+  %source = buffer.view %input[%origin] : buffer -> view<1024xi32>
+  %destination = buffer.view %output[%origin] : buffer -> view<1024xi32>
+  scf.for %word = [%begin to %word_count step %step] {
+    %value = view.load %source[%word] : view<1024xi32> -> i32
+    view.store %value, %destination[%word] : i32, view<1024xi32>
+  }
+  scf.for %record = [%begin to %record_count step %step] {
+    %first = index.mul %record, %record_words : index
+    %value = view.load %source[%first] : view<1024xi32> -> i32
+    %increment = scalar.constant 37 : i32
+    %updated = scalar.addi %value, %increment : i32
+    view.store %updated, %destination[%first] : i32, view<1024xi32>
+  }
+  func.return
+}
+
+check.scenario public @sram_result_wraparound {
+  check.trial[3](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input_storage = check.generate.random.uniform seed(%seed) range(-200000 to 200000) : tensor<1056xi32>
+    %input = check.tensor.view %input_storage offset(64) : tensor<1056xi32> -> tensor<1024xi32>
+    %output_storage = check.generate.fill value(-9999) : tensor<1056xi32>
+    %output = check.tensor.view %output_storage offset(64) : tensor<1056xi32> -> tensor<1024xi32>
+    check.compare<@sram_result, @reference>(%input, %output) : (tensor<1024xi32>, tensor<1024xi32>) -> () {
+      check.expect.equal actual(%input_storage) expected(%input_storage) : tensor<1056xi32>
+      check.expect.equal actual(%output_storage) expected(%output_storage) : tensor<1056xi32>
+    }
+  }
+  check.return
+}
+
+check.scenario public @sram_input_wraparound {
+  check.trial[3](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input_storage = check.generate.random.uniform seed(%seed) range(-200000 to 200000) : tensor<1056xi32>
+    %input = check.tensor.view %input_storage offset(64) : tensor<1056xi32> -> tensor<1024xi32>
+    %output_storage = check.generate.fill value(-9999) : tensor<1056xi32>
+    %output = check.tensor.view %output_storage offset(64) : tensor<1056xi32> -> tensor<1024xi32>
+    check.compare<@sram_input, @reference>(%input, %output) : (tensor<1024xi32>, tensor<1024xi32>) -> () {
+      check.expect.equal actual(%input_storage) expected(%input_storage) : tensor<1056xi32>
+      check.expect.equal actual(%output_storage) expected(%output_storage) : tensor<1056xi32>
+    }
+  }
+  check.return
+}

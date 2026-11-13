@@ -6,10 +6,10 @@
 
 // View reference fact construction helpers.
 //
-// These helpers summarize view-producing ops into root identity, byte-base,
-// byte-footprint, and alignment facts. They resolve layouts through encoding
-// facts so direct `encoding.layout.*` values and composed `#encoding.storage`
-// values share one interpretation path.
+// These helpers summarize view-producing ops into root identity, signed
+// byte-base, byte-footprint, and alignment facts. They resolve layouts through
+// encoding facts so direct `encoding.layout.*` values and composed
+// `#encoding.storage` values share one interpretation path.
 
 #ifndef LOOM_OPS_VIEW_REFERENCE_H_
 #define LOOM_OPS_VIEW_REFERENCE_H_

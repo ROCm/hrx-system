@@ -3,7 +3,7 @@
 vm.target<core> @vm
 
 // Overflow arguments come from ABI cells, not uninitialized local registers.
-low.func.def target<vm.core>(@vm) abi(vm_function) @wide_identity(%a0: reg<vm.value : i64>, %a1: reg<vm.value : i64>, %a2: reg<vm.value : i64>, %a3: reg<vm.value : i64>, %a4: reg<vm.value : i64>, %a5: reg<vm.value : i64>, %a6: reg<vm.value : i64>, %a7: reg<vm.value : i64>, %a8: reg<vm.value : i64>, %a9: reg<vm.value : i64>, %a10: reg<vm.value : i64>, %a11: reg<vm.value : i64>, %a12: reg<vm.value : i64>, %a13: reg<vm.value : i64>, %a14: reg<vm.value : i64>, %a15: reg<vm.value : i64>, %a16: reg<vm.value : i64>) -> (reg<vm.value : i64>, reg<vm.value : i64>) asm {
+low.func.def noinline target<vm.core>(@vm) abi(vm_function) @wide_identity(%a0: reg<vm.value : i64>, %a1: reg<vm.value : i64>, %a2: reg<vm.value : i64>, %a3: reg<vm.value : i64>, %a4: reg<vm.value : i64>, %a5: reg<vm.value : i64>, %a6: reg<vm.value : i64>, %a7: reg<vm.value : i64>, %a8: reg<vm.value : i64>, %a9: reg<vm.value : i64>, %a10: reg<vm.value : i64>, %a11: reg<vm.value : i64>, %a12: reg<vm.value : i64>, %a13: reg<vm.value : i64>, %a14: reg<vm.value : i64>, %a15: reg<vm.value : i64>, %a16: reg<vm.value : i64>) -> (reg<vm.value : i64>, reg<vm.value : i64>) asm {
   return %a0, %a16
 }
 
@@ -52,8 +52,6 @@ vm.module core(0.0) {
     ^bb0:
       control.block
       stack.store.i64 #v24, %v0.x1
-      stack.store.i64 #v0, %v1.x1
-      %v1 = value.copy %v0
       %v2 = value.copy %v0
       %v3 = value.copy %v0
       %v4 = value.copy %v0
@@ -68,6 +66,8 @@ vm.module core(0.0) {
       %v13 = value.copy %v0
       %v14 = value.copy %v0
       %v15 = value.copy %v0
+      stack.store.i64 #v0, %v1.x1
+      %v1 = value.copy %v0
       control.call @function0 {direct_ref_move_mask = 0x0000}
       %v2 = value.copy %v1
       %v1 = value.copy %v0
@@ -121,27 +121,27 @@ vm.module core(0.0) {
       %r0 = ref.abi.argument.load.move 0
     ^bb1:
       control.block
-      ref.stack.store.retain %r0, #r0
+      ref.stack.store.copy %r0, #r0
       ref.abi.result.store.move %r0, 0
       %r0 = ref.stack.load.move #r0
-      ref.stack.store.retain %r0, #r0
+      ref.stack.store.copy %r0, #r0
       ref.abi.result.store.move %r0, 1
       %r0 = ref.stack.load.move #r0
-      %r1 = ref.retain %r0
-      %r2 = ref.retain %r0
-      %r3 = ref.retain %r0
-      %r4 = ref.retain %r0
-      %r5 = ref.retain %r0
-      %r6 = ref.retain %r0
-      %r7 = ref.retain %r0
-      %r8 = ref.retain %r0
-      %r9 = ref.retain %r0
-      %r10 = ref.retain %r0
-      %r11 = ref.retain %r0
-      %r12 = ref.retain %r0
-      %r13 = ref.retain %r0
-      %r14 = ref.retain %r0
-      %r15 = ref.retain %r0
+      %r1 = ref.copy %r0
+      %r2 = ref.copy %r0
+      %r3 = ref.copy %r0
+      %r4 = ref.copy %r0
+      %r5 = ref.copy %r0
+      %r6 = ref.copy %r0
+      %r7 = ref.copy %r0
+      %r8 = ref.copy %r0
+      %r9 = ref.copy %r0
+      %r10 = ref.copy %r0
+      %r11 = ref.copy %r0
+      %r12 = ref.copy %r0
+      %r13 = ref.copy %r0
+      %r14 = ref.copy %r0
+      %r15 = ref.copy %r0
       control.return
     }
   }

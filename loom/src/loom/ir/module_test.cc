@@ -115,6 +115,40 @@ TEST_F(ModuleTest, AllocateAndFree) {
   loom_module_free(module);
 }
 
+TEST_F(ModuleTest, HeaderUsesArenaStorageIncludingOversizedAllocation) {
+  iree_arena_block_pool_t small_pool;
+  iree_arena_block_pool_initialize(1024, iree_allocator_system(), &small_pool);
+
+  loom_module_t* module = NULL;
+  IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"), &small_pool,
+                                      NULL, iree_allocator_null(), &module));
+  EXPECT_TRUE(iree_allocator_is_null(module->host_allocator));
+  loom_module_free(module);
+
+  iree_arena_block_pool_deinitialize(&small_pool);
+}
+
+TEST_F(ModuleTest, HeaderUsesRemainingActiveBlockCapacity) {
+  iree_arena_block_pool_t small_pool;
+  iree_arena_block_pool_initialize(4096, iree_allocator_system(), &small_pool);
+
+  loom_module_t* module = NULL;
+  IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"), &small_pool,
+                                      NULL, iree_allocator_system(), &module));
+  const uintptr_t block_begin =
+      (uintptr_t)iree_arena_block_ptr(&small_pool, module->arena.block_head);
+  const uintptr_t block_end = block_begin + small_pool.usable_block_size;
+  const uintptr_t module_begin = (uintptr_t)module;
+  const uintptr_t module_end = module_begin + sizeof(*module);
+  EXPECT_GE(module_begin, block_begin);
+  EXPECT_LE(module_end, block_end);
+  EXPECT_EQ(module->arena.total_allocation_size,
+            4 * small_pool.total_block_size);
+  loom_module_free(module);
+
+  iree_arena_block_pool_deinitialize(&small_pool);
+}
+
 TEST_F(ModuleTest, FreeNull) { loom_module_free(NULL); }
 
 TEST_F(ModuleTest, ModuleName) {
@@ -3741,7 +3775,10 @@ TEST_F(ModuleTest, BlockFindOp) {
   loom_module_free(module);
 }
 
-TEST(ModuleCallInventoryTest, TracksMutationAndRebuild) {
+class ModuleCallInventoryTest
+    : public ::testing::TestWithParam<loom_call_like_kind_t> {};
+
+TEST_P(ModuleCallInventoryTest, TracksMutationAndRebuild) {
   iree_arena_block_pool_t block_pool;
   iree_arena_block_pool_initialize(32 * 1024, iree_allocator_system(),
                                    &block_pool);
@@ -3750,8 +3787,24 @@ TEST(ModuleCallInventoryTest, TracksMutationAndRebuild) {
   iree_host_size_t vtable_count = 0;
   const loom_op_vtable_t* const* vtables =
       loom_test_dialect_vtables(&vtable_count);
-  IREE_ASSERT_OK(loom_context_register_dialect(
-      &context, LOOM_DIALECT_TEST, vtables, (uint16_t)vtable_count));
+  std::vector<const loom_op_vtable_t*> registered_vtables(
+      vtables, vtables + vtable_count);
+  loom_op_vtable_t invocation_vtable = {};
+  loom_call_like_vtable_t invocation_interface = {};
+  for (iree_host_size_t i = 0; i < vtable_count; ++i) {
+    if (vtables[i]->call_like &&
+        vtables[i]->call_like->kind == LOOM_CALL_LIKE_KIND_SEMANTIC) {
+      invocation_vtable = *vtables[i];
+      invocation_interface = *vtables[i]->call_like;
+      invocation_interface.kind = GetParam();
+      invocation_vtable.call_like = &invocation_interface;
+      registered_vtables[i] = &invocation_vtable;
+      break;
+    }
+  }
+  IREE_ASSERT_OK(loom_context_register_dialect(&context, LOOM_DIALECT_TEST,
+                                               registered_vtables.data(),
+                                               (uint16_t)vtable_count));
   IREE_ASSERT_OK(loom_context_finalize(&context));
 
   loom_module_t* module = NULL;
@@ -3772,7 +3825,7 @@ TEST(ModuleCallInventoryTest, TracksMutationAndRebuild) {
       &builder, callee, /*operands=*/NULL, /*operands_count=*/0,
       /*result_types=*/NULL, /*result_count=*/0, /*tied_results=*/NULL,
       /*tied_result_count=*/0, LOOM_LOCATION_UNKNOWN, &low_call));
-  EXPECT_FALSE(loom_module_has_semantic_calls(module));
+  EXPECT_FALSE(loom_module_has_source_calls(module));
   EXPECT_TRUE(loom_module_has_low_internal_calls(module));
   EXPECT_EQ(module->low_internal_call_op_count, 1u);
 
@@ -3786,17 +3839,17 @@ TEST(ModuleCallInventoryTest, TracksMutationAndRebuild) {
       &builder, callee, /*operands=*/NULL, /*operands_count=*/0,
       /*result_types=*/NULL, /*result_count=*/0, /*tied_results=*/NULL,
       /*tied_result_count=*/0, LOOM_LOCATION_UNKNOWN, &second_call));
-  EXPECT_TRUE(loom_module_has_semantic_calls(module));
-  EXPECT_EQ(module->semantic_call_op_count, 2u);
+  EXPECT_TRUE(loom_module_has_source_calls(module));
+  EXPECT_EQ(module->source_call_op_count, 2u);
 
   IREE_ASSERT_OK(loom_op_erase(module, first_call));
-  EXPECT_EQ(module->semantic_call_op_count, 1u);
+  EXPECT_EQ(module->source_call_op_count, 1u);
   EXPECT_EQ(module->low_internal_call_op_count, 1u);
   IREE_ASSERT_OK(loom_module_compute_uses(module));
-  EXPECT_EQ(module->semantic_call_op_count, 1u);
+  EXPECT_EQ(module->source_call_op_count, 1u);
   EXPECT_EQ(module->low_internal_call_op_count, 1u);
   IREE_ASSERT_OK(loom_op_erase(module, second_call));
-  EXPECT_FALSE(loom_module_has_semantic_calls(module));
+  EXPECT_FALSE(loom_module_has_source_calls(module));
   IREE_ASSERT_OK(loom_op_erase(module, low_call));
   EXPECT_FALSE(loom_module_has_low_internal_calls(module));
 
@@ -3804,6 +3857,10 @@ TEST(ModuleCallInventoryTest, TracksMutationAndRebuild) {
   loom_context_deinitialize(&context);
   iree_arena_block_pool_deinitialize(&block_pool);
 }
+
+INSTANTIATE_TEST_SUITE_P(SourceCalls, ModuleCallInventoryTest,
+                         ::testing::Values(LOOM_CALL_LIKE_KIND_SEMANTIC,
+                                           LOOM_CALL_LIKE_KIND_LOW_INVOKE));
 
 TEST_F(ModuleTest, BlockAppendSupportsMoreThanUint16Ops) {
   loom_module_t* module = NULL;

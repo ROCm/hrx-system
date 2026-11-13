@@ -1,0 +1,98 @@
+# Copyright 2026 The HRX Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+name: CodeQL / Native production
+
+on:
+  workflow_call:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 9 * * 6"
+
+concurrency:
+  group: codeql-native-production-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  analyze:
+    name: Analyze
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # Keep non-production paths out of the no-build extraction database;
+          # the CodeQL configuration repeats these as result-policy filters.
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /.github/codeql/
+            /libamdf/include/
+            /libamdf/src/
+            /loom/src/
+            /runtime/src/
+            !**/cts/
+            !**/test/
+            !**/tests/
+            !**/testdata/
+            !**/testing/
+            !**/benchmark/
+            !**/benchmarks/
+            !**/fuzz/
+            !**/test.*
+            !**/test_*.*
+            !**/*_test.*
+            !**/*_test_*.*
+            !**/*_testdata.*
+            !**/*benchmark*.*
+            !**/*fuzz*.*
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          languages: c-cpp
+          build-mode: none
+          config-file: .github/codeql/native-production.yml
+
+      - name: Analyze native production sources
+        uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          category: /language:c-cpp/native-production
+          output: ${{ runner.temp }}/codeql-results-c-cpp
+
+      - name: Require a clean result
+        env:
+          SARIF: ${{ runner.temp }}/codeql-results-c-cpp/cpp.sarif
+        run: |
+          result_count=$(jq '[.runs[] | .results[]?] | length' "$SARIF")
+          if (( result_count != 0 )); then
+            jq -r '
+              .runs[] | .results[]? |
+              [
+                (.locations[0].physicalLocation.artifactLocation.uri // "?"),
+                (.locations[0].physicalLocation.region.startLine // 0),
+                .ruleId,
+                .message.text
+              ] | @tsv
+            ' "$SARIF"
+            echo "CodeQL reported $result_count native production finding(s)." >&2
+            exit 1
+          fi
+          echo 'CodeQL reported no native production findings.'
+
+      - name: Retain the result
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: codeql-native-production-${{ github.run_id }}
+          path: ${{ runner.temp }}/codeql-results-c-cpp
+          if-no-files-found: error
+          retention-days: 14
+          overwrite: true

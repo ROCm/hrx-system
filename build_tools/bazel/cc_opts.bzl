@@ -109,12 +109,6 @@ _CLANG_CL_COPTS = _MSVC_COPTS + [
     "-Wno-unused-variable",
 ]
 
-_MSVC_ONLY_COPTS = [
-    # Enable the standards-conforming preprocessor required by __VA_OPT__.
-    # clang-cl is already conforming and diagnoses this option as unused.
-    "/Zc:preprocessor",
-]
-
 # The rules_cc Windows toolchain enables its standards-conforming C17 mode.
 # Do not append another /std option: MSVC warns whenever the later option
 # overrides the toolchain default, and C17 preserves the C11 language surface
@@ -241,7 +235,7 @@ def _iree_code_compiler_options(
                 _CLANG_COPTS,
                 _GCC_COPTS,
                 _CLANG_CL_COPTS,
-                _MSVC_COPTS + _MSVC_ONLY_COPTS,
+                _MSVC_COPTS,
             ) + _SANITIZER_FRAME_POINTER_COPTS + _UNDEFINED_SANITIZER_COPTS,
             copts,
         ),

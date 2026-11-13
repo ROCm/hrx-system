@@ -12,20 +12,21 @@
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
 #include "loom/codegen/low/frame.h"
+#include "loom/target/arch/amd/xdna/aie2p/emit/function_envelope.h"
 #include "loom/target/arch/amd/xdna/aie2p/emit/leaf_program.h"
+#include "loom/target/arch/amd/xdna/aie2p/emit/stack_frame.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 typedef struct loom_aie2p_bundle_plan_options_t {
+  // Admitted function frame and worker-owned backing.
+  loom_aie2p_stack_frame_t stack;
   // Structured diagnostics for final-frame semantic rejection.
   iree_diagnostic_emitter_t diagnostic_emitter;
-  // Whether this entry program preserves its incoming link register across
-  // direct helper calls.
-  bool preserve_link_register;
-  // Reserved scalar register holding the entry link while preservation is on.
-  loom_aie2p_physical_register_id_t link_shadow_register;
+  // Incoming-link and caller-shadow preservation across nested native calls.
+  loom_aie2p_return_address_t return_address;
 } loom_aie2p_bundle_plan_options_t;
 
 // Plans physical bundles for one successful, spill-free AIE2P Low frame. A
@@ -59,7 +60,9 @@ typedef struct loom_aie2p_bundle_plan_options_t {
 // slot records. Ordinary control-flow edges reach a quiescent event/resource
 // boundary before successor entry. Selected hardware loops instead honor the
 // scheduler-owned cross-iteration source deadline and prove their realized
-// register/resource recurrence at the fixed native period.
+// register/resource recurrence at the fixed native period. Their final body
+// retains its physical event history into the continuation instead of paying
+// a quiescent boundary on every iteration or discarding pending writes.
 // Structural control's source deadline constrains retirement; native condition
 // and LR reads retain concrete register-event issue admission. Native
 // branch-delay cycles contribute to this boundary. Prebound live-ins and

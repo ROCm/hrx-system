@@ -12,7 +12,7 @@
 #include "iree/base/threading/notification.h"
 #include "iree/net/carrier.h"
 #include "loom/runtime/telemetry/stream.h"
-#include "loom/serve/runtime/host/wake.h"
+#include "loom/runtime/wake.h"
 #include "loom/serve/transport/http/origin.h"
 #include "loom/serve/transport/http/request.h"
 
@@ -116,7 +116,7 @@ void loom_serve_http_server_record_error(loom_serve_http_server_t* server,
 // Replacing with an empty callback joins all prior callback accesses. The
 // observer's storage remains live until replacement or server destruction.
 void loom_serve_http_server_set_observer(loom_serve_http_server_t* server,
-                                         loom_serve_wake_callback_t observer);
+                                         loom_runtime_wake_callback_t observer);
 
 // Stops request admission and wakes the application to drain its services.
 // Does not cancel active connections or stop shared I/O infrastructure.
@@ -197,6 +197,13 @@ iree_status_t loom_serve_http_connection_send(
 // to avoid an intermediate header/payload copy.
 iree_status_t loom_serve_http_connection_send_generated(
     loom_serve_http_connection_t* connection, iree_net_send_prefix_t prefix);
+
+// Cancels peer I/O immediately while preserving the application claim and all
+// request views. Idempotent; failed becomes true. The owner must still finish
+// or abort after its input borrowers retire. Does not wait for network
+// retirement.
+void loom_serve_http_connection_cancel(
+    loom_serve_http_connection_t* connection);
 
 // Relinquishes the connection and all request views. Finish drains every
 // accepted send before closing; abort cancels outstanding network work. Neither

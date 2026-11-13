@@ -776,6 +776,20 @@ def test_optional_operand_segment_count_guard() -> None:
         Guard.operand_segment_count("pool", 2).validate(buffer.buffer_alloca)
 
 
+def test_value_divisibility_guard_requires_positive_i64_divisor() -> None:
+    for divisor in (1, 2**32, 2**63 - 1):
+        Guard.value_divisible_by("lhs", divisor).validate(scalar_arithmetic.scalar_addi)
+    for divisor in (0, 2**63):
+        with pytest.raises(ValueError, match="needs a positive i64 divisor"):
+            Guard.value_divisible_by("lhs", divisor).validate(
+                scalar_arithmetic.scalar_addi
+            )
+    with pytest.raises(ValueError, match="count must be non-negative"):
+        Guard.value_divisible_by("lhs", -1)
+    with pytest.raises(ValueError, match="field 'missing' is not an operand or result"):
+        Guard.value_divisible_by("missing", 4).validate(scalar_arithmetic.scalar_addi)
+
+
 def test_value_memory_space_guard_requires_known_unique_spaces() -> None:
     guard = Guard.value_memory_space("result", ("global", "descriptor"))
 

@@ -8,7 +8,9 @@
 
 #include <string.h>
 
+#include "loom/analysis/scc.h"
 #include "loom/codegen/low/diagnostics.h"
+#include "loom/codegen/low/read_only_data.h"
 #include "loom/error/parameter.h"
 #include "loom/ops/low/ops.h"
 #include "loom/target/arch/amd/xdna/aie2p/descriptors/core_descriptors.h"
@@ -18,40 +20,6 @@ static iree_string_view_t loom_aie2p_program_source_symbol_name(
     const loom_module_t* module, loom_symbol_id_t symbol_id) {
   return loom_string_table_get(&module->strings,
                                module->symbols.entries[symbol_id].name_id);
-}
-
-IREE_ATTRIBUTE_NOINLINE IREE_ATTRIBUTE_COLD static iree_status_t
-loom_aie2p_program_source_emit_nested_call(
-    const loom_aie2p_program_source_table_t* table,
-    const loom_aie2p_program_source_function_t* entry,
-    const loom_aie2p_program_source_function_t* helper,
-    const loom_low_direct_callee_requirement_t* nested_call) {
-  const loom_diagnostic_param_t params[] = {
-      loom_param_string(loom_aie2p_program_source_symbol_name(
-          table->module, helper->symbol.symbol_id)),
-      loom_param_string(
-          loom_low_diagnostic_symbol_name(table->module, nested_call->symbol)),
-  };
-  const loom_diagnostic_related_op_t related_ops[] = {
-      {
-          .label = IREE_SV("entry defined here"),
-          .op = entry->function_op,
-      },
-      {
-          .label = IREE_SV("helper defined here"),
-          .op = helper->function_op,
-      },
-  };
-  const loom_diagnostic_emission_t emission = {
-      .module = table->module,
-      .op = nested_call->first_call_op,
-      .error = LOOM_ERR_XDNA_063,
-      .params = params,
-      .param_count = IREE_ARRAYSIZE(params),
-      .related_ops = related_ops,
-      .related_op_count = IREE_ARRAYSIZE(related_ops),
-  };
-  return iree_diagnostic_emit(table->diagnostic_emitter, &emission);
 }
 
 iree_status_t loom_aie2p_program_source_table_initialize(
@@ -124,6 +92,7 @@ iree_status_t loom_aie2p_program_source_table_resolve(
   IREE_RETURN_IF_ERROR(loom_low_function_requirements_build(
       table->module, target.descriptor_set, loom_low_func_def_body(function_op),
       table->arena, &function->requirements));
+  function->program_data = &function->requirements.read_only_data;
   table->functions_by_symbol[symbol.symbol_id] = function;
   *out_function = function;
   *out_resolved = true;
@@ -141,34 +110,216 @@ loom_aie2p_program_source_table_lookup(
   return function;
 }
 
-iree_status_t loom_aie2p_program_source_admit_direct_helpers(
+// The shared graph engine owns traversal and cycle detection. This adapter
+// supplies the source inventory once and stops at already admitted subtrees.
+typedef struct loom_aie2p_program_source_graph_t {
+  // Lazy source index owning immutable requirements and completed closures.
+  loom_aie2p_program_source_table_t* table;
+  // Target-binding rejection encountered while resolving a reached function.
+  bool rejected;
+} loom_aie2p_program_source_graph_t;
+
+static iree_status_t loom_aie2p_program_source_visit_callees(
+    void* user_data, iree_host_size_t node,
+    loom_scc_successor_callback_t successor) {
+  loom_aie2p_program_source_graph_t* graph = user_data;
+  loom_aie2p_program_source_function_t* source = NULL;
+  bool resolved = false;
+  IREE_RETURN_IF_ERROR(loom_aie2p_program_source_table_resolve(
+      graph->table, (loom_symbol_ref_t){.symbol_id = (loom_symbol_id_t)node},
+      &resolved, &source));
+  if (!resolved) {
+    graph->rejected = true;
+    return iree_ok_status();
+  }
+  iree_status_t status = iree_ok_status();
+  if (!source->helpers_admitted) {
+    const loom_low_direct_callee_requirement_list_t callees =
+        source->requirements.direct_callees;
+    for (iree_host_size_t i = 0; i < callees.count && iree_status_is_ok(status);
+         ++i) {
+      status =
+          successor.fn(successor.user_data, callees.values[i].symbol.symbol_id);
+    }
+  }
+  return status;
+}
+
+static iree_status_t loom_aie2p_program_source_append_helper(
+    loom_symbol_ref_t symbol, uint8_t* membership,
+    iree_arena_allocator_t* arena, loom_symbol_ref_t** helpers,
+    iree_host_size_t* count, iree_host_size_t* capacity) {
+  if (membership[symbol.symbol_id]) {
+    return iree_ok_status();
+  }
+  if (*count == *capacity) {
+    IREE_RETURN_IF_ERROR(
+        iree_arena_grow_array(arena, *count, iree_max(*count + 1, 4u),
+                              sizeof(**helpers), capacity, (void**)helpers));
+  }
+  (*helpers)[(*count)++] = symbol;
+  membership[symbol.symbol_id] = 1;
+  return iree_ok_status();
+}
+
+static iree_status_t loom_aie2p_program_source_append_closure(
+    loom_aie2p_program_source_table_t* table,
+    const loom_aie2p_program_source_function_t* helper, uint8_t* membership,
+    loom_symbol_ref_t** helpers, iree_host_size_t* helper_count,
+    iree_host_size_t* helper_capacity, bool* out_admitted) {
+  *out_admitted = false;
+  if (helper->requirements.resource_count != 0 ||
+      helper->requirements.storage_layout.record_count != 0) {
+    const loom_diagnostic_param_t params[] = {
+        loom_param_string(loom_aie2p_program_source_symbol_name(
+            table->module, helper->symbol.symbol_id)),
+    };
+    const loom_diagnostic_emission_t emission = {
+        .module = table->module,
+        .op = helper->function_op,
+        .error = LOOM_ERR_XDNA_065,
+        .params = params,
+        .param_count = IREE_ARRAYSIZE(params),
+    };
+    return iree_diagnostic_emit(table->diagnostic_emitter, &emission);
+  }
+  // A previously requested root may also be a helper here. The graph stops at
+  // that root, so import its completed closure before appending the root
+  // itself. Other functions retain only their direct edges, already visited by
+  // SCC.
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0;
+       i < helper->helpers.count && iree_status_is_ok(status); ++i) {
+    status = loom_aie2p_program_source_append_helper(
+        helper->helpers.values[i], membership, table->arena, helpers,
+        helper_count, helper_capacity);
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_aie2p_program_source_append_helper(
+        helper->symbol, membership, table->arena, helpers, helper_count,
+        helper_capacity);
+  }
+  *out_admitted = iree_status_is_ok(status);
+  return status;
+}
+
+static iree_status_t loom_aie2p_program_source_finish_closure(
+    loom_aie2p_program_source_table_t* table,
+    loom_aie2p_program_source_function_t* entry,
+    loom_symbol_ref_array_t helpers) {
+  loom_low_read_only_data_builder_t data_builder = {0};
+  bool has_helper_data = false;
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0; i < helpers.count && iree_status_is_ok(status);
+       ++i) {
+    const loom_aie2p_program_source_function_t* helper =
+        loom_aie2p_program_source_table_lookup(table, helpers.values[i]);
+    const loom_low_read_only_data_set_t* data =
+        &helper->requirements.read_only_data;
+    if (data->count != 0) {
+      if (!has_helper_data) {
+        status = loom_low_read_only_data_builder_extend(
+            &data_builder, &entry->requirements.read_only_data, table->arena);
+        has_helper_data = true;
+      }
+      if (iree_status_is_ok(status)) {
+        status = loom_low_read_only_data_builder_extend(&data_builder, data,
+                                                        table->arena);
+      }
+    }
+  }
+  if (iree_status_is_ok(status) && has_helper_data) {
+    loom_low_read_only_data_set_t* data = NULL;
+    status = iree_arena_allocate(table->arena, sizeof(*data), (void**)&data);
+    if (iree_status_is_ok(status)) {
+      *data = loom_low_read_only_data_builder_finish(&data_builder);
+      entry->program_data = data;
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    entry->helpers = helpers;
+    entry->helpers_admitted = true;
+  }
+  return status;
+}
+
+static iree_status_t loom_aie2p_program_source_admit_helpers_impl(
+    loom_aie2p_program_source_table_t* table,
+    loom_aie2p_program_source_function_t* entry,
+    iree_arena_allocator_t* scratch_arena, bool* out_admitted) {
+  loom_aie2p_program_source_graph_t source_graph = {.table = table};
+  const loom_scc_graph_t graph = {
+      .node_count = table->module->symbols.count,
+      .visit_successors = loom_scc_visit_successors_callback_make(
+          loom_aie2p_program_source_visit_callees, &source_graph),
+  };
+  const iree_host_size_t root = entry->symbol.symbol_id;
+  const loom_scc_options_t options = {.root_nodes = &root, .root_count = 1};
+  loom_scc_list_t sccs = {0};
+  IREE_RETURN_IF_ERROR(
+      loom_scc_compute(&graph, &options, scratch_arena, &sccs));
+  if (source_graph.rejected) {
+    return iree_ok_status();
+  }
+  uint8_t* membership = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate_array(scratch_arena, graph.node_count,
+                                sizeof(*membership), (void**)&membership));
+  memset(membership, 0, graph.node_count * sizeof(*membership));
+  loom_symbol_ref_t* helpers = NULL;
+  iree_host_size_t helper_count = 0;
+  iree_host_size_t helper_capacity = 0;
+  bool admitted = true;
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0;
+       i < sccs.count && admitted && iree_status_is_ok(status); ++i) {
+    const loom_scc_t* scc = &sccs.values[i];
+    loom_aie2p_program_source_function_t* source =
+        table->functions_by_symbol[scc->nodes[0]];
+    if (scc->is_cycle) {
+      const loom_diagnostic_param_t params[] = {
+          loom_param_string(loom_aie2p_program_source_symbol_name(
+              table->module, source->symbol.symbol_id)),
+      };
+      const loom_diagnostic_emission_t emission = {
+          .module = table->module,
+          .op = source->function_op,
+          .error = LOOM_ERR_XDNA_063,
+          .params = params,
+          .param_count = IREE_ARRAYSIZE(params),
+      };
+      status = iree_diagnostic_emit(table->diagnostic_emitter, &emission);
+      admitted = false;
+    } else if (source != entry) {
+      status = loom_aie2p_program_source_append_closure(
+          table, source, membership, &helpers, &helper_count, &helper_capacity,
+          &admitted);
+    }
+  }
+  if (admitted && iree_status_is_ok(status)) {
+    status = loom_aie2p_program_source_finish_closure(
+        table, entry, loom_make_symbol_ref_array(helpers, helper_count));
+  }
+  *out_admitted = admitted && iree_status_is_ok(status);
+  return status;
+}
+
+iree_status_t loom_aie2p_program_source_admit_helpers(
     loom_aie2p_program_source_table_t* table,
     loom_aie2p_program_source_function_t* entry, bool* out_admitted) {
-  *out_admitted = false;
-  if (entry->direct_helpers_admitted) {
+  *out_admitted = entry->helpers_admitted;
+  if (*out_admitted) {
+    return iree_ok_status();
+  }
+  if (entry->requirements.direct_callees.count == 0) {
+    entry->helpers_admitted = true;
     *out_admitted = true;
     return iree_ok_status();
   }
-  for (iree_host_size_t i = 0; i < entry->requirements.direct_callees.count;
-       ++i) {
-    const loom_low_direct_callee_requirement_t* call =
-        &entry->requirements.direct_callees.values[i];
-    const loom_symbol_ref_t helper_ref = call->symbol;
-    bool helper_resolved = false;
-    loom_aie2p_program_source_function_t* helper = NULL;
-    IREE_RETURN_IF_ERROR(loom_aie2p_program_source_table_resolve(
-        table, helper_ref, &helper_resolved, &helper));
-    if (!helper_resolved) {
-      return iree_ok_status();
-    }
-    if (helper->requirements.direct_callees.count != 0) {
-      IREE_RETURN_IF_ERROR(loom_aie2p_program_source_emit_nested_call(
-          table, entry, helper,
-          &helper->requirements.direct_callees.values[0]));
-      return iree_ok_status();
-    }
-  }
-  entry->direct_helpers_admitted = true;
-  *out_admitted = true;
-  return iree_ok_status();
+  iree_arena_allocator_t scratch_arena;
+  iree_arena_initialize(table->arena->block_pool, &scratch_arena);
+  iree_status_t status = loom_aie2p_program_source_admit_helpers_impl(
+      table, entry, &scratch_arena, out_admitted);
+  iree_arena_deinitialize(&scratch_arena);
+  return status;
 }

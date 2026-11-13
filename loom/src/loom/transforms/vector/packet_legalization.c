@@ -135,9 +135,10 @@ static uint32_t loom_vector_packet_select_dynamic_window_consumers(
     const loom_target_legalization_context_t* context,
     const loom_op_t* slice_op,
     const loom_vector_packet_consumer_materializer_t* materializer,
-    loom_op_t** out_consumers, uint32_t consumer_capacity,
+    uint32_t consumer_capacity, uint32_t branch_capacity,
+    loom_op_t** out_consumers,
     loom_vector_packet_consumer_branch_t* out_branches,
-    uint32_t branch_capacity, uint32_t* out_consumer_count) {
+    uint32_t* out_consumer_count) {
   *out_consumer_count = 0;
   const loom_value_id_t root = loom_vector_slice_result(slice_op);
   const loom_value_t* root_value = loom_module_value(context->module, root);
@@ -865,9 +866,9 @@ iree_status_t loom_vector_packet_legalize_dynamic_slice(
   uint32_t consumer_count = 0;
   const uint32_t consumer_branch_count =
       loom_vector_packet_select_dynamic_window_consumers(
-          context, op, consumer_materializer, consumers,
-          IREE_ARRAYSIZE(consumers), consumer_branches,
-          IREE_ARRAYSIZE(consumer_branches), &consumer_count);
+          context, op, consumer_materializer, IREE_ARRAYSIZE(consumers),
+          IREE_ARRAYSIZE(consumer_branches), consumers, consumer_branches,
+          &consumer_count);
   if (!loom_vector_packet_dynamic_window_constrain_chunk_lane_count(
           context, source_type, result_lane_count, consumers, consumer_count,
           consumer_materializer, &chunk_lane_count)) {
@@ -1416,25 +1417,6 @@ static bool loom_vector_packet_value_is_exclusive_to_op(
   return loom_use_user_op(*loom_value_single_use(value)) == root_op;
 }
 
-// Captured values are sliced from an already materialized target carrier.
-// Values without a complete carrier mapping must be legalized before the
-// terminal store is reconsidered.
-static bool loom_vector_packet_captured_values_have_carriers(
-    const loom_vector_packetization_t* packetization) {
-  loom_target_legalization_context_t* context = packetization->context;
-  for (uint32_t i = 0; i < packetization->value_count; ++i) {
-    const loom_vector_packetized_value_t* value = &packetization->values[i];
-    if (value->source_mode != LOOM_VECTOR_PACKET_SOURCE_MODE_CAPTURED) {
-      continue;
-    }
-    if (!loom_target_legalization_has_source_vector_carrier(
-            context, value->source_type, value->source)) {
-      return false;
-    }
-  }
-  return true;
-}
-
 iree_status_t loom_vector_packet_legalize_store(
     loom_target_legalization_context_t* context, loom_op_t* op,
     const loom_target_vector_packet_policy_t* policy, bool* out_rewritten) {
@@ -1527,9 +1509,8 @@ iree_status_t loom_vector_packet_legalize_store(
                                                  /*allow_streaming=*/true));
   }
 
-  if (!loom_vector_packet_captured_values_have_carriers(&packetization) ||
-      (producer_selected &&
-       !loom_vector_packet_can_materialize(&packetization, &shape))) {
+  if (producer_selected &&
+      !loom_vector_packet_can_materialize(&packetization, &shape)) {
     return iree_ok_status();
   }
   if (!producer_selected) {
@@ -1631,17 +1612,18 @@ iree_status_t loom_vector_packet_legalize_store(
     *out_rewritten = true;
     return iree_ok_status();
   }
+  if (has_captured_values || requires_static_slices) {
+    return iree_ok_status();
+  }
   if (has_snapshots) {
     if (!loom_vector_packet_private_staging_allowed(policy)) {
       return iree_ok_status();
     }
-    IREE_RETURN_IF_ERROR(loom_vector_packet_canonicalize_snapshots(
-        &packetization, &shape, /*dynamic_windows_only=*/false));
-    *out_rewritten = true;
-    return iree_ok_status();
-  }
-  if (has_captured_values || requires_static_slices) {
-    return iree_ok_status();
+    // This rewrite owns both the private snapshot and its consuming loop.
+    // Publishing oversized staging loads would let later legalization capture
+    // and stage them again without reducing the producer graph.
+    IREE_RETURN_IF_ERROR(
+        loom_vector_packet_stage_snapshots(&packetization, &shape));
   }
   if (!can_interleave) {
     if (!loom_vector_packet_private_staging_allowed(policy)) {
@@ -1898,17 +1880,18 @@ iree_status_t loom_vector_packet_legalize_reduce(
     *out_result = LOOM_VECTOR_PACKET_REDUCE_RESULT_REWRITTEN;
     return iree_ok_status();
   }
+  if (requires_static_slices) {
+    return iree_ok_status();
+  }
   if (has_snapshots) {
     if (!loom_vector_packet_private_staging_allowed(policy)) {
       return iree_ok_status();
     }
-    IREE_RETURN_IF_ERROR(loom_vector_packet_canonicalize_snapshots(
-        &packetization, &shape, /*dynamic_windows_only=*/false));
-    *out_result = LOOM_VECTOR_PACKET_REDUCE_RESULT_REWRITTEN;
-    return iree_ok_status();
-  }
-  if (requires_static_slices) {
-    return iree_ok_status();
+    // This rewrite owns both the private snapshot and its consuming loop.
+    // Publishing oversized staging loads would let later legalization capture
+    // and stage them again without reducing the producer graph.
+    IREE_RETURN_IF_ERROR(
+        loom_vector_packet_stage_snapshots(&packetization, &shape));
   }
   const loom_combining_kind_t kind = loom_vector_reduce_kind(op);
   const uint8_t fastmath_flags = loom_vector_reduce_fastmath(op);

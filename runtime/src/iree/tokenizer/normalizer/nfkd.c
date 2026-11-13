@@ -427,21 +427,9 @@ static iree_status_t iree_tokenizer_normalizer_nfkd_state_process(
       break;
     }
 
-    // Decode the next codepoint.
-    // For contract verification: check that we have a complete UTF-8 sequence.
-    // The caller is responsible for ensuring input ends on codepoint boundaries
-    // (see normalizer.h), but we verify this in debug builds.
-    iree_host_size_t expected_byte_count;
-    if ((*in_ptr & 0x80) == 0) {
-      expected_byte_count = 1;
-    } else {
-      expected_byte_count = iree_unicode_utf8_sequence_length(*in_ptr);
-    }
+    // Decode the next codepoint. Malformed sequences map to one replacement
+    // character and consume one byte.
     iree_host_size_t available = (iree_host_size_t)(in_end - in_ptr);
-    IREE_ASSERT(available >= expected_byte_count,
-                "incomplete UTF-8 at end of normalizer input violates "
-                "interface contract");
-
     iree_string_view_t remaining_input = {
         (const char*)in_ptr,
         available,
@@ -456,10 +444,7 @@ static iree_status_t iree_tokenizer_normalizer_nfkd_state_process(
         codepoint, state->decomposed_buffer);
     state->decomposed_position = 0;
 
-    // Advance input pointer by actual bytes consumed, not theoretical length.
-    // For invalid UTF-8 (overlong sequences, invalid continuation bytes),
-    // the decoder consumes only 1 byte. Using decode_position ensures we
-    // don't skip valid bytes after an invalid sequence.
+    // Advance by the bytes consumed by the decoder.
     in_ptr += decode_position;
   }
 

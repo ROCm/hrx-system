@@ -78,27 +78,6 @@ amdf_status_t amdf_gpu_umd_create_endpoint_profile(
     }
   }
 
-  if (amdf_status_is_ok(status) && profile_available) {
-    const amdf_kmt_api_t* kmt = &platform_endpoint->instance->kmt;
-    profile.memory.flags =
-        (provider_properties.is_discrete
-             ? 0
-             : AMDF_MEMORY_SCOPE_FLAG_SYSTEM_BACKED) |
-        (kmt->query_video_memory_info ? AMDF_MEMORY_SCOPE_FLAG_AVAILABLE_BYTES
-                                      : 0);
-    if (provider_properties.is_discrete) {
-      D3DKMT_SEGMENTGROUPSIZEINFO sizes = {
-          .PhysicalAdapterIndex = platform_endpoint->physical_adapter_index,
-      };
-      status = amdf_kmt_query_adapter_info(kmt, platform_endpoint->adapter,
-                                           KMTQAITYPE_GETSEGMENTGROUPSIZE,
-                                           &sizes, sizeof(sizes));
-      if (amdf_status_is_ok(status)) {
-        profile.memory.capacity_byte_length = sizes.LocalMemory;
-      }
-    }
-  }
-
   amdf_status_t release_status = AMDF_STATUS_OK;
   if (adapter.native != NULL) {
     release_status = amdf_gpu_dxg_adapter_deinitialize(&adapter);

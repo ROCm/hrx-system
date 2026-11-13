@@ -45,7 +45,8 @@ typedef struct loom_wasm_host_module_t {
 
 // One complete caller-owned allocation root transferred around a call.
 typedef struct loom_wasm_host_memory_region_t {
-  // Address assigned to the first root byte in the nested module memory.
+  // Nonzero address of the first root byte in the nested module memory.
+  // Zero is reserved for a null buffer, including for empty storage roots.
   uint32_t address;
   // Mutable root storage in the caller's WebAssembly memory.
   uint8_t* data;
@@ -62,8 +63,9 @@ typedef struct loom_wasm_host_memory_region_t {
 // exported WebAssembly memory is retained automatically for region transport.
 iree_status_t loom_wasm_host_module_load(
     iree_const_byte_span_t module_data, iree_string_view_t function_export_name,
-    uint32_t parameter_count, loom_wasm_host_value_type_t* out_parameter_types,
-    uint32_t result_count, loom_wasm_host_value_type_t* out_result_types,
+    uint32_t parameter_count, uint32_t result_count,
+    loom_wasm_host_value_type_t* out_parameter_types,
+    loom_wasm_host_value_type_t* out_result_types,
     loom_wasm_host_module_t* out_module);
 
 // Releases the host-owned module instance and resets |module|.

@@ -8,21 +8,14 @@
 set -euo pipefail
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
-if [[ -n "${RUNFILES_DIR:-}" ]]; then
-  repo_root="${RUNFILES_DIR}/${TEST_WORKSPACE:-_main}"
-  tools_root="${repo_root}"
-else
-  repo_root="$(cd -- "${script_dir}/../../../../.." && pwd -P)"
-  "${repo_root}/build_tools/bin/iree-bazel-build" --config=asan \
-    --config=loom-importer-cxx \
-    //loom/src/loom/tools/loom-format \
-    //loom/src/loom/tools/loom-import-cxx \
-    //loom/src/loom/tools/loom-compile
-  tools_root="${repo_root}/bazel-bin"
-fi
-export LOOM_FORMAT="${tools_root}/loom/src/loom/tools/loom-format/loom-format"
-export LOOM_IMPORT_CXX="${tools_root}/loom/src/loom/tools/loom-import-cxx/loom-import-cxx"
-export LOOM_COMPILE="${tools_root}/loom/src/loom/tools/loom-compile/loom-compile"
+# shellcheck source=loom/docs/examples/example.shlib
+source "${LOOM_EXAMPLE_LIBRARY:-${script_dir}/../../example.shlib}"
+repo_root="${LOOM_EXAMPLE_REPO_ROOT}"
+loom_example_configure_inputs \
+  --config=loom-importer-cxx \
+  tool:loom-format \
+  tool:loom-import-cxx \
+  tool:loom-compile
 
 output_dir="${1:-${TEST_UNDECLARED_OUTPUTS_DIR:-${repo_root}/build/loom-docs/examples/targets/xdna-pipelines}}"
 mkdir -p -- "${output_dir}"

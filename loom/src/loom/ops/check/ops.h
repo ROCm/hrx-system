@@ -79,6 +79,12 @@ typedef enum loom_check_expect_approximate_nan_e {
   LOOM_CHECK_EXPECT_APPROXIMATE_NAN_COUNT_ = 3,
 } loom_check_expect_approximate_nan_t;
 
+// Optional output-flushing allowance. Absence retains the authored tolerances for all values; nonzero actual results always use those tolerances.
+typedef enum loom_check_expect_approximate_subnormal_e {
+  LOOM_CHECK_EXPECT_APPROXIMATE_SUBNORMAL_FLUSH = 1,
+  LOOM_CHECK_EXPECT_APPROXIMATE_SUBNORMAL_COUNT_ = 2,
+} loom_check_expect_approximate_subnormal_t;
+
 // LOOM_OP_CHECK_CASE: Named correctness harness.
 // check.case @empty {
 //   check.return
@@ -367,13 +373,20 @@ LOOM_DEFINE_OPERAND(loom_check_expect_approximate_expected, 1)
 LOOM_DEFINE_ATTR_F64(loom_check_expect_approximate_atol, 0)
 LOOM_DEFINE_ATTR_F64(loom_check_expect_approximate_rtol, 1)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_check_expect_approximate_nan, 2, loom_check_expect_approximate_nan_t)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_check_expect_approximate_subnormal, 3, loom_check_expect_approximate_subnormal_t)
+enum loom_check_expect_approximate_build_flag_bits_e {
+  LOOM_CHECK_EXPECT_APPROXIMATE_BUILD_FLAG_HAS_SUBNORMAL = 1u << 0,
+};
+typedef uint32_t loom_check_expect_approximate_build_flags_t;
 iree_status_t loom_check_expect_approximate_build(
     loom_builder_t* builder,
+    loom_check_expect_approximate_build_flags_t build_flags,
     loom_value_id_t actual,
     loom_value_id_t expected,
     double atol,
     double rtol,
     loom_check_expect_approximate_nan_t nan,
+    loom_optional uint8_t subnormal,
     loom_location_id_t location,
     loom_op_t** out_op);
 iree_status_t loom_check_expect_approximate_verify(

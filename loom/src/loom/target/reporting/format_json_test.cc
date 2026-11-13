@@ -89,7 +89,7 @@ TEST(CompileReportFormatTest, DiagnosticObjectsCanCrossStorageSegments) {
     iree_byte_sequence_release(sequence);
   }
   loom_target_compile_report_t report = {};
-  loom_target_compile_report_initialize(&report, iree_allocator_system());
+  loom_target_compile_report_initialize(iree_allocator_system(), &report);
   const loom_target_compile_report_format_options_t options = {
       .mode = LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS,
       .diagnostics = {.json_objects = diagnostics, .count = 2},
@@ -122,7 +122,7 @@ TEST(CompileReportFormatTest, FormatsJsonSummaryWithoutDetailRows) {
       },
   };
   loom_target_compile_report_t report = {};
-  loom_target_compile_report_initialize(&report, iree_allocator_system());
+  loom_target_compile_report_initialize(iree_allocator_system(), &report);
   report.artifact_kind = LOOM_TARGET_COMPILE_ARTIFACT_KIND_HAL_EXECUTABLE;
   report.backend_name = IREE_SVL("hal");
   loom_target_compile_report_record_artifact_size(&report, 256);
@@ -291,7 +291,7 @@ TEST(CompileReportFormatTest, FormatsJsonSummaryWithoutDetailRows) {
 
 TEST(CompileReportFormatTest, FormatsSourceLowTransformRowsJson) {
   loom_target_compile_report_t report = {};
-  loom_target_compile_report_initialize(&report, iree_allocator_system());
+  loom_target_compile_report_initialize(iree_allocator_system(), &report);
   loom_target_compile_report_source_low_transform_row_t row = {
       .function_name = IREE_SVL("kernel"),
       .source_op_name = IREE_SVL("scf.for"),
@@ -375,7 +375,7 @@ TEST(CompileReportFormatTest, FormatsSourceLowTransformRowsJson) {
 
 TEST(CompileReportFormatTest, FormatsAndMergesSourceBoundaryProjectionRows) {
   loom_target_compile_report_t entry = {};
-  loom_target_compile_report_initialize(&entry, iree_allocator_system());
+  loom_target_compile_report_initialize(iree_allocator_system(), &entry);
   loom_target_compile_report_source_boundary_projection_row_t selected = {
       .function_name = IREE_SVL("gdn"),
       .source_op_name = IREE_SVL("scf.for"),
@@ -431,7 +431,7 @@ TEST(CompileReportFormatTest, FormatsAndMergesSourceBoundaryProjectionRows) {
           &entry, &rejected));
 
   loom_target_compile_report_t report = {};
-  loom_target_compile_report_initialize(&report, iree_allocator_system());
+  loom_target_compile_report_initialize(iree_allocator_system(), &report);
   IREE_ASSERT_OK(
       loom_target_compile_report_record_entry_report(&report, &entry));
   loom_target_compile_report_deinitialize(&entry);
@@ -560,11 +560,11 @@ TEST(CompileReportFormatTest, FormatsAndMergesSourceBoundaryProjectionRows) {
 
 TEST(CompileReportFormatTest, FormatsAndAggregatesLowPlanningStatistics) {
   loom_target_compile_report_t report;
-  loom_target_compile_report_initialize(&report, iree_allocator_system());
+  loom_target_compile_report_initialize(iree_allocator_system(), &report);
 
   for (uint64_t i = 1; i <= 2; ++i) {
     loom_target_compile_report_t entry;
-    loom_target_compile_report_initialize(&entry, iree_allocator_system());
+    loom_target_compile_report_initialize(iree_allocator_system(), &entry);
     entry.detail_flags |= LOOM_TARGET_COMPILE_REPORT_DETAIL_LOW_PLANNING;
     loom_low_planning_statistics_t* planning = &entry.low_planning;
     planning->flags = LOOM_LOW_PLANNING_STATISTICS_FLAG_SYSTEM_ALLOCATIONS;
@@ -723,7 +723,7 @@ TEST(CompileReportFormatTest, OwnsAndFormatsPipelinePlans) {
   pipeline_plan.channel_row_count = 1;
 
   loom_target_compile_report_t report = {};
-  loom_target_compile_report_initialize(&report, iree_allocator_system());
+  loom_target_compile_report_initialize(iree_allocator_system(), &report);
   report.requested_detail_flags =
       LOOM_TARGET_COMPILE_REPORT_DETAIL_PIPELINE_PLAN_ROWS;
   IREE_ASSERT_OK(
@@ -812,7 +812,7 @@ TEST(CompileReportFormatTest, PhysicalInventoryOmitsUnavailableChannelFacts) {
   plan.memory_row_count = 1;
 
   loom_target_compile_report_t report;
-  loom_target_compile_report_initialize(&report, iree_allocator_system());
+  loom_target_compile_report_initialize(iree_allocator_system(), &report);
   report.requested_detail_flags =
       LOOM_TARGET_COMPILE_REPORT_DETAIL_PIPELINE_PLAN_ROWS;
   IREE_ASSERT_OK(
@@ -859,7 +859,7 @@ TEST(CompileReportFormatTest, PhysicalInventoryOmitsUnavailableChannelFacts) {
 
 TEST(CompileReportFormatTest, FormatsJsonEscapedStrings) {
   loom_target_compile_report_t report = {};
-  loom_target_compile_report_initialize(&report, iree_allocator_system());
+  loom_target_compile_report_initialize(iree_allocator_system(), &report);
   report.backend_name = IREE_SVL("quote\"line\n");
 
   iree_string_builder_t builder;
@@ -890,7 +890,7 @@ TEST(CompileReportFormatTest, FormatsJsonEscapedStrings) {
 
 TEST(CompileReportFormatTest, JsonModeNoneWritesNothing) {
   loom_target_compile_report_t report = {};
-  loom_target_compile_report_initialize(&report, iree_allocator_system());
+  loom_target_compile_report_initialize(iree_allocator_system(), &report);
 
   iree_string_builder_t builder;
   iree_string_builder_initialize(iree_allocator_system(), &builder);

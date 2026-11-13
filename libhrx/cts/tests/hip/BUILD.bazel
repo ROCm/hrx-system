@@ -17,6 +17,9 @@ load(
     "AMD_GPU_CTS_RESOURCE_GROUP",
     "AMD_GPU_CTS_TAGS",
 )
+load("//loom/build_tools/amdgpu:target_config.bzl", "LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITIES")
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
+load("//runtime/src/iree/hal/driver/amd/gpu/cts:testdata.bzl", "iree_hal_amd_gpu_cts_testdata")
 
 package(
     default_visibility = ["//visibility:private"],
@@ -27,6 +30,19 @@ package(
 _AMDGPU_CTS_COMPATIBILITY = select(AMDGPU_CTS_COMPATIBILITY_CONDITIONS)
 
 _HIP_GPU_CTS_COMPATIBILITY = ["@platforms//os:linux"] + _AMDGPU_CTS_COMPATIBILITY
+
+_HIP_LOOM_CTS_COMPATIBILITY = _HIP_GPU_CTS_COMPATIBILITY + loom_config_compatible_with([
+    "//loom/config/emit:amdgpu_elf",
+]) + select(dict([
+    (
+        "//loom/config/arch/amdgpu:" + capability,
+        [],
+    )
+    for capability in LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITIES
+] + [(
+    "//conditions:default",
+    ["@platforms//:incompatible"],
+)]))
 
 _HIP_RUNTIME = "//libhrx/src/binding/hip:amdhip64"
 
@@ -42,14 +58,36 @@ _HIP_TEST_DEPS = [
 ]
 
 hrx_cc_benchmark(
-    name = "hip_transfer_benchmark",
-    srcs = ["transfer_benchmark.cpp"],
+    name = "hip_graph_template_benchmark",
+    srcs = ["graph_template_benchmark.cpp"],
     data = [_HIP_RUNTIME],
     env = _HIP_RUNTIME_ENV,
     resource_group = AMD_GPU_CTS_RESOURCE_GROUP,
     tags = AMD_GPU_CTS_TAGS,
     target_compatible_with = _HIP_GPU_CTS_COMPATIBILITY,
     deps = [
+        "//libhrx/src/binding/hip:hip_dso_test_util",
+        "//libhrx/src/binding/hip:launch_params",
+        "//runtime/src/iree/base/tooling:flags",
+        "//runtime/src/iree/testing:benchmark_main",
+    ],
+)
+
+hrx_cc_benchmark(
+    name = "hip_transfer_benchmark",
+    srcs = [
+        "transfer_benchmark.cpp",
+        "//libhrx/cts/core:amdgpu_executable_test_data.hpp",
+        "//libhrx/cts/core:amdgpu_test_data.hpp",
+    ],
+    data = [_HIP_RUNTIME],
+    env = _HIP_RUNTIME_ENV,
+    resource_group = AMD_GPU_CTS_RESOURCE_GROUP,
+    tags = AMD_GPU_CTS_TAGS,
+    target_compatible_with = _HIP_GPU_CTS_COMPATIBILITY,
+    deps = [
+        "//build_tools/amdgpu:target_map_h",
+        "//libhrx/cts/tests/executable:amdgpu_executable_test_kernels",
         "//libhrx/src/binding/hip:hip_dso_test_util",
         "//libhrx/src/binding/hip:launch_params",
         "//runtime/src/iree/base/tooling:flags",
@@ -91,7 +129,7 @@ iree_amdgpu_binary_variants_embed_data(
     tags = ["manual"],
     target = "amdgcn-amd-amdhsa",
     target_compatible_with = _HIP_GPU_CTS_COMPATIBILITY,
-    target_selectors_flag = "//runtime/src/iree/hal/drivers/amd/gpu:targets",
+    target_selectors_flag = "//runtime/src/iree/hal/driver/amd/gpu:targets",
 )
 
 iree_amdgpu_binary_variants_embed_data(
@@ -106,7 +144,7 @@ iree_amdgpu_binary_variants_embed_data(
     tags = ["manual"],
     target = "amdgcn-amd-amdhsa",
     target_compatible_with = _HIP_GPU_CTS_COMPATIBILITY,
-    target_selectors_flag = "//runtime/src/iree/hal/drivers/amd/gpu:targets",
+    target_selectors_flag = "//runtime/src/iree/hal/driver/amd/gpu:targets",
 )
 
 hrx_cc_test(
@@ -157,6 +195,51 @@ hrx_cc_test(
     tags = AMD_GPU_CTS_TAGS,
     target_compatible_with = _HIP_GPU_CTS_COMPATIBILITY,
     deps = ["//libhrx/src/binding/hip:hip_dso_test_util"] + _HIP_TEST_DEPS,
+)
+
+iree_hal_amd_gpu_cts_testdata(
+    name = "event_queue_testdata",
+    srcs = ["event_queue.loom"],
+    backend_names = ["hrx_hip_event"],
+    target_compatible_with = _HIP_LOOM_CTS_COMPATIBILITY,
+)
+
+hrx_cc_test(
+    name = "hip_event_queue_test",
+    srcs = ["event_queue_test.cpp"],
+    data = [_HIP_RUNTIME],
+    env = _HIP_RUNTIME_ENV,
+    resource_group = AMD_GPU_CTS_RESOURCE_GROUP,
+    sanitizer_suppressions = hsa_suppressions,
+    tags = AMD_GPU_CTS_TAGS,
+    target_compatible_with = _HIP_LOOM_CTS_COMPATIBILITY,
+    deps = [
+        ":event_queue_testdata",
+        "//libhrx/src/binding/hip:hip_dso_test_util",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal/cts/util:registry",
+        "//runtime/src/iree/hal/driver/amd/gpu/cts:testdata",
+        "//runtime/src/iree/hal/driver/amd/gpu/target:identity",
+    ] + _HIP_TEST_DEPS,
+)
+
+hrx_cc_test(
+    name = "hip_visibility_test",
+    srcs = ["visibility_test.cpp"],
+    data = [_HIP_RUNTIME],
+    env = _HIP_RUNTIME_ENV,
+    resource_group = AMD_GPU_CTS_RESOURCE_GROUP,
+    sanitizer_suppressions = hsa_suppressions,
+    tags = AMD_GPU_CTS_TAGS,
+    target_compatible_with = _HIP_LOOM_CTS_COMPATIBILITY,
+    deps = [
+        ":event_queue_testdata",
+        "//libhrx/src/binding/hip:hip_dso_test_util",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal/cts/util:registry",
+        "//runtime/src/iree/hal/driver/amd/gpu/cts:testdata",
+        "//runtime/src/iree/hal/driver/amd/gpu/target:identity",
+    ] + _HIP_TEST_DEPS,
 )
 
 hrx_cc_test(
@@ -268,7 +351,29 @@ hrx_cc_test(
         "//build_tools/amdgpu:target_map_h",
         "//libhrx/cts/tests/executable:amdgpu_executable_test_kernels",
         "//libhrx/src/binding/hip:hip_dso_test_util",
-        "//runtime/src/iree/hal/drivers/amd/gpu/image:cooperative_images",
+        "//runtime/src/iree/hal/driver/amd/gpu/image:cooperative_images",
+    ] + _HIP_TEST_DEPS,
+)
+
+hrx_cc_test(
+    name = "hip_graph_memory_execution_test",
+    srcs = [
+        "graph_memory_execution_test.cpp",
+        "//libhrx/cts/core:amdgpu_executable_test_data.hpp",
+        "//libhrx/cts/core:amdgpu_test_data.hpp",
+    ],
+    data = [_HIP_RUNTIME],
+    env = _HIP_RUNTIME_ENV | {"HRX_GPU_DRIVER": "amdgpu"},
+    resource_group = AMD_GPU_CTS_RESOURCE_GROUP,
+    tags = AMD_GPU_CTS_TAGS,
+    target_compatible_with = ["@platforms//os:linux"] + select({
+        "//runtime/config/hal:driver_amd_gpu": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        "//build_tools/amdgpu:target_map_h",
+        "//libhrx/cts/tests/executable:amdgpu_executable_test_kernels",
+        "//libhrx/src/binding/hip:hip_dso_test_util",
     ] + _HIP_TEST_DEPS,
 )
 

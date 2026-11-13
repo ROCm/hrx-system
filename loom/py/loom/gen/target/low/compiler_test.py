@@ -33,21 +33,19 @@ from loom.target.low_descriptors import (
     IssueUse,
     IssueUseKind,
     LatencyKind,
-    MemorySpace,
     ModelQuality,
     NativeAsmValue,
     NativeAsmValueKind,
-    OperandForm,
-    OperandFormMatch,
-    OperandFormMatchKind,
     PhysicalRegisterView,
     PressureDelta,
+    RegClass,
     RegClassAlt,
     RegClassAltFlag,
     Resource,
     ResourceKind,
     ScheduleClass,
     ScheduleClassFlag,
+    SpillSlotSpace,
     descriptor_stable_id,
 )
 from loom.target.test.descriptors import (
@@ -88,6 +86,24 @@ def test_descriptor_lookup_rejects_unrepresentable_storage_count() -> None:
         ),
     ):
         compiler.compile_descriptor_set(TEST_LOW_CORE_DESCRIPTOR_SET)
+
+
+@pytest.mark.parametrize("count", [255, 256])
+def test_descriptor_operand_counts_fit_compact_rows(count: int) -> None:
+    result_operand = TEST_LOW_ADD_I32_DESCRIPTOR.operands[0]
+    descriptor = replace(
+        TEST_LOW_ADD_I32_DESCRIPTOR,
+        operands=(result_operand,) * count,
+    )
+    if count == 256:
+        with pytest.raises(
+            ValueError,
+            match=re.escape("descriptor 'test.add.i32' operand count does not fit u8"),
+        ):
+            validation.validate_descriptor_operands(descriptor)
+    else:
+        operand_layout = validation.validate_descriptor_operands(descriptor)
+        assert operand_layout.result_count == count
 
 
 @pytest.mark.parametrize(
@@ -873,88 +889,16 @@ def test_physical_view_lookup_preserves_exact_class_and_unit_relations() -> None
             assert actual == expected.get((physical_id, class_id), 0xFFFFFFFF)
 
 
-@pytest.mark.parametrize("change", ["none", "value", "kind", "source", "map_order"])
-def test_operand_form_interns_exact_predicates_and_maps(change: str) -> None:
-    base = TEST_LOW_ADD_I32_DESCRIPTOR
-    operands = (*base.operands, replace(base.operands[-1], field_name="extra"))
-    replacements = []
-    sources = []
-    for ordinal in range(2):
-        changed = ordinal == 1
-        matched_index = 2 if changed and change == "source" else 3
-        retained = [index for index in range(1, len(operands)) if index != matched_index]
-        if changed and change == "map_order":
-            retained.reverse()
-        replacement = replace(
-            base,
-            key=f"test.replacement.{ordinal}",
-            mnemonic=f"test.replacement.{ordinal}",
-            operands=(operands[0], *(operands[index] for index in retained)),
-            asm_forms=(),
-        )
-        match = OperandFormMatch(
-            source_operand=operands[matched_index].field_name,
-            match_kind=OperandFormMatchKind.ALL_EQUAL_EXACT_I64 if changed and change == "kind" else OperandFormMatchKind.ALL_EQUAL_I64,
-            match_i64=17 if changed and change == "value" else 0,
-        )
-        sources.append(
-            replace(
-                base,
-                key=f"test.source.{ordinal}",
-                mnemonic=f"test.source.{ordinal}",
-                operands=operands,
-                asm_forms=(),
-                operand_forms=(OperandForm(replacement_descriptor=replacement.key, matches=(match,)),),
-            )
-        )
-        replacements.append(replacement)
-    compiled = compiler.compile_descriptor_set(replace(TEST_LOW_CORE_DESCRIPTOR_SET, descriptors=(*sources, *replacements)))
-    first, second = compiled.operand_forms
-    same_matches = change in ("none", "map_order")
-    same_map = change not in ("source", "map_order")
-    assert (first.match_start == second.match_start) == same_matches
-    assert (first.operand_map_start == second.operand_map_start) == same_map
-    assert len(compiled.operand_form_matches) == (1 if same_matches else 2)
-    assert len(compiled.operand_form_operand_indices) == (2 if same_map else 4)
-    for source, replacement, form in zip(sources, replacements, compiled.operand_forms, strict=True):
-        assert compiled.descriptors[form.replacement_descriptor_ordinal].key == replacement.key
-        assert form.match_count == 1
-        match = compiled.operand_form_matches[form.match_start]
-        authored_match = source.operand_forms[0].matches[0]
-        source_index = next(index for index, operand in enumerate(source.operands) if operand.field_name == authored_match.source_operand)
-        assert match.source_operand_index == source_index
-        assert match.source_packet_operand_index == source_index - 1
-        assert match.match_kind == authored_match.match_kind
-        assert match.match_i64 == authored_match.match_i64
-        expected_map = [next(index for index, operand in enumerate(source.operands[1:]) if operand.field_name == retained.field_name) for retained in replacement.operands[1:]]
-        assert compiled.operand_form_operand_indices[form.operand_map_start : form.operand_map_start + form.operand_map_count] == expected_map
-
-
-@pytest.mark.parametrize("change", ["none", "width", "space", "order"])
-def test_operand_form_preserves_effect_identity(change: str) -> None:
-    base = TEST_LOW_LOAD_V4I32_DESCRIPTOR
-    effects = (base.effects[0], replace(base.effects[0], memory_space=MemorySpace.WORKGROUP))
-    replacement_effects = effects
-    if change == "width":
-        replacement_effects = (replace(effects[0], width_bits=256), effects[1])
-    elif change == "space":
-        replacement_effects = (replace(effects[0], memory_space=MemorySpace.GLOBAL), effects[1])
-    elif change == "order":
-        replacement_effects = tuple(reversed(effects))
-    replacement = replace(base, key="test.load.variant", mnemonic="test.load.variant", operands=base.operands[:1], asm_forms=(), effects=replacement_effects)
-    source = replace(
-        base,
-        effects=effects,
-        operand_forms=(
-            OperandForm(
-                replacement_descriptor=replacement.key,
-                matches=(OperandFormMatch(source_operand="address", match_kind=OperandFormMatchKind.ALL_EQUAL_I64, match_i64=0),),
-            ),
-        ),
-    )
-    descriptor_set = replace(TEST_LOW_CORE_DESCRIPTOR_SET, descriptors=(source, replacement))
-    if change == "none":
-        compiler.compile_descriptor_set(descriptor_set)
-    else:
-        with pytest.raises(ValueError, match="must preserve semantic effect ordinals"):
-            compiler.compile_descriptor_set(descriptor_set)
+@pytest.mark.parametrize(
+    "options",
+    [
+        {"spill_unit_bits": 0},
+        {"spill_unit_bits": 65536},
+        {"spill_min_alignment": 3},
+        {"spill_max_alignment": 65536},
+        {"spill_min_alignment": 64, "spill_max_alignment": 16},
+    ],
+)
+def test_register_spill_layout_rejects_invalid_machine_facts(options) -> None:
+    with pytest.raises(ValueError, match="spill"):
+        RegClass("test.words", 32, SpillSlotSpace.STACK, **options)

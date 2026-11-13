@@ -16,6 +16,8 @@
 extern "C" {
 #endif
 
+typedef struct loom_low_lower_source_call_plan_t
+    loom_low_lower_source_call_plan_t;
 typedef struct loom_low_lower_source_invoke_plan_t
     loom_low_lower_source_invoke_plan_t;
 typedef struct loom_low_lower_projected_call_plan_t
@@ -24,17 +26,30 @@ typedef struct loom_low_lower_projected_call_plan_t
 // Returns true when |source_op| is a direct semantic CallLike operation owned
 // by common source-to-Low lowering. Callable operands and results must occupy
 // the complete flat operation boundary.
-bool loom_low_lower_source_call_is_structural(const loom_module_t* module,
-                                              const loom_op_t* source_op);
+bool loom_low_lower_source_call_is_direct(const loom_module_t* module,
+                                          const loom_op_t* source_op);
 
 // Returns true when a direct semantic call targets a retained physical source
 // ABI projection and therefore requires an explicit selected plan.
 bool loom_low_lower_source_call_requires_projection(
     const loom_low_lower_context_t* context, const loom_op_t* source_op);
 
-// Lowers one direct semantic CallLike operation to low.func.call.
-iree_status_t loom_low_lower_source_call(loom_low_lower_context_t* context,
-                                         const loom_op_t* source_op);
+// Retains the direct callee interface and fixes its result carriers.
+iree_status_t loom_low_lower_source_call_plan(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_low_lower_source_call_plan_t** out_plan);
+
+// Prepares receiving-carrier conversions after source selection has finalized
+// operand bindings. Only nonempty recipes consume additional retained storage.
+iree_status_t loom_low_lower_source_call_finalize(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_low_lower_source_call_plan_t* plan);
+
+// Emits a direct semantic call and its prepared operand conversions without
+// consulting source analysis or changing canonical source value bindings.
+iree_status_t loom_low_lower_source_call(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_low_lower_source_call_plan_t* plan);
 
 // Retains the callee's physical source signature plan, proves logical
 // preconditions, and fixes logical result carriers before Low construction.
@@ -53,19 +68,21 @@ iree_status_t loom_low_lower_projected_call(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_low_lower_projected_call_plan_t* plan);
 
-// Resolves a low.invoke helper contract, checks result carriers, and proves its
-// preconditions. Retained predicates preserve each formal's operand position;
-// emission does not borrow the helper's signature or source body. Selection has
-// already planned the helper's exact Low contract; publication is not required.
+// Resolves a low.invoke helper contract, plans result-carrier conversions, and
+// proves its preconditions. The helper's native return signature is distinct
+// from source result storage, which must preserve every observation. Retained
+// predicates preserve each formal's operand position; emission does not borrow
+// the helper's signature or source body. Selection has already planned the
+// helper's exact Low contract; publication is not required.
 iree_status_t loom_low_lower_source_invoke_plan(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
-    const loom_low_lower_source_invoke_plan_t** out_plan);
+    loom_low_lower_source_invoke_plan_t** out_plan);
 
-// Checks actual producer carriers against the retained helper arguments before
-// Low construction. The shared definition-ordered planner owns this boundary.
+// Prepares lossless producer-to-receiver conversions before Low construction.
+// Incompatible authored helper carriers are rejected at this boundary.
 iree_status_t loom_low_lower_source_invoke_finalize(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
-    const loom_low_lower_source_invoke_plan_t* plan);
+    loom_low_lower_source_invoke_plan_t* plan);
 
 // Normalizes low.invoke using the helper contract and validated carriers.
 iree_status_t loom_low_lower_source_invoke(

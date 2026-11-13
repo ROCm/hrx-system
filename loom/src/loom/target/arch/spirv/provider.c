@@ -6,6 +6,7 @@
 
 #include "loom/target/arch/spirv/provider.h"
 
+#include "loom/target/arch/spirv/call_boundary.h"
 #include "loom/target/arch/spirv/descriptors/low_registry.h"
 #include "loom/target/arch/spirv/legalization.h"
 #include "loom/target/arch/spirv/low_verify.h"
@@ -14,10 +15,16 @@
 #include "loom/target/arch/spirv/ops/registry.h"
 #include "loom/target/arch/spirv/ops/target.h"
 #include "loom/target/arch/spirv/profile.h"
+#include "loom/transforms/pipeline/workgroup.h"
 
 static const loom_low_verify_provider_t* const kLoomSpirvLowVerifyProviders[] =
     {
         &loom_spirv_low_verify_provider,
+};
+
+static const loom_target_low_legality_provider_t* const
+    kLoomSpirvSourceLegalityProviders[] = {
+        &loom_spirv_call_boundary_legality_provider,
 };
 
 static const loom_target_legalizer_provider_t* const
@@ -33,10 +40,35 @@ static iree_status_t loom_spirv_provider_select_profile(
   return iree_ok_status();
 }
 
+static iree_status_t loom_spirv_provider_contribute_pipeline(
+    const loom_target_pipeline_contribution_t* contribution) {
+  if (contribution->phase ==
+      LOOM_TARGET_PIPELINE_PHASE_SOURCE_EXECUTION_LOWERING) {
+    return loom_pipeline_workgroup_build_pipeline(contribution->builder,
+                                                  IREE_SV("spirv"));
+  }
+  return iree_ok_status();
+}
+
+static loom_target_call_policy_t loom_spirv_select_call_policy(
+    const loom_resolved_target_t* resolved_target, const loom_module_t* module,
+    loom_call_like_kind_t kind, loom_call_like_t call,
+    loom_func_like_t callee) {
+  (void)resolved_target;
+  (void)call;
+  if (kind != LOOM_CALL_LIKE_KIND_SEMANTIC) {
+    return LOOM_TARGET_CALL_POLICY_NO_RESOURCES |
+           LOOM_TARGET_CALL_POLICY_NO_STORAGE;
+  }
+  return loom_spirv_source_callable_requires_inline(module, callee)
+             ? LOOM_TARGET_CALL_POLICY_REQUIRE_INLINE
+             : LOOM_TARGET_CALL_POLICY_DIRECT;
+}
+
 const loom_target_provider_t loom_spirv_target_provider = {
     .profile_type = &loom_spirv_target_profile_type,
     .materialize_definition = loom_spirv_target_materialize_definition,
-    .select_call_policy = loom_target_select_call_policy_require_inline,
+    .select_call_policy = loom_spirv_select_call_policy,
     .register_context = loom_spirv_ops_register_dialect,
     .initialize_low_descriptor_registry =
         loom_spirv_low_descriptor_registry_initialize,
@@ -54,7 +86,13 @@ const loom_target_provider_t loom_spirv_target_provider = {
             .count = IREE_ARRAYSIZE(kLoomSpirvLowVerifyProviders),
             .values = kLoomSpirvLowVerifyProviders,
         },
+    .low_legality_provider_list =
+        {
+            .count = IREE_ARRAYSIZE(kLoomSpirvSourceLegalityProviders),
+            .values = kLoomSpirvSourceLegalityProviders,
+        },
     .target_fact_type = &loom_spirv_target_fact_type,
+    .contribute_pipeline = loom_spirv_provider_contribute_pipeline,
     .select_profile = loom_spirv_provider_select_profile,
 };
 

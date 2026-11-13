@@ -11,6 +11,8 @@ import datetime as dt
 import hashlib
 import io
 import json
+import os
+import re
 import tarfile
 import tempfile
 import unittest
@@ -97,6 +99,92 @@ class FakeS3:
 
 
 class CiCoreCommonTest(unittest.TestCase):
+    def test_llvm_host_artifacts_exclude_llvm_development_and_rocm_runtime(self):
+        artifacts = common.wanted_artifacts("llvm")
+
+        self.assertEqual(
+            artifacts,
+            [
+                "sysdeps_lib_generic",
+                "sysdeps_run_generic",
+                "sysdeps_dev_generic",
+                "base_lib_generic",
+                "base_run_generic",
+                "base_dev_generic",
+                "amd-llvm_lib_generic",
+                "amd-llvm_run_generic",
+            ],
+        )
+
+    def test_llvm_development_artifacts_exclude_rocm_runtime(self):
+        artifacts = common.wanted_artifacts("llvm-with-dev")
+
+        self.assertEqual(
+            artifacts,
+            [
+                "sysdeps_lib_generic",
+                "sysdeps_run_generic",
+                "sysdeps_dev_generic",
+                "base_lib_generic",
+                "base_run_generic",
+                "base_dev_generic",
+                "amd-llvm_lib_generic",
+                "amd-llvm_run_generic",
+                "amd-llvm_dev_generic",
+            ],
+        )
+
+    def test_source_ctest_selection_requires_every_hardware_resource(self):
+        gpu_labels = [
+            "runtime-resource=amd-gpu",
+            "iree-run-requirement=libamdf.resource.amd_gpu",
+        ]
+        npu_labels = [
+            "runtime-resource=amd-xdna",
+            "iree-run-requirement=libamdf.resource.xdna",
+        ]
+        cases = (
+            (ci_core_linux, False),
+            (ci_core_linux, True),
+            (ci_core_windows, False),
+        )
+        for platform, gpu in cases:
+            with self.subTest(platform=platform.PLATFORM, gpu=gpu):
+                parser = argparse.ArgumentParser()
+                with mock.patch.dict(os.environ, {}, clear=True):
+                    platform.add_shared_args(parser)
+                    args = parser.parse_args(["--gpu"] if gpu else [])
+                args.ctest_label_regex = "runtime-resource=amd-gpu" if gpu else ""
+                args.ctest_label_exclude_regex = "manual"
+                arguments = common.ctest_arguments(args)
+                excluded = arguments[arguments.index("-LE") + 1]
+                included = arguments[arguments.index("-L") + 1] if gpu else ""
+                for labels, expected in (
+                    ([], not gpu),
+                    (gpu_labels, gpu),
+                    (
+                        [
+                            "runtime-resource=amd-gpu",
+                            "iree-run-requirement=runtime.resource.amd_gpu",
+                        ],
+                        gpu,
+                    ),
+                    (npu_labels, False),
+                    (gpu_labels + npu_labels, False),
+                    (
+                        gpu_labels
+                        + ["iree-run-requirement=libamdf.resource.amd_gpu_peers"],
+                        False,
+                    ),
+                    (gpu_labels + ["manual"], False),
+                ):
+                    with self.subTest(labels=labels):
+                        selected = (
+                            not included
+                            or any(re.search(included, label) for label in labels)
+                        ) and not any(re.search(excluded, label) for label in labels)
+                        self.assertEqual(selected, expected)
+
     def fetch_args(self, root: Path) -> argparse.Namespace:
         return argparse.Namespace(
             run_id="200",

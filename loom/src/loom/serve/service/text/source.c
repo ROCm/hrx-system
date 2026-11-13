@@ -9,9 +9,9 @@
 #include <string.h>
 
 #include "iree/tokenizer/vocab/vocab.h"
-#include "loom/serve/runtime/program/input.h"
-#include "loom/serve/runtime/program/json.h"
-#include "loom/serve/runtime/program/program.h"
+#include "loom/runtime/program/input.h"
+#include "loom/runtime/program/json.h"
+#include "loom/runtime/program/program.h"
 #include "loom/serve/service/text/state.h"
 #include "loomc/iree.h"
 
@@ -22,7 +22,7 @@ iree_status_t loom_serve_text_source_resolve_tokenizer(
       source->terminal_marker, 0,
       iree_vm_buffer_length(source->terminal_marker), &bytes));
   source->eos_token = iree_tokenizer_vocab_lookup(
-      iree_tokenizer_vocab(loom_serve_tokenizer_value(source->tokenizer)),
+      iree_tokenizer_vocab(loom_runtime_tokenizer_value(source->tokenizer)),
       iree_make_string_view((const char*)bytes.data, bytes.data_length));
   if (source->eos_token < 0) {
     return iree_make_status(IREE_STATUS_NOT_FOUND,
@@ -88,17 +88,17 @@ static iree_status_t loom_serve_text_prepare(
   iree_vm_variant_t results[4 + LOOM_SERVE_TEXT_STORAGE_RESULT_COUNT] = {0};
   iree_vm_module_t* modules[2] = {0};
   if (iree_status_is_ok(status)) {
-    status = loom_serve_input_module_create(source->environment, NULL,
-                                            host_allocator, &modules[0]);
+    status = loom_runtime_input_module_create(source->environment, NULL,
+                                              host_allocator, &modules[0]);
   }
   if (iree_status_is_ok(status)) {
-    status = loom_serve_json_module_create(source->environment, host_allocator,
-                                           &modules[1]);
+    status = loom_runtime_json_module_create(source->environment,
+                                             host_allocator, &modules[1]);
   }
   if (iree_status_is_ok(status)) {
-    status = loom_serve_preparation_evaluate(
+    status = loom_runtime_preparation_evaluate(
         source->environment, module, &options->sources, IREE_SV("prepare"),
-        LOOM_SERVE_PREPARATION_FLAG_PARAMETERS,
+        LOOM_RUNTIME_PREPARATION_FLAG_PARAMETERS,
         iree_vm_variant_span_from_array(arguments),
         iree_vm_variant_span_from_array(results),
         iree_vm_module_span_from_array(modules), host_allocator,
@@ -116,7 +116,7 @@ static iree_status_t loom_serve_text_prepare(
       (prefill_capacity < 1 || prefill_capacity > INT32_MAX ||
        shared_stage_count < 1 ||
        (iree_host_size_t)shared_stage_count >
-           loom_serve_preparation_stage_count(source->preparation))) {
+           loom_runtime_preparation_stage_count(source->preparation))) {
     status =
         iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                          "source bootstrap exceeds token runner capacities");
@@ -151,8 +151,7 @@ static iree_status_t loom_serve_text_prepare(
         options->checkpoint_capacity
             ? 2 * options->row_count + options->checkpoint_capacity
             : options->row_count;
-    const uint64_t carry_bytes = iree_unaligned_load_le_u64(
-        storage->bytes[LOOM_SERVE_TEXT_STORAGE_ALLOCATIONS].data + 6 * 24);
+    const uint64_t carry_bytes = storage->allocations[6].length;
     if (storage->recurrent.capacity < slots ||
         (storage->carry_stride &&
          options->row_count + options->checkpoint_capacity >
@@ -186,7 +185,7 @@ typedef struct loom_serve_text_source_sizing_t {
 
 static void loom_serve_text_source_reset_candidate(
     loom_serve_text_source_t* source, loom_serve_text_storage_t* storage) {
-  loom_serve_preparation_free(source->preparation);
+  loom_runtime_preparation_free(source->preparation);
   source->preparation = NULL;
   iree_vm_buffer_release(source->control_state);
   source->control_state = NULL;
@@ -203,10 +202,8 @@ static iree_status_t loom_serve_text_storage_declared_bytes(
   *out_bytes = 0;
   for (iree_host_size_t i = 0; i < LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT;
        ++i) {
-    const uint64_t length = iree_unaligned_load_le_u64(
-        storage->bytes[LOOM_SERVE_TEXT_STORAGE_ALLOCATIONS].data + i * 24);
-    if (length > INT64_MAX ||
-        !iree_checked_add_u64(*out_bytes, length, out_bytes)) {
+    if (!iree_checked_add_u64(*out_bytes, storage->allocations[i].length,
+                              out_bytes)) {
       return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                               "source storage size exceeds byte accounting");
     }
@@ -286,7 +283,7 @@ static iree_status_t loom_serve_text_source_evaluate_cache(
 }
 
 iree_status_t loom_serve_text_source_initialize(
-    loom_serve_jit_t* jit, const loom_serve_text_options_t* options,
+    loom_runtime_jit_t* jit, const loom_serve_text_options_t* options,
     iree_allocator_t host_allocator, loom_serve_text_source_t* out_source,
     loom_serve_text_storage_t* out_storage) {
   memset(out_source, 0, sizeof(*out_source));
@@ -306,7 +303,7 @@ iree_status_t loom_serve_text_source_initialize(
       .source = out_source,
       .storage = out_storage,
       .pool_capacity = options->pool_capacity};
-  IREE_RETURN_IF_ERROR(loom_serve_program_compile_service_cached(
+  IREE_RETURN_IF_ERROR(loom_runtime_program_compile_service_cached(
       jit, out_source->environment, &options->sources, options->sources.prepare,
       1, &prepare, (iree_string_view_list_t){0}, host_allocator,
       &sizing.module));
@@ -318,20 +315,19 @@ iree_status_t loom_serve_text_source_initialize(
   out_source->pool_capacity = sizing.pool_capacity;
   const loom_model_file_list_t* paths = NULL;
   const uint32_t source_count =
-      loom_serve_preparation_local_sources(out_source->preparation, &paths);
-  IREE_RETURN_IF_ERROR(loom_serve_parameter_sources_create(
+      loom_runtime_preparation_local_sources(out_source->preparation, &paths);
+  IREE_RETURN_IF_ERROR(loom_runtime_parameter_sources_create(
       NULL, &options->sources, source_count, paths, host_allocator,
       &out_source->parameter_sources));
   const iree_vm_ref_type_table_t* table = NULL;
   IREE_RETURN_IF_ERROR(
-      iree_hal_module_register_types(out_source->environment, &table));
-  IREE_RETURN_IF_ERROR(
-      iree_hal_module_types_resolve(table, &out_source->types));
+      iree_hal_vm_register_types(out_source->environment, &table));
+  IREE_RETURN_IF_ERROR(iree_hal_vm_types_resolve(table, &out_source->types));
   return iree_ok_status();
 }
 
 iree_status_t loom_serve_text_source_compile_control(
-    loom_serve_jit_t* jit, const loom_serve_text_options_t* options,
+    loom_runtime_jit_t* jit, const loom_serve_text_options_t* options,
     loom_serve_text_source_t* source) {
   const iree_string_view_t generation_roots[] = {IREE_SVL("step"),
                                                  IREE_SVL("epoch"),
@@ -365,10 +361,10 @@ iree_status_t loom_serve_text_source_compile_control(
       IREE_SVL("text_encode_prefill_group_v1"),
       IREE_SVL("text_publish_prefill_group_v1")};
   const iree_string_view_list_t additional =
-      options->group_mode == LOOM_SERVE_GROUP_MODE_TWO_BANK
+      options->group_mode == LOOM_RUNTIME_GROUP_MODE_TWO_BANK
           ? (iree_string_view_list_t){IREE_ARRAYSIZE(group_roots), group_roots}
           : (iree_string_view_list_t){0};
-  return loom_serve_program_compile_service_cached(
+  return loom_runtime_program_compile_service_cached(
       jit, source->environment, &options->sources, options->sources.control,
       encodes ? IREE_ARRAYSIZE(encoding_roots)
               : IREE_ARRAYSIZE(generation_roots),
@@ -377,12 +373,12 @@ iree_status_t loom_serve_text_source_compile_control(
 }
 
 void loom_serve_text_source_deinitialize(loom_serve_text_source_t* source) {
-  loom_serve_parameter_sources_release(source->parameter_sources);
-  loom_serve_preparation_free(source->preparation);
+  loom_runtime_parameter_sources_release(source->parameter_sources);
+  loom_runtime_preparation_free(source->preparation);
   iree_vm_module_release(source->module);
   iree_vm_buffer_release(source->control_state);
   iree_vm_buffer_release(source->options);
-  loom_serve_tokenizer_release(source->tokenizer);
+  loom_runtime_tokenizer_release(source->tokenizer);
   iree_vm_buffer_release(source->terminal_marker);
   iree_vm_environment_free(source->environment);
 }

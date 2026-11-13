@@ -28,10 +28,10 @@ typedef struct loom_pipeline_resource_pool_t {
   loom_value_fact_memory_space_t memory_space;
   // Available extent relative to this backing store's origin.
   uint64_t byte_capacity;
-  // Borrowed canonical packing owned by the admitting plan. Every construction
-  // using this backing appends to the same packing, including child
-  // invocations. Fixed transport ranges precede source construction; generated
-  // services and compiled workers join before final capacity admission.
+  // Borrowed canonical packing owned by the admitting plan. Construction
+  // placement reserves the complete graph's lifetime-aware footprint here.
+  // Fixed transport ranges precede placement; generated services and compiled
+  // workers join before final capacity admission.
   loom_source_storage_packing_t* packing;
 } loom_pipeline_resource_pool_t;
 
@@ -62,13 +62,29 @@ typedef struct loom_pipeline_resource_allocation_t {
   loom_value_id_t pool_value_id;
   // Canonical backing row selected by that value's explicit binding.
   uint32_t pool_index;
-  // Immutable byte offset within the backing store.
-  uint64_t byte_offset;
+  // Allocation ordinal before root-identity sorting, used for stable placement.
+  iree_host_size_t construction_order;
   // Complete allocation extent in bytes.
   uint64_t byte_length;
   // Alignment required by this allocation.
   uint64_t byte_alignment;
 } loom_pipeline_resource_allocation_t;
+
+// Exact slot geometry retained by the channel's construction owner. Bit units
+// preserve subbyte storage; byte-addressability belongs to physical selection.
+// Record envelopes can overlap even when their addressed elements are disjoint.
+typedef struct loom_pipeline_channel_geometry_t {
+  // Physical displacement between adjacent slot origins.
+  uint64_t slot_bit_stride;
+  // Logical elements in one record, counting repeated addresses separately.
+  uint64_t record_element_count;
+  // Envelope through the last addressed element, including padding.
+  uint64_t record_bit_span;
+  // Width of one physically stored scalar, including subbyte elements.
+  uint16_t element_bit_count;
+  // Logical row-major traversal visits consecutive physical elements.
+  bool record_dense;
+} loom_pipeline_channel_geometry_t;
 
 typedef struct loom_pipeline_resource_channel_t {
   // Fresh protocol binding, independent of its backing allocation identity.
@@ -81,7 +97,23 @@ typedef struct loom_pipeline_resource_channel_t {
   loom_value_fact_view_reference_t storage;
   // Specialized number of records in the authored binding.
   uint64_t capacity;
+  // Arena-owned exact geometry, shared by all importing occurrences. NULL when
+  // dimensions/layout/strides are unresolved or exceed the measurement domain;
+  // this does not reject source IR or imply a dense representation.
+  const loom_pipeline_channel_geometry_t* geometry;
 } loom_pipeline_resource_channel_t;
+
+// Specialized authored worker geometry. This is a domain of execution units,
+// not a count of records and not a request to repeat the strand body per
+// record.
+typedef struct loom_pipeline_worker_axis_t {
+  // First worker coordinate along this axis.
+  uint64_t origin;
+  // Number of workers along this axis.
+  uint64_t count;
+  // Coordinate increment between workers along this axis.
+  uint64_t stride;
+} loom_pipeline_worker_axis_t;
 
 typedef struct loom_pipeline_resource_strand_t {
   // Source declaration retaining target and worker-domain geometry.
@@ -89,6 +121,10 @@ typedef struct loom_pipeline_resource_strand_t {
   // Outlined ordinary call whose operands supply the actual captures.
   // Its operand order is the callee's formal order, not a resource ABI.
   loom_op_t* call;
+  // Specialized worker coordinates retained by construction analysis.
+  const loom_pipeline_worker_axis_t* axes;
+  // Number of worker axes.
+  iree_host_size_t rank;
 } loom_pipeline_resource_strand_t;
 
 typedef struct loom_pipeline_resources_t {
@@ -100,9 +136,9 @@ typedef struct loom_pipeline_resources_t {
   const loom_pipeline_resource_pool_binding_t* pool_bindings;
   // Number of retained pool bindings.
   iree_host_size_t pool_binding_count;
-  // Arena-owned source placements, sorted by root identity for indexed lookup.
+  // Arena-owned allocation requirements, sorted by root identity for lookup.
   const loom_pipeline_resource_allocation_t* allocations;
-  // Number of source placements.
+  // Number of allocation requirements.
   iree_host_size_t allocation_count;
   // Fresh channel bindings, sorted by source identity for indexed lookup.
   const loom_pipeline_resource_channel_t* channels;
@@ -139,15 +175,16 @@ typedef struct loom_pipeline_resources_t {
 // backing; several selections or incoming values may name the same backing.
 // This owner visits construction once, consumes retained storage
 // facts, and retains channel identities, outlined strand calls, and child
-// compositions alongside allocation placements. Child execution boundaries
+// compositions alongside allocation requirements. Child execution boundaries
 // remain separate: the enclosing planner binds their formal arguments using
 // these retained calls and plans each child's construction with its own
 // admitted resources. This result describes this construction's resources,
 // not the transitive resources of its children. Every allocation stays live
 // throughout the invocation.
-// Repeated construction from the same source gets fresh allocation ranges in
-// the selected pool's packing. Source IDs identify allocations only within
-// this occurrence; they never identify ranges across occurrences. Strand-local
+// Repeated construction from the same source gets fresh allocation identities.
+// Source IDs identify allocations only within this occurrence; they never
+// identify ranges across occurrences. The invocation graph places these
+// requirements after binding its complete coexistence structure. Strand-local
 // storage remains with worker compilation and joins the same packings using
 // source_storage_packing_reserve before capacity admission.
 //
@@ -164,8 +201,7 @@ typedef struct loom_pipeline_resources_t {
 // No IR mutation occurs. Source mutation invalidates this result; a consuming
 // rewrite must retain or translate its source correspondence before erasure.
 // The fact table and its extension storage outlive this result.
-// A rejected construction ends admission of the enclosing plan; its pool
-// packings may already include allocations from the rejected construction.
+// Discovery does not modify the supplied pool packings.
 iree_status_t loom_pipeline_resources_build(
     loom_module_t* module, loom_func_like_t pipeline,
     loom_value_fact_table_t* facts, const loom_pipeline_resource_pool_t* pools,
@@ -184,7 +220,7 @@ const loom_pipeline_resource_pool_binding_t*
 loom_pipeline_resources_lookup_pool(const loom_pipeline_resources_t* resources,
                                     loom_value_id_t value_id);
 
-// Returns the retained placement for a source allocation root, or NULL when
+// Returns the retained requirement for a source allocation root, or NULL when
 // the root is external to this construction. This is an indexed table lookup;
 // channel/view consumers obtain root identity from their retained value facts.
 const loom_pipeline_resource_allocation_t*

@@ -1,0 +1,95 @@
+// RUN: emit cxx roundtrip
+// REQUIRES: loom-export-cxx
+// One buffer result remains one root, even when its caller uses typed storage.
+#include <loomcxx/view.h>
+
+static loom::type::buffer<unsigned> identity(loom::type::buffer<unsigned> input) {
+  return input;
+}
+
+unsigned read(loom::type::buffer<unsigned> input) {
+  auto result = identity(input);
+  return loom::view::load(loom::buffer::view<1>(result, {}), 0);
+}
+
+// ----
+#include <loomcxx/view.h>
+
+[[loom::symbol("read")]]
+unsigned read(loom::type::buffer<unsigned char> input);
+
+[[loom::symbol("identity")]]
+static loom::type::buffer<unsigned char> identity(loom::type::buffer<unsigned char> input);
+
+[[loom::symbol("read")]]
+unsigned read(loom::type::buffer<unsigned char> input) {
+  auto result = identity(input);
+  auto v4 = loom::buffer::view<1>(loom::buffer::cast<const unsigned>(result), {});
+  unsigned v7 = loom::view::load(v4, loom::type::index{0});
+  return v7;
+}
+
+[[loom::symbol("identity")]]
+static loom::type::buffer<unsigned char> identity(loom::type::buffer<unsigned char> input) {
+  return input;
+}
+
+// ====
+// An interior pointer result preserves both the root and independent offset.
+static unsigned* next(unsigned* input) { return input + 1; }
+
+void write(unsigned* input) { *next(input) = 7u; }
+
+// ----
+#include <loomcxx/numeric.h>
+#include <loomcxx/predicate.h>
+#include <loomcxx/view.h>
+
+struct next_result {
+  loom::type::buffer<unsigned char> value0;
+  loom::type::offset value1;
+};
+
+[[loom::symbol("write")]]
+void write(loom::type::buffer<unsigned char> input, loom::type::offset input_byte_offset);
+
+[[loom::symbol("next")]]
+static next_result next(loom::type::buffer<unsigned char> input, loom::type::offset input_byte_offset);
+
+[[loom::symbol("write")]]
+void write(loom::type::buffer<unsigned char> input, loom::type::offset input_byte_offset) {
+  next_result call_result = next(input, input_byte_offset);
+  auto v3 = call_result.value0;
+  loom::type::offset v4 = call_result.value1;
+  auto v5 = loom::buffer::view<1>(loom::buffer::cast<unsigned>(v3), v4, {});
+  loom::view::store<loom::memory_access::root_in_bounds>(7u, v5, 0);
+  return;
+}
+
+[[loom::symbol("next")]]
+static next_result next(loom::type::buffer<unsigned char> input, loom::type::offset input_byte_offset) {
+  unsigned long long v15 = loom::offset::cast<unsigned long long>(input_byte_offset) + (loom::convert<long long>(1) * 4ull);
+  loom::assume(v15 <= 9223372036854775807ull);
+  return {input, loom::offset::cast(v15)};
+}
+
+// ====
+// Returning a pointer needs the offset facade even without any view operation.
+unsigned* identity(unsigned* input) { return input; }
+
+// ----
+#include <loomcxx/buffer.h>
+#include <loomcxx/index.h>
+
+struct identity_result {
+  loom::type::buffer<unsigned char> value0;
+  loom::type::offset value1;
+};
+
+[[loom::symbol("identity")]]
+identity_result identity(loom::type::buffer<unsigned char> input, loom::type::offset input_byte_offset);
+
+[[loom::symbol("identity")]]
+identity_result identity(loom::type::buffer<unsigned char> input, loom::type::offset input_byte_offset) {
+  return {input, input_byte_offset};
+}

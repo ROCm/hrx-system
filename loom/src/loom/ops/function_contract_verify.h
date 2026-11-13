@@ -39,6 +39,9 @@ iree_status_t loom_function_provider_contract_verify(
 enum loom_function_call_argument_match_flag_bits_e {
   // Allows a tensor or view value to be materialized as a buffer ABI argument.
   LOOM_FUNCTION_CALL_ARGUMENT_MATCH_FLAG_ALLOW_BUFFER_MATERIALIZATION = 1u << 0,
+  // Template applicability proves dimensions and complete encodings separately.
+  // Scalar, nominal, and composite input types retain exact type equality.
+  LOOM_FUNCTION_CALL_ARGUMENT_MATCH_FLAG_TEMPLATE_INPUTS = 1u << 1,
 };
 typedef uint16_t loom_function_call_argument_match_flags_t;
 

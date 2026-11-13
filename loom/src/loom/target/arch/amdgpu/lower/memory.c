@@ -17,6 +17,7 @@
 #include "loom/ops/vector/memory.h"
 #include "loom/ops/vector/ops.h"
 #include "loom/ops/view/ops.h"
+#include "loom/target/arch/amdgpu/lower/buffer_descriptor.h"
 #include "loom/target/arch/amdgpu/lower/constants.h"
 #include "loom/target/arch/amdgpu/lower/emit.h"
 #include "loom/target/arch/amdgpu/lower/memory_ordering.h"
@@ -44,10 +45,20 @@ loom_amdgpu_memory_access_alloca_root_rejection_bit(
 bool loom_amdgpu_memory_access_include_alloca_root_byte_offset(
     const loom_amdgpu_source_alloca_layout_t* alloca_layout,
     loom_low_source_memory_access_plan_t* source,
+    bool* out_uses_dynamic_root_address,
     loom_amdgpu_memory_access_diagnostic_t* diagnostic) {
+  *out_uses_dynamic_root_address = false;
+  bool allows_dynamic_root_address = false;
   switch (source->memory_space) {
     case LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP:
+      break;
     case LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE:
+      allows_dynamic_root_address = true;
+      if (loom_amdgpu_source_alloca_layout_requires_private_root_address(
+              alloca_layout)) {
+        *out_uses_dynamic_root_address = true;
+        return true;
+      }
       break;
     default:
       return true;
@@ -56,8 +67,17 @@ bool loom_amdgpu_memory_access_include_alloca_root_byte_offset(
   uint64_t root_byte_offset = 0;
   if (!loom_amdgpu_source_alloca_layout_lookup_byte_offset(
           alloca_layout, source->memory_space, source->root_value_id,
-          &root_byte_offset) ||
-      root_byte_offset > INT64_MAX) {
+          &root_byte_offset)) {
+    if (allows_dynamic_root_address) {
+      *out_uses_dynamic_root_address = true;
+      return true;
+    }
+    diagnostic->rejection_bits |=
+        loom_amdgpu_memory_access_alloca_root_rejection_bit(
+            source->memory_space);
+    return false;
+  }
+  if (root_byte_offset > INT64_MAX) {
     diagnostic->rejection_bits |=
         loom_amdgpu_memory_access_alloca_root_rejection_bit(
             source->memory_space);
@@ -88,7 +108,8 @@ static bool loom_amdgpu_memory_access_register_footprint(
 
   loom_amdgpu_vector_storage_t storage = {0};
   if (loom_type_rank(vector_type) != 1 ||
-      !loom_amdgpu_type_vector_storage(vector_type, &storage)) {
+      !loom_amdgpu_type_vector_register_storage(vector_type, &storage) ||
+      storage.register_count > LOOM_AMDGPU_MAX_SCALARIZED_32BIT_LANES) {
     diagnostic->rejection_bits |=
         LOOM_AMDGPU_MEMORY_ACCESS_REJECTION_VECTOR_TYPE;
     return false;
@@ -390,6 +411,8 @@ void loom_amdgpu_mark_memory_access_plan_storage_demands(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_amdgpu_memory_access_plan_t* plan) {
   IREE_ASSERT_GT(plan->packet_count, 0u);
+  loom_amdgpu_mark_buffer_extent_storage_demands(
+      context, &plan->source, plan->packets[0].access.buffer_extent);
   const loom_amdgpu_memory_mask_plan_t* mask =
       loom_amdgpu_memory_access_mask_plan(plan);
   if (mask) {
@@ -400,6 +423,10 @@ void loom_amdgpu_mark_memory_access_plan_storage_demands(
        ++packet_index) {
     const loom_amdgpu_memory_access_t* access =
         &plan->packets[packet_index].access;
+    if (access->uses_dynamic_root_address) {
+      loom_low_lower_require_source_value_storage(
+          context, access->source->root_value_id);
+    }
     if (access->realization.vaddr) {
       if (loom_amdgpu_memory_access_uses_resource_operand(access)) {
         loom_low_lower_require_source_value_storage(
@@ -872,9 +899,14 @@ bool loom_amdgpu_memory_access_plan_select(
 
   loom_low_source_memory_operation_kind_t kind =
       selected_source->operation_kind;
+  // Kernel entry already establishes visibility for unchanged entry data.
+  // Later acquisitions cannot impose a new cache obligation on those reads;
+  // their retained proof excludes prior writes, acquisitions, and backedges.
   if (kind == LOOM_MEMORY_ACCESS_OPERATION_LOAD &&
       (selected_source->memory_space == LOOM_VALUE_FACT_MEMORY_SPACE_GLOBAL ||
-       selected_source->memory_space == LOOM_VALUE_FACT_MEMORY_SPACE_GENERIC)) {
+       selected_source->memory_space == LOOM_VALUE_FACT_MEMORY_SPACE_GENERIC) &&
+      !(selected_source->reads_entry_contents &&
+        loom_kernel_def_isa(source_function.op))) {
     selected_source->read_visibility_scope = read_visibility_scope;
   }
   const bool is_atomic = kind == LOOM_MEMORY_ACCESS_OPERATION_ATOMIC_LOAD ||
@@ -889,11 +921,14 @@ bool loom_amdgpu_memory_access_plan_select(
                ? LOOM_MEMORY_ACCESS_OPERATION_LOAD
                : LOOM_MEMORY_ACCESS_OPERATION_STORE;
     // The selected naturally aligned packet supplies atomicity. Observable
-    // execution prevents Low cleanup from merging or deleting observations.
-    selected_source->access_flags |= LOOM_MEMORY_ACCESS_FLAG_VOLATILE;
+    // execution prevents Low cleanup from merging or deleting observations,
+    // while independent accesses can remain concurrently in flight.
+    selected_source->access_flags |= LOOM_MEMORY_ACCESS_FLAG_ATOMIC;
   }
+  bool uses_dynamic_root_address = false;
   if (!loom_amdgpu_memory_access_include_alloca_root_byte_offset(
-          alloca_layout, selected_source, out_diagnostic)) {
+          alloca_layout, selected_source, &uses_dynamic_root_address,
+          out_diagnostic)) {
     return false;
   }
   loom_amdgpu_memory_dynamic_term_materialization_plan_t materialization_plan;
@@ -924,6 +959,7 @@ bool loom_amdgpu_memory_access_plan_select(
 
   loom_amdgpu_memory_access_t access =
       loom_amdgpu_memory_access_from_source(selected_source);
+  access.uses_dynamic_root_address = uses_dynamic_root_address;
   access.preserve_inactive = preserve_inactive;
   const loom_type_t vector_type =
       loom_amdgpu_memory_access_source_vector_type(module, source_op);
@@ -995,8 +1031,12 @@ bool loom_amdgpu_memory_access_plan_select(
         return false;
       }
     }
-    IREE_ASSERT_LE(selected_source->vector_lane_count,
-                   IREE_ARRAYSIZE(out_selection->packets));
+    if (selected_source->vector_lane_count >
+        IREE_ARRAYSIZE(out_selection->packets)) {
+      out_diagnostic->rejection_bits |=
+          LOOM_AMDGPU_MEMORY_ACCESS_REJECTION_VECTOR_TYPE;
+      return false;
+    }
     uint32_t lane_index = 0;
     while (lane_index < selected_source->vector_lane_count) {
       const uint32_t remaining_lane_count =

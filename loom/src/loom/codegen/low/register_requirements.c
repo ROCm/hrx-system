@@ -10,6 +10,7 @@
 
 #include "loom/ir/module.h"
 #include "loom/ops/low/ops.h"
+#include "loom/ops/low/storage.h"
 
 static loom_low_register_requirement_t loom_low_register_requirement_classify(
     const loom_module_t* module, const loom_region_t* function_region,
@@ -24,14 +25,14 @@ static loom_low_register_requirement_t loom_low_register_requirement_classify(
     }
   } else {
     const loom_op_t* defining_op = loom_value_def_op(value);
-    if (defining_op && loom_low_reload_isa(defining_op)) {
+    if (defining_op && loom_low_storage_load_isa(defining_op)) {
       return LOOM_LOW_REGISTER_REQUIREMENT_MATERIALIZED_TRAFFIC;
     }
   }
   const loom_use_t* uses = loom_value_uses(value);
   for (uint32_t i = 0; i < value->use_count; ++i) {
     const loom_op_t* user_op = loom_use_user_op(uses[i]);
-    if (user_op && loom_low_spill_isa(user_op) &&
+    if (user_op && loom_low_storage_store_isa(user_op) &&
         loom_use_operand_index(uses[i]) == 0) {
       return LOOM_LOW_REGISTER_REQUIREMENT_MATERIALIZED_TRAFFIC;
     }

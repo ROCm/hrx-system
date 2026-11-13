@@ -23,37 +23,23 @@ COMMON_TOOLS = (
     ("ruff", "--version", r"\b0\.15\.15\b"),
     ("clang-format", "--version", r"\b22\.1\.3\b"),
 )
-SEMGREP_WARNING_FILTER = "ignore:pkg_resources is deprecated as an API:UserWarning"
-SEMGREP_VERSION_PATTERN = r"\b1\.96\.0\b"
 ZIZMOR_VERSION_PATTERN = r"\b1\.32\.0\b"
 STATIC_ANALYSIS_SETUP_HINT = (
     "run python dev.py bazel setup --venv to install the managed tool environment"
 )
-SEMGREP_WINDOWS_HINT = (
-    "the Semgrep package does not provide semgrep-core.exe for native Windows; "
-    "the Linux paranoid presubmit enforces these rules"
-)
 OPTIONAL_COMMON_TOOLS = (
-    (
-        "semgrep",
-        ("--disable-version-check", "--version"),
-        SEMGREP_VERSION_PATTERN,
-        STATIC_ANALYSIS_SETUP_HINT,
-        SEMGREP_WARNING_FILTER,
-    ),
     (
         "zizmor",
         ("--version",),
         ZIZMOR_VERSION_PATTERN,
         STATIC_ANALYSIS_SETUP_HINT,
-        None,
     ),
-    ("clang-tidy", ("--version",), None, None, None),
-    ("clang-apply-replacements", ("--version",), None, None, None),
+    ("clang-tidy", ("--version",), None, None),
+    ("clang-apply-replacements", ("--version",), None, None),
 )
 LANE_TOOLS = {
     "bazel": (
-        ("bazel", "--version", r"\b9\.2\.0\b"),
+        ("bazel", "--version", r"\b9\.3\.2\b"),
         ("buildifier", "--version", r"\b8\.5\.1\b"),
         ("buildozer", "--version", r"\b8\.5\.1\b"),
     ),
@@ -86,17 +72,12 @@ def doctor_plan(lane: str | None, tool_env: ToolEnvironment) -> CommandPlan:
             )
         )
     for optional_tool in OPTIONAL_COMMON_TOOLS:
-        tool, version_args, expected_pattern, hint, python_warnings = optional_tool
-        if tool == "semgrep" and sys.platform == "win32":
-            hint = SEMGREP_WINDOWS_HINT
-        step_env = env
-        if python_warnings:
-            step_env = {**env, "PYTHONWARNINGS": python_warnings}
+        tool, version_args, expected_pattern, hint = optional_tool
         plan.add(
             OptionalCheckCommandStep(
                 [tool_env.tool(tool), *version_args],
                 cwd=REPO_ROOT,
-                env=step_env,
+                env=env,
                 expected_pattern=expected_pattern,
                 hint=hint,
                 label=f"check optional {tool}",

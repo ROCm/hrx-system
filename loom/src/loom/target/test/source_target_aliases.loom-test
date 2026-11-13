@@ -1,0 +1,94 @@
+// RUN: emit source-low output=module
+
+// The call chain shares one resolved execution context through distinct exact
+// authored target references. Serialization binds every version, including the
+// inherited helper, to one witness so Low calls keep the same target identity.
+test.target<low_core> @entry_target {subgroup_size = 32}
+
+test.target<low_core> @helper_target {subgroup_size = 32}
+
+func.def noinline @double(%value: i32) -> (i32) {
+  %result = scalar.addi %value, %value : i32
+  func.return %result : i32
+}
+
+func.def noinline target(@helper_target) @increment(%value: i32) -> (i32) {
+  %doubled = func.call @double(%value) : (i32) -> (i32)
+  %step = scalar.constant 1 : i32
+  %result = scalar.addi %doubled, %step : i32
+  func.return %result : i32
+}
+
+func.def public target(@entry_target) @entry(%value: i32) -> (i32) {
+  %result = func.call @increment(%value) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ----
+test.target<low_core> @entry_target {subgroup_size = 32}
+
+test.target<low_core> @helper_target {subgroup_size = 32}
+
+low.func.def noinline target<test.low.core>(@helper_target) @double(%value: reg<test.i32>) -> (reg<test.i32>) asm {
+  %result = test.add.i32 %value, %value
+  return %result
+}
+
+low.func.def noinline target<test.low.core>(@helper_target) @increment(%value: reg<test.i32>) -> (reg<test.i32>) asm {
+  %doubled = low.func.call pure @double(%value) : (reg<test.i32>) -> (reg<test.i32>)
+  %step = test.const.i32 1
+  %result = test.add.i32 %doubled, %step
+  return %result
+}
+
+low.func.def public target<test.low.core>(@helper_target) abi(object_function) @entry(%value: reg<test.i32>) -> (reg<test.i32>) asm {
+  %result = low.func.call pure @increment(%value) : (reg<test.i32>) -> (reg<test.i32>)
+  return %result
+}
+
+// ====
+// RUN: emit source-low output=module
+
+// Resume compilation from the saved Low module with canonical call targets.
+test.target<low_core> @entry_target {subgroup_size = 32}
+
+test.target<low_core> @helper_target {subgroup_size = 32}
+
+low.func.def noinline target<test.low.core>(@helper_target) @double(%value: reg<test.i32>) -> (reg<test.i32>) asm {
+  %result = test.add.i32 %value, %value
+  return %result
+}
+
+low.func.def noinline target<test.low.core>(@helper_target) @increment(%value: reg<test.i32>) -> (reg<test.i32>) asm {
+  %doubled = low.func.call pure @double(%value) : (reg<test.i32>) -> (reg<test.i32>)
+  %step = test.const.i32 1
+  %result = test.add.i32 %doubled, %step
+  return %result
+}
+
+low.func.def public target<test.low.core>(@helper_target) abi(object_function) @entry(%value: reg<test.i32>) -> (reg<test.i32>) asm {
+  %result = low.func.call pure @increment(%value) : (reg<test.i32>) -> (reg<test.i32>)
+  return %result
+}
+
+// ----
+test.target<low_core> @entry_target {subgroup_size = 32}
+
+test.target<low_core> @helper_target {subgroup_size = 32}
+
+low.func.def noinline target<test.low.core>(@helper_target) @double(%value: reg<test.i32>) -> (reg<test.i32>) asm {
+  %result = test.add.i32 %value, %value
+  return %result
+}
+
+low.func.def noinline target<test.low.core>(@helper_target) @increment(%value: reg<test.i32>) -> (reg<test.i32>) asm {
+  %doubled = low.func.call pure @double(%value) : (reg<test.i32>) -> (reg<test.i32>)
+  %step = test.const.i32 1
+  %result = test.add.i32 %doubled, %step
+  return %result
+}
+
+low.func.def public target<test.low.core>(@helper_target) abi(object_function) @entry(%value: reg<test.i32>) -> (reg<test.i32>) asm {
+  %result = low.func.call pure @increment(%value) : (reg<test.i32>) -> (reg<test.i32>)
+  return %result
+}

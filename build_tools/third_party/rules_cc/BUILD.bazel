@@ -8,6 +8,7 @@
 # This package exports patches applied to the Bazel rules_cc module.
 
 exports_files([
+    "compressed_debug_info.patch",
     "optimized_profile.patch",
     "sanitizer_debug_info.patch",
 ])

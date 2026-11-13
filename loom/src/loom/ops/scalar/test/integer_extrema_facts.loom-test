@@ -58,3 +58,95 @@ func.def @unsigned_high_bit() -> (i64, i64) {
   %maximum = scalar.constant -9223372036854775808 : i64
   func.return %minimum, %maximum : i64, i64
 }
+
+// ====
+
+// Extrema select one input, so overlapping power-of-two alternatives retain
+// their guarantee. A nonpower alternative must still weaken the result.
+func.def @ranged_powers(%choose: i1, %other: i32) -> (i1, i1, i1, i1, i1) {
+  %c2 = scalar.constant 2 : i32
+  %c8 = scalar.constant 8 : i32
+  %c16 = scalar.constant 16 : i32
+  %left = scf.select %choose, %c2, %c16 : i32
+  %smin = scalar.minsi %left, %c8 : i32
+  %smax = scalar.maxsi %left, %c8 : i32
+  %umin = scalar.minui %left, %c8 : i32
+  %umax = scalar.maxui %left, %c8 : i32
+  %unproven = scalar.assume %other [range(%other, 4, 16), multiple_of(%other, 4)] : i32
+  %mixed = scalar.minsi %left, %unproven : i32
+  %a = test.fact_power_of_two %smin : i32 -> i1
+  %b = test.fact_power_of_two %smax : i32 -> i1
+  %c = test.fact_power_of_two %umin : i32 -> i1
+  %d = test.fact_power_of_two %umax : i32 -> i1
+  %e = test.fact_power_of_two %mixed : i32 -> i1
+  func.return %a, %b, %c, %d, %e : i1, i1, i1, i1, i1
+}
+
+// ----
+func.def @ranged_powers(%choose: i1, %other: i32) -> (i1, i1, i1, i1, i1) {
+  %a = scalar.constant true : i1
+  %b = scalar.constant true : i1
+  %c = scalar.constant true : i1
+  %d = scalar.constant true : i1
+  %e = scalar.constant false : i1
+  func.return %a, %b, %c, %d, %e : i1, i1, i1, i1, i1
+}
+
+// ====
+
+// Sign-crossing facts carry zero exclusion independently of their interval.
+func.def @nonzero_extrema(%left: i16, %right: i16) -> (i1, i1, i1, i1, i1) {
+  %a = scalar.assume %left [range(%left, -8, 8), ne(%left, 0)] : i16
+  %b = scalar.assume %right [range(%right, -16, 16), ne(%right, 0)] : i16
+  %c0 = scalar.constant 0 : i16
+  %smin = scalar.minsi %a, %b : i16
+  %smax = scalar.maxsi %a, %b : i16
+  %umin = scalar.minui %a, %b : i16
+  %umax = scalar.maxui %a, %b : i16
+  %mixed = scalar.minsi %a, %c0 : i16
+  %smin_nonzero = test.fact_non_zero %smin : i16 -> i1
+  %smax_nonzero = test.fact_non_zero %smax : i16 -> i1
+  %umin_nonzero = test.fact_non_zero %umin : i16 -> i1
+  %umax_nonzero = test.fact_non_zero %umax : i16 -> i1
+  %mixed_nonzero = test.fact_non_zero %mixed : i16 -> i1
+  func.return %smin_nonzero, %smax_nonzero, %umin_nonzero, %umax_nonzero, %mixed_nonzero : i1, i1, i1, i1, i1
+}
+
+// ----
+func.def @nonzero_extrema(%left: i16, %right: i16) -> (i1, i1, i1, i1, i1) {
+  %smin_nonzero = scalar.constant true : i1
+  %smax_nonzero = scalar.constant true : i1
+  %umin_nonzero = scalar.constant true : i1
+  %umax_nonzero = scalar.constant true : i1
+  %mixed_nonzero = scalar.constant false : i1
+  func.return %smin_nonzero, %smax_nonzero, %umin_nonzero, %umax_nonzero, %mixed_nonzero : i1, i1, i1, i1, i1
+}
+
+// ====
+
+// Unsigned order selects the nonnegative half for min and negative half for
+// max, including each selected operand's stronger divisor.
+func.def @unsigned_partitions(%low: i8, %high: i8) -> (i64, i64, i64, i64, i64, i64) {
+  %positive = scalar.assume %low [range(%low, 4, 16), multiple_of(%low, 4)] : i8
+  %negative = scalar.assume %high [range(%high, -16, -8), multiple_of(%high, 8)] : i8
+  %minimum = scalar.minui %negative, %positive : i8
+  %maximum = scalar.maxui %positive, %negative : i8
+  %min_lo = test.fact_range_lo %minimum : i8 -> i64
+  %min_hi = test.fact_range_hi %minimum : i8 -> i64
+  %min_divisor = test.fact_divisor %minimum : i8 -> i64
+  %max_lo = test.fact_range_lo %maximum : i8 -> i64
+  %max_hi = test.fact_range_hi %maximum : i8 -> i64
+  %max_divisor = test.fact_divisor %maximum : i8 -> i64
+  func.return %min_lo, %min_hi, %min_divisor, %max_lo, %max_hi, %max_divisor : i64, i64, i64, i64, i64, i64
+}
+
+// ----
+func.def @unsigned_partitions(%low: i8, %high: i8) -> (i64, i64, i64, i64, i64, i64) {
+  %min_lo = scalar.constant 4 : i64
+  %min_hi = scalar.constant 16 : i64
+  %min_divisor = scalar.constant 4 : i64
+  %max_lo = scalar.constant -16 : i64
+  %max_hi = scalar.constant -8 : i64
+  %max_divisor = scalar.constant 8 : i64
+  func.return %min_lo, %min_hi, %min_divisor, %max_lo, %max_hi, %max_divisor : i64, i64, i64, i64, i64, i64
+}

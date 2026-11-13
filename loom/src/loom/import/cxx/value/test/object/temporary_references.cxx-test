@@ -1,0 +1,544 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// RUN: pass canonicalize,cse,dce
+struct Slice {
+  double* pointer;
+  int lower;
+  int stride;
+
+  double& operator()(int index) const {
+    return pointer[(index - lower) * stride];
+  }
+};
+
+struct Table {
+  double* base;
+
+  Slice operator[](int block) const { return Slice{base + block, 0, 1}; }
+};
+
+double complete_temporary(double* output, int block) {
+  Table table{output};
+  const auto& slice = table[block];
+  return slice(0);
+}
+
+// ----
+func.def public @complete_temporary(%output: buffer, %output_byte_offset: offset, %block: i32) -> (f64) {
+  %slice_pointer, %slice_pointer_byte_offset, %slice_lower, %slice_stride = func.call pure @Table__operator_subscript_value(%output, %output_byte_offset, %block) : (buffer, offset, i32) -> (buffer, offset, i32, i32)
+  %8 = scalar.constant 0 : i32
+  %9, %10 = func.call pure @Slice__operator_call_value(%slice_pointer, %slice_pointer_byte_offset, %slice_lower, %slice_stride, %8) : (buffer, offset, i32, i32, i32) -> (buffer, offset)
+  %11 = buffer.view %9[%10] : buffer -> view<1xf64>
+  %12 = view.load<root_in_bounds> %11[0] : view<1xf64> -> f64
+  func.return %12 : f64
+}
+
+func.def @Table__operator_subscript_value(%this_base: buffer, %this_base_byte_offset: offset, %block: i32) -> (buffer, offset, i32, i32) {
+  %20 = scalar.extsi %block : i32 to i64
+  %45 = scalar.constant 3 : i64
+  %46 = scalar.shli %20, %45 : i64
+  %23 = index.cast %this_base_byte_offset : offset to i64
+  %24 = scalar.addi %23, %46 : i64
+  %25 = scalar.assume %24 [range(%24, 0, 9223372036854775807)] : i64
+  %26 = index.cast %25 : i64 to offset
+  %27 = scalar.constant 0 : i32
+  %28 = scalar.constant 1 : i32
+  func.return %this_base, %26, %27, %28 : buffer, offset, i32, i32
+}
+
+func.def @Slice__operator_call_value(%this_pointer: buffer, %this_pointer_byte_offset: offset, %this_lower: i32, %this_stride: i32, %index: i32) -> (buffer, offset) {
+  %36 = scalar.subi %index, %this_lower : i32
+  %37 = scalar.muli %36, %this_stride : i32
+  %38 = scalar.extsi %37 : i32 to i64
+  %47 = scalar.constant 3 : i64
+  %48 = scalar.shli %38, %47 : i64
+  %41 = index.cast %this_pointer_byte_offset : offset to i64
+  %42 = scalar.addi %41, %48 : i64
+  %43 = scalar.assume %42 [range(%42, 0, 9223372036854775807)] : i64
+  %44 = index.cast %43 : i64 to offset
+  func.return %this_pointer, %44 : buffer, offset
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+struct Slice {
+  double* pointer;
+  int lower;
+  int stride;
+
+  double& operator()(int index) const {
+    return pointer[(index - lower) * stride];
+  }
+};
+
+double conditional_temporary(bool choose, double* first, double* second) {
+  const Slice& slice = choose ? Slice{first, 0, 1} : Slice{second, 1, 1};
+  return slice(1);
+}
+
+double mutable_temporary(double* input) {
+  Slice&& slice = Slice{input, 0, 1};
+  slice.lower = 1;
+  return slice(1);
+}
+
+double branch_mutation(bool choose, double* input) {
+  Slice&& slice = Slice{input, 0, 1};
+  if (choose) {
+    slice.lower = 1;
+  } else {
+    slice.stride = 2;
+  }
+  return slice(2);
+}
+
+// ----
+func.def public @conditional_temporary(%choose: i1, %first: buffer, %first_byte_offset: offset, %second: buffer, %second_byte_offset: offset) -> (f64) {
+  %slice_pointer, %slice_pointer_byte_offset, %slice_lower, %slice_stride = scf.if %choose -> (buffer, offset, i32, i32) {
+    %10 = scalar.constant 0 : i32
+    %11 = scalar.constant 1 : i32
+    scf.yield %first, %first_byte_offset, %10, %11 : buffer, offset, i32, i32
+  } else {
+    %12 = scalar.constant 1 : i32
+    scf.yield %second, %second_byte_offset, %12, %12 : buffer, offset, i32, i32
+  }
+  %14 = scalar.constant 1 : i32
+  %15, %16 = func.call pure @Slice__operator_call_value(%slice_pointer, %slice_pointer_byte_offset, %slice_lower, %slice_stride, %14) : (buffer, offset, i32, i32, i32) -> (buffer, offset)
+  %17 = buffer.view %15[%16] : buffer -> view<1xf64>
+  %18 = view.load<root_in_bounds> %17[0] : view<1xf64> -> f64
+  func.return %18 : f64
+}
+
+func.def public @mutable_temporary(%input: buffer, %input_byte_offset: offset) -> (f64) {
+  %slice_stride = scalar.constant 1 : i32
+  %26, %27 = func.call pure @Slice__operator_call_value(%input, %input_byte_offset, %slice_stride, %slice_stride, %slice_stride) : (buffer, offset, i32, i32, i32) -> (buffer, offset)
+  %28 = buffer.view %26[%27] : buffer -> view<1xf64>
+  %29 = view.load<root_in_bounds> %28[0] : view<1xf64> -> f64
+  func.return %29 : f64
+}
+
+func.def public @branch_mutation(%choose: i1, %input: buffer, %input_byte_offset: offset) -> (f64) {
+  %slice_lower$34 = scalar.constant 0 : i32
+  %slice_stride$35 = scalar.constant 1 : i32
+  %slice_stride$41 = scalar.constant 2 : i32
+  %slice_lower$65 = scf.select %choose, %slice_stride$35, %slice_lower$34 : i32
+  %slice_stride$66 = scf.select %choose, %slice_stride$35, %slice_stride$41 : i32
+  %43, %44 = func.call pure @Slice__operator_call_value(%input, %input_byte_offset, %slice_lower$65, %slice_stride$66, %slice_stride$41) : (buffer, offset, i32, i32, i32) -> (buffer, offset)
+  %45 = buffer.view %43[%44] : buffer -> view<1xf64>
+  %46 = view.load<root_in_bounds> %45[0] : view<1xf64> -> f64
+  func.return %46 : f64
+}
+
+func.def @Slice__operator_call_value(%this_pointer: buffer, %this_pointer_byte_offset: offset, %this_lower: i32, %this_stride: i32, %index: i32) -> (buffer, offset) {
+  %54 = scalar.subi %index, %this_lower : i32
+  %55 = scalar.muli %54, %this_stride : i32
+  %56 = scalar.extsi %55 : i32 to i64
+  %67 = scalar.constant 3 : i64
+  %68 = scalar.shli %56, %67 : i64
+  %59 = index.cast %this_pointer_byte_offset : offset to i64
+  %60 = scalar.addi %59, %68 : i64
+  %61 = scalar.assume %60 [range(%60, 0, 9223372036854775807)] : i64
+  %62 = index.cast %61 : i64 to offset
+  func.return %this_pointer, %62 : buffer, offset
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+void observe(double* pointer);
+
+struct Owner {
+  double* pointer;
+  ~Owner() { observe(pointer); }
+};
+
+double projected_temporary(double* input) {
+  double* const& pointer = Owner{input}.pointer;
+  return pointer[0];
+}
+
+void nontrivial_temporary(double* input) {
+  const Owner& owner = Owner{input};
+  observe(owner.pointer);
+}
+
+void mutable_nontrivial_temporary(double* first, double* second) {
+  Owner&& owner = Owner{first};
+  owner.pointer = second;
+}
+
+void conditional_nontrivial_temporary(bool choose, double* first,
+                                      double* second) {
+  const Owner& owner = choose ? Owner{first} : Owner{second};
+  observe(owner.pointer);
+}
+
+void comma_nontrivial_temporary(double* first, double* second) {
+  const Owner& owner = (Owner{first}, Owner{second});
+  observe(owner.pointer);
+}
+
+// ----
+func.def public @projected_temporary(%input: buffer, %input_byte_offset: offset) -> (f64) {
+  %7 = index.cast %input_byte_offset : offset to i64
+  %9 = scalar.assume %7 [range(%7, 0, 9223372036854775807)] : i64
+  %10 = index.cast %9 : i64 to offset
+  %11 = buffer.view %input[%10] : buffer -> view<1xf64>
+  %12 = view.load<root_in_bounds> %11[0] : view<1xf64> -> f64
+  func.call @Owner___Owner_value(%input, %input_byte_offset) : (buffer, offset)
+  func.return %12 : f64
+}
+
+func.def public @nontrivial_temporary(%input: buffer, %input_byte_offset: offset) {
+  func.call @observe(%input, %input_byte_offset) : (buffer, offset)
+  func.call @Owner___Owner_value(%input, %input_byte_offset) : (buffer, offset)
+  func.return
+}
+
+func.def public @mutable_nontrivial_temporary(%first: buffer, %first_byte_offset: offset, %second: buffer, %second_byte_offset: offset) {
+  func.call @Owner___Owner_value(%second, %second_byte_offset) : (buffer, offset)
+  func.return
+}
+
+func.def public @conditional_nontrivial_temporary(%choose: i1, %first: buffer, %first_byte_offset: offset, %second: buffer, %second_byte_offset: offset) {
+  %owner_pointer = scf.select %choose, %first, %second : buffer
+  %owner_pointer_byte_offset = scf.select %choose, %first_byte_offset, %second_byte_offset : offset
+  func.call @observe(%owner_pointer, %owner_pointer_byte_offset) : (buffer, offset)
+  func.call @Owner___Owner_value(%owner_pointer, %owner_pointer_byte_offset) : (buffer, offset)
+  func.return
+}
+
+func.def public @comma_nontrivial_temporary(%first: buffer, %first_byte_offset: offset, %second: buffer, %second_byte_offset: offset) {
+  func.call @Owner___Owner_value(%first, %first_byte_offset) : (buffer, offset)
+  func.call @observe(%second, %second_byte_offset) : (buffer, offset)
+  func.call @Owner___Owner_value(%second, %second_byte_offset) : (buffer, offset)
+  func.return
+}
+
+func.def inline @Owner___Owner_value(%this_pointer: buffer, %this_pointer_byte_offset: offset) {
+  func.call @observe(%this_pointer, %this_pointer_byte_offset) : (buffer, offset)
+  func.return
+}
+
+func.decl @observe(%32: buffer, %33: offset)
+
+// ====
+// RUN: pass canonicalize,cse,dce
+struct Slice {
+  double* pointer;
+  int lower;
+  int stride;
+
+  double& operator()(int index) const {
+    return pointer[(index - lower) * stride];
+  }
+};
+
+struct Nested {
+  Slice slices[2];
+};
+
+double nested_temporary(double* first, double* second) {
+  const Nested& nested = Nested{{{first, 0, 1}, {second, 1, 2}}};
+  return nested.slices[1](3);
+}
+
+double array_subobject_temporary(double* first, double* second) {
+  const Slice& slice = Nested{{{first, 0, 1}, {second, 1, 2}}}.slices[1];
+  return slice(3);
+}
+
+double dynamic_array_subobject_temporary(int index, double* first,
+                                         double* second) {
+  const Slice& slice =
+      Nested{{{first, 0, 1}, {second, 1, 2}}}.slices[index & 1];
+  return slice(3);
+}
+
+struct Base {
+  double* pointer;
+};
+
+struct Derived : Base {
+  int offset;
+};
+
+double base_subobject_temporary(double* input) {
+  const Base& base = Derived{{input}, 0};
+  return base.pointer[0];
+}
+
+// ----
+func.def public @nested_temporary(%first: buffer, %first_byte_offset: offset, %second: buffer, %second_byte_offset: offset) -> (f64) {
+  %nested_slices_1_lower = scalar.constant 1 : i32
+  %nested_slices_1_stride = scalar.constant 2 : i32
+  %10 = scalar.constant 3 : i32
+  %11, %12 = func.call pure @Slice__operator_call_value(%second, %second_byte_offset, %nested_slices_1_lower, %nested_slices_1_stride, %10) : (buffer, offset, i32, i32, i32) -> (buffer, offset)
+  %13 = buffer.view %11[%12] : buffer -> view<1xf64>
+  %14 = view.load<root_in_bounds> %13[0] : view<1xf64> -> f64
+  func.return %14 : f64
+}
+
+func.def public @array_subobject_temporary(%first: buffer, %first_byte_offset: offset, %second: buffer, %second_byte_offset: offset) -> (f64) {
+  %slice_slices_1_lower = scalar.constant 1 : i32
+  %slice_slices_1_stride = scalar.constant 2 : i32
+  %25 = scalar.constant 3 : i32
+  %26, %27 = func.call pure @Slice__operator_call_value(%second, %second_byte_offset, %slice_slices_1_lower, %slice_slices_1_stride, %25) : (buffer, offset, i32, i32, i32) -> (buffer, offset)
+  %28 = buffer.view %26[%27] : buffer -> view<1xf64>
+  %29 = view.load<root_in_bounds> %28[0] : view<1xf64> -> f64
+  func.return %29 : f64
+}
+
+func.def public @dynamic_array_subobject_temporary(%index: i32, %first: buffer, %first_byte_offset: offset, %second: buffer, %second_byte_offset: offset) -> (f64) {
+  %slice_slices_0_lower = scalar.constant 0 : i32
+  %slice_slices_0_stride = scalar.constant 1 : i32
+  %slice_slices_1_stride = scalar.constant 2 : i32
+  %41 = scalar.andi %index, %slice_slices_0_stride : i32
+  %42 = scalar.constant 3 : i32
+  %44 = scalar.cmpi eq, %41, %slice_slices_0_lower : i32
+  %83 = scf.select %44, %first, %second : buffer
+  %84 = scf.select %44, %first_byte_offset, %second_byte_offset : offset
+  %85 = scf.select %44, %slice_slices_0_lower, %slice_slices_0_stride : i32
+  %86 = scf.select %44, %slice_slices_0_stride, %slice_slices_1_stride : i32
+  %49, %50 = func.call pure @Slice__operator_call_value(%83, %84, %85, %86, %42) : (buffer, offset, i32, i32, i32) -> (buffer, offset)
+  %51 = buffer.view %49[%50] : buffer -> view<1xf64>
+  %52 = view.load<root_in_bounds> %51[0] : view<1xf64> -> f64
+  func.return %52 : f64
+}
+
+func.def public @base_subobject_temporary(%input: buffer, %input_byte_offset: offset) -> (f64) {
+  %61 = index.cast %input_byte_offset : offset to i64
+  %63 = scalar.assume %61 [range(%61, 0, 9223372036854775807)] : i64
+  %64 = index.cast %63 : i64 to offset
+  %65 = buffer.view %input[%64] : buffer -> view<1xf64>
+  %66 = view.load<root_in_bounds> %65[0] : view<1xf64> -> f64
+  func.return %66 : f64
+}
+
+func.def @Slice__operator_call_value(%this_pointer: buffer, %this_pointer_byte_offset: offset, %this_lower: i32, %this_stride: i32, %index: i32) -> (buffer, offset) {
+  %74 = scalar.subi %index, %this_lower : i32
+  %75 = scalar.muli %74, %this_stride : i32
+  %76 = scalar.extsi %75 : i32 to i64
+  %87 = scalar.constant 3 : i64
+  %88 = scalar.shli %76, %87 : i64
+  %79 = index.cast %this_pointer_byte_offset : offset to i64
+  %80 = scalar.addi %79, %88 : i64
+  %81 = scalar.assume %80 [range(%80, 0, 9223372036854775807)] : i64
+  %82 = index.cast %81 : i64 to offset
+  func.return %this_pointer, %82 : buffer, offset
+}
+
+// ====
+// Pointer temporaries retain buffer identity and offsets as values. Reference
+// aliases observe writes to that value, while a conversion makes its own copy.
+float qualified_pointer(float* input) {
+  const float* const& pointer = input + 1;
+  return *pointer;
+}
+const void* erased_pointer(float* input) {
+  const void* const& pointer = input + 1;
+  return pointer;
+}
+float selected_pointer(bool choose, float* first, float* second) {
+  float* const& pointer = choose ? first : second;
+  return *pointer;
+}
+float mutate_pointer(float* input, int amount) {
+  float*&& pointer = input + 1;
+  float*& alias = pointer;
+  alias += amount;
+  return *pointer;
+}
+float copied_pointer(float* input) {
+  float*&& pointer = input + 1;
+  const void* const& copied = pointer;
+  pointer += 2;
+  return *static_cast<const float*>(copied) + *pointer;
+}
+float ordered_pointer(float* input, int* evaluations) {
+  float* const& pointer = (++*evaluations, input + *evaluations);
+  return *pointer;
+}
+bool null_pointer() {
+  const auto& pointer = nullptr;
+  return pointer == nullptr;
+}
+
+// ----
+func.def public @qualified_pointer(%input: buffer, %input_byte_offset: offset) -> (f32) {
+  %111 = scalar.constant 4 : i64
+  %7 = index.cast %input_byte_offset : offset to i64
+  %8 = scalar.addi %7, %111 : i64
+  %9 = scalar.assume %8 [range(%8, 0, 9223372036854775807)] : i64
+  %pointer_byte_offset = index.cast %9 : i64 to offset
+  %11 = buffer.view %input[%pointer_byte_offset] : buffer -> view<1xf32>
+  %12 = view.load<root_in_bounds> %11[0] : view<1xf32> -> f32
+  func.return %12 : f32
+}
+
+func.def public @erased_pointer(%input: buffer, %input_byte_offset: offset) -> (buffer, offset) {
+  %112 = scalar.constant 4 : i64
+  %21 = index.cast %input_byte_offset : offset to i64
+  %22 = scalar.addi %21, %112 : i64
+  %23 = scalar.assume %22 [range(%22, 0, 9223372036854775807)] : i64
+  %pointer_byte_offset = index.cast %23 : i64 to offset
+  func.return %input, %pointer_byte_offset : buffer, offset
+}
+
+func.def public @selected_pointer(%choose: i1, %first: buffer, %first_byte_offset: offset, %second: buffer, %second_byte_offset: offset) -> (f32) {
+  %31 = scalar.constant 0 : i32
+  %32 = scalar.constant 1 : i32
+  %115 = scf.select %choose, %31, %32 : i32
+  %35 = scalar.cmpi eq, %115, %31 : i32
+  %pointer = scf.select %35, %first, %second : buffer
+  %pointer_byte_offset = scf.select %35, %first_byte_offset, %second_byte_offset : offset
+  %38 = buffer.view %pointer[%pointer_byte_offset] : buffer -> view<1xf32>
+  %39 = view.load<root_in_bounds> %38[0] : view<1xf32> -> f32
+  func.return %39 : f32
+}
+
+func.def public @mutate_pointer(%input: buffer, %input_byte_offset: offset, %amount: i32) -> (f32) {
+  %118 = scalar.constant 4 : i64
+  %48 = index.cast %input_byte_offset : offset to i64
+  %49 = scalar.addi %48, %118 : i64
+  %50 = scalar.assume %49 [range(%49, 0, 9223372036854775807)] : i64
+  %pointer_byte_offset$51 = index.cast %50 : i64 to offset
+  %52 = scalar.extsi %amount : i32 to i64
+  %116 = scalar.constant 2 : i64
+  %117 = scalar.shli %52, %116 : i64
+  %55 = index.cast %pointer_byte_offset$51 : offset to i64
+  %56 = scalar.addi %55, %117 : i64
+  %57 = scalar.assume %56 [range(%56, 0, 9223372036854775807)] : i64
+  %pointer_byte_offset$58 = index.cast %57 : i64 to offset
+  %59 = buffer.view %input[%pointer_byte_offset$58] : buffer -> view<1xf32>
+  %60 = view.load<root_in_bounds> %59[0] : view<1xf32> -> f32
+  func.return %60 : f32
+}
+
+func.def public @copied_pointer(%input: buffer, %input_byte_offset: offset) -> (f32) {
+  %120 = scalar.constant 4 : i64
+  %68 = index.cast %input_byte_offset : offset to i64
+  %69 = scalar.addi %68, %120 : i64
+  %70 = scalar.assume %69 [range(%69, 0, 9223372036854775807)] : i64
+  %pointer_byte_offset$71 = index.cast %70 : i64 to offset
+  %119 = scalar.constant 8 : i64
+  %76 = index.cast %pointer_byte_offset$71 : offset to i64
+  %77 = scalar.addi %76, %119 : i64
+  %78 = scalar.assume %77 [range(%77, 0, 9223372036854775807)] : i64
+  %pointer_byte_offset$79 = index.cast %78 : i64 to offset
+  %80 = buffer.view %input[%pointer_byte_offset$71] : buffer -> view<1xf32>
+  %81 = view.load<root_in_bounds> %80[0] : view<1xf32> -> f32
+  %82 = buffer.view %input[%pointer_byte_offset$79] : buffer -> view<1xf32>
+  %83 = view.load<root_in_bounds> %82[0] : view<1xf32> -> f32
+  %84 = scalar.addf %81, %83 : f32
+  func.return %84 : f32
+}
+
+func.def public @ordered_pointer(%input: buffer, %input_byte_offset: offset, %evaluations: buffer, %evaluations_byte_offset: offset) -> (f32) {
+  %90 = buffer.view %evaluations[%evaluations_byte_offset] : buffer -> view<1xi32>
+  %91 = view.load<root_in_bounds> %90[0] : view<1xi32> -> i32
+  %92 = scalar.constant 1 : i32
+  %93 = scalar.addi %91, %92 : i32
+  view.store<root_in_bounds> %93, %90[0] : i32, view<1xi32>
+  %95 = view.load<root_in_bounds> %90[0] : view<1xi32> -> i32
+  %96 = scalar.extsi %95 : i32 to i64
+  %121 = scalar.constant 2 : i64
+  %122 = scalar.shli %96, %121 : i64
+  %99 = index.cast %input_byte_offset : offset to i64
+  %100 = scalar.addi %99, %122 : i64
+  %101 = scalar.assume %100 [range(%100, 0, 9223372036854775807)] : i64
+  %pointer_byte_offset = index.cast %101 : i64 to offset
+  %103 = buffer.view %input[%pointer_byte_offset] : buffer -> view<1xf32>
+  %104 = view.load<root_in_bounds> %103[0] : view<1xf32> -> f32
+  func.return %104 : f32
+}
+
+func.def public @null_pointer() -> (i1) {
+  %123 = scalar.constant true : i1
+  func.return %123 : i1
+}
+
+// ====
+// Reference parameters and results preserve the selected pointer object.
+static float* const& select(bool choose, float* const& first, float* const& second) {
+  return choose ? first : second;
+}
+float forwarded_pointer(bool choose, float* first, float* second) {
+  return *select(choose, first + 1, second + 2);
+}
+static float read(float* const& pointer) { return *pointer; }
+float nested_pointer(bool choose, float* first, float* second) {
+  return read(select(choose, first + 1, second + 2));
+}
+struct Owner {
+  float* pointer;
+  float* const& operator[](int) const { return pointer; }
+};
+float projected_pointer(float* input) { return read(Owner{input}[0]); }
+
+// ----
+func.def public @forwarded_pointer(%choose: i1, %first: buffer, %first_byte_offset: offset, %second: buffer, %second_byte_offset: offset) -> (f32) {
+  %80 = scalar.constant 4 : i64
+  %10 = index.cast %first_byte_offset : offset to i64
+  %11 = scalar.addi %10, %80 : i64
+  %12 = scalar.assume %11 [range(%11, 0, 9223372036854775807)] : i64
+  %13 = index.cast %12 : i64 to offset
+  %79 = scalar.constant 8 : i64
+  %18 = index.cast %second_byte_offset : offset to i64
+  %19 = scalar.addi %18, %79 : i64
+  %20 = scalar.assume %19 [range(%19, 0, 9223372036854775807)] : i64
+  %21 = index.cast %20 : i64 to offset
+  %22 = func.call pure @select(%choose, %first, %13, %second, %21) : (i1, buffer, offset, buffer, offset) -> (i32)
+  %23 = scalar.constant 0 : i32
+  %24 = scalar.cmpi eq, %22, %23 : i32
+  %81 = scf.select %24, %first, %second : buffer
+  %82 = scf.select %24, %13, %21 : offset
+  %27 = buffer.view %81[%82] : buffer -> view<1xf32>
+  %28 = view.load<root_in_bounds> %27[0] : view<1xf32> -> f32
+  func.return %28 : f32
+}
+
+func.def public @nested_pointer(%choose: i1, %first: buffer, %first_byte_offset: offset, %second: buffer, %second_byte_offset: offset) -> (f32) {
+  %84 = scalar.constant 4 : i64
+  %39 = index.cast %first_byte_offset : offset to i64
+  %40 = scalar.addi %39, %84 : i64
+  %41 = scalar.assume %40 [range(%40, 0, 9223372036854775807)] : i64
+  %42 = index.cast %41 : i64 to offset
+  %83 = scalar.constant 8 : i64
+  %47 = index.cast %second_byte_offset : offset to i64
+  %48 = scalar.addi %47, %83 : i64
+  %49 = scalar.assume %48 [range(%48, 0, 9223372036854775807)] : i64
+  %50 = index.cast %49 : i64 to offset
+  %51 = func.call pure @select(%choose, %first, %42, %second, %50) : (i1, buffer, offset, buffer, offset) -> (i32)
+  %52 = scalar.constant 0 : i32
+  %53 = scalar.cmpi eq, %51, %52 : i32
+  %85 = scf.select %53, %first, %second : buffer
+  %86 = scf.select %53, %42, %50 : offset
+  %56 = func.call readonly @read(%85, %86) : (buffer, offset) -> (f32)
+  func.return %56 : f32
+}
+
+func.def public @projected_pointer(%input: buffer, %input_byte_offset: offset) -> (f32) {
+  %61 = func.call readonly @read(%input, %input_byte_offset) : (buffer, offset) -> (f32)
+  func.return %61 : f32
+}
+
+func.def @select(%choose: i1, %first: buffer, %first_byte_offset: offset, %second: buffer, %second_byte_offset: offset) -> (i32) {
+  %68 = scalar.constant 0 : i32
+  %69 = scalar.constant 1 : i32
+  %87 = scf.select %choose, %68, %69 : i32
+  func.return %87 : i32
+}
+
+func.def @read(%pointer: buffer, %pointer_byte_offset: offset) -> (f32) {
+  %74 = buffer.view %pointer[%pointer_byte_offset] : buffer -> view<1xf32>
+  %75 = view.load<root_in_bounds> %74[0] : view<1xf32> -> f32
+  func.return %75 : f32
+}
+
+func.def @Owner__operator_subscript_value(%this_pointer: buffer, %this_pointer_byte_offset: offset, %78: i32) {
+  func.return
+}

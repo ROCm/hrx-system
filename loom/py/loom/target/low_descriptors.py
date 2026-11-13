@@ -57,6 +57,14 @@ class OperandRole(CEnum):
     IMPLICIT = "LOOM_LOW_OPERAND_ROLE_IMPLICIT"
 
 
+class OwnershipEffect(CEnum):
+    NONE = "LOOM_LOW_OWNERSHIP_NONE"
+    BORROW = "LOOM_LOW_OWNERSHIP_BORROW"
+    RETAIN = "LOOM_LOW_OWNERSHIP_RETAIN"
+    OWNED = "LOOM_LOW_OWNERSHIP_OWNED"
+    BORROWED = "LOOM_LOW_OWNERSHIP_BORROWED"
+
+
 class OperandSourceBinding(CEnum):
     NONE = "LOOM_LOW_OPERAND_SOURCE_BINDING_NONE"
     LHS = "LOOM_LOW_OPERAND_SOURCE_BINDING_LHS"
@@ -105,6 +113,7 @@ class OperandFlag(CEnum):
     EXECUTION_MASK = "LOOM_LOW_OPERAND_FLAG_EXECUTION_MASK"
     NARROWS_EXECUTION_MASK = "LOOM_LOW_OPERAND_FLAG_NARROWS_EXECUTION_MASK"
     COMMUTATIVE_STATE_UPDATE = "LOOM_LOW_OPERAND_FLAG_COMMUTATIVE_STATE_UPDATE"
+    UNOBSERVED_STATE_WRITE = "LOOM_LOW_OPERAND_FLAG_UNOBSERVED_STATE_WRITE"
     STORAGE_CONTINUATION = "LOOM_LOW_OPERAND_FLAG_STORAGE_CONTINUATION"
     VARIADIC = "LOOM_LOW_OPERAND_FLAG_VARIADIC"
 
@@ -160,6 +169,7 @@ class ImmediateFlag(CEnum):
 
 
 class EffectKind(CEnum):
+    UNKNOWN = "LOOM_LOW_EFFECT_KIND_UNKNOWN"
     READ = "LOOM_LOW_EFFECT_KIND_READ"
     WRITE = "LOOM_LOW_EFFECT_KIND_WRITE"
     CALL = "LOOM_LOW_EFFECT_KIND_CALL"
@@ -366,6 +376,8 @@ class DescriptorAsmSurface(Enum):
 class OperandFormMatchKind(CEnum):
     ALL_EQUAL_I64 = "LOOM_LOW_OPERAND_FORM_MATCH_ALL_EQUAL_I64"
     ALL_EQUAL_EXACT_I64 = "LOOM_LOW_OPERAND_FORM_MATCH_ALL_EQUAL_EXACT_I64"
+    # Generated receiving-class guard; the payload is a replacement operand index.
+    ACCEPTED_REGISTER_CLASS = "LOOM_LOW_OPERAND_FORM_MATCH_ACCEPTED_REGISTER_CLASS"
 
 
 class OperandFormImmediateAction(CEnum):
@@ -419,9 +431,29 @@ class RegClass:
     fixed_location_base: int = 0
     fixed_location_count: int = 0
     alias_set_id: int = 0
-    spill_class: str | None = None
+    # Memory width per allocation unit; None uses the register payload width.
+    spill_unit_bits: int | None = None
+    # Minimum byte alignment of a spill slot.
+    spill_min_alignment: int = 1
+    # Maximum natural tuple alignment in bytes.
+    spill_max_alignment: int = 16
     full_register_part_mask: int = 1
     physical_registers: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.spill_unit_bits is None:
+            object.__setattr__(self, "spill_unit_bits", self.alloc_unit_bits)
+        if not 0 < self.spill_unit_bits <= 0xFFFF:
+            raise ValueError(f"register class '{self.name}' has invalid spill width")
+        for alignment in (self.spill_min_alignment, self.spill_max_alignment):
+            if alignment <= 0 or alignment > 32768 or alignment & (alignment - 1):
+                raise ValueError(
+                    f"register class '{self.name}' has invalid spill alignment"
+                )
+        if self.spill_min_alignment > self.spill_max_alignment:
+            raise ValueError(
+                f"register class '{self.name}' has inverted spill alignment limits"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -511,6 +543,8 @@ class Operand:
     ready_stage: int = 0
     read_event: str | None = None
     write_event: str | None = None
+    # Logical handle effect; consuming transport uses structural Low operations.
+    ownership: OwnershipEffect = OwnershipEffect.NONE
 
 
 @dataclass(frozen=True, slots=True)
@@ -789,6 +823,9 @@ class Descriptor:
     feature_mask_words: tuple[int, ...] = ()
     encoding_format_id: int = 0
     encoding_id: int = 0
+    # Fixed native instruction size, when known. Used only during generation
+    # to admit size-preserving operand alternatives; not emitted into C rows.
+    encoding_byte_count: int | None = None
     flags: tuple[DescriptorFlag, ...] = ()
     instruction_classes: tuple[InstructionClass, ...] = ()
     operand_forms: tuple[OperandForm, ...] = ()

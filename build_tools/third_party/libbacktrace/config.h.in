@@ -38,19 +38,6 @@
 @LIBBACKTRACE_DL_ITERATE_PHDR_DEF@
 @LIBBACKTRACE_LINK_H_DEF@
 
-// FreeBSD-specific features.
-#if defined __has_include
-#if __has_include(<sys/sysctl.h>)
-#include <sys/sysctl.h>
-#if defined KERN_PROC
-#define HAVE_KERN_PROC 1
-#endif
-#if defined KERN_PROC_ARGS
-#define HAVE_KERN_PROC_ARGS 1
-#endif
-#endif
-#endif
-
 #elif defined __MACH__
 #define HAVE_MACH_O_DYLD_H 1
 #else

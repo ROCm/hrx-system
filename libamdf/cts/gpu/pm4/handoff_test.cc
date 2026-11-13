@@ -93,7 +93,7 @@ class Pm4SystemHandoffTest
   void CreatePayload(amdf_memory_access_t access, uint64_t byte_length,
                      GpuMemory** out_memory) {
     ASSERT_NO_FATAL_FAILURE(
-        CreateMemory(access, byte_length, out_memory, GetParam()));
+        CreateMemory(access, byte_length, GetParam(), out_memory));
   }
 
   // Accepted consumer work whose producer may not yet have been submitted.

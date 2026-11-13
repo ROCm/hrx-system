@@ -41,6 +41,53 @@ typedef struct loom_run_hal_target_route_t {
   const loomc_iree_hal_target_provider_t* provider;
 } loom_run_hal_target_route_t;
 
+// Synchronous lifecycle phases entered by HAL testbench execution.
+//
+// Each phase is published immediately before the named work begins. The next
+// phase therefore proves that the preceding phase completed, while COMPLETE
+// proves that one physical execution and its staging cleanup finished.
+typedef enum loom_run_hal_testbench_progress_phase_e {
+  LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_RECORD_BEGIN = 0,
+  LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_RUNTIME_INITIALIZE,
+  LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_RUNTIME_PROACTOR_POOL_CREATE,
+  LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_RUNTIME_FRONTIER_TRACKER_CREATE,
+  LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_RUNTIME_DEVICE_CREATE,
+  LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_RUNTIME_PROACTOR_POOL_RELEASE,
+  LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_RUNTIME_DEVICE_GROUP_CREATE,
+  LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_RUNTIME_FRONTIER_TRACKER_RELEASE,
+  LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_RUNTIME_DISPATCH_QUEUE_SELECT,
+  LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_RUNTIME_TRANSFER_QUEUE_SELECT,
+  LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_RUNTIME_DEVICE_SOURCE_POOL_CREATE,
+  LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_RUNTIME_DEVICE_POOL_CREATE,
+  LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_RUNTIME_STAGING_POOL_CREATE,
+  LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_RUNTIME_FAILURE_DEINITIALIZE,
+  LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_TARGET_SELECT,
+  LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_COMPILE,
+  LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_EXECUTABLE_LOAD,
+  LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_MATERIALIZE,
+  LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_STAGE,
+  LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_DISPATCH_PREPARE,
+  LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_DISPATCH,
+  LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_READBACK,
+  LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_RETIRE,
+  LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_COMPLETE,
+  LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_RECORD_COMPLETE,
+  LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_COUNT,
+} loom_run_hal_testbench_progress_phase_t;
+
+// Publishes one synchronous lifecycle phase. Callback errors propagate to the
+// caller so a requested progress contract cannot fail silently; required
+// cleanup still runs after an earlier execution or callback failure.
+typedef iree_status_t (*loom_run_hal_testbench_progress_fn_t)(
+    void* user_data, loom_run_hal_testbench_progress_phase_t phase);
+
+typedef struct loom_run_hal_testbench_progress_sink_t {
+  // Optional callback invoked at each lifecycle boundary.
+  loom_run_hal_testbench_progress_fn_t fn;
+  // Opaque callback state borrowed for the lifetime of the context.
+  void* user_data;
+} loom_run_hal_testbench_progress_sink_t;
+
 typedef struct loom_run_hal_testbench_context_t {
   // Public target environment composed by the final tool binary.
   loomc_target_environment_t* target_environment;
@@ -54,6 +101,8 @@ typedef struct loom_run_hal_testbench_context_t {
   iree_allocator_t host_allocator;
   // Device event sink used when initializing |runtime|.
   iree_hal_device_event_sink_t device_event_sink;
+  // Optional synchronous host lifecycle progress sink.
+  loom_run_hal_testbench_progress_sink_t progress_sink;
   // HAL runtime services required by every module added to this context.
   iree_hal_device_runtime_feature_flags_t runtime_features;
   // HAL driver parsed from the single active --device URI.
@@ -75,6 +124,16 @@ void loom_run_hal_testbench_context_initialize(
 void loom_run_hal_testbench_context_set_device_event_sink(
     loom_run_hal_testbench_context_t* context,
     iree_hal_device_event_sink_t device_event_sink);
+
+// Sets the synchronous lifecycle sink used by future HAL execution.
+void loom_run_hal_testbench_context_set_progress_sink(
+    loom_run_hal_testbench_context_t* context,
+    loom_run_hal_testbench_progress_sink_t progress_sink);
+
+// Publishes entry into |phase| through the configured progress sink.
+iree_status_t loom_run_hal_testbench_context_emit_progress(
+    loom_run_hal_testbench_context_t* context,
+    loom_run_hal_testbench_progress_phase_t phase);
 
 // Adds runtime requirements for the selected |root_symbols| in |module| and
 // instrumentation requested by |sanitizer_options|. The caller supplies every

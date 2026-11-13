@@ -8,7 +8,7 @@
 
 TEST_CASE_METHOD(HrxTestFixture, "Stream fill buffer", "[stream_ops][fill]") {
   hrx_stream_t stream = nullptr;
-  REQUIRE_OK(hrx().stream_create(device_, 0, &stream));
+  REQUIRE_OK(hrx().stream_create(transfer_queue_, 0, &stream));
 
   hrx_buffer_t buf = nullptr;
   REQUIRE_OK(hrx().buffer_allocate(
@@ -37,7 +37,7 @@ TEST_CASE_METHOD(HrxTestFixture, "Stream fill buffer", "[stream_ops][fill]") {
 TEST_CASE_METHOD(HrxTestFixture, "Stream wait observes flushed work",
                  "[stream_ops][wait]") {
   hrx_stream_t stream = nullptr;
-  REQUIRE_OK(hrx().stream_create(device_, 0, &stream));
+  REQUIRE_OK(hrx().stream_create(transfer_queue_, 0, &stream));
 
   hrx_buffer_t buf = nullptr;
   REQUIRE_OK(hrx().buffer_allocate(
@@ -64,7 +64,7 @@ TEST_CASE_METHOD(HrxTestFixture, "Stream wait observes flushed work",
 
 TEST_CASE_METHOD(HrxTestFixture, "Stream copy buffer", "[stream_ops][copy]") {
   hrx_stream_t stream = nullptr;
-  REQUIRE_OK(hrx().stream_create(device_, 0, &stream));
+  REQUIRE_OK(hrx().stream_create(transfer_queue_, 0, &stream));
 
   hrx_buffer_t src = nullptr;
   hrx_buffer_t dst = nullptr;
@@ -103,7 +103,7 @@ TEST_CASE_METHOD(HrxTestFixture, "Stream copy buffer", "[stream_ops][copy]") {
 
 TEST_CASE_METHOD(HrxTestFixture, "Stream update buffer", "[stream_ops][copy]") {
   hrx_stream_t stream = nullptr;
-  REQUIRE_OK(hrx().stream_create(device_, 0, &stream));
+  REQUIRE_OK(hrx().stream_create(transfer_queue_, 0, &stream));
 
   hrx_buffer_t buf = nullptr;
   REQUIRE_OK(hrx().buffer_allocate(
@@ -133,7 +133,7 @@ TEST_CASE_METHOD(HrxTestFixture, "Stream update buffer", "[stream_ops][copy]") {
 TEST_CASE_METHOD(HrxTestFixture, "Stream execution barrier",
                  "[stream_ops][barrier]") {
   hrx_stream_t stream = nullptr;
-  REQUIRE_OK(hrx().stream_create(device_, 0, &stream));
+  REQUIRE_OK(hrx().stream_create(transfer_queue_, 0, &stream));
 
   hrx_buffer_t buf = nullptr;
   REQUIRE_OK(hrx().buffer_allocate(
@@ -141,12 +141,22 @@ TEST_CASE_METHOD(HrxTestFixture, "Stream execution barrier",
       HRX_BUFFER_USAGE_DEFAULT | HRX_BUFFER_USAGE_MAPPING_SCOPED, &buf));
 
   uint32_t first = 0x11223344;
-  uint32_t second = 0x55667788;
   REQUIRE_OK(
       hrx().stream_fill_buffer(stream, buf, 0, 32, &first, sizeof(first)));
-  REQUIRE_OK(hrx().stream_execution_barrier(stream));
-  REQUIRE_OK(
-      hrx().stream_fill_buffer(stream, buf, 32, 32, &second, sizeof(second)));
+  REQUIRE_OK(hrx().stream_barrier(stream, nullptr));
+  const hrx_buffer_barrier_t range = {
+      .source_scope = HRX_ACCESS_SCOPE_TRANSFER_WRITE,
+      .target_scope = HRX_ACCESS_SCOPE_TRANSFER_READ,
+      .buffer_ref = {buf, 0, 32},
+  };
+  const hrx_barrier_t barrier = {
+      .source_stage_mask = HRX_EXECUTION_STAGE_TRANSFER,
+      .target_stage_mask = HRX_EXECUTION_STAGE_TRANSFER,
+      .buffer_barrier_count = 1,
+      .buffer_barriers = &range,
+  };
+  REQUIRE_OK(hrx().stream_barrier(stream, &barrier));
+  REQUIRE_OK(hrx().stream_copy_buffer(stream, buf, 0, buf, 32, 32));
   REQUIRE_OK(hrx().stream_flush(stream));
   REQUIRE_OK(hrx().stream_synchronize(stream));
 
@@ -155,7 +165,7 @@ TEST_CASE_METHOD(HrxTestFixture, "Stream execution barrier",
   const uint32_t* data = static_cast<const uint32_t*>(ptr);
   for (int i = 0; i < 8; ++i) {
     REQUIRE(data[i] == first);
-    REQUIRE(data[8 + i] == second);
+    REQUIRE(data[8 + i] == first);
   }
   REQUIRE_OK(hrx().buffer_unmap(buf));
 

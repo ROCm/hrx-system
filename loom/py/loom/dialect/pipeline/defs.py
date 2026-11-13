@@ -82,6 +82,18 @@ PipelineScope = EnumDef(
     doc=("Required materialization boundary. An absent scope permits a generic pipeline program that may span targets and runtime operations."),
 )
 
+StrandParticipation = EnumDef(
+    "StrandParticipation",
+    [
+        EnumCase(
+            "cooperative",
+            1,
+            doc="Selected workers cooperate in one strand instance and one ownership action per channel record.",
+        ),
+    ],
+    doc="Channel participation within a strand. Absent participation creates an independent instance per selected worker.",
+)
+
 _PIPELINE_MODIFIER_FORMAT = [
     OptionalGroup([TemplateParam("scope")], anchor="scope"),
     OptionalGroup([Attr("visibility")], anchor="visibility"),
@@ -400,9 +412,13 @@ pipeline_strand = Op(
     "pipeline.strand",
     group=pipeline_ops,
     doc=(
-        "Construct independently progressing strand instances over a target-relative "
-        "worker domain. Each selected worker enters its instance once; ordinary "
-        "loops in the body express repeated work. The region captures lexical SSA "
+        "Construct strand instances over a target-relative worker domain. By "
+        "default each selected worker enters an independent instance once. A "
+        "cooperative strand instead enters one instance with all selected workers: "
+        "channel actions collectively acquire, publish or release one record, "
+        "while ordinary payload operations execute per participant. Channel "
+        "actions require converged participation, including through calls. "
+        "Ordinary loops in the body express repeated work. The region captures lexical SSA "
         "values and declares work rather than executing inline. Multiple strands "
         "may share a worker, with channel dependencies controlling their progress. "
         "Origins, counts and strides select coordinates as origin + index * stride. "
@@ -435,6 +451,12 @@ pipeline_strand = Op(
             ATTR_TYPE_I64_ARRAY,
             doc="Worker strides; INT64_MIN entries refer to dynamic strides.",
         ),
+        AttrDef(
+            "participation",
+            ATTR_TYPE_ENUM,
+            enum_def=StrandParticipation,
+            optional=True,
+        ),
     ],
     regions=[
         RegionDef(
@@ -451,6 +473,7 @@ pipeline_strand = Op(
     ],
     verify="loom_pipeline_strand_verify",
     format=[
+        OptionalGroup([TemplateParam("participation")], anchor="participation"),
         OptionalGroup(
             [kw("target"), GLUE, LPAREN, SymbolRef("target"), GLUE, RPAREN],
             anchor="target",
@@ -467,7 +490,10 @@ pipeline_strand = Op(
         RPAREN,
         Region("body"),
     ],
-    examples=["pipeline.strand target(@npu) workers([%column, 2], [1, 1], [1, 1]) {\n}"],
+    examples=[
+        "pipeline.strand target(@npu) workers([%column, 2], [1, 1], [1, 1]) {\n}",
+        "pipeline.strand<cooperative> workers([0], [4], [1]) {\n}",
+    ],
 )
 
 pipeline_end = Op(

@@ -1,0 +1,30 @@
+// Adjacent packets cross the 1 MiB and 8 MiB address boundaries. A separate
+// runtime coordinate exercises the register-plus-immediate address form.
+func.def @large_uniform_loads(%position_input: index, %input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %position = index.assume %position_input [range(%position_input, 0, 7)] : index
+  %tail = index.constant 524288 : index
+  %tail_position = index.add %position, %tail : index
+  %read_input, %write_output = buffer.assume.noalias %input, %output : buffer, buffer
+  %source = buffer.view %read_input[%origin] : buffer -> view<2097161xi32>
+  %first = vector.load %source[262143] : view<2097161xi32> -> vector<3xi32>
+  %second = vector.load %source[2097151] : view<2097161xi32> -> vector<3xi32>
+  %last = view.load %source[%tail_position] : view<2097161xi32> -> i32
+  %destination = buffer.view %write_output[%origin] : buffer -> view<7xi32>
+  vector.store %first, %destination[0] : vector<3xi32>, view<7xi32>
+  vector.store %second, %destination[3] : vector<3xi32>, view<7xi32>
+  view.store %last, %destination[6] : i32, view<7xi32>
+  func.return
+}
+
+check.scenario @large_uniform_load_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %position = check.literal value(7) : index
+    %input = check.generate.iota offset(19) step(3) : tensor<2097161xi32>
+    %output = check.generate.fill value(-123) : tensor<7xi32>
+    check.compare<@large_uniform_loads>(%position, %input, %output) : (index, tensor<2097161xi32>, tensor<7xi32>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<7xi32>
+    }
+  }
+  check.return
+}

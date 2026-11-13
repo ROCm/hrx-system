@@ -1,0 +1,51 @@
+// RUN: verify
+// Loom semantic handles have their own linking contracts and cannot masquerade
+// as native C records merely because their facade is written in C++.
+#include <loomcxx/buffer.h>
+// ERROR@+1: LOWERING/059 "C ABI records require a named plain aggregate"
+extern "C" void semantic_buffer(loom::type::buffer<unsigned> value) {}
+
+// ====
+// Overlapping no_unique_address fields have no independent physical C ABI slot.
+struct Empty {};
+struct Record { [[no_unique_address]] Empty empty; unsigned value; };
+// ERROR@+1: LOWERING/059 "C ABI record fields require distinct named object storage"
+extern "C" Record overlapping_record(Record value) { return value; }
+
+// ====
+// C linkage does not remove the invisible-reference ABI required by a
+// nontrivial C++ copy constructor.
+struct Record { int value; Record(const Record& other) : value(other.value) {} };
+// ERROR@+1: LOWERING/059 "C ABI records must be trivial for calls"
+extern "C" int consume(Record record) { return record.value; }
+
+// ====
+// Move construction has the same call-boundary requirement.
+struct Record { int value; Record(Record&& other) : value(other.value) {} };
+// ERROR@+1: LOWERING/059 "C ABI records must be trivial for calls"
+extern "C" int consume(Record record) { return record.value; }
+
+// ====
+// A nontrivial destructor affects both parameter passing and result return.
+struct Record { int value; ~Record() {} };
+// ERROR@+1: LOWERING/059 "C ABI records must be trivial for calls"
+extern "C" Record produce() { return {3}; }
+
+// ====
+// The call classification propagates through ordinary member objects.
+struct Member { int value; ~Member() {} };
+struct Record { Member member; int bias; };
+// ERROR@+1: LOWERING/059 "C ABI records must be trivial for calls"
+extern "C" int consume(Record record) { return record.member.value + record.bias; }
+
+// ====
+// Trivially copyable is not enough: a class with no eligible copy or move
+// constructor also requires the C++ object-passing contract.
+struct Record {
+  int value;
+  Record(const Record&) = delete;
+  Record(Record&&) = delete;
+};
+static_assert(__is_trivially_copyable(Record));
+// ERROR@+1: LOWERING/059 "C ABI records must be trivial for calls"
+extern "C" int consume(Record record) { return record.value; }

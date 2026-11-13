@@ -21,6 +21,7 @@
 #include <algorithm>
 #include <array>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <span>
 #include <stdexcept>
@@ -37,7 +38,6 @@
 #include "loom/import/cxx/binding/command_programs.h"
 #include "loom/import/cxx/binding/config.h"
 #include "loom/import/cxx/binding/constexpr.h"
-#include "loom/import/cxx/binding/exponent.h"
 #include "loom/import/cxx/binding/fastmath.h"
 #include "loom/import/cxx/binding/function_contracts.h"
 #include "loom/import/cxx/binding/index_expression.h"
@@ -48,21 +48,25 @@
 #include "loom/import/cxx/binding/schedule_region.h"
 #include "loom/import/cxx/binding/target_definitions.h"
 #include "loom/import/cxx/binding/template_definitions.h"
+#include "loom/import/cxx/binding/template_inputs.h"
 #include "loom/import/cxx/check.h"
 #include "loom/import/cxx/control/analysis.h"
+#include "loom/import/cxx/control/regions.h"
+#include "loom/import/cxx/receiver/scopes.h"
 #include "loom/import/cxx/source/attributes.h"
+#include "loom/import/cxx/source/constants.h"
 #include "loom/import/cxx/source/error.h"
 #include "loom/import/cxx/source/expressions.h"
 #include "loom/import/cxx/source/locations.h"
+#include "loom/import/cxx/source/objects.h"
 #include "loom/import/cxx/source/source.h"
 #include "loom/import/cxx/symbol/functions.h"
 #include "loom/import/cxx/symbol/immutable_objects.h"
 #include "loom/import/cxx/value/bindings.h"
 #include "loom/import/cxx/value/bitcast.h"
-#include "loom/import/cxx/value/duplication.h"
 #include "loom/import/cxx/value/initialization.h"
+#include "loom/import/cxx/value/lvalues.h"
 #include "loom/import/cxx/value/objects.h"
-#include "loom/import/cxx/value/ownership.h"
 #include "loom/import/cxx/value/representation.h"
 #include "loom/import/cxx/value/scalar.h"
 #include "loom/import/cxx/value/signature.h"
@@ -84,6 +88,13 @@
 namespace loom::cxx_import {
 namespace {
 class Translator final : private Initialization::Evaluation {
+  struct Mutation {
+    // Automatic binding owning this complete source subobject.
+    cxx::Symbol* binding;
+    // Retained type and component slice carried across the region edge.
+    ValueProjection projection;
+  };
+
  public:
   Translator(cxx::TranslationUnit& unit, Diagnostics& diagnostics,
              loom_module_t* module, const loom_cxx_import_options_t& options)
@@ -177,7 +188,7 @@ class Translator final : private Initialization::Evaluation {
     if (current_function_.kind == FunctionKind::Pipeline) {
       fail(owner, "kernel intrinsic in a pipeline requires a strand body");
     }
-    fail(owner, "kernel intrinsic requires a kernel or force-inline helper");
+    fail(owner, "kernel intrinsic requires a kernel or inline helper");
   }
 
   void require_launch_configuration_context(cxx::AST* owner) {
@@ -191,74 +202,29 @@ class Translator final : private Initialization::Evaluation {
       return;
     }
     fail(owner,
-         "target launch query requires a kernel configuration or force-inline "
+         "target launch query requires a kernel configuration or inline "
          "helper");
   }
 
-  struct ReceiverOwner {
-    // Active receiver stack index.
-    size_t index;
-    // Whether source initialization has completed this subobject.
-    bool complete;
-  };
-
-  struct ReceiverFieldBinding {
-    // Member identity owned by this source current-object scope.
-    cxx::FieldSymbol* field;
-    // Enclosing receiver for the same declaration, when recursively active.
-    std::optional<ReceiverOwner> previous_owner;
-    // Enclosing value binding hidden while this receiver is current.
-    std::optional<Value> previous_value;
-  };
-
-  struct ActiveReceiver {
-    // Canonical flattened structure shared by value and storage receivers.
-    const RecordPartition* record;
-    // Addressable destination, absent for a record assembled as SSA values.
-    std::optional<StorageProjection> storage;
-    // Cv-qualified complete object type governing storage observations.
-    const cxx::Type* object_type;
-    // State restored when this source current-object scope ends.
-    std::vector<ReceiverFieldBinding> fields;
-  };
-
-  void enter_receiver(const RecordPartition& record,
-                      std::optional<StorageProjection> storage,
-                      const cxx::Type* object_type) {
-    ActiveReceiver receiver{&record, storage, object_type, {}};
-    receiver.fields.reserve(record.members.size());
-    const size_t receiver_index = receivers_.size();
-    for (const auto& member : record.members) {
-      auto owner = receiver_owners_.find(member.field);
-      auto value = values_.find(member.field);
-      receiver.fields.push_back(
-          {member.field,
-           owner == receiver_owners_.end()
-               ? std::nullopt
-               : std::optional<ReceiverOwner>{owner->second},
-           value == values_.end() ? std::nullopt
-                                  : std::optional<Value>{value->second}});
-      receiver_owners_[member.field] = {receiver_index, false};
-      values_.erase(member.field);
-    }
-    receivers_.push_back(std::move(receiver));
-  }
-
   void enter_value_receiver(const RecordPartition& record) override {
-    enter_receiver(record, std::nullopt, record.source->type());
+    receivers_.enter(record, std::nullopt, record.source->type());
   }
 
   void enter_storage_receiver(const RecordPartition& record,
                               StorageProjection destination,
                               const cxx::Type* object_type) override {
-    enter_receiver(record, destination, object_type);
+    receivers_.enter(record, destination, object_type);
   }
 
+  bool suspend_current_receiver() override { return receivers_.suspend(); }
+
+  void resume_current_receiver() override { receivers_.resume(); }
+
   void bind_value_receiver(const RecordPartition& record, Value value) {
-    enter_receiver(record, std::nullopt, record.source->type());
+    receivers_.enter(record, std::nullopt, record.source->type());
     for (const auto& member : record.members) {
       publish_receiver_member(
-          member.field,
+          member.source,
           value.project(*member.partition, member.component_offset));
     }
   }
@@ -266,83 +232,127 @@ class Translator final : private Initialization::Evaluation {
   void bind_storage_receiver(const RecordPartition& record,
                              StorageProjection destination,
                              const cxx::Type* object_type) {
-    enter_receiver(record, destination, object_type);
+    receivers_.enter(record, destination, object_type);
     for (const auto& member : record.members) {
-      complete_storage_receiver_member(member.field);
+      complete_receiver_member(member.source);
     }
   }
 
   Value current_receiver_value(cxx::AST* owner) {
-    IREE_ASSERT(!receivers_.empty());
-    const auto& active = receivers_.back();
+    IREE_ASSERT(receivers_.current());
+    const auto& active = *receivers_.current();
     IREE_ASSERT(!active.storage);
     std::vector<loom_value_id_t> components;
     components.reserve(active.record->component_count);
     for (const auto& member : active.record->members) {
-      receiver_member(member.field, owner).append_to(components);
+      receiver_member(member.source, owner).append_to(components);
     }
     return value_arena_.capture(*active.record, components);
   }
 
   void replace_current_receiver(Value value) {
-    IREE_ASSERT(!receivers_.empty());
-    const auto& active = receivers_.back();
+    IREE_ASSERT(receivers_.current());
+    const auto& active = *receivers_.current();
     IREE_ASSERT(!active.storage && &value.partition() == active.record);
     for (const auto& member : active.record->members) {
       publish_receiver_member(
-          member.field,
+          member.source,
           value.project(*member.partition, member.component_offset));
     }
   }
 
-  ActiveReceiver* receiver(cxx::FieldSymbol* field) {
-    auto found = receiver_owners_.find(field);
-    return found == receiver_owners_.end() ? nullptr
-                                           : &receivers_[found->second.index];
-  }
-
-  cxx::FieldSymbol* current_receiver_field(cxx::ExpressionAST* expression) {
+  std::optional<SubobjectProjection> current_receiver_selection(
+      cxx::ExpressionAST* expression) {
     expression = unwrap_object_identity(unit_, expression);
+    cxx::Symbol* field = nullptr;
+    cxx::List<cxx::Symbol*>* path = nullptr;
     if (auto* id = cxx::ast_cast<cxx::IdExpressionAST>(expression)) {
-      auto* field = cxx::symbol_cast<cxx::FieldSymbol>(id->symbol);
-      return field && receiver(field) ? field : nullptr;
+      field = id->symbol;
+      path = id->subobjectPath;
+    } else if (auto* member =
+                   cxx::ast_cast<cxx::MemberExpressionAST>(expression);
+               member && is_current_object(unit_, member->baseExpression)) {
+      field = member->symbol;
+      path = member->subobjectPath;
     }
-    auto* member = cxx::ast_cast<cxx::MemberExpressionAST>(expression);
-    if (!member || !is_current_object(unit_, member->baseExpression)) {
-      return nullptr;
+    auto* root = path ? path->value : field;
+    if (!is_direct_subobject(field) || !receivers_.find(root)) {
+      return std::nullopt;
     }
-    auto* field = cxx::symbol_cast<cxx::FieldSymbol>(member->symbol);
-    return field && receiver(field) ? field : nullptr;
+    return types_.selection(field, path, expression);
   }
 
-  std::optional<StorageProjection> receiver_storage(cxx::FieldSymbol* field,
+  Value selected_receiver_value(const SubobjectProjection& selected,
+                                const cxx::Type* type, cxx::AST* owner) {
+    auto* root = selected.root->source;
+    if (auto* active = receivers_.find(root); active && active->storage) {
+      if (!receivers_.is_complete(root)) {
+        fail(owner, "member is read before its initialization is complete");
+      }
+      auto projection =
+          storage_.subobject(*active->storage, selected.byte_offset, owner);
+      auto traits = unit_.typeTraits();
+      if (traits.is_volatile(active->object_type)) {
+        type = traits.add_volatile(type);
+      }
+      return traits.is_array(type) ? Value(projection.pointer)
+                                   : objects_.load(projection, type, owner);
+    }
+    if (!receivers_.is_complete(root)) {
+      fail(owner, "member is read before its initialization is complete");
+    }
+    auto value = values_.project(
+        root, *selected.partition,
+        selected.component_offset - selected.root->component_offset,
+        value_arena_);
+    if (!value) {
+      fail(owner, "source subobject is read before initialization");
+    }
+    return *value;
+  }
+
+  std::optional<StorageProjection> captured_object_storage(
+      cxx::Symbol* field, cxx::List<cxx::Symbol*>* path, cxx::AST* owner) {
+    if (!receivers_.current()) {
+      return std::nullopt;
+    }
+    auto* closure = receivers_.current()->record->source;
+    auto captured =
+        captured_object_member(unit_, closure, path ? path->value : field);
+    if (!captured) {
+      return std::nullopt;
+    }
+    auto pointer = receiver_member(captured->pointer_field, owner);
+    return storage_.subobject(
+        storage_.project(pointer.pointer(), captured->object_type, owner),
+        source_subobject_offset(field) +
+            (path ? types_.subobject_offset(path) : 0),
+        owner);
+  }
+
+  std::optional<StorageProjection> receiver_storage(cxx::Symbol* field,
                                                     cxx::AST* owner) {
-    auto* active = receiver(field);
+    auto* active = receivers_.find(field);
     if (!active || !active->storage) {
       return std::nullopt;
     }
     return storage_.member(*active->storage, field, owner);
   }
 
-  void publish_receiver_member(cxx::FieldSymbol* field, Value value) override {
-    auto* active = receiver(field);
-    IREE_ASSERT(active && !active->storage);
-    values_.set(field, value);
-    receiver_owners_.at(field).complete = true;
+  void publish_receiver_member(cxx::Symbol* field, Value value) override {
+    receivers_.publish(field, value);
   }
 
-  void complete_storage_receiver_member(cxx::FieldSymbol* field) override {
-    auto* active = receiver(field);
-    IREE_ASSERT(active && active->storage);
-    receiver_owners_.at(field).complete = true;
+  void complete_receiver_member(cxx::Symbol* field) override {
+    receivers_.mark_complete(field);
   }
 
-  Value receiver_member(cxx::FieldSymbol* field, cxx::AST* owner) override {
-    auto* active = receiver(field);
+  Value receiver_member(cxx::Symbol* field, cxx::AST* owner) override {
+    auto* active = receivers_.find(field);
     if (!active) {
       fail(owner, "member expression requires a current source object");
     }
-    if (!receiver_owners_.at(field).complete) {
+    if (!receivers_.is_complete(field)) {
       fail(owner, "member is read before its initialization is complete");
     }
     if (active->storage) {
@@ -358,34 +368,22 @@ class Translator final : private Initialization::Evaluation {
                        member_type, owner));
     }
     auto found = values_.find(field);
-    IREE_ASSERT(found != values_.end());
+    if (found == values_.end()) {
+      fail(owner, "source subobject is read before initialization");
+    }
     return found->second;
   }
 
-  void leave_receiver() override {
-    IREE_ASSERT(!receivers_.empty());
-    const size_t receiver_index = receivers_.size() - 1;
-    auto receiver = std::move(receivers_.back());
-    receivers_.pop_back();
-    for (const auto& binding : receiver.fields) {
-      auto found = receiver_owners_.find(binding.field);
-      IREE_ASSERT(found != receiver_owners_.end() &&
-                  found->second.index == receiver_index);
-      if (binding.previous_owner) {
-        found->second = *binding.previous_owner;
-      } else {
-        receiver_owners_.erase(found);
-      }
-      if (binding.previous_value) {
-        values_.set(binding.field, *binding.previous_value);
-      } else {
-        values_.erase(binding.field);
-      }
-    }
-  }
+  void leave_receiver() override { receivers_.leave(); }
 
   Value convert(cxx::ExpressionAST* input_ast, const cxx::Type* output_type,
                 cxx::AST* owner) override {
+    if (unit_.typeTraits().is_array(output_type) &&
+        unit_.typeTraits().is_char_type(
+            unit_.typeTraits().get_element_type(output_type)) &&
+        string_initializer(input_ast)) {
+      return initialization_.value(output_type, input_ast, nullptr, owner);
+    }
     auto value = expression(input_ast);
     if (value.is_address()) {
       auto input_domain =
@@ -427,12 +425,21 @@ class Translator final : private Initialization::Evaluation {
       return value;
     }
     if (value.is_pointer()) {
+      if (types_.unqualified(output_type)->kind() == cxx::TypeKind::kBool) {
+        return storage_.compare_null(value.pointer().root, false, owner);
+      }
       if (loom_type_kind(types_.get(output_type, owner)) != LOOM_TYPE_BUFFER) {
         fail(owner, "conversion must preserve pointer representation");
       }
       return value;
     }
     const auto& output_partition = types_.partition(output_type, owner);
+    if (output_partition.kind == ValueKind::Pointer) {
+      if (!null_pointer_expression(unit_, input_ast)) {
+        fail(owner, "integer-to-pointer conversion requires a null constant");
+      }
+      return storage_.null(owner);
+    }
     if (output_partition.kind == ValueKind::Address) {
       auto input = value.ssa();
       auto input_type = value_type(input);
@@ -518,6 +525,14 @@ class Translator final : private Initialization::Evaluation {
       auto components = value.components();
       for (size_t index = 0; index < components.size(); ++index) {
         name(components[index], hint + "_" + partition.component_names[index]);
+      }
+    } else if (value.is_array()) {
+      const auto& partition =
+          static_cast<const ArrayPartition&>(value.partition());
+      for (size_t index = 0; index < partition.source->size(); ++index) {
+        name(value.project(*partition.element,
+                           index * partition.element->component_count),
+             hint + "_" + std::to_string(index));
       }
     } else if (value.is_vector()) {
       const auto& partition =
@@ -631,6 +646,27 @@ class Translator final : private Initialization::Evaluation {
     size_t destruction_mark;
   };
 
+  // Evaluated source reference into one nontrivial temporary object. Geometry
+  // remains explicit when a returned reference denotes a base or subobject.
+  struct TemporaryReference {
+    // Stable construction-instance index in the current cleanup queue.
+    size_t index;
+    // First SSA component within the complete temporary's current value.
+    size_t component_offset = 0;
+    // Source-layout displacement if the complete object becomes addressable.
+    uint64_t byte_offset = 0;
+  };
+
+  // One reference declaration currently adopting a semantic temporary. The
+  // existing lvalue evaluator installs the complete value under this owner,
+  // then applies the source-written projection without materializing bytes.
+  struct MaterializedReference {
+    // Reference declaration owning the lifetime-extended object.
+    cxx::Symbol* binding;
+    // Canonical complete-object construction selected by lifetime analysis.
+    cxx::ExpressionAST* origin;
+  };
+
   // One completed source object awaiting destruction. Automatic bindings and
   // current receiver fields resolve their latest value at the cleanup edge;
   // temporary objects retain the value or storage created by their expression.
@@ -642,7 +678,7 @@ class Translator final : private Initialization::Evaluation {
     cxx::Symbol* binding = nullptr;
     // Current receiver subobject, mutually exclusive with |binding|, |value|
     // and |storage|.
-    cxx::FieldSymbol* field = nullptr;
+    cxx::Symbol* field = nullptr;
     // Complete source object type, including any bounded array extents.
     const cxx::Type* object_type = nullptr;
     // Direct SSA object retained by an unmaterialized temporary.
@@ -651,37 +687,66 @@ class Translator final : private Initialization::Evaluation {
     std::optional<StorageProjection> storage;
     // Conditional temporary activation flag, stored outside its source arm.
     std::optional<StorageAccess> activity;
-    // Original value identity used to transfer a result object's ownership.
-    std::optional<Value> identity;
+    // Canonical construction site; each evaluation gets its own cleanup entry.
+    cxx::ExpressionAST* origin = nullptr;
     // Source declaration or expression owning the implicit call location.
     cxx::AST* source = nullptr;
   };
 
-  void call_destructor(const Destruction& destruction, Value receiver,
+  void call_destructor(const Destruction& destruction,
+                       std::span<const loom_value_id_t> arguments,
                        ImplicitObjectABI receiver_abi, cxx::AST* source) {
     auto callee =
         functions_.declare(destruction.function, source, receiver_abi);
-    std::vector<loom_value_id_t> arguments;
-    receiver.append_to(arguments);
     loom_op_t* op;
     check(loom_func_call_build(&builder_, 0, 0, 0, 0, callee, arguments.data(),
                                arguments.size(), nullptr, 0, nullptr, 0,
                                locations_.get(source), &op));
   }
 
+  template <typename Read>
+  void destroy_components(const Destruction& destruction, cxx::AST* source,
+                          Read&& read) {
+    const auto* record = types_.record(destruction.element_type, source);
+    const auto* projection =
+        functions_.receiver_projection(destruction.function);
+    std::vector<loom_value_id_t> arguments;
+    arguments.reserve(projection ? projection->input_component_count
+                                 : record->component_count);
+    for (size_t index = destruction.element_count; index > 0; --index) {
+      const size_t offset = (index - 1) * record->component_count;
+      arguments.clear();
+      if (projection) {
+        for (const auto& group : projection->inputs) {
+          read(*group.partition, offset + group.component_offset)
+              .append_to(arguments);
+        }
+      } else {
+        read(*record, offset).append_to(arguments);
+      }
+      call_destructor(destruction, arguments, ImplicitObjectABI::Value, source);
+    }
+  }
+
   void destroy_value(Value value, const Destruction& destruction,
                      cxx::AST* source) {
-    auto* record = types_.record(destruction.element_type, source);
-    IREE_ASSERT(record);
-    IREE_ASSERT_EQ(value.partition().component_count,
-                   destruction.element_count * record->component_count);
-    for (size_t index = destruction.element_count; index > 0; --index) {
-      auto element =
-          destruction.element_count == 1
-              ? value
-              : value.project(*record, (index - 1) * record->component_count);
-      call_destructor(destruction, element, ImplicitObjectABI::Value, source);
-    }
+    destroy_components(destruction, source,
+                       [&](const Partition& partition, size_t offset) {
+                         return value.project(partition, offset);
+                       });
+  }
+
+  void destroy_binding(cxx::Symbol* binding, const Destruction& destruction,
+                       cxx::AST* source) {
+    destroy_components(
+        destruction, source, [&](const Partition& partition, size_t offset) {
+          auto value =
+              values_.project(binding, partition, offset, value_arena_);
+          if (!value) {
+            fail(source, "destructor reads an uninitialized source subobject");
+          }
+          return *value;
+        });
   }
 
   void destroy_storage(StorageProjection object, const cxx::Type* type,
@@ -694,7 +759,7 @@ class Translator final : private Initialization::Evaluation {
       }
       return;
     }
-    call_destructor(destruction, Value(object.pointer),
+    call_destructor(destruction, Value(object.pointer).components(),
                     ImplicitObjectABI::Storage, source);
   }
 
@@ -703,21 +768,19 @@ class Translator final : private Initialization::Evaluation {
       auto local = locals_.find(active.binding);
       if (local != locals_.end()) {
         destroy_storage(local_object(active.binding, active.source),
-                        active.binding->type(), active.destruction,
+                        source_object_type(active.binding), active.destruction,
                         active.source);
       } else {
-        destroy_value(values_.at(active.binding), active.destruction,
-                      active.source);
+        destroy_binding(active.binding, active.destruction, active.source);
       }
       return;
     }
     if (active.field) {
       if (auto storage = receiver_storage(active.field, active.source)) {
-        destroy_storage(*storage, active.field->type(), active.destruction,
-                        active.source);
+        destroy_storage(*storage, source_object_type(active.field),
+                        active.destruction, active.source);
       } else {
-        destroy_value(receiver_member(active.field, active.source),
-                      active.destruction, active.source);
+        destroy_binding(active.field, active.destruction, active.source);
       }
       return;
     }
@@ -761,7 +824,7 @@ class Translator final : private Initialization::Evaluation {
       emit_destruction({
           .destruction = *destruction,
           .binding = binding,
-          .object_type = binding->type(),
+          .object_type = source_object_type(binding),
           .source = source,
       });
     }
@@ -812,7 +875,7 @@ class Translator final : private Initialization::Evaluation {
       active_destructions_.push_back({
           .destruction = *destruction,
           .binding = binding,
-          .object_type = binding->type(),
+          .object_type = source_object_type(binding),
           .source = source,
       });
     }
@@ -823,65 +886,49 @@ class Translator final : private Initialization::Evaluation {
       active_destructions_.push_back({
           .destruction = subobject.destruction,
           .field = subobject.field,
-          .object_type = subobject.field->type(),
+          .object_type = source_object_type(subobject.field),
           .source = source,
       });
     }
   }
 
-  static bool same_value(Value left, Value right) {
-    return &left.partition() == &right.partition() &&
-           std::ranges::equal(left.components(), right.components());
-  }
-
-  bool owns_temporary_result(cxx::ExpressionAST* expression) {
-    if (!expression ||
-        expression->valueCategory != cxx::ValueCategory::kPrValue ||
-        !unit_.typeTraits().is_class(expression->type)) {
-      return false;
-    }
-    return cxx::ast_cast<cxx::CallExpressionAST>(expression) ||
-           cxx::ast_cast<cxx::TypeConstructionAST>(expression) ||
-           cxx::ast_cast<cxx::BracedTypeConstructionAST>(expression) ||
-           cxx::ast_cast<cxx::BracedInitListAST>(expression) ||
-           cxx::ast_cast<cxx::ParenInitializerAST>(expression) ||
-           cxx::ast_cast<cxx::ConditionalExpressionAST>(expression) ||
-           (cxx::ast_cast<cxx::SubscriptExpressionAST>(expression) &&
-            cxx::ast_cast<cxx::SubscriptExpressionAST>(expression)->symbol) ||
-           direct_operator_call(expression).has_value() ||
-           (cxx::ast_cast<cxx::ImplicitCastExpressionAST>(expression) &&
-            cxx::ast_cast<cxx::ImplicitCastExpressionAST>(expression)
-                ->conversionFunction);
-  }
-
-  void materialize_conditional_temporary(DestructionAction& action) {
-    IREE_ASSERT(!conditional_cleanup_anchors_.empty());
-    IREE_ASSERT(action.value);
-    IREE_ASSERT(!action.storage);
-    IREE_ASSERT(!action.activity);
+  void allocate_temporary_storage(DestructionAction& action) {
     auto saved = loom_builder_save(&builder_);
-    loom_builder_set_before(&builder_, conditional_cleanup_anchors_.front());
+    if (!conditional_cleanup_anchors_.empty()) {
+      loom_builder_restore(&builder_, conditional_cleanup_anchors_.front());
+    }
     auto object_allocation = storage_.allocate(
         action.object_type, LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE, 0,
         action.source);
-    auto object = storage_.project(object_allocation.pointer,
-                                   action.object_type, action.source);
-    auto* bool_type = unit_.control()->getBoolType();
-    auto activity_allocation = storage_.allocate(
-        bool_type, LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE, 0, action.source);
-    StorageAccess activity = {activity_allocation.view, std::nullopt};
-    auto inactive = scalars_.integer(false, LOOM_SCALAR_TYPE_I1,
-                                     locations_.get(action.source));
-    storage_.store(activity, inactive, bool_type, action.source);
-    loom_builder_restore(&builder_, saved);
+    action.storage = storage_.project(object_allocation.pointer,
+                                      action.object_type, action.source);
+    if (!conditional_cleanup_anchors_.empty()) {
+      auto* bool_type = unit_.control()->getBoolType();
+      auto activity_allocation = storage_.allocate(
+          bool_type, LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE, 0, action.source);
+      action.activity = StorageAccess{activity_allocation.view, std::nullopt};
+      auto inactive = scalars_.integer(false, LOOM_SCALAR_TYPE_I1,
+                                       locations_.get(action.source));
+      storage_.store(*action.activity, inactive, bool_type, action.source);
+      loom_builder_restore(&builder_, saved);
+    }
+  }
 
-    objects_.store(object, *action.value, action.object_type, action.source);
-    auto active = scalars_.integer(true, LOOM_SCALAR_TYPE_I1,
-                                   locations_.get(action.source));
-    storage_.store(activity, active, bool_type, action.source);
+  void activate_temporary_storage(const DestructionAction& action) {
+    if (action.activity) {
+      auto active = scalars_.integer(true, LOOM_SCALAR_TYPE_I1,
+                                     locations_.get(action.source));
+      storage_.store(*action.activity, active, unit_.control()->getBoolType(),
+                     action.source);
+    }
+  }
+
+  void materialize_temporary_value(DestructionAction& action) {
+    allocate_temporary_storage(action);
+    objects_.store(*action.storage, *action.value, action.object_type,
+                   action.source);
+    activate_temporary_storage(action);
     action.value.reset();
-    action.storage = object;
-    action.activity = activity;
   }
 
   void materialize_conditional_temporaries(size_t mark) {
@@ -889,26 +936,60 @@ class Translator final : private Initialization::Evaluation {
     IREE_ASSERT_LE(mark, temporary_destructions_.size());
     for (size_t index = mark; index < temporary_destructions_.size(); ++index) {
       auto& action = temporary_destructions_[index];
-      if (action.value) {
-        materialize_conditional_temporary(action);
+      if (action && action->value) {
+        materialize_temporary_value(*action);
       }
     }
   }
 
-  Value retain_temporary(cxx::ExpressionAST* expression, Value value) {
-    if (!owns_temporary_result(expression)) {
+  std::optional<TemporaryReference> temporary_result(
+      cxx::ExpressionAST* expression) const {
+    auto* origin = control_->temporary_origins().materialization(expression);
+    auto found = temporary_results_.find(origin);
+    return found == temporary_results_.end()
+               ? std::nullopt
+               : std::optional(TemporaryReference{found->second});
+  }
+
+  void forget_temporary(size_t index) {
+    const auto& action = *temporary_destructions_[index];
+    auto found = temporary_results_.find(action.origin);
+    if (found != temporary_results_.end() && found->second == index) {
+      temporary_results_.erase(found);
+    }
+    temporary_destructions_[index].reset();
+  }
+
+  void extend_materialized_temporary(size_t index) {
+    auto& action = *temporary_destructions_[index];
+    if (!extends_temporaries_ &&
+        control_->temporary_origins().extended(action.origin)) {
+      active_destructions_.push_back(action);
+      forget_temporary(index);
+    }
+  }
+
+  Value retain_temporary(cxx::ExpressionAST* expression, Value value,
+                         size_t evaluation_mark) {
+    auto* origin = control_->temporary_origins().result(expression);
+    if (!origin) {
       return value;
     }
-    auto destruction = destruction_for(unit_, expression->type);
-    if (!destruction) {
+    const auto& destruction = control_->temporary_origins().destruction(origin);
+    // Transparent syntax can complete an object already created by a child.
+    // A later evaluation of the same source construction is a distinct object.
+    auto found = temporary_results_.find(origin);
+    if (found != temporary_results_.end() && found->second >= evaluation_mark) {
+      temporary_destructions_[found->second]->value = value;
       return value;
     }
     IREE_ASSERT(full_expression_mark_);
-    temporary_destructions_.push_back({
-        .destruction = *destruction,
+    temporary_results_.insert_or_assign(origin, temporary_destructions_.size());
+    temporary_destructions_.push_back(DestructionAction{
+        .destruction = destruction,
         .object_type = expression->type,
         .value = value,
-        .identity = value,
+        .origin = origin,
         .source = expression,
     });
     return value;
@@ -918,8 +999,10 @@ class Translator final : private Initialization::Evaluation {
     FullExpression expression = {
         .mark = temporary_destructions_.size(),
         .parent_mark = full_expression_mark_,
+        .parent_extends_temporaries = extends_temporaries_,
     };
     full_expression_mark_ = expression.mark;
+    extends_temporaries_ = false;
     return expression;
   }
 
@@ -927,68 +1010,96 @@ class Translator final : private Initialization::Evaluation {
     IREE_ASSERT(full_expression_mark_);
     IREE_ASSERT_EQ(*full_expression_mark_, expression.mark);
     IREE_ASSERT_LE(expression.mark, temporary_destructions_.size());
+    if (extends_temporaries_) {
+      // The range initializer's surviving caller-owned temporaries become
+      // lexical objects in their original construction order. Adopted function
+      // arguments and nested full expressions have already retired their slots.
+      for (size_t index = expression.mark;
+           index < temporary_destructions_.size(); ++index) {
+        if (temporary_destructions_[index]) {
+          active_destructions_.push_back(*temporary_destructions_[index]);
+          forget_temporary(index);
+        }
+      }
+    }
     for (size_t index = temporary_destructions_.size(); index > expression.mark;
          --index) {
-      emit_destruction(temporary_destructions_[index - 1]);
+      if (temporary_destructions_[index - 1]) {
+        emit_destruction(*temporary_destructions_[index - 1]);
+        forget_temporary(index - 1);
+      }
     }
     temporary_destructions_.resize(expression.mark);
     full_expression_mark_ = expression.parent_mark;
+    extends_temporaries_ = expression.parent_extends_temporaries;
   }
 
-  bool adopt_temporary(Value value) {
-    IREE_ASSERT(full_expression_mark_);
-    auto mark = *full_expression_mark_;
-    for (size_t index = temporary_destructions_.size(); index > mark; --index) {
-      auto& action = temporary_destructions_[index - 1];
-      if (action.identity && same_value(*action.identity, value)) {
-        temporary_destructions_.erase(temporary_destructions_.begin() +
-                                      (index - 1));
-        return true;
+  // Result ownership transfers by construction identity, independently of
+  // the immutable payload and the number of transparent syntax wrappers.
+  void adopt_temporary_result(cxx::ExpressionAST* expression) {
+    auto* origin = control_->temporary_origins().result(expression);
+    auto found = temporary_results_.find(origin);
+    if (found != temporary_results_.end()) {
+      forget_temporary(found->second);
+    }
+  }
+
+  // A reference can extend a complete temporary through one of its
+  // subobjects. Adopt the complete materialization rather than requiring the
+  // initializer expression itself to be the owning prvalue.
+  void bind_temporary_materialization(cxx::ExpressionAST* expression,
+                                      cxx::Symbol* binding, cxx::AST* source) {
+    auto* origin = control_->temporary_origins().materialization(expression);
+    auto found = temporary_results_.find(origin);
+    if (found != temporary_results_.end()) {
+      if (extends_temporaries_) {
+        // Preserve this object's construction position among the initializer's
+        // other temporaries, but read its mutable named value at scope exit.
+        auto& action = *temporary_destructions_[found->second];
+        action.binding = binding;
+        action.value.reset();
+        action.source = source;
+        return;
+      }
+      forget_temporary(found->second);
+    }
+    activate_automatic_destruction(binding, source);
+  }
+
+  void update_temporary(std::optional<TemporaryReference> temporary,
+                        Value updated, const cxx::Type* type, cxx::AST* owner) {
+    if (temporary) {
+      auto& action = *temporary_destructions_[temporary->index];
+      if (action.storage) {
+        objects_.store(
+            storage_.subobject(*action.storage, temporary->byte_offset, owner),
+            updated, type, owner);
+      } else {
+        action.value = value_arena_.replace(
+            *action.value, temporary->component_offset, updated);
       }
     }
-    return false;
   }
 
-  bool adopt_temporary_result(cxx::ExpressionAST* expression, Value value) {
-    if (!expression ||
-        !cxx::materializedTemporary(unit_.typeTraits(), expression)) {
-      return false;
+  StorageProjection materialize_temporary(
+      cxx::ExpressionAST* expression, Value value,
+      std::optional<TemporaryReference> temporary = std::nullopt) {
+    if (!temporary) {
+      temporary = temporary_result(expression);
     }
-    return adopt_temporary(value);
-  }
-
-  StorageProjection materialize_temporary(cxx::ExpressionAST* expression,
-                                          Value value) {
-    IREE_ASSERT(full_expression_mark_);
-    auto mark = *full_expression_mark_;
-    for (size_t index = temporary_destructions_.size(); index > mark; --index) {
-      auto& action = temporary_destructions_[index - 1];
-      if (!action.identity || !same_value(*action.identity, value)) {
-        continue;
-      }
+    if (temporary) {
+      auto& action = *temporary_destructions_[temporary->index];
       if (!action.storage) {
-        if (conditional_cleanup_anchors_.empty()) {
-          auto allocation = storage_.allocate(
-              expression->type, LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE, 0,
-              expression);
-          action.storage = storage_.project(allocation.pointer,
-                                            expression->type, expression);
-          objects_.store(*action.storage, value, expression->type, expression);
-          action.value.reset();
-        } else {
-          materialize_conditional_temporary(action);
-        }
+        materialize_temporary_value(action);
       }
       auto storage = *action.storage;
-      if (extend_temporary_lifetime_) {
-        active_destructions_.push_back(std::move(action));
-        temporary_destructions_.erase(temporary_destructions_.begin() +
-                                      (index - 1));
+      if (temporary->byte_offset) {
+        storage =
+            storage_.subobject(storage, temporary->byte_offset, expression);
       }
+      extend_materialized_temporary(temporary->index);
       return storage;
     }
-    IREE_ASSERT(!cxx::materializedTemporary(unit_.typeTraits(), expression) ||
-                !destruction_for(unit_, expression->type));
     auto allocation = storage_.allocate(
         expression->type, LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE, 0, expression);
     auto storage =
@@ -1006,38 +1117,6 @@ class Translator final : private Initialization::Evaluation {
     bool unreachable = false;
   };
 
-  const ReferenceParameter* reference_parameter(size_t ordinal) const {
-    for (const auto& reference : current_function_.reference_parameters) {
-      if (reference.ordinal == ordinal) {
-        return &reference;
-      }
-      if (reference.ordinal > ordinal) {
-        break;
-      }
-    }
-    return nullptr;
-  }
-
-  bool returns_value_reference_parameter(cxx::FunctionSymbol* function) const {
-    auto returned = functions_.reference_return_parameter(function);
-    if (!returned) {
-      return false;
-    }
-    for (const auto& reference : functions_.reference_parameters(function)) {
-      if (reference.ordinal == *returned) {
-        return reference.abi == ReferenceABI::Value;
-      }
-    }
-    return false;
-  }
-
-  bool returns_value_reference(cxx::FunctionSymbol* function,
-                               const Value& result) const {
-    return returns_value_reference_parameter(function) ||
-           (!result.is_pointer() &&
-            functions_.returns_current_receiver_reference(function));
-  }
-
   std::vector<const cxx::Type*> function_result_sources() {
     std::vector<const cxx::Type*> sources;
     const bool returns_reference =
@@ -1045,29 +1124,56 @@ class Translator final : private Initialization::Evaluation {
     const bool returns_parameter_alias =
         returns_reference && current_function_.control &&
         current_function_.control->reference_return_parameter().has_value();
+    const auto projected_origins =
+        functions_.projected_reference_return_origins(
+            current_function_.source->symbol,
+            current_function_.implicit_object
+                ? current_function_.implicit_object->abi
+                : ImplicitObjectABI::None);
+    const bool returns_projected_reference =
+        returns_reference && !projected_origins.empty();
     const bool returns_receiver_alias =
         current_function_.implicit_object && current_function_.control &&
         current_function_.implicit_object->abi == ImplicitObjectABI::Value &&
         current_function_.control->returns_current_receiver_reference();
+    const bool returns_exact_projection =
+        returns_projected_reference && projected_origins.size() == 1;
     if (!unit_.typeTraits().is_void(current_function_.return_type) &&
-        !returns_receiver_alias && !returns_parameter_alias) {
-      sources.push_back(returns_reference
-                            ? unit_.typeTraits().add_pointer(
-                                  unit_.typeTraits().remove_reference(
-                                      current_function_.return_type))
-                            : current_function_.return_type);
+        !returns_receiver_alias && !returns_parameter_alias &&
+        !returns_exact_projection) {
+      const cxx::Type* result_type = current_function_.return_type;
+      if (returns_projected_reference) {
+        result_type = unit_.control()->getUnsignedIntType();
+      } else if (returns_reference) {
+        result_type = unit_.typeTraits().add_pointer(
+            unit_.typeTraits().remove_reference(result_type));
+      }
+      sources.push_back(result_type);
     }
     if (current_function_.implicit_object &&
         current_function_.implicit_object->abi == ImplicitObjectABI::Value) {
-      for (auto* field : current_function_.implicit_object->written_fields) {
-        sources.push_back(types_.unqualified_value(field->type()));
+      const auto& implicit = *current_function_.implicit_object;
+      if (implicit.projection) {
+        for (const auto& group : implicit.projection->outputs) {
+          sources.push_back(group.type);
+        }
+      } else {
+        for (auto* field : implicit.written_fields) {
+          sources.push_back(
+              types_.unqualified_value(source_object_type(field)));
+        }
       }
     }
-    auto parameters = current_function_.source->symbol->parameters();
-    for (const auto& reference : current_function_.reference_parameters) {
-      if (reference.abi == ReferenceABI::Value && reference.mutable_access) {
-        sources.push_back(
-            types_.unqualified_value(parameters[reference.ordinal]->type()));
+    for (const auto& parameter : current_function_.indirect_parameters) {
+      if (parameter.abi == IndirectParameterABI::Value &&
+          parameter.mutable_access) {
+        if (parameter.projection) {
+          for (const auto& group : parameter.projection->outputs) {
+            sources.push_back(group.type);
+          }
+        } else {
+          sources.push_back(types_.unqualified(parameter.object_type));
+        }
       }
     }
     return sources;
@@ -1076,14 +1182,38 @@ class Translator final : private Initialization::Evaluation {
   Returned complete_return(Returned returned) {
     if (current_function_.implicit_object &&
         current_function_.implicit_object->abi == ImplicitObjectABI::Value) {
-      for (auto* field : current_function_.implicit_object->written_fields) {
-        receiver_member(field, returned.source).append_to(returned.values);
+      const auto& implicit = *current_function_.implicit_object;
+      if (implicit.projection) {
+        for (const auto& group : implicit.projection->outputs) {
+          read(project_call_target(current_receiver_target(), group,
+                                   returned.source),
+               returned.source)
+              .append_to(returned.values);
+        }
+      } else {
+        for (auto* field : implicit.written_fields) {
+          receiver_member(field, returned.source).append_to(returned.values);
+        }
       }
     }
     auto parameters = current_function_.source->symbol->parameters();
-    for (const auto& reference : current_function_.reference_parameters) {
-      if (reference.abi == ReferenceABI::Value && reference.mutable_access) {
-        values_.at(parameters[reference.ordinal]).append_to(returned.values);
+    for (const auto& parameter : current_function_.indirect_parameters) {
+      if (parameter.abi == IndirectParameterABI::Value &&
+          parameter.mutable_access) {
+        if (parameter.projection) {
+          for (const auto& group : parameter.projection->outputs) {
+            auto value =
+                values_.project(parameters[parameter.ordinal], *group.partition,
+                                group.component_offset, value_arena_);
+            if (!value) {
+              fail(returned.source,
+                   "output field is not initialized on this return path");
+            }
+            value->append_to(returned.values);
+          }
+        } else {
+          values_.at(parameters[parameter.ordinal]).append_to(returned.values);
+        }
       }
     }
     return returned;
@@ -1099,6 +1229,77 @@ class Translator final : private Initialization::Evaluation {
     auto returned = return_values_impl(statement);
     finish_full_expression(mark);
     return returned;
+  }
+
+  void append_reference_return_indices(cxx::ExpressionAST* expression,
+                                       std::vector<size_t>& indices) {
+    expression = unwrap_object_identity(unit_, expression);
+    if (auto* conditional =
+            cxx::ast_cast<cxx::ConditionalExpressionAST>(expression);
+        conditional &&
+        expression->valueCategory != cxx::ValueCategory::kPrValue) {
+      append_reference_return_indices(conditional->iftrueExpression, indices);
+      append_reference_return_indices(conditional->iffalseExpression, indices);
+      return;
+    }
+    auto projected_indices =
+        current_function_.control->projected_reference_return_indices(
+            expression);
+    IREE_ASSERT(!projected_indices.empty());
+    indices.insert(indices.end(), projected_indices.begin(),
+                   projected_indices.end());
+  }
+
+  Value encode_reference_return_index(const Lvalue& target,
+                                      std::span<const size_t> indices,
+                                      size_t& leaf_index, cxx::AST* owner) {
+    const auto* selected = target.selection();
+    if (!selected) {
+      IREE_ASSERT_LT(leaf_index, indices.size());
+      return Value(scalars_.integer(indices[leaf_index++], LOOM_SCALAR_TYPE_I32,
+                                    locations_.get(owner)));
+    }
+    return dispatch_ordinal(
+        selected->selector, selected->alternatives.size(),
+        unit_.control()->getUnsignedIntType(), owner, [&](size_t ordinal) {
+          return encode_reference_return_index(selected->alternatives[ordinal],
+                                               indices, leaf_index, owner);
+        });
+  }
+
+  loom_value_id_t selected_reference_return(cxx::ExpressionAST* expression,
+                                            cxx::AST* owner) {
+    std::vector<size_t> indices;
+    append_reference_return_indices(expression, indices);
+    IREE_ASSERT(!indices.empty());
+
+    auto target = reference_lvalue(expression, owner, LvalueAccess::Read,
+                                   /*force_ordinal=*/true);
+    if (indices.size() == 1) {
+      return scalars_.integer(indices.front(), LOOM_SCALAR_TYPE_I32,
+                              locations_.get(owner));
+    }
+    const auto* selected = target.selection();
+    IREE_ASSERT(selected);
+    if (selected->alternatives.size() == indices.size() &&
+        std::ranges::none_of(selected->alternatives,
+                             [](const Lvalue& alternative) {
+                               return alternative.selection();
+                             })) {
+      bool identity_mapping = true;
+      for (size_t ordinal = 0; ordinal < indices.size(); ++ordinal) {
+        identity_mapping &= indices[ordinal] == ordinal;
+      }
+      if (identity_mapping) {
+        return selected->selector;
+      }
+    }
+
+    size_t leaf_index = 0;
+    auto encoded =
+        encode_reference_return_index(target, indices, leaf_index, owner);
+    IREE_ASSERT_EQ(leaf_index, indices.size());
+    return encoded.ssa();
   }
 
   Returned return_values_impl(cxx::ReturnStatementAST* statement) {
@@ -1125,20 +1326,34 @@ class Translator final : private Initialization::Evaluation {
       const bool returns_parameter_alias =
           current_function_.control &&
           current_function_.control->reference_return_parameter().has_value();
+      const auto projected_origins =
+          functions_.projected_reference_return_origins(
+              current_function_.source->symbol,
+              current_function_.implicit_object
+                  ? current_function_.implicit_object->abi
+                  : ImplicitObjectABI::None);
+      const bool returns_projected_reference = !projected_origins.empty();
       const bool returns_receiver_alias =
           current_function_.implicit_object && current_function_.control &&
           current_function_.implicit_object->abi == ImplicitObjectABI::Value &&
           current_function_.control->returns_current_receiver_reference();
       if (returns_receiver_alias) {
         IREE_ASSERT(is_current_object(unit_, statement->expression));
-      } else if (!returns_parameter_alias) {
+      } else if (returns_projected_reference && projected_origins.size() > 1) {
+        returned.values.push_back(
+            selected_reference_return(statement->expression, statement));
+      } else if (returns_parameter_alias || returns_projected_reference) {
+        // The alias needs no runtime payload, but selecting it can still
+        // evaluate a condition or call an effectful forwarding helper.
+        effect(statement->expression);
+      } else {
         reference_value(statement->expression, statement)
             .append_to(returned.values);
       }
     } else {
       auto value = convert(statement->expression, current_function_.return_type,
                            statement);
-      adopt_temporary_result(statement->expression, value);
+      adopt_temporary_result(statement->expression);
       value.append_to(returned.values);
     }
     return returned;
@@ -1214,21 +1429,24 @@ class Translator final : private Initialization::Evaluation {
                              defined.source->symbol);
       control_ = &*owned_control_;
     }
+    immutable_objects_.retain_locals(defined.source->symbol,
+                                     control_->static_locals());
     auto saved = loom_builder_enter_region(&builder_, op, region);
     values_.clear();
     locals_.clear();
     active_destructions_.clear();
     temporary_destructions_.clear();
+    temporary_results_.clear();
     full_expression_mark_.reset();
+    extends_temporaries_ = false;
     conditional_cleanup_anchors_.clear();
-    extend_temporary_lifetime_ = false;
     break_destruction_marks_.clear();
     continue_destruction_marks_.clear();
     immutable_storage_.clear();
     immutable_preamble_end_ = nullptr;
     references_.clear();
+    pointer_aliases_.clear();
     receivers_.clear();
-    receiver_owners_.clear();
     value_arena_.reset();
     size_t argument_index = 0;
     if (defined.implicit_object) {
@@ -1239,7 +1457,27 @@ class Translator final : private Initialization::Evaluation {
         fail(defined.source,
              "implicit object receiver requires an admitted record type");
       }
-      if (implicit.abi == ImplicitObjectABI::Value) {
+      if (implicit.projection) {
+        receivers_.enter(*record, std::nullopt, record->source->type());
+        for (const auto& member : record->members) {
+          values_.declare(member.source, *member.partition);
+          if (!defined.source->symbol->isConstructor()) {
+            receivers_.mark_complete(member.source);
+          }
+        }
+        for (const auto& group : implicit.projection->inputs) {
+          auto value = region_value(region, argument_index, *group.partition);
+          auto components = value.components();
+          for (size_t index = 0; index < components.size(); ++index) {
+            name(components[index],
+                 "this_" +
+                     record->component_names[group.component_offset + index]);
+          }
+          write(project_call_target(current_receiver_target(), group,
+                                    defined.source),
+                value, defined.source);
+        }
+      } else if (implicit.abi == ImplicitObjectABI::Value) {
         auto value =
             name(region_value(region, argument_index, *record), "this");
         bind_value_receiver(*record, value);
@@ -1254,27 +1492,72 @@ class Translator final : private Initialization::Evaluation {
       }
     }
     size_t parameter_index = 0;
+    size_t indirect_index = 0;
     for (auto* parameter : parameters) {
-      const auto* reference = reference_parameter(parameter_index);
+      const IndirectParameter* indirect = nullptr;
+      if (indirect_index < defined.indirect_parameters.size() &&
+          defined.indirect_parameters[indirect_index].ordinal ==
+              parameter_index) {
+        indirect = &defined.indirect_parameters[indirect_index++];
+      }
       auto* value_type =
-          !reference ? types_.unqualified(parameter->type())
-          : reference->abi == ReferenceABI::Storage
-              ? unit_.typeTraits().add_pointer(
-                    unit_.typeTraits().remove_reference(parameter->type()))
-              : types_.unqualified_value(parameter->type());
+          !indirect ? types_.unqualified(parameter->type())
+          : indirect->abi == IndirectParameterABI::Storage
+              ? unit_.typeTraits().add_pointer(indirect->object_type)
+              : types_.unqualified(indirect->object_type);
       const auto& partition = types_.partition(value_type, defined.source);
+      if (indirect && indirect->projection) {
+        values_.declare(parameter, partition);
+        for (const auto& group : indirect->projection->inputs) {
+          auto value = region_value(region, argument_index, *group.partition);
+          auto parameter_name = cxx::to_string(parameter->name());
+          if (partition.kind == ValueKind::Record) {
+            const auto& record = static_cast<const RecordPartition&>(partition);
+            auto components = value.components();
+            for (size_t index = 0; index < components.size(); ++index) {
+              name(components[index],
+                   parameter_name + "_" +
+                       record.component_names[group.component_offset + index]);
+            }
+          } else {
+            name(value, parameter_name);
+          }
+          values_.replace(parameter, group.component_offset, value,
+                          value_arena_);
+        }
+        if (indirect->borrowed_pointer) {
+          pointer_aliases_.emplace(
+              parameter,
+              Lvalue{ObjectLvalue{indirect->object_type,
+                                  Destination{parameter, 0, nullptr}}});
+        }
+        activate_automatic_destruction(parameter, defined.source);
+        ++parameter_index;
+        continue;
+      }
       bool kernel_pointer = defined.kind == FunctionKind::Kernel &&
                             partition.kind == ValueKind::Pointer;
       // Only pointers change representation at kernel entry: the ABI supplies
       // one buffer, and source pointer transport adds its zero byte origin.
+      const auto& incoming_partition =
+          defined.template_family
+              ? types_.partition(cxx::type_cast<cxx::FunctionType>(
+                                     defined.template_family->type())
+                                     ->parameterTypes()[parameter_index],
+                                 defined.source)
+              : (kernel_pointer ? kSSAPartition : partition);
       auto value =
           defined.staged_signature
               ? staged_region_value(
                     region, *defined.staged_signature,
                     defined.staged_signature->parameters[parameter_index],
                     partition)
-              : region_value(region, argument_index,
-                             kernel_pointer ? kSSAPartition : partition);
+              : region_value(region, argument_index, incoming_partition);
+      if (defined.template_family) {
+        value = bind_template_input(value, value_type, types_, value_arena_,
+                                    defined.source, &builder_,
+                                    locations_.get(defined.source));
+      }
       if (kernel_pointer) {
         auto buffer = value.ssa();
         if (!defined.parameter_contracts.empty()) {
@@ -1285,14 +1568,11 @@ class Translator final : private Initialization::Evaluation {
         value = storage_.root(buffer, defined.source);
       }
       value = name(value, cxx::to_string(parameter->name()));
-      if (reference && reference->abi == ReferenceABI::Storage) {
+      if (indirect && indirect->abi == IndirectParameterABI::Storage) {
         auto projection = storage_.project(
-            value.pointer(),
-            unit_.typeTraits().remove_reference(parameter->type()),
-            defined.source);
+            value.pointer(), indirect->object_type, defined.source);
         references_[parameter] = {
-            ObjectLvalue{unit_.typeTraits().remove_reference(parameter->type()),
-                         projection}};
+            ObjectLvalue{indirect->object_type, projection}};
         activate_automatic_destruction(parameter, defined.source);
         ++parameter_index;
         continue;
@@ -1310,17 +1590,31 @@ class Translator final : private Initialization::Evaluation {
       } else {
         values_.set(parameter, value);
       }
+      if (indirect && indirect->borrowed_pointer) {
+        pointer_aliases_.emplace(
+            parameter,
+            Lvalue{ObjectLvalue{indirect->object_type,
+                                Destination{parameter, 0, nullptr}}});
+      }
       activate_automatic_destruction(parameter, defined.source);
       ++parameter_index;
     }
     if (defined.source->symbol->isConstructor()) {
-      IREE_ASSERT(defined.implicit_object &&
-                  defined.implicit_object->abi == ImplicitObjectABI::Storage &&
-                  !receivers_.empty() && receivers_.back().storage);
-      initialization_.constructor_receiver(
-          *receivers_.back().storage, *receivers_.back().record,
-          defined.implicit_object->object_type, defined.source->symbol,
-          defined.source);
+      IREE_ASSERT(defined.implicit_object && receivers_.current());
+      auto initializers = control_->constructor_initializers();
+      if (defined.implicit_object->abi == ImplicitObjectABI::Storage) {
+        IREE_ASSERT(receivers_.current()->storage);
+        initialization_.constructor_receiver(
+            *receivers_.current()->storage, *receivers_.current()->record,
+            defined.implicit_object->object_type, defined.source->symbol,
+            initializers, defined.source);
+      } else {
+        IREE_ASSERT(defined.implicit_object->abi == ImplicitObjectABI::Value &&
+                    !receivers_.current()->storage);
+        initialization_.value_constructor_receiver(
+            *receivers_.current()->record, defined.implicit_object->object_type,
+            defined.source->symbol, initializers, defined.source);
+      }
     }
     if (defined.source->symbol->isDestructor()) {
       activate_subobject_destructions(defined.source);
@@ -1418,9 +1712,9 @@ class Translator final : private Initialization::Evaluation {
   StorageAccess allocate_local(
       cxx::Symbol* symbol, int64_t alignment, cxx::AST* owner,
       const ObjectRepresentation* initializer = nullptr) {
-    auto allocation =
-        storage_.allocate(symbol->type(), LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE,
-                          alignment, owner, initializer);
+    auto allocation = storage_.allocate(source_object_type(symbol),
+                                        LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE,
+                                        alignment, owner, initializer);
     auto spelling = cxx::to_string(symbol->name());
     name(Value(allocation.pointer), spelling + "_storage");
     name(allocation.view, spelling + "_view");
@@ -1469,21 +1763,25 @@ class Translator final : private Initialization::Evaluation {
   Value binding(cxx::Symbol* symbol, cxx::AST* owner) {
     auto found = locals_.find(symbol);
     if (found == locals_.end()) {
+      if (!values_.initialized(symbol)) {
+        fail(owner, "source value is read before initialization");
+      }
       return values_.at(symbol);
     }
-    if (unit_.typeTraits().is_array(symbol->type())) {
+    if (unit_.typeTraits().is_array(source_object_type(symbol))) {
       return found->second.pointer;
     }
-    auto value =
-        unit_.typeTraits().is_class(symbol->type())
-            ? objects_.load(local_object(symbol, owner), symbol->type(), owner)
-            : Value(storage_.load({found->second.view, std::nullopt},
-                                  symbol->type(), owner));
+    auto value = unit_.typeTraits().is_class(source_object_type(symbol))
+                     ? objects_.load(local_object(symbol, owner),
+                                     source_object_type(symbol), owner)
+                     : Value(storage_.load({found->second.view, std::nullopt},
+                                           source_object_type(symbol), owner));
     return name(value, cxx::to_string(symbol->name()));
   }
 
   StorageProjection local_object(cxx::Symbol* symbol, cxx::AST* owner) {
-    return storage_.project(locals_.at(symbol).pointer, symbol->type(), owner);
+    return storage_.project(locals_.at(symbol).pointer,
+                            source_object_type(symbol), owner);
   }
 
   Value apply_constexpr_contract(Value value, ConstexprContract contract) {
@@ -1500,38 +1798,62 @@ class Translator final : private Initialization::Evaluation {
                            cxx::ExpressionAST* initializer,
                            ConstexprContract constexpr_contract,
                            cxx::AST* owner) {
+    if (auto* referent = control_->pointer_alias(variable)) {
+      pointer_aliases_.emplace(
+          variable, reference_lvalue(referent, owner, LvalueAccess::Read));
+      return;
+    }
     if (unit_.typeTraits().is_reference(variable->type())) {
       if (!initializer) {
         fail(owner, "reference locals require an initializer");
       }
-      cxx::Initializer source(initializer);
-      auto* referent_expression = source.singleExpression();
+      auto* referent_expression =
+          cxx::Initializer(initializer).referenceExpression(unit_.typeTraits());
       if (!referent_expression) {
         fail(initializer,
              "reference locals require one initializer expression");
       }
       auto* referent = unit_.typeTraits().remove_reference(variable->type());
-      const bool previous_extension = extend_temporary_lifetime_;
-      extend_temporary_lifetime_ = true;
-      auto target = reference_lvalue(referent_expression, owner,
-                                     unit_.typeTraits().is_const(referent)
-                                         ? LvalueAccess::Read
-                                         : LvalueAccess::Write);
-      extend_temporary_lifetime_ = previous_extension;
+      if (auto* materialization =
+              control_->reference_materialization(variable)) {
+        if (control_->reference_requires_storage(variable)) {
+          fail(initializer,
+               "lifetime-extended semantic objects cannot provide physical "
+               "storage identity");
+        }
+        auto previous = materialized_reference_;
+        materialized_reference_ =
+            MaterializedReference{variable, materialization};
+        auto target = reference_lvalue(referent_expression, owner,
+                                       unit_.typeTraits().is_const(referent)
+                                           ? LvalueAccess::Read
+                                           : LvalueAccess::Write);
+        materialized_reference_ = previous;
+        bind_temporary_materialization(referent_expression, variable, owner);
+        references_.emplace(variable, std::move(target));
+        return;
+      }
+      auto target =
+          control_->reference_requires_storage(variable)
+              ? Lvalue{ObjectLvalue{
+                    referent,
+                    storage_.project(
+                        reference_value(referent_expression, owner).pointer(),
+                        referent, owner)}}
+              : reference_lvalue(referent_expression, owner,
+                                 unit_.typeTraits().is_const(referent)
+                                     ? LvalueAccess::Read
+                                     : LvalueAccess::Write);
       references_.emplace(variable, std::move(target));
       return;
     }
-    const bool user_record_constructor = types_.is_user_record_constructor(
-        variable->type(), variable->constructor(), owner);
-    const bool automatic_destruction =
-        control_->automatic_destruction(variable) != nullptr;
+    const bool record_constructor_call =
+        types_.record_constructor_requires_call(variable->type(),
+                                                variable->constructor(), owner);
     const bool requires_initialization =
-        initializer || user_record_constructor ||
+        initializer || record_constructor_call ||
         control_->default_constructor_initializes(variable->constructor());
-    if (unit_.typeTraits().is_array(variable->type()) ||
-        user_record_constructor || (!initializer && automatic_destruction) ||
-        control_->addressed(variable) ||
-        unit_.typeTraits().is_volatile(variable->type())) {
+    if (control_->storage_backed(variable)) {
       auto contents =
           unit_.typeTraits().is_volatile(variable->type())
               ? std::nullopt
@@ -1554,14 +1876,8 @@ class Translator final : private Initialization::Evaluation {
       activate_automatic_destruction(variable, owner);
       return;
     }
-    if (!initializer) {
-      const auto& partition = types_.partition(variable->type(), owner);
-      if (partition.kind != ValueKind::SSA) {
-        fail(owner,
-             "uninitialized locals require scalar or native vector object "
-             "storage");
-      }
-      allocate_local(variable, variable->explicitAlignment(), owner);
+    if (!requires_initialization) {
+      values_.declare(variable, types_.partition(variable->type(), owner));
       activate_automatic_destruction(variable, owner);
       return;
     }
@@ -1571,11 +1887,74 @@ class Translator final : private Initialization::Evaluation {
       types_.admit_construction(variable->constructor(), variable->type(),
                                 owner);
     }
-    auto value =
-        apply_constexpr_contract(expression(initializer), constexpr_contract);
-    adopt_temporary_result(initializer, value);
+    auto value = apply_constexpr_contract(
+        record_constructor_call
+            ? initialization_.value(variable->type(), initializer,
+                                    variable->constructor(), owner)
+        : initializer ? expression(initializer)
+                      : initialization_.value(variable->type(), nullptr,
+                                              variable->constructor(), owner),
+        constexpr_contract);
+    adopt_temporary_result(initializer);
     values_.set(variable, name(value, cxx::to_string(variable->name())));
     activate_automatic_destruction(variable, owner);
+  }
+
+  void initialize_local_declarator(
+      cxx::InitDeclaratorAST* declaration,
+      cxx::List<cxx::AttributeSpecifierAST*>* attributes, cxx::AST* owner) {
+    reject_misplaced_binding_declarator(unit_, diagnostics_,
+                                        declaration->declarator);
+    auto* variable = cxx::symbol_cast<cxx::VariableSymbol>(declaration->symbol);
+    auto constexpr_contract = admit_constexpr_contract(
+        unit_, diagnostics_, types_, attributes, variable,
+        variable && control_->addressed(variable), declaration);
+    if (cxx::symbol_cast<cxx::TypeAliasSymbol>(declaration->symbol)) {
+      return;
+    }
+    if (variable && variable->isStatic() && !variable->isThreadLocal()) {
+      if (annotated(variable, "workgroup")) {
+        fail(owner, "static immutable storage cannot have workgroup scope");
+      }
+      return;
+    }
+    if (!variable || variable->isExtern() || variable->isThreadLocal()) {
+      fail(owner, "local storage duration must be automatic or __shared__");
+    }
+    if (annotated(declaration->symbol, "workgroup")) {
+      if (current_function_.kind != FunctionKind::Kernel &&
+          current_function_.kind != FunctionKind::TemplateDefinition) {
+        fail(declaration,
+             "workgroup storage requires a kernel or template definition "
+             "body");
+      }
+      if (declaration->initializer) {
+        fail(declaration, "workgroup storage cannot have an initializer");
+      }
+      if (control_->automatic_destruction(variable)) {
+        fail(declaration, "workgroup storage requires trivial destruction");
+      }
+      auto* source_type = types_.unqualified(declaration->symbol->type());
+      auto* array = cxx::type_cast<cxx::BoundedArrayType>(source_type);
+      auto allocation =
+          storage_.allocate(source_type, LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP,
+                            variable->explicitAlignment(), declaration);
+      auto spelling = cxx::to_string(declaration->symbol->name());
+      if (array) {
+        values_.set(declaration->symbol,
+                    name(Value(allocation.pointer), spelling));
+      } else {
+        name(Value(allocation.pointer), spelling + "_storage");
+        locals_[declaration->symbol] = allocation;
+      }
+      name(allocation.view, spelling + "_view");
+      return;
+    }
+    auto mark = begin_full_expression();
+    extends_temporaries_ = control_->initializes_range(declaration);
+    initialize_variable(variable, declaration->initializer, constexpr_contract,
+                        declaration);
+    finish_full_expression(mark);
   }
 
   ConstexprContract initialize_condition(cxx::ExpressionAST* expression) {
@@ -1607,7 +1986,7 @@ class Translator final : private Initialization::Evaluation {
     auto* decision = declaration->symbol;
     auto value = apply_constexpr_contract(expression(declaration->initializer),
                                           constexpr_contract);
-    adopt_temporary_result(declaration->initializer, value);
+    adopt_temporary_result(declaration->initializer);
     if (auto found = locals_.find(decision); found != locals_.end()) {
       storage_.store({found->second.view, std::nullopt}, value.ssa(),
                      decision->type(), owner);
@@ -1659,6 +2038,10 @@ class Translator final : private Initialization::Evaluation {
     FastMathScope math_scope(
         lexical_fastmath_flags_,
         resolve_fastmath(ast ? fastmath_.statement(ast) : std::nullopt));
+    if (auto* range = cxx::ast_cast<cxx::ForRangeStatementAST>(ast)) {
+      validate_statement_attributes(ast);
+      return returning_statement(control_->range_scope(range), continuation);
+    }
     const size_t selection_mark = active_destructions_.size();
     auto* selected = selected_statement(ast);
     if (selected != ast) {
@@ -1769,6 +2152,16 @@ class Translator final : private Initialization::Evaluation {
                             pointer ? pointer->elementType() : type, owner);
   }
 
+  const Lvalue* pointer_alias_lvalue(cxx::ExpressionAST* expression) const {
+    auto* source =
+        cxx::ast_cast<cxx::IdExpressionAST>(unwrap_expression(expression));
+    if (!source) {
+      return nullptr;
+    }
+    auto found = pointer_aliases_.find(source->symbol);
+    return found == pointer_aliases_.end() ? nullptr : &found->second;
+  }
+
   StorageProjection pointer_expression(cxx::ExpressionAST* ast) {
     auto* source = strip_implicit_casts(ast);
     auto* source_type = unit_.typeTraits().remove_reference(source->type);
@@ -1839,66 +2232,74 @@ class Translator final : private Initialization::Evaluation {
 
   std::optional<StorageProjection> reference_field_address(
       cxx::ExpressionAST* ast) {
-    ast = strip_implicit_casts(ast);
+    ast = unwrap_object_identity(unit_, ast);
     cxx::FieldSymbol* field = nullptr;
+    auto* member = cxx::ast_cast<cxx::MemberExpressionAST>(ast);
     if (auto* id = cxx::ast_cast<cxx::IdExpressionAST>(ast)) {
       field = cxx::symbol_cast<cxx::FieldSymbol>(id->symbol);
-      if (!field || !receiver(field)) {
-        return std::nullopt;
-      }
-    } else if (auto* member = cxx::ast_cast<cxx::MemberExpressionAST>(ast)) {
+    } else if (member) {
       field = cxx::symbol_cast<cxx::FieldSymbol>(member->symbol);
-      if (!field) {
-        return std::nullopt;
-      }
-      if (!unit_.typeTraits().is_lvalue_reference(field->type())) {
-        return std::nullopt;
-      }
-      if (auto* active = receiver(field);
-          active && is_current_object(unit_, member->baseExpression)) {
-        auto pointer = receiver_member(field, ast);
-        return storage_.project(
-            pointer.pointer(),
-            unit_.typeTraits().remove_reference(field->type()), ast);
-      }
-      if (control_->storage_backed(member)) {
-        fail(ast,
-             "reference-bearing records cannot be loaded from physical "
-             "object storage");
-      }
-      auto base = expression(member->baseExpression);
-      const auto& slice = types_.member(field, ast);
-      auto pointer = base.project(*slice.partition, slice.component_offset);
-      return storage_.project(
-          pointer.pointer(), unit_.typeTraits().remove_reference(field->type()),
-          ast);
     }
     if (!field || !unit_.typeTraits().is_lvalue_reference(field->type())) {
       return std::nullopt;
     }
-    auto pointer = receiver_member(field, ast);
-    return storage_.project(pointer.pointer(),
-                            unit_.typeTraits().remove_reference(field->type()),
-                            ast);
+    auto* referent = unit_.typeTraits().remove_reference(field->type());
+    if (auto selected = current_receiver_selection(ast)) {
+      auto value = selected_receiver_value(*selected, field->type(), ast);
+      return storage_.project(value.pointer(), referent, ast);
+    }
+    if (!member) {
+      return std::nullopt;
+    }
+    if (control_->storage_backed(member)) {
+      fail(ast,
+           "reference-bearing records cannot be loaded from physical object "
+           "storage");
+    }
+    auto base = expression(member->baseExpression);
+    auto selected = types_.selection(field, member->subobjectPath, ast);
+    auto value = base.project(*selected.partition, selected.component_offset);
+    return storage_.project(value.pointer(), referent, ast);
   }
 
   StorageProjection object_address(cxx::ExpressionAST* ast) {
     ast = unwrap_object_identity(unit_, ast);
+    if (auto* binary = cxx::ast_cast<cxx::BinaryExpressionAST>(ast);
+        binary && !binary->symbol && binary->op == cxx::TokenKind::T_COMMA) {
+      effect(binary->leftExpression);
+      return object_address(binary->rightExpression);
+    }
+    if (auto* cast = cxx::ast_cast<cxx::ImplicitCastExpressionAST>(ast);
+        cast && is_class_adjustment(cast)) {
+      auto object = object_address(cast->expression);
+      auto byte_offset = types_.subobject_offset(cast->subobjectPath);
+      return cast->castKind == cxx::ImplicitCastKind::kBaseToDerivedConversion
+                 ? storage_.enclosing(object, byte_offset, cast)
+                 : storage_.subobject(object, byte_offset, cast);
+    }
     if (auto* literal = cxx::ast_cast<cxx::StringLiteralExpressionAST>(ast)) {
       return string_literal(literal);
     }
     if (auto reference = reference_field_address(ast)) {
       return *reference;
     }
-    if (auto* field = current_receiver_field(ast)) {
-      if (auto projection = receiver_storage(field, ast)) {
-        return *projection;
+    if (auto selected = current_receiver_selection(ast)) {
+      auto* active = receivers_.find(selected->root->source);
+      if (active->storage) {
+        return storage_.subobject(*active->storage, selected->byte_offset, ast);
       }
       fail(ast,
            "addressing a member during initialization requires addressable "
            "record storage");
     }
     if (auto* id = cxx::ast_cast<cxx::IdExpressionAST>(ast)) {
+      auto* field = cxx::symbol_cast<cxx::FieldSymbol>(id->symbol);
+      if (field) {
+        if (auto captured =
+                captured_object_storage(field, id->subobjectPath, ast)) {
+          return *captured;
+        }
+      }
       if (auto found = references_.find(id->symbol);
           found != references_.end()) {
         const auto* object =
@@ -1918,8 +2319,8 @@ class Translator final : private Initialization::Evaluation {
       }
       if (auto* variable = cxx::symbol_cast<cxx::VariableSymbol>(id->symbol);
           variable &&
-          cxx::symbol_cast<cxx::NamespaceSymbol>(
-              variable->canonical()->parent()) &&
+          (variable->isStatic() || cxx::symbol_cast<cxx::NamespaceSymbol>(
+                                       variable->canonical()->parent())) &&
           !configs_.contains(variable)) {
         return immutable_object(variable, id);
       }
@@ -1928,6 +2329,9 @@ class Translator final : private Initialization::Evaluation {
       }
     }
     if (auto* member = cxx::ast_cast<cxx::MemberExpressionAST>(ast)) {
+      if (member->vectorComponentKind != cxx::VectorComponentKind::kNone) {
+        fail(member, "extended-vector components are not addressable");
+      }
       auto* field = cxx::symbol_cast<cxx::FieldSymbol>(member->symbol);
       if (!field || field->isStatic()) {
         fail(ast, "record storage access requires a non-static data member");
@@ -1935,68 +2339,18 @@ class Translator final : private Initialization::Evaluation {
       auto base = member->accessOp == cxx::TokenKind::T_MINUS_GREATER
                       ? pointer_expression(member->baseExpression)
                       : object_address(member->baseExpression);
-      return storage_.member(base, field, ast);
-    }
-    if (auto call = direct_operator_call(ast)) {
-      auto* signature =
-          cxx::type_cast<cxx::FunctionType>(call->function->type());
-      if (!signature ||
-          !unit_.typeTraits().is_reference(signature->returnType())) {
-        fail(ast, "addressed operator must return a reference");
+      auto byte_offset = source_subobject_offset(field);
+      if (member->subobjectPath) {
+        byte_offset += types_.subobject_offset(member->subobjectPath);
       }
-      auto value = ordinary_operator_call(ast, *call);
-      if (!value || !value->is_pointer()) {
-        fail(ast, "reference-returning operator lost its object identity");
-      }
-      return storage_.project(
-          value->pointer(),
-          unit_.typeTraits().remove_reference(signature->returnType()), ast);
+      return storage_.subobject(base, byte_offset, ast);
     }
-    if (auto* subscript = cxx::ast_cast<cxx::SubscriptExpressionAST>(ast)) {
-      if (subscript->symbol) {
-        auto* signature =
-            cxx::type_cast<cxx::FunctionType>(subscript->symbol->type());
-        if (!signature ||
-            !unit_.typeTraits().is_reference(signature->returnType())) {
-          fail(ast, "addressed overloaded indexing must return a reference");
-        }
-        auto value = overloaded_subscript_call(subscript);
-        if (!value || !value->is_pointer()) {
-          fail(ast, "reference-returning subscript lost its object identity");
-        }
-        return storage_.project(
-            value->pointer(),
-            unit_.typeTraits().remove_reference(signature->returnType()), ast);
-      }
-      auto operands = subscript_operands(subscript);
-      return storage_.advance(operands.base, operands.index, operands.base_type,
-                              operands.index_type, cxx::TokenKind::T_PLUS, ast);
-    }
-    if (auto* unary = cxx::ast_cast<cxx::UnaryExpressionAST>(ast)) {
-      if (!unary->symbol && unary->op == cxx::TokenKind::T_STAR) {
-        return pointer_expression(unary->expression);
-      }
-    }
-    if (auto* call = cxx::ast_cast<cxx::CallExpressionAST>(ast)) {
-      auto* function = direct_callee(call);
-      auto* signature =
-          function ? cxx::type_cast<cxx::FunctionType>(function->type())
-                   : nullptr;
-      if (signature &&
-          unit_.typeTraits().is_reference(signature->returnType())) {
-        auto value = ordinary_call(call, function, locations_.get(call));
-        if (!value || !value->is_pointer()) {
-          fail(ast, "reference-returning call lost its object identity");
-        }
-        return storage_.project(
-            value->pointer(),
-            unit_.typeTraits().remove_reference(signature->returnType()), ast);
-      }
-    }
-    if (ast->valueCategory == cxx::ValueCategory::kPrValue &&
-        !unit_.typeTraits().is_array(ast->type)) {
+    // Value-producing operators and conversions materialize their result just
+    // like ordinary calls. Only glvalues below follow an existing identity.
+    if (ast->valueCategory == cxx::ValueCategory::kPrValue) {
       auto value = expression(ast);
-      if (unit_.typeTraits().is_class(ast->type)) {
+      if (unit_.typeTraits().is_class(ast->type) ||
+          unit_.typeTraits().is_array(ast->type)) {
         return materialize_temporary(ast, value);
       }
       auto allocation = storage_.allocate(
@@ -2005,6 +2359,24 @@ class Translator final : private Initialization::Evaluation {
       storage_.store(storage_.dereference(object, ast->type, ast), value.ssa(),
                      ast->type, ast);
       return object;
+    }
+    if (auto called = reference_call(ast)) {
+      if (called->reference_target) {
+        return reference_address(*called->reference_target, ast);
+      }
+      fail(ast,
+           "reference identity escaped an automatic value without "
+           "addressable storage");
+    }
+    if (auto* subscript = cxx::ast_cast<cxx::SubscriptExpressionAST>(ast)) {
+      auto operands = subscript_operands(subscript);
+      return storage_.advance(operands.base, operands.index, operands.base_type,
+                              operands.index_type, cxx::TokenKind::T_PLUS, ast);
+    }
+    if (auto* unary = cxx::ast_cast<cxx::UnaryExpressionAST>(ast)) {
+      if (!unary->symbol && unary->op == cxx::TokenKind::T_STAR) {
+        return pointer_expression(unary->expression);
+      }
     }
     fail(ast, "address-of requires an existing storage-backed element");
   }
@@ -2023,40 +2395,124 @@ class Translator final : private Initialization::Evaluation {
 
   enum class IncrementResult { Previous, Updated };
 
-  // One complete object selected by an automatic binding or evaluated memory
-  // address. Reads and writes share this projection even when another binding
-  // changes.
-  struct ObjectLvalue {
-    // Source object type retains qualifiers and storage access rules.
-    const cxx::Type* type;
-    // An automatic SSA partition or an evaluated storage projection.
-    std::variant<Destination, StorageAccess, StorageProjection> location;
-  };
+  // These arms only read evaluated lvalues or compute their replacements.
+  // Source expression effects and temporary construction have already finished.
+  Value selected_value(loom_value_id_t condition, const cxx::Type* result_type,
+                       cxx::AST* owner,
+                       const std::function<Value(size_t)>& operation) {
+    std::array<const cxx::Type*, 1> sources = {result_type};
+    auto outputs = bind_signature(types_, sources, owner, &builder_);
+    auto source = locations_.get(owner);
+    loom_op_t* op;
+    check(loom_scf_if_build(&builder_, LOOM_SCF_IF_BUILD_FLAG_HAS_ELSE_REGION,
+                            condition, outputs.types.data(),
+                            outputs.types.size(), nullptr, 0, source, &op));
+    for (size_t arm = 0; arm < 2; ++arm) {
+      auto* region =
+          arm == 0 ? loom_scf_if_then_region(op) : loom_scf_if_else_region(op);
+      auto saved = loom_builder_enter_region(&builder_, op, region);
+      auto value = operation(arm);
+      auto components = value.components();
+      loom_op_t* yield;
+      check(loom_scf_yield_build(&builder_, components.data(),
+                                 components.size(), source, &yield));
+      loom_builder_restore(&builder_, saved);
+    }
+    return value_arena_.capture(types_.partition(result_type, owner),
+                                {loom_op_results(op), outputs.types.size()});
+  }
 
-  // One lane projected from its complete vector lvalue. The source base and
-  // index have both been evaluated exactly once.
-  struct VectorLaneLvalue {
-    // Complete vector destination receiving the functional lane update.
-    ObjectLvalue destination;
-    // Vector snapshot used by one immediate compound operation. A durable C++
-    // reference has no snapshot and observes the current destination value on
-    // every later use while preserving its once-evaluated lane selector.
+  loom_value_id_t ordinal_condition(loom_value_id_t selector,
+                                    cxx::TokenKind predicate, size_t ordinal,
+                                    cxx::AST* owner) {
+    auto* ordinal_type = unit_.control()->getUnsignedIntType();
+    auto expected =
+        scalars_.integer(ordinal, LOOM_SCALAR_TYPE_I32, locations_.get(owner));
+    return scalars_.binary(predicate, selector, expected, ordinal_type,
+                           unit_.control()->getBoolType(), owner);
+  }
+
+  loom_value_id_t selection_condition(const SelectedLvalue& selected,
+                                      size_t ordinal, cxx::AST* owner) {
+    return ordinal_condition(selected.selector, cxx::TokenKind::T_EQUAL_EQUAL,
+                             ordinal, owner);
+  }
+
+  Value dispatch_ordinal_range(loom_value_id_t selector,
+                               const cxx::Type* result_type, cxx::AST* owner,
+                               const std::function<Value(size_t)>& operation,
+                               size_t begin, size_t end) {
+    IREE_ASSERT_LT(begin, end);
+    if (begin + 1 == end) {
+      return operation(begin);
+    }
+    const bool compact_tail = end - begin <= 3;
+    const size_t split = compact_tail ? begin : begin + (end - begin) / 2;
+    auto condition = ordinal_condition(
+        selector,
+        compact_tail ? cxx::TokenKind::T_EQUAL_EQUAL : cxx::TokenKind::T_LESS,
+        split, owner);
+    return selected_value(condition, result_type, owner, [&](size_t arm) {
+      if (compact_tail) {
+        return arm == 0 ? operation(begin)
+                        : dispatch_ordinal_range(selector, result_type, owner,
+                                                 operation, begin + 1, end);
+      }
+      return arm == 0 ? dispatch_ordinal_range(selector, result_type, owner,
+                                               operation, begin, split)
+                      : dispatch_ordinal_range(selector, result_type, owner,
+                                               operation, split, end);
+    });
+  }
+
+  Value dispatch_ordinal(loom_value_id_t selector, size_t count,
+                         const cxx::Type* result_type, cxx::AST* owner,
+                         const std::function<Value(size_t)>& operation) {
+    // Region construction visits every ordinal exactly once in ascending
+    // order. Reference-result encoding consumes its retained leaf map in that
+    // same source order without building a parallel flattened target list.
+    return dispatch_ordinal_range(selector, result_type, owner, operation, 0,
+                                  count);
+  }
+
+  Value dispatch_selection(const SelectedLvalue& selected, cxx::AST* owner,
+                           const std::function<Value(size_t)>& operation) {
+    return dispatch_ordinal(selected.selector, selected.alternatives.size(),
+                            types_.unqualified_value(selected.type), owner,
+                            operation);
+  }
+
+  // Result of one ordinary source call. Reference results retain their source
+  // lvalue, including physical storage. An unnamed value alias instead carries
+  // its referent value; a pointer value never doubles as a reference address.
+  struct EvaluatedCallResult {
+    // Source result or unnamed referent value; absent for void/lvalue results.
     std::optional<Value> value;
-    // Lane selector before projection to Loom's index domain.
-    loom_value_id_t index;
-    // Source selector type retaining its integer width and signedness.
-    const cxx::Type* index_type;
-  };
-
-  // Resolving a source lvalue executes every address and index expression once.
-  // An immediate lane operation may retain the complete vector snapshot;
-  // durable references instead reload their destination on each later use.
-  struct Lvalue {
-    // Complete object or one evaluated lane within a complete vector object.
-    std::variant<ObjectLvalue, VectorLaneLvalue> projection;
+    // Exact source destination named by a reference result.
+    std::optional<Lvalue> reference_target;
+    // Unnamed source object aliased by this reference result, if nontrivial.
+    std::optional<TemporaryReference> temporary;
   };
 
   enum class LvalueAccess { Read, Write };
+
+  std::optional<Lvalue> pointer_alias_member_lvalue(
+      cxx::MemberExpressionAST* member, cxx::AST* owner, LvalueAccess access) {
+    if (member->accessOp != cxx::TokenKind::T_MINUS_GREATER ||
+        member->vectorComponentKind != cxx::VectorComponentKind::kNone) {
+      return std::nullopt;
+    }
+    auto* alias = pointer_alias_lvalue(member->baseExpression);
+    if (!alias) {
+      return std::nullopt;
+    }
+    if (access == LvalueAccess::Write) {
+      types_.require_mutable(member->type, owner);
+    }
+    return alias->project(
+        types_.selection(member->symbol, member->subobjectPath, member),
+        member->type, storage_, owner);
+  }
 
   ObjectLvalue object_destination(
       cxx::ExpressionAST* expression, cxx::AST* owner,
@@ -2066,14 +2522,24 @@ class Translator final : private Initialization::Evaluation {
     if (access == LvalueAccess::Write) {
       types_.require_mutable(expression->type, expression);
     }
+    if (auto* id = cxx::ast_cast<cxx::IdExpressionAST>(
+            unwrap_object_identity(unit_, expression))) {
+      auto* field = cxx::symbol_cast<cxx::FieldSymbol>(id->symbol);
+      if (field) {
+        if (auto captured =
+                captured_object_storage(field, id->subobjectPath, owner)) {
+          return {expression->type, *captured};
+        }
+      }
+    }
     auto destination = retained_destination ? retained_destination
                                             : control_->destination(expression);
     if (destination) {
-      if (auto* field =
-              cxx::symbol_cast<cxx::FieldSymbol>(destination->binding);
-          field && receiver(field)) {
-        auto* active = receiver(field);
-        if (!receiver_owners_.at(field).complete) {
+      if (auto* field = destination->binding; receivers_.find(field)) {
+        auto* active = receivers_.find(field);
+        if (!receivers_.is_complete(field) &&
+            !(active->storage &&
+              unit_.typeTraits().is_array(expression->type))) {
           fail(owner,
                "member is mutated before its initialization is complete");
         }
@@ -2090,6 +2556,17 @@ class Translator final : private Initialization::Evaluation {
         }
       }
       if (!locals_.contains(destination->binding)) {
+        // A lifetime-extended semantic temporary uses its reference
+        // declaration as the complete SSA owner. Ordinary references have no
+        // value binding and continue to resolve through their retained lvalue.
+        if (values_.contains(destination->binding)) {
+          if (unit_.typeTraits().is_array(expression->type) &&
+              values_.partition(destination->binding).kind ==
+                  ValueKind::Pointer) {
+            return {expression->type, object_address(expression)};
+          }
+          return {expression->type, *destination};
+        }
         if (references_.contains(destination->binding)) {
           auto traits = unit_.typeTraits();
           if (preserve_identity || traits.is_class(expression->type) ||
@@ -2097,9 +2574,6 @@ class Translator final : private Initialization::Evaluation {
             return {expression->type, object_address(expression)};
           }
           return {expression->type, address(expression)};
-        }
-        if (values_.contains(destination->binding)) {
-          return {expression->type, *destination};
         }
         if (access == LvalueAccess::Write) {
           fail(owner, "mutation requires an owned automatic source binding");
@@ -2114,11 +2588,19 @@ class Translator final : private Initialization::Evaluation {
   }
 
   Value read(const ObjectLvalue& target, cxx::AST* owner) {
+    if (std::holds_alternative<CurrentReceiver>(target.location)) {
+      return current_receiver_value(owner);
+    }
     if (auto* destination = std::get_if<Destination>(&target.location)) {
-      auto value = values_.at(destination->binding);
-      return destination->member ? value.project(*destination->member,
-                                                 destination->component_offset)
-                                 : value;
+      const auto& partition = destination->member
+                                  ? *destination->member
+                                  : values_.partition(destination->binding);
+      auto value = values_.project(destination->binding, partition,
+                                   destination->component_offset, value_arena_);
+      if (!value) {
+        fail(owner, "source subobject is read before initialization");
+      }
+      return *value;
     }
     if (auto* object = std::get_if<StorageProjection>(&target.location)) {
       return objects_.load(*object, target.type, owner);
@@ -2128,14 +2610,23 @@ class Translator final : private Initialization::Evaluation {
   }
 
   void write(const ObjectLvalue& target, Value value, cxx::AST* owner) {
+    if (std::holds_alternative<CurrentReceiver>(target.location)) {
+      replace_current_receiver(value);
+      return;
+    }
     if (auto* destination = std::get_if<Destination>(&target.location)) {
-      auto binding = values_.at(destination->binding);
-      values_.set(destination->binding,
-                  name(destination->member
-                           ? value_arena_.replace(
-                                 binding, destination->component_offset, value)
-                           : value,
-                       cxx::to_string(destination->binding->name())));
+      if (destination->member) {
+        values_.replace(destination->binding, destination->component_offset,
+                        value, value_arena_);
+        if (values_.initialized(destination->binding)) {
+          values_.set(destination->binding,
+                      name(values_.at(destination->binding),
+                           cxx::to_string(destination->binding->name())));
+        }
+      } else {
+        values_.set(destination->binding,
+                    name(value, cxx::to_string(destination->binding->name())));
+      }
     } else if (auto* object =
                    std::get_if<StorageProjection>(&target.location)) {
       objects_.store(*object, value, target.type, owner);
@@ -2145,54 +2636,353 @@ class Translator final : private Initialization::Evaluation {
     }
   }
 
-  Lvalue vector_lane_destination(
-      cxx::SubscriptExpressionAST* subscript, cxx::AST* owner,
-      std::optional<Destination> retained_destination,
-      LvalueAccess access = LvalueAccess::Write, bool retain_value = true) {
-    if (subscript->symbol) {
-      fail(subscript, "overloaded indexing is not admitted");
+  bool is_array_element(cxx::ExpressionAST* expression) {
+    expression = unwrap_object_identity(unit_, expression);
+    auto* subscript = cxx::ast_cast<cxx::SubscriptExpressionAST>(expression);
+    return subscript && control_->array_subscript(subscript);
+  }
+
+  Lvalue project_array_element(const Lvalue& target,
+                               const ArrayPartition& array, size_t index,
+                               const cxx::Type* element_type, cxx::AST* owner) {
+    const size_t component_offset = index * array.element->component_count;
+    if (const auto* selected = target.selection()) {
+      std::vector<Lvalue> alternatives;
+      alternatives.reserve(selected->alternatives.size());
+      for (const auto& alternative : selected->alternatives) {
+        alternatives.push_back(project_array_element(alternative, array, index,
+                                                     element_type, owner));
+      }
+      return {std::make_shared<const SelectedLvalue>(
+          selected->selector, element_type, std::move(alternatives),
+          selected->lane)};
     }
-    auto* left_type = subscript->baseExpression->type;
-    auto* right_type = subscript->indexExpression->type;
-    bool left_vector = types_.native_vector(left_type);
-    bool right_vector = types_.native_vector(right_type);
-    if (!left_vector && !right_vector) {
-      fail(subscript, "vector lane destination requires a vector operand");
+    const auto* object = std::get_if<ObjectLvalue>(&target.projection);
+    if (!object) {
+      fail(owner, "array element requires a complete source object");
+    }
+    if (const auto* destination = std::get_if<Destination>(&object->location)) {
+      return {ObjectLvalue{
+          element_type,
+          Destination{destination->binding,
+                      destination->component_offset + component_offset,
+                      array.element}}};
+    }
+    if (const auto* storage =
+            std::get_if<StorageProjection>(&object->location)) {
+      return {
+          ObjectLvalue{element_type,
+                       storage_.element(*storage, array.source, index, owner)}};
+    }
+    fail(owner, "array element lost its retained source owner");
+  }
+
+  std::optional<Lvalue> array_element(cxx::SubscriptExpressionAST* subscript,
+                                      cxx::AST* owner, LvalueAccess access,
+                                      bool preserve_identity = false) {
+    const auto* operands = control_->array_subscript(subscript);
+    if (!operands) {
+      return std::nullopt;
     }
 
-    cxx::ExpressionAST* vector_expression =
+    std::optional<Lvalue> array_target;
+    std::optional<Value> index_value;
+    if (operands->array_first) {
+      array_target = reference_lvalue(operands->array, owner, access);
+      index_value = expression(operands->index);
+    } else {
+      index_value = expression(operands->index);
+      array_target = reference_lvalue(operands->array, owner, access);
+    }
+
+    const auto* element_type = subscript->type;
+    if (auto* object = std::get_if<ObjectLvalue>(&array_target->projection)) {
+      if (auto* storage = std::get_if<StorageProjection>(&object->location)) {
+        if (auto* member =
+                cxx::ast_cast<cxx::MemberExpressionAST>(operands->array)) {
+          name(storage->pointer, cxx::to_string(member->symbol->name()));
+        }
+        auto traits = unit_.typeTraits();
+        if (!preserve_identity && !traits.is_class(element_type) &&
+            !traits.is_array(element_type)) {
+          return Lvalue{ObjectLvalue{
+              element_type, storage_.subscript(*storage, index_value->ssa(),
+                                               operands->array->type,
+                                               operands->index->type, owner)}};
+        }
+        return Lvalue{ObjectLvalue{
+            element_type,
+            storage_.advance(*storage, index_value->ssa(),
+                             operands->array->type, operands->index->type,
+                             cxx::TokenKind::T_PLUS, owner)}};
+      }
+    }
+    auto* array = types_.array(operands->array->type, owner);
+    if (!array || !array->source->size()) {
+      fail(owner, "value subscript requires a nonempty bounded array");
+    }
+    if (operands->constant_index) {
+      return project_array_element(*array_target, *array,
+                                   *operands->constant_index, element_type,
+                                   owner);
+    }
+    if (array->source->size() == 1) {
+      return project_array_element(*array_target, *array, 0, element_type,
+                                   owner);
+    }
+
+    auto* ordinal_type = unit_.control()->getUnsignedIntType();
+    auto selector = scalars_.convert(index_value->ssa(), operands->index->type,
+                                     ordinal_type, owner);
+    std::vector<Lvalue> alternatives;
+    std::optional<loom_value_id_t> lane;
+    if (const auto* outer = array_target->selection()) {
+      alternatives.reserve(outer->alternatives.size() * array->source->size());
+      for (const auto& alternative : outer->alternatives) {
+        for (size_t index = 0; index < array->source->size(); ++index) {
+          alternatives.push_back(project_array_element(
+              alternative, *array, index, element_type, owner));
+        }
+      }
+      auto extent = scalars_.integer(
+          array->source->size(), LOOM_SCALAR_TYPE_I32, locations_.get(owner));
+      auto base = scalars_.binary(cxx::TokenKind::T_STAR, outer->selector,
+                                  extent, ordinal_type, ordinal_type, owner);
+      selector = scalars_.binary(cxx::TokenKind::T_PLUS, base, selector,
+                                 ordinal_type, ordinal_type, owner);
+      lane = outer->lane;
+    } else {
+      alternatives.reserve(array->source->size());
+      for (size_t index = 0; index < array->source->size(); ++index) {
+        alternatives.push_back(project_array_element(
+            *array_target, *array, index, element_type, owner));
+      }
+    }
+    return Lvalue{std::make_shared<const SelectedLvalue>(
+        selector, element_type, std::move(alternatives), lane)};
+  }
+
+  Lvalue project_vector_lane(const Lvalue& target, loom_value_id_t index,
+                             const cxx::Type* index_type,
+                             const cxx::Type* element_type, cxx::AST* owner,
+                             bool retain_value) {
+    if (const auto* selected = target.selection()) {
+      auto* lane_type = unit_.control()->getUnsignedLongLongIntType();
+      auto lane = scalars_.convert(index, index_type, lane_type, owner);
+      std::vector<Lvalue> alternatives;
+      alternatives.reserve(selected->alternatives.size());
+      for (const auto& alternative : selected->alternatives) {
+        alternatives.push_back(project_vector_lane(
+            alternative, lane, lane_type, element_type, owner, retain_value));
+      }
+      return {std::make_shared<const SelectedLvalue>(
+          selected->selector, element_type, std::move(alternatives), lane)};
+    }
+    const auto& object = std::get<ObjectLvalue>(target.projection);
+    if (const auto* storage =
+            std::get_if<StorageProjection>(&object.location)) {
+      auto* pointer_type = unit_.typeTraits().add_pointer(element_type);
+      return {ObjectLvalue{
+          element_type,
+          storage_.advance(*storage, index, pointer_type, index_type,
+                           cxx::TokenKind::T_PLUS, owner)}};
+    }
+    std::optional<Value> snapshot;
+    if (retain_value) {
+      snapshot = read(object, owner);
+    }
+    return {VectorLaneLvalue{object, snapshot, index, index_type}};
+  }
+
+  Lvalue vector_lane_destination(cxx::SubscriptExpressionAST* subscript,
+                                 cxx::AST* owner,
+                                 LvalueAccess access = LvalueAccess::Write,
+                                 bool retain_value = true) {
+    const bool left_vector =
+        types_.native_vector(subscript->baseExpression->type);
+    auto* vector =
         left_vector ? subscript->baseExpression : subscript->indexExpression;
-    cxx::ExpressionAST* index_expression =
+    auto* index =
         left_vector ? subscript->indexExpression : subscript->baseExpression;
     if (left_vector) {
-      auto vector_destination = object_destination(
-          vector_expression, owner, access, retained_destination);
-      auto index_value = expression(index_expression);
-      std::optional<Value> vector_value;
-      if (retain_value) {
-        vector_value = read(vector_destination, vector_expression);
-      }
-      return {VectorLaneLvalue{vector_destination, std::move(vector_value),
-                               index_value.ssa(), index_expression->type}};
+      auto target = reference_lvalue(vector, owner, access);
+      auto coordinate = expression(index);
+      return project_vector_lane(target, coordinate.ssa(), index->type,
+                                 subscript->type, owner, retain_value);
     }
+    // Commuted i[v] syntax still evaluates its written left operand first.
+    auto coordinate = expression(index);
+    auto target = reference_lvalue(vector, owner, access);
+    return project_vector_lane(target, coordinate.ssa(), index->type,
+                               subscript->type, owner, retain_value);
+  }
 
-    // The commuted spelling i[v] still evaluates its written left operand
-    // before resolving and loading the vector on the right.
-    auto index_value = expression(index_expression);
-    auto vector_destination = object_destination(vector_expression, owner,
-                                                 access, retained_destination);
+  const cxx::Identifier* vector_component_identifier(
+      cxx::MemberExpressionAST* selection) const {
+    auto* name = cxx::ast_cast<cxx::NameIdAST>(selection->unqualifiedId);
+    IREE_ASSERT(selection->vectorComponentKind !=
+                cxx::VectorComponentKind::kNone);
+    IREE_ASSERT(name && name->identifier);
+    return name->identifier;
+  }
+
+  const cxx::Type* vector_component_source_type(
+      cxx::MemberExpressionAST* selection) const {
+    if (selection->accessOp == cxx::TokenKind::T_MINUS_GREATER) {
+      return unit_.typeTraits().get_element_type(
+          selection->baseExpression->type);
+    }
+    return selection->baseExpression->type;
+  }
+
+  size_t vector_component_index(cxx::MemberExpressionAST* selection,
+                                size_t result_position) {
+    auto* source =
+        types_.native_vector(vector_component_source_type(selection));
+    IREE_ASSERT(source);
+    return cxx::vector_component_index(selection->vectorComponentKind,
+                                       vector_component_identifier(selection),
+                                       source->elementCount(), result_position);
+  }
+
+  Value read_vector_component(Value source,
+                              cxx::MemberExpressionAST* selection) {
+    auto* result = types_.native_vector(selection->type);
+    if (!result) {
+      return Value(vectors_.extract_static(
+          source.ssa(),
+          static_cast<int64_t>(vector_component_index(selection, 0)),
+          vector_component_source_type(selection), selection));
+    }
+    std::vector<loom_value_id_t> lanes;
+    lanes.reserve(result->elementCount());
+    for (size_t position = 0; position < result->elementCount(); ++position) {
+      lanes.push_back(vectors_.extract_static(
+          source.ssa(),
+          static_cast<int64_t>(vector_component_index(selection, position)),
+          vector_component_source_type(selection), selection));
+    }
+    return Value(vectors_.construct(lanes, selection->type, selection));
+  }
+
+  Value update_vector_component(Value destination, Value replacement,
+                                cxx::MemberExpressionAST* selection) {
+    auto* source =
+        types_.native_vector(vector_component_source_type(selection));
+    auto* result = types_.native_vector(selection->type);
+    const size_t result_count = result ? result->elementCount() : 1;
+    auto updated = destination.ssa();
+    for (size_t position = 0; position < result_count; ++position) {
+      const size_t index = vector_component_index(selection, position);
+      if (index == source->elementCount()) {
+        continue;
+      }
+      auto lane = result
+                      ? vectors_.extract_static(replacement.ssa(),
+                                                static_cast<int64_t>(position),
+                                                selection->type, selection)
+                      : replacement.ssa();
+      updated = vectors_.insert_static(
+          updated, lane, static_cast<int64_t>(index),
+          vector_component_source_type(selection), selection);
+    }
+    return Value(updated);
+  }
+
+  Lvalue vector_component_destination(
+      cxx::MemberExpressionAST* selection, cxx::AST* owner,
+      std::optional<Destination> retained_destination,
+      LvalueAccess access = LvalueAccess::Write, bool retain_value = true) {
+    ObjectLvalue vector_destination;
+    if (selection->accessOp == cxx::TokenKind::T_MINUS_GREATER) {
+      auto* source_type = vector_component_source_type(selection);
+      if (access == LvalueAccess::Write) {
+        types_.require_mutable(source_type, selection);
+      }
+      vector_destination = {source_type,
+                            pointer_expression(selection->baseExpression)};
+    } else {
+      vector_destination = object_destination(selection->baseExpression, owner,
+                                              access, retained_destination);
+    }
     std::optional<Value> vector_value;
     if (retain_value) {
-      vector_value = read(vector_destination, vector_expression);
+      vector_value = read(vector_destination, selection);
     }
-    return {VectorLaneLvalue{vector_destination, std::move(vector_value),
-                             index_value.ssa(), index_expression->type}};
+    return {VectorComponentLvalue{vector_destination, std::move(vector_value),
+                                  selection}};
+  }
+
+  Value vector_component_value(cxx::MemberExpressionAST* selection) {
+    if (selection->accessOp == cxx::TokenKind::T_MINUS_GREATER) {
+      ObjectLvalue source = {vector_component_source_type(selection),
+                             pointer_expression(selection->baseExpression)};
+      return read_vector_component(read(source, selection), selection);
+    }
+    return read_vector_component(expression(selection->baseExpression),
+                                 selection);
   }
 
   Lvalue destination(cxx::ExpressionAST* expression, cxx::AST* owner,
                      LvalueAccess access = LvalueAccess::Write,
                      bool preserve_identity = false) {
     auto* projected = unwrap_object_identity(unit_, expression);
+    if (auto* binary = cxx::ast_cast<cxx::BinaryExpressionAST>(projected);
+        binary && !binary->symbol && binary->op == cxx::TokenKind::T_COMMA) {
+      effect(binary->leftExpression);
+      return destination(binary->rightExpression, owner, access,
+                         preserve_identity);
+    }
+    if (auto* dereference = cxx::ast_cast<cxx::UnaryExpressionAST>(projected);
+        dereference && !dereference->symbol &&
+        dereference->op == cxx::TokenKind::T_STAR) {
+      if (auto* alias = pointer_alias_lvalue(dereference->expression)) {
+        if (access == LvalueAccess::Write) {
+          types_.require_mutable(projected->type, owner);
+        }
+        return *alias;
+      }
+    }
+    if (auto* member = cxx::ast_cast<cxx::MemberExpressionAST>(projected)) {
+      if (auto alias = pointer_alias_member_lvalue(member, owner, access)) {
+        return std::move(*alias);
+      }
+    }
+    if (unit_.typeTraits().is_class(projected->type) &&
+        is_current_object(unit_, projected)) {
+      if (access == LvalueAccess::Write) {
+        types_.require_mutable(projected->type, owner);
+      }
+      const auto& receiver = *receivers_.current();
+      if (receiver.storage) {
+        return {ObjectLvalue{projected->type, *receiver.storage}};
+      }
+      return {ObjectLvalue{projected->type,
+                           CurrentReceiver{receivers_.current()->record}}};
+    }
+    if (cxx::ast_cast<cxx::ConditionalExpressionAST>(projected)) {
+      return reference_lvalue(projected, owner, access);
+    }
+    if (auto* subscript =
+            cxx::ast_cast<cxx::SubscriptExpressionAST>(projected)) {
+      if (auto target =
+              array_element(subscript, owner, access, preserve_identity)) {
+        return std::move(*target);
+      }
+    }
+    if (auto called = reference_call(projected)) {
+      if (called->reference_target) {
+        return *called->reference_target;
+      }
+      if (called->value) {
+        // An exact alias of an unnamed receiver still names that temporary.
+        // Materialization moves its existing cleanup action onto storage.
+        return {ObjectLvalue{projected->type,
+                             materialize_temporary(projected, *called->value,
+                                                   called->temporary)}};
+      }
+      fail(owner, "reference result has no retained source destination");
+    }
     if (auto* id = cxx::ast_cast<cxx::IdExpressionAST>(projected)) {
       if (auto found = references_.find(id->symbol);
           found != references_.end()) {
@@ -2208,6 +2998,17 @@ class Translator final : private Initialization::Evaluation {
       }
       return {ObjectLvalue{projected->type, *reference}};
     }
+    if (auto* member = cxx::ast_cast<cxx::MemberExpressionAST>(projected);
+        member && member->accessOp == cxx::TokenKind::T_DOT &&
+        member->vectorComponentKind == cxx::VectorComponentKind::kNone &&
+        ((!control_->destination(member) &&
+          !control_->storage_backed(member)) ||
+         is_array_element(member->baseExpression))) {
+      auto base = reference_lvalue(member->baseExpression, owner, access);
+      return base.project(
+          types_.selection(member->symbol, member->subobjectPath, member),
+          member->type, storage_, owner);
+    }
     if ((cxx::ast_cast<cxx::CallExpressionAST>(projected) ||
          (cxx::ast_cast<cxx::SubscriptExpressionAST>(projected) &&
           cxx::ast_cast<cxx::SubscriptExpressionAST>(projected)->symbol)) &&
@@ -2217,11 +3018,19 @@ class Translator final : private Initialization::Evaluation {
       }
       return {ObjectLvalue{projected->type, object_address(projected)}};
     }
+    if (auto* member = cxx::ast_cast<cxx::MemberExpressionAST>(projected);
+        member &&
+        member->vectorComponentKind != cxx::VectorComponentKind::kNone) {
+      auto retained = control_->destination(expression);
+      if (!retained && projected != expression) {
+        retained = control_->destination(projected);
+      }
+      return vector_component_destination(member, owner, retained, access);
+    }
     if (auto* subscript = cxx::ast_cast<cxx::SubscriptExpressionAST>(projected);
         subscript && (types_.native_vector(subscript->baseExpression->type) ||
                       types_.native_vector(subscript->indexExpression->type))) {
-      return vector_lane_destination(subscript, owner,
-                                     control_->destination(expression), access);
+      return vector_lane_destination(subscript, owner, access);
     }
     auto retained = control_->destination(expression);
     if (!retained && projected != expression) {
@@ -2231,43 +3040,212 @@ class Translator final : private Initialization::Evaluation {
                                preserve_identity)};
   }
 
+  Lvalue reference_conditional(cxx::ConditionalExpressionAST* expression,
+                               cxx::AST* owner, LvalueAccess access,
+                               bool force_ordinal = false) {
+    auto condition = this->expression(expression->condition).ssa();
+    auto written = live_mutations(expression);
+    auto initial = values_;
+    ConditionalRegions regions(builder_);
+    conditional_cleanup_anchors_.push_back(loom_builder_save(&builder_));
+    std::array<std::optional<Lvalue>, 2> targets;
+    std::array<std::vector<loom_value_id_t>, 2> mutations;
+    for (size_t arm = 0; arm < targets.size(); ++arm) {
+      auto saved = regions.enter(arm);
+      const size_t temporary_mark = temporary_destructions_.size();
+      targets[arm] = reference_lvalue(arm == 0 ? expression->iftrueExpression
+                                               : expression->iffalseExpression,
+                                      owner, access, force_ordinal);
+      materialize_conditional_temporaries(temporary_mark);
+      mutations[arm] = current(written);
+      loom_builder_restore(&builder_, saved);
+      values_ = initial;
+    }
+    conditional_cleanup_anchors_.pop_back();
+
+    std::array<const StorageProjection*, 2> storage = {};
+    bool has_lane = false;
+    for (size_t arm = 0; arm < targets.size(); ++arm) {
+      const auto& target = *targets[arm];
+      if (const auto* object = std::get_if<ObjectLvalue>(&target.projection)) {
+        storage[arm] = std::get_if<StorageProjection>(&object->location);
+      }
+      has_lane |= std::holds_alternative<VectorLaneLvalue>(target.projection);
+      if (const auto* nested = target.selection()) {
+        has_lane |= nested->lane.has_value();
+      }
+    }
+    const bool addressable = !force_ordinal && storage[0] && storage[1];
+    if (!force_ordinal && !addressable && (storage[0] || storage[1])) {
+      fail(owner, "mixed reference selection requires addressable origins");
+    }
+
+    std::vector<Lvalue> alternatives;
+    auto* ordinal_type = unit_.control()->getUnsignedIntType();
+    auto* lane_type = unit_.control()->getUnsignedLongLongIntType();
+    auto source = locations_.get(owner);
+    for (size_t arm = 0; arm < targets.size(); ++arm) {
+      auto saved = regions.enter(arm);
+      auto& target = *targets[arm];
+      std::vector<loom_value_id_t> yielded;
+      if (addressable) {
+        Value(storage[arm]->pointer).append_to(yielded);
+      } else {
+        auto ordinal =
+            scalars_.integer(alternatives.size(), LOOM_SCALAR_TYPE_I32, source);
+        std::optional<loom_value_id_t> lane;
+        if (const auto* nested = target.selection()) {
+          alternatives.insert(alternatives.end(), nested->alternatives.begin(),
+                              nested->alternatives.end());
+          ordinal = scalars_.binary(cxx::TokenKind::T_PLUS, nested->selector,
+                                    ordinal, ordinal_type, ordinal_type, owner);
+          lane = nested->lane;
+        } else {
+          if (const auto* indexed =
+                  std::get_if<VectorLaneLvalue>(&target.projection)) {
+            lane = scalars_.convert(indexed->index, indexed->index_type,
+                                    lane_type, owner);
+          }
+          alternatives.push_back(std::move(target));
+        }
+        yielded.push_back(ordinal);
+        if (has_lane) {
+          yielded.push_back(
+              lane ? *lane : scalars_.integer(0, LOOM_SCALAR_TYPE_I64, source));
+        }
+      }
+      yielded.insert(yielded.end(), mutations[arm].begin(),
+                     mutations[arm].end());
+      loom_op_t* yield;
+      check(loom_scf_yield_build(&builder_, yielded.data(), yielded.size(),
+                                 source, &yield));
+      loom_builder_restore(&builder_, saved);
+    }
+
+    std::vector<const cxx::Type*> sources;
+    if (addressable) {
+      sources.push_back(unit_.typeTraits().add_pointer(expression->type));
+    } else {
+      sources.push_back(ordinal_type);
+      if (has_lane) {
+        sources.push_back(lane_type);
+      }
+    }
+    const size_t result_count =
+        addressable ? kPointerPartition.component_count : 1 + size_t(has_lane);
+    for (const auto& mutation : written) {
+      sources.push_back(mutation.projection.type);
+    }
+    auto outputs = bind_signature(types_, sources, owner, &builder_);
+    auto* op = regions.build(condition, outputs.types, source);
+    auto* results = loom_op_results(op);
+    bind_values(written, results + result_count);
+    if (addressable) {
+      return {ObjectLvalue{
+          expression->type,
+          StorageProjection{
+              {results[0], results[1]},
+              std::min(storage[0]->alignment, storage[1]->alignment),
+              storage[0]->pointer_width_constrained &&
+                  storage[1]->pointer_width_constrained}}};
+    }
+    std::optional<loom_value_id_t> coordinate;
+    if (has_lane) {
+      coordinate = results[1];
+      // A destination is read or written only in its selected arm, using the
+      // coordinate evaluated by that same arm.
+      for (auto& alternative : alternatives) {
+        auto* lane = std::get_if<VectorLaneLvalue>(&alternative.projection);
+        if (!lane) {
+          continue;
+        }
+        lane->index = *coordinate;
+        lane->index_type = lane_type;
+      }
+    }
+    return {std::make_shared<const SelectedLvalue>(
+        results[0], expression->type, std::move(alternatives), coordinate)};
+  }
+
   Lvalue reference_lvalue(cxx::ExpressionAST* expression, cxx::AST* owner,
-                          LvalueAccess access) {
+                          LvalueAccess access, bool force_ordinal = false) {
     auto* projected = unwrap_object_identity(unit_, expression);
+    if (materialized_reference_ &&
+        projected->valueCategory == cxx::ValueCategory::kPrValue &&
+        control_->temporary_origins().materialization(projected) ==
+            materialized_reference_->origin) {
+      if (access == LvalueAccess::Write) {
+        types_.require_mutable(projected->type, owner);
+      }
+      auto value = this->expression(projected);
+      values_.set(materialized_reference_->binding,
+                  name(value, cxx::to_string(
+                                  materialized_reference_->binding->name())));
+      return {ObjectLvalue{
+          projected->type,
+          Destination{materialized_reference_->binding, 0, nullptr}}};
+    }
+    if (materialized_reference_) {
+      if (auto* cast = cxx::ast_cast<cxx::ImplicitCastExpressionAST>(projected);
+          cast &&
+          cast->castKind == cxx::ImplicitCastKind::kDerivedToBaseConversion &&
+          control_->temporary_origins().materialization(cast) ==
+              materialized_reference_->origin) {
+        auto base =
+            reference_lvalue(cast->expression, owner, access, force_ordinal);
+        return base.project(types_.projection(cast->subobjectPath, cast),
+                            cast->type, storage_, owner);
+      }
+    }
+    if (auto* member = cxx::ast_cast<cxx::MemberExpressionAST>(projected);
+        member &&
+        member->vectorComponentKind != cxx::VectorComponentKind::kNone) {
+      fail(member, "extended-vector components are not addressable");
+    }
     if (auto* conditional =
             cxx::ast_cast<cxx::ConditionalExpressionAST>(projected)) {
       if (projected->valueCategory == cxx::ValueCategory::kPrValue) {
         return {ObjectLvalue{projected->type, object_address(projected)}};
       }
-      auto condition = this->expression(conditional->condition).ssa();
-      auto select = conditional_reference(conditional, condition);
-      return {ObjectLvalue{
-          projected->type,
-          storage_.project(select.pointer(), projected->type, owner)}};
+      return reference_conditional(conditional, owner, access, force_ordinal);
     }
     auto* subscript = cxx::ast_cast<cxx::SubscriptExpressionAST>(projected);
     const bool vector_lane =
         subscript && (types_.native_vector(subscript->baseExpression->type) ||
                       types_.native_vector(subscript->indexExpression->type));
+    if (vector_lane) {
+      return vector_lane_destination(subscript, owner, access,
+                                     /*retain_value=*/false);
+    }
+
     auto target =
-        vector_lane ? vector_lane_destination(subscript, owner,
-                                              control_->destination(projected),
-                                              access, false)
-                    : destination(projected, owner, access, true);
+        destination(projected, owner, access, /*preserve_identity=*/true);
     return target;
   }
 
   Value reference_value(cxx::ExpressionAST* expression, cxx::AST* owner) {
+    auto* projected = unwrap_object_identity(unit_, expression);
+    if (auto* conditional =
+            cxx::ast_cast<cxx::ConditionalExpressionAST>(projected);
+        conditional &&
+        projected->valueCategory != cxx::ValueCategory::kPrValue) {
+      auto condition = this->expression(conditional->condition).ssa();
+      return conditional_reference(conditional, condition);
+    }
     auto target = reference_lvalue(expression, owner, LvalueAccess::Read);
-    auto* object = std::get_if<ObjectLvalue>(&target.projection);
-    auto* projection =
+    return reference_address(target, owner).pointer;
+  }
+
+  StorageProjection reference_address(const Lvalue& target, cxx::AST* owner) {
+    const auto* object = std::get_if<ObjectLvalue>(&target.projection);
+    const auto* projection =
         object ? std::get_if<StorageProjection>(&object->location) : nullptr;
     if (!projection) {
       fail(owner,
            "reference identity escaped an automatic value without "
            "addressable storage");
     }
-    return Value(projection->pointer);
+    return *projection;
   }
 
   Value conditional_reference(cxx::ConditionalExpressionAST* ast,
@@ -2276,23 +3254,24 @@ class Translator final : private Initialization::Evaluation {
     auto* pointer_type = unit_.typeTraits().add_pointer(ast->type);
     std::vector<const cxx::Type*> sources = {pointer_type};
     sources.reserve(1 + written.size());
-    for (auto* symbol : written) {
-      sources.push_back(types_.unqualified_value(symbol->type()));
+    for (const auto& mutation : written) {
+      sources.push_back(mutation.projection.type);
     }
-    auto initial = current(written);
+    auto initial = values_;
     auto source = locations_.get(ast);
     auto outputs = bind_signature(types_, sources, ast, &builder_);
     loom_op_t* op;
     check(loom_scf_if_build(&builder_, LOOM_SCF_IF_BUILD_FLAG_HAS_ELSE_REGION,
                             condition, outputs.types.data(),
                             outputs.types.size(), nullptr, 0, source, &op));
-    conditional_cleanup_anchors_.push_back(op);
+    conditional_cleanup_anchors_.push_back(
+        {op->parent_block, op->parent_op, op});
     auto build_arm = [&](loom_region_t* region,
                          cxx::ExpressionAST* expression) {
       auto saved = loom_builder_enter_region(&builder_, op, region);
       const size_t temporary_mark = temporary_destructions_.size();
       std::vector<loom_value_id_t> yielded;
-      Value(object_address(expression).pointer).append_to(yielded);
+      reference_value(expression, ast).append_to(yielded);
       materialize_conditional_temporaries(temporary_mark);
       auto mutations = current(written);
       yielded.insert(yielded.end(), mutations.begin(), mutations.end());
@@ -2302,9 +3281,10 @@ class Translator final : private Initialization::Evaluation {
       loom_builder_restore(&builder_, saved);
     };
     build_arm(loom_scf_if_then_region(op), ast->iftrueExpression);
-    bind_values(written, initial.data());
+    values_ = initial;
     build_arm(loom_scf_if_else_region(op), ast->iffalseExpression);
     conditional_cleanup_anchors_.pop_back();
+    values_ = std::move(initial);
     bind_values(written,
                 loom_op_results(op) + kPointerPartition.component_count);
     return value_arena_.capture(
@@ -2313,208 +3293,439 @@ class Translator final : private Initialization::Evaluation {
   }
 
   Value read(const Lvalue& target, cxx::AST* owner) {
+    if (const auto* selected = target.selection()) {
+      return dispatch_selection(*selected, owner, [&](size_t arm) {
+        return read(selected->alternatives[arm], owner);
+      });
+    }
     if (auto* object = std::get_if<ObjectLvalue>(&target.projection)) {
       return read(*object, owner);
     }
-    const auto& lane = std::get<VectorLaneLvalue>(target.projection);
-    auto vector = lane.value ? *lane.value : read(lane.destination, owner);
-    return Value(vectors_.extract(vector.ssa(), lane.index,
-                                  lane.destination.type, lane.index_type,
-                                  owner));
+    if (auto* lane = std::get_if<VectorLaneLvalue>(&target.projection)) {
+      auto vector = lane->value ? *lane->value : read(lane->destination, owner);
+      return Value(vectors_.extract(vector.ssa(), lane->index,
+                                    lane->destination.type, lane->index_type,
+                                    owner));
+    }
+    const auto& component = std::get<VectorComponentLvalue>(target.projection);
+    auto vector =
+        component.value ? *component.value : read(component.destination, owner);
+    return read_vector_component(vector, component.selection);
+  }
+
+  Value read_selected_object(const ObjectLvalue& object,
+                             ValueBindings::Updates& updates, cxx::AST* owner) {
+    auto project = [&](cxx::Symbol* binding, const Partition& partition,
+                       size_t offset) {
+      auto value = updates.project(binding, partition, offset);
+      if (!value) {
+        fail(owner, "source subobject is read before initialization");
+      }
+      return *value;
+    };
+    if (const auto* destination = std::get_if<Destination>(&object.location)) {
+      const auto& partition = destination->member
+                                  ? *destination->member
+                                  : values_.partition(destination->binding);
+      return project(destination->binding, partition,
+                     destination->component_offset);
+    }
+    const auto& receiver = std::get<CurrentReceiver>(object.location);
+    std::vector<loom_value_id_t> components;
+    components.reserve(receiver.record->component_count);
+    for (const auto& member : receiver.record->members) {
+      project(member.source, *member.partition, 0).append_to(components);
+    }
+    return value_arena_.capture(*receiver.record, components);
+  }
+
+  loom_value_id_t combine_selection_condition(
+      std::optional<loom_value_id_t> outer, loom_value_id_t inner,
+      cxx::AST* owner) {
+    if (!outer) {
+      return inner;
+    }
+    auto* bool_type = unit_.control()->getBoolType();
+    return scalars_.binary(cxx::TokenKind::T_AMP, *outer, inner, bool_type,
+                           bool_type, owner);
+  }
+
+  void accumulate_selection_write(
+      const SelectedLvalue& selected, Value value, cxx::AST* owner,
+      std::optional<loom_value_id_t> outer_condition,
+      ValueBindings::Updates& updates) {
+    for (size_t ordinal = 0; ordinal < selected.alternatives.size();
+         ++ordinal) {
+      const auto& alternative = selected.alternatives[ordinal];
+      if (const auto* nested = alternative.selection()) {
+        auto condition = combine_selection_condition(
+            outer_condition, selection_condition(selected, ordinal, owner),
+            owner);
+        accumulate_selection_write(*nested, value, owner, condition, updates);
+        continue;
+      }
+      const auto& object = alternative.object();
+      if (std::holds_alternative<StorageAccess>(object.location) ||
+          std::holds_alternative<StorageProjection>(object.location)) {
+        auto condition = combine_selection_condition(
+            outer_condition, selection_condition(selected, ordinal, owner),
+            owner);
+        auto source = locations_.get(owner);
+        loom_op_t* op;
+        check(loom_scf_if_build(&builder_, 0, condition, nullptr, 0, nullptr, 0,
+                                source, &op));
+        auto saved = loom_builder_enter_region(&builder_, op,
+                                               loom_scf_if_then_region(op));
+        write(alternative, value, owner);
+        loom_op_t* yield;
+        check(loom_scf_yield_build(&builder_, nullptr, 0, source, &yield));
+        loom_builder_restore(&builder_, saved);
+        continue;
+      }
+      // Binary choices share one predicate with opposite arm polarity. This
+      // retains the complement known by the selection owner without requiring
+      // a later pass to recover it from the ordinal's range.
+      const bool complementary =
+          !outer_condition && selected.alternatives.size() == 2 && ordinal == 1;
+      auto condition = combine_selection_condition(
+          outer_condition,
+          selection_condition(selected, complementary ? 0 : ordinal, owner),
+          owner);
+      auto updated =
+          selected_value(condition, object.type, owner, [&](size_t arm) {
+            const bool replace = (arm == 0) != complementary;
+            if (replace &&
+                std::holds_alternative<ObjectLvalue>(alternative.projection)) {
+              return value;
+            }
+            auto current = read_selected_object(object, updates, owner);
+            if (!replace) {
+              return current;
+            }
+            if (const auto* lane =
+                    std::get_if<VectorLaneLvalue>(&alternative.projection)) {
+              auto original = lane->value ? *lane->value : current;
+              return Value(vectors_.insert(original.ssa(), value.ssa(),
+                                           lane->index, object.type,
+                                           lane->index_type, owner));
+            }
+            const auto& component =
+                std::get<VectorComponentLvalue>(alternative.projection);
+            return update_vector_component(
+                component.value ? *component.value : current, value,
+                component.selection);
+          });
+      if (const auto* destination =
+              std::get_if<Destination>(&object.location)) {
+        updates.replace(destination->binding, destination->component_offset,
+                        updated);
+      } else {
+        const auto& receiver = std::get<CurrentReceiver>(object.location);
+        for (const auto& member : receiver.record->members) {
+          updates.replace(
+              member.source, 0,
+              updated.project(*member.partition, member.component_offset));
+        }
+      }
+    }
+  }
+
+  void write_selection(const SelectedLvalue& selected, Value value,
+                       cxx::AST* owner) {
+    ValueBindings::Updates updates(values_, value_arena_);
+    accumulate_selection_write(selected, value, owner, std::nullopt, updates);
+    updates.apply();
+    for (auto* binding : selected.bindings) {
+      if (auto found = values_.find(binding); found != values_.end()) {
+        name(found->second, cxx::to_string(binding->name()));
+      }
+    }
   }
 
   void write(const Lvalue& target, Value value, cxx::AST* owner) {
+    if (const auto* selected = target.selection()) {
+      write_selection(*selected, value, owner);
+      return;
+    }
     if (auto* object = std::get_if<ObjectLvalue>(&target.projection)) {
       write(*object, value, owner);
       return;
     }
-    const auto& lane = std::get<VectorLaneLvalue>(target.projection);
-    auto vector = lane.value ? *lane.value : read(lane.destination, owner);
-    auto updated =
-        vectors_.insert(vector.ssa(), value.ssa(), lane.index,
-                        lane.destination.type, lane.index_type, owner);
-    write(lane.destination, Value(updated), owner);
+    if (auto* lane = std::get_if<VectorLaneLvalue>(&target.projection)) {
+      auto vector = lane->value ? *lane->value : read(lane->destination, owner);
+      auto updated =
+          vectors_.insert(vector.ssa(), value.ssa(), lane->index,
+                          lane->destination.type, lane->index_type, owner);
+      write(lane->destination, Value(updated), owner);
+      return;
+    }
+    const auto& component = std::get<VectorComponentLvalue>(target.projection);
+    auto vector =
+        component.value ? *component.value : read(component.destination, owner);
+    write(component.destination,
+          update_vector_component(vector, value, component.selection), owner);
   }
 
-  struct ReferenceOrigin {
-    // Automatic object that owns this flattened component interval.
-    cxx::Symbol* binding;
-    // Inclusive first flattened component within the owning object.
-    size_t begin;
-    // Exclusive end of the flattened component interval.
-    size_t end;
-    // Whether the callee may replace this interval.
-    bool mutable_access;
-  };
-
-  struct ReferenceWriteback {
-    // Once-evaluated lvalue receiving the mutable result.
-    Lvalue target;
-    // Source value transported through the tied call operand.
-    Value source;
-    // Exact automatic owner slice replaced by the tied result.
-    ReferenceOrigin origin;
+  struct IndirectWriteback {
+    // Once-evaluated lvalue receiving the mutable result, absent for a prvalue
+    // temporary identified by its evaluated cleanup token.
+    std::optional<Lvalue> target;
     // Admitted value representation transported through the call.
     const Partition* partition;
-    // Unqualified source value type used to bind the tied result.
+    // Unqualified source value type used to bind the returned value.
     const cxx::Type* value_type;
     // First flattened call operand for this source parameter.
     size_t argument_offset;
+    // Exact evaluated temporary receiving this writeback, if nontrivial.
+    std::optional<TemporaryReference> temporary;
+    // Sparse output groups, or null for whole-value writeback.
+    const ParameterProjection* projection = nullptr;
+    // Complete temporary payload retained when only some groups are returned.
+    std::optional<Value> source_value;
   };
 
   // One reference result proven to alias an already evaluated source argument.
-  // The value changes only when a mutable value-reference writeback replaces
-  // the corresponding flattened operand interval.
+  // The value changes only when a mutable indirect writeback replaces the
+  // corresponding flattened operand interval.
   struct ReferenceResultAlias {
     // Evaluated argument value reused as the source call result.
     Value value;
+    // Once-evaluated automatic destination named by the result.
+    std::optional<Lvalue> target;
     // First flattened call operand occupied by the aliased parameter.
     size_t argument_offset;
+    // Evaluated unnamed object retained when the reference escapes this call.
+    std::optional<TemporaryReference> temporary;
+  };
+
+  // One caller-owned origin admitted by a finite selected-reference result.
+  // Named and storage-backed arguments retain their lvalue; an unnamed const
+  // value remains an SSA payload because no valid source use can mutate it.
+  struct SelectedReferenceCandidate {
+    // Concrete caller destination, when the argument has one.
+    std::optional<Lvalue> target;
+    // Unnamed read-only value, present only when there is no destination.
+    std::optional<Value> value;
   };
 
   // One source argument evaluated exactly once, before its components are
-  // arranged in callable ABI order. A mutable value reference retains its
-  // destination until the tied call results are available.
+  // arranged in callable ABI order. A mutable indirect parameter retains its
+  // destination until the call results are available.
   struct EvaluatedCallArgument {
-    // Source value or storage pointer transported through the call.
-    Value value;
-    // Mutable automatic lvalue receiving a value-reference writeback.
-    std::optional<Lvalue> writeback_target;
-    // Admitted value structure of a mutable value reference.
-    const Partition* writeback_partition = nullptr;
-    // Unqualified value type of a mutable value reference.
+    // Completed value or storage pointer. An SSA lvalue is read from |target|
+    // only after all argument evaluations have finished.
+    std::optional<Value> value;
+    // Automatic lvalue named by an indirect argument. Read-only parameters
+    // retain it because an exact reference result can be mutated by a later
+    // call.
+    std::optional<Lvalue> target;
+    // Admitted value structure of an indirect parameter, including read-only
+    // ones.
+    const Partition* indirect_partition = nullptr;
+    // Unqualified value type of a mutable indirect parameter.
     const cxx::Type* writeback_type = nullptr;
-    // Automatic component interval participating in alias admission.
-    std::optional<ReferenceOrigin> origin;
+    // Exact temporary construction evaluated for this argument.
+    std::optional<TemporaryReference> temporary;
+    // Retained source input/output selection for this parameter.
+    const ParameterProjection* projection = nullptr;
   };
-
-  ReferenceOrigin reference_origin(const Lvalue& target, const Value& value,
-                                   bool mutable_access, cxx::AST* owner) {
-    const ObjectLvalue* object = std::get_if<ObjectLvalue>(&target.projection);
-    size_t component_count = value.partition().component_count;
-    if (!object) {
-      const auto& lane = std::get<VectorLaneLvalue>(target.projection);
-      object = &lane.destination;
-      component_count =
-          types_.partition(lane.destination.type, owner).component_count;
-    }
-    auto* destination = std::get_if<Destination>(&object->location);
-    if (!destination) {
-      fail(owner,
-           "runtime value-reference arguments require an automatic SSA "
-           "object");
-    }
-    return {
-        destination->binding,
-        destination->component_offset,
-        destination->component_offset + component_count,
-        mutable_access,
-    };
-  }
-
-  void require_nonoverlapping_references(std::vector<ReferenceOrigin> origins,
-                                         cxx::AST* owner) {
-    if (std::ranges::none_of(origins, [](const ReferenceOrigin& origin) {
-          return origin.mutable_access;
-        })) {
-      return;
-    }
-    std::ranges::sort(
-        origins, [](const ReferenceOrigin& left, const ReferenceOrigin& right) {
-          if (left.binding != right.binding) {
-            return std::less<cxx::Symbol*>{}(left.binding, right.binding);
-          }
-          return left.begin < right.begin;
-        });
-    cxx::Symbol* binding = nullptr;
-    size_t active_end = 0;
-    bool active_mutable = false;
-    for (const auto& origin : origins) {
-      if (origin.begin == origin.end) {
-        continue;
-      }
-      if (origin.binding != binding || origin.begin >= active_end) {
-        binding = origin.binding;
-        active_end = origin.end;
-        active_mutable = origin.mutable_access;
-        continue;
-      }
-      if (origin.mutable_access || active_mutable) {
-        fail(owner,
-             "mutable value-reference arguments must select nonoverlapping "
-             "automatic objects or member slices");
-      }
-      active_end = std::max(active_end, origin.end);
-    }
-  }
 
   EvaluatedCallArgument evaluate_call_argument(
       cxx::ExpressionAST* argument, cxx::ParameterSymbol* parameter,
-      const ReferenceParameter* reference, cxx::AST* owner) {
-    if (!reference) {
+      const IndirectParameter* indirect, cxx::AST* owner) {
+    if (!indirect) {
       auto value = expression(argument);
-      adopt_temporary_result(argument, value);
+      adopt_temporary_result(argument);
       return {.value = value};
     }
-    auto* expected_type = types_.unqualified_value(parameter->type());
+    auto* expected_type = types_.unqualified(indirect->object_type);
     const auto& expected_partition =
-        reference->abi == ReferenceABI::Storage
+        indirect->abi == IndirectParameterABI::Storage
             ? kPointerPartition
             : types_.partition(expected_type, owner);
-    if (reference->abi == ReferenceABI::Storage) {
-      return {.value = reference_value(argument, argument)};
+    if (indirect->abi == IndirectParameterABI::Storage) {
+      auto target = reference_lvalue(argument, argument, LvalueAccess::Read);
+      return {
+          .value = Value(reference_address(target, argument).pointer),
+          .target = std::move(target),
+      };
     }
     std::optional<Lvalue> target;
-    Value value;
-    std::optional<ReferenceOrigin> origin;
-    if (argument->valueCategory == cxx::ValueCategory::kLValue) {
-      target = destination(
-          argument, owner,
-          reference->mutable_access ? LvalueAccess::Write : LvalueAccess::Read);
-      value = read(*target, argument);
-      origin =
-          reference_origin(*target, value, reference->mutable_access, argument);
-    } else {
-      if (reference->mutable_access) {
-        fail(argument, "mutable value references require an lvalue argument");
+    std::optional<Value> value;
+    std::optional<TemporaryReference> temporary;
+    if (indirect->borrowed_pointer) {
+      auto* source = unwrap_expression(argument);
+      auto* address = cxx::ast_cast<cxx::UnaryExpressionAST>(source);
+      if (address && !address->symbol && address->op == cxx::TokenKind::T_AMP &&
+          types_.unqualified(address->expression->type) == expected_type) {
+        target = destination(address->expression, owner,
+                             indirect->mutable_access ? LvalueAccess::Write
+                                                      : LvalueAccess::Read);
+      } else if (auto* alias = pointer_alias_lvalue(argument)) {
+        target = *alias;
+      } else {
+        fail(argument,
+             "borrowed pointer argument lost its retained source object");
       }
+    } else if (unwrap_object_identity(unit_, argument)->valueCategory !=
+               cxx::ValueCategory::kPrValue) {
+      if (auto called = reference_call(argument)) {
+        target = std::move(called->reference_target);
+        temporary = called->temporary;
+        if (!target) {
+          IREE_ASSERT(called->value);
+          value = *called->value;
+        }
+      } else {
+        target = destination(argument, owner,
+                             indirect->mutable_access ? LvalueAccess::Write
+                                                      : LvalueAccess::Read);
+      }
+    } else {
       value = expression(argument);
-    }
-    if (&value.partition() != &expected_partition) {
-      fail(argument,
-           "runtime value-reference binding must preserve the admitted "
-           "source value type");
+      temporary = temporary_result(argument);
     }
     return {
         .value = value,
-        .writeback_target =
-            reference->mutable_access ? std::move(target) : std::nullopt,
-        .writeback_partition =
-            reference->mutable_access ? &expected_partition : nullptr,
-        .writeback_type = reference->mutable_access ? expected_type : nullptr,
-        .origin = origin,
+        .target = std::move(target),
+        .indirect_partition = &expected_partition,
+        .writeback_type = indirect->mutable_access ? expected_type : nullptr,
+        .temporary = temporary,
+        .projection = indirect->projection.get(),
     };
+  }
+
+  SelectedReferenceCandidate selected_call_argument_candidate(
+      EvaluatedCallArgument& argument) {
+    if (argument.target) {
+      return {.target = *argument.target};
+    }
+    IREE_ASSERT(argument.value);
+    return {.value = *argument.value};
+  }
+
+  SelectedReferenceCandidate project_reference_candidate(
+      SelectedReferenceCandidate candidate, const ValueProjection& projection,
+      cxx::AST* owner) {
+    if (candidate.target) {
+      candidate.target =
+          project_call_target(*candidate.target, projection, owner);
+    } else {
+      IREE_ASSERT(candidate.value);
+      candidate.value = candidate.value->project(*projection.partition,
+                                                 projection.component_offset);
+    }
+    return candidate;
+  }
+
+  Value selected_call_result_value(
+      loom_value_id_t selector,
+      std::span<const SelectedReferenceCandidate> candidates,
+      const cxx::Type* result_type, cxx::AST* owner) {
+    auto evaluate = [&](size_t ordinal) {
+      const auto& candidate = candidates[ordinal];
+      return candidate.target ? read(*candidate.target, owner)
+                              : *candidate.value;
+    };
+    return dispatch_ordinal(selector, candidates.size(), result_type, owner,
+                            evaluate);
+  }
+
+  Lvalue project_call_target(const Lvalue& target, const ValueProjection& group,
+                             cxx::AST* owner) {
+    if (const auto* selected = target.selection()) {
+      std::vector<Lvalue> alternatives;
+      alternatives.reserve(selected->alternatives.size());
+      for (const auto& alternative : selected->alternatives) {
+        alternatives.push_back(project_call_target(alternative, group, owner));
+      }
+      return {std::make_shared<const SelectedLvalue>(
+          selected->selector, group.type, std::move(alternatives),
+          selected->lane)};
+    }
+    const auto* object = std::get_if<ObjectLvalue>(&target.projection);
+    if (!object) {
+      return target;
+    }
+    if (auto* destination = std::get_if<Destination>(&object->location)) {
+      return {ObjectLvalue{
+          group.type,
+          Destination{destination->binding,
+                      destination->component_offset + group.component_offset,
+                      group.partition}}};
+    }
+    if (auto* receiver = std::get_if<CurrentReceiver>(&object->location)) {
+      const auto& members = receiver->record->members;
+      auto member = std::upper_bound(
+          members.begin(), members.end(), group.component_offset,
+          [](size_t offset, const SubobjectPartition& value) {
+            return offset < value.component_offset;
+          });
+      --member;
+      return {ObjectLvalue{group.type, Destination{member->source,
+                                                   group.component_offset -
+                                                       member->component_offset,
+                                                   group.partition}}};
+    }
+    if (group.component_offset == 0 &&
+        group.partition ==
+            &types_.partition(types_.unqualified_value(object->type), owner)) {
+      return target;
+    }
+    fail(owner,
+         "projected reference call requires a source value or complete scalar "
+         "storage");
+  }
+
+  Lvalue current_receiver_target() const {
+    const auto* record = receivers_.current()->record;
+    return {ObjectLvalue{record->source->type(), CurrentReceiver{record}}};
+  }
+
+  void materialize_call_argument(EvaluatedCallArgument& argument,
+                                 cxx::AST* owner) {
+    if (argument.projection) {
+      return;
+    }
+    if (!argument.value) {
+      argument.value = read(*argument.target, owner);
+    }
+    if (argument.indirect_partition &&
+        &argument.value->partition() != argument.indirect_partition) {
+      fail(owner,
+           "runtime indirect binding must preserve the admitted "
+           "source value type");
+    }
   }
 
   void append_call_argument(EvaluatedCallArgument argument,
                             size_t receiver_argument_count,
                             std::vector<loom_value_id_t>& arguments,
-                            std::vector<ReferenceWriteback>& writebacks,
-                            std::vector<ReferenceOrigin>& origins) {
+                            std::vector<IndirectWriteback>& writebacks,
+                            cxx::AST* owner) {
     const size_t argument_offset = receiver_argument_count + arguments.size();
-    argument.value.append_to(arguments);
-    if (argument.origin) {
-      origins.push_back(*argument.origin);
+    if (argument.projection) {
+      for (const auto& group : argument.projection->inputs) {
+        auto input =
+            argument.value
+                ? argument.value->project(*group.partition,
+                                          group.component_offset)
+                : read(project_call_target(*argument.target, group, owner),
+                       owner);
+        input.append_to(arguments);
+      }
+    } else {
+      argument.value->append_to(arguments);
     }
-    if (argument.writeback_target) {
-      IREE_ASSERT(argument.origin);
+    if (argument.writeback_type) {
       writebacks.push_back({
-          .target = std::move(*argument.writeback_target),
-          .source = argument.value,
-          .origin = *argument.origin,
-          .partition = argument.writeback_partition,
+          .target = std::move(argument.target),
+          .partition = argument.indirect_partition,
           .value_type = argument.writeback_type,
           .argument_offset = argument_offset,
+          .temporary = argument.temporary,
+          .projection = argument.projection,
+          .source_value = argument.value,
       });
     }
   }
@@ -2524,34 +3735,36 @@ class Translator final : private Initialization::Evaluation {
     ImplicitObjectABI abi;
     // Prvalue record or resolved storage pointer, when evaluated eagerly.
     std::optional<Value> value;
-    // Value structure used by a tied mutable receiver result.
+    // Value structure used by a mutable receiver result.
     const RecordPartition* record;
     // Once-evaluated external lvalue, absent for temporaries/current object.
     std::optional<Lvalue> target;
     // Whether mutable results replace the active value receiver.
     bool current;
     // Exact top-level fields returned by a value receiver call.
-    std::span<cxx::FieldSymbol* const> written_fields;
-    // Automatic receiver slices participating in reference overlap checks.
-    std::vector<ReferenceOrigin> origins;
+    std::span<cxx::Symbol* const> written_fields;
+    // Exact evaluated temporary whose current payload cleanup must observe.
+    std::optional<TemporaryReference> temporary;
+    // Whether this value receiver has no incoming object and returns a newly
+    // constructed complete record.
+    bool constructing = false;
   };
 
   ReceiverArgument current_receiver_argument(
       const RecordPartition& record, bool requires_storage,
-      std::span<cxx::FieldSymbol* const> written_fields, cxx::AST* owner) {
-    if (receivers_.empty() || receivers_.back().record != &record) {
+      std::span<cxx::Symbol* const> written_fields, cxx::AST* owner) {
+    if (!receivers_.current() || receivers_.current()->record != &record) {
       fail(owner,
            "implicit member call requires a matching current source object");
     }
-    const auto& active = receivers_.back();
+    const auto& active = *receivers_.current();
     if (active.storage) {
       return {ImplicitObjectABI::Storage,
               Value(active.storage->pointer),
               &record,
               std::nullopt,
               true,
-              written_fields,
-              {}};
+              written_fields};
     }
     if (requires_storage) {
       fail(owner, "member function requires a storage-backed receiver");
@@ -2561,18 +3774,73 @@ class Translator final : private Initialization::Evaluation {
             &record,
             std::nullopt,
             true,
-            written_fields,
-            {}};
+            written_fields};
   }
 
-  ReceiverArgument receiver_argument(cxx::FunctionSymbol* function,
-                                     cxx::ExpressionAST* receiver,
-                                     cxx::TokenKind access_op,
-                                     cxx::AST* owner) {
+  std::optional<EvaluatedCallResult> reference_call(
+      cxx::ExpressionAST* expression) {
+    expression = unwrap_object_identity(unit_, expression);
+    if (auto call = direct_operator_call(expression)) {
+      auto* signature =
+          cxx::type_cast<cxx::FunctionType>(call->function->type());
+      if (signature &&
+          unit_.typeTraits().is_reference(signature->returnType())) {
+        return ordinary_operator_call(expression, *call);
+      }
+      return std::nullopt;
+    }
+    if (auto* subscript =
+            cxx::ast_cast<cxx::SubscriptExpressionAST>(expression);
+        subscript && subscript->symbol) {
+      auto* signature =
+          cxx::type_cast<cxx::FunctionType>(subscript->symbol->type());
+      if (signature &&
+          unit_.typeTraits().is_reference(signature->returnType())) {
+        return overloaded_subscript_call(subscript);
+      }
+      return std::nullopt;
+    }
+    auto* call = cxx::ast_cast<cxx::CallExpressionAST>(expression);
+    auto* function = call ? direct_callee(call) : nullptr;
+    auto* signature = function
+                          ? cxx::type_cast<cxx::FunctionType>(function->type())
+                          : nullptr;
+    if (!signature ||
+        !unit_.typeTraits().is_reference(signature->returnType())) {
+      return std::nullopt;
+    }
+    if (intrinsics_.check_binding(function, expression) ||
+        functions_.is_check_case(function) ||
+        annotated(function, "check_benchmark") ||
+        intrinsics_.lookup(function, expression)) {
+      fail(expression,
+           "intrinsic and check calls cannot supply an implicit object");
+    }
+    if (annotated(function, "kernel")) {
+      fail(expression, "kernels require an explicit launch operation");
+    }
+    if (functions_.is_command_program(function)) {
+      fail(expression,
+           "command programs require an explicit command launch operation");
+    }
+    if (pipeline_contracts_.contains(function)) {
+      fail(expression,
+           "pipelines require explicit composition or kernel launch");
+    }
+    return ordinary_call(call, function, locations_.get(call));
+  }
+
+  ReceiverArgument unprojected_receiver_argument(
+      cxx::FunctionSymbol* function, cxx::ExpressionAST* receiver,
+      cxx::TokenKind access_op, cxx::AST* owner,
+      const RecordPartition* enclosing_record = nullptr) {
     auto* object_type = implicit_object_type(unit_, function);
     auto* record = object_type
                        ? types_.record(types_.unqualified(object_type), owner)
                        : nullptr;
+    if (enclosing_record) {
+      record = enclosing_record;
+    }
     if (!record) {
       fail(owner, "non-static member call requires an admitted record object");
     }
@@ -2594,74 +3862,140 @@ class Translator final : private Initialization::Evaluation {
     }
     if (access_op == cxx::TokenKind::T_MINUS_GREATER) {
       auto projection = pointer_expression(receiver);
-      return admit({ImplicitObjectABI::Storage,
-                    Value(projection.pointer),
-                    record,
-                    std::nullopt,
-                    false,
-                    written_fields,
-                    {}});
+      return admit({ImplicitObjectABI::Storage, Value(projection.pointer),
+                    record, std::nullopt, false, written_fields});
     }
     if (access_op != cxx::TokenKind::T_DOT) {
       fail(owner, "member call requires a dot or arrow receiver");
     }
-    if (receiver->valueCategory == cxx::ValueCategory::kPrValue) {
-      if (requires_storage) {
-        auto projection = object_address(receiver);
-        return {ImplicitObjectABI::Storage,
-                Value(projection.pointer),
-                record,
-                std::nullopt,
-                false,
-                written_fields,
-                {}};
+
+    auto from_target = [&](Lvalue target,
+                           std::optional<TemporaryReference> temporary =
+                               std::nullopt) {
+      if (target.selection()) {
+        return admit(ReceiverArgument{ImplicitObjectABI::Value, std::nullopt,
+                                      record, std::move(target), false,
+                                      written_fields, temporary});
       }
+      auto* object = std::get_if<ObjectLvalue>(&target.projection);
+      if (!object) {
+        fail(receiver, "member call receiver requires a complete object");
+      }
+      if (auto* storage = std::get_if<StorageProjection>(&object->location)) {
+        return admit(ReceiverArgument{
+            ImplicitObjectABI::Storage, Value(storage->pointer), record,
+            std::nullopt, false, written_fields, temporary});
+      }
+      return admit(ReceiverArgument{ImplicitObjectABI::Value, std::nullopt,
+                                    record, std::move(target), false,
+                                    written_fields, temporary});
+    };
+    if (auto called = reference_call(receiver)) {
+      if (called->reference_target) {
+        return from_target(std::move(*called->reference_target),
+                           called->temporary);
+      }
+      if (!called->value) {
+        fail(receiver, "void function cannot supply an implicit object");
+      }
+      if (&called->value->partition() != record) {
+        fail(receiver,
+             "member call receiver must preserve its admitted record type");
+      }
+      return admit({ImplicitObjectABI::Value, called->value, record,
+                    std::nullopt, false, written_fields, called->temporary});
+    }
+
+    bool direct_prvalue =
+        receiver->valueCategory == cxx::ValueCategory::kPrValue;
+    if (!direct_prvalue &&
+        receiver->valueCategory == cxx::ValueCategory::kXValue) {
+      auto* materialization =
+          cxx::ast_cast<cxx::ImplicitCastExpressionAST>(receiver);
+      direct_prvalue =
+          materialization &&
+          materialization->castKind ==
+              cxx::ImplicitCastKind::kTemporaryMaterializationConversion &&
+          materialization->expression->valueCategory ==
+              cxx::ValueCategory::kPrValue;
+    }
+    if (direct_prvalue) {
       auto value = expression(receiver);
       if (&value.partition() != record) {
         fail(receiver,
              "member call receiver must preserve its admitted record type");
       }
-      return admit({ImplicitObjectABI::Value,
-                    value,
-                    record,
-                    std::nullopt,
-                    false,
-                    written_fields,
-                    {}});
+      if (requires_storage) {
+        auto projection = materialize_temporary(receiver, value);
+        return {ImplicitObjectABI::Storage,
+                Value(projection.pointer),
+                record,
+                std::nullopt,
+                false,
+                written_fields};
+      }
+      return admit({ImplicitObjectABI::Value, value, record, std::nullopt,
+                    false, written_fields, temporary_result(receiver)});
     }
 
     auto target =
         destination(receiver, owner,
                     mutable_access ? LvalueAccess::Write : LvalueAccess::Read);
-    auto* object = std::get_if<ObjectLvalue>(&target.projection);
-    if (!object) {
-      fail(receiver, "member call receiver requires a complete object");
+    return from_target(std::move(target));
+  }
+
+  ReceiverArgument receiver_argument(cxx::FunctionSymbol* function,
+                                     cxx::ExpressionAST* receiver,
+                                     cxx::TokenKind access_op, cxx::AST* owner,
+                                     cxx::List<cxx::Symbol*>* path = nullptr) {
+    if (!path) {
+      return unprojected_receiver_argument(function, receiver, access_op,
+                                           owner);
     }
-    if (auto* storage = std::get_if<StorageProjection>(&object->location)) {
-      return admit({ImplicitObjectABI::Storage,
-                    Value(storage->pointer),
-                    record,
-                    std::nullopt,
-                    false,
-                    written_fields,
-                    {}});
+    const auto& selected = types_.projection(path, owner);
+    auto* enclosing = types_.record(path->value->parent()->type(), owner);
+    auto result = unprojected_receiver_argument(function, receiver, access_op,
+                                                owner, enclosing);
+    auto* type = implicit_object_type(unit_, function);
+    result.record = static_cast<const RecordPartition*>(selected.partition);
+    if (result.abi == ImplicitObjectABI::Storage) {
+      result.value =
+          storage_
+              .subobject(storage_.project(result.value->pointer(),
+                                          enclosing->source->type(), owner),
+                         selected.byte_offset, owner)
+              .pointer;
+    } else if (result.current) {
+      result.target = Lvalue{ObjectLvalue{
+          type, Destination{
+                    selected.root->source,
+                    selected.component_offset - selected.root->component_offset,
+                    selected.partition}}};
+    } else if (result.target) {
+      result.target = result.target->project(selected, type, storage_, owner);
+    } else {
+      if (result.temporary) {
+        result.temporary->component_offset += selected.component_offset;
+        result.temporary->byte_offset += selected.byte_offset;
+      }
+      result.value =
+          result.value->project(*selected.partition, selected.component_offset);
     }
-    return admit({ImplicitObjectABI::Value,
-                  std::nullopt,
-                  record,
-                  std::move(target),
-                  false,
-                  written_fields,
-                  {}});
+    result.current = false;
+    return result;
   }
 
   ReceiverArgument receiver_argument(cxx::CallExpressionAST* call,
                                      cxx::FunctionSymbol* function) {
     auto* base = unwrap_expression(call->baseExpression);
     auto* member = cxx::ast_cast<cxx::MemberExpressionAST>(base);
+    auto* id = cxx::ast_cast<cxx::IdExpressionAST>(base);
     return receiver_argument(
         function, member ? member->baseExpression : nullptr,
-        member ? member->accessOp : cxx::TokenKind::T_DOT, call);
+        member ? member->accessOp : cxx::TokenKind::T_DOT, call,
+        member ? member->subobjectPath
+        : id   ? id->subobjectPath
+               : nullptr);
   }
 
   ReceiverArgument receiver_argument(cxx::SubscriptExpressionAST* call,
@@ -2670,29 +4004,61 @@ class Translator final : private Initialization::Evaluation {
                              cxx::TokenKind::T_DOT, call);
   }
 
+  size_t receiver_input_count(
+      cxx::FunctionSymbol* function,
+      const std::optional<ReceiverArgument>& receiver) const {
+    if (!receiver) {
+      return 0;
+    }
+    if (receiver->abi == ImplicitObjectABI::Storage) {
+      return kPointerPartition.component_count;
+    }
+    const auto* projection = functions_.receiver_projection(function);
+    return projection ? projection->input_component_count
+                      : receiver->record->component_count;
+  }
+
   Value materialize_receiver(ReceiverArgument& receiver, cxx::AST* owner) {
-    if (receiver.value) {
+    if (receiver.abi == ImplicitObjectABI::Storage) {
+      IREE_ASSERT(receiver.value && receiver.value->is_pointer());
       return *receiver.value;
     }
-    Value value = receiver.current ? current_receiver_value(owner)
-                                   : read(*receiver.target, owner);
+    if (!receiver.value) {
+      receiver.value = receiver.current ? current_receiver_value(owner)
+                                        : read(*receiver.target, owner);
+    }
+    Value value = *receiver.value;
     if (&value.partition() != receiver.record) {
       fail(owner,
            "member call receiver must preserve its admitted record type");
     }
-    if (receiver.current) {
-      receiver.origins.reserve(receiver.written_fields.size());
-      for (auto* field : receiver.written_fields) {
-        const auto& member = types_.member(field, owner);
-        receiver.origins.push_back(
-            {field, 0, member.partition->component_count, true});
-      }
-    } else {
-      receiver.origins.push_back(reference_origin(
-          *receiver.target, value, !receiver.written_fields.empty(), owner));
-    }
-    receiver.value = value;
     return value;
+  }
+
+  SelectedReferenceCandidate receiver_reference_candidate(
+      ReceiverArgument& receiver, const ValueProjection& origin,
+      const std::optional<Value>& updated, cxx::AST* owner) {
+    if (receiver.abi == ImplicitObjectABI::Storage) {
+      IREE_ASSERT(receiver.value && receiver.value->is_pointer());
+      IREE_ASSERT_EQ(origin.component_offset, 0u);
+      IREE_ASSERT(origin.type ==
+                  types_.unqualified(receiver.record->source->type()));
+      auto projection =
+          storage_.project(receiver.value->pointer(), origin.type, owner);
+      return {.target = Lvalue{ObjectLvalue{origin.type, projection}}};
+    }
+    if (receiver.current || receiver.target) {
+      auto target =
+          receiver.current ? current_receiver_target() : *receiver.target;
+      return {.target = project_call_target(target, origin, owner)};
+    }
+    const Value* value = updated          ? &*updated
+                         : receiver.value ? &*receiver.value
+                                          : nullptr;
+    IREE_ASSERT(value);
+    return {
+        .value = value->project(*origin.partition, origin.component_offset),
+    };
   }
 
   void write_receiver(const ReceiverArgument& receiver, Value value,
@@ -2701,126 +4067,16 @@ class Translator final : private Initialization::Evaluation {
       replace_current_receiver(value);
     } else if (receiver.target) {
       write(*receiver.target, value, owner);
+    } else {
+      IREE_ASSERT(receiver.value);
+      update_temporary(receiver.temporary, value,
+                       receiver.record->source->type(), owner);
     }
   }
 
-  // Preserves source-level value copies before call results consume their tied
-  // operand identities. Only mutable value calls enter this path; ordinary
-  // calls retain their allocation-free argument emission.
-  void preserve_call_value_owners(
-      const std::optional<ReceiverArgument>& receiver,
-      std::span<const ReferenceWriteback> writebacks,
-      std::vector<loom_value_id_t>& arguments, cxx::AST* owner) {
-    const bool receiver_writeback = receiver &&
-                                    receiver->abi == ImplicitObjectABI::Value &&
-                                    !receiver->written_fields.empty();
-    if (!receiver_writeback && writebacks.empty()) {
-      return;
-    }
-
-    ValueDuplication duplication(unit_, diagnostics_, types_, value_arena_,
-                                 locations_, builder_);
-    ValueOwnership ownership(duplication);
-    std::vector<TiedValueConsumption> consumptions;
-    std::vector<std::optional<ReferenceOrigin>> consumption_origins;
-    consumptions.reserve(
-        (receiver_writeback ? receiver->written_fields.size() : 0) +
-        writebacks.size());
-    consumption_origins.reserve(consumptions.capacity());
-    if (receiver_writeback) {
-      const bool prvalue = !receiver->current && !receiver->target;
-      std::optional<ReferenceOrigin> receiver_origin;
-      if (!prvalue && !receiver->current) {
-        IREE_ASSERT_EQ(receiver->origins.size(), 1u);
-        receiver_origin = receiver->origins.front();
-      }
-      for (auto* field : receiver->written_fields) {
-        const auto& member = types_.member(field, owner);
-        consumptions.push_back({
-            .value = receiver->value->project(*member.partition,
-                                              member.component_offset),
-            .source_type = types_.unqualified_value(field->type()),
-            .argument_offset = member.component_offset,
-        });
-        if (prvalue) {
-          consumption_origins.push_back(std::nullopt);
-        } else if (receiver->current) {
-          consumption_origins.push_back(ReferenceOrigin{
-              field, 0, member.partition->component_count, true});
-        } else {
-          consumption_origins.push_back(
-              ReferenceOrigin{receiver_origin->binding,
-                              receiver_origin->begin + member.component_offset,
-                              receiver_origin->begin + member.component_offset +
-                                  member.partition->component_count,
-                              true});
-        }
-      }
-    }
-    for (const auto& writeback : writebacks) {
-      consumptions.push_back({
-          .value = writeback.source,
-          .source_type = writeback.value_type,
-          .argument_offset = writeback.argument_offset,
-      });
-      consumption_origins.push_back(writeback.origin);
-    }
-
-    std::unordered_map<cxx::Symbol*,
-                       std::unordered_map<loom_value_id_t, size_t>>
-        consumed_owner_counts;
-    for (size_t index = 0; index < consumptions.size(); ++index) {
-      ownership.add_owner(consumptions[index].value);
-      if (!consumption_origins[index]) {
-        continue;
-      }
-      auto origin = *consumption_origins[index];
-      auto components = consumptions[index].value.components();
-      IREE_ASSERT_EQ(origin.end - origin.begin, components.size());
-      for (auto component : components) {
-        ++consumed_owner_counts[origin.binding][component];
-      }
-    }
-
-    // Query only bindings carrying identities consumed by this call. Tied
-    // destination slices are replaced by results; another component or source
-    // binding carrying that identity remains an owner only if it is observed
-    // later in the source.
-    std::unordered_set<loom_value_id_t> queried_components;
-    for (const auto& consumption : consumptions) {
-      for (auto component : consumption.value.components()) {
-        if (!queried_components.insert(component).second) {
-          continue;
-        }
-        const auto* component_owners = values_.owners(component);
-        if (!component_owners) {
-          continue;
-        }
-        for (const auto& [binding, count] : *component_owners) {
-          if (!control_->value_has_later_lexical_use(binding, owner)) {
-            continue;
-          }
-          size_t consumed_count = 0;
-          if (auto consumed_binding = consumed_owner_counts.find(binding);
-              consumed_binding != consumed_owner_counts.end()) {
-            auto consumed_component = consumed_binding->second.find(component);
-            if (consumed_component != consumed_binding->second.end()) {
-              consumed_count = consumed_component->second;
-            }
-          }
-          if (count > consumed_count) {
-            ownership.add_owner_components({&component, 1});
-            break;
-          }
-        }
-      }
-    }
-    ownership.separate(consumptions, arguments, owner);
-  }
-
-  std::optional<Value> ordinary_call(cxx::CallExpressionAST* call,
-                                     cxx::FunctionSymbol* function,
-                                     loom_location_id_t source) {
+  EvaluatedCallResult ordinary_call(cxx::CallExpressionAST* call,
+                                    cxx::FunctionSymbol* function,
+                                    loom_location_id_t source) {
     if (call->isVirtualDispatch) {
       fail(call, "virtual member dispatch is not admitted");
     }
@@ -2840,9 +4096,9 @@ class Translator final : private Initialization::Evaluation {
                               std::move(receiver), source);
   }
 
-  std::optional<Value> ordinary_call(cxx::SubscriptExpressionAST* call,
-                                     cxx::FunctionSymbol* function,
-                                     loom_location_id_t source) {
+  EvaluatedCallResult ordinary_call(cxx::SubscriptExpressionAST* call,
+                                    cxx::FunctionSymbol* function,
+                                    loom_location_id_t source) {
     if (call->isVirtualDispatch) {
       fail(call, "virtual member dispatch is not admitted");
     }
@@ -2861,7 +4117,7 @@ class Translator final : private Initialization::Evaluation {
                               std::move(receiver), source);
   }
 
-  std::optional<Value> overloaded_subscript_call(
+  EvaluatedCallResult overloaded_subscript_call(
       cxx::SubscriptExpressionAST* call) {
     auto* function = call->symbol;
     IREE_ASSERT(function);
@@ -3247,7 +4503,11 @@ class Translator final : private Initialization::Evaluation {
     cxx::ExpressionAST* single = nullptr;
     // Arguments recovered from a declaration initializer.
     std::span<cxx::ExpressionAST* const> range;
+    // Next unevaluated argument in the initializer range.
     size_t range_index = 0;
+    // Projected source element for an array copy's first reference parameter.
+    // Callable analysis has already selected its storage-reference ABI.
+    std::optional<Value> leading_reference;
 
     cxx::ExpressionAST* next() {
       if (remaining) {
@@ -3268,6 +4528,98 @@ class Translator final : private Initialization::Evaluation {
                         cxx::FunctionSymbol* constructor,
                         std::span<cxx::ExpressionAST* const> arguments,
                         cxx::AST* owner) override {
+    emit_constructor_call(destination, record, constructor,
+                          SourceArguments{.range = arguments}, owner);
+  }
+
+  Value construct_value(const RecordPartition& record,
+                        const cxx::Type* object_type,
+                        cxx::FunctionSymbol* constructor,
+                        std::span<cxx::ExpressionAST* const> arguments,
+                        cxx::AST* owner) override {
+    auto* receiver_type = implicit_object_type(unit_, constructor);
+    IREE_ASSERT(receiver_type);
+    IREE_ASSERT(unit_.typeTraits().is_same(types_.unqualified(object_type),
+                                           types_.unqualified(receiver_type)));
+    if (functions_.receiver_requires_storage(constructor)) {
+      auto allocation = storage_.allocate(
+          object_type, LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE, 0, owner);
+      auto destination =
+          storage_.project(allocation.pointer, object_type, owner);
+      emit_constructor_call(destination, record, constructor,
+                            SourceArguments{.range = arguments}, owner);
+      return objects_.load(destination, object_type, owner);
+    }
+    ReceiverArgument receiver = {
+        .abi = ImplicitObjectABI::Value,
+        .record = &record,
+        .written_fields = functions_.receiver_writes(constructor),
+        .constructing = true,
+    };
+    auto result = emit_ordinary_call(
+        owner, constructor, SourceArguments{.range = arguments},
+        std::move(receiver), locations_.get(owner));
+    IREE_ASSERT(result.value && &result.value->partition() == &record);
+    return *result.value;
+  }
+
+  const ArrayCopyInitialization* array_copy(cxx::AST* owner) override {
+    return control_->array_copy(owner);
+  }
+
+  const InitializerList* initializer_list(
+      cxx::BracedInitListAST* expression) const override {
+    return control_->initializer_list(expression);
+  }
+
+  Pointer materialize_array(cxx::BracedInitListAST* expression) override {
+    std::optional<DestructionAction> cleanup;
+    StorageProjection storage;
+    if (auto* origin = control_->temporary_origins().result(expression)) {
+      cleanup.emplace(DestructionAction{
+          .destruction = control_->temporary_origins().destruction(origin),
+          .object_type = expression->type,
+          .origin = origin,
+          .source = expression,
+      });
+      allocate_temporary_storage(*cleanup);
+      storage = *cleanup->storage;
+    } else {
+      auto allocation = storage_.allocate(expression->type,
+                                          LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE,
+                                          0, expression);
+      storage =
+          storage_.project(allocation.pointer, expression->type, expression);
+    }
+    initialization_.object(storage, expression->type, expression, nullptr,
+                           expression);
+    if (cleanup) {
+      activate_temporary_storage(*cleanup);
+      auto index = temporary_destructions_.size();
+      temporary_results_.insert_or_assign(cleanup->origin, index);
+      temporary_destructions_.push_back(std::move(*cleanup));
+      extend_materialized_temporary(index);
+    }
+    return storage.pointer;
+  }
+
+  void call_copy_constructor(
+      StorageProjection destination, const RecordPartition& record,
+      cxx::FunctionSymbol* constructor, StorageProjection source,
+      std::span<cxx::ExpressionAST* const> default_arguments,
+      cxx::AST* owner) override {
+    emit_constructor_call(destination, record, constructor,
+                          SourceArguments{
+                              .range = default_arguments,
+                              .leading_reference = Value(source.pointer),
+                          },
+                          owner);
+  }
+
+  void emit_constructor_call(StorageProjection destination,
+                             const RecordPartition& record,
+                             cxx::FunctionSymbol* constructor,
+                             SourceArguments arguments, cxx::AST* owner) {
     ReceiverArgument receiver = {
         ImplicitObjectABI::Storage,
         Value(destination.pointer),
@@ -3275,19 +4627,28 @@ class Translator final : private Initialization::Evaluation {
         std::nullopt,
         false,
         functions_.receiver_writes(constructor),
-        {},
     };
-    auto result = emit_ordinary_call(
-        owner, constructor, SourceArguments{.range = arguments},
-        std::move(receiver), locations_.get(owner));
-    IREE_ASSERT(!result);
+    auto result =
+        emit_ordinary_call(owner, constructor, std::move(arguments),
+                           std::move(receiver), locations_.get(owner));
+    IREE_ASSERT(!result.value);
   }
 
-  std::optional<Value> emit_simple_call(cxx::AST* call,
-                                        cxx::FunctionSymbol* function,
-                                        loom_symbol_ref_t callee,
-                                        std::vector<loom_value_id_t> arguments,
-                                        loom_location_id_t source) {
+  EvaluatedCallResult storage_reference_result(Pointer pointer,
+                                               const cxx::Type* result_type,
+                                               cxx::AST* owner) {
+    auto* object_type = unit_.typeTraits().remove_reference(result_type);
+    return {
+        .reference_target = Lvalue{ObjectLvalue{
+            object_type, storage_.project(pointer, object_type, owner)}},
+    };
+  }
+
+  EvaluatedCallResult emit_simple_call(cxx::AST* call,
+                                       cxx::FunctionSymbol* function,
+                                       loom_symbol_ref_t callee,
+                                       std::vector<loom_value_id_t> arguments,
+                                       loom_location_id_t source) {
     auto* signature = cxx::type_cast<cxx::FunctionType>(function->type());
     IREE_ASSERT(signature);
     loom_op_t* op;
@@ -3295,7 +4656,7 @@ class Translator final : private Initialization::Evaluation {
       check(loom_func_call_build(&builder_, 0, 0, 0, 0, callee,
                                  arguments.data(), arguments.size(), nullptr, 0,
                                  nullptr, 0, source, &op));
-      return std::nullopt;
+      return {};
     }
     const bool returns_reference =
         unit_.typeTraits().is_reference(signature->returnType());
@@ -3308,38 +4669,64 @@ class Translator final : private Initialization::Evaluation {
     check(loom_func_call_build(&builder_, 0, 0, 0, 0, callee, arguments.data(),
                                arguments.size(), results.types.data(),
                                results.types.size(), nullptr, 0, source, &op));
-    return value_arena_.capture(
+    auto value = value_arena_.capture(
         returns_reference ? kPointerPartition
                           : types_.partition(signature->returnType(), call),
         {loom_op_results(op), results.types.size()});
+    return returns_reference
+               ? storage_reference_result(value.pointer(),
+                                          signature->returnType(), call)
+               : EvaluatedCallResult{.value = value};
   }
 
-  std::optional<Value> emit_evaluated_call(
+  EvaluatedCallResult emit_evaluated_call(
       cxx::AST* call, cxx::FunctionSymbol* function, loom_symbol_ref_t callee,
       std::optional<ReceiverArgument> receiver,
       std::vector<loom_value_id_t> arguments,
-      std::vector<ReferenceWriteback> writebacks,
-      std::vector<ReferenceOrigin> origins,
+      std::vector<IndirectWriteback> writebacks,
       std::optional<ReferenceResultAlias> reference_result_alias,
+      std::span<const ReferenceResultOrigin> projected_origins,
+      std::vector<SelectedReferenceCandidate> selected_reference_candidates,
       loom_location_id_t source) {
     auto* signature = cxx::type_cast<cxx::FunctionType>(function->type());
     IREE_ASSERT(signature);
+    const auto* receiver_projection =
+        receiver && receiver->abi == ImplicitObjectABI::Value
+            ? functions_.receiver_projection(function)
+            : nullptr;
     if (receiver) {
-      auto receiver_value = materialize_receiver(*receiver, call);
-      auto receiver_components = receiver_value.components();
-      arguments.insert(arguments.begin(), receiver_components.begin(),
-                       receiver_components.end());
-      origins.insert(origins.end(), receiver->origins.begin(),
-                     receiver->origins.end());
+      const size_t explicit_count = arguments.size();
+      if (receiver_projection) {
+        for (const auto& group : receiver_projection->inputs) {
+          auto value =
+              receiver->value
+                  ? receiver->value->project(*group.partition,
+                                             group.component_offset)
+                  : read(project_call_target(receiver->current
+                                                 ? current_receiver_target()
+                                                 : *receiver->target,
+                                             group, call),
+                         call);
+          value.append_to(arguments);
+        }
+      } else {
+        materialize_receiver(*receiver, call).append_to(arguments);
+      }
+      std::rotate(arguments.begin(), arguments.begin() + explicit_count,
+                  arguments.end());
     }
-    require_nonoverlapping_references(std::move(origins), call);
-    preserve_call_value_owners(receiver, writebacks, arguments, call);
 
     const bool returns_void =
         unit_.typeTraits().is_void(signature->returnType());
     const bool returns_reference =
         unit_.typeTraits().is_reference(signature->returnType());
     const bool returns_parameter_alias = reference_result_alias.has_value();
+    const bool returns_projected_reference =
+        returns_reference && !projected_origins.empty();
+    const bool returns_exact_projected_reference =
+        returns_projected_reference && projected_origins.size() == 1;
+    const bool returns_selected_projected_reference =
+        returns_projected_reference && projected_origins.size() > 1;
     const bool returns_receiver_alias =
         returns_reference && receiver &&
         receiver->abi == ImplicitObjectABI::Value &&
@@ -3349,85 +4736,87 @@ class Translator final : private Initialization::Evaluation {
                                     receiver->abi == ImplicitObjectABI::Value &&
                                     !receiver->written_fields.empty();
     result_sources.reserve(
-        (!returns_void && !returns_receiver_alias && !returns_parameter_alias) +
+        (!returns_void && !returns_receiver_alias && !returns_parameter_alias &&
+         !returns_exact_projected_reference) +
         (receiver ? receiver->written_fields.size() : 0) + writebacks.size());
     size_t ordinary_result_count = 0;
-    if (!returns_void && !returns_receiver_alias && !returns_parameter_alias) {
-      auto* result_type = returns_reference
-                              ? unit_.typeTraits().add_pointer(
-                                    unit_.typeTraits().remove_reference(
-                                        signature->returnType()))
-                              : signature->returnType();
+    if (!returns_void && !returns_receiver_alias && !returns_parameter_alias &&
+        !returns_exact_projected_reference) {
+      const cxx::Type* result_type = signature->returnType();
+      if (returns_selected_projected_reference) {
+        result_type = unit_.control()->getUnsignedIntType();
+      } else if (returns_reference) {
+        result_type = unit_.typeTraits().add_pointer(
+            unit_.typeTraits().remove_reference(result_type));
+      }
       result_sources.push_back(result_type);
       ordinary_result_count =
           types_.partition(result_type, call).component_count;
     }
-    if (receiver_writeback) {
+    if (receiver_projection) {
+      for (const auto& group : receiver_projection->outputs) {
+        result_sources.push_back(group.type);
+      }
+    } else if (receiver_writeback) {
       for (auto* field : receiver->written_fields) {
-        result_sources.push_back(types_.unqualified_value(field->type()));
+        result_sources.push_back(
+            types_.unqualified_value(source_object_type(field)));
       }
     }
     for (const auto& writeback : writebacks) {
-      result_sources.push_back(writeback.value_type);
+      if (writeback.projection) {
+        for (const auto& group : writeback.projection->outputs) {
+          result_sources.push_back(group.type);
+        }
+      } else {
+        result_sources.push_back(writeback.value_type);
+      }
     }
     BoundSignature results;
     if (!result_sources.empty()) {
       results = bind_signature(types_, result_sources, call, &builder_);
     }
-    std::vector<loom_tied_result_t> tied_results;
-    size_t result_offset = ordinary_result_count;
-    if (receiver_writeback) {
-      for (auto* field : receiver->written_fields) {
-        const auto& member = types_.member(field, call);
-        const size_t component_count = member.partition->component_count;
-        if (member.component_offset + component_count > UINT16_MAX ||
-            result_offset + component_count > UINT16_MAX) {
-          fail(call,
-               "implicit object call exceeds native operand or result limits");
-        }
-        for (size_t component = 0; component < component_count; ++component) {
-          const size_t operand = member.component_offset + component;
-          tied_results.push_back({
-              .result_index = static_cast<uint16_t>(result_offset + component),
-              .operand_index = static_cast<uint16_t>(operand),
-              .has_type_change = !loom_type_equal(
-                  loom_module_value_type(module_, arguments[operand]),
-                  results.types[result_offset + component]),
-          });
-        }
-        result_offset += component_count;
-      }
-    }
-    for (const auto& writeback : writebacks) {
-      const size_t component_count = writeback.partition->component_count;
-      if (writeback.argument_offset + component_count > UINT16_MAX ||
-          result_offset + component_count > UINT16_MAX) {
-        fail(call,
-             "value-reference call exceeds native operand or result limits");
-      }
-      for (size_t component = 0; component < component_count; ++component) {
-        tied_results.push_back({
-            .result_index = static_cast<uint16_t>(result_offset + component),
-            .operand_index =
-                static_cast<uint16_t>(writeback.argument_offset + component),
-            .has_type_change = !loom_type_equal(
-                loom_module_value_type(
-                    module_, arguments[writeback.argument_offset + component]),
-                results.types[result_offset + component]),
-        });
-      }
-      result_offset += component_count;
-    }
-
     loom_op_t* op;
     check(loom_func_call_build(&builder_, 0, 0, 0, 0, callee, arguments.data(),
                                arguments.size(), results.types.data(),
-                               results.types.size(), tied_results.data(),
-                               tied_results.size(), source, &op));
+                               results.types.size(), nullptr, 0, source, &op));
 
-    result_offset = ordinary_result_count;
+    size_t result_offset = ordinary_result_count;
     std::optional<Value> receiver_result;
-    if (receiver_writeback) {
+    if (receiver_projection) {
+      if (receiver->constructing) {
+        IREE_ASSERT(!receiver->value && !receiver->current &&
+                    !receiver->target);
+        IREE_ASSERT_EQ(receiver_projection->output_component_count,
+                       receiver->record->component_count);
+        receiver_result = value_arena_.capture(
+            *receiver->record, {loom_op_results(op) + result_offset,
+                                receiver_projection->output_component_count});
+        result_offset += receiver_projection->output_component_count;
+      } else {
+        auto updated = receiver->value;
+        for (const auto& group : receiver_projection->outputs) {
+          const size_t count = group.partition->component_count;
+          auto value = value_arena_.capture(
+              *group.partition, {loom_op_results(op) + result_offset, count});
+          if (receiver->current || receiver->target) {
+            write(project_call_target(receiver->current
+                                          ? current_receiver_target()
+                                          : *receiver->target,
+                                      group, call),
+                  value, call);
+          } else {
+            updated =
+                value_arena_.replace(*updated, group.component_offset, value);
+          }
+          result_offset += count;
+        }
+        if (updated && !receiver_projection->outputs.empty()) {
+          write_receiver(*receiver, *updated, call);
+          receiver_result = *updated;
+        }
+      }
+    } else if (receiver_writeback) {
       auto updated = *receiver->value;
       for (auto* field : receiver->written_fields) {
         const auto& member = types_.member(field, call);
@@ -3443,11 +4832,37 @@ class Translator final : private Initialization::Evaluation {
       receiver_result = updated;
     }
     for (const auto& writeback : writebacks) {
+      if (writeback.projection) {
+        auto temporary_value = writeback.source_value;
+        for (const auto& group : writeback.projection->outputs) {
+          const size_t count = group.partition->component_count;
+          auto updated = value_arena_.capture(
+              *group.partition, {loom_op_results(op) + result_offset, count});
+          if (writeback.target) {
+            write(project_call_target(*writeback.target, group, call), updated,
+                  call);
+          } else {
+            temporary_value = value_arena_.replace(
+                *temporary_value, group.component_offset, updated);
+          }
+          result_offset += count;
+        }
+        if (!writeback.target) {
+          update_temporary(writeback.temporary, *temporary_value,
+                           writeback.value_type, call);
+        }
+        continue;
+      }
       const size_t component_count = writeback.partition->component_count;
       auto updated = value_arena_.capture(
           *writeback.partition,
           {loom_op_results(op) + result_offset, component_count});
-      write(writeback.target, updated, call);
+      if (writeback.target) {
+        write(*writeback.target, updated, call);
+      } else {
+        update_temporary(writeback.temporary, updated, writeback.value_type,
+                         call);
+      }
       if (reference_result_alias && reference_result_alias->argument_offset ==
                                         writeback.argument_offset) {
         reference_result_alias->value = updated;
@@ -3455,21 +4870,98 @@ class Translator final : private Initialization::Evaluation {
       result_offset += component_count;
     }
     if (returns_void) {
-      return std::nullopt;
+      return receiver && receiver->constructing
+                 ? EvaluatedCallResult{.value = receiver_result}
+                 : EvaluatedCallResult{};
     }
     if (returns_receiver_alias) {
-      return receiver_result ? *receiver_result : *receiver->value;
+      return {
+          .value = receiver_result ? *receiver_result : *receiver->value,
+          .reference_target =
+              receiver->current
+                  ? Lvalue{ObjectLvalue{
+                        unit_.typeTraits().remove_reference(
+                            signature->returnType()),
+                        CurrentReceiver{receivers_.current()->record}}}
+                  : receiver->target,
+          .temporary = receiver->temporary,
+      };
+    }
+    if (returns_projected_reference) {
+      if (selected_reference_candidates.empty()) {
+        selected_reference_candidates.resize(projected_origins.size());
+      } else {
+        IREE_ASSERT_EQ(selected_reference_candidates.size(),
+                       projected_origins.size());
+      }
+      for (size_t ordinal = 0; ordinal < projected_origins.size(); ++ordinal) {
+        const auto& origin = projected_origins[ordinal];
+        if (origin.owner_ordinal == ReferenceResultOrigin::kReceiver) {
+          IREE_ASSERT(receiver);
+          selected_reference_candidates[ordinal] = receiver_reference_candidate(
+              *receiver, origin.projection, receiver_result, call);
+        } else {
+          IREE_ASSERT(selected_reference_candidates[ordinal].target ||
+                      selected_reference_candidates[ordinal].value);
+        }
+      }
+      if (returns_exact_projected_reference) {
+        auto candidate = std::move(selected_reference_candidates.front());
+        return {
+            .value = std::move(candidate.value),
+            .reference_target = std::move(candidate.target),
+            .temporary = receiver ? receiver->temporary : std::nullopt,
+        };
+      }
     }
     if (reference_result_alias) {
-      return reference_result_alias->value;
+      return {
+          .value = reference_result_alias->target
+                       ? std::nullopt
+                       : std::optional(reference_result_alias->value),
+          .reference_target = std::move(reference_result_alias->target),
+          .temporary = reference_result_alias->temporary,
+      };
     }
-    return value_arena_.capture(
+    if (returns_selected_projected_reference) {
+      IREE_ASSERT_EQ(ordinary_result_count, 1u);
+      auto selector = loom_op_results(op)[0];
+      auto* result_type =
+          unit_.typeTraits().remove_reference(signature->returnType());
+      const bool has_complete_targets =
+          std::ranges::all_of(selected_reference_candidates,
+                              [](const SelectedReferenceCandidate& candidate) {
+                                return candidate.target.has_value();
+                              });
+      if (!has_complete_targets) {
+        return {
+            .value = selected_call_result_value(
+                selector, selected_reference_candidates, result_type, call),
+            .temporary = receiver ? receiver->temporary : std::nullopt,
+        };
+      }
+      std::vector<Lvalue> targets;
+      targets.reserve(selected_reference_candidates.size());
+      for (auto& candidate : selected_reference_candidates) {
+        targets.push_back(std::move(*candidate.target));
+      }
+      return {
+          .reference_target = Lvalue{std::make_shared<const SelectedLvalue>(
+              selector, result_type, std::move(targets))},
+          .temporary = receiver ? receiver->temporary : std::nullopt,
+      };
+    }
+    auto value = value_arena_.capture(
         returns_reference ? kPointerPartition
                           : types_.partition(signature->returnType(), call),
         {loom_op_results(op), ordinary_result_count});
+    return returns_reference
+               ? storage_reference_result(value.pointer(),
+                                          signature->returnType(), call)
+               : EvaluatedCallResult{.value = value};
   }
 
-  std::optional<Value> emit_ordinary_call(
+  EvaluatedCallResult emit_ordinary_call(
       cxx::AST* call, cxx::FunctionSymbol* function,
       SourceArguments source_arguments,
       std::optional<ReceiverArgument> receiver, loom_location_id_t source) {
@@ -3478,70 +4970,121 @@ class Translator final : private Initialization::Evaluation {
     auto parameters = function->parameters();
     auto receiver_abi = receiver ? receiver->abi : ImplicitObjectABI::None;
     auto callee = functions_.declare(function, call, receiver_abi);
-    auto references = functions_.reference_parameters(function);
-    if (references.empty() && !receiver) {
+    auto indirect_parameters = functions_.indirect_parameters(function);
+    if (indirect_parameters.empty() &&
+        !(receiver && receiver->target && receiver->target->selection())) {
       std::vector<loom_value_id_t> arguments;
       for (size_t ordinal = 0; ordinal < parameters.size(); ++ordinal) {
         auto* argument = source_arguments.next();
         IREE_ASSERT(argument);
         auto value = expression(argument);
-        adopt_temporary_result(argument, value);
+        adopt_temporary_result(argument);
         value.append_to(arguments);
       }
       while (auto* variadic_argument = source_arguments.next()) {
         expression(variadic_argument).append_to(arguments);
       }
+      if (receiver) {
+        auto projected_origins = functions_.projected_reference_return_origins(
+            function, receiver->abi);
+        return emit_evaluated_call(call, function, callee, std::move(receiver),
+                                   std::move(arguments), {}, std::nullopt,
+                                   projected_origins, {}, source);
+      }
       return emit_simple_call(call, function, callee, std::move(arguments),
                               source);
     }
-    std::vector<loom_value_id_t> arguments;
-    std::vector<ReferenceWriteback> writebacks;
-    std::vector<ReferenceOrigin> origins;
-    std::optional<ReferenceResultAlias> reference_result_alias;
+    std::vector<EvaluatedCallArgument> evaluated_arguments;
+    evaluated_arguments.reserve(parameters.size());
+    size_t indirect_index = 0;
+    for (size_t ordinal = 0; ordinal < parameters.size(); ++ordinal) {
+      const IndirectParameter* indirect = nullptr;
+      if (indirect_index < indirect_parameters.size() &&
+          indirect_parameters[indirect_index].ordinal == ordinal) {
+        indirect = &indirect_parameters[indirect_index++];
+      }
+      EvaluatedCallArgument evaluated;
+      if (ordinal == 0 && source_arguments.leading_reference) {
+        IREE_ASSERT(indirect && indirect->abi == IndirectParameterABI::Storage);
+        evaluated.value = *source_arguments.leading_reference;
+        evaluated.target =
+            Lvalue{ObjectLvalue{indirect->object_type,
+                                storage_.project(evaluated.value->pointer(),
+                                                 indirect->object_type, call)}};
+      } else {
+        auto* argument = source_arguments.next();
+        IREE_ASSERT(argument);
+        evaluated = evaluate_call_argument(argument, parameters[ordinal],
+                                           indirect, call);
+      }
+      evaluated_arguments.push_back(std::move(evaluated));
+    }
+    std::vector<loom_value_id_t> variadic_arguments;
+    while (auto* argument = source_arguments.next()) {
+      expression(argument).append_to(variadic_arguments);
+    }
+    return emit_projected_call(call, function, callee, std::move(receiver),
+                               std::move(evaluated_arguments),
+                               std::move(variadic_arguments), source);
+  }
+
+  EvaluatedCallResult emit_projected_call(
+      cxx::AST* call, cxx::FunctionSymbol* function, loom_symbol_ref_t callee,
+      std::optional<ReceiverArgument> receiver,
+      std::vector<EvaluatedCallArgument> evaluated_arguments,
+      std::vector<loom_value_id_t> variadic_arguments,
+      loom_location_id_t source) {
+    auto* signature = cxx::type_cast<cxx::FunctionType>(function->type());
     auto return_parameter =
         unit_.typeTraits().is_reference(signature->returnType())
             ? functions_.reference_return_parameter(function)
             : std::nullopt;
-    writebacks.reserve(references.size());
-    origins.reserve(references.size() +
-                    (receiver && receiver->abi == ImplicitObjectABI::Value
-                         ? receiver->record->members.size()
-                         : 0));
     const size_t receiver_argument_count =
-        !receiver ? 0
-        : receiver->abi == ImplicitObjectABI::Value
-            ? receiver->record->component_count
-            : kPointerPartition.component_count;
-
-    size_t reference_index = 0;
-    for (size_t ordinal = 0; ordinal < parameters.size(); ++ordinal) {
-      auto* argument = source_arguments.next();
-      IREE_ASSERT(argument);
-      const ReferenceParameter* reference = nullptr;
-      if (reference_index < references.size() &&
-          references[reference_index].ordinal == ordinal) {
-        reference = &references[reference_index++];
+        receiver_input_count(function, receiver);
+    std::vector<loom_value_id_t> arguments;
+    std::vector<IndirectWriteback> writebacks;
+    std::optional<ReferenceResultAlias> reference_result_alias;
+    for (auto& evaluated : evaluated_arguments) {
+      materialize_call_argument(evaluated, call);
+    }
+    std::vector<SelectedReferenceCandidate> selected_reference_candidates;
+    auto projected_origins = functions_.projected_reference_return_origins(
+        function, receiver ? receiver->abi : ImplicitObjectABI::None);
+    if (!projected_origins.empty()) {
+      selected_reference_candidates.reserve(projected_origins.size());
+      for (const auto& origin : projected_origins) {
+        if (origin.owner_ordinal == ReferenceResultOrigin::kReceiver) {
+          IREE_ASSERT(receiver);
+          selected_reference_candidates.push_back(receiver_reference_candidate(
+              *receiver, origin.projection, std::nullopt, call));
+          continue;
+        }
+        auto candidate = selected_call_argument_candidate(
+            evaluated_arguments[origin.owner_ordinal]);
+        selected_reference_candidates.push_back(project_reference_candidate(
+            std::move(candidate), origin.projection, call));
       }
-      auto evaluated = evaluate_call_argument(argument, parameters[ordinal],
-                                              reference, call);
+    }
+    for (size_t ordinal = 0; ordinal < evaluated_arguments.size(); ++ordinal) {
+      auto& evaluated = evaluated_arguments[ordinal];
       if (return_parameter == ordinal) {
-        reference_result_alias = {evaluated.value,
-                                  receiver_argument_count + arguments.size()};
+        reference_result_alias = {*evaluated.value, evaluated.target,
+                                  receiver_argument_count + arguments.size(),
+                                  evaluated.temporary};
       }
       append_call_argument(std::move(evaluated), receiver_argument_count,
-                           arguments, writebacks, origins);
+                           arguments, writebacks, call);
     }
-    while (auto* argument = source_arguments.next()) {
-      expression(argument).append_to(arguments);
-    }
-    return emit_evaluated_call(call, function, callee, std::move(receiver),
-                               std::move(arguments), std::move(writebacks),
-                               std::move(origins),
-                               std::move(reference_result_alias), source);
+    arguments.insert(arguments.end(), variadic_arguments.begin(),
+                     variadic_arguments.end());
+    return emit_evaluated_call(
+        call, function, callee, std::move(receiver), std::move(arguments),
+        std::move(writebacks), std::move(reference_result_alias),
+        projected_origins, std::move(selected_reference_candidates), source);
   }
 
-  std::optional<Value> ordinary_operator_call(cxx::ExpressionAST* expression,
-                                              const DirectOperatorCall& call) {
+  EvaluatedCallResult ordinary_operator_call(cxx::ExpressionAST* expression,
+                                             const DirectOperatorCall& call) {
     admit_ordinary_operator(call, expression);
     auto* function = call.function;
     auto* signature = cxx::type_cast<cxx::FunctionType>(function->type());
@@ -3551,11 +5094,11 @@ class Translator final : private Initialization::Evaluation {
         call.argument_count + (call.has_postfix_dummy ? 1u : 0u);
     IREE_ASSERT(parameters.size() == parameter_count);
 
-    auto references = functions_.reference_parameters(function);
-    std::array<const ReferenceParameter*, 3> reference_by_ordinal = {};
-    for (const auto& reference : references) {
-      IREE_ASSERT(reference.ordinal < parameter_count);
-      reference_by_ordinal[reference.ordinal] = &reference;
+    auto indirect_parameters = functions_.indirect_parameters(function);
+    std::array<const IndirectParameter*, 3> indirect_by_ordinal = {};
+    for (const auto& parameter : indirect_parameters) {
+      IREE_ASSERT(parameter.ordinal < parameter_count);
+      indirect_by_ordinal[parameter.ordinal] = &parameter;
     }
 
     std::array<std::optional<EvaluatedCallArgument>, 3> evaluated_arguments;
@@ -3570,7 +5113,7 @@ class Translator final : private Initialization::Evaluation {
                   !evaluated_arguments[ordinal]);
       evaluated_arguments[ordinal] =
           evaluate_call_argument(call.arguments[ordinal], parameters[ordinal],
-                                 reference_by_ordinal[ordinal], expression);
+                                 indirect_by_ordinal[ordinal], expression);
     };
 
     switch (call.evaluation_order) {
@@ -3598,7 +5141,7 @@ class Translator final : private Initialization::Evaluation {
 
     if (call.has_postfix_dummy) {
       const size_t ordinal = call.argument_count;
-      IREE_ASSERT(!reference_by_ordinal[ordinal]);
+      IREE_ASSERT(!indirect_by_ordinal[ordinal]);
       auto type = types_.get(parameters[ordinal]->type(), expression);
       IREE_ASSERT(loom_type_kind(type) == LOOM_TYPE_SCALAR);
       evaluated_arguments[ordinal] = EvaluatedCallArgument{
@@ -3609,51 +5152,65 @@ class Translator final : private Initialization::Evaluation {
 
     auto receiver_abi = receiver ? receiver->abi : ImplicitObjectABI::None;
     auto callee = functions_.declare(function, expression, receiver_abi);
-    if (references.empty() && !receiver) {
+    if (indirect_parameters.empty() && !receiver) {
       std::vector<loom_value_id_t> arguments;
       for (size_t ordinal = 0; ordinal < parameter_count; ++ordinal) {
         IREE_ASSERT(evaluated_arguments[ordinal]);
-        evaluated_arguments[ordinal]->value.append_to(arguments);
+        evaluated_arguments[ordinal]->value->append_to(arguments);
       }
       return emit_simple_call(expression, function, callee,
                               std::move(arguments), locations_.get(expression));
     }
 
     const size_t receiver_argument_count =
-        !receiver ? 0
-        : receiver->abi == ImplicitObjectABI::Value
-            ? receiver->record->component_count
-            : kPointerPartition.component_count;
+        receiver_input_count(function, receiver);
     std::vector<loom_value_id_t> arguments;
-    std::vector<ReferenceWriteback> writebacks;
-    std::vector<ReferenceOrigin> origins;
+    std::vector<IndirectWriteback> writebacks;
     std::optional<ReferenceResultAlias> reference_result_alias;
     auto return_parameter =
         unit_.typeTraits().is_reference(signature->returnType())
             ? functions_.reference_return_parameter(function)
             : std::nullopt;
-    writebacks.reserve(references.size());
-    origins.reserve(references.size() +
-                    (receiver && receiver->abi == ImplicitObjectABI::Value
-                         ? receiver->record->members.size()
-                         : 0));
+    writebacks.reserve(indirect_parameters.size());
+    for (size_t ordinal = 0; ordinal < parameter_count; ++ordinal) {
+      IREE_ASSERT(evaluated_arguments[ordinal]);
+      materialize_call_argument(*evaluated_arguments[ordinal], expression);
+    }
+    std::vector<SelectedReferenceCandidate> selected_reference_candidates;
+    auto projected_origins =
+        functions_.projected_reference_return_origins(function, receiver_abi);
+    selected_reference_candidates.reserve(projected_origins.size());
+    for (const auto& origin : projected_origins) {
+      if (origin.owner_ordinal == ReferenceResultOrigin::kReceiver) {
+        IREE_ASSERT(receiver);
+        selected_reference_candidates.push_back(receiver_reference_candidate(
+            *receiver, origin.projection, std::nullopt, expression));
+        continue;
+      }
+      IREE_ASSERT(evaluated_arguments[origin.owner_ordinal]);
+      auto candidate = selected_call_argument_candidate(
+          *evaluated_arguments[origin.owner_ordinal]);
+      selected_reference_candidates.push_back(project_reference_candidate(
+          std::move(candidate), origin.projection, expression));
+    }
     for (size_t ordinal = 0; ordinal < parameter_count; ++ordinal) {
       IREE_ASSERT(evaluated_arguments[ordinal]);
       auto evaluated = std::move(*evaluated_arguments[ordinal]);
       if (return_parameter == ordinal) {
-        reference_result_alias = {evaluated.value,
+        reference_result_alias = {*evaluated.value, evaluated.target,
                                   receiver_argument_count + arguments.size()};
       }
       append_call_argument(std::move(evaluated), receiver_argument_count,
-                           arguments, writebacks, origins);
+                           arguments, writebacks, expression);
     }
     return emit_evaluated_call(
         expression, function, callee, std::move(receiver), std::move(arguments),
-        std::move(writebacks), std::move(origins),
-        std::move(reference_result_alias), locations_.get(expression));
+        std::move(writebacks), std::move(reference_result_alias),
+        projected_origins, std::move(selected_reference_candidates),
+        locations_.get(expression));
   }
 
-  std::optional<Value> ordinary_operator_call(cxx::ExpressionAST* expression) {
+  EvaluatedCallResult ordinary_operator_call(cxx::ExpressionAST* expression) {
     auto call = direct_operator_call(expression);
     IREE_ASSERT(call);
     return ordinary_operator_call(expression, *call);
@@ -3661,31 +5218,14 @@ class Translator final : private Initialization::Evaluation {
 
   Value ordinary_operator_value(cxx::ExpressionAST* expression,
                                 const DirectOperatorCall& call) {
-    auto value = ordinary_operator_call(expression, call);
-    if (!value) {
+    auto called = ordinary_operator_call(expression, call);
+    if (called.reference_target) {
+      return read(*called.reference_target, expression);
+    }
+    if (!called.value) {
       fail(expression, "void operator cannot be used as a value");
     }
-    auto* signature = cxx::type_cast<cxx::FunctionType>(call.function->type());
-    IREE_ASSERT(signature);
-    if (!unit_.typeTraits().is_reference(signature->returnType())) {
-      return *value;
-    }
-    if (returns_value_reference(call.function, *value)) {
-      return *value;
-    }
-    if (!value->is_pointer()) {
-      fail(expression, "reference-returning operator lost its object identity");
-    }
-    auto projection = storage_.project(
-        value->pointer(),
-        unit_.typeTraits().remove_reference(signature->returnType()),
-        expression);
-    if (unit_.typeTraits().is_class(expression->type)) {
-      return objects_.load(projection, expression->type, expression);
-    }
-    return storage_.load(
-        storage_.dereference(projection, expression->type, expression),
-        expression->type, expression);
+    return *called.value;
   }
 
   Value increment(cxx::ExpressionAST* destination, cxx::TokenKind token,
@@ -3768,38 +5308,10 @@ class Translator final : private Initialization::Evaluation {
 
   Value assignment(cxx::AssignmentExpressionAST* assignment) {
     auto* ast = assignment;
-    const auto& partition = types_.partition(
-        types_.unqualified(assignment->leftExpression->type), ast);
-    cxx::ClassSymbol* source = nullptr;
-    if (partition.kind == ValueKind::Record) {
-      source = static_cast<const RecordPartition&>(partition).source;
-    } else if (partition.kind == ValueKind::Buffer) {
-      source = static_cast<const BufferPartition&>(partition).source;
-    } else if (partition.kind == ValueKind::Address) {
-      source = static_cast<const AddressPartition&>(partition).source;
-    } else if (partition.kind == ValueKind::OpaqueDialect) {
-      source = static_cast<const OpaqueDialectPartition&>(partition).source;
-    } else if (partition.kind == ValueKind::Encoding) {
-      source = static_cast<const EncodingPartition&>(partition).source;
-    } else if (partition.kind == ValueKind::Pool) {
-      source = static_cast<const PoolPartition&>(partition).source;
-    } else if (partition.kind == ValueKind::Tile) {
-      source = static_cast<const TilePartition&>(partition).source;
-    } else if (partition.kind == ValueKind::Channel) {
-      source = static_cast<const ChannelPartition&>(partition).source;
-    } else if (partition.kind == ValueKind::Vector) {
-      source = static_cast<const VectorPartition&>(partition).source;
-    } else if (partition.kind == ValueKind::View) {
-      source = static_cast<const ViewPartition&>(partition).source;
-    } else if (partition.kind == ValueKind::Tensor) {
-      source = static_cast<const TensorPartition&>(partition).source;
-    }
-    if ((assignment->symbol &&
-         (!source ||
-          (assignment->symbol != source->copyAssignmentOperator() &&
-           assignment->symbol != source->moveAssignmentOperator()))) ||
-        assignment->op != cxx::TokenKind::T_EQUAL) {
-      fail(ast, "only builtin plain assignment is admitted here");
+    if (assignment->symbol &&
+        !types_.is_trivial_value_operation(assignment->symbol)) {
+      auto call = direct_operator_call(ast);
+      return ordinary_operator_value(ast, *call);
     }
     auto value = expression(assignment->rightExpression);
     write(destination(assignment->leftExpression, ast), value, ast);
@@ -3821,17 +5333,18 @@ class Translator final : private Initialization::Evaluation {
     if constexpr (has_value) {
       sources.push_back(ast->type);
     }
-    for (auto* symbol : written) {
-      sources.push_back(types_.unqualified_value(symbol->type()));
+    for (const auto& mutation : written) {
+      sources.push_back(mutation.projection.type);
     }
-    auto initial = current(written);
+    auto initial = values_;
     auto source = locations_.get(ast);
     auto outputs = bind_signature(types_, sources, ast, &builder_);
     loom_op_t* op;
     check(loom_scf_if_build(&builder_, LOOM_SCF_IF_BUILD_FLAG_HAS_ELSE_REGION,
                             condition, outputs.types.data(),
                             outputs.types.size(), nullptr, 0, source, &op));
-    conditional_cleanup_anchors_.push_back(op);
+    conditional_cleanup_anchors_.push_back(
+        {op->parent_block, op->parent_op, op});
     auto saved =
         loom_builder_enter_region(&builder_, op, loom_scf_if_then_region(op));
     size_t temporary_mark = temporary_destructions_.size();
@@ -3849,7 +5362,7 @@ class Translator final : private Initialization::Evaluation {
     check(loom_scf_yield_build(&builder_, yielded.data(), yielded.size(),
                                source, &yield));
     loom_builder_restore(&builder_, saved);
-    bind_values(written, initial.data());
+    values_ = initial;
     saved =
         loom_builder_enter_region(&builder_, op, loom_scf_if_else_region(op));
     temporary_mark = temporary_destructions_.size();
@@ -3867,6 +5380,7 @@ class Translator final : private Initialization::Evaluation {
                                source, &yield));
     loom_builder_restore(&builder_, saved);
     conditional_cleanup_anchors_.pop_back();
+    values_ = std::move(initial);
     bind_values(written, loom_op_results(op) + value_count);
     if constexpr (has_value) {
       return value_arena_.capture(types_.partition(ast->type, ast),
@@ -3888,9 +5402,9 @@ class Translator final : private Initialization::Evaluation {
     // Source conditional whose unfinished arms this frame owns.
     cxx::ConditionalExpressionAST* expression;
     // Source bindings that either arm may replace.
-    std::vector<cxx::Symbol*> written;
-    // Binding components restored before entering the else arm.
-    std::vector<loom_value_id_t> initial;
+    std::vector<Mutation> written;
+    // Binding availability restored before entering either continuation.
+    ValueBindings initial;
     // Structured conditional receiving the two source arm values.
     loom_op_t* operation;
     // Insertion point enclosing |operation|.
@@ -3914,17 +5428,18 @@ class Translator final : private Initialization::Evaluation {
         types_.partition(expression->type, expression).component_count;
     std::vector<const cxx::Type*> sources = {expression->type};
     sources.reserve(1 + written.size());
-    for (auto* symbol : written) {
-      sources.push_back(types_.unqualified_value(symbol->type()));
+    for (const auto& mutation : written) {
+      sources.push_back(mutation.projection.type);
     }
-    auto initial = current(written);
+    auto initial = values_;
     auto outputs = bind_signature(types_, sources, expression, &builder_);
     loom_op_t* operation;
     check(loom_scf_if_build(&builder_, LOOM_SCF_IF_BUILD_FLAG_HAS_ELSE_REGION,
                             condition, outputs.types.data(),
                             outputs.types.size(), nullptr, 0,
                             locations_.get(expression), &operation));
-    conditional_cleanup_anchors_.push_back(operation);
+    conditional_cleanup_anchors_.push_back(
+        {operation->parent_block, operation->parent_op, operation});
     auto enclosing = loom_builder_enter_region(
         &builder_, operation, loom_scf_if_then_region(operation));
     return {expression,
@@ -3941,7 +5456,7 @@ class Translator final : private Initialization::Evaluation {
                                Value value) {
     auto* arm = frame.building_then ? frame.expression->iftrueExpression
                                     : frame.expression->iffalseExpression;
-    adopt_temporary_result(arm, value);
+    adopt_temporary_result(arm);
     materialize_conditional_temporaries(frame.temporary_mark);
     std::vector<loom_value_id_t> yielded;
     value.append_to(yielded);
@@ -3955,8 +5470,10 @@ class Translator final : private Initialization::Evaluation {
   Value finish_conditional_value(const ConditionalValueFrame& frame) {
     loom_builder_restore(&builder_, frame.enclosing);
     IREE_ASSERT(!conditional_cleanup_anchors_.empty());
-    IREE_ASSERT_EQ(conditional_cleanup_anchors_.back(), frame.operation);
+    IREE_ASSERT_EQ(conditional_cleanup_anchors_.back().before_op,
+                   frame.operation);
     conditional_cleanup_anchors_.pop_back();
+    values_ = frame.initial;
     bind_values(frame.written,
                 loom_op_results(frame.operation) + frame.value_count);
     return value_arena_.capture(
@@ -3975,12 +5492,12 @@ class Translator final : private Initialization::Evaluation {
           expression, condition,
           [&] {
             auto value = this->expression(expression->iftrueExpression);
-            adopt_temporary_result(expression->iftrueExpression, value);
+            adopt_temporary_result(expression->iftrueExpression);
             return value;
           },
           [&] {
             auto value = this->expression(expression->iffalseExpression);
-            adopt_temporary_result(expression->iffalseExpression, value);
+            adopt_temporary_result(expression->iffalseExpression);
             return value;
           });
     }
@@ -4009,7 +5526,7 @@ class Translator final : private Initialization::Evaluation {
       value.reset();
       if (frame.building_then) {
         loom_builder_restore(&builder_, frame.enclosing);
-        bind_values(frame.written, frame.initial.data());
+        values_ = frame.initial;
         loom_builder_enter_region(&builder_, frame.operation,
                                   loom_scf_if_else_region(frame.operation));
         frame.building_then = false;
@@ -4044,7 +5561,83 @@ class Translator final : private Initialization::Evaluation {
         });
   }
 
+  std::optional<IntrinsicCallResult> multiprecision_arithmetic_builtin(
+      cxx::CallExpressionAST* call) {
+    auto* callee = cxx::ast_cast<cxx::IdExpressionAST>(call->baseExpression);
+    using Builtin = cxx::BuiltinFunctionKind;
+    bool addition;
+    switch (cxx::resolveBuiltinFunctionKind(callee)) {
+      case Builtin::T___BUILTIN_ADDCB:
+      case Builtin::T___BUILTIN_ADDCS:
+      case Builtin::T___BUILTIN_ADDC:
+      case Builtin::T___BUILTIN_ADDCL:
+      case Builtin::T___BUILTIN_ADDCLL:
+        addition = true;
+        break;
+      case Builtin::T___BUILTIN_SUBCB:
+      case Builtin::T___BUILTIN_SUBCS:
+      case Builtin::T___BUILTIN_SUBC:
+      case Builtin::T___BUILTIN_SUBCL:
+      case Builtin::T___BUILTIN_SUBCLL:
+        addition = false;
+        break;
+      default:
+        return std::nullopt;
+    }
+
+    std::array<Value, 4> arguments;
+    auto* argument = call->expressionList;
+    for (auto& value : arguments) {
+      value = expression(argument->value);
+      argument = argument->next;
+    }
+
+    const loom_type_t type = types_.get(call->type, call);
+    const loom_location_id_t location = locations_.get(call);
+    auto build =
+        addition ? loom_scalar_addcarryui_build : loom_scalar_subborrowui_build;
+    loom_op_t* first_op = nullptr;
+    check(build(&builder_, arguments[0].ssa(), arguments[1].ssa(), type,
+                location, &first_op));
+    loom_op_t* second_op = nullptr;
+    // Carry/borrow input is a full-width value rather than an i1. Each
+    // addition or subtraction can independently contribute to the output bit.
+    check(build(&builder_, loom_op_results(first_op)[0], arguments[2].ssa(),
+                type, location, &second_op));
+
+    const loom_type_t i1_type = loom_type_scalar(LOOM_SCALAR_TYPE_I1);
+    loom_op_t* flag_op = nullptr;
+    check(loom_scalar_ori_build(&builder_, loom_op_results(first_op)[1],
+                                loom_op_results(second_op)[1], i1_type,
+                                location, &flag_op));
+    loom_op_t* extended_flag_op = nullptr;
+    check(loom_scalar_extui_build(&builder_, loom_op_results(flag_op)[0],
+                                  i1_type, type, location, &extended_flag_op));
+
+    auto* output_expression = call->expressionList->next->next->next->value;
+    auto* output_type =
+        cxx::type_cast<cxx::PointerType>(output_expression->type)
+            ->elementType();
+    auto output = storage_.dereference(
+        storage_.project(arguments[3].pointer(), output_type, call),
+        output_type, call);
+    storage_.store(output, loom_op_results(extended_flag_op)[0], output_type,
+                   call);
+    return IntrinsicCallResult{Value(loom_op_results(second_op)[0])};
+  }
+
   std::optional<IntrinsicCallResult> builtin(cxx::CallExpressionAST* call) {
+    if (auto value = floating_builtin_constant(unit_, diagnostics_, call)) {
+      return IntrinsicCallResult{constant(*value, call)};
+    }
+    if (cxx::resolveBuiltinFunctionKind(
+            cxx::ast_cast<cxx::IdExpressionAST>(call->baseExpression)) ==
+        cxx::BuiltinFunctionKind::T___BUILTIN_UNREACHABLE) {
+      // This path has no defined continuation or runtime effect. The retained
+      // source exit summary stops the sequence and supplies func.unreachable
+      // when the enclosing callable cannot reach an ordinary return.
+      return IntrinsicCallResult{std::nullopt};
+    }
     if (auto atomic =
             AtomicBuiltin::resolve(unit_, diagnostics_, types_, call)) {
       std::array<Value, 4> arguments;
@@ -4064,23 +5657,14 @@ class Translator final : private Initialization::Evaluation {
       fence->call(&builder_, locations_.get(call));
       return IntrinsicCallResult{std::nullopt};
     }
-    if (auto exponent = ExponentBuiltin::resolve(types_, call)) {
-      std::array<Value, 2> arguments;
-      auto* argument = call->expressionList;
-      for (auto& value : arguments) {
-        value = expression(argument->value);
-        argument = argument->next;
-      }
-      return IntrinsicCallResult{exponent->call(
-          arguments, storage_, call, &builder_, locations_.get(call))};
+    if (auto arithmetic = multiprecision_arithmetic_builtin(call)) {
+      return arithmetic;
     }
     return std::nullopt;
   }
 
   Value constant(const cxx::ConstValue& value, cxx::ExpressionAST* ast) {
-    return types_.native_vector(ast->type)
-               ? vectors_.constant(value, ast->type, ast)
-               : scalars_.constant(value, ast->type, ast);
+    return initialization_.constant(value, ast->type, ast);
   }
 
   std::optional<Value> fold_constant_reference_call(
@@ -4123,11 +5707,13 @@ class Translator final : private Initialization::Evaluation {
   }
 
   Value expression(cxx::ExpressionAST* ast) override {
-    return retain_temporary(ast, expression_impl(ast));
+    const size_t evaluation_mark = temporary_destructions_.size();
+    auto value = expression_impl(ast);
+    return retain_temporary(ast, value, evaluation_mark);
   }
 
-  void adopt(cxx::ExpressionAST* expression, Value value) override {
-    adopt_temporary_result(expression, value);
+  void adopt(cxx::ExpressionAST* expression) override {
+    adopt_temporary_result(expression);
   }
 
   Value expression_impl(cxx::ExpressionAST* ast) {
@@ -4148,6 +5734,9 @@ class Translator final : private Initialization::Evaluation {
     if (auto* nested = cxx::ast_cast<cxx::NestedExpressionAST>(ast)) {
       return expression(nested->expression);
     }
+    if (auto* lambda = cxx::ast_cast<cxx::LambdaExpressionAST>(ast)) {
+      return initialization_.closure(lambda);
+    }
     if (auto* equal = cxx::ast_cast<cxx::EqualInitializerAST>(ast)) {
       return expression(equal->expression);
     }
@@ -4156,29 +5745,38 @@ class Translator final : private Initialization::Evaluation {
       return expression(initializer->expression);
     }
     if (auto* cast = cxx::ast_cast<cxx::ImplicitCastExpressionAST>(ast)) {
+      if (!cast->conversionFunction &&
+          cast->castKind == cxx::ImplicitCastKind::kArrayToPointerConversion) {
+        return pointer_expression(cast->expression).pointer;
+      }
+      if (is_class_adjustment(cast)) {
+        if (cast->castKind == cxx::ImplicitCastKind::kBaseToDerivedConversion) {
+          return load(cast);
+        }
+        const auto& selected = types_.projection(cast->subobjectPath, cast);
+        if (is_current_object(unit_, cast->expression)) {
+          return selected_receiver_value(selected, cast->type, cast);
+        }
+        return expression(cast->expression)
+            .project(*selected.partition, selected.component_offset);
+      }
       if (cast->conversionFunction &&
           !cast->conversionFunction->isConstructor() &&
           types_.record(implicit_object_type(unit_, cast->conversionFunction),
                         cast)) {
-        auto value = ordinary_operator_call(
-            ast, DirectOperatorCall{
-                     .function = cast->conversionFunction,
-                     .receiver = cast->expression,
-                     .arguments = {},
-                     .argument_count = 0,
-                     .evaluation_order = OperatorEvaluationOrder::Forward,
-                     .has_postfix_dummy = false,
-                     .is_virtual_dispatch = cast->isVirtualDispatch,
-                 });
-        if (!value) {
+        auto called = ordinary_operator_call(ast, *direct_operator_call(ast));
+        if (called.reference_target) {
+          return read(*called.reference_target, ast);
+        }
+        if (!called.value) {
           fail(ast, "conversion function must return a value");
         }
-        return *value;
+        return *called.value;
       }
       if (cast->conversionFunction &&
           cast->conversionFunction->isConstructor() &&
-          types_.is_user_record_constructor(cast->type,
-                                            cast->conversionFunction, cast)) {
+          types_.record_constructor_requires_call(
+              cast->type, cast->conversionFunction, cast)) {
         return initialization_.value(cast->type, cast->expression,
                                      cast->conversionFunction, cast);
       }
@@ -4212,27 +5810,40 @@ class Translator final : private Initialization::Evaluation {
     if (auto* cast = cxx::ast_cast<cxx::CastExpressionAST>(ast)) {
       auto input = loom_type_kind(types_.get(cast->expression->type, ast));
       auto output = loom_type_kind(types_.get(cast->type, ast));
-      if (input != output) {
+      const bool null_conversion =
+          input != output && output == LOOM_TYPE_BUFFER &&
+          null_pointer_expression(unit_, cast->expression);
+      const bool boolean_conversion =
+          input == LOOM_TYPE_BUFFER &&
+          types_.unqualified(cast->type)->kind() == cxx::TypeKind::kBool;
+      if (input != output && !null_conversion && !boolean_conversion) {
         fail(ast,
              "explicit casts require two scalars, two vectors or two pointers");
       }
       return convert(cast->expression, cast->type, ast);
     }
     if (auto* cast = cxx::ast_cast<cxx::CppCastExpressionAST>(ast)) {
-      if (explicit_xvalue_operand(unit_, cast)) {
+      if (explicit_reference_operand(unit_, cast)) {
         auto value = expression(cast->expression);
         if (&value.partition() != &types_.partition(cast->type, cast)) {
           fail(cast,
-               "xvalue casts must preserve the admitted source object type");
+               "reference casts must preserve the admitted source object type");
         }
         return value;
       }
       auto input = loom_type_kind(types_.get(cast->expression->type, ast));
       auto output = loom_type_kind(types_.get(cast->type, ast));
-      if (input != output ||
+      const bool null_conversion =
+          input != output && output == LOOM_TYPE_BUFFER &&
+          null_pointer_expression(unit_, cast->expression);
+      const bool boolean_conversion =
+          input == LOOM_TYPE_BUFFER &&
+          types_.unqualified(cast->type)->kind() == cxx::TypeKind::kBool;
+      if ((input != output && !null_conversion && !boolean_conversion) ||
           (cast->castOp != cxx::TokenKind::T_STATIC_CAST &&
            !(cast->castOp == cxx::TokenKind::T_REINTERPRET_CAST &&
-             (input == LOOM_TYPE_BUFFER || input == LOOM_TYPE_VECTOR)))) {
+             (input == LOOM_TYPE_BUFFER || input == LOOM_TYPE_VECTOR ||
+              null_conversion)))) {
         fail(ast,
              "casts require numeric static_cast or pointer/vector "
              "reinterpret_cast");
@@ -4253,19 +5864,17 @@ class Translator final : private Initialization::Evaluation {
       }
       auto output = types_.get(ast->type, ast);
       if (cast->constructorSymbol ||
-          loom_type_kind(output) != LOOM_TYPE_SCALAR ||
+          (loom_type_kind(output) != LOOM_TYPE_SCALAR &&
+           types_.partition(ast->type, ast).kind != ValueKind::Pointer) ||
           (cast->expressionList && cast->expressionList->next)) {
-        fail(ast, "functional casts require a scalar and at most one argument");
+        fail(ast,
+             "functional casts require a scalar or pointer and at most one "
+             "argument");
       }
       if (cast->expressionList) {
         return convert(cast->expressionList->value, ast->type, ast);
       }
-      loom_op_t* op;
-      check(loom_scalar_constant_build(
-          &builder_,
-          types_.is_float(ast->type) ? loom_attr_f64(0.0) : loom_attr_i64(0),
-          output, source, &op));
-      return result(op);
+      return initialization_.value(ast->type, ast, nullptr, ast);
     }
     if (auto* construction =
             cxx::ast_cast<cxx::BracedTypeConstructionAST>(ast)) {
@@ -4295,10 +5904,18 @@ class Translator final : private Initialization::Evaluation {
       return binding(decision->symbol, ast);
     }
     if (cxx::ast_cast<cxx::ThisExpressionAST>(ast)) {
-      if (receivers_.empty() || !receivers_.back().storage) {
+      if (receivers_.current()) {
+        auto* closure = receivers_.current()->record->source;
+        auto* captured_this =
+            closure->isClosureType() ? closure->capturedThisField() : nullptr;
+        if (captured_this) {
+          return receiver_member(captured_this, ast);
+        }
+      }
+      if (!receivers_.current() || !receivers_.current()->storage) {
         fail(ast, "this pointer requires a storage-backed receiver");
       }
-      return Value(receivers_.back().storage->pointer);
+      return Value(receivers_.current()->storage->pointer);
     }
     if (auto* id = cxx::ast_cast<cxx::IdExpressionAST>(ast)) {
       if (auto found = references_.find(id->symbol);
@@ -4306,18 +5923,36 @@ class Translator final : private Initialization::Evaluation {
         return name(read(found->second, ast),
                     cxx::to_string(id->symbol->name()));
       }
+      auto* field = cxx::symbol_cast<cxx::FieldSymbol>(id->symbol);
+      auto receiver_field =
+          field ? current_receiver_selection(id) : std::nullopt;
+      if (receiver_field &&
+          unit_.typeTraits().is_lvalue_reference(field->type())) {
+        if (!types_.pointer_reference_is_snapshot(field)) {
+          return name(load(ast), cxx::to_string(field->name()));
+        }
+        return name(
+            selected_receiver_value(*receiver_field, field->type(), ast),
+            cxx::to_string(field->name()));
+      }
+      if (receiver_field && id->subobjectPath) {
+        return name(
+            selected_receiver_value(*receiver_field, field->type(), ast),
+            cxx::to_string(field->name()));
+      }
       if (auto found = values_.find(id->symbol); found != values_.end()) {
         return found->second;
+      }
+      if (values_.contains(id->symbol)) {
+        fail(ast, "source value is read before initialization");
       }
       if (locals_.contains(id->symbol)) {
         return binding(id->symbol, ast);
       }
-      if (auto* field = cxx::symbol_cast<cxx::FieldSymbol>(id->symbol);
-          field && receiver(field)) {
-        if (unit_.typeTraits().is_lvalue_reference(field->type())) {
-          return name(load(ast), cxx::to_string(field->name()));
-        }
-        return name(receiver_member(field, ast), cxx::to_string(field->name()));
+      if (receiver_field) {
+        return name(
+            selected_receiver_value(*receiver_field, field->type(), ast),
+            cxx::to_string(field->name()));
       }
       if (auto* enumerator =
               cxx::symbol_cast<cxx::EnumeratorSymbol>(id->symbol)) {
@@ -4352,7 +5987,12 @@ class Translator final : private Initialization::Evaluation {
           }
         }
       }
-      if (cxx::symbol_cast<cxx::FieldSymbol>(id->symbol)) {
+      if (auto* field = cxx::symbol_cast<cxx::FieldSymbol>(id->symbol)) {
+        if (auto captured =
+                captured_object_storage(field, id->subobjectPath, ast)) {
+          return name(objects_.load(*captured, ast->type, ast),
+                      cxx::to_string(field->name()));
+        }
         fail(ast,
              "member-dependent initialization requires source object "
              "initialization semantics");
@@ -4362,6 +6002,9 @@ class Translator final : private Initialization::Evaluation {
     }
     if (auto* literal = cxx::ast_cast<cxx::BoolLiteralExpressionAST>(ast)) {
       return scalars_.integer(literal->isTrue, LOOM_SCALAR_TYPE_I1, source);
+    }
+    if (cxx::ast_cast<cxx::NullptrLiteralExpressionAST>(ast)) {
+      return storage_.null(ast);
     }
     if (auto* literal = cxx::ast_cast<cxx::StringLiteralExpressionAST>(ast)) {
       return string_literal(literal).pointer;
@@ -4381,13 +6024,27 @@ class Translator final : private Initialization::Evaluation {
       return scalars_.constant(*value, ast->type, ast);
     }
     if (auto* member = cxx::ast_cast<cxx::MemberExpressionAST>(ast)) {
-      if (auto* field = current_receiver_field(member)) {
-        if (unit_.typeTraits().is_lvalue_reference(field->type())) {
+      if (member->vectorComponentKind != cxx::VectorComponentKind::kNone) {
+        return vector_component_value(member);
+      }
+      if (auto selected = current_receiver_selection(member)) {
+        auto* field = static_cast<cxx::FieldSymbol*>(member->symbol);
+        if (unit_.typeTraits().is_lvalue_reference(field->type()) &&
+            !types_.pointer_reference_is_snapshot(field)) {
           return name(load(ast), cxx::to_string(field->name()));
         }
-        return name(receiver_member(field, ast), cxx::to_string(field->name()));
+        return name(selected_receiver_value(*selected, field->type(), ast),
+                    cxx::to_string(field->name()));
+      }
+      if (auto alias =
+              pointer_alias_member_lvalue(member, ast, LvalueAccess::Read)) {
+        return name(read(*alias, ast), cxx::to_string(member->symbol->name()));
       }
       auto* base = cxx::ast_cast<cxx::IdExpressionAST>(member->baseExpression);
+      if (is_array_element(member->baseExpression)) {
+        return name(read(destination(member, ast, LvalueAccess::Read), ast),
+                    cxx::to_string(member->symbol->name()));
+      }
       if (control_->storage_backed(member) ||
           unit_.typeTraits().is_array(member->type)) {
         return name(load(ast), cxx::to_string(member->symbol->name()));
@@ -4416,11 +6073,17 @@ class Translator final : private Initialization::Evaluation {
         if (!field || field->isStatic()) {
           fail(ast, "record value access requires a non-static data member");
         }
-        if (unit_.typeTraits().is_lvalue_reference(field->type())) {
+        if (unit_.typeTraits().is_lvalue_reference(field->type()) &&
+            !types_.pointer_reference_is_snapshot(field)) {
           return name(load(ast), cxx::to_string(field->name()));
         }
+        if (auto destination = control_->destination(member);
+            destination && values_.contains(destination->binding) &&
+            !locals_.contains(destination->binding)) {
+          return read(ObjectLvalue{member->type, *destination}, member);
+        }
         auto value = expression(member->baseExpression);
-        const auto& slice = types_.member(field, ast);
+        auto slice = types_.selection(field, member->subobjectPath, ast);
         return value.project(*slice.partition, slice.component_offset);
       }
       require_kernel_context(ast);
@@ -4498,6 +6161,21 @@ class Translator final : private Initialization::Evaluation {
       }
       auto right = expression(binary->rightExpression);
       if (left.is_pointer() || right.is_pointer()) {
+        if (binary->op == cxx::TokenKind::T_EQUAL_EQUAL ||
+            binary->op == cxx::TokenKind::T_EXCLAIM_EQUAL) {
+          const bool equal = binary->op == cxx::TokenKind::T_EQUAL_EQUAL;
+          if (null_pointer_expression(unit_, binary->rightExpression)) {
+            return storage_.compare_null(left.pointer().root, equal, ast);
+          }
+          if (null_pointer_expression(unit_, binary->leftExpression)) {
+            return storage_.compare_null(right.pointer().root, equal, ast);
+          }
+          return storage_.compare_address(left.pointer(), right.pointer(),
+                                          equal, ast);
+        }
+        if (left.is_pointer() && right.is_pointer()) {
+          fail(ast, "pointer ordering and subtraction are not supported");
+        }
         if (left.is_pointer() && !right.is_pointer()) {
           return storage_
               .advance(
@@ -4578,6 +6256,12 @@ class Translator final : private Initialization::Evaluation {
         return object_address(unary->expression).pointer;
       }
       if (unary->op == cxx::TokenKind::T_STAR) {
+        if (auto* alias = pointer_alias_lvalue(unary->expression)) {
+          return read(*alias, ast);
+        }
+        if (is_current_object(unit_, unary)) {
+          return read(destination(ast, ast, LvalueAccess::Read), ast);
+        }
         return load(ast);
       }
       if (unary->op != cxx::TokenKind::T_PLUS &&
@@ -4625,30 +6309,13 @@ class Translator final : private Initialization::Evaluation {
     if (auto* subscript = cxx::ast_cast<cxx::SubscriptExpressionAST>(ast)) {
       if (subscript->symbol) {
         auto called = overloaded_subscript_call(subscript);
-        if (!called) {
+        if (called.reference_target) {
+          return read(*called.reference_target, ast);
+        }
+        if (!called.value) {
           fail(ast, "void overloaded subscript cannot be used as a value");
         }
-        auto* signature =
-            cxx::type_cast<cxx::FunctionType>(subscript->symbol->type());
-        if (signature &&
-            unit_.typeTraits().is_reference(signature->returnType())) {
-          if (returns_value_reference(subscript->symbol, *called)) {
-            return *called;
-          }
-          if (!called->is_pointer()) {
-            fail(ast, "reference-returning subscript lost its object identity");
-          }
-          auto projection = storage_.project(
-              called->pointer(),
-              unit_.typeTraits().remove_reference(signature->returnType()),
-              ast);
-          if (unit_.typeTraits().is_class(ast->type)) {
-            return objects_.load(projection, ast->type, ast);
-          }
-          return storage_.load(storage_.dereference(projection, ast->type, ast),
-                               ast->type, ast);
-        }
-        return *called;
+        return *called.value;
       }
       auto* base_type = subscript->baseExpression->type;
       auto* index_type = subscript->indexExpression->type;
@@ -4661,6 +6328,9 @@ class Translator final : private Initialization::Evaluation {
         }
         return vectors_.extract(base.ssa(), index.ssa(), base_type, index_type,
                                 ast);
+      }
+      if (auto target = array_element(subscript, ast, LvalueAccess::Read)) {
+        return read(*target, ast);
       }
       return load(ast);
     }
@@ -4704,29 +6374,13 @@ class Translator final : private Initialization::Evaluation {
           fail(ast, "pipelines require explicit composition or kernel launch");
         }
         auto called = ordinary_call(call, function, source);
-        if (!called) {
+        if (called.reference_target) {
+          return read(*called.reference_target, ast);
+        }
+        if (!called.value) {
           fail(ast, "void function cannot be used as a value");
         }
-        auto* signature = cxx::type_cast<cxx::FunctionType>(function->type());
-        if (signature &&
-            unit_.typeTraits().is_reference(signature->returnType())) {
-          if (returns_value_reference(function, *called)) {
-            return *called;
-          }
-          if (!called->is_pointer()) {
-            fail(ast, "reference-returning call lost its object identity");
-          }
-          auto projection = storage_.project(
-              called->pointer(),
-              unit_.typeTraits().remove_reference(signature->returnType()),
-              ast);
-          if (unit_.typeTraits().is_class(ast->type)) {
-            return objects_.load(projection, ast->type, ast);
-          }
-          return storage_.load(storage_.dereference(projection, ast->type, ast),
-                               ast->type, ast);
-        }
-        return *called;
+        return *called.value;
       }
       if (auto* parameter = std::get_if<CommandParameterIntrinsic>(binding)) {
         return command_parameter(call, *parameter);
@@ -4845,8 +6499,8 @@ class Translator final : private Initialization::Evaluation {
     }
     const size_t control_count = sources.size();
     sources.reserve(control_count + written.size());
-    for (auto* symbol : written) {
-      sources.push_back(types_.unqualified_value(symbol->type()));
+    for (const auto& mutation : written) {
+      sources.push_back(mutation.projection.type);
     }
     auto source = locations_.get(owner);
     auto result_signature = bind_signature(types_, sources, owner, &builder_);
@@ -5139,8 +6793,8 @@ class Translator final : private Initialization::Evaluation {
     }
     const size_t control_count = sources.size();
     sources.reserve(control_count + written.size());
-    for (auto* symbol : written) {
-      sources.push_back(types_.unqualified_value(symbol->type()));
+    for (const auto& mutation : written) {
+      sources.push_back(mutation.projection.type);
     }
     auto signature = bind_signature(types_, sources, selection, &builder_);
 
@@ -5259,8 +6913,8 @@ class Translator final : private Initialization::Evaluation {
       }
       const size_t control_count = sources.size();
       sources.reserve(control_count + written.size());
-      for (auto* symbol : written) {
-        sources.push_back(types_.unqualified_value(symbol->type()));
+      for (const auto& mutation : written) {
+        sources.push_back(mutation.projection.type);
       }
       auto signature = bind_signature(types_, sources, selection, &builder_);
       loom_op_t* op;
@@ -5518,7 +7172,7 @@ class Translator final : private Initialization::Evaluation {
         loom_symbol_ref_is_valid(target)
             ? LOOM_PIPELINE_STRAND_BUILD_FLAG_HAS_TARGET
             : 0,
-        target, origins.data(), origins.size(),
+        0, target, origins.data(), origins.size(),
         strand.origins.static_values().data(),
         strand.origins.static_values().size(), counts.data(), counts.size(),
         strand.counts.static_values().data(),
@@ -5546,6 +7200,7 @@ class Translator final : private Initialization::Evaluation {
 
   void validate_statement_attributes(cxx::StatementAST* statement) {
     const bool loop = cxx::ast_cast<cxx::ForStatementAST>(statement) ||
+                      cxx::ast_cast<cxx::ForRangeStatementAST>(statement) ||
                       cxx::ast_cast<cxx::WhileStatementAST>(statement) ||
                       cxx::ast_cast<cxx::DoStatementAST>(statement);
     const bool declaration =
@@ -5597,6 +7252,10 @@ class Translator final : private Initialization::Evaluation {
         resolve_fastmath(ast ? fastmath_.statement(ast) : std::nullopt));
     if (ast) {
       validate_statement_attributes(ast);
+    }
+    if (auto* range = cxx::ast_cast<cxx::ForRangeStatementAST>(ast)) {
+      statement(control_->range_scope(range));
+      return;
     }
     const size_t selection_mark = active_destructions_.size();
     auto* selected = selected_statement(ast);
@@ -5674,6 +7333,29 @@ class Translator final : private Initialization::Evaluation {
       if (cxx::ast_cast<cxx::UsingDeclarationAST>(declaration->declaration)) {
         return;
       }
+      if (auto* structured =
+              cxx::ast_cast<cxx::StructuredBindingDeclarationAST>(
+                  declaration->declaration)) {
+        reject_misplaced_binding_attributes(
+            unit_, diagnostics_, structured->attributeList,
+            BindingAttributeScope::LocalDeclaration);
+        if (!structured->hiddenVariable || !structured->bindingDeclaratorList) {
+          fail(structured,
+               "structured binding decomposition must be resolved before "
+               "import");
+        }
+        initialize_local_declarator(structured->hiddenVariable,
+                                    structured->attributeList, structured);
+        for (auto* binding : cxx::ListView{structured->bindingDeclaratorList}) {
+          if (!binding->initializer) {
+            fail(structured,
+                 "structured binding decomposition must be resolved before "
+                 "import");
+          }
+          initialize_local_declarator(binding, nullptr, structured);
+        }
+        return;
+      }
       auto* simple =
           cxx::ast_cast<cxx::SimpleDeclarationAST>(declaration->declaration);
       if (!simple) {
@@ -5686,54 +7368,8 @@ class Translator final : private Initialization::Evaluation {
         admit_constexpr_contract(unit_, diagnostics_, types_,
                                  simple->attributeList, nullptr, false, simple);
       }
-      for (auto* variable : cxx::ListView{simple->initDeclaratorList}) {
-        reject_misplaced_binding_declarator(unit_, diagnostics_,
-                                            variable->declarator);
-        auto* source_variable =
-            cxx::symbol_cast<cxx::VariableSymbol>(variable->symbol);
-        auto constexpr_contract = admit_constexpr_contract(
-            unit_, diagnostics_, types_, simple->attributeList, source_variable,
-            source_variable && control_->addressed(source_variable), variable);
-        if (cxx::symbol_cast<cxx::TypeAliasSymbol>(variable->symbol)) {
-          continue;
-        }
-        if (!source_variable || source_variable->isStatic() ||
-            source_variable->isExtern() || source_variable->isThreadLocal()) {
-          fail(ast, "local storage duration must be automatic or __shared__");
-        }
-        if (variable->symbol && annotated(variable->symbol, "workgroup")) {
-          if (current_function_.kind != FunctionKind::Kernel &&
-              current_function_.kind != FunctionKind::TemplateDefinition) {
-            fail(variable,
-                 "workgroup storage requires a kernel or template definition "
-                 "body");
-          }
-          if (variable->initializer) {
-            fail(variable, "workgroup storage cannot have an initializer");
-          }
-          if (control_->automatic_destruction(source_variable)) {
-            fail(variable, "workgroup storage requires trivial destruction");
-          }
-          auto* source_type = types_.unqualified(variable->symbol->type());
-          auto* array = cxx::type_cast<cxx::BoundedArrayType>(source_type);
-          auto allocation = storage_.allocate(
-              source_type, LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP,
-              source_variable->explicitAlignment(), variable);
-          auto spelling = cxx::to_string(variable->symbol->name());
-          if (array) {
-            values_.set(variable->symbol,
-                        name(Value(allocation.pointer), spelling));
-          } else {
-            name(Value(allocation.pointer), spelling + "_storage");
-            locals_[variable->symbol] = allocation;
-          }
-          name(allocation.view, spelling + "_view");
-          continue;
-        }
-        auto mark = begin_full_expression();
-        initialize_variable(source_variable, variable->initializer,
-                            constexpr_contract, variable);
-        finish_full_expression(mark);
+      for (auto* declarator : cxx::ListView{simple->initDeclaratorList}) {
+        initialize_local_declarator(declarator, simple->attributeList, simple);
       }
       return;
     }
@@ -5745,8 +7381,8 @@ class Translator final : private Initialization::Evaluation {
       auto written = live_mutations(ast);
       std::vector<const cxx::Type*> sources;
       sources.reserve(written.size());
-      for (auto* symbol : written) {
-        sources.push_back(types_.unqualified_value(symbol->type()));
+      for (const auto& mutation : written) {
+        sources.push_back(mutation.projection.type);
       }
       auto results = bind_signature(types_, sources, ast, &builder_);
       loom_op_t* op;
@@ -5866,8 +7502,8 @@ class Translator final : private Initialization::Evaluation {
     auto outer_values = values_;
     std::vector<const cxx::Type*> sources = {unit_.control()->getBoolType()};
     sources.reserve(1 + written.size());
-    for (auto* symbol : written) {
-      sources.push_back(types_.unqualified_value(symbol->type()));
+    for (const auto& mutation : written) {
+      sources.push_back(mutation.projection.type);
     }
     auto source = locations_.get(owner);
     auto result_signature = bind_signature(types_, sources, owner, &builder_);
@@ -5903,13 +7539,13 @@ class Translator final : private Initialization::Evaluation {
   // Executes a loop latch only when the body reaches it. The inactive arm
   // forwards source state, skipping a for step and condition reinitialization.
   template <typename Execute>
-  void guarded_latch(cxx::AST* owner, const std::vector<cxx::Symbol*>& written,
+  void guarded_latch(cxx::AST* owner, const std::vector<Mutation>& written,
                      loom_value_id_t active, Execute execute) {
     auto outer_values = values_;
     std::vector<const cxx::Type*> sources;
     sources.reserve(written.size());
-    for (auto* symbol : written) {
-      sources.push_back(types_.unqualified_value(symbol->type()));
+    for (const auto& mutation : written) {
+      sources.push_back(mutation.projection.type);
     }
     auto source = locations_.get(owner);
     auto result_signature = bind_signature(types_, sources, owner, &builder_);
@@ -5955,26 +7591,37 @@ class Translator final : private Initialization::Evaluation {
     }
     auto written = live_mutations(ast);
     if (decision && values_.contains(decision)) {
-      std::erase(written, decision);
-      written.push_back(decision);
+      std::erase_if(written, [&](const auto& value) {
+        return value.binding == decision;
+      });
+      written.push_back(whole_mutation(decision));
     }
-    auto initial = current(written);
+    auto incoming = live_mutations(control_->written(ast));
+    if (decision && values_.contains(decision)) {
+      std::erase_if(incoming, [&](const auto& value) {
+        return value.binding == decision;
+      });
+      incoming.push_back(whole_mutation(decision));
+    }
+    size_t result_count = 0;
+    for (const auto& mutation : written) {
+      result_count += mutation.projection.partition->component_count;
+    }
+    auto initial = current(incoming);
     auto outer_values = values_;
     auto source = locations_.get(ast);
     auto dependent_state_sources = dependent_source_types(written, ast);
     auto bind_loop_signatures =
         [&](std::span<const loom_type_t> header_suffix_types,
             bool require_result_types) {
-          if (!dependent_state_sources.empty()) {
+          bool distinct_header = incoming.size() != written.size();
+          if (!dependent_state_sources.empty() || require_result_types ||
+              distinct_header) {
+            auto header_sources = source_types(incoming);
+            auto result_sources = source_types(written);
             return bind_condition_loop_signatures(
-                types_, dependent_state_sources, ast, &builder_,
-                header_suffix_types, require_result_types);
-          }
-          if (require_result_types) {
-            auto state_sources = source_types(written);
-            return bind_condition_loop_signatures(
-                types_, state_sources, ast, &builder_, header_suffix_types,
-                require_result_types);
+                types_, header_sources, result_sources, ast, &builder_,
+                header_suffix_types, require_result_types || distinct_header);
           }
           return BoundConditionLoopSignatures{};
         };
@@ -6007,11 +7654,11 @@ class Translator final : private Initialization::Evaluation {
             &builder_, header_initial.data(), header_initial.size(),
             signatures.header_types.empty() ? nullptr
                                             : signatures.header_types.data(),
-            signatures.result_types.data(), initial.size(), nullptr, 0, source,
+            signatures.result_types.data(), result_count, nullptr, 0, source,
             &op));
         auto* before = loom_scf_while_before(op);
         auto saved = loom_builder_enter_region(&builder_, op, before);
-        bind(written, before);
+        bind(incoming, before);
         auto header_active =
             loom_region_entry_arg_id(before, header_initial.size() - 1u);
         auto condition =
@@ -6049,7 +7696,7 @@ class Translator final : private Initialization::Evaluation {
             }
           });
         }
-        auto yielded = current(written);
+        auto yielded = current(incoming);
         yielded.push_back(flow.reaches_latch);
         check(loom_scf_yield_build(&builder_, yielded.data(), yielded.size(),
                                    source, &terminator));
@@ -6063,10 +7710,10 @@ class Translator final : private Initialization::Evaluation {
                                             : signatures.header_types.data(),
             signatures.result_types.empty() ? nullptr
                                             : signatures.result_types.data(),
-            initial.size(), nullptr, 0, source, &op));
+            result_count, nullptr, 0, source, &op));
         auto* before = loom_scf_while_before(op);
         auto saved = loom_builder_enter_region(&builder_, op, before);
-        bind(written, before);
+        bind(incoming, before);
         auto flow = loop_body(body, /*tracks_break=*/true);
         auto condition =
             guarded_condition(ast, flow.reaches_latch, evaluate_condition);
@@ -6084,7 +7731,7 @@ class Translator final : private Initialization::Evaluation {
           reinitialize_condition(declaration, constexpr_contract, ast);
           finish_full_expression(mark);
         }
-        auto yielded = current(written);
+        auto yielded = current(incoming);
         check(loom_scf_yield_build(&builder_, yielded.data(), yielded.size(),
                                    source, &terminator));
         loom_builder_restore(&builder_, saved);
@@ -6106,10 +7753,10 @@ class Translator final : private Initialization::Evaluation {
                                         : signatures.header_types.data(),
         signatures.result_types.empty() ? nullptr
                                         : signatures.result_types.data(),
-        initial.size(), nullptr, 0, source, &op));
+        result_count, nullptr, 0, source, &op));
     auto* before = loom_scf_while_before(op);
     auto saved = loom_builder_enter_region(&builder_, op, before);
-    bind(written, before);
+    bind(incoming, before);
     if (test == LoopTest::AfterBody) {
       loop_body(body);
     }
@@ -6139,7 +7786,7 @@ class Translator final : private Initialization::Evaluation {
       reinitialize_condition(declaration, constexpr_contract, ast);
       finish_full_expression(mark);
     }
-    auto yielded = current(written);
+    auto yielded = current(incoming);
     check(loom_scf_yield_build(&builder_, yielded.data(), yielded.size(),
                                source, &terminator));
     loom_builder_restore(&builder_, saved);
@@ -6219,7 +7866,8 @@ class Translator final : private Initialization::Evaluation {
                       ? expression(schedule.unroll_factor()).ssa()
                       : 0;
     auto written = live_mutations(loop);
-    std::erase(written, induction);
+    std::erase_if(
+        written, [&](const auto& value) { return value.binding == induction; });
     auto initial = current(written);
     BoundSignature result_signature;
     auto state_sources = dependent_source_types(written, loop);
@@ -6257,69 +7905,111 @@ class Translator final : private Initialization::Evaluation {
     bind_values(written, loom_op_results(op));
   }
 
-  std::vector<cxx::Symbol*> live_mutations(cxx::AST* owner) {
-    return live_mutations(control_->written(owner));
+  const cxx::Type* binding_value_type(cxx::Symbol* symbol) {
+    auto alias = pointer_aliases_.find(symbol);
+    return alias == pointer_aliases_.end()
+               ? types_.unqualified_value(source_object_type(symbol))
+               : types_.unqualified(alias->second.object().type);
   }
 
-  std::vector<cxx::Symbol*> live_mutations(
-      std::span<cxx::Symbol* const> candidates) {
-    std::vector<cxx::Symbol*> result;
+  Mutation whole_mutation(cxx::Symbol* symbol) {
+    return {symbol,
+            {binding_value_type(symbol), &values_.partition(symbol), 0}};
+  }
+
+  std::vector<Mutation> live_mutations(cxx::AST* owner) {
+    return live_mutations(control_->written(owner), owner);
+  }
+
+  std::vector<Mutation> live_mutations(std::span<cxx::Symbol* const> candidates,
+                                       cxx::AST* owner = nullptr) {
+    std::vector<Mutation> result;
     for (auto* symbol : candidates) {
-      if (values_.contains(symbol)) {
-        result.push_back(symbol);
+      if (auto found = values_.find(symbol); found != values_.end()) {
+        result.push_back(
+            {symbol,
+             {binding_value_type(symbol), &found->second.partition(), 0}});
+        continue;
+      }
+      if (!values_.contains(symbol)) {
+        continue;
+      }
+      auto* type = binding_value_type(symbol);
+      for (const auto& projection :
+           types_.projections(type, current_function_.source)) {
+        if (values_.initialized(symbol, projection.component_offset,
+                                projection.partition->component_count) ||
+            (owner && control_->initialized(owner, symbol, projection))) {
+          result.push_back({symbol, projection});
+        }
       }
     }
     return result;
   }
 
   std::vector<const cxx::Type*> source_types(
-      std::span<cxx::Symbol* const> symbols) {
+      std::span<const Mutation> mutations) {
     std::vector<const cxx::Type*> result;
-    result.reserve(symbols.size());
-    for (auto* symbol : symbols) {
-      result.push_back(types_.unqualified_value(symbol->type()));
+    result.reserve(mutations.size());
+    for (const auto& mutation : mutations) {
+      result.push_back(mutation.projection.type);
     }
     return result;
   }
 
-  // Returns the complete state type list only when at least one source type
-  // depends on destination identities. Ordinary scalar loops take the empty,
-  // allocation-free path and let the generated builders infer their schemes.
+  // Ordinary scalar loops keep inferred schemes; dependent source groups bind
+  // their destination identities before region or result creation.
   std::vector<const cxx::Type*> dependent_source_types(
-      std::span<cxx::Symbol* const> symbols, cxx::AST* owner) {
-    for (auto* symbol : symbols) {
-      if (types_.requires_binding(types_.unqualified_value(symbol->type()),
-                                  owner)) {
-        return source_types(symbols);
+      std::span<const Mutation> mutations, cxx::AST* owner) {
+    for (const auto& mutation : mutations) {
+      if (types_.requires_binding(mutation.projection.type, owner)) {
+        return source_types(mutations);
       }
     }
     return {};
   }
 
-  std::vector<loom_value_id_t> current(
-      const std::vector<cxx::Symbol*>& symbols) {
+  std::vector<loom_value_id_t> current(std::span<const Mutation> mutations) {
     std::vector<loom_value_id_t> result;
-    for (auto* symbol : symbols) {
-      values_.at(symbol).append_to(result);
+    for (const auto& mutation : mutations) {
+      auto value =
+          values_.project(mutation.binding, *mutation.projection.partition,
+                          mutation.projection.component_offset, value_arena_);
+      if (!value) {
+        fail(current_function_.source,
+             "source state is not initialized on every continuing path");
+      }
+      value->append_to(result);
     }
     return result;
   }
-  void bind(const std::vector<cxx::Symbol*>& symbols, loom_region_t* region,
-            size_t index = 0) {
-    for (auto* symbol : symbols) {
-      const auto& partition = values_.at(symbol).partition();
-      values_.set(symbol, name(region_value(region, index, partition),
-                               cxx::to_string(symbol->name())));
+
+  void bind_mutation(const Mutation& mutation, Value value) {
+    auto* binding = mutation.binding;
+    value = name(value, cxx::to_string(binding->name()));
+    if (&value.partition() == &values_.partition(binding)) {
+      values_.set(binding, value);
+    } else {
+      values_.replace(binding, mutation.projection.component_offset, value,
+                      value_arena_);
     }
   }
-  void bind_values(const std::vector<cxx::Symbol*>& symbols,
+
+  void bind(std::span<const Mutation> mutations, loom_region_t* region,
+            size_t index = 0) {
+    for (const auto& mutation : mutations) {
+      bind_mutation(mutation, region_value(region, index,
+                                           *mutation.projection.partition));
+    }
+  }
+
+  void bind_values(std::span<const Mutation> mutations,
                    const loom_value_id_t* components) {
-    for (auto* symbol : symbols) {
-      const auto& partition = values_.at(symbol).partition();
+    for (const auto& mutation : mutations) {
+      const auto& partition = *mutation.projection.partition;
       auto count = partition.component_count;
-      values_.set(symbol,
-                  name(value_arena_.capture(partition, {components, count}),
-                       cxx::to_string(symbol->name())));
+      bind_mutation(mutation,
+                    value_arena_.capture(partition, {components, count}));
       if (count) {
         components += count;
       }
@@ -6337,9 +8027,55 @@ class Translator final : private Initialization::Evaluation {
       effect(nested->expression);
       return;
     }
+    if (ast->valueCategory != cxx::ValueCategory::kPrValue &&
+        !unit_.typeTraits().is_volatile(ast->type)) {
+      // Discarded glvalues evaluate their selection and call effects without
+      // fetching the designated value. Volatile observations retain loads.
+      if (cxx::ast_cast<cxx::IdExpressionAST>(ast)) {
+        return;
+      }
+      if (auto* member = cxx::ast_cast<cxx::MemberExpressionAST>(ast)) {
+        effect(member->baseExpression);
+        return;
+      }
+      if (auto* operand = explicit_reference_operand(unit_, ast)) {
+        effect(operand);
+        return;
+      }
+      if (auto* cast = cxx::ast_cast<cxx::ImplicitCastExpressionAST>(ast);
+          cast && !cast->conversionFunction) {
+        effect(cast->expression);
+        return;
+      }
+      if (auto* unary = cxx::ast_cast<cxx::UnaryExpressionAST>(ast);
+          unary && !unary->symbol && unary->op == cxx::TokenKind::T_STAR) {
+        effect(unary->expression);
+        return;
+      }
+      if (auto* subscript = cxx::ast_cast<cxx::SubscriptExpressionAST>(ast);
+          subscript && !subscript->symbol) {
+        effect(subscript->baseExpression);
+        effect(subscript->indexExpression);
+        return;
+      }
+      if (auto* select = cxx::ast_cast<cxx::ConditionalExpressionAST>(ast)) {
+        conditional(
+            ast, expression(select->condition).ssa(),
+            [&] { effect(select->iftrueExpression); },
+            [&] { effect(select->iffalseExpression); });
+        return;
+      }
+      auto call = direct_operator_call(ast);
+      if (cxx::ast_cast<cxx::CallExpressionAST>(ast) ||
+          (call && !types_.is_trivial_value_operation(call->function))) {
+        if (reference_call(ast)) {
+          return;
+        }
+      }
+    }
     if (auto call = direct_operator_call(ast);
         call && types_.unqualified(ast->type)->kind() == cxx::TypeKind::kVoid) {
-      if (ordinary_operator_call(ast, *call)) {
+      if (ordinary_operator_call(ast, *call).value) {
         fail(ast, "value-producing operator reached a void expression");
       }
       return;
@@ -6531,7 +8267,7 @@ class Translator final : private Initialization::Evaluation {
           fail(ast, "pipelines require explicit composition or kernel launch");
         }
         auto called = ordinary_call(call, function, locations_.get(ast));
-        if (called) {
+        if (called.value || called.reference_target) {
           fail(ast, "value-producing function reached a void call");
         }
         return;
@@ -6628,16 +8364,21 @@ class Translator final : private Initialization::Evaluation {
   // Nontrivial prvalue results retained until the innermost full expression
   // completes. Result-object transfer removes only the selected final value;
   // side temporaries retain reverse construction order.
-  std::vector<DestructionAction> temporary_destructions_;
+  std::vector<std::optional<DestructionAction>> temporary_destructions_;
+  // Latest evaluated result at each retained construction site. Cleanup tokens
+  // remain stable when another result is adopted or extended to lexical scope.
+  std::unordered_map<cxx::ExpressionAST*, size_t> temporary_results_;
+  // Active only while one reference initializer adopts its semantic prvalue.
+  std::optional<MaterializedReference> materialized_reference_;
   // Temporary prefix owned by the current full expression. Lexical caller
   // tokens retain parent marks without a heap-backed translator stack.
   std::optional<size_t> full_expression_mark_;
+  // A range initializer extends its surviving temporaries to the loop scope.
+  // Nested full expressions save and suspend this policy in their caller token.
+  bool extends_temporaries_ = false;
   // Structured conditional expressions hoist branch-only temporary storage
   // before the outermost conditional operation so cleanup remains dominated.
-  std::vector<loom_op_t*> conditional_cleanup_anchors_;
-  // Local reference initialization transfers materialized result objects from
-  // full-expression cleanup to the surrounding lexical destruction stack.
-  bool extend_temporary_lifetime_ = false;
+  std::vector<loom_builder_ip_t> conditional_cleanup_anchors_;
   // Lexical cleanup boundaries for the innermost break and continue targets.
   std::vector<size_t> break_destruction_marks_;
   std::vector<size_t> continue_destruction_marks_;
@@ -6651,11 +8392,11 @@ class Translator final : private Initialization::Evaluation {
   // rebind. Storage references therefore preserve their root and byte offset
   // without re-evaluating a source address expression.
   std::unordered_map<cxx::Symbol*, Lvalue> references_;
-  // Nested source current objects retain declaration identity independently of
-  // spelling. The direct index avoids rediscovering an owning receiver through
-  // the active stack for every member expression.
-  std::vector<ActiveReceiver> receivers_;
-  std::unordered_map<cxx::FieldSymbol*, ReceiverOwner> receiver_owners_;
+  // Nonescaping local pointers retain their evaluated semantic lvalue rather
+  // than forcing the referent through a physical object representation.
+  std::unordered_map<cxx::Symbol*, Lvalue> pointer_aliases_;
+  // Lexical current objects share bindings and retain construction completion.
+  ReceiverScopes receivers_{values_};
   // Launch configurations not owned by the ordinary reachable-call analysis
   // retain a function-local analysis here.
   std::optional<ControlFlow> owned_control_;

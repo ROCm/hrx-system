@@ -55,6 +55,7 @@ iree_py_library(
         "float_narrowing.py",
         "packed_i32.py",
         "predicate.py",
+        "scalar_integer_extension.py",
         "vector_integer_arithmetic.py",
         "vector_integer_extension.py",
         "vector_shifts.py",
@@ -112,6 +113,17 @@ iree_py_test(
         "//loom/py/loom/tools:pytest_style_runner.py",
     ],
     args = ["loom.target.arch.wasm.vector_integer_extension_test"],
+    main = "pytest_style_runner.py",
+    deps = [":contracts"],
+)
+
+iree_py_test(
+    name = "scalar_integer_extension_test",
+    srcs = [
+        "scalar_integer_extension_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = ["loom.target.arch.wasm.scalar_integer_extension_test"],
     main = "pytest_style_runner.py",
     deps = [":contracts"],
 )

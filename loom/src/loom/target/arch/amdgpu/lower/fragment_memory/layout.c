@@ -341,12 +341,6 @@ bool loom_amdgpu_fragment_memory_select_packetization(
     *out_packetization = LOOM_AMDGPU_FRAGMENT_MEMORY_PACKETIZATION_SCALAR_B16;
     return true;
   }
-  if (loom_amdgpu_matrix_fragment_role_layout_uses_packed_b16_elements(
-          role, role_layout)) {
-    *out_packetization = LOOM_AMDGPU_FRAGMENT_MEMORY_PACKETIZATION_PACKED_B16;
-    return true;
-  }
-
   const uint32_t packed_element_byte_stride =
       address_layout->packed_element_byte_stride;
   bool has_runtime_packed_element_stride = false;
@@ -354,15 +348,32 @@ bool loom_amdgpu_fragment_memory_select_packetization(
     has_runtime_packed_element_stride |=
         runtime_axes[view_axis].packed_element_coordinate_stride != 0;
   }
+  // A packed coordinate with zero stride repeats a value; it is not a
+  // contiguous register load. The role layout distinguishes this from a
+  // register carrying one scalar with no packed coordinate.
+  if (!has_runtime_packed_element_stride && packed_element_byte_stride == 0 &&
+      address_layout->payload_elements_per_register > 1 &&
+      role_layout->packed_element_axis != LOOM_MATRIX_FRAGMENT_AXIS_COUNT) {
+    *out_packetization =
+        LOOM_AMDGPU_FRAGMENT_MEMORY_PACKETIZATION_BROADCAST_SUBWORD;
+    return true;
+  }
+  if (loom_amdgpu_matrix_fragment_role_layout_uses_packed_b16_elements(
+          role, role_layout)) {
+    *out_packetization =
+        LOOM_AMDGPU_FRAGMENT_MEMORY_PACKETIZATION_PACKED_SUBWORD;
+    return true;
+  }
+
   if (!has_runtime_packed_element_stride &&
       (packed_element_byte_stride == 0 ||
        packed_element_byte_stride == element_byte_count)) {
     return true;
   }
-  if (payload_form == LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_NATIVE &&
-      element_byte_count == 2 && role_layout->element_bit_count == 16 &&
-      address_layout->payload_elements_per_register == 2) {
-    *out_packetization = LOOM_AMDGPU_FRAGMENT_MEMORY_PACKETIZATION_PACKED_B16;
+  if (element_byte_count <= 2 &&
+      address_layout->payload_elements_per_register > 1) {
+    *out_packetization =
+        LOOM_AMDGPU_FRAGMENT_MEMORY_PACKETIZATION_PACKED_SUBWORD;
     return true;
   }
   return loom_amdgpu_fragment_memory_layout_reject(

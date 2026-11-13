@@ -211,9 +211,10 @@ typedef struct iree_arena_checkpoint_t {
   // Oversized-allocation list head at the checkpoint.
   iree_arena_oversized_allocation_t* allocation_head;
   // Current fixed-size block at the checkpoint.
+  // The oldest block is not stored: block growth only prepends, so a nonempty
+  // checkpoint retains the arena's current tail and an empty checkpoint
+  // restores a null tail.
   iree_arena_block_t* block_head;
-  // Oldest fixed-size block retained by the arena at the checkpoint.
-  iree_arena_block_t* block_tail;
   // Total bytes owned by the arena at the checkpoint.
   iree_host_size_t total_allocation_size;
   // Total bytes consumed from the arena at the checkpoint.
@@ -304,6 +305,18 @@ iree_status_t iree_arena_grow_array(iree_arena_allocator_t* arena,
                                     iree_host_size_t element_size,
                                     iree_host_size_t* inout_capacity,
                                     void** inout_ptr);
+
+// Grows an array while using the largest whole-element capacity that fits in a
+// fixed arena block before crossing into oversized storage. This otherwise has
+// the same contract as iree_arena_grow_array. The returned capacity may not be
+// a power of two. Once the requested minimum exceeds the block capacity,
+// geometric growth resumes from the full-block capacity.
+iree_status_t iree_arena_grow_array_block_fit(iree_arena_allocator_t* arena,
+                                              iree_host_size_t existing_count,
+                                              iree_host_size_t minimum_capacity,
+                                              iree_host_size_t element_size,
+                                              iree_host_size_t* inout_capacity,
+                                              void** inout_ptr);
 
 // Returns an iree_allocator_t that allocates from the given |arena|.
 // Frees are ignored as arenas can only be reset as a whole.

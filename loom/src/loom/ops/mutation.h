@@ -23,8 +23,15 @@ extern "C" {
 // own attributes or result types do not keep the whole op alive.
 bool loom_op_results_unused(const loom_module_t* module, const loom_op_t* op);
 
-// Returns true if |op| is trivially dead: it has results, does not
-// write to any resource, has no unknown effects, and every result is
+// Returns whether unused results make |op| erasable under its effect contract.
+// This does not inspect result uses: a closed-set rewrite establishes that
+// no retained observer needs them. Symbols, hints, convergent operations, and
+// observable effects remain live independently of their results.
+bool loom_op_is_dead_if_unused(const loom_module_t* module,
+                               const loom_op_t* op);
+
+// Returns true if |op| is trivially dead: it produces values or is pure, does
+// not write to any resource, has no unknown effects, and every result is
 // unused. Read-only and non-deterministic ops without writes are dead
 // when unused — a read with no observer is a no-op. Symbols and hints are
 // retained independently of their SSA result uses.

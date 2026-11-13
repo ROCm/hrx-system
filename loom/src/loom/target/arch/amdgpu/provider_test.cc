@@ -101,7 +101,7 @@ static ModulePtr ReadModuleBytecode(const std::vector<uint8_t>& bytes,
   IREE_CHECK_OK(loom_bytecode_read_module(
       iree_make_const_byte_span(bytes.data(), bytes.size()),
       IREE_SV("amdgpu_provider_test.loombc"), context, block_pool, &options,
-      &result, &module, iree_allocator_system()));
+      iree_allocator_system(), &result, &module));
   IREE_ASSERT(result.error_count == 0);
   IREE_ASSERT(module != nullptr);
   const loom_verify_options_t verify_options = {

@@ -122,9 +122,10 @@ class PipelineExecutionTest : public ::testing::Test {
                                                  &execution_, &conflict_));
   }
 
-  const iree_host_size_t* Participants(const Invocation& invocation) {
-    return execution_.workers +
-           invocation.source.ordinal * execution_.engine_count;
+  iree_host_size_t Participant(const Invocation& invocation,
+                               iree_host_size_t engine) {
+    return loom_pipeline_participants_worker(
+        execution_.invocations[invocation.source.ordinal], engine);
   }
 
   // Arena pool backing only retained execution results.
@@ -170,7 +171,7 @@ TEST_F(PipelineExecutionTest, SharedResourcesRequireOrderedWorkerLifetimes) {
   root.schedules.push_back(scope.bound);
   Build(3);
   EXPECT_EQ(conflict_.second_worker, IREE_HOST_SIZE_MAX);
-  EXPECT_EQ(Participants(root)[0], 0u);
+  EXPECT_EQ(Participant(root, 0), 0u);
 
   // Equal physical resources cannot serialize independently progressing work.
   root.schedules.clear();
@@ -204,21 +205,22 @@ TEST_F(PipelineExecutionTest, SerialChildrenReuseEnginesAcrossNestedScopes) {
   root.schedules.push_back(outer.bound);
   Build(3);
   EXPECT_EQ(conflict_.second_worker, IREE_HOST_SIZE_MAX);
-  EXPECT_EQ(Participants(root)[0], 0u);
-  EXPECT_EQ(Participants(root)[1], 1u);
-  EXPECT_EQ(Participants(root)[2], IREE_HOST_SIZE_MAX);
-  EXPECT_EQ(Participants(second)[0], 2u);
-  EXPECT_EQ(Participants(second)[1], 3u);
+  EXPECT_EQ(Participant(root, 0), 0u);
+  EXPECT_EQ(Participant(root, 1), 1u);
+  EXPECT_EQ(Participant(root, 2), IREE_HOST_SIZE_MAX);
+  EXPECT_EQ(Participant(second, 0), 2u);
+  EXPECT_EQ(Participant(second, 1), 3u);
   EXPECT_EQ(execution_.schedule_count, 2u);
   const auto* nested_workers =
-      loom_pipeline_execution_schedule(&execution_, &nested.bound)->workers;
-  EXPECT_EQ(nested_workers[0], 2u);
-  EXPECT_EQ(nested_workers[1], 3u);
+      loom_pipeline_execution_schedule(&execution_, &nested.bound)
+          ->participants;
+  EXPECT_EQ(loom_pipeline_participants_worker(nested_workers, 0), 2u);
+  EXPECT_EQ(loom_pipeline_participants_worker(nested_workers, 1), 3u);
   const auto* outer_workers =
       loom_pipeline_execution_schedule(&execution_, &root.schedules[0])
-          ->workers;
-  EXPECT_EQ(outer_workers[0], 0u);
-  EXPECT_EQ(outer_workers[1], 1u);
+          ->participants;
+  EXPECT_EQ(loom_pipeline_participants_worker(outer_workers, 0), 0u);
+  EXPECT_EQ(loom_pipeline_participants_worker(outer_workers, 1), 1u);
 }
 
 TEST_F(PipelineExecutionTest, ConcurrentChildrenCannotReuseAnEngine) {
@@ -229,6 +231,33 @@ TEST_F(PipelineExecutionTest, ConcurrentChildrenCannotReuseAnEngine) {
   Build(1);
   EXPECT_EQ(conflict_.first_worker, 0u);
   EXPECT_EQ(conflict_.second_worker, 1u);
+}
+
+TEST_F(PipelineExecutionTest, CompactSlotsIncludeOnlyActualParticipants) {
+  auto& root = AddInvocation({7});
+  auto& left = AddInvocation({129});
+  auto& empty = AddInvocation({IREE_HOST_SIZE_MAX});
+  auto& right = AddInvocation({4095});
+  root.children = {&left.source, &empty.source, &right.source};
+  Build(4096);
+  ASSERT_EQ(conflict_.second_worker, IREE_HOST_SIZE_MAX);
+  EXPECT_EQ(execution_.participant_count, 5u);
+  EXPECT_EQ((std::vector<iree_host_size_t>(execution_.offsets,
+                                           execution_.offsets + 5)),
+            (std::vector<iree_host_size_t>{0, 3, 4, 4, 5}));
+  EXPECT_EQ(loom_pipeline_execution_index(&execution_, 0, 7), 0u);
+  EXPECT_EQ(loom_pipeline_execution_index(&execution_, 0, 129), 1u);
+  EXPECT_EQ(loom_pipeline_execution_index(&execution_, 0, 4095), 2u);
+  EXPECT_EQ(loom_pipeline_execution_index(&execution_, 1, 129), 3u);
+  EXPECT_EQ(loom_pipeline_execution_index(&execution_, 3, 4095), 4u);
+  EXPECT_EQ(loom_pipeline_execution_index(&execution_, 1, 7),
+            IREE_HOST_SIZE_MAX);
+  EXPECT_EQ(loom_pipeline_execution_index(&execution_, 2, 129),
+            IREE_HOST_SIZE_MAX);
+  EXPECT_EQ(execution_.workers[7], 0u);
+  EXPECT_EQ(execution_.workers[129], 1u);
+  EXPECT_EQ(execution_.workers[4095], 3u);
+  EXPECT_EQ(execution_.workers[128], IREE_HOST_SIZE_MAX);
 }
 
 TEST_F(PipelineExecutionTest, AnOuterStrandOverlapsEverySerialVisit) {
@@ -266,8 +295,8 @@ TEST_F(PipelineExecutionTest, AutonomousActorsDoNotOccupyInstructionEngines) {
   auto& root = AddInvocation({IREE_HOST_SIZE_MAX, 0, IREE_HOST_SIZE_MAX, 1});
   Build(2);
   EXPECT_EQ(conflict_.second_worker, IREE_HOST_SIZE_MAX);
-  EXPECT_EQ(Participants(root)[0], 1u);
-  EXPECT_EQ(Participants(root)[1], 3u);
+  EXPECT_EQ(Participant(root, 0), 1u);
+  EXPECT_EQ(Participant(root, 1), 3u);
 }
 
 TEST_F(PipelineExecutionTest, EmptyAssignmentRetainsEmptyScopeParticipation) {
@@ -279,8 +308,8 @@ TEST_F(PipelineExecutionTest, EmptyAssignmentRetainsEmptyScopeParticipation) {
   EXPECT_EQ(execution_.engine_count, 0u);
   EXPECT_EQ(execution_.schedule_count, 1u);
   EXPECT_EQ(loom_pipeline_execution_schedule(&execution_, &root.schedules[0])
-                ->workers,
-            execution_.schedules[0].workers);
+                ->participants,
+            execution_.schedules[0].participants);
 }
 
 TEST_F(PipelineExecutionTest, ParticipantSetsPropagateThroughNestedChildren) {
@@ -292,10 +321,10 @@ TEST_F(PipelineExecutionTest, ParticipantSetsPropagateThroughNestedChildren) {
   wrapper.schedules.push_back(AddScope({&first, &second}).bound);
   Build(4);
   EXPECT_EQ(conflict_.second_worker, IREE_HOST_SIZE_MAX);
-  EXPECT_EQ(Participants(root)[0], 0u);
-  EXPECT_EQ(Participants(root)[1], 1u);
-  EXPECT_EQ(Participants(root)[2], 2u);
-  EXPECT_EQ(Participants(root)[3], 4u);
+  EXPECT_EQ(Participant(root, 0), 0u);
+  EXPECT_EQ(Participant(root, 1), 1u);
+  EXPECT_EQ(Participant(root, 2), 2u);
+  EXPECT_EQ(Participant(root, 3), 4u);
 }
 
 TEST_F(PipelineExecutionTest, DeepSerialNestingDoesNotUseTheCallStack) {
@@ -308,8 +337,12 @@ TEST_F(PipelineExecutionTest, DeepSerialNestingDoesNotUseTheCallStack) {
   root.schedules.push_back(scope->bound);
   Build(1);
   EXPECT_EQ(conflict_.second_worker, IREE_HOST_SIZE_MAX);
-  EXPECT_EQ(Participants(root)[0], 0u);
+  EXPECT_EQ(Participant(root, 0), 0u);
   EXPECT_EQ(execution_.schedule_count, 2049u);
+  EXPECT_EQ(execution_.invocations[0], execution_.invocations[1]);
+  for (size_t i = 0; i < execution_.schedule_count; ++i) {
+    EXPECT_EQ(execution_.schedules[i].participants, execution_.invocations[1]);
+  }
 }
 
 }  // namespace

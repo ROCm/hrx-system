@@ -44,9 +44,8 @@ TEST_F(AmdgpuProgramResourcesTest, AggregatesFunctionAndControlResources) {
   first_plan.preflight.next_free_vgpr = 7;
   first_plan.preflight.next_free_agpr = 2;
   first_plan.packet_plan.wait_states.minimum_vgpr_count = 10;
-  loom_amdgpu_storage_layout_t first_layout = {};
-  IREE_ASSERT_OK(loom_amdgpu_program_resource_builder_append_function(
-      &first_frame, &first_plan, &arena_, &builder, &first_layout));
+  loom_amdgpu_program_resource_builder_require_function(&first_frame,
+                                                        &first_plan, &builder);
 
   const uint32_t second_extents[] = {9, 4, 6, 1};
   loom_low_emission_frame_t second_frame = {};
@@ -57,9 +56,8 @@ TEST_F(AmdgpuProgramResourcesTest, AggregatesFunctionAndControlResources) {
   second_plan.preflight.next_free_sgpr = 9;
   second_plan.preflight.next_free_vgpr = 4;
   second_plan.preflight.next_free_agpr = 6;
-  loom_amdgpu_storage_layout_t second_layout = {};
-  IREE_ASSERT_OK(loom_amdgpu_program_resource_builder_append_function(
-      &second_frame, &second_plan, &arena_, &builder, &second_layout));
+  loom_amdgpu_program_resource_builder_require_function(&second_frame,
+                                                        &second_plan, &builder);
   loom_amdgpu_program_resource_builder_require_registers(
       /*sgpr_count=*/36, /*vgpr_count=*/32, /*agpr_count=*/8, &builder);
 
@@ -75,40 +73,29 @@ TEST_F(AmdgpuProgramResourcesTest, AggregatesFunctionAndControlResources) {
   EXPECT_EQ(resources.agpr_count, 8u);
 }
 
-TEST_F(AmdgpuProgramResourcesTest, SharesPrivateLeafFramesBelowEntryStorage) {
+TEST_F(AmdgpuProgramResourcesTest, MergesFinalFrameExtentsWithoutRebasing) {
   loom_amdgpu_program_resource_builder_t builder = {};
   IREE_ASSERT_OK(
       loom_amdgpu_program_resource_builder_initialize(0, &arena_, &builder));
 
-  loom_amdgpu_program_resource_builder_require_private_frame(12, &builder);
-  loom_amdgpu_program_resource_builder_require_private_frame(20, &builder);
+  const loom_low_emission_frame_t frame = {};
+  loom_amdgpu_function_plan_t plan = {};
+  plan.storage_layout.segment_sizes.private_segment_fixed_size = 12;
+  loom_amdgpu_program_resource_builder_require_function(&frame, &plan,
+                                                        &builder);
+  plan.storage_layout.segment_sizes.private_segment_fixed_size = 20;
+  loom_amdgpu_program_resource_builder_require_function(&frame, &plan,
+                                                        &builder);
+  EXPECT_EQ(builder.storage_segment_sizes.private_segment_fixed_size, 20u);
 
-  const loom_amdgpu_storage_layout_record_t entry_record = {
-      .storage_value_id = 1,
-      .reservation =
-          {
-              .space = LOOM_STORAGE_SPACE_PRIVATE,
-              .byte_size = 8,
-              .byte_alignment = 16,
-          },
-  };
-  loom_low_emission_frame_t entry_frame = {};
-  const loom_amdgpu_function_plan_t entry_plan = {
-      .storage_layout =
-          {
-              .segment_sizes = {.private_segment_fixed_size = 8},
-              .records = &entry_record,
-              .record_count = 1,
-          },
-  };
-  loom_amdgpu_storage_layout_t entry_layout = {};
-  IREE_ASSERT_OK(loom_amdgpu_program_resource_builder_append_function(
-      &entry_frame, &entry_plan, &arena_, &builder, &entry_layout));
-
-  ASSERT_EQ(entry_layout.record_count, 1u);
-  EXPECT_EQ(entry_layout.records[0].reservation.byte_offset, 32u);
-  EXPECT_EQ(entry_layout.segment_sizes.private_segment_fixed_size, 40u);
+  // The entry was compiled above the shared helper extent. Its final segment
+  // sizes already include that prefix, including any alignment padding.
+  plan.storage_layout.segment_sizes.private_segment_fixed_size = 40;
+  plan.storage_layout.segment_sizes.group_segment_fixed_size = 16;
+  loom_amdgpu_program_resource_builder_require_function(&frame, &plan,
+                                                        &builder);
   EXPECT_EQ(builder.storage_segment_sizes.private_segment_fixed_size, 40u);
+  EXPECT_EQ(builder.storage_segment_sizes.group_segment_fixed_size, 16u);
 }
 
 }  // namespace

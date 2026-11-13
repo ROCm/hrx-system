@@ -245,6 +245,7 @@ iree_runtime_cc_test(
         ":async",
         ":platform",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

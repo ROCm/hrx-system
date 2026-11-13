@@ -1,0 +1,167 @@
+# Copyright 2026 The HRX Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+name: LibHRX
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_type:
+        type: choice
+        options:
+          - nightly
+          - dev
+          - prerelease
+        default: nightly
+      run_id:
+        type: string
+        description: "TheRock artifact run id. Empty means the latest complete run."
+        default: ""
+  pull_request:
+    paths: &libhrx_gpu_paths
+      - ".bazelrc"
+      - ".bazelrc.configured"
+      - ".github/scripts/**"
+      - ".github/workflows/ci_libhrx_gpu.yml"
+      - "BUILD.bazel"
+      - "MODULE.*"
+      - "dev.py"
+      - "requirements-analysis*"
+      - "requirements-dev*"
+      - "build_tools/**"
+      - "runtime/**"
+      - "libhrx/**"
+      - "libamdf/**"
+      - "loom/**"
+      - "third_party/**"
+  push:
+    branches:
+      - main
+      - main-staging
+    paths: *libhrx_gpu_paths
+
+concurrency:
+  group: libhrx-gpu-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  bazel_linux_gpu:
+    name: Bazel / Linux x86-64 / Clang / Fastbuild / AMD ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: gfx942
+            runner: linux-gfx942-1gpu-ccs-csp-ossci-rocm
+            target_selector: gfx942
+          - name: gfx120x
+            runner: linux-gfx120X-gpu-rocm
+            target_selector: gfx120X-all
+    concurrency:
+      group: libhrx-bazel-linux-gpu-${{ matrix.target_selector }}-${{ (github.event_name == 'push' && github.ref) || github.run_id }}
+      cancel-in-progress: true
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    container:
+      image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
+      options: >-
+        --ipc host --group-add video --device /dev/kfd --device /dev/dri --cap-add SYSLOG
+        --group-add 993 --group-add 992 --group-add 110
+        --ulimit memlock=-1:-1 --security-opt seccomp=unconfined
+        --env-file /etc/podinfo/gha-gpu-isolation-settings --user 0:0
+    env:
+      AR: ${{ github.workspace }}/build/libhrx-bazel-gpu/rocm-root/lib/llvm/bin/llvm-ar
+      CC: ${{ github.workspace }}/build/libhrx-bazel-gpu/rocm-root/lib/llvm/bin/clang
+      CXX: ${{ github.workspace }}/build/libhrx-bazel-gpu/rocm-root/lib/llvm/bin/clang++
+      HRX_ARTIFACT_SET: core
+      HRX_DOWNLOAD_CACHE_DIR: ${{ github.workspace }}/build/libhrx-bazel-gpu/downloads
+      HRX_OUTPUT_DIR: ${{ github.workspace }}/build/libhrx-bazel-gpu
+      HRX_PYTHON: ${{ github.workspace }}/build/libhrx-bazel-gpu/python/bin/python3
+      HRX_RELEASE_TYPE: ${{ inputs.release_type || 'nightly' }}
+      HRX_RUN_ID: ${{ inputs.run_id || '' }}
+      HRX_ROCM_ROOT: ${{ github.workspace }}/build/libhrx-bazel-gpu/rocm-root
+      PIP_CACHE_DIR: ${{ github.workspace }}/build/libhrx-bazel-gpu/caches/pip
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Adjust git config
+        run: |
+          mkdir -p "$HOME"
+          git config --global --add safe.directory "$PWD"
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+
+      - name: Fetch ROCm toolchain
+        run: bash .github/scripts/fetch_rocm_toolchain.sh
+
+      - name: Install Bazel host tools
+        run: |
+          python3 --version
+          python3 dev.py bazel setup --venv
+          echo "$PWD/.venv/bin" >> "${GITHUB_PATH}"
+
+      - name: Check tool versions
+        run: |
+          bazel --version
+          bash .github/scripts/check_host_toolchain.sh --expect-artifact
+          bash .github/scripts/check_rocm_device_toolchain.sh
+          test -d "${HRX_ROCM_ROOT}/include"
+
+      - name: Report ROCm environment
+        timeout-minutes: 1
+        run: >-
+          bash .github/scripts/check_rocm_environment.sh
+          --export-libamdf-gpu-selection
+          --amdgpu-target "${{ matrix.target_selector }}"
+
+      - name: Build and test LibHRX GPU coverage
+        id: libhrx_bazel_ci
+        run: >-
+          python3 build_tools/devtools/ci.py iree-bazel-amdgpu
+          --target //libhrx/...
+          --amdgpu-target "${{ matrix.target_selector }}"
+          --bazel-profile-dir "${RUNNER_TEMP}/bazel-profiles"
+          --bazel-test-results-dir "${RUNNER_TEMP}/native-test-results-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+
+      - name: Capture accelerator kernel errors
+        if: ${{ always() && (steps.libhrx_bazel_ci.outcome == 'failure' || steps.libhrx_bazel_ci.outcome == 'cancelled') }}
+        run: |
+          date -u
+          uname -a
+          timeout --kill-after=5s 15s dmesg --ctime --level=err,warn 2>&1 | tail -n 200
+
+      - name: Upload Bazel profiles
+        continue-on-error: true
+        if: ${{ always() && (steps.libhrx_bazel_ci.outcome == 'success' || steps.libhrx_bazel_ci.outcome == 'failure') }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: libhrx-bazel-profiles-${{ matrix.target_selector }}-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/bazel-profiles/
+          if-no-files-found: warn
+          compression-level: 0
+          retention-days: 7
+
+      - name: Upload native test results
+        if: ${{ always() && (steps.libhrx_bazel_ci.outcome == 'success' || steps.libhrx_bazel_ci.outcome == 'failure') }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: libhrx-native-test-results-${{ matrix.target_selector }}-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/native-test-results-${{ github.run_id }}-${{ github.run_attempt }}/**/bazel-testlogs/**
+          if-no-files-found: warn
+          retention-days: 7

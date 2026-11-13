@@ -1,0 +1,229 @@
+// RUN: pass low-decompose-cfg-tuples,canonicalize,low-cse,low-dce
+
+// Both consumers observe pairs. The edge preserves those pairs instead of
+// transporting four unrelated registers and reconstructing each consumer.
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @aligned_halves(%condition: reg<test.i32>, %initial: reg<test.i32 x4>, %first: reg<test.i32 x2>, %second: reg<test.i32 x2>) -> (reg<test.i32 x2>, reg<test.i32 x2>) asm {
+  low.cond_br %condition, ^direct, ^composed : reg<test.i32>
+^direct:
+  low.br ^join(%initial: reg<test.i32 x4>)
+^composed:
+  %next = concat(%first, %second) : (reg<test.i32 x2>, reg<test.i32 x2>) -> reg<test.i32 x4>
+  low.br ^join(%next: reg<test.i32 x4>)
+^join(%state: reg<test.i32 x4>):
+  %low = slice %state[0] : reg<test.i32 x4> -> reg<test.i32 x2>
+  %high = slice %state[2] : reg<test.i32 x4> -> reg<test.i32 x2>
+  return %low, %high
+}
+
+// ----
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @aligned_halves(%condition: reg<test.i32>, %initial: reg<test.i32 x4>, %first: reg<test.i32 x2>, %second: reg<test.i32 x2>) -> (reg<test.i32 x2>, reg<test.i32 x2>) asm {
+  low.cond_br %condition, ^direct, ^composed : reg<test.i32>
+^direct:
+  %12 = slice %initial[0] : reg<test.i32 x4> -> reg<test.i32 x2>
+  %13 = slice %initial[2] : reg<test.i32 x4> -> reg<test.i32 x2>
+  low.br ^join(%12: reg<test.i32 x2>, %13: reg<test.i32 x2>)
+^composed:
+  low.br ^join(%first: reg<test.i32 x2>, %second: reg<test.i32 x2>)
+^join(%10: reg<test.i32 x2>, %11: reg<test.i32 x2>):
+  return %10, %11
+}
+
+// ====
+
+// Pair-sized observations at odd offsets need individual units at the join.
+// Their lengths alone do not establish a compatible pair boundary.
+// RUN: pass low-decompose-cfg-tuples,canonicalize,low-cse,low-dce
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @unaligned_pairs(%initial: reg<test.i32 x6>) -> (reg<test.i32 x2>, reg<test.i32 x2>) asm {
+  low.br ^join(%initial: reg<test.i32 x6>)
+^join(%state: reg<test.i32 x6>):
+  %first = slice %state[1] : reg<test.i32 x6> -> reg<test.i32 x2>
+  %second = slice %state[3] : reg<test.i32 x6> -> reg<test.i32 x2>
+  return %first, %second
+}
+
+// ----
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @unaligned_pairs(%initial: reg<test.i32 x6>) -> (reg<test.i32 x2>, reg<test.i32 x2>) asm {
+  %14 = slice %initial[0] : reg<test.i32 x6> -> reg<test.i32>
+  %15 = slice %initial[1] : reg<test.i32 x6> -> reg<test.i32>
+  %16 = slice %initial[2] : reg<test.i32 x6> -> reg<test.i32>
+  %17 = slice %initial[3] : reg<test.i32 x6> -> reg<test.i32>
+  %18 = slice %initial[4] : reg<test.i32 x6> -> reg<test.i32>
+  %19 = slice %initial[5] : reg<test.i32 x6> -> reg<test.i32>
+  low.br ^join(%14: reg<test.i32>, %15: reg<test.i32>, %16: reg<test.i32>, %17: reg<test.i32>, %18: reg<test.i32>, %19: reg<test.i32>)
+^join(%6: reg<test.i32>, %7: reg<test.i32>, %8: reg<test.i32>, %9: reg<test.i32>, %10: reg<test.i32>, %11: reg<test.i32>):
+  %12 = concat(%7, %8) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32 x2>
+  %13 = concat(%9, %10) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32 x2>
+  return %12, %13
+}
+
+// ====
+
+// Backedges exchange whole pairs without losing the independent ownership of
+// each iteration or imposing contiguity across the two halves.
+// RUN: pass low-decompose-cfg-tuples,canonicalize,low-cse,low-dce
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @paired_loop_state(%again: reg<test.i32>, %initial: reg<test.i64 x4>) -> (reg<test.i64 x2>) asm {
+  low.br ^loop(%initial: reg<test.i64 x4>)
+^loop(%state: reg<test.i64 x4>):
+  %first = slice %state[0] : reg<test.i64 x4> -> reg<test.i64 x2>
+  %second = slice %state[2] : reg<test.i64 x4> -> reg<test.i64 x2>
+  %next = concat(%second, %first) : (reg<test.i64 x2>, reg<test.i64 x2>) -> reg<test.i64 x4>
+  low.cond_br %again, ^backedge, ^exit : reg<test.i32>
+^backedge:
+  low.br ^loop(%next: reg<test.i64 x4>)
+^exit:
+  return %first
+}
+
+// ----
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @paired_loop_state(%again: reg<test.i32>, %initial: reg<test.i64 x4>) -> (reg<test.i64 x2>) asm {
+  %9 = slice %initial[0] : reg<test.i64 x4> -> reg<test.i64 x2>
+  %10 = slice %initial[2] : reg<test.i64 x4> -> reg<test.i64 x2>
+  low.br ^loop(%9: reg<test.i64 x2>, %10: reg<test.i64 x2>)
+^loop(%7: reg<test.i64 x2>, %8: reg<test.i64 x2>):
+  low.cond_br %again, ^backedge, ^exit : reg<test.i32>
+^backedge:
+  low.br ^loop(%8: reg<test.i64 x2>, %7: reg<test.i64 x2>)
+^exit:
+  return %7
+}
+
+// ====
+
+// Overlapping eight-register observations share four-register groups. Register
+// width is independent of grouping, and the tuple need not be a power of two.
+// RUN: pass low-decompose-cfg-tuples,canonicalize,low-cse,low-dce
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @overlapping_wide_groups(%initial: reg<test.i64 x12>) -> (reg<test.i64 x8>, reg<test.i64 x8>) asm {
+  low.br ^join(%initial: reg<test.i64 x12>)
+^join(%state: reg<test.i64 x12>):
+  %first = slice %state[0] : reg<test.i64 x12> -> reg<test.i64 x8>
+  %second = slice %state[4] : reg<test.i64 x12> -> reg<test.i64 x8>
+  return %first, %second
+}
+
+// ----
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @overlapping_wide_groups(%initial: reg<test.i64 x12>) -> (reg<test.i64 x8>, reg<test.i64 x8>) asm {
+  %11 = slice %initial[0] : reg<test.i64 x12> -> reg<test.i64 x4>
+  %12 = slice %initial[4] : reg<test.i64 x12> -> reg<test.i64 x4>
+  %13 = slice %initial[8] : reg<test.i64 x12> -> reg<test.i64 x4>
+  low.br ^join(%11: reg<test.i64 x4>, %12: reg<test.i64 x4>, %13: reg<test.i64 x4>)
+^join(%6: reg<test.i64 x4>, %7: reg<test.i64 x4>, %8: reg<test.i64 x4>):
+  %9 = concat(%6, %7) : (reg<test.i64 x4>, reg<test.i64 x4>) -> reg<test.i64 x8>
+  %10 = concat(%7, %8) : (reg<test.i64 x4>, reg<test.i64 x4>) -> reg<test.i64 x8>
+  return %9, %10
+}
+
+// ====
+
+// The common group can also have an odd number of physical register units.
+// RUN: pass low-decompose-cfg-tuples,canonicalize,low-cse,low-dce
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @three_register_groups(%initial: reg<test.i32 x9>) -> (reg<test.i32 x3>, reg<test.i32 x6>) asm {
+  low.br ^join(%initial: reg<test.i32 x9>)
+^join(%state: reg<test.i32 x9>):
+  %first = slice %state[0] : reg<test.i32 x9> -> reg<test.i32 x3>
+  %rest = slice %state[3] : reg<test.i32 x9> -> reg<test.i32 x6>
+  return %first, %rest
+}
+
+// ----
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @three_register_groups(%initial: reg<test.i32 x9>) -> (reg<test.i32 x3>, reg<test.i32 x6>) asm {
+  %10 = slice %initial[0] : reg<test.i32 x9> -> reg<test.i32 x3>
+  %11 = slice %initial[3] : reg<test.i32 x9> -> reg<test.i32 x3>
+  %12 = slice %initial[6] : reg<test.i32 x9> -> reg<test.i32 x3>
+  low.br ^join(%10: reg<test.i32 x3>, %11: reg<test.i32 x3>, %12: reg<test.i32 x3>)
+^join(%6: reg<test.i32 x3>, %7: reg<test.i32 x3>, %8: reg<test.i32 x3>):
+  %9 = concat(%7, %8) : (reg<test.i32 x3>, reg<test.i32 x3>) -> reg<test.i32 x6>
+  return %6, %9
+}
+
+// ====
+
+// One output group spans two concat operands. The concat's original capture
+// remains valid when a component is consumed before the outgoing branch.
+// RUN: pass low-decompose-cfg-tuples,canonicalize,low-cse,low-dce
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @group_across_concat_operands(%pair: reg<test.i32 x2>, %third: reg<test.i32>, %fourth: reg<test.i32>) -> (reg<test.i32 x2>, reg<test.i32 x2>, reg<test.i32>) asm {
+  %tuple = concat(%pair, %third, %fourth) : (reg<test.i32 x2>, reg<test.i32>, reg<test.i32>) -> reg<test.i32 x4>
+  %changed = test.tied.any %third
+  low.br ^join(%tuple: reg<test.i32 x4>)
+^join(%state: reg<test.i32 x4>):
+  %first = slice %state[0] : reg<test.i32 x4> -> reg<test.i32 x2>
+  %second = slice %state[2] : reg<test.i32 x4> -> reg<test.i32 x2>
+  return %first, %second, %changed
+}
+
+// ----
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @group_across_concat_operands(%pair: reg<test.i32 x2>, %third: reg<test.i32>, %fourth: reg<test.i32>) -> (reg<test.i32 x2>, reg<test.i32 x2>, reg<test.i32>) asm {
+  %tuple = concat(%pair, %third, %fourth) : (reg<test.i32 x2>, reg<test.i32>, reg<test.i32>) -> reg<test.i32 x4>
+  %changed = test.tied.any %third
+  %13 = slice %tuple[2] : reg<test.i32 x4> -> reg<test.i32 x2>
+  low.br ^join(%pair: reg<test.i32 x2>, %13: reg<test.i32 x2>)
+^join(%11: reg<test.i32 x2>, %12: reg<test.i32 x2>):
+  return %11, %12, %changed
+}
+
+// ====
+
+// Grouping preserves the outer owner across repeated inner-loop captures.
+// Destructive consumption of a nested slice cannot consume the outer group.
+// RUN: pass low-decompose-cfg-tuples,canonicalize,low-cse,low-dce
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @repeated_group_capture(%again: reg<test.i32>, %initial: reg<test.i32 x4>) -> (reg<test.i32>, reg<test.i32 x2>) asm {
+  low.br ^join(%initial: reg<test.i32 x4>)
+^join(%state: reg<test.i32 x4>):
+  low.br ^loop
+^loop:
+  %first = slice %state[0] : reg<test.i32 x4> -> reg<test.i32 x2>
+  %second = slice %state[2] : reg<test.i32 x4> -> reg<test.i32 x2>
+  %lane = slice %first[0] : reg<test.i32 x2> -> reg<test.i32>
+  %changed = test.tied.any %lane
+  low.cond_br %again, ^loop, ^exit : reg<test.i32>
+^exit:
+  return %changed, %second
+}
+
+// ----
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @repeated_group_capture(%again: reg<test.i32>, %initial: reg<test.i32 x4>) -> (reg<test.i32>, reg<test.i32 x2>) asm {
+  %11 = slice %initial[0] : reg<test.i32 x4> -> reg<test.i32 x2>
+  %12 = slice %initial[2] : reg<test.i32 x4> -> reg<test.i32 x2>
+  low.br ^join(%11: reg<test.i32 x2>, %12: reg<test.i32 x2>)
+^join(%9: reg<test.i32 x2>, %10: reg<test.i32 x2>):
+  low.br ^loop
+^loop:
+  %lane = slice %9[0] : reg<test.i32 x2> -> reg<test.i32>
+  %changed = test.tied.any %lane
+  low.cond_br %again, ^loop, ^exit : reg<test.i32>
+^exit:
+  return %changed, %10
+}

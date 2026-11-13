@@ -132,6 +132,11 @@
 // header payload byte. Their public text layout is declarative metadata and
 // does not affect storage identity.
 //
+// Managed-reference types carry owning/borrowed mode in the header payload
+// byte, two module-interned external key strings in dims[0], and the local
+// declaration symbol in dims[1]. The declaration is a presentation/dependency
+// binding, excluded from equality and hashing. No runtime pointer is stored.
+//
 // Type equality is structural: callers should use loom_type_equal() on the
 // by-value representation. The module type table deduplicates equal entries,
 // but pointer identity only applies to table entries themselves, not arbitrary
@@ -279,6 +284,7 @@ enum loom_type_kind_e {
   LOOM_TYPE_STORAGE = 13,   // low.storage<workgroup> (function-local storage)
   LOOM_TYPE_PARAMETERIZED = 14,  // Generic descriptor-backed type.
   LOOM_TYPE_GROUP = 15,          // group<[%M]x4> (communication participants)
+  LOOM_TYPE_REFERENCE = 16,      // ref<@Type> or ptr<@Type> (managed handle)
   LOOM_TYPE_COUNT_,
 };
 
@@ -289,6 +295,15 @@ typedef uint8_t loom_type_kind_t;
 static inline bool loom_type_kind_is_valid(loom_type_kind_t kind) {
   return (uint32_t)kind < LOOM_TYPE_COUNT_ && kind != 4;
 }
+
+// Logical ownership of a managed payload handle. Both modes are nullable;
+// neither exposes a numerical address or the provider's payload layout.
+// Runtime carrier protection is independent of this source type contract.
+typedef uint8_t loom_reference_ownership_t;
+enum loom_reference_ownership_e {
+  LOOM_REFERENCE_OWNERSHIP_OWNED = 0,
+  LOOM_REFERENCE_OWNERSHIP_BORROWED = 1,
+};
 
 // Semantic encoding role. Stored in the element_type byte of the type header
 // for LOOM_TYPE_ENCODING.
@@ -674,6 +689,47 @@ static inline bool loom_type_is_parameterized(loom_type_t type) {
 
 static inline bool loom_type_is_group(loom_type_t type) {
   return loom_type_kind(type) == LOOM_TYPE_GROUP;
+}
+
+static inline bool loom_type_is_reference(loom_type_t type) {
+  return loom_type_kind(type) == LOOM_TYPE_REFERENCE;
+}
+
+static inline loom_reference_ownership_t loom_type_reference_ownership(
+    loom_type_t type) {
+  return loom_type_payload(type);
+}
+
+static inline loom_string_id_t loom_type_reference_namespace_id(
+    loom_type_t type) {
+  return (loom_string_id_t)type.dims[0];
+}
+
+static inline loom_string_id_t loom_type_reference_name_id(loom_type_t type) {
+  return (loom_string_id_t)(type.dims[0] >> 32);
+}
+
+// Stable module-local declaration used for readable source and dependencies.
+// The spelling is not part of payload identity or semantic type equality.
+static inline loom_symbol_id_t loom_type_reference_declaration_id(
+    loom_type_t type) {
+  return (loom_symbol_id_t)type.dims[1];
+}
+
+// Constructs a resolved managed handle without allocating a parameter payload.
+// The declaration binding and exact external key have already been resolved by
+// the caller. Module interning chooses one presentation binding for each equal
+// mode/key pair; normal cloning remaps both key strings and the declaration.
+static inline loom_type_t loom_type_reference(
+    loom_reference_ownership_t ownership, loom_string_id_t namespace_id,
+    loom_string_id_t name_id, loom_symbol_id_t declaration_id) {
+  loom_type_t type = {0};
+  type.header = loom_type_make_raw_header(
+      LOOM_TYPE_REFERENCE, ownership, 0,
+      LOOM_TYPE_FLAG_INLINE_DIMS | LOOM_TYPE_FLAG_ALL_STATIC);
+  type.dims[0] = (uint64_t)namespace_id | ((uint64_t)name_id << 32);
+  type.dims[1] = declaration_id;
+  return type;
 }
 
 // Returns true if the type is shaped (has rank, dims, element type):

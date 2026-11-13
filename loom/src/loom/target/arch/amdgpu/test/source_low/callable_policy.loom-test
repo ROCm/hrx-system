@@ -12,12 +12,12 @@ func.def public target(@target) @callee_noinline(%value: i32) -> (i32) {
 }
 
 // ----
-low.func.def noinline target<amdgpu.gfx11.generic.core> @callee(%value: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
+low.func.def noinline target<amdgpu.gfx11.generic.core> @callee(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   return %value
 }
 
-low.func.def public target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @callee_noinline(%value: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
-  %result = low.func.call pure @callee(%value) : (reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>)
+low.func.def public target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @callee_noinline(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %result = low.func.call pure @callee(%value) : (reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>)
   return %result
 }
 
@@ -35,12 +35,12 @@ func.def public target(@target) @call_noinline(%value: i32) -> (i32) {
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core> @callee(%value: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
+low.func.def target<amdgpu.gfx11.generic.core> @callee(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   return %value
 }
 
-low.func.def public target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @call_noinline(%value: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
-  %result = low.func.call pure noinline @callee(%value) : (reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>)
+low.func.def public target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @call_noinline(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %result = low.func.call pure noinline @callee(%value) : (reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>)
   return %result
 }
 
@@ -103,14 +103,33 @@ func.def public target(@target) @owned_buffer_result() -> (offset) {
 
 amdgpu.target<gfx11-generic> @target
 
+func.def noinline @make_view() -> (view<1xi32>) {
+  %length = index.constant 4 : offset
+  %origin = index.constant 0 : offset
+  %storage = buffer.alloca<private> align(4) %length : buffer
+  %result = buffer.view %storage[%origin] : buffer -> view<1xi32>
+  func.return %result : view<1xi32>
+}
+
+func.def public target(@target) @owned_view_result() -> (i32) {
+  // ERROR@+1: LOWERING/044 {op_name="func.call", phase_name="inline-callables", callee_name="make_view", failure_code="target_requires_inline"}
+  %view = func.call @make_view() : () -> (view<1xi32>)
+  %value = view.load %view[0] : view<1xi32> -> i32
+  func.return %value : i32
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
 func.def @cycle_a(%value: i32) -> (i32) {
-  // ERROR@+1: LOWERING/044 {op_name="func.call", phase_name="inline-callables", callee_name="cycle_b", failure_code="required_cycle"}
+  // ERROR@+1: LOWERING/044 {op_name="func.call", phase_name="inline-callables", callee_name="cycle_b", failure_code="native_call_cycle"}
   %result = func.call @cycle_b(%value) : (i32) -> (i32)
   func.return %result : i32
 }
 
 func.def @cycle_b(%value: i32) -> (i32) {
-  // ERROR@+1: LOWERING/044 {op_name="func.call", phase_name="inline-callables", callee_name="cycle_a", failure_code="required_cycle"}
+  // ERROR@+1: LOWERING/044 {op_name="func.call", phase_name="inline-callables", callee_name="cycle_a", failure_code="native_call_cycle"}
   %result = func.call @cycle_a(%value) : (i32) -> (i32)
   func.return %result : i32
 }
@@ -118,4 +137,226 @@ func.def @cycle_b(%value: i32) -> (i32) {
 func.def public target(@target) @recursive(%value: i32) -> (i32) {
   %result = func.call @cycle_a(%value) : (i32) -> (i32)
   func.return %result : i32
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+func.def noinline @select_vector(%value: vector<1xi32>, %condition: i1) -> (vector<1xi32>) {
+  %fallback_value = scalar.constant 3 : i32
+  %fallback = vector.from_elements %fallback_value : vector<1xi32>
+  %selected = scf.select %condition, %value, %fallback : vector<1xi32>
+  func.return %selected : vector<1xi32>
+}
+
+func.def public target(@target) @call_select_vector(%value: vector<1xi32>, %flag: i32) -> (vector<1xi32>) {
+  %c0 = scalar.constant 0 : i32
+  %condition = scalar.cmpi ne, %flag, %c0 : i32
+  %selected = func.call @select_vector(%value, %condition) : (vector<1xi32>, i1) -> (vector<1xi32>)
+  func.return %selected : vector<1xi32>
+}
+
+// ----
+low.func.def noinline target<amdgpu.gfx11.generic.core> @select_vector(%value: reg<amdgpu.vgpr>, %condition: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr>) asm {
+  %selected = v_cndmask_b32_src0_inline %value, %condition {false_value = 3}
+  return %selected
+}
+
+low.func.def public target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @call_select_vector(%value: reg<amdgpu.vgpr>, %flag: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %condition = v_cmp_ne_i32_src1_inline %flag {rhs = 0}
+  %selected = low.func.call pure @select_vector(%value, %condition) : (reg<amdgpu.vgpr>, reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr>)
+  return %selected
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+func.def noinline @identity(%value: vector<1xi32>) -> (vector<1xi32>) {
+  func.return %value : vector<1xi32>
+}
+
+func.def noinline @select_vector(%value: vector<1xi32>, %condition: i1) -> (vector<1xi32>) {
+  %fallback_value = scalar.constant 3 : i32
+  %fallback = vector.from_elements %fallback_value : vector<1xi32>
+  %selected = scf.select %condition, %value, %fallback : vector<1xi32>
+  func.return %selected : vector<1xi32>
+}
+
+func.def public target(@target) @condition_across_call(%value: vector<1xi32>, %flag: i32) -> (vector<1xi32>) {
+  %c0 = scalar.constant 0 : i32
+  %condition = scalar.cmpi ne, %flag, %c0 : i32
+  %forwarded = func.call @identity(%value) : (vector<1xi32>) -> (vector<1xi32>)
+  %selected = func.call @select_vector(%forwarded, %condition) : (vector<1xi32>, i1) -> (vector<1xi32>)
+  func.return %selected : vector<1xi32>
+}
+
+// ----
+low.func.def noinline target<amdgpu.gfx11.generic.core> @identity(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  return %value
+}
+
+low.func.def noinline target<amdgpu.gfx11.generic.core> @select_vector(%value: reg<amdgpu.vgpr>, %condition: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr>) asm {
+  %selected = v_cndmask_b32_src0_inline %value, %condition {false_value = 3}
+  return %selected
+}
+
+low.func.def public target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @condition_across_call(%value: reg<amdgpu.vgpr>, %flag: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %condition = v_cmp_ne_i32_src1_inline %flag {rhs = 0}
+  %forwarded = low.func.call pure @identity(%value) : (reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>)
+  %selected = low.func.call pure @select_vector(%forwarded, %condition) : (reg<amdgpu.vgpr>, reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr>)
+  return %selected
+}
+
+// ====
+
+// HAL launch-argument facts reach retained calls through wide arithmetic.
+amdgpu.target<gfx11-generic> @target
+
+func.def noinline @increment(%position: index) -> (i32) {
+  %step = index.constant 1 : index
+  %next = index.add %position, %step : index
+  %result = index.cast %next : index to i32
+  func.return %result : i32
+}
+
+func.def public target(@target) @caller(%configuration: i64) -> (i32) {
+  %shift = scalar.constant 3 : i64
+  %shifted = scalar.shrui %configuration, %shift : i64
+  %mask = scalar.constant 7 : i64
+  %selector = scalar.andi %shifted, %mask : i64
+  %limit = scalar.constant 5 : i64
+  %bounded = scalar.minui %selector, %limit : i64
+  %position = index.cast %bounded : i64 to index
+  %value = func.call @increment(%position) : (index) -> (i32)
+  func.return %value : i32
+}
+
+// ----
+low.func.def noinline target<amdgpu.gfx11.generic.core> @increment(%position: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %step = s_mov_b32 1
+  %result = v_add_u32 %step, %position
+  return %result
+}
+
+low.func.def public target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @caller(%configuration: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>) asm {
+  %23 = s_mov_b32 3
+  %shifted = v_lshrrev_b64 %23, %configuration
+  %28 = s_mov_b32 7
+  %29 = s_mov_b32 0
+  %32 = slice %shifted[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %33 = v_and_b32 %28, %32
+  %35 = slice %shifted[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %36 = v_and_b32 %29, %35
+  %selector = concat(%33, %36) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %38 = s_mov_b32 5
+  %limit = concat(%38, %29) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %41 = v_cmp_lt_u64 %selector, %limit
+  %44 = v_mov_b32_copy %38
+  %45 = v_cndmask_b32 %44, %33, %41
+  %value = low.func.call pure @increment(%45) : (reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>)
+  return %value
+}
+
+// ====
+
+// An exported function can also consume per-lane device-call arguments.
+
+amdgpu.target<gfx11-generic> @target
+
+func.def public noinline target(@target) @absolute(%value: i32) -> (i32) {
+  %sign_boundary = scalar.constant 0 : i32
+  %positive = scalar.cmpi sgt, %value, %sign_boundary : i32
+  %result = scf.if %positive -> (i32) {
+    scf.yield %value : i32
+  } else {
+    %negative = scalar.subi %sign_boundary, %value : i32
+    scf.yield %negative : i32
+  }
+  func.return %result : i32
+}
+
+kernel.def target(@target) @varying_values() {
+  %groups = index.constant 1 : index
+  %threads = index.constant 64 : index
+  kernel.launch.config workgroups(%groups, %groups, %groups) workgroup_size(%threads, %groups, %groups) : index
+} launch(%output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %lane_value = index.cast %lane : index to i32
+  %bias = scalar.constant 32 : i32
+  %centered = scalar.subi %lane_value, %bias : i32
+  %result = func.call @absolute(%centered) : (i32) -> (i32)
+  %origin = index.constant 0 : offset
+  %results = buffer.view %output[%origin] : buffer -> view<64xi32>
+  view.store %result, %results[%lane] : i32, view<64xi32>
+  kernel.return
+}
+
+// ----
+low.func.def public noinline target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @absolute(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %positive = v_cmp_gt_i32_src1_inline %value {rhs = 0}
+  %25 = v_mov_b32 0
+  %negative = v_sub_nc_u32 %25, %value
+  %result = v_cndmask_b32 %negative, %value, %positive
+  return %result
+}
+
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 1, resource_count = 1, resource_offsets = [0], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @varying_values() asm {
+  %lane_value = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %results = resource<hal_binding> {extent = 256, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %31 = v_mov_b32 4294967264
+  %centered = v_add_u32 %lane_value, %31
+  %result = low.func.call pure @absolute(%centered) : (reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>)
+  %34 = v_lshlrev_b32_src0_inline %lane_value, 2
+  global_store_b32_saddr %34, %result, %results
+  return
+}
+
+// ====
+
+// A public predicate helper preserves independently varying lanes.
+
+amdgpu.target<gfx11-generic> @target
+
+func.def public noinline target(@target) @invert(%predicate: i1) -> (i1) {
+  %true = scalar.constant true : i1
+  %result = scalar.xori %predicate, %true : i1
+  func.return %result : i1
+}
+
+kernel.def target(@target) @caller() {
+  %groups = index.constant 1 : index
+  %threads = index.constant 64 : index
+  kernel.launch.config workgroups(%groups, %groups, %groups) workgroup_size(%threads, %groups, %groups) : index
+} launch(%output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %half = index.constant 32 : index
+  %first_half = index.cmp ult, %lane, %half : index
+  %predicate = func.call @invert(%first_half) : (i1) -> (i1)
+  %enabled = scalar.constant 19 : i32
+  %disabled = scalar.constant 37 : i32
+  %result = scf.select %predicate, %enabled, %disabled : i32
+  %origin = index.constant 0 : offset
+  %results = buffer.view %output[%origin] : buffer -> view<64xi32>
+  view.store %result, %results[%lane] : i32, view<64xi32>
+  kernel.return
+}
+
+// ----
+low.func.def public noinline target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @invert(%predicate: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr x2>) asm {
+  %20 = s_mov_b64_exec_read
+  %result = s_xor_b64 %predicate, %20
+  return %result
+}
+
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 1, resource_count = 1, resource_offsets = [0], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @caller() asm {
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %results = resource<hal_binding> {extent = 256, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %first_half = v_cmp_lt_u32_src1_inline %lane {rhs = 32}
+  %predicate = low.func.call pure @invert(%first_half) : (reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr x2>)
+  %result = v_cndmask_b32_src0_lit_src1_inline %predicate {imm32 = 37, true_value = 19}
+  %29 = v_lshlrev_b32_src0_inline %lane, 2
+  global_store_b32_saddr %29, %result, %results
+  return
 }

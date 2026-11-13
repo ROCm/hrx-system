@@ -112,6 +112,13 @@ iree_status_t loom_vector_packet_staging_store(
     const loom_vector_packet_slice_t* slice, loom_vector_packet_value_t packet,
     const loom_op_t* source_op);
 
+// Stages retained snapshots for a dynamic loop in the current plan. The plan
+// keeps the resulting private views and materializes native loads directly;
+// it never publishes oversized loads for a later rewrite to rediscover.
+iree_status_t loom_vector_packet_stage_snapshots(
+    loom_vector_packetization_t* packetization,
+    const loom_vector_packet_shape_t* shape);
+
 // Reifies snapshots as shared immutable private storage. When restricted to
 // dynamic windows, same-block packets are stored at their definitions and other
 // consumers retain the original captured SSA values. The selected chunk width

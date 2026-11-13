@@ -48,8 +48,8 @@ struct PredicateValue {
   PredicateValueOrigin origin;
   // Resolved root symbol for Binding, otherwise null.
   cxx::Symbol* binding;
-  // Direct semantic field selections from the root to the scalar leaf.
-  std::vector<cxx::FieldSymbol*> members;
+  // Direct base and field selections from the root to the scalar leaf.
+  std::vector<cxx::Symbol*> members;
   // Runtime bindings read by Expression values, in source traversal order.
   std::vector<PredicateDependency> dependencies;
   // Unconverted source identity owning diagnostics and its declared type.

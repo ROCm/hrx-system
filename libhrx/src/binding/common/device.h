@@ -10,6 +10,7 @@
 #include "common/context.h"
 #include "common/execution_resource.h"
 #include "common/host_callback.h"
+#include "common/mem_pool.h"
 #include "common/tls.h"
 #include "hrx_runtime.h"
 #include "iree/base/internal/arena.h"
@@ -24,15 +25,6 @@ extern "C" {
 // Device types
 //===----------------------------------------------------------------------===//
 
-typedef struct iree_hal_streaming_graph_memory_size_entry_t {
-  // Next size class tracked in the device graph-memory accounting table.
-  struct iree_hal_streaming_graph_memory_size_entry_t* next;
-  // Exact allocation size represented by this reusable graph-memory class.
-  iree_device_size_t size;
-  // Number of live executable graphs actively using this reusable size class.
-  uint32_t reference_count;
-} iree_hal_streaming_graph_memory_size_entry_t;
-
 // Maximum number of devices supported by the stream HAL.
 // This avoids dynamic enumeration overhead during initialization.
 #define IREE_HAL_STREAMING_MAX_DEVICES 64
@@ -42,7 +34,7 @@ typedef struct iree_hal_streaming_device_t {
   // Device ordinal in the global registry.
   iree_host_size_t ordinal;
 
-  // HRX device handle (owns the HAL device and driver).
+  // Borrowed HRX device view owned by the registry's sealed group.
   hrx_device_t hrx_device;
 
   // HAL device extracted from hrx_device for direct HAL calls.
@@ -109,31 +101,35 @@ typedef struct iree_hal_streaming_device_t {
   int32_t primary_context_ref_count;
 
   // Default device allocation pool, protected by primary_context_mutex.
-  hrx_mem_pool_t default_mem_pool;
+  iree_hal_streaming_mem_pool_t* default_mem_pool;
   // Current device allocation pool, protected by primary_context_mutex.
-  hrx_mem_pool_t current_mem_pool;
+  iree_hal_streaming_mem_pool_t* current_mem_pool;
 
-  // Guards graph-memory accounting fields.
+  // Guards graph-memory accounting and cached physical blocks.
   iree_slim_mutex_t graph_memory_mutex;
-  // Current graph-memory bytes visible via hipGraphMemAttrUsedMemCurrent.
+  // Logical bytes in accepted live graph allocations.
   uint64_t graph_memory_used_current;
   // High-water graph-memory bytes visible via hipGraphMemAttrUsedMemHigh.
   uint64_t graph_memory_used_high;
-  // Current graph-memory reservation visible via
-  // hipGraphMemAttrReservedMemCurrent.
+  // Physical extents retained for accepted allocations and cached reuse.
   uint64_t graph_memory_reserved_current;
   // High-water graph-memory reservation visible via
   // hipGraphMemAttrReservedMemHigh.
   uint64_t graph_memory_reserved_high;
-  // Reusable graph-memory size classes retained by this device graph pool.
-  iree_hal_streaming_graph_memory_size_entry_t*
-      graph_memory_reusable_size_entries;
+  // Unmapped physical graph blocks, reusable after their captured timepoints.
+  struct iree_hal_streaming_graph_memory_block_t* graph_memory_blocks;
 } iree_hal_streaming_device_t;
 
 // Global device registry for multi-device management.
 typedef struct iree_hal_streaming_device_registry_t {
   // Host allocator for internal allocations.
   iree_allocator_t host_allocator;
+
+  // Retained execution services owned by this compatibility frontend.
+  hrx_runtime_t runtime;
+
+  // Retained sealed group owning every borrowed device view in the registry.
+  hrx_device_group_t group;
 
   // Immutable HAL device-creation extension chain selected at initialization.
   const iree_hal_device_create_params_extension_t* device_extensions;
@@ -147,10 +143,9 @@ typedef struct iree_hal_streaming_device_registry_t {
   // Ready compatibility callouts, with one lazily created frontend worker.
   iree_hal_streaming_host_callback_queue_t host_callbacks;
 
-  iree_slim_mutex_t mutex;
-
   // Fixed-size array of registered devices.
   iree_hal_streaming_device_t devices[IREE_HAL_STREAMING_MAX_DEVICES];
+  // Initialized prefix of the device array.
   iree_host_size_t device_count;
 
   // Global context tracking for cleanup.
@@ -173,7 +168,9 @@ iree_hal_streaming_device_registry_t* iree_hal_streaming_device_registry(void);
 // Synchronization: none (queries static device count).
 iree_status_t iree_hal_streaming_device_count(iree_host_size_t* out_count);
 
-// Synchronization: none (returns device entry).
+// Returns the borrowed entry for |ordinal|, or NULL if the registry is not
+// initialized or the ordinal is out of range.
+// Synchronization: none (queries immutable registry membership).
 iree_hal_streaming_device_t* iree_hal_streaming_device_entry(
     iree_hal_streaming_device_ordinal_t ordinal);
 
@@ -222,7 +219,9 @@ iree_status_t iree_hal_streaming_device_get_string_property(
     iree_hal_streaming_device_ordinal_t ordinal, const char* category,
     const char* key, char* value, iree_host_size_t value_size);
 
-// Synchronization: none (queries current memory info).
+// Queries the binding's approximate free memory and immutable total memory.
+// Both outputs are zero on failure.
+// Synchronization: relaxed atomic load of the free-memory estimate.
 iree_status_t iree_hal_streaming_device_memory_info(
     iree_hal_streaming_device_ordinal_t ordinal,
     iree_device_size_t* out_free_memory, iree_device_size_t* out_total_memory);

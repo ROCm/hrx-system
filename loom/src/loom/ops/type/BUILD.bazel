@@ -1,0 +1,57 @@
+# Copyright 2026 The IREE Authors
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_instance_library", "loom_cc_library", "loom_generated_cc_library")
+
+package(
+    default_visibility = ["//visibility:public"],
+    features = ["layering_check"],
+    licenses = ["notice"],
+)
+
+loom_cc_library(
+    name = "op_defs",
+    hdrs = ["ops.h"],
+    textual_hdrs = ["ops.inc"],
+    deps = ["//loom/src/loom/ops:headers"],
+)
+
+loom_cc_instance_library(
+    name = "builders",
+    srcs = ["builders.c"],
+    hdrs = ["ops.h"],
+    textual_hdrs = ["ops.inc"],
+    deps = [
+        "//loom/src/loom/ir:builders",
+        "//loom/src/loom/ops:builders",
+    ],
+)
+
+loom_generated_cc_library(
+    name = "type",
+    srcs = ["verify.c"],
+    hdrs = ["ops.h"],
+    args = ["--dialect=type"],
+    extra_output_flags = [
+        "--ops-include",
+        "--builders",
+    ],
+    extra_outputs = [
+        "ops.inc",
+        "builders.c",
+    ],
+    generated_src_flags = ["--tables"],
+    generated_srcs = ["tables.c"],
+    generator = "//loom/py/loom/gen/ops:c_tables_type_generator",
+    textual_hdrs = ["ops.inc"],
+    deps = [
+        ":builders",
+        "//loom/src/loom/error:emitter",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/error:parameter",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:unicode",
+    ],
+)

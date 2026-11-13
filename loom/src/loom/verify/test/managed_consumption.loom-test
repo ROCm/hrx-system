@@ -1,0 +1,155 @@
+// An owning parameter transfers at a call even when the callee has no body.
+// RUN: verify
+type.decl import("provider", "object") @Object
+func.decl import("provider", "take") @take(%owner: ref<@Object>)
+func.def @reuse(%owner: ref<@Object>) {
+  func.call @take(%owner) : (ref<@Object>)
+  // ERROR@+1: DOMINANCE/002 {value_name="owner", consuming_op="func.call"}
+  func.call @take(%owner) : (ref<@Object>)
+  func.return
+}
+
+// ====
+// Two consuming fields require two owners, even within one call.
+// RUN: verify
+type.decl import("provider", "object") @Object
+func.decl @take_two(%left: ref<@Object>, %right: ref<@Object>)
+func.def @duplicate_argument(%owner: ref<@Object>) {
+  // ERROR@+1: DOMINANCE/019 {value_name="owner", op_name="func.call"}
+  func.call @take_two(%owner, %owner) : (ref<@Object>, ref<@Object>)
+  func.return
+}
+
+// ====
+// Returning twice also needs two independently owned references.
+// RUN: verify
+type.decl import("provider", "object") @Object
+func.def @duplicate_result(%owner: ref<@Object>) -> (ref<@Object>, ref<@Object>) {
+  // ERROR@+1: DOMINANCE/019 {value_name="owner", op_name="func.return"}
+  func.return %owner, %owner : ref<@Object>, ref<@Object>
+}
+
+// ====
+// Repeated borrowed fields impose no consuming-owner obligation.
+// RUN: verify
+type.decl import("provider", "object") @Object
+
+func.decl @inspect(%left: ptr<@Object>, %right: ptr<@Object>)
+
+func.def @borrow_twice(%pointer: ptr<@Object>) -> (ptr<@Object>, ptr<@Object>) {
+  func.call @inspect(%pointer, %pointer) : (ptr<@Object>, ptr<@Object>)
+  func.call @inspect(%pointer, %pointer) : (ptr<@Object>, ptr<@Object>)
+  func.return %pointer, %pointer : ptr<@Object>, ptr<@Object>
+}
+
+// ====
+// A callee can return a new owner of the same payload. Its consumed argument
+// and returned owner remain distinct logical identities.
+// RUN: verify
+type.decl import("provider", "object") @Object
+
+func.def noinline @relay(%owner: ref<@Object>) -> (ref<@Object>) {
+  func.return %owner : ref<@Object>
+}
+
+func.def @forward(%first: ref<@Object>, %second: ref<@Object>) -> (ref<@Object>, ref<@Object>) {
+  %returned = func.call @relay(%first) : (ref<@Object>) -> (ref<@Object>)
+  func.return %returned, %second : ref<@Object>, ref<@Object>
+}
+
+// ====
+// Mutually exclusive paths may each transfer the same incoming owner.
+// RUN: verify
+type.decl import("provider", "object") @Object
+
+func.decl @take(%owner: ref<@Object>)
+
+func.def @choose(%owner: ref<@Object>, %condition: i1) {
+  cfg.cond_br %condition, ^left, ^right
+^left:
+  func.call @take(%owner) : (ref<@Object>)
+  func.return
+^right:
+  func.call @take(%owner) : (ref<@Object>)
+  func.return
+}
+
+// ====
+// A join cannot revive ownership consumed on one incoming path.
+// RUN: verify
+type.decl import("provider", "object") @Object
+func.decl @take(%owner: ref<@Object>)
+func.def @join(%owner: ref<@Object>, %condition: i1) {
+  cfg.cond_br %condition, ^consume, ^join
+^consume:
+  func.call @take(%owner) : (ref<@Object>)
+  cfg.br ^join
+^join:
+  // ERROR@+1: DOMINANCE/002 {value_name="owner"}
+  func.call @take(%owner) : (ref<@Object>)
+  func.return
+}
+
+// ====
+// Repeating a consuming call requires recreating the dynamic owner.
+// RUN: verify
+type.decl import("provider", "object") @Object
+func.decl @take(%owner: ref<@Object>)
+func.def @repeat_consumption(%owner: ref<@Object>, %again: i1) {
+  cfg.br ^loop
+^loop:
+  // ERROR@+1: DOMINANCE/002 {value_name="owner"}
+  func.call @take(%owner) : (ref<@Object>)
+  cfg.cond_br %again, ^loop, ^exit
+^exit:
+  func.return
+}
+
+// ====
+// Reentering the factory recreates the owner on every trip.
+// RUN: verify
+type.decl import("provider", "object") @Object
+
+func.decl @make() -> (ref<@Object>)
+
+func.decl @take(%owner: ref<@Object>)
+
+func.def @recreate(%again: i1) {
+  cfg.br ^loop
+^loop:
+  %owner = func.call @make() : () -> (ref<@Object>)
+  func.call @take(%owner) : (ref<@Object>)
+  cfg.cond_br %again, ^loop, ^exit
+^exit:
+  func.return
+}
+
+// ====
+// Structured alternatives preserve mutual exclusion before CFG lowering.
+// RUN: verify
+type.decl import("provider", "object") @Object
+
+func.decl @take(%owner: ref<@Object>)
+
+func.def @structured_choice(%owner: ref<@Object>, %condition: i1) {
+  scf.if %condition {
+    func.call @take(%owner) : (ref<@Object>)
+  } else {
+    func.call @take(%owner) : (ref<@Object>)
+  }
+  func.return
+}
+
+// ====
+// A transfer in a structured region also invalidates the outer owner.
+// RUN: verify
+type.decl import("provider", "object") @Object
+func.decl @take(%owner: ref<@Object>)
+func.def @structured_reuse(%owner: ref<@Object>, %condition: i1) {
+  scf.if %condition {
+    func.call @take(%owner) : (ref<@Object>)
+  }
+  // ERROR@+1: DOMINANCE/002 {value_name="owner"}
+  func.call @take(%owner) : (ref<@Object>)
+  func.return
+}

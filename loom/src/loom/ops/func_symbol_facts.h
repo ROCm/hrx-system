@@ -16,6 +16,7 @@
 
 #include "iree/base/api.h"
 #include "loom/analysis/symbol_facts.h"
+#include "loom/ir/input_contract.h"
 #include "loom/ir/ir.h"
 #include "loom/target/condition.h"
 #include "loom/target/types.h"
@@ -61,9 +62,6 @@ typedef struct loom_func_symbol_facts_t {
   // Module-local template family symbol, or null for non-provider functions.
   loom_symbol_ref_t template_family;
 
-  // Borrowed template family symbol name, or empty when absent.
-  iree_string_view_t template_family_name;
-
   // Concrete provider priority, or zero when not applicable.
   int64_t priority;
 
@@ -93,6 +91,9 @@ typedef struct loom_func_symbol_facts_t {
 
   // True when the func is an external import declaration.
   bool imports;
+
+  // True when a trailing pointer retains nonempty template input obligations.
+  bool has_input_contract;
 
   // Borrowed import module name for external declarations, or empty.
   iree_string_view_t import_module;
@@ -126,6 +127,27 @@ typedef struct loom_func_symbol_facts_t {
   loom_target_linkage_t export_linkage;
 
 } loom_func_symbol_facts_t;
+
+// Returns immutable declared input obligations, or NULL for an empty contract.
+// Only payloads with nonempty requirements have trailing pointer storage.
+static inline const loom_input_contract_t* loom_func_symbol_input_contract(
+    const loom_func_symbol_facts_t* facts) {
+  return facts->has_input_contract
+             ? *(const loom_input_contract_t* const*)(facts + 1)
+             : NULL;
+}
+
+// Optional producer-owned input requirements for an immutable source module.
+// The callback and returned contracts outlive the consuming symbol fact table.
+typedef struct loom_func_input_contract_source_t {
+  // Owner of the source symbol-to-contract correspondence.
+  const void* self;
+  // Direct source-symbol lookup; NULL denotes an empty retained contract.
+  const loom_input_contract_t* (*lookup)(const void* self,
+                                         loom_symbol_id_t symbol_id);
+} loom_func_input_contract_source_t;
+
+extern const uint8_t loom_func_input_contract_resource_key;
 
 // Symbol fact domain used by generated func symbol descriptors.
 extern const loom_symbol_fact_domain_t loom_func_symbol_fact_domain;

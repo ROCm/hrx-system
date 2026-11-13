@@ -29,6 +29,7 @@
 #include "loom/ops/vector/ops.h"
 #include "loom/ops/view/ops.h"
 #include "loom/target/arch/amdgpu/error_catalog.h"
+#include "loom/target/arch/amdgpu/lower/buffer_descriptor.h"
 #include "loom/target/arch/amdgpu/lower/candidates/compare_candidates.h"
 #include "loom/target/arch/amdgpu/lower/constants.h"
 #include "loom/target/arch/amdgpu/lower/emit.h"
@@ -948,8 +949,8 @@ loom_amdgpu_fragment_memory_evaluate_layout(
     loom_amdgpu_matrix_numeric_type_t numeric_type,
     loom_scalar_type_t expected_element_type,
     loom_amdgpu_matrix_result_representation_flags_t representation_flags,
-    loom_amdgpu_fragment_memory_payload_form_t* out_payload_form,
     loom_amdgpu_fragment_memory_layout_rejection_flags_t* rejection_flags,
+    loom_amdgpu_fragment_memory_payload_form_t* out_payload_form,
     loom_amdgpu_fragment_memory_narrowed_result_sources_t*
         out_narrowed_result_sources) {
   *out_payload_form = LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_NATIVE;
@@ -1126,7 +1127,7 @@ static bool loom_amdgpu_fragment_memory_target_layout(
               environment, role, operation_kind, payload, payload_type,
               view_type, blocks, rows, columns, view_storage_schema,
               view_numeric, layout, numerics[i], expected_element,
-              representation->flags, out_payload_form, &rejection_flags,
+              representation->flags, &rejection_flags, out_payload_form,
               out_narrowed_result_sources) ==
           LOOM_AMDGPU_FRAGMENT_MEMORY_LAYOUT_MATCH_NONE) {
         continue;
@@ -1181,7 +1182,7 @@ static bool loom_amdgpu_fragment_memory_target_layout(
             environment, role, operation_kind, payload, payload_type, view_type,
             blocks, rows, columns, view_storage_schema, view_numeric, layout,
             role_storage.payload.numeric_type, expected_element_type,
-            /*representation_flags=*/0, &payload_form, &rejection_flags,
+            /*representation_flags=*/0, &rejection_flags, &payload_form,
             &narrowed_result_sources);
     if (layout_match <= best_match) {
       continue;
@@ -1215,16 +1216,18 @@ static bool loom_amdgpu_fragment_memory_query_view_strides(
     const loom_low_source_memory_access_plan_t* access,
     uint32_t* out_static_axis_byte_strides,
     loom_amdgpu_fragment_memory_diagnostic_t* diagnostic) {
+  const int64_t minimum_stride =
+      access->operation_kind == LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD ? 0 : 1;
   for (uint8_t axis = 0; axis < access->view_rank; ++axis) {
     const loom_low_source_memory_axis_byte_stride_t* axis_stride =
         &access->axis_byte_strides[axis];
     if ((axis_stride->kind != LOOM_LOW_SOURCE_MEMORY_AXIS_BYTE_STRIDE_STATIC &&
          axis_stride->kind !=
              LOOM_LOW_SOURCE_MEMORY_AXIS_BYTE_STRIDE_DYNAMIC) ||
-        axis_stride->static_byte_coefficient <= 0 ||
+        axis_stride->static_byte_coefficient < minimum_stride ||
         axis_stride->static_byte_coefficient > UINT32_MAX ||
         !loom_value_facts_fit_unsigned_bit_count(axis_stride->byte_facts, 32) ||
-        axis_stride->byte_facts.range_lo <= 0) {
+        axis_stride->byte_facts.range_lo < minimum_stride) {
       return loom_amdgpu_fragment_memory_reject(
           diagnostic, IREE_SV("fragment_memory.view_stride"));
     }
@@ -1614,7 +1617,7 @@ static bool loom_amdgpu_fragment_memory_evaluate_prepared(
   if (!use_transpose_load &&
       !loom_amdgpu_fragment_memory_space_supports_access(
           operation_kind, prepared->source_access.memory_space, packetization,
-          payload_form)) {
+          payload_form, (uint16_t)prepared->source_access.element_byte_count)) {
     return loom_amdgpu_fragment_memory_reject(
         diagnostic, IREE_SV("fragment_memory.memory_space"));
   }
@@ -2025,6 +2028,13 @@ static iree_status_t loom_amdgpu_fragment_memory_select(
   if (*out_selected && out_plan->scalar_base.dynamic_term_mask != 0) {
     IREE_RETURN_IF_ERROR(loom_amdgpu_plan_memory_dynamic_terms(
         context, &out_plan->source, &out_plan->dynamic_term_plans));
+  }
+  if (*out_selected &&
+      source_op->kind != LOOM_OP_SANITIZER_RACE_FRAGMENT_ACCESS &&
+      out_plan->source.memory_space ==
+          LOOM_VALUE_FACT_MEMORY_SPACE_DESCRIPTOR) {
+    IREE_RETURN_IF_ERROR(loom_amdgpu_plan_buffer_extent(
+        context, &out_plan->source, &out_plan->buffer_extent));
   }
   return iree_ok_status();
 }

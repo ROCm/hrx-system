@@ -119,6 +119,14 @@ iree_status_t loom_math_evaluation_build_binary(
     loom_math_evaluation_value_t* lhs, loom_math_evaluation_value_t* rhs,
     loom_math_evaluation_value_t* out_value);
 
+// Builds a product and sum permitting target-aware contraction. Recipes using
+// this builder must admit both fused and separately rounded evaluation.
+iree_status_t loom_math_evaluation_build_multiply_add(
+    loom_math_evaluation_t* evaluation, loom_math_evaluation_value_t* lhs,
+    loom_math_evaluation_value_t* rhs,
+    loom_math_evaluation_value_t* accumulator,
+    loom_math_evaluation_value_t* out_value);
+
 // Builds a fused product and sum in the selected evaluation representation.
 iree_status_t loom_math_evaluation_build_fma(
     loom_math_evaluation_t* evaluation, loom_math_evaluation_value_t* lhs,

@@ -97,5 +97,5 @@ amdf_status_t amdf_platform_endpoint_enumerate(
     return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
   }
   return amdf_windows_endpoint_snapshot_enumerate(
-      &instance->kmt, capacity, summaries, out_count, instance->host_allocator);
+      &instance->kmt, capacity, instance->host_allocator, summaries, out_count);
 }

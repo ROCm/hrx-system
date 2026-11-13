@@ -23,7 +23,7 @@
 #include "loom/ops/kernel/ops.h"
 #include "loom/testing/module_ptr.h"
 #include "loom/tooling/context/context.h"
-#include "loom/transforms/kernel/kernel_class_classifier.h"
+#include "loom/transforms/kernel/kernel_class_collection.h"
 #include "loom/transforms/kernel/kernel_class_materializer.h"
 #include "loom/transforms/symbol/template_decision_model.h"
 #include "loom/util/fact_table.h"
@@ -141,12 +141,13 @@ class KernelClassMaterializerBenchmarkFixture {
 
     IREE_CHECK_OK(loom_value_fact_table_initialize(
         &site_facts_, &analysis_arena_, std::size(site_argument_values_)));
-    site_facts_.count = std::size(site_argument_values_);
     for (iree_host_size_t i = 0; i < std::size(site_argument_values_); ++i) {
       site_argument_values_[i] = static_cast<loom_value_id_t>(i);
     }
-    site_facts_.entries[0] = loom_value_facts_exact_i64(64);
-    site_facts_.entries[1] = loom_value_facts_exact_i64(256);
+    IREE_CHECK_OK(loom_value_fact_table_define(&site_facts_, 0,
+                                               loom_value_facts_exact_i64(64)));
+    IREE_CHECK_OK(loom_value_fact_table_define(
+        &site_facts_, 1, loom_value_facts_exact_i64(256)));
     sites_[0] = {
         .facts = &site_facts_,
         .argument_values = &site_argument_values_[0],

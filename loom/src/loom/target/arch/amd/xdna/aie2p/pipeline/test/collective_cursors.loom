@@ -1,0 +1,120 @@
+// Collective and ordinary reads alternate on one three-slot ring. Eleven
+// admissions cross the ring boundary three times; the last record skips
+// the ordinary child. The record owner relays the reader's packet to a third
+// worker. Both reader and peer values are observed, and the ordinary read must
+// consume the following record.
+aie2p.target<array> @device
+
+pipeline.def @publish() run(%records: channel<tile<1xi32>>, %value: i32) {
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    %write, %payload = channel.reserve %records : channel<tile<1xi32>> -> (write<tile<1xi32>>, view<1xi32>)
+    view.store %value, %payload[0] : i32, view<1xi32>
+    channel.publish %write : write<tile<1xi32>>
+  }
+}
+
+pipeline.def @save_peer() run(%storage: buffer, %value: i32) {
+  %origin = index.constant 0 : offset
+  pipeline.strand workers([0, 4], [1, 1], [1, 1]) {
+    %output = buffer.view %storage[%origin] : buffer -> view<1xi32>
+    view.store %value, %output[0] : i32, view<1xi32>
+  }
+}
+
+pipeline.def @consume() run(%records: channel<tile<1xi32>>, %outgoing: channel<tile<3xi32>>, %peer_storage: buffer, %output: buffer, %collective: i32, %phase: index) {
+  %origin = index.constant 0 : offset
+  %bytes = index.constant 12 : offset
+  pipeline.strand workers([0, 3], [1, 1], [1, 1]) {
+    %read, %payload = channel.acquire %records : channel<tile<1xi32>> -> (read<tile<1xi32>>, view<1xi32>)
+    %ordinary = view.load %payload[0] : view<1xi32> -> i32
+    channel.release %read : read<tile<1xi32>>
+    %peer_view = buffer.view %peer_storage[%origin] : buffer -> view<1xi32>
+    %peer = view.load %peer_view[0] : view<1xi32> -> i32
+    %write, %result = channel.reserve %outgoing : channel<tile<3xi32>> -> (write<tile<3xi32>>, view<3xi32>)
+    view.store %collective, %result[0] : i32, view<3xi32>
+    view.store %peer, %result[1] : i32, view<3xi32>
+    view.store %ordinary, %result[2] : i32, view<3xi32>
+    channel.publish %write : write<tile<3xi32>>
+    %read_result, %data = channel.acquire %outgoing : channel<tile<3xi32>> -> (read<tile<3xi32>>, view<3xi32>)
+    %offset = index.scale %phase, %bytes : index, offset -> offset
+    %external = buffer.view %output[%offset] : buffer -> view<3xi32>
+    %copy = kernel.async.copy %data to %external {cache_scope = workgroup, cache_temporal = regular, direction = workgroup_to_global} : view<3xi32> to view<3xi32> -> kernel.async.token
+    %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+    kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+    channel.release %read_result : read<tile<3xi32>>
+  }
+}
+
+pipeline.def<kernel> public retain target(@device) @shared_cursor() run(%output_argument: buffer) {
+  %output = buffer.assume.alignment %output_argument {minimum_alignment = 4} : buffer
+  %memory = pipeline.memory<workgroup>[0, 2] : pool
+  %reader_memory = pipeline.memory<workgroup>[0, 3] : pool
+  %peer_memory = pipeline.memory<workgroup>[0, 4] : pool
+  %record_bytes = index.constant 12 : offset
+  %peer_bytes = index.constant 4 : offset
+  %origin = index.constant 0 : offset
+  %capacity = index.constant 3 : index
+  %one_slot = index.constant 1 : index
+  %storage = buffer.alloca<workgroup> pool(%memory) align(4) %record_bytes : buffer
+  %peer = buffer.alloca<workgroup> pool(%peer_memory) align(4) %peer_bytes : buffer
+  %outgoing_storage = buffer.alloca<workgroup> pool(%reader_memory) align(4) %record_bytes : buffer
+  %slots = buffer.view %storage[%origin] : buffer -> view<3x1xi32>
+  %records = channel.bind<fifo> %slots, %capacity : view<3x1xi32>, index -> channel<tile<1xi32>>
+  %outgoing_slots = buffer.view %outgoing_storage[%origin] : buffer -> view<1x3xi32>
+  %outgoing = channel.bind<fifo> %outgoing_slots, %one_slot : view<1x3xi32>, index -> channel<tile<3xi32>>
+  %initial = index.constant 5 : index
+  %count = index.constant 6 : index
+  %c0 = scalar.constant 0 : i32
+  %c100 = scalar.constant 100 : i32
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  pipeline.serial {
+    scf.for %phase = [%begin to %count step %step] {
+      %remaining_index = index.sub %initial, %phase : index
+      %remaining = index.cast %remaining_index : index to i32
+      pipeline.compose @publish(%records, %remaining) : (channel<tile<1xi32>>, i32)
+      %read, %payload = channel.acquire %records : channel<tile<1xi32>> -> (read<tile<1xi32>>, view<1xi32>)
+      %value = view.load %payload[0] : view<1xi32> -> i32
+      %work = scalar.cmpi ne, %value, %c0 : i32
+      channel.release %read : read<tile<1xi32>>
+      scf.if %work {
+        pipeline.compose @save_peer(%peer, %value) : (buffer, i32)
+        %ordinary = scalar.addi %value, %c100 : i32
+        pipeline.compose @publish(%records, %ordinary) : (channel<tile<1xi32>>, i32)
+        pipeline.compose @consume(%records, %outgoing, %peer, %output, %value, %phase) : (channel<tile<1xi32>>, channel<tile<3xi32>>, buffer, buffer, i32, index)
+      }
+    }
+  }
+}
+
+func.def @reference(%output: buffer) {
+  %origin = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %count = index.constant 5 : index
+  %step = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c100 = scalar.constant 100 : i32
+  %values = buffer.view %output[%origin] : buffer -> view<5x3xi32>
+  scf.for %phase = [%begin to %count step %step] {
+    %remaining = index.sub %count, %phase : index
+    %value = index.cast %remaining : index to i32
+    %ordinary = scalar.addi %value, %c100 : i32
+    view.store %value, %values[%phase, %begin] : i32, view<5x3xi32>
+    view.store %value, %values[%phase, %step] : i32, view<5x3xi32>
+    view.store %ordinary, %values[%phase, %c2] : i32, view<5x3xi32>
+  }
+  func.return
+}
+
+check.scenario public @collective_cursor_wraparound {
+  check.trial[2](%trial: index, %entropy: check.entropy) {
+    // The sixth iteration is admitted in the output extent, but its stop
+    // record must leave that row untouched, along with both outer guards.
+    %storage = check.generate.fill value(-7777) : tensor<50xi32>
+    %output = check.tensor.view %storage offset(64) : tensor<50xi32> -> tensor<18xi32>
+    check.compare<@shared_cursor, @reference>(%output) : (tensor<18xi32>) -> () {
+      check.expect.equal actual(%storage) expected(%storage) : tensor<50xi32>
+    }
+  }
+  check.return
+}

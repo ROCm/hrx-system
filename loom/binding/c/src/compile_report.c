@@ -140,8 +140,8 @@ void loomc_compile_report_state_initialize(
       .result = result,
   };
   iree_arena_initialize(block_pool, &out_state->arena);
-  loom_target_compile_report_initialize(
-      &out_state->report, iree_arena_allocator(&out_state->arena));
+  loom_target_compile_report_initialize(iree_arena_allocator(&out_state->arena),
+                                        &out_state->report);
   out_state->report.requested_detail_flags =
       loom_target_compile_report_requested_detail_flags(out_state->mode);
   if (mode == LOOMC_COMPILE_REPORT_MODE_DETAILS &&

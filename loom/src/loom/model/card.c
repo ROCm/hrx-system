@@ -953,15 +953,17 @@ static iree_status_t loom_model_select(loom_model_card_t* card,
   loom_model_json_object_t programs;
   IREE_RETURN_IF_ERROR(loom_model_object(
       card, programs_json,
-      "origin directory inputs libraries config device_placement exchange_pool", &programs));
+      "origin directory inputs libraries config device_placement exchange_pool",
+      &programs));
   IREE_RETURN_IF_ERROR(loom_model_device_placement(
       &programs, selection->schema_version, &selection->device_placement));
   IREE_RETURN_IF_ERROR(loom_model_string_field(
       &programs, "exchange_pool", false, &selection->exchange_pool));
   if (loom_model_field(&programs, IREE_SV("exchange_pool")) &&
       (selection->schema_version < 2 || !selection->exchange_pool.size)) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "exchange_pool requires schema version 2 and a name");
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "exchange_pool requires schema version 2 and a name");
   }
   IREE_RETURN_IF_ERROR(loom_model_string_field(&programs, "directory", false,
                                                &selection->directory));

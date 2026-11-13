@@ -444,3 +444,29 @@ func.def @cfg_affine_guard_with_constant_bound(%input: view<20xi32>, %raw: index
 ^exit:
   func.return
 }
+
+// ====
+
+// A conversion outside the guard is value-preserving only on the guarded
+// path. Proving that path must leave the other arm and the join unproven.
+func.def @guarded_cast_proof_stays_local(%storage: buffer, %raw: index) {
+  %input = index.assume %raw [range(%raw, 0, 1000)] : index
+  %narrow = index.cast %input : index to i8
+  %coordinate = index.cast %narrow : i8 to index
+  %c128 = index.constant 128 : index
+  %fits = index.cmp slt, %input, %c128 : index
+  %base = index.constant 0 : offset
+  %view = buffer.view %storage[%base] : buffer -> view<128xi32>
+  scf.if %fits {
+    %loaded = view.load %view[%coordinate] : view<128xi32> -> i32
+    test.use %loaded : i32
+  } else {
+    // ERROR@+1: SUBRANGE/023 {op_name="view.load", view_axis="0"}
+    %other = view.load %view[%coordinate] : view<128xi32> -> i32
+    test.use %other : i32
+  }
+  // ERROR@+1: SUBRANGE/023 {op_name="view.load", view_axis="0"}
+  %joined = view.load %view[%coordinate] : view<128xi32> -> i32
+  test.use %joined : i32
+  func.return
+}

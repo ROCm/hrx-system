@@ -24,11 +24,12 @@ extern "C" {
 // memory accesses remain reads and writes, ordering barriers become memory
 // fences, and target effects without a generic semantic remain unknown. Unknown
 // effects subsume the generic read/write traits when both kinds are present.
-// When non-NULL, |out_intrinsic_write_spaces| receives the instruction's
-// operand-independent write-space bound from the same descriptor projection.
+// Non-NULL output masks receive the instruction's operand-independent read and
+// write bounds from the same descriptor projection.
 loom_trait_flags_t loom_low_descriptor_effective_traits(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_descriptor_t* descriptor,
+    loom_memory_space_mask_t* out_intrinsic_read_spaces,
     loom_memory_space_mask_t* out_intrinsic_write_spaces);
 
 // Returns true when |descriptor| permits cloning |result_index| near each use

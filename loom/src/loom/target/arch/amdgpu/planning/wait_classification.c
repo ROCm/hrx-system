@@ -13,6 +13,7 @@
 #include "loom/codegen/low/packet.h"
 #include "loom/ops/cache.h"
 #include "loom/ops/low/ops.h"
+#include "loom/target/arch/amdgpu/planning/descriptor_semantics.h"
 #include "loom/target/arch/amdgpu/planning/storage_lease.h"
 #include "loom/target/arch/amdgpu/planning/structural_packet.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
@@ -241,7 +242,9 @@ loom_amdgpu_wait_classification_classify_structural_node(
     const loom_low_allocation_table_t* allocation, uint32_t node_index) {
   const loom_low_schedule_node_t* node = &schedule->nodes[node_index];
   if (node->kind != LOOM_LOW_SCHEDULE_NODE_STRUCTURAL) {
-    return (loom_amdgpu_structural_packet_info_t){.instruction_count = 1};
+    return (loom_amdgpu_structural_packet_info_t){
+        .instruction_count = loom_amdgpu_descriptor_instruction_count(
+            schedule->target.descriptor_set, node->descriptor)};
   }
   return loom_amdgpu_structural_packet_analyze(
       schedule, allocation, node_index,
@@ -739,7 +742,7 @@ static void loom_amdgpu_wait_classification_classify_vmem_suffixes(
 
 // Classification has one hot caller. Preserve its caller specialization while
 // retaining an external definition for ordinary non-LTO builds.
-IREE_ATTRIBUTE_ALWAYS_INLINE extern inline iree_status_t
+extern IREE_ATTRIBUTE_ALWAYS_INLINE iree_status_t
 loom_amdgpu_wait_classification_build(
     const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,

@@ -63,6 +63,10 @@ class BufferIntrinsic {
     AssumeNoalias,
     Cast,
     Root,
+    Null,
+    CompareNull,
+    CompareAddressEqual,
+    CompareAddressUnequal,
   };
 
   BufferIntrinsic(Operation operation,
@@ -111,7 +115,7 @@ class BufferIntrinsic {
   const cxx::Type* element_type_ = nullptr;
   // Source size or native index type accepted by the runtime operand.
   const cxx::Type* element_count_type_ = nullptr;
-  // Source-only element interpretation produced by buffer.cast.
+  // Source-only element interpretation produced by root, cast, or null.
   const BufferPartition* result_buffer_ = nullptr;
   // High storage domain selected for allocation or refinement.
   loom_value_fact_memory_space_t memory_space_ =

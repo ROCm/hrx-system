@@ -42,6 +42,7 @@ from loom.target.arch.amdgpu.contracts.packed_i8 import (
     packed_i8_logical_shift_rules,
     packed_i8_sub_rules,
 )
+from loom.target.arch.amdgpu.contracts.roots import root_rules
 from loom.target.arch.amdgpu.descriptors import (
     AMDGPU_SOURCE_INLINE_F32_VALUES,
     build_amdgpu_contract_descriptor_set,
@@ -57,6 +58,7 @@ from loom.target.contracts import (
     DescriptorRule,
     EmitDescriptorOp,
     EmitRegisterConcat,
+    EmitRegisterCopy,
     EmitRegisterSlice,
     Guard,
     GuardDiagnostic,
@@ -165,6 +167,7 @@ _DESCRIPTOR_KEYS = (
     "amdgpu.v_sqrt_f64",
     "amdgpu.v_rsq_f64",
     *EXPONENT_DESCRIPTOR_KEYS,
+    "amdgpu.v_cmp_class_f32",
     "amdgpu.v_cmp_class_f64",
     "amdgpu.v_cmp_olt_f64",
     "amdgpu.v_cvt_f64_i32",
@@ -242,11 +245,13 @@ _DESCRIPTOR_KEYS = (
     "amdgpu.v_and_b32.src0_inline",
     "amdgpu.v_and_b32.lit",
     "amdgpu.v_or_b32",
+    "amdgpu.v_or_b32.src0_inline",
     "amdgpu.v_or_b32.lit",
     "amdgpu.v_cmp_ogt_f32",
     "amdgpu.v_cmp_olt_f32",
     "amdgpu.v_cmp_uno_f32",
     "amdgpu.v_xor_b32",
+    "amdgpu.v_xor_b32.src0_inline",
     "amdgpu.v_xor_b32.lit",
     "amdgpu.v_lshlrev_b32",
     "amdgpu.v_lshlrev_b32.src0_inline",
@@ -667,7 +672,9 @@ def _constant_vector_shift_rule(
         emit=(
             EmitDescriptorOp(
                 descriptor=descriptor,
-                operands={"value": ValueRef.operand("lhs")},
+                operands={
+                    "value": _materialized_operand("lhs", REGISTERS_VGPR_MATERIALIZER)
+                },
                 results={"dst": ValueRef.result("result")},
                 immediates={"imm32": ValueProject.exact_i64("rhs")},
                 form=_emit_form(type_pattern),
@@ -696,7 +703,7 @@ def _i64_vector_shift_rule(
                     "shift": ValueRef.operand(
                         "rhs", materializer=I64_LOW_WORDS_MATERIALIZER.name
                     ),
-                    "value": ValueRef.operand("lhs"),
+                    "value": _materialized_operand("lhs", REGISTERS_VGPR_MATERIALIZER),
                 },
                 results={"dst": ValueRef.result("result")},
                 form=DescriptorEmitForm.PER_LANE,
@@ -884,16 +891,6 @@ def _f32_copysign_rules(
     register_insert = _descriptor("amdgpu.v_bfi_b32")
     typed_guards = _typed_guards(("lhs", "rhs", "result"), type_pattern)
     emit_form = _emit_form(type_pattern)
-    register_insert_operand = (
-        ValueRef.operand("lhs")
-        if type_pattern.kind == "vector"
-        else _f32_vgpr_operand("lhs")
-    )
-    register_base_operand = (
-        ValueRef.operand("rhs")
-        if type_pattern.kind == "vector"
-        else _f32_vgpr_operand("rhs")
-    )
     return (
         DescriptorRule(
             source_op=source_op,
@@ -931,8 +928,8 @@ def _f32_copysign_rules(
                     descriptor=register_insert,
                     operands={
                         "mask": ValueRef.temporary("magnitude_mask"),
-                        "insert": register_insert_operand,
-                        "base": register_base_operand,
+                        "insert": _f32_vgpr_operand("lhs"),
+                        "base": _f32_vgpr_operand("rhs"),
                     },
                     results={"dst": ValueRef.result("result")},
                     form=emit_form,
@@ -1281,6 +1278,103 @@ def _vector_iota_recipe_rules() -> tuple[RecipeRule, ...]:
     )
 
 
+def _vector_bitcast_recipe_rules() -> tuple[RecipeRule, ...]:
+    # Verification establishes equal logical payloads. Ordinary data uses a
+    # packed 32-bit register tuple; predicate lanes instead occupy two SGPRs.
+    # Only predicate-to-predicate casts preserve that separate physical layout.
+    data_types = (
+        Vector(
+            ("i8", "i16", "i32", "f8E4M3", "f8E5M2", "f16", "bf16", "f32"),
+            minimum_static_elements=1,
+            maximum_static_elements="UINT32_MAX",
+        ),
+        Vector(
+            ("i64", "f64"),
+            minimum_static_elements=1,
+            maximum_static_elements="(UINT32_MAX / 2u)",
+        ),
+    )
+    predicate_type = Vector(
+        "i1", minimum_static_elements=1, maximum_static_elements="(UINT32_MAX / 2u)"
+    )
+    return tuple(
+        RecipeRule(
+            source_op=vector.vector_bitcast,
+            guards=(
+                _value_type("input", source_type),
+                _value_type("result", result_type),
+            ),
+        )
+        for source_type, result_type in (
+            *((source, result) for source in data_types for result in data_types),
+            (predicate_type, predicate_type),
+        )
+    )
+
+
+def _vector_permutation_recipe_rules() -> tuple[RecipeRule, ...]:
+    # Verification owns the lane map and interleaved shapes. Shared routes use
+    # 16-bit byte extents; shuffle maps instead use 16-bit element counts.
+    rules = []
+    for elements, physical_bytes in (
+        (("i8", "f8E4M3", "f8E5M2"), 1),
+        (("i16", "f16", "bf16"), 2),
+        (("i32", "f32"), 4),
+        (("i1", "i64", "f64"), 8),
+    ):
+        descriptor_guards = (
+            (Guard.descriptor_available(_descriptor("amdgpu.v_perm_b32")),)
+            if physical_bytes < 4
+            else ()
+        )
+        combined_type = Vector(
+            elements,
+            minimum_static_elements=1,
+            maximum_static_elements=f"(UINT16_MAX / {physical_bytes}u)",
+        )
+        for source_op, field in (
+            (vector.vector_interleave, "result"),
+            (vector.vector_deinterleave, "source"),
+        ):
+            rules.append(
+                RecipeRule(
+                    source_op=source_op,
+                    guards=(_value_type(field, combined_type), *descriptor_guards),
+                )
+            )
+        rules.append(
+            RecipeRule(
+                source_op=vector.vector_shuffle,
+                guards=(
+                    _value_type(
+                        "source",
+                        Vector(elements, minimum_lanes=1, maximum_lanes="UINT16_MAX"),
+                    ),
+                    *descriptor_guards,
+                ),
+            )
+        )
+    return tuple(rules)
+
+
+def _vector_select_recipe_rules() -> tuple[RecipeRule, ...]:
+    # The native data selector consumes one wave mask per logical element.
+    # Publishing its complete storage family lets the shared component planner
+    # choose a legal packet for wider and multidimensional selects.
+    return tuple(
+        RecipeRule(
+            source_op=vector.vector_select,
+            guards=(
+                _value_type("condition", _VEC_I1_STATIC),
+                _value_type("result", result_type),
+                Guard.descriptor_available(_descriptor("amdgpu.v_cndmask_b32")),
+            ),
+        )
+        for result_type in _vector_storage_construct_recipe_types()
+        if result_type != _VEC_I1_STATIC
+    )
+
+
 def _vector_insert_recipe_rules() -> tuple[RecipeRule, ...]:
     return tuple(
         RecipeRule(
@@ -1462,6 +1556,17 @@ def _vector_16bit_float_conversion_recipe_rules() -> tuple[RecipeRule, ...]:
     )
 
 
+def _vector_bitfield_register_input(field: str) -> EmitRegisterCopy:
+    # Bitfield sources and results have equal payload widths. Prepare vector
+    # operands once before the per-lane sequence, preserving scalar inputs at
+    # descriptor slots that accept them directly.
+    return EmitRegisterCopy(
+        source=ValueRef.operand(field),
+        result=ValueRef.temporary(f"{field}_registers"),
+        result_type=ValueRef.result("result"),
+    )
+
+
 def _vector_bitfield_extract_alias_rule(source_op: Op) -> ValueAliasRule:
     return ValueAliasRule(
         source_op=source_op,
@@ -1530,7 +1635,9 @@ def _vector_bitfield_extractu_offset0_inline_rule(width: int) -> DescriptorRule:
         emit=(
             EmitDescriptorOp(
                 descriptor=descriptor,
-                operands={"rhs": ValueRef.operand("source")},
+                operands={
+                    "rhs": _materialized_operand("source", REGISTERS_VGPR_MATERIALIZER)
+                },
                 results={"dst": ValueRef.result("result")},
                 immediates={"imm32": _bitfield_low_mask(width)},
                 form=DescriptorEmitForm.PER_LANE,
@@ -1557,7 +1664,9 @@ def _vector_bitfield_extractu_offset0_literal_rule() -> DescriptorRule:
         emit=(
             EmitDescriptorOp(
                 descriptor=descriptor,
-                operands={"rhs": ValueRef.operand("source")},
+                operands={
+                    "rhs": _materialized_operand("source", REGISTERS_VGPR_MATERIALIZER)
+                },
                 results={"dst": ValueRef.result("result")},
                 immediates={"imm32": AttrProject.i64_low_bit_mask("width")},
                 form=DescriptorEmitForm.PER_LANE,
@@ -1584,9 +1693,10 @@ def _vector_bitfield_extractu_shift_inline_mask_rule(width: int) -> DescriptorRu
             Guard.descriptor_available(mask),
         ),
         emit=(
+            _vector_bitfield_register_input("source"),
             EmitDescriptorOp(
                 descriptor=shift,
-                operands={"value": ValueRef.operand("source")},
+                operands={"value": ValueRef.temporary("source_registers")},
                 results={"dst": ValueRef.temporary("shifted")},
                 result_types={"dst": ValueRef.result("result")},
                 immediates={"imm32": AttrProject.direct("offset")},
@@ -1621,9 +1731,10 @@ def _vector_bitfield_extractu_shift_literal_mask_rule() -> DescriptorRule:
             Guard.descriptor_available(mask),
         ),
         emit=(
+            _vector_bitfield_register_input("source"),
             EmitDescriptorOp(
                 descriptor=shift,
-                operands={"value": ValueRef.operand("source")},
+                operands={"value": ValueRef.temporary("source_registers")},
                 results={"dst": ValueRef.temporary("shifted")},
                 result_types={"dst": ValueRef.result("result")},
                 immediates={"imm32": AttrProject.direct("offset")},
@@ -1657,7 +1768,11 @@ def _vector_bitfield_extract_top_aligned_rule(
         emit=(
             EmitDescriptorOp(
                 descriptor=descriptor,
-                operands={"value": ValueRef.operand("source")},
+                operands={
+                    "value": _materialized_operand(
+                        "source", REGISTERS_VGPR_MATERIALIZER
+                    )
+                },
                 results={"dst": ValueRef.result("result")},
                 immediates={"imm32": AttrProject.direct("offset")},
                 form=DescriptorEmitForm.PER_LANE,
@@ -1684,9 +1799,10 @@ def _vector_bitfield_extracts_shift_rule() -> DescriptorRule:
             Guard.descriptor_available(shift_right),
         ),
         emit=(
+            _vector_bitfield_register_input("source"),
             EmitDescriptorOp(
                 descriptor=shift_left,
-                operands={"value": ValueRef.operand("source")},
+                operands={"value": ValueRef.temporary("source_registers")},
                 results={"dst": ValueRef.temporary("shifted_left")},
                 result_types={"dst": ValueRef.result("result")},
                 immediates={
@@ -1756,6 +1872,7 @@ def _vector_bitfield_insert_bfi_offset0_rule() -> DescriptorRule:
                 results={"dst": ValueRef.result("result")},
                 immediates={"imm32": AttrProject.i64_low_bit_mask("width")},
                 form=DescriptorEmitForm.PER_LANE,
+                operand_materialization=DescriptorOperandMaterialization.TARGET,
             ),
         ),
     )
@@ -1779,9 +1896,10 @@ def _vector_bitfield_insert_bfi_shift_rule() -> DescriptorRule:
             Guard.descriptor_available(insert),
         ),
         emit=(
+            _vector_bitfield_register_input("field"),
             EmitDescriptorOp(
                 descriptor=shift,
-                operands={"value": ValueRef.operand("field")},
+                operands={"value": ValueRef.temporary("field_registers")},
                 results={"dst": ValueRef.temporary("shifted_field")},
                 result_types={"dst": ValueRef.result("result")},
                 immediates={"imm32": AttrProject.direct("offset")},
@@ -1801,6 +1919,7 @@ def _vector_bitfield_insert_bfi_shift_rule() -> DescriptorRule:
                     )
                 },
                 form=DescriptorEmitForm.PER_LANE_SEQUENCE,
+                operand_materialization=DescriptorOperandMaterialization.TARGET,
             ),
         ),
     )
@@ -1859,9 +1978,11 @@ def _vector_bitfield_insert_fallback_rule(
             Guard.descriptor_available(merge),
         ),
         emit=(
+            _vector_bitfield_register_input("field"),
+            _vector_bitfield_register_input("base"),
             EmitDescriptorOp(
                 descriptor=field_mask,
-                operands={"rhs": ValueRef.operand("field")},
+                operands={"rhs": ValueRef.temporary("field_registers")},
                 results={"dst": ValueRef.temporary("field_low_bits")},
                 result_types={"dst": ValueRef.result("result")},
                 immediates={
@@ -1874,7 +1995,7 @@ def _vector_bitfield_insert_fallback_rule(
             *shift_emit,
             EmitDescriptorOp(
                 descriptor=clear_base,
-                operands={"rhs": ValueRef.operand("base")},
+                operands={"rhs": ValueRef.temporary("base_registers")},
                 results={"dst": ValueRef.temporary("cleared_base")},
                 result_types={"dst": ValueRef.result("result")},
                 immediates={
@@ -2404,137 +2525,6 @@ def _divf_exact_rule(source_op: Op, type_pattern: TypePattern) -> DescriptorRule
                 form=_emit_form(type_pattern),
             ),
         ),
-    )
-
-
-def _sqrtf_exact_f64_rule() -> DescriptorRule:
-    # OCML's MATH_SQRT uses the compiler builtin. Match LLVM AMDGPU's
-    # lowerFSQRTF64 in llvm/lib/Target/AMDGPU/SIISelLowering.cpp: Goldschmidt
-    # refinement, including its final rounding step.
-    # V_SQRT_F64 alone has only approximate precision, even without fastmath.
-    # Scaling below 2^-767 keeps the fused residuals out of the subnormal range.
-    descriptors = {
-        name: _descriptor(f"amdgpu.{name}")
-        for name in (
-            "s_mov_b32",
-            "v_mov_b32",
-            "v_cmp_olt_f64",
-            "v_cndmask_b32",
-            "v_ldexp_f64",
-            "v_rsq_f64",
-            "v_mul_f64",
-            "v_fma_f64",
-            "v_fma_f64.neg_a",
-            "v_cmp_class_f64",
-        )
-    }
-    source = ValueRef.operand("input", materializer=REGISTERS_VGPR_MATERIALIZER.name)
-    temp = ValueRef.temporary
-    emit: list[ContractEmit] = []
-
-    def instruction(
-        name: str, result: str, *, role: str = "dst", **operands: ValueRef
-    ) -> ValueRef:
-        value = temp(result)
-        emit.append(
-            EmitDescriptorOp(
-                descriptor=descriptors[name],
-                operands=operands,
-                results={role: value},
-                result_types={role: DescriptorResultType()},
-            )
-        )
-        return value
-
-    def constant(name: str, bits: int, *, move: str = "v_mov_b32") -> ValueRef:
-        value = temp(name)
-        emit.append(
-            EmitDescriptorOp(
-                descriptor=descriptors[move],
-                immediates={"imm32": bits},
-                results={"dst": value},
-                result_types={"dst": DescriptorResultType()},
-            )
-        )
-        return value
-
-    zero = constant("zero", 0)
-    threshold_high = constant("threshold_high", 0x10000000)
-    half_high = constant("half_high", 0x3FE00000)
-    for name, high in (("threshold", threshold_high), ("half", half_high)):
-        emit.append(
-            EmitRegisterConcat(
-                sources=(zero, high),
-                result=temp(name),
-                result_type=ValueRef.result("result"),
-            )
-        )
-    scaling = instruction(
-        "v_cmp_olt_f64", "scaling", role="mask", lhs=source, rhs=temp("threshold")
-    )
-    up = constant("up", 256)
-    up_exponent = instruction(
-        "v_cndmask_b32", "up_exponent", false_value=zero, true_value=up, mask=scaling
-    )
-    x = instruction("v_ldexp_f64", "scaled_input", input=source, exponent=up_exponent)
-    y = instruction("v_rsq_f64", "reciprocal_root", input=x)
-    s0 = instruction("v_mul_f64", "s0", lhs=x, rhs=y)
-    h0 = instruction("v_mul_f64", "h0", lhs=y, rhs=temp("half"))
-    r0 = instruction("v_fma_f64.neg_a", "r0", a=h0, b=s0, c=temp("half"))
-    h1 = instruction("v_fma_f64", "h1", a=h0, b=r0, c=h0)
-    s1 = instruction("v_fma_f64", "s1", a=s0, b=r0, c=s0)
-    d0 = instruction("v_fma_f64.neg_a", "d0", a=s1, b=s1, c=x)
-    s2 = instruction("v_fma_f64", "s2", a=d0, b=h1, c=s1)
-    d1 = instruction("v_fma_f64.neg_a", "d1", a=s2, b=s2, c=x)
-    rounded = instruction("v_fma_f64", "rounded", a=d1, b=h1, c=s2)
-    down = constant("down", 0xFFFFFF80)  # signed exponent -128
-    down_exponent = instruction(
-        "v_cndmask_b32",
-        "down_exponent",
-        false_value=zero,
-        true_value=down,
-        mask=scaling,
-    )
-    root = instruction("v_ldexp_f64", "root", input=rounded, exponent=down_exponent)
-    classes = constant("classes", 0x260, move="s_mov_b32")  # -0, +0, +infinity
-    special = instruction(
-        "v_cmp_class_f64", "special", role="mask", input=x, classes=classes
-    )
-    selected = []
-    for unit in range(2):
-        for name, value in (("root", root), ("input", x)):
-            emit.append(
-                EmitRegisterSlice(
-                    source=value,
-                    result=temp(f"{name}_{unit}"),
-                    unit_offset=unit,
-                    unit_count=1,
-                )
-            )
-        selected.append(
-            instruction(
-                "v_cndmask_b32",
-                f"selected_{unit}",
-                false_value=temp(f"root_{unit}"),
-                true_value=temp(f"input_{unit}"),
-                mask=special,
-            )
-        )
-    emit.append(EmitRegisterConcat(sources=selected, result=ValueRef.result("result")))
-    return DescriptorRule(
-        source_op=scalar_math.scalar_sqrtf,
-        descriptor=descriptors["v_rsq_f64"],
-        report_key=_report_key(scalar_math.scalar_sqrtf, "exact_f64"),
-        guards=(
-            *_typed_guards(("input", "result"), _F64),
-            Guard.instance_flags_has_none("fastmath", "afn"),
-            Guard.value_materializable("input", REGISTERS_VGPR_MATERIALIZER.name),
-            *(
-                Guard.descriptor_available(descriptor)
-                for descriptor in descriptors.values()
-            ),
-        ),
-        emit=tuple(emit),
     )
 
 
@@ -3119,6 +3109,24 @@ def _constant_binary_rule(
                 form=DescriptorEmitForm.PER_LANE,
             ),
         ),
+    )
+
+
+def _commutative_constant_binary_rules(
+    source_op: Op, descriptor_key: str
+) -> tuple[DescriptorRule, ...]:
+    return tuple(
+        _constant_binary_rule(
+            source_op,
+            f"{descriptor_key}.{suffix}",
+            literal_source=literal_source,
+            nonliteral_source=nonliteral_source,
+            extra_guards=(Guard.value_i64_range(literal_source, 0, 64),)
+            if suffix == "src0_inline"
+            else (),
+        )
+        for suffix in ("src0_inline", "lit")
+        for literal_source, nonliteral_source in (("lhs", "rhs"), ("rhs", "lhs"))
     )
 
 
@@ -4791,14 +4799,6 @@ def _rules() -> tuple[ContractCase, ...]:
                 report_key=_report_key(vector.vector_roundevenf, "rndne"),
             ),
             _unary_rule(vector.vector_truncf, _VEC_F32_STATIC, "amdgpu.v_trunc_f32"),
-            _unary_rule(vector.vector_sqrtf, _VEC_F32_STATIC, "amdgpu.v_sqrt_f32"),
-            _unary_rule(
-                vector.vector_rsqrtf,
-                _VEC_F32_STATIC,
-                "amdgpu.v_rsq_f32",
-                extra_guards=(Guard.instance_flags_has_all("fastmath", "afn"),),
-                report_key=_report_key(vector.vector_rsqrtf, "afn_f32"),
-            ),
         )
     )
     for source_op, descriptor_key in (
@@ -4819,18 +4819,7 @@ def _rules() -> tuple[ContractCase, ...]:
     rules.extend(
         (
             *packed_i8_add_rules(_DESCRIPTOR_SET),
-            _constant_binary_rule(
-                vector.vector_addi,
-                "amdgpu.v_add_u32.lit",
-                literal_source="lhs",
-                nonliteral_source="rhs",
-            ),
-            _constant_binary_rule(
-                vector.vector_addi,
-                "amdgpu.v_add_u32.lit",
-                literal_source="rhs",
-                nonliteral_source="lhs",
-            ),
+            *_commutative_constant_binary_rules(vector.vector_addi, "amdgpu.v_add_u32"),
             _binary_rule(
                 vector.vector_addi,
                 _VEC_I32_STATIC,
@@ -4903,18 +4892,7 @@ def _rules() -> tuple[ContractCase, ...]:
         )
         rules.extend(
             (
-                _constant_binary_rule(
-                    source_op,
-                    f"{descriptor_key}.lit",
-                    literal_source="lhs",
-                    nonliteral_source="rhs",
-                ),
-                _constant_binary_rule(
-                    source_op,
-                    f"{descriptor_key}.lit",
-                    literal_source="rhs",
-                    nonliteral_source="lhs",
-                ),
+                *_commutative_constant_binary_rules(source_op, descriptor_key),
                 _binary_rule(
                     source_op,
                     _VEC_I32_STATIC,
@@ -5147,29 +5125,7 @@ def _rules() -> tuple[ContractCase, ...]:
             ),
             _unary_rule(scalar_math.scalar_truncf, _F32, "amdgpu.v_trunc_f32"),
             _unary_rule(scalar_math.scalar_truncf, _F64, "amdgpu.v_trunc_f64"),
-            _unary_rule(scalar_math.scalar_sqrtf, _F32, "amdgpu.v_sqrt_f32"),
-            _unary_rule(
-                scalar_math.scalar_rsqrtf,
-                _F32,
-                "amdgpu.v_rsq_f32",
-                extra_guards=(Guard.instance_flags_has_all("fastmath", "afn"),),
-                report_key=_report_key(scalar_math.scalar_rsqrtf, "afn_f32"),
-            ),
-            _unary_rule(
-                scalar_math.scalar_sqrtf,
-                _F64,
-                "amdgpu.v_sqrt_f64",
-                extra_guards=(Guard.instance_flags_has_all("fastmath", "afn"),),
-                report_key=_report_key(scalar_math.scalar_sqrtf, "afn_f64"),
-            ),
-            _unary_rule(
-                scalar_math.scalar_rsqrtf,
-                _F64,
-                "amdgpu.v_rsq_f64",
-                extra_guards=(Guard.instance_flags_has_all("fastmath", "afn"),),
-                report_key=_report_key(scalar_math.scalar_rsqrtf, "afn_f64"),
-            ),
-            _sqrtf_exact_f64_rule(),
+            *root_rules(_DESCRIPTOR_SET),
             _cast_rule(
                 scalar_conversion.scalar_extf,
                 _F16,
@@ -5374,6 +5330,9 @@ def _rules() -> tuple[ContractCase, ...]:
                 ),
             ),
             *_vector_iota_recipe_rules(),
+            *_vector_bitcast_recipe_rules(),
+            *_vector_permutation_recipe_rules(),
+            *_vector_select_recipe_rules(),
             *_vector_insert_recipe_rules(),
             *_vector_uniform_construct_recipe_rules(
                 vector.vector_splat,

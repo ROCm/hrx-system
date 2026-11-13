@@ -1,0 +1,159 @@
+// RUN: emit source-low output=low
+
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @literal_logical_right_shifts(%values: vector<2xi64>) -> (i64, i64, i64, i64, i64, i64) {
+  %value = vector.extract %values[0] : vector<2xi64> -> i64
+  %c0 = scalar.constant 0 : i64
+  %c8 = scalar.constant 8 : i64
+  %c31 = scalar.constant 31 : i64
+  %c32 = scalar.constant 32 : i64
+  %c33 = scalar.constant 33 : i64
+  %c63 = scalar.constant 63 : i64
+  %s0 = scalar.shrui %value, %c0 : i64
+  %s8 = scalar.shrui %value, %c8 : i64
+  %s31 = scalar.shrui %value, %c31 : i64
+  %s32 = scalar.shrui %value, %c32 : i64
+  %s33 = scalar.shrui %value, %c33 : i64
+  %s63 = scalar.shrui %value, %c63 : i64
+  func.return %s0, %s8, %s31, %s32, %s33, %s63 : i64, i64, i64, i64, i64, i64
+}
+
+// ----
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @literal_logical_right_shifts(%values: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
+  %value = slice %values[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
+  %28 = s_mov_b32 8
+  %31 = s_mov_b32 31
+  %s8 = v_lshrrev_b64 %28, %value
+  %s31 = v_lshrrev_b64 %31, %value
+  %51 = slice %values[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %39 = v_mov_b32 0
+  %s32 = concat(%51, %39) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %43 = v_lshrrev_b32_src0_inline %51, 33
+  %s33 = concat(%43, %39) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %47 = v_lshrrev_b32_src0_inline %51, 63
+  %s63 = concat(%47, %39) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  return %value, %s8, %s31, %s32, %s33, %s63
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+// Bounded inputs omit only their zero upper-word products, not the upper word
+// of the result. The full-width control retains both cross products.
+kernel.def target(@target) @uniform_product_widths() {
+  %launch_unit = index.constant 1 : index
+  %launch_width = index.constant 64 : index
+  kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
+} launch(%lhs_input: i64, %rhs_input: i64, %wide_lhs: i64, %wide_rhs: i64, %result_buffer_0: buffer) {
+  %fixture_base = index.constant 0 : offset
+  %fixture_lane = kernel.workitem.id<x> : index
+  %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<4x64xi64>
+  %lhs = scalar.assume %lhs_input [range(%lhs_input, 0, 4294967295)] : i64
+  %rhs = scalar.assume %rhs_input [range(%rhs_input, 0, 4294967295)] : i64
+  %narrow = scalar.muli %lhs, %rhs : i64
+  %left_narrow = scalar.muli %lhs, %wide_rhs : i64
+  %right_narrow = scalar.muli %wide_lhs, %rhs : i64
+  %wide = scalar.muli %wide_lhs, %wide_rhs : i64
+  view.store %narrow, %result_view_0[0, %fixture_lane] : i64, view<4x64xi64>
+  view.store %left_narrow, %result_view_0[1, %fixture_lane] : i64, view<4x64xi64>
+  view.store %right_narrow, %result_view_0[2, %fixture_lane] : i64, view<4x64xi64>
+  view.store %wide, %result_view_0[3, %fixture_lane] : i64, view<4x64xi64>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_count = 8, direct_arg_count = 4, direct_arg_names = {arg0 = "lhs_input", arg1 = "rhs_input", arg2 = "wide_lhs", arg3 = "wide_rhs"}, direct_arg_offsets = [0, 8, 16, 24], direct_arg_parameter_indices = [0, 1, 2, 3], direct_arg_sizes = [8, 8, 8, 8], parameter_count = 5, resource_count = 1, resource_offsets = [32], resource_parameter_indices = [4], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @uniform_product_widths(%lhs: reg<amdgpu.sgpr x2>, %rhs: reg<amdgpu.sgpr x2>, %wide_lhs: reg<amdgpu.sgpr x2>, %wide_rhs: reg<amdgpu.sgpr x2>) asm {
+  %fixture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %result_view_0 = resource<hal_binding> {extent = 2048, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %29 = slice %lhs[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %30 = slice %rhs[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %31 = s_mul_i32 %29, %30
+  %32 = s_mul_hi_u32 %29, %30
+  %35 = slice %wide_rhs[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %36 = slice %wide_rhs[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %37 = s_mul_i32 %29, %35
+  %38 = s_mul_hi_u32 %29, %35
+  %39 = s_mul_i32 %29, %36
+  %40 = s_add_u32 %38, %39
+  %43 = slice %wide_lhs[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %44 = slice %wide_lhs[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %45 = s_mul_i32 %43, %30
+  %46 = s_mul_hi_u32 %43, %30
+  %47 = s_mul_i32 %44, %30
+  %48 = s_add_u32 %46, %47
+  %54 = s_mul_i32 %43, %35
+  %55 = s_mul_hi_u32 %43, %35
+  %56 = s_mul_i32 %43, %36
+  %57 = s_mul_i32 %44, %35
+  %58 = s_add_u32 %55, %56
+  %59 = s_add_u32 %58, %57
+  %62 = v_mov_b32_copy %31
+  %64 = v_mov_b32_copy %32
+  %65 = concat(%62, %64) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %66 = v_lshlrev_b32_src0_inline %fixture_lane, 3
+  global_store_b64_saddr %66, %65, %result_view_0
+  %68 = v_mov_b32_copy %37
+  %70 = v_mov_b32_copy %40
+  %71 = concat(%68, %70) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_store_b64_saddr %66, %71, %result_view_0 {offset = 512}
+  %74 = v_mov_b32_copy %45
+  %76 = v_mov_b32_copy %48
+  %77 = concat(%74, %76) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_store_b64_saddr %66, %77, %result_view_0 {offset = 1024}
+  %80 = v_mov_b32_copy %54
+  %82 = v_mov_b32_copy %59
+  %83 = concat(%80, %82) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_store_b64_saddr %66, %83, %result_view_0 {offset = 1536}
+  return
+}
+
+// ====
+
+amdgpu.target<gfx942> @target
+
+func.def target(@target) @varying_product_widths(%values: vector<4xi64>) -> (i64, i64, i64, i64) {
+  %lhs_input = vector.extract %values[0] : vector<4xi64> -> i64
+  %rhs_input = vector.extract %values[1] : vector<4xi64> -> i64
+  %wide_lhs = vector.extract %values[2] : vector<4xi64> -> i64
+  %wide_rhs = vector.extract %values[3] : vector<4xi64> -> i64
+  %lhs = scalar.assume %lhs_input [range(%lhs_input, 0, 4294967295)] : i64
+  %rhs = scalar.assume %rhs_input [range(%rhs_input, 0, 4294967295)] : i64
+  %narrow = scalar.muli %lhs, %rhs : i64
+  %left_narrow = scalar.muli %lhs, %wide_rhs : i64
+  %right_narrow = scalar.muli %wide_lhs, %rhs : i64
+  %wide = scalar.muli %wide_lhs, %wide_rhs : i64
+  func.return %narrow, %left_narrow, %right_narrow, %wide : i64, i64, i64, i64
+}
+
+// ----
+low.func.def target<amdgpu.cdna3.core>(@target) abi(hal_kernel) @varying_product_widths(%values: reg<amdgpu.vgpr x8>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
+  %67 = slice %values[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %66 = slice %values[2] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %26 = v_mul_lo_u32 %67, %66
+  %27 = v_mul_hi_u32 %67, %66
+  %narrow = concat(%26, %27) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %64 = slice %values[6] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %63 = slice %values[7] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %32 = v_mul_lo_u32 %67, %64
+  %33 = v_mul_hi_u32 %67, %64
+  %34 = v_mul_lo_u32 %67, %63
+  %35 = v_add_u32 %33, %34
+  %left_narrow = concat(%32, %35) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %61 = slice %values[4] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %60 = slice %values[5] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %40 = v_mul_lo_u32 %61, %66
+  %41 = v_mul_hi_u32 %61, %66
+  %42 = v_mul_lo_u32 %60, %66
+  %43 = v_add_u32 %41, %42
+  %right_narrow = concat(%40, %43) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %49 = v_mul_lo_u32 %61, %64
+  %50 = v_mul_hi_u32 %61, %64
+  %51 = v_mul_lo_u32 %61, %63
+  %52 = v_mul_lo_u32 %60, %64
+  %53 = v_add_u32 %50, %51
+  %54 = v_add_u32 %53, %52
+  %wide = concat(%49, %54) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  return %narrow, %left_narrow, %right_narrow, %wide
+}

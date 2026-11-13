@@ -1,0 +1,136 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+#ifndef LOOM_SERVICE_FINITE_RESULT_H_
+#define LOOM_SERVICE_FINITE_RESULT_H_
+
+#include "iree/vm/buffer.h"
+#include "loom/runtime/execution/execution.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+// Immutable cohort metadata and independently retained device output. The
+// result owns its logical output storage, not the source model, commands, or
+// parameters.
+// Device consumers import ready before reading and retain their buffer views
+// through actual queue retirement. The application device group outlives all
+// results and their consumers; a shared group alone grants no device access.
+typedef struct loom_service_finite_result_t loom_service_finite_result_t;
+
+// Checks an external source plan once and copies its row metadata. The LE i64
+// header is [physical output bytes, result bytes, request count, row count],
+// followed by [first row, row count, input tokens] per request, then
+// [byte offset, F32 count] per row. Rows lie within the result prefix of
+// output. Each request publishes an ordered prefix of its remaining protocol
+// rows, given by expected_rows. Zero rows permit nonterminal progress. The
+// checked result retains whether each prefix exhausts those remaining rows;
+// source collection must agree with that completion fact. A newly
+// created result has no device storage until the producer calls bind.
+// Copying separates retained rows from source buffers reused by a later
+// invocation.
+iree_status_t loom_service_finite_result_create(
+    iree_vm_buffer_t* plan, iree_host_size_t output_capacity,
+    iree_host_size_t result_capacity, iree_host_size_t request_count,
+    const iree_host_size_t* expected_rows, iree_allocator_t host_allocator,
+    loom_service_finite_result_t** out_result);
+
+// Creates one logical request's immutable result from independently owned rows.
+// The caller establishes that frontier covers every row: they come from earlier
+// epochs on its execution timeline. Retains the row buffers and execution;
+// neither the model nor any intermediate result remains borrowed. This copies
+// metadata only. Device consumers use the original buffers, while an explicit
+// host snapshot gathers their bytes directly into the final host allocation.
+iree_status_t loom_service_finite_result_create_rows(
+    const loom_service_finite_result_t* frontier, iree_host_size_t row_count,
+    const iree_hal_buffer_ref_t* rows, uint64_t input_tokens,
+    iree_allocator_t host_allocator, loom_service_finite_result_t** out_result);
+
+// Captures the accepted producer frontier and retains the exact output view,
+// including its offset and storage-release obligations. The caller supplies
+// storage independent of the producer's retirement-tracked views: a queue
+// allocation root or an owning logical suballocation, never a view whose
+// release keeps the producer model alive. Called once after successful
+// submission; output has the checked physical extent. Its source pool outlives
+// the result and every later buffer consumer. The producer separately retains
+// its tracked view through completion or terminal retirement.
+void loom_service_finite_result_bind(loom_service_finite_result_t* result,
+                                     loom_runtime_execution_t* execution,
+                                     iree_hal_buffer_t* output);
+
+void loom_service_finite_result_retain(loom_service_finite_result_t* result);
+
+// Releases caller ownership without waiting. Queue-captured views preserve
+// the exact logical storage. The storage owner keeps its source pool alive
+// until the final capture retires. NULL is accepted. There is no result cache
+// in this layer.
+void loom_service_finite_result_release(loom_service_finite_result_t* result);
+
+// Source output extent including padding, or compact bytes for gathered rows.
+// Allocator overhead is excluded.
+iree_host_size_t loom_service_finite_result_output_length(
+    const loom_service_finite_result_t* result);
+
+// Live result prefix; also the exact size of an explicit host snapshot.
+iree_host_size_t loom_service_finite_result_length(
+    const loom_service_finite_result_t* result);
+
+// Borrowed producer readiness, stable through result release. Import this
+// frontier before using device rows; no host wait is required for composition.
+loom_runtime_execution_frontier_t loom_service_finite_result_ready(
+    const loom_service_finite_result_t* result);
+
+// Trusted queries into the checked plan. Request and row ordinals retain the
+// original cohort associations even when other requests have been cancelled.
+// Number of published rows; zero is an unpublished result, not completion.
+iree_host_size_t loom_service_finite_result_row_count(
+    const loom_service_finite_result_t* result, iree_host_size_t request);
+// Source-boundary fact: this epoch exhausts the supplied remaining row count.
+bool loom_service_finite_result_completes_request(
+    const loom_service_finite_result_t* result, iree_host_size_t request);
+uint64_t loom_service_finite_result_input_tokens(
+    const loom_service_finite_result_t* result, iree_host_size_t request);
+iree_hal_buffer_ref_t loom_service_finite_result_row(
+    const loom_service_finite_result_t* result, iree_host_size_t request,
+    iree_host_size_t row);
+
+// Explicit host materialization for consumers such as HTTP vector encoders.
+// Device-to-device composition uses the result directly and never creates one.
+typedef struct loom_service_finite_snapshot_t loom_service_finite_snapshot_t;
+
+// Copies checked row metadata, allocates exact host result storage, and submits
+// a download batch on the producer's feedback branch. Called by the serialized
+// owner immediately after submission when host output is required. Queue
+// capture protects the destination even after failed readiness or early caller
+// release. On success the caller owns the snapshot; its rows become readable
+// after successful returned readiness. Snapshot readers retain no device output
+// after the download capture retires.
+iree_status_t loom_service_finite_result_download(
+    const loom_service_finite_result_t* result,
+    loom_service_finite_snapshot_t** out_snapshot,
+    loom_runtime_execution_frontier_t* out_frontier);
+
+// Retains immutable metadata and its independent host row storage.
+void loom_service_finite_snapshot_retain(
+    loom_service_finite_snapshot_t* snapshot);
+// Releases caller ownership, independently of any accepted download capture.
+// NULL is accepted. Row borrowers must have retired first.
+void loom_service_finite_snapshot_release(
+    loom_service_finite_snapshot_t* snapshot);
+
+// Queries the snapshot's copied metadata without retaining device storage.
+uint64_t loom_service_finite_snapshot_input_tokens(
+    const loom_service_finite_snapshot_t* snapshot, iree_host_size_t request);
+iree_const_byte_span_t loom_service_finite_snapshot_row(
+    const loom_service_finite_snapshot_t* snapshot, iree_host_size_t request,
+    iree_host_size_t row);
+
+#ifdef __cplusplus
+}  // extern "C"
+#endif
+
+#endif  // LOOM_SERVICE_FINITE_RESULT_H_

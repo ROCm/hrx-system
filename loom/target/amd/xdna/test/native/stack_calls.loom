@@ -1,0 +1,408 @@
+// Each helper must retain more scalar values than fit in the 32-word bank.
+// Stores alias the loaded buffer, so every input snapshot precedes mutation.
+// Repeated peer calls also overwrite the caller's scalar register bank; the
+// caller retains its own input snapshots until both helper frames have retired.
+
+aie2p.target<array> @array_target
+
+low.func.def noinline target<amd.xdna.aie2p.core> @xor_words(%buffer: reg<aie2p.ep>, %operand: reg<aie2p.er>) asm {
+  %address0 = padda %buffer, 0
+  %word0 = lda %address0, 0
+  %word1 = lda %address0, 4
+  %word2 = lda %address0, 8
+  %word3 = lda %address0, 12
+  %word4 = lda %address0, 16
+  %word5 = lda %address0, 20
+  %word6 = lda %address0, 24
+  %word7 = lda %address0, 28
+  %base1 = copy %address0 : reg<aie2p.ep> -> reg<aie2p.ep>
+  %address1 = padda %base1, 64
+  %word8 = lda %address1, -32
+  %word9 = lda %address1, -28
+  %word10 = lda %address1, -24
+  %word11 = lda %address1, -20
+  %word12 = lda %address1, -16
+  %word13 = lda %address1, -12
+  %word14 = lda %address1, -8
+  %word15 = lda %address1, -4
+  %word16 = lda %address1, 0
+  %word17 = lda %address1, 4
+  %word18 = lda %address1, 8
+  %word19 = lda %address1, 12
+  %word20 = lda %address1, 16
+  %word21 = lda %address1, 20
+  %word22 = lda %address1, 24
+  %word23 = lda %address1, 28
+  %base2 = copy %address1 : reg<aie2p.ep> -> reg<aie2p.ep>
+  %address2 = padda %base2, 64
+  %word24 = lda %address2, -32
+  %word25 = lda %address2, -28
+  %word26 = lda %address2, -24
+  %word27 = lda %address2, -20
+  %word28 = lda %address2, -16
+  %word29 = lda %address2, -12
+  %word30 = lda %address2, -8
+  %word31 = lda %address2, -4
+  %word32 = lda %address2, 0
+  %word33 = lda %address2, 4
+  %word34 = lda %address2, 8
+  %word35 = lda %address2, 12
+  %result35 = xor %word35, %operand
+  st %result35, %address2, 12
+  %result34 = xor %word34, %operand
+  st %result34, %address2, 8
+  %result33 = xor %word33, %operand
+  st %result33, %address2, 4
+  %result32 = xor %word32, %operand
+  st %result32, %address2, 0
+  %result31 = xor %word31, %operand
+  st %result31, %address2, -4
+  %result30 = xor %word30, %operand
+  st %result30, %address2, -8
+  %result29 = xor %word29, %operand
+  st %result29, %address2, -12
+  %result28 = xor %word28, %operand
+  st %result28, %address2, -16
+  %result27 = xor %word27, %operand
+  st %result27, %address2, -20
+  %result26 = xor %word26, %operand
+  st %result26, %address2, -24
+  %result25 = xor %word25, %operand
+  st %result25, %address2, -28
+  %result24 = xor %word24, %operand
+  st %result24, %address2, -32
+  %result23 = xor %word23, %operand
+  st %result23, %address1, 28
+  %result22 = xor %word22, %operand
+  st %result22, %address1, 24
+  %result21 = xor %word21, %operand
+  st %result21, %address1, 20
+  %result20 = xor %word20, %operand
+  st %result20, %address1, 16
+  %result19 = xor %word19, %operand
+  st %result19, %address1, 12
+  %result18 = xor %word18, %operand
+  st %result18, %address1, 8
+  %result17 = xor %word17, %operand
+  st %result17, %address1, 4
+  %result16 = xor %word16, %operand
+  st %result16, %address1, 0
+  %result15 = xor %word15, %operand
+  st %result15, %address1, -4
+  %result14 = xor %word14, %operand
+  st %result14, %address1, -8
+  %result13 = xor %word13, %operand
+  st %result13, %address1, -12
+  %result12 = xor %word12, %operand
+  st %result12, %address1, -16
+  %result11 = xor %word11, %operand
+  st %result11, %address1, -20
+  %result10 = xor %word10, %operand
+  st %result10, %address1, -24
+  %result9 = xor %word9, %operand
+  st %result9, %address1, -28
+  %result8 = xor %word8, %operand
+  st %result8, %address1, -32
+  %result7 = xor %word7, %operand
+  st %result7, %address0, 28
+  %result6 = xor %word6, %operand
+  st %result6, %address0, 24
+  %result5 = xor %word5, %operand
+  st %result5, %address0, 20
+  %result4 = xor %word4, %operand
+  st %result4, %address0, 16
+  %result3 = xor %word3, %operand
+  st %result3, %address0, 12
+  %result2 = xor %word2, %operand
+  st %result2, %address0, 8
+  %result1 = xor %word1, %operand
+  st %result1, %address0, 4
+  %result0 = xor %word0, %operand
+  st %result0, %address0, 0
+  return
+}
+
+low.func.def noinline target<amd.xdna.aie2p.core> @add_words(%buffer: reg<aie2p.ep>, %operand: reg<aie2p.er>) asm {
+  %address0 = padda %buffer, 0
+  %word0 = lda %address0, 0
+  %word1 = lda %address0, 4
+  %word2 = lda %address0, 8
+  %word3 = lda %address0, 12
+  %word4 = lda %address0, 16
+  %word5 = lda %address0, 20
+  %word6 = lda %address0, 24
+  %word7 = lda %address0, 28
+  %base1 = copy %address0 : reg<aie2p.ep> -> reg<aie2p.ep>
+  %address1 = padda %base1, 64
+  %word8 = lda %address1, -32
+  %word9 = lda %address1, -28
+  %word10 = lda %address1, -24
+  %word11 = lda %address1, -20
+  %word12 = lda %address1, -16
+  %word13 = lda %address1, -12
+  %word14 = lda %address1, -8
+  %word15 = lda %address1, -4
+  %word16 = lda %address1, 0
+  %word17 = lda %address1, 4
+  %word18 = lda %address1, 8
+  %word19 = lda %address1, 12
+  %word20 = lda %address1, 16
+  %word21 = lda %address1, 20
+  %word22 = lda %address1, 24
+  %word23 = lda %address1, 28
+  %base2 = copy %address1 : reg<aie2p.ep> -> reg<aie2p.ep>
+  %address2 = padda %base2, 64
+  %word24 = lda %address2, -32
+  %word25 = lda %address2, -28
+  %word26 = lda %address2, -24
+  %word27 = lda %address2, -20
+  %word28 = lda %address2, -16
+  %word29 = lda %address2, -12
+  %word30 = lda %address2, -8
+  %word31 = lda %address2, -4
+  %word32 = lda %address2, 0
+  %word33 = lda %address2, 4
+  %word34 = lda %address2, 8
+  %word35 = lda %address2, 12
+  %result35 = add.rr %word35, %operand
+  st %result35, %address2, 12
+  %result34 = add.rr %word34, %operand
+  st %result34, %address2, 8
+  %result33 = add.rr %word33, %operand
+  st %result33, %address2, 4
+  %result32 = add.rr %word32, %operand
+  st %result32, %address2, 0
+  %result31 = add.rr %word31, %operand
+  st %result31, %address2, -4
+  %result30 = add.rr %word30, %operand
+  st %result30, %address2, -8
+  %result29 = add.rr %word29, %operand
+  st %result29, %address2, -12
+  %result28 = add.rr %word28, %operand
+  st %result28, %address2, -16
+  %result27 = add.rr %word27, %operand
+  st %result27, %address2, -20
+  %result26 = add.rr %word26, %operand
+  st %result26, %address2, -24
+  %result25 = add.rr %word25, %operand
+  st %result25, %address2, -28
+  %result24 = add.rr %word24, %operand
+  st %result24, %address2, -32
+  %result23 = add.rr %word23, %operand
+  st %result23, %address1, 28
+  %result22 = add.rr %word22, %operand
+  st %result22, %address1, 24
+  %result21 = add.rr %word21, %operand
+  st %result21, %address1, 20
+  %result20 = add.rr %word20, %operand
+  st %result20, %address1, 16
+  %result19 = add.rr %word19, %operand
+  st %result19, %address1, 12
+  %result18 = add.rr %word18, %operand
+  st %result18, %address1, 8
+  %result17 = add.rr %word17, %operand
+  st %result17, %address1, 4
+  %result16 = add.rr %word16, %operand
+  st %result16, %address1, 0
+  %result15 = add.rr %word15, %operand
+  st %result15, %address1, -4
+  %result14 = add.rr %word14, %operand
+  st %result14, %address1, -8
+  %result13 = add.rr %word13, %operand
+  st %result13, %address1, -12
+  %result12 = add.rr %word12, %operand
+  st %result12, %address1, -16
+  %result11 = add.rr %word11, %operand
+  st %result11, %address1, -20
+  %result10 = add.rr %word10, %operand
+  st %result10, %address1, -24
+  %result9 = add.rr %word9, %operand
+  st %result9, %address1, -28
+  %result8 = add.rr %word8, %operand
+  st %result8, %address1, -32
+  %result7 = add.rr %word7, %operand
+  st %result7, %address0, 28
+  %result6 = add.rr %word6, %operand
+  st %result6, %address0, 24
+  %result5 = add.rr %word5, %operand
+  st %result5, %address0, 20
+  %result4 = add.rr %word4, %operand
+  st %result4, %address0, 16
+  %result3 = add.rr %word3, %operand
+  st %result3, %address0, 12
+  %result2 = add.rr %word2, %operand
+  st %result2, %address0, 8
+  %result1 = add.rr %word1, %operand
+  st %result1, %address0, 4
+  %result0 = add.rr %word0, %operand
+  st %result0, %address0, 0
+  return
+}
+
+func.def inline @stack_worker(%storage: buffer, %incoming: channel<tile<64xi32>>, %outgoing: channel<tile<64xi32>>) {
+  %read, %input = channel.acquire<mutable> %incoming : channel<tile<64xi32>> -> (read<tile<64xi32>, mutable>, view<64xi32>)
+  %write, %output = channel.reserve %outgoing : channel<tile<64xi32>> -> (write<tile<64xi32>>, view<64xi32>)
+  %saved0 = view.load %input[0] : view<64xi32> -> i32
+  %saved1 = view.load %input[1] : view<64xi32> -> i32
+  %saved2 = view.load %input[2] : view<64xi32> -> i32
+  %saved3 = view.load %input[3] : view<64xi32> -> i32
+  %saved4 = view.load %input[4] : view<64xi32> -> i32
+  %saved5 = view.load %input[5] : view<64xi32> -> i32
+  %saved6 = view.load %input[6] : view<64xi32> -> i32
+  %saved7 = view.load %input[7] : view<64xi32> -> i32
+  %saved8 = view.load %input[8] : view<64xi32> -> i32
+  %saved9 = view.load %input[9] : view<64xi32> -> i32
+  %saved10 = view.load %input[10] : view<64xi32> -> i32
+  %saved11 = view.load %input[11] : view<64xi32> -> i32
+  %saved12 = view.load %input[12] : view<64xi32> -> i32
+  %saved13 = view.load %input[13] : view<64xi32> -> i32
+  %saved14 = view.load %input[14] : view<64xi32> -> i32
+  %saved15 = view.load %input[15] : view<64xi32> -> i32
+  %saved16 = view.load %input[16] : view<64xi32> -> i32
+  %saved17 = view.load %input[17] : view<64xi32> -> i32
+  %saved18 = view.load %input[18] : view<64xi32> -> i32
+  %saved19 = view.load %input[19] : view<64xi32> -> i32
+  %saved20 = view.load %input[20] : view<64xi32> -> i32
+  %saved21 = view.load %input[21] : view<64xi32> -> i32
+  %saved22 = view.load %input[22] : view<64xi32> -> i32
+  %saved23 = view.load %input[23] : view<64xi32> -> i32
+  %key = view.load %input[62] : view<64xi32> -> i32
+  %bias = view.load %input[63] : view<64xi32> -> i32
+  %begin = index.constant 0 : index
+  %repeat = index.constant 2 : index
+  %end = index.constant 64 : index
+  %step = index.constant 1 : index
+  scf.for %iteration = [%begin to %repeat step %step] {
+    low.invoke @xor_words(%storage, %key) : (buffer, i32)
+    low.invoke @add_words(%storage, %bias) : (buffer, i32)
+  }
+  scf.for %element = [%begin to %end step %step] {
+    %value = view.load %input[%element] : view<64xi32> -> i32
+    view.store %value, %output[%element] : i32, view<64xi32>
+  }
+  view.store %saved0, %output[40] : i32, view<64xi32>
+  view.store %saved1, %output[41] : i32, view<64xi32>
+  view.store %saved2, %output[42] : i32, view<64xi32>
+  view.store %saved3, %output[43] : i32, view<64xi32>
+  view.store %saved4, %output[44] : i32, view<64xi32>
+  view.store %saved5, %output[45] : i32, view<64xi32>
+  view.store %saved6, %output[46] : i32, view<64xi32>
+  view.store %saved7, %output[47] : i32, view<64xi32>
+  view.store %saved8, %output[48] : i32, view<64xi32>
+  view.store %saved9, %output[49] : i32, view<64xi32>
+  view.store %saved10, %output[50] : i32, view<64xi32>
+  view.store %saved11, %output[51] : i32, view<64xi32>
+  view.store %saved12, %output[52] : i32, view<64xi32>
+  view.store %saved13, %output[53] : i32, view<64xi32>
+  view.store %saved14, %output[54] : i32, view<64xi32>
+  view.store %saved15, %output[55] : i32, view<64xi32>
+  view.store %saved16, %output[56] : i32, view<64xi32>
+  view.store %saved17, %output[57] : i32, view<64xi32>
+  view.store %saved18, %output[58] : i32, view<64xi32>
+  view.store %saved19, %output[59] : i32, view<64xi32>
+  view.store %saved20, %output[60] : i32, view<64xi32>
+  view.store %saved21, %output[61] : i32, view<64xi32>
+  view.store %saved22, %output[62] : i32, view<64xi32>
+  view.store %saved23, %output[63] : i32, view<64xi32>
+  channel.publish %write : write<tile<64xi32>>
+  channel.release %read : read<tile<64xi32>, mutable>
+  func.return
+}
+
+pipeline.def<kernel> @stack_tile(%row: index, %bytes: offset) run(%input_arg: buffer, %output_arg: buffer) {
+  %input, %output = buffer.assume.alignment %input_arg, %output_arg {minimum_alignment = 64} : buffer, buffer
+  %memory = pipeline.memory<workgroup>[0, %row] : pool
+  %origin = index.constant 0 : offset
+  %capacity = index.constant 1 : index
+  %input_storage = buffer.alloca<workgroup> pool(%memory) align(64) %bytes : buffer
+  %input_slots = buffer.view %input_storage[%origin] : buffer -> view<1x64xi32>
+  %incoming = channel.bind<fifo> %input_slots, %capacity : view<1x64xi32>, index -> channel<tile<64xi32>>
+  %output_storage = buffer.alloca<workgroup> pool(%memory) align(64) %bytes : buffer
+  %output_slots = buffer.view %output_storage[%origin] : buffer -> view<1x64xi32>
+  %outgoing = channel.bind<fifo> %output_slots, %capacity : view<1x64xi32>, index -> channel<tile<64xi32>>
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    %external_input = buffer.view %input[%origin] : buffer -> view<64xi32>
+    %write, %destination = channel.reserve %incoming : channel<tile<64xi32>> -> (write<tile<64xi32>>, view<64xi32>)
+    %ingress = kernel.async.copy %external_input to %destination {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<64xi32> to view<64xi32> -> kernel.async.token
+    %incoming_group = kernel.async.group %ingress : kernel.async.token -> kernel.async.group
+    kernel.async.wait %incoming_group {newer_groups = 0} : kernel.async.group
+    channel.publish %write : write<tile<64xi32>>
+    %read, %source = channel.acquire %outgoing : channel<tile<64xi32>> -> (read<tile<64xi32>>, view<64xi32>)
+    %external_output = buffer.view %output[%origin] : buffer -> view<64xi32>
+    %egress = kernel.async.copy %source to %external_output {cache_scope = workgroup, cache_temporal = regular, direction = workgroup_to_global} : view<64xi32> to view<64xi32> -> kernel.async.token
+    %outgoing_group = kernel.async.group %egress : kernel.async.token -> kernel.async.group
+    kernel.async.wait %outgoing_group {newer_groups = 0} : kernel.async.group
+    channel.release %read : read<tile<64xi32>>
+  }
+  pipeline.strand workers([0, %row], [1, 1], [1, 1]) {
+    func.call @stack_worker(%input_storage, %incoming, %outgoing) : (buffer, channel<tile<64xi32>>, channel<tile<64xi32>>)
+  }
+}
+
+// Different worker rows and channel footprints require independent physical
+// stack relocations while sharing the same helper definitions.
+pipeline.def<kernel> public retain target(@array_target) @stack_calls_row3() run(%input: buffer, %output: buffer) {
+  %row = index.constant 3 : index
+  %bytes = index.constant 256 : offset
+  pipeline.compose @stack_tile[%row, %bytes](%input, %output) : [index, offset](buffer, buffer)
+}
+
+pipeline.def<kernel> public retain target(@array_target) @stack_calls_row4() run(%input: buffer, %output: buffer) {
+  %row = index.constant 4 : index
+  %bytes = index.constant 512 : offset
+  pipeline.compose @stack_tile[%row, %bytes](%input, %output) : [index, offset](buffer, buffer)
+}
+
+func.def @stack_reference(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %inputs = buffer.view %input[%origin] : buffer -> view<64xi32>
+  %outputs = buffer.view %output[%origin] : buffer -> view<64xi32>
+  %key = view.load %inputs[62] : view<64xi32> -> i32
+  %bias = view.load %inputs[63] : view<64xi32> -> i32
+  %begin = index.constant 0 : index
+  %end = index.constant 64 : index
+  %step = index.constant 1 : index
+  %changed = index.constant 36 : index
+  %saved_begin = index.constant 40 : index
+  %saved_end = index.constant 64 : index
+  scf.for %element = [%begin to %end step %step] {
+    %value = view.load %inputs[%element] : view<64xi32> -> i32
+    %is_changed = index.cmp ult, %element, %changed : index
+    %value0 = scalar.xori %value, %key : i32
+    %value1 = scalar.addi %value0, %bias : i32
+    %value2 = scalar.xori %value1, %key : i32
+    %value3 = scalar.addi %value2, %bias : i32
+    %result = scf.select %is_changed, %value3, %value : i32
+    view.store %result, %outputs[%element] : i32, view<64xi32>
+  }
+  scf.for %element = [%saved_begin to %saved_end step %step] {
+    %source = index.sub %element, %saved_begin : index
+    %value = view.load %inputs[%source] : view<64xi32> -> i32
+    view.store %value, %outputs[%element] : i32, view<64xi32>
+  }
+  func.return
+}
+
+check.scenario public @caller_and_peer_frames {
+  check.trial[4](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-2147483648 to 2147483647) : tensor<64xi32>
+    %output_storage = check.generate.fill value(-1515870811) : tensor<96xi32>
+    %output = check.tensor.view %output_storage offset(64) : tensor<96xi32> -> tensor<64xi32>
+    check.compare<@stack_calls_row3, @stack_reference>(%input, %output) : (tensor<64xi32>, tensor<64xi32>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<64xi32>
+      check.expect.bitwise actual(%output_storage) expected(%output_storage) : tensor<96xi32>
+    }
+  }
+  check.trial[4](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-2147483648 to 2147483647) : tensor<64xi32>
+    %output_storage = check.generate.fill value(-1515870811) : tensor<96xi32>
+    %output = check.tensor.view %output_storage offset(64) : tensor<96xi32> -> tensor<64xi32>
+    check.compare<@stack_calls_row4, @stack_reference>(%input, %output) : (tensor<64xi32>, tensor<64xi32>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<64xi32>
+      check.expect.bitwise actual(%output_storage) expected(%output_storage) : tensor<96xi32>
+    }
+  }
+  check.return
+}

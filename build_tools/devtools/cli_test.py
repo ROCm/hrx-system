@@ -16,7 +16,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from build_tools.devtools import aliases, cli, importers
+from build_tools.devtools import aliases, cli
 from build_tools.devtools import bazel as bazel_dev
 from build_tools.devtools.command_plan import (
     CommandStep,
@@ -54,12 +54,6 @@ class CliTest(unittest.TestCase):
 
         self.assertEqual(cm.exception.code, 0)
         return output.getvalue()
-
-    def importer_manifest_patch(self):
-        return mock.patch(
-            "build_tools.devtools.importers.selected_manifests",
-            return_value=({"site_packages": "/tmp/loom-tilelang-site"},),
-        )
 
     def test_root_setup_can_add_optional_docs_toolchain(self):
         with (
@@ -106,62 +100,6 @@ class CliTest(unittest.TestCase):
             ["serve", "--address", "0.0.0.0:8080"],
         )
 
-    def test_importers_setup_uses_locked_requirements(self):
-        args = cli.parse_arguments(["importers", "setup", "tilelang"])
-
-        plan = args.handler(args)
-        description = normalized_plan_description(plan)
-
-        self.assertIn(".tmp/importers/tilelang/venv", description)
-        self.assertIn("pip install --require-hashes --only-binary=:all:", description)
-        self.assertIn("requirements-importers-tilelang.lock.txt", description)
-
-    def test_importers_setup_uses_locked_python_abi(self):
-        with (
-            mock.patch(
-                "build_tools.devtools.environment.interpreter_version",
-                side_effect=lambda command: (
-                    "3.12" if command == ("/tools/python3.12",) else "3.13"
-                ),
-            ),
-            mock.patch(
-                "build_tools.devtools.environment.shutil.which",
-                return_value="/tools/python3.12",
-            ),
-        ):
-            args = cli.parse_arguments(["importers", "setup", "tilelang"])
-            plan = args.handler(args)
-
-        description = normalized_plan_description(plan)
-        self.assertIn("/tools/python3.12 -m venv", description)
-        self.assertIn(".tmp/importers/tilelang/venv-3.12", description)
-
-    def test_importers_reject_manifest_from_wrong_python_abi(self):
-        importer_spec = importers.spec("tilelang")
-        manifest = {
-            "lock_sha256": importers.lock_hash(importer_spec),
-            "ok": True,
-            "python_version": "3.13.7",
-            "site_packages": str(importer_spec.state_dir),
-        }
-        with (
-            mock.patch.object(
-                importers.Path,
-                "read_text",
-                return_value=json.dumps(manifest),
-            ),
-            self.assertRaisesRegex(ValueError, "requires Python 3.12"),
-        ):
-            importers.load_manifest(importer_spec)
-
-    def test_importers_env_prints_manifest(self):
-        args = cli.parse_arguments(["importers", "env", "tilelang", "--format=shell"])
-
-        plan = args.handler(args)
-        description = normalized_plan_description(plan)
-
-        self.assertIn("# print importer environment tilelang manifest", description)
-
     def test_cmake_configure_forwards_options_without_separator(self):
         args = cli.parse_arguments(["cmake", "configure", "--fresh"])
 
@@ -178,7 +116,7 @@ class CliTest(unittest.TestCase):
                 "build/cmake-ci",
                 "cmake",
                 "configure",
-                "-DIREE_HAL_DRIVER_AMDGPU=OFF",
+                "-DIREE_HAL_DRIVER_AMD_GPU=OFF",
             ]
         )
 
@@ -193,7 +131,7 @@ class CliTest(unittest.TestCase):
             [
                 "bazel",
                 "configure",
-                "-DIREE_HAL_DRIVER_AMDGPU=ON",
+                "-DIREE_HAL_DRIVER_AMD_GPU=ON",
                 "-DIREE_ROCM_PATH=/opt/rocm",
             ]
         )
@@ -201,7 +139,7 @@ class CliTest(unittest.TestCase):
         plan = args.handler(args)
         description = plan.describe()
 
-        self.assertIn("-DIREE_HAL_DRIVER_AMDGPU=ON", description)
+        self.assertIn("-DIREE_HAL_DRIVER_AMD_GPU=ON", description)
         self.assertIn("-DIREE_ROCM_PATH=/opt/rocm", description)
 
     def test_bazel_configure_accepts_portable_loom_target_preset(self):
@@ -218,20 +156,12 @@ class CliTest(unittest.TestCase):
 
         self.assertIn("-DLOOM_TARGET_ALL_AMD_GPU=ON", description)
 
-    def test_bazel_configure_accepts_importer_environment(self):
-        args = cli.parse_arguments(["bazel", "configure", "--importer-env", "tilelang"])
-
-        plan = args.handler(args)
-        description = plan.describe()
-
-        self.assertIn("-DLOOM_IMPORT_TILELANG=ON", description)
-
     def test_bazel_configure_accepts_native_driver_options(self):
         args = cli.parse_arguments(
             [
                 "bazel",
                 "configure",
-                "--//runtime/config/hal:drivers=amdgpu,task",
+                "--//runtime/config/hal:drivers=amd-gpu,task",
                 "--repo_env=IREE_ROCM_PATH=/opt/rocm",
             ]
         )
@@ -239,7 +169,7 @@ class CliTest(unittest.TestCase):
         plan = args.handler(args)
         description = plan.describe()
 
-        self.assertIn("--//runtime/config/hal:drivers=amdgpu", description)
+        self.assertIn("--//runtime/config/hal:drivers=amd-gpu,task", description)
         self.assertIn("--repo_env=IREE_ROCM_PATH=/opt/rocm", description)
 
     def test_bazel_build_and_test_default_to_project_targets(self):
@@ -273,45 +203,6 @@ class CliTest(unittest.TestCase):
                         [*prefix, "--config=asan", *options],
                     )
 
-    def test_bazel_test_importer_environment_adds_config_and_pythonpath(self):
-        with self.importer_manifest_patch():
-            args = cli.parse_arguments(
-                [
-                    "bazel",
-                    "test",
-                    "--importer-env",
-                    "tilelang",
-                    "//loom/py/loom/importers/tilelang:tilelang_import_test",
-                ]
-            )
-            plan = args.handler(args)
-
-        description = plan.describe()
-        self.assertIn("--config=loom-importer-tilelang", description)
-        self.assertIn("--test_env=PYTHONPATH=/tmp/loom-tilelang-site", description)
-        self.assertIn(
-            "//loom/py/loom/importers/tilelang:tilelang_import_test",
-            description,
-        )
-
-    def test_bazel_test_all_importer_environments_use_aggregate_config(self):
-        with self.importer_manifest_patch():
-            args = cli.parse_arguments(
-                [
-                    "bazel",
-                    "test",
-                    "--importer-env",
-                    "mlir,tilelang",
-                    "//loom/py/loom/importers/...",
-                ]
-            )
-            plan = args.handler(args)
-
-        description = plan.describe()
-        self.assertIn("--config=loom-importers", description)
-        self.assertNotIn("--config=loom-importer-mlir", description)
-        self.assertNotIn("--config=loom-importer-tilelang", description)
-
     def test_bazel_build_preserves_negative_target_separator(self):
         argv = self.planned_argv(
             [
@@ -319,7 +210,7 @@ class CliTest(unittest.TestCase):
                 "build",
                 "--",
                 "//runtime/...",
-                "-//runtime/src/iree/hal/drivers/amdgpu/...",
+                "-//runtime/src/iree/hal/driver/amd/gpu/...",
             ]
         )
 
@@ -329,7 +220,7 @@ class CliTest(unittest.TestCase):
                 "build",
                 "--",
                 "//runtime/...",
-                "-//runtime/src/iree/hal/drivers/amdgpu/...",
+                "-//runtime/src/iree/hal/driver/amd/gpu/...",
             ],
         )
 
@@ -340,7 +231,7 @@ class CliTest(unittest.TestCase):
                 "test",
                 "--test_tag_filters=-requires-gpu",
                 "//runtime/...",
-                "-//runtime/src/iree/hal/drivers/amdgpu/...",
+                "-//runtime/src/iree/hal/driver/amd/gpu/...",
             ]
         )
 
@@ -352,7 +243,7 @@ class CliTest(unittest.TestCase):
                 "--test_tag_filters=-requires-gpu",
                 "--",
                 "//runtime/...",
-                "-//runtime/src/iree/hal/drivers/amdgpu/...",
+                "-//runtime/src/iree/hal/driver/amd/gpu/...",
             ],
         )
 
@@ -393,7 +284,7 @@ class CliTest(unittest.TestCase):
                 "bazel",
                 "query",
                 "//runtime/...",
-                "-//runtime/src/iree/hal/drivers/amdgpu/...",
+                "-//runtime/src/iree/hal/driver/amd/gpu/...",
             ]
         )
 
@@ -403,7 +294,7 @@ class CliTest(unittest.TestCase):
                 "query",
                 "--",
                 "//runtime/...",
-                "-//runtime/src/iree/hal/drivers/amdgpu/...",
+                "-//runtime/src/iree/hal/driver/amd/gpu/...",
             ],
         )
 
@@ -480,27 +371,6 @@ class CliTest(unittest.TestCase):
         self.assertIn("<Bazel launch script>", description)
         self.assertIn("--benchmark_filter=Alloc", description)
 
-    def test_bazel_run_importer_environment_adds_config_and_pythonpath(self):
-        with self.importer_manifest_patch():
-            args = cli.parse_arguments(
-                [
-                    "bazel",
-                    "run",
-                    "--importer-env=tilelang",
-                    "//loom/py/loom/importers/check:loom_import_check",
-                    "--",
-                    "--list-importers",
-                ]
-            )
-            plan = args.handler(args)
-
-        description = normalized_plan_description(plan)
-        self.assertIn("--config=loom-importer-tilelang", description)
-        self.assertEqual(
-            plan.steps[0].env.get("PYTHONPATH", "").split(os.pathsep)[0],
-            "/tmp/loom-tilelang-site",
-        )
-
     def test_bazel_run_can_print_resolved_executable_path(self):
         args = cli.parse_arguments(
             [
@@ -559,50 +429,6 @@ class CliTest(unittest.TestCase):
         self.assertIn("cmake -S", description)
         self.assertIn("--target iree_cmake_try_snippet", description)
         self.assertIn("# compile only", description)
-
-    def test_cmake_configure_importer_environment_adds_option_and_pythonpath(self):
-        with self.importer_manifest_patch():
-            args = cli.parse_arguments(
-                ["cmake", "configure", "--importer-env=tilelang"]
-            )
-            plan = args.handler(args)
-
-        description = plan.describe()
-        self.assertIn("-DLOOM_IMPORT_TILELANG=ON", description)
-        self.assertIn("PYTHONPATH=/tmp/loom-tilelang-site", description)
-
-    def test_cmake_test_importer_environment_adds_pythonpath(self):
-        with self.importer_manifest_patch():
-            args = cli.parse_arguments(
-                ["cmake", "test", "--importer-env", "tilelang", "-R", "tilelang"]
-            )
-            plan = args.handler(args)
-
-        description = plan.describe()
-        self.assertIn("PYTHONPATH=/tmp/loom-tilelang-site", description)
-        self.assertIn("-R tilelang", description)
-
-    def test_cmake_build_importer_environment_adds_pythonpath(self):
-        with (
-            self.importer_manifest_patch(),
-            tempfile.TemporaryDirectory() as temporary_dir,
-        ):
-            args = cli.parse_arguments(
-                [
-                    "--cmake-build-dir",
-                    temporary_dir,
-                    "cmake",
-                    "build",
-                    "--importer-env",
-                    "tilelang",
-                    "loom-opt",
-                ]
-            )
-            plan = args.handler(args)
-
-        description = plan.describe()
-        self.assertIn("PYTHONPATH=/tmp/loom-tilelang-site", description)
-        self.assertIn("--target loom-opt", description)
 
     def test_bazel_try_preserves_local_input_paths(self):
         with tempfile.TemporaryDirectory() as temporary_dir:
@@ -714,10 +540,59 @@ class CliTest(unittest.TestCase):
         plan = args.handler(args)
         description = normalized_plan_description(plan)
 
-        self.assertIn("bazel run --config=fuzzer", description)
-        self.assertIn("<Bazel launch script>", description)
-        self.assertIn("<corpus>", description)
-        self.assertIn("-artifact_prefix=<artifacts>/", description)
+        self.assertIn(
+            "bazel build --config=fuzzer "
+            "//runtime/src/iree/tokenizer:special_tokens_fuzz",
+            description,
+        )
+        self.assertIn(
+            "generate one canonical Bazel launch script per fuzzer", description
+        )
+        self.assertIn("run at most 1 launch scripts concurrently", description)
+
+    def test_bazel_fuzz_builds_exact_target_set_together(self):
+        args = cli.parse_arguments(
+            [
+                "bazel",
+                "fuzz",
+                "--workers=2",
+                "//z:decoder_fuzz",
+                "//a:parser_fuzz",
+                "--",
+                "-max_total_time=1",
+            ]
+        )
+
+        plan = args.handler(args)
+        description = normalized_plan_description(plan)
+
+        self.assertIn(
+            "bazel build --config=fuzzer //a:parser_fuzz //z:decoder_fuzz",
+            description,
+        )
+        self.assertIn("run at most 2 launch scripts concurrently", description)
+
+    def test_bazel_fuzz_compile_only_stops_after_build(self):
+        args = cli.parse_arguments(["bazel", "fuzz", "--compile-only", "//loom/..."])
+
+        plan = args.handler(args)
+        description = normalized_plan_description(plan)
+
+        self.assertIn("bazel build --config=asan '<fuzz targets>'", description)
+        self.assertNotIn("launch script", description)
+        self.assertNotIn("run at most", description)
+
+    def test_bazel_fuzz_corpus_compaction_describes_transaction(self):
+        args = cli.parse_arguments(
+            ["bazel", "fuzz", "--compact-corpus", "--workers=4", "//loom/..."]
+        )
+
+        plan = args.handler(args)
+        description = normalized_plan_description(plan)
+
+        self.assertIn("bazel build --config=fuzzer '<fuzz targets>'", description)
+        self.assertIn("run at most 4 launch scripts concurrently", description)
+        self.assertIn("install the complete retained set", description)
 
     def test_bazel_compile_commands_defaults_to_repo_roots(self):
         args = cli.parse_arguments(["bazel", "compile-commands"])
@@ -749,7 +624,7 @@ class CliTest(unittest.TestCase):
                 "-o",
                 "out/compile_commands.json",
                 "//runtime/...",
-                "-//runtime/src/iree/hal/drivers/cuda/...",
+                "-//runtime/src/iree/hal/driver/cuda/...",
             ]
         )
 
@@ -759,7 +634,7 @@ class CliTest(unittest.TestCase):
         self.assertIn("--config=asan", description)
         self.assertIn("out/compile_commands.json", description)
         self.assertIn("//runtime/...", description)
-        self.assertIn("-//runtime/src/iree/hal/drivers/cuda/...", description)
+        self.assertIn("-//runtime/src/iree/hal/driver/cuda/...", description)
 
     def test_bazel_clang_tidy_target_runs_aspect_directly(self):
         args = cli.parse_arguments(
@@ -862,7 +737,7 @@ class CliTest(unittest.TestCase):
 
     def test_bazel_clang_tidy_scopes_complete_runtime_driver_configuration(self):
         cases = (
-            (["//runtime/src/iree/hal/drivers/amd/gpu/cts:driver_test"], True),
+            (["//runtime/src/iree/hal/driver/amd/gpu/cts:driver_test"], True),
             (["//runtime/..."], True),
             (["//..."], True),
             (["//runtime/...", "-//runtime/..."], False),
@@ -1099,6 +974,10 @@ class CliTest(unittest.TestCase):
         self.assertEqual(bazel_dev.process_exit_code(7), 7)
 
     def test_bazel_aliases_include_query_cquery_info(self):
+        self.assertEqual(
+            aliases.BAZEL_ALIASES["iree-bazel-coverage"],
+            ["bazel", "coverage"],
+        )
         self.assertEqual(aliases.BAZEL_ALIASES["iree-bazel-query"], ["bazel", "query"])
         self.assertEqual(
             aliases.BAZEL_ALIASES["iree-bazel-cquery"], ["bazel", "cquery"]
@@ -1298,6 +1177,26 @@ class CliTest(unittest.TestCase):
         self.assertIn("Wrapper flags", output)
         self.assertNotIn("python dev.py", output)
         self.assertNotIn("### CMake", output)
+
+    def test_bazel_coverage_uses_native_llvm_profile(self):
+        args = cli.parse_arguments(
+            ["bazel", "coverage", "//runtime/src/iree/base:string_view_test"]
+        )
+
+        description = normalized_plan_description(args.handler(args))
+
+        self.assertIn("bazel coverage --config=llvm-coverage", description)
+        self.assertIn("//runtime/src/iree/base:string_view_test", description)
+
+    def test_bazel_coverage_agents_md_explains_scope(self):
+        output = self.parse_agents_md(["bazel", "coverage", "--agents_md"])
+
+        self.assertIn("## iree-bazel-coverage", output)
+        self.assertIn("native LLVM source", output)
+        self.assertIn("combined LCOV report", output)
+        self.assertIn("_coverage_report.dat", output)
+        self.assertIn("different denominators", output)
+        self.assertIn("//loom/src/loom[/:]", output)
 
     def test_bazel_run_agents_md_explains_process_contract(self):
         output = self.parse_agents_md(["bazel", "run", "--agents_md"])

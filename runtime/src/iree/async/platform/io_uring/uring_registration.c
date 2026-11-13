@@ -43,6 +43,76 @@ static int iree_io_uring_registration_syscall(int ring_fd, uint32_t opcode,
   return register_result;
 }
 
+// Replaces a range without relying on native suffix preservation. Both the
+// incoming range and the unaffected suffix retain existing pins; no user pages
+// are imported on this owner. Only the final clone changes the live table.
+// Proactor fixed-buffer entries are untagged, so replacing their native nodes
+// cannot introduce resource-retirement CQEs into the operation completion ring.
+static int iree_io_uring_registration_clone_buffers(
+    iree_io_uring_registration_t* registration,
+    const iree_io_uring_clone_buffers_t* replacement) {
+  if (registration->buffer_clone_scratch_fd < 0) {
+    iree_io_uring_params_t parameters = {0};
+    int descriptor = 0;
+    do {
+      descriptor = (int)syscall(IREE_IO_URING_SYSCALL_SETUP, 1, &parameters);
+    } while (descriptor < 0 && errno == EINTR);
+    if (descriptor < 0) {
+      return -errno;
+    }
+    registration->buffer_clone_scratch_fd = descriptor;
+  }
+  const int scratch_fd = registration->buffer_clone_scratch_fd;
+  iree_io_uring_clone_buffers_t clone = *replacement;
+  clone.dst_off = 0;
+  int result = iree_io_uring_registration_syscall(
+      scratch_fd, IREE_IORING_REGISTER_CLONE_BUFFERS, &clone, 1);
+  const uint32_t suffix_offset = replacement->dst_off + replacement->nr;
+  const uint32_t suffix_count =
+      registration->buffer_clone_capacity - suffix_offset;
+  if (result >= 0 && suffix_count) {
+    clone = (iree_io_uring_clone_buffers_t){
+        .src_fd = (uint32_t)registration->ring_fd,
+        .flags = IREE_IORING_REGISTER_DST_REPLACE,
+        .src_off = suffix_offset,
+        .dst_off = replacement->nr,
+        .nr = suffix_count,
+    };
+    result = iree_io_uring_registration_syscall(
+        scratch_fd, IREE_IORING_REGISTER_CLONE_BUFFERS, &clone, 1);
+  }
+  if (result >= 0) {
+    clone = (iree_io_uring_clone_buffers_t){
+        .src_fd = (uint32_t)scratch_fd,
+        .flags = IREE_IORING_REGISTER_DST_REPLACE,
+        .dst_off = replacement->dst_off,
+        .nr = replacement->nr + suffix_count,
+    };
+    result = iree_io_uring_registration_syscall(
+        registration->ring_fd, IREE_IORING_REGISTER_CLONE_BUFFERS, &clone, 1);
+  }
+  const int cleanup_result = iree_io_uring_registration_syscall(
+      scratch_fd, IREE_IORING_UNREGISTER_BUFFERS, NULL, 0);
+  if (cleanup_result < 0 && cleanup_result != -ENXIO) {
+    // Closing consumes the descriptor and releases any remaining references.
+    // Cleanup cannot turn a committed attachment into a reported rejection.
+    close(scratch_fd);
+    registration->buffer_clone_scratch_fd = -1;
+  }
+  return result;
+}
+
+static int iree_io_uring_registration_issue(
+    iree_io_uring_registration_t* registration, uint32_t opcode, void* arg,
+    uint32_t argument_count) {
+  if (opcode == IREE_IORING_REGISTER_CLONE_BUFFERS &&
+      registration->buffer_clone_capacity) {
+    return iree_io_uring_registration_clone_buffers(registration, arg);
+  }
+  return iree_io_uring_registration_syscall(registration->ring_fd, opcode, arg,
+                                            argument_count);
+}
+
 // Returns true after a request result has been published.
 static bool iree_io_uring_registration_wait_is_complete(void* user_data) {
   iree_io_uring_registration_wait_t* wait = user_data;
@@ -65,6 +135,7 @@ void iree_io_uring_registration_initialize(
     iree_io_uring_registration_t* out_registration) {
   memset(out_registration, 0, sizeof(*out_registration));
   out_registration->ring_fd = ring_fd;
+  out_registration->buffer_clone_scratch_fd = -1;
   iree_slim_mutex_initialize(&out_registration->mutex);
   iree_atomic_store(&out_registration->has_pending, 0,
                     iree_memory_order_relaxed);
@@ -85,6 +156,10 @@ void iree_io_uring_registration_initialize(
 void iree_io_uring_registration_deinitialize(
     iree_io_uring_registration_t* registration) {
   iree_io_uring_registration_end_polling(registration);
+  if (registration->buffer_clone_scratch_fd >= 0) {
+    close(registration->buffer_clone_scratch_fd);
+    registration->buffer_clone_scratch_fd = -1;
+  }
   iree_slim_mutex_deinitialize(&registration->mutex);
   registration->ring_fd = -1;
 }
@@ -133,9 +208,8 @@ static void iree_io_uring_registration_submit_request(
   switch (registration->state) {
     case IREE_IO_URING_REGISTRATION_STATE_DIRECT:
     case IREE_IO_URING_REGISTRATION_STATE_UNBOUND:
-      result = iree_io_uring_registration_syscall(registration->ring_fd,
-                                                  request->opcode, request->arg,
-                                                  request->argument_count);
+      result = iree_io_uring_registration_issue(
+          registration, request->opcode, request->arg, request->argument_count);
       break;
     case IREE_IO_URING_REGISTRATION_STATE_BOUND: {
       const bool owner = registration->owner_tid == current_tid;
@@ -337,9 +411,8 @@ void iree_io_uring_registration_drain(
                         iree_memory_order_release);
     }
     iree_io_uring_registration_callback_t completion = request->completion;
-    int result = iree_io_uring_registration_syscall(
-        registration->ring_fd, request->opcode, request->arg,
-        request->argument_count);
+    int result = iree_io_uring_registration_issue(
+        registration, request->opcode, request->arg, request->argument_count);
     iree_slim_mutex_unlock(&registration->mutex);
     completion.fn(completion.user_data, result);
     iree_slim_mutex_lock(&registration->mutex);

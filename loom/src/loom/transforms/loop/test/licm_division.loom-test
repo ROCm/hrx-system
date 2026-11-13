@@ -1,0 +1,322 @@
+// RUN: pass licm
+
+// Division's retained operand preconditions allow motion even out of a
+// potentially empty loop. Quotient rounding does not change those domains.
+func.def @scalar_division_family(%count: index, %lhs_input: i32, %rhs_input: i32) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %lhs = scalar.assume %lhs_input [range(%lhs_input, -100, 100)] : i32
+  %rhs = scalar.assume %rhs_input [ne(%rhs_input, 0)] : i32
+  scf.for %i = [%begin to %count step %step] {
+    %signed = scalar.divsi %lhs, %rhs : i32
+    %unsigned = scalar.divui %lhs, %rhs : i32
+    %signed_q, %signed_r = scalar.divremsi %lhs, %rhs : i32
+    %unsigned_q, %unsigned_r = scalar.divremui %lhs, %rhs : i32
+    %signed_remainder = scalar.remsi %lhs, %rhs : i32
+    %unsigned_remainder = scalar.remui %lhs, %rhs : i32
+    %signed_ceil = scalar.ceildivsi %lhs, %rhs : i32
+    %unsigned_ceil = scalar.ceildivui %lhs, %rhs : i32
+    %signed_floor = scalar.floordivsi %lhs, %rhs : i32
+    test.use %signed, %unsigned, %signed_q, %signed_r, %unsigned_q, %unsigned_r, %signed_remainder, %unsigned_remainder, %signed_ceil, %unsigned_ceil, %signed_floor : i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32
+  }
+  func.return
+}
+
+// ----
+func.def @scalar_division_family(%count: index, %lhs_input: i32, %rhs_input: i32) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %lhs = scalar.assume %lhs_input [range(%lhs_input, -100, 100)] : i32
+  %rhs = scalar.assume %rhs_input [ne(%rhs_input, 0)] : i32
+  %signed = scalar.divsi %lhs, %rhs : i32
+  %unsigned = scalar.divui %lhs, %rhs : i32
+  %signed_q, %signed_r = scalar.divremsi %lhs, %rhs : i32
+  %unsigned_q, %unsigned_r = scalar.divremui %lhs, %rhs : i32
+  %signed_remainder = scalar.remsi %lhs, %rhs : i32
+  %unsigned_remainder = scalar.remui %lhs, %rhs : i32
+  %signed_ceil = scalar.ceildivsi %lhs, %rhs : i32
+  %unsigned_ceil = scalar.ceildivui %lhs, %rhs : i32
+  %signed_floor = scalar.floordivsi %lhs, %rhs : i32
+  scf.for %i = [%begin to %count step %step] {
+    test.use %signed, %unsigned, %signed_q, %signed_r, %unsigned_q, %unsigned_r, %signed_remainder, %unsigned_remainder, %signed_ceil, %unsigned_ceil, %signed_floor : i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32
+  }
+  func.return
+}
+
+// ====
+
+// Signed quotient overflow remains guarded, while signed remainder is
+// defined for MIN modulo -1. Literal exclusions can prove either operand safe.
+func.def @signed_quotient_boundaries(%count: index, %lhs: i8, %rhs_input: i8, %wide_lhs: i64, %wide_rhs_input: i64) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %rhs = scalar.assume %rhs_input [ne(%rhs_input, 0)] : i8
+  %safe_lhs = scalar.assume %lhs [ne(%lhs, -128)] : i8
+  %safe_rhs = scalar.assume %rhs [ne(%rhs, -1)] : i8
+  %wide_rhs = scalar.assume %wide_rhs_input [ne(%wide_rhs_input, 0), ne(%wide_rhs_input, -1)] : i64
+  scf.for %i = [%begin to %count step %step] {
+    %unsafe_quotient = scalar.divsi %lhs, %rhs : i8
+    %unsafe_q, %unsafe_r = scalar.divremsi %lhs, %rhs : i8
+    %unsafe_ceil = scalar.ceildivsi %lhs, %rhs : i8
+    %unsafe_floor = scalar.floordivsi %lhs, %rhs : i8
+    %safe_remainder = scalar.remsi %lhs, %rhs : i8
+    %safe_dividend = scalar.divsi %safe_lhs, %rhs : i8
+    %safe_divisor = scalar.divsi %lhs, %safe_rhs : i8
+    %safe_wide = scalar.divsi %wide_lhs, %wide_rhs : i64
+    test.use %unsafe_quotient, %unsafe_q, %unsafe_r, %unsafe_ceil, %unsafe_floor, %safe_remainder, %safe_dividend, %safe_divisor, %safe_wide : i8, i8, i8, i8, i8, i8, i8, i8, i64
+  }
+  func.return
+}
+
+// ----
+func.def @signed_quotient_boundaries(%count: index, %lhs: i8, %rhs_input: i8, %wide_lhs: i64, %wide_rhs_input: i64) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %rhs = scalar.assume %rhs_input [ne(%rhs_input, 0)] : i8
+  %safe_lhs = scalar.assume %lhs [ne(%lhs, -128)] : i8
+  %safe_rhs = scalar.assume %rhs [ne(%rhs, -1)] : i8
+  %wide_rhs = scalar.assume %wide_rhs_input [ne(%wide_rhs_input, 0), ne(%wide_rhs_input, -1)] : i64
+  %safe_remainder = scalar.remsi %lhs, %rhs : i8
+  %safe_dividend = scalar.divsi %safe_lhs, %rhs : i8
+  %safe_divisor = scalar.divsi %lhs, %safe_rhs : i8
+  %safe_wide = scalar.divsi %wide_lhs, %wide_rhs : i64
+  scf.for %i = [%begin to %count step %step] {
+    %unsafe_quotient = scalar.divsi %lhs, %rhs : i8
+    %unsafe_q, %unsafe_r = scalar.divremsi %lhs, %rhs : i8
+    %unsafe_ceil = scalar.ceildivsi %lhs, %rhs : i8
+    %unsafe_floor = scalar.floordivsi %lhs, %rhs : i8
+    test.use %unsafe_quotient, %unsafe_q, %unsafe_r, %unsafe_ceil, %unsafe_floor, %safe_remainder, %safe_dividend, %safe_divisor, %safe_wide : i8, i8, i8, i8, i8, i8, i8, i8, i64
+  }
+  func.return
+}
+
+// ====
+
+// Boolean facts use raw 0/1; signed arithmetic interprets true as -1.
+// The other fixed widths use the same nonzero-divisor proof.
+func.def @integer_widths(%count: index, %bit: i1, %half: i16, %wide: i64) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %c0 = scalar.constant 0 : i1
+  %nonzero = scalar.assume %bit [ne(%bit, 0)] : i1
+  %half_divisor = scalar.assume %half [ne(%half, 0)] : i16
+  %wide_divisor = scalar.assume %wide [ne(%wide, 0)] : i64
+  scf.for %i = [%begin to %count step %step] {
+    %bit_unsigned = scalar.divui %bit, %nonzero : i1
+    %bit_remainder = scalar.remsi %bit, %nonzero : i1
+    %bit_signed_zero = scalar.divsi %c0, %nonzero : i1
+    %bit_signed_overflow = scalar.divsi %bit, %nonzero : i1
+    %half_remainder = scalar.remui %half, %half_divisor : i16
+    %wide_ceil = scalar.ceildivui %wide, %wide_divisor : i64
+    test.use %bit_unsigned, %bit_remainder, %bit_signed_zero, %bit_signed_overflow, %half_remainder, %wide_ceil : i1, i1, i1, i1, i16, i64
+  }
+  func.return
+}
+
+// ----
+func.def @integer_widths(%count: index, %bit: i1, %half: i16, %wide: i64) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %c0 = scalar.constant 0 : i1
+  %nonzero = scalar.assume %bit [ne(%bit, 0)] : i1
+  %half_divisor = scalar.assume %half [ne(%half, 0)] : i16
+  %wide_divisor = scalar.assume %wide [ne(%wide, 0)] : i64
+  %bit_unsigned = scalar.divui %bit, %nonzero : i1
+  %bit_remainder = scalar.remsi %bit, %nonzero : i1
+  %bit_signed_zero = scalar.divsi %c0, %nonzero : i1
+  %half_remainder = scalar.remui %half, %half_divisor : i16
+  %wide_ceil = scalar.ceildivui %wide, %wide_divisor : i64
+  scf.for %i = [%begin to %count step %step] {
+    %bit_signed_overflow = scalar.divsi %bit, %nonzero : i1
+    test.use %bit_unsigned, %bit_remainder, %bit_signed_zero, %bit_signed_overflow, %half_remainder, %wide_ceil : i1, i1, i1, i1, i16, i64
+  }
+  func.return
+}
+
+// ====
+
+// A uniform nonzero predicate survives even when the element interval spans
+// both signs. Every vector quotient/remainder form consumes that same fact.
+func.def @vector_division_family(%count: index, %lhs_input: i32, %rhs_input: i32) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %lhs_scalar = scalar.assume %lhs_input [range(%lhs_input, -100, 100)] : i32
+  %rhs_scalar = scalar.assume %rhs_input [ne(%rhs_input, 0)] : i32
+  %lhs = vector.splat %lhs_scalar : vector<4xi32>
+  %rhs = vector.splat %rhs_scalar : vector<4xi32>
+  scf.for %i = [%begin to %count step %step] {
+    %signed = vector.divsi %lhs, %rhs : vector<4xi32>
+    %unsigned = vector.divui %lhs, %rhs : vector<4xi32>
+    %signed_q, %signed_r = vector.divremsi %lhs, %rhs : vector<4xi32>
+    %unsigned_q, %unsigned_r = vector.divremui %lhs, %rhs : vector<4xi32>
+    %signed_remainder = vector.remsi %lhs, %rhs : vector<4xi32>
+    %unsigned_remainder = vector.remui %lhs, %rhs : vector<4xi32>
+    %signed_ceil = vector.ceildivsi %lhs, %rhs : vector<4xi32>
+    %unsigned_ceil = vector.ceildivui %lhs, %rhs : vector<4xi32>
+    %signed_floor = vector.floordivsi %lhs, %rhs : vector<4xi32>
+    test.use %signed, %unsigned, %signed_q, %signed_r, %unsigned_q, %unsigned_r, %signed_remainder, %unsigned_remainder, %signed_ceil, %unsigned_ceil, %signed_floor : vector<4xi32>, vector<4xi32>, vector<4xi32>, vector<4xi32>, vector<4xi32>, vector<4xi32>, vector<4xi32>, vector<4xi32>, vector<4xi32>, vector<4xi32>, vector<4xi32>
+  }
+  func.return
+}
+
+// ----
+func.def @vector_division_family(%count: index, %lhs_input: i32, %rhs_input: i32) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %lhs_scalar = scalar.assume %lhs_input [range(%lhs_input, -100, 100)] : i32
+  %rhs_scalar = scalar.assume %rhs_input [ne(%rhs_input, 0)] : i32
+  %lhs = vector.splat %lhs_scalar : vector<4xi32>
+  %rhs = vector.splat %rhs_scalar : vector<4xi32>
+  %signed = vector.divsi %lhs, %rhs : vector<4xi32>
+  %unsigned = vector.divui %lhs, %rhs : vector<4xi32>
+  %signed_q, %signed_r = vector.divremsi %lhs, %rhs : vector<4xi32>
+  %unsigned_q, %unsigned_r = vector.divremui %lhs, %rhs : vector<4xi32>
+  %signed_remainder = vector.remsi %lhs, %rhs : vector<4xi32>
+  %unsigned_remainder = vector.remui %lhs, %rhs : vector<4xi32>
+  %signed_ceil = vector.ceildivsi %lhs, %rhs : vector<4xi32>
+  %unsigned_ceil = vector.ceildivui %lhs, %rhs : vector<4xi32>
+  %signed_floor = vector.floordivsi %lhs, %rhs : vector<4xi32>
+  scf.for %i = [%begin to %count step %step] {
+    test.use %signed, %unsigned, %signed_q, %signed_r, %unsigned_q, %unsigned_r, %signed_remainder, %unsigned_remainder, %signed_ceil, %unsigned_ceil, %signed_floor : vector<4xi32>, vector<4xi32>, vector<4xi32>, vector<4xi32>, vector<4xi32>, vector<4xi32>, vector<4xi32>, vector<4xi32>, vector<4xi32>, vector<4xi32>, vector<4xi32>
+  }
+  func.return
+}
+
+// ====
+
+// A single unsafe lane blocks speculation. Empty vectors have no arithmetic;
+// dynamic uniform vectors use the same element facts without enumerating lanes.
+func.def @vector_division_domains(%count: index, %length: index, %lhs: vector<2xi8>, %dynamic_lhs: vector<[%length]xi16>, %divisor_input: i16, %empty: vector<0xi64>) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %positive = vector.constanti [2, 3] : vector<2xi8>
+  %with_zero = vector.constanti [2, 0] : vector<2xi8>
+  %with_minus_one = vector.constanti [2, -1] : vector<2xi8>
+  %divisor_scalar = scalar.assume %divisor_input [range(%divisor_input, 1, 100)] : i16
+  %dynamic_divisor = vector.splat %divisor_scalar : vector<[%length]xi16>
+  scf.for %i = [%begin to %count step %step] {
+    %safe = vector.divsi %lhs, %positive : vector<2xi8>
+    %unsafe_zero = vector.divui %lhs, %with_zero : vector<2xi8>
+    %unsafe_overflow = vector.divsi %lhs, %with_minus_one : vector<2xi8>
+    %dynamic_q, %dynamic_r = vector.divremsi %dynamic_lhs, %dynamic_divisor : vector<[%length]xi16>
+    %empty_q, %empty_r = vector.divremsi %empty, %empty : vector<0xi64>
+    test.use %safe, %unsafe_zero, %unsafe_overflow, %dynamic_q, %dynamic_r, %empty_q, %empty_r : vector<2xi8>, vector<2xi8>, vector<2xi8>, vector<[%length]xi16>, vector<[%length]xi16>, vector<0xi64>, vector<0xi64>
+  }
+  func.return
+}
+
+// ----
+func.def @vector_division_domains(%count: index, %length: index, %lhs: vector<2xi8>, %dynamic_lhs: vector<[%length]xi16>, %divisor_input: i16, %empty: vector<0xi64>) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %positive = vector.constanti [2, 3] : vector<2xi8>
+  %with_zero = vector.constanti [2, 0] : vector<2xi8>
+  %with_minus_one = vector.constanti [2, -1] : vector<2xi8>
+  %divisor_scalar = scalar.assume %divisor_input [range(%divisor_input, 1, 100)] : i16
+  %dynamic_divisor = vector.splat %divisor_scalar : vector<[%length]xi16>
+  %safe = vector.divsi %lhs, %positive : vector<2xi8>
+  %dynamic_q, %dynamic_r = vector.divremsi %dynamic_lhs, %dynamic_divisor : vector<[%length]xi16>
+  %empty_q, %empty_r = vector.divremsi %empty, %empty : vector<0xi64>
+  scf.for %i = [%begin to %count step %step] {
+    %unsafe_zero = vector.divui %lhs, %with_zero : vector<2xi8>
+    %unsafe_overflow = vector.divsi %lhs, %with_minus_one : vector<2xi8>
+    test.use %safe, %unsafe_zero, %unsafe_overflow, %dynamic_q, %dynamic_r, %empty_q, %empty_r : vector<2xi8>, vector<2xi8>, vector<2xi8>, vector<[%length]xi16>, vector<[%length]xi16>, vector<0xi64>, vector<0xi64>
+  }
+  func.return
+}
+
+// ====
+
+// Nonnegative coordinate division cannot overflow on any target width.
+// A nonzero but possibly negative index divisor does not meet that contract.
+func.def @index_division_domain(%count: index, %lhs_input: index, %rhs_input: index) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %lhs = index.assume %lhs_input [ge(%lhs_input, 0)] : index
+  %rhs = index.assume %rhs_input [gt(%rhs_input, 0)] : index
+  %nonzero = index.assume %rhs_input [ne(%rhs_input, 0)] : index
+  scf.for %i = [%begin to %count step %step] {
+    %quotient = index.div %lhs, %rhs : index
+    %remainder = index.rem %lhs, %rhs : index
+    %q, %r = index.divrem %lhs, %rhs : index
+    %unknown_lhs = index.div %lhs_input, %rhs : index
+    %unknown_rhs = index.rem %lhs, %rhs_input : index
+    %signed_rhs = index.div %lhs, %nonzero : index
+    test.use %quotient, %remainder, %q, %r, %unknown_lhs, %unknown_rhs, %signed_rhs : index, index, index, index, index, index, index
+  }
+  func.return
+}
+
+// ----
+func.def @index_division_domain(%count: index, %lhs_input: index, %rhs_input: index) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %lhs = index.assume %lhs_input [ge(%lhs_input, 0)] : index
+  %rhs = index.assume %rhs_input [gt(%rhs_input, 0)] : index
+  %nonzero = index.assume %rhs_input [ne(%rhs_input, 0)] : index
+  %quotient = index.div %lhs, %rhs : index
+  %remainder = index.rem %lhs, %rhs : index
+  %q, %r = index.divrem %lhs, %rhs : index
+  scf.for %i = [%begin to %count step %step] {
+    %unknown_lhs = index.div %lhs_input, %rhs : index
+    %unknown_rhs = index.rem %lhs, %rhs_input : index
+    %signed_rhs = index.div %lhs, %nonzero : index
+    test.use %quotient, %remainder, %q, %r, %unknown_lhs, %unknown_rhs, %signed_rhs : index, index, index, index, index, index, index
+  }
+  func.return
+}
+
+// ====
+
+// A proof established only under control must not justify extra executions.
+func.def @guarded_divisor(%count: index, %lhs: i32, %rhs: i32) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %c0 = scalar.constant 0 : i32
+  %valid = scalar.cmpi ne, %rhs, %c0 : i32
+  scf.for %i = [%begin to %count step %step] {
+    scf.if %valid {
+      %q, %r = scalar.divremui %lhs, %rhs : i32
+      test.use %q, %r : i32, i32
+    } else {
+    }
+  }
+  func.return
+}
+
+// ====
+
+// A safe carried division does not end the guaranteed entry prefix. The
+// dividend is variant, but the following invariant normalization can move.
+func.def @normalization_after_carried_division(%dividend: i32, %divisor_input: i32) -> (i32) {
+  %begin = index.constant 0 : index
+  %end = index.constant 4 : index
+  %step = index.constant 1 : index
+  %divisor = scalar.assume %divisor_input [ne(%divisor_input, 0)] : i32
+  %result = scf.for %i = [%begin to %end step %step](%value = %dividend : i32) -> (i32) {
+    %q, %r = scalar.divremui %value, %divisor : i32
+    %bounded = scalar.assume %divisor [range(%divisor, 32768, 65535)] : i32
+    %shift = scalar.ctlzi %bounded : i32
+    %normalized = scalar.shli %bounded, %shift : i32
+    %sum = scalar.addi %q, %normalized : i32
+    scf.yield %sum : i32
+  }
+  func.return %result : i32
+}
+
+// ----
+func.def @normalization_after_carried_division(%dividend: i32, %divisor_input: i32) -> (i32) {
+  %begin = index.constant 0 : index
+  %end = index.constant 4 : index
+  %step = index.constant 1 : index
+  %divisor = scalar.assume %divisor_input [ne(%divisor_input, 0)] : i32
+  %bounded = scalar.assume %divisor [range(%divisor, 32768, 65535)] : i32
+  %shift = scalar.ctlzi %bounded : i32
+  %normalized = scalar.shli %bounded, %shift : i32
+  %result = scf.for %i = [%begin to %end step %step](%value = %dividend : i32) -> (i32) {
+    %q, %r = scalar.divremui %value, %divisor : i32
+    %sum = scalar.addi %q, %normalized : i32
+    scf.yield %sum : i32
+  }
+  func.return %result : i32
+}

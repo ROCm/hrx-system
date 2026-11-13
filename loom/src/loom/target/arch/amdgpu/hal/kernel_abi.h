@@ -362,9 +362,8 @@ iree_status_t loom_amdgpu_hal_kernel_abi_verify_low(
     const loom_module_t* module, const loom_op_t* function_op,
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_amdgpu_processor_properties_t* properties, uint32_t max_errors,
-    iree_diagnostic_emitter_t emitter,
-    loom_amdgpu_hal_kernel_abi_verify_result_t* out_result,
-    iree_arena_allocator_t* arena);
+    iree_diagnostic_emitter_t emitter, iree_arena_allocator_t* arena,
+    loom_amdgpu_hal_kernel_abi_verify_result_t* out_result);
 
 // Derives the AMDGPU HAL-kernel ABI layout for |function_op|.
 //
@@ -380,8 +379,8 @@ iree_status_t loom_amdgpu_hal_kernel_abi_verify_low(
 // contract misuse that would otherwise make layout construction unsafe.
 iree_status_t loom_amdgpu_hal_kernel_abi_layout_from_low(
     const loom_module_t* module, const loom_op_t* function_op,
-    loom_amdgpu_hal_kernel_abi_layout_t* out_layout,
-    iree_arena_allocator_t* arena);
+    iree_arena_allocator_t* arena,
+    loom_amdgpu_hal_kernel_abi_layout_t* out_layout);
 
 // Returns true when |function_op| carries a prepared AMDGPU HAL ABI layout.
 bool loom_amdgpu_hal_kernel_abi_has_layout_attr(const loom_op_t* function_op);
@@ -400,8 +399,8 @@ iree_status_t loom_amdgpu_hal_kernel_abi_make_layout_attr(
 // Loads a prepared AMDGPU HAL ABI layout snapshot from low.kernel.def.
 iree_status_t loom_amdgpu_hal_kernel_abi_layout_from_attr(
     const loom_module_t* module, const loom_op_t* function_op,
-    loom_amdgpu_hal_kernel_abi_layout_t* out_layout,
-    iree_arena_allocator_t* arena);
+    iree_arena_allocator_t* arena,
+    loom_amdgpu_hal_kernel_abi_layout_t* out_layout);
 
 // Returns the ABI source kind for |value_id| when it is defined by an AMDGPU
 // low.live_in op, or UNKNOWN otherwise.

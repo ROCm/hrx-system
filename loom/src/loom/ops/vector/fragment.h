@@ -81,8 +81,9 @@ typedef struct loom_vector_fragment_fact_t {
   // One-based source schema encoding ID when HAS_SOURCE_STATIC_SCHEMA is set.
   uint16_t source_static_schema_encoding_id;
 
-  // Number of logical matrix shape values stored in shape_value_ids.
-  uint16_t shape_rank;
+  // Number of logical matrix shape values stored in shape_value_ids. A full
+  // word keeps the raw interned representation free of alignment padding.
+  uint32_t shape_rank;
 
   // Logical shape SSA value IDs in source order. Rank-2 fragments use
   // [row, column]; rank-3 fragments use [block, row, column].

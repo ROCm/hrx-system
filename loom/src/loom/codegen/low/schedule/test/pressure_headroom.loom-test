@@ -105,26 +105,26 @@ node 2 issue-cycle: 4
 // does not grow the physical bank and has no constraining headroom.
 // RUN: emit low-schedule-json @preferred_ownership_reuses_storage strategy=resource-stall diagnostics=candidates output=none
 
-amdgpu.target<gfx1100> @target {subgroup_size = 32}
+test.target<low_core> @target
 
-low.func.def target<amdgpu.rdna3.core>(@target) @preferred_ownership_reuses_storage(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %accumulator: reg<amdgpu.vgpr x8>) -> (reg<amdgpu.vgpr x8>) asm {
-  // REMARK@+1: BACKEND/015 {chosen_packet="amdgpu.v_wmma_f32_16x16x16_f16", rejected_packet="low.storage.reserve", chosen_projected_live_units="8", chosen_units_until_pressure_cliff="4294967295"}
-  %result = v_wmma_f32_16x16x16_f16 %lhs, %rhs, %accumulator
+low.func.def target<test.low.core>(@target) @preferred_ownership_reuses_storage(%lhs: reg<test.phys x4>, %rhs: reg<test.phys x4>, %accumulator: reg<test.phys x4>) -> (reg<test.phys x4>) asm {
+  // REMARK@+1: BACKEND/015 {chosen_packet="test.accumulate.v4phys", rejected_packet="low.storage.reserve", chosen_projected_live_units="4", chosen_units_until_pressure_cliff="4294967295"}
+  %result = test.accumulate.v4phys %lhs, %rhs, %accumulator
   %scratch = storage {byte_alignment = 4, byte_length = 4} : low.storage<private>
   return %result
 }
 
 // ====
 
-// An independent result overlaps all three eight-unit inputs. The early
-// footprint and seven-unit alignment reserve leave 217 of 256 units free.
+// An independent result overlaps all three four-unit inputs. The early
+// footprint and three-unit alignment reserve leave 13 of 32 units free.
 // RUN: emit low-schedule-json @independent_early_write_has_distinct_storage strategy=resource-stall diagnostics=candidates output=none
 
-amdgpu.target<gfx1100> @target {subgroup_size = 32}
+test.target<low_core> @target
 
-low.func.def target<amdgpu.rdna3.core>(@target) @independent_early_write_has_distinct_storage(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %accumulator: reg<amdgpu.vgpr x8>) -> (reg<amdgpu.vgpr x8>) asm {
-  // REMARK@+1: BACKEND/015 {chosen_packet="amdgpu.v_wmma_f32_16x16x16_f16", rejected_packet="low.storage.reserve", chosen_projected_live_units="8", chosen_units_until_pressure_cliff="217"}
-  %result = v_wmma_f32_16x16x16_f16 %lhs, %rhs, %accumulator : reg<amdgpu.vgpr x8>
+low.func.def target<test.low.core>(@target) @independent_early_write_has_distinct_storage(%lhs: reg<test.phys x4>, %rhs: reg<test.phys x4>, %accumulator: reg<test.phys x4>) -> (reg<test.phys x4>) asm {
+  // REMARK@+1: BACKEND/015 {chosen_packet="test.accumulate.v4phys", rejected_packet="low.storage.reserve", chosen_projected_live_units="4", chosen_units_until_pressure_cliff="13"}
+  %result = test.accumulate.v4phys %lhs, %rhs, %accumulator : reg<test.phys x4>
   %scratch = storage {byte_alignment = 4, byte_length = 4} : low.storage<private>
   return %result
 }
@@ -183,16 +183,153 @@ node 2 issue-cycle: 4
 
 // ====
 
-// The subtraction/cmov sequence still reads its original input after writing
-// the result. With all sixteen GPRs live, that temporary overlap exceeds the
-// physical bank even though the final live demand remains sixteen units.
+// The packet still reads its original input after writing the result.
+// With all 32 registers live, that temporary overlap exceeds the
+// physical bank even though the final live demand remains 32 units.
 // RUN: emit low-schedule-json @late_read_overlap strategy=resource-stall diagnostics=candidates output=none
 
-x86.target<avx2> @target
+test.target<low_core> @target
 
-low.func.def target<x86.avx2.core>(@target) @late_read_overlap(%held: reg<x86.gpr32 x15>, %source: reg<x86.gpr32>) -> (reg<x86.gpr32>, reg<x86.xmm x15>) asm {
-  // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", chosen_packet="x86.scalar.sub.if_uge.imm.gpr32", chosen_projected_live_units="16", chosen_pressure_cliff_source="x86.gpr32", chosen_pressure_cliff_units="16", chosen_pressure_cliff_penalty="2"}
-  %result = sub.if_uge.imm.gpr32 %source, 17
-  %released = copy %held : reg<x86.gpr32 x15> -> reg<x86.xmm x15>
+low.func.def target<test.low.core>(@target) @late_read_overlap(%held: reg<test.phys x31>, %source: reg<test.phys>) -> (reg<test.phys>, reg<test.i32 x31>) asm {
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", chosen_packet="test.late_update.phys", chosen_projected_live_units="32", chosen_pressure_cliff_source="test.phys", chosen_pressure_cliff_units="32", chosen_pressure_cliff_penalty="2"}
+  %result = test.late_update.phys %source
+  %released = copy %held : reg<test.phys x31> -> reg<test.i32 x31>
   return %result, %released
 }
+
+// ====
+
+// Seventeen consumers share the constant. The first sixteen retire seventeen
+// input units and produce sixteen results, paying for the constant without
+// retiring it. The bounded proof survives the extra unretained consumer.
+// A physical materialization reaches the four-register bank limit and puts
+// selection into pressure recovery; the independent read opens no storage.
+// RUN: emit low-schedule-query @bounded_frontier_retires_subset strategy=resource-stall order=0,1,3 scheduled-pressure=test.explicit32
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @bounded_frontier_retires_subset(%held: reg<test.explicit32 x3>, %seed: reg<test.i32>, %tail0: reg<test.i32>, %tail1: reg<test.i32>, %tail2: reg<test.i32>, %tail3: reg<test.i32>, %tail4: reg<test.i32>, %tail5: reg<test.i32>, %tail6: reg<test.i32>, %tail7: reg<test.i32>, %tail8: reg<test.i32>, %tail9: reg<test.i32>, %tail10: reg<test.i32>, %tail11: reg<test.i32>, %tail12: reg<test.i32>, %tail13: reg<test.i32>, %tail14: reg<test.i32>, %tail15: reg<test.i32>, %tail16: reg<test.i32>, %tail17: reg<test.i32>) -> (reg<test.explicit32 x3>, reg<test.explicit32>, reg<test.i32 x17>, reg<test.i32>) asm {
+  test.event.memory.read.i32 %seed
+  %increment = test.const.i32 1
+  %physical = test.rematerialize.explicit32 %seed
+  %first = test.add_mul.i32 %tail0, %tail1, %increment
+  %result1 = test.add.i32 %tail2, %increment
+  %result2 = test.add.i32 %tail3, %increment
+  %result3 = test.add.i32 %tail4, %increment
+  %result4 = test.add.i32 %tail5, %increment
+  %result5 = test.add.i32 %tail6, %increment
+  %result6 = test.add.i32 %tail7, %increment
+  %result7 = test.add.i32 %tail8, %increment
+  %result8 = test.add.i32 %tail9, %increment
+  %result9 = test.add.i32 %tail10, %increment
+  %result10 = test.add.i32 %tail11, %increment
+  %result11 = test.add.i32 %tail12, %increment
+  %result12 = test.add.i32 %tail13, %increment
+  %result13 = test.add.i32 %tail14, %increment
+  %result14 = test.add.i32 %tail15, %increment
+  %result15 = test.add.i32 %tail16, %increment
+  %result16 = test.add.i32 %tail17, %increment
+  %results = concat(%first, %result1, %result2, %result3, %result4, %result5, %result6, %result7, %result8, %result9, %result10, %result11, %result12, %result13, %result14, %result15, %result16) : (reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>) -> reg<test.i32 x17>
+  return %held, %physical, %results, %seed
+}
+
+// ----
+block 0 order: 1, 3, 0
+scheduled pressure test.explicit32: peak-live-units=4 peak-live-values=2
+
+// ====
+
+// The seventeenth consumer also reads a tail used by the retained subset.
+// That tail cannot be retired by the subset, so it no longer proves neutral
+// growth. Keep the independent read, which opens no storage, ahead of it.
+// RUN: emit low-schedule-query @bounded_frontier_keeps_shared_input strategy=resource-stall order=0,1,3 scheduled-pressure=test.explicit32
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @bounded_frontier_keeps_shared_input(%held: reg<test.explicit32 x3>, %seed: reg<test.i32>, %tail0: reg<test.i32>, %tail1: reg<test.i32>, %tail2: reg<test.i32>, %tail3: reg<test.i32>, %tail4: reg<test.i32>, %tail5: reg<test.i32>, %tail6: reg<test.i32>, %tail7: reg<test.i32>, %tail8: reg<test.i32>, %tail9: reg<test.i32>, %tail10: reg<test.i32>, %tail11: reg<test.i32>, %tail12: reg<test.i32>, %tail13: reg<test.i32>, %tail14: reg<test.i32>, %tail15: reg<test.i32>, %tail16: reg<test.i32>) -> (reg<test.explicit32 x3>, reg<test.explicit32>, reg<test.i32 x17>, reg<test.i32>) asm {
+  test.event.memory.read.i32 %seed
+  %increment = test.const.i32 1
+  %physical = test.rematerialize.explicit32 %seed
+  %first = test.add_mul.i32 %tail0, %tail1, %increment
+  %result1 = test.add.i32 %tail2, %increment
+  %result2 = test.add.i32 %tail3, %increment
+  %result3 = test.add.i32 %tail4, %increment
+  %result4 = test.add.i32 %tail5, %increment
+  %result5 = test.add.i32 %tail6, %increment
+  %result6 = test.add.i32 %tail7, %increment
+  %result7 = test.add.i32 %tail8, %increment
+  %result8 = test.add.i32 %tail9, %increment
+  %result9 = test.add.i32 %tail10, %increment
+  %result10 = test.add.i32 %tail11, %increment
+  %result11 = test.add.i32 %tail12, %increment
+  %result12 = test.add.i32 %tail13, %increment
+  %result13 = test.add.i32 %tail14, %increment
+  %result14 = test.add.i32 %tail15, %increment
+  %result15 = test.add.i32 %tail16, %increment
+  %result16 = test.add.i32 %tail1, %increment
+  %results = concat(%first, %result1, %result2, %result3, %result4, %result5, %result6, %result7, %result8, %result9, %result10, %result11, %result12, %result13, %result14, %result15, %result16) : (reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>) -> reg<test.i32 x17>
+  return %held, %physical, %results, %seed
+}
+
+// ----
+block 0 order: 0, 1, 3
+scheduled pressure test.explicit32: peak-live-units=4 peak-live-values=2
+
+// ====
+
+// One store retires one unit while the shared address adds one. Making that
+// neutral frontier ready has no retirement priority over another neutral move.
+// The store effects serialize, so only the first store is unlocked initially.
+// RUN: emit low-schedule-query @cross_bank_transfers_keep_neutral_frontier strategy=resource-stall order=0,1,4 scheduled-pressure=test.phys
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @cross_bank_transfers_keep_neutral_frontier(%held: reg<test.phys x27>, %tail0: reg<test.phys>, %tail1: reg<test.phys>, %tail2: reg<test.phys>, %seed0: reg<test.i32>, %seed1: reg<test.i32>, %seed2: reg<test.i32>) -> (reg<test.i32 x27>, reg<test.i32>, reg<test.i32>, reg<test.i32>) asm {
+  %shared = test.const.ptr 0
+  %moved0 = test.move.to.phys %seed0
+  %moved1 = test.move.to.phys %seed1
+  %moved2 = test.move.to.phys %seed2
+  test.store.phys.x1 %shared, %tail0
+  test.store.phys.x1 %shared, %tail1
+  test.store.phys.x1 %shared, %tail2
+  low.schedule.fence
+  %held_result = copy %held : reg<test.phys x27> -> reg<test.i32 x27>
+  %result0 = copy %moved0 : reg<test.phys> -> reg<test.i32>
+  %result1 = copy %moved1 : reg<test.phys> -> reg<test.i32>
+  %result2 = copy %moved2 : reg<test.phys> -> reg<test.i32>
+  return %held_result, %result0, %result1, %result2
+}
+
+// ----
+block 0 order: 1, 0, 4
+scheduled pressure test.phys: peak-live-units=31 peak-live-values=5
+
+// ====
+
+// Cross-bank moves keep aggregate liveness unchanged while growing a nearly
+// full physical bank. The shared address exposes stores that retire that bank.
+// Each store retires two units, repaying the one-unit shared address. A fence
+// keeps unrelated payloads live until these consumers have completed.
+// RUN: emit low-schedule-query @cross_bank_transfers_wait_for_retirement strategy=resource-stall order=0,1,4 scheduled-pressure=test.phys
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @cross_bank_transfers_wait_for_retirement(%held: reg<test.phys x24>, %tail0: reg<test.phys>, %tail1: reg<test.phys>, %tail2: reg<test.phys>, %tail3: reg<test.phys>, %tail4: reg<test.phys>, %tail5: reg<test.phys>, %seed0: reg<test.i32>, %seed1: reg<test.i32>, %seed2: reg<test.i32>) -> (reg<test.i32 x24>, reg<test.i32>, reg<test.i32>, reg<test.i32>) asm {
+  %shared = test.const.ptr 0
+  %moved0 = test.move.to.phys %seed0
+  %moved1 = test.move.to.phys %seed1
+  %moved2 = test.move.to.phys %seed2
+  test.store.phys.x2 %shared, %tail0, %tail1
+  test.store.phys.x2 %shared, %tail2, %tail3
+  test.store.phys.x2 %shared, %tail4, %tail5
+  low.schedule.fence
+  %held_result = copy %held : reg<test.phys x24> -> reg<test.i32 x24>
+  %result0 = copy %moved0 : reg<test.phys> -> reg<test.i32>
+  %result1 = copy %moved1 : reg<test.phys> -> reg<test.i32>
+  %result2 = copy %moved2 : reg<test.phys> -> reg<test.i32>
+  return %held_result, %result0, %result1, %result2
+}
+
+// ----
+block 0 order: 0, 4, 1
+scheduled pressure test.phys: peak-live-units=30 peak-live-values=7

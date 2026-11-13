@@ -247,6 +247,17 @@ TEST_P(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
   constexpr loom_string_ref_t kMatrixSmfmacTag = LOOM_STRING_REF(0, 115, 17);
   constexpr loom_string_ref_t kRegisterClassGpr = LOOM_STRING_REF(0, 132, 8);
   constexpr loom_string_ref_t kRegisterClassFpr = LOOM_STRING_REF(0, 140, 8);
+  const loom_low_descriptor_identity_t descriptor_identities[] = {
+      {.semantic_tag_string_ref = kRegisterCopyTag},
+      {.semantic_tag_string_ref = kMemoryGlobalTag},
+      {.semantic_tag_string_ref = kMemoryStackLoadTag},
+      {.semantic_tag_string_ref = kMemoryStackStoreTag},
+      {.semantic_tag_string_ref = kMatrixWmmaTag},
+      {.semantic_tag_string_ref = kMemoryGlobalTag},
+      {.semantic_tag_string_ref = kMatrixSwmmacTag},
+      {.semantic_tag_string_ref = kMatrixSmfmacTag},
+  };
+  const uint64_t descriptor_stable_ids[8] = {};
   loom_low_descriptor_t descriptors[8] = {};
   const loom_low_descriptor_layout_t layouts[] = {
       {},
@@ -254,16 +265,11 @@ TEST_P(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
       {.effect_start = 1, .effect_count = 1},
   };
   loom_low_descriptor_view_t descriptor_views[8] = {};
-  descriptors[0].semantic_tag_string_ref = kRegisterCopyTag;
-  descriptors[1].semantic_tag_string_ref = kMemoryGlobalTag;
-  descriptors[2].semantic_tag_string_ref = kMemoryStackLoadTag;
+  for (uint16_t i = 0; i < IREE_ARRAYSIZE(descriptors); ++i) {
+    descriptors[i].identity_ordinal = i;
+  }
   descriptors[2].layout_index = 1;
-  descriptors[3].semantic_tag_string_ref = kMemoryStackStoreTag;
   descriptors[3].layout_index = 2;
-  descriptors[4].semantic_tag_string_ref = kMatrixWmmaTag;
-  descriptors[5].semantic_tag_string_ref = kMemoryGlobalTag;
-  descriptors[6].semantic_tag_string_ref = kMatrixSwmmacTag;
-  descriptors[7].semantic_tag_string_ref = kMatrixSmfmacTag;
   const loom_low_effect_t effects[] = {
       {
           .kind = LOOM_LOW_EFFECT_KIND_READ,
@@ -307,9 +313,10 @@ TEST_P(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
           .physical_register_candidate_start = {},
           .candidate_lookup = {},
           .alias_set_id = {},
-          .spill_class_id = LOOM_LOW_REG_CLASS_NONE,
+          .spill_unit_bits = 32,
           .full_register_part_mask = 1,
           .spill_slot_space = LOOM_LOW_SPILL_SLOT_SPACE_STACK,
+          .spill_alignment_log2 = 0x40,
       },
       {
           .name_string_ref = kRegisterClassFpr,
@@ -320,15 +327,19 @@ TEST_P(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
           .physical_register_candidate_start = {},
           .candidate_lookup = {},
           .alias_set_id = {},
-          .spill_class_id = LOOM_LOW_REG_CLASS_NONE,
+          .spill_unit_bits = 32,
           .full_register_part_mask = 1,
           .spill_slot_space = LOOM_LOW_SPILL_SLOT_SPACE_STACK,
+          .spill_alignment_log2 = 0x40,
       },
   };
   loom_low_descriptor_set_t descriptor_set = {
       .stable_id = 1,
+      .descriptor_identities = descriptor_identities,
+      .descriptor_stable_ids = descriptor_stable_ids,
       .descriptors = descriptors,
       .descriptor_layouts = layouts,
+      .descriptor_identity_count = IREE_ARRAYSIZE(descriptor_identities),
       .descriptor_layout_count = IREE_ARRAYSIZE(layouts),
       .descriptor_views = descriptor_views,
       .descriptor_count = IREE_ARRAYSIZE(descriptors),
@@ -415,8 +426,8 @@ TEST_P(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
   loom_target_compile_report_t report = {};
   iree_arena_allocator_t report_arena;
   iree_arena_initialize(&block_pool, &report_arena);
-  loom_target_compile_report_initialize(&report,
-                                        iree_arena_allocator(&report_arena));
+  loom_target_compile_report_initialize(iree_arena_allocator(&report_arena),
+                                        &report);
   report.requested_detail_flags =
       LOOM_TARGET_COMPILE_REPORT_DETAIL_PRESSURE_ROWS |
       LOOM_TARGET_COMPILE_REPORT_DETAIL_PRESSURE_ORIGIN_ROWS |
@@ -1279,8 +1290,8 @@ TEST_P(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
       0u);
 
   loom_target_compile_report_t bounded_report = {};
-  loom_target_compile_report_initialize(&bounded_report,
-                                        iree_allocator_system());
+  loom_target_compile_report_initialize(iree_allocator_system(),
+                                        &bounded_report);
   bounded_report.requested_detail_flags =
       loom_target_compile_report_requested_detail_flags(
           LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_SUMMARY);
@@ -1298,8 +1309,8 @@ TEST_P(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
   loom_target_compile_report_deinitialize(&bounded_report);
 
   loom_target_compile_report_t summary_report = {};
-  loom_target_compile_report_initialize(&summary_report,
-                                        iree_allocator_system());
+  loom_target_compile_report_initialize(iree_allocator_system(),
+                                        &summary_report);
   summary_report.requested_detail_flags =
       LOOM_TARGET_COMPILE_REPORT_DETAIL_SCHEDULE_BAND_SUMMARY_ROWS;
   IREE_ASSERT_OK(loom_target_compile_report_record_low_emission_frame(
@@ -1330,8 +1341,8 @@ TEST_P(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
   loom_low_emission_frame_t split_frame = frame;
   split_frame.schedule.blocks = split_blocks;
   split_frame.schedule.block_count = IREE_ARRAYSIZE(split_blocks);
-  loom_target_compile_report_initialize(&summary_report,
-                                        iree_allocator_system());
+  loom_target_compile_report_initialize(iree_allocator_system(),
+                                        &summary_report);
   summary_report.requested_detail_flags =
       LOOM_TARGET_COMPILE_REPORT_DETAIL_SCHEDULE_BAND_SUMMARY_ROWS;
   IREE_ASSERT_OK(loom_target_compile_report_record_low_emission_frame(
@@ -1353,8 +1364,8 @@ TEST_P(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
   loom_target_compile_report_deinitialize(&summary_report);
 
   loom_target_compile_report_t allocation_report = {};
-  loom_target_compile_report_initialize(&allocation_report,
-                                        iree_allocator_system());
+  loom_target_compile_report_initialize(iree_allocator_system(),
+                                        &allocation_report);
   allocation_report.requested_detail_flags =
       LOOM_TARGET_COMPILE_REPORT_DETAIL_PRESSURE_ORIGIN_ROWS;
   IREE_ASSERT_OK(loom_target_compile_report_record_low_allocation(

@@ -15,10 +15,22 @@
 extern "C" {
 #endif
 
+typedef struct loom_low_lower_structural_boundary_t
+    loom_low_lower_structural_boundary_t;
+typedef struct loom_low_lower_structural_conversion_t
+    loom_low_lower_structural_conversion_t;
+
 typedef struct loom_low_lower_structural_plan_t {
   // Per-block exact branch choices: zero for dynamic, one for false, and two
   // for true. NULL when all edges are dynamic or unconditional.
   uint8_t* branch_conditions;
+  // First receiving signature observed by the source-plan traversal. These
+  // analysis-arena records are consumed after producer carriers are final.
+  loom_low_lower_structural_boundary_t* first_boundary;
+  // Last observed signature, used to append in source traversal order.
+  loom_low_lower_structural_boundary_t* last_boundary;
+  // Next prepared conversion in emission order. Equal carriers retain no row.
+  const loom_low_lower_structural_conversion_t* next_conversion;
 } loom_low_lower_structural_plan_t;
 
 // Retains an exact conditional edge before structural storage demand is marked.
@@ -43,11 +55,22 @@ loom_type_t loom_low_lower_structural_block_argument_type(
     const loom_low_lower_context_t* context, uint16_t block_index,
     uint16_t argument_index);
 
-// Retains result carriers for direct semantic calls and structured control,
+// Retains result carriers for structured control,
 // including the distinct header tuple of scf.while. Rejects unconsumed source
 // pipeline annotations before any Low operation is constructed.
 iree_status_t loom_low_lower_structural_plan_op(
     loom_low_lower_context_t* context, const loom_op_t* source_op);
+
+// Prepares incoming region operands using final producer carriers. Consumes
+// the boundaries retained by structural planning, without traversing source IR.
+iree_status_t loom_low_lower_structural_finalize_boundaries(
+    loom_low_lower_context_t* context);
+
+// Applies the retained conversion at one structured operand, if present.
+// Calls follow source traversal and operand order, including nested exits.
+iree_status_t loom_low_lower_structural_materialize_operand(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    uint16_t operand_index, loom_value_id_t* inout_low_value);
 
 // Expands the operation's selected result bindings into emission scratch.
 // Zero-sized tuples produce NULL. The header output is used only for scf.while;

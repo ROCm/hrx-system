@@ -9,7 +9,7 @@
 module(
     name = "hrx",
     version = "0.0.0",
-    bazel_compatibility = [">=9.2.0"],
+    bazel_compatibility = [">=9.3.2"],
 )
 
 include("//build_tools/bazel:deps.MODULE.bazel")
@@ -23,6 +23,7 @@ include("//loom/build_tools/bazel:deps.MODULE.bazel")
 register_toolchains(
     "//loom/build_tools/bazel:source_tools_benchmark_toolchain",
     "//loom/build_tools/bazel:source_tools_compile_toolchain",
+    "//loom/build_tools/bazel:source_tools_cxx_import_toolchain",
     "//loom/build_tools/bazel:source_tools_format_toolchain",
     "//loom/build_tools/bazel:source_tools_lint_toolchain",
     "//loom/build_tools/bazel:source_tools_link_toolchain",

@@ -89,7 +89,8 @@ class LowAllocationTargetConstraintsTest : public ::testing::Test {
         &builder, target_.descriptor_set_key, &descriptor_set));
     IREE_ASSERT_OK(loom_low_func_def_build(
         &builder, 0, /*visibility=*/0, /*retain=*/0, /*cc=*/0,
-        /*effect_contract=*/0, /*inline_policy=*/0, /*allocation=*/0,
+        /*effect_contract=*/0, /*temperature=*/0, /*inline_policy=*/0,
+        /*allocation=*/0,
         /*schedule=*/0, descriptor_set, /*target=*/{}, /*abi=*/0, {}, {},
         LOOM_STRING_ID_INVALID, {}, loom_symbol_ref_t{0, symbol},
         /*arg_types=*/nullptr, /*arg_types_count=*/0,

@@ -13,10 +13,17 @@
 #include "loom/ir/structural_hash.h"
 #include "loom/ops/op_defs.h"
 #include "loom/util/dominance.h"
+#include "loom/util/segmented_storage.h"
 
 //===----------------------------------------------------------------------===//
 // Expression identity
 //===----------------------------------------------------------------------===//
+
+void loom_expression_hash_cache_initialize(
+    loom_expression_hash_cache_t* cache) {
+  *cache = (loom_expression_hash_cache_t){0};
+  cache->type_hash = loom_type_hash(cache->type);
+}
 
 // Computes a content-aware hash for an op based on its kind, operands,
 // result types, attributes, and instance flags. Uses loom_attribute_hash
@@ -27,10 +34,14 @@
 // different result types from the same operands.
 uint32_t loom_expression_hash_with_value_identity(
     const loom_module_t* module, const loom_op_t* op,
-    loom_expression_value_identity_fn_t value_identity, void* user_data) {
+    loom_expression_value_identity_fn_t value_identity, void* user_data,
+    loom_expression_hash_cache_t* cache) {
   uint32_t hash = loom_structural_hash_initialize();
-  hash = loom_structural_hash_mix_u16(hash, op->kind);
-  hash = loom_structural_hash_mix_u16(hash, op->operand_count);
+  hash = loom_structural_hash_mix_u32(
+      hash, (uint32_t)op->kind | ((uint32_t)op->operand_count << 16));
+  hash = loom_structural_hash_mix_u32(
+      hash, (uint32_t)op->result_count | ((uint32_t)op->attribute_count << 16) |
+                ((uint32_t)op->instance_flags << 24));
   const loom_value_id_t* operands = loom_op_const_operands(op);
   for (uint16_t i = 0; i < op->operand_count; ++i) {
     const loom_value_id_t identity =
@@ -47,14 +58,16 @@ uint32_t loom_expression_hash_with_value_identity(
     }
   }
   const loom_value_id_t* results = loom_op_results((loom_op_t*)op);
-  hash = loom_structural_hash_mix_u16(hash, op->result_count);
   for (uint16_t i = 0; i < op->result_count; ++i) {
     if (results[i] != LOOM_VALUE_ID_INVALID) {
       loom_type_t type = loom_module_value_type(module, results[i]);
-      hash = loom_structural_hash_mix_u32(hash, loom_type_hash(type));
+      if (memcmp(&type, &cache->type, sizeof(type)) != 0) {
+        cache->type = type;
+        cache->type_hash = loom_type_hash(type);
+      }
+      hash = loom_structural_hash_mix_u32(hash, cache->type_hash);
     }
   }
-  hash = loom_structural_hash_mix_u8(hash, op->attribute_count);
   if (op->attribute_count > 0) {
     const loom_attribute_t* attrs = loom_op_attrs((loom_op_t*)op);
     for (uint8_t i = 0; i < op->attribute_count; ++i) {
@@ -62,14 +75,13 @@ uint32_t loom_expression_hash_with_value_identity(
       hash = loom_structural_hash_mix_u32(hash, attribute_hash);
     }
   }
-  hash = loom_structural_hash_mix_u8(hash, op->instance_flags);
   return loom_structural_hash_finalize(hash);
 }
 
-uint32_t loom_expression_hash(const loom_module_t* module,
-                              const loom_op_t* op) {
+uint32_t loom_expression_hash(const loom_module_t* module, const loom_op_t* op,
+                              loom_expression_hash_cache_t* cache) {
   return loom_expression_hash_with_value_identity(
-      module, op, /*value_identity=*/NULL, /*user_data=*/NULL);
+      module, op, /*value_identity=*/NULL, /*user_data=*/NULL, cache);
 }
 
 // Structural equality: two ops are CSE-equivalent if they have the
@@ -187,6 +199,35 @@ typedef struct loom_expression_binding_t {
   uint32_t probe_distance;
 } loom_expression_binding_t;
 
+// One fixed-capacity generation of the open-addressed structural-key index.
+// Growth publishes a new generation after rehashing active bindings; the pass
+// arena reclaims prior pages together at reset.
+typedef struct loom_expression_bucket_table_t {
+  // Contiguous prefix of latest binding indexes per structural key.
+  void* primary;
+  // Number of slots in primary.
+  iree_host_size_t primary_count;
+  // Stable fixed tail pages of latest binding indexes per structural key.
+  loom_segmented_storage_t pages;
+  // Shift mapping a tail slot to its page index.
+  uint8_t page_shift;
+  // Whether slots encode binding index plus one in uint16_t entries.
+  bool compact_heads;
+  // Mask mapping a tail slot to its position within a page.
+  uint32_t page_mask;
+  // Power-of-two slot count minus one; the table stays at most half full.
+  iree_host_size_t mask;
+} loom_expression_bucket_table_t;
+
+// Large expression indexes use fixed pages so every payload remains eligible
+// for the reusable arena block pool. Page capacities are powers of two, making
+// random access one shift, one mask, and one page-pointer load.
+enum {
+  LOOM_EXPRESSION_BINDING_PAGE_MAX_CAPACITY = 2048,
+  LOOM_EXPRESSION_BUCKET_PAGE_MAX_BYTES = 64 * 1024,
+  LOOM_EXPRESSION_SCOPE_PAGE_MAX_CAPACITY = 64,
+};
+
 // One value-keyed entry in the sparse fact-identity index. A slot for an
 // original value tracks its active refinement; a slot for an identity result
 // points back to the record that names its original value. Result slots remain
@@ -222,18 +263,28 @@ struct loom_expression_walk_t {
   loom_expression_identity_policy_t identity_policy;
   // Shared dominator-order operation and scope traversal.
   loom_dominance_walk_t* dominance_walk;
+  // Arena owning the walk's adaptive index generations.
+  iree_arena_allocator_t* arena;
   // Innermost active dominance scope, including completed dominating blocks.
   loom_expression_scope_t* active_scope;
-  // Fixed inventory of client scopes, one for every block in the region tree.
-  loom_expression_scope_t* scopes;
-  // Number of scopes entered so far.
-  iree_host_size_t scope_count;
-  // Fixed-capacity entries shared by all dominance scopes in this walk.
-  loom_expression_binding_t* bindings;
-  // Latest binding index per structural key, or UINT32_MAX for an empty slot.
-  uint32_t* bucket_heads;
-  // Power-of-two slot count minus one; the table stays at most half full.
-  iree_host_size_t bucket_mask;
+  // Current stable page receiving newly entered dominance scopes.
+  loom_expression_scope_t* scope_page;
+  // Number of initialized records in scope_page.
+  uint16_t scope_page_count;
+  // Number of records allocated in every scope page.
+  uint16_t scope_page_capacity;
+  // Stable adaptive pages of entries shared by all dominance scopes.
+  loom_segmented_storage_t binding_pages;
+  // Shift mapping a binding index to its page index.
+  uint8_t binding_page_shift;
+  // Mask mapping a binding index to its position within a page.
+  uint32_t binding_page_mask;
+  // Latest binding per structural key.
+  loom_expression_bucket_table_t buckets;
+  // Whether block entry expands storage for the operations in that scope.
+  bool adaptive_capacity;
+  // Binding count that can be inserted without growing either index.
+  uint32_t binding_capacity;
   // Number of active bindings; scopes retain checkpoints into this array.
   uint32_t binding_count;
   // Definition frontier: counts value-producing ops, not result-less barriers.
@@ -245,13 +296,230 @@ struct loom_expression_walk_t {
   loom_expression_refinement_state_t* refinement_state;
 };
 
-static iree_host_size_t loom_expression_scope_slot(
+static uint8_t loom_expression_page_shift(const iree_arena_allocator_t* arena,
+                                          iree_host_size_t element_size,
+                                          iree_host_size_t maximum_capacity) {
+  const iree_host_size_t maximum_allocation_size =
+      iree_arena_block_pool_max_allocation_size(arena->block_pool);
+  const iree_host_size_t capacity_limit = iree_min(
+      maximum_capacity, iree_max(maximum_allocation_size / element_size, 1));
+  uint8_t shift = 0;
+  while (((iree_host_size_t)1 << (shift + 1)) <= capacity_limit) {
+    ++shift;
+  }
+  return shift;
+}
+
+static loom_expression_binding_t* loom_expression_binding(
+    loom_expression_walk_t* walk, uint32_t index) {
+  loom_expression_binding_t* page =
+      (loom_expression_binding_t*)loom_segmented_storage_segment(
+          &walk->binding_pages, index >> walk->binding_page_shift);
+  return &page[index & walk->binding_page_mask];
+}
+
+static const loom_expression_binding_t* loom_expression_const_binding(
+    const loom_expression_walk_t* walk, uint32_t index) {
+  const loom_expression_binding_t* page =
+      (const loom_expression_binding_t*)loom_segmented_storage_const_segment(
+          &walk->binding_pages, index >> walk->binding_page_shift);
+  return &page[index & walk->binding_page_mask];
+}
+
+static uint32_t loom_expression_bucket_head(
+    const loom_expression_bucket_table_t* table, iree_host_size_t slot) {
+  if (slot < table->primary_count) {
+    if (table->compact_heads) {
+      const uint16_t encoded = ((const uint16_t*)table->primary)[slot];
+      return encoded ? (uint32_t)encoded - 1 : UINT32_MAX;
+    }
+    return ((const uint32_t*)table->primary)[slot];
+  }
+  slot -= table->primary_count;
+  const iree_host_size_t page_index = slot >> table->page_shift;
+  const iree_host_size_t page_offset = slot & table->page_mask;
+  const void* page =
+      loom_segmented_storage_const_segment(&table->pages, (uint32_t)page_index);
+  if (table->compact_heads) {
+    const uint16_t encoded = ((const uint16_t*)page)[page_offset];
+    return encoded ? (uint32_t)encoded - 1 : UINT32_MAX;
+  }
+  return ((const uint32_t*)page)[page_offset];
+}
+
+static void loom_expression_set_bucket_head(
+    loom_expression_bucket_table_t* table, iree_host_size_t slot,
+    uint32_t binding_index) {
+  if (slot < table->primary_count) {
+    if (table->compact_heads) {
+      IREE_ASSERT(binding_index == UINT32_MAX || binding_index < UINT16_MAX);
+      ((uint16_t*)table->primary)[slot] =
+          binding_index == UINT32_MAX ? 0 : (uint16_t)(binding_index + 1);
+    } else {
+      ((uint32_t*)table->primary)[slot] = binding_index;
+    }
+    return;
+  }
+  slot -= table->primary_count;
+  const iree_host_size_t page_index = slot >> table->page_shift;
+  const iree_host_size_t page_offset = slot & table->page_mask;
+  void* page =
+      loom_segmented_storage_segment(&table->pages, (uint32_t)page_index);
+  if (table->compact_heads) {
+    IREE_ASSERT(binding_index == UINT32_MAX || binding_index < UINT16_MAX);
+    ((uint16_t*)page)[page_offset] =
+        binding_index == UINT32_MAX ? 0 : (uint16_t)(binding_index + 1);
+    return;
+  }
+  ((uint32_t*)page)[page_offset] = binding_index;
+}
+
+static iree_status_t loom_expression_bucket_table_allocate(
+    iree_arena_allocator_t* arena, uint32_t entry_capacity,
+    loom_expression_bucket_table_t* out_table) {
+  *out_table = (loom_expression_bucket_table_t){0};
+  iree_host_size_t minimum_slot_count = 0;
+  if (!iree_host_size_checked_mul((iree_host_size_t)entry_capacity, 2,
+                                  &minimum_slot_count)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "expression index capacity overflow");
+  }
+  const iree_host_size_t slot_count =
+      iree_host_size_next_power_of_two(iree_max(minimum_slot_count, 1));
+  out_table->mask = slot_count - 1;
+  out_table->compact_heads = entry_capacity <= UINT16_MAX;
+  const iree_host_size_t element_size =
+      out_table->compact_heads ? sizeof(uint16_t) : sizeof(uint32_t);
+  out_table->primary_count = iree_min(
+      slot_count, iree_arena_block_pool_max_allocation_size(arena->block_pool) /
+                      element_size);
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, out_table->primary_count, element_size, &out_table->primary));
+  const uint8_t initial_byte = out_table->compact_heads ? 0 : 0xFF;
+  memset(out_table->primary, initial_byte,
+         out_table->primary_count * element_size);
+  const iree_host_size_t tail_count = slot_count - out_table->primary_count;
+  const iree_host_size_t maximum_page_capacity =
+      LOOM_EXPRESSION_BUCKET_PAGE_MAX_BYTES / element_size;
+  const iree_host_size_t desired_page_capacity =
+      tail_count == 0 ? 1
+                      : iree_min(iree_host_size_next_power_of_two(tail_count),
+                                 maximum_page_capacity);
+  out_table->page_shift =
+      loom_expression_page_shift(arena, element_size, desired_page_capacity);
+  out_table->page_mask = ((uint32_t)1 << out_table->page_shift) - 1;
+  const iree_host_size_t page_capacity = (iree_host_size_t)1
+                                         << out_table->page_shift;
+  loom_segmented_storage_initialize(page_capacity * element_size, element_size,
+                                    &out_table->pages);
+  const iree_host_size_t page_count =
+      tail_count == 0 ? 0 : ((tail_count - 1) >> out_table->page_shift) + 1;
+  if (page_count > UINT32_MAX) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "expression index exceeds page directory");
+  }
+  for (iree_host_size_t i = 0; i < page_count; ++i) {
+    void* page = NULL;
+    IREE_RETURN_IF_ERROR(
+        loom_segmented_storage_append(&out_table->pages, arena, &page));
+    memset(page, initial_byte, page_capacity * element_size);
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_expression_binding_pages_reserve(
+    loom_expression_walk_t* walk, uint32_t entry_capacity) {
+  const uint32_t required_page_count =
+      entry_capacity == 0
+          ? 0
+          : ((entry_capacity - 1) >> walk->binding_page_shift) + 1;
+  while (walk->binding_pages.segment_count < required_page_count) {
+    void* page = NULL;
+    IREE_RETURN_IF_ERROR(loom_segmented_storage_append(&walk->binding_pages,
+                                                       walk->arena, &page));
+  }
+  return iree_ok_status();
+}
+
+static uint32_t loom_expression_bucket_entry_capacity(
+    const loom_expression_bucket_table_t* table) {
+  iree_host_size_t capacity = (table->mask + 1) / 2;
+  if (table->compact_heads) {
+    capacity = iree_min(capacity, (iree_host_size_t)UINT16_MAX);
+  }
+  return (uint32_t)iree_min(capacity, (iree_host_size_t)UINT32_MAX);
+}
+
+static uint32_t loom_expression_binding_page_capacity(
+    const loom_expression_walk_t* walk) {
+  const uint64_t capacity = (uint64_t)walk->binding_pages.segment_count
+                            << walk->binding_page_shift;
+  return (uint32_t)iree_min(capacity, (uint64_t)UINT32_MAX);
+}
+
+static void loom_expression_update_binding_capacity(
+    loom_expression_walk_t* walk) {
+  walk->binding_capacity =
+      iree_min(loom_expression_bucket_entry_capacity(&walk->buckets),
+               loom_expression_binding_page_capacity(walk));
+}
+
+static iree_status_t loom_expression_bucket_table_grow(
+    loom_expression_walk_t* walk, uint32_t required_entry_capacity) {
+  loom_expression_bucket_table_t grown = {0};
+  IREE_RETURN_IF_ERROR(loom_expression_bucket_table_allocate(
+      walk->arena, required_entry_capacity, &grown));
+
+  const loom_expression_bucket_table_t old = walk->buckets;
+  const iree_host_size_t old_slot_count = old.mask + 1;
+  for (iree_host_size_t old_slot = 0; old_slot < old_slot_count; ++old_slot) {
+    const uint32_t head = loom_expression_bucket_head(&old, old_slot);
+    if (head == UINT32_MAX) {
+      continue;
+    }
+    const loom_expression_binding_t* head_binding =
+        loom_expression_const_binding(walk, head);
+    iree_host_size_t new_slot = head_binding->entry.hash & grown.mask;
+    while (loom_expression_bucket_head(&grown, new_slot) != UINT32_MAX) {
+      new_slot = (new_slot + 1) & grown.mask;
+    }
+    loom_expression_set_bucket_head(&grown, new_slot, head);
+    for (uint32_t binding_index = head; binding_index != UINT32_MAX;) {
+      loom_expression_binding_t* binding =
+          loom_expression_binding(walk, binding_index);
+      binding->probe_distance =
+          (uint32_t)((new_slot - binding->entry.hash) & grown.mask);
+      binding_index = binding->previous;
+    }
+  }
+  walk->buckets = grown;
+  return iree_ok_status();
+}
+
+static iree_status_t loom_expression_reserve_binding_capacity(
+    loom_expression_walk_t* walk, uint32_t required_entry_capacity) {
+  if (required_entry_capacity <= walk->binding_capacity) {
+    return iree_ok_status();
+  }
+  if (required_entry_capacity >
+      loom_expression_bucket_entry_capacity(&walk->buckets)) {
+    IREE_RETURN_IF_ERROR(
+        loom_expression_bucket_table_grow(walk, required_entry_capacity));
+  }
+  IREE_RETURN_IF_ERROR(
+      loom_expression_binding_pages_reserve(walk, required_entry_capacity));
+  loom_expression_update_binding_capacity(walk);
+  return iree_ok_status();
+}
+
+static loom_expression_probe_t loom_expression_scope_probe_slot(
     const loom_expression_cursor_t* cursor, uint32_t hash) {
   const loom_expression_walk_t* walk = cursor->walk;
-  iree_host_size_t slot = hash & walk->bucket_mask;
-  while (walk->bucket_heads[slot] != UINT32_MAX) {
+  iree_host_size_t slot = hash & walk->buckets.mask;
+  uint32_t binding_index = loom_expression_bucket_head(&walk->buckets, slot);
+  while (binding_index != UINT32_MAX) {
     const loom_expression_entry_t* entry =
-        &walk->bindings[walk->bucket_heads[slot]].entry;
+        &loom_expression_const_binding(walk, binding_index)->entry;
     if (entry->hash == hash) {
       const bool equal =
           walk->identity_policy.equal
@@ -260,15 +528,22 @@ static iree_host_size_t loom_expression_scope_slot(
                                             cursor->op)
               : loom_expression_equal(cursor->module, entry->op, cursor->op);
       if (equal) {
-        break;
+        return (loom_expression_probe_t){
+            .slot = slot,
+            .binding_index = binding_index,
+        };
       }
     }
-    slot = (slot + 1) & walk->bucket_mask;
+    slot = (slot + 1) & walk->buckets.mask;
+    binding_index = loom_expression_bucket_head(&walk->buckets, slot);
   }
-  return slot;
+  return (loom_expression_probe_t){
+      .slot = slot,
+      .binding_index = UINT32_MAX,
+  };
 }
 
-loom_expression_entry_t* loom_expression_scope_find(
+loom_expression_probe_t loom_expression_scope_probe(
     const loom_expression_cursor_t* cursor, uint32_t hash,
     loom_expression_lookup_flags_t flags) {
   loom_expression_walk_t* walk = cursor->walk;
@@ -277,28 +552,32 @@ loom_expression_entry_t* loom_expression_scope_find(
       iree_any_bit_set(flags, LOOM_EXPRESSION_LOOKUP_FLAG_STATEFUL)
           ? scope->stateful_start
           : scope->visible_start;
-  const uint32_t index =
-      walk->bucket_heads[loom_expression_scope_slot(cursor, hash)];
-  return index != UINT32_MAX && index >= first ? &walk->bindings[index].entry
-                                               : NULL;
+  loom_expression_probe_t probe =
+      loom_expression_scope_probe_slot(cursor, hash);
+  if (probe.binding_index != UINT32_MAX && probe.binding_index >= first) {
+    probe.entry = &loom_expression_binding(walk, probe.binding_index)->entry;
+  }
+  return probe;
 }
 
 void loom_expression_scope_insert(const loom_expression_cursor_t* cursor,
+                                  loom_expression_probe_t probe,
                                   loom_expression_entry_t entry) {
   loom_expression_walk_t* walk = cursor->walk;
-  const iree_host_size_t slot = loom_expression_scope_slot(cursor, entry.hash);
-  const uint32_t previous = walk->bucket_heads[slot];
+  iree_host_size_t slot = probe.slot;
+  uint32_t previous = probe.binding_index;
   if (previous != UINT32_MAX && previous >= cursor->scope->entry_start) {
-    walk->bindings[previous].entry = entry;
+    loom_expression_binding(walk, previous)->entry = entry;
     return;
   }
+  IREE_ASSERT(walk->binding_count < walk->binding_capacity);
   const uint32_t index = walk->binding_count++;
-  walk->bindings[index] = (loom_expression_binding_t){
+  *loom_expression_binding(walk, index) = (loom_expression_binding_t){
       .entry = entry,
       .previous = previous,
-      .probe_distance = (uint32_t)((slot - entry.hash) & walk->bucket_mask),
+      .probe_distance = (uint32_t)((slot - entry.hash) & walk->buckets.mask),
   };
-  walk->bucket_heads[slot] = index;
+  loom_expression_set_bucket_head(&walk->buckets, slot, index);
 }
 
 //===----------------------------------------------------------------------===//
@@ -512,9 +791,26 @@ static void loom_expression_scope_leave_refinements(
 // block. Visibility cutoffs make isolation and mutable-state barriers constant
 // time without changing structural-expression lookup policy.
 static iree_status_t loom_expression_walk_enter_scope(
-    void* user_data, loom_dominance_walk_scope_flags_t dominance_flags) {
+    void* user_data, uint32_t result_operation_count,
+    loom_dominance_walk_scope_flags_t dominance_flags) {
   loom_expression_walk_t* walk = (loom_expression_walk_t*)user_data;
-  loom_expression_scope_t* scope = &walk->scopes[walk->scope_count++];
+  if (walk->adaptive_capacity) {
+    if (result_operation_count > UINT32_MAX - walk->binding_count) {
+      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                              "expression index exceeds u32 bindings");
+    }
+    IREE_RETURN_IF_ERROR(loom_expression_reserve_binding_capacity(
+        walk, walk->binding_count + result_operation_count));
+  }
+  if (walk->scope_page_count == walk->scope_page_capacity) {
+    loom_expression_scope_t* scope_page = NULL;
+    IREE_RETURN_IF_ERROR(
+        iree_arena_allocate_array(walk->arena, walk->scope_page_capacity,
+                                  sizeof(*scope_page), (void**)&scope_page));
+    walk->scope_page = scope_page;
+    walk->scope_page_count = 0;
+  }
+  loom_expression_scope_t* scope = &walk->scope_page[walk->scope_page_count++];
   loom_expression_scope_flags_t flags = 0;
   if (iree_any_bit_set(dominance_flags,
                        LOOM_DOMINANCE_WALK_SCOPE_FLAG_STATE_BARRIER)) {
@@ -556,98 +852,13 @@ static void loom_expression_walk_leave_scope(void* user_data) {
   const uint32_t checkpoint = walk->active_scope->entry_start;
   while (walk->binding_count > checkpoint) {
     const loom_expression_binding_t* binding =
-        &walk->bindings[--walk->binding_count];
+        loom_expression_const_binding(walk, --walk->binding_count);
     const iree_host_size_t slot =
         ((iree_host_size_t)binding->entry.hash + binding->probe_distance) &
-        walk->bucket_mask;
-    walk->bucket_heads[slot] = binding->previous;
+        walk->buckets.mask;
+    loom_expression_set_bucket_head(&walk->buckets, slot, binding->previous);
   }
   walk->active_scope = walk->active_scope->parent;
-}
-
-static loom_op_t* loom_expression_first_region_op(const loom_region_t* region,
-                                                  uint16_t block_start) {
-  if (!region) {
-    return NULL;
-  }
-  for (uint16_t i = block_start; i < region->block_count; ++i) {
-    loom_op_t* op = loom_region_const_block(region, i)->first_op;
-    if (op) {
-      return op;
-    }
-  }
-  return NULL;
-}
-
-static loom_op_t* loom_expression_first_nested_op(const loom_op_t* op,
-                                                  uint8_t region_start) {
-  for (uint8_t i = region_start; i < op->region_count; ++i) {
-    loom_op_t* nested =
-        loom_expression_first_region_op(loom_op_regions(op)[i], 0);
-    if (nested) {
-      return nested;
-    }
-  }
-  return NULL;
-}
-
-// Counts the index's maximum insertions before any rewriting. Parent pointers
-// provide the return path without recursive calls or an allocated stack. Each
-// operation and block is visited once; finding the next sibling region scans
-// only its owner's bounded region operands, never an enclosing subtree.
-typedef struct loom_expression_inventory_t {
-  // Maximum number of structural expression bindings.
-  uint32_t definition_count;
-  // Number of dominance scopes entered by the shared traversal.
-  iree_host_size_t scope_count;
-} loom_expression_inventory_t;
-
-static loom_expression_inventory_t loom_expression_inventory(
-    const loom_region_t* root) {
-  loom_expression_inventory_t inventory = {
-      .scope_count = root->block_count,
-  };
-  loom_op_t* op = loom_expression_first_region_op(root, 0);
-  while (op) {
-    inventory.definition_count += op->result_count != 0;
-    for (uint8_t i = 0; i < op->region_count; ++i) {
-      const loom_region_t* region = loom_op_regions(op)[i];
-      inventory.scope_count += region ? region->block_count : 0;
-    }
-    loom_op_t* nested = loom_expression_first_nested_op(op, 0);
-    if (nested) {
-      op = nested;
-      continue;
-    }
-    while (op) {
-      if (op->next_op) {
-        op = op->next_op;
-        break;
-      }
-      const loom_region_t* region = op->parent_block->parent_region;
-      loom_op_t* next = loom_expression_first_region_op(
-          region, op->parent_block->region_index + 1);
-      if (next) {
-        op = next;
-        break;
-      }
-      if (region == root) {
-        return inventory;
-      }
-      const loom_op_t* parent = op->parent_op;
-      for (uint8_t i = 0; i < parent->region_count; ++i) {
-        if (loom_op_regions(parent)[i] == region) {
-          next = loom_expression_first_nested_op(parent, i + 1);
-          break;
-        }
-      }
-      op = next ? next : (loom_op_t*)parent;
-      if (next) {
-        break;
-      }
-    }
-  }
-  return inventory;
 }
 
 iree_status_t loom_expression_walk_allocate(
@@ -664,24 +875,33 @@ iree_status_t loom_expression_walk_allocate(
       .identity_policy = identity_policy
                              ? *identity_policy
                              : (loom_expression_identity_policy_t){0},
+      .arena = arena,
+      .adaptive_capacity = maximum_entry_count == 0,
   };
-  const loom_expression_inventory_t inventory =
-      loom_expression_inventory(region);
-  const uint32_t definition_count =
-      maximum_entry_count ? maximum_entry_count : inventory.definition_count;
-  const iree_host_size_t bucket_count = iree_host_size_next_power_of_two(
-      iree_max((iree_host_size_t)definition_count * 2, 1));
-  walk->bucket_mask = bucket_count - 1;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, definition_count,
-                                                 sizeof(*walk->bindings),
-                                                 (void**)&walk->bindings));
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, bucket_count,
-                                                 sizeof(*walk->bucket_heads),
-                                                 (void**)&walk->bucket_heads));
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, inventory.scope_count,
-                                                 sizeof(*walk->scopes),
-                                                 (void**)&walk->scopes));
-  memset(walk->bucket_heads, 0xFF, bucket_count * sizeof(*walk->bucket_heads));
+  uint32_t initial_entry_capacity = maximum_entry_count;
+  if (initial_entry_capacity == 0 && region->block_count != 0) {
+    initial_entry_capacity =
+        loom_region_entry_block(region)->result_operation_count;
+  }
+  walk->binding_page_shift =
+      loom_expression_page_shift(arena, sizeof(loom_expression_binding_t),
+                                 LOOM_EXPRESSION_BINDING_PAGE_MAX_CAPACITY);
+  walk->binding_page_mask = ((uint32_t)1 << walk->binding_page_shift) - 1;
+  loom_segmented_storage_initialize(
+      ((iree_host_size_t)walk->binding_page_mask + 1) *
+          sizeof(loom_expression_binding_t),
+      iree_alignof(loom_expression_binding_t), &walk->binding_pages);
+  IREE_RETURN_IF_ERROR(
+      loom_expression_binding_pages_reserve(walk, initial_entry_capacity));
+  IREE_RETURN_IF_ERROR(loom_expression_bucket_table_allocate(
+      arena, initial_entry_capacity, &walk->buckets));
+  loom_expression_update_binding_capacity(walk);
+
+  const uint8_t scope_page_shift =
+      loom_expression_page_shift(arena, sizeof(loom_expression_scope_t),
+                                 LOOM_EXPRESSION_SCOPE_PAGE_MAX_CAPACITY);
+  walk->scope_page_capacity = (uint16_t)1 << scope_page_shift;
+  walk->scope_page_count = walk->scope_page_capacity;
   IREE_RETURN_IF_ERROR(loom_dominance_walk_allocate(
       module, region,
       (loom_dominance_walk_callbacks_t){
@@ -754,8 +974,8 @@ static bool loom_expression_op_transfers_operand_ownership(
   return false;
 }
 
-static bool loom_expression_result_has_sensitive_ownership(
-    const loom_module_t* module, const loom_op_t* op) {
+bool loom_expression_results_are_shareable(const loom_module_t* module,
+                                           const loom_op_t* op) {
   const loom_value_id_t* results = loom_op_results((loom_op_t*)op);
   for (uint16_t i = 0; i < op->result_count; ++i) {
     const loom_value_id_t result = results[i];
@@ -764,16 +984,16 @@ static bool loom_expression_result_has_sensitive_ownership(
     }
     const loom_value_t* value = loom_module_value(module, result);
     if (loom_value_ownership_use_count(value) != 0) {
-      return true;
+      return false;
     }
   }
-  return false;
+  return true;
 }
 
 bool loom_expression_can_share_result_ownership(const loom_module_t* module,
                                                 const loom_op_t* op) {
   return !loom_expression_op_transfers_operand_ownership(module, op) &&
-         !loom_expression_result_has_sensitive_ownership(module, op);
+         loom_expression_results_are_shareable(module, op);
 }
 
 bool loom_expression_op_is_reusable(const loom_module_t* module,

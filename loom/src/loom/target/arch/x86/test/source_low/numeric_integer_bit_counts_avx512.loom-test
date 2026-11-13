@@ -48,7 +48,7 @@ func.def @predicate_i1x64_counts(%input: vector<64xi1>) -> (vector<64xi1>, vecto
 
 // ----
 low.func.def target<x86.avx512.core> abi(object_function) abi_layout({signature = (vector<64xi1>) -> (vector<64xi1>, vector<64xi1>, vector<64xi1>)}) @predicate_i1x64_counts(%population: reg<x86.zmm>) -> (reg<x86.zmm>, reg<x86.zmm>, reg<x86.zmm>) asm {
-  %11 = avx512.vmovdqu64.rodata.zmm @__low_rodata_67b5f91f
+  %11 = vpternlogd.ones
   %leading = vpxord %population, %11
   return %leading, %leading, %population
 }

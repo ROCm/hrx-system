@@ -152,6 +152,8 @@ static iree_status_t loom_func_symbol_resolve_target_conditions(
   return iree_ok_status();
 }
 
+const uint8_t loom_func_input_contract_resource_key = 0;
+
 static iree_status_t loom_func_symbol_fact_compute(
     const loom_symbol_fact_domain_t* domain,
     loom_symbol_fact_context_t* context, const loom_module_t* module,
@@ -166,10 +168,61 @@ static iree_status_t loom_func_symbol_fact_compute(
     IREE_BUILTIN_UNREACHABLE();
   }
 
+  const bool is_template = symbol->kind == LOOM_SYMBOL_TEMPLATE_DECL ||
+                           symbol->kind == LOOM_SYMBOL_TEMPLATE_DEF ||
+                           symbol->kind == LOOM_SYMBOL_TEMPLATE_UKERNEL;
+  const loom_input_contract_t* input_contract = NULL;
+  const loom_value_id_t* arguments = NULL;
+  const loom_value_id_t* inherited = NULL;
+  uint16_t argument_count = 0;
+  uint32_t requirement_count = 0;
+  bool project_inputs = false;
+  if (is_template) {
+    const loom_func_input_contract_source_t* source =
+        loom_symbol_fact_context_lookup_resource(
+            context, &loom_func_input_contract_resource_key);
+    if (source) {
+      input_contract = source->lookup(source->self, symbol_id);
+      requirement_count = input_contract ? input_contract->count : 0;
+    } else {
+      project_inputs = true;
+      arguments = loom_func_like_arg_ids(func, &argument_count);
+      const loom_symbol_ref_t family = loom_func_like_template_family(func);
+      if (loom_symbol_ref_is_valid(family)) {
+        const loom_func_like_t declaration = loom_func_like_cast(
+            module, module->symbols.entries[family.symbol_id].defining_op);
+        uint16_t inherited_count = 0;
+        inherited = loom_func_like_arg_ids(declaration, &inherited_count);
+      }
+      requirement_count = loom_input_contract_project(
+          module, arguments, argument_count, inherited, NULL);
+    }
+  }
+  const iree_host_size_t input_storage =
+      requirement_count
+          ? sizeof(input_contract) +
+                (project_inputs
+                     ? sizeof(*input_contract) +
+                           requirement_count * sizeof(*input_contract->values)
+                     : 0)
+          : 0;
   loom_func_symbol_facts_t* facts = NULL;
   IREE_RETURN_IF_ERROR(loom_symbol_fact_context_allocate(
-      context, sizeof(*facts), (void**)&facts));
+      context, sizeof(*facts) + input_storage, (void**)&facts));
   memset(facts, 0, sizeof(*facts));
+  if (requirement_count) {
+    const loom_input_contract_t** slot =
+        (const loom_input_contract_t**)(facts + 1);
+    if (project_inputs) {
+      loom_input_contract_t* projected = (loom_input_contract_t*)(slot + 1);
+      *projected = (loom_input_contract_t){.count = requirement_count};
+      loom_input_contract_project(module, arguments, argument_count, inherited,
+                                  projected->values);
+      input_contract = projected;
+    }
+    *slot = input_contract;
+    facts->has_input_contract = true;
+  }
 
   facts->base.domain = domain;
   facts->base.symbol_kind = symbol->kind;
@@ -187,13 +240,6 @@ static iree_status_t loom_func_symbol_fact_compute(
   facts->inline_policy = loom_func_like_inline_policy(func);
   facts->has_body = loom_func_like_body(func) != NULL;
   facts->template_family = loom_func_like_template_family(func);
-  if (loom_symbol_ref_is_valid(facts->template_family)) {
-    const loom_symbol_t* family_symbol =
-        &module->symbols.entries[facts->template_family.symbol_id];
-    IREE_RETURN_IF_ERROR(loom_func_symbol_string_from_id(
-        module, family_symbol->name_id, IREE_SV("template family"),
-        &facts->template_family_name));
-  }
   facts->priority = loom_func_like_priority(func);
   facts->argument_ids = loom_func_like_arg_ids(func, &facts->argument_count);
   facts->result_ids = loom_op_const_results(func.op);

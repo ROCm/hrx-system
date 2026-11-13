@@ -38,6 +38,9 @@ struct StorageAccess {
   loom_value_id_t view;
   // Full-rank dynamic array index, absent for a scalar pointer projection.
   std::optional<loom_value_id_t> index;
+  // Whether this access relies on the source's defined-access promise because
+  // its allocation extent is unavailable in the current function.
+  bool root_bounds_promised = false;
 };
 
 struct StorageAllocation {
@@ -70,6 +73,18 @@ class Storage {
   // Forms a zero-origin source pointer for a kernel buffer binding. The buffer
   // already carries any admitted parameter contracts.
   Pointer root(loom_value_id_t buffer, cxx::AST* owner);
+  // Constructs absent storage with zero byte origin. Null owns no allocation.
+  Pointer null(cxx::AST* owner);
+  // Constructs the opaque null root for source-level typed buffer values.
+  loom_value_id_t null_root(cxx::AST* owner);
+  // Tests the root's null identity without observing its extent or contents.
+  // The caller has already evaluated the source pointer expression.
+  loom_value_id_t compare_null(loom_value_id_t root, bool equal,
+                               cxx::AST* owner);
+  // Tests opaque byte positions. Shared IR cleanup can use a common root
+  // established after inlining; independent roots retain address equality.
+  loom_value_id_t compare_address(Pointer left, Pointer right, bool equal,
+                                  cxx::AST* owner);
   // Refines an opaque pointer origin to the configured source pointer width.
   // The allocation root remains independent; this only publishes the range
   // every valid source pointer representation already satisfies.
@@ -92,8 +107,16 @@ class Storage {
   // Projects an admitted record field using its retained C++ byte offset.
   // The allocation identity is preserved, including for nested records.
   // Packing changes the origin, without asserting natural field alignment.
-  StorageProjection member(StorageProjection base, cxx::FieldSymbol* field,
+  StorageProjection member(StorageProjection base, cxx::Symbol* field,
                            cxx::AST* owner);
+  // Projects a source-selected subobject from a live complete object. The
+  // displacement is retained by Types from the frontend's selected path.
+  StorageProjection subobject(StorageProjection base, uint64_t byte_offset,
+                              cxx::AST* owner);
+  // Reverses a nonvirtual base projection. The source reference cast requires
+  // an enclosing live object; this operation never adjusts a nullable pointer.
+  StorageProjection enclosing(StorageProjection base, uint64_t byte_offset,
+                              cxx::AST* owner);
   // Projects an in-bounds constant element of an admitted fixed array. Source
   // subobject offsets need no signed pointer-arithmetic conversion chain.
   StorageProjection element(StorageProjection base,
@@ -184,13 +207,12 @@ class Storage {
       cxx::AST* owner);
 
  private:
-  StorageProjection subobject(StorageProjection base, uint64_t byte_offset,
-                              cxx::AST* owner);
   // Publishes the defined-source dereference range for a compiler-owned
-  // allocation. External buffer roots have no importer-owned extent and pass
-  // through unchanged.
-  Pointer constrain_access(Pointer pointer, int64_t access_bytes,
-                           cxx::AST* owner);
+  // allocation. Returns no value when the current function has no exact root
+  // extent and the access must instead retain the source bounds promise.
+  std::optional<Pointer> constrain_known_access(Pointer pointer,
+                                                int64_t access_bytes,
+                                                cxx::AST* owner);
   // Copies producer-owned storage facts to a root refinement.
   void inherit_root_facts(loom_value_id_t source, loom_value_id_t result);
   // Records one fixed allocation after its producer and source layout have

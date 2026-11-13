@@ -15,6 +15,7 @@
 #include "loom/analysis/symbolic_integer_cast.h"
 #include "loom/analysis/symbolic_product.h"
 #include "loom/analysis/symbolic_projection.h"
+#include "loom/analysis/symbolic_scope.h"
 #include "loom/ir/attribute.h"
 #include "loom/ir/context.h"
 #include "loom/ops/index/carrier.h"
@@ -71,24 +72,6 @@ struct loom_symbolic_expr_memo_chunk_t {
   loom_symbolic_expr_memo_entry_t
       entries[LOOM_SYMBOLIC_EXPR_MEMO_ENTRIES_PER_CHUNK];
 };
-
-static loom_value_ordinal_t loom_symbolic_expr_try_value_ordinal(
-    const loom_symbolic_expr_context_t* context, loom_value_id_t value_id) {
-  return context->value_domain != NULL ? loom_local_value_domain_try_ordinal(
-                                             context->value_domain, value_id)
-                                       : (loom_value_ordinal_t)value_id;
-}
-
-static iree_status_t loom_symbolic_expr_resolve_value_ordinal(
-    loom_symbolic_expr_context_t* context, loom_value_id_t value_id,
-    loom_value_ordinal_t* out_value_ordinal) {
-  if (context->value_domain != NULL) {
-    return loom_local_value_domain_register_value(context->value_domain,
-                                                  value_id, out_value_ordinal);
-  }
-  *out_value_ordinal = (loom_value_ordinal_t)value_id;
-  return iree_ok_status();
-}
 
 static const loom_symbolic_expr_memo_entry_t*
 loom_symbolic_expr_ready_memo_entry(const loom_symbolic_expr_context_t* context,
@@ -154,7 +137,7 @@ const loom_symbolic_projection_t* loom_symbolic_expr_lookup_projection(
              : NULL;
 }
 
-const loom_symbolic_integer_cast_t* loom_symbolic_expr_lookup_integer_cast(
+const loom_integer_cast_t* loom_symbolic_expr_lookup_integer_cast(
     const loom_symbolic_expr_context_t* context, loom_value_id_t value_id) {
   if (context->integer_casts.count == 0) {
     return NULL;
@@ -380,7 +363,7 @@ iree_status_t loom_symbolic_expr_context_lookup_facts_and_selected_value(
         break;
       }
       IREE_RETURN_IF_ERROR(loom_condition_fact_scope_proves_condition(
-          &context->condition_query, context->fact_table,
+          loom_symbolic_expr_condition_query(context), context->fact_table,
           context->condition_scope, loom_scf_select_condition(defining_op),
           &condition, &proven));
       if (!proven) {
@@ -911,7 +894,7 @@ typedef struct loom_symbolic_expr_expansion_frame_t {
   // Low payload width retained by an integer cast projection.
   uint8_t cast_bit_count;
 
-  // loom_symbolic_integer_cast_kind_t selecting the payload interpretation.
+  // loom_integer_cast_kind_t selecting the payload interpretation.
   uint8_t cast_kind;
 
   // Completed proof's memo state, or EMPTY while no proof is retained.
@@ -1300,7 +1283,7 @@ static iree_status_t loom_symbolic_expr_expansion_prepare_frame(
       // identity; otherwise its result remains an independent symbolic term.
       if (input_facts.range_lo < result_lower_bound ||
           input_facts.range_hi > result_upper_bound) {
-        loom_symbolic_integer_cast_t cast = {0};
+        loom_integer_cast_t cast = {0};
         if (!loom_symbolic_integer_cast_from_op(context->module, defining_op,
                                                 &cast)) {
           *out_complete = true;
@@ -1544,24 +1527,22 @@ static iree_status_t loom_symbolic_expr_apply_integer_cast(
     const loom_symbolic_expr_t* input_expression,
     loom_symbolic_expr_t* out_expression) {
   const loom_value_id_t input_value = frame->operand_values[0];
-  loom_symbolic_integer_cast_t cast = {
+  loom_integer_cast_t cast = {
       .source_value_id = input_value,
       .bit_count = frame->cast_bit_count,
       .kind = frame->cast_kind,
   };
-  const loom_symbolic_integer_cast_t* input_cast =
+  const loom_integer_cast_t* input_cast =
       loom_symbolic_expr_lookup_integer_cast(context, input_value);
-  // A second interpretation of an equal or narrower low-bit payload replaces
-  // the first interpretation. Wider interpretations must retain the
-  // intermediate value because its sign or zero extension supplies new bits.
-  if (input_cast && cast.bit_count <= input_cast->bit_count) {
-    cast.source_value_id = input_cast->source_value_id;
+  if (input_cast) {
+    cast = loom_integer_cast_compose(
+        *input_cast, (loom_integer_cast_kind_t)cast.kind, cast.bit_count);
   }
 
   loom_value_facts_t source_facts = {0};
   IREE_RETURN_IF_ERROR(loom_symbolic_expr_context_lookup_facts(
       context, cast.source_value_id, &source_facts));
-  if (loom_symbolic_integer_cast_is_identity(&cast, source_facts)) {
+  if (loom_integer_cast_is_identity(&cast, source_facts)) {
     frame->kind = LOOM_SYMBOLIC_EXPR_EXPANSION_IDENTITY;
     frame->operand_values[0] = cast.source_value_id;
     if (cast.source_value_id == input_value) {

@@ -12,6 +12,7 @@ package(default_visibility = ["//visibility:public"])
 
 _KERNEL_SOURCES = [
     "control/branch/cfg.loom",
+    "control/branch/convergence.loom",
     "control/branch/effects.loom",
     "control/branch/guards.loom",
     "control/branch/half.loom",
@@ -111,8 +112,10 @@ _KERNEL_SOURCES = [
     "numeric/float/approximate_extended.loom",
     "numeric/float/narrow_reduction.loom",
     "numeric/integer/bitwise_divisibility.loom",
+    "numeric/integer/division_loops.loom",
     "numeric/integer/narrow_consumers.loom",
     "numeric/integer/wide/address_comparison.loom",
+    "numeric/integer/wide/comparison.loom",
     "numeric/integer/wide/shifts.loom",
     "numeric/integer/wide/subtract.loom",
     "numeric/integer/wide/uniform_immediate.loom",
@@ -132,6 +135,7 @@ loom_corpus_build(
     all_roots_xfail = {
         "//loom/target/vm:all": [
             "memory/atomic/float64.loom",
+            "memory/view/offset_recurrence.loom",
             "numeric/conversion/float8_schema_conversion.loom",
             "numeric/matrix/nvfp4.loom",
         ],
@@ -141,8 +145,10 @@ loom_corpus_build(
     profiles = ["//loom/target/vm:all"],
     xfails = {
         "//loom/target/vm:all": {
-            "function/template/library.loom:@template_dead_library_observations": "LOWERING/045",
             "memory/atomic/float64.loom:@atomic_f64_values": "TARGET/003",
+            "memory/buffer/positions.loom:@shared_position_observations": "TARGET/003",
+            "memory/buffer/positions.loom:@storage_domain_observations": "TARGET/003",
+            "memory/view/offset_recurrence.loom:@window_recurrence_observations": "SUBRANGE/026",
             "numeric/conversion/float8_schema_conversion.loom:@float8_schema_conversion": "TARGET/031",
             "numeric/matrix/nvfp4.loom:@nvfp4_matrix": "TARGET/031",
         },
@@ -155,10 +161,22 @@ loom_corpus_test(
     execution_profiles = [VM_REFERENCE_PROFILE],
     profile_sources = {
         VM_REFERENCE_PROFILE.name: [
+            "control/loop/scalar_state.loom",
+            "control/loop/vector_recurrence.loom",
             "function/call/calls.loom",
+            "function/call/direct.loom",
+            "function/template/library.loom",
+            "memory/address/logical_shift_loop.loom",
+            "memory/address/uniform_loads.loom",
+            "memory/buffer/boundaries.loom",
+            "memory/buffer/null.loom",
+            "memory/buffer/positions.loom",
             "memory/buffer/packing.loom",
             "memory/buffer/selection.loom",
+            "memory/packed/transport.loom",
             "memory/view/bitcast.loom",
+            "memory/view/offset_recurrence.loom",
+            "memory/view/scalar_exchange.loom",
             "numeric/float/activations.loom",
             "numeric/float/exponent.loom",
             "numeric/float/exponential.loom",
@@ -177,7 +195,20 @@ loom_corpus_test(
             "numeric/float/remainder.loom",
             "numeric/float/inverse_hyperbolic.loom",
             "numeric/float/inverse_hyperbolic_narrow.loom",
+            "numeric/integer/arithmetic.loom",
+            "numeric/integer/bit_count.loom",
+            "numeric/integer/division.loom",
+            "numeric/integer/widening.loom",
+            "numeric/vector/coordinates.loom",
+            "numeric/vector/refinement.loom",
         ],
+    },
+    xfails = {
+        VM_REFERENCE_PROFILE.name: {
+            "memory/buffer/positions.loom:@shared_position_equality": "TARGET/003",
+            "memory/buffer/positions.loom:@storage_domain_equality": "TARGET/003",
+            "memory/view/offset_recurrence.loom:@window_recurrence_values": "SUBRANGE/026",
+        },
     },
 )
 

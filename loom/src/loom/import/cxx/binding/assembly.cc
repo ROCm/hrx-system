@@ -251,7 +251,7 @@ std::optional<Value> AssemblyIntrinsic::call(
   }
   loom_op_t* op;
   check(loom_low_invoke_build(
-      builder, LOOM_LOW_INVOKE_BUILD_FLAG_HAS_INLINE_POLICY, 0,
+      builder, LOOM_LOW_INVOKE_BUILD_FLAG_HAS_INLINE_POLICY, 0, 0,
       LOOM_INLINE_POLICY_INLINE, fragment, operands.data(), operands.size(),
       result_types_.data(), result_types_.size(), nullptr, 0, location, &op));
   if (!result_partition_) {

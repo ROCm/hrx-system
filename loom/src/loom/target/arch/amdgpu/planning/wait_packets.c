@@ -419,7 +419,9 @@ iree_status_t loom_amdgpu_wait_packet_plan_format_json(
     IREE_RETURN_IF_ERROR(loom_json_object_begin(&stream, &packet_object));
     IREE_ASSERT_NE(packet->descriptor, NULL);
     iree_string_view_t descriptor_key = loom_low_descriptor_set_string(
-        schedule->target.descriptor_set, packet->descriptor->key_string_ref);
+        schedule->target.descriptor_set,
+        loom_low_descriptor_key_string_ref(schedule->target.descriptor_set,
+                                           packet->descriptor));
     IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
         &packet_object, IREE_SV("descriptor"), descriptor_key));
     IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(

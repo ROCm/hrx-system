@@ -51,7 +51,7 @@ void RunBenchmark(::benchmark::State& state,
     state.PauseTiming();
     TransferTrialResult result;
     iree::Status status(RunTransferTrial(GetTransportBackend(), create_proactor,
-                                         options, &result, measurement));
+                                         options, measurement, &result));
     state.ResumeTiming();
     if (!status.ok()) {
       if (!result.available && iree_status_is_unavailable(status.get())) {

@@ -48,6 +48,10 @@ int32_t loom_index_cmp_value_carrier_bitwidth(
   if (lhs_bitwidth < 0 || rhs_bitwidth < 0) {
     return -1;
   }
+  if ((lhs_bitwidth == 0 || rhs_bitwidth == 0) &&
+      loom_index_target_carrier_bitwidth(context, operand_scalar_type) > 0) {
+    return -1;
+  }
   return iree_max(lhs_bitwidth, rhs_bitwidth);
 }
 

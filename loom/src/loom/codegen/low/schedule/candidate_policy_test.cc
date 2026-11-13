@@ -6,6 +6,9 @@
 
 #include "loom/codegen/low/schedule/candidate_policy.h"
 
+#include <algorithm>
+#include <array>
+
 #include "iree/testing/gtest.h"
 
 namespace loom {
@@ -18,13 +21,13 @@ static loom_low_schedule_candidate_score_t MakeCandidate(
       .effective_stall_cycles = effective_stall_cycles,
       .pressure_cliff_units = LOOM_LOW_SCHEDULE_PRESSURE_CLIFF_NONE,
       .units_until_pressure_cliff = LOOM_LOW_SCHEDULE_PRESSURE_CLIFF_NONE,
-      .active_unspillable_completion_capacity = UINT32_MAX,
-      .active_unspillable_transaction_final_capacity = UINT32_MAX,
-      .opened_unspillable_completion_capacity = UINT32_MAX,
+      .active_constrained_completion_capacity = UINT32_MAX,
+      .active_constrained_transaction_final_capacity = UINT32_MAX,
+      .opened_constrained_completion_capacity = UINT32_MAX,
       .active_register_packing_completion_capacity = UINT32_MAX,
       .source_ordinal = source_ordinal,
       .selected_descriptor_ordinal = LOOM_LOW_DESCRIPTOR_ORDINAL_NONE,
-      .active_unspillable_completion_domain_id = UINT16_MAX,
+      .active_constrained_completion_domain_id = UINT16_MAX,
       .bottleneck_resource_id = LOOM_LOW_RESOURCE_NONE,
   };
 }
@@ -37,12 +40,12 @@ static loom_low_schedule_candidate_score_t MakeConstrainedCandidate(
   score.produced_live_units = 1;
   score.killed_live_value_count = 1;
   score.produced_live_value_count = 1;
-  score.active_unspillable_completion_capacity = 4;
-  score.active_unspillable_completion_domain_id = 1;
+  score.active_constrained_completion_capacity = 4;
+  score.active_constrained_completion_domain_id = 1;
   score.pressure_progress_kind =
       LOOM_LOW_SCHEDULE_PRESSURE_PROGRESS_CONSTRAINED_COMPLETION;
   score.flags =
-      LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_HAS_UNSPILLABLE_ACTIVATION |
+      LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_HAS_CONSTRAINED_ACTIVATION |
       LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_ADVANCES_CONSTRAINED_COMPLETION;
   return score;
 }
@@ -68,49 +71,60 @@ class CandidatePolicyTest : public ::testing::Test {
 
 TEST_F(CandidatePolicyTest, PressureProgressUsesPhysicalAndFrontierFacts) {
   auto score = MakeCandidate(0, 0);
-  EXPECT_EQ(loom_low_schedule_classify_candidate_pressure_progress(&score),
+  EXPECT_EQ(loom_low_schedule_classify_candidate_pressure_progress(
+                &score, LOOM_LOW_SCHEDULE_PRESSURE_PROGRESS_NONE),
             LOOM_LOW_SCHEDULE_PRESSURE_PROGRESS_NONE);
 
   score.killed_live_units = 8;
   score.produced_live_units = 4;
   score.killed_live_value_count = 2;
   score.produced_live_value_count = 1;
-  EXPECT_EQ(loom_low_schedule_classify_candidate_pressure_progress(&score),
+  EXPECT_EQ(loom_low_schedule_classify_candidate_pressure_progress(
+                &score, LOOM_LOW_SCHEDULE_PRESSURE_PROGRESS_NONE),
             LOOM_LOW_SCHEDULE_PRESSURE_PROGRESS_REDUCTION);
 
   // An aggregate reduction is not relief if a shared physical bank grows.
   score.flags = LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_GROWS_PACKING_RESOURCE;
-  EXPECT_EQ(loom_low_schedule_classify_candidate_pressure_progress(&score),
+  EXPECT_EQ(loom_low_schedule_classify_candidate_pressure_progress(
+                &score, LOOM_LOW_SCHEDULE_PRESSURE_PROGRESS_NONE),
             LOOM_LOW_SCHEDULE_PRESSURE_PROGRESS_NONE);
 
   score.flags = 0;
   score.killed_live_units = 4;
   score.killed_live_value_count = 1;
   score.storage_relation_count = 1;
-  EXPECT_EQ(loom_low_schedule_classify_candidate_pressure_progress(&score),
+  EXPECT_EQ(loom_low_schedule_classify_candidate_pressure_progress(
+                &score, LOOM_LOW_SCHEDULE_PRESSURE_PROGRESS_NONE),
             LOOM_LOW_SCHEDULE_PRESSURE_PROGRESS_STORAGE);
 
   score.storage_relation_count = 0;
-  EXPECT_EQ(loom_low_schedule_classify_candidate_pressure_progress(&score),
+  EXPECT_EQ(loom_low_schedule_classify_candidate_pressure_progress(
+                &score, LOOM_LOW_SCHEDULE_PRESSURE_PROGRESS_NONE),
             LOOM_LOW_SCHEDULE_PRESSURE_PROGRESS_NON_GROWING);
 
   score.produced_live_units = 8;
   score.produced_live_value_count = 2;
   score.flags = LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_UNLOCKS_DESCRIPTOR;
-  EXPECT_EQ(loom_low_schedule_classify_candidate_pressure_progress(&score),
+  EXPECT_EQ(loom_low_schedule_classify_candidate_pressure_progress(
+                &score, LOOM_LOW_SCHEDULE_PRESSURE_PROGRESS_NONE),
             LOOM_LOW_SCHEDULE_PRESSURE_PROGRESS_NONE);
 
   // A growing candidate can still expose a non-growing descriptor frontier.
   score.flags |=
       LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_UNLOCKS_NON_GROWING_DESCRIPTOR;
-  EXPECT_EQ(loom_low_schedule_classify_candidate_pressure_progress(&score),
+  EXPECT_EQ(loom_low_schedule_classify_candidate_pressure_progress(
+                &score, LOOM_LOW_SCHEDULE_PRESSURE_PROGRESS_FRONTIER),
             LOOM_LOW_SCHEDULE_PRESSURE_PROGRESS_FRONTIER);
+  EXPECT_EQ(loom_low_schedule_classify_candidate_pressure_progress(
+                &score, LOOM_LOW_SCHEDULE_PRESSURE_PROGRESS_RETIRING_FRONTIER),
+            LOOM_LOW_SCHEDULE_PRESSURE_PROGRESS_RETIRING_FRONTIER);
 
-  score.active_unspillable_completion_capacity = 8;
-  score.active_unspillable_completion_domain_id = 1;
+  score.active_constrained_completion_capacity = 8;
+  score.active_constrained_completion_domain_id = 1;
   score.flags |=
       LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_ADVANCES_CONSTRAINED_COMPLETION;
-  EXPECT_EQ(loom_low_schedule_classify_candidate_pressure_progress(&score),
+  EXPECT_EQ(loom_low_schedule_classify_candidate_pressure_progress(
+                &score, LOOM_LOW_SCHEDULE_PRESSURE_PROGRESS_NONE),
             LOOM_LOW_SCHEDULE_PRESSURE_PROGRESS_CONSTRAINED_COMPLETION);
 }
 
@@ -268,11 +282,11 @@ TEST_F(CandidatePolicyTest, RecoveryAdmissionUsesTheSelectedPressureContext) {
 
     auto overflowing = chosen;
     overflowing.flags =
-        LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_EXCEEDS_UNSPILLABLE_CAPACITY;
+        LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_EXCEEDS_CONSTRAINED_CAPACITY;
     EXPECT_TRUE(loom_low_schedule_candidate_policy_admits_recovery_nominee(
         mode, &nominee, &overflowing));
     nominee.flags =
-        LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_EXCEEDS_UNSPILLABLE_CAPACITY;
+        LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_EXCEEDS_CONSTRAINED_CAPACITY;
     EXPECT_FALSE(loom_low_schedule_candidate_policy_admits_recovery_nominee(
         mode, &nominee, &overflowing));
     nominee.flags = 0;
@@ -300,7 +314,7 @@ TEST_F(CandidatePolicyTest, HardCapacityPrecedesReadinessAndAggregateRelief) {
   overflowing.pressure_progress_kind =
       LOOM_LOW_SCHEDULE_PRESSURE_PROGRESS_REDUCTION;
   overflowing.flags =
-      LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_EXCEEDS_UNSPILLABLE_CAPACITY;
+      LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_EXCEEDS_CONSTRAINED_CAPACITY;
   for (const auto mode :
        {LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_DEFAULT,
         LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_PRESSURE_RELIEF,
@@ -324,10 +338,10 @@ TEST_F(CandidatePolicyTest, CompletionHeadroomPrecedesReadinessWithinCapacity) {
 
     // Preserving a completion cannot authorize exceeding another hard bank.
     completion.flags |=
-        LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_EXCEEDS_UNSPILLABLE_CAPACITY;
+        LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_EXCEEDS_CONSTRAINED_CAPACITY;
     ExpectPreferred(mode, independent, completion);
     completion.flags &=
-        ~LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_EXCEEDS_UNSPILLABLE_CAPACITY;
+        ~LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_EXCEEDS_CONSTRAINED_CAPACITY;
   }
 }
 
@@ -410,7 +424,7 @@ TEST_F(CandidatePolicyTest, NonReplayableHeadroomPrecedesPredictedPressure) {
 
     auto overflowing = completion;
     overflowing.flags |=
-        LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_EXCEEDS_UNSPILLABLE_CAPACITY;
+        LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_EXCEEDS_CONSTRAINED_CAPACITY;
     ExpectPreferred(mode, independent, overflowing);
 
     // A blocked materialization cannot spend this priority on new storage.
@@ -486,13 +500,13 @@ TEST_F(CandidatePolicyTest, ReadyProgressRequiresTheSameCompletionDomain) {
        {LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_PRESSURE_RELIEF,
         LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_PACKING_COMPLETION}) {
     SCOPED_TRACE(mode);
-    ready_peer.active_unspillable_completion_domain_id =
-        stalled_peer.active_unspillable_completion_domain_id;
+    ready_peer.active_constrained_completion_domain_id =
+        stalled_peer.active_constrained_completion_domain_id;
     ExpectPreferred(mode, ready_peer, stalled_peer);
 
     // Equal capacity does not make independent banks interchangeable. The
     // ready completion cannot displace an older transaction in another bank.
-    ready_peer.active_unspillable_completion_domain_id = 2;
+    ready_peer.active_constrained_completion_domain_id = 2;
     ExpectPreferred(mode, stalled_peer, ready_peer);
   }
 }
@@ -533,7 +547,7 @@ TEST_F(CandidatePolicyTest, RetainedSetupRequiresBoundedProgress) {
   setup.pressure_progress_kind =
       LOOM_LOW_SCHEDULE_PRESSURE_PROGRESS_NON_GROWING;
   setup.flags = LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_STORAGE_SETUP |
-                LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_HAS_UNSPILLABLE_ACTIVATION |
+                LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_HAS_CONSTRAINED_ACTIVATION |
                 LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_RETAINS_PRE_SPILL_PLACEMENT;
   auto independent = MakeCandidate(0, 1);
   independent.projected_live_units = 5;
@@ -547,7 +561,7 @@ TEST_F(CandidatePolicyTest, RetainedSetupRequiresBoundedProgress) {
     SCOPED_TRACE(mode);
     ExpectPreferred(mode, setup, independent);
     for (const uint16_t flag :
-         {LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_HAS_UNSPILLABLE_ACTIVATION,
+         {LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_HAS_CONSTRAINED_ACTIVATION,
           LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_RETAINS_PRE_SPILL_PLACEMENT}) {
       auto deferred = setup;
       deferred.flags &= ~flag;
@@ -566,9 +580,9 @@ TEST_F(CandidatePolicyTest, RetainedSetupRequiresBoundedProgress) {
 
     // Several leaves may be needed before a pinned transaction can finish.
     // Its retained terminal path admits them only while their storage fits.
-    leaf.active_unspillable_completion_capacity = 1;
-    leaf.active_unspillable_completion_domain_id = 0;
-    leaf.active_unspillable_transaction_final_capacity = 1;
+    leaf.active_constrained_completion_capacity = 1;
+    leaf.active_constrained_completion_domain_id = 0;
+    leaf.active_constrained_transaction_final_capacity = 1;
     leaf.flags |=
         LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_ADVANCES_CONSTRAINED_COMPLETION;
     leaf.pressure_progress_kind =
@@ -576,7 +590,7 @@ TEST_F(CandidatePolicyTest, RetainedSetupRequiresBoundedProgress) {
     ExpectPreferred(mode, leaf, independent);
     for (const uint16_t flag :
          {LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_OPENS_REGISTER_DEBT,
-          LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_EXCEEDS_UNSPILLABLE_CAPACITY}) {
+          LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_EXCEEDS_CONSTRAINED_CAPACITY}) {
       auto infeasible = leaf;
       infeasible.flags |= flag;
       infeasible.pressure_risk = LOOM_LOW_SCHEDULE_PRESSURE_RISK_DEBT;
@@ -626,6 +640,86 @@ TEST_F(CandidatePolicyTest, ReadyDescriptorOperandIsNotDeferredUnderPressure) {
   }
 }
 
+TEST_F(CandidatePolicyTest, ConsumerCompletionPrecedesNeutralTransfers) {
+  auto completion = MakeCandidate(0, 2);
+  completion.projected_live_units = 31;
+  completion.produced_live_units = 1;
+  completion.produced_live_value_count = 1;
+  completion.pressure_demand_units = 8;
+  completion.units_until_pressure_cliff = 1;
+  completion.pressure_risk = LOOM_LOW_SCHEDULE_PRESSURE_RISK_NEAR_CLIFF;
+  completion.pressure_progress_kind =
+      LOOM_LOW_SCHEDULE_PRESSURE_PROGRESS_RETIRING_FRONTIER;
+  completion.flags =
+      LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_REMATERIALIZABLE_LEAF |
+      LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_UNLOCKS_DESCRIPTOR |
+      LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_UNLOCKS_NON_GROWING_DESCRIPTOR;
+
+  auto transfer = MakeCandidate(0, 0);
+  transfer.projected_live_units = 30;
+  transfer.killed_live_units = 1;
+  transfer.produced_live_units = 1;
+  transfer.killed_live_value_count = 1;
+  transfer.produced_live_value_count = 1;
+  transfer.pressure_progress_kind =
+      LOOM_LOW_SCHEDULE_PRESSURE_PROGRESS_NON_GROWING;
+  auto storage = transfer;
+  storage.source_ordinal = 1;
+  storage.storage_relation_count = 1;
+  storage.pressure_progress_kind = LOOM_LOW_SCHEDULE_PRESSURE_PROGRESS_STORAGE;
+  auto neutral_frontier = completion;
+  neutral_frontier.source_ordinal = 3;
+  neutral_frontier.pressure_progress_kind =
+      LOOM_LOW_SCHEDULE_PRESSURE_PROGRESS_FRONTIER;
+
+  for (const auto mode :
+       {LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_PRESSURE_RELIEF,
+        LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_PACKING_COMPLETION}) {
+    SCOPED_TRACE(mode);
+    ExpectPreferred(mode, completion, transfer);
+    ExpectPreferred(mode, completion, storage);
+    ExpectPreferred(mode, completion, neutral_frontier);
+    ExpectPreferred(mode, transfer, neutral_frontier);
+    ExpectPreferred(mode, storage, neutral_frontier);
+    // The alias must not provide a path around completion priority through
+    // pairwise comparisons. Every ready-set order selects the same candidate.
+    const loom_low_schedule_candidate_score_t scores[] = {
+        completion,
+        transfer,
+        storage,
+        neutral_frontier,
+    };
+    std::array<uint32_t, 4> order = {0, 1, 2, 3};
+    do {
+      uint32_t chosen = order.front();
+      for (uint32_t next : order) {
+        if (loom_low_schedule_candidate_score_less(
+                &options_, mode, &scores[next], &scores[chosen], 0)) {
+          chosen = next;
+        }
+      }
+      EXPECT_EQ(chosen, 0u);
+    } while (std::next_permutation(order.begin(), order.end()));
+
+    // A bounded completion is not permission to cross another physical cliff.
+    auto costly_completion = completion;
+    costly_completion.pressure_cliff_penalty = 1;
+    costly_completion.pressure_risk = LOOM_LOW_SCHEDULE_PRESSURE_RISK_DEBT;
+    ExpectPreferred(mode, transfer, costly_completion);
+    ExpectPreferred(mode, storage, costly_completion);
+  }
+
+  // Unconstrained issue gaps retain their latency ordering.
+  completion.pressure_risk = LOOM_LOW_SCHEDULE_PRESSURE_RISK_NONE;
+  completion.units_until_pressure_cliff = LOOM_LOW_SCHEDULE_PRESSURE_CLIFF_NONE;
+  completion.effective_stall_cycles = 4;
+  completion.data_ready_stall_cycles = 4;
+  ExpectPreferred(LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_PRESSURE_RELIEF, transfer,
+                  completion);
+  ExpectPreferred(LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_DEFAULT, transfer,
+                  completion);
+}
+
 TEST_F(CandidatePolicyTest, NearCliffRecoveryDefersReadyGrowth) {
   auto recovery = MakeCandidate(4, 1);
   recovery.projected_live_units = 12;
@@ -669,6 +763,57 @@ TEST_F(CandidatePolicyTest, PressureRecoveryFillsSafeIssueGaps) {
                   independent, recovery);
 }
 
+TEST_F(CandidatePolicyTest, PressureRecoveryFillsGapsWithoutCreatingStorage) {
+  for (uint32_t activation_mask : {1u, 2u, 3u}) {
+    SCOPED_TRACE(activation_mask);
+    auto recovery = MakeCandidate(1, 0);
+    recovery.projected_live_units = 4;
+    recovery.killed_live_units = 4;
+    recovery.killed_live_value_count = 1;
+    recovery.pressure_progress_kind =
+        LOOM_LOW_SCHEDULE_PRESSURE_PROGRESS_REDUCTION;
+    if (activation_mask & 1) {
+      recovery.flags |=
+          LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_HAS_CONSTRAINED_ACTIVATION;
+    }
+    auto independent = MakeCandidate(0, 1);
+    independent.projected_live_units = 8;
+    if (activation_mask & 2) {
+      independent.flags |=
+          LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_HAS_CONSTRAINED_ACTIVATION;
+    }
+
+    // Neither operation creates storage. Transitive constrained activation
+    // cannot alone justify waiting for a retiring operation to become ready.
+    ExpectPreferred(LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_PRESSURE_RELIEF,
+                    independent, recovery);
+    ExpectPreferred(LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_PACKING_COMPLETION,
+                    recovery, independent);
+
+    // Ready work still cannot start another physical lifetime or approach
+    // its downstream pressure horizon while the retirement is pending.
+    auto growing = independent;
+    growing.produced_live_units = 1;
+    growing.produced_live_value_count = 1;
+    ++growing.projected_live_units;
+    ExpectPreferred(LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_PRESSURE_RELIEF,
+                    recovery, growing);
+    auto constrained = independent;
+    constrained.units_until_pressure_cliff = 1;
+    constrained.activation_reserve_units = 1;
+    constrained.pressure_risk = LOOM_LOW_SCHEDULE_PRESSURE_RISK_NEAR_CLIFF;
+    ExpectPreferred(LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_PRESSURE_RELIEF,
+                    recovery, constrained);
+
+    // A ready retirement keeps its progress priority; the exception fills
+    // idle issue time rather than favoring zero-result work unconditionally.
+    recovery.data_ready_stall_cycles = 0;
+    recovery.effective_stall_cycles = 0;
+    ExpectPreferred(LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_PRESSURE_RELIEF,
+                    recovery, independent);
+  }
+}
+
 TEST_F(CandidatePolicyTest, RecoveryPreservesSourceOrderWithoutProgress) {
   auto older = MakeCandidate(1, 0);
   older.data_ready_stall_cycles = 0;
@@ -698,6 +843,77 @@ TEST_F(CandidatePolicyTest, RecoveryPreservesSourceOrderWithoutProgress) {
   ExpectPreferred(LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_DEFAULT, later, older);
 }
 
+TEST_F(CandidatePolicyTest, RecoveryPrioritizesEquivalentMaterializations) {
+  auto base = MakeCandidate(0, 0);
+  base.projected_live_units = 4;
+  base.produced_live_units = 1;
+  base.produced_live_value_count = 1;
+  base.critical_path_cycles = 2;
+  base.selected_descriptor_ordinal = 7;
+  base.flags = LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_REMATERIALIZABLE_LEAF |
+               LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_UNLOCKS_DESCRIPTOR;
+
+  for (const auto mode :
+       {LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_PRESSURE_RELIEF,
+        LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_PACKING_COMPLETION}) {
+    SCOPED_TRACE(mode);
+    for (bool reaches_constrained : {false, true}) {
+      SCOPED_TRACE(reaches_constrained);
+      auto earlier = base;
+      if (reaches_constrained) {
+        earlier.flags |=
+            LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_HAS_CONSTRAINED_ACTIVATION;
+      }
+      auto critical = earlier;
+      critical.source_ordinal = 1;
+      critical.critical_path_cycles = 4;
+      ExpectPreferred(mode, critical, earlier);
+
+      // Different native storage or non-leaf setup keeps the age policy.
+      auto different = critical;
+      different.selected_descriptor_ordinal = 8;
+      ExpectPreferred(mode, earlier, different);
+      auto non_leaf = critical;
+      non_leaf.flags &= ~LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_REMATERIALIZABLE_LEAF;
+      ExpectPreferred(mode, earlier, non_leaf);
+
+      // Equal immediate occupancy does not prove equal aggregate packing.
+      // A later leaf must not open another ownership chain in shared storage.
+      auto packed_earlier = earlier;
+      auto packed_critical = critical;
+      packed_earlier.flags |=
+          LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_GROWS_PACKING_RESOURCE;
+      packed_critical.flags |=
+          LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_GROWS_PACKING_RESOURCE;
+      ExpectPreferred(mode, packed_earlier, packed_critical);
+      ExpectPreferred(mode, packed_earlier, critical);
+      ExpectPreferred(mode, earlier, packed_critical);
+
+      // Criticality cannot buy extra issue delay, live storage, or a cliff.
+      auto delayed = critical;
+      delayed.data_ready_stall_cycles = 1;
+      delayed.effective_stall_cycles = 1;
+      ExpectPreferred(mode, earlier, delayed);
+      auto growing = critical;
+      ++growing.produced_live_units;
+      ++growing.projected_live_units;
+      ExpectPreferred(mode, earlier, growing);
+      auto constrained = critical;
+      constrained.pressure_cliff_penalty = 1;
+      ExpectPreferred(mode, earlier, constrained);
+      auto infeasible = critical;
+      infeasible.flags |=
+          LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_EXCEEDS_CONSTRAINED_CAPACITY;
+      ExpectPreferred(mode, earlier, infeasible);
+
+      // The source ordinal remains the stable tie-break for equal paths.
+      auto tied = critical;
+      tied.critical_path_cycles = earlier.critical_path_cycles;
+      ExpectPreferred(mode, earlier, tied);
+    }
+  }
+}
+
 TEST_F(CandidatePolicyTest, RecoveryAdvancesNeutralStorageWithoutIdleCycles) {
   const uint16_t storage_modes[] = {
       LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_ADVANCES_STORAGE,
@@ -717,7 +933,7 @@ TEST_F(CandidatePolicyTest, RecoveryAdvancesNeutralStorageWithoutIdleCycles) {
       peer.killed_live_value_count = 1;
       peer.pressure_progress_kind =
           LOOM_LOW_SCHEDULE_PRESSURE_PROGRESS_NON_GROWING;
-      peer.flags = LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_HAS_UNSPILLABLE_ACTIVATION;
+      peer.flags = LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_HAS_CONSTRAINED_ACTIVATION;
       auto handoff = peer;
       handoff.source_ordinal = 1;
       handoff.flags |= storage_flags;
@@ -751,7 +967,7 @@ TEST_F(CandidatePolicyTest, RepairableDebtMustStayWithinRequiredBanks) {
     loom_low_schedule_register_debt_word_t alternative_debt[2] = {};
     const uint32_t word = bank / 64;
     const uint64_t bit = UINT64_C(1) << (bank % 64);
-    required_debt[word] = {.banks = bit, .required_banks = bit};
+    required_debt[word] = {.banks = bit, .constrained_banks = bit};
     alternative_debt[word].banks = bit;
 
     auto required = MakeCandidate(0, 0);
@@ -765,7 +981,7 @@ TEST_F(CandidatePolicyTest, RepairableDebtMustStayWithinRequiredBanks) {
     required.pressure_risk = LOOM_LOW_SCHEDULE_PRESSURE_RISK_DEBT;
     required.flags =
         LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_OPENS_REGISTER_DEBT |
-        LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_OPENS_REQUIRED_REGISTER_DEBT;
+        LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_OPENS_CONSTRAINED_REGISTER_DEBT;
 
     auto alternative = required;
     alternative.register_debt = alternative_debt;
@@ -805,7 +1021,7 @@ TEST_F(CandidatePolicyTest, ReadyPackingCompletionPrecedesOtherBankStall) {
       LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_EXACT_PACKING_COMPLETION;
   auto stalled_handoff = MakeConstrainedCandidate(1, 0);
   stalled_handoff.flags |= LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_ADVANCES_STORAGE;
-  stalled_handoff.active_unspillable_completion_domain_id = 2;
+  stalled_handoff.active_constrained_completion_domain_id = 2;
 
   EXPECT_TRUE(loom_low_schedule_candidate_policy_uses_ready_progress_order(
       &options_, LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_PACKING_COMPLETION,
@@ -815,8 +1031,8 @@ TEST_F(CandidatePolicyTest, ReadyPackingCompletionPrecedesOtherBankStall) {
       &stalled_handoff, &ready_completion));
 
   // A handoff in the same bank still owns its packing constraint.
-  stalled_handoff.active_unspillable_completion_domain_id =
-      ready_completion.active_unspillable_completion_domain_id;
+  stalled_handoff.active_constrained_completion_domain_id =
+      ready_completion.active_constrained_completion_domain_id;
   EXPECT_FALSE(loom_low_schedule_candidate_policy_uses_ready_progress_order(
       &options_, LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_PACKING_COMPLETION,
       &ready_completion, &stalled_handoff));
@@ -828,7 +1044,7 @@ TEST_F(CandidatePolicyTest, StalledPackingIdentityDoesNotOverrideOtherBank) {
       LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_EXACT_PACKING_COMPLETION;
   auto ready_handoff = MakeConstrainedCandidate(0, 1);
   ready_handoff.flags |= LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_ADVANCES_STORAGE;
-  ready_handoff.active_unspillable_completion_domain_id = 2;
+  ready_handoff.active_constrained_completion_domain_id = 2;
 
   EXPECT_FALSE(loom_low_schedule_candidate_policy_uses_ready_progress_order(
       &options_, LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_PACKING_COMPLETION,

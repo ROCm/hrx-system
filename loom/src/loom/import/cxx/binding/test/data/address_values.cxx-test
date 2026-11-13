@@ -1,0 +1,277 @@
+// RUN: roundtrip
+#include <loomcxx/index.h>
+
+struct IndexResults {
+  loom::type::index add;
+  loom::type::index sub;
+  loom::type::index mul;
+  loom::type::index div;
+  loom::type::index rem;
+  loom::type::index bit_and;
+  loom::type::index bit_or;
+  loom::type::index bit_xor;
+  loom::type::index shift_left;
+  loom::type::index shift_right_signed;
+  loom::type::index shift_right_unsigned;
+  loom::type::index minimum;
+  loom::type::index maximum;
+  loom::type::index multiply_add;
+  loom::type::index rotate_left;
+  loom::type::index rotate_right;
+  loom::type::index leading_zeros;
+  loom::type::index trailing_zeros;
+  loom::type::index population;
+  loom::type::divrem_result quotient_remainder;
+  loom::type::offset scaled;
+  bool equal;
+  bool not_equal;
+  bool less;
+  bool less_equal;
+  bool greater;
+  bool greater_equal;
+  bool unsigned_less;
+  bool unsigned_less_equal;
+  bool unsigned_greater;
+  bool unsigned_greater_equal;
+};
+
+IndexResults index_operations(loom::type::index lhs, loom::type::index rhs, loom::type::index amount, loom::type::offset stride) {
+  return {
+      lhs + rhs,
+      lhs - rhs,
+      lhs * rhs,
+      lhs / rhs,
+      lhs % rhs,
+      lhs & rhs,
+      lhs | rhs,
+      lhs ^ rhs,
+      lhs << amount,
+      lhs >> amount,
+      loom::index::shrui(lhs, amount),
+      loom::index::min(lhs, rhs),
+      loom::index::max(lhs, rhs),
+      loom::index::madd(lhs, rhs, amount),
+      loom::index::rotli(lhs, amount),
+      loom::index::rotri(lhs, amount),
+      loom::index::ctlzi(lhs),
+      loom::index::cttzi(lhs),
+      loom::index::ctpopi(lhs),
+      loom::index::divrem(lhs, rhs),
+      loom::index::scale(lhs, stride),
+      lhs == rhs,
+      lhs != rhs,
+      lhs < rhs,
+      lhs <= rhs,
+      lhs > rhs,
+      lhs >= rhs,
+      loom::index::ult(lhs, rhs),
+      loom::index::ule(lhs, rhs),
+      loom::index::ugt(lhs, rhs),
+      loom::index::uge(lhs, rhs),
+  };
+}
+
+struct OffsetResults {
+  loom::type::offset add;
+  loom::type::offset sub;
+  loom::type::index logical;
+  bool equal;
+  bool not_equal;
+  bool less;
+  bool less_equal;
+  bool greater;
+  bool greater_equal;
+  bool signed_less;
+  bool signed_less_equal;
+  bool signed_greater;
+  bool signed_greater_equal;
+};
+
+OffsetResults offset_operations(loom::type::offset lhs, loom::type::offset rhs) {
+  return {
+      lhs + rhs,
+      lhs - rhs,
+      loom::index::cast(lhs),
+      lhs == rhs,
+      lhs != rhs,
+      lhs < rhs,
+      lhs <= rhs,
+      lhs > rhs,
+      lhs >= rhs,
+      loom::offset::slt(lhs, rhs),
+      loom::offset::sle(lhs, rhs),
+      loom::offset::sgt(lhs, rhs),
+      loom::offset::sge(lhs, rhs),
+  };
+}
+
+loom::type::offset physical_offset_from_integer(unsigned value) {
+  return loom::offset::cast(value);
+}
+
+loom::type::offset physical_offset_from_index(loom::type::index value) {
+  return loom::offset::cast(value);
+}
+
+loom::type::index add_one(loom::type::index value) {
+  loom::type::index one{1};
+  return value + one;
+}
+
+loom::type::offset add_bytes(loom::type::offset value) {
+  return value + loom::type::offset{16};
+}
+
+loom::type::index index_from_unsigned(unsigned value) {
+  return loom::type::index{value};
+}
+
+constexpr loom::type::index previous{-1};
+constexpr loom::type::offset cache_line{64};
+
+loom::type::index logical_constant() { return previous; }
+
+loom::type::offset physical_constant() { return cache_line; }
+
+long long logical_carrier(loom::type::index value) {
+  return static_cast<long long>(value);
+}
+
+unsigned long long physical_carrier(loom::type::offset value) {
+  return static_cast<unsigned long long>(value);
+}
+
+unsigned logical_fixed_width(loom::type::index value) {
+  return loom::index::cast<unsigned>(value);
+}
+
+long long physical_fixed_width(loom::type::offset value) {
+  return loom::offset::cast<long long>(value);
+}
+
+// ----
+func.def public @index_operations(%lhs: index, %rhs: index, %amount: index, %stride: offset) -> (index, index, index, index, index, index, index, index, index, index, index, index, index, index, index, index, index, index, index, index, index, offset, i1, i1, i1, i1, i1, i1, i1, i1, i1, i1) {
+  %36 = index.add %lhs, %rhs : index
+  %37 = index.sub %lhs, %rhs : index
+  %38 = index.mul %lhs, %rhs : index
+  %39 = index.div %lhs, %rhs : index
+  %40 = index.rem %lhs, %rhs : index
+  %41 = index.andi %lhs, %rhs : index
+  %42 = index.ori %lhs, %rhs : index
+  %43 = index.xori %lhs, %rhs : index
+  %44 = index.shli %lhs, %amount : index
+  %45 = index.shrsi %lhs, %amount : index
+  %46 = index.shrui %lhs, %amount : index
+  %47 = index.min %lhs, %rhs : index
+  %48 = index.max %lhs, %rhs : index
+  %49 = index.madd %lhs, %rhs, %amount : index
+  %50 = index.rotli %lhs, %amount : index
+  %51 = index.rotri %lhs, %amount : index
+  %52 = index.ctlzi %lhs : index
+  %53 = index.cttzi %lhs : index
+  %54 = index.ctpopi %lhs : index
+  %55, %56 = index.divrem %lhs, %rhs : index
+  %57 = index.scale %lhs, %stride : index, offset -> offset
+  %58 = index.cmp eq, %lhs, %rhs : index
+  %59 = index.cmp ne, %lhs, %rhs : index
+  %60 = index.cmp slt, %lhs, %rhs : index
+  %61 = index.cmp sle, %lhs, %rhs : index
+  %62 = index.cmp sgt, %lhs, %rhs : index
+  %63 = index.cmp sge, %lhs, %rhs : index
+  %64 = index.cmp ult, %lhs, %rhs : index
+  %65 = index.cmp ule, %lhs, %rhs : index
+  %66 = index.cmp ugt, %lhs, %rhs : index
+  %67 = index.cmp uge, %lhs, %rhs : index
+  func.return %36, %37, %38, %39, %40, %41, %42, %43, %44, %45, %46, %47, %48, %49, %50, %51, %52, %53, %54, %55, %56, %57, %58, %59, %60, %61, %62, %63, %64, %65, %66, %67 : index, index, index, index, index, index, index, index, index, index, index, index, index, index, index, index, index, index, index, index, index, offset, i1, i1, i1, i1, i1, i1, i1, i1, i1, i1
+}
+
+func.def public @offset_operations(%lhs: offset, %rhs: offset) -> (offset, offset, index, i1, i1, i1, i1, i1, i1, i1, i1, i1, i1) {
+  %83 = index.add %lhs, %rhs : offset
+  %84 = index.sub %lhs, %rhs : offset
+  %85 = index.cast %lhs : offset to index
+  %86 = index.cmp eq, %lhs, %rhs : offset
+  %87 = index.cmp ne, %lhs, %rhs : offset
+  %88 = index.cmp ult, %lhs, %rhs : offset
+  %89 = index.cmp ule, %lhs, %rhs : offset
+  %90 = index.cmp ugt, %lhs, %rhs : offset
+  %91 = index.cmp uge, %lhs, %rhs : offset
+  %92 = index.cmp slt, %lhs, %rhs : offset
+  %93 = index.cmp sle, %lhs, %rhs : offset
+  %94 = index.cmp sgt, %lhs, %rhs : offset
+  %95 = index.cmp sge, %lhs, %rhs : offset
+  func.return %83, %84, %85, %86, %87, %88, %89, %90, %91, %92, %93, %94, %95 : offset, offset, index, i1, i1, i1, i1, i1, i1, i1, i1, i1, i1
+}
+
+func.def public @physical_offset_from_integer(%value: i32) -> (offset) {
+  %98 = index.cast %value : i32 to offset
+  func.return %98 : offset
+}
+
+func.def public @physical_offset_from_index(%value: index) -> (offset) {
+  %101 = index.cast %value : index to offset
+  func.return %101 : offset
+}
+
+func.def public @add_one(%value: index) -> (index) {
+  %104 = scalar.constant 1 : i32
+  %105 = scalar.extsi %104 : i32 to i64
+  %one = index.cast %105 : i64 to index
+  %107 = index.add %value, %one : index
+  func.return %107 : index
+}
+
+func.def public @add_bytes(%value: offset) -> (offset) {
+  %110 = scalar.constant 16 : i32
+  %111 = scalar.extsi %110 : i32 to i64
+  %112 = index.cast %111 : i64 to offset
+  %113 = index.add %value, %112 : offset
+  func.return %113 : offset
+}
+
+func.def public @index_from_unsigned(%value: i32) -> (index) {
+  %116 = scalar.extui %value : i32 to i64
+  %117 = index.cast %116 : i64 to index
+  func.return %117 : index
+}
+
+func.def public @logical_constant() -> (index) {
+  %previous = index.constant -1 : index
+  func.return %previous : index
+}
+
+func.def public @physical_constant() -> (offset) {
+  %cache_line = index.constant 64 : offset
+  func.return %cache_line : offset
+}
+
+func.def public @logical_carrier(%value: index) -> (i64) {
+  %124 = index.cast %value : index to i64
+  func.return %124 : i64
+}
+
+func.def public @physical_carrier(%value: offset) -> (i64) {
+  %127 = index.cast %value : offset to i64
+  func.return %127 : i64
+}
+
+func.def public @logical_fixed_width(%value: index) -> (i32) {
+  %130 = index.cast %value : index to i32
+  func.return %130 : i32
+}
+
+func.def public @physical_fixed_width(%value: offset) -> (i64) {
+  %133 = index.cast %value : offset to i64
+  func.return %133 : i64
+}
+
+// ====
+// RUN: roundtrip
+// The native index facade retains constexpr values in the index domain.
+#include <loomcxx/index.h>
+constexpr loom::type::index width{64};
+loom::type::index read_width() { return width; }
+// ----
+func.def public @read_width() -> (index) {
+  %width = index.constant 64 : index
+  func.return %width : index
+}

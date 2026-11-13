@@ -80,3 +80,33 @@ def test_low16_bitfield_extracts_cover_signedness_and_widths(
     assert width.flags == (ImmediateFlag.DEFAULT_VALUE,)
     assert width.default_value == 16
     assert width.unsigned_max == 16
+
+
+@pytest.mark.parametrize("target", _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS)
+@pytest.mark.parametrize("type_suffix", ["i32", "u32"])
+def test_scalar_low16_bitfield_controls_cannot_read_undefined_bits(
+    target, type_suffix: str
+) -> None:
+    overlays = {
+        overlay.descriptor_key: overlay
+        for overlay in _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS[target].overlay_rows()
+    }
+    full = overlays[f"amdgpu.s_bfe_{type_suffix}.lit"]
+    partial = overlays[f"amdgpu.s_bfe_{type_suffix}.lit_low16"]
+    assert partial.encoding_name == full.encoding_name
+    assert partial.encoding_format_id == full.encoding_format_id
+    assert partial.fixed_encoding_fields == full.fixed_encoding_fields
+    assert partial.implicit_operands == full.implicit_operands
+    assert partial.operands[0] == full.operands[0]
+    source = partial.operands[1].descriptor_operand
+    assert len(source.reg_alts) == 1
+    assert source.reg_alts[0].reg_class == _REG_SGPR
+    assert source.reg_alts[0].register_part == _REG_PART_SGPR_LOW16
+    (control,) = partial.immediates
+    assert control.default_value == 16 << 16
+    assert control.flags == (ImmediateFlag.DEFAULT_VALUE,)
+    assert control.unsigned_max == 16 << 16
+    assert control.value_step == 1 << 16
+    for value in range(0, control.unsigned_max + 1, control.value_step):
+        assert value & 31 == 0
+        assert value >> 16 <= 16

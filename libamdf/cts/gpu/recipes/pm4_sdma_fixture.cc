@@ -200,9 +200,8 @@ void Pm4SdmaTest::ResolvePairs(
 void Pm4SdmaTest::PrepareCoherentHandoff(
     const kernels::Kernel& kernel, PairQuery query_kind,
     std::span<const Edge> edges, std::array<Backing, kBackingCount>& backings,
-    Pm4ComputeProgram* out_program,
-    std::array<amdf_cache_operations_t, kTransferPhaseCount>*
-        inout_operations) {
+    std::array<amdf_cache_operations_t, kTransferPhaseCount>* inout_operations,
+    Pm4ComputeProgram* out_program) {
   for (size_t i = 0; i < backings.size(); ++i) {
     const auto flags =
         AMDF_MEMORY_FLAG_HOST_COHERENT |

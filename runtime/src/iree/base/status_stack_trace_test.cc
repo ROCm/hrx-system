@@ -12,7 +12,9 @@
 
 #include "iree/base/api.h"
 #include "iree/base/status_cc.h"
+#include "iree/base/threading/thread.h"
 #include "iree/testing/gtest.h"
+#include "iree/testing/status_matchers.h"
 
 #if (IREE_STATUS_FEATURES & IREE_STATUS_FEATURE_STACK_TRACE) != 0 && \
     defined(IREE_HAVE_LIBBACKTRACE)
@@ -20,12 +22,56 @@
 extern "C" IREE_ATTRIBUTE_NOINLINE iree_status_t
 iree_status_stack_trace_test_capture_cold();
 
+extern "C" IREE_ATTRIBUTE_NOINLINE iree_status_t
+iree_status_stack_trace_test_capture_scoped(bool sibling);
+
 namespace iree {
 namespace {
 
 IREE_ATTRIBUTE_NOINLINE iree_status_t CaptureWarmStatus() {
   return iree_make_status(IREE_STATUS_INTERNAL,
                           "concurrent symbolization test");
+}
+
+TEST(StatusStackTraceTest, ClonesColdNestedScopesOnSmallWorkerStack) {
+  // Debug information depth must not consume the reporting thread's stack.
+  // Keep the scope fixture in its own compilation unit so other tests cannot
+  // populate its function cache before the worker reaches it.
+  std::array<Status, 2> results;
+  iree_thread_create_params_t params = {.stack_size = 32 * 1024};
+  iree_thread_t* thread = nullptr;
+  IREE_ASSERT_OK(iree_thread_create(
+      +[](void* user_data) -> int {
+        auto& results = *static_cast<std::array<Status, 2>*>(user_data);
+        for (size_t i = 0; i < results.size(); ++i) {
+          Status original(iree_status_stack_trace_test_capture_scoped(i != 0));
+          results[i] = Status(iree_status_clone(original.get()));
+        }
+        return 0;
+      },
+      &results, params, iree_allocator_system(), &thread));
+  iree_thread_release(thread);
+
+  for (size_t i = 0; i < results.size(); ++i) {
+    SCOPED_TRACE(i);
+    const Status& status = results[i];
+    EXPECT_EQ(status.code(), StatusCode::kDataLoss);
+    const std::string diagnostic = status.ToString();
+    EXPECT_THAT(
+        diagnostic,
+        ::testing::AllOf(
+            ::testing::HasSubstr("nested scope diagnostic"),
+            ::testing::HasSubstr("preserved annotation"),
+            ::testing::HasSubstr("(status_stack_trace_test_scopes.cc:"),
+            ::testing::HasSubstr(i ? "CaptureSibling" : "CaptureDeepScope"),
+            ::testing::Not(::testing::HasSubstr(i ? "CaptureDeepScope"
+                                                  : "CaptureSibling"))));
+    const size_t inner = diagnostic.find("InlineInner");
+    const size_t outer = diagnostic.find("InlineOuter");
+    ASSERT_NE(inner, std::string::npos) << diagnostic;
+    ASSERT_NE(outer, std::string::npos) << diagnostic;
+    EXPECT_LT(inner, outer) << diagnostic;
+  }
 }
 
 TEST(StatusStackTraceTest, ConcurrentlySymbolizesColdCompilationUnit) {

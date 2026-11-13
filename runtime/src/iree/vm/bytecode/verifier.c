@@ -29,7 +29,7 @@ static bool iree_vm_bytecode_verify_signature_descriptor(
   if (kind >= IREE_VM_BYTECODE_SIGNATURE_KIND_I8 &&
       kind <= IREE_VM_BYTECODE_SIGNATURE_KIND_F64) {
     return type_ordinal == 0;
-  } else if (kind == IREE_VM_BYTECODE_SIGNATURE_KIND_REF) {
+  } else if (iree_vm_module_signature_type_kind_is_ref(kind)) {
     return type_ordinal < layout->ref_types.entry_count;
   } else if (kind == IREE_VM_BYTECODE_SIGNATURE_KIND_FUNCTION) {
     // Callable types are parsed after signatures and checked as one complete
@@ -204,7 +204,8 @@ static iree_status_t iree_vm_bytecode_verify_signature_descriptors(
     if (descriptors[i].kind_u16 >= IREE_VM_BYTECODE_SIGNATURE_KIND_I8 &&
         descriptors[i].kind_u16 <= IREE_VM_BYTECODE_SIGNATURE_KIND_F64) {
       ++value_count;
-    } else if (descriptors[i].kind_u16 == IREE_VM_BYTECODE_SIGNATURE_KIND_REF) {
+    } else if (iree_vm_module_signature_type_kind_is_ref(
+                   descriptors[i].kind_u16)) {
       ++ref_count;
     } else {
       ++function_count;

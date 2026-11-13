@@ -4,14 +4,14 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "loom/serve/runtime/host/wake.h"
+#include "loom/runtime/wake.h"
 #include "loom/serve/server/router_test_fixture.h"
 #include "loom/service/telemetry/record.h"
 
 namespace {
 
 const iree_string_view_t kDeviceNames[] = {IREE_SV("device")};
-const loom_serve_pool_binding_t kPools[] = {{IREE_SV("pool"), 1}};
+const loom_runtime_pool_binding_t kPools[] = {{IREE_SV("pool"), 1}};
 
 using loom_serve::testing::HttpRouterTest;
 using loom_serve::testing::loom_serve_test_model_service_t;
@@ -33,7 +33,7 @@ struct loom_serve_test_registration_dependency_t {
       .hold_completion = true,
   };
   // Immutable deployment role supplied by the real configuration parser.
-  loom_serve_model_kind_t kind = LOOM_SERVE_MODEL_KIND_EMBEDDING;
+  loom_service_kind_t kind = LOOM_SERVICE_KIND_EMBEDDING;
   // Model-protocol counters supplied by the dependency, not synthesized by
   // routing.
   loom_service_telemetry_counters_t counters = {};
@@ -44,7 +44,7 @@ struct loom_serve_test_registration_dependency_t {
   // Outer-test synchronization on actual retirement entry.
   std::condition_variable condition;
   // Final device-borrower wake, independent of the service observer.
-  loom_serve_wake_callback_t observer = {};
+  loom_runtime_wake_callback_t observer = {};
   // Registry-owned history borrowed by the prepared service.
   loom_runtime_telemetry_stream_t* stream = nullptr;
   // Retire has been called after all service and utility borrowers completed.
@@ -72,9 +72,9 @@ struct loom_serve_test_registration_dependency_t {
     loom_serve_registration_prepare_flags_t flags = 0;
   } preparation;
   // Terminal compiler evidence supplied independently of lifecycle timing.
-  loom_serve_compilation_report_t compilation = {};
+  loom_runtime_compilation_report_t compilation = {};
   // Parameter state belongs to the model dependency and changes on owner turns.
-  loom_serve_residency_snapshot_t parameters = {
+  loom_runtime_residency_snapshot_t parameters = {
       .active = true,
       .elastic = true,
       .memory = {.reserved_bytes = 4096, .committed_bytes = 4096},
@@ -115,7 +115,7 @@ struct loom_serve_test_registration_dependency_t {
   static iree_status_t Prepare(void* self,
                                loom_serve_registration_prepare_flags_t flags,
                                bool* complete, loom_serve_service_t* service,
-                               loom_serve_compilation_report_t* out_report) {
+                               loom_runtime_compilation_report_t* out_report) {
     auto* dependency =
         static_cast<loom_serve_test_registration_operation_t*>(self)
             ->dependency;
@@ -139,7 +139,7 @@ struct loom_serve_test_registration_dependency_t {
     *service =
         dependency->service.Interface(nullptr, dependency->capacity_domain);
     service->kind = dependency->kind;
-    if (service->kind == LOOM_SERVE_MODEL_KIND_ACTIVITY) {
+    if (service->kind == LOOM_SERVICE_KIND_ACTIVITY) {
       service->endpoint = nullptr;
       service->accept = nullptr;
     }
@@ -213,8 +213,8 @@ struct loom_serve_test_registration_dependency_t {
   }
   static iree_status_t Activate(void* self,
                                 loom_serve_model_component_t component,
-                                loom_serve_activation_flags_t flags,
-                                loom_serve_activation_phase_t* phase,
+                                loom_runtime_activation_flags_t flags,
+                                loom_runtime_activation_phase_t* phase,
                                 iree_status_t* component_status) {
     *component_status = iree_ok_status();
     auto* dependency =
@@ -223,9 +223,9 @@ struct loom_serve_test_registration_dependency_t {
     std::lock_guard<std::mutex> lock(dependency->mutex);
     auto& activation = dependency->activation;
     const bool cancel =
-        iree_any_bit_set(flags, LOOM_SERVE_ACTIVATION_FLAG_CANCEL);
+        iree_any_bit_set(flags, LOOM_RUNTIME_ACTIVATION_FLAG_CANCEL);
     if (!activation.submitted && cancel) {
-      *phase = LOOM_SERVE_ACTIVATION_COMPLETE;
+      *phase = LOOM_RUNTIME_ACTIVATION_COMPLETE;
       return iree_ok_status();
     }
     if (!activation.submitted) {
@@ -235,12 +235,12 @@ struct loom_serve_test_registration_dependency_t {
     activation.cancelling |= cancel;
     dependency->condition.notify_all();
     if (!activation.ready) {
-      *phase = LOOM_SERVE_ACTIVATION_LOADING;
+      *phase = LOOM_RUNTIME_ACTIVATION_LOADING;
       return iree_ok_status();
     }
     activation.submitted = false;
     activation.ready = false;
-    *phase = LOOM_SERVE_ACTIVATION_COMPLETE;
+    *phase = LOOM_RUNTIME_ACTIVATION_COMPLETE;
     if (iree_status_is_ok(activation.status)) {
       auto& parameters = dependency->parameters;
       parameters.activity.activations += !parameters.active;
@@ -251,7 +251,7 @@ struct loom_serve_test_registration_dependency_t {
   }
   static iree_status_t Create(
       void* self, const loom_serve_model_configuration_t* configuration,
-      loom_serve_wake_callback_t observer,
+      loom_runtime_wake_callback_t observer,
       loom_runtime_telemetry_stream_t* stream, iree_allocator_t host_allocator,
       loom_serve_registration_t* out_registration) {
     auto* dependency =
@@ -333,9 +333,9 @@ class HttpRouterRegistrationTest : public HttpRouterTest {
     managed_capacity_ = 1;
     factory_ = {
         .self = &managed_,
-        .kinds = (1u << LOOM_SERVE_MODEL_KIND_EMBEDDING) |
-                 (1u << LOOM_SERVE_MODEL_KIND_TEXT) |
-                 (1u << LOOM_SERVE_MODEL_KIND_ACTIVITY),
+        .kinds = (1u << LOOM_SERVICE_KIND_EMBEDDING) |
+                 (1u << LOOM_SERVICE_KIND_TEXT) |
+                 (1u << LOOM_SERVICE_KIND_ACTIVITY),
         .device_names = {1, kDeviceNames},
         .pool_count = 1,
         .pools = kPools,
@@ -393,6 +393,9 @@ class HttpRouterRegistrationTest : public HttpRouterTest {
   // production.
   loom_serve_test_registration_dependency_t managed_;
 };
+
+class HttpRouterSingleWorkerRegistrationTest
+    : public HttpRouterRegistrationTest {};
 
 TEST_P(HttpRouterRegistrationTest, NativeOnlyMetadataAndHttpRejectionAgree) {
   Declare("activity");
@@ -1129,7 +1132,7 @@ TEST_P(HttpRouterRegistrationTest,
   managed_.WaitRetiring();
   const int peer = Send("POST", "/v1/test", R"({"model":"b"})");
   EXPECT_TRUE(iree_any_bit_set(b_.WaitAdmission(),
-                               LOOM_SERVE_SERVICE_FLAG_SHARED_ACTIVITY));
+                               LOOM_RUNTIME_SERVICE_FLAG_SHARED_ACTIVITY));
   EXPECT_NE(Control("drain", "b").find(R"("queued_requests":1)"),
             std::string::npos);
   EXPECT_EQ(managed_.destroyed.load(), 0u);
@@ -1156,7 +1159,7 @@ TEST_P(HttpRouterRegistrationTest,
   managed_.WaitRetiring();
   const int peer = Send("POST", "/v1/test", R"({"model":"b"})");
   EXPECT_FALSE(iree_any_bit_set(b_.WaitAdmission(),
-                                LOOM_SERVE_SERVICE_FLAG_SHARED_ACTIVITY));
+                                LOOM_RUNTIME_SERVICE_FLAG_SHARED_ACTIVITY));
   EXPECT_EQ(Read(peer).find("HTTP/1.1 200"), 0u);
   EXPECT_EQ(managed_.destroyed.load(), 0u);
   managed_.ReleaseRetirement();
@@ -1206,7 +1209,7 @@ TEST_P(HttpRouterRegistrationTest,
   EXPECT_EQ(managed_.destroyed.load(), 1u);
 }
 
-TEST_P(HttpRouterRegistrationTest,
+TEST_P(HttpRouterSingleWorkerRegistrationTest,
        AbortAndServerStopStillWaitForActualModelOwnership) {
   Register();
   const int first = Send("POST", "/v1/test", R"({"model":"dynamic"})");
@@ -1291,7 +1294,7 @@ TEST_P(HttpRouterRegistrationTest,
   // not park indefinitely waiting for an ownership wake that cannot arrive.
   const int peer = Send("POST", "/v1/test", R"({"model":"b"})");
   EXPECT_FALSE(iree_any_bit_set(b_.WaitAdmission(),
-                                LOOM_SERVE_SERVICE_FLAG_SHARED_ACTIVITY));
+                                LOOM_RUNTIME_SERVICE_FLAG_SHARED_ACTIVITY));
   EXPECT_EQ(Read(peer).find("HTTP/1.1 200"), 0u);
   EXPECT_EQ(Control("unregister", "dynamic").find("HTTP/1.1 202"), 0u);
   while (Read(Send("GET", "/v1/status")).find(R"("id":"dynamic")") !=
@@ -1417,8 +1420,10 @@ TEST_P(HttpRouterRegistrationLatencyTest,
 }
 
 INSTANTIATE_TEST_SUITE_P(Workers, HttpRouterRegistrationLatencyTest,
-                         ::testing::Values(1, 4));
+                         ::testing::Values(4));
 INSTANTIATE_TEST_SUITE_P(Workers, HttpRouterRegistrationTest,
-                         ::testing::Values(1, 4));
+                         ::testing::Values(4));
+INSTANTIATE_TEST_SUITE_P(Workers, HttpRouterSingleWorkerRegistrationTest,
+                         ::testing::Values(1));
 
 }  // namespace

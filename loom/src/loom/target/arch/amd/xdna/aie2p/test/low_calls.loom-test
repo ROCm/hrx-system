@@ -295,13 +295,13 @@ low.func.def noinline target<amd.xdna.aie2p.core>(@core_target) @read_byte(%inpu
 low.func.def public retain target<amd.xdna.aie2p.core>(@core_target) abi(object_function) @read_origins(%dynamic_origin: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>) asm {
   %aligned = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
   %8 = copy %aligned : reg<aie2p.ep> -> reg<aie2p.ep>
-  %aligned_view = padda %8, 64
+  %aligned_view = paddb %8, 64
   %10 = copy %aligned : reg<aie2p.ep> -> reg<aie2p.ep>
   %11 = mova.modifier 4
-  %general_view = padda.modifier %10, %11
+  %general_view = paddb.modifier %10, %11
   %13 = copy %aligned : reg<aie2p.ep> -> reg<aie2p.ep>
   %14 = mov.modifier %dynamic_origin
-  %dynamic_view = padda.modifier %13, %14
+  %dynamic_view = paddb.modifier %13, %14
   %aligned_value = low.func.call @read_byte(%aligned_view) : (reg<aie2p.ep>) -> (reg<aie2p.er>)
   %general_value = low.func.call @read_byte(%general_view) : (reg<aie2p.ep>) -> (reg<aie2p.er>)
   %dynamic_value = low.func.call @read_byte(%dynamic_view) : (reg<aie2p.ep>) -> (reg<aie2p.er>)
@@ -353,7 +353,7 @@ low.func.def noinline target<amd.xdna.aie2p.core>(@core_target) @rotate_crop(%le
   %12 = mov.i32 2
   %13 = lshl %position, %12
   %14 = mov.modifier %13
-  %crop = padda.modifier %11, %14
+  %crop = paddb.modifier %11, %14
   return %crop
 }
 
@@ -365,4 +365,54 @@ low.func.def public retain target<amd.xdna.aie2p.core>(@core_target) abi(object_
   %crop = low.func.call pure @rotate_crop(%left_view, %right_view, %position, %count) : (reg<aie2p.ep>, reg<aie2p.ep>, reg<aie2p.er>, reg<aie2p.er>) -> (reg<aie2p.ep>)
   %value = lda %crop, 0
   return %value
+}
+
+// ====
+// RUN: emit source-low target=amd.xdna.aie2p:core output=module
+
+// A retained phase can call a retained math helper. Both boundaries keep the
+// pointer ABI, and the helper's alignment proof crosses the complete chain.
+aie2p.target<core> @core_target
+
+func.def noinline @copy_row(%input: view<8xbf16>, %output: view<8xbf16>) {
+  %value = vector.load %input[0] : view<8xbf16> -> vector<8xbf16>
+  vector.store %value, %output[0] : vector<8xbf16>, view<8xbf16>
+  func.return
+}
+
+func.def noinline @copy_phase(%input: view<8xbf16>, %output: view<8xbf16>) {
+  func.call @copy_row(%input, %output) : (view<8xbf16>, view<8xbf16>)
+  func.return
+}
+
+func.def public retain target(@core_target) @nested_worker(%input: buffer, %output: buffer) {
+  %input_aligned, %output_aligned = buffer.assume.alignment %input, %output {minimum_alignment = 16} : buffer, buffer
+  %origin = index.constant 0 : offset
+  %input_view = buffer.view %input_aligned[%origin] : buffer -> view<8xbf16>
+  %output_view = buffer.view %output_aligned[%origin] : buffer -> view<8xbf16>
+  func.call @copy_phase(%input_view, %output_view) : (view<8xbf16>, view<8xbf16>)
+  func.return
+}
+
+// ----
+aie2p.target<core> @core_target
+
+low.func.def noinline target<amd.xdna.aie2p.core>(@core_target) @copy_row(%input: reg<aie2p.ep>, %output: reg<aie2p.ep>) asm {
+  %2 = vlda.128.bf16x8 %input, 0
+  vst.128.bf16x8 %2, %output, 0
+  return
+}
+
+low.func.def noinline target<amd.xdna.aie2p.core>(@core_target) @copy_phase(%input: reg<aie2p.ep>, %output: reg<aie2p.ep>) asm {
+  low.func.call @copy_row(%input, %output) : (reg<aie2p.ep>, reg<aie2p.ep>)
+  return
+}
+
+low.func.def public retain target<amd.xdna.aie2p.core>(@core_target) abi(object_function) @nested_worker() asm {
+  %input_aligned = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %output_aligned = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %input_view = copy %input_aligned : reg<aie2p.ep> -> reg<aie2p.ep>
+  %output_view = copy %output_aligned : reg<aie2p.ep> -> reg<aie2p.ep>
+  low.func.call @copy_phase(%input_view, %output_view) : (reg<aie2p.ep>, reg<aie2p.ep>)
+  return
 }

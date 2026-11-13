@@ -166,17 +166,9 @@ static iree_status_t loom_pass_value_fact_owner_reserve_scope(
   if (table_covers_range) {
     return iree_ok_status();
   }
-  const iree_host_size_t pooled_entry_capacity =
-      iree_arena_block_pool_max_allocation_size(owner->block_pool) /
-      sizeof(*owner->table.entries);
-  if (owner->table.capacity > pooled_entry_capacity) {
-    // An oversized table is already reusable for the rest of the compiler
-    // invocation. Do not replace it or allocate speculative hint headroom;
-    // definition-time growth remains available if the scope actually needs it.
-    return iree_ok_status();
-  }
   const loom_value_id_t storage_first_value_id =
-      reserved_values.first_value_id & ~UINT32_C(63);
+      reserved_values.first_value_id &
+      ~(loom_value_id_t)LOOM_VALUE_FACT_SEGMENT_MASK;
   const bool omits_existing_prefix =
       storage_first_value_id > owner->table.first_value_id;
   if (owner->table.capacity != 0 && omits_existing_prefix) {
@@ -239,9 +231,10 @@ void loom_pass_value_fact_owner_invalidate(
   loom_pass_value_fact_owner_clear_scope(owner);
 }
 
-iree_status_t loom_pass_value_fact_owner_prepare(
+iree_status_t loom_pass_value_fact_owner_prepare_range(
     loom_pass_value_fact_owner_t* owner, const loom_module_t* module,
-    loom_pass_value_fact_scope_t scope, loom_value_fact_table_t** out_table) {
+    loom_pass_value_fact_scope_t scope, loom_value_fact_range_t reserved_values,
+    loom_value_fact_table_t** out_table) {
   *out_table = NULL;
   IREE_ASSERT(scope.kind != LOOM_PASS_VALUE_FACT_SCOPE_CONDITIONED_FUNCTION);
 
@@ -249,9 +242,11 @@ iree_status_t loom_pass_value_fact_owner_prepare(
     ++owner->lifecycle_counts->preparation_count;
   }
   IREE_RETURN_IF_ERROR(loom_pass_value_fact_scope_validate(scope));
-  IREE_RETURN_IF_ERROR(loom_pass_value_fact_owner_ensure_table(
-      owner, module, (loom_value_fact_range_t){0}));
+  IREE_RETURN_IF_ERROR(
+      loom_pass_value_fact_owner_ensure_table(owner, module, reserved_values));
   loom_pass_value_fact_owner_clear_scope(owner);
+  IREE_RETURN_IF_ERROR(loom_pass_value_fact_owner_reserve_scope(
+      owner, reserved_values, /*preserve_existing=*/false));
   owner->table.context.target_facts = scope.target_facts;
   if (scope.seed_facts.table) {
     const iree_status_t status = loom_value_fact_table_seed_values(
@@ -263,6 +258,13 @@ iree_status_t loom_pass_value_fact_owner_prepare(
   }
   *out_table = &owner->table;
   return iree_ok_status();
+}
+
+iree_status_t loom_pass_value_fact_owner_prepare(
+    loom_pass_value_fact_owner_t* owner, const loom_module_t* module,
+    loom_pass_value_fact_scope_t scope, loom_value_fact_table_t** out_table) {
+  return loom_pass_value_fact_owner_prepare_range(
+      owner, module, scope, (loom_value_fact_range_t){0}, out_table);
 }
 
 iree_status_t loom_pass_value_fact_owner_acquire_range(
@@ -277,11 +279,22 @@ iree_status_t loom_pass_value_fact_owner_acquire_range(
   IREE_RETURN_IF_ERROR(loom_pass_value_fact_scope_validate(scope));
   IREE_RETURN_IF_ERROR(
       loom_pass_value_fact_owner_ensure_table(owner, module, reserved_values));
+  // A conditioned request can finish without adding any scope-local facts.
+  // Its ordinary baseline then remains suitable for a mutable consumer. Record
+  // the downgrade so a later conditioned request reruns refinement instead of
+  // reusing assumptions about the consumer's potentially changed IR.
+  loom_pass_value_fact_scope_t cached_scope = owner->active_scope;
+  if (scope.kind == LOOM_PASS_VALUE_FACT_SCOPE_FUNCTION &&
+      cached_scope.kind == LOOM_PASS_VALUE_FACT_SCOPE_CONDITIONED_FUNCTION &&
+      !owner->table.has_conditioned_results) {
+    cached_scope.kind = LOOM_PASS_VALUE_FACT_SCOPE_FUNCTION;
+  }
   if (owner->module == module &&
-      loom_pass_value_fact_scope_equal(owner->active_scope, scope)) {
+      loom_pass_value_fact_scope_equal(cached_scope, scope)) {
     if (owner->lifecycle_counts) {
       ++owner->lifecycle_counts->cache_hit_count;
     }
+    owner->active_scope = scope;
     *out_table = &owner->table;
     return iree_ok_status();
   }

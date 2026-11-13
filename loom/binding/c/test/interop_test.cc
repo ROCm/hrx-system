@@ -137,7 +137,7 @@ struct PassReport {
 
 struct CompileReport {
   CompileReport() {
-    loom_target_compile_report_initialize(&value, iree_allocator_system());
+    loom_target_compile_report_initialize(iree_allocator_system(), &value);
     value.requested_detail_flags =
         LOOM_TARGET_COMPILE_REPORT_DETAIL_TARGET_CAPABILITY_ROWS;
   }
@@ -478,7 +478,7 @@ func.def public @identity(%value: i32) -> (i32) {
   PassProgramPtr pass_program_ptr(pass_program);
 
   loom_target_compile_report_t report = {};
-  loom_target_compile_report_initialize(&report, iree_allocator_system());
+  loom_target_compile_report_initialize(iree_allocator_system(), &report);
   const loomc_native_compile_report_options_t report_options = {
       .type = LOOMC_STRUCTURE_TYPE_NATIVE_COMPILE_REPORT_OPTIONS,
       .structure_size = sizeof(report_options),

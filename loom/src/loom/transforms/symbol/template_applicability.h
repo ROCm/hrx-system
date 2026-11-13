@@ -33,6 +33,7 @@ typedef enum loom_template_provider_unresolved_reason_e {
   LOOM_TEMPLATE_PROVIDER_UNRESOLVED_TARGET_IDENTITY = 1,
   LOOM_TEMPLATE_PROVIDER_UNRESOLVED_TARGET_CONDITION = 2,
   LOOM_TEMPLATE_PROVIDER_UNRESOLVED_VALUE_PREDICATE = 3,
+  LOOM_TEMPLATE_PROVIDER_UNRESOLVED_INPUT = 4,
 } loom_template_provider_unresolved_reason_t;
 
 // Detailed applicability result used by selection and diagnostics.
@@ -70,7 +71,7 @@ typedef struct loom_template_applicability_facts_t {
 
 // Allocation-free applicability fields shared by families and providers.
 typedef struct loom_template_applicability_contract_t {
-  // Module whose symbols and values own this contract.
+  // Module owning this contract's target symbol reference.
   const loom_module_t* module;
 
   // Module-local target requirement, or null when absent or not yet bound.
@@ -79,11 +80,16 @@ typedef struct loom_template_applicability_contract_t {
   // Immutable target identity requirement, or NULL when unresolved.
   const loom_target_facts_t* target_facts;
 
-  // Borrowed argument value IDs in signature order.
+  // Borrowed source argument identities in signature order, or NULL when
+  // predicate VALUE operands are signature ordinals.
   const loom_value_id_t* argument_ids;
 
-  // Borrowed result value IDs in signature order.
+  // Borrowed source result identities in signature order, or NULL when
+  // predicate VALUE operands are signature ordinals.
   const loom_value_id_t* result_ids;
+
+  // Declared input requirements in the current module encoding domain.
+  const loom_input_contract_t* input_contract;
 
   // Borrowed value predicates.
   const loom_predicate_t* predicates;
@@ -106,7 +112,18 @@ typedef struct loom_template_applicability_contract_t {
   // True when a target identity is required, even before its symbol or facts
   // are available in this contract's module.
   bool has_target_requirement;
+
+  // True when predicate VALUE operands are argument-then-result ordinals.
+  bool predicates_use_ordinals;
 } loom_template_applicability_contract_t;
+
+// Proves one declared input requirement using actual input types and retained
+// scalar/encoding facts. SSA identities and lexical relations remain exact;
+// incomplete information returns UNKNOWN and never inspects defining ops.
+loom_decision_truth_t loom_template_applicability_evaluate_input(
+    const loom_module_t* module, const loom_value_id_t* arguments,
+    const loom_input_requirement_t* requirement,
+    const loom_template_applicability_facts_t* facts);
 
 // Returns an allocation-free applicability contract over |provider|.
 loom_template_applicability_contract_t

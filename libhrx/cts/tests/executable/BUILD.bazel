@@ -5,6 +5,7 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 load("//build_tools/amdgpu:binary.bzl", "iree_amdgpu_binary_variants_embed_data")
+load("//libhrx/build_tools/bazel:cc.bzl", "hrx_cc_benchmark")
 load("//libhrx/build_tools/bazel:cts.bzl", "hrx_cts_test")
 load(
     "//libhrx/cts:defs.bzl",
@@ -32,7 +33,7 @@ iree_amdgpu_binary_variants_embed_data(
     tags = ["manual"],
     target = "amdgcn-amd-amdhsa",
     target_compatible_with = _AMDGPU_CTS_COMPATIBILITY,
-    target_selectors_flag = "//runtime/src/iree/hal/drivers/amd/gpu:targets",
+    target_selectors_flag = "//runtime/src/iree/hal/driver/amd/gpu:targets",
     visibility = ["//libhrx/cts/tests/hip:__pkg__"],
 )
 
@@ -43,11 +44,55 @@ hrx_cts_test(
         "//libhrx/cts/core:amdgpu_executable_test_data.hpp",
         "//libhrx/cts/core:amdgpu_test_data.hpp",
     ],
+    args = ["--hrx-device=gpu:0"],
     resource_group = AMD_GPU_CTS_RESOURCE_GROUP,
     tags = AMD_GPU_CTS_TAGS,
     target_compatible_with = _AMDGPU_CTS_COMPATIBILITY,
     deps = [
         ":amdgpu_executable_test_kernels",
         "//build_tools/amdgpu:target_map_h",
+    ],
+)
+
+hrx_cc_benchmark(
+    name = "queue_benchmark",
+    srcs = [
+        "queue_benchmark.cpp",
+        "//libhrx/cts/core:amdgpu_executable_test_data.hpp",
+        "//libhrx/cts/core:amdgpu_test_data.hpp",
+    ],
+    resource_group = AMD_GPU_CTS_RESOURCE_GROUP,
+    tags = AMD_GPU_CTS_TAGS,
+    target_compatible_with = _AMDGPU_CTS_COMPATIBILITY,
+    deps = [
+        ":amdgpu_executable_test_kernels",
+        "//build_tools/amdgpu:target_map_h",
+        "//libhrx/src/libhrx:hrx_static",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/tooling:flags",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:benchmark_main",
+    ],
+)
+
+hrx_cc_benchmark(
+    name = "graph_benchmark",
+    srcs = [
+        "graph_benchmark.cpp",
+        "//libhrx/cts/core:amdgpu_executable_test_data.hpp",
+        "//libhrx/cts/core:amdgpu_test_data.hpp",
+    ],
+    data = ["//libhrx/src/libhrx:hrx"],
+    env = {"HRX_LIBRARY": "$(rootpath //libhrx/src/libhrx:hrx)"},
+    resource_group = AMD_GPU_CTS_RESOURCE_GROUP,
+    tags = AMD_GPU_CTS_TAGS,
+    target_compatible_with = _AMDGPU_CTS_COMPATIBILITY,
+    deps = [
+        ":amdgpu_executable_test_kernels",
+        "//build_tools/amdgpu:target_map_h",
+        "//libhrx/cts/core:loader",
+        "//libhrx/src/binding/hip:launch_params",
+        "//runtime/src/iree/base/tooling:flags",
+        "//runtime/src/iree/testing:benchmark_main",
     ],
 )

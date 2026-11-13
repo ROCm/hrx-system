@@ -18,32 +18,46 @@ namespace {
 
 using ModulePtr = ::loom::testing::ModulePtr;
 
-class SourceLoweringTest : public ::loom::testing::SourceLoweringTestBase {};
+class SourceLoweringTest : public ::loom::testing::SourceLoweringTestBase {
+ protected:
+  void ExpectFuzzWorkloadPasses(const uint8_t* input, size_t input_size,
+                                uint32_t scale) {
+    const loom_low_source_workload_config_t workload_config =
+        loom_low_source_workload_config_make(scale);
+    loom_module_t* module_raw = nullptr;
+    IREE_ASSERT_OK(loom_low_source_workload_generate_fuzz_module(
+        input, input_size, &workload_config, &context_, &block_pool_,
+        &module_raw));
+    ModulePtr module(module_raw);
+    const loom_low_source_workload_pipeline_options_t pipeline_options = {
+        .pass_registry = loom_pass_builtin_registry(),
+        .descriptor_registry = &descriptor_registry_.registry,
+        .policy_registry = &policy_registry_,
+        .schedule_strategy = LOOM_LOW_SCHEDULE_STRATEGY_PRESSURE,
+    };
+    loom_low_source_workload_pipeline_counters_t counters = {};
+    bool pipeline_accepted = false;
+    IREE_ASSERT_OK(loom_low_source_workload_run_pipeline(
+        module.get(), &pipeline_options, &block_pool_, &counters,
+        &pipeline_accepted));
+    ASSERT_TRUE(pipeline_accepted);
+    EXPECT_EQ(counters.allocation_check_count, 1u);
+  }
+};
 
 TEST_F(SourceLoweringTest, CopiedDestructiveResultKeepsStorageIdentity) {
   // Generates a materialized copy, destructive result, and coalesced copy
   // whose storage reservations overlap without overwriting a live value.
   static constexpr uint8_t kInput[] = {0x29, 0xca, 0x4a};
-  const loom_low_source_workload_config_t workload_config =
-      loom_low_source_workload_config_make(4);
-  loom_module_t* module_raw = nullptr;
-  IREE_ASSERT_OK(loom_low_source_workload_generate_fuzz_module(
-      kInput, IREE_ARRAYSIZE(kInput), &workload_config, &context_, &block_pool_,
-      &module_raw));
-  ModulePtr module(module_raw);
-  const loom_low_source_workload_pipeline_options_t pipeline_options = {
-      .pass_registry = loom_pass_builtin_registry(),
-      .descriptor_registry = &descriptor_registry_.registry,
-      .policy_registry = &policy_registry_,
-      .schedule_strategy = LOOM_LOW_SCHEDULE_STRATEGY_PRESSURE,
-  };
-  loom_low_source_workload_pipeline_counters_t counters = {};
-  bool pipeline_accepted = false;
-  IREE_ASSERT_OK(loom_low_source_workload_run_pipeline(
-      module.get(), &pipeline_options, &block_pool_, &counters,
-      &pipeline_accepted));
-  ASSERT_TRUE(pipeline_accepted);
-  EXPECT_EQ(counters.allocation_check_count, 1u);
+  ExpectFuzzWorkloadPasses(kInput, IREE_ARRAYSIZE(kInput), /*scale=*/4);
+}
+
+TEST_F(SourceLoweringTest, RequiredRegisterAssignmentPassesAllocationCheck) {
+  // Generates a target-ID assignment whose immutable register requirement is
+  // retained for later victim searches. The independent checker must accept
+  // that assignment flag while still checking the assignment's full shape.
+  static constexpr uint8_t kInput[] = {0xb9, 0x21};
+  ExpectFuzzWorkloadPasses(kInput, IREE_ARRAYSIZE(kInput), /*scale=*/3);
 }
 
 TEST_F(SourceLoweringTest, PreparationDiagnosticStopsBeforeAllocation) {

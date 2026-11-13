@@ -145,9 +145,13 @@ command.def public @unresolved_schedule() launch(%storage: buffer) {
 // the provider's commands can replace its call.
 // RUN: emit command-program @invalid_schedule
 
+kernel.entry.decl @configured()
+
 template.decl @test.schedule(%count: index)
 
 template.def<@test.schedule> @several(%count: index) where [range(%count, 2, 8)] {
+  %unit = index.constant 1 : index
+  kernel.dispatch @configured[%count, %unit, %unit]() : [index, index, index]()
   template.return
 }
 

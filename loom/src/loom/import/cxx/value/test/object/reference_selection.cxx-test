@@ -1,0 +1,429 @@
+// RUN: roundtrip
+// Independent automatic references use one ordinary call. Each selected
+// source binding receives its own updated result.
+[[loom::noinline]] static void replace(unsigned& left, unsigned& right,
+                                      unsigned next) {
+  left = next;
+  right = next + 1u;
+}
+unsigned selected(bool choose_left, bool choose_right, unsigned first,
+                  unsigned second, unsigned third, unsigned fourth,
+                  unsigned next) {
+  unsigned& left = choose_left ? first : second;
+  unsigned& right = choose_right ? third : fourth;
+  replace(left, right, next);
+  return first + second + third + fourth;
+}
+
+// ----
+func.def public @selected(%choose_left: i1, %choose_right: i1, %first$2: i32, %second$3: i32, %third$4: i32, %fourth$5: i32, %next: i32) -> (i32) {
+  %10 = scf.if %choose_left -> (i32) {
+    %8 = scalar.constant 0 : i32
+    scf.yield %8 : i32
+  } else {
+    %9 = scalar.constant 1 : i32
+    scf.yield %9 : i32
+  }
+  %13 = scf.if %choose_right -> (i32) {
+    %11 = scalar.constant 0 : i32
+    scf.yield %11 : i32
+  } else {
+    %12 = scalar.constant 1 : i32
+    scf.yield %12 : i32
+  }
+  %14, %15 = func.call pure @replace(%next) : (i32) -> (i32, i32)
+  %16 = scalar.constant 0 : i32
+  %17 = scalar.cmpi eq, %10, %16 : i32
+  %first$18 = scf.if %17 -> (i32) {
+    scf.yield %14 : i32
+  } else {
+    scf.yield %first$2 : i32
+  }
+  %19 = scalar.constant 0 : i32
+  %20 = scalar.cmpi eq, %10, %19 : i32
+  %second$21 = scf.if %20 -> (i32) {
+    scf.yield %second$3 : i32
+  } else {
+    scf.yield %14 : i32
+  }
+  %22 = scalar.constant 0 : i32
+  %23 = scalar.cmpi eq, %13, %22 : i32
+  %third$24 = scf.if %23 -> (i32) {
+    scf.yield %15 : i32
+  } else {
+    scf.yield %third$4 : i32
+  }
+  %25 = scalar.constant 0 : i32
+  %26 = scalar.cmpi eq, %13, %25 : i32
+  %fourth$27 = scf.if %26 -> (i32) {
+    scf.yield %fourth$5 : i32
+  } else {
+    scf.yield %15 : i32
+  }
+  %28 = scalar.addi %first$18, %second$21 : i32
+  %29 = scalar.addi %28, %third$24 : i32
+  %30 = scalar.addi %29, %fourth$27 : i32
+  func.return %30 : i32
+}
+
+func.def noinline @replace(%next: i32) -> (i32, i32) {
+  %34 = scalar.constant 1 : i32
+  %right = scalar.addi %next, %34 : i32
+  func.return %next, %right : i32, i32
+}
+
+// ====
+// Mutable reference syntax alone is not a callable write effect. Exact
+// receiver aliases remain values when both observations are read-only.
+struct Cell;
+static unsigned inspect(Cell& value);
+struct Cell {
+  // Value observed through two aliases of the current receiver.
+  unsigned payload;
+  Cell& self() { return *this; }
+  unsigned observe() { return inspect(self()) + inspect(*this); }
+};
+static unsigned inspect(Cell& value) { return value.payload; }
+unsigned observed(unsigned input) {
+  Cell value{input};
+  return value.observe();
+}
+
+// ----
+func.def public @observed(%input: i32) -> (i32) {
+  %2 = func.call pure @Cell__observe_value(%input) : (i32) -> (i32)
+  func.return %2 : i32
+}
+
+func.def @Cell__observe_value(%this_payload: i32) -> (i32) {
+  func.call pure @Cell__self_value(%this_payload) : (i32)
+  %5 = func.call pure @inspect(%this_payload) : (i32) -> (i32)
+  %6 = func.call pure @inspect(%this_payload) : (i32) -> (i32)
+  %7 = scalar.addi %5, %6 : i32
+  func.return %7 : i32
+}
+
+func.def @inspect(%value_payload: i32) -> (i32) {
+  func.return %value_payload : i32
+}
+
+func.def @Cell__self_value(%this_payload: i32) {
+  func.return
+}
+
+// ====
+// A nested assignment through a returned receiver updates only its owning
+// field in the callable signature; neighboring fields stay unchanged.
+struct Pair {
+  // Neighbor retained unchanged by the nested assignment.
+  unsigned first;
+  // Subobject replaced through the returned receiver.
+  unsigned second;
+};
+struct Envelope {
+  // Leading field outside the written range.
+  unsigned prefix;
+  // Direct field carrying the nested writeback.
+  Pair pair;
+  // Trailing field outside the written range.
+  unsigned suffix;
+  Envelope& self() { return *this; }
+  void update(unsigned next) { self().pair.second = next; }
+};
+unsigned projected(unsigned input, unsigned next) {
+  Envelope value{1u, {2u, input}, 3u};
+  value.update(next);
+  return value.pair.second + value.suffix;
+}
+
+// ----
+func.def public @projected(%input: i32, %next: i32) -> (i32) {
+  %value_prefix = scalar.constant 1 : i32
+  %value_pair_first = scalar.constant 2 : i32
+  %value_suffix = scalar.constant 3 : i32
+  %value_pair_second = func.call pure @Envelope__update_value(%value_prefix, %value_pair_first, %input, %value_suffix, %next) : (i32, i32, i32, i32, i32) -> (i32)
+  %7 = scalar.addi %value_pair_second, %value_suffix : i32
+  func.return %7 : i32
+}
+
+func.def @Envelope__update_value(%this_prefix: i32, %this_pair_first: i32, %this_pair_second: i32, %this_suffix: i32, %next: i32) -> (i32) {
+  func.call pure @Envelope__self_value(%this_prefix, %this_pair_first, %this_pair_second, %this_suffix) : (i32, i32, i32, i32)
+  func.return %next : i32
+}
+
+func.def @Envelope__self_value(%this_prefix: i32, %this_pair_first: i32, %this_pair_second: i32, %this_suffix: i32) {
+  func.return
+}
+
+// ====
+// Dynamic writes carry only the selected field through each region. The
+// neighboring semantic pointer and copied record keep their original values.
+struct Item {
+  // Semantic member outside the selected update.
+  int* data;
+  // Independently updated scalar member.
+  unsigned value;
+};
+struct Items {
+  // First selection candidate.
+  Item first;
+  // Second selection candidate.
+  Item second;
+  // Third selection candidate.
+  Item third;
+};
+unsigned update(int* data, unsigned choice, unsigned next) {
+  Items items{{data, 1u}, {data, 2u}, {data, 3u}};
+  const auto saved = items;
+  Item& selected = choice == 0u ? items.first : choice == 1u ? items.second : items.third;
+  selected.value = next;
+  return items.first.value + 10u * items.second.value + 100u * items.third.value + 1000u * saved.first.value;
+}
+
+// ----
+func.def public @update(%data: buffer, %data_byte_offset: offset, %choice: i32, %next: i32) -> (i32) {
+  %items_first_value$5 = scalar.constant 1 : i32
+  %items_second_value$6 = scalar.constant 2 : i32
+  %items_third_value$7 = scalar.constant 3 : i32
+  %8 = scalar.constant 0 : i32
+  %9 = scalar.cmpi eq, %choice, %8 : i32
+  %18 = scf.if %9 -> (i32) {
+    %15 = scalar.constant 0 : i32
+    scf.yield %15 : i32
+  } else {
+    %10 = scalar.constant 1 : i32
+    %11 = scalar.cmpi eq, %choice, %10 : i32
+    %14 = scf.if %11 -> (i32) {
+      %12 = scalar.constant 0 : i32
+      scf.yield %12 : i32
+    } else {
+      %13 = scalar.constant 1 : i32
+      scf.yield %13 : i32
+    }
+    %16 = scalar.constant 1 : i32
+    %17 = scalar.addi %14, %16 : i32
+    scf.yield %17 : i32
+  }
+  %19 = scalar.constant 0 : i32
+  %20 = scalar.cmpi eq, %18, %19 : i32
+  %items_first_value$21 = scf.if %20 -> (i32) {
+    scf.yield %next : i32
+  } else {
+    scf.yield %items_first_value$5 : i32
+  }
+  %22 = scalar.constant 1 : i32
+  %23 = scalar.cmpi eq, %18, %22 : i32
+  %items_second_value$24 = scf.if %23 -> (i32) {
+    scf.yield %next : i32
+  } else {
+    scf.yield %items_second_value$6 : i32
+  }
+  %25 = scalar.constant 2 : i32
+  %26 = scalar.cmpi eq, %18, %25 : i32
+  %items_third_value$27 = scf.if %26 -> (i32) {
+    scf.yield %next : i32
+  } else {
+    scf.yield %items_third_value$7 : i32
+  }
+  %28 = scalar.constant 10 : i32
+  %29 = scalar.muli %28, %items_second_value$24 : i32
+  %30 = scalar.addi %items_first_value$21, %29 : i32
+  %31 = scalar.constant 100 : i32
+  %32 = scalar.muli %31, %items_third_value$27 : i32
+  %33 = scalar.addi %30, %32 : i32
+  %34 = scalar.constant 1000 : i32
+  %35 = scalar.muli %34, %items_first_value$5 : i32
+  %36 = scalar.addi %33, %35 : i32
+  func.return %36 : i32
+}
+
+// ====
+// Wide selected-reference reads use a balanced ordinal tree. The source
+// choice is evaluated once, and no read path is deeper than log2(N).
+unsigned selected_read(unsigned choice, unsigned first, unsigned second,
+                       unsigned third, unsigned fourth) {
+  unsigned& selected = choice == 0u   ? first
+                       : choice == 1u ? second
+                       : choice == 2u ? third
+                                      : fourth;
+  return selected;
+}
+
+// ----
+func.def public @selected_read(%choice: i32, %first: i32, %second: i32, %third: i32, %fourth: i32) -> (i32) {
+  %6 = scalar.constant 0 : i32
+  %7 = scalar.cmpi eq, %choice, %6 : i32
+  %22 = scf.if %7 -> (i32) {
+    %19 = scalar.constant 0 : i32
+    scf.yield %19 : i32
+  } else {
+    %8 = scalar.constant 1 : i32
+    %9 = scalar.cmpi eq, %choice, %8 : i32
+    %18 = scf.if %9 -> (i32) {
+      %15 = scalar.constant 0 : i32
+      scf.yield %15 : i32
+    } else {
+      %10 = scalar.constant 2 : i32
+      %11 = scalar.cmpi eq, %choice, %10 : i32
+      %14 = scf.if %11 -> (i32) {
+        %12 = scalar.constant 0 : i32
+        scf.yield %12 : i32
+      } else {
+        %13 = scalar.constant 1 : i32
+        scf.yield %13 : i32
+      }
+      %16 = scalar.constant 1 : i32
+      %17 = scalar.addi %14, %16 : i32
+      scf.yield %17 : i32
+    }
+    %20 = scalar.constant 1 : i32
+    %21 = scalar.addi %18, %20 : i32
+    scf.yield %21 : i32
+  }
+  %23 = scalar.constant 2 : i32
+  %24 = scalar.cmpi ult, %22, %23 : i32
+  %selected = scf.if %24 -> (i32) {
+    %26 = scalar.constant 0 : i32
+    %27 = scalar.cmpi eq, %22, %26 : i32
+    %28 = scf.if %27 -> (i32) {
+      scf.yield %first : i32
+    } else {
+      scf.yield %second : i32
+    }
+    scf.yield %28 : i32
+  } else {
+    %29 = scalar.constant 2 : i32
+    %30 = scalar.cmpi eq, %22, %29 : i32
+    %31 = scf.if %30 -> (i32) {
+      scf.yield %third : i32
+    } else {
+      scf.yield %fourth : i32
+    }
+    scf.yield %31 : i32
+  }
+  func.return %selected : i32
+}
+
+// ====
+// A reference result projects one of several semantic record elements from a
+// value-backed parameter. Forwarding the result through another call keeps the
+// pointer-bearing owner in SSA form and writes only the selected scalar field.
+struct ProjectedCell {
+  unsigned* data;
+  unsigned marker;
+};
+struct ProjectedArray {
+  ProjectedCell values[3];
+  [[loom::noinline]] ProjectedCell& operator[](unsigned index) {
+    return values[index];
+  }
+};
+[[loom::noinline]] static ProjectedCell& forward_projected_cell(
+    ProjectedArray& array, unsigned index) {
+  return array[index];
+}
+unsigned projected_call_reference(unsigned* data, unsigned index,
+                                  unsigned next) {
+  ProjectedArray array{{{data, 1u}, {data, 2u}, {data, 3u}}};
+  ProjectedCell& selected = forward_projected_cell(array, index);
+  selected.marker = next;
+  return array.values[0].marker + 10u * array.values[1].marker +
+         100u * array.values[2].marker;
+}
+
+// ----
+func.def public @projected_call_reference(%data: buffer, %data_byte_offset: offset, %index: i32, %next: i32) -> (i32) {
+  %array_values_0_marker$5 = scalar.constant 1 : i32
+  %array_values_1_marker$6 = scalar.constant 2 : i32
+  %array_values_2_marker$7 = scalar.constant 3 : i32
+  %8 = func.call pure @forward_projected_cell(%data, %data_byte_offset, %array_values_0_marker$5, %data, %data_byte_offset, %array_values_1_marker$6, %data, %data_byte_offset, %array_values_2_marker$7, %index) : (buffer, offset, i32, buffer, offset, i32, buffer, offset, i32, i32) -> (i32)
+  %9 = scalar.constant 0 : i32
+  %10 = scalar.cmpi eq, %8, %9 : i32
+  %array_values_0_marker$11 = scf.if %10 -> (i32) {
+    scf.yield %next : i32
+  } else {
+    scf.yield %array_values_0_marker$5 : i32
+  }
+  %12 = scalar.constant 1 : i32
+  %13 = scalar.cmpi eq, %8, %12 : i32
+  %array_values_1_marker$14 = scf.if %13 -> (i32) {
+    scf.yield %next : i32
+  } else {
+    scf.yield %array_values_1_marker$6 : i32
+  }
+  %15 = scalar.constant 2 : i32
+  %16 = scalar.cmpi eq, %8, %15 : i32
+  %array_values_2_marker$17 = scf.if %16 -> (i32) {
+    scf.yield %next : i32
+  } else {
+    scf.yield %array_values_2_marker$7 : i32
+  }
+  %18 = scalar.constant 0 : i32
+  %19 = scalar.constant 10 : i32
+  %20 = scalar.constant 1 : i32
+  %21 = scalar.muli %19, %array_values_1_marker$14 : i32
+  %22 = scalar.addi %array_values_0_marker$11, %21 : i32
+  %23 = scalar.constant 100 : i32
+  %24 = scalar.constant 2 : i32
+  %25 = scalar.muli %23, %array_values_2_marker$17 : i32
+  %26 = scalar.addi %22, %25 : i32
+  func.return %26 : i32
+}
+
+func.def noinline @forward_projected_cell(%array_values_0_data: buffer, %array_values_0_data_byte_offset: offset, %array_values_0_marker: i32, %array_values_1_data: buffer, %array_values_1_data_byte_offset: offset, %array_values_1_marker: i32, %array_values_2_data: buffer, %array_values_2_data_byte_offset: offset, %array_values_2_marker: i32, %index: i32) -> (i32) {
+  %38 = func.call pure @ProjectedArray__operator_subscript_value(%array_values_0_data, %array_values_0_data_byte_offset, %array_values_0_marker, %array_values_1_data, %array_values_1_data_byte_offset, %array_values_1_marker, %array_values_2_data, %array_values_2_data_byte_offset, %array_values_2_marker, %index) : (buffer, offset, i32, buffer, offset, i32, buffer, offset, i32, i32) -> (i32)
+  func.return %38 : i32
+}
+
+func.def noinline @ProjectedArray__operator_subscript_value(%this_values_0_data: buffer, %this_values_0_data_byte_offset: offset, %this_values_0_marker: i32, %this_values_1_data: buffer, %this_values_1_data_byte_offset: offset, %this_values_1_marker: i32, %this_values_2_data: buffer, %this_values_2_data_byte_offset: offset, %this_values_2_marker: i32, %index: i32) -> (i32) {
+  func.return %index : i32
+}
+
+// ====
+// A returned reference that may designate either a stored subobject or an
+// automatic value uses the storage ABI. The automatic alternative is promoted
+// once so both choices retain one uniform identity representation.
+struct StoredPair {
+  unsigned first;
+  unsigned second;
+};
+[[loom::noinline]] static unsigned& mixed_storage_reference(
+    bool stored, StoredPair& pair, unsigned& value) {
+  return stored ? pair.second : value;
+}
+unsigned mixed_storage_reference_call(StoredPair* pair, bool stored,
+                                      unsigned value, unsigned next) {
+  unsigned& selected = mixed_storage_reference(stored, *pair, value);
+  selected = next;
+  return pair->second + value;
+}
+
+// ----
+func.def public @mixed_storage_reference_call(%pair: buffer, %pair_byte_offset: offset, %stored: i1, %value$3: i32, %next: i32) -> (i32) {
+  %6 = index.constant 4 : offset
+  %value_storage = buffer.alloca<private> align(4) %6 : buffer
+  %value_storage_byte_offset = index.constant 0 : offset
+  %value_view = buffer.view %value_storage[%value_storage_byte_offset] : buffer -> view<1xi32>
+  view.store %value$3, %value_view[0] : i32, view<1xi32>
+  %10, %11 = func.call pure @mixed_storage_reference(%stored, %pair, %pair_byte_offset, %value_storage, %value_storage_byte_offset) : (i1, buffer, offset, buffer, offset) -> (buffer, offset)
+  %12 = buffer.view %10[%11] : buffer -> view<1xi32>
+  view.store<root_in_bounds> %next, %12[0] : i32, view<1xi32>
+  %13 = index.constant 4 : offset
+  %14 = index.add %pair_byte_offset, %13 : offset
+  %15 = buffer.view %pair[%14] : buffer -> view<1xi32>
+  %second = view.load<root_in_bounds> %15[0] : view<1xi32> -> i32
+  %value$17 = view.load %value_view[0] : view<1xi32> -> i32
+  %18 = scalar.addi %second, %value$17 : i32
+  func.return %18 : i32
+}
+
+func.def noinline @mixed_storage_reference(%stored: i1, %pair: buffer, %pair_byte_offset: offset, %value: buffer, %value_byte_offset: offset) -> (buffer, offset) {
+  %26, %27 = scf.if %stored -> (buffer, offset) {
+    %28 = index.constant 4 : offset
+    %29 = index.add %pair_byte_offset, %28 : offset
+    scf.yield %pair, %29 : buffer, offset
+  } else {
+    scf.yield %value, %value_byte_offset : buffer, offset
+  }
+  func.return %26, %27 : buffer, offset
+}

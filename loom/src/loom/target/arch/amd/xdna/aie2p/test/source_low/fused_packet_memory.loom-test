@@ -116,15 +116,13 @@ func.def target(@target) @load_encode_bfp_register_offsets(%source: buffer) -> (
 // ----
 low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @load_encode_bfp_register_offsets() -> (reg<aie2p.mexa>) asm {
   %source_aligned = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
-  %10 = mov.static-byte-offset 448
-  %11 = mov.address-index %10
-  %12 = vlda.convert.bf16x32.to.f32x32.index %source_aligned, %11
-  %13 = mov.static-byte-offset 512
-  %14 = mov.address-index %13
-  %15 = vlda.convert.bf16x32.to.f32x32.index %source_aligned, %14
-  %16 = concat(%12, %15) : (reg<aie2p.mbms x2>, reg<aie2p.mbms x2>) -> reg<aie2p.mbms x4>
+  %10 = mov.static-address-index 448
+  %11 = vlda.convert.bf16x32.to.f32x32.index %source_aligned, %10
+  %12 = mov.static-address-index 512
+  %13 = vlda.convert.bf16x32.to.f32x32.index %source_aligned, %12
+  %14 = concat(%11, %13) : (reg<aie2p.mbms x2>, reg<aie2p.mbms x2>) -> reg<aie2p.mbms x4>
   set.rounding 12
-  %encoded = vconv.bfp16ebs8.fp32 %16
+  %encoded = vconv.bfp16ebs8.fp32 %14
   return %encoded
 }
 

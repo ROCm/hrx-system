@@ -1,0 +1,25 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+package(
+    default_visibility = ["//loom/binding/c/test/target/cmd:__pkg__"],
+    licenses = ["notice"],
+)
+
+exports_files(
+    [
+        "class_admission.loom",
+        "command.loom",
+        "providers.loom-test",
+        "residual_shapes.loom",
+        "staged_literals.loom",
+        "staged_providers.loom",
+        "staged_required.loom",
+        "staged_selection.loom",
+        "structural_specializations.loom",
+    ],
+    visibility = ["//loom/binding/c/test/target/cmd:__pkg__"],
+)

@@ -530,7 +530,8 @@ iree_status_t loom_amdgpu_emit_fmaf_literal_operand_form_diagnostic(
   }
 
   const iree_string_view_t descriptor_name = loom_low_descriptor_set_string(
-      descriptor_set, descriptor->key_string_ref);
+      descriptor_set,
+      loom_low_descriptor_key_string_ref(descriptor_set, descriptor));
   const iree_string_view_t descriptor_set_name =
       loom_amdgpu_descriptor_set_key(descriptor_set);
   const iree_string_view_t decision_key =
@@ -577,7 +578,8 @@ static iree_status_t loom_amdgpu_emit_mulf_mix_operand_form_diagnostic(
   const loom_low_descriptor_set_t* descriptor_set =
       loom_low_lower_context_descriptor_set(context);
   const iree_string_view_t descriptor_name = loom_low_descriptor_set_string(
-      descriptor_set, descriptor.descriptor->key_string_ref);
+      descriptor_set, loom_low_descriptor_key_string_ref(
+                          descriptor_set, descriptor.descriptor));
   const iree_string_view_t descriptor_set_name =
       loom_amdgpu_descriptor_set_key(descriptor_set);
   const iree_string_view_t decision_key =
@@ -1233,7 +1235,7 @@ static iree_status_t loom_amdgpu_prepare_fma_mix_packet_sources(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_amdgpu_fma_mix_plan_t* plan, loom_type_t result_type,
     loom_value_id_t sources[LOOM_AMDGPU_FMA_MIX_SOURCE_COUNT],
-    iree_host_size_t* out_source_count, loom_named_attr_t* attrs,
+    loom_named_attr_t* attrs, iree_host_size_t* out_source_count,
     iree_host_size_t* out_attr_count) {
   *out_source_count = loom_amdgpu_fma_mix_plan_has_implicit_src2_zero(plan)
                           ? LOOM_AMDGPU_FMA_MIX_SOURCE_COUNT - 1
@@ -1267,7 +1269,7 @@ iree_status_t loom_amdgpu_emit_fma_mix_packet(
   loom_named_attr_t attrs[1] = {0};
   iree_host_size_t attr_count = 0;
   IREE_RETURN_IF_ERROR(loom_amdgpu_prepare_fma_mix_packet_sources(
-      context, source_op, plan, result_type, operands, &operand_count, attrs,
+      context, source_op, plan, result_type, operands, attrs, &operand_count,
       &attr_count));
 
   loom_op_t* low_op = NULL;
@@ -1292,7 +1294,7 @@ iree_status_t loom_amdgpu_emit_tied_fma_mix_packet(
   loom_named_attr_t attrs[1] = {0};
   iree_host_size_t attr_count = 0;
   IREE_RETURN_IF_ERROR(loom_amdgpu_prepare_fma_mix_packet_sources(
-      context, source_op, plan, result_type, sources, &source_count, attrs,
+      context, source_op, plan, result_type, sources, attrs, &source_count,
       &attr_count));
   loom_value_id_t operands[1 + LOOM_AMDGPU_FMA_MIX_SOURCE_COUNT] = {
       accumulator,

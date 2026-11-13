@@ -7,9 +7,76 @@
 #include "loom/transforms/index/target_legalization.h"
 
 #include "loom/ops/index/ops.h"
+#include "loom/ops/scalar/ops.h"
 #include "loom/ops/scf/ops.h"
 #include "loom/rewrite/rewriter.h"
 #include "loom/util/predicate_facts.h"
+
+// Bridges narrow payloads through the ordinary i32 address conversion. Native
+// target casts retain precedence. Boolean inputs enter either address domain as
+// 0 or 1; other payloads enter index signed and offset unsigned.
+static iree_status_t loom_index_legalize_narrow_cast(
+    const loom_target_legalizer_entry_t* entry,
+    loom_target_legalization_context_t* context, loom_op_t* op,
+    loom_target_legalizer_result_t* out_result) {
+  (void)entry;
+  out_result->action = LOOM_TARGET_LEGALIZER_ACTION_NO_COMMENT;
+  const loom_value_id_t input = loom_index_cast_input(op);
+  const loom_type_t input_type = loom_module_value_type(context->module, input);
+  const loom_type_t result_type =
+      loom_module_value_type(context->module, loom_index_cast_result(op));
+  const loom_scalar_type_t input_scalar = loom_type_element_type(input_type);
+  const loom_scalar_type_t result_scalar = loom_type_element_type(result_type);
+  const bool entering_address = loom_scalar_type_is_integer(input_scalar);
+  const loom_scalar_type_t payload_scalar =
+      entering_address ? input_scalar : result_scalar;
+  if (!loom_scalar_type_is_integer(payload_scalar) ||
+      loom_scalar_type_bitwidth(payload_scalar) >= 32) {
+    return iree_ok_status();
+  }
+  // Preserve the semantic width boundary while eager producer rewrites and
+  // address proofs still consume it. Final legalization selects the carrier.
+  if (context->mode != LOOM_TARGET_LEGALIZATION_MODE_FINAL) {
+    out_result->action = LOOM_TARGET_LEGALIZER_ACTION_DEFER;
+    return iree_ok_status();
+  }
+
+  loom_rewriter_t* rewriter = context->rewriter;
+  loom_builder_t* builder = &rewriter->builder;
+  loom_builder_set_before(builder, op);
+  const loom_value_id_t checkpoint = loom_rewriter_value_checkpoint(rewriter);
+  const loom_type_t carrier_type = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
+  loom_op_t* carrier = NULL;
+  loom_op_t* converted = NULL;
+  loom_value_id_t replacement;
+  if (entering_address) {
+    if (input_scalar == LOOM_SCALAR_TYPE_I1 ||
+        result_scalar == LOOM_SCALAR_TYPE_OFFSET) {
+      IREE_RETURN_IF_ERROR(loom_scalar_extui_build(
+          builder, input, input_type, carrier_type, op->location, &carrier));
+    } else {
+      IREE_RETURN_IF_ERROR(loom_scalar_extsi_build(
+          builder, input, input_type, carrier_type, op->location, &carrier));
+    }
+    IREE_RETURN_IF_ERROR(loom_index_cast_build(
+        builder, loom_op_results(carrier)[0], carrier_type, result_type,
+        op->location, &converted));
+    replacement = loom_index_cast_result(converted);
+  } else {
+    IREE_RETURN_IF_ERROR(loom_index_cast_build(
+        builder, input, input_type, carrier_type, op->location, &carrier));
+    IREE_RETURN_IF_ERROR(loom_scalar_trunci_build(
+        builder, loom_index_cast_result(carrier), carrier_type, result_type,
+        op->location, &converted));
+    replacement = loom_scalar_trunci_result(converted);
+  }
+  IREE_RETURN_IF_ERROR(loom_rewriter_preserve_result_names_on_new_values(
+      rewriter, op, &replacement, 1, checkpoint));
+  IREE_RETURN_IF_ERROR(
+      loom_rewriter_replace_all_uses_and_erase(rewriter, op, &replacement, 1));
+  out_result->action = LOOM_TARGET_LEGALIZER_ACTION_REWRITTEN;
+  return iree_ok_status();
+}
 
 // Native extrema contracts take precedence over this comparison/selection
 // decomposition. Targets without a native form still receive the exact signed
@@ -70,14 +137,31 @@ static iree_status_t loom_index_legalize_divrem(
   loom_value_id_t replacements[2] = {loom_index_div_result(quotient),
                                      loom_index_sub_result(remainder)};
   if (context->fact_table) {
-    loom_predicate_t predicates[LOOM_VALUE_FACT_INTEGER_REFINEMENT_CAPACITY];
-    const uint16_t predicate_count =
-        loom_value_facts_export_integer_refinements(
-            replacements[1],
-            loom_value_fact_table_lookup(context->fact_table, replacements[1]),
-            loom_value_fact_table_lookup(context->fact_table,
-                                         loom_op_const_results(op)[1]),
-            predicates, IREE_ARRAYSIZE(predicates));
+    const loom_value_facts_t remainder_facts = loom_value_fact_table_lookup(
+        context->fact_table, loom_op_const_results(op)[1]);
+    const loom_value_facts_t divisor_facts =
+        loom_value_fact_table_lookup(context->fact_table, rhs);
+    loom_predicate_t
+        predicates[LOOM_VALUE_FACT_INTEGER_REFINEMENT_CAPACITY + 1];
+    uint16_t predicate_count = loom_value_facts_export_integer_refinements(
+        replacements[1],
+        loom_value_fact_table_lookup(context->fact_table, replacements[1]),
+        remainder_facts, predicates, IREE_ARRAYSIZE(predicates));
+    // The reconstructed arithmetic loses the strict bound against a runtime
+    // divisor. Preserve it with the numeric refinements when the index domain
+    // is established and the numeric interval alone cannot express it.
+    if (loom_value_facts_is_positive(divisor_facts) &&
+        loom_value_facts_is_non_negative(
+            loom_value_fact_table_lookup(context->fact_table, lhs)) &&
+        remainder_facts.range_hi >= divisor_facts.range_lo) {
+      predicates[predicate_count++] = (loom_predicate_t){
+          .kind = LOOM_PREDICATE_LT,
+          .arg_count = 2,
+          .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_VALUE,
+                       LOOM_PRED_ARG_NONE},
+          .args = {replacements[1], rhs, 0},
+      };
+    }
     if (predicate_count != 0) {
       const loom_type_t result_type =
           loom_module_value_type(context->module, replacements[1]);
@@ -176,6 +260,11 @@ static iree_status_t loom_index_legalize_rotation(
 }
 
 static const loom_target_legalizer_rule_t kIndexLegalizerRules[] = {
+    {
+        .root_kind = LOOM_OP_INDEX_CAST,
+        .legalize = loom_index_legalize_narrow_cast,
+        .flags = LOOM_TARGET_LEGALIZER_ENTRY_FLAG_REQUIRE_CONTRACT_REJECTION,
+    },
     {
         .root_kind = LOOM_OP_INDEX_MIN,
         .legalize = loom_index_legalize_extrema,

@@ -196,6 +196,19 @@ std::vector<uint8_t> BuildLowerAlphaUnicodeDfa() {
   return builder.Build();
 }
 
+// Build a DFA that matches an invalid UTF-8 byte followed by '@'. Invalid
+// sequences map to the OTHER pseudo-byte as one replacement character.
+std::vector<uint8_t> BuildInvalidAtDfa() {
+  TestDfaBuilder builder;
+  builder.SetNumStates(3);
+  builder.SetStartState(0);
+  builder.SetFlags(IREE_TOKENIZER_UTIL_REGEX_DFA_FLAG_UNICODE);
+  builder.AddTransition(0, IREE_TOKENIZER_UTIL_REGEX_PSEUDO_OTHER, 1);
+  builder.AddTransition(1, '@', 2);
+  builder.SetAccepting(2);
+  return builder.Build();
+}
+
 // Build a DFA that matches [0-9]+ (one or more digits).
 std::vector<uint8_t> BuildDigitsDfa() {
   TestDfaBuilder builder;
@@ -1583,6 +1596,42 @@ TEST(Utf8Validation, StrayContiunationByte) {
   ASSERT_EQ(collector.matches.size(), 1);
   EXPECT_EQ(collector.matches[0].first, 2);
   EXPECT_EQ(collector.matches[0].second, 4);
+}
+
+TEST(Utf8Validation, MalformedSequenceRetryUsesDecodedLength) {
+  auto data = BuildInvalidAtDfa();
+  iree_tokenizer_regex_dfa_t dfa;
+  IREE_ASSERT_OK(iree_tokenizer_regex_dfa_load(
+      iree_make_const_byte_span(data.data(), data.size()), &dfa));
+
+  // The overlong lead byte decodes as one replacement character, so the
+  // second malformed byte remains a valid match start for "OTHER @".
+  const uint8_t input[] = {0xC0, 0x80, '@'};
+  MatchCollector collector;
+  IREE_EXPECT_OK(iree_tokenizer_regex_exec(
+      &dfa, iree_make_string_view((const char*)input, sizeof(input)),
+      MatchCollector::Callback, &collector));
+
+  ASSERT_EQ(collector.matches.size(), 1);
+  EXPECT_EQ(collector.matches[0].first, 1);
+  EXPECT_EQ(collector.matches[0].second, 3);
+}
+
+TEST(Utf8Validation, MalformedSequenceAtEndFinalizes) {
+  auto data = BuildInvalidAtDfa();
+  iree_tokenizer_regex_dfa_t dfa;
+  IREE_ASSERT_OK(iree_tokenizer_regex_dfa_load(
+      iree_make_const_byte_span(data.data(), data.size()), &dfa));
+
+  // This invalid four-byte lead enters a partial match at the final byte. EOF
+  // retry must consume the decoded replacement character without advancing
+  // beyond the available tail.
+  const uint8_t input[] = {0xF6};
+  MatchCollector collector;
+  IREE_EXPECT_OK(iree_tokenizer_regex_exec(
+      &dfa, iree_make_string_view((const char*)input, sizeof(input)),
+      MatchCollector::Callback, &collector));
+  EXPECT_TRUE(collector.matches.empty());
 }
 
 //===----------------------------------------------------------------------===//

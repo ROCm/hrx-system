@@ -37,6 +37,11 @@ LOOMC_API_PRIVATE void loomc_result_set_status_code(
 LOOMC_API_PRIVATE loomc_status_t loomc_result_add_diagnostic(
     loomc_result_t* result, const loomc_diagnostic_t* diagnostic);
 
+// Copies diagnostics with independent source storage in the destination
+// allocator. No allocation or allocator state owned by |source| escapes.
+LOOMC_API_PRIVATE loomc_status_t loomc_result_copy_diagnostics(
+    loomc_result_t* destination, const loomc_result_t* source);
+
 // Adds an artifact by copying metadata and retaining immutable contents.
 LOOMC_API_PRIVATE loomc_status_t loomc_result_add_artifact(
     loomc_result_t* result, const loomc_artifact_t* artifact);

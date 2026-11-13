@@ -81,6 +81,21 @@ def test_alignment_belongs_to_selected_register_alternative() -> None:
     ) == (4, 1)
 
 
+def test_alignment_reuses_unchanged_descriptor_set() -> None:
+    builder = _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS["rdna3_5"]
+    descriptor = _amdgpu_contract_descriptor_from_overlay(builder.overlay_rows()[0])
+    operand = replace(
+        descriptor.operands[0],
+        unit_count=1,
+        reg_alts=(RegClassAlt(_REG_VGPR),),
+    )
+    source = replace(
+        builder.base,
+        descriptors=(replace(descriptor, operands=(operand,)),),
+    )
+    assert _with_operand_alignment(source) is source
+
+
 @pytest.mark.parametrize("target", ["cdna3", "cdna4", "gfx9_4_generic"])
 @pytest.mark.parametrize(
     ("operation", "names"),

@@ -8,10 +8,12 @@
 
 import argparse
 import http.client
+import itertools
 import json
+import os
 import struct
 import tempfile
-import traceback
+import time
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -162,6 +164,23 @@ def check_media(address, memory_bytes):
 
 
 def check(server, source, directory, device, workers, memory_bytes, retention):
+    started_at = time.monotonic()
+
+    def report_phase(phase):
+        print(
+            json.dumps(
+                {
+                    "workers": workers,
+                    "memory_bytes": memory_bytes,
+                    "retention": retention,
+                    "phase": phase,
+                    "elapsed_seconds": round(time.monotonic() - started_at, 3),
+                }
+            ),
+            flush=True,
+        )
+
+    report_phase("prepare")
     configuration = directory / "models.flags"
     weights = directory / "weights.safetensors"
     header = b'{"bias":{"dtype":"I32","shape":[1],"data_offsets":[0,4]}}'
@@ -221,6 +240,7 @@ def check(server, source, directory, device, workers, memory_bytes, retention):
     ]
     with running_server(command, directory / "server.log") as (_, endpoint):
         assert endpoint is not None, (directory / "server.log").read_text()
+        report_phase("server_bound")
         address = urlsplit("http://" + endpoint)
         while True:
             state = control(address, "GET", "/v1/status", 200)
@@ -230,6 +250,7 @@ def check(server, source, directory, device, workers, memory_bytes, retention):
                 model["loom"]["status"]["phase"] == "idle" for model in models
             ):
                 break
+        report_phase("models_ready")
         memory = state["server"]["resources"]["pools"][0]["memory"]
         assert memory["storage"]["committed_bytes"] == PERMANENT_STORAGE_BYTES, memory
         messages = [{"role": "user", "content": "abxa"}]
@@ -243,6 +264,7 @@ def check(server, source, directory, device, workers, memory_bytes, retention):
             assert first_status == 200, first
             assert output(first) == oracle("abxa"), first
         wait_status(address, model="alpha", active_requests=0)
+        report_phase("histories_ready")
         if retention == "parameters":
             for _ in range(2):
                 state = control(
@@ -280,8 +302,12 @@ def check(server, source, directory, device, workers, memory_bytes, retention):
         }
         print(json.dumps(result), flush=True)
         assert memory_after["peak_bytes"] <= memory_bytes, result
-        impossible_peer = retention in ("parameters", "checkpoint") and (
-            memory_bytes == ONE_MODEL_LIMIT_BYTES
+        minimum_peer_bytes = {
+            "parameters": PARAMETER_AND_PEER_LIMIT_BYTES,
+            "checkpoint": CHECKPOINT_AND_PEER_LIMIT_BYTES,
+        }.get(retention)
+        impossible_peer = (
+            minimum_peer_bytes is not None and memory_bytes < minimum_peer_bytes
         )
         assert second_status == (503 if impossible_peer else 200), second
         if not impossible_peer:
@@ -312,6 +338,7 @@ def check(server, source, directory, device, workers, memory_bytes, retention):
         assert (
             f"loom_serve_model_parameter_admission_waiting{{{identity}}} 0\n"
         ) in metrics, metrics
+        report_phase("peer_pressure_complete")
         history = [
             *messages,
             {"role": "assistant", "content": output(first)},
@@ -350,7 +377,7 @@ def check(server, source, directory, device, workers, memory_bytes, retention):
             # survive the denial just as they survive in the roomy case.
             expected_sessions = (
                 set()
-                if memory_bytes == PARAMETER_AND_PEER_LIMIT_BYTES
+                if not impossible_peer and memory_bytes < TWO_MODEL_LIMIT_BYTES
                 else {f"conversation-{index}" for index in range(4)}
             )
             assert {session["name"] for session in sessions["data"]} == (
@@ -399,11 +426,13 @@ def check(server, source, directory, device, workers, memory_bytes, retention):
             )
             assert resumed_status == 200, resumed
             assert output(resumed) == oracle("abxa" + output(first) + "#b"), resumed
-            histories_reclaimed = memory_bytes == ONE_MODEL_LIMIT_BYTES or (
-                retention == "parameters"
-                and memory_bytes == PARAMETER_AND_PEER_LIMIT_BYTES
+            histories_reclaimed = memory_bytes < (
+                TWO_MODEL_LIMIT_BYTES
+                if retention == "parameters"
+                else CHECKPOINT_AND_PEER_LIMIT_BYTES
             )
             assert cached_tokens(resumed) == (0 if histories_reclaimed else 5), resumed
+        report_phase("retention_recovery_complete")
         # Removal owns pinned state as well as the service. A peer submitted
         # immediately after accepted unregister must complete without waiting
         # for a client-side polling loop to observe final model destruction.
@@ -437,6 +466,7 @@ def check(server, source, directory, device, workers, memory_bytes, retention):
         status, response = completion(address, "beta", messages, "replacement")
         assert status == 200, response
         assert output(response) == oracle("abxa"), response
+        report_phase("removal_replacement_complete")
         # Joined removal returns model ownership before explicit pool trim
         # releases reusable permanent-storage and workspace backing.
         control(
@@ -447,6 +477,7 @@ def check(server, source, directory, device, workers, memory_bytes, retention):
             body=json.dumps({"model": "beta", "mode": "drain"}),
             headers={"Content-Type": "application/json"},
         )
+        report_phase("final_removal_accepted")
         while True:
             final = control(address, "GET", "/v1/status", 200)
             pool = final["server"]["resources"]["pools"][0]
@@ -458,6 +489,7 @@ def check(server, source, directory, device, workers, memory_bytes, retention):
             ):
                 break
             assert all(not model["loom"].get("error") for model in final["data"]), final
+        report_phase("models_retired")
         assert memory["pending_bytes"] == 0, memory
         # Model removal can leave reusable allocator mappings. These remain
         # part of the physical total until explicit trim, without any model
@@ -480,6 +512,7 @@ def check(server, source, directory, device, workers, memory_bytes, retention):
             body=json.dumps({"pool": "pool", "target_bytes": 0}),
             headers={"Content-Type": "application/json"},
         )
+        report_phase("trim_accepted")
         while memory["committed_bytes"]:
             final = control(address, "GET", "/v1/status", 200)
             memory = final["server"]["resources"]["pools"][0]["memory"]["retained"]
@@ -492,53 +525,73 @@ def check(server, source, directory, device, workers, memory_bytes, retention):
             assert preserved_sessions == {
                 f"conversation-{index}" for index in range(4)
             }, {"retention": retention, "preserved_sessions": preserved_sessions}
+        report_phase("complete")
 
 
-def run_from_command_line(cases):
+def _run_cases(server, source, device, cases):
+    output_directory = os.environ.get("TEST_UNDECLARED_OUTPUTS_DIR")
+    if output_directory:
+        root = Path(output_directory) / "pressure"
+        root.mkdir()
+        temporary = None
+    else:
+        temporary = tempfile.TemporaryDirectory(prefix="loom-pressure-")
+        root = Path(temporary.name)
+    try:
+        for workers, memory_bytes, retention in cases:
+            directory = root / f"{workers}-{memory_bytes}-{retention}"
+            directory.mkdir()
+            check(
+                server,
+                source,
+                directory,
+                device,
+                workers,
+                memory_bytes,
+                retention,
+            )
+    finally:
+        if temporary is not None:
+            temporary.cleanup()
+
+
+def run_from_command_line():
     parser = argparse.ArgumentParser()
     parser.add_argument("--server", type=Path, required=True)
     parser.add_argument("--source", type=Path, required=True)
     parser.add_argument("--device", required=True)
+    parser.add_argument(
+        "--stress",
+        action="store_true",
+        help="run the complete physical-pressure matrix",
+    )
     arguments = parser.parse_args()
     server, source = arguments.server.absolute(), arguments.source.absolute().parent
-    failures = []
-    with tempfile.TemporaryDirectory(prefix="loom pressure ") as temporary:
-        root = Path(temporary)
-        for workers, memory_bytes, retention in cases:
-            directory = root / f"{workers}-{memory_bytes}-{retention}"
-            directory.mkdir()
-            try:
-                check(
-                    server,
-                    source,
-                    directory,
-                    arguments.device,
-                    workers,
-                    memory_bytes,
-                    retention,
-                )
-            except AssertionError:
-                failures.append(
-                    (workers, memory_bytes, retention, traceback.format_exc())
-                )
-    assert not failures, failures
+    cases = _STRESS_CASES if arguments.stress else _PRESUBMIT_CASES
+    _run_cases(server, source, arguments.device, cases)
 
 
-# Pairwise coverage across worker count, physical memory limit, and retained
-# state policy.
-_CASES = (
-    # Media and text fit as sequential phases without requiring their combined
-    # declared footprint. Tight cases force reclamation within one model's cap.
-    (1, MEDIA_AND_TEXT_LIMIT_BYTES, "none"),
-    (1, CHECKPOINT_AND_PEER_LIMIT_BYTES, "checkpoint"),
-    (1, TWO_MODEL_LIMIT_BYTES, "parameters"),
-    (4, ONE_MODEL_LIMIT_BYTES, "none"),
-    (4, TWO_MODEL_LIMIT_BYTES, "checkpoint"),
-    (4, PARAMETER_AND_PEER_LIMIT_BYTES, "parameters"),
-    (4, ONE_MODEL_LIMIT_BYTES, "parameters"),
-    (1, ONE_MODEL_LIMIT_BYTES, "checkpoint"),
+# One bounded integration witness crosses source JIT, explicit retained state,
+# denied peer admission, recovery, model replacement, and physical pool trim.
+_PRESUBMIT_CASES = ((1, ONE_MODEL_LIMIT_BYTES, "checkpoint"),)
+
+# The manual stress target owns the complete matrix across execution width,
+# every distinct semantic pressure boundary, and retained-state policy. Media
+# and text fit as sequential phases without requiring their combined declared
+# footprint; tight cases force reclamation within one model's cap.
+_STRESS_CASES = tuple(
+    itertools.product(
+        (1, 4),
+        (
+            ONE_MODEL_LIMIT_BYTES,
+            PARAMETER_AND_PEER_LIMIT_BYTES,
+            MEDIA_AND_TEXT_LIMIT_BYTES,
+            TWO_MODEL_LIMIT_BYTES,
+        ),
+        ("none", "checkpoint", "parameters"),
+    )
 )
 
 
 if __name__ == "__main__":
-    run_from_command_line(_CASES)
+    run_from_command_line()

@@ -7,8 +7,9 @@
 // Allocation-wide promotion of private typed cells to ordinary SSA.
 //
 // Shared byte-region facts partition accesses by allocation and exact typed
-// byte interval. Every use of an allocation participates in admission: unknown
-// observers, overlapping representations, and observable accesses keep storage.
+// byte interval. Unknown observers and observable accesses keep storage;
+// overlapping representations prevent scalar-cell promotion. Writes to
+// entirely unobserved allocations need no exact byte partition.
 // Reaching values and control-flow transports are planned before any mutation.
 
 #ifndef LOOM_TRANSFORMS_KERNEL_PRIVATE_STORAGE_H_
@@ -43,6 +44,8 @@ struct loom_private_storage_allocation_t {
   iree_host_size_t cell_count;
   // Whether every observer and live reaching value supports promotion.
   bool selected;
+  // Whether every use is a modeled projection or an ordinary erasable store.
+  bool write_only;
 };
 
 // Exact typed byte interval shared by all equivalent accesses. Cells are sparse
@@ -82,11 +85,13 @@ struct loom_private_storage_value_t {
   bool initialized;
 };
 
-// One memory access and its retained cell/replacement decision.
+// One memory access and its retained allocation/cell/replacement decision.
 typedef struct loom_private_storage_access_t {
-  // Original view.load or view.store.
+  // Original scalar cell access or ordinary MemoryAccess store.
   loom_op_t* op;
-  // Exact admitted byte cell.
+  // Owning allocation, even when dynamic coordinates prevent partitioning.
+  loom_private_storage_allocation_t* allocation;
+  // Exact admitted byte cell, or NULL when no scalar partition is available.
   loom_private_storage_cell_t* cell;
   // Reaching definition for a load, stored SSA definition for a store.
   loom_private_storage_value_t* value;
@@ -164,7 +169,7 @@ typedef struct loom_private_storage_plan_t {
   loom_private_storage_cell_t* cells;
   // Number of cells.
   iree_host_size_t cell_count;
-  // Memory accesses with retained cell identity.
+  // Memory accesses with retained allocation and optional cell identity.
   loom_private_storage_access_t* accesses;
   // Signature edits in child-before-parent order.
   loom_private_storage_signature_t* signatures;

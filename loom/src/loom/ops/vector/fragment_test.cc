@@ -6,6 +6,8 @@
 
 #include "loom/ops/vector/fragment.h"
 
+#include <cstring>
+
 #include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -105,6 +107,45 @@ TEST(VectorFragmentFactsTest, PayloadRoundTripsThroughValueFacts) {
   ASSERT_TRUE(loom_vector_fragment_fact_query_value_facts(&table.context, facts,
                                                           &queried));
   EXPECT_TRUE(loom_vector_fragment_fact_equal(fact, queried));
+
+  iree_arena_deinitialize(&arena);
+  iree_arena_block_pool_deinitialize(&block_pool);
+}
+
+TEST(VectorFragmentFactsTest, EqualFragmentsShareInternedIdentity) {
+  iree_arena_block_pool_t block_pool;
+  iree_arena_block_pool_initialize(4096, iree_allocator_system(), &block_pool);
+  iree_arena_allocator_t arena;
+  iree_arena_initialize(&block_pool, &arena);
+  loom_value_fact_table_t table;
+  IREE_ASSERT_OK(loom_value_fact_table_initialize(&table, &arena, 0));
+
+  loom_vector_fragment_fact_t fragments[2];
+  std::memset(&fragments[0], 0xA5, sizeof(fragments[0]));
+  std::memset(&fragments[1], 0x5A, sizeof(fragments[1]));
+  loom_value_facts_t facts[2];
+  for (int i = 0; i < 2; ++i) {
+    auto& fragment = fragments[i];
+    // Byte identity must follow the semantic fields, regardless of what
+    // occupied this storage before the fragment was constructed.
+    fragment.flags = LOOM_VECTOR_FRAGMENT_FACT_FLAG_HAS_SCHEMA |
+                     LOOM_VECTOR_FRAGMENT_FACT_FLAG_HAS_SCHEMA_VALUE;
+    fragment.role_flags = loom_vector_fragment_role_flag(LOOM_VECTOR_ROLE_LHS);
+    fragment.schema_value_id = 1;
+    fragment.static_schema_encoding_id = 0;
+    fragment.source_static_schema_encoding_id = 0;
+    fragment.shape_rank = 2;
+    fragment.shape_value_ids[0] = 2;
+    fragment.shape_value_ids[1] = 3;
+    fragment.shape_value_ids[2] = LOOM_VALUE_ID_INVALID;
+    fragment.auxiliary = {};
+    fragment.encoded_operand = {};
+    IREE_ASSERT_OK(loom_vector_fragment_fact_make_value_facts(
+        &table.context, fragment, &facts[i]));
+  }
+  EXPECT_TRUE(loom_vector_fragment_fact_equal(fragments[0], fragments[1]));
+  EXPECT_NE(facts[0].extension_id, LOOM_VALUE_FACT_EXTENSION_ID_NONE);
+  EXPECT_EQ(facts[0].extension_id, facts[1].extension_id);
 
   iree_arena_deinitialize(&arena);
   iree_arena_block_pool_deinitialize(&block_pool);

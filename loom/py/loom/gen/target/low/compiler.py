@@ -12,6 +12,7 @@ from collections.abc import Callable, Hashable, Mapping, Sequence
 from dataclasses import dataclass, replace
 
 from loom.gen.support.string_pool import CStringPool
+from loom.gen.target.low import operand_forms as operand_form_compiler
 from loom.gen.target.low import validation
 from loom.gen.target.low.compiled import (
     CompiledAsmForm,
@@ -37,7 +38,6 @@ from loom.gen.target.low.compiled import (
 )
 from loom.target.low_descriptors import (
     LOW_DESCRIPTOR_ENCODING_ID_NONE,
-    LOW_DESCRIPTOR_SET_ORDINAL_NONE,
     AsmForm,
     Constraint,
     ConstraintKind,
@@ -60,8 +60,6 @@ from loom.target.low_descriptors import (
     NativeAsmValueKind,
     Operand,
     OperandFlag,
-    OperandForm,
-    OperandFormImmediateAction,
     OperandRole,
     PhysicalRegister,
     PhysicalRegisterView,
@@ -79,42 +77,34 @@ from loom.target.low_descriptors import (
 )
 
 
-def _derive_mutable_state_classes(
-    descriptors: Sequence[Descriptor],
+def _derive_register_class_aliases(
+    classes: frozenset[str],
     register_classes: Mapping[str, RegClass],
     physical_registers: Mapping[str, PhysicalRegister],
 ) -> frozenset[str]:
-    """Returns every register class that may alias descriptor-written state."""
+    """Returns classes overlapping the named storage, including physical aliases."""
 
-    written_classes = {
-        alternative.reg_class
-        for descriptor in descriptors
-        for operand in descriptor.operands
-        if OperandFlag.STATE_WRITE in operand.flags
-        for alternative in operand.reg_alts
-        if alternative.reg_class is not None
-    }
-    written_alias_sets: set[int] = set()
-    written_atomic_units: set[int] = set()
-    for class_name in written_classes:
+    alias_sets: set[int] = set()
+    atomic_units: set[int] = set()
+    for class_name in classes:
         register_class = register_classes.get(class_name)
         if register_class is None:
             continue
         if register_class.alias_set_id:
-            written_alias_sets.add(register_class.alias_set_id)
+            alias_sets.add(register_class.alias_set_id)
         if RegClassFlag.EXPLICIT_PHYSICAL_REGISTERS in register_class.flags:
-            written_atomic_units.update(atomic_unit for register_name in register_class.physical_registers for atomic_unit in physical_registers[register_name].atomic_units)
+            atomic_units.update(atomic_unit for register_name in register_class.physical_registers for atomic_unit in physical_registers[register_name].atomic_units)
 
-    mutable_classes = set(written_classes)
+    aliased_classes = set(classes)
     for register_class in register_classes.values():
-        if register_class.alias_set_id and register_class.alias_set_id in written_alias_sets:
-            mutable_classes.add(register_class.name)
+        if register_class.alias_set_id and register_class.alias_set_id in alias_sets:
+            aliased_classes.add(register_class.name)
             continue
         if RegClassFlag.EXPLICIT_PHYSICAL_REGISTERS not in register_class.flags:
             continue
-        if any(atomic_unit in written_atomic_units for register_name in register_class.physical_registers for atomic_unit in physical_registers[register_name].atomic_units):
-            mutable_classes.add(register_class.name)
-    return frozenset(mutable_classes)
+        if any(atomic_unit in atomic_units for register_name in register_class.physical_registers for atomic_unit in physical_registers[register_name].atomic_units):
+            aliased_classes.add(register_class.name)
+    return frozenset(aliased_classes)
 
 
 def _derive_reg_class_pressure_set_ids(
@@ -280,7 +270,7 @@ _MEMORY_INSTRUCTION_CLASSES = frozenset(
     }
 )
 
-_DERIVED_OPERAND_FLAGS = frozenset((OperandFlag.TIED, OperandFlag.EARLY_CLOBBER))
+_DERIVED_OPERAND_FLAGS = frozenset((OperandFlag.TIED, OperandFlag.EARLY_CLOBBER, OperandFlag.UNOBSERVED_STATE_WRITE))
 
 _INSTRUCTION_CLASS_IMPLICATIONS = {
     InstructionClass.SMFMAC: (InstructionClass.MFMA,),
@@ -430,6 +420,7 @@ def validate_schedule_alternative_instruction_classes(
 def derive_descriptor_projections(
     descriptor: Descriptor,
     operand_layout: validation.DescriptorOperandLayout,
+    hidden_state_classes: frozenset[str],
 ) -> Descriptor:
     """Projects validated descriptor constraints onto compact runtime flags."""
 
@@ -474,7 +465,10 @@ def derive_descriptor_projections(
         if authored_projection_flags:
             names = ", ".join(sorted(flag.name.lower() for flag in authored_projection_flags))
             raise ValueError(f"descriptor '{descriptor.key}' operand '{operand.field_name}' authors derived projection flag(s): {names}")
-        operand_flags.append(list(operand.flags))
+        flags = list(operand.flags)
+        if operand.role is OperandRole.IMPLICIT and OperandFlag.STATE_WRITE in operand.flags and not any(alternative.reg_class in hidden_state_classes for alternative in operand.reg_alts):
+            flags.append(OperandFlag.UNOBSERVED_STATE_WRITE)
+        operand_flags.append(flags)
 
     for constraint in descriptor.constraints:
         if constraint.kind is ConstraintKind.TIED:
@@ -577,156 +571,6 @@ def _select_descriptors(spec: DescriptorSet, allowlist: DescriptorAllowlist | No
     return [descriptor for descriptor in spec.descriptors if descriptor.key in selected]
 
 
-def _index_descriptor_fields(
-    descriptor: Descriptor,
-) -> tuple[dict[str, int], dict[str, int]]:
-    operand_indices: dict[str, int] = {}
-    for i, operand in enumerate(descriptor.operands):
-        if operand.field_name in operand_indices:
-            raise ValueError(f"descriptor '{descriptor.key}' operand field '{operand.field_name}' is duplicated and cannot be used by asm forms")
-        operand_indices[operand.field_name] = i
-
-    immediate_indices: dict[str, int] = {}
-    for i, immediate in enumerate(descriptor.immediates):
-        if immediate.field_name in immediate_indices:
-            raise ValueError(f"descriptor '{descriptor.key}' immediate field '{immediate.field_name}' is duplicated and cannot be used by asm forms")
-        immediate_indices[immediate.field_name] = i
-    return operand_indices, immediate_indices
-
-
-def _compile_operand_form(
-    descriptor: Descriptor,
-    descriptor_ordinals: dict[str, int],
-    selected_descriptors: Sequence[Descriptor],
-    operand_form: OperandForm,
-) -> tuple[
-    CompiledOperandForm,
-    tuple[CompiledOperandFormMatch, ...],
-    tuple[int, ...],
-]:
-    operand_indices, immediate_indices = _index_descriptor_fields(descriptor)
-    source_packet_indices = validation.descriptor_packet_operand_indices(descriptor)
-    source_packet_index_by_operand_index = {operand_index: packet_index for packet_index, operand_index in enumerate(source_packet_indices)}
-    compiled_matches: list[CompiledOperandFormMatch] = []
-    match_index_by_source_operand: dict[str, int] = {}
-    for match in operand_form.matches:
-        source_operand_index = operand_indices.get(match.source_operand)
-        if source_operand_index is None:
-            raise ValueError(f"descriptor '{descriptor.key}' operand form references unknown source operand '{match.source_operand}'")
-        source_packet_operand_index = source_packet_index_by_operand_index.get(source_operand_index)
-        if source_packet_operand_index is None:
-            raise ValueError(f"descriptor '{descriptor.key}' operand form source '{match.source_operand}' is not a packet operand")
-        validation.validate_i64(
-            match.match_i64,
-            f"descriptor '{descriptor.key}' operand form match value",
-        )
-        match_index_by_source_operand[match.source_operand] = len(compiled_matches)
-        compiled_matches.append(
-            CompiledOperandFormMatch(
-                source_operand_index=source_operand_index,
-                source_packet_operand_index=source_packet_operand_index,
-                match_kind=match.match_kind,
-                match_i64=match.match_i64,
-            )
-        )
-
-    replacement_ordinal = descriptor_ordinals[operand_form.replacement_descriptor]
-    replacement = selected_descriptors[replacement_ordinal]
-
-    # Replacements preserve the packet's retained memory proof at each effect
-    # ordinal. Timing events may change with the encoding; semantic effects may
-    # not change identity, width, scope, or ordering.
-    def semantic_effects(value: Descriptor):
-        return tuple((effect.kind, effect.memory_space, effect.scope_id, effect.flags, effect.width_bits) for effect in value.effects)
-
-    if semantic_effects(descriptor) != semantic_effects(replacement):
-        raise ValueError(f"descriptor '{descriptor.key}' operand form replacement '{replacement.key}' must preserve semantic effect ordinals")
-    _replacement_operand_indices, replacement_immediate_indices = _index_descriptor_fields(replacement)
-    source_result_count = validation.validate_descriptor_operands(descriptor).result_count
-    replacement_result_count = validation.validate_descriptor_operands(replacement).result_count
-    if replacement_result_count != source_result_count:
-        raise ValueError(f"descriptor '{descriptor.key}' operand form replacement '{replacement.key}' must have the same result count")
-    for i in range(source_result_count):
-        source_result = descriptor.operands[i].field_name
-        replacement_result = replacement.operands[i].field_name
-        if replacement_result != source_result:
-            raise ValueError(f"descriptor '{descriptor.key}' operand form replacement '{replacement.key}' result {i} is '{replacement_result}' instead of '{source_result}'")
-    source_immediates = tuple(immediate.field_name for immediate in descriptor.immediates)
-    replacement_immediates = tuple(immediate.field_name for immediate in replacement.immediates)
-    source_immediate_indices = {field_name: i for i, field_name in enumerate(source_immediates)}
-    replacement_immediate_index = LOW_DESCRIPTOR_SET_ORDINAL_NONE
-    source_immediate_index = LOW_DESCRIPTOR_SET_ORDINAL_NONE
-    immediate_match_index = LOW_DESCRIPTOR_SET_ORDINAL_NONE
-    if operand_form.immediate_action is OperandFormImmediateAction.NONE:
-        if operand_form.immediate_field is not None:
-            raise ValueError(f"descriptor '{descriptor.key}' operand form without an immediate action names immediate field '{operand_form.immediate_field}'")
-        expected_replacement_immediates = source_immediates
-    elif operand_form.immediate_action is OperandFormImmediateAction.SET_MATCHED_I64:
-        if operand_form.immediate_field is None:
-            raise ValueError(f"descriptor '{descriptor.key}' operand form immediate action requires an immediate field")
-        if operand_form.immediate_source_operand is None:
-            raise ValueError(f"descriptor '{descriptor.key}' operand form immediate action requires an immediate source")
-        immediate_match_index = match_index_by_source_operand[operand_form.immediate_source_operand]
-        replacement_immediate_index = replacement_immediate_indices.get(operand_form.immediate_field, LOW_DESCRIPTOR_SET_ORDINAL_NONE)
-        if replacement_immediate_index == LOW_DESCRIPTOR_SET_ORDINAL_NONE:
-            raise ValueError(f"descriptor '{descriptor.key}' operand form replacement '{replacement.key}' has no immediate field '{operand_form.immediate_field}'")
-        if not validation.immediate_accepts_i64_assignment(replacement.immediates[replacement_immediate_index]):
-            raise ValueError(f"descriptor '{descriptor.key}' operand form replacement '{replacement.key}' immediate field '{operand_form.immediate_field}' cannot hold an i64 value")
-        if operand_form.immediate_field in immediate_indices:
-            raise ValueError(f"descriptor '{descriptor.key}' operand form replacement immediate '{operand_form.immediate_field}' already exists on the source descriptor")
-        expected_replacement_immediates = tuple((*source_immediates, operand_form.immediate_field))
-    elif operand_form.immediate_action is OperandFormImmediateAction.ADD_MATCHED_I64:
-        if operand_form.immediate_field is None:
-            raise ValueError(f"descriptor '{descriptor.key}' operand form immediate action requires an immediate field")
-        if operand_form.immediate_source_operand is None:
-            raise ValueError(f"descriptor '{descriptor.key}' operand form immediate action requires an immediate source")
-        immediate_match_index = match_index_by_source_operand[operand_form.immediate_source_operand]
-        source_immediate_index = source_immediate_indices.get(operand_form.immediate_field, LOW_DESCRIPTOR_SET_ORDINAL_NONE)
-        replacement_immediate_index = replacement_immediate_indices.get(operand_form.immediate_field, LOW_DESCRIPTOR_SET_ORDINAL_NONE)
-        if source_immediate_index == LOW_DESCRIPTOR_SET_ORDINAL_NONE:
-            raise ValueError(f"descriptor '{descriptor.key}' operand form source has no immediate field '{operand_form.immediate_field}'")
-        if replacement_immediate_index == LOW_DESCRIPTOR_SET_ORDINAL_NONE:
-            raise ValueError(f"descriptor '{descriptor.key}' operand form replacement '{replacement.key}' has no immediate field '{operand_form.immediate_field}'")
-        if descriptor.immediates[source_immediate_index] != replacement.immediates[replacement_immediate_index]:
-            raise ValueError(f"descriptor '{descriptor.key}' operand form replacement '{replacement.key}' immediate field '{operand_form.immediate_field}' has different metadata")
-        if not validation.immediate_accepts_i64_arithmetic(replacement.immediates[replacement_immediate_index]):
-            raise ValueError(f"descriptor '{descriptor.key}' operand form replacement '{replacement.key}' immediate field '{operand_form.immediate_field}' cannot hold an i64 value")
-        expected_replacement_immediates = source_immediates
-    else:
-        raise ValueError(f"descriptor '{descriptor.key}' operand form has unsupported immediate action {operand_form.immediate_action}")
-    if replacement_immediates != expected_replacement_immediates:
-        raise ValueError(f"descriptor '{descriptor.key}' operand form replacement '{replacement.key}' has immediate fields {replacement_immediates!r}, expected {expected_replacement_immediates!r}")
-
-    replacement_packet_indices = validation.descriptor_packet_operand_indices(replacement)
-    source_packet_index_by_field = {descriptor.operands[operand_index].field_name: packet_index for packet_index, operand_index in enumerate(source_packet_indices)}
-    operand_map: list[int] = []
-    matched_source_operands = {match.source_operand for match in operand_form.matches}
-    for replacement_operand_index in replacement_packet_indices:
-        field_name = replacement.operands[replacement_operand_index].field_name
-        if field_name in matched_source_operands:
-            raise ValueError(f"descriptor '{descriptor.key}' operand form replacement '{replacement.key}' still consumes source operand '{field_name}'")
-        source_packet_index = source_packet_index_by_field.get(field_name)
-        if source_packet_index is None:
-            raise ValueError(f"descriptor '{descriptor.key}' operand form replacement '{replacement.key}' operand '{field_name}' does not exist in the source packet")
-        operand_map.append(source_packet_index)
-
-    return (
-        CompiledOperandForm(
-            replacement_descriptor_ordinal=replacement_ordinal,
-            source_immediate_index=source_immediate_index,
-            replacement_immediate_index=replacement_immediate_index,
-            immediate_match_index=immediate_match_index,
-            immediate_action=operand_form.immediate_action,
-            match_start=0,
-            match_count=len(compiled_matches),
-            operand_map_start=0,
-            operand_map_count=len(operand_map),
-        ),
-        tuple(compiled_matches),
-        tuple(operand_map),
-    )
-
-
 def _compile_asm_form(
     string_pool: CStringPool,
     descriptor: Descriptor,
@@ -738,7 +582,7 @@ def _compile_asm_form(
 ) -> CompiledAsmForm:
     mnemonic = validation.asm_form_mnemonic(descriptor, asm_form)
     validation.validate_unique_asm_fields(descriptor, asm_form, mnemonic)
-    operand_indices, immediate_indices = _index_descriptor_fields(descriptor)
+    operand_indices, immediate_indices = validation.index_descriptor_fields(descriptor)
 
     def scoped_label(prefix: str, *parts: str) -> str:
         label_parts = [prefix]
@@ -1170,8 +1014,27 @@ def compile_descriptor_set(
     schedule_inputs = _dedupe_by_name(spec.schedule_classes, lambda item: item.name)
     enum_domain_inputs = _dedupe_by_name(spec.enum_domains, lambda item: item.name)
     _dedupe_by_name(spec.descriptors, lambda item: item.key)
-    mutable_state_classes = _derive_mutable_state_classes(
-        spec.descriptors,
+    mutable_state_classes = _derive_register_class_aliases(
+        frozenset(
+            alternative.reg_class
+            for descriptor in spec.descriptors
+            for operand in descriptor.operands
+            if OperandFlag.STATE_WRITE in operand.flags
+            for alternative in operand.reg_alts
+            if alternative.reg_class is not None
+        ),
+        reg_class_inputs,
+        physical_register_inputs,
+    )
+    hidden_state_classes = _derive_register_class_aliases(
+        frozenset(
+            alternative.reg_class
+            for descriptor in spec.descriptors
+            for operand in descriptor.operands
+            if OperandFlag.STATE_READ in operand.flags and not validation.operand_role_is_packet_input(operand.role)
+            for alternative in operand.reg_alts
+            if alternative.reg_class is not None
+        ),
         reg_class_inputs,
         physical_register_inputs,
     )
@@ -1210,6 +1073,7 @@ def compile_descriptor_set(
         projected_descriptors_by_key[descriptor.key] = derive_descriptor_projections(
             descriptor,
             operand_layout,
+            hidden_state_classes,
         )
     validation.validate_physical_descriptor_set(spec)
 
@@ -1393,18 +1257,6 @@ def compile_descriptor_set(
         selected_descriptors,
         instruction_classes,
     )
-
-    changed = True
-    while changed:
-        changed = False
-        for reg_class_name in list(used_reg_class_names):
-            spill_class = reg_class_inputs[reg_class_name].spill_class
-            if spill_class is not None:
-                if spill_class not in reg_class_inputs:
-                    raise ValueError(f"register class '{reg_class_name}' references unknown spill class '{spill_class}'")
-                if spill_class not in used_reg_class_names:
-                    used_reg_class_names.add(spill_class)
-                    changed = True
 
     for part_name in list(used_register_part_names):
         register_part = register_part_inputs[part_name]
@@ -1822,15 +1674,7 @@ def compile_descriptor_set(
             encoding_field_value_group_starts,
         )
         operand_form_start = len(operand_forms)
-        for operand_form in descriptor.operand_forms:
-            if operand_form.replacement_descriptor not in descriptor_ordinals:
-                raise ValueError(f"descriptor '{descriptor.key}' operand form replacement '{operand_form.replacement_descriptor}' was not selected")
-            compiled_form, compiled_matches, operand_map = _compile_operand_form(
-                descriptor,
-                descriptor_ordinals,
-                selected_descriptors,
-                operand_form,
-            )
+        for compiled_form, compiled_matches, operand_map in operand_form_compiler.compile_operand_forms(descriptor, descriptor_ordinals, selected_descriptors):
             compiled_form.match_start, _ = append_interned_sequence(
                 compiled_matches,
                 operand_form_matches,
@@ -1842,11 +1686,19 @@ def compile_descriptor_set(
                 operand_form_map_group_starts,
             )
             operand_forms.append(compiled_form)
+        validation.validate_u8(len(operand_forms) - operand_form_start, f"descriptor '{descriptor.key}' compiled operand form count")
         descriptor_rows.append(
             {
                 "operand_start": operand_start,
                 "operand_count": len(descriptor.operands),
                 "result_count": operand_layouts_by_descriptor[descriptor.key].result_count,
+                "value_state_operand_count": sum(
+                    1
+                    for operand in descriptor.operands
+                    if OperandFlag.SCHEDULE_ONLY_STATE not in operand.flags
+                    and OperandFlag.UNOBSERVED_STATE_WRITE not in operand.flags
+                    and (OperandFlag.STATE_WRITE in operand.flags or (OperandFlag.STATE_READ in operand.flags and not validation.operand_role_is_packet_input(operand.role)))
+                ),
                 "minimum_packet_operand_count": operand_layouts_by_descriptor[descriptor.key].minimum_packet_operand_count,
                 "immediate_start": immediate_start,
                 "immediate_count": len(descriptor.immediates),
@@ -1861,7 +1713,7 @@ def compile_descriptor_set(
                 "encoding_field_value_start": encoding_field_value_start,
                 "encoding_field_value_count": len(descriptor.encoding_field_values),
                 "operand_form_start": operand_form_start,
-                "operand_form_count": len(descriptor.operand_forms),
+                "operand_form_count": len(operand_forms) - operand_form_start,
             }
         )
 

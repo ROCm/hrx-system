@@ -63,7 +63,9 @@ iree_status_t loom_spirv_can_materialize_cooperative_initializer_component(
 }
 
 loom_type_t loom_spirv_cooperative_initializer_component_type(
-    const loom_low_lower_context_t* context, loom_value_id_t source_value_id) {
+    const loom_low_lower_context_t* context, loom_value_id_t source_value_id,
+    const void* plan) {
+  (void)plan;
   return loom_low_lower_value_binding_type(context, source_value_id);
 }
 

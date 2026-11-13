@@ -47,11 +47,11 @@ loom_vector_component_packet_query_cache_empty(void) {
   return (loom_vector_component_packet_query_cache_t){0};
 }
 
-// Returns whether |op| is a locally eligible component packet root with at
-// least one multi-lane width under the active target contract. The authored
-// contract result must describe |op| in its current shape. Graph ownership,
-// shared producer constraints, and the component expansion limit can still
-// reject every locally admitted width.
+// Returns whether |op| is a locally eligible component packet root or memory
+// input with at least one multi-lane width under the active target contract.
+// The authored contract result must describe |op| in its current shape. Graph
+// ownership, shared producer constraints, and the component expansion limit can
+// still reject every locally admitted width.
 iree_status_t loom_vector_component_packet_op_has_vector_candidate(
     loom_target_legalization_context_t* context, const loom_op_t* op,
     const loom_target_contract_query_result_t* authored_query_result,

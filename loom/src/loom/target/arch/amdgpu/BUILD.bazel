@@ -362,6 +362,19 @@ loom_cc_library(
     ],
 )
 
+loom_cc_test(
+    name = "math_policy_test",
+    srcs = ["math_policy_test.cc"],
+    deps = [
+        ":math_policy",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/target:math_policy",
+        "//loom/src/loom/target:types",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 loom_cc_library(
     name = "legalization",
     srcs = ["legalization.c"],
@@ -481,15 +494,18 @@ loom_cc_library(
         ":pass_registry",
         ":profile",
         "//loom/src/loom/ir",
+        "//loom/src/loom/ops:callable_effects",
         "//loom/src/loom/pass:builder",
         "//loom/src/loom/target:provider",
+        "//loom/src/loom/target/arch/amdgpu/abi:call_abi",
         "//loom/src/loom/target/arch/amdgpu/descriptors:low_registry",
         "//loom/src/loom/target/arch/amdgpu/diagnostics:packet_diagnostics",
         "//loom/src/loom/target/arch/amdgpu/lower",
         "//loom/src/loom/target/arch/amdgpu/lower:component_api",
         "//loom/src/loom/target/arch/amdgpu/lower:kinds",
         "//loom/src/loom/target/arch/amdgpu/ops",
-        "//loom/src/loom/transforms/scalar:wide_remainder_legalization",
+        "//loom/src/loom/transforms/pipeline:workgroup",
+        "//loom/src/loom/transforms/scalar:wide_division_legalization",
         "//runtime/src/iree/base",
     ],
 )

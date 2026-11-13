@@ -20,7 +20,7 @@ struct loom_serve_text_resize_t {
   // Validated source storage records; preparation acquires no device memory.
   loom_serve_text_storage_t storage;
   // Group plan exported from control_state, published with it at submission.
-  loom_serve_execution_plan_t* group_plan;
+  loom_runtime_execution_plan_t* group_plan;
 };
 
 void loom_serve_text_resize_free(loom_serve_text_resize_t* resize) {
@@ -29,7 +29,7 @@ void loom_serve_text_resize_free(loom_serve_text_resize_t* resize) {
   }
   iree_vm_buffer_release(resize->control_state);
   loom_serve_text_storage_deinitialize(&resize->storage);
-  loom_serve_execution_plan_release(resize->group_plan);
+  loom_runtime_execution_plan_release(resize->group_plan);
   iree_allocator_free(resize->host_allocator, resize);
 }
 
@@ -82,7 +82,7 @@ iree_status_t loom_serve_text_model_prepare_resize(
       iree_vm_variant_from_i64((int64_t)row_count)};
   iree_vm_variant_t results[1 + LOOM_SERVE_TEXT_STORAGE_RESULT_COUNT] = {0};
   iree_status_t status = iree_vm_invoke(
-      loom_serve_program_invocation(model->control.program),
+      loom_runtime_program_invocation(model->control.program),
       model->control.resize_state, iree_vm_variant_span_from_array(arguments),
       iree_vm_variant_span_from_array(results));
   if (iree_status_is_ok(status)) {
@@ -131,9 +131,9 @@ iree_status_t loom_serve_text_model_prepare_resize(
 
 iree_status_t loom_serve_text_model_submit_resize(
     loom_serve_text_model_t* model, loom_serve_text_resize_t* resize,
-    loom_serve_execution_frontier_t* out_frontier) {
+    loom_runtime_execution_frontier_t* out_frontier) {
   IREE_TRACE_ZONE_BEGIN(z0);
-  *out_frontier = (loom_serve_execution_frontier_t){0};
+  *out_frontier = (loom_runtime_execution_frontier_t){0};
   const iree_host_size_t row_count = resize->row_count;
   iree_status_t status =
       loom_serve_text_state_resize(&model->state, row_count, &resize->storage);
@@ -142,7 +142,7 @@ iree_status_t loom_serve_text_model_submit_resize(
     model->source.control_state = resize->control_state;
     resize->control_state = NULL;
     if (resize->group_plan) {
-      loom_serve_execution_plan_release(model->execution_plan);
+      loom_runtime_execution_plan_release(model->execution_plan);
       model->execution_plan = resize->group_plan;
       resize->group_plan = NULL;
     }
@@ -176,7 +176,7 @@ iree_status_t loom_serve_text_model_submit_resize(
     }
   }
   if (iree_status_is_ok(status)) {
-    *out_frontier = loom_serve_execution_frontier(model->execution);
+    *out_frontier = loom_runtime_execution_frontier(model->execution);
   }
   IREE_RETURN_AND_END_ZONE(z0, status);
 }

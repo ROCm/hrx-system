@@ -141,12 +141,16 @@ static inline bool loom_motion_loop_hoist_result_is_legal(
 
 // Evaluates moving |candidate_op| immediately before |loop.op|. Effect-free
 // subtrees must be safe to speculate because the loop may execute zero times.
+// |in_entry_prefix| identifies the loop body's entry-block prefix containing
+// only speculatable leaves and pure fact identities. In a proven-nonempty loop,
+// these identities may relocate without introducing a new execution path.
 // Ordinary unmasked view/vector loads may instead use a proven-nonempty loop
 // contract when every write in the loop is proven disjoint from the loaded byte
 // region. Loads nested under another predicate remain in place.
 iree_status_t loom_motion_subtree_evaluate_hoist_before_loop(
     loom_motion_analysis_t* analysis, loom_loop_like_t loop,
-    const loom_op_t* candidate_op, loom_motion_loop_hoist_result_t* out_result);
+    const loom_op_t* candidate_op, bool in_entry_prefix,
+    loom_motion_loop_hoist_result_t* out_result);
 
 // Returns true when |op| is an ordinary unmasked view or vector load with no
 // write, ordering, convergence, identity, or nondeterministic semantics.

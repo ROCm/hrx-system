@@ -1,0 +1,144 @@
+// RUN: pass canonicalize,cse,dce
+// Workgroup coordinates choose the row sign before four distinct half-
+// precision lane conversions.
+#include <loomcxx/kernel.h>
+#include <stdfloat>
+using Half4 = std::float16_t __attribute__((ext_vector_type(4)));
+[[loom::kernel, loom::workgroup_size(256, 1, 1),
+  loom::workgroup_count(6, 1, 1)]]
+void initialize_weights(Half4* weights) {
+  unsigned index =
+      loom::kernel::workgroup::id.x * 256u + loom::kernel::workitem::id.x;
+  // Distinct lanes and row signs expose both row addressing and lane order.
+  float sign = index < 768u ? 1.0f : -1.0f;
+  weights[index] =
+      Half4{std::float16_t(sign * 1.0f), std::float16_t(sign * 2.0f),
+            std::float16_t(sign * 3.0f), std::float16_t(sign * 4.0f)};
+}
+
+// ----
+kernel.def @initialize_weights() {
+  %1 = index.constant 6 : index
+  %2 = index.constant 1 : index
+  %4 = index.constant 256 : index
+  kernel.launch.config workgroups(%1, %2, %2) workgroup_size(%4, %2, %2) : index
+} launch(%weights: buffer) {
+  %workgroup_id_x = kernel.workgroup.id<x> : index
+  %9 = index.cast %workgroup_id_x : index to i32
+  %47 = scalar.constant 8 : i32
+  %48 = scalar.shli %9, %47 : i32
+  %workitem_id_x = kernel.workitem.id<x> : index
+  %13 = index.cast %workitem_id_x : index to i32
+  %index = scalar.addi %48, %13 : i32
+  %15 = scalar.constant 768 : i32
+  %16 = scalar.cmpi ult, %index, %15 : i32
+  %18 = scalar.constant 1.0 : f32
+  %43 = scalar.constant -1.0 : f32
+  %sign = scf.select %16, %18, %43 : f32
+  %23 = scalar.fptrunc %sign : f32 to f16
+  %24 = scalar.constant 2.0 : f32
+  %25 = scalar.mulf %sign, %24 : f32
+  %26 = scalar.fptrunc %25 : f32 to f16
+  %27 = scalar.constant 3.0 : f32
+  %28 = scalar.mulf %sign, %27 : f32
+  %29 = scalar.fptrunc %28 : f32 to f16
+  %30 = scalar.constant 4.0 : f32
+  %31 = scalar.mulf %sign, %30 : f32
+  %32 = scalar.fptrunc %31 : f32 to f16
+  %33 = vector.from_elements %23, %26, %29, %32 : vector<4xf16>
+  %34 = scalar.extui %index : i32 to i64
+  %44 = scalar.constant 3 : i64
+  %45 = scalar.shli %34, %44 : i64
+  %39 = scalar.assume %45 [range(%45, 0, 9223372036854775807)] : i64
+  %40 = index.cast %39 : i64 to offset
+  %41 = buffer.view %weights[%40] : buffer -> view<4xf16>
+  vector.store<root_in_bounds> %33, %41[0] : vector<4xf16>, view<4xf16>
+  kernel.return
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// Two ordered stores initialize opposite source-row selections.
+#include <loomcxx/kernel.h>
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void initialize_indices(unsigned* indices) {
+  indices[0] = 1u;
+  indices[1] = 0u;
+}
+
+// ----
+kernel.def @initialize_indices() {
+  %1 = index.constant 1 : index
+  kernel.launch.config workgroups(%1, %1, %1) workgroup_size(%1, %1, %1) : index
+} launch(%indices: buffer) {
+  %8 = scalar.constant 1 : i32
+  %29 = index.constant 0 : offset
+  %17 = buffer.view %indices[%29] : buffer -> view<1xi32>
+  view.store<root_in_bounds> %8, %17[0] : i32, view<1xi32>
+  %18 = scalar.constant 0 : i32
+  %28 = index.constant 4 : offset
+  %27 = buffer.view %indices[%28] : buffer -> view<1xi32>
+  view.store<root_in_bounds> %18, %27[0] : i32, view<1xi32>
+  kernel.return
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// Unsigned lane arithmetic and row selection feed an independent scalar
+// comparison.
+#include <loomcxx/kernel.h>
+[[loom::kernel, loom::workgroup_size(256, 1, 1),
+  loom::workgroup_count(24, 1, 1)]]
+void check_rows(const float* output, unsigned* matches) {
+  unsigned index =
+      loom::kernel::workgroup::id.x * 256u + loom::kernel::workitem::id.x;
+  float expected = float(index % 4u + 1u);
+  if (index < 3072u) {
+    expected = -expected;
+  }
+  matches[index] = output[index + 16u] == expected ? 1u : 0u;
+}
+
+// ----
+kernel.def @check_rows() {
+  %2 = index.constant 24 : index
+  %3 = index.constant 1 : index
+  %5 = index.constant 256 : index
+  kernel.launch.config workgroups(%2, %3, %3) workgroup_size(%5, %3, %3) : index
+} launch(%output: buffer, %matches: buffer) {
+  %workgroup_id_x = kernel.workgroup.id<x> : index
+  %11 = index.cast %workgroup_id_x : index to i32
+  %59 = scalar.constant 8 : i32
+  %60 = scalar.shli %11, %59 : i32
+  %workitem_id_x = kernel.workitem.id<x> : index
+  %15 = index.cast %workitem_id_x : index to i32
+  %index = scalar.addi %60, %15 : i32
+  %57 = scalar.constant 3 : i32
+  %58 = scalar.andi %index, %57 : i32
+  %19 = scalar.constant 1 : i32
+  %20 = scalar.addi %58, %19 : i32
+  %expected$21 = scalar.uitofp %20 : i32 to f32
+  %22 = scalar.constant 3072 : i32
+  %23 = scalar.cmpi ult, %index, %22 : i32
+  %expected$25 = scalar.negf %expected$21 : f32
+  %expected$56 = scf.select %23, %expected$25, %expected$21 : f32
+  %26 = scalar.constant 16 : i32
+  %27 = scalar.addi %index, %26 : i32
+  %28 = scalar.extui %27 : i32 to i64
+  %54 = scalar.constant 2 : i64
+  %55 = scalar.shli %28, %54 : i64
+  %33 = scalar.assume %55 [range(%55, 0, 9223372036854775807)] : i64
+  %34 = index.cast %33 : i64 to offset
+  %35 = buffer.view %output[%34] : buffer -> view<1xf32>
+  %36 = view.load<root_in_bounds> %35[0] : view<1xf32> -> f32
+  %37 = scalar.cmpf oeq, %36, %expected$56 : f32
+  %40 = scalar.constant 0 : i32
+  %53 = scf.select %37, %19, %40 : i32
+  %41 = scalar.extui %index : i32 to i64
+  %52 = scalar.shli %41, %54 : i64
+  %46 = scalar.assume %52 [range(%52, 0, 9223372036854775807)] : i64
+  %47 = index.cast %46 : i64 to offset
+  %48 = buffer.view %matches[%47] : buffer -> view<1xi32>
+  view.store<root_in_bounds> %53, %48[0] : i32, view<1xi32>
+  kernel.return
+}

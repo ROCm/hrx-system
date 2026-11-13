@@ -23,7 +23,7 @@ typedef struct loom_serve_text_reserve_context_t {
 } loom_serve_text_reserve_context_t;
 
 static iree_status_t loom_serve_text_forecast_state(
-    void* user_data, loom_serve_residency_projection_t* out_projection) {
+    void* user_data, loom_runtime_residency_projection_t* out_projection) {
   const loom_serve_text_reserve_context_t* context = user_data;
   return loom_serve_text_retention_forecast(
       context->model, context->reservation, context->replan, out_projection);
@@ -31,28 +31,28 @@ static iree_status_t loom_serve_text_forecast_state(
 
 static iree_status_t loom_serve_text_admit_state(
     void* user_data, iree_host_size_t range_count,
-    const loom_serve_memory_range_t* ranges, iree_hal_semaphore_t* readiness,
-    uint64_t value, loom_serve_memory_admission_t* out_admission,
-    loom_serve_memory_operation_t** out_operation) {
+    const loom_runtime_memory_range_t* ranges, iree_hal_semaphore_t* readiness,
+    uint64_t value, loom_runtime_memory_admission_t* out_admission,
+    loom_runtime_memory_operation_t** out_operation) {
   loom_serve_text_reserve_context_t* context = user_data;
-  const loom_serve_residency_forecast_t forecast = {
+  const loom_runtime_residency_forecast_t forecast = {
       .self = context, .query = loom_serve_text_forecast_state};
-  loom_serve_residency_admission_t admission;
-  const iree_status_t status = loom_serve_residency_try_admit_state(
+  loom_runtime_residency_admission_t admission;
+  const iree_status_t status = loom_runtime_residency_try_admit_state(
       context->model->residency, range_count, ranges, &forecast, readiness,
       value, &admission, out_operation);
   switch (admission) {
-    case LOOM_SERVE_RESIDENCY_ADMISSION_CAPACITY:
+    case LOOM_RUNTIME_RESIDENCY_ADMISSION_CAPACITY:
       *context->result = LOOM_SERVE_TEXT_RESERVE_CAPACITY;
-      *out_admission = LOOM_SERVE_MEMORY_ADMISSION_CAPACITY;
+      *out_admission = LOOM_RUNTIME_MEMORY_ADMISSION_CAPACITY;
       break;
-    case LOOM_SERVE_RESIDENCY_ADMISSION_DEFERRED:
+    case LOOM_RUNTIME_RESIDENCY_ADMISSION_DEFERRED:
       *context->result = LOOM_SERVE_TEXT_RESERVE_DEFERRED;
-      *out_admission = LOOM_SERVE_MEMORY_ADMISSION_DEFERRED;
+      *out_admission = LOOM_RUNTIME_MEMORY_ADMISSION_DEFERRED;
       break;
-    case LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED:
+    case LOOM_RUNTIME_RESIDENCY_ADMISSION_ACQUIRED:
       *context->result = LOOM_SERVE_TEXT_RESERVE_ACQUIRED;
-      *out_admission = LOOM_SERVE_MEMORY_ADMISSION_AVAILABLE;
+      *out_admission = LOOM_RUNTIME_MEMORY_ADMISSION_AVAILABLE;
       break;
   }
   return status;
@@ -107,9 +107,9 @@ uint64_t loom_serve_text_reservation_memory_footprint(
     const loom_serve_text_reservation_t* reservation) {
   const loom_serve_text_model_t* model = reservation->row->model;
   const uint64_t extents[] = {
-      loom_serve_residency_activation_footprint(model->residency),
+      loom_runtime_residency_activation_footprint(model->residency),
       loom_serve_text_state_reservation_footprint(reservation->state),
-      loom_serve_module_workspace_requirement(model->control.native_module)
+      loom_runtime_module_workspace_requirement(model->control.native_module)
           .allocation_size,
       2ull * model->source.prefill_capacity *
           LOOM_SERVE_TEXT_MEDIA_PACKET_RECORD_BYTES,
@@ -124,9 +124,9 @@ uint64_t loom_serve_text_reservation_memory_footprint(
 static iree_status_t loom_serve_text_reservation_submit_plan(
     loom_serve_text_reservation_t* reservation, bool replan,
     loom_serve_text_reserve_result_t* out_result,
-    loom_serve_execution_frontier_t* out_frontier) {
+    loom_runtime_execution_frontier_t* out_frontier) {
   *out_result = LOOM_SERVE_TEXT_RESERVE_STATE_CAPACITY;
-  *out_frontier = (loom_serve_execution_frontier_t){0};
+  *out_frontier = (loom_runtime_execution_frontier_t){0};
   loom_serve_text_row_t* row = reservation->row;
   const loom_serve_text_checkpoint_t* checkpoint = reservation->checkpoint;
   loom_serve_text_reserve_context_t context = {
@@ -135,10 +135,10 @@ static iree_status_t loom_serve_text_reservation_submit_plan(
       .replan = replan,
       .result = out_result,
   };
-  loom_serve_memory_admission_t admission;
+  loom_runtime_memory_admission_t admission;
   IREE_RETURN_IF_ERROR(loom_serve_text_state_reservation_submit(
       reservation->state, loom_serve_text_admit_state, &context, &admission));
-  if (admission == LOOM_SERVE_MEMORY_ADMISSION_AVAILABLE) {
+  if (admission == LOOM_RUNTIME_MEMORY_ADMISSION_AVAILABLE) {
     if (reservation->mode == LOOM_SERVE_TEXT_RESERVE_FRESH) {
       row->has_prediction = false;
       memset(&row->transfer, 0, sizeof(row->transfer));
@@ -153,14 +153,14 @@ static iree_status_t loom_serve_text_reservation_submit_plan(
           checkpoint->token == row->model->source.eos_token;
     }
   }
-  *out_frontier = loom_serve_execution_frontier(row->model->execution);
+  *out_frontier = loom_runtime_execution_frontier(row->model->execution);
   return iree_ok_status();
 }
 
 iree_status_t loom_serve_text_reservation_submit(
     loom_serve_text_reservation_t* reservation,
     loom_serve_text_reserve_result_t* out_result,
-    loom_serve_execution_frontier_t* out_frontier) {
+    loom_runtime_execution_frontier_t* out_frontier) {
   return loom_serve_text_reservation_submit_plan(reservation, false, out_result,
                                                  out_frontier);
 }
@@ -169,9 +169,9 @@ iree_status_t loom_serve_text_row_submit_reserve(
     loom_serve_text_row_t* row, loom_serve_text_reserve_mode_t mode,
     const loom_serve_text_checkpoint_t* checkpoint, iree_host_size_t extent,
     loom_serve_text_reserve_result_t* out_result,
-    loom_serve_execution_frontier_t* out_frontier) {
+    loom_runtime_execution_frontier_t* out_frontier) {
   *out_result = LOOM_SERVE_TEXT_RESERVE_STATE_CAPACITY;
-  *out_frontier = (loom_serve_execution_frontier_t){0};
+  *out_frontier = (loom_runtime_execution_frontier_t){0};
   loom_serve_text_reservation_t reservation;
   IREE_RETURN_IF_ERROR(loom_serve_text_reservation_prepare(
       row, mode, (loom_serve_text_checkpoint_t*)checkpoint, extent,

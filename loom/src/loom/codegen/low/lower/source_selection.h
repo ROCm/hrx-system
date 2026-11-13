@@ -108,6 +108,13 @@ loom_low_source_selection_target_bundle(
   return loom_target_facts_bundle(selection->target_facts);
 }
 
+// Initializes |scope| with the exact executable export selected for
+// |selection| and returns its forwarding emitter. |scope| must outlive every
+// use of the returned emitter.
+iree_diagnostic_emitter_t loom_low_source_selection_scope_diagnostics(
+    const loom_low_source_selection_t* selection,
+    iree_diagnostic_emitter_t target, loom_diagnostic_export_scope_t* scope);
+
 typedef struct loom_low_source_selection_list_t {
   // Selected func-like symbols.
   loom_low_source_selection_t* values;

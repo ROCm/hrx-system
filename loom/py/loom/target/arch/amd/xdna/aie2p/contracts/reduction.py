@@ -9,8 +9,8 @@
 from typing import Literal
 
 from loom.dialect.vector import defs as vector
-from loom.target.arch.amd.xdna.aie2p.contracts.data_path import (
-    F32_ACCUMULATOR_ADD_CONTROL,
+from loom.target.arch.amd.xdna.aie2p.contracts.f32_accumulator import (
+    F32AccumulatorProgram,
 )
 from loom.target.arch.amd.xdna.aie2p.contracts.floating import (
     emit_bf16_extremum,
@@ -29,7 +29,6 @@ from loom.target.contracts import (
     EmitDescriptorOp,
     EmitRegisterConcat,
     EmitRegisterCopy,
-    EmitRegisterMove,
     EmitRegisterSlice,
     Guard,
     Scalar,
@@ -45,7 +44,6 @@ _I64 = Scalar("i64")
 _F32 = Scalar("f32")
 _BF16 = Scalar("bf16")
 _F32X16_VECTOR = Vector("f32", lanes=16)
-_F32X64_ACCUMULATOR = Vector("f32", lanes=64)
 
 # AIE2P's 512-bit shuffle network halves the active i32 lanes with each
 # control. These sequences are independently witnessed against the AIE API
@@ -201,100 +199,34 @@ def _reduce_add_i32_rule(
 
 
 def _reduce_add_f32x16_rule(*, input_in_accumulator: bool) -> DescriptorRule:
-    clear = _descriptor("amd.xdna.aie2p.accumulator.clear.f32x64")
-    move_to_accumulator = _descriptor("amd.xdna.aie2p.move.vector512.to.accumulator512")
-    move_from_accumulator = _descriptor(
-        "amd.xdna.aie2p.move.accumulator512.to.vector512"
-    )
     shuffle = _descriptor("amd.xdna.aie2p.shuffle.x.to.accumulator512.configured")
-    add = _descriptor("amd.xdna.aie2p.add.f32x64.configured")
-    extract = _descriptor("amd.xdna.aie2p.extract.i32.immediate")
-
-    emits: list[ContractEmit] = []
-    for accumulator in ("current_padding", "shuffle_padding"):
-        cleared_accumulator = ValueRef.temporary(f"{accumulator}_clear")
-        emits.append(
-            _op_emit(
-                clear,
-                operands={},
-                results={"dst": cleared_accumulator},
-                descriptor_result_type=True,
-            )
-        )
-        emits.append(
-            EmitRegisterMove(
-                source=cleared_accumulator,
-                result=ValueRef.temporary(accumulator),
-                result_type=cleared_accumulator,
-            )
-        )
-        emits.extend(
-            EmitRegisterSlice(
-                source=ValueRef.temporary(accumulator),
-                result=ValueRef.temporary(f"{accumulator}_unit_{unit}"),
-                unit_offset=unit,
-                unit_count=1,
-            )
-            for unit in range(1, 4)
-        )
-
-    current_unit = ValueRef.temporary("current_unit")
+    add = _descriptor("amd.xdna.aie2p.add.f32x16.configured")
+    program = F32AccumulatorProgram()
     if input_in_accumulator:
-        current_vector = ValueRef.temporary("current_vector")
-        emits.extend(
-            (
-                EmitRegisterCopy(
-                    source=ValueRef.operand("input"),
-                    result=current_unit,
-                    result_type=ValueRef.temporary("current_padding_unit_1"),
-                ),
-                _op_emit(
-                    move_from_accumulator,
-                    operands={"src": current_unit},
-                    results={"dst": current_vector},
-                    descriptor_result_type=True,
-                ),
+        current_accumulator = ValueRef.operand("input")
+        current_vector = program.temporary("current_vector")
+        program.emits.append(
+            _op_emit(
+                _descriptor("amd.xdna.aie2p.move.accumulator512.low.to.vector512"),
+                operands={"src": current_accumulator},
+                results={"dst": current_vector},
+                descriptor_result_type=True,
             )
         )
     else:
         current_vector = ValueRef.operand("input")
-        emits.append(
-            _op_emit(
-                move_to_accumulator,
-                operands={"src": ValueRef.operand("input")},
-                results={"dst": current_unit},
-                descriptor_result_type=True,
-            )
-        )
-    emits.extend(
-        (
-            EmitRegisterConcat(
-                sources=(
-                    current_unit,
-                    *(
-                        ValueRef.temporary(f"current_padding_unit_{unit}")
-                        for unit in range(1, 4)
-                    ),
-                ),
-                result=ValueRef.temporary("current_accumulator"),
-                result_type=_F32X64_ACCUMULATOR,
-            ),
-            _constant_emit(
-                ValueRef.temporary("add_control"), F32_ACCUMULATOR_ADD_CONTROL
-            ),
-        )
-    )
-
-    current_accumulator = ValueRef.temporary("current_accumulator")
+        current_accumulator = program.vector_to_accumulator("current", current_vector)
+    # Only the low quarter participates. Native addition still owns its whole
+    # destination, but neither input needs padding in the unobserved quarters.
+    quarter_type = current_accumulator
     for stage, control in enumerate(_F32X16_REDUCTION_CONTROLS):
-        shuffle_control = ValueRef.temporary(f"shuffle_control_{stage}")
-        shuffled_unit = ValueRef.temporary(f"shuffled_unit_{stage}")
-        shuffled_storage_unit = ValueRef.temporary(f"shuffled_storage_unit_{stage}")
-        shuffled_accumulator = ValueRef.temporary(f"shuffled_accumulator_{stage}")
-        reduced_accumulator = ValueRef.temporary(f"reduced_accumulator_{stage}")
-        reduced_unit = ValueRef.temporary(f"reduced_unit_{stage}")
-        reduced_vector = ValueRef.temporary(f"reduced_vector_{stage}")
-        emits.extend(
+        shuffle_control = program.temporary(f"shuffle_control_{stage}")
+        shuffled_unit = program.temporary(f"shuffled_unit_{stage}")
+        shuffled_quarter = program.temporary(f"shuffled_quarter_{stage}")
+        reduced_unit = program.temporary(f"reduced_unit_{stage}")
+        reduced_quarter = program.temporary(f"reduced_quarter_{stage}")
+        reduced_vector = program.temporary(f"reduced_vector_{stage}")
+        program.emits.extend(
             (
                 _constant_emit(shuffle_control, control),
                 _op_emit(
@@ -309,49 +241,35 @@ def _reduce_add_f32x16_rule(*, input_in_accumulator: bool) -> DescriptorRule:
                 ),
                 EmitRegisterCopy(
                     source=shuffled_unit,
-                    result=shuffled_storage_unit,
-                    result_type=ValueRef.temporary("shuffle_padding_unit_1"),
+                    result=shuffled_quarter,
+                    result_type=quarter_type,
                 ),
-                EmitRegisterConcat(
-                    sources=(
-                        shuffled_storage_unit,
-                        *(
-                            ValueRef.temporary(f"shuffle_padding_unit_{unit}")
-                            for unit in range(1, 4)
-                        ),
-                    ),
-                    result=shuffled_accumulator,
-                    result_type=_F32X64_ACCUMULATOR,
-                ),
-                _op_emit(
-                    add,
-                    operands={
-                        "acc1": current_accumulator,
-                        "acc2": shuffled_accumulator,
-                        "acc": ValueRef.temporary("add_control"),
-                    },
-                    results={"dst": reduced_accumulator},
-                    descriptor_result_type=True,
-                ),
-                EmitRegisterSlice(
-                    source=reduced_accumulator,
-                    result=reduced_unit,
-                    unit_count=1,
+            )
+        )
+        reduced = program.binary(
+            f"reduced_{stage}", current_accumulator, shuffled_quarter, add.key
+        )
+        program.emits.extend(
+            (
+                EmitRegisterSlice(source=reduced, result=reduced_unit, unit_count=1),
+                EmitRegisterCopy(
+                    source=reduced_unit,
+                    result=reduced_quarter,
+                    result_type=quarter_type,
                 ),
                 _op_emit(
-                    move_from_accumulator,
+                    _descriptor("amd.xdna.aie2p.move.accumulator512.to.vector512"),
                     operands={"src": reduced_unit},
                     results={"dst": reduced_vector},
                     descriptor_result_type=True,
                 ),
             )
         )
-        current_accumulator = reduced_accumulator
+        current_accumulator = reduced_quarter
         current_vector = reduced_vector
-
-    emits.append(
+    program.emits.append(
         _op_emit(
-            extract,
+            _descriptor("amd.xdna.aie2p.extract.i32.immediate"),
             operands={"s1": current_vector},
             results={"dst": ValueRef.result("result")},
             descriptor_result_type=True,
@@ -376,7 +294,7 @@ def _reduce_add_f32x16_rule(*, input_in_accumulator: bool) -> DescriptorRule:
             Guard.instance_flags_has_all("fastmath", "ninf"),
             Guard.instance_flags_has_all("fastmath", "nsz"),
         ),
-        emit=tuple(emits),
+        emit=tuple(program.emits),
         report_key="f32x16_accumulator_tree",
     )
 

@@ -80,6 +80,17 @@ def _configuration_impl(ctx):
             )],
         ),
     ]
+    if base.compiler == "msvc-cl":
+        # This is compiler policy rather than a first-party target option:
+        # generated and external C/C++ actions use the same preprocessor.
+        additions.append(feature(
+            name = "standards_conforming_preprocessor",
+            enabled = True,
+            flag_sets = [flag_set(
+                actions = preprocessor_compile_actions,
+                flag_groups = [flag_group(flags = ["/Zc:preprocessor"])],
+            )],
+        ))
     if base.compiler == "clang-cl":
         additions.append(feature(
             name = "thin_lto_link",
@@ -118,6 +129,28 @@ def _configuration_impl(ctx):
     action_configs = base._action_configs_DO_NOT_USE
     tool_paths = base.tool_paths
     include_directories = base.cxx_builtin_include_directories
+    if ctx.attr.cross_compile and base.compiler == "msvc-cl" and not ctx.attr.action_private_wine:
+        # Wine clients rendezvous with the prefix's persistent wineserver over
+        # a user-owned socket below /tmp. Bazel's hermetic /tmp hides that
+        # socket from linux-sandbox, causing each action to create an isolated
+        # server and breaking cl.exe's handoff to c1.dll. Keep Wine-backed
+        # actions on the host and unsandboxed while retaining local and remote
+        # cache reuse.
+        action_configs = [action_config(
+            action_name = action.action_name,
+            enabled = action.enabled,
+            flag_sets = action.flag_sets,
+            implies = action.implies,
+            tools = [tool(
+                path = item.path,
+                tool = item.tool,
+                execution_requirements = item.execution_requirements + [
+                    "no-sandbox",
+                    "no-remote-exec",
+                ],
+                with_features = item.with_features,
+            ) for item in action.tools],
+        ) for action in action_configs]
     if ctx.attr.native_runtime:
         runtime = ctx.attr.native_runtime[NativeWindowsRuntimeInfo]
         if runtime.builtins:
@@ -182,6 +215,7 @@ def _configuration_impl(ctx):
 _configuration = rule(
     implementation = _configuration_impl,
     attrs = {
+        "action_private_wine": attr.bool(default = False),
         "base": attr.label(mandatory = True, providers = [CcToolchainConfigInfo]),
         "cross_compile": attr.bool(default = False),
         "native_runtime": attr.label(providers = [NativeWindowsRuntimeInfo]),
@@ -189,16 +223,19 @@ _configuration = rule(
     provides = [CcToolchainConfigInfo],
 )
 
-def windows_cross_toolchain_config(name, **kwargs):
-    """Defines a clang-cl cross configuration without root-only rules_cc patches.
+def windows_cross_toolchain_config(name, action_private_wine = False, **kwargs):
+    """Defines a Windows cross configuration without root-only rules_cc patches.
 
     Args:
       name: Name of the composed toolchain configuration target.
+      action_private_wine: Whether the execution platform owns a Wine server
+        inside each action's namespaces.
       **kwargs: Attributes of rules_cc's Windows cc_toolchain_config rule.
     """
     _cc_toolchain_config(name = name + "_base", **kwargs)
     _configuration(
         name = name,
+        action_private_wine = action_private_wine,
         base = ":" + name + "_base",
         cross_compile = True,
         **{key: kwargs[key] for key in ["visibility", "tags", "testonly", "target_compatible_with"] if key in kwargs}

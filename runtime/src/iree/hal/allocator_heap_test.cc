@@ -41,39 +41,4 @@ TEST(HeapAllocatorTest, DescribesCoherentHostMemory) {
   iree_hal_allocator_release(allocator);
 }
 
-TEST(HeapAllocatorTest, RejectsLegacyVirtualMemoryConstruction) {
-  iree_hal_allocator_t* allocator = nullptr;
-  IREE_ASSERT_OK(
-      iree_hal_allocator_create_heap(iree_allocator_system(), &allocator));
-  EXPECT_FALSE(iree_hal_allocator_supports_virtual_memory(allocator));
-
-  const iree_hal_physical_memory_params_t params = {
-      .type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL,
-      .usage = IREE_HAL_BUFFER_USAGE_TRANSFER,
-  };
-  iree_device_size_t minimum_granularity = 1;
-  iree_device_size_t recommended_granularity = 1;
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_UNAVAILABLE,
-      iree_hal_allocator_virtual_memory_query_granularity(
-          allocator, params, &minimum_granularity, &recommended_granularity));
-  EXPECT_EQ(minimum_granularity, 0);
-  EXPECT_EQ(recommended_granularity, 0);
-
-  iree_hal_buffer_t* reservation = nullptr;
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_UNAVAILABLE,
-      iree_hal_allocator_virtual_memory_reserve(
-          allocator, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 4096, &reservation));
-  EXPECT_EQ(reservation, nullptr);
-  iree_hal_physical_memory_t* physical_memory = nullptr;
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_UNAVAILABLE,
-      iree_hal_allocator_physical_memory_allocate(
-          allocator, params, 4096, iree_allocator_system(), &physical_memory));
-  EXPECT_EQ(physical_memory, nullptr);
-
-  iree_hal_allocator_release(allocator);
-}
-
 }  // namespace

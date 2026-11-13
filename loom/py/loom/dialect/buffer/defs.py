@@ -41,6 +41,7 @@ from loom.dsl import (
     BYTE_PATTERN_SCALAR,
     CONSTANT_LIKE,
     FACT_IDENTITY,
+    I1,
     I32,
     MEMORY_FENCE,
     OFFSET,
@@ -54,6 +55,8 @@ from loom.dsl import (
     BorrowedResult,
     CachePolicyInterface,
     Dialect,
+    EnumCase,
+    EnumDef,
     LegacyFormat,
     MemoryAccessInterface,
     Op,
@@ -116,6 +119,94 @@ buffer_constant = Op(
         ResultType("result"),
     ],
     examples=['%message = buffer.constant utf8("ready") : buffer'],
+)
+
+buffer_null = Op(
+    name="buffer.null",
+    group=buffer_ops,
+    doc=(
+        "Produce the null buffer, which identifies no storage. The result has "
+        "zero byte length, allocates nothing, and carries no release obligation. "
+        "It may be selected, passed, returned, and tested for null, but cannot "
+        "back a memory access. Null is distinct from every allocated buffer, "
+        "including zero-length storage. Its physical representation is target "
+        "and memory-space dependent; it is not an integer address."
+    ),
+    results=[Result("result", BUFFER, doc="Null storage reference.")],
+    traits=[PURE, CONSTANT_LIKE, SAFE_TO_SPECULATE],
+    facts="loom_buffer_null_facts",
+    eager_execution_cost=1,
+    format=[COLON, ResultType("result")],
+    examples=["%empty = buffer.null : buffer"],
+)
+
+buffer_compare_null = Op(
+    name="buffer.compare.null",
+    group=buffer_ops,
+    doc=("Test whether a buffer is null. Returns true exactly when the operand identifies no storage, independently of its byte length. The query does not access memory or change ownership."),
+    operands=[Operand("buffer", BUFFER, doc="Storage reference to test.")],
+    results=[Result("result", I1, doc="True for null, false for storage.")],
+    traits=[PURE, SAFE_TO_SPECULATE],
+    ownership_effects=[Borrow("buffer")],
+    facts="loom_buffer_compare_null_facts",
+    eager_execution_cost=1,
+    format=[Ref("buffer"), COLON, TypeOf("buffer")],
+    examples=["%missing = buffer.compare.null %input : buffer"],
+)
+
+BufferAddressPredicate = EnumDef(
+    "BufferAddressPredicate",
+    [
+        EnumCase("eq", 0, doc="Equal positions."),
+        EnumCase("ne", 1, doc="Unequal positions."),
+    ],
+    doc="Equality predicates for opaque buffer positions.",
+)
+
+buffer_compare_address = Op(
+    name="buffer.compare.address",
+    group=buffer_ops,
+    doc=(
+        "Compare two byte positions without exposing their addresses. Each "
+        "nonnull buffer must be live and its offset must be in bounds or at "
+        "the one-past endpoint. A null buffer permits only offset zero and "
+        "differs from every nonnull buffer, including empty storage. Aliased "
+        "buffers compare by their selected positions, not wrapper identity. "
+        "An empty root without native storage retains a distinct logical "
+        "position shared by its subspans. The operation reads no payload "
+        "bytes and changes no ownership."
+    ),
+    operands=[
+        Operand("lhs", BUFFER, doc="Left storage reference."),
+        Operand("lhs_offset", OFFSET, doc="Left byte position."),
+        Operand("rhs", BUFFER, doc="Right storage reference."),
+        Operand("rhs_offset", OFFSET, doc="Right byte position."),
+    ],
+    results=[Result("result", I1, doc="Result of the selected predicate.")],
+    attrs=[AttrDef("predicate", ATTR_TYPE_ENUM, enum_def=BufferAddressPredicate)],
+    traits=[PURE],
+    ownership_effects=[Borrow("lhs"), Borrow("rhs")],
+    canonicalize="loom_buffer_compare_address_canonicalize",
+    facts="loom_buffer_compare_address_facts",
+    format=[
+        Attr("predicate"),
+        COMMA,
+        Ref("lhs"),
+        GLUE,
+        LBRACKET,
+        Ref("lhs_offset"),
+        RBRACKET,
+        COMMA,
+        Ref("rhs"),
+        GLUE,
+        LBRACKET,
+        Ref("rhs_offset"),
+        RBRACKET,
+    ],
+    examples=[
+        "%done = buffer.compare.address eq, %cursor[%position], %end[%limit]",
+        "%more = buffer.compare.address ne, %cursor[%position], %end[%limit]",
+    ],
 )
 
 # ============================================================================
@@ -789,4 +880,7 @@ ALL_BUFFER_OPS: tuple[Op, ...] = (
     buffer_constant,
     buffer_alloca_init,
     buffer_duplicate,
+    buffer_null,
+    buffer_compare_null,
+    buffer_compare_address,
 )

@@ -7,10 +7,10 @@ The native runner owns source JIT, shared
 parameter residency, stage submission and result lifetime. The source owns
 tokenization/task framing, model shapes, pooling, normalization and learned
 heads. It does not require a decode loop, KV reservation or VM process per
-request. The HTTP consumers are [embeddings](embedding/protocol.h) and
+request. The HTTP consumers are [embeddings](../../../service/finite/embedding/protocol.h) and
 [SystemOne decisions](decision/README.md).
 
-The [source ABI](model.h) is implemented by the
+The [source ABI](../../../service/finite/model.h) is implemented by the
 [deterministic embedding package](../../fixture/embedding/README.md).
 It uses the same task executor, parameter cache and queue workspace as text and
 image deployments. Model documents name source programs and assets at registration;
@@ -42,18 +42,19 @@ domains. Native argument reflection cannot supply checkpoint tensor names,
 placement or lengths; native entries that consume checkpoint parameters require
 a source-owned placement contract before they can use this loader.
 
-`control.loom` exports three functions, resolved once in one shared VM process:
+`control.loom` exports four functions, resolved once in one shared VM process:
 
 ```
 prepare_request(state, input) -> (prepared_bytes, units, compatibility_tag)
-prepare_batch(state, stage_tags, ranges, prepared_bytes)
+prepare_batch(state, stage_tags, batch)
     -> (stage_index, upload_payload, result_plan)
-run(stage_index, input_buffer, output_buffer)
+run(state, stage_index, input_buffer, output_buffer, batch)
+collect_batch(state, batch)
 ```
 
 The native protocol provides ordered, indexed input records. Its layout is
-declared in [embedding/protocol.h](embedding/protocol.h) or
-[decision/protocol.h](decision/protocol.h). Source preparation
+declared in [embedding/protocol.h](../../../service/finite/embedding/protocol.h) or
+[decision/protocol.h](../../../service/finite/decision/protocol.h). Source preparation
 validates model-specific limits through `input.require`; an invalid input is a
 request rejection, not a failed device. The state is immutable across request
 preparation. Returned buffers own their storage or retain any aliased input.
@@ -65,10 +66,39 @@ pack together. The scheduler starts with the oldest prepared request and fills
 its cohort from compatible requests already waiting. It never delays a cohort
 to collect hypothetical arrivals.
 
-Batch preparation receives LE i64 `[offset, length]` pairs indexing concatenated
-prepared bytes in stable request order. It receives stage tags from cold
-declarations, so stage selection stays in source. A denied residency
-admission retains the prepared cohort without repeating source preparation.
+The batch capability exposes retained request states in stable original order.
+`finite.batch_pack` explicitly constructs LE i64 `[offset, length]` pairs and
+concatenated bytes when the source wants a packed upload. Preparation also
+receives stage tags from cold declarations, so stage selection stays in source.
+A denied parameter admission retains the prepared cohort without repeating
+source preparation.
+
+Continuing models declare stable scratch roots with `prepare.storage` and a
+logical capacity with `prepare.request_storage(capacity, demand_root)`. The
+demand entry receives `(state, prepared_bytes)` and returns the next cohort's
+positive demand in source-defined units. The runtime reserves a contiguous
+range and retains it across epochs. Capacity-blocked arrivals remain pending
+while admitted requests continue; an empty selection waits for capacity or new
+arrivals instead of running empty epochs.
+
+`finite.batch_origin(batch, ordinal)` gives the reserved origin. Source owns byte
+strides and native request metadata. During submission, `finite.batch_buffer` returns
+the corresponding stable root with a capture that protects the interval until
+actual queue retirement. Successful collection can call `finite.batch_release` to
+relinquish a completed cohort while its logical request continues. Cancellation
+uses the same lifetime boundary. Neither operation returns capacity while an
+accepted buffer capture remains alive.
+
+Collection updates the next-work offer with `finite.batch_offer`, or completes all
+selected members with `finite.batch_finish`. A positive offer requeues the request;
+zero completes it. Cold `prepare.feedback` declarations provide completed
+device replies to collection, so native progress can drive continuation.
+Each epoch may publish an ordered prefix of the request's remaining result
+rows. A zero offer requires all remaining rows, and a positive offer requires
+at least one row still outstanding. The service retains completed rows across
+cohorts, so source can release numerical scratch without losing earlier output.
+Device consumers receive one final result referencing those original buffers;
+HTTP consumers encode retained snapshots in input order after the final epoch.
 
 During `prepare_batch`, the same `prepare` capability can declare additional
 command/direct stages and bind their configuration or workspace limit. Its
@@ -175,14 +205,15 @@ invocations can reuse their plan buffers without changing retained row views.
 Physical output and live result extents are separate: stages may need padded
 binding storage that a host consumer does not download.
 
-Both stage kinds have two dynamic roots (input/output). Commands additionally
-bind private workspace when the compiler reflects a nonzero requirement.
+Both stage kinds have input/output roots. Commands additionally bind private
+workspace when the compiler reflects a nonzero requirement and can accept
+source-declared retained roots through the matching runner import.
 Direct native entries use their compiled launch-config companion and HAL
 logical-parameter reflection,
 submitting through `queue_dispatch` without a command buffer or invented host
 workspace. A resident array program uses this same path; source owns its
-device-local storage. Both kinds use the runner's `execute_2` import and publish
-device results. The source has no host-feedback destination in this ABI.
+device-local storage. Sources without retained roots use the runner's
+`execute_2` import; all sources publish independently owned device results.
 
 Normalization, dimensional projection and other neural math execute in kernels.
 The CPU formats final vectors and computes the decision protocol's
@@ -215,8 +246,8 @@ proof.
 
 ## Evidence and extension boundary
 
-[service.h](service.h) owns the common asynchronous cohort lifecycle.
-[protocol.h](protocol.h) supplies immutable native modality wiring for parsing
+[service.h](../../../service/finite/service.h) owns the common asynchronous cohort lifecycle.
+[protocol.h](../../../service/finite/protocol.h) supplies immutable native modality wiring for parsing
 and encoding. Each accepted job contains its concrete request storage in one
 allocation; model programs are not protocol callbacks. Embeddings and decisions
 share preparation, admission, device readiness, encoding lifetime and retirement.

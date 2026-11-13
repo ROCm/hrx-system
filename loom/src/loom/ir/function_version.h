@@ -23,6 +23,11 @@ extern "C" {
 
 typedef struct loom_function_version_t loom_function_version_t;
 
+// Returns the stable export name associated with |version|, or an empty view
+// when the representation does not carry export identity.
+typedef iree_string_view_t (*loom_function_version_export_name_fn_t)(
+    const loom_function_version_t* version);
+
 typedef enum loom_function_version_flag_bits_e {
   // Requested artifact entry retained independently of source visibility.
   LOOM_FUNCTION_VERSION_FLAG_RETAIN = 1u << 0,
@@ -33,6 +38,9 @@ typedef uint32_t loom_function_version_flags_t;
 typedef struct loom_function_version_type_t {
   // Stable diagnostic name for the representation.
   iree_string_view_t name;
+  // Optional projection of the stable export name retained by a concrete
+  // function version. Called only while forwarding an emitted diagnostic.
+  loom_function_version_export_name_fn_t export_name;
 } loom_function_version_type_t;
 
 // Base embedded first in compiler-owned function-version representations.
@@ -46,6 +54,16 @@ struct loom_function_version_t {
   // Invocation-owned lifetime requirements, preserved when IR is replaced.
   loom_function_version_flags_t flags;
 };
+
+// Returns the stable export name retained by |version|, or an empty view when
+// the version is NULL or its representation has no export projection.
+static inline iree_string_view_t loom_function_version_export_name(
+    const loom_function_version_t* version) {
+  return version != NULL && version->type != NULL &&
+                 version->type->export_name != NULL
+             ? version->type->export_name(version)
+             : iree_string_view_empty();
+}
 
 // Borrowed concrete function versions participating in one compilation.
 typedef struct loom_function_version_list_t {

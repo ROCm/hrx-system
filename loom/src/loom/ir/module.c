@@ -201,34 +201,35 @@ static void loom_region_adjust_summary_counts(
     loom_region_t* region, int32_t read_delta, int32_t write_delta,
     int32_t convergent_delta, int32_t observable_delta,
     int32_t resource_identity_delta, int32_t memory_access_delta,
+    loom_memory_space_mask_t removed_read_spaces,
+    loom_memory_space_mask_t added_read_spaces,
     loom_memory_space_mask_t removed_spaces,
     loom_memory_space_mask_t added_spaces) {
   if (read_delta == 0 && write_delta == 0 && convergent_delta == 0 &&
       observable_delta == 0 && resource_identity_delta == 0 &&
-      memory_access_delta == 0 && !removed_spaces && !added_spaces) {
+      memory_access_delta == 0 && !removed_read_spaces && !added_read_spaces &&
+      !removed_spaces && !added_spaces) {
     return;
   }
-  if (read_delta != 0) {
-    loom_region_adjust_summary_count(&region->read_effect_count, read_delta);
-  }
-  if (write_delta != 0) {
-    loom_region_adjust_summary_count(&region->write_effect_count, write_delta);
-  }
-  if (convergent_delta != 0) {
-    loom_region_adjust_summary_count(&region->convergent_effect_count,
-                                     convergent_delta);
-  }
-  if (observable_delta != 0) {
-    loom_region_adjust_summary_count(&region->observable_effect_count,
-                                     observable_delta);
-  }
-  if (resource_identity_delta != 0) {
-    loom_region_adjust_summary_count(&region->resource_identity_count,
-                                     resource_identity_delta);
-  }
-  if (memory_access_delta != 0) {
-    loom_region_adjust_summary_count(&region->memory_access_count,
-                                     memory_access_delta);
+  // Adjacent counters can combine their updates after the zero-contribution
+  // check, without a separate branch for each effect kind.
+  loom_region_adjust_summary_count(&region->read_effect_count, read_delta);
+  loom_region_adjust_summary_count(&region->write_effect_count, write_delta);
+  loom_region_adjust_summary_count(&region->convergent_effect_count,
+                                   convergent_delta);
+  loom_region_adjust_summary_count(&region->observable_effect_count,
+                                   observable_delta);
+  loom_region_adjust_summary_count(&region->resource_identity_count,
+                                   resource_identity_delta);
+  loom_region_adjust_summary_count(&region->memory_access_count,
+                                   memory_access_delta);
+  uint32_t changed_read_spaces = removed_read_spaces | added_read_spaces;
+  while (changed_read_spaces) {
+    const uint32_t space =
+        iree_math_count_trailing_zeros_u32(changed_read_spaces);
+    const int32_t delta = (added_read_spaces & (1u << space)) ? 1 : -1;
+    loom_region_adjust_summary_count(&region->read_space_counts[space], delta);
+    changed_read_spaces &= changed_read_spaces - 1;
   }
   uint32_t changed_spaces = removed_spaces | added_spaces;
   while (changed_spaces) {
@@ -243,11 +244,14 @@ static void loom_module_adjust_op_ancestor_summary_counts(
     loom_op_t* op, int32_t read_delta, int32_t write_delta,
     int32_t convergent_delta, int32_t observable_delta,
     int32_t resource_identity_delta, int32_t memory_access_delta,
+    loom_memory_space_mask_t removed_read_spaces,
+    loom_memory_space_mask_t added_read_spaces,
     loom_memory_space_mask_t removed_spaces,
     loom_memory_space_mask_t added_spaces) {
   if (read_delta == 0 && write_delta == 0 && convergent_delta == 0 &&
       observable_delta == 0 && resource_identity_delta == 0 &&
-      memory_access_delta == 0 && !removed_spaces && !added_spaces) {
+      memory_access_delta == 0 && !removed_read_spaces && !added_read_spaces &&
+      !removed_spaces && !added_spaces) {
     return;
   }
   loom_region_t* region =
@@ -256,8 +260,8 @@ static void loom_module_adjust_op_ancestor_summary_counts(
   while (region) {
     loom_region_adjust_summary_counts(
         region, read_delta, write_delta, convergent_delta, observable_delta,
-        resource_identity_delta, memory_access_delta, removed_spaces,
-        added_spaces);
+        resource_identity_delta, memory_access_delta, removed_read_spaces,
+        added_read_spaces, removed_spaces, added_spaces);
     if (!parent_op) {
       break;
     }
@@ -297,17 +301,17 @@ static void loom_module_adjust_poison_op_count(loom_module_t* module,
   }
 }
 
-static void loom_module_adjust_semantic_call_op_count(loom_module_t* module,
-                                                      const loom_op_t* op,
-                                                      int32_t delta) {
-  if (!iree_any_bit_set(op->flags, LOOM_OP_FLAG_SEMANTIC_CALL)) {
+static void loom_module_adjust_source_call_op_count(loom_module_t* module,
+                                                    const loom_op_t* op,
+                                                    int32_t delta) {
+  if (!iree_any_bit_set(op->flags, LOOM_OP_FLAG_SOURCE_CALL)) {
     return;
   }
   if (delta < 0) {
-    IREE_ASSERT_GT(module->semantic_call_op_count, 0u);
-    --module->semantic_call_op_count;
+    IREE_ASSERT_GT(module->source_call_op_count, 0u);
+    --module->source_call_op_count;
   } else if (delta > 0) {
-    ++module->semantic_call_op_count;
+    ++module->source_call_op_count;
   }
 }
 
@@ -335,22 +339,30 @@ static void loom_module_adjust_op_direct_summaries(loom_module_t* module,
   int32_t observable_delta =
       loom_traits_have_observable_effects(traits) ? direction : 0;
   int32_t resource_identity_delta =
-      loom_traits_has_resource_identity(traits) ? direction : 0;
+      loom_traits_may_create_resources(traits) ? direction : 0;
   int32_t memory_access_delta =
       loom_traits_may_access_memory(traits) ? direction : 0;
-  const loom_memory_space_mask_t write_spaces =
-      loom_op_written_memory_spaces(op, traits);
-  loom_module_adjust_op_ancestor_summary_counts(
-      op, read_delta, write_delta, convergent_delta, observable_delta,
-      resource_identity_delta, memory_access_delta,
-      direction < 0 ? write_spaces : 0, direction > 0 ? write_spaces : 0);
+  // Most operations contribute no effects. Keep their insertion and removal
+  // out of ancestor propagation before constructing its memory-space deltas.
+  if (read_delta || write_delta || convergent_delta || observable_delta ||
+      resource_identity_delta || memory_access_delta) {
+    const loom_memory_space_mask_t read_spaces =
+        loom_op_read_memory_spaces(op, traits);
+    const loom_memory_space_mask_t write_spaces =
+        loom_op_written_memory_spaces(op, traits);
+    loom_module_adjust_op_ancestor_summary_counts(
+        op, read_delta, write_delta, convergent_delta, observable_delta,
+        resource_identity_delta, memory_access_delta,
+        direction < 0 ? read_spaces : 0, direction > 0 ? read_spaces : 0,
+        direction < 0 ? write_spaces : 0, direction > 0 ? write_spaces : 0);
+  }
   if (iree_any_bit_set(traits, LOOM_TRAIT_HINT)) {
     loom_module_adjust_op_hint_sources(op, direction);
   }
   if (loom_traits_are_poison(traits)) {
     loom_module_adjust_poison_op_count(module, direction);
   }
-  loom_module_adjust_semantic_call_op_count(module, op, direction);
+  loom_module_adjust_source_call_op_count(module, op, direction);
   loom_module_adjust_low_internal_call_op_count(module, op, direction);
 }
 
@@ -381,6 +393,7 @@ void loom_module_record_region_summaries(loom_op_t* parent_op,
     parent_region->resource_identity_count += region->resource_identity_count;
     parent_region->memory_access_count += region->memory_access_count;
     for (uint32_t i = 0; i < LOOM_VALUE_FACT_MEMORY_SPACE_COUNT_; ++i) {
+      parent_region->read_space_counts[i] += region->read_space_counts[i];
       parent_region->write_space_counts[i] += region->write_space_counts[i];
     }
   }
@@ -428,11 +441,15 @@ void loom_module_update_op_direct_summaries(loom_module_t* module,
   int32_t new_observable =
       loom_traits_have_observable_effects(new_traits) ? 1 : 0;
   int32_t old_resource_identity =
-      loom_traits_has_resource_identity(old_traits) ? 1 : 0;
+      loom_traits_may_create_resources(old_traits) ? 1 : 0;
   int32_t new_resource_identity =
-      loom_traits_has_resource_identity(new_traits) ? 1 : 0;
+      loom_traits_may_create_resources(new_traits) ? 1 : 0;
   int32_t old_memory_access = loom_traits_may_access_memory(old_traits) ? 1 : 0;
   int32_t new_memory_access = loom_traits_may_access_memory(new_traits) ? 1 : 0;
+  const loom_memory_space_mask_t old_read_spaces =
+      loom_op_read_memory_spaces(op, old_traits);
+  const loom_memory_space_mask_t new_read_spaces =
+      loom_op_read_memory_spaces(op, new_traits);
   const loom_memory_space_mask_t old_spaces =
       loom_op_written_memory_spaces(op, old_traits);
   const loom_memory_space_mask_t new_spaces =
@@ -441,7 +458,8 @@ void loom_module_update_op_direct_summaries(loom_module_t* module,
       op, new_read - old_read, new_write - old_write,
       new_convergent - old_convergent, new_observable - old_observable,
       new_resource_identity - old_resource_identity,
-      new_memory_access - old_memory_access, old_spaces & ~new_spaces,
+      new_memory_access - old_memory_access, old_read_spaces & ~new_read_spaces,
+      new_read_spaces & ~old_read_spaces, old_spaces & ~new_spaces,
       new_spaces & ~old_spaces);
   if (iree_any_bit_set(old_traits ^ new_traits, LOOM_TRAIT_HINT)) {
     loom_module_adjust_op_hint_sources(
@@ -497,158 +515,6 @@ static iree_status_t loom_region_blocks_ensure_capacity(loom_module_t* module,
 //===----------------------------------------------------------------------===//
 // Module
 //===----------------------------------------------------------------------===//
-
-static iree_status_t loom_module_initialize_tables(
-    loom_module_t* module, const loom_module_size_hints_t* hints) {
-  iree_arena_allocator_t* arena = &module->arena;
-
-  iree_host_size_t string_capacity = 512;
-  iree_host_size_t type_capacity = 64;
-  iree_host_size_t encoding_capacity = 0;
-  iree_host_size_t source_capacity = 0;
-  iree_host_size_t symbol_capacity = 32;
-
-  if (hints) {
-    string_capacity =
-        (iree_host_size_t)(hints->string_count * LOOM_MODULE_GROWTH_FACTOR);
-    type_capacity =
-        (iree_host_size_t)(hints->type_count * LOOM_MODULE_GROWTH_FACTOR);
-    encoding_capacity =
-        (iree_host_size_t)(hints->encoding_count * LOOM_MODULE_GROWTH_FACTOR);
-    source_capacity =
-        (iree_host_size_t)(hints->source_count * LOOM_MODULE_GROWTH_FACTOR);
-    symbol_capacity =
-        (iree_host_size_t)(hints->symbol_count * LOOM_MODULE_GROWTH_FACTOR);
-    if (string_capacity < 8) {
-      string_capacity = 8;
-    }
-    if (type_capacity < 8) {
-      type_capacity = 8;
-    }
-    if (hints->encoding_count > 0 && encoding_capacity < 8) {
-      encoding_capacity = 8;
-    }
-    if (hints->source_count > 0 && source_capacity < 4) {
-      source_capacity = 4;
-    }
-    if (symbol_capacity < 4) {
-      symbol_capacity = 4;
-    }
-  }
-
-  // Value segments are allocated lazily as values are defined. The matching
-  // scratch and type-use head tables share each segment.
-  loom_segmented_storage_initialize(sizeof(loom_value_segment_t),
-                                    iree_alignof(loom_value_segment_t),
-                                    &module->values.segments);
-  module->scratch.values.value_table = &module->values;
-  module->scratch.values.state =
-      LOOM_VALUE_U32_SCRATCH_STATE_UNACQUIRED_ORDINALS;
-  module->type_uses.value_table = &module->values;
-  iree_arena_initialize(module->arena.block_pool, &module->type_uses.arena);
-
-  // Locations. Rows are allocated lazily in stable segments.
-  loom_segmented_storage_initialize(sizeof(loom_location_segment_t),
-                                    iree_alignof(loom_location_segment_t),
-                                    &module->locations.segments);
-
-  // String views are lazy; hints size only the interner's buckets.
-  loom_segmented_storage_initialize(sizeof(loom_string_segment_t),
-                                    iree_alignof(loom_string_segment_t),
-                                    &module->strings.segments);
-
-  // Canonical rows are lazy; type hints size only the interner's buckets.
-  loom_segmented_storage_initialize(sizeof(loom_type_segment_t),
-                                    iree_alignof(loom_type_segment_t),
-                                    &module->types.segments);
-
-  // Encodings. Modules without an encoding count hint retain lazy allocation.
-  if (encoding_capacity > 0) {
-    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        arena, encoding_capacity, sizeof(loom_encoding_t),
-        (void**)&module->encodings.entries));
-    module->encodings.capacity = encoding_capacity;
-  }
-
-  // Sources. Modules without a source count hint retain lazy allocation.
-  if (source_capacity > 0) {
-    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        arena, source_capacity, sizeof(iree_string_view_t),
-        (void**)&module->sources.entries));
-    module->sources.capacity = source_capacity;
-  }
-
-  // Symbols.
-  IREE_RETURN_IF_ERROR(
-      iree_arena_allocate_array(arena, symbol_capacity, sizeof(loom_symbol_t),
-                                (void**)&module->symbols.entries));
-  module->symbols.capacity = symbol_capacity;
-  memset(module->symbols.entries, 0, symbol_capacity * sizeof(loom_symbol_t));
-
-  // Intern tables sized to match entry capacity.
-  iree_host_size_t string_intern_capacity =
-      loom_intern_table_capacity_for_entries(string_capacity);
-  IREE_RETURN_IF_ERROR(loom_intern_table_initialize(
-      arena, string_intern_capacity, &module->string_intern));
-  iree_host_size_t type_intern_capacity =
-      loom_intern_table_capacity_for_entries(type_capacity);
-  IREE_RETURN_IF_ERROR(loom_intern_table_initialize(arena, type_intern_capacity,
-                                                    &module->type_intern));
-  iree_host_size_t encoding_intern_capacity = 0;
-  if (encoding_capacity > 0) {
-    encoding_intern_capacity =
-        loom_intern_table_capacity_for_entries(encoding_capacity);
-  }
-  return loom_intern_table_initialize(arena, encoding_intern_capacity,
-                                      &module->encoding_intern);
-}
-
-iree_status_t loom_module_allocate(loom_context_t* context,
-                                   iree_string_view_t name,
-                                   iree_arena_block_pool_t* block_pool,
-                                   const loom_module_size_hints_t* hints,
-                                   iree_allocator_t allocator,
-                                   loom_module_t** out_module) {
-  IREE_TRACE_ZONE_BEGIN(z0);
-  *out_module = NULL;
-
-  loom_module_t* module = NULL;
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0,
-      iree_allocator_malloc(allocator, sizeof(loom_module_t), (void**)&module));
-  memset(module, 0, sizeof(loom_module_t));
-
-  module->context = context;
-  module->allocator = allocator;
-  iree_arena_initialize(block_pool, &module->arena);
-
-  iree_status_t status = loom_module_initialize_tables(module, hints);
-  if (iree_status_is_ok(status)) {
-    status = loom_module_intern_string(module, name, &module->name_id);
-  }
-  if (iree_status_is_ok(status)) {
-    status = loom_module_allocate_region(module, 1, &module->body);
-  }
-  if (iree_status_is_ok(status)) {
-    *out_module = module;
-  } else {
-    loom_module_free(module);
-  }
-  IREE_TRACE_ZONE_END(z0);
-  return status;
-}
-
-void loom_module_free(loom_module_t* module) {
-  if (!module) {
-    return;
-  }
-  IREE_TRACE_ZONE_BEGIN(z0);
-  iree_allocator_t allocator = module->allocator;
-  iree_arena_deinitialize(&module->type_uses.arena);
-  iree_arena_deinitialize(&module->arena);
-  iree_allocator_free(allocator, module);
-  IREE_TRACE_ZONE_END(z0);
-}
 
 void loom_module_value_ordinal_scratch_acquire(loom_module_t* module) {
   loom_value_u32_scratch_t* scratch = &module->scratch.values;
@@ -709,6 +575,19 @@ static bool loom_encoding_alias_equal_fn(const void* context, uint32_t index) {
   const loom_encoding_equal_context_t* equal_context = context;
   return equal_context->module->encodings.entries[index].alias_id ==
          equal_context->encoding->alias_id;
+}
+
+uint16_t loom_module_find_encoding_alias(const loom_module_t* module,
+                                         loom_string_id_t alias_id) {
+  const loom_encoding_t encoding = {.alias_id = alias_id};
+  const loom_encoding_equal_context_t context = {
+      .module = module,
+      .encoding = &encoding,
+  };
+  const loom_intern_probe_t probe = loom_intern_table_probe(
+      &module->encoding_intern, loom_encoding_alias_hash(alias_id),
+      loom_encoding_alias_equal_fn, &context);
+  return probe.index == UINT32_MAX ? 0 : (uint16_t)(probe.index + 1);
 }
 
 static void loom_module_index_encoding_alias(loom_module_t* module,
@@ -1192,6 +1071,16 @@ static iree_status_t loom_module_mark_symbol_references_in_types(
     const loom_module_t* module, uint8_t* referenced_symbols) {
   for (iree_host_size_t i = 0; i < module->types.count; ++i) {
     loom_type_t type = loom_type_table_get(&module->types, i);
+    if (loom_type_is_reference(type)) {
+      const loom_symbol_ref_t declaration = {
+          .module_id = 0,
+          .symbol_id = loom_type_reference_declaration_id(type),
+      };
+      const loom_attribute_t binding = loom_attr_symbol(declaration);
+      IREE_RETURN_IF_ERROR(loom_module_mark_symbol_references_in_attr(
+          module, &binding, referenced_symbols, 0));
+      continue;
+    }
     if (!loom_type_is_parameterized(type)) {
       continue;
     }
@@ -1555,7 +1444,7 @@ iree_status_t loom_module_compact_symbols_preserving_symbol_refs(
 
   IREE_RETURN_IF_ERROR(
       loom_module_mark_symbol_references_in_types(module, referenced_symbols));
-  // Parameterized types are immutable entries in the module type interner. A
+  // Symbol-bearing types are immutable entries in the module type interner. A
   // preserved ordinal prefix keeps their symbol slots valid without rebuilding
   // that interner during symbol compaction.
   for (iree_host_size_t i = 0; i < old_symbol_count; ++i) {
@@ -3860,8 +3749,8 @@ static uint32_t loom_topological_type_hash(
   const loom_type_t type = context->type;
   uint32_t hash = loom_structural_hash_initialize();
   hash = loom_structural_hash_mix_u32(hash, type.header);
-  hash = loom_structural_hash_mix_u16(hash, type.encoding_id);
-  hash = loom_structural_hash_mix_u16(hash, type.encoding_flags);
+  hash = loom_structural_hash_mix_u32(
+      hash, (uint32_t)type.encoding_id | ((uint32_t)type.encoding_flags << 16));
 
   switch (loom_type_kind(type)) {
     case LOOM_TYPE_FUNCTION: {
@@ -5053,6 +4942,7 @@ static iree_status_t loom_block_link_op_between(loom_module_t* module,
     block->last_op = op;
   }
   ++block->op_count;
+  block->result_operation_count += op->result_count != 0;
   return iree_ok_status();
 }
 
@@ -5111,9 +5001,10 @@ void loom_block_unlink_op(loom_module_t* module, loom_op_t* op) {
   op->prev_op = NULL;
   op->next_op = NULL;
   op->block_ordinal = 0;
-  if (block->op_count > 0) {
-    --block->op_count;
-  }
+  IREE_ASSERT(block->op_count > 0);
+  --block->op_count;
+  IREE_ASSERT(op->result_count == 0 || block->result_operation_count > 0);
+  block->result_operation_count -= op->result_count != 0;
 }
 
 iree_host_size_t loom_block_find_op(const loom_block_t* block,

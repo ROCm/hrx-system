@@ -175,7 +175,12 @@ set(IREE_DEP_LIBBACKTRACE_SHA256 "858b1225351052234f7e71f0f36622fc9ad33aac947db7
 set(IREE_DEP_LIBBACKTRACE_STRIP_PREFIX "libbacktrace-793921876c981ce49759114d7bb89bb89b2d3a2d")
 set(IREE_DEP_LIBBACKTRACE_BUILD_FILE "//build_tools/third_party/libbacktrace:libbacktrace.BUILD.bazel")
 set(IREE_DEP_LIBBACKTRACE_PATCHES
+  "//build_tools/third_party/libbacktrace:explicit_integer_conversions.patch"
   "//build_tools/third_party/libbacktrace:threaded_cache_reads.patch"
+  "//build_tools/third_party/libbacktrace:ignore_nonruntime_symbols.patch"
+  "//build_tools/third_party/libbacktrace:zero_size_vectors.patch"
+  "//build_tools/third_party/libbacktrace:iterative_function_scopes.patch"
+  "//build_tools/third_party/libbacktrace:portable_test_warnings.patch"
 )
 set(IREE_DEP_LIBBACKTRACE_PATCH_ARGS
   "-p1"
@@ -189,10 +194,10 @@ set(IREE_DEP_MINIAUDIO_VERSION "")
 set(IREE_DEP_MINIAUDIO_DEV_DEPENDENCY "FALSE")
 set(IREE_DEP_MINIAUDIO_SOURCE_URL "")
 set(IREE_DEP_MINIAUDIO_URLS
-  "https://github.com/mackron/miniaudio/archive/refs/tags/0.11.25.tar.gz"
+  "https://github.com/mackron/miniaudio/archive/refs/tags/0.11.26.tar.gz"
 )
-set(IREE_DEP_MINIAUDIO_SHA256 "b900edcffe979816e2560a0580b9b1216d674b4f17fbadeca8f777a7f8ab0274")
-set(IREE_DEP_MINIAUDIO_STRIP_PREFIX "miniaudio-0.11.25")
+set(IREE_DEP_MINIAUDIO_SHA256 "838ba55a21c9142adf7b76bdc4351e5cd8b7ae128f46b25ec25f94ae9969c600")
+set(IREE_DEP_MINIAUDIO_STRIP_PREFIX "miniaudio-0.11.26")
 set(IREE_DEP_MINIAUDIO_BUILD_FILE "//build_tools/third_party/miniaudio:miniaudio.BUILD.bazel")
 set(IREE_DEP_MINIAUDIO_PATCHES "")
 set(IREE_DEP_MINIAUDIO_PATCH_ARGS "")
@@ -264,10 +269,10 @@ set(IREE_DEP_CXX_VERSION "")
 set(IREE_DEP_CXX_DEV_DEPENDENCY "FALSE")
 set(IREE_DEP_CXX_SOURCE_URL "")
 set(IREE_DEP_CXX_URLS
-  "https://github.com/benvanik/cplusplus/archive/fe2e6ca0a16c013a292e4d0a88882b6f966d2470.tar.gz"
+  "https://github.com/benvanik/cplusplus/archive/24374a126221c764d78e0733b4afc48a607b3da6.tar.gz"
 )
-set(IREE_DEP_CXX_SHA256 "e6ba97bd69886c3ece1f22c401ae8bf2f9752d63814171f45a5a1a2fa523981c")
-set(IREE_DEP_CXX_STRIP_PREFIX "cplusplus-fe2e6ca0a16c013a292e4d0a88882b6f966d2470")
+set(IREE_DEP_CXX_SHA256 "026fc2028839ace7f0abe095ba6e186277e092cf0cccf6493b26539566d11f92")
+set(IREE_DEP_CXX_STRIP_PREFIX "cplusplus-24374a126221c764d78e0733b4afc48a607b3da6")
 set(IREE_DEP_CXX_BUILD_FILE "//build_tools/third_party/cxx:cxx.BUILD.bazel")
 set(IREE_DEP_CXX_PATCHES "")
 set(IREE_DEP_CXX_PATCH_ARGS "")
@@ -287,6 +292,7 @@ set(IREE_DEP_MIMALLOC_STRIP_PREFIX "mimalloc-3.5.3")
 set(IREE_DEP_MIMALLOC_BUILD_FILE "//build_tools/third_party/mimalloc:mimalloc.BUILD.bazel")
 set(IREE_DEP_MIMALLOC_PATCHES
   "//build_tools/third_party/mimalloc:c_new_handler.patch"
+  "//build_tools/third_party/mimalloc:guarded_page_gcc_warning.patch"
 )
 set(IREE_DEP_MIMALLOC_PATCH_ARGS
   "-p1"
@@ -316,11 +322,10 @@ set(IREE_DEP_LIBDRM_HEADERS_VERSION "")
 set(IREE_DEP_LIBDRM_HEADERS_DEV_DEPENDENCY "FALSE")
 set(IREE_DEP_LIBDRM_HEADERS_SOURCE_URL "")
 set(IREE_DEP_LIBDRM_HEADERS_URLS
-  "https://mirrors.edge.kernel.org/gentoo/distfiles/13/libdrm-2.4.134.tar.xz"
-  "https://dri.freedesktop.org/libdrm/libdrm-2.4.134.tar.xz"
+  "https://gitlab.freedesktop.org/mesa/libdrm/-/archive/33fab8cbca7f7581e955a675597d14412702edc4/libdrm-33fab8cbca7f7581e955a675597d14412702edc4.tar.bz2"
 )
-set(IREE_DEP_LIBDRM_HEADERS_SHA256 "ac5e74d157830eb8bee44c6a6bf3ad49774ef0dd2a72bdad74a8f20308b52a95")
-set(IREE_DEP_LIBDRM_HEADERS_STRIP_PREFIX "libdrm-2.4.134")
+set(IREE_DEP_LIBDRM_HEADERS_SHA256 "86732374758d8aabf64e92c9a34ab0dbf2b363c1860b3bdf98f7aad79193de90")
+set(IREE_DEP_LIBDRM_HEADERS_STRIP_PREFIX "libdrm-33fab8cbca7f7581e955a675597d14412702edc4")
 set(IREE_DEP_LIBDRM_HEADERS_BUILD_FILE "//build_tools/third_party/linux_uapi:libdrm_headers.BUILD.bazel")
 set(IREE_DEP_LIBDRM_HEADERS_PATCHES "")
 set(IREE_DEP_LIBDRM_HEADERS_PATCH_ARGS "")

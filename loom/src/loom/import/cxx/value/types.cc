@@ -6,6 +6,7 @@
 
 #include "loom/import/cxx/value/types.h"
 
+#include <cxx/ast.h>
 #include <cxx/ast_interpreter.h>
 #include <cxx/attributes.h>
 #include <cxx/control.h>
@@ -21,12 +22,23 @@
 
 #include "loom/import/cxx/source/error.h"
 #include "loom/import/cxx/source/expressions.h"
+#include "loom/import/cxx/source/objects.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/type_registry.h"
 
 namespace loom::cxx_import {
 namespace {
+
+bool has_mutable_subobject(const Partition& partition) {
+  return partition.kind == ValueKind::Record
+             ? static_cast<const RecordPartition&>(partition)
+                   .has_mutable_subobject
+         : partition.kind == ValueKind::Array
+             ? static_cast<const ArrayPartition&>(partition)
+                   .has_mutable_subobject
+             : false;
+}
 
 const cxx::Attribute* type_binding(cxx::ClassSymbol* source) {
   auto find = [](cxx::ClassSymbol* symbol) -> const cxx::Attribute* {
@@ -49,11 +61,6 @@ const cxx::Attribute* type_binding(cxx::ClassSymbol* source) {
   return primary == source ? nullptr : find(primary);
 }
 
-bool has_user_provided_constructor(cxx::ClassSymbol* source) {
-  return source &&
-         std::ranges::any_of(source->constructors(), cxx::isUserProvided);
-}
-
 const cxx::ParameterPackSymbol* template_argument_pack(
     cxx::ClassSymbol* source) {
   auto arguments = source->templateArguments();
@@ -67,25 +74,10 @@ const cxx::ParameterPackSymbol* template_argument_pack(
 loom_type_t make_shaped_type(loom_type_kind_t kind, loom_scalar_type_t element,
                              std::span<const uint64_t> dimensions,
                              BoundTypeStorage& storage) {
-  bool all_static = true;
-  for (auto dimension : dimensions) {
-    all_static &= !loom_dim_is_dynamic(dimension);
-  }
-  uint8_t flags = all_static ? LOOM_TYPE_FLAG_ALL_STATIC : 0;
-  if (dimensions.size() <= 2) {
-    flags |= LOOM_TYPE_FLAG_INLINE_DIMS;
-  }
-  loom_type_t result = {
-      .header = loom_type_make_header(
-          kind, element, static_cast<uint8_t>(dimensions.size()), flags),
+  const loom_type_t base = {
+      .header = loom_type_make_header(kind, element, 0, 0),
   };
-  if (dimensions.size() <= 2) {
-    std::copy(dimensions.begin(), dimensions.end(), result.dims);
-  } else {
-    auto* retained = storage.retain_dimensions(dimensions);
-    result.dims[0] = reinterpret_cast<uintptr_t>(retained);
-  }
-  return result;
+  return storage.with_dimensions(base, dimensions);
 }
 
 loom_type_t make_encoded_shaped_type(loom_type_kind_t kind,
@@ -95,6 +87,12 @@ loom_type_t make_encoded_shaped_type(loom_type_kind_t kind,
                                      BoundTypeStorage& storage) {
   auto result = make_shaped_type(kind, element, dimensions, storage);
   if (encoding) {
+    if (*encoding > UINT16_MAX) {
+      check(iree_make_status(
+          IREE_STATUS_RESOURCE_EXHAUSTED,
+          "encoding value ID %u exceeds the shaped type limit of %u", *encoding,
+          UINT16_MAX));
+    }
     result.encoding_id = static_cast<uint16_t>(*encoding);
     result.encoding_flags = LOOM_ENCODING_FLAG_SSA;
   }
@@ -128,6 +126,29 @@ loom_type_t make_channel_handle_type(loom_module_t* module,
 }
 
 }  // namespace
+
+loom_type_t BoundTypeStorage::with_dimensions(
+    loom_type_t type, std::span<const uint64_t> dimensions) {
+  bool all_static = true;
+  for (auto dimension : dimensions) {
+    all_static &= !loom_dim_is_dynamic(dimension);
+  }
+  uint8_t flags = all_static ? LOOM_TYPE_FLAG_ALL_STATIC : 0;
+  if (dimensions.size() <= 2) {
+    flags |= LOOM_TYPE_FLAG_INLINE_DIMS;
+  }
+  type.header =
+      loom_type_make_header(loom_type_kind(type), loom_type_element_type(type),
+                            static_cast<uint8_t>(dimensions.size()), flags) |
+      (type.header & 0xFF000000u);
+  type.dims[0] = type.dims[1] = 0;
+  if (dimensions.size() <= 2) {
+    std::copy(dimensions.begin(), dimensions.end(), type.dims);
+  } else {
+    type.dims[0] = reinterpret_cast<uintptr_t>(retain_dimensions(dimensions));
+  }
+  return type;
+}
 
 const loom_overflow_dim_t* BoundTypeStorage::retain_dimensions(
     std::span<const loom_overflow_dim_t> dimensions) {
@@ -167,7 +188,6 @@ loom_type_t TilePartition::bind_type(
   std::optional<loom_value_id_t> encoding_value;
   if (encoding) {
     encoding_value = dependencies[dependency++];
-    IREE_ASSERT_LE(*encoding_value, UINT16_MAX);
   }
   IREE_ASSERT_EQ(dependency, dependencies.size());
   return make_encoded_shaped_type(
@@ -244,7 +264,6 @@ loom_type_t ViewPartition::bind_type(
   std::optional<loom_value_id_t> encoding_value;
   if (encoding) {
     encoding_value = dependencies[dependency++];
-    IREE_ASSERT_LE(*encoding_value, UINT16_MAX);
   }
   IREE_ASSERT_EQ(dependency, dependencies.size());
   return make_encoded_shaped_type(
@@ -352,6 +371,82 @@ bool Types::requires_binding(const cxx::Type* input, cxx::AST* owner) {
              : false;
 }
 
+bool Types::requires_value_transport(const cxx::Type* input) {
+  input = unqualified(input);
+  auto traits = unit_.typeTraits();
+  if (traits.is_pointer(input) || traits.is_reference(input) ||
+      traits.is_null_pointer(input)) {
+    return true;
+  }
+  if (auto* array = cxx::type_cast<cxx::BoundedArrayType>(input)) {
+    return requires_value_transport(array->elementType());
+  }
+  auto* record_type = cxx::type_cast<cxx::ClassType>(input);
+  if (!record_type) {
+    return false;
+  }
+  if (auto found = value_transport_.find(input);
+      found != value_transport_.end()) {
+    return found->second;
+  }
+  auto* source = record_type->definition();
+  traits.requireCompleteClass(source);
+  source = record_type->definition();
+  bool required = type_binding(source) != nullptr;
+  for (auto* base : source->baseClasses()) {
+    required |= requires_value_transport(source_object_type(base));
+  }
+  for (auto* symbol : source->members()) {
+    auto* field = cxx::symbol_cast<cxx::FieldSymbol>(symbol);
+    if (field && !field->isStatic()) {
+      required |= requires_value_transport(field->type());
+    }
+  }
+  value_transport_.emplace(input, required);
+  return required;
+}
+
+std::span<const ValueProjection> Types::projections(const cxx::Type* input,
+                                                    cxx::AST* owner) {
+  input = unqualified(input);
+  if (auto found = construction_groups_.find(input);
+      found != construction_groups_.end()) {
+    return found->second;
+  }
+  const auto& admitted = partition(input, owner);
+  std::vector<ValueProjection> result;
+  auto append = [&](const cxx::Type* type, size_t offset) {
+    for (auto child : projections(type, owner)) {
+      child.component_offset += offset;
+      result.push_back(child);
+    }
+  };
+  if (admitted.kind == ValueKind::Record && admitted.component_count) {
+    for (const auto& member :
+         static_cast<const RecordPartition&>(admitted).members) {
+      // Reference members retain their binding as a pointer group. The
+      // referent's value is not a subobject of this record's partition.
+      auto traits = unit_.typeTraits();
+      if (traits.is_reference(member.type())) {
+        result.push_back(
+            {traits.add_pointer(traits.remove_reference(member.type())),
+             member.partition, member.component_offset});
+      } else {
+        append(member.type(), member.component_offset);
+      }
+    }
+  } else if (admitted.kind == ValueKind::Array) {
+    const auto& array = static_cast<const ArrayPartition&>(admitted);
+    for (size_t offset = 0; offset < admitted.component_count;
+         offset += array.element->component_count) {
+      append(array.source->elementType(), offset);
+    }
+  } else {
+    result.push_back({input, &admitted, 0});
+  }
+  return construction_groups_.emplace(input, std::move(result)).first->second;
+}
+
 const ArrayPartition* Types::array(const cxx::Type* input, cxx::AST* owner) {
   auto* source = cxx::type_cast<cxx::BoundedArrayType>(unqualified(input));
   if (!source) {
@@ -375,6 +470,7 @@ const ArrayPartition* Types::array(const cxx::Type* input, cxx::AST* owner) {
   result->source = source;
   result->element = &element;
   result->requires_binding = requires_binding(source->elementType(), owner);
+  result->has_mutable_subobject = has_mutable_subobject(element);
   auto* admitted = result.get();
   arrays_.emplace(source, std::move(result));
   return admitted;
@@ -758,6 +854,12 @@ const TilePartition* Types::tile(const cxx::ClassType* input, cxx::AST* owner) {
                           "tile encoding must be void or a Loom encoding type");
     }
     tile_encoding = &static_cast<const EncodingPartition&>(admitted_encoding);
+    if ((tile_encoding->role == LOOM_ENCODING_ROLE_ADDRESS_LAYOUT ||
+         tile_encoding->role == LOOM_ENCODING_ROLE_PHYSICAL_STORAGE) &&
+        tile_encoding->rank != extents.size()) {
+      diagnostics_.reject(unit_, owner,
+                          "tile address encoding must have the same rank");
+    }
   }
   size_t dynamic_count = 0;
   for (auto extent : extents) {
@@ -1103,6 +1205,14 @@ const TensorPartition* Types::tensor(const cxx::ClassType* input,
   return admitted;
 }
 
+const cxx::Type* SubobjectPartition::type() const {
+  return source_object_type(source);
+}
+
+uint64_t SubobjectPartition::byte_offset() const {
+  return source_subobject_offset(source);
+}
+
 const RecordPartition* Types::record(const cxx::Type* input, cxx::AST* owner) {
   if (!input) {
     return nullptr;
@@ -1128,19 +1238,48 @@ const RecordPartition* Types::record(const cxx::Type* input, cxx::AST* owner) {
     source = type->definition();
   }
   if (!source || !source->isComplete() || source->isUnion() ||
-      !source->baseClasses().empty() ||
-      (!traits.is_aggregate(input) && !has_user_provided_constructor(source)) ||
-      !has_trivial_value_operations(input)) {
+      source->isPolymorphic()) {
     diagnostics_.reject(
         unit_, owner,
-        "record values require a complete baseless non-union type with "
-        "aggregate or user-provided construction and trivial copy and move "
-        "operations");
+        "record values require a complete non-union type without "
+        "virtual members");
   }
   auto result = std::make_unique<RecordPartition>();
   result->kind = ValueKind::Record;
   result->component_count = 0;
   result->source = source;
+  result->is_aggregate = traits.is_aggregate(input);
+  auto append = [&](cxx::Symbol* symbol) {
+    auto* type = source_object_type(symbol);
+    const auto& member_partition = traits.is_lvalue_reference(type)
+                                       ? kPointerPartition
+                                       : partition(type, owner);
+    if (symbol->kind() == cxx::SymbolKind::kBaseClass &&
+        member_partition.kind != ValueKind::Record) {
+      diagnostics_.reject(unit_, owner,
+                          "Loom semantic handles cannot be base subobjects");
+    }
+    SubobjectPartition member{symbol, &member_partition,
+                              result->component_count};
+    result->members.push_back(member);
+    members_.emplace(symbol, member);
+    append_component_names(member_partition, cxx::to_string(symbol->name()),
+                           result->component_names);
+    result->component_count += member_partition.component_count;
+    auto* field = cxx::symbol_cast<cxx::FieldSymbol>(symbol);
+    result->has_mutable_subobject |= (field && field->isMutable()) ||
+                                     has_mutable_subobject(member_partition);
+    if (!traits.is_reference(type)) {
+      result->requires_binding |= requires_binding(type, owner);
+    }
+  };
+  for (auto* base : source->baseClasses()) {
+    if (base->isVirtual()) {
+      diagnostics_.reject(
+          unit_, owner, "virtual base objects require a dynamic object layout");
+    }
+    append(base);
+  }
   for (auto* symbol : source->members()) {
     auto* field = cxx::symbol_cast<cxx::FieldSymbol>(symbol);
     if (!field || field->isStatic()) {
@@ -1155,36 +1294,66 @@ const RecordPartition* Types::record(const cxx::Type* input, cxx::AST* owner) {
           unit_, owner,
           "rvalue-reference fields require consuming object identity");
     }
-    const auto& member_partition = traits.is_lvalue_reference(field->type())
-                                       ? kPointerPartition
-                                       : partition(field->type(), owner);
-    MemberPartition member{field, &member_partition, result->component_count};
-    result->members.push_back(member);
-    members_.emplace(field, member);
-    auto name = cxx::to_string(field->name());
-    append_component_names(member_partition, name, result->component_names);
-    result->component_count += member_partition.component_count;
-    if (!traits.is_reference(field->type())) {
-      result->requires_binding |= requires_binding(field->type(), owner);
-    }
+    append(field);
   }
   auto* admitted = result.get();
   records_.emplace(source, std::move(result));
   return admitted;
 }
 
-bool Types::is_user_record_constructor(const cxx::Type* type,
-                                       cxx::FunctionSymbol* constructor,
+bool Types::implicit_object_may_mutate(cxx::FunctionSymbol* function,
                                        cxx::AST* owner) {
-  if (!constructor || !constructor->isConstructor() ||
-      !cxx::isUserProvided(constructor)) {
+  if (!function || !function->isImplicitObjectMemberFunction()) {
+    return false;
+  }
+  auto* signature = static_cast<const cxx::FunctionType*>(function->type());
+  if (!cxx::has_const(signature->cvQualifiers())) {
+    return true;
+  }
+  const auto* admitted = record(function->parent()->type(), owner);
+  return admitted && admitted->has_mutable_subobject;
+}
+
+bool Types::record_constructor_requires_call(const cxx::Type* type,
+                                             cxx::FunctionSymbol* constructor,
+                                             cxx::AST* owner) {
+  if (!constructor || !constructor->isConstructor()) {
     return false;
   }
   type = unqualified(type);
   while (auto* array = cxx::type_cast<cxx::BoundedArrayType>(type)) {
     type = unqualified(array->elementType());
   }
-  return record(type, owner) != nullptr;
+  auto* admitted = record(type, owner);
+  return admitted && (cxx::isUserProvided(constructor) ||
+                      (!same_function(constructor,
+                                      admitted->source->defaultConstructor()) &&
+                       !is_trivial_value_operation(constructor)));
+}
+
+bool Types::is_trivial_value_operation(cxx::FunctionSymbol* function) {
+  if (!function || cxx::isUserProvided(function)) {
+    return false;
+  }
+  auto* source = cxx::symbol_cast<cxx::ClassSymbol>(function->parent());
+  if (!source || !(source->isCopyConstructor(function) ||
+                   source->isMoveConstructor(function) ||
+                   source->isCopyAssignmentOperator(function) ||
+                   source->isMoveAssignmentOperator(function))) {
+    return false;
+  }
+  source = source->resolvedDefinition();
+  auto [entry, inserted] =
+      trivial_record_operations_.try_emplace(source, false);
+  if (inserted) {
+    // The class-wide fact covers every eligible cv-qualified overload and
+    // nested member. A single canonical copy/move trait cannot establish the
+    // behavior of the overload selected at this callsite. Mixed families use
+    // their synthesized bodies, including the individually trivial members.
+    entry->second =
+        unit_.typeTraits().has_trivial_value_operations(source->type());
+  }
+  return entry->second;
 }
 
 void Types::append_component_names(const Partition& partition,
@@ -1265,12 +1434,78 @@ void Types::append_component_names(const Partition& partition,
   }
 }
 
-const MemberPartition& Types::member(cxx::FieldSymbol* field, cxx::AST* owner) {
-  if (auto found = members_.find(field); found != members_.end()) {
+const SubobjectPartition& Types::member(cxx::Symbol* subobject,
+                                        cxx::AST* owner) {
+  if (auto found = members_.find(subobject); found != members_.end()) {
     return found->second;
   }
-  record(field->parent()->type(), owner);
-  return members_.at(field);
+  record(subobject->parent()->type(), owner);
+  return members_.at(subobject);
+}
+
+const SubobjectProjection& Types::projection(cxx::List<cxx::Symbol*>* path,
+                                             cxx::AST* owner) {
+  if (!projections_) {
+    projections_ = std::make_unique<ProjectionMap>();
+  }
+  auto [entry, inserted] = projections_->try_emplace(path);
+  if (entry->second.partition) {
+    return entry->second;
+  }
+  const auto& root = member(path->value, owner);
+  SubobjectProjection result{
+      &root, root.partition, root.component_offset,
+      inserted ? root.byte_offset() : entry->second.byte_offset};
+  for (auto* step : cxx::ListView{path->next}) {
+    const auto& selected = member(step, owner);
+    result.partition = selected.partition;
+    result.component_offset += selected.component_offset;
+    if (inserted) {
+      result.byte_offset += selected.byte_offset();
+    }
+  }
+  return entry->second = result;
+}
+
+uint64_t Types::subobject_offset(cxx::List<cxx::Symbol*>* path) {
+  if (!projections_) {
+    projections_ = std::make_unique<ProjectionMap>();
+  }
+  auto [entry, inserted] = projections_->try_emplace(path);
+  if (inserted) {
+    for (auto* step : cxx::ListView{path}) {
+      entry->second.byte_offset += source_subobject_offset(step);
+    }
+  }
+  return entry->second.byte_offset;
+}
+
+SubobjectProjection Types::selection(cxx::Symbol* field,
+                                     cxx::List<cxx::Symbol*>* path,
+                                     cxx::AST* owner) {
+  const auto& leaf = member(field, owner);
+  if (!path) {
+    return {&leaf, leaf.partition, leaf.component_offset, leaf.byte_offset()};
+  }
+  auto result = projection(path, owner);
+  result.partition = leaf.partition;
+  result.component_offset += leaf.component_offset;
+  result.byte_offset += leaf.byte_offset();
+  return result;
+}
+
+void Types::select_pointer_reference_snapshot(cxx::FieldSymbol* field,
+                                              cxx::AST* owner) {
+  const auto& admitted = member(field, owner);
+  auto traits = unit_.typeTraits();
+  IREE_ASSERT(traits.is_lvalue_reference(field->type()));
+  IREE_ASSERT(traits.is_pointer(traits.remove_reference(field->type())));
+  IREE_ASSERT_EQ(admitted.partition, &kPointerPartition);
+  pointer_reference_snapshots_.insert(field);
+}
+
+bool Types::pointer_reference_is_snapshot(cxx::FieldSymbol* field) const {
+  return pointer_reference_snapshots_.contains(field);
 }
 
 loom_type_t Types::get(const cxx::Type* input, cxx::AST* ast) {
@@ -1353,6 +1588,8 @@ loom_type_t Types::get(const cxx::Type* input, cxx::AST* ast) {
       }
       return loom_type_buffer();
     }
+    case cxx::TypeKind::kNullptr:
+      return loom_type_buffer();
     case cxx::TypeKind::kPointer: {
       auto* pointer = cxx::type_cast<cxx::PointerType>(unqualified(input));
       if (unit_.typeTraits().is_function(pointer->elementType())) {
@@ -1422,10 +1659,6 @@ loom_type_t Types::get(const cxx::Type* input, cxx::AST* ast) {
   }
 }
 
-bool Types::has_trivial_value_operations(const cxx::Type* input) {
-  return unit_.typeTraits().has_trivial_value_operations(input);
-}
-
 void Types::require_record_storage(const cxx::ClassType* input,
                                    cxx::AST* owner) {
   auto* source = input->definition();
@@ -1442,14 +1675,18 @@ void Types::require_record_storage(const cxx::ClassType* input,
                         "Loom source types require SSA value transport");
   }
   if (!source || !source->isComplete() || source->isUnion() ||
-      !source->baseClasses().empty() ||
-      (!traits.is_aggregate(input) && !has_user_provided_constructor(source)) ||
-      !has_trivial_value_operations(input)) {
+      source->isPolymorphic()) {
     diagnostics_.reject(
         unit_, owner,
-        "record storage requires a complete baseless non-union type with "
-        "aggregate or user-provided construction and trivial copy and move "
-        "operations");
+        "record storage requires a complete non-union type without "
+        "virtual members");
+  }
+  for (auto* base : source->baseClasses()) {
+    if (base->isVirtual()) {
+      diagnostics_.reject(
+          unit_, owner, "virtual base objects require a dynamic object layout");
+    }
+    storage_size(source_object_type(base), owner);
   }
   for (auto* symbol : source->members()) {
     auto* field = cxx::symbol_cast<cxx::FieldSymbol>(symbol);
@@ -1517,69 +1754,22 @@ bool Types::is_opaque_dialect(const cxx::Type* type, std::string_view name,
 }
 
 // The frontend has selected the special member and checked accessibility,
-// deletion, cv and overload resolution. Source admission establishes trivial
-// lifecycle semantics before an implicit copy becomes an SSA value copy.
-// Synthesized record constructors contribute their canonical member
-// initialization plans. User-provided record constructors retain ordinary
-// callable bodies over the exact destination storage.
+// deletion, cv and overload resolution. Ordinary records execute selected
+// nontrivial bodies; intrinsic source wrappers admit only trivial transport.
 void Types::admit_construction(cxx::FunctionSymbol* constructor,
                                const cxx::Type* type, cxx::AST* owner) {
-  if (!constructor) {
-    return;
-  }
-  // Array initialization retains an element constructor on the array entity.
-  // Initialization admits and executes it independently for every element.
-  if (unit_.typeTraits().is_array(type)) {
+  if (!constructor || unit_.typeTraits().is_array(type)) {
     return;
   }
   const auto& admitted = partition(unqualified(type), owner);
-  cxx::ClassSymbol* source = nullptr;
-  bool is_record = admitted.kind == ValueKind::Record;
-  if (admitted.kind == ValueKind::Record) {
-    source = static_cast<const RecordPartition&>(admitted).source;
-  } else if (admitted.kind == ValueKind::Buffer) {
-    source = static_cast<const BufferPartition&>(admitted).source;
-  } else if (admitted.kind == ValueKind::Address) {
-    source = static_cast<const AddressPartition&>(admitted).source;
-  } else if (admitted.kind == ValueKind::Encoding) {
-    source = static_cast<const EncodingPartition&>(admitted).source;
-  } else if (admitted.kind == ValueKind::Pool) {
-    source = static_cast<const PoolPartition&>(admitted).source;
-  } else if (admitted.kind == ValueKind::Tile) {
-    source = static_cast<const TilePartition&>(admitted).source;
-  } else if (admitted.kind == ValueKind::Channel) {
-    source = static_cast<const ChannelPartition&>(admitted).source;
-  } else if (admitted.kind == ValueKind::OpaqueDialect) {
-    source = static_cast<const OpaqueDialectPartition&>(admitted).source;
-  } else if (admitted.kind == ValueKind::Vector) {
-    source = static_cast<const VectorPartition&>(admitted).source;
-  } else if (admitted.kind == ValueKind::View) {
-    source = static_cast<const ViewPartition&>(admitted).source;
-  } else if (admitted.kind == ValueKind::Tensor) {
-    source = static_cast<const TensorPartition&>(admitted).source;
-  }
-  if (source && same_function(constructor, source->defaultConstructor())) {
-    if (is_record) {
-      return;
-    }
-    diagnostics_.reject(
-        unit_, owner,
-        "default Loom source type construction requires source object "
-        "initialization semantics");
-  }
-  if (is_record && cxx::isUserProvided(constructor)) {
+  if (admitted.kind == ValueKind::Record ||
+      is_trivial_value_operation(constructor)) {
     return;
   }
-  if (!source || (!same_function(constructor, source->copyConstructor()) &&
-                  !same_function(constructor, source->moveConstructor()))) {
-    diagnostics_.reject(
-        unit_, owner,
-        is_record
-            ? "record construction requires aggregate initialization "
-              "or a trivial copy"
-            : "Loom source type construction requires an operation result or "
-              "a trivial copy");
-  }
+  diagnostics_.reject(
+      unit_, owner,
+      "Loom source type construction requires an operation result or "
+      "a trivial copy");
 }
 
 void Types::require_mutable(const cxx::Type* input, cxx::AST* owner) {
@@ -1656,11 +1846,6 @@ void Types::append_bound(const cxx::Type* input, cxx::AST* owner,
         }
       }
       if (tile.encoding) {
-        if (identities[dependency] > UINT16_MAX) {
-          diagnostics_.reject(
-              unit_, owner,
-              "tile encoding identity exceeds Loom's current type capacity");
-        }
         output.push_back(loom_type_encoding_with_role(tile.encoding->role));
         ++dependency;
       }
@@ -1690,12 +1875,6 @@ void Types::append_bound(const cxx::Type* input, cxx::AST* owner,
         }
       }
       if (payload.encoding) {
-        if (identities[dependency] > UINT16_MAX) {
-          diagnostics_.reject(
-              unit_, owner,
-              "channel payload encoding identity exceeds Loom's current type "
-              "capacity");
-        }
         output.push_back(loom_type_encoding_with_role(payload.encoding->role));
         ++dependency;
       }
@@ -1745,10 +1924,13 @@ void Types::append_bound(const cxx::Type* input, cxx::AST* owner,
                 ? std::span<const loom_value_id_t>{}
                 : identities.subspan(member.component_offset,
                                      member.partition->component_count);
-        auto* member_type = member.field->type();
+        auto* member_type = member.type();
         if (unit_.typeTraits().is_lvalue_reference(member_type)) {
-          member_type = unit_.typeTraits().add_pointer(
-              unit_.typeTraits().remove_reference(member_type));
+          auto* referent = unit_.typeTraits().remove_reference(member_type);
+          member_type = pointer_reference_is_snapshot(
+                            static_cast<cxx::FieldSymbol*>(member.source))
+                            ? referent
+                            : unit_.typeTraits().add_pointer(referent);
         }
         append_bound(member_type, owner, member_identities, storage, output);
       }
@@ -1783,11 +1965,6 @@ void Types::append_bound(const cxx::Type* input, cxx::AST* owner,
         }
       }
       if (view.encoding) {
-        if (identities[component] > UINT16_MAX) {
-          diagnostics_.reject(
-              unit_, owner,
-              "view encoding identity exceeds Loom's current type capacity");
-        }
         output.push_back(loom_type_encoding_with_role(view.encoding->role));
         ++component;
       }

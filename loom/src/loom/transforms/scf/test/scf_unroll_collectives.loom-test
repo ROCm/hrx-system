@@ -54,12 +54,12 @@ func.def @recurrence_collectives(%input: view<2xi32>, %initial: i32) -> (i32) {
   %i_0 = index.constant 0 : index
   %i_1 = index.constant 1 : index
   %value = view.load %input[%i_0] : view<2xi32> -> i32
-  %collective = test.convergent %value : i32
-  %value_1 = view.load %input[%i_1] : view<2xi32> -> i32
-  %collective_1 = test.convergent %value_1 : i32
   scf.schedule.fence
+  %collective = test.convergent %value : i32
   %next = scalar.addi %initial, %collective : i32
   scf.schedule.fence
+  %value_1 = view.load %input[%i_1] : view<2xi32> -> i32
+  %collective_1 = test.convergent %value_1 : i32
   %next_1 = scalar.addi %next, %collective_1 : i32
   func.return %next_1 : i32
 }

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import subprocess
 import tempfile
 import unittest
 import zipfile
@@ -298,6 +299,65 @@ class LoomBinarySizeTest(unittest.TestCase):
         )
 
         self.assertEqual(selected["id"], 2)
+
+    def test_unavailable_artifact_commit_is_skipped(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            subprocess.run(["git", "init", "--quiet", root], check=True)
+            subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    root,
+                    "-c",
+                    "user.name=Fixture",
+                    "-c",
+                    "user.email=fixture@example.com",
+                    "commit",
+                    "--quiet",
+                    "--allow-empty",
+                    "-m",
+                    "anchor",
+                ],
+                check=True,
+            )
+            anchor = subprocess.run(
+                ["git", "-C", root, "rev-parse", "HEAD"],
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+            artifacts = [
+                {
+                    "id": 1,
+                    "created_at": "2026-08-31T03:00:00Z",
+                    "workflow_run": {"head_sha": "0" * 40},
+                },
+                {
+                    "id": 2,
+                    "created_at": "2026-08-31T01:00:00Z",
+                    "workflow_run": {"head_sha": anchor},
+                },
+            ]
+
+            selected = loom_binary_size.select_nearest_artifact(
+                artifacts,
+                anchor=anchor,
+                exclude_commit=None,
+                distance=lambda commit, comparison: loom_binary_size._git_distance(
+                    root, commit, comparison
+                ),
+            )
+
+        self.assertEqual(selected["id"], 2)
+
+    def test_git_distance_preserves_repository_failures(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            with self.assertRaisesRegex(
+                loom_binary_size.BinarySizeError,
+                "could not test ancestry",
+            ):
+                loom_binary_size._git_distance(Path(temporary), COMMIT_A, COMMIT_B)
 
     def test_history_zip_must_match_workflow_head(self):
         payload = BytesIO()

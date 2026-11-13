@@ -18,6 +18,14 @@ static void ExpectContains(loom_value_facts_t facts, int64_t value) {
   EXPECT_LE(facts.range_lo, value);
   EXPECT_GE(facts.range_hi, value);
   EXPECT_EQ(value % facts.known_divisor, 0);
+  if (loom_value_facts_is_non_zero(facts)) {
+    EXPECT_NE(value, 0);
+  }
+  if (loom_value_facts_is_power_of_two(facts)) {
+    EXPECT_GT(value, 0);
+    EXPECT_EQ(static_cast<uint64_t>(value) & (static_cast<uint64_t>(value) - 1),
+              0);
+  }
 }
 
 TEST(UnsignedDivisionTransfer, RepresentativeIntervalsContainEveryResult) {
@@ -72,6 +80,36 @@ TEST(UnsignedDivisionTransfer, RepresentativeIntervalsContainEveryResult) {
         }
       }
     }
+  }
+}
+
+TEST(UnsignedDivisionTransfer, WideOperandEndpointsRetainTheirSignedDomain) {
+  const auto nonnegative = loom_value_facts_make(0, INT64_MAX, 1);
+  const auto positive = loom_value_facts_make(1, INT64_MAX, 1);
+  const auto high_bits = loom_value_facts_make(INT64_MIN, -1, 1);
+  loom_value_facts_t quotient;
+  loom_value_facts_t remainder;
+  loom_value_facts_divui(&nonnegative, &positive, 64, &quotient);
+  EXPECT_EQ(quotient.range_lo, 0);
+  EXPECT_EQ(quotient.range_hi, INT64_MAX);
+  loom_value_facts_remui(&nonnegative, &positive, 64, &remainder);
+  EXPECT_EQ(remainder.range_lo, 0);
+  EXPECT_EQ(remainder.range_hi, INT64_MAX - 1);
+
+  EXPECT_TRUE(loom_value_facts_remui_is_identity(nonnegative, high_bits, 64));
+  loom_value_facts_remui(&nonnegative, &high_bits, 64, &remainder);
+  EXPECT_TRUE(loom_value_facts_equal(remainder, nonnegative));
+  const auto two = loom_value_facts_exact_i64(2);
+  loom_value_facts_divui(&high_bits, &two, 64, &quotient);
+  EXPECT_EQ(quotient.range_lo, INT64_C(1) << 62);
+  EXPECT_EQ(quotient.range_hi, INT64_MAX);
+
+  const auto one = loom_value_facts_exact_i64(1);
+  for (const auto interval : {nonnegative, high_bits}) {
+    const auto preimage = loom_value_facts_quotient_preimage(
+        LOOM_VALUE_FACTS_QUOTIENT_DIVUI, 64, interval, one);
+    EXPECT_EQ(preimage.range_lo, interval.range_lo);
+    EXPECT_EQ(preimage.range_hi, interval.range_hi);
   }
 }
 
@@ -259,6 +297,65 @@ TEST(RemsiTransfer, MinimumDivisorHasRepresentableRemainderBounds) {
   EXPECT_EQ(out.range_hi, INT64_MAX);
 }
 
+TEST(RemsiTransfer, DynamicDivisorsPreserveDividendSign) {
+  for (const auto divisor :
+       {loom_value_facts_make(1, 64, 1), loom_value_facts_make(-64, -1, 1),
+        loom_value_facts_make(INT64_MIN, -1, 1)}) {
+    const int64_t bound = divisor.range_lo == INT64_MIN ? INT64_MAX : 63;
+    for (const auto dividend :
+         {loom_value_facts_make(0, INT64_MAX, 1),
+          loom_value_facts_make(INT64_MIN, 0, 1), loom_value_facts_unknown()}) {
+      loom_value_facts_t remainder;
+      loom_value_facts_remsi(&dividend, &divisor, &remainder);
+      EXPECT_EQ(remainder.range_lo, dividend.range_lo >= 0 ? 0 : -bound);
+      EXPECT_EQ(remainder.range_hi, dividend.range_hi <= 0 ? 0 : bound);
+    }
+  }
+}
+
+TEST(RemsiTransfer, RepresentativeIntervalsContainEveryResult) {
+  constexpr int64_t kEndpoints[] = {-8, -5, -1, 0, 1, 3, 7};
+  for (int64_t dividend_lower : kEndpoints) {
+    for (int64_t dividend_upper : kEndpoints) {
+      if (dividend_lower > dividend_upper) {
+        continue;
+      }
+      const auto dividend =
+          loom_value_facts_make(dividend_lower, dividend_upper, 1);
+      for (int64_t divisor_lower : kEndpoints) {
+        for (int64_t divisor_upper : kEndpoints) {
+          if (divisor_lower > divisor_upper) {
+            continue;
+          }
+          const auto divisor =
+              loom_value_facts_make(divisor_lower, divisor_upper, 1);
+          SCOPED_TRACE(::testing::Message()
+                       << "dividend=[" << dividend_lower << ","
+                       << dividend_upper << "] divisor=[" << divisor_lower
+                       << "," << divisor_upper << "]");
+          loom_value_facts_t remainder;
+          loom_value_facts_remsi(&dividend, &divisor, &remainder);
+          if (divisor_lower > 0 || divisor_upper < 0) {
+            if (dividend_lower >= 0) {
+              EXPECT_GE(remainder.range_lo, 0);
+            }
+            if (dividend_upper <= 0) {
+              EXPECT_LE(remainder.range_hi, 0);
+            }
+          }
+          for (int64_t lhs = dividend_lower; lhs <= dividend_upper; ++lhs) {
+            for (int64_t rhs = divisor_lower; rhs <= divisor_upper; ++rhs) {
+              if (rhs != 0) {
+                ExpectContains(remainder, lhs % rhs);
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
 TEST(QuotientPreimage, WideCarrierBoundaryPoints) {
   for (int32_t bit_count : {16, 32, 64}) {
     const auto domain = loom_value_facts_make_signed_bit_count_range(bit_count);
@@ -341,6 +438,57 @@ TEST(QuotientPreimage, RetainsRoundingResiduesAndWideEndpoints) {
     EXPECT_EQ(actual.range_lo, test.lower);
     EXPECT_EQ(actual.range_hi, test.upper);
   }
+}
+
+TEST(DivisionTransfer, PositivePowersAcrossCarriersAndAliases) {
+  for (int32_t bit_count : {8, 16, 32, 64}) {
+    const int32_t exponents[] = {0, 1, 2, bit_count - 3, bit_count - 2};
+    for (int32_t a : exponents) {
+      for (int32_t b : exponents) {
+        auto numerator = loom_value_facts_make(
+            INT64_C(1) << a, INT64_C(1) << (bit_count - 2), 1);
+        auto denominator = loom_value_facts_make(1, INT64_C(1) << b, 1);
+        numerator.flags |= LOOM_VALUE_FACT_POWER_OF_TWO;
+        denominator.flags |= LOOM_VALUE_FACT_POWER_OF_TWO;
+        for (bool unsigned_quotient : {false, true}) {
+          for (int output_index = 0; output_index < 3; ++output_index) {
+            loom_value_facts_t operands[] = {numerator, denominator,
+                                             loom_value_facts_unknown()};
+            if (unsigned_quotient) {
+              loom_value_facts_divui(&operands[0], &operands[1], bit_count,
+                                     &operands[output_index]);
+            } else {
+              loom_value_facts_divsi(&operands[0], &operands[1],
+                                     &operands[output_index]);
+            }
+            EXPECT_EQ(loom_value_facts_is_power_of_two(operands[output_index]),
+                      a >= b);
+            for (int32_t lhs_exponent : exponents) {
+              if (lhs_exponent < a) {
+                continue;
+              }
+              for (int32_t rhs_exponent : exponents) {
+                if (rhs_exponent > b) {
+                  continue;
+                }
+                ExpectContains(operands[output_index],
+                               (INT64_C(1) << lhs_exponent) /
+                                   (INT64_C(1) << rhs_exponent));
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  const auto unknown_power = loom_value_facts_make(1, 4, 1);
+  auto powers = loom_value_facts_make(4, 16, 1);
+  powers.flags |= LOOM_VALUE_FACT_POWER_OF_TWO;
+  loom_value_facts_t result;
+  loom_value_facts_divsi(&powers, &unknown_power, &result);
+  EXPECT_FALSE(loom_value_facts_is_power_of_two(result));
+  loom_value_facts_divui(&powers, &unknown_power, 8, &result);
+  EXPECT_FALSE(loom_value_facts_is_power_of_two(result));
 }
 
 }  // namespace

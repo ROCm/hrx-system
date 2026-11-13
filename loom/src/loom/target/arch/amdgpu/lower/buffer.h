@@ -17,6 +17,17 @@
 extern "C" {
 #endif
 
+// Tests the nullability proof retained by source value analysis.
+bool loom_amdgpu_buffer_is_null(loom_low_lower_context_t* context,
+                                loom_value_id_t source_value);
+
+// Materializes semantic null in a receiving buffer carrier. Global addresses
+// use 64-bit zero; private/workgroup segment offsets use 32-bit all-ones.
+iree_status_t loom_amdgpu_emit_buffer_null(loom_low_lower_context_t* context,
+                                           const loom_op_t* source_op,
+                                           loom_type_t result_type,
+                                           loom_value_id_t* out_value);
+
 // Selects a plan for buffer construction source ops.
 iree_status_t loom_amdgpu_select_buffer_plan(loom_low_lower_context_t* context,
                                              const loom_op_t* source_op,

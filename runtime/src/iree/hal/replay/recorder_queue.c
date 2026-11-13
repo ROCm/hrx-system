@@ -391,7 +391,6 @@ static iree_status_t iree_hal_replay_recorder_queue_analyze_transfer(
         if (operation->upload.length == 0) {
           break;
         }
-        can_record &= wait_semaphore_list.count == 0;
         can_record &= iree_hal_replay_recorder_queue_has_captured_buffer(
             queue->recorder, operation->upload.target_buffer);
         operation_data_length = (iree_host_size_t)operation->upload.length;
@@ -1429,9 +1428,8 @@ static iree_status_t iree_hal_replay_recorder_queue_alloca(
       storage.replay_buffers[i] =
           iree_hal_replay_recorder_buffer_initialize_proxy(
               queue->recorder, queue->device_id, buffer_id,
-              IREE_HAL_REPLAY_OBJECT_ID_NONE, queue->placement_device,
-              storage.base_buffers[i], queue->host_allocator,
-              storage.proxy_buffers[i]);
+              queue->placement_device, storage.base_buffers[i],
+              queue->host_allocator, storage.proxy_buffers[i]);
       storage.proxy_buffers[i] = NULL;
       if (can_record) {
         iree_hal_replay_recorder_buffer_make_object_payload(

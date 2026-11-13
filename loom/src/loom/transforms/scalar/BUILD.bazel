@@ -24,6 +24,8 @@ loom_cc_library(
         "//loom/src/loom/rewrite:pattern_registry",
         "//loom/src/loom/rewrite:rewriter",
         "//loom/src/loom/transforms/conversion:chain",
+        "//loom/src/loom/util:fact_table_api",
+        "//loom/src/loom/util:predicate_facts",
         "//runtime/src/iree/base",
     ],
 )
@@ -59,27 +61,41 @@ loom_cc_library(
 )
 
 loom_cc_library(
-    name = "target_legalization",
-    srcs = ["target_legalization.c"],
-    hdrs = ["target_legalization.h"],
+    name = "division_refinement",
+    srcs = ["division_refinement.c"],
+    hdrs = ["division_refinement.h"],
     deps = [
-        ":combine_patterns",
         "//loom/src/loom/ir",
+        "//loom/src/loom/ops:headers",
         "//loom/src/loom/ops/scalar",
-        "//loom/src/loom/ops/scf",
-        "//loom/src/loom/rewrite:rewriter",
-        "//loom/src/loom/target:legalization",
-        "//loom/src/loom/util:numeric_format",
         "//loom/src/loom/util:predicate_facts",
         "//runtime/src/iree/base",
     ],
 )
 
 loom_cc_library(
-    name = "wide_remainder_legalization",
-    srcs = ["wide_remainder_legalization.c"],
-    hdrs = ["wide_remainder_legalization.h"],
+    name = "target_legalization",
+    srcs = ["target_legalization.c"],
+    hdrs = ["target_legalization.h"],
     deps = [
+        ":combine_patterns",
+        ":division_refinement",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/scalar",
+        "//loom/src/loom/ops/scf",
+        "//loom/src/loom/rewrite:rewriter",
+        "//loom/src/loom/target:legalization",
+        "//loom/src/loom/util:numeric_format",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "wide_division_legalization",
+    srcs = ["wide_division_legalization.c"],
+    hdrs = ["wide_division_legalization.h"],
+    deps = [
+        ":division_refinement",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/index",
         "//loom/src/loom/ops/scalar",
@@ -87,6 +103,7 @@ loom_cc_library(
         "//loom/src/loom/rewrite:rewriter",
         "//loom/src/loom/target:legalization",
         "//loom/src/loom/util:fact_table",
+        "//loom/src/loom/util:predicate_facts",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
     ],

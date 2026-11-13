@@ -148,12 +148,12 @@ void Pm4MappingFixture::Prepare(amdf_memory_scope_t* scope,
   };
   ASSERT_NO_FATAL_FAILURE(PrepareProgram(
       kernel->executable, kernel->entry_byte_offset, &program_, "mapping"));
-  ASSERT_NO_FATAL_FAILURE(CreateQueue(&queue_, command_byte_length));
+  ASSERT_NO_FATAL_FAILURE(CreateQueue(command_byte_length, &queue_));
 }
 
 void Pm4MappingFixture::CreateBacking(uint64_t byte_length,
-                                      GpuMemory** out_memory,
-                                      amdf_device_t* consumer) {
+                                      amdf_device_t* consumer,
+                                      GpuMemory** out_memory) {
   if (consumer == nullptr) {
     consumer = device_;
   }
@@ -405,10 +405,16 @@ void Pm4MappingFixture::RunRetainedSparse(
       };
   const auto original_batch = make_batch(original);
   const auto replacement_batch = make_batch(replacement);
-  const auto direct_batch = make_batch(direct);
+  auto direct_batch = make_batch(direct);
+  for (size_t i = 0; i < direct_batch.size(); ++i) {
+    for (size_t j = 0; j < direct_batch[i].size(); ++j) {
+      direct_batch[i][j].previous_memory = replacement_batch[i][j].memory;
+    }
+  }
   auto detach_batch = original_batch;
   for (auto& projection : detach_batch) {
     for (auto& entry : projection) {
+      entry.previous_memory = entry.memory;
       entry.memory = nullptr;
       entry.access = 0;
     }

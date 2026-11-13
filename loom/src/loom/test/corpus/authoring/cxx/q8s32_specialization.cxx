@@ -21,8 +21,9 @@ q8s32_specialize(
       loom::assume_aligned(64)]] const Q8S32BFloat16* activations,
     [[loom::noalias, loom::assume_aligned(64)]] const std::bfloat16_t* scale,
     [[loom::noalias, loom::assume_aligned(64)]] float* output) {
-  float result = q8s32_project(q8s32_input_capacity, weights[0], weights[1],
-                               activations[0], activations[1], *scale);
+  float result = loom::template_apply<q8s32_project>(
+      q8s32_input_capacity, weights[0], weights[1], activations[0],
+      activations[1], *scale);
   if (loom::kernel::subgroup::lane_id() == 0) {
     *output = result;
   }

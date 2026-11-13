@@ -758,7 +758,18 @@ loom_low_lower_rule_materialize_source_memory_address_coordinate_value(
       loom_module_value_type(module, source_value_id);
   loom_value_id_t low_value_id =
       loom_low_lower_lookup_value(context, source_value_id);
-  const loom_scalar_type_t scalar_type = loom_type_element_type(source_type);
+  loom_scalar_type_t scalar_type = loom_type_element_type(source_type);
+  if (scalar_type == LOOM_SCALAR_TYPE_INDEX) {
+    // A typed Low register retains the producer's chosen index carrier.
+    // Consume that numeric type through the same declared conversions as
+    // fixed-width source integers, without recovering ranges during emission.
+    const loom_type_t* payload = loom_type_register_value_type(
+        loom_module_value_type(module, low_value_id));
+    if (payload &&
+        loom_scalar_type_is_integer(loom_type_element_type(*payload))) {
+      scalar_type = loom_type_element_type(*payload);
+    }
+  }
   if (loom_scalar_type_is_integer(scalar_type)) {
     return loom_low_lower_rule_source_memory_convert_integer(
         context, rule_set,
@@ -902,8 +913,10 @@ loom_low_lower_rule_materialize_source_memory_complete_coordinate(
       source_memory_access->dynamic_view_base_term_count != 0 &&
       source_memory_access->dynamic_view_base_value_id !=
           LOOM_VALUE_ID_INVALID) {
-    accumulator = loom_low_lower_lookup_value(
-        context, source_memory_access->dynamic_view_base_value_id);
+    IREE_RETURN_IF_ERROR(
+        loom_low_lower_rule_materialize_source_memory_address_coordinate_value(
+            context, rule_set, source_op, materializer,
+            source_memory_access->dynamic_view_base_value_id, &accumulator));
     first_canonical_term = source_memory_access->dynamic_view_base_term_count;
     const bool subtracted_view_base = iree_checked_sub_i64(
         static_byte_offset,
@@ -988,7 +1001,8 @@ iree_status_t loom_low_lower_rule_materialize_source_memory_address(
       materializer->base_kind == LOOM_LOW_LOWER_SOURCE_MEMORY_ADDRESS_BASE_VIEW
           ? loom_low_source_memory_access_base_view_value_id(
                 source_memory_access)
-          : source_memory_access->root_value_id;
+          : loom_low_source_memory_access_address_value_id(
+                source_memory_access);
   base = loom_low_lower_lookup_value(context, source_base);
   loom_value_id_t coordinate = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(

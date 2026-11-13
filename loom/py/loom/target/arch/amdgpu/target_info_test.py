@@ -36,6 +36,7 @@ from loom.target.arch.amdgpu.target_info import (
     AMDGPU_DESCRIPTOR_SET_INFOS,
     AMDGPU_GENERIC_MATRIX_FEATURE_EXCLUSIONS,
     AMDGPU_INSTRUCTION_CONSTRAINT_DS_PAIRED_ADDRESS_ALIGNMENT,
+    AMDGPU_INSTRUCTION_CONSTRAINT_DS_PERMUTE_HALF_WAVE,
     AMDGPU_INSTRUCTION_CONSTRAINT_KNOWN_BITS,
     AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX9_4_GENERIC,
     AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX940,
@@ -719,6 +720,23 @@ def test_instruction_constraints_are_attached_to_canonical_targets() -> None:
         amdgpu_target_instruction_constraints(gfx12_5_generic_target, gfx12_5_generic)
         == 0
     )
+
+
+def test_ds_permute_scope_is_independent_of_default_wave_size() -> None:
+    processors = {info.processor: info for info in AMDGPU_PROCESSOR_INFOS}
+    for target in AMDGPU_TARGET_INFOS:
+        processor = processors[target.processor]
+        constraints = amdgpu_target_instruction_constraints(target, processor)
+        # GFX117x retains the GFX11 DS domain despite using GFX12 matrix layouts.
+        # Generic code objects inherit the restriction from their members.
+        half_wave = processor.processor.startswith(("gfx10", "gfx11"))
+        assert (
+            bool(constraints & AMDGPU_INSTRUCTION_CONSTRAINT_DS_PERMUTE_HALF_WAVE)
+            == half_wave
+        ), target.target
+
+    assert processors["gfx1151"].wavefront.default_size == 32
+    assert processors["gfx1200"].wavefront.default_size == 32
 
 
 def test_lds_bank_service_models_are_structural_target_data() -> None:

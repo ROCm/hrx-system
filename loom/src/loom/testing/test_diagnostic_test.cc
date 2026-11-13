@@ -93,6 +93,35 @@ TEST_F(TestDiagnosticTest, MatchesPublicDiagnosticCode) {
       &diagnostic, &annotation, IREE_SV("case.loom-test")));
 }
 
+TEST_F(TestDiagnosticTest, MatchesExportContext) {
+  loom_test_diagnostic_t diagnostic = {
+      .severity = LOOM_DIAGNOSTIC_ERROR,
+      .domain = LOOM_ERROR_DOMAIN_SUBRANGE,
+      .code = 26,
+      .export_name = IREE_SV("failing_export"),
+  };
+  diagnostic.origin.filename = IREE_SV("case.loom-test");
+  diagnostic.origin.line = 3;
+
+  loom_test_annotation_t annotation = {
+      .param_match_count = 1,
+      .severity = LOOM_DIAGNOSTIC_ERROR,
+      .domain = LOOM_ERROR_DOMAIN_SUBRANGE,
+      .code = 26,
+      .target_line = 3,
+  };
+  annotation.param_matches[0] = {
+      .name = IREE_SV("export"),
+      .value = IREE_SV("failing_export"),
+  };
+  EXPECT_TRUE(loom_test_diagnostic_matches_annotation(
+      &diagnostic, &annotation, IREE_SV("case.loom-test")));
+
+  annotation.param_matches[0].value = IREE_SV("other_export");
+  EXPECT_FALSE(loom_test_diagnostic_matches_annotation(
+      &diagnostic, &annotation, IREE_SV("case.loom-test")));
+}
+
 TEST_F(TestDiagnosticTest, FindsMaximumOneToOneMatching) {
   loom_test_diagnostic_t diagnostics[2] = {};
   diagnostics[0].severity = LOOM_DIAGNOSTIC_ERROR;

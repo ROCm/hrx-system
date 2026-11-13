@@ -406,19 +406,28 @@ void loom_value_facts_eval_float_conversion(
         result_type, result_type, out_result_facts, out_result_facts);
   }
 
+  // A format's smallest nonzero value bounds every conversion result away
+  // from destination subnormals when the destination has enough exponent
+  // range. Flushing only adds signed zero, which is not subnormal either.
+  loom_float_exact_format_t source_format;
+  loom_float_exact_format_t result_format;
+  if (loom_float_exact_format(source_type, &source_format) &&
+      loom_float_exact_format(result_type, &result_format) &&
+      source_format.minimum_normal_exponent - (source_format.precision - 1) >=
+          result_format.minimum_normal_exponent) {
+    out_result_facts->flags |= LOOM_VALUE_FACT_NOT_SUBNORMAL;
+  }
+
   loom_scalar_type_set_t result_exact_types =
       loom_value_facts_exact_float_types(*out_result_facts) |
       loom_float_type_exact_destinations(result_type);
   const loom_scalar_type_set_t source_exact_types =
       loom_value_facts_exact_float_types(*input_facts) |
       loom_float_type_exact_destinations(source_type);
-  const bool preserves_input_value =
-      loom_scalar_type_set_contains(source_exact_types, result_type) &&
-      (!policy.may_flush_input_subnormal ||
-       loom_value_facts_is_not_subnormal(*input_facts)) &&
-      (!policy.may_flush_result_subnormal ||
-       loom_value_facts_is_not_subnormal(*out_result_facts));
-  if (preserves_input_value) {
+  // Flushing may change a lane's value, but signed zero is representable in
+  // every supported float format. An otherwise exact conversion therefore
+  // retains its source formats without proving an exact source-lane identity.
+  if (loom_scalar_type_set_contains(source_exact_types, result_type)) {
     result_exact_types |= source_exact_types;
   }
   loom_value_facts_add_exact_float_types(out_result_facts, result_exact_types);

@@ -27,7 +27,7 @@ static bool loom_amdgpu_kernel_record_has_abi_source(
 
 static iree_status_t loom_amdgpu_kernel_record_concat3(
     iree_string_view_t a, iree_string_view_t b, iree_string_view_t c,
-    iree_string_view_t* out_value, iree_arena_allocator_t* arena) {
+    iree_arena_allocator_t* arena, iree_string_view_t* out_value) {
   *out_value = iree_string_view_empty();
   iree_host_size_t prefix_length = 0;
   iree_host_size_t length = 0;
@@ -249,8 +249,8 @@ static iree_status_t loom_amdgpu_kernel_record_collect_descriptor_flags(
 
 static iree_status_t loom_amdgpu_kernel_record_build_metadata_arguments(
     const loom_amdgpu_hal_kernel_abi_layout_t* abi_layout,
-    const loom_amdgpu_metadata_argument_t** out_arguments,
-    iree_arena_allocator_t* arena) {
+    iree_arena_allocator_t* arena,
+    const loom_amdgpu_metadata_argument_t** out_arguments) {
   *out_arguments = NULL;
   const iree_host_size_t argument_count = abi_layout->parameter_count;
   if (argument_count == 0) {
@@ -314,8 +314,8 @@ iree_status_t loom_amdgpu_kernel_record_build(
     const loom_low_allocation_table_t* allocation,
     const loom_amdgpu_storage_layout_t* storage_layout,
     const loom_amdgpu_kernel_record_options_t* options,
-    loom_amdgpu_kernel_record_t* out_record,
-    iree_arena_allocator_t* scratch_arena) {
+    iree_arena_allocator_t* scratch_arena,
+    loom_amdgpu_kernel_record_t* out_record) {
   *out_record = (loom_amdgpu_kernel_record_t){0};
   loom_amdgpu_native_preflight_t derived_preflight = {0};
   const loom_amdgpu_native_preflight_t* preflight = options->preflight;
@@ -355,8 +355,8 @@ iree_status_t loom_amdgpu_kernel_record_build(
     }
   } else {
     IREE_RETURN_IF_ERROR(loom_amdgpu_hal_kernel_abi_layout_from_low(
-        schedule->module, schedule->function_op, &derived_abi_layout,
-        scratch_arena));
+        schedule->module, schedule->function_op, scratch_arena,
+        &derived_abi_layout));
     abi_layout = &derived_abi_layout;
   }
 
@@ -401,8 +401,8 @@ iree_status_t loom_amdgpu_kernel_record_build(
   }
   const loom_amdgpu_kernel_entry_envelope_t* entry_envelope = NULL;
   IREE_RETURN_IF_ERROR(loom_amdgpu_kernel_entry_envelope_build(
-      &processor->properties, abi_verify, private_segment_size, &entry_envelope,
-      scratch_arena));
+      &processor->properties, abi_verify, private_segment_size, scratch_arena,
+      &entry_envelope));
   if (private_segment_size != 0 &&
       loom_amdgpu_processor_properties_kernel_descriptor_has_flags(
           &processor->properties,
@@ -446,12 +446,12 @@ iree_status_t loom_amdgpu_kernel_record_build(
 
   iree_string_view_t descriptor_symbol = iree_string_view_empty();
   IREE_RETURN_IF_ERROR(loom_amdgpu_kernel_record_concat3(
-      symbol, IREE_SV(".kd"), iree_string_view_empty(), &descriptor_symbol,
-      scratch_arena));
+      symbol, IREE_SV(".kd"), iree_string_view_empty(), scratch_arena,
+      &descriptor_symbol));
 
   const loom_amdgpu_metadata_argument_t* arguments = NULL;
   IREE_RETURN_IF_ERROR(loom_amdgpu_kernel_record_build_metadata_arguments(
-      abi_layout, &arguments, scratch_arena));
+      abi_layout, scratch_arena, &arguments));
   const bool has_required_workgroup_size =
       loom_target_workgroup_size_is_concrete(
           &hal_kernel->required_workgroup_size);

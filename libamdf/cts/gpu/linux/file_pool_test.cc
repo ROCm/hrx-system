@@ -290,8 +290,9 @@ class GpuFilePoolTest : public DispatchTest {
 
   void PrepareDispatch() {
     ASSERT_NO_FATAL_FAILURE(this->CreateMemory(
-        kReadWrite, 4096, &control_,
-        AMDF_MEMORY_FLAG_HOST_COHERENT | AMDF_MEMORY_FLAG_QUEUE_STORAGE));
+        kReadWrite, 4096,
+        AMDF_MEMORY_FLAG_HOST_COHERENT | AMDF_MEMORY_FLAG_QUEUE_STORAGE,
+        &control_));
     std::memset(control_->host.pointer, 0, control_->info.byte_length);
     if constexpr (!kSdma) {
       kernel_ = kernels::transform::kKernels.Find(this->gpu_endpoint_info_);
@@ -455,6 +456,9 @@ class GpuFilePoolTest : public DispatchTest {
               .memory = pool_.memory,
               .access = AMDF_MEMORY_ACCESS_READ,
               .source_byte_offset = input_slot * kUnit,
+              .previous_memory = generation ? pool_.memory : nullptr,
+              .previous_source_byte_offset =
+                  generation ? (1 + 2 * ((generation - 1) % 2)) * kUnit : 0,
           },
           {
               .target_byte_offset = kUnit,
@@ -462,6 +466,9 @@ class GpuFilePoolTest : public DispatchTest {
               .memory = pool_.memory,
               .access = kReadWrite,
               .source_byte_offset = output_slot * kUnit,
+              .previous_memory = generation ? pool_.memory : nullptr,
+              .previous_source_byte_offset =
+                  generation ? (5 + 2 * ((generation - 1) % 2)) * kUnit : 0,
           },
       }};
       ASSERT_EQ(this->api_->memory_reservation_update(
@@ -603,6 +610,9 @@ class GpuFilePoolTest : public DispatchTest {
               .memory = ordinary_.memory,
               .access = kReadWrite,
               .source_byte_offset = target_slot * kUnit,
+              .previous_memory = generation ? ordinary_.memory : nullptr,
+              .previous_source_byte_offset =
+                  generation ? (1 + 4 * (generation - 1)) * kUnit : 0,
           },
           {
               .target_byte_offset = kUnit,
@@ -610,6 +620,9 @@ class GpuFilePoolTest : public DispatchTest {
               .memory = ordinary_.memory,
               .access = AMDF_MEMORY_ACCESS_READ,
               .source_byte_offset = target_slot * kUnit,
+              .previous_memory = generation ? ordinary_.memory : nullptr,
+              .previous_source_byte_offset =
+                  generation ? (1 + 4 * (generation - 1)) * kUnit : 0,
           },
       }};
       ASSERT_EQ(this->api_->memory_reservation_update(
@@ -810,6 +823,8 @@ class GpuFilePoolTest : public DispatchTest {
               .memory = forward ? shared_memory_ : pool_.memory,
               .access = AMDF_MEMORY_ACCESS_READ,
               .source_byte_offset = input_slot * kUnit,
+              .previous_memory = forward ? nullptr : shared_memory_,
+              .previous_source_byte_offset = forward ? 0 : 2 * kUnit,
           },
           {
               .target_byte_offset = kUnit,
@@ -817,6 +832,8 @@ class GpuFilePoolTest : public DispatchTest {
               .memory = forward ? pool_.memory : shared_memory_,
               .access = kReadWrite,
               .source_byte_offset = output_slot * kUnit,
+              .previous_memory = forward ? nullptr : pool_.memory,
+              .previous_source_byte_offset = forward ? 0 : 3 * kUnit,
           },
       }};
       ASSERT_EQ(this->api_->memory_reservation_update(

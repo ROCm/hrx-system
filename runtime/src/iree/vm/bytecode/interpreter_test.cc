@@ -225,6 +225,79 @@ TEST_F(BytecodeInterpreterTest, ExecutesBufferAndLocalMemoryRoundTrip) {
   iree_vm_buffer_release(buffer);
 }
 
+TEST_F(BytecodeInterpreterTest, ComparesBufferPositionsThroughOpaqueRefs) {
+  std::array<uint8_t, 16> bytes = {};
+  iree_vm_buffer_t* roots[2] = {};
+  for (size_t i = 0; i < IREE_ARRAYSIZE(roots); ++i) {
+    IREE_ASSERT_OK(iree_vm_buffer_wrap(
+        i == 0 ? IREE_VM_BUFFER_ACCESS_FLAG_READ
+               : IREE_VM_BUFFER_ACCESS_FLAG_WRITE,
+        iree_make_byte_span(bytes.data() + i * 4, bytes.size() - i * 4),
+        iree_vm_buffer_release_callback_null(), iree_allocator_system(),
+        &roots[i]));
+  }
+  for (int64_t left = 0; left <= 16; ++left) {
+    for (int64_t right = 0; right <= 12; ++right) {
+      iree_vm_variant_t arguments[] = {
+          iree_vm_buffer_variant_from_ptr_borrowed(&types_, roots[0]),
+          iree_vm_variant_from_i64(left),
+          iree_vm_buffer_variant_from_ptr_borrowed(&types_, roots[1]),
+          iree_vm_variant_from_i64(right),
+      };
+      iree_vm_variant_t results[2] = {};
+      IREE_ASSERT_OK(iree_vm_invoke(invocation_,
+                                    LookupFunction(IREE_SV("positions")),
+                                    iree_vm_variant_span_from_array(arguments),
+                                    iree_vm_variant_span_from_array(results)));
+      ExpectI32(results[0], left == right + 4);
+      ExpectI32(results[1], left != right + 4);
+    }
+  }
+
+  for (int64_t invalid : {INT64_C(17), INT64_MAX, INT64_C(-1)}) {
+    iree_vm_variant_t arguments[] = {
+        iree_vm_buffer_variant_from_ptr_borrowed(&types_, roots[0]),
+        iree_vm_variant_from_i64(invalid),
+        iree_vm_buffer_variant_from_ptr_borrowed(&types_, roots[1]),
+        iree_vm_variant_from_i64(0),
+    };
+    iree_vm_variant_t results[2] = {};
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_OUT_OF_RANGE,
+        iree_vm_invoke(invocation_, LookupFunction(IREE_SV("positions")),
+                       iree_vm_variant_span_from_array(arguments),
+                       iree_vm_variant_span_from_array(results)));
+  }
+  iree_vm_buffer_release(roots[1]);
+  iree_vm_buffer_release(roots[0]);
+}
+
+TEST_F(BytecodeInterpreterTest, ComparesNullAndEmptyBufferPositions) {
+  iree_vm_buffer_t* empty = nullptr;
+  IREE_ASSERT_OK(iree_vm_buffer_wrap(
+      IREE_VM_BUFFER_ACCESS_FLAG_READ, iree_byte_span_empty(),
+      iree_vm_buffer_release_callback_null(), iree_allocator_system(), &empty));
+  const std::array<iree_vm_buffer_t*, 2> buffers = {nullptr, empty};
+  for (auto* left : buffers) {
+    for (auto* right : buffers) {
+      iree_vm_variant_t arguments[] = {
+          iree_vm_buffer_variant_from_ptr_borrowed(&types_, left),
+          iree_vm_variant_from_i64(0),
+          iree_vm_buffer_variant_from_ptr_borrowed(&types_, right),
+          iree_vm_variant_from_i64(0),
+      };
+      iree_vm_variant_t results[2] = {};
+      IREE_ASSERT_OK(iree_vm_invoke(invocation_,
+                                    LookupFunction(IREE_SV("positions")),
+                                    iree_vm_variant_span_from_array(arguments),
+                                    iree_vm_variant_span_from_array(results)));
+      ExpectI32(results[0], left == right);
+      ExpectI32(results[1], left != right);
+    }
+  }
+  iree_vm_buffer_release(empty);
+}
+
 TEST_F(BytecodeInterpreterTest, TransfersValueOverflowAcrossNestedCall) {
   std::array<iree_vm_variant_t, 17> arguments = {};
   std::array<iree_vm_variant_t, 17> results = {};

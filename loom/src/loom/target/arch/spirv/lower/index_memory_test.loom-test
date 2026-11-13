@@ -1,0 +1,52 @@
+// RUN: pass source-to-low{control-flow=structured-low}
+
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @storage_buffer_i32_accepts_wide_index(%input: buffer, %element0: index) -> (i32) where [range(%element0, 0, 2147483648)] {
+  %input_base = index.constant 0 : offset
+  %element = index.assume %element0 [range(%element0, 0, 2147483648)] : index
+  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
+  %input_view = buffer.view %input_aligned[%input_base] : buffer -> view<2147483649xi32>
+  %loaded = view.load %input_view[%element] : view<2147483649xi32> -> i32
+  func.return %loaded : i32
+}
+
+// ----
+spirv.target<vulkan1_3> @target
+
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @storage_buffer_i32_accepts_wide_index(%input_aligned: reg<spirv.ptr.storage_buffer>, %element: reg<spirv.id : i64>) -> (reg<spirv.id : i32>) where [range(%element, 0, 2147483648)] asm {
+  %11 = OpBitcast.i64.offset64 %element
+  %12 = OpConstant.offset64 4
+  %13 = OpIMul.offset64 %11, %12
+  %14 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input_aligned, %13
+  %loaded = OpLoad.storage_buffer.i32 %14
+  return %loaded
+}
+
+// ====
+
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @storage_buffer_i32_accepts_wide_dynamic_stride(%input: buffer, %columns0: index, %row0: index) -> (i32) where [range(%columns0, 1, 2147483648)] {
+  %input_base = index.constant 0 : offset
+  %columns = index.assume %columns0 [range(%columns0, 1, 2147483648)] : index
+  %row = index.assume %row0 [range(%row0, 0, 3)] : index
+  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
+  %input_view = buffer.view %input_aligned[%input_base] : buffer -> view<4x[%columns]xi32>
+  %loaded = view.load %input_view[%row, 0] : view<4x[%columns]xi32> -> i32
+  func.return %loaded : i32
+}
+
+// ----
+spirv.target<vulkan1_3> @target
+
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @storage_buffer_i32_accepts_wide_dynamic_stride(%input_aligned: reg<spirv.ptr.storage_buffer>, %columns: reg<spirv.id : i64>, %row: reg<spirv.id : index>) -> (reg<spirv.id : i32>) where [range(%columns, 1, 2147483648)] asm {
+  %14 = OpSConvert.i32.offset64 %row
+  %15 = OpBitcast.i64.offset64 %columns
+  %16 = OpIMul.offset64 %14, %15
+  %17 = OpConstant.offset64 4
+  %18 = OpIMul.offset64 %16, %17
+  %19 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input_aligned, %18
+  %loaded = OpLoad.storage_buffer.i32 %19
+  return %loaded
+}

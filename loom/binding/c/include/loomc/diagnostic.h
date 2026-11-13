@@ -107,6 +107,10 @@ typedef struct loomc_diagnostic_t {
   /// Stable diagnostic code.
   loomc_string_view_t code;
 
+  /// Stable name of the export whose compilation emitted this diagnostic, or
+  /// an empty view when the diagnostic is not scoped to an export.
+  loomc_string_view_t export_name;
+
   /// Human-readable rendered message.
   loomc_string_view_t message;
 

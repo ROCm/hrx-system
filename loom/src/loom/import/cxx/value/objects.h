@@ -31,7 +31,7 @@ class Objects {
              cxx::AST* owner);
   // Applies the enclosing object's observation qualifier to a source member.
   const cxx::Type* member_type(const cxx::Type* object_type,
-                               cxx::FieldSymbol* field) const;
+                               cxx::Symbol* field) const;
 
  private:
   void load_components(StorageProjection object, const cxx::Type* type,

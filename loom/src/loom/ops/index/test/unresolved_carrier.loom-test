@@ -1,0 +1,113 @@
+// RUN: pass canonicalize
+
+// Positive high-bit coordinates need a signed-capable carrier for min/max and
+// ordering even when their bits would fit one unsigned native word.
+test.target<low_core> @target {index_bitwidth = 32}
+
+func.def target(@target) @positive_high_bit(%input: index) -> (i64, i64, i64, i64, i1) {
+  %coordinate = index.assume %input [range(%input, 1073741823, 1073741825)] : index
+  %factor = index.constant 3 : index
+  %c1 = index.constant 1 : index
+  %product = index.mul %coordinate, %factor : index
+  %minimum = index.min %product, %c1 : index
+  %maximum = index.max %product, %c1 : index
+  %minimum_lo = test.fact_range_lo %minimum : index -> i64
+  %minimum_hi = test.fact_range_hi %minimum : index -> i64
+  %maximum_lo = test.fact_range_lo %maximum : index -> i64
+  %maximum_hi = test.fact_range_hi %maximum : index -> i64
+  %less = index.cmp slt, %product, %c1 : index
+  func.return %minimum_lo, %minimum_hi, %maximum_lo, %maximum_hi, %less : i64, i64, i64, i64, i1
+}
+
+// ----
+test.target<low_core> @target {index_bitwidth = 32}
+
+func.def target(@target) @positive_high_bit(%input: index) -> (i64, i64, i64, i64, i1) {
+  %minimum_lo = scalar.constant 1 : i64
+  %minimum_hi = scalar.constant 1 : i64
+  %maximum_lo = scalar.constant 3221225469 : i64
+  %maximum_hi = scalar.constant 3221225475 : i64
+  %less = scalar.constant false : i1
+  func.return %minimum_lo, %minimum_hi, %maximum_lo, %maximum_hi, %less : i64, i64, i64, i64, i1
+}
+
+// ====
+
+// A bounded shift can overflow the fact carrier without narrowing the value.
+// Later shifts and selections cannot publish native-width bounds, and
+// comparison against all native bits set is not universally true.
+test.target<low_core> @target {index_bitwidth = 32}
+
+func.def target(@target) @unresolved(%input: index, %amount_input: index) -> (i64, i64, i64, i64, i64, i64, i1) {
+  %coordinate = index.assume %input [range(%input, 0, 2147483646)] : index
+  %amount = index.assume %amount_input [range(%amount_input, 0, 40)] : index
+  %factor = index.constant 10 : index
+  %c1 = index.constant 1 : index
+  %native_bits = index.constant 4294967295 : index
+  %wide = index.mul %coordinate, %factor : index
+  %shifted = index.shli %wide, %amount : index
+  %half = index.shrui %shifted, %c1 : index
+  %small = index.min %shifted, %c1 : index
+  %large = index.max %shifted, %c1 : index
+  %half_lo = test.fact_range_lo %half : index -> i64
+  %half_hi = test.fact_range_hi %half : index -> i64
+  %small_lo = test.fact_range_lo %small : index -> i64
+  %small_hi = test.fact_range_hi %small : index -> i64
+  %large_lo = test.fact_range_lo %large : index -> i64
+  %large_hi = test.fact_range_hi %large : index -> i64
+  %fits_native_bits = index.cmp ule, %shifted, %native_bits : index
+  func.return %half_lo, %half_hi, %small_lo, %small_hi, %large_lo, %large_hi, %fits_native_bits : i64, i64, i64, i64, i64, i64, i1
+}
+
+// ----
+test.target<low_core> @target {index_bitwidth = 32}
+
+func.def target(@target) @unresolved(%input: index, %amount_input: index) -> (i64, i64, i64, i64, i64, i64, i1) {
+  %coordinate = index.assume %input [range(%input, 0, 2147483646)] : index
+  %amount = index.assume %amount_input [range(%amount_input, 0, 40)] : index
+  %factor = index.constant 10 : index
+  %native_bits = index.constant 4294967295 : index
+  %wide = index.mul %coordinate, %factor : index
+  %shifted = index.shli %wide, %amount : index
+  %half_lo = scalar.constant -9223372036854775808 : i64
+  %half_hi = scalar.constant 9223372036854775807 : i64
+  %small_lo = scalar.constant -9223372036854775808 : i64
+  %small_hi = scalar.constant 9223372036854775807 : i64
+  %large_lo = scalar.constant -9223372036854775808 : i64
+  %large_hi = scalar.constant 9223372036854775807 : i64
+  %fits_native_bits = index.cmp ule, %shifted, %native_bits : index
+  func.return %half_lo, %half_hi, %small_lo, %small_hi, %large_lo, %large_hi, %fits_native_bits : i64, i64, i64, i64, i64, i64, i1
+}
+
+// ====
+
+// An established native source retains its ordinary shift and selection facts.
+// An unsigned comparison with a positive high-bit peer requires the wider
+// carrier, so negative native inputs prevent the comparison from folding.
+test.target<low_core> @target {index_bitwidth = 32}
+
+func.def target(@target) @native(%input: index) -> (i64, i64, i64, i64, i1) {
+  %c1 = index.constant 1 : index
+  %native_bits = index.constant 4294967295 : index
+  %half = index.shrui %input, %c1 : index
+  %small = index.min %input, %c1 : index
+  %half_lo = test.fact_range_lo %half : index -> i64
+  %half_hi = test.fact_range_hi %half : index -> i64
+  %small_lo = test.fact_range_lo %small : index -> i64
+  %small_hi = test.fact_range_hi %small : index -> i64
+  %fits_native_bits = index.cmp ule, %input, %native_bits : index
+  func.return %half_lo, %half_hi, %small_lo, %small_hi, %fits_native_bits : i64, i64, i64, i64, i1
+}
+
+// ----
+test.target<low_core> @target {index_bitwidth = 32}
+
+func.def target(@target) @native(%input: index) -> (i64, i64, i64, i64, i1) {
+  %native_bits = index.constant 4294967295 : index
+  %half_lo = scalar.constant 0 : i64
+  %half_hi = scalar.constant 2147483647 : i64
+  %small_lo = scalar.constant -2147483648 : i64
+  %small_hi = scalar.constant 1 : i64
+  %fits_native_bits = index.cmp ule, %input, %native_bits : index
+  func.return %half_lo, %half_hi, %small_lo, %small_hi, %fits_native_bits : i64, i64, i64, i64, i1
+}

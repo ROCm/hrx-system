@@ -620,10 +620,11 @@ typedef enum iree_hal_transfer_operation_type_t {
   // Copies between two device buffer ranges.
   IREE_HAL_TRANSFER_OPERATION_TYPE_COPY = 2,
 
-  // Reads borrowed host bytes into a device buffer range after queue waits.
+  // Uploads immediately readable borrowed host bytes into a device buffer
+  // range.
   IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD = 3,
 
-  // Writes a device buffer range into borrowed host memory after queue waits.
+  // Downloads a device buffer range into immediately writable borrowed memory.
   IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD = 4,
 } iree_hal_transfer_operation_type_t;
 
@@ -701,8 +702,8 @@ typedef struct iree_hal_transfer_operation_t {
 
     // IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD payload.
     struct {
-      // Host bytes read after the transaction wait timepoints are reached.
-      // The allocation is borrowed until terminal transaction completion.
+      // Host bytes readable from the start of the call, independent of waits.
+      // The range remains live and unmodified until the transaction retires.
       const void* source;
 
       // Buffer receiving the host bytes.
@@ -723,8 +724,8 @@ typedef struct iree_hal_transfer_operation_t {
       // Byte offset into |source_buffer| where the download begins.
       iree_device_size_t source_offset;
 
-      // Host allocation receiving bytes before completion is published.
-      // The allocation is borrowed until terminal transaction completion.
+      // Host range writable by HAL from the start of the call, independent of
+      // waits. It remains live and inaccessible to the caller until retirement.
       void* target;
 
       // Number of bytes to download.
@@ -853,6 +854,9 @@ IREE_API_EXPORT iree_status_t iree_hal_queue_map(
 // reached, and every |signal_semaphore_list| timepoint is published only after
 // the command buffer reaches terminal completion. Queue submissions are not
 // implicitly FIFO; callers use semaphore dependencies to order operations.
+// Recorded barriers define payload memory visibility, including any system
+// release required before a host read. Terminal completion joins execution
+// and resource lifetimes but adds no implicit payload visibility boundary.
 //
 // An optional |binding_table| supplies indirect bindings recorded by the
 // command buffer. Its entries are captured before the call returns. By default
@@ -1055,10 +1059,11 @@ IREE_API_EXPORT iree_status_t iree_hal_queue_dealloca(
 
 // Enqueues one transfer transaction on the exact hardware |queue|.
 //
-// All operations become eligible after every |wait_semaphore_list| timepoint is
-// reached. The |signal_semaphore_list| timepoints are published only after all
-// operations complete, including any final copies into download host memory.
-// An empty transaction is a semaphore barrier.
+// Device buffer accesses occur after every |wait_semaphore_list| timepoint is
+// reached. The waits do not defer access to borrowed host memory. The
+// |signal_semaphore_list| timepoints are published only after all operations
+// complete, including any final copies into download host memory. An empty
+// transaction is a semaphore barrier.
 //
 // Implementations validate and capture the complete transaction before
 // returning. Fill patterns and update source bytes are copied during capture.
@@ -1070,12 +1075,18 @@ IREE_API_EXPORT iree_status_t iree_hal_queue_dealloca(
 // inspected. A transaction containing only zero-length operations is therefore
 // a semaphore barrier.
 //
-// Non-empty uploads and downloads borrow their host ranges until the
-// transaction completes or fails asynchronously and therefore require at least
-// one signal semaphore. Upload source reads and download target writes occur
-// after the wait timepoints are reached. Callers may order host writes before
-// an upload using those waits but must not concurrently access a borrowed range
-// while its transfer may be active.
+// Non-empty uploads and downloads borrow their host ranges from the start of
+// this call until the transaction retires and require at least one signal
+// semaphore. Upload sources must already be initialized and readable, and
+// remain live and unmodified throughout the borrow. Download targets must
+// already be writable and remain live and inaccessible to the caller throughout
+// the borrow. Implementations may read upload sources or write download targets
+// immediately, without waiting for |wait_semaphore_list|. An implementation may
+// capture upload bytes before returning, but callers must preserve the source
+// until retirement because early capture is not guaranteed.
+//
+// Successful completion of the signal timepoints establishes retirement. An
+// independently failed semaphore does not retire accepted memory accesses.
 IREE_API_EXPORT iree_status_t
 iree_hal_queue_transfer(iree_hal_queue_t* queue,
                         const iree_hal_semaphore_list_t wait_semaphore_list,
@@ -1095,6 +1106,9 @@ IREE_API_EXPORT iree_status_t iree_hal_queue_fill(
     iree_hal_fill_flags_t flags);
 
 // Enqueues a scalar captured update as a one-operation transfer transaction.
+// The source range must be readable and unmodified from the start of the call
+// until return. Its bytes are captured before returning, independent of
+// |wait_semaphore_list|, and the caller may then reuse the source storage.
 IREE_API_EXPORT iree_status_t iree_hal_queue_update(
     iree_hal_queue_t* queue,
     const iree_hal_semaphore_list_t wait_semaphore_list,
@@ -1115,8 +1129,10 @@ IREE_API_EXPORT iree_status_t iree_hal_queue_copy(
     iree_hal_copy_flags_t flags);
 
 // Enqueues a scalar upload from borrowed host memory.
-// The non-empty |source| range remains live and unmodified until terminal
-// completion is observed through |signal_semaphore_list|.
+// The non-empty |source| range must be initialized and readable when this call
+// starts and remain live and unmodified until the transaction retires, as
+// described by iree_hal_queue_transfer. HAL may read or capture the source
+// immediately; |wait_semaphore_list| orders device accesses, not source reads.
 IREE_API_EXPORT iree_status_t iree_hal_queue_upload(
     iree_hal_queue_t* queue,
     const iree_hal_semaphore_list_t wait_semaphore_list,
@@ -1125,8 +1141,11 @@ IREE_API_EXPORT iree_status_t iree_hal_queue_upload(
     iree_device_size_t length, const iree_hal_queue_barriers_t* barriers);
 
 // Enqueues a scalar download into borrowed host memory.
-// The non-empty |target| range remains live and inaccessible until terminal
-// completion is observed through |signal_semaphore_list|.
+// The non-empty |target| range must be writable by HAL when this call starts
+// and remain live and inaccessible to the caller until the transaction retires,
+// as described by iree_hal_queue_transfer. HAL may write the target
+// immediately; |wait_semaphore_list| orders device accesses, not permission to
+// use |target|.
 IREE_API_EXPORT iree_status_t iree_hal_queue_download(
     iree_hal_queue_t* queue,
     const iree_hal_semaphore_list_t wait_semaphore_list,

@@ -8,6 +8,7 @@
 
 #include "libamdf/src/allocator.h"
 #include "libamdf/src/gpu/umd/dxg/linux/api.h"
+#include "libamdf/src/gpu/umd/dxg/linux/memory_profile.h"
 #include "libamdf/src/gpu/umd/dxg/wsl/api.h"
 
 static amdf_status_t amdf_gpu_linux_dxg_device_release_native(
@@ -70,22 +71,30 @@ amdf_status_t amdf_gpu_linux_dxg_device_create(
         &device->paging_queue);
   }
 
+  amdf_gpu_umd_device_result_t result = {0};
   if (amdf_status_is_ok(status)) {
-    *out_result = (amdf_gpu_umd_device_result_t){
-        .id =
+    result.memory.flags = AMDF_MEMORY_SCOPE_FLAG_AVAILABLE_BYTES;
+    if (device->properties.is_discrete) {
+      status = amdf_gpu_linux_dxg_query_local_capacity(
+          endpoint, &result.memory.capacity_byte_length);
+    } else {
+      result.memory.flags |= AMDF_MEMORY_SCOPE_FLAG_SYSTEM_BACKED;
+    }
+  }
+  if (amdf_status_is_ok(status)) {
+    result.id = (amdf_device_id_t){
+        .words =
             {
-                .words =
-                    {
-                        endpoint->info.id.words[0],
-                        ((uint64_t)device->paging_queue.native << 32) |
-                            device->logical_device.native,
-                    },
+                endpoint->info.id.words[0],
+                ((uint64_t)device->paging_queue.native << 32) |
+                    device->logical_device.native,
             },
-        .reset_epoch = 1,
-        .features = AMDF_GPU_DEVICE_FEATURE_HOST_REGISTRATION |
-                    AMDF_GPU_DEVICE_FEATURE_DEVICE_RECREATION |
-                    AMDF_GPU_DEVICE_FEATURE_LOCAL_MEMORY,
     };
+    result.reset_epoch = 1;
+    result.features = AMDF_GPU_DEVICE_FEATURE_HOST_REGISTRATION |
+                      AMDF_GPU_DEVICE_FEATURE_DEVICE_RECREATION |
+                      AMDF_GPU_DEVICE_FEATURE_LOCAL_MEMORY;
+    *out_result = result;
     *out_device = device;
   } else {
     const amdf_status_t release_status =

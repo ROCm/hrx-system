@@ -1,0 +1,177 @@
+// RUN: pass canonicalize
+
+// Growing offsets lose their upper bound, not their divisibility. Both the
+// carried pointer and the loop result remain aligned for wide loads.
+func.def @advancing_alignment(%input: buffer, %count: index) -> (i64, i64, i64) {
+  %aligned = buffer.assume.alignment %input {minimum_alignment = 64} : buffer
+  %origin = index.constant 64 : offset
+  %first = buffer.view %aligned[%origin] : buffer -> view<16xi32>
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %last = scf.for %iteration = [%begin to %count step %step](%window = %first : view<16xi32>) -> (view<16xi32>) {
+    %alignment = test.fact_view_min_alignment %window : view<16xi32> -> i64
+    %root_alignment = test.fact_view_root_min_alignment %window : view<16xi32> -> i64
+    test.use %alignment, %root_alignment : i64, i64
+    %next = view.subview %window[16] : view<16xi32> -> view<16xi32>
+    scf.yield %next : view<16xi32>
+  }
+  %alignment = test.fact_view_min_alignment %last : view<16xi32> -> i64
+  %root_alignment = test.fact_view_root_min_alignment %last : view<16xi32> -> i64
+  %upper = test.fact_view_byte_offset_hi %last : view<16xi32> -> i64
+  func.return %alignment, %root_alignment, %upper : i64, i64, i64
+}
+
+// ----
+func.def @advancing_alignment(%input: buffer, %count: index) -> (i64, i64, i64) {
+  %aligned = buffer.assume.alignment %input {minimum_alignment = 64} : buffer
+  %origin = index.constant 64 : offset
+  %first = buffer.view %aligned[%origin] : buffer -> view<16xi32>
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %last = scf.for %iteration = [%begin to %count step %step](%window = %first : view<16xi32>) -> (view<16xi32>) {
+    %alignment = scalar.constant 64 : i64
+    %root_alignment = scalar.constant 64 : i64
+    test.use %alignment, %root_alignment : i64, i64
+    %next = view.subview %window[16] : view<16xi32> -> view<16xi32>
+    scf.yield %next : view<16xi32>
+  }
+  %alignment = scalar.constant 64 : i64
+  %root_alignment = scalar.constant 64 : i64
+  %upper = scalar.constant 9223372036854775807 : i64
+  func.return %alignment, %root_alignment, %upper : i64, i64, i64
+}
+
+// ====
+
+// Zero is divisible by the stride; the stride need not be a power of two.
+// Pointer alignment is the common divisor of the root and every increment.
+func.def @zero_origin_alignment(%input: buffer, %count: index) -> (i64, i64) {
+  %aligned = buffer.assume.alignment %input {minimum_alignment = 64} : buffer
+  %origin = index.constant 0 : offset
+  %first = buffer.view %aligned[%origin] : buffer -> view<16xi32>
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %last = scf.for %iteration = [%begin to %count step %step](%window = %first : view<16xi32>) -> (view<16xi32>) {
+    %alignment = test.fact_view_min_alignment %window : view<16xi32> -> i64
+    test.use %alignment : i64
+    %next = view.subview %window[24] : view<16xi32> -> view<16xi32>
+    scf.yield %next : view<16xi32>
+  }
+  %alignment = test.fact_view_min_alignment %last : view<16xi32> -> i64
+  %root_alignment = test.fact_view_root_min_alignment %last : view<16xi32> -> i64
+  func.return %alignment, %root_alignment : i64, i64
+}
+
+// ----
+func.def @zero_origin_alignment(%input: buffer, %count: index) -> (i64, i64) {
+  %aligned = buffer.assume.alignment %input {minimum_alignment = 64} : buffer
+  %origin = index.constant 0 : offset
+  %first = buffer.view %aligned[%origin] : buffer -> view<16xi32>
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %last = scf.for %iteration = [%begin to %count step %step](%window = %first : view<16xi32>) -> (view<16xi32>) {
+    %alignment = scalar.constant 32 : i64
+    test.use %alignment : i64
+    %next = view.subview %window[24] : view<16xi32> -> view<16xi32>
+    scf.yield %next : view<16xi32>
+  }
+  %alignment = scalar.constant 32 : i64
+  %root_alignment = scalar.constant 64 : i64
+  func.return %alignment, %root_alignment : i64, i64
+}
+
+// ====
+
+// Conditional backedges share the same widening contract. Different strides
+// reduce the carried alignment to their common divisor, not to either stride.
+func.def @conditional_stride_alignment(%input: buffer, %count: index, %condition: i1) -> (i64) {
+  %aligned = buffer.assume.alignment %input {minimum_alignment = 128} : buffer
+  %origin = index.constant 128 : offset
+  %first = buffer.view %aligned[%origin] : buffer -> view<16xi32>
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %last, %end = scf.while(%window = %first : view<16xi32>, %iteration = %begin : index) -> (view<16xi32>, index) {
+    %alignment = test.fact_view_min_alignment %window : view<16xi32> -> i64
+    test.use %alignment : i64
+    %more = index.cmp slt, %iteration, %count : index
+    scf.condition %more, %window, %iteration : i1, view<16xi32>, index
+  } do(%current: view<16xi32>, %position: index) {
+    %narrow_step = view.subview %current[24] : view<16xi32> -> view<16xi32>
+    %wide_step = view.subview %current[32] : view<16xi32> -> view<16xi32>
+    %next = scf.select %condition, %narrow_step, %wide_step : view<16xi32>
+    %next_position = index.add %position, %step : index
+    scf.yield %next, %next_position : view<16xi32>, index
+  }
+  %alignment = test.fact_view_min_alignment %last : view<16xi32> -> i64
+  func.return %alignment : i64
+}
+
+// ----
+func.def @conditional_stride_alignment(%input: buffer, %count: index, %condition: i1) -> (i64) {
+  %aligned = buffer.assume.alignment %input {minimum_alignment = 128} : buffer
+  %origin = index.constant 128 : offset
+  %first = buffer.view %aligned[%origin] : buffer -> view<16xi32>
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %last, %end = scf.while(%window = %first : view<16xi32>, %iteration = %begin : index) -> (view<16xi32>, index) {
+    %alignment = scalar.constant 32 : i64
+    test.use %alignment : i64
+    %more = index.cmp slt, %iteration, %count : index
+    scf.condition %more, %window, %iteration : i1, view<16xi32>, index
+  } do(%current: view<16xi32>, %position: index) {
+    %narrow_step = view.subview %current[24] : view<16xi32> -> view<16xi32>
+    %wide_step = view.subview %current[32] : view<16xi32> -> view<16xi32>
+    %next = scf.select %condition, %narrow_step, %wide_step : view<16xi32>
+    %next_position = index.add %position, %step : index
+    scf.yield %next, %next_position : view<16xi32>, index
+  }
+  %alignment = scalar.constant 32 : i64
+  func.return %alignment : i64
+}
+
+// ====
+
+// CFG feedback cannot transfer root alignment to a pointer advancing by a
+// byte. Retaining a divisor must still weaken it when an incoming edge does.
+func.def @byte_stride_alignment(%input: buffer, %count: index) -> (i64, i64) {
+  %aligned = buffer.assume.alignment %input {minimum_alignment = 64} : buffer
+  %origin = index.constant 64 : offset
+  %first = buffer.view %aligned[%origin] : buffer -> view<1xi8>
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  cfg.br ^header(%first: view<1xi8>, %begin: index)
+^header(%window: view<1xi8>, %iteration: index):
+  %alignment = test.fact_view_min_alignment %window : view<1xi8> -> i64
+  test.use %alignment : i64
+  %more = index.cmp slt, %iteration, %count : index
+  cfg.cond_br %more, ^body, ^exit
+^body:
+  %next = view.subview %window[1] : view<1xi8> -> view<1xi8>
+  %next_iteration = index.add %iteration, %step : index
+  cfg.br ^header(%next: view<1xi8>, %next_iteration: index)
+^exit:
+  %root_alignment = test.fact_view_root_min_alignment %window : view<1xi8> -> i64
+  func.return %alignment, %root_alignment : i64, i64
+}
+
+// ----
+func.def @byte_stride_alignment(%input: buffer, %count: index) -> (i64, i64) {
+  %aligned = buffer.assume.alignment %input {minimum_alignment = 64} : buffer
+  %origin = index.constant 64 : offset
+  %first = buffer.view %aligned[%origin] : buffer -> view<1xi8>
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  cfg.br ^header(%first: view<1xi8>, %begin: index)
+^header(%window: view<1xi8>, %iteration: index):
+  %alignment = scalar.constant 1 : i64
+  test.use %alignment : i64
+  %more = index.cmp slt, %iteration, %count : index
+  cfg.cond_br %more, ^body, ^exit
+^body:
+  %next = view.subview %window[1] : view<1xi8> -> view<1xi8>
+  %next_iteration = index.add %iteration, %step : index
+  cfg.br ^header(%next: view<1xi8>, %next_iteration: index)
+^exit:
+  %root_alignment = scalar.constant 64 : i64
+  func.return %alignment, %root_alignment : i64, i64
+}

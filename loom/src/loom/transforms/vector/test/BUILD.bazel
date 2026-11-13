@@ -41,7 +41,9 @@ loom_check_test_suite(
         "memory_footprint_condition_loops.loom-test",
         "memory_footprint_conditions.loom-test",
         "memory_footprint_coordinates.loom-test",
+        "memory_footprint_divrem.loom-test",
         "memory_footprint_induction.loom-test",
+        "memory_footprint_integer_casts.loom-test",
         "memory_footprint_inverse_quotient.loom-test",
         "memory_footprint_masked_conditions.loom-test",
         "memory_footprint_products.loom-test",
@@ -52,6 +54,7 @@ loom_check_test_suite(
         "memory_to_scalar.loom-test",
         "packed_memory_consumers.loom-test",
         "reduce_axes_to_scalar.loom-test",
+        "refinement.loom-test",
         "reshape_lanes.loom-test",
         "signed_unary_legalization.loom-test",
         "sink_single_use_reads.loom-test",
@@ -67,6 +70,15 @@ loom_check_test(
     name = "shape_slices",
     src = "shape_slices.loom-test",
     target_compatible_with = _AMDGPU_ARCH_COMPATIBLE_WITH,
+)
+
+loom_check_test(
+    name = "grouped_dot_legalization",
+    src = "grouped_dot_legalization.loom-test",
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/arch:amdgpu",
+        "//loom/config/arch:x86",
+    ]),
 )
 
 loom_check_test(

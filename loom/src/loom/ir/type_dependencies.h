@@ -44,6 +44,10 @@ bool loom_value_set_index_contains(const loom_value_set_index_t* index,
                                    loom_value_set_id_t set,
                                    loom_value_id_t value);
 
+// Returns the only member of a singleton set, or INVALID for other sets.
+loom_value_id_t loom_value_set_index_singleton(
+    const loom_value_set_index_t* index, loom_value_set_id_t set);
+
 // Unions two distinct nonempty canonical sets.
 iree_status_t loom_value_set_index_union_nonempty(loom_value_set_index_t* index,
                                                   loom_value_set_id_t first,
@@ -64,6 +68,13 @@ static inline iree_status_t loom_value_set_index_union(
   }
   return loom_value_set_index_union_nonempty(index, first, second, out_set);
 }
+
+// Intersects canonical sets, sharing equal subtrees and visiting only
+// overlapping radix branches. Empty and identical inputs allocate nothing.
+iree_status_t loom_value_set_index_intersection(loom_value_set_index_t* index,
+                                                loom_value_set_id_t first,
+                                                loom_value_set_id_t second,
+                                                loom_value_set_id_t* out_set);
 
 // Adds |value| to |set| and returns its canonical union.
 iree_status_t loom_value_set_index_add(loom_value_set_index_t* index,

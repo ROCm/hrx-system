@@ -11,23 +11,17 @@
 set -euo pipefail
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+# shellcheck source=loom/docs/examples/example.shlib
+source "${script_dir}/../../example.shlib"
+repo_root="${LOOM_EXAMPLE_REPO_ROOT}"
 
 if [[ "$#" -gt 1 ]]; then
   printf 'usage: %s [output-directory]\n' "$0" >&2
   exit 64
 fi
 
-if [[ -n "${RUNFILES_DIR:-}" ]]; then
-  workspace="${TEST_WORKSPACE:-_main}"
-  repo_root="${RUNFILES_DIR}/${workspace}"
-  product_frontier="${repo_root}/loom/binding/c/example/product_frontier"
-else
-  repo_root="$(cd -- "${script_dir}/../../../../.." && pwd -P)"
-  "${repo_root}/build_tools/bin/iree-bazel-build" \
-    --config=asan \
-    //loom/binding/c/example:product_frontier
-  product_frontier="${repo_root}/bazel-bin/loom/binding/c/example/product_frontier"
-fi
+loom_example_configure_inputs c-example:product_frontier
+product_frontier="${LOOM_PRODUCT_FRONTIER}"
 
 source_file="${repo_root}/loom/binding/c/example/product_frontier.c"
 for required_path in "${product_frontier}" "${source_file}"; do

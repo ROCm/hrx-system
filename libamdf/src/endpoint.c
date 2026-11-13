@@ -31,6 +31,9 @@ struct amdf_endpoint_t {
   bool engine_profile_resolved;
   // Borrowed physical-local descriptor, published only for supported storage.
   amdf_memory_scope_t local_memory_scope;
+  // Whether explicit device creation has published the immutable local scope.
+  // Accessed only under the instance's native-state lock.
+  bool local_memory_scope_published;
   // Immutable endpoint-local native queue families.
   struct {
     // Records owned inline for the lifetime of this endpoint.
@@ -103,6 +106,16 @@ const amdf_endpoint_info_t* amdf_endpoint_get_cached_info(
 amdf_memory_scope_t* amdf_endpoint_local_memory_scope(
     amdf_endpoint_t* endpoint) {
   return &endpoint->local_memory_scope;
+}
+
+void amdf_endpoint_publish_local_memory_scope(
+    amdf_endpoint_t* endpoint, const amdf_memory_scope_t* scope) {
+  if (!endpoint->local_memory_scope_published) {
+    endpoint->local_memory_scope = *scope;
+    endpoint->local_memory_scope.kind = AMDF_MEMORY_SCOPE_KIND_LOCAL;
+    endpoint->local_memory_scope.owner.endpoint = endpoint;
+    endpoint->local_memory_scope_published = true;
+  }
 }
 
 amdf_platform_endpoint_t* amdf_endpoint_get_platform(

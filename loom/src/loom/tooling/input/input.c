@@ -47,8 +47,8 @@ static iree_status_t loom_input_bytecode_load(
   loom_bytecode_read_result_t read_result = {0};
   return loom_bytecode_read_module(
       iree_make_const_byte_span(request->source.data, request->source.size),
-      request->path, context, block_pool, &read_options, &read_result,
-      out_module, host_allocator);
+      request->path, context, block_pool, &read_options, host_allocator,
+      &read_result, out_module);
 }
 
 const loom_input_provider_t loom_input_bytecode_provider = {

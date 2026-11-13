@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library", "loom_cc_test")
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_benchmark", "loom_cc_library", "loom_cc_test")
 
 package(
     default_visibility = ["//visibility:public"],
@@ -12,19 +12,35 @@ package(
     licenses = ["notice"],  # Apache 2.0
 )
 
+loom_cc_benchmark(
+    name = "planning_benchmark",
+    srcs = ["planning_benchmark.cc"],
+    deps = [
+        ":execution",
+        ":invocations",
+        ":resources",
+        ":schedule",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:benchmark_main",
+    ],
+)
+
 loom_cc_library(
     name = "schedule",
     srcs = ["schedule.c"],
     hdrs = ["schedule.h"],
     deps = [
+        "//loom/src/loom/analysis:value_relation",
         "//loom/src/loom/error:emitter",
         "//loom/src/loom/error:error_defs",
         "//loom/src/loom/error:parameter",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/buffer:op_defs",
-        "//loom/src/loom/ops/cfg:op_defs",
         "//loom/src/loom/ops/channel:op_defs",
         "//loom/src/loom/ops/pipeline:op_defs",
+        "//loom/src/loom/ops/view:op_defs",
         "//loom/src/loom/util:fact_table",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
@@ -39,6 +55,7 @@ loom_cc_library(
         ":schedule",
         "//loom/src/loom/analysis:channel_plan",
         "//loom/src/loom/analysis:source_storage_packing",
+        "//loom/src/loom/analysis:storage_geometry",
         "//loom/src/loom/error:emitter",
         "//loom/src/loom/error:error_defs",
         "//loom/src/loom/error:parameter",
@@ -62,6 +79,7 @@ loom_cc_test(
         ":resources",
         ":workers",
         "//loom/src/loom/analysis:source_storage_packing",
+        "//loom/src/loom/analysis:storage_access",
         "//loom/src/loom/error:diagnostic",
         "//loom/src/loom/error:error_defs",
         "//loom/src/loom/ir",
@@ -69,6 +87,7 @@ loom_cc_test(
         "//loom/src/loom/ops:type_registry",
         "//loom/src/loom/ops/buffer:builders",
         "//loom/src/loom/ops/channel:builders",
+        "//loom/src/loom/ops/encoding:builders",
         "//loom/src/loom/ops/func:builders",
         "//loom/src/loom/ops/index:builders",
         "//loom/src/loom/ops/pipeline:builders",
@@ -100,11 +119,35 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "participants",
+    srcs = ["participants.c"],
+    hdrs = ["participants.h"],
+    deps = [
+        "//loom/src/loom/util:adaptive_sort",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "participants_test",
+    srcs = ["participants_test.cc"],
+    deps = [
+        ":participants",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
     name = "execution",
     srcs = ["execution.c"],
     hdrs = ["execution.h"],
     deps = [
         ":invocations",
+        ":participants",
         ":resources",
         ":schedule",
         "//loom/src/loom/util:adaptive_sort",
@@ -116,22 +159,60 @@ loom_cc_library(
 
 loom_cc_library(
     name = "invocations",
-    srcs = ["invocations.c"],
-    hdrs = ["invocations.h"],
+    srcs = [
+        "construction_storage.c",
+        "invocations.c",
+        "lifetime_layout.c",
+        "lifetimes.c",
+    ],
+    hdrs = [
+        "construction_storage.h",
+        "invocations.h",
+        "lifetime_layout.h",
+        "lifetimes.h",
+    ],
     deps = [
         ":arguments",
         ":resources",
         ":schedule",
         ":workers",
+        "//loom/src/loom/analysis:source_storage_packing",
+        "//loom/src/loom/analysis:storage_access",
         "//loom/src/loom/error:emitter",
         "//loom/src/loom/error:error_defs",
         "//loom/src/loom/error:parameter",
         "//loom/src/loom/ir",
+        "//loom/src/loom/ops/channel:op_defs",
         "//loom/src/loom/ops/pipeline:op_defs",
         "//loom/src/loom/util:adaptive_sort",
         "//loom/src/loom/util:fact_table",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "lifetime_layout_test",
+    srcs = ["lifetime_layout_test.cc"],
+    deps = [
+        ":invocations",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "construction_storage_test",
+    srcs = ["construction_storage_test.cc"],
+    deps = [
+        ":invocations",
+        ":resources",
+        ":schedule",
+        "//loom/src/loom/analysis:source_storage_packing",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 
@@ -162,17 +243,20 @@ loom_cc_library(
         "//loom/src/loom/analysis:kernel_synchronization_legality",
         "//loom/src/loom/analysis:movement",
         "//loom/src/loom/analysis:storage_access",
+        "//loom/src/loom/analysis:symbolic_expr",
         "//loom/src/loom/error:emitter",
         "//loom/src/loom/error:error_defs",
         "//loom/src/loom/error:parameter",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:type_registry",
-        "//loom/src/loom/ops/cfg:op_defs",
         "//loom/src/loom/ops/channel:op_defs",
         "//loom/src/loom/ops/func:op_defs",
         "//loom/src/loom/ops/kernel:op_defs",
         "//loom/src/loom/ops/pipeline:op_defs",
+        "//loom/src/loom/util:adaptive_sort",
+        "//loom/src/loom/util:cfg_execution",
         "//loom/src/loom/util:cfg_graph",
+        "//loom/src/loom/util:cfg_loop_nest",
         "//loom/src/loom/util:fact_table",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
@@ -188,5 +272,46 @@ loom_cc_test(
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "progress",
+    srcs = ["progress.c"],
+    hdrs = ["progress.h"],
+    deps = [
+        ":invocations",
+        ":workers",
+        "//loom/src/loom/util:adaptive_sort",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "progress_test",
+    srcs = ["progress_test.cc"],
+    deps = [
+        ":progress",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "continuations",
+    srcs = ["continuations.c"],
+    hdrs = ["continuations.h"],
+    deps = [
+        ":invocations",
+        ":progress",
+        ":workers",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/util:adaptive_sort",
+        "//loom/src/loom/util:cfg_loop_nest",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
     ],
 )

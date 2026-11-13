@@ -8,6 +8,9 @@
 
 #include <stdint.h>
 
+#include <initializer_list>
+#include <string>
+
 #include "iree/testing/gtest.h"
 #include "loom/target/arch/amdgpu/descriptors/low_registry.h"
 #include "loom/target/arch/amdgpu/lower/fragment_memory/address.h"
@@ -93,8 +96,9 @@ TEST(AmdgpuFragmentMemoryPacketTest, PackedB16UsesSeparateElementAddresses) {
       .packed_b16_high_descriptor_ref =
           LOOM_AMDGPU_DESCRIPTOR_REF_DS_LOAD_U16_D16_HI,
       .payload_form = LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_NATIVE,
-      .packetization = LOOM_AMDGPU_FRAGMENT_MEMORY_PACKETIZATION_PACKED_B16,
+      .packetization = LOOM_AMDGPU_FRAGMENT_MEMORY_PACKETIZATION_PACKED_SUBWORD,
   };
+  plan.address_layout.payload_elements_per_register = 2;
   const auto packet =
       Packet(LOOM_AMDGPU_DESCRIPTOR_REF_DS_LOAD_U16_D16, 4, 1, 1);
 
@@ -308,6 +312,186 @@ TEST(AmdgpuFragmentMemoryPacketTest,
     EXPECT_EQ(accesses[0].flags,
               LOOM_AMDGPU_FRAGMENT_MEMORY_ISSUED_ACCESS_FLAG_PUBLISHERS_ONLY);
   }
+}
+
+// Compare physical packet footprints against the descriptor's logical element
+// coordinates. This covers every byte-addressable native layout, including
+// blocked MFMA, wave32/wave64, low-half results, packed integer operands, and
+// byte sources decoded into halfword operands.
+TEST(AmdgpuFragmentMemoryPacketTest, BroadcastReadsPreserveLogicalCoordinates) {
+  loom_target_low_descriptor_registry_t registry = {};
+  loom_amdgpu_low_descriptor_registry_initialize(&registry);
+  const auto* processor =
+      loom_amdgpu_target_info_find_processor(IREE_SV("gfx1100"));
+  const auto* descriptor_set = loom_low_descriptor_registry_lookup(
+      &registry.registry, processor->properties.descriptor_set.key);
+  const loom_contract_operand_role_t roles[] = {
+      LOOM_CONTRACT_OPERAND_ROLE_LHS, LOOM_CONTRACT_OPERAND_ROLE_RHS,
+      LOOM_CONTRACT_OPERAND_ROLE_ACCUMULATOR,
+      LOOM_CONTRACT_OPERAND_ROLE_RESULT};
+  uint32_t exercised_widths = 0;
+  for (iree_host_size_t ordinal = 0;
+       ordinal < loom_amdgpu_matrix_contract_descriptor_count(); ++ordinal) {
+    const auto* contract = loom_amdgpu_matrix_contract_descriptor_at(ordinal);
+    const auto* layout =
+        loom_amdgpu_matrix_contract_descriptor_fragment_layout(contract);
+    if (layout == nullptr) {
+      continue;
+    }
+    const auto name = loom_amdgpu_matrix_contract_descriptor_name(contract);
+    SCOPED_TRACE(std::string(name.data, name.size));
+    for (const auto role : roles) {
+      const auto* role_layout = loom_matrix_fragment_role_layout(layout, role);
+      // Sub-byte encoded operands do not have byte-addressable scalar views.
+      if (role_layout == nullptr || role_layout->element_bit_count < 8 ||
+          role_layout->element_bit_count % 8 != 0) {
+        continue;
+      }
+      SCOPED_TRACE(static_cast<int>(role));
+      const uint16_t native_element_bytes = role_layout->element_bit_count / 8;
+      const uint16_t decoded_element_bytes =
+          native_element_bytes == 2 &&
+                  (role == LOOM_CONTRACT_OPERAND_ROLE_LHS ||
+                   role == LOOM_CONTRACT_OPERAND_ROLE_RHS)
+              ? 1
+              : 0;
+      for (uint16_t element_bytes :
+           {native_element_bytes, decoded_element_bytes}) {
+        if (element_bytes == 0) {
+          continue;
+        }
+        SCOPED_TRACE(element_bytes);
+        exercised_widths |= 1u << element_bytes;
+        const bool blocked = layout->tile_shape.block_count > 1;
+        const uint8_t rank = blocked ? 3 : 2;
+        const loom_matrix_fragment_coordinate_dimension_t axes[] = {
+            LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_BLOCK,
+            role == LOOM_CONTRACT_OPERAND_ROLE_RHS
+                ? LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_REDUCTION
+                : LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_ROW,
+            role == LOOM_CONTRACT_OPERAND_ROLE_LHS
+                ? LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_REDUCTION
+                : LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_COLUMN};
+        for (uint8_t broadcast_axes = 1; broadcast_axes < (1u << rank);
+             ++broadcast_axes) {
+          SCOPED_TRACE(broadcast_axes);
+          loom_low_source_memory_axis_byte_stride_t strides[3] = {};
+          // Padded strides distinguish every coordinate and prevent an
+          // accidental axis swap or packet widening from preserving the
+          // expected addresses.
+          const uint32_t coefficients[] = {65536, 128, 1};
+          for (uint8_t axis = 0; axis < rank; ++axis) {
+            strides[axis].kind = LOOM_LOW_SOURCE_MEMORY_AXIS_BYTE_STRIDE_STATIC;
+            strides[axis].static_byte_coefficient =
+                (broadcast_axes & (1u << axis))
+                    ? 0
+                    : coefficients[axis + 3 - rank] * element_bytes;
+            strides[axis].byte_facts = loom_value_facts_exact_i64(
+                strides[axis].static_byte_coefficient);
+          }
+          for (auto memory_space : {LOOM_VALUE_FACT_MEMORY_SPACE_GLOBAL,
+                                    LOOM_VALUE_FACT_MEMORY_SPACE_DESCRIPTOR,
+                                    LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP}) {
+            SCOPED_TRACE(static_cast<int>(memory_space));
+            loom_amdgpu_fragment_memory_plan_t plan = {
+                .operation_kind = LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD,
+                .role = role,
+                .source =
+                    {
+                        .operation_kind = LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD,
+                        .memory_space = memory_space,
+                        .element_byte_count = element_bytes,
+                    },
+                .view_rank = rank,
+                .register_count = role_layout->register_count,
+                .payload_register_count = role_layout->register_count,
+                .element_byte_count = element_bytes,
+                .payload_form =
+                    element_bytes == native_element_bytes
+                        ? LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_NATIVE
+                        : LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_LOAD_FP8_TO_BF16,
+            };
+            ASSERT_TRUE(loom_amdgpu_fragment_memory_compile_address_layout(
+                role, role_layout, 0, rank, strides, &plan.address_layout,
+                plan.runtime_axes, nullptr));
+            ASSERT_TRUE(loom_amdgpu_fragment_memory_select_packetization(
+                role, role_layout, plan.payload_form, element_bytes,
+                &plan.address_layout, plan.runtime_axes, rank,
+                &plan.packetization, nullptr));
+            ASSERT_TRUE(loom_amdgpu_fragment_memory_plan_packets(
+                descriptor_set, layout, nullptr, &plan, nullptr));
+            const auto* projection = role_layout->coordinate_projection_plan;
+            for (uint16_t packet_index = 0; packet_index < plan.packet_count;
+                 ++packet_index) {
+              const auto& packet = plan.packets[packet_index];
+              loom_amdgpu_fragment_memory_issued_access_t accesses
+                  [LOOM_AMDGPU_FRAGMENT_MEMORY_MAX_ISSUED_ACCESSES_PER_PACKET] =
+                      {};
+              const uint16_t access_count =
+                  loom_amdgpu_fragment_memory_query_issued_accesses(
+                      &plan, &packet, accesses);
+              for (uint16_t access_index = 0; access_index < access_count;
+                   ++access_index) {
+                const auto& access = accesses[access_index];
+                int64_t static_offset = 0;
+                ASSERT_TRUE(loom_amdgpu_fragment_memory_static_offset_i64(
+                    &plan, access.register_index, access.element_index,
+                    &static_offset));
+                const bool broadcast =
+                    plan.packetization ==
+                    LOOM_AMDGPU_FRAGMENT_MEMORY_PACKETIZATION_BROADCAST_SUBWORD;
+                if (broadcast) {
+                  EXPECT_EQ(access.element_count, 1);
+                }
+                const uint16_t logical_count =
+                    broadcast
+                        ? plan.address_layout.payload_elements_per_register
+                        : access.element_count;
+                for (uint16_t lane = 0; lane < layout->wave_size; ++lane) {
+                  const uint64_t lane_offset =
+                      loom_amdgpu_fragment_memory_relative_lane_byte_offset(
+                          &plan.address_layout, lane);
+                  for (uint16_t element = 0; element < logical_count;
+                       ++element) {
+                    const uint32_t value_index =
+                        access.register_index * 32 /
+                            role_layout->element_bit_count /
+                            role_layout->coordinate_element_stride +
+                        access.element_index + element;
+                    uint32_t source
+                        [LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_COUNT] = {};
+                    source
+                        [LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_PARTICIPANT] =
+                            lane;
+                    source[LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_VALUE] =
+                        value_index;
+                    uint32_t coordinates
+                        [LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_COUNT] = {};
+                    loom_matrix_fragment_apply_coordinate_projection(
+                        projection->terms, projection->forward_term_count,
+                        source, coordinates);
+                    uint64_t expected = 0;
+                    for (uint8_t axis = 0; axis < rank; ++axis) {
+                      expected += coordinates[axes[axis + 3 - rank]] *
+                                  strides[axis].static_byte_coefficient;
+                    }
+                    const uint64_t actual =
+                        lane_offset + static_offset +
+                        (broadcast ? 0 : element * element_bytes);
+                    ASSERT_EQ(actual, expected)
+                        << "lane " << lane << ", register "
+                        << access.register_index << ", element "
+                        << access.element_index + element;
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  EXPECT_EQ(exercised_widths, (1u << 1) | (1u << 2) | (1u << 4) | (1u << 8));
 }
 
 }  // namespace

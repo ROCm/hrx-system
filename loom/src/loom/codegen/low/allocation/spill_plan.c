@@ -9,15 +9,48 @@
 #include <string.h>
 
 #include "iree/base/internal/math.h"
+#include "loom/codegen/low/allocation/live_range.h"
 #include "loom/codegen/low/allocation/spill_storage.h"
 #include "loom/codegen/low/function.h"
+#include "loom/codegen/low/register_parts.h"
+#include "loom/codegen/low/rematerialization_facts.h"
 #include "loom/ir/module.h"
 #include "loom/ops/low/ops.h"
 #include "loom/target/registers.h"
 #include "loom/util/adaptive_sort.h"
 #include "loom/util/cfg_graph.h"
 
-#define LOOM_LOW_ALLOCATION_SPILL_PLAN_MAX_NATURAL_ALIGNMENT 16u
+iree_status_t loom_low_allocation_spill_plan_define_parts(
+    const loom_local_value_domain_t* value_domain,
+    const loom_low_descriptor_set_t* descriptors,
+    const loom_low_allocation_assignment_t* assignments,
+    loom_low_allocation_spill_plan_t* spill_plans,
+    iree_host_size_t spill_plan_count, iree_arena_allocator_t* scratch_arena) {
+  bool analyzed = false;
+  uint32_t* masks = NULL;
+  for (iree_host_size_t i = 0; i < spill_plan_count; ++i) {
+    loom_low_allocation_spill_plan_t* plan = &spill_plans[i];
+    const uint16_t class_id =
+        assignments[plan->assignment_index].descriptor_reg_class_id;
+    const uint32_t full_mask =
+        descriptors->reg_classes[class_id].full_register_part_mask;
+    if (full_mask == 0) {
+      continue;
+    }
+    if (!analyzed) {
+      IREE_RETURN_IF_ERROR(loom_low_register_parts_analyze(
+          value_domain, descriptors, scratch_arena, &masks));
+      analyzed = true;
+    }
+    if (masks != NULL) {
+      const uint32_t mask =
+          masks[loom_local_value_domain_ordinal(value_domain, plan->value_id)] &
+          full_mask;
+      plan->defined_parts = mask == full_mask ? 0 : mask;
+    }
+  }
+  return iree_ok_status();
+}
 
 // Operand spilling does not rewrite attributes or dependent types. Their
 // referenced argument retains its definition and incoming payloads, with a
@@ -43,29 +76,35 @@ static uint32_t loom_low_allocation_spill_plan_natural_chunk_units(
   return 1;
 }
 
-iree_status_t loom_low_allocation_spill_plan_layout(
-    const loom_low_allocation_assignment_t* assignment,
-    uint16_t alloc_unit_bits, uint32_t* out_byte_size,
-    uint32_t* out_byte_alignment) {
-  uint64_t bit_size = (uint64_t)assignment->unit_count * alloc_unit_bits;
-  uint64_t byte_size = (bit_size + 7u) / 8u;
+static iree_status_t loom_low_allocation_spill_plan_byte_size(
+    uint32_t unit_count, uint16_t spill_unit_bits, uint32_t* out_byte_size) {
+  const uint64_t byte_size = ((uint64_t)unit_count * spill_unit_bits + 7u) / 8u;
   if (byte_size > UINT32_MAX) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "spill slot byte size exceeds uint32_t");
   }
-  uint32_t unit_byte_size = ((uint32_t)alloc_unit_bits + 7u) / 8u;
+  *out_byte_size = (uint32_t)byte_size;
+  return iree_ok_status();
+}
+
+iree_status_t loom_low_allocation_spill_plan_layout(
+    const loom_low_allocation_assignment_t* assignment,
+    const loom_low_reg_class_t* reg_class, uint32_t* out_byte_size,
+    uint32_t* out_byte_alignment) {
+  IREE_RETURN_IF_ERROR(loom_low_allocation_spill_plan_byte_size(
+      assignment->unit_count, reg_class->spill_unit_bits, out_byte_size));
+  const uint32_t unit_byte_size =
+      ((uint32_t)reg_class->spill_unit_bits + 7u) / 8u;
   const uint32_t chunk_units =
       loom_low_allocation_spill_plan_natural_chunk_units(
           assignment->unit_count);
-  uint64_t natural_alignment = (uint64_t)unit_byte_size * chunk_units;
-  if (natural_alignment >
-      LOOM_LOW_ALLOCATION_SPILL_PLAN_MAX_NATURAL_ALIGNMENT) {
-    natural_alignment = LOOM_LOW_ALLOCATION_SPILL_PLAN_MAX_NATURAL_ALIGNMENT;
-  }
-  const uint32_t byte_alignment =
-      iree_math_round_up_to_pow2_u32((uint32_t)natural_alignment);
-  *out_byte_size = (uint32_t)byte_size;
-  *out_byte_alignment = byte_alignment;
+  const uint32_t minimum_alignment = 1u
+                                     << (reg_class->spill_alignment_log2 & 15u);
+  const uint32_t maximum_alignment = 1u
+                                     << (reg_class->spill_alignment_log2 >> 4);
+  *out_byte_alignment = iree_math_round_up_to_pow2_u32(
+      iree_max(minimum_alignment,
+               iree_min(unit_byte_size * chunk_units, maximum_alignment)));
   return iree_ok_status();
 }
 
@@ -137,8 +176,8 @@ typedef struct loom_low_spill_materialization_slice_group_t {
   uint32_t target_cursor;
   // Number of slice uses in this group.
   uint32_t slice_count;
-  // Dense source-body block index shared by the slice uses.
-  uint16_t block_index;
+  // Dense block/call scope shared by the slice uses.
+  iree_host_size_t scope_index;
   // True when one full reload replaces the independent narrow reloads.
   bool use_full_reload;
 } loom_low_spill_materialization_slice_group_t;
@@ -185,9 +224,9 @@ typedef struct loom_low_spill_materialization_plan_builder_t {
   loom_low_spill_materialization_branch_payload_t* branch_payloads;
   // Number of records in |branch_payloads|.
   uint32_t branch_payload_count;
-  // Reused group index plus one indexed by source-body block.
-  uint32_t* slice_group_indices_plus_one_by_block;
-  // Reused slice groups bounded by selected-value uses and body blocks.
+  // Reused group index plus one indexed by block/call scope.
+  uint32_t* slice_group_indices_plus_one_by_scope;
+  // Reused slice groups bounded by selected-value uses and reload scopes.
   loom_low_spill_materialization_slice_group_t* slice_groups;
 } loom_low_spill_materialization_plan_builder_t;
 
@@ -226,14 +265,17 @@ bool loom_low_spill_materialization_plan_query_traffic(
       &plan->actions[action_index];
   const loom_low_allocation_spill_plan_t* spill_plan =
       &spill_plans[action->spill_plan_index];
+  const loom_type_t slot_type =
+      loom_module_value_type(module, spill_plan->value_id);
   *out_traffic = (loom_low_spill_materialization_traffic_t){
-      .value_type = loom_type_none(),
+      .moves_source = action->moves_source,
+      .defined_parts = spill_plan->defined_parts,
+      .value_type = slot_type,
+      .slot_unit_count = loom_low_register_type_unit_count(slot_type),
   };
   switch (action->kind) {
     case LOOM_LOW_SPILL_MATERIALIZATION_ACTION_DEFINITION_STORE:
       out_traffic->kind = LOOM_LOW_SPILL_MATERIALIZATION_TRAFFIC_STORE;
-      out_traffic->value_type =
-          loom_module_value_type(module, spill_plan->value_id);
       return true;
     case LOOM_LOW_SPILL_MATERIALIZATION_ACTION_EDGE_STORE: {
       out_traffic->kind = LOOM_LOW_SPILL_MATERIALIZATION_TRAFFIC_STORE;
@@ -249,15 +291,13 @@ bool loom_low_spill_materialization_plan_query_traffic(
     case LOOM_LOW_SPILL_MATERIALIZATION_ACTION_OPERAND_RELOAD:
     case LOOM_LOW_SPILL_MATERIALIZATION_ACTION_SHARED_SLICE_RELOAD:
       out_traffic->kind = LOOM_LOW_SPILL_MATERIALIZATION_TRAFFIC_RELOAD;
-      out_traffic->value_type =
-          loom_module_value_type(module, spill_plan->value_id);
       return true;
     case LOOM_LOW_SPILL_MATERIALIZATION_ACTION_NARROW_SLICE_RELOAD:
       out_traffic->kind = LOOM_LOW_SPILL_MATERIALIZATION_TRAFFIC_RELOAD;
       out_traffic->value_type =
           loom_low_spill_materialization_action_result_type(
               module, spill_plans, plan, (uint32_t)action_index);
-      out_traffic->byte_offset = action->value.narrow_slice_reload.byte_offset;
+      out_traffic->unit_offset = action->value.narrow_slice_reload.unit_offset;
       return true;
     case LOOM_LOW_SPILL_MATERIALIZATION_ACTION_REMOVE_BRANCH_ARGUMENT:
     case LOOM_LOW_SPILL_MATERIALIZATION_ACTION_REMOVE_BLOCK_ARGUMENT:
@@ -551,7 +591,8 @@ static iree_status_t loom_low_spill_materialization_initialize_values(
         sizeof(*builder->generated_uses), (void**)&builder->generated_uses));
   }
   const iree_host_size_t slice_group_capacity = iree_min(
-      (iree_host_size_t)maximum_initial_use_count, builder->body->block_count);
+      (iree_host_size_t)maximum_initial_use_count,
+      builder->body->block_count + builder->table->call_boundaries.count);
   if (slice_group_capacity != 0) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
         &builder->scratch_arena, slice_group_capacity,
@@ -607,17 +648,19 @@ static bool loom_low_spill_materialization_try_slice_use(
     const loom_low_spill_materialization_plan_builder_t* builder,
     const loom_low_allocation_assignment_t* assignment,
     const loom_low_allocation_spill_plan_t* spill_plan, loom_use_t source_use,
-    loom_op_t** out_slice_op, uint16_t* out_block_index,
+    loom_op_t** out_slice_op, iree_host_size_t* out_scope_index,
     uint32_t* out_reload_byte_size) {
   loom_op_t* slice_op = loom_use_user_op(source_use);
   if (!loom_low_allocation_spill_plan_slice_reload_byte_size(
           builder->table->module, assignment, spill_plan->byte_size, slice_op,
           out_reload_byte_size) ||
       !loom_region_try_block_index(builder->body, slice_op->parent_block,
-                                   out_block_index)) {
+                                   NULL)) {
     return false;
   }
   *out_slice_op = slice_op;
+  *out_scope_index =
+      loom_low_call_boundary_scope(&builder->table->call_boundaries, slice_op);
   return true;
 }
 
@@ -641,21 +684,21 @@ static void loom_low_spill_materialization_prepare_slice_groups(
   for (uint32_t i = 0; i < value->use_count; ++i) {
     loom_op_t* slice_op = NULL;
     uint32_t reload_byte_size = 0;
-    uint16_t block_index = 0;
+    iree_host_size_t scope_index = 0;
     if (!loom_low_spill_materialization_try_slice_use(
             builder, assignment, spill_plan, source_uses[i], &slice_op,
-            &block_index, &reload_byte_size)) {
+            &scope_index, &reload_byte_size)) {
       continue;
     }
     uint32_t group_index =
-        builder->slice_group_indices_plus_one_by_block[block_index];
+        builder->slice_group_indices_plus_one_by_scope[scope_index];
     if (group_index == 0) {
       group_index = (*out_group_count)++;
-      builder->slice_group_indices_plus_one_by_block[block_index] =
+      builder->slice_group_indices_plus_one_by_scope[scope_index] =
           group_index + 1;
       builder->slice_groups[group_index] =
           (loom_low_spill_materialization_slice_group_t){
-              .block_index = block_index,
+              .scope_index = scope_index,
               .first_slice_op = slice_op,
           };
     } else {
@@ -740,8 +783,6 @@ static void loom_low_spill_materialization_append_reloads(
     }
   }
 
-  const uint32_t unit_byte_size =
-      can_slice ? spill_plan->byte_size / assignment->unit_count : 0;
   const loom_value_id_t value_id = spill_plan->value_id;
   const loom_value_t* value =
       loom_module_value(builder->table->module, value_id);
@@ -753,14 +794,14 @@ static void loom_low_spill_materialization_append_reloads(
       continue;
     }
     loom_op_t* slice_op = NULL;
-    uint16_t block_index = 0;
+    iree_host_size_t scope_index = 0;
     uint32_t reload_byte_size = 0;
     uint32_t group_index = UINT32_MAX;
     if (can_slice && loom_low_spill_materialization_try_slice_use(
                          builder, assignment, spill_plan, source_uses[i],
-                         &slice_op, &block_index, &reload_byte_size)) {
+                         &slice_op, &scope_index, &reload_byte_size)) {
       const uint32_t group_index_plus_one =
-          builder->slice_group_indices_plus_one_by_block[block_index];
+          builder->slice_group_indices_plus_one_by_scope[scope_index];
       IREE_ASSERT_NE(group_index_plus_one, 0u);
       group_index = group_index_plus_one - 1;
     }
@@ -774,8 +815,6 @@ static void loom_low_spill_materialization_append_reloads(
     }
 
     if (group_index != UINT32_MAX) {
-      const int64_t byte_offset =
-          loom_low_slice_offset(slice_op) * (int64_t)unit_byte_size;
       const uint32_t action_index =
           loom_low_spill_materialization_append_action(
               builder,
@@ -786,7 +825,8 @@ static void loom_low_spill_materialization_append_reloads(
                   .value.narrow_slice_reload =
                       {
                           .slice_op = slice_op,
-                          .byte_offset = byte_offset,
+                          .unit_offset =
+                              (uint32_t)loom_low_slice_offset(slice_op),
                       },
               });
       const loom_value_id_t slice_result = loom_low_slice_result(slice_op);
@@ -796,10 +836,7 @@ static void loom_low_spill_materialization_append_reloads(
           builder->value_index, slice_result,
           LOOM_LOW_SPILL_MATERIALIZATION_REPLACEMENT_BIT | action_index);
       ++record->reload_count;
-      record->reload_bytes +=
-          (uint64_t)unit_byte_size *
-          loom_low_register_type_unit_count(
-              loom_module_value_type(builder->table->module, slice_result));
+      record->reload_bytes += reload_byte_size;
       continue;
     }
 
@@ -838,7 +875,7 @@ static void loom_low_spill_materialization_append_reloads(
       IREE_ASSERT_EQ(group->target_cursor,
                      group->target_start + group->slice_count);
     }
-    builder->slice_group_indices_plus_one_by_block[group->block_index] = 0;
+    builder->slice_group_indices_plus_one_by_scope[group->scope_index] = 0;
   }
 }
 
@@ -1197,6 +1234,63 @@ static iree_status_t loom_low_spill_materialization_project_instructions(
   return iree_ok_status();
 }
 
+// Preserve managed carrier retirement before spill rewriting replaces the
+// original SSA uses. Block gaps in sparse liveness distinguish final uses on
+// mutually exclusive paths; live-out values extend across the gap. Repeated
+// operands reload before the same consumer, so only the final scheduled reload
+// can take the cell. Scalar carriers need no ownership traffic.
+static iree_status_t loom_low_spill_materialization_plan_transfers(
+    loom_low_spill_materialization_plan_builder_t* builder,
+    const loom_low_spill_materialization_instruction_t* instructions,
+    uint32_t instruction_count) {
+  const loom_low_allocation_table_t* table = builder->table;
+  uint32_t* last_operation = NULL;
+  for (uint32_t i = instruction_count; i > 0; --i) {
+    const loom_low_spill_materialization_instruction_t* instruction =
+        &instructions[i - 1];
+    loom_low_spill_materialization_action_t* action =
+        &builder
+             ->actions[loom_low_spill_materialization_instruction_action_index(
+                 instruction)];
+    const loom_low_allocation_spill_plan_t* spill_plan =
+        &builder->spill_plans[action->spill_plan_index];
+    const loom_low_allocation_assignment_t* assignment =
+        &table->assignments[spill_plan->assignment_index];
+    if (!iree_any_bit_set(table->target.descriptor_set
+                              ->reg_classes[assignment->descriptor_reg_class_id]
+                              .flags,
+                          LOOM_LOW_REG_CLASS_FLAG_REFERENCE)) {
+      continue;
+    }
+    if (action->kind ==
+        LOOM_LOW_SPILL_MATERIALIZATION_ACTION_DEFINITION_STORE) {
+      action->moves_source = true;
+    } else if (action->kind ==
+                   LOOM_LOW_SPILL_MATERIALIZATION_ACTION_OPERAND_RELOAD &&
+               action->value.operand_reload.target.kind !=
+                   LOOM_LOW_SPILL_MATERIALIZATION_TARGET_ACTION_SOURCE) {
+      if (!last_operation) {
+        IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+            &builder->scratch_arena, builder->spill_plan_count,
+            sizeof(*last_operation), (void**)&last_operation));
+        memset(last_operation, 0xFF,
+               builder->spill_plan_count * sizeof(*last_operation));
+      }
+      const loom_liveness_operation_point_t* operation =
+          loom_liveness_operation_at(&table->liveness,
+                                     instruction->operation_index);
+      action->moves_source =
+          last_operation[action->spill_plan_index] !=
+              instruction->operation_index &&
+          !loom_low_allocation_live_range_assignment_live_at_point(
+              table->storage_segments, table->unit_end_points,
+              table->unit_point_count, assignment, operation->end_point);
+      last_operation[action->spill_plan_index] = instruction->operation_index;
+    }
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_low_spill_materialization_plan_copy(
     loom_low_spill_materialization_plan_builder_t* builder,
     iree_arena_allocator_t* arena,
@@ -1205,6 +1299,8 @@ static iree_status_t loom_low_spill_materialization_plan_copy(
   uint32_t instruction_count = 0;
   IREE_RETURN_IF_ERROR(loom_low_spill_materialization_project_instructions(
       builder, arena, &instructions, &instruction_count));
+  IREE_RETURN_IF_ERROR(loom_low_spill_materialization_plan_transfers(
+      builder, instructions, instruction_count));
   loom_low_spill_materialization_action_t* actions = NULL;
   if (builder->action_count != 0) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
@@ -1352,14 +1448,16 @@ IREE_ATTRIBUTE_NOINLINE iree_status_t loom_low_spill_materialization_plan_build(
     status = loom_low_spill_materialization_initialize_values(&builder);
   }
   if (iree_status_is_ok(status) && builder.body->block_count != 0) {
+    const iree_host_size_t scope_count =
+        builder.body->block_count + table->call_boundaries.count;
     status = iree_arena_allocate_array(
-        &builder.scratch_arena, builder.body->block_count,
-        sizeof(*builder.slice_group_indices_plus_one_by_block),
-        (void**)&builder.slice_group_indices_plus_one_by_block);
+        &builder.scratch_arena, scope_count,
+        sizeof(*builder.slice_group_indices_plus_one_by_scope),
+        (void**)&builder.slice_group_indices_plus_one_by_scope);
     if (iree_status_is_ok(status)) {
-      memset(builder.slice_group_indices_plus_one_by_block, 0,
-             builder.body->block_count *
-                 sizeof(*builder.slice_group_indices_plus_one_by_block));
+      memset(
+          builder.slice_group_indices_plus_one_by_scope, 0,
+          scope_count * sizeof(*builder.slice_group_indices_plus_one_by_scope));
     }
   }
   if (iree_status_is_ok(status)) {
@@ -1403,22 +1501,27 @@ static bool loom_low_allocation_spill_plan_use_is_removed_block_arg_edge(
 }
 
 typedef struct loom_low_allocation_spill_plan_slice_group_t {
-  // Sum of narrow reload bytes for this value's slice uses in the block.
+  // Sum of narrow reload bytes for this value's slice uses in the scope.
   uint64_t narrow_reload_bytes;
   // Number of slice uses; zero marks an untouched row.
   uint32_t slice_count;
-  // Next touched block, or UINT16_MAX at the end of the current query's list.
-  uint16_t next_block_index;
+  // Next touched scope, or IREE_HOST_SIZE_MAX at the end of the query.
+  iree_host_size_t next_scope_index;
 } loom_low_allocation_spill_plan_slice_group_t;
 
 iree_status_t loom_low_allocation_spill_plan_traffic_workspace_initialize(
-    const loom_region_t* body, iree_arena_allocator_t* arena,
+    const loom_region_t* body,
+    const loom_low_call_boundary_index_t* call_boundaries,
+    iree_arena_allocator_t* arena,
     loom_low_allocation_spill_plan_traffic_workspace_t* out_workspace) {
+  out_workspace->call_boundaries = *call_boundaries;
+  const iree_host_size_t scope_count =
+      body->block_count + call_boundaries->count;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      arena, body->block_count, sizeof(*out_workspace->slice_groups_by_block),
-      (void**)&out_workspace->slice_groups_by_block));
-  memset(out_workspace->slice_groups_by_block, 0,
-         body->block_count * sizeof(*out_workspace->slice_groups_by_block));
+      arena, scope_count, sizeof(*out_workspace->slice_groups_by_scope),
+      (void**)&out_workspace->slice_groups_by_scope));
+  memset(out_workspace->slice_groups_by_scope, 0,
+         scope_count * sizeof(*out_workspace->slice_groups_by_scope));
   return iree_ok_status();
 }
 
@@ -1428,8 +1531,10 @@ static void loom_low_allocation_spill_plan_value_reload_traffic(
     uint32_t spill_byte_size, const loom_value_t* value,
     const loom_region_t* body,
     loom_low_allocation_spill_plan_traffic_workspace_t* workspace,
-    uint32_t* out_reload_count, uint64_t* out_reload_bytes) {
-  uint16_t first_touched_block_index = UINT16_MAX;
+    uint32_t* out_reload_count, uint64_t* out_reload_bytes,
+    bool* out_has_narrow_uses) {
+  *out_has_narrow_uses = false;
+  iree_host_size_t first_touched_scope_index = IREE_HOST_SIZE_MAX;
 
   const loom_block_t* block = NULL;
   uint16_t arg_index = 0;
@@ -1454,29 +1559,35 @@ static void loom_low_allocation_spill_plan_value_reload_traffic(
     const bool is_slice_reload =
         loom_low_allocation_spill_plan_slice_reload_byte_size(
             module, assignment, spill_byte_size, user_op, &reload_byte_size);
+    if (loom_low_slice_isa(user_op)) {
+      const loom_type_t result_type =
+          loom_module_value_type(module, loom_low_slice_result(user_op));
+      *out_has_narrow_uses |= loom_low_register_type_unit_count(result_type) <
+                              assignment->unit_count;
+    }
 
-    uint16_t use_block_index = 0;
     if (!is_slice_reload || !can_group_slices ||
-        !loom_region_try_block_index(body, user_op->parent_block,
-                                     &use_block_index)) {
+        !loom_region_try_block_index(body, user_op->parent_block, NULL)) {
       ++reload_count;
       reload_bytes += is_slice_reload ? reload_byte_size : spill_byte_size;
       continue;
     }
 
+    const iree_host_size_t scope_index =
+        loom_low_call_boundary_scope(&workspace->call_boundaries, user_op);
     loom_low_allocation_spill_plan_slice_group_t* group =
-        &workspace->slice_groups_by_block[use_block_index];
+        &workspace->slice_groups_by_scope[scope_index];
     if (group->slice_count == 0) {
-      group->next_block_index = first_touched_block_index;
-      first_touched_block_index = use_block_index;
+      group->next_scope_index = first_touched_scope_index;
+      first_touched_scope_index = scope_index;
     }
     ++group->slice_count;
     group->narrow_reload_bytes += reload_byte_size;
   }
 
-  while (first_touched_block_index != UINT16_MAX) {
+  while (first_touched_scope_index != IREE_HOST_SIZE_MAX) {
     loom_low_allocation_spill_plan_slice_group_t* group =
-        &workspace->slice_groups_by_block[first_touched_block_index];
+        &workspace->slice_groups_by_scope[first_touched_scope_index];
     if (loom_low_allocation_spill_plan_use_full_slice_reload(
             group->slice_count, group->narrow_reload_bytes, spill_byte_size)) {
       ++reload_count;
@@ -1485,7 +1596,7 @@ static void loom_low_allocation_spill_plan_value_reload_traffic(
       reload_count += group->slice_count;
       reload_bytes += group->narrow_reload_bytes;
     }
-    first_touched_block_index = group->next_block_index;
+    first_touched_scope_index = group->next_scope_index;
     *group = (loom_low_allocation_spill_plan_slice_group_t){0};
   }
   *out_reload_count = reload_count;
@@ -1543,14 +1654,16 @@ static iree_status_t loom_low_allocation_spill_plan_traffic_for_layout(
   const loom_value_t* value = loom_module_value(module, value_id);
   uint32_t reload_count = 0;
   uint64_t reload_bytes = 0;
+  bool has_narrow_uses = false;
   loom_low_allocation_spill_plan_value_reload_traffic(
       module, assignment, byte_size, value, cfg_graph->region, workspace,
-      &reload_count, &reload_bytes);
+      &reload_count, &reload_bytes, &has_narrow_uses);
   uint32_t store_count = 0;
   IREE_RETURN_IF_ERROR(loom_low_allocation_spill_plan_value_store_count(
       module, cfg_graph, value_id, value, reload_count, &store_count));
   *out_traffic = (loom_low_allocation_spill_plan_traffic_t){
       .store_count = store_count,
+      .has_narrow_uses = has_narrow_uses,
       .store_bytes = (uint64_t)store_count * byte_size,
       .reload_count = reload_count,
       .reload_bytes = reload_bytes,
@@ -1558,37 +1671,50 @@ static iree_status_t loom_low_allocation_spill_plan_traffic_for_layout(
   return iree_ok_status();
 }
 
+uint64_t loom_low_allocation_spill_plan_traffic_cost(
+    const loom_low_allocation_spill_plan_traffic_t* traffic,
+    uint8_t rematerialization_flags) {
+  if (!traffic->has_narrow_uses &&
+      iree_all_bits_set(rematerialization_flags,
+                        LOOM_LOW_REMATERIALIZATION_VALUE_CLOSED |
+                            LOOM_LOW_REMATERIALIZATION_VALUE_STABLE_CAPTURE)) {
+    // Stable whole-value users can initialize a closed recipe without memory
+    // traffic. Ownership-sensitive and narrow uses retain the original value.
+    return 0;
+  }
+  return iree_math_saturating_add_u64(traffic->store_bytes,
+                                      traffic->reload_bytes);
+}
+
 iree_status_t loom_low_allocation_spill_plan_traffic(
     const loom_module_t* module, const loom_cfg_graph_t* cfg_graph,
     const loom_low_allocation_assignment_t* assignment,
-    uint16_t alloc_unit_bits,
+    uint16_t spill_unit_bits,
     loom_low_allocation_spill_plan_traffic_workspace_t* workspace,
     loom_low_allocation_spill_plan_traffic_t* out_traffic) {
   uint32_t byte_size = 0;
-  uint32_t byte_alignment = 0;
-  IREE_RETURN_IF_ERROR(loom_low_allocation_spill_plan_layout(
-      assignment, alloc_unit_bits, &byte_size, &byte_alignment));
+  IREE_RETURN_IF_ERROR(loom_low_allocation_spill_plan_byte_size(
+      assignment->unit_count, spill_unit_bits, &byte_size));
   return loom_low_allocation_spill_plan_traffic_for_layout(
       module, cfg_graph, assignment, byte_size, workspace, out_traffic);
 }
 
 iree_status_t loom_low_allocation_spill_plan_append(
     const loom_low_allocation_assignment_t* assignment,
-    uint32_t assignment_index, uint16_t alloc_unit_bits,
-    loom_low_spill_slot_space_t spill_slot_space,
+    uint32_t assignment_index, const loom_low_reg_class_t* reg_class,
     const loom_low_allocation_spill_plan_traffic_t* traffic,
     loom_low_allocation_spill_plan_t* spill_plans,
     iree_host_size_t* inout_spill_plan_count) {
   uint32_t byte_size = 0;
   uint32_t byte_alignment = 0;
   IREE_RETURN_IF_ERROR(loom_low_allocation_spill_plan_layout(
-      assignment, alloc_unit_bits, &byte_size, &byte_alignment));
+      assignment, reg_class, &byte_size, &byte_alignment));
 
   spill_plans[(*inout_spill_plan_count)++] = (loom_low_allocation_spill_plan_t){
       .value_id = assignment->value_id,
       .assignment_index = assignment_index,
       .slot_index = assignment->location_base,
-      .slot_space = spill_slot_space,
+      .slot_space = (loom_low_spill_slot_space_t)reg_class->spill_slot_space,
       .byte_size = byte_size,
       .byte_alignment = byte_alignment,
       .store_count = traffic->store_count,

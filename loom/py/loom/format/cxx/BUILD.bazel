@@ -6,6 +6,7 @@
 
 load("//build_tools/bazel:python.bzl", "iree_py_library", "iree_py_test")
 load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
+load("//loom/build_tools/bazel:loom_check.bzl", "loom_check_test")
 
 package(
     default_visibility = ["//visibility:public"],
@@ -16,11 +17,13 @@ iree_py_library(
     name = "cxx",
     srcs = [
         "__init__.py",
+        "buffer_access.py",
         "commands.py",
         "configs.py",
         "context.py",
         "errors.py",
         "expressions.py",
+        "functions.py",
         "kernel_configurations.py",
         "naming.py",
         "pipelines.py",
@@ -29,6 +32,7 @@ iree_py_library(
         "renderer.py",
         "translation_unit.py",
         "types.py",
+        "value_transport.py",
         "view_access.py",
     ],
     deps = [
@@ -53,17 +57,23 @@ iree_py_library(
 iree_py_test(
     name = "cxx_test",
     srcs = [
+        "buffer_access_test.py",
+        "context_test.py",
         "naming_test.py",
         "printer_test.py",
         "registry_test.py",
         "renderer_test.py",
+        "structured_results_test.py",
         "test_support.py",
         "//loom/py/loom/tools:pytest_style_runner.py",
     ],
     args = [
+        "loom.format.cxx.buffer_access_test",
+        "loom.format.cxx.context_test",
         "loom.format.cxx.naming_test",
         "loom.format.cxx.registry_test",
         "loom.format.cxx.renderer_test",
+        "loom.format.cxx.structured_results_test",
         "loom.format.cxx.printer_test",
     ],
     main = "pytest_style_runner.py",
@@ -80,6 +90,28 @@ iree_py_library(
     srcs = ["test_support.py"],
 )
 
+loom_check_test(
+    name = "control_flow_test",
+    src = "control_flow.loom-test",
+    data = ["//loom/py/loom/tools:loom-export-cxx"],
+    env = {
+        "LOOM_EXPORT_CXX": "$(rootpath //loom/py/loom/tools:loom-export-cxx)",
+    },
+    tags = ["skip-bazel_to_cmake"],
+    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
+)
+
+loom_check_test(
+    name = "value_observations_test",
+    src = "value_observations.loom-test",
+    data = ["//loom/py/loom/tools:loom-export-cxx"],
+    env = {
+        "LOOM_EXPORT_CXX": "$(rootpath //loom/py/loom/tools:loom-export-cxx)",
+    },
+    tags = ["skip-bazel_to_cmake"],
+    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
+)
+
 iree_py_test(
     name = "external_declarations_test",
     size = "small",
@@ -87,5 +119,106 @@ iree_py_test(
     args = ["$(rootpath //loom/src/loom/tools/loom-import-cxx)"],
     data = ["//loom/src/loom/tools/loom-import-cxx"],
     target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
+    deps = [":cxx"],
+)
+
+iree_py_test(
+    name = "predicate_conversions_test",
+    size = "small",
+    srcs = ["predicate_conversions_test.py"],
+    args = [
+        "$(rootpath //loom/src/loom/tools/loom-import-cxx)",
+        "$(rootpath //loom/src/loom/tools/loom-test)",
+    ],
+    data = [
+        "//loom/src/loom/tools/loom-import-cxx",
+        "//loom/src/loom/tools/loom-test",
+    ],
+    tags = ["skip-bazel_to_cmake"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/import:cxx",
+        "//loom/config/execute:vm_iree_vm",
+    ]),
+    deps = [":cxx"],
+)
+
+iree_py_test(
+    name = "control_flow_execution_test",
+    size = "small",
+    srcs = ["source_roundtrip_execution_test.py"],
+    args = [
+        "$(rootpath //loom/src/loom/tools/loom-import-cxx)",
+        "$(rootpath //loom/src/loom/tools/loom-test)",
+        "$(rootpath control_flow.cxx)",
+        "$(rootpath control_flow_checks.cxx)",
+        "8",
+        "31",
+    ],
+    data = [
+        "control_flow.cxx",
+        "control_flow_checks.cxx",
+        "//loom/src/loom/tools/loom-import-cxx",
+        "//loom/src/loom/tools/loom-test",
+    ],
+    main = "source_roundtrip_execution_test.py",
+    tags = ["skip-bazel_to_cmake"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/import:cxx",
+        "//loom/config/execute:vm_iree_vm",
+    ]),
+    deps = [":cxx"],
+)
+
+iree_py_test(
+    name = "refinement_execution_test",
+    size = "small",
+    srcs = ["source_roundtrip_execution_test.py"],
+    args = [
+        "$(rootpath //loom/src/loom/tools/loom-import-cxx)",
+        "$(rootpath //loom/src/loom/tools/loom-test)",
+        "$(rootpath refinement.cxx)",
+        "$(rootpath refinement_checks.cxx)",
+        "3",
+        "8",
+    ],
+    data = [
+        "refinement.cxx",
+        "refinement_checks.cxx",
+        "//loom/src/loom/tools/loom-import-cxx",
+        "//loom/src/loom/tools/loom-test",
+    ],
+    main = "source_roundtrip_execution_test.py",
+    tags = ["skip-bazel_to_cmake"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/import:cxx",
+        "//loom/config/execute:vm_iree_vm",
+    ]),
+    deps = [":cxx"],
+)
+
+iree_py_test(
+    name = "view_refinement_execution_test",
+    size = "small",
+    srcs = ["source_roundtrip_execution_test.py"],
+    args = [
+        "$(rootpath //loom/src/loom/tools/loom-import-cxx)",
+        "$(rootpath //loom/src/loom/tools/loom-test)",
+        "$(rootpath view_refinement.cxx)",
+        "$(rootpath view_refinement_checks.cxx)",
+        "2",
+        "7",
+    ],
+    data = [
+        "view_refinement.cxx",
+        "view_refinement_checks.cxx",
+        "//loom/src/loom/tools/loom-import-cxx",
+        "//loom/src/loom/tools/loom-test",
+    ],
+    main = "source_roundtrip_execution_test.py",
+    tags = ["skip-bazel_to_cmake"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/import:cxx",
+        "//loom/config/execute:vm_iree_vm",
+    ]),
     deps = [":cxx"],
 )

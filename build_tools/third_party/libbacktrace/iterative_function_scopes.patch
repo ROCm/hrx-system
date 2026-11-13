@@ -1,0 +1,405 @@
+diff --git a/dwarf.c b/dwarf.c
+--- a/dwarf.c
++++ b/dwarf.c
+@@ -2474,6 +2474,8 @@
+ 		     struct unit *u, struct unit_addrs_vector *addrs,
+ 		     enum dwarf_tag *unit_tag)
+ {
++  size_t depth = 0;
++
+   while (unit_buf->left > 0)
+     {
+       uint64_t code;
+@@ -2487,13 +2489,18 @@
+
+       code = read_uleb128 (unit_buf);
+       if (code == 0)
+-	return 1;
++	{
++	  if (depth == 0)
++	    return 1;
++	  --depth;
++	  continue;
++	}
+
+       abbrev = lookup_abbrev (&u->abbrevs, code, error_callback, data);
+       if (abbrev == NULL)
+ 	return 0;
+
+-      if (unit_tag != NULL)
++      if (unit_tag != NULL && depth == 0)
+ 	*unit_tag = abbrev->tag;
+
+       memset (&pcrange, 0, sizeof pcrange);
+@@ -2604,13 +2611,10 @@
+ 	    return 1;
+ 	}
+
++      /* Child DIEs contribute to the same unit range vector.  Only their
++	 nesting depth is needed to recognize the end of this sibling list.  */
+       if (abbrev->has_children)
+-	{
+-	  if (!find_address_ranges (state, base_address, unit_buf,
+-				    dwarf_sections, is_bigendian, altlink,
+-				    error_callback, data, u, addrs, NULL))
+-	    return 0;
+-	}
++	++depth;
+     }
+
+   return 1;
+@@ -3747,8 +3751,25 @@
+   return 1;
+ }
+
+-/* Read one entry plus all its children.  Add function addresses to
+-   VEC.  Returns 1 on success, 0 on error.  */
++/* A pending child list in the function-information walk.  Debug information
++   can nest far deeper than the executing call chain, so keep this state in a
++   growable vector rather than consuming the reporting thread's stack.  */
++
++struct function_scope
++{
++  /* Range base inherited by siblings after this child list ends.  */
++  uintptr_t base;
++  /* Function whose inline ranges are collected here, or NULL for other DIEs.  */
++  struct function *function;
++  /* Inline ranges owned by FUNCTION while its children are being read.  */
++  struct function_vector inlined;
++  /* Index of the enclosing inline-range owner, or SIZE_MAX for VEC_INLINED.  */
++  size_t parent_inlined;
++};
++
++/* Read one sibling list and all its children.  Add function addresses to
++   VEC_FUNCTION and inline ranges to their owning function.  Returns 1 on
++   success, 0 on error.  */
+
+ static int
+ read_function_entry (struct backtrace_state *state, struct dwarf_data *ddata,
+@@ -3758,7 +3779,15 @@
+ 		     struct function_vector *vec_function,
+ 		     struct function_vector *vec_inlined)
+ {
+-  while (unit_buf->left > 0)
++  struct backtrace_vector scopes;
++  size_t inlined_index;
++  int ret;
++
++  memset (&scopes, 0, sizeof scopes);
++  inlined_index = SIZE_MAX;
++  ret = 0;
++
++  while (unit_buf->left > 0 || scopes.size > 0)
+     {
+       uint64_t code;
+       const struct abbrev *abbrev;
+@@ -3769,20 +3798,59 @@
+       struct pcrange pcrange;
+       int have_linkage_name;
+
+-      code = read_uleb128 (unit_buf);
++      code = unit_buf->left > 0 ? read_uleb128 (unit_buf) : 0;
+       if (code == 0)
+-	return 1;
++	{
++	  struct function_scope *scope;
++
++	  if (scopes.size == 0)
++	    break;
++	  scope = ((struct function_scope *) scopes.base
++		   + scopes.size / sizeof (*scope) - 1);
++	  if (scope->inlined.count > 0)
++	    {
++	      struct function_addrs *p;
++	      struct function_addrs *faddrs;
++
++	      /* Allocate a trailing entry without including it in the count.  */
++	      p = ((struct function_addrs *)
++		   backtrace_vector_grow (state, sizeof (*p), error_callback,
++					  data, &scope->inlined.vec));
++	      if (p == NULL)
++		goto done;
++	      p->low = 0;
++	      --p->low;
++	      p->high = p->low;
++	      p->function = NULL;
++
++	      if (!backtrace_vector_release (state, &scope->inlined.vec,
++					     error_callback, data))
++		goto done;
++	      faddrs = (struct function_addrs *) scope->inlined.vec.base;
++	      backtrace_qsort (faddrs, scope->inlined.count,
++			       sizeof (*faddrs), function_addrs_compare);
++	      scope->function->function_addrs = faddrs;
++	      scope->function->function_addrs_count = scope->inlined.count;
++	    }
++	  base = scope->base;
++	  inlined_index = scope->parent_inlined;
++	  scopes.size -= sizeof (*scope);
++	  scopes.alc += sizeof (*scope);
++	  continue;
++	}
+
+       abbrev = lookup_abbrev (&u->abbrevs, code, error_callback, data);
+       if (abbrev == NULL)
+-	return 0;
++	goto done;
+
+       is_function = (abbrev->tag == DW_TAG_subprogram
+ 		     || abbrev->tag == DW_TAG_entry_point
+ 		     || abbrev->tag == DW_TAG_inlined_subroutine);
+
+       if (abbrev->tag == DW_TAG_inlined_subroutine)
+-	vec = vec_inlined;
++	vec = (inlined_index == SIZE_MAX
++	       ? vec_inlined
++	       : &((struct function_scope *) scopes.base)[inlined_index].inlined);
+       else
+ 	vec = vec_function;
+
+@@ -3793,7 +3861,7 @@
+ 		      backtrace_alloc (state, sizeof *function,
+ 				       error_callback, data));
+ 	  if (function == NULL)
+-	    return 0;
++	    goto done;
+ 	  memset (function, 0, sizeof *function);
+ 	}
+
+@@ -3807,7 +3875,7 @@
+ 			       unit_buf, u->is_dwarf64, u->version,
+ 			       u->addrsize, &ddata->dwarf_sections,
+ 			       ddata->altlink, &val))
+-	    return 0;
++	    goto done;
+
+ 	  /* The compile unit sets the base address for any address
+ 	     ranges in the function entries.  */
+@@ -3823,7 +3891,7 @@
+ 					   u->addr_base, u->addrsize,
+ 					   ddata->is_bigendian, val.u.uint,
+ 					   error_callback, data, &base))
+-		    return 0;
++		    goto done;
+ 		}
+ 	    }
+
+@@ -3840,7 +3908,7 @@
+ 					   ("invalid file number in "
+ 					    "DW_AT_call_file attribute"),
+ 					   0);
+-			  return 0;
++			  goto done;
+ 			}
+ 		      function->caller_filename = lhdr->filenames[val.u.uint];
+ 		    }
+@@ -3877,7 +3945,7 @@
+ 				       ddata->is_bigendian,
+ 				       u->str_offsets_base, &val,
+ 				       error_callback, data, &function->name))
+-		    return 0;
++		    goto done;
+ 		  break;
+
+ 		case DW_AT_linkage_name:
+@@ -3891,7 +3959,7 @@
+ 					 ddata->is_bigendian,
+ 					 u->str_offsets_base, &val,
+ 					 error_callback, data, &s))
+-		      return 0;
++		      goto done;
+ 		    if (s != NULL)
+ 		      {
+ 			function->name = s;
+@@ -3929,7 +3997,7 @@
+ 			       u, base, &pcrange, add_function_range,
+ 			       (void *) function, error_callback, data,
+ 			       (void *) vec))
+-		return 0;
++		goto done;
+ 	    }
+ 	  else
+ 	    {
+@@ -3941,63 +4009,39 @@
+
+       if (abbrev->has_children)
+ 	{
+-	  if (!is_function)
+-	    {
+-	      if (!read_function_entry (state, ddata, u, base, unit_buf, lhdr,
+-					error_callback, data, vec_function,
+-					vec_inlined))
+-		return 0;
+-	    }
+-	  else
+-	    {
+-	      struct function_vector fvec;
+-
+-	      /* Gather any information for inlined functions in
+-		 FVEC.  */
+-
+-	      memset (&fvec, 0, sizeof fvec);
+-
+-	      if (!read_function_entry (state, ddata, u, base, unit_buf, lhdr,
+-					error_callback, data, vec_function,
+-					&fvec))
+-		return 0;
+-
+-	      if (fvec.count > 0)
+-		{
+-		  struct function_addrs *p;
+-		  struct function_addrs *faddrs;
+-
+-		  /* Allocate a trailing entry, but don't include it
+-		     in fvec.count.  */
+-		  p = ((struct function_addrs *)
+-		       backtrace_vector_grow (state,
+-					      sizeof (struct function_addrs),
+-					      error_callback, data,
+-					      &fvec.vec));
+-		  if (p == NULL)
+-		    return 0;
+-		  p->low = 0;
+-		  --p->low;
+-		  p->high = p->low;
+-		  p->function = NULL;
+-
+-		  if (!backtrace_vector_release (state, &fvec.vec,
+-						 error_callback, data))
+-		    return 0;
+-
+-		  faddrs = (struct function_addrs *) fvec.vec.base;
+-		  backtrace_qsort (faddrs, fvec.count,
+-				   sizeof (struct function_addrs),
+-				   function_addrs_compare);
+-
+-		  function->function_addrs = faddrs;
+-		  function->function_addrs_count = fvec.count;
+-		}
+-	    }
+-	}
+-    }
+-
+-  return 1;
++	  struct function_scope *scope;
++
++	  scope = ((struct function_scope *)
++		   backtrace_vector_grow (state, sizeof (*scope), error_callback,
++					  data, &scopes));
++	  if (scope == NULL)
++	    goto done;
++	  memset (scope, 0, sizeof (*scope));
++	  scope->base = base;
++	  scope->function = is_function ? function : NULL;
++	  scope->parent_inlined = inlined_index;
++	  if (is_function)
++	    inlined_index = scopes.size / sizeof (*scope) - 1;
++	}
++    }
++
++  ret = 1;
++
++ done:
++  /* A failed walk can leave unfinished inline-range vectors.  Completed
++     vectors have already transferred to their function and left the stack.  */
++  while (scopes.size > 0)
++    {
++      struct function_scope *scope;
++
++      scope = ((struct function_scope *) scopes.base
++	       + scopes.size / sizeof (*scope) - 1);
++      backtrace_vector_free (state, &scope->inlined.vec, error_callback, data);
++      scopes.size -= sizeof (*scope);
++      scopes.alc += sizeof (*scope);
++    }
++  backtrace_vector_free (state, &scopes, error_callback, data);
++  return ret;
+ }
+
+ /* Read function name information for a compilation unit.  We look
+diff --git a/btest.c b/btest.c
+--- a/btest.c
++++ b/btest.c
+@@ -47,6 +47,20 @@
+
+ #include "testlib.h"
+
++/* Release the strings owned by the test callbacks after checking them.  */
++
++static void
++free_backtrace (struct bdata *data)
++{
++  size_t i;
++
++  for (i = 0; i < data->index; ++i)
++    {
++      free (data->all[i].filename);
++      free (data->all[i].function);
++    }
++}
++
+ /* Test the backtrace function with non-inlined functions.  */
+
+ static int test1 (void) __attribute__ ((noinline, noclone, optnone, unused));
+@@ -101,6 +115,8 @@
+   check ("test1", 1, all, f2line, "f2", "btest.c", &data.failed);
+   check ("test1", 2, all, f1line, "test1", "btest.c", &data.failed);
+
++  free_backtrace (&data);
++
+   printf ("%s: backtrace_full noinline\n", data.failed ? "FAIL" : "PASS");
+
+   if (data.failed)
+@@ -152,6 +168,8 @@
+   check ("test2", 0, all, f3line, "f13", "btest.c", &data.failed);
+   check ("test2", 1, all, f2line, "f12", "btest.c", &data.failed);
+   check ("test2", 2, all, f1line, "test2", "btest.c", &data.failed);
++
++  free_backtrace (&data);
+
+   printf ("%s: backtrace_full inline\n", data.failed ? "FAIL" : "PASS");
+
+@@ -238,6 +256,7 @@
+       check ("test3", 1, all, f2line, "f22", "btest.c", &bdata.failed);
+       check ("test3", 2, all, f1line, "test3", "btest.c", &bdata.failed);
+
++      free_backtrace (&bdata);
+       if (bdata.failed)
+ 	data.failed = 1;
+
+@@ -298,6 +317,7 @@
+ 		}
+ 	    }
+
++	  free (symdata.name);
+ 	  if (symdata.failed)
+ 	    data.failed = 1;
+ 	}
+@@ -376,6 +396,7 @@
+       check ("test4", 1, all, f2line, "f32", "btest.c", &bdata.failed);
+       check ("test4", 2, all, f1line, "test4", "btest.c", &bdata.failed);
+
++      free_backtrace (&bdata);
+       if (bdata.failed)
+ 	data.failed = 1;
+     }
+@@ -390,6 +411,11 @@
+
+ static int test5 (void) __attribute__ ((unused));
+
++/* Clang ASAN includes global redzones in the ELF symbol size.  This fixture
++   tests an ordinary object's exact symbol extent, not an instrumented one.  */
++#ifdef __clang__
++__attribute__ ((no_sanitize ("address")))
++#endif
+ int global = 1;
+
+ static int
+@@ -453,6 +479,7 @@
+   printf ("%s: backtrace_syminfo variable\n",
+ 	  symdata.failed ? "FAIL" : "PASS");
+
++  free (symdata.name);
+   if (symdata.failed)
+     ++failures;
+

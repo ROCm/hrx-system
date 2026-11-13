@@ -15,9 +15,11 @@ package(
 loom_check_test_suite(
     name = "test",
     srcs = [
+        "compare_address.loom-test",
         "distribution_facts.loom-test",
         "fold.loom-test",
         "literals.loom-test",
+        "null.loom-test",
         "roundtrip.loom-test",
         "verify.loom-test",
     ],

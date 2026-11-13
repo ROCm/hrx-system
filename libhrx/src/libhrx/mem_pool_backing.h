@@ -8,13 +8,15 @@
 #include "iree/base/threading/mutex.h"
 #include "iree/hal/buffer.h"
 #include "iree/hal/memory/tlsf_pool.h"
+#include "iree/hal/queue.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-// A public pool's request to retain shared storage. The backing owner guards
-// all fields; the public pool embeds this record and detaches it before dying.
+// A compatibility pool's request to retain shared storage. The backing owner
+// guards all fields; the compatibility pool embeds this record and detaches it
+// before dying.
 typedef struct hrx_mem_pool_retention_t {
   // Previous request attached to the device's backing owner, or NULL.
   struct hrx_mem_pool_retention_t* previous;
@@ -32,8 +34,9 @@ typedef struct hrx_mem_pool_sources_t {
   iree_hal_pool_t* mapping;
 } hrx_mem_pool_sources_t;
 
-// Device-owned backing shared by the device's public memory pools. The device
-// outlives its pools and buffers; the cache survives individual pool teardown.
+// Implicit backing for convenience allocations and compatibility pools. The
+// device outlives its pools and buffers; the cache survives individual pool
+// teardown.
 typedef struct hrx_mem_pool_backing_t {
   // Guards lazy construction and retention requests, never payload allocation.
   iree_slim_mutex_t mutex;
@@ -45,6 +48,10 @@ typedef struct hrx_mem_pool_backing_t {
   hrx_mem_pool_sources_t uncached_device;
   // Retained sources with required coherent public host access.
   hrx_mem_pool_sources_t host;
+  // Retained sources whose host and device execution addresses are identical.
+  hrx_mem_pool_sources_t common_host;
+  // Retained common-address sources with fine-grained host/program visibility.
+  hrx_mem_pool_sources_t fine_grained_host;
   // Retained sources with coherent host access and uncached device access.
   hrx_mem_pool_sources_t uncached_host;
   // Retained fixed-block pool for coherent eight-byte native queue signals.
@@ -55,7 +62,7 @@ typedef struct hrx_mem_pool_backing_t {
   iree_hal_pool_t* device_import_source;
   // Immutable child policy geometry selected with the cache's slab class.
   iree_hal_tlsf_pool_options_t pool_options;
-  // Borrowed list of requests embedded in live public pools.
+  // Borrowed list of requests embedded in live compatibility pools.
   hrx_mem_pool_retention_t* retention_head;
   // Maximum requested floor; all clients can reuse the same retained bytes.
   uint64_t min_bytes_to_keep;
@@ -63,12 +70,19 @@ typedef struct hrx_mem_pool_backing_t {
 
 void hrx_mem_pool_backing_initialize(hrx_mem_pool_backing_t* backing);
 
-// Releases shared storage before native device teardown. All public pools,
+// Releases shared storage before native device teardown. All dependent pools,
 // buffers, and reservations must have retired.
 void hrx_mem_pool_backing_deinitialize(hrx_mem_pool_backing_t* backing);
 
-// Creates one independent allocation policy over the device's shared cache.
-// The caller retains the device; construction acquires no native payload.
+// Returns the HRX buffer usage for a family's declared roles. Physical sources
+// and virtual reservations use the same access contract, including copy-only
+// families without requiring dispatch access from them.
+iree_hal_buffer_usage_t hrx_mem_pool_family_usage(
+    const iree_hal_queue_family_t* family);
+
+// Creates one independent compatibility allocation policy over the device's
+// shared cache. The caller retains the device; construction acquires no native
+// payload.
 iree_status_t hrx_mem_pool_backing_create_pool(hrx_device_t device,
                                                iree_hal_pool_t** out_pool);
 
@@ -84,6 +98,14 @@ iree_status_t hrx_mem_pool_backing_create_pool(hrx_device_t device,
 iree_status_t hrx_mem_pool_backing_retain_allocation_source(
     hrx_device_t device, hrx_memory_type_t memory_type,
     hrx_buffer_usage_t usage, iree_hal_pool_t** out_pool);
+
+// Retains owned host storage whose public host pointer is also its native
+// execution address. Fine-grained sources additionally support concurrent host
+// and dispatch-program load/store visibility. Wider and read-modify-write
+// atomic capabilities remain allocation-independent device properties.
+iree_status_t hrx_mem_pool_backing_retain_common_host_source(
+    hrx_device_t device, bool fine_grained, hrx_buffer_usage_t usage,
+    iree_hal_pool_t** out_pool);
 
 // Retains the device-owned eight-byte signal pool. Signals have coherent host
 // access and native 32/64-bit waits and stores on the dispatch family. Small

@@ -41,18 +41,53 @@ kernel.def @execution_uniform_scope_facts() {
 
 // ====
 
-func.def @ordinary_function_argument_has_unknown_uniform_scope(%arg: i32) {
+func.def @ordinary_function_argument_has_unknown_uniform_scope(%arg: i32, %vector: vector<4xi32>, %buffer: buffer) {
   %is_subgroup_uniform = test.fact_subgroup_uniform %arg : i32 -> i1
   %is_workgroup_uniform = test.fact_workgroup_uniform %arg : i32 -> i1
-  test.use %is_subgroup_uniform, %is_workgroup_uniform : i1, i1
+  %vector_uniform = test.fact_subgroup_uniform %vector : vector<4xi32> -> i1
+  %buffer_uniform = test.fact_subgroup_uniform %buffer : buffer -> i1
+  test.use %is_subgroup_uniform, %is_workgroup_uniform, %vector_uniform, %buffer_uniform : i1, i1, i1, i1
   func.return
 }
 
 // ----
-func.def @ordinary_function_argument_has_unknown_uniform_scope(%arg: i32) {
+func.def @ordinary_function_argument_has_unknown_uniform_scope(%arg: i32, %vector: vector<4xi32>, %buffer: buffer) {
   %is_subgroup_uniform = scalar.constant false : i1
   %is_workgroup_uniform = scalar.constant false : i1
-  test.use %is_subgroup_uniform, %is_workgroup_uniform : i1, i1
+  %vector_uniform = scalar.constant false : i1
+  %buffer_uniform = scalar.constant false : i1
+  test.use %is_subgroup_uniform, %is_workgroup_uniform, %vector_uniform, %buffer_uniform : i1, i1, i1, i1
+  func.return
+}
+
+// ====
+
+// Execution lanes and vector elements are independent dimensions. Every
+// argument is subgroup-uniform on a one-lane target, regardless of its shape.
+target.generic<reference> @one_lane {abi = hal_kernel, subgroup_size = 1}
+
+func.def target(@one_lane) @single_lane_parameters(%scalar: i32, %short: vector<1xi1>, %wide: vector<8xf32>, %buffer: buffer, %view: view<4xi32>) {
+  %scalar_uniform = test.fact_subgroup_uniform %scalar : i32 -> i1
+  %short_uniform = test.fact_subgroup_uniform %short : vector<1xi1> -> i1
+  %wide_uniform = test.fact_subgroup_uniform %wide : vector<8xf32> -> i1
+  %buffer_uniform = test.fact_subgroup_uniform %buffer : buffer -> i1
+  %view_uniform = test.fact_subgroup_uniform %view : view<4xi32> -> i1
+  %wider_scope = test.fact_workgroup_uniform %wide : vector<8xf32> -> i1
+  test.use %scalar_uniform, %short_uniform, %wide_uniform, %buffer_uniform, %view_uniform, %wider_scope : i1, i1, i1, i1, i1, i1
+  func.return
+}
+
+// ----
+target.generic<reference> @one_lane {abi = hal_kernel, subgroup_size = 1}
+
+func.def target(@one_lane) @single_lane_parameters(%scalar: i32, %short: vector<1xi1>, %wide: vector<8xf32>, %buffer: buffer, %view: view<4xi32>) {
+  %scalar_uniform = scalar.constant true : i1
+  %short_uniform = scalar.constant true : i1
+  %wide_uniform = scalar.constant true : i1
+  %buffer_uniform = scalar.constant true : i1
+  %view_uniform = scalar.constant true : i1
+  %wider_scope = scalar.constant false : i1
+  test.use %scalar_uniform, %short_uniform, %wide_uniform, %buffer_uniform, %view_uniform, %wider_scope : i1, i1, i1, i1, i1, i1
   func.return
 }
 
@@ -609,7 +644,7 @@ kernel.def @scalar_conversion_lane_distribution_facts() {
   %narrow_lo = scalar.constant -128 : i64
   %narrow_hi = scalar.constant 127 : i64
   %extended_is_varying = scalar.constant true : i1
-  %extended_lo = scalar.constant 0 : i64
+  %extended_lo = scalar.constant 1 : i64
   %extended_hi = scalar.constant 255 : i64
   test.use %narrow_is_varying, %narrow_lo, %narrow_hi, %extended_is_varying, %extended_lo, %extended_hi : i1, i64, i64, i1, i64, i64
   kernel.return

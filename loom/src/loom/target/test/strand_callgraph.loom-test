@@ -322,7 +322,9 @@ pass.pipeline<module> @specialize_targets pipeline {
 // Inherited devices project to worker code before specializing ordinary calls.
 // One reusable child is composed in two device contexts; its worker retains
 // hardware facts without inheriting the device's array ABI or contract.
-// RUN: pass specialize-target-callgraph,specialize-target-callgraph,canonicalize
+// Native helpers reuse equivalent projected contexts until outlining gives
+// each worker its own retained invocation identity.
+// RUN: pass specialize-target-callgraph,specialize-target-callgraph,specialize-target-callgraph,canonicalize
 test.target<device> @device32 {subgroup_size = 32}
 
 test.target<device> @device64 {subgroup_size = 64}
@@ -334,12 +336,17 @@ func.def noinline target(@core) @worker_width() -> (index) {
   func.return %width : index
 }
 
+low.func.def noinline target<test.low.core>(@core) @identity(%value: reg<test.i32>) -> (reg<test.i32>) asm {
+  return %value
+}
+
 pipeline.def @publish_width() run(%output: channel<tile<1xi32>>) {
   pipeline.strand workers([0], [1], [1]) {
     %write, %record = channel.reserve %output : channel<tile<1xi32>> -> (write<tile<1xi32>>, view<1xi32>)
     %width = func.call @worker_width() : () -> (index)
     %value = index.cast %width : index to i32
-    view.store %value, %record[0] : i32, view<1xi32>
+    %result = low.invoke noinline @identity(%value) : (i32) -> (i32)
+    view.store %result, %record[0] : i32, view<1xi32>
     channel.publish %write : write<tile<1xi32>>
   }
 }
@@ -369,12 +376,21 @@ func.def noinline target(@core) @worker_width_spec0() -> (index) {
   func.return %width : index
 }
 
+low.func.def noinline target<test.low.core>(@core) @identity(%value: reg<test.i32>) -> (reg<test.i32>) asm {
+  return %value
+}
+
+low.func.def noinline target<test.low.core>(@core) @identity_spec0(%value: reg<test.i32>) -> (reg<test.i32>) asm {
+  return %value
+}
+
 pipeline.def @publish_width() run(%output: channel<tile<1xi32>>) {
   pipeline.strand workers([0], [1], [1]) {
     %write, %record = channel.reserve %output : channel<tile<1xi32>> -> (write<tile<1xi32>>, view<1xi32>)
     %width = func.call pure @worker_width() : () -> (index)
     %value = index.cast %width : index to i32
-    view.store %value, %record[0] : i32, view<1xi32>
+    %result = low.invoke pure noinline @identity(%value) : (i32) -> (i32)
+    view.store %result, %record[0] : i32, view<1xi32>
     channel.publish %write : write<tile<1xi32>>
   }
 }
@@ -384,7 +400,8 @@ pipeline.def @publish_width_spec0() run(%output: channel<tile<1xi32>>) {
     %write, %record = channel.reserve %output : channel<tile<1xi32>> -> (write<tile<1xi32>>, view<1xi32>)
     %width = func.call pure @worker_width_spec0() : () -> (index)
     %value = index.cast %width : index to i32
-    view.store %value, %record[0] : i32, view<1xi32>
+    %result = low.invoke pure noinline @identity_spec0(%value) : (i32) -> (i32)
+    view.store %result, %record[0] : i32, view<1xi32>
     channel.publish %write : write<tile<1xi32>>
   }
 }
@@ -454,17 +471,86 @@ pipeline.def public target(@core) @run() run(%value: i32) {
 }
 
 func.def inline @__pipeline_strand_0(%value: i32) {
-  cfg.br ^_bb1
-^_bb1:
   %source_result = func.call @source_identity(%value) : (i32) -> (i32)
   %result = low.invoke noinline @identity(%source_result) : (i32) -> (i32)
   func.return
 }
 
 func.def inline @__pipeline_strand_1(%value: i32) {
-  cfg.br ^_bb1
-^_bb1:
   %source_result = func.call @source_identity_spec0(%value) : (i32) -> (i32)
   %result = low.invoke noinline @identity_spec0(%source_result) : (i32) -> (i32)
+  func.return
+}
+
+// ====
+// RUN: pass specialize-target-callgraph,outline-pipeline-strands,specialize-target-callgraph,canonicalize,symbol-dce
+
+// Outlining preserves an unchanged inherited context while explicit worker
+// requirements keep their independently selected helper versions.
+test.target<low_core> @construction {subgroup_size = 32}
+
+test.target<low_core> @other {subgroup_size = 64}
+
+func.def noinline @width() -> (index) {
+  %width = target.subgroup.size : index
+  func.return %width : index
+}
+
+pipeline.def public target(@construction) @mixed_workers() run(%input: i32) {
+  %parent_width = func.call @width() : () -> (index)
+  test.use %parent_width : index
+  pipeline.strand workers([0], [1], [1]) {
+    %worker_width = func.call @width() : () -> (index)
+    %result = index.cast %worker_width : index to i32
+    %sum = scalar.addi %input, %result : i32
+    test.use %sum : i32
+  }
+  pipeline.strand target(@other) workers([1], [1], [1]) {
+    %worker_width = func.call @width() : () -> (index)
+    %result = index.cast %worker_width : index to i32
+    %sum = scalar.addi %input, %result : i32
+    test.use %sum : i32
+  }
+}
+
+// ----
+test.target<low_core> @construction {subgroup_size = 32}
+
+test.target<low_core> @other {subgroup_size = 64}
+
+func.def noinline @width_spec1() -> (index) {
+  %width = index.constant 64 : index
+  func.return %width : index
+}
+
+func.def noinline @width_spec0() -> (index) {
+  %width = index.constant 32 : index
+  func.return %width : index
+}
+
+pipeline.def public target(@construction) @mixed_workers() run(%input: i32) {
+  %parent_width = func.call pure @width_spec0() : () -> (index)
+  test.use %parent_width : index
+  pipeline.strand workers([0], [1], [1]) {
+    func.call @__pipeline_strand_1(%input) : (i32)
+  }
+  pipeline.strand target(@other) workers([1], [1], [1]) {
+    func.call @__pipeline_strand_0(%input) : (i32)
+  }
+}
+
+func.def inline @__pipeline_strand_0(%input: i32) {
+  %worker_width = func.call pure @width_spec1() : () -> (index)
+  %result = index.cast %worker_width : index to i32
+  %sum = scalar.addi %input, %result : i32
+  test.use %sum : i32
+  func.return
+}
+
+func.def inline @__pipeline_strand_1(%input: i32) {
+  %worker_width = func.call pure @width_spec0() : () -> (index)
+  %result = index.cast %worker_width : index to i32
+  %sum = scalar.addi %input, %result : i32
+  test.use %sum : i32
   func.return
 }

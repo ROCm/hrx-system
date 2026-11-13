@@ -1,0 +1,85 @@
+// RUN: roundtrip
+using Fp8x4 = __float8_e4m3fn __attribute__((ext_vector_type(4)));
+using Float4 = float __attribute__((ext_vector_type(4)));
+constexpr unsigned kOneBits = __builtin_bit_cast(unsigned, 1.0f);
+static_assert(kOneBits == 0x3f800000u);
+constexpr Fp8x4 kScale = __builtin_bit_cast(Fp8x4, 0x403c3830u);
+static_assert(kScale[0] == 0.5f && kScale[1] == 1.0f);
+static_assert(kScale[2] == 1.5f && kScale[3] == 2.0f);
+void apply_scale(const Float4* input, Float4* output) {
+  *output = *input * __builtin_convertvector(kScale, Float4);
+}
+// ----
+func.def public @apply_scale(%input: buffer, %input_byte_offset: offset, %output: buffer, %output_byte_offset: offset) {
+  %4 = buffer.view %input[%input_byte_offset] : buffer -> view<4xf32>
+  %5 = vector.load<root_in_bounds> %4[0] : view<4xf32> -> vector<4xf32>
+  %kScale = vector.constantf [0.5, 1.0, 1.5, 2.0] : vector<4xf8E4M3>
+  %7 = vector.extf %kScale : vector<4xf8E4M3> to vector<4xf32>
+  %8 = vector.mulf %5, %7 : vector<4xf32>
+  %9 = buffer.view %output[%output_byte_offset] : buffer -> view<4xf32>
+  vector.store<root_in_bounds> %8, %9[0] : vector<4xf32>, view<4xf32>
+  func.return
+}
+
+// ====
+// RUN: roundtrip
+constexpr float kNaN = __builtin_bit_cast(float, 0x7f812345u);
+constexpr float kCopy = +kNaN;
+static_assert(__builtin_bit_cast(unsigned, kCopy) == 0x7f812345u);
+static_assert(__builtin_bit_cast(unsigned, -kCopy) == 0xff812345u);
+static_assert(__builtin_bit_cast(unsigned, -0.0f) == 0x80000000u);
+constexpr double kWide = __builtin_bit_cast(double, 0x7ff0000012345678ULL);
+static_assert(__builtin_bit_cast(unsigned long long, kWide) == 0x7ff0000012345678ULL);
+void store(float* output, double* wide) { *output = kNaN; *wide = kWide; }
+// ----
+func.def public @store(%output: buffer, %output_byte_offset: offset, %wide: buffer, %wide_byte_offset: offset) {
+  %4 = scalar.constant 2139169605 : i32
+  %kNaN = scalar.bitcast %4 : i32 to f32
+  %6 = buffer.view %output[%output_byte_offset] : buffer -> view<1xf32>
+  view.store<root_in_bounds> %kNaN, %6[0] : f32, view<1xf32>
+  %7 = scalar.constant 9218868437532825208 : i64
+  %kWide = scalar.bitcast %7 : i64 to f64
+  %9 = buffer.view %wide[%wide_byte_offset] : buffer -> view<1xf64>
+  view.store<root_in_bounds> %kWide, %9[0] : f64, view<1xf64>
+  func.return
+}
+
+// ====
+// RUN: verify
+using Halves2 = _Float16 __attribute__((ext_vector_type(2)));
+using Bytes4 = unsigned char __attribute__((ext_vector_type(4)));
+constexpr Halves2 kHalves = __builtin_bit_cast(Halves2, 0x7c018000u);
+constexpr Bytes4 kBytes = __builtin_bit_cast(Bytes4, kHalves);
+static_assert(kBytes[0] == 0 && kBytes[1] == 0x80);
+static_assert(kBytes[2] == 1 && kBytes[3] == 0x7c);
+static_assert(__builtin_bit_cast(unsigned, kHalves) == 0x7c018000u);
+static_assert(__builtin_bit_cast(signed char, (unsigned char)255) == -1);
+static_assert(__builtin_bit_cast(bool, (unsigned char)1));
+static_assert(__builtin_bit_cast(unsigned char, false) == 0);
+static_assert(__builtin_bit_cast(unsigned char, true) == 1);
+constexpr bool kTrue = __builtin_bit_cast(bool, (unsigned char)1);
+static_assert(__builtin_bit_cast(unsigned char, kTrue) == 1);
+
+// ====
+template <float Value> struct ValueTag {};
+static_assert(__is_same(ValueTag<1.0f>, ValueTag<static_cast<float>(1)>));
+static_assert(__is_same(ValueTag<1.0f>, ValueTag<__builtin_bit_cast(float, 0x3f800000u)>));
+static_assert(!__is_same(ValueTag<0.0f>, ValueTag<-0.0f>));
+static_assert(__is_same(ValueTag<__builtin_bit_cast(float, 0x7f812345u)>,
+                       ValueTag<__builtin_bit_cast(float, 0x7f812345u)>));
+static_assert(!__is_same(ValueTag<__builtin_bit_cast(float, 0x7f812345u)>,
+                        ValueTag<__builtin_bit_cast(float, 0x7f812346u)>));
+
+// ----
+
+// ====
+using Fp8x4 = __float8_e5m2 __attribute__((ext_vector_type(4)));
+static constexpr unsigned mutate_copy() {
+  constexpr auto original = __builtin_bit_cast(Fp8x4, 0x7d7e8000u);
+  auto copy = original;
+  copy[0] = (__float8_e5m2)2.0f;
+  return __builtin_bit_cast(unsigned, copy) ^ __builtin_bit_cast(unsigned, original);
+}
+static_assert(mutate_copy() == 0x40u);
+
+// ----

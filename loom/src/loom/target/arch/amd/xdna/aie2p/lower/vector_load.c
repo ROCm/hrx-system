@@ -18,7 +18,6 @@
 #include "loom/target/arch/amd/xdna/aie2p/vector_carrier.h"
 
 enum {
-  LOOM_AIE2P_VECTOR_LOAD_PLAN_SCALAR_PACKETS = 0x405,
   LOOM_AIE2P_VECTOR_LOAD_OFFSET_CHUNK_MAXIMUM = 127,
 };
 
@@ -179,10 +178,6 @@ iree_status_t loom_aie2p_query_vector_load_contract(
   return iree_ok_status();
 }
 
-bool loom_aie2p_vector_load_plan_isa(loom_low_lower_plan_t plan) {
-  return plan.id == LOOM_AIE2P_VECTOR_LOAD_PLAN_SCALAR_PACKETS;
-}
-
 iree_status_t loom_aie2p_prepare_vector_load_plan(
     void* user_data, loom_low_lower_context_t* context,
     const loom_op_t* source_op, loom_low_lower_plan_t* out_plan) {
@@ -213,7 +208,7 @@ iree_status_t loom_aie2p_prepare_vector_load_plan(
   IREE_RETURN_IF_ERROR(loom_low_lower_plan_value_type(
       context, loom_vector_load_result(source_op), result_type));
   *out_plan = loom_low_lower_plan_make(
-      LOOM_AIE2P_VECTOR_LOAD_PLAN_SCALAR_PACKETS, retained_plan);
+      LOOM_AIE2P_PLAN_VECTOR_LOAD_SCALAR_PACKETS, retained_plan);
   out_plan->access_flags = access->access_flags;
   return iree_ok_status();
 }
@@ -450,8 +445,8 @@ iree_status_t loom_aie2p_emit_vector_load_plan(
           &loom_amd_xdna_aie2p_core_lower_rule_set
                .source_memory_byte_offset_materializers[0],
           source_op, access, &complete_byte_offset));
-  const loom_value_id_t root =
-      loom_low_lower_lookup_value(context, access->root_value_id);
+  const loom_value_id_t root = loom_low_lower_lookup_value(
+      context, loom_low_source_memory_access_address_value_id(access));
   const loom_low_lower_memory_origin_t* origin = load_plan->origin;
   loom_value_id_t packets[LOOM_AIE2P_VECTOR_PACKET_MAX_COUNT] = {
       LOOM_VALUE_ID_INVALID,

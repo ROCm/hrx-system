@@ -19,6 +19,8 @@
 typedef struct loom_amdgpu_function_compile_spill_context_t {
   // Selected descriptor set used to rewrite structural spill traffic.
   const loom_low_descriptor_set_t* descriptor_set;
+  // Segment bytes reserved before this function's local storage.
+  loom_amdgpu_storage_layout_segment_sizes_t segment_prefix;
 } loom_amdgpu_function_compile_spill_context_t;
 
 static iree_status_t loom_amdgpu_function_compile_lower_spill_traffic(
@@ -28,8 +30,8 @@ static iree_status_t loom_amdgpu_function_compile_lower_spill_traffic(
   const loom_amdgpu_function_compile_spill_context_t* context = user_data;
   loom_amdgpu_spill_lowering_result_t result = {0};
   IREE_RETURN_IF_ERROR(loom_amdgpu_lower_spill_traffic(
-      module, low_function_op, context->descriptor_set, emitter, &result,
-      arena));
+      module, low_function_op, context->descriptor_set, context->segment_prefix,
+      emitter, arena, &result));
   out_result->error_count = result.error_count;
   out_result->lowered_traffic = result.lowered_traffic;
   out_result->required_register_value_ids = result.required_register_value_ids;
@@ -120,6 +122,7 @@ iree_status_t loom_amdgpu_function_compile(
   };
   loom_amdgpu_function_compile_spill_context_t spill_context = {
       .descriptor_set = options->resolved_target->descriptor_set,
+      .segment_prefix = options->storage_segment_prefix,
   };
   const loom_low_emission_frame_spill_free_options_t spill_free_options = {
       .materialization_options =
@@ -132,6 +135,7 @@ iree_status_t loom_amdgpu_function_compile(
                       options->report,
                       LOOM_TARGET_COMPILE_REPORT_DETAIL_SPILL_ROWS),
               .plan_traffic = loom_amdgpu_plan_spill_materialization_traffic,
+              .plan_traffic_user_data = &spill_context.segment_prefix,
               .emitter = options->emitter,
           },
       .lower_spill_traffic = loom_amdgpu_function_compile_lower_spill_traffic,
@@ -152,8 +156,9 @@ iree_status_t loom_amdgpu_function_compile(
       .callable = options->callable,
   };
   IREE_RETURN_IF_ERROR(loom_amdgpu_function_plan_build(
-      &out_compilation->frame, options->emitter, &packet_options, arena,
-      &plan_accepted, &out_compilation->plan));
+      &out_compilation->frame, options->emitter, &packet_options,
+      options->storage_segment_prefix, arena, &plan_accepted,
+      &out_compilation->plan));
   if (!plan_accepted) {
     return loom_amdgpu_function_compile_record_rejection(out_compilation,
                                                          options->report);

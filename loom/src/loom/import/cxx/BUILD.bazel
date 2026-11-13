@@ -6,7 +6,7 @@
 
 load("//build_tools/bazel:package_boundary.bzl", "iree_package_boundary")
 load("//build_tools/bazel:query.bzl", "iree_assert_dependency_boundary")
-load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library", "loom_cc_test", "loom_config_compatible_with")
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_fuzz", "loom_cc_library", "loom_cc_test", "loom_config_compatible_with")
 load(":build_defs.bzl", "CXX_COMPILER_OPTIONS")
 
 package(
@@ -23,6 +23,7 @@ iree_package_boundary(
 exports_files([
     "include/hip/hip_fp16.h",
     "include/hip/hip_runtime.h",
+    "include/hip/hip_vector_types.h",
     "include/loomcxx/atomic.h",
     "include/loomcxx/buffer.h",
     "include/loomcxx/cache.h",
@@ -42,10 +43,12 @@ exports_files([
     "include/loomcxx/target.h",
     "include/loomcxx/target/aie2p.h",
     "include/loomcxx/target/amdgpu.h",
+    "include/loomcxx/template.h",
     "include/loomcxx/vector.h",
     "include/loomcxx/view.h",
     "include/initializer_list",
     "include/stdfloat",
+    "include/type_traits",
 ])
 
 loom_cc_test(
@@ -63,6 +66,23 @@ loom_cc_test(
         "//loom/src/loom/target/test:descriptors",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_fuzz(
+    name = "import_fuzz",
+    srcs = ["import_fuzz.cc"],
+    # Two import-option bytes followed by the 64-byte source grammar.
+    args = ["-max_len=66"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/import:cxx",
+    ]),
+    deps = [
+        ":cxx",
+        "//loom/src/loom/format/text:printer",
+        "//loom/src/loom/import/cxx/testing:source_generator",
+        "//loom/src/loom/ops:op_registry",
+        "//runtime/src/iree/base/internal:arena",
     ],
 )
 
@@ -100,7 +120,6 @@ loom_cc_library(
         "//loom/src/loom/import/cxx/binding:config",
         "//loom/src/loom/import/cxx/binding:constant_attributes",
         "//loom/src/loom/import/cxx/binding:constexpr",
-        "//loom/src/loom/import/cxx/binding:exponent",
         "//loom/src/loom/import/cxx/binding:fastmath",
         "//loom/src/loom/import/cxx/binding:function_contracts",
         "//loom/src/loom/import/cxx/binding:index_expression",
@@ -115,7 +134,11 @@ loom_cc_library(
         "//loom/src/loom/import/cxx/binding:schedule_region",
         "//loom/src/loom/import/cxx/binding:target_definitions",
         "//loom/src/loom/import/cxx/binding:template_definitions",
+        "//loom/src/loom/import/cxx/binding:template_inputs",
         "//loom/src/loom/import/cxx/control:analysis",
+        "//loom/src/loom/import/cxx/control:regions",
+        "//loom/src/loom/import/cxx/lifetime:origins",
+        "//loom/src/loom/import/cxx/receiver:scopes",
         "//loom/src/loom/import/cxx/source",
         "//loom/src/loom/import/cxx/source:attributes",
         "//loom/src/loom/import/cxx/source:catalog",
@@ -123,16 +146,16 @@ loom_cc_library(
         "//loom/src/loom/import/cxx/source:error",
         "//loom/src/loom/import/cxx/source:expressions",
         "//loom/src/loom/import/cxx/source:locations",
+        "//loom/src/loom/import/cxx/source:objects",
         "//loom/src/loom/import/cxx/source:options",
         "//loom/src/loom/import/cxx/source:preamble",
         "//loom/src/loom/import/cxx/symbol:functions",
         "//loom/src/loom/import/cxx/symbol:immutable_objects",
         "//loom/src/loom/import/cxx/value:bindings",
         "//loom/src/loom/import/cxx/value:bitcast",
-        "//loom/src/loom/import/cxx/value:duplication",
         "//loom/src/loom/import/cxx/value:initialization",
+        "//loom/src/loom/import/cxx/value:lvalues",
         "//loom/src/loom/import/cxx/value:objects",
-        "//loom/src/loom/import/cxx/value:ownership",
         "//loom/src/loom/import/cxx/value:representation",
         "//loom/src/loom/import/cxx/value:scalar",
         "//loom/src/loom/import/cxx/value:signature",

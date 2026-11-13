@@ -1,0 +1,60 @@
+// RUN: pass vector-memory-footprint
+
+// Both coordinates cross different scalar representations. Their indexed
+// numeric relation must survive without treating the narrowed SSA as i32.
+func.def @bounded_sum_across_carriers(%input: buffer, %left_input: i32, %right_input: i32, %limit_input: i32) {
+  %left = scalar.assume %left_input [range(%left_input, 0, 31)] : i32
+  %right = scalar.assume %right_input [range(%right_input, 0, 31)] : i32
+  %limit = scalar.assume %limit_input [range(%limit_input, 1, 64)] : i32
+  %sum = scalar.addi %left, %right : i32
+  %bounded = scalar.assume %sum [lt(%sum, %limit)] : i32
+  %byte = scalar.trunci %bounded : i32 to i8
+  %wide = scalar.extui %byte : i8 to i64
+  %coordinate = index.cast %wide : i64 to index
+  %wide_limit = scalar.extsi %limit : i32 to i64
+  %extent = index.cast %wide_limit : i64 to index
+  %base = index.constant 0 : offset
+  %view = buffer.view %input[%base] : buffer -> view<[%extent]xi32>
+  %value = view.load %view[%coordinate] : view<[%extent]xi32> -> i32
+  test.use %value : i32
+  func.return
+}
+
+// ====
+
+// A refined conversion cannot strengthen another use of its original input.
+func.def @unrefined_conversion_is_not_bounded(%input: buffer, %coordinate_input: i32, %limit_input: i32) {
+  %coordinate = scalar.assume %coordinate_input [range(%coordinate_input, 0, 63)] : i32
+  %limit = scalar.assume %limit_input [range(%limit_input, 1, 64)] : i32
+  %bounded = scalar.assume %coordinate [lt(%coordinate, %limit)] : i32
+  %bounded_byte = scalar.trunci %bounded : i32 to i8
+  test.use %bounded_byte : i8
+  %unrefined_byte = scalar.trunci %coordinate : i32 to i8
+  %unrefined_wide = scalar.extui %unrefined_byte : i8 to i64
+  %origin = index.cast %unrefined_wide : i64 to index
+  %extent = index.cast %limit : i32 to index
+  %base = index.constant 0 : offset
+  %view = buffer.view %input[%base] : buffer -> view<[%extent]xi32>
+  // ERROR@+1: SUBRANGE/024 {op_name="view.load", view_axis="0"}
+  %value = view.load %view[%origin] : view<[%extent]xi32> -> i32
+  test.use %value : i32
+  func.return
+}
+
+// ====
+
+// Zero extension changes a negative signed value into a large positive value.
+func.def @unsigned_reinterpretation_is_not_identity(%input: buffer, %coordinate_input: i8, %limit_input: i8) {
+  %coordinate = scalar.assume %coordinate_input [range(%coordinate_input, -10, -1)] : i8
+  %limit = scalar.assume %limit_input [range(%limit_input, 1, 10)] : i8
+  %bounded = scalar.assume %coordinate [lt(%coordinate, %limit)] : i8
+  %wide = scalar.extui %bounded : i8 to i32
+  %origin = index.cast %wide : i32 to index
+  %extent = index.cast %limit : i8 to index
+  %base = index.constant 0 : offset
+  %view = buffer.view %input[%base] : buffer -> view<[%extent]xi32>
+  // ERROR@+1: SUBRANGE/024 {op_name="view.load", view_axis="0"}
+  %value = view.load %view[%origin] : view<[%extent]xi32> -> i32
+  test.use %value : i32
+  func.return
+}

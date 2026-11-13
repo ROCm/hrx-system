@@ -77,12 +77,13 @@ const loom_low_descriptor_set_t* ExplicitDescriptorSet() {
                    LOOM_LOW_REG_CLASS_FLAG_EXPLICIT_PHYSICAL_REGISTERS,
       },
   };
-  static const uint16_t kAtomicUnits[] = {0, 1, 0, 2, 3, 4, 5};
+  static const uint16_t kAtomicUnits[] = {0, 1, 0, 2, 3, 4, 5, 1};
   static const loom_low_physical_register_t kPhysicalRegisters[] = {
       {.name_string_ref = {}, .atomic_unit_start = 0, .atomic_unit_count = 2},
       {.name_string_ref = {}, .atomic_unit_start = 2, .atomic_unit_count = 1},
       {.name_string_ref = {}, .atomic_unit_start = 3, .atomic_unit_count = 2},
       {.name_string_ref = {}, .atomic_unit_start = 5, .atomic_unit_count = 2},
+      {.name_string_ref = {}, .atomic_unit_start = 7, .atomic_unit_count = 1},
   };
   static const loom_low_descriptor_set_t kDescriptorSet = [] {
     loom_low_descriptor_set_t descriptor_set = {
@@ -119,6 +120,21 @@ const loom_low_descriptor_set_t* ExchangeDescriptorSet() {
   return &kDescriptorSet;
 }
 
+const loom_low_descriptor_set_t* ReferenceDescriptorSet() {
+  static const auto kRegClasses = [] {
+    std::array<loom_low_reg_class_t, 3> classes = {};
+    classes[0].flags =
+        LOOM_LOW_REG_CLASS_FLAG_PHYSICAL | LOOM_LOW_REG_CLASS_FLAG_REFERENCE;
+    return classes;
+  }();
+  static const auto kDescriptorSet = [] {
+    auto descriptor_set = *IndependentDescriptorSet();
+    descriptor_set.reg_classes = kRegClasses.data();
+    return descriptor_set;
+  }();
+  return &kDescriptorSet;
+}
+
 loom_low_move_location_t Location(uint32_t ordinal,
                                   uint16_t register_class_id = 0) {
   return loom_low_move_location_t{
@@ -136,6 +152,12 @@ loom_low_move_t Move(uint32_t destination, uint32_t source,
   };
 }
 
+loom_low_move_t Transfer(uint32_t destination, uint32_t source) {
+  auto move = Move(destination, source);
+  move.kind = LOOM_LOW_MOVE_KIND_TRANSFER;
+  return move;
+}
+
 loom_low_move_t MoveBetween(uint32_t destination,
                             uint16_t destination_register_class_id,
                             uint32_t source,
@@ -149,7 +171,9 @@ loom_low_move_t MoveBetween(uint32_t destination,
 std::string MoveString(const loom_low_move_t& move) {
   return std::to_string(move.destination.descriptor_reg_class_id) + ":" +
          std::to_string(move.destination.location) +
-         (move.kind == LOOM_LOW_MOVE_KIND_EXCHANGE ? "<->" : "<-") +
+         (move.kind == LOOM_LOW_MOVE_KIND_EXCHANGE   ? "<->"
+          : move.kind == LOOM_LOW_MOVE_KIND_TRANSFER ? "<-!"
+                                                     : "<-") +
          std::to_string(move.source.location);
 }
 
@@ -261,6 +285,145 @@ TEST(LowMoveSequenceTest, SkipsIdentityMoves) {
   };
 
   EXPECT_TRUE(ResolveMoves(moves, IREE_ARRAYSIZE(moves), nullptr, 0).empty());
+}
+
+TEST(LowMoveSequenceTest, TransfersOnlyAfterTheFinalRead) {
+  const loom_low_move_t moves[] = {Transfer(4, 0), Transfer(5, 0)};
+  EXPECT_THAT(ResolveMoves(moves, IREE_ARRAYSIZE(moves), nullptr, 0,
+                           ReferenceDescriptorSet()),
+              ::testing::ElementsAre("0:4<-0", "0:5<-!0"));
+}
+
+TEST(LowMoveSequenceTest, PreservesLiveSourcesAndIdentityDestinations) {
+  const loom_low_move_t live[] = {Move(4, 0), Transfer(5, 0)};
+  EXPECT_THAT(ResolveMoves(live, IREE_ARRAYSIZE(live), nullptr, 0,
+                           ReferenceDescriptorSet()),
+              ::testing::ElementsAre("0:4<-0", "0:5<-0"));
+  const loom_low_move_t identity[] = {Transfer(0, 0), Transfer(1, 0)};
+  EXPECT_THAT(ResolveMoves(identity, IREE_ARRAYSIZE(identity), nullptr, 0,
+                           ReferenceDescriptorSet()),
+              ::testing::ElementsAre("0:1<-0"));
+}
+
+TEST(LowMoveSequenceTest, ReferenceCycleRetiresItsTemporaryAfterFanout) {
+  const loom_low_move_t moves[] = {Transfer(1, 0), Transfer(0, 1),
+                                   Transfer(2, 0)};
+  const loom_low_move_location_t temporaries[] = {Location(3)};
+  EXPECT_THAT(
+      ResolveMoves(moves, IREE_ARRAYSIZE(moves), temporaries,
+                   IREE_ARRAYSIZE(temporaries), ReferenceDescriptorSet()),
+      ::testing::ElementsAre("0:2<-0", "0:3<-!0", "0:0<-!1", "0:1<-!3"));
+}
+
+TEST(LowMoveSequenceTest, ReferenceTransfersPreserveParallelStateAndOwnership) {
+  // Three live cells admit independent moves, fan-out, identities, and cycles.
+  // Each source is independently live or consumed after the complete group.
+  constexpr uint32_t kCells = 3;
+  TestArena arena;
+  loom_low_move_sequence_scratch_t scratch;
+  IREE_ASSERT_OK(loom_low_move_sequence_scratch_initialize(arena.arena(),
+                                                           kCells, &scratch));
+  const loom_low_move_location_t temporary = Location(kCells + 1);
+  TemporaryResolver resolver = {&temporary, 1};
+  const loom_low_move_sequence_options_t options = {
+      ReferenceDescriptorSet(), {ResolveTemporary, &resolver}};
+  // Call arguments write packet cells; results read them. Neither group reads
+  // and writes the same packet cell. Packet zero and register zero are distinct
+  // owners, with packet zero represented by oracle cell three.
+  for (uint32_t packet_role = 0; packet_role < 3; ++packet_role) {
+    for (uint32_t shape = 0; shape < 64; ++shape) {
+      for (uint32_t consumed = 0; consumed < (1u << kCells); ++consumed) {
+        SCOPED_TRACE(packet_role);
+        SCOPED_TRACE(shape);
+        SCOPED_TRACE(consumed);
+        const std::array<uint32_t, kCells + 2> original = {1, 2, 3, 4, 0};
+        auto expected = original;
+        uint32_t destinations = 0;
+        uint32_t consumed_locations = 0;
+        uint32_t digits = shape;
+        iree_host_size_t count = 0;
+        for (uint32_t destination = 0; destination < kCells; ++destination) {
+          const uint32_t source = digits % (kCells + 1);
+          digits /= kCells + 1;
+          if (source == kCells) {
+            continue;
+          }
+          const uint32_t destination_cell =
+              packet_role == 1 && destination == 2 ? kCells : destination;
+          const uint32_t source_cell =
+              packet_role == 2 && source == 2 ? kCells : source;
+          destinations |= 1u << destination_cell;
+          if (consumed & (1u << source)) {
+            consumed_locations |= 1u << source_cell;
+          }
+          expected[destination_cell] = original[source_cell];
+          auto move = (consumed & (1u << source))
+                          ? Transfer(destination, source)
+                          : Move(destination, source);
+          if (destination_cell == kCells) {
+            move.destination.location_kind =
+                LOOM_LOW_ALLOCATION_LOCATION_CALL_STORAGE;
+            move.destination.location = 0;
+          }
+          if (source_cell == kCells) {
+            move.source.location_kind =
+                LOOM_LOW_ALLOCATION_LOCATION_CALL_STORAGE;
+            move.source.location = 0;
+          }
+          scratch.moves[count++] = move;
+        }
+        for (uint32_t source = 0; source <= kCells; ++source) {
+          if ((consumed_locations & ~destinations) & (1u << source)) {
+            expected[source] = 0;
+          }
+        }
+        loom_low_move_t output[kCells * 2];
+        iree_host_size_t output_count = 0;
+        bool complete = false;
+        IREE_ASSERT_OK(loom_low_move_sequence_resolve(
+            &scratch, count, &options, IREE_ARRAYSIZE(output), output,
+            &output_count, nullptr, &complete));
+        ASSERT_TRUE(complete);
+        auto actual = original;
+        std::array<uint32_t, kCells + 2> owners = {0, 1, 1, 1, 1};
+        for (iree_host_size_t i = 0; i < output_count; ++i) {
+          const auto& move = output[i];
+          const auto source = move.source.location_kind ==
+                                      LOOM_LOW_ALLOCATION_LOCATION_CALL_STORAGE
+                                  ? kCells
+                                  : move.source.location;
+          const auto destination =
+              move.destination.location_kind ==
+                      LOOM_LOW_ALLOCATION_LOCATION_CALL_STORAGE
+                  ? kCells
+                  : move.destination.location;
+          const auto payload = actual[source];
+          ASSERT_NE(payload, 0u);
+          ASSERT_NE(owners[payload], 0u);
+          if (move.kind == LOOM_LOW_MOVE_KIND_TRANSFER) {
+            actual[source] = 0;
+          } else {
+            ASSERT_EQ(move.kind, LOOM_LOW_MOVE_KIND_COPY);
+            ++owners[payload];
+          }
+          const auto replaced = actual[destination];
+          if (replaced) {
+            ASSERT_NE(owners[replaced], 0u);
+            --owners[replaced];
+          }
+          actual[destination] = payload;
+        }
+        EXPECT_EQ(actual, expected);
+        std::array<uint32_t, kCells + 2> expected_owners = {};
+        for (uint32_t payload : expected) {
+          if (payload) {
+            ++expected_owners[payload];
+          }
+        }
+        EXPECT_EQ(owners, expected_owners);
+      }
+    }
+  }
 }
 
 TEST(LowMoveSequenceTest, SkipsAliasIdentityMoves) {
@@ -532,6 +695,83 @@ TEST(LowMoveSequenceTest, IdentityDestinationCannotBecomeCycleScratch) {
     EXPECT_THAT(ResolveMoves(moves, IREE_ARRAYSIZE(moves), temporaries,
                              IREE_ARRAYSIZE(temporaries), descriptor_set),
                 ::testing::ElementsAre("0:3<-1", "0:1<-0", "0:0<-3"));
+  }
+}
+
+TEST(LowMoveSequenceTest, CompletedFanoutSourceCanBecomeCycleScratch) {
+  const loom_low_descriptor_set_t* descriptor_sets[] = {
+      IndependentDescriptorSet(), AliasDescriptorSet()};
+  for (const auto* descriptor_set : descriptor_sets) {
+    const loom_low_move_t moves[] = {Move(1, 2), Move(2, 1), Move(3, 0),
+                                     Move(4, 4), Move(5, 0)};
+    const loom_low_move_location_t temporary = Location(0);
+    // Both reads of source zero complete before the cycle. The resolver owns
+    // the separate proof that no value remains live in that register.
+    EXPECT_THAT(ResolveMoves(moves, IREE_ARRAYSIZE(moves), &temporary, 1,
+                             descriptor_set),
+                ::testing::ElementsAre("0:3<-0", "0:5<-0", "0:0<-2", "0:2<-1",
+                                       "0:1<-0"));
+  }
+}
+
+TEST(LowMoveSequenceTest, CompletedReferenceCopiesKeepTheirOwnerOccupied) {
+  TestArena arena;
+  loom_low_move_sequence_scratch_t scratch = {};
+  IREE_ASSERT_OK(
+      loom_low_move_sequence_scratch_initialize(arena.arena(), 3, &scratch));
+  scratch.moves[0] = Transfer(1, 2);
+  scratch.moves[1] = Transfer(2, 1);
+  const loom_low_move_location_t temporary = Location(0);
+  TemporaryResolver resolver = {&temporary, 1};
+  const loom_low_move_sequence_options_t options = {
+      ReferenceDescriptorSet(), {ResolveTemporary, &resolver}};
+  for (bool transfer : {false, true}) {
+    scratch.moves[2] = transfer ? Transfer(3, 0) : Move(3, 0);
+    loom_low_move_t output[4] = {};
+    iree_host_size_t count = 0;
+    bool complete = false;
+    IREE_ASSERT_OK(loom_low_move_sequence_resolve(
+        &scratch, 3, &options, IREE_ARRAYSIZE(output), output, &count,
+        /*out_input_flags=*/nullptr, &complete));
+    EXPECT_EQ(complete, transfer);
+    EXPECT_EQ(count, transfer ? 4u : 1u);
+    if (transfer) {
+      // Source zero is first emptied into result three, then carries and
+      // relinquishes the temporary owner. Every destination has one owner.
+      EXPECT_EQ(MoveString(output[0]), "0:3<-!0");
+      EXPECT_EQ(MoveString(output[1]), "0:0<-!2");
+      EXPECT_EQ(MoveString(output[2]), "0:2<-!1");
+      EXPECT_EQ(MoveString(output[3]), "0:1<-!0");
+    }
+  }
+}
+
+TEST(LowMoveSequenceTest, CompletedWideReadPreservesOverlappingDestination) {
+  TestArena arena;
+  loom_low_move_sequence_scratch_t scratch = {};
+  IREE_ASSERT_OK(
+      loom_low_move_sequence_scratch_initialize(arena.arena(), 3, &scratch));
+  scratch.moves[0] = Move(2, 3);
+  scratch.moves[1] = Move(3, 2);
+  // The completed read spans atomic units zero and one, while its narrow
+  // destination still owns zero. Only the source's upper unit becomes free.
+  scratch.moves[2] = Move(1, 0);
+  for (const auto& [view, occupied] :
+       {std::pair{0u, true}, std::pair{1u, true}, std::pair{4u, false}}) {
+    const auto probe = Location(view);
+    TemporaryResolver resolver = {.occupancy_probe = &probe};
+    const loom_low_move_sequence_options_t options = {
+        ExplicitDescriptorSet(), {ResolveTemporary, &resolver}};
+    loom_low_move_t output[4] = {};
+    iree_host_size_t count = 0;
+    bool complete = false;
+    IREE_ASSERT_OK(loom_low_move_sequence_resolve(
+        &scratch, 3, &options, IREE_ARRAYSIZE(output), output, &count,
+        /*out_input_flags=*/nullptr, &complete));
+    EXPECT_EQ(resolver.occupancy_probe_result, occupied);
+    EXPECT_FALSE(complete);  // The observer supplies no temporary.
+    ASSERT_EQ(count, 1u);
+    EXPECT_EQ(MoveString(output[0]), "0:1<-0");
   }
 }
 

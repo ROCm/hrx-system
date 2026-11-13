@@ -16,10 +16,11 @@ from loom.gen.target.low import c_emit, compiler, views
 from loom.gen.target.low.low_descriptors import (
     DescriptorAllowlist,
     compile_descriptor_set_family,
+    descriptor_identity_domain,
     generate_descriptor_set,
     generate_descriptor_set_family,
 )
-from loom.target.low_descriptors import DescriptorSet, Hazard, HazardKind, PressureDelta, descriptor_stable_id
+from loom.target.low_descriptors import Descriptor, DescriptorSet, Hazard, HazardKind, PressureDelta, descriptor_stable_id
 from loom.target.test.descriptors import (
     TEST_LOW_ADD_I32_DESCRIPTOR,
     TEST_LOW_CONST_I32_DESCRIPTOR,
@@ -36,10 +37,21 @@ def _emitted_initializer(source: str, declaration: str) -> str:
     return source[start : source.index("\n};", start)]
 
 
+def _identity_ordinals(*descriptors: Descriptor) -> dict[str, int]:
+    return {descriptor.key: ordinal for ordinal, descriptor in enumerate(descriptors)}
+
+
 def test_descriptor_layout_pool_preserves_all_compiled_spans() -> None:
     compiled = compiler.compile_descriptor_set(TEST_LOW_CORE_DESCRIPTOR_SET)
     layouts = []
-    rows = c_emit._descriptor_row_lines(compiled, compiled.descriptors, compiled.descriptor_rows, layouts, {})
+    rows = c_emit._descriptor_row_lines(
+        compiled,
+        compiled.descriptors,
+        compiled.descriptor_rows,
+        _identity_ordinals(*compiled.descriptors),
+        layouts,
+        {},
+    )
     assert len(layouts) < len(rows)
     for descriptor, source, row in zip(compiled.descriptors, compiled.descriptor_rows, rows, strict=True):
         index = int(next(field for field in row if field.startswith(".layout_index = ")).removeprefix(".layout_index = ").removesuffix(","))
@@ -48,7 +60,12 @@ def test_descriptor_layout_pool_preserves_all_compiled_spans() -> None:
             count = source[f"{span}_count"]
             expected.extend((f".{span}_start = {source[f'{span}_start'] if count else 0},", f".{span}_count = {count},"))
         expected.extend(
-            (f".encoding_format_id = {descriptor.encoding_format_id},", f".minimum_packet_operand_count = {source['minimum_packet_operand_count']},", f".op_kind = {descriptor.op_kind.c_name},")
+            (
+                f".encoding_format_id = {descriptor.encoding_format_id},",
+                f".minimum_packet_operand_count = {source['minimum_packet_operand_count']},",
+                f".op_kind = {descriptor.op_kind.c_name},",
+                f".flags = {'LOOM_LOW_DESCRIPTOR_LAYOUT_FLAG_VALUE_STATE' if source['value_state_operand_count'] else '0'},",
+            )
         )
         assert layouts[index] == tuple(expected)
 
@@ -59,14 +76,59 @@ def test_descriptor_identity_and_encoding_do_not_duplicate_layouts() -> None:
     spec = replace(TEST_LOW_CORE_DESCRIPTOR_SET, descriptors=descriptors)
     compiled = compiler.compile_descriptor_set(spec)
     layouts = []
-    rows = c_emit._descriptor_row_lines(compiled, compiled.descriptors, compiled.descriptor_rows, layouts, {})
+    rows = c_emit._descriptor_row_lines(
+        compiled,
+        compiled.descriptors,
+        compiled.descriptor_rows,
+        _identity_ordinals(*compiled.descriptors),
+        layouts,
+        {},
+    )
     assert len(layouts) == 1
     assert len({tuple(row) for row in rows}) == 3
     assert all(".layout_index = 0," in row for row in rows)
     source = generate_descriptor_set(spec).source
     assert source.count("static const loom_low_descriptor_layout_t ") == 1
+    assert source.count("static const loom_low_descriptor_identity_t ") == 1
+    assert source.count("static const uint64_t kTestLowCoreDescriptorStableIds") == 1
+    assert source.count(".identity_ordinal = ") == len(descriptors)
+    assert ".descriptor_identities = kTestLowCoreDescriptorIdentities," in source
+    assert ".descriptor_stable_ids = kTestLowCoreDescriptorStableIds," in source
     assert ".descriptor_layouts = kTestLowCoreDescriptorLayouts," in source
     assert ".descriptor_layout_count = 1," in source
+
+
+def test_descriptor_identity_catalog_can_be_shared_outside_family() -> None:
+    descriptors = (
+        TEST_LOW_CONST_I32_DESCRIPTOR,
+        TEST_LOW_ADD_I32_DESCRIPTOR,
+    )
+    spec = replace(TEST_LOW_CORE_DESCRIPTOR_SET, descriptors=descriptors)
+    identity_domain = descriptor_identity_domain(
+        descriptors,
+        keys=tuple(descriptor.key for descriptor in reversed(descriptors)),
+        table_symbol="loom_test_shared_descriptor_identities",
+        public_header="test/shared_descriptor_identities.h",
+    )
+
+    source = generate_descriptor_set(spec, identity_domain=identity_domain).source
+
+    assert '#include "test/shared_descriptor_identities.h"' in source
+    assert "static const loom_low_descriptor_identity_t " not in source
+    assert ".descriptor_identities = loom_test_shared_descriptor_identities," in source
+    assert ".identity_ordinal = 1," in source
+    assert ".identity_ordinal = 0," in source
+
+
+def test_descriptor_identity_catalog_rejects_conflicting_metadata() -> None:
+    descriptor = TEST_LOW_ADD_I32_DESCRIPTOR
+    with pytest.raises(ValueError, match="inconsistent semantic tags"):
+        descriptor_identity_domain(
+            (
+                descriptor,
+                replace(descriptor, semantic_tag="test.conflicting"),
+            )
+        )
 
 
 def test_descriptor_layouts_preserve_view_local_operand_form_spans() -> None:
@@ -83,8 +145,22 @@ def test_descriptor_layouts_preserve_view_local_operand_form_spans() -> None:
     assert view.descriptor_rows[0]["operand_form_start"] == 0
     layouts = []
     indices = {}
-    storage_rows = c_emit._descriptor_row_lines(compiled, compiled.descriptors, compiled.descriptor_rows, layouts, indices)
-    view_rows = c_emit._descriptor_row_lines(compiled, view.descriptors, view.descriptor_rows, layouts, indices)
+    storage_rows = c_emit._descriptor_row_lines(
+        compiled,
+        compiled.descriptors,
+        compiled.descriptor_rows,
+        _identity_ordinals(*compiled.descriptors),
+        layouts,
+        indices,
+    )
+    view_rows = c_emit._descriptor_row_lines(
+        compiled,
+        view.descriptors,
+        view.descriptor_rows,
+        _identity_ordinals(*compiled.descriptors),
+        layouts,
+        indices,
+    )
     storage_index = next(field for field in storage_rows[2] if field.startswith(".layout_index"))
     view_index = next(field for field in view_rows[0] if field.startswith(".layout_index"))
     assert storage_index != view_index
@@ -94,6 +170,8 @@ def test_descriptor_layouts_preserve_view_local_operand_form_spans() -> None:
     source = generate_descriptor_set_family(storage, (storage, spec)).source
     assert source.count("static const loom_low_descriptor_layout_t ") == 1
     assert source.count(".descriptor_layouts = kTestLowCoreDescriptorLayouts,") == 2
+    assert ".identity_ordinal = 2," in source
+    assert ".identity_ordinal = 3," in source
     assert ".operand_forms = kTestSiblingOperandForms," in source
 
 

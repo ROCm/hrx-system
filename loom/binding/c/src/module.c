@@ -825,7 +825,8 @@ static iree_status_t loomc_module_record_config_value(
     void* user_data, const loom_config_applied_value_t* applied_value) {
   loomc_module_t* module = (loomc_module_t*)user_data;
   iree_string_builder_t builder;
-  iree_string_builder_initialize(applied_value->module->allocator, &builder);
+  iree_string_builder_initialize(applied_value->module->host_allocator,
+                                 &builder);
   loom_output_stream_t stream;
   loom_output_stream_for_builder(&builder, &stream);
   iree_status_t status = loom_text_print_attribute(

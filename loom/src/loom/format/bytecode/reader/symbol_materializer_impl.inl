@@ -68,7 +68,7 @@ static iree_status_t loom_bytecode_reader_read_func_payload_attrs(
     IREE_RETURN_IF_ERROR(loom_bytecode_attribute_read_kind(
         &reader->decoder, cursor, &value_kind));
     IREE_RETURN_IF_ERROR(loom_bytecode_symbol_policy_materialize_attribute_ssa(
-        reader, cursor, descriptor, value_kind, &attrs[attr_index], ssa_scope));
+        reader, cursor, descriptor, value_kind, ssa_scope, &attrs[attr_index]));
   }
   return iree_ok_status();
 }
@@ -217,7 +217,7 @@ static iree_status_t loom_bytecode_reader_materialize_function_header(
   loom_attribute_t predicates_attr = loom_attr_absent();
   IREE_RETURN_IF_ERROR(loom_bytecode_symbol_policy_materialize_attribute_ssa(
       reader, cursor, /*descriptor=*/NULL, LOOM_BYTECODE_ATTR_PREDICATE_LIST,
-      &predicates_attr, &attribute_ssa_scope));
+      &attribute_ssa_scope, &predicates_attr));
   const bool has_predicates =
       iree_any_bit_set(flags, LOOM_BYTECODE_SYMBOL_FLAG_PREDICATES);
 
@@ -630,8 +630,8 @@ loom_bytecode_reader_materialize_global_symbol(
     IREE_RETURN_IF_ERROR(loom_bytecode_attribute_read_kind(
         &reader->decoder, cursor, &value_kind));
     IREE_RETURN_IF_ERROR(loom_bytecode_symbol_policy_materialize_attribute_ssa(
-        reader, cursor, descriptor, value_kind, &attrs[attr_index],
-        &attribute_ssa_scope));
+        reader, cursor, descriptor, value_kind, &attribute_ssa_scope,
+        &attrs[attr_index]));
   }
 
   loom_op_t* op = NULL;

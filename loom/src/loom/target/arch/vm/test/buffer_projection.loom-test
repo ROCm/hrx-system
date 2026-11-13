@@ -1,0 +1,213 @@
+// RUN: emit vm-object-lifetime
+
+func.decl import("lifetime", "event") @event(%value: i32)
+
+// One IR helper serves both immutable data and writable caller-owned storage.
+func.def noinline @identity(%value: buffer) -> (buffer) {
+  func.return %value : buffer
+}
+
+func.def noinline @pair(%left: buffer, %right: buffer) -> (buffer, buffer) {
+  %a = func.call pure @identity(%left) : (buffer) -> (buffer)
+  %b = func.call pure @identity(%right) : (buffer) -> (buffer)
+  func.return %a, %b : buffer, buffer
+}
+
+func.def noinline @literal() -> (buffer) {
+  %data = buffer.constant bytes("0b") : buffer
+  func.return %data : buffer
+}
+
+func.def noinline @select(%first: buffer, %second: buffer, %condition: i1) -> (buffer) {
+  %selected = scf.select %condition, %first, %second : buffer
+  func.return %selected : buffer
+}
+
+func.def noinline @observe(%data: buffer) {
+  %c0 = index.constant 0 : offset
+  %view = buffer.view %data[%c0] : buffer -> view<1xi8>
+  %byte = view.load %view[0] : view<1xi8> -> i8
+  %value = scalar.extui %byte : i8 to i32
+  func.call @event(%value) : (i32)
+  func.return
+}
+
+func.def public @run() {
+  %constant = func.call pure @literal() : () -> (buffer)
+  %storage = buffer.alloca.init<private> align(1) bytes("16") : buffer
+  %first, %second = func.call pure @pair(%constant, %storage) : (buffer, buffer) -> (buffer, buffer)
+  %c0 = index.constant 0 : offset
+  %writable = buffer.view %second[%c0] : buffer -> view<1xi8>
+  %replacement = scalar.constant 33 : i8
+  view.store %replacement, %writable[0] : i8, view<1xi8>
+  func.call @observe(%first) : (buffer)
+  func.call @observe(%second) : (buffer)
+  %true = scalar.constant true : i1
+  %false = scalar.constant false : i1
+  %selected_first = func.call pure @select(%first, %second, %true) : (buffer, buffer, i1) -> (buffer)
+  %selected_second = func.call pure @select(%first, %second, %false) : (buffer, buffer, i1) -> (buffer)
+  func.call @observe(%selected_first) : (buffer)
+  func.call @observe(%selected_second) : (buffer)
+  func.return
+}
+
+// ----
+event 11
+event 33
+event 11
+event 33
+OK 0
+retired 0
+
+// ====
+
+// Qualifiers join over loop backedges without changing the outside owner.
+func.decl import("lifetime", "event") @event(%value: i32)
+
+func.def noinline @choose(%initial: buffer, %replacement: buffer, %count: index) -> (buffer) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %result = scf.for %i = [%c0 to %count step %c1](%value = %initial : buffer) -> (buffer) {
+    scf.yield %replacement : buffer
+  }
+  func.return %result : buffer
+}
+
+func.def noinline @observe(%data: buffer) {
+  %c0 = index.constant 0 : offset
+  %view = buffer.view %data[%c0] : buffer -> view<1xi8>
+  %byte = view.load %view[0] : view<1xi8> -> i8
+  %value = scalar.extui %byte : i8 to i32
+  func.call @event(%value) : (i32)
+  func.return
+}
+
+func.def public @run() {
+  %storage = buffer.alloca.init<private> align(1) bytes("16") : buffer
+  %constant = buffer.constant bytes("0b") : buffer
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %unchanged = func.call pure @choose(%storage, %constant, %c0) : (buffer, buffer, index) -> (buffer)
+  %replaced = func.call pure @choose(%storage, %constant, %c1) : (buffer, buffer, index) -> (buffer)
+  func.call @observe(%unchanged) : (buffer)
+  func.call @observe(%replaced) : (buffer)
+  %offset = index.constant 0 : offset
+  %writable = buffer.view %storage[%offset] : buffer -> view<1xi8>
+  %replacement = scalar.constant 44 : i8
+  view.store %replacement, %writable[0] : i8, view<1xi8>
+  func.call @observe(%storage) : (buffer)
+  func.return
+}
+
+// ----
+event 22
+event 11
+event 44
+OK 0
+retired 0
+
+// ====
+
+func.decl import("lifetime", "event") @event(%value: i32)
+
+// The loop header publishes a result group different from its input group.
+func.def noinline @choose(%initial: buffer, %replacement: buffer, %again: i1) -> (buffer) {
+  %result = scf.while(%flag = %again : i1, %value = %initial : buffer) -> (buffer) {
+    scf.condition %flag, %value : i1, buffer
+  } do(%current: buffer) {
+    %false = scalar.constant false : i1
+    scf.yield %false, %replacement : i1, buffer
+  }
+  func.return %result : buffer
+}
+
+// A callable exit joins return qualification without qualifying its input.
+func.def noinline @early(%input: buffer, %condition: i1) -> (buffer) {
+  func.exit %condition : i1 {
+    %constant = buffer.constant bytes("0b") : buffer
+    func.return %constant : buffer
+  }
+  func.return %input : buffer
+}
+
+func.def noinline @observe(%data: buffer) {
+  %c0 = index.constant 0 : offset
+  %view = buffer.view %data[%c0] : buffer -> view<1xi8>
+  %byte = view.load %view[0] : view<1xi8> -> i8
+  %value = scalar.extui %byte : i8 to i32
+  func.call @event(%value) : (i32)
+  func.return
+}
+
+func.def public @run() {
+  %storage = buffer.alloca.init<private> align(1) bytes("16") : buffer
+  %constant = buffer.constant bytes("0b") : buffer
+  %false = scalar.constant false : i1
+  %true = scalar.constant true : i1
+  %unchanged = func.call pure @choose(%storage, %constant, %false) : (buffer, buffer, i1) -> (buffer)
+  %replaced = func.call pure @choose(%storage, %constant, %true) : (buffer, buffer, i1) -> (buffer)
+  func.call @observe(%unchanged) : (buffer)
+  func.call @observe(%replaced) : (buffer)
+  %early = func.call @early(%storage, %true) : (buffer, i1) -> (buffer)
+  %late = func.call @early(%storage, %false) : (buffer, i1) -> (buffer)
+  func.call @observe(%early) : (buffer)
+  func.call @observe(%late) : (buffer)
+  func.return
+}
+
+// ----
+event 22
+event 11
+event 11
+event 22
+OK 0
+retired 0
+
+// ====
+
+func.decl import("lifetime", "event") @event(%value: i32)
+
+// Recursive calls exchange the parameter qualifiers. The source projection
+// reaches a finite set of signatures and retains each call's selected one.
+func.def noinline @rotate(%first: buffer, %second: buffer, %count: index) -> (buffer) {
+  %c0 = index.constant 0 : index
+  %done = index.cmp eq, %count, %c0 : index
+  func.exit %done : i1 {
+    func.return %first : buffer
+  }
+  %c1 = index.constant 1 : index
+  %remaining = index.sub %count, %c1 : index
+  %result = func.call @rotate(%second, %first, %remaining) : (buffer, buffer, index) -> (buffer)
+  func.return %result : buffer
+}
+
+func.def noinline @observe(%data: buffer) {
+  %c0 = index.constant 0 : offset
+  %view = buffer.view %data[%c0] : buffer -> view<1xi8>
+  %byte = view.load %view[0] : view<1xi8> -> i8
+  %value = scalar.extui %byte : i8 to i32
+  func.call @event(%value) : (i32)
+  func.return
+}
+
+func.def public @run() {
+  %constant = buffer.constant bytes("0b") : buffer
+  %storage = buffer.alloca.init<private> align(1) bytes("16") : buffer
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %initial = func.call @rotate(%constant, %storage, %c0) : (buffer, buffer, index) -> (buffer)
+  %odd = func.call @rotate(%constant, %storage, %c1) : (buffer, buffer, index) -> (buffer)
+  %even = func.call @rotate(%constant, %storage, %c2) : (buffer, buffer, index) -> (buffer)
+  func.call @observe(%initial) : (buffer)
+  func.call @observe(%odd) : (buffer)
+  func.call @observe(%even) : (buffer)
+  func.return
+}
+
+// ----
+event 11
+event 22
+event 11
+OK 0
+retired 0

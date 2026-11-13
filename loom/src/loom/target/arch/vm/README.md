@@ -113,18 +113,29 @@ identities through calls and control flow; they are distinct from the Core
 native type provider before loading the image. Unknown opaque types fail
 compilation instead of being treated as untyped pointers.
 
-The optional [HAL reference provider](../../../../../../runtime/src/iree/module/hal/README.md)
-supplies canonical descriptors and typed host adapters for the two HAL types.
+The optional [HAL reference provider](../../../../../../runtime/src/iree/hal/vm/README.md)
+supplies canonical descriptors and typed host adapters for buffers, buffer
+views, and fences.
 Their VM references share the original HAL owner count, including buffer
-recycling and view destruction. Neither the compiler nor the generic VM links
-this provider automatically; the embedding composes the providers its modules
-use.
+recycling, view destruction, and fence semaphore ownership. Neither the compiler
+nor the generic VM links this provider automatically; the embedding composes the
+providers its modules use.
 
 Low reference registers retain their source types. The module planner binds
 each distinct type declaration once and emits a sorted namespace/type table;
 signatures compare both field kinds and reference identities. Runtime image
 construction resolves those keys to the host's canonical descriptors. Calls
 then move ordinary VM references without name lookup or wrapper allocation.
+
+Managed Low carriers have explicit lifetime operations. `low.copy` creates an
+independent identity, `low.move` transfers the carrier and invalidates its
+source, and `low.release` ends a complete `ref<T>` or `ptr<T>` carrier. Release
+clears the carrier before releasing an owned payload; borrowed and null states
+need no reference-count decrement. A pointer carrier may hold acquired lifetime
+protection, which ends at its release without changing the pointer's source
+type. Native finalizers run at the last release, including when values have
+moved through local storage. Reusing a released identity or one of its required
+storage aliases is invalid.
 
 ## Native imports and captured source
 

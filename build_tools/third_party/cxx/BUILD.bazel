@@ -6,4 +6,43 @@
 
 # bazel-to-cmake: skip
 
+load("//build_tools/bazel:cc_fuzz.bzl", "iree_cc_fuzz")
+
 exports_files(["cxx.BUILD.bazel"])
+
+_CXX_FRONTEND_FUZZ_SEEDS = [
+    "//build_tools/third_party/cxx/testdata:control_flow.cxx",
+    "//build_tools/third_party/cxx/testdata:lexical.cxx",
+    "//build_tools/third_party/cxx/testdata:preprocessor.cxx",
+    "//build_tools/third_party/cxx/testdata:semantics.cxx",
+]
+
+# Keeps the pinned frontend independently fuzzable without pulling the Loom
+# compiler or runtime into its instrumentation and failure-attribution boundary.
+iree_cc_fuzz(
+    name = "frontend_fuzz",
+    srcs = ["frontend_fuzz.cc"],
+    args = [
+        "-dict=$(rootpath :cplusplus.dict)",
+        "-max_len=65536",
+        "-seed_inputs=" + ",".join([
+            "$(rootpath %s)" % seed
+            for seed in _CXX_FRONTEND_FUZZ_SEEDS
+        ]),
+    ],
+    cxxopts = select({
+        "@platforms//os:windows": [
+            "/std:c++latest",
+            "/EHsc",
+            "/GR",
+        ],
+        "//conditions:default": [
+            "-std=c++23",
+            "-fexceptions",
+            "-frtti",
+        ],
+    }),
+    data = _CXX_FRONTEND_FUZZ_SEEDS + ["cplusplus.dict"],
+    features = ["-default_cpp_std"],
+    deps = ["@cxx//:parser"],
+)

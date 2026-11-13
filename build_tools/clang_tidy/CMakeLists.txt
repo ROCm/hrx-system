@@ -20,6 +20,7 @@ find_package(Clang REQUIRED CONFIG)
 add_library(IREEClangTidyPlugin MODULE
   iree/DesignatedInitializerCheck.cc
   iree/ExtentChecks.cc
+  iree/IsaDispatchChainCheck.cc
   iree/IreeTidyModule.cc
   iree/LifecycleChecks.cc
   iree/RecursionCheck.cc
@@ -109,6 +110,15 @@ add_test(
   COMMAND
     Python3::Interpreter
     "${CMAKE_CURRENT_SOURCE_DIR}/test/status_checks_test.py"
+    "--clang-tidy=${CLANG_TIDY_EXECUTABLE}"
+    "--plugin=$<TARGET_FILE:IREEClangTidyPlugin>"
+)
+
+add_test(
+  NAME iree-clang-tidy-isa-dispatch-chain-check
+  COMMAND
+    Python3::Interpreter
+    "${CMAKE_CURRENT_SOURCE_DIR}/test/isa_dispatch_chain_check_test.py"
     "--clang-tidy=${CLANG_TIDY_EXECUTABLE}"
     "--plugin=$<TARGET_FILE:IREEClangTidyPlugin>"
 )

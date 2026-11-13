@@ -14,7 +14,7 @@
 
 #include "iree/async/frontier_tracker.h"
 #include "iree/async/util/proactor_pool.h"
-#include "iree/hal/drivers/task/registration/driver_module.h"
+#include "iree/hal/driver/task/registration/driver_module.h"
 #include "iree/hal/replay/execute.h"
 #include "iree/hal/replay/file_reader.h"
 #include "iree/hal/replay/recorder_allocator.h"
@@ -731,7 +731,7 @@ TEST(ReplayRecorderTest, RecordsExactQueueTransferTransaction) {
   EXPECT_TRUE(transfer_targets_provisioned_queue);
 }
 
-TEST(ReplayRecorderTest, WaitfulUploadRemainsLiveAndIsMarkedUnsupported) {
+TEST(ReplayRecorderTest, UploadWithDeviceDependencyCanBeCapturedAndReplayed) {
   std::vector<uint8_t> storage(32768, 0);
   iree_hal_replay_recorder_t* recorder = CreateHostAllocationRecorder(&storage);
 
@@ -775,20 +775,23 @@ TEST(ReplayRecorderTest, WaitfulUploadRemainsLiveAndIsMarkedUnsupported) {
       .payload_values = &signal_value,
   };
 
-  uint8_t upload_data[] = {0x10, 0x11, 0x12, 0x13};
+  // The upload source is ready even though the destination has a dependency.
+  // Capture may read it immediately without waiting for the fill to complete.
+  const uint8_t fill_pattern = 0xA5;
+  const uint8_t upload_data[] = {0x10, 0x11, 0x12, 0x13};
+  IREE_ASSERT_OK(iree_hal_queue_fill(
+      queue, iree_hal_semaphore_list_empty(), wait_list, target_buffer, 0,
+      sizeof(upload_data), &fill_pattern, sizeof(fill_pattern), nullptr,
+      IREE_HAL_FILL_FLAG_NONE));
   IREE_ASSERT_OK(iree_hal_queue_upload(
       queue, wait_list, signal_list, upload_data, target_buffer,
       /*target_offset=*/0, sizeof(upload_data), /*barriers=*/NULL));
-  const uint8_t expected_data[] = {0x20, 0x21, 0x22, 0x23};
-  memcpy(upload_data, expected_data, sizeof(upload_data));
-  IREE_ASSERT_OK(iree_hal_semaphore_signal(wait_semaphore, wait_value,
-                                           /*frontier=*/nullptr));
   IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
       signal_list, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
-  uint8_t actual_data[sizeof(expected_data)] = {};
+  uint8_t actual_data[sizeof(upload_data)] = {};
   IREE_ASSERT_OK(iree_hal_buffer_map_read(target_buffer, /*source_offset=*/0,
                                           actual_data, sizeof(actual_data)));
-  EXPECT_EQ(0, memcmp(expected_data, actual_data, sizeof(expected_data)));
+  EXPECT_EQ(0, memcmp(upload_data, actual_data, sizeof(upload_data)));
 
   iree_hal_semaphore_release(signal_semaphore);
   iree_hal_semaphore_release(wait_semaphore);
@@ -799,14 +802,14 @@ TEST(ReplayRecorderTest, WaitfulUploadRemainsLiveAndIsMarkedUnsupported) {
   iree_hal_device_group_release(source_group);
 
   const ReplayRecordSummary summary = ParseReplayRecordSummary(storage);
-  EXPECT_EQ(0u, summary.queue.transfer_record_count);
-  EXPECT_EQ(1u, summary.queue.unsupported_transfer_record_count);
+  EXPECT_EQ(2u, summary.queue.transfer_record_count);
+  EXPECT_EQ(2u, summary.queue.transfer_payload_count);
+  EXPECT_EQ(0u, summary.queue.unsupported_transfer_record_count);
 
   iree_hal_device_group_t* replay_group = CreateTaskDeviceGroup();
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_UNIMPLEMENTED,
-                        iree_hal_replay_execute_file(
-                            GetCapturedFileContents(storage), replay_group,
-                            /*options=*/nullptr, iree_allocator_system()));
+  IREE_ASSERT_OK(iree_hal_replay_execute_file(GetCapturedFileContents(storage),
+                                              replay_group, /*options=*/nullptr,
+                                              iree_allocator_system()));
   iree_hal_device_group_release(replay_group);
   iree_hal_replay_recorder_release(recorder);
 }

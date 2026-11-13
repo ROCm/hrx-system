@@ -49,6 +49,15 @@ class ValueSetTest : public ::testing::Test {
     return result;
   }
 
+  static loom_value_set_id_t Intersection(loom_value_set_index_t* index,
+                                          loom_value_set_id_t first,
+                                          loom_value_set_id_t second) {
+    loom_value_set_id_t result = 0;
+    IREE_CHECK_OK(
+        loom_value_set_index_intersection(index, first, second, &result));
+    return result;
+  }
+
   static std::vector<loom_value_id_t> Members(
       const loom_value_set_index_t* index, loom_value_set_id_t set) {
     loom_value_set_cursor_t cursor;
@@ -124,6 +133,44 @@ TEST_F(ValueSetTest, LongNestedSetsRetainEveryMember) {
     EXPECT_TRUE(loom_value_set_index_contains(index, roots.back(), value));
   }
   EXPECT_EQ(Union(index, roots[1023], roots.back()), roots.back());
+}
+
+TEST_F(ValueSetTest, IntersectionPreservesCanonicalMembership) {
+  loom_value_set_index_t* index = AllocateIndex();
+  const std::array<loom_value_id_t, 8> values = {
+      0, 1, 63, 64, 65, 4096, UINT32_C(1) << 31, UINT32_MAX - 1};
+  std::array<loom_value_set_id_t, 256> sets = {};
+  for (uint32_t mask = 1; mask < sets.size(); ++mask) {
+    const uint32_t bit = iree_math_count_trailing_zeros_u32(mask);
+    sets[mask] = Add(index, sets[mask & (mask - 1)], values[bit]);
+  }
+  for (uint32_t left = 0; left < sets.size(); ++left) {
+    for (uint32_t right = 0; right < sets.size(); ++right) {
+      EXPECT_EQ(Intersection(index, sets[left], sets[right]),
+                sets[left & right])
+          << left << ", " << right;
+    }
+    const auto singleton = loom_value_set_index_singleton(index, sets[left]);
+    EXPECT_EQ(singleton, left && !(left & (left - 1))
+                             ? values[iree_math_count_trailing_zeros_u32(left)]
+                             : LOOM_VALUE_ID_INVALID);
+  }
+}
+
+TEST_F(ValueSetTest, IntersectionSharesNestedSetsWithoutAllocation) {
+  loom_value_set_index_t* index = AllocateIndex();
+  loom_value_set_id_t set = 0;
+  std::array<loom_value_set_id_t, 1024> roots;
+  for (loom_value_id_t value = 0; value < roots.size(); ++value) {
+    set = Add(index, set, value * 4097);
+    roots[value] = set;
+  }
+  const auto allocated = arena_.used_allocation_size;
+  for (auto root : roots) {
+    EXPECT_EQ(Intersection(index, root, set), root);
+    EXPECT_EQ(Intersection(index, set, root), root);
+  }
+  EXPECT_EQ(arena_.used_allocation_size, allocated);
 }
 
 }  // namespace

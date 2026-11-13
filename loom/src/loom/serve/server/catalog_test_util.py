@@ -77,7 +77,7 @@ def check_png(encoded, prompt, seed):
         if kind == b"IDAT":
             compressed.extend(payload)
         position += 12 + length
-    assert header == (7, 5, 8, 2, 0, 0, 0), header
+    assert header == (7, 5, 8, 6, 0, 0, 0), header
     assert position == len(image)
     expected = bytearray()
     for row in range(5):
@@ -88,6 +88,7 @@ def check_png(encoded, prompt, seed):
                     255 * (seed & 1),
                     255 * (len(prompt) & 1),
                     255 * ((row * 7 + column) & 1),
+                    255,
                 )
             )
     assert zlib.decompress(compressed) == expected
@@ -612,11 +613,15 @@ def prepare_catalog(fixtures, directory):
         model = json.loads((directory / package / "model.json").read_text())
         model["base_directory"] = str(directory / package)
         if kind == "text":
+            # Exercise automatic cache sizing with a fixture-sized budget. The
+            # tiny recurrent state would fit millions of endpoints in the
+            # production default.
             model["definition"].update(
                 weights=str(weights),
                 rows=2,
                 context_capacity=128,
                 checkpoint_capacity=2,
+                cache_target_bytes=65536,
             )
         catalog["models"].append(model)
     catalog_path = directory / "configuration" / "models.flags"

@@ -111,7 +111,7 @@ static iree_status_t loom_low_source_workload_prepare_low_functions(
   loom_module_t* pipeline_module = NULL;
   iree_status_t status = loom_module_allocate(
       module->context, IREE_SV("__low_source_workload_prepare_packetization"),
-      block_pool, NULL, module->allocator, &pipeline_module);
+      block_pool, NULL, module->host_allocator, &pipeline_module);
   const loom_op_t* pipeline_op = NULL;
   if (iree_status_is_ok(status)) {
     loom_op_t* mutable_pipeline_op = NULL;

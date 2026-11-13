@@ -225,7 +225,8 @@ iree_status_t loom_amdgpu_kernel_plan_build(
   loom_amdgpu_function_plan_t function_plan = {0};
   bool function_accepted = false;
   IREE_RETURN_IF_ERROR(loom_amdgpu_function_plan_build(
-      frame, options->emitter, /*packet_options=*/NULL, arena,
+      frame, options->emitter, /*packet_options=*/NULL,
+      (loom_amdgpu_storage_layout_segment_sizes_t){0}, arena,
       &function_accepted, &function_plan));
   if (!function_accepted) {
     *out_accepted = false;
@@ -295,7 +296,7 @@ iree_status_t loom_amdgpu_kernel_plan_build_from_function(
   };
   IREE_RETURN_IF_ERROR(loom_amdgpu_kernel_record_build(
       &frame->schedule, &frame->allocation, storage_layout, &record_options,
-      &out_plan->record, arena));
+      arena, &out_plan->record));
 
   bool residency_accepted = false;
   IREE_RETURN_IF_ERROR(loom_amdgpu_kernel_plan_admit_residency(

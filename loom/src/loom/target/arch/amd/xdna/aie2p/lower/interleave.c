@@ -17,7 +17,6 @@
 #include "loom/target/arch/amd/xdna/aie2p/vector_carrier.h"
 
 enum {
-  LOOM_AIE2P_INTERLEAVE_PLAN_NATIVE = 0x401,
   LOOM_AIE2P_INTERLEAVE_MAX_PACKET_COUNT = 4,
   LOOM_AIE2P_INTERLEAVE_PACKET_BYTE_COUNT = 64,
 };
@@ -154,10 +153,6 @@ iree_status_t loom_aie2p_query_interleave_contract(
   return iree_ok_status();
 }
 
-bool loom_aie2p_interleave_plan_isa(loom_low_lower_plan_t plan) {
-  return plan.id == LOOM_AIE2P_INTERLEAVE_PLAN_NATIVE;
-}
-
 iree_status_t loom_aie2p_select_interleave_plan(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_low_lower_plan_t* out_plan) {
@@ -180,7 +175,7 @@ iree_status_t loom_aie2p_select_interleave_plan(
     IREE_RETURN_IF_ERROR(loom_low_lower_plan_value_type(
         context, loom_op_const_results(source_op)[i], result_type));
   }
-  *out_plan = loom_low_lower_plan_make(LOOM_AIE2P_INTERLEAVE_PLAN_NATIVE,
+  *out_plan = loom_low_lower_plan_make(LOOM_AIE2P_PLAN_INTERLEAVE_NATIVE,
                                        retained_plan);
   return iree_ok_status();
 }

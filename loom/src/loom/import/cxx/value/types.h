@@ -27,14 +27,29 @@
 
 namespace loom::cxx_import {
 
-// One source member's retained position in an admitted record value. Component
+// One direct subobject's position in an admitted record value. Component
 // slices describe High value transport, independently of C++ object offsets.
-struct MemberPartition {
-  // Declaration identity and cv-qualified source type, borrowed from Source.
-  cxx::FieldSymbol* field;
+struct SubobjectPartition {
+  // Source properties remain owned by the frontend's direct declaration.
+  const cxx::Type* type() const;
+  uint64_t byte_offset() const;
+
+  // Direct field or nonvirtual base declaration identity, borrowed from Source.
+  cxx::Symbol* source;
   // Admitted member structure, owned by Types or a static leaf partition.
   const Partition* partition;
   // First component of this member in its containing record binding.
+  size_t component_offset;
+};
+
+// One independently constructed source subobject. Dependent handles remain
+// complete groups: a view's dimensions, encoding, and payload travel together.
+struct ValueProjection {
+  // Source type supplying the destination's dependent type scheme.
+  const cxx::Type* type;
+  // Complete semantic partition of this subobject.
+  const Partition* partition;
+  // First component relative to the complete enclosing source value.
   size_t component_offset;
 };
 
@@ -44,12 +59,30 @@ struct MemberPartition {
 struct RecordPartition final : Partition {
   // Canonical definition retaining nominal identity and source object layout.
   cxx::ClassSymbol* source;
-  // Declaration-order members, including zero-component empty records.
-  std::vector<MemberPartition> members;
+  // Direct bases followed by fields, including zero-component empty records.
+  std::vector<SubobjectPartition> members;
   // Retained member paths used to name newly bound High components.
   std::vector<std::string> component_names;
+  // Whether source initialization may bind members without a constructor call.
+  bool is_aggregate = false;
   // Whether any component needs destination identities to bind its High type.
   bool requires_binding = false;
+  // Whether a const receiver may write a mutable field, including subobjects.
+  bool has_mutable_subobject = false;
+};
+
+// One frontend-selected subobject path, retained once for shared use by source
+// ownership analysis and emission. The path is relative to a complete record;
+// its root distinguishes repeated instances of the same inherited declaration.
+struct SubobjectProjection {
+  // Direct subobject selected from the complete source record.
+  const SubobjectPartition* root;
+  // Structure of the final selected subobject, before an optional leaf field.
+  const Partition* partition;
+  // First component of the selected subobject in the complete record.
+  size_t component_offset;
+  // Physical displacement from the complete object, excluding its own origin.
+  uint64_t byte_offset;
 };
 
 // A fixed source array transported as immutable element components inside an
@@ -62,6 +95,8 @@ struct ArrayPartition final : Partition {
   const Partition* element;
   // Whether element types depend on destination SSA identities.
   bool requires_binding;
+  // Whether an element contains a field that remains writable through const.
+  bool has_mutable_subobject;
 };
 
 // Canonical typed source handle projected to one zero-origin High buffer. The
@@ -116,6 +151,11 @@ class BoundTypeStorage {
   BoundTypeStorage& operator=(const BoundTypeStorage&) = delete;
   BoundTypeStorage(BoundTypeStorage&&) = default;
   BoundTypeStorage& operator=(BoundTypeStorage&&) = default;
+
+  // Rebuilds only a shaped type's dimensions while preserving its carrier,
+  // element, alignment, and complete encoding attachment.
+  loom_type_t with_dimensions(loom_type_t type,
+                              std::span<const uint64_t> dimensions);
 
   // Retains one bounded dimension sequence and returns stable contiguous
   // storage. The sequence must have rank in [3, LOOM_TYPE_MAX_RANK].
@@ -359,17 +399,51 @@ class Types {
   // identities. Such values must use append_bound() after reserving every
   // destination component ID in transport order.
   bool requires_binding(const cxx::Type* input, cxx::AST* owner);
+  // Whether this source type contains handles without a native byte-storage
+  // representation. Native objects retain their ordinary storage semantics.
+  bool requires_value_transport(const cxx::Type* input);
+  // Cached independently constructible groups, in source declaration order.
+  std::span<const ValueProjection> projections(const cxx::Type* input,
+                                               cxx::AST* owner);
   // Returns a record's admitted source schema, or null for a non-record type.
   const RecordPartition* record(const cxx::Type* input, cxx::AST* owner);
+  // Whether a member call may replace value components of its receiver. Const
+  // calls consume the record's retained transitive mutable-subobject fact.
+  bool implicit_object_may_mutate(cxx::FunctionSymbol* function,
+                                  cxx::AST* owner);
   // Whether this constructor executes an ordinary admitted record body. Loom
   // source wrapper constructors retain their intrinsic projection paths.
-  bool is_user_record_constructor(const cxx::Type* type,
-                                  cxx::FunctionSymbol* constructor,
-                                  cxx::AST* owner);
+  bool record_constructor_requires_call(const cxx::Type* type,
+                                        cxx::FunctionSymbol* constructor,
+                                        cxx::AST* owner);
+  // Whether the selected copy/move special member has no source-level body
+  // effects. Retained once per source class; ordinary overloads are
+  // never replaced by component transport.
+  bool is_trivial_value_operation(cxx::FunctionSymbol* function);
   // Returns a fixed array's value schema, or null for a non-array type.
   const ArrayPartition* array(const cxx::Type* input, cxx::AST* owner);
   // Direct lookup of a member slice retained by its owning record's admission.
-  const MemberPartition& member(cxx::FieldSymbol* field, cxx::AST* owner);
+  const SubobjectPartition& member(cxx::Symbol* subobject, cxx::AST* owner);
+  // Projects a nonempty immutable path already selected by source semantics.
+  // Direct fields use member() and require no independently retained path.
+  const SubobjectProjection& projection(cxx::List<cxx::Symbol*>* path,
+                                        cxx::AST* owner);
+  // Physical-only access does not admit an SSA record partition: volatile
+  // fields may be accessed in memory while never forming a by-value record.
+  uint64_t subobject_offset(cxx::List<cxx::Symbol*>* path);
+  // Includes the leaf field after a possibly empty frontend-selected path.
+  SubobjectProjection selection(cxx::Symbol* field,
+                                cxx::List<cxx::Symbol*>* path, cxx::AST* owner);
+  // Selects snapshot value transport for a pointer reference field whose
+  // object identity is proven unobservable by whole-function analysis. The
+  // source reference and pointer value share the same two-component partition;
+  // this changes how construction and reads interpret those components, not
+  // the record ABI.
+  void select_pointer_reference_snapshot(cxx::FieldSymbol* field,
+                                         cxx::AST* owner);
+  // Whether this pointer reference field transports a stable referent snapshot
+  // instead of a pointer to the reference's source object.
+  bool pointer_reference_is_snapshot(cxx::FieldSymbol* field) const;
   // Admits a resolved constructor when the source partition represents a
   // trivial copy or move, or when an admitted record supplies the default
   // member-initialization plan. A null constructor requires no lifecycle
@@ -423,9 +497,6 @@ class Types {
                          cxx::AST* owner);
 
  private:
-  // Whether flattened value transport preserves every copy and move operation
-  // independently of this object's destruction semantics.
-  bool has_trivial_value_operations(const cxx::Type* input);
   void require_record_storage(const cxx::ClassType* input, cxx::AST* owner);
   const Partition* special(const cxx::Type* input, cxx::AST* owner);
   const BufferPartition* buffer(const cxx::ClassType* input, cxx::AST* owner);
@@ -460,6 +531,8 @@ class Types {
   // Stable source partitions, independent of every particular SSA binding.
   std::unordered_map<cxx::ClassSymbol*, std::unique_ptr<RecordPartition>>
       records_;
+  // Frontend special-member classification, retained at its first demand.
+  std::unordered_map<cxx::ClassSymbol*, bool> trivial_record_operations_;
   // Admitted typed buffer handles keyed by concrete source specialization.
   std::unordered_map<cxx::ClassSymbol*, std::unique_ptr<BufferPartition>>
       buffers_;
@@ -492,9 +565,22 @@ class Types {
   std::unordered_map<cxx::ClassSymbol*, std::unique_ptr<TensorPartition>>
       tensors_;
   // Member identity indexes the slice established by record admission.
-  std::unordered_map<cxx::FieldSymbol*, MemberPartition> members_;
+  std::unordered_map<cxx::Symbol*, SubobjectPartition> members_;
+  using ProjectionMap =
+      std::unordered_map<cxx::List<cxx::Symbol*>*, SubobjectProjection>;
+  // Present only when source access selects a nested class subobject path.
+  // A null partition retains a physical-only path; projection() completes the
+  // value facts before exposing the entry to its SSA consumers.
+  std::unique_ptr<ProjectionMap> projections_;
+  // Pointer reference fields whose source object identity is unobservable.
+  std::unordered_set<cxx::FieldSymbol*> pointer_reference_snapshots_;
   // Completed memory admission; layouts remain owned by the source symbols.
   std::unordered_set<cxx::ClassSymbol*> storage_records_;
+  // Source representation classification, independent of SSA admission.
+  std::unordered_map<const cxx::Type*, bool> value_transport_;
+  // Flattened construction groups computed once by source type admission.
+  std::unordered_map<const cxx::Type*, std::vector<ValueProjection>>
+      construction_groups_;
 };
 
 }  // namespace loom::cxx_import

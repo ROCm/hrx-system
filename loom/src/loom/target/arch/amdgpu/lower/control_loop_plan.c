@@ -224,11 +224,11 @@ static iree_status_t loom_amdgpu_try_prepare_loop_exit_region(
       loom_low_lower_control_carrier_argument_offset(context, continuation);
   const uint32_t previous_error_count =
       loom_low_lower_context_error_count(context);
-  const loom_amdgpu_mask_merge_constants_t* merge_constants = NULL;
+  const loom_amdgpu_mask_merge_flags_t* merge_flags = NULL;
   IREE_RETURN_IF_ERROR(loom_amdgpu_prepare_masked_merge(
       context, source_op, graph->blocks[match.continuation_index].block,
       continuation, (loom_value_slice_t){0}, (loom_value_slice_t){0},
-      &merge_constants));
+      &merge_flags));
   if (loom_low_lower_context_error_count(context) != previous_error_count) {
     return iree_ok_status();
   }
@@ -247,7 +247,7 @@ static iree_status_t loom_amdgpu_try_prepare_loop_exit_region(
       .continuation = continuation,
       .merge_arg_count = merge_arg_count,
       .source_merge_arg_count = source_merge_arg_count,
-      .merge_constants = merge_constants,
+      .merge_flags = merge_flags,
       .saved_exec = LOOM_VALUE_ID_INVALID,
       .source_condition = LOOM_VALUE_ID_INVALID,
   };
@@ -539,10 +539,17 @@ static iree_status_t loom_amdgpu_prepare_loop_plan(
         context, loom_cfg_cond_br_condition(exit->source_op));
     break;
   }
-  IREE_ASSERT(
-      loom_amdgpu_low_type_is_native_i1_mask(context, plan->exec_mask_type));
+  IREE_ASSERT(loom_amdgpu_low_type_is_sgpr_pair(context, plan->exec_mask_type));
   plan->capture_value_count =
       loom_low_lower_control_argument_count(context, low_continuation);
+  // Predicate capture explicitly combines new lane bits with retained bits.
+  // Enter the capture block before the loop so that retained SSA values
+  // dominate every exit, including the first group of lanes to retire.
+  for (uint16_t i = 0; i < plan->capture_value_count && !plan->entry_seeded;
+       ++i) {
+    plan->entry_seeded =
+        loom_amdgpu_control_argument_is_lane_mask(context, low_continuation, i);
+  }
   plan->capture_exits =
       plan->capture_value_count != 0 || plan->forwards_to_parent;
   for (uint32_t i = 0; i < plan->exit_plan_count && !plan->capture_exits; ++i) {

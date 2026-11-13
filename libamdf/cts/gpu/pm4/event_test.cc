@@ -92,7 +92,7 @@ TEST_P(Pm4EventTest, WakesForEveryFiniteBatchIncludingTheIdleTail) {
   const uint64_t host_records =
       reinterpret_cast<uintptr_t>(storage->host.pointer);
   GpuCommandQueue* queue = nullptr;
-  ASSERT_NO_FATAL_FAILURE(CreateQueue(&queue, 65536));
+  ASSERT_NO_FATAL_FAILURE(CreateQueue(65536, &queue));
   ASSERT_GE(queue->words().size(), kEpochCount * (record_count * 16u + 24u));
   Pm4CommandWriter commands(queue->words().data(), *pm4_profile_);
   for (uint32_t epoch = 0; epoch < kEpochCount; ++epoch) {

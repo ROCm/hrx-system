@@ -9,14 +9,11 @@
 #ifndef LOOM_TARGET_ARCH_AMD_XDNA_AIE2P_LOWER_SHUFFLE_H_
 #define LOOM_TARGET_ARCH_AMD_XDNA_AIE2P_LOWER_SHUFFLE_H_
 
-#include "loom/codegen/low/lower/lower.h"
+#include "loom/target/arch/amd/xdna/aie2p/lower/lower.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-// Returns true when |plan| is an AIE2P fixed-permutation plan.
-bool loom_aie2p_shuffle_plan_isa(loom_low_lower_plan_t plan);
 
 // Selects the complete fixed vector-permutation family admitted by AIE2P
 // register carriers. Non-shuffle and carrierless operations leave |out_plan|

@@ -1,0 +1,167 @@
+// RUN: emit source-low target=amdgpu:gfx1100 output=low
+
+// A final store materializes each word at the consumer. It does not choose
+// the register bank of a uniform recurrence, including a widened i32 result.
+kernel.def @uniform_stored_loop() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%seed: i64, %rounds: index, %narrow_output: buffer, %wide_output: buffer) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %base = index.constant 0 : offset
+  %lane = kernel.workitem.id<x> : index
+  %narrow_initial = scalar.trunci %seed : i64 to i32
+  %narrow_step = scalar.constant 3 : i32
+  %wide_step = scalar.constant 4294967297 : i64
+  %narrow, %wide = scf.for %iv = [%begin to %rounds step %step](%narrow_state = %narrow_initial : i32, %wide_state = %seed : i64) -> (i32, i64) {
+    %next_narrow = scalar.addi %narrow_state, %narrow_step : i32
+    %next_wide = scalar.addi %wide_state, %wide_step : i64
+    scf.yield %next_narrow, %next_wide : i32, i64
+  }
+  %narrow_results = buffer.view %narrow_output[%base] : buffer -> view<64xi32>
+  %wide_results = buffer.view %wide_output[%base] : buffer -> view<128xi64>
+  view.store %narrow, %narrow_results[%lane] : i32, view<64xi32>
+  view.store %wide, %wide_results[%lane] : i64, view<128xi64>
+  %width = index.constant 64 : index
+  %next_lane = index.add %lane, %width : index
+  %widened = scalar.extui %narrow : i32 to i64
+  view.store %widened, %wide_results[%next_lane] : i64, view<128xi64>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.rdna3.core> abi_layout({constant_count = 3, direct_arg_count = 2, direct_arg_names = {arg0 = "seed", arg1 = "rounds"}, direct_arg_offsets = [0, 8], direct_arg_parameter_indices = [0, 1], direct_arg_sizes = [8, 4], parameter_count = 4, resource_count = 2, resource_offsets = [16, 24], resource_parameter_indices = [2, 3], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @uniform_stored_loop(%seed: reg<amdgpu.sgpr x2>, %rounds: reg<amdgpu.sgpr>) asm {
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %narrow_results = resource<hal_binding> {extent = 256, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %wide_results = resource<hal_binding> {extent = 1024, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %begin = s_mov_b32 0
+  %step = s_mov_b32 1
+  %narrow_initial = slice %seed[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %narrow_step = s_mov_b32 3
+  %79 = slice %seed[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  low.br ^_bb1(%begin: reg<amdgpu.sgpr>, %narrow_initial: reg<amdgpu.sgpr>, %narrow_initial: reg<amdgpu.sgpr>, %79: reg<amdgpu.sgpr>)
+^_bb1(%iv: reg<amdgpu.sgpr>, %narrow_state: reg<amdgpu.sgpr>, %76: reg<amdgpu.sgpr>, %77: reg<amdgpu.sgpr>):
+  %48 = s_cmp_lt_i32 %iv, %rounds
+  low.cond_br %48, ^_bb2, ^_bb3 : reg<amdgpu.scc>
+^_bb2:
+  %next_narrow = s_add_u32 %narrow_state, %narrow_step
+  %54, %55 = s_add_co_u32 %76, %step
+  %56, %57 = s_addc_u32 %77, %step, %55
+  %59 = s_add_u32 %iv, %step
+  low.br ^_bb1(%59: reg<amdgpu.sgpr>, %next_narrow: reg<amdgpu.sgpr>, %54: reg<amdgpu.sgpr>, %56: reg<amdgpu.sgpr>)
+^_bb3:
+  %60 = v_mov_b32_copy %narrow_state
+  %61 = v_lshlrev_b32_src0_inline %lane, 2
+  global_store_b32_saddr %61, %60, %narrow_results
+  %63 = v_mov_b32_copy %76
+  %65 = v_mov_b32_copy %77
+  %66 = concat(%63, %65) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %67 = v_lshlrev_b32_src0_inline %lane, 3
+  global_store_b64_saddr %67, %66, %wide_results
+  %73 = v_mov_b32_copy %begin
+  %74 = concat(%60, %73) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_store_b64_saddr %67, %74, %wide_results {offset = 512}
+  return
+}
+
+// ====
+
+// Uniform CFG selection also stays scalar when its consumer is an atomic.
+kernel.def @uniform_atomic_payload() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%choose_left: i32, %left: i64, %right: i64, %output: buffer) {
+  %c0 = scalar.constant 0 : i32
+  %condition = scalar.cmpi ne, %choose_left, %c0 : i32
+  cfg.cond_br %condition, ^left, ^right
+^left:
+  cfg.br ^join(%left: i64)
+^right:
+  cfg.br ^join(%right: i64)
+^join(%value: i64):
+  %base = index.constant 0 : offset
+  %word = buffer.view %output[%base] : buffer -> view<1xi64>
+  view.atomic.reduce<addi> %value, %word[0] {ordering = relaxed, scope = device} : i64, view<1xi64>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.rdna3.core> abi_layout({constant_count = 5, direct_arg_count = 3, direct_arg_names = {arg0 = "choose_left", arg1 = "left", arg2 = "right"}, direct_arg_offsets = [0, 4, 12], direct_arg_parameter_indices = [0, 1, 2], direct_arg_sizes = [4, 8, 8], parameter_count = 4, resource_count = 1, resource_offsets = [24], resource_parameter_indices = [3], uses_kernarg_segment_ptr = true}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @uniform_atomic_payload(%choose_left: reg<amdgpu.sgpr>, %left: reg<amdgpu.sgpr x2>, %right: reg<amdgpu.sgpr x2>) asm {
+  %word = resource<hal_binding> {extent = 8, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %c0 = s_mov_b32 0
+  %condition = s_cmp_lg_i32 %choose_left, %c0
+  low.cond_br %condition, ^left, ^right : reg<amdgpu.scc>
+^left:
+  %25 = slice %left[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %26 = slice %left[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  low.br ^join(%25: reg<amdgpu.sgpr>, %26: reg<amdgpu.sgpr>)
+^right:
+  %27 = slice %right[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %28 = slice %right[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  low.br ^join(%27: reg<amdgpu.sgpr>, %28: reg<amdgpu.sgpr>)
+^join(%23: reg<amdgpu.sgpr>, %24: reg<amdgpu.sgpr>):
+  %17 = v_mov_b32 0
+  %19 = v_mov_b32_copy %23
+  %21 = v_mov_b32_copy %24
+  %22 = concat(%19, %21) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_atomic_add_u64_saddr %17, %22, %word
+  return
+}
+
+// ====
+
+// Uniform initial state becomes varying when lanes leave on different rounds.
+// That carried value must retain both vector words until every lane stores it.
+kernel.def @varying_stored_loop() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%seed: i64, %output: buffer) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %base = index.constant 0 : offset
+  %lane = kernel.workitem.id<x> : index
+  %increment = scalar.constant 4294967297 : i64
+  %value = scf.for %iv = [%begin to %lane step %step](%state = %seed : i64) -> (i64) {
+    %next = scalar.addi %state, %increment : i64
+    scf.yield %next : i64
+  }
+  %results = buffer.view %output[%base] : buffer -> view<64xi64>
+  view.store %value, %results[%lane] : i64, view<64xi64>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.rdna3.core> abi_layout({constant_count = 2, direct_arg_count = 1, direct_arg_names = {arg0 = "seed"}, direct_arg_offsets = [0], direct_arg_parameter_indices = [0], direct_arg_sizes = [8], parameter_count = 2, resource_count = 1, resource_offsets = [8], resource_parameter_indices = [1], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @varying_stored_loop(%seed: reg<amdgpu.sgpr x2>) asm {
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %results = resource<hal_binding> {extent = 512, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %begin = s_mov_b32 0
+  %step = s_mov_b32 1
+  %32 = v_mov_b32_copy %begin
+  %33 = slice %seed[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %34 = v_mov_b32_copy %33
+  %35 = slice %seed[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %36 = v_mov_b32_copy %35
+  %37 = concat(%34, %36) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %39 = s_mov_b64_exec_read
+  low.br ^_bb1(%32: reg<amdgpu.vgpr>, %37: reg<amdgpu.vgpr x2>)
+^_bb1(%iv: reg<amdgpu.vgpr>, %state: reg<amdgpu.vgpr x2>):
+  %38 = v_cmp_lt_i32 %iv, %lane
+  %40, %41 = s_and_saveexec_b64 %38
+  low.cond_br %41, ^_bb2, ^_bb3 : reg<amdgpu.scc>
+^_bb2:
+  %43 = v_mov_b32_copy %step
+  %47 = slice %state[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %48 = slice %state[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %51, %52 = v_add_co_u32 %47, %43
+  %53, %54 = v_add_co_ci_u32 %48, %43, %52
+  %next = concat(%51, %53) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %56 = v_add_u32 %step, %iv
+  low.br ^_bb1(%56: reg<amdgpu.vgpr>, %next: reg<amdgpu.vgpr x2>)
+^_bb3:
+  s_mov_b64_exec %39
+  %57 = v_lshlrev_b32_src0_inline %lane, 3
+  global_store_b64_saddr %57, %state, %results
+  return
+}

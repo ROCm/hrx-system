@@ -69,7 +69,6 @@ _COMPILER_CMAKE_OPTIONS = {
 }
 
 _RUNTIME_HAL_DRIVER_CMAKE_OPTIONS = {
-    "//runtime/config/hal:driver_amdgpu": "IREE_HAL_DRIVER_AMDGPU",
     "//runtime/config/hal:driver_task": "IREE_HAL_DRIVER_TASK",
     "//runtime/config/hal:driver_vulkan": "IREE_HAL_DRIVER_VULKAN",
     "//runtime/config/hal:driver_webgpu": "IREE_HAL_DRIVER_WEBGPU",
@@ -1367,6 +1366,11 @@ class BuildFileFunctions(
     ):
         if self._should_skip_target(tags=tags):
             return
+        # CMake language enablement establishes directory-scoped compiler
+        # rules consumed during generation. A generated package function would
+        # discard those rules when it returns, leaving Objective-C targets
+        # without compile and archive commands.
+        self._converter.requires_native_scope = True
         self._emit_platform_guard_begin(target_compatible_with)
         self._converter.body += "enable_language(OBJC)\n"
         for sources, option in ((srcs, "-fobjc-arc"), (non_arc_srcs, "-fno-objc-arc")):
@@ -2098,75 +2102,9 @@ class BuildFileFunctions(
         )
         self._emit_platform_guard_end(target_compatible_with)
 
-    def _iree_amdgpu_hal_cts_testdata(
-        self,
-        name,
-        srcs,
-        target_selectors_flag,
-        target_name,
-        identifier,
-        backend_name="legacy_amdgpu",
-        target_family="amdgpu",
-        target="amdgcn-amd-amdhsa",
-        deps=None,
-        internal_hdrs=None,
-        internalize=True,
-        source_format=None,
-        testonly=True,
-        tags=None,
-        target_compatible_with=None,
-        **kwargs,
-    ):
-        if self._should_skip_target(tags=tags, **kwargs):
-            return
-        name_block = self._convert_string_arg_block("NAME", name, quote=False)
-        target_block = self._convert_string_arg_block("TARGET", target, quote=False)
-        targets_block = self._convert_amdgpu_target_selectors_block(
-            target_selectors_flag
-        )
-        target_name_block = self._convert_string_arg_block(
-            "TARGET_NAME", target_name, quote=False
-        )
-        identifier_block = self._convert_string_arg_block("IDENTIFIER", identifier)
-        backend_name_block = self._convert_string_arg_block(
-            "BACKEND_NAME", backend_name
-        )
-        target_family_block = self._convert_string_arg_block(
-            "TARGET_FAMILY", target_family
-        )
-        hdrs_block = self._convert_srcs_block(internal_hdrs, block_name="INTERNAL_HDRS")
-        srcs_block = self._convert_srcs_block(srcs)
-        deps_block = self._convert_amdgpu_bitcode_deps_block(deps)
-        internalize_block = self._convert_amdgpu_internalize_block(internalize)
-        source_format_block = self._convert_string_arg_block(
-            "SOURCE_FORMAT", source_format, quote=False
-        )
-        testonly_block = self._convert_option_block("TESTONLY", testonly)
-
-        self._emit_platform_guard_begin(target_compatible_with)
-        self._converter.body += (
-            f"iree_amdgpu_hal_cts_testdata(\n"
-            f"{name_block}"
-            f"{target_block}"
-            f"{targets_block}"
-            f"{target_name_block}"
-            f"{identifier_block}"
-            f"{backend_name_block}"
-            f"{target_family_block}"
-            f"{hdrs_block}"
-            f"{srcs_block}"
-            f"{deps_block}"
-            f"{internalize_block}"
-            f"{source_format_block}"
-            f"{testonly_block}"
-            f")\n\n"
-        )
-        self._emit_platform_guard_end(target_compatible_with)
-
     def _convert_amdgpu_target_selectors_block(self, target_selectors_flag):
         variables = {
-            "//runtime/src/iree/hal/drivers/amdgpu:targets": "IREE_HAL_AMDGPU_TARGETS",
-            "//runtime/src/iree/hal/drivers/amd/gpu:targets": "IREE_HAL_AMD_GPU_TARGETS",
+            "//runtime/src/iree/hal/driver/amd/gpu:targets": "IREE_HAL_AMD_GPU_TARGETS",
         }
         if target_selectors_flag not in variables:
             raise NotImplementedError(
@@ -2539,7 +2477,7 @@ class BuildFileFunctions(
         )
         self._emit_platform_guard_end(target_compatible_with)
 
-    def iree_execution_test_suite(
+    def iree_cli_test(
         self,
         name,
         manifests,
@@ -2555,7 +2493,7 @@ class BuildFileFunctions(
     ):
         if self._should_skip_target(tags=tags, **kwargs):
             return
-        self._check_no_unhandled_kwargs("iree_execution_test_suite", kwargs)
+        self._check_no_unhandled_kwargs("iree_cli_test", kwargs)
 
         name_block = self._convert_string_arg_block("NAME", name, quote=False)
         manifests_block = self._convert_srcs_block(manifests, block_name="MANIFESTS")
@@ -2578,7 +2516,7 @@ class BuildFileFunctions(
 
         self._emit_platform_guard_begin(target_compatible_with)
         self._converter.body += (
-            f"iree_execution_test_suite(\n"
+            f"iree_cli_test(\n"
             f"{name_block}"
             f"{manifests_block}"
             f"{tools_block}"
@@ -2659,8 +2597,11 @@ class BuildFileFunctions(
             f")\n\n"
         )
 
-    def iree_executable_test(self, src, **kwargs):
-        self.native_test(src=src, **kwargs)
+    def iree_executable_test(self, src, data=None, tools=None, **kwargs):
+        self.native_test(src=src, data=(data or []) + (tools or []), **kwargs)
+
+    def iree_tool_test(self, src, **kwargs):
+        self.iree_executable_test(src=src, **kwargs)
 
     def iree_executable_alias(self, name, tags=None, **kwargs):
         if self._should_skip_target(tags=tags, **kwargs):

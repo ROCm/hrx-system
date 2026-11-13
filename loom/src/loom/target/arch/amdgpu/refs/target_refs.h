@@ -176,8 +176,8 @@ const loom_low_descriptor_t* loom_amdgpu_descriptor_ref_descriptor(
     const loom_low_descriptor_set_t* descriptor_set,
     loom_amdgpu_descriptor_ref_t descriptor_ref);
 
-// Returns the generated stable descriptor ref for |descriptor|, or NONE when
-// |descriptor| is not in the selected AMDGPU descriptor-ref domain.
+// Returns the generated target ref for |descriptor|, or NONE when |descriptor|
+// is not in the selected AMDGPU descriptor-ref domain.
 loom_amdgpu_descriptor_ref_t loom_amdgpu_descriptor_ref_for_descriptor(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_descriptor_t* descriptor);

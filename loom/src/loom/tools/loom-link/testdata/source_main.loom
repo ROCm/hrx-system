@@ -1,3 +1,0 @@
-func.def public @callee(%input: i32) -> (i32) {
-  func.return %input : i32
-}

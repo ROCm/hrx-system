@@ -63,6 +63,20 @@ static iree_string_view_t loom_low_lower_export_name(
   return loom_low_lower_nonempty(bundle->export_plan->name, IREE_SV("<empty>"));
 }
 
+void loom_low_lower_context_scope_diagnostics(
+    loom_low_lower_context_t* context) {
+  const loom_low_lower_options_t* options = context->options;
+  const loom_target_bundle_t* bundle =
+      loom_target_facts_bundle(options->target_facts);
+  const iree_string_view_t export_name =
+      bundle != NULL && bundle->export_plan != NULL ? bundle->export_plan->name
+                                                    : iree_string_view_empty();
+  loom_diagnostic_export_scope_initialize(export_name, options->emitter,
+                                          &context->diagnostic_scope);
+  context->diagnostic_emitter =
+      loom_diagnostic_export_scope_emitter(&context->diagnostic_scope);
+}
+
 iree_string_view_t loom_low_lower_context_export_name(
     const loom_low_lower_context_t* context) {
   return loom_low_lower_export_name(loom_low_lower_context_bundle(context));
@@ -105,7 +119,7 @@ static iree_status_t loom_low_lower_emit(loom_low_lower_context_t* context,
       .params = params,
       .param_count = param_count,
   };
-  return iree_diagnostic_emit(context->options->emitter, &emission);
+  return iree_diagnostic_emit(context->diagnostic_emitter, &emission);
 }
 
 IREE_ATTRIBUTE_COLD IREE_ATTRIBUTE_NOINLINE iree_status_t
@@ -242,6 +256,12 @@ loom_builder_t* loom_low_lower_context_builder(
 loom_func_like_t loom_low_lower_context_source_function(
     const loom_low_lower_context_t* context) {
   return context->source_function;
+}
+
+bool loom_low_lower_context_source_has_direct_callers(
+    const loom_low_lower_context_t* context) {
+  return context->options != NULL &&
+         context->options->source_has_direct_callers;
 }
 
 bool loom_low_lower_context_source_is_retained(
@@ -467,16 +487,11 @@ loom_low_lower_selected_plan_view_t loom_low_lower_context_selected_plan_view(
       &context->lowering->source_plan.selected_plans[index];
   return (loom_low_lower_selected_plan_view_t){
       .source_op = selected_plan->source_op,
-      .plan =
-          selected_plan->kind == LOOM_LOW_LOWER_SELECTED_PLAN_RULE ||
-                  selected_plan->kind ==
-                      LOOM_LOW_LOWER_SELECTED_PLAN_FUNCTION_STORAGE ||
-                  selected_plan->kind == LOOM_LOW_LOWER_SELECTED_PLAN_INVOKE ||
-                  selected_plan->kind ==
-                      LOOM_LOW_LOWER_SELECTED_PLAN_PROJECTED_CALL ||
-                  selected_plan->kind == LOOM_LOW_LOWER_SELECTED_PLAN_STRUCTURAL
-              ? loom_low_lower_plan_empty()
-              : selected_plan->data.target_plan,
+      .plan = selected_plan->kind == LOOM_LOW_LOWER_SELECTED_PLAN_CALLBACK ||
+                      selected_plan->kind ==
+                          LOOM_LOW_LOWER_SELECTED_PLAN_DESCRIPTOR_MATRIX
+                  ? loom_low_lower_selected_plan_target(selected_plan)
+                  : loom_low_lower_plan_empty(),
       .elided = iree_any_bit_set(selected_plan->flags,
                                  LOOM_LOW_LOWER_SELECTED_PLAN_ELIDED |
                                      LOOM_LOW_LOWER_SELECTED_PLAN_CLAIMED),
@@ -716,9 +731,12 @@ iree_status_t loom_low_lower_interpose_entry_block(
       continue;
     }
     IREE_ASSERT_LT(direct_argument_index, forwarded_arg_count);
-    IREE_RETURN_IF_ERROR(loom_low_lower_replace_value_binding(
-        context, source_arguments[i],
-        loom_block_arg_id(body_block, direct_argument_index)));
+    if (loom_type_kind(context->lowering->boundary.argument_map[i].body_type) ==
+        LOOM_TYPE_NONE) {
+      IREE_RETURN_IF_ERROR(loom_low_lower_replace_value_binding(
+          context, source_arguments[i],
+          loom_block_arg_id(body_block, direct_argument_index)));
+    }
     ++direct_argument_index;
   }
   IREE_ASSERT_EQ(direct_argument_index, forwarded_arg_count);

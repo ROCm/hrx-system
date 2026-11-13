@@ -34,7 +34,7 @@ struct [[loom::representation("amdgpu.rdna4m.core")]] Rdna4mCore {};
 // Message 0x83 is RTN_GET_REALTIME. The returned SGPR is asynchronous and
 // becomes available through LGKM on gfx11 and RDNA4m processors.
 template <class Contract>
-LOOM_FORCE_INLINE static unsigned sample_legacy_tick() {
+LOOM_INLINE static unsigned sample_legacy_tick() {
   return loom::low::assembly<Contract, unsigned>(R"loom(
       () -> (reg<amdgpu.sgpr>) {
         s_waitcnt {vmcnt = 0}
@@ -47,7 +47,7 @@ LOOM_FORCE_INLINE static unsigned sample_legacy_tick() {
 }
 
 template <class Contract>
-LOOM_FORCE_INLINE static unsigned long long sample_legacy_tick64() {
+LOOM_INLINE static unsigned long long sample_legacy_tick64() {
   return loom::low::assembly<Contract, unsigned long long>(R"loom(
       () -> (reg<amdgpu.sgpr x2>) {
         s_waitcnt {vmcnt = 0}
@@ -62,7 +62,7 @@ LOOM_FORCE_INLINE static unsigned long long sample_legacy_tick64() {
 // gfx12 processors expose the same reference clock through the split load,
 // store, and KM counters.
 template <class Contract>
-LOOM_FORCE_INLINE static unsigned sample_modern_tick() {
+LOOM_INLINE static unsigned sample_modern_tick() {
   return loom::low::assembly<Contract, unsigned>(R"loom(
       () -> (reg<amdgpu.sgpr>) {
         s_wait_loadcnt {loadcnt = 0}
@@ -75,7 +75,7 @@ LOOM_FORCE_INLINE static unsigned sample_modern_tick() {
 }
 
 template <class Contract>
-LOOM_FORCE_INLINE static unsigned long long sample_modern_tick64() {
+LOOM_INLINE static unsigned long long sample_modern_tick64() {
   return loom::low::assembly<Contract, unsigned long long>(R"loom(
       () -> (reg<amdgpu.sgpr x2>) {
         s_wait_loadcnt {loadcnt = 0}

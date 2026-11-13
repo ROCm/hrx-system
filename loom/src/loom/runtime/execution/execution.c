@@ -1,0 +1,937 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+#include "loom/runtime/execution/execution.h"
+
+#include "iree/base/threading/mutex.h"
+#include "loom/runtime/execution/group.h"
+#include "loom/runtime/execution/retirement.h"
+
+typedef struct loom_runtime_execution_timeline_t {
+  // Retained timeline identifying accepted operations on this branch.
+  iree_hal_semaphore_t* semaphore;
+  // Last accepted submission, advanced only after successful queue submission.
+  uint64_t submitted_value;
+} loom_runtime_execution_timeline_t;
+
+struct loom_runtime_execution_t {
+  // Intrusive ownership shared by the host and native VM module.
+  iree_atomic_ref_count_t ref_count;
+  // Allocator used for this object.
+  iree_allocator_t host_allocator;
+  // Exact queues and inventory ownership held through final execution release.
+  loom_runtime_execution_binding_t binding;
+  // Shared physical command backing, independent of this model's timeline.
+  loom_runtime_workspace_t* workspace;
+  // Ordered commands and input transfers for this model.
+  loom_runtime_execution_timeline_t work;
+  // Ordered downloads consuming produced results without gating model work.
+  loom_runtime_execution_timeline_t feedback;
+  // Protects timeline reservation through queue acceptance, never device waits.
+  iree_slim_mutex_t mutex;
+  bool failed_group;
+  // Test-only one-shot rejection of a group node index plus one; zero is off.
+  iree_host_size_t rejected_group_node;
+  // Transient allocation/pool captures governing workspace activity.
+  loom_runtime_workspace_scope_t* scope;
+  // Persistent allocation/pool captures, independent of workspace activity.
+  loom_runtime_workspace_scope_t* storage_scope;
+  // Model-visible views captured by execution and host payload transfers.
+  loom_runtime_retirement_t consumers;
+};
+
+void loom_runtime_execution_retain(loom_runtime_execution_t* execution) {
+  if (execution) {
+    iree_atomic_ref_count_inc(&execution->ref_count);
+  }
+}
+
+void loom_runtime_execution_release(loom_runtime_execution_t* execution) {
+  if (execution && iree_atomic_ref_count_dec(&execution->ref_count) == 1) {
+    loom_runtime_retirement_deinitialize(&execution->consumers);
+    loom_runtime_workspace_scope_retire(execution->storage_scope);
+    loom_runtime_workspace_scope_retire(execution->scope);
+    loom_runtime_workspace_release(execution->workspace);
+    iree_slim_mutex_deinitialize(&execution->mutex);
+    iree_hal_semaphore_release(execution->feedback.semaphore);
+    iree_hal_semaphore_release(execution->work.semaphore);
+    loom_runtime_execution_binding_release(execution->binding);
+    iree_allocator_free(execution->host_allocator, execution);
+  }
+}
+
+const iree_hal_queue_family_t* loom_runtime_execution_dispatch_family(
+    const loom_runtime_execution_t* execution) {
+  return iree_hal_queue_family(execution->binding.dispatch);
+}
+
+void loom_runtime_execution_set_retirement_observer(
+    loom_runtime_execution_t* execution, void (*wake)(void* user_data),
+    void* user_data) {
+  loom_runtime_retirement_set_observer(&execution->consumers, wake, user_data);
+}
+
+bool loom_runtime_execution_is_retired(loom_runtime_execution_t* execution) {
+  return loom_runtime_retirement_is_idle(&execution->consumers);
+}
+
+bool loom_runtime_execution_shares_group(loom_runtime_execution_t* lhs,
+                                         loom_runtime_execution_t* rhs) {
+  return loom_runtime_workspace_group(lhs->workspace) ==
+         loom_runtime_workspace_group(rhs->workspace);
+}
+
+iree_status_t loom_runtime_execution_reserve_workspace(
+    loom_runtime_execution_t* execution, iree_device_size_t length,
+    iree_device_size_t alignment) {
+  return loom_runtime_workspace_reserve(execution->workspace, length,
+                                        alignment);
+}
+
+iree_status_t loom_runtime_execution_alloca(
+    loom_runtime_execution_t* execution, iree_host_size_t count,
+    const iree_hal_pool_reservation_request_t* requests,
+    iree_hal_buffer_t** out_buffers) {
+  memset(out_buffers, 0, count * sizeof(*out_buffers));
+  iree_slim_mutex_lock(&execution->mutex);
+  if (execution->failed_group) {
+    iree_slim_mutex_unlock(&execution->mutex);
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "execution has a partially accepted failed group");
+  }
+  iree_hal_pool_t* pool = NULL;
+  iree_status_t status =
+      loom_runtime_workspace_scope_acquire(execution->scope, count, &pool);
+  if (iree_status_is_ok(status) &&
+      execution->work.submitted_value == IREE_HAL_SEMAPHORE_MAX_VALUE) {
+    status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                              "execution timeline is exhausted");
+  }
+  uint64_t next_value = execution->work.submitted_value + 1;
+  const iree_hal_semaphore_list_t waits = {1, &execution->work.semaphore,
+                                           &execution->work.submitted_value};
+  const iree_hal_semaphore_list_t signals = {1, &execution->work.semaphore,
+                                             &next_value};
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_queue_alloca(execution->binding.dispatch, waits, signals,
+                                   pool, count, requests, out_buffers);
+  }
+  if (iree_status_is_ok(status)) {
+    execution->work.submitted_value = next_value;
+    // Capture the complete accepted batch before wrapping caller views. Every
+    // raw root borrows its source pool independently of its siblings.
+    for (iree_host_size_t i = 0; i < count; ++i) {
+      if (i) {
+        iree_hal_pool_retain(pool);
+      }
+      loom_runtime_workspace_scope_capture(execution->scope, pool,
+                                           out_buffers[i]);
+    }
+    for (iree_host_size_t i = 0; i < count && iree_status_is_ok(status); ++i) {
+      status = loom_runtime_retirement_track(
+          &execution->consumers, &out_buffers[i], execution->host_allocator);
+    }
+    if (!iree_status_is_ok(status)) {
+      // Alloca was accepted even if a model-view allocation failed. The shared
+      // scope keeps every original root and pool through queue retirement.
+      for (iree_host_size_t i = 0; i < count; ++i) {
+        iree_hal_buffer_release(out_buffers[i]);
+        out_buffers[i] = NULL;
+      }
+    }
+  } else {
+    iree_hal_pool_release(pool);
+  }
+  iree_slim_mutex_unlock(&execution->mutex);
+  return status;
+}
+
+iree_status_t loom_runtime_execution_alloca_from_pool(
+    loom_runtime_execution_t* execution, iree_hal_pool_t* pool,
+    iree_host_size_t count, const iree_hal_pool_reservation_request_t* requests,
+    iree_hal_buffer_t** out_buffers) {
+  memset(out_buffers, 0, count * sizeof(*out_buffers));
+  iree_slim_mutex_lock(&execution->mutex);
+  if (execution->failed_group) {
+    iree_slim_mutex_unlock(&execution->mutex);
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "execution has a partially accepted failed group");
+  }
+  if (execution->work.submitted_value == IREE_HAL_SEMAPHORE_MAX_VALUE) {
+    iree_slim_mutex_unlock(&execution->mutex);
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "execution timeline is exhausted");
+  }
+  uint64_t next_value = execution->work.submitted_value + 1;
+  iree_status_t status = iree_ok_status();
+  if (!execution->storage_scope) {
+    status = loom_runtime_workspace_scope_allocate(execution->workspace,
+                                                   /*tracks_workspace=*/false,
+                                                   &execution->storage_scope);
+  }
+  if (iree_status_is_ok(status)) {
+    status =
+        loom_runtime_workspace_scope_reserve(execution->storage_scope, count);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_queue_alloca(
+        execution->binding.dispatch,
+        (iree_hal_semaphore_list_t){1, &execution->work.semaphore,
+                                    &execution->work.submitted_value},
+        (iree_hal_semaphore_list_t){1, &execution->work.semaphore, &next_value},
+        pool, count, requests, out_buffers);
+  }
+  if (iree_status_is_ok(status)) {
+    execution->work.submitted_value = next_value;
+    for (iree_host_size_t i = 0; i < count; ++i) {
+      iree_hal_pool_retain(pool);
+      loom_runtime_workspace_scope_capture(execution->storage_scope, pool,
+                                           out_buffers[i]);
+    }
+  }
+  iree_slim_mutex_unlock(&execution->mutex);
+  return status;
+}
+
+iree_status_t loom_runtime_execution_dealloca(
+    loom_runtime_execution_t* execution, iree_hal_buffer_t* buffer,
+    uint64_t* out_value) {
+  iree_slim_mutex_lock(&execution->mutex);
+  if (execution->work.submitted_value == IREE_HAL_SEMAPHORE_MAX_VALUE) {
+    iree_slim_mutex_unlock(&execution->mutex);
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "execution timeline is exhausted");
+  }
+  uint64_t next_value = execution->work.submitted_value + 1;
+  const iree_hal_semaphore_list_t waits = {1, &execution->work.semaphore,
+                                           &execution->work.submitted_value};
+  const iree_hal_semaphore_list_t signals = {1, &execution->work.semaphore,
+                                             &next_value};
+  iree_hal_buffer_t* root = iree_hal_buffer_allocated_buffer(buffer);
+  iree_status_t status = iree_hal_queue_dealloca(execution->binding.dispatch,
+                                                 waits, signals, 1, &root);
+  if (iree_status_is_ok(status)) {
+    execution->work.submitted_value = next_value;
+    *out_value = next_value;
+  }
+  iree_slim_mutex_unlock(&execution->mutex);
+  return status;
+}
+
+iree_status_t loom_runtime_execution_create(
+    loom_runtime_execution_queues_t* queues,
+    loom_runtime_workspace_t* workspace, iree_allocator_t host_allocator,
+    loom_runtime_execution_t** out_execution) {
+  *out_execution = NULL;
+  loom_runtime_execution_t* execution = NULL;
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc(host_allocator, sizeof(*execution),
+                                             (void**)&execution));
+  iree_atomic_ref_count_init(&execution->ref_count);
+  iree_slim_mutex_initialize(&execution->mutex);
+  loom_runtime_retirement_initialize(&execution->consumers);
+  execution->host_allocator = host_allocator;
+  execution->workspace = workspace;
+  loom_runtime_workspace_retain(workspace);
+  execution->binding = loom_runtime_execution_queues_acquire(queues);
+  iree_hal_device_t* device = iree_hal_queue_family_device(
+      iree_hal_queue_family(execution->binding.dispatch));
+  iree_status_t status = loom_runtime_workspace_scope_allocate(
+      workspace, /*tracks_workspace=*/true, &execution->scope);
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_semaphore_create(
+        device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
+        IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &execution->work.semaphore);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_semaphore_create(
+        device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
+        IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &execution->feedback.semaphore);
+  }
+  if (iree_status_is_ok(status)) {
+    *out_execution = execution;
+  } else {
+    loom_runtime_execution_release(execution);
+  }
+  return status;
+}
+
+loom_runtime_execution_frontier_t loom_runtime_execution_frontier(
+    loom_runtime_execution_t* execution) {
+  iree_slim_mutex_lock(&execution->mutex);
+  const loom_runtime_execution_frontier_t frontier = {
+      .semaphores = {execution->work.semaphore, execution->feedback.semaphore},
+      .values = {execution->work.submitted_value,
+                 execution->feedback.submitted_value},
+  };
+  iree_slim_mutex_unlock(&execution->mutex);
+  return frontier;
+}
+
+iree_status_t loom_runtime_execution_barrier(
+    loom_runtime_execution_t* execution, iree_hal_semaphore_list_t waits) {
+  iree_hal_semaphore_t* inline_semaphores[8];
+  uint64_t inline_values[8];
+  iree_hal_semaphore_t** semaphores = inline_semaphores;
+  uint64_t* values = inline_values;
+  const iree_host_size_t count = waits.count + 1;
+  void* storage = NULL;
+  if (count > IREE_ARRAYSIZE(inline_semaphores)) {
+    IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
+        execution->host_allocator, count, sizeof(*semaphores) + sizeof(*values),
+        &storage));
+    semaphores = storage;
+    values = (uint64_t*)(semaphores + count);
+  }
+  for (iree_host_size_t i = 0; i < waits.count; ++i) {
+    semaphores[i] = waits.semaphores[i];
+    values[i] = waits.payload_values[i];
+  }
+  iree_slim_mutex_lock(&execution->mutex);
+  if (execution->failed_group) {
+    iree_slim_mutex_unlock(&execution->mutex);
+    iree_allocator_free(execution->host_allocator, storage);
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "execution has a partially accepted failed group");
+  }
+  semaphores[waits.count] = execution->work.semaphore;
+  values[waits.count] = execution->work.submitted_value;
+  uint64_t next_value = execution->work.submitted_value + 1;
+  const iree_hal_semaphore_list_t dependencies = {count, semaphores, values};
+  const iree_hal_semaphore_list_t signals = {1, &execution->work.semaphore,
+                                             &next_value};
+  iree_status_t status =
+      execution->work.submitted_value == IREE_HAL_SEMAPHORE_MAX_VALUE
+          ? iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                             "execution timeline is exhausted")
+          : iree_hal_queue_barrier(execution->binding.dispatch, dependencies,
+                                   signals, NULL,
+                                   IREE_HAL_QUEUE_BARRIER_FLAG_NONE);
+  if (iree_status_is_ok(status)) {
+    execution->work.submitted_value = next_value;
+  }
+  iree_slim_mutex_unlock(&execution->mutex);
+  iree_allocator_free(execution->host_allocator, storage);
+  return status;
+}
+
+iree_status_t loom_runtime_execution_execute(
+    loom_runtime_execution_t* execution,
+    iree_hal_command_buffer_t* command_buffer,
+    iree_hal_buffer_binding_table_t bindings, uint64_t* out_value) {
+  iree_slim_mutex_lock(&execution->mutex);
+  if (execution->failed_group) {
+    iree_slim_mutex_unlock(&execution->mutex);
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "execution has a partially accepted failed group");
+  }
+  if (execution->work.submitted_value == IREE_HAL_SEMAPHORE_MAX_VALUE) {
+    iree_slim_mutex_unlock(&execution->mutex);
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "execution timeline is exhausted");
+  }
+  uint64_t next_value = execution->work.submitted_value + 1;
+  const iree_hal_semaphore_list_t waits = {1, &execution->work.semaphore,
+                                           &execution->work.submitted_value};
+  const iree_hal_semaphore_list_t signals = {1, &execution->work.semaphore,
+                                             &next_value};
+  iree_status_t status = iree_hal_queue_execute(
+      execution->binding.dispatch, waits, signals, command_buffer, bindings,
+      IREE_HAL_QUEUE_EXECUTE_FLAG_NONE);
+  if (iree_status_is_ok(status)) {
+    execution->work.submitted_value = next_value;
+    *out_value = next_value;
+  }
+  iree_slim_mutex_unlock(&execution->mutex);
+  return status;
+}
+
+iree_status_t loom_runtime_execution_timestamp(
+    loom_runtime_execution_t* execution, iree_hal_buffer_t* target,
+    iree_device_size_t offset, uint64_t* out_value) {
+  iree_slim_mutex_lock(&execution->mutex);
+  if (execution->work.submitted_value == IREE_HAL_SEMAPHORE_MAX_VALUE) {
+    iree_slim_mutex_unlock(&execution->mutex);
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "execution timeline is exhausted");
+  }
+  uint64_t next_value = execution->work.submitted_value + 1;
+  const iree_hal_semaphore_list_t waits = {1, &execution->work.semaphore,
+                                           &execution->work.submitted_value};
+  const iree_hal_semaphore_list_t signals = {1, &execution->work.semaphore,
+                                             &next_value};
+  iree_status_t status = iree_hal_queue_timestamp(
+      execution->binding.dispatch, waits, signals, target, offset, NULL,
+      IREE_HAL_TIMESTAMP_FLAG_NONE);
+  if (iree_status_is_ok(status)) {
+    execution->work.submitted_value = next_value;
+    *out_value = next_value;
+  }
+  iree_slim_mutex_unlock(&execution->mutex);
+  return status;
+}
+
+iree_status_t loom_runtime_execution_dispatch(
+    loom_runtime_execution_t* execution, iree_hal_executable_t* executable,
+    iree_hal_executable_function_t function, iree_hal_dispatch_config_t config,
+    iree_hal_buffer_ref_list_t bindings, uint64_t* out_value) {
+  iree_slim_mutex_lock(&execution->mutex);
+  if (execution->failed_group) {
+    iree_slim_mutex_unlock(&execution->mutex);
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "execution has a partially accepted failed group");
+  }
+  if (execution->work.submitted_value == IREE_HAL_SEMAPHORE_MAX_VALUE) {
+    iree_slim_mutex_unlock(&execution->mutex);
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "execution timeline is exhausted");
+  }
+  uint64_t next_value = execution->work.submitted_value + 1;
+  const iree_hal_semaphore_list_t waits = {1, &execution->work.semaphore,
+                                           &execution->work.submitted_value};
+  const iree_hal_semaphore_list_t signals = {1, &execution->work.semaphore,
+                                             &next_value};
+  iree_status_t status = iree_hal_queue_dispatch(
+      execution->binding.dispatch, waits, signals, executable, function, config,
+      iree_const_byte_span_empty(), bindings, NULL,
+      IREE_HAL_DISPATCH_FLAG_NONE);
+  if (iree_status_is_ok(status)) {
+    execution->work.submitted_value = next_value;
+    *out_value = next_value;
+  }
+  iree_slim_mutex_unlock(&execution->mutex);
+  return status;
+}
+
+iree_status_t loom_runtime_execution_transfer(
+    loom_runtime_execution_t* execution, iree_host_size_t operation_count,
+    const iree_hal_transfer_operation_t* operations, uint64_t* out_value) {
+  iree_slim_mutex_lock(&execution->mutex);
+  if (execution->failed_group) {
+    iree_slim_mutex_unlock(&execution->mutex);
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "execution has a partially accepted failed group");
+  }
+  if (execution->work.submitted_value == IREE_HAL_SEMAPHORE_MAX_VALUE) {
+    iree_slim_mutex_unlock(&execution->mutex);
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "execution timeline is exhausted");
+  }
+  uint64_t next_value = execution->work.submitted_value + 1;
+  const iree_hal_semaphore_list_t waits = {1, &execution->work.semaphore,
+                                           &execution->work.submitted_value};
+  const iree_hal_semaphore_list_t signals = {1, &execution->work.semaphore,
+                                             &next_value};
+  iree_status_t status =
+      iree_hal_queue_transfer(execution->binding.transfer, waits, signals,
+                              operation_count, operations, NULL);
+  if (iree_status_is_ok(status)) {
+    execution->work.submitted_value = next_value;
+    *out_value = next_value;
+  }
+  iree_slim_mutex_unlock(&execution->mutex);
+  return status;
+}
+
+iree_status_t loom_runtime_execution_feedback(
+    loom_runtime_execution_t* execution, iree_host_size_t operation_count,
+    const iree_hal_transfer_operation_t* operations, uint64_t* out_value) {
+  iree_slim_mutex_lock(&execution->mutex);
+  if (execution->failed_group) {
+    iree_slim_mutex_unlock(&execution->mutex);
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "execution has a partially accepted failed group");
+  }
+  if (execution->feedback.submitted_value == IREE_HAL_SEMAPHORE_MAX_VALUE) {
+    iree_slim_mutex_unlock(&execution->mutex);
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "feedback timeline is exhausted");
+  }
+  uint64_t next_value = execution->feedback.submitted_value + 1;
+  iree_hal_semaphore_t* wait_semaphores[] = {execution->work.semaphore,
+                                             execution->feedback.semaphore};
+  uint64_t wait_values[] = {execution->work.submitted_value,
+                            execution->feedback.submitted_value};
+  const iree_hal_semaphore_list_t waits = {IREE_ARRAYSIZE(wait_semaphores),
+                                           wait_semaphores, wait_values};
+  const iree_hal_semaphore_list_t signals = {1, &execution->feedback.semaphore,
+                                             &next_value};
+  iree_status_t status =
+      iree_hal_queue_transfer(execution->binding.transfer, waits, signals,
+                              operation_count, operations, NULL);
+  if (iree_status_is_ok(status)) {
+    execution->feedback.submitted_value = next_value;
+    *out_value = next_value;
+  }
+  iree_slim_mutex_unlock(&execution->mutex);
+  return status;
+}
+
+iree_status_t loom_runtime_execution_wait(loom_runtime_execution_t* execution,
+                                          uint64_t value) {
+  return loom_runtime_workspace_wait(execution->workspace,
+                                     execution->work.semaphore, value);
+}
+
+iree_status_t loom_runtime_execution_feedback_wait(
+    loom_runtime_execution_t* execution, uint64_t value) {
+  return loom_runtime_workspace_wait(execution->workspace,
+                                     execution->feedback.semaphore, value);
+}
+
+iree_status_t loom_runtime_execution_drain(
+    loom_runtime_execution_t* execution) {
+  iree_slim_mutex_lock(&execution->mutex);
+  const uint64_t work_value = execution->work.submitted_value;
+  const uint64_t feedback_value = execution->feedback.submitted_value;
+  iree_slim_mutex_unlock(&execution->mutex);
+  iree_status_t status = loom_runtime_execution_wait(execution, work_value);
+  status = iree_status_join(
+      status, loom_runtime_execution_feedback_wait(execution, feedback_value));
+  // Consumer captures protect model payloads after early failed readiness.
+  // Raw allocation objects independently remain protected by the shared pool.
+  return iree_status_join(
+      status, loom_runtime_workspace_await_retirement(execution->workspace,
+                                                      &execution->consumers));
+}
+
+iree_status_t loom_runtime_execution_advance_for_testing(
+    loom_runtime_execution_t* execution, uint64_t value) {
+  iree_slim_mutex_lock(&execution->mutex);
+  uint64_t current = 0;
+  iree_status_t status =
+      iree_hal_semaphore_query(execution->work.semaphore, &current);
+  if (iree_status_is_ok(status) &&
+      (current != execution->work.submitted_value || value <= current ||
+       value > IREE_HAL_SEMAPHORE_MAX_VALUE)) {
+    status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                              "timeline advance requires an idle timeline");
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_semaphore_signal(execution->work.semaphore, value, NULL);
+  }
+  if (iree_status_is_ok(status)) {
+    execution->work.submitted_value = value;
+  }
+  iree_slim_mutex_unlock(&execution->mutex);
+  return status;
+}
+
+iree_status_t loom_runtime_execution_reject_group_node_for_testing(
+    loom_runtime_execution_t* execution, iree_host_size_t index) {
+  iree_slim_mutex_lock(&execution->mutex);
+  execution->rejected_group_node = index + 1;
+  iree_slim_mutex_unlock(&execution->mutex);
+  return iree_ok_status();
+}
+
+static iree_status_t loom_runtime_execution_validate_transfer_buffer(
+    const iree_hal_queue_family_t* family, iree_hal_buffer_t* buffer,
+    iree_device_size_t offset, iree_device_size_t length,
+    iree_hal_buffer_usage_t usage, iree_hal_memory_access_t access) {
+  IREE_RETURN_IF_ERROR(iree_hal_buffer_validate_range(buffer, offset, length));
+  IREE_RETURN_IF_ERROR(
+      iree_hal_buffer_validate_family_usage(buffer, family, usage));
+  IREE_RETURN_IF_ERROR(iree_hal_buffer_validate_access(
+      iree_hal_buffer_allowed_access(buffer), access));
+  return iree_hal_buffer_validate_memory_type(
+      iree_hal_buffer_memory_type(buffer), IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE);
+}
+
+static iree_status_t loom_runtime_execution_validate_transfer(
+    const iree_hal_queue_family_t* family,
+    const iree_hal_transfer_operation_t* op) {
+  switch (op->type) {
+    case IREE_HAL_TRANSFER_OPERATION_TYPE_FILL:
+      if (!op->fill.length) {
+        return iree_ok_status();
+      }
+      if (op->fill.flags != IREE_HAL_FILL_FLAG_NONE ||
+          op->fill.target_offset % op->fill.pattern_length ||
+          op->fill.length % op->fill.pattern_length) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "group fill has flags or is misaligned");
+      }
+      return loom_runtime_execution_validate_transfer_buffer(
+          family, op->fill.target_buffer, op->fill.target_offset,
+          op->fill.length, IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET,
+          IREE_HAL_MEMORY_ACCESS_WRITE);
+    case IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE:
+      if (!op->update.length) {
+        return iree_ok_status();
+      }
+      if (op->update.flags != IREE_HAL_UPDATE_FLAG_NONE) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "group update has unsupported flags");
+      }
+      return loom_runtime_execution_validate_transfer_buffer(
+          family, op->update.target_buffer, op->update.target_offset,
+          op->update.length, IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET,
+          IREE_HAL_MEMORY_ACCESS_WRITE);
+    case IREE_HAL_TRANSFER_OPERATION_TYPE_COPY:
+      if (!op->copy.length) {
+        return iree_ok_status();
+      }
+      if (op->copy.flags != IREE_HAL_COPY_FLAG_NONE) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "group copy has unsupported flags");
+      }
+      IREE_RETURN_IF_ERROR(loom_runtime_execution_validate_transfer_buffer(
+          family, op->copy.source_buffer, op->copy.source_offset,
+          op->copy.length, IREE_HAL_BUFFER_USAGE_TRANSFER_SOURCE,
+          IREE_HAL_MEMORY_ACCESS_READ));
+      IREE_RETURN_IF_ERROR(loom_runtime_execution_validate_transfer_buffer(
+          family, op->copy.target_buffer, op->copy.target_offset,
+          op->copy.length, IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET,
+          IREE_HAL_MEMORY_ACCESS_WRITE));
+      if (iree_hal_buffer_test_overlap(
+              op->copy.source_buffer, op->copy.source_offset, op->copy.length,
+              op->copy.target_buffer, op->copy.target_offset,
+              op->copy.length) != IREE_HAL_BUFFER_OVERLAP_DISJOINT) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "group copy ranges overlap");
+      }
+      return iree_ok_status();
+    case IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD:
+      if (!op->upload.length) {
+        return iree_ok_status();
+      }
+      return loom_runtime_execution_validate_transfer_buffer(
+          family, op->upload.target_buffer, op->upload.target_offset,
+          op->upload.length, IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET,
+          IREE_HAL_MEMORY_ACCESS_WRITE);
+    case IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD:
+      if (!op->download.length) {
+        return iree_ok_status();
+      }
+      return loom_runtime_execution_validate_transfer_buffer(
+          family, op->download.source_buffer, op->download.source_offset,
+          op->download.length, IREE_HAL_BUFFER_USAGE_TRANSFER_SOURCE,
+          IREE_HAL_MEMORY_ACCESS_READ);
+    default:
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "invalid group transfer");
+  }
+}
+
+iree_status_t loom_runtime_execution_validate_group_node(
+    loom_runtime_execution_t* execution,
+    const loom_runtime_group_node_t* node) {
+  const iree_hal_queue_family_t* dispatch =
+      iree_hal_queue_family(execution->binding.dispatch);
+  switch (node->kind) {
+    case LOOM_RUNTIME_GROUP_BARRIER:
+      return iree_ok_status();
+    case LOOM_RUNTIME_GROUP_EXECUTE:
+      if (iree_hal_command_buffer_queue_family(node->command_buffer) !=
+          dispatch) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "group command belongs to another queue family");
+      }
+      return iree_ok_status();
+    case LOOM_RUNTIME_GROUP_DISPATCH:
+      if (iree_hal_executable_queue_family(node->executable) != dispatch) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "group executable belongs to another queue family");
+      }
+      for (iree_host_size_t i = 0; i < node->refs.count; ++i) {
+        const iree_hal_buffer_ref_t* ref = &node->refs.values[i];
+        if (ref->buffer_slot) {
+          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                  "group dispatch requires direct bindings");
+        }
+        IREE_RETURN_IF_ERROR(iree_hal_buffer_validate_usage_any(
+            iree_hal_buffer_family_usage(ref->buffer, dispatch),
+            IREE_HAL_BUFFER_USAGE_STORAGE));
+      }
+      return iree_ok_status();
+    case LOOM_RUNTIME_GROUP_TRANSFER:
+      return loom_runtime_execution_validate_transfer(
+          iree_hal_queue_family(execution->binding.transfer), &node->transfer);
+    default:
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "invalid group node");
+  }
+}
+
+iree_status_t loom_runtime_execution_submit_group(
+    loom_runtime_execution_t* execution, iree_host_size_t count,
+    const loom_runtime_group_node_t* nodes,
+    loom_runtime_group_submission_t* out_submission) {
+  *out_submission = (loom_runtime_group_submission_t){0};
+  iree_slim_mutex_lock(&execution->mutex);
+  iree_status_t status = iree_ok_status();
+  if (!count || execution->failed_group) {
+    status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                              "empty group or failed execution");
+  } else if (count >
+             IREE_HAL_SEMAPHORE_MAX_VALUE - execution->work.submitted_value) {
+    status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                              "execution timeline is exhausted");
+  }
+  for (iree_host_size_t i = 0; i < count && iree_status_is_ok(status); ++i) {
+    if (nodes[i].kind == LOOM_RUNTIME_GROUP_EXECUTE &&
+        iree_hal_command_buffer_queue_family(nodes[i].command_buffer) !=
+            iree_hal_queue_family(execution->binding.dispatch)) {
+      status =
+          iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                           "group command belongs to another queue family");
+    }
+  }
+  // Include previous feedback: a group may reuse its device output roots.
+  for (iree_host_size_t i = 0; i < count && iree_status_is_ok(status); ++i) {
+    uint64_t next = execution->work.submitted_value + 1;
+    iree_hal_semaphore_t* semaphores[] = {execution->work.semaphore,
+                                          execution->feedback.semaphore,
+                                          nodes[i].wait_semaphore};
+    uint64_t values[] = {execution->work.submitted_value,
+                         execution->feedback.submitted_value,
+                         nodes[i].wait_value};
+    iree_hal_semaphore_list_t waits = {nodes[i].wait_semaphore ? 3u : 2u,
+                                       semaphores, values};
+    iree_hal_semaphore_list_t signals = {1, &execution->work.semaphore, &next};
+    const loom_runtime_group_node_t* node = &nodes[i];
+    if (execution->rejected_group_node == i + 1) {
+      execution->rejected_group_node = 0;
+      status = iree_make_status(IREE_STATUS_INTERNAL,
+                                "injected queue rejection for testing");
+      break;
+    }
+    switch (node->kind) {
+      case LOOM_RUNTIME_GROUP_BARRIER:
+        status =
+            iree_hal_queue_barrier(execution->binding.dispatch, waits, signals,
+                                   NULL, IREE_HAL_QUEUE_BARRIER_FLAG_NONE);
+        break;
+      case LOOM_RUNTIME_GROUP_EXECUTE:
+        status = iree_hal_queue_execute(
+            execution->binding.dispatch, waits, signals, node->command_buffer,
+            node->bindings, IREE_HAL_QUEUE_EXECUTE_FLAG_NONE);
+        break;
+      case LOOM_RUNTIME_GROUP_DISPATCH:
+        status = iree_hal_queue_dispatch(
+            execution->binding.dispatch, waits, signals, node->executable,
+            node->function, node->config, iree_const_byte_span_empty(),
+            node->refs, NULL, IREE_HAL_DISPATCH_FLAG_NONE);
+        break;
+      case LOOM_RUNTIME_GROUP_TRANSFER:
+        status = iree_hal_queue_transfer(execution->binding.transfer, waits,
+                                         signals, 1, &node->transfer, NULL);
+        break;
+      default:
+        status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                  "invalid group node");
+    }
+    if (iree_status_is_ok(status)) {
+      execution->work.submitted_value = next;
+      ++out_submission->accepted_count;
+    }
+  }
+  execution->failed_group |=
+      !iree_status_is_ok(status) && out_submission->accepted_count != 0;
+  out_submission->frontier = (loom_runtime_execution_frontier_t){
+      .semaphores = {execution->work.semaphore, execution->feedback.semaphore},
+      .values = {execution->work.submitted_value,
+                 execution->feedback.submitted_value}};
+  out_submission->lane_count = 1;
+  out_submission->lanes[0] = out_submission->frontier;
+  out_submission->joined = iree_status_is_ok(status);
+  iree_slim_mutex_unlock(&execution->mutex);
+  return status;
+}
+
+iree_status_t loom_runtime_execution_submit_multi_group(
+    iree_host_size_t lane_count, loom_runtime_execution_t* const* lanes,
+    iree_host_size_t count, const loom_runtime_group_node_t* nodes,
+    loom_runtime_group_dependency_t* dependencies,
+    loom_runtime_group_submission_t* out_submission) {
+  *out_submission = (loom_runtime_group_submission_t){0};
+  if (!lane_count || lane_count > LOOM_RUNTIME_GROUP_MAX_LANES || !count ||
+      count > 65536) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "invalid multi-lane group geometry");
+  }
+  iree_host_size_t ordered[LOOM_RUNTIME_GROUP_MAX_LANES];
+  iree_host_size_t required[LOOM_RUNTIME_GROUP_MAX_LANES] = {1};
+  for (iree_host_size_t i = 0; i < lane_count; ++i) {
+    if (!lanes[i] || !loom_runtime_execution_shares_group(lanes[0], lanes[i])) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "group lanes must share one HAL group");
+    }
+    iree_host_size_t j = i;
+    while (j && (uintptr_t)lanes[ordered[j - 1]] > (uintptr_t)lanes[i]) {
+      ordered[j] = ordered[j - 1];
+      --j;
+    }
+    ordered[j] = i;
+    for (iree_host_size_t k = 0; k < i; ++k) {
+      if (lanes[k] == lanes[i]) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "duplicate execution lane");
+      }
+    }
+  }
+  for (iree_host_size_t i = 0; i < count; ++i) {
+    const loom_runtime_group_dependency_t* dependency = &dependencies[i];
+    if (dependency->lane >= lane_count ||
+        dependency->count > LOOM_RUNTIME_GROUP_MAX_LANES) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "invalid group lane or dependency count");
+    }
+    for (iree_host_size_t j = 0; j < dependency->count; ++j) {
+      if (dependency->predecessors[j] >= i) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "group dependency is not topological");
+      }
+      if (dependency->payload_mask & (1u << j)) {
+        const uint32_t producer = dependency->predecessors[j];
+        if (dependencies[producer].lane == dependency->lane ||
+            !nodes[producer].payload_semaphore ||
+            !nodes[producer].payload_value ||
+            nodes[producer].payload_value > IREE_HAL_SEMAPHORE_MAX_VALUE) {
+          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                  "invalid payload dependency");
+        }
+        for (iree_host_size_t k = 0; k < lane_count; ++k) {
+          if (nodes[producer].payload_semaphore == lanes[k]->work.semaphore ||
+              nodes[producer].payload_semaphore ==
+                  lanes[k]->feedback.semaphore) {
+            return iree_make_status(
+                IREE_STATUS_INVALID_ARGUMENT,
+                "payload readiness must be independent of lane completion");
+          }
+        }
+      }
+    }
+    ++required[dependency->lane];
+  }
+  // Every group locks shared lanes in the same order, including when two
+  // model owners provide opposite primary/secondary orderings.
+  for (iree_host_size_t i = 0; i < lane_count; ++i) {
+    iree_slim_mutex_lock(&lanes[ordered[i]]->mutex);
+  }
+  iree_status_t status = iree_ok_status();
+  iree_hal_semaphore_t* semaphores[3 * LOOM_RUNTIME_GROUP_MAX_LANES + 1];
+  uint64_t initial[2 * LOOM_RUNTIME_GROUP_MAX_LANES];
+  for (iree_host_size_t i = 0; i < lane_count; ++i) {
+    loom_runtime_execution_t* lane = lanes[i];
+    semaphores[2 * i] = lane->work.semaphore;
+    semaphores[2 * i + 1] = lane->feedback.semaphore;
+    initial[2 * i] = lane->work.submitted_value;
+    initial[2 * i + 1] = lane->feedback.submitted_value;
+    if (iree_status_is_ok(status) && lane->failed_group) {
+      status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                                "group lane has a partially accepted failure");
+    }
+    if (iree_status_is_ok(status) &&
+        required[i] > IREE_HAL_SEMAPHORE_MAX_VALUE - initial[2 * i]) {
+      status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                                "group lane timeline is exhausted");
+    }
+  }
+  for (iree_host_size_t i = 0; i < count && iree_status_is_ok(status); ++i) {
+    loom_runtime_group_dependency_t* dependency = &dependencies[i];
+    loom_runtime_execution_t* lane = lanes[dependency->lane];
+    uint64_t values[3 * LOOM_RUNTIME_GROUP_MAX_LANES + 1];
+    memcpy(values, initial, 2 * lane_count * sizeof(*values));
+    values[2 * dependency->lane] = lane->work.submitted_value;
+    iree_host_size_t wait_count = 2 * lane_count;
+    for (iree_host_size_t j = 0; j < dependency->count; ++j) {
+      const loom_runtime_group_dependency_t* predecessor =
+          &dependencies[dependency->predecessors[j]];
+      if (dependency->payload_mask & (1u << j)) {
+        const loom_runtime_group_node_t* producer =
+            &nodes[dependency->predecessors[j]];
+        semaphores[wait_count] = producer->payload_semaphore;
+        values[wait_count++] = producer->payload_value;
+      } else {
+        values[2 * predecessor->lane] =
+            iree_max(values[2 * predecessor->lane], predecessor->value);
+      }
+    }
+    if (nodes[i].wait_semaphore) {
+      semaphores[wait_count] = nodes[i].wait_semaphore;
+      values[wait_count++] = nodes[i].wait_value;
+    }
+    const iree_hal_semaphore_list_t waits = {wait_count, semaphores, values};
+    uint64_t next = lane->work.submitted_value + 1;
+    const iree_hal_semaphore_list_t signals = {1, &lane->work.semaphore, &next};
+    const loom_runtime_group_node_t* node = &nodes[i];
+    if (lane->rejected_group_node == i + 1) {
+      lane->rejected_group_node = 0;
+      status = iree_make_status(IREE_STATUS_INTERNAL,
+                                "injected queue rejection for testing");
+      break;
+    }
+    switch (node->kind) {
+      case LOOM_RUNTIME_GROUP_BARRIER:
+        status = iree_hal_queue_barrier(lane->binding.dispatch, waits, signals,
+                                        NULL, IREE_HAL_QUEUE_BARRIER_FLAG_NONE);
+        break;
+      case LOOM_RUNTIME_GROUP_EXECUTE:
+        status = iree_hal_queue_execute(lane->binding.dispatch, waits, signals,
+                                        node->command_buffer, node->bindings,
+                                        IREE_HAL_QUEUE_EXECUTE_FLAG_NONE);
+        break;
+      case LOOM_RUNTIME_GROUP_DISPATCH:
+        status = iree_hal_queue_dispatch(
+            lane->binding.dispatch, waits, signals, node->executable,
+            node->function, node->config, iree_const_byte_span_empty(),
+            node->refs, NULL, IREE_HAL_DISPATCH_FLAG_NONE);
+        break;
+      case LOOM_RUNTIME_GROUP_TRANSFER:
+        status = iree_hal_queue_transfer(lane->binding.transfer, waits, signals,
+                                         1, &node->transfer, NULL);
+        break;
+      default:
+        status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                  "invalid group node");
+    }
+    if (iree_status_is_ok(status)) {
+      lane->work.submitted_value = next;
+      dependency->value = next;
+      ++out_submission->accepted_count;
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    uint64_t values[2 * LOOM_RUNTIME_GROUP_MAX_LANES];
+    for (iree_host_size_t i = 0; i < lane_count; ++i) {
+      values[2 * i] = lanes[i]->work.submitted_value;
+      values[2 * i + 1] = lanes[i]->feedback.submitted_value;
+    }
+    uint64_t next = lanes[0]->work.submitted_value + 1;
+    if (lanes[0]->rejected_group_node == count + 1) {
+      lanes[0]->rejected_group_node = 0;
+      status = iree_make_status(IREE_STATUS_INTERNAL,
+                                "injected terminal join rejection for testing");
+    } else {
+      status = iree_hal_queue_barrier(
+          lanes[0]->binding.dispatch,
+          (iree_hal_semaphore_list_t){2 * lane_count, semaphores, values},
+          (iree_hal_semaphore_list_t){1, &lanes[0]->work.semaphore, &next},
+          NULL, IREE_HAL_QUEUE_BARRIER_FLAG_NONE);
+    }
+    if (iree_status_is_ok(status)) {
+      lanes[0]->work.submitted_value = next;
+      out_submission->joined = true;
+    }
+  }
+  out_submission->lane_count = lane_count;
+  for (iree_host_size_t i = 0; i < lane_count; ++i) {
+    lanes[i]->failed_group |=
+        !iree_status_is_ok(status) && out_submission->accepted_count != 0;
+    out_submission->lanes[i] = (loom_runtime_execution_frontier_t){
+        .semaphores = {lanes[i]->work.semaphore, lanes[i]->feedback.semaphore},
+        .values = {lanes[i]->work.submitted_value,
+                   lanes[i]->feedback.submitted_value}};
+  }
+  out_submission->frontier = out_submission->lanes[0];
+  for (iree_host_size_t i = lane_count; i > 0; --i) {
+    iree_slim_mutex_unlock(&lanes[ordered[i - 1]]->mutex);
+  }
+  return status;
+}

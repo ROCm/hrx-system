@@ -160,3 +160,81 @@ low.func.def target<test.low.core>(@target) @fixed_condition_select_capture(%con
   %changed = test.tied.any %value
   return %selected, %changed
 }
+
+// ====
+
+// The immediate slot accepts constants from either side, but commuting a
+// constant cannot move a floating-bank value into the integer-only slot.
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @immediate_left(%value: reg<test.i32>) -> (reg<test.i32>) asm {
+  %one = test.const.i32 1
+  %sum = test.commutative.add.i32 %one, %value
+  return %sum
+}
+
+low.func.def target<test.low.core>(@target) @immediate_right(%value: reg<test.i32>) -> (reg<test.i32>) asm {
+  %one = test.const.i32 1
+  %sum = test.commutative.add.i32 %value, %one
+  return %sum
+}
+
+low.func.def target<test.low.core>(@target) @different_register_class(%value: reg<test.f32>) -> (reg<test.i32>) asm {
+  %one = test.const.i32 1
+  %sum = test.commutative.add.i32 %value, %one
+  return %sum
+}
+
+low.func.def target<test.low.core>(@target) @outside_immediate_range(%value: reg<test.i32>) -> (reg<test.i32>) asm {
+  %five = test.const.i32 5
+  %sum = test.commutative.add.i32 %value, %five
+  return %sum
+}
+
+low.func.def target<test.low.core>(@target) @unknown_value(%left: reg<test.i32>, %right: reg<test.i32>) -> (reg<test.i32>) asm {
+  %sum = test.commutative.add.i32 %left, %right
+  return %sum
+}
+
+low.func.def target<test.low.core>(@target) @retain_input_owner(%value: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
+  %zero = test.const.i32 0
+  %sum = test.preferred.add.i32 %value, %zero
+  %changed = test.tied.any %sum
+  return %value, %changed
+}
+
+// ----
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @immediate_left(%value: reg<test.i32>) -> (reg<test.i32>) asm {
+  %sum = test.commutative.add.inline.i32 %value, 1
+  return %sum
+}
+
+low.func.def target<test.low.core>(@target) @immediate_right(%value: reg<test.i32>) -> (reg<test.i32>) asm {
+  %sum = test.commutative.add.inline.i32 %value, 1
+  return %sum
+}
+
+low.func.def target<test.low.core>(@target) @different_register_class(%value: reg<test.f32>) -> (reg<test.i32>) asm {
+  %one = test.const.i32 1
+  %sum = test.commutative.add.i32 %value, %one
+  return %sum
+}
+
+low.func.def target<test.low.core>(@target) @outside_immediate_range(%value: reg<test.i32>) -> (reg<test.i32>) asm {
+  %five = test.const.i32 5
+  %sum = test.commutative.add.i32 %value, %five
+  return %sum
+}
+
+low.func.def target<test.low.core>(@target) @unknown_value(%left: reg<test.i32>, %right: reg<test.i32>) -> (reg<test.i32>) asm {
+  %sum = test.commutative.add.i32 %left, %right
+  return %sum
+}
+
+low.func.def target<test.low.core>(@target) @retain_input_owner(%value: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
+  %sum = test.preferred.identity.i32 %value : reg<test.i32>
+  %changed = test.tied.any %sum
+  return %value, %changed
+}

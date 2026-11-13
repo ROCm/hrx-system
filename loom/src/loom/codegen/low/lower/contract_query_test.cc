@@ -30,6 +30,26 @@ namespace {
 
 constexpr loom_op_kind_t kSourceOpKind = LOOM_OP_KIND(7, 3);
 constexpr uint64_t kDescriptorId = UINT64_C(0x123456789abcdef0);
+constexpr uint8_t kTestEmitRefDescriptorBitCount = 8;
+
+loom_low_lower_emit_ref_storage_t MakeTestEmitRef(
+    loom_low_lower_descriptor_ref_t descriptor_ref, uint16_t emit_index) {
+  const uint32_t encoded_descriptor_ref =
+      descriptor_ref == LOOM_LOW_LOWER_DESCRIPTOR_REF_NONE
+          ? 0u
+          : (uint32_t)descriptor_ref + 1u;
+  const uint32_t packed_ref =
+      encoded_descriptor_ref |
+      ((uint32_t)emit_index << kTestEmitRefDescriptorBitCount);
+  return {
+      .bytes =
+          {
+              (uint8_t)packed_ref,
+              (uint8_t)(packed_ref >> 8),
+              (uint8_t)(packed_ref >> 16),
+          },
+  };
+}
 
 const char kDescriptorStringData[] = "test.descriptor";
 const char kRuleStringData[] = "test.sourcefieldvalueattr_kind";
@@ -48,15 +68,19 @@ const loom_string_pool_t kRuleStringPool = {
                     sizeof(kRuleStringData) - 1},
 };
 
-const loom_low_descriptor_t kDescriptor = {
-    .stable_id = kDescriptorId,
+const loom_low_descriptor_identity_t kDescriptorIdentity = {
     .key_string_ref = kRuleStringDescriptor,
 };
 
+const uint64_t kDescriptorStableId = kDescriptorId;
+const loom_low_descriptor_t kDescriptor = {};
 const loom_low_descriptor_layout_t kDescriptorLayout = {};
 const loom_low_descriptor_set_t kDescriptorSet = {
+    .descriptor_identities = &kDescriptorIdentity,
+    .descriptor_stable_ids = &kDescriptorStableId,
     .descriptors = &kDescriptor,
     .descriptor_layouts = &kDescriptorLayout,
+    .descriptor_identity_count = 1,
     .descriptor_layout_count = 1,
     .descriptor_count = 1,
     .descriptor_ordinal_count = 1,
@@ -454,10 +478,8 @@ TEST(LowContractQueryTest, ContractIndexDescriptorRuleSelectsLegalCase) {
   loom_low_lower_emit_t emit = {
       .kind = LOOM_LOW_LOWER_EMIT_DESCRIPTOR_OP,
   };
-  const loom_low_lower_emit_ref_t emit_ref = {
-      .descriptor_ref = 0,
-      .emit_index = 0,
-  };
+  const loom_low_lower_emit_ref_storage_t emit_ref =
+      MakeTestEmitRef(/*descriptor_ref=*/0, /*emit_index=*/0);
   loom_low_lower_rule_t rule = {.emit_count = 1};
   loom_low_lower_rule_set_t rule_set = {
       .rules = &rule,
@@ -466,6 +488,7 @@ TEST(LowContractQueryTest, ContractIndexDescriptorRuleSelectsLegalCase) {
       .descriptor_ref_count = 1,
       .emit_refs = &emit_ref,
       .emit_ref_count = 1,
+      .emit_ref_descriptor_bit_count = kTestEmitRefDescriptorBitCount,
       .emits = &emit,
       .emit_count = 1,
       .string_pool = kRuleStringPool,
@@ -621,10 +644,8 @@ TEST(LowContractQueryTest,
   loom_low_lower_rule_t rule = {.emit_count = 1};
   rule.metadata.emit.primary_emit = LOOM_LOW_LOWER_RULE_PRIMARY_EMIT(0, 1);
   const loom_low_lower_emit_t emit = {};
-  const loom_low_lower_emit_ref_t emit_ref = {
-      .descriptor_ref = 0,
-      .emit_index = 0,
-  };
+  const loom_low_lower_emit_ref_storage_t emit_ref =
+      MakeTestEmitRef(/*descriptor_ref=*/0, /*emit_index=*/0);
   const loom_low_lower_rule_set_t rule_set = {
       .rules = &rule,
       .rule_count = 1,
@@ -632,6 +653,7 @@ TEST(LowContractQueryTest,
       .primary_descriptor_feature_masks = &required_features,
       .emit_refs = &emit_ref,
       .emit_ref_count = 1,
+      .emit_ref_descriptor_bit_count = kTestEmitRefDescriptorBitCount,
       .emits = &emit,
       .emit_count = 1,
   };
@@ -960,9 +982,9 @@ TEST(LowContractQueryTest,
   const loom_low_lower_emit_t emit = {
       .kind = LOOM_LOW_LOWER_EMIT_DESCRIPTOR_OP,
   };
-  const loom_low_lower_emit_ref_t emit_refs[] = {
-      {.descriptor_ref = 0, .emit_index = 0},
-      {.descriptor_ref = 1, .emit_index = 0},
+  const loom_low_lower_emit_ref_storage_t emit_refs[] = {
+      MakeTestEmitRef(/*descriptor_ref=*/0, /*emit_index=*/0),
+      MakeTestEmitRef(/*descriptor_ref=*/1, /*emit_index=*/0),
   };
   loom_low_lower_rule_t rules[2] = {};
   rules[0].emit_count = 1;
@@ -974,6 +996,8 @@ TEST(LowContractQueryTest,
     rule_set_storage[i].descriptor_ref_count = IREE_ARRAYSIZE(descriptors);
     rule_set_storage[i].emit_refs = &emit_refs[i];
     rule_set_storage[i].emit_ref_count = 1;
+    rule_set_storage[i].emit_ref_descriptor_bit_count =
+        kTestEmitRefDescriptorBitCount;
     rule_set_storage[i].emits = &emit;
     rule_set_storage[i].emit_count = 1;
   }
@@ -1401,10 +1425,8 @@ TEST(LowContractQueryTest, TargetSubgroupSizeRangeRequiresKnownInRangeSize) {
   loom_low_lower_emit_t emit = {
       .kind = LOOM_LOW_LOWER_EMIT_DESCRIPTOR_OP,
   };
-  const loom_low_lower_emit_ref_t emit_ref = {
-      .descriptor_ref = 0,
-      .emit_index = 0,
-  };
+  const loom_low_lower_emit_ref_storage_t emit_ref =
+      MakeTestEmitRef(/*descriptor_ref=*/0, /*emit_index=*/0);
   loom_low_lower_rule_t rule = {
       .emit_count = 1,
       .guard_count = 1,
@@ -1422,6 +1444,7 @@ TEST(LowContractQueryTest, TargetSubgroupSizeRangeRequiresKnownInRangeSize) {
       .guard_ref_count = 1,
       .emit_refs = &emit_ref,
       .emit_ref_count = 1,
+      .emit_ref_descriptor_bit_count = kTestEmitRefDescriptorBitCount,
       .emits = &emit,
       .emit_count = 1,
       .string_pool = kRuleStringPool,
@@ -1641,10 +1664,8 @@ TEST_F(LowContractQuerySourceMemoryTest,
       .kind = LOOM_LOW_LOWER_EMIT_DESCRIPTOR_OP,
       .source_memory_ordinal = 1,
   };
-  const loom_low_lower_emit_ref_t emit_ref = {
-      .descriptor_ref = LOOM_LOW_LOWER_DESCRIPTOR_REF_NONE,
-      .emit_index = 0,
-  };
+  const loom_low_lower_emit_ref_storage_t emit_ref =
+      MakeTestEmitRef(LOOM_LOW_LOWER_DESCRIPTOR_REF_NONE, /*emit_index=*/0);
   loom_low_lower_rule_t rule = {.emit_count = 1};
 
   loom_low_lower_rule_set_t rule_set = {
@@ -1658,6 +1679,7 @@ TEST_F(LowContractQuerySourceMemoryTest,
       .source_memory_diagnostic_count = 1,
       .emit_refs = &emit_ref,
       .emit_ref_count = 1,
+      .emit_ref_descriptor_bit_count = kTestEmitRefDescriptorBitCount,
       .emits = &emit,
       .emit_count = 1,
   };

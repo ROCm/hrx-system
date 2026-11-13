@@ -383,3 +383,84 @@ check.scenario @immutable_gather_values {
   }
   check.return
 }
+
+// A retained leaf and its caller read the same immutable definition. Every
+// table entry is reached through runtime indices, including masked high bits.
+// The oracle derives words arithmetically instead of loading the same bytes.
+global.rodata.def @retained_words = align(64) bytes("39300000a67ec64113cd8c83801b53c5ed6919075ab8df48c706a68a34556ccca1a3320e0ef2f84f7b40bf91e88e85d355dd4b15c22b12572f7ad8989cc89eda0917651c76652b5ee3b3f19f5002b8e1bd507e232a9f446597ed0aa7043cd1e8718a972aded85d6c4b2724aeb875eaef25c4b03192127773ff603db56caf03f7d9fdc938464c907ab39a56bc20e91cfe8d37e33ffa85a98167d46fc3d42236054171fc46aebfc2881b0e89ca885c4f0cf5aa154e62f9db8fcf47a2d13c966813a9e42e551633f5968381bbd8f0cf811a5d1e485cca6c0e9e37bbd4dfa4099b21115861637ea627a5ebf4ede65843b428c5917a6a32e040ac9f2e07ee0c7dcd2f")
+
+func.def noinline @retained_rodata_word(%seed: i32) -> (i32) {
+  %mask = scalar.constant 63 : i32
+  %bounded = scalar.andi %seed, %mask : i32
+  %position = index.cast %bounded : i32 to index
+  %table = global.load @retained_words : buffer
+  %origin = index.constant 0 : offset
+  %words = buffer.view %table[%origin] : buffer -> view<64xi32>
+  %value = view.load %words[%position] : view<64xi32> -> i32
+  func.return %value : i32
+}
+
+func.def @retained_rodata(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %source = buffer.view %input[%origin] : buffer -> view<64xi32>
+  %destination = buffer.view %output[%origin] : buffer -> view<128xi32>
+  %table = global.load @retained_words : buffer
+  %words = buffer.view %table[%origin] : buffer -> view<64xi32>
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  %mask = scalar.constant 63 : i32
+  %shift = scalar.constant 17 : i32
+  scf.for %i = [%c0 to %c64 step %c1] {
+    %seed = view.load %source[%i] : view<64xi32> -> i32
+    %value = func.call @retained_rodata_word(%seed) : (i32) -> (i32)
+    view.store %value, %destination[%i] : i32, view<128xi32>
+    %shifted = scalar.addi %seed, %shift : i32
+    %bounded = scalar.andi %shifted, %mask : i32
+    %position = index.cast %bounded : i32 to index
+    %own_value = view.load %words[%position] : view<64xi32> -> i32
+    %own_output = index.add %i, %c64 : index
+    view.store %own_value, %destination[%own_output] : i32, view<128xi32>
+  }
+  func.return
+}
+
+func.def @retained_rodata_oracle(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %source = buffer.view %input[%origin] : buffer -> view<64xi32>
+  %destination = buffer.view %output[%origin] : buffer -> view<128xi32>
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  %mask = scalar.constant 63 : i32
+  %shift = scalar.constant 17 : i32
+  %multiplier = scalar.constant 1103515245 : i32
+  %bias = scalar.constant 12345 : i32
+  scf.for %i = [%c0 to %c64 step %c1] {
+    %seed = view.load %source[%i] : view<64xi32> -> i32
+    %bounded = scalar.andi %seed, %mask : i32
+    %product = scalar.muli %bounded, %multiplier : i32
+    %value = scalar.addi %product, %bias : i32
+    view.store %value, %destination[%i] : i32, view<128xi32>
+    %shifted = scalar.addi %seed, %shift : i32
+    %own_index = scalar.andi %shifted, %mask : i32
+    %own_product = scalar.muli %own_index, %multiplier : i32
+    %own_value = scalar.addi %own_product, %bias : i32
+    %own_output = index.add %i, %c64 : index
+    view.store %own_value, %destination[%own_output] : i32, view<128xi32>
+  }
+  func.return
+}
+
+check.scenario @retained_rodata_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(-2000000000) step(17) : tensor<64xi32>
+    %storage = check.generate.fill value(-559038737) : tensor<160xi32>
+    %output = check.tensor.view %storage offset(64) : tensor<160xi32> -> tensor<128xi32>
+    check.compare<@retained_rodata, @retained_rodata_oracle>(%input, %output) : (tensor<64xi32>, tensor<128xi32>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<64xi32>
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<160xi32>
+    }
+  }
+  check.return
+}

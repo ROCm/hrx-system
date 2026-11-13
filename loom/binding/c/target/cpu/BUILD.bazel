@@ -25,7 +25,7 @@ loom_cc_library(
         "//loom/src/loom/target:selection",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
-        "//runtime/src/iree/hal/drivers/task:device_spec",
+        "//runtime/src/iree/hal/driver/task:device_spec",
     ],
     alwayslink = True,
 )

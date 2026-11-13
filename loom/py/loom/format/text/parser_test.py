@@ -1429,6 +1429,7 @@ class TestParseTiedResult:
         )
         assert len(op.tied_results) == 1
         assert op.tied_results[0].operand_index == 1  # %tensor
+        assert not op.tied_results[0].has_type_change
 
 
 class TestParseInvokeOp:
@@ -1446,6 +1447,17 @@ class TestParseInvokeOp:
         assert len(op.results) == 2
         assert len(op.tied_results) == 1
         assert op.tied_results[0].operand_index == 0
+        assert not op.tied_results[0].has_type_change
+
+    def test_with_type_changing_tie(self) -> None:
+        module, scope = _setup_scope(("input", I32))
+        op = _parse_op(
+            "%output = test.invoke @convert(%input) : (i32) -> (%input as i64)",
+            module=module,
+            scope=scope,
+        )
+
+        assert op.tied_results[0].has_type_change
 
 
 # ============================================================================

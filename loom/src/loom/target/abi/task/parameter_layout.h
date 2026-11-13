@@ -10,7 +10,7 @@
 #define LOOM_TARGET_ABI_TASK_PARAMETER_LAYOUT_H_
 
 #include "iree/base/internal/arena.h"
-#include "iree/hal/drivers/task/executable/library/abi.h"
+#include "iree/hal/driver/task/executable/library/abi.h"
 #include "loom/ir/ir.h"
 
 #ifdef __cplusplus

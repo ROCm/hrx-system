@@ -35,6 +35,27 @@ class ConfigTest(unittest.TestCase):
             REPO_ROOT / ".bazel_to_cmake.cfg.py", "loom/.bazel_to_cmake.cfg.py"
         )
 
+    def test_check_helpers_retain_cmake_dependencies_and_environment(self):
+        for rule, source in (
+            ("loom_check_test", 'src="fixture.loom-test"'),
+            ("loom_check_test_suite", 'srcs=["fixture.loom-test"]'),
+        ):
+            with self.subTest(rule=rule):
+                output = bazel_to_cmake_converter.convert_build_file(
+                    f"""{rule}(
+    name="check", {source},
+    data=["input.txt"],
+    tools=["//third_party:spirv_val"],
+    env={{"LOOM_SPIRV_VAL": "$(rootpath //third_party:spirv_val)"}},
+)""",
+                    SimpleNamespace(PROJECTS=[self.project], REPO_MAP={"@hrx": ""}),
+                    str(REPO_ROOT / "loom/src/loom/target/emit/spirv/test"),
+                    repo_root=str(REPO_ROOT),
+                )
+                self.assertIn("iree::third_party::spirv_val", output)
+                self.assertIn("input.txt", output)
+                self.assertIn("LOOM_SPIRV_VAL=", output)
+
     def test_library_group_preserves_dependencies_and_package_policy(self):
         output = bazel_to_cmake_converter.convert_build_file(
             'loom_cc_library_group(name="aggregate", deps=[":first", ":second"])',
@@ -385,7 +406,7 @@ loom_library(
             functions = runtime_project.build_file_functions(
                 converter=converter,
                 targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@hrx": ""}),
-                build_dir=str(REPO_ROOT / "runtime/src/iree/hal/drivers/amd/gpu/cts"),
+                build_dir=str(REPO_ROOT / "runtime/src/iree/hal/driver/amd/gpu/cts"),
                 repo_root=str(REPO_ROOT),
                 condition_mappings=self.project.condition_mappings,
             )
@@ -403,6 +424,41 @@ loom_library(
             '"gfx1151=LOOM_ARCH_AMDGPU_DESCRIPTOR_SET_RDNA3_5_CORE"', converter.body
         )
         self.assertNotIn("LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_", converter.body)
+
+    def test_amdgpu_cts_projection_reaches_non_runtime_consumers(self):
+        runtime_project = bazel_to_cmake_config.include_project(
+            REPO_ROOT / ".bazel_to_cmake.cfg.py", "runtime/.bazel_to_cmake.cfg.py"
+        )
+        repo_cfg = SimpleNamespace(
+            PROJECTS=[runtime_project, self.project],
+            REPO_MAP={"@hrx": ""},
+            CustomBuildFileFunctions=_LoomBinaryBuildFileFunctions,
+        )
+        output = bazel_to_cmake_converter.convert_build_file(
+            """
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
+load("//runtime/src/iree/hal/driver/amd/gpu/cts:testdata.bzl", "iree_hal_amd_gpu_cts_testdata")
+iree_hal_amd_gpu_cts_testdata(
+    name="event_images",
+    srcs=["event_queue.loom"],
+    backend_names=["hip_event"],
+    target_compatible_with=loom_config_compatible_with([
+        "//loom/config/arch/amdgpu:descriptor_set_rdna3_5_core",
+    ]),
+)
+""",
+            repo_cfg,
+            str(REPO_ROOT / "consumer"),
+            repo_root=str(REPO_ROOT),
+        )
+        self.assertIn("iree_hal_amd_gpu_cts_testdata(\n", output)
+        self.assertIn('"event_images"', output)
+        self.assertIn('"event_queue.loom"', output)
+        self.assertIn('"hip_event"', output)
+        self.assertIn("LOOM_ARTIFACT_AMDGPU_ELF", output)
+        self.assertIn("IREE_HAL_DRIVER_AMD_GPU", output)
+        self.assertIn("LOOM_ARCH_AMDGPU_DESCRIPTOR_SET_RDNA3_5_CORE", output)
+        self.assertIn('"gfx1151=LOOM_ARCH_AMDGPU_DESCRIPTOR_SET_RDNA3_5_CORE"', output)
 
     def test_shared_tools_preserve_runtime_only_ownership(self):
         runtime_project = bazel_to_cmake_config.include_project(
@@ -452,7 +508,7 @@ loom_generated_cc_library(name="catalog", generator=":generate", instance_owned=
         self.assertIn("  RUNTIME_DEPS\n    iree::base", output)
         self.assertEqual(output.count("  LINKABLE_MORE_THAN_ONCE\n"), 2)
 
-    def test_loom_artifact_condition_reaches_external_execution_rule(self):
+    def test_loom_artifact_condition_reaches_external_cli_test(self):
         converter = SimpleNamespace(body="")
         functions = bazel_to_cmake_converter.BuildFileFunctions(
             converter=converter,
@@ -468,7 +524,7 @@ loom_generated_cc_library(name="catalog", generator=":generate", instance_owned=
             condition_mappings=self.project.condition_mappings,
         )
 
-        functions.iree_execution_test_suite(
+        functions.iree_cli_test(
             name="integer_shifts_test",
             manifests=["integer_shifts.test.json"],
             tools={"loom-compile": "//loom/src/loom/tools/loom-compile"},

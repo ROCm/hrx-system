@@ -35,7 +35,7 @@ typedef struct loom_parameterized_type_descriptor_t {
   const struct loom_value_fact_domain_t* fact_domain;
 
   // Runtime type kind carrying the parameters. LOOM_TYPE_PARAMETERIZED uses
-  // indirect immutable slots; other kinds carry one enum in the header byte.
+  // indirect immutable slots; compact kinds use their own representation.
   loom_type_kind_t ir_kind;
 
   // loom_type_flags_t bits used by a compact inline-enum representation.
@@ -50,6 +50,8 @@ typedef struct loom_parameterized_type_descriptor_t {
   // Exact-build generated indirect family identity, or NONE for compact
   // representations and handwritten descriptors without a generated family.
   loom_parameterized_type_kind_t kind;
+  // Logical handle mode for LOOM_TYPE_REFERENCE, otherwise zero.
+  loom_reference_ownership_t reference_ownership;
 } loom_parameterized_type_descriptor_t;
 
 static_assert(sizeof(loom_parameterized_type_descriptor_t) ==

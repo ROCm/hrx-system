@@ -18,6 +18,7 @@
 #include "loom/codegen/low/packet_hazard_plan_json.h"
 #include "loom/ir/ir.h"
 #include "loom/ops/low/ops.h"
+#include "loom/ops/low/storage.h"
 #include "loom/target/arch/amdgpu/facts.h"
 #include "loom/target/arch/amdgpu/planning/matrix_result_wait.h"
 #include "loom/target/arch/amdgpu/planning/matrix_wait_states.h"
@@ -465,8 +466,8 @@ loom_amdgpu_wait_plan_edge_copy_group(
 }
 
 static bool loom_amdgpu_wait_plan_op_has_packet_transfers(const loom_op_t* op) {
-  return op != NULL && (loom_low_copy_isa(op) || loom_low_move_isa(op) ||
-                        loom_low_slice_isa(op) || loom_low_concat_isa(op));
+  return op != NULL &&
+         loom_low_register_transfer_kind(op) != LOOM_LOW_REGISTER_TRANSFER_NONE;
 }
 
 static const loom_low_allocation_packet_move_group_t*
@@ -1096,15 +1097,37 @@ static bool loom_amdgpu_wait_plan_storage_release_is_ordered_vmem_reuse(
           .vmem_result_order_class;
   // A flat result may return through LDS while another request writes through
   // VMEM. Matching VMEM classes alone cannot order those physical writes.
-  return builder->classification.frontier_nodes[lease_record->node_index]
-                 .read_counter_mask ==
-             LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM_LOAD &&
-         builder->classification.frontier_nodes[action->insertion_node_index]
-                 .read_counter_mask ==
-             LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM_LOAD &&
-         producer_order_class != LOOM_AMDGPU_VMEM_RESULT_ORDER_NONE &&
-         producer_order_class != LOOM_AMDGPU_VMEM_RESULT_ORDER_UNKNOWN &&
-         producer_order_class == consumer_order_class;
+  if (builder->classification.frontier_nodes[lease_record->node_index]
+              .read_counter_mask != LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM_LOAD ||
+      builder->classification.frontier_nodes[action->insertion_node_index]
+              .read_counter_mask != LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM_LOAD ||
+      producer_order_class == LOOM_AMDGPU_VMEM_RESULT_ORDER_NONE ||
+      producer_order_class == LOOM_AMDGPU_VMEM_RESULT_ORDER_UNKNOWN ||
+      producer_order_class != consumer_order_class) {
+    return false;
+  }
+  // Ordered writes can replace the older lease only when the new result owns
+  // its complete footprint. A narrow load overlapping one word of a wide
+  // pending load does not protect the other words from subsequent VALU reuse.
+  const loom_low_allocation_storage_lease_t* lease =
+      &builder->allocation->storage_lease_instances[action->lease_record_index];
+  const loom_low_packet_view_t packet =
+      loom_low_packet_at_node(builder->schedule, action->insertion_node_index);
+  const loom_low_schedule_node_t* node =
+      &builder->schedule->nodes[action->insertion_node_index];
+  for (uint16_t i = 0; i < node->result_count; ++i) {
+    const loom_low_allocation_assignment_t* assignment =
+        loom_low_packet_result_assignment(builder->allocation, &packet, i);
+    if (assignment != NULL &&
+        assignment->location_kind == lease->location_kind &&
+        assignment->descriptor_reg_class_id == lease->descriptor_reg_class_id &&
+        assignment->location_base <= lease->location_base &&
+        (uint64_t)assignment->location_base + assignment->location_count >=
+            (uint64_t)lease->location_base + lease->location_count) {
+      return true;
+    }
+  }
+  return false;
 }
 
 // D16 memory results preserve a tied register part without reading it. Retain
@@ -3352,9 +3375,9 @@ iree_status_t loom_amdgpu_wait_plan_build(
     const loom_low_allocation_table_t* allocation,
     const loom_amdgpu_wait_plan_options_t* options,
     const loom_amdgpu_address_state_plan_t* address_state,
-    iree_arena_allocator_t* matrix_arena,
+    iree_arena_allocator_t* matrix_arena, iree_arena_allocator_t* arena,
+    iree_arena_allocator_t* transient_arena,
     loom_amdgpu_matrix_result_wait_t** out_matrix_results,
-    iree_arena_allocator_t* arena, iree_arena_allocator_t* transient_arena,
     loom_amdgpu_wait_plan_t* out_plan) {
   *out_plan = (loom_amdgpu_wait_plan_t){0};
   if (out_matrix_results != NULL) {

@@ -122,8 +122,8 @@ void Pm4SdmaStreamingTest::RunStreaming(const StreamingWorkload& workload,
   Pm4ComputeProgram program = {};
   std::array<amdf_cache_operations_t, kTransferPhaseCount> sdma_operations = {};
   ASSERT_NO_FATAL_FAILURE(PrepareCoherentHandoff(kernel, PairQuery::kConcrete,
-                                                 kEdges, backings, &program,
-                                                 &sdma_operations));
+                                                 kEdges, backings,
+                                                 &sdma_operations, &program));
   auto& source = *backings[kSource].memory;
   auto& input = *backings[kInput].memory;
   auto& output = *backings[kOutput].memory;

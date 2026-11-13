@@ -29,6 +29,13 @@ device and storage path under the measurement environment's exclusion policy.
 The default target smoke test uses Task and a declared source file; its timings
 are not performance measurements.
 
+`--queue_family=N` selects the exact transfer-capable family. This allows
+comparisons between compute blits and dedicated copy engines using identical
+files, buffers, and I/O depth. The default, `-1`, selects the first available
+transfer-capable family. A family with no provisioned queues must support
+dynamic acquisition; the benchmark acquires one queue outside timing and
+retains it through the final verification. Acquisition failure is an error.
+
 ```sh
 build_tools/bin/iree-bazel-run --config=opt \
   //runtime/src/iree/hal/cts/file:file_benchmark -- \
@@ -88,6 +95,7 @@ The additional counters describe the measured shape:
 | `host_allocations_per_read` | Successful allocation/reallocation calls through the supplied IREE host allocator, divided by completed reads |
 | `direct` | Whether native uncached I/O was requested |
 | `registered_io` | Whether retained file-I/O bindings were required |
+| `queue_family` | Exact family used for reads and verification downloads |
 
 The counted allocator adds atomic accounting to allocation and free calls. It
 does not count C++ harness allocations, native driver allocations, or kernel

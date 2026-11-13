@@ -71,7 +71,7 @@ typedef struct loom_low_source_function_plan_order_t {
   // Function plans retained in source selection order for emission.
   loom_low_source_function_plan_t* plans;
   // Pointers into plans ordered with callees before callers for planning, or
-  // NULL when source order already satisfies the call-free module.
+  // NULL when calls have no dependencies on source function plans.
   loom_low_source_function_plan_t** planning_order;
   // Number of entries in plans and planning_order.
   iree_host_size_t count;
@@ -111,7 +111,13 @@ static iree_status_t loom_low_source_function_plan_order_build(
   }
   IREE_ASSERT_EQ(out_order->count, function_count);
 
-  if (call_graph->node_count == 0) {
+  // Native callees already have physical signatures; they need no source
+  // planning order. Semantic and command-program dependencies retain their
+  // callee-first order, including mixed modules with native invocations.
+  if (!loom_call_graph_has_call_kind(call_graph,
+                                     LOOM_CALL_LIKE_KIND_SEMANTIC) &&
+      !loom_call_graph_has_call_kind(call_graph,
+                                     LOOM_CALL_LIKE_KIND_COMMAND_PROGRAM)) {
     return iree_ok_status();
   }
 
@@ -564,10 +570,14 @@ iree_status_t loom_low_source_to_low_run(loom_pass_t* pass,
     if (selection->kind != LOOM_LOW_SOURCE_SELECTION_REPRESENTATION) {
       continue;
     }
+    loom_diagnostic_export_scope_t diagnostic_scope;
+    const iree_diagnostic_emitter_t diagnostic_emitter =
+        loom_low_source_selection_scope_diagnostics(
+            selection, pass->diagnostic_emitter, &diagnostic_scope);
     const loom_low_representation_projection_plan_t* projection_plan = NULL;
     status = loom_low_plan_function_representation(
         module, selection->func, selection->target_facts, descriptor_registry,
-        pass->diagnostic_emitter, &selection_arena, &projection_plan);
+        diagnostic_emitter, &selection_arena, &projection_plan);
     if (iree_status_is_ok(status) && projection_plan == NULL) {
       ++statistics->errors;
       emitted_error_diagnostics = true;
@@ -636,7 +646,8 @@ iree_status_t loom_low_source_to_low_run(loom_pass_t* pass,
   loom_low_lower_call_interface_index_t call_interfaces = {0};
   const loom_low_lower_call_interface_index_t* call_interface_index = NULL;
   if (iree_status_is_ok(status) && !emitted_error_diagnostics &&
-      loom_module_has_semantic_calls(module)) {
+      loom_call_graph_has_call_kind(&invocation_facts.call_graph,
+                                    LOOM_CALL_LIKE_KIND_SEMANTIC)) {
     status = loom_low_lower_call_interface_index_initialize(
         &selection_arena, module->symbols.count, &call_interfaces);
     call_interface_index = &call_interfaces;
@@ -741,6 +752,9 @@ iree_status_t loom_low_source_to_low_run(loom_pass_t* pass,
         .representation_projections = &projection_index,
         .source_signature_projections = &source_signature_index,
         .call_interfaces = call_interface_index,
+        .source_has_direct_callers =
+            loom_low_source_invocation_facts_has_direct_callers(
+                &invocation_facts, selection->func),
         .emitter = pass->diagnostic_emitter,
         .max_errors = state ? state->max_errors : 20,
         .control_flow_lowering = state ? state->control_flow_lowering

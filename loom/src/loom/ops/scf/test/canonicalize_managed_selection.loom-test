@@ -1,0 +1,128 @@
+// A permutation transfers each source owner exactly once. Independent selects
+// would instead create new values while leaving the original owners live.
+// RUN: pass canonicalize
+type.decl import("provider", "object") @Object
+
+func.def @permute(%condition: i1, %first: ref<@Object>, %second: ref<@Object>, %left: ptr<@Object>, %right: ptr<@Object>) -> (ref<@Object>, ref<@Object>, ptr<@Object>, ptr<@Object>) {
+  %selected, %other, %selected_pointer, %other_pointer = scf.if %condition -> (ref<@Object>, ref<@Object>, ptr<@Object>, ptr<@Object>) {
+    scf.yield %first, %second, %left, %right : ref<@Object>, ref<@Object>, ptr<@Object>, ptr<@Object>
+  } else {
+    scf.yield %second, %first, %right, %left : ref<@Object>, ref<@Object>, ptr<@Object>, ptr<@Object>
+  }
+  func.return %selected, %other, %selected_pointer, %other_pointer : ref<@Object>, ref<@Object>, ptr<@Object>, ptr<@Object>
+}
+
+// ----
+type.decl import("provider", "object") @Object
+
+func.def @permute(%condition: i1, %first: ref<@Object>, %second: ref<@Object>, %left: ptr<@Object>, %right: ptr<@Object>) -> (ref<@Object>, ref<@Object>, ptr<@Object>, ptr<@Object>) {
+  %selected, %other, %selected_pointer, %other_pointer = scf.if %condition -> (ref<@Object>, ref<@Object>, ptr<@Object>, ptr<@Object>) {
+    scf.yield %first, %second, %left, %right : ref<@Object>, ref<@Object>, ptr<@Object>, ptr<@Object>
+  } else {
+    scf.yield %second, %first, %right, %left : ref<@Object>, ref<@Object>, ptr<@Object>, ptr<@Object>
+  }
+  func.return %selected, %other, %selected_pointer, %other_pointer : ref<@Object>, ref<@Object>, ptr<@Object>, ptr<@Object>
+}
+
+// ====
+
+// Cheap arithmetic can speculate, but the managed yields must still transfer
+// through the selected edge. Keep the complete result tuple on that edge.
+// RUN: pass canonicalize
+type.decl import("provider", "object") @Object
+
+func.def @choose_update(%condition: i1, %first: ref<@Object>, %second: ref<@Object>, %value: i32, %delta: i32) -> (ref<@Object>, ref<@Object>, i32) {
+  %selected, %other, %updated = scf.if %condition -> (ref<@Object>, ref<@Object>, i32) {
+    %increased = scalar.addi %value, %delta : i32
+    scf.yield %first, %second, %increased : ref<@Object>, ref<@Object>, i32
+  } else {
+    %decreased = scalar.subi %value, %delta : i32
+    scf.yield %second, %first, %decreased : ref<@Object>, ref<@Object>, i32
+  }
+  func.return %selected, %other, %updated : ref<@Object>, ref<@Object>, i32
+}
+
+// ----
+type.decl import("provider", "object") @Object
+
+func.def @choose_update(%condition: i1, %first: ref<@Object>, %second: ref<@Object>, %value: i32, %delta: i32) -> (ref<@Object>, ref<@Object>, i32) {
+  %selected, %other, %updated = scf.if %condition -> (ref<@Object>, ref<@Object>, i32) {
+    %increased = scalar.addi %value, %delta : i32
+    scf.yield %first, %second, %increased : ref<@Object>, ref<@Object>, i32
+  } else {
+    %decreased = scalar.subi %value, %delta : i32
+    scf.yield %second, %first, %decreased : ref<@Object>, ref<@Object>, i32
+  }
+  func.return %selected, %other, %updated : ref<@Object>, ref<@Object>, i32
+}
+
+// ====
+
+// A switch also transfers lifetimes; its rows cannot become a value lookup.
+// RUN: pass canonicalize
+type.decl import("provider", "object") @Object
+
+func.def @choose_pointer(%selector: index, %first: ptr<@Object>, %second: ptr<@Object>, %third: ptr<@Object>) -> (ptr<@Object>, ptr<@Object>, ptr<@Object>) {
+  %selected, %next, %last = scf.switch %selector -> (ptr<@Object>, ptr<@Object>, ptr<@Object>) {
+    case 0 {
+      scf.yield %first, %second, %third : ptr<@Object>, ptr<@Object>, ptr<@Object>
+    }
+    case 1 {
+      scf.yield %second, %third, %first : ptr<@Object>, ptr<@Object>, ptr<@Object>
+    }
+    default {
+      scf.yield %third, %first, %second : ptr<@Object>, ptr<@Object>, ptr<@Object>
+    }
+  }
+  func.return %selected, %next, %last : ptr<@Object>, ptr<@Object>, ptr<@Object>
+}
+
+// ----
+type.decl import("provider", "object") @Object
+
+func.def @choose_pointer(%selector: index, %first: ptr<@Object>, %second: ptr<@Object>, %third: ptr<@Object>) -> (ptr<@Object>, ptr<@Object>, ptr<@Object>) {
+  %selected, %next, %last = scf.switch %selector -> (ptr<@Object>, ptr<@Object>, ptr<@Object>) {
+    case 0 {
+      scf.yield %first, %second, %third : ptr<@Object>, ptr<@Object>, ptr<@Object>
+    }
+    case 1 {
+      scf.yield %second, %third, %first : ptr<@Object>, ptr<@Object>, ptr<@Object>
+    }
+    default {
+      scf.yield %third, %first, %second : ptr<@Object>, ptr<@Object>, ptr<@Object>
+    }
+  }
+  func.return %selected, %next, %last : ptr<@Object>, ptr<@Object>, ptr<@Object>
+}
+
+// ====
+
+// Hoisting the borrow would introduce a ref-valued branch result and consume
+// the chosen owner. Both original owners remain independently live here.
+// RUN: pass canonicalize
+type.decl import("provider", "object") @Object
+
+func.def @selected_borrow(%condition: i1, %first: ref<@Object>, %second: ref<@Object>) -> (ref<@Object>, ref<@Object>, ptr<@Object>) {
+  %pointer = scf.if %condition -> (ptr<@Object>) {
+    %left = ref.borrow %first : ref<@Object> -> ptr<@Object>
+    scf.yield %left : ptr<@Object>
+  } else {
+    %right = ref.borrow %second : ref<@Object> -> ptr<@Object>
+    scf.yield %right : ptr<@Object>
+  }
+  func.return %first, %second, %pointer : ref<@Object>, ref<@Object>, ptr<@Object>
+}
+
+// ----
+type.decl import("provider", "object") @Object
+
+func.def @selected_borrow(%condition: i1, %first: ref<@Object>, %second: ref<@Object>) -> (ref<@Object>, ref<@Object>, ptr<@Object>) {
+  %pointer = scf.if %condition -> (ptr<@Object>) {
+    %left = ref.borrow %first : ref<@Object> -> ptr<@Object>
+    scf.yield %left : ptr<@Object>
+  } else {
+    %right = ref.borrow %second : ref<@Object> -> ptr<@Object>
+    scf.yield %right : ptr<@Object>
+  }
+  func.return %first, %second, %pointer : ref<@Object>, ref<@Object>, ptr<@Object>
+}

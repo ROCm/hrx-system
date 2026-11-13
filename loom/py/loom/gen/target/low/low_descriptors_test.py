@@ -62,6 +62,7 @@ from loom.target.low_descriptors import (
     OperandFormMatchKind,
     OperandRole,
     OperandSourceBinding,
+    OwnershipEffect,
     PhysicalRegister,
     PhysicalRegisterView,
     RegClassAlt,
@@ -86,6 +87,7 @@ from loom.target.test.descriptors import (
     TEST_LOW_COND_BR_I32_DESCRIPTOR,
     TEST_LOW_CONST_I32_DESCRIPTOR,
     TEST_LOW_CORE_DESCRIPTOR_SET,
+    TEST_LOW_EXPLICIT_STATE_ADD_SCHEDULE_STATE_DESCRIPTOR,
     TEST_LOW_MUL_I32_DESCRIPTOR,
     TEST_LOW_NATIVE_COND_BR_I32_DESCRIPTOR,
     TEST_LOW_REMATERIALIZE_I32_DESCRIPTOR,
@@ -746,11 +748,17 @@ def test_compiler_derives_shared_explicit_register_pressure_sets() -> None:
     )
     compiled = compiler.compile_descriptor_set(descriptor_set)
     fixed_id = compiled.reg_class_ids["test.fixed.r0"]
+    spillable_fixed_id = compiled.reg_class_ids["test.spillable.fixed.r0"]
 
     pressure_set_id = compiled.reg_class_pressure_set_ids[explicit_id]
     assert pressure_set_id != 0
     assert compiled.reg_class_pressure_set_ids[spillable_id] == pressure_set_id
-    assert compiled.reg_class_pressure_set_ids[fixed_id] == 0
+    # Equal singleton domains share pressure independently of spillability,
+    # but do not merge with the larger domain that contains their register.
+    fixed_pressure_set_id = compiled.reg_class_pressure_set_ids[fixed_id]
+    assert fixed_pressure_set_id != 0
+    assert fixed_pressure_set_id != pressure_set_id
+    assert compiled.reg_class_pressure_set_ids[spillable_fixed_id] == fixed_pressure_set_id
 
     generated = generate_descriptor_set(descriptor_set)
     assert f".pressure_set_id = {pressure_set_id}," in generated.source
@@ -1338,6 +1346,23 @@ def test_compiler_rejects_authored_storage_continuation_result_projection() -> N
         compiler.compile_descriptor_set(descriptor_set)
 
 
+def test_compiler_accepts_storage_continuation_of_available_parts() -> None:
+    descriptor = _storage_continuation_descriptor()
+    operands = list(descriptor.operands)
+    operands[1] = replace(
+        operands[1],
+        reg_alts=(replace(operands[1].reg_alts[0], register_part=None),),
+    )
+    compiled = compiler.compile_descriptor_set(
+        replace(
+            TEST_LOW_CORE_DESCRIPTOR_SET,
+            descriptors=(replace(descriptor, operands=tuple(operands)),),
+        )
+    )
+    assert OperandFlag.STORAGE_CONTINUATION in compiled.descriptors[0].operands[1].flags
+    assert compiled.descriptors[0].operands[1].reg_alts[0].register_part is None
+
+
 def test_compiler_rejects_overlapping_storage_continuation_parts() -> None:
     descriptor = _storage_continuation_descriptor()
     operands = list(descriptor.operands)
@@ -1364,7 +1389,7 @@ def test_compiler_rejects_overlapping_storage_continuation_parts() -> None:
 
 @pytest.mark.parametrize(
     "projection_flag",
-    [OperandFlag.TIED, OperandFlag.EARLY_CLOBBER],
+    [OperandFlag.TIED, OperandFlag.EARLY_CLOBBER, OperandFlag.UNOBSERVED_STATE_WRITE],
 )
 def test_compiler_rejects_authored_operand_projection_flags(
     projection_flag: OperandFlag,
@@ -1718,6 +1743,51 @@ def test_compiler_allows_rematerialization_from_unwritten_target_state() -> None
     compiled = compiler.compile_descriptor_set(descriptor_set)
 
     assert compiled.operand_rematerializable[0]
+
+
+def test_compiler_replays_nonzero_result_with_explicit_state_input() -> None:
+    base = TEST_LOW_EXPLICIT_STATE_ADD_SCHEDULE_STATE_DESCRIPTOR
+    descriptor = replace(
+        base,
+        operands=(
+            TEST_LOW_ADD_I32_DESCRIPTOR.operands[0],
+            replace(
+                base.operands[0],
+                field_name="state_out",
+                flags=(OperandFlag.STATE_WRITE,),
+            ),
+            *base.operands[1:],
+        ),
+        constraints=(Constraint(ConstraintKind.REMATERIALIZABLE, 1),),
+        asm_forms=(AsmForm(results=("dst", "state_out"), operands=("lhs", "rhs")),),
+    )
+    descriptor_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        descriptors=(descriptor,),
+    )
+
+    compiled = compiler.compile_descriptor_set(descriptor_set)
+
+    assert compiled.operand_rematerializable == [False, True, False, False]
+    assert compiled.operand_rematerialization_source_operand_indices == [None] * 4
+
+    # Selecting the arithmetic result would also overwrite a different state
+    # result. Only the declared state result has the replay contract.
+    with pytest.raises(
+        ValueError,
+        match=re.escape("rematerializable result 0 cannot replay target state operand 'state_out'"),
+    ):
+        compiler.compile_descriptor_set(
+            replace(
+                descriptor_set,
+                descriptors=(
+                    replace(
+                        descriptor,
+                        constraints=(Constraint(ConstraintKind.REMATERIALIZABLE, 0),),
+                    ),
+                ),
+            )
+        )
 
 
 @pytest.mark.parametrize(
@@ -4983,3 +5053,20 @@ def test_generator_rejects_pseudo_flag_with_target_encoding_format() -> None:
         match=re.escape("descriptor 'test.add.i32' uses the pseudo flag with a target encoding format id"),
     ):
         generate_descriptor_set(descriptor_set)
+
+
+@pytest.mark.parametrize(("index", "effect"), [(0, OwnershipEffect.BORROW), (1, OwnershipEffect.OWNED)])
+def test_instruction_ownership_requires_matching_ssa_role(index, effect):
+    operands = list(TEST_LOW_ADD_I32_DESCRIPTOR.operands)
+    operands[index] = replace(operands[index], ownership=effect)
+    descriptor = replace(TEST_LOW_ADD_I32_DESCRIPTOR, operands=tuple(operands))
+    descriptor_set = replace(TEST_LOW_CORE_DESCRIPTOR_SET, descriptors=(descriptor,))
+    with pytest.raises(ValueError, match="ownership incompatible with its SSA role"):
+        generate_descriptor_set(descriptor_set)
+
+
+def test_numeric_descriptor_sets_omit_ownership_tables():
+    descriptor_set = replace(TEST_LOW_CORE_DESCRIPTOR_SET, descriptors=(TEST_LOW_ADD_I32_DESCRIPTOR,))
+    generated = generate_descriptor_set(descriptor_set)
+    assert "OwnershipOffsets" not in generated.source
+    assert "OwnershipEffects" not in generated.source

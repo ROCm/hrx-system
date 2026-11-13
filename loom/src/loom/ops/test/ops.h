@@ -318,7 +318,8 @@ enum {
   LOOM_OP_TEST_FACT_EXACT_FLOAT_TYPES = LOOM_OP_KIND(LOOM_DIALECT_TEST, 121),
   LOOM_OP_TEST_F64_ARRAY_ATTRS = LOOM_OP_KIND(LOOM_DIALECT_TEST, 122),
   LOOM_OP_TEST_STRING_ARRAY_ATTRS = LOOM_OP_KIND(LOOM_DIALECT_TEST, 123),
-  LOOM_OP_TEST_COUNT_ = 124,
+  LOOM_OP_TEST_FACT_OBSERVATION_SCOPE = LOOM_OP_KIND(LOOM_DIALECT_TEST, 124),
+  LOOM_OP_TEST_COUNT_ = 125,
 };
 
 // Synthetic flags for TemplateParamFlags parser/printer coverage.
@@ -1891,25 +1892,26 @@ LOOM_DEFINE_ATTR_I64(loom_test_target_max_workgroup_size_z, 9)
 LOOM_DEFINE_ATTR_I64(loom_test_target_max_flat_workgroup_size, 10)
 LOOM_DEFINE_ATTR_I64(loom_test_target_max_workgroup_storage_bytes, 11)
 LOOM_DEFINE_ATTR_I64(loom_test_target_subgroup_size, 12)
-LOOM_DEFINE_ATTR_I64(loom_test_target_max_grid_size_x, 13)
-LOOM_DEFINE_ATTR_I64(loom_test_target_max_grid_size_y, 14)
-LOOM_DEFINE_ATTR_I64(loom_test_target_max_grid_size_z, 15)
-LOOM_DEFINE_ATTR_I64(loom_test_target_max_flat_grid_size, 16)
-LOOM_DEFINE_ATTR_I64(loom_test_target_max_workgroup_count_x, 17)
-LOOM_DEFINE_ATTR_I64(loom_test_target_max_workgroup_count_y, 18)
-LOOM_DEFINE_ATTR_I64(loom_test_target_max_workgroup_count_z, 19)
-LOOM_DEFINE_ATTR_I64(loom_test_target_memory_space_generic, 20)
-LOOM_DEFINE_ATTR_I64(loom_test_target_memory_space_global, 21)
-LOOM_DEFINE_ATTR_I64(loom_test_target_memory_space_workgroup, 22)
-LOOM_DEFINE_ATTR_I64(loom_test_target_memory_space_constant, 23)
-LOOM_DEFINE_ATTR_I64(loom_test_target_memory_space_private, 24)
-LOOM_DEFINE_ATTR_I64(loom_test_target_memory_space_host, 25)
-LOOM_DEFINE_ATTR_I64(loom_test_target_memory_space_descriptor, 26)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_test_target_abi, 27, loom_target_abi_kind_t)
-LOOM_DEFINE_ATTR_STRING(loom_test_target_export_symbol, 28)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_test_target_linkage, 29, loom_target_linkage_t)
-LOOM_DEFINE_ATTR_STRING(loom_test_target_contract_set_key, 30)
-LOOM_DEFINE_ATTR_I64(loom_test_target_contract_feature_bits, 31)
+LOOM_DEFINE_ATTR_I64(loom_test_target_execution_unit_count, 13)
+LOOM_DEFINE_ATTR_I64(loom_test_target_max_grid_size_x, 14)
+LOOM_DEFINE_ATTR_I64(loom_test_target_max_grid_size_y, 15)
+LOOM_DEFINE_ATTR_I64(loom_test_target_max_grid_size_z, 16)
+LOOM_DEFINE_ATTR_I64(loom_test_target_max_flat_grid_size, 17)
+LOOM_DEFINE_ATTR_I64(loom_test_target_max_workgroup_count_x, 18)
+LOOM_DEFINE_ATTR_I64(loom_test_target_max_workgroup_count_y, 19)
+LOOM_DEFINE_ATTR_I64(loom_test_target_max_workgroup_count_z, 20)
+LOOM_DEFINE_ATTR_I64(loom_test_target_memory_space_generic, 21)
+LOOM_DEFINE_ATTR_I64(loom_test_target_memory_space_global, 22)
+LOOM_DEFINE_ATTR_I64(loom_test_target_memory_space_workgroup, 23)
+LOOM_DEFINE_ATTR_I64(loom_test_target_memory_space_constant, 24)
+LOOM_DEFINE_ATTR_I64(loom_test_target_memory_space_private, 25)
+LOOM_DEFINE_ATTR_I64(loom_test_target_memory_space_host, 26)
+LOOM_DEFINE_ATTR_I64(loom_test_target_memory_space_descriptor, 27)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_test_target_abi, 28, loom_target_abi_kind_t)
+LOOM_DEFINE_ATTR_STRING(loom_test_target_export_symbol, 29)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_test_target_linkage, 30, loom_target_linkage_t)
+LOOM_DEFINE_ATTR_STRING(loom_test_target_contract_set_key, 31)
+LOOM_DEFINE_ATTR_I64(loom_test_target_contract_feature_bits, 32)
 enum loom_test_target_build_flag_bits_e {
   LOOM_TEST_TARGET_BUILD_FLAG_HAS_CODEGEN_FORMAT = 1u << 0,
   LOOM_TEST_TARGET_BUILD_FLAG_HAS_ARTIFACT_FORMAT = 1u << 1,
@@ -1922,25 +1924,26 @@ enum loom_test_target_build_flag_bits_e {
   LOOM_TEST_TARGET_BUILD_FLAG_HAS_MAX_FLAT_WORKGROUP_SIZE = 1u << 8,
   LOOM_TEST_TARGET_BUILD_FLAG_HAS_MAX_WORKGROUP_STORAGE_BYTES = 1u << 9,
   LOOM_TEST_TARGET_BUILD_FLAG_HAS_SUBGROUP_SIZE = 1u << 10,
-  LOOM_TEST_TARGET_BUILD_FLAG_HAS_MAX_GRID_SIZE_X = 1u << 11,
-  LOOM_TEST_TARGET_BUILD_FLAG_HAS_MAX_GRID_SIZE_Y = 1u << 12,
-  LOOM_TEST_TARGET_BUILD_FLAG_HAS_MAX_GRID_SIZE_Z = 1u << 13,
-  LOOM_TEST_TARGET_BUILD_FLAG_HAS_MAX_FLAT_GRID_SIZE = 1u << 14,
-  LOOM_TEST_TARGET_BUILD_FLAG_HAS_MAX_WORKGROUP_COUNT_X = 1u << 15,
-  LOOM_TEST_TARGET_BUILD_FLAG_HAS_MAX_WORKGROUP_COUNT_Y = 1u << 16,
-  LOOM_TEST_TARGET_BUILD_FLAG_HAS_MAX_WORKGROUP_COUNT_Z = 1u << 17,
-  LOOM_TEST_TARGET_BUILD_FLAG_HAS_MEMORY_SPACE_GENERIC = 1u << 18,
-  LOOM_TEST_TARGET_BUILD_FLAG_HAS_MEMORY_SPACE_GLOBAL = 1u << 19,
-  LOOM_TEST_TARGET_BUILD_FLAG_HAS_MEMORY_SPACE_WORKGROUP = 1u << 20,
-  LOOM_TEST_TARGET_BUILD_FLAG_HAS_MEMORY_SPACE_CONSTANT = 1u << 21,
-  LOOM_TEST_TARGET_BUILD_FLAG_HAS_MEMORY_SPACE_PRIVATE = 1u << 22,
-  LOOM_TEST_TARGET_BUILD_FLAG_HAS_MEMORY_SPACE_HOST = 1u << 23,
-  LOOM_TEST_TARGET_BUILD_FLAG_HAS_MEMORY_SPACE_DESCRIPTOR = 1u << 24,
-  LOOM_TEST_TARGET_BUILD_FLAG_HAS_ABI = 1u << 25,
-  LOOM_TEST_TARGET_BUILD_FLAG_HAS_EXPORT_SYMBOL = 1u << 26,
-  LOOM_TEST_TARGET_BUILD_FLAG_HAS_LINKAGE = 1u << 27,
-  LOOM_TEST_TARGET_BUILD_FLAG_HAS_CONTRACT_SET_KEY = 1u << 28,
-  LOOM_TEST_TARGET_BUILD_FLAG_HAS_CONTRACT_FEATURE_BITS = 1u << 29,
+  LOOM_TEST_TARGET_BUILD_FLAG_HAS_EXECUTION_UNIT_COUNT = 1u << 11,
+  LOOM_TEST_TARGET_BUILD_FLAG_HAS_MAX_GRID_SIZE_X = 1u << 12,
+  LOOM_TEST_TARGET_BUILD_FLAG_HAS_MAX_GRID_SIZE_Y = 1u << 13,
+  LOOM_TEST_TARGET_BUILD_FLAG_HAS_MAX_GRID_SIZE_Z = 1u << 14,
+  LOOM_TEST_TARGET_BUILD_FLAG_HAS_MAX_FLAT_GRID_SIZE = 1u << 15,
+  LOOM_TEST_TARGET_BUILD_FLAG_HAS_MAX_WORKGROUP_COUNT_X = 1u << 16,
+  LOOM_TEST_TARGET_BUILD_FLAG_HAS_MAX_WORKGROUP_COUNT_Y = 1u << 17,
+  LOOM_TEST_TARGET_BUILD_FLAG_HAS_MAX_WORKGROUP_COUNT_Z = 1u << 18,
+  LOOM_TEST_TARGET_BUILD_FLAG_HAS_MEMORY_SPACE_GENERIC = 1u << 19,
+  LOOM_TEST_TARGET_BUILD_FLAG_HAS_MEMORY_SPACE_GLOBAL = 1u << 20,
+  LOOM_TEST_TARGET_BUILD_FLAG_HAS_MEMORY_SPACE_WORKGROUP = 1u << 21,
+  LOOM_TEST_TARGET_BUILD_FLAG_HAS_MEMORY_SPACE_CONSTANT = 1u << 22,
+  LOOM_TEST_TARGET_BUILD_FLAG_HAS_MEMORY_SPACE_PRIVATE = 1u << 23,
+  LOOM_TEST_TARGET_BUILD_FLAG_HAS_MEMORY_SPACE_HOST = 1u << 24,
+  LOOM_TEST_TARGET_BUILD_FLAG_HAS_MEMORY_SPACE_DESCRIPTOR = 1u << 25,
+  LOOM_TEST_TARGET_BUILD_FLAG_HAS_ABI = 1u << 26,
+  LOOM_TEST_TARGET_BUILD_FLAG_HAS_EXPORT_SYMBOL = 1u << 27,
+  LOOM_TEST_TARGET_BUILD_FLAG_HAS_LINKAGE = 1u << 28,
+  LOOM_TEST_TARGET_BUILD_FLAG_HAS_CONTRACT_SET_KEY = 1u << 29,
+  LOOM_TEST_TARGET_BUILD_FLAG_HAS_CONTRACT_FEATURE_BITS = 1u << 30,
 };
 typedef uint32_t loom_test_target_build_flags_t;
 iree_status_t loom_test_target_build(
@@ -1959,6 +1962,7 @@ iree_status_t loom_test_target_build(
     loom_optional int64_t max_flat_workgroup_size,
     loom_optional int64_t max_workgroup_storage_bytes,
     loom_optional int64_t subgroup_size,
+    loom_optional int64_t execution_unit_count,
     loom_optional int64_t max_grid_size_x,
     loom_optional int64_t max_grid_size_y,
     loom_optional int64_t max_grid_size_z,
@@ -2470,6 +2474,23 @@ iree_status_t loom_test_string_array_attrs_build(
     loom_optional loom_named_attr_slice_t dict,
     loom_location_id_t location,
     loom_op_t** out_op);
+
+// LOOM_OP_TEST_FACT_OBSERVATION_SCOPE: Exposes the uniform scope proved at this use: 0 for unknown, 1 for subgroup, 2 for workgroup, and 3 for cluster.
+// %scope = test.fact_observation_scope %x : index -> i32
+LOOM_DEFINE_ISA(loom_test_fact_observation_scope_isa, LOOM_OP_TEST_FACT_OBSERVATION_SCOPE)
+LOOM_DEFINE_OPERAND(loom_test_fact_observation_scope_value, 0)
+LOOM_DEFINE_RESULT(loom_test_fact_observation_scope_result, 0)
+iree_status_t loom_test_fact_observation_scope_build(
+    loom_builder_t* builder,
+    loom_may_consume loom_value_id_t value,
+    loom_type_t result_type,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+iree_status_t loom_test_fact_observation_scope_facts(
+    loom_fact_context_t* context,
+    const loom_module_t* module, const loom_op_t* op,
+    const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts);
 
 // Returns the vtable array for the test dialect.
 const loom_op_vtable_t* const* loom_test_dialect_vtables(

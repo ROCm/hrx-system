@@ -335,6 +335,18 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "read_only_data",
+    srcs = ["read_only_data.c"],
+    hdrs = ["read_only_data.h"],
+    deps = [
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/global",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
     name = "function_requirements",
     srcs = ["function_requirements.c"],
     hdrs = ["function_requirements.h"],
@@ -342,10 +354,10 @@ loom_cc_library(
         ":descriptors",
         ":function",
         ":immediates",
+        ":read_only_data",
         ":representation_binding",
         ":storage_layout",
         "//loom/src/loom/ir",
-        "//loom/src/loom/ops/global",
         "//loom/src/loom/ops/low",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
@@ -399,6 +411,7 @@ loom_cc_library(
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/low",
         "//loom/src/loom/target:registers",
+        "//loom/src/loom/util:adaptive_sort",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
     ],
@@ -410,6 +423,7 @@ loom_cc_test(
     deps = [
         ":builder",
         ":function_requirements",
+        ":read_only_data",
         ":storage_layout",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/global",
@@ -430,7 +444,7 @@ loom_cc_library(
         ":function",
         "//loom/src/loom/analysis:storage_layout",
         "//loom/src/loom/ir",
-        "//loom/src/loom/ops:type_builders",
+        "//loom/src/loom/ops:core_type_builders",
         "//loom/src/loom/ops/low",
         "//loom/src/loom/rewrite:rewriter",
         "//runtime/src/iree/base",
@@ -693,11 +707,12 @@ loom_cc_library(
         "//loom/src/loom/codegen/low/allocation:live_range",
         "//loom/src/loom/codegen/low/allocation:loop_edge_relocation",
         "//loom/src/loom/codegen/low/allocation:move_plan",
-        "//loom/src/loom/codegen/low/allocation:move_topology",
         "//loom/src/loom/codegen/low/allocation:numbering",
         "//loom/src/loom/codegen/low/allocation:packet_move",
+        "//loom/src/loom/codegen/low/allocation:physical_domains",
         "//loom/src/loom/codegen/low/allocation:placement",
         "//loom/src/loom/codegen/low/allocation:search",
+        "//loom/src/loom/codegen/low/allocation:spill_plan",
         "//loom/src/loom/codegen/low/allocation:storage",
         "//loom/src/loom/codegen/low/allocation:storage_lease",
         "//loom/src/loom/codegen/low/allocation:table",
@@ -796,6 +811,23 @@ loom_cc_test(
 )
 
 loom_cc_library(
+    name = "rematerialization_facts",
+    srcs = ["rematerialization_facts.c"],
+    hdrs = ["rematerialization_facts.h"],
+    deps = [
+        ":descriptor_traits",
+        ":representation_binding",
+        ":target_binding",
+        "//loom/src/loom/analysis:liveness",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/target:registers",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
     name = "rematerialization",
     srcs = ["rematerialization.c"],
     hdrs = ["rematerialization.h"],
@@ -804,6 +836,7 @@ loom_cc_library(
         ":descriptor_traits",
         ":diagnostics",
         ":register_requirements",
+        ":rematerialization_facts",
         ":representation_binding",
         ":storage_relation",
         ":target_binding",
@@ -1175,6 +1208,7 @@ loom_cc_test(
     ],
     deps = [
         ":source_memory_plan",
+        "//loom/src/loom/analysis:symbolic_expr",
         "//loom/src/loom/analysis:view_regions",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/buffer",
@@ -1182,6 +1216,7 @@ loom_cc_test(
         "//loom/src/loom/ops/encoding",
         "//loom/src/loom/ops/index",
         "//loom/src/loom/ops/kernel",
+        "//loom/src/loom/ops/scf",
         "//loom/src/loom/ops/test",
         "//loom/src/loom/ops/vector",
         "//loom/src/loom/ops/view",
@@ -1261,8 +1296,11 @@ loom_cc_library(
     srcs = ["register_parts.c"],
     hdrs = ["register_parts.h"],
     deps = [
+        ":descriptors",
+        ":representation_binding",
         "//loom/src/loom/error:emitter",
         "//loom/src/loom/ir",
+        "//loom/src/loom/target:registers",
         "//loom/src/loom/util:adaptive_sort",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
@@ -1409,5 +1447,32 @@ loom_cc_test(
         ":requirements",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "ownership",
+    srcs = ["ownership.c"],
+    hdrs = ["ownership.h"],
+    deps = [
+        ":descriptors",
+        ":representation_binding",
+        "//loom/src/loom/analysis:ownership",
+        "//loom/src/loom/ir",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "object_lifetime",
+    srcs = ["object_lifetime.c"],
+    hdrs = ["object_lifetime.h"],
+    deps = [
+        ":descriptors",
+        ":ownership",
+        "//loom/src/loom/analysis:ownership_lifetime",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/low",
+        "//runtime/src/iree/base",
     ],
 )

@@ -174,11 +174,13 @@ enum loom_target_math_recipe_e {
   LOOM_TARGET_MATH_RECIPE_RSQRT_NEWTON_TWO = 23,
   LOOM_TARGET_MATH_RECIPE_TRIGONOMETRIC_F32 = 24,
   LOOM_TARGET_MATH_RECIPE_PRESERVE_TRIGONOMETRIC_ZEROS = 25,
+  LOOM_TARGET_MATH_RECIPE_APPROXIMATE_LOGARITHM = 26,
+  LOOM_TARGET_MATH_RECIPE_APPROXIMATE_EXPONENTIAL = 27,
 };
 
 // Number of recipe ordinals available to recipe-indexed metadata tables.
 #define LOOM_TARGET_MATH_RECIPE_COUNT \
-  ((int)LOOM_TARGET_MATH_RECIPE_PRESERVE_TRIGONOMETRIC_ZEROS + 1)
+  ((int)LOOM_TARGET_MATH_RECIPE_APPROXIMATE_EXPONENTIAL + 1)
 
 // Packed policy-table sentinel selecting REJECT instead of KEEP or REWRITE.
 #define LOOM_TARGET_MATH_POLICY_RECIPE_REJECT UINT8_C(31)
@@ -450,9 +452,9 @@ typedef struct loom_target_math_pass_capability_t {
 // Initializes |out_registry| from a target-owned entry table. The table is
 // borrowed and must outlive |out_registry|.
 void loom_target_math_policy_registry_initialize_from_entries(
-    loom_target_math_policy_registry_t* out_registry,
     const loom_target_math_policy_registry_entry_t* entries,
-    iree_host_size_t entry_count);
+    iree_host_size_t entry_count,
+    loom_target_math_policy_registry_t* out_registry);
 
 // Looks up the math policy for |contract_set_stable_id|, or returns NULL when
 // no row matches.

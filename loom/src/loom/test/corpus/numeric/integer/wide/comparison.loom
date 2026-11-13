@@ -1,0 +1,178 @@
+// Each predicate occupies one bit, keeping uniform and per-lane comparisons
+// observable through the same compact result without materializing ten buffers.
+func.def inline @comparison_bits(%lhs: i64, %rhs: i64) -> (i32) {
+  %eq = scalar.cmpi eq, %lhs, %rhs : i64
+  %bit_eq = scalar.constant 1 : i32
+  %ne = scalar.cmpi ne, %lhs, %rhs : i64
+  %bit_ne = scalar.constant 2 : i32
+  %slt = scalar.cmpi slt, %lhs, %rhs : i64
+  %bit_slt = scalar.constant 4 : i32
+  %sle = scalar.cmpi sle, %lhs, %rhs : i64
+  %bit_sle = scalar.constant 8 : i32
+  %sgt = scalar.cmpi sgt, %lhs, %rhs : i64
+  %bit_sgt = scalar.constant 16 : i32
+  %sge = scalar.cmpi sge, %lhs, %rhs : i64
+  %bit_sge = scalar.constant 32 : i32
+  %ult = scalar.cmpi ult, %lhs, %rhs : i64
+  %bit_ult = scalar.constant 64 : i32
+  %ule = scalar.cmpi ule, %lhs, %rhs : i64
+  %bit_ule = scalar.constant 128 : i32
+  %ugt = scalar.cmpi ugt, %lhs, %rhs : i64
+  %bit_ugt = scalar.constant 256 : i32
+  %uge = scalar.cmpi uge, %lhs, %rhs : i64
+  %bit_uge = scalar.constant 512 : i32
+  %clear_bit = scalar.constant 0 : i32
+  %word_eq = scf.select %eq, %bit_eq, %clear_bit : i32
+  %word_ne = scf.select %ne, %bit_ne, %clear_bit : i32
+  %bits_ne = scalar.ori %word_eq, %word_ne : i32
+  %word_slt = scf.select %slt, %bit_slt, %clear_bit : i32
+  %bits_slt = scalar.ori %bits_ne, %word_slt : i32
+  %word_sle = scf.select %sle, %bit_sle, %clear_bit : i32
+  %bits_sle = scalar.ori %bits_slt, %word_sle : i32
+  %word_sgt = scf.select %sgt, %bit_sgt, %clear_bit : i32
+  %bits_sgt = scalar.ori %bits_sle, %word_sgt : i32
+  %word_sge = scf.select %sge, %bit_sge, %clear_bit : i32
+  %bits_sge = scalar.ori %bits_sgt, %word_sge : i32
+  %word_ult = scf.select %ult, %bit_ult, %clear_bit : i32
+  %bits_ult = scalar.ori %bits_sge, %word_ult : i32
+  %word_ule = scf.select %ule, %bit_ule, %clear_bit : i32
+  %bits_ule = scalar.ori %bits_ult, %word_ule : i32
+  %word_ugt = scf.select %ugt, %bit_ugt, %clear_bit : i32
+  %bits_ugt = scalar.ori %bits_ule, %word_ugt : i32
+  %word_uge = scf.select %uge, %bit_uge, %clear_bit : i32
+  %bits_uge = scalar.ori %bits_ugt, %word_uge : i32
+  func.return %bits_uge : i32
+}
+
+// Four operand placements share exact semantics: both uniform, both varying,
+// and each order of the mixed scalar/vector pair.
+kernel.def @wide_comparisons() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%lhs: i64, %rhs: i64, %input: buffer, %other: buffer, %output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %base = index.constant 0 : offset
+  %output_base = index.constant 32 : offset
+  %inputs = buffer.view %input[%base] : buffer -> view<64xi64>
+  %others = buffer.view %other[%base] : buffer -> view<64xi64>
+  %results = buffer.view %output[%output_base] : buffer -> view<4x64xi32>
+  %value = view.load %inputs[%lane] : view<64xi64> -> i64
+  %other_value = view.load %others[%lane] : view<64xi64> -> i64
+  %uniform = func.call @comparison_bits(%lhs, %rhs) : (i64, i64) -> (i32)
+  %varying = func.call @comparison_bits(%value, %other_value) : (i64, i64) -> (i32)
+  %scalar_left = func.call @comparison_bits(%lhs, %value) : (i64, i64) -> (i32)
+  %scalar_right = func.call @comparison_bits(%value, %rhs) : (i64, i64) -> (i32)
+  view.store %uniform, %results[0, %lane] : i32, view<4x64xi32>
+  view.store %varying, %results[1, %lane] : i32, view<4x64xi32>
+  view.store %scalar_left, %results[2, %lane] : i32, view<4x64xi32>
+  view.store %scalar_right, %results[3, %lane] : i32, view<4x64xi32>
+  kernel.return
+}
+
+// The interpreter oracle uses an ordinary loop instead of GPU lane execution.
+func.def @wide_comparisons_oracle(%lhs: i64, %rhs: i64, %input: buffer, %other: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %output_base = index.constant 32 : offset
+  %inputs = buffer.view %input[%base] : buffer -> view<64xi64>
+  %others = buffer.view %other[%base] : buffer -> view<64xi64>
+  %results = buffer.view %output[%output_base] : buffer -> view<4x64xi32>
+  %begin = index.constant 0 : index
+  %end = index.constant 64 : index
+  %step = index.constant 1 : index
+  %uniform = func.call @comparison_bits(%lhs, %rhs) : (i64, i64) -> (i32)
+  scf.for %lane = [%begin to %end step %step] {
+    %value = view.load %inputs[%lane] : view<64xi64> -> i64
+    %other_value = view.load %others[%lane] : view<64xi64> -> i64
+    %varying = func.call @comparison_bits(%value, %other_value) : (i64, i64) -> (i32)
+    %scalar_left = func.call @comparison_bits(%lhs, %value) : (i64, i64) -> (i32)
+    %scalar_right = func.call @comparison_bits(%value, %rhs) : (i64, i64) -> (i32)
+    view.store %uniform, %results[0, %lane] : i32, view<4x64xi32>
+    view.store %varying, %results[1, %lane] : i32, view<4x64xi32>
+    view.store %scalar_left, %results[2, %lane] : i32, view<4x64xi32>
+    view.store %scalar_right, %results[3, %lane] : i32, view<4x64xi32>
+  }
+  func.return
+}
+
+check.scenario @wide_comparison_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %lhs = check.literal value(-1) : i64
+    %rhs = check.literal value(-1) : i64
+    %input = check.generate.iota offset(-32) step(1) : tensor<64xi64>
+    %other = check.generate.iota offset(31) step(-1) : tensor<64xi64>
+    %output = check.generate.fill value(-7777) : tensor<272xi32>
+    check.compare<@wide_comparisons, @wide_comparisons_oracle>(%lhs, %rhs, %input, %other, %output) : (i64, i64, tensor<64xi64>, tensor<64xi64>, tensor<272xi32>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<64xi64>
+      check.expect.bitwise actual(%other) expected(%other) : tensor<64xi64>
+      check.expect.bitwise actual(%output) expected(%output) : tensor<272xi32>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %lhs = check.literal value(-1) : i64
+    %rhs = check.literal value(-1) : i64
+    %input = check.generate.iota offset(-32) step(1) : tensor<64xi64>
+    %other = check.generate.iota offset(-32) step(1) : tensor<64xi64>
+    %output = check.generate.fill value(-7777) : tensor<272xi32>
+    check.compare<@wide_comparisons, @wide_comparisons_oracle>(%lhs, %rhs, %input, %other, %output) : (i64, i64, tensor<64xi64>, tensor<64xi64>, tensor<272xi32>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<64xi64>
+      check.expect.bitwise actual(%other) expected(%other) : tensor<64xi64>
+      check.expect.bitwise actual(%output) expected(%output) : tensor<272xi32>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %lhs = check.literal value(-9223372036854775808) : i64
+    %rhs = check.literal value(9223372036854775807) : i64
+    %input = check.generate.iota offset(-9223372036854775808) step(1) : tensor<64xi64>
+    %other = check.generate.iota offset(-9223372036854775745) step(-1) : tensor<64xi64>
+    %output = check.generate.fill value(-7777) : tensor<272xi32>
+    check.compare<@wide_comparisons, @wide_comparisons_oracle>(%lhs, %rhs, %input, %other, %output) : (i64, i64, tensor<64xi64>, tensor<64xi64>, tensor<272xi32>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<64xi64>
+      check.expect.bitwise actual(%other) expected(%other) : tensor<64xi64>
+      check.expect.bitwise actual(%output) expected(%output) : tensor<272xi32>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %lhs = check.literal value(4294967295) : i64
+    %rhs = check.literal value(4294967296) : i64
+    %input = check.generate.iota offset(4294967264) step(1) : tensor<64xi64>
+    %other = check.generate.iota offset(4294967327) step(-1) : tensor<64xi64>
+    %output = check.generate.fill value(-7777) : tensor<272xi32>
+    check.compare<@wide_comparisons, @wide_comparisons_oracle>(%lhs, %rhs, %input, %other, %output) : (i64, i64, tensor<64xi64>, tensor<64xi64>, tensor<272xi32>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<64xi64>
+      check.expect.bitwise actual(%other) expected(%other) : tensor<64xi64>
+      check.expect.bitwise actual(%output) expected(%output) : tensor<272xi32>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %lhs = check.literal value(0) : i64
+    %rhs = check.literal value(4294967296) : i64
+    %input = check.generate.iota offset(-4294967328) step(1) : tensor<64xi64>
+    %other = check.generate.iota offset(-4294967265) step(-1) : tensor<64xi64>
+    %output = check.generate.fill value(-7777) : tensor<272xi32>
+    check.compare<@wide_comparisons, @wide_comparisons_oracle>(%lhs, %rhs, %input, %other, %output) : (i64, i64, tensor<64xi64>, tensor<64xi64>, tensor<272xi32>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<64xi64>
+      check.expect.bitwise actual(%other) expected(%other) : tensor<64xi64>
+      check.expect.bitwise actual(%output) expected(%output) : tensor<272xi32>
+    }
+  }
+  check.trial[32](%trial: index, %entropy: check.entropy) {
+    %lhs_entropy = check.entropy.fork %entropy name("lhs") : check.entropy
+    %lhs = check.entropy.read %lhs_entropy[%trial] : check.entropy -> i64
+    %rhs_entropy = check.entropy.fork %entropy name("rhs") : check.entropy
+    %rhs = check.entropy.read %rhs_entropy[%trial] : check.entropy -> i64
+    %input_entropy = check.entropy.fork %entropy name("input") : check.entropy
+    %input_seed = check.entropy.read %input_entropy[%trial] : check.entropy -> i64
+    %other_entropy = check.entropy.fork %entropy name("other") : check.entropy
+    %other_seed = check.entropy.read %other_entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%input_seed) range(-9223372036854775808 to 9223372036854775807) : tensor<64xi64>
+    %other = check.generate.random.uniform seed(%other_seed) range(-9223372036854775808 to 9223372036854775807) : tensor<64xi64>
+    %output = check.generate.fill value(-7777) : tensor<272xi32>
+    check.compare<@wide_comparisons, @wide_comparisons_oracle>(%lhs, %rhs, %input, %other, %output) : (i64, i64, tensor<64xi64>, tensor<64xi64>, tensor<272xi32>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<64xi64>
+      check.expect.bitwise actual(%other) expected(%other) : tensor<64xi64>
+      check.expect.bitwise actual(%output) expected(%output) : tensor<272xi32>
+    }
+  }
+  check.return
+}

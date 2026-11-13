@@ -11,6 +11,7 @@ load("//build_tools/bazel:runfiles.bzl", "IreeRunfilesEnvironmentInfo")
 _TOOLCHAIN_TYPES = {
     "benchmark": Label("//loom/build_tools/bazel:benchmark_toolchain_type"),
     "compile": Label("//loom/build_tools/bazel:compile_toolchain_type"),
+    "cxx_import": Label("//loom/build_tools/bazel:cxx_import_toolchain_type"),
     "format": Label("//loom/build_tools/bazel:format_toolchain_type"),
     "link": Label("//loom/build_tools/bazel:link_toolchain_type"),
     "lint": Label("//loom/build_tools/bazel:lint_toolchain_type"),
@@ -51,6 +52,7 @@ def loom_tools_toolchains(
         name,
         benchmark_tool,
         compile_tool,
+        cxx_import_tool,
         format_tool,
         lint_tool,
         link_tool,
@@ -64,14 +66,15 @@ def loom_tools_toolchains(
 
     The macro emits ``<name>_<role>`` implementations and
     ``<name>_<role>_toolchain`` registrations for the benchmark, compile,
-    format, lint, link, and test roles. Splitting the roles prevents a rule
-    using one executable from configuring the dependency graphs of the other
-    tools.
+    C/C++ import, format, lint, link, and test roles. Splitting the roles
+    prevents a rule using one executable from configuring the dependency
+    graphs of the other tools.
 
     Args:
       name: Prefix for generated implementation and registration targets.
       benchmark_tool: Label of the benchmark executable.
       compile_tool: Label of the compile executable.
+      cxx_import_tool: Label of the C/C++ source importer.
       format_tool: Label of the format executable.
       lint_tool: Label of the lint executable.
       link_tool: Label of the link executable.
@@ -85,6 +88,7 @@ def loom_tools_toolchains(
     tools = {
         "benchmark": benchmark_tool,
         "compile": compile_tool,
+        "cxx_import": cxx_import_tool,
         "format": format_tool,
         "link": link_tool,
         "lint": lint_tool,

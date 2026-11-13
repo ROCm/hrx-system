@@ -7,6 +7,7 @@
 #include "loom/rewrite/remap.h"
 
 #include <cstring>
+#include <string>
 #include <vector>
 
 #include "iree/base/internal/arena.h"
@@ -941,6 +942,74 @@ TEST_F(RemapTest, RemapsTypeAttributesAcrossModules) {
       loom_type_table_get(&target_->types, target_attr.type_id), source_type));
 }
 
+TEST_F(RemapTest, PayloadRemappingDoesNotImportSourceInventory) {
+  for (uint32_t i = 0; i < 4096; ++i) {
+    const std::string filename = "source-" + std::to_string(i) + ".loom";
+    loom_source_id_t source_id = LOOM_SOURCE_ID_INVALID;
+    IREE_ASSERT_OK(loom_module_register_source(
+        source_, iree_make_string_view(filename.data(), filename.size()),
+        &source_id));
+  }
+  const auto scratch_bytes = remap_arena_.used_allocation_size;
+  loom_ir_remap_t remap = InitializeRemap();
+  loom_type_t remapped_type = {};
+  IREE_ASSERT_OK(loom_ir_remap_type(
+      &remap, loom_type_scalar(LOOM_SCALAR_TYPE_INDEX), &remapped_type));
+  loom_attribute_t remapped_attribute = {};
+  IREE_ASSERT_OK(
+      loom_ir_remap_attribute(&remap, loom_attr_i64(16), &remapped_attribute));
+  EXPECT_TRUE(
+      loom_type_equal(remapped_type, loom_type_scalar(LOOM_SCALAR_TYPE_INDEX)));
+  EXPECT_EQ(loom_attr_as_i64(remapped_attribute), 16);
+  EXPECT_EQ(target_->sources.count, 0u);
+  EXPECT_EQ(remap.target_sources, nullptr);
+  EXPECT_EQ(remap_arena_.used_allocation_size, scratch_bytes);
+}
+
+TEST_F(RemapTest, ExplicitlyPublishesCompleteSourceMappingWithoutLocations) {
+  const iree_string_view_t filenames[] = {IREE_SV("first.loom"),
+                                          IREE_SV("second.loom")};
+  loom_source_id_t source_ids[IREE_ARRAYSIZE(filenames)];
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(filenames); ++i) {
+    IREE_ASSERT_OK(
+        loom_module_register_source(source_, filenames[i], &source_ids[i]));
+  }
+  loom_source_id_t existing_id = LOOM_SOURCE_ID_INVALID;
+  IREE_ASSERT_OK(
+      loom_module_register_source(target_, filenames[1], &existing_id));
+  loom_ir_remap_t remap = InitializeRemap();
+  IREE_ASSERT_OK(loom_ir_remap_sources(&remap));
+  ASSERT_NE(remap.target_sources, nullptr);
+  ASSERT_EQ(target_->sources.count, IREE_ARRAYSIZE(filenames));
+  EXPECT_EQ(remap.target_sources[source_ids[1]], existing_id);
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(filenames); ++i) {
+    EXPECT_TRUE(iree_string_view_equal(
+        target_->sources.entries[remap.target_sources[source_ids[i]]],
+        filenames[i]));
+  }
+  const auto* mapping = remap.target_sources;
+  const auto scratch_bytes = remap_arena_.used_allocation_size;
+  IREE_ASSERT_OK(loom_ir_remap_sources(&remap));
+  EXPECT_EQ(remap.target_sources, mapping);
+  EXPECT_EQ(remap_arena_.used_allocation_size, scratch_bytes);
+}
+
+TEST_F(RemapTest, EmptyAndSameModuleSourceMappingsNeedNoStorage) {
+  loom_ir_remap_t empty = InitializeRemap();
+  IREE_ASSERT_OK(loom_ir_remap_sources(&empty));
+  EXPECT_EQ(empty.target_sources, nullptr);
+
+  loom_source_id_t source_id = LOOM_SOURCE_ID_INVALID;
+  IREE_ASSERT_OK(
+      loom_module_register_source(source_, IREE_SV("model.loom"), &source_id));
+  loom_ir_remap_t same = {};
+  IREE_ASSERT_OK(loom_ir_remap_initialize(source_, source_, &remap_arena_,
+                                          nullptr, &same));
+  IREE_ASSERT_OK(loom_ir_remap_sources(&same));
+  EXPECT_EQ(same.target_sources, nullptr);
+  EXPECT_EQ(remap_arena_.used_allocation_size, 0u);
+}
+
 TEST_F(RemapTest, RemapsLocationsAcrossModules) {
   loom_source_id_t source_id = LOOM_SOURCE_ID_INVALID;
   IREE_ASSERT_OK(
@@ -971,12 +1040,8 @@ TEST_F(RemapTest, RemapsLocationsAcrossModules) {
   IREE_ASSERT_OK(iree_arena_allocate_array(
       &source_->arena, 1, sizeof(loom_location_id_t), (void**)&fused_children));
   fused_children[0] = file_location_id;
-  loom_location_entry_t fused_entry = {
-      .kind = LOOM_LOCATION_FUSED,
-      .flags = LOOM_LOCATION_FLAG_SYNTHETIC,
-  };
-  fused_entry.fused.count = 1;
-  fused_entry.fused.children = fused_children;
+  loom_location_entry_t fused_entry = loom_location_fused(fused_children, 1);
+  fused_entry.flags = LOOM_LOCATION_FLAG_SYNTHETIC;
   loom_location_id_t fused_location_id = LOOM_LOCATION_UNKNOWN;
   IREE_ASSERT_OK(
       loom_module_add_location(source_, fused_entry, &fused_location_id));
@@ -1083,6 +1148,79 @@ static iree_status_t RemapSymbolByName(void* user_data,
   }
   *out_target_ref = {.module_id = 0, .symbol_id = target_symbol_id};
   return iree_ok_status();
+}
+
+TEST_F(RemapTest, RemapsReferenceIdentityAndKeepsExistingTargetAlias) {
+  loom_string_id_t source_namespace;
+  loom_string_id_t source_name;
+  loom_string_id_t source_spelling;
+  loom_symbol_id_t source_declaration;
+  IREE_ASSERT_OK(
+      loom_module_intern_string(source_, IREE_SV("input"), &source_namespace));
+  IREE_ASSERT_OK(
+      loom_module_intern_string(source_, IREE_SV("decoder"), &source_name));
+  IREE_ASSERT_OK(
+      loom_module_intern_string(source_, IREE_SV("Decoder"), &source_spelling));
+  IREE_ASSERT_OK(
+      loom_module_add_symbol(source_, source_spelling, &source_declaration));
+
+  loom_string_id_t target_namespace;
+  loom_string_id_t target_name;
+  loom_string_id_t target_spelling;
+  loom_symbol_id_t target_declaration;
+  IREE_ASSERT_OK(loom_module_intern_string(target_, IREE_SV("DecoderAlias"),
+                                           &target_spelling));
+  IREE_ASSERT_OK(
+      loom_module_add_symbol(target_, target_spelling, &target_declaration));
+  IREE_ASSERT_OK(
+      loom_module_intern_string(target_, IREE_SV("decoder"), &target_name));
+  IREE_ASSERT_OK(
+      loom_module_intern_string(target_, IREE_SV("input"), &target_namespace));
+  ASSERT_NE(source_namespace, target_namespace);
+  const auto target_owner =
+      loom_type_reference(LOOM_REFERENCE_OWNERSHIP_OWNED, target_namespace,
+                          target_name, target_declaration);
+  loom_type_t canonical_owner;
+  IREE_ASSERT_OK(
+      loom_module_intern_type(target_, target_owner, &canonical_owner));
+
+  const auto source_owner =
+      loom_type_reference(LOOM_REFERENCE_OWNERSHIP_OWNED, source_namespace,
+                          source_name, source_declaration);
+  const auto source_borrow =
+      loom_type_reference(LOOM_REFERENCE_OWNERSHIP_BORROWED, source_namespace,
+                          source_name, source_declaration);
+  loom_type_t source_signature;
+  IREE_ASSERT_OK(loom_module_intern_function_type(
+      source_, &source_owner, 1, &source_borrow, 1, &source_signature));
+  const loom_ir_remap_options_t options = {
+      .remap_symbol =
+          loom_ir_remap_symbol_callback_make(RemapSymbolByName, nullptr),
+  };
+  auto remap = InitializeRemap(&options);
+  loom_type_t target_signature;
+  IREE_ASSERT_OK(
+      loom_ir_remap_type(&remap, source_signature, &target_signature));
+  loom_module_free(source_);
+  source_ = nullptr;
+  iree_arena_block_pool_trim(&block_pool_);
+
+  const auto argument = loom_type_func_arg_types(target_signature)[0];
+  const auto result = loom_type_func_result_types(target_signature)[0];
+  EXPECT_TRUE(loom_type_equal(argument, canonical_owner));
+  EXPECT_EQ(loom_type_reference_declaration_id(argument), target_declaration);
+  EXPECT_EQ(loom_type_reference_ownership(result),
+            LOOM_REFERENCE_OWNERSHIP_BORROWED);
+  EXPECT_EQ(loom_type_reference_namespace_id(result), target_namespace);
+  EXPECT_EQ(loom_type_reference_name_id(result), target_name);
+  const auto result_declaration = loom_type_reference_declaration_id(result);
+  ASSERT_LT(result_declaration, target_->symbols.count);
+  EXPECT_TRUE(iree_string_view_equal(
+      loom_string_table_get(
+          &target_->strings,
+          target_->symbols.entries[result_declaration].name_id),
+      IREE_SV("Decoder")));
+  EXPECT_FALSE(loom_type_equal(argument, result));
 }
 
 TEST_F(RemapTest, CopiesOrderedF64ArraysAcrossModules) {

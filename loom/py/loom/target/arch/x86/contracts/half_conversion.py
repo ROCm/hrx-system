@@ -98,13 +98,9 @@ def half_conversion_rules(
                         Guard.value_type(
                             "result", Vector(result_element, lanes=lane_count)
                         ),
-                        # Without F16C, packet narrowing must remain eligible
-                        # for legalization into the exact scalar conversion.
-                        *(
-                            (Guard.descriptor_available(descriptor),)
-                            if narrow and not evex
-                            else ()
-                        ),
+                        # Missing native features leave the exact scalar
+                        # conversion available to packet legalization.
+                        Guard.descriptor_available(descriptor),
                     ),
                     emit=(
                         emit_descriptor_op(
@@ -134,6 +130,7 @@ def half_conversion_rules(
                 guards=(
                     Guard.value_type("input", Vector("f16", lanes=lane_count)),
                     Guard.value_type("result", Vector("f64", lanes=lane_count)),
+                    Guard.descriptor_available(half),
                 ),
                 emit=(
                     emit_descriptor_op(

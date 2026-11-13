@@ -25,6 +25,9 @@ sh_test(
         "//loom/src/loom/tools/loom-format",
         "//loom/src/loom/tools/loom-import-cxx",
     ],
+    env = {
+        "LOOM_EXAMPLE_LIBRARY": "$(location //loom/docs/examples:example.shlib)",
+    },
     target_compatible_with = loom_config_compatible_with([
         "//loom/config/emit:aie2p_elf",
         "//loom/config/import:cxx",

@@ -32,7 +32,7 @@
 //   This function maps codepoints to CATEGORY pseudo-bytes only.
 //   Exact codepoint range matching (e.g., [一-龥]) is handled separately
 //   through the DFA's range checking mechanism, not through pseudo-bytes.
-static IREE_ATTRIBUTE_ALWAYS_INLINE inline uint8_t
+static IREE_ATTRIBUTE_ALWAYS_INLINE uint8_t
 iree_tokenizer_regex_codepoint_to_byte(uint32_t codepoint) {
   // ASCII bytes pass through directly.
   if (codepoint < 0x80) {
@@ -110,10 +110,9 @@ static inline bool iree_tokenizer_regex_shorthand_matches(
 // Checks if the lookahead condition at an accepting state should reject the
 // match. Returns true if the match should be rejected (negative lookahead
 // matched), false if the match should be accepted.
-IREE_ATTRIBUTE_ALWAYS_INLINE static inline bool
-iree_tokenizer_regex_lookahead_rejects(const iree_tokenizer_regex_dfa_t* dfa,
-                                       uint16_t state,
-                                       uint32_t next_codepoint) {
+static IREE_ATTRIBUTE_ALWAYS_INLINE bool iree_tokenizer_regex_lookahead_rejects(
+    const iree_tokenizer_regex_dfa_t* dfa, uint16_t state,
+    uint32_t next_codepoint) {
   if (!dfa->lookahead) {
     return false;
   }
@@ -1291,8 +1290,10 @@ static iree_status_t iree_tokenizer_regex_scan(
         // retained input first when the start belongs to an earlier chunk.
         IREE_RETURN_IF_ERROR(iree_tokenizer_regex_seek(
             state, state->match_start, &chunk, &base_offset, &position));
-        position +=
-            iree_unicode_utf8_sequence_length((uint8_t)chunk.data[position]);
+        // Malformed sequences decode as one replacement character. Advance by
+        // the bytes the decoder actually consumed instead of the byte's
+        // nominal sequence length so retry remains on a valid input position.
+        (void)iree_unicode_utf8_decode(chunk, &position);
         iree_tokenizer_regex_reset_to_start(state, dfa, base_offset + position);
         continue;
       } else {
@@ -1427,8 +1428,9 @@ iree_status_t iree_tokenizer_regex_exec_finalize(
     }
     if (!matched) {
       // An unfinished match can conceal a later complete match at EOF.
-      resume_position += iree_unicode_utf8_sequence_length(
-          (uint8_t)available_tail.data[resume_position - tail_start]);
+      iree_host_size_t tail_position = resume_position - tail_start;
+      (void)iree_unicode_utf8_decode(available_tail, &tail_position);
+      resume_position = tail_start + tail_position;
     }
     iree_tokenizer_regex_reset_to_start(state, dfa, resume_position);
     // Replay the unconsumed suffix through the same scan loop. Do not update

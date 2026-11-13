@@ -29,7 +29,6 @@ ROOT_COMMAND_EPILOG = """Common build-system commands:
   python dev.py bazel fuzz
   python dev.py bazel compile-commands
   python dev.py bazel clang-tidy
-  python dev.py importers setup tilelang
   python dev.py docs build
   python dev.py docs serve
 
@@ -48,10 +47,7 @@ Most developer scratch/state defaults under .tmp/. Set IREE_DEVTOOLS_TMP to
 redirect scratch that does not need to be a Bazel workspace package.
 
 Use `python dev.py bazel --help` or `python dev.py cmake --help` for the full
-subcommand list for that build system. Optional importer environments use
-locked requirement files outside the base Bazel module lock; set one up with
-`python dev.py importers setup <name>` and select it for build-system commands
-with `--importer-env <name>`."""
+subcommand list for that build system."""
 
 
 def root_command_help(command: str) -> CommandHelp:
@@ -75,26 +71,9 @@ tool environment.""",
   python dev.py doctor --system
   python dev.py doctor --tool-root ../.tools/iree-x""",
         )
-    if command == "importers":
-        return CommandHelp(
-            description="Manage optional importer Python environments.",
-            epilog="""Examples:
-  python dev.py importers setup tilelang
-  python dev.py importers setup mlir
-  python dev.py importers doctor tilelang
-  python dev.py importers doctor mlir
-  python dev.py importers env tilelang
-  python dev.py importers env mlir --format shell
-
-Importer environments are explicit, locked Python environments under .tmp/.
-They keep heavyweight frontend packages out of the base Bazel module lock while
-still giving Bazel, CMake, and CI one deterministic package surface. Select a
-ready environment for build-system commands with `--importer-env <name>`.
-Importer docs live under loom/py/loom/importers/.""",
-        )
     if command == "docs":
         return CommandHelp(
-            description="Build or serve the Loom programming guide.",
+            description="Build or serve the Loom documentation.",
             epilog="""Examples:
   python dev.py setup --docs
   python dev.py docs build
@@ -104,7 +83,7 @@ Importer docs live under loom/py/loom/importers/.""",
 
 The documentation toolchain is an optional, hash-locked part of the managed
 repository environment. Install it with `python dev.py setup --docs` before
-building or serving the guide.""",
+building or serving the site.""",
         )
     return CommandHelp(description=f"Run {command}.")
 
@@ -171,17 +150,13 @@ active.""",
   python dev.py bazel configure -DIREE_HAL_DRIVER_AMD=OFF
   python dev.py bazel configure --config=loom-target-amd-gpu
   python dev.py bazel configure --config=loom-target-all
-  python dev.py bazel configure --importer-env tilelang
-  python dev.py bazel configure --importer-env mlir
   python dev.py bazel configure --//runtime/config/hal:drivers=amd-gpu,task
 
 The default includes task and native AMD GPU/XDNA drivers. This writes
 .bazelrc.configured. Loom target presets resolve to complete architecture,
 artifact, and execution sets, which are printed in the configure summary.
 Published portable build options and exact-selection rules live in BUILDING.md.
-Use .bazelrc.local for checkout-specific Bazel overrides.
-`--importer-env <name>` writes the matching Loom importer build setting
-without adding frontend packages to the base module lock.""",
+Use .bazelrc.local for checkout-specific Bazel overrides.""",
             )
         return CommandHelp(
             description="Configure the CMake build tree.",
@@ -190,22 +165,18 @@ without adding frontend packages to the base module lock.""",
   python dev.py cmake configure
   python dev.py cmake configure --fresh
   python dev.py cmake configure -DCMAKE_BUILD_TYPE=Debug
-  python dev.py cmake configure -DAMDF_BUILD=ON -DIREE_HAL_DRIVER_AMD=OFF -DIREE_HAL_DRIVER_AMDGPU=OFF -DLIBHRX_BUILD=OFF -DLOOM_BUILD=OFF
+  python dev.py cmake configure -DAMDF_BUILD=ON -DIREE_HAL_DRIVER_AMD=OFF -DLIBHRX_BUILD=OFF -DLOOM_BUILD=OFF
   python dev.py cmake configure -DIREE_HAL_DRIVER_AMD_XDNA=OFF
   python dev.py cmake configure -DIREE_HAL_DRIVER_AMD=OFF -DLIBHRX_BUILD=OFF
   python dev.py cmake configure -DLOOM_TARGET_ALL_CPU=ON
   python dev.py cmake configure -DLOOM_TARGET_ALL=ON
-  python dev.py cmake configure --importer-env tilelang
-  python dev.py cmake configure --importer-env mlir
   python dev.py --cmake-build-dir build/cmake-asan cmake configure -DIREE_ENABLE_ASAN=ON
 
 The first configure uses build/cmake unless --cmake-build-dir or
 IREE_CMAKE_BUILD_DIR selects another tree. The selected tree is recorded for
 later iree-cmake-build, iree-cmake-test, iree-cmake-run, iree-cmake-try, and
 iree-cmake-fuzz invocations.
-Published project build options live in BUILDING.md. `--importer-env <name>`
-adds the matching `-DLOOM_IMPORT_<NAME>=ON` option and runs configure with the
-locked importer environment on PYTHONPATH.""",
+Published project build options live in BUILDING.md.""",
         )
     if command == "build":
         if lane == "bazel":
@@ -241,12 +212,7 @@ CMake.""",
                 epilog="""Examples:
   python dev.py bazel test
   python dev.py bazel test //build_tools/devtools:cli_test
-  python dev.py bazel test //libhrx/...
-  python dev.py bazel test --importer-env tilelang //loom/py/loom/importers/tilelang:tilelang_import_test
-  python dev.py bazel test --importer-env mlir //loom/py/loom/importers/mlir:mlir_import_test
-
-`--importer-env <name>` selects the Bazel importer config and forwards the
-locked importer site-packages path through Bazel test_env.""",
+  python dev.py bazel test //libhrx/...""",
             )
         return CommandHelp(
             description="Build and run selected CTests in the configured CMake tree.",
@@ -255,14 +221,10 @@ locked importer site-packages path through Bazel test_env.""",
   python dev.py cmake test
   python dev.py cmake test -R hrx
   python dev.py cmake test --rerun-failed
-  python dev.py cmake test --importer-env tilelang -R tilelang
-  python dev.py cmake test --importer-env mlir -R mlir
 
 CTest first enumerates the exact selection, builds the concrete CMake roots
 declared by those tests, and then runs the same selection with
-`--output-on-failure`. Source-only selections skip the build.
-`--importer-env <name>` runs CTest with the locked importer site-packages path
-on PYTHONPATH.""",
+`--output-on-failure`. Source-only selections skip the build.""",
         )
     if command == "query" and lane == "bazel":
         return CommandHelp(
@@ -521,15 +483,23 @@ deps; add --dep TARGET for anything inference misses.""",
     if command == "fuzz" and lane == "bazel":
         return CommandHelp(
             description="Build and run Bazel libFuzzer targets without holding the Bazel lock.",
-            arguments="Fuzz target or ... pattern, Bazel build options, followed by -- and fuzzer arguments.",
+            arguments="Exact fuzz targets or one ... pattern, Bazel build options, followed by -- and fuzzer arguments.",
             epilog="""Examples:
   python dev.py bazel fuzz //runtime/src/iree/tokenizer:special_tokens_fuzz
+  python dev.py bazel fuzz --workers=2 //path:parser_fuzz //path:schema_fuzz -- -max_total_time=60
   python dev.py bazel fuzz //runtime/src/iree/tokenizer/... -- -max_total_time=60
   python dev.py bazel fuzz --workers=4 --shard=0/4 //runtime/... -- -max_total_time=3600
   python dev.py bazel fuzz --workers=2 //loom/... -- -max_total_time=3600
+  python dev.py bazel fuzz --compile-only //...
 
-This builds with --config=fuzzer, resolves executable paths with cquery, then
-runs each fuzzer in a fresh child process with independent peak-memory accounting.
+Campaigns build with --config=fuzzer, resolve executable paths with cquery, then
+run each fuzzer in a fresh child process with independent peak-memory accounting.
+An exact target set is analyzed and built in one Bazel invocation before any
+fuzzer starts. A recursive pattern remains a separate discovery boundary and
+cannot be combined with exact targets.
+--compile-only builds every compatible selected target with --config=asan and
+stops. This qualifies compilation and linking while reusing an ASAN build's
+dependency objects; use a campaign for full dependency coverage instrumentation.
 --workers bounds host concurrency, --shard=INDEX/COUNT assigns zero-based stable
 target shards across machines, and --result=PATH overrides the default JSON result
 path. Keep runtime and Loom campaigns separate so their process cost, duration,
@@ -540,7 +510,7 @@ and host requirements can be scheduled independently.""",
             description="Build and run a CMake libFuzzer target.",
             arguments="CMake fuzz target and build options, followed by -- and fuzzer arguments.",
             epilog="""Examples:
-  python dev.py cmake configure -DIREE_ENABLE_FUZZING=ON -DLIBHRX_BUILD=OFF -DIREE_HAL_DRIVER_AMDGPU=OFF
+  python dev.py cmake configure -DIREE_ENABLE_FUZZING=ON -DLIBHRX_BUILD=OFF
   python dev.py cmake fuzz iree::tokenizer::special_tokens_fuzz
   python dev.py cmake fuzz iree::tokenizer::special_tokens_fuzz -- -max_total_time=60
 
@@ -639,6 +609,7 @@ iree-bazel-configure -DIREE_HAL_DRIVER_AMD=OFF
 iree-bazel-configure --//runtime/config/hal:drivers=amd-gpu,task
 iree-bazel-build [targets...]
 iree-bazel-test [targets...]
+iree-bazel-coverage //runtime/src/iree/base:string_view_test
 iree-bazel-query 'deps(//runtime/src/iree/base)'
 iree-bazel-cquery --output=files //runtime/src/iree/base
 python dev.py bazel compile-commands
@@ -668,7 +639,7 @@ maps to `cmake --build ... --target TARGET`.
 iree-cmake-configure
 iree-cmake-configure --fresh
 iree-cmake-configure --fresh -GNinja
-iree-cmake-configure -DAMDF_BUILD=ON -DIREE_HAL_DRIVER_AMD=OFF -DIREE_HAL_DRIVER_AMDGPU=OFF -DLIBHRX_BUILD=OFF -DLOOM_BUILD=OFF
+iree-cmake-configure -DAMDF_BUILD=ON -DIREE_HAL_DRIVER_AMD=OFF -DLIBHRX_BUILD=OFF -DLOOM_BUILD=OFF
 iree-cmake-configure -DIREE_HAL_DRIVER_AMD_XDNA=OFF
 iree-cmake-configure -DIREE_HAL_DRIVER_AMD=OFF -DLIBHRX_BUILD=OFF
 iree-cmake-build hrx::hrx
@@ -742,6 +713,28 @@ iree-bazel-test --config=asan //runtime/src/iree/base:allocator_test
 
 Use focused targets while iterating, then run the affected project or default
 target set before handing work back."""
+
+    if command == "coverage":
+        return """## iree-bazel-coverage
+
+Run an explicit Bazel test target or target pattern with native LLVM source
+coverage. The wrapper selects the repository's `llvm-coverage` configuration
+and writes the combined LCOV report to
+`bazel-out/_coverage/_coverage_report.dat`.
+
+```bash
+iree-bazel-coverage //runtime/src/iree/base:string_view_test
+iree-bazel-coverage //runtime/src/iree/base/...
+iree-bazel-coverage --instrumentation_filter='//loom/src/loom[/:]' //loom/src/loom/...
+```
+
+`--instrumentation_filter` is a label regular expression, not a target pattern;
+the `[/:]` boundary includes both the package itself and its subpackages.
+
+Coverage scopes must be explicit: runtime, Loom, and libamdf reports have
+different denominators and should not be collapsed into one percentage. This
+is an evidence and scheduled-analysis command, not a pull-request percentage
+gate."""
 
     if command == "query":
         return """## iree-bazel-query
@@ -900,27 +893,67 @@ fuzzer processes at once. The default is one worker.
 
 ```bash
 iree-bazel-fuzz //runtime/src/iree/tokenizer:special_tokens_fuzz
-iree-bazel-fuzz //runtime/src/iree/tokenizer:special_tokens_fuzz -- -max_total_time=60
-iree-bazel-fuzz --workers=4 --shard=0/4 //runtime/... -- -max_total_time=3600
-iree-bazel-fuzz --workers=2 //loom/... -- -max_total_time=3600
+iree-bazel-fuzz --mutation-time=60 //runtime/src/iree/tokenizer:special_tokens_fuzz
+iree-bazel-fuzz --workers=2 --mutation-time=60 //path:parser_fuzz //path:schema_fuzz
+iree-bazel-fuzz --workers=4 --mutation-time=3600 --shard=0/4 //runtime/...
+iree-bazel-fuzz --workers=2 --mutation-time=3600 --quiet-output //loom/...
+iree-bazel-fuzz --compact-corpus --workers=4 --quiet-output //runtime/...
+iree-bazel-fuzz --compile-only //...
 ```
 
-The recursive pattern is the campaign boundary. Run runtime and Loom campaigns
-independently so each can use an appropriate process count, shard layout,
-duration, and host. `//...` remains available for a deliberate whole-tree
-sweep. A caller with local Bazel packages outside that sweep can repeat
-`--ignore-directory=PATH`; the exclusion applies only to recursive target
-discovery and does not change ordinary Bazel build, run, or query behavior.
+Several exact labels form one target set. The launcher analyzes and builds the
+set in one Bazel invocation, generates every launch script, then starts fuzzer
+processes under the shared worker bound. This keeps Bazel work serialized while
+the binaries fuzz concurrently with independent corpus and artifact directories.
+
+`--mutation-time=SECONDS` starts each target's budget after libFuzzer reports
+`INITED`, so restoring and replaying a persistent corpus cannot consume the
+mutation window. The runner publishes a unique nonempty `-stop_file` when the
+window expires; libFuzzer completes its current input, writes final statistics,
+and exits successfully. Raw `-max_total_time`, `-runs`, merge, inner worker, and
+stop-file arguments are mutually exclusive with this campaign-level budget.
+
+`--compact-corpus` runs libFuzzer's lossless merge into isolated storage for
+each nonempty persistent corpus. All merges must succeed before any retained
+set is installed. Selected inputs are installed before redundant inputs are
+removed, so interruption or filesystem failure leaves a coverage-equivalent
+superset instead of an incomplete corpus. Scheduled main-branch campaigns run
+this maintenance before saving their trusted cache; pull requests only replay
+and extend the restored corpus.
+
+Interactive campaigns stream each fuzzer's output directly. Scheduled campaigns
+use `--quiet-output`: the runner still parses the stream and retains a bounded
+tail for the first failure, but successful output is discarded instead of
+growing a service log.
+
+A recursive pattern is an exclusive campaign boundary. Run runtime and Loom
+campaigns independently so each can use an appropriate process count, shard
+layout, duration, and host. `//...` remains available for a deliberate
+whole-tree sweep. A caller with local Bazel packages outside that sweep can
+repeat `--ignore-directory=PATH`; the exclusion applies only to recursive
+target discovery and does not change ordinary Bazel build, run, or query
+behavior.
+
+`--compile-only` retains recursive discovery, stable sharding, and incompatible
+target filtering, but builds with `--config=asan` and stops after one invocation.
+This qualifies each fuzz binary while reusing dependency objects from an ASAN
+build; campaigns retain `--config=fuzzer` coverage instrumentation throughout
+the dependency graph. Compile-only mode does not accept worker, result, or
+fuzzer-process arguments.
 
 Corpus and artifact directories live under
 `IREE_FUZZ_CACHE` when set, otherwise the platform user cache directory under
 `iree-fuzz-cache/`. Each run writes a compact JSON campaign result there;
 `--result=PATH` overrides its location. Shards use a stable hash of each target
 label, so adding a target does not move existing targets between machines. The
-result lists incompatible targets skipped by a pattern; naming one directly
-fails with a configuration diagnostic. Fuzzer arguments go after `--`;
-libFuzzer `-jobs` multiplies work inside every selected target and is usually
-inappropriate for pattern campaigns.
+result records source and executable identities, monotonic durations,
+libFuzzer coverage and feature growth, final execution and memory statistics,
+corpus and artifact deltas, and incompatible targets skipped by a pattern. A
+failed target also retains a 64 KiB output tail beside its local corpus and
+records that path. Naming one incompatible target directly fails with a
+configuration diagnostic. Fuzzer arguments go after `--`; libFuzzer `-jobs`
+multiplies work inside every selected target and is usually inappropriate for
+pattern campaigns.
 
 Merge an external corpus into the target's persistent corpus with libFuzzer's
 normal merge mode:
@@ -1079,7 +1112,7 @@ wrapper builds that target, resolves the executable with the CMake target map,
 then execs it directly.
 
 ```bash
-iree-cmake-configure -DIREE_ENABLE_FUZZING=ON -DLIBHRX_BUILD=OFF -DIREE_HAL_DRIVER_AMDGPU=OFF
+iree-cmake-configure -DIREE_ENABLE_FUZZING=ON -DLIBHRX_BUILD=OFF
 iree-cmake-fuzz iree::tokenizer::special_tokens_fuzz
 iree-cmake-fuzz iree::tokenizer::special_tokens_fuzz -- -max_total_time=60
 ```

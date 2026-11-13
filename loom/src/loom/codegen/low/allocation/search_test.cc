@@ -11,6 +11,8 @@
 #include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/codegen/low/allocation/spill_search.h"
+#include "loom/codegen/low/rematerialization_facts.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/target/registers.h"
@@ -122,7 +124,7 @@ loom_low_allocation_class_capacity_t Capacity(uint32_t max_units) {
       .descriptor_reg_class_id = 0,
       .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
       .max_units = max_units,
-      .alloc_unit_bits = 32,
+      .spill_unit_bits = 32,
       .spill_slot_space = LOOM_LOW_SPILL_SLOT_SPACE_UNKNOWN,
       .is_spillable = true,
       .is_bounded = true,
@@ -146,7 +148,8 @@ loom_low_reg_class_t RegClass(uint32_t allocatable_count,
       .flags = flags,
       .alloc_unit_bits = 32,
       .allocatable_count = (uint16_t)allocatable_count,
-      .spill_class_id = LOOM_LOW_REG_CLASS_NONE,
+      .spill_unit_bits = 32,
+      .spill_alignment_log2 = 0x40,
   };
   return reg_class;
 }
@@ -1079,6 +1082,26 @@ TEST_F(LowAllocationSearchTest,
   EXPECT_TRUE(loom_low_allocation_search_find_free_location(
       &context, &intervals[0], Capacity(/*max_units=*/8), &location_base));
   EXPECT_EQ(location_base, 3u);
+  // The repair needs a fifth register to leave four contiguous units below
+  // it. Preserving the provisional four-register tier would fragment that
+  // span and repeat the failed coloring. A complete alternative is compared
+  // only after all intervals have been placed.
+  auto packing_context = context;
+  packing_context.residency = {};
+  EXPECT_TRUE(loom_low_allocation_search_find_free_location(
+      &packing_context, &intervals[0], Capacity(/*max_units=*/8),
+      &location_base));
+  EXPECT_EQ(location_base, 4u);
+  auto residency_context = context;
+  residency_context.scalar_packing = {};
+  EXPECT_TRUE(loom_low_allocation_search_find_free_location(
+      &residency_context, &intervals[0], Capacity(/*max_units=*/8),
+      &location_base));
+  EXPECT_EQ(location_base, 0u);
+  EXPECT_TRUE(loom_low_allocation_search_find_free_location(
+      &packing_context, &intervals[0], Capacity(/*max_units=*/4),
+      &location_base));
+  EXPECT_EQ(location_base, 3u);
   context.residency = {};
 
   // The opposite packing direction is local to scalars whose own live range
@@ -1627,13 +1650,15 @@ TEST_F(LowAllocationSearchTest,
   context.assignment_map = &assignment_map;
   context.active_set = &active_set;
   context.storage_leases = &storage_leases;
+  const uint8_t rematerialization_flags[IREE_ARRAYSIZE(spill_traffic)] = {};
+  context.rematerialization_flags = rematerialization_flags;
   context.spill_traffic_by_value_ordinal = spill_traffic;
 
   const loom_low_allocation_class_capacity_t capacity = Capacity(
       /*max_units=*/2);
-  loom_low_allocation_search_workspace_t workspace = {};
-  loom_low_allocation_search_spill_victim_set_t victim_set = {};
-  IREE_ASSERT_OK(loom_low_allocation_search_find_active_spill_victim_set(
+  loom_low_allocation_spill_search_workspace_t workspace = {};
+  loom_low_allocation_spill_search_victim_set_t victim_set = {};
+  IREE_ASSERT_OK(loom_low_allocation_spill_search_find_victims(
       &context, &intervals[0], &capacity,
       /*interval_requires_register=*/false, &workspace, &arena_, &victim_set));
   ASSERT_TRUE(victim_set.found);
@@ -1643,7 +1668,7 @@ TEST_F(LowAllocationSearchTest,
 
   bool can_spill = false;
   loom_low_allocation_class_capacity_t spill_capacity = {};
-  IREE_ASSERT_OK(loom_low_allocation_search_assignment_spill_capacity(
+  IREE_ASSERT_OK(loom_low_allocation_spill_search_assignment_capacity(
       &context, &assignments[0], &can_spill, &spill_capacity));
   EXPECT_TRUE(can_spill);
   EXPECT_EQ(spill_capacity.max_units, 2u);
@@ -1780,19 +1805,48 @@ TEST_F(LowAllocationSearchTest, SelectsLowerTrafficActiveSpillVictimSetTie) {
   context.assignment_map = &assignment_map;
   context.active_set = &active_set;
   context.storage_leases = &storage_leases;
+  uint8_t rematerialization_flags[IREE_ARRAYSIZE(spill_traffic)] = {};
+  context.rematerialization_flags = rematerialization_flags;
   context.spill_traffic_by_value_ordinal = spill_traffic;
 
   const loom_low_allocation_class_capacity_t capacity = Capacity(
       /*max_units=*/4);
-  loom_low_allocation_search_workspace_t workspace = {};
-  loom_low_allocation_search_spill_victim_set_t victim_set = {};
-  IREE_ASSERT_OK(loom_low_allocation_search_find_active_spill_victim_set(
+  loom_low_allocation_spill_search_workspace_t workspace = {};
+  loom_low_allocation_spill_search_victim_set_t victim_set = {};
+  IREE_ASSERT_OK(loom_low_allocation_spill_search_find_victims(
       &context, &intervals[0], &capacity,
       /*interval_requires_register=*/false, &workspace, &arena_, &victim_set));
   ASSERT_TRUE(victim_set.found);
   EXPECT_EQ(victim_set.location_base, 2u);
   ASSERT_EQ(victim_set.assignment_count, 1u);
   EXPECT_EQ(victim_set.assignment_indices[0], 1u);
+
+  // A closed producer avoids memory traffic only when its ownership permits
+  // private reconstruction. Partial users also preserve the wide producer
+  // even when their reloads coalesce to full width.
+  for (bool has_stable_capture : {false, true}) {
+    rematerialization_flags[1] =
+        LOOM_LOW_REMATERIALIZATION_VALUE_CLASSIFIED |
+        LOOM_LOW_REMATERIALIZATION_VALUE_ELIGIBLE |
+        LOOM_LOW_REMATERIALIZATION_VALUE_CLOSED |
+        (has_stable_capture ? LOOM_LOW_REMATERIALIZATION_VALUE_STABLE_CAPTURE
+                            : 0);
+    for (bool has_narrow_uses : {false, true}) {
+      spill_traffic[1].has_narrow_uses = has_narrow_uses;
+      IREE_ASSERT_OK(loom_low_allocation_spill_search_find_victims(
+          &context, &intervals[0], &capacity,
+          /*interval_requires_register=*/false, &workspace, &arena_,
+          &victim_set));
+      ASSERT_TRUE(victim_set.found);
+      ASSERT_EQ(victim_set.assignment_count, 1u);
+      EXPECT_EQ(victim_set.assignment_indices[0],
+                has_stable_capture && !has_narrow_uses ? 0u : 1u);
+      EXPECT_EQ(spill_traffic[1].store_bytes, 8u);
+      EXPECT_EQ(spill_traffic[1].reload_bytes, 64u);
+    }
+  }
+  rematerialization_flags[1] = 0;
+  spill_traffic[1].has_narrow_uses = false;
 
   // Traffic wins independently of candidate order. Equal traffic retains the
   // longer remaining lifetime even when that candidate is visited second.
@@ -1810,7 +1864,7 @@ TEST_F(LowAllocationSearchTest, SelectsLowerTrafficActiveSpillVictimSetTie) {
     for (uint32_t reload_bytes : {8u, 64u, 128u}) {
       spill_traffic[2].reload_count = reload_bytes / 8u;
       spill_traffic[2].reload_bytes = reload_bytes;
-      IREE_ASSERT_OK(loom_low_allocation_search_find_active_spill_victim_set(
+      IREE_ASSERT_OK(loom_low_allocation_spill_search_find_victims(
           &context, &intervals[0], &capacity,
           /*interval_requires_register=*/true, &workspace, &arena_,
           &victim_set));
@@ -1828,7 +1882,7 @@ TEST_F(LowAllocationSearchTest, SelectsLowerTrafficActiveSpillVictimSetTie) {
     spill_traffic[2].reload_bytes = 40;
     context.use_pressure_efficiency = true;
     for (bool requires_register : {false, true}) {
-      IREE_ASSERT_OK(loom_low_allocation_search_find_active_spill_victim_set(
+      IREE_ASSERT_OK(loom_low_allocation_spill_search_find_victims(
           &context, &intervals[0], &capacity, requires_register, &workspace,
           &arena_, &victim_set));
       ASSERT_TRUE(victim_set.found);
@@ -1851,7 +1905,7 @@ TEST_F(LowAllocationSearchTest, SelectsLowerTrafficActiveSpillVictimSetTie) {
   spill_traffic[0].reload_count = 1;
   spill_traffic[0].reload_bytes = 8;
   for (bool requires_register : {false, true}) {
-    IREE_ASSERT_OK(loom_low_allocation_search_find_active_spill_victim_set(
+    IREE_ASSERT_OK(loom_low_allocation_spill_search_find_victims(
         &context, &intervals[0], &capacity, requires_register, &workspace,
         &arena_, &victim_set));
     EXPECT_EQ(victim_set.found, requires_register);
@@ -1864,7 +1918,7 @@ TEST_F(LowAllocationSearchTest, SelectsLowerTrafficActiveSpillVictimSetTie) {
   // spilling the incoming definition must not cause repeated short repairs.
   spill_traffic[0].reload_count = 7;
   spill_traffic[0].reload_bytes = 56;
-  IREE_ASSERT_OK(loom_low_allocation_search_find_active_spill_victim_set(
+  IREE_ASSERT_OK(loom_low_allocation_spill_search_find_victims(
       &context, &intervals[0], &capacity, /*interval_requires_register=*/false,
       &workspace, &arena_, &victim_set));
   ASSERT_TRUE(victim_set.found);
@@ -2014,15 +2068,17 @@ TEST_F(LowAllocationSearchTest, SelectsLowerTrafficOverFewerVictims) {
   context.assignment_map = &assignment_map;
   context.active_set = &active_set;
   context.storage_leases = &storage_leases;
+  const uint8_t rematerialization_flags[IREE_ARRAYSIZE(spill_traffic)] = {};
+  context.rematerialization_flags = rematerialization_flags;
   context.spill_traffic_by_value_ordinal = spill_traffic;
 
   // Begin with one active assignment occupying a two-unit budget. Then grow
   // the active set and budget, reusing the workspace for a different victim
   // set.
   const loom_low_allocation_class_capacity_t initial_capacity = Capacity(2);
-  loom_low_allocation_search_workspace_t workspace = {};
-  loom_low_allocation_search_spill_victim_set_t victim_set = {};
-  IREE_ASSERT_OK(loom_low_allocation_search_find_active_spill_victim_set(
+  loom_low_allocation_spill_search_workspace_t workspace = {};
+  loom_low_allocation_spill_search_victim_set_t victim_set = {};
+  IREE_ASSERT_OK(loom_low_allocation_spill_search_find_victims(
       &context, &intervals[0], &initial_capacity,
       /*interval_requires_register=*/false, &workspace, &arena_, &victim_set));
   ASSERT_TRUE(victim_set.found);
@@ -2038,7 +2094,7 @@ TEST_F(LowAllocationSearchTest, SelectsLowerTrafficOverFewerVictims) {
       &active_set, &descriptor_set, assignments, IREE_ARRAYSIZE(assignments),
       /*assignment_index=*/2);
   const loom_low_allocation_class_capacity_t capacity = Capacity(4);
-  IREE_ASSERT_OK(loom_low_allocation_search_find_active_spill_victim_set(
+  IREE_ASSERT_OK(loom_low_allocation_spill_search_find_victims(
       &context, &intervals[0], &capacity,
       /*interval_requires_register=*/false, &workspace, &arena_, &victim_set));
   EXPECT_GT(workspace.capacity, initial_workspace_capacity);
@@ -2049,7 +2105,7 @@ TEST_F(LowAllocationSearchTest, SelectsLowerTrafficOverFewerVictims) {
     ASSERT_EQ(victim_set.assignment_count, 2u);
     EXPECT_EQ(victim_set.assignment_indices[0], 1u);
     EXPECT_EQ(victim_set.assignment_indices[1], 2u);
-    IREE_ASSERT_OK(loom_low_allocation_search_find_active_spill_victim_set(
+    IREE_ASSERT_OK(loom_low_allocation_spill_search_find_victims(
         &context, &intervals[0], &capacity,
         /*interval_requires_register=*/false, &workspace, &arena_,
         &victim_set));
@@ -2062,7 +2118,7 @@ TEST_F(LowAllocationSearchTest, SelectsLowerTrafficOverFewerVictims) {
                                         IREE_ARRAYSIZE(assignments), 1);
   loom_low_allocation_active_set_remove(&active_set, assignments,
                                         IREE_ARRAYSIZE(assignments), 2);
-  IREE_ASSERT_OK(loom_low_allocation_search_find_active_spill_victim_set(
+  IREE_ASSERT_OK(loom_low_allocation_spill_search_find_victims(
       &context, &intervals[0], &initial_capacity,
       /*interval_requires_register=*/false, &workspace, &arena_, &victim_set));
   ASSERT_TRUE(victim_set.found);
@@ -2072,7 +2128,7 @@ TEST_F(LowAllocationSearchTest, SelectsLowerTrafficOverFewerVictims) {
   EXPECT_EQ(arena_.used_allocation_size, workspace_bytes);
 
   assignments[0].flags |= LOOM_LOW_ALLOCATION_ASSIGNMENT_FLAG_REQUIRES_REGISTER;
-  IREE_ASSERT_OK(loom_low_allocation_search_find_active_spill_victim_set(
+  IREE_ASSERT_OK(loom_low_allocation_spill_search_find_victims(
       &context, &intervals[0], &initial_capacity,
       /*interval_requires_register=*/false, &workspace, &arena_, &victim_set));
   EXPECT_FALSE(victim_set.found);

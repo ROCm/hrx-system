@@ -143,12 +143,9 @@ iree_status_t iree_hal_streaming_device_acquire_transfer_queue(
   return iree_ok_status();
 }
 
-static iree_status_t iree_hal_streaming_device_by_ordinal(
-    iree_hal_streaming_device_ordinal_t ordinal,
-    iree_hal_streaming_device_t** out_device) {
-  IREE_ASSERT_ARGUMENT(out_device);
-  *out_device = NULL;
-
+// Reports a missing entry after iree_hal_streaming_device_entry returns NULL.
+static iree_status_t iree_hal_streaming_device_ordinal_error(
+    iree_hal_streaming_device_ordinal_t ordinal) {
   iree_hal_streaming_device_registry_t* device_registry =
       iree_hal_streaming_device_registry();
   if (!device_registry) {
@@ -156,21 +153,9 @@ static iree_status_t iree_hal_streaming_device_by_ordinal(
                             "HAL stream layer not initialized");
   }
 
-  if (ordinal >= device_registry->device_count) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "device ordinal %zu out of range [0, %zu)", ordinal,
-                            device_registry->device_count);
-  }
-
-  iree_hal_streaming_device_t* device = &device_registry->devices[ordinal];
-
-  // Device is always created during initialization.
-  // Primary context is created lazily on first access.
-  IREE_ASSERT(device->hal_device);
-
-  *out_device = device;
-
-  return iree_ok_status();
+  return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                          "device ordinal %zu out of range [0, %zu)", ordinal,
+                          device_registry->device_count);
 }
 
 iree_status_t iree_hal_streaming_device_name(
@@ -182,10 +167,10 @@ iree_status_t iree_hal_streaming_device_name(
                             "name_size must be > 0");
   }
 
-  iree_hal_streaming_device_t* device = NULL;
-  iree_status_t status = iree_hal_streaming_device_by_ordinal(ordinal, &device);
-  if (!iree_status_is_ok(status)) {
-    return status;
+  iree_hal_streaming_device_t* device =
+      iree_hal_streaming_device_entry(ordinal);
+  if (!device) {
+    return iree_hal_streaming_device_ordinal_error(ordinal);
   }
 
   // Calculate safe copy length: min(source_length, dest_size - 1)
@@ -215,8 +200,11 @@ iree_status_t iree_hal_streaming_device_get_string_property(
                             "value_size must be > 0");
   }
 
-  iree_hal_streaming_device_t* device = NULL;
-  IREE_RETURN_IF_ERROR(iree_hal_streaming_device_by_ordinal(ordinal, &device));
+  iree_hal_streaming_device_t* device =
+      iree_hal_streaming_device_entry(ordinal);
+  if (!device) {
+    return iree_hal_streaming_device_ordinal_error(ordinal);
+  }
 
   // The streaming layer owns the set of string-valued device properties and
   // resolves them from values cached on iree_hal_streaming_device_t during
@@ -262,14 +250,15 @@ iree_status_t iree_hal_streaming_device_memory_info(
   *out_free_memory = 0;
   *out_total_memory = 0;
 
-  iree_hal_streaming_device_t* device = NULL;
-  iree_status_t status = iree_hal_streaming_device_by_ordinal(ordinal, &device);
-  if (iree_status_is_ok(status)) {
-    *out_free_memory = (iree_device_size_t)iree_atomic_load(
-        &device->free_memory, iree_memory_order_relaxed);
-    *out_total_memory = device->total_memory;
+  iree_hal_streaming_device_t* device =
+      iree_hal_streaming_device_entry(ordinal);
+  if (!device) {
+    return iree_hal_streaming_device_ordinal_error(ordinal);
   }
-  return status;
+  *out_free_memory = (iree_device_size_t)iree_atomic_load(
+      &device->free_memory, iree_memory_order_relaxed);
+  *out_total_memory = device->total_memory;
+  return iree_ok_status();
 }
 
 iree_status_t iree_hal_streaming_device_set_primary_context_flags(
@@ -339,21 +328,21 @@ static iree_status_t iree_hal_streaming_device_ensure_default_mem_pool_locked(
                             "device registry not initialized");
   }
 
-  hrx_mem_pool_t default_mem_pool = NULL;
+  iree_hal_streaming_mem_pool_t* default_mem_pool = NULL;
   if (!device->default_mem_pool) {
-    hrx_mem_pool_props_t props = {
+    iree_hal_streaming_mem_pool_props_t props = {
         .alloc_handle_type = 0,
         .location_type = 1,  // device
         .location_id = (int)device->ordinal,
     };
-    IREE_RETURN_IF_ERROR(HRX_CALL(
-        hrx_mem_pool_create(device->hrx_device, &props, &default_mem_pool)));
+    IREE_RETURN_IF_ERROR(iree_hal_streaming_mem_pool_create(
+        device->hrx_device, &props, &default_mem_pool));
     device->default_mem_pool = default_mem_pool;
   }
 
   if (!device->current_mem_pool) {
     device->current_mem_pool = device->default_mem_pool;
-    hrx_mem_pool_retain(device->current_mem_pool);
+    iree_hal_streaming_mem_pool_retain(device->current_mem_pool);
   }
   return iree_ok_status();
 }
@@ -401,11 +390,11 @@ static iree_status_t iree_hal_streaming_device_create_primary_context_locked(
 
   iree_hal_streaming_context_release(context);
   if (!had_current_mem_pool) {
-    hrx_mem_pool_release(device->current_mem_pool);
+    iree_hal_streaming_mem_pool_release(device->current_mem_pool);
     device->current_mem_pool = NULL;
   }
   if (!had_default_mem_pool) {
-    hrx_mem_pool_release(device->default_mem_pool);
+    iree_hal_streaming_mem_pool_release(device->default_mem_pool);
     device->default_mem_pool = NULL;
   }
   return status;
@@ -490,9 +479,9 @@ iree_status_t iree_hal_streaming_device_release_primary_context(
       iree_hal_streaming_context_release(retained_context);
       device->primary_context = NULL;
 
-      hrx_mem_pool_release(device->current_mem_pool);
+      iree_hal_streaming_mem_pool_release(device->current_mem_pool);
       device->current_mem_pool = NULL;
-      hrx_mem_pool_release(device->default_mem_pool);
+      iree_hal_streaming_mem_pool_release(device->default_mem_pool);
       device->default_mem_pool = NULL;
     }
 

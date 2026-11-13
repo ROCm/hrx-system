@@ -48,6 +48,26 @@ typedef struct loom_channel_plan_callable_t {
   const uint16_t* result_arguments;
 } loom_channel_plan_callable_t;
 
+// Semantic action retained by channel planning. Concrete operation identity is
+// classified once while collecting the plan; downstream completion, transport,
+// and materialization stages consume this stable vocabulary directly.
+typedef uint8_t loom_channel_plan_action_kind_t;
+enum loom_channel_plan_action_kind_e {
+  LOOM_CHANNEL_PLAN_ACTION_KIND_INVALID = 0,
+  LOOM_CHANNEL_PLAN_ACTION_KIND_CALL = 1,
+  LOOM_CHANNEL_PLAN_ACTION_KIND_BIND = 2,
+  LOOM_CHANNEL_PLAN_ACTION_KIND_RESERVE = 3,
+  LOOM_CHANNEL_PLAN_ACTION_KIND_ACCEPT = 4,
+  LOOM_CHANNEL_PLAN_ACTION_KIND_WAIT = 5,
+  LOOM_CHANNEL_PLAN_ACTION_KIND_ACQUIRE = 6,
+  LOOM_CHANNEL_PLAN_ACTION_KIND_PUBLISH = 7,
+  LOOM_CHANNEL_PLAN_ACTION_KIND_RELEASE = 8,
+  LOOM_CHANNEL_PLAN_ACTION_KIND_FANOUT = 9,
+  LOOM_CHANNEL_PLAN_ACTION_KIND_COPY = 10,
+  LOOM_CHANNEL_PLAN_ACTION_KIND_SELECT = 11,
+  LOOM_CHANNEL_PLAN_ACTION_KIND_COUNT_ = 12,
+};
+
 // One operation's channel identities, established before carrier rewriting.
 typedef struct loom_channel_plan_action_t {
   // Source operation, borrowed until the consuming rewrite erases it.
@@ -55,11 +75,18 @@ typedef struct loom_channel_plan_action_t {
   // Channel of the first operand, or the result for channel.bind; NULL for
   // a call, whose actual arguments have independent entries in the value table.
   const loom_channel_identity_t* channel;
-  // Destination channel for channel.copy; NULL for other operations.
-  const loom_channel_identity_t* destination_channel;
-  // Retained formal summary for a channel-aware call; NULL for channel ops.
-  const loom_channel_plan_callable_t* callable;
+  union {
+    // Destination channel for channel.copy; NULL for other channel actions.
+    const loom_channel_identity_t* destination_channel;
+    // Retained formal summary for a channel-aware call; NULL for channel ops.
+    const loom_channel_plan_callable_t* callable;
+  };
+  // Producer-classified semantic action kind.
+  loom_channel_plan_action_kind_t kind;
 } loom_channel_plan_action_t;
+
+static_assert(sizeof(loom_channel_plan_action_t) == 4 * sizeof(void*),
+              "channel plan actions must remain four pointers wide");
 
 typedef enum loom_channel_plan_rejection_kind_e {
   LOOM_CHANNEL_PLAN_REJECTION_NONE = 0,
@@ -87,11 +114,12 @@ typedef struct loom_channel_plan_t {
   // Equal entries mean membership only: records and consuming obligations
   // remain distinct SSA values with their original lifetime requirements.
   const loom_channel_identity_t* const* channels;
-  // Common admission result forwarded to each owned access, by value ordinal.
+  // Common admission result ordinal forwarded to each owned access ordinal.
   // INVALID means that the origin is external, opaque, or path dependent.
   // A repeated admission creates different records: equality identifies its
   // source site, not a dynamic record across different loop iterations.
-  const loom_value_id_t* admissions;
+  // Ordinals preserve the relation when cloning projects the value domain.
+  const loom_value_ordinal_t* admissions;
   // Original domain extent, excluding values created during materialization.
   loom_value_ordinal_t value_count;
   // Arena-owned channel actions in block/source order.
@@ -151,8 +179,12 @@ static inline const loom_channel_identity_t* loom_channel_plan_channel(
 // Source admission shared by every forwarding path to this original access.
 static inline loom_value_id_t loom_channel_plan_admission(
     const loom_channel_plan_t* plan, loom_value_id_t value_id) {
-  return plan->admissions[loom_local_value_domain_ordinal(plan->value_domain,
-                                                          value_id)];
+  const loom_value_ordinal_t ordinal =
+      plan->admissions[loom_local_value_domain_ordinal(plan->value_domain,
+                                                       value_id)];
+  return ordinal == LOOM_VALUE_ORDINAL_INVALID
+             ? LOOM_VALUE_ID_INVALID
+             : plan->value_domain->value_ids[ordinal];
 }
 
 #ifdef __cplusplus

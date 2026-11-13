@@ -36,8 +36,11 @@ class Pm4MappingFixture : public Pm4DispatchTest {
   void ReleaseBacking(GpuMemory* backing);
   void Prepare(amdf_memory_scope_t* scope, uint64_t command_byte_length = 65536,
                uint64_t secondary_mapping_granularity = 0);
-  void CreateBacking(uint64_t byte_length, GpuMemory** out_memory,
-                     amdf_device_t* consumer = nullptr);
+  void CreateBacking(uint64_t byte_length, amdf_device_t* consumer,
+                     GpuMemory** out_memory);
+  void CreateBacking(uint64_t byte_length, GpuMemory** out_memory) {
+    CreateBacking(byte_length, nullptr, out_memory);
+  }
   void Copy(uint64_t source, uint64_t target, uint64_t byte_length);
   void Verify(uint64_t address, uint64_t byte_length, uint32_t owner);
   void WriteAndVerify(uint64_t offset, uint64_t byte_length, uint32_t owner,

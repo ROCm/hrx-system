@@ -1,0 +1,275 @@
+// RUN: emit source-low output=low
+
+amdgpu.target<gfx1100> @target
+
+kernel.def target(@target) @column_scale() {
+  %unit = index.constant 1 : index
+  %threads = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %extent = index.constant 16 : index
+  %layout = encoding.layout.strided [0, 1] : encoding<layout>
+  %binding = buffer.assume.memory_space<global> %input : buffer
+  %source = buffer.view %binding[%base] : buffer -> view<16x16xf32, %layout>
+  %destination = buffer.view %output[%base] : buffer -> view<16x16xf32>
+  %value = vector.fragment.load<result> %source[0, 0] shape [%extent, %extent] : view<16x16xf32, %layout> -> vector<8xf32>
+  vector.fragment.store<result> %value, %destination[0, 0] shape [%extent, %extent] : vector<8xf32>, view<16x16xf32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.rdna3.core>(@target) abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 2, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @column_scale() asm {
+  %11 = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %source = resource<hal_binding> {extent = 64, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %destination = resource<hal_binding> {extent = 1024, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %14 = v_and_b32_src0_inline %11, 15
+  %15 = v_lshlrev_b32_src0_inline %14, 2
+  %17 = v_mov_b32 0
+  %18 = v_add_u32 %15, %17
+  %19 = global_load_b32_saddr %18, %source
+  %28 = v_lshlrev_b32_src0_inline %11, 2
+  global_store_b32_saddr %28, %19, %destination
+  global_store_b32_saddr %28, %19, %destination {offset = 128}
+  global_store_b32_saddr %28, %19, %destination {offset = 256}
+  global_store_b32_saddr %28, %19, %destination {offset = 384}
+  global_store_b32_saddr %28, %19, %destination {offset = 512}
+  global_store_b32_saddr %28, %19, %destination {offset = 640}
+  global_store_b32_saddr %28, %19, %destination {offset = 768}
+  global_store_b32_saddr %28, %19, %destination {offset = 896}
+  return
+}
+
+// ====
+
+// RUN: emit source-low output=low
+
+amdgpu.target<gfx1151> @target
+
+kernel.def target(@target) @halfword_broadcast() {
+  %unit = index.constant 1 : index
+  %threads = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %extent = index.constant 16 : index
+  %layout = encoding.layout.strided [1, 0] : encoding<layout>
+  %binding = buffer.assume.memory_space<descriptor> %input : buffer
+  %source = buffer.view %binding[%base] : buffer -> view<16x16xf16, %layout>
+  %destination = buffer.view %output[%base] : buffer -> view<16x16xf16>
+  %value = vector.fragment.load<lhs> %source[0, 0] shape [%extent, %extent] : view<16x16xf16, %layout> -> vector<16xf16>
+  vector.fragment.store<lhs> %value, %destination[0, 0] shape [%extent, %extent] : vector<16xf16>, view<16x16xf16>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.rdna3_5.core>(@target) abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 2, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @halfword_broadcast() asm {
+  %11 = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %source = resource<hal_binding> {extent = 32, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %destination = resource<hal_binding> {extent = 512, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %56 = slice %source[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %57 = slice %source[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %58 = s_mov_b32 65535
+  %59 = s_and_b32 %57, %58
+  %60 = concat(%56, %59) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %61 = s_mov_b32 32
+  %62 = s_mov_b32 822173696
+  %63 = concat(%60, %61, %62) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
+  %15 = s_mov_b32 0
+  %16 = v_and_b32_src0_inline %11, 15
+  %17 = v_lshlrev_b32_src0_inline %16, 1
+  %18 = buffer_load_d16_b16 %63, %17, %15
+  %19 = v_bfe_u32_offset_0_width_inline_low16 %18
+  %20 = v_lshlrev_b32_src0_inline %19, 16
+  %21 = v_or_b32 %19, %20
+  %51 = v_lshlrev_b32_src0_inline %16, 5
+  %55 = concat(%21, %21, %21, %21) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  global_store_b128_saddr %51, %55, %destination
+  %54 = concat(%21, %21, %21, %21) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  global_store_b128_saddr %51, %54, %destination {offset = 16}
+  return
+}
+
+// ====
+
+// RUN: emit source-low output=low
+
+amdgpu.target<gfx942> @target
+
+kernel.def target(@target) @wide_broadcast() {
+  %unit = index.constant 1 : index
+  %threads = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %extent = index.constant 16 : index
+  %layout = encoding.layout.strided [1, 0] : encoding<layout>
+  %binding = buffer.assume.memory_space<global> %input : buffer
+  %source = buffer.view %binding[%base] : buffer -> view<16x16xf64, %layout>
+  %destination = buffer.view %output[%base] : buffer -> view<16x16xf64>
+  %value = vector.fragment.load<result> %source[0, 0] shape [%extent, %extent] : view<16x16xf64, %layout> -> vector<4xf64>
+  vector.fragment.store<result> %value, %destination[0, 0] shape [%extent, %extent] : vector<4xf64>, view<16x16xf64>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.cdna3.core>(@target) abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 2, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @wide_broadcast() asm {
+  %11 = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %source = resource<hal_binding> {extent = 128, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %destination = resource<hal_binding> {extent = 2048, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %15 = v_mov_b32 0
+  %16 = v_lshrrev_b32_src0_inline %11, 4
+  %17 = v_lshl_add_u32_shift_imm %16, %15, 3
+  %18 = global_load_dwordx2_saddr %17, %source : reg<amdgpu.vgpr x2>
+  %19 = global_load_dwordx2_saddr %17, %source {offset = 32} : reg<amdgpu.vgpr x2>
+  %20 = global_load_dwordx2_saddr %17, %source {offset = 64} : reg<amdgpu.vgpr x2>
+  %21 = global_load_dwordx2_saddr %17, %source {offset = 96} : reg<amdgpu.vgpr x2>
+  %23 = v_lshlrev_b32_src0_inline %11, 3
+  global_store_dwordx2_saddr %23, %18, %destination
+  global_store_dwordx2_saddr %23, %19, %destination {offset = 512}
+  global_store_dwordx2_saddr %23, %20, %destination {offset = 1024}
+  global_store_dwordx2_saddr %23, %21, %destination {offset = 1536}
+  return
+}
+
+// ====
+
+// RUN: emit source-low output=low
+
+amdgpu.target<gfx1201> @target
+
+kernel.def target(@target) @byte_gather() {
+  %unit = index.constant 1 : index
+  %threads = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
+} launch(%row_stride_input: index, %column_stride_input: index, %input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %extent = index.constant 16 : index
+  %row_stride = index.assume %row_stride_input [range(%row_stride_input, 0, 16)] : index
+  %column_stride = index.assume %column_stride_input [range(%column_stride_input, 0, 16)] : index
+  %layout = encoding.layout.strided [%row_stride, %column_stride] : encoding<layout>
+  %binding = buffer.assume.memory_space<global> %input : buffer
+  %source = buffer.view %binding[%base] : buffer -> view<16x16xi8, %layout>
+  %destination = buffer.view %output[%base] : buffer -> view<16x16xi8>
+  %value = vector.fragment.load<rhs> %source[0, 0] shape [%extent, %extent] : view<16x16xi8, %layout> -> vector<8xi8>
+  vector.fragment.store<rhs> %value, %destination[0, 0] shape [%extent, %extent] : vector<8xi8>, view<16x16xi8>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.rdna4.core>(@target) abi_layout({constant_count = 2, direct_arg_count = 2, direct_arg_names = {arg0 = "row_stride_input", arg1 = "column_stride_input"}, direct_arg_offsets = [0, 4], direct_arg_parameter_indices = [0, 1], direct_arg_sizes = [4, 4], parameter_count = 4, resource_count = 2, resource_offsets = [8, 16], resource_parameter_indices = [2, 3], uses_kernarg_segment_ptr = true}) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @byte_gather(%row_stride: reg<amdgpu.sgpr>, %column_stride: reg<amdgpu.sgpr>) asm {
+  %17 = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %source = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %destination = resource<hal_binding> {extent = 256, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %20 = v_lshrrev_b32_src0_inline %17, 4
+  %21 = v_lshlrev_b32_src0_inline %20, 3
+  %22 = v_mul_lo_u32 %row_stride, %21
+  %23 = v_and_b32_src0_inline %17, 15
+  %24 = v_mul_lo_u32 %column_stride, %23
+  %25 = v_add_u32 %22, %24
+  %26 = global_load_u8_saddr %25, %source
+  %27 = v_add_u32 %row_stride, %25
+  %28 = global_load_u8_saddr %27, %source
+  %29 = v_add_u32_rhs_tied %row_stride, %27
+  %30 = global_load_u8_saddr %29, %source
+  %31 = v_add_u32_rhs_tied %row_stride, %29
+  %32 = global_load_u8_saddr %31, %source
+  %33 = v_lshlrev_b32_src0_inline %28, 8
+  %34 = v_or_b32 %26, %33
+  %35 = v_lshlrev_b32_src0_inline %30, 16
+  %36 = v_or_b32 %34, %35
+  %37 = v_lshlrev_b32_src0_inline %32, 24
+  %38 = v_or_b32 %36, %37
+  %39 = v_add_u32_rhs_tied %row_stride, %31
+  %40 = global_load_u8_saddr %39, %source
+  %41 = v_add_u32_rhs_tied %row_stride, %39
+  %42 = global_load_u8_saddr %41, %source
+  %43 = v_add_u32_rhs_tied %row_stride, %41
+  %44 = global_load_u8_saddr %43, %source
+  %45 = v_add_u32_rhs_tied %row_stride, %43
+  %46 = global_load_u8_saddr %45, %source
+  %47 = v_lshlrev_b32_src0_inline %42, 8
+  %48 = v_or_b32 %40, %47
+  %49 = v_lshlrev_b32_src0_inline %44, 16
+  %50 = v_or_b32 %48, %49
+  %51 = v_lshlrev_b32_src0_inline %46, 24
+  %52 = v_or_b32 %50, %51
+  %54 = v_lshl_add_u32_shift_imm %20, %23, 7
+  global_store_b8_saddr %54, %38, %destination
+  %56 = v_lshrrev_b32_src0_inline %38, 8
+  global_store_b8_saddr %54, %56, %destination {offset = 16}
+  %57 = v_lshrrev_b32_src0_inline %38, 16
+  global_store_b8_saddr %54, %57, %destination {offset = 32}
+  %58 = v_lshrrev_b32_src0_inline %38, 24
+  global_store_b8_saddr %54, %58, %destination {offset = 48}
+  global_store_b8_saddr %54, %52, %destination {offset = 64}
+  %60 = v_lshrrev_b32_src0_inline %52, 8
+  global_store_b8_saddr %54, %60, %destination {offset = 80}
+  %61 = v_lshrrev_b32_src0_inline %52, 16
+  global_store_b8_saddr %54, %61, %destination {offset = 96}
+  %62 = v_lshrrev_b32_src0_inline %52, 24
+  global_store_b8_saddr %54, %62, %destination {offset = 112}
+  return
+}
+
+// ====
+
+// RUN: emit source-low output=low
+
+amdgpu.target<gfx1250> @target
+
+kernel.def target(@target) @decoded_broadcast() {
+  %unit = index.constant 1 : index
+  %threads = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %extent = index.constant 16 : index
+  %reduction = index.constant 32 : index
+  %layout = encoding.layout.strided [0, 0] : encoding<layout>
+  %binding = buffer.assume.memory_space<global> %input : buffer
+  %source = buffer.view %binding[%base] : buffer -> view<32x16xf8E4M3, %layout>
+  %destination = buffer.view %output[%base] : buffer -> view<32x16xbf16>
+  %value = vector.fragment.load<rhs> %source[0, 0] shape [%reduction, %extent] : view<32x16xf8E4M3, %layout> -> vector<16xbf16>
+  vector.fragment.store<rhs> %value, %destination[0, 0] shape [%reduction, %extent] : vector<16xbf16>, view<32x16xbf16>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 2, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @decoded_broadcast() asm {
+  %12 = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %source = resource<hal_binding> {extent = 1, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %destination = resource<hal_binding> {extent = 1024, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %15 = v_and_b32_src0_inline %12, 15
+  %16 = v_mov_b32 0
+  %17 = v_lshrrev_b32_src0_inline %12, 4
+  %19 = v_add_u32 %16, %16
+  %20 = global_load_u8_saddr %19, %source
+  %21 = v_lshlrev_b32_src0_inline %20, 8
+  %22 = v_or_b32 %20, %21
+  %23 = v_and_b32_lit %22, 65535
+  %24 = v_cvt_pk_f32_fp8 %23
+  %25 = slice %24[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %26 = slice %24[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %27 = v_cvt_pk_bf16_f32 %25, %26
+  %85 = v_lshlrev_b32_src0_inline %15, 1
+  %86 = v_lshl_add_u32_shift_imm %17, %85, 9
+  global_store_short_saddr %86, %27, %destination
+  %88 = v_lshrrev_b32_src0_inline %27, 16
+  global_store_short_saddr %86, %88, %destination {offset = 32}
+  global_store_short_saddr %86, %27, %destination {offset = 64}
+  global_store_short_saddr %86, %88, %destination {offset = 96}
+  global_store_short_saddr %86, %27, %destination {offset = 128}
+  global_store_short_saddr %86, %88, %destination {offset = 160}
+  global_store_short_saddr %86, %27, %destination {offset = 192}
+  global_store_short_saddr %86, %88, %destination {offset = 224}
+  global_store_short_saddr %86, %27, %destination {offset = 256}
+  global_store_short_saddr %86, %88, %destination {offset = 288}
+  global_store_short_saddr %86, %27, %destination {offset = 320}
+  global_store_short_saddr %86, %88, %destination {offset = 352}
+  global_store_short_saddr %86, %27, %destination {offset = 384}
+  global_store_short_saddr %86, %88, %destination {offset = 416}
+  global_store_short_saddr %86, %27, %destination {offset = 448}
+  global_store_short_saddr %86, %88, %destination {offset = 480}
+  return
+}

@@ -16,21 +16,21 @@ class GroupElasticTextServiceTest : public SourceTextServiceTest {
  protected:
   loom_serve_text_options_t ModelOptions() const override {
     auto options = SourceTextServiceTest::ModelOptions();
-    options.group_mode = LOOM_SERVE_GROUP_MODE_TWO_BANK;
+    options.group_mode = LOOM_RUNTIME_GROUP_MODE_TWO_BANK;
     return options;
   }
-  loom_serve_pool_backing_t PoolBacking() const override {
-    return LOOM_SERVE_POOL_BACKING_ELASTIC;
+  loom_runtime_pool_backing_t PoolBacking() const override {
+    return LOOM_RUNTIME_POOL_BACKING_ELASTIC;
   }
 };
 
 TEST_F(GroupElasticTextServiceTest,
        BothBanksAreChargedAndRunWithinOnePhysicalBudget) {
-  auto* memory = loom_serve_pool_memory(storage_owner_);
+  auto* memory = loom_runtime_pool_memory(storage_owner_);
   ASSERT_NE(memory, nullptr);
-  EXPECT_GT(loom_serve_memory_pool_live_bytes(memory), 0u);
-  EXPECT_LE(loom_serve_memory_pool_live_bytes(memory),
-            loom_serve_memory_pool_limit(memory));
+  EXPECT_GT(loom_runtime_memory_pool_live_bytes(memory), 0u);
+  EXPECT_LE(loom_runtime_memory_pool_live_bytes(memory),
+            loom_runtime_memory_pool_limit(memory));
   const int32_t tokens[] = {0, 1, 2, 0, 1};
   loom_serve_text_span_t a = {
       .row_index = 0, .token_count = 3, .token_ids = tokens};
@@ -39,11 +39,11 @@ TEST_F(GroupElasticTextServiceTest,
                               .token_ids = tokens + 3,
                               .flags = LOOM_SERVICE_TEXT_SPAN_FLAG_SELECT,
                               .input_offset = 3};
-  loom_serve_execution_frontier_t frontier;
+  loom_runtime_execution_frontier_t frontier;
   IREE_ASSERT_OK(
       loom_serve_text_model_submit_epoch_pair(model_, 0, &a, 0, &b, &frontier));
   IREE_ASSERT_OK(
-      loom_serve_execution_wait(model_->execution, frontier.values[0]));
+      loom_runtime_execution_wait(model_->execution, frontier.values[0]));
   loom_serve_text_result_t result;
   IREE_ASSERT_OK(loom_serve_text_model_complete_epoch(model_, &result));
   Oracle oracle;
@@ -51,13 +51,13 @@ TEST_F(GroupElasticTextServiceTest,
     oracle.Consume(token);
   }
   EXPECT_EQ(result.tokens[0], oracle.Predict());
-  EXPECT_LE(loom_serve_memory_pool_live_bytes(memory),
-            loom_serve_memory_pool_limit(memory));
+  EXPECT_LE(loom_runtime_memory_pool_live_bytes(memory),
+            loom_runtime_memory_pool_limit(memory));
 }
 
 TEST_F(GroupElasticTextServiceTest,
        VariantBankWorkspacesBeyondBudgetRejectBeforeSwap) {
-  auto* memory = loom_serve_pool_memory(storage_owner_);
+  auto* memory = loom_runtime_pool_memory(storage_owner_);
   ASSERT_NE(memory, nullptr);
   const auto compile = [&](uint64_t bytes, loom_serve_text_variant_t** out) {
     const auto path =
@@ -72,7 +72,7 @@ TEST_F(GroupElasticTextServiceTest,
             "  %temporary = buffer.alloca<global> align(16) %bytes : buffer\n"
             "  kernel.launch @copy_group_hidden"));
     const auto provider = iree_make_cstring_view(path.c_str());
-    const loom_serve_sources_t sources = {.count = 1, .values = &provider};
+    const loom_runtime_sources_t sources = {.count = 1, .values = &provider};
     struct Compilation {
       iree_status_t status = iree_ok_status();
       std::promise<loom_serve_text_variant_t*> ready;
@@ -80,7 +80,7 @@ TEST_F(GroupElasticTextServiceTest,
     IREE_ASSERT_OK(loom_serve_text_model_compile_variant_async(
         model_, &sources, nullptr,
         [](void* user_data, iree_status_t status, void* variant,
-           const loom_serve_compilation_report_t* report) {
+           const loom_runtime_compilation_report_t* report) {
           auto* completion = static_cast<Compilation*>(user_data);
           completion->status = status;
           completion->ready.set_value(
@@ -103,14 +103,14 @@ TEST_F(GroupElasticTextServiceTest,
   auto* plan = model_->execution_plan;
   iree_hal_buffer_t* workspace =
       model_->banks[1].roots[LOOM_SERVE_TEXT_BANK_WORKSPACE];
-  const uint64_t live = loom_serve_memory_pool_live_bytes(memory);
+  const uint64_t live = loom_runtime_memory_pool_live_bytes(memory);
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_RESOURCE_EXHAUSTED,
       loom_serve_text_model_select_variant(model_, oversized.get()));
   EXPECT_EQ(model_->execution_plan, plan);
   EXPECT_EQ(model_->prefill_group.stages, nullptr);
   EXPECT_EQ(model_->banks[1].roots[LOOM_SERVE_TEXT_BANK_WORKSPACE], workspace);
-  EXPECT_EQ(loom_serve_memory_pool_live_bytes(memory), live);
+  EXPECT_EQ(loom_runtime_memory_pool_live_bytes(memory), live);
 
   IREE_ASSERT_OK(loom_serve_text_model_select_variant(model_, modest.get()));
   EXPECT_GE(iree_hal_buffer_byte_length(
@@ -124,11 +124,11 @@ TEST_F(GroupElasticTextServiceTest,
                               .token_ids = tokens + 3,
                               .flags = LOOM_SERVICE_TEXT_SPAN_FLAG_SELECT,
                               .input_offset = 3};
-  loom_serve_execution_frontier_t frontier;
+  loom_runtime_execution_frontier_t frontier;
   IREE_ASSERT_OK(
       loom_serve_text_model_submit_epoch_pair(model_, 0, &a, 0, &b, &frontier));
   IREE_ASSERT_OK(
-      loom_serve_execution_wait(model_->execution, frontier.values[0]));
+      loom_runtime_execution_wait(model_->execution, frontier.values[0]));
   loom_serve_text_result_t result;
   IREE_ASSERT_OK(loom_serve_text_model_complete_epoch(model_, &result));
   Oracle oracle;
@@ -136,8 +136,8 @@ TEST_F(GroupElasticTextServiceTest,
     oracle.Consume(token);
   }
   EXPECT_EQ(result.tokens[0], oracle.Predict());
-  EXPECT_LE(loom_serve_memory_pool_live_bytes(memory),
-            loom_serve_memory_pool_limit(memory));
+  EXPECT_LE(loom_runtime_memory_pool_live_bytes(memory),
+            loom_runtime_memory_pool_limit(memory));
 }
 
 }  // namespace

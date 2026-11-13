@@ -68,26 +68,31 @@ void loom_low_lower_inherit_value_type(loom_low_lower_context_t* context,
       LOOM_LOW_LOWER_VALUE_INHERITED_TYPE;
 }
 
-bool loom_low_lower_value_binding_type_is_planned(
+static loom_value_ordinal_t loom_low_lower_value_binding_type_ordinal(
     const loom_low_lower_context_t* context, loom_value_id_t source_value_id) {
   const loom_value_ordinal_t ordinal =
-      loom_low_lowering_frame_value_ordinal(context->lowering, source_value_id);
-  return context->lowering->value_bindings[ordinal].type !=
-             LOOM_TYPE_ID_INVALID ||
-         iree_any_bit_set(context->lowering->source_plan.value_flags[ordinal],
-                          LOOM_LOW_LOWER_VALUE_INHERITED_TYPE);
-}
-
-loom_type_t loom_low_lower_value_binding_type(
-    const loom_low_lower_context_t* context, loom_value_id_t source_value_id) {
-  loom_value_ordinal_t ordinal =
       loom_low_lowering_frame_value_ordinal(context->lowering, source_value_id);
   const loom_low_lower_value_flags_t flags =
       context->lowering->source_plan.value_flags[ordinal];
   if (!iree_any_bit_set(flags, LOOM_LOW_LOWER_VALUE_MATERIALIZED) &&
       iree_any_bit_set(flags, LOOM_LOW_LOWER_VALUE_INHERITED_TYPE)) {
-    ordinal = context->lowering->value_bindings[ordinal].type_source;
+    return context->lowering->value_bindings[ordinal].type_source;
   }
+  return ordinal;
+}
+
+bool loom_low_lower_value_binding_type_is_planned(
+    const loom_low_lower_context_t* context, loom_value_id_t source_value_id) {
+  const loom_value_ordinal_t ordinal =
+      loom_low_lower_value_binding_type_ordinal(context, source_value_id);
+  return context->lowering->value_bindings[ordinal].type !=
+         LOOM_TYPE_ID_INVALID;
+}
+
+loom_type_t loom_low_lower_value_binding_type(
+    const loom_low_lower_context_t* context, loom_value_id_t source_value_id) {
+  const loom_value_ordinal_t ordinal =
+      loom_low_lower_value_binding_type_ordinal(context, source_value_id);
   const loom_low_lower_value_binding_t binding =
       context->lowering->value_bindings[ordinal];
   if (iree_any_bit_set(context->lowering->source_plan.value_flags[ordinal],
@@ -153,6 +158,9 @@ iree_status_t loom_low_lower_replace_value_binding(
       loom_low_lowering_frame_value_ordinal(context->lowering, source_value_id);
   IREE_ASSERT(
       loom_low_lower_source_value_has_low_mapping(context, source_value_id));
+  IREE_ASSERT(loom_type_equal(
+      loom_low_lower_value_binding_type(context, source_value_id),
+      loom_module_value_type(context->module, low_value_id)));
   context->lowering->value_bindings[ordinal].value = low_value_id;
   return loom_low_lower_copy_value_name(context, source_value_id, low_value_id);
 }

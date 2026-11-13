@@ -112,27 +112,15 @@ func.def @wide_integer_comparison(%lhs: vector<2xi64>, %rhs: vector<2xi64>) -> (
 
 // ----
 low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @wide_integer_comparison(%lhs: reg<amdgpu.vgpr x4>, %rhs: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x2>) asm {
-  %59 = slice %lhs[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %58 = slice %lhs[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %57 = slice %rhs[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %56 = slice %rhs[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %24 = v_cmp_gt_u32 %58, %56
-  %25 = v_cmp_gt_u32 %59, %57
-  %26 = v_cmp_eq_i32 %58, %56
-  %27 = s_and_b64 %26, %25
-  %28 = s_or_b64 %24, %27
-  %55 = slice %lhs[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %54 = slice %lhs[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %53 = slice %rhs[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %52 = slice %rhs[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %35 = v_cmp_gt_u32 %54, %52
-  %36 = v_cmp_gt_u32 %55, %53
-  %37 = v_cmp_eq_i32 %54, %52
-  %38 = s_and_b64 %37, %36
-  %39 = s_or_b64 %35, %38
-  %48 = v_cndmask_b32_src0_lit_src1_inline %28 {imm32 = 0, true_value = 1}
-  %50 = v_cndmask_b32_src0_lit_src1_inline %39 {imm32 = 0, true_value = 1}
-  %result = concat(%48, %50) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %18 = slice %lhs[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
+  %19 = slice %rhs[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
+  %20 = v_cmp_gt_u64 %18, %19
+  %21 = slice %lhs[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
+  %22 = slice %rhs[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
+  %23 = v_cmp_gt_u64 %21, %22
+  %32 = v_cndmask_b32_src0_lit_src1_inline %20 {imm32 = 0, true_value = 1}
+  %34 = v_cndmask_b32_src0_lit_src1_inline %23 {imm32 = 0, true_value = 1}
+  %result = concat(%32, %34) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
   return %result
 }
 

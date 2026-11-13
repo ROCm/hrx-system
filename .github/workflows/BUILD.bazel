@@ -10,9 +10,12 @@ package(default_visibility = ["//visibility:public"])
 
 exports_files([
     "build_core_windows.yml",
+    "build_loom_sdk.yml",
+    "build_loom_sdk_artifacts.yml",
     "ci_iree.yml",
     "ci_libhrx.yml",
-    "docs.yml",
+    "ci_libhrx_gpu.yml",
+    "fuzz.yml",
     "presubmit.yml",
     "test_core_linux_gpu.yml",
     "test_core_linux_gpu_source.yml",

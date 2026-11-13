@@ -103,6 +103,8 @@ bool loom_type_equal(loom_type_t a, loom_type_t b) {
     return a.dims[0] == b.dims[0] && a.dims[1] == b.dims[1];
   }
   switch (kind) {
+    case LOOM_TYPE_REFERENCE:
+      return a.dims[0] == b.dims[0];
     case LOOM_TYPE_FUNCTION: {
       const loom_func_type_data_t* a_data = loom_type_func_data(a);
       const loom_func_type_data_t* b_data = loom_type_func_data(b);
@@ -255,8 +257,8 @@ static uint32_t loom_type_hash_mix_sequence(uint32_t hash,
 uint32_t loom_type_hash(loom_type_t type) {
   uint32_t hash = loom_structural_hash_initialize();
   hash = loom_structural_hash_mix_u32(hash, type.header);
-  hash = loom_structural_hash_mix_u16(hash, type.encoding_id);
-  hash = loom_structural_hash_mix_u16(hash, type.encoding_flags);
+  hash = loom_structural_hash_mix_u32(
+      hash, (uint32_t)type.encoding_id | ((uint32_t)type.encoding_flags << 16));
 
   loom_type_kind_t kind = loom_type_kind(type);
   if (!loom_type_kind_is_valid(kind)) {
@@ -265,6 +267,9 @@ uint32_t loom_type_hash(loom_type_t type) {
     return loom_structural_hash_finalize(hash);
   }
   switch (kind) {
+    case LOOM_TYPE_REFERENCE:
+      hash = loom_structural_hash_mix_u64(hash, type.dims[0]);
+      return loom_structural_hash_finalize(hash);
     case LOOM_TYPE_FUNCTION: {
       const loom_func_type_data_t* data = loom_type_func_data(type);
       if (!data) {

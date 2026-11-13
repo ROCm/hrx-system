@@ -82,8 +82,8 @@ iree_status_t RunDirectTransferTrial(
     const TransportBackend& transport,
     const iree::async::cts::ProactorFactory& create_proactor,
     const DirectTransferTrialOptions& options,
-    DirectTransferTrialResult* out_result,
-    TransferTrialMeasurement measurement = {});
+    TransferTrialMeasurement measurement,
+    DirectTransferTrialResult* out_result);
 
 }  // namespace iree::net::cts
 

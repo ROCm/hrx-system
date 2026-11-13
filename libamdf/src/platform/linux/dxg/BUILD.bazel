@@ -70,6 +70,7 @@ amdf_cc_library(
     deps = [
         ":kmt",
         "//libamdf/src:allocator",
+        "//libamdf/src:pci",
         "//libamdf/src/platform",
         "//libamdf/src/platform/dxg:endpoint_identity",
         "//libamdf/src/platform/linux:endpoint_state",

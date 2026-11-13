@@ -6,12 +6,22 @@
 
 """Tile operation definitions."""
 
-from loom.dsl import TILE, Dialect, Op, TypeDef, value_duplication_op
+from loom.dsl import TILE, Dialect, Op, TypeDef, value_duplication_op, value_refinement_op
 
 tile_ops = Dialect(
     "tile",
     dialect_id=0x03,
     doc="Register-resident shaped values and their structural operations.",
+)
+
+tile_refine = value_refinement_op(
+    "tile.refine",
+    group=tile_ops,
+    carrier=TILE,
+    doc=(
+        "Assert more precise shape and encoding information for the same tile elements. Source and result describe the same value and ownership identity; this operation performs no conversion or copy."
+    ),
+    examples=["%refined = tile.refine %source : tile<[%count]xf32> -> tile<16xf32>"],
 )
 
 tile_duplicate = value_duplication_op(
@@ -23,4 +33,4 @@ tile_duplicate = value_duplication_op(
 )
 
 ALL_TILE_TYPES: tuple[TypeDef, ...] = ()
-ALL_TILE_OPS: tuple[Op, ...] = (tile_duplicate,)
+ALL_TILE_OPS: tuple[Op, ...] = (tile_refine, tile_duplicate)

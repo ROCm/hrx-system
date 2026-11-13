@@ -1,0 +1,271 @@
+// RUN: roundtrip
+// A counted copy admits its schedule without a redundant compound statement.
+void entry(unsigned* output, const unsigned* input) {
+  [[loom::unroll]]
+  for (unsigned index = 0; index < 15u; ++index)
+    output[index] = input[index];
+}
+
+// ----
+func.def public @entry(%output: buffer, %output_byte_offset: offset, %input: buffer, %input_byte_offset: offset) {
+  %index = scalar.constant 0 : i32
+  %5 = index.cast %index : i32 to offset
+  %6 = scalar.constant 15 : i32
+  %7 = index.cast %6 : i32 to offset
+  %8 = index.constant 1 : offset
+  scf.for %index = [%5 to %7 step %8] unroll {
+    %10 = index.cast %index : offset to i32
+    %11 = scalar.extui %10 : i32 to i64
+    %12 = scalar.constant 4 : i64
+    %13 = scalar.muli %11, %12 : i64
+    %14 = index.cast %input_byte_offset : offset to i64
+    %15 = scalar.addi %14, %13 : i64
+    %16 = scalar.assume %15 [range(%15, 0, 9223372036854775807)] : i64
+    %17 = index.cast %16 : i64 to offset
+    %18 = buffer.view %input[%17] : buffer -> view<1xi32>
+    %19 = view.load<root_in_bounds> %18[0] : view<1xi32> -> i32
+    %20 = scalar.extui %10 : i32 to i64
+    %21 = scalar.constant 4 : i64
+    %22 = scalar.muli %20, %21 : i64
+    %23 = index.cast %output_byte_offset : offset to i64
+    %24 = scalar.addi %23, %22 : i64
+    %25 = scalar.assume %24 [range(%24, 0, 9223372036854775807)] : i64
+    %26 = index.cast %25 : i64 to offset
+    %27 = buffer.view %output[%26] : buffer -> view<1xi32>
+    view.store<root_in_bounds> %19, %27[0] : i32, view<1xi32>
+  }
+  func.return
+}
+
+// ====
+// RUN: roundtrip
+// Runtime bounds and loop-carried values retain counted semantics.
+unsigned entry(unsigned start, unsigned count) {
+  unsigned total = 0;
+  [[loom::unroll(3), loom::pipeline(2)]]
+  for (unsigned index = start; index < count; ++index)
+    total += index;
+  return total;
+}
+
+// ----
+func.def public @entry(%start: i32, %count: i32) -> (i32) {
+  %total$3 = scalar.constant 0 : i32
+  %4 = index.cast %start : i32 to offset
+  %5 = index.cast %count : i32 to offset
+  %6 = index.constant 1 : offset
+  %7 = scalar.constant 2 : i32
+  %8 = scalar.constant 3 : i32
+  %9 = index.cast %7 : i32 to index
+  %10 = index.cast %8 : i32 to index
+  %total$13 = scf.for %index = [%4 to %5 step %6](%total$12 = %total$3 : i32) -> (i32) pipeline(%9) unroll(%10) {
+    %14 = index.cast %index : offset to i32
+    %total$15 = scalar.addi %total$12, %14 : i32
+    scf.yield %total$15 : i32
+  }
+  func.return %total$13 : i32
+}
+
+// ====
+// RUN: roundtrip
+// Direct conditional bodies retain their iteration exits and selected writes.
+unsigned entry(unsigned count) {
+  unsigned total = 0;
+  [[loom::unroll(2)]]
+  for (unsigned index = 0; index < count; ++index)
+    if (index & 1u)
+      continue;
+    else
+      total += index;
+  return total;
+}
+
+// ----
+func.def public @entry(%count: i32) -> (i32) {
+  %total$2 = scalar.constant 0 : i32
+  %index = scalar.constant 0 : i32
+  %4 = index.cast %index : i32 to offset
+  %5 = index.cast %count : i32 to offset
+  %6 = index.constant 1 : offset
+  %7 = scalar.constant 2 : i32
+  %8 = index.cast %7 : i32 to index
+  %total$11 = scf.for %index = [%4 to %5 step %6](%total$10 = %total$2 : i32) -> (i32) unroll(%8) {
+    %12 = index.cast %index : offset to i32
+    %13 = scalar.constant 1 : i32
+    %14 = scalar.andi %12, %13 : i32
+    %15 = scalar.constant 0 : i32
+    %16 = scalar.cmpi ne, %14, %15 : i32
+    %17, %total$18 = scf.if %16 -> (i1, i32) {
+      %19 = scalar.constant 0 : i1
+      scf.yield %19, %total$10 : i1, i32
+    } else {
+      %total = scalar.addi %total$10, %12 : i32
+      %21 = scalar.constant 1 : i1
+      scf.yield %21, %total : i1, i32
+    }
+    scf.yield %total$18 : i32
+  }
+  func.return %total$11 : i32
+}
+
+// ====
+// RUN: roundtrip
+// Each nested loop owns its body summary independently.
+unsigned entry(unsigned count) {
+  unsigned total = 0;
+  [[loom::unroll(2)]]
+  for (unsigned row = 0; row < count; ++row)
+    [[loom::unroll]] for (unsigned column = 0; column < 3u; ++column)
+      total += row * 3u + column;
+  return total;
+}
+
+// ----
+func.def public @entry(%count: i32) -> (i32) {
+  %total$2 = scalar.constant 0 : i32
+  %row = scalar.constant 0 : i32
+  %4 = index.cast %row : i32 to offset
+  %5 = index.cast %count : i32 to offset
+  %6 = index.constant 1 : offset
+  %7 = scalar.constant 2 : i32
+  %8 = index.cast %7 : i32 to index
+  %total$11 = scf.for %row = [%4 to %5 step %6](%total$10 = %total$2 : i32) -> (i32) unroll(%8) {
+    %12 = index.cast %row : offset to i32
+    %column = scalar.constant 0 : i32
+    %14 = index.cast %column : i32 to offset
+    %15 = scalar.constant 3 : i32
+    %16 = index.cast %15 : i32 to offset
+    %17 = index.constant 1 : offset
+    %total$20 = scf.for %column = [%14 to %16 step %17](%total$19 = %total$10 : i32) -> (i32) unroll {
+      %21 = index.cast %column : offset to i32
+      %22 = scalar.constant 3 : i32
+      %23 = scalar.muli %12, %22 : i32
+      %24 = scalar.addi %23, %21 : i32
+      %total$25 = scalar.addi %total$19, %24 : i32
+      scf.yield %total$25 : i32
+    }
+    scf.yield %total$20 : i32
+  }
+  func.return %total$11 : i32
+}
+
+// ====
+// RUN: roundtrip
+// Empty and declaration bodies use the same counted-loop proof.
+unsigned entry(unsigned count) {
+  unsigned total = 0;
+  [[loom::unroll(2)]]
+  for (unsigned index = 0; index < count; ++index)
+    ;
+  [[loom::unroll(2)]]
+  for (unsigned index = 0; index < count; ++index)
+    unsigned unused = (total += index);
+  return total;
+}
+
+// ----
+func.def public @entry(%count: i32) -> (i32) {
+  %total$2 = scalar.constant 0 : i32
+  %index$3 = scalar.constant 0 : i32
+  %4 = index.cast %index$3 : i32 to offset
+  %5 = index.cast %count : i32 to offset
+  %6 = index.constant 1 : offset
+  %7 = scalar.constant 2 : i32
+  %8 = index.cast %7 : i32 to index
+  scf.for %index = [%4 to %5 step %6] unroll(%8) {
+    %10 = index.cast %index : offset to i32
+  }
+  %index$11 = scalar.constant 0 : i32
+  %12 = index.cast %index$11 : i32 to offset
+  %13 = index.cast %count : i32 to offset
+  %14 = index.constant 1 : offset
+  %15 = scalar.constant 2 : i32
+  %16 = index.cast %15 : i32 to index
+  %total$19 = scf.for %index = [%12 to %13 step %14](%total$18 = %total$2 : i32) -> (i32) unroll(%16) {
+    %20 = index.cast %index : offset to i32
+    %total$21 = scalar.addi %total$18, %20 : i32
+    scf.yield %total$21 : i32
+  }
+  func.return %total$19 : i32
+}
+
+// ====
+// RUN: roundtrip
+// An unbraced body that changes the induction variable remains an ordinary
+// while loop: its second increment is part of the source program.
+unsigned entry(unsigned start) {
+  unsigned total = 0;
+  for (unsigned index = start; index < 20u; ++index)
+    total += index, ++index;
+  return total;
+}
+
+// ----
+func.def public @entry(%start: i32) -> (i32) {
+  %total$2 = scalar.constant 0 : i32
+  %total$7, %index = scf.while(%total = %total$2 : i32, %index = %start : i32) -> (i32, i32) {
+    %9 = scalar.constant 20 : i32
+    %10 = scalar.cmpi ult, %index, %9 : i32
+    scf.condition %10, %total, %index : i1, i32, i32
+  } do(%total$5: i32, %index$6: i32) {
+    %total$11 = scalar.addi %total$5, %index$6 : i32
+    %12 = scalar.constant 1 : i32
+    %index$13 = scalar.addi %index$6, %12 : i32
+    %14 = scalar.constant 1 : i32
+    %index$15 = scalar.addi %index$13, %14 : i32
+    scf.yield %total$11, %index$15 : i32, i32
+  }
+  func.return %total$7 : i32
+}
+
+// ====
+// RUN: roundtrip
+// A bound changed by the direct body must be evaluated on every iteration.
+unsigned entry(unsigned bound) {
+  unsigned total = 0;
+  for (unsigned index = 0; index < bound; ++index)
+    total += bound--;
+  return total;
+}
+
+// ----
+func.def public @entry(%bound$0: i32) -> (i32) {
+  %total$2 = scalar.constant 0 : i32
+  %index$3 = scalar.constant 0 : i32
+  %bound$10, %total$11, %index$12 = scf.while(%bound = %bound$0 : i32, %total = %total$2 : i32, %index = %index$3 : i32) -> (i32, i32, i32) {
+    %13 = scalar.cmpi ult, %index, %bound : i32
+    scf.condition %13, %bound, %total, %index : i1, i32, i32, i32
+  } do(%bound$7: i32, %total$8: i32, %index$9: i32) {
+    %14 = scalar.constant 1 : i32
+    %bound$15 = scalar.subi %bound$7, %14 : i32
+    %total$16 = scalar.addi %total$8, %bound$7 : i32
+    %17 = scalar.constant 1 : i32
+    %index$18 = scalar.addi %index$9, %17 : i32
+    scf.yield %bound$15, %total$16, %index$18 : i32, i32, i32
+  }
+  func.return %total$11 : i32
+}
+
+// ====
+// RUN: verify
+void entry(unsigned count) {
+  // ERROR@+1: LOWERING/059 "loop scheduling requires a nonwrapping counted for loop"
+  [[loom::unroll]] for (unsigned index = 0; index < count; ++index)
+    ++index;
+}
+
+// ====
+// RUN: verify
+void entry(unsigned count) {
+  // ERROR@+1: LOWERING/059 "loop scheduling requires a nonwrapping counted for loop"
+  [[loom::unroll]] for (unsigned index = 0; index < count; ++index)
+    --count;
+}
+
+// ====
+// RUN: verify
+void entry(unsigned count) {
+  // ERROR@+1: LOWERING/059 "loop scheduling cannot preserve break exits"
+  [[loom::unroll]] for (unsigned index = 0; index < count; ++index)
+    break;
+}

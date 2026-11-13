@@ -8,6 +8,8 @@
 
 import random
 
+import pytest
+
 from loom.dialect.scalar import arithmetic as scalar_arithmetic
 from loom.dialect.scalar import bitwise as scalar_bitwise
 from loom.dialect.scalar import comparison as scalar_comparison
@@ -24,6 +26,21 @@ from loom.target.contracts import (
 
 _U32_MASK = 2**32 - 1
 _U64_MASK = 2**64 - 1
+_I64_UNSIGNED_DIVISION_DIVISORS = (
+    1,
+    2,
+    3,
+    2**24 - 1,
+    2**31 - 1,
+    2**31,
+    2**31 + 1,
+    2**32 - 1,
+)
+_I64_UNSIGNED_DIVISION_OPS = (
+    scalar_arithmetic.scalar_divui,
+    scalar_arithmetic.scalar_remui,
+    scalar_arithmetic.scalar_divremui,
+)
 
 
 def _u32(value: int) -> int:
@@ -52,11 +69,14 @@ def _logical_shift(value: int, amount: int) -> int:
     return _u32(value << amount)
 
 
-def _evaluate_rule(rule: DescriptorRule, lhs: int, rhs: int) -> int:
+def _evaluate_rule(
+    rule: DescriptorRule, lhs: int, rhs: int, result_name: str = "result"
+) -> int:
     values: dict[ValueRef, int | tuple[int, int]] = {
         ValueRef.operand("lhs"): _split_i64(lhs),
         ValueRef.operand("rhs"): _split_i64(rhs),
     }
+    carry_state = 0
     for emit in rule.emit:
         if isinstance(emit, EmitRegisterSlice):
             source = values[emit.source]
@@ -100,16 +120,18 @@ def _evaluate_rule(rule: DescriptorRule, lhs: int, rhs: int) -> int:
             )
             assert isinstance(rhs_value, int)
             result = operands["s0"] + rhs_value + operands.get("carry_in", 0)
+            carry_state = int(result > _U32_MASK)
             if "carry_out" in emit.results:
-                values[emit.results["carry_out"]] = int(result > _U32_MASK)
+                values[emit.results["carry_out"]] = carry_state
         elif semantic_tag in (
             "integer.sub.i32",
             "integer.sub.borrow_out.i32",
             "integer.sub.borrow_in_out.i32",
         ):
             result = operands["s0"] - operands["s1"] - operands.get("carry_in", 0)
+            carry_state = int(result < 0)
             if "carry_out" in emit.results:
-                values[emit.results["carry_out"]] = int(result < 0)
+                values[emit.results["carry_out"]] = carry_state
         elif semantic_tag == "integer.lshl.i32":
             result = _logical_shift(operands["s0"], operands["s1"])
         elif semantic_tag == "integer.ashl.i32":
@@ -129,9 +151,11 @@ def _evaluate_rule(rule: DescriptorRule, lhs: int, rhs: int) -> int:
             "register.move.from.division-state",
         ):
             result = operands["src"]
+        elif semantic_tag == "register.move.carry-to-scalar":
+            result = carry_state
         elif semantic_tag == "integer.divide.step.unsigned.i32":
             state = operands["sd"]
-            remainder = (operands["s0"] << 1) | (state >> 31)
+            remainder = _u32((operands["s0"] << 1) | (state >> 31))
             state = _u32(state << 1)
             if remainder >= operands["s1"]:
                 remainder -= operands["s1"]
@@ -147,7 +171,7 @@ def _evaluate_rule(rule: DescriptorRule, lhs: int, rhs: int) -> int:
         assert len(data_results) == 1
         values[data_results[0]] = _u32(result)
 
-    result = values[ValueRef.result("result")]
+    result = values[ValueRef.result(result_name)]
     if isinstance(result, tuple):
         return _join_i64(result)
     return result
@@ -302,7 +326,9 @@ def _rule(source_op, *, predicate: str | None = None) -> DescriptorRule:
     candidates = [
         rule
         for rule in AIE2P_I64_RULES
-        if isinstance(rule, DescriptorRule) and rule.source_op is source_op
+        if isinstance(rule, DescriptorRule)
+        and rule.source_op is source_op
+        and rule.priority == 0
     ]
     if predicate is not None:
         candidates = [
@@ -343,6 +369,79 @@ def _i64_shift_basis() -> tuple[int, ...]:
         *single_bits,
         *(_U64_MASK ^ bit for bit in single_bits),
     )
+
+
+def _i64_unsigned_division_rules() -> tuple[tuple[DescriptorRule, int], ...]:
+    rules: list[tuple[DescriptorRule, int]] = []
+    for rule in AIE2P_I64_RULES:
+        if not isinstance(rule, DescriptorRule):
+            continue
+        if rule.source_op not in _I64_UNSIGNED_DIVISION_OPS:
+            continue
+        divisor_range = next(
+            guard for guard in rule.guards if guard.kind is GuardKind.VALUE_I64_RANGE
+        )
+        assert divisor_range.minimum == 1
+        assert isinstance(divisor_range.maximum, int)
+        rules.append((rule, divisor_range.maximum))
+    assert {(rule.source_op, divisor_maximum) for rule, divisor_maximum in rules} == {
+        (operation, divisor_maximum)
+        for operation in _I64_UNSIGNED_DIVISION_OPS
+        for divisor_maximum in (2**31, 2**32 - 1)
+    }
+    return tuple(rules)
+
+
+def _i64_unsigned_division_transition_values(divisor: int) -> tuple[int, ...]:
+    quotient_transitions = (
+        1,
+        2,
+        (2**32 - 1) // divisor,
+        2**32 // divisor,
+        2**32 - 1,
+        2**32,
+        _U64_MASK // divisor,
+    )
+    values = {0, _U64_MASK}
+    for quotient in quotient_transitions:
+        if quotient == 0:
+            continue
+        threshold = quotient * divisor
+        for value in (threshold - 1, threshold, threshold + 1):
+            if 0 <= value <= _U64_MASK:
+                values.add(value)
+    return tuple(sorted(values))
+
+
+def _i64_unsigned_division_basis() -> list[tuple[int, int]]:
+    samples: list[tuple[int, int]] = []
+    for divisor in _I64_UNSIGNED_DIVISION_DIVISORS:
+        samples.extend((1 << bit, divisor) for bit in range(64))
+        samples.extend(
+            (value, divisor)
+            for value in _i64_unsigned_division_transition_values(divisor)
+        )
+    return list(dict.fromkeys(samples))
+
+
+def _check_i64_unsigned_division_samples(
+    samples: list[tuple[int, int]],
+) -> None:
+    for rule, divisor_maximum in _i64_unsigned_division_rules():
+        for value, divisor in samples:
+            if divisor > divisor_maximum:
+                continue
+            quotient, remainder = divmod(value, divisor)
+            if rule.source_op is scalar_arithmetic.scalar_divremui:
+                assert _evaluate_rule(rule, value, divisor, "quotient") == quotient
+                assert _evaluate_rule(rule, value, divisor, "remainder") == remainder
+            else:
+                expected = (
+                    quotient
+                    if rule.source_op is scalar_arithmetic.scalar_divui
+                    else remainder
+                )
+                assert _evaluate_rule(rule, value, divisor) == expected
 
 
 def _pair_vector_words(values: tuple[int, ...]) -> tuple[int, ...]:
@@ -393,19 +492,69 @@ def test_i64_binary_recipes_are_exact() -> None:
             assert _evaluate_rule(rule, lhs, rhs) == reference(lhs, rhs) & _U64_MASK
 
 
-def test_i64_unsigned_remainder_by_word_recipe_is_exact() -> None:
-    rule = _rule(scalar_arithmetic.scalar_remui)
+@pytest.mark.parametrize(
+    "source_op", [scalar_bitwise.scalar_ori, scalar_bitwise.scalar_xori]
+)
+@pytest.mark.parametrize("low_field", ["lhs", "rhs"])
+def test_i64_word_join_recipes_are_exact(source_op, low_field: str) -> None:
+    rule = next(
+        rule
+        for rule in AIE2P_I64_RULES
+        if isinstance(rule, DescriptorRule)
+        and rule.source_op is source_op
+        and any(
+            guard.kind is GuardKind.VALUE_I64_RANGE and guard.field == low_field
+            for guard in rule.guards
+        )
+    )
+    samples = _i64_samples()
+    samples.extend((value, value) for value in _i64_shift_basis())
+    for low, high in samples:
+        low &= _U32_MASK
+        high &= _U64_MASK ^ _U32_MASK
+        lhs, rhs = (low, high) if low_field == "lhs" else (high, low)
+        reference = lhs | rhs if source_op is scalar_bitwise.scalar_ori else lhs ^ rhs
+        assert _evaluate_rule(rule, lhs, rhs) == reference
+
+
+def test_i64_carry_and_borrow_recipes_are_exact() -> None:
+    carry_and_borrow_rules = (
+        (
+            _rule(scalar_arithmetic.scalar_addcarryui),
+            "sum",
+            "carry",
+            lambda lhs, rhs: lhs + rhs,
+        ),
+        (
+            _rule(scalar_arithmetic.scalar_subborrowui),
+            "difference",
+            "borrow",
+            lambda lhs, rhs: lhs - rhs,
+        ),
+    )
+    for lhs, rhs in _i64_samples():
+        for rule, value_name, flag_name, reference in carry_and_borrow_rules:
+            mathematical_result = reference(lhs, rhs)
+            assert _evaluate_rule(rule, lhs, rhs, value_name) == (
+                mathematical_result & _U64_MASK
+            )
+            assert _evaluate_rule(rule, lhs, rhs, flag_name) == int(
+                mathematical_result < 0 or mathematical_result > _U64_MASK
+            )
+
+
+def test_i64_unsigned_division_by_word_recipes_are_exact() -> None:
+    _check_i64_unsigned_division_samples(_i64_unsigned_division_basis())
+
+
+@pytest.mark.exhaustive
+def test_i64_unsigned_division_by_word_recipes_match_seeded_stress_oracle() -> None:
     generator = random.Random(0xA1E2_D1A1)
-    divisors = (1, 2, 3, 2**24 - 1, 2**31, 2**32 - 1)
     samples = [
-        (value, divisor) for value, _ in _i64_samples()[:256] for divisor in divisors
-    ]
-    samples.extend(
         (generator.getrandbits(64), generator.randint(1, 2**32 - 1))
         for _ in range(4096)
-    )
-    for value, divisor in samples:
-        assert _evaluate_rule(rule, value, divisor) == value % divisor
+    ]
+    _check_i64_unsigned_division_samples(samples)
 
 
 def test_i64_shift_recipes_are_exact() -> None:

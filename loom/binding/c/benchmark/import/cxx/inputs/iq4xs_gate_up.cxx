@@ -81,10 +81,10 @@ LOOM_TEMPLATE_DEF(stage_iq4xs_input)
                         loom::atomic::ordering::acq_rel>();
 }
 
-static LOOM_FORCE_INLINE void stage_iq4xs_input_async(unsigned tile,
-                                                      unsigned workitem,
-                                                      const BFloat2* input,
-                                                      BFloat2* scratch) {
+static LOOM_INLINE void stage_iq4xs_input_async(unsigned tile,
+                                                unsigned workitem,
+                                                const BFloat2* input,
+                                                BFloat2* scratch) {
   auto source = loom::buffer::view<5, 512>(
       reinterpret_cast<const std::bfloat16_t*>(input), {},
       loom::encoding::layout::dense<2>());
@@ -112,18 +112,17 @@ void stage_iq4xs_input_gfx9_4(bool use_async, unsigned tile, unsigned workitem,
                         loom::atomic::ordering::acq_rel>();
 }
 
-static LOOM_FORCE_INLINE Codes16 iq4nl_table() {
+static LOOM_INLINE Codes16 iq4nl_table() {
   return {-127, -104, -83, -65, -49, -35, -22, -10,
           1,    13,   25,  38,  53,  69,  89,  113};
 }
 
-static LOOM_FORCE_INLINE Codes4 lookup(Codes16 table, Bytes4 indices) {
+static LOOM_INLINE Codes4 lookup(Codes16 table, Bytes4 indices) {
   return {table[indices[0]], table[indices[1]], table[indices[2]],
           table[indices[3]]};
 }
 
-static LOOM_FORCE_INLINE std::bfloat16_t group_scale(Words2 header,
-                                                     unsigned group) {
+static LOOM_INLINE std::bfloat16_t group_scale(Words2 header, unsigned group) {
   loom::assume(group < 8u);
   Half2 header_halves = __builtin_bit_cast(Half2, header[0]);
   float base = float(header_halves[0]);
@@ -135,9 +134,8 @@ static LOOM_FORCE_INLINE std::bfloat16_t group_scale(Words2 header,
   return std::bfloat16_t(base * float(centered));
 }
 
-static LOOM_FORCE_INLINE BFloat4 decode4(Codes16 table, Bytes4 packed,
-                                         bool uses_high,
-                                         std::bfloat16_t scale) {
+static LOOM_INLINE BFloat4 decode4(Codes16 table, Bytes4 packed, bool uses_high,
+                                   std::bfloat16_t scale) {
   Bytes4 indices = (packed >> (4u * unsigned(uses_high))) & 15u;
   Codes4 codes = lookup(table, indices);
   Float4 values = __builtin_convertvector(codes, Float4);
@@ -150,7 +148,7 @@ struct IQ4XSAccumulators {
   Float2 up;
 };
 
-static LOOM_FORCE_INLINE IQ4XSAccumulators accumulate_iq4xs_tile(
+static LOOM_INLINE IQ4XSAccumulators accumulate_iq4xs_tile(
     unsigned tile, const std::bfloat16_t* scratch, const IQ4XSBlock* gate_row,
     const IQ4XSBlock* up_row, Codes16 table, unsigned group,
     unsigned lane_value_base, bool uses_high, IQ4XSAccumulators accumulators) {

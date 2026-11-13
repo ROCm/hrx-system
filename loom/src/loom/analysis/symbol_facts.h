@@ -166,10 +166,10 @@ iree_status_t loom_symbol_fact_context_allocate(
     loom_symbol_fact_context_t* context, iree_host_size_t byte_length,
     void** out_ptr);
 
-// Looks up an injected resource by provider-owned pointer key.
-iree_status_t loom_symbol_fact_context_lookup_resource(
-    loom_symbol_fact_context_t* context, const void* key,
-    const void** out_value);
+// Returns an injected resource by provider-owned key, or NULL when absent.
+// Resource lists are trusted caller-owned compiler state.
+const void* loom_symbol_fact_context_lookup_resource(
+    loom_symbol_fact_context_t* context, const void* key);
 
 // Recursively looks up another symbol's facts while computing a domain payload.
 iree_status_t loom_symbol_fact_context_lookup(

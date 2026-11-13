@@ -26,10 +26,14 @@ from loom.target.arch.amd.xdna.aie2p.core_descriptor_specs import (
 )
 from loom.target.arch.amd.xdna.aie2p.core_descriptors import (
     AIE2P_CORE_DESCRIPTOR_SET,
+    _descriptor,
     _low_register_class_name,
     _register_packing_members,
 )
 from loom.target.arch.amd.xdna.aie2p.core_machine_data import CORE_MACHINE_TABLE
+from loom.target.arch.amd.xdna.aie2p.core_stack_descriptors import (
+    STACK_SPILLABLE_CLASSES,
+)
 from loom.target.low_descriptors import (
     Constraint,
     ConstraintKind,
@@ -199,6 +203,11 @@ def test_core_descriptor_closure_is_complete() -> None:
                 ("aie2p.mr31_scd", 1, 1),
             ),
         ),
+        (
+            "amd.xdna.aie2p.register.pointer.units",
+            "aie2p.ep",
+            (("aie2p.ep", 1, 1), ("aie2p.eps", 1, 1), ("aie2p.mpfs", 1, 1)),
+        ),
     ]
 
 
@@ -207,6 +216,7 @@ def test_core_descriptor_closure_is_complete() -> None:
     [
         ("register.x.pairs", "mXm", 2),
         ("register.scalar.units", "eR", 1),
+        ("register.pointer.units", "eP", 1),
     ],
 )
 def test_register_packing_covers_physical_aliases(
@@ -598,9 +608,23 @@ def test_low_register_classes_retain_machine_candidate_order() -> None:
                 register_class.physical_registers
                 == machine_classes[register_class.name].candidates
             )
+            layout = machine_classes[register_class.name].layout
+            assert register_class.spill_unit_bits == layout.spill_size_bits
+            assert (
+                register_class.spill_min_alignment
+                == (layout.spill_alignment_bits + 7) // 8
+            )
+            assert register_class.spill_max_alignment == (
+                64
+                if register_class.name == "aie2p.vec256"
+                else register_class.spill_min_alignment
+            )
         assert RegClassFlag.PHYSICAL in register_class.flags
         assert RegClassFlag.EXPLICIT_PHYSICAL_REGISTERS in register_class.flags
-        assert RegClassFlag.UNSPILLABLE in register_class.flags
+        assert (RegClassFlag.UNSPILLABLE in register_class.flags) == (
+            register_class.name
+            not in {f"aie2p.{name.lower()}" for name in STACK_SPILLABLE_CLASSES}
+        )
 
     el_class = next(
         register_class
@@ -629,6 +653,24 @@ def test_low_register_classes_retain_machine_candidate_order() -> None:
         ("aie2p.mstfifo.low512", "aie2p.mstfifo", 0x1),
         ("aie2p.mstfifo.high512", "aie2p.mstfifo", 0x2),
     } <= parts
+
+
+@pytest.mark.parametrize(
+    ("inputs", "message"),
+    [
+        (("fifo_reg", "fifo_reg"), "overwritten input names must be unique"),
+        (("missing",), "must be an unencoded explicit tied register input"),
+        (("src",), "must be an unencoded explicit tied register input"),
+    ],
+)
+def test_overwritten_inputs_require_fixed_tied_storage(inputs, message) -> None:
+    spec = next(
+        spec
+        for spec in _DESCRIPTOR_SPECS
+        if spec.key == "amd.xdna.aie2p.store.bfp16ebs8.fifo.push"
+    )
+    with pytest.raises(ValueError, match=message):
+        _descriptor(replace(spec, overwritten_inputs=inputs))
 
 
 def test_aggregate_updates_require_coindexed_unencoded_components() -> None:
@@ -935,10 +977,24 @@ def test_descriptor_encoding_ids_and_adapters_are_materialized() -> None:
         address_index_move.constraints
     )
 
-    static_offset = descriptors["amd.xdna.aie2p.materialize.static-byte-offset.i32"]
-    assert static_offset.asm_forms[0].mnemonic == "mov.static-byte-offset"
-    assert static_offset.operands[0].reg_alts[0].reg_class == "aie2p.er"
-    assert Constraint(ConstraintKind.REMATERIALIZABLE, 0) in static_offset.constraints
+    for name, register_class, mnemonic in (
+        ("static-byte-offset.i32", "aie2p.er", "mov.static-byte-offset"),
+        ("static-address-index.i20", "aie2p.edj", "mov.static-address-index"),
+    ):
+        static_offset = descriptors[f"amd.xdna.aie2p.materialize.{name}"]
+        assert static_offset.asm_forms[0].mnemonic == mnemonic
+        assert len(static_offset.operands) == 1
+        assert static_offset.operands[0].reg_alts[0].reg_class == register_class
+        assert static_offset.operands[0].encoding_adapter_id != 0
+        assert static_offset.immediates[0].field_name == "i"
+        assert static_offset.immediates[0].bit_width == 32
+        assert static_offset.immediates[0].signed_min == -(2**31)
+        assert static_offset.immediates[0].unsigned_max == 2**31 - 1
+        assert static_offset.immediates[0].kind is ImmediateKind.SIGNED
+        assert static_offset.effects == ()
+        assert Constraint(ConstraintKind.REMATERIALIZABLE, 0) in (
+            static_offset.constraints
+        )
 
     for name in (
         "accumulator.clear.i32x64",
@@ -1201,6 +1257,8 @@ def test_scalar_address_descriptors_expose_fixed_register_state() -> None:
     ]
     assert move_to_state.asm_forms[0].mnemonic == "mov.dividend"
     assert move_from_state.asm_forms[0].mnemonic == "mov.quotient"
+    assert move_to_state.operands[0].flags == (OperandFlag.STATE_WRITE,)
+    assert move_from_state.operands[1].flags == (OperandFlag.STATE_READ,)
 
     divide_step = descriptors["amd.xdna.aie2p.divide.step.unsigned.i32"]
     assert [operand.field_name for operand in divide_step.operands] == [
@@ -1223,6 +1281,8 @@ def test_scalar_address_descriptors_expose_fixed_register_state() -> None:
     assert divide_step.constraints[0].rhs_operand_index == 2
     assert divide_step.asm_forms[0].results == ("d0", "sd_out")
     assert divide_step.asm_forms[0].operands == ("sd", "s0", "s1")
+    assert divide_step.operands[1].flags == (OperandFlag.STATE_WRITE,)
+    assert divide_step.operands[2].flags == (OperandFlag.STATE_READ,)
 
     multiply_add = descriptors["amd.xdna.aie2p.madd.i32"]
     assert [operand.field_name for operand in multiply_add.operands] == [
@@ -2137,7 +2197,7 @@ def test_implicit_registers_and_machine_ties_reach_low() -> None:
             OperandFlag.IMPLICIT,
             OperandFlag.STATE_WRITE,
         }
-        assert carry.reg_alts[0].reg_class == "aie2p.state.srcarry"
+        assert carry.reg_alts[0].reg_class == "aie2p.msrcarry"
         assert carry.reg_alts[0].flags == (RegClassAltFlag.PHYSICAL_ONLY,)
         assert carry.ready_stage == 1
 
@@ -2182,9 +2242,24 @@ def test_implicit_registers_and_machine_ties_reach_low() -> None:
             OperandFlag.STATE_READ,
         }
         assert carry_definition.reg_alts == carry_use.reg_alts
-        assert carry_definition.reg_alts[0].reg_class == "aie2p.state.srcarry"
+        assert carry_definition.reg_alts[0].reg_class == "aie2p.msrcarry"
         assert carry_definition.ready_stage == 1
         assert carry_use.read_stage == 1
+
+    carry_move = descriptors["amd.xdna.aie2p.move.carry-to-scalar"]
+    assert [operand.field_name for operand in carry_move.operands] == [
+        "dst",
+        "implicit_input_src",
+    ]
+    assert [operand.reg_alts[0].reg_class for operand in carry_move.operands] == [
+        "aie2p.er",
+        "aie2p.msrcarry",
+    ]
+    assert carry_move.operands[1].flags == (
+        OperandFlag.IMPLICIT,
+        OperandFlag.STATE_READ,
+    )
+    assert carry_move.asm_forms[0].mnemonic == "mov.carry"
 
     link_register = descriptors["amd.xdna.aie2p.return"].operands[0]
     assert link_register.field_name == "implicit_use_lr"

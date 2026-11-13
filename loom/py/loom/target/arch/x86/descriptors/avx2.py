@@ -20,6 +20,7 @@ from loom.target.arch.x86.vector_families import (
     AVX2_FLOAT_FMA_MNEMONICS,
     AVX2_FLOAT_INTEGER_I32_FORMS,
     AVX2_FLOAT_ROOT_FAMILIES,
+    AVX2_FLOAT_ROUNDING_FAMILIES,
     AVX2_INTEGER_BINARY_FAMILIES,
     AVX2_INTEGER_COMPARE_MNEMONICS,
     AVX2_INTEGER_FLOAT_I32_FORMS,
@@ -91,6 +92,7 @@ from .common import (
     _scalar_float_unary_descriptor,
     _vector_float_unary_descriptor,
     _vector_lane_units,
+    _vector_ones_descriptor,
     _vector_operand,
     _vector_result,
     _vector_splat_descriptor,
@@ -104,6 +106,7 @@ from .float_integer import (
     scalar_float_integer_descriptors,
     vector_float_integer_descriptors,
 )
+from .float_rounding import float_rounding_descriptors
 from .integer_float import (
     integer_float_descriptors,
     vector_integer_float_descriptors,
@@ -955,6 +958,17 @@ _X86_AVX2_VECTOR_DESCRIPTORS = (
         ),
         native.VXORPS,
     ),
+    *(
+        _vex_descriptor(
+            _vector_ones_descriptor(
+                vector_bit_width=width,
+                key=f"x86.avx2.vpcmpeqd.ones.{suffix}",
+                mnemonic="vpcmpeqd",
+            ),
+            native.VPCMPEQD_ONES,
+        )
+        for width, suffix in ((128, "xmm"), (256, "ymm"))
+    ),
     _vex_descriptor(
         Descriptor(
             key="x86.avx2.vinsertps.xmm",
@@ -1152,6 +1166,12 @@ _X86_AVX2_VECTOR_DESCRIPTORS = (
         AVX2_FLOAT_BINARY_FAMILIES, native.AVX2_FLOAT_BINARY
     ),
     *_vector_float_root_family_descriptors(),
+    *float_rounding_descriptors(
+        key_prefix="x86.avx2",
+        families=AVX2_FLOAT_ROUNDING_FAMILIES,
+        vector_bit_widths=AVX2_VECTOR_BIT_WIDTHS,
+        evex=False,
+    ),
     *(
         _vector_binary_descriptor(
             vector_bit_width=vector_bit_width,

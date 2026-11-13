@@ -902,6 +902,7 @@ class TestBuilder(DialectBuilder):
         max_flat_workgroup_size: int | None = ...,
         max_workgroup_storage_bytes: int | None = ...,
         subgroup_size: int | None = ...,
+        execution_unit_count: int | None = ...,
         max_grid_size_x: int | None = ...,
         max_grid_size_y: int | None = ...,
         max_grid_size_z: int | None = ...,
@@ -1202,3 +1203,13 @@ class TestBuilder(DialectBuilder):
         dict: Mapping[str, Any] | None = ...,
         location_id: int | None = ...,
     ) -> None: ...
+    def fact_observation_scope(
+        self,
+        *,
+        value: ValueRef,
+        results: list[Type | TiedResultSpec],
+        name: str | None = ...,
+        names: Sequence[str] | None = ...,
+        result_names: Sequence[str] | None = ...,
+        location_id: int | None = ...,
+    ) -> ValueRef: ...

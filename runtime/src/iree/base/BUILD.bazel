@@ -243,10 +243,15 @@ iree_runtime_cc_test(
     srcs = [
         "status_stack_trace_test.cc",
         "status_stack_trace_test_helper.cc",
+        "status_stack_trace_test_scopes.cc",
     ],
+    # Cold DWARF decoding and inline frames are the subject of this test.
+    copts = ["-g"],
+    keep_debug = True,
     target_compatible_with = ["@platforms//os:linux"],
     deps = [
         ":base",
+        "//runtime/src/iree/base/threading:thread",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

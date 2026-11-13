@@ -7,6 +7,7 @@
 #include "loom/transforms/cleanup/dce.h"
 
 #include "loom/ir/context.h"
+#include "loom/ir/local_value_domain.h"
 #include "loom/ir/location_compaction.h"
 #include "loom/ir/module.h"
 #include "loom/ir/value_refs.h"
@@ -72,6 +73,13 @@ iree_status_t loom_location_dce_run(loom_pass_t* pass, loom_module_t* module) {
 
 #define LOOM_DCE_INITIAL_CAPACITY 32
 
+typedef struct loom_dce_lifetime_region_t {
+  // Region selected for ownership-aware cleanup during worklist seeding.
+  loom_region_t* region;
+  // Enclosing operation whose erasure retires the selected region.
+  loom_op_t* owner;
+} loom_dce_lifetime_region_t;
+
 typedef struct loom_dce_worklist_t {
   // Deduplicated operations to re-check for deadness.
   loom_op_t** entries;
@@ -79,6 +87,12 @@ typedef struct loom_dce_worklist_t {
   iree_host_size_t count;
   // Capacity of entries.
   iree_host_size_t capacity;
+  // Regions containing operations whose deadness needs a lifetime closure.
+  loom_dce_lifetime_region_t* lifetime_regions;
+  // Number of regions selected during the initial structural walk.
+  iree_host_size_t lifetime_region_count;
+  // Allocated capacity of lifetime_regions.
+  iree_host_size_t lifetime_region_capacity;
 } loom_dce_worklist_t;
 
 static iree_status_t loom_dce_worklist_initialize(
@@ -143,16 +157,21 @@ static iree_status_t loom_dce_seed_worklist(
 
   while (stack_count > 0) {
     loom_region_t* region = region_stack[--stack_count];
+    loom_op_t* lifetime_owner = NULL;
 
     loom_block_t* block = NULL;
     loom_region_for_each_block(region, block) {
       loom_op_t* op = NULL;
       loom_block_for_each_op(block, op) {
         op->flags &= ~LOOM_OP_FLAG_ON_WORKLIST;
-        bool is_dead = false;
-        IREE_RETURN_IF_ERROR(deadness_query->fn(deadness_query->user_data,
-                                                module, op, &is_dead));
-        if (is_dead) {
+        const loom_dead_state_op_kind_t kind =
+            deadness_query->fn(deadness_query->user_data, module, op);
+        if (kind == LOOM_DEAD_STATE_OP_LIFETIME ||
+            kind == LOOM_DEAD_STATE_OP_CONSUMING) {
+          lifetime_owner = op->parent_op;
+        }
+        if (kind == LOOM_DEAD_STATE_OP_VALUE &&
+            loom_op_results_unused(module, op)) {
           IREE_RETURN_IF_ERROR(loom_dce_worklist_push(arena, worklist, op));
         }
 
@@ -169,6 +188,16 @@ static iree_status_t loom_dce_seed_worklist(
           region_stack[stack_count++] = regions[r];
         }
       }
+    }
+    if (lifetime_owner) {
+      IREE_RETURN_IF_ERROR(
+          iree_arena_grow_array(arena, worklist->lifetime_region_count,
+                                worklist->lifetime_region_count + 1,
+                                sizeof(*worklist->lifetime_regions),
+                                &worklist->lifetime_region_capacity,
+                                (void**)&worklist->lifetime_regions));
+      worklist->lifetime_regions[worklist->lifetime_region_count++] =
+          (loom_dce_lifetime_region_t){region, lifetime_owner};
     }
   }
 
@@ -220,18 +249,10 @@ static iree_status_t loom_dce_add_subtree_providers_to_worklist(
 // Implementation
 //===----------------------------------------------------------------------===//
 
-static iree_status_t loom_dce_default_deadness_query(
-    void* user_data, const loom_module_t* module, const loom_op_t* op,
-    bool* out_is_dead) {
-  (void)user_data;
-  *out_is_dead = loom_op_is_trivially_dead(module, op);
-  return iree_ok_status();
-}
-
 iree_status_t loom_dce_run(loom_pass_t* pass, loom_module_t* module,
                            loom_func_like_t function) {
   const loom_dce_deadness_query_callback_t deadness_query = {
-      .fn = loom_dce_default_deadness_query,
+      .fn = loom_dead_state_classify_op,
   };
   return loom_dce_run_with_deadness_query(pass, module, function,
                                           deadness_query);
@@ -265,12 +286,9 @@ iree_status_t loom_dce_run_with_deadness_query(
     if (!op) {
       break;
     }
-    bool is_dead = false;
-    status = deadness_query.fn(deadness_query.user_data, module, op, &is_dead);
-    if (!iree_status_is_ok(status)) {
-      break;
-    }
-    if (!is_dead) {
+    if (deadness_query.fn(deadness_query.user_data, module, op) !=
+            LOOM_DEAD_STATE_OP_VALUE ||
+        !loom_op_results_unused(module, op)) {
       continue;
     }
 
@@ -288,5 +306,42 @@ iree_status_t loom_dce_run_with_deadness_query(
   }
 
   loom_dce_worklist_deinitialize(&worklist);
+  iree_arena_allocator_t arena;
+  iree_arena_initialize(pass->arena->block_pool, &arena);
+  // Nested regions are independent scopes. Their captures remain live in the
+  // enclosing scope until structured control is lowered to ordinary CFG.
+  for (iree_host_size_t i = 0;
+       i < worklist.lifetime_region_count && iree_status_is_ok(status); ++i) {
+    const loom_dce_lifetime_region_t scope = worklist.lifetime_regions[i];
+    // The worklist may have erased an enclosing operation and its subtree.
+    if (scope.owner->flags & LOOM_OP_FLAG_DEAD) {
+      continue;
+    }
+    loom_region_t* region = scope.region;
+    iree_arena_reset(&arena);
+    loom_local_value_domain_t domain = {0};
+    status = loom_local_value_domain_acquire_for_region(module, region, &arena,
+                                                        &domain);
+    loom_cfg_graph_t graph = {0};
+    if (iree_status_is_ok(status)) {
+      status = loom_cfg_graph_build(module, region, &arena, &graph);
+    }
+    loom_rewriter_t rewriter;
+    loom_rewriter_initialize(&rewriter, module, &arena);
+    iree_host_size_t removed_arguments = 0;
+    iree_host_size_t removed_operations = 0;
+    if (iree_status_is_ok(status)) {
+      status = loom_cfg_eliminate_dead_state(
+          &rewriter, &graph, &domain, deadness_query.fn,
+          deadness_query.user_data, &removed_arguments, &removed_operations);
+    }
+    loom_rewriter_deinitialize(&rewriter);
+    loom_local_value_domain_release(&domain);
+    if (removed_arguments || removed_operations) {
+      loom_pass_mark_changed(pass);
+      statistics->ops_eliminated += removed_operations;
+    }
+  }
+  iree_arena_deinitialize(&arena);
   return status;
 }

@@ -110,9 +110,8 @@ TEST(HeapPoolTest, BorrowedMaterializationRetainsBackingAfterReservation) {
   iree_hal_pool_acquire_info_t info = {};
   iree_hal_pool_acquire_result_t result = IREE_HAL_POOL_ACQUIRE_NONE;
   IREE_ASSERT_OK(iree_hal_pool_acquire_reservations_sync(
-      pool, 1, &request,
-      /*requester_frontier=*/nullptr, &reservation, &info, &result,
-      IREE_HAL_POOL_RESERVE_FLAG_NONE));
+      pool, 1, &request, /*requester_frontier=*/nullptr,
+      IREE_HAL_POOL_RESERVE_FLAG_NONE, &reservation, &info, &result));
   EXPECT_EQ(result, IREE_HAL_POOL_ACQUIRE_OK_FRESH);
 
   iree_hal_buffer_t* buffer = nullptr;

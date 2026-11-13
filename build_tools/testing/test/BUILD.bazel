@@ -5,7 +5,7 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 load("@rules_python//python:defs.bzl", "py_binary")
-load("//build_tools/testing:build_defs.bzl", "iree_execution_test_suite")
+load("//build_tools/testing:build_defs.bzl", "iree_cli_test")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -14,8 +14,8 @@ py_binary(
     srcs = ["fixture_tool.py"],
 )
 
-iree_execution_test_suite(
-    name = "execution_test_suite_smoke_test",
+iree_cli_test(
+    name = "cli_test_smoke_test",
     data = ["input.txt"],
     manifests = ["smoke.test.json"],
     tools = {

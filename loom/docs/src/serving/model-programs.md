@@ -18,7 +18,7 @@ The important distinction is the shape of state and output, not the model name:
 | Contract | Source responsibilities | Starting package |
 | --- | --- | --- |
 | Retained text | Token framing, paged state geometry, mixed prompt/decode math, progress, sampling and chat policy. | [Tiny text model](https://github.com/ROCm/hrx-system/tree/main/loom/src/loom/serve/fixture/text) |
-| Staged image | Prompt preparation, parameter domains, numerical stages, invocation continuation and final RGB. | [Image model](https://github.com/ROCm/hrx-system/tree/main/loom/src/loom/serve/fixture/image) |
+| Staged image | Prompt preparation, parameter domains, numerical stages, invocation continuation and final RGBA8. | [Image model](https://github.com/ROCm/hrx-system/tree/main/loom/src/loom/serve/fixture/image) |
 | Finite embeddings | Input preparation, cohort cost/compatibility, pooling/projection and final vectors. | [Embedding model](https://github.com/ROCm/hrx-system/tree/main/loom/src/loom/serve/fixture/embedding) |
 | Finite decisions | Structured question framing and compact normalized answer distributions. | [Decision model](https://github.com/ROCm/hrx-system/tree/main/loom/src/loom/serve/fixture/decision) |
 | Streaming speech | Voice conditioning, independent request state, compatible next-work batches and continuous waveform blocks. | [Speech model](https://github.com/ROCm/hrx-system/tree/main/loom/src/loom/serve/fixture/speech) |
@@ -180,7 +180,7 @@ cold source. Each request choice owns its declarations independently; selecting
 another choice does not change the checkpoint identity of accepted work.
 
 The exact signatures and ownership are in the
-[preparation contract](https://github.com/ROCm/hrx-system/blob/main/loom/src/loom/serve/runtime/program/preparation.h).
+[preparation contract](https://github.com/ROCm/hrx-system/blob/main/loom/src/loom/runtime/program/preparation.h).
 Declarations copy their strings; opaque returned state must own its storage or
 retain its inputs. Preparation is not a place to submit device work.
 
@@ -195,7 +195,7 @@ The warm `control` VM imports the runner-local `runner.execute_N` and
 buffers; `feedback` transfers a bounded final result into a registered host slot.
 Both enqueue work without waiting. The native model owner schedules completion
 on work/feedback timelines and preserves buffers until their actual last use.
-The [runner-module contract](https://github.com/ROCm/hrx-system/blob/main/loom/src/loom/serve/runtime/program/module.h)
+The [runner-module contract](https://github.com/ROCm/hrx-system/blob/main/loom/src/loom/runtime/program/module.h)
 defines arity, buffer types and lifetime. This is a coarse serving capability,
 not a source program's ownership of the entire device or process scheduler.
 
@@ -206,6 +206,32 @@ orders subsequent model work after the supplied fence without waiting on the
 CPU or synchronizing other models. A null fence represents no external work.
 Completion describes readiness; storage ownership still extends through the
 last accepted consumer, including when a dependency fails.
+
+### Measure device work
+
+Control programs can bracket prepared stages with queue-clock captures:
+
+```text
+(frequency_hz, valid_bits) = runner.timestamp_clock()
+runner.timestamp(feedback_buffer, begin_byte_offset)
+runner.execute_N(stage, ...)
+finished = runner.timestamp(feedback_buffer, end_byte_offset)
+runner.feedback(slot, feedback_buffer, byte_offset, byte_length)
+```
+
+Each capture writes a raw 64-bit tick to an 8-byte-aligned, transfer-writable
+destination. Its return value is an accepted work timepoint, not the captured
+tick. Captures follow preceding model work, and subsequent work follows the
+capture. They enqueue without a host wait or a device-wide barrier. Returning
+the samples in the existing feedback transfer needs no separate readback.
+
+`timestamp_clock` reports the dispatch queue family's clock. A zero frequency
+or width means that no timestamp clock is advertised; unsupported captures
+return an error. Within that family, subtract samples modulo `2^valid_bits`
+and divide by `frequency_hz` to obtain elapsed seconds. A captured zero is
+valid, and successful completion establishes that the sample was written.
+Each queued epoch owns separate sample slots until its readers retire; a later
+capture must not overwrite feedback that is still in flight.
 
 ### Read checkpoint bytes on demand
 
@@ -286,26 +312,57 @@ result capacities, an optional tokenizer asset, a source name and opaque state.
 Its control program exports:
 
 ```text
-prepare_request(state, input) -> (prepared_bytes, units, compatibility_tag)
-prepare_batch(state, stage_tags, ranges, prepared_bytes)
+prepare_request(state, input) -> (request_state, units, compatibility_tag)
+prepare_batch(state, stage_tags, batch: ptr<finite.batch>)
     -> (stage_index, upload_payload, result_plan)
-run(stage_index, input_buffer, output_buffer)
+run(state, stage_index, input_buffer, output_buffer, batch: ptr<finite.batch>)
+collect_batch(state, batch: ptr<finite.batch>)
 ```
 
 The HTTP parser provides indexed protocol records, not a source-private JSON
 guess. `prepare_request` performs model framing and validation. `units` is a
 positive additive bound on real work/storage; it need not mean tokens. Equal
-compatibility tags mean requests can share a cohort. Source state is immutable
-across request preparation, and returned buffers retain any aliased input.
+compatibility tags mean requests can share a cohort. Each request retains its
+source buffer across epochs; the model shares one serialized control instance.
+Returned buffers retain any aliased input.
 
 The native scheduler starts with the oldest prepared request and fills the
 cohort from compatible waiting requests. It does not wait for hypothetical
-arrivals. Batch preparation receives stable request-order `[offset, length]` I64
-ranges into the packed buffer. The buffer starts with a copy of that directory,
-followed by the prepared request bytes. A program can upload this allocation
-directly and let device workers index requests through the directory, without
-copying the request data again. Batch preparation selects a declared stage and
-maps physical output back to requests.
+arrivals. The `finite` capability exposes the entire selected cohort to one
+preparation or collection call:
+
+| Import | Contract |
+| --- | --- |
+| `batch_count(batch) -> i64` | Number of selected members. |
+| `batch_state(batch, ordinal) -> buffer` | Retained request state at its original cohort ordinal. |
+| `batch_pack(batch) -> (ranges, packed)` | Explicitly copy states into an upload directory and payload. |
+| `batch_origin(batch, ordinal) -> i64` | Reserved cohort origin in source-defined storage units. |
+| `batch_buffer(batch, ordinal, root) -> hal.buffer` | Stable device root whose capture protects the cohort until queue retirement. Submission only. |
+| `batch_release(batch, ordinal)` | Relinquish a completed cohort's storage during collection while its logical request continues. |
+| `batch_offer(batch, ordinal, units, tag)` | Publish the next work offer during successful collection. Zero units finishes the request. |
+| `batch_finish(batch)` | Finish every member of a one-shot cohort during collection. |
+
+The borrowed batch is valid only during that call. Cancellation preserves its
+original ordinals until collection retires. `batch_pack` produces request-order
+`[offset, length]` I64 ranges; the packed buffer contains the same directory
+followed by the states. A one-shot program can upload it directly. A continuing
+program can instead read each state and construct a compact control packet.
+Batch preparation selects a stage and maps physical output back to requests.
+
+After the accepted device frontier succeeds, `collect_batch` commits progress
+and publishes each member's next offer. It never runs for failed readiness.
+Unfinished members rejoin behind new arrivals, so compatible late requests can
+join the next epoch. Each member can publish an ordered prefix of its remaining
+result rows. Collection finishes a member exactly when that prefix exhausts its
+remaining rows. Earlier rows retain their independent output storage while the
+source releases and reuses numerical cohort scratch. Empty output alone does
+not indicate completion. A one-shot source
+calls `finite.batch_finish` from collection and uses this same lifecycle.
+
+Request-state buffers are host control storage. Device intermediates need an
+explicit producer-owned lifetime across epochs: native generators own that
+storage and its retirement. Compiler workspace inside a source `run` invocation
+is scoped to that invocation.
 
 Finite `prepare_batch` can also declare stages with the `prepare` capability.
 It uses the same `stage`, `dispatch`, `config`, `config_i64`, and
@@ -325,9 +382,11 @@ nor image-to-text composition requires downloading hidden features to the host.
 
 The result plan describes physical output bytes separately from the live result
 prefix, then each request's rows and each row's offset/width. Results retain
-their device storage independently of the producing model. Device consumers
-import the producer's readiness and read those rows without a host roundtrip.
-HTTP consumers explicitly download a compact snapshot for encoding; device
+their device storage independently of the producing model. A logical request
+spanning cohorts keeps its rows in the original buffers and publishes one final
+result in input order. Device consumers import the producer's readiness and read
+those rows without a consolidation copy or host roundtrip. HTTP consumers
+explicitly download and retain compact snapshots until final encoding; device
 padding and activation storage need not be downloaded. Projection and
 normalization happen in the numerical program. Decision encoding similarly
 consumes final probabilities, not hidden activations.
@@ -382,14 +441,15 @@ checkpoint declarations select retained banks or prepare independent banks on
 demand; omitted declarations preserve the cold parameter layout. Stages within
 one cohort share a parameter binding map.
 
-Image control then drives command parts to final RGB. It returns a continuation
+Image control then drives command parts to final RGBA8. It returns a continuation
 cursor; another invocation occurs only after the previous accepted frontiers
 retire. Compiler-reflected workspace remains live across barrier-aligned parts.
-RGB and compiler-aligned workspace share one cohort-sized pool allocation,
-retained through final feedback. Each request keeps a stable output slice even
+RGBA8 output and compiler-aligned workspace have separate cohort-sized pool
+allocations. Final feedback retains the output after workspace retirement. Each request keeps a stable output slice even
 if a peer is cancelled. Neither storage nor pixel geometry belongs to the
-executable cache. Final output is F32 CHW RGB in `[-1,1]` before native image
-encoding uses each request's dimensions.
+executable cache. Final output is row-major RGBA8: four bytes per pixel in R, G, B, A
+order. Models perform their final quantization on device; native PNG encoding
+preserves those bytes, including alpha, using each request's dimensions.
 The [image source contract](https://github.com/ROCm/hrx-system/blob/main/loom/src/loom/serve/service/image/model.h)
 defines entry signatures, alignment and cancellation.
 
@@ -486,11 +546,19 @@ retains its three-argument contract; its source produces tokens in `prepare_inpu
 Text and sequence plans are compact arrays of nine little-endian u32 fields
 per span. The first epoch's records occupy `[0, first_count)`; optional
 continuation records immediately follow at `first_count`. A record's resident
-state ID is independent of its plan ordinal. The eighth argument to
-`publish_epoch` is a buffer of little-endian u32 continuation flags indexed by
+state ID is independent of its plan ordinal. The continuation-flags argument to
+`publish_epoch` is a buffer of little-endian u32 flags indexed by
 first-plan ordinal, not a bitmask indexed by state ID. Source programs size
 their tables and results from the requested resident and cohort capacities;
 neither coordinate has a built-in sixteen-entry limit.
+
+`publish_epoch` receives the retained control-state buffer as its first
+argument, followed by the plan and completed feedback. It runs only after
+successful epoch completion and can update source-owned history for subsequent
+epochs, such as measured execution costs. The source owns this history's
+layout and carries it through control-state growth. Submitted device work uses
+its already-captured inputs; publication does not change those inputs or the
+completed feedback banks.
 
 `encode_epoch` writes metadata and input packets, then returns
 `(output_count, transfer_plan, byte_offset, byte_length)`. The plan view contains
@@ -512,7 +580,7 @@ The plan can reuse retained control state and is consumed during submission;
 packet bytes stay immutable until accepted transfers retire, including failure.
 Source reuse, destination visibility, and destination reuse after consumption
 are separate ownership boundaries. See the
-[byte-placement contract](https://github.com/ROCm/hrx-system/blob/main/loom/src/loom/serve/runtime/program/transfer_plan.h)
+[byte-placement contract](https://github.com/ROCm/hrx-system/blob/main/loom/src/loom/runtime/program/transfer_plan.h)
 for the encoding and validation rules.
 The same contract applies to generative text and media epochs. See
 [epoch uploads](https://github.com/ROCm/hrx-system/blob/main/loom/src/loom/serve/service/text/epoch_upload.h)

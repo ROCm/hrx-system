@@ -13,9 +13,22 @@ function(iree_msvc_masm_library)
   cmake_path(ABSOLUTE_PATH _RULE_SRC BASE_DIRECTORY "${_SOURCE_DIR}")
   iree_package_binary_dir(_IREE_PACKAGE_BINARY_DIR)
   set(_OBJECT "${_IREE_PACKAGE_BINARY_DIR}/${_RULE_NAME}.obj")
+
+  if(CMAKE_ASM_MASM_COMPILER)
+    set(_MASM_COMPILER "${CMAKE_ASM_MASM_COMPILER}")
+  else()
+    find_program(_MASM_COMPILER NAMES ml64 REQUIRED NO_CACHE)
+  endif()
+  cmake_path(GET _MASM_COMPILER FILENAME _MASM_COMPILER_NAME)
+  if(_MASM_COMPILER_NAME MATCHES "^llvm-ml")
+    set(_MASM_OPTIONS -m64 /c)
+  else()
+    set(_MASM_OPTIONS /nologo /Zi /c)
+  endif()
   add_custom_command(
     OUTPUT "${_OBJECT}"
-    COMMAND ml64 /nologo /Zi /c /Fo "${_OBJECT}" "${_RULE_SRC}"
+    COMMAND "${_MASM_COMPILER}" ${_MASM_OPTIONS}
+      /Fo "${_OBJECT}" "${_RULE_SRC}"
     DEPENDS "${_RULE_SRC}"
     COMMENT "Assembling ${_RULE_NAME}"
     VERBATIM

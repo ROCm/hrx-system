@@ -6,7 +6,7 @@ of both. Devices are explicit process resources; model registrations have
 independent lifetimes.
 
 ```sh
-loom-serve --device=URI [--model=path/model.json ...] [options]
+loom-serve --device=URI [--model=path ...] [options]
 loom-serve --devices=devices.json [--model=path/deployment.json ...] [options]
 loom-serve --device=task --pool_backing=fixed --listen=127.0.0.1:8080
 loom-serve --flagfile=serve.flags
@@ -40,7 +40,7 @@ above remain the ordinary entry point on every platform.
 | `--device=URI` | None | Shortcut constructing device `device` and pool `pool`. Mutually exclusive with `--devices`. |
 | `--devices=path` | None | Machine-local JSON declaring named devices and independent pools with their consumer membership, memory limits, and idle policy. |
 | `--wait_mode=active\|blocking` | `active` | Completion-wait policy for every device. Overrides the machine file's `wait_mode`. Requests remain asynchronous. |
-| `--model=path` | None, repeatable | A local model card or serving deployment document; omission starts empty. |
+| `--model=path` | None, repeatable | A local model card, serving deployment document, or directory containing `model.json`; omission starts empty. |
 | `--preset=name` | Card selection | Select a preset when loading one card directly. Fetched cards retain the selection made during acquisition. |
 | `--listen=address` | `127.0.0.1:8080`, repeatable | Numeric IPv4 `host:port`, IPv6 `[host]:port`, or `unix:path`. |
 | `--workers=N` | `8` | Shared CPU workers for JIT, model scheduling and media work. |
@@ -73,12 +73,22 @@ Set `"wait_mode": "blocking"` at the root of a machine configuration, or use
 `--wait_mode=blocking` with either `--device` or `--devices`. An explicit CLI
 value overrides the file for every device. The setting is fixed at startup.
 
-AMD GPU devices use their bounded coherent-completion observation budget in
-active mode: 100 µs by default, tunable with the device URI's
-`completion_spin_ns` parameter. Blocking mode sets that budget to zero even
-when the URI specifies a nonzero value. Native-event backends retain their
-completion notifications. CPU devices report completion directly from their
-execution workers; this setting leaves the shared CPU executor unchanged.
+On AMD GPU user queues, active mode lets the existing completion worker poll
+pending GPU work for up to one second after actual completion progress. Further
+progress renews that budget; when no work remains pending, the worker sleeps
+without waiting for the budget to expire. This reduces completion wake-up
+latency and can improve throughput and energy per request. Polling occupies a
+CPU core while active, however, and long GPU operations may use more CPU without
+finishing faster. For battery-sensitive or CPU-constrained deployments, select
+`--wait_mode=blocking`.
+
+The device URI's `completion_spin_ns` parameter adjusts this budget; for example,
+`--device='amdgpu://?completion_spin_ns=10000000'` selects 10 ms. Blocking mode
+sets the budget to zero even when the URI specifies a nonzero value. AMD GPU
+kernel queues, including the Windows native submission path, use native
+completion events and do not use this polling budget. CPU devices report
+completion directly from their execution workers; this setting leaves the
+shared CPU executor unchanged.
 
 ### Memory and admission limits
 

@@ -6,9 +6,12 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
+import sys
+import tarfile
 import tempfile
 import unittest
 from pathlib import Path
@@ -25,6 +28,77 @@ FIXTURE = REPO_ROOT / "build_tools/cmake/testdata/generated_packages"
 
 
 class CMakeGeneratedPackagesTest(unittest.TestCase):
+    def test_generator_inputs_resolve_from_locked_archives(self):
+        with tempfile.TemporaryDirectory(prefix="cmake registry inputs ") as temporary:
+            root = Path(temporary)
+            source, build = root / "source", root / "build"
+            source.mkdir()
+            registry = root / "registry"
+            (registry / "data").mkdir(parents=True)
+            (registry / "data/name file.txt").write_text("first")
+            (registry / "notice.txt").write_text("license")
+            archive = root / "registry.tar.gz"
+            with tarfile.open(archive, "w:gz") as output:
+                output.add(registry, arcname="registry")
+            digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+            (source / "generate.py").write_text(
+                "import argparse\nfrom pathlib import Path\n"
+                "p = argparse.ArgumentParser()\n"
+                "for name in ('input', 'notice', 'output'): p.add_argument('--' + name, type=Path)\n"
+                "a = p.parse_args()\na.output.write_text(a.input.read_text() + a.notice.read_text())\n"
+            )
+            (source / "CMakeLists.txt").write_text(
+                """cmake_minimum_required(VERSION 3.26)
+project(registry_generator NONE)
+set(IREE_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
+set(IREE_BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}")
+set(IREE_PACKAGE_ROOT_DIR "${IREE_SOURCE_DIR}")
+set(IREE_PACKAGE_ROOT_PREFIX fixture)
+include("${IREE_REPO_ROOT}/build_tools/cmake/iree_macros.cmake")
+include("${IREE_REPO_ROOT}/build_tools/cmake/iree_generated_files.cmake")
+"""
+                + f'set(IREE_DEP_SAMPLE_URLS "{archive.as_posix()}")\n'
+                + f'set(IREE_DEP_SAMPLE_SHA256 "{digest}")\n'
+                + """set(IREE_DEP_SAMPLE_PATCHES "")
+set(IREE_DEP_SAMPLE_PATCH_ARGS "")
+if(NOT DEFINED INPUT_PATH)
+  set(INPUT_PATH "data/name file.txt")
+endif()
+add_executable(generator IMPORTED)
+set_property(TARGET generator PROPERTY IMPORTED_LOCATION "${Python3_EXECUTABLE}")
+iree_generated_files(NAME names GENERATOR generator
+  OUTPUTS "${IREE_BINARY_DIR}/names.txt"
+  INPUTS "@sample///${INPUT_PATH}" "@sample///notice.txt"
+    "${IREE_SOURCE_DIR}/generate.py"
+  ARGS "${IREE_SOURCE_DIR}/generate.py" "--input=@sample///${INPUT_PATH}"
+    "--notice=@sample///notice.txt" "--output=${IREE_BINARY_DIR}/names.txt")
+"""
+            )
+            configure_project(source, build)
+            build_project(build, "fixture_names")
+            generated_output = build / "names.txt"
+            completion_stamp = build / "CMakeFiles/fixture_names.stamp"
+            self.assertEqual(generated_output.read_text(), "firstlicense")
+            changed_input = build / "_deps/sample-src/data/name file.txt"
+            changed_input.write_text("second")
+            # Ninja can retain a completed output time in its build log. Make
+            # the changed input unambiguously newer than every custom-command
+            # output so invalidation does not depend on one filesystem tick.
+            changed_time = (
+                max(
+                    generated_output.stat().st_mtime_ns,
+                    completion_stamp.stat().st_mtime_ns,
+                )
+                + 2_000_000_000
+            )
+            os.utime(changed_input, ns=(changed_time, changed_time))
+            build_project(build, "fixture_names")
+            self.assertEqual(generated_output.read_text(), "secondlicense")
+            result = configure_project(
+                source, root / "missing", "-DINPUT_PATH=absent", expect_failure=True
+            )
+            self.assertIn("missing input @sample///absent", result)
+
     def test_setup_defaults_and_live_native_interfaces(self):
         with tempfile.TemporaryDirectory(prefix="cmake native defaults ") as temporary:
             source, build = Path(temporary) / "source", Path(temporary) / "build"
@@ -182,6 +256,12 @@ iree_generated_files(NAME copy GENERATOR copy_tool
             build_project(build, "fixture_logical_copy")
             self.assertEqual(output.stat().st_mtime_ns, timestamp)
             input_file.write_text("second")
+            # GNU Make compares timestamps at the filesystem's effective
+            # resolution. Keep the changed source unambiguously newer than the
+            # generated output instead of depending on test execution crossing
+            # a timestamp tick.
+            changed_time = output.stat().st_mtime_ns + 2_000_000_000
+            os.utime(input_file, ns=(changed_time, changed_time))
             build_project(build, "fixture_logical_copy")
             self.assertEqual(output.read_text(), "second")
             output.unlink()
@@ -194,9 +274,23 @@ iree_generated_files(NAME copy GENERATOR copy_tool
         ) as temporary:
             root = Path(temporary)
             source = root / "source"
-            # Stress Windows object paths while leaving room for the generator's
-            # configuration directory and a complete object-name digest.
-            build = root / "build directory for an embedded CI workspace"
+            # Hold the complete-digest object at a stable limit below legacy
+            # MSVC MAX_PATH. This preserves room for a multi-config generator's
+            # configuration directory without depending on the ambient
+            # temporary root length: `\\RelWithDebInfo` and the terminating NUL
+            # still fit beneath the 260-code-unit limit.
+            object_path_budget = 240
+            object_path_suffix = Path(
+                "owned/package/CMakeFiles/"
+                "fixture_package_library_with_generated_inputs_and_package_identity.dir"
+            ) / ("0" * 32 + ".obj")
+            build_name = "embedded workspace"
+            padding_length = object_path_budget - len(
+                str(root / build_name / object_path_suffix)
+            )
+            self.assertGreaterEqual(padding_length, 0)
+            build = root / (build_name + "x" * padding_length)
+            self.assertEqual(len(str(build / object_path_suffix)), object_path_budget)
             shutil.copytree(FIXTURE, source)
             for template in source.rglob("BUILD.bazel.in"):
                 template.rename(template.with_suffix(""))
@@ -253,7 +347,14 @@ iree_generated_files(NAME copy GENERATOR copy_tool
             check(7)
             # Source libraries precede native defaults regardless of whether
             # Ninja places the link inputs in a response file.
-            if os.environ["IREE_TEST_CMAKE_GENERATOR"].startswith("Ninja"):
+            # CMAKE_NINJA_FORCE_RESPONSE_FILE also moves archive members into a
+            # response file. Apple ar treats @file as a literal member path, so
+            # forcing that unsupported toolchain combination would fail before
+            # the final-link ordering exercised here.
+            if (
+                os.environ["IREE_TEST_CMAKE_GENERATOR"].startswith("Ninja")
+                and sys.platform != "darwin"
+            ):
                 configure_project(host, build, "-DCMAKE_NINJA_FORCE_RESPONSE_FILE=ON")
                 check(7)
                 configure_project(host, build, "-UCMAKE_NINJA_FORCE_RESPONSE_FILE")

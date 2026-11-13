@@ -8,6 +8,7 @@
 #define LOOM_TRANSFORMS_PIPELINE_CHANNEL_MATERIALIZATION_H_
 
 #include "loom/analysis/channel_plan.h"
+#include "loom/rewrite/remap.h"
 #include "loom/rewrite/rewriter.h"
 #include "loom/util/cfg_graph.h"
 
@@ -23,8 +24,14 @@ typedef struct loom_channel_materialization_instance_t {
   loom_func_like_t function;
   // Released domain whose ordinals match the source plan exactly.
   loom_local_value_domain_t value_domain;
-  // Projected actions and exits, borrowing the source membership table.
+  // Projected actions and exits, borrowing source membership and admission
+  // ordinal tables. Admission values resolve through this instance's domain.
   loom_channel_plan_t plan;
+  // Original CFG topology with instance block, terminator, and selector IDs.
+  // Adjacency and traversal arrays borrow the immutable source graph.
+  loom_cfg_graph_t graph;
+  // Clone-owned SSA correspondence, independent of the active ordinal domain.
+  loom_ir_remap_t remap;
 } loom_channel_materialization_instance_t;
 
 // Clones a selected callable occurrence before consuming channel rewrites.
@@ -34,9 +41,11 @@ typedef struct loom_channel_materialization_instance_t {
 // channel analysis. It leaves the original definition and domain untouched.
 //
 // Release the source domain before restoring the instance's domain. The
-// source membership table and protocol identities outlive materialization.
+// source ordinal tables and protocol identities outlive materialization.
 // Ordinal-indexed selections keep their correspondence; action and return
-// pointers refer only to the clone. Initial runtime state, other selected SSA
+// pointers refer only to the clone. The CFG retains its original topology;
+// observer translates additional selected effect sites during the same clone.
+// Initial runtime state, other selected SSA
 // operands and dependencies of physical carrier types must use the instance's
 // value_ids at their original ordinals. Cloned source types already refer to
 // the corresponding cloned values.
@@ -44,7 +53,9 @@ typedef struct loom_channel_materialization_instance_t {
 // this helper neither retargets callers nor selects transport mechanics.
 iree_status_t loom_channel_materialization_clone(
     loom_rewriter_t* rewriter, loom_func_like_t source_function,
-    const loom_channel_plan_t* source_plan, loom_symbol_ref_t target_symbol,
+    const loom_channel_plan_t* source_plan,
+    const loom_cfg_graph_t* source_graph, loom_symbol_ref_t target_symbol,
+    loom_ir_clone_observer_t observer,
     loom_channel_materialization_instance_t* out_instance);
 
 // Emission mechanics for one already selected channel realization. Selection

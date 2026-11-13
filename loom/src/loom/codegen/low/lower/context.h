@@ -127,6 +127,10 @@ struct loom_low_lower_context_t {
   loom_func_like_t source_function;
   // Caller-owned lowering options.
   const loom_low_lower_options_t* options;
+  // Export identity applied to otherwise-unscoped lowering diagnostics.
+  loom_diagnostic_export_scope_t diagnostic_scope;
+  // Forwarding emitter borrowing |diagnostic_scope|.
+  iree_diagnostic_emitter_t diagnostic_emitter;
   // Target-low lowering policy selected by the caller.
   const loom_low_lower_policy_t* policy;
   // Descriptor set selected by source legality.
@@ -176,6 +180,11 @@ struct loom_low_lower_context_t {
   // Emitted target-low function operation, or NULL before emission starts.
   loom_op_t* low_func_op;
 };
+
+// Scopes the context's diagnostic emitter to its selected target export.
+// Call once after initializing a context that has lowering options.
+void loom_low_lower_context_scope_diagnostics(
+    loom_low_lower_context_t* context);
 
 // Returns the source function name used in source-to-low diagnostics/reports.
 iree_string_view_t loom_low_lower_context_function_name(

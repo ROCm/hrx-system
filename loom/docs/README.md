@@ -1,8 +1,8 @@
 # Loom documentation
 
-`loom/docs/` owns the Loom programming guide and the inputs used to assemble
-its published reference. It is documentation build infrastructure, not a
-shipped Loom command-line surface.
+`loom/docs/` owns the Loom website, including its programming guide, workflows,
+serving documentation, and generated reference. It is documentation build
+infrastructure, not a shipped Loom command-line surface.
 
 Add the optional, pinned documentation toolchain to the repository environment:
 

@@ -1,0 +1,96 @@
+// RUN: pass canonicalize,cse,dce
+// Loop-local array storage remains addressable across a noinline publication;
+// a separate scalar is passed to a mutator and reread after the call.
+[[loom::noinline]] static unsigned increment(unsigned* value) {
+  return ++*value;
+}
+
+[[loom::noinline]] static void publish(unsigned* output, unsigned value) {
+  *output = value;
+}
+
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void call_lifetimes_kernel(const unsigned* parameters, unsigned* output) {
+  for (unsigned index = 0; index < parameters[0]; ++index) {
+    // Dynamic indexing keeps an unpassed array addressable across a call.
+    unsigned values[2] = {index, index + 7};
+    publish(output + index, values[parameters[1] & 1]);
+    // A passed scalar is read and written by the callee before it returns.
+    unsigned counter = index;
+    unsigned updated = increment(&counter);
+    output[parameters[0] + index] = updated + counter;
+  }
+}
+// ----
+kernel.def @call_lifetimes_kernel() {
+  %2 = index.constant 1 : index
+  kernel.launch.config workgroups(%2, %2, %2) workgroup_size(%2, %2, %2) : index
+} launch(%parameters: buffer, %output: buffer) {
+  %index$10 = scalar.constant 0 : i32
+  %index$13 = scf.while(%index = %index$10 : i32) -> (i32) {
+    %99 = index.constant 0 : offset
+    %22 = buffer.view %parameters[%99] : buffer -> view<1xi32>
+    %23 = view.load<root_in_bounds> %22[0] : view<1xi32> -> i32
+    %24 = scalar.cmpi ult, %index, %23 : i32
+    scf.condition %24, %index : i1, i32
+  } do(%index$12: i32) {
+    %25 = index.constant 8 : offset
+    %values_storage = buffer.alloca<private> align(4) %25 : buffer
+    %values_storage_byte_offset = index.constant 0 : offset
+    %values_view = buffer.view %values_storage[%values_storage_byte_offset] : buffer -> view<2xi32>
+    %29 = index.constant 0 : index
+    view.store %index$12, %values_view[%29] : i32, view<2xi32>
+    %30 = scalar.constant 7 : i32
+    %31 = scalar.addi %index$12, %30 : i32
+    %32 = index.constant 1 : index
+    view.store %31, %values_view[%32] : i32, view<2xi32>
+    %33 = scalar.extui %index$12 : i32 to i64
+    %102 = scalar.constant 2 : i64
+    %103 = scalar.shli %33, %102 : i64
+    %38 = scalar.assume %103 [range(%103, 0, 9223372036854775807)] : i64
+    %39 = index.cast %38 : i64 to offset
+    %97 = index.constant 4 : offset
+    %48 = buffer.view %parameters[%97] : buffer -> view<1xi32>
+    %49 = view.load<root_in_bounds> %48[0] : view<1xi32> -> i32
+    %50 = scalar.constant 1 : i32
+    %51 = scalar.andi %49, %50 : i32
+    %52 = scalar.extui %51 : i32 to i64
+    %53 = scalar.assume %52 [range(%52, 0, 1)] : i64
+    %54 = index.cast %53 : i64 to index
+    %55 = view.load %values_view[%54] : view<2xi32> -> i32
+    func.call @publish(%output, %39, %55) : (buffer, offset, i32)
+    %counter_storage = buffer.alloca<private> align(4) %97 : buffer
+    %counter_view = buffer.view %counter_storage[%values_storage_byte_offset] : buffer -> view<1xi32>
+    view.store %index$12, %counter_view[0] : i32, view<1xi32>
+    %updated = func.call @increment(%counter_storage, %values_storage_byte_offset) : (buffer, offset) -> (i32)
+    %counter = view.load %counter_view[0] : view<1xi32> -> i32
+    %62 = scalar.addi %updated, %counter : i32
+    %71 = buffer.view %parameters[%values_storage_byte_offset] : buffer -> view<1xi32>
+    %72 = view.load<root_in_bounds> %71[0] : view<1xi32> -> i32
+    %73 = scalar.addi %72, %index$12 : i32
+    %74 = scalar.extui %73 : i32 to i64
+    %101 = scalar.shli %74, %102 : i64
+    %79 = scalar.assume %101 [range(%101, 0, 9223372036854775807)] : i64
+    %80 = index.cast %79 : i64 to offset
+    %81 = buffer.view %output[%80] : buffer -> view<1xi32>
+    view.store<root_in_bounds> %62, %81[0] : i32, view<1xi32>
+    %index$83 = scalar.addi %index$12, %50 : i32
+    scf.yield %index$83 : i32
+  }
+  kernel.return
+}
+
+func.def noinline @publish(%output: buffer, %output_byte_offset: offset, %value: i32) {
+  %87 = buffer.view %output[%output_byte_offset] : buffer -> view<1xi32>
+  view.store<root_in_bounds> %value, %87[0] : i32, view<1xi32>
+  func.return
+}
+
+func.def noinline @increment(%value: buffer, %value_byte_offset: offset) -> (i32) {
+  %91 = buffer.view %value[%value_byte_offset] : buffer -> view<1xi32>
+  %92 = view.load<root_in_bounds> %91[0] : view<1xi32> -> i32
+  %93 = scalar.constant 1 : i32
+  %94 = scalar.addi %92, %93 : i32
+  view.store<root_in_bounds> %94, %91[0] : i32, view<1xi32>
+  func.return %94 : i32
+}

@@ -316,6 +316,9 @@ static bool amdf_gpu_kfd_user_queue_select_plan(
   amdf_gpu_kfd_user_queue_plans_t plans;
   amdf_gpu_kfd_target_user_queue_plans_initialize(
       &device->topology, device->page_size, device->cache_line_size, &plans);
+  const amdf_queue_family_placement_info_t placement =
+      amdf_gpu_kfd_target_user_queue_placement(
+          &device->topology, device->page_size, create_info->command_type);
   for (uint32_t i = 0; i < plans.count; ++i) {
     const amdf_gpu_kfd_user_queue_plan_t* plan = &plans.values[i];
     const amdf_gpu_queue_family_properties_t* family = &plan->family;
@@ -327,7 +330,7 @@ static bool amdf_gpu_kfd_user_queue_select_plan(
          ~family->user_queue_capabilities) == 0 &&
         (create_info->placement == AMDF_QUEUE_PLACEMENT_DEFAULT ||
          (create_info->placement <= AMDF_QUEUE_PLACEMENT_DEVICE_LOCAL &&
-          (family->placement_capabilities & (1u << create_info->placement)) !=
+          (placement.placement_capabilities & (1u << create_info->placement)) !=
               0)) &&
         create_info->roles == family->roles &&
         (create_info->ring_byte_length == 0 ||
@@ -345,9 +348,14 @@ static bool amdf_gpu_kfd_user_queue_select_plan(
                ~KFD_IOC_ALLOC_MEM_FLAGS_GTT) |
               KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_PUBLIC |
               KFD_IOC_ALLOC_MEM_FLAGS_UNCACHED;
+          const bool header_commit =
+              family->command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL;
           out_plan->ring.host_publish_executor =
-              AMDF_CACHE_TRANSITION_EXECUTOR_HOST_API;
-          out_plan->ring.host_publish_fence = AMDF_HOST_CACHE_FENCE_NONE;
+              header_commit ? AMDF_CACHE_TRANSITION_EXECUTOR_HOST_DIRECT
+                            : AMDF_CACHE_TRANSITION_EXECUTOR_HOST_API;
+          out_plan->ring.host_publish_fence =
+              header_commit ? AMDF_HOST_CACHE_FENCE_X86_SFENCE
+                            : AMDF_HOST_CACHE_FENCE_NONE;
         }
       }
       if (create_info->ring_byte_length != 0) {
@@ -364,6 +372,28 @@ static bool amdf_gpu_kfd_user_queue_select_plan(
     }
   }
   return false;
+}
+
+// Native plans provide page-aligned storage in complete 64-byte blocks.
+// Initialize final packet bytes before activation, without reading the mapping
+// or zeroing an AQL header before replacing it with INVALID.
+static void amdf_gpu_kfd_user_queue_initialize_ring(
+    const amdf_gpu_umd_user_queue_t* queue) {
+  // AQL type 1 is INVALID; zero would admit a vendor packet.
+  const uint32_t primary_header = queue->plan.aql.xcc_count ? 1u : 0u;
+  uint64_t first_word = 0;
+  memcpy(&first_word, &primary_header, sizeof(primary_header));
+  const size_t primary_begin = queue->plan.ring.primary_byte_offset;
+  const size_t primary_end =
+      primary_begin + queue->plan.ring.primary_byte_length;
+  volatile uint64_t* words = (volatile uint64_t*)queue->ring.host_pointer;
+  for (size_t offset = 0; offset < queue->plan.ring.storage.byte_length;
+       offset += 64, words += 8) {
+    words[0] = offset >= primary_begin && offset < primary_end ? first_word : 0;
+    for (uint32_t i = 1; i < 8; ++i) {
+      words[i] = 0;
+    }
+  }
 }
 
 amdf_status_t amdf_gpu_umd_user_queue_create(
@@ -442,7 +472,7 @@ amdf_status_t amdf_gpu_umd_user_queue_create(
         &queue->retirement_flush_trigger);
   }
   if (amdf_status_is_ok(status)) {
-    memset(queue->ring.host_pointer, 0, queue->plan.ring.storage.byte_length);
+    amdf_gpu_kfd_user_queue_initialize_ring(queue);
     memset(queue->control.host_pointer, 0,
            queue->plan.control.storage.byte_length);
   }
@@ -484,18 +514,14 @@ amdf_status_t amdf_gpu_umd_user_queue_create(
     inactive_signal->event_mailbox_address =
         create_info->inactive_event.mailbox_address;
     inactive_signal->event_id = create_info->inactive_event.interrupt_context;
-    for (size_t offset = 0; offset < queue->plan.ring.primary_byte_length;
-         offset += 64) {
-      // Zero is a vendor packet, not an empty AQL slot.
-      *(uint32_t*)((uint8_t*)queue->ring.host_pointer + offset) = 1;
-    }
   }
 
   // AQL INVALID headers must reach the ring before native queue activation.
-  // This also publishes initial PM4/SDMA padding without reading it back.
+  // There is no executable header guarding these initial stores yet. This
+  // cold release also publishes initial PM4/SDMA padding.
   if (amdf_status_is_ok(status) &&
-      queue->plan.ring.host_publish_executor ==
-          AMDF_CACHE_TRANSITION_EXECUTOR_HOST_API) {
+      queue->plan.ring.placement == AMDF_QUEUE_PLACEMENT_DEVICE_LOCAL &&
+      !device->topology.integrated) {
     status = queue->native_api->flush_host_writes(queue->native_api->user_data,
                                                   device);
   }

@@ -1,0 +1,345 @@
+// RUN: roundtrip
+unsigned captureless(unsigned value) {
+  return [](unsigned input) { return input + 1u; }(value);
+}
+
+unsigned value_capture(unsigned value) {
+  auto add = [value](unsigned input) { return value + input; };
+  return add(2u);
+}
+
+unsigned mutable_capture(unsigned value) {
+  auto increment = [value]() mutable { return ++value; };
+  return increment() + increment();
+}
+
+unsigned reference_capture(unsigned value) {
+  auto add = [&value](unsigned amount) { value += amount; };
+  add(3u);
+  return value;
+}
+
+unsigned init_capture(unsigned value) {
+  auto scale = [factor = value * 2u](unsigned input) {
+    return factor * input;
+  };
+  return scale(3u);
+}
+
+unsigned generic_capture(unsigned value) {
+  auto add = [value](auto input) { return value + input; };
+  return add(4u);
+}
+
+// ----
+func.def public @captureless(%value: i32) -> (i32) {
+  %2 = func.call pure @operator_call_value(%value) : (i32) -> (i32)
+  func.return %2 : i32
+}
+
+func.def public @value_capture(%value: i32) -> (i32) {
+  %5 = scalar.constant 2 : i32
+  %6 = func.call pure @operator_call_value_1(%value, %5) : (i32, i32) -> (i32)
+  func.return %6 : i32
+}
+
+func.def public @mutable_capture(%value: i32) -> (i32) {
+  %9, %increment_value$10 = func.call pure @operator_call_value_2(%value) : (i32) -> (i32, i32)
+  %11, %increment_value$12 = func.call pure @operator_call_value_2(%increment_value$10) : (i32) -> (i32, i32)
+  %13 = scalar.addi %9, %11 : i32
+  func.return %13 : i32
+}
+
+func.def public @reference_capture(%value$14: i32) -> (i32) {
+  %16 = index.constant 4 : offset
+  %value_storage = buffer.alloca<private> align(4) %16 : buffer
+  %value_storage_byte_offset = index.constant 0 : offset
+  %value_view = buffer.view %value_storage[%value_storage_byte_offset] : buffer -> view<1xi32>
+  view.store %value$14, %value_view[0] : i32, view<1xi32>
+  %20 = scalar.constant 3 : i32
+  func.call @operator_call_value_3(%value_storage, %value_storage_byte_offset, %20) : (buffer, offset, i32)
+  %value$21 = view.load %value_view[0] : view<1xi32> -> i32
+  func.return %value$21 : i32
+}
+
+func.def public @init_capture(%value: i32) -> (i32) {
+  %24 = scalar.constant 2 : i32
+  %scale_factor = scalar.muli %value, %24 : i32
+  %26 = scalar.constant 3 : i32
+  %27 = func.call pure @operator_call_value_4(%scale_factor, %26) : (i32, i32) -> (i32)
+  func.return %27 : i32
+}
+
+func.def public @generic_capture(%value: i32) -> (i32) {
+  %30 = scalar.constant 4 : i32
+  %31 = func.call pure @operator_call_unsigned_int_value(%value, %30) : (i32, i32) -> (i32)
+  func.return %31 : i32
+}
+
+func.def @operator_call_value(%input: i32) -> (i32) {
+  %34 = scalar.constant 1 : i32
+  %35 = scalar.addi %input, %34 : i32
+  func.return %35 : i32
+}
+
+func.def @operator_call_value_1(%this_value: i32, %input: i32) -> (i32) {
+  %39 = scalar.addi %this_value, %input : i32
+  func.return %39 : i32
+}
+
+func.def @operator_call_value_2(%this_value: i32) -> (i32, i32) {
+  %43 = scalar.constant 1 : i32
+  %value = scalar.addi %this_value, %43 : i32
+  func.return %value, %value : i32, i32
+}
+
+func.def @operator_call_value_3(%this_value: buffer, %this_value_byte_offset: offset, %amount: i32) {
+  %48 = buffer.view %this_value[%this_value_byte_offset] : buffer -> view<1xi32>
+  %49 = view.load<root_in_bounds> %48[0] : view<1xi32> -> i32
+  %50 = scalar.addi %49, %amount : i32
+  %51 = buffer.view %this_value[%this_value_byte_offset] : buffer -> view<1xi32>
+  view.store<root_in_bounds> %50, %51[0] : i32, view<1xi32>
+  func.return
+}
+
+func.def @operator_call_value_4(%this_factor: i32, %input: i32) -> (i32) {
+  %55 = scalar.muli %this_factor, %input : i32
+  func.return %55 : i32
+}
+
+func.def @operator_call_unsigned_int_value(%this_value: i32, %input: i32) -> (i32) {
+  %59 = scalar.addi %this_value, %input : i32
+  func.return %59 : i32
+}
+
+// ====
+// A reference init-capture preserves the identity of its initializer instead
+// of copying the current value into the closure.
+void reference_init_capture(int value) {
+  auto add = [&alias = value](int amount) { alias += amount; };
+  add(5);
+}
+
+// ----
+func.def public @reference_init_capture(%value: i32) {
+  %1 = index.constant 4 : offset
+  %value_storage = buffer.alloca<private> align(4) %1 : buffer
+  %value_storage_byte_offset = index.constant 0 : offset
+  %value_view = buffer.view %value_storage[%value_storage_byte_offset] : buffer -> view<1xi32>
+  view.store %value, %value_view[0] : i32, view<1xi32>
+  %5 = scalar.constant 5 : i32
+  func.call @operator_call_value(%value_storage, %value_storage_byte_offset, %5) : (buffer, offset, i32)
+  func.return
+}
+
+func.def @operator_call_value(%this_alias: buffer, %this_alias_byte_offset: offset, %amount: i32) {
+  %9 = buffer.view %this_alias[%this_alias_byte_offset] : buffer -> view<1xi32>
+  %10 = view.load<root_in_bounds> %9[0] : view<1xi32> -> i32
+  %11 = scalar.addi %10, %amount : i32
+  %12 = buffer.view %this_alias[%this_alias_byte_offset] : buffer -> view<1xi32>
+  view.store<root_in_bounds> %11, %12[0] : i32, view<1xi32>
+  func.return
+}
+
+// ====
+// A captured this pointer retains the identity of its outer object. Unqualified
+// outer members in operator() project through that pointer.
+struct Owner {
+  static constexpr int bias = 7;
+  int value;
+
+  int add(int amount) {
+    auto apply = [this](int input) { return bias + value + input; };
+    return apply(amount);
+  }
+};
+
+int this_capture(int owner_value) {
+  Owner owner{owner_value};
+  return owner.add(6);
+}
+
+// ----
+func.def public @this_capture(%owner_value: i32) -> (i32) {
+  %2 = index.constant 4 : offset
+  %owner_storage = buffer.alloca<private> align(4) %2 : buffer
+  %owner_storage_byte_offset = index.constant 0 : offset
+  %owner_view = buffer.view %owner_storage[%owner_storage_byte_offset] : buffer -> view<4xi8>
+  %6 = index.constant 0 : offset
+  %7 = index.add %owner_storage_byte_offset, %6 : offset
+  %8 = index.assume %7 [range(%7, 0, 0)] : offset
+  %9 = buffer.view %owner_storage[%8] : buffer -> view<1xi32>
+  view.store %owner_value, %9[0] : i32, view<1xi32>
+  %10 = scalar.constant 6 : i32
+  %11 = func.call readonly @Owner__add_storage(%owner_storage, %owner_storage_byte_offset, %10) : (buffer, offset, i32) -> (i32)
+  func.return %11 : i32
+}
+
+func.def @Owner__add_storage(%this: buffer, %this_byte_offset: offset, %amount: i32) -> (i32) {
+  %16 = func.call readonly @Owner__operator_call_value(%this, %this_byte_offset, %amount) : (buffer, offset, i32) -> (i32)
+  func.return %16 : i32
+}
+
+func.def @Owner__operator_call_value(%this___this: buffer, %this___this_byte_offset: offset, %input: i32) -> (i32) {
+  %21 = scalar.constant 7 : i32
+  %22 = index.constant 0 : offset
+  %23 = index.add %this___this_byte_offset, %22 : offset
+  %24 = buffer.view %this___this[%23] : buffer -> view<1xi32>
+  %value = view.load<root_in_bounds> %24[0] : view<1xi32> -> i32
+  %26 = scalar.addi %21, %value : i32
+  %27 = scalar.addi %26, %input : i32
+  func.return %27 : i32
+}
+
+// ====
+// Default captures produce the same concrete value and reference fields as
+// their explicit spellings after frontend capture analysis.
+unsigned default_value_capture(unsigned value) {
+  return [=](unsigned input) { return value + input; }(2u);
+}
+
+void default_reference_capture(unsigned value) {
+  [&] { ++value; }();
+}
+
+// ----
+func.def public @default_value_capture(%value: i32) -> (i32) {
+  %2 = scalar.constant 2 : i32
+  %3 = func.call pure @operator_call_value(%value, %2) : (i32, i32) -> (i32)
+  func.return %3 : i32
+}
+
+func.def public @default_reference_capture(%value: i32) {
+  %5 = index.constant 4 : offset
+  %value_storage = buffer.alloca<private> align(4) %5 : buffer
+  %value_storage_byte_offset = index.constant 0 : offset
+  %value_view = buffer.view %value_storage[%value_storage_byte_offset] : buffer -> view<1xi32>
+  view.store %value, %value_view[0] : i32, view<1xi32>
+  func.call @operator_call_value_1(%value_storage, %value_storage_byte_offset) : (buffer, offset)
+  func.return
+}
+
+func.def @operator_call_value(%this_value: i32, %input: i32) -> (i32) {
+  %12 = scalar.addi %this_value, %input : i32
+  func.return %12 : i32
+}
+
+func.def @operator_call_value_1(%this_value: buffer, %this_value_byte_offset: offset) {
+  %15 = buffer.view %this_value[%this_value_byte_offset] : buffer -> view<1xi32>
+  %16 = view.load<root_in_bounds> %15[0] : view<1xi32> -> i32
+  %17 = scalar.constant 1 : i32
+  %18 = scalar.addi %16, %17 : i32
+  %19 = buffer.view %this_value[%this_value_byte_offset] : buffer -> view<1xi32>
+  view.store<root_in_bounds> %18, %19[0] : i32, view<1xi32>
+  func.return
+}
+
+// ====
+// Capture initializers execute in source order while the resulting values are
+// assembled by semantic field identity.
+unsigned ordered_init_capture(unsigned value) {
+  unsigned sequence = value;
+  auto combine = [left = sequence++, right = sequence++](unsigned input) {
+    return left * 100u + right * 10u + input;
+  };
+  return combine(sequence);
+}
+
+// ----
+func.def public @ordered_init_capture(%value: i32) -> (i32) {
+  %2 = scalar.constant 1 : i32
+  %sequence$3 = scalar.addi %value, %2 : i32
+  %4 = scalar.constant 1 : i32
+  %sequence$5 = scalar.addi %sequence$3, %4 : i32
+  %6 = func.call pure @operator_call_value(%value, %sequence$3, %sequence$5) : (i32, i32, i32) -> (i32)
+  func.return %6 : i32
+}
+
+func.def @operator_call_value(%this_left: i32, %this_right: i32, %input: i32) -> (i32) {
+  %11 = scalar.constant 100 : i32
+  %12 = scalar.muli %this_left, %11 : i32
+  %13 = scalar.constant 10 : i32
+  %14 = scalar.muli %this_right, %13 : i32
+  %15 = scalar.addi %12, %14 : i32
+  %16 = scalar.addi %15, %input : i32
+  func.return %16 : i32
+}
+
+// ====
+// A forwarding-reference specialization transports the closure value into the
+// first helper. Recursive calls reference-collapse the named parameter to an
+// lvalue reference while preserving the same captured owner identity. A stable
+// pointer captured by reference travels as its two-component value alongside
+// ordinary scalar reference captures, without private pointer-object storage.
+template <int Index, class Function>
+static void apply(Function&& function) {
+  function(Index);
+  if constexpr (Index < 2) {
+    apply<Index + 1>(function);
+  }
+}
+
+int forwarding_recursive(const int* input, int index) {
+  int sum = 0;
+  apply<0>([&](auto value) { sum += input[index + value]; });
+  return sum;
+}
+
+// ----
+func.def public @forwarding_recursive(%input: buffer, %input_byte_offset: offset, %index: i32) -> (i32) {
+  %4 = index.constant 4 : offset
+  %index_storage = buffer.alloca<private> align(4) %4 : buffer
+  %index_storage_byte_offset = index.constant 0 : offset
+  %index_view = buffer.view %index_storage[%index_storage_byte_offset] : buffer -> view<1xi32>
+  view.store %index, %index_view[0] : i32, view<1xi32>
+  %8 = index.constant 4 : offset
+  %sum_storage = buffer.alloca<private> align(4) %8 : buffer
+  %sum_storage_byte_offset = index.constant 0 : offset
+  %sum_view = buffer.view %sum_storage[%sum_storage_byte_offset] : buffer -> view<1xi32>
+  %12 = scalar.constant 0 : i32
+  view.store %12, %sum_view[0] : i32, view<1xi32>
+  func.call @apply_0__lambda_auto__type_param_0__0___const_(%sum_storage, %sum_storage_byte_offset, %input, %input_byte_offset, %index_storage, %index_storage_byte_offset) : (buffer, offset, buffer, offset, buffer, offset)
+  %sum = view.load %sum_view[0] : view<1xi32> -> i32
+  func.return %sum : i32
+}
+
+func.def @apply_0__lambda_auto__type_param_0__0___const_(%function_sum: buffer, %function_sum_byte_offset: offset, %function_input: buffer, %function_input_byte_offset: offset, %function_index: buffer, %function_index_byte_offset: offset) {
+  %20 = scalar.constant 0 : i32
+  func.call @operator_call_int_value(%function_sum, %function_sum_byte_offset, %function_input, %function_input_byte_offset, %function_index, %function_index_byte_offset, %20) : (buffer, offset, buffer, offset, buffer, offset, i32)
+  func.call @apply_1__lambda_auto__type_param_0__0___const__(%function_sum, %function_sum_byte_offset, %function_input, %function_input_byte_offset, %function_index, %function_index_byte_offset) : (buffer, offset, buffer, offset, buffer, offset)
+  func.return
+}
+
+func.def @operator_call_int_value(%this_sum: buffer, %this_sum_byte_offset: offset, %this_input: buffer, %this_input_byte_offset: offset, %this_index: buffer, %this_index_byte_offset: offset, %value: i32) {
+  %28 = buffer.view %this_index[%this_index_byte_offset] : buffer -> view<1xi32>
+  %index = view.load<root_in_bounds> %28[0] : view<1xi32> -> i32
+  %30 = scalar.addi %index, %value : i32
+  %31 = scalar.extsi %30 : i32 to i64
+  %32 = scalar.constant 4 : i64
+  %33 = scalar.muli %31, %32 : i64
+  %34 = index.cast %this_input_byte_offset : offset to i64
+  %35 = scalar.addi %34, %33 : i64
+  %36 = scalar.assume %35 [range(%35, 0, 9223372036854775807)] : i64
+  %37 = index.cast %36 : i64 to offset
+  %38 = buffer.view %this_input[%37] : buffer -> view<1xi32>
+  %39 = view.load<root_in_bounds> %38[0] : view<1xi32> -> i32
+  %40 = buffer.view %this_sum[%this_sum_byte_offset] : buffer -> view<1xi32>
+  %41 = view.load<root_in_bounds> %40[0] : view<1xi32> -> i32
+  %42 = scalar.addi %41, %39 : i32
+  %43 = buffer.view %this_sum[%this_sum_byte_offset] : buffer -> view<1xi32>
+  view.store<root_in_bounds> %42, %43[0] : i32, view<1xi32>
+  func.return
+}
+
+func.def @apply_1__lambda_auto__type_param_0__0___const__(%function_sum: buffer, %function_sum_byte_offset: offset, %function_input: buffer, %function_input_byte_offset: offset, %function_index: buffer, %function_index_byte_offset: offset) {
+  %50 = scalar.constant 1 : i32
+  func.call @operator_call_int_value(%function_sum, %function_sum_byte_offset, %function_input, %function_input_byte_offset, %function_index, %function_index_byte_offset, %50) : (buffer, offset, buffer, offset, buffer, offset, i32)
+  func.call @apply_2__lambda_auto__type_param_0__0___const__(%function_sum, %function_sum_byte_offset, %function_input, %function_input_byte_offset, %function_index, %function_index_byte_offset) : (buffer, offset, buffer, offset, buffer, offset)
+  func.return
+}
+
+func.def @apply_2__lambda_auto__type_param_0__0___const__(%function_sum: buffer, %function_sum_byte_offset: offset, %function_input: buffer, %function_input_byte_offset: offset, %function_index: buffer, %function_index_byte_offset: offset) {
+  %57 = scalar.constant 2 : i32
+  func.call @operator_call_int_value(%function_sum, %function_sum_byte_offset, %function_input, %function_input_byte_offset, %function_index, %function_index_byte_offset, %57) : (buffer, offset, buffer, offset, buffer, offset, i32)
+  func.return
+}

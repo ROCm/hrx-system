@@ -89,6 +89,23 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "execution_scope",
+    srcs = ["execution_scope.c"],
+    hdrs = ["execution_scope.h"],
+    deps = [
+        ":facts_builder",
+        ":provider",
+        ":resolved_target",
+        "//loom/src/loom/analysis:symbol_facts",
+        "//loom/src/loom/analysis:symbol_references",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/target",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
     name = "callgraph_specialization",
     srcs = ["callgraph_specialization.c"],
     hdrs = ["callgraph_specialization.h"],
@@ -99,6 +116,7 @@ loom_cc_library(
         ":pass_environment",
         ":provider",
         "//loom/src/loom/analysis:symbol_facts",
+        "//loom/src/loom/analysis:symbol_liveness",
         "//loom/src/loom/analysis:symbol_references",
         "//loom/src/loom/codegen/low:loop_execution",
         "//loom/src/loom/codegen/low:memory_access",

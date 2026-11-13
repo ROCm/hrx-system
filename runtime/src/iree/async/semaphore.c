@@ -189,8 +189,8 @@ static iree_status_t iree_async_semaphore_default_signal(
 }
 
 IREE_API_EXPORT uint8_t iree_async_semaphore_query_frontier(
-    iree_async_semaphore_t* semaphore, iree_async_frontier_t* out_frontier,
-    uint8_t capacity) {
+    iree_async_semaphore_t* semaphore, uint8_t capacity,
+    iree_async_frontier_t* out_frontier) {
   iree_slim_mutex_lock(&semaphore->mutex);
   uint8_t actual_count = semaphore->frontier->entry_count;
   if (out_frontier != NULL) {
@@ -863,18 +863,18 @@ IREE_API_EXPORT iree_status_t iree_async_semaphore_multi_wait(
 
   // Fast path: single semaphore. The timepoint machinery is overkill.
   if (count == 1) {
-    // Check failure before value — the vtable query may encode failure as a
-    // high sentinel value that would falsely satisfy the >= check.
+    // Observe failure after the value so a concurrently published failure
+    // sentinel cannot satisfy the wait without its associated status.
+    uint64_t current_value = (uint64_t)iree_atomic_load(
+        &semaphores[0]->timeline_value, iree_memory_order_acquire);
     iree_status_t failure = (iree_status_t)iree_atomic_load(
         &semaphores[0]->failure_status, iree_memory_order_acquire);
     if (!iree_status_is_ok(failure)) {
       IREE_TRACE_ZONE_END(z0);
-      return iree_status_from_code(iree_status_code(failure));
+      return iree_status_clone(failure);
     }
 
     // Atomic check for immediate satisfaction.
-    uint64_t current_value = (uint64_t)iree_atomic_load(
-        &semaphores[0]->timeline_value, iree_memory_order_acquire);
     if (current_value >= minimum_values[0]) {
       IREE_TRACE_ZONE_END(z0);
       return iree_ok_status();
@@ -901,7 +901,7 @@ IREE_API_EXPORT iree_status_t iree_async_semaphore_multi_wait(
           &semaphores[i]->failure_status, iree_memory_order_acquire);
       if (!iree_status_is_ok(failure)) {
         IREE_TRACE_ZONE_END(z0);
-        return iree_status_from_code(iree_status_code(failure));
+        return iree_status_clone(failure);
       }
       if (current_value >= minimum_values[i]) {
         ++satisfied_count;
@@ -992,14 +992,12 @@ IREE_API_EXPORT iree_status_t iree_async_semaphore_multi_wait(
       }
     }
 
-    // Check for failure status even if we didn't time out. Returns the failure
-    // status code (not the full status) to match the fast-path behavior and the
-    // HAL convention of following up with a query to get the full status.
+    // Preserve the full failure independently of the callback's owned clone.
     if (iree_status_is_ok(status)) {
       iree_status_t failure = (iree_status_t)iree_atomic_load(
           &state.failure_status, iree_memory_order_acquire);
       if (!iree_status_is_ok(failure)) {
-        status = iree_status_from_code(iree_status_code(failure));
+        status = iree_status_clone(failure);
       }
     }
   }
@@ -1022,7 +1020,7 @@ IREE_API_EXPORT iree_status_t iree_async_semaphore_multi_wait(
     }
   }
 
-  // Free captured failure status clone (we extracted the code above).
+  // Free the callback-owned status after every dispatched callback has joined.
   iree_status_t captured_failure = (iree_status_t)iree_atomic_load(
       &state.failure_status, iree_memory_order_acquire);
   if (!iree_status_is_ok(captured_failure)) {

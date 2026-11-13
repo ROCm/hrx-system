@@ -479,7 +479,7 @@ static iree_status_t loom_amdgpu_legalize_static_vector_shape(
   return iree_ok_status();
 }
 
-static iree_status_t loom_amdgpu_legalize_vector_shuffle(
+static iree_status_t loom_amdgpu_legalize_vector_permutation(
     const loom_target_legalizer_entry_t* entry,
     loom_target_legalization_context_t* context, loom_op_t* op,
     loom_target_legalizer_result_t* out_result) {
@@ -492,15 +492,20 @@ static iree_status_t loom_amdgpu_legalize_vector_shuffle(
     return iree_ok_status();
   }
   if (context->mode != LOOM_TARGET_LEGALIZATION_MODE_FINAL ||
-      loom_amdgpu_vector_shuffle_can_lower(context->module,
-                                           context->descriptor_set, op)) {
+      loom_amdgpu_vector_permutation_can_lower(context->module,
+                                               context->descriptor_set, op)) {
     out_result->action = LOOM_TARGET_LEGALIZER_ACTION_DEFER;
     return iree_ok_status();
   }
 
   bool rewritten = false;
-  IREE_RETURN_IF_ERROR(loom_vector_descriptor_to_scalar_rewrite_op(
-      context->pass, context->rewriter, op, &rewritten));
+  if (loom_vector_transpose_isa(op)) {
+    IREE_RETURN_IF_ERROR(loom_vector_transpose_to_shuffle_rewrite_op(
+        context->rewriter, op, &rewritten));
+  } else {
+    IREE_RETURN_IF_ERROR(loom_vector_descriptor_to_scalar_rewrite_op(
+        context->pass, context->rewriter, op, &rewritten));
+  }
   if (rewritten) {
     out_result->action = LOOM_TARGET_LEGALIZER_ACTION_REWRITTEN;
   }
@@ -556,15 +561,16 @@ static iree_status_t loom_amdgpu_legalize_vector_load(
     IREE_RETURN_IF_ERROR(
         loom_vector_static_shape_memory_rewrite_op(context, op, &rewritten));
   }
-  if (!rewritten && context->boundary_representation ==
-                        LOOM_TARGET_BOUNDARY_REPRESENTATION_PROJECTED) {
+  if (!rewritten && (context->boundary_representation ==
+                         LOOM_TARGET_BOUNDARY_REPRESENTATION_PROJECTED ||
+                     context->mode == LOOM_TARGET_LEGALIZATION_MODE_FINAL)) {
     IREE_RETURN_IF_ERROR(loom_vector_packet_legalize_load(
         context, op, context->vector_packet_policy, &rewritten));
   }
-  // Store-root packet legalization owns connected load/arithmetic components
-  // while boundaries retain logical carriers, so that one plan can retain
-  // shared producers or stage fanout. Once boundary carriers are physical,
-  // preserve the load as a packet snapshot for the component planner to reuse.
+  // Eager legalization lets store-root plans retain shared producers or stage
+  // fanout. Final legalization must also complete loads feeding structural
+  // consumers whose stores cannot own the entire producer graph. Preserve
+  // those reads as packet snapshots at their original observation points.
   out_result->action = rewritten ? LOOM_TARGET_LEGALIZER_ACTION_REWRITTEN
                                  : LOOM_TARGET_LEGALIZER_ACTION_DEFER;
   return iree_ok_status();
@@ -844,20 +850,15 @@ static iree_status_t loom_amdgpu_legalize_atomic(
     };
     return iree_ok_status();
   }
-  // Narrow logical CAS uses a masked word packet and a full flat pointer for
+  // Narrow logical CAS uses a masked word packet and a full-width pointer for
   // device-visible storage. Check the same physical carrier here while the
   // shared rewrite retains the source payload and memory space.
   const bool subword =
       loom_scalar_type_bitwidth(loom_type_element_type(value_type)) < 32;
   const loom_type_t cmpxchg_type =
       subword ? loom_type_scalar(LOOM_SCALAR_TYPE_I32) : value_type;
-  const loom_value_fact_memory_space_t cmpxchg_space =
-      subword &&
-              view_reference.memory_space == LOOM_VALUE_FACT_MEMORY_SPACE_GLOBAL
-          ? LOOM_VALUE_FACT_MEMORY_SPACE_GENERIC
-          : view_reference.memory_space;
   if (!loom_amdgpu_atomic_has_native_candidate(
-          context->descriptor_set, cmpxchg_space,
+          context->descriptor_set, view_reference.memory_space,
           LOOM_AMDGPU_ATOMIC_OPERATION_CMPXCHG, atomic_kind, scope,
           /*access_flags=*/0, cmpxchg_type)) {
     return iree_ok_status();
@@ -1250,7 +1251,7 @@ static const loom_target_legalizer_rule_t kAmdgpuLegalizerRules[] = {
         .root_kind = LOOM_OP_VECTOR_CLAMPF,
         .first_operand_element_types = LOOM_SCALAR_TYPE_SET_F32,
         .match = loom_amdgpu_match_f32_clamp_decomposition,
-        .legalize = loom_vector_legalize_f32_extrema,
+        .legalize = loom_vector_legalize_float_extrema,
     },
     {
         .flags = LOOM_TARGET_LEGALIZER_ENTRY_FLAG_REQUIRE_CONTRACT_REJECTION,
@@ -1314,7 +1315,11 @@ static const loom_target_legalizer_rule_t kAmdgpuLegalizerRules[] = {
     },
     {
         .root_kind = LOOM_OP_VECTOR_SHUFFLE,
-        .legalize = loom_amdgpu_legalize_vector_shuffle,
+        .legalize = loom_amdgpu_legalize_vector_permutation,
+    },
+    {
+        .root_kind = LOOM_OP_VECTOR_TRANSPOSE,
+        .legalize = loom_amdgpu_legalize_vector_permutation,
     },
     // Retain native packed pairs. Other shapes and profiles use the shared
     // per-element reference, with policy enforced by that provider.
@@ -1394,22 +1399,6 @@ static const loom_target_legalizer_rule_t kAmdgpuLegalizerRules[] = {
     {
         .root_kind = LOOM_OP_VECTOR_TRANSFORM,
         .legalize = loom_amdgpu_legalize_vector_transform,
-    },
-    {
-        .root_kind = LOOM_OP_VECTOR_DOT2F,
-        .legalize = loom_amdgpu_retain_native_vector_op,
-    },
-    {
-        .root_kind = LOOM_OP_VECTOR_DOT4I,
-        .legalize = loom_amdgpu_retain_native_vector_op,
-    },
-    {
-        .root_kind = LOOM_OP_VECTOR_DOT8I4,
-        .legalize = loom_amdgpu_retain_native_vector_op,
-    },
-    {
-        .root_kind = LOOM_OP_VECTOR_DOT4F8,
-        .legalize = loom_amdgpu_retain_native_vector_op,
     },
     {
         .root_kind = LOOM_OP_VECTOR_DECODE,

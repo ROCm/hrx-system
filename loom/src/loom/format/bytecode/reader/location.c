@@ -57,7 +57,7 @@ static iree_status_t loom_bytecode_location_table_begin(
 
 // Inline the grammar so index/validation callers erase native construction when
 // their output is absent, instead of paying for a runtime materialization mode.
-IREE_ATTRIBUTE_ALWAYS_INLINE static inline iree_status_t
+static IREE_ATTRIBUTE_ALWAYS_INLINE iree_status_t
 loom_bytecode_location_decode_entry(
     loom_bytecode_location_validator_t* validator,
     loom_bytecode_location_table_t* table, iree_host_size_t index,
@@ -82,10 +82,7 @@ loom_bytecode_location_decode_entry(
         IREE_SV("kind"), kind_offset,
         IREE_SV("location_0_must_be_the_unflagged_none_location"));
   }
-  loom_location_entry_t entry = {
-      .kind = (loom_location_kind_t)kind,
-      .flags = flags,
-  };
+  loom_location_entry_t entry;
   switch ((loom_location_kind_t)kind) {
     case LOOM_LOCATION_NONE:
       if (index != 0 || flags != 0) {
@@ -94,6 +91,10 @@ loom_bytecode_location_decode_entry(
             index, IREE_SV("kind"), kind_offset,
             IREE_SV("only_location_0_may_be_the_unflagged_none_location"));
       }
+      entry = (loom_location_entry_t){
+          .kind = LOOM_LOCATION_NONE,
+          .flags = 0,
+      };
       break;
     case LOOM_LOCATION_FILE: {
       uint64_t source_id = 0;
@@ -124,11 +125,22 @@ loom_bytecode_location_decode_entry(
         }
         coordinates[field] = (uint32_t)value;
       }
-      entry.file.source_id = (loom_source_id_t)source_id;
-      entry.file.start_line = coordinates[0];
-      entry.file.start_col = coordinates[1];
-      entry.file.end_line = coordinates[2];
-      entry.file.end_col = coordinates[3];
+      entry = (loom_location_entry_t){
+          .file =
+              {
+                  .kind = LOOM_LOCATION_FILE,
+                  .flags = flags,
+                  .source_id = (loom_source_id_t)source_id,
+                  .field_span_count = 0,
+                  .field_span_format = LOOM_LOCATION_FIELD_SPAN_FORMAT_NONE,
+                  .reserved = 0,
+                  .start_line = coordinates[0],
+                  .start_col = coordinates[1],
+                  .end_line = coordinates[2],
+                  .end_col = coordinates[3],
+                  .field_span_data = NULL,
+              },
+      };
       break;
     }
     case LOOM_LOCATION_FUSED: {
@@ -171,8 +183,16 @@ loom_bytecode_location_decode_entry(
           children[child_index] = (loom_location_id_t)child;
         }
       }
-      entry.fused.count = (uint32_t)child_count;
-      entry.fused.children = children;
+      entry = (loom_location_entry_t){
+          .fused =
+              {
+                  .kind = LOOM_LOCATION_FUSED,
+                  .flags = flags,
+                  .reserved = 0,
+                  .count = (uint32_t)child_count,
+                  .children = children,
+              },
+      };
       break;
     }
     case LOOM_LOCATION_OPAQUE: {
@@ -206,9 +226,16 @@ loom_bytecode_location_decode_entry(
             &validator->output_module->arena, span.data_length, (void**)&data));
         memcpy(data, span.data, span.data_length);
       }
-      entry.opaque.source_id = (loom_source_id_t)source_id;
-      entry.opaque.data_length = (uint32_t)span.data_length;
-      entry.opaque.data = data;
+      entry = (loom_location_entry_t){
+          .opaque =
+              {
+                  .kind = LOOM_LOCATION_OPAQUE,
+                  .flags = flags,
+                  .source_id = (loom_source_id_t)source_id,
+                  .data_length = (uint32_t)span.data_length,
+                  .data = data,
+              },
+      };
       break;
     }
     case LOOM_LOCATION_TAGGED: {
@@ -253,10 +280,17 @@ loom_bytecode_location_decode_entry(
             &validator->output_module->arena, span.data_length, (void**)&data));
         memcpy(data, span.data, span.data_length);
       }
-      entry.tagged.tag = (loom_location_tag_t)tag;
-      entry.tagged.child = (loom_location_id_t)child;
-      entry.tagged.data_length = (uint32_t)span.data_length;
-      entry.tagged.data = data;
+      entry = (loom_location_entry_t){
+          .tagged =
+              {
+                  .kind = LOOM_LOCATION_TAGGED,
+                  .flags = flags,
+                  .tag = (loom_location_tag_t)tag,
+                  .data_length = (uint32_t)span.data_length,
+                  .child = (loom_location_id_t)child,
+                  .data = data,
+              },
+      };
       break;
     }
     default:

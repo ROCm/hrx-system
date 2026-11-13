@@ -37,6 +37,24 @@ common:lockfile-update --lockfile_mode=update
 # Compatibility spelling for CI/hooks that want to state the locked intent.
 common:locked --lockfile_mode=error
 
+# ROCm's Azure CI cluster provides a shared Bazel cache on its internal
+# network. This config is selected only by jobs running in that cluster; it is
+# unreachable from developer machines and is not selected by release workflows.
+build:rocm-ci-cache --remote_cache=grpc://bazelremote-svc.bazelremote-ns.svc.cluster.local:9092
+
+# Cached build actions may cross CI runs, but every test invocation must still
+# execute against the hardware and process environment assigned to that job.
+test:rocm-ci-cache --cache_test_results=no
+
+# Bazel's top-level download policy can otherwise leave cached executables
+# behind local Windows executable-wrapper actions and current-invocation test
+# evidence behind CI result staging. Materialize those local consumer inputs
+# without downloading cached object and archive intermediates, and keep the
+# build-event references local so result staging can consume that evidence.
+test:rocm-ci-cache --remote_download_regex=.*[.]exe$
+test:rocm-ci-cache --remote_download_regex=.*test[.](log|xml)$
+test:rocm-ci-cache --nobuild_event_json_file_path_conversion
+
 # -----------------------------------------------------------------------------
 # Local build defaults.
 # -----------------------------------------------------------------------------
@@ -51,6 +69,11 @@ build --guard_against_concurrent_changes
 # Reuse their PIC objects for both static and shared linkage instead of
 # compiling dependencies separately for each linkage mode.
 build --host_features=prefer_pic_for_opt_binaries
+
+# ELF toolchains compress full debug information in objects and linked outputs.
+# This does not enable debug information in profiles that otherwise omit it.
+build --features=compressed_debug_info
+build --host_features=compressed_debug_info
 
 # Preserve runfiles trees on Windows and Unix-like hosts.
 startup --windows_enable_symlinks
@@ -98,6 +121,11 @@ build:mimalloc --custom_malloc=//third_party:allocator_new_delete
 # match it to the host and destination. Native Windows defaults to clang-cl.
 build:windows-clang-cl --//build_tools/windows:compiler=clang-cl
 build:windows-msvc --//build_tools/windows:compiler=msvc
+# Wine compiler actions require the selected user identity and prefix. Keep
+# these values in the action key instead of relying on the ambient shell.
+build:windows-msvc --action_env=HOME
+build:windows-msvc --action_env=WINEARCH
+build:windows-msvc --action_env=WINEPREFIX
 
 # Retain failed action arguments, environment, and parameter-file paths for
 # Windows diagnostics before subsequent CI phases can replace the inputs.
@@ -140,18 +168,36 @@ build --test_env=PYTHONSAFEPATH=1
 test:presubmit --config=locked
 test:presubmit --test_output=errors
 
-# Optional Loom importer lanes. These configs make importer-specific targets
-# compatible in the Bazel graph. The native C/C++ dependency is pinned; Python
-# frontend packages are runtime-probed by the importer backends.
+# Optional Loom importer lane.
 build:loom-importer-cxx --//loom/config/import:enable=cxx
-build:loom-importer-mlir --//loom/config/import:enable=mlir
-build:loom-importer-tilelang --//loom/config/import:enable=tilelang
-build:loom-importers --//loom/config/import:enable=cxx,mlir,tilelang
 
 # Manual sweeps can keep going to expose the full failure set without changing
 # the default hook behavior.
 test:presubmit-keep-going --config=presubmit
 test:presubmit-keep-going --keep_going
+
+# -----------------------------------------------------------------------------
+# Source coverage.
+# -----------------------------------------------------------------------------
+
+# Bazel's generic coverage feature is toolchain-defined and some Clang
+# toolchains still spell it as GCC's --coverage. Disable that feature and own
+# the native LLVM instrumentation explicitly so local and remote Clang actions
+# produce the same profile format. Atomic counter updates preserve coverage
+# counts for the multithreaded runtime tests.
+build:llvm-coverage --features=-coverage
+build:llvm-coverage --copt=-fprofile-instr-generate
+build:llvm-coverage --copt=-fcoverage-mapping
+build:llvm-coverage --copt=-fprofile-update=atomic
+build:llvm-coverage --linkopt=-fprofile-instr-generate
+build:llvm-coverage --cc_output_directory_tag=llvm-coverage
+
+# LLVM covmap collection initially produces indexed profile data. Request the
+# LCOV conversion explicitly so Bazel's combined report does not silently
+# contain only zero-count baseline records.
+coverage:llvm-coverage --experimental_use_llvm_covmap
+coverage:llvm-coverage --experimental_generate_llvm_lcov
+coverage:llvm-coverage --combined_report=lcov
 
 # -----------------------------------------------------------------------------
 # Sanitizers.
@@ -182,6 +228,9 @@ build:msan --config=sanitizer
 build:msan --features=msan
 build:msan --copt=-fsanitize=memory
 build:msan --copt=-fsanitize-memory-track-origins
+# Fortified libc calls can become plain stores after MSAN instrumentation in
+# ThinLTO. Expose memory intrinsics before instrumentation so shadow stays valid.
+build:msan --copt=-U_FORTIFY_SOURCE
 build:msan --linkopt=-fsanitize=memory
 build:msan --cc_output_directory_tag=msan
 build:msan --copt=-DMEMORY_SANITIZER

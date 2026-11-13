@@ -1,0 +1,67 @@
+# GENERATED FILE: DO NOT EDIT.
+# Generator: loom.gen.python.builders_pyi.
+# Regenerate: python3 loom/py/loom/gen/run.py builders_pyi --in-place
+
+from __future__ import annotations
+
+from collections.abc import Sequence
+
+from loom.builder import TiedResultSpec, ValueRef
+from loom.builders import DialectBuilder
+from loom.ir import Type
+
+class RefBuilder(DialectBuilder):
+    def duplicate(
+        self,
+        *,
+        sources: list[ValueRef] = ...,
+        results: list[Type | TiedResultSpec],
+        name: str | None = ...,
+        names: Sequence[str] | None = ...,
+        result_names: Sequence[str] | None = ...,
+        location_id: int | None = ...,
+    ) -> list[ValueRef]: ...
+    def borrow(
+        self,
+        *,
+        owner: ValueRef,
+        results: list[Type | TiedResultSpec],
+        name: str | None = ...,
+        names: Sequence[str] | None = ...,
+        result_names: Sequence[str] | None = ...,
+        location_id: int | None = ...,
+    ) -> ValueRef: ...
+    def release(
+        self,
+        *,
+        value: ValueRef,
+        location_id: int | None = ...,
+    ) -> None: ...
+    def null(
+        self,
+        *,
+        results: list[Type | TiedResultSpec],
+        name: str | None = ...,
+        names: Sequence[str] | None = ...,
+        result_names: Sequence[str] | None = ...,
+        location_id: int | None = ...,
+    ) -> ValueRef: ...
+    def compare_null(
+        self,
+        *,
+        value: ValueRef,
+        name: str | None = ...,
+        names: Sequence[str] | None = ...,
+        result_names: Sequence[str] | None = ...,
+        location_id: int | None = ...,
+    ) -> ValueRef: ...
+    def compare_eq(
+        self,
+        *,
+        left: ValueRef,
+        right: ValueRef,
+        name: str | None = ...,
+        names: Sequence[str] | None = ...,
+        result_names: Sequence[str] | None = ...,
+        location_id: int | None = ...,
+    ) -> ValueRef: ...

@@ -250,14 +250,17 @@ void GpuFileStagedTest::Run(const StagedCase& test_case) {
   GpuUserQueue* reader_queue = nullptr;
   GpuUserQueue* transfer = nullptr;
   for (auto** queue : {&file_queue, &upload_queue, &reader_queue}) {
-    ASSERT_NO_FATAL_FAILURE(
-        CreateQueue(family_, queue, AMDF_QUEUE_PRODUCER_MODE_SINGLE, {},
-                    AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER, kAqlRingBytes));
+    ASSERT_NO_FATAL_FAILURE(CreateQueue(
+        family_, GpuUserQueueOptions{.ring_byte_length = kAqlRingBytes},
+        queue));
   }
-  ASSERT_NO_FATAL_FAILURE(
-      CreateQueue(sdma_family_, &transfer, AMDF_QUEUE_PRODUCER_MODE_SINGLE, {},
-                  AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER |
-                      AMDF_USER_QUEUE_CAPABILITY_DEVICE_PRODUCER));
+  ASSERT_NO_FATAL_FAILURE(CreateQueue(
+      sdma_family_,
+      GpuUserQueueOptions{
+          .required_capabilities = AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER |
+                                   AMDF_USER_QUEUE_CAPABILITY_DEVICE_PRODUCER,
+      },
+      &transfer));
   const auto& mapping = transfer->producer.info;
   uint64_t file_packet_index = 0;
   uint64_t upload_index = 0;

@@ -4,35 +4,16 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "loom/ops/command/ops.h"
-#include "loom/ops/kernel/ops.h"
+#include "loom/ops/command/composition.h"
 #include "loom/rewrite/rewriter.h"
-
-typedef enum loom_command_composition_e {
-  LOOM_COMMAND_COMPOSITION_NONE,
-  LOOM_COMMAND_COMPOSITION_SERIAL,
-  LOOM_COMMAND_COMPOSITION_CONCURRENT,
-} loom_command_composition_t;
-
-static loom_command_composition_t loom_command_composition(
-    const loom_op_t* op) {
-  switch (op->kind) {
-    case LOOM_OP_COMMAND_DEF:
-    case LOOM_OP_COMMAND_SERIAL:
-    case LOOM_OP_KERNEL_LAUNCH_SERIAL:
-      return LOOM_COMMAND_COMPOSITION_SERIAL;
-    case LOOM_OP_COMMAND_CONCURRENT:
-    case LOOM_OP_KERNEL_LAUNCH_CONCURRENT:
-      return LOOM_COMMAND_COMPOSITION_CONCURRENT;
-    default:
-      return LOOM_COMMAND_COMPOSITION_NONE;
-  }
-}
 
 iree_status_t loom_command_schedule_canonicalize(loom_op_t* op,
                                                  loom_rewriter_t* rewriter) {
-  if (!op->parent_op ||
-      loom_command_composition(op->parent_op) != loom_command_composition(op)) {
+  if (!op->parent_op) {
+    return iree_ok_status();
+  }
+  if (loom_command_composition_mode(op->parent_op) !=
+      loom_command_composition_schedule_mode(op)) {
     return iree_ok_status();
   }
 

@@ -364,6 +364,46 @@ func.def @allocated_dense_view_rejects_access_past_root() {
 
 // ====
 
+// A source-language contract can promise that a logically valid access fits
+// its allocation even when opaque pointer transport hides the exact extent.
+func.def @allocated_dense_view_accepts_promised_root_access(%base: offset) {
+  %byte_length = index.constant 64 : offset
+  %scratch = buffer.alloca<workgroup> align(16) %byte_length : buffer
+  %view = buffer.view %scratch[%base] : buffer -> view<1xf32>
+  %loaded = view.load<root_in_bounds> %view[0] : view<1xf32> -> f32
+  test.use %loaded : f32
+  func.return
+}
+
+// ====
+
+// Atomic source accesses carry the same root promise without weakening their
+// ordering or logical-coordinate contracts.
+func.def @allocated_dense_view_accepts_promised_atomic_root_access(%base: offset) {
+  %byte_length = index.constant 64 : offset
+  %scratch = buffer.alloca<workgroup> align(16) %byte_length : buffer
+  %view = buffer.view %scratch[%base] : buffer -> view<1xi32>
+  %loaded = view.atomic.load<root_in_bounds> %view[0] {ordering = relaxed, scope = workgroup} : view<1xi32> -> i32
+  test.use %loaded : i32
+  func.return
+}
+
+// ====
+
+// The root promise does not weaken the logical view-coordinate contract.
+func.def @allocated_dense_view_root_promise_rejects_logical_overflow() {
+  %byte_length = index.constant 128 : offset
+  %base = index.constant 0 : offset
+  %scratch = buffer.alloca<workgroup> align(16) %byte_length : buffer
+  %view = buffer.view %scratch[%base] : buffer -> view<16xf32>
+  // ERROR@+1: SUBRANGE/004 "dimension 0" "offset (16) + size (1) = 17 exceeds bound 16"
+  %loaded = view.load<root_in_bounds> %view[16] : view<16xf32> -> f32
+  test.use %loaded : f32
+  func.return
+}
+
+// ====
+
 func.def @allocated_strided_view_rejects_root_overflow() {
   %byte_length = index.constant 27 : offset
   %base = index.constant 0 : offset

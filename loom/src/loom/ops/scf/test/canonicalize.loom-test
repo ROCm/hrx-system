@@ -603,8 +603,7 @@ func.def @if_edge_rewrites_refinable_result_type_refs(%buffer: buffer, %offset: 
     %iota = vector.iota %c0 step %c1 : vector<[%16]xindex>
     %mask = vector.mask.range [%c0 to %16 step %c1] : index -> vector<[%16]xi1>
     %sub = view.subview %source[0] : view<[%n]xi32> -> view<[%16]xi32>
-    %refined = view.refine %sub : view<[%16]xi32> -> view<[%16]xi32>
-    %loaded = vector.load %refined[0] : view<[%16]xi32> -> vector<[%16]xi32>
+    %loaded = vector.load %sub[0] : view<[%16]xi32> -> vector<[%16]xi32>
     test.use %constant, %iota, %mask, %loaded : vector<[%16]xi32>, vector<[%16]xindex>, vector<[%16]xi1>, vector<[%16]xi32>
   } else {
   }

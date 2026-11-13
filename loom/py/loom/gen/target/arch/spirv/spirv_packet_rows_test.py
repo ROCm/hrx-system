@@ -39,6 +39,7 @@ from loom.target.arch.spirv.builtins import (
     BUILTIN_SCALAR_INDEX_QUERIES,
 )
 from loom.target.arch.spirv.cooperative_matrix import (
+    COOPERATIVE_MATRIX_ARITHMETIC,
     COOPERATIVE_MATRIX_TYPES,
     cooperative_matrix_memory_variants,
 )
@@ -83,6 +84,7 @@ from loom.target.arch.spirv.scalar_alu import (
 )
 from loom.target.arch.spirv.scalar_constant import FLOAT_CONSTANT_TYPES
 from loom.target.arch.spirv.scalar_memory import (
+    PACKED_STORAGE_BUFFER_VECTORS,
     RAW_STORAGE_BUFFER_BYTE,
     STORAGE_BUFFER_SCALARS,
 )
@@ -331,6 +333,31 @@ def test_generation_emits_scalar_memory_packet_rows() -> None:
     assert "LOOM_SPIRV_VALUE_CLASS_PTR_PHYSICAL_STORAGE_BUFFER" in tables
 
 
+def test_packed_memory_alignment_follows_the_component() -> None:
+    assert {packet.suffix for packet in PACKED_STORAGE_BUFFER_VECTORS} == {
+        "v2i8",
+        "v4i8",
+        "v2i16",
+        "v4i16",
+        "v2i32",
+    }
+    for packet in PACKED_STORAGE_BUFFER_VECTORS:
+        pointer = _packet_row(f"spirv.op_ptr_access_chain.storage_buffer.{packet.suffix}.byte_offset").result_type
+        assert "LOOM_SPIRV_VALUE_CLASS_PTR_PHYSICAL_STORAGE_BUFFER" in pointer
+        assert f".lane_count = {packet.lane_count}" in pointer
+        assert packet.scalar_enum in pointer
+        load = _packet_row(f"spirv.op_load.storage_buffer.{packet.suffix}")
+        store = _packet_row(f"spirv.op_store.storage_buffer.{packet.suffix}")
+        assert load.operand_types == (pointer,)
+        assert store.operand_types == (pointer, load.result_type)
+        assert "LOOM_SPIRV_VALUE_CLASS_VECTOR" in load.result_type
+        assert f".lane_count = {packet.lane_count}" in load.result_type
+        assert load.memory_alignment == store.memory_alignment == packet.component.byte_width
+        for operation in ("load", "store"):
+            descriptor = _descriptor(f"spirv.op_{operation}.storage_buffer.{packet.suffix}")
+            assert descriptor.effects[0].width_bits == packet.byte_width * 8
+
+
 def test_generation_emits_raw_storage_byte_bridge_rows() -> None:
     suffix = RAW_STORAGE_BUFFER_BYTE.suffix
     load_row = _packet_row(f"spirv.op_load.storage_buffer.{suffix}")
@@ -361,10 +388,11 @@ def test_cooperative_matrix_memory_packets_preserve_runtime_stride() -> None:
     rows = {row.descriptor_key: row for row in _packet_rows()}
     for matrix_type in COOPERATIVE_MATRIX_TYPES:
         scalar = matrix_type.scalar
-        for role in matrix_type.source_roles:
+        for operation in ("load", "store"):
             for memory in cooperative_matrix_memory_variants(scalar):
-                is_load = role != "result"
-                row = rows[matrix_type.memory_key(role, memory)]
+                is_load = operation == "load"
+                row = rows[matrix_type.memory_key(operation, memory)]
+                assert row.opcode == ("LOOM_SPIRV_OP_COOPERATIVE_MATRIX_LOAD_KHR" if is_load else "LOOM_SPIRV_OP_COOPERATIVE_MATRIX_STORE_KHR")
                 assert row.form == ("LOOM_SPIRV_PACKET_FORM_COOPERATIVE_MATRIX_LOAD" if is_load else "LOOM_SPIRV_PACKET_FORM_COOPERATIVE_MATRIX_STORE")
                 assert len(row.operand_types) == (2 if is_load else 3)
                 pointer_class = "PTR_WORKGROUP" if memory.space == "workgroup" else "PTR_PHYSICAL_STORAGE_BUFFER"
@@ -858,12 +886,49 @@ def test_floating_packets_control_operation_contraction() -> None:
                     )
                 )
     expected_keys.update(("spirv.op_f_convert.bf16.f32", "spirv.op_f_convert.f32.bf16"))
+    cooperative_keys = {
+        matrix_type.arithmetic_key(operation)
+        for matrix_type in COOPERATIVE_MATRIX_TYPES
+        for operation in COOPERATIVE_MATRIX_ARITHMETIC
+        if operation.supports(matrix_type) and operation.controls_contraction
+    }
+    expected_keys.update(cooperative_keys)
     assert {key for key, row in rows.items() if row.no_contraction} == expected_keys
     arithmetic_keys = {f"spirv.op_{operation}.{prefix}{scalar}" for operation in ("fadd", "fsub", "fmul", "fdiv", "frem") for prefix in ("", "v2", "v3", "v4") for scalar in ("f16", "f32", "f64")}
     arithmetic_keys.update(f"spirv.op_vector_times_scalar.v{lanes}{element}" for lanes in (2, 3, 4) for element in ("f16", "f32", "f64"))
+    arithmetic_keys.update(cooperative_keys)
     assert {key for key, row in rows.items() if row.contraction_controlled} == arithmetic_keys
     generated_fmul = _generated_row(generate_tables(), "spirv.op_fmul.f32")
     assert (".flags = LOOM_SPIRV_PACKET_FLAG_NO_CONTRACTION | LOOM_SPIRV_PACKET_FLAG_CONTRACTION_CONTROLLED,") in generated_fmul
+
+
+def test_cooperative_arithmetic_preserves_native_component_shape_and_use() -> None:
+    rows = {row.descriptor_key: row for row in _packet_rows()}
+    descriptors = {row.key: row for row in SPIRV_LOGICAL_CORE_DESCRIPTOR_SET.descriptors}
+    floating = {"addf", "subf", "mulf", "divf", "negf"}
+    integer = {"addi", "subi", "muli", "divsi", "divui", "negi"}
+    assert {operation.source for operation in COOPERATIVE_MATRIX_ARITHMETIC} == floating | integer
+    for matrix_type in COOPERATIVE_MATRIX_TYPES:
+        expected = floating if matrix_type.scalar.suffix in ("f16", "f32") else integer
+        if matrix_type.scalar.suffix == "bf16":
+            expected = set()
+        for operation in COOPERATIVE_MATRIX_ARITHMETIC:
+            key = matrix_type.arithmetic_key(operation)
+            assert (key in rows) == (operation.source in expected)
+            if key not in rows:
+                continue
+            row = rows[key]
+            unary = operation.source in ("negf", "negi")
+            assert row.form == ("LOOM_SPIRV_PACKET_FORM_UNARY_TYPED" if unary else "LOOM_SPIRV_PACKET_FORM_BINARY_LHS_TYPE")
+            assert row.operand_types == (row.result_type,) * (1 if unary else 2)
+            assert f".scalar_type = {matrix_type.scalar.scalar_enum}" in row.result_type
+            assert f".rows = {matrix_type.rows}, .columns = {matrix_type.columns}" in row.result_type
+            assert f".use = {matrix_type.use_c_expression}" in row.result_type
+            assert descriptors[key].feature_mask_words == (matrix_type.feature_bits,)
+            controls_contraction = operation.source in floating and not unary
+            assert row.contraction_controlled == controls_contraction
+            assert row.no_contraction == controls_contraction
+            assert row.immediate_count == int(controls_contraction)
 
 
 def test_generation_emits_complete_ordinary_vector_float_comparisons() -> None:

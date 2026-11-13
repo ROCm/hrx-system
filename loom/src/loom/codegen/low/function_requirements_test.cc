@@ -9,6 +9,7 @@
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/codegen/low/builder.h"
+#include "loom/codegen/low/read_only_data.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/global/ops.h"
@@ -87,7 +88,8 @@ class LowFunctionRequirementsTest : public ::testing::Test {
     loom_op_t* function = nullptr;
     IREE_CHECK_OK(loom_low_func_def_build(
         &builder, /*build_flags=*/0, /*visibility=*/0, /*retain=*/0,
-        /*cc=*/0, /*effect_contract=*/0, /*inline_policy=*/0,
+        /*cc=*/0, /*effect_contract=*/0, /*temperature=*/0,
+        /*inline_policy=*/0,
         /*allocation=*/0, /*schedule=*/0, descriptor_set_name_,
         /*target=*/loom_symbol_ref_t{}, /*abi=*/0,
         loom_named_attr_slice_empty(), loom_named_attr_slice_empty(),
@@ -278,6 +280,15 @@ TEST_F(LowFunctionRequirementsTest, CollectsStorageAcrossBlocks) {
   BuildReturn(&right_builder);
 
   const auto requirements = Analyze(function);
+  EXPECT_EQ(loom_low_call_boundary_scope(&requirements.call_boundaries,
+                                         stack_address),
+            0u);
+  EXPECT_EQ(loom_low_call_boundary_scope(&requirements.call_boundaries,
+                                         later_address),
+            1u);
+  EXPECT_EQ(loom_low_call_boundary_scope(&requirements.call_boundaries,
+                                         loom_block_const_last_op(right)),
+            2u);
   EXPECT_EQ(requirements.node_count, 8u);
   EXPECT_EQ(requirements.return_count, 2u);
   EXPECT_EQ(requirements.storage_address_count, 2u);
@@ -296,11 +307,13 @@ TEST_F(LowFunctionRequirementsTest, EmptyInterface) {
   const auto requirements = Analyze(function);
   EXPECT_EQ(requirements.resource_count, 0u);
   EXPECT_EQ(requirements.resources, nullptr);
+  EXPECT_EQ(requirements.call_boundaries.count, 0u);
+  EXPECT_EQ(requirements.call_boundaries.calls, nullptr);
   EXPECT_EQ(requirements.storage_layout.record_count, 0u);
-  EXPECT_EQ(requirements.read_only_data_count, 0u);
-  EXPECT_EQ(requirements.read_only_data, nullptr);
-  EXPECT_EQ(requirements.read_only_data_ordinal_slot_count, 0u);
-  EXPECT_EQ(requirements.read_only_data_ordinal_slots, nullptr);
+  EXPECT_EQ(requirements.read_only_data.count, 0u);
+  EXPECT_EQ(requirements.read_only_data.values, nullptr);
+  EXPECT_EQ(requirements.read_only_data.slot_count, 0u);
+  EXPECT_EQ(requirements.read_only_data.ordinal_slots, nullptr);
   EXPECT_EQ(requirements.node_count, 1u);
   EXPECT_EQ(requirements.return_count, 1u);
   EXPECT_EQ(requirements.storage_address_count, 0u);
@@ -331,25 +344,30 @@ TEST_F(LowFunctionRequirementsTest,
   BuildReturn(&builder);
 
   const auto requirements = Analyze(function);
-  ASSERT_EQ(requirements.read_only_data_count, 5u);
-  EXPECT_EQ(requirements.read_only_data_ordinal_slot_count, 16u);
-  EXPECT_EQ(requirements.read_only_data[0].symbol.symbol_id, data4.symbol_id);
-  EXPECT_EQ(requirements.read_only_data[0].minimum_alignment, 32u);
-  EXPECT_EQ(requirements.read_only_data[1].symbol.symbol_id, data0.symbol_id);
-  EXPECT_EQ(requirements.read_only_data[1].minimum_alignment, 16u);
-  EXPECT_EQ(requirements.read_only_data[2].symbol.symbol_id, data2.symbol_id);
-  EXPECT_EQ(requirements.read_only_data[3].symbol.symbol_id, data1.symbol_id);
-  EXPECT_EQ(requirements.read_only_data[4].symbol.symbol_id, data3.symbol_id);
+  ASSERT_EQ(requirements.read_only_data.count, 5u);
+  EXPECT_EQ(requirements.read_only_data.slot_count, 16u);
+  EXPECT_EQ(requirements.read_only_data.values[0].symbol.symbol_id,
+            data4.symbol_id);
+  EXPECT_EQ(requirements.read_only_data.values[0].minimum_alignment, 32u);
+  EXPECT_EQ(requirements.read_only_data.values[1].symbol.symbol_id,
+            data0.symbol_id);
+  EXPECT_EQ(requirements.read_only_data.values[1].minimum_alignment, 16u);
+  EXPECT_EQ(requirements.read_only_data.values[2].symbol.symbol_id,
+            data2.symbol_id);
+  EXPECT_EQ(requirements.read_only_data.values[3].symbol.symbol_id,
+            data1.symbol_id);
+  EXPECT_EQ(requirements.read_only_data.values[4].symbol.symbol_id,
+            data3.symbol_id);
   const loom_symbol_ref_t expected_order[] = {data4, data0, data2, data1,
                                               data3};
   for (uint32_t i = 0; i < IREE_ARRAYSIZE(expected_order); ++i) {
-    EXPECT_EQ(loom_low_function_requirements_read_only_data_ordinal(
-                  &requirements, expected_order[i]),
+    EXPECT_EQ(loom_low_read_only_data_ordinal(&requirements.read_only_data,
+                                              expected_order[i]),
               i);
   }
-  EXPECT_EQ(loom_low_function_requirements_read_only_data_ordinal(&requirements,
-                                                                  unused),
-            UINT32_MAX);
+  EXPECT_EQ(
+      loom_low_read_only_data_ordinal(&requirements.read_only_data, unused),
+      UINT32_MAX);
 }
 
 TEST_F(LowFunctionRequirementsTest, SmallDataSetNeedsNoOrdinalIndex) {
@@ -364,15 +382,63 @@ TEST_F(LowFunctionRequirementsTest, SmallDataSetNeedsNoOrdinalIndex) {
   BuildReturn(&builder);
 
   const auto requirements = Analyze(function);
-  ASSERT_EQ(requirements.read_only_data_count, 2u);
-  EXPECT_EQ(requirements.read_only_data_ordinal_slot_count, 0u);
-  EXPECT_EQ(requirements.read_only_data_ordinal_slots, nullptr);
-  EXPECT_EQ(loom_low_function_requirements_read_only_data_ordinal(&requirements,
-                                                                  first),
+  ASSERT_EQ(requirements.read_only_data.count, 2u);
+  EXPECT_EQ(requirements.read_only_data.slot_count, 0u);
+  EXPECT_EQ(requirements.read_only_data.ordinal_slots, nullptr);
+  EXPECT_EQ(
+      loom_low_read_only_data_ordinal(&requirements.read_only_data, first), 0u);
+  EXPECT_EQ(
+      loom_low_read_only_data_ordinal(&requirements.read_only_data, second),
+      1u);
+}
+
+TEST_F(LowFunctionRequirementsTest, UnionsInventoriesWithoutChangingOrdinals) {
+  const loom_symbol_ref_t symbols[] = {
+      BuildReadOnlyData(IREE_SV("entry"), 16, 0x11),
+      BuildReadOnlyData(IREE_SV("shared"), 32, 0x22),
+      BuildReadOnlyData(IREE_SV("helper_a"), 64, 0x33),
+      BuildReadOnlyData(IREE_SV("helper_b"), 1, 0x44),
+      BuildReadOnlyData(IREE_SV("helper_c"), 8, 0x55),
+  };
+  loom_op_t* entry = BuildFunction(IREE_SV("entry_function"));
+  loom_builder_t entry_builder = BodyBuilder(entry);
+  for (unsigned i : {0, 1, 2}) {
+    BuildReadOnlyDataPacket(&entry_builder, true, symbols[0], symbols[i]);
+  }
+  BuildReturn(&entry_builder);
+  const auto entry_requirements = Analyze(entry);
+
+  loom_op_t* helper = BuildFunction(IREE_SV("helper_function"));
+  loom_builder_t helper_builder = BodyBuilder(helper);
+  for (unsigned i : {1, 4, 3}) {
+    BuildReadOnlyDataPacket(&helper_builder, true, symbols[0], symbols[i]);
+  }
+  BuildReturn(&helper_builder);
+  const auto helper_requirements = Analyze(helper);
+
+  loom_low_read_only_data_builder_t data_builder = {};
+  IREE_ASSERT_OK(loom_low_read_only_data_builder_extend(
+      &data_builder, &entry_requirements.read_only_data, &analysis_arena_));
+  IREE_ASSERT_OK(loom_low_read_only_data_builder_extend(
+      &data_builder, &helper_requirements.read_only_data, &analysis_arena_));
+  IREE_ASSERT_OK(loom_low_read_only_data_builder_extend(
+      &data_builder, &entry_requirements.read_only_data, &analysis_arena_));
+  const auto data = loom_low_read_only_data_builder_finish(&data_builder);
+  ASSERT_EQ(data.count, 5u);
+  const unsigned expected_order[] = {0, 1, 2, 4, 3};
+  for (uint32_t i = 0; i < IREE_ARRAYSIZE(expected_order); ++i) {
+    const auto symbol = symbols[expected_order[i]];
+    EXPECT_EQ(loom_low_read_only_data_ordinal(&data, symbol), i);
+    EXPECT_EQ(data.values[i].definition,
+              module_->symbols.entries[symbol.symbol_id].defining_op);
+    EXPECT_EQ(data.values[i].contents.data[0], (expected_order[i] + 1) * 0x11);
+  }
+  EXPECT_EQ(data.values[1].minimum_alignment, 32u);
+  EXPECT_EQ(entry_requirements.read_only_data.count, 3u);
+  EXPECT_EQ(helper_requirements.read_only_data.count, 3u);
+  EXPECT_EQ(loom_low_read_only_data_ordinal(&helper_requirements.read_only_data,
+                                            symbols[1]),
             0u);
-  EXPECT_EQ(loom_low_function_requirements_read_only_data_ordinal(&requirements,
-                                                                  second),
-            1u);
 }
 
 TEST_F(LowFunctionRequirementsTest, ResidentControlFlowHasNoReturn) {
@@ -409,7 +475,8 @@ TEST_F(LowFunctionRequirementsTest, RetainsUniqueDirectCalleesInCallOrder) {
     loom_op_t* call = nullptr;
     IREE_ASSERT_OK(loom_low_func_call_build(
         &builder, /*build_flags=*/0, /*effect_contract=*/0,
-        /*inline_policy=*/0, callee, /*operands=*/nullptr,
+        /*temperature=*/0, /*inline_policy=*/0, callee,
+        /*operands=*/nullptr,
         /*operands_count=*/0, /*result_types=*/nullptr, /*result_count=*/0,
         /*tied_results=*/nullptr, /*tied_result_count=*/0,
         LOOM_LOCATION_UNKNOWN, &call));
@@ -419,9 +486,50 @@ TEST_F(LowFunctionRequirementsTest, RetainsUniqueDirectCalleesInCallOrder) {
       first_first_call = call;
     }
   }
-  BuildReturn(&builder);
+  loom_block_t* exit = nullptr;
+  IREE_ASSERT_OK(
+      loom_region_append_block(module_, loom_low_func_def_body(entry), &exit));
+  loom_op_t* branch = nullptr;
+  IREE_ASSERT_OK(loom_low_br_build(&builder, exit, /*args=*/nullptr,
+                                   /*args_count=*/0, LOOM_LOCATION_UNKNOWN,
+                                   &branch));
+  loom_builder_t exit_builder = BlockBuilder(entry, exit);
+  BuildReturn(&exit_builder);
 
   const auto requirements = Analyze(entry);
+  ASSERT_EQ(requirements.call_boundaries.count, 3u);
+  EXPECT_EQ(loom_low_call_boundary_scope(&requirements.call_boundaries,
+                                         first_second_call),
+            0u);
+  EXPECT_EQ(loom_low_call_boundary_scope(&requirements.call_boundaries,
+                                         first_first_call),
+            1u);
+  EXPECT_EQ(loom_low_call_boundary_scope(&requirements.call_boundaries, branch),
+            3u);
+  EXPECT_EQ(loom_low_call_boundary_scope(&requirements.call_boundaries,
+                                         loom_block_const_last_op(exit)),
+            4u);
+
+  // Model a valid dense label range. Preparing the body can insert ordinary
+  // operations and relabel calls without changing their relative order.
+  first_second_call->block_ordinal = 1;
+  first_first_call->block_ordinal = 2;
+  first_first_call->next_op->block_ordinal = 100;
+  branch->block_ordinal = 200;
+  loom_builder_set_before(&builder, first_first_call);
+  loom_op_t* storage = nullptr;
+  IREE_ASSERT_OK(loom_low_storage_reserve_build(
+      &builder, /*byte_length=*/4, /*byte_alignment=*/4,
+      loom_type_storage(LOOM_STORAGE_SPACE_PRIVATE), LOOM_LOCATION_UNKNOWN,
+      &storage));
+  EXPECT_NE(first_first_call->block_ordinal, 2u);
+  EXPECT_EQ(
+      loom_low_call_boundary_scope(&requirements.call_boundaries, storage), 1u);
+  EXPECT_EQ(loom_low_call_boundary_scope(&requirements.call_boundaries,
+                                         first_first_call),
+            1u);
+  EXPECT_EQ(loom_low_call_boundary_scope(&requirements.call_boundaries, branch),
+            3u);
   ASSERT_EQ(requirements.direct_callees.count, 2u);
   EXPECT_EQ(requirements.direct_callees.values[0].symbol.symbol_id,
             second_ref.symbol_id);
@@ -457,7 +565,8 @@ TEST_F(LowFunctionRequirementsTest, RetainsManyUniqueDirectCalleesInCallOrder) {
     loom_op_t* call = nullptr;
     IREE_ASSERT_OK(loom_low_func_call_build(
         &builder, /*build_flags=*/0, /*effect_contract=*/0,
-        /*inline_policy=*/0, callee, /*operands=*/nullptr,
+        /*temperature=*/0, /*inline_policy=*/0, callee,
+        /*operands=*/nullptr,
         /*operands_count=*/0, /*result_types=*/nullptr, /*result_count=*/0,
         /*tied_results=*/nullptr, /*tied_result_count=*/0,
         LOOM_LOCATION_UNKNOWN, &call));

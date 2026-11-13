@@ -181,7 +181,7 @@ TEST_F(Pm4BranchTest, ShaderOperandMatrixSelectsRetainedGraphs) {
                                          "pm4_branch", &code));
 
   GpuCommandQueue* queue = nullptr;
-  ASSERT_NO_FATAL_FAILURE(CreateQueue(&queue, kCommandByteLength));
+  ASSERT_NO_FATAL_FAILURE(CreateQueue(kCommandByteLength, &queue));
   const bool primary_ring =
       queue->publication_mode() == AMDF_QUEUE_PUBLICATION_MODE_USER;
   const size_t command_capacity = primary_ring ? queue->words().size() : 0;

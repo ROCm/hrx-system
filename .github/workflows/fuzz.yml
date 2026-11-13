@@ -1,0 +1,146 @@
+# Copyright 2026 The HRX Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+name: Loom / Fuzz
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "23 9 * * *"
+
+concurrency:
+  group: loom-fuzz-${{ github.ref || github.run_id }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  linux_x86_64:
+    name: Linux x86-64
+    runs-on: az-linux-scale-rocm-default-prod
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    container:
+      image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
+    env:
+      AR: ${{ github.workspace }}/build/fuzz/rocm-root/lib/llvm/bin/llvm-ar
+      CC: ${{ github.workspace }}/build/fuzz/rocm-root/lib/llvm/bin/clang
+      CXX: ${{ github.workspace }}/build/fuzz/rocm-root/lib/llvm/bin/clang++
+      HRX_ARTIFACT_SET: llvm
+      HRX_DOWNLOAD_CACHE_DIR: ${{ github.workspace }}/build/fuzz/downloads
+      HRX_OUTPUT_DIR: ${{ github.workspace }}/build/fuzz
+      HRX_PYTHON: ${{ github.workspace }}/build/fuzz/python/bin/python3
+      HRX_RELEASE_TYPE: nightly
+      HRX_ROCM_ROOT: ${{ github.workspace }}/build/fuzz/rocm-root
+      IREE_FUZZ_CACHE: build/iree-fuzz-cache
+      IREE_FUZZ_RESULT: build/iree-fuzz-campaign-${{ github.run_id }}-${{ github.run_attempt }}.json
+      PIP_CACHE_DIR: ${{ github.workspace }}/build/fuzz/caches/pip
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+
+      - name: Adjust git config
+        run: |
+          mkdir -p "$HOME"
+          git config --global --add safe.directory "$PWD"
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+
+      - name: Fetch LLVM toolchain
+        run: bash .github/scripts/fetch_rocm_toolchain.sh
+
+      - name: Install Bazel host tools
+        run: |
+          python3 dev.py bazel setup --venv
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+
+      - name: Check tool versions
+        run: bash .github/scripts/check_host_toolchain.sh --expect-artifact
+
+      - name: Configure Bazel
+        run: |
+          python3 dev.py bazel configure \
+            --//runtime/config/hal:drivers=task \
+            --//loom/config/import:enable=cxx \
+            --//loom/config/serve:image_codecs=png,jpeg,gif,webp \
+            --//loom/config/serve:audio_codecs=wav,mp3,flac
+
+      - name: Restore trusted fuzz corpus
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.IREE_FUZZ_CACHE }}/**/corpus
+          key: iree-fuzz-corpus-linux-v1-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            iree-fuzz-corpus-linux-v1-
+
+      - name: Run bounded fuzz campaign
+        id: fuzz_campaign
+        run: |
+          campaign_targets=(
+            --//build_tools/vulkan/config:enabled=false
+            --//build_tools/d3d12/config:enabled=false
+            --//loom/config/serve:image_codecs=png,jpeg,gif,webp
+            --//loom/config/serve:audio_codecs=wav,mp3,flac
+            //...
+          )
+          python3 dev.py bazel fuzz \
+            --workers=8 \
+            --mutation-time=120 \
+            --quiet-output \
+            --result="$IREE_FUZZ_RESULT" \
+            "${campaign_targets[@]}" -- \
+            -rss_limit_mb=1024 \
+            -timeout=30
+          if [[ "$GITHUB_REF" == refs/heads/main ]]; then
+            python3 dev.py bazel fuzz \
+              --compact-corpus \
+              --workers=8 \
+              --quiet-output \
+              "${campaign_targets[@]}" -- \
+              -rss_limit_mb=1024 \
+              -timeout=30
+          fi
+
+      - name: Report fuzz failure
+        if: ${{ always() && steps.fuzz_campaign.outcome == 'failure' }}
+        run: |
+          if [[ -d "$IREE_FUZZ_CACHE" ]]; then
+            find "$IREE_FUZZ_CACHE" -type f -name last-failure.log \
+              -print -exec cat {} \;
+          fi
+
+      - name: Upload fuzz failure evidence
+        if: ${{ always() && steps.fuzz_campaign.outcome == 'failure' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: native-fuzz-failure-${{ github.sha }}-attempt-${{ github.run_attempt }}
+          path: |
+            ${{ env.IREE_FUZZ_RESULT }}
+            ${{ env.IREE_FUZZ_CACHE }}/**/artifacts/**
+            ${{ env.IREE_FUZZ_CACHE }}/**/last-failure.log
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Save trusted fuzz corpus
+        if: ${{ github.ref == 'refs/heads/main' && steps.fuzz_campaign.outcome == 'success' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.IREE_FUZZ_CACHE }}/**/corpus
+          key: iree-fuzz-corpus-linux-v1-${{ github.run_id }}-${{ github.run_attempt }}

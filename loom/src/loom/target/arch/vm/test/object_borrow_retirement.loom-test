@@ -1,0 +1,163 @@
+// Pointer protection outlives explicit owner release and retires at final use.
+// RUN: emit vm-object-lifetime
+vm.target<core> @vm
+
+type.decl import("lifetime", "object") @Object
+
+low.func.decl import(native, "create", module = "lifetime") target<vm.core>(@vm) abi(vm_function) @create(%identity: reg<vm.value : i32>) -> (reg<vm.ref : ref<@Object>>, reg<vm.ref : ptr<@Object>>)
+
+low.func.decl import(native, "read", module = "lifetime") target<vm.core>(@vm) abi(vm_function) @read(%pointer: reg<vm.ref : ptr<@Object>>)
+
+low.func.decl import(native, "observe", module = "lifetime") target<vm.core>(@vm) abi(vm_function) @observe()
+
+low.func.def public target<vm.core>(@vm) abi(vm_function) @run() asm {
+  %identity = constant.i32 1
+  %owner, %saved = low.func.call @create(%identity) : (reg<vm.value : i32>) -> (reg<vm.ref : ref<@Object>>, reg<vm.ref : ptr<@Object>>)
+  low.release %owner : reg<vm.ref : ref<@Object>>
+  low.func.call @read(%saved) : (reg<vm.ref : ptr<@Object>>)
+  low.func.call @observe() : ()
+  return
+}
+
+// ----
+create 1
+read 1
+destroy 1
+live 0
+OK 0
+retired 0
+
+// ====
+
+// An unused borrowed argument retires on entry. A retained caller can still
+// use its own carrier; a final-use caller transfers the only protection.
+// RUN: emit vm-object-lifetime
+type.decl import("lifetime", "object") @Object
+
+func.decl import("lifetime", "create") @create(%identity: i32) -> (ref<@Object>, ptr<@Object>)
+
+func.decl import("lifetime", "consume") @consume(%owner: ref<@Object>)
+
+func.decl import("lifetime", "read") @read(%pointer: ptr<@Object>)
+
+func.decl import("lifetime", "observe") @observe()
+
+func.def noinline @unused(%pointer: ptr<@Object>) {
+  func.call @observe() : ()
+  func.return
+}
+
+func.def public @run() {
+  %identity = scalar.constant 1 : i32
+  %owner, %pointer = func.call @create(%identity) : (i32) -> (ref<@Object>, ptr<@Object>)
+  func.call @consume(%owner) : (ref<@Object>)
+  func.call @unused(%pointer) : (ptr<@Object>)
+  func.call @read(%pointer) : (ptr<@Object>)
+  func.call @unused(%pointer) : (ptr<@Object>)
+  func.call @observe() : ()
+  func.return
+}
+
+// ----
+create 1
+consume 1
+live 1
+read 1
+destroy 1
+live 0
+live 0
+OK 0
+retired 0
+
+// ====
+
+// A target instruction's final borrowed input releases after the instruction.
+// Its independently retained result remains live until its explicit release.
+// RUN: emit vm-object-lifetime
+vm.target<core> @vm
+
+type.decl import("lifetime", "object") @Object
+
+low.func.decl import(native, "create", module = "lifetime") target<vm.core>(@vm) abi(vm_function) @create(%identity: reg<vm.value : i32>) -> (reg<vm.ref : ref<@Object>>, reg<vm.ref : ptr<@Object>>)
+
+low.func.decl import(native, "observe", module = "lifetime") target<vm.core>(@vm) abi(vm_function) @observe()
+
+low.func.def public target<vm.core>(@vm) abi(vm_function) @run() asm {
+  %identity = constant.i32 1
+  %owner, %pointer = low.func.call @create(%identity) : (reg<vm.value : i32>) -> (reg<vm.ref : ref<@Object>>, reg<vm.ref : ptr<@Object>>)
+  low.release %owner : reg<vm.ref : ref<@Object>>
+  %alias = low.assume %pointer [] : reg<vm.ref : ptr<@Object>>
+  %condition = constant.i32 1 : reg<vm.value : i1>
+  %selected = ref.select %condition, %alias, %alias : reg<vm.ref : ptr<@Object>>
+  low.release %selected : reg<vm.ref : ptr<@Object>>
+  low.func.call @observe() : ()
+  return
+}
+
+// ----
+create 1
+destroy 1
+live 0
+OK 0
+retired 0
+
+// ====
+
+// Pointer protection outlives explicit owner release and retires at final use.
+// RUN: emit vm-object-lifetime
+vm.target<core> @vm
+
+type.decl import("lifetime", "object") @Object
+
+low.func.decl import(native, "create", module = "lifetime") target<vm.core>(@vm) abi(vm_function) @create(%identity: reg<vm.value : i32>) -> (reg<vm.ref : ref<@Object>>, reg<vm.ref : ptr<@Object>>)
+
+low.func.decl import(native, "read", module = "lifetime") target<vm.core>(@vm) abi(vm_function) @read(%pointer: reg<vm.ref : ptr<@Object>>)
+
+low.func.decl import(native, "observe", module = "lifetime") target<vm.core>(@vm) abi(vm_function) @observe()
+
+// Each branch retires its unused pointer before the following observation.
+low.func.def target<vm.core>(@vm) abi(vm_function) @choose(%condition: reg<vm.value : i1>) asm {
+  %first = constant.i32 1
+  %second = constant.i32 2
+  %left_owner, %left = low.func.call @create(%first) : (reg<vm.value : i32>) -> (reg<vm.ref : ref<@Object>>, reg<vm.ref : ptr<@Object>>)
+  %right_owner, %right = low.func.call @create(%second) : (reg<vm.value : i32>) -> (reg<vm.ref : ref<@Object>>, reg<vm.ref : ptr<@Object>>)
+  low.release %left_owner : reg<vm.ref : ref<@Object>>
+  low.release %right_owner : reg<vm.ref : ref<@Object>>
+  low.cond_br %condition, ^left_path, ^right_path : reg<vm.value : i1>
+^left_path:
+  low.func.call @observe() : ()
+  low.br ^joined(%left: reg<vm.ref : ptr<@Object>>)
+^right_path:
+  low.func.call @observe() : ()
+  low.br ^joined(%right: reg<vm.ref : ptr<@Object>>)
+^joined(%value: reg<vm.ref : ptr<@Object>>):
+  low.func.call @read(%value) : (reg<vm.ref : ptr<@Object>>)
+  low.func.call @observe() : ()
+  return
+}
+
+low.func.def public target<vm.core>(@vm) abi(vm_function) @run() asm {
+  %left = constant.i32 1 : reg<vm.value : i1>
+  %right = constant.i32 0 : reg<vm.value : i1>
+  low.func.call @choose(%left) : (reg<vm.value : i1>)
+  low.func.call @choose(%right) : (reg<vm.value : i1>)
+  return
+}
+
+// ----
+create 1
+create 2
+destroy 2
+live 1
+read 1
+destroy 1
+live 0
+create 1
+create 2
+destroy 1
+live 1
+read 2
+destroy 2
+live 0
+OK 0
+retired 0

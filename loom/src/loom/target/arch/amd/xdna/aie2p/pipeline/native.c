@@ -4,13 +4,15 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "loom/target/arch/amd/xdna/aie2p/pipeline/native.h"
-
-#include "loom/analysis/storage_geometry.h"
 #include "loom/error/parameter.h"
 #include "loom/ops/channel/ops.h"
 #include "loom/ops/func/ops.h"
 #include "loom/ops/pipeline/ops.h"
+#include "loom/target/arch/amd/xdna/aie2p/pipeline/channel_state.h"
+#include "loom/target/arch/amd/xdna/aie2p/pipeline/input.h"
+#include "loom/target/arch/amd/xdna/aie2p/pipeline/refill.h"
+#include "loom/target/arch/amd/xdna/aie2p/pipeline/semaphores.h"
+#include "loom/target/arch/amd/xdna/aie2p/pipeline/storage.h"
 #include "loom/target/arch/amd/xdna/error_catalog.h"
 #include "loom/target/function_version.h"
 #include "loom/util/fact_extensions.h"
@@ -31,7 +33,8 @@ iree_status_t loom_aie2p_native_reject(
 static iree_status_t loom_aie2p_native_inventory(
     loom_aie2p_native_context_t* context) {
   const loom_xdna_array_family_t* family = context->family;
-  const iree_host_size_t tile_count = family->column_count * family->row_count;
+  const iree_host_size_t tile_count =
+      (iree_host_size_t)family->column_count * family->row_count;
   iree_arena_allocator_t* arena = context->pass->arena;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       arena, tile_count, sizeof(*context->tiles), (void**)&context->tiles));
@@ -82,7 +85,7 @@ static iree_status_t loom_aie2p_native_inventory(
 }
 
 static iree_status_t loom_aie2p_native_select_channels(
-    loom_aie2p_native_context_t* context, loom_module_t* module,
+    loom_aie2p_native_context_t* context,
     const loom_pipeline_realization_t* realization, bool* out_valid) {
   const loom_pipeline_invocations_t* invocations = &realization->invocations;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
@@ -92,58 +95,40 @@ static iree_status_t loom_aie2p_native_select_channels(
     const loom_pipeline_invocation_channel_t* occurrence =
         &invocations->channels[i];
     const loom_pipeline_resource_channel_t* source = occurrence->source;
-    const loom_pipeline_resource_allocation_t* allocation =
+    const loom_pipeline_storage_allocation_t* allocation =
         occurrence->allocation;
     if (!allocation) {
       return loom_aie2p_native_reject(
           context, source->binding,
           IREE_SV("invocation-owned on-chip channel storage"));
     }
-    loom_aie2p_native_tile_t* owner =
-        context->pool_tiles[allocation->pool_index];
-    const loom_type_t storage_type = loom_module_value_type(
-        module, loom_channel_bind_storage(source->binding));
-    loom_storage_geometry_t geometry;
-    loom_storage_geometry_span_t record;
+    const loom_pipeline_channel_geometry_t* geometry = source->geometry;
     int64_t offset = 0;
-    uint64_t stride_bits = 0, record_bits = 0, extent = 0;
-    if (!loom_storage_geometry_query(&occurrence->invocation->facts->context,
-                                     module, storage_type, &geometry) ||
-        geometry.rank == 0 ||
-        !loom_storage_geometry_measure(&geometry, 1, &record) ||
+    uint64_t extent = 0;
+    if (!geometry ||
         !loom_value_facts_as_exact_i64(source->storage.base_byte_offset,
                                        &offset) ||
-        offset < 0 ||
-        !iree_checked_mul_u64(geometry.axes[0].element_stride,
-                              geometry.element_bit_count, &stride_bits) ||
-        !iree_checked_mul_u64(record.element_span, geometry.element_bit_count,
-                              &record_bits) ||
-        stride_bits % 8 || record_bits % 8 ||
-        !iree_checked_mul_u64(source->capacity - 1, stride_bits / 8, &extent) ||
-        !iree_checked_add_u64(extent, record_bits / 8, &extent) ||
-        (uint64_t)offset > allocation->byte_length ||
-        extent > allocation->byte_length - (uint64_t)offset ||
-        stride_bits / 8 > UINT32_MAX ||
+        offset < 0 || geometry->slot_bit_stride % 8 ||
+        geometry->record_bit_span % 8 ||
+        !iree_checked_mul_u64(source->capacity - 1,
+                              geometry->slot_bit_stride / 8, &extent) ||
+        !iree_checked_add_u64(extent, geometry->record_bit_span / 8, &extent) ||
+        (uint64_t)offset > allocation->source->byte_length ||
+        extent > allocation->source->byte_length - (uint64_t)offset ||
+        geometry->slot_bit_stride / 8 > UINT32_MAX ||
         allocation->byte_offset > UINT32_MAX - (uint64_t)offset) {
       return loom_aie2p_native_reject(
           context, source->binding,
           IREE_SV("specialized byte-addressable channel slot geometry"));
     }
-    if (source->capacity > (uint64_t)owner->facts->lock_value_maximum ||
-        owner->next_lock + 2 > owner->facts->lock_count) {
-      return loom_aie2p_native_reject(
-          context, source->binding,
-          IREE_SV("a hardware semaphore pair with enough slot credits"));
-    }
     context->channels[i] = (loom_aie2p_native_channel_t){
         .source = source,
-        .pool_index = allocation->pool_index,
+        .pool_index = allocation->source->pool_index,
         .byte_offset = (uint32_t)(allocation->byte_offset + (uint64_t)offset),
-        .byte_stride = (uint32_t)(stride_bits / 8),
-        .record_byte_length = (uint32_t)(record_bits / 8),
-        .record_dense = record.dense,
-        .free_lock = owner->next_lock++,
-        .ready_lock = owner->next_lock++,
+        .byte_stride = (uint32_t)(geometry->slot_bit_stride / 8),
+        .record_byte_length = (uint32_t)(geometry->record_bit_span / 8),
+        .record_dense = geometry->record_dense,
+        .balance = {.worker = UINT32_MAX, .exact = true, .balanced = true},
         .cursor = {.reader = {.worker = UINT32_MAX},
                    .writer = {.worker = UINT32_MAX}}};
   }
@@ -180,6 +165,10 @@ static iree_status_t loom_aie2p_native_select_channel_accesses(
     *access = (loom_aie2p_native_channel_access_t){.channel = channel};
     if (context->pool_tiles[channel->pool_index]->facts->kind ==
         LOOM_XDNA_TILE_KIND_MEMORY) {
+      if (!channel->replay.record_count) {
+        ++worker->channels.remote_count;
+        continue;
+      }
       const loom_pipeline_invocation_t* invocation =
           realization->invocations.workers[worker - context->workers]
               .invocation;
@@ -190,12 +179,11 @@ static iree_status_t loom_aie2p_native_select_channel_accesses(
       const iree_host_size_t distributor =
           engine == IREE_HOST_SIZE_MAX
               ? IREE_HOST_SIZE_MAX
-              : context->distribution_execution
-                    .workers[invocation->ordinal *
-                                 context->distribution_execution.engine_count +
-                             engine];
-      if (!channel->replay.record_count || channel->replay.credits != 1 ||
-          distributor == IREE_HOST_SIZE_MAX ||
+              : loom_pipeline_participants_worker(
+                    context->distribution_execution
+                        .invocations[invocation->ordinal],
+                    engine);
+      if (channel->replay.credits != 1 || distributor == IREE_HOST_SIZE_MAX ||
           (realization->invocations.workers[distributor].invocation !=
                invocation &&
            (realization->invocations.workers[distributor].invocation->parent !=
@@ -207,6 +195,7 @@ static iree_status_t loom_aie2p_native_select_channel_accesses(
             IREE_SV("a finite SRAM batch whose producer owns the complete "
                     "distribution lifetime"));
       }
+      access->batch_publication = true;
       continue;
     }
     const loom_xdna_tile_coordinate_t owner =
@@ -233,11 +222,11 @@ static iree_status_t loom_aie2p_native_select_channel_accesses(
         &realization->invocations, action->channel);
     const loom_aie2p_native_channel_access_t* access =
         &worker->channels.accesses[worker->channels.indices[index]];
-    if (access->window) {
+    if (!access->batch_publication) {
       continue;
     }
-    if ((!loom_channel_reserve_isa(action->op) &&
-         !loom_channel_publish_isa(action->op)) ||
+    if ((action->kind != LOOM_CHANNEL_PLAN_ACTION_KIND_RESERVE &&
+         action->kind != LOOM_CHANNEL_PLAN_ACTION_KIND_PUBLISH) ||
         source->completion.actions[i].maximum_admissions >
             access->channel->replay.record_count) {
       return loom_aie2p_native_reject(
@@ -245,74 +234,6 @@ static iree_status_t loom_aie2p_native_select_channel_accesses(
           IREE_SV("one complete SRAM publication without slot reuse inside "
                   "its producer invocation"));
     }
-  }
-  *out_valid = true;
-  return iree_ok_status();
-}
-
-static iree_status_t loom_aie2p_native_select_buffer_accesses(
-    loom_aie2p_native_context_t* context,
-    const loom_pipeline_invocation_t* invocation,
-    const loom_pipeline_worker_t* source, loom_aie2p_native_worker_t* worker,
-    bool* out_valid) {
-  *out_valid = false;
-  uint16_t argument_count = 0;
-  const loom_value_id_t* arguments =
-      loom_func_like_arg_ids(source->function, &argument_count);
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      context->pass->arena, argument_count, sizeof(*worker->buffers.accesses),
-      (void**)&worker->buffers.accesses));
-  for (uint16_t i = 0; i < argument_count; ++i) {
-    const loom_value_id_t argument = arguments[i];
-    if (!loom_type_is_buffer(
-            loom_module_value_type(context->code.module, argument)) ||
-        !loom_module_value_has_uses(context->code.module, argument)) {
-      continue;
-    }
-    loom_value_fact_buffer_reference_t reference;
-    if (!loom_value_facts_query_buffer_reference(
-            &source->facts.context,
-            loom_value_fact_table_lookup(&source->facts, argument),
-            &reference)) {
-      return loom_aie2p_native_reject(
-          context, source->source->call,
-          IREE_SV("a resolved storage root for each core buffer capture"));
-    }
-    const loom_value_id_t root =
-        loom_value_fact_buffer_reference_resolve_root_value(reference,
-                                                            argument);
-    if (reference.memory_space != LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP) {
-      continue;
-    }
-    const loom_pipeline_resource_allocation_t* allocation =
-        loom_pipeline_invocation_lookup_allocation(invocation, root);
-    if (!allocation || allocation->byte_length == 0 ||
-        allocation->byte_offset > UINT32_MAX ||
-        allocation->byte_length > UINT32_MAX) {
-      return loom_aie2p_native_reject(
-          context, source->source->call,
-          IREE_SV("an invocation-owned finite local allocation for each core "
-                  "buffer capture"));
-    }
-    const loom_aie2p_native_tile_t* owner =
-        context->pool_tiles[allocation->pool_index];
-    if (owner->facts->kind == LOOM_XDNA_TILE_KIND_MEMORY) {
-      return loom_aie2p_native_reject(
-          context, source->source->call,
-          IREE_SV("DMA-owned SRAM storage with compute-memory handoffs"));
-    }
-    const loom_xdna_address_window_t* window = loom_xdna_array_load_window(
-        context->family, worker->tile->coordinate, owner->coordinate);
-    if (!window) {
-      return loom_aie2p_native_reject(
-          context, source->source->call,
-          IREE_SV("captured storage directly visible from its consuming core"));
-    }
-    loom_aie2p_native_buffer_access_t* access =
-        &worker->buffers.accesses[worker->buffers.count++];
-    access->argument = argument;
-    access->alignment = allocation->byte_alignment;
-    access->address = window->base + (uint32_t)allocation->byte_offset;
   }
   *out_valid = true;
   return iree_ok_status();
@@ -326,6 +247,8 @@ static iree_status_t loom_aie2p_native_claim_transport_cursor(
   *out_valid = false;
   loom_aie2p_native_channel_t* channel =
       loom_aie2p_native_channel(context, realization, identity);
+  loom_aie2p_native_begin_cursor_owner(channel, &realization->invocations,
+                                       worker_index);
   loom_aie2p_native_cursor_t* cursor =
       reader ? &channel->cursor.reader : &channel->cursor.writer;
   if (!admissions || admissions > UINT32_MAX) {
@@ -366,6 +289,7 @@ static iree_status_t loom_aie2p_native_claim_transport_cursor(
   cursor->worker = worker_index;
   cursor->transport_batch = batch_index;
   cursor->maximum_admissions += (uint32_t)admissions;
+  cursor->exact_admissions = true;
   cursor->advances = channel->source->capacity > 1 &&
                      (cursor->shared || cursor->maximum_admissions > 1);
   *out_valid = true;
@@ -474,16 +398,17 @@ static iree_status_t loom_aie2p_native_configure_channels(
     const iree_host_size_t channel_index =
         loom_pipeline_invocations_channel_index(&realization->invocations,
                                                 source_action->channel);
-    const loom_aie2p_native_channel_t* channel =
-        &context->channels[channel_index];
+    loom_aie2p_native_channel_t* channel = &context->channels[channel_index];
     loom_aie2p_native_configuration_cursor_t* position =
         &positions[channel_index];
     loom_aie2p_native_configuration_action_t* action = &actions[action_index];
     *action = (loom_aie2p_native_configuration_action_t){
         .channel = channel, .expected = -1, .value = -1};
-    const loom_op_t* op = step->op;
-    const bool reserve = loom_channel_reserve_isa(op);
-    const bool acquire = loom_channel_acquire_isa(op);
+    const loom_op_t* op = source_action->op;
+    const bool reserve =
+        source_action->kind == LOOM_CHANNEL_PLAN_ACTION_KIND_RESERVE;
+    const bool acquire =
+        source_action->kind == LOOM_CHANNEL_PLAN_ACTION_KIND_ACQUIRE;
     if (reserve || acquire) {
       const loom_value_id_t record = loom_op_const_results(op)[0];
       records[loom_local_value_domain_ordinal(&source->value_domain, record)] =
@@ -498,7 +423,7 @@ static iree_status_t loom_aie2p_native_configure_channels(
         }
         position->reservation =
             (position->reservation + 1) % channel->replay.record_count;
-      } else if (loom_channel_publish_isa(op)) {
+      } else if (source_action->kind == LOOM_CHANNEL_PLAN_ACTION_KIND_PUBLISH) {
         position->publication +=
             source->completion.actions[action_index].credits;
         if (position->publication == channel->replay.record_count) {
@@ -510,7 +435,8 @@ static iree_status_t loom_aie2p_native_configure_channels(
     } else if (channel->source->capacity == 1 &&
                source->completion.actions[action_index].maximum_admissions >
                    1) {
-      action->lock = reserve || loom_channel_release_isa(op)
+      action->lock = reserve || source_action->kind ==
+                                    LOOM_CHANNEL_PLAN_ACTION_KIND_RELEASE
                          ? channel->free_lock
                          : channel->ready_lock;
       if (reserve || acquire) {
@@ -519,12 +445,18 @@ static iree_status_t loom_aie2p_native_configure_channels(
       } else if (source->completion.actions[action_index].credits) {
         action->value = 1;
       }
-    } else if (acquire || loom_channel_publish_isa(op)) {
+    } else if (acquire ||
+               source_action->kind == LOOM_CHANNEL_PLAN_ACTION_KIND_PUBLISH) {
       // A single admission from an ordinary ring retains the original
       // initial-credit debit and unobservable final reclamation.
       action->lock = channel->ready_lock;
       action->expected = acquire ? 1 : -1;
       action->value = acquire ? 0 : 1;
+    }
+    if (loom_channel_release_isa(op) && action->value == 1 &&
+        action->lock == channel->free_lock && channel->source->capacity == 1) {
+      ++channel->configuration_returns.count;
+      channel->configuration_returns.last = action;
     }
   }
   worker->configuration_actions = actions;
@@ -537,71 +469,33 @@ static bool loom_aie2p_native_can_repeat(
     const loom_pipeline_realization_t* realization,
     const loom_pipeline_worker_t* source, loom_aie2p_native_worker_t* worker) {
   const loom_pipeline_transport_t* transport = &source->transport;
-  if (!transport->induction || !transport->sources_stable ||
-      transport->count != 4 || transport->stream_count != 1 ||
-      transport->streams[0]->transfer_count != 1 ||
+  if (!transport->input || transport->input->phase_count != 1 ||
+      transport->input->phases[0].source_capture_count ||
+      transport->input->acquisition || !transport->sources_stable ||
       transport->repetitions < 2) {
     return false;
   }
-  const loom_pipeline_transport_step_t* steps = transport->steps;
-  if (!loom_channel_reserve_isa(steps[0].op) ||
-      steps[1].kind != LOOM_PIPELINE_TRANSPORT_STEP_TRANSFER ||
-      steps[2].kind != LOOM_PIPELINE_TRANSPORT_STEP_WAIT ||
-      !loom_channel_publish_isa(steps[3].op) ||
-      loom_channel_publish_write(steps[3].op) !=
-          loom_channel_reserve_write(steps[0].op)) {
-    return false;
-  }
-  const loom_movement_request_t* request = &steps[1].source.transfer->request;
-  if (request->kind != LOOM_MOVEMENT_KIND_KERNEL_ASYNC_COPY ||
-      request->source.memory_space != LOOM_VALUE_FACT_MEMORY_SPACE_GLOBAL ||
+  const loom_pipeline_transport_input_phase_t* input =
+      &transport->input->phases[0];
+  const loom_movement_request_t* request = &input->transfer->request;
+  if (request->source.memory_space != LOOM_VALUE_FACT_MEMORY_SPACE_GLOBAL ||
       request->dest.memory_space != LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP) {
     return false;
   }
   const loom_aie2p_native_channel_t* channel = loom_aie2p_native_channel(
-      context, realization, steps[0].source.channel->channel);
+      context, realization, input->reservation->channel);
   // Consumer completion observes every DMA publication, and therefore the last
   // external read and local write, before the invocation can retire storage.
   // Egress must instead observe global-write completion before releasing its
   // source slot: a subsequent reservation can observe the external output.
-  if (channel->cursor.reader.worker == UINT32_MAX ||
-      channel->cursor.reader.shared || channel->cursor.writer.shared ||
-      channel->cursor.reader.maximum_admissions != transport->repetitions ||
-      !realization->workers[channel->cursor.reader.worker]
-           .block_execution_counts) {
+  if (channel->cursor.writer.shared ||
+      !loom_aie2p_native_cursor_has_exact_admissions(&channel->cursor.reader,
+                                                     transport->repetitions)) {
     return false;
   }
-  const loom_view_region_t *external, *local;
-  loom_view_region_table_try_lookup(&source->asynchronous.movement.view_regions,
-                                    request->source.value_id, &external);
-  loom_view_region_table_try_lookup(&source->asynchronous.movement.view_regions,
-                                    request->dest.value_id, &local);
-  if (local->base_view_value_id != loom_channel_reserve_view(steps[0].op) ||
-      !loom_symbolic_expr_is_constant(&local->projection_byte_offset)) {
-    return false;
-  }
-  const loom_symbolic_expr_t* offset = &external->begin_byte_offset;
-  int64_t begin = offset->constant, stride = 0;
-  if (offset->term_count) {
-    int64_t initial, increment, displacement;
-    if (!loom_symbolic_expr_is_linear(offset) || offset->term_count != 1 ||
-        offset->terms[0].value_id != transport->induction->value ||
-        !loom_value_facts_as_exact_i64(
-            loom_value_fact_recurrence_operand_facts(
-                &source->facts, transport->induction->initial_value),
-            &initial) ||
-        !loom_value_facts_as_exact_i64(
-            loom_value_fact_recurrence_operand_facts(
-                &source->facts, transport->induction->step),
-            &increment) ||
-        !iree_checked_mul_i64(offset->terms[0].coefficient, initial,
-                              &displacement) ||
-        !iree_checked_add_i64(begin, displacement, &begin) ||
-        !iree_checked_mul_i64(offset->terms[0].coefficient, increment,
-                              &stride)) {
-      return false;
-    }
-  }
+  const int64_t begin = input->source_byte_offset;
+  const int64_t stride = input->source_byte_stride;
+  const uint64_t period = input->period;
   const loom_xdna_dma_facts_t* local_dma =
       &context->pool_tiles[channel->pool_index]->facts->dma;
   const loom_xdna_dma_facts_t* shim_dma =
@@ -611,21 +505,24 @@ static bool loom_aie2p_native_can_repeat(
   if (channel->replay.record_count &&
       ((uint64_t)request->transferred_byte_count !=
            channel->record_byte_length ||
-       local->projection_byte_offset.constant != 0 ||
+       input->destination_byte_offset != 0 ||
        stride != channel->record_byte_length ||
        transport->repetitions % channel->replay.record_count)) {
     return false;
   }
+  const uint32_t capacity =
+      channel->replay.record_count ? 1 : channel->source->capacity;
+  const uint32_t byte_stride = capacity > 1 ? channel->byte_stride : 0;
   if (begin < 0 || begin > UINT32_MAX || stride < 0 || stride > UINT32_MAX ||
       transport->repetitions > UINT32_MAX ||
-      channel->source->capacity > (UINT64_C(1) << local_dma->iteration_bits) ||
-      (channel->byte_stride % local_dma->transfer_length_granularity) ||
+      capacity > (UINT64_C(1) << local_dma->iteration_bits) ||
+      (byte_stride % local_dma->transfer_length_granularity) ||
       (stride % shim_dma->transfer_length_granularity) ||
-      channel->byte_stride / local_dma->transfer_length_granularity >
+      byte_stride / local_dma->transfer_length_granularity >
           (UINT64_C(1) << local_dma->step_size_bits) ||
       !loom_aie2p_native_select_ingress_descriptor(
           context, source, request, (uint32_t)stride,
-          (uint32_t)transport->repetitions, worker)) {
+          (uint32_t)transport->repetitions, (uint32_t)period, worker)) {
     return false;
   }
   worker->repetition.count = (uint32_t)transport->repetitions;
@@ -641,8 +538,8 @@ static iree_status_t loom_aie2p_native_select(
     const loom_pipeline_realization_t* realization, bool* out_valid) {
   loom_aie2p_native_context_t* context = user_data;
   *out_valid = false;
-  IREE_RETURN_IF_ERROR(loom_aie2p_native_select_channels(
-      context, module, realization, out_valid));
+  IREE_RETURN_IF_ERROR(
+      loom_aie2p_native_select_channels(context, realization, out_valid));
   if (!*out_valid) {
     return iree_ok_status();
   }
@@ -771,47 +668,63 @@ static iree_status_t loom_aie2p_native_select(
     for (iree_host_size_t j = 0; j < source->channels.action_count; ++j) {
       const loom_channel_plan_action_t* action = &source->channels.actions[j];
       const loom_op_t* op = action->op;
-      if (!loom_channel_acquire_isa(op) && !loom_channel_reserve_isa(op) &&
-          !loom_channel_publish_isa(op) && !loom_channel_release_isa(op) &&
-          !loom_channel_wait_isa(op)) {
-        return loom_aie2p_native_reject(
-            context, op,
-            IREE_SV(
-                "FIFO acquire/reserve/wait/publish/release channel actions"));
+      switch (action->kind) {
+        case LOOM_CHANNEL_PLAN_ACTION_KIND_ACQUIRE:
+        case LOOM_CHANNEL_PLAN_ACTION_KIND_RESERVE:
+        case LOOM_CHANNEL_PLAN_ACTION_KIND_PUBLISH:
+        case LOOM_CHANNEL_PLAN_ACTION_KIND_RELEASE:
+        case LOOM_CHANNEL_PLAN_ACTION_KIND_WAIT:
+          break;
+        default:
+          return loom_aie2p_native_reject(
+              context, op,
+              IREE_SV("FIFO acquire/reserve/wait/publish/release channel "
+                      "actions"));
       }
-      if (loom_channel_acquire_isa(op) || loom_channel_reserve_isa(op)) {
+      if (action->kind == LOOM_CHANNEL_PLAN_ACTION_KIND_ACQUIRE ||
+          action->kind == LOOM_CHANNEL_PLAN_ACTION_KIND_RESERVE) {
         loom_aie2p_native_channel_t* channel =
             loom_aie2p_native_channel(context, realization, action->channel);
-        loom_aie2p_native_cursor_t* cursor = loom_channel_acquire_isa(op)
-                                                 ? &channel->cursor.reader
-                                                 : &channel->cursor.writer;
-        const bool shared = cursor->shared || (cursor->worker != UINT32_MAX &&
-                                               cursor->worker != i);
-        const uint32_t maximum_admissions =
-            cursor->worker == i
-                ? iree_max(cursor->maximum_admissions,
-                           source->completion.actions[j].maximum_admissions)
-                : source->completion.actions[j].maximum_admissions;
-        *cursor = (loom_aie2p_native_cursor_t){
-            .worker = (uint32_t)i,
-            .maximum_admissions = maximum_admissions,
-            .shared = shared,
-            .advances =
-                channel->source->capacity > 1 &&
-                (maximum_admissions > 1 || shared ||
-                 realization->invocations.workers[i].invocation->ordinal != 0)};
-      }
-    }
-    for (iree_host_size_t j = 0; j < source->channels.action_count; ++j) {
-      const loom_channel_plan_action_t* action = &source->channels.actions[j];
-      if (source->completion.actions[j].credits >
-          (uint32_t)tile->facts->lock_value_maximum) {
-        return loom_aie2p_native_reject(
-            context, action->op,
-            IREE_SV("a completed FIFO prefix within semaphore credit range"));
+        loom_aie2p_native_begin_cursor_owner(channel, &realization->invocations,
+                                             (uint32_t)i);
+        loom_aie2p_native_cursor_t* cursor =
+            action->kind == LOOM_CHANNEL_PLAN_ACTION_KIND_ACQUIRE
+                ? &channel->cursor.reader
+                : &channel->cursor.writer;
+        const bool imported =
+            realization->invocations.channels[channel - context->channels]
+                .invocation != realization->invocations.workers[i].invocation;
+        loom_aie2p_native_cursor_bind(
+            cursor, channel->source->capacity, (uint32_t)i,
+            source->completion.actions[j].maximum_admissions,
+            loom_cfg_execution_count_is_exact(&source->execution_counts,
+                                              op->parent_block->region_index),
+            imported);
       }
     }
   }
+  // Retained batches use replay-lifetime credits rather than one per storage
+  // slot. All distribution facts are available before credit admission.
+  for (iree_host_size_t i = 0; i < realization->invocations.channel_count;
+       ++i) {
+    loom_aie2p_native_channel_t* channel = &context->channels[i];
+    loom_aie2p_native_finish_cursor_owners(channel);
+    const loom_aie2p_native_tile_t* owner =
+        context->pool_tiles[channel->pool_index];
+    if (!channel->replay.record_count &&
+        channel->source->capacity >
+            (uint64_t)owner->facts->lock_value_maximum) {
+      return loom_aie2p_native_reject(
+          context, channel->source->binding,
+          IREE_SV("a hardware semaphore pair with enough slot credits"));
+    }
+  }
+  IREE_RETURN_IF_ERROR(
+      loom_aie2p_native_assign_channel_locks(context, realization, out_valid));
+  if (!*out_valid) {
+    return iree_ok_status();
+  }
+  *out_valid = false;
   // The invocation command stream is one sequential engine. Selecting at most
   // one strand preserves concurrency between independently authored strands.
   // Every other strand retains its own execution engine.
@@ -827,6 +740,27 @@ static iree_status_t loom_aie2p_native_select(
     core_engines[i] = IREE_HOST_SIZE_MAX;
     if (source->transport.cohort_count) {
       worker->execution = LOOM_AIE2P_NATIVE_EXECUTION_DISTRIBUTION;
+      continue;
+    }
+    for (iree_host_size_t j = 0; j < source->channels.action_count; ++j) {
+      const loom_channel_plan_action_t* action = &source->channels.actions[j];
+      const loom_aie2p_native_channel_t* channel =
+          loom_aie2p_native_channel(context, realization, action->channel);
+      const loom_aie2p_native_tile_t* owner =
+          context->pool_tiles[channel->pool_index];
+      if (!channel->replay.record_count &&
+          source->completion.actions[j].credits >
+              (uint32_t)owner->facts->lock_value_maximum) {
+        return loom_aie2p_native_reject(
+            context, action->op,
+            IREE_SV("a completed FIFO prefix within semaphore credit range"));
+      }
+    }
+    bool input = false;
+    IREE_RETURN_IF_ERROR(
+        loom_aie2p_native_select_input(context, realization, i, &input));
+    if (input) {
+      worker->execution = LOOM_AIE2P_NATIVE_EXECUTION_INPUT;
       continue;
     }
     bool configure = false;
@@ -858,7 +792,8 @@ static iree_status_t loom_aie2p_native_select(
   loom_pipeline_execution_conflict_t conflict;
   IREE_RETURN_IF_ERROR(loom_pipeline_execution_build(
       &realization->invocations, core_engines,
-      context->family->column_count * context->family->row_count,
+      (iree_host_size_t)context->family->column_count *
+          context->family->row_count,
       context->pass->arena, &context->execution, &conflict));
   if (conflict.second_worker != IREE_HOST_SIZE_MAX) {
     return loom_aie2p_native_reject(
@@ -909,8 +844,8 @@ static iree_status_t loom_aie2p_native_select(
             : core_engines;
     for (iree_host_size_t j = 0; j < source->channels.action_count; ++j) {
       const loom_channel_plan_action_t* action = &source->channels.actions[j];
-      const bool reader = loom_channel_acquire_isa(action->op);
-      if (!reader && !loom_channel_reserve_isa(action->op)) {
+      const bool reader = action->kind == LOOM_CHANNEL_PLAN_ACTION_KIND_ACQUIRE;
+      if (!reader && action->kind != LOOM_CHANNEL_PLAN_ACTION_KIND_RESERVE) {
         continue;
       }
       const loom_aie2p_native_channel_t* channel =
@@ -954,7 +889,7 @@ static iree_status_t loom_aie2p_native_select(
     if (!valid) {
       return iree_ok_status();
     }
-    IREE_RETURN_IF_ERROR(loom_aie2p_native_select_buffer_accesses(
+    IREE_RETURN_IF_ERROR(loom_aie2p_native_select_storage_accesses(
         context, realization->invocations.workers[i].invocation, source, worker,
         &valid));
     if (!valid) {
@@ -969,7 +904,12 @@ static iree_status_t loom_aie2p_native_select(
          (context->workers[channel->cursor.writer.worker].execution !=
               LOOM_AIE2P_NATIVE_EXECUTION_DMA &&
           context->workers[channel->cursor.writer.worker].execution !=
+              LOOM_AIE2P_NATIVE_EXECUTION_DISTRIBUTION &&
+          context->workers[channel->cursor.writer.worker].execution !=
               LOOM_AIE2P_NATIVE_EXECUTION_CONFIGURATION &&
+          !(context->workers[channel->cursor.writer.worker].execution ==
+                LOOM_AIE2P_NATIVE_EXECUTION_INPUT &&
+            channel->replay.credits == 1) &&
           !(context->workers[channel->cursor.writer.worker].execution ==
                 LOOM_AIE2P_NATIVE_EXECUTION_CORE &&
             context->pool_tiles[channel->pool_index]->facts->kind ==
@@ -980,6 +920,16 @@ static iree_status_t loom_aie2p_native_select(
     }
   }
   IREE_RETURN_IF_ERROR(
+      loom_aie2p_native_select_progress(context, realization, out_valid));
+  if (!*out_valid) {
+    return iree_ok_status();
+  }
+  IREE_RETURN_IF_ERROR(
+      loom_aie2p_native_select_collectives(context, realization, out_valid));
+  if (!*out_valid) {
+    return iree_ok_status();
+  }
+  IREE_RETURN_IF_ERROR(
       loom_aie2p_native_select_transfers(context, realization, out_valid));
   if (!*out_valid) {
     return iree_ok_status();
@@ -987,6 +937,7 @@ static iree_status_t loom_aie2p_native_select(
   for (iree_host_size_t i = realization->resources.strand_count;
        i < worker_count; ++i) {
     if (context->workers[i].execution != LOOM_AIE2P_NATIVE_EXECUTION_CORE &&
+        context->workers[i].execution != LOOM_AIE2P_NATIVE_EXECUTION_INPUT &&
         !(context->workers[i].execution ==
               LOOM_AIE2P_NATIVE_EXECUTION_DISTRIBUTION &&
           context->workers[i].distribution_phases)) {
@@ -996,6 +947,14 @@ static iree_status_t loom_aie2p_native_select(
           IREE_SV("resident child transport start and retirement"));
     }
   }
+  if (realization->invocations.lifetimes.has_serial) {
+    IREE_RETURN_IF_ERROR(loom_aie2p_native_finalize_endpoints(context));
+  }
+  IREE_RETURN_IF_ERROR(
+      loom_aie2p_native_select_initializers(context, realization, out_valid));
+  if (!*out_valid) {
+    return iree_ok_status();
+  }
   IREE_RETURN_IF_ERROR(loom_aie2p_native_select_joins(context, out_valid));
   if (!*out_valid) {
     return iree_ok_status();
@@ -1003,6 +962,13 @@ static iree_status_t loom_aie2p_native_select(
   return loom_pipeline_resources_check_capacity(
       &realization->resources, realization->function.op,
       context->pass->diagnostic_emitter, out_valid);
+}
+
+static bool loom_aie2p_native_has_worker_body(const void* user_data,
+                                              iree_host_size_t worker_index) {
+  const loom_aie2p_native_context_t* context = user_data;
+  return context->workers[worker_index].execution ==
+         LOOM_AIE2P_NATIVE_EXECUTION_CORE;
 }
 
 iree_status_t loom_aie2p_pipeline_realize(loom_pass_t* pass,
@@ -1022,6 +988,7 @@ iree_status_t loom_aie2p_pipeline_realize(loom_pass_t* pass,
       loom_aie2p_worker_builder_initialize(module, pass->arena, &context.code));
   const loom_pipeline_realization_callback_t callback = {
       .select = loom_aie2p_native_select,
+      .has_worker_body = loom_aie2p_native_has_worker_body,
       .worker = loom_aie2p_native_emit_worker,
       .entry = loom_aie2p_native_emit_configuration,
       .user_data = &context};

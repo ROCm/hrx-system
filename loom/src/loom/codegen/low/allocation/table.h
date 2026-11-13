@@ -15,6 +15,7 @@
 #include "loom/codegen/low/allocation/move.h"
 #include "loom/codegen/low/allocation/target_constraints.h"
 #include "loom/codegen/low/descriptors.h"
+#include "loom/codegen/low/function_requirements.h"
 #include "loom/codegen/low/placement.h"
 #include "loom/codegen/low/register_requirements.h"
 #include "loom/codegen/low/storage_layout.h"
@@ -68,7 +69,7 @@ typedef enum loom_low_allocation_value_scratch_flag_bits_e {
 // Bitset of loom_low_allocation_value_scratch_flag_bits_t values.
 typedef uint16_t loom_low_allocation_value_scratch_flags_t;
 
-// Allocation remark for agent/tool feedback.
+// Allocation decision facts retained for pressure repair and reporting.
 typedef struct loom_low_allocation_remark_t {
   // Remark category.
   loom_low_allocation_remark_kind_t kind;
@@ -100,6 +101,9 @@ typedef struct loom_low_allocation_spill_plan_t {
   // Predicted operand-use reloads in the current synthetic spill plan. Actual
   // materialization may differ after earlier spill rewrites in the same frame.
   uint32_t reload_count;
+  // Defined register parts for a partial value; zero denotes a complete value.
+  // Native transport preserves exactly these parts without reading other bits.
+  uint32_t defined_parts;
 } loom_low_allocation_spill_plan_t;
 
 // Distinct fixed retained-read blockers encountered by spilled assignments, in
@@ -257,9 +261,9 @@ typedef struct loom_low_allocation_call_moves_t {
   uint16_t argument_count;
   // Complete semantic result count, including storage ABI results.
   uint16_t result_count;
-  // Register transport immediately before transferring control to the callee.
+  // Register and call-packet transport before transferring control.
   loom_low_move_group_t arguments;
-  // Register transport immediately after the callee returns.
+  // Register and call-packet transport after the callee returns.
   loom_low_move_group_t results;
 } loom_low_allocation_call_moves_t;
 
@@ -327,11 +331,16 @@ typedef struct loom_low_allocation_table_t {
   const loom_low_storage_transport_t* storage_transport;
   // Packed authored storage layout for the immutable function snapshot.
   loom_low_storage_layout_t storage_layout;
+  // Immutable source call boundaries shared with spill planning.
+  loom_low_call_boundary_index_t call_boundaries;
   // Liveness analysis that produced the allocated intervals.
   loom_liveness_analysis_t liveness;
   // Borrowed structural register requirements in the liveness value domain.
   // NULL when the function snapshot has no structural requirements.
   const loom_low_register_requirement_t* register_requirements;
+  // Producer reconstruction flags in the liveness value domain, retained when
+  // pressure required victim ranking. NULL if no ranking needed the analysis.
+  const uint8_t* rematerialization_flags;
   // Arena-owned physical reservations indexed by assignment segment ranges.
   // Borrows |liveness.segments| when no tied-source refinement is required.
   const loom_liveness_segment_t* storage_segments;
@@ -376,7 +385,7 @@ typedef struct loom_low_allocation_table_t {
   iree_host_size_t spill_plan_count;
   // Distinct retained-read blockers published by the accepted coloring.
   loom_low_allocation_retained_fixed_values_t retained_fixed_values;
-  // Allocation remarks in spill-decision order.
+  // Allocation decision facts in spill order, independent of diagnostics.
   const loom_low_allocation_remark_t* remarks;
   // Number of records in |remarks|.
   iree_host_size_t remark_count;

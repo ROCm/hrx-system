@@ -11,29 +11,20 @@
 set -euo pipefail
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+# shellcheck source=loom/docs/examples/example.shlib
+source "${script_dir}/../../example.shlib"
+repo_root="${LOOM_EXAMPLE_REPO_ROOT}"
 
 if [[ "$#" -gt 1 ]]; then
   printf 'usage: %s [output-directory]\n' "$0" >&2
   exit 64
 fi
 
-if [[ -n "${RUNFILES_DIR:-}" ]]; then
-  workspace="${TEST_WORKSPACE:-_main}"
-  repo_root="${RUNFILES_DIR}/${workspace}"
-  link_modules="${repo_root}/loom/binding/c/example/link_modules"
-  loom_format="${repo_root}/loom/src/loom/tools/loom-format/loom-format"
-else
-  repo_root="$(cd -- "${script_dir}/../../../../.." && pwd -P)"
-  "${repo_root}/build_tools/bin/iree-bazel-build" \
-    --config=asan \
-    //loom/binding/c/example:link_modules \
-    //loom/src/loom/tools/loom-format:loom-format
-  link_modules="${repo_root}/bazel-bin/loom/binding/c/example/link_modules"
-  loom_format="${repo_root}/bazel-bin/loom/src/loom/tools/loom-format/loom-format"
-fi
+loom_example_configure_inputs c-example:link_modules tool:loom-format
+link_modules="${LOOM_LINK_MODULES}"
 
 source_file="${repo_root}/loom/binding/c/example/link_modules.c"
-for required_path in "${link_modules}" "${loom_format}" "${source_file}"; do
+for required_path in "${link_modules}" "${LOOM_FORMAT}" "${source_file}"; do
   if [[ ! -e "${required_path}" ]]; then
     printf 'required composition input not found: %s\n' "${required_path}" >&2
     exit 127
@@ -52,7 +43,7 @@ trap cleanup EXIT
 
 linked_output="${temporary_root}/linked.loom"
 "${link_modules}" >"${linked_output}"
-"${loom_format}" --check "${linked_output}"
+"${LOOM_FORMAT}" --check "${linked_output}"
 
 cp -- "${linked_output}" "${output_dir}/linked.loom"
 cp -- "${source_file}" "${output_dir}/link_modules.c"

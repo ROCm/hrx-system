@@ -1,0 +1,45 @@
+# HAL VM integration
+
+This package adapts HAL resources to the VM. It depends on the native HAL and
+Core VM libraries; both remain independent of this package and each other.
+Native ownership and driver behavior stay with HAL. The type provider preserves
+native object identity and shares its reference counts with VM callers.
+
+## Reference types
+
+`iree/hal/vm/types.h` lets a VM host pass actual HAL buffers, buffer views,
+and fences through ordinary compiled calls. Link the optional `types` library
+and register its provider once when composing the environment:
+
+```c
+const iree_vm_ref_type_table_t* table = NULL;
+IREE_RETURN_IF_ERROR(iree_hal_vm_register_types(environment, &table));
+iree_hal_vm_types_t types;
+IREE_RETURN_IF_ERROR(iree_hal_vm_types_resolve(table, &types));
+
+// Retain one argument owner while keeping the caller's HAL owner.
+iree_vm_variant_t argument =
+    iree_hal_buffer_variant_from_ptr_retained(&types, buffer);
+```
+
+Other native modules resolve the already registered `hal` table from the
+environment. The consumer-owned `iree_hal_vm_types_t` contains canonical
+handles for `buffer`, `buffer_view`, and `fence`, in append-only provider ordinal
+order. Bytecode images use their own sorted namespace/type ordinals; loading binds
+those keys to the same canonical handles used by native signatures.
+
+References preserve the original object pointer, buffer range and access rights,
+and view shape, element type and encoding. VM and HAL owners share the existing
+intrusive count. The final VM buffer owner follows HAL recycling; the final view
+owner destroys the view and releases its buffer. Fences retain their semaphore
+timepoints and use the same shared owner count. Dropping a fence neither cancels
+accepted work nor establishes retirement of the resources it uses. No wrapper
+object is allocated. The Core VM `buffer` remains a separate CPU byte-storage type.
+
+The environment borrows the provider table and can be freed after module
+construction. Provider descriptors and native destructor code must remain loaded
+until all referring modules and escaped objects are gone. Statically linked tools
+naturally provide that lifetime; a dynamic host keeps the provider library live.
+
+This library supplies types and ownership adapters. It does not add native HAL
+operations or a compiler dependency to either the VM or HAL core libraries.

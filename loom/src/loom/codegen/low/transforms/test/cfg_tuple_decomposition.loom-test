@@ -378,7 +378,7 @@ low.func.def target<test.low.core>(@test_target) @scalar_control(%input: reg<tes
 
 // ----
 CHECK: *"changed":true,*
-CHECK: *"block-args-decomposed":2,"lane-block-args-inserted":5,"branch-edges-decomposed":1,"slices-removed":2}*
+CHECK: *"block-args-decomposed":2,"group-block-args-inserted":5,"branch-edges-decomposed":1,"slices-removed":2}*
 CHECK: *"category":"value-facts","acquisition_count":1,*"recomputation_count":1,*
 
 // ====
@@ -438,4 +438,222 @@ low.func.def target<test.low.core>(@target) @aliased_lane_capture_and_observer(%
   %alias = low.assume %first [range(%first, 0, 1024)] : reg<test.i32>
   %changed = test.tied.any %alias
   return %changed, %8
+}
+
+// ====
+
+// A mixed-width join projects overlapping ranges without retaining a whole
+// tuple owner. Concat inputs are captured where the source tuple was created.
+// RUN: pass low-decompose-cfg-tuples,low-dce
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @mixed_width_join(%condition: reg<test.i32>, %initial: reg<test.i32 x5>, %first: reg<test.i32 x2>, %second: reg<test.i32 x3>) -> (reg<test.i32 x2>, reg<test.i32 x3>, reg<test.i32>) asm {
+  low.cond_br %condition, ^direct, ^composed : reg<test.i32>
+^direct:
+  low.br ^join(%initial: reg<test.i32 x5>)
+^composed:
+  %next = concat(%first, %second) : (reg<test.i32 x2>, reg<test.i32 x3>) -> reg<test.i32 x5>
+  low.br ^join(%next: reg<test.i32 x5>)
+^join(%state: reg<test.i32 x5>):
+  %low = slice %state[0] : reg<test.i32 x5> -> reg<test.i32 x2>
+  %middle = slice %state[1] : reg<test.i32 x5> -> reg<test.i32 x3>
+  %last = slice %state[4] : reg<test.i32 x5> -> reg<test.i32>
+  return %low, %middle, %last
+}
+
+// ----
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @mixed_width_join(%condition: reg<test.i32>, %initial: reg<test.i32 x5>, %first: reg<test.i32 x2>, %second: reg<test.i32 x3>) -> (reg<test.i32 x2>, reg<test.i32 x3>, reg<test.i32>) asm {
+  low.cond_br %condition, ^direct, ^composed : reg<test.i32>
+^direct:
+  %19 = slice %initial[0] : reg<test.i32 x5> -> reg<test.i32>
+  %20 = slice %initial[1] : reg<test.i32 x5> -> reg<test.i32>
+  %21 = slice %initial[2] : reg<test.i32 x5> -> reg<test.i32>
+  %22 = slice %initial[3] : reg<test.i32 x5> -> reg<test.i32>
+  %23 = slice %initial[4] : reg<test.i32 x5> -> reg<test.i32>
+  low.br ^join(%19: reg<test.i32>, %20: reg<test.i32>, %21: reg<test.i32>, %22: reg<test.i32>, %23: reg<test.i32>)
+^composed:
+  %24 = slice %first[0] : reg<test.i32 x2> -> reg<test.i32>
+  %25 = slice %first[1] : reg<test.i32 x2> -> reg<test.i32>
+  %26 = slice %second[0] : reg<test.i32 x3> -> reg<test.i32>
+  %27 = slice %second[1] : reg<test.i32 x3> -> reg<test.i32>
+  %28 = slice %second[2] : reg<test.i32 x3> -> reg<test.i32>
+  low.br ^join(%24: reg<test.i32>, %25: reg<test.i32>, %26: reg<test.i32>, %27: reg<test.i32>, %28: reg<test.i32>)
+^join(%12: reg<test.i32>, %13: reg<test.i32>, %14: reg<test.i32>, %15: reg<test.i32>, %16: reg<test.i32>):
+  %17 = concat(%12, %13) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32 x2>
+  %18 = concat(%13, %14, %15) : (reg<test.i32>, reg<test.i32>, reg<test.i32>) -> reg<test.i32 x3>
+  return %17, %18, %16
+}
+
+// ====
+
+// The projected unit is a register of the original class, not an assumed
+// 32-bit scalar. Wide backedge fragments may permute and overlap.
+// RUN: pass low-decompose-cfg-tuples,canonicalize,low-cse,low-dce
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @wide_register_cycle(%condition: reg<test.i32>, %initial: reg<test.i64 x4>) -> (reg<test.i64 x3>) asm {
+  low.br ^loop(%initial: reg<test.i64 x4>)
+^loop(%state: reg<test.i64 x4>):
+  %low = slice %state[0] : reg<test.i64 x4> -> reg<test.i64 x2>
+  %high = slice %state[2] : reg<test.i64 x4> -> reg<test.i64 x2>
+  %observed = slice %state[1] : reg<test.i64 x4> -> reg<test.i64 x3>
+  %next = concat(%high, %low) : (reg<test.i64 x2>, reg<test.i64 x2>) -> reg<test.i64 x4>
+  low.cond_br %condition, ^backedge, ^exit : reg<test.i32>
+^backedge:
+  low.br ^loop(%next: reg<test.i64 x4>)
+^exit:
+  return %observed
+}
+
+// ----
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @wide_register_cycle(%condition: reg<test.i32>, %initial: reg<test.i64 x4>) -> (reg<test.i64 x3>) asm {
+  %15 = slice %initial[0] : reg<test.i64 x4> -> reg<test.i64>
+  %16 = slice %initial[1] : reg<test.i64 x4> -> reg<test.i64>
+  %17 = slice %initial[2] : reg<test.i64 x4> -> reg<test.i64>
+  %18 = slice %initial[3] : reg<test.i64 x4> -> reg<test.i64>
+  low.br ^loop(%15: reg<test.i64>, %16: reg<test.i64>, %17: reg<test.i64>, %18: reg<test.i64>)
+^loop(%8: reg<test.i64>, %9: reg<test.i64>, %10: reg<test.i64>, %11: reg<test.i64>):
+  %14 = concat(%9, %10, %11) : (reg<test.i64>, reg<test.i64>, reg<test.i64>) -> reg<test.i64 x3>
+  low.cond_br %condition, ^backedge, ^exit : reg<test.i32>
+^backedge:
+  low.br ^loop(%10: reg<test.i64>, %11: reg<test.i64>, %8: reg<test.i64>, %9: reg<test.i64>)
+^exit:
+  return %14
+}
+
+// ====
+
+// A full-width observation still requires the original tuple ownership.
+// RUN: pass low-decompose-cfg-tuples,low-dce
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @whole_range_slice(%initial: reg<test.i32 x4>) -> (reg<test.i32 x4>, reg<test.i32 x2>) asm {
+  low.br ^join(%initial: reg<test.i32 x4>)
+^join(%state: reg<test.i32 x4>):
+  %whole = slice %state[0] : reg<test.i32 x4> -> reg<test.i32 x4>
+  %part = slice %state[1] : reg<test.i32 x4> -> reg<test.i32 x2>
+  return %whole, %part
+}
+
+// ----
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @whole_range_slice(%initial: reg<test.i32 x4>) -> (reg<test.i32 x4>, reg<test.i32 x2>) asm {
+  low.br ^join(%initial: reg<test.i32 x4>)
+^join(%state: reg<test.i32 x4>):
+  %whole = slice %state[0] : reg<test.i32 x4> -> reg<test.i32 x4>
+  %part = slice %state[1] : reg<test.i32 x4> -> reg<test.i32 x2>
+  return %whole, %part
+}
+
+// ====
+
+// Each matrix observation captures its own accumulator even when ranges
+// overlap, and even when an inner loop repeatedly observes an outer owner.
+// RUN: pass low-decompose-cfg-tuples,canonicalize,low-cse,low-dce
+
+amdgpu.target<gfx942> @target
+
+low.func.def target<amdgpu.cdna3.core>(@target) @repeated_matrix_captures(%condition: reg<amdgpu.sgpr>, %initial: reg<amdgpu.vgpr x8>, %lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr>) asm {
+  low.br ^join(%initial: reg<amdgpu.vgpr x8>)
+^join(%state: reg<amdgpu.vgpr x8>):
+  low.br ^loop
+^loop:
+  %first = slice %state[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x4>
+  %second = slice %state[2] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x4>
+  %observed = slice %state[3] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %changed_first = v_mfma_f32_16x16x16_bf16 %lhs, %rhs, %first
+  %changed_second = v_mfma_f32_16x16x16_bf16 %lhs, %rhs, %second
+  low.cond_br %condition, ^loop, ^exit : reg<amdgpu.sgpr>
+^exit:
+  return %changed_first, %changed_second, %observed
+}
+
+// ----
+amdgpu.target<gfx942> @target
+
+low.func.def target<amdgpu.cdna3.core>(@target) @repeated_matrix_captures(%condition: reg<amdgpu.sgpr>, %initial: reg<amdgpu.vgpr x8>, %lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr>) asm {
+  %23 = slice %initial[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %24 = slice %initial[1] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %25 = slice %initial[2] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %26 = slice %initial[3] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %27 = slice %initial[4] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %28 = slice %initial[5] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %29 = slice %initial[6] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %30 = slice %initial[7] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  low.br ^join(%23: reg<amdgpu.vgpr>, %24: reg<amdgpu.vgpr>, %25: reg<amdgpu.vgpr>, %26: reg<amdgpu.vgpr>, %27: reg<amdgpu.vgpr>, %28: reg<amdgpu.vgpr>, %29: reg<amdgpu.vgpr>, %30: reg<amdgpu.vgpr>)
+^join(%13: reg<amdgpu.vgpr>, %14: reg<amdgpu.vgpr>, %15: reg<amdgpu.vgpr>, %16: reg<amdgpu.vgpr>, %17: reg<amdgpu.vgpr>, %18: reg<amdgpu.vgpr>, %19: reg<amdgpu.vgpr>, %20: reg<amdgpu.vgpr>):
+  low.br ^loop
+^loop:
+  %21 = concat(%13, %14, %15, %16) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  %22 = concat(%15, %16, %17, %18) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  %changed_first = v_mfma_f32_16x16x16_bf16 %lhs, %rhs, %21
+  %changed_second = v_mfma_f32_16x16x16_bf16 %lhs, %rhs, %22
+  low.cond_br %condition, ^loop, ^exit : reg<amdgpu.sgpr>
+^exit:
+  return %changed_first, %changed_second, %16
+}
+
+// ====
+
+// A matrix loop carries independent accumulator fragments; only their partial
+// observations need contiguous register ownership within the loop body.
+// RUN: pass low-decompose-cfg-tuples,canonicalize,low-cse,low-dce
+
+amdgpu.target<gfx942> @target
+
+low.func.def target<amdgpu.cdna3.core>(@target) @matrix_fragment_cycle(%condition: reg<amdgpu.sgpr>, %initial: reg<amdgpu.vgpr x8>, %lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>) asm {
+  low.br ^loop(%initial: reg<amdgpu.vgpr x8>)
+^loop(%state: reg<amdgpu.vgpr x8>):
+  %low = slice %state[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x4>
+  %high = slice %state[4] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x4>
+  %changed_low = v_mfma_f32_16x16x16_bf16 %lhs, %rhs, %low
+  %changed_high = v_mfma_f32_16x16x16_bf16 %lhs, %rhs, %high
+  %next = concat(%changed_low, %changed_high) : (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>) -> reg<amdgpu.vgpr x8>
+  %observed = slice %state[7] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  low.cond_br %condition, ^backedge, ^exit : reg<amdgpu.sgpr>
+^backedge:
+  low.br ^loop(%next: reg<amdgpu.vgpr x8>)
+^exit:
+  return %observed
+}
+
+// ----
+amdgpu.target<gfx942> @target
+
+low.func.def target<amdgpu.cdna3.core>(@target) @matrix_fragment_cycle(%condition: reg<amdgpu.sgpr>, %initial: reg<amdgpu.vgpr x8>, %lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>) asm {
+  %22 = slice %initial[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %23 = slice %initial[1] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %24 = slice %initial[2] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %25 = slice %initial[3] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %26 = slice %initial[4] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %27 = slice %initial[5] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %28 = slice %initial[6] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %29 = slice %initial[7] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  low.br ^loop(%22: reg<amdgpu.vgpr>, %23: reg<amdgpu.vgpr>, %24: reg<amdgpu.vgpr>, %25: reg<amdgpu.vgpr>, %26: reg<amdgpu.vgpr>, %27: reg<amdgpu.vgpr>, %28: reg<amdgpu.vgpr>, %29: reg<amdgpu.vgpr>)
+^loop(%12: reg<amdgpu.vgpr>, %13: reg<amdgpu.vgpr>, %14: reg<amdgpu.vgpr>, %15: reg<amdgpu.vgpr>, %16: reg<amdgpu.vgpr>, %17: reg<amdgpu.vgpr>, %18: reg<amdgpu.vgpr>, %19: reg<amdgpu.vgpr>):
+  %20 = concat(%12, %13, %14, %15) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  %21 = concat(%16, %17, %18, %19) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  %changed_low = v_mfma_f32_16x16x16_bf16 %lhs, %rhs, %20
+  %changed_high = v_mfma_f32_16x16x16_bf16 %lhs, %rhs, %21
+  %30 = slice %changed_low[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %31 = slice %changed_low[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %32 = slice %changed_low[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %33 = slice %changed_low[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %34 = slice %changed_high[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %35 = slice %changed_high[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %36 = slice %changed_high[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %37 = slice %changed_high[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  low.cond_br %condition, ^backedge, ^exit : reg<amdgpu.sgpr>
+^backedge:
+  low.br ^loop(%30: reg<amdgpu.vgpr>, %31: reg<amdgpu.vgpr>, %32: reg<amdgpu.vgpr>, %33: reg<amdgpu.vgpr>, %34: reg<amdgpu.vgpr>, %35: reg<amdgpu.vgpr>, %36: reg<amdgpu.vgpr>, %37: reg<amdgpu.vgpr>)
+^exit:
+  return %19
 }

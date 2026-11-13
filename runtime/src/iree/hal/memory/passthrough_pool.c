@@ -141,6 +141,9 @@ struct iree_hal_passthrough_pool_allocation_state_t {
   // Backing bytes charged to this reservation.
   iree_device_size_t charged_length;
 
+  // Physical admission retained through final native disposal.
+  iree_hal_memory_credit_t credit;
+
   // Move-owned external transport released after the native attachment.
   iree_hal_external_storage_t external_storage;
 
@@ -312,10 +315,15 @@ static void iree_hal_passthrough_pool_unlink_allocation(
 
 // Accounts for a consumed native owner. Failed unpublished construction has
 // charged_length zero; published backing has already entered bytes_committed.
-// Loss and its diagnostic are published before terminal callbacks or wakes.
+// The source ledger and loss diagnostic precede credit settlement: observing
+// returned capacity must also observe the terminal native accounting.
 static void iree_hal_passthrough_pool_record_release(
     iree_hal_passthrough_pool_state_t* pool, iree_device_size_t charged_length,
-    iree_hal_slab_release_info_t release_info) {
+    iree_hal_slab_release_info_t release_info,
+    iree_hal_memory_credit_t* credit) {
+  iree_status_t credit_status = credit->budget
+                                    ? iree_status_clone(release_info.status)
+                                    : iree_ok_status();
   if (release_info.abandoned_byte_length) {
     intptr_t expected = (intptr_t)iree_ok_status();
     if (!iree_atomic_compare_exchange_strong(
@@ -333,6 +341,10 @@ static void iree_hal_passthrough_pool_record_release(
       &pool->bytes_committed,
       (int64_t)release_info.abandoned_byte_length - (int64_t)charged_length,
       iree_memory_order_relaxed);
+  if (credit->budget) {
+    iree_hal_memory_credit_settle(credit, release_info.abandoned_byte_length,
+                                  credit_status);
+  }
 }
 
 static void iree_hal_passthrough_pool_release_join(void* user_data) {
@@ -343,11 +355,11 @@ static void iree_hal_passthrough_pool_release_join(void* user_data) {
   }
   iree_hal_passthrough_pool_state_t* pool = state->pool;
   iree_hal_external_storage_release(&state->external_storage);
-  iree_hal_passthrough_pool_record_release(pool, state->charged_length,
-                                           state->release_info);
   if (state->charged_length) {
     iree_atomic_fetch_sub(&pool->slab_count, 1, iree_memory_order_relaxed);
   }
+  iree_hal_passthrough_pool_record_release(pool, state->charged_length,
+                                           state->release_info, &state->credit);
   iree_hal_passthrough_pool_unlink_allocation(pool, state);
   iree_allocator_free(pool->host_allocator, state);
   // Physical capacity becomes available only after the native free returns.
@@ -918,6 +930,68 @@ static iree_status_t iree_hal_passthrough_pool_validate_reservation_request(
   return iree_ok_status();
 }
 
+static iree_status_t iree_hal_passthrough_pool_shape_request(
+    const iree_hal_passthrough_pool_state_t* pool,
+    const iree_hal_pool_reservation_request_t* request,
+    iree_hal_asan_allocation_layout_t* out_layout,
+    iree_hal_slab_request_t* out_native) {
+  *out_layout = (iree_hal_asan_allocation_layout_t){0};
+  const iree_device_size_t alignment =
+      request->min_alignment ? request->min_alignment : 1;
+  const bool asan = iree_hal_asan_pool_options_is_enabled(&pool->asan_options);
+  if (asan) {
+    IREE_RETURN_IF_ERROR(iree_hal_asan_calculate_allocation_layout(
+        &pool->asan_options, request->allocation_size, alignment, out_layout));
+  }
+  *out_native = (iree_hal_slab_request_t){
+      .min_length =
+          asan ? out_layout->backing_length : request->allocation_size,
+      .min_alignment =
+          iree_max(alignment, out_layout->backing_offset_alignment),
+  };
+  return iree_ok_status();
+}
+
+static iree_status_t iree_hal_passthrough_pool_query_allocation_cost(
+    iree_hal_pool_t* base_pool, iree_host_size_t request_count,
+    const iree_hal_pool_reservation_request_t* requests,
+    uint64_t* out_byte_length) {
+  *out_byte_length = 0;
+  iree_hal_passthrough_pool_state_t* pool =
+      iree_hal_passthrough_pool_state(base_pool);
+  if (!pool->owned_enabled) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "import-only pool cannot acquire backing");
+  }
+  uint64_t total = 0;
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0; i < request_count && iree_status_is_ok(status);
+       ++i) {
+    status = iree_hal_passthrough_pool_validate_reservation_request(
+        pool, &requests[i]);
+    iree_hal_asan_allocation_layout_t layout;
+    iree_hal_slab_request_t native;
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_passthrough_pool_shape_request(pool, &requests[i],
+                                                       &layout, &native);
+    }
+    uint64_t cost = 0;
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_slab_provider_query_allocation_cost(pool->slab_provider,
+                                                            native, &cost);
+    }
+    if (iree_status_is_ok(status) &&
+        !iree_checked_add_u64(total, cost, &total)) {
+      status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                "native allocation cost overflows");
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    *out_byte_length = total;
+  }
+  return status;
+}
+
 // Native growth is cold: all independent release records and one batch
 // continuation are secured before the first native allocation can begin.
 typedef struct iree_hal_passthrough_pool_acquire_t {
@@ -943,6 +1017,8 @@ typedef struct iree_hal_passthrough_pool_acquire_t {
   iree_status_t status;
   // Native constructor or rollback outcome, joined before pool publication.
   iree_hal_slab_release_info_t release_info;
+  // Complete admission moved before native submission; split only on success.
+  iree_hal_memory_credit_t credit;
   // Native charge acquired before post-acquisition preparation, independent of
   // the descriptor array consumed by a rollback release batch.
   iree_device_size_t charged_length;
@@ -956,6 +1032,7 @@ static void iree_hal_passthrough_pool_acquire_finish(
       iree_status_is_ok(status) ? IREE_HAL_POOL_ACQUIRE_OK_FRESH
                                 : IREE_HAL_POOL_ACQUIRE_NONE;
   const iree_allocator_t host_allocator = acquire->pool->host_allocator;
+  iree_hal_memory_credit_return(&acquire->credit);
   if (!iree_status_is_ok(status)) {
     for (iree_host_size_t i = 0; i < acquire->native.count; ++i) {
       iree_allocator_free(host_allocator, acquire->states[i]);
@@ -971,11 +1048,12 @@ static void iree_hal_passthrough_pool_acquire_rollback_join(void* user_data) {
       1) {
     return;
   }
-  iree_hal_passthrough_pool_record_release(
-      acquire->pool, acquire->charged_length, acquire->release_info);
   iree_atomic_fetch_sub(&acquire->pool->slab_count,
                         (int32_t)acquire->native.count,
                         iree_memory_order_relaxed);
+  iree_hal_passthrough_pool_record_release(
+      acquire->pool, acquire->charged_length, acquire->release_info,
+      &acquire->credit);
   iree_async_notification_signal_if_observed(acquire->pool->notification,
                                              IREE_ALL_WAITERS);
   iree_hal_passthrough_pool_acquire_finish(acquire);
@@ -995,8 +1073,8 @@ static void iree_hal_passthrough_pool_acquire_join(
     return;
   }
   if (!iree_status_is_ok(acquire->status)) {
-    iree_hal_passthrough_pool_record_release(acquire->pool, 0,
-                                             acquire->release_info);
+    iree_hal_passthrough_pool_record_release(
+        acquire->pool, 0, acquire->release_info, &acquire->credit);
     iree_async_notification_signal_if_observed(acquire->pool->notification,
                                                IREE_ALL_WAITERS);
     iree_hal_passthrough_pool_acquire_finish(acquire);
@@ -1039,10 +1117,15 @@ static void iree_hal_passthrough_pool_acquire_join(
     return;
   }
 
+  const bool credited = acquire->credit.budget != NULL;
   for (iree_host_size_t i = 0; i < count; ++i) {
     iree_hal_passthrough_pool_reservation_state_t* state = acquire->states[i];
     iree_hal_passthrough_pool_allocation_state_t* allocation =
         &state->allocation;
+    if (credited) {
+      allocation->credit = iree_hal_memory_credit_split(
+          &acquire->credit, allocation->charged_length);
+    }
     iree_hal_slab_buffer_backing_initialize(
         pool->slab_provider, &allocation->slab, &pool->slab_properties,
         pool->notification, pool->frontier_tracker,
@@ -1084,16 +1167,13 @@ static void iree_hal_passthrough_pool_acquire_completed(
   iree_hal_passthrough_pool_acquire_join(acquire);
 }
 
-static iree_status_t iree_hal_passthrough_pool_acquire_reservations(
+static iree_status_t iree_hal_passthrough_pool_acquire(
     iree_hal_pool_t* base_pool, iree_host_size_t request_count,
     const iree_hal_pool_reservation_request_t* requests,
-    const iree_async_frontier_t* requester_frontier,
-    iree_hal_pool_reservation_t* out_reservations,
-    iree_hal_pool_acquire_info_t* out_infos,
+    iree_hal_memory_credit_t* credit,
     iree_hal_pool_acquire_callback_t completion,
-    iree_hal_pool_reserve_flags_t flags) {
-  (void)requester_frontier;
-  (void)flags;
+    iree_hal_pool_reservation_t* out_reservations,
+    iree_hal_pool_acquire_info_t* out_infos) {
   iree_hal_passthrough_pool_state_t* pool =
       iree_hal_passthrough_pool_state(base_pool);
   if (!pool->owned_enabled) {
@@ -1157,24 +1237,15 @@ static iree_status_t iree_hal_passthrough_pool_acquire_reservations(
       memset(state, 0, sizeof(*state));
       acquire->states[i] = state;
       state->allocation.pool = pool;
-      const iree_device_size_t alignment =
-          requests[i].min_alignment ? requests[i].min_alignment : 1;
-      if (iree_hal_asan_pool_options_is_enabled(&pool->asan_options)) {
-        status = iree_hal_asan_calculate_allocation_layout(
-            &pool->asan_options, requests[i].allocation_size, alignment,
-            &state->asan_layout);
-      }
-      geometry[i] = (iree_hal_slab_request_t){
-          .min_length =
-              iree_hal_asan_pool_options_is_enabled(&pool->asan_options)
-                  ? state->asan_layout.backing_length
-                  : requests[i].allocation_size,
-          .min_alignment =
-              iree_max(alignment, state->asan_layout.backing_offset_alignment),
-      };
+      status = iree_hal_passthrough_pool_shape_request(
+          pool, &requests[i], &state->asan_layout, &geometry[i]);
     }
   }
   if (iree_status_is_ok(status)) {
+    if (credit) {
+      acquire->credit = *credit;
+      *credit = (iree_hal_memory_credit_t){0};
+    }
     iree_atomic_store(&acquire->pending, 2, iree_memory_order_relaxed);
     iree_hal_slab_provider_acquire_slabs(pool->slab_provider, &acquire->native);
     iree_hal_passthrough_pool_acquire_join(acquire);
@@ -1185,6 +1256,42 @@ static iree_status_t iree_hal_passthrough_pool_acquire_reservations(
     iree_allocator_free(pool->host_allocator, acquire);
   }
   return status;
+}
+
+static iree_status_t iree_hal_passthrough_pool_acquire_reservations(
+    iree_hal_pool_t* base_pool, iree_host_size_t request_count,
+    const iree_hal_pool_reservation_request_t* requests,
+    const iree_async_frontier_t* requester_frontier,
+    iree_hal_pool_acquire_callback_t completion,
+    iree_hal_pool_reserve_flags_t flags,
+    iree_hal_pool_reservation_t* out_reservations,
+    iree_hal_pool_acquire_info_t* out_infos) {
+  (void)requester_frontier;
+  (void)flags;
+  return iree_hal_passthrough_pool_acquire(base_pool, request_count, requests,
+                                           NULL, completion, out_reservations,
+                                           out_infos);
+}
+
+static iree_status_t iree_hal_passthrough_pool_acquire_with_credit(
+    iree_hal_pool_t* base_pool, iree_host_size_t request_count,
+    const iree_hal_pool_reservation_request_t* requests,
+    iree_hal_memory_credit_t* credit,
+    iree_hal_pool_acquire_callback_t completion,
+    iree_hal_pool_reservation_t* out_reservations,
+    iree_hal_pool_acquire_info_t* out_infos) {
+  uint64_t cost = 0;
+  IREE_RETURN_IF_ERROR(iree_hal_passthrough_pool_query_allocation_cost(
+      base_pool, request_count, requests, &cost));
+  if (cost > credit->byte_length || (cost && !credit->budget)) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "native allocation requires %" PRIu64
+                            " admitted bytes; credit contains %" PRIu64,
+                            cost, credit->byte_length);
+  }
+  return iree_hal_passthrough_pool_acquire(base_pool, request_count, requests,
+                                           credit, completion, out_reservations,
+                                           out_infos);
 }
 
 static void iree_hal_passthrough_pool_release_one_reservation(
@@ -1459,6 +1566,8 @@ static void iree_hal_passthrough_pool_trim(
 
 static const iree_hal_pool_vtable_t iree_hal_passthrough_pool_vtable = {
     .destroy = iree_hal_passthrough_pool_destroy,
+    .query_allocation_cost = iree_hal_passthrough_pool_query_allocation_cost,
+    .acquire_with_credit = iree_hal_passthrough_pool_acquire_with_credit,
     .acquire_reservations = iree_hal_passthrough_pool_acquire_reservations,
     .release_reservations = iree_hal_passthrough_pool_release_reservations,
     .materialize_reservations =

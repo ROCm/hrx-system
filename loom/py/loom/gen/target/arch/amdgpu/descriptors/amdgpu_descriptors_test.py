@@ -17,13 +17,16 @@ from loom.gen.target.arch.amdgpu.amdgpu_target_table_family import (
     amdgpu_target_table_family,
 )
 from loom.gen.target.arch.amdgpu.descriptors import amdgpu_descriptors
+from loom.gen.target.low.compiled import DescriptorIdentityDomain
+from loom.target.arch.amdgpu.descriptors.api import amdgpu_descriptor_ref_keys
 from loom.target.arch.amdgpu.target_info import (
     AMDGPU_DESCRIPTOR_SET_INFO_FLAG_DESCRIPTOR_PACKET_ENCODING,
     AMDGPU_SOPP_OPCODE_INFO_RDNA,
     AmdgpuDescriptorSetInfo,
     AmdgpuDescriptorSetIsaInfo,
 )
-from loom.target.low_descriptors import Descriptor, DescriptorSet
+from loom.target.low_descriptors import Descriptor, DescriptorSet, NativeAsmValue, NativeAsmValueKind
+from loom.target.test.descriptors import TEST_LOW_ADD_I32_DESCRIPTOR, TEST_LOW_CORE_DESCRIPTOR_SET
 
 
 def _descriptor(index: int) -> Descriptor:
@@ -78,6 +81,10 @@ def _descriptor_set_info(
     )
 
 
+def test_descriptor_identity_ordinals_are_target_refs() -> None:
+    assert amdgpu_descriptors.amdgpu_descriptor_identity_domain().keys == amdgpu_descriptor_ref_keys()
+
+
 def test_exact_storage_families_include_portable_source_views() -> None:
     rdna3_family = amdgpu_target_table_family("rdna3")
     rdna3_5_family = amdgpu_target_table_family("rdna3_5")
@@ -94,6 +101,23 @@ def test_exact_storage_families_include_portable_source_views() -> None:
     assert [info.generator_target for info in cdna4_family.representation_infos] == ["gfx9_4_generic"]
 
 
+def test_native_recipe_selection_includes_representation_views_only_for_selected_storage() -> None:
+    def descriptor_set(literal: str) -> DescriptorSet:
+        descriptor = TEST_LOW_ADD_I32_DESCRIPTOR
+        form = replace(descriptor.asm_forms[0], native_assembly_values=(NativeAsmValue(NativeAsmValueKind.LITERAL, literal=literal),))
+        return replace(TEST_LOW_CORE_DESCRIPTOR_SET, descriptors=(replace(descriptor, asm_forms=(form,)),))
+
+    spans = amdgpu_descriptors.amdgpu_descriptor_table_family_native_spans(
+        amdgpu_target_table_family("cdna4"),
+        {
+            "cdna4": descriptor_set("storage"),
+            "gfx9_4_generic": descriptor_set("representation"),
+            "rdna4": descriptor_set("unselected"),
+        },
+    )
+    assert {value.literal for span in spans for value in span} == {"storage", "representation"}
+
+
 def test_alternate_portable_view_uses_storage_qualified_provider() -> None:
     storage_info = _descriptor_set_info("test_storage")
     representation_info = _descriptor_set_info("test_portable")
@@ -105,12 +129,20 @@ def test_alternate_portable_view_uses_storage_qualified_provider() -> None:
     storage_set = replace(_descriptor_set("test_storage", 2), descriptor_set_ordinal=7)
     representation_set = replace(_descriptor_set("test_portable", 1), descriptor_set_ordinal=2)
     generated = SimpleNamespace(source="// shared\n", view_headers=("// storage\n",))
+    expected_identity_domain = DescriptorIdentityDomain(keys=("amdgpu.test0", "amdgpu.test1"))
 
-    with mock.patch.object(
-        amdgpu_descriptors,
-        "generate_descriptor_set_family",
-        return_value=generated,
-    ) as generate_descriptor_set_family:
+    with (
+        mock.patch.object(
+            amdgpu_descriptors,
+            "amdgpu_descriptor_identity_domain",
+            return_value=expected_identity_domain,
+        ),
+        mock.patch.object(
+            amdgpu_descriptors,
+            "generate_descriptor_set_family",
+            return_value=generated,
+        ) as generate_descriptor_set_family,
+    ):
         assert (
             amdgpu_descriptors.generate_amdgpu_descriptor_table_family(
                 family,
@@ -127,6 +159,7 @@ def test_alternate_portable_view_uses_storage_qualified_provider() -> None:
     assert generated_views[0] is storage_set
     assert generated_views[1].function_name == ("loom_amdgpu_test_portable_core_descriptor_set_from_test_storage_storage")
     assert generated_views[1].descriptor_set_ordinal == 7
+    assert generate_descriptor_set_family.call_args.kwargs["identity_domain"] is expected_identity_domain
 
 
 def test_storage_generation_reuses_parsed_isa_for_declared_views() -> None:
@@ -137,6 +170,7 @@ def test_storage_generation_reuses_parsed_isa_for_declared_views() -> None:
     parsed_spec = object()
     parse_calls: list[Path] = []
     build_calls: list[tuple[tuple[str, ...], object]] = []
+    expected_identity_domain = DescriptorIdentityDomain(keys=("amdgpu.test0", "amdgpu.test1"))
 
     def parse_xml(paths: dict[str, Path], instruction_names: dict[str, tuple[str, ...]]) -> dict[str, object]:
         assert instruction_names == {"test": ("TEST",)}
@@ -159,9 +193,13 @@ def test_storage_generation_reuses_parsed_isa_for_declared_views() -> None:
         *,
         primary_strings=None,
         shared_strings=None,
+        native_asm_values=None,
+        identity_domain=None,
     ) -> SimpleNamespace:
         assert primary_strings is None
         assert shared_strings is None
+        assert native_asm_values is None
+        assert identity_domain is expected_identity_domain
         return SimpleNamespace(
             source="// shared\n",
             view_headers=tuple(f"// {descriptor_set.key}\n" for descriptor_set in view_descriptor_sets),
@@ -201,6 +239,11 @@ def test_storage_generation_reuses_parsed_isa_for_declared_views() -> None:
             amdgpu_descriptors,
             "generate_descriptor_set_family",
             generate_descriptor_set_family,
+        ),
+        mock.patch.object(
+            amdgpu_descriptors,
+            "amdgpu_descriptor_identity_domain",
+            return_value=expected_identity_domain,
         ),
     ):
         tmp_path = Path(temporary_directory)

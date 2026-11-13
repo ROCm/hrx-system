@@ -1,0 +1,108 @@
+// RUN: pass source-to-low
+
+// The pointer ABI has no buffer length. A leading view extent is a source
+// bounds fact, and this load's address needs only the base.
+test.target<low_core> @target
+
+func.def target(@target) @leading_extent(%storage: buffer) -> (vector<4xi32>) {
+  %bytes = buffer.length %storage
+  %length = index.cast %bytes : offset to index
+  %width = index.constant 4 : index
+  %capacity_value = index.div %length, %width : index
+  %capacity = index.assume %capacity_value [ge(%capacity_value, 4)] : index
+  %origin = index.constant 0 : offset
+  %view = buffer.view %storage[%origin] : buffer -> view<[%capacity]xi32>
+  %result = vector.load %view[0] : view<[%capacity]xi32> -> vector<4xi32>
+  func.return %result : vector<4xi32>
+}
+
+// ----
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) abi(object_function) @leading_extent() -> (reg<test.i32 x4>) asm {
+  %view = resource<native_pointer> {index = 0, source_type = buffer} : reg<test.ptr>
+  %result = test.load.v4i32 %view
+  return %result
+}
+
+// ====
+
+// Predicate operands establish source facts without demanding runtime storage.
+test.target<low_core> @target
+
+func.def target(@target) @proof_predicate(%storage: buffer, %row: index) -> (index) {
+  %bytes = buffer.length %storage
+  %length = index.cast %bytes : offset to index
+  %bounded = index.assume %row [ge(%row, 0), lt(%row, %length)] : index
+  func.return %bounded : index
+}
+
+// ----
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) abi(object_function) @proof_predicate(%bounded: reg<test.i32>) -> (reg<test.i32>) asm {
+  %storage = resource<native_pointer> {index = 0, source_type = buffer} : reg<test.ptr>
+  return %bounded
+}
+
+// ====
+
+// A trailing dimension contributes to the address stride, so its unavailable
+// producer must be diagnosed before a memory plan can finalize or emit.
+test.target<low_core> @target
+
+func.def target(@target) @runtime_stride(%row_storage: buffer, %storage: buffer, %row: index) -> (vector<4xi32>) {
+  // ERROR@+1: TARGET/001 {op_name="buffer.length"}
+  %bytes = buffer.length %row_storage
+  // ERROR@+1: TARGET/001 {op_name="index.cast"}
+  %length = index.cast %bytes : offset to index
+  %capacity = index.assume %length [ge(%length, 4)] : index
+  %origin = index.constant 0 : offset
+  %view = buffer.view %storage[%origin] : buffer -> view<4x[%capacity]xi32>
+  %bounded_row = index.assume %row [range(%row, 0, 3)] : index
+  %result = vector.load %view[%bounded_row, 0] : view<4x[%capacity]xi32> -> vector<4xi32>
+  func.return %result : vector<4xi32>
+}
+
+// ====
+
+// The same producer is unavailable when its value is a function result.
+test.target<low_core> @target
+
+func.def target(@target) @runtime_result(%storage: buffer) -> (offset) {
+  // ERROR@+1: TARGET/001 {op_name="buffer.length"}
+  %bytes = buffer.length %storage
+  func.return %bytes : offset
+}
+
+// ====
+
+// A live consumer propagates demand through each unavailable producer. Both
+// failures belong to the diagnostic set, before any consumer is finalized.
+test.target<low_core> @target
+
+func.def target(@target) @multiple_runtime_lengths(%first: buffer, %second: buffer) -> (offset) {
+  // ERROR@+1: TARGET/001 {op_name="buffer.length"}
+  %first_bytes = buffer.length %first
+  // ERROR@+1: TARGET/001 {op_name="buffer.length"}
+  %second_bytes = buffer.length %second
+  %sum = index.add %first_bytes, %second_bytes : offset
+  func.return %sum : offset
+}
+
+// ====
+
+// RUN: compile-report source-to-low
+
+// An elided unavailable producer is still an ordinary zero-emission report row.
+test.target<low_core> @target
+
+func.def target(@target) @reported_proof(%storage: buffer) {
+  %bytes = buffer.length %storage
+  func.return
+}
+
+// ----
+COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
+COMPILE-REPORT: source_low selected_ops=1 emitted_ops=0 rows=1 unkeyed_maximum_emitted_ops=0
+COMPILE-REPORT: source_low[0] function=reported_proof source_op=buffer.length selection=plan emitted_ops=0

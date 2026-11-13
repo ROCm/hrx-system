@@ -1,0 +1,146 @@
+// Recompute numeric facts after legalization invalidates its analysis. Native
+// descriptor compositions retain the semantic operation through this boundary.
+// RUN: pass target-legalize{mode=eager},canonicalize
+
+x86.target<scalar> @target
+
+func.def target(@target) @byte_magnitude(%input: i8) -> (i64, i64, i1) {
+  %value = scalar.assume %input [range(%input, -8, 8), ne(%input, 0)] : i8
+  %absolute = scalar.absi %value : i8
+  %lower = test.fact_range_lo %absolute : i8 -> i64
+  %upper = test.fact_range_hi %absolute : i8 -> i64
+  %nonzero = test.fact_non_zero %absolute : i8 -> i1
+  func.return %lower, %upper, %nonzero : i64, i64, i1
+}
+
+func.def target(@target) @halfword_magnitude(%input: i16) -> (i64, i64, i1) {
+  %value = scalar.assume %input [range(%input, -8, 8), ne(%input, 0)] : i16
+  %absolute = scalar.absi %value : i16
+  %lower = test.fact_range_lo %absolute : i16 -> i64
+  %upper = test.fact_range_hi %absolute : i16 -> i64
+  %nonzero = test.fact_non_zero %absolute : i16 -> i1
+  func.return %lower, %upper, %nonzero : i64, i64, i1
+}
+
+func.def target(@target) @word_magnitude(%input: i32) -> (i64, i64, i1) {
+  %value = scalar.assume %input [range(%input, -8, 8), ne(%input, 0)] : i32
+  %absolute = scalar.absi %value : i32
+  %lower = test.fact_range_lo %absolute : i32 -> i64
+  %upper = test.fact_range_hi %absolute : i32 -> i64
+  %nonzero = test.fact_non_zero %absolute : i32 -> i1
+  func.return %lower, %upper, %nonzero : i64, i64, i1
+}
+
+func.def target(@target) @doubleword_magnitude(%input: i64) -> (i64, i64, i1) {
+  %value = scalar.assume %input [range(%input, -8, 8), ne(%input, 0)] : i64
+  %absolute = scalar.absi %value : i64
+  %lower = test.fact_range_lo %absolute : i64 -> i64
+  %upper = test.fact_range_hi %absolute : i64 -> i64
+  %nonzero = test.fact_non_zero %absolute : i64 -> i1
+  func.return %lower, %upper, %nonzero : i64, i64, i1
+}
+
+// ----
+x86.target<scalar> @target
+
+func.def target(@target) @byte_magnitude(%input: i8) -> (i64, i64, i1) {
+  %lower = scalar.constant 1 : i64
+  %upper = scalar.constant 8 : i64
+  %nonzero = scalar.constant true : i1
+  func.return %lower, %upper, %nonzero : i64, i64, i1
+}
+
+func.def target(@target) @halfword_magnitude(%input: i16) -> (i64, i64, i1) {
+  %lower = scalar.constant 1 : i64
+  %upper = scalar.constant 8 : i64
+  %nonzero = scalar.constant true : i1
+  func.return %lower, %upper, %nonzero : i64, i64, i1
+}
+
+func.def target(@target) @word_magnitude(%input: i32) -> (i64, i64, i1) {
+  %lower = scalar.constant 1 : i64
+  %upper = scalar.constant 8 : i64
+  %nonzero = scalar.constant true : i1
+  func.return %lower, %upper, %nonzero : i64, i64, i1
+}
+
+func.def target(@target) @doubleword_magnitude(%input: i64) -> (i64, i64, i1) {
+  %lower = scalar.constant 1 : i64
+  %upper = scalar.constant 8 : i64
+  %nonzero = scalar.constant true : i1
+  func.return %lower, %upper, %nonzero : i64, i64, i1
+}
+
+// ====
+
+// Signed minimum wraps, so unconstrained absolute value does not establish
+// nonnegativity or exclude zero.
+x86.target<scalar> @target
+
+func.def target(@target) @unconstrained_word(%value: i32) -> (i64, i64, i1) {
+  %absolute = scalar.absi %value : i32
+  %lower = test.fact_range_lo %absolute : i32 -> i64
+  %upper = test.fact_range_hi %absolute : i32 -> i64
+  %nonzero = test.fact_non_zero %absolute : i32 -> i1
+  func.return %lower, %upper, %nonzero : i64, i64, i1
+}
+
+func.def target(@target) @unconstrained_doubleword(%value: i64) -> (i64, i64, i1) {
+  %absolute = scalar.absi %value : i64
+  %lower = test.fact_range_lo %absolute : i64 -> i64
+  %upper = test.fact_range_hi %absolute : i64 -> i64
+  %nonzero = test.fact_non_zero %absolute : i64 -> i1
+  func.return %lower, %upper, %nonzero : i64, i64, i1
+}
+
+// ----
+x86.target<scalar> @target
+
+func.def target(@target) @unconstrained_word(%value: i32) -> (i64, i64, i1) {
+  %lower = scalar.constant -2147483648 : i64
+  %upper = scalar.constant 2147483647 : i64
+  %nonzero = scalar.constant false : i1
+  func.return %lower, %upper, %nonzero : i64, i64, i1
+}
+
+func.def target(@target) @unconstrained_doubleword(%value: i64) -> (i64, i64, i1) {
+  %lower = scalar.constant -9223372036854775808 : i64
+  %upper = scalar.constant 9223372036854775807 : i64
+  %nonzero = scalar.constant false : i1
+  func.return %lower, %upper, %nonzero : i64, i64, i1
+}
+
+// ====
+
+// A branch excludes zero only on its true edge. Recompute the magnitude inside
+// that scope and keep the caller's unconstrained result conservative.
+x86.target<scalar> @target
+
+func.def target(@target) @guarded_magnitude(%input: i32) -> (i1, i1) {
+  %value = scalar.assume %input [range(%input, -8, 8)] : i32
+  %c0 = scalar.constant 0 : i32
+  %condition = scalar.cmpi ne, %value, %c0 : i32
+  %inside = scf.if %condition -> (i1) {
+    %absolute = scalar.absi %value : i32
+    %nonzero = test.fact_non_zero %absolute : i32 -> i1
+    scf.yield %nonzero : i1
+  } else {
+    %absolute = scalar.absi %value : i32
+    %nonzero = test.fact_non_zero %absolute : i32 -> i1
+    scf.yield %nonzero : i1
+  }
+  %absolute = scalar.absi %value : i32
+  %outside = test.fact_non_zero %absolute : i32 -> i1
+  func.return %inside, %outside : i1, i1
+}
+
+// ----
+x86.target<scalar> @target
+
+func.def target(@target) @guarded_magnitude(%input: i32) -> (i1, i1) {
+  %value = scalar.assume %input [range(%input, -8, 8)] : i32
+  %c0 = scalar.constant 0 : i32
+  %condition = scalar.cmpi ne, %value, %c0 : i32
+  %outside = scalar.constant false : i1
+  func.return %condition, %outside : i1, i1
+}

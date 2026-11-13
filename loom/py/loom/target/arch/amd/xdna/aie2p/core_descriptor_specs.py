@@ -37,6 +37,10 @@ from loom.target.arch.amd.xdna.aie2p.core_fifo_descriptors import (
     _fifo_store_descriptor_specs,
 )
 from loom.target.arch.amd.xdna.aie2p.core_machine_data import CORE_MACHINE_TABLE
+from loom.target.arch.amd.xdna.aie2p.core_stack_descriptors import (
+    STACK_DESCRIPTOR_SPECS,
+    STACK_REGISTER_PARTS,
+)
 from loom.target.arch.amd.xdna.aie2p.core_stream_descriptors import (
     _cascade_descriptor_specs,
     _cascade_matrix_descriptor_specs,
@@ -103,6 +107,7 @@ _LOCK_EFFECT = Effect(
 _VEC256_LOW128_PART = "aie2p.vec256.low128"
 _VEC256_HIGH128_PART = "aie2p.vec256.high128"
 _REGISTER_PARTS = (
+    *STACK_REGISTER_PARTS,
     *BFP_REGISTER_PARTS,
     *PREDICATE_REGISTER_PARTS,
     RegisterPart(_VEC256_LOW128_PART, "aie2p.vec256", 0x1),
@@ -842,6 +847,7 @@ def _loop_setup_descriptor_specs() -> tuple[_DescriptorSpec, ...]:
 _BASE_DESCRIPTOR_SPECS = (
     *_address_descriptor_specs(),
     *_loop_setup_descriptor_specs(),
+    *STACK_DESCRIPTOR_SPECS,
     _DescriptorSpec(
         "ADD_NC_mv_add_ri",
         f"{_TARGET_KEY}.add.i32.immediate.shift",
@@ -1077,6 +1083,24 @@ _BASE_DESCRIPTOR_SPECS = (
         "II_VMAC_f_vmac_bf_vmul_bf_core_X_X",
         storage_overrides=(("dst", "mBMs"), ("acc1", "mBMs")),
         asm_mnemonic="vmac.bf16x32",
+    ),
+    *(
+        _DescriptorSpec(
+            f"{mnemonic}_f_{form}_vmul_bf_core_Y_Y",
+            f"{_TARGET_KEY}.{operation}.bf16x64.configured",
+            f"floating.{operation}.bf16x64.configured",
+            f"II_{mnemonic}_f_{form}_vmul_bf_core_Y_Y",
+            storage_overrides=(
+                (("dst", "mBMs"), ("acc1", "mBMs"))
+                if operation == "accumulate"
+                else (("dst", "mBMs"),)
+            ),
+            asm_mnemonic=f"{mnemonic.lower()}.bf16x64",
+        )
+        for operation, mnemonic, form in (
+            ("multiply", "VMUL", "vmul_bf"),
+            ("accumulate", "VMAC", "vmac_bf"),
+        )
     ),
     # Packet dot products observe the low sixteen accumulator lanes. The
     # instruction still clobbers every destination quarter.
@@ -1841,6 +1865,26 @@ _BASE_DESCRIPTOR_SPECS = (
     ),
     _DescriptorSpec(
         "MOVXM",
+        f"{_TARGET_KEY}.materialize.static-address-index.i20",
+        "integer.materialize.static-address-index.i20",
+        "II_MOVXM_eDJ",
+        (("dst", "eDJ"),),
+        asm_mnemonic="mov.static-address-index",
+        rematerializable=True,
+        flags=(DescriptorFlag.SAFE_TO_SPECULATE,),
+    ),
+    _DescriptorSpec(
+        "MOV_alu_mv_mv_mv_cg",
+        f"{_TARGET_KEY}.materialize.static-address-index.i20.short",
+        "integer.materialize.static-address-index.i20",
+        "II_MOV_alu_mv_mv_mv_cg_eDJ",
+        (("dst", "eDJ"),),
+        asm_mnemonic="mov.static-address-index.short",
+        rematerializable=True,
+        flags=(DescriptorFlag.SAFE_TO_SPECULATE,),
+    ),
+    _DescriptorSpec(
+        "MOVXM",
         f"{_TARGET_KEY}.materialize.local-address.i32",
         "memory.materialize.local-address.i32",
         "II_MOVXM_eP",
@@ -1922,6 +1966,15 @@ _BASE_DESCRIPTOR_SPECS = (
         "II_MOV_alu_mv_mv_mv_scl",
         (("dst", "eR"), ("src", "mR31_divs")),
         asm_mnemonic="mov.quotient",
+    ),
+    _DescriptorSpec(
+        "MOV_alu_mv_mv_mv_scl",
+        f"{_TARGET_KEY}.move.carry-to-scalar",
+        "register.move.carry-to-scalar",
+        "II_MOV_alu_mv_mv_mv_scl",
+        (("dst", "eR"), ("src", "mSRCarry")),
+        implicit_inputs=("src",),
+        asm_mnemonic="mov.carry",
     ),
     _DescriptorSpec(
         "ADD_alu_r_rr",

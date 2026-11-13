@@ -5,9 +5,10 @@
 
 #include "loom/serve/service/text/retention.h"
 
+#include "loom/runtime/testing/native_allocator.h"
 #include "loom/serve/service/text/reservation.h"
 #include "loom/serve/service/text/service_test_fixture.h"
-#include "loom/serve/testing/native_allocator.h"
+#include "loom/serve/service/text/state.h"
 
 namespace {
 
@@ -45,6 +46,29 @@ class TextRetentionTest : public SourceTextServiceTest {
     IREE_ASSERT_OK(loom_serve_text_row_reset(row));
   }
 
+  void SeparatePrivateMappings() {
+    const auto mapping_size =
+        loom_runtime_pool_state_geometry(storage_owner_).mapping_size;
+    if (!mapping_size) {
+      return;
+    }
+    // Keep the live token sequence tiny, but place each row's input across a
+    // mapping boundary. Recurrent/KV bounds alone cannot cover that exact
+    // private request range as they do in the compact fixture.
+    const loom_serve_packing_shape_t shapes[] = {
+        {4, 1}, {mapping_size / sizeof(int32_t) + 1, 4}};
+    auto options = ModelOptions();
+    options.prefill_capacity = shapes[1].token_capacity;
+    options.context_capacity = 2 * options.prefill_capacity;
+    options.pool_capacity = 4 * options.prefill_capacity;
+    options.epoch_count = IREE_ARRAYSIZE(shapes);
+    options.epoch_shapes = shapes;
+    IREE_ASSERT_OK(loom_serve_text_model_free(model_));
+    model_ = nullptr;
+    IREE_ASSERT_OK(loom_serve_text_model_allocate(
+        device_, storage_owner_, &options, allocations_.allocator(), &model_));
+  }
+
   void Continue() {
     auto* row = loom_serve_text_model_row(model_, 0);
     bool restored = false;
@@ -59,7 +83,7 @@ class TextRetentionTest : public SourceTextServiceTest {
   }
 
   // Observes/fails actual host allocation, not the retention implementation.
-  loom_serve::testing::NativeAllocator allocations_;
+  loom_runtime::testing::NativeAllocator allocations_;
   // Owned endpoint preserving actual source data across forecasts.
   loom_serve_text_checkpoint_t* checkpoint_ = nullptr;
   // Optional exact producer plan, retired before its source endpoint.
@@ -69,7 +93,7 @@ class TextRetentionTest : public SourceTextServiceTest {
 TEST_F(TextRetentionTest, AliasedExplicitHandlesProtectSharedBacking) {
   ASSERT_NO_FATAL_FAILURE(Capture());
   const auto before = loom_serve_text_model_memory_statistics(model_);
-  loom_serve_residency_projection_t retained;
+  loom_runtime_residency_projection_t retained;
   IREE_ASSERT_OK(
       loom_serve_text_retention_forecast(model_, nullptr, false, &retained));
   EXPECT_LE(retained.minimum_bytes, retained.resident_bytes);
@@ -80,7 +104,7 @@ TEST_F(TextRetentionTest, AliasedExplicitHandlesProtectSharedBacking) {
 
   loom_serve_text_checkpoint_retain(checkpoint_);
   loom_serve_text_retention_add_checkpoint(checkpoint_);
-  loom_serve_residency_projection_t aliased;
+  loom_runtime_residency_projection_t aliased;
   IREE_EXPECT_OK(
       loom_serve_text_retention_forecast(model_, nullptr, false, &aliased));
   EXPECT_EQ(aliased.minimum_bytes, retained.minimum_bytes);
@@ -99,13 +123,18 @@ TEST_F(TextRetentionTest, AliasedExplicitHandlesProtectSharedBacking) {
 }
 
 TEST_F(TextRetentionTest, PreparedRequestProtectsItsBorrowAndExactRanges) {
+  ASSERT_NO_FATAL_FAILURE(SeparatePrivateMappings());
   ASSERT_NO_FATAL_FAILURE(Capture());
   auto* row = loom_serve_text_model_row(model_, 1);
+  allocations_.ResetAllocationMetrics();
   IREE_ASSERT_OK(loom_serve_text_reservation_prepare(
       row, LOOM_SERVE_TEXT_RESERVE_CHECKPOINT, checkpoint_, 16, &reservation_));
+  const auto preparation = allocations_.allocation_metrics();
+  RecordProperty("prepare_allocations", preparation.request_count);
+  RecordProperty("prepare_requested_bytes", preparation.requested_bytes);
   ASSERT_NE(reservation_.state, nullptr);
   loom_serve_text_retention_add_checkpoint(checkpoint_);
-  loom_serve_residency_projection_t retained, required, movable;
+  loom_runtime_residency_projection_t retained, required, movable;
   IREE_ASSERT_OK(
       loom_serve_text_retention_forecast(model_, nullptr, false, &retained));
   IREE_ASSERT_OK(loom_serve_text_retention_forecast(model_, reservation_.state,
@@ -115,6 +144,10 @@ TEST_F(TextRetentionTest, PreparedRequestProtectsItsBorrowAndExactRanges) {
   EXPECT_LE(retained.minimum_bytes, retained.resident_bytes);
   EXPECT_LE(movable.minimum_bytes, required.minimum_bytes);
   EXPECT_GE(required.minimum_bytes, retained.minimum_bytes);
+  // This request borrows the only retained endpoint. Its exact source bound
+  // must match the native commitment union, including COW readers and tails.
+  EXPECT_EQ(required.minimum_bytes,
+            loom_serve_text_state_reservation_footprint(reservation_.state));
   if (retained.resident_bytes) {
     EXPECT_GT(retained.minimum_bytes, 0u);
   }
@@ -129,7 +162,7 @@ TEST_F(TextRetentionTest,
   if (!loom_serve_text_model_memory_statistics(model_).reserved_bytes) {
     return;
   }
-  loom_serve_residency_projection_t before;
+  loom_runtime_residency_projection_t before;
   IREE_ASSERT_OK(
       loom_serve_text_retention_forecast(model_, nullptr, false, &before));
   // Reference scratch fails before traversal; constraint growth fails after
@@ -137,12 +170,12 @@ TEST_F(TextRetentionTest,
   for (auto command :
        {IREE_ALLOCATOR_COMMAND_CALLOC, IREE_ALLOCATOR_COMMAND_REALLOC}) {
     allocations_.FailNextAllocation(command);
-    loom_serve_residency_projection_t failed;
+    loom_runtime_residency_projection_t failed;
     IREE_EXPECT_STATUS_IS(
         IREE_STATUS_RESOURCE_EXHAUSTED,
         loom_serve_text_retention_forecast(model_, nullptr, false, &failed));
     loom_serve_text_retention_clear(model_);
-    loom_serve_residency_projection_t after;
+    loom_runtime_residency_projection_t after;
     IREE_ASSERT_OK(
         loom_serve_text_retention_forecast(model_, nullptr, false, &after));
     EXPECT_EQ(after.resident_bytes, before.resident_bytes);
@@ -155,7 +188,7 @@ TEST_F(TextRetentionTest, QueryScratchTracksOwnershipNotVirtualCapacity) {
   if (!loom_serve_text_model_memory_statistics(model_).reserved_bytes) {
     return;
   }
-  loom_serve::testing::NativeAllocator::AllocationMetrics baseline = {};
+  loom_runtime::testing::NativeAllocator::AllocationMetrics baseline = {};
   for (uint32_t capacity : {256u, 4u * 1024 * 1024}) {
     IREE_ASSERT_OK(loom_serve_text_model_free(model_));
     model_ = nullptr;
@@ -165,7 +198,7 @@ TEST_F(TextRetentionTest, QueryScratchTracksOwnershipNotVirtualCapacity) {
         device_, storage_owner_, &options, allocations_.allocator(), &model_));
     ASSERT_NO_FATAL_FAILURE(Capture());
     allocations_.ResetAllocationMetrics();
-    loom_serve_residency_projection_t retained;
+    loom_runtime_residency_projection_t retained;
     IREE_ASSERT_OK(
         loom_serve_text_retention_forecast(model_, nullptr, false, &retained));
     const auto metrics = allocations_.allocation_metrics();
@@ -187,6 +220,7 @@ TEST_F(TextRetentionTest, QueryScratchTracksOwnershipNotVirtualCapacity) {
 }
 
 TEST_F(TextRetentionTest, ColdRestoreDoesNotChargeUnacceptedDeclarations) {
+  ASSERT_NO_FATAL_FAILURE(SeparatePrivateMappings());
   ASSERT_NO_FATAL_FAILURE(Capture());
   if (!loom_serve_text_model_memory_statistics(model_).reserved_bytes) {
     return;
@@ -195,10 +229,14 @@ TEST_F(TextRetentionTest, ColdRestoreDoesNotChargeUnacceptedDeclarations) {
   loom_serve_text_trim_result_t trim;
   IREE_ASSERT_OK(loom_serve_text_model_trim(model_, &trim));
   auto* row = loom_serve_text_model_row(model_, 1);
+  allocations_.ResetAllocationMetrics();
   IREE_ASSERT_OK(loom_serve_text_reservation_prepare(
       row, LOOM_SERVE_TEXT_RESERVE_CHECKPOINT, checkpoint_, 16, &reservation_));
+  const auto preparation = allocations_.allocation_metrics();
+  RecordProperty("prepare_allocations", preparation.request_count);
+  RecordProperty("prepare_requested_bytes", preparation.requested_bytes);
   ASSERT_NE(reservation_.state, nullptr);
-  loom_serve_residency_projection_t idle, request;
+  loom_runtime_residency_projection_t idle, request;
   IREE_ASSERT_OK(
       loom_serve_text_retention_forecast(model_, nullptr, false, &idle));
   EXPECT_EQ(idle.minimum_bytes, 0u);
@@ -206,6 +244,8 @@ TEST_F(TextRetentionTest, ColdRestoreDoesNotChargeUnacceptedDeclarations) {
                                                     false, &request));
   EXPECT_GT(request.minimum_bytes, idle.minimum_bytes);
   EXPECT_EQ(request.resident_bytes, idle.resident_bytes);
+  EXPECT_EQ(request.minimum_bytes,
+            loom_serve_text_state_reservation_footprint(reservation_.state));
   loom_serve_text_reservation_deinitialize(&reservation_);
   ASSERT_NO_FATAL_FAILURE(Continue());
 }

@@ -205,7 +205,7 @@ func.def @private_indices_and_cache(%input: buffer, %row: index, %column: index,
   %origin = index.constant 0 : offset
   %storage = buffer.assume.memory_space<private> %input : buffer
   %cells = buffer.view %storage[%origin] : buffer -> view<2x4xi16>
-  %old = view.atomic.rmw<subi> %update, %cells[%row, %column] {cache_scope = system, cache_temporal = non_temporal, ordering = acq_rel, scope = system} : i16, view<2x4xi16> -> i16
+  %old = view.atomic.rmw<subi, root_in_bounds> %update, %cells[%row, %column] {cache_scope = system, cache_temporal = non_temporal, ordering = acq_rel, scope = system} : i16, view<2x4xi16> -> i16
   buffer.fence scope(system) ordering(seq_cst)
   func.return %old : i16
 }
@@ -215,9 +215,9 @@ func.def @private_indices_and_cache(%input: buffer, %row: index, %column: index,
   %origin = index.constant 0 : offset
   %storage = buffer.assume.memory_space<private> %input : buffer
   %cells = buffer.view %storage[%origin] : buffer -> view<2x4xi16>
-  %old = view.load %cells[%row, %column] {cache_scope = system, cache_temporal = non_temporal} : view<2x4xi16> -> i16
+  %old = view.load<root_in_bounds> %cells[%row, %column] {cache_scope = system, cache_temporal = non_temporal} : view<2x4xi16> -> i16
   %10 = scalar.subi %old, %update : i16
-  view.store %10, %cells[%row, %column] {cache_scope = system, cache_temporal = non_temporal} : i16, view<2x4xi16>
+  view.store<root_in_bounds> %10, %cells[%row, %column] {cache_scope = system, cache_temporal = non_temporal} : i16, view<2x4xi16>
   buffer.fence scope(system) ordering(seq_cst)
   func.return %old : i16
 }

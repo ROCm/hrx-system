@@ -332,10 +332,29 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "call_boundary",
+    srcs = ["call_boundary.c"],
+    hdrs = ["call_boundary.h"],
+    deps = [
+        ":error_defs",
+        "//loom/src/loom/error:parameter",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:callable_effects",
+        "//loom/src/loom/ops/func",
+        "//loom/src/loom/ops/vector",
+        "//loom/src/loom/target:legalization",
+        "//loom/src/loom/target:low_legality",
+        "//loom/src/loom/target/arch/spirv/descriptors",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
     name = "legalization",
     srcs = ["legalization.c"],
     hdrs = ["legalization.h"],
     deps = [
+        ":call_boundary",
         ":features",
         ":value_types",
         "//loom/src/loom/ir",
@@ -375,6 +394,7 @@ loom_cc_library(
     hdrs = ["provider.h"],
     visibility = _SPIRV_PROVIDER_VISIBILITY,
     deps = [
+        ":call_boundary",
         ":legalization",
         ":low_verify",
         ":math_policy",
@@ -383,6 +403,7 @@ loom_cc_library(
         "//loom/src/loom/target/arch/spirv/descriptors:low_registry",
         "//loom/src/loom/target/arch/spirv/lower",
         "//loom/src/loom/target/arch/spirv/ops",
+        "//loom/src/loom/transforms/pipeline:workgroup",
         "//runtime/src/iree/base",
     ],
 )

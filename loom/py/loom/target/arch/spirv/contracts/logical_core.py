@@ -8,6 +8,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from loom.dialect.buffer import ALL_BUFFER_OPS
 from loom.dialect.buffer import defs as buffer
 from loom.dialect.index import ALL_INDEX_OPS
@@ -69,13 +71,18 @@ from loom.target.arch.spirv.contracts.float_width import (
     float_width_widen_rules,
 )
 from loom.target.arch.spirv.contracts.index import (
+    NATIVE_INDEX_ARITHMETIC_MATERIALIZER,
+    NATIVE_INDEX_MATERIALIZER,
     SPIRV_INDEX_CONVERSION_RULES,
-    SPIRV_INDEX_NUMERIC_RULES,
+    SPIRV_INDEX_LOWERING_RULES,
+    WIDE_INDEX_ARITHMETIC_MATERIALIZER,
+    index_result_carrier_rules,
 )
 from loom.target.arch.spirv.contracts.integer_bits import (
     bit_count_rules,
     rotation_rules,
 )
+from loom.target.arch.spirv.contracts.integer_dot import integer_dot_rules
 from loom.target.arch.spirv.contracts.memory import (
     STORAGE_BUFFER_MEMORY_SPACES as _STORAGE_BUFFER_MEMORY_SPACES,
 )
@@ -109,6 +116,7 @@ from loom.target.arch.spirv.contracts.ordinary_vector import (
 from loom.target.arch.spirv.contracts.ordinary_vector_alu import (
     SPIRV_ORDINARY_VECTOR_ALU_CONTRACT_CASES,
 )
+from loom.target.arch.spirv.contracts.packed_memory import packed_storage_buffer_rules
 from loom.target.arch.spirv.contracts.predicate import integer_to_boolean_rule
 from loom.target.arch.spirv.contracts.reference_fallback import (
     SPIRV_REFERENCE_FALLBACK_CONTRACT_CASES,
@@ -169,6 +177,7 @@ from loom.target.contracts import (
     DescriptorRule,
     EmitDescriptorOp,
     Guard,
+    RecipeRule,
     ResultTypeBinding,
     Scalar,
     SourceMemoryAddressCoordinateType,
@@ -496,6 +505,7 @@ def _builtin_index_rule(
             _descriptor_emit(
                 descriptor=descriptor,
                 results={"dst": ValueRef.result("result")},
+                result_types={"dst": _INDEX},
             ),
         ),
     )
@@ -503,9 +513,12 @@ def _builtin_index_rule(
 
 def _builtin_index_rules() -> tuple[DescriptorRule, ...]:
     return tuple(
-        _builtin_index_rule(query, dimension)
+        rule
         for query in BUILTIN_INDEX_QUERIES
         for dimension in BUILTIN_DIMENSIONS
+        for rule in index_result_carrier_rules(
+            _builtin_index_rule(query, dimension), 32, unsigned=True
+        )
     )
 
 
@@ -522,6 +535,7 @@ def _builtin_scalar_index_rule(query: BuiltinQuery) -> DescriptorRule:
             _descriptor_emit(
                 descriptor=descriptor,
                 results={"dst": ValueRef.result("result")},
+                result_types={"dst": _INDEX},
             ),
         ),
     )
@@ -529,7 +543,11 @@ def _builtin_scalar_index_rule(query: BuiltinQuery) -> DescriptorRule:
 
 def _builtin_scalar_index_rules() -> tuple[DescriptorRule, ...]:
     return tuple(
-        _builtin_scalar_index_rule(query) for query in BUILTIN_SCALAR_INDEX_QUERIES
+        rule
+        for query in BUILTIN_SCALAR_INDEX_QUERIES
+        for rule in index_result_carrier_rules(
+            _builtin_scalar_index_rule(query), 32, unsigned=True
+        )
     )
 
 
@@ -736,6 +754,47 @@ def _buffer_view_rule(
     )
 
 
+def _buffer_compare_address_rules() -> tuple[DescriptorRule, ...]:
+    addresses = tuple(
+        EmitDescriptorOp(
+            descriptor=_descriptor("spirv.op_iadd.storage_buffer.byte_offset"),
+            operands={
+                "lhs": ValueRef.operand(side),
+                "rhs": ValueRef.operand(f"{side}_offset"),
+            },
+            results={"dst": ValueRef.temporary(f"{side}_address")},
+            result_types={"dst": DescriptorResultType()},
+            form=DescriptorEmitForm.OP,
+        )
+        for side in ("lhs", "rhs")
+    )
+    return tuple(
+        DescriptorRule(
+            source_op=buffer.buffer_compare_address,
+            guards=(
+                Guard.enum_attr_equals("predicate", predicate),
+                *(
+                    Guard.value_memory_space(side, _STORAGE_BUFFER_MEMORY_SPACES)
+                    for side in ("lhs", "rhs")
+                ),
+            ),
+            emit=(
+                *addresses,
+                EmitDescriptorOp(
+                    descriptor=_descriptor(f"spirv.op_{suffix}.storage_buffer"),
+                    operands={
+                        "lhs": ValueRef.temporary("lhs_address"),
+                        "rhs": ValueRef.temporary("rhs_address"),
+                    },
+                    results={"dst": ValueRef.result("result")},
+                    form=DescriptorEmitForm.OP,
+                ),
+            ),
+        )
+        for predicate, suffix in (("eq", "iequal"), ("ne", "inotequal"))
+    )
+
+
 def _raw_storage_buffer_byte_load_rule() -> DescriptorRule:
     scalar = RAW_STORAGE_BUFFER_BYTE
     address_descriptor = _descriptor(
@@ -833,13 +892,37 @@ def _raw_storage_buffer_byte_store_rule() -> DescriptorRule:
     )
 
 
-def _storage_subview_rule(scalar: StorageBufferScalar) -> ValueElideRule:
-    return ValueElideRule(
+def _storage_subview_rule(*, dynamic: bool) -> DescriptorRule:
+    # Structural projections disappear through storage-demand analysis. Views
+    # crossing a control boundary instead carry their complete byte address.
+    # The address remains an integer; loads/stores create typed BDA pointers.
+    descriptor = _descriptor("spirv.op_copy_object.storage_buffer")
+    address_materializer = replace(
+        _storage_buffer_address_materializer(RAW_STORAGE_BUFFER_BYTE),
+        address=_descriptor("spirv.op_iadd.storage_buffer.byte_offset"),
+    )
+    return DescriptorRule(
         source_op=view.view_subview,
-        values=(ValueRef.result("result"),),
+        descriptor=descriptor,
         guards=(
-            Guard.value_type("result", View(_storage_source_types(scalar))),
             Guard.value_memory_space("result", _STORAGE_BUFFER_MEMORY_SPACES),
+            *_source_memory_address_feature_guards(address_materializer),
+        ),
+        emit=(
+            _descriptor_emit(
+                descriptor=descriptor,
+                operands={"input": ValueRef.source_memory_address()},
+                results={"dst": ValueRef.result("result")},
+                source_memory=replace(
+                    _storage_buffer_source_memory(
+                        SourceMemoryOperation.VIEW_CARRIER, RAW_STORAGE_BUFFER_BYTE
+                    ),
+                    dynamic_term_count=None if dynamic else 0,
+                    dynamic_term_count_minimum=1 if dynamic else 0,
+                    allow_dynamic_stride_values=dynamic,
+                ),
+                source_memory_address_materializer=address_materializer,
+            ),
         ),
     )
 
@@ -1089,7 +1172,9 @@ def _view_store_workgroup_rule(
 
 
 def _storage_buffer_rules() -> tuple[ContractCase, ...]:
-    rules: list[ContractCase] = []
+    rules: list[ContractCase] = [
+        _storage_subview_rule(dynamic=dynamic) for dynamic in (False, True)
+    ]
     for scalar in STORAGE_BUFFER_SCALARS:
         if scalar.source_rule_enabled or scalar.numeric_format_c_expression is None:
             continue
@@ -1101,7 +1186,6 @@ def _storage_buffer_rules() -> tuple[ContractCase, ...]:
         )
     for scalar in SOURCE_STORAGE_BUFFER_SCALARS:
         rules.append(_buffer_view_rule(scalar))
-        rules.append(_storage_subview_rule(scalar))
         rules.append(_workgroup_subview_rule(scalar))
         rules.append(_view_load_rule(scalar))
         rules.append(_view_store_rule(scalar))
@@ -1383,11 +1467,16 @@ SPIRV_LOGICAL_CORE_CONTRACT_FRAGMENT = ContractFragment(
     name="spirv.logical.core",
     descriptor_set=SPIRV_LOGICAL_CORE_DESCRIPTOR_SET,
     public_header="loom/target/arch/spirv/contracts/logical_core.h",
-    materializers=(COOPERATIVE_INITIALIZER_MATERIALIZER,),
+    materializers=(
+        COOPERATIVE_INITIALIZER_MATERIALIZER,
+        NATIVE_INDEX_MATERIALIZER,
+        NATIVE_INDEX_ARITHMETIC_MATERIALIZER,
+        WIDE_INDEX_ARITHMETIC_MATERIALIZER,
+    ),
     cases=(
         *_scalar_constant_rules(),
         *SPIRV_INDEX_CONVERSION_RULES,
-        *SPIRV_INDEX_NUMERIC_RULES,
+        *SPIRV_INDEX_LOWERING_RULES,
         *_builtin_index_rules(),
         *_builtin_scalar_index_rules(),
         _conversion_alias_rule(scalar_conversion.scalar_bitcast, _F8E4M3, _I8),
@@ -1403,6 +1492,7 @@ SPIRV_LOGICAL_CORE_CONTRACT_FRAGMENT = ContractFragment(
         *rounding_rules(),
         *bit_count_rules(),
         *rotation_rules(),
+        *integer_dot_rules(),
         *SPIRV_ORDINARY_VECTOR_CONTRACT_CASES,
         # Singleton vectors use the scalar physical carrier. Native BF16 rows
         # precede these software alternatives just as for scalar constants.
@@ -1416,10 +1506,51 @@ SPIRV_LOGICAL_CORE_CONTRACT_FRAGMENT = ContractFragment(
         *SPIRV_ORDINARY_VECTOR_ALU_CONTRACT_CASES,
         *_compare_rules(),
         *_select_rules(),
+        *(
+            RecipeRule(
+                source_op=buffer.buffer_compare_address,
+                guards=(Guard.value_memory_space(side, _WORKGROUP_MEMORY_SPACES),),
+            )
+            for side in ("lhs", "rhs")
+        ),
+        *_buffer_compare_address_rules(),
         _raw_storage_buffer_byte_load_rule(),
         _raw_storage_buffer_byte_store_rule(),
+        DescriptorRule(
+            source_op=buffer.buffer_null,
+            emit=(
+                EmitDescriptorOp(
+                    descriptor=_descriptor("spirv.op_constant.storage_buffer"),
+                    results={"dst": ValueRef.result("result")},
+                    immediates={"offset64_value": 0},
+                    form=DescriptorEmitForm.CONST,
+                ),
+            ),
+        ),
+        DescriptorRule(
+            source_op=buffer.buffer_compare_null,
+            emit=(
+                EmitDescriptorOp(
+                    descriptor=_descriptor("spirv.op_constant.storage_buffer"),
+                    results={"dst": ValueRef.temporary("zero")},
+                    result_types={"dst": DescriptorResultType()},
+                    immediates={"offset64_value": 0},
+                    form=DescriptorEmitForm.CONST,
+                ),
+                EmitDescriptorOp(
+                    descriptor=_descriptor("spirv.op_iequal.storage_buffer"),
+                    operands={
+                        "lhs": ValueRef.operand("buffer"),
+                        "rhs": ValueRef.temporary("zero"),
+                    },
+                    results={"dst": ValueRef.result("result")},
+                    form=DescriptorEmitForm.OP,
+                ),
+            ),
+        ),
         *_storage_buffer_rules(),
         *bfloat_carrier_memory_rules(),
+        *packed_storage_buffer_rules(),
         *SPIRV_ATOMIC_CONTRACT_CASES,
         *SPIRV_SUBGROUP_CONTRACT_CASES,
         *_control_barrier_rules(),

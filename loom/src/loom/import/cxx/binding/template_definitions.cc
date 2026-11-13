@@ -15,6 +15,7 @@
 
 #include <limits>
 
+#include "loom/import/cxx/binding/template_inputs.h"
 #include "loom/import/cxx/source/attributes.h"
 #include "loom/import/cxx/source/error.h"
 #include "loom/import/cxx/value/types.h"
@@ -170,14 +171,15 @@ void TemplateDefinitions::validate(const Provider& provider,
                      types.unqualified(family_type->returnType());
   if (matches) {
     for (size_t i = 0; i < implementation_type->parameterTypes().size(); ++i) {
-      matches &= types.unqualified(implementation_type->parameterTypes()[i]) ==
-                 types.unqualified(family_type->parameterTypes()[i]);
+      matches &= template_input_compatible(
+          types, family_type->parameterTypes()[i],
+          implementation_type->parameterTypes()[i], source);
     }
   }
   if (!matches) {
-    diagnostics_.reject(
-        unit_, source,
-        "template definition signature must exactly match its family");
+    diagnostics_.reject(unit_, source,
+                        "template definition signature must match its family "
+                        "carrier and result types");
   }
   // A provider inherits its family's calling convention. A device annotation
   // is accepted as redundant documentation, but cannot turn a host family into

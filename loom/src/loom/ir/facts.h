@@ -303,6 +303,18 @@ loom_value_facts_t loom_value_facts_exact_i64(int64_t value);
 loom_value_facts_t loom_value_facts_make(int64_t lo, int64_t hi,
                                          int64_t known_divisor);
 
+// Narrows two sound overapproximations of the same value with finite descending
+// height. Each integer endpoint may leave its type-domain extreme and cross
+// each sign boundary once. Finite endpoints within the same sign class and
+// nontrivial divisors are retained. Floating intervals are admitted once. An
+// exact value may replace a bounded interval; this is a terminal refinement.
+// Independent predicates and uniformity may strengthen.
+// Extension payloads are handled by the owning fact table, not this scalar
+// transfer.
+loom_value_facts_t loom_value_facts_narrow(loom_scalar_type_t scalar_type,
+                                           loom_value_facts_t previous,
+                                           loom_value_facts_t next);
+
 // Returns the target-independent signed integer range represented by a scalar
 // integer or address type. Returns false for floating-point scalar types.
 bool loom_value_facts_scalar_type_domain(loom_scalar_type_t scalar_type,
@@ -420,16 +432,17 @@ loom_value_facts_t loom_value_facts_make_signed_bit_count_range(
 
 // Extracts a fixed unsigned bitfield from an integer fact summary. Returns
 // false for invalid transfer parameters or an exact unsigned result outside
-// the signed i64 fact domain. Unknown source facts produce the unsigned range
-// envelope implied by |width|.
+// the signed i64 fact domain. Retains bounded ranges and divisibility through
+// the shift and field truncation; unknown facts produce the width envelope.
 bool loom_value_facts_extract_unsigned_bitfield(loom_value_facts_t source,
                                                 int32_t source_bit_count,
                                                 int64_t offset, int64_t width,
                                                 loom_value_facts_t* out_facts);
 
 // Extracts a fixed signed bitfield from an integer fact summary. Returns false
-// only for invalid transfer parameters; unknown source facts produce the
-// conservative range implied by |width|.
+// only for invalid transfer parameters. Retains bounded ranges and divisibility
+// through the shift and field truncation; unknown facts produce the width
+// envelope. Signed one-bit fields extend to [-1, 0].
 bool loom_value_facts_extract_signed_bitfield(loom_value_facts_t source,
                                               int32_t source_bit_count,
                                               int64_t offset, int64_t width,
@@ -762,8 +775,38 @@ void loom_value_facts_meet_float(const loom_value_facts_t* a,
                                  const loom_value_facts_t* b,
                                  loom_value_facts_t* out);
 
-// Conservative join: widens range to the outer bounds, weakens divisor
-// to the GCD. Used at join points (scf.if yields, block arguments).
+// Predicates retained when an integer result is one of two input values. These
+// can describe noncontiguous alternatives that their interval hull cannot.
+// Zero is also a valid subgroup mask, independently of the active lane count.
+static inline loom_value_fact_flags_t
+loom_value_facts_common_integer_predicates(const loom_value_facts_t* a,
+                                           const loom_value_facts_t* b) {
+  loom_value_fact_flags_t flags =
+      a->flags & b->flags &
+      (LOOM_VALUE_FACT_NON_ZERO | LOOM_VALUE_FACT_POWER_OF_TWO |
+       LOOM_VALUE_FACT_SUBGROUP_LANE_MASK);
+  if ((loom_value_facts_is_subgroup_lane_mask(*a) &&
+       loom_value_facts_is_zero(*b)) ||
+      (loom_value_facts_is_zero(*a) &&
+       loom_value_facts_is_subgroup_lane_mask(*b))) {
+    flags |= LOOM_VALUE_FACT_SUBGROUP_LANE_MASK;
+  }
+  return flags;
+}
+
+// Exact zero is divisible by every positive divisor. Its stored divisor is one
+// because the fact representation requires a positive value.
+static inline int64_t loom_value_facts_common_divisor(
+    const loom_value_facts_t* a, const loom_value_facts_t* b) {
+  return loom_value_facts_is_zero(*a) ? b->known_divisor
+         : loom_value_facts_is_zero(*b)
+             ? a->known_divisor
+             : iree_math_gcd_i64(a->known_divisor, b->known_divisor);
+}
+
+// Conservative join: widens range to the outer bounds, weakens divisor to the
+// GCD, and retains predicates true for both inputs. Used at join points
+// (scf.if yields, block arguments). The output may alias either input.
 static inline void loom_value_facts_meet(const loom_value_facts_t* a,
                                          const loom_value_facts_t* b,
                                          loom_value_facts_t* out) {
@@ -772,36 +815,23 @@ static inline void loom_value_facts_meet(const loom_value_facts_t* a,
     return;
   }
 
-  const bool preserves_subgroup_lane_mask =
-      (loom_value_facts_is_subgroup_lane_mask(*a) &&
-       loom_value_facts_is_subgroup_lane_mask(*b)) ||
-      (loom_value_facts_is_subgroup_lane_mask(*a) &&
-       loom_value_facts_is_zero(*b)) ||
-      (loom_value_facts_is_zero(*a) &&
-       loom_value_facts_is_subgroup_lane_mask(*b));
-  *out = loom_value_facts_make(
+  loom_value_facts_t result = loom_value_facts_make(
       a->range_lo < b->range_lo ? a->range_lo : b->range_lo,
       a->range_hi > b->range_hi ? a->range_hi : b->range_hi,
-      // Exact zero is divisible by every positive divisor. Its stored divisor
-      // is one because the fact representation requires a positive value.
-      loom_value_facts_is_zero(*a) ? b->known_divisor
-      : loom_value_facts_is_zero(*b)
-          ? a->known_divisor
-          : iree_math_gcd_i64(a->known_divisor, b->known_divisor));
-  if (preserves_subgroup_lane_mask) {
-    loom_value_facts_mark_subgroup_lane_mask(out);
-  }
+      loom_value_facts_common_divisor(a, b));
+  result.flags |= loom_value_facts_common_integer_predicates(a, b);
   if (loom_value_facts_is_lane_predicate(*a) ||
       loom_value_facts_is_lane_predicate(*b)) {
-    loom_value_facts_mark_lane_predicate(out);
+    loom_value_facts_mark_lane_predicate(&result);
   } else if (loom_value_facts_is_lane_varying(*a) ||
              loom_value_facts_is_lane_varying(*b)) {
-    loom_value_facts_mark_lane_varying(out);
+    loom_value_facts_mark_lane_varying(&result);
   } else {
     const loom_value_fact_uniform_scope_t uniform_scope = iree_min(
         loom_value_facts_uniform_scope(*a), loom_value_facts_uniform_scope(*b));
-    loom_value_facts_mark_uniform_at_scope(out, uniform_scope);
+    loom_value_facts_mark_uniform_at_scope(&result, uniform_scope);
   }
+  *out = result;
 }
 
 //===----------------------------------------------------------------------===//
@@ -960,13 +990,17 @@ loom_value_facts_t loom_value_facts_quotient_preimage(
     loom_value_facts_quotient_kind_t kind, int32_t bit_count,
     loom_value_facts_t quotient, loom_value_facts_t scale);
 
-// Shifts.
+// Shifts retain interval and divisibility facts for bounded amounts in [0, 63].
+// Left-shift ranges widen when the mathematical product may overflow; the
+// modular wrapper then applies the destination carrier. Amounts outside the
+// fact carrier yield unknown facts without assuming unreachable execution.
+// A power-of-two source retains that guarantee when the result stays positive.
 void loom_value_facts_shli(const loom_value_facts_t* lhs,
                            const loom_value_facts_t* rhs,
                            loom_value_facts_t* out);
 // Logical right shift in a verified integer width in [1, 64]. Interprets
 // source facts as raw bits at that width; a nonzero shift clears the sign bit.
-// Non-exact or out-of-domain shift amounts produce unknown facts.
+// Bounded amounts use endpoint ranges; out-of-domain amounts yield unknown.
 void loom_value_facts_shrui(const loom_value_facts_t* lhs,
                             const loom_value_facts_t* rhs, int32_t bit_count,
                             loom_value_facts_t* out);
@@ -1032,6 +1066,9 @@ void loom_value_facts_negi(const loom_value_facts_t* input,
                            loom_value_facts_t* out);
 void loom_value_facts_absi(const loom_value_facts_t* input,
                            loom_value_facts_t* out);
+// Sign maps integer inputs to -1, 0, or 1 (Boolean inputs remain [0,1]).
+void loom_value_facts_signi(const loom_value_facts_t* input,
+                            loom_value_facts_t* out);
 
 // Ternary: fused multiply-add (a*b + c).
 void loom_value_facts_fmai(const loom_value_facts_t* a,
@@ -1055,6 +1092,20 @@ void loom_value_facts_addi_modular(const loom_value_facts_t* lhs,
 void loom_value_facts_subi_modular(const loom_value_facts_t* lhs,
                                    const loom_value_facts_t* rhs,
                                    int32_t bit_count, loom_value_facts_t* out);
+// Unsigned addition modulo 2^bit_count with an i1 carry result. The wrapped
+// value uses the declared signed fact representation; carry is exactly one
+// when the mathematical unsigned sum exceeds the declared width.
+void loom_value_facts_addcarryui(const loom_value_facts_t* lhs,
+                                 const loom_value_facts_t* rhs,
+                                 int32_t bit_count, loom_value_facts_t* out_sum,
+                                 loom_value_facts_t* out_carry);
+// Unsigned subtraction modulo 2^bit_count with an i1 borrow result. Borrow is
+// exactly one when the unsigned lhs is less than the unsigned rhs.
+void loom_value_facts_subborrowui(const loom_value_facts_t* lhs,
+                                  const loom_value_facts_t* rhs,
+                                  int32_t bit_count,
+                                  loom_value_facts_t* out_difference,
+                                  loom_value_facts_t* out_borrow);
 void loom_value_facts_muli_modular(const loom_value_facts_t* lhs,
                                    const loom_value_facts_t* rhs,
                                    int32_t bit_count, loom_value_facts_t* out);

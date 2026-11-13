@@ -13,6 +13,7 @@
 #include "loom/codegen/low/descriptor_traits.h"
 #include "loom/codegen/low/diagnostics.h"
 #include "loom/codegen/low/register_requirements.h"
+#include "loom/codegen/low/rematerialization_facts.h"
 #include "loom/codegen/low/representation_binding.h"
 #include "loom/codegen/low/schedule/types.h"
 #include "loom/codegen/low/storage_relation.h"
@@ -78,17 +79,14 @@ static bool loom_low_allocation_failure_is_rematerializable_pressure(
                                  IREE_SV("spill-traffic-register-exhausted")));
 }
 
-static bool loom_low_descriptor_packet_kind_may_rematerialize(
-    loom_low_descriptor_packet_kind_t kind) {
-  return kind == LOOM_LOW_DESCRIPTOR_PACKET_OP ||
-         kind == LOOM_LOW_DESCRIPTOR_PACKET_CONST;
-}
-
 typedef struct loom_low_rematerialization_recipe_t {
-  // Producer operations in reverse dependency and consumption order.
-  loom_op_t** packets;
+  // Selected producer results in reverse dependency and consumption order.
+  // Each operation appears once, even when several of its results are used.
+  loom_value_id_t* values;
   // Number of distinct producers in the recipe.
   iree_host_size_t packet_count;
+  // Number of results defined by all recipe operations, including siblings.
+  iree_host_size_t result_count;
   // Whether cloning the recipe would add a use of a register-required value.
   bool has_required_external_input;
   // Whether the recipe followed an optional descriptor source edge.
@@ -114,69 +112,24 @@ typedef struct loom_low_rematerialization_plan_t {
   loom_low_rematerialization_action_t action;
 } loom_low_rematerialization_plan_t;
 
-static bool loom_low_rematerialization_packet_is_eligible(
-    loom_module_t* module, const loom_low_resolved_target_t* target,
-    loom_value_id_t value_id, loom_op_t** out_defining_op) {
-  *out_defining_op = NULL;
-  const loom_value_t* value = loom_module_value(module, value_id);
-  if (loom_value_is_block_arg(value) || loom_value_has_attribute_uses(value) ||
-      loom_module_value_has_type_uses(module, value_id)) {
-    return false;
-  }
-
-  const loom_type_t value_type = loom_module_value_type(module, value_id);
-  const loom_low_register_type_resolver_t register_type_resolver =
-      loom_low_register_type_resolver_for_descriptor_set(
-          target->descriptor_set);
-  if (loom_low_register_type_resolver_has_class_flags(
-          &register_type_resolver, value_type,
-          LOOM_LOW_REG_CLASS_FLAG_REFERENCE)) {
-    return false;
-  }
-
-  loom_op_t* defining_op = loom_value_def_op(value);
-  if (defining_op == NULL ||
-      iree_any_bit_set(defining_op->flags, LOOM_OP_FLAG_DEAD) ||
-      defining_op->result_count != 1 || defining_op->region_count != 0 ||
-      defining_op->successor_count != 0 ||
-      iree_any_bit_set(loom_op_effective_traits(module, defining_op),
-                       LOOM_TRAIT_OBSERVABLE_EFFECT)) {
-    return false;
-  }
-
-  const uint16_t result_index = loom_value_def_index(value);
-  loom_low_descriptor_packet_t packet = {0};
-  loom_low_descriptor_packet_initialize(target->descriptor_set, defining_op,
-                                        &packet);
-  if (packet.kind == LOOM_LOW_DESCRIPTOR_PACKET_NONE) {
-    // Structural composition is repeatable when its inputs can be recreated
-    // privately. Recipe planning establishes that ownership boundary.
-    if (!iree_any_bit_set(loom_op_vtable(module, defining_op)->vtable_flags,
-                          LOOM_OP_VTABLE_STRUCTURAL_MATERIALIZATION)) {
-      return false;
+static bool loom_low_rematerialization_is_tied_source(const loom_op_t* op,
+                                                      uint16_t operand_index) {
+  const loom_tied_result_t* ties = loom_op_tied_results(op);
+  for (uint16_t i = 0; i < op->tied_result_count; ++i) {
+    if (ties[i].operand_index == operand_index) {
+      return true;
     }
-  } else if (!loom_low_descriptor_packet_kind_may_rematerialize(packet.kind) ||
-             !loom_low_descriptor_result_can_rematerialize(
-                 target->descriptor_set, packet.descriptor, result_index)) {
-    return false;
   }
-  *out_defining_op = defining_op;
-  return true;
+  return false;
 }
 
-static loom_value_id_t loom_low_rematerialization_tied_source(
-    const loom_op_t* op) {
-  const loom_tied_result_t tied = loom_op_tied_results(op)[0];
-  return loom_op_const_operands(op)[tied.operand_index];
+static loom_op_t* loom_low_rematerialization_recipe_op(
+    const loom_module_t* module,
+    const loom_low_rematerialization_recipe_t* recipe, iree_host_size_t index) {
+  return loom_value_def_op(loom_module_value(module, recipe->values[index]));
 }
 
-enum loom_low_rematerialization_value_flag_bits_e {
-  LOOM_LOW_REMATERIALIZATION_VALUE_CLASSIFIED = 1u << 0,
-  LOOM_LOW_REMATERIALIZATION_VALUE_ELIGIBLE = 1u << 1,
-  LOOM_LOW_REMATERIALIZATION_VALUE_CLOSED = 1u << 2,
-  LOOM_LOW_REMATERIALIZATION_VALUE_CONSUMED = 1u << 3,
-  LOOM_LOW_REMATERIALIZATION_VALUE_COLLECTED = 1u << 4,
-};
+enum { LOOM_LOW_REMATERIALIZATION_VALUE_COLLECTED = 1u << 6 };
 
 // Immutable producer facts for one consumer-first repair batch. Rewrites may
 // change uses, but cannot change an unprocessed producer's original inputs.
@@ -206,38 +159,6 @@ typedef struct loom_low_rematerialization_facts_t {
   bool reconstruct_constants;
 } loom_low_rematerialization_facts_t;
 
-typedef struct loom_low_rematerialization_closure_cursor_t {
-  // Local value whose structural inputs are being visited.
-  loom_value_ordinal_t ordinal;
-  // Next operand to visit before completing this producer.
-  uint16_t next_operand;
-  // Whether every input visited so far belongs to a closed materialization.
-  bool is_closed;
-} loom_low_rematerialization_closure_cursor_t;
-
-static uint16_t loom_low_rematerialization_source_operand(
-    const loom_low_rematerialization_facts_t* facts, const loom_op_t* op) {
-  if (op->tied_result_count != 0) {
-    return LOOM_LOW_ID_NONE;
-  }
-  loom_low_descriptor_packet_t packet = {0};
-  loom_low_descriptor_packet_initialize(facts->target->descriptor_set, op,
-                                        &packet);
-  return packet.descriptor != NULL
-             ? loom_low_descriptor_result_rematerialization_source_operand(
-                   facts->target->descriptor_set, packet.descriptor, 0)
-             : LOOM_LOW_ID_NONE;
-}
-
-static loom_low_rematerialization_closure_cursor_t
-loom_low_rematerialization_closure_cursor_initialize(
-    loom_value_ordinal_t ordinal) {
-  return (loom_low_rematerialization_closure_cursor_t){
-      .ordinal = ordinal,
-      .is_closed = true,
-  };
-}
-
 static void loom_low_rematerialization_facts_release(
     loom_low_rematerialization_facts_t* facts) {
   for (iree_host_size_t i = 0; i < facts->value_count; ++i) {
@@ -251,130 +172,36 @@ static loom_value_ordinal_t loom_low_rematerialization_ordinal(
   return loom_module_value_ordinal_scratch_lookup(facts->module, value_id);
 }
 
-static iree_status_t loom_low_rematerialization_classify(
-    loom_low_rematerialization_facts_t* facts,
-    const loom_low_resolved_target_t* target, iree_arena_allocator_t* arena) {
-  loom_module_t* module = facts->module;
-  for (loom_value_ordinal_t ordinal = 0; ordinal < facts->value_count;
-       ++ordinal) {
-    const loom_value_id_t value_id = facts->value_ids[ordinal];
-    uint8_t flags =
-        loom_value_consuming_use_count(loom_module_value(module, value_id)) != 0
-            ? LOOM_LOW_REMATERIALIZATION_VALUE_CONSUMED
-            : 0;
-    loom_op_t* op = NULL;
-    bool eligible = loom_low_rematerialization_packet_is_eligible(
-        module, target, value_id, &op);
-    if (eligible && facts->liveness != NULL) {
-      const uint32_t interval_index =
-          facts->liveness->value_interval_indices[ordinal];
-      eligible = interval_index != UINT32_MAX &&
-                 facts->liveness->intervals[interval_index].definition_point !=
-                     UINT32_MAX;
-    } else if (eligible) {
-      eligible = op->parent_block->parent_region == facts->region;
-    }
-    if (!eligible) {
-      flags |= LOOM_LOW_REMATERIALIZATION_VALUE_CLASSIFIED;
-    } else {
-      flags |= LOOM_LOW_REMATERIALIZATION_VALUE_ELIGIBLE;
-      if (op->operand_count == 0) {
-        flags |= LOOM_LOW_REMATERIALIZATION_VALUE_CLASSIFIED |
-                 LOOM_LOW_REMATERIALIZATION_VALUE_CLOSED;
-      } else if (!iree_any_bit_set(loom_op_vtable(module, op)->vtable_flags,
-                                   LOOM_OP_VTABLE_STRUCTURAL_MATERIALIZATION)) {
-        // Late reconstruction initializes constants and composes their storage.
-        // Replaying arithmetic retains the ordinary execution-domain contract.
-        flags |= LOOM_LOW_REMATERIALIZATION_VALUE_CLASSIFIED;
-      }
-    }
-    facts->value_flags[ordinal] = flags;
-  }
-
-  if (!facts->reconstruct_constants) {
-    return iree_ok_status();
-  }
-
-  // Memoized postorder handles inlined CFG layouts whose definition list is
-  // not dominance ordered. Each eligible producer and edge is visited once.
-  loom_low_rematerialization_closure_cursor_t* stack = NULL;
-  iree_host_size_t capacity = 0;
-  for (loom_value_ordinal_t root = 0; root < facts->value_count; ++root) {
-    if (iree_any_bit_set(facts->value_flags[root],
-                         LOOM_LOW_REMATERIALIZATION_VALUE_CLASSIFIED)) {
-      continue;
-    }
-    IREE_RETURN_IF_ERROR(iree_arena_grow_array(arena, 0, 1, sizeof(*stack),
-                                               &capacity, (void**)&stack));
-    iree_host_size_t depth = 1;
-    stack[0] = loom_low_rematerialization_closure_cursor_initialize(root);
-    while (depth != 0) {
-      loom_low_rematerialization_closure_cursor_t* cursor = &stack[depth - 1];
-      const loom_op_t* op = loom_value_def_op(
-          loom_module_value(module, facts->value_ids[cursor->ordinal]));
-      if (!cursor->is_closed || cursor->next_operand == op->operand_count) {
-        facts->value_flags[cursor->ordinal] |=
-            LOOM_LOW_REMATERIALIZATION_VALUE_CLASSIFIED |
-            (cursor->is_closed ? LOOM_LOW_REMATERIALIZATION_VALUE_CLOSED : 0);
-        --depth;
-        continue;
-      }
-      const loom_value_id_t input =
-          loom_op_const_operands(op)[cursor->next_operand];
-      const loom_value_ordinal_t input_ordinal =
-          loom_low_rematerialization_ordinal(facts, input);
-      const uint8_t input_flags = facts->value_flags[input_ordinal];
-      if (loom_type_kind(loom_module_value_type(module, input)) !=
-          LOOM_TYPE_REGISTER) {
-        cursor->is_closed = !iree_any_bit_set(
-            input_flags, LOOM_LOW_REMATERIALIZATION_VALUE_CONSUMED);
-      } else if (loom_low_register_type_class_id(
-                     loom_module_value_type(module, input)) !=
-                 loom_low_register_type_class_id(loom_module_value_type(
-                     module, facts->value_ids[cursor->ordinal]))) {
-        cursor->is_closed = false;
-      } else if (loom_low_register_type_unit_count(
-                     loom_module_value_type(module, input)) >
-                 loom_low_register_type_unit_count(loom_module_value_type(
-                     module, facts->value_ids[cursor->ordinal]))) {
-        // A narrow projection must not reconstruct its wider input. Retain
-        // that input as a capture instead of multiplying its materialization.
-        cursor->is_closed = false;
-      } else if (!iree_any_bit_set(
-                     input_flags,
-                     LOOM_LOW_REMATERIALIZATION_VALUE_CLASSIFIED)) {
-        IREE_RETURN_IF_ERROR(iree_arena_grow_array(arena, depth, depth + 1,
-                                                   sizeof(*stack), &capacity,
-                                                   (void**)&stack));
-        stack[depth++] =
-            loom_low_rematerialization_closure_cursor_initialize(input_ordinal);
-        continue;
-      } else {
-        cursor->is_closed = iree_any_bit_set(
-            input_flags, LOOM_LOW_REMATERIALIZATION_VALUE_CLOSED);
-      }
-      ++cursor->next_operand;
-    }
-  }
-  return iree_ok_status();
-}
-
 static iree_status_t loom_low_rematerialization_facts_initialize(
     loom_low_rematerialization_facts_t* facts,
-    const loom_low_resolved_target_t* target, iree_arena_allocator_t* arena) {
+    const loom_low_resolved_target_t* target, const uint8_t* retained_flags,
+    iree_arena_allocator_t* arena) {
   facts->target = target;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, facts->value_count,
-                                                 sizeof(*facts->value_flags),
-                                                 (void**)&facts->value_flags));
   loom_module_value_ordinal_scratch_acquire(facts->module);
   for (loom_value_ordinal_t i = 0; i < facts->value_count; ++i) {
     loom_module_value_ordinal_scratch_set(facts->module, facts->value_ids[i],
                                           i);
   }
-  const iree_arena_checkpoint_t checkpoint = iree_arena_checkpoint_save(arena);
-  iree_status_t status =
-      loom_low_rematerialization_classify(facts, target, arena);
-  iree_arena_checkpoint_restore(&checkpoint);
+  iree_status_t status = iree_ok_status();
+  if (retained_flags != NULL) {
+    status = iree_arena_allocate_array(arena, facts->value_count,
+                                       sizeof(*facts->value_flags),
+                                       (void**)&facts->value_flags);
+    if (iree_status_is_ok(status)) {
+      memcpy(facts->value_flags, retained_flags, facts->value_count);
+    }
+  } else {
+    const loom_low_rematerialization_scope_t scope = {
+        .module = facts->module,
+        .target = target,
+        .value_ids = facts->value_ids,
+        .value_count = facts->value_count,
+        .liveness = facts->liveness,
+        .region = facts->region,
+    };
+    status = loom_low_rematerialization_facts_build(
+        &scope, facts->reconstruct_constants, arena, &facts->value_flags);
+  }
   if (!iree_status_is_ok(status)) {
     loom_low_rematerialization_facts_release(facts);
   }
@@ -382,8 +209,8 @@ static iree_status_t loom_low_rematerialization_facts_initialize(
 }
 
 typedef struct loom_low_rematerialization_packet_order_t {
-  // Original producer retained by the recipe.
-  loom_op_t* packet;
+  // Selected result of the original producer retained by the recipe.
+  loom_value_id_t value_id;
   // Original scheduled definition point, or source ordinal for schedule repair.
   uint64_t definition_point;
   // Retained CFG preorder; strict dominators have smaller preorders.
@@ -403,18 +230,19 @@ LOOM_DEFINE_ADAPTIVE_SORT(loom_low_rematerialization_packet_sort,
                           loom_low_rematerialization_packet_less)
 
 static iree_status_t loom_low_rematerialization_order_consumption(
-    const loom_low_rematerialization_facts_t* facts, loom_op_t** packets,
+    const loom_low_rematerialization_facts_t* facts, loom_value_id_t* values,
     iree_host_size_t packet_count, iree_arena_allocator_t* arena) {
   loom_low_rematerialization_packet_order_t* order = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       arena, packet_count, sizeof(*order), (void**)&order));
   for (iree_host_size_t i = 0; i < packet_count; ++i) {
-    const loom_op_t* op = packets[i];
+    const loom_op_t* op =
+        loom_value_def_op(loom_module_value(facts->module, values[i]));
     uint64_t point = op->block_ordinal;
     uint16_t block_index = op->parent_block->region_index;
     if (facts->liveness != NULL) {
-      const loom_value_ordinal_t ordinal = loom_low_rematerialization_ordinal(
-          facts, loom_op_const_results(op)[0]);
+      const loom_value_ordinal_t ordinal =
+          loom_low_rematerialization_ordinal(facts, values[i]);
       point = facts->liveness
                   ->intervals[facts->liveness->value_interval_indices[ordinal]]
                   .definition_point;
@@ -422,7 +250,7 @@ static iree_status_t loom_low_rematerialization_order_consumption(
           loom_liveness_block_index_at_point(facts->liveness, (uint32_t)point);
     }
     order[i] = (loom_low_rematerialization_packet_order_t){
-        .packet = packets[i],
+        .value_id = values[i],
         .definition_point = point,
         .block_preorder = facts->cfg_graph->blocks != NULL
                               ? facts->cfg_graph->blocks[block_index].preorder
@@ -433,7 +261,7 @@ static iree_status_t loom_low_rematerialization_order_consumption(
   // source. Retained program order preserves those read-before-consume edges.
   loom_low_rematerialization_packet_sort(order, packet_count);
   for (iree_host_size_t i = 0; i < packet_count; ++i) {
-    packets[i] = order[i].packet;
+    values[i] = order[i].value_id;
   }
   return iree_ok_status();
 }
@@ -443,6 +271,10 @@ typedef struct loom_low_rematerialization_recipe_cursor_t {
   loom_value_ordinal_t ordinal;
   // Next packet operand to classify as a producer or external capture.
   uint16_t next_operand;
+  // Descriptor defining explicit architectural-state inputs, or NULL.
+  const loom_low_descriptor_t* descriptor;
+  // Next descriptor row to inspect alongside the packet's operand stream.
+  uint16_t next_descriptor_operand;
   // Optional descriptor-declared producer operand, or LOOM_LOW_ID_NONE.
   uint16_t source_operand_index;
 } loom_low_rematerialization_recipe_cursor_t;
@@ -451,19 +283,68 @@ static loom_low_rematerialization_recipe_cursor_t
 loom_low_rematerialization_recipe_cursor_initialize(
     const loom_low_rematerialization_facts_t* facts,
     loom_value_ordinal_t ordinal, bool follow_explicit_sources) {
-  uint16_t source_operand_index = LOOM_LOW_ID_NONE;
   const loom_value_t* value =
       loom_module_value(facts->module, facts->value_ids[ordinal]);
-  if (follow_explicit_sources &&
-      iree_any_bit_set(facts->value_flags[ordinal],
-                       LOOM_LOW_REMATERIALIZATION_VALUE_ELIGIBLE)) {
-    source_operand_index = loom_low_rematerialization_source_operand(
-        facts, loom_value_def_op(value));
-  }
+  const loom_op_t* op = loom_value_def_op(value);
+  loom_low_descriptor_packet_t packet = {0};
+  loom_low_descriptor_packet_initialize(facts->target->descriptor_set, op,
+                                        &packet);
+  const uint16_t source_operand_index =
+      follow_explicit_sources && packet.descriptor != NULL
+          ? loom_low_descriptor_result_rematerialization_source_operand(
+                facts->target->descriptor_set, packet.descriptor,
+                loom_value_def_index(value))
+          : LOOM_LOW_ID_NONE;
   return (loom_low_rematerialization_recipe_cursor_t){
       .ordinal = ordinal,
+      .descriptor = packet.descriptor,
+      .next_descriptor_operand =
+          packet.descriptor != NULL ? packet.descriptor->result_count : 0,
       .source_operand_index = source_operand_index,
   };
+}
+
+// Explicit state is an SSA dependency with ephemeral storage. Its producer
+// joins the recipe; keeping only the original state value would leave the same
+// clobbering lifetime that triggered repair. Hidden state remains governed by
+// the generator's immutable-state and scheduling-only guarantees.
+static bool loom_low_rematerialization_recipe_operand_is_state(
+    const loom_low_rematerialization_facts_t* facts,
+    loom_low_rematerialization_recipe_cursor_t* cursor,
+    uint16_t operand_index) {
+  if (cursor->descriptor == NULL) {
+    return false;
+  }
+  while (cursor->next_descriptor_operand < cursor->descriptor->operand_count) {
+    const loom_low_operand_t* operand = loom_low_descriptor_operand(
+        facts->target->descriptor_set, cursor->descriptor,
+        cursor->next_descriptor_operand++);
+    if (loom_low_operand_role_is_packet_operand(operand->role) &&
+        operand->source_value_index == operand_index) {
+      return iree_any_bit_set(operand->flags,
+                              LOOM_LOW_OPERAND_FLAG_STATE_READ) &&
+             !iree_any_bit_set(operand->flags,
+                               LOOM_LOW_OPERAND_FLAG_SCHEDULE_ONLY_STATE);
+    }
+  }
+  return false;
+}
+
+static void loom_low_rematerialization_mark_collected(
+    loom_low_rematerialization_facts_t* facts, loom_value_ordinal_t ordinal,
+    bool collected) {
+  const loom_op_t* op = loom_value_def_op(
+      loom_module_value(facts->module, facts->value_ids[ordinal]));
+  const loom_value_id_t* results = loom_op_const_results(op);
+  for (uint16_t i = 0; i < op->result_count; ++i) {
+    uint8_t* flags = &facts->value_flags[loom_low_rematerialization_ordinal(
+        facts, results[i])];
+    if (collected) {
+      *flags |= LOOM_LOW_REMATERIALIZATION_VALUE_COLLECTED;
+    } else {
+      *flags &= (uint8_t)~LOOM_LOW_REMATERIALIZATION_VALUE_COLLECTED;
+    }
+  }
 }
 
 static iree_status_t loom_low_rematerialization_plan_recipe(
@@ -474,9 +355,10 @@ static iree_status_t loom_low_rematerialization_plan_recipe(
     loom_low_rematerialization_recipe_t* out_recipe) {
   *out_recipe = (loom_low_rematerialization_recipe_t){0};
   loom_module_t* module = facts->module;
-  loom_op_t** packets = NULL;
+  loom_value_id_t* values = NULL;
   iree_host_size_t packet_count = 0;
   iree_host_size_t packet_capacity = 0;
+  iree_host_size_t result_count = 0;
   bool has_required_external_input = false;
   bool has_consumption = false;
   bool followed_explicit_source = false;
@@ -490,7 +372,7 @@ static iree_status_t loom_low_rematerialization_plan_recipe(
   iree_host_size_t depth = 1;
   stack[0] = loom_low_rematerialization_recipe_cursor_initialize(
       facts, root, follow_explicit_sources);
-  facts->value_flags[root] |= LOOM_LOW_REMATERIALIZATION_VALUE_COLLECTED;
+  loom_low_rematerialization_mark_collected(facts, root, true);
   iree_status_t status = iree_ok_status();
   while (depth != 0 && eligible && iree_status_is_ok(status)) {
     loom_low_rematerialization_recipe_cursor_t* cursor = &stack[depth - 1];
@@ -502,6 +384,17 @@ static iree_status_t loom_low_rematerialization_plan_recipe(
     }
     loom_op_t* op = loom_value_def_op(
         loom_module_value(module, facts->value_ids[cursor->ordinal]));
+    // Replaying a detached transfer from its original input restores the
+    // physical lifetime that allocation split, making the two repairs undo
+    // each other. Only closed reconstruction recreates the input too and
+    // therefore preserves the detached storage boundary.
+    if (!(rebuild_composition &&
+          iree_any_bit_set(flags, LOOM_LOW_REMATERIALIZATION_VALUE_CLOSED)) &&
+        ((loom_low_copy_isa(op) && loom_low_copy_detached(op)) ||
+         (loom_low_move_isa(op) && loom_low_move_detached(op)))) {
+      eligible = false;
+      break;
+    }
     // Copies preserve the complete input width and can replay a stable capture.
     // Aggregate identities need the closed recipe: replaying only their final
     // composition retains every input and can multiply wide setup for slices.
@@ -521,19 +414,19 @@ static iree_status_t loom_low_rematerialization_plan_recipe(
       const loom_value_ordinal_t ordinal =
           loom_low_rematerialization_ordinal(facts, input);
       const uint8_t input_flags = facts->value_flags[ordinal];
+      const bool state_source =
+          loom_low_rematerialization_recipe_operand_is_state(facts, cursor,
+                                                             operand_index);
       const bool explicit_source =
           operand_index == cursor->source_operand_index &&
           iree_any_bit_set(input_flags,
                            LOOM_LOW_REMATERIALIZATION_VALUE_ELIGIBLE);
       followed_explicit_source |= explicit_source;
       const bool owned =
-          explicit_source ||
-          (op->tied_result_count != 0 &&
-           input == loom_low_rematerialization_tied_source(op)) ||
+          state_source || explicit_source ||
+          loom_low_rematerialization_is_tied_source(op, operand_index) ||
           (rebuild_composition &&
            iree_any_bit_set(flags, LOOM_LOW_REMATERIALIZATION_VALUE_CLOSED) &&
-           iree_any_bit_set(loom_op_vtable(module, op)->vtable_flags,
-                            LOOM_OP_VTABLE_STRUCTURAL_MATERIALIZATION) &&
            loom_type_kind(loom_module_value_type(module, input)) ==
                LOOM_TYPE_REGISTER &&
            iree_any_bit_set(input_flags,
@@ -541,12 +434,16 @@ static iree_status_t loom_low_rematerialization_plan_recipe(
       if (owned) {
         if (!iree_any_bit_set(input_flags,
                               LOOM_LOW_REMATERIALIZATION_VALUE_COLLECTED)) {
+          if (!iree_any_bit_set(input_flags,
+                                LOOM_LOW_REMATERIALIZATION_VALUE_ELIGIBLE)) {
+            eligible = false;
+            continue;
+          }
           status =
               iree_arena_grow_array(arena, depth, depth + 1, sizeof(*stack),
                                     &stack_capacity, (void**)&stack);
           if (iree_status_is_ok(status)) {
-            facts->value_flags[ordinal] |=
-                LOOM_LOW_REMATERIALIZATION_VALUE_COLLECTED;
+            loom_low_rematerialization_mark_collected(facts, ordinal, true);
             stack[depth++] =
                 loom_low_rematerialization_recipe_cursor_initialize(
                     facts, ordinal, follow_explicit_sources);
@@ -555,26 +452,34 @@ static iree_status_t loom_low_rematerialization_plan_recipe(
       }
       continue;
     }
-    has_consumption |=
-        iree_any_bit_set(flags, LOOM_LOW_REMATERIALIZATION_VALUE_CONSUMED);
+    for (uint16_t i = 0; i < op->result_count; ++i) {
+      const loom_value_ordinal_t result_ordinal =
+          loom_low_rematerialization_ordinal(facts,
+                                             loom_op_const_results(op)[i]);
+      has_consumption |=
+          iree_any_bit_set(facts->value_flags[result_ordinal],
+                           LOOM_LOW_REMATERIALIZATION_VALUE_CONSUMED);
+    }
     status = iree_arena_grow_array(arena, packet_count, packet_count + 1,
-                                   sizeof(*packets), &packet_capacity,
-                                   (void**)&packets);
+                                   sizeof(*values), &packet_capacity,
+                                   (void**)&values);
     if (iree_status_is_ok(status)) {
-      packets[packet_count++] = op;
+      values[packet_count++] = facts->value_ids[cursor->ordinal];
+      result_count += op->result_count;
     }
     --depth;
   }
   for (iree_host_size_t i = 0, j = packet_count; i < j / 2; ++i) {
-    loom_op_t* packet = packets[i];
-    packets[i] = packets[j - i - 1];
-    packets[j - i - 1] = packet;
+    const loom_value_id_t value = values[i];
+    values[i] = values[j - i - 1];
+    values[j - i - 1] = value;
   }
   // Classify captures after collecting the complete graph. An operand may
   // name a non-immediate ancestor discovered through another producer edge.
   for (iree_host_size_t i = 0;
        i < packet_count && eligible && iree_status_is_ok(status); ++i) {
-    const loom_op_t* op = packets[i];
+    const loom_op_t* op =
+        loom_value_def_op(loom_module_value(facts->module, values[i]));
     for (uint16_t j = 0; j < op->operand_count && eligible; ++j) {
       const loom_value_id_t input = loom_op_const_operands(op)[j];
       const loom_value_ordinal_t ordinal =
@@ -588,6 +493,8 @@ static iree_status_t loom_low_rematerialization_plan_recipe(
       // a lifetime proof beyond the captured value's direct consuming uses.
       eligible = loom_low_capture_source_is_stable(module, input);
       has_required_external_input |=
+          iree_any_bit_set(facts->value_flags[ordinal],
+                           LOOM_LOW_REMATERIALIZATION_VALUE_UNSPILLABLE) ||
           loom_low_register_requirements_get(facts->register_requirements,
                                              ordinal) !=
               LOOM_LOW_REGISTER_REQUIREMENT_NONE ||
@@ -597,22 +504,21 @@ static iree_status_t loom_low_rematerialization_plan_recipe(
     }
   }
   if (iree_status_is_ok(status) && eligible && has_consumption) {
-    status = loom_low_rematerialization_order_consumption(facts, packets,
+    status = loom_low_rematerialization_order_consumption(facts, values,
                                                           packet_count, arena);
   }
   for (iree_host_size_t i = 0; i < depth; ++i) {
-    facts->value_flags[stack[i].ordinal] &=
-        (uint8_t)~LOOM_LOW_REMATERIALIZATION_VALUE_COLLECTED;
+    loom_low_rematerialization_mark_collected(facts, stack[i].ordinal, false);
   }
   for (iree_host_size_t i = 0; i < packet_count; ++i) {
-    const loom_value_ordinal_t ordinal = loom_low_rematerialization_ordinal(
-        facts, loom_op_const_results(packets[i])[0]);
-    facts->value_flags[ordinal] &=
-        (uint8_t)~LOOM_LOW_REMATERIALIZATION_VALUE_COLLECTED;
+    const loom_value_ordinal_t ordinal =
+        loom_low_rematerialization_ordinal(facts, values[i]);
+    loom_low_rematerialization_mark_collected(facts, ordinal, false);
   }
   if (iree_status_is_ok(status) && eligible) {
     *out_recipe = (loom_low_rematerialization_recipe_t){
-        .packets = packets,
+        .values = values,
+        .result_count = result_count,
         .packet_count = packet_count,
         .has_required_external_input = has_required_external_input,
     };
@@ -722,23 +628,27 @@ static bool loom_low_rematerialization_uses_share_execution_domain(
 // multiplying even one packet across loop iterations; allocation can retain
 // the original value and use ordinary spill traffic instead.
 static bool loom_low_rematerialization_preserves_execution_domain(
-    const loom_low_allocation_table_t* allocation,
+    const loom_module_t* module, const loom_low_allocation_table_t* allocation,
     const loom_low_rematerialization_recipe_t* recipe, const loom_use_t* uses,
     uint32_t use_count) {
   if (recipe->packet_count == 0) {
     return false;
   }
   if (!loom_low_rematerialization_uses_share_execution_domain(
-          allocation, recipe->packets[0], uses, use_count)) {
+          allocation, loom_low_rematerialization_recipe_op(module, recipe, 0),
+          uses, use_count)) {
     return false;
   }
   if (allocation == NULL || !allocation->cfg_graph.has_cycles) {
     return true;
   }
-  const loom_block_t* selected_block = recipe->packets[0]->parent_block;
+  const loom_block_t* selected_block =
+      loom_low_rematerialization_recipe_op(module, recipe, 0)->parent_block;
   for (iree_host_size_t i = 1; i < recipe->packet_count; ++i) {
     if (!loom_low_rematerialization_blocks_share_execution_domain(
-            allocation, selected_block, recipe->packets[i]->parent_block)) {
+            allocation, selected_block,
+            loom_low_rematerialization_recipe_op(module, recipe, i)
+                ->parent_block)) {
       return false;
     }
   }
@@ -747,9 +657,9 @@ static bool loom_low_rematerialization_preserves_execution_domain(
 
 static iree_status_t loom_low_rematerialization_clone_for_use(
     loom_rewriter_t* rewriter,
-    const loom_low_rematerialization_recipe_t* recipe, loom_use_t use,
-    loom_low_rematerialization_state_t* state, loom_ir_remap_t* remap,
-    loom_value_id_t* out_cloned_value_id) {
+    const loom_low_rematerialization_recipe_t* recipe, loom_value_id_t value_id,
+    loom_use_t use, loom_low_rematerialization_state_t* state,
+    loom_ir_remap_t* remap, loom_value_id_t* out_cloned_value_id) {
   *out_cloned_value_id = LOOM_VALUE_ID_INVALID;
 
   loom_op_t* user_op = loom_use_user_op(use);
@@ -758,28 +668,38 @@ static iree_status_t loom_low_rematerialization_clone_for_use(
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = recipe->packet_count;
        i > 0 && iree_status_is_ok(status); --i) {
-    loom_op_t* source_op = recipe->packets[i - 1];
+    loom_op_t* source_op = loom_low_rematerialization_recipe_op(
+        rewriter->builder.module, recipe, i - 1);
     loom_op_t* cloned_op = NULL;
     status = loom_ir_clone_op(&rewriter->builder, source_op, remap, &cloned_op);
     if (!iree_status_is_ok(status)) {
       break;
     }
 
-    const loom_value_id_t source_value_id = loom_op_const_results(source_op)[0];
-    const loom_value_id_t cloned_value_id = loom_op_results(cloned_op)[0];
-    status = loom_rewriter_clear_value_name(rewriter, cloned_value_id);
-    if (iree_status_is_ok(status)) {
-      status = loom_rewriter_try_set_derived_value_name(
-          rewriter, source_value_id, cloned_value_id, IREE_SV("remat"));
-    }
-    if (iree_status_is_ok(status)) {
-      iree_bitmap_set(state->per_user_values, cloned_value_id);
-      if (state->required_register_values != NULL &&
-          source_value_id < state->required_register_values->bit_count &&
-          iree_bitmap_test(*state->required_register_values, source_value_id)) {
-        iree_bitmap_set(*state->required_register_values, cloned_value_id);
+    for (uint16_t result_index = 0;
+         result_index < source_op->result_count && iree_status_is_ok(status);
+         ++result_index) {
+      const loom_value_id_t source_value_id =
+          loom_op_const_results(source_op)[result_index];
+      const loom_value_id_t cloned_value_id =
+          loom_op_results(cloned_op)[result_index];
+      status = loom_rewriter_clear_value_name(rewriter, cloned_value_id);
+      if (iree_status_is_ok(status)) {
+        status = loom_rewriter_try_set_derived_value_name(
+            rewriter, source_value_id, cloned_value_id, IREE_SV("remat"));
       }
-      *out_cloned_value_id = cloned_value_id;
+      if (iree_status_is_ok(status)) {
+        iree_bitmap_set(state->per_user_values, cloned_value_id);
+        if (source_value_id == value_id) {
+          *out_cloned_value_id = cloned_value_id;
+        }
+        if (state->required_register_values != NULL &&
+            source_value_id < state->required_register_values->bit_count &&
+            iree_bitmap_test(*state->required_register_values,
+                             source_value_id)) {
+          iree_bitmap_set(*state->required_register_values, cloned_value_id);
+        }
+      }
     }
   }
   loom_builder_restore(&rewriter->builder, saved_ip);
@@ -835,6 +755,17 @@ static iree_status_t loom_low_rematerialization_prepare_value(
                                                     observed_uses[i])) {
       return iree_ok_status();
     }
+    // A branch forwards storage into a successor argument; it is not a
+    // register consumer replacing a reload. Reconstructing all edge values
+    // here would require them to coexist in registers even when their block
+    // arguments need spill storage.
+    if (facts->reconstruct_constants &&
+        iree_any_bit_set(
+            loom_op_vtable(module, loom_use_user_op(observed_uses[i]))
+                ->vtable_flags,
+            LOOM_OP_VTABLE_DIRECT_BRANCH)) {
+      return iree_ok_status();
+    }
     // A proper subrange keeps the wider producer as an external capture.
     // Rebuilding the aggregate would multiply work the consumer never reads.
     if (rebuild_composition &&
@@ -846,15 +777,6 @@ static iree_status_t loom_low_rematerialization_prepare_value(
                           loom_low_rematerialization_use_shortens_live_range(
                               defining_op, observed_uses[i]);
   }
-  // Replaying the selected packet across a repeated execution boundary is
-  // already disallowed, independent of any producer ancestry that may enrich
-  // its recipe. Reject it before constructing and indexing that ancestry.
-  if (!facts->reconstruct_constants &&
-      !loom_low_rematerialization_uses_share_execution_domain(
-          spill_allocation, defining_op, observed_uses, use_count)) {
-    return iree_ok_status();
-  }
-
   loom_low_rematerialization_recipe_t recipe = {0};
   IREE_RETURN_IF_ERROR(loom_low_rematerialization_plan_recipe(
       facts, value_id, rebuild_composition, /*follow_explicit_sources=*/true,
@@ -878,8 +800,10 @@ static iree_status_t loom_low_rematerialization_prepare_value(
     const loom_op_t* previous = loom_use_user_op(observed_uses[i]);
     for (iree_host_size_t j = 0;
          j < recipe.packet_count && !shortens_live_range; ++j) {
-      shortens_live_range |= previous->prev_op != recipe.packets[j];
-      previous = recipe.packets[j];
+      const loom_op_t* op =
+          loom_low_rematerialization_recipe_op(module, &recipe, j);
+      shortens_live_range |= previous->prev_op != op;
+      previous = op;
     }
   }
   loom_low_rematerialization_action_t action =
@@ -916,26 +840,29 @@ static iree_status_t loom_low_rematerialization_prepare_value(
     if (!loom_low_capture_source_is_stable(module, value_id)) {
       return iree_ok_status();
     }
-    // Predicted-spill rematerialization is optional. Do not replace one reload
-    // with a multi-packet recipe in a different repeated execution domain.
+    // A reload executes at its user, so one recreatable packet can replace it
+    // across a repeated execution boundary. Larger recipes retain their
+    // original execution domain instead of multiplying work inside a loop.
     // Cloning also multiplies external input uses; register-required values
     // cannot spill to repair that pressure. An optional authored source may
     // enrich the recipe only when it preserves both properties, otherwise the
     // packet's original replay guarantee remains authoritative.
     bool preserves_execution_domain =
         loom_low_rematerialization_preserves_execution_domain(
-            spill_allocation, &recipe, observed_uses, use_count);
+            module, spill_allocation, &recipe, observed_uses, use_count);
     if (recipe.followed_explicit_source &&
-        (!preserves_execution_domain || recipe.has_required_external_input)) {
+        ((!preserves_execution_domain && recipe.packet_count != 1) ||
+         recipe.has_required_external_input)) {
       IREE_RETURN_IF_ERROR(loom_low_rematerialization_plan_recipe(
           facts, value_id, rebuild_composition,
           /*follow_explicit_sources=*/false, state->required_register_values,
           arena, &recipe));
       preserves_execution_domain =
           loom_low_rematerialization_preserves_execution_domain(
-              spill_allocation, &recipe, observed_uses, use_count);
+              module, spill_allocation, &recipe, observed_uses, use_count);
     }
-    if (recipe.packet_count == 0 || !preserves_execution_domain ||
+    if (recipe.packet_count == 0 ||
+        (!preserves_execution_domain && recipe.packet_count != 1) ||
         recipe.has_required_external_input) {
       return iree_ok_status();
     }
@@ -975,7 +902,6 @@ static iree_status_t loom_low_rematerialization_apply_value(
   }
 
   const loom_low_rematerialization_recipe_t* recipe = &plan->recipe;
-  loom_op_t* defining_op = recipe->packets[0];
   const loom_use_t* uses = plan->uses;
   const uint32_t use_count = plan->use_count;
 
@@ -984,23 +910,23 @@ static iree_status_t loom_low_rematerialization_apply_value(
   // Recipe planning rejects consumed external inputs, so cloning cannot cross
   // an ownership transfer.
   // Clone the complete recipe in dependency and consumption order, so each
-  // tied or moved packet consumes its private predecessor. Each
-  // eligible packet has one result and no regions. Reserve membership for the
-  // worst-case per-use clones before mutation changes the module value count.
-  if (recipe->packet_count > UINT32_MAX / use_count) {
+  // tied or moved packet consumes its private predecessor. Reserve membership
+  // for every result, including unused siblings, before cloning changes the
+  // module value count.
+  if (recipe->result_count > UINT32_MAX / use_count) {
     return iree_make_status(
         IREE_STATUS_RESOURCE_EXHAUSTED,
-        "rematerialization clone count exceeds uint32 capacity");
+        "rematerialization value count exceeds uint32 capacity");
   }
-  const uint32_t maximum_clone_count =
-      (uint32_t)(recipe->packet_count * use_count);
-  if (maximum_clone_count > LOOM_VALUE_ID_INVALID - module->values.count) {
+  const uint32_t maximum_value_count =
+      (uint32_t)(recipe->result_count * use_count);
+  if (maximum_value_count > LOOM_VALUE_ID_INVALID - module->values.count) {
     return iree_make_status(
         IREE_STATUS_RESOURCE_EXHAUSTED,
         "rematerialization value count exceeds value ID capacity");
   }
   const iree_host_size_t required_value_count =
-      module->values.count + maximum_clone_count;
+      module->values.count + maximum_value_count;
   IREE_RETURN_IF_ERROR(loom_low_rematerialization_reserve_values(
       required_value_count, state->arena, &state->per_user_values));
   if (state->required_register_values != NULL) {
@@ -1045,7 +971,8 @@ static iree_status_t loom_low_rematerialization_apply_value(
     loom_value_id_t cloned_value_id = LOOM_VALUE_ID_INVALID;
     if (first_user_use) {
       status = loom_low_rematerialization_clone_for_use(
-          &rewriter, recipe, uses[i], state, &remap, &cloned_value_id);
+          &rewriter, recipe, value_id, uses[i], state, &remap,
+          &cloned_value_id);
     } else {
       const loom_use_t first_use = uses[user_uses[user_slot] - 1];
       cloned_value_id =
@@ -1068,7 +995,8 @@ static iree_status_t loom_low_rematerialization_apply_value(
     // blocks. Those inputs no longer retain a per-user placement guarantee.
     for (iree_host_size_t packet_index = 0; packet_index < recipe->packet_count;
          ++packet_index) {
-      const loom_op_t* packet = recipe->packets[packet_index];
+      const loom_op_t* packet =
+          loom_low_rematerialization_recipe_op(module, recipe, packet_index);
       const loom_value_id_t* operands = loom_op_const_operands(packet);
       for (uint16_t operand_index = 0; operand_index < packet->operand_count;
            ++operand_index) {
@@ -1085,10 +1013,10 @@ static iree_status_t loom_low_rematerialization_apply_value(
     }
     // Erase producers made unused by this repair. A shared predecessor may
     // survive while another independent branch of the recipe becomes dead.
-    IREE_ASSERT(loom_op_results_unused(module, defining_op));
     for (iree_host_size_t i = 0;
          i < recipe->packet_count && iree_status_is_ok(status); ++i) {
-      loom_op_t* packet = recipe->packets[i];
+      loom_op_t* packet =
+          loom_low_rematerialization_recipe_op(module, recipe, i);
       if (!loom_op_results_unused(module, packet)) {
         continue;
       }
@@ -1116,7 +1044,7 @@ iree_status_t loom_low_schedule_rematerialize_failure(
       .region = schedule->blocks[0].block->parent_region,
   };
   IREE_RETURN_IF_ERROR(loom_low_rematerialization_facts_initialize(
-      &facts, &schedule->target, arena));
+      &facts, &schedule->target, /*retained_flags=*/NULL, arena));
   const loom_value_id_t value_id = schedule->failure.state_value_id;
   loom_low_rematerialization_plan_t plan = {0};
   iree_status_t status = loom_low_rematerialization_prepare_value(
@@ -1563,7 +1491,7 @@ iree_status_t loom_low_allocation_rematerialize_failure(
       .region = table->liveness.region,
   };
   IREE_RETURN_IF_ERROR(loom_low_rematerialization_facts_initialize(
-      &facts, &table->target, arena));
+      &facts, &table->target, table->rematerialization_flags, arena));
   loom_low_rematerialization_candidate_t* candidates = NULL;
   iree_host_size_t tier_counts[LOOM_LOW_REMATERIALIZATION_TIER_COUNT] = {0};
   iree_status_t status = loom_low_rematerialization_plan_failure_batch(
@@ -1590,6 +1518,43 @@ iree_status_t loom_low_allocation_rematerialize_failure(
   return status;
 }
 
+// A completed allocation can keep inexpensive cross-block producers in
+// registers while selecting other values for storage. Release that retained
+// pressure in the same repair batch instead of discovering another spill set
+// after each allocation. The allocator's remarks retain the effective budgets,
+// including caller overrides; descriptor capacities alone are insufficient.
+static iree_status_t loom_low_rematerialization_build_spill_pressure(
+    const loom_low_allocation_table_t* table, iree_arena_allocator_t* arena,
+    bool** out_pressure_classes) {
+  const uint32_t class_count = table->target.descriptor_set->reg_class_count;
+  uint32_t* budgets = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, class_count, sizeof(*budgets), (void**)&budgets));
+  memset(budgets, 0xFF, class_count * sizeof(*budgets));
+  for (iree_host_size_t i = 0; i < table->remark_count; ++i) {
+    const loom_low_allocation_remark_t* remark = &table->remarks[i];
+    const uint16_t class_id =
+        table->assignments[remark->assignment_index].descriptor_reg_class_id;
+    budgets[class_id] = iree_min(budgets[class_id], remark->budget_units);
+  }
+  bool* pressure_classes = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, class_count,
+                                                 sizeof(*pressure_classes),
+                                                 (void**)&pressure_classes));
+  memset(pressure_classes, 0, class_count * sizeof(*pressure_classes));
+  for (iree_host_size_t i = 0; i < table->liveness.pressure_summary_count;
+       ++i) {
+    const loom_liveness_pressure_summary_t* summary =
+        &table->liveness.pressure_summaries[i];
+    if (summary->value_class.type_kind == LOOM_TYPE_REGISTER) {
+      const uint16_t class_id = summary->value_class.register_class_id;
+      pressure_classes[class_id] = summary->peak_live_units > budgets[class_id];
+    }
+  }
+  *out_pressure_classes = pressure_classes;
+  return iree_ok_status();
+}
+
 static iree_status_t loom_low_allocation_rematerialize_spill_plans_impl(
     loom_module_t* module, const loom_low_allocation_table_t* table,
     bool reconstruct_constants, loom_low_rematerialization_state_t* state,
@@ -1600,6 +1565,11 @@ static iree_status_t loom_low_allocation_rematerialize_spill_plans_impl(
     return iree_ok_status();
   }
   const loom_liveness_analysis_t* liveness = &table->liveness;
+  bool* pressure_classes = NULL;
+  if (!reconstruct_constants) {
+    IREE_RETURN_IF_ERROR(loom_low_rematerialization_build_spill_pressure(
+        table, arena, &pressure_classes));
+  }
   loom_low_rematerialization_candidate_t* candidates = NULL;
   iree_host_size_t count = 0;
   iree_host_size_t capacity = 0;
@@ -1608,15 +1578,24 @@ static iree_status_t loom_low_allocation_rematerialize_spill_plans_impl(
     const uint32_t assignment_index =
         table->assignment_indices_by_value_ordinal[ordinal];
     if (assignment_index == UINT32_MAX ||
-        table->assignments[assignment_index].location_kind !=
-            LOOM_LOW_ALLOCATION_LOCATION_SPILL_SLOT) {
+        !iree_any_bit_set(table->rematerialization_flags[ordinal],
+                          LOOM_LOW_REMATERIALIZATION_VALUE_ELIGIBLE)) {
       continue;
     }
     const loom_liveness_interval_t* interval =
         &liveness->intervals[liveness->value_interval_indices[ordinal]];
-    loom_op_t* defining_op = NULL;
-    if (!loom_low_rematerialization_packet_is_eligible(
-            module, &table->target, interval->value_id, &defining_op)) {
+    // Additional roots have no input lifetimes to extend. Selected spill
+    // roots retain their complete replay recipes and consumer-first order;
+    // splitting them into a later tier can amplify pressure in the interim.
+    const bool releases_cross_block_pressure =
+        pressure_classes != NULL &&
+        pressure_classes[interval->value_class.register_class_id] &&
+        interval->block_count >= 2 &&
+        loom_value_def_op(loom_module_value(module, interval->value_id))
+                ->operand_count == 0;
+    if (table->assignments[assignment_index].location_kind !=
+            LOOM_LOW_ALLOCATION_LOCATION_SPILL_SLOT &&
+        !releases_cross_block_pressure) {
       continue;
     }
     const uint16_t block_index = loom_liveness_block_index_at_point(
@@ -1652,7 +1631,7 @@ static iree_status_t loom_low_allocation_rematerialize_spill_plans_impl(
       .reconstruct_constants = reconstruct_constants,
   };
   IREE_RETURN_IF_ERROR(loom_low_rematerialization_facts_initialize(
-      &facts, &table->target, arena));
+      &facts, &table->target, table->rematerialization_flags, arena));
   loom_low_rematerialization_candidate_sort(candidates, count);
   iree_status_t status = loom_low_rematerialization_apply_batch(
       module, candidates, count, /*schedule=*/NULL, table, state, arena, &facts,
@@ -1681,27 +1660,7 @@ iree_status_t loom_low_allocation_reconstruct_spills(
     loom_module_t* module, const loom_low_allocation_table_t* table,
     loom_low_rematerialization_state_t* state,
     iree_diagnostic_emitter_t emitter, iree_arena_allocator_t* arena,
-    const loom_low_allocation_spill_plan_t** out_spill_plans,
-    iree_host_size_t* out_spill_plan_count,
     loom_low_rematerialization_batch_result_t* out_result) {
-  *out_spill_plans = table->spill_plans;
-  *out_spill_plan_count = table->spill_plan_count;
-  IREE_RETURN_IF_ERROR(loom_low_allocation_rematerialize_spill_plans_impl(
-      module, table, true, state, emitter, arena, out_result));
-  if (out_result->rewritten_operand_count == 0) {
-    return iree_ok_status();
-  }
-  loom_low_allocation_spill_plan_t* remaining = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      arena, table->spill_plan_count, sizeof(*remaining), (void**)&remaining));
-  iree_host_size_t count = 0;
-  for (iree_host_size_t i = 0; i < table->spill_plan_count; ++i) {
-    const loom_low_allocation_spill_plan_t* plan = &table->spill_plans[i];
-    if (loom_module_value(module, plan->value_id)->use_count != 0) {
-      remaining[count++] = *plan;
-    }
-  }
-  *out_spill_plans = remaining;
-  *out_spill_plan_count = count;
-  return iree_ok_status();
+  return loom_low_allocation_rematerialize_spill_plans_impl(
+      module, table, true, state, emitter, arena, out_result);
 }

@@ -380,9 +380,12 @@ static void loom_verify_dimension_dependencies(
     loom_verify_state_t* state, const loom_op_t* op,
     loom_verify_dimension_field_t field,
     loom_type_use_iterator_t* dependencies) {
-  for (loom_value_id_t provider = loom_type_dependencies_next(dependencies);
-       provider != LOOM_VALUE_ID_INVALID;
-       provider = loom_type_dependencies_next(dependencies)) {
+  // An unbound dimension is retained as LOOM_VALUE_ID_INVALID. Test cursor
+  // availability separately so that this malformed reference is not mistaken
+  // for exhaustion of the set.
+  while (dependencies->members ||
+         loom_type_dependencies_advance(dependencies)) {
+    const loom_value_id_t provider = loom_type_dependencies_next(dependencies);
     if (provider >= state->module->values.count) {
       loom_verify_emit_dimension_ref_out_of_range(state, op, field, provider);
     } else {

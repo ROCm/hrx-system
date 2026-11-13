@@ -39,6 +39,14 @@ bool loom_cfg_block_argument_can_forward(const loom_module_t* module,
                                          loom_value_id_t argument,
                                          loom_value_id_t source) {
   const loom_value_t* source_value = loom_module_value(module, source);
+  const loom_type_t* payload =
+      loom_type_register_value_type(source_value->type);
+  if (loom_type_is_reference(payload ? *payload : source_value->type)) {
+    // Managed CFG arguments transfer lifetime state. Equal payloads do not
+    // establish interchangeable owners or borrow protection. Descriptor-only
+    // use summaries omit type-directed call, return, and edge transfers.
+    return false;
+  }
   if (loom_value_ownership_use_count(source_value) != 0 ||
       loom_value_ownership_use_count(loom_module_value(module, argument)) !=
           0) {

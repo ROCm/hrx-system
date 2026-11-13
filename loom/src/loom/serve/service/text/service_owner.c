@@ -8,8 +8,6 @@
 
 #include <string.h>
 
-#include "iree/base/threading/mutex.h"
-
 bool loom_serve_text_has_work(const loom_serve_text_service_t* service) {
   return service->completion.work != TEXT_WORK_NONE ||
          service->cpu_work != TEXT_CPU_WORK_NONE;
@@ -18,8 +16,9 @@ bool loom_serve_text_has_work(const loom_serve_text_service_t* service) {
 iree_status_t loom_serve_text_await_work(loom_serve_text_service_t* service,
                                          loom_serve_text_work_t work) {
   service->completion.start_time = iree_time_now();
-  IREE_RETURN_IF_ERROR(loom_serve_text_readiness_await(
-      &service->readiness, &service->completion.frontier));
+  IREE_RETURN_IF_ERROR(loom_runtime_execution_await(
+      &service->readiness, &service->completion.frontier,
+      &service->device_wait));
   service->completion.work = work;
   IREE_TRACE({
     if (work == TEXT_WORK_EPOCH) {
@@ -32,9 +31,10 @@ iree_status_t loom_serve_text_await_work(loom_serve_text_service_t* service,
 
 void loom_serve_text_schedule_cpu(loom_serve_text_service_t* service,
                                   loom_serve_text_cpu_work_t work,
-                                  loom_serve_text_cpu_work_fn_t run) {
+                                  loom_runtime_cpu_work_fn_t run) {
   service->cpu_work = work;
-  loom_serve_text_readiness_schedule(&service->readiness, run, service);
+  loom_runtime_readiness_schedule(&service->readiness, run, service,
+                                  &service->cpu_task);
 }
 
 void loom_serve_text_observe(loom_serve_text_service_t* service,
@@ -84,8 +84,8 @@ void loom_serve_text_observe(loom_serve_text_service_t* service,
       loom_serve_text_model_weight_statistics(service->model);
   state->parameter_activity =
       loom_serve_text_model_parameter_activity(service->model);
-  const loom_serve_pool_statistics_t pool_memory =
-      loom_serve_pool_statistics(loom_serve_text_model_pool(service->model));
+  const loom_runtime_pool_statistics_t pool_memory =
+      loom_runtime_pool_statistics(loom_serve_text_model_pool(service->model));
   state->pool_memory = (loom_runtime_storage_shared_memory_record_t){
       .retained_committed_bytes = pool_memory.retained.committed_bytes,
       .workspace_committed_bytes = pool_memory.workspace.bytes_committed,

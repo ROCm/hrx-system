@@ -131,44 +131,54 @@ static iree_status_t loom_kernel_barrier_lifetime_push_region(
 static iree_status_t loom_kernel_barrier_lifetime_check_op(
     loom_kernel_barrier_lifetime_state_t* state, loom_op_t* op,
     loom_value_id_t* phase_id) {
-  if (loom_kernel_barrier_arrive_isa(op)) {
-    if (*phase_id != LOOM_VALUE_ID_INVALID) {
-      return loom_kernel_barrier_lifetime_fail(
-          state, op, *phase_id,
-          IREE_SV("another barrier arrives before the active phase is waited"));
+  switch (op->kind) {
+    case LOOM_OP_KERNEL_BARRIER_ARRIVE:
+      if (*phase_id != LOOM_VALUE_ID_INVALID) {
+        return loom_kernel_barrier_lifetime_fail(
+            state, op, *phase_id,
+            IREE_SV(
+                "another barrier arrives before the active phase is waited"));
+      }
+      *phase_id = loom_kernel_barrier_arrive_phase(op);
+      break;
+    case LOOM_OP_KERNEL_BARRIER_WAIT: {
+      const loom_value_id_t waited_phase_id =
+          loom_kernel_barrier_wait_phase(op);
+      if (*phase_id != waited_phase_id) {
+        return loom_kernel_barrier_lifetime_fail(
+            state, op, *phase_id,
+            IREE_SV("the wait does not consume the phase active on this path"));
+      }
+      *phase_id = LOOM_VALUE_ID_INVALID;
+      break;
     }
-    *phase_id = loom_kernel_barrier_arrive_phase(op);
-  } else if (loom_kernel_barrier_wait_isa(op)) {
-    const loom_value_id_t waited_phase_id = loom_kernel_barrier_wait_phase(op);
-    if (*phase_id != waited_phase_id) {
-      return loom_kernel_barrier_lifetime_fail(
-          state, op, *phase_id,
-          IREE_SV("the wait does not consume the phase active on this path"));
-    }
-    *phase_id = LOOM_VALUE_ID_INVALID;
-  } else if (loom_kernel_barrier_isa(op) &&
-             *phase_id != LOOM_VALUE_ID_INVALID) {
-    return loom_kernel_barrier_lifetime_fail(
-        state, op, *phase_id,
-        IREE_SV(
-            "a complete barrier executes before the active phase is waited"));
-  } else if (loom_call_like_isa(loom_call_like_const_cast(state->module, op)) &&
-             *phase_id != LOOM_VALUE_ID_INVALID &&
-             !iree_any_bit_set(loom_op_effective_traits(state->module, op),
-                               LOOM_TRAIT_PURE)) {
-    return loom_kernel_barrier_lifetime_fail(
-        state, op, *phase_id,
-        IREE_SV(
-            "an impure or unresolved call executes while a phase is active"));
-  } else if (*phase_id != LOOM_VALUE_ID_INVALID &&
-             !iree_any_bit_set(loom_op_effective_traits(state->module, op),
-                               LOOM_TRAIT_TERMINATOR) &&
-             iree_any_bit_set(loom_op_effective_traits(state->module, op),
-                              LOOM_TRAIT_CONVERGENT)) {
-    return loom_kernel_barrier_lifetime_fail(
-        state, op, *phase_id,
-        IREE_SV(
-            "another convergent operation executes while a phase is active"));
+    case LOOM_OP_KERNEL_BARRIER:
+      if (*phase_id != LOOM_VALUE_ID_INVALID) {
+        return loom_kernel_barrier_lifetime_fail(
+            state, op, *phase_id,
+            IREE_SV("a complete barrier executes before the active phase is "
+                    "waited"));
+      }
+      break;
+    default:
+      if (*phase_id != LOOM_VALUE_ID_INVALID) {
+        const loom_trait_flags_t traits = op->traits;
+        if (loom_call_like_isa(loom_call_like_const_cast(state->module, op)) &&
+            !iree_any_bit_set(traits, LOOM_TRAIT_PURE)) {
+          return loom_kernel_barrier_lifetime_fail(
+              state, op, *phase_id,
+              IREE_SV("an impure or unresolved call executes while a phase is "
+                      "active"));
+        }
+        if (!iree_any_bit_set(traits, LOOM_TRAIT_TERMINATOR) &&
+            iree_any_bit_set(traits, LOOM_TRAIT_CONVERGENT)) {
+          return loom_kernel_barrier_lifetime_fail(
+              state, op, *phase_id,
+              IREE_SV("another convergent operation executes while a phase is "
+                      "active"));
+        }
+      }
+      break;
   }
 
   loom_region_t** regions = loom_op_regions(op);

@@ -369,6 +369,8 @@ enum loom_operand_ownership_effect_e {
   LOOM_OPERAND_OWNERSHIP_DISCARD = 5,
   // Operand resource escapes to an untracked owner.
   LOOM_OPERAND_OWNERSHIP_ESCAPE = 6,
+  // Transfers the exact owned or borrowed state and invalidates the source.
+  LOOM_OPERAND_OWNERSHIP_MOVE = 7,
 };
 typedef uint8_t loom_operand_ownership_effect_t;
 
@@ -388,6 +390,10 @@ enum loom_result_ownership_effect_e {
   LOOM_RESULT_OWNERSHIP_TIED = 5,
   // Result receives the exact ownership state of a consumed operand.
   LOOM_RESULT_OWNERSHIP_MOVED = 6,
+  // Result duplicates the source ownership state without consuming it. An
+  // owned source creates an independent owner; a borrowed source stays
+  // borrowed.
+  LOOM_RESULT_OWNERSHIP_COPIED = 7,
 };
 typedef uint8_t loom_result_ownership_effect_t;
 
@@ -577,12 +583,19 @@ typedef struct loom_symbol_definition_descriptor_t {
   // Operand field index plus one containing a kernel workload signature, or 0
   // when the signature is stored in a region or the symbol is not a kernel.
   uint8_t kernel_workload_operand_field_index_plus_one;
+  // External managed-payload identity, absent when both indices are zero.
+  struct {
+    // Attribute index plus one for the provider namespace string.
+    uint8_t namespace_attr_index_plus_one;
+    // Attribute index plus one for the provider's exact payload name string.
+    uint8_t name_attr_index_plus_one;
+  } type_contract;
   // Optional domain that computes typed facts for symbols defined by this op.
   const loom_symbol_fact_domain_t* fact_domain;
 } loom_symbol_definition_descriptor_t;
 
 static_assert(sizeof(loom_symbol_definition_descriptor_t) ==
-                  (IREE_PTR_SIZE == 8 ? 32 : 24),
+                  (IREE_PTR_SIZE == 8 ? 40 : 28),
               "loom_symbol_definition_descriptor_t must remain compact");
 
 static inline iree_string_view_t loom_symbol_definition_descriptor_name(
@@ -1010,6 +1023,14 @@ loom_inline_policy_t loom_call_like_inline_policy(loom_call_like_t call);
 // Returns the semantic class of the call-like op.
 loom_call_like_kind_t loom_call_like_kind(loom_call_like_t call);
 
+// Returns true for calls that transfer runtime arguments and results, rather
+// than requests for compile-time expansion.
+static inline bool loom_call_like_kind_is_runtime(loom_call_like_kind_t kind) {
+  return kind == LOOM_CALL_LIKE_KIND_SEMANTIC ||
+         kind == LOOM_CALL_LIKE_KIND_LOW_INTERNAL ||
+         kind == LOOM_CALL_LIKE_KIND_LOW_INVOKE;
+}
+
 //===----------------------------------------------------------------------===//
 // FuncLike interface helpers
 //===----------------------------------------------------------------------===//
@@ -1324,6 +1345,15 @@ static inline loom_value_slice_t loom_direct_branch_args(const loom_op_t* op) {
   };
 }
 
+// Returns whether the complete payload may be rebuilt without remapping
+// operation-specific metadata. DirectBranch guarantees positional forwarding;
+// the variadic shape permits cardinality changes. Attributed branches may
+// qualify payload positions and therefore retain dialect-owned mutation.
+static inline bool loom_direct_branch_can_rebuild_payload(const loom_op_t* op) {
+  return op &&
+         iree_any_bit_set(op->flags, LOOM_OP_FLAG_REBUILDABLE_DIRECT_BRANCH);
+}
+
 //===----------------------------------------------------------------------===//
 // ValueDuplication interface
 //===----------------------------------------------------------------------===//
@@ -1332,6 +1362,11 @@ static inline loom_value_slice_t loom_direct_branch_args(const loom_op_t* op) {
 // Generation proves that the complete operand and result lists are equally
 // sized positional tuples whose result types remap source-tuple references to
 // the corresponding result identities.
+// Each result copies the source ownership state without consuming it: an owner
+// creates an independent owner, while a borrow remains borrowed.
+// StorageRelation implementations have no execution effects beyond copying
+// the carrier. ObservableEffect preserves any ownership acquisition performed
+// by that transport.
 bool loom_value_duplication_isa(const loom_module_t* module,
                                 const loom_op_t* op);
 
@@ -1412,7 +1447,7 @@ iree_status_t loom_region_branch_build_region_terminator(
 // MemoryAccess interface
 //===----------------------------------------------------------------------===//
 
-// Per-instance execution-semantics modifiers for memory-access operations.
+// Per-instance semantic modifiers for memory-access operations.
 enum loom_memory_access_flag_bits_e {
   // Requires every dynamic access to execute as an independently observable
   // operation and preserves its order relative to other volatile accesses. A
@@ -1424,6 +1459,16 @@ enum loom_memory_access_flag_bits_e {
   // results. Without this flag the target may flush subnormals. Selection
   // consumes this numerical requirement; it is not a physical Low access flag.
   LOOM_MEMORY_ACCESS_FLAG_NOFTZ = 1u << 1,
+  // A physical Low load/store is one indivisible atomic observation. Every
+  // dynamic access remains observable and same-location issue order is
+  // preserved. The selected instruction and alignment supply atomicity;
+  // explicit fences/cache controls supply synchronization and visibility.
+  // Unlike volatile, independent addresses do not require ordered completion.
+  LOOM_MEMORY_ACCESS_FLAG_ATOMIC = 1u << 2,
+  // Promises that the complete physical access lies within its allocation
+  // root. Logical view indices remain subject to ordinary footprint proof.
+  // This is a source contract and has no target execution semantics.
+  LOOM_MEMORY_ACCESS_FLAG_ROOT_IN_BOUNDS = 1u << 3,
 };
 typedef uint8_t loom_memory_access_flags_t;
 
@@ -1451,8 +1496,8 @@ loom_memory_access_t loom_memory_access_cast(const loom_module_t* module,
 loom_memory_access_operation_kind_t loom_memory_access_operation_kind(
     loom_memory_access_t access);
 
-// Returns the per-access execution semantics. MemoryAccess operations use the
-// shared memory-access vocabulary for their instance flags; the op generator
+// Returns the per-access semantics. MemoryAccess operations use the shared
+// memory-access vocabulary for their instance flags; the op generator
 // enforces that contract even for operations without optional flags.
 loom_memory_access_flags_t loom_memory_access_flags(
     loom_memory_access_t access);

@@ -269,9 +269,12 @@ static FrameAnalysis AnalyzeFrame(const loom_low_emission_frame_t& frame) {
     const uint32_t node_index = frame.schedule.scheduled_node_indices[i];
     const loom_low_schedule_node_t& node = frame.schedule.nodes[node_index];
     analysis.signature = HashValue(analysis.signature, node_index);
-    analysis.signature =
-        HashValue(analysis.signature,
-                  node.descriptor == nullptr ? 0 : node.descriptor->stable_id);
+    analysis.signature = HashValue(
+        analysis.signature,
+        node.descriptor == nullptr
+            ? 0
+            : loom_low_descriptor_stable_id(
+                  frame.schedule.target.descriptor_set, node.descriptor));
     if (node.descriptor != nullptr &&
         iree_any_bit_set(
             loom_low_descriptor_set_descriptor_view(
@@ -840,7 +843,7 @@ class PacketPlanFixture {
         module_, low_function, resolved_target.descriptor_set,
         loom_amdgpu_target_processor_properties_from_resolved_target(
             &resolved_target),
-        /*max_errors=*/20, /*emitter=*/{}, &abi_verify_result, &frame_arena_));
+        /*max_errors=*/20, /*emitter=*/{}, &frame_arena_, &abi_verify_result));
     if (abi_verify_result.error_count != 0) {
       std::abort();
     }
@@ -942,8 +945,8 @@ static PlanMetrics BuildReferencePlan(PacketPlanFixture& fixture,
     AbortOnError(loom_amdgpu_wait_plan_build(
         &fixture.frame().schedule, &fixture.frame().allocation,
         /*options=*/nullptr, &fixture.address_state(), /*matrix_arena=*/nullptr,
-        /*out_matrix_results=*/nullptr, fixture.plan_arena(),
-        fixture.transient_arena(), &plan));
+        fixture.plan_arena(), fixture.transient_arena(),
+        /*out_matrix_results=*/nullptr, &plan));
     metrics.wait_action_count = plan.action_count;
     metrics.hazard_record_count = plan.hazard_plan.record_count;
     metrics.progress_record_count = plan.progress.record_count;
@@ -1042,9 +1045,9 @@ static void BenchmarkPlan(benchmark::State& state, const FixtureSpec& spec,
       AbortOnError(loom_amdgpu_wait_plan_build(
           &fixture.frame().schedule, &fixture.frame().allocation,
           /*options=*/nullptr, &fixture.address_state(),
-          /*matrix_arena=*/nullptr,
-          /*out_matrix_results=*/nullptr, fixture.plan_arena(),
-          fixture.transient_arena(), &plan));
+          /*matrix_arena=*/nullptr, fixture.plan_arena(),
+          fixture.transient_arena(),
+          /*out_matrix_results=*/nullptr, &plan));
       benchmark::DoNotOptimize(plan);
     } else {
       loom_amdgpu_packet_plan_t plan = {};

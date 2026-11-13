@@ -7,6 +7,15 @@
 #include "iree/base/internal/math.h"
 #include "loom/ir/facts.h"
 
+// Division consumes values already represented in their source carrier.
+// Wrapping mathematical results at 64 bits treats saturated endpoints as
+// unbounded; doing that to an operand would discard valid sign/range facts.
+static loom_value_facts_t loom_value_facts_division_operand(
+    loom_value_facts_t facts, int32_t bit_count) {
+  return bit_count == 64 ? facts
+                         : loom_value_facts_wrap_integer(facts, bit_count);
+}
+
 typedef struct loom_value_facts_unsigned_range_t {
   // Inclusive minimum unsigned value.
   uint64_t minimum;
@@ -60,10 +69,10 @@ bool loom_value_facts_remui_is_identity(loom_value_facts_t lhs,
   const uint64_t mask = iree_math_mask_low_bits_u64(UINT64_MAX, bit_count);
   const loom_value_facts_unsigned_range_t lhs_range =
       loom_value_facts_unsigned_range(
-          loom_value_facts_wrap_integer(lhs, bit_count), mask);
+          loom_value_facts_division_operand(lhs, bit_count), mask);
   const loom_value_facts_unsigned_range_t rhs_range =
       loom_value_facts_unsigned_range(
-          loom_value_facts_wrap_integer(rhs, bit_count), mask);
+          loom_value_facts_division_operand(rhs, bit_count), mask);
   return lhs_range.maximum < rhs_range.minimum;
 }
 
@@ -77,8 +86,9 @@ static void loom_value_facts_unsigned_division(
     int32_t bit_count, loom_value_facts_unsigned_division_kind_t kind,
     loom_value_facts_t* out) {
   const loom_value_facts_t lhs_facts =
-      loom_value_facts_wrap_integer(*lhs, bit_count);
-  loom_value_facts_t rhs_facts = loom_value_facts_wrap_integer(*rhs, bit_count);
+      loom_value_facts_division_operand(*lhs, bit_count);
+  loom_value_facts_t rhs_facts =
+      loom_value_facts_division_operand(*rhs, bit_count);
   rhs_facts.flags |= rhs->flags & LOOM_VALUE_FACT_NON_ZERO;
   uint64_t lhs_bits = 0;
   uint64_t rhs_bits = 0;
@@ -137,6 +147,10 @@ static void loom_value_facts_unsigned_division(
       *out = loom_value_facts_make_unsigned_result_range(
           lhs_range.minimum / rhs_range.maximum,
           lhs_range.maximum / rhs_minimum, bit_count, divisor);
+      if (out->range_lo > 0) {
+        out->flags |=
+            lhs_facts.flags & rhs_facts.flags & LOOM_VALUE_FACT_POWER_OF_TWO;
+      }
     }
   }
   loom_value_facts_propagate_binary_distribution(lhs_facts, rhs_facts, out);
@@ -186,6 +200,11 @@ void loom_value_facts_divsi(const loom_value_facts_t* lhs,
     int64_t lo = lhs_lo / rhs_hi;
     int64_t hi = lhs_hi / rhs_lo;
     *out = loom_value_facts_make(lo, hi, divisor);
+    // A nonzero quotient of positive powers of two is another power of two.
+    if (lo > 0) {
+      out->flags |=
+          lhs_facts.flags & rhs_facts.flags & LOOM_VALUE_FACT_POWER_OF_TWO;
+    }
     loom_value_facts_propagate_binary_distribution(lhs_facts, rhs_facts, out);
     return;
   }
@@ -234,9 +253,11 @@ void loom_value_facts_remsi(const loom_value_facts_t* lhs,
   // produces a representable signed upper bound.
   const int64_t remainder_bound =
       (int64_t)(maximum_divisor_magnitude - UINT64_C(1));
-  // Signed remainder preserves the sign of the dividend. Conservative
-  // bound: [-remainder_bound, remainder_bound].
-  *out = loom_value_facts_make(-remainder_bound, remainder_bound, 1);
+  // Signed remainder preserves the sign of the dividend, independently of
+  // the divisor's sign. Keep that information for dynamic divisors too.
+  *out =
+      loom_value_facts_make(lhs_facts.range_lo >= 0 ? 0 : -remainder_bound,
+                            lhs_facts.range_hi <= 0 ? 0 : remainder_bound, 1);
   loom_value_facts_propagate_binary_distribution(lhs_facts, rhs_facts, out);
 }
 
@@ -310,8 +331,8 @@ loom_value_facts_t loom_value_facts_quotient_preimage(
       scale.range_lo > scale.range_hi) {
     return domain;
   }
-  quotient = loom_value_facts_wrap_integer(quotient, bit_count);
-  scale = loom_value_facts_wrap_integer(scale, bit_count);
+  quotient = loom_value_facts_division_operand(quotient, bit_count);
+  scale = loom_value_facts_division_operand(scale, bit_count);
   const bool unsigned_quotient = kind == LOOM_VALUE_FACTS_QUOTIENT_DIVUI ||
                                  kind == LOOM_VALUE_FACTS_QUOTIENT_CEILDIVUI ||
                                  kind == LOOM_VALUE_FACTS_QUOTIENT_SHRUI;

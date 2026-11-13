@@ -4,12 +4,45 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_fuzz", "loom_cc_instance_library", "loom_cc_library", "loom_cc_test")
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_benchmark", "loom_cc_fuzz", "loom_cc_instance_library", "loom_cc_library", "loom_cc_test")
+load("//loom/build_tools/bazel:loom_check.bzl", "loom_check_test")
 
 package(
     default_visibility = ["//visibility:public"],
     features = ["layering_check"],
     licenses = ["notice"],  # Apache 2.0
+)
+
+loom_cc_library(
+    name = "ordinal_map",
+    srcs = ["ordinal_map.c"],
+    hdrs = ["ordinal_map.h"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "ordinal_map_test",
+    srcs = ["ordinal_map_test.cc"],
+    deps = [
+        ":ordinal_map",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_benchmark(
+    name = "ordinal_map_benchmark",
+    srcs = ["ordinal_map_benchmark.cc"],
+    deps = [
+        ":ordinal_map",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:benchmark_main",
+    ],
 )
 
 loom_cc_library(
@@ -277,6 +310,7 @@ loom_cc_test(
 loom_cc_library(
     name = "fact_table_api",
     hdrs = [
+        "fact_cast.h",
         "fact_extensions.h",
         "fact_identity.h",
         "fact_layout.h",
@@ -327,6 +361,7 @@ loom_cc_library(
 loom_cc_library(
     name = "fact_table",
     srcs = [
+        "fact_cast.c",
         "fact_cfg.c",
         "fact_extensions.c",
         "fact_identity.c",
@@ -345,6 +380,7 @@ loom_cc_library(
         "reference_transfer.c",
     ],
     hdrs = [
+        "fact_cast.h",
         "fact_cfg.h",
         "fact_extensions.h",
         "fact_identity.h",
@@ -464,6 +500,18 @@ loom_cc_test(
 )
 
 loom_cc_test(
+    name = "fact_cast_test",
+    srcs = ["fact_cast_test.cc"],
+    deps = [
+        ":fact_table",
+        "//loom/src/loom/ir:facts",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
     name = "fact_origin_test",
     srcs = ["fact_origin_test.cc"],
     deps = [
@@ -563,6 +611,21 @@ loom_cc_test(
     ],
 )
 
+loom_check_test(
+    name = "fact_loop_test",
+    src = "fact_loop_test.loom-test",
+)
+
+loom_check_test(
+    name = "fact_uniformity_test",
+    src = "fact_uniformity_test.loom-test",
+)
+
+loom_check_test(
+    name = "fact_remainder_test",
+    src = "fact_remainder_test.loom-test",
+)
+
 loom_cc_library(
     name = "predicate_facts",
     srcs = ["predicate_facts.c"],
@@ -626,6 +689,19 @@ loom_cc_test(
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_benchmark(
+    name = "call_graph_benchmark",
+    srcs = ["call_graph_benchmark.cc"],
+    deps = [
+        ":call_graph",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/test",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:benchmark_main",
     ],
 )
 
@@ -841,6 +917,7 @@ loom_cc_library(
     hdrs = ["cfg_execution.h"],
     deps = [
         ":cfg_control",
+        ":cfg_loop_nest",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
     ],
@@ -915,8 +992,10 @@ loom_cc_test(
     srcs = ["cfg_execution_test.cc"],
     deps = [
         ":cfg_control",
+        ":cfg_dominance",
         ":cfg_execution",
         ":cfg_graph_test_util",
+        ":cfg_loop_nest",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",

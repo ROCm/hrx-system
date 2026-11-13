@@ -1,0 +1,87 @@
+// RUN: emit source-low target=amdgpu:gfx1100 output=low
+
+// Global addresses test all 64 bits against zero.
+func.def @optional_global(%input: buffer, %use: i1) -> (i1) {
+  %empty = buffer.null : buffer
+  %selected = scf.select %use, %input, %empty : buffer
+  %missing = buffer.compare.null %selected : buffer
+  func.return %missing : i1
+}
+
+// ----
+low.func.def target<amdgpu.rdna3.core> abi(hal_kernel) @optional_global(%use: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr x2>) asm {
+  %input = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %11 = v_mov_b32 0
+  %13 = slice %input[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %14 = v_mov_b32_copy %13
+  %16 = v_cndmask_b32 %11, %14, %use
+  %17 = slice %input[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %18 = v_mov_b32_copy %17
+  %20 = v_cndmask_b32 %11, %18, %use
+  %24 = v_or_b32 %16, %20
+  %missing = v_cmp_eq_i32_src0_inline %24 {lhs = 0}
+  return %missing
+}
+
+// ====
+
+// A zero private-segment offset is valid storage. Null uses all-ones,
+// including when transferred from a null constructor to a loop's carrier.
+func.def @optional_private(%iterations: index) -> (i1) {
+  %bytes = index.constant 4 : offset
+  %storage = buffer.alloca<private> align(4) %bytes : buffer
+  %empty = buffer.null : buffer
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %selected, %other = scf.for %i = [%begin to %iterations step %step](%current = %empty : buffer, %next = %storage : buffer) -> (buffer, buffer) {
+    scf.yield %next, %current : buffer, buffer
+  }
+  %missing = buffer.compare.null %selected : buffer
+  func.return %missing : i1
+}
+
+// ----
+low.func.def target<amdgpu.rdna3.core> abi(hal_kernel) @optional_private(%iterations: reg<amdgpu.vgpr>) -> (reg<amdgpu.sgpr x2>) asm {
+  %29 = storage {byte_alignment = 4, byte_length = 4} : low.storage<private>
+  %storage = storage_address %29 : low.storage<private> -> reg<amdgpu.vgpr>
+  %begin = s_mov_b32 0
+  %step = s_mov_b32 1
+  %35 = v_mov_b32_copy %begin
+  %36 = v_mov_b32 4294967295
+  %38 = s_mov_b64_exec_read
+  low.br ^_bb1(%35: reg<amdgpu.vgpr>, %36: reg<amdgpu.vgpr>, %storage: reg<amdgpu.vgpr>)
+^_bb1(%i: reg<amdgpu.vgpr>, %current: reg<amdgpu.vgpr>, %next: reg<amdgpu.vgpr>):
+  %37 = v_cmp_lt_i32 %i, %iterations
+  %39, %40 = s_and_saveexec_b64 %37
+  low.cond_br %40, ^_bb2, ^_bb3 : reg<amdgpu.scc>
+^_bb2:
+  %41 = v_add_u32 %step, %i
+  low.br ^_bb1(%41: reg<amdgpu.vgpr>, %next: reg<amdgpu.vgpr>, %current: reg<amdgpu.vgpr>)
+^_bb3:
+  s_mov_b64_exec %38
+  %42 = v_mov_b32 4294967295
+  %missing = v_cmp_eq_i32 %42, %current
+  return %missing
+}
+
+// ====
+
+// The same segment sentinel applies to shared workgroup storage.
+func.def @optional_workgroup(%use: i1) -> (i1) {
+  %bytes = index.constant 4 : offset
+  %storage = buffer.alloca<workgroup> align(4) %bytes : buffer
+  %empty = buffer.null : buffer
+  %selected = scf.select %use, %storage, %empty : buffer
+  %missing = buffer.compare.null %selected : buffer
+  func.return %missing : i1
+}
+
+// ----
+low.func.def target<amdgpu.rdna3.core> abi(hal_kernel) @optional_workgroup(%use: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr x2>) asm {
+  %9 = storage {byte_alignment = 4, byte_length = 4} : low.storage<workgroup>
+  %storage = storage_address %9 : low.storage<workgroup> -> reg<amdgpu.vgpr>
+  %13 = v_mov_b32 4294967295
+  %selected = v_cndmask_b32 %13, %storage, %use
+  %missing = v_cmp_eq_i32 %13, %selected
+  return %missing
+}

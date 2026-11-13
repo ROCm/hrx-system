@@ -155,6 +155,28 @@ py_test(
 )
 
 py_test(
+    name = "isa_dispatch_chain_check_test",
+    srcs = [
+        "clang_tidy_test.py",
+        "isa_dispatch_chain_check_test.py",
+    ],
+    args = [
+        "--clang-tidy=$(location @iree_clang_tidy_llvm//:clang-tidy)",
+        "--plugin=$(location :test_plugin)",
+    ],
+    data = [
+        "isa_dispatch_chain_check.c",
+        "isa_dispatch_chain_check.cc",
+        ":test_plugin",
+        "@iree_clang_tidy_llvm//:clang-tidy",
+    ],
+    imports = ["."],
+    main = "isa_dispatch_chain_check_test.py",
+    tags = ["manual"],
+    target_compatible_with = CLANG_TIDY_LLVM_TARGET_COMPATIBLE_WITH,
+)
+
+py_test(
     name = "lifecycle_checks_test",
     srcs = [
         "clang_tidy_test.py",
@@ -301,6 +323,7 @@ test_suite(
         ":aspect_selection_tests",
         ":designated_initializer_check_test",
         ":extent_checks_test",
+        ":isa_dispatch_chain_check_test",
         ":lifecycle_checks_test",
         ":plugin_smoke_test",
         ":recursion_check_test",

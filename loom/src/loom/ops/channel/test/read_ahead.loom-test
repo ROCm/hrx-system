@@ -79,90 +79,91 @@ func.def @sum_record(%read: read<tile<64xf32>>, %length: index, %initial: f32) -
   %75 = index.sub %length, %74 : index
   %76 = index.assume %75 [ge(%75, %64), le(%75, %length)] : index
   cfg.br ^_bb2(%39: index, %initial: f32, %value$42: f32, %value$45: f32)
-^_bb2(%151: index, %152: f32, %153: f32, %154: f32):
-  %156 = index.cmp slt, %151, %76 : index
-  cfg.cond_br %156, ^_bb3, ^_bb6
+^_bb2(%152: index, %153: f32, %154: f32, %155: f32):
+  %157 = index.cmp slt, %152, %76 : index
+  cfg.cond_br %157, ^_bb3, ^_bb6
 ^_bb3:
-  %155 = index.assume %151 [range(%151, 2, 9223372036854775806), multiple_of(%151, 2), lt(%151, %76)] : index
+  %156 = index.assume %152 [range(%152, 2, 9223372036854775806), multiple_of(%152, 2), lt(%152, %76)] : index
   %84 = index.constant 1 : index
-  %85 = index.add %155, %84 : index
-  %86, %87 = index.assume %155, %85 [lt(%155, %length), lt(%85, %length)] : index, index
+  %85 = index.add %156, %84 : index
+  %86, %87 = index.assume %156, %85 [range(%156, 2, 9223372036854775806), ge(%156, %39), lt(%156, %length), range(%85, 2, 9223372036854775806), ge(%85, %39), lt(%85, %length)] : index, index
   %value$88 = view.load %payload[%86] : view<64xf32> -> f32
   %value_1$89 = view.load %payload[%87] : view<64xf32> -> f32
   scf.schedule.fence
-  %next$90 = scalar.addf %152, %153 : f32
+  %next$90 = scalar.addf %153, %154 : f32
   scf.schedule.fence
-  %next_1$91 = scalar.addf %next$90, %154 : f32
-  %157 = index.sub %76, %155 : index
-  %158 = index.cmp ult, %62, %157 : index
-  cfg.cond_br %158, ^_bb4, ^_bb5
+  %next_1$91 = scalar.addf %next$90, %155 : f32
+  %158 = index.sub %76, %156 : index
+  %159 = index.cmp ult, %62, %158 : index
+  cfg.cond_br %159, ^_bb4, ^_bb5
 ^_bb4:
-  %159 = index.add %155, %62 : index
-  cfg.br ^_bb2(%159: index, %next_1$91: f32, %value$88: f32, %value_1$89: f32)
+  %160 = index.add %156, %62 : index
+  cfg.br ^_bb2(%160: index, %next_1$91: f32, %value$88: f32, %value_1$89: f32)
 ^_bb5:
   cfg.br ^_bb7(%next_1$91: f32, %value$88: f32, %value_1$89: f32)
 ^_bb6:
-  cfg.br ^_bb7(%152: f32, %153: f32, %154: f32)
-^_bb7(%148: f32, %149: f32, %150: f32):
-  cfg.br ^_bb8(%76: index, %148: f32, %149: f32, %150: f32)
-^_bb8(%141: index, %142: f32, %143: f32, %144: f32):
-  %146 = index.cmp slt, %141, %length : index
-  cfg.cond_br %146, ^_bb9, ^_bb10
+  cfg.br ^_bb7(%153: f32, %154: f32, %155: f32)
+^_bb7(%149: f32, %150: f32, %151: f32):
+  cfg.br ^_bb8(%76: index, %149: f32, %150: f32, %151: f32)
+^_bb8(%142: index, %143: f32, %144: f32, %145: f32):
+  %147 = index.cmp slt, %142, %length : index
+  cfg.cond_br %147, ^_bb9, ^_bb10
 ^_bb9:
-  %145 = index.assume %141 [range(%141, -9223372036854775808, 9223372036854775806), ge(%141, %76), lt(%141, %length)] : index
-  %value$99 = view.load %payload[%145] : view<64xf32> -> f32
-  %next$100 = scalar.addf %142, %143 : f32
-  %147 = index.add %145, %step : index
-  cfg.br ^_bb8(%147: index, %next$100: f32, %144: f32, %value$99: f32)
+  %146 = index.assume %142 [range(%142, -9223372036854775808, 9223372036854775806), ge(%142, %76), lt(%142, %length)] : index
+  %99 = index.assume %146 [range(%146, 2, 9223372036854775806)] : index
+  %value$100 = view.load %payload[%99] : view<64xf32> -> f32
+  %next$101 = scalar.addf %143, %144 : f32
+  %148 = index.add %146, %step : index
+  cfg.br ^_bb8(%148: index, %next$101: f32, %145: f32, %value$100: f32)
 ^_bb10:
-  cfg.br ^_bb11(%142: f32, %143: f32, %144: f32)
-^_bb11(%138: f32, %139: f32, %140: f32):
-  %next$55 = scalar.addf %138, %139 : f32
-  %next$56 = scalar.addf %next$55, %140 : f32
+  cfg.br ^_bb11(%143: f32, %144: f32, %145: f32)
+^_bb11(%139: f32, %140: f32, %141: f32):
+  %next$55 = scalar.addf %139, %140 : f32
+  %next$56 = scalar.addf %next$55, %141 : f32
   cfg.br ^_bb21(%next$56: f32)
 ^_bb12:
-  %101 = index.constant 2 : index
-  %102 = index.constant 0 : index
-  %103 = index.sub %length, %begin : index
-  %104 = index.max %103, %102 : index
-  %105 = index.constant 2 : index
-  %106 = index.div %104, %105 : index
-  %107 = index.mul %106, %101 : index
-  %108 = index.add %begin, %107 : index
+  %102 = index.constant 2 : index
+  %103 = index.constant 0 : index
+  %104 = index.sub %length, %begin : index
+  %105 = index.max %104, %103 : index
+  %106 = index.constant 2 : index
+  %107 = index.div %105, %106 : index
+  %108 = index.mul %107, %102 : index
+  %109 = index.add %begin, %108 : index
   cfg.br ^_bb13(%begin: index, %initial: f32)
-^_bb13(%133: index, %134: f32):
-  %136 = index.cmp slt, %133, %108 : index
-  cfg.cond_br %136, ^_bb14, ^_bb15
+^_bb13(%134: index, %135: f32):
+  %137 = index.cmp slt, %134, %109 : index
+  cfg.cond_br %137, ^_bb14, ^_bb15
 ^_bb14:
-  %135 = index.assume %133 [range(%133, 0, 9223372036854775806), multiple_of(%133, 2), lt(%133, %108)] : index
-  %112 = index.constant 1 : index
-  %113 = index.add %135, %112 : index
-  %114, %115 = index.assume %135, %113 [lt(%135, %length), lt(%113, %length)] : index, index
-  %value$116 = view.load %payload[%114] : view<64xf32> -> f32
-  %value_1$117 = view.load %payload[%115] : view<64xf32> -> f32
+  %136 = index.assume %134 [range(%134, 0, 9223372036854775804), multiple_of(%134, 2), lt(%134, %109)] : index
+  %113 = index.constant 1 : index
+  %114 = index.add %136, %113 : index
+  %115, %116 = index.assume %136, %114 [range(%136, 0, 9223372036854775806), ge(%136, %begin), lt(%136, %length), range(%114, 0, 9223372036854775806), ge(%114, %begin), lt(%114, %length)] : index, index
+  %value$117 = view.load %payload[%115] : view<64xf32> -> f32
+  %value_1$118 = view.load %payload[%116] : view<64xf32> -> f32
   scf.schedule.fence
-  %next$118 = scalar.addf %134, %value$116 : f32
+  %next$119 = scalar.addf %135, %value$117 : f32
   scf.schedule.fence
-  %next_1$119 = scalar.addf %next$118, %value_1$117 : f32
-  %137 = index.add %135, %101 : index
-  cfg.br ^_bb13(%137: index, %next_1$119: f32)
+  %next_1$120 = scalar.addf %next$119, %value_1$118 : f32
+  %138 = index.add %136, %102 : index
+  cfg.br ^_bb13(%138: index, %next_1$120: f32)
 ^_bb15:
-  cfg.br ^_bb16(%134: f32)
-^_bb16(%132: f32):
-  cfg.br ^_bb17(%108: index, %132: f32)
-^_bb17(%127: index, %128: f32):
-  %130 = index.cmp slt, %127, %length : index
-  cfg.cond_br %130, ^_bb18, ^_bb19
+  cfg.br ^_bb16(%135: f32)
+^_bb16(%133: f32):
+  cfg.br ^_bb17(%109: index, %133: f32)
+^_bb17(%128: index, %129: f32):
+  %131 = index.cmp slt, %128, %length : index
+  cfg.cond_br %131, ^_bb18, ^_bb19
 ^_bb18:
-  %129 = index.assume %127 [range(%127, -9223372036854775808, 9223372036854775806), ge(%127, %108), lt(%127, %length)] : index
-  %value$123 = view.load %payload[%129] : view<64xf32> -> f32
-  %next$124 = scalar.addf %128, %value$123 : f32
-  %131 = index.add %129, %step : index
-  cfg.br ^_bb17(%131: index, %next$124: f32)
+  %130 = index.assume %128 [range(%128, 0, 9223372036854775806), ge(%128, %109), lt(%128, %length)] : index
+  %value$124 = view.load %payload[%130] : view<64xf32> -> f32
+  %next$125 = scalar.addf %129, %value$124 : f32
+  %132 = index.add %130, %step : index
+  cfg.br ^_bb17(%132: index, %next$125: f32)
 ^_bb19:
-  cfg.br ^_bb20(%128: f32)
-^_bb20(%126: f32):
-  cfg.br ^_bb21(%126: f32)
+  cfg.br ^_bb20(%129: f32)
+^_bb20(%127: f32):
+  cfg.br ^_bb21(%127: f32)
 ^_bb21(%sum: f32):
   channel.release %read : read<tile<64xf32>>
   func.return %sum : f32
@@ -180,18 +181,18 @@ func.def @sum_stream(%source: channel<tile<64xf32>>, %staging: channel<tile<64xf
   channel.copy %first_source -> %first_write : read<tile<64xf32>>, write<tile<64xf32>>
   %first = channel.accept %staging : channel<tile<64xf32>> -> read<tile<64xf32>>
   cfg.br ^_bb2(%step: index, %first: read<tile<64xf32>>, %identity: f32)
-^_bb2(%163: index, %current: read<tile<64xf32>>, %partial: f32):
-  %167 = index.cmp slt, %163, %count : index
-  cfg.cond_br %167, ^_bb3, ^_bb4
+^_bb2(%164: index, %current: read<tile<64xf32>>, %partial: f32):
+  %168 = index.cmp slt, %164, %count : index
+  cfg.cond_br %168, ^_bb3, ^_bb4
 ^_bb3:
-  %record = index.assume %163 [range(%163, 1, 9223372036854775806), lt(%163, %count)] : index
+  %record = index.assume %164 [range(%164, 1, 9223372036854775806), lt(%164, %count)] : index
   %next_source = channel.accept %source : channel<tile<64xf32>> -> read<tile<64xf32>>
   %next_write, %next_storage = channel.reserve %staging : channel<tile<64xf32>> -> (write<tile<64xf32>>, view<64xf32>)
   channel.copy %next_source -> %next_write : read<tile<64xf32>>, write<tile<64xf32>>
   %next = channel.accept %staging : channel<tile<64xf32>> -> read<tile<64xf32>>
   %next_sum = func.call @sum_record(%current, %length, %partial) : (read<tile<64xf32>>, index, f32) -> (f32)
-  %168 = index.add %record, %step : index
-  cfg.br ^_bb2(%168: index, %next: read<tile<64xf32>>, %next_sum: f32)
+  %169 = index.add %record, %step : index
+  cfg.br ^_bb2(%169: index, %next: read<tile<64xf32>>, %next_sum: f32)
 ^_bb4:
   cfg.br ^_bb5(%current: read<tile<64xf32>>, %partial: f32)
 ^_bb5(%last: read<tile<64xf32>>, %sum: f32):

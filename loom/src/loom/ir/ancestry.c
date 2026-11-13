@@ -21,46 +21,6 @@ bool loom_op_is_ancestor_of(const loom_op_t* ancestor_op, const loom_op_t* op) {
   return false;
 }
 
-static const loom_op_t* loom_region_parent_op(const loom_region_t* region) {
-  if (!region) {
-    return NULL;
-  }
-  const loom_block_t* block = NULL;
-  loom_region_for_each_block(region, block) {
-    if (block->first_op) {
-      return block->first_op->parent_op;
-    }
-  }
-  return NULL;
-}
-
-static bool loom_op_contains_region_slow(const loom_op_t* ancestor_op,
-                                         const loom_region_t* target_region) {
-  if (!ancestor_op || !target_region) {
-    return false;
-  }
-  loom_region_t* const* regions = loom_op_regions(ancestor_op);
-  for (uint8_t i = 0; i < ancestor_op->region_count; ++i) {
-    const loom_region_t* region = regions[i];
-    if (!region) {
-      continue;
-    }
-    if (region == target_region) {
-      return true;
-    }
-    const loom_block_t* block = NULL;
-    loom_region_for_each_block(region, block) {
-      const loom_op_t* child_op = NULL;
-      loom_block_for_each_op(block, child_op) {
-        if (loom_op_contains_region_slow(child_op, target_region)) {
-          return true;
-        }
-      }
-    }
-  }
-  return false;
-}
-
 bool loom_op_contains_block(const loom_op_t* ancestor_op,
                             const loom_block_t* block) {
   if (!ancestor_op || !block ||
@@ -68,9 +28,7 @@ bool loom_op_contains_block(const loom_op_t* ancestor_op,
     return false;
   }
   const loom_op_t* parent_op = loom_region_parent_op(block->parent_region);
-  return parent_op
-             ? loom_op_is_ancestor_of(ancestor_op, parent_op)
-             : loom_op_contains_region_slow(ancestor_op, block->parent_region);
+  return parent_op && loom_op_is_ancestor_of(ancestor_op, parent_op);
 }
 
 bool loom_op_subtree_defines_value(const loom_module_t* module,

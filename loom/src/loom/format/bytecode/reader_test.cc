@@ -1759,8 +1759,8 @@ class ReaderTest : public ::testing::Test {
 
   loom_bytecode_read_result_t ReadIndex(
       const std::vector<uint8_t>& bytes, iree_arena_allocator_t* metadata_arena,
-      loom_bytecode_file_metadata_t* out_metadata,
-      std::vector<std::string>* error_ids) {
+      std::vector<std::string>* error_ids,
+      loom_bytecode_file_metadata_t* out_metadata) {
     loom_bytecode_read_result_t result = {0};
     loom_bytecode_index_options_t options = {
         .diagnostic_sink =
@@ -1778,9 +1778,9 @@ class ReaderTest : public ::testing::Test {
 
   loom_bytecode_read_result_t ReadModule(const std::vector<uint8_t>& bytes,
                                          loom_context_t* context,
-                                         loom_module_t** out_module,
                                          std::vector<std::string>* error_ids,
-                                         bool verify_module = false) {
+                                         bool verify_module,
+                                         loom_module_t** out_module) {
     loom_bytecode_read_result_t result = {0};
     loom_bytecode_read_options_t options = {
         .diagnostic_sink =
@@ -1791,24 +1791,38 @@ class ReaderTest : public ::testing::Test {
     };
     IREE_CHECK_OK(loom_bytecode_read_module(
         iree_make_const_byte_span(bytes.data(), bytes.size()),
-        IREE_SV("test.loombc"), context, &block_pool_, &options, &result,
-        out_module, iree_allocator_system()));
+        IREE_SV("test.loombc"), context, &block_pool_, &options,
+        iree_allocator_system(), &result, out_module));
     IREE_CHECK_OK(
         VerifyMaterializedModule(verify_module, options, &result, out_module));
     return result;
   }
 
   loom_bytecode_read_result_t ReadModule(const std::vector<uint8_t>& bytes,
-                                         loom_module_t** out_module,
+                                         loom_context_t* context,
                                          std::vector<std::string>* error_ids,
-                                         bool verify_module = false) {
-    return ReadModule(bytes, &context_, out_module, error_ids, verify_module);
+                                         loom_module_t** out_module) {
+    return ReadModule(bytes, context, error_ids, /*verify_module=*/false,
+                      out_module);
+  }
+
+  loom_bytecode_read_result_t ReadModule(const std::vector<uint8_t>& bytes,
+                                         std::vector<std::string>* error_ids,
+                                         bool verify_module,
+                                         loom_module_t** out_module) {
+    return ReadModule(bytes, &context_, error_ids, verify_module, out_module);
+  }
+
+  loom_bytecode_read_result_t ReadModule(const std::vector<uint8_t>& bytes,
+                                         std::vector<std::string>* error_ids,
+                                         loom_module_t** out_module) {
+    return ReadModule(bytes, error_ids, /*verify_module=*/false, out_module);
   }
 
   loom_bytecode_read_result_t ReadModuleOrdinal(
       const std::vector<uint8_t>& bytes, uint16_t module_ordinal,
-      loom_module_t** out_module, std::vector<std::string>* error_ids,
-      bool verify_module = false) {
+      std::vector<std::string>* error_ids, bool verify_module,
+      loom_module_t** out_module) {
     loom_bytecode_read_result_t result = {0};
     loom_bytecode_read_options_t options = {
         .diagnostic_sink =
@@ -1820,7 +1834,7 @@ class ReaderTest : public ::testing::Test {
     IREE_CHECK_OK(loom_bytecode_read_module_ordinal(
         iree_make_const_byte_span(bytes.data(), bytes.size()),
         IREE_SV("test.loombc"), &context_, &block_pool_, module_ordinal,
-        &options, &result, out_module, iree_allocator_system()));
+        &options, iree_allocator_system(), &result, out_module));
     IREE_CHECK_OK(
         VerifyMaterializedModule(verify_module, options, &result, out_module));
     return result;
@@ -1829,8 +1843,9 @@ class ReaderTest : public ::testing::Test {
   loom_bytecode_read_result_t MaterializeModuleSymbols(
       const std::vector<uint8_t>& bytes,
       const loom_bytecode_file_metadata_t* metadata,
-      const std::vector<iree_host_size_t>& ordinals, loom_module_t** out_module,
-      std::vector<std::string>* error_ids, bool verify_module = false) {
+      const std::vector<iree_host_size_t>& ordinals,
+      std::vector<std::string>* error_ids, bool verify_module,
+      loom_module_t** out_module) {
     loom_bytecode_read_result_t result = {0};
     const loom_bytecode_read_options_t options = {
         .diagnostic_sink =
@@ -1847,10 +1862,19 @@ class ReaderTest : public ::testing::Test {
             .count = ordinals.size(),
             .ordinals = ordinals.data(),
         },
-        &options, &result, out_module, iree_allocator_system()));
+        &options, iree_allocator_system(), &result, out_module));
     IREE_CHECK_OK(
         VerifyMaterializedModule(verify_module, options, &result, out_module));
     return result;
+  }
+
+  loom_bytecode_read_result_t MaterializeModuleSymbols(
+      const std::vector<uint8_t>& bytes,
+      const loom_bytecode_file_metadata_t* metadata,
+      const std::vector<iree_host_size_t>& ordinals,
+      std::vector<std::string>* error_ids, loom_module_t** out_module) {
+    return MaterializeModuleSymbols(bytes, metadata, ordinals, error_ids,
+                                    /*verify_module=*/false, out_module);
   }
 
   uint16_t ReadU16LE(const std::vector<uint8_t>& bytes, size_t offset) {
@@ -2771,7 +2795,7 @@ class ReaderTest : public ::testing::Test {
     iree_arena_initialize(&block_pool_, &metadata_arena);
     loom_bytecode_file_metadata_t metadata = {0};
     error_ids.clear();
-    result = ReadIndex(bytes, &metadata_arena, &metadata, &error_ids);
+    result = ReadIndex(bytes, &metadata_arena, &error_ids, &metadata);
     EXPECT_GT(result.error_count, 0u);
     EXPECT_FALSE(error_ids.empty());
     if (!error_ids.empty()) {
@@ -2815,7 +2839,7 @@ class ReaderTest : public ::testing::Test {
                              const char* expected_error_id) {
     std::vector<std::string> error_ids;
     loom_module_t* module = nullptr;
-    loom_bytecode_read_result_t result = ReadModule(bytes, &module, &error_ids);
+    loom_bytecode_read_result_t result = ReadModule(bytes, &error_ids, &module);
     EXPECT_GT(result.error_count, 0u);
     EXPECT_EQ(module, nullptr);
     if (module) {
@@ -2837,7 +2861,7 @@ class ReaderTest : public ::testing::Test {
     IREE_EXPECT_OK(loom_bytecode_read_module(
         iree_make_const_byte_span(bytes.data(), bytes.size()),
         IREE_SV("test.loombc"), &context_, &storage.block_pool, &options,
-        &result, &module, iree_allocator_system()));
+        iree_allocator_system(), &result, &module));
 
     EXPECT_EQ(result.error_count, 0u);
     EXPECT_TRUE(error_ids.empty());
@@ -2859,7 +2883,7 @@ class ReaderTest : public ::testing::Test {
     IREE_ASSERT_OK(loom_bytecode_read_module(
         iree_make_const_byte_span(bytes.data(), bytes.size()),
         IREE_SV("test.loombc"), &context_, &storage.block_pool, &options,
-        &result, &module, iree_allocator_system()));
+        iree_allocator_system(), &result, &module));
 
     EXPECT_EQ(result.error_count, 1u);
     EXPECT_EQ(error_ids, (std::vector<std::string>{"ERR_BYTECODE_009"}));
@@ -2873,7 +2897,7 @@ class ReaderTest : public ::testing::Test {
     loom_module_t* read_module = nullptr;
     std::vector<std::string> error_ids;
     loom_bytecode_read_result_t result =
-        ReadModule(first, &read_module, &error_ids);
+        ReadModule(first, &error_ids, &read_module);
     EXPECT_EQ(result.error_count, 0u) << ::testing::PrintToString(error_ids);
     EXPECT_TRUE(error_ids.empty()) << ::testing::PrintToString(error_ids);
     ASSERT_NE(read_module, nullptr);
@@ -3130,7 +3154,7 @@ TEST_F(ReaderTest, IndexesFunctionRootRegionsIndependently) {
   loom_bytecode_file_metadata_t metadata = {0};
   std::vector<std::string> error_ids;
   loom_bytecode_read_result_t result =
-      ReadIndex(bytes, &metadata_arena, &metadata, &error_ids);
+      ReadIndex(bytes, &metadata_arena, &error_ids, &metadata);
   ASSERT_EQ(result.error_count, 0u);
   ASSERT_TRUE(error_ids.empty());
   ASSERT_EQ(metadata.module_count, 1u);
@@ -3156,7 +3180,7 @@ TEST_F(ReaderTest, IndexesFunctionRootRegionsIndependently) {
             payloads[1].absolute_offset);
 
   loom_module_t* read_module = nullptr;
-  result = ReadModule(bytes, &read_module, &error_ids, /*verify_module=*/true);
+  result = ReadModule(bytes, &error_ids, /*verify_module=*/true, &read_module);
   EXPECT_EQ(result.error_count, 0u) << ::testing::PrintToString(error_ids);
   ASSERT_NE(read_module, nullptr);
   ASSERT_EQ(read_module->symbols.count, 1u);
@@ -3166,9 +3190,8 @@ TEST_F(ReaderTest, IndexesFunctionRootRegionsIndependently) {
   EXPECT_NE(loom_test_split_func_body(read_func), nullptr);
 
   loom_module_t* selected_module = nullptr;
-  result = MaterializeModuleSymbols(bytes, &metadata, {0}, &selected_module,
-                                    &error_ids,
-                                    /*verify_module=*/true);
+  result = MaterializeModuleSymbols(bytes, &metadata, {0}, &error_ids,
+                                    /*verify_module=*/true, &selected_module);
   EXPECT_EQ(result.error_count, 0u) << ::testing::PrintToString(error_ids);
   ASSERT_NE(selected_module, nullptr);
   ASSERT_EQ(selected_module->symbols.count, 1u);
@@ -3193,7 +3216,7 @@ TEST_F(ReaderTest, IndexesKernelRootRegionRoles) {
   loom_bytecode_file_metadata_t metadata = {0};
   std::vector<std::string> error_ids;
   loom_bytecode_read_result_t result =
-      ReadIndex(bytes, &metadata_arena, &metadata, &error_ids);
+      ReadIndex(bytes, &metadata_arena, &error_ids, &metadata);
   ASSERT_EQ(result.error_count, 0u);
   ASSERT_TRUE(error_ids.empty());
   ASSERT_EQ(metadata.module_count, 1u);
@@ -3206,7 +3229,7 @@ TEST_F(ReaderTest, IndexesKernelRootRegionRoles) {
   EXPECT_EQ(symbol.body_region_payload_ordinal_plus_one, 2u);
 
   loom_module_t* read_module = nullptr;
-  result = ReadModule(bytes, &read_module, &error_ids, /*verify_module=*/true);
+  result = ReadModule(bytes, &error_ids, /*verify_module=*/true, &read_module);
   EXPECT_EQ(result.error_count, 0u) << ::testing::PrintToString(error_ids);
   ASSERT_NE(read_module, nullptr);
   ASSERT_EQ(read_module->symbols.count, 1u);
@@ -3239,8 +3262,8 @@ TEST_F(ReaderTest, ZeroArgumentBodyRetainsSignatureBindingContract) {
   loom_module_t* read_module = nullptr;
   IREE_ASSERT_OK(loom_bytecode_read_module(
       iree_make_const_byte_span(bytes.data(), bytes.size()),
-      IREE_SV("test.loombc"), &context_, &block_pool_, &options, &result,
-      &read_module, iree_allocator_system()));
+      IREE_SV("test.loombc"), &context_, &block_pool_, &options,
+      iree_allocator_system(), &result, &read_module));
   EXPECT_GT(result.error_count, 0u);
   EXPECT_EQ(failure_code,
             "signature_argument_count_does_not_match_region_entry");
@@ -3263,16 +3286,16 @@ TEST_F(ReaderTest, MaterializesExactIndexedSymbolSelection) {
   loom_bytecode_file_metadata_t metadata = {0};
   std::vector<std::string> error_ids;
   loom_bytecode_read_result_t index_result =
-      ReadIndex(bytes, &metadata_arena, &metadata, &error_ids);
+      ReadIndex(bytes, &metadata_arena, &error_ids, &metadata);
   ASSERT_EQ(index_result.error_count, 0u);
   ASSERT_TRUE(error_ids.empty());
   ASSERT_EQ(metadata.module_count, 1u);
   ASSERT_EQ(metadata.modules[0].symbol_count, 2u);
 
   loom_module_t* selected_module = nullptr;
-  loom_bytecode_read_result_t selected_result = MaterializeModuleSymbols(
-      bytes, &metadata, {1}, &selected_module, &error_ids,
-      /*verify_module=*/true);
+  loom_bytecode_read_result_t selected_result =
+      MaterializeModuleSymbols(bytes, &metadata, {1}, &error_ids,
+                               /*verify_module=*/true, &selected_module);
   EXPECT_EQ(selected_result.error_count, 0u)
       << ::testing::PrintToString(error_ids);
   ASSERT_NE(selected_module, nullptr);
@@ -3313,7 +3336,7 @@ TEST_F(ReaderTest, SelectedMaterializationDoesNotReadRejectedBody) {
   loom_bytecode_file_metadata_t metadata = {0};
   std::vector<std::string> error_ids;
   loom_bytecode_read_result_t index_result =
-      ReadIndex(bytes, &metadata_arena, &metadata, &error_ids);
+      ReadIndex(bytes, &metadata_arena, &error_ids, &metadata);
   ASSERT_EQ(index_result.error_count, 0u);
   ASSERT_TRUE(error_ids.empty());
   const loom_bytecode_symbol_metadata_t* rejected =
@@ -3329,9 +3352,9 @@ TEST_F(ReaderTest, SelectedMaterializationDoesNotReadRejectedBody) {
   }
 
   loom_module_t* selected_module = nullptr;
-  loom_bytecode_read_result_t selected_result = MaterializeModuleSymbols(
-      bytes, &metadata, {1}, &selected_module, &error_ids,
-      /*verify_module=*/true);
+  loom_bytecode_read_result_t selected_result =
+      MaterializeModuleSymbols(bytes, &metadata, {1}, &error_ids,
+                               /*verify_module=*/true, &selected_module);
   EXPECT_EQ(selected_result.error_count, 0u)
       << ::testing::PrintToString(error_ids);
   ASSERT_NE(selected_module, nullptr);
@@ -3340,7 +3363,7 @@ TEST_F(ReaderTest, SelectedMaterializationDoesNotReadRejectedBody) {
   error_ids.clear();
   loom_module_t* full_module = nullptr;
   loom_bytecode_read_result_t full_result =
-      ReadModule(bytes, &full_module, &error_ids);
+      ReadModule(bytes, &error_ids, &full_module);
   EXPECT_GT(full_result.error_count, 0u);
   EXPECT_EQ(full_module, nullptr);
 
@@ -3360,7 +3383,7 @@ TEST_F(ReaderTest, SelectedMaterializationDoesNotReadRejectedSymbolEntry) {
   loom_bytecode_file_metadata_t metadata = {0};
   std::vector<std::string> error_ids;
   loom_bytecode_read_result_t index_result =
-      ReadIndex(bytes, &metadata_arena, &metadata, &error_ids);
+      ReadIndex(bytes, &metadata_arena, &error_ids, &metadata);
   ASSERT_EQ(index_result.error_count, 0u);
   ASSERT_TRUE(error_ids.empty());
   const loom_bytecode_symbol_metadata_t* rejected =
@@ -3371,9 +3394,9 @@ TEST_F(ReaderTest, SelectedMaterializationDoesNotReadRejectedSymbolEntry) {
             0x80);
 
   loom_module_t* selected_module = nullptr;
-  loom_bytecode_read_result_t selected_result = MaterializeModuleSymbols(
-      bytes, &metadata, {1}, &selected_module, &error_ids,
-      /*verify_module=*/true);
+  loom_bytecode_read_result_t selected_result =
+      MaterializeModuleSymbols(bytes, &metadata, {1}, &error_ids,
+                               /*verify_module=*/true, &selected_module);
   EXPECT_EQ(selected_result.error_count, 0u)
       << ::testing::PrintToString(error_ids);
   ASSERT_NE(selected_module, nullptr);
@@ -3382,7 +3405,7 @@ TEST_F(ReaderTest, SelectedMaterializationDoesNotReadRejectedSymbolEntry) {
   error_ids.clear();
   loom_module_t* full_module = nullptr;
   loom_bytecode_read_result_t full_result =
-      ReadModule(bytes, &full_module, &error_ids);
+      ReadModule(bytes, &error_ids, &full_module);
   EXPECT_GT(full_result.error_count, 0u);
   EXPECT_EQ(full_module, nullptr);
 
@@ -3402,7 +3425,7 @@ TEST_F(ReaderTest, DiagnosesMalformedSelectedBody) {
   loom_bytecode_file_metadata_t metadata = {0};
   std::vector<std::string> error_ids;
   loom_bytecode_read_result_t index_result =
-      ReadIndex(bytes, &metadata_arena, &metadata, &error_ids);
+      ReadIndex(bytes, &metadata_arena, &error_ids, &metadata);
   ASSERT_EQ(index_result.error_count, 0u);
   ASSERT_TRUE(error_ids.empty());
   const loom_bytecode_symbol_metadata_t* selected =
@@ -3418,9 +3441,9 @@ TEST_F(ReaderTest, DiagnosesMalformedSelectedBody) {
             0x80);
 
   loom_module_t* selected_module = nullptr;
-  loom_bytecode_read_result_t selected_result = MaterializeModuleSymbols(
-      bytes, &metadata, {1}, &selected_module, &error_ids,
-      /*verify_module=*/true);
+  loom_bytecode_read_result_t selected_result =
+      MaterializeModuleSymbols(bytes, &metadata, {1}, &error_ids,
+                               /*verify_module=*/true, &selected_module);
   EXPECT_GT(selected_result.error_count, 0u);
   EXPECT_FALSE(error_ids.empty());
   EXPECT_EQ(selected_module, nullptr);
@@ -3441,7 +3464,7 @@ TEST_F(ReaderTest, PreservesRegionSourceFlags) {
   loom_module_t* read_module = nullptr;
   std::vector<std::string> error_ids;
   loom_bytecode_read_result_t result =
-      ReadModule(bytes, &read_module, &error_ids);
+      ReadModule(bytes, &error_ids, &read_module);
   EXPECT_EQ(result.error_count, 0u);
   EXPECT_TRUE(error_ids.empty());
   ASSERT_NE(read_module, nullptr);
@@ -3488,7 +3511,7 @@ TEST_F(ReaderTest, PreservesSourceTrivia) {
   loom_module_t* read_module = nullptr;
   std::vector<std::string> error_ids;
   loom_bytecode_read_result_t result =
-      ReadModule(bytes, &read_module, &error_ids);
+      ReadModule(bytes, &error_ids, &read_module);
   EXPECT_EQ(result.error_count, 0u);
   EXPECT_TRUE(error_ids.empty());
   ASSERT_NE(read_module, nullptr);
@@ -3610,7 +3633,7 @@ TEST_F(ReaderTest, ReadsFunctionModuleIndex) {
   loom_bytecode_file_metadata_t metadata = {0};
   std::vector<std::string> error_ids;
   loom_bytecode_read_result_t result =
-      ReadIndex(bytes, &metadata_arena, &metadata, &error_ids);
+      ReadIndex(bytes, &metadata_arena, &error_ids, &metadata);
 
   EXPECT_EQ(result.error_count, 0u);
   EXPECT_TRUE(error_ids.empty());
@@ -3726,7 +3749,7 @@ TEST_F(ReaderTest, IndexesRawDependencyOccurrencesBySourceSymbol) {
   loom_bytecode_file_metadata_t metadata = {0};
   std::vector<std::string> error_ids;
   loom_bytecode_read_result_t result =
-      ReadIndex(bytes, &metadata_arena, &metadata, &error_ids);
+      ReadIndex(bytes, &metadata_arena, &error_ids, &metadata);
 
   ASSERT_EQ(result.error_count, 0u);
   ASSERT_TRUE(error_ids.empty());
@@ -3773,7 +3796,7 @@ TEST_F(ReaderTest, IndexesEveryAbstractProviderDemand) {
   loom_bytecode_file_metadata_t metadata = {0};
   std::vector<std::string> error_ids;
   loom_bytecode_read_result_t result =
-      ReadIndex(bytes, &metadata_arena, &metadata, &error_ids);
+      ReadIndex(bytes, &metadata_arena, &error_ids, &metadata);
 
   ASSERT_EQ(result.error_count, 0u);
   ASSERT_TRUE(error_ids.empty());
@@ -3849,7 +3872,7 @@ TEST_F(ReaderTest, PreservesPhysicalSymbolDefinitionOrder) {
   loom_bytecode_file_metadata_t metadata = {0};
   std::vector<std::string> error_ids;
   loom_bytecode_read_result_t result =
-      ReadIndex(bytes, &metadata_arena, &metadata, &error_ids);
+      ReadIndex(bytes, &metadata_arena, &error_ids, &metadata);
   ASSERT_EQ(result.error_count, 0u);
   ASSERT_TRUE(error_ids.empty());
   ASSERT_EQ(metadata.module_count, 1u);
@@ -3891,8 +3914,8 @@ TEST_F(ReaderTest, PreservesPhysicalSymbolDefinitionOrder) {
 
   loom_module_t* read_module = nullptr;
   error_ids.clear();
-  result = ReadModule(bytes, &read_module, &error_ids,
-                      /*verify_module=*/true);
+  result = ReadModule(bytes, &error_ids,
+                      /*verify_module=*/true, &read_module);
   ASSERT_EQ(result.error_count, 0u);
   ASSERT_TRUE(error_ids.empty());
   ASSERT_NE(read_module, nullptr);
@@ -3928,7 +3951,7 @@ TEST_F(ReaderTest, RejectsDuplicateSymbolIdentity) {
   loom_bytecode_file_metadata_t metadata = {0};
   std::vector<std::string> error_ids;
   loom_bytecode_read_result_t result =
-      ReadIndex(bytes, &metadata_arena, &metadata, &error_ids);
+      ReadIndex(bytes, &metadata_arena, &error_ids, &metadata);
   ASSERT_EQ(result.error_count, 0u);
   ASSERT_TRUE(error_ids.empty());
   ASSERT_EQ(metadata.module_count, 1u);
@@ -4016,7 +4039,7 @@ TEST_F(ReaderTest, PreservesLinkOnceRodataSymbolPolicy) {
   loom_bytecode_file_metadata_t metadata = {0};
   std::vector<std::string> error_ids;
   loom_bytecode_read_result_t metadata_result =
-      ReadIndex(bytes, &metadata_arena, &metadata, &error_ids);
+      ReadIndex(bytes, &metadata_arena, &error_ids, &metadata);
   EXPECT_EQ(metadata_result.error_count, 0u);
   EXPECT_TRUE(error_ids.empty());
   ASSERT_EQ(metadata.module_count, 1u);
@@ -4031,7 +4054,7 @@ TEST_F(ReaderTest, PreservesLinkOnceRodataSymbolPolicy) {
 
   loom_module_t* read_module = nullptr;
   loom_bytecode_read_result_t read_result =
-      ReadModule(bytes, &read_module, &error_ids, /*verify_module=*/true);
+      ReadModule(bytes, &error_ids, /*verify_module=*/true, &read_module);
   EXPECT_EQ(read_result.error_count, 0u);
   EXPECT_TRUE(error_ids.empty());
   ASSERT_NE(read_module, nullptr);
@@ -4119,7 +4142,7 @@ TEST_F(ReaderTest, IndexRetainsSignatureLocalPredicates) {
   loom_bytecode_file_metadata_t metadata = {0};
   std::vector<std::string> error_ids;
   loom_bytecode_read_result_t result =
-      ReadIndex(bytes, &metadata_arena, &metadata, &error_ids);
+      ReadIndex(bytes, &metadata_arena, &error_ids, &metadata);
 
   EXPECT_EQ(result.error_count, 0u);
   EXPECT_TRUE(error_ids.empty());
@@ -4153,7 +4176,7 @@ TEST_F(ReaderTest, RetainedFunctionSurvivesModuleRead) {
   loom_bytecode_file_metadata_t metadata = {0};
   std::vector<std::string> error_ids;
   loom_bytecode_read_result_t metadata_result =
-      ReadIndex(bytes, &metadata_arena, &metadata, &error_ids);
+      ReadIndex(bytes, &metadata_arena, &error_ids, &metadata);
 
   EXPECT_EQ(metadata_result.error_count, 0u);
   EXPECT_TRUE(error_ids.empty());
@@ -4167,7 +4190,7 @@ TEST_F(ReaderTest, RetainedFunctionSurvivesModuleRead) {
 
   loom_module_t* read_module = nullptr;
   loom_bytecode_read_result_t read_result =
-      ReadModule(bytes, &read_module, &error_ids);
+      ReadModule(bytes, &error_ids, &read_module);
   EXPECT_EQ(read_result.error_count, 0u);
   EXPECT_TRUE(error_ids.empty());
   ASSERT_NE(read_module, nullptr);
@@ -4191,7 +4214,7 @@ TEST_F(ReaderTest, ReadsImportOffsetTableInIndex) {
   loom_bytecode_file_metadata_t metadata = {0};
   std::vector<std::string> error_ids;
   loom_bytecode_read_result_t result =
-      ReadIndex(bytes, &metadata_arena, &metadata, &error_ids);
+      ReadIndex(bytes, &metadata_arena, &error_ids, &metadata);
 
   EXPECT_EQ(result.error_count, 0u);
   EXPECT_TRUE(error_ids.empty());
@@ -4258,7 +4281,7 @@ TEST_F(ReaderTest, ReadsMultiModuleIndexAndMaterializesByOrdinal) {
   loom_bytecode_file_metadata_t metadata = {0};
   std::vector<std::string> error_ids;
   loom_bytecode_read_result_t result =
-      ReadIndex(bytes, &metadata_arena, &metadata, &error_ids);
+      ReadIndex(bytes, &metadata_arena, &error_ids, &metadata);
 
   EXPECT_EQ(result.error_count, 0u);
   EXPECT_TRUE(error_ids.empty());
@@ -4273,7 +4296,7 @@ TEST_F(ReaderTest, ReadsMultiModuleIndexAndMaterializesByOrdinal) {
   loom_module_t* read_module = nullptr;
   std::vector<std::string> ordinal_error_ids;
   loom_bytecode_read_result_t ordinal_result = ReadModuleOrdinal(
-      bytes, 1, &read_module, &ordinal_error_ids, /*verify_module=*/true);
+      bytes, 1, &ordinal_error_ids, /*verify_module=*/true, &read_module);
   EXPECT_EQ(ordinal_result.error_count, 0u);
   EXPECT_TRUE(ordinal_error_ids.empty());
   ASSERT_NE(read_module, nullptr);
@@ -4290,7 +4313,7 @@ TEST_F(ReaderTest, ReadsMultiModuleIndexAndMaterializesByOrdinal) {
   loom_module_t* rejected_module = nullptr;
   std::vector<std::string> single_error_ids;
   loom_bytecode_read_result_t single_result =
-      ReadModule(bytes, &rejected_module, &single_error_ids);
+      ReadModule(bytes, &single_error_ids, &rejected_module);
   EXPECT_GT(single_result.error_count, 0u);
   EXPECT_EQ(rejected_module, nullptr);
   ASSERT_FALSE(single_error_ids.empty());
@@ -4308,8 +4331,8 @@ TEST_F(ReaderTest, ReadsFunctionBodyModule) {
   loom_module_t* read_module = nullptr;
   std::vector<std::string> error_ids;
   loom_bytecode_read_result_t result =
-      ReadModule(bytes, &read_module, &error_ids,
-                 /*verify_module=*/true);
+      ReadModule(bytes, &error_ids,
+                 /*verify_module=*/true, &read_module);
 
   EXPECT_EQ(result.error_count, 0u);
   EXPECT_TRUE(error_ids.empty());
@@ -4343,8 +4366,8 @@ TEST_F(ReaderTest, ReadsSegmentedOperandCounts) {
   loom_module_t* read_module = nullptr;
   std::vector<std::string> error_ids;
   loom_bytecode_read_result_t result =
-      ReadModule(bytes, &read_module, &error_ids,
-                 /*verify_module=*/true);
+      ReadModule(bytes, &error_ids,
+                 /*verify_module=*/true, &read_module);
 
   EXPECT_EQ(result.error_count, 0u) << ::testing::PrintToString(error_ids);
   EXPECT_TRUE(error_ids.empty()) << ::testing::PrintToString(error_ids);
@@ -4377,7 +4400,7 @@ TEST_F(ReaderTest, EnumAttributesPreserveFutureOrdinals) {
   loom_module_t* read_module = nullptr;
   std::vector<std::string> error_ids;
   loom_bytecode_read_result_t result =
-      ReadModule(bytes, &read_module, &error_ids, /*verify_module=*/true);
+      ReadModule(bytes, &error_ids, /*verify_module=*/true, &read_module);
 
   EXPECT_EQ(result.error_count, 0u) << ::testing::PrintToString(error_ids);
   EXPECT_TRUE(error_ids.empty()) << ::testing::PrintToString(error_ids);
@@ -4403,7 +4426,7 @@ TEST_F(ReaderTest, EnumArraysPreserveStableValuesAndOrder) {
   loom_module_t* read_module = nullptr;
   std::vector<std::string> error_ids;
   loom_bytecode_read_result_t result =
-      ReadModule(bytes, &read_module, &error_ids, /*verify_module=*/true);
+      ReadModule(bytes, &error_ids, /*verify_module=*/true, &read_module);
 
   EXPECT_EQ(result.error_count, 0u) << ::testing::PrintToString(error_ids);
   EXPECT_TRUE(error_ids.empty()) << ::testing::PrintToString(error_ids);
@@ -4447,7 +4470,7 @@ TEST_F(ReaderTest, StringArraysPreserveValuesPresenceAndOrder) {
   loom_module_t* read_module = nullptr;
   std::vector<std::string> error_ids;
   loom_bytecode_read_result_t result =
-      ReadModule(bytes, &read_module, &error_ids, /*verify_module=*/true);
+      ReadModule(bytes, &error_ids, /*verify_module=*/true, &read_module);
 
   EXPECT_EQ(result.error_count, 0u) << ::testing::PrintToString(error_ids);
   EXPECT_TRUE(error_ids.empty()) << ::testing::PrintToString(error_ids);
@@ -4511,7 +4534,7 @@ TEST_F(ReaderTest, F64ArraysPreserveBitsPresenceAndOrder) {
   loom_module_t* read_module = nullptr;
   std::vector<std::string> error_ids;
   loom_bytecode_read_result_t result =
-      ReadModule(bytes, &read_module, &error_ids, /*verify_module=*/true);
+      ReadModule(bytes, &error_ids, /*verify_module=*/true, &read_module);
 
   EXPECT_EQ(result.error_count, 0u) << ::testing::PrintToString(error_ids);
   EXPECT_TRUE(error_ids.empty()) << ::testing::PrintToString(error_ids);
@@ -4565,7 +4588,7 @@ TEST_F(ReaderTest, SignedEnumSetsPreserveAssertionsAndPresence) {
   loom_module_t* read_module = nullptr;
   std::vector<std::string> error_ids;
   loom_bytecode_read_result_t result =
-      ReadModule(bytes, &read_module, &error_ids, /*verify_module=*/true);
+      ReadModule(bytes, &error_ids, /*verify_module=*/true, &read_module);
 
   EXPECT_EQ(result.error_count, 0u) << ::testing::PrintToString(error_ids);
   EXPECT_TRUE(error_ids.empty()) << ::testing::PrintToString(error_ids);
@@ -4605,7 +4628,7 @@ TEST_F(ReaderTest, SymbolArraysPreserveNamesPresenceAndOrder) {
   loom_module_t* read_module = nullptr;
   std::vector<std::string> error_ids;
   loom_bytecode_read_result_t result =
-      ReadModule(bytes, &read_module, &error_ids, /*verify_module=*/true);
+      ReadModule(bytes, &error_ids, /*verify_module=*/true, &read_module);
 
   EXPECT_EQ(result.error_count, 0u) << ::testing::PrintToString(error_ids);
   EXPECT_TRUE(error_ids.empty()) << ::testing::PrintToString(error_ids);
@@ -4669,7 +4692,7 @@ TEST_F(ReaderTest, SymbolSetsPreserveCanonicalNamesAndPresence) {
   loom_module_t* read_module = nullptr;
   std::vector<std::string> error_ids;
   loom_bytecode_read_result_t result =
-      ReadModule(bytes, &read_module, &error_ids, /*verify_module=*/true);
+      ReadModule(bytes, &error_ids, /*verify_module=*/true, &read_module);
 
   EXPECT_EQ(result.error_count, 0u) << ::testing::PrintToString(error_ids);
   EXPECT_TRUE(error_ids.empty()) << ::testing::PrintToString(error_ids);
@@ -4720,7 +4743,7 @@ TEST_F(ReaderTest, ParameterizedAttrsPreserveNamedSlotsAndPresence) {
   loom_module_t* read_module = nullptr;
   std::vector<std::string> error_ids;
   loom_bytecode_read_result_t result =
-      ReadModule(bytes, &read_module, &error_ids, /*verify_module=*/true);
+      ReadModule(bytes, &error_ids, /*verify_module=*/true, &read_module);
 
   EXPECT_EQ(result.error_count, 0u) << ::testing::PrintToString(error_ids);
   EXPECT_TRUE(error_ids.empty()) << ::testing::PrintToString(error_ids);
@@ -4806,8 +4829,8 @@ TEST_F(ReaderTest, ReadsGlobalSymbolModule) {
   loom_module_t* read_module = nullptr;
   std::vector<std::string> error_ids;
   loom_bytecode_read_result_t result =
-      ReadModule(bytes, &read_module, &error_ids,
-                 /*verify_module=*/true);
+      ReadModule(bytes, &error_ids,
+                 /*verify_module=*/true, &read_module);
 
   EXPECT_EQ(result.error_count, 0u);
   EXPECT_TRUE(error_ids.empty());
@@ -4839,8 +4862,8 @@ TEST_F(ReaderTest, ReadsDynamicGlobalSymbolModule) {
   loom_module_t* read_module = nullptr;
   std::vector<std::string> error_ids;
   loom_bytecode_read_result_t result =
-      ReadModule(bytes, &read_module, &error_ids,
-                 /*verify_module=*/true);
+      ReadModule(bytes, &error_ids,
+                 /*verify_module=*/true, &read_module);
 
   EXPECT_EQ(result.error_count, 0u);
   EXPECT_TRUE(error_ids.empty());
@@ -4888,7 +4911,7 @@ TEST_F(ReaderTest, ReadsLocationTablesWithModuleSources) {
   loom_bytecode_file_metadata_t metadata = {0};
   std::vector<std::string> error_ids;
   loom_bytecode_read_result_t index_result =
-      ReadIndex(bytes, &metadata_arena, &metadata, &error_ids);
+      ReadIndex(bytes, &metadata_arena, &error_ids, &metadata);
   ASSERT_EQ(index_result.error_count, 0u);
   ASSERT_TRUE(error_ids.empty());
   ASSERT_EQ(metadata.module_count, 1u);
@@ -4908,7 +4931,7 @@ TEST_F(ReaderTest, ReadsLocationTablesWithModuleSources) {
   loom_module_t* read_module = nullptr;
   error_ids.clear();
   loom_bytecode_read_result_t result =
-      ReadModule(bytes, &read_context, &read_module, &error_ids);
+      ReadModule(bytes, &read_context, &error_ids, &read_module);
 
   EXPECT_EQ(result.error_count, 0u);
   EXPECT_TRUE(error_ids.empty());
@@ -4949,7 +4972,7 @@ TEST_F(ReaderTest, ReadsTaggedLocationTables) {
   loom_module_t* read_module = nullptr;
   std::vector<std::string> error_ids;
   loom_bytecode_read_result_t result =
-      ReadModule(bytes, &read_module, &error_ids);
+      ReadModule(bytes, &error_ids, &read_module);
 
   EXPECT_EQ(result.error_count, 0u);
   EXPECT_TRUE(error_ids.empty());
@@ -4977,7 +5000,7 @@ TEST_F(ReaderTest, ReadsMultiBlockFunctionBodyModule) {
   loom_module_t* read_module = nullptr;
   std::vector<std::string> error_ids;
   loom_bytecode_read_result_t result =
-      ReadModule(bytes, &read_module, &error_ids);
+      ReadModule(bytes, &error_ids, &read_module);
 
   EXPECT_EQ(result.error_count, 0u);
   EXPECT_TRUE(error_ids.empty());
@@ -5003,7 +5026,7 @@ TEST_F(ReaderTest, ReadsFunctionBodySuccessorReferences) {
   loom_module_t* read_module = nullptr;
   std::vector<std::string> error_ids;
   loom_bytecode_read_result_t result =
-      ReadModule(bytes, &read_module, &error_ids);
+      ReadModule(bytes, &error_ids, &read_module);
 
   EXPECT_EQ(result.error_count, 0u);
   EXPECT_TRUE(error_ids.empty());
@@ -5033,7 +5056,7 @@ TEST_F(ReaderTest, ReadsNestedRegionBodyModule) {
   loom_module_t* read_module = nullptr;
   std::vector<std::string> error_ids;
   loom_bytecode_read_result_t result =
-      ReadModule(bytes, &read_module, &error_ids);
+      ReadModule(bytes, &error_ids, &read_module);
 
   EXPECT_EQ(result.error_count, 0u);
   EXPECT_TRUE(error_ids.empty());
@@ -5043,11 +5066,13 @@ TEST_F(ReaderTest, ReadsNestedRegionBodyModule) {
   ASSERT_TRUE(loom_test_func_isa(func_op));
   loom_region_t* body = loom_test_func_body(func_op);
   ASSERT_NE(body, nullptr);
+  EXPECT_EQ(loom_region_parent_op(body), func_op);
   loom_block_t* entry = loom_region_entry_block(body);
   ASSERT_EQ(entry->op_count, 1u);
   ASSERT_TRUE(loom_test_map_isa(entry->first_op));
   loom_region_t* map_body = loom_test_map_body(entry->first_op);
   ASSERT_NE(map_body, nullptr);
+  EXPECT_EQ(loom_region_parent_op(map_body), entry->first_op);
   EXPECT_EQ(map_body->block_count, 1u);
   loom_block_t* map_entry = loom_region_entry_block(map_body);
   ASSERT_EQ(map_entry->op_count, 1u);
@@ -5064,7 +5089,7 @@ TEST_F(ReaderTest, ReadsDynamicDimBindings) {
   loom_module_t* read_dynamic_module = nullptr;
   std::vector<std::string> dynamic_errors;
   loom_bytecode_read_result_t dynamic_result =
-      ReadModule(dynamic_bytes, &read_dynamic_module, &dynamic_errors);
+      ReadModule(dynamic_bytes, &dynamic_errors, &read_dynamic_module);
 
   EXPECT_EQ(dynamic_result.error_count, 0u);
   EXPECT_TRUE(dynamic_errors.empty());
@@ -5093,7 +5118,7 @@ TEST_F(ReaderTest, ReadsSsaEncodingBindings) {
   loom_module_t* read_encoding_module = nullptr;
   std::vector<std::string> encoding_errors;
   loom_bytecode_read_result_t encoding_result =
-      ReadModule(encoding_bytes, &read_encoding_module, &encoding_errors);
+      ReadModule(encoding_bytes, &encoding_errors, &read_encoding_module);
 
   EXPECT_EQ(encoding_result.error_count, 0u);
   EXPECT_TRUE(encoding_errors.empty());
@@ -5130,7 +5155,7 @@ TEST_F(ReaderTest, ReadsCoResultDynamicDimBindings) {
   loom_module_t* read_module = nullptr;
   std::vector<std::string> error_ids;
   loom_bytecode_read_result_t result =
-      ReadModule(bytes, &read_module, &error_ids);
+      ReadModule(bytes, &error_ids, &read_module);
 
   EXPECT_EQ(result.error_count, 0u);
   EXPECT_TRUE(error_ids.empty());
@@ -5228,7 +5253,7 @@ TEST_F(ReaderTest, ReadsStructuralRegisterValueType) {
   loom_module_t* read_module = nullptr;
   std::vector<std::string> error_ids;
   loom_bytecode_read_result_t result =
-      ReadModule(bytes, &read_module, &error_ids);
+      ReadModule(bytes, &error_ids, &read_module);
   EXPECT_EQ(result.error_count, 0u) << ::testing::PrintToString(error_ids);
   EXPECT_TRUE(error_ids.empty()) << ::testing::PrintToString(error_ids);
   ASSERT_NE(read_module, nullptr);
@@ -5268,14 +5293,14 @@ TEST_F(ReaderTest, SelectedDeclarationRetainsArgumentOwnership) {
   loom_bytecode_file_metadata_t metadata = {};
   std::vector<std::string> error_ids;
   const loom_bytecode_read_result_t index_result =
-      ReadIndex(bytes, &metadata_arena, &metadata, &error_ids);
+      ReadIndex(bytes, &metadata_arena, &error_ids, &metadata);
   ASSERT_EQ(index_result.error_count, 0u);
   ASSERT_TRUE(error_ids.empty());
 
   loom_module_t* selected_module = nullptr;
-  const loom_bytecode_read_result_t selected_result = MaterializeModuleSymbols(
-      bytes, &metadata, {0}, &selected_module, &error_ids,
-      /*verify_module=*/true);
+  const loom_bytecode_read_result_t selected_result =
+      MaterializeModuleSymbols(bytes, &metadata, {0}, &error_ids,
+                               /*verify_module=*/true, &selected_module);
   EXPECT_EQ(selected_result.error_count, 0u)
       << ::testing::PrintToString(error_ids);
   ASSERT_NE(selected_module, nullptr);
@@ -5306,7 +5331,7 @@ TEST_F(ReaderTest, ReadsDescriptorBackedParameterizedTypes) {
   loom_module_t* read_module = nullptr;
   std::vector<std::string> error_ids;
   loom_bytecode_read_result_t result =
-      ReadModule(bytes, &read_module, &error_ids);
+      ReadModule(bytes, &error_ids, &read_module);
   EXPECT_EQ(result.error_count, 0u);
   EXPECT_TRUE(error_ids.empty());
   ASSERT_NE(read_module, nullptr);
@@ -5399,12 +5424,12 @@ TEST_F(ReaderTest, SelectedReaderPreservesParameterizedTypeIdentities) {
   loom_bytecode_file_metadata_t metadata = {};
   std::vector<std::string> error_ids;
   const loom_bytecode_read_result_t index_result =
-      ReadIndex(bytes, &metadata_arena, &metadata, &error_ids);
+      ReadIndex(bytes, &metadata_arena, &error_ids, &metadata);
   ASSERT_EQ(index_result.error_count, 0u);
   loom_module_t* selected_module = nullptr;
-  const loom_bytecode_read_result_t result = MaterializeModuleSymbols(
-      bytes, &metadata, {0}, &selected_module, &error_ids,
-      /*verify_module=*/true);
+  const loom_bytecode_read_result_t result =
+      MaterializeModuleSymbols(bytes, &metadata, {0}, &error_ids,
+                               /*verify_module=*/true, &selected_module);
   EXPECT_EQ(result.error_count, 0u);
   EXPECT_TRUE(error_ids.empty());
   ASSERT_NE(selected_module, nullptr);
@@ -5442,7 +5467,7 @@ TEST_F(ReaderTest, RejectsDuplicateParameterizedTypeRecords) {
   loom_bytecode_file_metadata_t metadata = {};
   std::vector<std::string> error_ids;
   const loom_bytecode_read_result_t result =
-      ReadIndex(bytes, &metadata_arena, &metadata, &error_ids);
+      ReadIndex(bytes, &metadata_arena, &error_ids, &metadata);
   ASSERT_EQ(result.error_count, 0u);
   ASSERT_EQ(metadata.modules[0].types.count, 2u);
   const loom_bytecode_table_entry_metadata_t* entries =
@@ -5536,7 +5561,7 @@ TEST_F(ReaderTest, FullReadOwnsUnreferencedSourceTablesInWireOrder) {
   loom_module_free(module);
   loom_module_t* output = nullptr;
   std::vector<std::string> errors;
-  const auto result = ReadModule(bytes, &output, &errors);
+  const auto result = ReadModule(bytes, &errors, &output);
   ASSERT_EQ(result.error_count, 0u);
   ASSERT_NE(output, nullptr);
   std::vector<uint8_t>().swap(bytes);
@@ -5572,7 +5597,7 @@ TEST_F(ReaderTest, FullReadRejectsMalformedUnreferencedLocation) {
   bytes[offset + 1] = 0x80;
   loom_module_t* output = nullptr;
   std::vector<std::string> errors;
-  const auto result = ReadModule(bytes, &output, &errors);
+  const auto result = ReadModule(bytes, &errors, &output);
   EXPECT_EQ(output, nullptr);
   EXPECT_EQ(result.error_count, 1u);
   ASSERT_EQ(errors.size(), 1u);
@@ -5595,10 +5620,10 @@ TEST_F(ReaderTest, PreservesGlobalAndRecordDefinitionLocations) {
     iree_arena_initialize(&block_pool_, &arena);
     loom_bytecode_file_metadata_t metadata = {};
     std::vector<std::string> errors;
-    EXPECT_EQ(ReadIndex(bytes, &arena, &metadata, &errors).error_count, 0u);
+    EXPECT_EQ(ReadIndex(bytes, &arena, &errors, &metadata).error_count, 0u);
     loom_module_t* selected_module = nullptr;
-    EXPECT_EQ(MaterializeModuleSymbols(bytes, &metadata, {0}, &selected_module,
-                                       &errors)
+    EXPECT_EQ(MaterializeModuleSymbols(bytes, &metadata, {0}, &errors,
+                                       &selected_module)
                   .error_count,
               0u);
     ASSERT_NE(selected_module, nullptr);
@@ -5652,8 +5677,8 @@ TEST_F(ReaderTest, RejectsSymbolDefinitionsInBodies) {
   loom_module_t* read_module = nullptr;
   IREE_ASSERT_OK(loom_bytecode_read_module(
       iree_make_const_byte_span(bytes.data(), bytes.size()),
-      IREE_SV("test.loombc"), &context_, &block_pool_, &options, &result,
-      &read_module, iree_allocator_system()));
+      IREE_SV("test.loombc"), &context_, &block_pool_, &options,
+      iree_allocator_system(), &result, &read_module));
   EXPECT_GT(result.error_count, 0u);
   EXPECT_EQ(failure_code,
             "symbol_definition_is_not_permitted_in_a_symbol_body");
@@ -5664,12 +5689,12 @@ TEST_F(ReaderTest, RejectsSymbolDefinitionsInBodies) {
   loom_bytecode_file_metadata_t metadata = {0};
   std::vector<std::string> error_ids;
   // Directory indexing stays lazy; decoding either body path must reject it.
-  result = ReadIndex(bytes, &metadata_arena, &metadata, &error_ids);
+  result = ReadIndex(bytes, &metadata_arena, &error_ids, &metadata);
   ASSERT_EQ(result.error_count, 0u);
   ASSERT_TRUE(error_ids.empty());
   loom_module_t* selected_module = nullptr;
-  result = MaterializeModuleSymbols(bytes, &metadata, {0}, &selected_module,
-                                    &error_ids);
+  result = MaterializeModuleSymbols(bytes, &metadata, {0}, &error_ids,
+                                    &selected_module);
   EXPECT_GT(result.error_count, 0u);
   EXPECT_EQ(selected_module, nullptr);
 
@@ -6466,7 +6491,7 @@ TEST_F(ReaderTest, NoLocationsModeStripsSymbolLocation) {
   loom_module_t* read_module = nullptr;
   std::vector<std::string> errors;
   const loom_bytecode_read_result_t result =
-      ReadModule(bytes, &read_module, &errors);
+      ReadModule(bytes, &errors, &read_module);
   EXPECT_EQ(result.error_count, 0u);
   ASSERT_NE(read_module, nullptr);
   EXPECT_EQ(read_module->symbols.entries[0].defining_op->location,

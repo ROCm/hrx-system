@@ -9,16 +9,20 @@
 #include "buffer.h"
 #include "buffer_table.h"
 #include "device.h"
+#include "graph_analysis.h"
+#include "graph_exec.h"
 #include "hrx_runtime.h"
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
 #include "iree/base/tracing.h"
 #include "iree/hal/api.h"
-#include "iree/hal/drivers/task/executable/loaders/registration/init.h"
+#include "iree/hal/driver/task/executable/loaders/registration/init.h"
 #include "iree/hal/utils/resource_set.h"
 #include "iree_hal_compat.h"
 #include "mem_pool_backing.h"
+#include "queue.h"
 #include "runtime.h"
+#include "stream.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -204,14 +208,6 @@ static_assert(HRX_ENCODING_TYPE_DENSE_ROW_MAJOR ==
                   IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR,
               "encoding type mismatch");
 
-// Memory protection bitfield.
-static_assert(HRX_MEMORY_PROTECTION_NONE == IREE_HAL_MEMORY_PROTECTION_NONE,
-              "memory protection mismatch");
-static_assert(HRX_MEMORY_PROTECTION_READ == IREE_HAL_MEMORY_PROTECTION_READ,
-              "memory protection mismatch");
-static_assert(HRX_MEMORY_PROTECTION_WRITE == IREE_HAL_MEMORY_PROTECTION_WRITE,
-              "memory protection mismatch");
-
 // Map permissions share memory access values; operation flags are translated.
 static_assert(HRX_MAP_READ == IREE_HAL_MEMORY_ACCESS_READ,
               "map flags mismatch");
@@ -222,74 +218,39 @@ static_assert(HRX_MAP_WRITE == IREE_HAL_MEMORY_ACCESS_WRITE,
 // Internal types backing opaque handles
 //===----------------------------------------------------------------------===//
 
-#define HRX_MAX_DEVICES 64
-
 // Status payload (allocated on error, NULL = OK).
 typedef struct hrx_status_s {
   hrx_status_code_t code;
   char* message;
 } hrx_status_s;
 
-// Allocator (wraps iree_hal_allocator_t, owned by device).
-typedef struct hrx_allocator_s {
-  iree_atomic_ref_count_t ref_count;
-  iree_hal_allocator_t* hal_allocator;
-  hrx_device_t device;
-} hrx_allocator_s;
-
-// Device instance.
-typedef struct hrx_device_s {
-  iree_atomic_ref_count_t ref_count;
-  hrx_accelerator_type_t type;
-  int ordinal;
-  iree_hal_device_t* hal_device;
-  // Provisioned queue used for direct host and device transfers. Borrowed from
-  // |hal_device|, which must outlive every use.
-  iree_hal_queue_t* transfer_queue;
-  // Provisioned queue used for stream command buffers. Borrowed from
-  // |hal_device|, which must outlive every use.
-  iree_hal_queue_t* dispatch_queue;
-  iree_hal_device_group_t* hal_device_group;
-  // Shared native backing and retention coordination for public memory pools.
-  hrx_mem_pool_backing_t mem_pool_backing;
-  bool profiling_active;
-  hrx_allocator_s allocator;           // Inline, owned by device.
-  hrx_buffer_table_t buffer_table;     // Device-pointer-to-buffer lookup.
-  iree_arena_block_pool_t block_pool;  // Shared arena pool for graphs.
-  char name[128];
-  char architecture[64];
-} hrx_device_s;
-
 // Timeline semaphore.
 typedef struct hrx_semaphore_s {
+  // References to the wrapper, which owns its dependencies once.
   iree_atomic_ref_count_t ref_count;
+  // Retained native timeline.
   iree_hal_semaphore_t* hal_semaphore;
+  // Retained device keeping the timeline's group and services alive.
   hrx_device_t device;
 } hrx_semaphore_s;
 
 // Event: marks a point in a stream's timeline for cross-stream sync.
 typedef struct hrx_event_s {
+  // Public references to this event and its retained completion point.
   iree_atomic_ref_count_t ref_count;
+  // Creation options, including whether queue timing is enabled.
   hrx_event_flags_t flags;
-  hrx_semaphore_t semaphore;  // Dedicated semaphore for this event.
-  uint64_t signal_value;      // Timeline value the semaphore must reach.
-  hrx_stream_t recording_stream;
-  hrx_device_t device;
-  int64_t record_time_ns;  // Host-side timestamp at record time.
-} hrx_event_s;
-
-// Stream with pending command buffer.
-typedef struct hrx_stream_s {
-  iree_atomic_ref_count_t ref_count;
-  hrx_device_t device;
-  // Exact HAL queue used by this stream. Borrowed from |device|.
-  iree_hal_queue_t* hal_queue;
+  // Retained recording stream semaphore, or NULL before the first record.
   hrx_semaphore_t semaphore;
-  uint64_t timepoint;
-  iree_hal_command_buffer_t* pending_cb;
-  bool has_pending_work;
-  uint32_t flags;
-} hrx_stream_s;
+  // Accepted value captured from |semaphore|; zero denotes no pending work.
+  uint64_t signal_value;
+  // Retained creation device, including when no record names a semaphore.
+  hrx_device_t device;
+  // Retained tick storage for the last accepted timed record, or NULL.
+  hrx_event_timestamp_slot_t* timestamp_slot;
+  // Clock identity borrowed from the recording device retained by |semaphore|.
+  const iree_hal_queue_family_t* timestamp_family;
+} hrx_event_s;
 
 //===----------------------------------------------------------------------===//
 // Graph internals
@@ -312,12 +273,19 @@ static inline bool hrx_graph_node_is_recordable(
 }
 
 typedef struct hrx_graph_kernel_node_attrs_internal_t {
+  // Executable retained by the graph's node resource set.
   iree_hal_executable_t* executable;
+  // Export selected from |executable|.
   uint32_t export_ordinal;
+  // Number of workgroups along each axis.
   uint32_t grid_dim[3];
+  // Number of work items per workgroup along each axis.
   uint32_t block_dim[3];
-  uint32_t shared_memory_bytes;
+  // Validated HAL dispatch flags, translated when the node is inserted.
+  iree_hal_dispatch_flags_t flags;
+  // Argument bytes copied into the graph arena.
   iree_const_byte_span_t constants;
+  // References copied into the graph arena; the resource set retains buffers.
   iree_hal_buffer_ref_list_t bindings;
 } hrx_graph_kernel_node_attrs_internal_t;
 
@@ -337,7 +305,9 @@ typedef struct hrx_graph_memset_node_attrs_internal_t {
 } hrx_graph_memset_node_attrs_internal_t;
 
 typedef struct hrx_graph_host_call_node_attrs_internal_t {
-  void (*fn)(void* user_data);
+  // Application callback retaining the public HRX status contract.
+  hrx_host_call_fn_t fn;
+  // Borrowed callback state kept alive by the application through completion.
   void* user_data;
 } hrx_graph_host_call_node_attrs_internal_t;
 
@@ -368,177 +338,53 @@ typedef struct hrx_graph_edge_t {
 } hrx_graph_edge_t;
 
 typedef struct hrx_graph_s {
+  // References to this template, including instantiated executables.
   iree_atomic_ref_count_t ref_count;
+  // Retained device providing the graph arena and captured native resources.
   hrx_device_t device;
 
   iree_arena_allocator_t arena;
   iree_allocator_t arena_allocator;
 
-  // HAL resources referenced by graph nodes. Released before their pools.
+  // Explicit HAL buffers and executables referenced by graph nodes. Allocation
+  // pools remain caller-owned.
   iree_hal_resource_set_t* node_resource_set;
-
-  // Allocation pools borrowed by buffers in |node_resource_set|.
-  iree_hal_resource_set_t* allocation_pool_set;
 
   hrx_graph_node_block_t* node_blocks;
   hrx_graph_node_block_t* current_node_block;
   iree_host_size_t node_count;
 
-  hrx_graph_node_block_t* root_blocks;
-  hrx_graph_node_block_t* current_root_block;
-  iree_host_size_t root_count;
-
   hrx_graph_edge_t* additional_edges;
   iree_host_size_t additional_edge_count;
 
   uint32_t flags;
-  iree_slim_mutex_t mutex;
 } hrx_graph_s;
 
-typedef struct hrx_graph_sort_node_t {
-  hrx_graph_node_s* node;
-  uint32_t original_index;
-  uint32_t sorted_index;
-  uint32_t max_dependency_index;
-  uint32_t partition_id;
-  uint16_t in_degree;
-  uint8_t type;
-  uint8_t stream_id;
-} hrx_graph_sort_node_t;
-
-enum hrx_graph_partition_type_e {
-  HRX_GRAPH_PARTITION_TYPE_RECORDABLE = 0,
-  HRX_GRAPH_PARTITION_TYPE_HOST_CALL,
-  HRX_GRAPH_PARTITION_TYPE_EMPTY,
-};
-typedef uint8_t hrx_graph_partition_type_t;
-
-typedef struct hrx_graph_partition_t {
-  uint32_t start_index;
-  uint32_t count;
-  hrx_graph_partition_type_t type;
-  uint8_t stream_count;
-} hrx_graph_partition_t;
-
-typedef struct hrx_graph_schedule_t {
-  hrx_graph_sort_node_t* sorted_nodes;
-  uint32_t* node_index_map;
-  hrx_graph_partition_t* partitions;
-  iree_host_size_t partition_count;
-  iree_host_size_t block_count;
-} hrx_graph_schedule_t;
-
-// Tracks commands recorded since the most recent graph command-buffer
-// barrier. Exposed internally so the barrier planner can be tested without
-// depending on backend command scheduling behavior.
-typedef struct hrx_graph_barrier_state_t {
-  uint32_t values[8];
-  uint32_t count : 31;
-  uint32_t invalid : 1;
-} hrx_graph_barrier_state_t;
-
-typedef struct hrx_graph_exec_s {
-  iree_atomic_ref_count_t ref_count;
-  hrx_device_t device;
-  hrx_graph_t graph;  // retained
-
-  iree_arena_allocator_t arena_allocator;
-
-  struct hrx_graph_exec_block_t** blocks;
-  uint32_t block_count;
-
-  uint32_t semaphore_count;
-  iree_hal_semaphore_t** semaphores;  // borrowed; owned by resource_set
-  uint64_t* semaphore_base_values;
-
-  iree_hal_resource_set_t* resource_set;
-  uint32_t flags;
-  iree_slim_mutex_t mutex;
-} hrx_graph_exec_s;
-
-// Internal graph scheduling API (implemented in graph_analysis.c).
+// Normalizes native graph dependencies for the shared indexed analyzer.
 iree_status_t hrx_graph_schedule_nodes(hrx_graph_node_block_t* node_blocks,
                                        iree_host_size_t node_count,
                                        hrx_graph_edge_t* additional_edges,
                                        iree_arena_allocator_t* arena,
                                        hrx_graph_schedule_t* out_schedule);
 
-void hrx_graph_barrier_state_reset(hrx_graph_barrier_state_t* state);
-iree_status_t hrx_graph_record_node_barrier(
-    hrx_graph_barrier_state_t* state, const hrx_graph_node_s* node,
-    const hrx_graph_edge_t* additional_edges, const uint32_t* node_index_map,
-    uint32_t sorted_index, iree_hal_command_buffer_t* command_buffer,
-    bool* out_did_barrier);
-
-// Internal graph exec APIs (implemented in graph_exec.c).
-iree_status_t hrx_graph_exec_instantiate_locked(
-    hrx_graph_exec_t exec, hrx_graph_node_block_t* node_blocks,
-    iree_host_size_t node_count);
-
-// Memory pool (stream-ordered memory management).
-typedef struct hrx_mem_pool_s {
-  // References held by public handles and bounded allocations.
-  iree_atomic_ref_count_t ref_count;
-
-  // Retained device owning the cache shared by compatible public pools.
-  hrx_device_t device;
-
-  // HIP/CUDA-style creation properties used for attribute queries.
-  hrx_mem_pool_props_t props;
-
-  // TLSF HAL pool serving suballocated and dedicated ordinary backing.
-  iree_hal_pool_t* hal_pool;
-
-  // Embedded request linked into the device's shared retention policy.
-  hrx_mem_pool_retention_t retention;
-
-  // Bytes charged to the immutable |props.max_size| allocation limit.
-  size_t allocation_budget_current;
-
-  // HIP/CUDA release threshold attribute in bytes.
-  uint64_t release_threshold;
-
-  // Allocations that have retained the HAL pool but have not reserved from it.
-  uint32_t inflight_allocation_count;
-
-  // True when internal dependency insertion is allowed for reuse.
-  bool reuse_allow_internal_dependencies;
-
-  // True when event dependencies are honored for reuse.
-  bool reuse_follow_event_dependencies;
-
-  // True when opportunistic reuse is allowed.
-  bool reuse_allow_opportunistic;
-
-  // Current backing borrowed by this child, excluding shared idle storage.
-  uint64_t reserved_mem_current;
-
-  // Peak backing borrowed by this child, including padding and fragmentation.
-  uint64_t reserved_mem_high;
-
-  // Current backing bytes charged to live allocations.
-  uint64_t used_mem_current;
-
-  // Peak backing bytes charged to live allocations.
-  uint64_t used_mem_high;
-
-  // Platform-native pool handle, if one is imported or exported.
-  void* platform_handle;
-
-  // Guards mutable pool attributes and lazy HAL pool creation.
-  iree_slim_mutex_t mutex;
-} hrx_mem_pool_s;
-
 // Timeline fence wrapper.
 typedef struct hrx_fence_s {
+  // References to the wrapper, which owns its dependencies once.
   iree_atomic_ref_count_t ref_count;
+  // Retained native fence owning the timepoint values and native semaphores.
   iree_hal_fence_t* hal_fence;
+  // The allocation continues with hrx_semaphore_t owners[hal_fence->capacity],
+  // in native timepoint order. These keep each device group and runtime alive.
 } hrx_fence_s;
 
 // Buffer view wrapper.
 typedef struct hrx_buffer_view_s {
+  // References to the view, which owns its dependencies once.
   iree_atomic_ref_count_t ref_count;
+  // Retained native shape and encoding metadata.
   iree_hal_buffer_view_t* hal_buffer_view;
+  // Retained allocation owner, including its pool and device group.
+  hrx_buffer_t buffer;
 } hrx_buffer_view_s;
 
 // HAL executable wrapper for direct queue/stream dispatch.
@@ -557,39 +403,6 @@ typedef struct hrx_executable_s {
 } hrx_executable_s;
 
 typedef struct iree_async_proactor_pool_t iree_async_proactor_pool_t;
-
-//===----------------------------------------------------------------------===//
-// Global state
-//===----------------------------------------------------------------------===//
-
-typedef struct hrx_cpu_state_t {
-  hrx_device_s devices[HRX_MAX_DEVICES];
-  int device_count;
-  bool initialized;
-  iree_hal_driver_t* driver;
-} hrx_cpu_state_t;
-
-typedef struct hrx_gpu_state_t {
-  hrx_device_s devices[HRX_MAX_DEVICES];
-  int device_count;
-  bool initialized;
-  iree_hal_driver_t* driver;
-} hrx_gpu_state_t;
-
-typedef struct hrx_shared_state_t {
-  iree_async_proactor_pool_t* proactor_pool;
-  iree_allocator_t host_allocator;
-  int init_count;
-  bool shared_initialized;
-} hrx_shared_state_t;
-
-// Access global state (defined in runtime.c).
-hrx_shared_state_t* hrx_get_shared_state(void);
-hrx_gpu_state_t* hrx_get_gpu_state(void);
-hrx_cpu_state_t* hrx_get_cpu_state(void);
-
-// Ensure shared infrastructure is created (idempotent).
-hrx_status_t hrx_ensure_shared_state(void);
 
 // Returns whether a topology edge can provide read/write access to the
 // non-coherent allocation surface used for ordinary device allocations.
@@ -615,21 +428,6 @@ static inline bool hrx_topology_edge_supports_peer_access(
              capabilities,
              IREE_HAL_TOPOLOGY_CAPABILITY_PEER_ACCESS_REQUIRES_GRANT);
 }
-
-// Collapses an HRX flattened queue-affinity mask into the corresponding HAL
-// queue-family affinity for resource placement. Zero selects every family.
-iree_status_t hrx_hal_queue_affinity_to_family_affinity(
-    iree_hal_device_t* device, hrx_queue_affinity_t affinity,
-    iree_hal_queue_family_affinity_t* out_family_affinity);
-
-// Selects a provisioned queue matching an HRX flattened queue-affinity mask,
-// all required HAL queue-family roles, and optional exact |required_family|.
-// An affinity of zero selects any queue.
-iree_status_t hrx_hal_device_select_queue(
-    iree_hal_device_t* device, hrx_queue_affinity_t affinity,
-    iree_hal_queue_family_role_flags_t required_roles,
-    const iree_hal_queue_family_t* required_family,
-    iree_hal_queue_t** out_queue);
 
 // Convert iree_status_t to hrx_status_t.
 hrx_status_t hrx_status_from_iree(iree_status_t iree_status);

@@ -169,39 +169,44 @@ BoundStagedSignature bind_staged_signature(
 }
 
 BoundConditionLoopSignatures bind_condition_loop_signatures(
-    Types& types, std::span<const cxx::Type* const> sources, cxx::AST* owner,
+    Types& types, std::span<const cxx::Type* const> header_sources,
+    std::span<const cxx::Type* const> result_sources, cxx::AST* owner,
     loom_builder_t* builder, std::span<const loom_type_t> header_suffix_types,
     bool require_result_types) {
   BoundConditionLoopSignatures result;
-  if (!signature_requires_binding(types, sources, owner)) {
+  if (!signature_requires_binding(types, header_sources, owner) &&
+      !signature_requires_binding(types, result_sources, owner)) {
     if (require_result_types) {
-      const size_t count = component_count(types, sources, owner);
+      const size_t count = component_count(types, result_sources, owner);
       result.result_types.reserve(count);
-      for (const auto* source : sources) {
+      for (const auto* source : result_sources) {
         types.append(source, owner, result.result_types);
       }
     }
     return result;
   }
 
-  const size_t source_component_count = component_count(types, sources, owner);
+  const size_t source_component_count =
+      component_count(types, header_sources, owner);
+  const size_t result_component_count =
+      component_count(types, result_sources, owner);
   const size_t header_component_count =
       source_component_count + header_suffix_types.size();
-  result.identities.resize(header_component_count + source_component_count);
+  result.identities.resize(header_component_count + result_component_count);
   check(loom_builder_reserve_values(builder, result.identities.size(),
                                     result.identities.data()));
   result.header_types.reserve(header_component_count);
-  append_bound(types, sources, owner,
+  append_bound(types, header_sources, owner,
                std::span<const loom_value_id_t>(result.identities)
                    .first(source_component_count),
                result.header_type_storage, result.header_types);
   result.header_types.insert(result.header_types.end(),
                              header_suffix_types.begin(),
                              header_suffix_types.end());
-  result.result_types.reserve(source_component_count);
-  append_bound(types, sources, owner,
+  result.result_types.reserve(result_component_count);
+  append_bound(types, result_sources, owner,
                std::span<const loom_value_id_t>(result.identities)
-                   .subspan(header_component_count, source_component_count),
+                   .subspan(header_component_count, result_component_count),
                result.result_type_storage, result.result_types);
   return result;
 }

@@ -63,10 +63,11 @@ iree_status_t loom_op_set_operand(loom_module_t* module, loom_op_t* op,
                                   uint16_t operand_index,
                                   loom_value_id_t new_value_id);
 
-// Rebuilds all use lists from scratch by walking every live op in the
-// module. Clears all values' use data, then re-adds uses from operands.
-// Used after parsing (the parser fills operands but not use lists) and
-// as a recovery path after bulk IR mutations.
+// Rebuilds all use lists and structural ownership from scratch by walking every
+// live op in the module. Clears all values' use data, then re-adds uses from
+// operands and restores block, region, and operation parent links. Used after
+// parsing (the parser fills operands but not use lists) and as a recovery path
+// after bulk IR mutations.
 iree_status_t loom_module_compute_uses(loom_module_t* module);
 
 #ifdef __cplusplus

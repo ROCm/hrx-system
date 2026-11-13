@@ -1,0 +1,144 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library")
+
+package(
+    default_visibility = ["//visibility:private"],
+    features = ["layering_check"],
+    licenses = ["notice"],
+)
+
+loom_cc_library(
+    name = "native_allocator",
+    testonly = True,
+    hdrs = ["native_allocator.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":device",
+        "//loom/src/loom/runtime/device",
+        "//loom/src/loom/runtime/execution",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+loom_cc_library(
+    name = "worker_gate",
+    testonly = True,
+    hdrs = ["worker_gate.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//runtime/src/iree/task",
+        "//runtime/src/iree/testing:gtest",
+    ],
+)
+
+loom_cc_library(
+    name = "compiler",
+    testonly = True,
+    srcs = ["compiler.c"],
+    hdrs = ["compiler.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//loom/binding/c:loomc",
+        "//loom/binding/c/target/iree_hal",
+        "//loom/src/loom/runtime/host",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+loom_cc_library(
+    name = "device",
+    testonly = True,
+    srcs = ["device.c"],
+    hdrs = ["device.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//loom/src/loom/runtime/device",
+        "//loom/src/loom/runtime/execution:workspace",
+        "//loom/src/loom/runtime/host",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/base/threading:thread",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+loom_cc_library(
+    name = "jit",
+    testonly = True,
+    srcs = ["jit.cc"],
+    hdrs = ["jit.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":compiler",
+        ":device",
+        ":native_allocator",
+        "//loom/binding/c:loomc",
+        "//loom/src/loom/runtime/device",
+        "//loom/src/loom/runtime/execution",
+        "//loom/src/loom/runtime/host",
+        "//loom/src/loom/runtime/program:jit",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/tooling:flags",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/task",
+        "//runtime/src/iree/testing:gtest",
+    ],
+)
+
+loom_cc_library(
+    name = "jit_module",
+    testonly = True,
+    srcs = ["jit_module.cc"],
+    hdrs = ["jit_module.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":jit",
+        "//loom/src/loom/runtime/device",
+        "//loom/src/loom/runtime/execution",
+        "//loom/src/loom/runtime/host",
+        "//loom/src/loom/runtime/program:jit",
+        "//loom/src/loom/runtime/program:module",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/vm:types",
+        "//runtime/src/iree/vm",
+        "//runtime/src/iree/vm/bytecode:module",
+    ],
+)
+
+loom_cc_library(
+    name = "application",
+    testonly = True,
+    srcs = ["application.cc"],
+    hdrs = ["application.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":compiler",
+        ":device",
+        ":native_allocator",
+        "//loom/src/loom/runtime/device",
+        "//loom/src/loom/runtime/host",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+    ],
+)
+
+loom_cc_library(
+    name = "stalled_stderr",
+    testonly = True,
+    hdrs = ["stalled_stderr.h"],
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    visibility = ["//visibility:public"],
+    deps = ["//runtime/src/iree/testing:gtest"],
+)

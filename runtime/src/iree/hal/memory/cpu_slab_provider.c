@@ -69,6 +69,17 @@ static void iree_hal_cpu_slab_provider_destroy(
   iree_allocator_free(allocator, provider);
 }
 
+static iree_status_t iree_hal_cpu_slab_provider_query_allocation_cost(
+    iree_hal_slab_provider_t* base_provider, iree_hal_slab_request_t request,
+    uint64_t* out_byte_length) {
+  if (request.min_length > IREE_HOST_SIZE_MAX) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "CPU slab length exceeds host address space");
+  }
+  *out_byte_length = request.min_length;
+  return iree_ok_status();
+}
+
 static iree_status_t iree_hal_cpu_slab_provider_acquire_slab(
     iree_hal_slab_provider_t* base_provider, iree_device_size_t min_length,
     iree_device_size_t min_alignment, iree_hal_slab_t* out_slab,
@@ -313,6 +324,8 @@ static void iree_hal_cpu_slab_provider_release_slabs(
 static const iree_hal_slab_provider_vtable_t iree_hal_cpu_slab_provider_vtable =
     {
         .destroy = iree_hal_cpu_slab_provider_destroy,
+        .query_allocation_cost =
+            iree_hal_cpu_slab_provider_query_allocation_cost,
         .acquire_slabs = iree_hal_cpu_slab_provider_acquire_slabs,
         .import_slab = iree_hal_cpu_slab_provider_import_slab,
         .release_slabs = iree_hal_cpu_slab_provider_release_slabs,

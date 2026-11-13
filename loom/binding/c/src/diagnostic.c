@@ -280,6 +280,7 @@ loomc_status_t loomc_result_add_loom_diagnostic(
         .severity = loomc_diagnostic_severity_from_loom(diagnostic->severity),
         .code = loomc_string_view_from_iree(
             iree_string_builder_view(&code_builder)),
+        .export_name = loomc_string_view_from_iree(diagnostic->export_name),
         .message = loomc_string_view_from_iree(
             iree_string_builder_view(&message_builder)),
         .formatted_text = loomc_string_view_from_iree(

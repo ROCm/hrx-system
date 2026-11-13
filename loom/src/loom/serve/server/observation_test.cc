@@ -25,12 +25,12 @@ class ObservationTest : public ::testing::Test {
         4, iree_allocator_system(), &stream_));
     const loom_serve_service_t service = {
         .name = IREE_SV("model"),
-        .self = this,
-        .kind = LOOM_SERVE_MODEL_KIND_EMBEDDING,
+        .runtime = {.self = this},
+        .kind = LOOM_SERVICE_KIND_EMBEDDING,
         .snapshot =
             [](void* self) {
               auto* test = static_cast<ObservationTest*>(self);
-              return loom_serve_service_snapshot_t{
+              return loom_service_snapshot_t{
                   .phase = "idle",
                   .active_requests = test->active_,
               };

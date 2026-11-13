@@ -24,6 +24,53 @@ namespace {
 
 using TypesWithModuleTest = ValueBuilderTest;
 
+TEST_F(TypesWithModuleTest, ConstructionGroupsKeepDependentHandlesWhole) {
+  Source source(IREE_SV(R"(
+    namespace loom::type {
+    using size_type = __SIZE_TYPE__;
+    inline constexpr size_type dynamic = ~size_type{0};
+    template <size_type... Extents>
+    struct [[loom::type("shape")]] shape {};
+    template <class Shape, class T, class Encoding = void>
+    struct [[loom::type("view")]] view {};
+    }
+    using View = loom::type::view<loom::type::shape<loom::type::dynamic>, float>;
+    struct Field { View value; unsigned position; };
+    struct Pair { Field first; Field second; };
+    struct Native { unsigned value; unsigned other; };
+    struct NativeStorage { unsigned bits : 3; };
+    struct Binding { unsigned& value; const float* pointer; unsigned count; };
+  )"),
+                IREE_SV("construction_groups.cxx"), options());
+  Types types(source.unit(), source.diagnostics());
+  auto source_type = [&](const char* name) {
+    return (*source.unit().globalScope()->find(name).begin())->type();
+  };
+  EXPECT_TRUE(types.requires_value_transport(source_type("Pair")));
+  EXPECT_FALSE(types.requires_value_transport(source_type("Native")));
+  // Storage classification must not require value admission of native types.
+  EXPECT_FALSE(types.requires_value_transport(source_type("NativeStorage")));
+  auto groups = types.projections(source_type("Pair"), source.unit().ast());
+  ASSERT_EQ(groups.size(), 4u);
+  EXPECT_EQ(groups[0].partition->kind, ValueKind::View);
+  EXPECT_EQ(groups[0].partition->component_count, 2u);
+  EXPECT_EQ(groups[0].component_offset, 0u);
+  EXPECT_EQ(groups[1].component_offset, 2u);
+  EXPECT_EQ(groups[2].partition, groups[0].partition);
+  EXPECT_EQ(groups[2].component_offset, 3u);
+  EXPECT_EQ(groups[3].component_offset, 5u);
+  EXPECT_EQ(groups.data(),
+            types.projections(source_type("Pair"), source.unit().ast()).data());
+  auto bindings =
+      types.projections(source_type("Binding"), source.unit().ast());
+  ASSERT_EQ(bindings.size(), 3u);
+  EXPECT_EQ(bindings[0].partition, &kPointerPartition);
+  EXPECT_EQ(&types.partition(bindings[0].type, source.unit().ast()),
+            &kPointerPartition);
+  EXPECT_EQ(bindings[1].component_offset, 2u);
+  EXPECT_EQ(bindings[2].component_offset, 4u);
+}
+
 TEST_F(TypesWithModuleTest, ProjectsSpecialAndRegisteredOpaqueHandles) {
   Source source(IREE_SV(R"(
     template<class T> struct [[loom::type("buffer")]] Buffer { T* data; };
@@ -187,6 +234,21 @@ TEST_F(TypesWithModuleTest, ProjectsPipelinePayloadAndHandleFamilies) {
   EXPECT_EQ(loom_type_dim_static_size_at(tile_types[2], 1), 8);
   EXPECT_EQ(loom_type_encoding_value_id(tile_types[2]), 12u);
 
+  // Both direct operation construction and flattened signatures enforce the
+  // encoding representation limit before narrowing a module-local identity.
+  const loom_value_id_t maximum_dependencies[] = {11, UINT16_MAX};
+  auto maximum_tile =
+      dynamic_tile.bind_type(maximum_dependencies, tile_storage);
+  EXPECT_EQ(loom_type_encoding_value_id(maximum_tile), UINT16_MAX);
+  const loom_value_id_t overflowing_dependencies[] = {11, UINT16_MAX + 1u};
+  try {
+    dynamic_tile.bind_type(overflowing_dependencies, tile_storage);
+    FAIL() << "encoding identity was truncated";
+  } catch (StatusError& error) {
+    iree::Status status(error.release());
+    EXPECT_EQ(status.code(), iree::StatusCode::kResourceExhausted);
+  }
+
   std::vector<loom_type_t> static_channel_types;
   types.append(source_type("StaticChannel"), owner, static_channel_types);
   ASSERT_EQ(static_channel_types.size(), 1u);
@@ -342,7 +404,8 @@ TEST(TypesTest, RecordPartitionsRetainNominalMembersAndStaticTransport) {
   EXPECT_EQ(packet->members[1].component_offset, 0u);
   EXPECT_EQ(packet->members[2].component_offset, 2u);
   EXPECT_EQ(packet->members[3].component_offset, 4u);
-  EXPECT_EQ(types.member(packet->members[2].field, owner).component_offset, 2u);
+  EXPECT_EQ(types.member(packet->members[2].source, owner).component_offset,
+            2u);
   EXPECT_EQ(packet->component_names,
             (std::vector<std::string>{"pair_a", "pair_b", "pointer",
                                       "pointer_byte_offset", "valid"}));
@@ -351,8 +414,7 @@ TEST(TypesTest, RecordPartitionsRetainNominalMembersAndStaticTransport) {
   EXPECT_EQ(types.partition(source_type("Pair"), owner).kind,
             ValueKind::Record);
   EXPECT_EQ(packet->members[2].partition->kind, ValueKind::Pointer);
-  EXPECT_TRUE(
-      source.unit().typeTraits().is_const(packet->members[3].field->type()));
+  EXPECT_TRUE(source.unit().typeTraits().is_const(packet->members[3].type()));
   EXPECT_EQ(types.record(source_type("Empty"), owner)->source->sizeInBytes(),
             1);
   std::vector<loom_type_t> signature;
@@ -399,7 +461,7 @@ TEST(TypesTest, RecordMemoryUsesSourceLayoutIndependentlyOfValuePartitions) {
   auto* partition = types.record(padded, owner);
   ASSERT_NE(partition, nullptr);
   ASSERT_EQ(partition->members.size(), 3u);
-  EXPECT_EQ(partition->members[1].field->offsetInClass(), 4u);
+  EXPECT_EQ(partition->members[1].byte_offset(), 4u);
   EXPECT_EQ(partition->members[1].component_offset, 1u);
   EXPECT_EQ(types.storage_size(padded, owner), 12);
   auto* observed = source_type("Observed");
@@ -547,6 +609,21 @@ TEST(TypesTest, ViewPartitionsPreservePlainAndEncodedSourceTypes) {
   EXPECT_EQ(loom_type_dim_static_size_at(plane_types[2], 1), 32);
   EXPECT_TRUE(loom_type_has_ssa_encoding(plane_types[2]));
   EXPECT_EQ(loom_type_encoding_value_id(plane_types[2]), 12u);
+
+  const auto& plane_partition = static_cast<const ViewPartition&>(plane);
+  const loom_value_id_t maximum_dependencies[] = {11, UINT16_MAX};
+  auto maximum_view =
+      plane_partition.bind_type(maximum_dependencies, plane_storage);
+  EXPECT_EQ(loom_type_encoding_value_id(maximum_view), UINT16_MAX);
+  const loom_value_id_t overflowing_dependencies[] = {11, UINT16_MAX + 1u};
+  EXPECT_THROW(
+      plane_partition.bind_type(overflowing_dependencies, plane_storage),
+      StatusError);
+  const loom_value_id_t overflowing_ids[] = {11, UINT16_MAX + 1u,
+                                             UINT16_MAX + 2u};
+  EXPECT_THROW(types.append_bound(source_type("Plane"), owner, overflowing_ids,
+                                  plane_storage, plane_types),
+               StatusError);
 
   const auto& volume = types.partition(source_type("Volume"), owner);
   EXPECT_EQ(volume.kind, ValueKind::View);
@@ -1199,6 +1276,98 @@ TEST(TypesTest, VectorProjectionSeparatesLogicalLanesFromObjectLayout) {
                 lane_count != object_lane_count);
     }
   }
+}
+
+TEST(TypesTest, RetainsSelectedSubobjectPositionsIndependentlyOfByteLayout) {
+  loom_cxx_import_options_t options;
+  loom_cxx_import_options_initialize(&options);
+  Source source(IREE_SV(R"(
+    struct Leaf { double value; };
+    struct Middle { char tag; Leaf leaf; };
+    struct Outer { unsigned count; Middle first, second; };
+  )"),
+                IREE_SV("subobjects.cxx"), options);
+  Types types(source.unit(), source.diagnostics());
+  auto* owner = source.unit().ast();
+  auto* outer = types.record(
+      (*source.unit().globalScope()->find("Outer").begin())->type(), owner);
+  const auto& second = outer->members[2];
+  const auto& middle = static_cast<const RecordPartition&>(*second.partition);
+  auto* path = cxx::make_list_node(source.unit().arena(), second.source);
+  path->next =
+      cxx::make_list_node(source.unit().arena(), middle.members[1].source);
+  EXPECT_EQ(types.subobject_offset(path), 32u);
+  const auto& selected = types.projection(path, owner);
+  EXPECT_EQ(selected.root->source, second.source);
+  EXPECT_EQ(selected.partition, middle.members[1].partition);
+  EXPECT_EQ(selected.component_offset, 4u);
+  EXPECT_EQ(selected.byte_offset, 32u);
+  EXPECT_EQ(&types.projection(path, owner), &selected);
+  EXPECT_EQ(types.subobject_offset(path), selected.byte_offset);
+}
+
+TEST(TypesTest, BasePartitionsPreserveRepeatedIdentityAndOverlappingPadding) {
+  loom_cxx_import_options_t options;
+  loom_cxx_import_options_initialize(&options);
+  Source source(IREE_SV(R"(
+    struct Empty {};
+    struct Left : Empty {};
+    struct Right : Empty {};
+    struct Both : Left, Right { unsigned value; };
+    struct Tail {
+      unsigned value;
+      unsigned char tag;
+      Tail() : value(0), tag(0) {}
+    };
+    struct Derived : Tail { unsigned char extra; };
+  )"),
+                IREE_SV("base_layout.cxx"), options);
+  Types types(source.unit(), source.diagnostics());
+  auto* owner = source.unit().ast();
+  auto source_type = [&](const char* name) {
+    return (*source.unit().globalScope()->find(name).begin())->type();
+  };
+  auto* both = types.record(source_type("Both"), owner);
+  ASSERT_EQ(both->members.size(), 3u);
+  EXPECT_EQ(both->component_count, 1u);
+  EXPECT_NE(both->members[0].source, both->members[1].source);
+  EXPECT_EQ(both->members[0].byte_offset(), 0u);
+  EXPECT_EQ(both->members[1].byte_offset(), 1u);
+  EXPECT_EQ(both->members[2].byte_offset(), 0u);
+  EXPECT_EQ(both->members[0].partition->component_count, 0u);
+  EXPECT_EQ(both->members[1].partition->component_count, 0u);
+  EXPECT_EQ(types.storage_size(source_type("Both"), owner), 4);
+
+  auto* derived = types.record(source_type("Derived"), owner);
+  ASSERT_EQ(derived->members.size(), 2u);
+  EXPECT_EQ(derived->component_count, 3u);
+  EXPECT_EQ(derived->members[1].component_offset, 2u);
+  EXPECT_EQ(derived->members[1].byte_offset(), 5u);
+  EXPECT_EQ(types.storage_size(source_type("Tail"), owner), 8);
+  EXPECT_EQ(types.storage_size(source_type("Derived"), owner), 8);
+}
+
+TEST(TypesTest, RetainsMutableSubobjectsThroughBasesAndArrays) {
+  loom_cxx_import_options_t options;
+  loom_cxx_import_options_initialize(&options);
+  Source source(IREE_SV(R"(
+    struct Leaf { mutable unsigned value; };
+    struct Plain { unsigned value; };
+    struct Derived : Leaf { Plain plain; };
+    struct Nested { Leaf leaves[2][3]; };
+    struct Borrowed { const Leaf* pointer; };
+  )"),
+                IREE_SV("mutable_subobjects.cxx"), options);
+  Types types(source.unit(), source.diagnostics());
+  auto* owner = source.unit().ast();
+  auto record = [&](const char* name) {
+    return types.record(
+        (*source.unit().globalScope()->find(name).begin())->type(), owner);
+  };
+  EXPECT_TRUE(record("Derived")->has_mutable_subobject);
+  EXPECT_TRUE(record("Nested")->has_mutable_subobject);
+  EXPECT_FALSE(record("Plain")->has_mutable_subobject);
+  EXPECT_FALSE(record("Borrowed")->has_mutable_subobject);
 }
 
 TEST(TypesTest, MutationUsesTheObjectQualifierInsteadOfItsPointee) {

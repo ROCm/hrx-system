@@ -1,0 +1,465 @@
+// RUN: roundtrip
+#include <loomcxx/scalar.h>
+
+double scale(double value, int exponent) {
+  return loom::scalar::ldexpf(value, exponent);
+}
+
+loom::scalar::frexpf_result<double> decompose(double value) {
+  return loom::scalar::frexpf(value);
+}
+
+template <class Float>
+int exponent(Float value) {
+  return loom::scalar::frexpf(value).exponent;
+}
+int half(_Float16 value) { return exponent(value); }
+int bfloat(__bf16 value) { return exponent(value); }
+int single(float value) { return exponent(value); }
+int e4m3(__float8_e4m3fn value) { return exponent(value); }
+int e5m2(__float8_e5m2 value) { return exponent(value); }
+
+// ----
+func.def public @scale(%value: f64, %exponent: i32) -> (f64) {
+  %3 = scalar.ldexpf %value, %exponent : f64, i32
+  func.return %3 : f64
+}
+
+func.def public @decompose(%value: f64) -> (f64, i32) {
+  %7, %8 = scalar.frexpf %value : f64, i32
+  func.return %7, %8 : f64, i32
+}
+
+func.def public @half(%value: f16) -> (i32) {
+  %11 = func.call pure @exponent__Float16(%value) : (f16) -> (i32)
+  func.return %11 : i32
+}
+
+func.def public @bfloat(%value: bf16) -> (i32) {
+  %14 = func.call pure @exponent___bf16(%value) : (bf16) -> (i32)
+  func.return %14 : i32
+}
+
+func.def public @single(%value: f32) -> (i32) {
+  %17 = func.call pure @exponent_float(%value) : (f32) -> (i32)
+  func.return %17 : i32
+}
+
+func.def public @e4m3(%value: f8E4M3) -> (i32) {
+  %20 = func.call pure @exponent___float8_e4m3fn(%value) : (f8E4M3) -> (i32)
+  func.return %20 : i32
+}
+
+func.def public @e5m2(%value: f8E5M2) -> (i32) {
+  %23 = func.call pure @exponent___float8_e5m2(%value) : (f8E5M2) -> (i32)
+  func.return %23 : i32
+}
+
+func.def @exponent__Float16(%value: f16) -> (i32) {
+  %26, %27 = scalar.frexpf %value : f16, i32
+  func.return %27 : i32
+}
+
+func.def @exponent___bf16(%value: bf16) -> (i32) {
+  %30, %31 = scalar.frexpf %value : bf16, i32
+  func.return %31 : i32
+}
+
+func.def @exponent_float(%value: f32) -> (i32) {
+  %34, %35 = scalar.frexpf %value : f32, i32
+  func.return %35 : i32
+}
+
+func.def @exponent___float8_e4m3fn(%value: f8E4M3) -> (i32) {
+  %38, %39 = scalar.frexpf %value : f8E4M3, i32
+  func.return %39 : i32
+}
+
+func.def @exponent___float8_e5m2(%value: f8E5M2) -> (i32) {
+  %42, %43 = scalar.frexpf %value : f8E5M2, i32
+  func.return %43 : i32
+}
+
+// ====
+// RUN: roundtrip
+double builtin(double value, int power, int* exponent) {
+  return __builtin_ldexp(__builtin_frexp(value, exponent), power);
+}
+float builtin_float(float value, int power, int* exponent) {
+  return __builtin_ldexpf(__builtin_frexpf(value, exponent), power);
+}
+void exponent_only(double value, int* exponent) {
+  __builtin_frexp(value, exponent);
+}
+
+// ----
+func.def public @builtin(%value: f64, %power: i32, %exponent: buffer, %exponent_byte_offset: offset) -> (f64) {
+  %5, %6 = scalar.frexpf %value : f64, i32
+  %7 = buffer.view %exponent[%exponent_byte_offset] : buffer -> view<1xi32>
+  view.store<root_in_bounds> %6, %7[0] : i32, view<1xi32>
+  %8 = scalar.ldexpf %5, %power : f64, i32
+  func.return %8 : f64
+}
+
+func.def public @builtin_float(%value: f32, %power: i32, %exponent: buffer, %exponent_byte_offset: offset) -> (f32) {
+  %14, %15 = scalar.frexpf %value : f32, i32
+  %16 = buffer.view %exponent[%exponent_byte_offset] : buffer -> view<1xi32>
+  view.store<root_in_bounds> %15, %16[0] : i32, view<1xi32>
+  %17 = scalar.ldexpf %14, %power : f32, i32
+  func.return %17 : f32
+}
+
+func.def public @exponent_only(%value: f64, %exponent: buffer, %exponent_byte_offset: offset) {
+  %21, %22 = scalar.frexpf %value : f64, i32
+  %23 = buffer.view %exponent[%exponent_byte_offset] : buffer -> view<1xi32>
+  view.store<root_in_bounds> %22, %23[0] : i32, view<1xi32>
+  func.return
+}
+
+// ====
+// RUN: verify
+// ERROR@+1: LOWERING/059 "fixed i32 intrinsic fields must be signed 32-bit integers"
+[[loom::op("scalar.ldexpf")]] float scale(float, unsigned);
+
+// ====
+// RUN: verify
+struct WrongExponent {
+  // Floating result remains correctly typed.
+  float fraction;
+  // Intentionally invalid exponent width.
+  short exponent;
+};
+// ERROR@+1: LOWERING/059 "fixed i32 intrinsic fields must be signed 32-bit integers"
+[[loom::op("scalar.frexpf")]] WrongExponent decompose(float);
+
+// ====
+// RUN: verify
+// ERROR@+1: LOWERING/059 "intrinsic result must be a record with one member per result"
+[[loom::op("scalar.frexpf")]] float decompose(float);
+
+// ====
+// RUN: verify
+struct Nested {
+  struct Fraction {
+    // Nested scalar must not masquerade as a direct result member.
+    float value;
+  };
+  // Intentionally invalid nested result.
+  Fraction fraction;
+  // Correct exponent type isolates the structural diagnostic.
+  int exponent;
+};
+// ERROR@+1: LOWERING/059 "intrinsic result members must be scalar values"
+[[loom::op("scalar.frexpf")]] Nested decompose(float);
+
+// ====
+// RUN: verify
+struct Pair {
+  // Intentionally differs from the operand type.
+  double fraction;
+  // Fixed signed exponent.
+  int exponent;
+};
+// ERROR@+1: LOWERING/059 "intrinsic operands must have the result's type"
+[[loom::op("scalar.frexpf")]] Pair decompose(float);
+
+// ====
+// RUN: verify
+double unsupported(double value, int* exponent) {
+  // ERROR@+1: LOWERING/059 "math builtin '__builtin_frexpl' requires long-double lowering; implicit narrowing is not permitted"
+  return __builtin_frexpl(value, exponent);
+}
+
+// ====
+// RUN: roundtrip
+// Floating updates and copied exponent results retain float throughout.
+#include <loomcxx/scalar.h>
+template <class Float>
+static Float rebuild(Float input) {
+  auto original = input++;
+  --input;
+  auto pair = loom::scalar::frexpf(input);
+  auto copy = pair;
+  return loom::scalar::ldexpf(copy.fraction, copy.exponent) + original + input;
+}
+float evaluate(float input) { return rebuild(input); }
+float fraction(float input) { return loom::scalar::frexpf(input).fraction; }
+// ----
+func.def public @evaluate(%input: f32) -> (f32) {
+  %2 = func.call pure @rebuild_float(%input) : (f32) -> (f32)
+  func.return %2 : f32
+}
+
+func.def public @fraction(%input: f32) -> (f32) {
+  %5, %6 = scalar.frexpf %input : f32, i32
+  func.return %5 : f32
+}
+
+func.def @rebuild_float(%input$7: f32) -> (f32) {
+  %9 = scalar.constant 1 : i32
+  %10 = scalar.sitofp %9 : i32 to f32
+  %input$11 = scalar.addf %input$7, %10 : f32
+  %12 = scalar.constant 1 : i32
+  %13 = scalar.sitofp %12 : i32 to f32
+  %input$14 = scalar.subf %input$11, %13 : f32
+  %pair_fraction, %pair_exponent = scalar.frexpf %input$14 : f32, i32
+  %17 = scalar.ldexpf %pair_fraction, %pair_exponent : f32, i32
+  %18 = scalar.addf %17, %input$7 : f32
+  %19 = scalar.addf %18, %input$14 : f32
+  func.return %19 : f32
+}
+
+// ====
+// RUN: roundtrip
+// Floating updates and copied exponent results retain double throughout.
+#include <loomcxx/scalar.h>
+template <class Float>
+static Float rebuild(Float input) {
+  auto original = input++;
+  --input;
+  auto pair = loom::scalar::frexpf(input);
+  auto copy = pair;
+  return loom::scalar::ldexpf(copy.fraction, copy.exponent) + original + input;
+}
+double evaluate(double input) { return rebuild(input); }
+double fraction(double input) { return loom::scalar::frexpf(input).fraction; }
+// ----
+func.def public @evaluate(%input: f64) -> (f64) {
+  %2 = func.call pure @rebuild_double(%input) : (f64) -> (f64)
+  func.return %2 : f64
+}
+
+func.def public @fraction(%input: f64) -> (f64) {
+  %5, %6 = scalar.frexpf %input : f64, i32
+  func.return %5 : f64
+}
+
+func.def @rebuild_double(%input$7: f64) -> (f64) {
+  %9 = scalar.constant 1 : i32
+  %10 = scalar.sitofp %9 : i32 to f64
+  %input$11 = scalar.addf %input$7, %10 : f64
+  %12 = scalar.constant 1 : i32
+  %13 = scalar.sitofp %12 : i32 to f64
+  %input$14 = scalar.subf %input$11, %13 : f64
+  %pair_fraction, %pair_exponent = scalar.frexpf %input$14 : f64, i32
+  %17 = scalar.ldexpf %pair_fraction, %pair_exponent : f64, i32
+  %18 = scalar.addf %17, %input$7 : f64
+  %19 = scalar.addf %18, %input$14 : f64
+  func.return %19 : f64
+}
+
+// ====
+// RUN: roundtrip
+// Floating updates and copied exponent results retain _Float16 throughout.
+#include <loomcxx/scalar.h>
+template <class Float>
+static Float rebuild(Float input) {
+  auto original = input++;
+  --input;
+  auto pair = loom::scalar::frexpf(input);
+  auto copy = pair;
+  return loom::scalar::ldexpf(copy.fraction, copy.exponent) + original + input;
+}
+_Float16 evaluate(_Float16 input) { return rebuild(input); }
+_Float16 fraction(_Float16 input) { return loom::scalar::frexpf(input).fraction; }
+// ----
+func.def public @evaluate(%input: f16) -> (f16) {
+  %2 = func.call pure @rebuild__Float16(%input) : (f16) -> (f16)
+  func.return %2 : f16
+}
+
+func.def public @fraction(%input: f16) -> (f16) {
+  %5, %6 = scalar.frexpf %input : f16, i32
+  func.return %5 : f16
+}
+
+func.def @rebuild__Float16(%input$7: f16) -> (f16) {
+  %9 = scalar.constant 1 : i32
+  %10 = scalar.sitofp %9 : i32 to f16
+  %input$11 = scalar.addf %input$7, %10 : f16
+  %12 = scalar.constant 1 : i32
+  %13 = scalar.sitofp %12 : i32 to f16
+  %input$14 = scalar.subf %input$11, %13 : f16
+  %pair_fraction, %pair_exponent = scalar.frexpf %input$14 : f16, i32
+  %17 = scalar.ldexpf %pair_fraction, %pair_exponent : f16, i32
+  %18 = scalar.addf %17, %input$7 : f16
+  %19 = scalar.addf %18, %input$14 : f16
+  func.return %19 : f16
+}
+
+// ====
+// RUN: roundtrip
+// Floating updates and copied exponent results retain __bf16 throughout.
+#include <loomcxx/scalar.h>
+template <class Float>
+static Float rebuild(Float input) {
+  auto original = input++;
+  --input;
+  auto pair = loom::scalar::frexpf(input);
+  auto copy = pair;
+  return loom::scalar::ldexpf(copy.fraction, copy.exponent) + original + input;
+}
+__bf16 evaluate(__bf16 input) { return rebuild(input); }
+__bf16 fraction(__bf16 input) { return loom::scalar::frexpf(input).fraction; }
+// ----
+func.def public @evaluate(%input: bf16) -> (bf16) {
+  %2 = func.call pure @rebuild___bf16(%input) : (bf16) -> (bf16)
+  func.return %2 : bf16
+}
+
+func.def public @fraction(%input: bf16) -> (bf16) {
+  %5, %6 = scalar.frexpf %input : bf16, i32
+  func.return %5 : bf16
+}
+
+func.def @rebuild___bf16(%input$7: bf16) -> (bf16) {
+  %9 = scalar.constant 1 : i32
+  %10 = scalar.sitofp %9 : i32 to bf16
+  %input$11 = scalar.addf %input$7, %10 : bf16
+  %12 = scalar.constant 1 : i32
+  %13 = scalar.sitofp %12 : i32 to bf16
+  %input$14 = scalar.subf %input$11, %13 : bf16
+  %pair_fraction, %pair_exponent = scalar.frexpf %input$14 : bf16, i32
+  %17 = scalar.ldexpf %pair_fraction, %pair_exponent : bf16, i32
+  %18 = scalar.addf %17, %input$7 : bf16
+  %19 = scalar.addf %18, %input$14 : bf16
+  func.return %19 : bf16
+}
+
+// ====
+// RUN: roundtrip
+// Floating updates and copied exponent results retain __float8_e4m3fn throughout.
+#include <loomcxx/scalar.h>
+template <class Float>
+static Float rebuild(Float input) {
+  auto original = input++;
+  --input;
+  auto pair = loom::scalar::frexpf(input);
+  auto copy = pair;
+  return loom::scalar::ldexpf(copy.fraction, copy.exponent) + original + input;
+}
+__float8_e4m3fn evaluate(__float8_e4m3fn input) { return rebuild(input); }
+__float8_e4m3fn fraction(__float8_e4m3fn input) { return loom::scalar::frexpf(input).fraction; }
+// ----
+func.def public @evaluate(%input: f8E4M3) -> (f8E4M3) {
+  %2 = func.call pure @rebuild___float8_e4m3fn(%input) : (f8E4M3) -> (f8E4M3)
+  func.return %2 : f8E4M3
+}
+
+func.def public @fraction(%input: f8E4M3) -> (f8E4M3) {
+  %5, %6 = scalar.frexpf %input : f8E4M3, i32
+  func.return %5 : f8E4M3
+}
+
+func.def @rebuild___float8_e4m3fn(%input$7: f8E4M3) -> (f8E4M3) {
+  %9 = scalar.constant 1 : i32
+  %10 = scalar.sitofp %9 : i32 to f8E4M3
+  %input$11 = scalar.addf %input$7, %10 : f8E4M3
+  %12 = scalar.constant 1 : i32
+  %13 = scalar.sitofp %12 : i32 to f8E4M3
+  %input$14 = scalar.subf %input$11, %13 : f8E4M3
+  %pair_fraction, %pair_exponent = scalar.frexpf %input$14 : f8E4M3, i32
+  %17 = scalar.ldexpf %pair_fraction, %pair_exponent : f8E4M3, i32
+  %18 = scalar.addf %17, %input$7 : f8E4M3
+  %19 = scalar.addf %18, %input$14 : f8E4M3
+  func.return %19 : f8E4M3
+}
+
+// ====
+// RUN: roundtrip
+// Floating updates and copied exponent results retain __float8_e5m2 throughout.
+#include <loomcxx/scalar.h>
+template <class Float>
+static Float rebuild(Float input) {
+  auto original = input++;
+  --input;
+  auto pair = loom::scalar::frexpf(input);
+  auto copy = pair;
+  return loom::scalar::ldexpf(copy.fraction, copy.exponent) + original + input;
+}
+__float8_e5m2 evaluate(__float8_e5m2 input) { return rebuild(input); }
+__float8_e5m2 fraction(__float8_e5m2 input) { return loom::scalar::frexpf(input).fraction; }
+// ----
+func.def public @evaluate(%input: f8E5M2) -> (f8E5M2) {
+  %2 = func.call pure @rebuild___float8_e5m2(%input) : (f8E5M2) -> (f8E5M2)
+  func.return %2 : f8E5M2
+}
+
+func.def public @fraction(%input: f8E5M2) -> (f8E5M2) {
+  %5, %6 = scalar.frexpf %input : f8E5M2, i32
+  func.return %5 : f8E5M2
+}
+
+func.def @rebuild___float8_e5m2(%input$7: f8E5M2) -> (f8E5M2) {
+  %9 = scalar.constant 1 : i32
+  %10 = scalar.sitofp %9 : i32 to f8E5M2
+  %input$11 = scalar.addf %input$7, %10 : f8E5M2
+  %12 = scalar.constant 1 : i32
+  %13 = scalar.sitofp %12 : i32 to f8E5M2
+  %input$14 = scalar.subf %input$11, %13 : f8E5M2
+  %pair_fraction, %pair_exponent = scalar.frexpf %input$14 : f8E5M2, i32
+  %17 = scalar.ldexpf %pair_fraction, %pair_exponent : f8E5M2, i32
+  %18 = scalar.addf %17, %input$7 : f8E5M2
+  %19 = scalar.addf %18, %input$14 : f8E5M2
+  func.return %19 : f8E5M2
+}
+
+// ====
+// RUN: roundtrip
+// Builtin argument effects happen once, and discarding the fraction preserves its exponent store.
+double builtin_evaluation(double input, int index, int* exponents) {
+  double fraction = __builtin_frexp(input++, &exponents[index++]);
+  __builtin_frexpf(4.0f, &exponents[1]);
+  double scaled = __builtin_ldexp(input++, index++);
+  float scaled_float = __builtin_ldexpf(-0.75f, -3);
+  return fraction + scaled + scaled_float + input + index;
+}
+// ----
+func.def public @builtin_evaluation(%input$0: f64, %index$1: i32, %exponents: buffer, %exponents_byte_offset: offset) -> (f64) {
+  %5 = scalar.constant 1 : i32
+  %6 = scalar.sitofp %5 : i32 to f64
+  %input$7 = scalar.addf %input$0, %6 : f64
+  %8 = scalar.constant 1 : i32
+  %index$9 = scalar.addi %index$1, %8 : i32
+  %10 = scalar.extsi %index$1 : i32 to i64
+  %11 = scalar.constant 4 : i64
+  %12 = scalar.muli %10, %11 : i64
+  %13 = index.cast %exponents_byte_offset : offset to i64
+  %14 = scalar.addi %13, %12 : i64
+  %15 = scalar.assume %14 [range(%14, 0, 9223372036854775807)] : i64
+  %16 = index.cast %15 : i64 to offset
+  %fraction, %18 = scalar.frexpf %input$0 : f64, i32
+  %19 = buffer.view %exponents[%16] : buffer -> view<1xi32>
+  view.store<root_in_bounds> %18, %19[0] : i32, view<1xi32>
+  %20 = scalar.constant 4.0 : f32
+  %21 = scalar.constant 1 : i32
+  %22 = scalar.extsi %21 : i32 to i64
+  %23 = scalar.constant 4 : i64
+  %24 = scalar.muli %22, %23 : i64
+  %25 = index.cast %exponents_byte_offset : offset to i64
+  %26 = scalar.addi %25, %24 : i64
+  %27 = scalar.assume %26 [range(%26, 0, 9223372036854775807)] : i64
+  %28 = index.cast %27 : i64 to offset
+  %29, %30 = scalar.frexpf %20 : f32, i32
+  %31 = buffer.view %exponents[%28] : buffer -> view<1xi32>
+  view.store<root_in_bounds> %30, %31[0] : i32, view<1xi32>
+  %32 = scalar.constant 1 : i32
+  %33 = scalar.sitofp %32 : i32 to f64
+  %input$34 = scalar.addf %input$7, %33 : f64
+  %35 = scalar.constant 1 : i32
+  %index$36 = scalar.addi %index$9, %35 : i32
+  %scaled = scalar.ldexpf %input$7, %index$9 : f64, i32
+  %38 = scalar.constant 0.75 : f32
+  %39 = scalar.negf %38 : f32
+  %40 = scalar.constant 3 : i32
+  %41 = scalar.constant 0 : i32
+  %42 = scalar.subi %41, %40 : i32
+  %scaled_float = scalar.ldexpf %39, %42 : f32, i32
+  %44 = scalar.addf %fraction, %scaled : f64
+  %45 = scalar.extf %scaled_float : f32 to f64
+  %46 = scalar.addf %44, %45 : f64
+  %47 = scalar.addf %46, %input$34 : f64
+  %48 = scalar.sitofp %index$36 : i32 to f64
+  %49 = scalar.addf %47, %48 : f64
+  func.return %49 : f64
+}

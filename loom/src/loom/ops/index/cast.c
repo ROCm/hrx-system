@@ -6,28 +6,33 @@
 
 #include "loom/ops/index/cast.h"
 
-#include "iree/base/internal/math.h"
+bool loom_index_cast_payload_interpretation(loom_scalar_type_t input_type,
+                                            loom_scalar_type_t result_type,
+                                            loom_integer_cast_kind_t* out_kind,
+                                            uint8_t* out_bit_count) {
+  loom_scalar_type_t payload_type;
+  if (loom_scalar_type_is_integer(result_type)) {
+    payload_type = result_type;
+  } else if (loom_scalar_type_is_integer(input_type) &&
+             (result_type == LOOM_SCALAR_TYPE_INDEX ||
+              input_type != LOOM_SCALAR_TYPE_I64)) {
+    payload_type = input_type;
+  } else {
+    return false;
+  }
+  *out_kind = payload_type == LOOM_SCALAR_TYPE_I1 ||
+                      result_type == LOOM_SCALAR_TYPE_OFFSET
+                  ? LOOM_INTEGER_CAST_UNSIGNED
+                  : LOOM_INTEGER_CAST_SIGNED;
+  *out_bit_count = (uint8_t)loom_scalar_type_bitwidth(payload_type);
+  return true;
+}
 
 static bool loom_index_cast_to_offset_zero_extends_source(
     loom_scalar_type_t input_type, loom_scalar_type_t result_type,
     int32_t input_bitwidth) {
   return result_type == LOOM_SCALAR_TYPE_OFFSET &&
          loom_scalar_type_is_integer(input_type) && input_bitwidth < 63;
-}
-
-static loom_value_facts_t loom_index_cast_zero_extend_to_offset_facts(
-    loom_value_facts_t facts, int32_t input_bitwidth) {
-  const int64_t unsigned_extent = INT64_C(1) << input_bitwidth;
-  const int64_t unsigned_max = unsigned_extent - 1;
-  if (facts.range_lo >= 0) {
-    return loom_value_facts_clamp_domain(facts, 0, unsigned_max);
-  }
-  if (facts.range_hi < 0) {
-    return loom_value_facts_make(
-        facts.range_lo + unsigned_extent, facts.range_hi + unsigned_extent,
-        iree_math_gcd_i64(facts.known_divisor, unsigned_extent));
-  }
-  return loom_value_facts_make(0, unsigned_max, 1);
 }
 
 loom_value_facts_t loom_index_cast_transfer_facts(
@@ -44,12 +49,12 @@ loom_value_facts_t loom_index_cast_transfer_facts(
   }
 
   const int32_t input_bitwidth = loom_scalar_type_bitwidth(input_type);
-  loom_value_facts_t facts =
-      loom_value_facts_clamp_domain(input_facts, input_lo, input_hi);
   if (loom_index_cast_to_offset_zero_extends_source(input_type, result_type,
                                                     input_bitwidth)) {
-    return loom_index_cast_zero_extend_to_offset_facts(facts, input_bitwidth);
+    return loom_value_facts_zero_extend(input_facts, input_bitwidth);
   }
+  loom_value_facts_t facts =
+      loom_value_facts_clamp_domain(input_facts, input_lo, input_hi);
 
   if (facts.range_lo >= result_lo && facts.range_hi <= result_hi) {
     return facts;

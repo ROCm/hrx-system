@@ -1,0 +1,1098 @@
+// RUN: emit vm-object-lifetime
+// INPUT: cxx root=run
+// Explicit copy/move, replacement, aliases, and reverse destruction.
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+
+struct Owner {
+  // Payload whose changes make lifecycle effects observable.
+  unsigned value;
+  explicit Owner(unsigned value) : value(value) { event(100u + value); }
+  Owner(const Owner& other) : value(other.value) { event(200u + value); }
+  Owner(Owner&& other) : value(other.value) {
+    other.value = 0;
+    event(300u + value);
+  }
+  Owner& operator=(const Owner& other) {
+    event(400u + value);
+    value = other.value;
+    return *this;
+  }
+  Owner& operator=(Owner&& other) {
+    event(500u + value);
+    unsigned incoming = other.value;
+    other.value = 0;
+    value = incoming;
+    return *this;
+  }
+  ~Owner() { event(600u + value); }
+};
+
+void run() {
+  {
+    Owner first(7);
+    Owner second(first);
+    Owner third(static_cast<Owner&&>(first));
+    second = third;
+    third = static_cast<Owner&&>(second);
+    third = third;
+    third = static_cast<Owner&&>(third);
+    event(700u + first.value * 100u + second.value * 10u + third.value);
+  }
+  event(999u);
+}
+
+// ----
+event 107
+event 207
+event 307
+event 407
+event 507
+event 407
+event 507
+event 707
+event 607
+event 600
+event 600
+event 999
+OK 0
+retired 0
+
+// ====
+// Defaulted special members execute their nested member operations in order.
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+
+struct Owner {
+  // Payload whose changes make lifecycle effects observable.
+  unsigned value;
+  explicit Owner(unsigned value) : value(value) { event(100u + value); }
+  Owner(const Owner& other) : value(other.value) { event(200u + value); }
+  Owner(Owner&& other) : value(other.value) {
+    other.value = 0;
+    event(300u + value);
+  }
+  Owner& operator=(const Owner& other) {
+    event(400u + value);
+    value = other.value;
+    return *this;
+  }
+  Owner& operator=(Owner&& other) {
+    event(500u + value);
+    unsigned incoming = other.value;
+    other.value = 0;
+    value = incoming;
+    return *this;
+  }
+  ~Owner() { event(600u + value); }
+};
+
+struct Pair {
+  // First member constructed, copied, and assigned.
+  Owner first;
+  // Second member, destroyed before the first.
+  Owner second;
+  explicit Pair(unsigned seed) : first(seed), second(seed + 1u) {}
+  Pair(const Pair&) = default;
+  Pair(Pair&&) = default;
+  Pair& operator=(const Pair&) = default;
+  Pair& operator=(Pair&&) = default;
+  ~Pair() = default;
+};
+void run() {
+  Pair source(2u);
+  Pair copied(source);
+  Pair moved(static_cast<Pair&&>(source));
+  copied = moved;
+  moved = static_cast<Pair&&>(copied);
+  event(700u + source.first.value + copied.second.value + moved.first.value);
+}
+
+// ----
+event 102
+event 103
+event 202
+event 203
+event 302
+event 303
+event 402
+event 403
+event 502
+event 503
+event 702
+event 603
+event 602
+event 600
+event 600
+event 600
+event 600
+OK 0
+retired 0
+
+// ====
+// Explicit calls to trivial special members still return the destination alias.
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+
+struct Value {
+  // Payload whose changes make lifecycle effects observable.
+  unsigned value;
+  Value(const Value&) = default;
+  Value(Value&&) = default;
+  Value& operator=(const Value&) = default;
+  Value& operator=(Value&&) = default;
+  explicit Value(unsigned value) : value(value) {}
+};
+
+void run() {
+  Value first(1u);
+  Value second(2u);
+  first.operator=(second).value = 3u;
+  second.operator=(static_cast<Value&&>(first)).value = 4u;
+  Value third(first);
+  Value fourth(static_cast<Value&&>(second));
+  event(first.value * 1000u + second.value * 100u +
+        third.value * 10u + fourth.value);
+}
+
+// ----
+event 3434
+OK 0
+retired 0
+
+// ====
+// Defaulted array members preserve element order and source identity.
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+
+struct Owner {
+  // Payload whose changes make lifecycle effects observable.
+  unsigned value;
+  explicit Owner(unsigned value) : value(value) { event(100u + value); }
+  Owner(const Owner& other) : value(other.value) { event(200u + value); }
+  Owner(Owner&& other) : value(other.value) {
+    other.value = 0;
+    event(300u + value);
+  }
+  Owner& operator=(const Owner& other) {
+    event(400u + value);
+    value = other.value;
+    return *this;
+  }
+  Owner& operator=(Owner&& other) {
+    event(500u + value);
+    unsigned incoming = other.value;
+    other.value = 0;
+    value = incoming;
+    return *this;
+  }
+  ~Owner() { event(600u + value); }
+};
+
+struct Packet {
+  // Elements retain independent state across defaulted operations.
+  Owner values[2];
+  explicit Packet(unsigned seed) : values{Owner(seed), Owner(seed + 1u)} {}
+};
+void run() {
+  Packet source(4u);
+  Packet copied(source);
+  Packet moved(static_cast<Packet&&>(source));
+  copied = moved;
+  moved = static_cast<Packet&&>(copied);
+  event(700u + source.values[0].value + copied.values[1].value + moved.values[0].value);
+}
+
+// ----
+event 104
+event 105
+event 204
+event 205
+event 304
+event 305
+event 404
+event 405
+event 504
+event 505
+event 704
+event 605
+event 604
+event 600
+event 600
+event 600
+event 600
+OK 0
+retired 0
+
+// ====
+// Overload selection distinguishes mutable, const, and xvalue sources.
+
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+struct Selected {
+  // Payload whose changes make lifecycle effects observable.
+  unsigned value;
+  explicit Selected(unsigned value) : value(value) {}
+  Selected(Selected&) : value(1u) { event(101u); }
+  Selected(const Selected&) = default;
+  Selected(Selected&&) : value(3u) { event(103u); }
+  Selected& operator=(Selected&) { value = 4u; event(104u); return *this; }
+  Selected& operator=(const Selected&) = default;
+  Selected& operator=(Selected&&) { value = 6u; event(106u); return *this; }
+};
+void run() {
+  Selected source(7u);
+  const Selected fixed(8u);
+  Selected first(source);
+  Selected second(fixed);
+  Selected third(static_cast<Selected&&>(source));
+  event(first.value * 100u + second.value * 10u + third.value);
+  first = source;
+  second = fixed;
+  third = static_cast<Selected&&>(source);
+  event(first.value * 100u + second.value * 10u + third.value);
+}
+
+// ----
+event 101
+event 103
+event 183
+event 104
+event 106
+event 486
+OK 0
+retired 0
+
+// ====
+// A move-only record transfers; a copy-only record accepts an xvalue by copy.
+
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+struct MoveOnly {
+  // Payload whose changes make lifecycle effects observable.
+  unsigned value;
+  explicit MoveOnly(unsigned value) : value(value) {}
+  MoveOnly(const MoveOnly&) = delete;
+  MoveOnly& operator=(const MoveOnly&) = delete;
+  MoveOnly(MoveOnly&& other) : value(other.value) { other.value = 0; event(100u + value); }
+  MoveOnly& operator=(MoveOnly&& other) {
+    unsigned incoming = other.value;
+    other.value = 0;
+    value = incoming;
+    event(200u + value);
+    return *this;
+  }
+};
+struct CopyOnly {
+  // Payload whose changes make lifecycle effects observable.
+  unsigned value;
+  explicit CopyOnly(unsigned value) : value(value) {}
+  CopyOnly(const CopyOnly& other) : value(other.value) { event(300u + value); }
+  CopyOnly& operator=(const CopyOnly& other) {
+    value = other.value;
+    event(400u + value);
+    return *this;
+  }
+};
+void run() {
+  MoveOnly source(7u);
+  MoveOnly moved(static_cast<MoveOnly&&>(source));
+  source = static_cast<MoveOnly&&>(moved);
+  event(source.value * 10u + moved.value);
+  CopyOnly original(9u);
+  CopyOnly copy(static_cast<CopyOnly&&>(original));
+  original = static_cast<CopyOnly&&>(copy);
+  event(original.value * 10u + copy.value);
+}
+
+// ----
+event 107
+event 207
+event 70
+event 309
+event 409
+event 99
+OK 0
+retired 0
+
+// ====
+// By-value calls and returned objects retain selected moves and exactly one cleanup.
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+
+struct Owner {
+  // Payload whose changes make lifecycle effects observable.
+  unsigned value;
+  explicit Owner(unsigned value) : value(value) { event(100u + value); }
+  Owner(const Owner& other) : value(other.value) { event(200u + value); }
+  Owner(Owner&& other) : value(other.value) {
+    other.value = 0;
+    event(300u + value);
+  }
+  Owner& operator=(const Owner& other) {
+    event(400u + value);
+    value = other.value;
+    return *this;
+  }
+  Owner& operator=(Owner&& other) {
+    event(500u + value);
+    unsigned incoming = other.value;
+    other.value = 0;
+    value = incoming;
+    return *this;
+  }
+  ~Owner() { event(600u + value); }
+};
+
+void consume(Owner value) { event(800u + value.value); }
+Owner make(unsigned value) { return Owner(value); }
+Owner relay(Owner value) { return value; }
+void run() {
+  Owner source(5u);
+  consume(source);
+  event(900u);
+  consume(static_cast<Owner&&>(source));
+  event(901u);
+  Owner result = make(6u);
+  Owner relayed = relay(static_cast<Owner&&>(result));
+  event(902u + relayed.value);
+}
+
+// ----
+event 105
+event 205
+event 805
+event 605
+event 900
+event 305
+event 805
+event 605
+event 901
+event 106
+event 306
+event 306
+event 600
+event 908
+event 606
+event 600
+event 600
+OK 0
+retired 0
+
+// ====
+// Assignment notation sequences RHS first and returns the destination alias.
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+
+struct Owner {
+  // Payload whose changes make lifecycle effects observable.
+  unsigned value;
+  explicit Owner(unsigned value) : value(value) { event(100u + value); }
+  Owner(const Owner& other) : value(other.value) { event(200u + value); }
+  Owner(Owner&& other) : value(other.value) {
+    other.value = 0;
+    event(300u + value);
+  }
+  Owner& operator=(const Owner& other) {
+    event(400u + value);
+    value = other.value;
+    return *this;
+  }
+  Owner& operator=(Owner&& other) {
+    event(500u + value);
+    unsigned incoming = other.value;
+    other.value = 0;
+    value = incoming;
+    return *this;
+  }
+  ~Owner() { event(600u + value); }
+};
+
+Owner& left(Owner& value) { event(801u); return value; }
+const Owner& right(const Owner& value) { event(802u); return value; }
+void run() {
+  Owner first(3u);
+  Owner second(4u);
+  (left(first) = right(second)).value += 1u;
+  event(700u + first.value);
+  first.operator=(second);
+  event(700u + first.value);
+}
+
+// ----
+event 103
+event 104
+event 802
+event 801
+event 403
+event 705
+event 405
+event 704
+event 604
+event 604
+OK 0
+retired 0
+
+// ====
+// Copy-list initialization, nested aggregate clauses, and temporaries execute once.
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+
+struct Owner {
+  // Payload whose changes make lifecycle effects observable.
+  unsigned value;
+  explicit Owner(unsigned value) : value(value) { event(100u + value); }
+  Owner(const Owner& other) : value(other.value) { event(200u + value); }
+  Owner(Owner&& other) : value(other.value) {
+    other.value = 0;
+    event(300u + value);
+  }
+  Owner& operator=(const Owner& other) {
+    event(400u + value);
+    value = other.value;
+    return *this;
+  }
+  Owner& operator=(Owner&& other) {
+    event(500u + value);
+    unsigned incoming = other.value;
+    other.value = 0;
+    value = incoming;
+    return *this;
+  }
+  ~Owner() { event(600u + value); }
+};
+
+struct Aggregate {
+  // Nested owner is copy-initialized by the aggregate clause.
+  Owner owner;
+};
+void inspect(const Owner& value) { event(800u + value.value); }
+void run() {
+  Owner first(2u);
+  Owner second = first;
+  Owner third{second};
+  Owner fourth = {third};
+  Aggregate aggregate{first};
+  inspect(Owner(first));
+  event(900u);
+}
+
+// ----
+event 102
+event 202
+event 202
+event 202
+event 202
+event 202
+event 802
+event 602
+event 900
+event 602
+event 602
+event 602
+event 602
+event 602
+OK 0
+retired 0
+
+// ====
+// An implicitly constructed aggregate may have nontrivial assignment.
+
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+struct Value {
+  // Payload whose changes make lifecycle effects observable.
+  unsigned value;
+  Value& operator=(const Value& other) {
+    value = other.value + 1u;
+    event(100u + value);
+    return *this;
+  }
+};
+void run() {
+  Value first{3u};
+  Value second = first;
+  second = first;
+  Value third = static_cast<Value&&>(second);
+  event(first.value * 100u + second.value * 10u + third.value);
+}
+
+// ----
+event 104
+event 344
+OK 0
+retired 0
+
+// ====
+// Array leaf constructors evaluate defaults and retire their temporaries per element.
+
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+struct Marker {
+  // Payload whose changes make lifecycle effects observable.
+  unsigned value;
+  explicit Marker(unsigned value) : value(value) { event(100u + value); }
+  ~Marker() { event(200u + value); }
+};
+struct Element {
+  // Payload whose changes make lifecycle effects observable.
+  unsigned value;
+  explicit Element(unsigned value) : value(value) {}
+  Element(const Element& other, const Marker& marker = Marker(3u))
+      : value(other.value + marker.value) { event(300u + value); }
+};
+struct Grid {
+  // Array leaves are initialized in row-major order.
+  Element values[2][2];
+  Grid() : values{{Element(1u), Element(2u)}, {Element(3u), Element(4u)}} {}
+};
+void run() {
+  Grid original;
+  Grid copied(original);
+  event(copied.values[0][0].value * 100u + copied.values[1][1].value);
+}
+
+// ----
+event 103
+event 304
+event 203
+event 103
+event 305
+event 203
+event 103
+event 306
+event 203
+event 103
+event 307
+event 203
+event 407
+OK 0
+retired 0
+
+// ====
+// Closure copies and moves execute the captured object lifecycle.
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+
+struct Owner {
+  // Payload whose changes make lifecycle effects observable.
+  unsigned value;
+  explicit Owner(unsigned value) : value(value) { event(100u + value); }
+  Owner(const Owner& other) : value(other.value) { event(200u + value); }
+  Owner(Owner&& other) : value(other.value) {
+    other.value = 0;
+    event(300u + value);
+  }
+  Owner& operator=(const Owner& other) {
+    event(400u + value);
+    value = other.value;
+    return *this;
+  }
+  Owner& operator=(Owner&& other) {
+    event(500u + value);
+    unsigned incoming = other.value;
+    other.value = 0;
+    value = incoming;
+    return *this;
+  }
+  ~Owner() { event(600u + value); }
+};
+
+void run() {
+  Owner source(8u);
+  auto action = [source]() { event(700u + source.value); };
+  auto copied = action;
+  auto moved = static_cast<decltype(action)&&>(action);
+  action();
+  copied();
+  moved();
+}
+
+// ----
+event 108
+event 208
+event 208
+event 308
+event 700
+event 708
+event 708
+event 608
+event 608
+event 600
+event 608
+OK 0
+retired 0
+
+// ====
+// Conditional prvalues construct the selected destination without duplicate owners.
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+
+struct Owner {
+  // Payload whose changes make lifecycle effects observable.
+  unsigned value;
+  explicit Owner(unsigned value) : value(value) { event(100u + value); }
+  Owner(const Owner& other) : value(other.value) { event(200u + value); }
+  Owner(Owner&& other) : value(other.value) {
+    other.value = 0;
+    event(300u + value);
+  }
+  Owner& operator=(const Owner& other) {
+    event(400u + value);
+    value = other.value;
+    return *this;
+  }
+  Owner& operator=(Owner&& other) {
+    event(500u + value);
+    unsigned incoming = other.value;
+    other.value = 0;
+    value = incoming;
+    return *this;
+  }
+  ~Owner() { event(600u + value); }
+};
+
+void choose(bool first) {
+  Owner source(2u);
+  Owner other(3u);
+  Owner result = first ? Owner(source) : Owner(static_cast<Owner&&>(other));
+  event(700u + result.value);
+}
+void run() { choose(false); choose(true); }
+
+// ----
+event 102
+event 103
+event 303
+event 703
+event 603
+event 600
+event 602
+event 102
+event 103
+event 202
+event 702
+event 602
+event 603
+event 602
+OK 0
+retired 0
+
+// ====
+// Out-of-line defaulted members retain their resolved definitions.
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+
+struct Owner {
+  // Payload whose changes make lifecycle effects observable.
+  unsigned value;
+  explicit Owner(unsigned value) : value(value) { event(100u + value); }
+  Owner(const Owner& other) : value(other.value) { event(200u + value); }
+  Owner(Owner&& other) : value(other.value) {
+    other.value = 0;
+    event(300u + value);
+  }
+  Owner& operator=(const Owner& other) {
+    event(400u + value);
+    value = other.value;
+    return *this;
+  }
+  Owner& operator=(Owner&& other) {
+    event(500u + value);
+    unsigned incoming = other.value;
+    other.value = 0;
+    value = incoming;
+    return *this;
+  }
+  ~Owner() { event(600u + value); }
+};
+
+struct Box {
+  // Nested owner supplies the defaulted lifecycle behavior.
+  Owner value;
+  explicit Box(unsigned seed) : value(seed) {}
+  Box(const Box&);
+  Box(Box&&);
+  Box& operator=(const Box&);
+  Box& operator=(Box&&);
+};
+Box::Box(const Box&) = default;
+Box::Box(Box&&) = default;
+Box& Box::operator=(const Box&) = default;
+Box& Box::operator=(Box&&) = default;
+void run() {
+  Box first(4u);
+  Box second(first);
+  Box third(static_cast<Box&&>(first));
+  second = third;
+  third = static_cast<Box&&>(second);
+}
+
+// ----
+event 104
+event 204
+event 304
+event 404
+event 504
+event 604
+event 600
+event 600
+OK 0
+retired 0
+
+// ====
+// Captured arrays and copied closures run each element constructor.
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+
+struct Owner {
+  // Payload whose changes make lifecycle effects observable.
+  unsigned value;
+  explicit Owner(unsigned value) : value(value) { event(100u + value); }
+  Owner(const Owner& other) : value(other.value) { event(200u + value); }
+  Owner(Owner&& other) : value(other.value) {
+    other.value = 0;
+    event(300u + value);
+  }
+  Owner& operator=(const Owner& other) {
+    event(400u + value);
+    value = other.value;
+    return *this;
+  }
+  Owner& operator=(Owner&& other) {
+    event(500u + value);
+    unsigned incoming = other.value;
+    other.value = 0;
+    value = incoming;
+    return *this;
+  }
+  ~Owner() { event(600u + value); }
+};
+
+void run() {
+  Owner source[2]{Owner(1u), Owner(2u)};
+  auto action = [source]() { event(700u + source[0].value * 10u + source[1].value); };
+  auto copied = action;
+  action();
+  copied();
+}
+
+// ----
+event 101
+event 102
+event 201
+event 202
+event 201
+event 202
+event 712
+event 712
+event 602
+event 601
+event 602
+event 601
+event 602
+event 601
+OK 0
+retired 0
+
+// ====
+// Template special members instantiate their ordinary bodies and cleanup.
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+
+struct Owner {
+  // Payload whose changes make lifecycle effects observable.
+  unsigned value;
+  explicit Owner(unsigned value) : value(value) { event(100u + value); }
+  Owner(const Owner& other) : value(other.value) { event(200u + value); }
+  Owner(Owner&& other) : value(other.value) {
+    other.value = 0;
+    event(300u + value);
+  }
+  Owner& operator=(const Owner& other) {
+    event(400u + value);
+    value = other.value;
+    return *this;
+  }
+  Owner& operator=(Owner&& other) {
+    event(500u + value);
+    unsigned incoming = other.value;
+    other.value = 0;
+    value = incoming;
+    return *this;
+  }
+  ~Owner() { event(600u + value); }
+};
+
+template <typename T> struct Wrapper {
+  // Member lifecycle is selected after template instantiation.
+  T value;
+  explicit Wrapper(unsigned seed) : value(seed) {}
+  Wrapper(const Wrapper&) = default;
+  Wrapper(Wrapper&&) = default;
+  Wrapper& operator=(const Wrapper&) = default;
+  Wrapper& operator=(Wrapper&&) = default;
+};
+void run() {
+  Wrapper<Owner> first(9u);
+  Wrapper<Owner> second(first);
+  Wrapper<Owner> third(static_cast<Wrapper<Owner>&&>(first));
+  second = third;
+  third = static_cast<Wrapper<Owner>&&>(second);
+}
+
+// ----
+event 109
+event 209
+event 309
+event 409
+event 509
+event 609
+event 600
+event 600
+OK 0
+retired 0
+
+// ====
+// Other selected plain-assignment overloads retain their declared result type.
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+
+struct Value {
+  // Payload whose changes make lifecycle effects observable.
+  unsigned value;
+  unsigned operator=(unsigned next) {
+    value = next;
+    event(100u + value);
+    return value + 1u;
+  }
+};
+struct Sink {
+  // Payload whose changes make lifecycle effects observable.
+  unsigned value;
+  void operator=(unsigned next) { value = next; event(200u + value); }
+};
+
+void run() {
+  Value value{1u};
+  unsigned result = (value = 7u);
+  event(result * 10u + value.value);
+  Sink sink{2u};
+  sink = 9u;
+  event(sink.value);
+}
+
+// ----
+event 107
+event 87
+event 209
+event 9
+OK 0
+retired 0
+
+// ====
+// Repeated base instances retain separate identities through construction,
+// inherited method calls, defaulted copying, and reverse-order destruction.
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+struct Base {
+  unsigned value;
+  Base(unsigned value) : value(value) { event(100 + value); }
+  Base(const Base& other) : value(other.value) { event(200 + value); }
+  void add(unsigned delta) { value += delta; }
+  ~Base() { event(300 + value); }
+};
+struct Left : Base { using Base::Base; };
+struct Right : Base { using Base::Base; };
+struct Both : Left, Right {
+  Base member;
+  Both(unsigned value) : Left(value), Right(value + 1), member(value + 2) {}
+  ~Both() { event(9); }
+};
+void run() {
+  Both first(1);
+  Both second(first);
+  second.Right::add(5);
+  event(first.Right::value);
+  event(second.Right::value);
+}
+// ----
+event 101
+event 102
+event 103
+event 201
+event 202
+event 203
+event 2
+event 7
+event 9
+event 303
+event 307
+event 301
+event 9
+event 303
+event 302
+event 301
+OK 0
+retired 0
+
+// ====
+// A base snapshot leaves a derived byte in reused tail padding untouched.
+// Downcasting a base reference retains the enclosing object's exact origin.
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+struct Prefix { unsigned value; };
+struct Tail {
+  unsigned word;
+  unsigned char tag;
+  Tail() : word(11), tag(13) {}
+};
+struct Derived : Prefix, Tail { unsigned char extra; };
+static void replace(Tail& base) {
+  auto& complete = static_cast<Derived&>(base);
+  complete.value += 3;
+  base = Tail{};
+  event(complete.extra);
+}
+void run() {
+  Derived value{{7}, {}, 17};
+  value.word = 19;
+  value.tag = 23;
+  replace(value);
+  event(value.value);
+  event(value.word);
+  event(value.tag);
+  event(value.extra);
+}
+// ----
+event 17
+event 10
+event 11
+event 13
+event 17
+OK 0
+retired 0
+
+// ====
+// Empty repeated bases still have separate lifetimes despite transporting no
+// SSA components. A nonempty field is constructed after both bases.
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+struct Empty {
+  Empty() { event(1); }
+  ~Empty() { event(2); }
+};
+struct Left : Empty {};
+struct Right : Empty {};
+struct Both : Left, Right {
+  unsigned value;
+  ~Both() { event(value); }
+};
+void run() {
+  Both value{{}, {}, 7};
+  event(value.value);
+}
+// ----
+event 1
+event 1
+event 7
+event 7
+event 2
+event 2
+OK 0
+retired 0
+
+// ====
+// Distinct base references stay independent; overlapping references and a
+// receiver alias share one live object for sequenced reads and writes.
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+struct Base {
+  unsigned value;
+  unsigned mix(const Base& other) { ++value; return other.value; }
+};
+struct Left : Base {};
+struct Right : Base {};
+struct Both : Left, Right {
+  unsigned same() { return Right::mix(static_cast<Right&>(*this)); }
+};
+static unsigned update(Base& destination, const Base& source) {
+  ++destination.value;
+  return source.value;
+}
+void run() {
+  Both value{{{3}}, {{7}}};
+  event(update(static_cast<Left&>(value), static_cast<Right&>(value)));
+  event(value.Left::value);
+  event(update(static_cast<Left&>(value), static_cast<Left&>(value)));
+  event(value.Left::mix(static_cast<Right&>(value)));
+  event(value.same());
+  event(value.Left::value);
+  event(value.Right::value);
+}
+// ----
+event 7
+event 4
+event 5
+event 7
+event 8
+event 6
+event 8
+OK 0
+retired 0
+
+// ====
+// Inherited operators update the selected base through returned references.
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+struct Prefix { unsigned tag; };
+struct Base {
+  unsigned value;
+  unsigned& operator[](unsigned delta) { value += delta; return value; }
+  unsigned operator()(unsigned delta) { value += delta; return value; }
+  Base& operator++() { ++value; return *this; }
+};
+struct Derived : Prefix, Base { unsigned extra; };
+void run() {
+  Derived value{{99}, {5}, 7};
+  value[2] += 3;
+  event(value(4));
+  ++value;
+  event(value.value);
+  event(value.tag);
+  event(value.extra);
+}
+// ----
+event 14
+event 15
+event 99
+event 7
+OK 0
+retired 0
+
+// ====
+// Moving a derived object transfers its base payload; arrays and early returns
+// destroy complete objects in reverse order, including moved-from bases.
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+struct Base {
+  unsigned value;
+  Base(unsigned value) : value(value) { event(100 + value); }
+  Base(Base&& other) : value(other.value) { other.value = 0; event(200 + value); }
+  ~Base() { event(300 + value); }
+};
+struct Derived : Base {
+  using Base::Base;
+  Derived(Derived&&) = default;
+};
+static void visit(bool stop) {
+  Derived values[2] = {Derived(1), Derived(2)};
+  Derived moved(static_cast<Derived&&>(values[0]));
+  if (stop) return;
+  event(999);
+}
+void run() { visit(true); }
+// ----
+event 101
+event 102
+event 201
+event 301
+event 302
+event 300
+OK 0
+retired 0
+
+// ====
+// A const receiver can still change mutable fields inherited from a base.
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+struct Base { mutable unsigned value; };
+struct Derived : Base { unsigned next() const { return ++value; } };
+void run() {
+  Derived value{{7}};
+  for (unsigned i = 0; i < 3; ++i) event(value.next());
+  event(value.value);
+}
+// ----
+event 8
+event 9
+event 10
+event 10
+OK 0
+retired 0

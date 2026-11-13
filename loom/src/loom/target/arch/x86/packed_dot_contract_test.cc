@@ -34,7 +34,8 @@ const loom_x86_packed_dot_descriptor_t* FindDescriptor(const char* name) {
     const loom_low_descriptor_t* low_descriptor =
         loom_x86_packed_dot_low_descriptor(descriptor_set, descriptor);
     if (low_descriptor != nullptr &&
-        low_descriptor->stable_id == expected_stable_id) {
+        loom_low_descriptor_stable_id(descriptor_set, low_descriptor) ==
+            expected_stable_id) {
       return descriptor;
     }
   }
@@ -87,7 +88,10 @@ TEST(PackedDotContractTest, EverySemanticDescriptorProjectsUniquely) {
     const loom_low_descriptor_t* low_descriptor =
         loom_x86_packed_dot_low_descriptor(descriptor_set, descriptor);
     ASSERT_NE(low_descriptor, nullptr);
-    EXPECT_TRUE(stable_ids.insert(low_descriptor->stable_id).second);
+    EXPECT_TRUE(stable_ids
+                    .insert(loom_low_descriptor_stable_id(descriptor_set,
+                                                          low_descriptor))
+                    .second);
   }
   EXPECT_EQ(stable_ids.size(), count);
   EXPECT_EQ(loom_x86_packed_dot_descriptor_at(count), nullptr);
@@ -98,19 +102,27 @@ TEST(PackedDotContractTest, ResolvesGeneratedLowDescriptorReferences) {
       FindDescriptor("x86.avx512_bf16.vdpbf16ps.ymm");
   ASSERT_NE(semantic_descriptor, nullptr);
 
+  const loom_low_descriptor_set_t* packed_dot_descriptor_set =
+      loom_x86_packed_dot_core_descriptor_set();
   const loom_low_descriptor_t* packed_dot_descriptor =
-      loom_x86_packed_dot_low_descriptor(
-          loom_x86_packed_dot_core_descriptor_set(), semantic_descriptor);
+      loom_x86_packed_dot_low_descriptor(packed_dot_descriptor_set,
+                                         semantic_descriptor);
   ASSERT_NE(packed_dot_descriptor, nullptr);
   const uint64_t expected_stable_id = loom_low_descriptor_stable_id_from_key(
       IREE_SV("x86.avx512_bf16.vdpbf16ps.ymm"));
-  EXPECT_EQ(packed_dot_descriptor->stable_id, expected_stable_id);
+  EXPECT_EQ(loom_low_descriptor_stable_id(packed_dot_descriptor_set,
+                                          packed_dot_descriptor),
+            expected_stable_id);
 
+  const loom_low_descriptor_set_t* composite_descriptor_set =
+      loom_x86_avx512_features_core_descriptor_set();
   const loom_low_descriptor_t* composite_descriptor =
-      loom_x86_packed_dot_low_descriptor(
-          loom_x86_avx512_features_core_descriptor_set(), semantic_descriptor);
+      loom_x86_packed_dot_low_descriptor(composite_descriptor_set,
+                                         semantic_descriptor);
   ASSERT_NE(composite_descriptor, nullptr);
-  EXPECT_EQ(composite_descriptor->stable_id, expected_stable_id);
+  EXPECT_EQ(loom_low_descriptor_stable_id(composite_descriptor_set,
+                                          composite_descriptor),
+            expected_stable_id);
 
   EXPECT_EQ(loom_x86_packed_dot_low_descriptor(
                 loom_x86_avx512_core_descriptor_set(), semantic_descriptor),
@@ -118,11 +130,14 @@ TEST(PackedDotContractTest, ResolvesGeneratedLowDescriptorReferences) {
 
   semantic_descriptor = FindDescriptor("x86.avx_vnni.vpdpbusd.ymm");
   ASSERT_NE(semantic_descriptor, nullptr);
+  const loom_low_descriptor_set_t* avx_vnni_descriptor_set =
+      loom_x86_avx_vnni_core_descriptor_set();
   const loom_low_descriptor_t* avx_vnni_descriptor =
-      loom_x86_packed_dot_low_descriptor(
-          loom_x86_avx_vnni_core_descriptor_set(), semantic_descriptor);
+      loom_x86_packed_dot_low_descriptor(avx_vnni_descriptor_set,
+                                         semantic_descriptor);
   ASSERT_NE(avx_vnni_descriptor, nullptr);
-  EXPECT_EQ(avx_vnni_descriptor->stable_id,
+  EXPECT_EQ(loom_low_descriptor_stable_id(avx_vnni_descriptor_set,
+                                          avx_vnni_descriptor),
             loom_low_descriptor_stable_id_from_key(
                 IREE_SV("x86.avx_vnni.vpdpbusd.ymm")));
 }

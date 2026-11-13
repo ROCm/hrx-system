@@ -30,6 +30,17 @@ static iree_status_t iree_hal_virtual_buffer_validate_sources(
   return iree_ok_status();
 }
 
+static bool iree_hal_virtual_buffer_scope_requires_common_address(
+    iree_hal_pool_scope_t scope) {
+  for (iree_host_size_t i = 0; i < scope.family_count; ++i) {
+    if (iree_any_bit_set(scope.families[i].requirements,
+                         IREE_HAL_POOL_ACCESS_REQUIRE_HOST_ADDRESS_IDENTITY)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 IREE_API_EXPORT iree_status_t iree_hal_virtual_buffer_query_capabilities(
     iree_hal_device_group_t* group, iree_hal_pool_scope_t scope,
     iree_hal_virtual_buffer_sources_t sources, iree_allocator_t host_allocator,
@@ -53,6 +64,12 @@ IREE_API_EXPORT iree_status_t iree_hal_virtual_buffer_query_capabilities(
       status = backend->query_virtual_buffer(backend, group, scope, sources,
                                              host_allocator, out_capabilities);
     }
+  }
+  if (iree_status_is_ok(status) && out_capabilities->max_byte_length &&
+      iree_hal_virtual_buffer_scope_requires_common_address(scope) &&
+      !iree_all_bits_set(out_capabilities->supported_flags,
+                         IREE_HAL_VIRTUAL_BUFFER_FLAG_REQUIRE_COMMON_ADDRESS)) {
+    memset(out_capabilities, 0, sizeof(*out_capabilities));
   }
   if (!iree_status_is_ok(status)) {
     memset(out_capabilities, 0, sizeof(*out_capabilities));
@@ -102,11 +119,17 @@ IREE_API_EXPORT iree_status_t iree_hal_virtual_buffer_create(
   IREE_RETURN_IF_ERROR(iree_hal_pool_scope_validate(group, scope));
   IREE_RETURN_IF_ERROR(
       iree_hal_virtual_buffer_validate_sources(group, sources));
+  iree_hal_virtual_buffer_options_t required_options = *options;
+  if (iree_hal_virtual_buffer_scope_requires_common_address(scope)) {
+    required_options.flags |=
+        IREE_HAL_VIRTUAL_BUFFER_FLAG_REQUIRE_COMMON_ADDRESS;
+  }
   const iree_hal_virtual_buffer_create_callback_t leaf = {
       .fn = iree_hal_virtual_buffer_create_native,
   };
   return iree_hal_device_group_create_virtual_buffer(
-      group, &scope, &sources, options, leaf, host_allocator, out_buffer);
+      group, &scope, &sources, &required_options, leaf, host_allocator,
+      out_buffer);
 }
 
 //===----------------------------------------------------------------------===//
@@ -690,6 +713,7 @@ static void iree_hal_memory_mapping_batch_destroy(
   if (!iree_any_bit_set(batch->flags, IREE_HAL_QUEUE_MAP_FLAG_BORROW_BUFFERS)) {
     for (iree_host_size_t i = 0; i < batch->mapping_count; ++i) {
       iree_hal_buffer_release(batch->mappings[i].source);
+      iree_hal_buffer_release(batch->mappings[i].previous_source);
       iree_hal_buffer_release(batch->mappings[i].target);
     }
   }
@@ -700,64 +724,32 @@ static const iree_hal_resource_vtable_t iree_hal_memory_mapping_batch_vtable = {
     .destroy = iree_hal_memory_mapping_batch_destroy,
 };
 
-static iree_status_t iree_hal_memory_mapping_validate(
-    const iree_hal_memory_mapping_t* mapping, const void* domain) {
-  if (!mapping->target) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "mapping target is null");
-  }
+static iree_status_t iree_hal_memory_mapping_validate_source(
+    const iree_hal_memory_mapping_t* mapping, iree_hal_buffer_t* source_buffer,
+    iree_device_size_t source_offset, iree_hal_memory_access_t access,
+    const void* domain) {
   const iree_hal_memory_contract_t* contract = mapping->target->memory.contract;
-  if (!contract || contract->domain != domain) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "mapping target and queue must belong to one group");
-  }
-  IREE_RETURN_IF_ERROR(
-      iree_hal_virtual_buffer_validate_scope(mapping->target, mapping->scope));
-  const iree_hal_buffer_vtable_t* vtable =
-      (const iree_hal_buffer_vtable_t*)
-          mapping->target->allocated_buffer->resource.vtable;
-  if (!vtable->query_virtual) {
-    return iree_make_status(IREE_STATUS_UNAVAILABLE,
-                            "mapping target is not a virtual buffer");
-  }
-  if ((unsigned)mapping->operation >
-          IREE_HAL_MEMORY_MAPPING_OPERATION_PROTECT ||
-      (mapping->operation == IREE_HAL_MEMORY_MAPPING_OPERATION_UNBIND &&
-       mapping->source) ||
-      ((mapping->operation == IREE_HAL_MEMORY_MAPPING_OPERATION_BIND ||
-        mapping->operation == IREE_HAL_MEMORY_MAPPING_OPERATION_PROTECT) &&
-       !mapping->source)) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "mapping operation has an invalid source");
-  }
   const iree_hal_buffer_range_t range = mapping->target_range;
-  if (!range.byte_length || range.byte_offset > mapping->target->byte_length ||
-      range.byte_length > mapping->target->byte_length - range.byte_offset) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "mapping target range is outside its logical view");
-  }
-  if (!mapping->source) {
-    if (mapping->source_offset || mapping->access) {
+  if (!source_buffer) {
+    if (source_offset || access) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "removal requires zero source offset and access");
     }
   } else {
-    if (iree_any_bit_set(mapping->access, ~IREE_HAL_MEMORY_ACCESS_ALL) ||
-        !iree_all_bits_set(mapping->source->allowed_access, mapping->access) ||
-        !iree_all_bits_set(mapping->target->allowed_access, mapping->access)) {
+    if (iree_any_bit_set(access, ~IREE_HAL_MEMORY_ACCESS_ALL) ||
+        !iree_all_bits_set(source_buffer->allowed_access, access) ||
+        !iree_all_bits_set(mapping->target->allowed_access, access)) {
       return iree_make_status(
           IREE_STATUS_PERMISSION_DENIED,
           "mapping access exceeds source or target permissions");
     }
-    if (mapping->source_offset > mapping->source->byte_length ||
-        range.byte_length >
-            mapping->source->byte_length - mapping->source_offset) {
+    if (source_offset > source_buffer->byte_length ||
+        range.byte_length > source_buffer->byte_length - source_offset) {
       return iree_make_status(
           IREE_STATUS_OUT_OF_RANGE,
           "mapping source range is outside its logical view");
     }
-    const iree_hal_memory_contract_t* source = mapping->source->memory.contract;
+    const iree_hal_memory_contract_t* source = source_buffer->memory.contract;
     if (!source || source->domain != domain) {
       return iree_make_status(IREE_STATUS_PERMISSION_DENIED,
                               "source has no mapping contract in this group");
@@ -789,6 +781,55 @@ static iree_status_t iree_hal_memory_mapping_validate(
   return iree_ok_status();
 }
 
+static iree_status_t iree_hal_memory_mapping_validate(
+    const iree_hal_memory_mapping_t* mapping, const void* domain) {
+  if (!mapping->target) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "mapping target is null");
+  }
+  const iree_hal_memory_contract_t* contract = mapping->target->memory.contract;
+  if (!contract || contract->domain != domain) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "mapping target and queue must belong to one group");
+  }
+  IREE_RETURN_IF_ERROR(
+      iree_hal_virtual_buffer_validate_scope(mapping->target, mapping->scope));
+  const iree_hal_buffer_vtable_t* vtable =
+      (const iree_hal_buffer_vtable_t*)
+          mapping->target->allocated_buffer->resource.vtable;
+  if (!vtable->query_virtual) {
+    return iree_make_status(IREE_STATUS_UNAVAILABLE,
+                            "mapping target is not a virtual buffer");
+  }
+  if ((unsigned)mapping->operation >
+          IREE_HAL_MEMORY_MAPPING_OPERATION_PROTECT ||
+      (mapping->operation == IREE_HAL_MEMORY_MAPPING_OPERATION_UNBIND &&
+       (mapping->source || !mapping->previous_source)) ||
+      ((mapping->operation == IREE_HAL_MEMORY_MAPPING_OPERATION_BIND ||
+        mapping->operation == IREE_HAL_MEMORY_MAPPING_OPERATION_PROTECT) &&
+       mapping->previous_source) ||
+      ((mapping->operation == IREE_HAL_MEMORY_MAPPING_OPERATION_BIND ||
+        mapping->operation == IREE_HAL_MEMORY_MAPPING_OPERATION_PROTECT) &&
+       !mapping->source)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "mapping operation has an invalid source");
+  }
+  const iree_hal_buffer_range_t range = mapping->target_range;
+  if (!range.byte_length || range.byte_offset > mapping->target->byte_length ||
+      range.byte_length > mapping->target->byte_length - range.byte_offset) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "mapping target range is outside its logical view");
+  }
+  IREE_RETURN_IF_ERROR(iree_hal_memory_mapping_validate_source(
+      mapping, mapping->source, mapping->source_offset, mapping->access,
+      domain));
+  IREE_RETURN_IF_ERROR(iree_hal_memory_mapping_validate_source(
+      mapping, mapping->previous_source, mapping->previous_source_offset,
+      IREE_HAL_MEMORY_ACCESS_NONE, domain));
+  return iree_ok_status();
+}
+
 // Capture qualifies every currently available target. Commit requires all
 // targets and native sources after the allocation dependencies have completed.
 typedef enum iree_hal_memory_mapping_phase_e {
@@ -796,9 +837,22 @@ typedef enum iree_hal_memory_mapping_phase_e {
   IREE_HAL_MEMORY_MAPPING_PHASE_COMMIT,
 } iree_hal_memory_mapping_phase_t;
 
+// Last successful immutable-contract query in one resolution traversal. Pages
+// from one slab commonly share this key; native ranges and live backing remain
+// independently resolved for every mapping. No result crosses phases.
+typedef struct iree_hal_memory_mapping_compatibility_t {
+  // Native target whose projection aliases and source schema were checked.
+  const iree_hal_virtual_buffer_t* target;
+  // Desired and prior contracts retained by the captured buffer views.
+  const iree_hal_memory_contract_t* sources[2];
+  // Exact scope used to qualify inseparable native projections.
+  uint32_t scope_id;
+} iree_hal_memory_mapping_compatibility_t;
+
 static iree_status_t iree_hal_memory_mapping_resolve(
     const iree_hal_memory_mapping_t* mapping,
     iree_hal_memory_mapping_phase_t phase,
+    iree_hal_memory_mapping_compatibility_t* compatibility,
     iree_hal_memory_mapping_batch_storage_t* batch) {
   const iree_hal_virtual_buffer_view_t view =
       iree_hal_buffer_virtual_view(mapping->target);
@@ -829,13 +883,40 @@ static iree_status_t iree_hal_memory_mapping_resolve(
         (unsigned)mapping->operation);
   }
   const iree_hal_memory_contract_t* contract = mapping->target->memory.contract;
-  const iree_hal_memory_contract_t* source_contract =
-      mapping->source ? mapping->source->memory.contract : NULL;
-  if (source_contract && !iree_hal_virtual_buffer_source_is_compatible(
-                             target, mapping->scope.id, source_contract)) {
-    return iree_make_status(
-        IREE_STATUS_UNAVAILABLE,
-        "source does not preserve the virtual buffer mapping contract");
+  iree_hal_buffer_t* source_buffers[] = {
+      mapping->source,
+      mapping->operation == IREE_HAL_MEMORY_MAPPING_OPERATION_PROTECT
+          ? mapping->source
+          : mapping->previous_source,
+  };
+  const iree_device_size_t source_offsets[] = {
+      mapping->source_offset,
+      mapping->operation == IREE_HAL_MEMORY_MAPPING_OPERATION_PROTECT
+          ? mapping->source_offset
+          : mapping->previous_source_offset,
+  };
+  const iree_hal_memory_contract_t* source_contracts[] = {
+      source_buffers[0] ? source_buffers[0]->memory.contract : NULL,
+      source_buffers[1] ? source_buffers[1]->memory.contract : NULL,
+  };
+  if (compatibility->target != target ||
+      compatibility->scope_id != mapping->scope.id ||
+      compatibility->sources[0] != source_contracts[0] ||
+      compatibility->sources[1] != source_contracts[1]) {
+    for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(source_contracts); ++i) {
+      if (source_contracts[i] &&
+          !iree_hal_virtual_buffer_source_is_compatible(
+              target, mapping->scope.id, source_contracts[i])) {
+        return iree_make_status(
+            IREE_STATUS_UNAVAILABLE,
+            "source does not preserve the virtual buffer mapping contract");
+      }
+    }
+    *compatibility = (iree_hal_memory_mapping_compatibility_t){
+        .target = target,
+        .sources = {source_contracts[0], source_contracts[1]},
+        .scope_id = mapping->scope.id,
+    };
   }
   const uint32_t begin = mapping->scope.id ? mapping->scope.id : 1;
   const uint32_t end = mapping->scope.id ? begin + 1 : contract->scope_count;
@@ -864,9 +945,20 @@ static iree_status_t iree_hal_memory_mapping_resolve(
                    .access = mapping->access,
                    .operation = mapping->operation},
     };
-    if (mapping->source && phase == IREE_HAL_MEMORY_MAPPING_PHASE_COMMIT) {
+    for (iree_host_size_t source_index = 0;
+         source_index < IREE_ARRAYSIZE(source_buffers) &&
+         iree_status_is_ok(status) &&
+         phase == IREE_HAL_MEMORY_MAPPING_PHASE_COMMIT;
+         ++source_index) {
+      iree_hal_buffer_t* source_buffer = source_buffers[source_index];
+      if (!source_buffer) {
+        continue;
+      }
+      const iree_hal_memory_contract_t* source_contract =
+          source_buffer->memory.contract;
+      const iree_device_size_t source_offset = source_offsets[source_index];
       const iree_hal_buffer_memory_view_t memory =
-          iree_hal_buffer_memory_view(mapping->source);
+          iree_hal_buffer_memory_view(source_buffer);
       if (!memory.bindings) {
         status =
             iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
@@ -880,10 +972,9 @@ static iree_status_t iree_hal_memory_mapping_resolve(
         iree_hal_buffer_native_binding_t source =
             iree_hal_buffer_memory_native_binding(&memory, slot);
         if (!source.mapping_source.descriptor ||
-            source.mapping_source.offset >
-                UINT64_MAX - mapping->source_offset ||
+            source.mapping_source.offset > UINT64_MAX - source_offset ||
             !iree_device_size_has_alignment(
-                source.mapping_source.offset + mapping->source_offset,
+                source.mapping_source.offset + source_offset,
                 source.mapping_source.granularity) ||
             !iree_device_size_has_alignment(
                 mapping->target_range.byte_length,
@@ -892,8 +983,12 @@ static iree_status_t iree_hal_memory_mapping_resolve(
               IREE_STATUS_FAILED_PRECONDITION,
               "native mapping source is unavailable or misaligned");
         } else {
-          source.mapping_source.offset += mapping->source_offset;
-          resolved->update.source = source;
+          source.mapping_source.offset += source_offset;
+          if (source_index == 0) {
+            resolved->update.source = source;
+          } else {
+            resolved->update.previous_source = source;
+          }
         }
       }
     }
@@ -930,6 +1025,14 @@ static bool iree_hal_memory_mapping_updates_are_contiguous(
          previous->target_range.byte_offset +
                  previous->target_range.byte_length ==
              current->target_range.byte_offset &&
+         previous->previous_source.mapping_source.descriptor ==
+             current->previous_source.mapping_source.descriptor &&
+         previous->previous_source.mapping_source.granularity ==
+             current->previous_source.mapping_source.granularity &&
+         (!previous->previous_source.mapping_source.descriptor ||
+          previous->previous_source.mapping_source.offset +
+                  previous->target_range.byte_length ==
+              current->previous_source.mapping_source.offset) &&
          previous->source.mapping_source.descriptor ==
              current->source.mapping_source.descriptor &&
          previous->source.mapping_source.granularity ==
@@ -945,10 +1048,12 @@ static iree_status_t iree_hal_memory_mapping_batch_resolve_phase(
     iree_hal_memory_mapping_phase_t phase) {
   batch->base.update_count = 0;
   batch->base.entry_count = 0;
+  iree_hal_memory_mapping_compatibility_t compatibility = {0};
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0;
        i < batch->mapping_count && iree_status_is_ok(status); ++i) {
-    status = iree_hal_memory_mapping_resolve(&batch->mappings[i], phase, batch);
+    status = iree_hal_memory_mapping_resolve(&batch->mappings[i], phase,
+                                             &compatibility, batch);
   }
   if (iree_status_is_ok(status)) {
     qsort(batch->resolved, batch->base.update_count, sizeof(batch->resolved[0]),
@@ -1074,6 +1179,7 @@ IREE_API_EXPORT iree_status_t iree_hal_memory_mapping_batch_create(
     for (iree_host_size_t i = 0; i < mapping_count; ++i) {
       iree_hal_buffer_retain(mappings[i].target);
       iree_hal_buffer_retain(mappings[i].source);
+      iree_hal_buffer_retain(mappings[i].previous_source);
     }
   }
   iree_status_t status = iree_hal_memory_mapping_batch_resolve_phase(

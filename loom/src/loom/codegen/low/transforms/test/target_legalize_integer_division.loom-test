@@ -1,127 +1,121 @@
 // RUN: pass target-legalize{mode=complete,policy=prefer-native},dce
 
+// Word-sized lanes isolate scalarization from wide-division decomposition.
 test.target<low_core> @test_target
 
-func.def target(@test_target) @signed_quotient(%lhs: vector<2xi64>, %rhs: vector<2xi64>) -> (vector<2xi64>) {
-  %result = vector.divsi %lhs, %rhs : vector<2xi64>
-  func.return %result : vector<2xi64>
+func.def target(@test_target) @signed_quotient(%lhs: vector<2xi32>, %rhs: vector<2xi32>) -> (vector<2xi32>) {
+  %result = vector.divsi %lhs, %rhs : vector<2xi32>
+  func.return %result : vector<2xi32>
 }
 
-func.def target(@test_target) @unsigned_quotient(%lhs: vector<2xi64>, %rhs: vector<2xi64>) -> (vector<2xi64>) {
-  %result = vector.divui %lhs, %rhs : vector<2xi64>
-  func.return %result : vector<2xi64>
+func.def target(@test_target) @unsigned_quotient(%lhs: vector<2xi32>, %rhs: vector<2xi32>) -> (vector<2xi32>) {
+  %result = vector.divui %lhs, %rhs : vector<2xi32>
+  func.return %result : vector<2xi32>
 }
 
-func.def target(@test_target) @signed_remainder(%lhs: vector<2xi64>, %rhs: vector<2xi64>) -> (vector<2xi64>) {
-  %result = vector.remsi %lhs, %rhs : vector<2xi64>
-  func.return %result : vector<2xi64>
+func.def target(@test_target) @signed_remainder(%lhs: vector<2xi32>, %rhs: vector<2xi32>) -> (vector<2xi32>) {
+  %result = vector.remsi %lhs, %rhs : vector<2xi32>
+  func.return %result : vector<2xi32>
 }
 
-func.def target(@test_target) @unsigned_remainder(%lhs: vector<2xi64>, %rhs: vector<2xi64>) -> (vector<2xi64>) {
-  %result = vector.remui %lhs, %rhs : vector<2xi64>
-  func.return %result : vector<2xi64>
+func.def target(@test_target) @unsigned_remainder(%lhs: vector<2xi32>, %rhs: vector<2xi32>) -> (vector<2xi32>) {
+  %result = vector.remui %lhs, %rhs : vector<2xi32>
+  func.return %result : vector<2xi32>
 }
 
-func.def target(@test_target) @signed_ceil(%lhs: vector<2xi64>, %rhs: vector<2xi64>) -> (vector<2xi64>) {
-  %result = vector.ceildivsi %lhs, %rhs : vector<2xi64>
-  func.return %result : vector<2xi64>
+func.def target(@test_target) @signed_ceil(%lhs: vector<2xi32>, %rhs: vector<2xi32>) -> (vector<2xi32>) {
+  %result = vector.ceildivsi %lhs, %rhs : vector<2xi32>
+  func.return %result : vector<2xi32>
 }
 
-func.def target(@test_target) @unsigned_ceil(%lhs: vector<2xi64>, %rhs: vector<2xi64>) -> (vector<2xi64>) {
-  %result = vector.ceildivui %lhs, %rhs : vector<2xi64>
-  func.return %result : vector<2xi64>
+func.def target(@test_target) @unsigned_ceil(%lhs: vector<2xi32>, %rhs: vector<2xi32>) -> (vector<2xi32>) {
+  %result = vector.ceildivui %lhs, %rhs : vector<2xi32>
+  func.return %result : vector<2xi32>
 }
 
-func.def target(@test_target) @signed_floor(%lhs: vector<2xi64>, %rhs: vector<2xi64>) -> (vector<2xi64>) {
-  %result = vector.floordivsi %lhs, %rhs : vector<2xi64>
-  func.return %result : vector<2xi64>
+func.def target(@test_target) @signed_floor(%lhs: vector<2xi32>, %rhs: vector<2xi32>) -> (vector<2xi32>) {
+  %result = vector.floordivsi %lhs, %rhs : vector<2xi32>
+  func.return %result : vector<2xi32>
 }
 
 // ----
 test.target<low_core> @test_target
 
-func.def target(@test_target) @signed_quotient(%lhs: vector<2xi64>, %rhs: vector<2xi64>) -> (vector<2xi64>) {
-  %28 = vector.extract %lhs[0] : vector<2xi64> -> i64
-  %29 = vector.extract %rhs[0] : vector<2xi64> -> i64
-  %30 = scalar.divsi %28, %29 : i64
-  %31 = vector.extract %lhs[1] : vector<2xi64> -> i64
-  %32 = vector.extract %rhs[1] : vector<2xi64> -> i64
-  %33 = scalar.divsi %31, %32 : i64
-  %35 = vector.splat %30 : vector<2xi64>
-  %result = vector.insert %33 into %35[1] : i64, vector<2xi64>
-  func.return %result : vector<2xi64>
+func.def target(@test_target) @signed_quotient(%lhs: vector<2xi32>, %rhs: vector<2xi32>) -> (vector<2xi32>) {
+  %28 = vector.extract %lhs[0] : vector<2xi32> -> i32
+  %29 = vector.extract %rhs[0] : vector<2xi32> -> i32
+  %30 = scalar.divsi %28, %29 : i32
+  %31 = vector.extract %lhs[1] : vector<2xi32> -> i32
+  %32 = vector.extract %rhs[1] : vector<2xi32> -> i32
+  %33 = scalar.divsi %31, %32 : i32
+  %result = vector.from_elements %30, %33 : vector<2xi32>
+  func.return %result : vector<2xi32>
 }
 
-func.def target(@test_target) @unsigned_quotient(%lhs: vector<2xi64>, %rhs: vector<2xi64>) -> (vector<2xi64>) {
-  %37 = vector.extract %lhs[0] : vector<2xi64> -> i64
-  %38 = vector.extract %rhs[0] : vector<2xi64> -> i64
-  %39 = scalar.divui %37, %38 : i64
-  %40 = vector.extract %lhs[1] : vector<2xi64> -> i64
-  %41 = vector.extract %rhs[1] : vector<2xi64> -> i64
-  %42 = scalar.divui %40, %41 : i64
-  %44 = vector.splat %39 : vector<2xi64>
-  %result = vector.insert %42 into %44[1] : i64, vector<2xi64>
-  func.return %result : vector<2xi64>
+func.def target(@test_target) @unsigned_quotient(%lhs: vector<2xi32>, %rhs: vector<2xi32>) -> (vector<2xi32>) {
+  %35 = vector.extract %lhs[0] : vector<2xi32> -> i32
+  %36 = vector.extract %rhs[0] : vector<2xi32> -> i32
+  %37 = scalar.divui %35, %36 : i32
+  %38 = vector.extract %lhs[1] : vector<2xi32> -> i32
+  %39 = vector.extract %rhs[1] : vector<2xi32> -> i32
+  %40 = scalar.divui %38, %39 : i32
+  %result = vector.from_elements %37, %40 : vector<2xi32>
+  func.return %result : vector<2xi32>
 }
 
-func.def target(@test_target) @signed_remainder(%lhs: vector<2xi64>, %rhs: vector<2xi64>) -> (vector<2xi64>) {
-  %46 = vector.extract %lhs[0] : vector<2xi64> -> i64
-  %47 = vector.extract %rhs[0] : vector<2xi64> -> i64
-  %48 = scalar.remsi %46, %47 : i64
-  %49 = vector.extract %lhs[1] : vector<2xi64> -> i64
-  %50 = vector.extract %rhs[1] : vector<2xi64> -> i64
-  %51 = scalar.remsi %49, %50 : i64
-  %53 = vector.splat %48 : vector<2xi64>
-  %result = vector.insert %51 into %53[1] : i64, vector<2xi64>
-  func.return %result : vector<2xi64>
+func.def target(@test_target) @signed_remainder(%lhs: vector<2xi32>, %rhs: vector<2xi32>) -> (vector<2xi32>) {
+  %42 = vector.extract %lhs[0] : vector<2xi32> -> i32
+  %43 = vector.extract %rhs[0] : vector<2xi32> -> i32
+  %44 = scalar.remsi %42, %43 : i32
+  %45 = vector.extract %lhs[1] : vector<2xi32> -> i32
+  %46 = vector.extract %rhs[1] : vector<2xi32> -> i32
+  %47 = scalar.remsi %45, %46 : i32
+  %result = vector.from_elements %44, %47 : vector<2xi32>
+  func.return %result : vector<2xi32>
 }
 
-func.def target(@test_target) @unsigned_remainder(%lhs: vector<2xi64>, %rhs: vector<2xi64>) -> (vector<2xi64>) {
-  %55 = vector.extract %lhs[0] : vector<2xi64> -> i64
-  %56 = vector.extract %rhs[0] : vector<2xi64> -> i64
-  %57 = scalar.remui %55, %56 : i64
-  %58 = vector.extract %lhs[1] : vector<2xi64> -> i64
-  %59 = vector.extract %rhs[1] : vector<2xi64> -> i64
-  %60 = scalar.remui %58, %59 : i64
-  %62 = vector.splat %57 : vector<2xi64>
-  %result = vector.insert %60 into %62[1] : i64, vector<2xi64>
-  func.return %result : vector<2xi64>
+func.def target(@test_target) @unsigned_remainder(%lhs: vector<2xi32>, %rhs: vector<2xi32>) -> (vector<2xi32>) {
+  %49 = vector.extract %lhs[0] : vector<2xi32> -> i32
+  %50 = vector.extract %rhs[0] : vector<2xi32> -> i32
+  %51 = scalar.remui %49, %50 : i32
+  %52 = vector.extract %lhs[1] : vector<2xi32> -> i32
+  %53 = vector.extract %rhs[1] : vector<2xi32> -> i32
+  %54 = scalar.remui %52, %53 : i32
+  %result = vector.from_elements %51, %54 : vector<2xi32>
+  func.return %result : vector<2xi32>
 }
 
-func.def target(@test_target) @signed_ceil(%lhs: vector<2xi64>, %rhs: vector<2xi64>) -> (vector<2xi64>) {
-  %64 = vector.extract %lhs[0] : vector<2xi64> -> i64
-  %65 = vector.extract %rhs[0] : vector<2xi64> -> i64
-  %66 = scalar.ceildivsi %64, %65 : i64
-  %67 = vector.extract %lhs[1] : vector<2xi64> -> i64
-  %68 = vector.extract %rhs[1] : vector<2xi64> -> i64
-  %69 = scalar.ceildivsi %67, %68 : i64
-  %71 = vector.splat %66 : vector<2xi64>
-  %result = vector.insert %69 into %71[1] : i64, vector<2xi64>
-  func.return %result : vector<2xi64>
+func.def target(@test_target) @signed_ceil(%lhs: vector<2xi32>, %rhs: vector<2xi32>) -> (vector<2xi32>) {
+  %56 = vector.extract %lhs[0] : vector<2xi32> -> i32
+  %57 = vector.extract %rhs[0] : vector<2xi32> -> i32
+  %58 = scalar.ceildivsi %56, %57 : i32
+  %59 = vector.extract %lhs[1] : vector<2xi32> -> i32
+  %60 = vector.extract %rhs[1] : vector<2xi32> -> i32
+  %61 = scalar.ceildivsi %59, %60 : i32
+  %result = vector.from_elements %58, %61 : vector<2xi32>
+  func.return %result : vector<2xi32>
 }
 
-func.def target(@test_target) @unsigned_ceil(%lhs: vector<2xi64>, %rhs: vector<2xi64>) -> (vector<2xi64>) {
-  %73 = vector.extract %lhs[0] : vector<2xi64> -> i64
-  %74 = vector.extract %rhs[0] : vector<2xi64> -> i64
-  %75 = scalar.ceildivui %73, %74 : i64
-  %76 = vector.extract %lhs[1] : vector<2xi64> -> i64
-  %77 = vector.extract %rhs[1] : vector<2xi64> -> i64
-  %78 = scalar.ceildivui %76, %77 : i64
-  %80 = vector.splat %75 : vector<2xi64>
-  %result = vector.insert %78 into %80[1] : i64, vector<2xi64>
-  func.return %result : vector<2xi64>
+func.def target(@test_target) @unsigned_ceil(%lhs: vector<2xi32>, %rhs: vector<2xi32>) -> (vector<2xi32>) {
+  %63 = vector.extract %lhs[0] : vector<2xi32> -> i32
+  %64 = vector.extract %rhs[0] : vector<2xi32> -> i32
+  %65 = scalar.ceildivui %63, %64 : i32
+  %66 = vector.extract %lhs[1] : vector<2xi32> -> i32
+  %67 = vector.extract %rhs[1] : vector<2xi32> -> i32
+  %68 = scalar.ceildivui %66, %67 : i32
+  %result = vector.from_elements %65, %68 : vector<2xi32>
+  func.return %result : vector<2xi32>
 }
 
-func.def target(@test_target) @signed_floor(%lhs: vector<2xi64>, %rhs: vector<2xi64>) -> (vector<2xi64>) {
-  %82 = vector.extract %lhs[0] : vector<2xi64> -> i64
-  %83 = vector.extract %rhs[0] : vector<2xi64> -> i64
-  %84 = scalar.floordivsi %82, %83 : i64
-  %85 = vector.extract %lhs[1] : vector<2xi64> -> i64
-  %86 = vector.extract %rhs[1] : vector<2xi64> -> i64
-  %87 = scalar.floordivsi %85, %86 : i64
-  %89 = vector.splat %84 : vector<2xi64>
-  %result = vector.insert %87 into %89[1] : i64, vector<2xi64>
-  func.return %result : vector<2xi64>
+func.def target(@test_target) @signed_floor(%lhs: vector<2xi32>, %rhs: vector<2xi32>) -> (vector<2xi32>) {
+  %70 = vector.extract %lhs[0] : vector<2xi32> -> i32
+  %71 = vector.extract %rhs[0] : vector<2xi32> -> i32
+  %72 = scalar.floordivsi %70, %71 : i32
+  %73 = vector.extract %lhs[1] : vector<2xi32> -> i32
+  %74 = vector.extract %rhs[1] : vector<2xi32> -> i32
+  %75 = scalar.floordivsi %73, %74 : i32
+  %result = vector.from_elements %72, %75 : vector<2xi32>
+  func.return %result : vector<2xi32>
 }
 
 // ====
@@ -148,43 +142,55 @@ func.def target(@test_target) @vector_combined(%lhs: vector<2xi32>, %rhs: vector
 test.target<low_core> @test_target
 
 func.def target(@test_target) @narrow_combined(%lhs: i16, %rhs: i16) -> (i16, i16) {
-  %31 = scalar.extui %lhs : i16 to i32
-  %32 = scalar.constant 16 : i32
-  %33 = scalar.shli %31, %32 : i32
-  %34 = scalar.shrsi %33, %32 : i32
-  %27 = scalar.extui %rhs : i16 to i32
-  %28 = scalar.constant 16 : i32
-  %29 = scalar.shli %27, %28 : i32
-  %30 = scalar.shrsi %29, %28 : i32
-  %24 = scalar.divsi %34, %30 : i32
-  %25 = scalar.muli %24, %30 : i32
-  %26 = scalar.subi %34, %25 : i32
+  %42 = scalar.extui %lhs : i16 to i32
+  %43 = scalar.constant 16 : i32
+  %44 = scalar.shli %42, %43 : i32
+  %45 = scalar.shrsi %44, %43 : i32
+  %38 = scalar.extui %rhs : i16 to i32
+  %39 = scalar.constant 16 : i32
+  %40 = scalar.shli %38, %39 : i32
+  %41 = scalar.shrsi %40, %39 : i32
+  %24 = scalar.divsi %45, %41 : i32
+  %25 = scalar.muli %24, %41 : i32
+  %26 = scalar.subi %45, %25 : i32
+  %27 = scalar.constant 31 : i32
+  %28 = scalar.shrsi %41, %27 : i32
+  %29 = scalar.xori %41, %28 : i32
+  %30 = scalar.subi %29, %28 : i32
+  %31 = scalar.constant 1 : i32
+  %32 = scalar.subi %30, %31 : i32
+  %33 = scalar.assume %32 [ge(%32, 0), ult(%32, %30)] : i32
+  %36 = scalar.constant 0 : i32
+  %37 = scalar.subi %36, %33 : i32
+  %35 = scalar.assume %26 [range(%26, %37, %33)] : i32
   %quotient = scalar.trunci %24 : i32 to i16
-  %remainder = scalar.trunci %26 : i32 to i16
+  %remainder = scalar.trunci %35 : i32 to i16
   func.return %quotient, %remainder : i16, i16
 }
 
 func.def target(@test_target) @index_combined(%lhs: index, %rhs: index) -> (index, index) {
   %quotient = index.div %lhs, %rhs : index
-  %36 = index.mul %quotient, %rhs : index
-  %remainder = index.sub %lhs, %36 : index
+  %47 = index.mul %quotient, %rhs : index
+  %remainder = index.sub %lhs, %47 : index
   func.return %quotient, %remainder : index, index
 }
 
 func.def target(@test_target) @vector_combined(%lhs: vector<2xi32>, %rhs: vector<2xi32>) -> (vector<2xi32>, vector<2xi32>) {
-  %38 = vector.extract %lhs[0] : vector<2xi32> -> i32
-  %39 = vector.extract %rhs[0] : vector<2xi32> -> i32
-  %55 = scalar.divui %38, %39 : i32
-  %56 = scalar.muli %55, %39 : i32
-  %57 = scalar.subi %38, %56 : i32
-  %42 = vector.extract %lhs[1] : vector<2xi32> -> i32
-  %43 = vector.extract %rhs[1] : vector<2xi32> -> i32
-  %52 = scalar.divui %42, %43 : i32
-  %53 = scalar.muli %52, %43 : i32
-  %54 = scalar.subi %42, %53 : i32
-  %50 = vector.splat %55 : vector<2xi32>
-  %quotient = vector.insert %52 into %50[1] : i32, vector<2xi32>
-  %48 = vector.splat %57 : vector<2xi32>
-  %remainder = vector.insert %54 into %48[1] : i32, vector<2xi32>
+  %49 = vector.extract %lhs[0] : vector<2xi32> -> i32
+  %50 = vector.extract %rhs[0] : vector<2xi32> -> i32
+  %67 = scalar.divui %49, %50 : i32
+  %68 = scalar.muli %67, %50 : i32
+  %69 = scalar.subi %49, %68 : i32
+  %70 = scalar.assume %69 [ult(%69, %50)] : i32
+  %53 = vector.extract %lhs[1] : vector<2xi32> -> i32
+  %54 = vector.extract %rhs[1] : vector<2xi32> -> i32
+  %63 = scalar.divui %53, %54 : i32
+  %64 = scalar.muli %63, %54 : i32
+  %65 = scalar.subi %53, %64 : i32
+  %66 = scalar.assume %65 [ult(%65, %54)] : i32
+  %61 = vector.splat %67 : vector<2xi32>
+  %quotient = vector.insert %63 into %61[1] : i32, vector<2xi32>
+  %59 = vector.splat %70 : vector<2xi32>
+  %remainder = vector.insert %66 into %59[1] : i32, vector<2xi32>
   func.return %quotient, %remainder : vector<2xi32>, vector<2xi32>
 }

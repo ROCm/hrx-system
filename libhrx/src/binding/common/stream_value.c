@@ -72,11 +72,8 @@ static iree_status_t iree_hal_streaming_schedule_value_flush_locked(
     return iree_ok_status();
   }
 
-  iree_async_proactor_pool_t* proactor_pool = hrx_runtime_proactor_pool();
-  if (IREE_UNLIKELY(!proactor_pool)) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "async runtime is unavailable");
-  }
+  iree_async_proactor_pool_t* proactor_pool =
+      hrx_device_proactor_pool(stream->context->device_entry->hrx_device);
 
   iree_async_proactor_t* proactor = NULL;
   IREE_RETURN_IF_ERROR(

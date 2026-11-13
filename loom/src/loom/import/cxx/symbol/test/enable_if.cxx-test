@@ -1,0 +1,344 @@
+// RUN: verify
+#include <type_traits>
+
+static_assert(__is_same(std::enable_if<true>::type, void));
+static_assert(__is_same(std::enable_if_t<true>, void));
+static_assert(__is_same(std::enable_if_t<true, const unsigned&>, const unsigned&));
+static_assert(__is_same(std::enable_if_t<true, volatile int*>, volatile int*));
+static_assert(__is_same(std::enable_if_t<true, int[4]>, int[4]));
+
+template <class Type>
+concept HasType = requires { typename Type::type; };
+static_assert(HasType<std::enable_if<true>>);
+static_assert(!HasType<std::enable_if<false>>);
+static_assert(!HasType<std::enable_if<false, unsigned>>);
+
+template <class Type>
+constexpr auto classify(Type) -> std::enable_if_t<__is_integral(Type), int> {
+  return 1;
+}
+template <class Type>
+constexpr auto classify(Type) -> std::enable_if_t<!__is_integral(Type), int> {
+  return 2;
+}
+static_assert(classify(7) == 1);
+static_assert(classify(7.0f) == 2);
+static_assert(classify<double>(7.0) == 2);
+
+template <class Type, std::enable_if_t<__is_integral(Type), int> = 0>
+constexpr int template_parameter(Type) { return 3; }
+template <class Type, std::enable_if_t<!__is_integral(Type), int> = 0>
+constexpr int template_parameter(Type) { return 4; }
+static_assert(template_parameter(7) == 3);
+static_assert(template_parameter(7.0f) == 4);
+
+template <class Type>
+constexpr int function_parameter(Type, std::enable_if_t<__is_integral(Type)>* = nullptr) {
+  return 5;
+}
+static constexpr int function_parameter(...) { return 6; }
+static_assert(function_parameter(7) == 5);
+static_assert(function_parameter(7.0f) == 6);
+
+template <class Type, class = std::enable_if_t<__is_integral(Type)>>
+constexpr int default_type(Type) { return 7; }
+static constexpr int default_type(...) { return 8; }
+static_assert(default_type(7) == 7);
+static_assert(default_type(7.0f) == 8);
+
+template <class Type>
+constexpr typename std::enable_if<__is_integral(Type), int>::type member_type(Type) {
+  return 9;
+}
+static constexpr int member_type(...) { return 10; }
+static_assert(member_type(7) == 9);
+static_assert(member_type(7.0f) == 10);
+
+// ====
+// RUN: roundtrip
+#include <hip/hip_runtime.h>
+
+template <unsigned Rounds>
+auto select_round(unsigned value) -> std::enable_if_t<Rounds % 4 == 0, unsigned> {
+  return value + 1;
+}
+template <unsigned Rounds>
+auto select_round(unsigned value) -> std::enable_if_t<Rounds % 4 != 0, unsigned> {
+  return value + 2;
+}
+unsigned complete_round(unsigned value) { return select_round<20>(value); }
+unsigned partial_round(unsigned value) { return select_round<21>(value); }
+
+// ----
+func.def public @complete_round(%value: i32) -> (i32) {
+  %2 = func.call pure @select_round_20(%value) : (i32) -> (i32)
+  func.return %2 : i32
+}
+
+func.def public @partial_round(%value: i32) -> (i32) {
+  %5 = func.call pure @select_round_21(%value) : (i32) -> (i32)
+  func.return %5 : i32
+}
+
+func.def @select_round_20(%value: i32) -> (i32) {
+  %8 = scalar.constant 1 : i32
+  %9 = scalar.addi %value, %8 : i32
+  func.return %9 : i32
+}
+
+func.def @select_round_21(%value: i32) -> (i32) {
+  %12 = scalar.constant 2 : i32
+  %13 = scalar.addi %value, %12 : i32
+  func.return %13 : i32
+}
+
+// ====
+// RUN: verify
+#include <type_traits>
+
+template <class Type>
+// REMARK@+1: PARSE/036 "candidate function not viable: substitution failure: no type named 'type' in '::std::enable_if<0, float>'"
+auto only_integer(Type value) -> std::enable_if_t<__is_integral(Type), Type> {
+  return value;
+}
+// ERROR@+1: PARSE/036 "no matching function for call to 'only_integer'"
+float rejected(float value) { return only_integer(value); }
+
+// ====
+#include <type_traits>
+
+// ERROR@+1: PARSE/036 "'type' is not a type"
+using Missing = std::enable_if<false>::type;
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// SFINAE selects aggregate-returning overloads with array parameters. Preserve
+// the second field and array decay while selecting the proper key offset.
+#include <hip/hip_runtime.h>
+struct State {
+  // Accumulator updated by the selected overload.
+  unsigned first;
+  // State forwarded unchanged by both overloads.
+  unsigned second;
+};
+template <class StateType, class Word, unsigned Rounds>
+auto rounds(StateType state, Word keys[3])
+    -> std::enable_if_t<Rounds % 4 != 0, StateType> {
+  state.first += keys[0];
+  return state;
+}
+template <class StateType, class Word, unsigned Rounds>
+auto rounds(StateType state, Word keys[3])
+    -> std::enable_if_t<Rounds % 4 == 0, StateType> {
+  state.first += keys[1];
+  return state;
+}
+State zero(State state, unsigned* keys) { return rounds<State, unsigned, 0>(state, keys); }
+State one(State state, unsigned* keys) { return rounds<State, unsigned, 1>(state, keys); }
+State three(State state, unsigned* keys) { return rounds<State, unsigned, 3>(state, keys); }
+State four(State state, unsigned* keys) { return rounds<State, unsigned, 4>(state, keys); }
+State complete(State state, unsigned* keys) { return rounds<State, unsigned, 20>(state, keys); }
+State partial(State state, unsigned* keys) { return rounds<State, unsigned, 21>(state, keys); }
+// ----
+func.def public @zero(%state_first: i32, %state_second: i32, %keys: buffer, %keys_byte_offset: offset) -> (i32, i32) {
+  %6, %7 = func.call readonly @rounds___State_unsigned_int_0(%state_first, %state_second, %keys, %keys_byte_offset) : (i32, i32, buffer, offset) -> (i32, i32)
+  func.return %6, %7 : i32, i32
+}
+
+func.def public @one(%state_first: i32, %state_second: i32, %keys: buffer, %keys_byte_offset: offset) -> (i32, i32) {
+  %14, %15 = func.call readonly @rounds___State_unsigned_int_1(%state_first, %state_second, %keys, %keys_byte_offset) : (i32, i32, buffer, offset) -> (i32, i32)
+  func.return %14, %15 : i32, i32
+}
+
+func.def public @three(%state_first: i32, %state_second: i32, %keys: buffer, %keys_byte_offset: offset) -> (i32, i32) {
+  %22, %23 = func.call readonly @rounds___State_unsigned_int_3(%state_first, %state_second, %keys, %keys_byte_offset) : (i32, i32, buffer, offset) -> (i32, i32)
+  func.return %22, %23 : i32, i32
+}
+
+func.def public @four(%state_first: i32, %state_second: i32, %keys: buffer, %keys_byte_offset: offset) -> (i32, i32) {
+  %30, %31 = func.call readonly @rounds___State_unsigned_int_4(%state_first, %state_second, %keys, %keys_byte_offset) : (i32, i32, buffer, offset) -> (i32, i32)
+  func.return %30, %31 : i32, i32
+}
+
+func.def public @complete(%state_first: i32, %state_second: i32, %keys: buffer, %keys_byte_offset: offset) -> (i32, i32) {
+  %38, %39 = func.call readonly @rounds___State_unsigned_int_20(%state_first, %state_second, %keys, %keys_byte_offset) : (i32, i32, buffer, offset) -> (i32, i32)
+  func.return %38, %39 : i32, i32
+}
+
+func.def public @partial(%state_first: i32, %state_second: i32, %keys: buffer, %keys_byte_offset: offset) -> (i32, i32) {
+  %46, %47 = func.call readonly @rounds___State_unsigned_int_21(%state_first, %state_second, %keys, %keys_byte_offset) : (i32, i32, buffer, offset) -> (i32, i32)
+  func.return %46, %47 : i32, i32
+}
+
+func.def @rounds___State_unsigned_int_0(%state_first$48: i32, %state_second: i32, %keys: buffer, %keys_byte_offset: offset) -> (i32, i32) {
+  %150 = scalar.constant 4 : i64
+  %58 = index.cast %keys_byte_offset : offset to i64
+  %59 = scalar.addi %58, %150 : i64
+  %60 = scalar.assume %59 [range(%59, 0, 9223372036854775807)] : i64
+  %61 = index.cast %60 : i64 to offset
+  %62 = buffer.view %keys[%61] : buffer -> view<1xi32>
+  %63 = view.load<root_in_bounds> %62[0] : view<1xi32> -> i32
+  %state_first$64 = scalar.addi %state_first$48, %63 : i32
+  func.return %state_first$64, %state_second : i32, i32
+}
+
+func.def @rounds___State_unsigned_int_1(%state_first$65: i32, %state_second: i32, %keys: buffer, %keys_byte_offset: offset) -> (i32, i32) {
+  %75 = index.cast %keys_byte_offset : offset to i64
+  %77 = scalar.assume %75 [range(%75, 0, 9223372036854775807)] : i64
+  %78 = index.cast %77 : i64 to offset
+  %79 = buffer.view %keys[%78] : buffer -> view<1xi32>
+  %80 = view.load<root_in_bounds> %79[0] : view<1xi32> -> i32
+  %state_first$81 = scalar.addi %state_first$65, %80 : i32
+  func.return %state_first$81, %state_second : i32, i32
+}
+
+func.def @rounds___State_unsigned_int_3(%state_first$82: i32, %state_second: i32, %keys: buffer, %keys_byte_offset: offset) -> (i32, i32) {
+  %92 = index.cast %keys_byte_offset : offset to i64
+  %94 = scalar.assume %92 [range(%92, 0, 9223372036854775807)] : i64
+  %95 = index.cast %94 : i64 to offset
+  %96 = buffer.view %keys[%95] : buffer -> view<1xi32>
+  %97 = view.load<root_in_bounds> %96[0] : view<1xi32> -> i32
+  %state_first$98 = scalar.addi %state_first$82, %97 : i32
+  func.return %state_first$98, %state_second : i32, i32
+}
+
+func.def @rounds___State_unsigned_int_4(%state_first$99: i32, %state_second: i32, %keys: buffer, %keys_byte_offset: offset) -> (i32, i32) {
+  %151 = scalar.constant 4 : i64
+  %109 = index.cast %keys_byte_offset : offset to i64
+  %110 = scalar.addi %109, %151 : i64
+  %111 = scalar.assume %110 [range(%110, 0, 9223372036854775807)] : i64
+  %112 = index.cast %111 : i64 to offset
+  %113 = buffer.view %keys[%112] : buffer -> view<1xi32>
+  %114 = view.load<root_in_bounds> %113[0] : view<1xi32> -> i32
+  %state_first$115 = scalar.addi %state_first$99, %114 : i32
+  func.return %state_first$115, %state_second : i32, i32
+}
+
+func.def @rounds___State_unsigned_int_20(%state_first$116: i32, %state_second: i32, %keys: buffer, %keys_byte_offset: offset) -> (i32, i32) {
+  %152 = scalar.constant 4 : i64
+  %126 = index.cast %keys_byte_offset : offset to i64
+  %127 = scalar.addi %126, %152 : i64
+  %128 = scalar.assume %127 [range(%127, 0, 9223372036854775807)] : i64
+  %129 = index.cast %128 : i64 to offset
+  %130 = buffer.view %keys[%129] : buffer -> view<1xi32>
+  %131 = view.load<root_in_bounds> %130[0] : view<1xi32> -> i32
+  %state_first$132 = scalar.addi %state_first$116, %131 : i32
+  func.return %state_first$132, %state_second : i32, i32
+}
+
+func.def @rounds___State_unsigned_int_21(%state_first$133: i32, %state_second: i32, %keys: buffer, %keys_byte_offset: offset) -> (i32, i32) {
+  %143 = index.cast %keys_byte_offset : offset to i64
+  %145 = scalar.assume %143 [range(%143, 0, 9223372036854775807)] : i64
+  %146 = index.cast %145 : i64 to offset
+  %147 = buffer.view %keys[%146] : buffer -> view<1xi32>
+  %148 = view.load<root_in_bounds> %147[0] : view<1xi32> -> i32
+  %state_first$149 = scalar.addi %state_first$133, %148 : i32
+  func.return %state_first$149, %state_second : i32, i32
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// Local keys and record values reach both overloads before the caller projects one field.
+#include <hip/hip_runtime.h>
+
+struct State {
+  // Accumulator updated by the selected round implementation.
+  unsigned first;
+  // Unchanged state carried through aggregate arguments and results.
+  unsigned second;
+};
+
+template <class StateType, class Word, unsigned Rounds>
+auto rounds(StateType state, Word keys[3])
+    -> std::enable_if_t<Rounds % 4 != 0, StateType> {
+  state.first += keys[0];
+  return state;
+}
+
+template <class StateType, class Word, unsigned Rounds>
+auto rounds(StateType state, Word keys[3])
+    -> std::enable_if_t<Rounds % 4 == 0, StateType> {
+  state.first += keys[1];
+  return state;
+}
+
+template <unsigned Rounds>
+static unsigned selected_round(unsigned value) {
+  State state{value, 2};
+  unsigned keys[3] = {3, 7, 11};
+  return rounds<State, unsigned, Rounds>(state, keys).first;
+}
+
+unsigned complete(unsigned value) { return selected_round<20>(value); }
+unsigned partial(unsigned value) { return selected_round<21>(value); }
+
+// ----
+func.def public @complete(%value: i32) -> (i32) {
+  %2 = func.call @selected_round_20(%value) : (i32) -> (i32)
+  func.return %2 : i32
+}
+
+func.def public @partial(%value: i32) -> (i32) {
+  %5 = func.call @selected_round_21(%value) : (i32) -> (i32)
+  func.return %5 : i32
+}
+
+func.def @selected_round_20(%value: i32) -> (i32) {
+  %state_second = scalar.constant 2 : i32
+  %9 = index.constant 12 : offset
+  %keys_storage = buffer.alloca<private> align(4) %9 : buffer
+  %keys_storage_byte_offset = index.constant 0 : offset
+  %keys_view = buffer.view %keys_storage[%keys_storage_byte_offset] : buffer -> view<3xi32>
+  %13 = scalar.constant 3 : i32
+  %14 = index.constant 0 : index
+  view.store %13, %keys_view[%14] : i32, view<3xi32>
+  %15 = scalar.constant 7 : i32
+  %16 = index.constant 1 : index
+  view.store %15, %keys_view[%16] : i32, view<3xi32>
+  %17 = scalar.constant 11 : i32
+  %18 = index.constant 2 : index
+  view.store %17, %keys_view[%18] : i32, view<3xi32>
+  %19, %20 = func.call readonly @rounds___State_unsigned_int_20(%value, %state_second, %keys_storage, %keys_storage_byte_offset) : (i32, i32, buffer, offset) -> (i32, i32)
+  func.return %19 : i32
+}
+
+func.def @selected_round_21(%value: i32) -> (i32) {
+  %state_second = scalar.constant 2 : i32
+  %24 = index.constant 12 : offset
+  %keys_storage = buffer.alloca<private> align(4) %24 : buffer
+  %keys_storage_byte_offset = index.constant 0 : offset
+  %keys_view = buffer.view %keys_storage[%keys_storage_byte_offset] : buffer -> view<3xi32>
+  %28 = scalar.constant 3 : i32
+  %29 = index.constant 0 : index
+  view.store %28, %keys_view[%29] : i32, view<3xi32>
+  %30 = scalar.constant 7 : i32
+  %31 = index.constant 1 : index
+  view.store %30, %keys_view[%31] : i32, view<3xi32>
+  %32 = scalar.constant 11 : i32
+  %33 = index.constant 2 : index
+  view.store %32, %keys_view[%33] : i32, view<3xi32>
+  %34, %35 = func.call readonly @rounds___State_unsigned_int_21(%value, %state_second, %keys_storage, %keys_storage_byte_offset) : (i32, i32, buffer, offset) -> (i32, i32)
+  func.return %34 : i32
+}
+
+func.def @rounds___State_unsigned_int_20(%state_first$36: i32, %state_second: i32, %keys: buffer, %keys_byte_offset: offset) -> (i32, i32) {
+  %70 = scalar.constant 4 : i64
+  %46 = index.cast %keys_byte_offset : offset to i64
+  %47 = scalar.addi %46, %70 : i64
+  %48 = scalar.assume %47 [range(%47, 0, 9223372036854775807)] : i64
+  %49 = index.cast %48 : i64 to offset
+  %50 = buffer.view %keys[%49] : buffer -> view<1xi32>
+  %51 = view.load<root_in_bounds> %50[0] : view<1xi32> -> i32
+  %state_first$52 = scalar.addi %state_first$36, %51 : i32
+  func.return %state_first$52, %state_second : i32, i32
+}
+
+func.def @rounds___State_unsigned_int_21(%state_first$53: i32, %state_second: i32, %keys: buffer, %keys_byte_offset: offset) -> (i32, i32) {
+  %63 = index.cast %keys_byte_offset : offset to i64
+  %65 = scalar.assume %63 [range(%63, 0, 9223372036854775807)] : i64
+  %66 = index.cast %65 : i64 to offset
+  %67 = buffer.view %keys[%66] : buffer -> view<1xi32>
+  %68 = view.load<root_in_bounds> %67[0] : view<1xi32> -> i32
+  %state_first$69 = scalar.addi %state_first$53, %68 : i32
+  func.return %state_first$69, %state_second : i32, i32
+}

@@ -8,6 +8,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from loom.dialect.index import defs as index
 from loom.dialect.scf import defs as scf
 from loom.dsl import Op
@@ -28,11 +30,14 @@ from loom.target.contracts import (
     EmitDescriptorOp,
     Guard,
     GuardDiagnostic,
+    GuardKind,
     OrdinalValueAliasRule,
     ResultTypeBinding,
     Scalar,
+    SourceValueKind,
     TypePattern,
     ValueAliasRule,
+    ValueMaterializer,
     ValueRef,
     descriptor_by_key,
     i64_param,
@@ -51,6 +56,30 @@ _OFFSET = Scalar("offset")
 _S32_MIN = -(2**31)
 _S32_MAX = (2**31) - 1
 _U32_MAX = (2**32) - 1
+
+# Coordinate representation IDs owned by lower/index.h.
+_INDEX_REPRESENTATIONS = {32: 1, 64: 2}
+
+NATIVE_INDEX_MATERIALIZER = ValueMaterializer(
+    name="spirv.native_index",
+    can_materialize="loom_spirv_can_materialize_native_index",
+    result_type="loom_spirv_materialized_index_operand_type",
+    prepare="loom_spirv_prepare_native_index",
+    materialize="loom_spirv_emit_index_operand",
+    header="loom/target/arch/spirv/lower/index_operands.h",
+)
+
+NATIVE_INDEX_ARITHMETIC_MATERIALIZER = replace(
+    NATIVE_INDEX_MATERIALIZER,
+    name="spirv.native_index_arithmetic",
+    can_materialize="loom_spirv_can_materialize_native_index_arithmetic",
+)
+WIDE_INDEX_ARITHMETIC_MATERIALIZER = replace(
+    NATIVE_INDEX_MATERIALIZER,
+    name="spirv.wide_index_arithmetic",
+    can_materialize="loom_spirv_can_materialize_wide_index_arithmetic",
+    prepare="loom_spirv_prepare_wide_index",
+)
 
 
 def _descriptor(key: str) -> Descriptor:
@@ -128,21 +157,24 @@ def _numeric_range_diagnostic(
     )
 
 
-def _index_constant_rule() -> DescriptorRule:
-    descriptor = _descriptor("spirv.op_constant.i32")
+def _index_constant_rule(width: int = 32) -> DescriptorRule:
+    descriptor = _descriptor(f"spirv.op_constant.i{width}")
     return DescriptorRule(
         source_op=index.index_constant,
         descriptor=descriptor,
         guards=(
             Guard.attr_kind("value", "i64"),
             Guard.value_type("result", _INDEX),
-            Guard.i64_range("value", _S32_MIN, _S32_MAX),
+            Guard.i64_range("value", _S32_MIN, (1 << (width - 1)) - 1),
+            Guard.low_value_representation("result", _INDEX_REPRESENTATIONS[width]),
+            *_feature_guards(descriptor),
         ),
         emit=(
             _emit(
                 descriptor,
                 results={"dst": ValueRef.result("result")},
-                immediates={"i32_value": AttrProject.direct("value")},
+                result_types={"dst": _INDEX if width == 32 else _I64},
+                immediates={f"i{width}_value": AttrProject.direct("value")},
                 form=DescriptorEmitForm.CONST,
             ),
         ),
@@ -230,9 +262,10 @@ def _address_constant_emit(
     value: int,
     temporary: str,
 ) -> EmitDescriptorOp:
-    if address_type == _INDEX:
-        descriptor = _descriptor("spirv.op_constant.i32")
-        immediate = "i32_value"
+    if address_type in (_INDEX, _I64):
+        width = 32 if address_type == _INDEX else 64
+        descriptor = _descriptor(f"spirv.op_constant.i{width}")
+        immediate = f"i{width}_value"
     else:
         descriptor = _descriptor("spirv.op_constant.offset64")
         immediate = "offset64_value"
@@ -248,8 +281,10 @@ def _address_constant_emit(
 def _boolean_to_address_cast_rule(
     result_type: TypePattern,
     select_descriptor_key: str,
+    carrier_type: TypePattern | None = None,
 ) -> DescriptorRule:
     descriptor = _descriptor(select_descriptor_key)
+    carrier_type = carrier_type or result_type
     return DescriptorRule(
         source_op=index.index_cast,
         descriptor=descriptor,
@@ -259,8 +294,8 @@ def _boolean_to_address_cast_rule(
             *_feature_guards(descriptor),
         ),
         emit=(
-            _address_constant_emit(result_type, 1, "one"),
-            _address_constant_emit(result_type, 0, "zero"),
+            _address_constant_emit(carrier_type, 1, "one"),
+            _address_constant_emit(carrier_type, 0, "zero"),
             _emit(
                 descriptor,
                 operands={
@@ -274,21 +309,29 @@ def _boolean_to_address_cast_rule(
     )
 
 
-def _boolean_address_cast_rules() -> tuple[DescriptorRule, ...]:
-    return (
-        _boolean_to_address_cast_rule(_INDEX, "spirv.op_select.i32"),
-        _boolean_to_address_cast_rule(_OFFSET, "spirv.op_select.offset64"),
-        integer_to_boolean_rule(index.index_cast, "index"),
-        integer_to_boolean_rule(index.index_cast, "offset"),
-    )
-
-
-def _signed_payload_index_cast_rules() -> tuple[DescriptorRule | ValueAliasRule, ...]:
+def _signed_payload_index_cast_rules(
+    width: int,
+) -> tuple[DescriptorRule | ValueAliasRule, ...]:
     rules: list[DescriptorRule | ValueAliasRule] = []
     for scalar_pair in INTEGER_SCALAR_ALU_TYPE_PAIRS:
         payload_type = Scalar(scalar_pair.source_type)
         suffix = scalar_pair.signed.suffix
-        if scalar_pair.bit_width == 32:
+        if scalar_pair.bit_width == width:
+            if width == 64:
+                rules.extend(
+                    (
+                        replace(
+                            _cast_alias_rule(payload_type, _INDEX),
+                            guards=(
+                                Guard.value_type("input", payload_type),
+                                Guard.value_type("result", _INDEX),
+                                Guard.value_i64_range("input", _S32_MIN, (1 << 63) - 1),
+                            ),
+                        ),
+                        _cast_alias_rule(_INDEX, payload_type),
+                    )
+                )
+                continue
             rules.append(
                 _cast_descriptor_rule(
                     payload_type,
@@ -306,7 +349,7 @@ def _signed_payload_index_cast_rules() -> tuple[DescriptorRule | ValueAliasRule,
             continue
 
         range_guard = None
-        if scalar_pair.bit_width > 32:
+        if scalar_pair.bit_width > width:
             range_guard = Guard.value_signed_bit_count(
                 "input",
                 32,
@@ -322,7 +365,7 @@ def _signed_payload_index_cast_rules() -> tuple[DescriptorRule | ValueAliasRule,
             _cast_descriptor_rule(
                 payload_type,
                 _INDEX,
-                f"spirv.op_s_convert.{suffix}.i32",
+                f"spirv.op_s_convert.{suffix}.i{width}",
                 range_guard=range_guard,
             )
         )
@@ -330,7 +373,7 @@ def _signed_payload_index_cast_rules() -> tuple[DescriptorRule | ValueAliasRule,
             _cast_descriptor_rule(
                 _INDEX,
                 payload_type,
-                f"spirv.op_s_convert.i32.{suffix}",
+                f"spirv.op_s_convert.i{width}.{suffix}",
             )
         )
     return tuple(rules)
@@ -414,12 +457,26 @@ def _payload_offset_cast_rules() -> tuple[DescriptorRule, ...]:
     return tuple(rules)
 
 
-def _address_cast_rules() -> tuple[DescriptorRule | ValueAliasRule, ...]:
+def _address_cast_rules(width: int) -> tuple[DescriptorRule | ValueAliasRule, ...]:
+    if width == 64:
+        return (
+            _cast_alias_rule(_INDEX, _INDEX),
+            _cast_descriptor_rule(
+                _INDEX,
+                _OFFSET,
+                "spirv.op_bitcast.i64.offset64",
+                range_guard=Guard.value_i64_range("input", 0, (1 << 63) - 1),
+            ),
+            _cast_descriptor_rule(
+                _OFFSET,
+                _INDEX,
+                "spirv.op_bitcast.offset64.i64",
+            ),
+        )
     to_offset = _descriptor("spirv.op_uconvert.u32.offset64")
     from_offset = _descriptor("spirv.op_uconvert.offset64.u32")
     return (
         _cast_alias_rule(_INDEX, _INDEX),
-        _cast_alias_rule(_OFFSET, _OFFSET),
         DescriptorRule(
             source_op=index.index_cast,
             descriptor=to_offset,
@@ -490,20 +547,90 @@ def _address_cast_rules() -> tuple[DescriptorRule | ValueAliasRule, ...]:
     )
 
 
+def _index_cast_carrier_rule(
+    rule: DescriptorRule | ValueAliasRule,
+    width: int,
+) -> DescriptorRule | ValueAliasRule:
+    fields = {
+        guard.field
+        for guard in rule.guards
+        if guard.kind == GuardKind.VALUE_TYPE and guard.type_pattern == _INDEX
+    }
+    guards = (
+        *rule.guards,
+        *(
+            Guard.low_value_representation(field, _INDEX_REPRESENTATIONS[width])
+            for field in sorted(fields)
+        ),
+    )
+    if isinstance(rule, ValueAliasRule):
+        return replace(rule, guards=guards)
+    return replace(
+        rule,
+        guards=guards,
+        emit=tuple(
+            replace(
+                step,
+                result_types={
+                    **(step.result_types or {}),
+                    **{
+                        name: _INDEX if width == 32 else _I64
+                        for name, value in step.results.items()
+                        if value.kind == SourceValueKind.RESULT
+                        and value.field in fields
+                    },
+                }
+                or None,
+            )
+            for step in rule.emit
+        ),
+    )
+
+
+def _index_cast_rules(width: int) -> tuple[DescriptorRule | ValueAliasRule, ...]:
+    to_boolean = integer_to_boolean_rule(
+        index.index_cast, "index" if width == 32 else "i64"
+    )
+    if width == 64:
+        to_boolean = replace(
+            to_boolean,
+            guards=tuple(
+                replace(guard, type_pattern=_INDEX)
+                if guard.kind == GuardKind.VALUE_TYPE and guard.field == "input"
+                else guard
+                for guard in to_boolean.guards
+            ),
+        )
+    return tuple(
+        _index_cast_carrier_rule(rule, width)
+        for rule in (
+            _boolean_to_address_cast_rule(
+                _INDEX, f"spirv.op_select.i{width}", _INDEX if width == 32 else _I64
+            ),
+            to_boolean,
+            *_signed_payload_index_cast_rules(width),
+            *_address_cast_rules(width),
+        )
+    )
+
+
 SPIRV_INDEX_CONVERSION_RULES: tuple[
     DescriptorRule | OrdinalValueAliasRule | ValueAliasRule, ...
 ] = (
     _index_constant_rule(),
+    _index_constant_rule(64),
     _offset_constant_rule(),
     OrdinalValueAliasRule(
         source_op=index.index_assume,
         source=ValueRef.operand("values"),
         result=ValueRef.result("results"),
     ),
-    *_boolean_address_cast_rules(),
-    *_signed_payload_index_cast_rules(),
+    *_index_cast_rules(32),
+    *_index_cast_rules(64),
+    _boolean_to_address_cast_rule(_OFFSET, "spirv.op_select.offset64"),
+    integer_to_boolean_rule(index.index_cast, "offset"),
     *_payload_offset_cast_rules(),
-    *_address_cast_rules(),
+    _cast_alias_rule(_OFFSET, _OFFSET),
 )
 
 
@@ -536,7 +663,37 @@ def _binary_numeric_rule(
     )
 
 
-def _index_madd_rule() -> DescriptorRule:
+def _index_madd_rule(width: int = 32) -> DescriptorRule:
+    if width == 64:
+        multiply = _descriptor("spirv.op_imul.i64")
+        add = _descriptor("spirv.op_iadd.i64")
+        return DescriptorRule(
+            source_op=index.index_madd,
+            descriptor=add,
+            guards=(
+                *_typed_guards(("a", "b", "c", "result"), _INDEX),
+                *_feature_guards(add),
+            ),
+            emit=(
+                _emit(
+                    multiply,
+                    operands={
+                        "lhs": ValueRef.operand("a"),
+                        "rhs": ValueRef.operand("b"),
+                    },
+                    results={"dst": ValueRef.temporary("product")},
+                    result_types={"dst": _I64},
+                ),
+                _emit(
+                    add,
+                    operands={
+                        "lhs": ValueRef.temporary("product"),
+                        "rhs": ValueRef.operand("c"),
+                    },
+                    results={"dst": ValueRef.result("result")},
+                ),
+            ),
+        )
     descriptor = _descriptor("spirv.op_imul_add.i32")
     return DescriptorRule(
         source_op=index.index_madd,
@@ -556,7 +713,7 @@ def _index_madd_rule() -> DescriptorRule:
     )
 
 
-def _index_scale_rule() -> DescriptorRule:
+def _index_scale_rule(width: int = 32) -> DescriptorRule:
     descriptor = _descriptor("spirv.op_imul.offset64")
     return DescriptorRule(
         source_op=index.index_scale,
@@ -568,7 +725,11 @@ def _index_scale_rule() -> DescriptorRule:
         ),
         emit=(
             _emit(
-                _descriptor("spirv.op_s_convert.i32.offset64"),
+                _descriptor(
+                    "spirv.op_s_convert.i32.offset64"
+                    if width == 32
+                    else "spirv.op_bitcast.i64.offset64"
+                ),
                 operands={"input": ValueRef.operand("index")},
                 results={"dst": ValueRef.temporary("wide_index")},
                 result_types={"dst": _OFFSET},
@@ -588,8 +749,10 @@ def _index_scale_rule() -> DescriptorRule:
 def _index_unsigned_binary_rule(
     source_op: Op,
     descriptor_key: str,
+    width: int = 32,
 ) -> DescriptorRule:
     descriptor = _descriptor(descriptor_key)
+    maximum = _U32_MAX if width == 32 else (1 << 63) - 1
     return DescriptorRule(
         source_op=source_op,
         descriptor=descriptor,
@@ -598,35 +761,36 @@ def _index_unsigned_binary_rule(
             Guard.value_i64_range(
                 "lhs",
                 0,
-                _U32_MAX,
+                maximum,
                 diagnostic=_numeric_range_diagnostic(
                     "lhs",
                     0,
-                    _U32_MAX,
-                    "spirv.index.dividend.u32",
+                    maximum,
+                    f"spirv.index.dividend.u{width}",
                 ),
             ),
             Guard.value_i64_range(
                 "rhs",
                 1,
-                _U32_MAX,
+                maximum,
                 diagnostic=_numeric_range_diagnostic(
                     "rhs",
                     1,
-                    _U32_MAX,
-                    "spirv.index.divisor.positive_u32",
+                    maximum,
+                    f"spirv.index.divisor.positive_u{width}",
                 ),
             ),
+            *_feature_guards(descriptor),
         ),
         emit=(
             _integer_view_emit(
-                "spirv.op_bitcast.i32.u32",
+                f"spirv.op_bitcast.i{width}.u{width}",
                 ValueRef.operand("lhs"),
                 ValueRef.temporary("unsigned_lhs"),
                 DescriptorResultType(),
             ),
             _integer_view_emit(
-                "spirv.op_bitcast.i32.u32",
+                f"spirv.op_bitcast.i{width}.u{width}",
                 ValueRef.operand("rhs"),
                 ValueRef.temporary("unsigned_rhs"),
                 DescriptorResultType(),
@@ -641,10 +805,10 @@ def _index_unsigned_binary_rule(
                 result_types={"dst": DescriptorResultType()},
             ),
             _integer_view_emit(
-                "spirv.op_bitcast.u32.i32",
+                f"spirv.op_bitcast.u{width}.i{width}",
                 ValueRef.temporary("unsigned_result"),
                 ValueRef.result("result"),
-                _INDEX,
+                _INDEX if width == 32 else _I64,
             ),
         ),
     )
@@ -653,13 +817,17 @@ def _index_unsigned_binary_rule(
 def _index_minmax_rule(
     source_op: Op,
     compare_descriptor_key: str,
+    width: int = 32,
 ) -> DescriptorRule:
     compare = _descriptor(compare_descriptor_key)
-    select = _descriptor("spirv.op_select.i32")
+    select = _descriptor(f"spirv.op_select.i{width}")
     return DescriptorRule(
         source_op=source_op,
         descriptor=select,
-        guards=_typed_guards(("lhs", "rhs", "result"), _INDEX),
+        guards=(
+            *_typed_guards(("lhs", "rhs", "result"), _INDEX),
+            *_feature_guards(select),
+        ),
         emit=(
             _emit(
                 compare,
@@ -683,7 +851,9 @@ def _index_minmax_rule(
     )
 
 
-def _index_shift_rule(source_op: Op, descriptor_key: str) -> DescriptorRule:
+def _index_shift_rule(
+    source_op: Op, descriptor_key: str, width: int = 32
+) -> DescriptorRule:
     return _binary_numeric_rule(
         source_op,
         _INDEX,
@@ -692,12 +862,12 @@ def _index_shift_rule(source_op: Op, descriptor_key: str) -> DescriptorRule:
             Guard.value_i64_range(
                 "rhs",
                 0,
-                31,
+                width - 1,
                 diagnostic=_numeric_range_diagnostic(
                     "rhs",
                     0,
-                    31,
-                    "spirv.index.shift_amount.u5",
+                    width - 1,
+                    f"spirv.index.shift_amount.u{width.bit_length() - 1}",
                 ),
             ),
         ),
@@ -732,15 +902,15 @@ def _direct_compare_rule(
     )
 
 
-def _index_compare_rule(predicate: ComparePredicate) -> DescriptorRule:
+def _index_compare_rule(predicate: ComparePredicate, width: int = 32) -> DescriptorRule:
     if predicate.source_predicate in ("eq", "ne", "slt", "sle", "sgt", "sge"):
         return _direct_compare_rule(
             _INDEX,
             predicate,
-            f"spirv.op_{predicate.descriptor_suffix}.i32",
+            f"spirv.op_{predicate.descriptor_suffix}.i{width}",
         )
 
-    descriptor = _descriptor(f"spirv.op_{predicate.descriptor_suffix}.u32")
+    descriptor = _descriptor(f"spirv.op_{predicate.descriptor_suffix}.u{width}")
     return DescriptorRule(
         source_op=index.index_cmp,
         descriptor=descriptor,
@@ -748,16 +918,17 @@ def _index_compare_rule(predicate: ComparePredicate) -> DescriptorRule:
             Guard.enum_attr_equals("predicate", predicate.source_predicate),
             *_typed_guards(("lhs", "rhs"), _INDEX),
             Guard.value_type("result", _I1),
+            *_feature_guards(descriptor),
         ),
         emit=(
             _integer_view_emit(
-                "spirv.op_bitcast.i32.u32",
+                f"spirv.op_bitcast.i{width}.u{width}",
                 ValueRef.operand("lhs"),
                 ValueRef.temporary("unsigned_lhs"),
                 DescriptorResultType(),
             ),
             _integer_view_emit(
-                "spirv.op_bitcast.i32.u32",
+                f"spirv.op_bitcast.i{width}.u{width}",
                 ValueRef.operand("rhs"),
                 ValueRef.temporary("unsigned_rhs"),
                 DescriptorResultType(),
@@ -871,4 +1042,186 @@ SPIRV_INDEX_NUMERIC_RULES: tuple[DescriptorRule, ...] = (
     *(_offset_compare_rule(predicate) for predicate in INTEGER_COMPARE_PREDICATES),
     _address_select_rule(_INDEX, "spirv.op_select.i32"),
     _address_select_rule(_OFFSET, "spirv.op_select.offset64"),
+)
+
+
+def index_result_carrier_rules(
+    rule: DescriptorRule,
+    width: int,
+    *,
+    unsigned: bool = False,
+) -> tuple[DescriptorRule, ...]:
+    """Binds a recipe's result to the selected physical coordinate carrier."""
+    index_fields = {
+        guard.field
+        for guard in rule.guards
+        if guard.kind == GuardKind.VALUE_TYPE and guard.type_pattern == _INDEX
+    }
+    result_fields = {
+        value.field
+        for step in rule.emit
+        for value in step.results.values()
+        if value.kind == SourceValueKind.RESULT and value.field in index_fields
+    }
+    assert len(result_fields) <= 1
+    if not result_fields:
+        return (rule,)
+    result_field = next(iter(result_fields))
+    rules = []
+    for output_width in (32, 64):
+        projection = output_width != width
+        emits = []
+        for step in rule.emit:
+            results = dict(step.results)
+            result_types = dict(step.result_types or {})
+            for name, value in results.items():
+                if value.kind == SourceValueKind.RESULT and value.field == result_field:
+                    if projection:
+                        results[name] = ValueRef.temporary("arithmetic_result")
+                    result_types[name] = _INDEX if width == 32 else _I64
+            emits.append(
+                replace(step, results=results, result_types=result_types or None)
+            )
+        if projection:
+            if unsigned:
+                assert width == 32 and output_width == 64
+                emits.extend(
+                    (
+                        _integer_view_emit(
+                            "spirv.op_bitcast.i32.u32",
+                            ValueRef.temporary("arithmetic_result"),
+                            ValueRef.temporary("unsigned_native"),
+                            DescriptorResultType(),
+                        ),
+                        _integer_view_emit(
+                            "spirv.op_u_convert.u32.u64",
+                            ValueRef.temporary("unsigned_native"),
+                            ValueRef.temporary("unsigned_wide"),
+                            DescriptorResultType(),
+                        ),
+                        _integer_view_emit(
+                            "spirv.op_bitcast.u64.i64",
+                            ValueRef.temporary("unsigned_wide"),
+                            ValueRef.result(result_field),
+                            _I64,
+                        ),
+                    )
+                )
+            else:
+                emits.append(
+                    _emit(
+                        _descriptor(f"spirv.op_s_convert.i{width}.i{output_width}"),
+                        operands={"input": ValueRef.temporary("arithmetic_result")},
+                        results={"dst": ValueRef.result(result_field)},
+                        result_types={"dst": _INDEX if output_width == 32 else _I64},
+                    )
+                )
+        guards = [
+            *rule.guards,
+            Guard.low_value_representation(
+                result_field, _INDEX_REPRESENTATIONS[output_width]
+            ),
+        ]
+        for step in emits:
+            guards.extend(_feature_guards(step.descriptor))
+        rules.append(
+            replace(rule, guards=tuple(dict.fromkeys(guards)), emit=tuple(emits))
+        )
+    return tuple(rules)
+
+
+def _index_carrier_rules(
+    rule: DescriptorRule, width: int, *, native_bits: bool = False
+) -> tuple[DescriptorRule, ...]:
+    index_fields = {
+        guard.field
+        for guard in rule.guards
+        if guard.kind == GuardKind.VALUE_TYPE and guard.type_pattern == _INDEX
+    }
+    if not index_fields:
+        return (rule,)
+    materializer = (
+        NATIVE_INDEX_MATERIALIZER
+        if native_bits
+        else NATIVE_INDEX_ARITHMETIC_MATERIALIZER
+        if width == 32
+        else WIDE_INDEX_ARITHMETIC_MATERIALIZER
+    )
+    operand_fields = {
+        value.field
+        for step in rule.emit
+        for value in step.operands.values()
+        if value.kind == SourceValueKind.OPERAND and value.field in index_fields
+    }
+    guards = rule.guards
+    if not native_bits:
+        guards += (
+            Guard.value_materializable(sorted(operand_fields)[0], materializer.name),
+        )
+    rule = replace(
+        rule,
+        guards=guards,
+        emit=tuple(
+            replace(
+                step,
+                operands={
+                    name: replace(value, materializer=materializer.name)
+                    if value.kind == SourceValueKind.OPERAND
+                    and value.field in index_fields
+                    else value
+                    for name, value in step.operands.items()
+                },
+            )
+            for step in rule.emit
+        ),
+    )
+    return index_result_carrier_rules(rule, width)
+
+
+_NATIVE_INDEX_BIT_OPS = {
+    index.index_rotli,
+    index.index_rotri,
+    index.index_ctlzi,
+    index.index_cttzi,
+    index.index_ctpopi,
+}
+
+_WIDE_INDEX_NUMERIC_RULES = (
+    *(
+        _binary_numeric_rule(operation, _INDEX, f"spirv.op_{descriptor}.i64")
+        for operation, descriptor in (
+            (index.index_add, "iadd"),
+            (index.index_sub, "isub"),
+            (index.index_mul, "imul"),
+            (index.index_andi, "bitwise_and"),
+            (index.index_ori, "bitwise_or"),
+            (index.index_xori, "bitwise_xor"),
+        )
+    ),
+    _index_scale_rule(64),
+    _index_unsigned_binary_rule(index.index_div, "spirv.op_udiv.u64", 64),
+    _index_unsigned_binary_rule(index.index_rem, "spirv.op_umod.u64", 64),
+    _index_minmax_rule(index.index_min, "spirv.op_s_less_than.i64", 64),
+    _index_minmax_rule(index.index_max, "spirv.op_s_greater_than.i64", 64),
+    _index_madd_rule(64),
+    _index_shift_rule(index.index_shli, "spirv.op_shift_left_logical.i64", 64),
+    _index_shift_rule(index.index_shrsi, "spirv.op_shift_right_arithmetic.i64", 64),
+    _index_shift_rule(index.index_shrui, "spirv.op_shift_right_logical.i64", 64),
+    *(_index_compare_rule(predicate, 64) for predicate in INTEGER_COMPARE_PREDICATES),
+    _address_select_rule(_INDEX, "spirv.op_select.i64"),
+)
+
+SPIRV_INDEX_LOWERING_RULES = (
+    *(
+        lowered
+        for rule in SPIRV_INDEX_NUMERIC_RULES
+        for lowered in _index_carrier_rules(
+            rule, 32, native_bits=rule.source_op in _NATIVE_INDEX_BIT_OPS
+        )
+    ),
+    *(
+        lowered
+        for rule in _WIDE_INDEX_NUMERIC_RULES
+        for lowered in _index_carrier_rules(rule, 64)
+    ),
 )

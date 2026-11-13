@@ -31,7 +31,7 @@ func.def inline @__pipeline_strand_0() {
 }
 
 // ====
-// RUN: pass inline-callables,outline-pipeline-strands,cfg-simplify
+// RUN: pass inline-callables,outline-pipeline-strands
 
 // Ordinary inline helpers and outlining preserve execution placement. The
 // outlined body carries kernel operations until physical realization places it.
@@ -67,7 +67,7 @@ func.def inline @__pipeline_strand_0(%output: view<128xi32>) {
 
 // ====
 
-// RUN: pass outline-pipeline-strands,cfg-simplify,outline-pipeline-strands
+// RUN: pass outline-pipeline-strands,outline-pipeline-strands
 
 // The capture set includes a dependent payload width and a bound that is used
 // only in a predicate. Worker selection remains outside the function.
@@ -304,4 +304,95 @@ func.def inline @__pipeline_strand_0(%width: index, %channel: channel<tile<[%wid
   %read, %payload = channel.acquire %channel : channel<tile<[%width]xi32>> -> (read<tile<[%width]xi32>>, view<[%width]xi32>)
   channel.release %read : read<tile<[%width]xi32>>
   func.return
+}
+
+// ====
+// RUN: pass outline-pipeline-strands,test.realize-pipeline,symbol-dce,cfg-simplify
+
+// A single call to a declaration still needs a worker body. Realization clones
+// that body and preserves its external call and captured arguments.
+func.decl @consume(%value: i32)
+
+pipeline.def public @single_external_call() run(%value: i32) {
+  pipeline.strand workers([0], [1], [1]) {
+    func.call @consume(%value) : (i32)
+  }
+}
+
+// ----
+func.decl @consume(%value: i32)
+
+func.def inline @__pipeline_worker_0(%value: i32) {
+  func.call @consume(%value) : (i32)
+  func.return
+}
+
+func.def public inline @__pipeline_engine_0(%6: i32) {
+  func.call @__pipeline_worker_0(%6) : (i32)
+  func.return
+}
+
+// ====
+// RUN: pass scf-to-cfg,outline-pipeline-strands
+
+// Runtime selection belongs to a nested serial schedule. CFG conversion may
+// expand that schedule while the surrounding concurrent construction graph
+// remains one block and can be outlined without losing any branch.
+pipeline.def public @nested_runtime_selection(%condition: i1) run() {
+  pipeline.concurrent {
+    pipeline.serial {
+      scf.if %condition {
+        pipeline.serial {
+        }
+      } else {
+        pipeline.serial {
+        }
+      }
+    }
+  }
+}
+
+// ----
+pipeline.def public @nested_runtime_selection(%condition: i1) run() {
+  pipeline.compose @__pipeline_concurrent_0(%condition) : (i1)
+}
+
+pipeline.def @__pipeline_concurrent_0() run(%condition: i1) {
+  pipeline.serial {
+    cfg.cond_br %condition, ^_bb1, ^_bb2
+  ^_bb1:
+    pipeline.serial {
+    }
+    cfg.br ^_bb3
+  ^_bb2:
+    pipeline.serial {
+    }
+    cfg.br ^_bb3
+  ^_bb3:
+  }
+}
+
+// ====
+// RUN: pass canonicalize,scf-to-cfg,outline-pipeline-strands
+
+// Compile-time selection may remain in a concurrent construction graph when
+// ordinary normalization removes it before CFG conversion.
+pipeline.def public @static_concurrent_selection() run() {
+  %selected = scalar.constant true : i1
+  pipeline.concurrent {
+    scf.if %selected {
+      pipeline.serial {
+      }
+    }
+  }
+}
+
+// ----
+pipeline.def public @static_concurrent_selection() run() {
+  pipeline.compose @__pipeline_concurrent_0() : ()
+}
+
+pipeline.def @__pipeline_concurrent_0() run() {
+  pipeline.serial {
+  }
 }

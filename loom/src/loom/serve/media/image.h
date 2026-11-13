@@ -67,8 +67,8 @@ void loom_serve_media_image_input_deinitialize(
 // dimensions.
 iree_status_t loom_serve_media_image_decode_batch(
     iree_host_size_t count, const loom_serve_media_image_input_t* const* inputs,
-    const iree_byte_span_t* pixels, iree_status_t* out_statuses,
-    iree_allocator_t host_allocator);
+    const iree_byte_span_t* pixels, iree_allocator_t host_allocator,
+    iree_status_t* out_statuses);
 
 // Inspects one borrowed transport input. The temporary compressed
 // representation is released before return.

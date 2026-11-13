@@ -1,0 +1,219 @@
+// RUN: pass refine-boundaries
+
+// The loaded byte keeps this call alive. Forwarding its view requires the
+// dimension and layout identities to change in the signature and caller.
+func.def noinline @read(%count: index, %layout: encoding<layout>, %rows: view<[%count]xi8, %layout>) -> (%result_count: index, %result_layout: encoding<layout>, view<[%result_count]xi8, %result_layout>, i8) {
+  %origin = index.constant 0 : index
+  %value = view.load %rows[%origin] : view<[%count]xi8, %layout> -> i8
+  func.return %count, %layout, %rows, %value : index, encoding<layout>, view<[%count]xi8, %layout>, i8
+}
+
+func.def public @entry(%count: index, %layout: encoding<layout>, %rows: view<[%count]xi8, %layout>) -> (%result_count: index, %result_layout: encoding<layout>, view<[%result_count]xi8, %result_layout>, i8) {
+  %next_count, %next_layout, %next_rows, %value = func.call @read(%count, %layout, %rows) : (index, encoding<layout>, view<[%count]xi8, %layout>) -> (index, encoding<layout>, view<[%next_count]xi8, %next_layout>, i8)
+  func.return %next_count, %next_layout, %next_rows, %value : index, encoding<layout>, view<[%next_count]xi8, %next_layout>, i8
+}
+
+// ----
+func.def noinline @read(%count: index, %layout: encoding<layout>, %rows: view<[%count]xi8, %layout>) -> (i8) {
+  %origin = index.constant 0 : index
+  %value = view.load %rows[%origin] : view<[%count]xi8, %layout> -> i8
+  func.return %value : i8
+}
+
+func.def public @entry(%count: index, %layout: encoding<layout>, %rows: view<[%count]xi8, %layout>) -> (%result_count: index, %result_layout: encoding<layout>, view<[%result_count]xi8, %result_layout>, i8) {
+  %value = func.call @read(%count, %layout, %rows) : (index, encoding<layout>, view<[%count]xi8, %layout>) -> (i8)
+  func.return %count, %layout, %rows, %value : index, encoding<layout>, view<[%count]xi8, %layout>, i8
+}
+
+// ====
+
+// RUN: pass refine-boundaries
+
+// The view is constructed in the callee and must remain a result. Its type
+// refers directly to input dimensions and layout after their results retire.
+func.def noinline @make_rows(%count: index, %layout: encoding<layout>, %data: buffer) -> (%result_count: index, %result_layout: encoding<layout>, view<[%result_count]xi8, %result_layout>) {
+  %origin = index.constant 0 : offset
+  %rows = buffer.view %data[%origin] : buffer -> view<[%count]xi8, %layout>
+  func.return %count, %layout, %rows : index, encoding<layout>, view<[%count]xi8, %layout>
+}
+
+func.def public @entry(%count: index, %layout: encoding<layout>, %data: buffer) -> (%result_count: index, %result_layout: encoding<layout>, view<[%result_count]xi8, %result_layout>) {
+  %next_count, %next_layout, %rows = func.call @make_rows(%count, %layout, %data) : (index, encoding<layout>, buffer) -> (index, encoding<layout>, view<[%next_count]xi8, %next_layout>)
+  func.return %next_count, %next_layout, %rows : index, encoding<layout>, view<[%next_count]xi8, %next_layout>
+}
+
+// ----
+func.def noinline @make_rows(%count: index, %layout: encoding<layout>, %data: buffer) -> (view<[%count]xi8, %layout>) {
+  %origin = index.constant 0 : offset
+  %rows = buffer.view %data[%origin] : buffer -> view<[%count]xi8, %layout>
+  func.return %rows : view<[%count]xi8, %layout>
+}
+
+func.def public @entry(%count: index, %layout: encoding<layout>, %data: buffer) -> (%result_count: index, %result_layout: encoding<layout>, view<[%result_count]xi8, %result_layout>) {
+  %rows = func.call pure @make_rows(%count, %layout, %data) : (index, encoding<layout>, buffer) -> (view<[%count]xi8, %layout>)
+  func.return %count, %layout, %rows : index, encoding<layout>, view<[%count]xi8, %layout>
+}
+
+// ====
+
+// RUN: pass refine-boundaries
+
+// A computed extent cannot forward an input. Duplicate result forwarding
+// instead makes the view depend on the surviving earlier result.
+func.def noinline @make_rows(%left: index, %right: index, %data: buffer) -> (%first_count: index, %second_count: index, view<[%second_count]xi8>) {
+  %count = index.add %left, %right : index
+  %origin = index.constant 0 : offset
+  %rows = buffer.view %data[%origin] : buffer -> view<[%count]xi8>
+  func.return %count, %count, %rows : index, index, view<[%count]xi8>
+}
+
+func.def public @entry(%left: index, %right: index, %data: buffer) -> (%count: index, view<[%count]xi8>) {
+  %first_count, %second_count, %rows = func.call @make_rows(%left, %right, %data) : (index, index, buffer) -> (index, index, view<[%second_count]xi8>)
+  func.return %second_count, %rows : index, view<[%second_count]xi8>
+}
+
+// ----
+func.def noinline @make_rows(%left: index, %right: index, %data: buffer) -> (%first_count: index, view<[%first_count]xi8>) {
+  %count = index.add %left, %right : index
+  %origin = index.constant 0 : offset
+  %rows = buffer.view %data[%origin] : buffer -> view<[%count]xi8>
+  func.return %count, %rows : index, view<[%count]xi8>
+}
+
+func.def public @entry(%left: index, %right: index, %data: buffer) -> (%count: index, view<[%count]xi8>) {
+  %first_count, %rows = func.call pure @make_rows(%left, %right, %data) : (index, index, buffer) -> (index, view<[%first_count]xi8>)
+  func.return %first_count, %rows : index, view<[%first_count]xi8>
+}
+
+// ====
+
+// RUN: pass refine-boundaries
+
+// Neither input dimension can replace the result across both exits, even
+// though the layout forwards on every exit. Keep the varying result group.
+func.def noinline @choose_rows(%choose: i1, %first_count: index, %second_count: index, %layout: encoding<layout>, %data: buffer) -> (%count: index, %result_layout: encoding<layout>, view<[%count]xi8, %result_layout>) {
+  %origin = index.constant 0 : offset
+  cfg.cond_br %choose, ^first, ^second
+^first:
+  %first_rows = buffer.view %data[%origin] : buffer -> view<[%first_count]xi8, %layout>
+  func.return %first_count, %layout, %first_rows : index, encoding<layout>, view<[%first_count]xi8, %layout>
+^second:
+  %second_rows = buffer.view %data[%origin] : buffer -> view<[%second_count]xi8, %layout>
+  func.return %second_count, %layout, %second_rows : index, encoding<layout>, view<[%second_count]xi8, %layout>
+}
+
+func.def public @entry(%choose: i1, %first_count: index, %second_count: index, %layout: encoding<layout>, %data: buffer) -> (%count: index, %result_layout: encoding<layout>, view<[%count]xi8, %result_layout>) {
+  %count, %next_layout, %rows = func.call @choose_rows(%choose, %first_count, %second_count, %layout, %data) : (i1, index, index, encoding<layout>, buffer) -> (index, encoding<layout>, view<[%count]xi8, %next_layout>)
+  func.return %count, %next_layout, %rows : index, encoding<layout>, view<[%count]xi8, %next_layout>
+}
+
+// ----
+func.def noinline @choose_rows(%choose: i1, %first_count: index, %second_count: index, %layout: encoding<layout>, %data: buffer) -> (%count: index, view<[%count]xi8, %layout>) {
+  %origin = index.constant 0 : offset
+  cfg.cond_br %choose, ^first, ^second
+^first:
+  %first_rows = buffer.view %data[%origin] : buffer -> view<[%first_count]xi8, %layout>
+  func.return %first_count, %first_rows : index, view<[%first_count]xi8, %layout>
+^second:
+  %second_rows = buffer.view %data[%origin] : buffer -> view<[%second_count]xi8, %layout>
+  func.return %second_count, %second_rows : index, view<[%second_count]xi8, %layout>
+}
+
+func.def public @entry(%choose: i1, %first_count: index, %second_count: index, %layout: encoding<layout>, %data: buffer) -> (%count: index, %result_layout: encoding<layout>, view<[%count]xi8, %result_layout>) {
+  %count, %rows = func.call pure @choose_rows(%choose, %first_count, %second_count, %layout, %data) : (i1, index, index, encoding<layout>, buffer) -> (index, view<[%count]xi8, %layout>)
+  func.return %count, %layout, %rows : index, encoding<layout>, view<[%count]xi8, %layout>
+}
+
+// ====
+
+// RUN: pass refine-boundaries
+
+// Public signatures retain their authored result identities. The caller must
+// still agree with that signature after discovering forwarded values.
+func.def public noinline @make_rows(%count: index, %data: buffer) -> (%result_count: index, view<[%result_count]xi8>) {
+  %origin = index.constant 0 : offset
+  %rows = buffer.view %data[%origin] : buffer -> view<[%count]xi8>
+  func.return %count, %rows : index, view<[%count]xi8>
+}
+
+func.def public @entry(%count: index, %data: buffer) -> (%result_count: index, view<[%result_count]xi8>) {
+  %next_count, %rows = func.call @make_rows(%count, %data) : (index, buffer) -> (index, view<[%next_count]xi8>)
+  func.return %next_count, %rows : index, view<[%next_count]xi8>
+}
+
+// ----
+func.def public noinline @make_rows(%count: index, %data: buffer) -> (%result_count: index, view<[%result_count]xi8>) {
+  %origin = index.constant 0 : offset
+  %rows = buffer.view %data[%origin] : buffer -> view<[%count]xi8>
+  func.return %count, %rows : index, view<[%count]xi8>
+}
+
+func.def public @entry(%count: index, %data: buffer) -> (%result_count: index, view<[%result_count]xi8>) {
+  %next_count, %rows = func.call pure @make_rows(%count, %data) : (index, buffer) -> (index, view<[%next_count]xi8>)
+  func.return %next_count, %rows : index, view<[%next_count]xi8>
+}
+
+// ====
+
+// RUN: pass refine-boundaries
+
+// Exact return facts can fold scalar consumers without replacing the identity
+// anchoring a public result group. Both extent and layout remain ABI carriers.
+func.def public noinline @make_rows(%data: buffer) -> (%count: index, %layout: encoding<layout>, view<[%count]xi8, %layout>) {
+  %count = index.constant 2 : index
+  %layout = encoding.layout.dense : encoding<layout>
+  %origin = index.constant 0 : offset
+  %rows = buffer.view %data[%origin] : buffer -> view<[%count]xi8, %layout>
+  func.return %count, %layout, %rows : index, encoding<layout>, view<[%count]xi8, %layout>
+}
+
+func.def public @entry(%data: buffer) -> (%result_count: index, %result_layout: encoding<layout>, view<[%result_count]xi8, %result_layout>, i1) {
+  %count, %layout, %rows = func.call @make_rows(%data) : (buffer) -> (index, encoding<layout>, view<[%count]xi8, %layout>)
+  %expected_count = index.constant 2 : index
+  %equal = index.cmp eq, %count, %expected_count : index
+  func.return %count, %layout, %rows, %equal : index, encoding<layout>, view<[%count]xi8, %layout>, i1
+}
+
+// ----
+func.def public noinline @make_rows(%data: buffer) -> (%count: index, %layout: encoding<layout>, view<[%count]xi8, %layout>) {
+  %count = index.constant 2 : index
+  %layout = encoding.layout.dense : encoding<layout>
+  %origin = index.constant 0 : offset
+  %rows = buffer.view %data[%origin] : buffer -> view<[%count]xi8, %layout>
+  func.return %count, %layout, %rows : index, encoding<layout>, view<[%count]xi8, %layout>
+}
+
+func.def public @entry(%data: buffer) -> (%result_count: index, %result_layout: encoding<layout>, view<[%result_count]xi8, %result_layout>, i1) {
+  %count, %layout, %rows = func.call pure @make_rows(%data) : (buffer) -> (index, encoding<layout>, view<[%count]xi8, %layout>)
+  %equal = scalar.constant true : i1
+  func.return %count, %layout, %rows, %equal : index, encoding<layout>, view<[%count]xi8, %layout>, i1
+}
+
+// ====
+
+// RUN: pass refine-boundaries{mode=encodings}
+
+// Encoding-only mode preserves the nominal dimension identities. Unknown
+// layouts remain dependent values rather than becoming forwarding rewrites.
+func.def noinline @make_rows(%count: index, %layout: encoding<layout>, %data: buffer) -> (%result_count: index, %result_layout: encoding<layout>, view<[%result_count]xi8, %result_layout>) {
+  %origin = index.constant 0 : offset
+  %rows = buffer.view %data[%origin] : buffer -> view<[%count]xi8, %layout>
+  func.return %count, %layout, %rows : index, encoding<layout>, view<[%count]xi8, %layout>
+}
+
+func.def public @entry(%count: index, %layout: encoding<layout>, %data: buffer) -> (%result_count: index, %result_layout: encoding<layout>, view<[%result_count]xi8, %result_layout>) {
+  %next_count, %next_layout, %rows = func.call @make_rows(%count, %layout, %data) : (index, encoding<layout>, buffer) -> (index, encoding<layout>, view<[%next_count]xi8, %next_layout>)
+  func.return %next_count, %next_layout, %rows : index, encoding<layout>, view<[%next_count]xi8, %next_layout>
+}
+
+// ----
+func.def noinline @make_rows(%count: index, %layout: encoding<layout>, %data: buffer) -> (%result_count: index, %result_layout: encoding<layout>, view<[%result_count]xi8, %result_layout>) {
+  %origin = index.constant 0 : offset
+  %rows = buffer.view %data[%origin] : buffer -> view<[%count]xi8, %layout>
+  func.return %count, %layout, %rows : index, encoding<layout>, view<[%count]xi8, %layout>
+}
+
+func.def public @entry(%count: index, %layout: encoding<layout>, %data: buffer) -> (%result_count: index, %result_layout: encoding<layout>, view<[%result_count]xi8, %result_layout>) {
+  %next_count, %next_layout, %rows = func.call @make_rows(%count, %layout, %data) : (index, encoding<layout>, buffer) -> (index, encoding<layout>, view<[%next_count]xi8, %next_layout>)
+  func.return %next_count, %next_layout, %rows : index, encoding<layout>, view<[%next_count]xi8, %next_layout>
+}

@@ -33,7 +33,7 @@ TEST_P(GpuCooperativeQueueTest, EstablishesNativeAdmissionBeforePublication) {
                         AMDF_USER_QUEUE_CAPABILITY_COOPERATIVE_DISPATCH;
   GpuUserQueue* queue = nullptr;
   ASSERT_NO_FATAL_FAILURE(CreateQueue(
-      family_, &queue, AMDF_QUEUE_PRODUCER_MODE_SINGLE, {}, required));
+      family_, GpuUserQueueOptions{.required_capabilities = required}, &queue));
   EXPECT_EQ(queue->info.capabilities & required, required);
   // No packet is published. Fixture teardown releases native admission with
   // the empty queue before the next protocol borrows the same cached device.
@@ -108,8 +108,15 @@ class GpuUserQueueCapacityTest
 
 TEST_P(GpuUserQueueCapacityTest, CopiesAcrossWrapAndRetiredReuse) {
   const auto& test = GetParam();
+  amdf_queue_family_placement_info_t placement = {
+      .type = AMDF_STRUCTURE_TYPE_QUEUE_FAMILY_PLACEMENT_INFO,
+      .structure_size = sizeof(placement),
+  };
+  ASSERT_EQ(api_->device_query_queue_family_placement_info(
+                device_, family_.ordinal, &placement),
+            AMDF_STATUS_OK);
   if (test.placement != AMDF_QUEUE_PLACEMENT_DEFAULT &&
-      !(family_.placement_capabilities & (1u << test.placement))) {
+      !(placement.placement_capabilities & (1u << test.placement))) {
     GTEST_SKIP() << "family does not support requested ring placement";
   }
   if (test.byte_length != 0 &&
@@ -119,10 +126,12 @@ TEST_P(GpuUserQueueCapacityTest, CopiesAcrossWrapAndRetiredReuse) {
     GTEST_SKIP() << "family does not admit requested ring capacity";
   }
   GpuUserQueue* queue = nullptr;
-  ASSERT_NO_FATAL_FAILURE(
-      CreateQueue(family_, &queue, AMDF_QUEUE_PRODUCER_MODE_SINGLE, {},
-                  AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER, test.byte_length, 0,
-                  nullptr, test.placement));
+  ASSERT_NO_FATAL_FAILURE(CreateQueue(family_,
+                                      GpuUserQueueOptions{
+                                          .ring_byte_length = test.byte_length,
+                                          .placement = test.placement,
+                                      },
+                                      &queue));
   const uint64_t capacity = queue->info.ring_byte_length;
   if (test.byte_length != 0) {
     ASSERT_EQ(capacity, test.byte_length);
@@ -260,15 +269,24 @@ class GpuUserQueuePublicationTest : public GpuUserQueueCapacityTest {};
 
 TEST_P(GpuUserQueuePublicationTest, IncrementalStoresAcrossRingWrap) {
   const auto& test = GetParam();
-  if (!(family_.placement_capabilities & (1u << test.placement))) {
+  amdf_queue_family_placement_info_t placement = {
+      .type = AMDF_STRUCTURE_TYPE_QUEUE_FAMILY_PLACEMENT_INFO,
+      .structure_size = sizeof(placement),
+  };
+  ASSERT_EQ(api_->device_query_queue_family_placement_info(
+                device_, family_.ordinal, &placement),
+            AMDF_STATUS_OK);
+  if (!(placement.placement_capabilities & (1u << test.placement))) {
     GTEST_SKIP() << "family does not support requested ring placement";
   }
   const bool pm4 = test.command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_PM4;
   GpuUserQueue* queue = nullptr;
-  ASSERT_NO_FATAL_FAILURE(CreateQueue(family_, &queue,
-                                      AMDF_QUEUE_PRODUCER_MODE_SINGLE, {},
-                                      AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER,
-                                      4096, 0, nullptr, test.placement));
+  ASSERT_NO_FATAL_FAILURE(CreateQueue(family_,
+                                      GpuUserQueueOptions{
+                                          .ring_byte_length = 4096,
+                                          .placement = test.placement,
+                                      },
+                                      &queue));
   GpuMemory* payload = nullptr;
   ASSERT_NO_FATAL_FAILURE(CreateMemory(
       AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE, 4096, &payload));

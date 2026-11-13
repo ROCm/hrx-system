@@ -65,6 +65,9 @@ _F32X16_VECTOR = Vector("f32", lanes=16)
 _F32X32_VECTOR = Vector("f32", lanes=32)
 _I16X32_VECTOR = Vector("i16", lanes=32)
 _F32X64_ACCUMULATOR = Vector("f32", lanes=64)
+_F32_FULL_ACCUMULATOR = Vector(
+    "f32", minimum_static_elements=33, maximum_static_elements=64
+)
 _I1_VECTOR = Vector("i1", minimum_static_elements=1, maximum_static_elements=64)
 
 _BF16_ELEMENTWISE_MULTIPLY_CONTROL = vector_data_path_control(
@@ -1111,25 +1114,29 @@ def _float_packet_accumulator_zero_rule() -> DescriptorRule:
     )
 
 
-def _float_matrix_accumulator_add_rule() -> DescriptorRule:
+def _float_full_accumulator_binary_rule(
+    source_op: Op, operation_descriptor_key: str
+) -> DescriptorRule:
+    # These values occupy a complete DM carrier. The unobserved tail of a
+    # partial vector neither requires initialization nor changes active lanes.
     config_constant = _descriptor("amd.xdna.aie2p.constant.i32.mova")
-    add = _descriptor("amd.xdna.aie2p.add.f32x64.configured")
+    operation = _descriptor(operation_descriptor_key)
     return DescriptorRule(
-        source_op=vector.vector_addf,
-        descriptor=add,
-        guards=_typed_guards(("lhs", "rhs", "result"), _F32X64_ACCUMULATOR),
+        source_op=source_op,
+        descriptor=operation,
+        guards=_typed_guards(("lhs", "rhs", "result"), _F32_FULL_ACCUMULATOR),
         emit=(
             _constant_emit(
                 config_constant,
-                ValueRef.temporary("add_control"),
+                ValueRef.temporary("arithmetic_control"),
                 F32_ACCUMULATOR_ADD_CONTROL,
             ),
             _op_emit(
-                add,
+                operation,
                 operands={
                     "acc1": ValueRef.operand("lhs"),
                     "acc2": ValueRef.operand("rhs"),
-                    "acc": ValueRef.temporary("add_control"),
+                    "acc": ValueRef.temporary("arithmetic_control"),
                 },
                 results={"dst": ValueRef.result("result")},
             ),
@@ -1355,7 +1362,13 @@ AIE2P_FLOATING_RULES = (
     ),
     _float_packet_accumulator_zero_rule(),
     _float_matrix_accumulator_zero_rule(),
-    _float_matrix_accumulator_add_rule(),
+    *(
+        _float_full_accumulator_binary_rule(source_op, descriptor_key)
+        for source_op, descriptor_key in (
+            (vector.vector_addf, "amd.xdna.aie2p.add.f32x64.configured"),
+            (vector.vector_subf, "amd.xdna.aie2p.sub.f32x64.configured"),
+        )
+    ),
     *(
         _float_vector_accumulator_binary_rule(
             source_op,

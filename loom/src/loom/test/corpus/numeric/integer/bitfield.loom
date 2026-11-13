@@ -114,6 +114,44 @@ func.def @bitfield_observations(%bits: i64, %output: buffer) {
   func.return
 }
 
+// Word extraction preserves the selected half of a wide memory value. Widen
+// afterward to observe both the exact word and its signed interpretation.
+func.def @word_bitfield_extractions(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %inputs = buffer.view %input[%base] : buffer -> view<4xi64>
+  %outputs = buffer.view %output[%base] : buffer -> view<6xi64>
+  %unsigned_low_bits = view.load %inputs[0] : view<4xi64> -> i64
+  %unsigned_high_bits = view.load %inputs[1] : view<4xi64> -> i64
+  %signed_low_bits = view.load %inputs[2] : view<4xi64> -> i64
+  %signed_high_bits = view.load %inputs[3] : view<4xi64> -> i64
+  %unsigned_low = scalar.bitfield.extractu %unsigned_low_bits {offset = 0, width = 32} : i64 -> i32
+  %unsigned_high = scalar.bitfield.extractu %unsigned_high_bits {offset = 32, width = 32} : i64 -> i32
+  %signed_low = scalar.bitfield.extracts %signed_low_bits {offset = 0, width = 32} : i64 -> i32
+  %signed_high = scalar.bitfield.extracts %signed_high_bits {offset = 32, width = 32} : i64 -> i32
+  %unsigned_low_wide = scalar.extui %unsigned_low : i32 to i64
+  %unsigned_high_wide = scalar.extui %unsigned_high : i32 to i64
+  %signed_low_wide = scalar.extsi %signed_low : i32 to i64
+  %signed_high_wide = scalar.extsi %signed_high : i32 to i64
+  view.store %unsigned_low_wide, %outputs[1] : i64, view<6xi64>
+  view.store %unsigned_high_wide, %outputs[2] : i64, view<6xi64>
+  view.store %signed_low_wide, %outputs[3] : i64, view<6xi64>
+  view.store %signed_high_wide, %outputs[4] : i64, view<6xi64>
+  func.return
+}
+
+check.scenario @word_bitfield_values {
+  check.trial[32](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-9223372036854775808 to 9223372036854775807) : tensor<4xi64>
+    %output = check.generate.fill value(-123) : tensor<6xi64>
+    check.compare<@word_bitfield_extractions>(%input, %output) : (tensor<4xi64>, tensor<6xi64>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<4xi64>
+      check.expect.bitwise actual(%output) expected(%output) : tensor<6xi64>
+    }
+  }
+  check.return
+}
+
 check.scenario @bitfield_values {
   check.trial[256](%trial: index, %entropy: check.entropy) {
     %bits = check.entropy.read %entropy[%trial] : check.entropy -> i64

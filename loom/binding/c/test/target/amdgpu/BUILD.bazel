@@ -85,7 +85,7 @@ loom_cc_test(
         "//loom/binding/c/target/amdgpu",
         "//loom/binding/c/target/cmd",
         "//loom/binding/c/test:test_util",
-        "//loom/src/loom/target/arch/cmd:program",
+        "//loom/src/loom/runtime/command:program",
         "//runtime/src/iree/base",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
@@ -143,6 +143,17 @@ loom_cc_test(
     ],
 )
 
+iree_c_embed_data(
+    name = "vector_arguments_testdata",
+    testonly = True,
+    srcs = ["vector_arguments.loom"],
+    c_file_output = "vector_arguments_testdata.c",
+    flatten = True,
+    h_file_output = "vector_arguments_testdata.h",
+    identifier = "loomc_amdgpu_vector_arguments_testdata",
+    visibility = ["//visibility:private"],
+)
+
 loom_cc_test(
     name = "iree_hal_execution_test",
     srcs = ["iree_hal_execution_test.cc"],
@@ -153,6 +164,7 @@ loom_cc_test(
     ],
     target_compatible_with = _AMDGPU_HAL_COMPATIBLE_WITH,
     deps = [
+        ":vector_arguments_testdata",
         "//loom/binding/c:loomc",
         "//loom/binding/c/target/amdgpu",
         "//loom/binding/c/target/amdgpu:iree_hal",

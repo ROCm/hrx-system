@@ -17,6 +17,26 @@ namespace {
 // Maximum segments we expect from a single process/finalize call.
 constexpr size_t kMaxSegments = 256;
 
+bool ValidateSegments(iree_host_size_t input_size,
+                      iree_host_size_t output_capacity,
+                      const iree_tokenizer_segment_t* segments,
+                      iree_host_size_t segment_count) {
+  if (segment_count > output_capacity) {
+    ADD_FAILURE() << "segmenter produced " << segment_count
+                  << " segments into capacity " << output_capacity;
+    return false;
+  }
+  for (iree_host_size_t i = 0; i < segment_count; ++i) {
+    if (segments[i].start > segments[i].end || segments[i].end > input_size) {
+      ADD_FAILURE() << "segment " << i << " has range [" << segments[i].start
+                    << ", " << segments[i].end << ") outside input size "
+                    << input_size;
+      return false;
+    }
+  }
+  return true;
+}
+
 // Converts segments to strings given the input text.
 std::vector<std::string> SegmentsToStrings(
     const char* input, const iree_tokenizer_segment_t* segments,
@@ -47,8 +67,14 @@ std::vector<std::string> ProcessAndFinalize(
       iree_tokenizer_make_segment_output(segments, kMaxSegments), &consumed,
       &segment_count));
 
-  // Pull-based: process() may leave bytes unconsumed (for pending segments).
-  // No assertion on consumed == input.size - unconsumed bytes go to finalize.
+  if (consumed > input.size) {
+    ADD_FAILURE() << "segmenter consumed " << consumed << " bytes from "
+                  << input.size << " bytes of input";
+    return {};
+  }
+  if (!ValidateSegments(input.size, kMaxSegments, segments, segment_count)) {
+    return {};
+  }
 
   // Verify has_pending() after process.
   bool has_pending = iree_tokenizer_segmenter_state_has_pending(state.get());
@@ -70,6 +96,10 @@ std::vector<std::string> ProcessAndFinalize(
       state.get(), remaining_input,
       iree_tokenizer_make_segment_output(segments, kMaxSegments),
       &finalize_count));
+  if (!ValidateSegments(remaining_input.size, kMaxSegments, segments,
+                        finalize_count)) {
+    return {};
+  }
 
   // Add any segments from finalize (offsets relative to remaining_input).
   for (size_t i = 0; i < finalize_count; ++i) {
@@ -109,6 +139,15 @@ std::vector<std::string> ProcessChunkedAndFinalize(
         state.get(), chunk,
         iree_tokenizer_make_segment_output(segments, kMaxSegments), &consumed,
         &segment_count));
+
+    if (consumed > chunk.size) {
+      ADD_FAILURE() << "segmenter consumed " << consumed << " bytes from "
+                    << chunk.size << " bytes of input";
+      return result;
+    }
+    if (!ValidateSegments(chunk.size, kMaxSegments, segments, segment_count)) {
+      return result;
+    }
 
     // Convert segments to strings with position adjustment.
     // Segments are relative to chunk start (at position).
@@ -152,6 +191,10 @@ std::vector<std::string> ProcessChunkedAndFinalize(
       state.get(), remaining_input,
       iree_tokenizer_make_segment_output(segments, kMaxSegments),
       &finalize_count));
+  if (!ValidateSegments(remaining_input.size, kMaxSegments, segments,
+                        finalize_count)) {
+    return result;
+  }
 
   // Add segments from finalize (offsets relative to remaining_input).
   for (size_t i = 0; i < finalize_count; ++i) {
@@ -213,6 +256,15 @@ std::vector<std::string> ProcessChunkedAndFinalizeUtf8(
         iree_tokenizer_make_segment_output(segments, kMaxSegments), &consumed,
         &segment_count));
 
+    if (consumed > chunk.size) {
+      ADD_FAILURE() << "segmenter consumed " << consumed << " bytes from "
+                    << chunk.size << " bytes of input";
+      return result;
+    }
+    if (!ValidateSegments(chunk.size, kMaxSegments, segments, segment_count)) {
+      return result;
+    }
+
     // Convert segments to strings with position adjustment.
     // Segments are relative to chunk start (at position).
     for (size_t i = 0; i < segment_count; ++i) {
@@ -255,6 +307,10 @@ std::vector<std::string> ProcessChunkedAndFinalizeUtf8(
       state.get(), remaining_input,
       iree_tokenizer_make_segment_output(segments, kMaxSegments),
       &finalize_count));
+  if (!ValidateSegments(remaining_input.size, kMaxSegments, segments,
+                        finalize_count)) {
+    return result;
+  }
 
   // Add segments from finalize (offsets relative to remaining_input).
   for (size_t i = 0; i < finalize_count; ++i) {
@@ -336,6 +392,15 @@ void TestLimitedOutputCapacity(
         state.get(), remaining, iree_tokenizer_make_segment_output(&segment, 1),
         &consumed, &segment_count));
 
+    if (consumed > remaining.size) {
+      ADD_FAILURE() << "segmenter consumed " << consumed << " bytes from "
+                    << remaining.size << " bytes of input";
+      break;
+    }
+    if (!ValidateSegments(remaining.size, 1, &segment, segment_count)) {
+      break;
+    }
+
     if (segment_count > 0) {
       // Segment is relative to 'remaining', adjust to input.
       size_t abs_start = position + segment.start;
@@ -385,6 +450,10 @@ void TestLimitedOutputCapacity(
       break;
     }
     iree_status_ignore(finalize_status);
+
+    if (!ValidateSegments(remaining_input.size, 1, &segment, finalize_count)) {
+      break;
+    }
 
     if (finalize_count > 0) {
       size_t abs_start = position + segment.start;

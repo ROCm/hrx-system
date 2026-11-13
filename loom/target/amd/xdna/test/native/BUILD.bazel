@@ -55,9 +55,12 @@ _VM_REFERENCE_COMPATIBLE_WITH = loom_config_compatible_with([
         "dma_wrap",
         "grouped_dma",
         "hardware_loop",
+        "helper_results",
         "packed_matrix_groups",
         "radian_trigonometry",
         "source_owned_accumulation",
+        "stack_calls",
+        "stack_fifo",
     ]
 ]
 
@@ -76,6 +79,14 @@ _XDNA_EIGHT_COLUMN_PROFILE = loom_execution_profile(
 loom_test(
     name = "multicast_execution_test",
     srcs = ["channel_multicast.loom"],
+    benchmark_smoke = False,
+    execution_profiles = [_XDNA_EIGHT_COLUMN_PROFILE],
+    tags = ["manual"],
+)
+
+loom_test(
+    name = "multisource_execution_test",
+    srcs = ["channel_multisource.loom"],
     benchmark_smoke = False,
     execution_profiles = [_XDNA_EIGHT_COLUMN_PROFILE],
     tags = ["manual"],
@@ -124,7 +135,7 @@ loom_cc_binary(
         "//runtime/src/iree/hal/cts/util:registry",
         "//runtime/src/iree/hal/cts/util:test_base",
         "//runtime/src/iree/hal/cts/util:test_main",
-        "//runtime/src/iree/hal/drivers/amd:driver",
+        "//runtime/src/iree/hal/driver/amd:driver",
         "//runtime/src/iree/testing:gtest",
     ],
 )

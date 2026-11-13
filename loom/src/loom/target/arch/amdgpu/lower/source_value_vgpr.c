@@ -17,6 +17,7 @@
 #include "loom/ops/scf/ops.h"
 #include "loom/ops/vector/ops.h"
 #include "loom/ops/view/ops.h"
+#include "loom/target/arch/amdgpu/lower/source_representation.h"
 #include "loom/target/arch/amdgpu/lower/source_value_analysis.h"
 #include "loom/target/arch/amdgpu/lower/types.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
@@ -78,6 +79,7 @@ static bool loom_amdgpu_source_memory_access_prefers_vgpr(
     return true;
   }
   if (plan.operation_kind != LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD ||
+      iree_any_bit_set(plan.access_flags, LOOM_MEMORY_ACCESS_FLAG_VOLATILE) ||
       (uint64_t)plan.element_byte_count * plan.vector_lane_count < 4 ||
       (plan.vector_lane_byte_stride != plan.element_byte_count &&
        plan.element_byte_count < 4) ||
@@ -88,9 +90,11 @@ static bool loom_amdgpu_source_memory_access_prefers_vgpr(
           plan.cache_policy.build_flags,
           LOOM_VECTOR_MEMORY_CACHE_POLICY_BUILD_FLAG_SCOPE |
               LOOM_VECTOR_MEMORY_CACHE_POLICY_BUILD_FLAG_TEMPORAL) ||
-      !loom_view_region_table_root_is_stable(view_regions, plan.root_value_id,
-                                             plan.alias_scope_id,
-                                             plan.memory_space) ||
+      !(loom_view_region_table_root_is_stable(view_regions, plan.root_value_id,
+                                              plan.alias_scope_id,
+                                              plan.memory_space) ||
+        (plan.reads_entry_contents &&
+         loom_kernel_def_isa(view_regions->value_domain->region->parent_op))) ||
       loom_amdgpu_source_memory_terms_prefer_vgpr(
           module, fact_table, view_regions, analysis, &plan) ||
       loom_amdgpu_analyzed_source_value_prefers_vgpr(
@@ -116,7 +120,13 @@ static bool loom_amdgpu_vector_extract_prefers_vgpr(
 }
 
 static bool loom_amdgpu_source_value_naturally_prefers_vgpr(
-    const loom_module_t* module, loom_value_id_t source_value_id) {
+    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
+    loom_value_id_t source_value_id) {
+  loom_amdgpu_register_shape_t native_shape = {0};
+  if (loom_amdgpu_source_invoke_result_shape(module, fact_table,
+                                             source_value_id, &native_shape)) {
+    return native_shape.class_id == LOOM_AMDGPU_REG_CLASS_ID_VGPR;
+  }
   const loom_type_t source_type =
       loom_module_value_type(module, source_value_id);
   if (loom_amdgpu_scalar_type_naturally_prefers_vgpr(source_type)) {
@@ -133,7 +143,7 @@ static bool loom_amdgpu_source_value_naturally_prefers_vgpr(
 bool loom_amdgpu_source_value_facts_prefer_vgpr(
     const loom_module_t* module, const loom_value_fact_table_t* fact_table,
     loom_value_id_t source_value_id) {
-  if (fact_table == NULL || source_value_id >= module->values.count) {
+  if (source_value_id >= module->values.count) {
     return false;
   }
   const loom_type_t source_type =
@@ -141,8 +151,38 @@ bool loom_amdgpu_source_value_facts_prefer_vgpr(
   if (loom_amdgpu_type_is_i1(source_type)) {
     return false;
   }
-  return loom_value_facts_is_lane_varying(
-      loom_value_fact_table_lookup(fact_table, source_value_id));
+  const loom_value_facts_t facts =
+      fact_table ? loom_value_fact_table_lookup(fact_table, source_value_id)
+                 : loom_value_facts_unknown();
+  if (loom_value_facts_is_lane_varying(facts)) {
+    return true;
+  }
+  if (!loom_value_facts_is_subgroup_uniform(facts)) {
+    const loom_value_t* value = loom_module_value(module, source_value_id);
+    if (loom_value_is_block_arg(value)) {
+      return true;
+    }
+    // Structured results join control-flow values just like block arguments.
+    // Unknown distribution cannot justify a scalar callable result carrier.
+    const loom_op_t* defining_op = loom_value_def_op(value);
+    if (defining_op != NULL && defining_op->region_count != 0) {
+      const loom_op_vtable_t* vtable = loom_op_vtable(module, defining_op);
+      if (vtable->region_branch != NULL || vtable->loop_like != NULL) {
+        return true;
+      }
+    }
+  }
+  if (loom_type_is_buffer(source_type) && fact_table != NULL) {
+    loom_value_fact_buffer_reference_t reference = {0};
+    if (loom_value_facts_query_buffer_reference(&fact_table->context, facts,
+                                                &reference)) {
+      // Segment addresses retain their physical VGPR carrier even when the
+      // addressed storage is shared uniformly by the workgroup.
+      return reference.memory_space == LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE ||
+             reference.memory_space == LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP;
+    }
+  }
+  return false;
 }
 
 static bool loom_amdgpu_source_value_known_distribution_facts(
@@ -250,6 +290,12 @@ static_assert(IREE_ARRAYSIZE(kAmdgpuScfSourceProducerFlags) ==
 
 static const loom_amdgpu_source_producer_flags_t
     kAmdgpuBufferSourceProducerFlags[LOOM_OP_BUFFER_COUNT_] = {
+        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_BUFFER_COMPARE_ADDRESS)] =
+            LOOM_AMDGPU_SOURCE_PRODUCER_I1_COMPARE |
+            LOOM_AMDGPU_SOURCE_PRODUCER_I1_COMPARE_SUPPORTS_SGPR_BOOL,
+        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_BUFFER_COMPARE_NULL)] =
+            LOOM_AMDGPU_SOURCE_PRODUCER_I1_COMPARE |
+            LOOM_AMDGPU_SOURCE_PRODUCER_I1_COMPARE_SUPPORTS_SGPR_BOOL,
         [LOOM_AMDGPU_OP_INDEX(LOOM_OP_BUFFER_LOAD_I8_U)] =
             LOOM_AMDGPU_SOURCE_PRODUCER_MEMORY_ACCESS,
 };
@@ -566,8 +612,7 @@ loom_amdgpu_distribution_transfer_binary_result_follows_operand_vgpr(
     loom_value_id_t* out_rhs) {
   *out_lhs = LOOM_VALUE_ID_INVALID;
   *out_rhs = LOOM_VALUE_ID_INVALID;
-  if (loom_value_def_index(loom_module_value(module, source_value_id)) != 0 ||
-      defining_op->operand_count != 2 || defining_op->result_count != 1 ||
+  if (defining_op->operand_count != 2 ||
       !loom_traits_have_distribution_transfer(
           loom_op_effective_traits(module, defining_op)) ||
       (!loom_amdgpu_type_is_i32(
@@ -584,24 +629,40 @@ loom_amdgpu_distribution_transfer_binary_result_follows_operand_vgpr(
 
 static bool loom_amdgpu_source_producer_requires_wide_vgpr(
     const loom_module_t* module, const loom_value_fact_table_t* fact_table,
+    loom_amdgpu_source_value_analysis_t* analysis,
     loom_value_id_t source_value_id,
     loom_amdgpu_source_producer_flags_t producer_flags) {
-  return iree_any_bit_set(producer_flags,
-                          LOOM_AMDGPU_SOURCE_PRODUCER_ADDRESS_64BIT) &&
-         loom_amdgpu_source_address_value_needs_64bit(
-             module, fact_table, source_value_id,
-             loom_module_value_type(module, source_value_id));
+  if (!iree_any_bit_set(producer_flags,
+                        LOOM_AMDGPU_SOURCE_PRODUCER_ADDRESS_64BIT)) {
+    return false;
+  }
+  if (analysis != NULL && analysis->representation_plan != NULL) {
+    loom_low_representation_id_t representation =
+        LOOM_LOW_REPRESENTATION_ID_NONE;
+    loom_low_representation_plan_lookup(
+        analysis->representation_plan,
+        loom_local_value_domain_ordinal(analysis->value_domain,
+                                        source_value_id),
+        &representation);
+    if (representation == LOOM_AMDGPU_ADDRESS_REPRESENTATION_WIDE) {
+      return true;
+    }
+  }
+  return loom_amdgpu_source_address_value_needs_64bit(
+      module, fact_table, source_value_id,
+      loom_module_value_type(module, source_value_id));
 }
 
 bool loom_amdgpu_source_value_directly_prefers_vgpr(
     const loom_module_t* module, const loom_value_fact_table_t* fact_table,
+    loom_amdgpu_source_value_analysis_t* analysis,
     loom_value_id_t source_value_id, loom_value_id_t excluded_value_id) {
   while (true) {
     if (source_value_id == excluded_value_id ||
         source_value_id >= module->values.count) {
       return false;
     }
-    if (loom_amdgpu_source_value_naturally_prefers_vgpr(module,
+    if (loom_amdgpu_source_value_naturally_prefers_vgpr(module, fact_table,
                                                         source_value_id)) {
       return true;
     }
@@ -630,7 +691,7 @@ bool loom_amdgpu_source_value_directly_prefers_vgpr(
     const loom_amdgpu_source_producer_flags_t producer_flags =
         loom_amdgpu_source_producer_flags(defining_op->kind);
     if (loom_amdgpu_source_producer_requires_wide_vgpr(
-            module, fact_table, source_value_id, producer_flags)) {
+            module, fact_table, analysis, source_value_id, producer_flags)) {
       return true;
     }
     if (iree_any_bit_set(producer_flags,
@@ -657,7 +718,7 @@ bool loom_amdgpu_source_value_directly_prefers_vgpr(
     if (iree_any_bit_set(producer_flags,
                          LOOM_AMDGPU_SOURCE_PRODUCER_VECTOR_EXTRACT)) {
       return loom_amdgpu_source_value_naturally_prefers_vgpr(
-          module, loom_vector_extract_source(defining_op));
+          module, fact_table, loom_vector_extract_source(defining_op));
     }
     if (iree_any_bit_set(producer_flags,
                          LOOM_AMDGPU_SOURCE_PRODUCER_VECTOR_REDUCE)) {
@@ -668,11 +729,11 @@ bool loom_amdgpu_source_value_directly_prefers_vgpr(
                          LOOM_AMDGPU_SOURCE_PRODUCER_SCF_SELECT)) {
       return loom_value_def_index(value) == 0 &&
              (loom_amdgpu_source_value_directly_prefers_vgpr(
-                  module, fact_table, loom_scf_select_true_value(defining_op),
-                  excluded_value_id) ||
+                  module, fact_table, analysis,
+                  loom_scf_select_true_value(defining_op), excluded_value_id) ||
               loom_amdgpu_source_value_directly_prefers_vgpr(
-                  module, fact_table, loom_scf_select_false_value(defining_op),
-                  excluded_value_id));
+                  module, fact_table, analysis,
+                  loom_scf_select_false_value(defining_op), excluded_value_id));
     }
 
     loom_value_id_t lhs = LOOM_VALUE_ID_INVALID;
@@ -680,9 +741,9 @@ bool loom_amdgpu_source_value_directly_prefers_vgpr(
     if (loom_amdgpu_distribution_transfer_binary_result_follows_operand_vgpr(
             module, source_value_id, defining_op, &lhs, &rhs)) {
       return loom_amdgpu_source_value_directly_prefers_vgpr(
-                 module, fact_table, lhs, source_value_id) ||
+                 module, fact_table, analysis, lhs, source_value_id) ||
              loom_amdgpu_source_value_directly_prefers_vgpr(
-                 module, fact_table, rhs, source_value_id);
+                 module, fact_table, analysis, rhs, source_value_id);
     }
     if (loom_amdgpu_source_producer_result_requires_vgpr(
             module, source_value_id, producer_flags)) {
@@ -693,7 +754,7 @@ bool loom_amdgpu_source_value_directly_prefers_vgpr(
                module, source_value_id, defining_op, producer_flags,
                &operand) &&
            loom_amdgpu_source_value_directly_prefers_vgpr(
-               module, fact_table, operand, source_value_id);
+               module, fact_table, analysis, operand, source_value_id);
   }
 }
 
@@ -717,7 +778,8 @@ static bool loom_amdgpu_select_payload_prefers_vgpr(
     return loom_amdgpu_source_value_facts_prefer_vgpr(module, fact_table,
                                                       source_value_id) ||
            loom_amdgpu_source_value_directly_prefers_vgpr(
-               module, fact_table, source_value_id, condition_value_id);
+               module, fact_table, analysis, source_value_id,
+               condition_value_id);
   }
   return loom_amdgpu_analyzed_source_value_prefers_vgpr(
       module, fact_table, view_regions, analysis, source_value_id);
@@ -792,7 +854,7 @@ static bool loom_amdgpu_branch_payload_has_vgpr_select_dependency(
     return false;
   }
   const loom_op_t* defining_op = loom_value_def_op(value);
-  if (defining_op == NULL || loom_value_def_index(value) != 0) {
+  if (defining_op == NULL) {
     return false;
   }
   if (loom_scf_select_isa(defining_op)) {
@@ -842,7 +904,7 @@ static bool loom_amdgpu_branch_arg_payload_prefers_vgpr(
   if (loom_amdgpu_source_value_facts_prefer_vgpr(module, fact_table,
                                                  incoming_value_id) ||
       loom_amdgpu_source_value_directly_prefers_vgpr(
-          module, fact_table, incoming_value_id, excluded_value_id)) {
+          module, fact_table, analysis, incoming_value_id, excluded_value_id)) {
     return true;
   }
   const loom_value_t* incoming_value =
@@ -959,8 +1021,22 @@ static bool loom_amdgpu_source_value_prefers_vgpr_impl(
   }
   const loom_type_t source_type =
       loom_module_value_type(module, source_value_id);
-  // Fixed physical storage takes precedence over uniformity and producer
-  // transfer rules so consumers use the same bank as value type mapping.
+  const loom_value_t* value = loom_module_value(module, source_value_id);
+  if (loom_amdgpu_source_value_is_entry_argument(module, source_value_id) &&
+      (loom_type_is_scalar(source_type) || loom_type_is_vector(source_type))) {
+    if (loom_type_element_type(source_type) == LOOM_SCALAR_TYPE_I1) {
+      return false;
+    }
+    return !fact_table ||
+           !loom_value_facts_is_subgroup_uniform(
+               loom_value_fact_table_lookup(fact_table, source_value_id));
+  }
+  loom_amdgpu_register_shape_t native_shape = {0};
+  if (loom_amdgpu_source_invoke_result_shape(module, fact_table,
+                                             source_value_id, &native_shape)) {
+    return native_shape.class_id == LOOM_AMDGPU_REG_CLASS_ID_VGPR;
+  }
+  // Ordinary producer policies apply after native-result storage selection.
   if (loom_amdgpu_scalar_type_has_fixed_vgpr_storage(source_type)) {
     return true;
   }
@@ -969,11 +1045,10 @@ static bool loom_amdgpu_source_value_prefers_vgpr_impl(
     return true;
   }
 
-  const loom_value_t* value = loom_module_value(module, source_value_id);
   if (loom_value_is_block_arg(value)) {
     const loom_block_t* block = loom_value_def_block(value);
     const uint16_t arg_index = loom_value_def_index(value);
-    if (loom_amdgpu_source_value_naturally_prefers_vgpr(module,
+    if (loom_amdgpu_source_value_naturally_prefers_vgpr(module, fact_table,
                                                         source_value_id) ||
         (loom_amdgpu_block_arg_has_cfg_predecessor(analysis, block,
                                                    arg_index) &&
@@ -989,7 +1064,7 @@ static bool loom_amdgpu_source_value_prefers_vgpr_impl(
   }
   const loom_op_t* defining_op = loom_value_def_op(value);
   if (defining_op == NULL) {
-    return loom_amdgpu_source_value_naturally_prefers_vgpr(module,
+    return loom_amdgpu_source_value_naturally_prefers_vgpr(module, fact_table,
                                                            source_value_id);
   }
   const loom_trait_flags_t defining_op_traits =
@@ -1015,7 +1090,7 @@ static bool loom_amdgpu_source_value_prefers_vgpr_impl(
   const loom_amdgpu_source_producer_flags_t producer_flags =
       loom_amdgpu_source_producer_flags(defining_op->kind);
   if (loom_amdgpu_source_producer_requires_wide_vgpr(
-          module, fact_table, source_value_id, producer_flags)) {
+          module, fact_table, analysis, source_value_id, producer_flags)) {
     return true;
   }
 
@@ -1063,8 +1138,10 @@ static bool loom_amdgpu_source_value_prefers_vgpr_impl(
     return true;
   }
 
-  if (loom_value_def_index(value) == 0 &&
-      loom_traits_have_distribution_transfer(defining_op_traits)) {
+  // Every result carries the operand placement dependency, including a
+  // quotient's paired remainder. Uniform values can still require VGPRs when
+  // their producer has no scalar instruction form.
+  if (loom_traits_have_distribution_transfer(defining_op_traits)) {
     return loom_amdgpu_distribution_transfer_result_prefers_vgpr(
         module, fact_table, view_regions, analysis, source_value_id,
         defining_op);
@@ -1132,7 +1209,7 @@ static bool loom_amdgpu_source_value_prefers_vgpr_impl(
                                                        producer_flags) ||
       loom_amdgpu_scalar_type_fallback_result_prefers_vgpr(source_type) ||
       (loom_type_is_vector(source_type) &&
-       loom_amdgpu_source_value_naturally_prefers_vgpr(module,
+       loom_amdgpu_source_value_naturally_prefers_vgpr(module, fact_table,
                                                        source_value_id))) {
     return true;
   }

@@ -81,6 +81,8 @@ REFERENCE_SECTIONS = (
 DIALECT_REFERENCE_SPECS = (
     DialectReferenceSpec("scalar", "program"),
     DialectReferenceSpec("func", "program"),
+    DialectReferenceSpec("type", "program"),
+    DialectReferenceSpec("ref", "program"),
     DialectReferenceSpec("template", "program"),
     DialectReferenceSpec("encoding", "program"),
     DialectReferenceSpec("pool", "program"),

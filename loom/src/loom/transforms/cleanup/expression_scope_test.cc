@@ -59,11 +59,10 @@ class ExpressionScopeTest : public ::testing::Test {
     return cursor;
   }
 
-  void Initialize() {
-    IREE_ASSERT_OK(loom_expression_walk_allocate(module_, module_->body,
-                                                 /*identity_policy=*/nullptr,
-                                                 /*maximum_entry_count=*/0,
-                                                 &arena_, &walk_));
+  void Initialize(uint32_t maximum_entry_count = 0) {
+    IREE_ASSERT_OK(loom_expression_walk_allocate(
+        module_, module_->body,
+        /*identity_policy=*/nullptr, maximum_entry_count, &arena_, &walk_));
   }
 
   // Shared allocator for IR and analysis; their arena lifetimes stay separate.
@@ -105,23 +104,25 @@ TEST_F(ExpressionScopeTest,
                                        LOOM_LOCATION_UNKNOWN, &branch));
     }
   }
-  Initialize();
+  // A bound larger than one arena block also exercises the paged bucket tail.
+  Initialize(/*maximum_entry_count=*/2048);
+  loom_expression_cursor_t cursor = Next(root);
   const iree_host_size_t initial_bytes = arena_.used_allocation_size;
   // Equal hashes exercise structural equality and collision-probe rollback.
   // Hashing is a dependency of the scoped index, not the subject of this test.
-  const uint32_t hash = 123;
+  const uint32_t hash = 3000;
   int visited = 0;
   for (;;) {
-    loom_expression_cursor_t cursor;
-    IREE_ASSERT_OK(loom_expression_walk_next(walk_, &cursor));
     if (!cursor.op) {
       break;
     }
     if (!loom_test_constant_isa(cursor.op)) {
+      IREE_ASSERT_OK(loom_expression_walk_next(walk_, &cursor));
       continue;
     }
     ++visited;
-    auto* existing = loom_expression_scope_find(&cursor, hash, 0);
+    auto probe = loom_expression_scope_probe(&cursor, hash, 0);
+    auto* existing = probe.entry;
     const bool same_as_root = loom_test_constant_value(cursor.op).i64 == 42;
     if (cursor.op != root && same_as_root) {
       ASSERT_NE(existing, nullptr);
@@ -131,7 +132,9 @@ TEST_F(ExpressionScopeTest,
     }
     // An expired effect epoch can require a new producer even when a
     // structural equivalent dominates. Sibling bindings remain independent.
-    loom_expression_scope_insert(&cursor, {cursor.op, hash, cursor.epoch});
+    loom_expression_scope_insert(&cursor, probe,
+                                 {cursor.op, hash, cursor.epoch});
+    IREE_ASSERT_OK(loom_expression_walk_next(walk_, &cursor));
   }
   EXPECT_EQ(visited, 7);
   EXPECT_EQ(arena_.used_allocation_size, initial_bytes);
@@ -159,21 +162,26 @@ TEST_F(ExpressionScopeTest,
 
   auto cursor = Next(outer);
   const uint32_t outer_epoch = cursor.epoch;
-  const uint32_t hash = loom_expression_hash(module_, outer);
-  loom_expression_scope_insert(&cursor, {outer, hash, cursor.epoch});
+  loom_expression_hash_cache_t hash_cache;
+  loom_expression_hash_cache_initialize(&hash_cache);
+  const uint32_t hash = loom_expression_hash(module_, outer, &hash_cache);
+  loom_expression_scope_insert(&cursor,
+                               loom_expression_scope_probe(&cursor, hash, 0),
+                               {outer, hash, cursor.epoch});
   Next(isolated);
   cursor = Next(inner);
   const uint32_t inner_epoch = cursor.epoch;
-  EXPECT_EQ(loom_expression_scope_find(&cursor, hash, 0), nullptr);
-  loom_expression_scope_insert(&cursor, {inner, hash, cursor.epoch});
+  auto probe = loom_expression_scope_probe(&cursor, hash, 0);
+  EXPECT_EQ(probe.entry, nullptr);
+  loom_expression_scope_insert(&cursor, probe, {inner, hash, cursor.epoch});
   Next(branch);
   cursor = Next(dominated);
-  auto* existing = loom_expression_scope_find(&cursor, hash, 0);
+  auto* existing = loom_expression_scope_probe(&cursor, hash, 0).entry;
   ASSERT_NE(existing, nullptr);
   EXPECT_EQ(existing->op, inner);
   EXPECT_EQ(existing->metadata, inner_epoch);
   cursor = Next(resumed);
-  existing = loom_expression_scope_find(&cursor, hash, 0);
+  existing = loom_expression_scope_probe(&cursor, hash, 0).entry;
   ASSERT_NE(existing, nullptr);
   EXPECT_EQ(existing->op, outer);
   EXPECT_EQ(existing->metadata, outer_epoch);
@@ -196,35 +204,45 @@ TEST_F(ExpressionScopeTest, ReplacingAnExpiredLocalBindingKeepsRollbackIntact) {
   loom_builder_restore(&builder_, saved);
   loom_op_t* resumed = Constant(42);
   loom_op_t* invisible = Constant(43);
-  Initialize();
+  Initialize(/*maximum_entry_count=*/7);
   const uint32_t hash = 1;
   auto cursor = Next(outer);
-  loom_expression_scope_insert(&cursor, {outer, hash, cursor.epoch});
+  loom_expression_scope_insert(&cursor,
+                               loom_expression_scope_probe(&cursor, hash, 0),
+                               {outer, hash, cursor.epoch});
   Next(map);
   const iree_host_size_t initial_bytes = arena_.used_allocation_size;
   cursor = Next(first);
-  loom_expression_scope_insert(&cursor, {first, hash, cursor.epoch});
+  loom_expression_scope_insert(&cursor,
+                               loom_expression_scope_probe(&cursor, hash, 0),
+                               {first, hash, cursor.epoch});
   cursor = Next(collision);
-  loom_expression_scope_insert(&cursor, {collision, hash, cursor.epoch});
+  loom_expression_scope_insert(&cursor,
+                               loom_expression_scope_probe(&cursor, hash, 0),
+                               {collision, hash, cursor.epoch});
   cursor = Next(second);
   // Epoch policy can expire a producer without removing its structural key.
-  loom_expression_scope_insert(&cursor, {second, hash, cursor.epoch});
+  loom_expression_scope_insert(&cursor,
+                               loom_expression_scope_probe(&cursor, hash, 0),
+                               {second, hash, cursor.epoch});
   cursor = Next(third);
-  auto* existing = loom_expression_scope_find(&cursor, hash, 0);
+  auto* existing = loom_expression_scope_probe(&cursor, hash, 0).entry;
   ASSERT_NE(existing, nullptr);
   EXPECT_EQ(existing->op, second);
   EXPECT_EQ(existing->metadata, cursor.epoch - 1);
   cursor = Next(resumed);
-  existing = loom_expression_scope_find(&cursor, hash, 0);
+  existing = loom_expression_scope_probe(&cursor, hash, 0).entry;
   ASSERT_NE(existing, nullptr);
   EXPECT_EQ(existing->op, outer);
   cursor = Next(invisible);
-  EXPECT_EQ(loom_expression_scope_find(&cursor, hash, 0), nullptr);
+  EXPECT_EQ(loom_expression_scope_probe(&cursor, hash, 0).entry, nullptr);
   Next(nullptr);
   EXPECT_EQ(arena_.used_allocation_size, initial_bytes);
 }
 
-TEST_F(ExpressionScopeTest, InventoryIncludesOperationsAfterEmptyNestedBlocks) {
+TEST_F(ExpressionScopeTest,
+       AdaptiveIndexIncludesOperationsAfterEmptyNestedBlocks) {
+  loom_op_t* outer = Constant(99);
   loom_op_t* map = nullptr;
   IREE_ASSERT_OK(loom_test_map_build(&builder_, nullptr, 0,
                                      loom_type_scalar(LOOM_SCALAR_TYPE_I32),
@@ -240,19 +258,79 @@ TEST_F(ExpressionScopeTest, InventoryIncludesOperationsAfterEmptyNestedBlocks) {
   IREE_ASSERT_OK(loom_test_isolated_region_build(
       &builder_, nullptr, 0, nullptr, 0, LOOM_LOCATION_UNKNOWN, &empty));
   loom_op_t* first = Constant(100);
-  loom_builder_set_block(&builder_, blocks[2]);
   loom_op_t* second = Constant(101);
+  loom_op_t* third = Constant(102);
+  loom_op_t* repeated = Constant(100);
+  loom_builder_set_block(&builder_, blocks[2]);
+  loom_op_t* remote = Constant(103);
   loom_builder_restore(&builder_, saved);
-  loom_op_t* last = Constant(102);
+  loom_op_t* last = Constant(104);
   Initialize();
+  auto cursor = Next(outer);
+  const uint32_t hash = 1;
+  loom_expression_scope_insert(&cursor,
+                               loom_expression_scope_probe(&cursor, hash, 0),
+                               {outer, hash, cursor.epoch});
   Next(map);
   Next(empty);
-  for (auto* op : {first, second, last}) {
-    auto cursor = Next(op);
-    loom_expression_scope_insert(
-        &cursor, {op, loom_expression_hash(module_, op), cursor.epoch});
+  // Deliberately collide distinct structures so the block-entry reservation
+  // grows and rehashes occupied probe chains before the repeated expression.
+  for (auto* op : {first, second, third}) {
+    cursor = Next(op);
+    loom_expression_scope_insert(&cursor,
+                                 loom_expression_scope_probe(&cursor, hash, 0),
+                                 {op, hash, cursor.epoch});
   }
+  cursor = Next(repeated);
+  auto probe = loom_expression_scope_probe(&cursor, hash, 0);
+  ASSERT_NE(probe.entry, nullptr);
+  EXPECT_EQ(probe.entry->op, first);
+  loom_expression_scope_insert(&cursor, probe, {repeated, hash, cursor.epoch});
+  cursor = Next(remote);
+  loom_expression_scope_insert(&cursor,
+                               loom_expression_scope_probe(&cursor, hash, 0),
+                               {remote, hash, cursor.epoch});
+  cursor = Next(last);
+  loom_expression_scope_insert(&cursor,
+                               loom_expression_scope_probe(&cursor, hash, 0),
+                               {last, hash, cursor.epoch});
   Next(nullptr);
+}
+
+TEST_F(ExpressionScopeTest, PromotesCompactHeadsAtBindingIndexBoundary) {
+  for (uint32_t i = 0; i < UINT16_MAX; ++i) {
+    Constant(i);
+  }
+  loom_op_t* isolated = nullptr;
+  IREE_ASSERT_OK(loom_test_isolated_region_build(
+      &builder_, nullptr, 0, nullptr, 0, LOOM_LOCATION_UNKNOWN, &isolated));
+  auto saved = loom_builder_enter_region(
+      &builder_, isolated, loom_test_isolated_region_body(isolated));
+  Constant(UINT16_MAX);
+  loom_builder_restore(&builder_, saved);
+
+  Initialize();
+  uint32_t visited = 0;
+  bool all_misses = true;
+  for (;;) {
+    loom_expression_cursor_t cursor;
+    IREE_ASSERT_OK(loom_expression_walk_next(walk_, &cursor));
+    if (!cursor.op) {
+      break;
+    }
+    if (!loom_test_constant_isa(cursor.op)) {
+      continue;
+    }
+    const uint32_t hash = (uint32_t)loom_test_constant_value(cursor.op).i64;
+    const loom_expression_probe_t probe =
+        loom_expression_scope_probe(&cursor, hash, 0);
+    all_misses &= probe.entry == nullptr;
+    loom_expression_scope_insert(&cursor, probe,
+                                 {cursor.op, hash, cursor.epoch});
+    ++visited;
+  }
+  EXPECT_TRUE(all_misses);
+  EXPECT_EQ(visited, (uint32_t)UINT16_MAX + 1);
 }
 
 }  // namespace

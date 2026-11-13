@@ -1397,26 +1397,57 @@ def _derive_accumulator_quarter_adapters(
 
 
 BFP_STORAGE_FIELDS = (
-    ("mantissas", ("sub_bfp16_x",), ("OP_mMvBMXDst",)),
-    ("exponents_low32", ("sub_bfp16_e", "sub_lo_exp"), ("OP_mElm",)),
-    ("exponents_high32", ("sub_bfp16_e", "sub_hi_exp"), ("OP_mEhm",)),
+    ("mantissas", ("sub_bfp16_x",), ("OP_mMvBMXDst", "OP_mXa", "OP_mXs")),
+    (
+        "exponents_low32",
+        ("sub_bfp16_e", "sub_lo_exp"),
+        ("OP_mElm", "OP_mLdaScl", "OP_mSclSt"),
+    ),
+    (
+        "exponents_high32",
+        ("sub_bfp16_e", "sub_hi_exp"),
+        ("OP_mEhm", "OP_mLdaScl", "OP_mSclSt"),
+    ),
 )
 
+STACK_COMPOSITE_FIELDS = {
+    **{
+        register_class: tuple(
+            (half, (path,), ("OP_mLdaScl", "OP_mSclSt"))
+            for half, path in (("low32", "sub_l_even"), ("high32", "sub_l_odd"))
+        )
+        for register_class in ("eLPredicate", "mL8m")
+    },
+    "eDM": tuple(
+        (f"quarter{index}", (outer, inner), ("OP_mBMm", "OP_mBMs"))
+        for index, (outer, inner) in enumerate(
+            (outer, inner)
+            for outer in ("sub_1024_acc_lo", "sub_1024_acc_hi")
+            for inner in ("sub_512_acc_lo", "sub_512_acc_hi")
+        )
+    ),
+}
 
-def _derive_bfp_storage_adapters(
+
+def _derive_storage_field_adapters(
     source_adapters: tuple[RegisterAdapter, ...],
     register_classes: tuple[RegisterClass, ...],
     physical_registers: tuple[PhysicalRegister, ...],
 ) -> tuple[RegisterAdapter, ...]:
-    """Projects EX mantissas and exponent words into native operand fields."""
+    """Projects compound payloads into their native component operand fields."""
 
     classes = {row.name: row for row in register_classes}
     registers = {row.name: row for row in physical_registers}
     adapters = {row.name: row for row in source_adapters}
     result = []
-    for component, path, adapter_names in BFP_STORAGE_FIELDS:
+    fields = {"mEXa": BFP_STORAGE_FIELDS, **STACK_COMPOSITE_FIELDS}
+    for register_class, component, path, adapter_names in (
+        (register_class, *field)
+        for register_class, components in fields.items()
+        for field in components
+    ):
         projected_registers = []
-        for name in classes["mEXa"].candidates:
+        for name in classes[register_class].candidates:
             selected = name
             for index in path:
                 register = registers[selected]
@@ -1430,8 +1461,8 @@ def _derive_bfp_storage_adapters(
             encodings = dict(adapters[adapter_name].effective_register_encodings)
             result.append(
                 RegisterAdapter(
-                    name=f"LOOM_mEXa_{component}_{adapter_name}",
-                    register_class="mEXa",
+                    name=f"LOOM_{register_class}_{component}_{adapter_name}",
+                    register_class=register_class,
                     register_encodings=tuple(
                         (name, encodings[selected])
                         for name, selected in projected_registers
@@ -1526,6 +1557,8 @@ def _derive_dimension_adapters(
                 selected[name] = field
             for adapter_name in (
                 "OP_mLdaCg",
+                "OP_mLdaScl",
+                "OP_mSclSt",
                 "OP_mMvSclSrc",
                 "OP_mMvSclDst",
                 "OP_mMvSclDstCg",
@@ -1589,7 +1622,7 @@ _REGISTER_ADAPTERS = (
         _REGISTER_CLASSES,
         _PHYSICAL_REGISTERS,
     ),
-    *_derive_bfp_storage_adapters(
+    *_derive_storage_field_adapters(
         _SOURCE_REGISTER_ADAPTERS,
         _REGISTER_CLASSES,
         _PHYSICAL_REGISTERS,

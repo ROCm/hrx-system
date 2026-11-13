@@ -1,0 +1,37 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library", "loom_cc_test", "loom_config_compatible_with")
+
+package(
+    default_visibility = ["//loom/src/loom/import/cxx:__pkg__"],
+    features = ["layering_check"],
+    licenses = ["notice"],
+)
+
+loom_cc_library(
+    name = "source_generator",
+    testonly = True,
+    srcs = ["source_generator.cc"],
+    hdrs = ["source_generator.h"],
+)
+
+loom_cc_test(
+    name = "source_generator_test",
+    srcs = ["source_generator_test.cc"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/import:cxx",
+    ]),
+    deps = [
+        ":source_generator",
+        "//loom/src/loom/format/text:printer",
+        "//loom/src/loom/import/cxx",
+        "//loom/src/loom/ops:op_registry",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)

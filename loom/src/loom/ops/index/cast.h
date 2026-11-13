@@ -9,12 +9,20 @@
 #ifndef LOOM_OPS_INDEX_CAST_H_
 #define LOOM_OPS_INDEX_CAST_H_
 
-#include "loom/ir/facts.h"
+#include "loom/ir/integer_cast.h"
 #include "loom/ir/scalar_type.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+// Describes the fixed-width payload interpretation for verified index.cast
+// types. Address-to-address conversions and i64-to-offset instead require a
+// source-domain proof and return false.
+bool loom_index_cast_payload_interpretation(loom_scalar_type_t input_type,
+                                            loom_scalar_type_t result_type,
+                                            loom_integer_cast_kind_t* out_kind,
+                                            uint8_t* out_bit_count);
 
 // Applies index.cast semantics to one scalar fact summary. |input_type| and
 // |result_type| must be fixed-width integer, index, or offset scalar types,

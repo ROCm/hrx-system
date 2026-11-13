@@ -71,18 +71,17 @@ class CommandBufferTimestampTest : public CtsTestBase<> {
     IREE_ASSERT_OK(UploadBufferData(initial.data(), *out_buffer, 0, length));
   }
 
-  void Begin(iree_hal_command_buffer_t** out_command_buffer,
-             iree_hal_command_buffer_mode_t mode = 0) {
+  void Begin(iree_hal_command_buffer_mode_t mode,
+             iree_hal_command_buffer_t** out_command_buffer) {
     IREE_ASSERT_OK(iree_hal_command_buffer_create(
         iree_hal_queue_family(queue_), mode, IREE_HAL_COMMAND_CATEGORY_TRANSFER,
         indirect() ? 1 : 0, out_command_buffer));
     IREE_ASSERT_OK(iree_hal_command_buffer_begin(*out_command_buffer));
   }
 
-  void Record(iree_hal_buffer_t* buffer,
-              iree_hal_command_buffer_t** out_command_buffer,
-              iree_hal_command_buffer_mode_t mode = 0) {
-    Begin(out_command_buffer, mode);
+  void Record(iree_hal_buffer_t* buffer, iree_hal_command_buffer_mode_t mode,
+              iree_hal_command_buffer_t** out_command_buffer) {
+    Begin(mode, out_command_buffer);
     if (HasFatalFailure()) {
       return;
     }
@@ -182,8 +181,8 @@ TEST_P(CommandBufferTimestampTest, TransferConsumerAndQueueClock) {
   Allocate(kRangeLength, buffer.out());
   ASSERT_FALSE(HasFatalFailure());
   Ref<iree_hal_command_buffer_t> command_buffer;
-  Record(buffer, command_buffer.out(),
-         indirect() ? 0 : IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT);
+  Record(buffer, indirect() ? 0 : IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
+         command_buffer.out());
   ASSERT_FALSE(HasFatalFailure());
   Ref<iree_hal_buffer_t> outer;
   Allocate(16, outer.out());
@@ -216,7 +215,7 @@ TEST_P(CommandBufferTimestampTest, BatchedCompletionPreservesInterleavedBytes) {
     Ref<iree_hal_buffer_t> buffer;
     Allocate(length, buffer.out());
     Ref<iree_hal_command_buffer_t> commands;
-    Begin(commands.out());
+    Begin(0, commands.out());
     ASSERT_FALSE(HasFatalFailure());
     for (uint32_t i = 0; i < count; ++i) {
       // These independent captures share bytes' cache lines with untouched
@@ -247,7 +246,7 @@ TEST_P(CommandBufferTimestampTest, RangedConsumerAndOverwrite) {
   Ref<iree_hal_buffer_t> buffer;
   Allocate(64, buffer.out());
   Ref<iree_hal_command_buffer_t> commands;
-  Begin(commands.out());
+  Begin(0, commands.out());
   ASSERT_FALSE(HasFatalFailure());
   IREE_ASSERT_OK(
       iree_hal_command_buffer_timestamp(commands, 0, 0, RefAt(buffer, 8), 0));
@@ -312,7 +311,7 @@ TEST_P(CommandBufferTimestampTest, ConcurrentBindingsAndReuse) {
   Allocate(3 * kRangeLength, buffer.out());
   ASSERT_FALSE(HasFatalFailure());
   Ref<iree_hal_command_buffer_t> command_buffer;
-  Record(buffer, command_buffer.out());
+  Record(buffer, 0, command_buffer.out());
   ASSERT_FALSE(HasFatalFailure());
   SemaphoreList gate(device_, {0}, {1});
   SemaphoreList first_done(device_, {0}, {1});
@@ -364,7 +363,7 @@ TEST_P(CommandBufferTimestampTest, PendingAllocationAndReleasedOwners) {
   // Every accepted operation has a completion to join even if a later recording
   // or submission fails. No assertion exits with the allocation gate held.
   iree_status_t status = [&]() -> iree_status_t {
-    Record(buffer, command_buffer.out());
+    Record(buffer, 0, command_buffer.out());
     if (HasFatalFailure()) {
       return iree_make_status(IREE_STATUS_INTERNAL);
     }
@@ -403,7 +402,7 @@ TEST_P(CommandBufferTimestampTest, FailedDependencyDoesNotWrite) {
   Allocate(kRangeLength, buffer.out());
   ASSERT_FALSE(HasFatalFailure());
   Ref<iree_hal_command_buffer_t> command_buffer;
-  Record(buffer, command_buffer.out());
+  Record(buffer, 0, command_buffer.out());
   ASSERT_FALSE(HasFatalFailure());
   SemaphoreList gate(device_, {0}, {1});
   SemaphoreList done(device_, {0}, {1});
@@ -422,7 +421,7 @@ TEST_P(CommandBufferTimestampTest, RejectsInvalidRecordingAndBinding) {
   Allocate(kRangeLength, buffer.out());
   ASSERT_FALSE(HasFatalFailure());
   Ref<iree_hal_command_buffer_t> command_buffer;
-  Begin(command_buffer.out());
+  Begin(0, command_buffer.out());
   ASSERT_FALSE(HasFatalFailure());
 #if IREE_HAL_COMMAND_BUFFER_VALIDATION_ENABLE
   for (iree_device_size_t length : {0, 4, 16}) {

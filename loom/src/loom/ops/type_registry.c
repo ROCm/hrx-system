@@ -52,6 +52,11 @@ const loom_type_descriptor_t* loom_type_registry_lookup_builtin(
   return loom_type_registry_builtin_descriptors[kind];
 }
 
+const loom_type_descriptor_t* loom_type_registry_lookup_reference(
+    loom_reference_ownership_t ownership) {
+  return loom_type_registry_reference_descriptors[ownership];
+}
+
 const loom_type_descriptor_t* loom_type_registry_lookup(
     const loom_context_t* context, iree_string_view_t name) {
   iree_host_size_t low = 0;

@@ -87,6 +87,7 @@ amdf_cc_library(
         "//libamdf/cts/gpu:gpu_device_fixture",
         "//libamdf/cts/gpu/util:memory",
         "//libamdf/cts/gpu/util:user_queue",
+        "//libamdf/cts/util:file_storage",
         "//libamdf/cts/util:wait",
         "//third_party:google_test",
         "//third_party:linux_io_uapi",

@@ -1,0 +1,303 @@
+// RUN: roundtrip
+// Typed loads and stores transport __float8_e4m3fn payloads without numeric conversion.
+using Payload = __float8_e4m3fn __attribute__((ext_vector_type(4)));
+void store(unsigned bits, Payload* output) {
+  *output = __builtin_bit_cast(Payload, bits);
+}
+unsigned load(const Payload* input) {
+  return __builtin_bit_cast(unsigned, *input);
+}
+// ----
+func.def public @store(%bits: i32, %output: buffer, %output_byte_offset: offset) {
+  %3 = vector.from_elements %bits : vector<1xi32>
+  %4 = vector.bitcast %3 : vector<1xi32> to vector<4xf8E4M3>
+  %5 = buffer.view %output[%output_byte_offset] : buffer -> view<4xf8E4M3>
+  vector.store<root_in_bounds> %4, %5[0] : vector<4xf8E4M3>, view<4xf8E4M3>
+  func.return
+}
+
+func.def public @load(%input: buffer, %input_byte_offset: offset) -> (i32) {
+  %9 = buffer.view %input[%input_byte_offset] : buffer -> view<4xf8E4M3>
+  %10 = vector.load<root_in_bounds> %9[0] : view<4xf8E4M3> -> vector<4xf8E4M3>
+  %11 = vector.bitcast %10 : vector<4xf8E4M3> to vector<1xi32>
+  %12 = vector.extract %11[0] : vector<1xi32> -> i32
+  func.return %12 : i32
+}
+
+// ====
+// RUN: roundtrip
+// Constant object representations retain their bits in the typed value.
+using Payload = __float8_e4m3fn __attribute__((ext_vector_type(4)));
+Payload payload() {
+  constexpr Payload value = __builtin_bit_cast(Payload, 0x7E7F0080u);
+  return value;
+}
+// ----
+func.def public @payload() -> (vector<4xf8E4M3>) {
+  %1 = scalar.constant -0.0 : f8E4M3
+  %2 = scalar.constant 0.0 : f8E4M3
+  %3 = scalar.constant 127 : i8
+  %4 = scalar.bitcast %3 : i8 to f8E4M3
+  %5 = scalar.constant 448.0 : f8E4M3
+  %value = vector.from_elements %1, %2, %4, %5 : vector<4xf8E4M3>
+  func.return %value : vector<4xf8E4M3>
+}
+
+// ====
+// RUN: roundtrip
+// Typed loads and stores transport __float8_e5m2 payloads without numeric conversion.
+using Payload = __float8_e5m2 __attribute__((ext_vector_type(4)));
+void store(unsigned bits, Payload* output) {
+  *output = __builtin_bit_cast(Payload, bits);
+}
+unsigned load(const Payload* input) {
+  return __builtin_bit_cast(unsigned, *input);
+}
+// ----
+func.def public @store(%bits: i32, %output: buffer, %output_byte_offset: offset) {
+  %3 = vector.from_elements %bits : vector<1xi32>
+  %4 = vector.bitcast %3 : vector<1xi32> to vector<4xf8E5M2>
+  %5 = buffer.view %output[%output_byte_offset] : buffer -> view<4xf8E5M2>
+  vector.store<root_in_bounds> %4, %5[0] : vector<4xf8E5M2>, view<4xf8E5M2>
+  func.return
+}
+
+func.def public @load(%input: buffer, %input_byte_offset: offset) -> (i32) {
+  %9 = buffer.view %input[%input_byte_offset] : buffer -> view<4xf8E5M2>
+  %10 = vector.load<root_in_bounds> %9[0] : view<4xf8E5M2> -> vector<4xf8E5M2>
+  %11 = vector.bitcast %10 : vector<4xf8E5M2> to vector<1xi32>
+  %12 = vector.extract %11[0] : vector<1xi32> -> i32
+  func.return %12 : i32
+}
+
+// ====
+// RUN: roundtrip
+// Constant object representations retain their bits in the typed value.
+using Payload = __float8_e5m2 __attribute__((ext_vector_type(4)));
+Payload payload() {
+  constexpr Payload value = __builtin_bit_cast(Payload, 0x7D7E0080u);
+  return value;
+}
+// ----
+func.def public @payload() -> (vector<4xf8E5M2>) {
+  %1 = scalar.constant -0.0 : f8E5M2
+  %2 = scalar.constant 0.0 : f8E5M2
+  %3 = scalar.constant 126 : i8
+  %4 = scalar.bitcast %3 : i8 to f8E5M2
+  %5 = scalar.constant 125 : i8
+  %6 = scalar.bitcast %5 : i8 to f8E5M2
+  %value = vector.from_elements %1, %2, %4, %6 : vector<4xf8E5M2>
+  func.return %value : vector<4xf8E5M2>
+}
+
+// ====
+// RUN: roundtrip
+// Typed loads and stores transport _Float16 payloads without numeric conversion.
+using Payload = _Float16 __attribute__((ext_vector_type(2)));
+void store(unsigned bits, Payload* output) {
+  *output = __builtin_bit_cast(Payload, bits);
+}
+unsigned load(const Payload* input) {
+  return __builtin_bit_cast(unsigned, *input);
+}
+// ----
+func.def public @store(%bits: i32, %output: buffer, %output_byte_offset: offset) {
+  %3 = vector.from_elements %bits : vector<1xi32>
+  %4 = vector.bitcast %3 : vector<1xi32> to vector<2xf16>
+  %5 = buffer.view %output[%output_byte_offset] : buffer -> view<2xf16>
+  vector.store<root_in_bounds> %4, %5[0] : vector<2xf16>, view<2xf16>
+  func.return
+}
+
+func.def public @load(%input: buffer, %input_byte_offset: offset) -> (i32) {
+  %9 = buffer.view %input[%input_byte_offset] : buffer -> view<2xf16>
+  %10 = vector.load<root_in_bounds> %9[0] : view<2xf16> -> vector<2xf16>
+  %11 = vector.bitcast %10 : vector<2xf16> to vector<1xi32>
+  %12 = vector.extract %11[0] : vector<1xi32> -> i32
+  func.return %12 : i32
+}
+
+// ====
+// RUN: roundtrip
+// Constant object representations retain their bits in the typed value.
+using Payload = _Float16 __attribute__((ext_vector_type(2)));
+Payload payload() {
+  constexpr Payload value = __builtin_bit_cast(Payload, 0x7C018000u);
+  return value;
+}
+// ----
+func.def public @payload() -> (vector<2xf16>) {
+  %1 = scalar.constant -0.0 : f16
+  %2 = scalar.constant 31745 : i16
+  %3 = scalar.bitcast %2 : i16 to f16
+  %value = vector.from_elements %1, %3 : vector<2xf16>
+  func.return %value : vector<2xf16>
+}
+
+// ====
+// RUN: roundtrip
+// Typed loads and stores transport __bf16 payloads without numeric conversion.
+using Payload = __bf16 __attribute__((ext_vector_type(2)));
+void store(unsigned bits, Payload* output) {
+  *output = __builtin_bit_cast(Payload, bits);
+}
+unsigned load(const Payload* input) {
+  return __builtin_bit_cast(unsigned, *input);
+}
+// ----
+func.def public @store(%bits: i32, %output: buffer, %output_byte_offset: offset) {
+  %3 = vector.from_elements %bits : vector<1xi32>
+  %4 = vector.bitcast %3 : vector<1xi32> to vector<2xbf16>
+  %5 = buffer.view %output[%output_byte_offset] : buffer -> view<2xbf16>
+  vector.store<root_in_bounds> %4, %5[0] : vector<2xbf16>, view<2xbf16>
+  func.return
+}
+
+func.def public @load(%input: buffer, %input_byte_offset: offset) -> (i32) {
+  %9 = buffer.view %input[%input_byte_offset] : buffer -> view<2xbf16>
+  %10 = vector.load<root_in_bounds> %9[0] : view<2xbf16> -> vector<2xbf16>
+  %11 = vector.bitcast %10 : vector<2xbf16> to vector<1xi32>
+  %12 = vector.extract %11[0] : vector<1xi32> -> i32
+  func.return %12 : i32
+}
+
+// ====
+// RUN: roundtrip
+// Constant object representations retain their bits in the typed value.
+using Payload = __bf16 __attribute__((ext_vector_type(2)));
+Payload payload() {
+  constexpr Payload value = __builtin_bit_cast(Payload, 0x7F818000u);
+  return value;
+}
+// ----
+func.def public @payload() -> (vector<2xbf16>) {
+  %1 = scalar.constant -0.0 : bf16
+  %2 = scalar.constant 32641 : i16
+  %3 = scalar.bitcast %2 : i16 to bf16
+  %value = vector.from_elements %1, %3 : vector<2xbf16>
+  func.return %value : vector<2xbf16>
+}
+
+// ====
+// RUN: roundtrip
+// Typed loads and stores transport float payloads without numeric conversion.
+using Payload = float;
+void store(unsigned bits, Payload* output) {
+  *output = __builtin_bit_cast(Payload, bits);
+}
+unsigned load(const Payload* input) {
+  return __builtin_bit_cast(unsigned, *input);
+}
+// ----
+func.def public @store(%bits: i32, %output: buffer, %output_byte_offset: offset) {
+  %3 = scalar.bitcast %bits : i32 to f32
+  %4 = buffer.view %output[%output_byte_offset] : buffer -> view<1xf32>
+  view.store<root_in_bounds> %3, %4[0] : f32, view<1xf32>
+  func.return
+}
+
+func.def public @load(%input: buffer, %input_byte_offset: offset) -> (i32) {
+  %8 = buffer.view %input[%input_byte_offset] : buffer -> view<1xf32>
+  %9 = view.load<root_in_bounds> %8[0] : view<1xf32> -> f32
+  %10 = scalar.bitcast %9 : f32 to i32
+  func.return %10 : i32
+}
+
+// ====
+// RUN: roundtrip
+// Constant object representations retain their bits in the typed value.
+using Payload = float;
+Payload payload() {
+  constexpr Payload value = __builtin_bit_cast(Payload, 0x7F812345u);
+  return value;
+}
+// ----
+func.def public @payload() -> (f32) {
+  %1 = scalar.constant 2139169605 : i32
+  %value = scalar.bitcast %1 : i32 to f32
+  func.return %value : f32
+}
+
+// ====
+// RUN: roundtrip
+// Typed loads and stores transport float payloads without numeric conversion.
+using Payload = float __attribute__((ext_vector_type(2)));
+void store(unsigned long long bits, Payload* output) {
+  *output = __builtin_bit_cast(Payload, bits);
+}
+unsigned long long load(const Payload* input) {
+  return __builtin_bit_cast(unsigned long long, *input);
+}
+// ----
+func.def public @store(%bits: i64, %output: buffer, %output_byte_offset: offset) {
+  %3 = vector.from_elements %bits : vector<1xi64>
+  %4 = vector.bitcast %3 : vector<1xi64> to vector<2xf32>
+  %5 = buffer.view %output[%output_byte_offset] : buffer -> view<2xf32>
+  vector.store<root_in_bounds> %4, %5[0] : vector<2xf32>, view<2xf32>
+  func.return
+}
+
+func.def public @load(%input: buffer, %input_byte_offset: offset) -> (i64) {
+  %9 = buffer.view %input[%input_byte_offset] : buffer -> view<2xf32>
+  %10 = vector.load<root_in_bounds> %9[0] : view<2xf32> -> vector<2xf32>
+  %11 = vector.bitcast %10 : vector<2xf32> to vector<1xi64>
+  %12 = vector.extract %11[0] : vector<1xi64> -> i64
+  func.return %12 : i64
+}
+
+// ====
+// RUN: roundtrip
+// Constant object representations retain their bits in the typed value.
+using Payload = float __attribute__((ext_vector_type(2)));
+Payload payload() {
+  constexpr Payload value = __builtin_bit_cast(Payload, 0x7FF123456789ABCDull);
+  return value;
+}
+// ----
+func.def public @payload() -> (vector<2xf32>) {
+  %1 = scalar.constant 1.300266746393047e+24 : f32
+  %2 = scalar.constant 2146509637 : i32
+  %3 = scalar.bitcast %2 : i32 to f32
+  %value = vector.from_elements %1, %3 : vector<2xf32>
+  func.return %value : vector<2xf32>
+}
+
+// ====
+// RUN: roundtrip
+// Typed loads and stores transport double payloads without numeric conversion.
+using Payload = double;
+void store(unsigned long long bits, Payload* output) {
+  *output = __builtin_bit_cast(Payload, bits);
+}
+unsigned long long load(const Payload* input) {
+  return __builtin_bit_cast(unsigned long long, *input);
+}
+// ----
+func.def public @store(%bits: i64, %output: buffer, %output_byte_offset: offset) {
+  %3 = scalar.bitcast %bits : i64 to f64
+  %4 = buffer.view %output[%output_byte_offset] : buffer -> view<1xf64>
+  view.store<root_in_bounds> %3, %4[0] : f64, view<1xf64>
+  func.return
+}
+
+func.def public @load(%input: buffer, %input_byte_offset: offset) -> (i64) {
+  %8 = buffer.view %input[%input_byte_offset] : buffer -> view<1xf64>
+  %9 = view.load<root_in_bounds> %8[0] : view<1xf64> -> f64
+  %10 = scalar.bitcast %9 : f64 to i64
+  func.return %10 : i64
+}
+
+// ====
+// RUN: roundtrip
+// Constant object representations retain their bits in the typed value.
+using Payload = double;
+Payload payload() {
+  constexpr Payload value = __builtin_bit_cast(Payload, 0x7FF0000012345678ull);
+  return value;
+}
+// ----
+func.def public @payload() -> (f64) {
+  %1 = scalar.constant 9218868437532825208 : i64
+  %value = scalar.bitcast %1 : i64 to f64
+  func.return %value : f64
+}

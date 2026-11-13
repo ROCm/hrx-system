@@ -15,6 +15,7 @@ _WINDOWS_X86_64 = ["@platforms//cpu:x86_64", "@platforms//os:windows"]
 
 def _windows_cc_toolchain_impl(ctx):
     cc = ctx.attr.cc[cc_common.CcToolchainInfo]
+    variables = ctx.attr.cc[platform_common.TemplateVariableInfo].variables
     address_sanitizer_files = ctx.files.address_sanitizer_files
     if ctx.attr.native_runtime:
         runtime = ctx.attr.native_runtime[NativeWindowsRuntimeInfo]
@@ -37,6 +38,13 @@ def _windows_cc_toolchain_impl(ctx):
                 # Exact executable and loader inputs, without C/C++ headers.
                 files = depset([ctx.file.masm] + ctx.files.masm_files),
             ),
+            # Executable and declared inputs for inspecting PE/COFF symbols.
+            dumpbin = struct(
+                executable = ctx.file.dumpbin or variables.get("DUMPBIN"),
+                execution_requirements = ctx.attr.dumpbin_execution_requirements if ctx.file.dumpbin else [],
+                files = depset([ctx.file.dumpbin] if ctx.file.dumpbin else []),
+                use_default_shell_env = bool(ctx.file.dumpbin),
+            ),
             # Compiler-owned Windows runtime artifacts, indexed by filename.
             address_sanitizer_files = {file.basename: file for file in address_sanitizer_files},
         ),
@@ -47,6 +55,11 @@ windows_cc_toolchain = rule(
     attrs = {
         "address_sanitizer_files": attr.label_list(allow_files = True, doc = "Matching Windows compiler-rt DLL, import library, and runtime thunk."),
         "cc": attr.label(mandatory = True, providers = [cc_common.CcToolchainInfo]),
+        "dumpbin": attr.label(allow_single_file = True, cfg = "exec", doc = "PE/COFF symbol inspection executable."),
+        "dumpbin_execution_requirements": attr.string_list(
+            default = ["no-sandbox", "no-remote-exec"],
+            doc = "Scheduler requirements for the selected PE/COFF inspection executable.",
+        ),
         "masm": attr.label(allow_single_file = True, cfg = "exec", mandatory = True),
         "masm_arguments": attr.string_list(doc = "MASM flags preceding output and source paths."),
         "masm_files": attr.label_list(allow_files = True, cfg = "exec", doc = "MASM executable and loader dependencies."),
@@ -179,6 +192,22 @@ def windows_toolchains():
             target_compatible_with = _WINDOWS_X86_64,
             target_settings = [":compiler_clang_cl"],
             toolchain = "@iree_windows_toolchain//:toolchain",
+            toolchain_type = "@bazel_tools//tools/cpp:toolchain_type",
+        )
+        native.toolchain(
+            name = "windows_x86_64_msvc_action_private",
+            exec_compatible_with = HOST_CONSTRAINTS + [":wine_server_action_private"],
+            target_compatible_with = _WINDOWS_X86_64,
+            target_settings = [":compiler_msvc"],
+            toolchain = "@iree_windows_toolchain//:msvc_action_private_toolchain",
+            toolchain_type = "@bazel_tools//tools/cpp:toolchain_type",
+        )
+        native.toolchain(
+            name = "windows_x86_64_msvc",
+            exec_compatible_with = HOST_CONSTRAINTS + [":wine_server_persistent"],
+            target_compatible_with = _WINDOWS_X86_64,
+            target_settings = [":compiler_msvc"],
+            toolchain = "@iree_windows_toolchain//:msvc_toolchain",
             toolchain_type = "@bazel_tools//tools/cpp:toolchain_type",
         )
     else:

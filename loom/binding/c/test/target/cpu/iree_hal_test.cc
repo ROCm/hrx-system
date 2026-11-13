@@ -18,8 +18,8 @@
 #include "iree/base/internal/cpu.h"
 #include "iree/base/internal/math.h"
 #include "iree/hal/api.h"
-#include "iree/hal/drivers/task/device_spec.h"
-#include "iree/hal/drivers/task/executable/elf/elf_module.h"
+#include "iree/hal/driver/task/device_spec.h"
+#include "iree/hal/driver/task/executable/elf/elf_module.h"
 #include "iree/hal/utils/device_spec_builder.h"
 #include "iree/testing/gtest.h"
 #include "loom/target/arch/x86/facts.h"
@@ -97,8 +97,8 @@ void InitializeFakeDevice(const iree_hal_device_spec_t* device_spec,
 
 iree_status_t CreateCpuDeviceSpec(bool include_cpu_facet,
                                   bool include_loader_target,
-                                  DeviceSpecPtr* out_device_spec,
-                                  const iree_cpu_data_t* cpu_data = nullptr) {
+                                  const iree_cpu_data_t* cpu_data,
+                                  DeviceSpecPtr* out_device_spec) {
   out_device_spec->reset();
   iree_hal_device_spec_builder_t builder;
   iree_hal_device_spec_builder_initialize(iree_allocator_system(), &builder);
@@ -151,6 +151,13 @@ iree_status_t CreateCpuDeviceSpec(bool include_cpu_facet,
     out_device_spec->reset(device_spec);
   }
   return status;
+}
+
+iree_status_t CreateCpuDeviceSpec(bool include_cpu_facet,
+                                  bool include_loader_target,
+                                  DeviceSpecPtr* out_device_spec) {
+  return CreateCpuDeviceSpec(include_cpu_facet, include_loader_target,
+                             /*cpu_data=*/nullptr, out_device_spec);
 }
 
 TargetEnvironmentPtr CreateConfiguredTargetEnvironment() {
@@ -234,9 +241,8 @@ const loomc_artifact_t* FindArtifact(const loomc_result_t* result,
 
 TargetProfilePtr SelectCpuTarget(
     loomc_target_environment_t* target_environment, FakeHalDevice* device,
-    loomc_result_t** out_result,
-    const iree_hal_executable_target_t** out_executable_target = nullptr,
-    loomc_target_profile_t* requested_profile = nullptr) {
+    loomc_target_profile_t* requested_profile, loomc_result_t** out_result,
+    const iree_hal_executable_target_t** out_executable_target = nullptr) {
   const loomc_iree_hal_target_provider_t* providers[] = {
       loomc_cpu_iree_hal_target_provider(),
   };
@@ -261,6 +267,15 @@ TargetProfilePtr SelectCpuTarget(
   return TargetProfilePtr(selection.target_profile);
 }
 
+TargetProfilePtr SelectCpuTarget(
+    loomc_target_environment_t* target_environment, FakeHalDevice* device,
+    loomc_result_t** out_result,
+    const iree_hal_executable_target_t** out_executable_target = nullptr) {
+  return SelectCpuTarget(target_environment, device,
+                         /*requested_profile=*/nullptr, out_result,
+                         out_executable_target);
+}
+
 TEST(LoomcCpuIreeHalTargetTest, EnrichesExplicitNativeProfileFromDevice) {
   const iree_cpu_data_t cpu_data = {
       .architecture = IREE_CPU_ARCHITECTURE_X86_64,
@@ -269,8 +284,8 @@ TEST(LoomcCpuIreeHalTargetTest, EnrichesExplicitNativeProfileFromDevice) {
   };
   DeviceSpecPtr device_spec;
   IREE_ASSERT_OK(CreateCpuDeviceSpec(/*include_cpu_facet=*/true,
-                                     /*include_loader_target=*/true,
-                                     &device_spec, &cpu_data));
+                                     /*include_loader_target=*/true, &cpu_data,
+                                     &device_spec));
   FakeHalDevice device = {};
   InitializeFakeDevice(device_spec.get(), &device);
   TargetEnvironmentPtr target_environment = CreateConfiguredTargetEnvironment();
@@ -281,9 +296,9 @@ TEST(LoomcCpuIreeHalTargetTest, EnrichesExplicitNativeProfileFromDevice) {
   TargetProfilePtr requested_profile(selected_profile);
 
   loomc_result_t* result = nullptr;
-  TargetProfilePtr profile = SelectCpuTarget(
-      target_environment.get(), &device, &result,
-      /*out_executable_target=*/nullptr, requested_profile.get());
+  TargetProfilePtr profile = SelectCpuTarget(target_environment.get(), &device,
+                                             requested_profile.get(), &result,
+                                             /*out_executable_target=*/nullptr);
   ResultPtr result_ptr(result);
 
   ASSERT_NE(result_ptr.get(), nullptr);
@@ -340,13 +355,13 @@ TEST(LoomcCpuIreeHalTargetTest,
   DeviceSpecPtr device_spec;
   IREE_ASSERT_OK(CreateCpuDeviceSpec(/*include_cpu_facet=*/true,
                                      /*include_loader_target=*/true,
-                                     &device_spec, &requested_facts->cpu_data));
+                                     &requested_facts->cpu_data, &device_spec));
   FakeHalDevice device = {};
   InitializeFakeDevice(device_spec.get(), &device);
   loomc_result_t* result = nullptr;
-  TargetProfilePtr profile = SelectCpuTarget(
-      target_environment.get(), &device, &result,
-      /*out_executable_target=*/nullptr, requested_profile.get());
+  TargetProfilePtr profile = SelectCpuTarget(target_environment.get(), &device,
+                                             requested_profile.get(), &result,
+                                             /*out_executable_target=*/nullptr);
   ResultPtr result_ptr(result);
 
   ASSERT_NE(result_ptr.get(), nullptr);
@@ -402,8 +417,8 @@ TEST(LoomcCpuIreeHalTargetTest, SelectsStrongestProfileFromDeviceFacts) {
   };
   DeviceSpecPtr device_spec;
   IREE_ASSERT_OK(CreateCpuDeviceSpec(/*include_cpu_facet=*/true,
-                                     /*include_loader_target=*/true,
-                                     &device_spec, &cpu_data));
+                                     /*include_loader_target=*/true, &cpu_data,
+                                     &device_spec));
   FakeHalDevice device = {};
   InitializeFakeDevice(device_spec.get(), &device);
   TargetEnvironmentPtr target_environment = CreateConfiguredTargetEnvironment();
@@ -435,8 +450,8 @@ TEST(LoomcCpuIreeHalTargetTest, CompilesMixedAuthoredTargetsFromDeviceFacts) {
   };
   DeviceSpecPtr device_spec;
   IREE_ASSERT_OK(CreateCpuDeviceSpec(/*include_cpu_facet=*/true,
-                                     /*include_loader_target=*/true,
-                                     &device_spec, &cpu_data));
+                                     /*include_loader_target=*/true, &cpu_data,
+                                     &device_spec));
   FakeHalDevice device = {};
   InitializeFakeDevice(device_spec.get(), &device);
   TargetEnvironmentPtr target_environment = CreateConfiguredTargetEnvironment();
@@ -511,8 +526,8 @@ TEST(LoomcCpuIreeHalTargetTest, CompilesSerializedAvxVnniInt8ProfileToObject) {
   };
   DeviceSpecPtr device_spec;
   IREE_ASSERT_OK(CreateCpuDeviceSpec(/*include_cpu_facet=*/true,
-                                     /*include_loader_target=*/true,
-                                     &device_spec, &cpu_data));
+                                     /*include_loader_target=*/true, &cpu_data,
+                                     &device_spec));
   FakeHalDevice device = {};
   InitializeFakeDevice(device_spec.get(), &device);
   TargetEnvironmentPtr target_environment = CreateConfiguredTargetEnvironment();
@@ -601,7 +616,7 @@ TEST(LoomcCpuIreeHalTargetTest, CompilesBfloatBroadcastWithoutNeConvert) {
                  IREE_CPU_DATA0_X86_64_AVX2},
   };
   DeviceSpecPtr device_spec;
-  IREE_ASSERT_OK(CreateCpuDeviceSpec(true, true, &device_spec, &cpu_data));
+  IREE_ASSERT_OK(CreateCpuDeviceSpec(true, true, &cpu_data, &device_spec));
   FakeHalDevice device = {};
   InitializeFakeDevice(device_spec.get(), &device);
   TargetEnvironmentPtr target_environment = CreateConfiguredTargetEnvironment();
@@ -672,7 +687,7 @@ TEST(LoomcCpuIreeHalTargetTest,
       .fields = {IREE_CPU_DATA0_X86_64_BMI2},
   };
   DeviceSpecPtr device_spec;
-  IREE_ASSERT_OK(CreateCpuDeviceSpec(true, true, &device_spec, &cpu_data));
+  IREE_ASSERT_OK(CreateCpuDeviceSpec(true, true, &cpu_data, &device_spec));
   FakeHalDevice device = {};
   InitializeFakeDevice(device_spec.get(), &device);
   TargetEnvironmentPtr target_environment = CreateConfiguredTargetEnvironment();
@@ -866,7 +881,7 @@ TEST_P(LegacyHalfConversionTest,
                          : (f16c ? IREE_CPU_DATA0_X86_64_F16C : 0))},
   };
   DeviceSpecPtr device_spec;
-  IREE_ASSERT_OK(CreateCpuDeviceSpec(true, true, &device_spec, &cpu_data));
+  IREE_ASSERT_OK(CreateCpuDeviceSpec(true, true, &cpu_data, &device_spec));
   FakeHalDevice device = {};
   InitializeFakeDevice(device_spec.get(), &device);
   TargetEnvironmentPtr target_environment = CreateConfiguredTargetEnvironment();

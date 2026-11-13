@@ -594,6 +594,92 @@ TEST(VMProgramTest, RejectsMissingAndIncompatibleImports) {
                     &kYieldTargetDefinition);
 }
 
+TEST(VMProgramTest, MatchesDeclaredReferenceOwnershipThroughNestedCallables) {
+  const iree_vm_module_signature_type_kind_t kinds[] = {
+      IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF,
+      IREE_VM_MODULE_SIGNATURE_TYPE_KIND_PTR,
+  };
+  const iree_vm_ref_type_t source_types[] = {kSharedRefType};
+  const iree_vm_ref_type_t target_types[] = {kAuxiliaryRefType, kSharedRefType};
+  const iree_vm_module_signature_type_t function_field[] = {
+      {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_FUNCTION, 0}};
+  const iree_vm_module_import_group_t groups[] = {{IREE_SV("target"), 0, 1}};
+  for (bool nested : {false, true}) {
+    for (bool result_mode : {false, true}) {
+      for (auto source_kind : kinds) {
+        for (auto target_kind : kinds) {
+          SCOPED_TRACE(::testing::Message()
+                       << "nested=" << nested << " result=" << result_mode
+                       << " source=" << source_kind
+                       << " target=" << target_kind);
+          const iree_vm_module_signature_type_t source_fields[] = {
+              {result_mode ? kinds[0] : source_kind, 0},
+              {result_mode ? source_kind : kinds[0], 0},
+          };
+          const iree_vm_module_signature_type_t target_fields[] = {
+              {result_mode ? kinds[0] : target_kind, 1},
+              {result_mode ? target_kind : kinds[0], 1},
+          };
+          const iree_vm_module_callable_type_declaration_t source_callables[] =
+              {
+                  {{{&source_fields[0], 1, 0, 1, 0},
+                    {&source_fields[1], 1, 0, 1, 0}},
+                   IREE_VM_CALLABLE_TYPE_FLAG_NONE,
+                   0,
+                   0},
+                  {{{function_field, 1, 0, 0, 1}, {function_field, 1, 0, 0, 1}},
+                   IREE_VM_CALLABLE_TYPE_FLAG_NONE,
+                   1,
+                   0},
+              };
+          const iree_vm_module_callable_type_declaration_t target_callables[] =
+              {
+                  {{{&target_fields[0], 1, 0, 1, 0},
+                    {&target_fields[1], 1, 0, 1, 0}},
+                   IREE_VM_CALLABLE_TYPE_FLAG_NONE,
+                   0,
+                   0},
+                  {{{function_field, 1, 0, 0, 1}, {function_field, 1, 0, 0, 1}},
+                   IREE_VM_CALLABLE_TYPE_FLAG_NONE,
+                   1,
+                   0},
+              };
+          const iree_host_size_t callable_ordinal = nested ? 1 : 0;
+          const iree_vm_module_import_declaration_t imports[] = {
+              {IREE_SV("target"), IREE_SV("work"), callable_ordinal,
+               IREE_VM_MODULE_IMPORT_FLAG_NONE, 0}};
+          const iree_vm_module_export_declaration_t exports[] = {
+              {IREE_SV("work"), callable_ordinal, 0, 0}};
+          TableModule source;
+          TableModule target;
+          IREE_ASSERT_OK(source.Publish(TableModuleDefinition(IREE_SV("source"))
+                                            .WithRefTypes(source_types)
+                                            .WithCallableTypes(source_callables)
+                                            .WithImports(groups, imports)));
+          IREE_ASSERT_OK(
+              target.Publish(TableModuleDefinition(IREE_SV("target"), 1)
+                                 .WithRefTypes(target_types)
+                                 .WithCallableTypes(target_callables)
+                                 .WithExports(exports)));
+          iree_vm_module_t* libraries[] = {target.module()};
+          iree_vm_program_t* program = nullptr;
+          iree_status_t status = iree_vm_program_create(
+              {source.module(), iree_vm_module_span_from_array(libraries)},
+              iree_allocator_system(), &program);
+          if (source_kind == target_kind) {
+            IREE_ASSERT_OK(status);
+            EXPECT_NE(program, nullptr);
+          } else {
+            IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT, status);
+            EXPECT_EQ(program, nullptr);
+          }
+          iree_vm_program_release(program);
+        }
+      }
+    }
+  }
+}
+
 static const TableModuleDefinition kDuplicateDefinition(IREE_SVL("duplicate"));
 static const TableModuleDefinition kNonLinkableDefinition(
     IREE_SVL("inspection.only"), 0, 0, IREE_VM_MODULE_FLAG_NONE);

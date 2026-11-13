@@ -22,9 +22,9 @@ func.def public @image_prepare_batch_v1(%state: buffer, %tags: buffer, %ranges: 
   func.return %result_0, %result_1 : i32, buffer
 }
 
-func.decl @generate(%first_part: i32, %part_count: i32, %cursor: i32, %output_bytes: i64, %request: hal.buffer, %rgb: hal.buffer, %workspace: hal.buffer) -> (i32)
+func.decl @generate(%first_part: i32, %part_count: i32, %cursor: i32, %output_bytes: i64, %request: hal.buffer, %rgba: hal.buffer, %workspace: hal.buffer) -> (i32)
 
-func.def public @image_generate_v1(%first_part: i32, %part_count: i32, %cursor: i32, %output_bytes: i64, %request: hal.buffer, %rgb: hal.buffer, %workspace: hal.buffer) -> (i32) {
-  %result_0 = func.call @generate(%first_part, %part_count, %cursor, %output_bytes, %request, %rgb, %workspace) : (i32, i32, i32, i64, hal.buffer, hal.buffer, hal.buffer) -> (i32)
+func.def public @image_generate_v1(%first_part: i32, %part_count: i32, %cursor: i32, %output_bytes: i64, %request: hal.buffer, %rgba: hal.buffer, %workspace: hal.buffer) -> (i32) {
+  %result_0 = func.call @generate(%first_part, %part_count, %cursor, %output_bytes, %request, %rgba, %workspace) : (i32, i32, i32, i64, hal.buffer, hal.buffer, hal.buffer) -> (i32)
   func.return %result_0 : i32
 }

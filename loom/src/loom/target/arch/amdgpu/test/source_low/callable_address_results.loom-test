@@ -1,0 +1,296 @@
+// RUN: emit source-low target=amdgpu:gfx11-generic output=low
+// Narrow and wide uniform callers share one retained address signature.
+func.def noinline @advance(%value: offset) -> (offset) {
+  %increment = index.constant 8 : offset
+  %next = index.add %value, %increment : offset
+  func.return %next : offset
+}
+
+kernel.def @uniform_offsets() {
+  %groups = index.constant 1 : index
+  %threads = index.constant 64 : index
+  kernel.launch.config workgroups(%groups, %groups, %groups) workgroup_size(%threads, %groups, %groups) : index
+} launch(%output: buffer, %wide: offset) where [range(%wide, 0, 8589934591)] {
+  %small = index.constant 16 : offset
+  %first = func.call @advance(%small) : (offset) -> (offset)
+  %second = func.call @advance(%wide) : (offset) -> (offset)
+  %first_bits = index.cast %first : offset to i64
+  %second_bits = index.cast %second : offset to i64
+  %origin = index.constant 0 : offset
+  %output_view = buffer.view %output[%origin] : buffer -> view<64x2xi64>
+  %row = kernel.workitem.id<x> : index
+  view.store %first_bits, %output_view[%row, 0] : i64, view<64x2xi64>
+  view.store %second_bits, %output_view[%row, 1] : i64, view<64x2xi64>
+  kernel.return
+}
+
+// ----
+low.func.def noinline target<amdgpu.gfx11.generic.core> @advance(%value: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr x2>) asm {
+  %increment = s_mov_b32 8
+  %23 = s_mov_b32 0
+  %25 = slice %value[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %26 = slice %value[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %29, %30 = s_add_co_u32 %25, %increment
+  %31, %32 = s_addc_u32 %26, %23, %30
+  %next = concat(%29, %31) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  return %next
+}
+
+low.kernel.def target<amdgpu.gfx11.generic.core> abi_layout({constant_count = 2, direct_arg_count = 1, direct_arg_names = {arg0 = "wide"}, direct_arg_offsets = [8], direct_arg_parameter_indices = [1], direct_arg_sizes = [8], parameter_count = 2, resource_count = 1, resource_offsets = [0], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @uniform_offsets(%wide: reg<amdgpu.sgpr x2>) where [range(%wide, 0, 8589934591)] asm {
+  %row = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %output_view = resource<hal_binding> {extent = 1024, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %small = s_mov_b32 16
+  %38 = s_mov_b32 0
+  %39 = concat(%small, %38) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %first_bits = low.func.call pure @advance(%39) : (reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr x2>)
+  %second_bits = low.func.call pure @advance(%wide) : (reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr x2>)
+  %42 = slice %first_bits[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %43 = v_mov_b32_copy %42
+  %44 = slice %first_bits[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %45 = v_mov_b32_copy %44
+  %46 = concat(%43, %45) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %47 = v_lshlrev_b32_src0_inline %row, 4
+  global_store_b64_saddr %47, %46, %output_view
+  %48 = slice %second_bits[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %49 = v_mov_b32_copy %48
+  %50 = slice %second_bits[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %51 = v_mov_b32_copy %50
+  %52 = concat(%49, %51) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_store_b64_saddr %47, %52, %output_view {offset = 8}
+  return
+}
+
+// ====
+
+// Narrow and wide uniform callers share one retained address signature.
+func.def noinline @advance(%value: index) -> (index) {
+  %increment = index.constant 8 : index
+  %next = index.add %value, %increment : index
+  func.return %next : index
+}
+
+kernel.def @uniform_indices() {
+  %groups = index.constant 1 : index
+  %threads = index.constant 64 : index
+  kernel.launch.config workgroups(%groups, %groups, %groups) workgroup_size(%threads, %groups, %groups) : index
+} launch(%output: buffer, %wide: index) where [range(%wide, 0, 8589934591)] {
+  %small = index.constant 16 : index
+  %first = func.call @advance(%small) : (index) -> (index)
+  %second = func.call @advance(%wide) : (index) -> (index)
+  %first_bits = index.cast %first : index to i64
+  %second_bits = index.cast %second : index to i64
+  %origin = index.constant 0 : offset
+  %output_view = buffer.view %output[%origin] : buffer -> view<64x2xi64>
+  %row = kernel.workitem.id<x> : index
+  view.store %first_bits, %output_view[%row, 0] : i64, view<64x2xi64>
+  view.store %second_bits, %output_view[%row, 1] : i64, view<64x2xi64>
+  kernel.return
+}
+
+// ----
+low.func.def noinline target<amdgpu.gfx11.generic.core> @advance(%value: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr x2>) asm {
+  %increment = s_mov_b32 8
+  %23 = s_mov_b32 0
+  %25 = slice %value[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %26 = slice %value[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %29, %30 = s_add_co_u32 %25, %increment
+  %31, %32 = s_addc_u32 %26, %23, %30
+  %next = concat(%29, %31) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  return %next
+}
+
+low.kernel.def target<amdgpu.gfx11.generic.core> abi_layout({constant_count = 2, direct_arg_count = 1, direct_arg_names = {arg0 = "wide"}, direct_arg_offsets = [8], direct_arg_parameter_indices = [1], direct_arg_sizes = [8], parameter_count = 2, resource_count = 1, resource_offsets = [0], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @uniform_indices(%wide: reg<amdgpu.sgpr x2>) where [range(%wide, 0, 8589934591)] asm {
+  %row = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %output_view = resource<hal_binding> {extent = 1024, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %small = s_mov_b32 16
+  %38 = s_mov_b32 0
+  %39 = concat(%small, %38) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %first_bits = low.func.call pure @advance(%39) : (reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr x2>)
+  %second_bits = low.func.call pure @advance(%wide) : (reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr x2>)
+  %42 = slice %first_bits[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %43 = v_mov_b32_copy %42
+  %44 = slice %first_bits[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %45 = v_mov_b32_copy %44
+  %46 = concat(%43, %45) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %47 = v_lshlrev_b32_src0_inline %row, 4
+  global_store_b64_saddr %47, %46, %output_view
+  %48 = slice %second_bits[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %49 = v_mov_b32_copy %48
+  %50 = slice %second_bits[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %51 = v_mov_b32_copy %50
+  %52 = concat(%49, %51) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_store_b64_saddr %47, %52, %output_view {offset = 8}
+  return
+}
+
+// ====
+
+// Per-lane and uniform callers share one retained address signature.
+func.def noinline @advance(%value: offset) -> (offset) {
+  %increment = index.constant 8 : offset
+  %next = index.add %value, %increment : offset
+  func.return %next : offset
+}
+
+kernel.def @varying_offsets() {
+  %groups = index.constant 1 : index
+  %threads = index.constant 64 : index
+  kernel.launch.config workgroups(%groups, %groups, %groups) workgroup_size(%threads, %groups, %groups) : index
+} launch(%output: buffer, %wide: offset) where [range(%wide, 0, 8589934591)] {
+  %lane = kernel.workitem.id<x> : index
+  %small = index.cast %lane : index to offset
+  %first = func.call @advance(%small) : (offset) -> (offset)
+  %second = func.call @advance(%wide) : (offset) -> (offset)
+  %first_bits = index.cast %first : offset to i64
+  %second_bits = index.cast %second : offset to i64
+  %origin = index.constant 0 : offset
+  %output_view = buffer.view %output[%origin] : buffer -> view<64x2xi64>
+  %row = kernel.workitem.id<x> : index
+  view.store %first_bits, %output_view[%row, 0] : i64, view<64x2xi64>
+  view.store %second_bits, %output_view[%row, 1] : i64, view<64x2xi64>
+  kernel.return
+}
+
+// ----
+low.func.def noinline target<amdgpu.gfx11.generic.core> @advance(%value: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm {
+  %increment = s_mov_b32 8
+  %24 = v_mov_b32_copy %increment
+  %25 = v_mov_b32 0
+  %27 = slice %value[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %28 = slice %value[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %31, %32 = v_add_co_u32 %27, %24
+  %33, %34 = v_add_co_ci_u32 %28, %25, %32
+  %next = concat(%31, %33) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  return %next
+}
+
+low.kernel.def target<amdgpu.gfx11.generic.core> abi_layout({constant_count = 2, direct_arg_count = 1, direct_arg_names = {arg0 = "wide"}, direct_arg_offsets = [8], direct_arg_parameter_indices = [1], direct_arg_sizes = [8], parameter_count = 2, resource_count = 1, resource_offsets = [0], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @varying_offsets(%wide: reg<amdgpu.sgpr x2>) where [range(%wide, 0, 8589934591)] asm {
+  %small = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %output_view = resource<hal_binding> {extent = 1024, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %39 = v_mov_b32 0
+  %40 = concat(%small, %39) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %first_bits = low.func.call pure @advance(%40) : (reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>)
+  %42 = slice %wide[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %43 = v_mov_b32_copy %42
+  %44 = slice %wide[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %45 = v_mov_b32_copy %44
+  %46 = concat(%43, %45) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %second_bits = low.func.call pure @advance(%46) : (reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>)
+  %48 = v_lshlrev_b32_src0_inline %small, 4
+  global_store_b64_saddr %48, %first_bits, %output_view
+  global_store_b64_saddr %48, %second_bits, %output_view {offset = 8}
+  return
+}
+
+// ====
+
+// Per-lane and uniform callers share one retained address signature.
+func.def noinline @advance(%value: index) -> (index) {
+  %increment = index.constant 8 : index
+  %next = index.add %value, %increment : index
+  func.return %next : index
+}
+
+kernel.def @varying_indices() {
+  %groups = index.constant 1 : index
+  %threads = index.constant 64 : index
+  kernel.launch.config workgroups(%groups, %groups, %groups) workgroup_size(%threads, %groups, %groups) : index
+} launch(%output: buffer, %wide: index) where [range(%wide, 0, 8589934591)] {
+  %small = kernel.workitem.id<x> : index
+  %first = func.call @advance(%small) : (index) -> (index)
+  %second = func.call @advance(%wide) : (index) -> (index)
+  %first_bits = index.cast %first : index to i64
+  %second_bits = index.cast %second : index to i64
+  %origin = index.constant 0 : offset
+  %output_view = buffer.view %output[%origin] : buffer -> view<64x2xi64>
+  %row = kernel.workitem.id<x> : index
+  view.store %first_bits, %output_view[%row, 0] : i64, view<64x2xi64>
+  view.store %second_bits, %output_view[%row, 1] : i64, view<64x2xi64>
+  kernel.return
+}
+
+// ----
+low.func.def noinline target<amdgpu.gfx11.generic.core> @advance(%value: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm {
+  %increment = s_mov_b32 8
+  %23 = v_mov_b32_copy %increment
+  %24 = v_mov_b32 0
+  %26 = slice %value[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %27 = slice %value[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %30, %31 = v_add_co_u32 %26, %23
+  %32, %33 = v_add_co_ci_u32 %27, %24, %31
+  %next = concat(%30, %32) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  return %next
+}
+
+low.kernel.def target<amdgpu.gfx11.generic.core> abi_layout({constant_count = 2, direct_arg_count = 1, direct_arg_names = {arg0 = "wide"}, direct_arg_offsets = [8], direct_arg_parameter_indices = [1], direct_arg_sizes = [8], parameter_count = 2, resource_count = 1, resource_offsets = [0], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @varying_indices(%wide: reg<amdgpu.sgpr x2>) where [range(%wide, 0, 8589934591)] asm {
+  %small = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %output_view = resource<hal_binding> {extent = 1024, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %38 = v_mov_b32 0
+  %39 = concat(%small, %38) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %first_bits = low.func.call pure @advance(%39) : (reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>)
+  %41 = slice %wide[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %42 = v_mov_b32_copy %41
+  %43 = slice %wide[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %44 = v_mov_b32_copy %43
+  %45 = concat(%42, %44) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %second_bits = low.func.call pure @advance(%45) : (reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>)
+  %47 = v_lshlrev_b32_src0_inline %small, 4
+  global_store_b64_saddr %47, %first_bits, %output_view
+  global_store_b64_saddr %47, %second_bits, %output_view {offset = 8}
+  return
+}
+
+// ====
+
+// The returned storage excludes the unrelated global receipt argument.
+func.def noinline @select_and_record(%left: buffer, %right: buffer, %receipt: buffer, %choice: i1) -> (buffer) {
+  %origin = index.constant 0 : offset
+  %receipt_view = buffer.view %receipt[%origin] : buffer -> view<1xi32>
+  %record = scalar.extui %choice : i1 to i32
+  view.store %record, %receipt_view[0] : i32, view<1xi32>
+  %selected = scf.select %choice, %left, %right : buffer
+  func.return %selected : buffer
+}
+
+func.def public @read_selected(%receipt: buffer, %left_value: i32, %right_value: i32, %choice: i1) -> (i32) {
+  %length = index.constant 4 : offset
+  %origin = index.constant 0 : offset
+  %left = buffer.alloca<private> align(4) %length : buffer
+  %right = buffer.alloca<private> align(4) %length : buffer
+  %left_view = buffer.view %left[%origin] : buffer -> view<1xi32>
+  %right_view = buffer.view %right[%origin] : buffer -> view<1xi32>
+  view.store %left_value, %left_view[0] : i32, view<1xi32>
+  view.store %right_value, %right_view[0] : i32, view<1xi32>
+  %selected = func.call @select_and_record(%left, %right, %receipt, %choice) : (buffer, buffer, buffer, i1) -> (buffer)
+  %selected_view = buffer.view %selected[%origin] : buffer -> view<1xi32>
+  %value = view.load %selected_view[0] : view<1xi32> -> i32
+  func.return %value : i32
+}
+
+// ----
+low.func.def noinline target<amdgpu.gfx11.generic.core> @select_and_record(%left: reg<amdgpu.vgpr>, %right: reg<amdgpu.vgpr>, %receipt_view: reg<amdgpu.vgpr x2>, %choice: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr>) asm {
+  %record = v_cndmask_b32_src0_lit_src1_inline %choice {imm32 = 0, true_value = 1}
+  %34 = slice %receipt_view[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %35 = slice %receipt_view[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %36 = concat(%34, %35) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_store_b32_vaddr %36, %record
+  %selected = v_cndmask_b32 %right, %left, %choice
+  return %selected
+}
+
+low.func.def public target<amdgpu.gfx11.generic.core> abi(hal_kernel) @read_selected(%left_value: reg<amdgpu.vgpr>, %right_value: reg<amdgpu.vgpr>, %choice: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr>) asm {
+  %receipt = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %43 = storage {byte_alignment = 4, byte_length = 8} : low.storage<private>
+  %left_view = storage_address %43 : low.storage<private> -> reg<amdgpu.vgpr>
+  %right_view = storage_address %43 {offset = 4} : low.storage<private> -> reg<amdgpu.vgpr>
+  scratch_store_b32_vaddr %left_view, %left_value
+  scratch_store_b32_vaddr %right_view, %right_value
+  %46 = slice %receipt[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %47 = v_mov_b32_copy %46
+  %48 = slice %receipt[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %49 = v_mov_b32_copy %48
+  %50 = concat(%47, %49) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %selected_view = low.func.call @select_and_record(%left_view, %right_view, %50, %choice) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr x2>, reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr>)
+  %value = scratch_load_b32_vaddr %selected_view
+  return %value
+}

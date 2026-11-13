@@ -1,0 +1,107 @@
+// Eight private constructions with capacities 1..8 fill their entire rings
+// and leave every record unread. Their serial lifetimes share one pair whose
+// credits change on entry. The root ring stays live throughout both epochs
+// and must retain a distinct pair.
+aie2p.target<array> @device
+
+pipeline.def @consume_record() run(%input: channel<tile<16xi32>>, %output: buffer, %record: index, %capacity: index) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %origin = index.constant 0 : offset
+  %record_bytes = index.constant 64 : offset
+  %memory = pipeline.memory<workgroup>[0, 2] : pool
+  %storage_bytes = index.scale %capacity, %record_bytes : index, offset -> offset
+  %storage = buffer.alloca<workgroup> pool(%memory) align(64) %storage_bytes : buffer
+  %slots = buffer.view %storage[%origin] : buffer -> view<[%capacity]x16xi32>
+  %channel = channel.bind<fifo> %slots, %capacity : view<[%capacity]x16xi32>, index -> channel<tile<16xi32>>
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    %input_read, %source = channel.acquire %input : channel<tile<16xi32>> -> (read<tile<16xi32>>, view<16xi32>)
+    %values = vector.load %source[0] : view<16xi32> -> vector<16xi32>
+    %biases = vector.splati 7 : vector<16xi32>
+    %adjusted = vector.addi %values, %biases : vector<16xi32>
+    channel.release %input_read : read<tile<16xi32>>
+    %offset = index.scale %record, %record_bytes : index, offset -> offset
+    %external = buffer.view %output[%offset] : buffer -> view<16xi32>
+    scf.for %slot = [%begin to %capacity step %step] {
+      %write, %destination = channel.reserve %channel : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
+      vector.store %adjusted, %destination[0] : vector<16xi32>, view<16xi32>
+      %copy = kernel.async.copy %destination to %external {cache_scope = workgroup, cache_temporal = regular, direction = workgroup_to_global} : view<16xi32> to view<16xi32> -> kernel.async.token
+      %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+      kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+      channel.publish %write : write<tile<16xi32>>
+    }
+  }
+}
+
+pipeline.def<kernel> public retain target(@device) @entry() run(%input_argument: buffer, %output_argument: buffer) {
+  %input_unique, %output_unique = buffer.assume.noalias %input_argument, %output_argument : buffer, buffer
+  %input, %output = buffer.assume.alignment %input_unique, %output_unique {minimum_alignment = 64} : buffer, buffer
+  %capacity = index.constant 1 : index
+  %origin = index.constant 0 : offset
+  %record_bytes = index.constant 64 : offset
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %epochs = index.constant 2 : index
+  %phases = index.constant 8 : index
+  %records = index.constant 16 : index
+  %memory = pipeline.memory<workgroup>[0, 2] : pool
+  %storage = buffer.alloca<workgroup> pool(%memory) align(64) %record_bytes : buffer
+  %slots = buffer.view %storage[%origin] : buffer -> view<1x16xi32>
+  %incoming = channel.bind<fifo> %slots, %capacity : view<1x16xi32>, index -> channel<tile<16xi32>>
+  pipeline.strand workers([0, 3], [1, 1], [1, 1]) {
+    scf.for %record = [%begin to %records step %step] {
+      %offset = index.scale %record, %record_bytes : index, offset -> offset
+      %external = buffer.view %input[%offset] : buffer -> view<16xi32>
+      %write, %destination = channel.reserve %incoming : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
+      %copy = kernel.async.copy %external to %destination {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<16xi32> to view<16xi32> -> kernel.async.token
+      %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+      kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+      %values = vector.load %destination[0] : view<16xi32> -> vector<16xi32>
+      %biases = vector.splati 3 : vector<16xi32>
+      %adjusted = vector.addi %values, %biases : vector<16xi32>
+      vector.store %adjusted, %destination[0] : vector<16xi32>, view<16xi32>
+      channel.publish %write : write<tile<16xi32>>
+    }
+  }
+  pipeline.serial {
+    scf.for %epoch = [%begin to %epochs step %step] {
+      %base = index.mul %epoch, %phases : index
+      scf.for %phase = [%begin to %phases step %step] unroll {
+        %record = index.add %base, %phase : index
+        %slots = index.add %phase, %step : index
+        pipeline.compose @consume_record(%incoming, %output, %record, %slots) : (channel<tile<16xi32>>, buffer, index, index)
+      }
+    }
+  }
+}
+
+func.def @reference(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %count = index.constant 256 : index
+  %bias = scalar.constant 10 : i32
+  %source = buffer.view %input[%origin] : buffer -> view<256xi32>
+  %destination = buffer.view %output[%origin] : buffer -> view<256xi32>
+  scf.for %element = [%begin to %count step %step] {
+    %value = view.load %source[%element] : view<256xi32> -> i32
+    %adjusted = scalar.addi %value, %bias : i32
+    view.store %adjusted, %destination[%element] : i32, view<256xi32>
+  }
+  func.return
+}
+
+check.scenario public @serial_semaphore_reuse {
+  check.trial[3](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input_storage = check.generate.random.uniform seed(%seed) range(-1000000 to 1000000) : tensor<288xi32>
+    %input = check.tensor.view %input_storage offset(64) : tensor<288xi32> -> tensor<256xi32>
+    %output_storage = check.generate.fill value(-9999) : tensor<288xi32>
+    %output = check.tensor.view %output_storage offset(64) : tensor<288xi32> -> tensor<256xi32>
+    check.compare<@entry, @reference>(%input, %output) : (tensor<256xi32>, tensor<256xi32>) -> () {
+      check.expect.equal actual(%input_storage) expected(%input_storage) : tensor<288xi32>
+      check.expect.equal actual(%output_storage) expected(%output_storage) : tensor<288xi32>
+    }
+  }
+  check.return
+}

@@ -58,12 +58,12 @@ std::optional<DecodeIntrinsic> DecodeIntrinsic::resolve(
     }
     names.reserve(record->members.size());
     for (const auto& member : record->members) {
-      if (!types.native_vector(member.field->type())) {
+      if (!types.native_vector(member.type())) {
         diagnostics.reject(unit, owner,
                            "vector.decode auxiliaries must be a flat record "
                            "of named vectors");
       }
-      auto name = cxx::to_string(member.field->name());
+      auto name = cxx::to_string(member.source->name());
       loom_encoding_auxiliary_key_t key;
       if (!loom_encoding_auxiliary_key_lookup(view(name), &key)) {
         diagnostics.reject(unit, owner,

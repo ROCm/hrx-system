@@ -75,7 +75,7 @@ low.func.def target<amd.xdna.aie2p.configuration>(@configuration_target) @invoke
   // ERROR@+1: XDNA/044 {binding="0", extent="64", offset="48", length="32"}
   %range = range %binding, %offset, %length
   %address = constant 2588608 : reg<aie2p.config.scalar : i64>
-  write.address %address, %range
+  write.address %address, %range, %zero
   return
 }
 
@@ -105,7 +105,7 @@ low.func.def target<amd.xdna.aie2p.configuration>(@configuration_target) @invoke
   %range = range %binding, %zero, %extent
   %address = constant 2588608 : reg<aie2p.config.scalar : i64>
   // ERROR@+1: XDNA/041 {operand_name="binding alignment", value="1", minimum="4", maximum="4294967295"}
-  write.address %address, %range
+  write.address %address, %range, %zero
   return
 }
 
@@ -384,3 +384,34 @@ low.func.def target<amd.xdna.aie2p.configuration>(@configuration) @invoke() asm 
   binding.unused %skipped_ordinal
   return
 }
+
+// ====
+// Address-only updates preserve packet flags without supplying address bits.
+// RUN: emit aie2p-xdna
+
+aie2p.target<configuration> @configuration_target {device_profile = "amd.xdna.strix_halo.17f0_11"}
+
+low.func.def public retain target<amd.xdna.aie2p.configuration>(@configuration_target) abi(array_program) @stream() asm {
+  %columns = constant 1 : reg<aie2p.config.scalar : i64>
+  entry %columns, @initialize, @invoke
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.configuration>(@configuration_target) @initialize() asm {
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.configuration>(@configuration_target) @invoke() asm {
+  %origin = constant 0 : reg<aie2p.config.scalar : i64>
+  %address_bits = constant 1 : reg<aie2p.config.scalar : i64>
+  %extent = constant 64 : reg<aie2p.config.scalar : i64>
+  %read_access = constant 1 : reg<aie2p.config.scalar : i64>
+  %binding = binding %origin, %read_access, %extent, %extent
+  %range = range %binding, %origin, %extent
+  %address = constant 118788 : reg<aie2p.config.scalar : i64>
+  // ERROR@+1: XDNA/047 {flags="1"}
+  write.address %address, %range, %address_bits
+  return
+}
+
+// ----

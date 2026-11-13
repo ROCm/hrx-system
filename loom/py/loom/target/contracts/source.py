@@ -152,7 +152,11 @@ class ValueRef:
 
     @classmethod
     def source_memory_root(cls) -> Self:
-        """Returns the storage root selected by source-memory analysis."""
+        """Returns the address base paired with the plan's byte coordinates.
+
+        An independently materialized view can be this base while the plan
+        retains a different root for storage provenance and alias analysis.
+        """
         return cls(
             kind=SourceValueKind.SOURCE_MEMORY_ROOT,
             field="",

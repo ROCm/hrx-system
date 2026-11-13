@@ -49,7 +49,9 @@ iree_status_t loom_low_allocation_edge_alias_storage_range_used_after_operation(
 // Returns whether |interval| may share the edge destination units covered by
 // |relation| with |counterpart|. The query proves that neither the destination
 // nor a distinct source remains observable after the edge handoff; linear
-// interval overlap alone is not sufficient for that decision.
+// interval overlap alone is not sufficient for that decision. The relation
+// names the actual candidate source and destination. A component projected
+// through an aggregate edge retains its own identity and unit range here.
 iree_status_t loom_low_allocation_edge_alias_allows_counterpart_overlap(
     const loom_low_allocation_edge_alias_context_t* context,
     const loom_liveness_interval_t* interval,

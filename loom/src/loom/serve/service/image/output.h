@@ -13,25 +13,24 @@
 extern "C" {
 #endif
 
-// Checks representable F32 RGB storage and PNG dimensions/chunk limits before
+// Checks representable RGBA8 storage and PNG dimensions/chunk limits before
 // generation and returns the exact encoded byte length without allocating.
 // Failure leaves *out_length zero. Model-specific geometry remains a source
 // preparation contract, independent of these transport representation limits.
-iree_status_t loom_serve_image_rgb_f32_png_size(uint32_t width, uint32_t height,
-                                                iree_host_size_t* out_length);
+iree_status_t loom_serve_image_rgba8_png_size(uint32_t width, uint32_t height,
+                                              iree_host_size_t* out_length);
 
-// Encodes completed little-endian F32 CHW RGB in [-1,1] as an RGB8 PNG.
-// The exact shape and every sample are checked before publishing output.
-// Conversion rounds (value/2+0.5)*255 using the caller's FP rounding mode.
+// Encodes row-major RGBA8 bytes as an RGBA8 PNG, preserving all four channels.
+// The input contains exactly width * height * 4 bytes in R, G, B, A order.
 // PNG uses filter zero and stored DEFLATE blocks: one output allocation, no
-// converted image scratch or external codec dependency. Nonfinite/out-of-range
-// device output fails with DATA_LOSS instead of silently clamping it.
+// converted image scratch or external codec dependency.
 // Success transfers output storage to the caller, freed with host_allocator;
 // failure leaves *out_png empty. Input storage is only borrowed during the
 // call.
-iree_status_t loom_serve_image_encode_rgb_f32_png(
-    uint32_t width, uint32_t height, iree_const_byte_span_t rgb,
-    iree_allocator_t host_allocator, iree_byte_span_t* out_png);
+iree_status_t loom_serve_image_encode_rgba8_png(uint32_t width, uint32_t height,
+                                                iree_const_byte_span_t rgba,
+                                                iree_allocator_t host_allocator,
+                                                iree_byte_span_t* out_png);
 
 #ifdef __cplusplus
 }  // extern "C"

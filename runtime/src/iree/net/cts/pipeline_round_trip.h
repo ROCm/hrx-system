@@ -55,8 +55,7 @@ iree_status_t RunPipelineRoundTrip(
     const TransportBackend& transport,
     const iree::async::cts::ProactorFactory& create_proactor,
     const PipelineRoundTripOptions& options,
-    PipelineRoundTripResult* out_result,
-    TransferTrialMeasurement measurement = {});
+    TransferTrialMeasurement measurement, PipelineRoundTripResult* out_result);
 
 }  // namespace iree::net::cts
 

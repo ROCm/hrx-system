@@ -1,0 +1,281 @@
+// RUN: pass specialize-target-callgraph,inline-callables{policy=target,budget=0,hot-budget=0}
+
+// With profitability disabled, retain the inner leaf and expand its caller.
+test.target<low_leaf> @target
+
+func.def target(@target) @inner(%value: i32) -> (i32) {
+  %result = test.addi %value, %value : i32
+  func.return %result : i32
+}
+
+func.def target(@target) @outer(%value: i32) -> (i32) {
+  %result = func.call @inner(%value) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+func.def public target(@target) @entry(%value: i32) -> (i32) {
+  %result = func.call @outer(%value) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ----
+test.target<low_leaf> @target
+
+func.def target(@target) @inner(%value: i32) -> (i32) {
+  %result = test.addi %value, %value : i32
+  func.return %result : i32
+}
+
+func.def public target(@target) @entry(%value: i32) -> (i32) {
+  %result = func.call @inner(%value) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ====
+
+// An authored outer boundary instead expands its cold inner helper.
+test.target<low_leaf> @target
+
+func.def cold target(@target) @inner(%value: i32) -> (i32) {
+  %result = test.addi %value, %value : i32
+  func.return %result : i32
+}
+
+func.def noinline target(@target) @outer(%value: i32) -> (i32) {
+  %result = func.call @inner(%value) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+func.def public target(@target) @entry(%value: i32) -> (i32) {
+  %result = func.call @outer(%value) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ----
+test.target<low_leaf> @target
+
+func.def noinline target(@target) @outer(%value: i32) -> (i32) {
+  %result = test.addi %value, %value : i32
+  func.return %result : i32
+}
+
+func.def public target(@target) @entry(%value: i32) -> (i32) {
+  %result = func.call @outer(%value) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ====
+
+// Call-site noinline has the same force as a declaration.
+test.target<low_leaf> @target
+
+func.def cold target(@target) @inner(%value: i32) -> (i32) {
+  %result = test.addi %value, %value : i32
+  func.return %result : i32
+}
+
+func.def target(@target) @outer(%value: i32) -> (i32) {
+  %result = func.call @inner(%value) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+func.def public target(@target) @entry(%value: i32) -> (i32) {
+  %result = func.call noinline @outer(%value) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ----
+test.target<low_leaf> @target
+
+func.def target(@target) @outer(%value: i32) -> (i32) {
+  %result = test.addi %value, %value : i32
+  func.return %result : i32
+}
+
+func.def public target(@target) @entry(%value: i32) -> (i32) {
+  %result = func.call noinline @outer(%value) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ====
+
+// An authored inner boundary survives through a cold automatic outer.
+test.target<low_leaf> @target
+
+func.def noinline target(@target) @inner(%value: i32) -> (i32) {
+  %result = test.addi %value, %value : i32
+  func.return %result : i32
+}
+
+func.def cold target(@target) @outer(%value: i32) -> (i32) {
+  %result = func.call @inner(%value) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+func.def public target(@target) @entry(%value: i32) -> (i32) {
+  %result = func.call @outer(%value) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ----
+test.target<low_leaf> @target
+
+func.def noinline target(@target) @inner(%value: i32) -> (i32) {
+  %result = test.addi %value, %value : i32
+  func.return %result : i32
+}
+
+func.def public target(@target) @entry(%value: i32) -> (i32) {
+  %result = func.call @inner(%value) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ====
+
+// Each expanded wrapper carries the retained-call fact to its own caller.
+test.target<low_leaf> @target
+
+func.def noinline target(@target) @leaf(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+func.def cold target(@target) @middle(%value: i32) -> (i32) {
+  %result = func.call @leaf(%value) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+func.def cold target(@target) @outer(%value: i32) -> (i32) {
+  %result = func.call @middle(%value) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+func.def public target(@target) @entry(%value: i32) -> (i32) {
+  %result = func.call @outer(%value) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ----
+test.target<low_leaf> @target
+
+func.def noinline target(@target) @leaf(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+func.def public target(@target) @entry(%value: i32) -> (i32) {
+  %result = func.call @leaf(%value) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ====
+
+// The physical Low graph uses the same cut and CFG splice machinery.
+test.target<low_leaf> @target
+
+low.func.def target<test.low.core>(@target) @inner(%value: reg<test.i32>) -> (reg<test.i32>) asm {
+  low.br ^exit(%value: reg<test.i32>)
+^exit(%result: reg<test.i32>):
+  return %result
+}
+
+low.func.def target<test.low.core>(@target) @outer(%value: reg<test.i32>) -> (reg<test.i32>) asm {
+  %result = low.func.call @inner(%value) : (reg<test.i32>) -> (reg<test.i32>)
+  return %result
+}
+
+low.func.def public target<test.low.core>(@target) @entry(%value: reg<test.i32>) -> (reg<test.i32>) asm {
+  %result = low.func.call @outer(%value) : (reg<test.i32>) -> (reg<test.i32>)
+  return %result
+}
+
+// ----
+test.target<low_leaf> @target
+
+low.func.def target<test.low.core>(@target) @inner(%value: reg<test.i32>) -> (reg<test.i32>) asm {
+  low.br ^exit(%value: reg<test.i32>)
+^exit(%result: reg<test.i32>):
+  return %result
+}
+
+low.func.def public target<test.low.core>(@target) @entry(%value: reg<test.i32>) -> (reg<test.i32>) asm {
+  %result = low.func.call @inner(%value) : (reg<test.i32>) -> (reg<test.i32>)
+  return %result
+}
+
+// ====
+
+// RUN: pass specialize-target-callgraph,inline-callables{policy=target,budget=1,hot-budget=1}
+
+// Independent workers still require legal callees without treating their calls
+// as native calls made by the enclosing construction program.
+test.target<low_leaf> @target
+
+func.def target(@target) @inner(%value: i32) -> (i32) {
+  %result = test.addi %value, %value : i32
+  func.return %result : i32
+}
+
+func.def cold target(@target) @outer(%value: i32) -> (i32) {
+  %result = func.call @inner(%value) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+pipeline.def public target(@target) @run(%seed: i32) run(%output: buffer) {
+  pipeline.strand workers([0], [1], [1]) {
+    %value = func.call @outer(%seed) : (i32) -> (i32)
+    %origin = index.constant 0 : offset
+    %view = buffer.view %output[%origin] : buffer -> view<1xi32>
+    view.store %value, %view[0] : i32, view<1xi32>
+  }
+}
+
+// ----
+test.target<low_leaf> @target
+
+func.def target(@target) @inner(%value: i32) -> (i32) {
+  %result = test.addi %value, %value : i32
+  func.return %result : i32
+}
+
+pipeline.def public target(@target) @run(%seed: i32) run(%output: buffer) {
+  pipeline.strand workers([0], [1], [1]) {
+    %result = func.call @inner(%seed) : (i32) -> (i32)
+    %origin = index.constant 0 : offset
+    %view = buffer.view %output[%origin] : buffer -> view<1xi32>
+    view.store %result, %view[0] : i32, view<1xi32>
+  }
+}
+
+// ====
+
+// RUN: pass specialize-target-callgraph,inline-callables{policy=target,budget=0,hot-budget=0}
+
+// Explicit storage follows expansions through multiple cold wrappers.
+test.target<low_leaf> @target
+
+low.func.def inline target<test.low.core>(@target) @reserve(%value: reg<test.i32>) -> (reg<test.i32>) asm {
+  %storage = storage {byte_alignment = 4, byte_length = 16} : low.storage<private>
+  return %value
+}
+
+low.func.def cold target<test.low.core>(@target) @middle(%value: reg<test.i32>) -> (reg<test.i32>) asm {
+  %result = low.func.call @reserve(%value) : (reg<test.i32>) -> (reg<test.i32>)
+  return %result
+}
+
+low.func.def cold target<test.low.core>(@target) @outer(%value: reg<test.i32>) -> (reg<test.i32>) asm {
+  %result = low.func.call @middle(%value) : (reg<test.i32>) -> (reg<test.i32>)
+  return %result
+}
+
+low.func.def public target<test.low.core>(@target) @entry(%value: reg<test.i32>) -> (reg<test.i32>) asm {
+  %result = low.func.call @outer(%value) : (reg<test.i32>) -> (reg<test.i32>)
+  return %result
+}
+
+// ----
+test.target<low_leaf> @target
+
+low.func.def public target<test.low.core>(@target) @entry(%value: reg<test.i32>) -> (reg<test.i32>) asm {
+  %storage = storage {byte_alignment = 4, byte_length = 16} : low.storage<private>
+  return %value
+}

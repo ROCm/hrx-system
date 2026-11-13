@@ -30,6 +30,42 @@ TEST(SlabProviderTest, HostSourcesReportPhysicalCapacityWithoutAcquisition) {
   }
 }
 
+TEST(SlabProviderTest, NativeCostMatchesPayloadIncludingAlignmentPadding) {
+  for (bool shared : {false, true}) {
+    iree_hal_slab_provider_t* provider = nullptr;
+    IREE_ASSERT_OK(shared ? iree_hal_shared_slab_provider_create(
+                                iree_allocator_system(), &provider)
+                          : iree_hal_cpu_slab_provider_create(
+                                0, iree_allocator_system(), &provider));
+    iree_hal_slab_provider_properties_t properties;
+    iree_hal_slab_provider_query_properties(provider, &properties);
+    const uint64_t alignment = properties.allocation_alignment;
+    for (const auto request :
+         {iree_hal_slab_request_t{alignment - 1, alignment},
+          iree_hal_slab_request_t{alignment + 1, alignment},
+          iree_hal_slab_request_t{alignment, alignment * 2},
+          iree_hal_slab_request_t{alignment * 2, alignment * 4}}) {
+      SCOPED_TRACE(::testing::Message() << shared << ":" << request.min_length
+                                        << ":" << request.min_alignment);
+      uint64_t cost = 0;
+      IREE_ASSERT_OK(iree_hal_slab_provider_query_allocation_cost(
+          provider, request, &cost));
+      iree_hal_slab_t slab = {};
+      IREE_ASSERT_OK(iree_hal_slab_provider_acquire_slab_sync(
+          provider, request.min_length, request.min_alignment, &slab, nullptr));
+      EXPECT_EQ(cost, slab.native_allocation.byte_length);
+      iree_hal_slab_provider_release_slab_sync(provider, &slab, nullptr);
+    }
+    uint64_t ignored = 0;
+    if (shared) {
+      IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
+                            iree_hal_slab_provider_query_allocation_cost(
+                                provider, {UINT64_MAX, alignment}, &ignored));
+    }
+    iree_hal_slab_provider_release(provider);
+  }
+}
+
 static iree_hal_asan_pool_options_t ShadowOptions() {
   iree_hal_asan_pool_options_t options = {
       .mode = IREE_HAL_ASAN_POOL_MODE_SHADOW,

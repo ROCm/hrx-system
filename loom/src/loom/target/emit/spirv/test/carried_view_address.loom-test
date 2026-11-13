@@ -1,0 +1,113 @@
+// RUN: emit spirv-dis @advance target=spirv:vulkan1.3+bda input=source-low control-flow=structured-low validate
+// REQUIRES: spirv-dis, spirv-val
+
+// Carry integer byte addresses, not typed pointers whose pointee size would
+// scale an already byte-scaled displacement a second time.
+func.def @advance(%input: view<1xi32>, %position_value: i32, %count: index) -> (i32) {
+  %position = index.cast %position_value : i32 to index
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %last = scf.for %iteration = [%begin to %count step %step](%window = %input : view<1xi32>) -> (view<1xi32>) {
+    %next = view.subview %window[%position] : view<1xi32> -> view<1xi32>
+    scf.yield %next : view<1xi32>
+  }
+  %value = view.load %last[0] : view<1xi32> -> i32
+  func.return %value : i32
+}
+
+// ----
+               OpCapability Shader
+               OpCapability VulkanMemoryModel
+               OpCapability PhysicalStorageBufferAddresses
+               OpCapability Int64
+               OpExtension "SPV_KHR_vulkan_memory_model"
+               OpExtension "SPV_KHR_physical_storage_buffer"
+               OpMemoryModel PhysicalStorageBuffer64 Vulkan
+               OpEntryPoint GLCompute %advance "advance"
+               OpExecutionMode %advance LocalSize 1 1 1
+               OpName %advance "advance"
+               OpName %input "input"
+               OpName %position_value "position_value"
+               OpName %count "count"
+               OpName %begin "begin"
+               OpName %step "step"
+               OpName %iteration "iteration"
+               OpName %window "window"
+               OpName %next "next"
+               OpName %last "last"
+               OpName %value "value"
+               OpMemberDecorate %_struct_6 0 Offset 0
+               OpDecorate %_struct_6 Block
+               OpDecorate %4 DescriptorSet 0
+               OpDecorate %4 Binding 0
+               OpMemberDecorate %_struct_10 0 Offset 0
+               OpDecorate %_struct_10 Block
+               OpDecorate %9 DescriptorSet 0
+               OpDecorate %9 Binding 1
+               OpDecorate %13 DescriptorSet 0
+               OpDecorate %13 Binding 2
+               OpDecorate %14 DescriptorSet 0
+               OpDecorate %14 Binding 3
+               OpDecorate %_ptr_PhysicalStorageBuffer_int ArrayStride 4
+        %int = OpTypeInt 32 1
+      %int_0 = OpConstant %int 0
+      %ulong = OpTypeInt 64 0
+  %_struct_6 = OpTypeStruct %ulong
+%_ptr_StorageBuffer__struct_6 = OpTypePointer StorageBuffer %_struct_6
+%_ptr_StorageBuffer_ulong = OpTypePointer StorageBuffer %ulong
+          %4 = OpVariable %_ptr_StorageBuffer__struct_6 StorageBuffer
+ %_struct_10 = OpTypeStruct %int
+%_ptr_StorageBuffer__struct_10 = OpTypePointer StorageBuffer %_struct_10
+%_ptr_StorageBuffer_int = OpTypePointer StorageBuffer %int
+          %9 = OpVariable %_ptr_StorageBuffer__struct_10 StorageBuffer
+         %13 = OpVariable %_ptr_StorageBuffer__struct_10 StorageBuffer
+         %14 = OpVariable %_ptr_StorageBuffer__struct_10 StorageBuffer
+       %void = OpTypeVoid
+         %16 = OpTypeFunction %void
+      %begin = OpConstant %int 0
+       %step = OpConstant %int 1
+       %bool = OpTypeBool
+    %ulong_4 = OpConstant %ulong 4
+    %ulong_0 = OpConstant %ulong 0
+%_ptr_PhysicalStorageBuffer_int = OpTypePointer PhysicalStorageBuffer %int
+    %advance = OpFunction %void None %16
+         %17 = OpLabel
+         %18 = OpAccessChain %_ptr_StorageBuffer_ulong %4 %int_0
+      %input = OpLoad %ulong %18 Aligned 8
+         %20 = OpAccessChain %_ptr_StorageBuffer_int %9 %int_0
+%position_value = OpLoad %int %20 Aligned 4
+         %22 = OpAccessChain %_ptr_StorageBuffer_int %13 %int_0
+      %count = OpLoad %int %22 Aligned 4
+         %27 = OpSLessThan %bool %begin %count
+         %28 = OpISub %int %count %begin
+         %29 = OpULessThan %bool %step %28
+         %30 = OpISub %int %count %step
+         %31 = OpSelect %int %29 %30 %begin
+               OpSelectionMerge %36 None
+               OpBranchConditional %27 %32 %36
+         %32 = OpLabel
+  %iteration = OpPhi %int %begin %17 %37 %35
+     %window = OpPhi %ulong %input %17 %next %35
+               OpLoopMerge %34 %35 None
+               OpBranch %33
+         %33 = OpLabel
+         %42 = OpSConvert %ulong %position_value
+         %44 = OpIMul %ulong %42 %ulong_4
+         %45 = OpIAdd %ulong %window %44
+       %next = OpCopyObject %ulong %45
+               OpBranch %35
+         %35 = OpLabel
+         %38 = OpSLessThan %bool %iteration %31
+         %37 = OpIAdd %int %iteration %step
+               OpBranchConditional %38 %32 %34
+         %34 = OpLabel
+               OpBranch %36
+         %36 = OpLabel
+       %last = OpPhi %ulong %input %17 %next %34
+         %48 = OpIAdd %ulong %last %ulong_0
+         %50 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %48
+      %value = OpLoad %int %50 Aligned 4
+         %52 = OpAccessChain %_ptr_StorageBuffer_int %14 %int_0
+               OpStore %52 %value Aligned 4
+               OpReturn
+               OpFunctionEnd

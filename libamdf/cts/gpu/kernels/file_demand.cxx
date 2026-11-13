@@ -244,7 +244,7 @@ using loom::atomic::scope;
 using loom::view::atomic::load;
 using loom::view::atomic::store;
 
-LOOM_FORCE_INLINE unsigned demand_hash(unsigned input) {
+LOOM_INLINE unsigned demand_hash(unsigned input) {
   unsigned first = input ^ (input << 13u);
   unsigned second = first ^ (first >> 17u);
   return second ^ (second << 5u);
@@ -252,9 +252,8 @@ LOOM_FORCE_INLINE unsigned demand_hash(unsigned input) {
 
 // Probes the immutable payload, refreshes the public numerical witness, and
 // returns a clock sample taken after those observations and stores.
-LOOM_FORCE_INLINE unsigned demand_probe(unsigned* data, Record* record,
-                                        unsigned key, unsigned seed,
-                                        unsigned word_count) {
+LOOM_INLINE unsigned demand_probe(unsigned* data, Record* record, unsigned key,
+                                  unsigned seed, unsigned word_count) {
   const unsigned word_mask = word_count - 1u;
   const unsigned first = data[0];
   const unsigned selected = data[key & word_mask];

@@ -1,0 +1,478 @@
+// RUN: pass inline-callables,combine,cse,symbol-dce
+// INPUT: cxx root=mxfp4_group_dot root=mxfp8_group_dot
+#include <loomcxx/encoding.h>
+#include <loomcxx/kernel.h>
+#include <loomcxx/numeric.h>
+#include <loomcxx/vector.h>
+#include <stdfloat>
+
+using Words4 = unsigned __attribute__((ext_vector_type(4)));
+using Words8 = unsigned __attribute__((ext_vector_type(8)));
+using ScaleWord = unsigned __attribute__((ext_vector_type(1)));
+using Fp8x32 = loom::type::float8_e4m3fn_t __attribute__((ext_vector_type(32)));
+using Fp8x64 = loom::type::float8_e4m3fn_t __attribute__((ext_vector_type(64)));
+using BFloat32 = std::bfloat16_t __attribute__((ext_vector_type(32)));
+using BFloat64 = std::bfloat16_t __attribute__((ext_vector_type(64)));
+using Float16 = float __attribute__((ext_vector_type(16)));
+using Bits32 = unsigned __attribute__((ext_vector_type(32)));
+
+struct Scales {
+  // Four packed E8M0 bytes; each group consumes its corresponding byte.
+  ScaleWord scale;
+};
+
+float mxfp4_group_dot(Words4 payload, ScaleWord scale, BFloat32 activations) {
+  auto schema = loom::encoding::define<loom::encoding::f4e2m1{}>();
+  auto weights = loom::vector::decode<BFloat32>(payload, schema, Scales{scale});
+  Float16 partial = {};
+  partial = loom::vector::dot2f(weights, activations, partial);
+  return loom::vector::reduce::addf(partial, 0.0f);
+}
+
+float mxfp8_group_dot(Fp8x32 payload, ScaleWord scale, BFloat32 activations) {
+  auto schema = loom::encoding::define<loom::encoding::f8e4m3fn{}>();
+  auto weights = loom::vector::decode<BFloat32>(payload, schema, Scales{scale});
+  Float16 partial = {};
+  partial = loom::vector::dot2f(weights, activations, partial);
+  return loom::vector::reduce::addf(partial, 0.0f);
+}
+
+
+// ----
+func.def public @mxfp4_group_dot(%payload: vector<4xi32>, %scale: vector<1xi32>, %activations: vector<32xbf16>) -> (f32) {
+  %schema = encoding.define #encoding.f4e2m1<affine=scale_only, payload_elements=32, payload_packing=little_endian_nibbles, payload_registers=4, scale_format=e8m0, scale_group_elements=32, scale_operands=1, scale_topology=block_1d, zero_scale_fallback=true> : encoding<schema>
+  %weights = vector.decode %payload using %schema {scale = %scale : vector<1xi32>} : vector<4xi32>, encoding<schema> -> vector<32xbf16>
+  %partial$20 = vector.splatf 0.0 : vector<16xf32>
+  %partial$7 = vector.dot2f %weights, %activations, %partial$20 : vector<32xbf16>, vector<32xbf16>, vector<16xf32>
+  %8 = scalar.constant 0.0 : f32
+  %9 = vector.reduce<addf> %partial$7, %8 : vector<16xf32>, f32
+  func.return %9 : f32
+}
+
+func.def public @mxfp8_group_dot(%payload: vector<32xf8E4M3>, %scale: vector<1xi32>, %activations: vector<32xbf16>) -> (f32) {
+  %schema = encoding.define #encoding.f8e4m3fn<affine=scale_only, payload_elements=32, scale_format=e8m0, scale_group_elements=32, scale_operands=1, scale_topology=block_1d> : encoding<schema>
+  %weights = vector.decode %payload using %schema {scale = %scale : vector<1xi32>} : vector<32xf8E4M3>, encoding<schema> -> vector<32xbf16>
+  %partial$21 = vector.splatf 0.0 : vector<16xf32>
+  %partial$17 = vector.dot2f %weights, %activations, %partial$21 : vector<32xbf16>, vector<32xbf16>, vector<16xf32>
+  %18 = scalar.constant 0.0 : f32
+  %19 = vector.reduce<addf> %partial$17, %18 : vector<16xf32>, f32
+  func.return %19 : f32
+}
+
+// ====
+// INPUT: cxx root=packed_group_dot
+#include <loomcxx/kernel.h>
+#include <loomcxx/numeric.h>
+#include <loomcxx/scalar.h>
+#include <loomcxx/vector.h>
+#include <stdfloat>
+
+using Bytes16 = unsigned char __attribute__((ext_vector_type(16)));
+using Codes16 = signed char __attribute__((ext_vector_type(16)));
+using BFloat16 = std::bfloat16_t __attribute__((ext_vector_type(16)));
+using Float8 = float __attribute__((ext_vector_type(8)));
+
+[[loom::inline]] static Codes16 lookup(Codes16 table, Bytes16 indices) {
+  return {table[indices[0]],  table[indices[1]],  table[indices[2]],
+          table[indices[3]],  table[indices[4]],  table[indices[5]],
+          table[indices[6]],  table[indices[7]],  table[indices[8]],
+          table[indices[9]],  table[indices[10]], table[indices[11]],
+          table[indices[12]], table[indices[13]], table[indices[14]],
+          table[indices[15]]};
+}
+
+float packed_group_dot(Codes16 table, Bytes16 packed, BFloat16 activations_low,
+                       BFloat16 activations_high, float scale, float seed) {
+  auto low_codes = lookup(table, packed & 15);
+  auto high_codes = lookup(table, packed >> 4);
+  auto low_weights = loom::convert<BFloat16>(low_codes);
+  auto high_weights = loom::convert<BFloat16>(high_codes);
+  Float8 partial = {};
+  partial = loom::vector::dot2f(low_weights, activations_low, partial);
+  partial = loom::vector::dot2f(high_weights, activations_high, partial);
+  return loom::scalar::fmaf(scale, loom::vector::reduce::addf(partial, 0.0f),
+                            seed);
+}
+
+
+// ----
+func.def public @packed_group_dot(%table: vector<16xi8>, %packed: vector<16xi8>, %activations_low: vector<16xbf16>, %activations_high: vector<16xbf16>, %scale: f32, %seed: f32) -> (f32) {
+  %264 = vector.splati 15 : vector<16xi8>
+  %10 = vector.andi %packed, %264 : vector<16xi8>
+  %low_codes = vector.table.lookup %table[%10] : vector<16xi8>, vector<16xi8> -> vector<16xi8>
+  %259 = vector.splati 4 : vector<16xi8>
+  %15 = vector.shrui %packed, %259 : vector<16xi8>
+  %high_codes = vector.table.lookup %table[%15] : vector<16xi8>, vector<16xi8> -> vector<16xi8>
+  %low_weights = vector.sitofp %low_codes : vector<16xi8> to vector<16xbf16>
+  %high_weights = vector.sitofp %high_codes : vector<16xi8> to vector<16xbf16>
+  %partial$254 = vector.splatf 0.0 : vector<8xf32>
+  %partial$20 = vector.dot2f %low_weights, %activations_low, %partial$254 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  %partial$21 = vector.dot2f %high_weights, %activations_high, %partial$20 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  %22 = scalar.constant 0.0 : f32
+  %23 = vector.reduce<addf> %partial$21, %22 : vector<8xf32>, f32
+  %24 = scalar.fmaf %scale, %23, %seed : f32
+  func.return %24 : f32
+}
+
+// ====
+// RUN: pass inline-callables,combine,cse,symbol-dce
+// INPUT: cxx root=mxfp4_decode_dot
+// Aligned, independent payload, scale, and activation buffers feed a decoded dot.
+#include <loomcxx/encoding.h>
+#include <loomcxx/kernel.h>
+#include <loomcxx/numeric.h>
+#include <loomcxx/vector.h>
+#include <stdfloat>
+
+using Words4 = unsigned __attribute__((ext_vector_type(4)));
+using Words8 = unsigned __attribute__((ext_vector_type(8)));
+using ScaleWord = unsigned __attribute__((ext_vector_type(1)));
+using Fp8x32 = loom::type::float8_e4m3fn_t __attribute__((ext_vector_type(32)));
+using Fp8x64 = loom::type::float8_e4m3fn_t __attribute__((ext_vector_type(64)));
+using BFloat32 = std::bfloat16_t __attribute__((ext_vector_type(32)));
+using BFloat64 = std::bfloat16_t __attribute__((ext_vector_type(64)));
+using Float16 = float __attribute__((ext_vector_type(16)));
+using Bits32 = unsigned __attribute__((ext_vector_type(32)));
+
+struct Scales {
+  // Four packed E8M0 bytes; each group consumes its corresponding byte.
+  ScaleWord scale;
+};
+
+float mxfp4_group_dot(Words4 payload, ScaleWord scale, BFloat32 activations) {
+  auto schema = loom::encoding::define<loom::encoding::f4e2m1{}>();
+  auto weights = loom::vector::decode<BFloat32>(payload, schema, Scales{scale});
+  Float16 partial = {};
+  partial = loom::vector::dot2f(weights, activations, partial);
+  return loom::vector::reduce::addf(partial, 0.0f);
+}
+
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void mxfp4_decode_dot(
+    [[loom::noalias, loom::assume_aligned(64)]] const Words4* payload,
+    [[loom::noalias, loom::assume_aligned(64)]] const ScaleWord* scale,
+    [[loom::noalias, loom::assume_aligned(64)]] const BFloat32* activations,
+    [[loom::noalias]] float* output) {
+  *output = mxfp4_group_dot(*payload, *scale, *activations);
+}
+
+// ----
+kernel.def @mxfp4_decode_dot() {
+  %4 = index.constant 1 : index
+  kernel.launch.config workgroups(%4, %4, %4) workgroup_size(%4, %4, %4) : index
+} launch(%0: buffer, %1: buffer, %2: buffer, %3: buffer) {
+  %10 = buffer.assume.alignment %0 {minimum_alignment = 64} : buffer
+  %payload = buffer.assume.noalias %10 : buffer
+  %payload_byte_offset = index.constant 0 : offset
+  %13 = buffer.assume.alignment %1 {minimum_alignment = 64} : buffer
+  %scale = buffer.assume.noalias %13 : buffer
+  %16 = buffer.assume.alignment %2 {minimum_alignment = 64} : buffer
+  %activations = buffer.assume.noalias %16 : buffer
+  %output = buffer.assume.noalias %3 : buffer
+  %21 = buffer.view %payload[%payload_byte_offset] : buffer -> view<4xi32>
+  %22 = vector.load<root_in_bounds> %21[0] : view<4xi32> -> vector<4xi32>
+  %23 = buffer.view %scale[%payload_byte_offset] : buffer -> view<1xi32>
+  %24 = vector.load<root_in_bounds> %23[0] : view<1xi32> -> vector<1xi32>
+  %25 = buffer.view %activations[%payload_byte_offset] : buffer -> view<32xbf16>
+  %26 = vector.load<root_in_bounds> %25[0] : view<32xbf16> -> vector<32xbf16>
+  %schema = encoding.define #encoding.f4e2m1<affine=scale_only, payload_elements=32, payload_packing=little_endian_nibbles, payload_registers=4, scale_format=e8m0, scale_group_elements=32, scale_operands=1, scale_topology=block_1d, zero_scale_fallback=true> : encoding<schema>
+  %weights = vector.decode %22 using %schema {scale = %24 : vector<1xi32>} : vector<4xi32>, encoding<schema> -> vector<32xbf16>
+  %partial$39 = vector.splatf 0.0 : vector<16xf32>
+  %partial$36 = vector.dot2f %weights, %26, %partial$39 : vector<32xbf16>, vector<32xbf16>, vector<16xf32>
+  %37 = scalar.constant 0.0 : f32
+  %38 = vector.reduce<addf> %partial$36, %37 : vector<16xf32>, f32
+  %28 = buffer.view %output[%payload_byte_offset] : buffer -> view<1xf32>
+  view.store<root_in_bounds> %38, %28[0] : f32, view<1xf32>
+  kernel.return
+}
+
+// ====
+// RUN: pass inline-callables,combine,cse,symbol-dce
+// INPUT: cxx root=mxfp8_decode_dot
+// FP8 payloads keep their encoded element type at the kernel boundary.
+#include <loomcxx/encoding.h>
+#include <loomcxx/kernel.h>
+#include <loomcxx/numeric.h>
+#include <loomcxx/vector.h>
+#include <stdfloat>
+
+using Words4 = unsigned __attribute__((ext_vector_type(4)));
+using Words8 = unsigned __attribute__((ext_vector_type(8)));
+using ScaleWord = unsigned __attribute__((ext_vector_type(1)));
+using Fp8x32 = loom::type::float8_e4m3fn_t __attribute__((ext_vector_type(32)));
+using Fp8x64 = loom::type::float8_e4m3fn_t __attribute__((ext_vector_type(64)));
+using BFloat32 = std::bfloat16_t __attribute__((ext_vector_type(32)));
+using BFloat64 = std::bfloat16_t __attribute__((ext_vector_type(64)));
+using Float16 = float __attribute__((ext_vector_type(16)));
+using Bits32 = unsigned __attribute__((ext_vector_type(32)));
+
+struct Scales {
+  // Four packed E8M0 bytes; each group consumes its corresponding byte.
+  ScaleWord scale;
+};
+
+float mxfp8_group_dot(Fp8x32 payload, ScaleWord scale, BFloat32 activations) {
+  auto schema = loom::encoding::define<loom::encoding::f8e4m3fn{}>();
+  auto weights = loom::vector::decode<BFloat32>(payload, schema, Scales{scale});
+  Float16 partial = {};
+  partial = loom::vector::dot2f(weights, activations, partial);
+  return loom::vector::reduce::addf(partial, 0.0f);
+}
+
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void mxfp8_decode_dot(
+    [[loom::noalias, loom::assume_aligned(64)]] const Fp8x32* payload,
+    [[loom::noalias, loom::assume_aligned(64)]] const ScaleWord* scale,
+    [[loom::noalias, loom::assume_aligned(64)]] const BFloat32* activations,
+    [[loom::noalias]] float* output) {
+  *output = mxfp8_group_dot(*payload, *scale, *activations);
+}
+
+// ----
+kernel.def @mxfp8_decode_dot() {
+  %4 = index.constant 1 : index
+  kernel.launch.config workgroups(%4, %4, %4) workgroup_size(%4, %4, %4) : index
+} launch(%0: buffer, %1: buffer, %2: buffer, %3: buffer) {
+  %10 = buffer.assume.alignment %0 {minimum_alignment = 64} : buffer
+  %payload = buffer.assume.noalias %10 : buffer
+  %payload_byte_offset = index.constant 0 : offset
+  %13 = buffer.assume.alignment %1 {minimum_alignment = 64} : buffer
+  %scale = buffer.assume.noalias %13 : buffer
+  %16 = buffer.assume.alignment %2 {minimum_alignment = 64} : buffer
+  %activations = buffer.assume.noalias %16 : buffer
+  %output = buffer.assume.noalias %3 : buffer
+  %21 = buffer.view %payload[%payload_byte_offset] : buffer -> view<32xf8E4M3>
+  %22 = vector.load<root_in_bounds> %21[0] : view<32xf8E4M3> -> vector<32xf8E4M3>
+  %23 = buffer.view %scale[%payload_byte_offset] : buffer -> view<1xi32>
+  %24 = vector.load<root_in_bounds> %23[0] : view<1xi32> -> vector<1xi32>
+  %25 = buffer.view %activations[%payload_byte_offset] : buffer -> view<32xbf16>
+  %26 = vector.load<root_in_bounds> %25[0] : view<32xbf16> -> vector<32xbf16>
+  %schema = encoding.define #encoding.f8e4m3fn<affine=scale_only, payload_elements=32, scale_format=e8m0, scale_group_elements=32, scale_operands=1, scale_topology=block_1d> : encoding<schema>
+  %weights = vector.decode %22 using %schema {scale = %24 : vector<1xi32>} : vector<32xf8E4M3>, encoding<schema> -> vector<32xbf16>
+  %partial$39 = vector.splatf 0.0 : vector<16xf32>
+  %partial$36 = vector.dot2f %weights, %26, %partial$39 : vector<32xbf16>, vector<32xbf16>, vector<16xf32>
+  %37 = scalar.constant 0.0 : f32
+  %38 = vector.reduce<addf> %partial$36, %37 : vector<16xf32>, f32
+  %28 = buffer.view %output[%payload_byte_offset] : buffer -> view<1xf32>
+  view.store<root_in_bounds> %38, %28[0] : f32, view<1xf32>
+  kernel.return
+}
+
+// ====
+// RUN: pass inline-callables,combine,cse,symbol-dce
+// INPUT: cxx root=mxfp4_group_bits
+// Two 32-element groups share one packed scale word without merging scale bytes.
+#include <loomcxx/encoding.h>
+#include <loomcxx/kernel.h>
+#include <loomcxx/numeric.h>
+#include <loomcxx/vector.h>
+#include <stdfloat>
+
+using Words4 = unsigned __attribute__((ext_vector_type(4)));
+using Words8 = unsigned __attribute__((ext_vector_type(8)));
+using ScaleWord = unsigned __attribute__((ext_vector_type(1)));
+using Fp8x32 = loom::type::float8_e4m3fn_t __attribute__((ext_vector_type(32)));
+using Fp8x64 = loom::type::float8_e4m3fn_t __attribute__((ext_vector_type(64)));
+using BFloat32 = std::bfloat16_t __attribute__((ext_vector_type(32)));
+using BFloat64 = std::bfloat16_t __attribute__((ext_vector_type(64)));
+using Float16 = float __attribute__((ext_vector_type(16)));
+using Bits32 = unsigned __attribute__((ext_vector_type(32)));
+
+struct Scales {
+  // Four packed E8M0 bytes; each group consumes its corresponding byte.
+  ScaleWord scale;
+};
+
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void mxfp4_group_bits(
+    [[loom::noalias, loom::assume_aligned(64)]] const Words8* payload,
+    [[loom::noalias, loom::assume_aligned(64)]] const ScaleWord* scale,
+    [[loom::noalias, loom::assume_aligned(64)]] Bits32* output) {
+  auto schema =
+      loom::encoding::define<loom::encoding::f4e2m1{.payload_elements = 64}>();
+  auto weights =
+      loom::vector::decode<BFloat64>(*payload, schema, Scales{*scale});
+  *output = __builtin_bit_cast(Bits32, weights);
+}
+
+// ----
+kernel.def @mxfp4_group_bits() {
+  %3 = index.constant 1 : index
+  kernel.launch.config workgroups(%3, %3, %3) workgroup_size(%3, %3, %3) : index
+} launch(%0: buffer, %1: buffer, %2: buffer) {
+  %9 = buffer.assume.alignment %0 {minimum_alignment = 64} : buffer
+  %payload = buffer.assume.noalias %9 : buffer
+  %payload_byte_offset = index.constant 0 : offset
+  %12 = buffer.assume.alignment %1 {minimum_alignment = 64} : buffer
+  %scale = buffer.assume.noalias %12 : buffer
+  %15 = buffer.assume.alignment %2 {minimum_alignment = 64} : buffer
+  %output = buffer.assume.noalias %15 : buffer
+  %schema = encoding.define #encoding.f4e2m1<affine=scale_only, payload_elements=64, payload_packing=little_endian_nibbles, payload_registers=8, scale_format=e8m0, scale_group_elements=32, scale_operands=1, scale_topology=block_1d, zero_scale_fallback=true> : encoding<schema>
+  %19 = buffer.view %payload[%payload_byte_offset] : buffer -> view<8xi32>
+  %20 = vector.load<root_in_bounds> %19[0] : view<8xi32> -> vector<8xi32>
+  %21 = buffer.view %scale[%payload_byte_offset] : buffer -> view<1xi32>
+  %22 = vector.load<root_in_bounds> %21[0] : view<1xi32> -> vector<1xi32>
+  %weights = vector.decode %20 using %schema {scale = %22 : vector<1xi32>} : vector<8xi32>, encoding<schema> -> vector<64xbf16>
+  %24 = vector.bitcast %weights : vector<64xbf16> to vector<32xi32>
+  %25 = buffer.view %output[%payload_byte_offset] : buffer -> view<32xi32>
+  vector.store<root_in_bounds> %24, %25[0] : vector<32xi32>, view<32xi32>
+  kernel.return
+}
+
+// ====
+// RUN: pass inline-callables,combine,cse,symbol-dce
+// INPUT: cxx root=mxfp8_group_bits
+// The FP8 two-group form preserves the same scale grouping and BF16 bit projection.
+#include <loomcxx/encoding.h>
+#include <loomcxx/kernel.h>
+#include <loomcxx/numeric.h>
+#include <loomcxx/vector.h>
+#include <stdfloat>
+
+using Words4 = unsigned __attribute__((ext_vector_type(4)));
+using Words8 = unsigned __attribute__((ext_vector_type(8)));
+using ScaleWord = unsigned __attribute__((ext_vector_type(1)));
+using Fp8x32 = loom::type::float8_e4m3fn_t __attribute__((ext_vector_type(32)));
+using Fp8x64 = loom::type::float8_e4m3fn_t __attribute__((ext_vector_type(64)));
+using BFloat32 = std::bfloat16_t __attribute__((ext_vector_type(32)));
+using BFloat64 = std::bfloat16_t __attribute__((ext_vector_type(64)));
+using Float16 = float __attribute__((ext_vector_type(16)));
+using Bits32 = unsigned __attribute__((ext_vector_type(32)));
+
+struct Scales {
+  // Four packed E8M0 bytes; each group consumes its corresponding byte.
+  ScaleWord scale;
+};
+
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void mxfp8_group_bits(
+    [[loom::noalias, loom::assume_aligned(64)]] const Fp8x64* payload,
+    [[loom::noalias, loom::assume_aligned(64)]] const ScaleWord* scale,
+    [[loom::noalias, loom::assume_aligned(64)]] Bits32* output) {
+  auto schema = loom::encoding::define<loom::encoding::f8e4m3fn{
+      .payload_elements = 64,
+  }>();
+  auto weights =
+      loom::vector::decode<BFloat64>(*payload, schema, Scales{*scale});
+  *output = __builtin_bit_cast(Bits32, weights);
+}
+
+// ----
+kernel.def @mxfp8_group_bits() {
+  %3 = index.constant 1 : index
+  kernel.launch.config workgroups(%3, %3, %3) workgroup_size(%3, %3, %3) : index
+} launch(%0: buffer, %1: buffer, %2: buffer) {
+  %9 = buffer.assume.alignment %0 {minimum_alignment = 64} : buffer
+  %payload = buffer.assume.noalias %9 : buffer
+  %payload_byte_offset = index.constant 0 : offset
+  %12 = buffer.assume.alignment %1 {minimum_alignment = 64} : buffer
+  %scale = buffer.assume.noalias %12 : buffer
+  %15 = buffer.assume.alignment %2 {minimum_alignment = 64} : buffer
+  %output = buffer.assume.noalias %15 : buffer
+  %schema = encoding.define #encoding.f8e4m3fn<affine=scale_only, payload_elements=64, scale_format=e8m0, scale_group_elements=32, scale_operands=1, scale_topology=block_1d> : encoding<schema>
+  %19 = buffer.view %payload[%payload_byte_offset] : buffer -> view<64xf8E4M3>
+  %20 = vector.load<root_in_bounds> %19[0] : view<64xf8E4M3> -> vector<64xf8E4M3>
+  %21 = buffer.view %scale[%payload_byte_offset] : buffer -> view<1xi32>
+  %22 = vector.load<root_in_bounds> %21[0] : view<1xi32> -> vector<1xi32>
+  %weights = vector.decode %20 using %schema {scale = %22 : vector<1xi32>} : vector<64xf8E4M3>, encoding<schema> -> vector<64xbf16>
+  %24 = vector.bitcast %weights : vector<64xbf16> to vector<32xi32>
+  %25 = buffer.view %output[%payload_byte_offset] : buffer -> view<32xi32>
+  vector.store<root_in_bounds> %24, %25[0] : vector<32xi32>, view<32xi32>
+  kernel.return
+}
+
+// ====
+// RUN: pass inline-callables,combine,cse,symbol-dce
+// INPUT: cxx root=decode_dot
+// Dynamic scalar scale and seed remain separate from the packed vector inputs.
+#include <loomcxx/kernel.h>
+#include <loomcxx/numeric.h>
+#include <loomcxx/scalar.h>
+#include <loomcxx/vector.h>
+#include <stdfloat>
+
+using Bytes16 = unsigned char __attribute__((ext_vector_type(16)));
+using Codes16 = signed char __attribute__((ext_vector_type(16)));
+using BFloat16 = std::bfloat16_t __attribute__((ext_vector_type(16)));
+using Float8 = float __attribute__((ext_vector_type(8)));
+
+[[loom::inline]] static Codes16 lookup(Codes16 table, Bytes16 indices) {
+  return {table[indices[0]],  table[indices[1]],  table[indices[2]],
+          table[indices[3]],  table[indices[4]],  table[indices[5]],
+          table[indices[6]],  table[indices[7]],  table[indices[8]],
+          table[indices[9]],  table[indices[10]], table[indices[11]],
+          table[indices[12]], table[indices[13]], table[indices[14]],
+          table[indices[15]]};
+}
+
+float packed_group_dot(Codes16 table, Bytes16 packed, BFloat16 activations_low,
+                       BFloat16 activations_high, float scale, float seed) {
+  auto low_codes = lookup(table, packed & 15);
+  auto high_codes = lookup(table, packed >> 4);
+  auto low_weights = loom::convert<BFloat16>(low_codes);
+  auto high_weights = loom::convert<BFloat16>(high_codes);
+  Float8 partial = {};
+  partial = loom::vector::dot2f(low_weights, activations_low, partial);
+  partial = loom::vector::dot2f(high_weights, activations_high, partial);
+  return loom::scalar::fmaf(scale, loom::vector::reduce::addf(partial, 0.0f),
+                            seed);
+}
+
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void decode_dot(
+    [[loom::noalias, loom::assume_aligned(64)]] const Codes16* table,
+    [[loom::noalias, loom::assume_aligned(64)]] const Bytes16* packed,
+    [[loom::noalias, loom::assume_aligned(64)]] const BFloat16* activations_low,
+    [[loom::noalias,
+      loom::assume_aligned(64)]] const BFloat16* activations_high,
+    [[loom::noalias]] float* output, float scale, float seed) {
+  *output = packed_group_dot(*table, *packed, *activations_low,
+                             *activations_high, scale, seed);
+}
+
+// ----
+kernel.def @decode_dot() {
+  %7 = index.constant 1 : index
+  kernel.launch.config workgroups(%7, %7, %7) workgroup_size(%7, %7, %7) : index
+} launch(%0: buffer, %1: buffer, %2: buffer, %3: buffer, %4: buffer, %scale: f32, %seed: f32) {
+  %13 = buffer.assume.alignment %0 {minimum_alignment = 64} : buffer
+  %table = buffer.assume.noalias %13 : buffer
+  %table_byte_offset = index.constant 0 : offset
+  %16 = buffer.assume.alignment %1 {minimum_alignment = 64} : buffer
+  %packed = buffer.assume.noalias %16 : buffer
+  %19 = buffer.assume.alignment %2 {minimum_alignment = 64} : buffer
+  %activations_low = buffer.assume.noalias %19 : buffer
+  %22 = buffer.assume.alignment %3 {minimum_alignment = 64} : buffer
+  %activations_high = buffer.assume.noalias %22 : buffer
+  %output = buffer.assume.noalias %4 : buffer
+  %27 = buffer.view %table[%table_byte_offset] : buffer -> view<16xi8>
+  %28 = vector.load<root_in_bounds> %27[0] : view<16xi8> -> vector<16xi8>
+  %29 = buffer.view %packed[%table_byte_offset] : buffer -> view<16xi8>
+  %30 = vector.load<root_in_bounds> %29[0] : view<16xi8> -> vector<16xi8>
+  %31 = buffer.view %activations_low[%table_byte_offset] : buffer -> view<16xbf16>
+  %32 = vector.load<root_in_bounds> %31[0] : view<16xbf16> -> vector<16xbf16>
+  %33 = buffer.view %activations_high[%table_byte_offset] : buffer -> view<16xbf16>
+  %34 = vector.load<root_in_bounds> %33[0] : view<16xbf16> -> vector<16xbf16>
+  %35 = func.call pure @packed_group_dot(%28, %30, %32, %34, %scale, %seed) : (vector<16xi8>, vector<16xi8>, vector<16xbf16>, vector<16xbf16>, f32, f32) -> (f32)
+  %36 = buffer.view %output[%table_byte_offset] : buffer -> view<1xf32>
+  view.store<root_in_bounds> %35, %36[0] : f32, view<1xf32>
+  kernel.return
+}
+
+func.def @packed_group_dot(%table: vector<16xi8>, %packed: vector<16xi8>, %activations_low: vector<16xbf16>, %activations_high: vector<16xbf16>, %scale: f32, %seed: f32) -> (f32) {
+  %301 = vector.splati 15 : vector<16xi8>
+  %47 = vector.andi %packed, %301 : vector<16xi8>
+  %low_codes = vector.table.lookup %table[%47] : vector<16xi8>, vector<16xi8> -> vector<16xi8>
+  %296 = vector.splati 4 : vector<16xi8>
+  %52 = vector.shrui %packed, %296 : vector<16xi8>
+  %high_codes = vector.table.lookup %table[%52] : vector<16xi8>, vector<16xi8> -> vector<16xi8>
+  %low_weights = vector.sitofp %low_codes : vector<16xi8> to vector<16xbf16>
+  %high_weights = vector.sitofp %high_codes : vector<16xi8> to vector<16xbf16>
+  %partial$291 = vector.splatf 0.0 : vector<8xf32>
+  %partial$57 = vector.dot2f %low_weights, %activations_low, %partial$291 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  %partial$58 = vector.dot2f %high_weights, %activations_high, %partial$57 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  %59 = scalar.constant 0.0 : f32
+  %60 = vector.reduce<addf> %partial$58, %59 : vector<8xf32>, f32
+  %61 = scalar.fmaf %scale, %60, %seed : f32
+  func.return %61 : f32
+}

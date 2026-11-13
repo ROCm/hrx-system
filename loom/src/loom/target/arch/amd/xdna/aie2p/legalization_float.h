@@ -14,7 +14,8 @@ extern "C" {
 #endif
 
 // Lowers comparisons for every direct floating-point encoding through packed
-// integer order keys. Preserves NaNs, signed zeros, infinities, and subnormal
+// integer operations, using sign and magnitude for known zero operands and
+// order keys otherwise. Preserves NaNs, signed zeros, infinities, and subnormal
 // ordering without converting floating-point values or extracting lanes.
 iree_status_t loom_aie2p_legalize_vector_cmpf(
     const loom_target_legalizer_entry_t* entry,

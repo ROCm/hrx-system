@@ -6,10 +6,11 @@
 
 #include "loom/target/arch/cmd/check/program_plan.h"
 
-#include "loom/target/arch/cmd/program.h"
+#include "loom/runtime/command/program.h"
 #include "loom/tools/loom-check/compile.h"
 #include "loom/tools/loom-check/compile_diagnostics.h"
 #include "loomc/iree.h"
+#include "loomc/module.h"
 #include "loomc/target/cmd/program.h"
 
 typedef struct loom_cmd_program_plan_check_options_t {
@@ -17,7 +18,20 @@ typedef struct loom_cmd_program_plan_check_options_t {
   loomc_string_view_t* root_names;
   // Number of entries in |root_names|.
   iree_host_size_t root_count;
+  // Include the independently published device programs in the exact output.
+  bool include_kernel_sources;
 } loom_cmd_program_plan_check_options_t;
+
+typedef struct loom_cmd_program_plan_check_requests_t {
+  // Case storage owning the request array.
+  iree_arena_allocator_t* arena;
+  // Owned requests retained until the parent compilation has completed.
+  loomc_request_t** values;
+  // Number of owned request references.
+  iree_host_size_t count;
+  // Allocated request slots.
+  iree_host_size_t capacity;
+} loom_cmd_program_plan_check_requests_t;
 
 static bool loom_cmd_program_plan_check_emit_provider_matches(
     const loom_check_emit_provider_t* provider,
@@ -87,7 +101,9 @@ static iree_status_t loom_cmd_program_plan_check_parse_options(
   IREE_RETURN_IF_ERROR(loom_cmd_program_plan_check_parse_roots(
       roots_text, request->case_arena, out_options));
 
-  if (!iree_string_view_is_empty(option_text)) {
+  if (iree_string_view_equal(option_text, IREE_SV("kernels"))) {
+    out_options->include_kernel_sources = true;
+  } else if (!iree_string_view_is_empty(option_text)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "unexpected command program emit option '%.*s'",
                             (int)option_text.size, option_text.data);
@@ -127,6 +143,66 @@ static loomc_status_t loom_cmd_program_plan_check_append_listing_segment(
       iree_make_string_view((const char*)segment.data, segment.data_length)));
 }
 
+static loomc_status_t loom_cmd_program_plan_check_capture_request(
+    void* user_data, loomc_request_t* request) {
+  loom_cmd_program_plan_check_requests_t* requests = user_data;
+  if (requests == NULL) {
+    loomc_request_release(request);
+    return loomc_ok_status();
+  }
+  iree_status_t status =
+      iree_arena_grow_array(requests->arena, requests->count,
+                            requests->count + 1, sizeof(*requests->values),
+                            &requests->capacity, (void**)&requests->values);
+  if (iree_status_is_ok(status)) {
+    requests->values[requests->count++] = request;
+  } else {
+    loomc_request_release(request);
+  }
+  return loomc_status_from_iree(status);
+}
+
+static iree_status_t loom_cmd_program_plan_check_append_kernel_source(
+    const loom_check_emit_provider_request_t* request,
+    const loomc_request_t* kernel_request) {
+  const loom_check_compile_session_t* session =
+      request->environment->compile_session;
+  const loomc_allocator_t allocator =
+      loomc_allocator_from_iree(request->host_allocator);
+  loomc_module_t* module = NULL;
+  loomc_result_t* result = NULL;
+  iree_status_t status = iree_status_from_loomc(
+      loomc_module_deserialize_from_source(session->context, session->workspace,
+                                           loomc_request_source(kernel_request),
+                                           NULL, allocator, &module, &result));
+  bool succeeded = false;
+  if (iree_status_is_ok(status)) {
+    status = loom_check_compile_append_result(request->diagnostic_collector,
+                                              result, &succeeded);
+  }
+  loomc_source_t* source = NULL;
+  if (iree_status_is_ok(status) && succeeded) {
+    const loomc_module_serialize_options_t options = {
+        .type = LOOMC_STRUCTURE_TYPE_MODULE_SERIALIZE_OPTIONS,
+        .structure_size = sizeof(options),
+        .format = LOOMC_SOURCE_FORMAT_TEXT,
+    };
+    status = iree_status_from_loomc(
+        loomc_module_serialize_to_source(module, &options, allocator, &source));
+  }
+  if (iree_status_is_ok(status) && succeeded) {
+    const loomc_byte_span_t contents = loomc_source_contents(source);
+    status = iree_string_builder_append_string(
+        &request->result->actual_output,
+        iree_make_string_view((const char*)contents.data,
+                              contents.data_length));
+  }
+  loomc_source_release(source);
+  loomc_result_release(result);
+  loomc_module_release(module);
+  return status;
+}
+
 static iree_status_t loom_cmd_program_plan_check_emit_provider_execute(
     const loom_check_emit_provider_t* provider,
     const loom_check_emit_provider_request_t* request) {
@@ -135,6 +211,8 @@ static iree_status_t loom_cmd_program_plan_check_emit_provider_execute(
   IREE_RETURN_IF_ERROR(
       loom_cmd_program_plan_check_parse_options(request, &options));
 
+  loom_cmd_program_plan_check_requests_t kernels = {.arena =
+                                                        request->case_arena};
   const loomc_cmd_program_module_options_t product_options = {
       .type = LOOMC_STRUCTURE_TYPE_CMD_PROGRAM_MODULE_OPTIONS,
       .structure_size = sizeof(product_options),
@@ -142,6 +220,11 @@ static iree_status_t loom_cmd_program_plan_check_emit_provider_execute(
       .root_symbols = options.root_names,
       .root_symbol_count = options.root_count,
       .artifact_flags = LOOMC_EMIT_ARTIFACT_FLAG_TARGET_LISTING,
+      .request_sink =
+          {
+              .publish = loom_cmd_program_plan_check_capture_request,
+              .user_data = options.include_kernel_sources ? &kernels : NULL,
+          },
   };
   loomc_product_t* product = NULL;
   loomc_result_t* result = NULL;
@@ -173,6 +256,14 @@ static iree_status_t loom_cmd_program_plan_check_emit_provider_execute(
             .fn = loom_cmd_program_plan_check_append_listing_segment,
             .user_data = &request->result->actual_output,
         }));
+  }
+  for (iree_host_size_t i = 0;
+       i < kernels.count && succeeded && iree_status_is_ok(status); ++i) {
+    status = loom_cmd_program_plan_check_append_kernel_source(
+        request, kernels.values[i]);
+  }
+  for (iree_host_size_t i = 0; i < kernels.count; ++i) {
+    loomc_request_release(kernels.values[i]);
   }
   loomc_result_release(result);
   loomc_product_release(product);

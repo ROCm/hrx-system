@@ -268,7 +268,7 @@ TEST_F(BuilderTest, AllocOpWithSuccessorsKeepsTrailingFieldsDistinct) {
 
   loom_op_successors(op)[0] = then_block;
   loom_op_successors(op)[1] = else_block;
-  loom_op_regions(op)[0] = child_region;
+  loom_op_set_region(op, 0, child_region);
   loom_op_operands(op)[0] = 42;
   loom_op_results(op)[0] = 7;
   loom_op_attrs(op)[0] = loom_attr_i64(99);
@@ -361,6 +361,40 @@ TEST_F(BuilderTest, MemoryFenceHasOrderingWithoutMemoryAccess) {
   EXPECT_FALSE(loom_region_has_memory_accesses(module_->body));
 }
 
+TEST_F(BuilderTest, ReadSpaceSummaryTracksNestedContributors) {
+  const loom_type_t i32 = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
+  loom_value_id_t pool = LOOM_VALUE_ID_INVALID;
+  loom_value_id_t input = LOOM_VALUE_ID_INVALID;
+  IREE_ASSERT_OK(loom_builder_define_block_arg(
+      &builder_, loom_module_block(module_), loom_type_pool(), &pool));
+  IREE_ASSERT_OK(loom_builder_define_block_arg(
+      &builder_, loom_module_block(module_), i32, &input));
+  loom_op_t* map = nullptr;
+  IREE_ASSERT_OK(loom_test_map_build(&builder_, &input, 1, i32, nullptr, 0,
+                                     LOOM_LOCATION_UNKNOWN, &map));
+  loom_region_t* body = loom_test_map_body(map);
+  const loom_builder_ip_t saved =
+      loom_builder_enter_region(&builder_, map, body);
+  loom_op_t* first = nullptr;
+  loom_op_t* second = nullptr;
+  IREE_ASSERT_OK(loom_test_read_resource_build(&builder_, pool, i32,
+                                               LOOM_LOCATION_UNKNOWN, &first));
+  IREE_ASSERT_OK(loom_test_read_resource_build(&builder_, pool, i32,
+                                               LOOM_LOCATION_UNKNOWN, &second));
+  loom_builder_restore(&builder_, saved);
+  const loom_memory_space_mask_t unknown =
+      1u << LOOM_VALUE_FACT_MEMORY_SPACE_UNKNOWN;
+  EXPECT_EQ(loom_region_read_memory_spaces(body), unknown);
+  EXPECT_EQ(loom_region_read_memory_spaces(module_->body), unknown);
+  IREE_ASSERT_OK(loom_op_erase(module_, first));
+  EXPECT_EQ(loom_region_read_memory_spaces(body), unknown);
+  IREE_ASSERT_OK(loom_module_compute_uses(module_));
+  EXPECT_EQ(body->read_space_counts[LOOM_VALUE_FACT_MEMORY_SPACE_UNKNOWN], 1u);
+  IREE_ASSERT_OK(loom_op_erase(module_, second));
+  EXPECT_EQ(loom_region_read_memory_spaces(body), 0);
+  EXPECT_EQ(loom_region_read_memory_spaces(module_->body), 0);
+}
+
 TEST_F(BuilderTest, DirectWriteEffectSummaryUpdatesOnErase) {
   loom_type_t pool_type = loom_type_pool();
   loom_type_t i32 = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
@@ -401,12 +435,12 @@ TEST_F(BuilderTest, DirectIdentitySummaryUpdatesOnErase) {
       LOOM_LOCATION_UNKNOWN, &allocation_op));
 
   EXPECT_EQ(module_->body->resource_identity_count, 1u);
-  EXPECT_TRUE(loom_region_has_resource_identities(module_->body));
+  EXPECT_TRUE(loom_region_may_create_resources(module_->body));
   EXPECT_FALSE(loom_region_has_memory_accesses(module_->body));
 
   IREE_ASSERT_OK(loom_op_erase(module_, allocation_op));
   EXPECT_EQ(module_->body->resource_identity_count, 0u);
-  EXPECT_FALSE(loom_region_has_resource_identities(module_->body));
+  EXPECT_FALSE(loom_region_may_create_resources(module_->body));
 }
 
 TEST_F(BuilderTest, UnknownOpEffectsAreConservative) {
@@ -419,6 +453,7 @@ TEST_F(BuilderTest, UnknownOpEffectsAreConservative) {
 
   EXPECT_EQ(loom_op_effective_traits(module_, op), LOOM_TRAIT_UNKNOWN_EFFECTS);
   EXPECT_TRUE(loom_op_may_write(module_, op));
+  EXPECT_TRUE(loom_region_may_create_resources(module_->body));
   EXPECT_EQ(module_->body->read_effect_count, 1u);
   EXPECT_EQ(module_->body->write_effect_count, 1u);
   EXPECT_EQ(module_->body->memory_access_count, 1u);
@@ -800,8 +835,16 @@ TEST_F(BuilderTest, RegionAccessor) {
                                           0, 0, LOOM_LOCATION_UNKNOWN, &op));
   // Set a sentinel region pointer.
   loom_region_t sentinel_region = {0};
-  loom_op_regions(op)[0] = &sentinel_region;
+  loom_op_set_region(op, 0, &sentinel_region);
   EXPECT_EQ(loom_test_map_body(op), &sentinel_region);
+  EXPECT_EQ(loom_region_parent_op(&sentinel_region), op);
+
+  loom_region_t replacement_region = {0};
+  loom_op_set_region(op, 0, &replacement_region);
+  EXPECT_EQ(loom_region_parent_op(&sentinel_region), nullptr);
+  EXPECT_EQ(loom_region_parent_op(&replacement_region), op);
+  loom_op_set_region(op, 0, nullptr);
+  EXPECT_EQ(loom_region_parent_op(&replacement_region), nullptr);
 }
 
 TEST_F(BuilderTest, TrailingStorageAlignment) {
@@ -1232,7 +1275,7 @@ TEST_F(BuilderTest, TargetLikeInterfaceReadsTargetRecordFields) {
       /*offset_bitwidth=*/0, /*max_workgroup_size_x=*/0,
       /*max_workgroup_size_y=*/0, /*max_workgroup_size_z=*/0,
       /*max_flat_workgroup_size=*/0, /*max_workgroup_storage_bytes=*/0,
-      /*subgroup_size=*/0,
+      /*subgroup_size=*/0, /*execution_unit_count=*/0,
       /*max_grid_size_x=*/0, /*max_grid_size_y=*/0, /*max_grid_size_z=*/0,
       /*max_flat_grid_size=*/0,
       /*max_workgroup_count_x=*/0, /*max_workgroup_count_y=*/0,
@@ -1581,6 +1624,31 @@ TEST_F(BuilderTest, OpRemoveResultsCompactsDefinitionsAndTiedResults) {
   EXPECT_EQ(loom_module_value(module_, operand)->use_count, 1u);
   IREE_ASSERT_OK(loom_op_erase(module_, op));
   EXPECT_EQ(loom_module_value(module_, operand)->use_count, 0u);
+}
+
+TEST_F(BuilderTest, OpRemoveLastResultUpdatesBlockResultCount) {
+  loom_type_t i32 = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
+  loom_value_id_t input = build_constant(&builder_, module_, i32);
+  loom_op_t* op = nullptr;
+  IREE_ASSERT_OK(loom_test_addi_build(&builder_, input, input, i32,
+                                      LOOM_LOCATION_UNKNOWN, &op));
+  loom_block_t* block = op->parent_block;
+  const uint32_t initial_result_operation_count = block->result_operation_count;
+
+  const bool remove_results[] = {true};
+  uint16_t removed_count = 0;
+  iree_arena_allocator_t scratch_arena;
+  iree_arena_initialize(&block_pool_, &scratch_arena);
+  iree_status_t status = loom_op_remove_results(module_, op, remove_results,
+                                                &scratch_arena, &removed_count);
+  iree_arena_deinitialize(&scratch_arena);
+  IREE_ASSERT_OK(status);
+
+  EXPECT_EQ(removed_count, 1u);
+  EXPECT_EQ(op->result_count, 0u);
+  EXPECT_EQ(block->result_operation_count, initial_result_operation_count - 1);
+  IREE_ASSERT_OK(loom_op_erase(module_, op));
+  EXPECT_EQ(block->result_operation_count, initial_result_operation_count - 1);
 }
 
 TEST_F(BuilderTest, InlineUsesPopulated) {

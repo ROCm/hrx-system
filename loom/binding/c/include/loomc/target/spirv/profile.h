@@ -230,8 +230,20 @@ typedef enum loomc_spirv_feature_e {
   /// Subgroup up and down shuffle operations.
   LOOMC_SPIRV_FEATURE_GROUP_NON_UNIFORM_SHUFFLE_RELATIVE = 46,
 
+  /// SPV_KHR_integer_dot_product operations.
+  LOOMC_SPIRV_FEATURE_INTEGER_DOT_PRODUCT = 47,
+
+  /// Integer dots admit all native integer vector types.
+  LOOMC_SPIRV_FEATURE_INTEGER_DOT_PRODUCT_INPUT_ALL = 48,
+
+  /// Integer dots admit four-byte vectors.
+  LOOMC_SPIRV_FEATURE_INTEGER_DOT_PRODUCT_INPUT4X8_BIT = 49,
+
+  /// Integer dots admit four bytes packed in an i32.
+  LOOMC_SPIRV_FEATURE_INTEGER_DOT_PRODUCT_INPUT4X8_BIT_PACKED = 50,
+
   /// Number of public SPIR-V feature identifiers.
-  LOOMC_SPIRV_FEATURE_COUNT = 47,
+  LOOMC_SPIRV_FEATURE_COUNT = 51,
 } loomc_spirv_feature_t;
 
 /// Bitset of `loomc_spirv_feature_t` values.

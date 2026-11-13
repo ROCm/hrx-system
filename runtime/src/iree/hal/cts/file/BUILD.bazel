@@ -55,7 +55,7 @@ iree_runtime_cc_binary(
         "//runtime/src/iree/base/threading",
         "//runtime/src/iree/base/tooling:flags",
         "//runtime/src/iree/hal",
-        "//runtime/src/iree/hal/drivers",
+        "//runtime/src/iree/hal/driver",
         "//runtime/src/iree/hal/utils:files",
         "//runtime/src/iree/io:file_handle",
         "//runtime/src/iree/testing:benchmark",
@@ -70,6 +70,7 @@ iree_executable_test(
     src = ":file_benchmark",
     args = [
         "--device=task",
+        "--queue_family=0",
         "--file=$(rootpath file_benchmark.cc)",
         "--file_length=4096",
         "--read_bytes=4096",

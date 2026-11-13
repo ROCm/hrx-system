@@ -35,7 +35,7 @@ _MAP_3 = VectorOpcodeMap.MAP_0F3A
 _MAP_5 = VectorOpcodeMap.MAP_5
 _MAP_6 = VectorOpcodeMap.MAP_6
 
-_ZERO = vector_encoding_recipe(_R.RESULT, _R.RESULT, _R.RESULT)
+_RESULT_ONLY = vector_encoding_recipe(_R.RESULT, _R.RESULT, _R.RESULT)
 _REVERSE_UNARY = vector_encoding_recipe(_R.INPUT_0, _R.NONE, _R.RESULT)
 _NDS_SWAPPED_INPUTS = vector_encoding_recipe(_R.RESULT, _R.INPUT_1, _R.INPUT_0)
 _UNARY = vector_encoding_recipe(_R.RESULT, _R.NONE, _R.INPUT_0)
@@ -202,6 +202,7 @@ def _instruction(
     operands: tuple[VectorOperandShape, ...],
     immediates: tuple[VectorImmediateShape, ...],
     *encodings: VectorEncoding,
+    fixed_immediate: int | None = None,
 ) -> VectorMachineInstruction:
     return VectorMachineInstruction(
         descriptor_mnemonic=mnemonic,
@@ -210,6 +211,7 @@ def _instruction(
         operands=operands,
         immediates=immediates,
         encodings=encodings,
+        fixed_immediate=fixed_immediate,
     )
 
 
@@ -960,6 +962,76 @@ VMULSH = _instruction(
     _IMMEDIATES_0,
     _encoding(_EVEX, _MAP_5, 2, 0, 0x59, (128,)),
 )
+VROUNDPS = _instruction(
+    "vroundps",
+    _UNARY_IMMEDIATE,
+    _OPERANDS_13,
+    _IMMEDIATES_5,
+    _encoding(_VEX, _MAP_3, 1, 0, 0x08, (128, 256)),
+)
+VROUNDPD = _instruction(
+    "vroundpd",
+    _UNARY_IMMEDIATE,
+    _OPERANDS_13,
+    _IMMEDIATES_5,
+    _encoding(_VEX, _MAP_3, 1, 0, 0x09, (128, 256)),
+)
+VROUNDSS = _instruction(
+    "vroundss",
+    _NDS_IMMEDIATE,
+    _OPERANDS_16,
+    _IMMEDIATES_5,
+    _encoding(_VEX, _MAP_3, 1, 0, 0x0A, (128,)),
+)
+VROUNDSD = _instruction(
+    "vroundsd",
+    _NDS_IMMEDIATE,
+    _OPERANDS_16,
+    _IMMEDIATES_5,
+    _encoding(_VEX, _MAP_3, 1, 0, 0x0B, (128,)),
+)
+VRNDSCALEPS = _instruction(
+    "vrndscaleps",
+    _UNARY_IMMEDIATE,
+    _OPERANDS_13,
+    _IMMEDIATES_5,
+    _encoding(_EVEX, _MAP_3, 1, 0, 0x08, (128, 256, 512)),
+)
+VRNDSCALEPD = _instruction(
+    "vrndscalepd",
+    _UNARY_IMMEDIATE,
+    _OPERANDS_13,
+    _IMMEDIATES_5,
+    _encoding(_EVEX, _MAP_3, 1, 1, 0x09, (128, 256, 512)),
+)
+VRNDSCALESS = _instruction(
+    "vrndscaless",
+    _NDS_IMMEDIATE,
+    _OPERANDS_16,
+    _IMMEDIATES_5,
+    _encoding(_EVEX, _MAP_3, 1, 0, 0x0A, (128,)),
+)
+VRNDSCALESD = _instruction(
+    "vrndscalesd",
+    _NDS_IMMEDIATE,
+    _OPERANDS_16,
+    _IMMEDIATES_5,
+    _encoding(_EVEX, _MAP_3, 1, 1, 0x0B, (128,)),
+)
+VRNDSCALEPH = _instruction(
+    "vrndscaleph",
+    _UNARY_IMMEDIATE,
+    _OPERANDS_13,
+    _IMMEDIATES_5,
+    _encoding(_EVEX, _MAP_3, 0, 0, 0x08, (128, 256, 512)),
+)
+VRNDSCALESH = _instruction(
+    "vrndscalesh",
+    _NDS_IMMEDIATE,
+    _OPERANDS_16,
+    _IMMEDIATES_5,
+    _encoding(_EVEX, _MAP_3, 0, 0, 0x0A, (128,)),
+)
 VPACKSSDW = _instruction(
     "vpackssdw",
     _NDS,
@@ -1154,6 +1226,13 @@ VPCMPEQD = _instruction(
     "vpcmpeqd",
     _NDS,
     _OPERANDS_16,
+    _IMMEDIATES_0,
+    _encoding(_VEX, _MAP_1, 1, 0, 0x76, (128, 256)),
+)
+VPCMPEQD_ONES = _instruction(
+    "vpcmpeqd",
+    _RESULT_ONLY,
+    _OPERANDS_20,
     _IMMEDIATES_0,
     _encoding(_VEX, _MAP_1, 1, 0, 0x76, (128, 256)),
 )
@@ -1962,6 +2041,14 @@ VPSUBW = _instruction(
     _encoding(_EVEX, _MAP_1, 1, 0, 0xF9, (512,)),
     _encoding(_VEX, _MAP_1, 1, 0, 0xF9, (128, 256)),
 )
+VPTERNLOGD_ONES = _instruction(
+    "vpternlogd",
+    vector_encoding_recipe(_R.RESULT, _R.RESULT, _R.RESULT, _B.IMMEDIATE),
+    _OPERANDS_20,
+    _IMMEDIATES_0,
+    _encoding(_EVEX, _MAP_3, 1, 0, 0x25, (128, 256, 512)),
+    fixed_immediate=0xFF,
+)
 VPUNPCKLBW = _instruction(
     "vpunpcklbw",
     _NDS,
@@ -2171,7 +2258,7 @@ VSUBSH = _instruction(
 )
 VXORPS = _instruction(
     "vxorps",
-    _ZERO,
+    _RESULT_ONLY,
     _OPERANDS_20,
     _IMMEDIATES_0,
     _encoding(_EVEX, _MAP_1, 0, 0, 0x57, (512,)),

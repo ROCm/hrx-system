@@ -9,6 +9,7 @@
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/analysis/symbolic_expr_test_fixture.h"
+#include "loom/analysis/view_regions.h"
 
 namespace loom {
 namespace {
@@ -124,6 +125,34 @@ TEST_F(LowLowerMemoryEffectsTest, StaticGeometryNeedsNoDynamicProof) {
       origin, &source, &geometry, loom_value_facts_exact_i64(0), &interval,
       &lane_byte_count));
   source.root_uniform_scope = LOOM_VALUE_FACT_UNIFORM_SCOPE_SUBGROUP;
+  EXPECT_FALSE(loom_low_lower_memory_packet_interval(
+      origin, &source, &geometry, loom_value_facts_exact_i64(0), &interval,
+      &lane_byte_count));
+}
+
+TEST_F(LowLowerMemoryEffectsTest, CarrierCoordinatesAreNotStorageIntervals) {
+  const loom_view_region_t region = {
+      .base_view_value_id = 8,
+      .root_value_id = 7,
+  };
+  const loom_low_source_memory_access_plan_t source = {
+      .base_view_value_id = region.base_view_value_id,
+      .materialized_base_region = &region,
+      .root_value_id = region.root_value_id,
+      .root_uniform_scope = LOOM_VALUE_FACT_UNIFORM_SCOPE_WORKGROUP,
+      .element_byte_count = 4,
+      .vector_lane_count = 2,
+      .vector_lane_byte_stride = 4,
+      .static_byte_offset = 16,
+  };
+  const loom_low_lower_memory_origin_t* origin = nullptr;
+  IREE_ASSERT_OK(loom_low_lower_memory_origin_plan(
+      &expression_context_, &source, &plan_arena_, &origin));
+  EXPECT_EQ(origin, nullptr);
+  loom_low_memory_relative_interval_t interval = {};
+  int64_t lane_byte_count = 0;
+  const auto geometry =
+      loom_low_lower_memory_packet_geometry_from_source(&source);
   EXPECT_FALSE(loom_low_lower_memory_packet_interval(
       origin, &source, &geometry, loom_value_facts_exact_i64(0), &interval,
       &lane_byte_count));

@@ -28,6 +28,7 @@ from loom.dialect import (
     pass_,
     pipeline,
     pool,
+    ref,
     sanitizer,
     scalar,
     scf,
@@ -36,6 +37,7 @@ from loom.dialect import (
     tensor,
     test,
     tile,
+    type,
     vector,
     view,
 )
@@ -58,6 +60,7 @@ __all__ = [
     "pass_",
     "pipeline",
     "pool",
+    "ref",
     "sanitizer",
     "scalar",
     "scf",
@@ -66,6 +69,7 @@ __all__ = [
     "tensor",
     "test",
     "tile",
+    "type",
     "vector",
     "view",
 ]

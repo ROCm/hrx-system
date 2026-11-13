@@ -16,7 +16,7 @@
 // - Varying output buffer capacities per item
 // - State reuse across consecutive items
 //
-// Uses fuzzing_util for tokenizer loading (dummy or real via --tokenizer_json).
+// Uses fuzzing_util for configured real-tokenizer or dummy-tokenizer loading.
 //
 // See https://iree.dev/developers/debugging/fuzzing/ for build and run info.
 
@@ -30,8 +30,9 @@
 static iree_tokenizer_t* g_tokenizer = NULL;
 
 extern "C" int LLVMFuzzerInitialize(int* argc, char*** argv) {
-  iree_status_t status =
-      iree_tokenizer_fuzz_load_or_build(argc, argv, &g_tokenizer, NULL);
+  (void)argc;
+  (void)argv;
+  iree_status_t status = iree_tokenizer_fuzz_load_or_build(&g_tokenizer, NULL);
   if (!iree_status_is_ok(status)) {
     iree_status_fprint(stderr, status);
     iree_status_free(status);

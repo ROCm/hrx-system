@@ -1,0 +1,103 @@
+// Each lane has independent divisors and a possibly empty loop. Invariant
+// signed/unsigned preparations coexist with a divisor that changes each trip;
+// invalid divisors in inactive branches must not affect observable results.
+func.def device inline @loop_division_lane(%input: buffer, %output: buffer, %lane: index) {
+  %base = index.constant 0 : offset
+  %inputs = buffer.view %input[%base] : buffer -> view<32x4xi32>
+  %outputs = buffer.view %output[%base] : buffer -> view<32x2xi32>
+  %initial = view.load %inputs[%lane, 0] : view<32x4xi32> -> i32
+  %first_divisor = view.load %inputs[%lane, 1] : view<32x4xi32> -> i32
+  %second_divisor = view.load %inputs[%lane, 2] : view<32x4xi32> -> i32
+  %count_bits = view.load %inputs[%lane, 3] : view<32x4xi32> -> i32
+  %c0 = scalar.constant 0 : i32
+  %c1 = scalar.constant 1 : i32
+  %c2 = scalar.constant 2 : i32
+  %c7 = scalar.constant 7 : i32
+  %cn1 = scalar.constant -1 : i32
+  %odd_divisor = scalar.ori %first_divisor, %c1 : i32
+  %is_negative_one = scalar.cmpi eq, %odd_divisor, %cn1 : i32
+  %safe_divisor = scf.select %is_negative_one, %c1, %odd_divisor : i32
+  %count_masked = scalar.andi %count_bits, %c7 : i32
+  %count = index.cast %count_masked : i32 to index
+  %first_nonzero = scalar.cmpi ne, %first_divisor, %c0 : i32
+  %first_not_negative_one = scalar.cmpi ne, %first_divisor, %cn1 : i32
+  %second_nonzero = scalar.cmpi ne, %second_divisor, %c0 : i32
+  %first_valid = scalar.andi %first_nonzero, %first_not_negative_one : i1
+  %enabled = scalar.andi %first_valid, %second_nonzero : i1
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %final, %checksum, %final_divisor = scf.for %i = [%begin to %count step %step](%value = %initial : i32, %accumulator = %c0 : i32, %changing = %second_divisor : i32) -> (i32, i32, i32) {
+    %unsigned_quotient, %unsigned_remainder = scalar.divremui %value, %safe_divisor : i32
+    %signed_quotient, %signed_remainder = scalar.divremsi %value, %safe_divisor : i32
+    %guarded_observation = scf.if %enabled -> (i32) {
+      %guarded_quotient = scalar.divui %signed_quotient, %first_divisor : i32
+      %other_remainder = scalar.remsi %guarded_quotient, %second_divisor : i32
+      scf.yield %other_remainder : i32
+    } else {
+      scf.yield %c0 : i32
+    }
+    %nonzero_changing = scalar.ori %changing, %c1 : i32
+    %changing_quotient = scalar.divui %value, %nonzero_changing : i32
+    %next = scalar.addi %value, %unsigned_quotient : i32
+    %quotients = scalar.xori %signed_quotient, %changing_quotient : i32
+    %remainders = scalar.xori %signed_remainder, %unsigned_remainder : i32
+    %observations = scalar.xori %quotients, %remainders : i32
+    %other_observations = scalar.xori %observations, %guarded_observation : i32
+    %next_accumulator = scalar.addi %accumulator, %other_observations : i32
+    %next_divisor = scalar.addi %changing, %c2 : i32
+    scf.yield %next, %next_accumulator, %next_divisor : i32, i32, i32
+  }
+  view.store %final, %outputs[%lane, 0] : i32, view<32x2xi32>
+  view.store %checksum, %outputs[%lane, 1] : i32, view<32x2xi32>
+  func.return
+}
+
+kernel.def @lane_division_loops() {
+  %unit = index.constant 1 : index
+  %width = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  func.call @loop_division_lane(%input, %output, %lane) : (buffer, buffer, index)
+  kernel.return
+}
+
+func.def @lane_division_loops_oracle(%input: buffer, %output: buffer) {
+  %begin = index.constant 0 : index
+  %end = index.constant 32 : index
+  %step = index.constant 1 : index
+  scf.for %lane = [%begin to %end step %step] {
+    func.call @loop_division_lane(%input, %output, %lane) : (buffer, buffer, index)
+  }
+  func.return
+}
+
+check.scenario @lane_division_loop_values {
+  // Every lane takes an empty loop with zero divisors.
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.fill value(0) : tensor<32x4xi32>
+    %output = check.generate.fill value(-123) : tensor<32x2xi32>
+    check.compare<@lane_division_loops, @lane_division_loops_oracle>(%input, %output) : (tensor<32x4xi32>, tensor<32x2xi32>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<32x4xi32>
+      check.expect.bitwise actual(%output) expected(%output) : tensor<32x2xi32>
+    }
+  }
+  // The second divisor is zero in one lane and negative in half the lanes.
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(-62) step(1) : tensor<32x4xi32>
+    %output = check.generate.fill value(-123) : tensor<32x2xi32>
+    check.compare<@lane_division_loops, @lane_division_loops_oracle>(%input, %output) : (tensor<32x4xi32>, tensor<32x2xi32>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<32x2xi32>
+    }
+  }
+  check.trial[8](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-2147483648 to 2147483647) : tensor<32x4xi32>
+    %output = check.generate.fill value(-123) : tensor<32x2xi32>
+    check.compare<@lane_division_loops, @lane_division_loops_oracle>(%input, %output) : (tensor<32x4xi32>, tensor<32x2xi32>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<32x4xi32>
+      check.expect.bitwise actual(%output) expected(%output) : tensor<32x2xi32>
+    }
+  }
+  check.return
+}

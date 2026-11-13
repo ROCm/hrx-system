@@ -16,6 +16,38 @@
 extern "C" {
 #endif
 
+// Synchronous lifecycle phases entered while constructing a HAL runtime.
+//
+// Each phase is published immediately before the named work begins. The next
+// phase therefore proves that the preceding phase completed.
+typedef enum loom_run_hal_runtime_progress_phase_e {
+  LOOM_RUN_HAL_RUNTIME_PROGRESS_PHASE_PROACTOR_POOL_CREATE = 0,
+  LOOM_RUN_HAL_RUNTIME_PROGRESS_PHASE_FRONTIER_TRACKER_CREATE,
+  LOOM_RUN_HAL_RUNTIME_PROGRESS_PHASE_DEVICE_CREATE,
+  LOOM_RUN_HAL_RUNTIME_PROGRESS_PHASE_PROACTOR_POOL_RELEASE,
+  LOOM_RUN_HAL_RUNTIME_PROGRESS_PHASE_DEVICE_GROUP_CREATE,
+  LOOM_RUN_HAL_RUNTIME_PROGRESS_PHASE_FRONTIER_TRACKER_RELEASE,
+  LOOM_RUN_HAL_RUNTIME_PROGRESS_PHASE_DISPATCH_QUEUE_SELECT,
+  LOOM_RUN_HAL_RUNTIME_PROGRESS_PHASE_TRANSFER_QUEUE_SELECT,
+  LOOM_RUN_HAL_RUNTIME_PROGRESS_PHASE_DEVICE_SOURCE_POOL_CREATE,
+  LOOM_RUN_HAL_RUNTIME_PROGRESS_PHASE_DEVICE_POOL_CREATE,
+  LOOM_RUN_HAL_RUNTIME_PROGRESS_PHASE_STAGING_POOL_CREATE,
+  LOOM_RUN_HAL_RUNTIME_PROGRESS_PHASE_FAILURE_DEINITIALIZE,
+  LOOM_RUN_HAL_RUNTIME_PROGRESS_PHASE_COUNT,
+} loom_run_hal_runtime_progress_phase_t;
+
+// Publishes one runtime construction phase. Callback errors propagate to the
+// caller after already-owned resources are released.
+typedef iree_status_t (*loom_run_hal_runtime_progress_fn_t)(
+    void* user_data, loom_run_hal_runtime_progress_phase_t phase);
+
+typedef struct loom_run_hal_runtime_progress_sink_t {
+  // Optional callback invoked at each runtime construction boundary.
+  loom_run_hal_runtime_progress_fn_t fn;
+  // Opaque callback state borrowed until initialization returns.
+  void* user_data;
+} loom_run_hal_runtime_progress_sink_t;
+
 // Shared HAL runtime state created by the execution layer.
 typedef struct loom_run_hal_runtime_t {
   // Selected HAL device used for executable preparation and dispatch.
@@ -41,6 +73,8 @@ typedef struct loom_run_hal_runtime_options_t {
   iree_hal_device_event_sink_t event_sink;
   // HAL runtime services requested for executables loaded into the device.
   iree_hal_device_runtime_feature_flags_t runtime_features;
+  // Optional synchronous runtime construction progress sink.
+  loom_run_hal_runtime_progress_sink_t progress_sink;
 } loom_run_hal_runtime_options_t;
 
 // Initializes |out_options| with default HAL runtime creation policy.

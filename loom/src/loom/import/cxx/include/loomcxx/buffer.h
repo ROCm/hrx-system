@@ -76,7 +76,37 @@ enum class memory_space {
   generic = 7,
 };
 
+// Source-level proof attached to one memory access. Ordinary accesses carry no
+// additional physical-root promise. root_in_bounds states that the complete
+// access lies within its allocation root; logical view bounds remain checked.
+enum class memory_access {
+  none = 0,
+  root_in_bounds = 8,
+};
+
 namespace buffer {
+
+// Constructs absent storage without allocating or exposing a native address.
+template <class T>
+[[loom::op("buffer.null")]] loom::type::buffer<T> null();
+
+namespace compare {
+
+// Closed predicate family for opaque byte-position comparisons.
+enum class predicate { eq = 0, ne = 1 };
+
+// Tests identity. Valid storage with zero length is nonnull.
+template <class T>
+[[loom::op("buffer.compare.null")]] bool null(loom::type::buffer<T> source);
+
+// Compares live byte positions, including one-past endpoints. Null permits
+// only offset zero; native addresses are never exposed to the source program.
+template <predicate Predicate, class Left, class Right>
+[[loom::op("buffer.compare.address")]] bool address(
+    loom::type::buffer<Left> left, loom::type::offset left_offset,
+    loom::type::buffer<Right> right, loom::type::offset right_offset);
+
+}  // namespace compare
 
 // Recovers the zero-origin Loom buffer root carried by a source pointer. The
 // pointer expression is evaluated normally; its interior byte origin is not

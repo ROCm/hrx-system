@@ -21,6 +21,12 @@
 extern "C" {
 #endif
 
+// Both declared ownership modes use the physical reference bank.
+static inline bool loom_vm_signature_kind_is_reference(uint16_t kind) {
+  return kind == IREE_VM_BYTECODE_SIGNATURE_KIND_REF ||
+         kind == IREE_VM_BYTECODE_SIGNATURE_KIND_PTR;
+}
+
 // Exact logical signature retained while building the program plan.
 typedef struct loom_vm_function_signature_t {
   // Physical argument/result counts. Program planning assigns descriptor_base.
@@ -28,8 +34,8 @@ typedef struct loom_vm_function_signature_t {
   // Module-owned argument descriptors followed by result descriptors, in
   // source order. Metadata planning finalizes them before function emission.
   iree_vm_bytecode_v0_signature_descriptor_row_t* fields;
-  // Argument/result register positions finalized with the logical fields.
-  loom_low_allocation_abi_location_t* registers;
+  // Argument/result register and call-packet coordinates finalized with fields.
+  loom_low_allocation_abi_location_t* locations;
 } loom_vm_function_signature_t;
 
 // Compiler-owned callable binding retained while building a VM program plan.
@@ -61,7 +67,7 @@ typedef struct loom_vm_program_callable_t {
   uint8_t target_kind;
   // Exact logical fields and their physical argument/result bank counts.
   loom_vm_function_signature_t signature;
-  // Shared allocation contract borrowing the classified signature registers.
+  // Shared allocation contract borrowing the classified signature coordinates.
   loom_low_call_contract_t call_contract;
   // Value and reference prefixes overwritten by argument/result transport.
   loom_low_call_clobber_t call_clobbers[2];

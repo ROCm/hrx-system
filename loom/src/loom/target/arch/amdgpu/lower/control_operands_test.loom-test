@@ -1,0 +1,435 @@
+// RUN: pass source-to-low{control-flow=structured-low}
+
+// Counted control retains the full exclusive endpoint in a uniform register
+// pair, even though the initial constant has an ordinary one-word producer.
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @exclusive_endpoint() -> (index) {
+  %begin = index.constant 0 : index
+  %end = index.constant 4294967296 : index
+  %step = index.constant 4294967295 : index
+  %last = scf.for %position = [%begin to %end step %step](%current = %begin : index) -> (index) {
+    scf.yield %position : index
+  }
+  func.return %last : index
+}
+
+// ----
+amdgpu.target<gfx11-generic> @target
+
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @exclusive_endpoint() -> (reg<amdgpu.sgpr x2>) asm {
+  %8 = s_mov_b32 0
+  %9 = s_mov_b32 0
+  %begin = concat(%8, %9) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %11 = s_mov_b32 0
+  %12 = s_mov_b32 1
+  %end = concat(%11, %12) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %step = s_mov_b32 4294967295
+  %15 = s_mov_b32 0
+  %16 = concat(%step, %15) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %last = low.scf.for signed [%begin to %end step %16] iter_args(%begin: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr x2>) do(%position: reg<amdgpu.sgpr x2>, %current: reg<amdgpu.sgpr x2>) {
+    low.scf.yield %position : reg<amdgpu.sgpr x2>
+  }
+  return %last
+}
+
+// ====
+
+// Entry and backedge values both reach the selected state carrier. A zero-trip
+// loop must preserve the signed initial value without evaluating the body.
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @zero_trip_state(%count_input: index, %initial: index) -> (index) {
+  %count = index.assume %count_input [range(%count_input, 0, 2)] : index
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %wide = index.constant 4294967296 : index
+  %result = scf.for %position = [%begin to %count step %step](%current = %initial : index) -> (index) {
+    scf.yield %wide : index
+  }
+  func.return %result : index
+}
+
+// ----
+amdgpu.target<gfx11-generic> @target
+
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @zero_trip_state(%count: reg<amdgpu.vgpr>, %initial: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x2>) asm {
+  %begin = s_mov_b32 0
+  %step = s_mov_b32 1
+  %15 = s_mov_b32 0
+  %16 = s_mov_b32 1
+  %wide = concat(%15, %16) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %18 = v_mov_b32_copy %begin
+  %19 = v_mov_b32_copy %step
+  %20 = v_ashrrev_i32_src0_inline %initial, 31
+  %21 = concat(%initial, %20) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %result = low.scf.for signed [%18 to %count step %19] iter_args(%21: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) do(%position: reg<amdgpu.vgpr>, %current: reg<amdgpu.vgpr x2>) {
+    %25 = slice %wide[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+    %26 = v_mov_b32_copy %25
+    %27 = slice %wide[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+    %28 = v_mov_b32_copy %27
+    %29 = concat(%26, %28) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+    low.scf.yield %29 : reg<amdgpu.vgpr x2>
+  }
+  return %result
+}
+
+// ====
+
+// The loop receiver uses a vector register, while its native producer and
+// consumer declare scalar registers. Uniformity permits the directed transfer
+// without changing the native helper's signature or the loop's placement.
+amdgpu.target<gfx11-generic> @target
+
+low.func.def noinline target<amdgpu.gfx11.generic.core>(@target) @flip_sign(%value: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
+  %sign = s_mov_b32 2147483648
+  %result = s_xor_b32 %value, %sign
+  return %result
+}
+
+kernel.def target(@target) @native_loop() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%initial: f32, %count: index, %output: buffer) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %result = scf.for %iteration = [%begin to %count step %step](%value = %initial : f32) -> (f32) {
+    %next = low.invoke @flip_sign(%value) : (f32) -> (f32)
+    scf.yield %next : f32
+  }
+  %origin = index.constant 0 : offset
+  %lane = kernel.workitem.id<x> : index
+  %view = buffer.view %output[%origin] : buffer -> view<64xf32>
+  view.store %result, %view[%lane] : f32, view<64xf32>
+  kernel.return
+}
+
+// ----
+amdgpu.target<gfx11-generic> @target
+
+low.func.def noinline target<amdgpu.gfx11.generic.core>(@target) @flip_sign(%value: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
+  %sign = s_mov_b32 2147483648
+  %result = s_xor_b32 %value, %sign
+  return %result
+}
+
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_count = 2, direct_arg_count = 2, direct_arg_names = {arg0 = "initial", arg1 = "count"}, direct_arg_offsets = [0, 4], direct_arg_parameter_indices = [0, 1], direct_arg_sizes = [4, 4], parameter_count = 3, resource_count = 1, resource_offsets = [8], resource_parameter_indices = [2], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @native_loop(%initial: reg<amdgpu.sgpr>, %count: reg<amdgpu.sgpr>) asm {
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %view = resource<hal_binding> {extent = 256, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %begin = s_mov_b32 0
+  %step = s_mov_b32 1
+  %24 = v_mov_b32_copy %initial
+  %result = low.scf.for signed [%begin to %count step %step] iter_args(%24: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) do(%iteration: reg<amdgpu.sgpr>, %value: reg<amdgpu.vgpr>) {
+    %28 = v_readfirstlane_b32 %value
+    %next = low.func.call @flip_sign(%28) : (reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>)
+    %30 = v_mov_b32_copy %next
+    low.scf.yield %30 : reg<amdgpu.vgpr>
+  }
+  %31 = v_lshlrev_b32_src0_inline %lane, 2
+  global_store_b32_saddr %31, %result, %view
+  return
+}
+
+// ====
+
+// A packed three-element payload occupies two words. A native argument must
+// receive both words, including the partially occupied final word.
+amdgpu.target<gfx11-generic> @target
+
+low.func.def target<amdgpu.gfx11.generic.core>(@target) @packed_identity(%value: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr x2>) asm {
+  return %value
+}
+
+kernel.def target(@target) @packed_native_argument() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: i16, %output: buffer) {
+  %packet = vector.splat %input : vector<3xi16>
+  %result = low.invoke @packed_identity(%packet) : (vector<3xi16>) -> (vector<3xi16>)
+  %origin = index.constant 0 : offset
+  %view = buffer.view %output[%origin] : buffer -> view<3xi16>
+  vector.store %result, %view[0] : vector<3xi16>, view<3xi16>
+  kernel.return
+}
+
+// ----
+amdgpu.target<gfx11-generic> @target
+
+low.func.def target<amdgpu.gfx11.generic.core>(@target) @packed_identity(%value: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr x2>) asm {
+  return %value
+}
+
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "input"}, direct_arg_offsets = [0], direct_arg_parameter_indices = [0], direct_arg_payload_sizes = [2], direct_arg_sizes = [4], parameter_count = 2, resource_count = 1, resource_offsets = [8], resource_parameter_indices = [1], uses_kernarg_segment_ptr = true}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @packed_native_argument(%input: reg<amdgpu.sgpr>) asm {
+  %view = resource<hal_binding> {extent = 6, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %11 = v_mov_b32_copy %input
+  %12 = v_and_b32_lit %11, 65535
+  %13 = v_mov_b32_copy %input
+  %14 = v_and_b32_lit %13, 65535
+  %15 = v_lshlrev_b32_src0_inline %14, 16
+  %16 = v_or_b32 %12, %15
+  %17 = v_mov_b32_copy %input
+  %18 = v_and_b32_lit %17, 65535
+  %packet = concat(%16, %18) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %20 = slice %packet[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %21 = v_readfirstlane_b32 %20
+  %22 = slice %packet[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %23 = v_readfirstlane_b32 %22
+  %24 = concat(%21, %23) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %result = low.func.call @packed_identity(%24) : (reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr x2>)
+  %26 = slice %result[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.vgpr>
+  %27 = v_mov_b32 0
+  global_store_b32_saddr %27, %26, %view
+  %28 = slice %result[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.vgpr>
+  global_store_short_saddr %27, %28, %view {offset = 4}
+  return
+}
+
+// ====
+
+// A vector comparison can produce a lane mask even when its logical predicate
+// is uniform. Only that proof permits a native scalar truth argument.
+amdgpu.target<gfx11-generic> @target
+
+low.func.def target<amdgpu.gfx11.generic.core>(@target) @truth_identity(%value: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
+  return %value
+}
+
+kernel.def target(@target) @uniform_mask_argument() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%input: f32, %output: buffer) {
+  %threshold = scalar.constant 0.0 : f32
+  %positive = scalar.cmpf ogt, %input, %threshold : f32
+  %word = low.invoke @truth_identity(%positive) : (i1) -> (i32)
+  %origin = index.constant 0 : offset
+  %lane = kernel.workitem.id<x> : index
+  %view = buffer.view %output[%origin] : buffer -> view<64xi32>
+  view.store %word, %view[%lane] : i32, view<64xi32>
+  kernel.return
+}
+
+// ----
+amdgpu.target<gfx11-generic> @target
+
+low.func.def target<amdgpu.gfx11.generic.core>(@target) @truth_identity(%value: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
+  return %value
+}
+
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "input"}, direct_arg_offsets = [0], direct_arg_parameter_indices = [0], direct_arg_sizes = [4], parameter_count = 2, resource_count = 1, resource_offsets = [8], resource_parameter_indices = [1], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @uniform_mask_argument(%input: reg<amdgpu.sgpr>) asm {
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %view = resource<hal_binding> {extent = 256, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %positive = v_cmp_gt_f32_src1_inline %input {rhs = "f32_0_0"}
+  %16 = s_mov_b64_exec_read
+  %17, %18 = s_and_b64_scc %positive, %16
+  %19 = s_mov_b32 0
+  %20 = s_mov_b32 1
+  %21 = s_cselect_b32 %20, %19, %18
+  %word = low.func.call @truth_identity(%21) : (reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>)
+  %23 = v_mov_b32_copy %word
+  %24 = v_lshlrev_b32_src0_inline %lane, 2
+  global_store_b32_saddr %24, %23, %view
+  return
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+low.func.def target<amdgpu.gfx11.generic.core>(@target) @scalar_payload(%value: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr x2>) asm {
+  return %value
+}
+
+// A known packed width supplies no distribution proof.
+func.def target(@target) @unknown_packed_argument(%value: vector<3xi16>) -> (vector<3xi16>) {
+  // ERROR@+1: TARGET/074 {callee_name="scalar_payload", value_kind="operand", actual_type="reg<amdgpu.vgpr x2>", expected_type="reg<amdgpu.sgpr x2>"}
+  %result = low.invoke @scalar_payload(%value) : (vector<3xi16>) -> (vector<3xi16>)
+  func.return %result : vector<3xi16>
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+low.func.def target<amdgpu.gfx11.generic.core>(@target) @scalar_truth(%value: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
+  return %value
+}
+
+// A mask stored in SGPRs can still contain different truth values per lane.
+func.def target(@target) @unknown_mask_argument(%value: i1) -> (i32) {
+  // ERROR@+1: TARGET/074 {callee_name="scalar_truth", value_kind="operand", actual_type="reg<amdgpu.sgpr x2>", expected_type="reg<amdgpu.sgpr>"}
+  %result = low.invoke @scalar_truth(%value) : (i1) -> (i32)
+  func.return %result : i32
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+low.func.def target<amdgpu.gfx11.generic.core>(@target) @native_word(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  return %value
+}
+
+// The source ABI retains two words; a local proof admits the native word.
+func.def target(@target) @bounded_native_argument(%input: index) -> (i32) where [range(%input, 0, 4294967296)] {
+  %bounded = index.assume %input [range(%input, 0, 31)] : index
+  %result = low.invoke @native_word(%bounded) : (index) -> (i32)
+  func.return %result : i32
+}
+
+// ----
+amdgpu.target<gfx11-generic> @target
+
+low.func.def target<amdgpu.gfx11.generic.core>(@target) @native_word(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  return %value
+}
+
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @bounded_native_argument(%bounded: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>) where [range(%bounded, 0, 4294967296)] asm {
+  %8 = slice %bounded[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %result = low.func.call @native_word(%8) : (reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>)
+  return %result
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+low.func.def target<amdgpu.gfx11.generic.core>(@target) @native_word(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  return %value
+}
+
+func.def target(@target) @unrepresentable_native_argument(%input: index) -> (i32) where [range(%input, 0, 4294967296)] {
+  // ERROR@+1: TARGET/074 {callee_name="native_word", value_kind="operand", actual_type="reg<amdgpu.vgpr x2>", expected_type="reg<amdgpu.vgpr>"}
+  %result = low.invoke @native_word(%input) : (index) -> (i32)
+  func.return %result : i32
+}
+
+// ====
+
+// Inverting a previously defined mask under partial participation can leave
+// set bits outside EXEC. Scalar truth observes only the participating lanes.
+amdgpu.target<gfx11-generic> @target
+
+low.func.def target<amdgpu.gfx11.generic.core>(@target) @truth_identity(%value: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
+  return %value
+}
+
+kernel.def target(@target) @inactive_mask_bits() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%input: f32, %output: buffer) {
+  %threshold = scalar.constant 0.0 : f32
+  %positive = scalar.cmpf ogt, %input, %threshold : f32
+  %origin = index.constant 0 : offset
+  %lane = kernel.workitem.id<x> : index
+  %view = buffer.view %output[%origin] : buffer -> view<64xi32>
+  %first = index.constant 0 : index
+  %participates = index.cmp ne, %lane, %first : index
+  scf.if %participates {
+    %true = scalar.constant true : i1
+    %inverted = scalar.xori %positive, %true : i1
+    %word = low.invoke @truth_identity(%inverted) : (i1) -> (i32)
+    view.store %word, %view[%lane] : i32, view<64xi32>
+  }
+  kernel.return
+}
+
+// ----
+amdgpu.target<gfx11-generic> @target
+
+low.func.def target<amdgpu.gfx11.generic.core>(@target) @truth_identity(%value: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
+  return %value
+}
+
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "input"}, direct_arg_offsets = [0], direct_arg_parameter_indices = [0], direct_arg_sizes = [4], parameter_count = 2, resource_count = 1, resource_offsets = [8], resource_parameter_indices = [1], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @inactive_mask_bits(%input: reg<amdgpu.sgpr>) asm {
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %view = resource<hal_binding> {extent = 256, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %positive = v_cmp_gt_f32_src1_inline %input {rhs = "f32_0_0"}
+  %participates = v_cmp_ne_i32_src1_inline %lane {rhs = 0}
+  low.scf.if %participates {
+    %21 = s_mov_b32 0
+    %true = s_cmp_eq_i32 %21, %21
+    %23 = s_mov_b64_exec_read
+    %inverted = s_xor_b64 %positive, %23
+    %25 = s_mov_b64_exec_read
+    %26, %27 = s_and_b64_scc %inverted, %25
+    %28 = s_mov_b32 0
+    %29 = s_mov_b32 1
+    %30 = s_cselect_b32 %29, %28, %27
+    %word = low.func.call @truth_identity(%30) : (reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>)
+    %32 = v_mov_b32_copy %word
+    %33 = v_lshlrev_b32_src0_inline %lane, 2
+    global_store_b32_saddr %33, %32, %view
+  }
+  return
+}
+
+// ====
+
+// Both a uniform lane mask and a scalar truth value can feed an SCC receiver.
+amdgpu.target<gfx11-generic> @target
+
+low.func.def target<amdgpu.gfx11.generic.core>(@target) @condition_word(%condition: reg<amdgpu.scc>) -> (reg<amdgpu.sgpr>) asm {
+  %false = s_mov_b32 0
+  %true = s_mov_b32 1
+  %word = s_cselect_b32 %true, %false, %condition
+  return %word
+}
+
+kernel.def target(@target) @native_condition_arguments() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: f32, %output: buffer) {
+  %threshold = scalar.constant 0.0 : f32
+  %positive = scalar.cmpf ogt, %input, %threshold : f32
+  %truth = low.invoke @condition_word(%positive) : (i1) -> (i1)
+  %word = low.invoke @condition_word(%truth) : (i1) -> (i32)
+  %origin = index.constant 0 : offset
+  %position = index.constant 0 : index
+  %view = buffer.view %output[%origin] : buffer -> view<1xi32>
+  view.store %word, %view[%position] : i32, view<1xi32>
+  kernel.return
+}
+
+// ----
+amdgpu.target<gfx11-generic> @target
+
+low.func.def target<amdgpu.gfx11.generic.core>(@target) @condition_word(%condition: reg<amdgpu.scc>) -> (reg<amdgpu.sgpr>) asm {
+  %false = s_mov_b32 0
+  %true = s_mov_b32 1
+  %word = s_cselect_b32 %true, %false, %condition
+  return %word
+}
+
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "input"}, direct_arg_offsets = [0], direct_arg_parameter_indices = [0], direct_arg_sizes = [4], parameter_count = 2, resource_count = 1, resource_offsets = [8], resource_parameter_indices = [1], uses_kernarg_segment_ptr = true}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @native_condition_arguments(%input: reg<amdgpu.sgpr>) asm {
+  %view = resource<hal_binding> {extent = 4, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %positive = v_cmp_gt_f32_src1_inline %input {rhs = "f32_0_0"}
+  %18 = s_mov_b64_exec_read
+  %19, %20 = s_and_b64_scc %positive, %18
+  %truth = low.func.call @condition_word(%20) : (reg<amdgpu.scc>) -> (reg<amdgpu.sgpr>)
+  %22 = s_cmp_lg_i32_src1_inline %truth {rhs = 0}
+  %word = low.func.call @condition_word(%22) : (reg<amdgpu.scc>) -> (reg<amdgpu.sgpr>)
+  %24 = v_mov_b32_copy %word
+  %25 = v_mov_b32 0
+  global_store_b32_saddr %25, %24, %view
+  return
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+low.func.def target<amdgpu.gfx11.generic.core>(@target) @condition_word(%condition: reg<amdgpu.scc>) -> (reg<amdgpu.sgpr>) asm {
+  %false = s_mov_b32 0
+  %true = s_mov_b32 1
+  %word = s_cselect_b32 %true, %false, %condition
+  return %word
+}
+
+func.def target(@target) @unknown_native_condition(%input: i1) -> (i32) {
+  // ERROR@+1: TARGET/074 {callee_name="condition_word", value_kind="operand", actual_type="reg<amdgpu.sgpr x2>", expected_type="reg<amdgpu.scc>"}
+  %result = low.invoke @condition_word(%input) : (i1) -> (i32)
+  func.return %result : i32
+}

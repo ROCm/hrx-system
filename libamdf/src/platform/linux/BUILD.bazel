@@ -63,6 +63,17 @@ amdf_cc_library(
     visibility = ["//libamdf/src:__subpackages__"],
 )
 
+amdf_cc_test(
+    name = "file_test",
+    srcs = ["file_test.cc"],
+    target_compatible_with = ["@platforms//os:linux"],
+    deps = [
+        ":file",
+        "//third_party:google_test",
+        "//third_party:google_test_main",
+    ],
+)
+
 amdf_cc_library(
     name = "host_reservation",
     srcs = ["host_reservation.c"],
@@ -282,7 +293,10 @@ amdf_cc_test(
 amdf_cc_test(
     name = "endpoint_metadata_test",
     srcs = ["endpoint_metadata_test.cc"],
-    linkopts = ["-Wl,--wrap=open"],
+    linkopts = [
+        "-Wl,--wrap=open",
+        "-Wl,--wrap=syscall",
+    ],
     target_compatible_with = ["@platforms//os:linux"],
     deps = [
         ":endpoint",

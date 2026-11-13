@@ -137,11 +137,14 @@ static iree_status_t loom_low_schedule_initialize_value_records(
            loom_module_value_has_uses(state->module, value_id));
       if (iree_all_bits_set(reg_class->flags,
                             LOOM_LOW_REG_CLASS_FLAG_UNSPILLABLE) ||
+          iree_all_bits_set(
+              reg_class->flags,
+              LOOM_LOW_REG_CLASS_FLAG_EXPLICIT_PHYSICAL_REGISTERS) ||
           has_required_lifetime ||
           (value_id < state->options->required_register_values.bit_count &&
            iree_bitmap_test(state->options->required_register_values,
                             value_id))) {
-        value->flags |= LOOM_LOW_SCHEDULE_VALUE_FLAG_REQUIRES_REGISTER;
+        value->flags |= LOOM_LOW_SCHEDULE_VALUE_FLAG_CONSTRAINED_REGISTER;
       }
     }
   }
@@ -191,12 +194,6 @@ static iree_status_t loom_low_schedule_initialize_storage(
       memset(state->preferred_pair_nodes, 0xFF,
              node_count * sizeof(*state->preferred_pair_nodes));
     }
-    IREE_RETURN_IF_ERROR(
-        iree_arena_allocate_array(state->scratch_arena, node_count,
-                                  sizeof(*state->state_chain_read_heads),
-                                  (void**)&state->state_chain_read_heads));
-    memset(state->state_chain_read_heads, 0xFF,
-           node_count * sizeof(*state->state_chain_read_heads));
     if (loom_low_schedule_strategy_uses_pressure(state->options->strategy) &&
         iree_any_bit_set(state->options->flags,
                          LOOM_LOW_SCHEDULE_FLAG_RETAIN_PRESSURE_STEPS)) {
@@ -694,12 +691,9 @@ static iree_status_t loom_low_schedule_initialize_descriptor_tables(
         (void**)&state->call_node_indices));
   }
   iree_host_size_t call_index = 0;
-  const bool order_structural_setup = iree_any_bit_set(
-      state->options->flags, LOOM_LOW_SCHEDULE_FLAG_ORDER_STRUCTURAL_SETUP);
   for (iree_host_size_t node_index = 0; node_index < node_count; ++node_index) {
     loom_low_schedule_node_t* node = &state->nodes[node_index];
-    loom_low_schedule_setup_order_classify_node(state, (uint32_t)node_index,
-                                                order_structural_setup);
+    loom_low_schedule_setup_order_classify_node(state, (uint32_t)node_index);
     if (node->descriptor != NULL) {
       max_descriptor_operand_count =
           iree_max(max_descriptor_operand_count, node->operand_count);
@@ -899,7 +893,7 @@ static void loom_low_schedule_initialize_source_range_ready_frontier(
               &pressure_state->unlocks.frontier, node_index);
       if (group_index != LOOM_LOW_SCHEDULE_DEPENDENCY_GROUP_NONE) {
         loom_low_schedule_pressure_publish_unlock_consumer(
-            state, pressure_state, group_index);
+            state, pressure_state, ready_policy, group_index);
       }
     }
     if (indegrees[node_index] == 0) {
@@ -925,14 +919,22 @@ static uint32_t loom_low_schedule_count_unscheduled_nodes_in_block(
   return unscheduled_count;
 }
 
+enum loom_low_schedule_cycle_visit_state_e {
+  LOOM_LOW_SCHEDULE_CYCLE_UNVISITED = 0,
+  LOOM_LOW_SCHEDULE_CYCLE_ACTIVE,
+  LOOM_LOW_SCHEDULE_CYCLE_FINISHED,
+  LOOM_LOW_SCHEDULE_CYCLE_MEMBER,
+};
+
 static void loom_low_schedule_record_dependency_cycle_path(
     loom_low_schedule_failure_t* failure, const uint32_t* parent_nodes,
-    uint32_t producer_node, uint32_t consumer_node) {
+    uint8_t* visit_states, uint32_t producer_node, uint32_t consumer_node) {
   uint32_t reverse_nodes[LOOM_LOW_SCHEDULE_FAILURE_CYCLE_NODE_CAPACITY];
   uint32_t reverse_count = 0;
   bool truncated = false;
   uint32_t cursor = producer_node;
   while (cursor != LOOM_LOW_SCHEDULE_NODE_NONE) {
+    visit_states[cursor] = LOOM_LOW_SCHEDULE_CYCLE_MEMBER;
     if (reverse_count < IREE_ARRAYSIZE(reverse_nodes)) {
       reverse_nodes[reverse_count++] = cursor;
     } else {
@@ -976,7 +978,8 @@ loom_low_schedule_find_dependency_witness(
 
 // Finds the explicit architectural-state value retained on a read-before-
 // clobber dependency. Other state dependency forms have no SSA value that can
-// be rematerialized.
+// be rematerialized. Already-private values cannot be cloned again and must
+// not hide an unrepaired value on the same cycle.
 static loom_value_id_t loom_low_schedule_state_value_for_dependency(
     const loom_low_schedule_build_state_t* state,
     const loom_low_schedule_dependency_t* dependency) {
@@ -989,28 +992,46 @@ static loom_value_id_t loom_low_schedule_state_value_for_dependency(
       loom_low_schedule_node_const_operand_ordinals(reader);
   if (dependency->value_operand_index != LOOM_LOW_ID_NONE) {
     IREE_ASSERT_LT(dependency->value_operand_index, reader->operand_count);
-    return state->value_domain
-        ->value_ids[operand_ordinals[dependency->value_operand_index]];
+    const loom_value_id_t value_id =
+        state->value_domain
+            ->value_ids[operand_ordinals[dependency->value_operand_index]];
+    const iree_bitmap_t private_values =
+        state->options->per_user_placement_values;
+    if (value_id < private_values.bit_count &&
+        iree_bitmap_test(private_values, value_id)) {
+      return LOOM_VALUE_ID_INVALID;
+    }
+    return value_id;
   }
   return LOOM_VALUE_ID_INVALID;
 }
 
 static void loom_low_schedule_record_cycle_state_value(
-    loom_low_schedule_build_state_t* state) {
+    loom_low_schedule_build_state_t* state, const uint32_t* parent_nodes,
+    const uint8_t* visit_states) {
   if (state->failure.state_value_id != LOOM_VALUE_ID_INVALID ||
-      state->failure.cycle_node_count < 2 ||
       iree_any_bit_set(state->failure.flags,
-                       LOOM_LOW_SCHEDULE_FAILURE_FLAG_CYCLE_PATH_TRUNCATED |
-                           LOOM_LOW_SCHEDULE_FAILURE_FLAG_WITNESS_EDGE_ONLY)) {
+                       LOOM_LOW_SCHEDULE_FAILURE_FLAG_WITNESS_EDGE_ONLY)) {
     return;
   }
-  for (uint32_t i = 0; i < state->failure.cycle_node_count; ++i) {
-    const uint32_t producer_node = state->failure.cycle_nodes[i];
-    const uint32_t consumer_node =
-        state->failure.cycle_nodes[(i + 1) % state->failure.cycle_node_count];
+
+  // The diagnostic excerpt may omit the repairable edge. The completed DFS
+  // retains the full cycle in its parent links and membership marks. Inspect
+  // every raw edge on that path, including parallel SSA/state dependencies.
+  for (uint32_t i = 0; i < state->dependencies.count; ++i) {
     const loom_low_schedule_dependency_t* dependency =
-        loom_low_schedule_find_dependency_witness(state, producer_node,
-                                                  consumer_node);
+        loom_low_schedule_dependency_graph_at(&state->dependencies, i);
+    const uint32_t producer_node = dependency->producer_node;
+    const uint32_t consumer_node = dependency->consumer_node;
+    if (visit_states[producer_node] != LOOM_LOW_SCHEDULE_CYCLE_MEMBER ||
+        visit_states[consumer_node] != LOOM_LOW_SCHEDULE_CYCLE_MEMBER) {
+      continue;
+    }
+    if (parent_nodes[consumer_node] != producer_node &&
+        !(producer_node == state->failure.producer_node &&
+          consumer_node == state->failure.consumer_node)) {
+      continue;
+    }
     const loom_value_id_t state_value_id =
         loom_low_schedule_state_value_for_dependency(state, dependency);
     if (state_value_id != LOOM_VALUE_ID_INVALID) {
@@ -1161,14 +1182,14 @@ static iree_status_t loom_low_schedule_record_dependency_cycle(
        start_node < block_node_end; ++start_node) {
     if (!loom_low_schedule_node_is_unscheduled_in_block(
             state, start_node, node_count, state->current_block_index) ||
-        visit_states[start_node] != 0) {
+        visit_states[start_node] != LOOM_LOW_SCHEDULE_CYCLE_UNVISITED) {
       continue;
     }
     iree_host_size_t stack_count = 1;
     stack_nodes[0] = start_node;
     stack_next_groups[0] = loom_low_schedule_dependency_index_group_begin(
         &state->dependency_index, start_node);
-    visit_states[start_node] = 1;
+    visit_states[start_node] = LOOM_LOW_SCHEDULE_CYCLE_ACTIVE;
     while (stack_count != 0) {
       const uint32_t producer_node = stack_nodes[stack_count - 1];
       bool advanced = false;
@@ -1185,18 +1206,18 @@ static iree_status_t loom_low_schedule_record_dependency_cycle(
                 state, consumer_node, node_count, state->current_block_index)) {
           continue;
         }
-        if (visit_states[consumer_node] == 0) {
+        if (visit_states[consumer_node] == LOOM_LOW_SCHEDULE_CYCLE_UNVISITED) {
           parent_nodes[consumer_node] = producer_node;
           stack_nodes[stack_count] = consumer_node;
           stack_next_groups[stack_count] =
               loom_low_schedule_dependency_index_group_begin(
                   &state->dependency_index, consumer_node);
-          visit_states[consumer_node] = 1;
+          visit_states[consumer_node] = LOOM_LOW_SCHEDULE_CYCLE_ACTIVE;
           ++stack_count;
           advanced = true;
           break;
         }
-        if (visit_states[consumer_node] == 1) {
+        if (visit_states[consumer_node] == LOOM_LOW_SCHEDULE_CYCLE_ACTIVE) {
           const loom_low_schedule_dependency_t* dependency =
               loom_low_schedule_find_dependency_witness(state, producer_node,
                                                         consumer_node);
@@ -1204,15 +1225,17 @@ static iree_status_t loom_low_schedule_record_dependency_cycle(
               state, block_record, scheduled_in_block, producer_node,
               consumer_node, dependency);
           loom_low_schedule_record_dependency_cycle_path(
-              &state->failure, parent_nodes, producer_node, consumer_node);
-          loom_low_schedule_record_cycle_state_value(state);
+              &state->failure, parent_nodes, visit_states, producer_node,
+              consumer_node);
+          loom_low_schedule_record_cycle_state_value(state, parent_nodes,
+                                                     visit_states);
           return iree_ok_status();
         }
       }
       if (advanced) {
         continue;
       }
-      visit_states[producer_node] = 2;
+      visit_states[producer_node] = LOOM_LOW_SCHEDULE_CYCLE_FINISHED;
       --stack_count;
     }
   }
@@ -1301,23 +1324,23 @@ static iree_status_t loom_low_schedule_run_list_scheduler(
           (void**)&state->node_pressure_activation_units));
       memset(state->node_pressure_activation_units, 0,
              node_count * sizeof(*state->node_pressure_activation_units));
-      const uint16_t unspillable_domain_count =
-          state->pressure_limits.unspillable_completion_domain_count;
-      if (unspillable_domain_count != 0) {
-        iree_host_size_t unspillable_entry_count = 0;
-        if (!iree_host_size_checked_mul(node_count, unspillable_domain_count,
-                                        &unspillable_entry_count)) {
+      const uint16_t constrained_domain_count =
+          state->pressure_limits.constrained_completion_domain_count;
+      if (constrained_domain_count != 0) {
+        iree_host_size_t constrained_entry_count = 0;
+        if (!iree_host_size_checked_mul(node_count, constrained_domain_count,
+                                        &constrained_entry_count)) {
           return iree_make_status(
               IREE_STATUS_RESOURCE_EXHAUSTED,
-              "low schedule unspillable pressure table size overflow");
+              "low schedule constrained pressure table size overflow");
         }
         IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-            state->scratch_arena, unspillable_entry_count,
-            sizeof(*state->node_unspillable_activation_units),
-            (void**)&state->node_unspillable_activation_units));
-        memset(state->node_unspillable_activation_units, 0,
-               unspillable_entry_count *
-                   sizeof(*state->node_unspillable_activation_units));
+            state->scratch_arena, constrained_entry_count,
+            sizeof(*state->node_constrained_activation_units),
+            (void**)&state->node_constrained_activation_units));
+        memset(state->node_constrained_activation_units, 0,
+               constrained_entry_count *
+                   sizeof(*state->node_constrained_activation_units));
       }
       if (state->pressure_limits.active_register_packing_resource_count != 0) {
         iree_host_size_t packing_entry_count = 0;
@@ -1371,7 +1394,7 @@ static iree_status_t loom_low_schedule_run_list_scheduler(
   }
   iree_arena_deinitialize(&dependency_scratch_arena);
   IREE_RETURN_IF_ERROR(dependency_index_status);
-  if (state->pressure_limits.unspillable_completion_domain_count != 0 ||
+  if (state->pressure_limits.constrained_completion_domain_count != 0 ||
       state->node_completion_cost_cycles != NULL) {
     IREE_RETURN_IF_ERROR(loom_low_schedule_dependency_incoming_index_initialize(
         &state->dependency_index, state->nodes, state->scratch_arena,
@@ -1380,8 +1403,8 @@ static iree_status_t loom_low_schedule_run_list_scheduler(
   if (loom_low_schedule_strategy_uses_pressure(state->options->strategy)) {
     IREE_RETURN_IF_ERROR(loom_low_schedule_completion_demand_initialize(
         &state->dependency_index, &state->dependency_incoming_index,
-        state->pressure_limits.unspillable_completion_domain_count,
-        state->scratch_arena, &pressure_state.unspillable_completion_demand));
+        state->pressure_limits.constrained_completion_domain_count,
+        state->scratch_arena, &pressure_state.constrained_completion_demand));
     IREE_RETURN_IF_ERROR(loom_low_schedule_pressure_initialize_unlock_summaries(
         state, (uint32_t)node_count, &pressure_state));
   }
@@ -1517,7 +1540,7 @@ static iree_status_t loom_low_schedule_run_list_scheduler(
           if (remaining_group != LOOM_LOW_SCHEDULE_DEPENDENCY_GROUP_NONE &&
               consumer_node >= range_start && consumer_node < range_end) {
             loom_low_schedule_pressure_publish_unlock_consumer(
-                state, &pressure_state, remaining_group);
+                state, &pressure_state, &ready_policy, remaining_group);
           }
         }
         uint32_t consumer_ready_issue_cycle =
@@ -1928,7 +1951,12 @@ static iree_status_t loom_low_schedule_build(
         .resource_summary_count = state.resource_summary_count,
     };
     out_table->loop_nest.graph = &out_table->cfg_graph;
-    if (state.error_count == 0 &&
+    if (state.error_count == 0) {
+      status = loom_low_schedule_borrow_plan_build(
+          out_table, model->context.storage_origins, scratch_arena, arena,
+          &out_table->borrows);
+    }
+    if (iree_status_is_ok(status) && state.error_count == 0 &&
         iree_any_bit_set(options->flags,
                          LOOM_LOW_SCHEDULE_FLAG_RETAIN_SOURCE_SUFFIX_BOUNDS)) {
       status = loom_low_schedule_source_suffix_bounds_build(

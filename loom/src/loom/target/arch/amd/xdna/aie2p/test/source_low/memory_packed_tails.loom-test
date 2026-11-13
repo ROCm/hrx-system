@@ -37,15 +37,13 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @copy_byte_tail_3(
   st.s8 %41, %output, 5
   st.s8 %42, %output, 6
   %43 = lda.u8 %input, 7
-  %44 = mov.static-byte-offset 8
-  %45 = mov.address-index %44
-  %46 = lda.i8.index %input, %45
-  %47 = mov.static-byte-offset 9
-  %48 = mov.address-index %47
-  %49 = lda.i8.index %input, %48
+  %44 = mov.static-address-index 8
+  %45 = lda.i8.index %input, %44
+  %46 = mov.static-address-index 9
+  %47 = lda.i8.index %input, %46
   st.s8 %43, %output, 7
-  st.i8.index %46, %output, %45
-  st.i8.index %49, %output, %48
+  st.i8.index %45, %output, %44
+  st.i8.index %47, %output, %46
   return
 }
 
@@ -88,62 +86,48 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @copy_byte_tail_7(
   st.s8 %65, %output, 5
   st.s8 %66, %output, 6
   st.s8 %67, %output, 7
-  %68 = mov.static-byte-offset 8
-  %69 = mov.address-index %68
-  %70 = lda.i8.index %input, %69
-  %71 = mov.static-byte-offset 9
-  %72 = mov.address-index %71
+  %68 = mov.static-address-index 8
+  %69 = lda.i8.index %input, %68
+  %70 = mov.static-address-index 9
+  %71 = lda.i8.index %input, %70
+  %72 = mov.static-address-index 10
   %73 = lda.i8.index %input, %72
-  %74 = mov.static-byte-offset 10
-  %75 = mov.address-index %74
-  %76 = lda.i8.index %input, %75
-  %77 = mov.static-byte-offset 11
-  %78 = mov.address-index %77
+  %74 = mov.static-address-index 11
+  %75 = lda.i8.index %input, %74
+  %76 = mov.static-address-index 12
+  %77 = lda.i8.index %input, %76
+  %78 = mov.static-address-index 13
   %79 = lda.i8.index %input, %78
-  %80 = mov.static-byte-offset 12
-  %81 = mov.address-index %80
-  %82 = lda.i8.index %input, %81
-  %83 = mov.static-byte-offset 13
-  %84 = mov.address-index %83
-  %85 = lda.i8.index %input, %84
-  %86 = mov.static-byte-offset 14
-  %87 = mov.address-index %86
-  %88 = lda.i8.index %input, %87
-  st.i8.index %70, %output, %69
+  %80 = mov.static-address-index 14
+  %81 = lda.i8.index %input, %80
+  st.i8.index %69, %output, %68
+  st.i8.index %71, %output, %70
   st.i8.index %73, %output, %72
-  st.i8.index %76, %output, %75
+  st.i8.index %75, %output, %74
+  st.i8.index %77, %output, %76
   st.i8.index %79, %output, %78
-  st.i8.index %82, %output, %81
-  st.i8.index %85, %output, %84
-  st.i8.index %88, %output, %87
-  %103 = mov.static-byte-offset 15
-  %104 = mov.address-index %103
-  %105 = lda.i8.index %input, %104
-  %106 = mov.static-byte-offset 16
-  %107 = mov.address-index %106
-  %108 = lda.i8.index %input, %107
-  %109 = mov.static-byte-offset 17
-  %110 = mov.address-index %109
-  %111 = lda.i8.index %input, %110
-  %112 = mov.static-byte-offset 18
-  %113 = mov.address-index %112
-  %114 = lda.i8.index %input, %113
-  %115 = mov.static-byte-offset 19
-  %116 = mov.address-index %115
-  %117 = lda.i8.index %input, %116
-  %118 = mov.static-byte-offset 20
-  %119 = mov.address-index %118
-  %120 = lda.i8.index %input, %119
-  %121 = mov.static-byte-offset 21
-  %122 = mov.address-index %121
-  %123 = lda.i8.index %input, %122
-  st.i8.index %105, %output, %104
-  st.i8.index %108, %output, %107
-  st.i8.index %111, %output, %110
-  st.i8.index %114, %output, %113
-  st.i8.index %117, %output, %116
-  st.i8.index %120, %output, %119
-  st.i8.index %123, %output, %122
+  st.i8.index %81, %output, %80
+  %89 = mov.static-address-index 15
+  %90 = lda.i8.index %input, %89
+  %91 = mov.static-address-index 16
+  %92 = lda.i8.index %input, %91
+  %93 = mov.static-address-index 17
+  %94 = lda.i8.index %input, %93
+  %95 = mov.static-address-index 18
+  %96 = lda.i8.index %input, %95
+  %97 = mov.static-address-index 19
+  %98 = lda.i8.index %input, %97
+  %99 = mov.static-address-index 20
+  %100 = lda.i8.index %input, %99
+  %101 = mov.static-address-index 21
+  %102 = lda.i8.index %input, %101
+  st.i8.index %90, %output, %89
+  st.i8.index %92, %output, %91
+  st.i8.index %94, %output, %93
+  st.i8.index %96, %output, %95
+  st.i8.index %98, %output, %97
+  st.i8.index %100, %output, %99
+  st.i8.index %102, %output, %101
   return
 }
 
@@ -186,62 +170,48 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @copy_word_tail_7(
   st.s16 %65, %output, 10
   st.s16 %66, %output, 12
   st.s16 %67, %output, 14
-  %68 = mov.static-byte-offset 16
-  %69 = mov.address-index %68
-  %70 = lda.i16.index %input, %69
-  %71 = mov.static-byte-offset 18
-  %72 = mov.address-index %71
+  %68 = mov.static-address-index 16
+  %69 = lda.i16.index %input, %68
+  %70 = mov.static-address-index 18
+  %71 = lda.i16.index %input, %70
+  %72 = mov.static-address-index 20
   %73 = lda.i16.index %input, %72
-  %74 = mov.static-byte-offset 20
-  %75 = mov.address-index %74
-  %76 = lda.i16.index %input, %75
-  %77 = mov.static-byte-offset 22
-  %78 = mov.address-index %77
+  %74 = mov.static-address-index 22
+  %75 = lda.i16.index %input, %74
+  %76 = mov.static-address-index 24
+  %77 = lda.i16.index %input, %76
+  %78 = mov.static-address-index 26
   %79 = lda.i16.index %input, %78
-  %80 = mov.static-byte-offset 24
-  %81 = mov.address-index %80
-  %82 = lda.i16.index %input, %81
-  %83 = mov.static-byte-offset 26
-  %84 = mov.address-index %83
-  %85 = lda.i16.index %input, %84
-  %86 = mov.static-byte-offset 28
-  %87 = mov.address-index %86
-  %88 = lda.i16.index %input, %87
-  st.i16.index %70, %output, %69
+  %80 = mov.static-address-index 28
+  %81 = lda.i16.index %input, %80
+  st.i16.index %69, %output, %68
+  st.i16.index %71, %output, %70
   st.i16.index %73, %output, %72
-  st.i16.index %76, %output, %75
+  st.i16.index %75, %output, %74
+  st.i16.index %77, %output, %76
   st.i16.index %79, %output, %78
-  st.i16.index %82, %output, %81
-  st.i16.index %85, %output, %84
-  st.i16.index %88, %output, %87
-  %103 = mov.static-byte-offset 30
-  %104 = mov.address-index %103
-  %105 = lda.i16.index %input, %104
-  %106 = mov.static-byte-offset 32
-  %107 = mov.address-index %106
-  %108 = lda.i16.index %input, %107
-  %109 = mov.static-byte-offset 34
-  %110 = mov.address-index %109
-  %111 = lda.i16.index %input, %110
-  %112 = mov.static-byte-offset 36
-  %113 = mov.address-index %112
-  %114 = lda.i16.index %input, %113
-  %115 = mov.static-byte-offset 38
-  %116 = mov.address-index %115
-  %117 = lda.i16.index %input, %116
-  %118 = mov.static-byte-offset 40
-  %119 = mov.address-index %118
-  %120 = lda.i16.index %input, %119
-  %121 = mov.static-byte-offset 42
-  %122 = mov.address-index %121
-  %123 = lda.i16.index %input, %122
-  st.i16.index %105, %output, %104
-  st.i16.index %108, %output, %107
-  st.i16.index %111, %output, %110
-  st.i16.index %114, %output, %113
-  st.i16.index %117, %output, %116
-  st.i16.index %120, %output, %119
-  st.i16.index %123, %output, %122
+  st.i16.index %81, %output, %80
+  %89 = mov.static-address-index 30
+  %90 = lda.i16.index %input, %89
+  %91 = mov.static-address-index 32
+  %92 = lda.i16.index %input, %91
+  %93 = mov.static-address-index 34
+  %94 = lda.i16.index %input, %93
+  %95 = mov.static-address-index 36
+  %96 = lda.i16.index %input, %95
+  %97 = mov.static-address-index 38
+  %98 = lda.i16.index %input, %97
+  %99 = mov.static-address-index 40
+  %100 = lda.i16.index %input, %99
+  %101 = mov.static-address-index 42
+  %102 = lda.i16.index %input, %101
+  st.i16.index %90, %output, %89
+  st.i16.index %92, %output, %91
+  st.i16.index %94, %output, %93
+  st.i16.index %96, %output, %95
+  st.i16.index %98, %output, %97
+  st.i16.index %100, %output, %99
+  st.i16.index %102, %output, %101
   return
 }
 

@@ -49,6 +49,31 @@ from runtime.build_tools.bazel import configure as runtime_configure
 
 
 class CiTest(unittest.TestCase):
+    def test_repository_compilation_mode_overrides_build_defaults_only(self):
+        for mode in (None, "fastbuild", "dbg", "opt"):
+            with self.subTest(mode=mode):
+                command = ["iree-bazel-repository-build"]
+                if mode is not None:
+                    command += ["--compilation-mode", mode]
+                args = ci.parse_arguments(command)
+                with mock.patch.object(
+                    ci_config, "BAZEL_DEFAULT_OPTIONS", ("--compilation_mode=dbg",)
+                ):
+                    configure, build = ci.steps_from_args(args)
+                prefix = "--compilation_mode="
+                self.assertFalse(any(arg.startswith(prefix) for arg in configure.argv))
+                modes = [arg for arg in build.argv if arg.startswith(prefix)]
+                self.assertEqual(
+                    modes, [prefix + "dbg"] + ([prefix + mode] if mode else [])
+                )
+
+    def test_compilation_mode_rejects_commands_that_cannot_apply_it(self):
+        for command in ("iree-cmake-repository-build", "iree-bazel-cpu-asan"):
+            with self.subTest(command=command):
+                args = ci.parse_arguments([command, "--compilation-mode", "opt"])
+                with self.assertRaisesRegex(ValueError, "--compilation-mode"):
+                    ci.steps_from_args(args)
+
     def test_cts_family_filter_composes_with_requested_cases(self):
         with (
             mock.patch.object(
@@ -425,6 +450,9 @@ class CiTest(unittest.TestCase):
                     if keep_going:
                         self.assertEqual(phase.argv[4], "--keep_going")
                         self.assertEqual(phase.argv[5:], original.argv[4:])
+                    elif original.argv[1:4] == ("dev.py", "bazel", "test"):
+                        self.assertEqual(phase.argv[4], "--notest_keep_going")
+                        self.assertEqual(phase.argv[5:], original.argv[4:])
                     else:
                         self.assertEqual(phase, original)
 
@@ -480,9 +508,12 @@ class CiTest(unittest.TestCase):
             self.assertNotIn("sha256", record)
 
     def uses_cmake_build_dir(self, step: ci.CiStep, command_name: str) -> bool:
+        build_root = Path(
+            os.environ.get("IREE_CI_CMAKE_BUILD_ROOT", ci.DEFAULT_CMAKE_CI_BUILD_ROOT)
+        )
         expected_args = (
             "--cmake-build-dir",
-            str(ci.CMAKE_CI_BUILD_ROOT / command_name),
+            str(build_root / command_name),
         )
         return any(
             step.argv[index : index + 2] == expected_args
@@ -543,8 +574,7 @@ class CiTest(unittest.TestCase):
         self.assertNotIn("dev.py bazel build ", text)
         self.assertIn("dev.py bazel test ", text)
         self.assertIn(" -- //runtime/...", text)
-        self.assertIn("-//runtime/src/iree/hal/drivers/amdgpu/...", text)
-        self.assertIn("-//runtime/src/iree/hal/drivers/vulkan/...", text)
+        self.assertIn("-//runtime/src/iree/hal/driver/vulkan/...", text)
         self.assertIn(
             "--test_tag_filters=" + ",".join(ci_config.CPU_RESOURCE_TAG_EXCLUDES),
             text,
@@ -730,29 +760,104 @@ class CiTest(unittest.TestCase):
                 result_dir,
             )
             event = {
+                "id": {
+                    "testResult": {
+                        "label": "//example:test",
+                        "configuration": {"id": "configuration"},
+                        "run": 1,
+                        "shard": 1,
+                        "attempt": 1,
+                    }
+                },
                 "testResult": {
-                    "testActionOutput": [{"name": "test.xml", "uri": source.as_uri()}]
-                }
+                    "status": "PASSED",
+                    "testActionOutput": [{"name": "test.xml", "uri": source.as_uri()}],
+                },
             }
             for step, payload in zip(steps, ("first result", "second result")):
                 source.write_text(payload)
                 capture = step.test_results
                 capture.build_event_path.write_text(json.dumps(event) + "\n")
-                self.assertEqual(
-                    ci.bazel_test_results.stage(
-                        capture.build_event_path, capture.output_dir
-                    ),
-                    1,
+                result = ci.bazel_test_results.stage(
+                    capture.build_event_path, capture.output_dir
                 )
+                self.assertEqual(result.output_count, 1)
             self.assertEqual(
                 sorted(path.read_text() for path in result_dir.rglob("test.xml")),
                 ["first result", "second result"],
             )
 
+    def test_failed_test_stages_results_before_stopping_later_phases(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "testlogs" / "example" / "test.log"
+            source.parent.mkdir(parents=True)
+            events = root / "events.json"
+            output = root / "artifacts"
+            later = root / "later"
+            event = (
+                json.dumps(
+                    {
+                        "id": {
+                            "testResult": {
+                                "label": "//example:test",
+                                "configuration": {"id": "configuration"},
+                                "run": 1,
+                                "shard": 1,
+                                "attempt": 1,
+                            }
+                        },
+                        "testResult": {
+                            "status": "FAILED",
+                            "testActionOutput": [
+                                {"name": "test.log", "uri": source.as_uri()}
+                            ],
+                        },
+                    }
+                )
+                + "\n"
+            )
+            script = (
+                "from pathlib import Path; "
+                f"Path({str(source)!r}).write_text('first native failure'); "
+                f"Path({str(events)!r}).write_text({event!r}); "
+                "raise SystemExit(17)"
+            )
+            steps = [
+                ci.CiStep(
+                    "Failing test",
+                    (sys.executable, "-c", script),
+                    test_results=ci.bazel_test_results.BazelTestResultsCapture(
+                        events, output
+                    ),
+                ),
+                ci.CiStep(
+                    "Later phase",
+                    (
+                        sys.executable,
+                        "-c",
+                        f"from pathlib import Path; Path({str(later)!r}).touch()",
+                    ),
+                ),
+            ]
+            with (
+                mock.patch.dict(os.environ, {}, clear=True),
+                contextlib.redirect_stdout(io.StringIO()),
+            ):
+                returncode = ci.run_steps(
+                    steps, dry_run=False, keep_going=False, verbose=False
+                )
+            self.assertEqual(returncode, 17)
+            self.assertFalse(later.exists())
+            self.assertEqual(
+                (output / "bazel-testlogs/example/test.log").read_text(),
+                "first native failure",
+            )
+
     def test_native_gpu_ci_requires_explicit_windows_target(self):
         with mock.patch.object(ci.sys, "platform", "win32"):
             args = ci.parse_arguments(["iree-bazel-amdgpu-native"])
-            with self.assertRaisesRegex(ValueError, "exact --amdgpu-target"):
+            with self.assertRaisesRegex(ValueError, "explicit --amdgpu-target"):
                 ci.steps_from_args(args)
         with mock.patch.object(ci.sys, "platform", "linux"):
             args = ci.parse_arguments(
@@ -778,33 +883,45 @@ class CiTest(unittest.TestCase):
             ci.steps_from_args(args)
         plan.assert_called_once_with(("//example:custom",), "gfx1201", "asan")
 
-    def test_native_gpu_ci_admits_only_gpu_resource_tests(self):
-        args = ci.parse_arguments(
-            ["iree-bazel-amdgpu-native-asan", "--amdgpu-target", "gfx1201"]
-        )
+    def test_native_gpu_ci_expands_family_and_exact_target_selections(self):
         with (
-            mock.patch.object(ci.sys, "platform", "win32"),
+            mock.patch.object(
+                ci.target_map,
+                "exact_targets_for_selection",
+                side_effect=[["TARGET_A", "TARGET_B"], ["TARGET_C"]],
+            ) as expand,
             mock.patch.object(ci.shutil, "which", return_value=None),
         ):
-            steps = ci.steps_from_args(args)
-
-        test_step = next(
-            step for step in steps if step.name == "Test IREE / Windows AMDGPU / ASAN"
-        )
-        tag_filter = next(
-            argument
-            for argument in test_step.argv
-            if argument.startswith("--test_tag_filters=")
-        )
-        positive_tags = [
-            tag
-            for tag in tag_filter.split("=", 1)[1].split(",")
-            if not tag.startswith("-")
-        ]
+            steps = ci.amdgpu_windows_steps(
+                ("//example:custom",), "FAMILY_A,TARGET_C", "asan"
+            )
         self.assertEqual(
-            positive_tags,
-            [ci_config.AMD_GPU_RUN_REQUIREMENT_TAG],
+            expand.call_args_list, [mock.call("FAMILY_A"), mock.call("TARGET_C")]
         )
+        prefix = "--test_arg=--amdf_gpu_target="
+        qualification = []
+        for step in steps:
+            targets = [
+                arg.removeprefix(prefix) for arg in step.argv if arg.startswith(prefix)
+            ]
+            if targets:
+                qualification.append(targets)
+        self.assertTrue(qualification)
+        for targets in qualification:
+            self.assertEqual(targets, ["TARGET_A", "TARGET_B", "TARGET_C"])
+
+    def test_native_gpu_ci_rejects_unknown_target_before_configuring(self):
+        with (
+            mock.patch.object(
+                ci.target_map,
+                "exact_targets_for_selection",
+                side_effect=ValueError("unknown target selector"),
+            ),
+            mock.patch.object(ci, "bazel_configure_step") as configure,
+        ):
+            with self.assertRaisesRegex(ValueError, "unknown target selector"):
+                ci.amdgpu_windows_steps((), "UNKNOWN_FAMILY", "asan")
+        configure.assert_not_called()
 
     def test_bazel_profile_names_must_be_unique(self):
         duplicate_steps = [
@@ -816,18 +933,17 @@ class CiTest(unittest.TestCase):
             ci.add_bazel_profiles(duplicate_steps, Path("/tmp/profiles"))
 
     def test_non_bazel_commands_reject_bazel_profile_directory(self):
-        for command in ("iree-cmake-cpu", "iree-importers-tilelang"):
-            for option, path in (
-                ("--bazel-profile-dir", "/tmp/profiles"),
-                ("--bazel-test-results-dir", "/tmp/results"),
-            ):
-                with self.subTest(command=command, option=option):
-                    args = ci.parse_arguments([command, option, path])
-                    with self.assertRaisesRegex(
-                        ValueError,
-                        f"{option} is only supported for Bazel CI commands",
-                    ):
-                        ci.steps_from_args(args)
+        for option, path in (
+            ("--bazel-profile-dir", "/tmp/profiles"),
+            ("--bazel-test-results-dir", "/tmp/results"),
+        ):
+            with self.subTest(option=option):
+                args = ci.parse_arguments(["iree-cmake-cpu", option, path])
+                with self.assertRaisesRegex(
+                    ValueError,
+                    f"{option} is only supported for Bazel CI commands",
+                ):
+                    ci.steps_from_args(args)
 
     def test_main_creates_bazel_profile_directory_only_when_executing(self):
         with tempfile.TemporaryDirectory() as temporary_dir:
@@ -893,7 +1009,7 @@ class CiTest(unittest.TestCase):
         )
         self.assertEqual(
             runtime_configure.configuration(request).drivers,
-            {"task", "amdgpu", "vulkan", "webgpu", "amd-gpu", "amd-xdna"},
+            {"task", "vulkan", "webgpu", "amd-gpu", "amd-xdna"},
         )
         self.assertIn(
             "--//loom/config/arch:enable="
@@ -918,6 +1034,8 @@ class CiTest(unittest.TestCase):
         self.assertIn(f"-DIREE_ROCM_PATH={rocm_root}", configure_step.argv)
         build_step = steps[-1]
         self.assertEqual(build_step.argv[-1], "//...")
+        self.assertIn("--nobuild_runfile_links", build_step.argv)
+        self.assertNotIn("--nobuild_runfile_links", configure_step.argv)
         self.assertFalse(any(arg.startswith("-//") for arg in build_step.argv))
         self.assertFalse(any(step.name.startswith("Test") for step in steps))
 
@@ -929,7 +1047,7 @@ class CiTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "repository-wide"):
             ci.steps_from_args(args)
 
-    def test_bazel_repository_tests_build_only_their_dependencies(self):
+    def test_bazel_repository_integration_tests_then_builds_complete_graph(self):
         args = ci.parse_arguments(["iree-bazel-repository-integration"])
         for platform_coverage in ("0", "1"):
             with (
@@ -940,7 +1058,7 @@ class CiTest(unittest.TestCase):
                     clear=True,
                 ),
             ):
-                configure, test = ci.steps_from_args(args)
+                configure, test, build = ci.steps_from_args(args)
                 self.assertEqual(configure.argv[2:4], ("bazel", "configure"))
                 self.assertEqual(test.argv[2:4], ("bazel", "test"))
                 self.assertIn("--build_tests_only", test.argv)
@@ -948,6 +1066,34 @@ class CiTest(unittest.TestCase):
                 self.assertEqual(
                     "--test_lang_filters=-py" in test.argv, platform_coverage == "0"
                 )
+                self.assertEqual(build.argv[2:4], ("bazel", "build"))
+                self.assertIn("//...", build.argv)
+                self.assertIn("--nobuild_runfile_links", build.argv)
+
+    def test_bazel_repository_integration_isolates_device_probe(self):
+        args = ci.parse_arguments(
+            ["iree-bazel-repository-integration", "--amdgpu-target", "gfx11-generic"]
+        )
+        with mock.patch.dict(ci.os.environ, {"HRX_ROCM_ROOT": "/tmp/rocm-root"}):
+            configure, _test, build, device_build = ci.steps_from_args(args)
+
+        self.assertIn("-DIREE_ROCM_PATH=/tmp/rocm-root", configure.argv)
+        self.assertIn("//...", build.argv)
+        self.assertFalse(
+            any(
+                arg.startswith("--//runtime/src/iree/hal/driver/amd/gpu:targets=")
+                for arg in build.argv
+            )
+        )
+        self.assertNotIn("//...", device_build.argv)
+        self.assertIn(
+            "//runtime/src/iree/hal/driver/amd/gpu/image:hip_images",
+            device_build.argv,
+        )
+        self.assertIn(
+            "--//runtime/src/iree/hal/driver/amd/gpu:targets=gfx11-generic",
+            device_build.argv,
+        )
 
     def test_bazel_repository_device_compilation_shares_the_build_invocation(self):
         args = ci.parse_arguments(
@@ -959,17 +1105,20 @@ class CiTest(unittest.TestCase):
         self.assertEqual(build.argv[2:4], ("bazel", "build"))
         self.assertIn("//...", build.argv)
         self.assertIn(
-            "--//runtime/src/iree/hal/drivers/amdgpu:targets=gfx11-generic",
+            "--//runtime/src/iree/hal/driver/amd/gpu:targets=gfx11-generic",
             build.argv,
         )
 
     def test_bazel_repository_device_compilation_requires_rocm(self):
-        args = ci.parse_arguments(
-            ["iree-bazel-repository-build", "--amdgpu-target", "gfx11-generic"]
-        )
-        with mock.patch.dict(ci.os.environ, {}, clear=True):
-            with self.assertRaisesRegex(ValueError, "requires HRX_ROCM_ROOT"):
-                ci.steps_from_args(args)
+        for command in (
+            "iree-bazel-repository-build",
+            "iree-bazel-repository-integration",
+        ):
+            with self.subTest(command=command):
+                args = ci.parse_arguments([command, "--amdgpu-target", "gfx11-generic"])
+                with mock.patch.dict(ci.os.environ, {}, clear=True):
+                    with self.assertRaisesRegex(ValueError, "requires HRX_ROCM_ROOT"):
+                        ci.steps_from_args(args)
 
     def test_shared_tool_commands_do_not_run_a_static_configuration(self):
         for command in (
@@ -1008,6 +1157,7 @@ class CiTest(unittest.TestCase):
             ["Configure CMake", "Build repository", "Test repository smoke"],
         )
         configure_step = steps[0]
+        self.assertIn("-DLIBHRX_BUILD=OFF", configure_step.argv)
         self.assertIn("-DLOOM_TARGET_DEFAULT=OFF", configure_step.argv)
         for _driver, define in ci.CMAKE_HAL_DRIVER_DEFINES:
             self.assertIn(f"-D{define}=ON", configure_step.argv)
@@ -1019,13 +1169,9 @@ class CiTest(unittest.TestCase):
             self.assertIn(f"-D{define}=ON", configure_step.argv)
         for _importer, define in ci.CMAKE_LOOM_IMPORTER_DEFINES:
             self.assertIn(f"-D{define}=ON", configure_step.argv)
-        for option in ci.AMDGPU_DEVICE_BINARY_PREBUILT_OPTIONS:
-            self.assertIn(option, configure_step.argv)
-        for option in ci.AMDGPU_DEVICE_BINARY_SOURCE_OPTIONS:
-            self.assertNotIn(option, configure_step.argv)
         self.assertFalse(
             any(
-                option.startswith("-DIREE_HAL_AMDGPU_TARGETS=")
+                option.startswith("-DIREE_HAL_AMD_GPU_TARGETS=")
                 or option.startswith("-DLOOM_ARCH_AMDGPU_TARGETS=")
                 for option in configure_step.argv
             )
@@ -1033,8 +1179,6 @@ class CiTest(unittest.TestCase):
         build_step = steps[1]
         self.assertEqual(build_step.argv[-2:], ("build", "--parallel"))
         smoke_step = steps[2]
-        for regex in ci_config.CMAKE_REPOSITORY_SMOKE_CTEST_REGEXES:
-            self.assertTrue(any(regex in arg for arg in smoke_step.argv))
         self.assertTrue(
             any(
                 ci_config.CTEST_RESOURCE_LABEL_EXCLUDE_REGEX in arg
@@ -1047,6 +1191,47 @@ class CiTest(unittest.TestCase):
                 for arg in smoke_step.argv
             )
         )
+
+    def test_cmake_hrx_repository_build_includes_all_products(self):
+        args = ci.parse_arguments(["hrx-cmake-repository-build"])
+
+        steps = ci.steps_from_args(args)
+
+        self.assertEqual(
+            [step.name for step in steps],
+            ["Configure CMake", "Build repository", "Test repository smoke"],
+        )
+        self.assertIn("-DLIBHRX_BUILD=ON", steps[0].argv)
+        self.assertTrue(
+            any(
+                "libhrx/cts/tests/status/hrx_cts_status" in arg for arg in steps[2].argv
+            )
+        )
+
+    def test_cmake_build_root_can_use_platform_storage(self):
+        with mock.patch.dict(
+            ci.os.environ, {"IREE_CI_CMAKE_BUILD_ROOT": "B:/hrx/cmake"}
+        ):
+            args = ci.parse_arguments(["hrx-cmake-repository-build"])
+            steps = ci.steps_from_args(args)
+            for step in steps:
+                self.assertTrue(
+                    self.uses_cmake_build_dir(step, "hrx-cmake-repository-build")
+                )
+
+    def test_cmake_hrx_repository_build_respects_macos_product_support(self):
+        args = ci.parse_arguments(["hrx-cmake-repository-build"])
+
+        with mock.patch.object(ci.sys, "platform", "darwin"):
+            steps = ci.steps_from_args(args)
+
+        configure_step = steps[0]
+        self.assertIn("-DLIBHRX_BUILD=ON", configure_step.argv)
+        self.assertIn("-DLIBHRX_BUILD_HIP_BINDING=OFF", configure_step.argv)
+        self.assertIn("-DAMDF_BUILD=OFF", configure_step.argv)
+        self.assertIn("-DIREE_HAL_DRIVER_TASK=ON", configure_step.argv)
+        for driver, define in ci.CMAKE_HAL_DRIVER_DEFINES:
+            self.assertIn(f"-D{define}=OFF", configure_step.argv, driver)
 
     def test_cmake_configure_rejects_partial_loom_capability_selection(self):
         with self.assertRaisesRegex(ValueError, "requires architecture"):
@@ -1105,6 +1290,11 @@ class CiTest(unittest.TestCase):
             with (
                 self.subTest(platform=platform),
                 mock.patch.object(ci.sys, "platform", platform),
+                mock.patch.object(
+                    ci.target_map,
+                    "exact_targets_for_selection",
+                    return_value=["TARGET_A", "TARGET_B"],
+                ),
             ):
                 steps = ci.steps_from_args(
                     ci.parse_arguments(
@@ -1113,7 +1303,7 @@ class CiTest(unittest.TestCase):
                 )
                 test_step = next(step for step in steps if "test" in step.argv)
                 self.assertIn(
-                    "--//runtime/src/iree/hal/drivers/amd/gpu:targets=selected-hardware",
+                    "--//runtime/src/iree/hal/driver/amd/gpu:targets=selected-hardware",
                     test_step.argv,
                 )
                 self.assertIn(
@@ -1121,14 +1311,12 @@ class CiTest(unittest.TestCase):
                     test_step.argv,
                 )
 
-    def test_amdgpu_loom_importers_are_forwarded_to_configuration(self):
+    def test_amdgpu_loom_importer_is_forwarded_to_configuration(self):
         args = ci.parse_arguments(
             [
                 "iree-bazel-amdgpu",
                 "--loom-importer",
                 "cxx",
-                "--loom-importer",
-                "mlir",
             ]
         )
 
@@ -1136,7 +1324,7 @@ class CiTest(unittest.TestCase):
 
         configure_step = next(step for step in steps if step.name == "Configure Bazel")
         self.assertIn(
-            "--//loom/config/import:enable=cxx,mlir",
+            "--//loom/config/import:enable=cxx",
             configure_step.argv,
         )
 
@@ -1270,110 +1458,27 @@ class CiTest(unittest.TestCase):
             test_step.argv,
         )
         self.assertFalse(
-            any("-DIREE_HAL_DRIVER_AMDGPU=ON" in line for line in command_lines)
+            any("-DIREE_HAL_DRIVER_AMD_GPU=ON" in line for line in command_lines)
         )
 
-    def test_tilelang_importer_command_sets_up_and_tests_bazel_and_cmake(self):
-        args = ci.parse_arguments(["iree-importers-tilelang"])
-
-        steps = ci.steps_from_args(args)
-        command_lines = [step.command_line() for step in steps]
-
-        self.assertEqual(
-            [step.name for step in steps],
-            [
-                "Setup TileLang importer environment",
-                "Report TileLang importer environment",
-                "Test TileLang importer with Bazel",
-                "Configure TileLang importer CMake",
-                "Build TileLang importer CMake verifier",
-                "Test TileLang importer with CMake",
-            ],
-        )
-        self.assertIn("python3 dev.py importers setup tilelang", command_lines)
-        self.assertIn("python3 dev.py importers env tilelang", command_lines)
-        self.assertIn("--importer-env tilelang", command_lines[2])
-        self.assertIn(
-            "//loom/py/loom/importers/tilelang:tilelang_import_test",
-            command_lines[2],
-        )
-        self.assertTrue(self.uses_cmake_build_dir(steps[3], "iree-importers-tilelang"))
-        self.assertIn("--importer-env tilelang", command_lines[3])
-        self.assertIn("cmake build loom-opt --parallel", command_lines[4])
-        self.assertIn(
-            "loom/py/loom/importers/tilelang/tilelang_import_test",
-            command_lines[5],
-        )
-
-    def test_importer_command_rejects_target_override(self):
-        args = ci.parse_arguments(["iree-importers-tilelang", "--target", "//loom/..."])
-
-        with self.assertRaisesRegex(
-            ValueError,
-            "--target is not supported for importer CI commands",
+    def test_cpu_sanitizer_aggregate_configures_once_and_preserves_scope(self):
+        with mock.patch.object(
+            ci_config,
+            "BAZEL_CPU_SANITIZER_TEST_TAG_FILTERS",
+            {"first": ("first-subject",), "second": ("second-subject",)},
         ):
-            ci.steps_from_args(args)
+            steps = ci.cpu_sanitizer_steps(("//selected/...",))
 
-    def test_sanitizer_command_runs_only_testable_configurations(self):
-        args = ci.parse_arguments(
-            [
-                "iree-bazel-cpu-sanitizers",
-                "--target",
-                "//runtime/...",
-            ]
-        )
-
-        steps = ci.steps_from_args(args)
-
-        self.assertTrue(
-            any(
-                step.argv[:4] == ("python3", "dev.py", "bazel", "test")
-                and "--config=asan" in step.argv
-                and step.argv.index("--config=asan") < step.argv.index("--")
-                for step in steps
+        self.assertEqual(len(steps), 3)
+        self.assertEqual(steps[0].argv[:4], ("python3", "dev.py", "bazel", "configure"))
+        for step, config in zip(steps[1:], ("first", "second")):
+            self.assertEqual(step.argv[:4], ("python3", "dev.py", "bazel", "test"))
+            self.assertIn(f"--config={config}", step.argv)
+            self.assertIn("//selected/...", step.argv)
+            self.assertLess(
+                step.argv.index("--config=" + config), step.argv.index("--")
             )
-        )
-        self.assertTrue(
-            any(
-                step.argv[:4] == ("python3", "dev.py", "bazel", "test")
-                and "--config=ubsan" in step.argv
-                and step.argv.index("--config=ubsan") < step.argv.index("--")
-                for step in steps
-            )
-        )
-        self.assertTrue(
-            any(
-                step.argv[:4] == ("python3", "dev.py", "bazel", "test")
-                and "--config=tsan" in step.argv
-                and step.argv.index("--config=tsan") < step.argv.index("--")
-                for step in steps
-            )
-        )
-        tsan_test_step = next(
-            step for step in steps if step.name == "Test IREE with TSAN"
-        )
-        tsan_test_env = [
-            arg
-            for arg in tsan_test_step.argv
-            if arg.startswith("--test_env=TSAN_OPTIONS=")
-        ]
-        self.assertEqual(len(tsan_test_env), 1)
-        self.assertTrue(
-            tsan_test_env[0].startswith("--test_env=TSAN_OPTIONS=suppressions=")
-        )
-        tsan_suppression_path = Path(
-            tsan_test_env[0].removeprefix("--test_env=TSAN_OPTIONS=suppressions=")
-        )
-        self.assertTrue(tsan_suppression_path.is_absolute())
-        self.assertTrue(tsan_suppression_path.is_file())
-        self.assertFalse(any("--config=msan" in step.argv for step in steps))
-        sanitizer_test_steps = [
-            step for step in steps if step.name.startswith("Test IREE")
-        ]
-        for xfail_target in ci_config.CPU_SANITIZERS_XFAIL_TARGETS:
-            self.assertTrue(
-                any(xfail_target in step.argv for step in sanitizer_test_steps)
-            )
+            self.assertGreater(step.argv.index("//selected/..."), step.argv.index("--"))
 
     def test_bazel_cpu_single_sanitizer_command_runs_one_configuration(self):
         args = ci.parse_arguments(
@@ -1402,29 +1507,68 @@ class CiTest(unittest.TestCase):
         self.assertFalse(
             any("--//loom/config:shared_tools" in step.argv for step in steps)
         )
-
-    def test_bazel_cpu_msan_command_builds_without_tests(self):
-        args = ci.parse_arguments(
-            [
-                "iree-bazel-cpu-msan",
-                "--target",
-                "//runtime/...",
-            ]
+        self.assertFalse(
+            any(step.name == "Build repository fuzz targets" for step in steps)
         )
 
-        steps = ci.steps_from_args(args)
-        command_lines = [step.command_line() for step in steps]
+    def test_bazel_cpu_asan_platform_lane_builds_fuzz_targets(self):
+        args = ci.parse_arguments(["iree-bazel-cpu-asan"])
 
-        self.assertTrue(
-            any(
-                step.argv[:4] == ("python3", "dev.py", "bazel", "build")
-                and "--config=msan" in step.argv
-                and step.argv.index("--config=msan") < step.argv.index("--")
-                and step.argv.index("//runtime/...") > step.argv.index("--")
-                for step in steps
-            )
+        with mock.patch.dict(
+            ci.os.environ, {"IREE_CI_PLATFORM_COVERAGE": "1"}, clear=True
+        ):
+            steps = ci.steps_from_args(args)
+
+        fuzz_step = next(
+            step for step in steps if step.name == "Build repository fuzz targets"
         )
-        self.assertFalse(any("bazel test" in line for line in command_lines))
+        self.assertEqual(
+            fuzz_step.argv[:5],
+            ("python3", "dev.py", "bazel", "fuzz", "--compile-only"),
+        )
+        self.assertEqual(fuzz_step.argv[-1], "//...")
+        self.assertIn("--//loom/config/import:enable=cxx", fuzz_step.argv)
+        self.assertIn(
+            "--//loom/config/serve:image_codecs=png,jpeg,gif,webp", fuzz_step.argv
+        )
+        self.assertIn("--//loom/config/serve:audio_codecs=wav,mp3,flac", fuzz_step.argv)
+
+    def test_focused_cpu_sanitizer_builds_only_its_selected_test_closures(self):
+        with (
+            mock.patch.object(
+                ci_config,
+                "BAZEL_CPU_SANITIZER_TEST_TAG_FILTERS",
+                {"focused": ("instrumented-subject",)},
+            ),
+            mock.patch.object(
+                ci_config, "CPU_SANITIZERS_XFAIL_TARGETS", ("-//other:failure",)
+            ),
+            mock.patch.dict(os.environ, {"IREE_CI_PLATFORM_COVERAGE": "1"}, clear=True),
+        ):
+            steps = ci.cpu_config_steps(("//selected/...",), "focused")
+
+        # A broad platform build would analyze unqualified native dependencies
+        # even though the test invocation filters them out.
+        self.assertEqual(len(steps), 1)
+        step = steps[0]
+        self.assertEqual(step.argv[:4], ("python3", "dev.py", "bazel", "test"))
+        self.assertIn("--build_tests_only", step.argv)
+        self.assertIn("--config=focused", step.argv)
+        self.assertIn("//selected/...", step.argv)
+        self.assertNotIn("-//other:failure", step.argv)
+        self.assertFalse(
+            any(arg.startswith("--test_lang_filters=") for arg in step.argv)
+        )
+        filters = next(
+            arg for arg in step.argv if arg.startswith("--test_tag_filters=")
+        )
+        self.assertIn("instrumented-subject", filters.split("=", 1)[1].split(","))
+        self.assertIsNotNone(step.requirement_audit)
+
+    def test_cpu_sanitizer_rejects_unknown_configuration(self):
+        with mock.patch.object(ci_config, "BAZEL_CPU_SANITIZER_TEST_TAG_FILTERS", {}):
+            with self.assertRaisesRegex(ValueError, "unknown Bazel sanitizer config"):
+                ci.cpu_config_steps(("//selected/...",), "unknown")
 
     def test_amdgpu_command_tests_one_semantic_graph(self):
         args = ci.parse_arguments(
@@ -1523,7 +1667,7 @@ class CiTest(unittest.TestCase):
             self.assertIn(target, test_step.argv)
         self.assertFalse(
             any(
-                arg.startswith("-//runtime/src/iree/hal/drivers/vulkan")
+                arg.startswith("-//runtime/src/iree/hal/driver/vulkan")
                 for arg in test_step.argv
             )
         )
@@ -1610,7 +1754,6 @@ class CiTest(unittest.TestCase):
     def test_amdgpu_container_jobs_preserve_runner_device_selection(self):
         for path, job_name in (
             (".github/workflows/ci_iree.yml", "bazel_linux"),
-            (".github/workflows/ci_libhrx.yml", "cmake_linux_gfx942"),
             (
                 ".github/workflows/test_core_linux_gpu_source.yml",
                 "test_core_linux_gpu_source",
@@ -1628,6 +1771,73 @@ class CiTest(unittest.TestCase):
                     "GPU_DEVICE_ORDINAL",
                 ):
                     self.assertNotIn(f"{variable_name}:", block)
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux host tool check")
+    def test_host_toolchain_check_accepts_system_tools_without_rocm(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            tool_dir = Path(temporary_dir) / "bin"
+            tool_dir.mkdir()
+            environment = os.environ.copy()
+            environment.pop("HRX_ROCM_ROOT", None)
+            for variable_name in ("CC", "CXX", "AR"):
+                tool_path = tool_dir / variable_name.lower()
+                tool_path.write_text("#!/usr/bin/env bash\nexit 0\n")
+                tool_path.chmod(0o755)
+                environment[variable_name] = os.fspath(tool_path)
+
+            result = subprocess.run(
+                ["bash", ".github/scripts/check_host_toolchain.sh", "--expect-system"],
+                env=environment,
+                check=False,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+            )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux host tool check")
+    def test_host_toolchain_check_requires_root_for_fetched_tools(self):
+        environment = os.environ.copy()
+        environment.pop("HRX_ROCM_ROOT", None)
+
+        result = subprocess.run(
+            ["bash", ".github/scripts/check_host_toolchain.sh", "--expect-artifact"],
+            env=environment,
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("HRX_ROCM_ROOT is required", result.stdout)
+
+    def test_host_workflows_select_minimal_artifact_closures(self):
+        loom_block = self.workflow_job_block(
+            ".github/workflows/ci_iree.yml", "bazel_linux"
+        )
+        libhrx_block = self.workflow_job_block(
+            ".github/workflows/ci_libhrx.yml", "bazel_linux"
+        )
+        fuzz_block = self.workflow_job_block(
+            ".github/workflows/fuzz.yml", "linux_x86_64"
+        )
+        presubmit_block = self.workflow_job_block(
+            ".github/workflows/presubmit.yml", "presubmit"
+        )
+
+        self.assertIn("IREE_CI_ARTIFACT_SET:", loom_block)
+        self.assertIn("if: env.IREE_CI_ARTIFACT_SET != ''", loom_block)
+        self.assertIn("artifact_set: llvm", loom_block)
+        self.assertIn("artifact_set: core", loom_block)
+        self.assertNotIn("fetch_rocm_toolchain", libhrx_block)
+        self.assertNotIn("check_rocm_device_toolchain", libhrx_block)
+        self.assertIn("HRX_ARTIFACT_SET: llvm", fuzz_block)
+        self.assertNotIn("HRX_ARTIFACT_SET: core", fuzz_block)
+        self.assertIn("fetch_rocm_toolchain", fuzz_block)
+        self.assertNotIn("check_rocm_device_toolchain", fuzz_block)
+        self.assertIn("HRX_ARTIFACT_SET: llvm-with-dev", presubmit_block)
 
     def test_fetch_toolchain_uses_owned_ci_entry_point(self):
         script = Path(".github/scripts/fetch_rocm_toolchain.sh").read_text()
@@ -1657,6 +1867,7 @@ elif [[ "$1" == "-m" && "$2" == "pip" ]]; then
   exit 0
 elif [[ "$1" == "build_tools/ci/ci_core_linux.py" && "$2" == "fetch-rocm" ]]; then
   mkdir -p "${HRX_ROCM_ROOT}/lib/llvm/bin"
+  touch "${HRX_ROCM_ROOT}/lib/libhsa-runtime64.so.1"
   printf '%s\n' \
     '{"artifact_identity":"nightly-123456-linux-release-core"}' \
     >"${HRX_ROCM_ROOT}/.hrx-rocm-artifacts.json"
@@ -1680,6 +1891,7 @@ fi
                     "HRX_OUTPUT_DIR": os.fspath(output_dir),
                     "HRX_PYTHON": os.fspath(output_dir / "python/bin/python3"),
                     "HRX_ROCM_ROOT": os.fspath(rocm_root),
+                    "LLVM_ROOT": os.fspath(rocm_root / "lib/llvm"),
                     "IREE_CLANG_TIDY_LLVM_ROOT": os.fspath(rocm_root / "lib/llvm"),
                     "IREE_ROCM_PATH": os.fspath(rocm_root),
                     "PATH": f"{fake_bin}:{env['PATH']}",
@@ -1710,6 +1922,10 @@ fi
             )
             self.assertNotIn("AR", exported_env)
             self.assertEqual(
+                exported_env["LLVM_ROOT"],
+                str(versioned_rocm_root / "lib/llvm"),
+            )
+            self.assertEqual(
                 exported_env["IREE_CLANG_TIDY_LLVM_ROOT"],
                 str(versioned_rocm_root / "lib/llvm"),
             )
@@ -1719,27 +1935,28 @@ fi
                 str(versioned_rocm_root / "lib/libhsa-runtime64.so.1"),
             )
 
-    def test_loom_docs_workflow_reviews_every_change_and_deploys_only_main(self):
-        text = Path(".github/workflows/docs.yml").read_text()
+    def test_loom_docs_use_the_qualified_sdk_and_deploy_only_main(self):
+        build_text = Path(".github/workflows/build_loom_sdk_artifacts.yml").read_text()
+        sdk_text = Path(".github/workflows/build_loom_sdk.yml").read_text()
+        ci_text = Path(".github/workflows/ci_iree.yml").read_text()
         build_block = self.workflow_job_block(
-            ".github/workflows/docs.yml", "build_docs"
+            ".github/workflows/build_loom_sdk_artifacts.yml", "build"
         )
         deploy_block = self.workflow_job_block(
-            ".github/workflows/docs.yml", "deploy_docs"
+            ".github/workflows/ci_iree.yml", "docs_deploy"
         )
 
-        for path in (
-            '"requirements-analysis.lock.txt"',
-            '"requirements-dev.lock.txt"',
-            '"build_tools/devtools/**"',
-            '"loom/binding/c/**"',
-            '"loom/docs/**"',
-            '"loom/py/loom/**"',
-            '"loom/src/loom/editor/textmate/**"',
+        for target in (
+            "//loom/binding/c/example:jit_task_pool",
+            "//loom/binding/c/example:link_modules",
+            "//loom/binding/c/example:product_frontier",
         ):
-            self.assertIn(f"- {path}", text)
-        self.assertIn("runs-on: ubuntu-24.04", build_block)
+            self.assertIn(target, build_block)
+        self.assertIn("build_tools/ci/change_scope.py", build_block)
         self.assertIn("python3 dev.py setup --docs", build_block)
+        self.assertIn("pip install --no-deps wheel-artifact/*.whl", build_block)
+        self.assertIn("LOOM_DOCS_C_EXAMPLE_DIR", build_block)
+        self.assertIn("LOOM_DOCS_TOOL_DIR", build_block)
         self.assertIn("loom_docs.highlight_test", build_block)
         self.assertIn(
             "--site-dir build/loom-pages/loom",
@@ -1758,16 +1975,15 @@ fi
             r"uses: actions/upload-pages-artifact@[0-9a-f]{40} # v\d+\.\d+\.\d+",
         )
         self.assertIn("path: build/loom-pages", build_block)
-        self.assertIn(
-            "group: ${{ github.workflow }}-build-${{ github.ref }}", build_block
-        )
-        self.assertIn("cancel-in-progress: true", build_block)
         self.assertNotIn("pages: write", build_block)
         self.assertNotIn("id-token: write", build_block)
         self.assertNotIn("actions/deploy-pages", build_block)
+        self.assertIn("value: ${{ jobs.build.outputs.documentation }}", build_text)
+        self.assertIn("value: ${{ jobs.build.outputs.documentation }}", sdk_text)
 
-        self.assertIn("if: github.ref == 'refs/heads/main'", deploy_block)
-        self.assertIn("needs: build_docs", deploy_block)
+        self.assertIn("github.ref == 'refs/heads/main'", deploy_block)
+        self.assertIn("needs.sdk.outputs.documentation == 'true'", deploy_block)
+        self.assertIn("needs: sdk", deploy_block)
         self.assertIn("pages: write", deploy_block)
         self.assertIn("id-token: write", deploy_block)
         self.assertIn("name: github-pages", deploy_block)
@@ -1779,12 +1995,9 @@ fi
             deploy_block,
             r"uses: actions/deploy-pages@[0-9a-f]{40} # v\d+\.\d+\.\d+",
         )
-        self.assertEqual(text.count("pages: write"), 1)
-        self.assertEqual(text.count("id-token: write"), 1)
-        self.assertEqual(text.count("actions/deploy-pages@"), 1)
-        self.assertNotIn("apt-get", text)
-        self.assertNotIn("pip install", text)
-        self.assertNotIn("sudo", text)
+        self.assertEqual(ci_text.count("pages: write"), 1)
+        self.assertEqual(ci_text.count("id-token: write"), 1)
+        self.assertEqual(ci_text.count("actions/deploy-pages@"), 1)
 
     def test_cmake_cpu_sanitizer_command_uses_cmake_build_dir_and_xfails(self):
         args = ci.parse_arguments(["iree-cmake-cpu-ubsan"])
@@ -1925,12 +2138,6 @@ fi
 
         self.assertTrue(
             any(
-                "-DIREE_HAL_AMDGPU_DEVICE_BINARY_BUILD_MODE=source" in line
-                for line in command_lines
-            )
-        )
-        self.assertTrue(
-            any(
                 "-DIREE_HAL_AMDGPU_DEVICE_TOOLCHAIN=rocm" in line
                 for line in command_lines
             )
@@ -2017,10 +2224,10 @@ fi
             )
         )
         self.assertTrue(
-            any("-DIREE_HAL_DRIVER_AMDGPU=OFF" in line for line in command_lines)
+            any("-DIREE_HAL_DRIVER_AMD_GPU=OFF" in line for line in command_lines)
         )
         self.assertFalse(
-            any("-DIREE_HAL_AMDGPU_TARGETS=" in line for line in command_lines)
+            any("-DIREE_HAL_AMD_GPU_TARGETS=" in line for line in command_lines)
         )
         test_step = next(
             step
@@ -2040,7 +2247,7 @@ fi
             any("-DIREE_HAL_DRIVER_VULKAN=ON" in line for line in command_lines)
         )
         self.assertTrue(
-            any("-DIREE_HAL_DRIVER_AMDGPU=OFF" in line for line in command_lines)
+            any("-DIREE_HAL_DRIVER_AMD_GPU=OFF" in line for line in command_lines)
         )
         build_steps = [step for step in steps if step.name.startswith("Build IREE")]
         self.assertEqual(build_steps, [])

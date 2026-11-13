@@ -889,12 +889,14 @@ class BuildFileFunctions:
         cxxopts=None,
         defines=None,
         linkopts=None,
+        includes=None,
         tags=None,
         target_compatible_with=None,
         **kwargs,
     ):
         if self._should_skip_target(tags=tags, **kwargs):
             return
+        includes_block = self._convert_includes_block(includes)
         name_block = self._convert_string_arg_block("NAME", name, quote=False)
         srcs_block, platform_srcs_block = self._convert_platform_select_srcs(name, srcs)
         data_block = self._convert_target_list_block("DATA", data)
@@ -930,6 +932,7 @@ class BuildFileFunctions:
             f"{copts_block}"
             f"{defines_block}"
             f"{linkopts_block}"
+            f"{includes_block}"
             f"{labels_block}"
             f")\n\n"
         )
@@ -955,6 +958,7 @@ class BuildFileFunctions:
         copts=None,
         defines=None,
         linkopts=None,
+        includes=None,
         args=None,
         env=None,
         tags=None,
@@ -968,6 +972,7 @@ class BuildFileFunctions:
     ):
         if self._should_skip_target(tags=tags):
             return
+        includes_block = self._convert_includes_block(includes)
         name_block = self._convert_string_arg_block("NAME", name, quote=False)
         srcs_block = self._convert_srcs_block(srcs)
         data_block = self._convert_data_list_block(data)
@@ -997,6 +1002,7 @@ class BuildFileFunctions:
             f"{copts_block}"
             f"{defines_block}"
             f"{linkopts_block}"
+            f"{includes_block}"
             f"{args_block}"
             f"{env_block}"
             f"{testonly_block}"

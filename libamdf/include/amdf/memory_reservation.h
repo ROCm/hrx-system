@@ -138,8 +138,12 @@ typedef struct amdf_memory_reservation_access_info_t {
   uint64_t reset_epoch;
 } amdf_memory_reservation_access_info_t;
 
-/// One replacement or detach within a stable reservation.
+/// One caller-described transition within a stable reservation.
 /// Destination ranges in a batch must not overlap. Source ranges may repeat.
+/// The caller supplies the backing currently installed across the whole range;
+/// a NULL previous_memory declares an unbound range. Edits crossing prior or
+/// desired source boundaries are split into separate entries. The library
+/// validates source admission and geometry, not the declared installed state.
 typedef struct amdf_memory_mapping_update_t {
   /// Byte offset in the destination reservation.
   uint64_t target_byte_offset;
@@ -158,6 +162,18 @@ typedef struct amdf_memory_mapping_update_t {
   amdf_memory_access_t access;
   /// Offset from the source's logical byte zero, or zero for detach.
   uint64_t source_byte_offset;
+  /// Backing currently installed throughout the destination range, or NULL
+  /// when unbound. Borrowed through update completion and any surviving
+  /// aliases.
+  amdf_memory_t* previous_memory;
+  /// Prior source access for an admitted device sharing the selected native
+  /// mapping group; zero for host or unbound.
+  uint32_t previous_memory_access_ordinal;
+  /// Reserved; zero.
+  uint32_t reserved;
+  /// Offset in previous_memory corresponding to the destination's first byte;
+  /// zero when unbound. The prior range is wholly contained by that source.
+  uint64_t previous_source_byte_offset;
 } amdf_memory_mapping_update_t;
 
 #ifdef __cplusplus

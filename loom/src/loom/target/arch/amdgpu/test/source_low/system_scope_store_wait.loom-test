@@ -1,0 +1,77 @@
+// RUN: emit source-low target=amdgpu:gfx1200 output=low
+
+kernel.def @ordinary_system_store_pair() {
+  %unit = index.constant 1 : index
+  %wave = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%wave, %unit, %unit) : index
+} launch(%output: buffer, %value: i32) {
+  %lane = kernel.workitem.id<x> : index
+  %base = index.constant 0 : offset
+  %output_view = buffer.view %output[%base] : buffer -> view<32x2xi32>
+  view.store %value, %output_view[%lane, 0] {cache_scope = device, cache_temporal = regular} : i32, view<32x2xi32>
+  view.store %value, %output_view[%lane, 1] {cache_scope = system, cache_temporal = regular} : i32, view<32x2xi32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.rdna4.core> abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "value"}, direct_arg_offsets = [8], direct_arg_parameter_indices = [1], direct_arg_sizes = [4], parameter_count = 2, resource_count = 1, resource_offsets = [0], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @ordinary_system_store_pair(%value: reg<amdgpu.sgpr>) asm {
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %output_view = resource<hal_binding> {extent = 256, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %14 = v_mov_b32_copy %value
+  %15 = v_lshlrev_b32_src0_inline %lane, 3
+  global_store_b32_saddr %15, %14, %output_view {scope = 2}
+  global_store_b32_saddr %15, %14, %output_view {offset = 4, scope = 3}
+  return
+}
+
+// ====
+// RUN: emit source-low target=amdgpu:gfx1200 output=low
+
+kernel.def @atomic_system_store_control() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%output: buffer, %value: i32) {
+  %base = index.constant 0 : offset
+  %output_view = buffer.view %output[%base] : buffer -> view<2xi32>
+  view.store %value, %output_view[0] {cache_scope = device, cache_temporal = regular} : i32, view<2xi32>
+  view.atomic.store %value, %output_view[1] {ordering = relaxed, scope = system} : i32, view<2xi32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.rdna4.core> abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "value"}, direct_arg_offsets = [8], direct_arg_parameter_indices = [1], direct_arg_sizes = [4], parameter_count = 2, resource_count = 1, resource_offsets = [0], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @atomic_system_store_control(%value: reg<amdgpu.sgpr>) asm {
+  %output_view = resource<hal_binding> {extent = 8, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %7 = v_mov_b32_copy %value
+  %8 = v_mov_b32 0
+  global_store_b32_saddr %8, %7, %output_view {scope = 2}
+  global_store_b32_saddr<atomic> %8, %7, %output_view {offset = 4, scope = 3}
+  return
+}
+
+// ====
+// RUN: emit source-low target=amdgpu:gfx1200 output=low
+
+kernel.def @system_store_drains_disjoint_load() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%output: buffer, %value: i32) {
+  %base = index.constant 0 : offset
+  %values = buffer.view %output[%base] : buffer -> view<3xi32>
+  %loaded = view.load %values[2] : view<3xi32> -> i32
+  view.store %value, %values[0] {cache_scope = system, cache_temporal = regular} : i32, view<3xi32>
+  view.store %loaded, %values[1] : i32, view<3xi32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.rdna4.core> abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "value"}, direct_arg_offsets = [8], direct_arg_parameter_indices = [1], direct_arg_sizes = [4], parameter_count = 2, resource_count = 1, resource_offsets = [0], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @system_store_drains_disjoint_load(%value: reg<amdgpu.sgpr>) asm {
+  %values = resource<hal_binding> {extent = 12, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %8 = s_mov_b32 0
+  %loaded = s_load_dword %values, %8 {offset = 8}
+  %10 = v_mov_b32_copy %value
+  %11 = v_mov_b32 0
+  global_store_b32_saddr %11, %10, %values {scope = 3}
+  %12 = v_mov_b32_copy %loaded
+  global_store_b32_saddr %11, %12, %values {offset = 4}
+  return
+}

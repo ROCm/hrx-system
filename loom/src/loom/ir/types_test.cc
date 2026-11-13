@@ -106,6 +106,48 @@ const loom_parameterized_type_descriptor_t kRepeatedDictDescriptor = {
     .parameter_count = IREE_ARRAYSIZE(kRepeatedDictParameters),
 };
 
+TEST(TypesTest,
+     ReferenceIdentityUsesOwnershipAndKeyWithoutDeclarationSpelling) {
+  for (auto ownership :
+       {LOOM_REFERENCE_OWNERSHIP_OWNED, LOOM_REFERENCE_OWNERSHIP_BORROWED}) {
+    const auto first = loom_type_reference(ownership, 7, 11, 2);
+    const auto alias = loom_type_reference(ownership, 7, 11, 19);
+    EXPECT_TRUE(loom_type_is_reference(first));
+    EXPECT_EQ(loom_type_reference_ownership(first), ownership);
+    EXPECT_EQ(loom_type_reference_namespace_id(first), 7u);
+    EXPECT_EQ(loom_type_reference_name_id(first), 11u);
+    EXPECT_EQ(loom_type_reference_declaration_id(first), 2u);
+    EXPECT_TRUE(loom_type_equal(first, alias));
+    EXPECT_EQ(loom_type_hash(first), loom_type_hash(alias));
+    EXPECT_FALSE(
+        loom_type_equal(first, loom_type_reference(ownership, 8, 11, 2)));
+    EXPECT_FALSE(
+        loom_type_equal(first, loom_type_reference(ownership, 7, 12, 2)));
+    EXPECT_FALSE(
+        loom_type_equal(first, loom_type_reference(ownership, 11, 7, 2)));
+    EXPECT_FALSE(loom_type_has_dimensions(first));
+    EXPECT_FALSE(loom_type_may_reference_values(first));
+    EXPECT_TRUE(
+        loom_type_equal_after_value_remap(nullptr, first, alias, nullptr));
+
+    const auto first_signature = BuildFunctionType(&first, 1, &first, 1);
+    const auto alias_signature = BuildFunctionType(&alias, 1, &alias, 1);
+    EXPECT_TRUE(loom_type_equal(first_signature.get(), alias_signature.get()));
+    EXPECT_EQ(loom_type_hash(first_signature.get()),
+              loom_type_hash(alias_signature.get()));
+  }
+  const auto owner =
+      loom_type_reference(LOOM_REFERENCE_OWNERSHIP_OWNED, 7, 11, 2);
+  const auto borrow =
+      loom_type_reference(LOOM_REFERENCE_OWNERSHIP_BORROWED, 7, 11, 2);
+  EXPECT_FALSE(loom_type_equal(owner, borrow));
+  const auto owned_signature = BuildFunctionType(&owner, 1, &owner, 1);
+  const auto borrowed_argument = BuildFunctionType(&borrow, 1, &owner, 1);
+  const auto borrowed_result = BuildFunctionType(&owner, 1, &borrow, 1);
+  EXPECT_FALSE(loom_type_equal(owned_signature.get(), borrowed_argument.get()));
+  EXPECT_FALSE(loom_type_equal(owned_signature.get(), borrowed_result.get()));
+}
+
 TEST(TypesTest, FunctionTypeEqualAndHashAreStructural) {
   loom_type_t i32 = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
   loom_type_t f32 = loom_type_scalar(LOOM_SCALAR_TYPE_F32);

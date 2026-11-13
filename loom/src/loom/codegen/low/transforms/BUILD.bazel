@@ -61,6 +61,7 @@ loom_cc_library(
         "//loom/src/loom/target:registers",
         "//loom/src/loom/transforms/boundary:projection_core",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
     ],
 )
 
@@ -136,6 +137,7 @@ loom_cc_library(
         "//loom/src/loom/rewrite:remap",
         "//loom/src/loom/rewrite:rewriter",
         "//loom/src/loom/target:function_version",
+        "//loom/src/loom/target:registers",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/internal:arena",
@@ -179,6 +181,20 @@ loom_cc_library(
     deps = [
         "//loom/src/loom/codegen/low:verify",
         "//loom/src/loom/codegen/low/pipeline:pass_environment",
+        "//loom/src/loom/pass:types",
+        "//loom/src/loom/target:pass_environment",
+        "//loom/src/loom/target:provider",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "borrow_lifetime",
+    srcs = ["borrow_lifetime.c"],
+    hdrs = ["borrow_lifetime.h"],
+    deps = [
+        "//loom/src/loom/codegen/low:object_lifetime",
+        "//loom/src/loom/ir",
         "//loom/src/loom/pass:types",
         "//loom/src/loom/target:pass_environment",
         "//loom/src/loom/target:provider",

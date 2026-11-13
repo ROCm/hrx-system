@@ -18,10 +18,13 @@ loom_cc_library(
     hdrs = ["ownership_lifetime.h"],
     deps = [
         "//loom/src/loom/analysis:ownership_lifetime",
+        "//loom/src/loom/codegen/low:ownership",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops:type_registry",
         "//loom/src/loom/pass:types",
+        "//loom/src/loom/target:pass_environment",
+        "//loom/src/loom/target:provider",
         "//runtime/src/iree/base",
     ],
 )

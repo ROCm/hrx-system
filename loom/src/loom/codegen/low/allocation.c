@@ -18,7 +18,9 @@
 #include "loom/codegen/low/allocation/loop_edge_relocation.h"
 #include "loom/codegen/low/allocation/numbering.h"
 #include "loom/codegen/low/allocation/packet_move.h"
+#include "loom/codegen/low/allocation/physical_domains.h"
 #include "loom/codegen/low/allocation/placement.h"
+#include "loom/codegen/low/allocation/spill_plan.h"
 #include "loom/codegen/low/allocation/storage_lease.h"
 #include "loom/codegen/low/allocation/target_constraints.h"
 #include "loom/codegen/low/allocation/unit_liveness_builder.h"
@@ -53,10 +55,14 @@ typedef struct loom_low_allocation_build_state_t {
   loom_low_placement_preference_index_t preferences;
   // Unique concat-chain preferences shared by assignment attempts.
   loom_low_allocation_concat_affinity_t* concat_affinity;
+  // Immutable physical candidate preferences shared by assignment attempts.
+  loom_low_allocation_physical_domains_t physical_domains;
   // Mutable per-allocation-unit live end points.
   loom_low_allocation_unit_liveness_t unit_liveness;
   // Structural content identity shared by all assignment attempts.
   loom_low_allocation_content_identity_t content_identity;
+  // Lazy producer classification preserved across alternative assignments.
+  loom_low_allocation_reconstruction_t reconstruction;
   // Completed interval assignment, spill plan, and remark rows.
   loom_low_allocation_interval_assignment_result_t interval_assignment;
   // Mutable low.copy decision plan being built.
@@ -73,6 +79,10 @@ typedef struct loom_low_allocation_build_state_t {
   loom_low_allocation_exit_moves_t* exit_moves;
   // Number of initialized exit transport records.
   iree_host_size_t exit_move_count;
+  // External boundary coordinates retained only through final numbering.
+  loom_low_allocation_numbering_anchor_t* boundary_anchors;
+  // Number of initialized ranges, including elided identity transfers.
+  iree_host_size_t boundary_anchor_count;
   // Mutable branch edge-copy plan being built.
   loom_low_allocation_edge_copy_plan_t edge_copy_plan;
   // Mutable packet-local final move plan being built.
@@ -153,10 +163,12 @@ loom_low_allocation_make_interval_assignment_context(
       .liveness = &state->liveness,
       .value_domain = &model->context.value_domain,
       .register_requirements = model->register_requirements,
+      .call_boundaries = model->context.requirements.call_boundaries,
       .schedule = state->options->schedule,
       .placement = &state->placement,
       .preferences = &state->preferences,
       .concat_affinity = state->concat_affinity,
+      .physical_domains = &state->physical_domains,
       .target_constraints = target_constraints,
       .entry_locations = state->options->entry_locations,
       .entry_location_count = state->options->entry_location_count,
@@ -169,6 +181,7 @@ loom_low_allocation_make_interval_assignment_context(
       .residency = state->options->residency,
       .storage_leases = storage_leases,
       .arena = arena,
+      .reconstruction = &state->reconstruction,
       .function_cfg_graph = &model->cfg_graph,
       .spill_traffic_exclusive_limit = spill_traffic_exclusive_limit,
       .fragmentation_repair_reg_classes = fragmentation_repair_reg_classes,
@@ -183,6 +196,7 @@ static iree_status_t loom_low_allocation_try_alternative_assignment(
     const loom_low_function_model_t* model,
     const loom_local_value_domain_t* value_domain,
     loom_low_allocation_search_strategy_t search_strategy,
+    loom_target_residency_view_t residency,
     iree_bitmap_t fragmentation_repair_reg_classes,
     const loom_low_allocation_numbering_analysis_t* baseline_numbering,
     const iree_arena_checkpoint_t* assignment_checkpoint,
@@ -236,7 +250,7 @@ static iree_status_t loom_low_allocation_try_alternative_assignment(
 
   loom_low_allocation_interval_assignment_result_t scratch_result = {0};
   if (iree_status_is_ok(status)) {
-    const loom_low_allocation_interval_assignment_context_t scratch_context =
+    loom_low_allocation_interval_assignment_context_t scratch_context =
         loom_low_allocation_make_interval_assignment_context(
             state, model, search_strategy, fragmentation_repair_reg_classes,
             &scratch_arena, &scratch_target_constraints,
@@ -244,6 +258,7 @@ static iree_status_t loom_low_allocation_try_alternative_assignment(
             state->target_constraints.error_count == 0
                 ? &state->interval_assignment.spill_traffic_bytes
                 : NULL);
+    scratch_context.residency = residency;
     status = loom_low_allocation_interval_assignment_build(
         &scratch_context, decision_arena, &scratch_result);
   }
@@ -325,6 +340,7 @@ loom_low_allocation_entry_destination(
   const uint32_t assignment_index =
       state->interval_assignment.assignment_indices_by_value_ordinal[ordinal];
   if (entry->location_kind == LOOM_LOW_ALLOCATION_LOCATION_UNASSIGNED ||
+      entry->location_kind == LOOM_LOW_ALLOCATION_LOCATION_CALL_STORAGE ||
       assignment_index == UINT32_MAX) {
     return NULL;
   }
@@ -355,7 +371,7 @@ static iree_status_t loom_low_allocation_build_entry_moves(
     source.location_base = entry->location_base;
     loom_low_allocation_move_plan_append_assignment(
         &state->move_plan, &source, 0, destination, 0,
-        destination->location_count, &raw_move_count);
+        destination->location_count, /*consume_source=*/true, &raw_move_count);
     loom_low_allocation_target_constraints_record_location_extent(
         &state->target_constraints, source.descriptor_reg_class_id,
         source.location_kind, source.location_base, source.location_count);
@@ -426,16 +442,49 @@ loom_low_allocation_append_boundary_moves(
     boundary.descriptor_reg_class_id = locations[i].descriptor_reg_class_id;
     boundary.location_kind = locations[i].location_kind;
     boundary.location_base = locations[i].location_base;
+    if (state->boundary_anchors != NULL &&
+        boundary.location_kind ==
+            LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER) {
+      state->boundary_anchors[state->boundary_anchor_count++] =
+          (loom_low_allocation_numbering_anchor_t){
+              .location = locations[i],
+              .unit_count = assignment->location_count,
+          };
+    }
     loom_low_allocation_target_constraints_record_location_extent(
         &state->target_constraints, boundary.descriptor_reg_class_id,
         boundary.location_kind, boundary.location_base,
         boundary.location_count);
     const bool from_abi =
         direction == LOOM_LOW_ALLOCATION_BOUNDARY_DIRECTION_FROM_ABI;
+    const loom_type_t* value_type =
+        loom_type_register_value_type(loom_module_value_type(
+            state->module, state->liveness.value_ids[ordinals[i]]));
+    // Owning callable fields transfer their source on this path even when a
+    // mutually exclusive branch has a later use in the linear point order.
+    const bool consumes_owner = value_type &&
+                                loom_type_is_reference(*value_type) &&
+                                loom_type_reference_ownership(*value_type) ==
+                                    LOOM_REFERENCE_OWNERSHIP_OWNED;
+    // A copying reload leaves its backing cell alive independently of the
+    // loaded SSA value. A moving reload carries an explicit consuming transfer.
+    const loom_low_storage_transport_t* transport =
+        state->options->storage_transport;
+    const bool consume_source =
+        from_abi ||
+        (assignment->location_kind == LOOM_LOW_ALLOCATION_LOCATION_STORAGE
+             ? transport
+                   ->bindings[transport->bindings_by_value_ordinal[ordinals[i]]]
+                   .moves_source
+             : (consumes_owner ||
+                !loom_low_allocation_live_range_assignment_live_at_point(
+                    state->unit_liveness.storage_segments.entries,
+                    state->unit_liveness.end_points,
+                    state->unit_liveness.point_count, assignment, point)));
     loom_low_allocation_move_plan_append_assignment(
         &state->move_plan, from_abi ? &boundary : assignment, 0,
         from_abi ? assignment : &boundary, 0, assignment->location_count,
-        &raw_count);
+        consume_source, &raw_count);
   }
   IREE_RETURN_IF_ERROR(loom_low_allocation_move_plan_append_group(
       &state->move_plan, owner_op, point, point, raw_count, out_group,
@@ -444,11 +493,11 @@ loom_low_allocation_append_boundary_moves(
 }
 
 // Reads the already collected call sites and their target convention rows.
-// Capacity includes whole register views; memory ABI operands are materialized
-// by the target at this same boundary, before/after the register permutation.
+// Capacity includes whole register views and declared call-packet cells.
 static void loom_low_allocation_call_move_capacity(
     const loom_low_allocation_build_state_t* state,
-    iree_host_size_t* total_count, iree_host_size_t* group_count) {
+    iree_host_size_t* total_count, iree_host_size_t* group_count,
+    iree_host_size_t* boundary_count) {
   const loom_low_schedule_table_t* schedule = state->options->schedule;
   if (!state->options->call_contracts.query || !schedule) {
     return;
@@ -461,7 +510,7 @@ static void loom_low_allocation_call_move_capacity(
             state->options->call_contracts.user_data,
             loom_low_func_call_callee(node->op));
     for (uint16_t side = 0; side < 2; ++side) {
-      const loom_low_allocation_abi_location_t* registers =
+      const loom_low_allocation_abi_location_t* locations =
           side ? contract->results : contract->arguments;
       const uint16_t count =
           side ? iree_min(node->result_count, contract->result_count)
@@ -470,9 +519,10 @@ static void loom_low_allocation_call_move_capacity(
           side ? loom_low_schedule_node_const_result_ordinals(node)
                : loom_low_schedule_node_const_operand_ordinals(node);
       const iree_host_size_t units = loom_low_allocation_boundary_unit_count(
-          state, registers, ordinals, count);
+          state, locations, ordinals, count);
       *total_count += units;
       *group_count = iree_max(*group_count, units);
+      *boundary_count += count;
     }
   }
 }
@@ -505,7 +555,7 @@ static iree_status_t loom_low_allocation_build_call_moves(
         &state->liveness,
         state->move_plan.operation_indices_by_source_node[node_index]);
     for (uint16_t side = 0; side < 2; ++side) {
-      const loom_low_allocation_abi_location_t* registers =
+      const loom_low_allocation_abi_location_t* locations =
           side ? contract->results : contract->arguments;
       const uint16_t count =
           side ? iree_min(node->result_count, contract->result_count)
@@ -513,11 +563,10 @@ static iree_status_t loom_low_allocation_build_call_moves(
       const loom_value_ordinal_t* ordinals =
           side ? loom_low_schedule_node_const_result_ordinals(node)
                : loom_low_schedule_node_const_operand_ordinals(node);
-      // Overflow arguments have already been stored before register transport.
-      // The move set protects its own sources and destinations, including
-      // identities; other dying inputs are available for cycle scratch.
+      // The complete move set protects register and packet-cell sources and
+      // destinations, including identities and repeated argument sources.
       IREE_RETURN_IF_ERROR(loom_low_allocation_append_boundary_moves(
-          state, node->op, point->end_point, registers, ordinals, count,
+          state, node->op, point->end_point, locations, ordinals, count,
           side ? LOOM_LOW_ALLOCATION_BOUNDARY_DIRECTION_FROM_ABI
                : LOOM_LOW_ALLOCATION_BOUNDARY_DIRECTION_TO_ABI,
           side ? &call->results : &call->arguments));
@@ -542,7 +591,7 @@ static const loom_low_schedule_node_t* loom_low_allocation_block_exit(
 static void loom_low_allocation_exit_move_capacity(
     const loom_low_allocation_build_state_t* state,
     iree_host_size_t* total_count, iree_host_size_t* group_count,
-    iree_host_size_t* exit_count) {
+    iree_host_size_t* exit_count, iree_host_size_t* boundary_count) {
   const loom_low_schedule_table_t* schedule = state->options->schedule;
   if (!state->options->exit_locations || !schedule) {
     return;
@@ -563,6 +612,7 @@ static void loom_low_allocation_exit_move_capacity(
         state, state->options->exit_locations, ordinals, count);
     *total_count += units;
     *group_count = iree_max(*group_count, units);
+    *boundary_count += count;
   }
 }
 
@@ -627,13 +677,15 @@ static iree_status_t loom_low_allocation_build_moves(
   }
   iree_host_size_t call_unit_count = 0;
   iree_host_size_t call_group_capacity = 0;
-  loom_low_allocation_call_move_capacity(state, &call_unit_count,
-                                         &call_group_capacity);
+  iree_host_size_t boundary_capacity = 0;
+  loom_low_allocation_call_move_capacity(
+      state, &call_unit_count, &call_group_capacity, &boundary_capacity);
   iree_host_size_t exit_unit_count = 0;
   iree_host_size_t exit_group_capacity = 0;
   iree_host_size_t exit_move_capacity = 0;
   loom_low_allocation_exit_move_capacity(
-      state, &exit_unit_count, &exit_group_capacity, &exit_move_capacity);
+      state, &exit_unit_count, &exit_group_capacity, &exit_move_capacity,
+      &boundary_capacity);
   const bool has_calls = state->options->call_contracts.query &&
                          state->options->schedule &&
                          state->options->schedule->call_node_count;
@@ -641,6 +693,11 @@ static iree_status_t loom_low_allocation_build_moves(
       state->placement.edge_copy_group_count == 0 && entry_unit_count == 0 &&
       !has_calls && exit_move_capacity == 0) {
     return iree_ok_status();
+  }
+  if (boundary_capacity != 0 && state->preferences.instruction_use_count != 0) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        decision_arena, boundary_capacity, sizeof(*state->boundary_anchors),
+        (void**)&state->boundary_anchors));
   }
   const iree_arena_checkpoint_t scratch_checkpoint =
       iree_arena_checkpoint_save(decision_arena);
@@ -779,6 +836,7 @@ static iree_status_t loom_low_allocate_function_impl(
       .function_op = model->context.function_op,
       .target = model->context.target,
   };
+  iree_arena_initialize(arena->block_pool, &state.reconstruction.arena);
   if (iree_status_is_ok(status) && retained_location_table != NULL) {
     status = loom_low_allocation_index_retained_assignments(
         model, retained_location_table, &decision_arena, &state);
@@ -869,6 +927,11 @@ static iree_status_t loom_low_allocate_function_impl(
         &model->cfg_graph, &state.placement, &state.unit_liveness,
         &decision_arena, arena);
   }
+  if (iree_status_is_ok(status) && state.target_constraints.error_count == 0) {
+    status = loom_low_allocation_physical_domains_build(
+        &state.target_constraints, &state.liveness, &state.unit_liveness,
+        &state.placement, &decision_arena, &state.physical_domains);
+  }
   const iree_arena_checkpoint_t interval_assignment_checkpoint =
       iree_arena_checkpoint_save(arena);
   if (iree_status_is_ok(status) && state.target_constraints.error_count == 0) {
@@ -906,6 +969,7 @@ static iree_status_t loom_low_allocate_function_impl(
     status = loom_low_allocation_try_alternative_assignment(
         &state, model, value_domain,
         LOOM_LOW_ALLOCATION_SEARCH_STRATEGY_PRESSURE_EFFICIENCY,
+        state.options->residency,
         /*fragmentation_repair_reg_classes=*/(iree_bitmap_t){0},
         /*baseline_numbering=*/NULL, &interval_assignment_checkpoint,
         &decision_arena);
@@ -957,7 +1021,7 @@ static iree_status_t loom_low_allocate_function_impl(
       status = loom_low_allocation_try_alternative_assignment(
           &state, model, value_domain,
           LOOM_LOW_ALLOCATION_SEARCH_STRATEGY_FRAGMENTATION_REPAIR,
-          repair_reg_classes, &baseline_numbering,
+          state.options->residency, repair_reg_classes, &baseline_numbering,
           &interval_assignment_checkpoint, &decision_arena);
     }
   }
@@ -973,6 +1037,30 @@ static iree_status_t loom_low_allocate_function_impl(
     status = loom_low_allocation_try_alternative_assignment(
         &state, model, value_domain,
         LOOM_LOW_ALLOCATION_SEARCH_STRATEGY_FRAGMENTATION_REPAIR,
+        state.options->residency,
+        /*fragmentation_repair_reg_classes=*/(iree_bitmap_t){0},
+        /*baseline_numbering=*/NULL, &interval_assignment_checkpoint,
+        &decision_arena);
+  }
+  // First preserve the residency-aware packing above. If the initial snapshot
+  // still requires memory traffic, compare a packing unconstrained by
+  // provisional tiers. Repaired snapshots retain the ordinary packing policy
+  // instead of repeating whole-coloring exploration for each inserted spill.
+  // Both attempts reuse the same analyses and enforce the same hard capacity;
+  // the second may replace the first only by reducing reconstruction-aware
+  // spill traffic. A zero-traffic incumbent has nothing left to improve.
+  if (retained_location_table == NULL && iree_status_is_ok(status) &&
+      !state.options->has_allocation_repair &&
+      state.interval_assignment.has_packable_aggregates &&
+      !loom_target_residency_model_is_empty(state.options->residency.model) &&
+      ((state.target_constraints.error_count == 0 &&
+        state.interval_assignment.spill_traffic_bytes != 0) ||
+       loom_low_allocation_failure_is_present(
+           &state.target_constraints.failure))) {
+    status = loom_low_allocation_try_alternative_assignment(
+        &state, model, value_domain,
+        LOOM_LOW_ALLOCATION_SEARCH_STRATEGY_FRAGMENTATION_REPAIR,
+        /*residency=*/(loom_target_residency_view_t){0},
         /*fragmentation_repair_reg_classes=*/(iree_bitmap_t){0},
         /*baseline_numbering=*/NULL, &interval_assignment_checkpoint,
         &decision_arena);
@@ -1052,6 +1140,8 @@ static iree_status_t loom_low_allocate_function_impl(
         .storage_leases = &state.storage_leases,
         .moves = state.move_plan.moves,
         .move_count = state.move_plan.move_count,
+        .boundary_anchors = state.boundary_anchors,
+        .boundary_anchor_count = state.boundary_anchor_count,
     };
     status = loom_low_allocation_number_registers(&numbering_context,
                                                   &decision_arena);
@@ -1060,8 +1150,28 @@ static iree_status_t loom_low_allocate_function_impl(
       state.target_constraints.error_count == 0 &&
       state.interval_assignment.spill_plan_count != 0) {
     status = loom_liveness_retain_operation_index(&state.liveness, arena);
+    if (iree_status_is_ok(status)) {
+      status = loom_low_allocation_spill_plan_define_parts(
+          value_domain, state.target.descriptor_set,
+          state.interval_assignment.assignments,
+          state.interval_assignment.spill_plans,
+          state.interval_assignment.spill_plan_count, &decision_arena);
+    }
   }
   iree_arena_deinitialize(&decision_arena);
+  // Retain only the compact immutable facts after every assignment rollback is
+  // complete. The classification arena's pool block is immediately reusable.
+  uint8_t* rematerialization_flags = NULL;
+  if (iree_status_is_ok(status) && state.reconstruction.value_flags != NULL) {
+    status = iree_arena_allocate_array(arena, value_domain->value_count,
+                                       sizeof(*rematerialization_flags),
+                                       (void**)&rematerialization_flags);
+    if (iree_status_is_ok(status)) {
+      memcpy(rematerialization_flags, state.reconstruction.value_flags,
+             value_domain->value_count);
+    }
+  }
+  iree_arena_deinitialize(&state.reconstruction.arena);
 
   uint32_t* first_storage_release_action_by_node = NULL;
   if (locations_replayed && iree_status_is_ok(status) &&
@@ -1086,8 +1196,10 @@ static iree_status_t loom_low_allocate_function_impl(
         .target = state.target,
         .storage_transport = options->storage_transport,
         .storage_layout = model->context.requirements.storage_layout,
+        .call_boundaries = model->context.requirements.call_boundaries,
         .liveness = state.liveness,
         .register_requirements = model->register_requirements,
+        .rematerialization_flags = rematerialization_flags,
         .storage_segments = state.unit_liveness.storage_segments.entries,
         .placement = state.placement,
         .fixed_values = state.target_constraints.fixed_values,

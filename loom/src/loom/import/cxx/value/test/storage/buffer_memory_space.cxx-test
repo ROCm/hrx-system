@@ -1,0 +1,266 @@
+// RUN: format bytecode
+#include <loomcxx/buffer.h>
+
+using loom::buffer::assume::memory_space;
+using ReadOnly = loom::type::buffer<const unsigned>;
+
+// Each domain applies equally to a pointer's root and a borrowed typed buffer.
+#define REFINE(Name, Space)                                                   \
+  const unsigned* Name##_pointer(const unsigned* source) {                    \
+    return memory_space<loom::memory_space::Space>(source);                   \
+  }                                                                          \
+  ReadOnly Name##_buffer(ReadOnly source) {                                   \
+    return memory_space<loom::memory_space::Space>(source);                   \
+  }
+REFINE(global, global)
+REFINE(workgroup, workgroup)
+REFINE(private_storage, private_)
+REFINE(constant, constant)
+REFINE(host, host)
+REFINE(descriptor, descriptor)
+REFINE(generic, generic)
+
+// ----
+func.def public @global_pointer(%source: buffer, %source_byte_offset: offset) -> (buffer, offset) {
+  %4 = buffer.assume.memory_space<global> %source : buffer
+  func.return %4, %source_byte_offset : buffer, offset
+}
+
+func.def public @global_buffer(%source: buffer) -> (buffer) {
+  %7 = buffer.assume.memory_space<global> %source : buffer
+  func.return %7 : buffer
+}
+
+func.def public @workgroup_pointer(%source: buffer, %source_byte_offset: offset) -> (buffer, offset) {
+  %12 = buffer.assume.memory_space<workgroup> %source : buffer
+  func.return %12, %source_byte_offset : buffer, offset
+}
+
+func.def public @workgroup_buffer(%source: buffer) -> (buffer) {
+  %15 = buffer.assume.memory_space<workgroup> %source : buffer
+  func.return %15 : buffer
+}
+
+func.def public @private_storage_pointer(%source: buffer, %source_byte_offset: offset) -> (buffer, offset) {
+  %20 = buffer.assume.memory_space<private> %source : buffer
+  func.return %20, %source_byte_offset : buffer, offset
+}
+
+func.def public @private_storage_buffer(%source: buffer) -> (buffer) {
+  %23 = buffer.assume.memory_space<private> %source : buffer
+  func.return %23 : buffer
+}
+
+func.def public @constant_pointer(%source: buffer, %source_byte_offset: offset) -> (buffer, offset) {
+  %28 = buffer.assume.memory_space<constant> %source : buffer
+  func.return %28, %source_byte_offset : buffer, offset
+}
+
+func.def public @constant_buffer(%source: buffer) -> (buffer) {
+  %31 = buffer.assume.memory_space<constant> %source : buffer
+  func.return %31 : buffer
+}
+
+func.def public @host_pointer(%source: buffer, %source_byte_offset: offset) -> (buffer, offset) {
+  %36 = buffer.assume.memory_space<host> %source : buffer
+  func.return %36, %source_byte_offset : buffer, offset
+}
+
+func.def public @host_buffer(%source: buffer) -> (buffer) {
+  %39 = buffer.assume.memory_space<host> %source : buffer
+  func.return %39 : buffer
+}
+
+func.def public @descriptor_pointer(%source: buffer, %source_byte_offset: offset) -> (buffer, offset) {
+  %44 = buffer.assume.memory_space<descriptor> %source : buffer
+  func.return %44, %source_byte_offset : buffer, offset
+}
+
+func.def public @descriptor_buffer(%source: buffer) -> (buffer) {
+  %47 = buffer.assume.memory_space<descriptor> %source : buffer
+  func.return %47 : buffer
+}
+
+func.def public @generic_pointer(%source: buffer, %source_byte_offset: offset) -> (buffer, offset) {
+  %52 = buffer.assume.memory_space<generic> %source : buffer
+  func.return %52, %source_byte_offset : buffer, offset
+}
+
+func.def public @generic_buffer(%source: buffer) -> (buffer) {
+  %55 = buffer.assume.memory_space<generic> %source : buffer
+  func.return %55 : buffer
+}
+
+// ====
+// Refinement preserves an interior origin and both element qualifiers.
+#include <loomcxx/buffer.h>
+#include <loomcxx/view.h>
+
+unsigned observe_pointer(const volatile unsigned* source) {
+  auto* refined = loom::buffer::assume::memory_space<loom::memory_space::global>(
+      source + 3);
+  return refined[2];
+}
+
+unsigned observe_buffer(loom::type::buffer<const volatile unsigned> source) {
+  auto refined = loom::buffer::assume::memory_space<loom::memory_space::global>(
+      source);
+  auto view = loom::buffer::view<4>(refined, {},
+                                   loom::encoding::layout::dense<1>());
+  return loom::view::load(view, 2);
+}
+
+// ----
+func.def public @observe_pointer(%source: buffer, %source_byte_offset: offset) -> (i32) {
+  %3 = scalar.constant 3 : i32
+  %4 = scalar.extsi %3 : i32 to i64
+  %5 = scalar.constant 4 : i64
+  %6 = scalar.muli %4, %5 : i64
+  %7 = index.cast %source_byte_offset : offset to i64
+  %8 = scalar.addi %7, %6 : i64
+  %9 = scalar.assume %8 [range(%8, 0, 9223372036854775807)] : i64
+  %refined_byte_offset = index.cast %9 : i64 to offset
+  %refined = buffer.assume.memory_space<global> %source : buffer
+  %12 = scalar.constant 2 : i32
+  %13 = scalar.extsi %12 : i32 to i64
+  %14 = scalar.constant 4 : i64
+  %15 = scalar.muli %13, %14 : i64
+  %16 = index.cast %refined_byte_offset : offset to i64
+  %17 = scalar.addi %16, %15 : i64
+  %18 = scalar.assume %17 [range(%17, 0, 9223372036854775807)] : i64
+  %19 = index.cast %18 : i64 to offset
+  %20 = buffer.view %refined[%19] : buffer -> view<1xi32>
+  %21 = view.load<volatile|root_in_bounds> %20[0] : view<1xi32> -> i32
+  func.return %21 : i32
+}
+
+func.def public @observe_buffer(%source: buffer) -> (i32) {
+  %refined = buffer.assume.memory_space<global> %source : buffer
+  %view_layout = encoding.layout.dense : encoding<layout>
+  %26 = index.constant 0 : offset
+  %view = buffer.view %refined[%26] : buffer -> view<4xi32, %view_layout>
+  %28 = scalar.constant 2 : i32
+  %29 = index.cast %28 : i32 to index
+  %30 = view.load<volatile> %view[%29] : view<4xi32, %view_layout> -> i32
+  func.return %30 : i32
+}
+
+// ====
+// Allocation facts remain available to projections through the refined root.
+#include <loomcxx/buffer.h>
+
+unsigned private_element() {
+  unsigned values[4] = {7, 11, 13, 17};
+  auto* refined =
+      loom::buffer::assume::memory_space<loom::memory_space::private_>(values);
+  return refined[2];
+}
+
+// ----
+func.def public @private_element() -> (i32) {
+  %1 = index.constant 16 : offset
+  %values_storage = buffer.alloca<private> align(4) %1 : buffer
+  %values_storage_byte_offset = index.constant 0 : offset
+  %values_view = buffer.view %values_storage[%values_storage_byte_offset] : buffer -> view<4xi32>
+  %5 = scalar.constant 7 : i32
+  %6 = index.constant 0 : index
+  view.store %5, %values_view[%6] : i32, view<4xi32>
+  %7 = scalar.constant 11 : i32
+  %8 = index.constant 1 : index
+  view.store %7, %values_view[%8] : i32, view<4xi32>
+  %9 = scalar.constant 13 : i32
+  %10 = index.constant 2 : index
+  view.store %9, %values_view[%10] : i32, view<4xi32>
+  %11 = scalar.constant 17 : i32
+  %12 = index.constant 3 : index
+  view.store %11, %values_view[%12] : i32, view<4xi32>
+  %refined = buffer.assume.memory_space<private> %values_storage : buffer
+  %14 = scalar.constant 2 : i32
+  %15 = scalar.extsi %14 : i32 to i64
+  %16 = scalar.constant 4 : i64
+  %17 = scalar.muli %15, %16 : i64
+  %18 = index.cast %values_storage_byte_offset : offset to i64
+  %19 = scalar.addi %18, %17 : i64
+  %20 = scalar.assume %19 [range(%19, 0, 9223372036854775807)] : i64
+  %21 = index.cast %20 : i64 to offset
+  %22 = index.assume %21 [range(%21, 0, 12)] : offset
+  %23 = buffer.view %refined[%22] : buffer -> view<1xi32>
+  %24 = view.load %23[0] : view<1xi32> -> i32
+  func.return %24 : i32
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// Pointer and typed-buffer borrows retain their respective roots while
+// constant-space refinement preserves the pointer interior origin. Both
+// forms publish alternating outputs from the same logical source coordinate.
+#include <loomcxx/kernel.h>
+#include <loomcxx/view.h>
+[[loom::kernel, loom::workgroup_size(32, 1, 1), loom::workgroup_count(2, 1, 1)]]
+void borrowed_storage(const unsigned* input_pointer,
+                      loom::type::buffer<const unsigned> input_buffer,
+                      unsigned* output) {
+  unsigned item =
+      loom::kernel::workgroup::id.x * 32u + loom::kernel::workitem::id.x;
+  auto* interior =
+      loom::buffer::assume::memory_space<loom::memory_space::constant>(
+          input_pointer + 3);
+  auto buffer =
+      loom::buffer::assume::memory_space<loom::memory_space::constant>(
+          input_buffer);
+  auto source =
+      loom::buffer::view<70>(buffer, {}, loom::encoding::layout::dense<1>());
+  output[item * 2 + 1] = interior[item];
+  output[item * 2 + 2] = loom::view::load(source, item + 3);
+}
+// ----
+kernel.def @borrowed_storage() {
+  %3 = index.constant 2 : index
+  %4 = index.constant 1 : index
+  %6 = index.constant 32 : index
+  kernel.launch.config workgroups(%3, %4, %4) workgroup_size(%6, %4, %4) : index
+} launch(%input_pointer: buffer, %input_buffer: buffer, %output: buffer) {
+  %workgroup_id_x = kernel.workgroup.id<x> : index
+  %12 = index.cast %workgroup_id_x : index to i32
+  %81 = scalar.constant 5 : i32
+  %82 = scalar.shli %12, %81 : i32
+  %workitem_id_x = kernel.workitem.id<x> : index
+  %16 = index.cast %workitem_id_x : index to i32
+  %item = scalar.addi %82, %16 : i32
+  %interior = buffer.assume.memory_space<constant> %input_pointer : buffer
+  %buffer = buffer.assume.memory_space<constant> %input_buffer : buffer
+  %29 = index.constant 0 : offset
+  %source = buffer.view %buffer[%29] : buffer -> view<70xi32>
+  %31 = scalar.extui %item : i32 to i64
+  %79 = scalar.constant 2 : i64
+  %80 = scalar.shli %31, %79 : i64
+  %78 = scalar.constant 12 : i64
+  %77 = scalar.addi %80, %78 : i64
+  %36 = scalar.assume %77 [range(%77, 0, 9223372036854775807)] : i64
+  %37 = index.cast %36 : i64 to offset
+  %38 = buffer.view %interior[%37] : buffer -> view<1xi32>
+  %39 = view.load<root_in_bounds> %38[0] : view<1xi32> -> i32
+  %75 = scalar.constant 1 : i32
+  %76 = scalar.shli %item, %75 : i32
+  %43 = scalar.addi %76, %75 : i32
+  %44 = scalar.extui %43 : i32 to i64
+  %74 = scalar.shli %44, %79 : i64
+  %49 = scalar.assume %74 [range(%74, 0, 9223372036854775807)] : i64
+  %50 = index.cast %49 : i64 to offset
+  %51 = buffer.view %output[%50] : buffer -> view<1xi32>
+  view.store<root_in_bounds> %39, %51[0] : i32, view<1xi32>
+  %52 = scalar.constant 3 : i32
+  %53 = scalar.addi %item, %52 : i32
+  %54 = scalar.extui %53 : i32 to i64
+  %55 = index.cast %54 : i64 to index
+  %56 = view.load %source[%55] : view<70xi32> -> i32
+  %59 = scalar.constant 2 : i32
+  %60 = scalar.addi %76, %59 : i32
+  %61 = scalar.extui %60 : i32 to i64
+  %70 = scalar.shli %61, %79 : i64
+  %66 = scalar.assume %70 [range(%70, 0, 9223372036854775807)] : i64
+  %67 = index.cast %66 : i64 to offset
+  %68 = buffer.view %output[%67] : buffer -> view<1xi32>
+  view.store<root_in_bounds> %56, %68[0] : i32, view<1xi32>
+  kernel.return
+}

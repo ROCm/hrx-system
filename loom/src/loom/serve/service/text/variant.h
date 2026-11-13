@@ -19,13 +19,14 @@ extern "C" {
 // All borrowed base objects outlive completion. Source/sanitizer options are
 // borrowed through completion. Rejection owes no callback.
 iree_status_t loom_serve_text_variant_compile_async(
-    loom_serve_text_model_t* owner, loom_serve_device_t* device,
-    const loom_serve_preparation_t* preparation, iree_host_size_t shared_count,
-    iree_host_size_t stage_count, const loom_serve_text_stage_t* baseline,
+    loom_serve_text_model_t* owner, loom_runtime_device_t* device,
+    const loom_runtime_preparation_t* preparation,
+    iree_host_size_t shared_count, iree_host_size_t stage_count,
+    const loom_serve_text_stage_t* baseline,
     iree_hal_command_buffer_mode_t command_mode,
-    const loom_serve_sources_t* sources,
+    const loom_runtime_sources_t* sources,
     const loomc_sanitizer_options_t* sanitizer,
-    loom_serve_variant_completion_fn_t completion, void* user_data,
+    loom_runtime_variant_completion_fn_t completion, void* user_data,
     iree_allocator_t host_allocator);
 
 // Checks candidate ownership and the replacement private peak before rebinding
@@ -33,14 +34,14 @@ iree_status_t loom_serve_text_variant_compile_async(
 // excludes peer admission until the new peak has been published.
 iree_status_t loom_serve_text_variant_bind(
     const loom_serve_text_variant_t* variant, loom_serve_text_model_t* owner,
-    iree_vm_module_t* module, loom_serve_residency_t* residency);
+    iree_vm_module_t* module, loom_runtime_residency_t* residency);
 
 // Borrows a ready candidate's descriptors, one per model stage, for owner-side
 // validation before selection. Valid until the candidate is freed.
 iree_status_t loom_serve_text_variant_stages(
     const loom_serve_text_variant_t* variant,
     const loom_serve_text_model_t* owner,
-    const loom_serve_stage_t** out_stages);
+    const loom_runtime_stage_t** out_stages);
 
 #ifdef __cplusplus
 }  // extern "C"

@@ -48,3 +48,58 @@ low.func.def target<test.low.core>(@target) @non_memory_modifier(%left: reg<test
   %sum = test.add.i32<volatile> %left, %right
   return %sum
 }
+
+// ====
+// Native and canonical Low share the same per-access semantic modifiers.
+// RUN: roundtrip
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @native_atomic_access_flags(%address: reg<test.ptr>, %value: reg<test.i32 x4>) asm {
+  %observed = test.load.v4i32<atomic> %address
+  test.store.v4i32<atomic> %address, %value
+  return
+}
+
+
+// ====
+// RUN: format bytecode
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @bytecode_atomic_access_flags(%address: reg<test.ptr>, %value: reg<test.i32 x4>) asm {
+  %observed = test.load.v4i32<atomic> %address
+  test.store.v4i32<atomic> %address, %value
+  return
+}
+
+
+// ====
+// RUN: roundtrip
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @canonical_atomic_access_flags(%address: reg<test.ptr>) -> (reg<test.i32 x4>) {
+  %observed = low.op<test.load.v4i32><atomic>(%address) : (reg<test.ptr>) -> reg<test.i32 x4>
+  low.return %observed : reg<test.i32 x4>
+}
+
+// ----
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @canonical_atomic_access_flags(%address: reg<test.ptr>) -> (reg<test.i32 x4>) asm {
+  %observed = test.load.v4i32<atomic> %address
+  return %observed
+}
+
+
+// ====
+// RUN: verify
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @non_memory_atomic_modifier(%left: reg<test.i32>, %right: reg<test.i32>) -> (reg<test.i32>) asm {
+  // ERROR@+1: TARGET/090 {descriptor="test.add.i32", function_name="non_memory_atomic_modifier"}
+  %sum = test.add.i32<atomic> %left, %right
+  return %sum
+}

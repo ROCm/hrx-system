@@ -129,8 +129,8 @@ struct iree_hal_profiling_from_flags_t {
 
 static iree_status_t iree_hal_profile_capture_filter_set_u32_from_flag(
     int64_t flag_value, iree_hal_profile_capture_filter_flags_t flag,
-    const char* flag_name, uint32_t* out_value,
-    iree_hal_profile_capture_filter_t* inout_filter) {
+    const char* flag_name, iree_hal_profile_capture_filter_t* inout_filter,
+    uint32_t* out_value) {
   if (flag_value < 0) {
     return iree_ok_status();
   }
@@ -164,17 +164,17 @@ static iree_status_t iree_hal_profile_capture_filter_from_flags(
   IREE_RETURN_IF_ERROR(iree_hal_profile_capture_filter_set_u32_from_flag(
       FLAG_device_profiling_filter_command_index,
       IREE_HAL_PROFILE_CAPTURE_FILTER_FLAG_COMMAND_INDEX,
-      "device_profiling_filter_command_index", &out_filter->command_index,
-      out_filter));
+      "device_profiling_filter_command_index", out_filter,
+      &out_filter->command_index));
   IREE_RETURN_IF_ERROR(iree_hal_profile_capture_filter_set_u32_from_flag(
       FLAG_device_profiling_filter_physical_device,
       IREE_HAL_PROFILE_CAPTURE_FILTER_FLAG_PHYSICAL_DEVICE_ORDINAL,
-      "device_profiling_filter_physical_device",
-      &out_filter->physical_device_ordinal, out_filter));
+      "device_profiling_filter_physical_device", out_filter,
+      &out_filter->physical_device_ordinal));
   IREE_RETURN_IF_ERROR(iree_hal_profile_capture_filter_set_u32_from_flag(
       FLAG_device_profiling_filter_queue,
       IREE_HAL_PROFILE_CAPTURE_FILTER_FLAG_QUEUE_ORDINAL,
-      "device_profiling_filter_queue", &out_filter->queue_ordinal, out_filter));
+      "device_profiling_filter_queue", out_filter, &out_filter->queue_ordinal));
   return iree_ok_status();
 }
 

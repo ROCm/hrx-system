@@ -241,7 +241,9 @@ iree_status_t iree_async_proactor_create_io_uring(
   if (iree_status_is_ok(status) && proactor->buffer_table) {
     bool supports_buffer_clone = false;
     status = iree_async_proactor_io_uring_probe_buffer_clone(
-        &proactor->ring, &supports_buffer_clone);
+        &proactor->ring, buffer_ring_probe_page,
+        iree_io_uring_sparse_table_capacity(proactor->buffer_table),
+        &supports_buffer_clone);
     if (supports_buffer_clone) {
       proactor->kernel_capabilities |=
           IREE_ASYNC_PROACTOR_CAPABILITY_CONCURRENT_BUFFER_REGISTRATION;
@@ -773,12 +775,49 @@ static void iree_async_proactor_io_uring_handle_signal_cqe(
   // teardown). No cleanup needed here - destroy() handles it.
 }
 
+// A failed native transfer still owns its operation, file, and registered span.
+// Preserve their coordinates before completion releases or reuses them: errno
+// alone cannot distinguish an inaccessible host view from a fixed-slot
+// mismatch.
+static iree_status_t iree_async_proactor_io_uring_file_error(
+    int error, const char* action, const iree_async_file_t* file,
+    uint64_t file_offset, iree_async_span_t span) {
+  const iree_async_region_t* region = span.region;
+  const int32_t fixed_buffer_base =
+      region && region->type == IREE_ASYNC_REGION_TYPE_IOURING
+          ? region->handles.iouring.base_buffer_index
+          : -1;
+  // A linked operation can be cancelled before its file-producing predecessor
+  // publishes a handle.
+  return iree_make_status(
+      iree_status_code_from_errno(error),
+      "io_uring file %s failed (%d): fd=%d file_flags=0x%x "
+      "file_offset=%" PRIu64 " buffer=%p length=%" PRIhsz
+      " region_base=%p region_length=%" PRIhsz " region_offset=%" PRIhsz
+      " fixed_buffer_base=%" PRId32 " fixed_buffer_size=%" PRIhsz,
+      action, error, file ? file->primitive.value.fd : -1,
+      file ? (unsigned)file->flags : 0, file_offset, iree_async_span_ptr(span),
+      span.length, region ? region->base_ptr : NULL,
+      region ? region->length : 0, region ? span.offset : 0, fixed_buffer_base,
+      region ? region->buffer_size : 0);
+}
+
 // Converts a CQE result to an iree_status_t.
 // Handles special cases like timer expiration and futex value mismatch.
 static iree_status_t iree_async_proactor_io_uring_cqe_to_status(
     const iree_io_uring_cqe_t* cqe, iree_async_operation_t* operation) {
   if (cqe->res >= 0) {
     return iree_ok_status();
+  }
+
+  if (operation->type == IREE_ASYNC_OPERATION_TYPE_FILE_READ) {
+    const iree_async_file_read_operation_t* read = (const void*)operation;
+    return iree_async_proactor_io_uring_file_error(
+        -cqe->res, "read", read->file, read->offset, read->buffer);
+  } else if (operation->type == IREE_ASYNC_OPERATION_TYPE_FILE_WRITE) {
+    const iree_async_file_write_operation_t* write = (const void*)operation;
+    return iree_async_proactor_io_uring_file_error(
+        -cqe->res, "write", write->file, write->offset, write->buffer);
   }
 
   // Timer: -ETIME is the expected success case (timeout expired).
@@ -1098,6 +1137,40 @@ iree_async_proactor_io_uring_socket_from_io_operation(
   }
 }
 
+// Returns true when an operation failure proves that the socket is no longer
+// usable. A resource refusal from a zero-copy send is local to the requested
+// copy-avoidance path: the same socket and bytes may still be sent with kernel
+// copying, so the operation reports the error without poisoning the socket.
+static bool iree_async_proactor_io_uring_socket_error_is_terminal(
+    iree_async_proactor_io_uring_t* proactor, iree_async_operation_t* operation,
+    iree_status_code_t status_code) {
+  if (status_code != IREE_STATUS_RESOURCE_EXHAUSTED ||
+      !iree_any_bit_set(proactor->capabilities,
+                        IREE_ASYNC_PROACTOR_CAPABILITY_ZERO_COPY_SEND)) {
+    return true;
+  }
+  switch (operation->type) {
+    case IREE_ASYNC_OPERATION_TYPE_SOCKET_SEND: {
+      iree_async_socket_send_operation_t* send =
+          (iree_async_socket_send_operation_t*)operation;
+      return !iree_any_bit_set(send->socket->flags,
+                               IREE_ASYNC_SOCKET_FLAG_ZERO_COPY) ||
+             iree_any_bit_set(send->send_flags,
+                              IREE_ASYNC_SOCKET_SEND_FLAG_NO_ZERO_COPY);
+    }
+    case IREE_ASYNC_OPERATION_TYPE_SOCKET_SENDTO: {
+      iree_async_socket_sendto_operation_t* sendto =
+          (iree_async_socket_sendto_operation_t*)operation;
+      return !iree_any_bit_set(sendto->socket->flags,
+                               IREE_ASYNC_SOCKET_FLAG_ZERO_COPY) ||
+             iree_any_bit_set(sendto->send_flags,
+                              IREE_ASYNC_SOCKET_SEND_FLAG_NO_ZERO_COPY);
+    }
+    default:
+      return true;
+  }
+}
+
 //===----------------------------------------------------------------------===//
 // Poll
 //===----------------------------------------------------------------------===//
@@ -1171,8 +1244,10 @@ iree_host_size_t iree_async_proactor_io_uring_process_cqe(
     flags = iree_async_proactor_io_uring_completion_flags(cqe, operation);
   }
 
-  // Propagate error to socket's sticky failure status.
-  if (!iree_status_is_ok(status)) {
+  // Propagate connection-terminal errors to the socket's sticky failure state.
+  if (!iree_status_is_ok(status) &&
+      iree_async_proactor_io_uring_socket_error_is_terminal(
+          proactor, operation, iree_status_code(status))) {
     iree_async_socket_t* socket =
         iree_async_proactor_io_uring_socket_from_io_operation(operation);
     if (socket) {

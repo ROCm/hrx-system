@@ -12,9 +12,14 @@ func.def @observe_unused(%input: buffer) {
 // ----
 low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @observe_unused() asm {
   %source = resource<hal_binding> {extent = 8, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %7 = v_mov_b32 0
-  %first = global_load_b32_saddr<volatile> %7, %source
-  %second = global_load_b32_saddr<volatile> %7, %source {offset = 4}
+  %7 = slice %source[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %8 = slice %source[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %9 = v_mov_b32_copy %7
+  %10 = v_mov_b32_copy %8
+  %11 = concat(%9, %10) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %first = global_load_b32_vaddr<volatile> %11
+  %17 = concat(%9, %10) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %second = global_load_b32_vaddr<volatile> %17 {offset = 4}
   return
 }
 
@@ -37,23 +42,46 @@ func.def @observe_vector(%input: buffer, %output: buffer) {
 low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @observe_vector() asm {
   %source = resource<hal_binding> {extent = 64, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %destination = resource<hal_binding> {extent = 128, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %11 = v_mov_b32 0
-  %12 = global_load_b128_saddr<volatile> %11, %source
-  %13 = global_load_b128_saddr<volatile> %11, %source {offset = 16}
-  %14 = global_load_b128_saddr<volatile> %11, %source {offset = 32}
-  %15 = global_load_b128_saddr<volatile> %11, %source {offset = 48}
-  %18 = global_load_b128_saddr<volatile> %11, %source
-  %19 = global_load_b128_saddr<volatile> %11, %source {offset = 16}
-  %20 = global_load_b128_saddr<volatile> %11, %source {offset = 32}
-  %21 = global_load_b128_saddr<volatile> %11, %source {offset = 48}
-  global_store_b128_saddr<volatile> %11, %12, %destination
-  global_store_b128_saddr<volatile> %11, %13, %destination {offset = 16}
-  global_store_b128_saddr<volatile> %11, %14, %destination {offset = 32}
-  global_store_b128_saddr<volatile> %11, %15, %destination {offset = 48}
-  global_store_b128_saddr<volatile> %11, %18, %destination {offset = 64}
-  global_store_b128_saddr<volatile> %11, %19, %destination {offset = 80}
-  global_store_b128_saddr<volatile> %11, %20, %destination {offset = 96}
-  global_store_b128_saddr<volatile> %11, %21, %destination {offset = 112}
+  %11 = slice %source[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %12 = slice %source[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %13 = v_mov_b32_copy %11
+  %14 = v_mov_b32_copy %12
+  %15 = concat(%13, %14) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %16 = global_load_b128_vaddr<volatile> %15
+  %21 = concat(%13, %14) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %22 = global_load_b128_vaddr<volatile> %21 {offset = 16}
+  %27 = concat(%13, %14) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %28 = global_load_b128_vaddr<volatile> %27 {offset = 32}
+  %33 = concat(%13, %14) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %34 = global_load_b128_vaddr<volatile> %33 {offset = 48}
+  %40 = concat(%13, %14) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %41 = global_load_b128_vaddr<volatile> %40
+  %46 = concat(%13, %14) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %47 = global_load_b128_vaddr<volatile> %46 {offset = 16}
+  %52 = concat(%13, %14) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %53 = global_load_b128_vaddr<volatile> %52 {offset = 32}
+  %58 = concat(%13, %14) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %59 = global_load_b128_vaddr<volatile> %58 {offset = 48}
+  %62 = slice %destination[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %63 = slice %destination[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %64 = v_mov_b32_copy %62
+  %65 = v_mov_b32_copy %63
+  %66 = concat(%64, %65) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_store_b128_vaddr<volatile> %66, %16
+  %72 = concat(%64, %65) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_store_b128_vaddr<volatile> %72, %22 {offset = 16}
+  %78 = concat(%64, %65) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_store_b128_vaddr<volatile> %78, %28 {offset = 32}
+  %84 = concat(%64, %65) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_store_b128_vaddr<volatile> %84, %34 {offset = 48}
+  %90 = concat(%64, %65) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_store_b128_vaddr<volatile> %90, %41 {offset = 64}
+  %96 = concat(%64, %65) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_store_b128_vaddr<volatile> %96, %47 {offset = 80}
+  %102 = concat(%64, %65) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_store_b128_vaddr<volatile> %102, %53 {offset = 96}
+  %108 = concat(%64, %65) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_store_b128_vaddr<volatile> %108, %59 {offset = 112}
   return
 }
 
@@ -74,11 +102,22 @@ func.def @observe_byte(%input: buffer, %output: buffer) {
 low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @observe_byte() asm {
   %source = resource<hal_binding> {extent = 1, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %destination = resource<hal_binding> {extent = 2, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %9 = v_mov_b32 0
-  %first = global_load_u8_saddr<volatile> %9, %source
-  %second = global_load_u8_saddr<volatile> %9, %source
-  global_store_b8_saddr<volatile> %9, %first, %destination
-  global_store_b8_saddr<volatile> %9, %second, %destination {offset = 1}
+  %9 = slice %source[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %10 = slice %source[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %11 = v_mov_b32_copy %9
+  %12 = v_mov_b32_copy %10
+  %13 = concat(%11, %12) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %first = global_load_u8_vaddr<volatile> %13
+  %19 = concat(%11, %12) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %second = global_load_u8_vaddr<volatile> %19
+  %21 = slice %destination[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %22 = slice %destination[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %23 = v_mov_b32_copy %21
+  %24 = v_mov_b32_copy %22
+  %25 = concat(%23, %24) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_store_b8_vaddr<volatile> %25, %first
+  %30 = concat(%23, %24) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_store_b8_vaddr<volatile> %30, %second {offset = 1}
   return
 }
 
@@ -94,20 +133,18 @@ func.def @observe_dynamic_address(%input: buffer, %byte_offset: offset) -> (i32,
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @observe_dynamic_address(%base: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @observe_dynamic_address(%base: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
   %source = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %13 = v_mov_b32 0
-  %14 = slice %base[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %13 = slice %base[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %14 = slice %base[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %15 = slice %source[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
   %16 = slice %source[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %17 = s_mov_b32 0
-  %18, %19 = s_add_co_u32 %15, %14
-  %20, %21 = s_addc_u32 %16, %17, %19
-  %22 = concat(%18, %20) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %first = global_load_b32_saddr<volatile> %13, %22
-  %29, %30 = s_add_co_u32 %15, %14
-  %31, %32 = s_addc_u32 %16, %17, %30
-  %33 = concat(%29, %31) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %second = global_load_b32_saddr<volatile> %13, %33 {offset = 4}
+  %17, %18 = v_add_co_u32 %15, %13
+  %19 = v_mov_b32_copy %16
+  %20, %21 = v_add_co_ci_u32 %19, %14, %18
+  %22 = concat(%17, %20) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %first = global_load_b32_vaddr<volatile> %22
+  %33 = concat(%17, %20) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %second = global_load_b32_vaddr<volatile> %33 {offset = 4}
   return %first, %second
 }

@@ -114,6 +114,14 @@ NanPolicy = EnumDef(
     doc="NaN comparison policy for approximate expectations.",
 )
 
+SubnormalPolicy = EnumDef(
+    "SubnormalPolicy",
+    [
+        EnumCase("flush", 1, doc="Accept a signed zero actual result when the reference magnitude is below the actual type's smallest normal value."),
+    ],
+    doc="Optional output-flushing allowance. Absence retains the authored tolerances for all values; nonzero actual results always use those tolerances.",
+)
+
 FileWriteMode = EnumDef(
     "FileWriteMode",
     [
@@ -908,6 +916,7 @@ check_expect_approximate = Op(
         AttrDef("atol", "f64"),
         AttrDef("rtol", "f64"),
         AttrDef("nan", "enum", enum_def=NanPolicy),
+        AttrDef("subnormal", "enum", enum_def=SubnormalPolicy, optional=True),
     ],
     traits=_EXPECT_BODY_TRAITS,
     verify="loom_check_expect_approximate_verify",
@@ -916,6 +925,7 @@ check_expect_approximate = Op(
         Clause("atol", Attr("atol")),
         Clause("rtol", Attr("rtol")),
         Clause("nan", Attr("nan")),
+        OptionalGroup([Clause("subnormal", Attr("subnormal"))], anchor="subnormal"),
         COLON,
         TypeOf("actual"),
         COMMA,
@@ -938,6 +948,7 @@ check_expect_approximate = Op(
     ],
     examples=[
         "check.expect.approximate actual(%actual) expected(%expected) atol(0.0001) rtol(0.0001) nan(same) : tensor<[%m]xbf16>, tensor<[%m]xf64>",
+        "check.expect.approximate actual(%actual) expected(%expected) atol(0.0) rtol(0.00001) nan(same) subnormal(flush) : f32, f64",
     ],
 )
 

@@ -168,9 +168,9 @@ TEST_P(SdmaSubmissionCacheTest, NativeBoundariesPublishReusedPrivatePayloads) {
   GpuMemory* target = nullptr;
   GpuMemory* local = nullptr;
   ASSERT_NO_FATAL_FAILURE(
-      CreateMemory(kReadWrite, kByteLength, &source, GetParam()));
+      CreateMemory(kReadWrite, kByteLength, GetParam(), &source));
   ASSERT_NO_FATAL_FAILURE(
-      CreateMemory(kReadWrite, kByteLength, &target, GetParam()));
+      CreateMemory(kReadWrite, kByteLength, GetParam(), &target));
   ASSERT_NE(local_scope_, nullptr);
   const amdf_memory_device_access_t access = {
       device_,

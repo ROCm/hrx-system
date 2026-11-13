@@ -55,13 +55,18 @@ from loom.target.arch.amd.xdna.aie2p.core_machine_data import (
     BFP_STORAGE_FIELDS,
     CORE_MACHINE_TABLE,
     DIMENSION_FIELDS,
+    STACK_COMPOSITE_FIELDS,
 )
 from loom.target.arch.amd.xdna.aie2p.core_move_topology import (
     AGGREGATE_MOVE_COMPONENT_FORMS,
     AGGREGATE_MOVE_RECIPES,
     SCALAR_MOVE_TOPOLOGY,
 )
-from loom.target.low_descriptors import DescriptorFlag
+from loom.target.arch.amd.xdna.aie2p.core_stack_descriptors import (
+    STACK_RECIPES,
+    stack_descriptor_key,
+)
+from loom.target.low_descriptors import DescriptorFlag, OperandRole
 
 _NATIVE_MAX_PACKET_SIZE = 16
 _NATIVE_MAX_BUNDLE_SLOT_COUNT = 8
@@ -395,6 +400,7 @@ def _register_part_unit_masks(compiled) -> list[int]:
     # parts follow the named physical subregister hierarchy, not unit-ID order.
     paths = {
         "aie2p.mexa": tuple(path for _, path, _ in BFP_STORAGE_FIELDS),
+        **{f"aie2p.{name.lower()}": tuple(path for _, path, _ in fields) for name, fields in STACK_COMPOSITE_FIELDS.items()},
         "aie2p.elpredicate": (("sub_l_even",), ("sub_l_odd",)),
         "aie2p.vec256": ((), ()),
         "aie2p.eldfiforeg": (("sub_lo_fifo",), ("sub_hi_fifo",)),
@@ -671,6 +677,83 @@ def _emit_register_tables() -> str:
     return "\n".join(lines)
 
 
+def _emit_spill_tables() -> str:
+    spec = AIE2P_CORE_DESCRIPTOR_SET
+    compiled = compile_descriptor_set(spec)
+    ordinals = {row.key: ordinal for ordinal, row in enumerate(spec.descriptors)}
+    classes = [[0, 0] for _ in compiled.reg_classes]
+    parts = {part.name: part.mask for part in spec.register_parts}
+    spill_parts = {}
+    recipes = ["    {0, 0, 0, 0},"]
+    pieces = []
+    for recipe_index, recipe in enumerate(STACK_RECIPES, start=1):
+        class_id = compiled.reg_class_ids[f"aie2p.{recipe.register_class.lower()}"]
+        full_mask = compiled.reg_classes[class_id].full_register_part_mask
+        component_masks = tuple(parts[piece.register_part] if piece.register_part else full_mask for piece in recipe.pieces)
+        combined_mask = 0
+        for mask in component_masks:
+            if combined_mask & mask:
+                raise ValueError(f"{recipe.name}: stack components overlap register parts")
+            combined_mask |= mask
+        if combined_mask != full_mask:
+            raise ValueError(f"{recipe.name}: stack components do not cover the complete register")
+        spill_parts[f"aie2p.{recipe.register_class.lower()}"] = component_masks
+        recipes.append(f"    {{{class_id}, {len(pieces)}, {len(recipe.pieces)}, {recipe.unit_count}}},")
+        for name in recipe.source_classes:
+            row = classes[compiled.reg_class_ids[f"aie2p.{name.lower()}"]]
+            column = int(recipe.unit_count > 1)
+            if row[column] or recipe.unit_count not in (1, 2):
+                raise ValueError(f"{name}: duplicate or unsupported stack transfer width")
+            row[column] = recipe_index
+        for piece in recipe.pieces:
+            descriptors = [ordinals[stack_descriptor_key(recipe, piece, operation, indexed)] for operation in ("load", "store") for indexed in (False, True)]
+            continuations = [ordinals[stack_descriptor_key(recipe, piece, "load", indexed, True)] for indexed in (False, True)] if piece.register_part else [0, 0]
+            part_mask = parts[piece.register_part] if piece.register_part else 0
+            if any(value > 65535 for value in (*descriptors, *continuations, piece.byte_offset, piece.unit_byte_stride, piece.plane_byte_stride)):
+                raise ValueError(f"{recipe.name}: stack recipe exceeds uint16 fields")
+            addressing_forms = [f"{{{near}, {far}}}" for near, far in zip(descriptors[::2], descriptors[1::2], strict=True)]
+            fields = (
+                "{" + ", ".join(addressing_forms) + "}",
+                f"{{{continuations[0]}, {continuations[1]}}}",
+                str(piece.byte_offset),
+                str(piece.unit_byte_stride),
+                str(piece.plane_byte_stride),
+                f"0x{part_mask:x}",
+            )
+            pieces.append("    {" + ", ".join(fields) + "},")
+    # Every producible partial value needs an exact subset of native transfers.
+    # Classes whose parts only describe reads can keep their full-width recipe.
+    for descriptor in spec.descriptors:
+        for operand in descriptor.operands:
+            if operand.role is not OperandRole.RESULT:
+                continue
+            for alternative in operand.reg_alts:
+                if alternative.register_part is None or alternative.reg_class not in spill_parts:
+                    continue
+                mask = parts[alternative.register_part]
+                if any(component & mask and component & ~mask for component in spill_parts[alternative.reg_class]):
+                    raise ValueError(f"{descriptor.key}: partial result has no exact stack transfer")
+    if len(recipes) > 256 or len(pieces) > 65535:
+        raise ValueError("AIE2P stack tables exceed their compact index fields")
+    return "\n".join(
+        (
+            *line_comment_header("//", generator="loom.gen.target.arch.amd.xdna.aie2p.encoding_tables"),
+            "static const uint8_t kSpillClassRecipes[][2] = {",
+            *(f"    {{{narrow}, {wide}}}," for narrow, wide in classes),
+            "};",
+            "",
+            "static const loom_aie2p_spill_recipe_t kSpillRecipes[] = {",
+            *recipes,
+            "};",
+            "",
+            "static const loom_aie2p_spill_piece_t kSpillPieces[] = {",
+            *pieces,
+            "};",
+            "",
+        )
+    )
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Generate AIE2P target tables.")
     parser.add_argument(
@@ -715,6 +798,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     parser.add_argument("--configuration-descriptor-header-output", type=Path)
     parser.add_argument("--configuration-descriptor-source-output", type=Path)
+    parser.add_argument("--spill-output", type=Path)
     args = parser.parse_args(argv)
     output_paths = (
         args.encoding_output,
@@ -726,6 +810,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         args.array_descriptor_source_output,
         args.configuration_descriptor_header_output,
         args.configuration_descriptor_source_output,
+        args.spill_output,
     )
     if args.check and any(path is not None for path in output_paths):
         parser.error("--check cannot be combined with output paths")
@@ -736,6 +821,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         (args.encoding_output, _emit_encoding_tables),
         (args.machine_output, lambda: machine_tables.emit_tables(CORE_MACHINE_TABLE, CORE_ENCODING_TABLE)),
         (args.register_output, _emit_register_tables),
+        (args.spill_output, _emit_spill_tables),
     ):
         if args.check or path is not None:
             contents = generate()

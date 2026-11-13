@@ -10,12 +10,14 @@
 #include <atomic>
 #include <condition_variable>
 #include <cstring>
+#include <deque>
 #include <functional>
 #include <mutex>
 #include <vector>
 
 #include "iree/async/frontier.h"
 #include "iree/hal/pool.h"
+#include "iree/hal/slab_pool.h"
 #include "iree/testing/gtest.h"
 
 namespace iree::hal::testing {
@@ -28,6 +30,8 @@ struct DeferredBackingPool : iree_hal_pool_t {
   iree_hal_pool_t* backing = nullptr;
   // Whether subsequent acquisitions wait for the test's explicit completion.
   bool defer = false;
+  // Rejects one acquisition before retaining arrays or accepting completion.
+  bool reject_next_acquisition = false;
   // Whether the dependency exposes its optional physical-capacity fact.
   bool report_physical_capacity = true;
   // Owner-installed observation boundary for completing a held dependency
@@ -42,7 +46,7 @@ struct DeferredBackingPool : iree_hal_pool_t {
   std::mutex acquire_mutex;
   // Signals that a real consumer has handed off its borrowed request.
   std::condition_variable acquire_condition;
-  // One captured request; the consumer submits its next request on completion.
+  // Captured requests preserve their independently accepted completions.
   struct Pending {
     // Number of borrowed request and output array elements.
     iree_host_size_t count;
@@ -56,9 +60,13 @@ struct DeferredBackingPool : iree_hal_pool_t {
     iree_hal_pool_acquire_info_t* infos;
     // Exactly one completion accepted by this capture.
     iree_hal_pool_acquire_callback_t completion;
+    // Admission moved into this dependency capture before native submission.
+    iree_hal_memory_credit_t credit = {};
     // Forwarded acquisition flags.
     iree_hal_pool_reserve_flags_t flags;
-  } pending = {};
+  };
+  // Requests held by this dependency until explicitly completed by the test.
+  std::deque<Pending> pending;
 
   IREE_ASYNC_FIXED_FRONTIER_TYPE(ReturnFrontier, UINT8_MAX);
   struct PendingReturn {
@@ -84,7 +92,7 @@ struct DeferredBackingPool : iree_hal_pool_t {
         .destroy =
             [](iree_hal_pool_t* base) {
               auto* self = static_cast<DeferredBackingPool*>(base);
-              EXPECT_EQ(self->pending.count, 0u);
+              EXPECT_TRUE(self->pending.empty());
               EXPECT_TRUE(self->pending_returns.empty());
               iree_hal_pool_deinitialize(base);
               iree_hal_pool_release(self->backing);
@@ -94,11 +102,15 @@ struct DeferredBackingPool : iree_hal_pool_t {
             [](iree_hal_pool_t* base, iree_host_size_t count,
                const iree_hal_pool_reservation_request_t* requests,
                const iree_async_frontier_t* frontier,
-               iree_hal_pool_reservation_t* reservations,
-               iree_hal_pool_acquire_info_t* infos,
                iree_hal_pool_acquire_callback_t completion,
-               iree_hal_pool_reserve_flags_t flags) -> iree_status_t {
+               iree_hal_pool_reserve_flags_t flags,
+               iree_hal_pool_reservation_t* reservations,
+               iree_hal_pool_acquire_info_t* infos) -> iree_status_t {
           auto* self = static_cast<DeferredBackingPool*>(base);
+          if (self->reject_next_acquisition) {
+            self->reject_next_acquisition = false;
+            return iree_status_from_code(IREE_STATUS_RESOURCE_EXHAUSTED);
+          }
           Pending pending = {
               .count = count,
               .requests = requests,
@@ -111,8 +123,7 @@ struct DeferredBackingPool : iree_hal_pool_t {
           {
             std::lock_guard<std::mutex> lock(self->acquire_mutex);
             if (self->defer) {
-              EXPECT_EQ(self->pending.count, 0u);
-              self->pending = pending;
+              self->pending.push_back(pending);
               self->acquire_condition.notify_all();
               return iree_ok_status();
             }
@@ -162,6 +173,45 @@ struct DeferredBackingPool : iree_hal_pool_t {
                   static_cast<DeferredBackingPool*>(base)->backing, flags,
                   min_bytes_to_keep);
             },
+        .query_allocation_cost =
+            [](iree_hal_pool_t* base, iree_host_size_t count,
+               const iree_hal_pool_reservation_request_t* requests,
+               uint64_t* out_length) {
+              return iree_hal_slab_pool_query_allocation_cost(
+                  static_cast<DeferredBackingPool*>(base)->backing, count,
+                  requests, out_length);
+            },
+        .acquire_with_credit =
+            [](iree_hal_pool_t* base, iree_host_size_t count,
+               const iree_hal_pool_reservation_request_t* requests,
+               iree_hal_memory_credit_t* credit,
+               iree_hal_pool_acquire_callback_t completion,
+               iree_hal_pool_reservation_t* reservations,
+               iree_hal_pool_acquire_info_t* infos) {
+              auto* self = static_cast<DeferredBackingPool*>(base);
+              if (self->reject_next_acquisition) {
+                self->reject_next_acquisition = false;
+                return iree_status_from_code(IREE_STATUS_RESOURCE_EXHAUSTED);
+              }
+              Pending call = {.count = count,
+                              .requests = requests,
+                              .reservations = reservations,
+                              .infos = infos,
+                              .completion = completion,
+                              .credit = *credit};
+              *credit = {};
+              {
+                std::lock_guard<std::mutex> lock(self->acquire_mutex);
+                if (self->defer) {
+                  self->pending.push_back(call);
+                  self->acquire_condition.notify_all();
+                  return iree_ok_status();
+                }
+              }
+              iree_status_t status = self->Forward(call);
+              *credit = call.credit;
+              return status;
+            },
     };
     auto* self = new DeferredBackingPool();
     iree_status_t status = iree_hal_pool_initialize(
@@ -179,7 +229,7 @@ struct DeferredBackingPool : iree_hal_pool_t {
     return status;
   }
 
-  iree_status_t Forward(Pending call) {
+  iree_status_t Forward(Pending& call) {
     const size_t current_depth =
         depth.fetch_add(1, std::memory_order_relaxed) + 1;
     size_t previous_maximum = maximum_depth.load(std::memory_order_relaxed);
@@ -187,9 +237,14 @@ struct DeferredBackingPool : iree_hal_pool_t {
            !maximum_depth.compare_exchange_weak(previous_maximum, current_depth,
                                                 std::memory_order_relaxed)) {
     }
-    iree_status_t status = iree_hal_pool_acquire_reservations(
-        backing, call.count, call.requests, call.frontier, call.reservations,
-        call.infos, call.completion, call.flags);
+    iree_status_t status =
+        call.credit.budget
+            ? iree_hal_slab_pool_acquire_with_credit(
+                  backing, call.count, call.requests, &call.credit,
+                  call.completion, call.reservations, call.infos)
+            : iree_hal_pool_acquire_reservations(
+                  backing, call.count, call.requests, call.frontier,
+                  call.completion, call.flags, call.reservations, call.infos);
     depth.fetch_sub(1, std::memory_order_relaxed);
     return status;
   }
@@ -198,12 +253,13 @@ struct DeferredBackingPool : iree_hal_pool_t {
     Pending call;
     {
       std::lock_guard<std::mutex> lock(acquire_mutex);
-      ASSERT_NE(pending.count, 0u);
-      call = pending;
-      pending = {};
+      ASSERT_FALSE(pending.empty());
+      call = pending.front();
+      pending.pop_front();
     }
     iree_status_t status = Forward(call);
     if (!iree_status_is_ok(status)) {
+      iree_hal_memory_credit_return(&call.credit);
       call.completion.fn(call.completion.user_data, status,
                          IREE_HAL_POOL_ACQUIRE_NONE);
     }
@@ -213,10 +269,11 @@ struct DeferredBackingPool : iree_hal_pool_t {
     Pending call;
     {
       std::lock_guard<std::mutex> lock(acquire_mutex);
-      ASSERT_NE(pending.count, 0u);
-      call = pending;
-      pending = {};
+      ASSERT_FALSE(pending.empty());
+      call = pending.front();
+      pending.pop_front();
     }
+    iree_hal_memory_credit_return(&call.credit);
     call.completion.fn(call.completion.user_data,
                        iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                                         "native allocation failed"),
@@ -225,20 +282,41 @@ struct DeferredBackingPool : iree_hal_pool_t {
 
   void WaitForAcquisition() {
     std::unique_lock<std::mutex> lock(acquire_mutex);
-    acquire_condition.wait(lock, [&] { return pending.count != 0; });
+    acquire_condition.wait(lock, [&] { return !pending.empty(); });
+  }
+
+  size_t PendingRequestCount() {
+    std::lock_guard<std::mutex> lock(acquire_mutex);
+    size_t count = 0;
+    for (const auto& call : pending) {
+      count += call.count;
+    }
+    return count;
+  }
+
+  iree_hal_pool_reservation_request_t FirstRequest() {
+    std::lock_guard<std::mutex> lock(acquire_mutex);
+    return pending.front().requests[0];
+  }
+
+  Pending TakeFirstAcquisition() {
+    std::lock_guard<std::mutex> lock(acquire_mutex);
+    Pending call = pending.front();
+    pending.pop_front();
+    return call;
   }
 
   void ResumeAcquisitions() {
-    Pending call;
+    std::deque<Pending> calls;
     {
       std::lock_guard<std::mutex> lock(acquire_mutex);
       defer = false;
-      call = pending;
-      pending = {};
+      calls.swap(pending);
     }
-    if (call.count) {
+    for (auto& call : calls) {
       iree_status_t status = Forward(call);
       if (!iree_status_is_ok(status)) {
+        iree_hal_memory_credit_return(&call.credit);
         call.completion.fn(call.completion.user_data, status,
                            IREE_HAL_POOL_ACQUIRE_NONE);
       }

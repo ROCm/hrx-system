@@ -60,8 +60,10 @@ typedef struct loom_low_move_sequence_scratch_t {
   iree_host_size_t temporary_count;
 } loom_low_move_sequence_scratch_t;
 
-// Resolves one scratch unit for a cyclic storage class. A false |out_resolved|
-// reports that the callback emitted a user-facing allocation diagnostic.
+// Resolves one scratch unit for a cyclic storage class after all acyclic moves
+// have completed. The callback excludes values live beyond the group in
+// addition to |occupied_locations|. A false |out_resolved| reports that the
+// callback emitted a user-facing allocation diagnostic.
 typedef iree_status_t (*loom_low_move_sequence_resolve_temporary_fn_t)(
     void* user_data, const loom_low_move_location_t* storage_class,
     const loom_low_move_sequence_location_set_t* occupied_locations,
@@ -103,8 +105,10 @@ enum loom_low_move_sequence_input_flag_bits_e {
 };
 typedef uint8_t loom_low_move_sequence_input_flags_t;
 
-// Returns true when |location| overlaps a source or destination in the current
-// parallel move group, including identity moves that emit no instruction.
+// Returns true when |location| overlaps a destination or preserved reference
+// source in the current parallel move group, including identity moves that
+// emit no instruction. Acyclic sources have already been read; every remaining
+// cycle source is also a destination. Other live values belong to the resolver.
 // |occupied_locations| is valid only during the temporary resolver callback
 // that received it.
 bool loom_low_move_sequence_location_set_contains(
@@ -123,6 +127,10 @@ iree_status_t loom_low_move_sequence_scratch_initialize(
 // other cycles add one scratch-save move. Transfers retain their source
 // and destination register views; aliased views need not have the same width.
 // Scratch saves use the source view whose contents must survive the cycle.
+// Consuming reference inputs transfer only on their source's final read;
+// identities and source-preserving inputs keep that carrier live. Reference
+// cycles transfer their carriers through scratch without retaining a spare
+// owner after the group.
 // When non-NULL, |out_input_flags| reports the identity and active rows already
 // classified while preparing the move set.
 // |out_complete| is false only when the temporary resolver emitted an

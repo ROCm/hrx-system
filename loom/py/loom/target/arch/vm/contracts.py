@@ -16,6 +16,8 @@ from iree.vm.bytecode.spec.isa.core.buffer import (
     BUFFER_ATOMIC_RMW,
     BUFFER_ATOMIC_SCOPE_SELECTOR,
     BUFFER_COMPARE,
+    BUFFER_COMPARE_ADDRESS,
+    BUFFER_COMPARE_ADDRESS_SELECTOR,
     BUFFER_COPY,
     BUFFER_FILL,
     BUFFER_LENGTH,
@@ -49,7 +51,12 @@ from iree.vm.bytecode.spec.isa.core.integer import (
     IntegerUnaryOperation,
     IntegerUnarySemantics,
 )
-from iree.vm.bytecode.spec.isa.core.ref import REF_SELECT
+from iree.vm.bytecode.spec.isa.core.ref import (
+    REF_COMPARE_EQ,
+    REF_COMPARE_NULL,
+    REF_NULL,
+    REF_SELECT,
+)
 from iree.vm.bytecode.spec.isa.core.rules import FieldRule, RecordRuleKind
 from iree.vm.bytecode.spec.isa.core.stack import MEMORY_FORMAT_SELECTOR
 from iree.vm.bytecode.spec.isa.core.value import VALUE_COPY, VALUE_SELECT
@@ -61,6 +68,8 @@ from loom.dialect.globals import ALL_GLOBAL_OPS
 from loom.dialect.globals.defs import global_load
 from loom.dialect.index import ALL_INDEX_OPS, IndexPredicate
 from loom.dialect.index import defs as index
+from loom.dialect.ref import ALL_REF_OPS
+from loom.dialect.ref import defs as ref
 from loom.dialect.scalar import (
     ALL_SCALAR_OPS,
     ClampFMode,
@@ -337,6 +346,7 @@ VM_CORE_CONTRACT_DIALECT_OPS = {
     "global": ALL_GLOBAL_OPS,
     "scalar": ALL_SCALAR_OPS,
     "index": ALL_INDEX_OPS,
+    "ref": ALL_REF_OPS,
     "scf": ALL_SCF_OPS,
     "view": view.ALL_VIEW_OPS,
 }
@@ -352,7 +362,16 @@ def _direct_cases(semantics_type, source_ops, type_prefix="i"):
                 IntegerBinaryOperation.OR,
                 IntegerBinaryOperation.XOR,
             ):
-                source_type = Scalar(("i1", "i32"))
+                source_type = Scalar(("i1", "i8", "i16", "i32"))
+            elif semantics.bit_width == 32 and semantics.operation in (
+                IntegerBinaryOperation.ADD,
+                IntegerBinaryOperation.SUB,
+                IntegerBinaryOperation.MUL,
+                IntegerBinaryOperation.SHIFT_LEFT,
+            ):
+                # Low logical result bits are independent of upper carrier
+                # bits. Preserve source semantics until instruction emission.
+                source_type = Scalar(("i8", "i16", "i32"))
             yield DirectDescriptorCase(
                 source_ops[semantics.operation],
                 descriptor,
@@ -1045,6 +1064,25 @@ def _view_cases():
 def _buffer_cases():
     # Source spelling is the only correspondence here: types and legal value
     # ranges come from the source op and wire fields respectively.
+    for predicate in BUFFER_COMPARE_ADDRESS_SELECTOR.values:
+        yield DescriptorRule(
+            source_op=buffer.buffer_compare_address,
+            guards=(Guard.enum_attr_equals("predicate", predicate.name),),
+            emit=(
+                EmitDescriptorOp(
+                    descriptor=_DESCRIPTORS[BUFFER_COMPARE_ADDRESS.opcode],
+                    operands={
+                        "left_r8": ValueRef.operand("lhs"),
+                        "left_offset_v8": ValueRef.operand("lhs_offset"),
+                        "right_r8": ValueRef.operand("rhs"),
+                        "right_offset_v8": ValueRef.operand("rhs_offset"),
+                    },
+                    results={"destination_v8": ValueRef.result("result")},
+                    immediates={"predicate_u8": predicate.value},
+                    form=DescriptorEmitForm.OP,
+                ),
+            ),
+        )
     byte_format = next(
         value.value for value in MEMORY_FORMAT_SELECTOR.values if value.name == "i8.x1"
     )
@@ -1192,7 +1230,51 @@ VM_CORE_CONTRACT_FRAGMENT = ContractFragment(
     + tuple(_buffer_cases())
     + (RecipeRule(source_op=global_load),)
     + tuple(_view_cases())
+    + tuple(
+        DescriptorRule(
+            source_op=source_op,
+            emit=(
+                EmitDescriptorOp(
+                    descriptor=_DESCRIPTORS[REF_NULL.opcode],
+                    form=DescriptorEmitForm.OP,
+                    results={"destination_r8": ValueRef.result("result")},
+                ),
+            ),
+        )
+        for source_op in (ref.ref_null, buffer.buffer_null)
+    )
+    + tuple(
+        DescriptorRule(
+            source_op=source_op,
+            emit=(
+                EmitDescriptorOp(
+                    descriptor=_DESCRIPTORS[REF_COMPARE_NULL.opcode],
+                    form=DescriptorEmitForm.OP,
+                    operands={"source_r8": ValueRef.operand(operand)},
+                    results={"destination_v8": ValueRef.result("result")},
+                ),
+            ),
+        )
+        for source_op, operand in (
+            (ref.ref_compare_null, "value"),
+            (buffer.buffer_compare_null, "buffer"),
+        )
+    )
     + (
+        DescriptorRule(
+            source_op=ref.ref_compare_eq,
+            emit=(
+                EmitDescriptorOp(
+                    descriptor=_DESCRIPTORS[REF_COMPARE_EQ.opcode],
+                    form=DescriptorEmitForm.OP,
+                    operands={
+                        "left_r8": ValueRef.operand("left"),
+                        "right_r8": ValueRef.operand("right"),
+                    },
+                    results={"destination_v8": ValueRef.result("result")},
+                ),
+            ),
+        ),
         DescriptorRule(
             source_op=scf_select,
             guards=(

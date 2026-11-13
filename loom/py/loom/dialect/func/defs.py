@@ -97,7 +97,11 @@ CallingConv = EnumDef(
 EffectContract = EnumDef(
     "EffectContract",
     [
-        EnumCase("pure", 1, doc="No memory effects, deterministic."),
+        EnumCase(
+            "pure",
+            1,
+            doc="No memory or observable payload effects, with deterministic computation. Managed allocations and handle bookkeeping may be eliminated with an unused lifetime; live owners keep their independent identities and cleanup.",
+        ),
         EnumCase(
             "readonly",
             2,

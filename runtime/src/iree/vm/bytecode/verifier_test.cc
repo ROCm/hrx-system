@@ -165,12 +165,12 @@ TEST_F(CoreExecutionModuleVerificationTest, MapsAndVerifies) {
   EXPECT_EQ(plan.layout.imports.entry_count, 2u);
   EXPECT_EQ(plan.layout.constants.count, 0u);
   EXPECT_EQ(plan.layout.ref_types.entry_count, 1u);
-  EXPECT_EQ(plan.layout.callable_types.count, 14u);
-  EXPECT_EQ(plan.layout.exports.count, 26u);
-  EXPECT_EQ(plan.layout.functions.count, 33u);
+  EXPECT_EQ(plan.layout.callable_types.count, 15u);
+  EXPECT_EQ(plan.layout.exports.count, 27u);
+  EXPECT_EQ(plan.layout.functions.count, 34u);
   EXPECT_EQ(plan.layout.rodata.count, 1u);
-  EXPECT_EQ(plan.callable_fields.value_count, 46u);
-  EXPECT_EQ(plan.callable_fields.ref_count, 51u);
+  EXPECT_EQ(plan.callable_fields.value_count, 50u);
+  EXPECT_EQ(plan.callable_fields.ref_count, 53u);
   EXPECT_EQ(plan.callable_fields.function_count, 0u);
   EXPECT_EQ(plan.rodata_storage.copy_length, 0u);
   ASSERT_NE(plan.layout.globals.header, nullptr);
@@ -182,7 +182,7 @@ TEST_F(CoreExecutionModuleVerificationTest, MapsAndVerifies) {
   EXPECT_EQ(plan.layout.globals.header->immutable_function_count_u32, 1u);
   EXPECT_TRUE(iree_string_view_equal(
       iree_vm_bytecode_string_at(&plan.layout.strings,
-                                 plan.layout.exports.rows[16].name_string_u16),
+                                 plan.layout.exports.rows[17].name_string_u16),
       IREE_SV("run")));
 }
 
@@ -290,6 +290,17 @@ TEST_F(ModuleVerificationTest, RejectsMissingEntryBlock) {
   ExpectInstructionsRejected(std::move(bytes));
 }
 
+TEST_F(ModuleVerificationTest, BorrowCannotReplaceItsOwnAnchor) {
+  std::vector<uint8_t> bytes = CopyImage();
+  const uint8_t* original = FindInstruction(IREE_VM_BYTECODE_OPCODE_REF_BORROW);
+  ASSERT_NE(original, nullptr);
+  auto* borrow = MutableRecord(
+      &bytes, contents_,
+      reinterpret_cast<const iree_vm_bytecode_ref_borrow_t*>(original));
+  borrow->destination_r8 = borrow->source_r8;
+  ExpectInstructionsRejected(std::move(bytes));
+}
+
 TEST_F(ModuleVerificationTest, RejectsFunctionFallthrough) {
   std::vector<uint8_t> bytes = CopyImage();
   const iree_vm_bytecode_v0_function_row_t* function =
@@ -389,6 +400,30 @@ TEST_F(ModuleVerificationTest, RejectsNonzeroBinaryMathPadding) {
     math->zero_padding_u8[index] = 1;
     ExpectInstructionsRejected(std::move(bytes));
   }
+}
+
+TEST_F(ModuleVerificationTest, RejectsBufferAddressOrderingAndPadding) {
+  const uint8_t* original =
+      FindInstruction(IREE_VM_BYTECODE_OPCODE_BUFFER_COMPARE_ADDRESS);
+  ASSERT_NE(original, nullptr);
+  // Equality is the complete selector domain; ordering is not a way to expose
+  // a relationship between unrelated host addresses.
+  for (uint8_t predicate : {uint8_t{2}, uint8_t{255}}) {
+    std::vector<uint8_t> bytes = CopyImage();
+    auto* compare = MutableRecord(
+        &bytes, contents_,
+        reinterpret_cast<const iree_vm_bytecode_buffer_compare_address_t*>(
+            original));
+    compare->predicate_u8 = predicate;
+    ExpectInstructionsRejected(std::move(bytes));
+  }
+  std::vector<uint8_t> bytes = CopyImage();
+  auto* compare = MutableRecord(
+      &bytes, contents_,
+      reinterpret_cast<const iree_vm_bytecode_buffer_compare_address_t*>(
+          original));
+  compare->zero_padding_u8 = 1;
+  ExpectInstructionsRejected(std::move(bytes));
 }
 
 TEST_F(ModuleVerificationTest, RejectsInvalidRegister) {
@@ -523,6 +558,22 @@ TEST_F(ModuleVerificationTest, RejectsEnvelopeAndDirectoryCorruption) {
     SCOPED_TRACE("truncated image data");
     std::vector<uint8_t> bytes = CopyImage();
     bytes.pop_back();
+    ExpectRejected(bytes);
+  }
+}
+
+TEST_F(ModuleVerificationTest, ChecksPayloadOrdinalForBothReferenceModes) {
+  for (const uint16_t kind : {IREE_VM_BYTECODE_SIGNATURE_KIND_REF,
+                              IREE_VM_BYTECODE_SIGNATURE_KIND_PTR}) {
+    std::vector<uint8_t> bytes = CopyImage();
+    auto* descriptor = MutableRecord(&bytes, contents_,
+                                     plan_.layout.signatures.descriptors + 1);
+    ASSERT_EQ(descriptor->kind_u16, IREE_VM_BYTECODE_SIGNATURE_KIND_REF);
+    descriptor->kind_u16 = kind;
+    iree_vm_bytecode_module_plan_t output = {};
+    IREE_ASSERT_OK(iree_vm_bytecode_verify_module_structure(
+        iree_make_const_byte_span(bytes.data(), bytes.size()), &output));
+    descriptor->type_ordinal_u16 = plan_.layout.ref_types.entry_count;
     ExpectRejected(bytes);
   }
 }

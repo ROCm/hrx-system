@@ -17,8 +17,12 @@ from loom.format.cxx.context import (
     _strip_outer_parentheses,
 )
 from loom.format.cxx.errors import CxxRenderError
-from loom.format.cxx.types import KERNEL_COORDINATE_CPP_TYPE
+from loom.format.cxx.types import KERNEL_COORDINATE_CPP_TYPE, uses_native_vector
 from loom.ir import (
+    I1,
+    I32,
+    BufferType,
+    DynamicEncoding,
     EncodingInstance,
     Operation,
     Predicate,
@@ -86,6 +90,7 @@ _SCALAR_TRIGONOMETRY_OPERATIONS = frozenset(
 )
 _SCALAR_NAMED_FUNCTION_OPERATIONS = frozenset(
     {
+        "scalar.absi",
         "scalar.absf",
         "scalar.acosf",
         "scalar.acoshf",
@@ -502,14 +507,108 @@ class CxxExpressionRenderer(CxxRenderContext):
                 return self._address_cast_target(result)
         return None
 
+    def _predicate_conversion(
+        self, operation: Operation, source_expression: str, result_type: str
+    ) -> str | None:
+        """Preserves one-bit arithmetic rather than C++ Boolean conversion."""
+
+        source = self.module.values[operation.operands[0]].type
+        result = self.module.values[operation.results[0]].type
+        source_element = (
+            source.element_type if isinstance(source, ShapedType) else source
+        )
+        result_element = (
+            result.element_type if isinstance(result, ShapedType) else result
+        )
+        if source_element != I1 and result_element != I1:
+            return None
+
+        member = operation.name.split(".")[-1]
+
+        def constant(
+            value_type: ScalarType | ShapedType, signed: bool, value: int
+        ) -> str:
+            element = (
+                value_type.element_type
+                if isinstance(value_type, ShapedType)
+                else value_type
+            )
+            scalar = f"static_cast<{self.types.scalar(element, signed)}>({value})"
+            if isinstance(value_type, ShapedType):
+                vector = self.types.vector(value_type, signed)
+                if uses_native_vector(value_type):
+                    return f"({vector}{{}} + {scalar})"
+                return f"loom::vector::splat<{vector}>({{}}, {scalar})"
+            return scalar
+
+        if source_element == I1:
+            # Signed i1 has values {0, -1}; C++ bool has values {0, 1}.
+            signed = member in {"extsi", "sitofp"}
+            true_value = constant(result, signed, -1 if signed else 1)
+            false_value = constant(result, signed, 0)
+            if isinstance(source, ShapedType):
+                return (
+                    f"loom::vector::select({source_expression}, "
+                    f"{true_value}, {false_value})"
+                )
+            return f"({source_expression} ? {true_value} : {false_value})"
+
+        # Integer truncation retains bit zero, not the source's nonzero test.
+        # Float-to-i1 first rounds toward zero in a wider integer carrier; all
+        # inputs representable by signed/unsigned i1 fit that carrier exactly.
+        signed = (
+            member == "fptosi"
+            if member != "trunci"
+            else (operation.operands[0] in self.signed_values)
+        )
+        carrier = source
+        if member in {"fptosi", "fptoui"}:
+            carrier = (
+                ShapedType(source.type_kind, I32, source.dims)
+                if isinstance(source, ShapedType)
+                else I32
+            )
+            carrier_type = (
+                self.types.vector(carrier, signed)
+                if isinstance(carrier, ShapedType)
+                else self.types.scalar(carrier, signed)
+            )
+            self.uses_numeric_conversion = True
+            source_expression = f"loom::convert<{carrier_type}>({source_expression})"
+        masked = f"({source_expression} & {constant(carrier, signed, 1)})"
+        zero = constant(carrier, signed, 0)
+        if isinstance(result, ShapedType):
+            return f"loom::vector::cmpi::ne<{result_type}>({masked}, {zero})"
+        return f"({masked} != {zero})"
+
     def _numeric_conversion(self, operation: Operation) -> tuple[str, ...]:
         """Projects one exact scalar or native-vector numeric conversion."""
 
-        self.uses_numeric_conversion = True
         member = operation.name.split(".")[-1]
         source = operation.operands[0]
         result = operation.results[0]
         source_expression = self.expression(source)
+        result_signedness = {
+            "extsi": True,
+            "fptosi": True,
+            "extui": False,
+            "fptoui": False,
+        }.get(member)
+        result_type = self.cpp_type(result, signed=result_signedness)
+        predicate = self._predicate_conversion(
+            operation, source_expression, result_type
+        )
+        if predicate is not None:
+            self._declare(
+                result,
+                predicate,
+                declaration_type=result_type,
+                expression_type=result_type,
+                inlineable=True,
+            )
+            return ()
+
+        self.uses_numeric_conversion = True
         source_signedness = {
             "extsi": True,
             "sitofp": True,
@@ -521,13 +620,6 @@ class CxxExpressionRenderer(CxxRenderContext):
             if self.expression_type(source) != source_type:
                 source_expression = f"loom::convert<{source_type}>({source_expression})"
 
-        result_signedness = {
-            "extsi": True,
-            "fptosi": True,
-            "extui": False,
-            "fptoui": False,
-        }.get(member)
-        result_type = self.cpp_type(result, signed=result_signedness)
         subnormal = operation.attributes.get("subnormal")
         policy = ""
         if subnormal is not None:
@@ -558,7 +650,7 @@ class CxxExpressionRenderer(CxxRenderContext):
             if (
                 (value == 0 or value == 0.0)
                 and isinstance(value_type, ShapedType)
-                and value_type.rank == 1
+                and uses_native_vector(value_type)
             ):
                 return f"{self.cpp_type(value_id)}{{}}"
         if definition is not None and definition.name in {
@@ -728,6 +820,7 @@ class CxxExpressionRenderer(CxxRenderContext):
                 conditions.append(condition)
         if conditions:
             condition = " && ".join(conditions)
+            self.uses_predicate_functions = True
             self.writer.line(f"loom::assume({_strip_outer_parentheses(condition)});")
         for source, result in zip(resolved.value_ids("values"), results, strict=True):
             self.expressions[result] = self.expression(source)
@@ -1064,6 +1157,20 @@ class CxxExpressionRenderer(CxxRenderContext):
                 raise CxxRenderError(
                     operation, f"comparison predicate {predicate!r} is unsupported"
                 )
+            # Region-carried aliases and mixed signed/unsigned uses can have a
+            # different C++ type from this operation's integer interpretation.
+            signed = predicate.startswith("s")
+            arguments = []
+            for operand in operation.operands:
+                argument = self.expression(operand)
+                interpretation = self.cpp_type(operand, signed=signed)
+                if self.expression_type(operand) != interpretation:
+                    argument = f"static_cast<{interpretation}>({argument})"
+                arguments.append(argument)
+            if signed and repr(self.module.values[operation.operands[0]].type) == "i1":
+                # Signed i1 is {0, -1}; bool is {0, 1}, reversing their order.
+                token = {"<": ">", "<=": ">=", ">": "<", ">=": "<="}[token]
+            expression = f"({arguments[0]} {token} {arguments[1]})"
             statement_attribute = None
         elif name == "scalar.cmpf":
             predicate = operation.attributes.get("predicate")
@@ -1085,11 +1192,12 @@ class CxxExpressionRenderer(CxxRenderContext):
                     "native C++ binary operator",
                 )
             statement_attribute = self._fastmath_contract(operation)
+            expression = self._binary_expression(operation, token)
         else:
             return None
         self._declare(
             operation.results[0],
-            self._binary_expression(operation, token),
+            expression,
             inlineable=True,
             statement_attribute=statement_attribute,
         )
@@ -1153,27 +1261,38 @@ class CxxExpressionRenderer(CxxRenderContext):
 
     def _render_vector_slice(self, operation: Operation) -> tuple[str, ...]:
         resolved = self._resolved(operation)
-        offsets = self._mixed_indices(
+        offsets = self._mixed_index_record(
             resolved,
             dynamic_field="offsets",
             static_field="static_offsets",
         )
-        if len(offsets) != 1:
-            raise CxxRenderError(
-                operation,
-                "native C++ vector slicing requires one lane offset",
-            )
-        static_offsets = resolved.attr("static_offsets")
-        offset = offsets[0]
-        if static_offsets and static_offsets[0] != -(2**63):
-            offset = f"loom::type::index{{{offset}}}"
         result = resolved.value_id("result")
         source = self.expression(resolved.value_id("source"))
+        value_type = self.module.values[result].type
+        dimensions = (
+            f", {self.dynamic_dimensions(value_type)}"
+            if not value_type.is_all_static
+            else ""
+        )
         self._declare(
             result,
-            f"loom::vector::slice<{self.cpp_type(result)}>({source}, {offset})",
+            f"loom::vector::slice<{self.cpp_type(result)}>"
+            f"({source}, {offsets}{dimensions})",
         )
         return ("static_offsets",)
+
+    def _native_vector_lane(
+        self, operation: Operation, resolved: Any, indices: list[str]
+    ) -> str:
+        if len(indices) != 1:
+            raise CxxRenderError(
+                operation, "native vector access requires one lane index"
+            )
+        # Native vector subscripting requires a C++ integer. Loom's index
+        # wrapper exposes its full signed coordinate through this conversion.
+        if resolved.value_ids("indices"):
+            return f"static_cast<long long>({indices[0]})"
+        return indices[0]
 
     def _render_vector_insert(self, operation: Operation) -> tuple[str, ...]:
         resolved = self._resolved(operation)
@@ -1182,11 +1301,7 @@ class CxxExpressionRenderer(CxxRenderContext):
             dynamic_field="indices",
             static_field="static_indices",
         )
-        if len(indices) != 1:
-            raise CxxRenderError(
-                operation,
-                "native vector insertion requires one lane index",
-            )
+        lane = self._native_vector_lane(operation, resolved, indices)
 
         result = resolved.value_id("result")
         source = self.expression(resolved.value_id("dest"))
@@ -1207,7 +1322,7 @@ class CxxExpressionRenderer(CxxRenderContext):
                 f"auto {mutation_target} = {_strip_outer_parentheses(source)};"
             )
         self.writer.line(
-            f"{mutation_target}[{indices[0]}] = "
+            f"{mutation_target}[{lane}] = "
             f"{self.expression(resolved.value_id('value'))};"
         )
         if assignment_target_id is not None:
@@ -1325,8 +1440,8 @@ class CxxExpressionRenderer(CxxRenderContext):
             value = operation.attributes["value"]
             type_name = self.cpp_type(result)
             value_type = self.module.values[result].type
-            if isinstance(value_type, ShapedType) and (
-                value_type.rank > 1 or repr(value_type.element_type) == "i1"
+            if isinstance(value_type, ShapedType) and not uses_native_vector(
+                value_type
             ):
                 element = self.types.scalar(
                     value_type.element_type, result in self.signed_values
@@ -1353,9 +1468,7 @@ class CxxExpressionRenderer(CxxRenderContext):
             result = operation.results[0]
             value_type = self.module.values[result].type
             if not (
-                isinstance(value_type, ShapedType)
-                and value_type.rank == 1
-                and repr(value_type.element_type) != "i1"
+                isinstance(value_type, ShapedType) and uses_native_vector(value_type)
             ):
                 raise CxxRenderError(
                     operation,
@@ -1382,7 +1495,9 @@ class CxxExpressionRenderer(CxxRenderContext):
             )
             source_id = resolved.value_id("source")
             source_type = self.module.values[source_id].type
-            if isinstance(source_type, ShapedType) and source_type.rank > 1:
+            if isinstance(source_type, ShapedType) and not uses_native_vector(
+                source_type
+            ):
                 static_indices = resolved.attr("static_indices")
                 source = self.expression(source_id)
                 result = operation.results[0]
@@ -1409,13 +1524,10 @@ class CxxExpressionRenderer(CxxRenderContext):
                     )
                 self._declare(result, expression, inlineable=True)
                 return ("static_indices",)
-            if len(indices) != 1:
-                raise CxxRenderError(
-                    operation, "native vector extraction requires one lane index"
-                )
+            lane = self._native_vector_lane(operation, resolved, indices)
             self._declare(
                 operation.results[0],
-                f"{self.expression(operation.operands[0])}[{indices[0]}]",
+                f"{self.expression(operation.operands[0])}[{lane}]",
                 inlineable=True,
             )
             return ("static_indices",)
@@ -1425,11 +1537,12 @@ class CxxExpressionRenderer(CxxRenderContext):
             result = operation.results[0]
             value_type = self.module.values[result].type
             expression = self.expression(operation.operands[0])
-            if isinstance(value_type, ShapedType) and (
-                value_type.rank > 1 or repr(value_type.element_type) == "i1"
+            if isinstance(value_type, ShapedType) and not uses_native_vector(
+                value_type
             ):
                 expression = (
-                    f"loom::vector::splat<{self.cpp_type(result)}>({{}}, {expression})"
+                    f"loom::vector::splat<{self.cpp_type(result)}>"
+                    f"({self.dynamic_dimensions(value_type)}, {expression})"
                 )
             self._declare(result, expression)
             return ()
@@ -1441,7 +1554,7 @@ class CxxExpressionRenderer(CxxRenderContext):
             result_type = self.module.values[result].type
             structured = any(
                 isinstance(value_type, ShapedType)
-                and (value_type.rank > 1 or repr(value_type.element_type) == "i1")
+                and not uses_native_vector(value_type)
                 for value_type in (source_type, result_type)
             )
             self._declare(
@@ -1529,6 +1642,26 @@ class CxxExpressionRenderer(CxxRenderContext):
 
     def _render_simple(self, operation: Operation) -> tuple[str, ...] | None:
         name = operation.name
+        if name in {"vector.refine", "view.refine", "tile.refine"}:
+            result = operation.results[0]
+            source = operation.operands[0]
+            value_type = self.module.values[result].type
+            arguments = [self.expression(source)]
+            if not value_type.is_all_static:
+                arguments.append(self.dynamic_dimensions(value_type))
+            if (
+                isinstance(value_type.encoding, DynamicEncoding)
+                and value_type.encoding != self.module.values[source].type.encoding
+            ):
+                arguments.append(
+                    self.dynamic_view_encoding_expression(operation, value_type)
+                )
+            self._declare(
+                result,
+                f"loom::{name.replace('.', '::')}<{self.cpp_type(result)}>"
+                f"({', '.join(arguments)})",
+            )
+            return ()
         if name in {"scalar.constant", "index.constant"}:
             result = operation.results[0]
             self.expressions[result] = self._literal(
@@ -1537,15 +1670,27 @@ class CxxExpressionRenderer(CxxRenderContext):
             return ("value",)
         if name == "scf.select":
             resolved = self._resolved(operation)
+            result = resolved.value_id("result")
             condition = _strip_outer_parentheses(
                 self.expression(resolved.value_id("condition"))
             )
-            expression = (
-                f"({condition} ? "
-                f"{self.expression(resolved.value_id('true_value'))} : "
-                f"{self.expression(resolved.value_id('false_value'))})"
+            if isinstance(self.module.values[result].type, BufferType):
+                element = self._buffer_element(result)
+                values = [
+                    self._buffer_argument(resolved.value_id(field), element)
+                    for field in ("true_value", "false_value")
+                ]
+                expression_type = f"loom::type::buffer<{element}>"
+            else:
+                values = [
+                    self.expression(resolved.value_id(field))
+                    for field in ("true_value", "false_value")
+                ]
+                expression_type = None
+            expression = f"({condition} ? {values[0]} : {values[1]})"
+            self._declare(
+                result, expression, expression_type=expression_type, inlineable=True
             )
-            self._declare(resolved.value_id("result"), expression, inlineable=True)
             return ()
         if name in {"scalar.assume", "index.assume"}:
             self._render_assume(operation)

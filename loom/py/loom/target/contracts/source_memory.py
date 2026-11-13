@@ -67,7 +67,12 @@ class SourceMemoryAddressLayout(Enum):
 
 @unique
 class SourceMemoryAddressBase(Enum):
-    """Source-memory value used as the base of a complete target address."""
+    """Source-memory value used as the base of a complete target address.
+
+    ROOT uses the base paired with canonical byte coordinates, including a
+    materialized view carrier. BASE_VIEW uses the retained view resource.
+    Neither selection changes the plan's storage identity for alias analysis.
+    """
 
     ROOT = "root"
     BASE_VIEW = "base_view"

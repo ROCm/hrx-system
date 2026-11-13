@@ -1,0 +1,242 @@
+// RUN: pass combine,cse
+// A mixed constant table keeps its dynamic lane and selected result lane.
+typedef unsigned U4 __attribute__((vector_size(16)));
+typedef unsigned U16 __attribute__((vector_size(64)));
+[[loom::op("vector.table.lookup")]] U4 lookup(U16 table, U4 indices);
+
+unsigned lookup_lane(unsigned input, unsigned index, unsigned lane) {
+  U16 table = {input, 1u, 0xffffffffu, 0x80000000u, 4u,  5u,  6u,  7u,
+               8u,    9u, 10u,         11u,         12u, 13u, 14u, 15u};
+  U4 indices = {index, 15u - index, 0u, 15u};
+  U4 values = lookup(table, indices);
+  return values[lane];
+}
+
+// ----
+func.def public @lookup_lane(%input: i32, %index: i32, %lane: i32) -> (i32) {
+  %4 = vector.constanti [0, 1, -1, -2147483648, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15] : vector<16xi32>
+  %table = vector.insert %input into %4[0] : i32, vector<16xi32>
+  %6 = scalar.constant 15 : i32
+  %7 = scalar.subi %6, %index : i32
+  %8 = scalar.constant 0 : i32
+  %indices = vector.from_elements %index, %7, %8, %6 : vector<4xi32>
+  %values = vector.table.lookup %table[%indices] : vector<16xi32>, vector<4xi32> -> vector<4xi32>
+  %12 = index.cast %lane : i32 to index
+  %13 = vector.extract %values[%12] : vector<4xi32> -> i32
+  func.return %13 : i32
+}
+
+// ====
+// RUN: pass combine,cse
+// Byte narrowing, signed operands, and accumulator extremes compose with extraction.
+typedef int I4 __attribute__((vector_size(16)));
+typedef signed char S16 __attribute__((vector_size(16)));
+typedef unsigned char B16 __attribute__((vector_size(16)));
+[[loom::op("vector.dot4i", "u8s8")]] I4 dot(B16 lhs, S16 rhs, I4 acc);
+
+int dot_lane(unsigned input, int accumulator, unsigned lane) {
+  B16 lhs = {(unsigned char)input,
+             255u,
+             128u,
+             127u,
+             0u,
+             1u,
+             255u,
+             128u,
+             23u,
+             45u,
+             67u,
+             89u,
+             255u,
+             255u,
+             255u,
+             255u};
+  S16 rhs = {-128, 127, -1, 1,  127, -128, 1,   -1,
+             -3,   5,   -7, 11, 127, 127,  127, 127};
+  I4 acc = {accumulator, -1, 2147483647, (-2147483647 - 1)};
+  I4 values = dot(lhs, rhs, acc);
+  return values[lane];
+}
+
+// ----
+func.def public @dot_lane(%input: i32, %accumulator: i32, %lane: i32) -> (i32) {
+  %4 = vector.constanti [0, -1, -128, 127, 0, 1, -1, -128, 23, 45, 67, 89, -1, -1, -1, -1] : vector<16xi8>
+  %5 = scalar.trunci %input : i32 to i8
+  %lhs = vector.insert %5 into %4[0] : i8, vector<16xi8>
+  %rhs = vector.constanti [-128, 127, -1, 1, 127, -128, 1, -1, -3, 5, -7, 11, 127, 127, 127, 127] : vector<16xi8>
+  %8 = vector.constanti [0, -1, 2147483647, -2147483648] : vector<4xi32>
+  %acc = vector.insert %accumulator into %8[0] : i32, vector<4xi32>
+  %values = vector.dot4i<u8s8> %lhs, %rhs, %acc : vector<16xi8>, vector<16xi8>, vector<4xi32>
+  %11 = index.cast %lane : i32 to index
+  %12 = vector.extract %values[%11] : vector<4xi32> -> i32
+  func.return %12 : i32
+}
+
+// ====
+// RUN: pass combine,cse
+// Register lookup preserves a fixed table origin and per-element index/output addresses.
+typedef unsigned U4 __attribute__((vector_size(16)));
+typedef unsigned U16 __attribute__((vector_size(64)));
+[[loom::op("vector.table.lookup")]] U4 lookup(U16 table, U4 indices);
+
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void register_lookup(const U16* table, const U4* indices, U4* output,
+                     unsigned count) {
+  for (unsigned i = 0; i < count; ++i) {
+    output[i] = lookup(table[0], indices[i]);
+  }
+}
+
+// ----
+kernel.def @register_lookup() {
+  %4 = index.constant 1 : index
+  kernel.launch.config workgroups(%4, %4, %4) workgroup_size(%4, %4, %4) : index
+} launch(%table: buffer, %indices: buffer, %output: buffer, %count: i32) {
+  %50 = index.constant 0 : offset
+  %15 = index.cast %count : i32 to offset
+  %16 = index.constant 1 : offset
+  scf.for %i = [%50 to %15 step %16] {
+    %18 = index.cast %i : offset to i32
+    %27 = buffer.view %table[%50] : buffer -> view<16xi32>
+    %28 = vector.load<root_in_bounds> %27[0] : view<16xi32> -> vector<16xi32>
+    %29 = scalar.extui %18 : i32 to i64
+    %53 = scalar.constant 4 : i64
+    %54 = scalar.shli %29, %53 : i64
+    %34 = scalar.assume %54 [range(%54, 0, 9223372036854775807)] : i64
+    %35 = index.cast %34 : i64 to offset
+    %36 = buffer.view %indices[%35] : buffer -> view<4xi32>
+    %37 = vector.load<root_in_bounds> %36[0] : view<4xi32> -> vector<4xi32>
+    %38 = vector.table.lookup %28[%37] : vector<16xi32>, vector<4xi32> -> vector<4xi32>
+    %46 = buffer.view %output[%35] : buffer -> view<4xi32>
+    vector.store<root_in_bounds> %38, %46[0] : vector<4xi32>, view<4xi32>
+  }
+  kernel.return
+}
+
+// ====
+// RUN: pass combine,cse
+// Float lookup retains floating payloads through the same dynamic loop.
+typedef unsigned U4 __attribute__((vector_size(16)));
+typedef float F4 __attribute__((vector_size(16)));
+typedef float F16 __attribute__((vector_size(64)));
+
+[[loom::op("vector.table.lookup")]] F4 lookup(F16 table, U4 indices);
+
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void register_lookup_float(const F16* table, const U4* indices, F4* output,
+                           unsigned count) {
+  for (unsigned i = 0; i < count; ++i) {
+    output[i] = lookup(table[0], indices[i]);
+  }
+}
+
+// ----
+kernel.def @register_lookup_float() {
+  %4 = index.constant 1 : index
+  kernel.launch.config workgroups(%4, %4, %4) workgroup_size(%4, %4, %4) : index
+} launch(%table: buffer, %indices: buffer, %output: buffer, %count: i32) {
+  %50 = index.constant 0 : offset
+  %15 = index.cast %count : i32 to offset
+  %16 = index.constant 1 : offset
+  scf.for %i = [%50 to %15 step %16] {
+    %18 = index.cast %i : offset to i32
+    %27 = buffer.view %table[%50] : buffer -> view<16xf32>
+    %28 = vector.load<root_in_bounds> %27[0] : view<16xf32> -> vector<16xf32>
+    %29 = scalar.extui %18 : i32 to i64
+    %53 = scalar.constant 4 : i64
+    %54 = scalar.shli %29, %53 : i64
+    %34 = scalar.assume %54 [range(%54, 0, 9223372036854775807)] : i64
+    %35 = index.cast %34 : i64 to offset
+    %36 = buffer.view %indices[%35] : buffer -> view<4xi32>
+    %37 = vector.load<root_in_bounds> %36[0] : view<4xi32> -> vector<4xi32>
+    %38 = vector.table.lookup %28[%37] : vector<16xf32>, vector<4xi32> -> vector<4xf32>
+    %46 = buffer.view %output[%35] : buffer -> view<4xf32>
+    vector.store<root_in_bounds> %38, %46[0] : vector<4xf32>, view<4xf32>
+  }
+  kernel.return
+}
+
+// ====
+// RUN: pass combine,cse
+// All four signedness variants share the loaded accumulator and distinct destinations.
+typedef int I4 __attribute__((vector_size(16)));
+typedef signed char S16 __attribute__((vector_size(16)));
+typedef unsigned char B16 __attribute__((vector_size(16)));
+[[loom::op("vector.dot4i", "s8s8")]] I4 dot(S16 lhs, S16 rhs, I4 acc);
+[[loom::op("vector.dot4i", "u8s8")]] I4 dot(B16 lhs, S16 rhs, I4 acc);
+[[loom::op("vector.dot4i", "s8u8")]] I4 dot(S16 lhs, B16 rhs, I4 acc);
+[[loom::op("vector.dot4i", "u8u8")]] I4 dot(B16 lhs, B16 rhs, I4 acc);
+
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void mixed_dot(const S16* lhs, const S16* rhs, const I4* acc, I4* output,
+               unsigned count) {
+  for (unsigned i = 0; i < count; ++i) {
+    S16 a = lhs[i];
+    S16 b = rhs[i];
+    I4 initial = acc[i];
+    output[4u * i] = dot(a, b, initial);
+    output[4u * i + 1u] = dot((B16)a, b, initial);
+    output[4u * i + 2u] = dot(a, (B16)b, initial);
+    output[4u * i + 3u] = dot((B16)a, (B16)b, initial);
+  }
+}
+
+// ----
+kernel.def @mixed_dot() {
+  %5 = index.constant 1 : index
+  kernel.launch.config workgroups(%5, %5, %5) workgroup_size(%5, %5, %5) : index
+} launch(%lhs: buffer, %rhs: buffer, %acc: buffer, %output: buffer, %count: i32) {
+  %105 = index.constant 0 : offset
+  %17 = index.cast %count : i32 to offset
+  %18 = index.constant 1 : offset
+  scf.for %i = [%105 to %17 step %18] {
+    %20 = index.cast %i : offset to i32
+    %21 = scalar.extui %20 : i32 to i64
+    %126 = scalar.constant 4 : i64
+    %127 = scalar.shli %21, %126 : i64
+    %26 = scalar.assume %127 [range(%127, 0, 9223372036854775807)] : i64
+    %27 = index.cast %26 : i64 to offset
+    %28 = buffer.view %lhs[%27] : buffer -> view<16xi8>
+    %a = vector.load<root_in_bounds> %28[0] : view<16xi8> -> vector<16xi8>
+    %37 = buffer.view %rhs[%27] : buffer -> view<16xi8>
+    %b = vector.load<root_in_bounds> %37[0] : view<16xi8> -> vector<16xi8>
+    %46 = buffer.view %acc[%27] : buffer -> view<4xi32>
+    %initial = vector.load<root_in_bounds> %46[0] : view<4xi32> -> vector<4xi32>
+    %48 = vector.dot4i<s8s8> %a, %b, %initial : vector<16xi8>, vector<16xi8>, vector<4xi32>
+    %120 = scalar.constant 2 : i32
+    %121 = scalar.shli %20, %120 : i32
+    %51 = scalar.extui %121 : i32 to i64
+    %119 = scalar.shli %51, %126 : i64
+    %56 = scalar.assume %119 [range(%119, 0, 9223372036854775807)] : i64
+    %57 = index.cast %56 : i64 to offset
+    %58 = buffer.view %output[%57] : buffer -> view<4xi32>
+    vector.store<root_in_bounds> %48, %58[0] : vector<4xi32>, view<4xi32>
+    %59 = vector.dot4i<u8s8> %a, %b, %initial : vector<16xi8>, vector<16xi8>, vector<4xi32>
+    %62 = scalar.constant 1 : i32
+    %63 = scalar.addi %121, %62 : i32
+    %64 = scalar.extui %63 : i32 to i64
+    %115 = scalar.shli %64, %126 : i64
+    %69 = scalar.assume %115 [range(%115, 0, 9223372036854775807)] : i64
+    %70 = index.cast %69 : i64 to offset
+    %71 = buffer.view %output[%70] : buffer -> view<4xi32>
+    vector.store<root_in_bounds> %59, %71[0] : vector<4xi32>, view<4xi32>
+    %72 = vector.dot4i<s8u8> %a, %b, %initial : vector<16xi8>, vector<16xi8>, vector<4xi32>
+    %76 = scalar.addi %121, %120 : i32
+    %77 = scalar.extui %76 : i32 to i64
+    %111 = scalar.shli %77, %126 : i64
+    %82 = scalar.assume %111 [range(%111, 0, 9223372036854775807)] : i64
+    %83 = index.cast %82 : i64 to offset
+    %84 = buffer.view %output[%83] : buffer -> view<4xi32>
+    vector.store<root_in_bounds> %72, %84[0] : vector<4xi32>, view<4xi32>
+    %85 = vector.dot4i<u8u8> %a, %b, %initial : vector<16xi8>, vector<16xi8>, vector<4xi32>
+    %88 = scalar.constant 3 : i32
+    %89 = scalar.addi %121, %88 : i32
+    %90 = scalar.extui %89 : i32 to i64
+    %107 = scalar.shli %90, %126 : i64
+    %95 = scalar.assume %107 [range(%107, 0, 9223372036854775807)] : i64
+    %96 = index.cast %95 : i64 to offset
+    %97 = buffer.view %output[%96] : buffer -> view<4xi32>
+    vector.store<root_in_bounds> %85, %97[0] : vector<4xi32>, view<4xi32>
+  }
+  kernel.return
+}

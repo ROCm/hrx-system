@@ -205,6 +205,8 @@ TEST_F(SdmaQueuedMappingTest, PendingTransferThenReplacementAndDetach) {
             AMDF_STATUS_OK);
   ASSERT_NO_FATAL_FAILURE(Submit(0, lengths[0]));
   for (uint32_t generation = 1; generation <= kGenerationCount; ++generation) {
+    update.previous_memory = backing->memory;
+    update.previous_source_byte_offset = update.source_byte_offset;
     update.source_byte_offset = (generation % 2) * granularity;
     ASSERT_EQ(api_->kernel_queue_update_memory(queue_, reservation_, 0, 1,
                                                &update, &point_),
@@ -225,6 +227,8 @@ TEST_F(SdmaQueuedMappingTest, PendingTransferThenReplacementAndDetach) {
   const amdf_memory_mapping_update_t detach = {
       .target_byte_offset = offset,
       .byte_length = granularity,
+      .previous_memory = backing->memory,
+      .previous_source_byte_offset = (kGenerationCount % 2) * granularity,
   };
   ASSERT_EQ(api_->kernel_queue_update_memory(queue_, reservation_, 0, 1,
                                              &detach, &point_),

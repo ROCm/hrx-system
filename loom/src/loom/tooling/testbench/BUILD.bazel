@@ -45,6 +45,7 @@ loom_cc_library(
         ":operation_plan",
         "//loom/src/loom/ir:builders",
         "//loom/src/loom/ops:builders",
+        "//loom/src/loom/ops/command:composition",
         "//loom/src/loom/ops/kernel:op_defs",
         "//loom/src/loom/tooling/testbench/scenario:plan",
         "//runtime/src/iree/base",

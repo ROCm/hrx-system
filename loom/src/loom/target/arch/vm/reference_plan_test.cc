@@ -13,6 +13,8 @@
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/ir/context.h"
+#include "loom/ops/type/ops.h"
+#include "loom/ops/type_builders.h"
 #include "loom/ops/type_registry.h"
 
 namespace {
@@ -21,6 +23,10 @@ class VMReferencePlanTest : public ::testing::Test {
  protected:
   void SetUp() override {
     loom_context_initialize(iree_allocator_system(), &context_);
+    iree_host_size_t count = 0;
+    const auto* vtables = loom_type_dialect_vtables(&count);
+    IREE_ASSERT_OK(loom_context_register_dialect(&context_, LOOM_DIALECT_TYPE,
+                                                 vtables, (uint16_t)count));
     iree_arena_block_pool_initialize(32 * 1024, {this, Allocate}, &pool_);
     iree_arena_initialize(&pool_, &arena_);
   }
@@ -72,6 +78,27 @@ class VMReferencePlanTest : public ::testing::Test {
     return loom_type_dialect_opaque(name);
   }
 
+  loom_type_t Declare(iree_string_view_t name,
+                      const loom_type_reference_key_t& key) {
+    loom_string_id_t name_id, namespace_id, payload_id;
+    IREE_CHECK_OK(loom_module_intern_string(module_, name, &name_id));
+    IREE_CHECK_OK(
+        loom_module_intern_string(module_, key.namespace_name, &namespace_id));
+    IREE_CHECK_OK(
+        loom_module_intern_string(module_, key.type_name, &payload_id));
+    loom_symbol_ref_t symbol = {};
+    IREE_CHECK_OK(loom_module_add_symbol(module_, name_id, &symbol.symbol_id));
+    loom_builder_t builder;
+    loom_builder_initialize(module_, &module_->arena,
+                            loom_module_block(module_), &builder);
+    loom_op_t* op = nullptr;
+    IREE_CHECK_OK(loom_type_decl_build(&builder, namespace_id, payload_id,
+                                       symbol, LOOM_LOCATION_UNKNOWN, &op));
+    loom_type_t type;
+    IREE_CHECK_OK(loom_ref_type_make(module_, symbol, &type));
+    return type;
+  }
+
   static iree_status_t Allocate(void* self, iree_allocator_command_t command,
                                 const void* params, void** pointer) {
     if (command != IREE_ALLOCATOR_COMMAND_FREE &&
@@ -115,12 +142,64 @@ static bool KeyLess(const loom_type_reference_key_t* lhs,
              : iree_string_view_compare(lhs->type_name, rhs->type_name) < 0;
 }
 
+static void ExpectKeyEqual(const loom_type_reference_key_t* actual,
+                           const loom_type_reference_key_t* expected) {
+  EXPECT_TRUE(
+      iree_string_view_equal(actual->namespace_name, expected->namespace_name));
+  EXPECT_TRUE(iree_string_view_equal(actual->type_name, expected->type_name));
+}
+
 TEST_F(VMReferencePlanTest, EmptyPlanAllocatesNothing) {
   loom_vm_reference_plan_t plan = {};
   EXPECT_FALSE(loom_vm_reference_plan_finalize(&plan));
   EXPECT_EQ(plan.count, 0u);
   EXPECT_EQ(plan.group_count, 0u);
   EXPECT_EQ(arena_.used_allocation_size, 0u);
+}
+
+TEST_F(VMReferencePlanTest, InlineModesAndStaticAliasesShareExternalKeys) {
+  ASSERT_NO_FATAL_FAILURE(CreateTypes(1, 1));
+  const auto nominal = InternType(0);
+  const loom_type_reference_key_t other_key = {IREE_SVL("different"),
+                                               IREE_SVL("payload")};
+  const auto owner = Declare(IREE_SV("Object"), keys_[0]);
+  const auto other = Declare(IREE_SV("Other"), other_key);
+  const auto alias = Declare(IREE_SV("Alias"), keys_[0]);
+  loom_type_t borrowed;
+  IREE_ASSERT_OK(loom_ptr_type_make(
+      module_, {.symbol_id = loom_type_reference_declaration_id(owner)},
+      &borrowed));
+  // Equal numeric IDs in the two source domains must not alias their keys.
+  ASSERT_EQ(loom_type_dialect_name_id(nominal),
+            loom_type_reference_declaration_id(other));
+  loom_vm_reference_plan_t plan = {};
+  const loom_type_t types[] = {nominal, other, owner, borrowed, alias};
+  uint16_t ordinals[IREE_ARRAYSIZE(types)];
+  for (size_t i = 0; i < IREE_ARRAYSIZE(types); ++i) {
+    IREE_ASSERT_OK(loom_vm_reference_plan_bind(&plan, module_, types[i],
+                                               &arena_, &ordinals[i]));
+  }
+  EXPECT_EQ(plan.count, 2u);
+  EXPECT_NE(ordinals[0], ordinals[1]);
+  EXPECT_EQ(ordinals[0], ordinals[2]);
+  EXPECT_EQ(ordinals[0], ordinals[3]);
+  EXPECT_EQ(ordinals[0], ordinals[4]);
+  const auto bytes = arena_.used_allocation_size;
+  for (size_t i = 0; i < 10000; ++i) {
+    const auto index = i % IREE_ARRAYSIZE(types);
+    uint16_t ordinal;
+    IREE_ASSERT_OK(loom_vm_reference_plan_bind(&plan, module_, types[index],
+                                               &arena_, &ordinal));
+    EXPECT_EQ(ordinal, ordinals[index]);
+  }
+  EXPECT_EQ(arena_.used_allocation_size, bytes);
+  loom_vm_reference_plan_finalize(&plan);
+  ExpectKeyEqual(loom_vm_reference_plan_key(
+                     &plan, loom_vm_reference_plan_ordinal(&plan, ordinals[0])),
+                 &keys_[0]);
+  ExpectKeyEqual(loom_vm_reference_plan_key(
+                     &plan, loom_vm_reference_plan_ordinal(&plan, ordinals[1])),
+                 &other_key);
 }
 
 TEST_F(VMReferencePlanTest, AliasesAndRepeatedUsesShareCanonicalOrdinals) {
@@ -150,8 +229,8 @@ TEST_F(VMReferencePlanTest, AliasesAndRepeatedUsesShareCanonicalOrdinals) {
   EXPECT_EQ(arena_.used_allocation_size, bytes);
   for (uint32_t i = 0; i < names_.size(); ++i) {
     const uint16_t ordinal = loom_vm_reference_plan_ordinal(&plan, ordinals[i]);
-    EXPECT_EQ(loom_vm_reference_plan_key(&plan, ordinal),
-              &keys_[i % keys_.size()]);
+    ExpectKeyEqual(loom_vm_reference_plan_key(&plan, ordinal),
+                   &keys_[i % keys_.size()]);
   }
 }
 
@@ -172,10 +251,11 @@ TEST_F(VMReferencePlanTest, CanonicalOrderCrossesBothSegmentDirectories) {
   EXPECT_TRUE(loom_vm_reference_plan_finalize(&plan));
   std::sort(expected.begin(), expected.end(), KeyLess);
   for (uint32_t i = 0; i < expected.size(); ++i) {
-    EXPECT_EQ(loom_vm_reference_plan_key(&plan, i), expected[i]);
-    EXPECT_EQ(loom_vm_reference_plan_key(
-                  &plan, loom_vm_reference_plan_ordinal(&plan, ordinals[i])),
-              &keys_[i]);
+    ExpectKeyEqual(loom_vm_reference_plan_key(&plan, i), expected[i]);
+    ExpectKeyEqual(
+        loom_vm_reference_plan_key(
+            &plan, loom_vm_reference_plan_ordinal(&plan, ordinals[i])),
+        &keys_[i]);
   }
   EXPECT_EQ(arena_.used_allocation_size, bytes);
 }

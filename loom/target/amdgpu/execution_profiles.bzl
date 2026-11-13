@@ -17,8 +17,11 @@ load("//loom/build_tools/bazel:defs.bzl", "loom_execution_profile")
 load(
     "//loom/requirements:defs.bzl",
     "ARCH_AMDGPU",
+    "ARCH_VM",
     "ARTIFACT_AMDGPU_ELF",
+    "ARTIFACT_VM_BINARY",
     "EXECUTE_IREE_HAL",
+    "EXECUTE_IREE_VM",
 )
 load(
     "//runtime/requirements:defs.bzl",
@@ -33,8 +36,11 @@ def amd_gpu_execution_profile(name, runner_args = [], tags = [], device = "amdgp
             LIBAMDF,
             LIBAMDF_GPU,
             ARCH_AMDGPU,
+            ARCH_VM,
             ARTIFACT_AMDGPU_ELF,
+            ARTIFACT_VM_BINARY,
             EXECUTE_IREE_HAL,
+            EXECUTE_IREE_VM,
             HAL_AMD_GPU,
         ],
         executor = "hardware",

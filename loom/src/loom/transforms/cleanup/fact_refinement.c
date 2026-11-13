@@ -17,6 +17,7 @@
 #include "loom/util/adaptive_sort.h"
 #include "loom/util/dominance.h"
 #include "loom/util/fact_cfg.h"
+#include "loom/util/fact_relation.h"
 
 #define LOOM_FACT_REFINEMENT_NO_NODE IREE_HOST_SIZE_MAX
 
@@ -654,13 +655,13 @@ static void loom_fact_refinement_append_observation(
   }
   IREE_ASSERT(*inout_observation_count < observation_capacity,
               "observation capacity must cover every predicate argument");
-  observations[(*inout_observation_count)++] =
-      (loom_fact_refinement_observation_t){
-          .anchor = anchor,
-          .source = source,
-          .kind = LOOM_FACT_REFINEMENT_OBSERVATION_PREDICATE,
-          .payload.predicate = normalized,
-      };
+  const iree_host_size_t observation_index = (*inout_observation_count)++;
+  observations[observation_index] = (loom_fact_refinement_observation_t){
+      .anchor = anchor,
+      .source = source,
+      .kind = LOOM_FACT_REFINEMENT_OBSERVATION_PREDICATE,
+      .payload.predicate = normalized,
+  };
 }
 
 static void loom_fact_refinement_append_exact_alias_observation(
@@ -682,13 +683,13 @@ static void loom_fact_refinement_append_exact_alias_observation(
   }
   IREE_ASSERT(*inout_observation_count < observation_capacity,
               "observation capacity must cover every identity pair");
-  observations[(*inout_observation_count)++] =
-      (loom_fact_refinement_observation_t){
-          .anchor = anchor,
-          .source = source,
-          .kind = LOOM_FACT_REFINEMENT_OBSERVATION_EXACT_ALIAS,
-          .payload.exact_alias = alias,
-      };
+  const iree_host_size_t observation_index = (*inout_observation_count)++;
+  observations[observation_index] = (loom_fact_refinement_observation_t){
+      .anchor = anchor,
+      .source = source,
+      .kind = LOOM_FACT_REFINEMENT_OBSERVATION_EXACT_ALIAS,
+      .payload.exact_alias = alias,
+  };
 }
 
 static bool loom_fact_refinement_candidate_is_still_exact(
@@ -708,12 +709,65 @@ static bool loom_fact_refinement_candidate_is_still_exact(
   return true;
 }
 
+typedef struct loom_fact_refinement_retained_relations_t {
+  // Existing owner of path-local refinement publication.
+  loom_fact_refinement_plan_t* plan;
+  // Exact identity establishing this scoped refinement.
+  loom_op_t* anchor;
+  // Exact result whose inherited relations are being preserved.
+  loom_value_id_t value;
+  // Observation storage, or NULL during capacity counting.
+  loom_fact_refinement_observation_t* observations;
+  // Available entries in observations.
+  iree_host_size_t capacity;
+  // Counted or populated observation count.
+  iree_host_size_t count;
+} loom_fact_refinement_retained_relations_t;
+
+static bool loom_fact_refinement_append_retained_relation(
+    void* user_data, loom_value_id_t counterpart,
+    loom_integer_order_outcome_bits_t outcomes) {
+  loom_fact_refinement_retained_relations_t* state = user_data;
+  if (!loom_fact_refinement_value_is_dynamic(state->plan->rewriter->fact_table,
+                                             counterpart)) {
+    return true;
+  }
+  if (!state->observations) {
+    ++state->count;
+    return true;
+  }
+  loom_symbolic_integer_relation_t relation;
+  const bool resolved =
+      loom_symbolic_integer_relation_from_outcomes(outcomes, &relation);
+  IREE_ASSERT(resolved,
+              "retained relations have constrained nonempty outcomes");
+  (void)resolved;
+  const loom_predicate_t predicate = {
+      .kind = loom_symbolic_integer_relation_to_predicate_kind(relation),
+      .arg_count = 2,
+      .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_VALUE,
+                   LOOM_PRED_ARG_NONE},
+      .args = {state->value, counterpart, 0},
+  };
+  loom_fact_refinement_append_observation(
+      state->plan, state->anchor, counterpart, 1, &predicate,
+      state->observations, state->capacity, &state->count);
+  return true;
+}
+
 static iree_status_t loom_fact_refinement_build_nodes(
     loom_fact_refinement_plan_t* plan, loom_op_t** candidate_ops,
     iree_host_size_t candidate_count) {
   iree_host_size_t observation_capacity = 0;
   for (iree_host_size_t i = 0; i < candidate_count; ++i) {
     const loom_op_t* op = candidate_ops[i];
+    loom_fact_refinement_retained_relations_t retained = {.plan = plan};
+    for (uint16_t j = 0; j < op->result_count; ++j) {
+      loom_value_fact_table_for_each_signed_integer_relation_while(
+          plan->rewriter->fact_table, loom_op_const_results(op)[j],
+          loom_fact_refinement_append_retained_relation, &retained);
+    }
+    observation_capacity += retained.count;
     const loom_attribute_t* attributes = loom_op_const_attrs(op);
     const uint16_t pair_count = op->operand_count < op->result_count
                                     ? op->operand_count
@@ -772,6 +826,20 @@ static iree_status_t loom_fact_refinement_build_nodes(
           plan, op, operands[j], results[j], observations, observation_capacity,
           &observation_count);
     }
+    loom_fact_refinement_retained_relations_t retained = {
+        .plan = plan,
+        .anchor = op,
+        .observations = observations,
+        .capacity = observation_capacity,
+        .count = observation_count,
+    };
+    for (uint16_t j = 0; j < op->result_count; ++j) {
+      retained.value = results[j];
+      loom_value_fact_table_for_each_signed_integer_relation_while(
+          facts, retained.value, loom_fact_refinement_append_retained_relation,
+          &retained);
+    }
+    observation_count = retained.count;
     const loom_attribute_t* attributes = loom_op_const_attrs(op);
     for (uint8_t j = 0; j < op->attribute_count; ++j) {
       if (attributes[j].kind != LOOM_ATTR_PREDICATE_LIST) {
@@ -827,7 +895,12 @@ static iree_status_t loom_fact_refinement_build_nodes(
     loom_value_id_t exact_alias = LOOM_VALUE_ID_INVALID;
     do {
       if (observations[i].kind == LOOM_FACT_REFINEMENT_OBSERVATION_PREDICATE) {
-        predicates[predicate_count++] = observations[i].payload.predicate;
+        if (predicate_count == predicate_start ||
+            !loom_fact_refinement_predicate_equal(
+                &predicates[predicate_count - 1],
+                &observations[i].payload.predicate)) {
+          predicates[predicate_count++] = observations[i].payload.predicate;
+        }
       } else {
         IREE_ASSERT(exact_alias == LOOM_VALUE_ID_INVALID ||
                     exact_alias == observations[i].payload.exact_alias);
@@ -992,23 +1065,6 @@ static iree_host_size_t loom_fact_refinement_find_local_node(
   return low > block_start ? low - 1 : LOOM_FACT_REFINEMENT_NO_NODE;
 }
 
-static const loom_op_t* loom_fact_refinement_region_parent_op(
-    const loom_block_t* block) {
-  if (!block || !block->parent_region) {
-    return NULL;
-  }
-  if (block->first_op) {
-    return block->first_op->parent_op;
-  }
-  const loom_block_t* sibling = NULL;
-  loom_region_for_each_block(block->parent_region, sibling) {
-    if (sibling->first_op) {
-      return sibling->first_op->parent_op;
-    }
-  }
-  return NULL;
-}
-
 static iree_status_t loom_fact_refinement_resolve_block_entry(
     loom_fact_refinement_source_t* source, const loom_block_t* block,
     iree_host_size_t* out_node) {
@@ -1048,7 +1104,7 @@ static iree_status_t loom_fact_refinement_resolve_block_entry(
     if (!region || region->block_count == 0 || region->blocks[0] != current) {
       break;
     }
-    const loom_op_t* parent_op = loom_fact_refinement_region_parent_op(current);
+    const loom_op_t* parent_op = loom_region_parent_op(current->parent_region);
     if (!parent_op || loom_traits_is_isolated(parent_op->traits)) {
       break;
     }
@@ -1567,12 +1623,17 @@ static void loom_fact_refinement_set_carrier_insertion_point(
   }
 }
 
-static iree_status_t loom_fact_refinement_materialize_carriers(
+static iree_status_t loom_fact_refinement_apply_carriers(
     loom_fact_refinement_plan_t* plan) {
   loom_fact_refinement_carrier_use_t* uses = NULL;
   iree_host_size_t use_count = 0;
+  // Definition and use mappings name the original embedded values. Compute
+  // both target types before publishing definitions, which may replace those
+  // identities with an earlier refinement than a later use requires.
   IREE_RETURN_IF_ERROR(
       loom_fact_refinement_build_carrier_uses(plan, &uses, &use_count));
+  IREE_RETURN_IF_ERROR(
+      loom_fact_refinement_apply_carrier_definition_types(plan));
   loom_module_t* module = plan->rewriter->module;
   for (iree_host_size_t i = 0; i < use_count;) {
     const iree_host_size_t use_start = i;
@@ -1585,6 +1646,9 @@ static iree_status_t loom_fact_refinement_materialize_carriers(
 
     const loom_type_t source_type = loom_module_value_type(module, carrier);
     const loom_type_t target_type = uses[use_start].target_type;
+    if (loom_type_equal(source_type, target_type)) {
+      continue;
+    }
     const loom_fact_refinement_carrier_provider_t* provider =
         loom_fact_refinement_find_carrier_provider(plan->policy, source_type,
                                                    target_type);
@@ -1734,10 +1798,7 @@ iree_status_t loom_fact_refinement_preserve_pending(
       status = loom_fact_refinement_materialize_nodes(&plan);
     }
     if (iree_status_is_ok(status) && plan.node_count > 0) {
-      status = loom_fact_refinement_apply_carrier_definition_types(&plan);
-    }
-    if (iree_status_is_ok(status) && plan.node_count > 0) {
-      status = loom_fact_refinement_materialize_carriers(&plan);
+      status = loom_fact_refinement_apply_carriers(&plan);
     }
     if (iree_status_is_ok(status) && plan.node_count > 0) {
       status = loom_fact_refinement_apply_attributes(&plan);

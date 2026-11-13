@@ -63,8 +63,10 @@ iree_py_test(
         "$(location //loom/src/loom/format/text/test:predicate_attributes.loom-test)",
         "$(location //loom/src/loom/format/bytecode:scoped_type_interop.loom-test)",
         "$(location //loom/src/loom/format/text/test:byte_attributes.loom-test)",
+        "$(location //loom/src/loom/format/bytecode:managed_types.loom-test)",
     ],
     data = [
+        "//loom/src/loom/format/bytecode:managed_types.loom-test",
         "//loom/src/loom/format/bytecode:scoped_type_interop.loom-test",
         "//loom/src/loom/format/text/test:byte_attributes.loom-test",
         "//loom/src/loom/format/text/test:predicate_attributes.loom-test",
@@ -81,6 +83,7 @@ iree_py_test(
         "//loom/py/loom/dialect/low",
         "//loom/py/loom/dialect/scf",
         "//loom/py/loom/dialect/test",
+        "//loom/py/loom/dialect/type",
         "//loom/py/loom/format/text",
         "//loom/py/loom/target/test:descriptors",
     ],

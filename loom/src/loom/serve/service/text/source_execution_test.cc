@@ -5,9 +5,15 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 #include <atomic>
+#include <memory>
 
+#include "loom/runtime/execution/workspace.h"
+#include "loom/runtime/host/host.h"
+#include "loom/runtime/host/reclamation.h"
+#include "loom/runtime/testing/application.h"
+#include "loom/runtime/testing/compiler.h"
+#include "loom/runtime/testing/device.h"
 #include "loom/serve/service/text/service_test_fixture.h"
-#include "loom/serve/testing/service_application.h"
 
 namespace {
 
@@ -44,11 +50,11 @@ TEST_F(RegisteredSourceTextServiceTest,
 TEST_F(SourceTextServiceTest, PreparationActivatesWeightsOnlyWithDemand) {
   for (const auto flags : {0u, uint32_t{LOOM_SERVE_TEXT_LOAD_FLAG_DEMAND}}) {
     SCOPED_TRACE(flags);
-    auto* pool = loom_serve_pool_memory(storage_owner_);
+    auto* pool = loom_runtime_pool_memory(storage_owner_);
     if (pool) {
-      IREE_ASSERT_OK(loom_serve_memory_pool_await(pool));
+      IREE_ASSERT_OK(loom_runtime_memory_pool_await(pool));
     }
-    const auto before = loom_serve_pool_statistics(storage_owner_);
+    const auto before = loom_runtime_pool_statistics(storage_owner_);
     const auto options = ModelOptions();
     iree_notification_t notification;
     iree_notification_initialize(&notification);
@@ -74,7 +80,7 @@ TEST_F(SourceTextServiceTest, PreparationActivatesWeightsOnlyWithDemand) {
     auto* model = loom_serve_text_load_take_model(load);
     loom_serve_text_load_free(load);
     const auto parameters =
-        loom_serve_residency_snapshot(loom_serve_text_model_residency(model));
+        loom_runtime_residency_snapshot(loom_serve_text_model_residency(model));
     // Warmup owns an independent invocation. Preparation does not import its
     // weight-ready dependency into the mutable-state execution timeline.
     EXPECT_FALSE(parameters.active);
@@ -95,12 +101,213 @@ TEST_F(SourceTextServiceTest, PreparationActivatesWeightsOnlyWithDemand) {
     // Model retirement releases logical ownership. Native disposal may finish
     // later and remains charged to the shared pool until its outer join.
     if (pool) {
-      IREE_ASSERT_OK(loom_serve_memory_pool_await(pool));
+      IREE_ASSERT_OK(loom_runtime_memory_pool_await(pool));
     }
-    const auto after = loom_serve_pool_statistics(storage_owner_);
+    const auto after = loom_runtime_pool_statistics(storage_owner_);
     EXPECT_EQ(after.retained.reserved_bytes, before.retained.reserved_bytes);
     EXPECT_EQ(after.retained.committed_bytes, before.retained.committed_bytes);
   }
+}
+
+TEST_F(SourceTextServiceTest,
+       PreparedModelRemainsUsableAfterAllocatorTrimFailure) {
+  struct TrimAllocator {
+    // Storage provider that outlives this test's host and device group.
+    iree_allocator_t backing = iree_allocator_system();
+    // Explicit reclamation calls after terminal preparation.
+    iree_host_size_t calls = 0;
+    // External control failure injected independently of allocation/free.
+    bool reject = true;
+  } state;
+  const iree_allocator_t allocator = {
+      &state,
+      [](void* self, iree_allocator_command_t command, const void* parameters,
+         void** pointer) -> iree_status_t {
+        auto* state = static_cast<TrimAllocator*>(self);
+        if (command == IREE_ALLOCATOR_COMMAND_TRIM) {
+          ++state->calls;
+          if (state->reject) {
+            return iree_status_from_code(IREE_STATUS_UNAVAILABLE);
+          }
+        }
+        return state->backing.ctl(state->backing.self, command, parameters,
+                                  pointer);
+      },
+  };
+  loom_runtime_host_t* host = nullptr;
+  IREE_ASSERT_OK(loom_runtime_test_host_create(2, allocator, &host));
+  const std::unique_ptr<loom_runtime_host_t,
+                        decltype(&loom_runtime_host_release)>
+      host_owner(host, loom_runtime_host_release);
+  iree_hal_driver_t* driver = nullptr;
+  IREE_ASSERT_OK(loom_runtime_test_driver_acquire(host, &driver));
+  const std::unique_ptr<iree_hal_driver_t, decltype(&iree_hal_driver_release)>
+      driver_owner(driver, iree_hal_driver_release);
+  const auto* target = loom_runtime_test_device();
+  const loom_runtime_device_options_t device_options = {
+      .driver = driver,
+      .uri = target->device_uri,
+  };
+  loom_runtime_device_group_t* group = nullptr;
+  IREE_ASSERT_OK(loom_runtime_device_group_allocate(host, 1, &device_options,
+                                                    allocator, &group));
+  const auto release_group = [](loom_runtime_device_group_t* group) {
+    IREE_EXPECT_OK(loom_runtime_device_group_free(group));
+  };
+  const std::unique_ptr<loom_runtime_device_group_t, decltype(release_group)>
+      group_owner(group, release_group);
+  const bool elastic =
+      target->service_backing == LOOM_RUNTIME_POOL_BACKING_ELASTIC;
+  const loom_runtime_pool_options_t pool_options = {
+      .elastic = elastic,
+      .weight_slab_size = 2 * 1024 * 1024,
+      .state_slab_size = 2 * 1024 * 1024,
+      .memory_limit = elastic ? 64 * 1024 * 1024u : 0,
+  };
+  loom_runtime_pool_t* pool = nullptr;
+  IREE_ASSERT_OK(loom_runtime_device_group_create_pool(
+      group, {.name = IREE_SV("reclamation"), .device_mask = 1}, &pool_options,
+      &pool));
+  auto* device = loom_runtime_device_group_at(group, 0);
+  iree_notification_t notification;
+  iree_notification_initialize(&notification);
+  const auto wake = [](void* payload) {
+    iree_notification_post(static_cast<iree_notification_t*>(payload),
+                           IREE_ALL_WAITERS);
+  };
+  const auto options = ModelOptions();
+  for (const bool reject : {true, false}) {
+    SCOPED_TRACE(reject);
+    state.reject = reject;
+    const auto trim_count = state.calls;
+    loom_serve_text_load_t* load = nullptr;
+    IREE_ASSERT_OK(loom_serve_text_load_allocate(
+        device, pool, &options, wake, &notification, allocator, &load));
+    struct LoadWait {
+      // Borrowed load advanced by this pool's exclusive outer owner.
+      loom_serve_text_load_t* load;
+      // Owned load result joined with physical allocation progress.
+      iree_status_t status = iree_ok_status();
+      // Terminal preparation and accepted consumer retirement have completed.
+      bool complete = false;
+    } wait{load};
+    iree_status_t status = loom_runtime_workspace_await(
+        loom_runtime_pool_workspace(pool), &notification,
+        [](void* user_data) {
+          auto* wait = static_cast<LoadWait*>(user_data);
+          wait->status = loom_serve_text_load_advance(
+              wait->load, LOOM_SERVE_TEXT_LOAD_FLAG_DEMAND, &wait->complete);
+          return wait->complete || !iree_status_is_ok(wait->status);
+        },
+        &wait);
+    status = iree_status_join(status, wait.status);
+    EXPECT_TRUE(wait.complete);
+    EXPECT_EQ(state.calls, trim_count);
+    auto* model = loom_serve_text_load_take_model(load);
+    loom_serve_text_load_free(load);
+    EXPECT_EQ(loom_serve_text_model_parameter_activity(model).activations, 1u);
+    IREE_ASSERT_OK(status);
+    status = loom_runtime_host_trim_compiler_idle(host, 0, iree_time_now());
+    if (reject) {
+      IREE_EXPECT_STATUS_IS(IREE_STATUS_UNAVAILABLE, status);
+    } else {
+      IREE_ASSERT_OK(status);
+    }
+    EXPECT_EQ(state.calls, trim_count + 1);
+    // Reclamation is independent of the successfully prepared model. Its
+    // executable owners survive both a successful and failed allocator hint.
+    auto* row = loom_serve_text_model_row(model, 0);
+    const int32_t token = Oracle::Id('a');
+    IREE_ASSERT_OK(loom_serve_text_row_prefill(row, 1, &token));
+    Oracle reference;
+    reference.Consume("a");
+    EXPECT_EQ(loom_serve_text_row_token(row), reference.Predict());
+    IREE_ASSERT_OK(loom_serve_text_model_free(model));
+    if (auto* memory = loom_runtime_pool_memory(pool)) {
+      IREE_ASSERT_OK(loom_runtime_memory_pool_await(memory));
+    }
+    // Idle backing belongs to the shared pool; no model consumer may remain.
+    EXPECT_FALSE(loom_runtime_pool_is_in_use(pool));
+  }
+  iree_notification_deinitialize(&notification);
+}
+
+TEST_F(SourceTextServiceTest,
+       GroupedPreparationReclaimsAndRetainsNativeOutput) {
+  loom_runtime_reclamation_t reclamation;
+  IREE_ASSERT_OK(loom_runtime_reclamation_initialize(host_, 0, &reclamation));
+  iree_notification_t notification;
+  iree_notification_initialize(&notification);
+  loom_runtime_reclamation_set_observer(
+      &reclamation, {[](void* payload) {
+                       iree_notification_post(
+                           static_cast<iree_notification_t*>(payload),
+                           IREE_ALL_WAITERS);
+                     },
+                     &notification});
+  loom_serve_text_model_t* models[4] = {};
+  loom_runtime_host_preparation_begin(host_);
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0;
+       i < IREE_ARRAYSIZE(models) && iree_status_is_ok(status); ++i) {
+    const loom_serve_packing_shape_t shape = {4 * (i + 1), i + 1};
+    auto options = ModelOptions();
+    options.prefill_capacity = shape.token_capacity;
+    options.epoch_count = 1;
+    options.epoch_shapes = &shape;
+    status = loom_serve_text_model_allocate(device_, storage_owner_, &options,
+                                            host_allocator_, &models[i]);
+    bool progress = false;
+    status = iree_status_join(status, loom_runtime_reclamation_advance(
+                                          &reclamation, false, &progress));
+    // A gap between complete models is still inside the caller's preparation
+    // workflow. It cannot arm idle reclamation or submit a trimming task.
+    EXPECT_FALSE(loom_runtime_reclamation_is_pending(&reclamation));
+    EXPECT_EQ(loom_runtime_host_compiler_idle_deadline(host_, 0),
+              IREE_TIME_INFINITE_FUTURE);
+  }
+  loom_runtime_host_preparation_end(host_);
+  EXPECT_NE(loom_runtime_host_compiler_idle_deadline(host_, 0),
+            IREE_TIME_INFINITE_FUTURE);
+  for (;;) {
+    const auto ticket = iree_notification_prepare_wait(&notification);
+    bool progress = false;
+    iree_status_t advance_status = loom_runtime_reclamation_advance(
+        &reclamation, !iree_status_is_ok(status), &progress);
+    status = iree_status_join(status, advance_status);
+    if (!loom_runtime_reclamation_is_pending(&reclamation)) {
+      iree_notification_cancel_wait(&notification);
+      break;
+    }
+    if (progress) {
+      iree_notification_cancel_wait(&notification);
+    } else {
+      iree_notification_commit_wait(&notification, ticket, IREE_DURATION_ZERO,
+                                    IREE_TIME_INFINITE_FUTURE);
+    }
+  }
+  EXPECT_EQ(loom_runtime_host_compiler_idle_deadline(host_, 0),
+            IREE_TIME_INFINITE_FUTURE);
+  bool progress = false;
+  status = iree_status_join(
+      status, loom_runtime_reclamation_advance(&reclamation, true, &progress));
+  loom_runtime_reclamation_set_observer(&reclamation, {});
+  loom_runtime_reclamation_deinitialize(&reclamation);
+  iree_notification_deinitialize(&notification);
+  for (auto* model : models) {
+    if (model && iree_status_is_ok(status)) {
+      auto* row = loom_serve_text_model_row(model, 0);
+      const int32_t token = Oracle::Id('a');
+      status = loom_serve_text_row_prefill(row, 1, &token);
+      if (iree_status_is_ok(status)) {
+        Oracle reference;
+        reference.Consume("a");
+        EXPECT_EQ(loom_serve_text_row_token(row), reference.Predict());
+      }
+    }
+    status = iree_status_join(status, loom_serve_text_model_free(model));
+  }
+  IREE_ASSERT_OK(status);
 }
 
 TEST_F(SourceTextServiceTest, IndependentParameterPreparationJoinsAllDomains) {
@@ -136,11 +343,11 @@ TEST_F(SourceTextServiceTest, IndependentParameterPreparationJoinsAllDomains) {
       ASSERT_TRUE(std::filesystem::copy_file(directory_ + "/weights.loom",
                                              package + "/weights.loom"));
     }
-    auto* pool = loom_serve_pool_memory(storage_owner_);
+    auto* pool = loom_runtime_pool_memory(storage_owner_);
     if (pool) {
-      IREE_ASSERT_OK(loom_serve_memory_pool_await(pool));
+      IREE_ASSERT_OK(loom_runtime_memory_pool_await(pool));
     }
-    const auto before = loom_serve_pool_statistics(storage_owner_);
+    const auto before = loom_runtime_pool_statistics(storage_owner_);
     auto options = ModelOptions();
     options.sources.base_directory = iree_make_cstring_view(package.c_str());
     loom_serve_text_model_t* model = nullptr;
@@ -162,20 +369,20 @@ TEST_F(SourceTextServiceTest, IndependentParameterPreparationJoinsAllDomains) {
     }
     IREE_ASSERT_OK(loom_serve_text_model_free(model));
     if (pool) {
-      IREE_ASSERT_OK(loom_serve_memory_pool_await(pool));
+      IREE_ASSERT_OK(loom_runtime_memory_pool_await(pool));
     }
-    const auto after = loom_serve_pool_statistics(storage_owner_);
+    const auto after = loom_runtime_pool_statistics(storage_owner_);
     EXPECT_EQ(after.retained.reserved_bytes, before.retained.reserved_bytes);
     EXPECT_EQ(after.retained.committed_bytes, before.retained.committed_bytes);
   }
 }
 
 TEST_F(SourceTextServiceTest, FailedControlCompileRetiresNativePreparation) {
-  auto* pool = loom_serve_pool_memory(storage_owner_);
+  auto* pool = loom_runtime_pool_memory(storage_owner_);
   if (pool) {
-    IREE_ASSERT_OK(loom_serve_memory_pool_await(pool));
+    IREE_ASSERT_OK(loom_runtime_memory_pool_await(pool));
   }
-  const auto before = loom_serve_pool_statistics(storage_owner_);
+  const auto before = loom_runtime_pool_statistics(storage_owner_);
   const auto control =
       iree::testing::MakeTempFilePath("invalid_text_control", ".loom");
   {
@@ -190,9 +397,9 @@ TEST_F(SourceTextServiceTest, FailedControlCompileRetiresNativePreparation) {
       device_, storage_owner_, &options, host_allocator_, &failed));
   EXPECT_EQ(failed, nullptr);
   if (pool) {
-    IREE_ASSERT_OK(loom_serve_memory_pool_await(pool));
+    IREE_ASSERT_OK(loom_runtime_memory_pool_await(pool));
   }
-  const auto after = loom_serve_pool_statistics(storage_owner_);
+  const auto after = loom_runtime_pool_statistics(storage_owner_);
   EXPECT_EQ(after.retained.reserved_bytes, before.retained.reserved_bytes);
   EXPECT_EQ(after.retained.committed_bytes, before.retained.committed_bytes);
 
@@ -226,11 +433,11 @@ TEST_F(SourceTextServiceTest, FailedLinkRetiresAcceptedInitialization) {
     output << source;
     ASSERT_TRUE(output.good());
   }
-  auto* pool = loom_serve_pool_memory(storage_owner_);
+  auto* pool = loom_runtime_pool_memory(storage_owner_);
   if (pool) {
-    IREE_ASSERT_OK(loom_serve_memory_pool_await(pool));
+    IREE_ASSERT_OK(loom_runtime_memory_pool_await(pool));
   }
-  const auto before = loom_serve_pool_statistics(storage_owner_);
+  const auto before = loom_runtime_pool_statistics(storage_owner_);
   auto options = ModelOptions();
   options.sources.base_directory = iree_make_cstring_view(package.c_str());
   iree_notification_t notification;
@@ -275,9 +482,9 @@ TEST_F(SourceTextServiceTest, FailedLinkRetiresAcceptedInitialization) {
   IREE_ASSERT_OK(loom_serve_text_model_free_retired(partial));
   iree_notification_deinitialize(&notification);
   if (pool) {
-    IREE_ASSERT_OK(loom_serve_memory_pool_await(pool));
+    IREE_ASSERT_OK(loom_runtime_memory_pool_await(pool));
   }
-  const auto after = loom_serve_pool_statistics(storage_owner_);
+  const auto after = loom_runtime_pool_statistics(storage_owner_);
   EXPECT_EQ(after.retained.reserved_bytes, before.retained.reserved_bytes);
   EXPECT_EQ(after.retained.committed_bytes, before.retained.committed_bytes);
   auto* row = loom_serve_text_model_row(model_, 0);
@@ -289,11 +496,11 @@ TEST_F(SourceTextServiceTest, FailedLinkRetiresAcceptedInitialization) {
 }
 
 TEST_F(SourceTextServiceTest, MissingCheckpointFailsBeforeParameterPlacement) {
-  auto* pool = loom_serve_pool_memory(storage_owner_);
+  auto* pool = loom_runtime_pool_memory(storage_owner_);
   if (pool) {
-    IREE_ASSERT_OK(loom_serve_memory_pool_await(pool));
+    IREE_ASSERT_OK(loom_runtime_memory_pool_await(pool));
   }
-  const auto before = loom_serve_pool_statistics(storage_owner_);
+  const auto before = loom_runtime_pool_statistics(storage_owner_);
   auto options = ModelOptions();
   const auto missing = iree::testing::MakeTempFilePath("missing_checkpoint");
   ASSERT_FALSE(std::filesystem::exists(missing));
@@ -333,9 +540,9 @@ TEST_F(SourceTextServiceTest, MissingCheckpointFailsBeforeParameterPlacement) {
   IREE_ASSERT_OK(loom_serve_text_model_free_retired(partial));
   iree_notification_deinitialize(&notification);
   if (pool) {
-    IREE_ASSERT_OK(loom_serve_memory_pool_await(pool));
+    IREE_ASSERT_OK(loom_runtime_memory_pool_await(pool));
   }
-  const auto after = loom_serve_pool_statistics(storage_owner_);
+  const auto after = loom_runtime_pool_statistics(storage_owner_);
   EXPECT_EQ(after.retained.reserved_bytes, before.retained.reserved_bytes);
   EXPECT_EQ(after.retained.committed_bytes, before.retained.committed_bytes);
   // The failed preparation did not retire shared queues or existing models.
@@ -380,16 +587,16 @@ class GrowingTextServiceTest : public SourceTextServiceTest {
   void SetUp() override {
     ASSERT_NO_FATAL_FAILURE(SourceTextServiceTest::SetUp());
     const auto application_options =
-        loom_serve_test_application_options_default();
-    const loom_serve_pool_options_t pool_options = {
+        loom_runtime_test_application_options_default();
+    const loom_runtime_pool_options_t pool_options = {
         .elastic =
-            application_options.backing == LOOM_SERVE_POOL_BACKING_ELASTIC,
+            application_options.backing == LOOM_RUNTIME_POOL_BACKING_ELASTIC,
         .weight_slab_size = application_options.slab_size,
         .state_slab_size = application_options.slab_size,
     };
     const std::string name =
-        "growth" + std::to_string(loom_serve_device_group_pool_count(group_));
-    IREE_ASSERT_OK(loom_serve_device_group_create_pool(
+        "growth" + std::to_string(loom_runtime_device_group_pool_count(group_));
+    IREE_ASSERT_OK(loom_runtime_device_group_create_pool(
         group_, {iree_make_cstring_view(name.c_str()), 1}, &pool_options,
         &pool_));
     const auto options = ModelOptions();
@@ -397,8 +604,8 @@ class GrowingTextServiceTest : public SourceTextServiceTest {
                                                   host_allocator_, &model_));
     EXPECT_EQ(loom_serve_text_model_pool(model_), pool_);
     EXPECT_EQ(
-        loom_serve_residency_cache(loom_serve_text_model_residency(model_)),
-        loom_serve_pool_residency_cache(pool_));
+        loom_runtime_residency_cache(loom_serve_text_model_residency(model_)),
+        loom_runtime_pool_residency_cache(pool_));
   }
 
   loom_serve_text_options_t ModelOptions() const override {
@@ -411,14 +618,14 @@ class GrowingTextServiceTest : public SourceTextServiceTest {
   }
 
   // Explicit storage owner independent of the execution device's default pool.
-  loom_serve_pool_t* pool_ = nullptr;
+  loom_runtime_pool_t* pool_ = nullptr;
   // Large input staging makes 129 residents cross physical slab boundaries,
   // while the actual numerical workload remains a few tokens per resident.
   const loom_serve_packing_shape_t growth_shapes_[1] = {{4096, 129}};
 };
 
 TEST_F(GrowingTextServiceTest, GrowthKeepsLiveHistoriesHandlesAndCheckpoints) {
-  const auto default_before = loom_serve_pool_statistics(storage_owner_);
+  const auto default_before = loom_runtime_pool_statistics(storage_owner_);
   std::vector<Oracle> references(129);
   auto* original = loom_serve_text_model_row(model_, 0);
   const int32_t prompt[] = {0, 1, 2};
@@ -445,15 +652,15 @@ TEST_F(GrowingTextServiceTest, GrowthKeepsLiveHistoriesHandlesAndCheckpoints) {
     EXPECT_EQ(prepared.pending_bytes, previous.pending_bytes);
     EXPECT_EQ(prepared.releasing_bytes, previous.releasing_bytes);
     EXPECT_EQ(prepared.released_bytes, previous.released_bytes);
-    loom_serve_execution_frontier_t frontier;
+    loom_runtime_execution_frontier_t frontier;
     auto status =
         loom_serve_text_model_submit_resize(model_, resize, &frontier);
     loom_serve_text_resize_free(resize);
     IREE_ASSERT_OK(status);
     for (size_t i = 0; i < IREE_ARRAYSIZE(frontier.semaphores); ++i) {
-      IREE_ASSERT_OK(loom_serve_workspace_wait(loom_serve_pool_workspace(pool_),
-                                               frontier.semaphores[i],
-                                               frontier.values[i]));
+      IREE_ASSERT_OK(loom_runtime_workspace_wait(
+          loom_runtime_pool_workspace(pool_), frontier.semaphores[i],
+          frontier.values[i]));
     }
     loom_serve_text_model_complete_resize(model_);
     EXPECT_EQ(loom_serve_text_model_row_count(model_), capacity);
@@ -491,7 +698,7 @@ TEST_F(GrowingTextServiceTest, GrowthKeepsLiveHistoriesHandlesAndCheckpoints) {
   const auto after = loom_serve_text_model_parameter_activity(model_);
   EXPECT_EQ(after.activations, activity.activations);
   EXPECT_EQ(after.read_bytes, activity.read_bytes);
-  const auto default_after = loom_serve_pool_statistics(storage_owner_);
+  const auto default_after = loom_runtime_pool_statistics(storage_owner_);
   EXPECT_EQ(default_after.storage.bytes_reserved,
             default_before.storage.bytes_reserved);
   EXPECT_EQ(default_after.retained.reserved_bytes,
@@ -626,7 +833,7 @@ TEST_P(PooledTextServiceTest, KnownInputCheckpointsPreserveNoPrediction) {
   const loom_serve_text_span_t prefix = {0, tokens.size(), tokens.data(), 0};
   IREE_ASSERT_OK(loom_serve_text_model_epoch(model_, 1, 1, &prefix));
   EXPECT_EQ(loom_serve_text_row_position(row), 11u);
-  loom_serve_execution_frontier_t frontier;
+  loom_runtime_execution_frontier_t frontier;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
                         loom_serve_text_row_submit_decode(row, &frontier));
 

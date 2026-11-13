@@ -79,7 +79,7 @@ class FunctionContracts {
     // Parameter ordinal for Parameter; ignored for Result.
     size_t parameter_ordinal;
     // Direct semantic member path from the root to one scalar component.
-    std::vector<cxx::FieldSymbol*> members;
+    std::vector<cxx::Symbol*> members;
     // Root source type used to validate typed result placeholders.
     const cxx::Type* root_type;
     // Scalar leaf type before frontend-selected implicit conversions.

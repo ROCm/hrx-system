@@ -13,7 +13,7 @@ import pytest
 from loom.dialect.encoding import defs as encoding
 from loom.dialect.vector import defs as vector
 from loom.dsl import EncodingOperandSummaryDef
-from loom.target.arch.amd.xdna.aie2p.contracts.bfp import AIE2P_BFP_ENCODE_RULE
+from loom.target.arch.amd.xdna.aie2p.contracts.bfp import AIE2P_BFP_ENCODE_RULES
 from loom.target.arch.amd.xdna.aie2p.contracts.packet_conversion import (
     I4_UNPACK_SOURCE_LANE_COUNTS,
     INTEGER_PACK_INSTRUCTIONS,
@@ -42,6 +42,10 @@ from loom.target.contracts import (
 
 _I32_MIN = -(2**31)
 _I32_MAX = (2**31) - 1
+
+_FUSED_MEMORY_RULES = tuple(
+    rule for rule in AIE2P_PACKET_MEMORY_RULES if rule.source_nodes
+)
 
 _MEMORY_ROOTS = (
     (
@@ -373,13 +377,13 @@ def test_fused_packet_memory_rules_cover_the_native_shape_matrix() -> None:
                     ] += 1
 
     actual_identities = Counter(
-        _fused_rule_identity(rule) for rule in AIE2P_PACKET_MEMORY_RULES
+        _fused_rule_identity(rule) for rule in _FUSED_MEMORY_RULES
     )
     assert actual_identities == expected_identities
 
 
 def test_fused_packet_memory_rules_preserve_graph_and_state_contracts() -> None:
-    for rule in AIE2P_PACKET_MEMORY_RULES:
+    for rule in _FUSED_MEMORY_RULES:
         assert rule.priority == 1
         source_node = rule.source_nodes[0]
         memory_emit = _source_memory_emit(rule)
@@ -439,6 +443,55 @@ def test_fused_packet_memory_rules_preserve_graph_and_state_contracts() -> None:
                 "amd.xdna.aie2p.state.saturation.immediate",
                 "amd.xdna.aie2p.state.pack-size.immediate",
             ]
+
+
+def test_bfp_stores_cover_addresses_and_preserve_exact_record_extents() -> None:
+    cases = set()
+    for rule in AIE2P_PACKET_MEMORY_RULES:
+        if rule.report_key != "native_memory_store_bfp16ebs8":
+            continue
+        memory = _source_memory_emit(rule).source_memory
+        assert memory.operation is SourceMemoryOperation.STORE
+        assert memory.element_byte_count == 1
+        assert memory.vector_lane_count is None
+        assert memory.minimum_alignment == 8
+        assert Guard.low_value_register_class("value", "aie2p.mexa") in rule.guards
+        assert Guard.value_static_dim0_multiple("value", 72) in rule.guards
+        emits = [emit for emit in rule.emit if isinstance(emit, EmitDescriptorOp)]
+        assert not any(".load." in emit.descriptor.key for emit in emits)
+        pointer_move, position, push, flush = emits[-4:]
+        assert pointer_move.descriptor.key == "amd.xdna.aie2p.move.store-fifo.pointer"
+        assert position.immediates == {"i": 0}
+        assert push.descriptor.key.removesuffix(".volatile") == (
+            "amd.xdna.aie2p.store.bfp16ebs8.fifo.push.empty"
+        )
+        assert "fifo_reg" not in push.operands
+        assert push.operands["src"] == ValueRef.operand("value")
+        assert push.operands["ptr"] == pointer_move.results["dst"]
+        assert push.operands["avail"] == position.results["dst"]
+        assert flush.descriptor.key.removesuffix(".volatile") == (
+            "amd.xdna.aie2p.store.fifo.flush.512"
+        )
+        assert flush.operands["fifo_reg"] == push.results["fifo_reg_out"]
+        assert flush.operands["ptr"] == push.results["ptr_out"]
+        assert flush.operands["avail"] == push.results["avail_out"]
+        assert rule.sequence_carried == (
+            push.results["ptr_out"].field,
+            push.results["avail_out"].field,
+        )
+        assert push.form is flush.form is DescriptorEmitForm.PER_LANE_SEQUENCE
+        if memory.dynamic_term_count_minimum:
+            address = "dynamic"
+        elif memory.static_byte_offset_maximum:
+            address = emits[0].descriptor.key.rsplit(".", 1)[1]
+        else:
+            address = "zero"
+        cases.add((address, push.descriptor.key.endswith(".volatile")))
+    assert cases == {
+        (address, volatile)
+        for address in ("zero", "mova", "movxm", "dynamic")
+        for volatile in (False, True)
+    }
 
 
 def test_bfp_group_address_setup_preserves_the_fifo_pointer_domain() -> None:
@@ -575,7 +628,7 @@ def test_bfp_group_consumes_each_byte_once_without_reading_padding(
 def test_fused_float_memory_rules_publish_subnormal_policy() -> None:
     float_rules = [
         rule
-        for rule in AIE2P_PACKET_MEMORY_RULES
+        for rule in _FUSED_MEMORY_RULES
         if rule.source_nodes[0].source_op is vector.vector_extf
         or rule.source_nodes[0].source_op is vector.vector_fptrunc
     ]
@@ -628,7 +681,7 @@ def test_fused_float_memory_rules_publish_subnormal_policy() -> None:
 def test_bfp_load_rules_preserve_two_native_chunks() -> None:
     rules = [
         rule
-        for rule in AIE2P_PACKET_MEMORY_RULES
+        for rule in _FUSED_MEMORY_RULES
         if rule.source_nodes[0].source_op is vector.vector_encode
     ]
     assert len(rules) == len(_MEMORY_ROOTS) * 2 * 7
@@ -703,14 +756,26 @@ def test_bfp_encodes_preserve_schema_and_ordered_conversion_tail() -> None:
         ),
     )
     rules = [
-        AIE2P_BFP_ENCODE_RULE,
+        *AIE2P_BFP_ENCODE_RULES,
         *(
             rule
-            for rule in AIE2P_PACKET_MEMORY_RULES
+            for rule in _FUSED_MEMORY_RULES
             if rule.source_nodes[0].source_op is vector.vector_encode
         ),
     ]
     for rule in rules:
+        if rule.report_key == "encode.f32.bfp16ebs8":
+            assert rule.guards == (
+                Guard.value_type("source", Vector("f32", lanes=64)),
+                *expected_guards[1:],
+            )
+            rounding, encoded = rule.emit
+            assert rounding.descriptor.key == "amd.xdna.aie2p.state.rounding.immediate"
+            assert rounding.immediates == {"i": 12}
+            assert encoded.descriptor.key == "amd.xdna.aie2p.convert.f32x64.bfp16ebs8"
+            assert encoded.operands == {"src": ValueRef.operand("source")}
+            assert encoded.results == {"dst": ValueRef.result("result")}
+            continue
         if rule.source_op is vector.vector_encode:
             assert rule.guards == expected_guards
             result = ValueRef.result("result")

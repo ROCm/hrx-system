@@ -57,8 +57,9 @@ from loom.dialect.func.defs import (
     CallingConv,
     EffectContract,
     InlinePolicyAttr,
+    Temperature,
 )
-from loom.dialect.memory import MemoryAccessFlags
+from loom.dialect.memory import LowMemoryAccessFlags
 from loom.dialect.symbol import Retain, Visibility
 from loom.dialect.target.defs import ExportAbiKind, ExportLinkage
 from loom.dsl import (
@@ -72,6 +73,7 @@ from loom.dsl import (
     FACT_IDENTITY,
     HINT,
     ISOLATED_FROM_ABOVE,
+    OBSERVABLE_EFFECT,
     PURE,
     REGISTER,
     STORAGE,
@@ -79,13 +81,16 @@ from loom.dsl import (
     SYMBOL_DEFINE,
     TERMINATOR,
     UNKNOWN_EFFECTS,
+    AliasResult,
     AttrDef,
     BlockArgsSatisfy,
+    Borrow,
     BorrowedResult,
     CallLikeInterface,
     CallLikeKind,
     ConditionForwardedCountMatchesBlockArgs,
     ConditionForwardedTypesMatchBlockArgs,
+    CopiedResult,
     Dialect,
     DirectBranchInterface,
     EnumCase,
@@ -95,6 +100,7 @@ from loom.dsl import (
     ImplicitTerminator,
     IterArgsMatchResults,
     LoopLikeInterface,
+    Move,
     MovedResult,
     NoAncestor,
     Op,
@@ -260,6 +266,7 @@ _FUNC_COMMON_ATTRS = [
     AttrDef("visibility", "enum", enum_def=Visibility, optional=True),
     AttrDef("cc", "enum", enum_def=CallingConv, optional=True),
     AttrDef("effect_contract", "enum", enum_def=EffectContract, optional=True),
+    AttrDef("temperature", "enum", enum_def=Temperature, optional=True),
     AttrDef("inline_policy", "enum", enum_def=InlinePolicyAttr, optional=True),
     AttrDef("allocation", "enum", enum_def=LowAllocationMode, optional=True),
     AttrDef("schedule", "enum", enum_def=LowScheduleMode, optional=True),
@@ -314,6 +321,7 @@ _FUNC_MODIFIER_FORMAT: list[FormatElement] = [
     OptionalGroup([Attr("retain")], anchor="retain"),
     OptionalGroup([Attr("cc")], anchor="cc"),
     OptionalGroup([Attr("effect_contract")], anchor="effect_contract"),
+    OptionalGroup([Attr("temperature")], anchor="temperature"),
     OptionalGroup([Attr("inline_policy")], anchor="inline_policy"),
     OptionalGroup(
         [kw("allocation"), GLUE, LPAREN, Attr("allocation"), GLUE, RPAREN],
@@ -509,6 +517,7 @@ _FUNC_LIKE_COMMON: dict[str, Any] = dict(
     visibility="visibility",
     cc="cc",
     effect_contract="effect_contract",
+    temperature="temperature",
     inline_policy="inline_policy",
     predicates="predicates",
 )
@@ -753,6 +762,7 @@ low_func_call = Op(
             symbol_ref=SymbolReference("function", ["callable"]),
         ),
         AttrDef("effect_contract", "enum", enum_def=EffectContract, optional=True),
+        AttrDef("temperature", "enum", enum_def=Temperature, optional=True),
         AttrDef("inline_policy", "enum", enum_def=InlinePolicyAttr, optional=True),
     ],
     results=[Result("results", REGISTER, variadic=True)],
@@ -763,6 +773,7 @@ low_func_call = Op(
             operands="operands",
             results="results",
             effect_contract="effect_contract",
+            temperature="temperature",
             inline_policy="inline_policy",
             kind=CallLikeKind.LOW_INTERNAL,
         ),
@@ -773,6 +784,7 @@ low_func_call = Op(
     verify="loom_low_func_call_verify",
     format=[
         OptionalGroup([Attr("effect_contract")], anchor="effect_contract"),
+        OptionalGroup([Attr("temperature")], anchor="temperature"),
         OptionalGroup([Attr("inline_policy")], anchor="inline_policy"),
         SymbolRef("callee"),
         GLUE,
@@ -1267,7 +1279,10 @@ low_op = Op(
         "access flags constrain each instruction instance independently of its "
         "descriptor and machine cache controls. Volatile preserves dynamic "
         "memory observations and their order; it supplies no atomicity, "
-        "synchronization, or cache-coherence guarantee."
+        "synchronization, or cache-coherence guarantee. Atomic preserves each "
+        "indivisible observation and same-location issue order without ordering "
+        "completion across independent addresses. The instruction, alignment, "
+        "fences, and cache controls supply the physical atomic memory contract."
     ),
     operands=[Operand("operands", REGISTER, variadic=True)],
     attrs=[
@@ -1276,7 +1291,7 @@ low_op = Op(
             "memory_flags",
             ATTR_TYPE_FLAGS,
             optional=True,
-            enum_def=MemoryAccessFlags,
+            enum_def=LowMemoryAccessFlags,
         ),
         AttrDef("attrs", "dict", optional=True),
     ],
@@ -1418,7 +1433,10 @@ low_copy = Op(
         "Explicit virtual-register copy used by lowering and allocation. Each "
         "copy produces a fresh virtual-register identity and may constrain the "
         "result to a different target register class with the same unit count "
-        "and semantic value type."
+        "and semantic value type. The result copies the source ownership mode "
+        "without consuming it: an owner creates an independent owner, while a "
+        "borrow remains borrowed. Managed copies cannot share their physical "
+        "carrier while both lifetimes remain live."
     ),
     operands=[Operand("source", REGISTER)],
     attrs=[
@@ -1433,6 +1451,10 @@ low_copy = Op(
     results=[Result("result", REGISTER, allocates=True)],
     structural_materialization=True,
     traits=[STORAGE_RELATION],
+    ownership_effects=[CopiedResult("result", "source")],
+    lifetime_effects_only=True,
+    effective_traits="loom_low_transfer_effective_traits",
+    eager_execution_cost=0,
     verify="loom_low_copy_verify",
     facts="loom_low_copy_facts",
     format=[
@@ -1475,6 +1497,9 @@ low_move = Op(
     ],
     traits=[STORAGE_RELATION],
     ownership_effects=[MovedResult("result", "source")],
+    lifetime_effects_only=True,
+    effective_traits="loom_low_transfer_effective_traits",
+    eager_execution_cost=0,
     verify="loom_low_move_verify",
     facts="loom_low_move_facts",
     format=[
@@ -1488,6 +1513,54 @@ low_move = Op(
     examples=[
         "%moved = low.move %value : reg<cmd.binding> -> reg<cmd.binding>",
     ],
+)
+
+# ============================================================================
+# low.release — end a managed carrier lifetime
+# ============================================================================
+
+low_release = Op(
+    "low.release",
+    group=low_ops,
+    phase=OpPhase.EXECUTABLE,
+    doc=(
+        "End the lifetime of a complete typed managed-reference carrier. The "
+        "source identity is invalid afterward. An owned carrier releases its "
+        "reference; a borrowed or null carrier is only cleared. A ptr carrier "
+        "may hold compiler-acquired protection, which is released here without "
+        "changing its borrowed source type. Native finalization occurs at this "
+        "operation when the carrier holds the last owner."
+    ),
+    operands=[Operand("value", REGISTER)],
+    traits=[OBSERVABLE_EFFECT],
+    ownership_effects=[Move("value")],
+    lifetime_effects_only=True,
+    verify="loom_low_release_verify",
+    format=[Ref("value"), COLON, TypeOf("value")],
+    examples=["low.release %owner : reg<vm.ref : ref<@Object>>"],
+)
+
+low_borrow = Op(
+    "low.borrow",
+    assembly=AssemblyFormat("borrow"),
+    group=low_ops,
+    phase=OpPhase.EXECUTABLE,
+    doc=(
+        "Project an owning managed reference into an independent pointer carrier "
+        "of the same nominal payload. The owner remains valid and keeps its "
+        "explicit lifetime. The pointer remains live through its final use: "
+        "emission acquires protection unless a covering owner is proven. This "
+        "safe operation does not expose an unchecked machine borrow."
+    ),
+    operands=[Operand("owner", REGISTER)],
+    results=[Result("pointer", REGISTER, allocates=True)],
+    structural_materialization=True,
+    traits=[OBSERVABLE_EFFECT],
+    ownership_effects=[Borrow("owner"), AliasResult("pointer", "owner")],
+    lifetime_effects_only=True,
+    verify="loom_low_borrow_verify",
+    format=[Ref("owner"), COLON, TypeOf("owner"), ARROW, ResultType("pointer")],
+    examples=["%pointer = low.borrow %owner : reg<vm.ref : ref<@Frame>> -> reg<vm.ref : ptr<@Frame>>"],
 )
 
 # ============================================================================
@@ -1718,6 +1791,54 @@ low_reload = Op(
     ],
 )
 
+# Destructive storage transfers preserve a logical value while moving its
+# physical carrier. Ordinary spill/reload operations preserve their source.
+low_spill_move = Op(
+    "low.spill.move",
+    group=low_ops,
+    phase=OpPhase.EXECUTABLE,
+    doc=(
+        "Transfer a register value into low storage, invalidating the source register value. Managed carriers move without retaining and clear their source; scalar carriers need no physical clearing."
+    ),
+    operands=[Operand("value", REGISTER), Operand("storage", STORAGE)],
+    attrs=[AttrDef("offset", ATTR_TYPE_I64, default=0, elide_default=True)],
+    traits=[UNKNOWN_EFFECTS],
+    ownership_effects=[Move("value")],
+    verify="loom_low_spill_verify",
+    format=[
+        Ref("value"),
+        COMMA,
+        Ref("storage"),
+        AttrDict(),
+        COLON,
+        TypeOf("value"),
+        COMMA,
+        TypeOf("storage"),
+    ],
+    examples=["low.spill.move %value, %slot : reg<amdgpu.vgpr x4>, low.storage<private>"],
+)
+
+low_reload_move = Op(
+    "low.reload.move",
+    group=low_ops,
+    phase=OpPhase.EXECUTABLE,
+    doc=("Transfer a stored value into a register, ending the stored value's lifetime. Managed storage becomes canonical null; scalar storage is unspecified until rewritten."),
+    operands=[Operand("storage", STORAGE)],
+    attrs=[AttrDef("offset", ATTR_TYPE_I64, default=0, elide_default=True)],
+    results=[Result("result", REGISTER)],
+    traits=[UNKNOWN_EFFECTS],
+    verify="loom_low_reload_verify",
+    format=[
+        Ref("storage"),
+        AttrDict(),
+        COLON,
+        TypeOf("storage"),
+        ARROW,
+        ResultType("result"),
+    ],
+    examples=["%value = low.reload.move %slot : low.storage<private> -> reg<amdgpu.vgpr x4>"],
+)
+
 # ============================================================================
 # low.storage.address — materialize a storage address
 # ============================================================================
@@ -1818,13 +1939,18 @@ low_invoke = Op(
         "Source-typed call edge to an explicitly selected target-Low function. "
         "Source-to-Low lowering maps the source operands and results to the "
         "helper register signature, proves the helper argument predicates, and "
-        "normalizes the edge to low.func.call. Each source value maps to one "
-        "register-typed value. Views require storage and layout information "
+        "normalizes the edge to low.func.call. Argument carriers may be "
+        "converted when source facts prove a target-supported lossless "
+        "conversion. The native call returns the helper's declared carriers; "
+        "lowering converts them to source result storage when needed to "
+        "preserve each lane's observation across divergent control. This does "
+        "not change source-type matching for ordinary calls. Each source value "
+        "maps to one register-typed value. Views require storage and layout information "
         "beyond that carrier and are not accepted as operands or results; use "
         "a source helper taking views or pass buffers and offsets explicitly. "
-        "Authored inline policy has the "
-        "same meaning as on low.func.call; targets without a Low call ABI may "
-        "require the normalized edge to inline before emission."
+        "Authored temperature and inline policy have the same meaning as on "
+        "low.func.call; targets without a Low call ABI may require the "
+        "normalized edge to inline before emission."
     ),
     operands=[Operand("operands", ANY, variadic=True)],
     attrs=[
@@ -1834,6 +1960,7 @@ low_invoke = Op(
             symbol_ref=SymbolReference("function", ["callable"]),
         ),
         AttrDef("effect_contract", "enum", enum_def=EffectContract, optional=True),
+        AttrDef("temperature", "enum", enum_def=Temperature, optional=True),
         AttrDef("inline_policy", "enum", enum_def=InlinePolicyAttr, optional=True),
     ],
     results=[Result("results", ANY, variadic=True)],
@@ -1848,6 +1975,7 @@ low_invoke = Op(
             operands="operands",
             results="results",
             effect_contract="effect_contract",
+            temperature="temperature",
             inline_policy="inline_policy",
             kind=CallLikeKind.LOW_INVOKE,
         ),
@@ -1858,6 +1986,7 @@ low_invoke = Op(
     verify="loom_low_invoke_verify",
     format=[
         OptionalGroup([Attr("effect_contract")], anchor="effect_contract"),
+        OptionalGroup([Attr("temperature")], anchor="temperature"),
         OptionalGroup([Attr("inline_policy")], anchor="inline_policy"),
         SymbolRef("callee"),
         GLUE,
@@ -1991,4 +2120,8 @@ ALL_LOW_OPS: tuple[Op, ...] = (
     low_unreachable,
     # Appended to preserve every existing serialized Low operation ordinal.
     low_br_identity,
+    low_spill_move,
+    low_reload_move,
+    low_release,
+    low_borrow,
 )

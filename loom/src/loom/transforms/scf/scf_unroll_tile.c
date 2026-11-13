@@ -1025,6 +1025,7 @@ static iree_status_t loom_scf_unroll_classify_recurrence_body_ops(
   IREE_RETURN_IF_ERROR(loom_ir_remap_map_value(
       &available_values, body_block->arg_ids[0], availability_marker));
 
+  bool has_independent_read = false;
   for (uint32_t op_index = 0; op_index < body_ops->count; ++op_index) {
     const loom_op_t* source_op = body_ops->operations[op_index].op;
     if (!loom_scf_unroll_payload_is_ready(
@@ -1033,6 +1034,9 @@ static iree_status_t loom_scf_unroll_classify_recurrence_body_ops(
     }
     independent_ops[op_index] = true;
     ++*out_independent_count;
+    has_independent_read |=
+        body_ops->operations[op_index].effects == LOOM_SCF_BODY_EFFECT_READ &&
+        body_ops->operations[op_index].load_count != 0;
     const loom_value_id_t* results = loom_op_const_results(source_op);
     for (uint16_t i = 0; i < source_op->result_count; ++i) {
       IREE_RETURN_IF_ERROR(loom_ir_remap_map_value(
@@ -1041,6 +1045,53 @@ static iree_status_t loom_scf_unroll_classify_recurrence_body_ops(
   }
 
   *out_independent_ops = independent_ops;
+  *out_dependent_count = body_ops->count - *out_independent_count;
+  if (!has_independent_read || *out_dependent_count == 0) {
+    return iree_ok_status();
+  }
+
+  // Bound lookahead at ordinary reads and their prerequisites. Arithmetic
+  // consuming those reads belongs with the current iteration, so each window
+  // can overlap that arithmetic with future reads instead of completing an
+  // entire future contribution before its fence. Pure-compute recurrences keep
+  // their independent-producer partition above.
+  //
+  // Reuse the availability map: identity now marks a required value, while the
+  // external lower-bound marker still denotes an independent, unneeded value.
+  // Verified SSA and the body's retained payload references make one reverse
+  // pass sufficient for the complete prerequisite closure.
+  *out_independent_count = 0;
+  for (uint32_t reverse = body_ops->count; reverse > 0; --reverse) {
+    const uint32_t op_index = reverse - 1;
+    if (!independent_ops[op_index]) {
+      continue;
+    }
+    const loom_scf_body_operation_t* operation =
+        &body_ops->operations[op_index];
+    const loom_op_t* source_op = operation->op;
+    bool producer = operation->effects == LOOM_SCF_BODY_EFFECT_READ &&
+                    operation->load_count != 0;
+    const loom_value_id_t* results = loom_op_const_results(source_op);
+    for (uint16_t i = 0; i < source_op->result_count; ++i) {
+      loom_value_id_t state = LOOM_VALUE_ID_INVALID;
+      producer |= loom_ir_remap_try_lookup_value(&available_values, results[i],
+                                                 &state) &&
+                  state == results[i];
+    }
+    independent_ops[op_index] = producer;
+    if (!producer) {
+      continue;
+    }
+    ++*out_independent_count;
+    for (iree_host_size_t i = 0; i < operation->reference_count; ++i) {
+      const loom_scf_body_reference_t* reference =
+          &body_ops->references[operation->reference_begin + i];
+      if (!reference->allow_identity_mapping) {
+        IREE_RETURN_IF_ERROR(loom_ir_remap_map_value(
+            &available_values, reference->value_id, reference->value_id));
+      }
+    }
+  }
   *out_dependent_count = body_ops->count - *out_independent_count;
   return iree_ok_status();
 }

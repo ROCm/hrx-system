@@ -69,7 +69,10 @@ class AmdfBuildFileFunctions(
         return os.path.relpath(self._build_dir, self._repo_root).replace("\\", "/")
 
     def _should_emit_python_target(self):
-        return self._package_name() == "libamdf/cts/gpu/kernels"
+        return self._package_name() in (
+            "libamdf/build_tools",
+            "libamdf/cts/gpu/kernels",
+        ) or self._package_name().startswith("libamdf/tool/")
 
     def _python_package_dirs(self):
         return ["${PROJECT_SOURCE_DIR}"]
@@ -108,12 +111,25 @@ class AmdfBuildFileFunctions(
         kwargs = self._apply_amdf_cmake_policy(kwargs)
         self.cc_binary(deps=(deps or []) + ["//libamdf:headers"], **kwargs)
 
+    def amdf_cc_tool(self, deps=None, **kwargs):
+        kwargs = self._apply_amdf_cmake_policy(kwargs)
+        self.cc_binary(
+            deps=(deps or []) + ["//libamdf:headers"],
+            _cmake_rule="amdf_cc_tool",
+            **kwargs,
+        )
+
     def amdf_cc_test(self, deps=None, **kwargs):
         kwargs = self._apply_amdf_cmake_policy(
             kwargs,
             include_run_requirements=True,
         )
         self.cc_test(deps=(deps or []) + ["//libamdf:headers"], **kwargs)
+
+    def amdf_py_test(self, **kwargs):
+        self.iree_py_test(
+            **self._apply_amdf_cmake_policy(kwargs, include_run_requirements=True)
+        )
 
     def amdf_cc_benchmark(self, deps=None, **kwargs):
         kwargs = self._apply_amdf_cmake_policy(kwargs, include_run_requirements=True)

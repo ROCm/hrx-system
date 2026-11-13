@@ -110,6 +110,15 @@ bool loom_cfg_loop_nest_calculate_block_execution_counts(
     const loom_cfg_loop_nest_t* nest, const uint64_t* trip_counts,
     uint64_t* out_block_counts);
 
+// Computes bounds and reports single-path structure in one retained-graph pass.
+// Returns whether all bounds are finite. out_exact distinguishes modeled loop
+// headers from conditional paths independently of boundedness. Output storage
+// is initialized even for partially bounded or irreducible control.
+bool loom_cfg_loop_nest_calculate_bounds(const loom_cfg_loop_nest_t* nest,
+                                         const uint64_t* trip_bounds,
+                                         uint64_t* out_block_bounds,
+                                         bool* out_exact);
+
 // Retains an upper bound for each block even when another path has an unknown
 // count. UINT64_MAX denotes an unknown or overflowing trip/block bound.
 // Conditional paths receive their enclosing loop multiplier; unreachable
@@ -121,15 +130,16 @@ bool loom_cfg_loop_nest_calculate_block_execution_bounds(
     const loom_cfg_loop_nest_t* nest, const uint64_t* trip_bounds,
     uint64_t* out_block_bounds);
 
-// Orders each reachable block once, visiting a loop body before its
-// continuation. Requires the single-path, header-tested structure admitted by
-// calculate_block_execution_counts. The output has
-// graph->reverse_postorder.count entries and is independent of block layout and
-// conditional successor order. This is one structural traversal, not an
-// expansion of repeated execution; consumers retain loop scopes/counts when
-// interpreting repeated effects.
-void loom_cfg_loop_nest_order_blocks(const loom_cfg_loop_nest_t* nest,
-                                     uint16_t* out_blocks);
+// Orders each reachable block once, visiting complete loop bodies before their
+// continuations. Requires reducible control flow. Conditional alternatives
+// retain reverse postorder within their loop scope; they are not a promise of
+// execution. The output has graph->reverse_postorder.count entries. Consumers
+// retain loop scopes/counts when interpreting repeated effects.
+// Takes O(B+L) time and temporary storage, released before returning. Acyclic
+// graphs copy retained reverse postorder without allocating.
+iree_status_t loom_cfg_loop_nest_order_blocks(const loom_cfg_loop_nest_t* nest,
+                                              iree_arena_allocator_t* arena,
+                                              uint16_t* out_blocks);
 
 // Expands exact loop trip counts into the execution multiplier contributed by
 // enclosing loops for each block. Unlike exact execution counts, multipliers

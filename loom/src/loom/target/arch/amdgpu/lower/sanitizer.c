@@ -51,6 +51,30 @@ typedef struct loom_amdgpu_sanitizer_module_state_t {
   iree_host_size_t site_row_count;
 } loom_amdgpu_sanitizer_module_state_t;
 
+typedef struct loom_amdgpu_sanitizer_access_report_preparation_island_t {
+  // Next preparation island with a distinct access shape, or NULL.
+  struct loom_amdgpu_sanitizer_access_report_preparation_island_t* next;
+  // Access kind reported by failures routed through this island.
+  loom_amdgpu_asan_access_kind_t access_kind;
+  // Number of application bytes checked by each routed access.
+  uint32_t access_size;
+  // Canonical alignment class consumed by the shared shadow checker.
+  uint32_t alignment_class;
+  // Shared cold block that prepares the complete access report.
+  loom_block_t* entry_block;
+  // Per-lane fault address accepted by entry_block.
+  loom_value_id_t fault_address_arg;
+  // Uniform sanitizer site ID accepted by entry_block.
+  loom_value_id_t site_id_arg;
+} loom_amdgpu_sanitizer_access_report_preparation_island_t;
+
+static uint32_t loom_amdgpu_sanitizer_access_alignment_class(
+    uint32_t minimum_alignment) {
+  const uint32_t shadow_granule_size = 1u
+                                       << LOOM_AMDGPU_ASAN_SHADOW_SCALE_SHIFT;
+  return minimum_alignment < shadow_granule_size ? 1u : shadow_granule_size;
+}
+
 typedef struct loom_amdgpu_sanitizer_lower_state_t {
   // True once the source function sanitizer site collection has been built.
   bool has_site_collection;
@@ -90,6 +114,9 @@ typedef struct loom_amdgpu_sanitizer_lower_state_t {
   bool has_atomic_island;
   // Shared cold island for atomic access failures.
   loom_amdgpu_sanitizer_access_report_island_t atomic_island;
+  // Shared cold report preparation islands keyed by access shape.
+  loom_amdgpu_sanitizer_access_report_preparation_island_t*
+      access_report_preparation_island_head;
 } loom_amdgpu_sanitizer_lower_state_t;
 
 typedef struct loom_amdgpu_sanitizer_access_diagnostic_t {
@@ -988,6 +1015,119 @@ static iree_status_t loom_amdgpu_sanitizer_get_access_island(
   return iree_ok_status();
 }
 
+static bool loom_amdgpu_sanitizer_access_report_preparation_island_matches(
+    const loom_amdgpu_sanitizer_access_report_preparation_island_t* island,
+    const loom_amdgpu_sanitizer_access_plan_t* plan) {
+  return island->access_kind == plan->report_access_kind &&
+         island->access_size == plan->access_size &&
+         island->alignment_class ==
+             loom_amdgpu_sanitizer_access_alignment_class(
+                 plan->minimum_alignment);
+}
+
+static iree_status_t loom_amdgpu_sanitizer_get_access_report_preparation_island(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_amdgpu_sanitizer_lower_state_t* state,
+    const loom_amdgpu_sanitizer_access_plan_t* plan, uint32_t wavefront_size,
+    const loom_amdgpu_sanitizer_access_report_preparation_island_t**
+        out_island) {
+  *out_island = NULL;
+  for (const loom_amdgpu_sanitizer_access_report_preparation_island_t* island =
+           state->access_report_preparation_island_head;
+       island != NULL; island = island->next) {
+    if (loom_amdgpu_sanitizer_access_report_preparation_island_matches(island,
+                                                                       plan)) {
+      *out_island = island;
+      return iree_ok_status();
+    }
+  }
+
+  loom_builder_t* builder = loom_low_lower_context_builder(context);
+  const loom_low_descriptor_set_t* descriptor_set =
+      loom_low_lower_context_descriptor_set(context);
+  const loom_amdgpu_sanitizer_access_report_island_t* report_island = NULL;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_sanitizer_get_access_island(
+      builder, descriptor_set, state, plan->report_access_kind,
+      source_op->location, &report_island));
+
+  loom_amdgpu_sanitizer_access_report_preparation_island_t* island = NULL;
+  IREE_RETURN_IF_ERROR(loom_low_lower_allocate_function_array(
+      context, 1, sizeof(*island), (void**)&island));
+  *island = (loom_amdgpu_sanitizer_access_report_preparation_island_t){
+      .access_kind = plan->report_access_kind,
+      .access_size = plan->access_size,
+      .alignment_class =
+          loom_amdgpu_sanitizer_access_alignment_class(plan->minimum_alignment),
+  };
+
+  loom_builder_ip_t saved_ip = loom_builder_save(builder);
+  IREE_RETURN_IF_ERROR(loom_region_insert_block(
+      builder->module, saved_ip.block->parent_region,
+      (uint16_t)(saved_ip.block->region_index + 1), &island->entry_block));
+  loom_type_t vgpr_x2_type = loom_type_none();
+  IREE_RETURN_IF_ERROR(
+      loom_amdgpu_make_vgpr_range_type(context, 2, &vgpr_x2_type));
+  IREE_RETURN_IF_ERROR(loom_builder_define_block_arg(
+      builder, island->entry_block, vgpr_x2_type, &island->fault_address_arg));
+  loom_type_t sgpr_x2_type = loom_type_none();
+  IREE_RETURN_IF_ERROR(
+      loom_amdgpu_make_sgpr_range_type(context, 2, &sgpr_x2_type));
+  IREE_RETURN_IF_ERROR(loom_builder_define_block_arg(
+      builder, island->entry_block, sgpr_x2_type, &island->site_id_arg));
+
+  loom_builder_set_block(builder, island->entry_block);
+  loom_amdgpu_feedback_packet_source_t source = {0};
+  IREE_RETURN_IF_ERROR(
+      loom_amdgpu_sanitizer_build_report_source(context, source_op, &source));
+  loom_amdgpu_sanitizer_access_config_t access_config = {0};
+  IREE_RETURN_IF_ERROR(loom_amdgpu_build_sanitizer_access_config(
+      builder, descriptor_set, state->asan_config_symbol, source_op->location,
+      &access_config));
+  loom_amdgpu_sanitizer_access_check_t report_check = {0};
+  IREE_RETURN_IF_ERROR(loom_amdgpu_build_sanitizer_access_check_with_config(
+      builder, descriptor_set, &access_config, island->fault_address_arg,
+      plan->access_size, island->alignment_class, wavefront_size,
+      source_op->location, &report_check));
+  loom_value_id_t report_access_size = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_sanitizer_emit_vgpr_u64_constant(
+      context, source_op, plan->access_size, &report_access_size));
+  loom_value_id_t report_site_id = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_materialize_low_vgpr_b32_registers(
+      context, source_op, island->site_id_arg, &report_site_id));
+  const loom_amdgpu_sanitizer_access_report_t report = {
+      .access_kind = plan->report_access_kind,
+      .flags = LOOM_AMDGPU_ASAN_REPORT_FLAG_NONE,
+      .fault_address = island->fault_address_arg,
+      .access_size = report_access_size,
+      .site_id = report_site_id,
+      .shadow_address = report_check.shadow_address,
+      .shadow_value = report_check.shadow_value,
+  };
+  IREE_RETURN_IF_ERROR(loom_amdgpu_build_sanitizer_access_report_branch(
+      builder, descriptor_set, report_island, &source, &report,
+      source_op->location));
+  loom_builder_restore(builder, saved_ip);
+
+  island->next = state->access_report_preparation_island_head;
+  state->access_report_preparation_island_head = island;
+  *out_island = island;
+  return iree_ok_status();
+}
+
+static iree_status_t loom_amdgpu_sanitizer_branch_to_access_report_preparation(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_amdgpu_sanitizer_access_report_preparation_island_t* island,
+    loom_value_id_t fault_address, loom_sanitizer_site_id_t site_id) {
+  loom_value_id_t low_site_id = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_sgpr64_constant_u64(
+      context, source_op, site_id, &low_site_id));
+  const loom_value_id_t args[] = {fault_address, low_site_id};
+  loom_op_t* branch_op = NULL;
+  return loom_low_br_build(loom_low_lower_context_builder(context),
+                           island->entry_block, args, IREE_ARRAYSIZE(args),
+                           source_op->location, &branch_op);
+}
+
 static iree_status_t loom_amdgpu_sanitizer_get_trap_island(
     loom_builder_t* builder, const loom_low_descriptor_set_t* descriptor_set,
     loom_amdgpu_sanitizer_lower_state_t* state, loom_location_id_t location,
@@ -1345,42 +1485,20 @@ iree_status_t loom_amdgpu_lower_sanitizer_assert_access(
   }
 
   loom_amdgpu_sanitizer_access_report_failure_branch_t branch = {0};
-  const loom_amdgpu_sanitizer_access_report_island_t* island = NULL;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_sanitizer_get_access_island(
-      builder, descriptor_set, state, plan->report_access_kind,
-      source_op->location, &island));
+  const loom_amdgpu_sanitizer_access_report_preparation_island_t*
+      preparation_island = NULL;
+  IREE_RETURN_IF_ERROR(
+      loom_amdgpu_sanitizer_get_access_report_preparation_island(
+          context, source_op, state, plan, wavefront_size,
+          &preparation_island));
   IREE_RETURN_IF_ERROR(
       loom_amdgpu_build_sanitizer_access_report_failure_mask_split(
           builder, descriptor_set, repeat_failure.failure_mask,
           source_op->location, &branch));
-
-  loom_amdgpu_feedback_packet_source_t source = {0};
   IREE_RETURN_IF_ERROR(
-      loom_amdgpu_sanitizer_build_report_source(context, source_op, &source));
-  loom_value_id_t report_access_size = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_sanitizer_emit_vgpr_u64_constant(
-      context, source_op, plan->access_size, &report_access_size));
-  loom_value_id_t report_site_id = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_sanitizer_emit_vgpr_u64_constant(
-      context, source_op, plan->site_id, &report_site_id));
-
-  loom_amdgpu_sanitizer_access_check_t report_check = {0};
-  IREE_RETURN_IF_ERROR(loom_amdgpu_build_sanitizer_access_check_with_config(
-      builder, descriptor_set, &access_config,
-      repeat_failure.selected_fault_address, plan->access_size,
-      plan->minimum_alignment, wavefront_size, source_op->location,
-      &report_check));
-  loom_amdgpu_sanitizer_access_report_t report = {
-      .access_kind = plan->report_access_kind,
-      .flags = LOOM_AMDGPU_ASAN_REPORT_FLAG_NONE,
-      .fault_address = repeat_failure.selected_fault_address,
-      .access_size = report_access_size,
-      .site_id = report_site_id,
-      .shadow_address = report_check.shadow_address,
-      .shadow_value = report_check.shadow_value,
-  };
-  IREE_RETURN_IF_ERROR(loom_amdgpu_build_sanitizer_access_report_branch(
-      builder, descriptor_set, island, &source, &report, source_op->location));
+      loom_amdgpu_sanitizer_branch_to_access_report_preparation(
+          context, source_op, preparation_island,
+          repeat_failure.selected_fault_address, plan->site_id));
 
   loom_builder_set_block(builder, branch.continuation_block);
   return iree_ok_status();

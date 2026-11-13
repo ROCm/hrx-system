@@ -11,7 +11,7 @@ from dataclasses import replace
 import pytest
 
 from loom.assembly import COMMA, EncodingOf, OptionalGroup, Param, ScalarOf, ShapeOf, kw
-from loom.builtin_types import channel_type, encoding_type, read_type, storage_type, view_type, write_type
+from loom.builtin_types import channel_type, encoding_type, ptr_type, read_type, ref_type, storage_type, view_type, write_type
 from loom.dsl import EncodingParam, EnumCase, ScalarParam, ShapeParam, TypeDef
 from loom.gen.ops.type_registry import generate_type_builders, generate_type_registry
 
@@ -20,6 +20,22 @@ def test_view_alignment_is_part_of_the_declared_format() -> None:
     _, _, source = generate_type_registry([view_type])
     assert "{LOOM_TYPE_FMT_ALIGNMENT, 3, 0}" in source
     assert "LOOM_KW_ALIGN" in source
+
+
+def test_managed_handles_resolve_symbols_instead_of_allocating_parameter_slots() -> None:
+    header, builders = generate_type_builders([ref_type, ptr_type])
+    _, _, metadata = generate_type_registry([ref_type, ptr_type])
+    for name, mode in (("ref", "OWNED"), ("ptr", "BORROWED")):
+        assert f"loom_{name}_type_make(loom_module_t* module, loom_symbol_ref_t declaration" in header
+        assert f"return loom_reference_type_make(module, LOOM_REFERENCE_OWNERSHIP_{mode}, declaration, out_type);" in builders
+        assert f".reference_ownership = LOOM_REFERENCE_OWNERSHIP_{mode}," in metadata
+    assert "LOOM_PARAMETERIZED_TYPE_REF" not in header
+    assert "loom_module_make_parameterized_type_by_kind" not in builders
+
+
+def test_managed_handle_registry_rejects_duplicate_modes() -> None:
+    with pytest.raises(ValueError, match="duplicate registry names"):
+        generate_type_registry([ptr_type, replace(ptr_type, name="other_ptr")])
 
 
 @pytest.mark.parametrize("type_def", [channel_type, read_type, write_type])

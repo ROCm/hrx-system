@@ -1,0 +1,79 @@
+// RUN: verify
+#include <loomcxx/view.h>
+using Buffer = loom::type::buffer<const unsigned char>;
+Buffer entry(Buffer input, bool choose) {
+  Buffer result;
+  if (choose) {
+    result = input;
+  }
+  // ERROR@+1: LOWERING/059 "source value is read before initialization"
+  return result;
+}
+// ====
+#include <loomcxx/view.h>
+using Buffer = loom::type::buffer<const unsigned char>;
+Buffer entry(Buffer input, unsigned count) {
+  Buffer result;
+  for (unsigned index = 0; index < count; ++index) {
+    result = input;
+  }
+  // ERROR@+1: LOWERING/059 "source value is read before initialization"
+  return result;
+}
+// ====
+#include <loomcxx/view.h>
+using Buffer = loom::type::buffer<const unsigned char>;
+struct Packet {
+  // Resource handle with no initial payload.
+  Buffer data;
+  // Independently assignable scalar value.
+  unsigned position;
+};
+unsigned entry(Buffer input) {
+  Packet result;
+  result.data = input;
+  // ERROR@+1: LOWERING/059 "source subobject is read before initialization"
+  return result.position;
+}
+// ====
+#include <loomcxx/view.h>
+using Buffer = loom::type::buffer<const unsigned char>;
+Buffer entry(Buffer input, bool stop) {
+  Buffer result;
+  do {
+    if (stop) {
+      break;
+    }
+    result = input;
+  } while (false);
+  // ERROR@+1: LOWERING/059 "source value is read before initialization"
+  return result;
+}
+// ====
+// A destructor requires the fields it reads, even when other members are
+// absent from its projected receiver contract.
+#include <loomcxx/buffer.h>
+void observe(unsigned value);
+struct Partial {
+  // Has no payload when the destructor receiver would be passed.
+  loom::type::buffer<const unsigned char> data;
+  // This field is consumed by the destructor and must be initialized.
+  unsigned position;
+  ~Partial() { observe(position); }
+};
+void entry() {
+  // ERROR@+1: LOWERING/059 "destructor reads an uninitialized source subobject"
+  Partial result;
+}
+// ====
+// Projected methods still require every field they actually consume.
+struct Cursor {
+  const float* data;
+  unsigned position;
+  unsigned current() const { return position; }
+};
+unsigned entry() {
+  Cursor cursor;
+  // ERROR@+1: LOWERING/059 "source subobject is read before initialization"
+  return cursor.current();
+}

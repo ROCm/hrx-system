@@ -1,0 +1,168 @@
+// RUN: roundtrip
+// Local arrays retain their bounded source type and one-past-end iteration.
+#include <loomcxx/kernel.h>
+
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void k(int* out, int a, int b, int c) {
+  int values[3] = {a, b, c};
+  int sum = 0;
+  for (int v : values) sum += v;
+  out[0] = sum;
+}
+
+// ----
+kernel.def @k() {
+  %4 = index.constant 1 : index
+  %5 = index.constant 1 : index
+  %6 = index.constant 1 : index
+  %7 = index.constant 1 : index
+  %8 = index.constant 1 : index
+  %9 = index.constant 1 : index
+  kernel.launch.config workgroups(%4, %5, %6) workgroup_size(%7, %8, %9) : index
+} launch(%out: buffer, %a: i32, %b: i32, %c: i32) {
+  %out_byte_offset = index.constant 0 : offset
+  %11 = index.constant 12 : offset
+  %values_storage = buffer.alloca<private> align(4) %11 : buffer
+  %values_storage_byte_offset = index.constant 0 : offset
+  %values_view = buffer.view %values_storage[%values_storage_byte_offset] : buffer -> view<3xi32>
+  %15 = index.constant 0 : index
+  view.store %a, %values_view[%15] : i32, view<3xi32>
+  %16 = index.constant 1 : index
+  view.store %b, %values_view[%16] : i32, view<3xi32>
+  %17 = index.constant 2 : index
+  view.store %c, %values_view[%17] : i32, view<3xi32>
+  %sum$18 = scalar.constant 0 : i32
+  %19 = scalar.constant 3 : i64
+  %20 = scalar.constant 4 : i64
+  %21 = scalar.muli %19, %20 : i64
+  %22 = index.cast %values_storage_byte_offset : offset to i64
+  %23 = scalar.addi %22, %21 : i64
+  %24 = scalar.assume %23 [range(%23, 0, 9223372036854775807)] : i64
+  %_byte_offset$25 = index.cast %24 : i64 to offset
+  %sum$32, %33, %_byte_offset$34 = scf.while(%sum = %sum$18 : i32, %27 = %values_storage : buffer, %_byte_offset = %values_storage_byte_offset : offset) -> (i32, buffer, offset) {
+    %35 = buffer.compare.address ne, %27[%_byte_offset], %values_storage[%_byte_offset$25]
+    scf.condition %35, %sum, %27, %_byte_offset : i1, i32, buffer, offset
+  } do(%sum$29: i32, %30: buffer, %_byte_offset$31: offset) {
+    %36 = buffer.view %30[%_byte_offset$31] : buffer -> view<1xi32>
+    %v = view.load<root_in_bounds> %36[0] : view<1xi32> -> i32
+    %sum$38 = scalar.addi %sum$29, %v : i32
+    %39 = scalar.constant 1 : i32
+    %40 = scalar.extsi %39 : i32 to i64
+    %41 = scalar.constant 4 : i64
+    %42 = scalar.muli %40, %41 : i64
+    %43 = index.cast %_byte_offset$31 : offset to i64
+    %44 = scalar.addi %43, %42 : i64
+    %45 = scalar.assume %44 [range(%44, 0, 9223372036854775807)] : i64
+    %_byte_offset$46 = index.cast %45 : i64 to offset
+    scf.yield %sum$38, %30, %_byte_offset$46 : i32, buffer, offset
+  }
+  %47 = scalar.constant 0 : i32
+  %48 = scalar.extsi %47 : i32 to i64
+  %49 = scalar.constant 4 : i64
+  %50 = scalar.muli %48, %49 : i64
+  %51 = index.cast %out_byte_offset : offset to i64
+  %52 = scalar.addi %51, %50 : i64
+  %53 = scalar.assume %52 [range(%52, 0, 9223372036854775807)] : i64
+  %54 = index.cast %53 : i64 to offset
+  %55 = buffer.view %out[%54] : buffer -> view<1xi32>
+  view.store<root_in_bounds> %sum$32, %55[0] : i32, view<1xi32>
+  kernel.return
+}
+
+// ====
+// A user iterator carries ordinary mutable values through the loop.
+#include <loomcxx/kernel.h>
+
+struct Range {
+  struct iterator {
+    long i;
+    long operator*() const { return i; }
+    void operator++() { ++i; }
+    bool operator!=(const iterator& o) const { return i != o.i; }
+  };
+  long n;
+  iterator begin() const { return {0}; }
+  iterator end() const { return {n}; }
+};
+
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void k(long* out, long n) {
+  long sum = 0;
+  for (long i : Range{n}) sum += i;
+  out[0] = sum;
+}
+
+// ----
+kernel.def @k() {
+  %2 = index.constant 1 : index
+  %3 = index.constant 1 : index
+  %4 = index.constant 1 : index
+  %5 = index.constant 1 : index
+  %6 = index.constant 1 : index
+  %7 = index.constant 1 : index
+  kernel.launch.config workgroups(%2, %3, %4) workgroup_size(%5, %6, %7) : index
+} launch(%out: buffer, %n: i64) {
+  %out_byte_offset = index.constant 0 : offset
+  %9 = scalar.constant 0 : i32
+  %sum$10 = scalar.extsi %9 : i32 to i64
+  %11 = index.constant 8 : offset
+  %12 = buffer.alloca<private> align(8) %11 : buffer
+  %13 = index.constant 0 : offset
+  %14 = buffer.view %12[%13] : buffer -> view<8xi8>
+  %15 = index.constant 0 : offset
+  %16 = index.add %13, %15 : offset
+  %17 = index.assume %16 [range(%16, 0, 0)] : offset
+  %18 = buffer.view %12[%17] : buffer -> view<1xi64>
+  view.store %n, %18[0] : i64, view<1xi64>
+  %_i$19 = func.call pure @Range__begin_storage(%12, %13) : (buffer, offset) -> (i64)
+  %_i$20 = func.call readonly @Range__end_storage(%12, %13) : (buffer, offset) -> (i64)
+  %sum$25, %_i$26 = scf.while(%sum = %sum$10 : i64, %_i = %_i$19 : i64) -> (i64, i64) {
+    %27 = func.call pure @Range__iterator__operator_not_equal_value(%_i, %_i$20) : (i64, i64) -> (i1)
+    scf.condition %27, %sum, %_i : i1, i64, i64
+  } do(%sum$23: i64, %_i$24: i64) {
+    %i = func.call pure @Range__iterator__operator_dereference_value(%_i$24) : (i64) -> (i64)
+    %sum$29 = scalar.addi %sum$23, %i : i64
+    %_i$30 = func.call pure @Range__iterator__operator_pre_increment_value(%_i$24) : (i64) -> (i64)
+    scf.yield %sum$29, %_i$30 : i64, i64
+  }
+  %31 = scalar.constant 0 : i32
+  %32 = scalar.extsi %31 : i32 to i64
+  %33 = scalar.constant 8 : i64
+  %34 = scalar.muli %32, %33 : i64
+  %35 = index.cast %out_byte_offset : offset to i64
+  %36 = scalar.addi %35, %34 : i64
+  %37 = scalar.assume %36 [range(%36, 0, 9223372036854775807)] : i64
+  %38 = index.cast %37 : i64 to offset
+  %39 = buffer.view %out[%38] : buffer -> view<1xi64>
+  view.store<root_in_bounds> %sum$25, %39[0] : i64, view<1xi64>
+  kernel.return
+}
+
+func.def @Range__begin_storage(%this: buffer, %this_byte_offset: offset) -> (i64) {
+  %43 = scalar.constant 0 : i32
+  %44 = scalar.extsi %43 : i32 to i64
+  func.return %44 : i64
+}
+
+func.def @Range__end_storage(%this: buffer, %this_byte_offset: offset) -> (i64) {
+  %48 = index.constant 0 : offset
+  %49 = index.add %this_byte_offset, %48 : offset
+  %50 = buffer.view %this[%49] : buffer -> view<1xi64>
+  %n = view.load<root_in_bounds> %50[0] : view<1xi64> -> i64
+  func.return %n : i64
+}
+
+func.def @Range__iterator__operator_not_equal_value(%this_i: i64, %o_i: i64) -> (i1) {
+  %55 = scalar.cmpi ne, %this_i, %o_i : i64
+  func.return %55 : i1
+}
+
+func.def @Range__iterator__operator_dereference_value(%this_i: i64) -> (i64) {
+  func.return %this_i : i64
+}
+
+func.def @Range__iterator__operator_pre_increment_value(%this_i: i64) -> (i64) {
+  %60 = scalar.constant 1 : i64
+  %i = scalar.addi %this_i, %60 : i64
+  func.return %i : i64
+}

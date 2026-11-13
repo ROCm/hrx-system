@@ -19,6 +19,9 @@ void amdf_test_wddm_provider_reset(void);
 // Selects the number of rejected adapter-close attempts.
 void amdf_test_wddm_provider_set_adapter_close_failures(uint32_t failure_count);
 
+// Selects the native package type returned with adapter properties.
+void amdf_test_wddm_provider_set_discrete(uint32_t is_discrete);
+
 // Returns the number of successfully opened adapters.
 uint32_t amdf_test_wddm_provider_query_adapter_open_success_count(void);
 

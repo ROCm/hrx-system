@@ -52,11 +52,8 @@ static bool loom_low_schedule_setup_order_has_per_user_placement(
 
 static bool loom_low_schedule_setup_order_is_member(
     const loom_low_schedule_build_state_t* state,
-    const loom_low_schedule_node_t* node, bool order_structural_setup) {
+    const loom_low_schedule_node_t* node) {
   if (node->kind == LOOM_LOW_SCHEDULE_NODE_STRUCTURAL) {
-    if (order_structural_setup) {
-      return true;
-    }
     bool requires_register = false;
     if (loom_low_schedule_setup_order_has_per_user_placement(
             state, node, &requires_register) &&
@@ -64,42 +61,60 @@ static bool loom_low_schedule_setup_order_is_member(
       return true;
     }
     if (!iree_any_bit_set(node->flags,
-                          LOOM_LOW_SCHEDULE_NODE_FLAG_STORAGE_SETUP) ||
-        node->result_count != 1) {
+                          LOOM_LOW_SCHEDULE_NODE_FLAG_STORAGE_SETUP)) {
       return false;
+    }
+    // Structural composition can separate a private input from the native
+    // consumer of the assembled value. Preserve that input's placement through
+    // its immediate composition, subject to the same footprint and unique
+    // successor checks as other setup. Unrelated storage keeps its freedom to
+    // retire live operands instead of inheriting a function-wide repair policy.
+    const iree_bitmap_t per_user_values =
+        state->options->per_user_placement_values;
+    if (per_user_values.bit_count != 0) {
+      const loom_value_ordinal_t* operands =
+          loom_low_schedule_node_const_operand_ordinals(node);
+      for (uint16_t i = 0; i < node->operand_count; ++i) {
+        const loom_value_id_t value_id =
+            state->value_domain->value_ids[operands[i]];
+        if (value_id < per_user_values.bit_count &&
+            iree_bitmap_test(per_user_values, value_id)) {
+          return true;
+        }
+      }
     }
     // A singleton cannot hold a later setup while its consumer's prerequisites
     // still need that location. Other storage remains available for pressure
     // and issue-slot scheduling instead of acquiring these ordering edges.
     const loom_low_schedule_value_record_t* result =
         &state->values[loom_low_schedule_node_const_result_ordinals(node)[0]];
-    if (!loom_low_schedule_value_requires_register(result)) {
+    if (!loom_low_schedule_value_has_constrained_register(result)) {
       return false;
     }
-    const uint16_t domain = loom_low_schedule_unspillable_completion_domain_id(
+    const uint16_t domain = loom_low_schedule_constrained_completion_domain_id(
         state, result->register_class_id);
     return domain != UINT16_MAX && result->unit_count == 1 &&
-           state->pressure_limits.unspillable_completion_domains[domain]
+           state->pressure_limits.constrained_completion_domains[domain]
                    .capacity == 1;
   }
   if (node->result_count != 1) {
     return false;
   }
-  // Input-free rematerializable values remain pressure-scheduled. A required
-  // private value cannot be cloned and instead retains the complete target
-  // setup chain that produced it.
+  // Repair owns the placement of private producers, including input-free
+  // constants. Their complete setup chain must remain available together:
+  // deferring each constant until it alone unlocks a consumer can strand a
+  // consumer that needs several constants while unrelated live ranges grow.
   bool requires_register = false;
   const bool has_per_user_placement =
       loom_low_schedule_setup_order_has_per_user_placement(state, node,
                                                            &requires_register);
-  return has_per_user_placement &&
-         (node->operand_count != 0 || requires_register);
+  return has_per_user_placement;
 }
 
-// Artificial prerequisites must preserve the footprint of storage that
-// allocation cannot spill. Keep conversions and contractions available
-// to pressure scheduling so those inputs can retire before independent work.
-static bool loom_low_schedule_setup_order_preserves_required_pressure(
+// Artificial prerequisites must preserve the footprint of constrained storage.
+// Keep conversions and contractions available to pressure scheduling so those
+// inputs can retire before independent work.
+static bool loom_low_schedule_setup_order_preserves_completion_pressure(
     const loom_low_schedule_build_state_t* state,
     const loom_low_schedule_node_t* node) {
   if (node->result_count != 1) {
@@ -120,7 +135,7 @@ static bool loom_low_schedule_setup_order_preserves_required_pressure(
     const loom_low_schedule_value_record_t* operand =
         &state->values[operands[i]];
     if (operand->unit_count == 0 ||
-        !loom_low_schedule_value_requires_register(operand)) {
+        !loom_low_schedule_value_has_constrained_register(operand)) {
       continue;
     }
     if (operand->register_class_id != result->register_class_id &&
@@ -153,7 +168,7 @@ static bool loom_low_schedule_setup_order_preserves_required_pressure(
   if (operand_units == 0) {
     return true;
   }
-  return loom_low_schedule_value_requires_register(result) &&
+  return loom_low_schedule_value_has_constrained_register(result) &&
          operand_units <= result->unit_count &&
          !iree_any_bit_set(node->flags,
                            LOOM_LOW_SCHEDULE_NODE_FLAG_EARLY_CLOBBER |
@@ -162,7 +177,8 @@ static bool loom_low_schedule_setup_order_preserves_required_pressure(
 
 static bool loom_low_schedule_setup_order_mark_node(
     loom_low_schedule_build_state_t* state, loom_low_schedule_node_t* node) {
-  if (!loom_low_schedule_setup_order_preserves_required_pressure(state, node)) {
+  if (!loom_low_schedule_setup_order_preserves_completion_pressure(state,
+                                                                   node)) {
     return false;
   }
   node->flags |= LOOM_LOW_SCHEDULE_NODE_FLAG_ORDERED_SETUP;
@@ -176,7 +192,7 @@ static void loom_low_schedule_setup_order_mark_continuation_source(
   loom_low_schedule_node_t* node = &state->nodes[producer];
   if (node->descriptor == NULL ||
       iree_any_bit_set(node->traits, LOOM_TRAIT_OBSERVABLE_EFFECT) ||
-      !loom_low_schedule_value_requires_register(
+      !loom_low_schedule_value_has_constrained_register(
           &state->values[source_ordinal])) {
     return;
   }
@@ -193,8 +209,8 @@ static void loom_low_schedule_setup_order_mark_continuation_source(
       bool requires_register = false;
       if (loom_low_schedule_setup_order_has_per_user_placement(
               state, node, &requires_register) ||
-          loom_low_schedule_setup_order_preserves_required_pressure(state,
-                                                                    node)) {
+          loom_low_schedule_setup_order_preserves_completion_pressure(state,
+                                                                      node)) {
         node->flags |= LOOM_LOW_SCHEDULE_NODE_FLAG_ORDERED_SETUP;
         state->setup_order.has_members = true;
       }
@@ -264,16 +280,14 @@ static void loom_low_schedule_setup_order_classify_storage_continuation(
 }
 
 void loom_low_schedule_setup_order_classify_node(
-    loom_low_schedule_build_state_t* state, uint32_t node_index,
-    bool order_structural_setup) {
+    loom_low_schedule_build_state_t* state, uint32_t node_index) {
   loom_low_schedule_node_t* node = &state->nodes[node_index];
   if (node->result_count != 1) {
     return;
   }
   loom_low_schedule_setup_order_classify_storage_continuation(state, node,
                                                               node_index);
-  if (loom_low_schedule_setup_order_is_member(state, node,
-                                              order_structural_setup)) {
+  if (loom_low_schedule_setup_order_is_member(state, node)) {
     (void)loom_low_schedule_setup_order_mark_node(state, node);
   }
 }

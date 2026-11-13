@@ -12,9 +12,9 @@
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "iree/vm/environment.h"
-#include "loom/serve/runtime/execution/execution.h"
-#include "loom/serve/testing/device.h"
-#include "loom/serve/testing/service_application.h"
+#include "loom/runtime/execution/execution.h"
+#include "loom/runtime/testing/application.h"
+#include "loom/runtime/testing/device.h"
 
 namespace {
 
@@ -34,18 +34,18 @@ class TextStateTest : public ::testing::TestWithParam<uint32_t> {
         .checkpoint_capacity = 2,
     };
     loom_serve_text_state_initialize(&options, host_allocator, &state);
-    auto application_options = loom_serve_test_application_options_default();
-    if (application_options.backing == LOOM_SERVE_POOL_BACKING_ELASTIC) {
+    auto application_options = loom_runtime_test_application_options_default();
+    if (application_options.backing == LOOM_RUNTIME_POOL_BACKING_ELASTIC) {
       application_options.memory_limit = 64 * 1024 * 1024;
     }
-    loom_serve_test_application_t* application = nullptr;
-    IREE_ASSERT_OK(loom_serve_test_application_acquire(
+    loom_runtime_test_application_t* application = nullptr;
+    IREE_ASSERT_OK(loom_runtime_test_application_acquire(
         &application_options, host_allocator, &application));
-    device = loom_serve_test_application_device_at(application, 0);
-    storage_owner = loom_serve_device_group_pool_at(
-        loom_serve_test_application_device_group(application), 0);
-    IREE_ASSERT_OK(
-        loom_serve_device_create_execution(device, storage_owner, &execution));
+    device = loom_runtime_test_application_device_at(application, 0);
+    storage_owner = loom_runtime_device_group_pool_at(
+        loom_runtime_test_application_device_group(application), 0);
+    IREE_ASSERT_OK(loom_runtime_device_create_execution(device, storage_owner,
+                                                        &execution));
     IREE_ASSERT_OK(iree_vm_environment_allocate(host_allocator, &environment));
     IREE_ASSERT_OK(iree_vm_ref_types_resolve(
         iree_vm_environment_lookup_ref_type_table(environment, IREE_SV("vm")),
@@ -103,11 +103,11 @@ class TextStateTest : public ::testing::TestWithParam<uint32_t> {
   void TearDown() override {
     loom_serve_text_state_retire(&state, nullptr, nullptr);
     if (execution) {
-      IREE_EXPECT_OK(loom_serve_execution_drain(execution));
+      IREE_EXPECT_OK(loom_runtime_execution_drain(execution));
     }
     loom_serve_text_state_await_retirement(&state);
     IREE_EXPECT_OK(loom_serve_text_state_deinitialize(&state));
-    loom_serve_execution_release(execution);
+    loom_runtime_execution_release(execution);
     iree_vm_variant_span_reset(iree_vm_variant_span_from_array(results));
     iree_vm_environment_free(environment);
   }
@@ -140,8 +140,8 @@ class TextStateTest : public ::testing::TestWithParam<uint32_t> {
     };
     uint64_t completion = 0;
     IREE_RETURN_IF_ERROR(
-        loom_serve_execution_transfer(execution, 1, &upload, &completion));
-    return loom_serve_execution_wait(execution, completion);
+        loom_runtime_execution_transfer(execution, 1, &upload, &completion));
+    return loom_runtime_execution_wait(execution, completion);
   }
 
   void CheckBytes(iree_hal_buffer_t* buffer, uint64_t offset,
@@ -159,8 +159,8 @@ class TextStateTest : public ::testing::TestWithParam<uint32_t> {
     };
     uint64_t completion = 0;
     IREE_ASSERT_OK(
-        loom_serve_execution_feedback(execution, 1, &download, &completion));
-    IREE_ASSERT_OK(loom_serve_execution_feedback_wait(execution, completion));
+        loom_runtime_execution_feedback(execution, 1, &download, &completion));
+    IREE_ASSERT_OK(loom_runtime_execution_feedback_wait(execution, completion));
     EXPECT_EQ(actual, expected);
   }
 
@@ -210,11 +210,11 @@ class TextStateTest : public ::testing::TestWithParam<uint32_t> {
   // Allocator enclosing bootstrap metadata and state retirement.
   const iree_allocator_t host_allocator = iree_allocator_system();
   // Borrowed process-wide device used by this physical-target test suite.
-  loom_serve_device_t* device = nullptr;
+  loom_runtime_device_t* device = nullptr;
   // Explicit storage selected for retained state and execution workspace.
-  loom_serve_pool_t* storage_owner = nullptr;
+  loom_runtime_pool_t* storage_owner = nullptr;
   // Owned serialized model execution domain.
-  loom_serve_execution_t* execution = nullptr;
+  loom_runtime_execution_t* execution = nullptr;
   // VM buffer type owner for the source bootstrap values.
   iree_vm_environment_t* environment = nullptr;
   // Resolved canonical reference handles for bootstrap buffers.
@@ -229,7 +229,7 @@ class TextStateTest : public ::testing::TestWithParam<uint32_t> {
 
 TEST_P(TextStateTest, OptionalRootsRetainOriginsMapsAndCheckpointCarry) {
   IREE_ASSERT_OK(Allocate());
-  IREE_ASSERT_OK(loom_serve_execution_drain(execution));
+  IREE_ASSERT_OK(loom_runtime_execution_drain(execution));
   EXPECT_EQ(state.draft.cache != nullptr, (GetParam() & 1) != 0);
   EXPECT_EQ(state.draft.row_table != nullptr, (GetParam() & 2) != 0);
   EXPECT_EQ(state.carry != nullptr, (GetParam() & 4) != 0);
@@ -247,7 +247,7 @@ TEST_P(TextStateTest, OptionalRootsRetainOriginsMapsAndCheckpointCarry) {
   const loom_serve_text_span_t span = {0, 5, tokens};
   const uint32_t extent = 5;
   IREE_ASSERT_OK(loom_serve_text_state_grow(&state, 1, &span, &extent));
-  IREE_ASSERT_OK(loom_serve_execution_drain(execution));
+  IREE_ASSERT_OK(loom_runtime_execution_drain(execution));
   ASSERT_NO_FATAL_FAILURE(CheckMaps());
   auto* row = state.rows[0];
   ASSERT_NO_FATAL_FAILURE(CacheContents(row, true));
@@ -267,7 +267,7 @@ TEST_P(TextStateTest, OptionalRootsRetainOriginsMapsAndCheckpointCarry) {
   loom_serve_text_state_checkpoint_t* checkpoint = nullptr;
   IREE_ASSERT_OK(loom_serve_text_state_row_submit_pin(row, &checkpoint));
   ASSERT_NE(checkpoint, nullptr);
-  IREE_ASSERT_OK(loom_serve_execution_drain(execution));
+  IREE_ASSERT_OK(loom_runtime_execution_drain(execution));
   const std::vector<uint8_t> changed(carry.size(), 0xA5);
   if (!carry.empty()) {
     IREE_ASSERT_OK(Upload(state.carry, 0, changed));
@@ -287,9 +287,9 @@ TEST_P(TextStateTest, OptionalRootsRetainOriginsMapsAndCheckpointCarry) {
     auto status = loom_serve_text_state_resize(&state, capacity, &storage);
     loom_serve_text_storage_deinitialize(&storage);
     IREE_ASSERT_OK(status);
-    IREE_ASSERT_OK(loom_serve_execution_drain(execution));
+    IREE_ASSERT_OK(loom_runtime_execution_drain(execution));
     if (state.memory.pool && previous_carry) {
-      EXPECT_GE(loom_serve_memory_pool_live_bytes(state.memory.pool),
+      EXPECT_GE(loom_runtime_memory_pool_live_bytes(state.memory.pool),
                 iree_hal_buffer_byte_length(previous_carry.get()) +
                     iree_hal_buffer_byte_length(state.carry));
     }
@@ -316,9 +316,9 @@ TEST_P(TextStateTest, OptionalRootsRetainOriginsMapsAndCheckpointCarry) {
   }
   if (state.memory.pool) {
     IREE_ASSERT_OK(loom_serve_text_state_checkpoint_submit_suspend(checkpoint));
-    IREE_ASSERT_OK(loom_serve_execution_drain(execution));
+    IREE_ASSERT_OK(loom_runtime_execution_drain(execution));
     loom_serve_text_state_checkpoint_complete_suspend(checkpoint);
-    EXPECT_EQ(loom_serve_snapshot_size(checkpoint->snapshot),
+    EXPECT_EQ(loom_runtime_snapshot_size(checkpoint->snapshot),
               16 + carry.size() + state.storage.region_count * 32);
     // Destroy the live endpoint copy so only the host snapshot can recover it.
     if (!carry.empty()) {
@@ -358,7 +358,7 @@ TEST_P(TextStateTest, OptionalRootsRetainOriginsMapsAndCheckpointCarry) {
     IREE_ASSERT_OK(loom_serve_text_state_submit_trim(&state, &result));
     bool complete = false;
     while (!complete) {
-      IREE_ASSERT_OK(loom_serve_execution_drain(execution));
+      IREE_ASSERT_OK(loom_runtime_execution_drain(execution));
       IREE_ASSERT_OK(
           loom_serve_text_state_complete_trim(&state, &result, &complete));
     }
@@ -369,12 +369,12 @@ TEST_P(TextStateTest, OptionalRootsRetainOriginsMapsAndCheckpointCarry) {
   }
   // Capacity reservation detaches shared tails and publishes the same maps
   // to whichever origin tables the source actually allocated.
-  loom_serve_memory_admission_t admission;
+  loom_runtime_memory_admission_t admission;
   IREE_ASSERT_OK(loom_serve_text_state_row_submit_reserve(
       fork, LOOM_SERVE_TEXT_RESERVE_CONTINUE, nullptr, 9, nullptr, nullptr,
       &admission));
-  ASSERT_EQ(admission, LOOM_SERVE_MEMORY_ADMISSION_AVAILABLE);
-  IREE_ASSERT_OK(loom_serve_execution_drain(execution));
+  ASSERT_EQ(admission, LOOM_RUNTIME_MEMORY_ADMISSION_AVAILABLE);
+  IREE_ASSERT_OK(loom_runtime_execution_drain(execution));
   loom_serve_text_state_row_complete_reserve(fork);
   ASSERT_NO_FATAL_FAILURE(CheckMaps());
   loom_serve_text_state_row_release_reservation(fork);
@@ -390,12 +390,12 @@ TEST_P(TextStateTest, CarryFollowsSourceStride) {
 }
 
 TEST_P(TextStateTest, PermanentRootsConsumeTheSharedPhysicalBudget) {
-  auto* memory = loom_serve_pool_memory(storage_owner);
+  auto* memory = loom_runtime_pool_memory(storage_owner);
   if (!memory) {
     GTEST_SKIP() << "Fixed backing has no shared physical admission ledger";
   }
-  IREE_ASSERT_OK(loom_serve_test_pool_trim_and_drain(storage_owner, 0));
-  const uint64_t before = loom_serve_memory_pool_live_bytes(memory);
+  IREE_ASSERT_OK(loom_runtime_test_pool_trim_and_drain(storage_owner, 0));
+  const uint64_t before = loom_runtime_memory_pool_live_bytes(memory);
   ASSERT_EQ(before, 0u);
   uint64_t permanent_bytes = 0;
   for (size_t i = 0; i < LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT; ++i) {
@@ -406,8 +406,8 @@ TEST_P(TextStateTest, PermanentRootsConsumeTheSharedPhysicalBudget) {
     }
   }
   IREE_ASSERT_OK(Allocate());
-  IREE_ASSERT_OK(loom_serve_execution_drain(execution));
-  EXPECT_GE(loom_serve_memory_pool_live_bytes(memory),
+  IREE_ASSERT_OK(loom_runtime_execution_drain(execution));
+  EXPECT_GE(loom_runtime_memory_pool_live_bytes(memory),
             before + permanent_bytes);
 }
 

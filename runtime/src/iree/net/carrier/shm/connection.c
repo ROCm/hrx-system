@@ -454,9 +454,10 @@ void iree_net_shm_connection_publish(
                            });
   IREE_CHECK_OK(iree_async_local_stream_receive(
       connection->channel.stream,
-      iree_make_byte_span(&connection->peer_byte, 1), 0, NULL,
+      iree_make_byte_span(&connection->peer_byte, 1), 0,
       (iree_async_local_stream_callback_t){
           .fn = iree_net_shm_connection_peer_complete,
           .user_data = connection,
-      }));
+      },
+      NULL));
 }

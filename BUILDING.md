@@ -79,9 +79,11 @@ CMake consumer fixtures live under the owning project's `build_tools/`;
 Presubmit enforces this boundary: product source directories contain no authored
 CMake files. Generated declarations and build artifacts stay in the build tree.
 
-`LIBHRX_BUILD=OFF` selects a runtime/compiler build. Building the HRX GPU
-runtime instead uses `LIBHRX_BUILD=ON` and its AMDGPU dependencies; see
-[ROCm configuration](#rocm) and the [HRX package build](README.md#building).
+`LIBHRX_BUILD=OFF` selects a runtime/compiler build. Building the native HRX
+API and its compatibility bindings uses `LIBHRX_BUILD=ON`; see the
+[libhrx package build](libhrx/README.md#build-and-install). The
+[driver configuration](#runtime-libraries-and-drivers) describes native AMD
+execution separately from the optional [ROCr path](#legacy-rocr-hal-and-rocm).
 
 The default build tree is `build/cmake`. Select another with
 `python dev.py --cmake-build-dir /path/to/build cmake configure ...`; subsequent
@@ -217,6 +219,19 @@ iree-cmake-configure -DCMAKE_BUILD_TYPE=Release -DCMAKE_INTERPROCEDURAL_OPTIMIZA
 This enables interprocedural optimization for targets throughout the build,
 except components with explicit exclusions such as the mimalloc adapter.
 
+### Debug information
+
+Linux builds compress full DWARF debug information with zlib in both object
+files and linked binaries. Archives remain self-contained, and debuggers retain
+source lines, inline frames, types, and local variables. This reduces build
+artifact storage and transfer without adding a runtime library dependency or
+enabling debug information in optimized profiles that otherwise omit it.
+Windows PDB and macOS debug information are unchanged.
+
+For tools without compressed-DWARF support, disable this with Bazel's
+`--features=-compressed_debug_info --host_features=-compressed_debug_info`
+or CMake's `-DIREE_ENABLE_COMPRESSED_DEBUG_INFO=OFF`.
+
 ### Sanitizers
 
 Bazel selects sanitizer instrumentation with named configurations:
@@ -226,7 +241,7 @@ Bazel selects sanitizer instrumentation with named configurations:
 | `--config=asan` | AddressSanitizer with use-after-scope checks. |
 | `--config=ubsan` | UndefinedBehaviorSanitizer with the function and vptr checks disabled to match the runtime's type-erased dispatch and `-fno-rtti` C++ mode. |
 | `--config=tsan` | ThreadSanitizer. |
-| `--config=msan` | MemorySanitizer; execution also requires instrumented native dependencies. |
+| `--config=msan` | MemorySanitizer with origin tracking; in-process native dependencies must also be instrumented. |
 | `--config=fuzzer` | libFuzzer build mode with ASAN enabled. |
 
 Examples:
@@ -234,7 +249,12 @@ Examples:
 ```bash
 python dev.py bazel test //runtime/... --config=asan
 python dev.py bazel test //runtime/src/iree/async/... --config=tsan
+python build_tools/devtools/ci.py iree-bazel-cpu-msan
 ```
+
+The [CPU MSAN profile](build_tools/ci/README.md#select-a-reproduction) selects
+qualified host compiler, arena, and VM tests without requiring instrumentation
+of external tools or GPU execution.
 
 CMake exposes `IREE_ENABLE_ASAN`, `IREE_ENABLE_UBSAN`, `IREE_ENABLE_TSAN`,
 and `IREE_ENABLE_MSAN`. Use a separate build tree for each configuration:
@@ -359,7 +379,8 @@ independent:
 
 | Build host | Destination/compiler | Configs |
 | --- | --- | --- |
-| Linux | Windows x86-64, clang-cl | `--config=windows-x86_64` |
+| Linux | Windows x86-64, clang-cl (default) | `--config=windows-x86_64` |
+| Linux | Windows x86-64, MSVC | `--config=windows-x86_64 --config=windows-msvc` |
 | Windows x64 | Native, clang-cl (default) | None |
 | Windows x64 | Native, MSVC | `--config=windows-msvc` |
 | Linux or macOS | macOS arm64 | `--config=macos-arm64` |
@@ -371,8 +392,8 @@ builds infer their destination from the host, so adding a matching destination
 config is optional.
 For example, a native MSVC build needs only `--config=windows-msvc`; adding
 `--config=windows-x86_64` produces the same selection in either flag order.
-`windows-clang-cl` explicitly selects the default Windows compiler. MSVC requires
-a Windows build host; Linux-to-Windows builds use clang-cl. macOS destinations
+`windows-clang-cl` explicitly selects the default Windows compiler. Linux uses
+clang-cl by default and can run genuine MSVC through Wine. macOS destinations
 use Xcode/Command Line Tools on a Mac and LLVM on Linux.
 
 Build-time generators retain the host toolchain and remain executable on the
@@ -417,11 +438,12 @@ python dev.py cmake doctor
 ```
 
 Keep source and build paths short, and use a separate CMake tree for each
-compiler. Bazel's Python runfiles require symbolic links: enable Windows
-Developer Mode or grant the account the Create symbolic links user right.
-`python dev.py bazel configure` and `python dev.py bazel doctor` check that
-the current process can create one. The Windows long-path policy can help tools
-that support it, but does not remove path limits from every tool.
+compiler. Bazel's managed Python runfiles exceed the legacy Win32 path limit
+and use symbolic links, so Windows Bazel hosts require `LongPathsEnabled=1`
+plus Developer Mode or an equivalent Create symbolic links user right.
+Provision both policies in the base image for CI jobs that cannot elevate.
+`python dev.py bazel configure` and `python dev.py bazel doctor` diagnose both
+capabilities. Long-path support does not remove path limits from every tool.
 
 Windows Bazel builds use `clang-cl` by default and require `BAZEL_LLVM` to name
 the LLVM installation root. The MSVC ABI tools and SDK still come from the
@@ -524,6 +546,37 @@ iree-bazel-build --config=windows-x86_64 //tools:iree-dump-cpuinfo
 iree-bazel-build --config=windows-x86_64 -c dbg \
   //runtime/src/iree/base/testing:dynamic_library_test
 iree-bazel-build --config=windows-x86_64 -c opt //tools:iree-dump-cpuinfo
+```
+
+To compile with genuine MSVC instead of clang-cl, install a complete 64-bit Wine
+runtime, `wineserver`, `flock`, `7z`, `curl`, and `tar`. The checked-in setup
+scripts acquire the pinned Windows target inputs and x64 MSVC compiler package
+into user-owned cache directories:
+
+```bash
+export LLVM_ROOT=/path/to/llvm
+export WINDOWS_CROSS_ROOT="${XDG_CACHE_HOME:-$HOME/.cache}/hrx/windows-cross"
+export WINSDK_ROOT="$WINDOWS_CROSS_ROOT/sdk"
+export WINDOWS_COMPILER_RT_ROOT="$WINDOWS_CROSS_ROOT/compiler-rt"
+export MSVC_WINE_ROOT="${XDG_CACHE_HOME:-$HOME/.cache}/hrx/msvc"
+export WINEARCH=win64
+export WINEPREFIX="${XDG_CACHE_HOME:-$HOME/.cache}/hrx/msvc-wine-prefix"
+
+.github/scripts/setup_windows_cross.sh
+.github/scripts/setup_windows_msvc.sh
+```
+
+These acquisition scripts accept the Microsoft package licenses on the caller's
+behalf. Review them before running them when the compiler and SDK are not already
+installed. MSVC setup initializes the prefix without a display and disables the
+unused Mono, Gecko, and menu integration components. Compiler actions require
+that initialized prefix, retain its Wine server, and coordinate concurrent
+processes through it. Build any Windows artifact with both the destination and
+compiler configs:
+
+```bash
+iree-bazel-build --config=windows-x86_64 --config=windows-msvc \
+  //loom/src/loom/tools/loom-compile
 ```
 
 Debug and fastbuild outputs include PDBs. Cross-built DLLs declare exports with
@@ -645,7 +698,6 @@ Building a driver does not open devices; applications select devices at runtime.
 | `IREE_ENABLE_VULKAN` | `ON`, `OFF` | Enables Vulkan API clients independently of HAL drivers. Defaults to `ON`; the Vulkan HAL also enables API availability. | Selects Vulkan API clients with the same default and HAL implication. | `--//build_tools/vulkan/config:enabled=<bool>` |
 | `IREE_ENABLE_D3D12` | `ON`, `OFF` | Enables D3D12 API clients for Windows targets. Defaults to `ON`. | Selects D3D12 API clients for Windows targets, including cross-compilation. Defaults to `ON`. | `--//build_tools/d3d12/config:enabled=<bool>` |
 | `IREE_NET_RDMA` | `ON`, `OFF` | Enables native RDMA resources and registration on Linux. Defaults to `OFF`. | Enables the same native RDMA packages; no host carrier is implicitly registered. Defaults to `OFF`. | `--//runtime/config/net:rdma=<bool>` |
-| `IREE_HAL_DRIVER_AMDGPU` | `ON`, `OFF` | Builds the legacy ROCr HAL driver, selected at runtime as `legacy-amdgpu`. | Adds or removes the `amdgpu` build selector from the recursive package scope and registers `legacy-amdgpu`. | `--//runtime/config/hal:drivers=<complete-driver-list>` |
 | `IREE_HAL_DRIVER_TASK` | `ON`, `OFF` | Builds the task runtime HAL driver. | Adds or removes `task` from the runtime driver registry. | `--//runtime/config/hal:drivers=<complete-driver-list>` |
 | `IREE_HAL_DRIVER_VULKAN` | `ON`, `OFF` | Builds the Vulkan runtime HAL driver. | Adds or removes `vulkan` from the runtime driver registry and recursive package scope. | `--//runtime/config/hal:drivers=<complete-driver-list>` |
 | `IREE_HAL_DRIVER_WEBGPU` | `ON`, `OFF` | Builds the WebGPU runtime HAL driver. | Adds or removes `webgpu` from the runtime driver registry and recursive package scope for WebGPU development. | `--//runtime/config/hal:drivers=<complete-driver-list>` |
@@ -691,14 +743,13 @@ independently control libamdf's native implementations, including those used by
 clients other than the HAL. Portable image and target utilities remain available
 to compiler clients independently of HAL engine selection.
 
-libamdf can also be built independently of the legacy AMDGPU HAL and ROCm
-dependency stack:
+libamdf can also be built without HAL consumers or a ROCm installation:
 
 ```bash
 python dev.py bazel configure -DIREE_HAL_DRIVER_AMD=OFF -DAMDF_BUILD=ON
 iree-bazel-build //libamdf:all
 
-iree-cmake-configure -DAMDF_BUILD=ON -DIREE_HAL_DRIVER_AMD=OFF -DIREE_HAL_DRIVER_AMDGPU=OFF -DLIBHRX_BUILD=OFF -DLOOM_BUILD=OFF
+iree-cmake-configure -DAMDF_BUILD=ON -DIREE_HAL_DRIVER_AMD=OFF -DLIBHRX_BUILD=OFF -DLOOM_BUILD=OFF
 iree-cmake-build libamdf/all
 ```
 
@@ -736,47 +787,34 @@ package mode; without a ROCm path it inherits the global mode. To consume a
 ROCm or TheRock SDK while keeping other source dependencies pinned, set
 `IREE_ROCM_PATH` and leave `IREE_DEPENDENCY_MODE=pinned`.
 
-### Legacy ROCr HAL and ROCm
+### Optional ROCm device tooling
 
-The native AMD GPU HAL is enabled by default and requires neither ROCr nor a
-ROCm SDK. This section applies only to the legacy `legacy-amdgpu` HAL and to
-development that explicitly needs ROCm device tooling.
+The native AMD GPU HAL is enabled by default and needs neither ROCr nor a
+ROCm SDK. HIP interoperability tests and source-built HSACO fixtures can use a
+ROCm device compiler independently of the runtime. Pinned dependency mode
+provides headers without a ROCm installation; without a configured device
+toolchain, builds use the available checked-in device fixtures.
 
-Pinned mode is the default. It lets AMDGPU host-side code compile without a
-ROCm/TheRock root; Bazel writes `IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN=none` when no
-ROCm path is configured:
-
-```bash
-python dev.py bazel configure -DIREE_HAL_DRIVER_AMDGPU=ON
-```
-
-Package mode consumes headers from a configured ROCm/TheRock root. Setting
-`IREE_ROCM_PATH` selects ROCm package header mode by default:
+Setting `IREE_ROCM_PATH` selects package headers and the optional ROCm device
+toolchain:
 
 ```bash
-python dev.py bazel configure \
-  -DIREE_HAL_DRIVER_AMDGPU=ON \
-  -DIREE_ROCM_PATH=/opt/rocm
+python dev.py bazel configure -DIREE_ROCM_PATH=/opt/rocm
 ```
 
-When a ROCm path is only needed for device tooling and the headers should still
-come from pinned sources, set `IREE_ROCM_DEPENDENCY_MODE=pinned` explicitly.
-
-Bazel configuration also accepts `IREE_ROCM_PATH` from the environment when
-the AMDGPU HAL is enabled:
+To use that device compiler with pinned headers, add
+`-DIREE_ROCM_DEPENDENCY_MODE=pinned`. With the native GPU engine enabled,
+Bazel configuration also accepts `IREE_ROCM_PATH` from the environment:
 
 ```bash
 IREE_ROCM_PATH=/opt/rocm python dev.py bazel configure \
-  -DIREE_HAL_DRIVER_AMDGPU=ON \
   -DIREE_ROCM_DEPENDENCY_MODE=pinned
 ```
 
-Host compiler selection is independent of the ROCm device toolchain. Set
-`CC`, `CXX`, and `AR` before configuring to choose the host compiler. A
-successful host build with pinned headers does not install ROCr; executing
-ROCr-backed AMDGPU programs still needs the runtime and access to a GPU.
-See the [AMDGPU build tools guide](build_tools/amdgpu/README.md) for device
-compiler selection and runtime target selectors.
+Host compiler selection remains independent: `CC`, `CXX`, and `AR` select the
+host tools. Explicit HIP/HSA interoperability tests still require their external
+runtime and GPU access. See the [AMDGPU build tools guide](build_tools/amdgpu/README.md)
+for device compiler selection and runtime target selectors.
 
 ### Loom compiler capabilities and execution
 
@@ -901,7 +939,7 @@ The Loom AMDGPU selector accepts:
 Runtime AMDGPU selectors such as `gfx9-generic`, `gfx908`,
 `gfx10-1-generic`, and `gfx10-3-generic` are not supported by the Loom compiler.
 The `iree_hal` selector narrows Loom to the supported subset requested by
-`IREE_HAL_AMDGPU_TARGETS`. Use it for a JIT build targeting the same processors
+`IREE_HAL_AMD_GPU_TARGETS`. Use it for a JIT build targeting the same processors
 as the runtime; `loom_defaults` keeps the compiler's full target set.
 
 AMDGPU compiler target selection is also a complete list. Bazel uses
@@ -923,7 +961,7 @@ To select Loom targets from the runtime's processor set:
 python dev.py cmake configure \
   -DLOOM_TARGET_ALL_AMD_GPU=ON \
   -DLOOM_ARCH_AMDGPU_TARGETS=iree_hal \
-  -DIREE_HAL_AMDGPU_TARGETS='gfx942;gfx1201'
+  -DIREE_HAL_AMD_GPU_TARGETS='gfx942;gfx1201'
 ```
 
 Execution options describe the runtime substrate available to Loom tools, not a
@@ -934,7 +972,7 @@ one GPU processor uses:
 ```bash
 python dev.py bazel configure \
   --config=loom-target-amd-gpu \
-  --//runtime/src/iree/hal/drivers/amd/gpu:targets=gfx942 \
+  --//runtime/src/iree/hal/driver/amd/gpu:targets=gfx942 \
   --//loom/config/arch/amdgpu:targets=gfx942
 ```
 
@@ -946,15 +984,11 @@ select only the capabilities they consume.
 
 ### Loom importers
 
-Importers are optional. The native [C/C++ importer](loom/src/loom/import/cxx/README.md)
+The native [C/C++ importer](loom/src/loom/import/cxx/README.md) is optional. It
 uses `--config=loom-importer-cxx` with Bazel or `-DLOOM_IMPORT_CXX=ON` with
-CMake. The [Python importer guide](loom/py/loom/importers/README.md) covers
-TileLang and MLIR, including their separate managed Python environments:
-
-```bash
-python dev.py importers setup mlir
-iree-bazel-test --importer-env mlir //loom/py/loom/importers/mlir:mlir_test
-```
+CMake. Foreign frontend integrations can use the separately versioned Python
+[importer construction API](loom/py/loom/importers/README.md) without adding
+their parser or compiler dependencies to an HRX deployment.
 
 ### Serving image inputs
 
@@ -1012,7 +1046,7 @@ tree. Bazel project availability is currently expressed by target selection.
 
 | Option | Default | Build system | Meaning |
 | --- | --- | --- | --- |
-| `LIBHRX_BUILD` | `ON` | CMake | Builds libhrx and HRX compatibility targets. GPU execution currently requires the explicitly enabled legacy backend (`IREE_HAL_DRIVER_AMDGPU=ON`); CPU execution does not. |
+| `LIBHRX_BUILD` | `ON` | CMake | Builds libhrx and HRX compatibility targets. GPU execution uses the native AMD GPU backend (`IREE_HAL_DRIVER_AMD_GPU=ON`, enabled by default). |
 | `LIBHRX_BUILD_CTS` | `ON` when libhrx and tests are enabled | CMake | Builds libhrx CTS binaries. |
 | `LIBHRX_BUILD_PASSTHROUGH` | `ON` on Linux, `OFF` elsewhere | CMake | Builds HIP passthrough and interception developer tools. |
 | `LOOM_BUILD` | `ON` | CMake | Builds Loom libraries, tools, bindings, and tests. |
@@ -1030,7 +1064,7 @@ cmake --install build/cmake --prefix build/install
 
 Replace `build/cmake` with the configured build tree. HRX's `HrxPublicDist`
 component installs its public SDK; see the
-[HRX package instructions](README.md#building). Public HRX packaging
+[HRX package instructions](libhrx/README.md#build-and-install). Public HRX packaging
 uses `BUILD_SHARED_LIBS=OFF` so private runtime components are incorporated into
 `libhrx`. Shared Loom tool bundles have their own
 [linkage option](#shared-loom-tool-bundles).

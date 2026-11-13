@@ -13,6 +13,7 @@
 #include "loom/analysis/consumption.h"
 #include "loom/analysis/motion.h"
 #include "loom/analysis/symbolic_expr_proof.h"
+#include "loom/codegen/low/lower/bindings.h"
 #include "loom/codegen/low/lower/context.h"
 #include "loom/codegen/low/lower/rule_descriptor.h"
 #include "loom/codegen/low/lower/rule_source_memory.h"
@@ -1225,6 +1226,20 @@ static iree_status_t loom_low_lower_rule_guard_matches(
           guard->selector.value.value_ref_index,
           loom_low_lower_rule_set_guard_payload(rule_set, guard)->u64,
           /*is_signed_domain=*/false, out_matches);
+    case LOOM_LOW_LOWER_GUARD_VALUE_DIVISIBLE_BY: {
+      const loom_value_id_t value_id = loom_low_lower_rule_source_value(
+          match_context->module, rule_set, source_op,
+          guard->selector.value.value_ref_index);
+      loom_value_facts_t facts = loom_value_facts_unknown();
+      *out_matches = loom_low_lower_rule_integer_element_range_facts(
+                         match_context->module, match_context->fact_table,
+                         value_id, &facts) &&
+                     loom_value_facts_divisible_by(
+                         facts, (int64_t)loom_low_lower_rule_set_guard_payload(
+                                    rule_set, guard)
+                                    ->u64);
+      return iree_ok_status();
+    }
     case LOOM_LOW_LOWER_GUARD_VALUE_EXACT_I64:
       *out_matches = loom_low_lower_rule_value_facts_exact_i64(
           match_context, rule_set, source_op,
@@ -1263,6 +1278,22 @@ static iree_status_t loom_low_lower_rule_guard_matches(
           match_context, rule_set, source_op,
           guard->selector.value.value_ref_index);
       return iree_ok_status();
+    case LOOM_LOW_LOWER_GUARD_VALUE_EXACT_FLOAT_TYPE: {
+      if (!match_context->fact_table) {
+        *out_matches = false;
+        return iree_ok_status();
+      }
+      const loom_value_id_t value_id = loom_low_lower_rule_source_value(
+          match_context->module, rule_set, source_op,
+          guard->selector.value.value_ref_index);
+      const loom_value_facts_t facts =
+          loom_value_fact_table_lookup(match_context->fact_table, value_id);
+      *out_matches = loom_value_facts_is_exact_float_type(
+          facts, (loom_scalar_type_t)loom_low_lower_rule_set_guard_payload(
+                     rule_set, guard)
+                     ->u64);
+      return iree_ok_status();
+    }
     case LOOM_LOW_LOWER_GUARD_VALUE_FLOAT_EXACTLY_REPRESENTABLE_AS: {
       if (!match_context->fact_table) {
         *out_matches = false;
@@ -1686,26 +1717,36 @@ static bool loom_low_lower_rule_emission_source_node(
 static iree_status_t loom_low_lower_rule_guard_program_matches(
     const loom_low_lower_rule_match_context_t* match_context,
     const loom_low_lower_rule_set_t* rule_set, const loom_op_t* source_op,
-    uint16_t guard_start, uint16_t guard_count, bool* out_matches,
+    uint16_t guard_start, uint16_t guard_count,
+    const loom_low_lower_guard_t** out_failed_guard,
     uint16_t* out_diagnostic_index, uint16_t* out_matched_guard_count) {
-  *out_matches = false;
+  *out_failed_guard = NULL;
   *out_diagnostic_index = LOOM_LOW_LOWER_DIAGNOSTIC_NONE;
   *out_matched_guard_count = 0;
+  if (guard_count == 0) {
+    return iree_ok_status();
+  }
+  const loom_low_lower_guard_ref_t* guard_ref_cursor =
+      rule_set->guard_refs +
+      ((uint32_t)guard_start << rule_set->guard_ref_offset_shift);
   for (uint16_t i = 0; i < guard_count; ++i) {
-    const uint16_t guard_ref_index = (uint16_t)(guard_start + i);
-    const loom_low_lower_guard_ref_t guard_index =
-        rule_set->guard_refs[guard_ref_index];
+    uint16_t guard_index = *guard_ref_cursor++;
+    if (IREE_UNLIKELY(guard_index == LOOM_LOW_LOWER_GUARD_REF_ESCAPE)) {
+      guard_index =
+          (uint16_t)(guard_ref_cursor[0] | (guard_ref_cursor[1] << 8));
+      guard_ref_cursor += 2;
+    }
     const loom_low_lower_guard_t* guard = &rule_set->guards[guard_index];
     bool guard_matches = false;
     IREE_RETURN_IF_ERROR(loom_low_lower_rule_guard_matches(
         match_context, rule_set, source_op, guard, &guard_matches));
     if (!guard_matches) {
+      *out_failed_guard = guard;
       *out_diagnostic_index = guard->diagnostic_index;
       *out_matched_guard_count = i;
       return iree_ok_status();
     }
   }
-  *out_matches = true;
   *out_matched_guard_count = guard_count;
   return iree_ok_status();
 }
@@ -1718,7 +1759,8 @@ static iree_status_t loom_low_lower_rule_matches(
     const loom_op_t** out_diagnostic_source_op,
     bool* out_source_memory_compatible, bool* out_uses_source_memory_access,
     const loom_op_t** out_source_nodes, uint8_t* out_source_node_count,
-    uint8_t* out_emission_source_node_index) {
+    uint8_t* out_emission_source_node_index,
+    const loom_low_lower_guard_t** out_failed_root_guard) {
   *out_matches = false;
   *out_diagnostic_index = LOOM_LOW_LOWER_DIAGNOSTIC_NONE;
   *out_matched_guard_count = 0;
@@ -1727,24 +1769,19 @@ static iree_status_t loom_low_lower_rule_matches(
   *out_uses_source_memory_access = false;
   *out_source_node_count = 0;
   *out_emission_source_node_index = 0;
-  bool guards_match = false;
+  *out_failed_root_guard = NULL;
+  const loom_low_lower_guard_t* failed_guard = NULL;
   IREE_RETURN_IF_ERROR(loom_low_lower_rule_guard_program_matches(
       match_context, rule_set, source_op, rule->guard_start, rule->guard_count,
-      &guards_match, out_diagnostic_index, out_matched_guard_count));
-  if (!guards_match) {
-    if (*out_matched_guard_count < rule->guard_count) {
-      const uint16_t guard_ref_index =
-          (uint16_t)(rule->guard_start + *out_matched_guard_count);
-      const loom_low_lower_guard_ref_t guard_index =
-          rule_set->guard_refs[guard_ref_index];
-      const loom_low_lower_guard_t* guard = &rule_set->guards[guard_index];
-      if (guard->kind == LOOM_LOW_LOWER_GUARD_DESCRIPTOR_AVAILABLE) {
-        loom_low_lower_rule_source_memory_match_t source_memory_match;
-        IREE_RETURN_IF_ERROR(loom_low_lower_rule_source_memory_emits_match(
-            match_context, rule_set, source_op, rule, &source_memory_match));
-        *out_source_memory_compatible = source_memory_match.all_emits_match &&
-                                        source_memory_match.has_source_memory;
-      }
+      &failed_guard, out_diagnostic_index, out_matched_guard_count));
+  if (failed_guard != NULL) {
+    *out_failed_root_guard = failed_guard;
+    if (failed_guard->kind == LOOM_LOW_LOWER_GUARD_DESCRIPTOR_AVAILABLE) {
+      loom_low_lower_rule_source_memory_match_t source_memory_match;
+      IREE_RETURN_IF_ERROR(loom_low_lower_rule_source_memory_emits_match(
+          match_context, rule_set, source_op, rule, &source_memory_match));
+      *out_source_memory_compatible = source_memory_match.all_emits_match &&
+                                      source_memory_match.has_source_memory;
     }
     return iree_ok_status();
   }
@@ -1774,9 +1811,9 @@ static iree_status_t loom_low_lower_rule_matches(
     uint16_t node_matched_guard_count = 0;
     IREE_RETURN_IF_ERROR(loom_low_lower_rule_guard_program_matches(
         match_context, rule_set, out_source_nodes[source_node_index],
-        source_node->guard_start, source_node->guard_count, &guards_match,
+        source_node->guard_start, source_node->guard_count, &failed_guard,
         out_diagnostic_index, &node_matched_guard_count));
-    if (!guards_match) {
+    if (failed_guard != NULL) {
       *out_diagnostic_source_op = out_source_nodes[source_node_index];
       *out_matched_guard_count =
           (uint16_t)(matched_guard_count + node_matched_guard_count);
@@ -1903,11 +1940,12 @@ iree_status_t loom_low_lower_rule_set_select_rule_range_with_match_context(
     const loom_op_t* source_nodes[LOOM_LOW_LOWER_MAX_SOURCE_NODES];
     uint8_t source_node_count = 0;
     uint8_t emission_source_node_index = 0;
+    const loom_low_lower_guard_t* failed_root_guard = NULL;
     IREE_RETURN_IF_ERROR(loom_low_lower_rule_matches(
         match_context, rule_set, source_op, rule, &rule_matches,
         &diagnostic_index, &matched_guard_count, &diagnostic_source_op,
         &source_memory_compatible, &uses_source_memory_access, source_nodes,
-        &source_node_count, &emission_source_node_index));
+        &source_node_count, &emission_source_node_index, &failed_root_guard));
     if (rule_matches) {
       out_selection->rule = rule;
       out_selection->rule_index = rule_index;
@@ -1929,25 +1967,19 @@ iree_status_t loom_low_lower_rule_set_select_rule_range_with_match_context(
                                               best_failure)) {
       best_failure = candidate_failure;
     }
-    if (matched_guard_count < rule->guard_count) {
-      const uint16_t guard_ref_index =
-          (uint16_t)(rule->guard_start + matched_guard_count);
-      const loom_low_lower_guard_ref_t guard_index =
-          rule_set->guard_refs[guard_ref_index];
-      const loom_low_lower_guard_t* guard = &rule_set->guards[guard_index];
-      if (guard->kind != LOOM_LOW_LOWER_GUARD_DESCRIPTOR_AVAILABLE) {
-        // An interned root guard program has the same pure result for every
-        // adjacent rule that references it. Descriptor availability is the
-        // exception because its failure also ranks rule-specific memory forms.
-        while ((uint16_t)(i + 1) < rule_count) {
-          const loom_low_lower_rule_t* next_rule =
-              &rule_set->rules[rule_start + i + 1];
-          if (next_rule->guard_start != rule->guard_start ||
-              next_rule->guard_count != rule->guard_count) {
-            break;
-          }
-          ++i;
+    if (failed_root_guard != NULL &&
+        failed_root_guard->kind != LOOM_LOW_LOWER_GUARD_DESCRIPTOR_AVAILABLE) {
+      // An interned root guard program has the same pure result for every
+      // adjacent rule that references it. Descriptor availability is the
+      // exception because its failure also ranks rule-specific memory forms.
+      while ((uint16_t)(i + 1) < rule_count) {
+        const loom_low_lower_rule_t* next_rule =
+            &rule_set->rules[rule_start + i + 1];
+        if (next_rule->guard_start != rule->guard_start ||
+            next_rule->guard_count != rule->guard_count) {
+          break;
         }
+        ++i;
       }
     }
   }
@@ -1977,8 +2009,15 @@ static iree_status_t loom_low_lower_rule_match_map_value_from_lowering(
   *out_mapped_value = loom_low_lower_rule_mapped_value_none();
   loom_low_lower_context_t* context = (loom_low_lower_context_t*)user_data;
   loom_type_t low_type = loom_type_none();
-  IREE_RETURN_IF_ERROR(loom_low_lower_query_value(context, source_op,
-                                                  source_value_id, &low_type));
+  // Contract probes precede source planning. Once a producer has selected its
+  // carrier, operand guards must use that decision instead of its preference.
+  if (context->lowering->source_plan.value_flags != NULL &&
+      loom_low_lower_value_binding_type_is_planned(context, source_value_id)) {
+    low_type = loom_low_lower_value_binding_type(context, source_value_id);
+  } else {
+    IREE_RETURN_IF_ERROR(loom_low_lower_query_value(
+        context, source_op, source_value_id, &low_type));
+  }
   if (!loom_low_type_is_register(low_type)) {
     return iree_ok_status();
   }
@@ -2341,7 +2380,8 @@ loom_low_lower_descriptor_ref_t loom_low_lower_rule_primary_descriptor_ref(
   IREE_ASSERT_LT(primary_emit_ordinal, rule->emit_count);
   const uint16_t emit_ref_index =
       (uint16_t)(rule->action.emit_start + primary_emit_ordinal);
-  return rule_set->emit_refs[emit_ref_index].descriptor_ref;
+  return loom_low_lower_rule_set_emit_ref_at(rule_set, emit_ref_index)
+      .descriptor_ref;
 }
 
 iree_status_t loom_low_lower_rule_query_primary_descriptor(

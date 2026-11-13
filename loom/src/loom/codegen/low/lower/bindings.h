@@ -60,8 +60,9 @@ void loom_low_lower_inherit_value_type(loom_low_lower_context_t* context,
                                        loom_value_id_t source_value_id,
                                        loom_value_id_t result_value_id);
 
-// Returns true when definition-ordered planning has selected or inherited the
-// native carrier for |source_value_id|.
+// Returns true when definition-ordered planning has selected the native carrier
+// for |source_value_id| or its flattened inherited producer. Inheritance alone
+// does not publish a carrier before that producer's selection.
 bool loom_low_lower_value_binding_type_is_planned(
     const loom_low_lower_context_t* context, loom_value_id_t source_value_id);
 
@@ -86,9 +87,8 @@ iree_status_t loom_low_lower_bind_value(loom_low_lower_context_t* context,
                                         loom_value_id_t source_value_id,
                                         loom_value_id_t low_value_id);
 
-// Replaces an emitted binding when entry interposition remaps its SSA identity
-// or adapts a physical ABI carrier to its body representation. Subsequent
-// queries observe the replacement value's actual type.
+// Replaces an emitted binding when entry interposition remaps its SSA identity.
+// The replacement must preserve the selected native carrier.
 iree_status_t loom_low_lower_replace_value_binding(
     loom_low_lower_context_t* context, loom_value_id_t source_value_id,
     loom_value_id_t low_value_id);

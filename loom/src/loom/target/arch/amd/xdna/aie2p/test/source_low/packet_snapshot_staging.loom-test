@@ -1,4 +1,4 @@
-// RUN: with-checks emit source-low target=amd.xdna.aie2p:core output=low
+// RUN: emit source-low target=amd.xdna.aie2p:core output=low
 
 func.def @preserve_large_old_source(%source: buffer, %destination: buffer, %replacement: i32) {
   %source_noalias, %destination_noalias = buffer.assume.noalias %source, %destination : buffer, buffer
@@ -15,13 +15,118 @@ func.def @preserve_large_old_source(%source: buffer, %destination: buffer, %repl
 }
 
 // ----
-CHECK: %* = vlda.512.i32x16 %source_aligned, 0
-CHECK: %* = mov.static-byte-offset 2048
-CHECK: %* = vlda.512.i32x16.index %source_aligned, *
-CHECK: %* = storage {byte_alignment = 64, byte_length = 2112} : low.storage<private>
-CHECK: vst.512.i32x16 %*, %*, 0
-CHECK: vst.512.i32x16.index %*, %*, *
-CHECK-NOT: *vlda.128*
-CHECK-NOT: *vlda.256*
-CHECK-NOT: *vst.128*
-CHECK-NOT: *vst.256*
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @preserve_large_old_source(%replacement: reg<aie2p.er>) asm {
+  %source_aligned = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %destination_aligned = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %64 = vlda.512.i32x16 %source_aligned, 0
+  %65 = vlda.512.i32x16 %source_aligned, 64
+  %66 = vlda.512.i32x16 %source_aligned, 128
+  %67 = vlda.512.i32x16 %source_aligned, 192
+  %68 = vlda.512.i32x16 %source_aligned, 256
+  %69 = vlda.512.i32x16 %source_aligned, 320
+  %70 = vlda.512.i32x16 %source_aligned, 384
+  %71 = vlda.512.i32x16 %source_aligned, 448
+  %72 = mov.static-address-index 512
+  %73 = vlda.512.i32x16.index %source_aligned, %72
+  %74 = mov.static-address-index 576
+  %75 = vlda.512.i32x16.index %source_aligned, %74
+  %76 = mov.static-address-index 640
+  %77 = vlda.512.i32x16.index %source_aligned, %76
+  %78 = mov.static-address-index 704
+  %79 = vlda.512.i32x16.index %source_aligned, %78
+  %80 = mov.static-address-index 768
+  %81 = vlda.512.i32x16.index %source_aligned, %80
+  %82 = mov.static-address-index 832
+  %83 = vlda.512.i32x16.index %source_aligned, %82
+  %84 = mov.static-address-index 896
+  %85 = vlda.512.i32x16.index %source_aligned, %84
+  %86 = mov.static-address-index 960
+  %87 = vlda.512.i32x16.index %source_aligned, %86
+  %88 = mov.static-address-index 1024
+  %89 = vlda.512.i32x16.index %source_aligned, %88
+  %90 = mov.static-address-index 1088
+  %91 = vlda.512.i32x16.index %source_aligned, %90
+  %92 = mov.static-address-index 1152
+  %93 = vlda.512.i32x16.index %source_aligned, %92
+  %94 = mov.static-address-index 1216
+  %95 = vlda.512.i32x16.index %source_aligned, %94
+  %96 = mov.static-address-index 1280
+  %97 = vlda.512.i32x16.index %source_aligned, %96
+  %98 = mov.static-address-index 1344
+  %99 = vlda.512.i32x16.index %source_aligned, %98
+  %100 = mov.static-address-index 1408
+  %101 = vlda.512.i32x16.index %source_aligned, %100
+  %102 = mov.static-address-index 1472
+  %103 = vlda.512.i32x16.index %source_aligned, %102
+  %104 = mov.static-address-index 1536
+  %105 = vlda.512.i32x16.index %source_aligned, %104
+  %106 = mov.static-address-index 1600
+  %107 = vlda.512.i32x16.index %source_aligned, %106
+  %108 = mov.static-address-index 1664
+  %109 = vlda.512.i32x16.index %source_aligned, %108
+  %110 = mov.static-address-index 1728
+  %111 = vlda.512.i32x16.index %source_aligned, %110
+  %112 = mov.static-address-index 1792
+  %113 = vlda.512.i32x16.index %source_aligned, %112
+  %114 = mov.static-address-index 1856
+  %115 = vlda.512.i32x16.index %source_aligned, %114
+  %116 = mov.static-address-index 1920
+  %117 = vlda.512.i32x16.index %source_aligned, %116
+  %118 = mov.static-address-index 1984
+  %119 = vlda.512.i32x16.index %source_aligned, %118
+  %120 = mov.static-address-index 2048
+  %121 = vlda.512.i32x16.index %source_aligned, %120
+  %122 = storage {byte_alignment = 64, byte_length = 2112} : low.storage<private>
+  %123 = storage_address %122 : low.storage<private> -> reg<aie2p.ep>
+  vst.512.i32x16 %64, %123, 0
+  vst.512.i32x16 %65, %123, 64
+  vst.512.i32x16 %66, %123, 128
+  vst.512.i32x16 %67, %123, 192
+  vst.512.i32x16 %68, %123, 256
+  vst.512.i32x16 %69, %123, 320
+  vst.512.i32x16 %70, %123, 384
+  vst.512.i32x16 %71, %123, 448
+  vst.512.i32x16.index %73, %123, %72
+  vst.512.i32x16.index %75, %123, %74
+  vst.512.i32x16.index %77, %123, %76
+  vst.512.i32x16.index %79, %123, %78
+  vst.512.i32x16.index %81, %123, %80
+  vst.512.i32x16.index %83, %123, %82
+  vst.512.i32x16.index %85, %123, %84
+  vst.512.i32x16.index %87, %123, %86
+  vst.512.i32x16.index %89, %123, %88
+  vst.512.i32x16.index %91, %123, %90
+  vst.512.i32x16.index %93, %123, %92
+  vst.512.i32x16.index %95, %123, %94
+  vst.512.i32x16.index %97, %123, %96
+  vst.512.i32x16.index %99, %123, %98
+  vst.512.i32x16.index %101, %123, %100
+  vst.512.i32x16.index %103, %123, %102
+  vst.512.i32x16.index %105, %123, %104
+  vst.512.i32x16.index %107, %123, %106
+  vst.512.i32x16.index %109, %123, %108
+  vst.512.i32x16.index %111, %123, %110
+  vst.512.i32x16.index %113, %123, %112
+  vst.512.i32x16.index %115, %123, %114
+  vst.512.i32x16.index %117, %123, %116
+  vst.512.i32x16.index %119, %123, %118
+  vst.512.i32x16.index %121, %123, %120
+  st %replacement, %source_aligned, 0
+  %149 = mov.short 0
+  %150 = mov.short 528
+  %151 = mov.short 16
+  low.br ^_bb1(%149: reg<aie2p.er>)
+^_bb1(%61: reg<aie2p.er>):
+  %152 = lt %61, %150
+  low.cond_br %152, ^_bb2, ^_bb3 : reg<aie2p.er>
+^_bb2:
+  %153 = mov.i32 2
+  %154 = lshl %61, %153
+  %155 = mov.address-index %154
+  %156 = vlda.512.i32x16.index %123, %155
+  vst.512.i32x16.index %156, %destination_aligned, %155
+  %158 = add.nc %61, %151
+  low.br ^_bb1(%158: reg<aie2p.er>)
+^_bb3:
+  return
+}

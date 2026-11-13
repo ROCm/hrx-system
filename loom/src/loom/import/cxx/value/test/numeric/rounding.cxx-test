@@ -1,0 +1,167 @@
+// RUN: roundtrip
+// ceilf retains the float operand and result.
+#include <loomcxx/scalar.h>
+float rounded(float value) { return loom::scalar::ceilf(value); }
+// ----
+func.def public @rounded(%value: f32) -> (f32) {
+  %2 = scalar.ceilf %value : f32
+  func.return %2 : f32
+}
+
+// ====
+// RUN: roundtrip
+// floorf retains the float operand and result.
+#include <loomcxx/scalar.h>
+float rounded(float value) { return loom::scalar::floorf(value); }
+// ----
+func.def public @rounded(%value: f32) -> (f32) {
+  %2 = scalar.floorf %value : f32
+  func.return %2 : f32
+}
+
+// ====
+// RUN: roundtrip
+// truncf retains the float operand and result.
+#include <loomcxx/scalar.h>
+float rounded(float value) { return loom::scalar::truncf(value); }
+// ----
+func.def public @rounded(%value: f32) -> (f32) {
+  %2 = scalar.truncf %value : f32
+  func.return %2 : f32
+}
+
+// ====
+// RUN: roundtrip
+// roundevenf retains the float operand and result.
+#include <loomcxx/scalar.h>
+float rounded(float value) { return loom::scalar::roundevenf(value); }
+// ----
+func.def public @rounded(%value: f32) -> (f32) {
+  %2 = scalar.roundevenf %value : f32
+  func.return %2 : f32
+}
+
+// ====
+// RUN: roundtrip
+// roundf retains the float operand and result.
+#include <loomcxx/scalar.h>
+float rounded(float value) { return loom::scalar::roundf(value); }
+// ----
+func.def public @rounded(%value: f32) -> (f32) {
+  %2 = scalar.roundf %value : f32
+  func.return %2 : f32
+}
+
+// ====
+// RUN: roundtrip
+// Arithmetic stays in the selected source precision before rounding.
+#include <loomcxx/scalar.h>
+float candidate(float value) {
+  return loom::scalar::floorf(value + float(0.5));
+}
+float bucket(float value) {
+  return loom::scalar::roundf(float(256) * value + float(65536));
+}
+// ----
+func.def public @candidate(%value: f32) -> (f32) {
+  %2 = scalar.constant 0.5 : f64
+  %3 = scalar.fptrunc %2 : f64 to f32
+  %4 = scalar.addf %value, %3 : f32
+  %5 = scalar.floorf %4 : f32
+  func.return %5 : f32
+}
+
+func.def public @bucket(%value: f32) -> (f32) {
+  %8 = scalar.constant 256 : i32
+  %9 = scalar.sitofp %8 : i32 to f32
+  %10 = scalar.mulf %9, %value : f32
+  %11 = scalar.constant 65536 : i32
+  %12 = scalar.sitofp %11 : i32 to f32
+  %13 = scalar.addf %10, %12 : f32
+  %14 = scalar.roundf %13 : f32
+  func.return %14 : f32
+}
+
+// ====
+// RUN: roundtrip
+// ceilf retains the double operand and result.
+#include <loomcxx/scalar.h>
+double rounded(double value) { return loom::scalar::ceilf(value); }
+// ----
+func.def public @rounded(%value: f64) -> (f64) {
+  %2 = scalar.ceilf %value : f64
+  func.return %2 : f64
+}
+
+// ====
+// RUN: roundtrip
+// floorf retains the double operand and result.
+#include <loomcxx/scalar.h>
+double rounded(double value) { return loom::scalar::floorf(value); }
+// ----
+func.def public @rounded(%value: f64) -> (f64) {
+  %2 = scalar.floorf %value : f64
+  func.return %2 : f64
+}
+
+// ====
+// RUN: roundtrip
+// truncf retains the double operand and result.
+#include <loomcxx/scalar.h>
+double rounded(double value) { return loom::scalar::truncf(value); }
+// ----
+func.def public @rounded(%value: f64) -> (f64) {
+  %2 = scalar.truncf %value : f64
+  func.return %2 : f64
+}
+
+// ====
+// RUN: roundtrip
+// roundevenf retains the double operand and result.
+#include <loomcxx/scalar.h>
+double rounded(double value) { return loom::scalar::roundevenf(value); }
+// ----
+func.def public @rounded(%value: f64) -> (f64) {
+  %2 = scalar.roundevenf %value : f64
+  func.return %2 : f64
+}
+
+// ====
+// RUN: roundtrip
+// roundf retains the double operand and result.
+#include <loomcxx/scalar.h>
+double rounded(double value) { return loom::scalar::roundf(value); }
+// ----
+func.def public @rounded(%value: f64) -> (f64) {
+  %2 = scalar.roundf %value : f64
+  func.return %2 : f64
+}
+
+// ====
+// RUN: roundtrip
+// Arithmetic stays in the selected source precision before rounding.
+#include <loomcxx/scalar.h>
+double candidate(double value) {
+  return loom::scalar::floorf(value + double(0.5));
+}
+double bucket(double value) {
+  return loom::scalar::roundf(double(256) * value + double(65536));
+}
+// ----
+func.def public @candidate(%value: f64) -> (f64) {
+  %2 = scalar.constant 0.5 : f64
+  %3 = scalar.addf %value, %2 : f64
+  %4 = scalar.floorf %3 : f64
+  func.return %4 : f64
+}
+
+func.def public @bucket(%value: f64) -> (f64) {
+  %7 = scalar.constant 256 : i32
+  %8 = scalar.sitofp %7 : i32 to f64
+  %9 = scalar.mulf %8, %value : f64
+  %10 = scalar.constant 65536 : i32
+  %11 = scalar.sitofp %10 : i32 to f64
+  %12 = scalar.addf %9, %11 : f64
+  %13 = scalar.roundf %12 : f64
+  func.return %13 : f64
+}

@@ -9,10 +9,10 @@
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/codegen/low/schedule/completion_demand.h"
+#include "loom/codegen/low/schedule/completion_pressure.h"
 #include "loom/codegen/low/schedule/dependencies.h"
 #include "loom/codegen/low/schedule/dependency_incoming.h"
 #include "loom/codegen/low/schedule/dependency_index.h"
-#include "loom/codegen/low/schedule/required_pressure.h"
 #include "loom/target/residency.h"
 
 namespace loom {
@@ -107,21 +107,21 @@ TEST_F(CandidatePressureTest, RequiredOwnershipUsesRetainedInstructionPhases) {
       .values = values,
       .nodes = &node,
       .dependency_index = dependencies,
-      .node_unspillable_activation_units = &activation_units,
+      .node_constrained_activation_units = &activation_units,
       .pressure_limits =
           {
               .by_reg_class = &register_limit,
-              .unspillable_completion_domains = &domain,
-              .unspillable_completion_domain_ids_by_reg_class = &domain_id,
-              .unspillable_completion_domain_count = 1,
+              .constrained_completion_domains = &domain,
+              .constrained_completion_domain_ids_by_reg_class = &domain_id,
+              .constrained_completion_domain_count = 1,
           },
   };
   loom_low_schedule_pressure_state_t pressure;
   IREE_ASSERT_OK(loom_low_schedule_pressure_initialize(&state, 1, &pressure));
-  pressure.unspillable_completion_demand = completions;
+  pressure.constrained_completion_demand = completions;
   pressure.current_live_units = 4;
   pressure.current_live_units_by_reg_class[0] = 4;
-  auto& required = pressure.required_pressure[0];
+  auto& required = pressure.completion_pressure[0];
   IREE_ASSERT_OK(loom_low_schedule_pressure_initialize_unlock_summaries(
       &state, 1, &pressure));
   const loom_low_schedule_ready_policy_t ready = {};
@@ -143,7 +143,7 @@ TEST_F(CandidatePressureTest, RequiredOwnershipUsesRetainedInstructionPhases) {
         node.flags |= LOOM_LOW_SCHEDULE_NODE_FLAG_EARLY_CLOBBER;
       }
       const loom_low_schedule_value_flags_t ownership =
-          requires_register ? LOOM_LOW_SCHEDULE_VALUE_FLAG_REQUIRES_REGISTER
+          requires_register ? LOOM_LOW_SCHEDULE_VALUE_FLAG_CONSTRAINED_REGISTER
                             : 0;
       values[0].flags = ownership | LOOM_LOW_SCHEDULE_VALUE_FLAG_LIVE;
       values[1].flags =
@@ -165,7 +165,7 @@ TEST_F(CandidatePressureTest, RequiredOwnershipUsesRetainedInstructionPhases) {
       EXPECT_EQ(
           iree_any_bit_set(
               score.flags,
-              LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_EXCEEDS_UNSPILLABLE_CAPACITY),
+              LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_EXCEEDS_CONSTRAINED_CAPACITY),
           requires_register && (phase.early_write || phase.late_read));
       EXPECT_EQ(required.live_units, requires_register ? 4u : 0u);
       EXPECT_EQ(pressure.current_live_units, 4u);

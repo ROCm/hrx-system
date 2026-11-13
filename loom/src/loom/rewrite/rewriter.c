@@ -441,9 +441,22 @@ static iree_status_t loom_rewriter_fold_results(
   loom_builder_set_before(&rewriter->builder, op);
   loom_value_id_t value_checkpoint = loom_rewriter_value_checkpoint(rewriter);
 
+  const bool preserve_relations =
+      !exact_facts && loom_traits_are_fact_identity(op->traits) &&
+      rewriter->pending_exact_relations_callback.fn &&
+      loom_value_fact_table_has_pending_exact_relations(rewriter->fact_table);
   loom_value_id_t* replacement_ids = NULL;
-  IREE_RETURN_IF_ERROR(loom_value_fact_table_value_id_scratch(
-      rewriter->fact_table, op->result_count, &replacement_ids));
+  if (preserve_relations) {
+    // Relation materialization mutates facts and may reuse table scratch. Keep
+    // the proven replacements alive across that mutation without reading the
+    // expired observation or publishing another fact batch for this fold.
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        rewriter->arena, op->result_count, sizeof(*replacement_ids),
+        (void**)&replacement_ids));
+  } else {
+    IREE_RETURN_IF_ERROR(loom_value_fact_table_value_id_scratch(
+        rewriter->fact_table, op->result_count, &replacement_ids));
+  }
 
   for (uint16_t i = 0; i < op->result_count; ++i) {
 #ifndef NDEBUG
@@ -463,6 +476,10 @@ static iree_status_t loom_rewriter_fold_results(
   IREE_RETURN_IF_ERROR(loom_rewriter_preserve_result_names_on_new_values(
       rewriter, op, replacement_ids, op->result_count, value_checkpoint));
 
+  if (preserve_relations) {
+    IREE_RETURN_IF_ERROR(rewriter->pending_exact_relations_callback.fn(
+        rewriter->pending_exact_relations_callback.user_data, rewriter));
+  }
   IREE_RETURN_IF_ERROR(loom_rewriter_replace_all_uses_and_erase(
       rewriter, op, replacement_ids, op->result_count));
 
@@ -476,19 +493,6 @@ iree_status_t loom_rewriter_try_fold(loom_rewriter_t* rewriter, loom_op_t* op,
   if (!loom_rewriter_can_fold(rewriter, op)) {
     return iree_ok_status();
   }
-#ifndef NDEBUG
-  const loom_value_fact_observation_t observation =
-      loom_value_fact_observation_capture(rewriter->fact_table);
-#endif
-  if (loom_traits_are_fact_identity(op->traits) &&
-      rewriter->pending_exact_relations_callback.fn &&
-      loom_value_fact_table_has_pending_exact_relations(rewriter->fact_table)) {
-    IREE_RETURN_IF_ERROR(rewriter->pending_exact_relations_callback.fn(
-        rewriter->pending_exact_relations_callback.user_data, rewriter));
-  }
-#ifndef NDEBUG
-  loom_value_fact_observation_assert_valid(observation);
-#endif
   IREE_RETURN_IF_ERROR(loom_rewriter_fold_results(rewriter, op, NULL));
   *out_folded = true;
   return iree_ok_status();
@@ -961,6 +965,44 @@ iree_status_t loom_rewriter_replace_results_with_materialized_values_and_erase(
                                                   op->result_count);
 }
 
+iree_status_t loom_rewriter_rebuild_direct_branch(
+    loom_rewriter_t* rewriter, loom_op_t* source, loom_block_t* destination,
+    const loom_value_id_t* arguments, uint16_t argument_count) {
+  IREE_ASSERT(loom_direct_branch_can_rebuild_payload(source));
+
+  const loom_builder_ip_t saved_ip = loom_builder_save(&rewriter->builder);
+  loom_builder_set_before(&rewriter->builder, source);
+  loom_op_t* replacement = NULL;
+  iree_status_t status = loom_builder_allocate_op_with_successors(
+      &rewriter->builder, source->kind, argument_count, /*result_count=*/0,
+      /*successor_count=*/1, /*region_count=*/0, /*tied_result_count=*/0,
+      /*attribute_count=*/0, source->location, &replacement);
+  if (iree_status_is_ok(status)) {
+    replacement->instance_flags = source->instance_flags;
+    replacement->traits = source->traits;
+    replacement->intrinsic_read_spaces = source->intrinsic_read_spaces;
+    replacement->intrinsic_write_spaces = source->intrinsic_write_spaces;
+    replacement->flags |= source->flags & LOOM_OP_SOURCE_PRESENTATION_FLAG_MASK;
+    if (argument_count != 0) {
+      memcpy(loom_op_operands(replacement), arguments,
+             argument_count * sizeof(*arguments));
+    }
+    loom_op_successors(replacement)[0] = destination;
+    status = loom_builder_finalize_op(&rewriter->builder, replacement);
+  }
+  loom_builder_restore(&rewriter->builder, saved_ip);
+  IREE_RETURN_IF_ERROR(status);
+
+  iree_host_size_t comment_count = 0;
+  const iree_string_view_t* comments =
+      loom_module_op_comments(rewriter->module, source, &comment_count);
+  if (comment_count != 0) {
+    IREE_RETURN_IF_ERROR(loom_module_attach_op_comments(
+        rewriter->module, replacement, comments, comment_count));
+  }
+  return loom_rewriter_erase(rewriter, source);
+}
+
 iree_status_t loom_rewriter_erase(loom_rewriter_t* rewriter, loom_op_t* op) {
   IREE_RETURN_IF_ERROR(loom_rewriter_preserve_elided_fact_identity_names(
       rewriter, op, /*replacements=*/NULL));
@@ -1099,13 +1141,7 @@ static bool loom_rewriter_parent_owns_block(const loom_module_t* module,
   if (!loom_rewriter_op_belongs_to_module(module, parent_op)) {
     return false;
   }
-  loom_region_t* const* regions = loom_op_regions(parent_op);
-  for (uint8_t i = 0; i < parent_op->region_count; ++i) {
-    if (regions[i] == block->parent_region) {
-      return true;
-    }
-  }
-  return false;
+  return loom_region_parent_op(block->parent_region) == parent_op;
 }
 
 iree_status_t loom_rewriter_move_region_blocks(

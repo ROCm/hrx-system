@@ -20,9 +20,8 @@ extern "C" {
 bool loom_op_is_ancestor_of(const loom_op_t* ancestor_op, const loom_op_t* op);
 
 // Returns true when |ancestor_op| transitively owns |block| through one of its
-// regions. Nonempty regions use maintained operation ancestry in O(depth).
-// Op-less regions fall back to a structural walk because regions intentionally
-// carry no parent pointer.
+// regions. Queries follow the region owner and maintained operation ancestry
+// in O(depth), including for empty regions.
 bool loom_op_contains_block(const loom_op_t* ancestor_op,
                             const loom_block_t* block);
 

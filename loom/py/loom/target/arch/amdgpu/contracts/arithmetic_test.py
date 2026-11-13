@@ -39,6 +39,7 @@ from loom.target.contracts import (
     SourceValueKind,
     TypePattern,
     UnsignedDivisorMagicKind,
+    Vector,
     View,
     compile_lower_rule_set,
 )
@@ -674,6 +675,44 @@ def test_integer_extrema_rules_prefer_encoded_constants() -> None:
         )
 
 
+def test_i32_carry_borrow_rules_cover_uniform_and_divergent_predicates() -> None:
+    compiled = _COMPILED_INTEGER_RULES
+
+    for source_op, scalar_descriptor, vector_descriptor in (
+        (
+            scalar_arithmetic.scalar_addcarryui,
+            "amdgpu.s_add_co_u32",
+            "amdgpu.v_add_co_u32",
+        ),
+        (
+            scalar_arithmetic.scalar_subborrowui,
+            "amdgpu.s_sub_co_u32",
+            "amdgpu.v_sub_co_u32",
+        ),
+    ):
+        rules = _rules_for_source_op(compiled, source_op)
+        assert tuple(_rule_descriptor_keys(compiled, rule) for rule in rules) == (
+            (scalar_descriptor,),
+            (
+                scalar_descriptor,
+                "amdgpu.s_mov_b32",
+                "amdgpu.s_mov_b32",
+                "amdgpu.s_cselect_b32",
+            ),
+            (vector_descriptor,),
+            (),
+        )
+        assert all(
+            set(_rule_type_patterns(compiled, rule)) == {Scalar("i1"), Scalar("i32")}
+            for rule in rules[:-1]
+        )
+        assert set(_rule_type_patterns(compiled, rules[-1])) == {
+            Scalar("i1"),
+            Scalar("i64"),
+        }
+        assert rules[-1].flags & LOWER_RULE_FLAG_CONTRACT_ONLY
+
+
 def test_scalar_i32_bitwise_rules_prefer_encoded_constants() -> None:
     compiled = _COMPILED_INTEGER_RULES
 
@@ -699,6 +738,217 @@ def test_scalar_i32_bitwise_rules_prefer_encoded_constants() -> None:
             (f"amdgpu.s_{suffix}",),
             (f"amdgpu.v_{suffix}",),
         )
+
+
+def test_vector_i32_constants_prefer_inline_without_changing_operand_storage() -> None:
+    compiled = _COMPILED_ARITHMETIC_RULES
+    word_vectors = Vector(
+        "i32",
+        minimum_static_elements=1,
+        maximum_static_elements="LOOM_AMDGPU_MAX_SCALARIZED_32BIT_LANES",
+    )
+    for source_op, mnemonic in (
+        (vector.vector_addi, "add_u32"),
+        (vector.vector_andi, "and_b32"),
+        (vector.vector_ori, "or_b32"),
+        (vector.vector_xori, "xor_b32"),
+    ):
+        rules = tuple(
+            rule
+            for rule in _rules_for_source_op(compiled, source_op)
+            if set(_rule_type_patterns(compiled, rule)) == {word_vectors}
+        )
+        assert tuple(_rule_descriptor_keys(compiled, rule) for rule in rules) == (
+            (f"amdgpu.v_{mnemonic}.src0_inline",),
+            (f"amdgpu.v_{mnemonic}.src0_inline",),
+            (f"amdgpu.v_{mnemonic}.lit",),
+            (f"amdgpu.v_{mnemonic}.lit",),
+            (f"amdgpu.v_{mnemonic}",),
+        )
+        for ordinal, rule in enumerate(rules[:4]):
+            guards = compiled.guards[
+                rule.guard_start : rule.guard_start + rule.guard_count
+            ]
+            exact = next(
+                guard for guard in guards if guard.kind == GuardKind.VALUE_EXACT_I64
+            )
+            constant = compiled.value_refs[exact.value_ref_index]
+            assert constant.kind == SourceValueKind.OPERAND
+            assert constant.index == ordinal % 2
+            ranges = tuple(
+                guard for guard in guards if guard.kind == GuardKind.VALUE_I64_RANGE
+            )
+            assert len(ranges) == (1 if ordinal < 2 else 0)
+            if ranges:
+                assert ranges[0].value_ref_index == exact.value_ref_index
+                assert (ranges[0].minimum_i64, ranges[0].maximum_i64) == (0, 64)
+            emit = compiled.emits[rule.emit_start]
+            assert emit.operand_ref_count == 1
+            operand = compiled.value_refs[emit.operand_ref_start]
+            assert operand.kind == SourceValueKind.OPERAND
+            assert operand.index == 1 - constant.index
+            assert operand.materializer_index != 0
+            projection = compiled.attr_copies[emit.attr_copy_start]
+            assert projection.kind == LowerAttrCopyKind.VALUE_I32_AS_U32_BITS
+            assert projection.value_ref_index == exact.value_ref_index
+
+
+def test_scalar_i64_bitwise_preserves_either_uniform_source() -> None:
+    compiled = _COMPILED_INTEGER_RULES
+    for source_op, mnemonic in (
+        (scalar_bitwise.scalar_andi, "and"),
+        (scalar_bitwise.scalar_ori, "or"),
+        (scalar_bitwise.scalar_xori, "xor"),
+    ):
+        rules = tuple(
+            rule
+            for rule in _rules_for_source_op(compiled, source_op)
+            if set(_rule_type_patterns(compiled, rule)) == {Scalar("i64")}
+            and _rule_descriptor_keys(compiled, rule)
+        )
+        assert tuple(_rule_descriptor_keys(compiled, rule) for rule in rules) == (
+            (f"amdgpu.s_{mnemonic}_b64",),
+            *((f"amdgpu.v_{mnemonic}_b32",),) * 3,
+        )
+        for rule, expected_sources in zip(
+            rules[1:], ((0, 1), (1, 0), (0, 1)), strict=True
+        ):
+            emit = compiled.emits[rule.emit_start]
+            assert emit.kind is LowerEmitKind.DESCRIPTOR_OP_PER_LANE
+            sources = compiled.value_refs[
+                emit.operand_ref_start : emit.operand_ref_start + emit.operand_ref_count
+            ]
+            assert tuple(source.index for source in sources) == expected_sources
+            assert sources[1].materializer_index != 0
+            if rule == rules[-1]:
+                assert sources[0].materializer_index != 0
+            else:
+                assert sources[0].materializer_index == 0
+                guards = compiled.guards[
+                    rule.guard_start : rule.guard_start + rule.guard_count
+                ]
+                assert any(
+                    guard.kind is GuardKind.LOW_VALUE_REGISTER_CLASS
+                    and compiled.value_refs[guard.value_ref_index].kind
+                    is SourceValueKind.OPERAND
+                    and compiled.value_refs[guard.value_ref_index].index
+                    == expected_sources[0]
+                    and AMDGPU_INTEGER_CONTRACT_FRAGMENT.descriptor_set.reg_classes[
+                        guard.register_class_id
+                    ].name
+                    == "amdgpu.sgpr"
+                    for guard in guards
+                )
+
+
+def test_scalar_i64_shift_family_has_native_and_word_transport_rules() -> None:
+    compiled = _COMPILED_INTEGER_RULES
+    for source_op, scalar_key, vector_key in (
+        (scalar_bitwise.scalar_shli, "s_lshl_b64", "v_lshlrev_b64"),
+        (scalar_bitwise.scalar_shrui, "s_lshr_b64", "v_lshrrev_b64"),
+        (scalar_bitwise.scalar_shrsi, "s_ashr_i64", "v_ashrrev_i64"),
+    ):
+        rules = tuple(
+            rule
+            for rule in _rules_for_source_op(compiled, source_op)
+            if set(_rule_type_patterns(compiled, rule)) == {Scalar("i64")}
+        )
+        keys = tuple(_rule_descriptor_keys(compiled, rule) for rule in rules)
+        native = ((f"amdgpu.{scalar_key}",), (f"amdgpu.{vector_key}",))
+        if source_op is scalar_bitwise.scalar_shrsi:
+            assert keys == native
+        else:
+            assert keys == (
+                ("amdgpu.s_mov_b32",),
+                native[0],
+                ("amdgpu.v_mov_b32",),
+                (
+                    "amdgpu.v_mov_b32",
+                    f"amdgpu.{vector_key.removesuffix('_b64')}_b32.src0_inline",
+                ),
+                ("amdgpu.v_mov_b32", f"amdgpu.{vector_key.removesuffix('_b64')}_b32"),
+                native[1],
+            )
+            for rule in (rules[0], rules[2]):
+                guards = compiled.guards[
+                    rule.guard_start : rule.guard_start + rule.guard_count
+                ]
+                assert any(
+                    guard.kind is GuardKind.VALUE_I64_RANGE
+                    and guard.minimum_i64 == guard.maximum_i64 == 32
+                    for guard in guards
+                )
+                emits = compiled.emits[
+                    rule.emit_start : rule.emit_start + rule.emit_count
+                ]
+                assert emits[0].kind is LowerEmitKind.REGISTER_SLICE
+                assert emits[0].structural_offset == (
+                    0 if source_op is scalar_bitwise.scalar_shli else 1
+                )
+                assert emits[-1].kind is LowerEmitKind.REGISTER_CONCAT
+            bounded = rules[4]
+            guards = compiled.guards[
+                bounded.guard_start : bounded.guard_start + bounded.guard_count
+            ]
+            assert any(
+                guard.kind is GuardKind.VALUE_I64_RANGE
+                and (guard.minimum_i64, guard.maximum_i64) == (32, 63)
+                for guard in guards
+            )
+            emits = compiled.emits[
+                bounded.emit_start : bounded.emit_start + bounded.emit_count
+            ]
+            assert emits[0].structural_offset == (
+                0 if source_op is scalar_bitwise.scalar_shli else 1
+            )
+            assert emits[-1].kind is LowerEmitKind.REGISTER_CONCAT
+
+
+def test_disjoint_word_bitwise_rules_cover_both_orders_and_banks() -> None:
+    compiled = _COMPILED_INTEGER_RULES
+    for source_op in (scalar_bitwise.scalar_ori, scalar_bitwise.scalar_xori):
+        covered = []
+        for rule in _rules_for_source_op(compiled, source_op):
+            guards = compiled.guards[
+                rule.guard_start : rule.guard_start + rule.guard_count
+            ]
+            divisors = [
+                guard for guard in guards if guard.kind is GuardKind.VALUE_DIVISIBLE_BY
+            ]
+            if not divisors:
+                continue
+            assert set(_rule_type_patterns(compiled, rule)) == {Scalar("i64")}
+            divisor = divisors[0]
+            assert divisor.u64 == 2**32
+            bounds = next(
+                guard for guard in guards if guard.kind is GuardKind.VALUE_I64_RANGE
+            )
+            assert (bounds.minimum_i64, bounds.maximum_i64) == (0, 2**32 - 1)
+            low = compiled.value_refs[bounds.value_ref_index].index
+            high = compiled.value_refs[divisor.value_ref_index].index
+            result_class = next(
+                AMDGPU_INTEGER_CONTRACT_FRAGMENT.descriptor_set.reg_classes[
+                    guard.register_class_id
+                ].name
+                for guard in guards
+                if guard.kind is GuardKind.LOW_VALUE_REGISTER_CLASS
+                and compiled.value_refs[guard.value_ref_index].kind
+                is SourceValueKind.RESULT
+            )
+            covered.append((low, high, result_class))
+            emits = compiled.emits[rule.emit_start : rule.emit_start + rule.emit_count]
+            assert tuple(emit.kind for emit in emits) == (
+                LowerEmitKind.REGISTER_SLICE,
+                LowerEmitKind.REGISTER_SLICE,
+                LowerEmitKind.REGISTER_CONCAT,
+            )
+            assert tuple(emit.structural_offset for emit in emits[:2]) == (0, 1)
+        assert covered == [
+            (0, 1, "amdgpu.sgpr"),
+            (1, 0, "amdgpu.sgpr"),
+            (0, 1, "amdgpu.vgpr"),
+            (1, 0, "amdgpu.vgpr"),
+        ]
 
 
 def test_mixed_scalar_bool_mask_rules_precede_mask_materialization() -> None:
@@ -1419,6 +1669,108 @@ def test_vector_extract_rules_publish_contract_only_shape_rows() -> None:
         assert GuardKind.VECTOR_EXTRACT_SHAPE in guard_kinds
 
 
+def test_vector_bitcast_preserves_numeric_and_mask_storage_domains() -> None:
+    compiled = _COMPILED_ARITHMETIC_RULES
+    numeric_types = {
+        "i8",
+        "i16",
+        "i32",
+        "i64",
+        "f8E4M3",
+        "f8E5M2",
+        "f16",
+        "bf16",
+        "f32",
+        "f64",
+    }
+    accepted_pairs = set()
+    for rule in _rules_for_source_op(compiled, vector.vector_bitcast):
+        assert rule.flags & LOWER_RULE_FLAG_CONTRACT_ONLY
+        assert rule.emit_count == 0
+        source, result = _rule_type_patterns(compiled, rule)
+        accepted_pairs.update(
+            (lhs, rhs) for lhs in source.elements for rhs in result.elements
+        )
+    assert accepted_pairs == {
+        (lhs, rhs) for lhs in numeric_types for rhs in numeric_types
+    } | {("i1", "i1")}
+
+
+def test_vector_permutations_publish_complete_physical_storage_family() -> None:
+    compiled = _COMPILED_ARITHMETIC_RULES
+    physical_bytes = {
+        "i8": 1,
+        "f8E4M3": 1,
+        "f8E5M2": 1,
+        "i16": 2,
+        "f16": 2,
+        "bf16": 2,
+        "i32": 4,
+        "f32": 4,
+        "i1": 8,
+        "i64": 8,
+        "f64": 8,
+    }
+    for source_op in (
+        vector.vector_interleave,
+        vector.vector_deinterleave,
+        vector.vector_shuffle,
+    ):
+        payloads = set()
+        for rule in _rules_for_source_op(compiled, source_op):
+            assert rule.flags & LOWER_RULE_FLAG_CONTRACT_ONLY
+            assert rule.emit_count == 0
+            (pattern,) = _rule_type_patterns(compiled, rule)
+            guards = compiled.guards[
+                rule.guard_start : rule.guard_start + rule.guard_count
+            ]
+            uses_permute = any(
+                guard.kind == GuardKind.DESCRIPTOR_AVAILABLE for guard in guards
+            )
+            for element in pattern.elements:
+                assert uses_permute == (physical_bytes[element] < 4)
+                if source_op is vector.vector_shuffle:
+                    assert pattern.minimum_lanes == 1
+                    assert pattern.maximum_lanes == "UINT16_MAX"
+                else:
+                    assert pattern.minimum_static_elements == 1
+                    assert (
+                        pattern.maximum_static_elements
+                        == f"(UINT16_MAX / {physical_bytes[element]}u)"
+                    )
+                payloads.add(element)
+        assert payloads == physical_bytes.keys()
+
+
+def test_vector_select_packets_bound_wave_mask_count_for_every_payload() -> None:
+    compiled = _COMPILED_ARITHMETIC_RULES
+    payloads = set()
+    for rule in _rules_for_source_op(compiled, vector.vector_select):
+        if not rule.flags & LOWER_RULE_FLAG_CONTRACT_ONLY:
+            continue
+        condition, result = _rule_type_patterns(compiled, rule)
+        assert condition.elements == ("i1",)
+        assert (
+            condition.maximum_static_elements
+            == "LOOM_AMDGPU_MAX_SCALARIZED_32BIT_LANES"
+        )
+        payloads.update(result.elements)
+        guards = compiled.guards[rule.guard_start : rule.guard_start + rule.guard_count]
+        assert any(guard.kind == GuardKind.DESCRIPTOR_AVAILABLE for guard in guards)
+    assert payloads == {
+        "i8",
+        "i16",
+        "i32",
+        "i64",
+        "f8E4M3",
+        "f8E5M2",
+        "f16",
+        "bf16",
+        "f32",
+        "f64",
+    }
+
+
 def test_vector_construct_rules_publish_contract_only_storage_rows() -> None:
     compiled = _COMPILED_ARITHMETIC_RULES
 
@@ -1603,3 +1955,59 @@ def test_bitpack_contract_covers_word_and_predicate_lanes() -> None:
         cases.add((types[0].element, types[1].element, width_guard.maximum_i64))
 
     assert cases == {("i32", "i8", 8), ("i1", "i8", 1)}
+
+
+def test_square_root_rules_preserve_subnormal_inputs_without_afn() -> None:
+    compiled = _COMPILED_ARITHMETIC_RULES
+    expected = (
+        "amdgpu.s_mov_b32",
+        "amdgpu.v_cmp_class_f32",
+        "amdgpu.v_mul_f32.lit",
+        "amdgpu.v_cndmask_b32",
+        "amdgpu.v_sqrt_f32",
+        "amdgpu.v_mul_f32.lit",
+        "amdgpu.v_cndmask_b32",
+    )
+    for source_op in (scalar_math.scalar_sqrtf, vector.vector_sqrtf):
+        rules = _rules_for_source_op(compiled, source_op)
+        native = [
+            rule
+            for rule in rules
+            if _rule_descriptor_keys(compiled, rule) == ("amdgpu.v_sqrt_f32",)
+        ]
+        scaled = [
+            rule for rule in rules if _rule_descriptor_keys(compiled, rule) == expected
+        ]
+        assert len(native) == len(scaled) == 1
+        assert rules.index(native[0]) < rules.index(scaled[0])
+        guards = compiled.guards[
+            native[0].guard_start : native[0].guard_start + native[0].guard_count
+        ]
+        assert any(
+            guard.kind == GuardKind.VALUE_NOT_SUBNORMAL_OR_INSTANCE_FLAGS_HAS_ALL
+            and guard.u64 == _AFN_FASTMATH_FLAG
+            for guard in guards
+        )
+        guards = compiled.guards[
+            scaled[0].guard_start : scaled[0].guard_start + scaled[0].guard_count
+        ]
+        assert not any(
+            guard.kind
+            in (GuardKind.INSTANCE_FLAGS_HAS_ALL, GuardKind.INSTANCE_FLAGS_HAS_NONE)
+            for guard in guards
+        )
+        # The family includes all static vector shapes, with one SGPR constant
+        # shared by the per-lane classification and scaling instructions.
+        emits = compiled.emits[
+            scaled[0].emit_start : scaled[0].emit_start + scaled[0].emit_count
+        ]
+        assert emits[0].kind == LowerEmitKind.DESCRIPTOR_CONST
+        if source_op is vector.vector_sqrtf:
+            assert all(
+                emit.kind == LowerEmitKind.DESCRIPTOR_OP_PER_LANE for emit in emits[1:]
+            )
+            assert Vector(
+                "f32",
+                minimum_static_elements=1,
+                maximum_static_elements="LOOM_AMDGPU_MAX_SCALARIZED_32BIT_LANES",
+            ) in _rule_type_patterns(compiled, scaled[0])

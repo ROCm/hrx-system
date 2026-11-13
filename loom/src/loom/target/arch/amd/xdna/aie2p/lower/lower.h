@@ -15,6 +15,22 @@
 extern "C" {
 #endif
 
+// Dense target-owned identity retained after source operation selection.
+// Concrete source kinds are classified once; every later lowering phase
+// dispatches on this semantic family without rediscovering source identity.
+typedef enum loom_aie2p_plan_kind_e {
+  LOOM_AIE2P_PLAN_FIFO_STATE_IMPORT = 0,
+  LOOM_AIE2P_PLAN_VECTOR_LOAD_SCALAR_PACKETS = 1,
+  LOOM_AIE2P_PLAN_VECTOR_CONSTRUCT_PUSH = 2,
+  LOOM_AIE2P_PLAN_MATRIX_MMA_M8N8K8 = 3,
+  LOOM_AIE2P_PLAN_INTERLEAVE_NATIVE = 4,
+  LOOM_AIE2P_PLAN_TRANSPOSE_STATIC = 5,
+  LOOM_AIE2P_PLAN_SHUFFLE_FIXED = 6,
+  LOOM_AIE2P_PLAN_GATHER_IMMUTABLE = 7,
+  LOOM_AIE2P_PLAN_RODATA_ADDRESS = 8,
+  LOOM_AIE2P_PLAN_COUNT_ = 9,
+} loom_aie2p_plan_kind_t;
+
 // Returns the AIE2P compute-tile core lowering policy.
 //
 // Logical scalar values of up to 32 bits occupy one eR register; 64-bit values

@@ -48,6 +48,26 @@ cc_test = rule(
     parent = rules_cc_test,
 )
 
+def _keep_debug_transition_impl(_settings, _attr):
+    return {"//command_line_option:strip": "never"}
+
+_keep_debug_transition = transition(
+    implementation = _keep_debug_transition_impl,
+    inputs = [],
+    outputs = ["//command_line_option:strip"],
+)
+
+def _cc_unstripped_test_impl(ctx):
+    return ctx.super()
+
+# Diagnostic tests consume their own DWARF records as input. Retain those
+# records through the normal C++ test rule, including its runner and coverage.
+cc_unstripped_test = rule(
+    implementation = _cc_unstripped_test_impl,
+    parent = cc_test,
+    cfg = _keep_debug_transition,
+)
+
 def _iree_cc_test_impl(
         name,
         visibility,
@@ -63,6 +83,7 @@ def _iree_cc_test_impl(
         system_includes,
         linkopts,
         linkstatic,
+        keep_debug,
         args,
         env,
         sanitizer_suppressions,
@@ -93,7 +114,8 @@ def _iree_cc_test_impl(
     cc_attrs.add_if_not_none(target_attrs, "env", env)
     target_attrs["size"] = size
     target_attrs["tags"] = cc_attrs.with_resource_group_tags(tags, resource_group)
-    cc_test(
+    test_rule = cc_unstripped_test if keep_debug else cc_test
+    test_rule(
         name = name,
         visibility = visibility,
         **target_attrs
@@ -104,6 +126,9 @@ iree_cc_test = macro(
 
     Tests link statically by default so each executable does not split
     process-local test state across Bazel-generated shared objects.
+
+    `keep_debug` preserves debug sections consumed by introspection tests.
+    Tests requiring DWARF must also request its emission in `copts`.
 
     `resource_group` serializes tests that compete for a named local resource.
     Bazel receives the conservative `exclusive-if-local` tag plus a structured
@@ -126,6 +151,11 @@ iree_cc_test = macro(
             ),
             "execution_data": None,
             "execution_deps": None,
+            "keep_debug": attr.bool(
+                configurable = False,
+                default = False,
+                doc = "Retain debug sections required by the test; copts controls their emission.",
+            ),
             "resource_group": attr.string(
                 configurable = False,
                 doc = "Local resource name used to serialize tests competing for the same host resource.",

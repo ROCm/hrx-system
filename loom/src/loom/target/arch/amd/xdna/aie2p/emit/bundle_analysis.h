@@ -61,6 +61,8 @@ typedef struct loom_aie2p_block_analysis_t {
   uint32_t terminator_issue_cycle;
   // Structural control kind selected for this block.
   loom_aie2p_block_terminator_t terminator;
+  // Allocation-owned parallel result transport before a native return.
+  loom_low_move_range_t return_moves;
   // Selected physical branches, shared by destination alignment and emission.
   struct {
     // Native branches in emission order; fallthrough contributes no entry.
@@ -104,6 +106,7 @@ typedef struct loom_aie2p_bundle_plan_analysis_t {
 // |out_accepted| false and no plan may consume the partial analysis.
 iree_status_t loom_aie2p_bundle_plan_analyze(
     const loom_low_emission_frame_t* frame,
+    const loom_low_storage_layout_t* storage_layout,
     iree_diagnostic_emitter_t diagnostic_emitter,
     iree_arena_allocator_t* plan_arena, iree_arena_allocator_t* scratch_arena,
     loom_aie2p_bundle_plan_analysis_t* out_analysis, bool* out_accepted);

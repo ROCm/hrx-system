@@ -75,29 +75,28 @@ IREE_API_EXPORT iree_status_t iree_io_stdio_stream_wrap(
 // platform-optimal APIs instead of stdio.
 static void iree_io_map_stdio_fopen_mode(iree_io_stdio_stream_mode_t stdio_mode,
                                          char out_fopen_mode[16]) {
-  memset(out_fopen_mode, 0, 16);
-
+  iree_string_view_t fopen_mode = IREE_SV("b");
   if (iree_all_bits_set(stdio_mode, IREE_IO_STDIO_STREAM_MODE_READ |
                                         IREE_IO_STDIO_STREAM_MODE_WRITE |
                                         IREE_IO_STDIO_STREAM_MODE_APPEND)) {
-    strcat(out_fopen_mode, "a+");
+    fopen_mode = IREE_SV("a+b");
   } else if (iree_all_bits_set(stdio_mode,
                                IREE_IO_STDIO_STREAM_MODE_READ |
                                    IREE_IO_STDIO_STREAM_MODE_WRITE |
                                    IREE_IO_STDIO_STREAM_MODE_DISCARD)) {
-    strcat(out_fopen_mode, "w+");
+    fopen_mode = IREE_SV("w+b");
   } else if (iree_all_bits_set(stdio_mode,
                                IREE_IO_STDIO_STREAM_MODE_READ |
                                    IREE_IO_STDIO_STREAM_MODE_WRITE)) {
-    strcat(out_fopen_mode, "r+");
+    fopen_mode = IREE_SV("r+b");
   } else if (iree_all_bits_set(stdio_mode,
                                IREE_IO_STDIO_STREAM_MODE_WRITE |
                                    IREE_IO_STDIO_STREAM_MODE_APPEND)) {
-    strcat(out_fopen_mode, "a");
+    fopen_mode = IREE_SV("ab");
   } else if (iree_all_bits_set(stdio_mode, IREE_IO_STDIO_STREAM_MODE_WRITE)) {
-    strcat(out_fopen_mode, "w");
+    fopen_mode = IREE_SV("wb");
   } else if (iree_all_bits_set(stdio_mode, IREE_IO_STDIO_STREAM_MODE_READ)) {
-    strcat(out_fopen_mode, "r");
+    fopen_mode = IREE_SV("rb");
   }
   if (iree_all_bits_set(stdio_mode, IREE_IO_STDIO_STREAM_MODE_WRITE) &&
       !iree_all_bits_set(stdio_mode, IREE_IO_STDIO_STREAM_MODE_DISCARD)) {
@@ -105,10 +104,9 @@ static void iree_io_map_stdio_fopen_mode(iree_io_stdio_stream_mode_t stdio_mode,
     // TODO(benvanik): actually observe this; the C11 spec says `x` is supported
     // but at least on MSVC's CRT it isn't. We can emulate this with stat and
     // such but today we don't have any uses that require it.
-    // strcat(out_fopen_mode, "x");
+    // The selected mode would include an `x` suffix here.
   }
-  // Force binary mode (avoid Windows CRLF expansion).
-  strcat(out_fopen_mode, "b");
+  iree_string_view_to_cstring(fopen_mode, out_fopen_mode, 16);
 }
 
 IREE_API_EXPORT iree_status_t iree_io_stdio_stream_open(

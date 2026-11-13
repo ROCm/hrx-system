@@ -1,0 +1,665 @@
+// RUN: emit vm-object-lifetime
+// INPUT: cxx root=run
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+[[loom::noinline]] static unsigned replace(unsigned& owner) { owner = 22; return 0; }
+void run() {
+  unsigned owner = 11;
+  event(owner << replace(owner));
+  event(owner);
+}
+
+// ----
+event 11
+event 22
+OK 0
+retired 0
+
+// ====
+
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+[[loom::noinline]] static unsigned replace(unsigned& owner) { owner = 22; return 0; }
+struct Pair {
+  // Snapshot initialized before the second clause.
+  unsigned first;
+  // Result of the later mutation.
+  unsigned second;
+};
+void run() {
+  unsigned owner = 11;
+  Pair result{owner, replace(owner)};
+  event(result.first);
+  event(result.second);
+  event(owner);
+}
+
+// ----
+event 11
+event 0
+event 22
+OK 0
+retired 0
+
+// ====
+
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+[[loom::noinline]] static unsigned replace(unsigned& owner) { owner = 22; return 0; }
+struct Pair {
+  // Current source subobject, changed by the following default initializer.
+  unsigned first;
+  // Mutation changes first rather than preserving its original value.
+  unsigned second = replace(first);
+};
+void run() {
+  unsigned owner = 11;
+  Pair result{owner};
+  event(result.first);
+  event(result.second);
+  event(owner);
+}
+
+// ----
+event 22
+event 0
+event 11
+OK 0
+retired 0
+
+// ====
+
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+[[loom::noinline]] static unsigned replace(unsigned& owner) { owner = 22; return 0; }
+struct Owner {
+  // Current source payload; outer and constructed instances share a declaration.
+  unsigned value;
+  // Secondary component initialized after the saved payload.
+  unsigned second;
+  unsigned construct() {
+    Owner result{value, replace(value)};
+    event(result.value);
+    event(result.second);
+    return value;
+  }
+};
+void run() {
+  Owner owner{11, 33};
+  event(owner.construct());
+  event(owner.value);
+  event(owner.second);
+}
+
+// ----
+event 11
+event 0
+event 22
+event 22
+event 33
+OK 0
+retired 0
+
+// ====
+
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+[[loom::noinline]] static unsigned replace(unsigned*& owner, unsigned* next) {
+  owner = next;
+  return 1;
+}
+void run() {
+  unsigned first[2]{11,22};
+  unsigned second[2]{33,44};
+  unsigned* owner = first;
+  event(owner[replace(owner, second)]);
+  event(owner[0]);
+}
+
+// ----
+event 22
+event 33
+OK 0
+retired 0
+// ====
+
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+[[loom::noinline]] static unsigned increment(unsigned& value) { ++value; return 0; }
+[[loom::noinline]] static unsigned exclusive(bool choose, unsigned value) {
+  unsigned saved = value;
+  if (choose) { increment(value); return value; }
+  else { return saved; }
+}
+[[loom::noinline]] static unsigned exclusive_reversed(bool choose, unsigned value) {
+  unsigned saved = value;
+  if (choose) { return saved; }
+  else { increment(value); return value; }
+}
+[[loom::noinline]] static unsigned dead_copy(unsigned value) {
+  unsigned saved = value;
+  increment(value);
+  return value;
+}
+[[loom::noinline]] static unsigned last_read_before_update(unsigned value) {
+  event(value);
+  increment(value);
+  return value;
+}
+[[loom::noinline]] static unsigned loop(unsigned value, unsigned count) {
+  for (unsigned i = 0; i < count; ++i) increment(value);
+  return value;
+}
+[[loom::noinline]] static unsigned loop_snapshot(unsigned value, unsigned count) {
+  unsigned total = 0;
+  for (unsigned i = 0; i < count; ++i) total += value << increment(value);
+  return total + value;
+}
+[[loom::noinline]] static unsigned same_call(unsigned& value, unsigned saved) {
+  ++value;
+  return value + saved;
+}
+[[loom::noinline]] static void increment_pair(unsigned& first, unsigned& second) {
+  ++first;
+  second += 2u;
+}
+[[loom::noinline]] static unsigned independent_writebacks(unsigned value) {
+  unsigned first = value;
+  unsigned second = value;
+  increment_pair(first, second);
+  return first * 100u + second;
+}
+void run() {
+  event(exclusive(true, 11));
+  event(exclusive(false, 11));
+  event(exclusive_reversed(true, 11));
+  event(exclusive_reversed(false, 11));
+  event(dead_copy(11));
+  event(last_read_before_update(11));
+  event(loop(11, 0));
+  event(loop(11, 2));
+  event(loop_snapshot(11, 2));
+  unsigned value = 11;
+  event(same_call(value, value));
+  event(independent_writebacks(11));
+}
+
+// ----
+event 12
+event 11
+event 11
+event 12
+event 12
+event 11
+event 12
+event 11
+event 13
+event 36
+event 23
+event 1213
+OK 0
+retired 0
+// ====
+
+#include <loomcxx/view.h>
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+namespace loomt = loom::type;
+using Rows = loomt::view<loomt::shape<loomt::dynamic>, const unsigned char,
+                        loomt::encoding<loom::encoding::role::layout, 1>>;
+[[loom::noinline]] static unsigned trim(Rows& rows) {
+  rows = loom::view::subview(rows, {1}, {1});
+  return 0;
+}
+struct Pair {
+  // Earlier view keeps its complete shape and layout tuple.
+  Rows saved;
+  // Later call result after changing the original source view.
+  unsigned ignored;
+};
+void run() {
+  auto data = loom::buffer::constant("\x0b\x16");
+  auto layout = loom::encoding::layout::dense<1>();
+  auto source = loom::buffer::view<loomt::dynamic>(data, {2}, layout);
+  Pair result{source, trim(source)};
+  event(loom::view::load(result.saved, 0));
+  event(loom::view::load(source, 0));
+}
+
+// ----
+event 11
+event 22
+OK 0
+retired 0
+
+// ====
+
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+[[loom::noinline]] static unsigned replace(unsigned& value) { value = 22; return 0; }
+[[loom::noinline]] static unsigned increment(unsigned& value) { ++value; return 0; }
+[[loom::noinline]] static void conditional(bool choose) {
+  unsigned value = 11;
+  event(value << (choose ? replace(value) : 0u));
+  event(value);
+}
+[[loom::noinline]] static void captured_loop(unsigned value) {
+  for (unsigned i = 0; i < 2; ++i) {
+    unsigned local = value;
+    increment(local);
+    event(local);
+  }
+  event(value);
+}
+[[loom::noinline]] static unsigned early_exit(bool choose, unsigned value) {
+  for (unsigned i = 0; i < 2; ++i) {
+    if (choose) { increment(value); return value; }
+  }
+  return value;
+}
+[[loom::noinline]] static void closure_snapshot() {
+  unsigned value = 11;
+  auto closure = [saved = value, ignored = replace(value)] { return saved + ignored; };
+  event(closure());
+  event(value);
+}
+using Lanes = unsigned __attribute__((ext_vector_type(2)));
+[[loom::noinline]] static void vector_snapshot() {
+  unsigned value = 11;
+  Lanes lanes{value, replace(value)};
+  event(lanes[0]);
+  event(lanes[1]);
+  event(value);
+}
+[[loom::noinline]] static void multiple_copies(unsigned value) {
+  unsigned first = value;
+  unsigned second = value;
+  increment(first);
+  increment(second);
+  event(first);
+  event(second);
+  event(value);
+}
+void run() {
+  conditional(true);
+  conditional(false);
+  captured_loop(11);
+  event(early_exit(true, 11));
+  event(early_exit(false, 11));
+  closure_snapshot();
+  vector_snapshot();
+  multiple_copies(11);
+}
+// ----
+event 11
+event 22
+event 11
+event 11
+event 12
+event 12
+event 11
+event 12
+event 11
+event 11
+event 22
+event 11
+event 0
+event 22
+event 12
+event 12
+event 11
+OK 0
+retired 0
+
+// ====
+// An overloaded shift snapshots its by-value left operand, while the following
+// mutation updates the original record. Member/prvalue forms retain the same
+// rule when a later argument changes the source used to construct the receiver.
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+struct Owner {
+  // Saved payload of this source instance.
+  unsigned value;
+  void observe(unsigned) const { event(value); }
+};
+[[loom::noinline]] static unsigned replace(Owner& owner) { owner.value = 22; return 0; }
+[[loom::noinline]] static void operator<<(Owner saved, unsigned) { event(saved.value); }
+void run() {
+  Owner owner{11};
+  owner << replace(owner);
+  event(owner.value);
+  owner.value = 11;
+  Owner{owner.value}.observe(replace(owner));
+  event(owner.value);
+}
+// ----
+event 11
+event 22
+event 11
+event 22
+OK 0
+retired 0
+
+// ====
+// A vector passed by value retains its lanes while an independent binding is
+// updated through a mutable reference. Runtime lane indices cover both source
+// subscripting and the exported C++ integer conversion.
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+using Lanes = unsigned __attribute__((ext_vector_type(2)));
+[[loom::noinline]] static void replace_lane(Lanes& lanes, unsigned index) {
+  lanes[index] = 33;
+}
+[[loom::noinline]] static unsigned read_lane(Lanes lanes, unsigned index) {
+  return lanes[index];
+}
+void run() {
+  Lanes lanes{11, 22};
+  Lanes saved = lanes;
+  replace_lane(lanes, 1);
+  event(read_lane(saved, 1));
+  event(read_lane(lanes, 1));
+  event(read_lane(lanes, 0));
+}
+// ----
+event 22
+event 33
+event 11
+OK 0
+retired 0
+
+// ====
+
+// Forwarded and copied generic closures read stable pointer values. Distinct
+// index types exercise concrete call operators over the same captured field.
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+template<int Index, class Function>
+static void each(Function&& function) {
+  function(Index);
+  if constexpr (Index < 2) each<Index + 1>(function);
+}
+template<class Index>
+static int read_value(const int* input, Index index) { return input[index]; }
+template<class Function>
+static void copied_call(Function function) { function(0L); }
+template<bool Mutates> struct Mode { static constexpr bool mutates = Mutates; };
+void run() {
+  const int values[] = {3, 7, 11, 19, 31};
+  const int* input = values + 2;
+  int index = 0;
+  int sum = 0;
+  each<0>([&](auto value) { sum += input[index + value]; });
+  event(sum);
+  auto read = [&input](auto step) {
+    event(input[step]);
+    event(step[input]);
+    event(*(input + step));
+    event(*(step + input));
+    event(*(input - step));
+    event(read_value(input, step));
+  };
+  read(1);
+  copied_call(read);
+  auto selected = [&](auto mode) {
+    if constexpr (decltype(mode)::mutates) { ++input; }
+    return input[1];
+  };
+  event(selected(Mode<false>{}));
+  auto nested = [&](auto step) { return [input, step] { return input[step]; }(); };
+  event(nested(2));
+}
+
+// ----
+event 61
+event 19
+event 19
+event 19
+event 19
+event 7
+event 19
+event 11
+event 11
+event 11
+event 11
+event 11
+event 11
+event 19
+event 31
+OK 0
+retired 0
+
+// ====
+// A builtin comma sequences its left operand while retaining the right
+// operand's destination for references, assignments, and borrowed addresses.
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+[[loom::noinline]] static void update(unsigned& value) { value += 10; }
+void run() {
+  unsigned value = 1;
+  unsigned& selected = (event(2), value);
+  selected = 3;
+  (event(4), value) += 5;
+  update((event(6), value));
+  unsigned* pointer = &(event(7), value);
+  *pointer += 2;
+  event(value);
+  unsigned values[] = {30, 40};
+  (event(8), values)[1] = 50;
+  event(values[1]);
+}
+
+// ----
+event 2
+event 4
+event 6
+event 7
+event 20
+event 8
+event 50
+OK 0
+retired 0
+
+// ====
+// Array deduction, mutable structured bindings, nested ranges, and the
+// C++20 initializer all share the ordinary declaration and loop paths.
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+template <class T, unsigned Count>
+static unsigned sum(const T (&values)[Count]) {
+  unsigned total = 0;
+  for (auto value : values) total += value;
+  return total;
+}
+void run() {
+  int rows[2][2] = {{1, 2}, {3, 4}};
+  for (int increment = 10; auto& [first, second] : rows) {
+    first += increment;
+    second *= 2;
+  }
+  for (const auto& row : rows) event(sum(row));
+}
+
+// ----
+event 15
+event 21
+OK 0
+retired 0
+
+// ====
+// ADL lookup with pointer iterators preserves references to original elements.
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+namespace custom {
+struct Range {
+  // Inclusive start and exclusive end of caller-owned storage.
+  int* first;
+  // One-past-end pointer, including for an empty range.
+  int* last;
+};
+static int* begin(Range& range) { return range.first; }
+static int* end(Range& range) { return range.last; }
+}
+void run() {
+  int values[3] = {2, 5, 9};
+  custom::Range range{values, values + 3};
+  for (auto& value : range) value += 10;
+  for (int value : values) event(value);
+  custom::Range empty{values, values};
+  for (int value : empty) event(99);
+}
+
+// ----
+event 12
+event 15
+event 19
+OK 0
+retired 0
+
+// ====
+// List construction performs conversions in source order. Empty lists and
+// copies preserve the pointer/count contract, including end equality.
+#include <initializer_list>
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+static unsigned next(unsigned& value) { return ++value; }
+static unsigned sum(std::initializer_list<unsigned long long> values) {
+  unsigned result = 0;
+  for (auto value : values) result += static_cast<unsigned>(value);
+  return result;
+}
+static long largest(std::initializer_list<long> values) {
+  long result = values.begin()[0];
+  for (decltype(sizeof(0)) index = 1; index < values.size(); ++index)
+    if (result < values.begin()[index]) result = values.begin()[index];
+  return result;
+}
+void run() {
+  unsigned counter = 0;
+  event(sum({next(counter), next(counter), next(counter)}));
+  event(counter);
+  std::initializer_list<unsigned> empty{};
+  event(empty.size());
+  event(empty.begin() == empty.end());
+  auto values = {7u, 9u};
+  auto copy = values;
+  event(copy.begin() == values.begin());
+  event(*std::begin(copy));
+  event(*(std::end(copy) - 1));
+  for (unsigned value : {2u, 3u}) event(value);
+  event(static_cast<unsigned>(largest({-7L, 9L, 3L})));
+}
+
+// ----
+event 6
+event 3
+event 0
+event 1
+event 1
+event 7
+event 9
+event 2
+event 3
+event 9
+OK 0
+retired 0
+
+// ====
+// An initializer-list constructor receives the complete list as one argument.
+#include <initializer_list>
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+struct Sum {
+  // Sum accumulated by the selected list constructor.
+  unsigned value = 0;
+  Sum(std::initializer_list<unsigned> values) {
+    for (auto element : values) value += element;
+  }
+};
+void run() {
+  Sum named{3u, 5u};
+  event(named.value);
+  event(Sum{7u, 11u}.value);
+}
+
+// ----
+event 8
+event 18
+OK 0
+retired 0
+
+// ====
+// Libraries with pointer/end layout retain the same backing identity and
+// initialize the end pointer one past the last element, including empty lists.
+namespace std {
+template<class E> class initializer_list {
+  // Beginning of the compiler-created const array.
+  const E* first_;
+  // One-past-end iterator, equal to first_ when empty.
+  const E* last_;
+ public:
+  const E* begin() const { return first_; }
+  const E* end() const { return last_; }
+};
+}
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+static unsigned sum(std::initializer_list<unsigned> values) {
+  unsigned result = 0;
+  for (unsigned value : values) result += value;
+  return result;
+}
+void run() {
+  event(sum({3u, 7u, 11u}));
+  event(sum({}));
+  std::initializer_list<unsigned> values{5u, 8u};
+  event(values.end() == values.begin() + 2);
+  event(*(values.end() - 1));
+}
+
+// ----
+event 21
+event 0
+event 1
+event 8
+OK 0
+retired 0
+
+// ====
+// Vector and plain-record elements use the same const-array initialization
+// and addressing as scalar elements; no scalar-only list ABI is introduced.
+#include <initializer_list>
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+using Packet = unsigned __attribute__((ext_vector_type(4)));
+struct Pair {
+  // First scalar component.
+  unsigned first;
+  // Second scalar component.
+  unsigned second;
+};
+void run() {
+  std::initializer_list<Packet> packets{Packet{1, 2, 3, 4}, Packet{5, 6, 7, 8}};
+  for (const auto& packet : packets) event(packet[2]);
+  std::initializer_list<Pair> pairs{{1, 2}, {3, 4}};
+  for (const auto& pair : pairs) event(pair.first * 10 + pair.second);
+  std::initializer_list<float> weights{1.5f, 2.5f};
+  event(static_cast<unsigned>(weights.begin()[0] + weights.begin()[1]));
+}
+
+// ----
+event 3
+event 7
+event 12
+event 34
+event 4
+OK 0
+retired 0
+
+// ====
+// A constructor's escaped this pointer names the final backing-array element,
+// including during construction of later elements.
+#include <initializer_list>
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+struct Element {
+  // Scalar payload stored in the final element object.
+  unsigned value;
+  Element(unsigned input, const Element*& observed) : value(input) { observed = this; }
+};
+void run() {
+  const Element* first = nullptr;
+  const Element* second = nullptr;
+  std::initializer_list<Element> values{Element{7, first}, Element{first->value + 2, second}};
+  event(first == values.begin());
+  event(second == values.begin() + 1);
+  event(first->value + second->value);
+}
+
+// ----
+event 1
+event 1
+event 16
+OK 0
+retired 0

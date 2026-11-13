@@ -234,3 +234,355 @@ check.scenario @ordinary_logarithm_values {
   }
   check.return
 }
+
+// All four logarithms consume runtime encodings. Eight-lane F32 and four-lane F64
+// packets exercise native SIMD; scalar observations use the same inputs.
+func.def @logarithm_f32_family(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %end = index.constant 32 : index
+  %packet = index.constant 8 : index
+  %step = index.constant 1 : index
+  %source = buffer.view %input[%origin] : buffer -> view<32xf32>
+  %result = buffer.view %output[%origin] : buffer -> view<8x32xf32>
+  scf.for %i = [%begin to %end step %packet] {
+    %values = vector.load %source[%i] : view<32xf32> -> vector<8xf32>
+    %natural = vector.logf<afn> %values : vector<8xf32>
+    %binary = vector.log2f<afn> %values : vector<8xf32>
+    %decimal = vector.log10f<afn> %values : vector<8xf32>
+    %increment = vector.log1pf<afn> %values : vector<8xf32>
+    vector.store %natural, %result[0, %i] : vector<8xf32>, view<8x32xf32>
+    vector.store %binary, %result[1, %i] : vector<8xf32>, view<8x32xf32>
+    vector.store %decimal, %result[2, %i] : vector<8xf32>, view<8x32xf32>
+    vector.store %increment, %result[3, %i] : vector<8xf32>, view<8x32xf32>
+  }
+  scf.for %i = [%begin to %end step %step] {
+    %value = view.load %source[%i] : view<32xf32> -> f32
+    %natural = scalar.logf<afn> %value : f32
+    %binary = scalar.log2f<afn> %value : f32
+    %decimal = scalar.log10f<afn> %value : f32
+    %increment = scalar.log1pf<afn> %value : f32
+    view.store %natural, %result[4, %i] : f32, view<8x32xf32>
+    view.store %binary, %result[5, %i] : f32, view<8x32xf32>
+    view.store %decimal, %result[6, %i] : f32, view<8x32xf32>
+    view.store %increment, %result[7, %i] : f32, view<8x32xf32>
+  }
+  func.return
+}
+
+func.def @logarithm_f32_inputs(%input: buffer) {
+  %origin = index.constant 0 : offset
+  %destination = buffer.view %input[%origin] : buffer -> view<32xi32>
+  %bits = vector.constanti [0, -2147483648, 1, -2147483647, 8388607, 8388608, 8388609, 1065353215, 1065353216, 1065353217, -1082130433, -1082130432, -1082130431, 1060439282, 1060439283, 1060439284, 1068827890, 1068827891, 1068827892, 2139095039, 2139095040, -8388608, 2143289344, -4194304, 2139095041, -8388607, 872415232, 872415231, 872415233, -1275068416, -1275068417, -1275068415] : vector<32xi32>
+  vector.store %bits, %destination[0] : vector<32xi32>, view<32xi32>
+  func.return
+}
+
+check.scenario @logarithm_f32_family_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.fill value(0) : tensor<32xi32>
+    check.generate<@logarithm_f32_inputs>(%input) : (tensor<32xi32>) -> ()
+    %output = check.generate.fill value(0.0) : tensor<8x32xf32>
+    %vector_small = check.tensor.view %output offset(384) : tensor<8x32xf32> -> tensor<4xf32>
+    %scalar_small = check.tensor.view %output offset(896) : tensor<8x32xf32> -> tensor<4xf32>
+    check.compare<@logarithm_f32_family>(%input, %output) : (tensor<32xi32>, tensor<8x32xf32>) -> () {
+      check.expect.bitwise actual(%vector_small) expected(%vector_small) : tensor<4xf32>
+      check.expect.bitwise actual(%scalar_small) expected(%scalar_small) : tensor<4xf32>
+      check.expect.approximate actual(%output) expected(%output) atol(0.0) rtol(4.76837158203125e-07) nan(same) : tensor<8x32xf32>, tensor<8x32xf32>
+    }
+  }
+  check.trial[64](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-2147483648 to 2147483647) : tensor<32xi32>
+    %output = check.generate.fill value(0.0) : tensor<8x32xf32>
+    check.compare<@logarithm_f32_family>(%input, %output) : (tensor<32xi32>, tensor<8x32xf32>) -> () {
+      check.expect.approximate actual(%output) expected(%output) atol(0.0) rtol(4.76837158203125e-07) nan(same) : tensor<8x32xf32>, tensor<8x32xf32>
+    }
+  }
+  check.return
+}
+
+func.def @logarithm_f64_family(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %end = index.constant 32 : index
+  %packet = index.constant 4 : index
+  %step = index.constant 1 : index
+  %source = buffer.view %input[%origin] : buffer -> view<32xf64>
+  %result = buffer.view %output[%origin] : buffer -> view<8x32xf64>
+  scf.for %i = [%begin to %end step %packet] {
+    %values = vector.load %source[%i] : view<32xf64> -> vector<4xf64>
+    %natural = vector.logf<afn> %values : vector<4xf64>
+    %binary = vector.log2f<afn> %values : vector<4xf64>
+    %decimal = vector.log10f<afn> %values : vector<4xf64>
+    %increment = vector.log1pf<afn> %values : vector<4xf64>
+    vector.store %natural, %result[0, %i] : vector<4xf64>, view<8x32xf64>
+    vector.store %binary, %result[1, %i] : vector<4xf64>, view<8x32xf64>
+    vector.store %decimal, %result[2, %i] : vector<4xf64>, view<8x32xf64>
+    vector.store %increment, %result[3, %i] : vector<4xf64>, view<8x32xf64>
+  }
+  scf.for %i = [%begin to %end step %step] {
+    %value = view.load %source[%i] : view<32xf64> -> f64
+    %natural = scalar.logf<afn> %value : f64
+    %binary = scalar.log2f<afn> %value : f64
+    %decimal = scalar.log10f<afn> %value : f64
+    %increment = scalar.log1pf<afn> %value : f64
+    view.store %natural, %result[4, %i] : f64, view<8x32xf64>
+    view.store %binary, %result[5, %i] : f64, view<8x32xf64>
+    view.store %decimal, %result[6, %i] : f64, view<8x32xf64>
+    view.store %increment, %result[7, %i] : f64, view<8x32xf64>
+  }
+  func.return
+}
+
+func.def @logarithm_f64_inputs(%input: buffer) {
+  %origin = index.constant 0 : offset
+  %destination = buffer.view %input[%origin] : buffer -> view<32xi64>
+  %bits = vector.constanti [0, -9223372036854775808, 1, -9223372036854775807, 4503599627370495, 4503599627370496, 4503599627370497, 4607182418800017407, 4607182418800017408, 4607182418800017409, -4616189618054758401, -4616189618054758400, -4616189618054758399, 4604544271217802188, 4604544271217802189, 4604544271217802190, 4609047870845172684, 4609047870845172685, 4609047870845172686, 9218868437227405311, 9218868437227405312, -4503599627370496, 9221120237041090560, -2251799813685248, 9218868437227405313, -4503599627370495, 4363988038922010624, 4363988038922010623, 4363988038922010625, -4859383997932765184, -4859383997932765185, -4859383997932765183] : vector<32xi64>
+  vector.store %bits, %destination[0] : vector<32xi64>, view<32xi64>
+  func.return
+}
+
+check.scenario @logarithm_f64_family_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.fill value(0) : tensor<32xi64>
+    check.generate<@logarithm_f64_inputs>(%input) : (tensor<32xi64>) -> ()
+    %output = check.generate.fill value(0.0) : tensor<8x32xf64>
+    %vector_small = check.tensor.view %output offset(768) : tensor<8x32xf64> -> tensor<4xf64>
+    %scalar_small = check.tensor.view %output offset(1792) : tensor<8x32xf64> -> tensor<4xf64>
+    check.compare<@logarithm_f64_family>(%input, %output) : (tensor<32xi64>, tensor<8x32xf64>) -> () {
+      check.expect.bitwise actual(%vector_small) expected(%vector_small) : tensor<4xf64>
+      check.expect.bitwise actual(%scalar_small) expected(%scalar_small) : tensor<4xf64>
+      check.expect.approximate actual(%output) expected(%output) atol(0.0) rtol(8.8817841970012523e-16) nan(same) : tensor<8x32xf64>, tensor<8x32xf64>
+    }
+  }
+  check.trial[64](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-9223372036854775808 to 9223372036854775807) : tensor<32xi64>
+    %output = check.generate.fill value(0.0) : tensor<8x32xf64>
+    check.compare<@logarithm_f64_family>(%input, %output) : (tensor<32xi64>, tensor<8x32xf64>) -> () {
+      check.expect.approximate actual(%output) expected(%output) atol(0.0) rtol(8.8817841970012523e-16) nan(same) : tensor<8x32xf64>, tensor<8x32xf64>
+    }
+  }
+  check.return
+}
+
+// Narrow results may cross a single rounding midpoint. Their relative bounds
+// below are one format epsilon; NaNs and infinities must still classify alike.
+func.def @logarithm_f16_family(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %end = index.constant 32 : index
+  %packet = index.constant 4 : index
+  %step = index.constant 1 : index
+  %source = buffer.view %input[%origin] : buffer -> view<32xf16>
+  %result = buffer.view %output[%origin] : buffer -> view<8x32xf16>
+  scf.for %i = [%begin to %end step %packet] {
+    %values = vector.load %source[%i] : view<32xf16> -> vector<4xf16>
+    %natural = vector.logf<afn> %values : vector<4xf16>
+    %binary = vector.log2f<afn> %values : vector<4xf16>
+    %decimal = vector.log10f<afn> %values : vector<4xf16>
+    %increment = vector.log1pf<afn> %values : vector<4xf16>
+    vector.store %natural, %result[0, %i] : vector<4xf16>, view<8x32xf16>
+    vector.store %binary, %result[1, %i] : vector<4xf16>, view<8x32xf16>
+    vector.store %decimal, %result[2, %i] : vector<4xf16>, view<8x32xf16>
+    vector.store %increment, %result[3, %i] : vector<4xf16>, view<8x32xf16>
+  }
+  scf.for %i = [%begin to %end step %step] {
+    %value = view.load %source[%i] : view<32xf16> -> f16
+    %natural = scalar.logf<afn> %value : f16
+    %binary = scalar.log2f<afn> %value : f16
+    %decimal = scalar.log10f<afn> %value : f16
+    %increment = scalar.log1pf<afn> %value : f16
+    view.store %natural, %result[4, %i] : f16, view<8x32xf16>
+    view.store %binary, %result[5, %i] : f16, view<8x32xf16>
+    view.store %decimal, %result[6, %i] : f16, view<8x32xf16>
+    view.store %increment, %result[7, %i] : f16, view<8x32xf16>
+  }
+  func.return
+}
+
+func.def @logarithm_f16_inputs(%input: buffer) {
+  %origin = index.constant 0 : offset
+  %destination = buffer.view %input[%origin] : buffer -> view<32xi16>
+  %bits = vector.constanti [0, -32768, 1, -32767, 1023, 1024, 1025, 15359, 15360, 15361, -17409, -17408, -17407, 14759, 14760, 14761, 15783, 15784, 15785, 31743, 31744, -1024, 32256, -512, 31745, -1023, 4096, 4095, 4097, -28672, -28673, -28671] : vector<32xi16>
+  vector.store %bits, %destination[0] : vector<32xi16>, view<32xi16>
+  func.return
+}
+
+check.scenario @logarithm_f16_family_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.fill value(0) : tensor<32xi16>
+    check.generate<@logarithm_f16_inputs>(%input) : (tensor<32xi16>) -> ()
+    %output = check.generate.fill value(0.0) : tensor<8x32xf16>
+    %vector_small = check.tensor.view %output offset(192) : tensor<8x32xf16> -> tensor<4xf16>
+    %scalar_small = check.tensor.view %output offset(448) : tensor<8x32xf16> -> tensor<4xf16>
+    check.compare<@logarithm_f16_family>(%input, %output) : (tensor<32xi16>, tensor<8x32xf16>) -> () {
+      check.expect.bitwise actual(%vector_small) expected(%vector_small) : tensor<4xf16>
+      check.expect.bitwise actual(%scalar_small) expected(%scalar_small) : tensor<4xf16>
+      check.expect.approximate actual(%output) expected(%output) atol(0.0) rtol(0.0009765625) nan(same) : tensor<8x32xf16>, tensor<8x32xf16>
+    }
+  }
+  check.trial[16](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-32768 to 32767) : tensor<32xi16>
+    %output = check.generate.fill value(0.0) : tensor<8x32xf16>
+    check.compare<@logarithm_f16_family>(%input, %output) : (tensor<32xi16>, tensor<8x32xf16>) -> () {
+      check.expect.approximate actual(%output) expected(%output) atol(0.0) rtol(0.0009765625) nan(same) : tensor<8x32xf16>, tensor<8x32xf16>
+    }
+  }
+  check.return
+}
+
+func.def @logarithm_bf16_family(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %end = index.constant 32 : index
+  %packet = index.constant 4 : index
+  %step = index.constant 1 : index
+  %source = buffer.view %input[%origin] : buffer -> view<32xbf16>
+  %result = buffer.view %output[%origin] : buffer -> view<8x32xbf16>
+  scf.for %i = [%begin to %end step %packet] {
+    %values = vector.load %source[%i] : view<32xbf16> -> vector<4xbf16>
+    %natural = vector.logf<afn> %values : vector<4xbf16>
+    %binary = vector.log2f<afn> %values : vector<4xbf16>
+    %decimal = vector.log10f<afn> %values : vector<4xbf16>
+    %increment = vector.log1pf<afn> %values : vector<4xbf16>
+    vector.store %natural, %result[0, %i] : vector<4xbf16>, view<8x32xbf16>
+    vector.store %binary, %result[1, %i] : vector<4xbf16>, view<8x32xbf16>
+    vector.store %decimal, %result[2, %i] : vector<4xbf16>, view<8x32xbf16>
+    vector.store %increment, %result[3, %i] : vector<4xbf16>, view<8x32xbf16>
+  }
+  scf.for %i = [%begin to %end step %step] {
+    %value = view.load %source[%i] : view<32xbf16> -> bf16
+    %natural = scalar.logf<afn> %value : bf16
+    %binary = scalar.log2f<afn> %value : bf16
+    %decimal = scalar.log10f<afn> %value : bf16
+    %increment = scalar.log1pf<afn> %value : bf16
+    view.store %natural, %result[4, %i] : bf16, view<8x32xbf16>
+    view.store %binary, %result[5, %i] : bf16, view<8x32xbf16>
+    view.store %decimal, %result[6, %i] : bf16, view<8x32xbf16>
+    view.store %increment, %result[7, %i] : bf16, view<8x32xbf16>
+  }
+  func.return
+}
+
+func.def @logarithm_bf16_inputs(%input: buffer) {
+  %origin = index.constant 0 : offset
+  %destination = buffer.view %input[%origin] : buffer -> view<32xi16>
+  %bits = vector.constanti [0, -32768, 1, -32767, 127, 128, 129, 16255, 16256, 16257, -16513, -16512, -16511, 16180, 16181, 16182, 16308, 16309, 16310, 32639, 32640, -128, 32704, -64, 32641, -127, 15232, 15231, 15233, -17536, -17537, -17535] : vector<32xi16>
+  vector.store %bits, %destination[0] : vector<32xi16>, view<32xi16>
+  func.return
+}
+
+check.scenario @logarithm_bf16_family_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.fill value(0) : tensor<32xi16>
+    check.generate<@logarithm_bf16_inputs>(%input) : (tensor<32xi16>) -> ()
+    %output = check.generate.fill value(0.0) : tensor<8x32xbf16>
+    %vector_small = check.tensor.view %output offset(192) : tensor<8x32xbf16> -> tensor<4xbf16>
+    %scalar_small = check.tensor.view %output offset(448) : tensor<8x32xbf16> -> tensor<4xbf16>
+    check.compare<@logarithm_bf16_family>(%input, %output) : (tensor<32xi16>, tensor<8x32xbf16>) -> () {
+      check.expect.bitwise actual(%vector_small) expected(%vector_small) : tensor<4xbf16>
+      check.expect.bitwise actual(%scalar_small) expected(%scalar_small) : tensor<4xbf16>
+      check.expect.approximate actual(%output) expected(%output) atol(0.0) rtol(0.0078125) nan(same) : tensor<8x32xbf16>, tensor<8x32xbf16>
+    }
+  }
+  check.trial[16](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-32768 to 32767) : tensor<32xi16>
+    %output = check.generate.fill value(0.0) : tensor<8x32xbf16>
+    check.compare<@logarithm_bf16_family>(%input, %output) : (tensor<32xi16>, tensor<8x32xbf16>) -> () {
+      check.expect.approximate actual(%output) expected(%output) atol(0.0) rtol(0.0078125) nan(same) : tensor<8x32xbf16>, tensor<8x32xbf16>
+    }
+  }
+  check.return
+}
+
+func.def @logarithm_f8e4m3_family(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %end = index.constant 256 : index
+  %packet = index.constant 4 : index
+  %step = index.constant 1 : index
+  %source = buffer.view %input[%origin] : buffer -> view<256xf8E4M3>
+  %result = buffer.view %output[%origin] : buffer -> view<8x256xf8E4M3>
+  scf.for %i = [%begin to %end step %packet] {
+    %values = vector.load %source[%i] : view<256xf8E4M3> -> vector<4xf8E4M3>
+    %natural = vector.logf<afn> %values : vector<4xf8E4M3>
+    %binary = vector.log2f<afn> %values : vector<4xf8E4M3>
+    %decimal = vector.log10f<afn> %values : vector<4xf8E4M3>
+    %increment = vector.log1pf<afn> %values : vector<4xf8E4M3>
+    vector.store %natural, %result[0, %i] : vector<4xf8E4M3>, view<8x256xf8E4M3>
+    vector.store %binary, %result[1, %i] : vector<4xf8E4M3>, view<8x256xf8E4M3>
+    vector.store %decimal, %result[2, %i] : vector<4xf8E4M3>, view<8x256xf8E4M3>
+    vector.store %increment, %result[3, %i] : vector<4xf8E4M3>, view<8x256xf8E4M3>
+  }
+  scf.for %i = [%begin to %end step %step] {
+    %value = view.load %source[%i] : view<256xf8E4M3> -> f8E4M3
+    %natural = scalar.logf<afn> %value : f8E4M3
+    %binary = scalar.log2f<afn> %value : f8E4M3
+    %decimal = scalar.log10f<afn> %value : f8E4M3
+    %increment = scalar.log1pf<afn> %value : f8E4M3
+    view.store %natural, %result[4, %i] : f8E4M3, view<8x256xf8E4M3>
+    view.store %binary, %result[5, %i] : f8E4M3, view<8x256xf8E4M3>
+    view.store %decimal, %result[6, %i] : f8E4M3, view<8x256xf8E4M3>
+    view.store %increment, %result[7, %i] : f8E4M3, view<8x256xf8E4M3>
+  }
+  func.return
+}
+
+check.scenario @logarithm_f8e4m3_family_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(-128) step(1) : tensor<256xi8>
+    %output = check.generate.fill value(0.0) : tensor<8x256xf8E4M3>
+    check.compare<@logarithm_f8e4m3_family>(%input, %output) : (tensor<256xi8>, tensor<8x256xf8E4M3>) -> () {
+      check.expect.approximate actual(%output) expected(%output) atol(0.0) rtol(0.125) nan(same) : tensor<8x256xf8E4M3>, tensor<8x256xf8E4M3>
+    }
+  }
+  check.return
+}
+
+func.def @logarithm_f8e5m2_family(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %end = index.constant 256 : index
+  %packet = index.constant 4 : index
+  %step = index.constant 1 : index
+  %source = buffer.view %input[%origin] : buffer -> view<256xf8E5M2>
+  %result = buffer.view %output[%origin] : buffer -> view<8x256xf8E5M2>
+  scf.for %i = [%begin to %end step %packet] {
+    %values = vector.load %source[%i] : view<256xf8E5M2> -> vector<4xf8E5M2>
+    %natural = vector.logf<afn> %values : vector<4xf8E5M2>
+    %binary = vector.log2f<afn> %values : vector<4xf8E5M2>
+    %decimal = vector.log10f<afn> %values : vector<4xf8E5M2>
+    %increment = vector.log1pf<afn> %values : vector<4xf8E5M2>
+    vector.store %natural, %result[0, %i] : vector<4xf8E5M2>, view<8x256xf8E5M2>
+    vector.store %binary, %result[1, %i] : vector<4xf8E5M2>, view<8x256xf8E5M2>
+    vector.store %decimal, %result[2, %i] : vector<4xf8E5M2>, view<8x256xf8E5M2>
+    vector.store %increment, %result[3, %i] : vector<4xf8E5M2>, view<8x256xf8E5M2>
+  }
+  scf.for %i = [%begin to %end step %step] {
+    %value = view.load %source[%i] : view<256xf8E5M2> -> f8E5M2
+    %natural = scalar.logf<afn> %value : f8E5M2
+    %binary = scalar.log2f<afn> %value : f8E5M2
+    %decimal = scalar.log10f<afn> %value : f8E5M2
+    %increment = scalar.log1pf<afn> %value : f8E5M2
+    view.store %natural, %result[4, %i] : f8E5M2, view<8x256xf8E5M2>
+    view.store %binary, %result[5, %i] : f8E5M2, view<8x256xf8E5M2>
+    view.store %decimal, %result[6, %i] : f8E5M2, view<8x256xf8E5M2>
+    view.store %increment, %result[7, %i] : f8E5M2, view<8x256xf8E5M2>
+  }
+  func.return
+}
+
+check.scenario @logarithm_f8e5m2_family_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(-128) step(1) : tensor<256xi8>
+    %output = check.generate.fill value(0.0) : tensor<8x256xf8E5M2>
+    check.compare<@logarithm_f8e5m2_family>(%input, %output) : (tensor<256xi8>, tensor<8x256xf8E5M2>) -> () {
+      check.expect.approximate actual(%output) expected(%output) atol(0.0) rtol(0.25) nan(same) : tensor<8x256xf8E5M2>, tensor<8x256xf8E5M2>
+    }
+  }
+  check.return
+}

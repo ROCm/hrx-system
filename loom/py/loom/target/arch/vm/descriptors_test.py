@@ -28,11 +28,21 @@ from iree.vm.bytecode.spec.isa.core.integer import (
     IntegerDivisionSemantics,
     IntegerUnarySemantics,
 )
-from iree.vm.bytecode.spec.isa.core.rules import FieldRule, RecordRuleKind, StateAccess
+from iree.vm.bytecode.spec.isa.core.ref import (
+    REF_COMPARE_EQ,
+    REF_COMPARE_NULL,
+    REF_NULL,
+)
+from iree.vm.bytecode.spec.isa.core.rules import (
+    FieldRule,
+    RecordRuleKind,
+    RefOwnership,
+    StateAccess,
+)
 from iree.vm.bytecode.spec.isa.core.stack import MEMORY_FORMAT_SELECTOR
 from iree.vm.bytecode.spec.specification import SPECIFICATION
 
-from loom.dialect.scalar import conversion, math
+from loom.dialect.scalar import arithmetic, bitwise, conversion, math
 from loom.ir import ScalarType, ScalarTypeKind
 from loom.target.arch.vm.contracts import (
     VM_CORE_CONTRACT_DIALECT_OPS,
@@ -43,6 +53,8 @@ from loom.target.contracts import (
     LOWER_EMIT_FLAG_RECORD_SOURCE_MEMORY,
     AttrProject,
     DescriptorRule,
+    GuardKind,
+    ValueRef,
     compile_lower_rule_set,
 )
 from loom.target.low_descriptors import (
@@ -52,7 +64,54 @@ from loom.target.low_descriptors import (
     ImmediateFlag,
     ImmediateKind,
     OperandRole,
+    OwnershipEffect,
 )
+
+
+def test_modular_binary_carriers_cover_all_logical_integer_widths():
+    instructions = {
+        instruction.opcode: instruction for instruction in SPECIFICATION.instructions
+    }
+    operations = {
+        arithmetic.scalar_addi,
+        arithmetic.scalar_subi,
+        arithmetic.scalar_muli,
+        bitwise.scalar_andi,
+        bitwise.scalar_ori,
+        bitwise.scalar_xori,
+        bitwise.scalar_shli,
+    }
+    cells = set()
+    for rule in VM_CORE_CONTRACT_FRAGMENT.cases:
+        if not isinstance(rule, DescriptorRule) or rule.source_op not in operations:
+            continue
+        types = {
+            guard.field: guard.type_pattern
+            for guard in rule.guards
+            if guard.kind is GuardKind.VALUE_TYPE
+        }
+        assert types["lhs"] == types["rhs"] == types["result"]
+        assert len(rule.emit) == 1
+        emit = rule.emit[0]
+        assert emit.operands == {
+            "left_v8": ValueRef.operand("lhs"),
+            "right_v8": ValueRef.operand("rhs"),
+        }
+        semantics = instructions[emit.descriptor.encoding_id].semantics
+        assert isinstance(semantics, IntegerBinarySemantics)
+        for element in types["result"].elements:
+            width = int(element[1:])
+            assert semantics.bit_width == max(32, width)
+            cell = (rule.source_op, width)
+            assert cell not in cells
+            cells.add(cell)
+    assert cells == {
+        *((op, width) for op in operations for width in (8, 16, 32, 64)),
+        *(
+            (op, 1)
+            for op in (bitwise.scalar_andi, bitwise.scalar_ori, bitwise.scalar_xori)
+        ),
+    }
 
 
 def test_scalar_packets_preserve_spec_encoding_and_semantic_types():
@@ -154,6 +213,20 @@ def test_register_fields_preserve_the_wire_bank_and_position():
             )
             (alternative,) = operand.reg_alts
             assert alternative.reg_class == banks[field.rule.kind]
+            expected_ownership = {
+                RefOwnership.BORROW: OwnershipEffect.BORROW,
+                RefOwnership.INSPECT: OwnershipEffect.BORROW,
+                RefOwnership.RETAIN: OwnershipEffect.RETAIN,
+                RefOwnership.REPLACE_OWNER: OwnershipEffect.OWNED,
+                RefOwnership.REPLACE_RETAIN: OwnershipEffect.OWNED,
+                RefOwnership.REPLACE_BORROW: OwnershipEffect.BORROWED,
+                RefOwnership.CLEAR: OwnershipEffect.NONE,
+            }
+            assert operand.ownership is (
+                expected_ownership[field.ref_policy.ownership]
+                if field.ref_policy
+                else OwnershipEffect.NONE
+            )
 
 
 def test_effects_preserve_state_access_not_runtime_aborts():
@@ -172,6 +245,16 @@ def test_effects_preserve_state_access_not_runtime_aborts():
                 for effect in instruction.state_effects
             )
         )
+        creates_owner = any(
+            field.ref_policy
+            and field.ref_policy.ownership
+            in (RefOwnership.REPLACE_OWNER, RefOwnership.REPLACE_RETAIN)
+            for field in instruction.fields
+        )
+        if creates_owner:
+            expected += (EffectKind.UNKNOWN,)
+        if instruction is REF_NULL:
+            assert DescriptorFlag.UNIQUE_IDENTITY in descriptor.flags
         if expected:
             assert DescriptorFlag.SIDE_EFFECTING in descriptor.flags
             assert DescriptorFlag.DEAD_REMOVABLE not in descriptor.flags
@@ -179,6 +262,24 @@ def test_effects_preserve_state_access_not_runtime_aborts():
         else:
             assert not descriptor.effects
             assert DescriptorFlag.DEAD_REMOVABLE in descriptor.flags
+
+
+def test_handle_observation_returns_canonical_predicates_without_ownership():
+    descriptors = {
+        descriptor.encoding_id: descriptor
+        for descriptor in VM_CORE_DESCRIPTOR_SET.descriptors
+    }
+    for instruction in (REF_COMPARE_NULL, REF_COMPARE_EQ):
+        descriptor = descriptors[instruction.opcode]
+        (result_type,) = descriptor.asm_forms[0].result_value_types
+        assert result_type.element_type is ScalarTypeKind.I1
+        assert not descriptor.effects
+        assert DescriptorFlag.DEAD_REMOVABLE in descriptor.flags
+        assert all(
+            operand.ownership is OwnershipEffect.BORROW
+            for operand in descriptor.operands
+            if operand.role is OperandRole.OPERAND
+        )
 
 
 def test_lowering_uses_the_projected_descriptors():

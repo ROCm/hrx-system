@@ -7,9 +7,7 @@ func.def @static_tail(%source: vector<2x3x4xi16>) -> (vector<3x4xi16>) {
 
 // ----
 func.def @static_tail(%source: vector<2x3x4xi16>) -> (vector<3x4xi16>) {
-  %3 = vector.bitcast %source : vector<2x3x4xi16> to vector<24xi16>
-  %4 = vector.slice %3[12] : vector<24xi16> -> vector<12xi16>
-  %result = vector.bitcast %4 : vector<12xi16> to vector<3x4xi16>
+  %result = vector.extract %source[1] : vector<2x3x4xi16> -> vector<3x4xi16>
   func.return %result : vector<3x4xi16>
 }
 
@@ -22,21 +20,16 @@ func.def @dynamic_scalar(%source: vector<2x3xi16>, %row: index) -> (i16) {
 
 // ----
 func.def @dynamic_scalar(%source: vector<2x3xi16>, %row: index) -> (i16) {
-  %4 = index.constant 3 : index
-  %5 = index.mul %row, %4 : index
-  %6 = index.constant 1 : index
-  %7 = index.add %5, %6 : index
-  %8 = vector.bitcast %source : vector<2x3xi16> to vector<6xi16>
-  %result = vector.extract %8[%7] : vector<6xi16> -> i16
+  %result = vector.extract %source[%row, 1] : vector<2x3xi16> -> i16
   func.return %result : i16
 }
 
 // ====
 // RUN: pass target=amd.xdna.aie2p:core target-legalize{mode=final},canonicalize
 
-// This aggregate exceeds the multidimensional carrier domain. Flattening its
-// extraction would recreate the bitcast that scalarization is decomposing.
-func.def @transient_aggregate(%input: buffer) -> (f32) {
+// A native accumulator matrix can normalize to its flat memory view. Extracting
+// one element still folds to one scalar load at the corresponding byte offset.
+func.def @static_matrix_element(%input: buffer) -> (f32) {
   %input_offset = index.constant 0 : offset
   %input_view = buffer.view %input[%input_offset] : buffer -> view<8x8xf32>
   %loaded = vector.load %input_view[0, 0] : view<8x8xf32> -> vector<8x8xf32>
@@ -45,9 +38,50 @@ func.def @transient_aggregate(%input: buffer) -> (f32) {
 }
 
 // ----
-func.def @transient_aggregate(%input: buffer) -> (f32) {
+func.def @static_matrix_element(%input: buffer) -> (f32) {
   %input_offset = index.constant 0 : offset
   %input_view = buffer.view %input[%input_offset] : buffer -> view<8x8xf32>
-  %result = view.load %input_view[3, 5] : view<8x8xf32> -> f32
+  %8 = view.bitcast %input_view : view<8x8xf32> -> view<64xf32>
+  %result = view.load %8[29] : view<64xf32> -> f32
   func.return %result : f32
+}
+
+// ====
+
+// RUN: pass target=amd.xdna.aie2p:core target-legalize{mode=final},canonicalize
+
+// An address carrier does not match its source memory element width. Shape
+// normalization must terminate with one target diagnostic instead of cycling
+// through scalar construction and extraction or diagnosing every scalar lane.
+func.def @index_matrix_memory(%input: buffer) -> (index) {
+  %offset = index.constant 0 : offset
+  %view = buffer.view %input[%offset] : buffer -> view<2x17xindex>
+  // ERROR@+1: TARGET/003
+  %loaded = vector.load %view[0, 0] : view<2x17xindex> -> vector<2x17xindex>
+  %result = vector.extract %loaded[1, 16] : vector<2x17xindex> -> index
+  func.return %result : index
+}
+
+// ====
+
+// RUN: pass target=amd.xdna.aie2p:core target-legalize{mode=final},canonicalize
+
+func.def @offset_tensor_memory(%input: buffer) -> (offset) {
+  %offset = index.constant 0 : offset
+  %view = buffer.view %input[%offset] : buffer -> view<2x2x9xoffset>
+  // ERROR@+1: TARGET/003
+  %loaded = vector.load %view[0, 0, 0] : view<2x2x9xoffset> -> vector<2x2x9xoffset>
+  %result = vector.extract %loaded[1, 1, 8] : vector<2x2x9xoffset> -> offset
+  func.return %result : offset
+}
+
+// ====
+// RUN: pass target=amd.xdna.aie2p:core target-legalize{mode=final},canonicalize
+
+func.def @index_matrix_store(%output: buffer, %values: vector<2x17xindex>) {
+  %offset = index.constant 0 : offset
+  %view = buffer.view %output[%offset] : buffer -> view<2x17xindex>
+  // ERROR@+1: TARGET/003
+  vector.store %values, %view[0, 0] : vector<2x17xindex>, view<2x17xindex>
+  func.return
 }

@@ -42,7 +42,7 @@
 
 int main(int argc, char** argv) {
   IREE_TRACE_APP_ENTER();
-  const loom_serve_compiler_options_t* compiler_options = NULL;
+  const loom_runtime_compiler_options_t* compiler_options = NULL;
 #if LOOM_SERVE_CONFIG_HAVE_ANY_TARGET
   const loomc_iree_hal_target_provider_t* target_providers[] = {
 #if LOOM_SERVE_CONFIG_HAVE_X86
@@ -58,7 +58,7 @@ int main(int argc, char** argv) {
       loomc_xdna_iree_hal_target_provider(),
 #endif  // LOOM_SERVE_CONFIG_HAVE_XDNA
   };
-  const loom_serve_compiler_options_t configured_compiler_options = {
+  const loom_runtime_compiler_options_t configured_compiler_options = {
       .target_environment_create = loomc_target_environment_create_configured,
       .target_providers = target_providers,
       .target_provider_count = IREE_ARRAYSIZE(target_providers),

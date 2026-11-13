@@ -50,3 +50,98 @@ low.func.def target<test.low.core>(@target) @ordinary_call_setup() -> (reg<test.
 
 // ----
 node 1 <- none
+
+// ====
+
+// Spilling does not create another physical condition register. Prepare each
+// consumer's other inputs before occupying the singleton, just as for the
+// unspillable condition class.
+// RUN: emit low-schedule-query @spillable_fixed_setup kind=order strategy=resource-stall order=0,1,2,3,4,5 consumer=*
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @spillable_fixed_setup(%condition: reg<test.i32>, %left: reg<test.i32>, %right: reg<test.i32>) -> (reg<test.i32>) asm {
+  %first = copy %condition : reg<test.i32> -> reg<test.spillable.fixed.r0>
+  %second = copy %condition : reg<test.i32> -> reg<test.spillable.fixed.r0>
+  %constant = test.const.i32 1
+  %prepared = test.add.i32 %left, %constant
+  %selected = test.fixed.select.i32 %prepared, %right, %first
+  %result = test.fixed.select.i32 %selected, %right, %second
+  return %result
+}
+
+// ----
+block 0 order: 2, 3, 0, 4, 1, 5
+node 0 <- 3
+node 1 <- 4
+
+// ====
+
+// A required source and its singleton subset have the same physical footprint
+// even when the destination can spill. Deferring the copy preserves capacity.
+// RUN: emit low-schedule-query @spillable_fixed_subset strategy=resource-stall kind=order consumer=0
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @spillable_fixed_subset(%source: reg<test.explicit32>, %other: reg<test.i32>) -> (reg<test.i32>) asm {
+  %condition = copy %source : reg<test.explicit32> -> reg<test.spillable.fixed.r0>
+  %dependency = test.add.i32 %other, %other
+  %result = test.fixed.select.i32 %dependency, %other, %condition
+  return %result
+}
+
+// ----
+node 0 <- 1
+
+// ====
+
+// A disjoint source domain can retire before independent prerequisites. Its
+// storage is not preserved by a transfer to the singleton class.
+// RUN: emit low-schedule-query @spillable_fixed_disjoint strategy=resource-stall kind=order consumer=0
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @spillable_fixed_disjoint(%source: reg<test.coindexed.partner>, %other: reg<test.i32>) -> (reg<test.i32>) asm {
+  %condition = copy %source : reg<test.coindexed.partner> -> reg<test.spillable.fixed.r0>
+  %dependency = test.add.i32 %other, %other
+  %result = test.fixed.select.i32 %dependency, %other, %condition
+  return %result
+}
+
+// ----
+node 0 <- none
+
+// ====
+
+// Ordinary multi-register spillable classes retain freedom to materialize
+// copies before unrelated work; they have no singleton exclusion boundary.
+// RUN: emit low-schedule-query @spillable_broad_setup strategy=resource-stall kind=order consumer=0
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @spillable_broad_setup(%source: reg<test.i32>, %other: reg<test.i32>) -> (reg<test.spillable.explicit32>, reg<test.i32>) asm {
+  %value = copy %source : reg<test.i32> -> reg<test.spillable.explicit32>
+  %dependency = test.add.i32 %other, %other
+  return %value, %dependency
+}
+
+// ----
+node 0 <- none
+
+// ====
+
+// Multiple consumers cannot acquire a single-consumer prerequisite chain.
+// RUN: emit low-schedule-query @spillable_fixed_fanout strategy=resource-stall kind=order consumer=0
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @spillable_fixed_fanout(%source: reg<test.i32>, %other: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
+  %condition = copy %source : reg<test.i32> -> reg<test.spillable.fixed.r0>
+  %dependency = test.add.i32 %other, %other
+  %first = test.fixed.select.i32 %source, %other, %condition
+  %second = test.fixed.select.i32 %dependency, %other, %condition
+  return %first, %second
+}
+
+// ----
+node 0 <- none

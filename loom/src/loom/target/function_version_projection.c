@@ -438,12 +438,11 @@ static void loom_target_function_version_projection_seed_exact_contexts(
         function_version->target_context_ordinal;
     loom_symbol_ref_t* context_target_ref =
         &plan->contexts.target_refs[context_ordinal];
-    if (loom_symbol_ref_is_valid(*context_target_ref)) {
-      IREE_ASSERT_EQ(context_target_ref->module_id,
-                     projected_target_ref.module_id);
-      IREE_ASSERT_EQ(context_target_ref->symbol_id,
-                     projected_target_ref.symbol_id);
-    } else {
+    // Callgraph specialization preserves a context across distinct authored
+    // requirements that leave its facts unchanged. Any exact witness can name
+    // that context. Bind its versions to one witness so Low calls remain
+    // within the same target after serialization and resumed compilation.
+    if (!loom_symbol_ref_is_valid(*context_target_ref)) {
       *context_target_ref = projected_target_ref;
     }
   }

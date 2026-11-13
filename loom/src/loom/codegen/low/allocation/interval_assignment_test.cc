@@ -11,6 +11,7 @@
 #include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/codegen/low/allocation/physical_domains.h"
 #include "loom/ir/context.h"
 #include "loom/ir/local_value_domain.h"
 #include "loom/ir/module.h"
@@ -31,6 +32,7 @@ class LowAllocationIntervalAssignmentTest : public ::testing::Test {
                                      &block_pool_);
     iree_arena_initialize(&block_pool_, &arena_);
     iree_arena_initialize(&block_pool_, &decision_arena_);
+    iree_arena_initialize(&block_pool_, &reconstruction_.arena);
     loom_context_initialize(iree_allocator_system(), &context_);
     iree_host_size_t vtable_count = 0;
     const loom_op_vtable_t* const* vtables =
@@ -58,7 +60,8 @@ class LowAllocationIntervalAssignmentTest : public ::testing::Test {
         &builder, IREE_SV("test.low.core"), &descriptor_set));
     IREE_ASSERT_OK(loom_low_func_def_build(
         &builder, 0, /*visibility=*/0, /*retain=*/0, /*cc=*/0,
-        /*effect_contract=*/0, /*inline_policy=*/0, /*allocation=*/0,
+        /*effect_contract=*/0, /*temperature=*/0, /*inline_policy=*/0,
+        /*allocation=*/0,
         /*schedule=*/0, descriptor_set, /*target=*/{}, /*abi=*/0, {}, {},
         LOOM_STRING_ID_INVALID, {}, loom_symbol_ref_t{0, symbol},
         /*arg_types=*/nullptr, /*arg_types_count=*/0,
@@ -73,6 +76,7 @@ class LowAllocationIntervalAssignmentTest : public ::testing::Test {
   }
 
   void TearDown() override {
+    iree_arena_deinitialize(&reconstruction_.arena);
     iree_arena_deinitialize(&decision_arena_);
     iree_arena_deinitialize(&arena_);
     loom_module_free(module_);
@@ -88,12 +92,26 @@ class LowAllocationIntervalAssignmentTest : public ::testing::Test {
     return value_id;
   }
 
+  loom_low_allocation_physical_domains_t BuildPhysicalDomains(
+      const loom_low_allocation_target_constraints_t& constraints,
+      const loom_liveness_analysis_t& liveness,
+      const loom_low_allocation_unit_liveness_t& unit_liveness,
+      const loom_low_placement_table_t& placement) {
+    loom_low_allocation_physical_domains_t domains = {};
+    IREE_CHECK_OK(loom_low_allocation_physical_domains_build(
+        &constraints, &liveness, &unit_liveness, &placement, &arena_,
+        &domains));
+    return domains;
+  }
+
   // Shared pool for published results and allocation decision storage.
   iree_arena_block_pool_t block_pool_;
   // Owns prerequisite analyses and published assignment tables.
   iree_arena_allocator_t arena_;
   // Owns allocation decisions and checkpoint-scoped assignment scratch.
   iree_arena_allocator_t decision_arena_;
+  // Shared snapshot facts survive scratch rollback across assignment attempts.
+  loom_low_allocation_reconstruction_t reconstruction_ = {};
   // Context for the module-local value domain.
   loom_context_t context_;
   // Owns value identities and the function used for diagnostics.
@@ -191,7 +209,8 @@ TEST_F(LowAllocationIntervalAssignmentTest,
       .flags = LOOM_LOW_REG_CLASS_FLAG_PHYSICAL,
       .alloc_unit_bits = 32,
       .allocatable_count = 4,
-      .spill_class_id = LOOM_LOW_REG_CLASS_NONE,
+      .spill_unit_bits = 32,
+      .spill_alignment_log2 = 0x40,
   };
   loom_low_descriptor_set_t descriptor_set = {
       .stable_id = descriptor_set_id,
@@ -213,6 +232,8 @@ TEST_F(LowAllocationIntervalAssignmentTest,
                                       loom_low_func_def_body(function_op_),
                                       &arena_, &function_cfg_graph));
 
+  auto physical_domains = BuildPhysicalDomains(target_constraints, liveness,
+                                               unit_liveness, placement);
   loom_low_allocation_storage_lease_state_t storage_leases = {};
   const loom_low_allocation_interval_assignment_context_t context = {
       .module = module,
@@ -224,6 +245,7 @@ TEST_F(LowAllocationIntervalAssignmentTest,
       .schedule = nullptr,
       .placement = &placement,
       .preferences = nullptr,
+      .physical_domains = &physical_domains,
       .target_constraints = &target_constraints,
       .entry_locations = nullptr,
       .entry_location_count = 0,
@@ -231,6 +253,7 @@ TEST_F(LowAllocationIntervalAssignmentTest,
       .unit_liveness = &unit_liveness,
       .storage_leases = &storage_leases,
       .arena = &arena_,
+      .reconstruction = &reconstruction_,
       .function_cfg_graph = &function_cfg_graph,
   };
   loom_low_allocation_interval_assignment_result_t result = {};
@@ -266,6 +289,8 @@ TEST_F(LowAllocationIntervalAssignmentTest,
   EXPECT_EQ(result.spill_plans, nullptr);
   EXPECT_EQ(result.remarks, nullptr);
   EXPECT_TRUE(result.has_packable_aggregates);
+  EXPECT_EQ(reconstruction_.value_flags, nullptr);
+  EXPECT_EQ(reconstruction_.arena.used_allocation_size, 0u);
 
   // Replaying a retained location bypasses first-fit search while rebuilding
   // the assignment's current lifetime and indexes.
@@ -298,6 +323,8 @@ TEST_F(LowAllocationIntervalAssignmentTest,
   // improve the incumbent traffic. The same attempt completes when that spill
   // remains below the exclusive bound.
   reg_class.allocatable_count = 1;
+  physical_domains = BuildPhysicalDomains(target_constraints, liveness,
+                                          unit_liveness, placement);
 
   uint64_t spill_traffic_exclusive_limit = 16;
   loom_low_allocation_interval_assignment_context_t bounded_context = context;
@@ -312,6 +339,10 @@ TEST_F(LowAllocationIntervalAssignmentTest,
   EXPECT_EQ(result.spill_traffic_bytes, spill_traffic_exclusive_limit);
   EXPECT_EQ(result.spill_plan_count, 0u);
   EXPECT_EQ(result.remark_count, 0u);
+  ASSERT_NE(reconstruction_.value_flags, nullptr);
+  const uint8_t* reconstruction_flags = reconstruction_.value_flags;
+  const iree_host_size_t reconstruction_bytes =
+      reconstruction_.arena.used_allocation_size;
 
   ++spill_traffic_exclusive_limit;
   result = {};
@@ -319,6 +350,8 @@ TEST_F(LowAllocationIntervalAssignmentTest,
       &bounded_context, &decision_arena_, &result));
   iree_arena_reset(&decision_arena_);
   iree_arena_block_pool_trim(&block_pool_);
+  EXPECT_EQ(reconstruction_.value_flags, reconstruction_flags);
+  EXPECT_EQ(reconstruction_.arena.used_allocation_size, reconstruction_bytes);
   EXPECT_FALSE(result.reached_spill_traffic_limit);
   ASSERT_EQ(result.assignment_count, 1u);
   EXPECT_EQ(result.assignments[0].location_kind,
@@ -341,6 +374,25 @@ TEST_F(LowAllocationIntervalAssignmentTest,
   EXPECT_EQ(result.remarks[0].assignment_index, plan.assignment_index);
   EXPECT_EQ(result.remarks[0].budget_units, 1u);
   EXPECT_EQ(result.remarks[0].required_units, 2u);
+
+  // Wider native memory payloads affect both candidate pruning and the final
+  // reservation. Register capacity and liveness are unchanged.
+  reg_class.spill_unit_bits = 64;
+  reg_class.spill_alignment_log2 = 0x66;
+  result = {};
+  IREE_ASSERT_OK(loom_low_allocation_interval_assignment_build(
+      &bounded_context, &decision_arena_, &result));
+  EXPECT_TRUE(result.reached_spill_traffic_limit);
+  EXPECT_EQ(result.spill_traffic_bytes, 32u);
+  spill_traffic_exclusive_limit = 33;
+  result = {};
+  IREE_ASSERT_OK(loom_low_allocation_interval_assignment_build(
+      &bounded_context, &decision_arena_, &result));
+  EXPECT_FALSE(result.reached_spill_traffic_limit);
+  ASSERT_EQ(result.spill_plan_count, 1u);
+  EXPECT_EQ(result.spill_plans[0].byte_size, 16u);
+  EXPECT_EQ(result.spill_plans[0].byte_alignment, 64u);
+  EXPECT_EQ(result.spill_traffic_bytes, 32u);
 
   loom_local_value_domain_release(&value_domain);
 }
@@ -427,7 +479,8 @@ TEST_F(LowAllocationIntervalAssignmentTest,
                LOOM_LOW_REG_CLASS_FLAG_EXPLICIT_PHYSICAL_REGISTERS,
       .alloc_unit_bits = 512,
       .allocatable_count = 2,
-      .spill_class_id = LOOM_LOW_REG_CLASS_NONE,
+      .spill_unit_bits = 512,
+      .spill_alignment_log2 = 0x40,
       .physical_atomic_unit_count = 2,
   };
   loom_low_physical_register_t physical_registers[] = {
@@ -529,6 +582,8 @@ TEST_F(LowAllocationIntervalAssignmentTest,
       /*reserved_range_count=*/0, /*emitter=*/iree_diagnostic_emitter_t{},
       &arena_, &target_constraints));
 
+  auto physical_domains = BuildPhysicalDomains(target_constraints, liveness,
+                                               unit_liveness, placement);
   loom_low_allocation_storage_lease_state_t storage_leases = {};
   const loom_low_allocation_interval_assignment_context_t context = {
       .module = module,
@@ -540,6 +595,7 @@ TEST_F(LowAllocationIntervalAssignmentTest,
       .schedule = nullptr,
       .placement = &placement,
       .preferences = nullptr,
+      .physical_domains = &physical_domains,
       .target_constraints = &target_constraints,
       .entry_locations = nullptr,
       .entry_location_count = 0,
@@ -547,6 +603,7 @@ TEST_F(LowAllocationIntervalAssignmentTest,
       .unit_liveness = &unit_liveness,
       .storage_leases = &storage_leases,
       .arena = &arena_,
+      .reconstruction = &reconstruction_,
   };
   loom_low_allocation_interval_assignment_result_t result = {};
   IREE_ASSERT_OK(loom_low_allocation_interval_assignment_build(
@@ -568,6 +625,8 @@ TEST_F(LowAllocationIntervalAssignmentTest,
       IREE_ARRAYSIZE(view_ordinals);
   descriptor_set.physical_register_view_count =
       IREE_ARRAYSIZE(physical_register_views);
+  physical_domains = BuildPhysicalDomains(target_constraints, liveness,
+                                          unit_liveness, placement);
   IREE_ASSERT_OK(loom_low_allocation_interval_assignment_build(
       &context, &decision_arena_, &result));
   ASSERT_EQ(result.assignment_count, 3u);
@@ -719,7 +778,8 @@ TEST_P(LowFixedSubrangeAssignmentTest, PreservesOffsetAndTiedOwner) {
       .flags = LOOM_LOW_REG_CLASS_FLAG_PHYSICAL,
       .alloc_unit_bits = 32,
       .allocatable_count = 8,
-      .spill_class_id = LOOM_LOW_REG_CLASS_NONE,
+      .spill_unit_bits = 32,
+      .spill_alignment_log2 = 0x40,
   };
   loom_low_descriptor_set_t descriptor_set = {
       .stable_id = descriptor_set_id,
@@ -765,6 +825,8 @@ TEST_P(LowFixedSubrangeAssignmentTest, PreservesOffsetAndTiedOwner) {
   IREE_ASSERT_OK(loom_low_allocation_target_constraints_finalize_fixed_values(
       &target_constraints, &liveness, &unit_liveness, &arena_));
 
+  auto physical_domains = BuildPhysicalDomains(target_constraints, liveness,
+                                               unit_liveness, placement);
   loom_low_allocation_storage_lease_state_t storage_leases = {};
   const loom_low_allocation_interval_assignment_context_t context = {
       .module = module,
@@ -776,6 +838,7 @@ TEST_P(LowFixedSubrangeAssignmentTest, PreservesOffsetAndTiedOwner) {
       .schedule = nullptr,
       .placement = &placement,
       .preferences = nullptr,
+      .physical_domains = &physical_domains,
       .target_constraints = &target_constraints,
       .entry_locations = nullptr,
       .entry_location_count = 0,
@@ -783,6 +846,7 @@ TEST_P(LowFixedSubrangeAssignmentTest, PreservesOffsetAndTiedOwner) {
       .unit_liveness = &unit_liveness,
       .storage_leases = &storage_leases,
       .arena = &arena_,
+      .reconstruction = &reconstruction_,
   };
   loom_low_allocation_interval_assignment_result_t result = {};
   IREE_ASSERT_OK(loom_low_allocation_interval_assignment_build(
@@ -895,14 +959,16 @@ class LowRequiredRegisterRelocationTest
             .alloc_unit_bits = 64,
             .allocatable_count = capacity_,
             .alias_set_id = 1,
-            .spill_class_id = LOOM_LOW_REG_CLASS_NONE,
+            .spill_unit_bits = 64,
+            .spill_alignment_log2 = 0x40,
         },
         {
             .flags = LOOM_LOW_REG_CLASS_FLAG_PHYSICAL,
             .alloc_unit_bits = 32,
             .allocatable_count = 4,
             .alias_set_id = 1,
-            .spill_class_id = LOOM_LOW_REG_CLASS_NONE,
+            .spill_unit_bits = 32,
+            .spill_alignment_log2 = 0x40,
         },
     };
     const loom_low_descriptor_set_t descriptors = {
@@ -946,6 +1012,8 @@ class LowRequiredRegisterRelocationTest
     IREE_ASSERT_OK(loom_cfg_graph_build(module,
                                         loom_low_func_def_body(function_op_),
                                         &arena_, &function_cfg_graph));
+    const auto physical_domains =
+        BuildPhysicalDomains(constraints, liveness, unit_liveness, placement);
     loom_low_allocation_storage_lease_state_t leases = {};
     const loom_low_allocation_interval_assignment_context_t context = {
         .module = module,
@@ -955,10 +1023,12 @@ class LowRequiredRegisterRelocationTest
         .liveness = &liveness,
         .value_domain = &value_domain,
         .placement = &placement,
+        .physical_domains = &physical_domains,
         .target_constraints = &constraints,
         .unit_liveness = &unit_liveness,
         .storage_leases = &leases,
         .arena = &arena_,
+        .reconstruction = &reconstruction_,
         .function_cfg_graph = &function_cfg_graph,
         .required_register_values = {module->values.count, &required_bits},
     };
@@ -1224,6 +1294,8 @@ void LowEntryPlacementTest::CheckPlacement(
     IREE_ASSERT_OK(loom_low_allocation_target_constraints_finalize_fixed_values(
         &constraints, &liveness, &unit_liveness, &arena_));
   }
+  const auto physical_domains =
+      BuildPhysicalDomains(constraints, liveness, unit_liveness, placement);
   loom_low_allocation_storage_lease_state_t leases = {};
   const loom_low_allocation_interval_assignment_context_t context = {
       .module = module_,
@@ -1233,12 +1305,14 @@ void LowEntryPlacementTest::CheckPlacement(
       .liveness = &liveness,
       .value_domain = &domain,
       .placement = &placement,
+      .physical_domains = &physical_domains,
       .target_constraints = &constraints,
       .entry_locations = incoming,
       .entry_location_count = test_case.incoming_count,
       .unit_liveness = &unit_liveness,
       .storage_leases = &leases,
       .arena = &arena_,
+      .reconstruction = &reconstruction_,
       .function_cfg_graph = &graph,
       .search_strategy = test_case.strategy,
   };
@@ -1274,7 +1348,8 @@ TEST_P(LowLinearEntryPlacementTest, PreservesOrRelocatesIncomingStorage) {
                     : LOOM_LOW_REG_CLASS_FLAG_VIRTUAL_ONLY)),
       .alloc_unit_bits = 32,
       .allocatable_count = physical ? test_case.capacity : uint16_t{0},
-      .spill_class_id = LOOM_LOW_REG_CLASS_NONE,
+      .spill_unit_bits = 32,
+      .spill_alignment_log2 = 0x40,
   };
   const loom_low_descriptor_set_t descriptors = {
       .stable_id = 17,

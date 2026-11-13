@@ -176,7 +176,8 @@ enum iree_hal_execution_stage_bits_t {
 };
 typedef uint32_t iree_hal_execution_stage_t;
 
-// Bitfield specifying cache-coherence semantics for an execution dependency.
+// Bitfield specifying global cache-coherence semantics for an execution
+// dependency. Buffer-specific dependencies do not narrow these explicit flags.
 enum iree_hal_barrier_flag_bits_t {
   IREE_HAL_BARRIER_FLAG_NONE = 0,
 
@@ -264,7 +265,7 @@ typedef struct iree_hal_barrier_t {
   iree_hal_execution_stage_t source_stage_mask;
   // Later local stages; zero contributes no target execution dependency.
   iree_hal_execution_stage_t target_stage_mask;
-  // Explicit minimum semantics independent of prepared transition queries.
+  // Explicit global minimum semantics independent of prepared queries.
   iree_hal_barrier_flags_t flags;
   // Combined visibility actions for this local queue executor.
   iree_hal_memory_effects_t effects;
@@ -285,10 +286,37 @@ IREE_API_EXPORT iree_status_t
 iree_hal_barrier_validate(const iree_hal_barrier_t* barrier,
                           const iree_hal_queue_family_t* queue_family);
 
-// Resolves validated global effects into their equivalent explicit flags.
-// This is a value transform; it queries no buffers, contracts or native driver.
+// Resolves minimum native cache semantics from HOST stages and global effects.
+// Executors lower ranged recipes independently. These flags may require
+// whole-cache actions but do not widen the descriptor's logical dependencies.
+// This is a value transform; it queries no buffers, contracts, or native
+// driver.
+static inline iree_hal_barrier_flags_t iree_hal_barrier_resolve_cache_flags(
+    const iree_hal_barrier_t* barrier) {
+  iree_hal_barrier_flags_t flags = barrier->flags;
+  if (iree_any_bit_set(barrier->target_stage_mask,
+                       IREE_HAL_EXECUTION_STAGE_HOST) ||
+      iree_any_bit_set(barrier->effects.bits,
+                       IREE_HAL_MEMORY_EFFECT_GLOBAL_RELEASE_TO_SYSTEM)) {
+    flags |= IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE;
+  }
+  if (iree_any_bit_set(barrier->source_stage_mask,
+                       IREE_HAL_EXECUTION_STAGE_HOST) ||
+      iree_any_bit_set(barrier->effects.bits,
+                       IREE_HAL_MEMORY_EFFECT_GLOBAL_ACQUIRE_FROM_SYSTEM)) {
+    flags |= IREE_HAL_BARRIER_FLAG_ACQUIRE_SYSTEM_SCOPE;
+  }
+  return flags;
+}
+
+// Resolves globally requested visibility into explicit flags. HOST stages
+// preserve authored access/range dependencies; without those dependencies they
+// request conservative global visibility. Native cache lowering is separate.
 static inline iree_hal_barrier_flags_t iree_hal_barrier_resolve_flags(
     const iree_hal_barrier_t* barrier) {
+  if (!barrier->memory_barrier_count && !barrier->buffer_barrier_count) {
+    return iree_hal_barrier_resolve_cache_flags(barrier);
+  }
   iree_hal_barrier_flags_t flags = barrier->flags;
   if (iree_any_bit_set(barrier->effects.bits,
                        IREE_HAL_MEMORY_EFFECT_GLOBAL_RELEASE_TO_SYSTEM)) {
@@ -586,15 +614,19 @@ IREE_API_EXPORT iree_status_t iree_hal_command_buffer_end_debug_group(
 // system coherence domain before target-scope accesses, while
 // IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE publishes source-scope
 // writes to that domain. HOST source and target stages imply the corresponding
-// acquire-system and release-system semantics, respectively.
+// acquire-system and release-system semantics for the declared access/range
+// dependencies. Without such dependencies, HOST requests global visibility.
+// Explicit flags and prepared global effects apply globally even when buffer
+// dependencies are also present. Native cache operations may have broader
+// physical scope without widening logical dependencies on unrelated buffers.
 //
 // Prepared global queue effects are resolved while recording and compose with
 // the explicit minimum flags. Prepared ranged queue effects are correlated
 // with buffer barriers and copied by the accepting recorder. No table or scope
 // is retained or queried during submission. Unqualified effects fail with
 // IREE_STATUS_UNAVAILABLE; host and program actions require their qualified
-// executor and fail here with IREE_STATUS_UNIMPLEMENTED. An empty effect elides
-// cache work while execution and access dependencies remain in force.
+// executor and fail here with IREE_STATUS_UNIMPLEMENTED. An empty effect adds
+// no cache work beyond that required by stages, flags, and access dependencies.
 IREE_API_EXPORT iree_status_t
 iree_hal_command_buffer_barrier(iree_hal_command_buffer_t* command_buffer,
                                 const iree_hal_barrier_t* barrier);

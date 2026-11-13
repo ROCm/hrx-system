@@ -94,6 +94,14 @@ uint32_t loom_low_allocation_live_range_assignment_max_unit_end_point(
     const uint32_t* unit_end_points, iree_host_size_t unit_point_count,
     const loom_low_allocation_assignment_t* assignment);
 
+// Returns whether any physical unit remains live at |point|. Sparse storage
+// segments preserve path-specific deaths even when another block has a later
+// use in linear program order. An absent segment range reserves continuously.
+bool loom_low_allocation_live_range_assignment_live_at_point(
+    const loom_liveness_segment_t* storage_segments,
+    const uint32_t* unit_end_points, iree_host_size_t unit_point_count,
+    const loom_low_allocation_assignment_t* assignment, uint32_t point);
+
 // Returns true when two value live ranges can overlap in at least one CFG
 // block. Linear interval overlap alone is not enough for branch placement,
 // where phi-style values can interleave in the program-point numbering without

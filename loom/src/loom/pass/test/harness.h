@@ -110,12 +110,14 @@ class PassTestHarness : public ::testing::Test {
       loom_pass_predicate_provider_t predicate_provider = {});
 
   iree_status_t Compile(loom_module_t* module, const loom_op_t* pipeline_op,
-                        loom_pass_program_t* out_program,
-                        loom_pass_predicate_provider_t predicate_provider = {});
+                        loom_pass_program_t* out_program);
   iree_status_t Compile(loom_module_t* module, const loom_op_t* pipeline_op,
-                        loom_pass_program_t* out_program,
+                        loom_pass_predicate_provider_t predicate_provider,
+                        loom_pass_program_t* out_program);
+  iree_status_t Compile(loom_module_t* module, const loom_op_t* pipeline_op,
                         loom_pass_environment_t environment,
-                        loom_pass_predicate_provider_t predicate_provider);
+                        loom_pass_predicate_provider_t predicate_provider,
+                        loom_pass_program_t* out_program);
 
   loom_pass_interpreter_options_t InterpreterOptions(
       loom_test_pass_trace_t* trace,

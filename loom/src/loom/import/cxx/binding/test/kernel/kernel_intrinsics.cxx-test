@@ -1,0 +1,226 @@
+// RUN: pass canonicalize,cse
+// Kernel-only intrinsics remain available in nested kernel control flow.
+// Barriers have no kernel ancestor requirement and may live in helpers.
+#include <loomcxx/kernel.h>
+static void synchronize() { loom::kernel::workgroup::barrier(); }
+[[loom::kernel, loom::workgroup_size(64, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void entry(unsigned* coordinates, float* output, float value) {
+  unsigned lane = loom::kernel::workitem::id.x;
+  if (lane < 32) {
+    coordinates[lane] = loom::kernel::workgroup::id.x +
+                        loom::kernel::workgroup::size.x +
+                        loom::kernel::workgroup::count.x +
+                        loom::kernel::subgroup::size();
+    output[lane] = loom::kernel::subgroup::shuffle_xor(value, 1, 32).value;
+  }
+  synchronize();
+}
+// ----
+kernel.def @entry() {
+  %3 = index.constant 1 : index
+  %6 = index.constant 64 : index
+  kernel.launch.config workgroups(%3, %3, %3) workgroup_size(%6, %3, %3) : index
+} launch(%coordinates: buffer, %output: buffer, %value: f32) {
+  %workitem_id_x = kernel.workitem.id<x> : index
+  %lane = index.cast %workitem_id_x : index to i32
+  %13 = scalar.constant 32 : i32
+  %14 = scalar.cmpi ult, %lane, %13 : i32
+  scf.if %14 {
+    %46 = scalar.assume %lane [lt(%lane, 32)] : i32
+    %49 = scalar.constant 65 : i32
+    %23 = kernel.subgroup.size : index
+    %24 = index.cast %23 : index to i32
+    %54 = scalar.addi %24, %49 : i32
+    %26 = scalar.extui %46 : i32 to i64
+    %52 = scalar.constant 2 : i64
+    %53 = scalar.shli %26, %52 : i64
+    %31 = scalar.assume %53 [range(%53, 0, 9223372036854775807)] : i64
+    %32 = index.cast %31 : i64 to offset
+    %33 = buffer.view %coordinates[%32] : buffer -> view<1xi32>
+    view.store<root_in_bounds> %54, %33[0] : i32, view<1xi32>
+    %34 = scalar.constant 1 : i32
+    %36, %37 = kernel.subgroup.shuffle<xor> %value, %34, %13 : f32, i32, i32
+    %45 = buffer.view %output[%32] : buffer -> view<1xf32>
+    view.store<root_in_bounds> %36, %45[0] : f32, view<1xf32>
+  }
+  func.call @synchronize() : ()
+  kernel.return
+}
+
+func.def @synchronize() {
+  kernel.barrier<global> scope(workgroup) ordering(acq_rel)
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  func.return
+}
+
+// ====
+// Required-inline helpers may load immutable header values that control a
+// barrier. Import preserves the helper boundary; kernel legalization expands
+// it before proving convergence in the caller's fact scope.
+#include <loomcxx/kernel.h>
+LOOM_INLINE bool header_enables_barrier(const unsigned* header) {
+  return header[0] != 0;
+}
+[[loom::kernel, loom::workgroup_size(64, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void guarded_barrier(const unsigned* header) {
+  if (header_enables_barrier(header)) {
+    loom::kernel::workgroup::barrier();
+  }
+}
+// ----
+func.def public linkonce inline @header_enables_barrier(%header: buffer, %header_byte_offset: offset) -> (i1) {
+  %7 = index.cast %header_byte_offset : offset to i64
+  %9 = scalar.assume %7 [range(%7, 0, 9223372036854775807)] : i64
+  %10 = index.cast %9 : i64 to offset
+  %11 = buffer.view %header[%10] : buffer -> view<1xi32>
+  %12 = view.load<root_in_bounds> %11[0] : view<1xi32> -> i32
+  %13 = scalar.constant 0 : i32
+  %14 = scalar.cmpi ne, %12, %13 : i32
+  func.return %14 : i1
+}
+
+kernel.def @guarded_barrier() {
+  %16 = index.constant 1 : index
+  %19 = index.constant 64 : index
+  kernel.launch.config workgroups(%16, %16, %16) workgroup_size(%19, %16, %16) : index
+} launch(%header: buffer) {
+  %header_byte_offset = index.constant 0 : offset
+  %23 = func.call readonly @header_enables_barrier(%header, %header_byte_offset) : (buffer, offset) -> (i1)
+  scf.if %23 {
+    kernel.barrier<global> scope(workgroup) ordering(acq_rel)
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  }
+  kernel.return
+}
+
+// ====
+// Required-inline helpers defer placement until their kernel use is expanded.
+#include <loomcxx/kernel.h>
+[[loom::inline]] static unsigned topology() {
+  return loom::kernel::workitem::id.x + loom::kernel::workgroup::id.x +
+         loom::kernel::workgroup::size.x + loom::kernel::workgroup::count.x +
+         loom::kernel::subgroup::size();
+}
+[[loom::device, loom::inline]] static float exchange(float value) {
+  return loom::kernel::subgroup::shuffle_xor(value, 1, 32).value;
+}
+[[loom::kernel, loom::workgroup_size(64, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void entry(unsigned* coordinates, float* output, float value) {
+  unsigned lane = loom::kernel::workitem::id.x;
+  coordinates[lane] = topology();
+  output[lane] = exchange(value);
+}
+// ----
+kernel.def @entry() {
+  %3 = index.constant 1 : index
+  %6 = index.constant 64 : index
+  kernel.launch.config workgroups(%3, %3, %3) workgroup_size(%6, %3, %3) : index
+} launch(%coordinates: buffer, %output: buffer, %value: f32) {
+  %workitem_id_x = kernel.workitem.id<x> : index
+  %lane = index.cast %workitem_id_x : index to i32
+  %13 = func.call pure @topology() : () -> (i32)
+  %14 = scalar.extui %lane : i32 to i64
+  %54 = scalar.constant 2 : i64
+  %55 = scalar.shli %14, %54 : i64
+  %19 = scalar.assume %55 [range(%55, 0, 9223372036854775807)] : i64
+  %20 = index.cast %19 : i64 to offset
+  %21 = buffer.view %coordinates[%20] : buffer -> view<1xi32>
+  view.store<root_in_bounds> %13, %21[0] : i32, view<1xi32>
+  %22 = func.call @exchange(%value) : (f32) -> (f32)
+  %30 = buffer.view %output[%20] : buffer -> view<1xf32>
+  view.store<root_in_bounds> %22, %30[0] : f32, view<1xf32>
+  kernel.return
+}
+
+func.def inline @topology() -> (i32) {
+  %workitem_id_x = kernel.workitem.id<x> : index
+  %33 = index.cast %workitem_id_x : index to i32
+  %workgroup_id_x = kernel.workgroup.id<x> : index
+  %35 = index.cast %workgroup_id_x : index to i32
+  %36 = scalar.addi %33, %35 : i32
+  %workgroup_size_x = kernel.workgroup.size<x> : index
+  %38 = index.cast %workgroup_size_x : index to i32
+  %39 = scalar.addi %36, %38 : i32
+  %workgroup_count_x = kernel.workgroup.count<x> : index
+  %41 = index.cast %workgroup_count_x : index to i32
+  %42 = scalar.addi %39, %41 : i32
+  %43 = kernel.subgroup.size : index
+  %44 = index.cast %43 : index to i32
+  %45 = scalar.addi %42, %44 : i32
+  func.return %45 : i32
+}
+
+func.def device inline @exchange(%value: f32) -> (f32) {
+  %48 = scalar.constant 1 : i32
+  %49 = scalar.constant 32 : i32
+  %50, %51 = kernel.subgroup.shuffle<xor> %value, %48, %49 : f32, i32, i32
+  func.return %50 : f32
+}
+
+// ====
+// Auto-deduced topology coordinates retain Loom's index identity while normal
+// C++ and HIP expressions cross the existing unsigned boundary.
+#include <hip/hip_runtime.h>
+#include <loomcxx/predicate.h>
+
+[[loom::kernel, loom::workgroup_size(4, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void topology_identity(unsigned* output) {
+  auto coordinate = loom::kernel::workitem::id.x;
+  loom::assume(loom::predicate::range(coordinate, 0, 3));
+  auto subgroup = loom::kernel::subgroup::id();
+  auto subgroup_count = loom::kernel::subgroup::count();
+  auto subgroup_size = loom::kernel::subgroup::size();
+  auto subgroup_lane = loom::kernel::subgroup::lane_id();
+  loom::assume(loom::predicate::range(subgroup_lane, 0, 3));
+  unsigned lane = coordinate;
+  unsigned values[4];
+  values[coordinate] = lane;
+  unsigned hip_coordinate = threadIdx.x + blockIdx.x;
+  output[coordinate] = values[coordinate] + hip_coordinate;
+  auto logical = static_cast<loom::type::index>(coordinate);
+  auto shifted = logical + loom::type::index{0};
+  auto output_view = loom::buffer::view<4>(output, {}, loom::encoding::layout::dense<1>());
+  loom::view::store(lane, output_view, shifted);
+  auto subgroup_topology = static_cast<loom::type::index>(subgroup) + static_cast<loom::type::index>(subgroup_count) + static_cast<loom::type::index>(subgroup_size);
+  auto subgroup_value = loom::index::cast<unsigned>(subgroup_topology);
+  loom::view::store(subgroup_value, output_view, subgroup_lane);
+}
+
+// ----
+kernel.def @topology_identity() {
+  %1 = index.constant 1 : index
+  %4 = index.constant 4 : index
+  kernel.launch.config workgroups(%1, %1, %1) workgroup_size(%4, %1, %1) : index
+} launch(%output: buffer) {
+  %output_byte_offset = index.constant 0 : offset
+  %workitem_id_x = kernel.workitem.id<x> : index
+  %coordinate = index.assume %workitem_id_x [range(%workitem_id_x, 0, 3)] : index
+  %subgroup = kernel.subgroup.id : index
+  %subgroup_count = kernel.subgroup.count : index
+  %subgroup_size = kernel.subgroup.size : index
+  %subgroup_lane$13 = kernel.subgroup.lane.id : index
+  %subgroup_lane$14 = index.assume %subgroup_lane$13 [range(%subgroup_lane$13, 0, 3)] : index
+  %lane = index.cast %coordinate : index to i32
+  %16 = index.constant 16 : offset
+  %values_storage = buffer.alloca<private> align(4) %16 : buffer
+  %values_view = buffer.view %values_storage[%output_byte_offset] : buffer -> view<4xi32>
+  %21 = scalar.extui %lane : i32 to i64
+  %22 = scalar.assume %21 [range(%21, 0, 3)] : i64
+  %23 = index.cast %22 : i64 to index
+  view.store %lane, %values_view[%23] : i32, view<4xi32>
+  %33 = view.load %values_view[%23] : view<4xi32> -> i32
+  %55 = scalar.addi %lane, %33 : i32
+  %53 = scalar.constant 2 : i64
+  %54 = scalar.shli %22, %53 : i64
+  %41 = scalar.assume %54 [range(%54, 0, 9223372036854775807)] : i64
+  %42 = index.cast %41 : i64 to offset
+  %43 = buffer.view %output[%42] : buffer -> view<1xi32>
+  view.store<root_in_bounds> %55, %43[0] : i32, view<1xi32>
+  %output_view = buffer.view %output[%output_byte_offset] : buffer -> view<4xi32>
+  view.store %lane, %output_view[%coordinate] : i32, view<4xi32>
+  %50 = index.add %subgroup, %subgroup_count : index
+  %subgroup_topology = index.add %50, %subgroup_size : index
+  %subgroup_value = index.cast %subgroup_topology : index to i32
+  view.store %subgroup_value, %output_view[%subgroup_lane$14] : i32, view<4xi32>
+  kernel.return
+}

@@ -201,7 +201,7 @@ static iree_status_t loom_x86_module_encode_function(
   IREE_RETURN_IF_ERROR(loom_x86_function_write(
       &function, symbol_indices, section_index,
       function.symbol_fixup_count ? fixups->values + fixups->count : NULL,
-      stream, report ? &instruction_count : NULL, function_arena));
+      stream, function_arena, report ? &instruction_count : NULL));
   fixups->count += function.symbol_fixup_count;
   if (report) {
     const uint64_t code_bytes = iree_io_stream_offset(stream) - code_start;

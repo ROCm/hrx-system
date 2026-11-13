@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal
 
 from loom.target.arch.spirv.features import feature_bits_expression, feature_bits_value
 from loom.target.arch.spirv.scalar_memory import (
@@ -304,6 +305,12 @@ class CooperativeMatrixType:
     columns: int
     role: str
 
+    def arithmetic_key(self, operation: CooperativeMatrixArithmetic) -> str:
+        return (
+            f"spirv.op_{operation.suffix}.cooperative.{self.scalar.suffix}."
+            f"{self.rows}x{self.columns}.{self.role}"
+        )
+
     @property
     def constructor_key(self) -> str:
         return (
@@ -311,10 +318,11 @@ class CooperativeMatrixType:
             f"{self.rows}x{self.columns}.{self.role}"
         )
 
-    def memory_key(self, role: str, memory: CooperativeMatrixMemory) -> str:
-        operation = "store" if role == "result" else "load"
+    def memory_key(
+        self, operation: Literal["load", "store"], memory: CooperativeMatrixMemory
+    ) -> str:
         return (
-            f"spirv.op_cooperative_matrix_{operation}_khr.{role}."
+            f"spirv.op_cooperative_matrix_{operation}_khr.{self.role}."
             f"{self.scalar.suffix}.{self.rows}x{self.columns}.subgroup."
             f"{memory.descriptor_suffix}"
         )
@@ -367,4 +375,54 @@ COOPERATIVE_MATRIX_TYPES = tuple(
             ),
         )
     )
+)
+
+
+@dataclass(frozen=True, slots=True)
+class CooperativeMatrixArithmetic:
+    """One component-wise operation admitted by SPV_KHR_cooperative_matrix."""
+
+    # Vector dialect operation suffix.
+    source: str
+    # SPIR-V descriptor operation suffix.
+    suffix: str
+    # Assembly instruction spelling.
+    mnemonic: str
+    # SPIR-V wire opcode constant.
+    opcode: str
+    # Number of same-typed cooperative matrix operands.
+    operand_count: int = 2
+
+    @property
+    def floating_point(self) -> bool:
+        return self.source.endswith("f")
+
+    @property
+    def controls_contraction(self) -> bool:
+        return self.floating_point and self.operand_count == 2
+
+    def supports(self, matrix_type: CooperativeMatrixType) -> bool:
+        # BF16 permits matrix multiply and conversion, but not these arithmetic
+        # instructions. Signedness belongs to the opcode for integer arithmetic.
+        if self.floating_point:
+            return matrix_type.scalar.source_type in ("f16", "f32", "f64")
+        return matrix_type.scalar.source_type.startswith("i")
+
+
+COOPERATIVE_MATRIX_ARITHMETIC = (
+    CooperativeMatrixArithmetic("addf", "fadd", "OpFAdd", "LOOM_SPIRV_OP_F_ADD"),
+    CooperativeMatrixArithmetic("subf", "fsub", "OpFSub", "LOOM_SPIRV_OP_F_SUB"),
+    CooperativeMatrixArithmetic("mulf", "fmul", "OpFMul", "LOOM_SPIRV_OP_F_MUL"),
+    CooperativeMatrixArithmetic("divf", "fdiv", "OpFDiv", "LOOM_SPIRV_OP_F_DIV"),
+    CooperativeMatrixArithmetic(
+        "negf", "fnegate", "OpFNegate", "LOOM_SPIRV_OP_F_NEGATE", 1
+    ),
+    CooperativeMatrixArithmetic("addi", "iadd", "OpIAdd", "LOOM_SPIRV_OP_I_ADD"),
+    CooperativeMatrixArithmetic("subi", "isub", "OpISub", "LOOM_SPIRV_OP_I_SUB"),
+    CooperativeMatrixArithmetic("muli", "imul", "OpIMul", "LOOM_SPIRV_OP_I_MUL"),
+    CooperativeMatrixArithmetic("divsi", "sdiv", "OpSDiv", "LOOM_SPIRV_OP_S_DIV"),
+    CooperativeMatrixArithmetic("divui", "udiv", "OpUDiv", "LOOM_SPIRV_OP_U_DIV"),
+    CooperativeMatrixArithmetic(
+        "negi", "snegate", "OpSNegate", "LOOM_SPIRV_OP_S_NEGATE", 1
+    ),
 )

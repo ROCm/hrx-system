@@ -122,9 +122,9 @@ iree_status_t loom_serve_text_prefix_cache_submit(
     loom_serve_text_row_t* row, iree_host_size_t count, const int32_t* tokens,
     iree_host_size_t extension_start,
     const loom_serve_text_prefix_entry_t* protected_entry, bool* out_evicted,
-    loom_serve_execution_frontier_t* out_frontier) {
+    loom_runtime_execution_frontier_t* out_frontier) {
   *out_evicted = false;
-  *out_frontier = (loom_serve_execution_frontier_t){0};
+  *out_frontier = (loom_runtime_execution_frontier_t){0};
   // Include equality when checking ancestors; admission itself is strict.
   const loom_serve_text_prefix_entry_t* ancestor =
       loom_serve_text_prefix_cache_find(cache, chat, count + 1, tokens);

@@ -257,6 +257,9 @@ typedef struct loom_aie2p_array_worker_plan_t {
   uint32_t resident_state_count;
   // Private ordered-fold state reserved before channel rings are placed.
   loom_aie2p_array_fold_state_plan_t fold_state;
+  // Final occupied prefix of each local-memory bank, including channel rings
+  // and service state. Borrowed from the arena-owned physical placement state.
+  const uint32_t* local_memory_bank_cursors;
 } loom_aie2p_array_worker_plan_t;
 
 // Final local-data placement for one compiled worker storage domain.
@@ -382,6 +385,9 @@ typedef struct loom_aie2p_array_route_plan_t {
   loom_xdna_stream_port_t destination_port;
   // Destination channel ordinal within destination_port.
   uint8_t destination_channel;
+  // This stream-switch output delivers payload to DMA, directly or through
+  // the shim demultiplexer. Packet mode removes its header at this edge.
+  bool dma_destination;
 } loom_aie2p_array_route_plan_t;
 
 // Packet resources owned by the completion endpoint on one used shim.

@@ -1,0 +1,262 @@
+// RUN: roundtrip
+// Record decomposition keeps the hidden object and its element aliases in SSA.
+struct Pair {
+  unsigned first;
+  unsigned second;
+};
+
+Pair value_binding(unsigned first, unsigned second) {
+  auto [left, right] = Pair{first, second};
+  left += 3u;
+  return {left, right};
+}
+
+Pair reference_binding(Pair value) {
+  auto& [left, right] = value;
+  left = right;
+  right += 4u;
+  return value;
+}
+
+unsigned const_reference_binding(Pair value) {
+  const auto& [left, right] = value;
+  return left + right;
+}
+
+// ----
+func.def public @value_binding(%first: i32, %second: i32) -> (i32, i32) {
+  %4 = scalar.constant 3 : i32
+  %$e_first = scalar.addi %first, %4 : i32
+  func.return %$e_first, %second : i32, i32
+}
+
+func.def public @reference_binding(%value_first: i32, %value_second$7: i32) -> (i32, i32) {
+  %10 = scalar.constant 4 : i32
+  %value_second$11 = scalar.addi %value_second$7, %10 : i32
+  func.return %value_second$7, %value_second$11 : i32, i32
+}
+
+func.def public @const_reference_binding(%value_first: i32, %value_second: i32) -> (i32) {
+  %15 = scalar.addi %value_first, %value_second : i32
+  func.return %15 : i32
+}
+
+// ====
+// RUN: pass canonicalize,cse,promote-private-fragments,canonicalize,cse,dce
+// Array decomposition preserves the difference between a hidden copy and an
+// lvalue-reference binding while promotion recovers scalar SSA values.
+struct ArrayResult {
+  unsigned original;
+  unsigned first;
+  unsigned second;
+};
+
+ArrayResult array_value_binding(unsigned first, unsigned second) {
+  unsigned values[2] = {first, second};
+  auto [left, right] = values;
+  left += 3u;
+  values[0] += 5u;
+  return {values[0], left, right};
+}
+
+ArrayResult array_reference_binding(unsigned first, unsigned second) {
+  unsigned values[2] = {first, second};
+  auto& [left, right] = values;
+  left += 3u;
+  right += 5u;
+  return {values[0], left, right};
+}
+
+struct Element {
+  unsigned low;
+  unsigned high;
+};
+
+unsigned record_array_value_binding(unsigned first, unsigned second) {
+  Element values[2] = {{first, second}, {second, first}};
+  auto [left, right] = values;
+  left.low += 1u;
+  return left.low + left.high + right.low + right.high;
+}
+
+unsigned nested_array_value_binding(unsigned value) {
+  unsigned values[2][2] = {{value, value + 1u}, {value + 2u, value + 3u}};
+  auto [left, right] = values;
+  left[0] += 5u;
+  values[0][0] += 7u;
+  return left[0] + right[1] + values[0][0];
+}
+
+// ----
+func.def public @array_value_binding(%first: i32, %second: i32) -> (i32, i32, i32) {
+  %43 = scalar.constant 3 : i32
+  %47 = scalar.addi %first, %43 : i32
+  %50 = scalar.constant 5 : i32
+  %56 = scalar.addi %first, %50 : i32
+  func.return %56, %47, %second : i32, i32, i32
+}
+
+func.def public @array_reference_binding(%first: i32, %second: i32) -> (i32, i32, i32) {
+  %93 = scalar.constant 3 : i32
+  %97 = scalar.addi %first, %93 : i32
+  %100 = scalar.constant 5 : i32
+  %104 = scalar.addi %second, %100 : i32
+  func.return %97, %97, %104 : i32, i32, i32
+}
+
+func.def public @record_array_value_binding(%first: i32, %second: i32) -> (i32) {
+  %201 = scalar.constant 1 : i32
+  %441 = scalar.addi %first, %second : i32
+  %443 = scalar.addi %441, %second : i32
+  %445 = scalar.addi %443, %first : i32
+  %446 = scalar.addi %445, %201 : i32
+  func.return %446 : i32
+}
+
+func.def public @nested_array_value_binding(%value: i32) -> (i32) {
+  %472 = scalar.addi %value, %value : i32
+  %474 = scalar.addi %472, %value : i32
+  %476 = scalar.constant 15 : i32
+  %477 = scalar.addi %474, %476 : i32
+  func.return %477 : i32
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// Raggi resolves tuple protocol lookup into ordinary get<I> calls and
+// reference declarations before the importer sees the declaration.
+namespace std {
+template <class T>
+struct tuple_size;
+template <unsigned I, class T>
+struct tuple_element;
+}  // namespace std
+
+struct Tuple {
+  unsigned first;
+  unsigned second;
+  template <unsigned I>
+  unsigned& get() & {
+    if constexpr (I == 0) {
+      return first;
+    } else {
+      return second;
+    }
+  }
+  template <unsigned I>
+  unsigned&& get() && {
+    if constexpr (I == 0) {
+      return static_cast<unsigned&&>(first);
+    } else {
+      return static_cast<unsigned&&>(second);
+    }
+  }
+};
+
+namespace std {
+template <>
+struct tuple_size<Tuple> {
+  static constexpr unsigned value = 2;
+};
+template <>
+struct tuple_element<0, Tuple> {
+  using type = unsigned;
+};
+template <>
+struct tuple_element<1, Tuple> {
+  using type = unsigned;
+};
+}  // namespace std
+
+Tuple tuple_protocol_binding(Tuple value) {
+  auto& [left, right] = value;
+  left += right;
+  right *= 2u;
+  return value;
+}
+
+Tuple tuple_protocol_value_binding(Tuple value) {
+  auto [left, right] = value;
+  left += right;
+  return {left, right};
+}
+
+// ----
+func.def public @tuple_protocol_binding(%value_first$0: i32, %value_second$1: i32) -> (i32, i32) {
+  %value_first$4 = scalar.addi %value_first$0, %value_second$1 : i32
+  %20 = scalar.constant 1 : i32
+  %value_second$21 = scalar.shli %value_second$1, %20 : i32
+  func.return %value_first$4, %value_second$21 : i32, i32
+}
+
+func.def public @tuple_protocol_value_binding(%value_first: i32, %value_second: i32) -> (i32, i32) {
+  %$e_first = scalar.addi %value_first, %value_second : i32
+  func.return %$e_first, %value_second : i32, i32
+}
+
+func.def @Tuple__get_0_value(%this_first: i32, %this_second: i32) {
+  func.return
+}
+
+func.def @Tuple__get_1_value(%this_first: i32, %this_second: i32) {
+  func.return
+}
+
+func.def @Tuple__get_0_value_1(%this_first: i32, %this_second: i32) {
+  func.return
+}
+
+func.def @Tuple__get_1_value_1(%this_first: i32, %this_second: i32) {
+  func.return
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// The hidden object owns the structured binding lifetime and is destroyed
+// after its aliases' final use on every exit.
+void observe(unsigned);
+
+struct Guard {
+  unsigned value;
+  ~Guard() { observe(value); }
+};
+
+struct GuardPair {
+  Guard first;
+  Guard second;
+};
+
+unsigned structured_binding_lifetime(unsigned value) {
+  auto [first, second] = GuardPair{{value}, {value + 1u}};
+  return first.value + second.value;
+}
+
+// ----
+func.def public @structured_binding_lifetime(%value: i32) -> (i32) {
+  %2 = scalar.constant 1 : i32
+  %$e_second_value = scalar.addi %value, %2 : i32
+  %4 = scalar.addi %value, %$e_second_value : i32
+  func.call @GuardPair___GuardPair_value(%value, %$e_second_value) : (i32, i32)
+  func.return %4 : i32
+}
+
+func.def inline @GuardPair___GuardPair_value(%this_first_value: i32, %this_second_value: i32) {
+  func.call @Guard___Guard_value(%this_second_value) : (i32)
+  func.call @Guard___Guard_value(%this_first_value) : (i32)
+  func.return
+}
+
+func.def inline @Guard___Guard_value(%this_value: i32) {
+  func.call @observe(%this_value) : (i32)
+  func.return
+}
+
+func.decl @observe(%8: i32)
+
+// ====
+// RUN: verify
+void invalid_array_binding() {
+  unsigned values[2] = {};
+  // ERROR@+1: "1 names provided for structured binding of array with 2 elements"
+  auto [only] = values;
+}

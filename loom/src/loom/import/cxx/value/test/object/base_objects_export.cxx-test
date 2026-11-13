@@ -1,0 +1,78 @@
+// REQUIRES: loom-export-cxx
+// RUN: emit cxx roundtrip
+// Raising preserves base selection and destruction as ordinary calls and SSA
+// operands, without depending on the original inheritance spelling.
+void observe(unsigned);
+struct Base {
+  unsigned value;
+  [[loom::inline]] void add(unsigned delta) { value += delta; }
+  ~Base() { observe(value); }
+};
+struct Left : Base {};
+struct Right : Base {};
+struct Both : Left, Right { unsigned extra; };
+unsigned update(unsigned input) {
+  Both value{{{input}}, {{7}}, 11};
+  value.Right::add(3);
+  return value.Left::value + value.Right::value * 5 + value.extra;
+}
+// ----
+
+[[loom::symbol("update")]]
+unsigned update(unsigned input);
+
+[[loom::symbol("Base__add_value"), loom::inline]]
+static unsigned Base__add_value(unsigned this_value, unsigned delta);
+
+[[loom::symbol("Both___Both_value"), loom::inline]]
+static void Both___Both_value(unsigned this_Left_Base_value, unsigned this_Right_Base_value);
+
+[[loom::symbol("Right___Right_value"), loom::inline]]
+static void Right___Right_value(unsigned this_Base_value);
+
+[[loom::symbol("Left___Left_value"), loom::inline]]
+static void Left___Left_value(unsigned this_Base_value);
+
+[[loom::symbol("Base___Base_value"), loom::inline]]
+static void Base___Base_value(unsigned this_value);
+
+[[loom::symbol("observe")]]
+void observe(unsigned v19);
+
+[[loom::symbol("update")]]
+unsigned update(unsigned input) {
+  unsigned value_Right_Base_value_1 = Base__add_value(7u, 3u);
+  Both___Both_value(input, value_Right_Base_value_1);
+  return ((input + (value_Right_Base_value_1 * 5u)) + 11u);
+}
+
+[[loom::symbol("Base__add_value"), loom::inline]]
+static unsigned Base__add_value(unsigned this_value, unsigned delta) {
+  unsigned value = this_value + delta;
+  return value;
+}
+
+[[loom::symbol("Both___Both_value"), loom::inline]]
+static void Both___Both_value(unsigned this_Left_Base_value, unsigned this_Right_Base_value) {
+  Right___Right_value(this_Right_Base_value);
+  Left___Left_value(this_Left_Base_value);
+  return;
+}
+
+[[loom::symbol("Right___Right_value"), loom::inline]]
+static void Right___Right_value(unsigned this_Base_value) {
+  Base___Base_value(this_Base_value);
+  return;
+}
+
+[[loom::symbol("Left___Left_value"), loom::inline]]
+static void Left___Left_value(unsigned this_Base_value) {
+  Base___Base_value(this_Base_value);
+  return;
+}
+
+[[loom::symbol("Base___Base_value"), loom::inline]]
+static void Base___Base_value(unsigned this_value) {
+  observe(this_value);
+  return;
+}

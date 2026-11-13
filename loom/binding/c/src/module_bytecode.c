@@ -19,10 +19,6 @@
 #include "source.h"
 #include "target.h"
 
-enum {
-  LOOMC_MODULE_BYTECODE_BLOCK_SIZE = 32 * 1024,
-};
-
 typedef struct loomc_module_byte_buffer_stream_t {
   // Base stream header.
   iree_io_stream_t base;
@@ -61,8 +57,8 @@ static loomc_status_t loomc_module_decode_bytecode_source(
       iree_make_const_byte_span(contents.data, contents.data_length),
       iree_string_view_from_loomc(options->identifier),
       loomc_context_loom_context(context), loomc_module_block_pool(module),
-      &read_options, &read_result, out_internal_module,
-      iree_allocator_from_loomc(allocator)));
+      &read_options, iree_allocator_from_loomc(allocator), &read_result,
+      out_internal_module));
   if (loomc_status_is_ok(status) && read_result.error_count != 0) {
     loom_module_free(*out_internal_module);
     *out_internal_module = NULL;
@@ -292,11 +288,7 @@ static uint8_t* loomc_module_byte_buffer_stream_take_storage(
 static loomc_status_t loomc_module_serialize_bytecode_to_stream(
     const loomc_context_t* context, const loom_module_t* internal_module,
     const loomc_module_symbol_projection_t* projection,
-    iree_io_stream_t* target_stream, loomc_allocator_t allocator) {
-  iree_arena_block_pool_t block_pool;
-  iree_arena_block_pool_initialize(LOOMC_MODULE_BYTECODE_BLOCK_SIZE,
-                                   iree_allocator_from_loomc(allocator),
-                                   &block_pool);
+    iree_io_stream_t* target_stream) {
   loom_bytecode_write_options_t write_options = {0};
   loomc_target_pass_environment_initialize_low_repr_environment(
       loomc_context_target_pass_environment(context),
@@ -308,10 +300,9 @@ static loomc_status_t loomc_module_serialize_bytecode_to_stream(
         .count = projection->count,
     };
   }
-  loomc_status_t status = loomc_status_from_iree(loom_bytecode_write_module(
-      internal_module, target_stream, &write_options, &block_pool));
-  iree_arena_block_pool_deinitialize(&block_pool);
-  return status;
+  return loomc_status_from_iree(
+      loom_bytecode_write_module(internal_module, target_stream, &write_options,
+                                 internal_module->arena.block_pool));
 }
 
 loomc_status_t loomc_module_serialize_internal_bytecode_to_source(
@@ -326,8 +317,8 @@ loomc_status_t loomc_module_serialize_internal_bytecode_to_source(
   iree_io_stream_t* base_stream = NULL;
   if (loomc_status_is_ok(status)) {
     base_stream = &stream->base;
-    status = loomc_module_serialize_bytecode_to_stream(
-        context, internal_module, projection, base_stream, allocator);
+    status = loomc_module_serialize_bytecode_to_stream(context, internal_module,
+                                                       projection, base_stream);
   }
 
   uint8_t* storage = NULL;

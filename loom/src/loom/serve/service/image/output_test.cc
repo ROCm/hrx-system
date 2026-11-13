@@ -6,7 +6,6 @@
 
 #include "loom/serve/service/image/output.h"
 
-#include <limits>
 #include <utility>
 #include <vector>
 
@@ -15,48 +14,47 @@
 
 namespace {
 
-TEST(ImageOutputTest, ExactRgbConversionAndPngChecksums) {
-  uint8_t rgb[12];
-  iree_unaligned_store_le_f32(rgb, -1.0f);
-  iree_unaligned_store_le_f32(rgb + 4, 0.0f);
-  iree_unaligned_store_le_f32(rgb + 8, 1.0f);
+TEST(ImageOutputTest, ExactRgbaPixelsAndPngChecksums) {
+  const uint8_t rgba[] = {0,  128, 255, 64, 255, 0, 32, 255,
+                          17, 67,  201, 0,  1,   2, 3,  127};
   iree_byte_span_t png;
-  IREE_ASSERT_OK(loom_serve_image_encode_rgb_f32_png(
-      1, 1, iree_make_const_byte_span(rgb, sizeof(rgb)),
+  IREE_ASSERT_OK(loom_serve_image_encode_rgba8_png(
+      2, 2, iree_make_const_byte_span(rgba, sizeof(rgba)),
       iree_allocator_system(), &png));
-  // One RGB pixel (0,128,255), with a complete zlib stream and all PNG CRCs.
+  // Two rows with distinct color and alpha values, independently encoded with
+  // zlib stored blocks and PNG CRCs. This also fixes the byte/row ordering.
   const uint8_t expected[] = {
-      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d,
-      0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
-      0x08, 0x02, 0x00, 0x00, 0x00, 0x90, 0x77, 0x53, 0xde, 0x00, 0x00, 0x00,
-      0x0f, 0x49, 0x44, 0x41, 0x54, 0x78, 0x01, 0x01, 0x04, 0x00, 0xfb, 0xff,
-      0x00, 0x00, 0x80, 0xff, 0x02, 0x03, 0x01, 0x80, 0x9d, 0x7f, 0x4c, 0xcd,
-      0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82};
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00,
+      0x0d, 0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00,
+      0x00, 0x02, 0x08, 0x06, 0x00, 0x00, 0x00, 0x72, 0xb6, 0x0d, 0x24,
+      0x00, 0x00, 0x00, 0x1d, 0x49, 0x44, 0x41, 0x54, 0x78, 0x01, 0x01,
+      0x12, 0x00, 0xed, 0xff, 0x00, 0x00, 0x80, 0xff, 0x40, 0xff, 0x00,
+      0x20, 0xff, 0x00, 0x11, 0x43, 0xc9, 0x00, 0x01, 0x02, 0x03, 0x7f,
+      0x3a, 0x6e, 0x05, 0x80, 0x89, 0x6e, 0x97, 0xfa, 0x00, 0x00, 0x00,
+      0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
+  };
   EXPECT_EQ(std::vector<uint8_t>(png.data, png.data + png.data_length),
             std::vector<uint8_t>(expected, expected + sizeof(expected)));
   iree_allocator_free(iree_allocator_system(), png.data);
 }
 
 TEST(ImageOutputTest, StoredBlockBoundariesAreIndependentOfRows) {
-  for (auto shape : {std::pair<uint32_t, uint32_t>{28, 771},
-                     {21845, 1},
-                     {21844, 1},
-                     {1, 16384},
+  for (auto shape : {std::pair<uint32_t, uint32_t>{64, 255},
+                     {16384, 1},
+                     {16383, 1},
+                     {1, 13108},
                      {3, 2}}) {
     SCOPED_TRACE(::testing::PrintToString(shape));
     const auto [width, height] = shape;
-    const size_t raw_length = (width * 3 + 1) * height;
-    std::vector<uint8_t> rgb(size_t{width} * height * 12);
-    for (size_t i = 0; i < rgb.size(); i += 4) {
-      iree_unaligned_store_le_f32(rgb.data() + i, -1.0f);
-    }
+    const size_t raw_length = (width * 4 + 1) * height;
+    std::vector<uint8_t> rgba(size_t{width} * height * 4);
     iree_byte_span_t png;
-    IREE_ASSERT_OK(loom_serve_image_encode_rgb_f32_png(
-        width, height, iree_make_const_byte_span(rgb.data(), rgb.size()),
+    IREE_ASSERT_OK(loom_serve_image_encode_rgba8_png(
+        width, height, iree_make_const_byte_span(rgba.data(), rgba.size()),
         iree_allocator_system(), &png));
     iree_host_size_t predicted_length = 0;
     IREE_ASSERT_OK(
-        loom_serve_image_rgb_f32_png_size(width, height, &predicted_length));
+        loom_serve_image_rgba8_png_size(width, height, &predicted_length));
     EXPECT_EQ(predicted_length, png.data_length);
     const uint8_t* cursor = png.data + 43;
     size_t decoded = 0;
@@ -87,38 +85,43 @@ TEST(ImageOutputTest, RejectsUnencodableShapeWithoutAllocating) {
   iree_host_size_t length = 1;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
-      loom_serve_image_rgb_f32_png_size(UINT32_MAX, 1, &length));
+      loom_serve_image_rgba8_png_size(UINT32_MAX, 1, &length));
   EXPECT_EQ(length, 0u);
   if (IREE_HOST_SIZE_MAX > UINT32_MAX) {
-    // RGB storage fits a 64-bit host, but the PNG IDAT cannot represent it.
+    // RGBA storage fits a 64-bit host, but the PNG IDAT cannot represent it.
     IREE_EXPECT_STATUS_IS(
         IREE_STATUS_OUT_OF_RANGE,
-        loom_serve_image_rgb_f32_png_size(32768, 32768, &length));
+        loom_serve_image_rgba8_png_size(32768, 32768, &length));
+    EXPECT_EQ(length, 0u);
+    // Framing arithmetic must reject enormous valid host extents too.
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_OUT_OF_RANGE,
+        loom_serve_image_rgba8_png_size(INT32_MAX, INT32_MAX, &length));
     EXPECT_EQ(length, 0u);
   }
 }
 
 TEST(ImageOutputTest, RejectsInvalidShapeAndDeviceOutput) {
-  uint8_t rgb[12] = {};
+  uint8_t rgba[4] = {};
   iree_byte_span_t png;
   for (auto shape : {std::pair<uint32_t, uint32_t>{0, 1},
                      {1, 0},
                      {2, 1},
                      {UINT32_MAX, UINT32_MAX}}) {
     IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
-                          loom_serve_image_encode_rgb_f32_png(
+                          loom_serve_image_encode_rgba8_png(
                               shape.first, shape.second,
-                              iree_make_const_byte_span(rgb, sizeof(rgb)),
+                              iree_make_const_byte_span(rgba, sizeof(rgba)),
                               iree_allocator_system(), &png));
     EXPECT_EQ(png.data, nullptr);
   }
-  for (float value : {2.0f, -2.0f, std::numeric_limits<float>::infinity(),
-                      std::numeric_limits<float>::quiet_NaN()}) {
-    iree_unaligned_store_le_f32(rgb, value);
-    IREE_EXPECT_STATUS_IS(IREE_STATUS_DATA_LOSS,
-                          loom_serve_image_encode_rgb_f32_png(
-                              1, 1, iree_make_const_byte_span(rgb, sizeof(rgb)),
-                              iree_allocator_system(), &png));
+  uint8_t oversized[5] = {};
+  for (size_t length : {size_t{3}, size_t{5}}) {
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_INVALID_ARGUMENT,
+        loom_serve_image_encode_rgba8_png(
+            1, 1, iree_make_const_byte_span(oversized, length),
+            iree_allocator_system(), &png));
     EXPECT_EQ(png.data, nullptr);
   }
 }

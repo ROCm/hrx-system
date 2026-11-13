@@ -45,14 +45,16 @@ class ModuleBlockOrderTest : public ::testing::Test {
     return op;
   }
 
-  loom_op_t* AppendOp() {
+  loom_op_t* AppendOp(uint16_t result_count = 0) {
     loom_op_t* op = AllocateOp();
+    op->result_count = result_count;
     IREE_CHECK_OK(loom_block_append_op(module_, block_, op));
     return op;
   }
 
   void CheckOrder() {
     uint32_t count = 0;
+    uint32_t result_operation_count = 0;
     uint64_t previous_ordinal = 0;
     loom_op_t* previous_op = nullptr;
     loom_op_t* op = nullptr;
@@ -63,9 +65,11 @@ class ModuleBlockOrderTest : public ::testing::Test {
       previous_op = op;
       previous_ordinal = op->block_ordinal;
       ++count;
+      result_operation_count += op->result_count != 0;
     }
     EXPECT_EQ(previous_op, block_->last_op);
     EXPECT_EQ(count, block_->op_count);
+    EXPECT_EQ(result_operation_count, block_->result_operation_count);
     if (block_->last_op) {
       EXPECT_LT(block_->last_op->block_ordinal, UINT64_MAX);
     }
@@ -80,6 +84,22 @@ class ModuleBlockOrderTest : public ::testing::Test {
   // Module body block whose linked order and ordinals are checked together.
   loom_block_t* block_ = nullptr;
 };
+
+TEST_F(ModuleBlockOrderTest, TracksResultOperationsAcrossRelinking) {
+  loom_op_t* first = AppendOp(/*result_count=*/1);
+  loom_op_t* middle = AppendOp();
+  loom_op_t* last = AppendOp(/*result_count=*/2);
+  CheckOrder();
+  EXPECT_EQ(block_->result_operation_count, 2u);
+
+  loom_block_unlink_op(module_, first);
+  CheckOrder();
+  EXPECT_EQ(block_->result_operation_count, 1u);
+  IREE_ASSERT_OK(loom_block_insert_before_op(module_, block_, last, first));
+  CheckOrder();
+  EXPECT_EQ(block_->result_operation_count, 2u);
+  EXPECT_EQ(middle->next_op, first);
+}
 
 TEST_F(ModuleBlockOrderTest, RepeatedAfterStableOpRetainsSparseCapacity) {
   constexpr uint32_t kInsertionCount = 4096;

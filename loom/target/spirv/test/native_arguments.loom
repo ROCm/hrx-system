@@ -1,0 +1,54 @@
+// Native producers can retain wide carriers after a local range proof. The
+// receiving index signature observes the same signed value after narrowing.
+low.func.def target<spirv.logical.core> @wide_coordinate(%value: reg<spirv.id : i64>) -> (reg<spirv.id : i64>) asm {
+  return %value
+}
+
+low.func.def target<spirv.logical.core> @word_coordinate(%value: reg<spirv.id : index>) -> (reg<spirv.id : index>) asm {
+  return %value
+}
+
+kernel.def @native_index_roundtrip() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%input_buffer: buffer, %output_buffer: buffer) {
+  %origin = index.constant 0 : offset
+  %lane = kernel.workitem.id<x> : index
+  %input = buffer.view %input_buffer[%origin] : buffer -> view<64xi32>
+  %output = buffer.view %output_buffer[%origin] : buffer -> view<64xi32>
+  %bits = view.load %input[%lane] : view<64xi32> -> i32
+  %coordinate = index.cast %bits : i32 to index
+  %wide_bits = low.invoke @wide_coordinate(%coordinate) : (index) -> (i64)
+  %validated_bits = scalar.assume %wide_bits [range(%wide_bits, -2147483648, 4294967296)] : i64
+  %wide = index.cast %validated_bits : i64 to index
+  %bounded = index.assume %wide [range(%wide, -2147483648, 2147483647)] : index
+  %word = low.invoke @word_coordinate(%bounded) : (index) -> (index)
+  %result = index.cast %word : index to i32
+  view.store %result, %output[%lane] : i32, view<64xi32>
+  kernel.return
+}
+
+check.case @native_negative_limit {
+  %input = check.generate.iota offset(-2147483648) step(1) : tensor<64xi32>
+  %output = check.generate.fill value(17) : tensor<64xi32>
+  kernel.launch @native_index_roundtrip(%input, %output) : (tensor<64xi32>, tensor<64xi32>)
+  check.expect.bitwise actual(%output) expected(%input) : tensor<64xi32>
+  check.return
+}
+
+check.case @native_signed_coordinates {
+  %input = check.generate.iota offset(-32) step(1) : tensor<64xi32>
+  %output = check.generate.fill value(17) : tensor<64xi32>
+  kernel.launch @native_index_roundtrip(%input, %output) : (tensor<64xi32>, tensor<64xi32>)
+  check.expect.bitwise actual(%output) expected(%input) : tensor<64xi32>
+  check.return
+}
+
+check.case @native_positive_limit {
+  %input = check.generate.iota offset(2147483584) step(1) : tensor<64xi32>
+  %output = check.generate.fill value(17) : tensor<64xi32>
+  kernel.launch @native_index_roundtrip(%input, %output) : (tensor<64xi32>, tensor<64xi32>)
+  check.expect.bitwise actual(%output) expected(%input) : tensor<64xi32>
+  check.return
+}

@@ -12,12 +12,22 @@
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/binding/c/test/target/amdgpu/command_profile_testdata.h"
-#include "loom/target/arch/cmd/program.h"
+#include "loom/runtime/command/program.h"
 #include "loomc/target/cmd.h"
 #include "target_test_util.h"
 
 namespace loomc::testing::amdgpu {
 namespace {
+
+using CommandCompilerPtr =
+    loomc::testing::HandlePtr<loomc_cmd_compiler_t, loomc_cmd_compiler_release>;
+
+CommandCompilerPtr CreateCommandCompiler(loomc_link_index_t* index) {
+  loomc_cmd_compiler_t* compiler = nullptr;
+  LOOMC_EXPECT_OK(loomc_cmd_compiler_create(
+      index, nullptr, loomc_allocator_system(), &compiler));
+  return CommandCompilerPtr(compiler);
+}
 
 struct KernelRequestCapture {
   // Requests transferred by one command-product construction.
@@ -63,6 +73,7 @@ command.def public @dispatch() launch() {
     source = SerializeModule(module.get(), LOOMC_SOURCE_FORMAT_BYTECODE);
   }
   LinkIndexPtr index = CreateLinkIndex(context.get(), source.get());
+  CommandCompilerPtr command_compiler = CreateCommandCompiler(index.get());
 
   const loomc_target_specialization_t specialization = {
       .function_symbol = loomc_make_cstring_view("record_subgroup_size"),
@@ -87,7 +98,7 @@ command.def public @dispatch() launch() {
       .type = LOOMC_STRUCTURE_TYPE_CMD_PROGRAM_PRODUCT_OPTIONS,
       .structure_size = sizeof(product_options),
       .next = &target_options,
-      .link_index = index.get(),
+      .compiler = command_compiler.get(),
       .root_symbol_ordinals = nullptr,
       .root_symbol_count = 0,
       .flags = LOOMC_CMD_PROGRAM_PRODUCT_FLAG_INCLUDE_INPUT_EXPORTS,
@@ -127,6 +138,7 @@ command.def public @dispatch() launch() {
   // The independent request owns its concrete target after planning ends.
   product_result_ptr.reset();
   product_ptr.reset();
+  command_compiler.reset();
   index.reset();
   source.reset();
   profile.reset();
@@ -183,7 +195,8 @@ enum class CommandSource { kText, kBytecode, kRequest, kModule };
 // Exercises every command-product admission path with the same command root.
 loomc_status_t BuildCommandProduct(
     loomc_context_t* context, loomc_workspace_t* workspace,
-    loomc_source_t* source, const loomc_cmd_program_product_options_t& options,
+    loomc_link_index_t* index, loomc_source_t* source,
+    const loomc_cmd_program_product_options_t& options,
     CommandSource source_kind, loomc_product_t** out_product,
     loomc_result_t** out_result) {
   if (source_kind == CommandSource::kText ||
@@ -213,7 +226,7 @@ loomc_status_t BuildCommandProduct(
 
   loomc_link_index_symbol_t symbol = {};
   EXPECT_TRUE(loomc_link_index_lookup_global(
-      options.link_index, loomc_make_cstring_view("dispatch"), &symbol));
+      index, loomc_make_cstring_view("dispatch"), &symbol));
   const loomc_request_root_t root = {
       .module_ordinal = static_cast<uint32_t>(symbol.provider_module_ordinal),
       .symbol_ordinal = static_cast<uint32_t>(symbol.module_symbol_ordinal),
@@ -255,6 +268,7 @@ TEST_P(AmdgpuCommandProfileTest, ConfiguresSelectedKernelsAndOwnsTargets) {
     source = SerializeModule(module.get(), LOOMC_SOURCE_FORMAT_BYTECODE);
   }
   LinkIndexPtr index = CreateLinkIndex(context.get(), source.get());
+  CommandCompilerPtr command_compiler = CreateCommandCompiler(index.get());
   const loomc_config_binding_t binding = {
       .key = loomc_make_cstring_view("test.count"),
       .value = loomc_make_cstring_view("127"),
@@ -268,7 +282,7 @@ TEST_P(AmdgpuCommandProfileTest, ConfiguresSelectedKernelsAndOwnsTargets) {
       .type = LOOMC_STRUCTURE_TYPE_CMD_PROGRAM_PRODUCT_OPTIONS,
       .structure_size = sizeof(options),
       .next = &empty_target_options,
-      .link_index = index.get(),
+      .compiler = command_compiler.get(),
       .flags = LOOMC_CMD_PROGRAM_PRODUCT_FLAG_INCLUDE_INPUT_EXPORTS,
       .config =
           {
@@ -284,8 +298,8 @@ TEST_P(AmdgpuCommandProfileTest, ConfiguresSelectedKernelsAndOwnsTargets) {
   loomc_product_t* raw_product = nullptr;
   loomc_result_t* raw_result = nullptr;
   LOOMC_ASSERT_OK(BuildCommandProduct(context.get(), workspace.get(),
-                                      source.get(), options, source_kind,
-                                      &raw_product, &raw_result));
+                                      index.get(), source.get(), options,
+                                      source_kind, &raw_product, &raw_result));
   ProductPtr product(raw_product);
   ResultPtr result(raw_result);
   ExpectSucceededResult(result.get());
@@ -327,6 +341,7 @@ TEST_P(AmdgpuCommandProfileTest, ConfiguresSelectedKernelsAndOwnsTargets) {
   // All producer state can retire before the independent requests compile.
   result.reset();
   product.reset();
+  command_compiler.reset();
   index.reset();
   source.reset();
   profile.reset();
@@ -402,11 +417,12 @@ TEST_P(AmdgpuCommandProviderSelectionTest,
     source = SerializeModule(module.get(), LOOMC_SOURCE_FORMAT_BYTECODE);
   }
   LinkIndexPtr index = CreateLinkIndex(context.get(), source.get());
+  CommandCompilerPtr command_compiler = CreateCommandCompiler(index.get());
   KernelRequestCapture capture;
   const loomc_cmd_program_product_options_t options = {
       .type = LOOMC_STRUCTURE_TYPE_CMD_PROGRAM_PRODUCT_OPTIONS,
       .structure_size = sizeof(options),
-      .link_index = index.get(),
+      .compiler = command_compiler.get(),
       .flags = LOOMC_CMD_PROGRAM_PRODUCT_FLAG_INCLUDE_INPUT_EXPORTS,
       .target_profile = profile.get(),
       .request_sink = {CaptureKernelRequest, &capture},
@@ -414,8 +430,8 @@ TEST_P(AmdgpuCommandProviderSelectionTest,
   loomc_product_t* raw_product = nullptr;
   loomc_result_t* raw_result = nullptr;
   LOOMC_ASSERT_OK(BuildCommandProduct(context.get(), workspace.get(),
-                                      source.get(), options, source_kind,
-                                      &raw_product, &raw_result));
+                                      index.get(), source.get(), options,
+                                      source_kind, &raw_product, &raw_result));
   ProductPtr product(raw_product);
   ResultPtr result(raw_result);
   ExpectSucceededResult(result.get());
@@ -455,6 +471,7 @@ class AmdgpuCommandTargetLivenessTest
       source_ = SerializeModule(module.get(), LOOMC_SOURCE_FORMAT_BYTECODE);
     }
     index_ = CreateLinkIndex(context_.get(), source_.get());
+    command_compiler_ = CreateCommandCompiler(index_.get());
   }
 
   void Build(const char* use_rdna, KernelRequestCapture* capture,
@@ -464,7 +481,7 @@ class AmdgpuCommandTargetLivenessTest
         .value = loomc_make_cstring_view(use_rdna),
     };
     const loomc_cmd_program_product_options_t options = {
-        .link_index = index_.get(),
+        .compiler = command_compiler_.get(),
         .flags = LOOMC_CMD_PROGRAM_PRODUCT_FLAG_INCLUDE_INPUT_EXPORTS,
         .config =
             {
@@ -478,8 +495,8 @@ class AmdgpuCommandTargetLivenessTest
     loomc_product_t* product = nullptr;
     loomc_result_t* result = nullptr;
     LOOMC_ASSERT_OK(BuildCommandProduct(context_.get(), workspace_.get(),
-                                        source_.get(), options, GetParam(),
-                                        &product, &result));
+                                        index_.get(), source_.get(), options,
+                                        GetParam(), &product, &result));
     out_product->reset(product);
     out_result->reset(result);
   }
@@ -490,6 +507,7 @@ class AmdgpuCommandTargetLivenessTest
   TargetProfilePtr profile_;
   SourcePtr source_;
   LinkIndexPtr index_;
+  CommandCompilerPtr command_compiler_;
 };
 
 TEST_P(AmdgpuCommandTargetLivenessTest,
@@ -550,6 +568,7 @@ TEST_P(AmdgpuCommandTargetPolicyTest, RejectsMixedTargetPolicies) {
     source = SerializeModule(module.get(), LOOMC_SOURCE_FORMAT_BYTECODE);
   }
   LinkIndexPtr index = CreateLinkIndex(context.get(), source.get());
+  CommandCompilerPtr command_compiler = CreateCommandCompiler(index.get());
   const loomc_target_specialization_t specialization = {
       .function_symbol = loomc_make_cstring_view("dispatch"),
       .target_profile = profile.get(),
@@ -570,7 +589,7 @@ TEST_P(AmdgpuCommandTargetPolicyTest, RejectsMixedTargetPolicies) {
     };
     const loomc_cmd_program_product_options_t options = {
         .next = &explicit_options,
-        .link_index = index.get(),
+        .compiler = command_compiler.get(),
         .flags = LOOMC_CMD_PROGRAM_PRODUCT_FLAG_INCLUDE_INPUT_EXPORTS,
         .target_profile = profile.get(),
     };
@@ -578,8 +597,9 @@ TEST_P(AmdgpuCommandTargetPolicyTest, RejectsMixedTargetPolicies) {
     loomc_result_t* raw_result = nullptr;
     LOOMC_EXPECT_STATUS_IS(
         LOOMC_STATUS_INVALID_ARGUMENT,
-        BuildCommandProduct(context.get(), workspace.get(), source.get(),
-                            options, GetParam(), &raw_product, &raw_result));
+        BuildCommandProduct(context.get(), workspace.get(), index.get(),
+                            source.get(), options, GetParam(), &raw_product,
+                            &raw_result));
     ProductPtr product(raw_product);
     ResultPtr result(raw_result);
     EXPECT_EQ(product.get(), nullptr);
@@ -604,8 +624,9 @@ TEST_P(AmdgpuCommandTargetPolicyTest, RejectsIncompatibleProfileEnvironment) {
     source = SerializeModule(module.get(), LOOMC_SOURCE_FORMAT_BYTECODE);
   }
   LinkIndexPtr index = CreateLinkIndex(context.get(), source.get());
+  CommandCompilerPtr command_compiler = CreateCommandCompiler(index.get());
   const loomc_cmd_program_product_options_t options = {
-      .link_index = index.get(),
+      .compiler = command_compiler.get(),
       .flags = LOOMC_CMD_PROGRAM_PRODUCT_FLAG_INCLUDE_INPUT_EXPORTS,
       .target_profile = profile.get(),
   };
@@ -613,8 +634,9 @@ TEST_P(AmdgpuCommandTargetPolicyTest, RejectsIncompatibleProfileEnvironment) {
   loomc_result_t* raw_result = nullptr;
   LOOMC_EXPECT_STATUS_IS(
       LOOMC_STATUS_INVALID_ARGUMENT,
-      BuildCommandProduct(context.get(), workspace.get(), source.get(), options,
-                          GetParam(), &raw_product, &raw_result));
+      BuildCommandProduct(context.get(), workspace.get(), index.get(),
+                          source.get(), options, GetParam(), &raw_product,
+                          &raw_result));
   ProductPtr product(raw_product);
   ResultPtr result(raw_result);
   EXPECT_EQ(product.get(), nullptr);
@@ -635,16 +657,17 @@ TEST_P(AmdgpuCommandTargetPolicyTest, ReportsIncompatibleSourceTarget) {
     source = SerializeModule(module.get(), LOOMC_SOURCE_FORMAT_BYTECODE);
   }
   LinkIndexPtr index = CreateLinkIndex(context.get(), source.get());
+  CommandCompilerPtr command_compiler = CreateCommandCompiler(index.get());
   const loomc_cmd_program_product_options_t options = {
-      .link_index = index.get(),
+      .compiler = command_compiler.get(),
       .flags = LOOMC_CMD_PROGRAM_PRODUCT_FLAG_INCLUDE_INPUT_EXPORTS,
       .target_profile = profile.get(),
   };
   loomc_product_t* raw_product = nullptr;
   loomc_result_t* raw_result = nullptr;
   LOOMC_ASSERT_OK(BuildCommandProduct(context.get(), workspace.get(),
-                                      source.get(), options, GetParam(),
-                                      &raw_product, &raw_result));
+                                      index.get(), source.get(), options,
+                                      GetParam(), &raw_product, &raw_result));
   ProductPtr product(raw_product);
   ResultPtr result(raw_result);
   ASSERT_NE(result.get(), nullptr);

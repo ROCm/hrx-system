@@ -52,13 +52,26 @@ TEST_F(GpuDeviceFixture, InactivatesAdvertisedQueuesBeforeReleasingOwners) {
     ASSERT_EQ(
         api_->endpoint_query_queue_family_info(endpoint_, ordinal, &family),
         AMDF_STATUS_OK);
+    amdf_queue_family_placement_info_t placement = {
+        .type = AMDF_STRUCTURE_TYPE_QUEUE_FAMILY_PLACEMENT_INFO,
+        .structure_size = sizeof(placement),
+    };
+    ASSERT_EQ(api_->device_query_queue_family_placement_info(device_, ordinal,
+                                                             &placement),
+              AMDF_STATUS_OK);
     if (family.user_queue_capabilities &
         AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER) {
+      const amdf_queue_placement_t requested_placement =
+          (placement.placement_capabilities &
+           AMDF_QUEUE_PLACEMENT_CAPABILITY_HOST_LOCAL)
+              ? AMDF_QUEUE_PLACEMENT_HOST_LOCAL
+              : AMDF_QUEUE_PLACEMENT_DEFAULT;
       const amdf_gpu_user_queue_create_info_t create = {
           .type = AMDF_STRUCTURE_TYPE_GPU_USER_QUEUE_CREATE_INFO,
           .structure_size = sizeof(create),
           .queue_family_ordinal = ordinal,
           .priority = AMDF_QUEUE_PRIORITY_NORMAL,
+          .placement = requested_placement,
           .producer_mode = AMDF_QUEUE_PRODUCER_MODE_SINGLE,
           .required_capabilities = AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER,
       };
@@ -87,6 +100,9 @@ TEST_F(GpuDeviceFixture, InactivatesAdvertisedQueuesBeforeReleasingOwners) {
                 AMDF_STATUS_OK);
     }
     if (family.publication_modes & AMDF_QUEUE_PUBLICATION_MODE_KERNEL) {
+      if (!(family.publication_modes & AMDF_QUEUE_PUBLICATION_MODE_USER)) {
+        EXPECT_EQ(placement.placement_capabilities, 0u);
+      }
       const amdf_gpu_kernel_queue_create_info_t create = {
           .type = AMDF_STRUCTURE_TYPE_GPU_KERNEL_QUEUE_CREATE_INFO,
           .structure_size = sizeof(create),
@@ -748,6 +764,27 @@ TEST_F(GpuEndpointTest, CreatesReclaimableDevicesFromOneEndpoint) {
   if (!(first_info.features & AMDF_GPU_DEVICE_FEATURE_DEVICE_RECREATION)) {
     GTEST_SKIP() << "device recreation is unavailable";
   }
+  uint32_t scope_count = 0;
+  const auto count_status =
+      api_->device_enumerate_memory_scopes(device_, 0, nullptr, &scope_count);
+  ASSERT_EQ(count_status,
+            scope_count == 0
+                ? AMDF_STATUS_OK
+                : amdf_make_api_status(AMDF_STATUS_CODE_BUFFER_TOO_SMALL));
+  std::vector<amdf_memory_scope_t*> first_scopes(scope_count);
+  ASSERT_EQ(api_->device_enumerate_memory_scopes(
+                device_, scope_count, first_scopes.data(), &scope_count),
+            AMDF_STATUS_OK);
+  std::vector<amdf_memory_scope_info_t> scope_infos(scope_count);
+  for (uint32_t i = 0; i < scope_count; ++i) {
+    scope_infos[i] = {
+        .type = AMDF_STRUCTURE_TYPE_MEMORY_SCOPE_INFO,
+        .structure_size = sizeof(scope_infos[i]),
+    };
+    ASSERT_EQ(api_->memory_scope_query_info(first_scopes[i], &scope_infos[i]),
+              AMDF_STATUS_OK);
+    EXPECT_GT(scope_infos[i].capacity_byte_length, 0u);
+  }
   const amdf_gpu_device_create_info_t create_info = MakeDeviceCreateInfo();
   ASSERT_TRUE(amdf_status_is_ok(
       gpu_api_->device_create(endpoint_, &create_info, &second_device_)));
@@ -759,8 +796,28 @@ TEST_F(GpuEndpointTest, CreatesReclaimableDevicesFromOneEndpoint) {
       gpu_api_->device_query_info(second_device_, &second_info)));
   EXPECT_FALSE(amdf_device_id_is_equal(&first_info.id, &second_info.id));
 
+  std::vector<amdf_memory_scope_t*> second_scopes(scope_count);
+  uint32_t second_scope_count = 0;
+  ASSERT_EQ(api_->device_enumerate_memory_scopes(second_device_, scope_count,
+                                                 second_scopes.data(),
+                                                 &second_scope_count),
+            AMDF_STATUS_OK);
+  EXPECT_EQ(second_scope_count, scope_count);
+  EXPECT_EQ(first_scopes, second_scopes);
+
   ASSERT_TRUE(amdf_status_is_ok(api_->device_destroy(second_device_)));
   second_device_ = nullptr;
+  for (uint32_t i = 0; i < scope_count; ++i) {
+    amdf_memory_scope_info_t info = {
+        .type = AMDF_STRUCTURE_TYPE_MEMORY_SCOPE_INFO,
+        .structure_size = sizeof(info),
+    };
+    ASSERT_EQ(api_->memory_scope_query_info(second_scopes[i], &info),
+              AMDF_STATUS_OK);
+    EXPECT_EQ(info.kind, scope_infos[i].kind);
+    EXPECT_EQ(info.flags, scope_infos[i].flags);
+    EXPECT_EQ(info.capacity_byte_length, scope_infos[i].capacity_byte_length);
+  }
 }
 
 }  // namespace

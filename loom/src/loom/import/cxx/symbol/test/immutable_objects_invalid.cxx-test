@@ -1,0 +1,118 @@
+// RUN: verify
+struct Entry {
+  mutable unsigned value;
+};
+static constexpr Entry mutable_table[1] = {{1}};
+unsigned mutable_lookup(unsigned index) {
+  // ERROR@+1: LOWERING/059 "immutable storage requires a nonvolatile deeply const object"
+  return mutable_table[index % 1u].value;
+}
+
+// ====
+static constexpr unsigned value = 1;
+static constexpr const unsigned* address_table[1] = {&value};
+bool address_lookup(unsigned index) {
+  // ERROR@+1: LOWERING/059 "immutable storage requires a fully initialized, trivially copyable, address-free object representation"
+  return address_table[index % 1u] != nullptr;
+}
+
+// ====
+static thread_local const unsigned thread_table[1] = {1};
+unsigned thread_lookup(unsigned index) {
+  // ERROR@+1: LOWERING/059 "immutable storage cannot have thread-local storage"
+  return thread_table[index % 1u];
+}
+
+// ====
+struct Bits {
+  unsigned low : 4;
+  unsigned high : 4;
+};
+static constexpr Bits bitfield_table[1] = {{3, 12}};
+unsigned bitfield_lookup(unsigned index) {
+  // ERROR@+1: LOWERING/059 "record storage requires named fields without bitfields or no_unique_address"
+  return bitfield_table[index % 1u].low;
+}
+
+// ====
+struct Empty {};
+struct Compact {
+  [[no_unique_address]] Empty empty;
+  unsigned value;
+};
+static constexpr Compact compact_table[1] = {{{}, 7}};
+unsigned compact_lookup(unsigned index) {
+  // ERROR@+1: LOWERING/059 "record storage requires named fields without bitfields or no_unique_address"
+  return compact_table[index % 1u].value;
+}
+
+// ====
+template <unsigned Value>
+inline constexpr unsigned templated_table[1] = {Value};
+
+unsigned templated_lookup(unsigned index) {
+  // ERROR@+1: LOWERING/059 "linkable immutable object template specializations are unsupported"
+  return templated_table<7>[index % 1u];
+}
+
+// ====
+unsigned mutable_local(unsigned index) {
+  // ERROR@+1: LOWERING/059 "immutable storage requires a nonvolatile deeply const object"
+  static unsigned table[2] = {1, 2};
+  return table[index & 1u];
+}
+
+// ====
+unsigned dynamic_local(unsigned value) {
+  // ERROR@+1: LOWERING/059 "immutable storage requires constant initialization"
+  static const unsigned table[2] = {value, value + 1};
+  return table[0];
+}
+
+// ====
+unsigned volatile_local() {
+  // ERROR@+1: LOWERING/059 "immutable storage requires a nonvolatile deeply const object"
+  static const volatile unsigned value = 1;
+  return value;
+}
+
+// ====
+unsigned thread_local_lookup(unsigned index) {
+  // ERROR@+1: LOWERING/059 "immutable storage cannot have thread-local storage"
+  static thread_local const unsigned table[2] = {1, 2};
+  return table[index & 1u];
+}
+
+// ====
+struct MutableEntry { mutable unsigned value; };
+unsigned mutable_local_member(unsigned index) {
+  // ERROR@+1: LOWERING/059 "immutable storage requires a nonvolatile deeply const object"
+  static constexpr MutableEntry table[2] = {{1}, {2}};
+  return table[index & 1u].value;
+}
+
+// ====
+unsigned addressed_local() {
+  static constexpr unsigned value = 1;
+  // ERROR@+1: LOWERING/059 "immutable storage requires a fully initialized, trivially copyable, address-free object representation"
+  static constexpr const unsigned* address[1] = {&value};
+  return *address[0];
+}
+
+// ====
+struct Cleanup {
+  unsigned value;
+  constexpr ~Cleanup() {}
+};
+unsigned nontrivial_local() {
+  // ERROR@+1: LOWERING/059 "immutable storage requires a fully initialized, trivially copyable, address-free object representation"
+  static constexpr Cleanup value{3};
+  return value.value;
+}
+
+// ====
+unsigned workgroup_local(unsigned index) {
+  // ERROR@+1: LOWERING/059 "static immutable storage cannot have workgroup scope"
+  [[loom::workgroup]] static constexpr unsigned table[2] = {1, 2};
+  return table[index & 1u];
+}

@@ -345,6 +345,8 @@ typedef enum loom_amdgpu_instruction_constraint_bit_e {
   // Integer matrix packets require coexecution spacing.
   LOOM_AMDGPU_INSTRUCTION_CONSTRAINT_INTEGER_MATRIX_COEXECUTION_SPACING = 1u
                                                                           << 9,
+  // DS permute instructions exchange only within each 32-lane wave64 half.
+  LOOM_AMDGPU_INSTRUCTION_CONSTRAINT_DS_PERMUTE_HALF_WAVE = 1u << 10,
   // Instruction constraints known by the AMDGPU target package.
   LOOM_AMDGPU_INSTRUCTION_CONSTRAINT_KNOWN_BITS =
       LOOM_AMDGPU_INSTRUCTION_CONSTRAINT_DS_PAIRED_ADDRESS_ALIGNMENT |
@@ -356,7 +358,8 @@ typedef enum loom_amdgpu_instruction_constraint_bit_e {
       LOOM_AMDGPU_INSTRUCTION_CONSTRAINT_WMMA_F4_32X16_SPLIT |
       LOOM_AMDGPU_INSTRUCTION_CONSTRAINT_WMMA_SCALE_ENCODING |
       LOOM_AMDGPU_INSTRUCTION_CONSTRAINT_SWMMAC_LOW_PRECISION_LOWERING |
-      LOOM_AMDGPU_INSTRUCTION_CONSTRAINT_INTEGER_MATRIX_COEXECUTION_SPACING,
+      LOOM_AMDGPU_INSTRUCTION_CONSTRAINT_INTEGER_MATRIX_COEXECUTION_SPACING |
+      LOOM_AMDGPU_INSTRUCTION_CONSTRAINT_DS_PERMUTE_HALF_WAVE,
 } loom_amdgpu_instruction_constraint_bit_t;
 
 // Bitset of loom_amdgpu_instruction_constraint_bit_t values.

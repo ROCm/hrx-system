@@ -41,11 +41,12 @@ typedef struct loom_low_call_clobber_list_t {
 // The boundary supplies its own register class, width, and location; it does
 // not constrain storage during the value's SSA lifetime.
 typedef struct loom_low_allocation_abi_location_t {
-  // Register-like allocation kind, or UNASSIGNED for a storage ABI operand.
+  // Register-like kind or CALL_STORAGE for a packet cell. UNASSIGNED leaves
+  // transport to the target's separate ABI mechanism.
   uint16_t location_kind;
   // Register class in the allocation's resolved descriptor set.
   uint16_t descriptor_reg_class_id;
-  // Physical view or first linear register unit in the boundary register class.
+  // Physical view, first register unit, or first call-packet unit in the class.
   uint32_t location_base;
 } loom_low_allocation_abi_location_t;
 
@@ -66,13 +67,13 @@ typedef struct loom_low_allocation_entry_value_t {
 } loom_low_allocation_entry_value_t;
 
 typedef struct loom_low_call_contract_t {
-  // ABI registers indexed by logical argument. A missing suffix or UNASSIGNED
-  // entry is stored through the target's storage ABI before register transport
-  // at the same call. Those consumed inputs may then supply cycle scratch.
+  // ABI coordinates indexed by logical argument. Packet cells participate in
+  // the same parallel transfer graph as register arguments. A missing suffix
+  // or UNASSIGNED entry retains target-owned transport before this graph.
   const loom_low_allocation_abi_location_t* arguments;
   // Length of |arguments|; queries may return a convention's maximum prefix.
   uint16_t argument_count;
-  // ABI registers indexed by logical result, with the same suffix convention.
+  // ABI coordinates indexed by logical result, with the same suffix convention.
   const loom_low_allocation_abi_location_t* results;
   // Length of |results|.
   uint16_t result_count;

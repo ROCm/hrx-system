@@ -8,6 +8,7 @@
 
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load("//build_tools/bazel:cc_attrs.bzl", "cc_attrs")
+load("//build_tools/bazel:executable.bzl", "iree_executable_test")
 load(
     "//loom/requirements:package_policy.bzl",
     "apply_loom_test_policy",
@@ -233,6 +234,7 @@ def loom_check_test(
         size = "small",
         tags = [],
         data = [],
+        tools = [],
         env = {},
         runner = Label("//loom/src/loom/tools/loom-check:loom-check-test"),
         **kwargs):
@@ -244,35 +246,26 @@ def loom_check_test(
       size: Test size (default: "small").
       tags: Additional tags to apply to the test.
       data: Additional runfiles made available to loom-check.
+      tools: External helpers built for the test execution platform.
       env: Additional test environment variables.
       runner: loom-check compatible runner binary.
-      **kwargs: Additional attributes passed to sh_test.
+      **kwargs: Additional attributes passed to iree_executable_test.
     """
     _loom_check_test_base_name(src)
     kwargs = apply_loom_test_policy(kwargs, name = name)
+    args = kwargs.pop("args", [])
     policy_tags = kwargs.pop("tags", [])
     resource_group = kwargs.pop("resource_group", None)
-    test_tags = cc_attrs.with_resource_group_tags(
-        tags + ["loom-check"] + policy_tags,
-        resource_group,
-    )
-    launcher_name = name + "_launcher"
-    _loom_check_executable(
-        name = launcher_name,
-        src = src,
-        data = data,
-        env = env,
-        runner = runner,
-        tags = ["manual"],
-        testonly = True,
-    )
-    sh_test(
+    iree_executable_test(
         name = name,
-        srcs = [":" + launcher_name],
-        data = data + [runner, src],
+        src = runner,
+        args = args + ["$(rootpath %s)" % src],
         env = env,
+        data = data + [src],
+        tools = tools,
+        resource_group = resource_group,
         size = size,
-        tags = test_tags,
+        tags = tags + ["loom-check", "msan"] + policy_tags,
         **kwargs
     )
 
@@ -282,6 +275,7 @@ def loom_check_test_suite(
         size = "small",
         tags = [],
         data = [],
+        tools = [],
         env = {},
         runner = Label("//loom/src/loom/tools/loom-check:loom-check-test"),
         test_name_prefix_to_strip = "",
@@ -298,6 +292,7 @@ def loom_check_test_suite(
       size: Test size (default: "small").
       tags: Additional tags to apply to each generated test and the suite.
       data: Additional runfiles made available to each generated test.
+      tools: External helpers built for the test execution platform.
       env: Additional test environment variables for each generated test.
       runner: loom-check compatible runner binary.
       test_name_prefix_to_strip: Optional source path prefix to remove before
@@ -319,6 +314,7 @@ def loom_check_test_suite(
             size = size,
             tags = tags,
             data = data,
+            tools = tools,
             env = env,
             runner = runner,
             **kwargs

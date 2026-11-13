@@ -27,6 +27,7 @@ from loom.target.arch.x86.contracts.float_roots import (
     scalar_float_root_rules,
     vector_float_root_rules,
 )
+from loom.target.arch.x86.contracts.float_rounding import float_rounding_rules
 from loom.target.arch.x86.contracts.floating_extrema import (
     avx2_float_extrema_rules,
 )
@@ -68,6 +69,7 @@ from loom.target.arch.x86.descriptors import X86_AVX2_DESCRIPTOR_SET
 from loom.target.arch.x86.vector_families import (
     AVX2_CARRIER_VECTOR_BIT_WIDTHS,
     AVX2_FLOAT_ROOT_FAMILIES,
+    AVX2_FLOAT_ROUNDING_FAMILIES,
     AVX2_ROOT_VECTOR_BIT_WIDTHS,
     AVX2_SCALAR_FLOAT_ROOT_FAMILIES,
 )
@@ -103,6 +105,12 @@ def _memory_rules() -> tuple[DescriptorRule, ...]:
 def _cases() -> Sequence[ContractCase]:
     return (
         *avx2_scalar_float_rules(_descriptor),
+        *float_rounding_rules(
+            _descriptor,
+            descriptor_key_prefix="x86.avx2",
+            families=AVX2_FLOAT_ROUNDING_FAMILIES,
+            vector_bit_widths=AVX2_CARRIER_VECTOR_BIT_WIDTHS,
+        ),
         *scalar_float_root_rules(
             _descriptor,
             descriptor_key_prefix="x86.avx2",

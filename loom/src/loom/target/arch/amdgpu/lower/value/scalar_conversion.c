@@ -1099,21 +1099,18 @@ static iree_status_t loom_amdgpu_lookup_and_normalize_vgpr_narrow_integer(
       context, source_op, source, &low_source));
   return loom_amdgpu_normalize_narrow_integer(
       context, source_op, low_source, source_bit_count, source_representation,
-      required_representation, out_low_source);
+      required_representation,
+      loom_module_value_type(loom_low_lower_context_module(context),
+                             low_source),
+      out_low_source);
 }
 
-static iree_status_t loom_amdgpu_lookup_scalar_conversion_source_for_i64_result(
+static iree_status_t loom_amdgpu_lookup_scalar_conversion_integer_source(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_amdgpu_scalar_conversion_plan_t* plan, loom_type_t result_type,
     loom_low_representation_id_t required_representation,
     loom_value_id_t* out_low_source) {
   *out_low_source = LOOM_VALUE_ID_INVALID;
-  if (!loom_low_type_is_register(result_type) ||
-      loom_low_register_type_unit_count(result_type) != 2) {
-    IREE_ASSERT_UNREACHABLE(
-        "AMDGPU scalar conversion selected a non-register i64 result");
-    IREE_BUILTIN_UNREACHABLE();
-  }
   const bool result_is_vgpr = loom_amdgpu_low_type_is_register_class(
       context, result_type, LOOM_AMDGPU_REG_CLASS_ID_VGPR);
   if (result_is_vgpr) {
@@ -1131,7 +1128,7 @@ static iree_status_t loom_amdgpu_lookup_scalar_conversion_source_for_i64_result(
       context, result_type, LOOM_AMDGPU_REG_CLASS_ID_SGPR);
   if (!result_is_sgpr) {
     IREE_ASSERT_UNREACHABLE(
-        "AMDGPU scalar conversion selected an unsupported i64 register class");
+        "AMDGPU scalar conversion selected an unsupported register class");
     IREE_BUILTIN_UNREACHABLE();
   }
 
@@ -1143,14 +1140,15 @@ static iree_status_t loom_amdgpu_lookup_scalar_conversion_source_for_i64_result(
       context, source_type, LOOM_AMDGPU_REG_CLASS_ID_SGPR);
   if (!source_is_sgpr || loom_low_register_type_unit_count(source_type) != 1) {
     IREE_ASSERT_UNREACHABLE(
-        "AMDGPU scalar conversion selected an SGPR i64 result from a "
+        "AMDGPU scalar conversion selected an SGPR result from a "
         "non-SGPR source");
     IREE_BUILTIN_UNREACHABLE();
   }
   if (plan->source_bit_count < 32) {
     return loom_amdgpu_normalize_narrow_integer(
         context, source_op, *out_low_source, plan->source_bit_count,
-        plan->narrow_representation, required_representation, out_low_source);
+        plan->narrow_representation, required_representation, source_type,
+        out_low_source);
   }
   return iree_ok_status();
 }
@@ -1418,7 +1416,7 @@ iree_status_t loom_amdgpu_lower_scalar_conversion(
       IREE_RETURN_IF_ERROR(loom_amdgpu_normalize_narrow_integer(
           context, source_op, low_source, plan->result_bit_count,
           LOOM_AMDGPU_NARROW_INTEGER_REPRESENTATION_LOW_BITS,
-          plan->narrow_representation, &low_result));
+          plan->narrow_representation, result_type, &low_result));
       return loom_low_lower_bind_value(context, plan->result, low_result);
     }
     case LOOM_AMDGPU_SCALAR_CONVERSION_KIND_NARROW_RESULT_LOW_32: {
@@ -1429,25 +1427,23 @@ iree_status_t loom_amdgpu_lower_scalar_conversion(
       IREE_RETURN_IF_ERROR(loom_amdgpu_normalize_narrow_integer(
           context, source_op, low_source, plan->result_bit_count,
           LOOM_AMDGPU_NARROW_INTEGER_REPRESENTATION_LOW_BITS,
-          plan->narrow_representation, &low_result));
+          plan->narrow_representation, result_type, &low_result));
       return loom_low_lower_bind_value(context, plan->result, low_result);
     }
     case LOOM_AMDGPU_SCALAR_CONVERSION_KIND_SIGN_EXTEND: {
       loom_value_id_t low_result = LOOM_VALUE_ID_INVALID;
-      IREE_RETURN_IF_ERROR(loom_amdgpu_lookup_and_normalize_vgpr_narrow_integer(
-          context, source_op, plan->source, plan->source_bit_count,
-          plan->narrow_representation,
+      IREE_RETURN_IF_ERROR(loom_amdgpu_lookup_scalar_conversion_integer_source(
+          context, source_op, plan, result_type,
           LOOM_AMDGPU_NARROW_INTEGER_REPRESENTATION_SIGN_EXTENDED,
           &low_result));
       return loom_low_lower_bind_value(context, plan->result, low_result);
     }
     case LOOM_AMDGPU_SCALAR_CONVERSION_KIND_SIGN_EXTEND_I64: {
       loom_value_id_t low_source = LOOM_VALUE_ID_INVALID;
-      IREE_RETURN_IF_ERROR(
-          loom_amdgpu_lookup_scalar_conversion_source_for_i64_result(
-              context, source_op, plan, result_type,
-              LOOM_AMDGPU_NARROW_INTEGER_REPRESENTATION_SIGN_EXTENDED,
-              &low_source));
+      IREE_RETURN_IF_ERROR(loom_amdgpu_lookup_scalar_conversion_integer_source(
+          context, source_op, plan, result_type,
+          LOOM_AMDGPU_NARROW_INTEGER_REPRESENTATION_SIGN_EXTENDED,
+          &low_source));
       loom_value_id_t low_result = LOOM_VALUE_ID_INVALID;
       IREE_RETURN_IF_ERROR(loom_amdgpu_emit_i64_from_i32(
           context, source_op, low_source, &low_result));
@@ -1455,20 +1451,10 @@ iree_status_t loom_amdgpu_lower_scalar_conversion(
     }
     case LOOM_AMDGPU_SCALAR_CONVERSION_KIND_ZERO_EXTEND: {
       loom_value_id_t low_source = LOOM_VALUE_ID_INVALID;
-      if (plan->result_bit_count == 64) {
-        IREE_RETURN_IF_ERROR(
-            loom_amdgpu_lookup_scalar_conversion_source_for_i64_result(
-                context, source_op, plan, result_type,
-                LOOM_AMDGPU_NARROW_INTEGER_REPRESENTATION_ZERO_EXTENDED,
-                &low_source));
-      } else {
-        IREE_RETURN_IF_ERROR(
-            loom_amdgpu_lookup_and_normalize_vgpr_narrow_integer(
-                context, source_op, plan->source, plan->source_bit_count,
-                plan->narrow_representation,
-                LOOM_AMDGPU_NARROW_INTEGER_REPRESENTATION_ZERO_EXTENDED,
-                &low_source));
-      }
+      IREE_RETURN_IF_ERROR(loom_amdgpu_lookup_scalar_conversion_integer_source(
+          context, source_op, plan, result_type,
+          LOOM_AMDGPU_NARROW_INTEGER_REPRESENTATION_ZERO_EXTENDED,
+          &low_source));
       if (plan->result_bit_count == 64) {
         return loom_amdgpu_bind_zero_extended_i64(context, source_op,
                                                   plan->result, low_source);
@@ -1539,7 +1525,7 @@ iree_status_t loom_amdgpu_lower_scalar_conversion(
       IREE_RETURN_IF_ERROR(loom_amdgpu_normalize_narrow_integer(
           context, source_op, converted_source, plan->result_bit_count,
           LOOM_AMDGPU_NARROW_INTEGER_REPRESENTATION_LOW_BITS,
-          plan->narrow_representation, &low_result));
+          plan->narrow_representation, result_type, &low_result));
       return loom_low_lower_bind_value(context, plan->result, low_result);
     }
     case LOOM_AMDGPU_SCALAR_CONVERSION_KIND_ALIAS:

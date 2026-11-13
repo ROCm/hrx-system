@@ -18,9 +18,11 @@
 #include "loom/ops/test/ops.h"
 #include "loom/ops/vector/ops.h"
 #include "loom/pass/value_facts.h"
+#include "loom/rewrite/rewriter.h"
 #include "loom/target/facts.h"
 #include "loom/target/types.h"
 #include "loom/transforms/cleanup/configured.h"
+#include "loom/transforms/cleanup/fact_refinement.h"
 
 namespace loom {
 namespace {
@@ -729,6 +731,99 @@ TEST_F(CanonicalizerTest, FactRefinementBatchesVariadicRelations) {
               LOOM_PRED_ARG_CONST);
     EXPECT_EQ(refined_predicates.predicate_list[0].args[1], i);
   }
+}
+
+TEST_F(CanonicalizerTest, ImmediateFoldRetainsResultsAcrossRelationRefinement) {
+  constexpr uint16_t kResultCount = 2;
+  const loom_type_t index_type = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
+  loom_type_t types[kResultCount];
+  loom_value_id_t exact[kResultCount];
+  loom_value_id_t upper[kResultCount];
+  loom_predicate_t predicates[kResultCount] = {};
+  for (uint16_t i = 0; i < kResultCount; ++i) {
+    types[i] = index_type;
+    IREE_ASSERT_OK(loom_builder_define_block_arg(
+        &builder_, loom_region_entry_block(body_), index_type, &upper[i]));
+    loom_op_t* constant = nullptr;
+    IREE_ASSERT_OK(loom_index_constant_build(&builder_, loom_attr_i64(i + 7),
+                                             index_type, LOOM_LOCATION_UNKNOWN,
+                                             &constant));
+    exact[i] = loom_index_constant_result(constant);
+    predicates[i] = loom_predicate_t{
+        .kind = LOOM_PREDICATE_LT,
+        .arg_count = 2,
+        .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_VALUE,
+                     LOOM_PRED_ARG_NONE},
+        .reserved = {},
+        .args = {exact[i], upper[i], 0},
+    };
+  }
+  loom_op_t* assumption = nullptr;
+  IREE_ASSERT_OK(loom_index_assume_build(
+      &builder_, exact, kResultCount, predicates, kResultCount, types,
+      kResultCount, LOOM_LOCATION_UNKNOWN, &assumption));
+  loom_value_id_t operands[2 * kResultCount];
+  for (uint16_t i = 0; i < kResultCount; ++i) {
+    operands[2 * i] = loom_op_const_results(assumption)[i];
+    operands[2 * i + 1] = upper[i];
+  }
+  loom_op_t* use = nullptr;
+  IREE_ASSERT_OK(loom_test_use_build(&builder_, operands,
+                                     IREE_ARRAYSIZE(operands),
+                                     LOOM_LOCATION_UNKNOWN, &use));
+  loom_op_t* terminator = nullptr;
+  IREE_ASSERT_OK(loom_test_yield_build(&builder_, nullptr, 0,
+                                       LOOM_LOCATION_UNKNOWN, &terminator));
+
+  iree_arena_allocator_t arena;
+  iree_arena_initialize(&block_pool_, &arena);
+  loom_pass_value_fact_owner_t owner;
+  loom_pass_value_fact_owner_initialize(&block_pool_, &owner);
+  loom_value_fact_table_t* facts = nullptr;
+  IREE_ASSERT_OK(loom_pass_value_fact_owner_acquire(
+      &owner, module_, loom_pass_value_fact_scope_function(func_like_),
+      &facts));
+  ASSERT_TRUE(loom_value_fact_table_has_pending_exact_relations(facts));
+  loom_rewriter_t rewriter;
+  loom_rewriter_initialize(&rewriter, module_, &arena);
+  loom_rewriter_attach_value_facts(&rewriter, facts);
+  rewriter.constant_materializer = {
+      .supports = loom_value_facts_can_materialize_constant,
+      .materialize = loom_constant_build,
+  };
+  rewriter.pending_exact_relations_callback = {
+      .user_data = const_cast<loom_fact_refinement_policy_t*>(
+          loom_cleanup_configured_pattern_provider_set()
+              ->fact_refinement_policy),
+      .fn =
+          [](void* user_data, loom_rewriter_t* rewriter) {
+            return loom_fact_refinement_preserve_pending(
+                rewriter,
+                static_cast<const loom_fact_refinement_policy_t*>(user_data));
+          },
+  };
+
+  bool folded = false;
+  IREE_ASSERT_OK(loom_rewriter_try_fold(&rewriter, assumption, &folded));
+  EXPECT_TRUE(folded);
+  EXPECT_TRUE(assumption->flags & LOOM_OP_FLAG_DEAD);
+  IREE_ASSERT_OK(loom_rewriter_propagate_value_facts(&rewriter));
+  for (uint16_t i = 0; i < kResultCount; ++i) {
+    const loom_value_id_t value = loom_op_const_operands(use)[2 * i];
+    EXPECT_EQ(constant_value(value), i + 7);
+    const loom_value_id_t refined = loom_op_const_operands(use)[2 * i + 1];
+    const loom_op_t* refinement =
+        loom_value_def_op(loom_module_value(module_, refined));
+    ASSERT_TRUE(loom_index_assume_isa(refinement));
+    EXPECT_EQ(loom_op_const_operands(refinement)[0], upper[i]);
+    const loom_attribute_t predicate = loom_index_assume_predicates(refinement);
+    ASSERT_EQ(predicate.count, 1);
+    EXPECT_EQ(predicate.predicate_list[0].kind, LOOM_PREDICATE_GT);
+    EXPECT_EQ(predicate.predicate_list[0].args[1], i + 7);
+  }
+  loom_rewriter_deinitialize(&rewriter);
+  loom_pass_value_fact_owner_deinitialize(&owner);
+  iree_arena_deinitialize(&arena);
 }
 
 TEST_F(CanonicalizerTest, EmptyFunctionNoOps) {

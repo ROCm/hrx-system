@@ -4,8 +4,8 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// loom-link: imports sources and merges or links bytecode modules through
-// metadata-first planning and materialization.
+// loom-link: merges or links Loom modules through metadata-first planning and
+// materialization.
 
 #include <stdio.h>
 #include <string.h>
@@ -19,8 +19,7 @@
 #include "loom/tooling/cli/loomc_options.h"
 #include "loom/tooling/cli/loomc_result.h"
 #include "loom/tooling/config/input.h"
-#include "loom/tooling/input/flags.h"
-#include "loom/tooling/input/loomc_configured.h"
+#include "loom/tooling/input/loomc.h"
 #include "loom/tooling/io/file.h"
 #include "loom/tooling/io/module_format.h"
 #include "loom/util/stream.h"
@@ -33,13 +32,16 @@ IREE_FLAG(string, mode, "auto",
           "link mode when roots, root libraries, or exported input symbols "
           "are requested.");
 IREE_FLAG(string, from, "auto",
-          "Input encoding for every input: auto, text, bc, or bytecode. "
-          "Source language is selected separately with --input-format.");
+          "Loom module encoding for every input: auto, text, bc, or bytecode.");
+IREE_FLAG_NAMED(string, input_format, "input-format", "",
+                "Loom input format override: loom or loombc. Empty selects "
+                "from each filename.");
+IREE_FLAG_LIST_NAMED(string, source_prefix_map, "source-prefix-map",
+                     "Remap diagnostic filenames with old=new. Repeat for "
+                     "multiple prefixes; the last matching entry wins.");
 IREE_FLAG(string, to, "text", "Output format: text, bc, or bytecode.");
 IREE_FLAG(string, output, "-",
           "Output path. Use '-' or the empty string for stdout.");
-IREE_FLAG(bool, cleanup, true,
-          "Normalize imported C++ source modules before linking.");
 IREE_FLAG_LIST(string, root,
                "Root symbol to materialize in link mode. Repeat for "
                "multiple roots.");
@@ -266,6 +268,13 @@ static loomc_status_t loom_link_cli_create_target_environment(
   return status;
 }
 
+static loom_input_options_t loom_link_cli_input_options(void) {
+  return (loom_input_options_t){
+      .format = iree_make_cstring_view(FLAG_input_format),
+      .source_path_options = {.prefix_maps = FLAG_source_prefix_map_list()},
+  };
+}
+
 static iree_status_t loom_link_cli_check_result(const loomc_result_t* result,
                                                 const char* failure_message) {
   bool succeeded = false;
@@ -274,23 +283,6 @@ static iree_status_t loom_link_cli_check_result(const loomc_result_t* result,
   return succeeded ? iree_ok_status()
                    : iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "%s",
                                       failure_message);
-}
-
-static iree_status_t loom_link_cli_prepare_pass_program(
-    loomc_context_t* context, const char* pipeline,
-    loomc_allocator_t compiler_allocator,
-    loomc_pass_program_t** out_pass_program) {
-  loomc_result_t* result = NULL;
-  iree_status_t status =
-      iree_status_from_loomc(loomc_pass_program_create_from_pipeline_text(
-          context, loomc_make_cstring_view(pipeline), NULL, compiler_allocator,
-          out_pass_program, &result));
-  if (iree_status_is_ok(status)) {
-    status =
-        loom_link_cli_check_result(result, "cleanup pipeline creation failed");
-  }
-  loomc_result_release(result);
-  return status;
 }
 
 static void loom_link_cli_index_deinitialize(loom_link_cli_index_t* index,
@@ -310,7 +302,6 @@ loom_link_cli_release_file(void* user_data, loomc_byte_span_t contents) {
 static iree_status_t loom_link_cli_add_input(
     const loom_link_cli_input_t* input, loom_module_format_t requested_format,
     loomc_context_t* context, loomc_workspace_t* workspace,
-    bool cleanup_sources, loomc_pass_program_t** inout_source_cleanup_program,
     loomc_link_index_builder_t* builder, iree_arena_block_pool_t* block_pool,
     iree_allocator_t allocator, loomc_link_index_source_slot_t* out_slot) {
   const iree_string_view_t filename =
@@ -354,43 +345,23 @@ static iree_status_t loom_link_cli_add_input(
     }
   } else {
     loom_tooling_loomc_input_options_t admission_options = {
-        .input = loom_input_options_from_flags(),
+        .input = loom_link_cli_input_options(),
         .path = filename,
         .source = loom_tooling_file_contents_string_view(contents),
-        .import = loom_configured_input_loomc_importer(),
+        .import = NULL,
     };
     const loom_input_format_t* selected_format = NULL;
-    status = loom_input_format_select(loom_configured_input_loomc_formats(),
+    status = loom_input_format_select((loom_input_format_list_t){0},
                                       admission_options.input.format, filename,
                                       &selected_format, NULL);
     if (iree_status_is_ok(status)) {
       admission_options.input.format = selected_format->name;
       status = loom_tooling_input_admit_loomc_module(
-          &admission_options, context, workspace, block_pool, &module, &result,
-          allocator);
+          &admission_options, context, workspace, block_pool, allocator,
+          &module, &result);
     }
     if (iree_status_is_ok(status)) {
       status = loom_link_cli_check_result(result, "input has source errors");
-    }
-    const bool cleanup_source =
-        cleanup_sources && selected_format &&
-        iree_string_view_equal(selected_format->name, IREE_SV("cxx"));
-    if (iree_status_is_ok(status) && cleanup_source &&
-        !*inout_source_cleanup_program) {
-      status = loom_link_cli_prepare_pass_program(
-          context, "combine,cse,dce,location-dce", compiler_allocator,
-          inout_source_cleanup_program);
-    }
-    if (iree_status_is_ok(status) && cleanup_source) {
-      loomc_result_release(result);
-      result = NULL;
-      status = iree_status_from_loomc(
-          loomc_pass_program_run(*inout_source_cleanup_program, workspace,
-                                 module, NULL, compiler_allocator, &result));
-      if (iree_status_is_ok(status)) {
-        status =
-            loom_link_cli_check_result(result, "C++ source cleanup failed");
-      }
     }
     if (iree_status_is_ok(status)) {
       status = iree_status_from_loomc(loomc_link_index_builder_add_module(
@@ -503,10 +474,8 @@ static iree_status_t loom_link_cli_collect_inputs(
 static iree_status_t loom_link_cli_build_index(
     const loom_link_cli_input_t* inputs, iree_host_size_t input_count,
     loom_module_format_t input_format, loomc_context_t* context,
-    loomc_workspace_t* workspace, bool cleanup_sources,
-    loomc_pass_program_t** inout_source_cleanup_program,
-    iree_arena_block_pool_t* block_pool, iree_allocator_t allocator,
-    loom_link_cli_index_t* out_index) {
+    loomc_workspace_t* workspace, iree_arena_block_pool_t* block_pool,
+    iree_allocator_t allocator, loom_link_cli_index_t* out_index) {
   *out_index = (loom_link_cli_index_t){0};
   loomc_link_index_builder_t* builder = NULL;
   IREE_RETURN_IF_ERROR(iree_status_from_loomc(loomc_link_index_builder_allocate(
@@ -531,9 +500,9 @@ static iree_status_t loom_link_cli_build_index(
   for (iree_host_size_t i = 0; i < input_count && iree_status_is_ok(status);
        ++i) {
     loomc_link_index_source_slot_t slot = {0};
-    status = loom_link_cli_add_input(
-        &inputs[i], input_format, context, workspace, cleanup_sources,
-        inout_source_cleanup_program, builder, block_pool, allocator, &slot);
+    status =
+        loom_link_cli_add_input(&inputs[i], input_format, context, workspace,
+                                builder, block_pool, allocator, &slot);
     if (iree_status_is_ok(status) &&
         loom_link_cli_input_is_direct_dependency(&inputs[i])) {
       out_index->direct_providers.values[out_index->direct_providers.count++] =
@@ -721,8 +690,7 @@ static void loom_link_cli_print_agents_markdown(FILE* stream) {
       stream,
       "## loom-link\n"
       "\n"
-      "`loom-link` imports source and combines bytecode modules, applies "
-      "config\n"
+      "`loom-link` combines Loom text and bytecode modules, applies config\n"
       "bindings to materialized modules, and selects the symbols that should "
       "be\n"
       "kept in a merged library or reachable runtime artifact.\n"
@@ -757,13 +725,10 @@ static void loom_link_cli_print_agents_markdown(FILE* stream) {
       "equally available to link mode, but does not own a direct dependency\n"
       "during strict dependency analysis. `--from=auto|text|bc` "
       "controls\n"
-      "input encoding and `--to=text|bc` controls output encoding. Source\n"
-      "languages are selected by filename or `--input-format=loom|cxx`.\n"
-      "Optional importers must be enabled in the build. Provider options use\n"
-      "`--input-options=\"cxx:std=c++20 I=include\"`; relative headers "
-      "resolve\n"
-      "from the physical input path. `--source-prefix-map=old=new` changes\n"
-      "diagnostic filenames without changing header lookup.\n"
+      "input encoding and `--to=text|bc` controls output encoding. Inputs\n"
+      "must be Loom text or bytecode; import source languages with their\n"
+      "own frontend, such as `loom-import-cxx`, before linking.\n"
+      "`--source-prefix-map=old=new` changes diagnostic filenames.\n"
       "\n"
       "### Merge and link\n"
       "\n"
@@ -778,8 +743,6 @@ static void loom_link_cli_print_agents_markdown(FILE* stream) {
       "re-export\n"
       "it through the requester. Select it as a root when it is also an "
       "output.\n"
-      "C++ source modules receive the same target-aware normalization as\n"
-      "`loom-import-cxx`; `--cleanup=false` preserves their imported form.\n"
       "`--strip-check` removes symbols marked as test/benchmark-only from\n"
       "runtime artifacts.\n"
       "\n"
@@ -825,7 +788,7 @@ static void loom_link_cli_print_agents_markdown(FILE* stream) {
 int main(int argc, char** argv) {
   iree_flags_set_usage(
       "loom-link",
-      "Imports source and links bytecode modules into one Loom module.\n"
+      "Links Loom text and bytecode modules into one Loom module.\n"
       "\n"
       "Usage:\n"
       "  loom-link [--mode=merge|link] [--from=auto|text|bc] "
@@ -874,7 +837,6 @@ int main(int argc, char** argv) {
   loomc_workspace_t* workspace = NULL;
   loomc_linker_t* linker = NULL;
   loomc_module_t* linked_module = NULL;
-  loomc_pass_program_t* source_cleanup_program = NULL;
   loomc_result_t* result = NULL;
   loom_config_text_binding_set_t config_set;
   loom_config_text_binding_set_initialize(allocator, &config_set);
@@ -984,9 +946,9 @@ int main(int argc, char** argv) {
                                           &input_count);
   }
   if (iree_status_is_ok(status)) {
-    status = loom_link_cli_build_index(
-        inputs, input_count, input_format, context, workspace, FLAG_cleanup,
-        &source_cleanup_program, &block_pool, allocator, &link_index);
+    status = loom_link_cli_build_index(inputs, input_count, input_format,
+                                       context, workspace, &block_pool,
+                                       allocator, &link_index);
   }
   if (iree_status_is_ok(status) && dependency_analysis_requested) {
     iree_string_view_t component_name = requested_dependency_component;
@@ -1113,7 +1075,6 @@ int main(int argc, char** argv) {
     exit_code = 1;
   }
   loomc_result_release(result);
-  loomc_pass_program_release(source_cleanup_program);
   loomc_module_release(linked_module);
   loomc_linker_release(linker);
   loom_link_cli_index_deinitialize(&link_index, allocator);

@@ -325,7 +325,7 @@ TEST(Aie2pTileLinkTest, RelocatesMovxmInsideAMultiSlotBundle) {
   iree_arena_initialize(&block_pool, &arena);
   loom_native_section_contribution_assembly_t assembly = {};
   IREE_ASSERT_OK(loom_native_assemble_section_contributions(
-      object.sections, object.section_count, &assembly, &arena));
+      object.sections, object.section_count, &arena, &assembly));
   ASSERT_EQ(assembly.section_count, 2u);
   assembly.sections[0].address = 0;
   assembly.sections[1].address = 0x70000;
@@ -432,7 +432,7 @@ TEST(Aie2pTileLinkTest, RelocatesMovxmToExecutableCodeAddress) {
   iree_arena_initialize(&block_pool, &arena);
   loom_native_section_contribution_assembly_t assembly = {};
   IREE_ASSERT_OK(loom_native_assemble_section_contributions(
-      object.sections, object.section_count, &assembly, &arena));
+      object.sections, object.section_count, &arena, &assembly));
   ASSERT_EQ(assembly.section_count, 1u);
   assembly.sections[0].address = 0x1000;
   IREE_ASSERT_OK(

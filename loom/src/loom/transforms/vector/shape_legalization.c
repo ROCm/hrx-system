@@ -265,6 +265,14 @@ static iree_status_t loom_vector_static_shape_extract_rewrite(
   IREE_RETURN_IF_ERROR(loom_vector_static_shape_restore_result(
       context, op, flat_result, flat_result_type, result_type,
       value_checkpoint));
+  // Publish the linear access with its original producer exposed. A load may
+  // already have restored this shape during eager legalization; leaving the
+  // inverse casts for a later worklist visit lets a packet consumer scalarize
+  // before it can see that load. Replacing the extraction first also releases
+  // the old shape alias so the canonicalizer can retire it immediately.
+  loom_op_t* flatten_op =
+      loom_rewriter_value_defining_op(rewriter, flat_source);
+  IREE_RETURN_IF_ERROR(loom_vector_bitcast_canonicalize(flatten_op, rewriter));
   *out_rewritten = true;
   return iree_ok_status();
 }

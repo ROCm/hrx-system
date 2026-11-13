@@ -1787,12 +1787,12 @@ static void iree_hal_tlsf_pool_acquire_progress(
     iree_atomic_store(&acquire->parent.pending, 2, iree_memory_order_relaxed);
     iree_status_t status = iree_hal_pool_acquire_reservations(
         pool->backing_pool, 1, &acquire->parent.request, acquire->call.frontier,
-        &acquire->parent.reservation, &acquire->parent.info,
         (iree_hal_pool_acquire_callback_t){
             .fn = iree_hal_tlsf_pool_acquire_parent_complete,
             .user_data = acquire,
         },
-        acquire->call.flags);
+        acquire->call.flags, &acquire->parent.reservation,
+        &acquire->parent.info);
     if (!iree_status_is_ok(status)) {
       iree_hal_tlsf_pool_acquire_parent_complete(acquire, status,
                                                  IREE_HAL_POOL_ACQUIRE_NONE);
@@ -1809,10 +1809,10 @@ static iree_status_t iree_hal_tlsf_pool_acquire_reservations(
     iree_hal_pool_t* base_pool, iree_host_size_t request_count,
     const iree_hal_pool_reservation_request_t* requests,
     const iree_async_frontier_t* requester_frontier,
-    iree_hal_pool_reservation_t* out_reservations,
-    iree_hal_pool_acquire_info_t* out_infos,
     iree_hal_pool_acquire_callback_t completion,
-    iree_hal_pool_reserve_flags_t flags) {
+    iree_hal_pool_reserve_flags_t flags,
+    iree_hal_pool_reservation_t* out_reservations,
+    iree_hal_pool_acquire_info_t* out_infos) {
   iree_hal_tlsf_pool_t* pool = (iree_hal_tlsf_pool_t*)base_pool;
   iree_hal_tlsf_pool_acquire_element_t
       inline_elements[IREE_HAL_TLSF_POOL_INLINE_TRANSACTION_CAPACITY];

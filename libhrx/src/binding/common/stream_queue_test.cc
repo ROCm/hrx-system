@@ -81,15 +81,25 @@ static void PauseFinalObserverFinish(void* user_data) {
 
 class StreamValueWaitObserverTest : public ::testing::Test {
  protected:
+  // Owns the task device and its runtime through fixture cleanup.
+  hrx_device_group_t group_ = nullptr;
+
   void SetUp() override {
-    IREE_ASSERT_OK(HRX_CALL(hrx_cpu_initialize(/*flags=*/0)));
-    hrx_device_t hrx_device = nullptr;
-    IREE_ASSERT_OK(HRX_CALL(hrx_cpu_device_get(/*index=*/0, &hrx_device)));
+    hrx_runtime_t runtime = nullptr;
+    IREE_ASSERT_OK(HRX_CALL(
+        hrx_runtime_create(nullptr, hrx_host_allocator_system(), &runtime)));
+    const hrx_device_create_params_t params = {.uri = "task://"};
+    hrx_status_t status = hrx_device_group_create(runtime, 1, &params, &group_);
+    hrx_runtime_release(runtime);
+    IREE_ASSERT_OK(HRX_CALL(status));
+    hrx_device_t hrx_device = hrx_device_group_get_device(group_, 0);
     device_ = hrx_device_hal(hrx_device);
     ASSERT_NE(nullptr, device_);
     primary_queue_ = iree_hal_device_queue(device_, /*family_ordinal=*/0,
                                            /*queue_ordinal=*/0);
     ASSERT_NE(nullptr, primary_queue_);
+    device_entry_.hrx_device = hrx_device;
+    context_.device_entry = &device_entry_;
     context_.device = device_;
     context_.host_allocator = iree_allocator_system();
     iree_hal_streaming_value_wait_lanes_initialize(&context_);
@@ -100,7 +110,8 @@ class StreamValueWaitObserverTest : public ::testing::Test {
     if (context_initialized_) {
       iree_hal_streaming_value_wait_lanes_deinitialize(&context_);
     }
-    IREE_EXPECT_OK(HRX_CALL(hrx_cpu_shutdown()));
+    hrx_device_group_release(group_);
+    group_ = nullptr;
   }
 
   iree_hal_streaming_value_wait_lane_t* CreateLane() {
@@ -178,6 +189,8 @@ class StreamValueWaitObserverTest : public ::testing::Test {
         &condition, iree_infinite_timeout()));
   }
 
+  // Frontend device owner, borrowed by the context for runtime services.
+  iree_hal_streaming_device_t device_entry_ = {};
   iree_hal_streaming_context_t context_ = {};
   iree_hal_device_t* device_ = nullptr;
   iree_hal_queue_t* primary_queue_ = nullptr;
@@ -439,10 +452,18 @@ TEST_F(StreamValueWaitObserverTest,
 
 class StreamQueueLeaseTest : public ::testing::Test {
  protected:
+  // Owns the task device and its runtime through fixture cleanup.
+  hrx_device_group_t group_ = nullptr;
+
   void SetUp() override {
-    IREE_ASSERT_OK(HRX_CALL(hrx_cpu_initialize(0)));
-    hrx_device_t device = nullptr;
-    IREE_ASSERT_OK(HRX_CALL(hrx_cpu_device_get(0, &device)));
+    hrx_runtime_t runtime = nullptr;
+    IREE_ASSERT_OK(HRX_CALL(
+        hrx_runtime_create(nullptr, hrx_host_allocator_system(), &runtime)));
+    const hrx_device_create_params_t params = {.uri = "task://"};
+    hrx_status_t status = hrx_device_group_create(runtime, 1, &params, &group_);
+    hrx_runtime_release(runtime);
+    IREE_ASSERT_OK(HRX_CALL(status));
+    hrx_device_t device = hrx_device_group_get_device(group_, 0);
     device_entry_.hrx_device = device;
     device_entry_.hal_device = hrx_device_hal(device);
     iree_slim_mutex_initialize(&device_entry_.primary_context_mutex);
@@ -480,7 +501,8 @@ class StreamQueueLeaseTest : public ::testing::Test {
     iree_arena_block_pool_deinitialize(&device_entry_.block_pool);
     iree_slim_mutex_deinitialize(&device_entry_.graph_memory_mutex);
     iree_slim_mutex_deinitialize(&device_entry_.primary_context_mutex);
-    IREE_EXPECT_OK(HRX_CALL(hrx_cpu_shutdown()));
+    hrx_device_group_release(group_);
+    group_ = nullptr;
   }
 
   iree_hal_streaming_stream_t* CreateStream() {
@@ -583,6 +605,41 @@ TEST_F(StreamQueueLeaseTest, OrdinaryWorkDoesNotAllocateACompletionObserver) {
   EXPECT_EQ(stream->queue, observed_queue_.load(std::memory_order_acquire));
   EXPECT_EQ(nullptr, stream->value_wait_lane);
   EXPECT_EQ(0u, context_->peak_value_wait_submission_count);
+}
+
+TEST_F(StreamQueueLeaseTest, UntimedEventDoesNotExtendAcceptedLease) {
+  auto* stream = CreateStream();
+  auto* gate = CreateGate();
+  ASSERT_NE(nullptr, stream);
+  ASSERT_NE(nullptr, gate);
+  IREE_ASSERT_OK(StartLease(stream, gate));
+  ASSERT_EQ(1u, stream->pending_value);
+  iree_hal_streaming_event_t* event = nullptr;
+  IREE_ASSERT_OK(iree_hal_streaming_event_create(
+      context_, IREE_HAL_STREAMING_EVENT_FLAG_DISABLE_TIMING,
+      iree_allocator_system(), &event));
+  events_.push_back(event);
+
+  for (int i = 0; i < 4; ++i) {
+    IREE_ASSERT_OK(iree_hal_streaming_event_record(
+        event, stream, /*capture_external_record=*/false));
+    iree_hal_streaming_recorded_point_t point = {};
+    iree_hal_streaming_event_acquire_recorded_point(event, &point);
+    EXPECT_EQ(stream->timeline_semaphore, point.semaphore);
+    EXPECT_EQ(1u, point.value);
+    EXPECT_EQ(1u, stream->pending_value);
+    EXPECT_TRUE(point.requires_independent_queue);
+    iree_hal_streaming_event_release_recorded_point(&point);
+    iree_slim_mutex_lock(&context_->value_wait_lane_mutex);
+    EXPECT_EQ(1u, context_->peak_value_wait_submission_count);
+    EXPECT_EQ(1, iree_atomic_load(&context_->active_value_wait_observer_count,
+                                  iree_memory_order_acquire));
+    iree_slim_mutex_unlock(&context_->value_wait_lane_mutex);
+  }
+
+  IREE_ASSERT_OK(iree_hal_semaphore_signal(gate, 1, nullptr));
+  IREE_ASSERT_OK(iree_hal_streaming_event_synchronize(event));
+  AwaitObserverCount(0);
 }
 
 TEST_F(StreamQueueLeaseTest,
@@ -784,9 +841,15 @@ TEST_F(StreamQueueLeaseTest, GraphLaunchExtendsTheAcceptedStreamLease) {
   std::unique_ptr<iree_hal_streaming_graph_t,
                   decltype(&iree_hal_streaming_graph_release)>
       owned_graph(graph, iree_hal_streaming_graph_release);
+  iree_hal_streaming_event_t* event = nullptr;
+  IREE_ASSERT_OK(iree_hal_streaming_event_create(
+      context_, IREE_HAL_STREAMING_EVENT_FLAG_DISABLE_TIMING,
+      iree_allocator_system(), &event));
+  events_.push_back(event);
   iree_hal_streaming_graph_node_t* node = nullptr;
-  IREE_ASSERT_OK(
-      iree_hal_streaming_graph_add_empty_node(graph, nullptr, 0, &node));
+  IREE_ASSERT_OK(iree_hal_streaming_graph_add_event_node(
+      graph, nullptr, 0, IREE_HAL_STREAMING_GRAPH_NODE_TYPE_EVENT_RECORD, event,
+      &node));
   iree_hal_streaming_graph_exec_t* exec = nullptr;
   IREE_ASSERT_OK(iree_hal_streaming_graph_instantiate(
       graph, IREE_HAL_STREAMING_GRAPH_INSTANTIATE_FLAG_NONE, &exec));

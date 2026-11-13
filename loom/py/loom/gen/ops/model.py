@@ -12,7 +12,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from loom.dsl import EncodingFamilyDef, Op, ParameterizedAttrDef
+from loom.dsl import EncodingFamilyDef, EnumDef, Op, ParameterizedAttrDef
 
 
 @dataclass(frozen=True)
@@ -35,6 +35,8 @@ class GenerationModel:
 
     dialects: list[DialectGeneration]
     types: list[Any]
+    # Model-owned enums emitted into standalone public C headers.
+    generated_enums: tuple[EnumDef, ...] = ()
 
 
 DialectGenerationLoader = Callable[[], DialectGeneration]
@@ -223,6 +225,18 @@ def _load_config_generation() -> DialectGeneration:
     return DialectGeneration(config_ops, list(ALL_CONFIG_OPS), None)
 
 
+def _load_type_generation() -> DialectGeneration:
+    from loom.dialect.type import ALL_TYPE_OPS, type_ops
+
+    return DialectGeneration(type_ops, list(ALL_TYPE_OPS), None)
+
+
+def _load_ref_generation() -> DialectGeneration:
+    from loom.dialect.ref import ALL_REF_OPS, ref_ops
+
+    return DialectGeneration(ref_ops, list(ALL_REF_OPS), None)
+
+
 def _load_sanitizer_generation() -> DialectGeneration:
     from loom.dialect.sanitizer import ALL_SANITIZER_OPS, sanitizer_ops
 
@@ -302,6 +316,8 @@ _DIALECT_GENERATION_LOADERS: tuple[tuple[str, DialectGenerationLoader], ...] = (
     ("template", _load_template_generation),
     ("pass", _load_pass_generation),
     ("config", _load_config_generation),
+    ("type", _load_type_generation),
+    ("ref", _load_ref_generation),
     ("sanitizer", _load_sanitizer_generation),
     ("amdgpu", _load_amdgpu_generation),
     ("aie2p", _load_aie2p_generation),
@@ -337,9 +353,12 @@ def _load_core_types() -> list[Any]:
 
 def load_generation_model() -> GenerationModel:
     """Loads all canonical Python DSL declarations."""
+    from loom.dialect.combining import CombiningKind
+
     return GenerationModel(
         dialects=[loader() for _, loader in _DIALECT_GENERATION_LOADERS],
         types=_load_core_types(),
+        generated_enums=(CombiningKind,),
     )
 
 

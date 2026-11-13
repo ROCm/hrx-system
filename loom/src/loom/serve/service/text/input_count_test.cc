@@ -41,17 +41,18 @@ class InputCountTest : public SourceTextServiceTest {
   void TearDown() override {
     if (service_) {
       AdvanceUntil(
-          interface_, [&] { return Idle(); }, LOOM_SERVE_SERVICE_FLAG_STOPPING);
-      interface_.set_observer(interface_.self, {});
+          interface_, [&] { return Idle(); },
+          LOOM_RUNTIME_SERVICE_FLAG_STOPPING);
+      interface_.runtime.vtable->set_observer(interface_.runtime.self, {});
       loom_serve_text_service_free(service_, IREE_STATUS_OK);
     }
     SourceTextServiceTest::TearDown();
   }
 
   bool Idle() const {
-    return !interface_.is_pending(interface_.self) &&
-           !interface_.is_active(interface_.self) &&
-           !interface_.snapshot(interface_.self).queued_requests;
+    return !interface_.runtime.vtable->is_pending(interface_.runtime.self) &&
+           !interface_.runtime.vtable->is_active(interface_.runtime.self) &&
+           !interface_.snapshot(interface_.runtime.self).queued_requests;
   }
 
   std::string Count(const std::string& body, const std::string& headers = "") {
@@ -136,10 +137,10 @@ TEST_F(InputCountTest, CountingProgressesWithEveryExecutionRowOccupied) {
   loom_serve_http_connection_t* connection = nullptr;
   ASSERT_NO_FATAL_FAILURE(AcceptLoopback(interface_, &connection));
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface_, [&] {
-    const auto snapshot = interface_.snapshot(interface_.self);
+    const auto snapshot = interface_.snapshot(interface_.runtime.self);
     return snapshot.active_requests == 1 &&
            std::string(snapshot.phase) == "idle" &&
-           !interface_.is_pending(interface_.self);
+           !interface_.runtime.vtable->is_pending(interface_.runtime.self);
   }));
   const auto before = loom_serve_text_model_pool_usage(model_);
   const uint64_t outputs = interface_.telemetry.counters->output_tokens;
@@ -150,7 +151,7 @@ TEST_F(InputCountTest, CountingProgressesWithEveryExecutionRowOccupied) {
   }));
   EXPECT_NE(Read(client).find("\r\n\r\n{\"input_tokens\":3}"),
             std::string::npos);
-  EXPECT_EQ(interface_.snapshot(interface_.self).active_requests, 1u);
+  EXPECT_EQ(interface_.snapshot(interface_.runtime.self).active_requests, 1u);
   const auto after = loom_serve_text_model_pool_usage(model_);
   EXPECT_EQ(after.available, before.available);
   EXPECT_EQ(after.pending, before.pending);
@@ -167,23 +168,24 @@ TEST_F(InputCountTest, StopJoinsBorrowedHeadAndCancelsQueuedQueries) {
   IREE_ASSERT_OK(http_.TakeRequest(first, &connections[0], &requests[0]));
   const int second = Send(body, "", kInputTokens);
   IREE_ASSERT_OK(http_.TakeRequest(second, &connections[1], &requests[1]));
-  OwnerTurn::Run(loom_serve_host_executor(host_), [&] {
+  OwnerTurn::Run(loom_runtime_host_executor(host_), [&] {
     for (size_t i = 0; i < 2; ++i) {
-      IREE_ASSERT_OK(
-          interface_.accept(interface_.self, connections[i], requests[i], 0));
+      IREE_ASSERT_OK(interface_.accept(interface_.runtime.self, connections[i],
+                                       requests[i], 0));
     }
     // The sole worker is still running this owner turn, so the first query
     // cannot have released its CPU loan. Stopping may cancel only the tail.
     bool progress = false;
-    IREE_ASSERT_OK(interface_.advance(
-        interface_.self, LOOM_SERVE_SERVICE_FLAG_STOPPING, &progress));
+    IREE_ASSERT_OK(interface_.runtime.vtable->advance(
+        interface_.runtime.self, LOOM_RUNTIME_SERVICE_FLAG_STOPPING,
+        &progress));
     EXPECT_TRUE(progress);
-    EXPECT_TRUE(interface_.is_pending(interface_.self));
+    EXPECT_TRUE(interface_.runtime.vtable->is_pending(interface_.runtime.self));
     EXPECT_EQ(interface_.telemetry.counters->cancelled, 1u);
-    EXPECT_EQ(interface_.snapshot(interface_.self).active_requests, 1u);
+    EXPECT_EQ(interface_.snapshot(interface_.runtime.self).active_requests, 1u);
   });
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil(
-      interface_, [&] { return Idle(); }, LOOM_SERVE_SERVICE_FLAG_STOPPING));
+      interface_, [&] { return Idle(); }, LOOM_RUNTIME_SERVICE_FLAG_STOPPING));
   EXPECT_EQ(interface_.telemetry.counters->cancelled, 2u);
   EXPECT_EQ(interface_.telemetry.counters->completed, 0u);
   EXPECT_TRUE(Read(first, true).empty());
@@ -201,13 +203,13 @@ TEST_F(InputCountTest, FullQueueRejectsWithoutDisturbingAcceptedQueries) {
     IREE_ASSERT_OK(
         http_.TakeRequest(clients[i], &connections[i], &requests[i]));
   }
-  OwnerTurn::Run(loom_serve_host_executor(host_), [&] {
+  OwnerTurn::Run(loom_runtime_host_executor(host_), [&] {
     for (size_t i = 0; i < 3; ++i) {
-      IREE_ASSERT_OK(
-          interface_.accept(interface_.self, connections[i], requests[i], 0));
+      IREE_ASSERT_OK(interface_.accept(interface_.runtime.self, connections[i],
+                                       requests[i], 0));
     }
-    EXPECT_EQ(interface_.snapshot(interface_.self).queued_requests, 1u);
-    EXPECT_EQ(interface_.snapshot(interface_.self).active_requests, 1u);
+    EXPECT_EQ(interface_.snapshot(interface_.runtime.self).queued_requests, 1u);
+    EXPECT_EQ(interface_.snapshot(interface_.runtime.self).active_requests, 1u);
     EXPECT_EQ(interface_.telemetry.counters->rejected, 1u);
   });
   EXPECT_EQ(Read(clients[2]).find("HTTP/1.1 503"), 0u);
@@ -229,10 +231,10 @@ TEST_F(InputCountTest, DisconnectRetiresTheHeadBeforeReusingItsClaim) {
   IREE_ASSERT_OK(http_.TakeRequest(first, &connections[0], &requests[0]));
   const int second = Send(Request(Message("user", "bax")), "", kInputTokens);
   IREE_ASSERT_OK(http_.TakeRequest(second, &connections[1], &requests[1]));
-  OwnerTurn::Run(loom_serve_host_executor(host_), [&] {
+  OwnerTurn::Run(loom_runtime_host_executor(host_), [&] {
     for (size_t i = 0; i < 2; ++i) {
-      IREE_ASSERT_OK(
-          interface_.accept(interface_.self, connections[i], requests[i], 0));
+      IREE_ASSERT_OK(interface_.accept(interface_.runtime.self, connections[i],
+                                       requests[i], 0));
     }
   });
   const linger reset = {1, 0};

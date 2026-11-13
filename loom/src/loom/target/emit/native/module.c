@@ -284,7 +284,7 @@ IREE_ATTRIBUTE_NOINLINE static iree_status_t loom_native_module_report_function(
     iree_arena_allocator_t* function_arena, iree_io_stream_t* stream,
     bool* out_accepted) {
   loom_target_compile_report_t report;
-  loom_target_compile_report_initialize(&report, request->allocator);
+  loom_target_compile_report_initialize(request->allocator, &report);
   report.requested_detail_flags =
       request->compile_report->requested_detail_flags;
   report.lowered_symbol = entry->func_name;

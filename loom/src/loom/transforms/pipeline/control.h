@@ -21,16 +21,42 @@ typedef struct loom_pipeline_control_callback_t {
   // Registers an ordinary helper in this engine's admitted execution context.
   iree_status_t (*function)(void* user_data, iree_host_size_t engine,
                             loom_func_like_t function);
+  // Prepares an autonomous worker before this invocation's instruction work.
+  // Captures are the actual source operands in the original worker formal
+  // order, projected into this engine. Preparation cannot await its consumers.
+  // The selected instruction owner starts and retires the resulting work.
+  iree_status_t (*prepare_worker)(void* user_data, loom_builder_t* builder,
+                                  iree_host_size_t worker,
+                                  loom_value_slice_t captures);
   // Emits before or after a child's local call. scope is NULL for concurrent
   // construction. A serial boundary executes on every engine participating in
   // scope, including engines with no work in this particular child. A NULL
   // child orders a nested serial scope against its enclosing scope. The after
-  // boundary establishes complete retirement before control advances.
+  // boundary establishes complete retirement before control advances. state
+  // contains the additional runtime operands in options.state_types order,
+  // as passed to the surrounding projected invocation.
   iree_status_t (*boundary)(void* user_data, loom_builder_t* builder,
                             iree_host_size_t engine,
                             const loom_pipeline_invocation_schedule_t* scope,
                             const loom_pipeline_invocation_t* child,
-                            bool before);
+                            bool before, const loom_value_id_t* state);
+  // Acquires one logical record on the selected reader. A valid payload view
+  // places the retained read body on this engine; INVALID selects a receiver.
+  // State values are this projected call's invocation-private arguments, in
+  // the same order as options.state_types.
+  iree_status_t (*collective_begin)(
+      void* user_data, loom_builder_t* builder, iree_host_size_t engine,
+      const loom_pipeline_invocation_schedule_t* scope,
+      const loom_pipeline_collective_t* collective,
+      const loom_value_id_t* state_arguments, loom_type_t payload_type,
+      loom_value_id_t* out_payload);
+  // Distributes the reader's values, joins all participants, and returns the
+  // record's credit. Receivers supply INVALID input values. Every output is
+  // an actual value in this engine's execution domain, never an address alias.
+  iree_status_t (*collective_end)(
+      void* user_data, loom_builder_t* builder, iree_host_size_t engine,
+      const loom_pipeline_invocation_schedule_t* scope,
+      const loom_pipeline_collective_t* collective, loom_value_id_t* values);
   // Borrowed selected physical execution state.
   void* user_data;
 } loom_pipeline_control_callback_t;
@@ -38,10 +64,14 @@ typedef struct loom_pipeline_control_callback_t {
 typedef struct loom_pipeline_control_options_t {
   // Selected engine per worker; IREE_HOST_SIZE_MAX excludes autonomous work.
   const iree_host_size_t* worker_engines;
-  // Optional invocation-major physical boundary controllers. An autonomous
-  // child has no instruction worker, but its selected controller starts and
-  // retires it around concurrent parent work. Absent entries are SIZE_MAX.
-  const iree_host_size_t* boundary_workers;
+  // Optional engine per autonomous worker needing captured entry operands.
+  // SIZE_MAX needs no preparation. An admitted instruction participant owns
+  // each selected engine; preparation adds no independent execution context.
+  const iree_host_size_t* preparation_engines;
+  // Optional controller set per invocation. An autonomous child has no
+  // instruction worker, but its selected controller starts and retires it
+  // around concurrent parent work. Empty controller sets are NULL.
+  const loom_pipeline_participants_t* const* boundary_workers;
   // Additional invocation-private values passed through projected calls.
   // These express actual runtime state, independently of source captures.
   const loom_type_t* state_types;
@@ -72,10 +102,13 @@ typedef struct loom_pipeline_control_function_t {
 // correspondence after signature pruning. Source constructions remain
 // immutable.
 //
-// The returned table is invocation-major with execution->engine_count columns.
-// The physical owner builds each root entry and supplies its surviving runtime
-// state arguments. One root call executes the complete resident engine program;
-// the owner alone initializes state and publishes terminal completion.
+// The returned table uses execution's compact invocation/engine slots. Every
+// entry represents an actual participant; execution_index maps engine
+// identities to these slots, and execution.offsets gives each invocation's
+// ordered range. The physical owner builds each root entry and supplies its
+// surviving runtime state arguments. One root call executes the complete
+// resident engine program; the owner alone initializes state and publishes
+// terminal completion.
 iree_status_t loom_pipeline_control_materialize(
     loom_rewriter_t* rewriter, const loom_pipeline_realization_t* realization,
     const loom_pipeline_execution_t* execution,

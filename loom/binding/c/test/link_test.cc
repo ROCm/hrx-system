@@ -75,6 +75,7 @@ static iree_status_t ProjectFakeTargetProfileFacts(
 
 static const loom_target_profile_type_t kFakeTargetProfileType = {
     .name = IREE_SVL("fake-link"),
+    .storage_size = sizeof(loom_target_profile_t),
     .fact_type = &loom_test_target_fact_type,
     .project_facts = ProjectFakeTargetProfileFacts,
     .equal = loom_target_profile_equal_common,
@@ -100,7 +101,7 @@ static iree_status_t MaterializeFakeTargetDefinition(
       /*offset_bitwidth=*/0, /*max_workgroup_size_x=*/0,
       /*max_workgroup_size_y=*/0, /*max_workgroup_size_z=*/0,
       /*max_flat_workgroup_size=*/0, /*max_workgroup_storage_bytes=*/0,
-      /*subgroup_size=*/0,
+      /*subgroup_size=*/0, /*execution_unit_count=*/0,
       /*max_grid_size_x=*/0, /*max_grid_size_y=*/0, /*max_grid_size_z=*/0,
       /*max_flat_grid_size=*/0,
       /*max_workgroup_count_x=*/0, /*max_workgroup_count_y=*/0,
@@ -1266,8 +1267,12 @@ func.def public @entry() -> (index) {
   };
   loomc_config_binding_t first_bindings[] = {
       {
-          .key = loomc_make_cstring_view("@model36.model.hidden_size"),
-          .value = loomc_make_cstring_view("4096"),
+          .key = loomc_make_cstring_view("  @model36.model.hidden_size  "),
+          .value = loomc_make_cstring_view(" 4096 "),
+      },
+      {
+          .key = loomc_make_cstring_view("unused.value"),
+          .value = loomc_make_cstring_view("not a typed Loom value"),
       },
   };
   loomc_link_options_t first_options = {
@@ -1283,7 +1288,7 @@ func.def public @entry() -> (index) {
       .config =
           {
               .bindings = first_bindings,
-              .binding_count = 1,
+              .binding_count = std::size(first_bindings),
               .json_object = loomc_make_cstring_view(R"({
                 "model36": {
                   "model": {"hidden_size": 2048}
@@ -1307,6 +1312,27 @@ func.def public @entry() -> (index) {
   EXPECT_EQ(first_text.find("config.decl @model36.model.hidden_size"),
             std::string::npos);
   EXPECT_EQ(first_text.find("2048"), std::string::npos);
+
+  const loomc_config_binding_t duplicate_bindings[] = {
+      first_bindings[0],
+      {
+          .key = loomc_make_cstring_view("model36.model.hidden_size"),
+          .value = loomc_make_cstring_view("2048"),
+      },
+  };
+  loomc_link_options_t invalid_options = first_options;
+  invalid_options.config.bindings = duplicate_bindings;
+  invalid_options.config.binding_count = std::size(duplicate_bindings);
+  ResultPtr invalid_result;
+  ModulePtr invalid_module =
+      LinkIndex(linker.get(), workspace.get(), link_index.get(),
+                &invalid_options, &invalid_result);
+  EXPECT_EQ(invalid_module, nullptr);
+  ASSERT_NE(invalid_result, nullptr);
+  EXPECT_FALSE(loomc_result_succeeded(invalid_result.get()));
+  ASSERT_EQ(loomc_result_diagnostic_count(invalid_result.get()), 1u);
+  EXPECT_EQ(ToString(loomc_result_diagnostic_at(invalid_result.get(), 0)->code),
+            "CONFIG/INVALID");
 
   loomc_config_binding_t second_bindings[] = {
       {

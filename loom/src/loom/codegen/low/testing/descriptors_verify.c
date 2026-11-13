@@ -212,6 +212,12 @@ static iree_status_t loom_low_verify_tables_present(
                             "low descriptor set has no schedule models");
   }
   IREE_RETURN_IF_ERROR(loom_low_verify_pointer_for_count(
+      descriptor_set->descriptor_identities,
+      descriptor_set->descriptor_identity_count, "descriptor_identities"));
+  IREE_RETURN_IF_ERROR(loom_low_verify_pointer_for_count(
+      descriptor_set->descriptor_stable_ids,
+      descriptor_set->descriptor_ordinal_count, "descriptor_stable_ids"));
+  IREE_RETURN_IF_ERROR(loom_low_verify_pointer_for_count(
       descriptor_set->descriptors, descriptor_set->descriptor_ordinal_count,
       "descriptors"));
   IREE_RETURN_IF_ERROR(loom_low_verify_pointer_for_count(
@@ -346,7 +352,8 @@ static iree_status_t loom_low_verify_descriptor_refs(
           "%" PRIu32 " but backing storage has only %" PRIu32 " descriptors",
           i, ordinal, descriptor_set->descriptor_ref_count);
     }
-    const uint64_t stable_id = descriptor_set->descriptors[ordinal].stable_id;
+    const uint64_t stable_id = loom_low_descriptor_stable_id(
+        descriptor_set, &descriptor_set->descriptors[ordinal]);
     if (stable_id <= previous_id) {
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
@@ -1201,8 +1208,9 @@ static iree_status_t loom_low_verify_storage_continuation_pair(
     if (source_alternative == NULL ||
         result_alternative->register_part_id >=
             descriptor_set->register_part_count ||
-        source_alternative->register_part_id >=
-            descriptor_set->register_part_count) {
+        (source_alternative->register_part_id != LOOM_LOW_REGISTER_PART_NONE &&
+         source_alternative->register_part_id >=
+             descriptor_set->register_part_count)) {
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
           "low storage-continuation result and source must name valid "
@@ -1210,14 +1218,22 @@ static iree_status_t loom_low_verify_storage_continuation_pair(
     }
     const loom_low_register_part_t* result_part =
         &descriptor_set->register_parts[result_alternative->register_part_id];
-    const loom_low_register_part_t* source_part =
-        &descriptor_set->register_parts[source_alternative->register_part_id];
-    if (result_part->reg_class_id != result_alternative->reg_class_id ||
-        source_part->reg_class_id != result_alternative->reg_class_id) {
+    if (result_part->reg_class_id != result_alternative->reg_class_id) {
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
           "low storage-continuation result and source register parts must "
           "belong to their alternative register class");
+    }
+    if (source_alternative->register_part_id == LOOM_LOW_REGISTER_PART_NONE) {
+      continue;
+    }
+    const loom_low_register_part_t* source_part =
+        &descriptor_set->register_parts[source_alternative->register_part_id];
+    if (source_part->reg_class_id != result_alternative->reg_class_id) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "low storage-continuation source register part must belong to its "
+          "alternative register class");
     }
     if ((result_part->mask & source_part->mask) != 0) {
       return iree_make_status(
@@ -1408,6 +1424,7 @@ static bool loom_low_operand_form_match_kind_is_valid(
   switch (kind) {
     case LOOM_LOW_OPERAND_FORM_MATCH_ALL_EQUAL_I64:
     case LOOM_LOW_OPERAND_FORM_MATCH_ALL_EQUAL_EXACT_I64:
+    case LOOM_LOW_OPERAND_FORM_MATCH_ACCEPTED_REGISTER_CLASS:
       return true;
     default:
       return false;
@@ -1518,6 +1535,24 @@ static iree_status_t loom_low_verify_descriptor_operand_forms(
             "low descriptor %" PRIu32 " operand form %" PRIu32 " match %" PRIu16
             " has unknown match kind %u",
             descriptor_index, form_index, match_index, match->match_kind);
+      }
+      if (match->match_kind ==
+          LOOM_LOW_OPERAND_FORM_MATCH_ACCEPTED_REGISTER_CLASS) {
+        const loom_low_descriptor_t* replacement =
+            &descriptor_set->descriptors[form->replacement_descriptor_ordinal];
+        if (match->match_i64 < 0 ||
+            match->match_i64 >= replacement->operand_count ||
+            !loom_low_operand_role_is_packet_operand(
+                loom_low_descriptor_operand(descriptor_set, replacement,
+                                            (uint16_t)match->match_i64)
+                    ->role) ||
+            match_index == form->immediate_match_index) {
+          return iree_make_status(
+              IREE_STATUS_INVALID_ARGUMENT,
+              "low descriptor %" PRIu32 " operand form %" PRIu32
+              " has an invalid receiving register-class predicate",
+              descriptor_index, form_index);
+        }
       }
     }
     if (!loom_low_operand_form_immediate_action_is_valid(
@@ -2490,32 +2525,39 @@ static iree_status_t loom_low_verify_descriptor(
           LOOM_LOW_DESCRIPTOR_FLAG_IDEMPOTENT_STATE_UPDATE |
           LOOM_LOW_DESCRIPTOR_FLAG_READ_ONLY_DATA_IMMEDIATES,
       "descriptor", descriptor_index));
+  const uint16_t identity_ordinal = descriptor->identity_ordinal;
+  if (identity_ordinal >= descriptor_set->descriptor_identity_count) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "low descriptor %" PRIu32
+                            " identity ordinal %" PRIu16
+                            " is outside the %" PRIu32 "-row identity catalog",
+                            descriptor_index, identity_ordinal,
+                            descriptor_set->descriptor_identity_count);
+  }
+  const loom_low_descriptor_identity_t* identity =
+      &descriptor_set->descriptor_identities[identity_ordinal];
   iree_string_view_t descriptor_key = iree_string_view_empty();
   IREE_RETURN_IF_ERROR(loom_low_verify_non_empty_required_string(
-      descriptor_set, descriptor->key_string_ref, "descriptor.key",
+      descriptor_set, identity->key_string_ref, "descriptor_identity.key",
       &descriptor_key));
-  if (descriptor->stable_id == LOOM_LOW_STABLE_ID_NONE) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "low descriptor %" PRIu32
-                            " has no stable descriptor ID",
-                            descriptor_index);
-  }
+  IREE_RETURN_IF_ERROR(loom_low_verify_optional_string(
+      descriptor_set, identity->semantic_tag_string_ref,
+      "descriptor_identity.semantic_tag"));
   const uint64_t expected_stable_id =
       loom_low_descriptor_stable_id_from_key(descriptor_key);
-  if (descriptor->stable_id != expected_stable_id) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "low descriptor %" PRIu32
-                            " key '%.*s' stable ID "
-                            "0x%016" PRIx64 " should be 0x%016" PRIx64,
-                            descriptor_index, (int)descriptor_key.size,
-                            descriptor_key.data, descriptor->stable_id,
-                            expected_stable_id);
+  const uint64_t stable_id =
+      loom_low_descriptor_stable_id_at(descriptor_set, descriptor_index);
+  if (stable_id == LOOM_LOW_STABLE_ID_NONE || stable_id != expected_stable_id) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "low descriptor %" PRIu32
+        " key '%.*s' has absent or mismatched stable ID 0x%016" PRIx64
+        " (expected 0x%016" PRIx64 ")",
+        descriptor_index, (int)descriptor_key.size, descriptor_key.data,
+        stable_id, expected_stable_id);
   }
   IREE_RETURN_IF_ERROR(loom_low_verify_optional_string(
       descriptor_set, descriptor->mnemonic_string_ref, "descriptor.mnemonic"));
-  IREE_RETURN_IF_ERROR(loom_low_verify_optional_string(
-      descriptor_set, descriptor->semantic_tag_string_ref,
-      "descriptor.semantic_tag"));
   const loom_low_descriptor_layout_t* descriptor_layout =
       loom_low_descriptor_layout(descriptor_set, descriptor);
   IREE_RETURN_IF_ERROR(loom_low_verify_span(
@@ -3076,8 +3118,8 @@ static iree_status_t loom_low_verify_reg_class(
         reg_class->alloc_unit_bits != 0 || reg_class->allocatable_count != 0 ||
         reg_class->storage.fixed_locations.fixed_location_base != 0 ||
         reg_class->storage.fixed_locations.fixed_location_count != 0 ||
-        reg_class->alias_set_id != 0 ||
-        reg_class->spill_class_id != LOOM_LOW_REG_CLASS_NONE ||
+        reg_class->alias_set_id != 0 || reg_class->spill_unit_bits != 0 ||
+        reg_class->spill_alignment_log2 != 0 ||
         reg_class->full_register_part_mask != 0 ||
         reg_class->spill_slot_space != 0) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -3240,14 +3282,13 @@ static iree_status_t loom_low_verify_reg_class(
                             reg_class_index, fixed_location_base,
                             reg_class->allocatable_count);
   }
-  if (reg_class->spill_class_id != LOOM_LOW_REG_CLASS_NONE &&
-      reg_class->spill_class_id >= descriptor_set->reg_class_count) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+  if (reg_class->spill_unit_bits == 0 ||
+      (reg_class->spill_alignment_log2 & 15u) >
+          (reg_class->spill_alignment_log2 >> 4)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "low register class %" PRIu32
-                            " references spill class %" PRIu16
-                            " but only %" PRIu32 " classes exist",
-                            reg_class_index, reg_class->spill_class_id,
-                            descriptor_set->reg_class_count);
+                            " has invalid spill width or alignment limits",
+                            reg_class_index);
   }
   return iree_ok_status();
 }

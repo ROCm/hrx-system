@@ -1,0 +1,215 @@
+// RUN: roundtrip
+#include <loomcxx/kernel.h>
+
+using loom::kernel::scan_direction;
+using loom::kernel::scan_mode;
+using Integers4 = int __attribute__((ext_vector_type(4)));
+using Floats4 = float __attribute__((ext_vector_type(4)));
+
+// Every combining spelling travels through both scan scopes. The four prefix
+// modes and subgroup clustering are independent of the scalar/vector carrier.
+LOOM_INLINE int subgroup_integers(int value, unsigned unsigned_value) {
+  using namespace loom::kernel::subgroup::scan;
+  return addi<scan_mode::exclusive, scan_direction::reverse, 16, 2>(value) +
+         muli(value) + minsi(value) + maxsi(value) + minui(unsigned_value) +
+         maxui(unsigned_value) + andi(value) + ori(value) + xori(value);
+}
+
+LOOM_INLINE float subgroup_floats(float value) {
+  using namespace loom::kernel::subgroup::scan;
+  return addf<scan_mode::inclusive, scan_direction::reverse>(value) +
+         mulf(value) + minimumf(value) + maximumf(value) + minnumf(value) +
+         maxnumf(value);
+}
+
+LOOM_INLINE int workgroup_integers(int value, unsigned unsigned_value) {
+  using namespace loom::kernel::workgroup::scan;
+  return addi<scan_mode::exclusive>(value) + muli(value) + minsi(value) +
+         maxsi(value) + minui(unsigned_value) + maxui(unsigned_value) +
+         andi(value) + ori(value) + xori(value);
+}
+
+LOOM_INLINE float workgroup_floats(float value) {
+  using namespace loom::kernel::workgroup::scan;
+  return addf<scan_mode::exclusive, scan_direction::reverse>(value) +
+         mulf(value) + minimumf(value) + maximumf(value) + minnumf(value) +
+         maxnumf(value);
+}
+
+LOOM_INLINE Integers4 subgroup_vector(Integers4 value) {
+  return loom::kernel::subgroup::scan::addi(value);
+}
+
+LOOM_INLINE Floats4 workgroup_vector(Floats4 value) {
+  return loom::kernel::workgroup::scan::addf(value);
+}
+
+// C++ promotions must not change the collective's operand or result width.
+LOOM_INLINE signed char scan_i8(signed char value) {
+  return loom::kernel::workgroup::scan::addi(value);
+}
+LOOM_INLINE unsigned char scan_u8(unsigned char value) {
+  return loom::kernel::subgroup::scan::maxui(value);
+}
+LOOM_INLINE short scan_i16(short value) {
+  return loom::kernel::subgroup::scan::minsi(value);
+}
+LOOM_INLINE unsigned short scan_u16(unsigned short value) {
+  return loom::kernel::workgroup::scan::ori(value);
+}
+LOOM_INLINE long long scan_i64(long long value) {
+  return loom::kernel::workgroup::scan::addi(value);
+}
+LOOM_INLINE unsigned long long scan_u64(unsigned long long value) {
+  return loom::kernel::subgroup::scan::addi(value);
+}
+LOOM_INLINE _Float16 scan_f16(_Float16 value) {
+  return loom::kernel::subgroup::scan::addf(value);
+}
+LOOM_INLINE __bf16 scan_bf16(__bf16 value) {
+  return loom::kernel::workgroup::scan::addf(value);
+}
+LOOM_INLINE double scan_f64(double value) {
+  return loom::kernel::workgroup::scan::addf(value);
+}
+
+// The binding works with custom declarations, including non-type enum values.
+template <unsigned Mode, unsigned Direction, class T>
+[[loom::op("kernel.workgroup.scan", "addi")]] T custom_scan(T value);
+
+LOOM_INLINE int custom_reverse(int value) {
+  return custom_scan<0, 1>(value);
+}
+
+// ----
+func.def public linkonce inline @subgroup_integers(%value: i32, %unsigned_value: i32) -> (i32) {
+  %3 = kernel.subgroup.scan<addi> %value {cluster_size = 16, cluster_stride = 2, direction = reverse, mode = exclusive} : i32
+  %4 = kernel.subgroup.scan<muli> %value {direction = forward, mode = inclusive} : i32
+  %5 = scalar.addi %3, %4 : i32
+  %6 = kernel.subgroup.scan<minsi> %value {direction = forward, mode = inclusive} : i32
+  %7 = scalar.addi %5, %6 : i32
+  %8 = kernel.subgroup.scan<maxsi> %value {direction = forward, mode = inclusive} : i32
+  %9 = scalar.addi %7, %8 : i32
+  %10 = kernel.subgroup.scan<minui> %unsigned_value {direction = forward, mode = inclusive} : i32
+  %11 = scalar.addi %9, %10 : i32
+  %12 = kernel.subgroup.scan<maxui> %unsigned_value {direction = forward, mode = inclusive} : i32
+  %13 = scalar.addi %11, %12 : i32
+  %14 = kernel.subgroup.scan<andi> %value {direction = forward, mode = inclusive} : i32
+  %15 = scalar.addi %13, %14 : i32
+  %16 = kernel.subgroup.scan<ori> %value {direction = forward, mode = inclusive} : i32
+  %17 = scalar.addi %15, %16 : i32
+  %18 = kernel.subgroup.scan<xori> %value {direction = forward, mode = inclusive} : i32
+  %19 = scalar.addi %17, %18 : i32
+  func.return %19 : i32
+}
+
+func.def public linkonce inline @subgroup_floats(%value: f32) -> (f32) {
+  %22 = kernel.subgroup.scan<addf> %value {direction = reverse, mode = inclusive} : f32
+  %23 = kernel.subgroup.scan<mulf> %value {direction = forward, mode = inclusive} : f32
+  %24 = scalar.addf %22, %23 : f32
+  %25 = kernel.subgroup.scan<minimumf> %value {direction = forward, mode = inclusive} : f32
+  %26 = scalar.addf %24, %25 : f32
+  %27 = kernel.subgroup.scan<maximumf> %value {direction = forward, mode = inclusive} : f32
+  %28 = scalar.addf %26, %27 : f32
+  %29 = kernel.subgroup.scan<minnumf> %value {direction = forward, mode = inclusive} : f32
+  %30 = scalar.addf %28, %29 : f32
+  %31 = kernel.subgroup.scan<maxnumf> %value {direction = forward, mode = inclusive} : f32
+  %32 = scalar.addf %30, %31 : f32
+  func.return %32 : f32
+}
+
+func.def public linkonce inline @workgroup_integers(%value: i32, %unsigned_value: i32) -> (i32) {
+  %36 = kernel.workgroup.scan<addi> %value {direction = forward, mode = exclusive} : i32
+  %37 = kernel.workgroup.scan<muli> %value {direction = forward, mode = inclusive} : i32
+  %38 = scalar.addi %36, %37 : i32
+  %39 = kernel.workgroup.scan<minsi> %value {direction = forward, mode = inclusive} : i32
+  %40 = scalar.addi %38, %39 : i32
+  %41 = kernel.workgroup.scan<maxsi> %value {direction = forward, mode = inclusive} : i32
+  %42 = scalar.addi %40, %41 : i32
+  %43 = kernel.workgroup.scan<minui> %unsigned_value {direction = forward, mode = inclusive} : i32
+  %44 = scalar.addi %42, %43 : i32
+  %45 = kernel.workgroup.scan<maxui> %unsigned_value {direction = forward, mode = inclusive} : i32
+  %46 = scalar.addi %44, %45 : i32
+  %47 = kernel.workgroup.scan<andi> %value {direction = forward, mode = inclusive} : i32
+  %48 = scalar.addi %46, %47 : i32
+  %49 = kernel.workgroup.scan<ori> %value {direction = forward, mode = inclusive} : i32
+  %50 = scalar.addi %48, %49 : i32
+  %51 = kernel.workgroup.scan<xori> %value {direction = forward, mode = inclusive} : i32
+  %52 = scalar.addi %50, %51 : i32
+  func.return %52 : i32
+}
+
+func.def public linkonce inline @workgroup_floats(%value: f32) -> (f32) {
+  %55 = kernel.workgroup.scan<addf> %value {direction = reverse, mode = exclusive} : f32
+  %56 = kernel.workgroup.scan<mulf> %value {direction = forward, mode = inclusive} : f32
+  %57 = scalar.addf %55, %56 : f32
+  %58 = kernel.workgroup.scan<minimumf> %value {direction = forward, mode = inclusive} : f32
+  %59 = scalar.addf %57, %58 : f32
+  %60 = kernel.workgroup.scan<maximumf> %value {direction = forward, mode = inclusive} : f32
+  %61 = scalar.addf %59, %60 : f32
+  %62 = kernel.workgroup.scan<minnumf> %value {direction = forward, mode = inclusive} : f32
+  %63 = scalar.addf %61, %62 : f32
+  %64 = kernel.workgroup.scan<maxnumf> %value {direction = forward, mode = inclusive} : f32
+  %65 = scalar.addf %63, %64 : f32
+  func.return %65 : f32
+}
+
+func.def public linkonce inline @subgroup_vector(%value: vector<4xi32>) -> (vector<4xi32>) {
+  %68 = kernel.subgroup.scan<addi> %value {direction = forward, mode = inclusive} : vector<4xi32>
+  func.return %68 : vector<4xi32>
+}
+
+func.def public linkonce inline @workgroup_vector(%value: vector<4xf32>) -> (vector<4xf32>) {
+  %71 = kernel.workgroup.scan<addf> %value {direction = forward, mode = inclusive} : vector<4xf32>
+  func.return %71 : vector<4xf32>
+}
+
+func.def public linkonce inline @scan_i8(%value: i8) -> (i8) {
+  %74 = kernel.workgroup.scan<addi> %value {direction = forward, mode = inclusive} : i8
+  func.return %74 : i8
+}
+
+func.def public linkonce inline @scan_u8(%value: i8) -> (i8) {
+  %77 = kernel.subgroup.scan<maxui> %value {direction = forward, mode = inclusive} : i8
+  func.return %77 : i8
+}
+
+func.def public linkonce inline @scan_i16(%value: i16) -> (i16) {
+  %80 = kernel.subgroup.scan<minsi> %value {direction = forward, mode = inclusive} : i16
+  func.return %80 : i16
+}
+
+func.def public linkonce inline @scan_u16(%value: i16) -> (i16) {
+  %83 = kernel.workgroup.scan<ori> %value {direction = forward, mode = inclusive} : i16
+  func.return %83 : i16
+}
+
+func.def public linkonce inline @scan_i64(%value: i64) -> (i64) {
+  %86 = kernel.workgroup.scan<addi> %value {direction = forward, mode = inclusive} : i64
+  func.return %86 : i64
+}
+
+func.def public linkonce inline @scan_u64(%value: i64) -> (i64) {
+  %89 = kernel.subgroup.scan<addi> %value {direction = forward, mode = inclusive} : i64
+  func.return %89 : i64
+}
+
+func.def public linkonce inline @scan_f16(%value: f16) -> (f16) {
+  %92 = kernel.subgroup.scan<addf> %value {direction = forward, mode = inclusive} : f16
+  func.return %92 : f16
+}
+
+func.def public linkonce inline @scan_bf16(%value: bf16) -> (bf16) {
+  %95 = kernel.workgroup.scan<addf> %value {direction = forward, mode = inclusive} : bf16
+  func.return %95 : bf16
+}
+
+func.def public linkonce inline @scan_f64(%value: f64) -> (f64) {
+  %98 = kernel.workgroup.scan<addf> %value {direction = forward, mode = inclusive} : f64
+  func.return %98 : f64
+}
+
+func.def public linkonce inline @custom_reverse(%value: i32) -> (i32) {
+  %101 = kernel.workgroup.scan<addi> %value {direction = reverse, mode = inclusive} : i32
+  func.return %101 : i32
+}

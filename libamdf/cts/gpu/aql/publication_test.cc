@@ -10,20 +10,45 @@ namespace {
 
 class AqlQueuePlacementTest
     : public AqlQueueTest,
-      public ::testing::WithParamInterface<amdf_queue_placement_t> {};
+      public ::testing::WithParamInterface<amdf_queue_placement_t> {
+ protected:
+  void SetUp() override {
+    AqlQueueTest::SetUp();
+    if (HasFatalFailure() || IsSkipped()) {
+      return;
+    }
+    amdf_queue_family_placement_info_t placement = {
+        .type = AMDF_STRUCTURE_TYPE_QUEUE_FAMILY_PLACEMENT_INFO,
+        .structure_size = sizeof(placement),
+    };
+    ASSERT_EQ(api_->device_query_queue_family_placement_info(
+                  device_, family_.ordinal, &placement),
+              AMDF_STATUS_OK);
+    if (GetParam() != AMDF_QUEUE_PLACEMENT_DEFAULT &&
+        !(placement.placement_capabilities & (1u << GetParam()))) {
+      GTEST_SKIP() << "family does not support requested ring placement";
+    }
+  }
+
+  void CreatePlacedQueue(amdf_queue_producer_mode_t producer_mode,
+                         GpuUserQueue** out_queue) {
+    ASSERT_NO_FATAL_FAILURE(CreateQueue(family_,
+                                        GpuUserQueueOptions{
+                                            .producer_mode = producer_mode,
+                                            .ring_byte_length = 4096,
+                                            .placement = GetParam(),
+                                        },
+                                        out_queue));
+  }
+};
 
 TEST_P(AqlQueuePlacementTest, CompletesBarriersAndReusesRetiredSlots) {
-  if (GetParam() != AMDF_QUEUE_PLACEMENT_DEFAULT &&
-      !(family_.placement_capabilities & (1u << GetParam()))) {
-    GTEST_SKIP() << "family does not support requested ring placement";
-  }
   GpuMemory* storage = nullptr;
   GpuUserQueue* queue = nullptr;
   ASSERT_NO_FATAL_FAILURE(CreateMemory(
       AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE, 4096, &storage));
-  ASSERT_NO_FATAL_FAILURE(CreateQueue(
-      family_, &queue, AMDF_QUEUE_PRODUCER_MODE_SINGLE, {},
-      AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER, 4096, 0, nullptr, GetParam()));
+  ASSERT_NO_FATAL_FAILURE(
+      CreatePlacedQueue(AMDF_QUEUE_PRODUCER_MODE_SINGLE, &queue));
   std::memset(storage->host.pointer, 0, storage->info.byte_length);
   auto* signals = static_cast<aql::Signal*>(storage->host.pointer);
   signals[0] = aql::UserSignal();
@@ -31,29 +56,26 @@ TEST_P(AqlQueuePlacementTest, CompletesBarriersAndReusesRetiredSlots) {
   const uint64_t packet_count =
       queue->host.ring_byte_length / sizeof(aql::Packet) + 1;
   uint64_t index = 0;
-  for (uint32_t round = 0; round < 2; ++round) {
-    signals[0].value = packet_count;
-    const auto packet =
-        aql::Barrier(aql::BarrierType::kAnd, aql::HeaderBarrier::kEnabled,
-                     storage->device_address,
-                     {storage->device_address + sizeof(aql::Signal)});
+  for (uint32_t round = 0; round < 64; ++round) {
+    const uint32_t completion_index = round % 2;
+    const uint32_t dependency_index = 1 - completion_index;
+    signals[completion_index].value = packet_count;
+    const auto packet = aql::Barrier(
+        aql::BarrierType::kAnd, aql::HeaderBarrier::kEnabled,
+        storage->device_address + completion_index * sizeof(aql::Signal),
+        {storage->device_address + dependency_index * sizeof(aql::Signal)});
     for (uint64_t i = 0; i < packet_count; ++i) {
       GpuStoreRelease(queue->host.write_index_address, index + 1);
       ASSERT_TRUE(aql::Publish(*queue, index++, packet));
     }
     ASSERT_NO_FATAL_FAILURE(
-        WaitCompletionAndConsumption(*queue, signals[0], index));
+        WaitCompletionAndConsumption(*queue, signals[completion_index], index));
     // The dependency remains zero until every barrier has completed; only
     // completion, not read-index advancement, permits rearming the signal.
   }
 }
 
-INSTANTIATE_TEST_SUITE_P(Placements, AqlQueuePlacementTest,
-                         ::testing::Values(AMDF_QUEUE_PLACEMENT_DEFAULT,
-                                           AMDF_QUEUE_PLACEMENT_HOST_LOCAL,
-                                           AMDF_QUEUE_PLACEMENT_DEVICE_LOCAL));
-
-TEST_F(AqlQueueTest, MultipleProducersReserveAndPublishIndependently) {
+TEST_P(AqlQueuePlacementTest, MultipleProducersReserveAndPublishIndependently) {
   if ((family_.producer_modes & AMDF_QUEUE_PRODUCER_MODE_BIT_MULTI) == 0) {
     GTEST_SKIP() << "family does not admit multiple host producers";
   }
@@ -61,7 +83,8 @@ TEST_F(AqlQueueTest, MultipleProducersReserveAndPublishIndependently) {
   GpuUserQueue* queue = nullptr;
   ASSERT_NO_FATAL_FAILURE(CreateMemory(
       AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE, 4096, &storage));
-  ASSERT_NO_FATAL_FAILURE(CreateQueue(&queue, AMDF_QUEUE_PRODUCER_MODE_MULTI));
+  ASSERT_NO_FATAL_FAILURE(
+      CreatePlacedQueue(AMDF_QUEUE_PRODUCER_MODE_MULTI, &queue));
   std::memset(storage->host.pointer, 0, storage->info.byte_length);
   auto* completion = static_cast<aql::Signal*>(storage->host.pointer);
   *completion = aql::UserSignal(64);
@@ -85,7 +108,7 @@ TEST_F(AqlQueueTest, MultipleProducersReserveAndPublishIndependently) {
       WaitCompletionAndConsumption(*queue, *completion, 64));
 }
 
-TEST_F(AqlQueueTest, PublishesReservedPacketsOutOfOrder) {
+TEST_P(AqlQueuePlacementTest, PublishesReservedPacketsOutOfOrder) {
   if ((family_.producer_modes & AMDF_QUEUE_PRODUCER_MODE_BIT_MULTI) == 0) {
     GTEST_SKIP() << "family does not admit multiple host producers";
   }
@@ -93,7 +116,8 @@ TEST_F(AqlQueueTest, PublishesReservedPacketsOutOfOrder) {
   GpuUserQueue* queue = nullptr;
   ASSERT_NO_FATAL_FAILURE(CreateMemory(
       AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE, 4096, &storage));
-  ASSERT_NO_FATAL_FAILURE(CreateQueue(&queue, AMDF_QUEUE_PRODUCER_MODE_MULTI));
+  ASSERT_NO_FATAL_FAILURE(
+      CreatePlacedQueue(AMDF_QUEUE_PRODUCER_MODE_MULTI, &queue));
   std::memset(storage->host.pointer, 0, storage->info.byte_length);
   auto* signals = static_cast<aql::Signal*>(storage->host.pointer);
   signals[0] = aql::UserSignal(1);
@@ -119,5 +143,10 @@ TEST_F(AqlQueueTest, PublishesReservedPacketsOutOfOrder) {
       GpuLoadAcquire<int64_t>(reinterpret_cast<uintptr_t>(&signals[0].value)),
       0);
 }
+
+INSTANTIATE_TEST_SUITE_P(Placements, AqlQueuePlacementTest,
+                         ::testing::Values(AMDF_QUEUE_PLACEMENT_DEFAULT,
+                                           AMDF_QUEUE_PLACEMENT_HOST_LOCAL,
+                                           AMDF_QUEUE_PLACEMENT_DEVICE_LOCAL));
 
 }  // namespace

@@ -193,15 +193,14 @@ static iree_status_t loom_amdgpu_program_callable_prepare_abi_side(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_value_id_t* values, uint16_t value_count,
     iree_string_view_t side, iree_host_size_t location_offset,
-    iree_diagnostic_emitter_t emitter, bool* out_prepared,
-    loom_amdgpu_program_callable_t* callable,
-    loom_amdgpu_call_abi_requirements_t* out_requirements) {
+    iree_diagnostic_emitter_t emitter, loom_amdgpu_program_callable_t* callable,
+    bool* out_prepared, loom_amdgpu_call_abi_requirements_t* out_requirements) {
   *out_prepared = false;
   loom_amdgpu_call_abi_requirements_t requirements = {0};
   for (uint16_t i = 0; i < value_count; ++i) {
     const loom_type_t type = loom_module_value_type(module, values[i]);
     loom_amdgpu_call_abi_requirements_t next_requirements = requirements;
-    if (!loom_amdgpu_call_abi_add_low_type(descriptor_set, type,
+    if (!loom_amdgpu_call_abi_add_low_type(descriptor_set->stable_id, type,
                                            &next_requirements)) {
       IREE_RETURN_IF_ERROR(loom_amdgpu_program_callable_emit_unsupported_abi(
           module, function_op, side, i, type, requirements,
@@ -234,7 +233,7 @@ iree_status_t loom_amdgpu_program_callable_prepare_abi(
     const loom_module_t* module, loom_op_t* function_op,
     const loom_low_descriptor_set_t* descriptor_set,
     iree_diagnostic_emitter_t emitter, iree_arena_allocator_t* arena,
-    bool* out_prepared, loom_amdgpu_program_callable_t* callable) {
+    loom_amdgpu_program_callable_t* callable, bool* out_prepared) {
   *out_prepared = false;
   const loom_func_like_t function = loom_func_like_cast(module, function_op);
   const loom_value_id_t* arguments =
@@ -255,7 +254,7 @@ iree_status_t loom_amdgpu_program_callable_prepare_abi(
   bool side_prepared = false;
   IREE_RETURN_IF_ERROR(loom_amdgpu_program_callable_prepare_abi_side(
       module, function_op, descriptor_set, arguments, callable->argument_count,
-      IREE_SV("argument"), 0, emitter, &side_prepared, callable,
+      IREE_SV("argument"), 0, emitter, callable, &side_prepared,
       &callable->argument_requirements));
   if (!side_prepared) {
     return iree_ok_status();
@@ -263,7 +262,7 @@ iree_status_t loom_amdgpu_program_callable_prepare_abi(
   IREE_RETURN_IF_ERROR(loom_amdgpu_program_callable_prepare_abi_side(
       module, function_op, descriptor_set, loom_op_results(function_op),
       callable->result_count, IREE_SV("result"), callable->argument_count,
-      emitter, &side_prepared, callable, &callable->result_requirements));
+      emitter, callable, &side_prepared, &callable->result_requirements));
   if (!side_prepared) {
     return iree_ok_status();
   }

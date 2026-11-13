@@ -184,6 +184,9 @@ typedef struct loom_low_lower_abi_argument_t {
   int64_t resource_index;
   union {
     // Selected body carrier for a direct argument requiring entry adaptation.
+    // Source planning publishes this carrier. Entry setup reads the physical
+    // argument from the mapped entry block and binds the adapted source value;
+    // the ABI carrier never occupies the source value's binding.
     // None means that the ABI carrier is consumed directly or adapted per use.
     loom_type_t body_type;
     // Semantic source type recorded on low.resource. None defaults to the
@@ -308,7 +311,8 @@ typedef struct loom_low_lower_prepare_branch_callback_t {
 typedef iree_status_t (*loom_low_lower_prepare_control_operand_fn_t)(
     void* user_data, loom_low_lower_context_t* context,
     const loom_op_t* source_terminator, loom_value_id_t source_value_id,
-    loom_type_t required_low_type, const void** out_plan);
+    loom_type_t actual_low_type, loom_type_t required_low_type,
+    const void** out_plan);
 
 typedef iree_status_t (*loom_low_lower_emit_control_operand_fn_t)(
     void* user_data, loom_low_lower_context_t* context,
@@ -317,15 +321,26 @@ typedef iree_status_t (*loom_low_lower_emit_control_operand_fn_t)(
     const void* plan, loom_value_id_t* out_low_value_id);
 
 typedef struct loom_low_lower_control_operand_t {
-  // Prepares a branch or callable-exit operand whose actual producer carrier
-  // differs from its receiving signature. Source facts are available here;
-  // rejection emits diagnostics before any Low construction. Retained data
-  // belongs to the function arena or immutable target storage. NULL is a
+  // Admits a conversion across an authored native argument or result boundary.
+  // Consumes retained facts without inspecting IR; missing requires equality.
+  // Compiler-selected branch, call, and return receivers already own this
+  // proof and go directly to preparation instead of repeating admission.
+  bool (*accepts)(loom_type_t source_type, loom_value_facts_t source_facts,
+                  loom_type_t actual_type, loom_type_t required_type);
+  // Prepares a branch, call, or callable-exit operand, or a native call result,
+  // whose producer carrier differs from its receiving storage. Source facts
+  // are available here; rejection emits diagnostics before Low construction.
+  // Both carrier types are explicit: the producer of a native result is its
+  // declared return signature, not the selected source-value binding. Retained
+  // data belongs to the function arena or immutable target storage. NULL is a
   // valid recipe for a conversion determined entirely by the selected types.
   loom_low_lower_prepare_control_operand_fn_t prepare;
   // Emits the prepared conversion without consulting source analysis or
-  // changing the source value's canonical mapping. Only infrastructure
-  // failures remain possible. Both callbacks are present or both are absent.
+  // changing the source value's canonical mapping. The supplied Low value is
+  // authoritative; a native result has no source binding until converted.
+  // Only infrastructure failures remain possible. Preparation and emission are
+  // paired; admission requires both and is optional for targets without
+  // authored conversions.
   loom_low_lower_emit_control_operand_fn_t emit;
   // Caller-owned payload passed to both callbacks.
   void* user_data;
@@ -556,8 +571,9 @@ iree_status_t loom_low_lower_descriptor_matrix_reject(
 typedef struct loom_low_lower_selected_plan_view_t {
   // Source op this selected plan lowers.
   const loom_op_t* source_op;
-  // Target-owned plan selected during planning. Shared rules and function
-  // storage return an empty plan because their data is owned by core lowering.
+  // Target callback or descriptor-matrix plan selected during planning.
+  // All other selections return an empty plan; their payloads belong to core
+  // lowering and cannot be interpreted as target plan IDs or data.
   loom_low_lower_plan_t plan;
   // True when demand analysis proved the source op has no required low storage.
   bool elided;
@@ -860,6 +876,8 @@ typedef struct loom_low_lower_finalize_plan_callback_t {
   // The shared planner calls this in definition order before Low creation;
   // source bindings contain actual producer carriers, and facts remain live.
   // The callback consumes its retained plan without traversing source IR.
+  // It may request pure realizations of already-demanded source operands;
+  // the shared owner freezes their emission schedule after finalization.
   loom_low_lower_finalize_plan_fn_t fn;
   // Caller-owned payload passed to |fn|.
   void* user_data;
@@ -956,6 +974,12 @@ typedef struct loom_low_lower_op_contract_query_t {
   loom_op_kind_t first_op_kind;
   // Number of contiguous operation kinds accepted from |first_op_kind|.
   uint16_t op_kind_count;
+  // First accepted operation kind that may produce a terminal rejection.
+  loom_op_kind_t first_terminal_rejection_op_kind;
+  // Number of contiguous terminal-capable kinds from
+  // |first_terminal_rejection_op_kind|.
+  // Zero means that this query never produces terminal rejections.
+  uint16_t terminal_rejection_op_kind_count;
 } loom_low_lower_op_contract_query_t;
 
 // Returns true when |query| accepts |op_kind|.
@@ -963,6 +987,15 @@ static inline bool loom_low_lower_op_contract_query_accepts(
     const loom_low_lower_op_contract_query_t* query, loom_op_kind_t op_kind) {
   return query->op_kind_count == 0 ||
          (uint16_t)(op_kind - query->first_op_kind) < query->op_kind_count;
+}
+
+// Returns true when querying |op_kind| may produce a terminal rejection.
+static inline bool
+loom_low_lower_op_contract_query_may_return_terminal_rejection(
+    const loom_low_lower_op_contract_query_t* query, loom_op_kind_t op_kind) {
+  return query->terminal_rejection_op_kind_count != 0 &&
+         (uint16_t)(op_kind - query->first_terminal_rejection_op_kind) <
+             query->terminal_rejection_op_kind_count;
 }
 
 typedef struct loom_low_lower_policy_t {
@@ -1011,12 +1044,21 @@ typedef struct loom_low_lower_policy_t {
   // Joins unequal native return carriers for one semantic result type. The
   // operation is associative and commutative, and the selected carrier must
   // losslessly accept either input through structural operand materialization.
-  // Inputs are mapped register types; none means no supported common carrier.
-  // Missing requires exact equality. This query consumes types only and must
-  // not inspect source IR or alter producer representations. Targets retaining
-  // direct calls must use the same result convention at definitions and calls.
+  // Inputs are register types in the selected representation contract,
+  // including authored Low receivers; none means no supported lossless common
+  // carrier. Missing requires exact equality. This query consumes types only
+  // and must not inspect source IR or alter producer representations. Targets
+  // retaining direct calls must use the same result convention at definitions
+  // and calls.
   loom_type_t (*join_result_type)(loom_type_t source_type, loom_type_t lhs,
                                   loom_type_t rhs);
+  // Refines a native call result's per-execution distribution from its logical
+  // type and the callee's declared register carrier. Returns distribution
+  // flags only, without inspecting IR. Missing admits different values in
+  // different invocations. The shared fact owner accounts for subgroup size
+  // and observations after divergent iterations.
+  loom_value_fact_flags_t (*native_result_distribution)(
+      loom_type_t source_type, loom_type_t native_type);
   // Optionally emits target live-ins or other structural preamble packets.
   loom_low_lower_emit_preamble_callback_t emit_preamble;
   // Target entry resources planned before Low construction and emitted after
@@ -1114,9 +1156,9 @@ typedef struct loom_low_lower_policy_registry_t {
 // Initializes |out_registry| from a target-owned entry table. The table is
 // borrowed and must outlive |out_registry|.
 void loom_low_lower_policy_registry_initialize_from_entries(
-    loom_low_lower_policy_registry_t* out_registry,
     const loom_low_lower_policy_registry_entry_t* entries,
-    iree_host_size_t entry_count);
+    iree_host_size_t entry_count,
+    loom_low_lower_policy_registry_t* out_registry);
 
 // Looks up the lowering policy for |contract_set_stable_id|, or returns NULL
 // when no row matches. The registry table is target-owned static data;
@@ -1209,6 +1251,10 @@ typedef struct loom_low_lower_options_t {
       source_signature_projections;
   // Physical interfaces published by callee plans before caller planning.
   const loom_low_lower_call_interface_index_t* call_interfaces;
+  // True when source inlining retained at least one direct semantic caller of
+  // the function being lowered. Target ABI mapping consumes this physical
+  // boundary fact instead of interpreting the authored inline policy.
+  bool source_has_direct_callers;
   // Structured diagnostic emitter for user legality and lowering failures.
   iree_diagnostic_emitter_t emitter;
   // Maximum number of errors to emit before aborting. Zero means no limit.
@@ -1348,6 +1394,12 @@ loom_builder_t* loom_low_lower_context_builder(
 
 // Returns the source function being lowered.
 loom_func_like_t loom_low_lower_context_source_function(
+    const loom_low_lower_context_t* context);
+
+// Returns whether source inlining retained a direct semantic caller of the
+// source function. This is false for standalone lowering without module call
+// planning and for source functions used only as module roots.
+bool loom_low_lower_context_source_has_direct_callers(
     const loom_low_lower_context_t* context);
 
 // Returns the function-wide required payload read scope selected before op
@@ -1587,8 +1639,10 @@ typedef struct loom_low_lower_entry_interposition_t {
 // entry block remains the function entry and must be terminated by the caller.
 // Source body emission will continue in the returned body_block, which receives
 // the original physical entry block arguments followed by target-owned
-// arguments of |target_arg_types|. Direct source entry arguments are rebound to
-// the forwarded body_block arguments.
+// arguments of |target_arg_types|. Unadapted direct source arguments are
+// rebound to the forwarded arguments. Arguments with a selected body_type
+// retain their planned type until entry setup binds the adapted value. Their
+// ABI carriers occupy the same direct-argument positions in body_block.
 iree_status_t loom_low_lower_interpose_entry_block(
     loom_low_lower_context_t* context, const loom_type_t* target_arg_types,
     uint16_t target_arg_count,

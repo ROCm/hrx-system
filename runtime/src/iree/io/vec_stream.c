@@ -359,7 +359,7 @@ static iree_status_t iree_io_vec_stream_seek(
   // We compute a new global offset and then navigate the list based on that. We
   // could use the seek mode as a discriminator for that instead but before
   // walking we have to handle extends on the common path anyway.
-  iree_io_stream_pos_t new_offset = stream->offset;
+  iree_io_stream_pos_t new_offset;
   switch (seek_mode) {
     case IREE_IO_STREAM_SEEK_SET:
       new_offset = seek_offset;

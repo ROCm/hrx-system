@@ -32,7 +32,7 @@ typedef struct PipelineRunCounts {
   // Number of retained call-graph specialization pass runs.
   int target_callgraph_specialization = 0;
   // Lexical pass-run ordinals of the expected call-graph specializations.
-  int target_callgraph_specialization_ordinals[5] = {};
+  int target_callgraph_specialization_ordinals[7] = {};
   // Number of semantic boundary-refinement pass runs.
   int boundary_refinement = 0;
   // Lexical pass-run ordinal of semantic boundary refinement.
@@ -41,7 +41,7 @@ typedef struct PipelineRunCounts {
   int boundary_cleanup_ordinal = 0;
   // Lexical pass-run ordinal of the first target-required call inlining.
   int first_target_inlining_ordinal = 0;
-  // Lexical pass-run ordinal of preparatory source call inlining.
+  // Lexical pass-run ordinal of initial preparatory source call inlining.
   int preparatory_target_inlining_ordinal = 0;
   // Required source inlining after execution realization adds new helpers.
   int execution_target_inlining_ordinal = 0;
@@ -79,10 +79,8 @@ typedef struct PipelineRunCounts {
   int source_loop_unrolling_ordinal = 0;
   // Number of private-fragment promotion pass runs.
   int private_fragment_promotion = 0;
-  // Lexical pass-run ordinal of the first private-fragment promotion.
-  int first_private_fragment_promotion_ordinal = 0;
-  // Lexical pass-run ordinal of the last private-fragment promotion.
-  int last_private_fragment_promotion_ordinal = 0;
+  // Lexical positions of initial, expansion, inlining, and unroll promotion.
+  int private_fragment_promotion_ordinals[7] = {};
   // Number of vector-bank scalar replacement pass runs.
   int vector_bank_sroa = 0;
   // Lexical pass-run ordinal of vector-bank scalar replacement.
@@ -213,7 +211,8 @@ iree_status_t InspectPipelineRun(void* user_data, loom_op_t* op,
         count_context->module, loom_pass_run_options(op), IREE_SV("rewrite"));
   } else if (iree_string_view_equal(key,
                                     IREE_SV("specialize-target-callgraph"))) {
-    if (counts->target_callgraph_specialization < 5) {
+    if (counts->target_callgraph_specialization <
+        IREE_ARRAYSIZE(counts->target_callgraph_specialization_ordinals)) {
       counts->target_callgraph_specialization_ordinals
           [counts->target_callgraph_specialization] =
           count_context->current_run_ordinal;
@@ -277,13 +276,12 @@ iree_status_t InspectPipelineRun(void* user_data, loom_op_t* op,
     counts->source_loop_unrolling_ordinal = count_context->current_run_ordinal;
   } else if (iree_string_view_equal(key,
                                     IREE_SV("promote-private-fragments"))) {
-    ++counts->private_fragment_promotion;
-    if (counts->first_private_fragment_promotion_ordinal == 0) {
-      counts->first_private_fragment_promotion_ordinal =
+    if (counts->private_fragment_promotion < 7) {
+      counts->private_fragment_promotion_ordinals
+          [counts->private_fragment_promotion] =
           count_context->current_run_ordinal;
     }
-    counts->last_private_fragment_promotion_ordinal =
-        count_context->current_run_ordinal;
+    ++counts->private_fragment_promotion;
   } else if (iree_string_view_equal(key, IREE_SV("sroa-vector-banks"))) {
     ++counts->vector_bank_sroa;
     counts->vector_bank_sroa_ordinal = count_context->current_run_ordinal;
@@ -409,7 +407,7 @@ TEST_F(TargetPipelineTest, ZeroChecksStillMaterializesAuthoredAssertions) {
   EXPECT_EQ(counts.final_template_selection, 1);
   EXPECT_TRUE(
       iree_string_view_equal(counts.final_template_rewrite, IREE_SV("inline")));
-  EXPECT_EQ(counts.target_callgraph_specialization, 5);
+  EXPECT_EQ(counts.target_callgraph_specialization, 7);
   EXPECT_EQ(counts.boundary_refinement, 1);
   EXPECT_EQ(counts.pipeline_preparation, 2);
   EXPECT_EQ(counts.worker_outlining, 2);
@@ -417,9 +415,13 @@ TEST_F(TargetPipelineTest, ZeroChecksStillMaterializesAuthoredAssertions) {
   EXPECT_EQ(counts.source_to_low, 1);
   EXPECT_EQ(counts.low_verification, 0);
   EXPECT_EQ(counts.symbol_dce, 1);
-  EXPECT_LT(counts.final_template_selection_ordinal,
-            counts.target_callgraph_specialization_ordinals[0]);
   EXPECT_LT(counts.target_callgraph_specialization_ordinals[0],
+            counts.target_callgraph_specialization_ordinals[1]);
+  EXPECT_LT(counts.target_callgraph_specialization_ordinals[1],
+            counts.final_template_selection_ordinal);
+  EXPECT_LT(counts.final_template_selection_ordinal,
+            counts.target_callgraph_specialization_ordinals[2]);
+  EXPECT_LT(counts.target_callgraph_specialization_ordinals[2],
             counts.first_target_inlining_ordinal);
   EXPECT_LT(counts.first_target_inlining_ordinal,
             counts.last_source_combination_ordinal);
@@ -430,20 +432,20 @@ TEST_F(TargetPipelineTest, ZeroChecksStillMaterializesAuthoredAssertions) {
   EXPECT_LT(counts.pipeline_preparation_ordinals[0],
             counts.worker_outlining_ordinals[0]);
   EXPECT_LT(counts.worker_outlining_ordinals[0],
-            counts.target_callgraph_specialization_ordinals[1]);
-  EXPECT_LT(counts.target_callgraph_specialization_ordinals[1],
+            counts.target_callgraph_specialization_ordinals[3]);
+  EXPECT_LT(counts.target_callgraph_specialization_ordinals[3],
             counts.pipeline_preparation_ordinals[1]);
   EXPECT_LT(counts.pipeline_preparation_ordinals[1],
             counts.worker_outlining_ordinals[1]);
   EXPECT_LT(counts.worker_outlining_ordinals[1],
-            counts.target_callgraph_specialization_ordinals[2]);
-  EXPECT_LT(counts.target_callgraph_specialization_ordinals[2],
+            counts.target_callgraph_specialization_ordinals[4]);
+  EXPECT_LT(counts.target_callgraph_specialization_ordinals[4],
             counts.boundary_refinement_ordinal);
   EXPECT_LT(counts.boundary_refinement_ordinal,
             counts.boundary_cleanup_ordinal);
   EXPECT_LT(counts.boundary_cleanup_ordinal,
-            counts.target_callgraph_specialization_ordinals[4]);
-  EXPECT_LT(counts.target_callgraph_specialization_ordinals[4],
+            counts.target_callgraph_specialization_ordinals[6]);
+  EXPECT_LT(counts.target_callgraph_specialization_ordinals[6],
             counts.first_target_legalization_ordinal);
   EXPECT_EQ(counts.view_transport_decomposition, 1);
   EXPECT_LT(counts.worker_outlining_ordinals[1],
@@ -451,18 +453,36 @@ TEST_F(TargetPipelineTest, ZeroChecksStillMaterializesAuthoredAssertions) {
   EXPECT_LT(counts.view_transport_decomposition_ordinal,
             counts.first_target_legalization_ordinal);
   EXPECT_EQ(counts.source_loop_unrolling, 1);
-  EXPECT_EQ(counts.private_fragment_promotion, 2);
+  EXPECT_EQ(counts.private_fragment_promotion, 7);
   EXPECT_EQ(counts.vector_bank_sroa, 1);
   EXPECT_EQ(counts.sink_single_use_reads, 1);
   EXPECT_GT(counts.scf_to_cfg, 0);
   EXPECT_LT(counts.source_loop_unrolling_ordinal,
             counts.vector_bank_sroa_ordinal);
-  EXPECT_LT(counts.first_private_fragment_promotion_ordinal,
+  EXPECT_LT(counts.private_fragment_promotion_ordinals[0],
             counts.source_loop_unrolling_ordinal);
+  EXPECT_LT(counts.private_fragment_promotion_ordinals[1],
+            counts.final_template_selection_ordinal);
+  EXPECT_LT(counts.final_template_selection_ordinal,
+            counts.private_fragment_promotion_ordinals[2]);
+  EXPECT_LT(counts.private_fragment_promotion_ordinals[2],
+            counts.preparatory_target_inlining_ordinal);
+  EXPECT_LT(counts.preparatory_target_inlining_ordinal,
+            counts.private_fragment_promotion_ordinals[3]);
+  EXPECT_LT(counts.private_fragment_promotion_ordinals[3],
+            counts.pipeline_preparation_ordinals[0]);
+  EXPECT_LT(counts.execution_target_inlining_ordinal,
+            counts.private_fragment_promotion_ordinals[4]);
+  EXPECT_LT(counts.private_fragment_promotion_ordinals[4],
+            counts.execution_cleanup_ordinal);
   EXPECT_LT(counts.vector_bank_sroa_ordinal,
-            counts.last_private_fragment_promotion_ordinal);
-  EXPECT_LT(counts.last_private_fragment_promotion_ordinal,
+            counts.private_fragment_promotion_ordinals[5]);
+  EXPECT_LT(counts.private_fragment_promotion_ordinals[5],
             counts.first_complete_target_legalization_ordinal);
+  EXPECT_LT(counts.resumed_target_inlining_ordinal,
+            counts.private_fragment_promotion_ordinals[6]);
+  EXPECT_LT(counts.private_fragment_promotion_ordinals[6],
+            counts.source_to_low_ordinal);
   EXPECT_LT(counts.vector_bank_sroa_ordinal,
             counts.sink_single_use_reads_ordinal);
   EXPECT_LT(counts.sink_single_use_reads_ordinal,
@@ -472,8 +492,8 @@ TEST_F(TargetPipelineTest, ZeroChecksStillMaterializesAuthoredAssertions) {
   EXPECT_LT(counts.worker_outlining_ordinals[1],
             counts.execution_target_inlining_ordinal);
   EXPECT_LT(counts.execution_target_inlining_ordinal,
-            counts.target_callgraph_specialization_ordinals[3]);
-  EXPECT_LT(counts.target_callgraph_specialization_ordinals[3],
+            counts.target_callgraph_specialization_ordinals[5]);
+  EXPECT_LT(counts.target_callgraph_specialization_ordinals[5],
             counts.execution_cleanup_ordinal);
   EXPECT_LT(counts.execution_cleanup_ordinal,
             counts.boundary_refinement_ordinal);
@@ -541,15 +561,15 @@ TEST_F(TargetPipelineTest, StructuredControlFlowExpandsSourceLoopPolicies) {
 
   const PipelineRunCounts counts = CountPipelineRuns(module.get(), pipeline_op);
   EXPECT_EQ(counts.source_loop_unrolling, 1);
-  EXPECT_EQ(counts.private_fragment_promotion, 2);
+  EXPECT_EQ(counts.private_fragment_promotion, 6);
   EXPECT_EQ(counts.vector_bank_sroa, 1);
-  EXPECT_LT(counts.first_private_fragment_promotion_ordinal,
+  EXPECT_LT(counts.private_fragment_promotion_ordinals[0],
             counts.source_loop_unrolling_ordinal);
   EXPECT_LT(counts.source_loop_unrolling_ordinal,
             counts.vector_bank_sroa_ordinal);
   EXPECT_LT(counts.vector_bank_sroa_ordinal,
-            counts.last_private_fragment_promotion_ordinal);
-  EXPECT_LT(counts.last_private_fragment_promotion_ordinal,
+            counts.private_fragment_promotion_ordinals[5]);
+  EXPECT_LT(counts.private_fragment_promotion_ordinals[5],
             counts.first_complete_target_legalization_ordinal);
   EXPECT_LT(counts.first_complete_target_legalization_ordinal,
             counts.boundary_projection_ordinal);

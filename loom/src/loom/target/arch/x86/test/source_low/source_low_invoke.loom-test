@@ -1,7 +1,7 @@
 // RUN: emit source-low output=low
 
-// Source invocation preserves the native callable boundary after translating
-// semantic operands to the callee's Low register representation.
+// Source invocation translates semantic operands to the callee's Low register
+// representation before profitability composes the trivial helper.
 x86.target<scalar> @target
 
 low.func.def target<x86.scalar.core>(@target) @identity(%value: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
@@ -14,13 +14,8 @@ func.def target(@target) @caller(%value: i32) -> (i32) {
 }
 
 // ----
-low.func.def target<x86.scalar.core>(@target) @identity(%value: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
-  return %value
-}
-
 low.func.def target<x86.scalar.core>(@target) abi(object_function) @caller(%value: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
-  %result = low.func.call pure @identity(%value) : (reg<x86.gpr32>) -> (reg<x86.gpr32>)
-  return %result
+  return %value
 }
 
 // ====
@@ -49,8 +44,8 @@ low.func.def target<x86.scalar.core>(@target) abi(object_function) @noinline_cal
 
 // ====
 
-// An ordinary supported vector call remains a platform ABI boundary. Target
-// policy only requires inlining when the source signature is not representable.
+// An ordinary supported vector call is eligible for profitable composition.
+// The public caller retains the source vector signature in its ABI layout.
 x86.target<avx2> @target
 
 func.def @identity_vector(%value: vector<4xi32>) -> (vector<4xi32>) {
@@ -63,19 +58,14 @@ func.def target(@target) @vector_caller(%value: vector<4xi32>) -> (vector<4xi32>
 }
 
 // ----
-low.func.def target<x86.avx2.core> abi_layout({signature = (vector<4xi32>) -> (vector<4xi32>)}) @identity_vector(%value: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
-  return %value
-}
-
 low.func.def target<x86.avx2.core>(@target) abi(object_function) abi_layout({signature = (vector<4xi32>) -> (vector<4xi32>)}) @vector_caller(%value: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
-  %result = low.func.call pure @identity_vector(%value) : (reg<x86.xmm>) -> (reg<x86.xmm>)
-  return %result
+  return %value
 }
 
 // ====
 
-// Narrow direct calls retain the source signature that distinguishes their
-// normalized carrier from an ordinary i32 in the same GPR32 representation.
+// A narrow source signature remains on the public caller after profitable
+// composition distinguishes its normalized GPR32 carrier from ordinary i32.
 x86.target<avx2> @target
 
 func.def @identity_i8(%value: i8) -> (i8) {
@@ -88,11 +78,6 @@ func.def target(@target) @narrow_caller(%value: i8) -> (i8) {
 }
 
 // ----
-low.func.def target<x86.avx2.core> abi_layout({signature = (i8) -> (i8)}) @identity_i8(%value: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
-  return %value
-}
-
 low.func.def target<x86.avx2.core>(@target) abi(object_function) abi_layout({signature = (i8) -> (i8)}) @narrow_caller(%value: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
-  %result = low.func.call pure @identity_i8(%value) : (reg<x86.gpr32>) -> (reg<x86.gpr32>)
-  return %result
+  return %value
 }

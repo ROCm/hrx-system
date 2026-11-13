@@ -199,7 +199,15 @@ def materialize_amdgpu_descriptor_overlay(
 ) -> Descriptor:
     instruction = _select_instruction(spec, overlay)
     encoding = _select_instruction_encoding(instruction, overlay)
-    xml_operands = _validate_operand_overlay(spec, overlay, instruction, encoding)
+    immediates = _materialize_immediates(overlay)
+    mapped_immediate_fields = _mapped_immediate_fields(overlay, immediates)
+    xml_operands, encoding_fields = _validate_operand_overlay(
+        spec,
+        overlay,
+        instruction,
+        encoding,
+        mapped_immediate_fields,
+    )
     operands = tuple(
         _materialize_operand_overlay(
             operand_overlay,
@@ -215,14 +223,23 @@ def materialize_amdgpu_descriptor_overlay(
     operands = tuple(
         operand for operand in operands if operand.role is OperandRole.RESULT
     ) + tuple(operand for operand in operands if operand.role is not OperandRole.RESULT)
+    # The final format may append a literal to the instruction's XML format.
+    # Supplemental formats without XML facts leave the fixed size unspecified.
+    encoding_format_id = _encoding_format_id(overlay)
+    native_format = spec.encoding_map().get(
+        AMDGPU_ENCODING_FORMAT_XML_NAMES_BY_ID[encoding_format_id]
+    )
     return Descriptor(
         key=overlay.descriptor_key,
         mnemonic=overlay.mnemonic or overlay.instruction_name.lower(),
         semantic_tag=overlay.semantic_tag,
         operands=operands,
-        immediates=_materialize_immediates(overlay),
+        immediates=immediates,
         encoding_field_values=_materialize_encoding_field_values(
-            spec, overlay, encoding
+            spec,
+            overlay,
+            xml_operands,
+            encoding_fields,
         ),
         asm_forms=_asm_forms_for_overlay(overlay),
         asm_surface=overlay.asm_surface,
@@ -233,7 +250,10 @@ def materialize_amdgpu_descriptor_overlay(
         ),
         operand_forms=overlay.operand_forms,
         feature_mask_words=overlay.feature_mask_words,
-        encoding_format_id=_encoding_format_id(overlay),
+        encoding_format_id=encoding_format_id,
+        encoding_byte_count=((native_format.bit_count + 31) // 32) * 4
+        if native_format is not None
+        else None,
         encoding_id=encoding.opcode
         if overlay.encoding_id is None
         else overlay.encoding_id,
@@ -383,10 +403,10 @@ def _materialize_immediates(
 
 
 def _mapped_immediate_fields(
-    overlay: AmdgpuDescriptorOverlay,
+    overlay: AmdgpuDescriptorOverlay, immediates: tuple[Immediate, ...]
 ) -> tuple[tuple[str, Immediate, ImmediateEncodingSlice | None], ...]:
     mapped_fields: list[tuple[str, Immediate, ImmediateEncodingSlice | None]] = []
-    for immediate in _materialize_immediates(overlay):
+    for immediate in immediates:
         try:
             if immediate.encoding_field_id:
                 mapped_fields.append(
@@ -415,12 +435,9 @@ def _mapped_immediate_fields(
 def _materialize_encoding_field_values(
     spec: AmdgpuIsaFactSource,
     overlay: AmdgpuDescriptorOverlay,
-    encoding: AmdgpuIsaInstructionEncoding,
+    xml_operands: dict[str, AmdgpuIsaOperand],
+    encoding_fields: dict[str, AmdgpuIsaEncodingField],
 ) -> tuple[EncodingFieldValue, ...]:
-    xml_operands = _explicit_xml_operands_by_field_name(encoding, overlay)
-    encoding_fields, _partition_carriers = _encoding_fields_and_partition_carriers(
-        spec, overlay, xml_operands
-    )
     field_values = [
         _materialize_encoding_field_value(
             spec, overlay, xml_operands, encoding_fields, field_name, value
@@ -629,8 +646,14 @@ def _validate_operand_overlay(
     overlay: AmdgpuDescriptorOverlay,
     instruction: AmdgpuIsaInstruction,
     encoding: AmdgpuIsaInstructionEncoding,
-) -> dict[str, AmdgpuIsaOperand]:
-    _validate_unique_overlay_fields(overlay)
+    mapped_immediate_fields: tuple[
+        tuple[str, Immediate, ImmediateEncodingSlice | None], ...
+    ],
+) -> tuple[
+    dict[str, AmdgpuIsaOperand],
+    dict[str, AmdgpuIsaEncodingField],
+]:
+    _validate_unique_overlay_fields(overlay, mapped_immediate_fields)
     xml_operands = _explicit_xml_operands_by_field_name(encoding, overlay)
     encoding_fields, partition_carriers = _encoding_fields_and_partition_carriers(
         spec, overlay, xml_operands
@@ -687,7 +710,7 @@ def _validate_operand_overlay(
             )
         covered_fields.add(ignored_operand.xml_field_name)
 
-    for immediate_field, immediate, encoding_slice in _mapped_immediate_fields(overlay):
+    for immediate_field, immediate, encoding_slice in mapped_immediate_fields:
         xml_operand = xml_operands.get(immediate_field)
         if xml_operand is not None:
             if not xml_operand.is_input or xml_operand.is_output:
@@ -762,7 +785,7 @@ def _validate_operand_overlay(
             f"operand field(s): {missing_text}"
         )
     _validate_implicit_operand_overlays(overlay, instruction, encoding)
-    return xml_operands
+    return xml_operands, encoding_fields
 
 
 def _xml_operand_requires_implicit_overlay(xml_operand: AmdgpuIsaOperand) -> bool:
@@ -973,7 +996,12 @@ def _format_architectural_xml_operand(xml_operand: AmdgpuIsaOperand) -> str:
     )
 
 
-def _validate_unique_overlay_fields(overlay: AmdgpuDescriptorOverlay) -> None:
+def _validate_unique_overlay_fields(
+    overlay: AmdgpuDescriptorOverlay,
+    mapped_immediate_fields: tuple[
+        tuple[str, Immediate, ImmediateEncodingSlice | None], ...
+    ],
+) -> None:
     def immediate_subfield_mask(
         immediate: Immediate,
         encoding_slice: ImmediateEncodingSlice | None,
@@ -1012,7 +1040,7 @@ def _validate_unique_overlay_fields(overlay: AmdgpuDescriptorOverlay) -> None:
             )
         covered_fields.add(ignored_operand.xml_field_name)
     immediate_field_masks: dict[str, int | None] = {}
-    for immediate_field, immediate, encoding_slice in _mapped_immediate_fields(overlay):
+    for immediate_field, immediate, encoding_slice in mapped_immediate_fields:
         if immediate_field in covered_fields:
             if immediate_field not in immediate_field_masks:
                 raise AmdgpuDescriptorOverlayError(

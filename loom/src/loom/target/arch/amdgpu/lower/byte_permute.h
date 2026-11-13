@@ -72,6 +72,16 @@ iree_status_t loom_amdgpu_byte_permute_emitter_emit(
     loom_value_id_t source1, uint32_t selector, loom_type_t result_type,
     loom_value_id_t* out_value);
 
+// Gathers one word from up to four source words. Each selector is a byte
+// ordinal in the concatenation of |sources|. Identity maps alias their input;
+// other maps need at most three V_PERM_B32 packets.
+iree_status_t loom_amdgpu_byte_permute_emitter_gather(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_amdgpu_byte_permute_emitter_t* emitter,
+    const loom_value_id_t sources[4], uint32_t source_count,
+    const uint8_t selectors[4], loom_type_t result_type,
+    loom_value_id_t* out_value);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif

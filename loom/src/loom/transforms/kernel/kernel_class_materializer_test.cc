@@ -20,12 +20,14 @@
 #include "loom/format/bytecode/writer.h"
 #include "loom/format/text/parser.h"
 #include "loom/ir/context.h"
+#include "loom/ir/input_contract.h"
 #include "loom/ops/index/ops.h"
 #include "loom/ops/kernel/ops.h"
 #include "loom/ops/op_defs.h"
 #include "loom/ops/scalar/ops.h"
 #include "loom/ops/scf/ops.h"
 #include "loom/ops/template/ops.h"
+#include "loom/ops/view/ops.h"
 #include "loom/testing/module_ptr.h"
 #include "loom/tooling/context/context.h"
 #include "loom/transforms/symbol/template_selection.h"
@@ -135,7 +137,7 @@ class KernelClassMaterializerTest : public ::testing::Test {
     IREE_EXPECT_OK(loom_bytecode_read_module(
         iree_make_const_byte_span(bytecode.data(), bytecode.size()),
         IREE_SV("kernel_class.loombc"), &context_, &block_pool_, &read_options,
-        &read_result, &round_tripped_module, iree_allocator_system()));
+        iree_allocator_system(), &read_result, &round_tripped_module));
     EXPECT_EQ(read_result.error_count, 0u);
     Verify(round_tripped_module);
     return ModulePtr(round_tripped_module);
@@ -146,7 +148,7 @@ class KernelClassMaterializerTest : public ::testing::Test {
 };
 
 TEST_F(KernelClassMaterializerTest,
-       PublishesIndependentAffineClassesAsOrdinaryKernelIR) {
+       PublishesRequiredAndOptionalDecisionsInSourceOrder) {
   constexpr iree_host_size_t kSiteCount = 1000;
   const iree_string_view_t source = IREE_SV(R"(
 template.decl @boundary.family(%effective_n: index, %duplicate: index) -> (index)
@@ -167,7 +169,7 @@ template.def<@sign.family> priority(10) @nonnegative(%value: i32) where [ge(%val
   template.return
 }
 
-template.def<@sign.family> priority(1) @negative(%value: i32) {
+template.def<@sign.family> priority(1) @negative(%value: i32) where [lt(%value, 0)] {
   template.return
 }
 
@@ -196,9 +198,11 @@ kernel.def @classified() {
 
   iree_arena_allocator_t analysis_arena;
   iree_arena_initialize(&block_pool_, &analysis_arena);
+  iree_arena_allocator_t construction_arena;
+  iree_arena_initialize(&block_pool_, &construction_arena);
   loom_symbol_reference_table_t references = {};
   ModulePtr source_module =
-      ParseAndVerify(source, &analysis_arena, &references);
+      ParseAndVerify(source, &construction_arena, &references);
   ASSERT_NE(source_module, nullptr);
 
   loom_symbol_fact_table_t symbol_facts = {};
@@ -220,20 +224,29 @@ kernel.def @classified() {
       source_module->symbols.entries[kernel_symbol_id].defining_op);
   loom_value_fact_table_t kernel_facts = {};
   IREE_ASSERT_OK(loom_value_fact_table_initialize(
-      &kernel_facts, &analysis_arena, source_module->values.count));
+      &kernel_facts, &construction_arena, source_module->values.count));
   IREE_ASSERT_OK(loom_value_fact_table_compute(&kernel_facts,
                                                source_module.get(), kernel));
   loom_symbolic_expr_context_t expression_context = {};
   loom_symbolic_expr_context_initialize(source_module.get(),
                                         /*value_domain=*/nullptr, &kernel_facts,
-                                        &analysis_arena, &expression_context);
+                                        &construction_arena,
+                                        &expression_context);
   const loom_template_applicability_target_t kernel_target = {};
   loom_kernel_class_classifier_t classifier = {};
   IREE_ASSERT_OK(loom_kernel_class_classifier_build(
       source_module.get(), kernel_symbol_id, &references, &decision_models,
       &kernel_facts, &expression_context, &kernel_target, &analysis_arena,
       &classifier));
+  // Publication retains the compact boundary facts and source operation
+  // identity; construction references and dataflow tables can retire first.
+  iree_arena_deinitialize(&construction_arena);
+  iree_arena_block_pool_trim(&block_pool_);
   ASSERT_EQ(classifier.decision_count, 4u);
+  EXPECT_EQ(classifier.decisions[0].generic_result.kind,
+            LOOM_DECISION_PROGRAM_RESULT_SELECTED);
+  EXPECT_EQ(classifier.decisions[1].generic_result.kind,
+            LOOM_DECISION_PROGRAM_RESULT_UNRESOLVED);
   ASSERT_EQ(classifier.projection_count, 2u);
   EXPECT_EQ(classifier.projections[0].kind,
             LOOM_KERNEL_CLASS_PROJECTION_AFFINE);
@@ -245,7 +258,6 @@ kernel.def @classified() {
   loom_value_fact_table_t site_facts = {};
   IREE_ASSERT_OK(loom_value_fact_table_initialize(&site_facts, &analysis_arena,
                                                   kSiteCount * 4));
-  site_facts.count = kSiteCount * 4;
   for (iree_host_size_t i = 0; i < kSiteCount; ++i) {
     const iree_host_size_t value_base = i * 4;
     site_argument_values[value_base + 0] =
@@ -256,16 +268,20 @@ kernel.def @classified() {
         static_cast<loom_value_id_t>(value_base + 2);
     site_argument_values[value_base + 3] =
         static_cast<loom_value_id_t>(value_base + 3);
-    site_facts.entries[value_base + 0] =
-        loom_value_facts_exact_i64(static_cast<int64_t>(i));
-    site_facts.entries[value_base + 1] =
-        loom_value_facts_exact_i64(static_cast<int64_t>((i * 7) % 5));
+    IREE_ASSERT_OK(loom_value_fact_table_define(
+        &site_facts, value_base + 0,
+        loom_value_facts_exact_i64(static_cast<int64_t>(i))));
+    IREE_ASSERT_OK(loom_value_fact_table_define(
+        &site_facts, value_base + 1,
+        loom_value_facts_exact_i64(static_cast<int64_t>((i * 7) % 5))));
     const int64_t effective_n =
         static_cast<int64_t>(i + static_cast<iree_host_size_t>((i * 7) % 5));
-    site_facts.entries[value_base + 2] =
-        loom_value_facts_exact_i64(effective_n >= 128 ? 1 : -1);
-    site_facts.entries[value_base + 3] =
-        loom_value_facts_exact_i64(static_cast<int64_t>(1000003 * i + 17));
+    IREE_ASSERT_OK(loom_value_fact_table_define(
+        &site_facts, value_base + 2,
+        loom_value_facts_exact_i64(effective_n >= 128 ? 1 : -1)));
+    IREE_ASSERT_OK(loom_value_fact_table_define(
+        &site_facts, value_base + 3,
+        loom_value_facts_exact_i64(static_cast<int64_t>(1000003 * i + 17))));
     sites[i] = {
         .facts = &site_facts,
         .argument_values = &site_argument_values[value_base],
@@ -434,11 +450,12 @@ kernel.def @classified() {
       loom_value_facts_exact_i64(7),  loom_value_facts_exact_i64(8),
       loom_value_facts_exact_i64(32), loom_value_facts_unknown(),
   };
-  const loom_value_fact_table_t site_facts = {
-      .entries = facts,
-      .count = 6,
-      .capacity = 6,
-  };
+  loom_value_fact_table_t site_facts = {};
+  IREE_ASSERT_OK(loom_value_fact_table_initialize(&site_facts, &arena,
+                                                  IREE_ARRAYSIZE(facts)));
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(facts); ++i) {
+    IREE_ASSERT_OK(loom_value_fact_table_define(&site_facts, i, facts[i]));
+  }
   const loom_value_id_t arguments[] = {0, 1, 2, 3, 4, 5};
   const loom_kernel_class_site_t sites[] = {
       {.facts = &site_facts, .argument_values = arguments},
@@ -493,9 +510,31 @@ kernel.def @classified() {
   iree_arena_deinitialize(&arena);
 }
 
-TEST_F(KernelClassMaterializerTest,
+class KernelClassInputMaterializerTest
+    : public KernelClassMaterializerTest,
+      public ::testing::WithParamInterface<bool> {};
+
+TEST_P(KernelClassInputMaterializerTest,
        PublishesExternalProviderSelectionAsGenericRequest) {
-  const iree_string_view_t source = IREE_SV(R"(
+  const bool shaped = GetParam();
+  const iree_string_view_t source = shaped ? IREE_SV(R"(
+template.decl @external.family(%n: index, %value: view<[%n]xf32>)
+
+template.def<@external.family> priority(1) @fallback(%n: index, %value: view<[%n]xf32>) {
+  template.return
+}
+
+kernel.def @classified() {
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch(%n: index, %buffer: buffer) {
+  %zero = index.constant 0 : offset
+  %value = buffer.view %buffer[%zero] : buffer -> view<[%n]xf32>
+  template.apply<@external.family>(%n, %value) : (index, view<[%n]xf32>) -> ()
+  kernel.return
+}
+)")
+                                           : IREE_SV(R"(
 template.decl @external.family(%n: index)
 
 template.def<@external.family> priority(1) @fallback(%n: index) {
@@ -528,25 +567,45 @@ kernel.def @classified() {
       .reserved = {},
       .args = {0, 128},
   };
+  alignas(loom_input_contract_t) const struct {
+    // One retained shape requirement in the contract's trailing storage.
+    uint32_t count;
+    // Canonical contract padding.
+    uint32_t reserved;
+    // External provider's fixed width, independent of its scalar predicates.
+    loom_input_requirement_t requirement;
+  } input = {
+      .count = 1,
+      .reserved = 0,
+      .requirement =
+          {
+              .argument = 1,
+              .axis = 0,
+              .expected = 256,
+          },
+  };
   const loom_template_provider_contract_t external_contract = {
       .kind = LOOM_TEMPLATE_PROVIDER_KIND_DEF,
       .has_body = true,
-      .argument_count = 1,
+      .argument_count = static_cast<uint16_t>(shaped ? 2 : 1),
       .result_count = 0,
-      .predicate_count = 1,
+      .predicate_count = static_cast<uint16_t>(shaped ? 0 : 1),
       .target_condition_count = 0,
       .name = IREE_SV("external"),
       .priority = 10,
-      .predicates = &external_predicate,
+      .input_contract =
+          shaped ? reinterpret_cast<const loom_input_contract_t*>(&input)
+                 : nullptr,
+      .predicates = shaped ? nullptr : &external_predicate,
   };
   const loom_symbol_ref_t family = {
       .module_id = 0,
       .symbol_id = family_symbol_id,
   };
   loom_template_provider_summary_t external_provider = {};
-  IREE_ASSERT_OK(loom_template_provider_contract_bind_family(
+  loom_template_provider_contract_bind_family(
       &external_contract, source_module.get(), family, loom_symbol_ref_null(),
-      /*origin_ordinal=*/7, &analysis_arena, &external_provider));
+      /*origin_ordinal=*/7, &external_provider);
 
   loom_symbol_fact_table_t symbol_facts = {};
   loom_symbol_fact_table_initialize(&symbol_facts, &analysis_arena);
@@ -582,16 +641,17 @@ kernel.def @classified() {
       &kernel_facts, &expression_context, &kernel_target, &analysis_arena,
       &classifier));
   ASSERT_EQ(classifier.decision_count, 1u);
+  EXPECT_EQ(classifier.decisions[0].input_count, shaped ? 1u : 0u);
 
   loom_value_fact_table_t site_facts = {};
   IREE_ASSERT_OK(loom_value_fact_table_initialize(&site_facts, &analysis_arena,
                                                   /*capacity=*/1));
-  site_facts.count = 1;
-  site_facts.entries[0] = loom_value_facts_exact_i64(256);
-  const loom_value_id_t site_argument_value = 0;
+  IREE_ASSERT_OK(loom_value_fact_table_define(&site_facts, 0,
+                                              loom_value_facts_exact_i64(256)));
+  const loom_value_id_t site_arguments[] = {0, LOOM_VALUE_ID_INVALID};
   const loom_kernel_class_site_t site = {
       .facts = &site_facts,
-      .argument_values = &site_argument_value,
+      .argument_values = site_arguments,
   };
   const loom_kernel_class_collection_options_t collection_options =
       loom_kernel_class_collection_options_default();
@@ -643,11 +703,19 @@ kernel.def @classified() {
   ASSERT_NE(apply_op, nullptr);
   const loom_value_slice_t apply_operands =
       loom_template_apply_operands(apply_op);
-  ASSERT_EQ(apply_operands.count, 1u);
+  ASSERT_EQ(apply_operands.count, shaped ? 2u : 1u);
   const loom_value_t* refined_operand =
       loom_module_value(class_module, apply_operands.values[0]);
   ASSERT_FALSE(loom_value_is_block_arg(refined_operand));
   EXPECT_EQ(loom_value_def_op(refined_operand), assume_op);
+  if (shaped) {
+    const auto* view = loom_value_def_op(
+        loom_module_value(class_module, apply_operands.values[1]));
+    ASSERT_TRUE(loom_view_refine_isa(view));
+    const auto type =
+        loom_module_value_type(class_module, apply_operands.values[1]);
+    EXPECT_EQ(loom_type_dim_value_id_at(type, 0), apply_operands.values[0]);
+  }
 
   // The ordinary request survives serialization independently of every
   // classifier input and selects the same external provider when linked into
@@ -667,9 +735,9 @@ kernel.def @classified() {
       .symbol_id = FindSymbol(class_module, IREE_SV("external.family")),
   };
   loom_template_provider_summary_t rebound_external_provider = {};
-  IREE_ASSERT_OK(loom_template_provider_contract_bind_family(
+  loom_template_provider_contract_bind_family(
       &external_contract, class_module, class_family, loom_symbol_ref_null(),
-      /*origin_ordinal=*/7, &query_arena, &rebound_external_provider));
+      /*origin_ordinal=*/7, &rebound_external_provider);
   loom_symbol_fact_table_t class_symbol_facts = {};
   loom_symbol_fact_table_initialize(&class_symbol_facts, &query_arena);
   loom_template_provider_catalog_t class_providers = {};
@@ -691,6 +759,9 @@ kernel.def @classified() {
   EXPECT_EQ(query_result.unresolved_site_count, 0u);
   iree_arena_deinitialize(&query_arena);
 }
+
+INSTANTIATE_TEST_SUITE_P(ScalarAndShape, KernelClassInputMaterializerTest,
+                         ::testing::Bool());
 
 }  // namespace
 }  // namespace loom

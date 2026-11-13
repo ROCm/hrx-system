@@ -343,6 +343,7 @@ static iree_status_t loom_refine_boundaries_clone_function_specialization(
       &target_op));
   target_op->instance_flags = source_op->instance_flags;
   target_op->traits = source_op->traits;
+  target_op->intrinsic_read_spaces = source_op->intrinsic_read_spaces;
   target_op->intrinsic_write_spaces = source_op->intrinsic_write_spaces;
 
   loom_attribute_t* target_attrs = loom_op_attrs(target_op);
@@ -382,7 +383,7 @@ static iree_status_t loom_refine_boundaries_clone_function_specialization(
       loom_ir_clone_region(&builder, source_body, &remap, &target_body);
   loom_builder_restore(&builder, saved_ip);
   IREE_RETURN_IF_ERROR(status);
-  loom_op_regions(target_op)[0] = target_body;
+  loom_op_set_region(target_op, 0, target_body);
 
   uint16_t predicate_count = 0;
   const loom_predicate_t* predicates =

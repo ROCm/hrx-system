@@ -6,6 +6,7 @@
 
 #include "iree/async/platform/io_uring/uring_registration.h"
 
+#include <fcntl.h>
 #include <sys/mman.h>
 #include <unistd.h>
 
@@ -96,6 +97,117 @@ class IoUringRegistrationTest : public ::testing::Test {
   iree_io_uring_ring_t ring_ = {};
   bool ring_initialized_ = false;
 };
+
+class IoUringBufferCloneTest : public IoUringRegistrationTest {
+ protected:
+  void SetUp() override {
+    IoUringRegistrationTest::SetUp();
+    if (HasFatalFailure() || IsSkipped()) {
+      return;
+    }
+    iree_io_uring_rsrc_register_t table = {
+        .nr = kCapacity,
+        .flags = IREE_IORING_RSRC_REGISTER_SPARSE,
+    };
+    ASSERT_EQ(iree_io_uring_ring_register(&ring_, IREE_IORING_REGISTER_BUFFERS2,
+                                          &table, sizeof(table)),
+              0);
+    struct iovec buffers[3] = {};
+    for (size_t i = 0; i < 3; ++i) {
+      buffers[i] = {backing_[i], sizeof(backing_[i])};
+    }
+    ASSERT_EQ(
+        iree_io_uring_registration_prepare_buffers(buffers, 3, &source_fd_), 0);
+    zero_fd_ = open("/dev/zero", O_RDONLY | O_CLOEXEC);
+    ASSERT_GE(zero_fd_, 0);
+    IREE_ASSERT_OK(iree_io_uring_ring_enable(&ring_));
+    const int result = Clone(0, 0);
+    if (result == -EINVAL || result == -ENOSYS || result == -EOPNOTSUPP ||
+        result == -EPERM || result == -EACCES) {
+      GTEST_SKIP() << "kernel cannot clone registered buffer ranges";
+    }
+    ASSERT_EQ(result, 0);
+    // Exercise composition even when the test kernel preserves clone suffixes.
+    // The same registration owner executes this path after native detection.
+    ring_.registration.buffer_clone_capacity = kCapacity;
+  }
+
+  void TearDown() override {
+    if (zero_fd_ >= 0) {
+      EXPECT_EQ(close(zero_fd_), 0);
+    }
+    if (source_fd_ >= 0) {
+      EXPECT_EQ(iree_io_uring_registration_release_buffers(source_fd_), 0);
+    }
+    IoUringRegistrationTest::TearDown();
+  }
+
+  int Clone(uint32_t source_index, uint32_t destination_index) {
+    iree_io_uring_clone_buffers_t clone = {
+        .src_fd = static_cast<uint32_t>(source_fd_),
+        .flags = IREE_IORING_REGISTER_DST_REPLACE,
+        .src_off = source_index,
+        .dst_off = destination_index,
+        .nr = 1,
+    };
+    return iree_io_uring_ring_register(
+        &ring_, IREE_IORING_REGISTER_CLONE_BUFFERS, &clone, 1);
+  }
+
+  void ReadSlot(uint32_t slot, size_t backing_index) {
+    memset(backing_[backing_index], 0xA5, sizeof(backing_[backing_index]));
+    auto* submission = iree_io_uring_ring_get_sqe(&ring_);
+    ASSERT_NE(submission, nullptr);
+    memset(submission, 0, sizeof(*submission));
+    submission->opcode = IREE_IORING_OP_READ_FIXED;
+    submission->fd = zero_fd_;
+    submission->addr = reinterpret_cast<uintptr_t>(backing_[backing_index]);
+    submission->len = sizeof(backing_[backing_index]);
+    submission->buf_index = slot;
+    IREE_ASSERT_OK(
+        iree_io_uring_ring_wait_cqe(&ring_, 1, true, IREE_DURATION_INFINITE));
+    auto* completion = iree_io_uring_ring_peek_cqe(&ring_);
+    ASSERT_NE(completion, nullptr);
+    const int result = completion->res;
+    iree_io_uring_ring_cq_advance(&ring_, 1);
+    ASSERT_EQ(result, sizeof(backing_[backing_index]));
+    const uint8_t zeros[sizeof(backing_[0])] = {};
+    EXPECT_EQ(memcmp(backing_[backing_index], zeros, sizeof(zeros)), 0);
+  }
+
+  // Small sparse table leaves holes on both sides of a middle replacement.
+  static constexpr uint32_t kCapacity = 8;
+  // Backing remains alive until both destination and source pins are released.
+  alignas(4096) uint8_t backing_[3][4096] = {};
+  // Independent pin owner shared by every clone.
+  int source_fd_ = -1;
+  // Finite read source consumed by the real fixed-buffer I/O path.
+  int zero_fd_ = -1;
+};
+
+TEST_F(IoUringBufferCloneTest, ReplacementPreservesPrefixAndSuffix) {
+  ASSERT_EQ(Clone(0, 0), 0);
+  ASSERT_EQ(Clone(1, 4), 0);
+  ASSERT_EQ(Clone(2, 7), 0);
+  for (uint32_t slot : {0u, 4u, 7u}) {
+    const uint32_t source_index = slot == 0 ? 0 : slot == 4 ? 1 : 2;
+    ASSERT_EQ(Clone(source_index, slot), 0);
+    ASSERT_NO_FATAL_FAILURE(ReadSlot(0, 0));
+    ASSERT_NO_FATAL_FAILURE(ReadSlot(4, 1));
+    ASSERT_NO_FATAL_FAILURE(ReadSlot(7, 2));
+  }
+}
+
+TEST_F(IoUringBufferCloneTest, FailedReplacementPreservesLiveRegistrations) {
+  ASSERT_EQ(Clone(0, 0), 0);
+  ASSERT_EQ(Clone(2, 7), 0);
+  // An absent source slot is rejected before the target table changes.
+  EXPECT_EQ(Clone(3, 0), -EOVERFLOW);
+  ASSERT_NO_FATAL_FAILURE(ReadSlot(0, 0));
+  ASSERT_NO_FATAL_FAILURE(ReadSlot(7, 2));
+  ASSERT_EQ(Clone(1, 4), 0);
+  ASSERT_NO_FATAL_FAILURE(ReadSlot(4, 1));
+}
 
 // Holds a real SINGLE_ISSUER owner until the test explicitly allows progress.
 // Teardown always joins the owner, including after a fatal test assertion.

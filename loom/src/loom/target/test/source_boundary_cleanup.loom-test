@@ -1,0 +1,273 @@
+// RUN: emit source-low output=low
+
+// Boundary refinement supplies the zero operands after source cleanup. The
+// guarded assumption belongs to an unreachable branch and must disappear
+// before target verification. Keep the call boundary through source inlining.
+test.target<low_core> @target
+
+func.def noinline @optional_count(%enabled: i1, %head: i32, %tail: i32) -> (i32) {
+  %c0 = scalar.constant 0 : i32
+  %selected = scf.select %enabled, %tail, %c0 : i32
+  %count = scalar.addi %head, %selected : i32
+  %present = scalar.cmpi ne, %count, %c0 : i32
+  %result = scf.if %present -> (i32) {
+    %bounded = scalar.assume %count [ne(%count, 0)] : i32
+    scf.yield %bounded : i32
+  } else {
+    scf.yield %c0 : i32
+  }
+  func.return %result : i32
+}
+
+func.def public target(@target) @empty_count(%enabled: i1) -> (i32) {
+  %c0 = scalar.constant 0 : i32
+  %count = func.call @optional_count(%enabled, %c0, %c0) : (i1, i32, i32) -> (i32)
+  func.return %count : i32
+}
+
+// ----
+low.func.def noinline target<test.low.core> @optional_count(%enabled: reg<test.i32>) -> (reg<test.i32>) asm {
+  %result = test.const.i32 0
+  return %result
+}
+
+low.func.def public target<test.low.core>(@target) abi(object_function) @empty_count(%enabled: reg<test.i32>) -> (reg<test.i32>) asm {
+  %count = low.func.call pure @optional_count(%enabled) : (reg<test.i32>) -> (reg<test.i32>)
+  return %count
+}
+
+// ====
+// RUN: emit source-low output=low control-flow=structured-low
+
+// Structured consumers need the same cleanup for index-valued bounds.
+test.target<low_core> @target
+
+func.def noinline @optional_extent(%enabled: i1, %head: index, %tail: index) -> (index) {
+  %c0 = index.constant 0 : index
+  %selected = scf.select %enabled, %tail, %c0 : index
+  %extent = index.add %head, %selected : index
+  %present = index.cmp ne, %extent, %c0 : index
+  %result = scf.if %present -> (index) {
+    %bounded = index.assume %extent [ne(%extent, 0)] : index
+    scf.yield %bounded : index
+  } else {
+    scf.yield %c0 : index
+  }
+  func.return %result : index
+}
+
+func.def public target(@target) @empty_extent(%enabled: i1) -> (index) {
+  %c0 = index.constant 0 : index
+  %extent = func.call @optional_extent(%enabled, %c0, %c0) : (i1, index, index) -> (index)
+  func.return %extent : index
+}
+
+// ----
+low.func.def noinline target<test.low.core> @optional_extent(%enabled: reg<test.i32>) -> (reg<test.i32>) asm {
+  %result = test.const.i32 0
+  return %result
+}
+
+low.func.def public target<test.low.core>(@target) abi(object_function) @empty_extent(%enabled: reg<test.i32>) -> (reg<test.i32>) asm {
+  %extent = low.func.call pure @optional_extent(%enabled) : (reg<test.i32>) -> (reg<test.i32>)
+  return %extent
+}
+
+// ====
+// RUN: pass refine-boundaries
+
+// Repeated calls feed the result range back into the shared formal summary.
+// Saturating decrement must converge without walking every integer bound.
+test.target<low_core> @target
+
+func.def noinline @decrement(%value: i32) -> (i32) {
+  %minimum = scalar.constant 0 : i32
+  %step = scalar.constant 1 : i32
+  %nonnegative = scalar.maxsi %value, %minimum : i32
+  %difference = scalar.subi %nonnegative, %step : i32
+  %result = scalar.maxsi %difference, %minimum : i32
+  func.return %result : i32
+}
+
+func.def public target(@target) @twice() -> (i32) {
+  %value = scalar.constant 16 : i32
+  %first = func.call @decrement(%value) : (i32) -> (i32)
+  %second = func.call @decrement(%first) : (i32) -> (i32)
+  func.return %second : i32
+}
+
+// ----
+test.target<low_core> @target
+
+func.def noinline @decrement(%value: i32) -> (i32) {
+  %minimum = scalar.constant 0 : i32
+  %nonnegative = scalar.maxsi %value, %minimum : i32
+  %11 = scalar.constant -1 : i32
+  %difference = scalar.addi %nonnegative, %11 : i32
+  %result = scalar.maxsi %difference, %minimum : i32
+  func.return %result : i32
+}
+
+func.def public target(@target) @twice() -> (i32) {
+  %value = scalar.constant 16 : i32
+  %first = func.call pure @decrement(%value) : (i32) -> (i32)
+  %second = func.call pure @decrement(%first) : (i32) -> (i32)
+  func.return %second : i32
+}
+
+// ====
+// RUN: emit source-low output=low control-flow=structured-low
+
+// A call inside a counted recurrence sees every body observation. Provisional
+// facts from the first or final iteration must not specialize the shared callee.
+test.target<low_core> @target
+
+func.def noinline @double_value(%value: i32) -> (i32) {
+  %result = scalar.addi %value, %value : i32
+  func.return %result : i32
+}
+
+func.def public target(@target) @repeat_and_continue() -> (i32) {
+  %initial = scalar.constant 1 : i32
+  %start = index.constant 0 : index
+  %count = index.constant 4 : index
+  %step = index.constant 1 : index
+  %repeated = scf.for %i = [%start to %count step %step](%value = %initial : i32) -> (i32) {
+    %next = func.call @double_value(%value) : (i32) -> (i32)
+    scf.yield %next : i32
+  }
+  %result = func.call @double_value(%repeated) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ----
+low.func.def noinline target<test.low.core> @double_value(%value: reg<test.i32>) -> (reg<test.i32>) asm {
+  %result = test.add.i32 %value, %value
+  return %result
+}
+
+low.func.def public target<test.low.core>(@target) abi(object_function) @repeat_and_continue() -> (reg<test.i32>) asm {
+  %initial = test.const.i32 1
+  %start = test.const.i32 0
+  %count = test.const.i32 4
+  %repeated = low.scf.for signed [%start to %count step %initial] iter_args(%initial: reg<test.i32>) -> (reg<test.i32>) do(%i: reg<test.i32>, %value: reg<test.i32>) {
+    %next = low.func.call pure @double_value(%value) : (reg<test.i32>) -> (reg<test.i32>)
+    low.scf.yield %next : reg<test.i32>
+  }
+  %result = low.func.call pure @double_value(%repeated) : (reg<test.i32>) -> (reg<test.i32>)
+  return %result
+}
+
+// ====
+// RUN: emit source-low output=low
+
+// This unbound helper acquires its target during call-graph specialization.
+// Count shared expressions once before inline profitability, including wide
+// values whose repeated construction would otherwise exceed the budget.
+test.target<low_core> @target
+
+func.def @double_lane(%value: i32) -> (i32) {
+  %left = vector.splat %value : vector<16xi32>
+  %right = vector.splat %value : vector<16xi32>
+  %sum = vector.addi %left, %right : vector<16xi32>
+  %result = vector.extract %sum[0] : vector<16xi32> -> i32
+  func.return %result : i32
+}
+
+func.def public target(@target) @combine(%lhs: i32, %rhs: i32) -> (i32) {
+  %left = func.call @double_lane(%lhs) : (i32) -> (i32)
+  %right = func.call @double_lane(%rhs) : (i32) -> (i32)
+  %result = scalar.addi %left, %right : i32
+  func.return %result : i32
+}
+
+// ----
+low.func.def public target<test.low.core>(@target) abi(object_function) @combine(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) asm {
+  %result$20 = test.add.i32 %lhs, %lhs
+  %result$21 = test.add.i32 %rhs, %rhs
+  %result$22 = test.add.i32 %result$20, %result$21
+  return %result$22
+}
+
+// ====
+// RUN: emit source-low output=low
+
+// Before inlining, both private arrays escape into the helper. Once its
+// unobserved destination stores disappear, cleanup removes the loop, exposing
+// the source initialization as unobserved too.
+test.target<low_core> @target
+
+func.def inline @copy_coordinates(%source: buffer, %destination: buffer) {
+  %origin = index.constant 0 : offset
+  %input = buffer.view %source[%origin] : buffer -> view<3xi32>
+  %output = buffer.view %destination[%origin] : buffer -> view<3xi32>
+  %start = index.constant 0 : index
+  %count = index.constant 3 : index
+  %step = index.constant 1 : index
+  scf.for %i = [%start to %count step %step] {
+    %value = view.load %input[%i] : view<3xi32> -> i32
+    view.store %value, %output[%i] : i32, view<3xi32>
+  }
+  func.return
+}
+
+func.def public target(@target) @unused_coordinates(%x: i32, %y: i32, %z: i32) {
+  %bytes = index.constant 12 : offset
+  %source = buffer.alloca<private> align(4) %bytes : buffer
+  %destination = buffer.alloca<private> align(4) %bytes : buffer
+  %origin = index.constant 0 : offset
+  %input = buffer.view %source[%origin] : buffer -> view<3xi32>
+  view.store %x, %input[0] : i32, view<3xi32>
+  view.store %y, %input[1] : i32, view<3xi32>
+  view.store %z, %input[2] : i32, view<3xi32>
+  func.call @copy_coordinates(%source, %destination) : (buffer, buffer)
+  func.return
+}
+
+// ----
+low.func.def public target<test.low.core>(@target) abi(object_function) @unused_coordinates(%x: reg<test.i32>, %y: reg<test.i32>, %z: reg<test.i32>) asm {
+  return
+}
+
+// ====
+// RUN: emit source-low output=low control-flow=structured-low
+
+// A helper returning scalarized coordinates has the same storage dependency
+// when the caller discards its results. Structured consumers need no storage.
+test.target<low_core> @target
+
+func.def @read_coordinates(%source: buffer) -> (i32, i32, i32) {
+  %bytes = index.constant 12 : offset
+  %destination = buffer.alloca<private> align(4) %bytes : buffer
+  %origin = index.constant 0 : offset
+  %input = buffer.view %source[%origin] : buffer -> view<3xi32>
+  %output = buffer.view %destination[%origin] : buffer -> view<3xi32>
+  %start = index.constant 0 : index
+  %count = index.constant 3 : index
+  %step = index.constant 1 : index
+  scf.for %i = [%start to %count step %step] {
+    %value = view.load %input[%i] : view<3xi32> -> i32
+    view.store %value, %output[%i] : i32, view<3xi32>
+  }
+  %x = view.load %output[0] : view<3xi32> -> i32
+  %y = view.load %output[1] : view<3xi32> -> i32
+  %z = view.load %output[2] : view<3xi32> -> i32
+  func.return %x, %y, %z : i32, i32, i32
+}
+
+func.def public target(@target) @unused_result(%x: i32, %y: i32, %z: i32) {
+  %bytes = index.constant 12 : offset
+  %source = buffer.alloca<private> align(4) %bytes : buffer
+  %origin = index.constant 0 : offset
+  %input = buffer.view %source[%origin] : buffer -> view<3xi32>
+  view.store %x, %input[0] : i32, view<3xi32>
+  view.store %y, %input[1] : i32, view<3xi32>
+  view.store %z, %input[2] : i32, view<3xi32>
+  %first, %second, %third = func.call @read_coordinates(%source) : (buffer) -> (i32, i32, i32)
+  func.return
+}
+
+// ----
+low.func.def public target<test.low.core>(@target) abi(object_function) @unused_result(%x: reg<test.i32>, %y: reg<test.i32>, %z: reg<test.i32>) asm {
+  return
+}

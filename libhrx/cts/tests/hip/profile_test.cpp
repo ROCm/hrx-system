@@ -61,6 +61,10 @@ class HipProfileTest : public testing::Test {
         EXPECT_EQ(hipSuccess,
                   Call<decltype(&hipGraphDestroy)>("hipGraphDestroy", graph_));
       }
+      if (event_) {
+        EXPECT_EQ(hipSuccess,
+                  Call<decltype(&hipEventDestroy)>("hipEventDestroy", event_));
+      }
       if (stream_) {
         EXPECT_EQ(hipSuccess, Call<decltype(&hipStreamDestroy)>(
                                   "hipStreamDestroy", stream_));
@@ -86,6 +90,16 @@ class HipProfileTest : public testing::Test {
     if (!HasFailure()) {
       CheckCapture();
     }
+  }
+
+  void CheckCaptureProgress() {
+    // The file sink buffers stdio writes. Check progress here and parse every
+    // record after shutdown has committed the final buffered suffix.
+    std::ifstream input(profile_file_.path(), std::ios::binary | std::ios::ate);
+    ASSERT_TRUE(input.good());
+    const std::streamoff length = input.tellg();
+    ASSERT_GT(length, capture_length_);
+    capture_length_ = length;
   }
 
   void CheckCapture() {
@@ -133,7 +147,7 @@ class HipProfileTest : public testing::Test {
       }
     }
     EXPECT_GT(ended_count, 0u);
-    EXPECT_EQ(direct_count, 1u);
+    EXPECT_EQ(direct_count, direct_count_);
     EXPECT_EQ(recorded_count, 2u);
   }
 
@@ -153,10 +167,16 @@ class HipProfileTest : public testing::Test {
   void* output_ = nullptr;
   // Explicit stream used for ordinary dispatch and graph capture.
   hipStream_t stream_ = nullptr;
+  // Reusable event covering dispatch completion without timestamp work.
+  hipEvent_t event_ = nullptr;
   // Captured graph retained until its executable is released.
   hipGraph_t graph_ = nullptr;
   // Instantiated graph retained through its final execution.
   hipGraphExec_t graph_executable_ = nullptr;
+  // Direct dispatches whose completion has been synchronized by the test.
+  uint32_t direct_count_ = 0;
+  // File length at the preceding synchronization group's checkpoint.
+  std::streamoff capture_length_ = 0;
 };
 
 TEST_F(HipProfileTest, DispatchModeCapturesDirectAndRecordedExecution) {
@@ -178,6 +198,9 @@ TEST_F(HipProfileTest, DispatchModeCapturesDirectAndRecordedExecution) {
   ASSERT_EQ(hipSuccess, Call<decltype(&hipMalloc)>("hipMalloc", &output_, 4));
   ASSERT_EQ(hipSuccess,
             Call<decltype(&hipStreamCreate)>("hipStreamCreate", &stream_));
+  ASSERT_EQ(hipSuccess,
+            Call<decltype(&hipEventCreateWithFlags)>(
+                "hipEventCreateWithFlags", &event_, hipEventDisableTiming));
   uint32_t expected = 0xC0FFEE;
   void* arguments[] = {&output_, &expected};
   ASSERT_EQ(hipSuccess, Call<decltype(&hipModuleLaunchKernel)>(
@@ -185,6 +208,7 @@ TEST_F(HipProfileTest, DispatchModeCapturesDirectAndRecordedExecution) {
                             0, stream_, arguments, nullptr));
   ASSERT_EQ(hipSuccess, Call<decltype(&hipStreamSynchronize)>(
                             "hipStreamSynchronize", stream_));
+  ++direct_count_;
   uint32_t actual = 0;
   ASSERT_EQ(hipSuccess,
             Call<decltype(&hipMemcpy)>("hipMemcpy", &actual, output_,
@@ -213,6 +237,49 @@ TEST_F(HipProfileTest, DispatchModeCapturesDirectAndRecordedExecution) {
             Call<decltype(&hipMemcpy)>("hipMemcpy", &actual, output_,
                                        sizeof(actual), hipMemcpyDeviceToHost));
   EXPECT_EQ(actual, expected);
+
+  // Cross the producer's ring capacity in one runtime lifetime. Each group uses
+  // only its named host synchronization boundary and must publish its records
+  // before shutdown, including when the synchronization is event-scoped.
+  {
+    std::ifstream input(profile_file_.path(), std::ios::binary | std::ios::ate);
+    ASSERT_TRUE(input.good());
+    capture_length_ = input.tellg();
+    ASSERT_GE(capture_length_, 0);
+  }
+  for (uint32_t i = 0; i < 5000; ++i) {
+    ASSERT_EQ(hipSuccess, Call<decltype(&hipModuleLaunchKernel)>(
+                              "hipModuleLaunchKernel", function, 1, 1, 1, 1, 1,
+                              1, 0, stream_, arguments, nullptr));
+    switch (i / 1000) {
+      case 0:
+        ASSERT_EQ(hipSuccess, Call<decltype(&hipStreamSynchronize)>(
+                                  "hipStreamSynchronize", stream_));
+        break;
+      case 1:
+        ASSERT_EQ(hipSuccess, Call<decltype(&hipDeviceSynchronize)>(
+                                  "hipDeviceSynchronize"));
+        break;
+      case 2:
+        ASSERT_EQ(hipSuccess,
+                  Call<decltype(&hipCtxSynchronize)>("hipCtxSynchronize"));
+        break;
+      case 3:
+        ASSERT_EQ(hipSuccess, Call<decltype(&hipEventRecord)>("hipEventRecord",
+                                                              event_, stream_));
+        ASSERT_EQ(hipSuccess, Call<decltype(&hipEventSynchronize)>(
+                                  "hipEventSynchronize", event_));
+        break;
+      case 4:
+        ASSERT_EQ(hipSuccess, Call<decltype(&hipStreamSynchronize)>(
+                                  "hipStreamSynchronize", nullptr));
+        break;
+    }
+    ++direct_count_;
+    if ((i + 1) % 1000 == 0) {
+      CheckCaptureProgress();
+    }
+  }
 }
 
 }  // namespace

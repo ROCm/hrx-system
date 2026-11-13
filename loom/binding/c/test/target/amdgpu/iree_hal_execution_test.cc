@@ -11,6 +11,7 @@
 #include "iree/base/api.h"
 #include "iree/hal/api.h"
 #include "iree/testing/gtest.h"
+#include "loom/binding/c/test/target/amdgpu/vector_arguments_testdata.h"
 #include "loomc/loomc.h"
 #include "loomc/target/amdgpu.h"
 #include "loomc/target/amdgpu/iree_hal.h"
@@ -32,41 +33,6 @@ kernel.def @double_i32_at_byte_offset() {
   %doubled = scalar.addi %loaded, %loaded : i32
   %output_view = buffer.view %output_aligned[%byte_offset_aligned] : buffer -> view<1xi32>
   view.store %doubled, %output_view[0] : i32, view<1xi32>
-  kernel.return
-}
-)";
-
-constexpr char kVectorArgumentSourceText[] = R"(
-kernel.def @select_vector_arguments() {
-  %unit = index.constant 1 : index
-  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
-} launch(%input: buffer, %output: buffer, %values: vector<20xi32>, %predicates: vector<4xi1>, %scalar_predicate: i1) {
-  %base = index.constant 0 : offset
-  %input_view = buffer.view %input[%base] : buffer -> view<4xi32>
-  %output_view = buffer.view %output[%base] : buffer -> view<9xi32>
-  %fallback0 = view.load %input_view[0] : view<4xi32> -> i32
-  %fallback1 = view.load %input_view[1] : view<4xi32> -> i32
-  %fallback2 = view.load %input_view[2] : view<4xi32> -> i32
-  %fallback3 = view.load %input_view[3] : view<4xi32> -> i32
-  %value0 = vector.extract %values[0] : vector<20xi32> -> i32
-  %value15 = vector.extract %values[15] : vector<20xi32> -> i32
-  %value16 = vector.extract %values[16] : vector<20xi32> -> i32
-  %value19 = vector.extract %values[19] : vector<20xi32> -> i32
-  %predicate0 = vector.extract %predicates[0] : vector<4xi1> -> i1
-  %predicate1 = vector.extract %predicates[1] : vector<4xi1> -> i1
-  %predicate2 = vector.extract %predicates[2] : vector<4xi1> -> i1
-  %predicate3 = vector.extract %predicates[3] : vector<4xi1> -> i1
-  %selected0 = scf.select %predicate0, %value0, %fallback0 : i32
-  %selected1 = scf.select %predicate1, %value15, %fallback1 : i32
-  %selected2 = scf.select %predicate2, %value16, %fallback2 : i32
-  %selected3 = scf.select %predicate3, %value19, %fallback3 : i32
-  %scalar_selected = scf.select %scalar_predicate, %value19, %fallback3 : i32
-  %predicate_word0 = scalar.extui %predicate0 : i1 to i32
-  %predicate_word1 = scalar.extui %predicate1 : i1 to i32
-  %predicate_word2 = scalar.extui %predicate2 : i1 to i32
-  %predicate_word3 = scalar.extui %predicate3 : i1 to i32
-  %result = vector.from_elements %selected0, %selected1, %selected2, %selected3, %predicate_word0, %predicate_word1, %predicate_word2, %predicate_word3, %scalar_selected : vector<9xi32>
-  vector.store %result, %output_view[0] : vector<9xi32>, view<9xi32>
   kernel.return
 }
 )";
@@ -459,43 +425,77 @@ void RunSparseByteOffsetExecution(
   EXPECT_EQ(output[1], expected_high_output);
 }
 
-TEST(LoomcAmdgpuIreeHalExecutionTest,
-     SpecializesEmitsAndExecutesOnLiveAmdgpuHalDevice) {
-  loomc::testing::target::RunIreeHalKernelExecutionTest(
-      MakeExecutionTarget(kSourceText, "double_i32_at_byte_offset"),
-      loomc::testing::target::RunIreeHalByteOffsetExecution);
+using LoomcAmdgpuIreeHalExecutionTest =
+    loomc::testing::target::IreeHalExecutionTest;
+
+TEST_F(LoomcAmdgpuIreeHalExecutionTest,
+       SpecializesEmitsAndExecutesOnLiveAmdgpuHalDevice) {
+  RunKernel(MakeExecutionTarget(kSourceText, "double_i32_at_byte_offset"),
+            loomc::testing::target::RunIreeHalByteOffsetExecution);
 }
 
-TEST(LoomcAmdgpuIreeHalExecutionTest, VectorArgumentsCrossNativeKernarg) {
-  loomc::testing::target::RunIreeHalKernelExecutionTest(
-      MakeExecutionTarget(kVectorArgumentSourceText, "select_vector_arguments"),
+TEST_F(LoomcAmdgpuIreeHalExecutionTest, VectorArgumentsCrossNativeKernarg) {
+  RunKernel(
+      MakeExecutionTarget(
+          loomc_amdgpu_vector_arguments_testdata_create()[0].data,
+          "select_vector_arguments"),
       [](const loomc::testing::target::IreeHalKernelExecution& execution) {
         EXPECT_EQ(execution.launch_config.workgroup_size.x, 1u);
         EXPECT_EQ(execution.launch_config.workgroup_size.y, 1u);
         EXPECT_EQ(execution.launch_config.workgroup_size.z, 1u);
-        std::array<uint32_t, 21> constant_words = {};
-        for (size_t i = 0; i < 20; ++i) {
-          constant_words[i] = 101 + static_cast<uint32_t>(i);
+        std::array<uint32_t, 20> values = {};
+        for (size_t i = 0; i < values.size(); ++i) {
+          values[i] = 101 + static_cast<uint32_t>(i);
         }
-        constant_words[20] = 0x00010001;
-        std::array<uint8_t, sizeof(constant_words) + 1> constants = {};
-        std::memcpy(constants.data(), constant_words.data(),
-                    sizeof(constant_words));
-        constants.back() = 1;
+        // HAL constants contain dense payload bytes; each native argument has
+        // its own word-aligned slot. Distinct byte patterns expose cross-slot
+        // reads, incorrect padding consumption, and bit-versus-byte packing.
+        const std::array<uint8_t, 5> left = {1, 0, 1, 0, 1};
+        const std::array<uint8_t, 3> right = {1, 0, 0};
+        std::array<uint8_t, sizeof(values) + left.size() + 1 + right.size()>
+            constants = {};
+        std::memcpy(constants.data(), values.data(), sizeof(values));
+        std::memcpy(constants.data() + sizeof(values), left.data(),
+                    left.size());
+        std::memcpy(constants.data() + sizeof(values) + left.size() + 1,
+                    right.data(), right.size());
         const std::array<int32_t, 4> input = {-1, -2, -3, -4};
-        std::array<int32_t, 9> output = {};
-        loomc::testing::target::ExecuteIreeHalKernelWithBuffers(
-            execution,
-            iree_make_const_byte_span(constants.data(), sizeof(constants)),
-            iree_make_const_byte_span(input.data(), sizeof(input)),
-            iree_make_byte_span(output.data(), sizeof(output)));
-        EXPECT_EQ(output,
-                  (std::array<int32_t, 9>{101, -2, 117, -4, 1, 0, 1, 0, 120}));
+        for (uint8_t scalar_predicate : {0, 1}) {
+          SCOPED_TRACE(scalar_predicate);
+          constants[sizeof(values) + left.size()] = scalar_predicate;
+          std::array<int32_t, 20> output = {};
+          loomc::testing::target::ExecuteIreeHalKernelWithBuffers(
+              execution,
+              iree_make_const_byte_span(constants.data(), sizeof(constants)),
+              iree_make_const_byte_span(input.data(), sizeof(input)),
+              iree_make_byte_span(output.data(), sizeof(output)));
+          EXPECT_EQ(output,
+                    (std::array<int32_t, 20>{101,
+                                             -2,
+                                             117,
+                                             -4,
+                                             1,
+                                             0,
+                                             1,
+                                             0,
+                                             1,
+                                             0,
+                                             1,
+                                             0,
+                                             1,
+                                             1,
+                                             0,
+                                             0,
+                                             scalar_predicate ? 120 : -4,
+                                             scalar_predicate,
+                                             1 - scalar_predicate,
+                                             scalar_predicate}));
+        }
       });
 }
 
-TEST(LoomcAmdgpuIreeHalExecutionTest, UniformByteOffsetBeyond4GiB) {
-  loomc::testing::target::RunIreeHalKernelExecutionTest(
+TEST_F(LoomcAmdgpuIreeHalExecutionTest, UniformByteOffsetBeyond4GiB) {
+  RunKernel(
       MakeExecutionTarget(kSourceText, "double_i32_at_byte_offset"),
       [](const loomc::testing::target::IreeHalKernelExecution& execution) {
         const uint64_t constants[] = {SparseTestBuffer::kHighPageOffset + 4};
@@ -505,8 +505,8 @@ TEST(LoomcAmdgpuIreeHalExecutionTest, UniformByteOffsetBeyond4GiB) {
       });
 }
 
-TEST(LoomcAmdgpuIreeHalExecutionTest, SpilledVaryingScaledOffsetBeyond4GiB) {
-  loomc::testing::target::RunIreeHalKernelExecutionTest(
+TEST_F(LoomcAmdgpuIreeHalExecutionTest, SpilledVaryingScaledOffsetBeyond4GiB) {
+  RunKernel(
       MakeExecutionTarget(kWideScaledSourceText, "double_i32_at_scaled_offset"),
       [](const loomc::testing::target::IreeHalKernelExecution& execution) {
         const uint32_t constants[] = {0x40000001};

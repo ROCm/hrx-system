@@ -6,10 +6,13 @@
 #
 # bazel-to-cmake: skip
 
+load("@hrx//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
+
 # --8<-- [start:kernel-library]
 load(
     "@hrx//loom/build_tools/bazel:defs.bzl",
     "loom_kernel_library",
+    "loom_test",
 )
 load(
     "@hrx//loom/target/amdgpu:execution_profiles.bzl",
@@ -28,3 +31,13 @@ loom_kernel_library(
     targets = ["@hrx//loom/target/amdgpu:gfx11-generic"],
 )
 # --8<-- [end:kernel-library]
+
+loom_test(
+    name = "saxpy_cxx_test",
+    srcs = ["saxpy.cxx"],
+    compile_targets = ["@hrx//loom/target/amdgpu:gfx11-generic"],
+    execution_profiles = [AMD_GPU_HARDWARE_PROFILE],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/import:cxx",
+    ]),
+)

@@ -30,6 +30,7 @@ from loom.dsl import (
     ATTR_TYPE_I64,
     ATTR_TYPE_I64_ARRAY,
     ATTR_TYPE_PARAMETERIZED,
+    CONSTANT_LIKE,
     ENCODING_LAYOUT,
     ENCODING_SCHEMA,
     FACT_IDENTITY,
@@ -895,7 +896,8 @@ encoding_layout_dense = Op(
     phase=OpPhase.EXECUTABLE,
     doc=("Construct a dense row-major address layout. The consuming view type provides the rank and logical extents."),
     results=[Result("result", ENCODING_LAYOUT, doc="Dense address-layout value.")],
-    traits=[PURE],
+    traits=[PURE, CONSTANT_LIKE],
+    eager_execution_cost=0,
     facts="loom_encoding_layout_dense_facts",
     format=[COLON, ResultType("result")],
     examples=[
@@ -922,6 +924,8 @@ encoding_layout_strided = Op(
         ),
     ],
     traits=[PURE],
+    effective_traits="loom_encoding_constructor_effective_traits",
+    eager_execution_cost=0,
     verify="loom_encoding_layout_strided_verify",
     facts="loom_encoding_layout_strided_facts",
     format=[
@@ -1010,6 +1014,8 @@ encoding_define = Op(
     ],
     constraints=[OperandDictionary("params", "param_names")],
     traits=[PURE],
+    effective_traits="loom_encoding_constructor_effective_traits",
+    eager_execution_cost=0,
     verify="loom_encoding_define_verify",
     facts="loom_encoding_define_facts",
     format=[

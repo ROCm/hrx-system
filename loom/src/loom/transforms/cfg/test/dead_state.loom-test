@@ -1,0 +1,348 @@
+// RUN: pass cfg-simplify
+
+// Projecting the only sequence-counter consumer away leaves a closed
+// recurrence. Request/model effects and the request-selected branch survive.
+func.decl @request() -> (i1)
+
+func.decl @model()
+
+func.def @peer() {
+  %c1 = scalar.constant 1 : i32
+  cfg.br ^request(%c1: i32)
+^request(%expected: i32):
+  %continue = func.call @request() : () -> (i1)
+  cfg.cond_br %continue, ^work, ^done
+^work:
+  func.call @model() : ()
+  %next = scalar.addi %expected, %c1 : i32
+  cfg.br ^request(%next: i32)
+^done:
+  func.return
+}
+
+// ----
+func.decl @request() -> (i1)
+
+func.decl @model()
+
+func.def @peer() {
+  cfg.br ^request
+^request:
+  %continue = func.call @request() : () -> (i1)
+  cfg.cond_br %continue, ^work, ^done
+^work:
+  func.call @model() : ()
+  cfg.br ^request
+^done:
+  func.return
+}
+
+// ====
+// RUN: pass cfg-simplify
+
+// Mutually dependent scalar/vector updates are dead together. The analysis
+// follows SSA dependencies, independently of element width or arithmetic kind.
+func.def @dead_tuple(%again: i1, %integer: i64, %real: f64, %vector: vector<4xf32>, %index: index, %offset: offset) {
+  cfg.br ^loop(%integer: i64, %integer: i64, %real: f64, %vector: vector<4xf32>, %index: index, %offset: offset)
+^loop(%a: i64, %b: i64, %r: f64, %v: vector<4xf32>, %i: index, %o: offset):
+  cfg.cond_br %again, ^body, ^done
+^body:
+  %next_a = scalar.addi %a, %b : i64
+  %next_b = scalar.muli %a, %a : i64
+  %next_r = scalar.addf %r, %real : f64
+  %next_v = vector.addf %v, %vector : vector<4xf32>
+  %next_i = index.add %i, %index : index
+  %next_o = index.add %o, %offset : offset
+  cfg.br ^loop(%next_a: i64, %next_b: i64, %next_r: f64, %next_v: vector<4xf32>, %next_i: index, %next_o: offset)
+^done:
+  func.return
+}
+
+// ----
+func.def @dead_tuple(%again: i1, %integer: i64, %real: f64, %vector: vector<4xf32>, %index: index, %offset: offset) {
+  cfg.br ^loop
+^loop:
+  cfg.cond_br %again, ^loop, ^done
+^done:
+  func.return
+}
+
+// ====
+// RUN: pass cfg-simplify
+
+// The control recurrence, returned state, and observed state remain live.
+// A separate recurrence can die despite sharing the same loop and initial value.
+func.decl @observe(%value: i32)
+
+func.def @live_tuple(%limit: i32) -> (i32) {
+  %c0 = scalar.constant 0 : i32
+  %c1 = scalar.constant 1 : i32
+  cfg.br ^loop(%c0: i32, %c0: i32, %c0: i32)
+^loop(%position: i32, %result: i32, %unused: i32):
+  %continue = scalar.cmpi slt, %position, %limit : i32
+  cfg.cond_br %continue, ^body, ^done
+^body:
+  func.call @observe(%position) : (i32)
+  %next_position = scalar.addi %position, %c1 : i32
+  %next_result = scalar.addi %result, %position : i32
+  %next_unused = scalar.addi %unused, %unused : i32
+  cfg.br ^loop(%next_position: i32, %next_result: i32, %next_unused: i32)
+^done:
+  func.return %result : i32
+}
+
+// ----
+func.decl @observe(%value: i32)
+
+func.def @live_tuple(%limit: i32) -> (i32) {
+  %c0 = scalar.constant 0 : i32
+  %c1 = scalar.constant 1 : i32
+  cfg.br ^loop(%c0: i32, %c0: i32)
+^loop(%position: i32, %result: i32):
+  %continue = scalar.cmpi slt, %position, %limit : i32
+  cfg.cond_br %continue, ^body, ^done
+^body:
+  func.call @observe(%position) : (i32)
+  %next_position = scalar.addi %position, %c1 : i32
+  %next_result = scalar.addi %result, %position : i32
+  cfg.br ^loop(%next_position: i32, %next_result: i32)
+^done:
+  func.return %result : i32
+}
+
+// ====
+// RUN: pass cfg-simplify
+
+// Read-only loads disappear with an unobserved recurrence. Volatile reads and
+// convergent operations keep their operands even when their results are unused.
+func.def @read_effects(%again: i1, %input: view<8xi32>, %seed: i32) {
+  %c0 = index.constant 0 : index
+  cfg.br ^loop(%seed: i32, %seed: i32)
+^loop(%dead: i32, %live: i32):
+  cfg.cond_br %again, ^body, ^done
+^body:
+  %unused = view.load %input[%c0] : view<8xi32> -> i32
+  %next_dead = scalar.addi %dead, %unused : i32
+  %observed = view.load<volatile> %input[%c0] : view<8xi32> -> i32
+  %next_live = scalar.addi %live, %observed : i32
+  %converged = test.convergent %next_live : i32
+  cfg.br ^loop(%next_dead: i32, %next_live: i32)
+^done:
+  func.return
+}
+
+// ----
+func.def @read_effects(%again: i1, %input: view<8xi32>, %seed: i32) {
+  %c0 = index.constant 0 : index
+  cfg.br ^loop(%seed: i32)
+^loop(%live: i32):
+  cfg.cond_br %again, ^body, ^done
+^body:
+  %observed = view.load<volatile> %input[%c0] : view<8xi32> -> i32
+  %next_live = scalar.addi %live, %observed : i32
+  %converged = test.convergent %next_live : i32
+  cfg.br ^loop(%next_live: i32)
+^done:
+  func.return
+}
+
+// ====
+// RUN: pass cfg-simplify
+
+// A nested region captures the recurrence through a live operation. Its
+// conditional execution and hint must remain at the authored control point.
+func.def @nested_capture(%again: i1, %select: i1, %seed: i32) {
+  cfg.br ^loop(%seed: i32)
+^loop(%value: i32):
+  cfg.cond_br %again, ^body, ^done
+^body:
+  scf.if %select {
+    test.use %value : i32
+    scf.schedule.fence
+  } else {
+  }
+  %next = scalar.addi %value, %seed : i32
+  cfg.br ^loop(%next: i32)
+^done:
+  func.return
+}
+
+// ----
+func.def @nested_capture(%again: i1, %select: i1, %seed: i32) {
+  cfg.br ^loop(%seed: i32)
+^loop(%value: i32):
+  cfg.cond_br %again, ^body, ^done
+^body:
+  scf.if %select {
+    test.use %value : i32
+    scf.schedule.fence
+  } else {
+  }
+  %next = scalar.addi %value, %seed : i32
+  cfg.br ^loop(%next: i32)
+^done:
+  func.return
+}
+
+// ====
+// RUN: pass cfg-simplify
+
+// An attribute-only dimension use keeps the width recurrence live. The
+// neighboring attribute owner's unused recurrence and dimension may disappear.
+func.def @attribute_uses(%again: i1, %initial: index, %value: f32) {
+  %c1 = index.constant 1 : index
+  cfg.br ^loop(%initial: index, %initial: index)
+^loop(%live_width: index, %dead_width: index):
+  cfg.cond_br %again, ^body, ^done
+^body:
+  %live = test.attrs %value {shape = #test.options<mode = fast, element_type = vector<[%live_width]xf32>>} : f32
+  %dead = test.attrs %value {shape = #test.options<mode = fast, element_type = vector<[%dead_width]xf32>>} : f32
+  test.use %live : f32
+  %next_live = index.add %live_width, %c1 : index
+  %next_dead = index.add %dead_width, %dead_width : index
+  cfg.br ^loop(%next_live: index, %next_dead: index)
+^done:
+  func.return
+}
+
+// ----
+func.def @attribute_uses(%again: i1, %initial: index, %value: f32) {
+  %c1 = index.constant 1 : index
+  cfg.br ^loop(%initial: index)
+^loop(%live_width: index):
+  cfg.cond_br %again, ^body, ^done
+^body:
+  %live = test.attrs %value {shape = #test.options<mode = fast, element_type = vector<[%live_width]xf32>>} : f32
+  test.use %live : f32
+  %next_live = index.add %live_width, %c1 : index
+  cfg.br ^loop(%next_live: index)
+^done:
+  func.return
+}
+
+// ====
+// RUN: pass cfg-simplify
+
+// A dependent type can be the only observer of a width recurrence. Removing
+// that carrier also removes the width, without substituting a fabricated value.
+func.def @dead_dependent_type(%again: i1, %initial: index, %storage: buffer) {
+  %origin = index.constant 0 : offset
+  %c1 = index.constant 1 : index
+  %initial_view = buffer.view %storage[%origin] : buffer -> view<[%initial]xi32>
+  cfg.br ^loop(%initial: index, %initial_view: view<[%initial]xi32>)
+^loop(%width: index, %unused: view<[%width]xi32>):
+  cfg.cond_br %again, ^body, ^done
+^body:
+  %next_width = index.add %width, %c1 : index
+  %next_view = buffer.view %storage[%origin] : buffer -> view<[%next_width]xi32>
+  cfg.br ^loop(%next_width: index, %next_view: view<[%next_width]xi32>)
+^done:
+  func.return
+}
+
+// ----
+func.def @dead_dependent_type(%again: i1, %initial: index, %storage: buffer) {
+  cfg.br ^loop
+^loop:
+  cfg.cond_br %again, ^loop, ^done
+^done:
+  func.return
+}
+
+// ====
+// RUN: pass cfg-simplify
+
+// A live dependent carrier keeps its width and the matching incoming tuple.
+func.def @live_dependent_type(%again: i1, %initial: index, %storage: buffer) {
+  %origin = index.constant 0 : offset
+  %c1 = index.constant 1 : index
+  %initial_view = buffer.view %storage[%origin] : buffer -> view<[%initial]xi32>
+  cfg.br ^loop(%initial: index, %initial_view: view<[%initial]xi32>)
+^loop(%width: index, %current: view<[%width]xi32>):
+  cfg.cond_br %again, ^body, ^done
+^body:
+  test.use %current : view<[%width]xi32>
+  %next_width = index.add %width, %c1 : index
+  %next_view = buffer.view %storage[%origin] : buffer -> view<[%next_width]xi32>
+  cfg.br ^loop(%next_width: index, %next_view: view<[%next_width]xi32>)
+^done:
+  func.return
+}
+
+// ----
+func.def @live_dependent_type(%again: i1, %initial: index, %storage: buffer) {
+  %origin = index.constant 0 : offset
+  %c1 = index.constant 1 : index
+  %initial_view = buffer.view %storage[%origin] : buffer -> view<[%initial]xi32>
+  cfg.br ^loop(%initial: index, %initial_view: view<[%initial]xi32>)
+^loop(%width: index, %current: view<[%width]xi32>):
+  cfg.cond_br %again, ^body, ^done
+^body:
+  test.use %current : view<[%width]xi32>
+  %next_width = index.add %width, %c1 : index
+  %next_view = buffer.view %storage[%origin] : buffer -> view<[%next_width]xi32>
+  cfg.br ^loop(%next_width: index, %next_view: view<[%next_width]xi32>)
+^done:
+  func.return
+}
+
+// ====
+// RUN: with-low-asm pass cfg-simplify
+
+// The same closed-state rule applies after target lowering. Neither the
+// external predicate nor the live recurrence may change with the dead register.
+test.target<low_core> @device
+
+low.func.def target<test.low.core>(@device) @register_state(%again: reg<test.i32>, %seed: reg<test.i32>) -> (reg<test.i32>) asm {
+  low.br ^loop(%seed: reg<test.i32>, %seed: reg<test.i32>)
+^loop(%live: reg<test.i32>, %dead: reg<test.i32>):
+  low.cond_br %again, ^body, ^done : reg<test.i32>
+^body:
+  %next_live = test.add.i32 %live, %seed
+  %next_dead = test.add.i32 %dead, %dead
+  low.br ^loop(%next_live: reg<test.i32>, %next_dead: reg<test.i32>)
+^done:
+  return %live
+}
+
+// ----
+test.target<low_core> @device
+
+low.func.def target<test.low.core>(@device) @register_state(%again: reg<test.i32>, %seed: reg<test.i32>) -> (reg<test.i32>) asm {
+  low.br ^loop(%seed: reg<test.i32>)
+^loop(%live: reg<test.i32>):
+  low.cond_br %again, ^body, ^done : reg<test.i32>
+^body:
+  %next_live = test.add.i32 %live, %seed
+  low.br ^loop(%next_live: reg<test.i32>)
+^done:
+  return %live
+}
+
+// ====
+// RUN: pass cfg-simplify
+
+// Observing a later result retains the whole producer, including its unused
+// first result and their dependent type relationship. Only the dead recurrence
+// disappears; the result's live input and attribute dependencies still matter.
+func.def @later_result(%again: i1, %input: tensor<8xf32>, %initial: index) -> (index) {
+  cfg.br ^loop(%initial: index)
+^loop(%unused: index):
+  %output, %extent = test.deflate %input : tensor<8xf32> -> (tensor<[%extent]xf32>, index)
+  cfg.cond_br %again, ^body, ^done
+^body:
+  %next = index.add %unused, %extent : index
+  cfg.br ^loop(%next: index)
+^done:
+  func.return %extent : index
+}
+
+// ----
+func.def @later_result(%again: i1, %input: tensor<8xf32>, %initial: index) -> (index) {
+  cfg.br ^loop
+^loop:
+  %output, %extent = test.deflate %input : tensor<8xf32> -> (tensor<[%extent]xf32>, index)
+  cfg.cond_br %again, ^loop, ^done
+^done:
+  func.return %extent : index
+}

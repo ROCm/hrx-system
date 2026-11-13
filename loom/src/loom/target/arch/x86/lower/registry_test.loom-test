@@ -1,0 +1,40 @@
+// RUN: pass target-legalize{mode=final}
+
+// Feature-qualified AVX-512 profiles retain both FP8 carriers at callable
+// boundaries and at every supported native vector packet width.
+x86.target<avx512> @target {features = [avx512bf16]}
+
+func.def target(@target) @forward_scalar(%a: f8E4M3, %b: f8E5M2) -> (f8E4M3, f8E5M2) {
+  func.return %a, %b : f8E4M3, f8E5M2
+}
+
+func.def target(@target) @forward_xmm(%a: vector<16xf8E4M3>, %b: vector<16xf8E5M2>) -> (vector<16xf8E4M3>, vector<16xf8E5M2>) {
+  func.return %a, %b : vector<16xf8E4M3>, vector<16xf8E5M2>
+}
+
+func.def target(@target) @forward_ymm(%a: vector<32xf8E4M3>, %b: vector<32xf8E5M2>) -> (vector<32xf8E4M3>, vector<32xf8E5M2>) {
+  func.return %a, %b : vector<32xf8E4M3>, vector<32xf8E5M2>
+}
+
+func.def target(@target) @forward_zmm(%a: vector<64xf8E4M3>, %b: vector<64xf8E5M2>) -> (vector<64xf8E4M3>, vector<64xf8E5M2>) {
+  func.return %a, %b : vector<64xf8E4M3>, vector<64xf8E5M2>
+}
+
+// ----
+x86.target<avx512> @target {features = [avx512bf16]}
+
+func.def target(@target) @forward_scalar(%a: f8E4M3, %b: f8E5M2) -> (f8E4M3, f8E5M2) {
+  func.return %a, %b : f8E4M3, f8E5M2
+}
+
+func.def target(@target) @forward_xmm(%a: vector<16xf8E4M3>, %b: vector<16xf8E5M2>) -> (vector<16xf8E4M3>, vector<16xf8E5M2>) {
+  func.return %a, %b : vector<16xf8E4M3>, vector<16xf8E5M2>
+}
+
+func.def target(@target) @forward_ymm(%a: vector<32xf8E4M3>, %b: vector<32xf8E5M2>) -> (vector<32xf8E4M3>, vector<32xf8E5M2>) {
+  func.return %a, %b : vector<32xf8E4M3>, vector<32xf8E5M2>
+}
+
+func.def target(@target) @forward_zmm(%a: vector<64xf8E4M3>, %b: vector<64xf8E5M2>) -> (vector<64xf8E4M3>, vector<64xf8E5M2>) {
+  func.return %a, %b : vector<64xf8E4M3>, vector<64xf8E5M2>
+}

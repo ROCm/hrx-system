@@ -576,7 +576,8 @@ typedef struct iree_hal_device_subgroup_spec_t {
 
 // Stable execution-resource facts.
 typedef struct iree_hal_device_execution_spec_t {
-  // Execution unit count in the logical device.
+  // Execution unit count in the logical device, or zero when unknown.
+  // Units describe device capacity, not the residency of a loaded dispatch.
   uint32_t unit_count;
   // Execution unit group count in the logical device.
   uint32_t group_count;

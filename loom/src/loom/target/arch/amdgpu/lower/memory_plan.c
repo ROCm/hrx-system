@@ -122,8 +122,7 @@ static iree_status_t loom_amdgpu_memory_try_descriptor_zero_fill(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_low_source_memory_access_plan_t* source,
     loom_value_id_t condition,
-    const loom_amdgpu_buffer_extent_plan_t** out_buffer_extent,
-    bool* out_selected) {
+    loom_amdgpu_buffer_extent_plan_t** out_buffer_extent, bool* out_selected) {
   *out_buffer_extent = NULL;
   *out_selected = false;
   if (source_op->kind != LOOM_OP_VECTOR_LOAD_MASK ||
@@ -201,8 +200,7 @@ static iree_status_t loom_amdgpu_memory_access_plan_select_from_context(
     loom_amdgpu_memory_access_selection_t* out_selection,
     loom_amdgpu_memory_access_plan_flags_t* out_plan_flags,
     loom_value_id_t* out_condition,
-    const loom_amdgpu_buffer_extent_plan_t** out_buffer_extent,
-    bool* out_selected) {
+    loom_amdgpu_buffer_extent_plan_t** out_buffer_extent, bool* out_selected) {
   *out_selected = false;
   *out_plan_flags = 0;
   *out_condition = LOOM_VALUE_ID_INVALID;
@@ -324,7 +322,7 @@ static iree_status_t loom_amdgpu_select_memory_plan(
   loom_amdgpu_memory_access_selection_t selection;
   loom_amdgpu_memory_access_plan_flags_t plan_flags = 0;
   loom_value_id_t condition = LOOM_VALUE_ID_INVALID;
-  const loom_amdgpu_buffer_extent_plan_t* buffer_extent = NULL;
+  loom_amdgpu_buffer_extent_plan_t* buffer_extent = NULL;
   bool selected = false;
   IREE_RETURN_IF_ERROR(loom_amdgpu_memory_access_plan_select_from_context(
       context, source_op, &selection, &plan_flags, &condition, &buffer_extent,
@@ -354,6 +352,18 @@ static iree_status_t loom_amdgpu_select_memory_plan(
   retained_plan->source = selection.source;
   retained_plan->packet_count = selection.packet_count;
   retained_plan->flags = plan_flags;
+  const loom_amdgpu_memory_access_t* first = &selection.packets[0].access;
+  if (buffer_extent == NULL &&
+      (first->address_form == LOOM_AMDGPU_MEMORY_ADDRESS_FORM_DEFAULT ||
+       first->address_form ==
+           LOOM_AMDGPU_MEMORY_ADDRESS_FORM_BUFFER_OFF_ZERO) &&
+      retained_plan->source.memory_space !=
+          LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP &&
+      retained_plan->source.memory_space !=
+          LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE) {
+    IREE_RETURN_IF_ERROR(loom_amdgpu_plan_buffer_extent(
+        context, &retained_plan->source, &buffer_extent));
+  }
   if (preserve_inactive) {
     const loom_memory_access_t source_access = loom_memory_access_cast(
         loom_low_lower_context_module(context), source_op);
@@ -446,13 +456,10 @@ static bool loom_amdgpu_memory_access_offset_immediate_info(
   const uint32_t descriptor_ordinal =
       loom_low_descriptor_set_descriptor_ordinal(descriptor_set,
                                                  access->descriptor);
-  const loom_low_immediate_kind_t expected_kind =
-      access->address_form == LOOM_AMDGPU_MEMORY_ADDRESS_FORM_GLOBAL_SMEM
-          ? LOOM_LOW_IMMEDIATE_KIND_UNSIGNED
-          : LOOM_LOW_IMMEDIATE_KIND_SIGNED;
   return descriptor_ordinal != LOOM_LOW_DESCRIPTOR_ORDINAL_NONE &&
          loom_amdgpu_descriptor_offset_immediate_info(
-             descriptor_set, descriptor_ordinal, 1, expected_kind, out_info) &&
+             descriptor_set, descriptor_ordinal, 1,
+             LOOM_LOW_IMMEDIATE_KIND_SIGNED, out_info) &&
          out_info->unit_byte_count == 1;
 }
 
@@ -481,6 +488,9 @@ static bool loom_amdgpu_memory_plan_try_rebias_shared_scalar_address(
                                     : (int64_t)offset_info.unsigned_max;
     if (access->payload_register_count == 4) {
       immediate_maximum &= ~INT64_C(15);
+    } else if (access->address_form ==
+               LOOM_AMDGPU_MEMORY_ADDRESS_FORM_GLOBAL_SMEM) {
+      immediate_maximum &= ~INT64_C(3);
     }
     if (access->static_byte_offset > immediate_maximum) {
       const int64_t required_base =
@@ -508,11 +518,7 @@ static bool loom_amdgpu_memory_plan_try_rebias_shared_scalar_address(
                               common_base_byte_offset, &immediate_offsets[i])) {
       return false;
     }
-    const int64_t immediate_minimum =
-        offset_info.kind == LOOM_LOW_IMMEDIATE_KIND_SIGNED
-            ? offset_info.signed_min
-            : 0;
-    if (immediate_offsets[i] < immediate_minimum ||
+    if (immediate_offsets[i] < offset_info.signed_min ||
         (immediate_offsets[i] >= 0 &&
          (uint64_t)immediate_offsets[i] > offset_info.unsigned_max)) {
       return false;
@@ -567,18 +573,14 @@ static bool loom_amdgpu_memory_plan_try_share_address(
   return true;
 }
 
-iree_status_t loom_amdgpu_finalize_memory_plan(
-    loom_low_lower_context_t* context, loom_amdgpu_memory_access_plan_t* plan) {
+void loom_amdgpu_finalize_memory_plan(loom_low_lower_context_t* context,
+                                      loom_amdgpu_memory_access_plan_t* plan) {
   const loom_amdgpu_memory_access_t* first = &plan->packets[0].access;
-  const loom_amdgpu_buffer_extent_plan_t* buffer_extent = first->buffer_extent;
-  if (buffer_extent == NULL &&
-      (first->address_form == LOOM_AMDGPU_MEMORY_ADDRESS_FORM_DEFAULT ||
-       first->address_form ==
-           LOOM_AMDGPU_MEMORY_ADDRESS_FORM_BUFFER_OFF_ZERO) &&
-      first->source->memory_space != LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP &&
-      first->source->memory_space != LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE) {
-    IREE_RETURN_IF_ERROR(
-        loom_amdgpu_plan_buffer_extent(context, first->source, &buffer_extent));
+  loom_amdgpu_buffer_extent_plan_t* buffer_extent = first->buffer_extent;
+  if (!iree_any_bit_set(
+          plan->flags,
+          LOOM_AMDGPU_MEMORY_ACCESS_PLAN_FLAG_DESCRIPTOR_ZERO_FILL)) {
+    loom_amdgpu_finalize_buffer_extent(context, first->source, &buffer_extent);
   }
   for (uint32_t i = 0; i < plan->packet_count; ++i) {
     plan->packets[i].access.buffer_extent = buffer_extent;
@@ -588,5 +590,4 @@ iree_status_t loom_amdgpu_finalize_memory_plan(
           loom_low_lower_context_descriptor_set(context), plan)) {
     plan->flags |= LOOM_AMDGPU_MEMORY_ACCESS_PLAN_FLAG_SHARED_ADDRESS;
   }
-  return iree_ok_status();
 }

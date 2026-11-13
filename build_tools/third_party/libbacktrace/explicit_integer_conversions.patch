@@ -1,0 +1,19 @@
+diff --git a/elf.c b/elf.c
+index 1464dcb..6d8b918 100644
+--- a/elf.c
++++ b/elf.c
+@@ -1335 +1335 @@
+-#define ZLIB_HUFFMAN_VALUE_MASK 0x01ff
++#define ZLIB_HUFFMAN_VALUE_MASK 0x01ffU
+@@ -1956 +1956 @@ elf_zlib_inflate (const unsigned char *pin, size_t sin, uint16_t *zdebug_table,
+-	      lenc = ~lenc;
++	      lenc = (uint16_t) ~lenc;
+@@ -6806 +6806 @@ elf_add (struct backtrace_state *state, const char *filename, int descriptor,
+-	      && shdr->sh_size <= 12 + ((note->namesz + 3) & ~ 3) + note->descsz)
++	      && shdr->sh_size <= 12 + ((note->namesz + 3U) & ~3U) + note->descsz)
+@@ -6808 +6808 @@ elf_add (struct backtrace_state *state, const char *filename, int descriptor,
+-	      buildid_data = &note->name[0] + ((note->namesz + 3) & ~ 3);
++	      buildid_data = &note->name[0] + ((note->namesz + 3U) & ~3U);
+@@ -6838 +6838 @@ elf_add (struct backtrace_state *state, const char *filename, int descriptor,
+-	  crc_offset = (crc_offset + 3) & ~3;
++	  crc_offset = (crc_offset + 3) & ~(size_t) 3;

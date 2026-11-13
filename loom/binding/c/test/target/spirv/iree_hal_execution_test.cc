@@ -174,7 +174,11 @@ void RunSubgroupExecution(
   }
 }
 
-TEST(LoomcSpirvIreeHalExecutionTest, SelectsAndExecutesRequiredSubgroupWidths) {
+using LoomcSpirvIreeHalExecutionTest =
+    loomc::testing::target::IreeHalExecutionTest;
+
+TEST_F(LoomcSpirvIreeHalExecutionTest,
+       SelectsAndExecutesRequiredSubgroupWidths) {
   const loomc_iree_hal_target_provider_t* providers[] = {
       loomc_spirv_iree_hal_target_provider(),
   };
@@ -228,15 +232,14 @@ kernel.def target(@target) @record_subgroups() {
         .create_target_environment = CreateSpirvTargetEnvironment,
         .validate_target_profile = ValidateSelectableSubgroups,
     };
-    loomc::testing::target::RunIreeHalKernelExecutionTest(
-        target, [width](const auto& execution) {
-          RunSubgroupExecution(execution, width);
-        });
+    RunKernel(target, [width](const auto& execution) {
+      RunSubgroupExecution(execution, width);
+    });
   }
 }
 
-TEST(LoomcSpirvIreeHalExecutionTest,
-     CompilesEmitsAndExecutesOnLiveVulkanHalDevice) {
+TEST_F(LoomcSpirvIreeHalExecutionTest,
+       CompilesEmitsAndExecutesOnLiveVulkanHalDevice) {
   const loomc_iree_hal_target_provider_t* target_providers[] = {
       loomc_spirv_iree_hal_target_provider(),
   };
@@ -264,8 +267,7 @@ TEST(LoomcSpirvIreeHalExecutionTest,
       .validate_target_profile = ValidateSpirvVulkanProfile,
   };
 
-  loomc::testing::target::RunIreeHalKernelExecutionTest(
-      target, loomc::testing::target::RunIreeHalByteOffsetExecution);
+  RunKernel(target, loomc::testing::target::RunIreeHalByteOffsetExecution);
 }
 
 }  // namespace

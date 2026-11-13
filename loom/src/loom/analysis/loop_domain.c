@@ -66,6 +66,73 @@ bool loom_loop_domain_trip_count(loom_loop_bound_flags_t bound_flags,
   return true;
 }
 
+static uint8_t loom_loop_domain_active_bit_count(uint64_t value) {
+  return value == 0 ? 0
+                    : (uint8_t)(64 - iree_math_count_leading_zeros_u64(value));
+}
+
+loom_loop_recurrence_facts_t loom_loop_domain_shrui_to_zero_recurrence_facts(
+    uint8_t bitwidth, loom_value_facts_t initial_values,
+    loom_value_facts_t shift) {
+  loom_loop_recurrence_facts_t result = {
+      .values = loom_value_facts_unknown(),
+      .body_values = loom_value_facts_unknown(),
+      .exit_value = loom_value_facts_unknown(),
+  };
+  int64_t shift_amount = 0;
+  if (bitwidth == 0 || bitwidth > 64 ||
+      loom_value_facts_is_float(initial_values) ||
+      !loom_value_facts_as_exact_i64(shift, &shift_amount) ||
+      shift_amount <= 0 || shift_amount >= bitwidth) {
+    return result;
+  }
+
+  initial_values = loom_value_facts_wrap_integer(initial_values, bitwidth);
+  uint64_t initial_bits = 0;
+  const bool exact_initial = loom_value_facts_as_exact_raw_bits(
+      initial_values, bitwidth, &initial_bits);
+  const uint8_t active_bit_count =
+      exact_initial ? loom_loop_domain_active_bit_count(initial_bits)
+      : initial_values.range_lo < 0 ? bitwidth
+                                    : loom_loop_domain_active_bit_count(
+                                          (uint64_t)initial_values.range_hi);
+  result.trip_count =
+      (active_bit_count + (uint8_t)shift_amount - 1) / (uint8_t)shift_amount;
+  result.trip_count_kind =
+      exact_initial ? LOOM_LOOP_TRIP_COUNT_EXACT : LOOM_LOOP_TRIP_COUNT_BOUNDED;
+
+  if (result.trip_count == 0) {
+    result.trip_count_kind = LOOM_LOOP_TRIP_COUNT_EXACT;
+    result.values = initial_values;
+    result.exit_value = initial_values;
+    return result;
+  }
+
+  const loom_value_facts_t shift_facts =
+      loom_value_facts_exact_i64(shift_amount);
+  loom_value_facts_t first_shifted;
+  loom_value_facts_shrui(&initial_values, &shift_facts, bitwidth,
+                         &first_shifted);
+  const int64_t values_lower = iree_min(initial_values.range_lo, INT64_C(0));
+  const int64_t values_upper =
+      iree_max(initial_values.range_hi, first_shifted.range_hi);
+  result.values =
+      loom_value_facts_make(values_lower, values_upper, /*known_divisor=*/1);
+  result.exit_value = loom_value_facts_exact_i64(0);
+
+  int64_t body_lower =
+      initial_values.range_lo < 0 ? initial_values.range_lo : 1;
+  if (exact_initial) {
+    const uint64_t final_shift =
+        (result.trip_count - 1) * (uint64_t)shift_amount;
+    const int64_t final_body_value = (int64_t)(initial_bits >> final_shift);
+    body_lower = iree_min(initial_values.range_lo, final_body_value);
+  }
+  result.body_values =
+      loom_value_facts_make(body_lower, values_upper, /*known_divisor=*/1);
+  return result;
+}
+
 static int64_t loom_loop_domain_value_from_rank(uint64_t rank) {
   const uint64_t sign_bit = UINT64_C(1) << 63;
   return rank >= sign_bit ? (int64_t)(rank - sign_bit)

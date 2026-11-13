@@ -7,7 +7,7 @@
 #ifndef LOOM_SERVE_SERVICE_SPEECH_VOICE_LOAD_H_
 #define LOOM_SERVE_SERVICE_SPEECH_VOICE_LOAD_H_
 
-#include "loom/serve/runtime/program/sources.h"
+#include "loom/runtime/program/sources.h"
 #include "loom/serve/service/speech/service.h"
 
 #ifdef __cplusplus
@@ -25,8 +25,8 @@ typedef struct loom_serve_speech_voice_load_t loom_serve_speech_voice_load_t;
 // No I/O or asynchronous work is accepted here. A card with no voices returns
 // NULL.
 iree_status_t loom_serve_speech_voice_load_allocate(
-    loom_serve_host_t* host, const loom_serve_sources_t* sources,
-    loom_serve_speech_service_t* service, loom_serve_wake_callback_t observer,
+    loom_runtime_host_t* host, const loom_runtime_sources_t* sources,
+    loom_serve_speech_service_t* service, loom_runtime_wake_callback_t observer,
     iree_allocator_t host_allocator, loom_serve_speech_voice_load_t** out_load);
 
 // Advances one bounded owner turn. Cancellation is irreversible and stops the

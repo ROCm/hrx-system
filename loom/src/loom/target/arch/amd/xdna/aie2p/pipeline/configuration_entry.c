@@ -139,7 +139,7 @@ iree_status_t loom_aie2p_configuration_entry_realize(
           (loom_symbol_ref_is_valid(target)
                ? LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_TARGET
                : 0),
-      visibility, retained ? LOOM_LOW_RETAIN_RETAIN : 0, 0, 0, 0, 0, 0,
+      visibility, retained ? LOOM_LOW_RETAIN_RETAIN : 0, 0, 0, 0, 0, 0, 0,
       contract, target, LOOM_TARGET_ABI_ARRAY_PROGRAM,
       loom_named_attr_slice_empty(), loom_attr_as_dict(layout),
       LOOM_STRING_ID_INVALID, loom_named_attr_slice_empty(), symbol, NULL, 0,

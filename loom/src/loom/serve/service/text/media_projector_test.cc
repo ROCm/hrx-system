@@ -12,8 +12,8 @@
 
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/runtime/testing/application.h"
 #include "loom/serve/testing/model.h"
-#include "loom/serve/testing/service_application.h"
 
 namespace {
 
@@ -68,42 +68,42 @@ class MediaProjectorTest : public ::testing::Test {
     iree_notification_initialize(&notification_);
     iree_string_builder_initialize(host_allocator_,
                                    &chat_.projections.metadata);
-    auto options = loom_serve_test_application_options_default();
-    options.backing = LOOM_SERVE_POOL_BACKING_ELASTIC;
+    auto options = loom_runtime_test_application_options_default();
+    options.backing = LOOM_RUNTIME_POOL_BACKING_ELASTIC;
     options.slab_size = 4096;
     options.memory_limit = 16 * 1024;
-    loom_serve_test_application_t* application = nullptr;
-    IREE_ASSERT_OK(loom_serve_test_application_acquire(
+    loom_runtime_test_application_t* application = nullptr;
+    IREE_ASSERT_OK(loom_runtime_test_application_acquire(
         &options, host_allocator_, &application));
-    auto* host = loom_serve_test_application_host(application);
-    device_ = loom_serve_test_application_device_at(application, 0);
-    storage_owner_ = loom_serve_device_group_pool_at(
-        loom_serve_test_application_device_group(application), 0);
+    auto* host = loom_runtime_test_application_host(application);
+    device_ = loom_runtime_test_application_device_at(application, 0);
+    storage_owner_ = loom_runtime_device_group_pool_at(
+        loom_runtime_test_application_device_group(application), 0);
     const char* source = std::getenv("LOOM_SERVE_TEST_PROJECTOR_SOURCE");
     ASSERT_NE(source, nullptr);
     IREE_ASSERT_OK(document_.Load(source));
-    const loom_serve_finite_model_options_t model_options = {
+    const loom_service_finite_model_options_t model_options = {
         .sources = document_.value().sources,
         .asset_directory = IREE_SV("."),
         .options = IREE_SV("{}"),
     };
-    IREE_ASSERT_OK(loom_serve_finite_model_allocate(
+    IREE_ASSERT_OK(loom_service_finite_model_allocate(
         device_, storage_owner_, &model_options, host_allocator_, &model_));
     iree_async_proactor_t* proactor = nullptr;
     IREE_ASSERT_OK(iree_async_proactor_pool_get(
-        loom_serve_host_proactor_pool(host), 0, &proactor));
-    const loom_serve_wake_callback_t observer = {
+        loom_runtime_host_proactor_pool(host), 0, &proactor));
+    const loom_runtime_wake_callback_t observer = {
         [](void* data) {
           iree_notification_post(static_cast<iree_notification_t*>(data),
                                  IREE_ALL_WAITERS);
         },
         &notification_,
     };
-    loom_serve_workspace_set_observer(loom_serve_pool_workspace(storage_owner_),
-                                      observer);
+    loom_runtime_workspace_set_observer(
+        loom_runtime_pool_workspace(storage_owner_), observer);
     IREE_ASSERT_OK(loom_serve_text_media_projector_allocate(
-        model_, requests_.size() * 3, loom_serve_host_executor(host), proactor,
-        observer, host_allocator_, &projector_));
+        model_, requests_.size() * 3, loom_runtime_host_executor(host),
+        proactor, observer, host_allocator_, &projector_));
     image_.source = loom_serve_media_image_source_from_data_url(IREE_SV(
         "data:image/x-portable-arbitrarymap;base64,"
         "UDcKV0lEVEggMgpIRUlHSFQgMgpERVBUSCAzCk1BWFZBTCAyNTUKVFVQTFRZUEUg"
@@ -140,9 +140,9 @@ class MediaProjectorTest : public ::testing::Test {
       }
       loom_serve_text_media_projector_free(projector_);
     }
-    IREE_EXPECT_OK(loom_serve_finite_model_free(model_));
-    loom_serve_workspace_set_observer(loom_serve_pool_workspace(storage_owner_),
-                                      {});
+    IREE_EXPECT_OK(loom_service_finite_model_free(model_));
+    loom_runtime_workspace_set_observer(
+        loom_runtime_pool_workspace(storage_owner_), {});
     iree_notification_deinitialize(&notification_);
     iree_string_builder_deinitialize(&chat_.projections.metadata);
   }
@@ -152,8 +152,8 @@ class MediaProjectorTest : public ::testing::Test {
     while (!ready()) {
       const auto ticket = iree_notification_prepare_wait(&notification_);
       bool progress = false;
-      auto status = loom_serve_workspace_advance(
-          loom_serve_pool_workspace(storage_owner_));
+      auto status = loom_runtime_workspace_advance(
+          loom_runtime_pool_workspace(storage_owner_));
       status = iree_status_join(status, loom_serve_text_media_projector_advance(
                                             projector_, 0, &progress));
       if (ready() || progress || !iree_status_is_ok(status)) {
@@ -181,11 +181,11 @@ class MediaProjectorTest : public ::testing::Test {
   // Source ownership encloses every asynchronous compile and invocation.
   loom_serve::testing::ModelDocument document_;
   // Borrowed device whose workspace is driven by this serialized owner.
-  loom_serve_device_t* device_ = nullptr;
+  loom_runtime_device_t* device_ = nullptr;
   // Explicit storage owner selected independently from execution placement.
-  loom_serve_pool_t* storage_owner_ = nullptr;
+  loom_runtime_pool_t* storage_owner_ = nullptr;
   // Actual source-defined pixel producer, not a mocked projection service.
-  loom_serve_finite_model_t* model_ = nullptr;
+  loom_service_finite_model_t* model_ = nullptr;
   // Serialized preparation/cohort/publication owner under test.
   loom_serve_text_media_projector_t* projector_ = nullptr;
   // Ordinary owner wake, joined before its storage is destroyed.
@@ -220,14 +220,14 @@ TEST_F(MediaProjectorTest, PublishesAccordingToPhaseFootprintAndKeepsOrdinals) {
   EXPECT_TRUE(loom_serve_text_media_request_bind(requests_[0], &input_, 0));
   EXPECT_FALSE(loom_serve_text_media_request_bind(requests_[1], &input_, 0));
   EXPECT_FALSE(loom_serve_text_media_request_bind(requests_[2], &input_, 0));
-  EXPECT_EQ(loom_serve_finite_model_parameters(model_).pin_count, 1u);
+  EXPECT_EQ(loom_service_finite_model_parameters(model_).pin_count, 1u);
   ASSERT_TRUE(loom_serve_text_media_projector_cancel(projector_, requests_[1]));
   loom_serve_text_media_request_free(requests_[1]);
   requests_[1] = nullptr;
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] {
     return loom_serve_text_media_projector_is_collecting(projector_);
   }));
-  EXPECT_EQ(loom_serve_finite_model_parameters(model_).pin_count, 0u);
+  EXPECT_EQ(loom_service_finite_model_parameters(model_).pin_count, 0u);
   ASSERT_TRUE(loom_serve_text_media_request_bind(requests_[2], &input_, 0));
   const auto* early = loom_serve_text_media_request_input(requests_[0]);
   const auto* deferred = loom_serve_text_media_request_input(requests_[2]);
@@ -235,18 +235,18 @@ TEST_F(MediaProjectorTest, PublishesAccordingToPhaseFootprintAndKeepsOrdinals) {
   EXPECT_EQ(early->spans[0].request_index, 0u);
   EXPECT_EQ(deferred->spans[0].request_index, 2u);
 
-  loom_serve_finite_snapshot_t* snapshot = nullptr;
-  loom_serve_execution_frontier_t ready;
-  IREE_ASSERT_OK(loom_serve_finite_result_download(deferred->spans[0].result,
-                                                   &snapshot, &ready));
+  loom_service_finite_snapshot_t* snapshot = nullptr;
+  loom_runtime_execution_frontier_t ready;
+  IREE_ASSERT_OK(loom_service_finite_result_download(deferred->spans[0].result,
+                                                     &snapshot, &ready));
   for (size_t i = 0; i < IREE_ARRAYSIZE(ready.semaphores); ++i) {
     IREE_EXPECT_OK(
-        loom_serve_workspace_wait(loom_serve_pool_workspace(storage_owner_),
-                                  ready.semaphores[i], ready.values[i]));
+        loom_runtime_workspace_wait(loom_runtime_pool_workspace(storage_owner_),
+                                    ready.semaphores[i], ready.values[i]));
   }
   const std::array<float, 4> expected = {513, 0, 0, 3};
   for (size_t index : {0u, 2u}) {
-    const auto row = loom_serve_finite_snapshot_row(snapshot, index, 0);
+    const auto row = loom_service_finite_snapshot_row(snapshot, index, 0);
     EXPECT_EQ(row.data_length, sizeof(expected));
     if (row.data_length == sizeof(expected)) {
       EXPECT_EQ(std::memcmp(row.data, expected.data(), sizeof(expected)), 0);
@@ -254,7 +254,7 @@ TEST_F(MediaProjectorTest, PublishesAccordingToPhaseFootprintAndKeepsOrdinals) {
     loom_serve_text_media_request_begin(requests_[index]);
     loom_serve_text_media_request_consume(requests_[index], 1);
   }
-  loom_serve_finite_snapshot_release(snapshot);
+  loom_service_finite_snapshot_release(snapshot);
 }
 
 TEST_F(MediaProjectorTest, RejectsImpossibleContinuationBeforeSubmission) {
@@ -267,7 +267,7 @@ TEST_F(MediaProjectorTest, RejectsImpossibleContinuationBeforeSubmission) {
       IREE_STATUS_RESOURCE_EXHAUSTED,
       loom_serve_text_media_request_take_status(requests_[0]));
   EXPECT_FALSE(loom_serve_text_media_request_bind(requests_[0], &input_, 0));
-  EXPECT_EQ(loom_serve_finite_model_parameters(model_).pin_count, 0u);
+  EXPECT_EQ(loom_service_finite_model_parameters(model_).pin_count, 0u);
 }
 
 TEST_F(MediaProjectorTest, SharesOneCohortAndBatchesRemainingOwnerProjections) {
@@ -315,11 +315,11 @@ TEST_F(MediaProjectorTest, SharesOneCohortAndBatchesRemainingOwnerProjections) {
   EXPECT_EQ(inputs[0]->spans[1].result, shared);
   EXPECT_EQ(inputs[1]->spans[0].result, shared);
   EXPECT_EQ(inputs[2]->spans[0].result, shared);
-  EXPECT_EQ(loom_serve_finite_result_output_length(shared), 35 * 16u);
+  EXPECT_EQ(loom_service_finite_result_output_length(shared), 35 * 16u);
   for (size_t i = 0; i < inputs.size(); ++i) {
     const auto* private_result = inputs[i]->spans[2].result;
     EXPECT_NE(private_result, shared);
-    EXPECT_EQ(loom_serve_finite_result_output_length(private_result),
+    EXPECT_EQ(loom_service_finite_result_output_length(private_result),
               (i ? 64 : 32) * 16u);
     if (i) {
       EXPECT_EQ(inputs[i]->spans[1].result, private_result);

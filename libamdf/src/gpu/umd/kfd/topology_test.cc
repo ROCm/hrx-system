@@ -10,6 +10,8 @@
 #include <fcntl.h>
 #include <stdlib.h>
 #include <sys/ioctl.h>
+#include <sys/stat.h>
+#include <sys/utsname.h>
 
 #include <cstdarg>
 #include <cstring>
@@ -21,12 +23,15 @@
 #include "gtest/gtest.h"
 #include "libamdf/src/allocator.h"
 #include "libamdf/src/gpu/umd/endpoint_profile.h"
+#include "libamdf/src/gpu/umd/kfd/target/user_queue.h"
 #include "libamdf/src/platform/linux/endpoint.h"
 #include "libamdf/src/platform/linux/file.h"
 
 namespace {
 
 struct NativeDeviceInfo {
+  // Kernel release supplied by the native identity dependency.
+  const char* kernel_release = "7.3.0";
   // Cached native facts returned by the read-only render query.
   drm_amdgpu_info_device info = {
       .virtual_address_offset = 0x10000,
@@ -43,8 +48,10 @@ struct NativeDeviceInfo {
               .heap_usage = UINT64_C(512) << 20,
           },
   };
-  // Real descriptor borrowed by the query and closed by profile construction.
+  // Real descriptor borrowed by an explicit native query.
   int descriptor = -1;
+  // Execution-file opens attempted by the operation under test.
+  uint32_t open_count = 0;
   // Error at native file opening, or zero for success.
   int open_error = 0;
   // Error at the metadata query, or zero for success.
@@ -55,17 +62,56 @@ struct NativeDeviceInfo {
 
 thread_local NativeDeviceInfo* native_device_info = nullptr;
 
+struct AttributeReadFailure {
+  // Filesystem device containing the selected sysfs fixture attribute.
+  dev_t device = 0;
+  // Inode of the selected attribute, independent of its temporary descriptor.
+  ino_t inode = 0;
+  // Native read error returned for that attribute.
+  int error = 0;
+  // Reads of the selected attribute attempted by the production reader.
+  uint32_t attempts = 0;
+};
+
+thread_local AttributeReadFailure* attribute_read_failure = nullptr;
+
 }  // namespace
 
 extern "C" amdf_status_t __real_amdf_linux_endpoint_open_file(
     const amdf_platform_endpoint_t*, int*);
 extern "C" int __real_ioctl(int, unsigned long, ...);
+extern "C" int __real_uname(struct utsname*);
+extern "C" ssize_t __real_read(int, void*, size_t);
+
+extern "C" ssize_t __wrap_read(int descriptor, void* buffer, size_t length) {
+  if (attribute_read_failure != nullptr) {
+    struct stat info = {};
+    if (fstat(descriptor, &info) == 0 &&
+        info.st_dev == attribute_read_failure->device &&
+        info.st_ino == attribute_read_failure->inode) {
+      ++attribute_read_failure->attempts;
+      errno = attribute_read_failure->error;
+      return -1;
+    }
+  }
+  return __real_read(descriptor, buffer, length);
+}
+
+extern "C" int __wrap_uname(struct utsname* out_kernel) {
+  if (native_device_info == nullptr) {
+    return __real_uname(out_kernel);
+  }
+  std::memset(out_kernel, 0, sizeof(*out_kernel));
+  std::strcpy(out_kernel->release, native_device_info->kernel_release);
+  return 0;
+}
 
 extern "C" amdf_status_t __wrap_amdf_linux_endpoint_open_file(
     const amdf_platform_endpoint_t* endpoint, int* out_descriptor) {
   if (native_device_info == nullptr) {
     return __real_amdf_linux_endpoint_open_file(endpoint, out_descriptor);
   }
+  ++native_device_info->open_count;
   if (native_device_info->open_error != 0) {
     return amdf_linux_error(native_device_info->open_error);
   }
@@ -198,6 +244,7 @@ class KfdTopologyTest : public ::testing::Test {
 
   void TearDown() override {
     native_device_info = nullptr;
+    attribute_read_failure = nullptr;
     if (native_.descriptor >= 0) {
       EXPECT_EQ(fcntl(native_.descriptor, F_GETFD), -1);
       EXPECT_EQ(errno, EBADF);
@@ -240,6 +287,17 @@ class KfdTopologyTest : public ::testing::Test {
             optional_properties);
   }
 
+  void FailAttributeReads(const std::filesystem::path& path, int error) {
+    struct stat info = {};
+    ASSERT_EQ(stat(path.c_str(), &info), 0);
+    read_failure_ = {
+        .device = info.st_dev,
+        .inode = info.st_ino,
+        .error = error,
+    };
+    attribute_read_failure = &read_failure_;
+  }
+
   void WritePeer(uint32_t ordinal, uint32_t backing_node, uint32_t gpu_id,
                  uint32_t flags) {
     const auto nodes = directory_ / "class/kfd/kfd/topology/nodes";
@@ -276,6 +334,8 @@ class KfdTopologyTest : public ::testing::Test {
 
   // Read-only native query dependency; descriptor release remains real.
   NativeDeviceInfo native_;
+  // Optional failure injected at the native attribute-read dependency.
+  AttributeReadFailure read_failure_;
   // Temporary native metadata directory owned by this case.
   std::filesystem::path directory_;
   // Instance whose discovery root names only the test-owned directory.
@@ -300,7 +360,7 @@ TEST_F(KfdTopologyTest, DiscoversMemoryAndSdmaWithoutComputeStorageMetadata) {
   EXPECT_EQ(topology.properties.gfx_ip.minor, 4u);
   EXPECT_EQ(topology.properties.gfx_ip.stepping, 2u);
   EXPECT_FALSE(topology.gc_ip.exact);
-  EXPECT_STREQ(topology.driver_version, "");
+  EXPECT_TRUE(topology.sdma.device_producer_restricted);
   EXPECT_EQ(topology.properties.compute.compute_unit_count, 304u);
   EXPECT_EQ(topology.properties.compute.wavefront_size, 64u);
   EXPECT_EQ(topology.properties.topology.xcc_count, 8u);
@@ -447,26 +507,46 @@ TEST_F(KfdTopologyTest, NativeGcIdentityDoesNotUseCompilerTargetAliases) {
   amdf_gpu_kfd_topology_deinitialize(&topology, amdf_allocator_system());
 }
 
-TEST_F(KfdTopologyTest,
-       ModuleIdentityRestrictsOnlyAffectedProfileCapabilities) {
+TEST_F(KfdTopologyTest, ShaderDoorbellSupportFollowsFixedKernelReleases) {
   WriteProperties(
       "cwsr_size 19185664\nctl_stack_size 16384\n"
       "num_sdma_engines 2\nnum_sdma_xgmi_engines 14\n"
       "num_sdma_queues_per_engine 8\n");
-  const auto gc =
-      directory_ / "dev/char/226:160/device/ip_discovery/die/0/11/0";
-  std::filesystem::create_directories(gc);
-  WriteAttribute(gc / "major", "9\n");
-  WriteAttribute(gc / "minor", "4\n");
-  WriteAttribute(gc / "revision", "3\n");
   const auto module = directory_ / "module/amdgpu";
   std::filesystem::create_directories(module);
-  for (const std::string& version :
-       {std::string("6.16.13\n"), std::string("6.16.13"),
-        std::string("6.16.14\n"), std::string("6.16.13-custom\n"),
-        std::string("6.16.13\nextra\n"), std::string(128, 'x')}) {
-    SCOPED_TRACE(version);
-    WriteAttribute(module / "version", version);
+  WriteAttribute(module / "taint", "\n");
+  struct Case {
+    // Release reported by the upstream module's running kernel.
+    const char* release;
+    // Whether this release carries the native doorbell alignment fix.
+    bool device_producer;
+  };
+  const Case cases[] = {
+      {"6.6.159", false},
+      {"6.6.160", true},
+      {"6.12.112", false},
+      {"6.12.113", true},
+      {"6.18.56", false},
+      {"6.18.57", true},
+      {"7.2.10", false},
+      {"7.2.11", true},
+      {"7.0.99-generic", false},
+      {"7.1.99-custom", false},
+      {"7.3.0-rc6", false},
+      {"7.3.0-rc7", true},
+      {"7.3.0", true},
+      {"7.4.0-rc1", true},
+      {"6.12.113-custom", true},
+      {"6.18.57-rc1", false},
+      {"7.2.12-rc1", true},
+      {"7.2.11.31400100", false},
+      {"7.3.0-rc", false},
+      {"7.3.0-rc7extra", false},
+      {"999999999999999999999.0.0", false},
+  };
+  for (const auto& test : cases) {
+    SCOPED_TRACE(test.release);
+    native_.kernel_release = test.release;
     amdf_gpu_endpoint_profile_t* profile = nullptr;
     ASSERT_EQ(amdf_gpu_umd_create_endpoint_profile(
                   &endpoint_, amdf_allocator_system(), &profile),
@@ -474,18 +554,85 @@ TEST_F(KfdTopologyTest,
     ASSERT_EQ(profile->queue_family_count, 2u);
     EXPECT_EQ(profile->queue_families[0].command_type,
               AMDF_QUEUE_COMMAND_TYPE_GPU_AQL);
-    EXPECT_EQ(profile->queue_families[0].user_queue_capabilities,
-              AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER |
-                  AMDF_USER_QUEUE_CAPABILITY_DEVICE_PRODUCER |
-                  AMDF_USER_QUEUE_CAPABILITY_EXECUTION_RESOURCE_SELECTION);
+    EXPECT_NE(profile->queue_families[0].user_queue_capabilities &
+                  AMDF_USER_QUEUE_CAPABILITY_DEVICE_PRODUCER,
+              0u);
     EXPECT_EQ(profile->queue_families[1].command_type,
               AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA);
-    const bool restricted = version == "6.16.13\n" || version == "6.16.13";
-    EXPECT_EQ(
-        profile->queue_families[1].user_queue_capabilities,
-        AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER |
-            (restricted ? 0 : AMDF_USER_QUEUE_CAPABILITY_DEVICE_PRODUCER));
+    EXPECT_NE(profile->queue_families[1].user_queue_capabilities &
+                  AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER,
+              0u);
+    EXPECT_EQ((profile->queue_families[1].user_queue_capabilities &
+               AMDF_USER_QUEUE_CAPABILITY_DEVICE_PRODUCER) != 0,
+              test.device_producer);
+    EXPECT_EQ(native_.open_count, 0u);
     amdf_free(amdf_allocator_system(), profile);
+  }
+}
+
+TEST_F(KfdTopologyTest, VendorModulesDoNotInheritTheHostKernelFix) {
+  WriteProperties(
+      "num_sdma_engines 2\nnum_sdma_xgmi_engines 0\n"
+      "num_sdma_queues_per_engine 8\n");
+  const auto module = directory_ / "module/amdgpu";
+  std::filesystem::create_directories(module);
+  native_.kernel_release = "7.4.0";
+  WriteAttribute(module / "taint", "OE\n");
+  for (const char* version : {"6.16.13-custom\n", "6.19.14.31400100\n"}) {
+    WriteAttribute(module / "version", version);
+    amdf_gpu_kfd_topology_t topology = {};
+    ASSERT_EQ(amdf_gpu_kfd_topology_initialize(
+                  &endpoint_, amdf_allocator_system(), &topology),
+              AMDF_STATUS_OK);
+    EXPECT_TRUE(topology.sdma.device_producer_restricted);
+    amdf_gpu_kfd_topology_deinitialize(&topology, amdf_allocator_system());
+  }
+  std::filesystem::remove(module / "version");
+  for (bool expose_module : {true, false}) {
+    if (!expose_module) {
+      std::filesystem::remove(module / "taint");
+    }
+    amdf_gpu_kfd_topology_t topology = {};
+    ASSERT_EQ(amdf_gpu_kfd_topology_initialize(
+                  &endpoint_, amdf_allocator_system(), &topology),
+              AMDF_STATUS_OK);
+    EXPECT_TRUE(topology.sdma.device_producer_restricted);
+    amdf_gpu_kfd_topology_deinitialize(&topology, amdf_allocator_system());
+  }
+}
+
+TEST_F(KfdTopologyTest, ShaderDoorbellRestrictionUsesNativeHardwareIdentity) {
+  const auto gc =
+      directory_ / "dev/char/226:160/device/ip_discovery/die/0/11/0";
+  std::filesystem::create_directories(gc);
+  struct Case {
+    // Compiler-facing target for this physical GPU.
+    uint32_t target;
+    // Exact GC IP supplied by native discovery.
+    uint32_t gc[3];
+    // Whether shader doorbell routing needs the native driver fix.
+    bool restricted;
+  };
+  const Case cases[] = {
+      {90402, {9, 4, 3}, true},    {90402, {9, 4, 4}, true},
+      {90500, {9, 5, 0}, true},    {90010, {9, 4, 2}, false},
+      {110501, {11, 5, 1}, false},
+  };
+  for (const auto& test : cases) {
+    SCOPED_TRACE(test.target);
+    WriteProperties(
+        "num_sdma_engines 2\nnum_sdma_xgmi_engines 0\n"
+        "num_sdma_queues_per_engine 8\n",
+        0, test.target);
+    WriteAttribute(gc / "major", std::to_string(test.gc[0]) + "\n");
+    WriteAttribute(gc / "minor", std::to_string(test.gc[1]) + "\n");
+    WriteAttribute(gc / "revision", std::to_string(test.gc[2]) + "\n");
+    amdf_gpu_kfd_topology_t topology = {};
+    ASSERT_EQ(amdf_gpu_kfd_topology_initialize(
+                  &endpoint_, amdf_allocator_system(), &topology),
+              AMDF_STATUS_OK);
+    EXPECT_EQ(topology.sdma.device_producer_restricted, test.restricted);
+    amdf_gpu_kfd_topology_deinitialize(&topology, amdf_allocator_system());
   }
 }
 
@@ -639,6 +786,64 @@ TEST_F(KfdTopologyTest, KeepsOnlyAdmittedGpuBackingsInThePublishedDirection) {
   amdf_gpu_kfd_topology_deinitialize(&topology, amdf_allocator_system());
 }
 
+TEST_F(KfdTopologyTest, DeviceCgroupDenialSkipsGpuBeforeSelectedEndpoint) {
+  WriteProperties("");
+  const auto nodes = directory_ / "class/kfd/kfd/topology/nodes";
+  std::filesystem::create_directories(nodes / "8");
+  // Choose the denied node in actual directory order. Populating files within
+  // these two directories leaves that order intact and tests scan continuation.
+  const auto denied = std::filesystem::directory_iterator(nodes)->path();
+  const auto allowed = nodes / (denied.filename() == "6" ? "8" : "6");
+  if (allowed.filename() != "6") {
+    std::filesystem::copy_file(nodes / "6/properties", allowed / "properties");
+  }
+  WriteAttribute(allowed / "gpu_id", "53458\n");
+  WriteAttribute(denied / "gpu_id", "12345\n");
+  FailAttributeReads(denied / "gpu_id", EPERM);
+  amdf_gpu_kfd_topology_t topology = {};
+  ASSERT_EQ(amdf_gpu_kfd_topology_initialize(
+                &endpoint_, amdf_allocator_system(), &topology),
+            AMDF_STATUS_OK);
+  EXPECT_GT(read_failure_.attempts, 0u);
+  EXPECT_EQ(topology.gpu_id, 53458u);
+  amdf_gpu_kfd_topology_deinitialize(&topology, amdf_allocator_system());
+}
+
+TEST_F(KfdTopologyTest, DeviceCgroupDenialOmitsPeerBacking) {
+  WriteProperties("", 2);
+  WritePeer(0, 2, 12345, 1);
+  WritePeer(1, 8, 54321, 1);
+  FailAttributeReads(directory_ / "class/kfd/kfd/topology/nodes/2/gpu_id",
+                     EPERM);
+  amdf_gpu_kfd_topology_t topology = {};
+  ASSERT_EQ(amdf_gpu_kfd_topology_initialize(
+                &endpoint_, amdf_allocator_system(), &topology),
+            AMDF_STATUS_OK);
+  EXPECT_GT(read_failure_.attempts, 0u);
+  ASSERT_EQ(topology.memory_peers.count, 1u);
+  EXPECT_EQ(topology.memory_peers.gpu_ids[0], 54321u);
+  amdf_gpu_kfd_topology_deinitialize(&topology, amdf_allocator_system());
+}
+
+TEST_F(KfdTopologyTest, DeniedEndpointAndNativeReadFailuresPreserveOutput) {
+  WriteProperties("");
+  for (const int error : {EPERM, EACCES, EIO}) {
+    SCOPED_TRACE(error);
+    FailAttributeReads(directory_ / "class/kfd/kfd/topology/nodes/6/gpu_id",
+                       error);
+    amdf_gpu_kfd_topology_t topology;
+    std::memset(&topology, 0xA5, sizeof(topology));
+    const auto original = topology;
+    EXPECT_EQ(amdf_gpu_kfd_topology_initialize(
+                  &endpoint_, amdf_allocator_system(), &topology),
+              error == EPERM
+                  ? amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED)
+                  : amdf_linux_error(error));
+    EXPECT_GT(read_failure_.attempts, 0u);
+    EXPECT_EQ(std::memcmp(&topology, &original, sizeof(topology)), 0);
+  }
+}
+
 TEST_F(KfdTopologyTest, MalformedPeerRecordsNeverPublishPartialTopology) {
   WriteProperties("", 1);
   WritePeer(0, 2, 12345, 1);
@@ -708,41 +913,54 @@ TEST_F(KfdTopologyTest, VirtualFunctionsKeepOnlyHostPublishedSystemRings) {
                   &endpoint_, amdf_allocator_system(), &profile),
               AMDF_STATUS_OK);
     EXPECT_EQ(profile->queue_family_count, 3u);
-    for (uint32_t i = 0; i < profile->queue_family_count; ++i) {
-      const auto& family = profile->queue_families[i];
-      EXPECT_EQ(family.placement_capabilities,
-                AMDF_QUEUE_PLACEMENT_CAPABILITY_HOST_LOCAL |
-                    (mode != AMDGPU_IDS_FLAGS_MODE_VF
-                         ? AMDF_QUEUE_PLACEMENT_CAPABILITY_DEVICE_LOCAL
-                         : 0));
-      EXPECT_EQ(family.host_publication[AMDF_QUEUE_PLACEMENT_HOST_LOCAL],
-                AMDF_QUEUE_HOST_PUBLICATION_FLAG_KNOWN);
-      EXPECT_EQ(family.host_publication[AMDF_QUEUE_PLACEMENT_DEVICE_LOCAL] ==
-                    AMDF_QUEUE_HOST_PUBLICATION_FLAG_UNKNOWN,
-                mode == AMDGPU_IDS_FLAGS_MODE_VF);
-    }
     amdf_free(amdf_allocator_system(), profile);
-    EXPECT_EQ(fcntl(native_.descriptor, F_GETFD), -1);
-    EXPECT_EQ(errno, EBADF);
+
+    amdf_gpu_kfd_topology_t topology = {};
+    ASSERT_EQ(amdf_gpu_kfd_topology_initialize(
+                  &endpoint_, amdf_allocator_system(), &topology),
+              AMDF_STATUS_OK);
+    int descriptor = -1;
+    ASSERT_EQ(amdf_linux_endpoint_open_file(&endpoint_, &descriptor),
+              AMDF_STATUS_OK);
+    ASSERT_EQ(amdf_gpu_kfd_topology_query_memory(
+                  descriptor, endpoint_.info.pci.device_id, &topology),
+              AMDF_STATUS_OK);
+    const auto placement = amdf_gpu_kfd_target_user_queue_placement(
+        &topology, 4096, AMDF_QUEUE_COMMAND_TYPE_GPU_PM4);
+    EXPECT_EQ(placement.placement_capabilities,
+              AMDF_QUEUE_PLACEMENT_CAPABILITY_HOST_LOCAL |
+                  (mode != AMDGPU_IDS_FLAGS_MODE_VF
+                       ? AMDF_QUEUE_PLACEMENT_CAPABILITY_DEVICE_LOCAL
+                       : 0));
+    EXPECT_EQ(placement.host_publication[AMDF_QUEUE_PLACEMENT_HOST_LOCAL],
+              AMDF_QUEUE_HOST_PUBLICATION_FLAG_KNOWN);
+    EXPECT_EQ(placement.host_publication[AMDF_QUEUE_PLACEMENT_DEVICE_LOCAL] ==
+                  AMDF_QUEUE_HOST_PUBLICATION_FLAG_UNKNOWN,
+              mode == AMDGPU_IDS_FLAGS_MODE_VF);
+    EXPECT_EQ(amdf_linux_file_close(&descriptor), AMDF_STATUS_OK);
+    amdf_gpu_kfd_topology_deinitialize(&topology, amdf_allocator_system());
   }
   EXPECT_EQ(native_.query_count, 3u);
+  EXPECT_EQ(native_.open_count, 3u);
 }
 
-TEST_F(KfdTopologyTest, FailedNativeProfileQueryDoesNotPublishOrRetainFile) {
+TEST_F(KfdTopologyTest, DiscoveryDoesNotOpenExecutionFilesOrQueryLiveMemory) {
   WriteProperties("");
-  auto* const sentinel =
-      reinterpret_cast<amdf_gpu_endpoint_profile_t*>(uintptr_t{1});
   for (bool fail_open : {true, false}) {
     SCOPED_TRACE(fail_open);
     native_.open_error = fail_open ? EACCES : 0;
     native_.query_error = fail_open ? 0 : EIO;
-    auto* output = sentinel;
-    EXPECT_EQ(amdf_gpu_umd_create_endpoint_profile(
+    amdf_gpu_endpoint_profile_t* output = nullptr;
+    ASSERT_EQ(amdf_gpu_umd_create_endpoint_profile(
                   &endpoint_, amdf_allocator_system(), &output),
-              amdf_linux_error(fail_open ? EACCES : EIO));
-    EXPECT_EQ(output, sentinel);
+              AMDF_STATUS_OK);
+    EXPECT_EQ(output->info.compute.compute_unit_count, 304u);
+    EXPECT_GT(output->queue_family_count, 0u);
+    amdf_free(amdf_allocator_system(), output);
   }
-  EXPECT_EQ(native_.query_count, 1u);
+  EXPECT_EQ(native_.query_count, 0u);
+  EXPECT_EQ(native_.open_count, 0u);
+  EXPECT_EQ(native_.descriptor, -1);
 }
 
 TEST_F(KfdTopologyTest, ChangedGenerationReleasesUnpublishedPeerMetadata) {
@@ -872,6 +1090,28 @@ TEST_F(KfdTopologyTest, MissingCpuRouteDoesNotImplyAtomicSupport) {
               AMDF_STATUS_OK);
     EXPECT_FALSE(topology.host_atomics.supports_32);
     EXPECT_FALSE(topology.host_atomics.supports_64);
+    amdf_gpu_kfd_topology_deinitialize(&topology, amdf_allocator_system());
+  }
+}
+
+TEST_F(KfdTopologyTest, DeviceCgroupDeniedGpuIsNotACpuRoute) {
+  // An enabled XGMI GPU edge cannot provide CPU atomics or cached VRAM, even
+  // when the destination's gpu_id is unreadable under the job's device cgroup.
+  WriteIoLink(0, 8, 42, 1, 11);
+  WriteIoLink(1, 0, 0, 1);
+  FailAttributeReads(directory_ / "class/kfd/kfd/topology/nodes/8/gpu_id",
+                     EPERM);
+  for (const bool cpu_route : {false, true}) {
+    SCOPED_TRACE(cpu_route);
+    WriteProperties(cpu_route ? "io_links_count 2\n" : "io_links_count 1\n");
+    amdf_gpu_kfd_topology_t topology = {};
+    ASSERT_EQ(amdf_gpu_kfd_topology_initialize(
+                  &endpoint_, amdf_allocator_system(), &topology),
+              AMDF_STATUS_OK);
+    EXPECT_GT(read_failure_.attempts, 0u);
+    EXPECT_EQ(topology.host_atomics.supports_32, cpu_route);
+    EXPECT_EQ(topology.host_atomics.supports_64, cpu_route);
+    EXPECT_FALSE(topology.vram.host_cached);
     amdf_gpu_kfd_topology_deinitialize(&topology, amdf_allocator_system());
   }
 }

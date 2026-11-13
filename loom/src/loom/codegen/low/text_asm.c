@@ -78,7 +78,8 @@ static void loom_low_descriptor_text_asm_make_packet(
       .form = loom_low_descriptor_text_asm_layout_handle(layout),
       .descriptor = loom_low_descriptor_text_asm_descriptor_handle(descriptor),
       .descriptor_key = loom_low_descriptor_set_string(
-          descriptor_set, descriptor->key_string_ref),
+          descriptor_set,
+          loom_low_descriptor_key_string_ref(descriptor_set, descriptor)),
       .mnemonic = loom_low_descriptor_set_string(descriptor_set,
                                                  asm_form->mnemonic_string_ref),
       .result_count = descriptor->result_count,
@@ -765,7 +766,8 @@ static iree_status_t loom_low_descriptor_text_asm_describe_packet(
 
   out_statement->kind = LOOM_TEXT_LOW_ASM_STATEMENT_UNAVAILABLE;
   out_statement->packet.descriptor_key = loom_low_descriptor_set_string(
-      descriptor_set, descriptor->key_string_ref);
+      descriptor_set,
+      loom_low_descriptor_key_string_ref(descriptor_set, descriptor));
   const loom_low_descriptor_view_t* descriptor_view =
       loom_low_descriptor_set_descriptor_view_at(descriptor_set,
                                                  descriptor_ordinal);

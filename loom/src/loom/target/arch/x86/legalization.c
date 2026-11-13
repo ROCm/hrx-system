@@ -42,24 +42,6 @@ static bool loom_x86_descriptor_features_available(
   return true;
 }
 
-static iree_status_t loom_x86_retain_native_vector_op(
-    const loom_target_legalizer_entry_t* entry,
-    loom_target_legalization_context_t* context, loom_op_t* op,
-    loom_target_legalizer_result_t* out_result) {
-  (void)entry;
-  (void)op;
-  *out_result = (loom_target_legalizer_result_t){
-      .action = LOOM_TARGET_LEGALIZER_ACTION_NO_COMMENT,
-  };
-  if (!loom_x86_legalizer_descriptor_set_is_x86(context->descriptor_set)) {
-    return iree_ok_status();
-  }
-  *out_result = (loom_target_legalizer_result_t){
-      .action = LOOM_TARGET_LEGALIZER_ACTION_DEFER,
-  };
-  return iree_ok_status();
-}
-
 // Expand literals independently from their patch users so x86 construction
 // selection can retain an immutable vector load before sparse lane updates.
 // Other targets continue to the shared construction selector when this
@@ -284,18 +266,6 @@ static const loom_target_legalizer_rule_t kX86LegalizerRules[] = {
     {
         .root_kind = LOOM_OP_VECTOR_DIVREMUI,
         .legalize = loom_x86_legalize_vector_divrem,
-    },
-    {
-        .root_kind = LOOM_OP_VECTOR_DOT2F,
-        .legalize = loom_x86_retain_native_vector_op,
-    },
-    {
-        .root_kind = LOOM_OP_VECTOR_DOT4I,
-        .legalize = loom_x86_retain_native_vector_op,
-    },
-    {
-        .root_kind = LOOM_OP_VECTOR_DOT8I4,
-        .legalize = loom_x86_retain_native_vector_op,
     },
 };
 

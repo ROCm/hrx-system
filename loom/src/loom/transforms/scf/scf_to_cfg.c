@@ -69,12 +69,19 @@ const loom_pass_info_t* loom_scf_to_cfg_pass_info(void) {
 #define LOOM_SCF_TO_CFG_INITIAL_REGION_STACK_CAPACITY 16
 #define LOOM_SCF_TO_CFG_INLINE_FRONTIER_CAPACITY 16
 
+typedef struct loom_scf_to_cfg_region_entry_t {
+  // Region waiting to be processed.
+  loom_region_t* region;
+  // Static structure required by the region's owning operation.
+  const loom_region_descriptor_t* descriptor;
+} loom_scf_to_cfg_region_entry_t;
+
 typedef struct loom_scf_to_cfg_region_stack_t {
-  // Region pointers waiting to be processed.
-  loom_region_t** regions;
-  // Number of queued region pointers.
+  // Region entries waiting to be processed.
+  loom_scf_to_cfg_region_entry_t* entries;
+  // Number of queued region entries.
   iree_host_size_t count;
-  // Allocated region pointer capacity.
+  // Allocated region entry capacity.
   iree_host_size_t capacity;
 } loom_scf_to_cfg_region_stack_t;
 
@@ -142,27 +149,31 @@ static iree_status_t loom_scf_to_cfg_region_stack_initialize(
   stack->count = 0;
   stack->capacity = LOOM_SCF_TO_CFG_INITIAL_REGION_STACK_CAPACITY;
   return iree_arena_allocate_array(
-      arena, stack->capacity, sizeof(loom_region_t*), (void**)&stack->regions);
+      arena, stack->capacity, sizeof(*stack->entries), (void**)&stack->entries);
 }
 
 static iree_status_t loom_scf_to_cfg_region_stack_push(
     iree_arena_allocator_t* arena, loom_scf_to_cfg_region_stack_t* stack,
-    loom_region_t* region) {
+    loom_region_t* region, const loom_region_descriptor_t* descriptor) {
   if (!region || region->block_count == 0) {
     return iree_ok_status();
   }
   if (stack->count >= stack->capacity) {
     IREE_RETURN_IF_ERROR(iree_arena_grow_array(
-        arena, stack->count, stack->count + 1, sizeof(loom_region_t*),
-        &stack->capacity, (void**)&stack->regions));
+        arena, stack->count, stack->count + 1, sizeof(*stack->entries),
+        &stack->capacity, (void**)&stack->entries));
   }
-  stack->regions[stack->count++] = region;
+  stack->entries[stack->count++] = (loom_scf_to_cfg_region_entry_t){
+      .region = region,
+      .descriptor = descriptor,
+  };
   return iree_ok_status();
 }
 
-static loom_region_t* loom_scf_to_cfg_region_stack_pop(
+static loom_scf_to_cfg_region_entry_t loom_scf_to_cfg_region_stack_pop(
     loom_scf_to_cfg_region_stack_t* stack) {
-  return stack->count > 0 ? stack->regions[--stack->count] : NULL;
+  return stack->count > 0 ? stack->entries[--stack->count]
+                          : (loom_scf_to_cfg_region_entry_t){.region = NULL};
 }
 
 static void loom_scf_to_cfg_frontier_initialize(
@@ -1428,35 +1439,46 @@ static iree_status_t loom_scf_to_cfg_lower_switch(
 static bool loom_scf_to_cfg_classify_op(
     const loom_scf_to_cfg_state_t* state, loom_op_t* op,
     loom_scf_to_cfg_lowering_kind_t* out_lowering_kind) {
-  if (loom_func_exit_isa(op) &&
-      op->parent_block->parent_region == loom_func_like_body(state->function)) {
-    *out_lowering_kind = LOOM_SCF_TO_CFG_LOWERING_EXIT;
-  } else if (loom_scf_if_isa(op)) {
-    *out_lowering_kind = LOOM_SCF_TO_CFG_LOWERING_IF;
-  } else if (loom_scf_for_isa(op)) {
-    *out_lowering_kind = LOOM_SCF_TO_CFG_LOWERING_FOR;
-  } else if (loom_scf_while_isa(op)) {
-    *out_lowering_kind = LOOM_SCF_TO_CFG_LOWERING_WHILE;
-  } else if (loom_scf_switch_isa(op)) {
-    *out_lowering_kind = LOOM_SCF_TO_CFG_LOWERING_SWITCH;
-  } else {
-    return false;
+  switch (op->kind) {
+    case LOOM_OP_FUNC_EXIT:
+      if (op->parent_block->parent_region !=
+          loom_func_like_body(state->function)) {
+        return false;
+      }
+      *out_lowering_kind = LOOM_SCF_TO_CFG_LOWERING_EXIT;
+      return true;
+    case LOOM_OP_SCF_IF:
+      *out_lowering_kind = LOOM_SCF_TO_CFG_LOWERING_IF;
+      return true;
+    case LOOM_OP_SCF_FOR:
+      *out_lowering_kind = LOOM_SCF_TO_CFG_LOWERING_FOR;
+      return true;
+    case LOOM_OP_SCF_WHILE:
+      *out_lowering_kind = LOOM_SCF_TO_CFG_LOWERING_WHILE;
+      return true;
+    case LOOM_OP_SCF_SWITCH:
+      *out_lowering_kind = LOOM_SCF_TO_CFG_LOWERING_SWITCH;
+      return true;
+    default:
+      return false;
   }
-  return true;
 }
 
 static iree_status_t loom_scf_to_cfg_collect_child_regions(
     loom_scf_to_cfg_state_t* state, loom_op_t* op) {
+  const loom_op_vtable_t* vtable = loom_op_vtable(state->module, op);
   loom_region_t** regions = loom_op_regions(op);
   for (uint8_t i = 0; i < op->region_count; ++i) {
     IREE_RETURN_IF_ERROR(loom_scf_to_cfg_region_stack_push(
-        state->pass->arena, &state->region_stack, regions[i]));
+        state->pass->arena, &state->region_stack, regions[i],
+        loom_op_vtable_region_descriptor(vtable, i)));
   }
   return iree_ok_status();
 }
 
 static iree_status_t loom_scf_to_cfg_collect_block_frontier(
-    loom_scf_to_cfg_state_t* state, loom_block_t* block) {
+    loom_scf_to_cfg_state_t* state, loom_block_t* block,
+    const loom_region_descriptor_t* region_descriptor) {
   loom_op_t* op = NULL;
   loom_block_for_each_op(block, op) {
     if (iree_any_bit_set(op->flags, LOOM_OP_FLAG_DEAD)) {
@@ -1464,6 +1486,13 @@ static iree_status_t loom_scf_to_cfg_collect_block_frontier(
     }
     loom_scf_to_cfg_lowering_kind_t lowering_kind;
     if (loom_scf_to_cfg_classify_op(state, op, &lowering_kind)) {
+      if (lowering_kind != LOOM_SCF_TO_CFG_LOWERING_EXIT && region_descriptor &&
+          iree_any_bit_set(region_descriptor->flags,
+                           LOOM_REGION_SINGLE_BLOCK)) {
+        IREE_RETURN_IF_ERROR(
+            loom_scf_to_cfg_emit(state, op, LOOM_ERR_STRUCTURE_066));
+        continue;
+      }
       IREE_RETURN_IF_ERROR(loom_scf_to_cfg_frontier_push(
           state->pass->arena, &state->frontier, op, lowering_kind));
       continue;
@@ -1483,18 +1512,19 @@ static iree_status_t loom_scf_to_cfg_collect_frontier(
   state->region_stack.count = 0;
   state->frontier.count = 0;
   IREE_RETURN_IF_ERROR(loom_scf_to_cfg_region_stack_push(
-      state->pass->arena, &state->region_stack, body));
+      state->pass->arena, &state->region_stack, body,
+      loom_func_like_body_region_descriptor(state->module, function)));
 
   while (true) {
-    loom_region_t* region =
+    const loom_scf_to_cfg_region_entry_t region_entry =
         loom_scf_to_cfg_region_stack_pop(&state->region_stack);
-    if (!region || loom_pass_has_error_diagnostics(state->pass)) {
+    if (!region_entry.region || loom_pass_has_error_diagnostics(state->pass)) {
       break;
     }
     loom_block_t* block = NULL;
-    loom_region_for_each_block(region, block) {
-      IREE_RETURN_IF_ERROR(
-          loom_scf_to_cfg_collect_block_frontier(state, block));
+    loom_region_for_each_block(region_entry.region, block) {
+      IREE_RETURN_IF_ERROR(loom_scf_to_cfg_collect_block_frontier(
+          state, block, region_entry.descriptor));
     }
   }
 

@@ -11,14 +11,13 @@
 #include "iree/base/api.h"
 #include "iree/base/threading/mutex.h"
 #include "iree/hal/api.h"
+#include "libhrx/src/libhrx/event_timestamp.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 typedef struct iree_hal_streaming_context_t iree_hal_streaming_context_t;
-typedef struct iree_hal_streaming_event_timestamp_slot_t
-    iree_hal_streaming_event_timestamp_slot_t;
 typedef struct iree_hal_streaming_graph_t iree_hal_streaming_graph_t;
 typedef struct iree_hal_streaming_graph_node_t iree_hal_streaming_graph_node_t;
 typedef struct iree_hal_streaming_stream_t iree_hal_streaming_stream_t;
@@ -34,18 +33,6 @@ typedef struct iree_hal_streaming_operation_timeline_t {
   uint64_t pending_value;
 } iree_hal_streaming_operation_timeline_t;
 
-// Facts converting a pair of device ticks captured on one device into a
-// duration. Populated or zeroed as a unit: a zero |frequency_hz| means the
-// device advertises no domain whose ticks this layer can convert, and is the
-// one state in which a timing-enabled record captures no tick.
-typedef struct iree_hal_streaming_timestamp_domain_t {
-  // Ticks per second of the domain, or 0 when the device advertises none.
-  uint64_t frequency_hz;
-  // Number of low bits defined in a tick, in [1, 64]; the counter wraps at
-  // this width. Zero exactly when |frequency_hz| is zero.
-  uint32_t valid_bits;
-} iree_hal_streaming_timestamp_domain_t;
-
 typedef enum iree_hal_streaming_event_flag_bits_e {
   IREE_HAL_STREAMING_EVENT_FLAG_NONE = 0ull,
   IREE_HAL_STREAMING_EVENT_FLAG_BLOCKING_SYNC = 1ull << 0,
@@ -53,7 +40,7 @@ typedef enum iree_hal_streaming_event_flag_bits_e {
   IREE_HAL_STREAMING_EVENT_FLAG_INTERPROCESS = 1ull << 2,
 } iree_hal_streaming_event_flags_t;
 
-// The timeline point a submitted event record names, together with the stream
+// The timeline point an event record names, together with the stream
 // timeline point that reaching it implies and the device tick slot the record
 // captures into. Published and read as one value so no reader can pair one
 // record's semaphore, value or tick with another record's.
@@ -63,15 +50,15 @@ typedef enum iree_hal_streaming_event_flag_bits_e {
 // path has: iree_hal_streaming_event_acquire_recorded_point produces one,
 // iree_hal_streaming_event_commit_recorded_point consumes one, and
 // iree_hal_streaming_event_release_recorded_point drops what one names. A
-// point under construction names the timeline a record is about to signal and
-// owns nothing, which is how a record path builds its point before
-// iree_hal_streaming_event_enqueue_record completes it into an owning one.
+// point under construction owns nothing. A record path either retains an
+// already-accepted stream point or submits a new signal through
+// iree_hal_streaming_event_enqueue_record to make the point owning.
 typedef struct iree_hal_streaming_recorded_point_t {
-  // Timeline semaphore the record's submission signals, or NULL when no record
-  // has been submitted. Retained by whoever holds the point.
+  // Timeline semaphore whose accepted work the record observes, or NULL when
+  // no queue point has been recorded. Retained by whoever holds the point.
   iree_hal_semaphore_t* semaphore;
-  // Value |semaphore| reaches once the recorded work completes, or 0 when
-  // |semaphore| is NULL.
+  // Value |semaphore| reaches once the recorded work completes. Zero for an
+  // empty stream snapshot or when |semaphore| is NULL.
   uint64_t value;
   // Stream whose timeline this point is ordered after, or 0 when the point
   // follows no stream timeline point. Identifies the timeline a cross-stream
@@ -82,15 +69,15 @@ typedef struct iree_hal_streaming_recorded_point_t {
   // inside a graph launch is ordered after the tail the launch waited on,
   // which is earlier than anything the launch signals.
   uint64_t ordered_after_stream_value;
-  // True when the record executes outside its context's shared primary queue.
-  // A dependent stream must keep its wait off that shared queue so producers
-  // submitted later can continue to run.
+  // True when recorded work may execute outside the context's shared primary
+  // queue. A dependent stream must keep its wait off that shared queue so
+  // producers submitted later can continue to run.
   bool requires_independent_queue;
   // Slot the device writes this record's tick into at the point |value| names,
   // or NULL when the record captured no tick because timing is disabled on the
   // event or the device advertises no domain. Retained by whoever holds the
   // point; the tick is defined once |semaphore| reaches |value|.
-  iree_hal_streaming_event_timestamp_slot_t* timestamp_slot;
+  hrx_event_timestamp_slot_t* timestamp_slot;
 } iree_hal_streaming_recorded_point_t;
 
 // Event for synchronization.
@@ -164,22 +151,6 @@ typedef enum iree_hal_streaming_event_timing_e {
   IREE_HAL_STREAMING_EVENT_TIMING_UNSUPPORTED,
 } iree_hal_streaming_event_timing_t;
 
-// Reads the facts converting the ticks of the device |spec| describes, or a
-// zeroed domain when it advertises none whose ticks records made on that device
-// can be differenced. A NULL |spec| is a device publishing no facts at all.
-//
-// The facts belong to the queue family a capture resolves to, so this accepts
-// only a device reporting a single family covering a single physical device:
-// there is then one domain, and two records made anywhere on the device are
-// comparable however the implementation resolves their queue affinity. The
-// device-scope summary carries the DEVICE_TIMESTAMPS flag, which no family spec
-// repeats, and may aggregate families that differ, so the flag is read there
-// and the numbers from the family itself; a summary that disagrees with the one
-// family it stands for describes no domain either can be converted with.
-// Synchronization: none (reads immutable device facts).
-iree_hal_streaming_timestamp_domain_t iree_hal_streaming_query_timestamp_domain(
-    const iree_hal_device_spec_t* spec);
-
 // Creates an event owned by |context|.
 // Synchronization: none (creates new event).
 iree_status_t iree_hal_streaming_event_create(
@@ -229,10 +200,9 @@ void iree_hal_streaming_event_release_recorded_point(
 //
 // A submitted record ends the event's association with any graph a capture-time
 // record left on it, in the same transition, so no reader can see the new point
-// while the event still reads as captured. Returns that graph reference;
-// releasing it can free the allocations the graph owns, which synchronizes
-// every context and relocks the stream, so callers holding a stream or graph
-// executable mutex must release it after unlocking.
+// while the event still reads as captured. Returns that graph reference for
+// release outside the caller's stream or graph executable mutex, keeping
+// destruction of graph-owned resources outside submission locks.
 // Synchronization: event (event mutex held while replacing the point).
 IREE_MUST_USE_RESULT iree_hal_streaming_graph_t*
 iree_hal_streaming_event_commit_recorded_point(
@@ -243,10 +213,8 @@ iree_hal_streaming_event_commit_recorded_point(
 // An event names none once its last record has been submitted, and none before
 // any record has been made.
 //
-// Answers from the association alone, taking no reference to the graph: a
-// caller deciding only whether the event names a capture never holds a
-// reference whose release could free the graph's allocations, which
-// synchronizes every context.
+// Answers from the association alone without acquiring ownership or running
+// graph destruction when the caller only needs to query capture state.
 // Synchronization: event (event mutex held while reading).
 bool iree_hal_streaming_event_has_capture_graph(
     iree_hal_streaming_event_t* event);
@@ -254,9 +222,8 @@ bool iree_hal_streaming_event_has_capture_graph(
 // Returns a retained reference to the graph and exact session a capture-time
 // record last associated |event| with, or NULL/zero when the event names no
 // capture. Both outputs are acquired atomically under the event mutex.
-// Releasing the returned graph can free the allocations it owns, which
-// synchronizes every context and relocks streams, so callers holding a stream
-// mutex must release it after unlocking.
+// Release the returned reference outside the caller's stream mutex so graph
+// destruction runs outside submission locks.
 // Synchronization: event (event mutex held while retaining).
 IREE_MUST_USE_RESULT iree_hal_streaming_graph_t*
 iree_hal_streaming_event_acquire_capture_graph(
@@ -314,10 +281,12 @@ IREE_MUST_USE_RESULT iree_status_t iree_hal_streaming_event_enqueue_record(
     iree_hal_streaming_recorded_point_t* point);
 
 // Records |event| at the point |stream| has reached. On a stream that is not
-// capturing that point is a queue point: |stream| is flushed so the record
-// lands behind everything already recorded on it, and the record is enqueued
-// there. |stream| must then belong to |event|'s context, or the record is
-// refused with IREE_STATUS_INCOMPATIBLE.
+// capturing, pending command recording is submitted first. An untimed record
+// retains the resulting stream point without submitting new work and flushes
+// every retained queue realization. A timed record enqueues a device timestamp
+// after the stream tail, or a completion barrier when the device has no clock.
+// |stream| must belong to |event|'s context, or the record is refused with
+// IREE_STATUS_INCOMPATIBLE.
 //
 // A default captured record names the stream's dependency frontier and no
 // queue point, so nothing is flushed or enqueued and it is accepted from any
@@ -327,7 +296,8 @@ IREE_MUST_USE_RESULT iree_status_t iree_hal_streaming_event_enqueue_record(
 // node that publishes a submitted event point on each graph launch. Such a
 // node requires the event's context to match the graph's. Outside capture,
 // both modes record the ordinary stream point.
-// Synchronization: stream flush (flushes a stream that is not capturing).
+// Synchronization: stream mutex covers pending recording, point capture, and
+// publication. The event mutex protects replacement of the recorded point.
 iree_status_t iree_hal_streaming_event_record(
     iree_hal_streaming_event_t* event, iree_hal_streaming_stream_t* stream,
     bool capture_external_record);
@@ -335,25 +305,6 @@ iree_status_t iree_hal_streaming_event_record(
 // Waits until the event's last submitted record is signaled.
 iree_status_t iree_hal_streaming_event_synchronize(
     iree_hal_streaming_event_t* event);
-
-// Converts the interval between two ticks captured in |domain| to milliseconds.
-// Only the low |domain.valid_bits| of a tick are defined and the counter wraps
-// there, so the difference is reduced modulo that width; a width of 64 makes
-// the reduction the identity.
-//
-// Reading that reduced difference as a signed offset from the counter's top bit
-// is this layer's choice and not something the device facts state. It is what
-// makes a pair captured in order a positive duration and a reversed pair a
-// negative one, and what it costs is that an interval longer than half the
-// counter range reports negative: out of reach at 64 bits and 100 MHz, but 21
-// seconds on a 32-bit counter at the same rate.
-//
-// |domain| must be populated; the only caller reaches this through a record
-// that captured a tick, which a zeroed domain makes impossible.
-// Synchronization: none (pure arithmetic).
-float iree_hal_streaming_timestamp_domain_elapsed_ms(
-    iree_hal_streaming_timestamp_domain_t domain, uint64_t start_tick,
-    uint64_t stop_tick);
 
 // Measures the interval between the records |start| and |stop| name and stores
 // it in milliseconds in |*ms|. Writes |*ms| only when |*out_timing| is

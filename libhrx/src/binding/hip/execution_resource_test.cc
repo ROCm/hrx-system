@@ -204,11 +204,11 @@ class ExecutionResourceTest : public ::testing::Test {
     iree_hal_device_release(hal_device_);
   }
 
-  hipError_t SplitSmByCount(hipDevResource* out_resources,
+  hipError_t SplitSmByCount(const hipDevResource* input, unsigned int flags,
+                            unsigned int minimum_count,
                             unsigned int* inout_group_count,
-                            const hipDevResource* input,
-                            hipDevResource* out_remainder, unsigned int flags,
-                            unsigned int minimum_count) {
+                            hipDevResource* out_resources,
+                            hipDevResource* out_remainder) {
     const iree_hal_streaming_execution_resource_set_t* input_set = nullptr;
     hipError_t result = iree_hip_execution_resource_resolve_sm_for_device(
         input, &device_, &input_set);
@@ -216,14 +216,15 @@ class ExecutionResourceTest : public ::testing::Test {
       return result;
     }
     return iree_hip_execution_resource_split_sm_by_count(
-        &device_, input_set, input, flags, minimum_count, out_resources,
-        inout_group_count, out_remainder);
+        &device_, input_set, input, flags, minimum_count, inout_group_count,
+        out_resources, out_remainder);
   }
 
-  hipError_t SplitSm(hipDevResource* out_resources, unsigned int group_count,
-                     const hipDevResource* input, hipDevResource* out_remainder,
+  hipError_t SplitSm(const hipDevResource* input, unsigned int group_count,
                      unsigned int flags,
-                     hipDevSmResourceGroupParams* group_parameters) {
+                     hipDevSmResourceGroupParams* group_parameters,
+                     hipDevResource* out_resources,
+                     hipDevResource* out_remainder) {
     const iree_hal_streaming_execution_resource_set_t* input_set = nullptr;
     hipError_t result = iree_hip_execution_resource_resolve_sm_for_device(
         input, &device_, &input_set);
@@ -413,9 +414,9 @@ TEST_F(ExecutionResourceTest, SplitsUniformResourcesIntoExactDisjointSets) {
   std::memset(&untouched_remainder, 0xA5, sizeof(untouched_remainder));
   const hipDevResource expected_untouched_remainder = untouched_remainder;
   unsigned int partition_count = 1;
-  EXPECT_EQ(SplitSmByCount(
-                /*out_resources=*/nullptr, &partition_count, &full_resource,
-                &untouched_remainder, /*flags=*/0, /*minimum_count=*/5),
+  EXPECT_EQ(SplitSmByCount(&full_resource, /*flags=*/0, /*minimum_count=*/5,
+                           &partition_count, /*out_resources=*/nullptr,
+                           &untouched_remainder),
             hipSuccess);
   EXPECT_EQ(partition_count, 2u);
   EXPECT_EQ(std::memcmp(&untouched_remainder, &expected_untouched_remainder,
@@ -424,21 +425,19 @@ TEST_F(ExecutionResourceTest, SplitsUniformResourcesIntoExactDisjointSets) {
 
   hipDevResource requested_partition;
   unsigned int requested_partition_count = 1;
-  ASSERT_EQ(
-      SplitSmByCount(&requested_partition, &requested_partition_count,
-                     &full_resource, /*out_remainder=*/nullptr, /*flags=*/0,
-                     /*minimum_count=*/5),
-      hipSuccess);
+  ASSERT_EQ(SplitSmByCount(&full_resource, /*flags=*/0, /*minimum_count=*/5,
+                           &requested_partition_count, &requested_partition,
+                           /*out_remainder=*/nullptr),
+            hipSuccess);
   EXPECT_EQ(requested_partition_count, 1u);
   EXPECT_EQ(requested_partition.sm.smCount, 6u);
 
   hipDevResource partitions[4];
   hipDevResource remainder;
   partition_count = IREE_ARRAYSIZE(partitions);
-  ASSERT_EQ(
-      SplitSmByCount(partitions, &partition_count, &full_resource, &remainder,
-                     /*flags=*/0, /*minimum_count=*/5),
-      hipSuccess);
+  ASSERT_EQ(SplitSmByCount(&full_resource, /*flags=*/0, /*minimum_count=*/5,
+                           &partition_count, partitions, &remainder),
+            hipSuccess);
   ASSERT_EQ(partition_count, 2u);
   for (iree_host_size_t i = 0; i < partition_count; ++i) {
     EXPECT_EQ(partitions[i].type, hipDevResourceTypeSm);
@@ -495,8 +494,8 @@ TEST_F(ExecutionResourceTest, SplitsStructuredUnevenExactSets) {
   group_parameters[1].smCount = 4;
   hipDevResource partitions[2];
   hipDevResource remainder;
-  ASSERT_EQ(SplitSm(partitions, IREE_ARRAYSIZE(partitions), &full_resource,
-                    &remainder, /*flags=*/0, group_parameters),
+  ASSERT_EQ(SplitSm(&full_resource, IREE_ARRAYSIZE(partitions), /*flags=*/0,
+                    group_parameters, partitions, &remainder),
             hipSuccess);
 
   EXPECT_EQ(group_parameters[0].smCount, 6u);
@@ -549,8 +548,8 @@ TEST_F(ExecutionResourceTest, BackfillsAutomaticallySizedStructuredGroup) {
   group_parameters[1].flags = hipDevSmResourceGroupBackfill;
   hipDevResource partitions[2];
   hipDevResource remainder;
-  ASSERT_EQ(SplitSm(partitions, IREE_ARRAYSIZE(partitions), &full_resource,
-                    &remainder, /*flags=*/0, group_parameters),
+  ASSERT_EQ(SplitSm(&full_resource, IREE_ARRAYSIZE(partitions), /*flags=*/0,
+                    group_parameters, partitions, &remainder),
             hipSuccess);
 
   EXPECT_EQ(group_parameters[0].smCount, 4u);
@@ -568,9 +567,9 @@ TEST_F(ExecutionResourceTest, DiscoversStructuredGroupsInOrder) {
       hipDevSmResourceGroupDefault, &full_resource));
 
   hipDevSmResourceGroupParams group_parameters[2] = {};
-  ASSERT_EQ(SplitSm(/*out_resources=*/nullptr, IREE_ARRAYSIZE(group_parameters),
-                    &full_resource,
-                    /*out_remainder=*/nullptr, /*flags=*/0, group_parameters),
+  ASSERT_EQ(SplitSm(&full_resource, IREE_ARRAYSIZE(group_parameters),
+                    /*flags=*/0, group_parameters, /*out_resources=*/nullptr,
+                    /*out_remainder=*/nullptr),
             hipSuccess);
 
   EXPECT_EQ(group_parameters[0].smCount, full_resource.sm.smCount);
@@ -589,8 +588,8 @@ TEST_F(ExecutionResourceTest, DryRunPublishesStructuredRemainder) {
 
   hipDevSmResourceGroupParams group_parameter = {.smCount = 4};
   hipDevResource remainder;
-  ASSERT_EQ(SplitSm(/*out_resources=*/nullptr, /*group_count=*/1,
-                    &full_resource, &remainder, /*flags=*/0, &group_parameter),
+  ASSERT_EQ(SplitSm(&full_resource, /*group_count=*/1, /*flags=*/0,
+                    &group_parameter, /*out_resources=*/nullptr, &remainder),
             hipSuccess);
 
   EXPECT_EQ(group_parameter.smCount, 4u);
@@ -620,8 +619,8 @@ TEST_F(ExecutionResourceTest,
   std::memset(&partition, 0xA5, sizeof(partition));
   const hipDevResource expected_partition = partition;
 
-  EXPECT_EQ(SplitSm(&partition, /*group_count=*/1, &full_resource,
-                    /*out_remainder=*/nullptr, /*flags=*/0, &group_parameter),
+  EXPECT_EQ(SplitSm(&full_resource, /*group_count=*/1, /*flags=*/0,
+                    &group_parameter, &partition, /*out_remainder=*/nullptr),
             hipErrorNotSupported);
   EXPECT_EQ(std::memcmp(&group_parameter, &expected_parameter,
                         sizeof(group_parameter)),
@@ -652,8 +651,8 @@ TEST_F(ExecutionResourceTest,
   std::memset(&remainder, 0x5A, sizeof(remainder));
   const hipDevResource expected_remainder = remainder;
 
-  EXPECT_EQ(SplitSm(partitions, IREE_ARRAYSIZE(partitions), &input_resource,
-                    &remainder, /*flags=*/0, group_parameters),
+  EXPECT_EQ(SplitSm(&input_resource, IREE_ARRAYSIZE(partitions), /*flags=*/0,
+                    group_parameters, partitions, &remainder),
             hipErrorInvalidResourceConfiguration);
   EXPECT_EQ(std::memcmp(group_parameters, expected_parameters,
                         sizeof(group_parameters)),
@@ -674,10 +673,9 @@ TEST_F(ExecutionResourceTest, PreservesConstraintGroupsInRemainder) {
 
   hipDevResource untouched_remainder = {};
   unsigned int discovered_partition_count = 99;
-  ASSERT_EQ(SplitSmByCount(
-                /*out_resources=*/nullptr, &discovered_partition_count,
-                &input_resource, &untouched_remainder, /*flags=*/0,
-                /*minimum_count=*/4),
+  ASSERT_EQ(SplitSmByCount(&input_resource, /*flags=*/0, /*minimum_count=*/4,
+                           &discovered_partition_count,
+                           /*out_resources=*/nullptr, &untouched_remainder),
             hipSuccess);
   EXPECT_EQ(discovered_partition_count, 1u);
 
@@ -686,8 +684,8 @@ TEST_F(ExecutionResourceTest, PreservesConstraintGroupsInRemainder) {
   const hipDevResource expected_unused_partition = partitions[1];
   hipDevResource remainder;
   unsigned int partition_count = IREE_ARRAYSIZE(partitions);
-  ASSERT_EQ(SplitSmByCount(partitions, &partition_count, &input_resource,
-                           &remainder, /*flags=*/0, /*minimum_count=*/4),
+  ASSERT_EQ(SplitSmByCount(&input_resource, /*flags=*/0, /*minimum_count=*/4,
+                           &partition_count, partitions, &remainder),
             hipSuccess);
   ASSERT_EQ(partition_count, 1u);
   EXPECT_EQ(partitions[0].sm.smCount, 4u);
@@ -734,8 +732,8 @@ TEST_F(ExecutionResourceTest, RejectsUnsupportedSplitWithoutPublishing) {
     unsigned int partition_count = IREE_ARRAYSIZE(partitions);
     const unsigned int expected_partition_count = partition_count;
 
-    EXPECT_EQ(SplitSmByCount(partitions, &partition_count, input, &remainder,
-                             flags, minimum_count),
+    EXPECT_EQ(SplitSmByCount(input, flags, minimum_count, &partition_count,
+                             partitions, &remainder),
               expected_result);
     EXPECT_EQ(partition_count, expected_partition_count);
     EXPECT_EQ(std::memcmp(partitions, expected_partitions, sizeof(partitions)),

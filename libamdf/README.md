@@ -216,9 +216,11 @@ driver, which is available through
 or the computer manufacturer. Keep each device's complete signed package
 together so its kernel driver, firmware, and companion files agree.
 
-After building libamdf, the enumeration example reports passive endpoint
-identity and capabilities. Updating a compatible native driver does not require
-adding its release number to libamdf.
+After building libamdf, [amdf-info](tool/amdf-info/README.md) reports passive
+GPU/NPU identity and capabilities in readable text or JSON. `--details` expands
+the report, and `--device=rdna --activate` or `--device=xdna --activate` checks
+native device acquisition and teardown without submitting work. Updating a
+compatible native driver does not require adding its release number to libamdf.
 
 ## Building and embedding
 
@@ -247,18 +249,18 @@ on the host's installed DRM/KFD/XDNA header versions. These are private build
 inputs: libamdf does not link libdrm, and installed clients need only the public
 amdf headers. Runtime driver capabilities are still queried independently.
 
-Build libamdf without the legacy AMDGPU HAL:
+Build libamdf independently of the AMD HAL drivers:
 
 ```bash
-iree-bazel-configure -DAMDF_BUILD=ON -DIREE_HAL_DRIVER_AMDGPU=OFF
+iree-bazel-configure -DAMDF_BUILD=ON -DIREE_HAL_DRIVER_AMD=OFF
 iree-bazel-build //libamdf:amdf //libamdf:amdf_static
-iree-bazel-run //libamdf/examples:enumerate
+iree-bazel-run //libamdf/tool/amdf-info
 ```
 
 The equivalent CMake build is:
 
 ```bash
-iree-cmake-configure -DAMDF_BUILD=ON -DIREE_HAL_DRIVER_AMDGPU=OFF -DLIBHRX_BUILD=OFF -DLOOM_BUILD=OFF
+iree-cmake-configure -DAMDF_BUILD=ON -DIREE_HAL_DRIVER_AMD=OFF -DLIBHRX_BUILD=OFF -DLOOM_BUILD=OFF
 iree-cmake-build amdf amdf_static
 ```
 
@@ -267,4 +269,5 @@ publication-only, warm submission and completed execution measurements.
 
 Installing the repository exports `amdf::amdf` and `amdf::amdf_static` through
 `find_package(amdf CONFIG REQUIRED)` and installs the public headers beneath
-`include/amdf/`.
+`include/amdf/`. The `AMDF` component also installs `amdf-info` under `bin/`;
+`amdf_TOOL_DIR` identifies that directory to CMake clients.

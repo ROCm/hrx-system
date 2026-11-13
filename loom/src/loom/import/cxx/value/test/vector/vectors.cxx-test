@@ -1,0 +1,231 @@
+// RUN: roundtrip
+// Explicit vectors retain masks and structured value transport.
+typedef unsigned u32x16 __attribute__((vector_size(64)));
+typedef int i32x16 __attribute__((vector_size(64)));
+static u32x16 update(u32x16 value, u32x16 depth) {
+  return (value & 65535u) | (depth & 0xffff0000u);
+}
+void entry(const u32x16* input, u32x16* output, i32x16* masks, unsigned count) {
+  u32x16 value = input[0];
+  for (unsigned i = 0; i < count; ++i) {
+    value = update(value, input[i]);
+  }
+  if (count > 1u) {
+    value += 1u;
+  }
+  output[0] = value;
+  masks[0] = value > input[0];
+  masks[1] = !value;
+}
+// ----
+func.def public @entry(%input: buffer, %input_byte_offset: offset, %output: buffer, %output_byte_offset: offset, %masks: buffer, %masks_byte_offset: offset, %count: i32) {
+  %7 = scalar.constant 0 : i32
+  %8 = scalar.extsi %7 : i32 to i64
+  %9 = scalar.constant 64 : i64
+  %10 = scalar.muli %8, %9 : i64
+  %11 = index.cast %input_byte_offset : offset to i64
+  %12 = scalar.addi %11, %10 : i64
+  %13 = scalar.assume %12 [range(%12, 0, 9223372036854775807)] : i64
+  %14 = index.cast %13 : i64 to offset
+  %15 = buffer.view %input[%14] : buffer -> view<16xi32>
+  %value$16 = vector.load<root_in_bounds> %15[0] : view<16xi32> -> vector<16xi32>
+  %i = scalar.constant 0 : i32
+  %18 = index.cast %i : i32 to offset
+  %19 = index.cast %count : i32 to offset
+  %20 = index.constant 1 : offset
+  %value$23 = scf.for %i = [%18 to %19 step %20](%value$22 = %value$16 : vector<16xi32>) -> (vector<16xi32>) {
+    %24 = index.cast %i : offset to i32
+    %25 = scalar.extui %24 : i32 to i64
+    %26 = scalar.constant 64 : i64
+    %27 = scalar.muli %25, %26 : i64
+    %28 = index.cast %input_byte_offset : offset to i64
+    %29 = scalar.addi %28, %27 : i64
+    %30 = scalar.assume %29 [range(%29, 0, 9223372036854775807)] : i64
+    %31 = index.cast %30 : i64 to offset
+    %32 = buffer.view %input[%31] : buffer -> view<16xi32>
+    %33 = vector.load<root_in_bounds> %32[0] : view<16xi32> -> vector<16xi32>
+    %value$34 = func.call pure @update(%value$22, %33) : (vector<16xi32>, vector<16xi32>) -> (vector<16xi32>)
+    scf.yield %value$34 : vector<16xi32>
+  }
+  %35 = scalar.constant 1 : i32
+  %36 = scalar.cmpi ugt, %count, %35 : i32
+  %value$37 = scf.if %36 -> (vector<16xi32>) {
+    %38 = scalar.constant 1 : i32
+    %39 = vector.splat %38 : vector<16xi32>
+    %value = vector.addi %value$23, %39 : vector<16xi32>
+    scf.yield %value : vector<16xi32>
+  } else {
+    scf.yield %value$23 : vector<16xi32>
+  }
+  %41 = scalar.constant 0 : i32
+  %42 = scalar.extsi %41 : i32 to i64
+  %43 = scalar.constant 64 : i64
+  %44 = scalar.muli %42, %43 : i64
+  %45 = index.cast %output_byte_offset : offset to i64
+  %46 = scalar.addi %45, %44 : i64
+  %47 = scalar.assume %46 [range(%46, 0, 9223372036854775807)] : i64
+  %48 = index.cast %47 : i64 to offset
+  %49 = buffer.view %output[%48] : buffer -> view<16xi32>
+  vector.store<root_in_bounds> %value$37, %49[0] : vector<16xi32>, view<16xi32>
+  %50 = scalar.constant 0 : i32
+  %51 = scalar.extsi %50 : i32 to i64
+  %52 = scalar.constant 64 : i64
+  %53 = scalar.muli %51, %52 : i64
+  %54 = index.cast %input_byte_offset : offset to i64
+  %55 = scalar.addi %54, %53 : i64
+  %56 = scalar.assume %55 [range(%55, 0, 9223372036854775807)] : i64
+  %57 = index.cast %56 : i64 to offset
+  %58 = buffer.view %input[%57] : buffer -> view<16xi32>
+  %59 = vector.load<root_in_bounds> %58[0] : view<16xi32> -> vector<16xi32>
+  %60 = vector.cmpi ugt, %value$37, %59 : vector<16xi32> -> vector<16xi1>
+  %61 = vector.extsi %60 : vector<16xi1> to vector<16xi32>
+  %62 = scalar.constant 0 : i32
+  %63 = scalar.extsi %62 : i32 to i64
+  %64 = scalar.constant 64 : i64
+  %65 = scalar.muli %63, %64 : i64
+  %66 = index.cast %masks_byte_offset : offset to i64
+  %67 = scalar.addi %66, %65 : i64
+  %68 = scalar.assume %67 [range(%67, 0, 9223372036854775807)] : i64
+  %69 = index.cast %68 : i64 to offset
+  %70 = buffer.view %masks[%69] : buffer -> view<16xi32>
+  vector.store<root_in_bounds> %61, %70[0] : vector<16xi32>, view<16xi32>
+  %71 = vector.splati 0 : vector<16xi32>
+  %72 = vector.cmpi eq, %value$37, %71 : vector<16xi32> -> vector<16xi1>
+  %73 = vector.extsi %72 : vector<16xi1> to vector<16xi32>
+  %74 = scalar.constant 1 : i32
+  %75 = scalar.extsi %74 : i32 to i64
+  %76 = scalar.constant 64 : i64
+  %77 = scalar.muli %75, %76 : i64
+  %78 = index.cast %masks_byte_offset : offset to i64
+  %79 = scalar.addi %78, %77 : i64
+  %80 = scalar.assume %79 [range(%79, 0, 9223372036854775807)] : i64
+  %81 = index.cast %80 : i64 to offset
+  %82 = buffer.view %masks[%81] : buffer -> view<16xi32>
+  vector.store<root_in_bounds> %73, %82[0] : vector<16xi32>, view<16xi32>
+  func.return
+}
+
+func.def @update(%value: vector<16xi32>, %depth: vector<16xi32>) -> (vector<16xi32>) {
+  %86 = scalar.constant 65535 : i32
+  %87 = vector.splat %86 : vector<16xi32>
+  %88 = vector.andi %value, %87 : vector<16xi32>
+  %89 = scalar.constant -65536 : i32
+  %90 = vector.splat %89 : vector<16xi32>
+  %91 = vector.andi %depth, %90 : vector<16xi32>
+  %92 = vector.ori %88, %91 : vector<16xi32>
+  func.return %92 : vector<16xi32>
+}
+
+// ====
+// RUN: roundtrip
+// Vector lanes and bit casts keep source representation.
+typedef unsigned U __attribute__((vector_size(16)));
+typedef float F __attribute__((vector_size(16)));
+unsigned lane(unsigned* input, unsigned index) {
+  U lanes = {1u, 2u};
+  const U* source = reinterpret_cast<const U*>(input);
+  U value = *source + lanes;
+  F bits = (F)value;
+  U recovered = __builtin_bit_cast(U, bits);
+  return recovered[index];
+}
+// ----
+func.def public @lane(%input: buffer, %input_byte_offset: offset, %index: i32) -> (i32) {
+  %lanes = vector.constanti [1, 2, 0, 0] : vector<4xi32>
+  %5 = buffer.view %input[%input_byte_offset] : buffer -> view<4xi32>
+  %6 = vector.load<root_in_bounds> %5[0] : view<4xi32> -> vector<4xi32>
+  %value = vector.addi %6, %lanes : vector<4xi32>
+  %bits = vector.bitcast %value : vector<4xi32> to vector<4xf32>
+  %recovered = vector.bitcast %bits : vector<4xf32> to vector<4xi32>
+  %10 = index.cast %index : i32 to index
+  %11 = vector.extract %recovered[%10] : vector<4xi32> -> i32
+  func.return %11 : i32
+}
+
+// ====
+// RUN: roundtrip
+// Shaped intrinsics retain heterogeneous signatures and kinds.
+typedef unsigned Table __attribute__((vector_size(64)));
+typedef unsigned Indices __attribute__((vector_size(16)));
+typedef signed char Coordinates __attribute__((vector_size(16)));
+typedef unsigned char Weights __attribute__((vector_size(16)));
+typedef int Result __attribute__((vector_size(16)));
+[[loom::op("vector.table.lookup")]] Indices lookup(Table, Indices);
+[[loom::op("vector.dot4i", "s8u8")]] Result dot(Coordinates, Weights, Result);
+Indices lookup_row(Table table, Indices indices) {
+  return lookup(table, indices);
+}
+Result transform(Coordinates points, Weights rows, Result translation) {
+  return dot(points, rows, translation);
+}
+// ----
+func.def public @lookup_row(%table: vector<16xi32>, %indices: vector<4xi32>) -> (vector<4xi32>) {
+  %3 = vector.table.lookup %table[%indices] : vector<16xi32>, vector<4xi32> -> vector<4xi32>
+  func.return %3 : vector<4xi32>
+}
+
+func.def public @transform(%points: vector<16xi8>, %rows: vector<16xi8>, %translation: vector<4xi32>) -> (vector<4xi32>) {
+  %8 = vector.dot4i<s8u8> %points, %rows, %translation : vector<16xi8>, vector<16xi8>, vector<4xi32>
+  func.return %8 : vector<4xi32>
+}
+
+// ====
+// Register slices keep their lane offset as an ordinary SSA value.
+#include <loomcxx/vector.h>
+using Float16 = float __attribute__((ext_vector_type(16)));
+using Float4 = float __attribute__((ext_vector_type(4)));
+Float4 slice(Float16 source, loom::type::size_type offset) {
+  return loom::vector::slice<Float4>(source, offset);
+}
+
+Float4 slice_index(Float16 source, loom::type::index offset) {
+  return loom::vector::slice<Float4>(source, offset);
+}
+
+// ----
+func.def public @slice(%source: vector<16xf32>, %offset: i64) -> (vector<4xf32>) {
+  %3 = index.cast %offset : i64 to index
+  %4 = vector.slice %source[%3] : vector<16xf32> -> vector<4xf32>
+  func.return %4 : vector<4xf32>
+}
+
+func.def public @slice_index(%source: vector<16xf32>, %offset: index) -> (vector<4xf32>) {
+  %8 = vector.slice %source[%offset] : vector<16xf32> -> vector<4xf32>
+  func.return %8 : vector<4xf32>
+}
+
+// ====
+// Lanewise absolute value retains the vector element category.
+#include <loomcxx/vector.h>
+using Float4 = float __attribute__((ext_vector_type(4)));
+using Int4 = int __attribute__((ext_vector_type(4)));
+Float4 absolute_float(Float4 value) { return loom::vector::absf(value); }
+Int4 absolute_integer(Int4 value) { return loom::vector::absi(value); }
+Float4 extrema(Float4 left, Float4 right) {
+  return loom::vector::minimumf(left, right) +
+         loom::vector::maximumf(left, right) +
+         loom::vector::minnumf(left, right) +
+         loom::vector::maxnumf(left, right);
+}
+
+// ----
+func.def public @absolute_float(%value: vector<4xf32>) -> (vector<4xf32>) {
+  %2 = vector.absf %value : vector<4xf32>
+  func.return %2 : vector<4xf32>
+}
+
+func.def public @absolute_integer(%value: vector<4xi32>) -> (vector<4xi32>) {
+  %5 = vector.absi %value : vector<4xi32>
+  func.return %5 : vector<4xi32>
+}
+
+func.def public @extrema(%left: vector<4xf32>, %right: vector<4xf32>) -> (vector<4xf32>) {
+  %9 = vector.minimumf %left, %right : vector<4xf32>
+  %10 = vector.maximumf %left, %right : vector<4xf32>
+  %11 = vector.addf %9, %10 : vector<4xf32>
+  %12 = vector.minnumf %left, %right : vector<4xf32>
+  %13 = vector.addf %11, %12 : vector<4xf32>
+  %14 = vector.maxnumf %left, %right : vector<4xf32>
+  %15 = vector.addf %13, %14 : vector<4xf32>
+  func.return %15 : vector<4xf32>
+}

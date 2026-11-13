@@ -682,21 +682,25 @@ TEST_F(DominanceTest, WalkMaintainsDominatorScopesAcrossCfgAndNesting) {
     int enter_count = 0;
     int leave_count = 0;
     std::vector<loom_dominance_walk_scope_flags_t> flags;
+    std::vector<uint32_t> result_operation_counts;
   } state;
   loom_dominance_walk_callbacks_t callbacks = {
       .user_data = &state,
       .enter_scope =
-          [](void* user_data, loom_dominance_walk_scope_flags_t flags) {
+          [](void* user_data, uint32_t result_operation_count,
+             loom_dominance_walk_scope_flags_t flags) {
             auto* state = static_cast<ScopeState*>(user_data);
             ++state->depth;
             ++state->enter_count;
             state->flags.push_back(flags);
+            state->result_operation_counts.push_back(result_operation_count);
             return iree_ok_status();
           },
       .leave_scope =
           [](void* user_data) {
             auto* state = static_cast<ScopeState*>(user_data);
             state->flags.pop_back();
+            state->result_operation_counts.pop_back();
             --state->depth;
             ++state->leave_count;
           },
@@ -717,6 +721,8 @@ TEST_F(DominanceTest, WalkMaintainsDominatorScopesAcrossCfgAndNesting) {
       break;
     }
     ASSERT_FALSE(state.flags.empty());
+    EXPECT_EQ(state.result_operation_counts.back(),
+              cursor.op->parent_block->result_operation_count);
     visits.push_back({cursor.op, {state.depth, state.flags.back()}});
   }
 

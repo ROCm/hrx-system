@@ -167,6 +167,21 @@ iree_vm_buffer_access(const iree_vm_buffer_t* buffer);
 IREE_API_EXPORT iree_host_size_t
 iree_vm_buffer_length(const iree_vm_buffer_t* buffer);
 
+// Tests whether two buffer positions identify the same byte address. Each
+// offset may reach its buffer's one-past endpoint. A null buffer permits only
+// offset zero and is unequal to every nonnull buffer, including empty storage.
+// Independently wrapped overlapping ranges compare by their selected positions,
+// not by wrapper identity. Empty roots without native storage retain distinct
+// logical identities, shared by their subspans.
+//
+// Both nonnull roots must be open. No byte access rights are required, payload
+// bytes are not read, and ownership is unchanged. Failure leaves |out_equal|
+// untouched. No address is exposed through the result.
+IREE_API_EXPORT iree_status_t iree_vm_buffer_compare_address(
+    const iree_vm_buffer_t* left, iree_host_size_t left_offset,
+    const iree_vm_buffer_t* right, iree_host_size_t right_offset,
+    bool* out_equal);
+
 // Returns an exact borrowed readable range. The operation requires READ
 // access, performs subtraction-form bounds checking, and leaves |out_span|
 // untouched on failure. It creates no native mapping or unmap obligation.

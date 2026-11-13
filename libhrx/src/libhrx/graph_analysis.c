@@ -1,431 +1,320 @@
 // Copyright 2026 The HRX Authors
 // SPDX-License-Identifier: Apache-2.0
-//
-// DAG scheduling algorithm: topological sort, partitioning, workstream
-// detection. Pure algorithm with no binding-layer dependencies.
 
-#include "hrx_internal.h"
+#include "graph_analysis.h"
+
 #include "iree/base/internal/math.h"
 
-//===----------------------------------------------------------------------===//
-// Tuning parameters
-//===----------------------------------------------------------------------===//
-
-#define HRX_GRAPH_MIN_PARTITION_SIZE_FOR_STREAMS 16
+// Bound recording size and amortize the extra command buffers/semaphores needed
+// by independent workstreams. These bounds affect recording, never graph size.
 #define HRX_GRAPH_MAX_PARTITION_SIZE 2048
-#define HRX_GRAPH_MAX_WORKSTREAMS 8
+#define HRX_GRAPH_MIN_PARTITION_SIZE_FOR_STREAMS 16
 #define HRX_GRAPH_MIN_NODES_PER_STREAM 32
-#define HRX_GRAPH_MAX_REACHABILITY_BITS 64
-#define HRX_GRAPH_MAX_FAN_OUT 8
+#define HRX_GRAPH_MAX_FAN_IN 8
 
-//===----------------------------------------------------------------------===//
-// Phase 1: Preparation
-//===----------------------------------------------------------------------===//
-
-static bool hrx_graph_prepare_nodes(hrx_graph_node_block_t* node_blocks,
-                                    iree_host_size_t node_count,
-                                    hrx_graph_sort_node_t* sort_nodes,
-                                    uint32_t* node_index_map) {
-  uint32_t index = 0;
-  for (hrx_graph_node_block_t* block = node_blocks; block;
-       block = block->next) {
-    if (block->next) {
-      IREE_BUILTIN_PREFETCH_RO(block->next, IREE_BUILTIN_PREFETCH_LOCALITY_L3);
-    }
-    for (iree_host_size_t i = 0; i < block->count; ++i) {
-      hrx_graph_node_s* node = block->nodes[i];
-      sort_nodes[index] = (hrx_graph_sort_node_t){
-          .original_index = index,
-          .sorted_index = index,
-          .max_dependency_index = 0,
-          .partition_id = 0,
-          .in_degree = 0,
-          .type = (uint8_t)node->type,
-          .stream_id = 0,
-          .node = node,
-      };
-      node_index_map[node->node_index] = index;
-      ++index;
-    }
-  }
-
-  bool is_sorted = true;
-  for (uint32_t i = 0; is_sorted && i < node_count; ++i) {
-    hrx_graph_node_s* node = sort_nodes[i].node;
-    if (node->dependency_count > 0) {
-      for (uint32_t j = 0; j < node->dependency_count; ++j) {
-        uint32_t dep_index = node_index_map[node->dependencies[j]->node_index];
-        if (dep_index >= i) {
-          is_sorted = false;
-          break;
-        }
-      }
-    }
-  }
-
-  return is_sorted;
-}
-
-//===----------------------------------------------------------------------===//
-// Phase 2: Topological sort
-//===----------------------------------------------------------------------===//
-
-static iree_status_t hrx_graph_topological_sort(
-    hrx_graph_sort_node_t* nodes, uint32_t node_count, uint32_t* node_index_map,
-    hrx_graph_edge_t* additional_edges, iree_arena_allocator_t* arena,
-    bool is_already_sorted) {
-  if (is_already_sorted && !additional_edges) {
-    for (uint32_t i = 0; i < node_count; ++i) {
-      uint32_t max_dep = 0;
-      for (uint32_t j = 0; j < nodes[i].node->dependency_count; ++j) {
-        const uint32_t dep_index =
-            node_index_map[nodes[i].node->dependencies[j]->node_index];
-        if (dep_index < i && dep_index != UINT32_MAX) {
-          max_dep = iree_max(max_dep, dep_index);
-        }
-      }
-      nodes[i].max_dependency_index = max_dep;
-    }
+iree_status_t hrx_graph_analysis_initialize(
+    iree_host_size_t node_count, iree_arena_allocator_t* arena,
+    hrx_graph_analysis_t* out_analysis) {
+  memset(out_analysis, 0, sizeof(*out_analysis));
+  if (!node_count) {
     return iree_ok_status();
   }
-
-  uint32_t* queue = NULL;
-  const iree_host_size_t queue_size = node_count * sizeof(*queue);
-  IREE_RETURN_IF_ERROR(iree_arena_allocate(arena, queue_size, (void**)&queue));
-
-  for (uint32_t i = 0; i < node_count; ++i) {
-    nodes[i].in_degree = (uint16_t)nodes[i].node->dependency_count;
+  iree_host_size_t allocation_size = 0;
+  if (node_count > UINT32_MAX ||
+      !iree_host_size_checked_mul(
+          node_count, sizeof(void*) + 2 * sizeof(uint32_t) + sizeof(uint8_t),
+          &allocation_size) ||
+      !iree_host_size_checked_add(allocation_size, sizeof(uint32_t),
+                                  &allocation_size)) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "graph node tables exceed addressable storage");
   }
-
-  hrx_graph_edge_t* edge = additional_edges;
-  while (edge) {
-    uint32_t to_index = node_index_map[edge->to->node_index];
-    if (to_index < node_count) {
-      ++nodes[to_index].in_degree;
-    }
-    edge = edge->next;
-  }
-
-  uint32_t queue_head = 0;
-  uint32_t queue_tail = 0;
-  for (uint32_t i = 0; i < node_count; ++i) {
-    if (nodes[i].in_degree == 0) {
-      queue[queue_tail++] = i;
-    }
-  }
-
-  uint32_t sorted_count = 0;
-  while (queue_head < queue_tail) {
-    uint32_t current = queue[queue_head++];
-    nodes[current].sorted_index = sorted_count++;
-
-    uint32_t max_dep = 0;
-    for (uint32_t j = 0; j < nodes[current].node->dependency_count; ++j) {
-      uint32_t dep_index =
-          node_index_map[nodes[current].node->dependencies[j]->node_index];
-      if (dep_index != UINT32_MAX) {
-        uint32_t dep_sorted_index = nodes[dep_index].sorted_index;
-        max_dep = iree_max(max_dep, dep_sorted_index);
-      }
-    }
-
-    edge = additional_edges;
-    while (edge) {
-      if (edge->to == nodes[current].node) {
-        uint32_t from_index = node_index_map[edge->from->node_index];
-        if (from_index != UINT32_MAX) {
-          uint32_t from_sorted_index = nodes[from_index].sorted_index;
-          max_dep = iree_max(max_dep, from_sorted_index);
-        }
-      }
-      edge = edge->next;
-    }
-    nodes[current].max_dependency_index = max_dep;
-
-    for (uint32_t i = 0; i < node_count; ++i) {
-      if (i == current) {
-        continue;
-      }
-      hrx_graph_node_s* node = nodes[i].node;
-      for (uint32_t j = 0; j < node->dependency_count; ++j) {
-        if (node->dependencies[j] == nodes[current].node) {
-          if (--nodes[i].in_degree == 0) {
-            queue[queue_tail++] = i;
-          }
-          break;
-        }
-      }
-    }
-
-    edge = additional_edges;
-    while (edge) {
-      if (edge->from == nodes[current].node) {
-        uint32_t to_index = node_index_map[edge->to->node_index];
-        if (to_index < node_count && to_index != current) {
-          if (--nodes[to_index].in_degree == 0) {
-            queue[queue_tail++] = to_index;
-          }
-        }
-      }
-      edge = edge->next;
-    }
-  }
-
-  if (sorted_count != node_count) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "graph contains cycles (%u nodes processed of %u)",
-                            sorted_count, node_count);
-  }
-
-  hrx_graph_sort_node_t temp;
-  for (uint32_t i = 0; i < node_count; ++i) {
-    while (nodes[i].sorted_index != i) {
-      uint32_t target = nodes[i].sorted_index;
-      temp = nodes[target];
-      nodes[target] = nodes[i];
-      nodes[i] = temp;
-    }
-  }
-
-  for (uint32_t i = 0; i < node_count; ++i) {
-    node_index_map[nodes[i].node->node_index] = i;
-  }
-
+  void** sources = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate(arena, allocation_size, (void**)&sources));
+  uint32_t* offsets = (uint32_t*)(sources + node_count);
+  uint32_t* order = offsets + node_count + 1;
+  uint8_t* flags = (uint8_t*)(order + node_count);
+  memset(offsets, 0, (node_count + 1) * sizeof(*offsets));
+  *out_analysis = (hrx_graph_analysis_t){
+      .node_count = (uint32_t)node_count,
+      .sources = sources,
+      .offsets = offsets,
+      .order = order,
+      .flags = flags,
+  };
   return iree_ok_status();
 }
 
-//===----------------------------------------------------------------------===//
-// Phase 3: Partitioning with workstream detection
-//===----------------------------------------------------------------------===//
-
-typedef struct hrx_graph_stream_state_t {
-  uint64_t reachability_mask;
-  uint32_t last_node_index;
-} hrx_graph_stream_state_t;
-
-typedef struct hrx_uint32x2_t {
-  uint32_t values[2];
-} hrx_uint32x2_t;
-
-static hrx_uint32x2_t hrx_graph_partition_with_streams(
-    hrx_graph_sort_node_t* nodes, uint32_t node_count, uint32_t* node_index_map,
-    const hrx_graph_edge_t* additional_edges,
-    hrx_graph_partition_t* partitions) {
-  uint32_t partition_count = 0;
-  uint32_t block_count = 0;
-
-  hrx_graph_stream_state_t streams[HRX_GRAPH_MAX_WORKSTREAMS];
-  uint8_t active_streams = 0;
-
-  for (uint32_t i = 0; i < node_count;) {
-    bool is_recordable = hrx_graph_node_is_recordable(nodes[i].type);
-    if (!is_recordable) {
-      hrx_graph_partition_type_t partition_type;
-      switch (nodes[i].type) {
-        case HRX_GRAPH_NODE_TYPE_INTERNAL_EMPTY:
-          partition_type = HRX_GRAPH_PARTITION_TYPE_EMPTY;
-          break;
-        case HRX_GRAPH_NODE_TYPE_INTERNAL_HOST_CALL:
-          partition_type = HRX_GRAPH_PARTITION_TYPE_HOST_CALL;
-          break;
-        default:
-          partition_type = HRX_GRAPH_PARTITION_TYPE_EMPTY;
-          break;
-      }
-      partitions[partition_count] = (hrx_graph_partition_t){
-          .start_index = i,
-          .count = 1,
-          .type = partition_type,
-          .stream_count = 1,
-      };
-      nodes[i].partition_id = partition_count;
-      nodes[i].stream_id = 0;
-      ++partition_count;
-      ++block_count;
-      ++i;
-      active_streams = 0;
-    } else {
-      uint32_t recordable_start = i;
-      memset(streams, 0, sizeof(streams));
-      active_streams = 0;
-
-      uint32_t partition_size = 0;
-      while (i < node_count && partition_size < HRX_GRAPH_MAX_PARTITION_SIZE &&
-             hrx_graph_node_is_recordable(nodes[i].type)) {
-        bool deps_satisfied = true;
-        for (uint32_t j = 0; j < nodes[i].node->dependency_count; ++j) {
-          uint32_t dep_index =
-              node_index_map[nodes[i].node->dependencies[j]->node_index];
-          if (dep_index >= recordable_start && dep_index < i) {
-            // OK
-          } else if (dep_index >= i) {
-            deps_satisfied = false;
-            break;
-          }
-        }
-        for (const hrx_graph_edge_t* edge = additional_edges;
-             deps_satisfied && edge != NULL; edge = edge->next) {
-          if (edge->to != nodes[i].node) {
-            continue;
-          }
-          const uint32_t dep_index = node_index_map[edge->from->node_index];
-          if (dep_index >= i) {
-            deps_satisfied = false;
-          }
-        }
-        if (!deps_satisfied) {
-          break;
-        }
-
-        const bool use_workstreams =
-            (i - recordable_start) >= HRX_GRAPH_MIN_PARTITION_SIZE_FOR_STREAMS;
-
-        uint8_t assigned_stream = 0;
-        uint8_t connected_streams = 0;
-
-        for (uint32_t j = 0; j < nodes[i].node->dependency_count; ++j) {
-          uint32_t dep_index =
-              node_index_map[nodes[i].node->dependencies[j]->node_index];
-          if (dep_index >= recordable_start && dep_index < i) {
-            uint8_t dep_stream = nodes[dep_index].stream_id;
-            connected_streams |= (1 << dep_stream);
-          }
-        }
-        uint32_t additional_dependency_count = 0;
-        for (const hrx_graph_edge_t* edge = additional_edges; edge != NULL;
-             edge = edge->next) {
-          if (edge->to != nodes[i].node) {
-            continue;
-          }
-          ++additional_dependency_count;
-          const uint32_t dep_index = node_index_map[edge->from->node_index];
-          if (dep_index >= recordable_start && dep_index < i) {
-            const uint8_t dep_stream = nodes[dep_index].stream_id;
-            connected_streams |= (1 << dep_stream);
-          }
-        }
-
-        if (use_workstreams && connected_streams == 0 &&
-            active_streams < HRX_GRAPH_MAX_WORKSTREAMS) {
-          uint32_t remaining_in_partition =
-              HRX_GRAPH_MAX_PARTITION_SIZE - partition_size;
-          if (remaining_in_partition >= HRX_GRAPH_MIN_NODES_PER_STREAM) {
-            assigned_stream = active_streams++;
-            streams[assigned_stream].last_node_index = i;
-            if ((i - recordable_start) < HRX_GRAPH_MAX_REACHABILITY_BITS) {
-              streams[assigned_stream].reachability_mask =
-                  1ULL << (i - recordable_start);
-            }
-          } else {
-            assigned_stream = 0;
-            if (active_streams == 0) {
-              active_streams = 1;
-            }
-          }
-        } else if (use_workstreams &&
-                   iree_math_count_ones_u32(connected_streams) == 1) {
-          assigned_stream =
-              iree_math_count_trailing_zeros_u32(connected_streams);
-          streams[assigned_stream].last_node_index = i;
-          if ((i - recordable_start) < HRX_GRAPH_MAX_REACHABILITY_BITS) {
-            streams[assigned_stream].reachability_mask |=
-                1ULL << (i - recordable_start);
-          }
-        } else {
-          const uint32_t dep_count =
-              iree_math_count_ones_u32(connected_streams);
-          const bool is_sync_point =
-              (nodes[i].node->dependency_count + additional_dependency_count >
-               HRX_GRAPH_MAX_FAN_OUT);
-          if (!use_workstreams || dep_count > 1 || is_sync_point) {
-            assigned_stream = 0;
-            for (uint32_t k = recordable_start; k < i; ++k) {
-              nodes[k].stream_id = 0;
-            }
-            active_streams = 1;
-          } else {
-            assigned_stream = 0;
-            if (active_streams == 0) {
-              active_streams = 1;
-            }
-          }
-        }
-
-        nodes[i].partition_id = partition_count;
-        nodes[i].stream_id = assigned_stream;
-        ++i;
-        ++partition_size;
-      }
-
-      const uint32_t stream_count = active_streams > 0 ? active_streams : 1;
-      partitions[partition_count] = (hrx_graph_partition_t){
-          .start_index = recordable_start,
-          .count = i - recordable_start,
-          .type = HRX_GRAPH_PARTITION_TYPE_RECORDABLE,
-          .stream_count = stream_count,
-      };
-      ++partition_count;
-      block_count += stream_count;
-    }
+iree_status_t hrx_graph_analysis_allocate_dependencies(
+    hrx_graph_analysis_t* analysis, iree_arena_allocator_t* arena) {
+  if (!analysis->node_count) {
+    return iree_ok_status();
   }
-
-  return (hrx_uint32x2_t){{partition_count, block_count}};
+  uint64_t edge_count = 0;
+  for (uint32_t i = 0; i < analysis->node_count; ++i) {
+    uint32_t count = analysis->offsets[i + 1];
+    analysis->offsets[i] = (uint32_t)edge_count;
+    analysis->order[i] = (uint32_t)edge_count;
+    edge_count += count;
+  }
+  iree_host_size_t allocation_size = 0;
+  if (edge_count > UINT32_MAX ||
+      !iree_host_size_checked_mul((iree_host_size_t)edge_count,
+                                  sizeof(uint32_t), &allocation_size)) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "graph dependencies exceed addressable storage");
+  }
+  analysis->offsets[analysis->node_count] = (uint32_t)edge_count;
+  if (allocation_size) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate(arena, allocation_size,
+                                             (void**)&analysis->dependencies));
+  }
+  return iree_ok_status();
 }
 
-//===----------------------------------------------------------------------===//
-// Main entry point
-//===----------------------------------------------------------------------===//
-
-iree_status_t hrx_graph_schedule_nodes(hrx_graph_node_block_t* node_blocks,
-                                       iree_host_size_t node_count,
-                                       hrx_graph_edge_t* additional_edges,
-                                       iree_arena_allocator_t* arena,
-                                       hrx_graph_schedule_t* out_schedule) {
-  IREE_ASSERT_ARGUMENT(out_schedule);
-
-  if (node_count == 0) {
-    memset(out_schedule, 0, sizeof(*out_schedule));
+// Builds reverse CSR adjacency only when creation order is not topological.
+// order doubles as adjacency fill cursors and then the FIFO ready queue. After
+// the sort, pending becomes the source-to-sorted inverse map.
+static iree_status_t hrx_graph_topological_sort(hrx_graph_analysis_t* analysis,
+                                                iree_arena_allocator_t* arena,
+                                                const uint32_t** out_ranks) {
+  const uint32_t count = analysis->node_count;
+  if (analysis->is_topologically_ordered) {
+    for (uint32_t node = 0; node < count; ++node) {
+      analysis->order[node] = node;
+    }
+    *out_ranks = analysis->order;
     return iree_ok_status();
   }
 
+  const uint32_t edge_count = analysis->offsets[count];
+  iree_host_size_t word_count = (iree_host_size_t)count * 2 + 1 + edge_count;
+  iree_host_size_t allocation_size = 0;
+  if (!iree_host_size_checked_mul(word_count, sizeof(uint32_t),
+                                  &allocation_size)) {
+    return iree_make_status(
+        IREE_STATUS_RESOURCE_EXHAUSTED,
+        "graph reverse adjacency exceeds addressable storage");
+  }
+  uint32_t* outgoing_offsets = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate(arena, allocation_size, (void**)&outgoing_offsets));
+  uint32_t* pending = outgoing_offsets + count + 1;
+  uint32_t* outgoing = pending + count;
+  memset(outgoing_offsets, 0, ((iree_host_size_t)count + 1) * sizeof(uint32_t));
+  for (uint32_t e = 0; e < edge_count; ++e) {
+    ++outgoing_offsets[analysis->dependencies[e] + 1];
+  }
+  for (uint32_t node = 0; node < count; ++node) {
+    outgoing_offsets[node + 1] += outgoing_offsets[node];
+    analysis->order[node] = outgoing_offsets[node];
+    pending[node] = analysis->offsets[node + 1] - analysis->offsets[node];
+  }
+  for (uint32_t node = 0; node < count; ++node) {
+    for (uint32_t e = analysis->offsets[node]; e < analysis->offsets[node + 1];
+         ++e) {
+      const uint32_t predecessor = analysis->dependencies[e];
+      outgoing[analysis->order[predecessor]++] = node;
+    }
+  }
+  uint32_t head = 0;
+  uint32_t tail = 0;
+  for (uint32_t node = 0; node < count; ++node) {
+    if (!pending[node]) {
+      analysis->order[tail++] = node;
+    }
+  }
+  while (head < tail) {
+    const uint32_t node = analysis->order[head++];
+    for (uint32_t e = outgoing_offsets[node]; e < outgoing_offsets[node + 1];
+         ++e) {
+      const uint32_t successor = outgoing[e];
+      if (!--pending[successor]) {
+        analysis->order[tail++] = successor;
+      }
+    }
+  }
+  if (tail != count) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "graph contains cycles (%u of %u nodes ordered)",
+                            tail, count);
+  }
+  for (uint32_t position = 0; position < count; ++position) {
+    pending[analysis->order[position]] = position;
+  }
+  *out_ranks = pending;
+  return iree_ok_status();
+}
+
+// Empty nodes carry dependencies but no operation. Keep their topological
+// positions so they still separate recording ranges; the existing join between
+// those ranges orders every transitive predecessor without an empty submission.
+static uint32_t hrx_graph_partition_begin(const hrx_graph_analysis_t* analysis,
+                                          uint32_t start) {
+  while (start < analysis->node_count &&
+         (analysis->flags[analysis->order[start]] &
+          HRX_GRAPH_ANALYSIS_NODE_KIND_MASK) == HRX_GRAPH_ANALYSIS_NODE_EMPTY) {
+    ++start;
+  }
+  return start;
+}
+
+static uint32_t hrx_graph_partition_end(const hrx_graph_analysis_t* analysis,
+                                        uint32_t start) {
+  uint32_t end = start + 1;
+  if ((analysis->flags[analysis->order[start]] &
+       HRX_GRAPH_ANALYSIS_NODE_KIND_MASK) ==
+      HRX_GRAPH_ANALYSIS_NODE_RECORDABLE) {
+    const uint32_t limit = start + iree_min(analysis->node_count - start,
+                                            HRX_GRAPH_MAX_PARTITION_SIZE);
+    while (end < limit && (analysis->flags[analysis->order[end]] &
+                           HRX_GRAPH_ANALYSIS_NODE_KIND_MASK) ==
+                              HRX_GRAPH_ANALYSIS_NODE_RECORDABLE) {
+      ++end;
+    }
+  }
+  return end;
+}
+
+// A multi-stream join collapses the preceding prefix. Record its endpoint and
+// read earlier stream IDs as zero instead of rewriting the prefix at each join.
+// One final pass publishes the assignments and exact barrier decisions.
+static uint32_t hrx_graph_partition_streams(hrx_graph_analysis_t* analysis,
+                                            const uint32_t* ranks,
+                                            uint32_t start, uint32_t end,
+                                            uint32_t* frontiers) {
+  uint32_t collapsed_end = start;
+  uint32_t stream_count = 1;
+  for (uint32_t position = start; position < end; ++position) {
+    const uint32_t node = analysis->order[position];
+    uint32_t connected = 0;
+    uint32_t frontier = 0;
+    for (uint32_t e = analysis->offsets[node]; e < analysis->offsets[node + 1];
+         ++e) {
+      const uint32_t predecessor = analysis->dependencies[e];
+      const uint32_t rank = ranks[predecessor];
+      frontier = iree_max(frontier, rank + 1);
+      if (rank >= start) {
+        uint32_t stream = rank < collapsed_end
+                              ? 0
+                              : analysis->flags[predecessor] >>
+                                    HRX_GRAPH_ANALYSIS_NODE_STREAM_SHIFT;
+        connected |= 1u << stream;
+      }
+    }
+    frontiers[position - start] = frontier;
+    uint32_t stream = 0;
+    bool parallel =
+        position - start >= HRX_GRAPH_MIN_PARTITION_SIZE_FOR_STREAMS;
+    if (parallel && !connected && stream_count < HRX_GRAPH_MAX_WORKSTREAMS) {
+      if (HRX_GRAPH_MAX_PARTITION_SIZE - (position - start) >=
+          HRX_GRAPH_MIN_NODES_PER_STREAM) {
+        stream = stream_count++;
+      }
+    } else if (parallel && iree_math_count_ones_u32(connected) == 1) {
+      stream = iree_math_count_trailing_zeros_u32(connected);
+    } else if (!parallel || iree_math_count_ones_u32(connected) > 1 ||
+               analysis->offsets[node + 1] - analysis->offsets[node] >
+                   HRX_GRAPH_MAX_FAN_IN) {
+      collapsed_end = position;
+      stream_count = 1;
+    }
+    analysis->flags[node] =
+        (uint8_t)(stream << HRX_GRAPH_ANALYSIS_NODE_STREAM_SHIFT);
+  }
+
+  // Every in-partition dependency has been assigned to the same final stream.
+  // A barrier covers all earlier positions on that stream, so the largest
+  // predecessor rank is sufficient: no pending-node set or edge walk is needed.
+  // Earlier partitions are already ordered by their completion semaphores.
+  uint32_t boundaries[HRX_GRAPH_MAX_WORKSTREAMS];
+  for (uint32_t stream = 0; stream < stream_count; ++stream) {
+    boundaries[stream] = start;
+  }
+  for (uint32_t position = start; position < end; ++position) {
+    const uint32_t node = analysis->order[position];
+    uint32_t stream =
+        position < collapsed_end
+            ? 0
+            : analysis->flags[node] >> HRX_GRAPH_ANALYSIS_NODE_STREAM_SHIFT;
+    uint8_t flags = (uint8_t)(stream << HRX_GRAPH_ANALYSIS_NODE_STREAM_SHIFT);
+    if (frontiers[position - start] > boundaries[stream]) {
+      flags |= HRX_GRAPH_ANALYSIS_NODE_BARRIER_BEFORE;
+      boundaries[stream] = position;
+    }
+    analysis->flags[node] = flags;
+  }
+  return stream_count;
+}
+
+iree_status_t hrx_graph_analyze(hrx_graph_analysis_t* analysis,
+                                iree_arena_allocator_t* arena,
+                                hrx_graph_schedule_t* out_schedule) {
+  memset(out_schedule, 0, sizeof(*out_schedule));
+  if (!analysis->node_count) {
+    return iree_ok_status();
+  }
   IREE_TRACE_ZONE_BEGIN(z0);
-  IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, node_count);
-
-  hrx_graph_sort_node_t* sorted_nodes = NULL;
-  const iree_host_size_t sorted_nodes_size = node_count * sizeof(*sorted_nodes);
+  const uint32_t* ranks = NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_arena_allocate(arena, sorted_nodes_size, (void**)&sorted_nodes));
+      z0, hrx_graph_topological_sort(analysis, arena, &ranks));
 
-  uint32_t* node_index_map = NULL;
-  const iree_host_size_t map_size = node_count * sizeof(*node_index_map);
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_arena_allocate(arena, map_size, (void**)&node_index_map));
-
-  const bool is_sorted = hrx_graph_prepare_nodes(node_blocks, node_count,
-                                                 sorted_nodes, node_index_map);
-  IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, is_sorted);
-
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, hrx_graph_topological_sort(sorted_nodes, node_count, node_index_map,
-                                     additional_edges, arena, is_sorted));
-
+  // Count actual boundaries before allocation. A long recording needs a few
+  // descriptors, not a worst-case node-sized table held for its whole lifetime.
+  uint32_t partition_count = 0;
+  uint32_t maximum_partition_size = 0;
+  for (uint32_t start = hrx_graph_partition_begin(analysis, 0);
+       start < analysis->node_count;) {
+    const uint32_t end = hrx_graph_partition_end(analysis, start);
+    maximum_partition_size = iree_max(maximum_partition_size, end - start);
+    ++partition_count;
+    start = hrx_graph_partition_begin(analysis, end);
+  }
   hrx_graph_partition_t* partitions = NULL;
-  const iree_host_size_t partitions_size = node_count * sizeof(*partitions);
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_arena_allocate(arena, partitions_size, (void**)&partitions));
-
-  const hrx_uint32x2_t partition_block_counts =
-      hrx_graph_partition_with_streams(sorted_nodes, node_count, node_index_map,
-                                       additional_edges, partitions);
-  IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, partition_block_counts.values[0]);
-  IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, partition_block_counts.values[1]);
-
-  out_schedule->sorted_nodes = sorted_nodes;
-  out_schedule->node_index_map = node_index_map;
-  out_schedule->partitions = partitions;
-  out_schedule->partition_count = partition_block_counts.values[0];
-  out_schedule->block_count = partition_block_counts.values[1];
-
+  if (partition_count) {
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_arena_allocate(
+                arena, (iree_host_size_t)partition_count * sizeof(*partitions),
+                (void**)&partitions));
+  }
+  // Reused by every partition; these predecessor frontiers avoid an edge walk
+  // after workstream joins have resolved their final assignments.
+  uint32_t* frontiers = NULL;
+  if (maximum_partition_size) {
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0,
+        iree_arena_allocate(arena, maximum_partition_size * sizeof(*frontiers),
+                            (void**)&frontiers));
+  }
+  uint32_t block_count = 0;
+  uint32_t start = hrx_graph_partition_begin(analysis, 0);
+  for (uint32_t p = 0; p < partition_count; ++p) {
+    const uint32_t end = hrx_graph_partition_end(analysis, start);
+    uint32_t stream_count = 1;
+    if ((analysis->flags[analysis->order[start]] &
+         HRX_GRAPH_ANALYSIS_NODE_KIND_MASK) ==
+        HRX_GRAPH_ANALYSIS_NODE_RECORDABLE) {
+      stream_count =
+          hrx_graph_partition_streams(analysis, ranks, start, end, frontiers);
+    }
+    partitions[p] = (hrx_graph_partition_t){
+        .start_index = start,
+        .count = end - start,
+        .stream_count = stream_count,
+    };
+    block_count += stream_count;
+    start = hrx_graph_partition_begin(analysis, end);
+  }
+  *out_schedule = (hrx_graph_schedule_t){
+      .node_count = analysis->node_count,
+      .partition_count = partition_count,
+      .block_count = block_count,
+      .sources = analysis->sources,
+      .order = analysis->order,
+      .flags = analysis->flags,
+      .partitions = partitions,
+  };
   IREE_TRACE_ZONE_END(z0);
   return iree_ok_status();
 }

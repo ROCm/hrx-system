@@ -35,9 +35,8 @@ static iree_string_view_t loom_cmd_program_artifact_set_copy_string(
 }
 
 iree_status_t loom_cmd_program_artifact_set_build(
-    const loom_cmd_program_plan_t* plan,
-    loom_cmd_program_artifact_set_t* out_artifact_set,
-    iree_allocator_t host_allocator) {
+    const loom_cmd_program_plan_t* plan, iree_allocator_t host_allocator,
+    loom_cmd_program_artifact_set_t* out_artifact_set) {
   if (plan == NULL || plan->root_module == NULL || plan->root_count == 0 ||
       out_artifact_set == NULL) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -138,7 +137,7 @@ iree_status_t loom_cmd_program_artifact_set_build(
     }
     iree_byte_span_t data = iree_byte_span_empty();
     status =
-        loom_cmd_program_plan_serialize_root(plan, i, &data, host_allocator);
+        loom_cmd_program_plan_serialize_root(plan, i, host_allocator, &data);
     if (iree_status_is_ok(status)) {
       status = iree_byte_sequence_create_from_span_move(&data, host_allocator,
                                                         &artifact->data);

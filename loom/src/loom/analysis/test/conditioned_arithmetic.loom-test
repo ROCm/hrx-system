@@ -1,0 +1,500 @@
+// RUN: pass unroll-scf-for,dce
+
+// The divisor conversion precedes the guard. Magnitude calculation uses
+// ordinary arithmetic, and its neutral sign is known only inside the branch.
+func.def @guarded_magnitude(%input: i64, %bound: i64) {
+  %narrow = scalar.trunci %bound : i64 to i8
+  %wide = scalar.extsi %narrow : i8 to i64
+  %c0 = scalar.constant 0 : i64
+  %limit = scalar.constant 16 : i64
+  %positive = scalar.cmpi sgt, %bound, %c0 : i64
+  %small = scalar.cmpi sle, %bound, %limit : i64
+  %valid = scalar.andi %positive, %small : i1
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  scf.if %valid {
+    %shift = scalar.constant 63 : i64
+    %sign = scalar.shrsi %wide, %shift : i64
+    %flipped = scalar.xori %wide, %sign : i64
+    %magnitude = scalar.subi %flipped, %sign : i64
+    %bounded = scalar.assume %input [ult(%input, %magnitude)] : i64
+    %position = index.cast %bounded : i64 to index
+    %extent = index.cast %bound : i64 to index
+    %distance = index.sub %extent, %position : index
+    %ordered = test.fact_positive %distance : index -> i1
+    %count = index.cast %ordered : i1 to index
+    scf.for %iteration = [%begin to %count step %step] unroll {
+      test.use %iteration : index
+    }
+  }
+  func.return
+}
+
+// ----
+func.def @guarded_magnitude(%input: i64, %bound: i64) {
+  %c0 = scalar.constant 0 : i64
+  %limit = scalar.constant 16 : i64
+  %positive = scalar.cmpi sgt, %bound, %c0 : i64
+  %small = scalar.cmpi sle, %bound, %limit : i64
+  %valid = scalar.andi %positive, %small : i1
+  scf.if %valid {
+    %iteration_0 = index.constant 0 : index
+    test.use %iteration_0 : index
+  }
+  func.return
+}
+
+// ====
+
+// Every zero-neutral primitive in this chain must forward the input's strict
+// bound. The neutral value is dynamic outside the branch.
+func.def @neutral_zero(%raw: i32, %limit: i32, %neutral: i32) {
+  %input = scalar.assume %raw [range(%raw, 0, 64), lt(%raw, %limit)] : i32
+  %c0 = scalar.constant 0 : i32
+  %selected = scalar.cmpi eq, %neutral, %c0 : i32
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  scf.if %selected {
+    %sum = scalar.addi %input, %neutral : i32
+    %reverse_sum = scalar.addi %neutral, %sum : i32
+    %difference = scalar.subi %reverse_sum, %neutral : i32
+    %exclusive = scalar.xori %difference, %neutral : i32
+    %reverse_exclusive = scalar.xori %neutral, %exclusive : i32
+    %inclusive = scalar.ori %reverse_exclusive, %neutral : i32
+    %reverse_inclusive = scalar.ori %neutral, %inclusive : i32
+    %carry_sum, %carry = scalar.addcarryui %reverse_inclusive, %neutral : i32
+    %reverse_carry_sum, %reverse_carry = scalar.addcarryui %neutral, %carry_sum : i32
+    %borrow_difference, %borrow = scalar.subborrowui %reverse_carry_sum, %neutral : i32
+    %left = scalar.shli %borrow_difference, %neutral : i32
+    %signed_right = scalar.shrsi %left, %neutral : i32
+    %unsigned_right = scalar.shrui %signed_right, %neutral : i32
+    %rotated_left = scalar.rotli %unsigned_right, %neutral : i32
+    %rotated_right = scalar.rotri %rotated_left, %neutral : i32
+    %position = index.cast %rotated_right : i32 to index
+    %extent = index.cast %limit : i32 to index
+    %distance = index.sub %extent, %position : index
+    %ordered = test.fact_positive %distance : index -> i1
+    %count = index.cast %ordered : i1 to index
+    scf.for %iteration = [%begin to %count step %step] unroll {
+      test.use %iteration : index
+    }
+  }
+  func.return
+}
+
+// ----
+func.def @neutral_zero(%raw: i32, %limit: i32, %neutral: i32) {
+  %c0 = scalar.constant 0 : i32
+  %selected = scalar.cmpi eq, %neutral, %c0 : i32
+  scf.if %selected {
+    %iteration_0 = index.constant 0 : index
+    test.use %iteration_0 : index
+  }
+  func.return
+}
+
+// ====
+
+// Multiplication and scalar/paired division share the same identity at one.
+// The paired remainder is independently constant and must not acquire the
+// quotient's numeric origin.
+func.def @neutral_unit(%raw: i16, %limit: i16, %unit: i16) {
+  %input = scalar.assume %raw [range(%raw, 0, 64), lt(%raw, %limit)] : i16
+  %c1 = scalar.constant 1 : i16
+  %selected = scalar.cmpi eq, %unit, %c1 : i16
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  scf.if %selected {
+    %product = scalar.muli %input, %unit : i16
+    %reverse_product = scalar.muli %unit, %product : i16
+    %signed_quotient = scalar.divsi %reverse_product, %unit : i16
+    %unsigned_quotient = scalar.divui %signed_quotient, %unit : i16
+    %signed_pair, %signed_remainder = scalar.divremsi %unsigned_quotient, %unit : i16
+    %unsigned_pair, %unsigned_remainder = scalar.divremui %signed_pair, %unit : i16
+    %position = index.cast %unsigned_pair : i16 to index
+    %extent = index.cast %limit : i16 to index
+    %distance = index.sub %extent, %position : index
+    %ordered = test.fact_positive %distance : index -> i1
+    %count = index.cast %ordered : i1 to index
+    scf.for %iteration = [%begin to %count step %step] unroll {
+      test.use %iteration : index
+    }
+    %signed_minimum = test.fact_range_lo %signed_remainder : i16 -> i64
+    %signed_maximum = test.fact_range_hi %signed_remainder : i16 -> i64
+    %unsigned_minimum = test.fact_range_lo %unsigned_remainder : i16 -> i64
+    %unsigned_maximum = test.fact_range_hi %unsigned_remainder : i16 -> i64
+    %c0 = scalar.constant 0 : i64
+    %signed_lower_exact = scalar.cmpi eq, %signed_minimum, %c0 : i64
+    %signed_upper_exact = scalar.cmpi eq, %signed_maximum, %c0 : i64
+    %unsigned_lower_exact = scalar.cmpi eq, %unsigned_minimum, %c0 : i64
+    %unsigned_upper_exact = scalar.cmpi eq, %unsigned_maximum, %c0 : i64
+    %signed_exact = scalar.andi %signed_lower_exact, %signed_upper_exact : i1
+    %unsigned_exact = scalar.andi %unsigned_lower_exact, %unsigned_upper_exact : i1
+    %remainders_exact = scalar.andi %signed_exact, %unsigned_exact : i1
+    %remainder_count = index.cast %remainders_exact : i1 to index
+    scf.for %iteration = [%begin to %remainder_count step %step] unroll {
+      test.use %iteration : index
+    }
+  }
+  func.return
+}
+
+// ----
+func.def @neutral_unit(%raw: i16, %limit: i16, %unit: i16) {
+  %c1 = scalar.constant 1 : i16
+  %selected = scalar.cmpi eq, %unit, %c1 : i16
+  scf.if %selected {
+    %iteration_0$36 = index.constant 0 : index
+    test.use %iteration_0$36 : index
+    %iteration_0$37 = index.constant 0 : index
+    test.use %iteration_0$37 : index
+  }
+  func.return
+}
+
+// ====
+
+// The signed all-bits value is the AND identity at every non-Boolean width.
+// Rotation by a whole width is an identity, even when the count is not zero.
+func.def @bitwise_identities(%input: i8, %mask: i8, %rotation: i8) {
+  %all_bits = scalar.constant -1 : i8
+  %width = scalar.constant 8 : i8
+  %whole_mask = scalar.cmpi eq, %mask, %all_bits : i8
+  %whole_rotation = scalar.cmpi eq, %rotation, %width : i8
+  %selected = scalar.andi %whole_mask, %whole_rotation : i1
+  scf.if %selected {
+    %masked = scalar.andi %input, %mask : i8
+    %reverse_masked = scalar.andi %mask, %masked : i8
+    %left = scalar.rotli %reverse_masked, %rotation : i8
+    %right = scalar.rotri %left, %rotation : i8
+    %before = index.cast %input : i8 to index
+    %after = index.cast %right : i8 to index
+    %distance = index.sub %after, %before : index
+    %minimum = test.fact_range_lo %distance : index -> i64
+    %maximum = test.fact_range_hi %distance : index -> i64
+    %c0 = scalar.constant 0 : i64
+    %lower_exact = scalar.cmpi eq, %minimum, %c0 : i64
+    %upper_exact = scalar.cmpi eq, %maximum, %c0 : i64
+    %equal = scalar.andi %lower_exact, %upper_exact : i1
+    %count = index.cast %equal : i1 to index
+    %begin = index.constant 0 : index
+    %step = index.constant 1 : index
+    scf.for %iteration = [%begin to %count step %step] unroll {
+      test.use %iteration : index
+    }
+  }
+  func.return
+}
+
+// ----
+func.def @bitwise_identities(%input: i8, %mask: i8, %rotation: i8) {
+  %all_bits = scalar.constant -1 : i8
+  %width = scalar.constant 8 : i8
+  %whole_mask = scalar.cmpi eq, %mask, %all_bits : i8
+  %whole_rotation = scalar.cmpi eq, %rotation, %width : i8
+  %selected = scalar.andi %whole_mask, %whole_rotation : i1
+  scf.if %selected {
+    %iteration_0 = index.constant 0 : index
+    test.use %iteration_0 : index
+  }
+  func.return
+}
+
+// ====
+
+// Boolean all-bits is true, not the signed integer literal -1. Every rotate
+// count is an identity for a one-bit carrier.
+func.def @boolean_identities(%input: i1, %mask: i1, %rotation: i1) {
+  scf.if %mask {
+    %masked = scalar.andi %input, %mask : i1
+    %reverse_masked = scalar.andi %mask, %masked : i1
+    %left = scalar.rotli %reverse_masked, %rotation : i1
+    %right = scalar.rotri %left, %rotation : i1
+    %before = index.cast %input : i1 to index
+    %after = index.cast %right : i1 to index
+    %distance = index.sub %after, %before : index
+    %minimum = test.fact_range_lo %distance : index -> i64
+    %maximum = test.fact_range_hi %distance : index -> i64
+    %c0 = scalar.constant 0 : i64
+    %lower_exact = scalar.cmpi eq, %minimum, %c0 : i64
+    %upper_exact = scalar.cmpi eq, %maximum, %c0 : i64
+    %equal = scalar.andi %lower_exact, %upper_exact : i1
+    %count = index.cast %equal : i1 to index
+    %begin = index.constant 0 : index
+    %step = index.constant 1 : index
+    scf.for %iteration = [%begin to %count step %step] unroll {
+      test.use %iteration : index
+    }
+  }
+  func.return
+}
+
+// ----
+func.def @boolean_identities(%input: i1, %mask: i1, %rotation: i1) {
+  scf.if %mask {
+    %iteration_0 = index.constant 0 : index
+    test.use %iteration_0 : index
+  }
+  func.return
+}
+
+// ====
+
+// An interval containing a neutral value is insufficient. These changing
+// operations must not inherit the input's identity or strict upper bound.
+func.def @non_neutral(%raw: i32, %amount: i32) {
+  %input = scalar.assume %raw [range(%raw, 0, 7)] : i32
+  %overlapping = scalar.assume %amount [range(%amount, 0, 1)] : i32
+  %c1 = scalar.constant 1 : i32
+  %changed = scalar.xori %input, %overlapping : i32
+  %difference = scalar.subi %changed, %c1 : i32
+  %before = index.cast %input : i32 to index
+  %after = index.cast %difference : i32 to index
+  %distance = index.sub %after, %before : index
+  %minimum = test.fact_range_lo %distance : index -> i64
+  %maximum = test.fact_range_hi %distance : index -> i64
+  %limit = scalar.constant 0 : i64
+  %not_identity = scalar.cmpi sgt, %maximum, %limit : i64
+  %count = index.cast %not_identity : i1 to index
+  %check_begin = index.constant 0 : index
+  %check_step = index.constant 1 : index
+  scf.for %iteration = [%check_begin to %count step %check_step] unroll {
+    test.use %iteration : index
+  }
+  func.return
+}
+
+// ----
+func.def @non_neutral(%raw: i32, %amount: i32) {
+  %iteration_0 = index.constant 0 : index
+  test.use %iteration_0 : index
+  func.return
+}
+
+// ====
+
+// Numeric identity must be withdrawn as loop inference widens a carried
+// operand from its initial zero to a changing runtime value.
+func.def @changing_neutral(%raw: i32) {
+  %input = scalar.assume %raw [range(%raw, 0, 7)] : i32
+  %c0 = scalar.constant 0 : i32
+  %c1 = scalar.constant 1 : i32
+  %begin = index.constant 0 : index
+  %end = index.constant 2 : index
+  %step = index.constant 1 : index
+  %final, %result = scf.for %iteration = [%begin to %end step %step](%neutral = %c0 : i32, %previous = %input : i32) -> (i32, i32) {
+    %sum = scalar.addi %input, %neutral : i32
+    %next = scalar.addi %neutral, %c1 : i32
+    scf.yield %next, %sum : i32, i32
+  }
+  %before = index.cast %input : i32 to index
+  %after = index.cast %result : i32 to index
+  %distance = index.sub %after, %before : index
+  %minimum = test.fact_range_lo %distance : index -> i64
+  %maximum = test.fact_range_hi %distance : index -> i64
+  %limit = scalar.constant 0 : i64
+  %not_identity = scalar.cmpi sgt, %maximum, %limit : i64
+  %count = index.cast %not_identity : i1 to index
+  %check_begin = index.constant 0 : index
+  %check_step = index.constant 1 : index
+  scf.for %iteration = [%check_begin to %count step %check_step] unroll {
+    test.use %iteration : index
+  }
+  func.return
+}
+
+// ----
+func.def @changing_neutral(%raw: i32) {
+  %iteration_0 = index.constant 0 : index
+  test.use %iteration_0 : index
+  func.return
+}
+
+// ====
+
+// A literal-valued operand can still carry a relation to a dynamic value.
+// Constant information is not a reason to drop that relation during inference.
+func.def @exact_operand_relation(%raw: i32, %bound: i32, %neutral: i32) {
+  %limit = scalar.assume %bound [range(%bound, 0, 16)] : i32
+  %input = scalar.assume %raw [range(%raw, 5, 5), lt(%raw, %limit)] : i32
+  %c0 = scalar.constant 0 : i32
+  %selected = scalar.cmpi eq, %neutral, %c0 : i32
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  scf.if %selected {
+    %sum = scalar.addi %input, %neutral : i32
+    %position = index.cast %sum : i32 to index
+    %extent = index.cast %limit : i32 to index
+    %distance = index.sub %extent, %position : index
+    %ordered = test.fact_positive %distance : index -> i1
+    %count = index.cast %ordered : i1 to index
+    scf.for %iteration = [%begin to %count step %step] unroll {
+      test.use %iteration : index
+    }
+  }
+  func.return
+}
+
+// ----
+func.def @exact_operand_relation(%raw: i32, %bound: i32, %neutral: i32) {
+  %c0 = scalar.constant 0 : i32
+  %selected = scalar.cmpi eq, %neutral, %c0 : i32
+  scf.if %selected {
+    %iteration_0 = index.constant 0 : index
+    test.use %iteration_0 : index
+  }
+  func.return
+}
+
+// ====
+
+// Index and byte-offset operations retain numeric identity without confusing
+// it with same-type SSA replacement. The original alias owns the strict bound.
+func.def @neutral_index(%raw: index, %limit: index, %neutral: index, %unit: index) {
+  %input = index.assume %raw [range(%raw, 0, 64), lt(%raw, %limit)] : index
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %is_zero = index.cmp eq, %neutral, %c0 : index
+  %is_one = index.cmp eq, %unit, %c1 : index
+  %selected = scalar.andi %is_zero, %is_one : i1
+  scf.if %selected {
+    %sum = index.add %input, %neutral : index
+    %reverse_sum = index.add %neutral, %sum : index
+    %difference = index.sub %reverse_sum, %neutral : index
+    %product = index.mul %difference, %unit : index
+    %reverse_product = index.mul %unit, %product : index
+    %quotient = index.div %reverse_product, %unit : index
+    %pair, %remainder = index.divrem %quotient, %unit : index
+    %inclusive = index.ori %pair, %neutral : index
+    %reverse_inclusive = index.ori %neutral, %inclusive : index
+    %exclusive = index.xori %reverse_inclusive, %neutral : index
+    %reverse_exclusive = index.xori %neutral, %exclusive : index
+    %left = index.shli %reverse_exclusive, %neutral : index
+    %signed_right = index.shrsi %left, %neutral : index
+    %unsigned_right = index.shrui %signed_right, %neutral : index
+    %rotate_left = index.rotli %unsigned_right, %neutral : index
+    %rotate_right = index.rotri %rotate_left, %neutral : index
+    %all_bits = index.constant -1 : index
+    %masked = index.andi %rotate_right, %all_bits : index
+    %reverse_masked = index.andi %all_bits, %masked : index
+    %distance = index.sub %limit, %reverse_masked : index
+    %ordered = test.fact_positive %distance : index -> i1
+    %count = index.cast %ordered : i1 to index
+    scf.for %iteration = [%c0 to %count step %c1] unroll {
+      test.use %iteration : index
+    }
+    %stride = index.cast %unit : index to offset
+    %scaled = index.scale %reverse_masked, %stride : index, offset -> offset
+    %restored = index.cast %scaled : offset to index
+    %offset_distance = index.sub %limit, %restored : index
+    %offset_ordered = test.fact_positive %offset_distance : index -> i1
+    %offset_count = index.cast %offset_ordered : i1 to index
+    scf.for %iteration = [%c0 to %offset_count step %c1] unroll {
+      test.use %iteration : index
+    }
+    %minimum = test.fact_range_lo %remainder : index -> i64
+    %maximum = test.fact_range_hi %remainder : index -> i64
+    %literal_zero = scalar.constant 0 : i64
+    %lower_exact = scalar.cmpi eq, %minimum, %literal_zero : i64
+    %upper_exact = scalar.cmpi eq, %maximum, %literal_zero : i64
+    %remainder_exact = scalar.andi %lower_exact, %upper_exact : i1
+    %remainder_count = index.cast %remainder_exact : i1 to index
+    scf.for %iteration = [%c0 to %remainder_count step %c1] unroll {
+      test.use %iteration : index
+    }
+  }
+  func.return
+}
+
+// ----
+func.def @neutral_index(%raw: index, %limit: index, %neutral: index, %unit: index) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %is_zero = index.cmp eq, %neutral, %c0 : index
+  %is_one = index.cmp eq, %unit, %c1 : index
+  %selected = scalar.andi %is_zero, %is_one : i1
+  scf.if %selected {
+    %iteration_0$49 = index.constant 0 : index
+    test.use %iteration_0$49 : index
+    %iteration_0$50 = index.constant 0 : index
+    test.use %iteration_0$50 : index
+    %iteration_0$51 = index.constant 0 : index
+    test.use %iteration_0$51 : index
+  }
+  func.return
+}
+
+// ====
+
+// RUN: pass specialize-target-callgraph,unroll-scf-for,dce
+
+// A unit byte stride can still wrap a wide coordinate in a narrower physical
+// carrier. Its result must not acquire the coordinate's numeric identity.
+test.target<low_core> @offset32 {index_bitwidth = 32, offset_bitwidth = 32}
+
+func.def target(@offset32) @unit_stride_wrap(%raw: index) {
+  %low = index.assume %raw [range(%raw, 1, 3)] : index
+  %high_word = index.constant 4294967296 : index
+  %coordinate = index.add %high_word, %low : index
+  %stride = index.constant 1 : offset
+  %bytes = index.scale %coordinate, %stride : index, offset -> offset
+  %restored = index.cast %bytes : offset to index
+  %distance = index.sub %coordinate, %restored : index
+  %positive = test.fact_positive %distance : index -> i1
+  %count = index.cast %positive : i1 to index
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  scf.for %iteration = [%begin to %count step %step] unroll {
+    test.use %iteration : index
+  }
+  func.return
+}
+
+// ----
+test.target<low_core> @offset32 {index_bitwidth = 32, offset_bitwidth = 32}
+
+func.def target(@offset32) @unit_stride_wrap(%raw: index) {
+  %iteration_0 = index.constant 0 : index
+  test.use %iteration_0 : index
+  func.return
+}
+
+// ====
+
+// RUN: pass specialize-target-callgraph,unroll-scf-for,dce
+
+// Rotation identity follows the selected coordinate-carrier width. The
+// dynamic count becomes one complete turn only within the guard.
+test.target<low_core> @index32 {index_bitwidth = 32}
+
+func.def target(@index32) @carrier_rotation(%raw: index, %limit: index, %amount: index) {
+  %input = index.assume %raw [range(%raw, 0, 64), lt(%raw, %limit)] : index
+  %width = index.constant 32 : index
+  %selected = index.cmp eq, %amount, %width : index
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  scf.if %selected {
+    %left = index.rotli %input, %amount : index
+    %right = index.rotri %left, %amount : index
+    %distance = index.sub %limit, %right : index
+    %ordered = test.fact_positive %distance : index -> i1
+    %count = index.cast %ordered : i1 to index
+    scf.for %iteration = [%begin to %count step %step] unroll {
+      test.use %iteration : index
+    }
+  }
+  func.return
+}
+
+// ----
+test.target<low_core> @index32 {index_bitwidth = 32}
+
+func.def target(@index32) @carrier_rotation(%raw: index, %limit: index, %amount: index) {
+  %width = index.constant 32 : index
+  %selected = index.cmp eq, %amount, %width : index
+  scf.if %selected {
+    %iteration_0 = index.constant 0 : index
+    test.use %iteration_0 : index
+  }
+  func.return
+}

@@ -9,7 +9,6 @@
 #include <stddef.h>
 
 extern const uint16_t* const kLoomAmdgpuDescriptorRefOrdinalTables[];
-extern const uint16_t* const kLoomAmdgpuDescriptorRefByOrdinalTables[];
 extern const loom_amdgpu_descriptor_traits_t* const
     kLoomAmdgpuDescriptorTraitTables[];
 extern const uint8_t* const kLoomAmdgpuDescriptorMemoryPropertyTables[];
@@ -42,16 +41,6 @@ static const uint16_t* loom_amdgpu_descriptor_ref_ordinal_table(
     return NULL;
   }
   return kLoomAmdgpuDescriptorRefOrdinalTables[descriptor_set_ordinal];
-}
-
-static const uint16_t* loom_amdgpu_descriptor_ref_by_ordinal_table(
-    const loom_low_descriptor_set_t* descriptor_set) {
-  const uint16_t descriptor_set_ordinal =
-      loom_amdgpu_target_ref_descriptor_set_ordinal(descriptor_set);
-  if (descriptor_set_ordinal == LOOM_LOW_DESCRIPTOR_SET_ORDINAL_NONE) {
-    return NULL;
-  }
-  return kLoomAmdgpuDescriptorRefByOrdinalTables[descriptor_set_ordinal];
 }
 
 static const loom_amdgpu_descriptor_traits_t*
@@ -124,17 +113,12 @@ const loom_low_descriptor_t* loom_amdgpu_descriptor_ref_descriptor(
 loom_amdgpu_descriptor_ref_t loom_amdgpu_descriptor_ref_for_descriptor(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_descriptor_t* descriptor) {
-  const uint16_t* descriptor_refs =
-      loom_amdgpu_descriptor_ref_by_ordinal_table(descriptor_set);
-  if (descriptor_refs == NULL) {
-    return LOOM_AMDGPU_DESCRIPTOR_REF_NONE;
-  }
   const uint32_t descriptor_ordinal =
       loom_low_descriptor_set_descriptor_ordinal(descriptor_set, descriptor);
   if (descriptor_ordinal == LOOM_LOW_DESCRIPTOR_ORDINAL_NONE) {
     return LOOM_AMDGPU_DESCRIPTOR_REF_NONE;
   }
-  return descriptor_refs[descriptor_ordinal];
+  return descriptor->identity_ordinal;
 }
 
 loom_amdgpu_descriptor_traits_t loom_amdgpu_descriptor_traits(

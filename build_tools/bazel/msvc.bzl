@@ -41,16 +41,22 @@ def _iree_msvc_masm_object_impl(ctx):
     arguments.add_all(masm_toolchain.arguments)
     arguments.add("/Fo" + object_file.path)
     arguments.add(source_file.path)
+
     environment = cc_common.get_environment_variables(
         action_name = ASSEMBLE_ACTION_NAME,
         feature_configuration = feature_configuration,
         variables = compile_variables,
+    )
+    execution_requirements = cc_common.get_execution_requirements(
+        action_name = ASSEMBLE_ACTION_NAME,
+        feature_configuration = feature_configuration,
     )
 
     ctx.actions.run(
         arguments = [arguments],
         env = environment,
         executable = masm_toolchain.assembler,
+        execution_requirements = {requirement: "" for requirement in execution_requirements},
         inputs = depset(
             direct = [source_file],
             transitive = [masm_toolchain.files],
@@ -58,6 +64,9 @@ def _iree_msvc_masm_object_impl(ctx):
         mnemonic = "IreeMsvcMasm",
         outputs = [object_file],
         progress_message = "Assembling MSVC object %{label}",
+        # Include execution-time --action_env values such as WINEPREFIX. Bazel
+        # overlays the explicit toolchain environment above on those values.
+        use_default_shell_env = True,
     )
     return [DefaultInfo(files = depset([object_file]))]
 

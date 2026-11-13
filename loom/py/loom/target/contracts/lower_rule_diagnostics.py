@@ -8,6 +8,8 @@
 
 from __future__ import annotations
 
+from functools import cache
+
 from loom.error.target import (
     ERR_TARGET_002,
     ERR_TARGET_003,
@@ -59,6 +61,7 @@ def _type_pattern_element_text(type_pattern: TypePattern) -> str:
     return "{" + ", ".join(type_pattern.elements) + "}"
 
 
+@cache
 def _value_type_diagnostic(
     field: str,
     type_pattern: TypePattern,
@@ -370,6 +373,7 @@ def _instance_flags_diagnostic(
     return _named_constraint_diagnostic("flags", field, f"{predicate}.{enum_keyword}")
 
 
+@cache
 def _named_constraint_diagnostic(
     subject_role: str,
     subject_name: str,
@@ -430,6 +434,7 @@ def _attr_diagnostic(field: str, attr_type: str) -> DiagnosticRef:
     return _named_constraint_diagnostic("field", field, f"attr_kind.{attr_type}")
 
 
+@cache
 def _count_constraint_diagnostic(
     subject_role: str,
     subject_name: str,
@@ -445,6 +450,7 @@ def _count_constraint_diagnostic(
     )
 
 
+@cache
 def _range_constraint_diagnostic(
     subject_role: str,
     subject_name: str,
@@ -462,6 +468,7 @@ def _range_constraint_diagnostic(
     )
 
 
+@cache
 def _element_range_constraint_diagnostic(
     subject_role: str,
     subject_name: str,
@@ -481,6 +488,7 @@ def _element_range_constraint_diagnostic(
     )
 
 
+@cache
 def _relation_constraint_diagnostic(
     subject_role: str,
     subject_name: str,

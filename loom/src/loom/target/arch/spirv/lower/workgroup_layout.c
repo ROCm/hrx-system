@@ -647,14 +647,8 @@ void loom_spirv_workgroup_layout_lookup_low_storage(
   *out_low_storage_value_id = segment->low_storage_value_id;
 }
 
-uint64_t loom_spirv_workgroup_layout_source_memory_root_byte_offset(
-    void* user_data, const loom_low_lower_context_t* context,
-    const loom_low_source_memory_access_plan_t* source_memory_access) {
-  (void)user_data;
-  if (source_memory_access->memory_space !=
-      LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP) {
-    return 0;
-  }
+uint64_t loom_spirv_workgroup_layout_root_byte_offset(
+    const loom_low_lower_context_t* context, loom_value_id_t root_value_id) {
   const loom_spirv_workgroup_layout_t* layout =
       (const loom_spirv_workgroup_layout_t*)loom_low_lower_lookup_target_state(
           context, &kLoomSpirvWorkgroupLayoutStateKey, sizeof(*layout));
@@ -662,7 +656,17 @@ uint64_t loom_spirv_workgroup_layout_source_memory_root_byte_offset(
     return 0;
   }
   const loom_spirv_workgroup_layout_entry_t* entry =
-      loom_spirv_workgroup_layout_lookup_entry(
-          layout, source_memory_access->root_value_id);
+      loom_spirv_workgroup_layout_lookup_entry(layout, root_value_id);
   return entry != NULL ? entry->byte_offset : 0;
+}
+
+uint64_t loom_spirv_workgroup_layout_source_memory_root_byte_offset(
+    void* user_data, const loom_low_lower_context_t* context,
+    const loom_low_source_memory_access_plan_t* source_memory_access) {
+  (void)user_data;
+  return source_memory_access->memory_space ==
+                 LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP
+             ? loom_spirv_workgroup_layout_root_byte_offset(
+                   context, source_memory_access->root_value_id)
+             : 0;
 }

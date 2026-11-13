@@ -555,12 +555,8 @@ iree_status_t iree_hal_streaming_prepare_value_wait_submission(
   submission->stream = stream;
   iree_hal_streaming_stream_retain(stream);
 
-  iree_async_proactor_pool_t* proactor_pool = hrx_runtime_proactor_pool();
-  if (IREE_UNLIKELY(!proactor_pool)) {
-    iree_hal_streaming_destroy_value_wait_submissions(context, submission);
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "async runtime is unavailable");
-  }
+  iree_async_proactor_pool_t* proactor_pool =
+      hrx_device_proactor_pool(context->device_entry->hrx_device);
   status = iree_async_proactor_pool_get(proactor_pool, /*index=*/0,
                                         &submission->observer_proactor);
   if (!iree_status_is_ok(status)) {

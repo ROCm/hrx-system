@@ -192,7 +192,6 @@ loom_cc_library(
     deps = [
         "//loom/src/loom/codegen/low:allocation",
         "//loom/src/loom/codegen/low:packet",
-        "//loom/src/loom/codegen/low/allocation:move_topology",
         "//loom/src/loom/codegen/low/schedule",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/low",
@@ -369,6 +368,18 @@ loom_cc_library(
     ],
 )
 
+loom_cc_test(
+    name = "wait_frontier_test",
+    srcs = ["wait_frontier_test.cc"],
+    deps = [
+        ":wait_frontier",
+        "//loom/src/loom/util:cfg_graph_test_util",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 loom_cc_library(
     name = "wait_loop",
     srcs = ["wait_loop.c"],
@@ -390,6 +401,7 @@ loom_cc_library(
     srcs = ["wait_classification.c"],
     hdrs = ["wait_classification.h"],
     deps = [
+        ":descriptor_semantics",
         ":storage_lease",
         ":structural_packet",
         ":wait_completion",
@@ -528,6 +540,7 @@ loom_cc_test(
         "//loom/src/loom/codegen/low:builder",
         "//loom/src/loom/codegen/low:immediates",
         "//loom/src/loom/codegen/low:storage_lease",
+        "//loom/src/loom/codegen/low/allocation:storage_lease_index",
         "//loom/src/loom/codegen/low/schedule",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:cache",

@@ -1,0 +1,123 @@
+// RUN: roundtrip
+// An undefined direct-body path provides no result and performs no trap.
+unsigned impossible() {
+  __builtin_unreachable();
+}
+
+// ----
+func.def public @impossible() -> (i32) {
+  func.unreachable
+}
+
+// ====
+// Returning and undefined branches use callable exits, not an incomplete tuple.
+unsigned select(bool defined) {
+  if (defined) return 7u;
+  else __builtin_unreachable();
+}
+
+// ----
+func.def public @select(%defined: i1) -> (i32) {
+  scf.if %defined {
+    %2 = scalar.constant 7 : i32
+    %3 = scalar.constant 1 : i1
+    func.exit %3 : i1 {
+      func.return %2 : i32
+    }
+  } else {
+  }
+  func.unreachable
+}
+
+// ====
+// A genuinely diverging branch has the same absence of a result-bearing edge.
+unsigned wait_or_return(bool ready) {
+  if (ready) return 9u;
+  else for (;;) {}
+}
+
+// ----
+func.def public @wait_or_return(%ready: i1) -> (i32) {
+  scf.if %ready {
+    %2 = scalar.constant 9 : i32
+    %3 = scalar.constant 1 : i1
+    func.exit %3 : i1 {
+      func.return %2 : i32
+    }
+  } else {
+    scf.while {
+      %4 = scalar.constant 1 : i1
+      scf.condition %4 : i1
+    } do {
+      scf.yield
+    }
+  }
+  func.unreachable
+}
+
+// ====
+// The containing sequence must not import code after an unreachable statement.
+void stop(unsigned* output) {
+  output[0] = 3u;
+  __builtin_unreachable();
+  output[0] = 99u;
+}
+
+// ----
+func.def public @stop(%output: buffer, %output_byte_offset: offset) {
+  %2 = scalar.constant 3 : i32
+  %3 = scalar.constant 0 : i32
+  %4 = scalar.extsi %3 : i32 to i64
+  %5 = scalar.constant 4 : i64
+  %6 = scalar.muli %4, %5 : i64
+  %7 = index.cast %output_byte_offset : offset to i64
+  %8 = scalar.addi %7, %6 : i64
+  %9 = scalar.assume %8 [range(%8, 0, 9223372036854775807)] : i64
+  %10 = index.cast %9 : i64 to offset
+  %11 = buffer.view %output[%10] : buffer -> view<1xi32>
+  view.store<root_in_bounds> %2, %11[0] : i32, view<1xi32>
+  func.unreachable
+}
+
+// ====
+// Kernel bodies use their own return operation and the shared unreachable exit.
+#include <loomcxx/kernel.h>
+[[loom::kernel, loom::workgroup_count(1, 1, 1), loom::workgroup_size(1, 1, 1)]]
+void kernel_exit(bool defined, unsigned* output) {
+  if (defined) {
+    output[0] = 11u;
+    return;
+  }
+  __builtin_unreachable();
+}
+
+// ----
+kernel.def @kernel_exit() {
+  %2 = index.constant 1 : index
+  %3 = index.constant 1 : index
+  %4 = index.constant 1 : index
+  %5 = index.constant 1 : index
+  %6 = index.constant 1 : index
+  %7 = index.constant 1 : index
+  kernel.launch.config workgroups(%2, %3, %4) workgroup_size(%5, %6, %7) : index
+} launch(%defined: i1, %output: buffer) {
+  %output_byte_offset = index.constant 0 : offset
+  scf.if %defined {
+    %9 = scalar.constant 11 : i32
+    %10 = scalar.constant 0 : i32
+    %11 = scalar.extsi %10 : i32 to i64
+    %12 = scalar.constant 4 : i64
+    %13 = scalar.muli %11, %12 : i64
+    %14 = index.cast %output_byte_offset : offset to i64
+    %15 = scalar.addi %14, %13 : i64
+    %16 = scalar.assume %15 [range(%15, 0, 9223372036854775807)] : i64
+    %17 = index.cast %16 : i64 to offset
+    %18 = buffer.view %output[%17] : buffer -> view<1xi32>
+    view.store<root_in_bounds> %9, %18[0] : i32, view<1xi32>
+    %19 = scalar.constant 1 : i1
+    func.exit %19 : i1 {
+      kernel.return
+    }
+  }
+  func.unreachable
+}

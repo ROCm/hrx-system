@@ -8,21 +8,21 @@
 #include <stdlib.h>
 
 #include "iree/base/tracing.h"
-#include "loom/serve/testing/compiler.h"
-#include "loom/serve/testing/device.h"
+#include "loom/runtime/testing/compiler.h"
+#include "loom/runtime/testing/device.h"
 #include "loom/tools/loom-serve/main.h"
 
 int main(int argc, char** argv) {
   IREE_TRACE_APP_ENTER();
-  const loom_serve_test_compiler_t* compiler = loom_serve_test_compiler();
+  const loom_runtime_test_compiler_t* compiler = loom_runtime_test_compiler();
   const loomc_iree_hal_target_provider_t* target_provider =
       compiler->target_provider();
-  const loom_serve_compiler_options_t compiler_options = {
+  const loom_runtime_compiler_options_t compiler_options = {
       .target_environment_create = compiler->target_environment_create,
       .target_providers = &target_provider,
       .target_provider_count = 1,
   };
-  const loom_serve_test_device_t* device = loom_serve_test_device();
+  const loom_runtime_test_device_t* device = loom_runtime_test_device();
   iree_hal_driver_registry_t* driver_registry = NULL;
   iree_status_t status = iree_ok_status();
   if (device->driver_register) {

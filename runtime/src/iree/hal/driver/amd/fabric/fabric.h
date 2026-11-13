@@ -1,0 +1,106 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+#ifndef IREE_HAL_DRIVER_AMD_FABRIC_FABRIC_H_
+#define IREE_HAL_DRIVER_AMD_FABRIC_FABRIC_H_
+
+#include "amdf/amdf.h"
+#include "iree/base/api.h"
+#include "iree/base/threading/mutex.h"
+#include "iree/hal/device_spec.h"
+#include "iree/hal/driver/amd/fabric/allocation_queue.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+typedef struct iree_hal_amd_fabric_allocation_entry_t
+    iree_hal_amd_fabric_allocation_entry_t;
+
+// Shared native identity and allocation domains for AMD execution engines.
+// The driver and every materialized device retain this owner independently.
+// Discovery is immutable; endpoint-local allocation queues are acquired on
+// demand and retired with their last device acquisition. Engine resources and
+// private scopes belong to the consuming device.
+// Sharing native identity does not grant access across sealed HAL groups.
+typedef struct iree_hal_amd_fabric_t {
+  // References held by native owners; never modified directly by consumers.
+  iree_atomic_ref_count_t ref_count;
+  // Allocator owning this object and its discovery snapshot.
+  iree_allocator_t host_allocator;
+  // Borrowed negotiated core table, live for the complete fabric lifetime.
+  const amdf_api_t* api;
+  // Owned instance containing shared native provider connections.
+  amdf_instance_t* instance;
+  // Borrowed ordinary system storage scope, owned by the instance.
+  amdf_memory_scope_t* system_scope;
+  // Number of passive identities in the immutable discovery snapshot.
+  uint32_t endpoint_count;
+  // Owned snapshot including all native engine kinds, without activation.
+  amdf_endpoint_summary_t* endpoints;
+  // Protects cold allocation-domain construction, never native batch execution.
+  iree_slim_mutex_t allocation_mutex;
+  // Active allocation domains, one per physical endpoint and requested node.
+  iree_hal_amd_fabric_allocation_entry_t* allocations;
+} iree_hal_amd_fabric_t;
+
+// Creates an independent native instance and snapshots passive discovery.
+// Engine extension negotiation and activation happen in engine constructors.
+// The providing library and |api| must outlive the returned fabric. Failure
+// publishes no output. The caller releases the returned reference.
+// |native_lifetime| selects libamdf's native state lifetime bound,
+// independently from HAL group identity and handle ownership. PROCESS may share
+// Linux KFD state with foreign clients; the application must order their VM
+// mutations against reservation updates and removal. INSTANCE supports only
+// services that the native provider can reclaim at instance destruction.
+iree_status_t iree_hal_amd_fabric_create(const amdf_api_t* api,
+                                         amdf_native_lifetime_t native_lifetime,
+                                         iree_allocator_t host_allocator,
+                                         iree_hal_amd_fabric_t** out_fabric);
+
+// Retains the shared owner. NULL is ignored.
+void iree_hal_amd_fabric_retain(iree_hal_amd_fabric_t* fabric);
+
+// Releases the shared owner after all native children are gone. A native
+// teardown failure is diagnosed and preserves remaining ownership. NULL is
+// ignored. This performs no implicit device wait.
+void iree_hal_amd_fabric_release(iree_hal_amd_fabric_t* fabric);
+
+// Copies cached native attachment facts into the HAL physical identity before
+// device-spec publication. |display_name| remains borrowed. Optional PCI
+// address availability is preserved; failure leaves |out_identity| unchanged.
+// This does not activate execution or enter the native driver.
+iree_status_t iree_hal_amd_fabric_query_physical_device_identity(
+    const amdf_api_t* api, amdf_endpoint_t* endpoint,
+    iree_string_view_t display_name,
+    iree_hal_physical_device_identity_t* out_identity);
+
+// Acquires native allocation progress for a physical endpoint and host node.
+// Logical contexts of the same endpoint share a queue at the same placement;
+// other endpoints progress independently. Native provider synchronization is
+// unchanged. The selected progress entry supplies |node_id|; UINT32_MAX leaves
+// placement unspecified. Each successful acquisition must be paired with
+// iree_hal_amd_fabric_release_allocation_queue while the fabric remains live.
+// Providers and accepted requests may retain independent queue references.
+iree_status_t iree_hal_amd_fabric_acquire_allocation_queue(
+    iree_hal_amd_fabric_t* fabric, const amdf_endpoint_id_t* endpoint_id,
+    uint32_t node_id, iree_hal_amd_fabric_allocation_queue_t** out_queue);
+
+// Releases one device acquisition after its native work and callback tails
+// have drained. The last acquisition removes the shared domain and releases
+// its worker; the native connection remains available for later devices.
+// Independent queue references remain valid until released. This is a cold
+// lifecycle operation and must not run from the queue's worker. NULL is
+// ignored.
+void iree_hal_amd_fabric_release_allocation_queue(
+    iree_hal_amd_fabric_t* fabric,
+    iree_hal_amd_fabric_allocation_queue_t* queue);
+
+#ifdef __cplusplus
+}  // extern "C"
+#endif
+
+#endif  // IREE_HAL_DRIVER_AMD_FABRIC_FABRIC_H_

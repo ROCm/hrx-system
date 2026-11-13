@@ -668,7 +668,7 @@ func.def public @encode_epoch(%control_state: buffer, %plan: buffer, %inputs: bu
   func.return %first_count, %control_state, %transfer_begin, %transfer_length : i32, buffer, i64, i64
 }
 
-func.def public @publish_epoch(%plan: buffer, %media_plan: buffer, %count: i32, %first_media_count: i32, %next_media_count: i32, %verified: i32, %continues: i32, %next_speculative: buffer, %ordinary: buffer, %first_results: buffer, %next_results: buffer, %progress: buffer) {
+func.def public @publish_epoch(%control_state: buffer, %plan: buffer, %media_plan: buffer, %count: i32, %first_media_count: i32, %next_media_count: i32, %verified: i32, %continues: i32, %next_speculative: buffer, %ordinary: buffer, %first_results: buffer, %next_results: buffer, %progress: buffer) {
   %origin = index.constant 0 : offset
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
@@ -845,10 +845,10 @@ func.def public @text_encode_prefill_group_v1(%state: buffer, %plan_a: buffer, %
   func.return
 }
 
-func.def public @text_publish_prefill_group_v1(%plan_a: buffer, %plan_b: buffer, %outputs: buffer, %progress: buffer) {
+func.def public @text_publish_prefill_group_v1(%state: buffer, %plan_a: buffer, %plan_b: buffer, %outputs: buffer, %progress: buffer) {
   %zero = scalar.constant 0 : i32
   %one = scalar.constant 1 : i32
-  func.call @publish_epoch(%plan_b, %plan_b, %one, %zero, %zero, %zero, %zero, %plan_b, %outputs, %outputs, %outputs, %progress) : (buffer, buffer, i32, i32, i32, i32, i32, buffer, buffer, buffer, buffer, buffer)
+  func.call @publish_epoch(%state, %plan_b, %plan_b, %one, %zero, %zero, %zero, %zero, %plan_b, %outputs, %outputs, %outputs, %progress) : (buffer, buffer, buffer, i32, i32, i32, i32, i32, buffer, buffer, buffer, buffer, buffer)
   %origin = index.constant 0 : offset
   %a = buffer.view %plan_a[%origin] : buffer -> view<1x9xi32>
   %length_a = view.load %a[0, 0] : view<1x9xi32> -> i32

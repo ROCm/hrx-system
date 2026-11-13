@@ -16,11 +16,10 @@ func.def @add_i32(%value: i32, %delta: i32) -> (i32) {
 }
 
 // ----
-low.func.def public target<amdgpu.gfx11.generic.core> abi(hal_kernel) @call_mixed_i32(%value: reg<amdgpu.vgpr>, %delta: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.sgpr>) asm {
-  %24 = v_mov_b32_copy %delta
-  %result$25 = v_add_u32 %value, %24
-  %result$26 = s_add_u32 %delta, %delta
-  return %result$25, %result$26
+low.func.def public target<amdgpu.gfx11.generic.core> abi(hal_kernel) @call_mixed_i32(%value: reg<amdgpu.vgpr>, %delta: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
+  %result$20 = v_add_u32 %value, %delta
+  %result$21 = v_add_u32 %delta, %delta
+  return %result$20, %result$21
 }
 
 // ====
@@ -38,20 +37,18 @@ func.def @add_i64(%value: i64, %delta: i64) -> (i64) {
 }
 
 // ----
-low.func.def public target<amdgpu.gfx11.generic.core> abi(hal_kernel) @call_mixed_i64(%value: reg<amdgpu.vgpr x2>, %delta: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.sgpr x2>) asm {
-  %16 = slice %delta[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %17 = v_mov_b32_copy %16
-  %18 = slice %delta[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %19 = v_mov_b32_copy %18
-  %21 = slice %value[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %22 = slice %value[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %25, %26 = v_add_co_u32 %21, %17
-  %27, %28 = v_add_co_ci_u32 %22, %19, %26
-  %result$29 = concat(%25, %27) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %34, %35 = s_add_co_u32 %16, %16
-  %36, %37 = s_addc_u32 %18, %18, %35
-  %result$38 = concat(%34, %36) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  return %result$29, %result$38
+low.func.def public target<amdgpu.gfx11.generic.core> abi(hal_kernel) @call_mixed_i64(%value: reg<amdgpu.vgpr x2>, %delta: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
+  %16 = slice %value[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %17 = slice %value[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %18 = slice %delta[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %19 = slice %delta[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %20, %21 = v_add_co_u32 %16, %18
+  %22, %23 = v_add_co_ci_u32 %17, %19, %21
+  %result$24 = concat(%20, %22) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %29, %30 = v_add_co_u32 %18, %18
+  %31, %32 = v_add_co_ci_u32 %19, %19, %30
+  %result$33 = concat(%29, %31) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  return %result$24, %result$33
 }
 
 // ====
@@ -71,24 +68,22 @@ func.def @select_lane(%values: vector<4xi32>, %lane: index) -> (i32) where [rang
 }
 
 // ----
-low.func.def public target<amdgpu.gfx11.generic.core> abi(hal_kernel) @call_vector_result(%input: reg<amdgpu.sgpr>, %lane: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) where [range(%lane, 0, 3)] asm {
+low.func.def public target<amdgpu.gfx11.generic.core> abi(hal_kernel) @call_vector_result(%input: reg<amdgpu.vgpr>, %lane: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) where [range(%lane, 0, 3)] asm {
   %c1 = s_mov_b32 1
   %c2 = s_mov_b32 2
   %c3 = s_mov_b32 3
-  %18 = v_mov_b32_copy %input
-  %19 = v_mov_b32_copy %c1
-  %20 = v_mov_b32_copy %c2
-  %21 = v_mov_b32_copy %c3
-  %24 = v_mov_b32_copy %lane
-  %25 = v_mov_b32 1
-  %26 = v_cmp_eq_i32 %24, %25
-  %28 = v_cndmask_b32 %18, %19, %26
-  %29 = v_mov_b32 2
-  %30 = v_cmp_eq_i32 %24, %29
-  %32 = v_cndmask_b32 %28, %20, %30
-  %33 = v_mov_b32 3
-  %34 = v_cmp_eq_i32 %24, %33
-  %result = v_cndmask_b32 %32, %21, %34
+  %18 = v_mov_b32_copy %c1
+  %19 = v_mov_b32_copy %c2
+  %20 = v_mov_b32_copy %c3
+  %23 = v_mov_b32 1
+  %24 = v_cmp_eq_i32 %lane, %23
+  %26 = v_cndmask_b32 %input, %18, %24
+  %27 = v_mov_b32 2
+  %28 = v_cmp_eq_i32 %lane, %27
+  %30 = v_cndmask_b32 %26, %19, %28
+  %31 = v_mov_b32 3
+  %32 = v_cmp_eq_i32 %lane, %31
+  %result = v_cndmask_b32 %30, %20, %32
   return %result
 }
 
@@ -116,19 +111,22 @@ func.def @advance_i32(%value: i32, %delta: i32) -> (i32) {
 }
 
 // ----
-low.func.def public target<amdgpu.gfx11.generic.core> abi(hal_kernel) @call_loop(%value: reg<amdgpu.vgpr>, %delta: reg<amdgpu.sgpr>, %count: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm {
+low.func.def public target<amdgpu.gfx11.generic.core> abi(hal_kernel) @call_loop(%value: reg<amdgpu.vgpr>, %delta: reg<amdgpu.vgpr>, %count: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %c0 = s_mov_b32 0
   %c1 = s_mov_b32 1
-  low.br ^_bb1(%c0: reg<amdgpu.sgpr>, %value: reg<amdgpu.vgpr>)
-^_bb1(%i: reg<amdgpu.sgpr>, %current: reg<amdgpu.vgpr>):
-  %34 = s_cmp_lt_i32 %i, %count
-  low.cond_br %34, ^_bb2, ^_bb3 : reg<amdgpu.scc>
+  %36 = v_mov_b32_copy %c0
+  %38 = s_mov_b64_exec_read
+  low.br ^_bb1(%36: reg<amdgpu.vgpr>, %value: reg<amdgpu.vgpr>)
+^_bb1(%i: reg<amdgpu.vgpr>, %current: reg<amdgpu.vgpr>):
+  %37 = v_cmp_lt_i32 %i, %count
+  %39, %40 = s_and_saveexec_b64 %37
+  low.cond_br %40, ^_bb2, ^_bb3 : reg<amdgpu.scc>
 ^_bb2:
-  %35 = v_mov_b32_copy %delta
-  %result = v_add_u32 %current, %35
-  %37 = s_add_u32 %i, %c1
-  low.br ^_bb1(%37: reg<amdgpu.sgpr>, %result: reg<amdgpu.vgpr>)
+  %result = v_add_u32 %current, %delta
+  %42 = v_add_u32 %c1, %i
+  low.br ^_bb1(%42: reg<amdgpu.vgpr>, %result: reg<amdgpu.vgpr>)
 ^_bb3:
+  s_mov_b64_exec %38
   return %current
 }
 
@@ -145,8 +143,8 @@ func.def @scalar_add(%value: i32, %delta: i32) -> (i32) {
 }
 
 // ----
-low.func.def public target<amdgpu.gfx11.generic.core> abi(hal_kernel) @call_scalar(%value: reg<amdgpu.sgpr>, %delta: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
-  %result = s_add_u32 %value, %delta
+low.func.def public target<amdgpu.gfx11.generic.core> abi(hal_kernel) @call_scalar(%value: reg<amdgpu.vgpr>, %delta: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %result = v_add_u32 %value, %delta
   return %result
 }
 
@@ -159,7 +157,7 @@ func.def public @preserve_contracts(%limit: index, %value: i32) -> (%bounded: in
 }
 
 // ----
-low.func.def public target<amdgpu.gfx11.generic.core> abi(hal_kernel) @preserve_contracts(%limit: reg<amdgpu.sgpr>, %value: reg<amdgpu.sgpr>) -> (%bounded: reg<amdgpu.sgpr>, %echo: reg<amdgpu.sgpr>) where [range(%limit, 1, 8), eq(%bounded, %limit), eq(%echo, %value)] asm {
+low.func.def public target<amdgpu.gfx11.generic.core> abi(hal_kernel) @preserve_contracts(%limit: reg<amdgpu.vgpr>, %value: reg<amdgpu.vgpr>) -> (%bounded: reg<amdgpu.vgpr>, %echo: reg<amdgpu.vgpr>) where [range(%limit, 1, 8), eq(%bounded, %limit), eq(%echo, %value)] asm {
   return %limit, %value
 }
 
@@ -174,3 +172,67 @@ func.def public @call_external(%value: i32) -> (i32) {
 }
 
 func.decl @increment(%value: i32) -> (%result: i32) where [eq(%result, %value)]
+
+// ====
+
+// Uniform loads can use vector registers even when a retained helper selects
+// scalar registers. Preserve narrow payloads and both words of wide values;
+// floating payloads keep their ordinary callable representation.
+amdgpu.target<gfx11-generic> @target
+
+func.def noinline @forward_scalars(%i8: i8, %i16: i16, %i32: i32, %i64: i64, %f16: f16, %bf16: bf16, %f32: f32, %f64: f64) -> (i8, i16, i32, i64, f16, bf16, f32, f64) {
+  func.return %i8, %i16, %i32, %i64, %f16, %bf16, %f32, %f64 : i8, i16, i32, i64, f16, bf16, f32, f64
+}
+
+func.def public target(@target) @loaded_scalars(%input: buffer) -> (i8, i16, i32, i64, f16, bf16, f32, f64) {
+  %origin = index.constant 0 : offset
+  %view_i8 = buffer.view %input[%origin] : buffer -> view<1xi8>
+  %i8 = view.load %view_i8[0] : view<1xi8> -> i8
+  %view_i16 = buffer.view %input[%origin] : buffer -> view<1xi16>
+  %i16 = view.load %view_i16[0] : view<1xi16> -> i16
+  %view_i32 = buffer.view %input[%origin] : buffer -> view<1xi32>
+  %i32 = view.load %view_i32[0] : view<1xi32> -> i32
+  %view_i64 = buffer.view %input[%origin] : buffer -> view<1xi64>
+  %i64 = view.load %view_i64[0] : view<1xi64> -> i64
+  %view_f16 = buffer.view %input[%origin] : buffer -> view<1xf16>
+  %f16 = view.load %view_f16[0] : view<1xf16> -> f16
+  %view_bf16 = buffer.view %input[%origin] : buffer -> view<1xbf16>
+  %bf16 = view.load %view_bf16[0] : view<1xbf16> -> bf16
+  %view_f32 = buffer.view %input[%origin] : buffer -> view<1xf32>
+  %f32 = view.load %view_f32[0] : view<1xf32> -> f32
+  %view_f64 = buffer.view %input[%origin] : buffer -> view<1xf64>
+  %f64 = view.load %view_f64[0] : view<1xf64> -> f64
+  %result_i8, %result_i16, %result_i32, %result_i64, %result_f16, %result_bf16, %result_f32, %result_f64 = func.call @forward_scalars(%i8, %i16, %i32, %i64, %f16, %bf16, %f32, %f64) : (i8, i16, i32, i64, f16, bf16, f32, f64) -> (i8, i16, i32, i64, f16, bf16, f32, f64)
+  func.return %result_i8, %result_i16, %result_i32, %result_i64, %result_f16, %result_bf16, %result_f32, %result_f64 : i8, i16, i32, i64, f16, bf16, f32, f64
+}
+
+// ----
+low.func.def noinline target<amdgpu.gfx11.generic.core> @forward_scalars(%i8: reg<amdgpu.vgpr>, %i16: reg<amdgpu.vgpr>, %i32: reg<amdgpu.vgpr>, %i64: reg<amdgpu.vgpr x2>, %f16: reg<amdgpu.vgpr>, %bf16: reg<amdgpu.vgpr>, %f32: reg<amdgpu.vgpr>, %f64: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr x2>) asm {
+  return %i8, %i16, %i32, %i64, %f16, %bf16, %f32, %f64
+}
+
+low.func.def public target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @loaded_scalars() -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr x2>) asm {
+  %view_f64 = resource<hal_binding> {extent = 8, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %75 = slice %view_f64[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %76 = slice %view_f64[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %77 = v_mov_b32_copy %75
+  %78 = v_mov_b32_copy %76
+  %79 = concat(%77, %78) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %i8 = global_load_u8_vaddr %79
+  %85 = concat(%77, %78) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %i16 = global_load_u16_vaddr %85
+  %91 = concat(%77, %78) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %i32 = global_load_b32_vaddr %91
+  %97 = concat(%77, %78) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %i64 = global_load_b64_vaddr %97
+  %103 = concat(%77, %78) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %f16 = global_load_u16_vaddr %103
+  %109 = concat(%77, %78) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %bf16 = global_load_u16_vaddr %109
+  %115 = concat(%77, %78) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %f32 = global_load_b32_vaddr %115
+  %121 = concat(%77, %78) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %f64 = global_load_b64_vaddr %121
+  %result_i8, %result_i16, %result_i32, %result_i64, %result_f16, %result_bf16, %result_f32, %result_f64 = low.func.call pure @forward_scalars(%i8, %i16, %i32, %i64, %f16, %bf16, %f32, %f64) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr x2>)
+  return %result_i8, %result_i16, %result_i32, %result_i64, %result_f16, %result_bf16, %result_f32, %result_f64
+}

@@ -1,6 +1,41 @@
 // Every constant reaches memory so the target and oracle compare its exact
 // bits, including signed zeros, subnormals, infinities, and NaNs.
 
+// Full vectors and irregular tails all produce the exact all-ones payload.
+// Each destination has one untouched guard element after its stored vector.
+func.def @vector_all_bits(%bytes: buffer, %words: buffer, %dwords: buffer, %qwords: buffer) {
+  %base = index.constant 0 : offset
+  %byte_view = buffer.view %bytes[%base] : buffer -> view<68xi8>
+  %word_view = buffer.view %words[%base] : buffer -> view<36xi16>
+  %dword_view = buffer.view %dwords[%base] : buffer -> view<20xi32>
+  %qword_view = buffer.view %qwords[%base] : buffer -> view<12xi64>
+  %byte_values = vector.splati -1 : vector<67xi8>
+  %word_values = vector.splati -1 : vector<35xi16>
+  %dword_values = vector.splati -1 : vector<19xi32>
+  %qword_values = vector.splati -1 : vector<11xi64>
+  vector.store %byte_values, %byte_view[0] : vector<67xi8>, view<68xi8>
+  vector.store %word_values, %word_view[0] : vector<35xi16>, view<36xi16>
+  vector.store %dword_values, %dword_view[0] : vector<19xi32>, view<20xi32>
+  vector.store %qword_values, %qword_view[0] : vector<11xi64>, view<12xi64>
+  func.return
+}
+
+check.scenario @vector_all_bits_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %bytes = check.generate.fill value(93) : tensor<68xi8>
+    %words = check.generate.fill value(93) : tensor<36xi16>
+    %dwords = check.generate.fill value(93) : tensor<20xi32>
+    %qwords = check.generate.fill value(93) : tensor<12xi64>
+    check.compare<@vector_all_bits>(%bytes, %words, %dwords, %qwords) : (tensor<68xi8>, tensor<36xi16>, tensor<20xi32>, tensor<12xi64>) -> () {
+      check.expect.bitwise actual(%bytes) expected(%bytes) : tensor<68xi8>
+      check.expect.bitwise actual(%words) expected(%words) : tensor<36xi16>
+      check.expect.bitwise actual(%dwords) expected(%dwords) : tensor<20xi32>
+      check.expect.bitwise actual(%qwords) expected(%qwords) : tensor<12xi64>
+    }
+  }
+  check.return
+}
+
 func.def @vector_constants_narrow(%output: buffer) {
   %byte_origin = index.constant 0 : offset
   %e4_origin = index.constant 16 : offset

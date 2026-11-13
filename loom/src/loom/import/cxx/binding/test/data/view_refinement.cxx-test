@@ -1,0 +1,130 @@
+// RUN: emit cxx roundtrip
+// REQUIRES: loom-export-cxx
+// Complete source views retain their encoding across exact shape assertions.
+#include <loomcxx/view.h>
+namespace t = loom::type;
+using Layout = t::encoding<loom::encoding::role::layout, 3>;
+using Rows = t::view<t::shape<t::dynamic, 2, t::dynamic>, const float, Layout>;
+using Fixed = t::view<t::shape<3, 2, 4>, const float, Layout>;
+
+Fixed fixed(Rows source) { return loom::view::refine<Fixed>(source); }
+Rows expose(Fixed source, t::index planes, t::index columns) {
+  return loom::view::refine<Rows>(source, {planes, columns});
+}
+
+// ----
+#include <loomcxx/view.h>
+
+[[loom::symbol("fixed")]]
+loom::type::view<loom::type::shape<3, 2, 4>, const float, loom::type::encoding<loom::encoding::role::layout, 3>> fixed(loom::type::view<loom::type::shape<loom::type::dynamic, 2, loom::type::dynamic>, const float, loom::type::encoding<loom::encoding::role::layout, 3>> source);
+
+[[loom::symbol("expose")]]
+loom::type::view<loom::type::shape<loom::type::dynamic, 2, loom::type::dynamic>, const float, loom::type::encoding<loom::encoding::role::layout, 3>> expose(loom::type::view<loom::type::shape<3, 2, 4>, const float, loom::type::encoding<loom::encoding::role::layout, 3>> source, loom::type::index planes, loom::type::index columns);
+
+[[loom::symbol("fixed")]]
+loom::type::view<loom::type::shape<3, 2, 4>, const float, loom::type::encoding<loom::encoding::role::layout, 3>> fixed(loom::type::view<loom::type::shape<loom::type::dynamic, 2, loom::type::dynamic>, const float, loom::type::encoding<loom::encoding::role::layout, 3>> source) {
+  auto v6 = loom::view::refine<loom::type::view<loom::type::shape<3, 2, 4>, const float, loom::type::encoding<loom::encoding::role::layout, 3>>>(source);
+  return v6;
+}
+
+[[loom::symbol("expose")]]
+loom::type::view<loom::type::shape<loom::type::dynamic, 2, loom::type::dynamic>, const float, loom::type::encoding<loom::encoding::role::layout, 3>> expose(loom::type::view<loom::type::shape<3, 2, 4>, const float, loom::type::encoding<loom::encoding::role::layout, 3>> source, loom::type::index planes, loom::type::index columns) {
+  auto v15 = loom::view::refine<loom::type::view<loom::type::shape<loom::type::dynamic, 2, loom::type::dynamic>, const float, loom::type::encoding<loom::encoding::role::layout, 3>>>(source, loom::type::indices{planes, columns});
+  return v15;
+}
+
+// ====
+// RUN: emit cxx roundtrip
+// Explicit encoding assertions retain storage and rank; they never repack.
+#include <loomcxx/view.h>
+namespace t = loom::type;
+using Layout = t::encoding<loom::encoding::role::layout, 2>;
+using Plain = t::view<t::shape<3, 4>, const float>;
+using Encoded = t::view<t::shape<3, 4>, const float, Layout>;
+using Rows = t::view<t::shape<t::dynamic, 4>, const float, Layout>;
+
+Encoded dense(Plain source) {
+  return loom::view::refine<Encoded>(source, loom::encoding::layout::dense<2>());
+}
+Rows expose(Plain source, t::index rows) {
+  return loom::view::refine<Rows>(source, {rows}, loom::encoding::layout::dense<2>());
+}
+Plain assert_plain(Encoded source) { return loom::view::refine<Plain>(source); }
+
+// ----
+#include <loomcxx/view.h>
+
+[[loom::symbol("dense")]]
+loom::type::view<loom::type::shape<3, 4>, const float, loom::type::encoding<loom::encoding::role::layout, 2>> dense(loom::type::view<loom::type::shape<3, 4>, const float> source);
+
+[[loom::symbol("expose")]]
+loom::type::view<loom::type::shape<loom::type::dynamic, 4>, const float, loom::type::encoding<loom::encoding::role::layout, 2>> expose(loom::type::view<loom::type::shape<3, 4>, const float> source, loom::type::index rows);
+
+[[loom::symbol("assert_plain")]]
+loom::type::view<loom::type::shape<3, 4>, const float> assert_plain(loom::type::view<loom::type::shape<3, 4>, const float, loom::type::encoding<loom::encoding::role::layout, 2>> source);
+
+[[loom::symbol("dense")]]
+loom::type::view<loom::type::shape<3, 4>, const float, loom::type::encoding<loom::encoding::role::layout, 2>> dense(loom::type::view<loom::type::shape<3, 4>, const float> source) {
+  auto v4 = loom::view::refine<loom::type::view<loom::type::shape<3, 4>, const float, loom::type::encoding<loom::encoding::role::layout, 2>>>(source, loom::encoding::layout::dense<2>());
+  return v4;
+}
+
+[[loom::symbol("expose")]]
+loom::type::view<loom::type::shape<loom::type::dynamic, 4>, const float, loom::type::encoding<loom::encoding::role::layout, 2>> expose(loom::type::view<loom::type::shape<3, 4>, const float> source, loom::type::index rows) {
+  auto v11 = loom::view::refine<loom::type::view<loom::type::shape<loom::type::dynamic, 4>, const float, loom::type::encoding<loom::encoding::role::layout, 2>>>(source, loom::type::indices{rows}, loom::encoding::layout::dense<2>());
+  return v11;
+}
+
+[[loom::symbol("assert_plain")]]
+loom::type::view<loom::type::shape<3, 4>, const float> assert_plain(loom::type::view<loom::type::shape<3, 4>, const float, loom::type::encoding<loom::encoding::role::layout, 2>> source) {
+  auto v15 = loom::view::refine<loom::type::view<loom::type::shape<3, 4>, const float>>(source);
+  return v15;
+}
+
+// ====
+// RUN: emit cxx roundtrip
+// An explicit encoding can be an ordinary argument, not just an operation result.
+#include <loomcxx/view.h>
+namespace t = loom::type;
+using Storage = t::encoding<loom::encoding::role::storage, 2>;
+using Source = t::view<t::shape<t::dynamic, 4>, const float, Storage>;
+using Result = t::view<t::shape<3, 4>, const float, Storage>;
+
+Result asserted(Source source, Storage encoding) {
+  return loom::view::refine<Result>(source, encoding);
+}
+// ----
+#include <loomcxx/view.h>
+
+[[loom::symbol("asserted")]]
+loom::type::view<loom::type::shape<3, 4>, const float, loom::type::encoding<loom::encoding::role::storage, 2>> asserted(loom::type::view<loom::type::shape<loom::type::dynamic, 4>, const float, loom::type::encoding<loom::encoding::role::storage, 2>> source, loom::type::encoding<loom::encoding::role::storage> encoding);
+
+[[loom::symbol("asserted")]]
+loom::type::view<loom::type::shape<3, 4>, const float, loom::type::encoding<loom::encoding::role::storage, 2>> asserted(loom::type::view<loom::type::shape<loom::type::dynamic, 4>, const float, loom::type::encoding<loom::encoding::role::storage, 2>> source, loom::type::encoding<loom::encoding::role::storage> encoding) {
+  auto v6 = loom::view::refine<loom::type::view<loom::type::shape<3, 4>, const float, loom::type::encoding<loom::encoding::role::storage, 2>>>(source, encoding);
+  return v6;
+}
+
+// ====
+// RUN: emit cxx roundtrip
+// Maximum rank fills every dynamic slot plus the encoding and payload.
+#include <loomcxx/view.h>
+namespace t = loom::type;
+using Layout = t::encoding<loom::encoding::role::layout, 15>;
+using Fixed = t::view<t::shape<1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1>, const float, Layout>;
+using Dynamic = t::view<t::shape<t::dynamic, t::dynamic, t::dynamic, t::dynamic, t::dynamic, t::dynamic, t::dynamic, t::dynamic, t::dynamic, t::dynamic, t::dynamic, t::dynamic, t::dynamic, t::dynamic, t::dynamic>, const float, Layout>;
+
+Dynamic expose(Fixed source, t::index one) {
+  return loom::view::refine<Dynamic>(source, {one, one, one, one, one, one, one, one, one, one, one, one, one, one, one});
+}
+// ----
+#include <loomcxx/view.h>
+
+[[loom::symbol("expose")]]
+loom::type::view<loom::type::shape<loom::type::dynamic, loom::type::dynamic, loom::type::dynamic, loom::type::dynamic, loom::type::dynamic, loom::type::dynamic, loom::type::dynamic, loom::type::dynamic, loom::type::dynamic, loom::type::dynamic, loom::type::dynamic, loom::type::dynamic, loom::type::dynamic, loom::type::dynamic, loom::type::dynamic>, const float, loom::type::encoding<loom::encoding::role::layout, 15>> expose(loom::type::view<loom::type::shape<1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1>, const float, loom::type::encoding<loom::encoding::role::layout, 15>> source, loom::type::index one);
+
+[[loom::symbol("expose")]]
+loom::type::view<loom::type::shape<loom::type::dynamic, loom::type::dynamic, loom::type::dynamic, loom::type::dynamic, loom::type::dynamic, loom::type::dynamic, loom::type::dynamic, loom::type::dynamic, loom::type::dynamic, loom::type::dynamic, loom::type::dynamic, loom::type::dynamic, loom::type::dynamic, loom::type::dynamic, loom::type::dynamic>, const float, loom::type::encoding<loom::encoding::role::layout, 15>> expose(loom::type::view<loom::type::shape<1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1>, const float, loom::type::encoding<loom::encoding::role::layout, 15>> source, loom::type::index one) {
+  auto v20 = loom::view::refine<loom::type::view<loom::type::shape<loom::type::dynamic, loom::type::dynamic, loom::type::dynamic, loom::type::dynamic, loom::type::dynamic, loom::type::dynamic, loom::type::dynamic, loom::type::dynamic, loom::type::dynamic, loom::type::dynamic, loom::type::dynamic, loom::type::dynamic, loom::type::dynamic, loom::type::dynamic, loom::type::dynamic>, const float, loom::type::encoding<loom::encoding::role::layout, 15>>>(source, loom::type::indices{one, one, one, one, one, one, one, one, one, one, one, one, one, one, one});
+  return v20;
+}

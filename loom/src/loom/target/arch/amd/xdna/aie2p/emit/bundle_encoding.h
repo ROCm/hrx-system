@@ -40,7 +40,8 @@ loom_aie2p_bundle_encoding_packet_move_group(
 
 // Encodes one descriptor-backed packet with its allocated operands. A symbolic
 // constant-data address is encoded as zero and reported for later relocation.
-void loom_aie2p_bundle_encoding_encode_packet(
+// Returns the selected native descriptor for physical issue planning.
+uint32_t loom_aie2p_bundle_encoding_encode_packet(
     const loom_low_emission_frame_t* frame,
     const loom_low_packet_view_t* packet,
     loom_aie2p_encoded_slot_t* out_encoded_slot,
@@ -60,9 +61,8 @@ loom_aie2p_bundle_encoding_encode_structural_descriptor(
     const loom_low_descriptor_set_t* descriptor_set,
     uint32_t descriptor_ordinal);
 
-// Encodes an immediate LC, LS, or LE state-programming instruction.
-loom_aie2p_encoded_slot_t
-loom_aie2p_bundle_encoding_encode_loop_setup_descriptor(
+// Encodes a single-immediate instruction acting only on fixed native state.
+loom_aie2p_encoded_slot_t loom_aie2p_bundle_encoding_encode_state_immediate(
     const loom_low_descriptor_set_t* descriptor_set,
     uint32_t descriptor_ordinal, int64_t immediate);
 

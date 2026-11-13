@@ -1,0 +1,137 @@
+// RUN: with-checks emit aie2p-xdna input=source-low output=pipeline-report
+
+// A retained 64-record batch exceeds a hardware semaphore's 63-credit limit,
+// but its whole lifetime uses one credit. The ordinary ring rejection is
+// covered by native_admission.loom-test; this source must preserve all slots.
+// The receiver is in another column, reached through the compute stream row.
+#include <loomcxx/kernel.h>
+#include <loomcxx/pipeline.h>
+#include <loomcxx/target/aie2p.h>
+namespace t = loom::type;
+using Bytes = t::buffer<unsigned char>;
+template <t::size_type Size>
+using Tile = t::tile<t::shape<Size>, unsigned char>;
+template <t::size_type Size>
+using Stream = t::channel<Tile<Size>>;
+
+template <t::size_type Count, t::size_type Size>
+[[loom::inline]] static Stream<Size> make_retained(t::pool pool) {
+  auto* storage = loom::buffer::alloca<loom::memory_space::workgroup, 64>(
+      t::offset{Count * Size}, pool);
+  return loom::channel::bind<loom::channel::discipline::fifo>(
+      loom::buffer::view<Count, Size>(storage, {}), t::index{Count});
+}
+
+template <t::size_type Size, t::size_type Count>
+struct Retained {
+  // Read obligation for this contiguous record.
+  t::read<Tile<Size>> first;
+  // Remaining contiguous records protected by the same retained lifetime.
+  Retained<Size, Count - 1> remaining;
+};
+template <t::size_type Size>
+struct Retained<Size, 1> {
+  // Final read obligation in the retained batch.
+  t::read<Tile<Size>> first;
+};
+
+template <t::size_type Count, t::size_type Size>
+[[loom::inline]] static Retained<Size, Count> acquire_all(Stream<Size> source) {
+  auto read = loom::channel::acquire(source);
+  if constexpr (Count == 1) {
+    return {read.read};
+  } else {
+    return {read.read, acquire_all<Count - 1>(source)};
+  }
+}
+
+template <t::size_type Size, t::size_type Count>
+[[loom::inline]] static void release_all(Retained<Size, Count> records) {
+  loom::channel::release(records.first);
+  if constexpr (Count != 1) {
+    release_all(records.remaining);
+  }
+}
+
+template <t::size_type Size, t::size_type Count>
+[[loom::inline]] static Retained<Size, Count> replay_all(
+    Retained<Size, Count> records, Stream<Size> destination) {
+  auto reads = loom::channel::fanout<2>(records.first);
+  auto write = loom::channel::reserve(destination);
+  loom::channel::copy(reads.first, write.write);
+  if constexpr (Count == 1) {
+    return {reads.second};
+  } else {
+    return {reads.second, replay_all(records.remaining, destination)};
+  }
+}
+
+template <t::size_type Count, t::size_type Size>
+[[loom::inline]] static void fill(Bytes source, Stream<Size> destination,
+                                  t::offset base) {
+  for (int record = 0; record < static_cast<int>(Count); ++record) {
+    auto offset =
+        base + loom::index::scale(loom::index::cast(record), t::offset{Size});
+    auto input = loom::buffer::view<Size>(source, offset, {});
+    auto write = loom::channel::reserve(destination);
+    auto copy = loom::kernel::async::copy<
+        loom::kernel::async::direction::global_to_workgroup,
+        loom::cache::scope::workgroup, loom::cache::temporal::regular>(
+        input, write.payload);
+    auto group = loom::kernel::async::group(copy);
+    loom::kernel::async::wait<0>(group);
+    loom::channel::publish(write.write);
+  }
+}
+
+constexpr loom::aie2p::target array_target{
+    .kind = "array", .device_profile = "amd.xdna.strix_halo.17f0_11"};
+
+[[loom::pipeline("kernel"), loom::retain, loom::target(array_target)]]
+void retained_64([[loom::launch]] Bytes input_arg, Bytes output_arg) {
+  auto input = loom::buffer::assume::alignment<64>(
+      loom::buffer::assume::noalias(input_arg));
+  auto output = loom::buffer::assume::alignment<64>(
+      loom::buffer::assume::noalias(output_arg));
+  auto retained = make_retained<64, 64>(
+      loom::pipeline::memory<loom::memory_space::workgroup>(
+          t::indices{t::index{0}, t::index{1}}));
+  auto receiver = make_retained<1, 64>(
+      loom::pipeline::memory<loom::memory_space::workgroup>(
+          t::indices{t::index{1}, t::index{2}}));
+  [[loom::strand(t::indices{t::index{0}, t::index{2}},
+                 t::indices{t::index{1}, t::index{1}},
+                 t::indices{t::index{1}, t::index{1}})]] {
+    fill<64>(input, retained, t::offset{0});
+  }
+  [[loom::strand(t::indices{t::index{0}, t::index{2}},
+                 t::indices{t::index{1}, t::index{1}},
+                 t::indices{t::index{1}, t::index{1}})]] {
+    auto records = acquire_all<64>(retained);
+    for (int replay = 0; replay < 2; ++replay) {
+      records = replay_all(records, receiver);
+    }
+    release_all(records);
+  }
+  [[loom::strand(t::indices{t::index{1}, t::index{2}},
+                 t::indices{t::index{1}, t::index{1}},
+                 t::indices{t::index{1}, t::index{1}})]] {
+    for (int record = 0; record < 128; ++record) {
+      auto read = loom::channel::acquire(receiver);
+      auto destination = loom::buffer::view<64>(
+          output, loom::index::scale(loom::index::cast(record), t::offset{64}),
+          {});
+      auto copy = loom::kernel::async::copy<
+          loom::kernel::async::direction::workgroup_to_global,
+          loom::cache::scope::workgroup, loom::cache::temporal::regular>(
+          read.payload, destination);
+      auto completion = loom::kernel::async::group(copy);
+      loom::kernel::async::wait<0>(completion);
+      loom::channel::release(read.read);
+    }
+  }
+}
+
+// ----
+CHECK: COMPILE-REPORT: pipeline root=retained_64 realization=resident-configuration workers=1 binding_count=2 *
+CHECK: COMPILE-REPORT: pipeline.memory[0] placement=0,1 memory_index=0 reserved_byte_count=4096 *

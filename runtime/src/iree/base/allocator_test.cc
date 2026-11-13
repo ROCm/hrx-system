@@ -4,6 +4,9 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include <cstring>
+#include <thread>
+
 #include "iree/base/api.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -14,6 +17,73 @@ using ::iree::Status;
 using ::iree::StatusCode;
 using ::iree::testing::status::IsOk;
 using ::iree::testing::status::StatusIs;
+
+TEST(AllocatorTrim, NullAllocator) {
+  IREE_EXPECT_OK(iree_allocator_trim(iree_allocator_null()));
+}
+
+TEST(AllocatorTrim, PreservesInlineStorage) {
+  IREE_ALLOCATOR_INLINE_STORAGE(storage, 128);
+  iree_allocator_t allocator = iree_allocator_inline_arena(&storage.header);
+  void* live = nullptr;
+  IREE_ASSERT_OK(iree_allocator_malloc(allocator, 64, &live));
+  std::memset(live, 0x5A, 64);
+  IREE_ASSERT_OK(iree_allocator_trim(allocator));
+  void* next = nullptr;
+  IREE_ASSERT_OK(iree_allocator_malloc(allocator, 64, &next));
+  EXPECT_NE(next, live);
+  for (iree_host_size_t i = 0; i < 64; ++i) {
+    EXPECT_EQ(static_cast<uint8_t*>(live)[i], 0x5A);
+  }
+}
+
+TEST(AllocatorTrim, PreservesLiveCrossThreadAllocations) {
+  constexpr iree_host_size_t kCount = 32;
+  constexpr iree_host_size_t kLength = 32768;
+  void* allocations[kCount] = {};
+  iree_allocator_t allocator = iree_allocator_system();
+  std::thread worker([&] {
+    for (iree_host_size_t i = 0; i < kCount; ++i) {
+      IREE_ASSERT_OK(iree_allocator_malloc_uninitialized(allocator, kLength,
+                                                         &allocations[i]));
+      std::memset(allocations[i], static_cast<int>(i), kLength);
+    }
+  });
+  worker.join();
+  for (iree_host_size_t i = 0; i < kCount; i += 2) {
+    iree_allocator_free(allocator, allocations[i]);
+  }
+  IREE_ASSERT_OK(iree_allocator_trim(allocator));
+  for (iree_host_size_t i = 1; i < kCount; i += 2) {
+    const auto* bytes = static_cast<const uint8_t*>(allocations[i]);
+    for (iree_host_size_t j = 0; j < kLength; ++j) {
+      EXPECT_EQ(bytes[j], i);
+    }
+    iree_allocator_free(allocator, allocations[i]);
+  }
+  IREE_EXPECT_OK(iree_allocator_trim(allocator));
+  void* subsequent = nullptr;
+  IREE_ASSERT_OK(iree_allocator_malloc(allocator, kLength, &subsequent));
+  iree_allocator_free(allocator, subsequent);
+}
+
+TEST(AllocatorTrim, PropagatesCustomAllocatorFailure) {
+  bool called = false;
+  iree_allocator_t allocator = {
+      &called,
+      [](void* self, iree_allocator_command_t command, const void* params,
+         void** pointer) -> iree_status_t {
+        EXPECT_EQ(command, IREE_ALLOCATOR_COMMAND_TRIM);
+        EXPECT_EQ(params, nullptr);
+        EXPECT_EQ(pointer, nullptr);
+        *static_cast<bool*>(self) = true;
+        return iree_status_from_code(IREE_STATUS_UNAVAILABLE);
+      },
+  };
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_UNAVAILABLE,
+                        iree_allocator_trim(allocator));
+  EXPECT_TRUE(called);
+}
 
 //===----------------------------------------------------------------------===//
 // Byte span tests

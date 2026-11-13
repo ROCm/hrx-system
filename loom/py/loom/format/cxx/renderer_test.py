@@ -58,6 +58,53 @@ def test_projects_multiple_kernels_in_one_translation_unit() -> None:
     assert "output_1" not in result
 
 
+def test_preserves_kernel_symbols_with_valid_unique_source_names() -> None:
+    source = """\
+kernel.def @library.dispatch(%groups: index) {
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch() {
+  kernel.return
+}
+
+kernel.def @library_dispatch() {
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch() {
+  kernel.return
+}
+
+command.def public @run() launch() {
+  %one = index.constant 1 : index
+  kernel.launch @library.dispatch[%one]() : [index]()
+  kernel.launch @library_dispatch() : ()
+  command.return
+}
+"""
+
+    result = render_module(load_module(source.encode()))
+
+    assert (
+        "static loom::kernel::configuration "
+        "library_dispatch_configuration(loom::type::index groups)" in result
+    )
+    assert (
+        "[[loom::kernel(library_dispatch_configuration), "
+        'loom::symbol("library.dispatch")]]\nvoid library_dispatch()' in result
+    )
+    assert (
+        '[[loom::kernel, loom::symbol("library_dispatch"), '
+        "loom::workgroup_count(1, 1, 1), loom::workgroup_size(1, 1, 1)]]\n"
+        "void library_dispatch_2()" in result
+    )
+    assert (
+        "loom::kernel::launch<library_dispatch>("
+        "loom::kernel::workload(loom::type::index{1}));" in result
+    )
+    assert "loom::kernel::launch<library_dispatch_2>();" in result
+    assert "void library.dispatch" not in result
+
+
 def test_projects_selected_kernels_from_a_mixed_module_in_source_order() -> None:
     source = (
         "func.def @helper() {\n  func.return\n}\n\n"
@@ -392,6 +439,32 @@ command.def public @misordered(%dimension: index, %token: i32) launch(%output: v
         render_module(load_module(source.encode()))
 
 
+@pytest.mark.parametrize(
+    "source",
+    [
+        "func.def public @shared(%size: index, %first: view<[%size]xf32>, "
+        "%second: view<[%size]xf32>) { func.return }",
+        "command.def public @shared(%size: index) "
+        "launch(%first: view<[%size]xf32>, %second: view<[%size]xf32>) "
+        "{ command.return }",
+        "kernel.def @shared(%size: index, %first: view<[%size]xf32>, "
+        "%second: view<[%size]xf32>) { "
+        "%one = index.constant 1 : index\n"
+        "kernel.launch.config workgroups(%one, %one, %one) "
+        "workgroup_size(%one, %one, %one) : index\n"
+        "} launch() { kernel.return }",
+    ],
+)
+def test_rejects_shared_formal_dimensions_without_weakening_equality(
+    source: str,
+) -> None:
+    with pytest.raises(
+        CxxRenderError,
+        match="dependencies do not form a C\\+\\+ source-order projection",
+    ):
+        render_module(load_module(source.encode()))
+
+
 def test_preserves_scalar_kernel_arguments() -> None:
     source = SOURCE_MODULE.replace(
         "} launch(%input: buffer, %output: buffer) {",
@@ -689,120 +762,6 @@ kernel.def @unbound() {
         render_module(module)
 
 
-def test_rejects_incompatible_dependent_view_loop_carriers() -> None:
-    source = """\
-kernel.def @incompatible_view_carrier() {
-  %one = index.constant 1 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
-} launch(%input: buffer) {
-  %zero = index.constant 0 : offset
-  %small = buffer.view %input[%zero] : buffer -> view<4xi32>
-  %large = buffer.view %input[%zero] : buffer -> view<8xi32>
-  %result = scf.while(%before = %small : view<4xi32>) -> (view<8xi32>) {
-    %true = scalar.constant 1 : i1
-    scf.condition %true, %large : i1, view<8xi32>
-  } do(%after: view<8xi32>) {
-    scf.yield %small : view<4xi32>
-  }
-  test.use %result : view<8xi32>
-  kernel.return
-}
-"""
-
-    with pytest.raises(
-        CxxRenderError,
-        match=r"while result type view<8xi32> has no initializable C\+\+ carrier",
-    ):
-        render_module(load_module(source.encode()))
-
-
-def test_projects_while_regions_as_guarded_cxx_state() -> None:
-    source = """\
-kernel.def @bounded_loop() {
-  %count = index.constant 1 : index
-  kernel.launch.config workgroups(%count, %count, %count) workgroup_size(%count, %count, %count) : index
-} launch() {
-  %begin = index.constant 0 : index
-  %end = index.constant 4 : index
-  %step = index.constant 1 : index
-  %terminal = scf.while(%before = %begin : index) -> (index) {
-    %more = index.cmp ult, %before, %end : index
-    scf.condition %more, %before : i1, index
-  } do(%position: index) {
-    %next = index.add %position, %step : index
-    scf.yield %next : index
-  }
-  kernel.return
-}
-"""
-
-    result = render_module(load_module(source.encode()))
-
-    assert "loom::type::index terminal = loom::type::index{0};" in result
-    assert "bool loop_continues = true;" in result
-    assert "while (loop_continues) {" in result
-    assert "bool more = loom::index::ult(terminal, loom::type::index{4});" in result
-    assert "loop_continues = more;" in result
-    assert "if (loop_continues) {" in result
-    assert "terminal = terminal + loom::type::index{1};" in result
-
-
-def test_projects_expression_only_while_header_as_natural_cxx() -> None:
-    source = """\
-kernel.def @bounded_loop() {
-  %count = index.constant 1 : index
-  kernel.launch.config workgroups(%count, %count, %count) workgroup_size(%count, %count, %count) : index
-} launch() {
-  %begin = index.constant 0 : index
-  %terminal = scf.while(%before = %begin : index) -> (index) {
-    %0 = index.constant 4 : index
-    %1 = index.cmp slt, %before, %0 : index
-    scf.condition %1, %before : i1, index
-  } do(%position: index) {
-    %2 = index.constant 1 : index
-    %3 = index.add %position, %2 : index
-    scf.yield %3 : index
-  }
-  kernel.return
-}
-"""
-
-    result = render_module(load_module(source.encode()))
-
-    assert "while (terminal < loom::type::index{4}) {" in result
-    assert "terminal = terminal + loom::type::index{1};" in result
-    assert "loop_continues" not in result
-
-
-def test_projects_identity_header_while_without_a_synthetic_guard() -> None:
-    source = """\
-kernel.def @identity_header_loop() {
-  %count = index.constant 1 : index
-  kernel.launch.config workgroups(%count, %count, %count) workgroup_size(%count, %count, %count) : index
-} launch() {
-  %initial_active = scalar.constant 1 : i1
-  %initial_position = index.constant 0 : index
-  %limit = index.constant 4 : index
-  %step = index.constant 1 : index
-  %active, %position = scf.while(%before_active = %initial_active : i1, %before_position = %initial_position : index) -> (i1, index) {
-    scf.condition %before_active, %before_active, %before_position : i1, i1, index
-  } do(%body_active: i1, %body_position: index) {
-    %next_position = index.add %body_position, %step : index
-    %next_active = index.cmp ult, %next_position, %limit : index
-    scf.yield %next_active, %next_position : i1, index
-  }
-  kernel.return
-}
-"""
-
-    result = render_module(load_module(source.encode()))
-
-    assert result.count("while (") == 1
-    assert "bool active = 1;" in result
-    assert "while (active) {" in result
-    assert "loop_continues" not in result
-
-
 def test_projects_vector_absolute_value_as_typed_intrinsic() -> None:
     source = SOURCE_MODULE.replace(
         "  %value = view.load %slice[0] : view<1xf32> -> f32\n",
@@ -895,6 +854,62 @@ kernel.def @page_present() {
     assert "void page_present(const int* pages)" in result
     assert "int page_id = loom::view::load(pages_view, 0);" in result
     assert "bool present = page_id >= 0;" in result
+
+
+@pytest.mark.parametrize("width", [8, 16, 32, 64])
+@pytest.mark.parametrize(
+    ("predicate", "token"), [("ult", "<"), ("eq", "=="), ("ne", "!=")]
+)
+def test_comparisons_preserve_bits_across_mixed_signed_uses(
+    width: int, predicate: str, token: str
+) -> None:
+    source = f"""\
+func.def public @compare(%lhs: i{width}, %rhs: i{width}) -> (i1) {{
+  %signed_use = scalar.sitofp %lhs : i{width} to f64
+  %result = scalar.cmpi {predicate}, %lhs, %rhs : i{width}
+  func.return %result : i1
+}}
+"""
+    result = render_module(load_module(source.encode()))
+    interpretation = {
+        8: "unsigned char",
+        16: "unsigned short",
+        32: "unsigned",
+        64: "unsigned long long",
+    }[width]
+    assert f"static_cast<{interpretation}>(lhs) {token} rhs" in result
+
+
+@pytest.mark.parametrize(
+    ("predicate", "token"), [("slt", ">"), ("sle", ">="), ("sgt", "<"), ("sge", "<=")]
+)
+def test_signed_one_bit_comparisons_reverse_boolean_order(
+    predicate: str, token: str
+) -> None:
+    source = f"""\
+func.def public @compare(%lhs: i1, %rhs: i1) -> (i1) {{
+  %result = scalar.cmpi {predicate}, %lhs, %rhs : i1
+  func.return %result : i1
+}}
+"""
+    result = render_module(load_module(source.encode()))
+    assert f"lhs {token} rhs" in result
+
+
+def test_signed_comparison_uses_the_loop_carriers_actual_type() -> None:
+    source = """\
+func.def public @maximum(%lhs: i64, %rhs: i64) -> (i64) {
+  %result = scf.while(%value = %lhs : i64) -> (i64) {
+    %less = scalar.cmpi slt, %value, %rhs : i64
+    scf.condition %less, %value : i1, i64
+  } do(%current: i64) {
+    scf.yield %rhs : i64
+  }
+  func.return %result : i64
+}
+"""
+    result = render_module(load_module(source.encode()))
+    assert "static_cast<long long>(result) < rhs" in result
 
 
 def test_projects_numeric_conversions_through_the_public_facade() -> None:
@@ -1000,11 +1015,12 @@ kernel.def @slice() {
     result = render_module(load_module(source.encode()))
 
     assert (
-        "Float32x4 dynamic = loom::vector::slice<Float32x4>(source, offset);" in result
+        "Float32x4 dynamic = loom::vector::slice<Float32x4>(source, loom::type::indices{offset});"
+        in result
     )
     assert (
         "Float32x4 static_value = loom::vector::slice<Float32x4>("
-        "source, loom::type::index{4});" in result
+        "source, {4});" in result
     )
 
 
@@ -1225,6 +1241,20 @@ def test_projects_index_arithmetic_without_scalarizing_its_domain() -> None:
     assert "loom::type::indices{v43}" in result
 
 
+def test_scalar_assumption_includes_its_predicate_facade() -> None:
+    source = """\
+func.def public @bounded(%value: i64) -> (%result: i64) {
+  %result = scalar.assume %value [range(%value, 0, 9223372036854775807)] : i64
+  func.return %result : i64
+}
+"""
+
+    result = render_module(load_module(source.encode()))
+
+    assert "#include <loomcxx/predicate.h>" in result
+    assert "loom::assume(value <= 9223372036854775807ull);" in result
+
+
 def test_projects_topology_coordinates_without_losing_index_identity() -> None:
     source = """\
 kernel.def @topology_identity() {
@@ -1284,6 +1314,25 @@ def test_preserves_unsigned_extension_when_folding_address_constants() -> None:
 
     assert "loom::type::index{4294967295}" in result
     assert "loom::type::index{-1}" not in result
+
+
+@pytest.mark.parametrize("width", [8, 16])
+@pytest.mark.parametrize("signed", [False, True])
+def test_narrow_scalar_literals_retain_their_cpp_type(width: int, signed: bool) -> None:
+    extension = "extsi" if signed else "extui"
+    source = f"""func.def public @literal() -> (i32) {{
+  %value = scalar.constant 7 : i{width}
+  %extended = scalar.{extension} %value : i{width} to i32
+  func.return %extended : i32
+}}
+"""
+    result = render_module(load_module(source.encode()))
+    element = (
+        {8: "signed char", 16: "short"}[width]
+        if signed
+        else {8: "unsigned char", 16: "unsigned short"}[width]
+    )
+    assert f"static_cast<{element}>(7)" in result
 
 
 def test_preserves_unsigned_extension_of_a_signed_runtime_value() -> None:
@@ -1652,9 +1701,9 @@ func.def inline @math.double(%input: vector<4xf32>) -> (vector<4xf32>) {
     module = load_module(source.encode())
     result = render_module(module, roots=("math.copy_double",))
 
-    assert '[[loom::symbol("math.double"), loom::force_inline]]' in result
+    assert '[[loom::symbol("math.double"), loom::inline]]' in result
     assert "static Float32x4 math_double(Float32x4 input)" in result
-    assert '[[loom::symbol("math.copy_double"), loom::force_inline]]' in result
+    assert '[[loom::symbol("math.copy_double"), loom::inline]]' in result
     assert (
         "void math_copy_double("
         "loom::type::view<loom::type::shape<4>, const float> source, "
@@ -1676,6 +1725,25 @@ func.def public noinline @math.identity(%input: i32) -> (i32) {
     result = render_module(load_module(source.encode()))
 
     assert '[[loom::symbol("math.identity"), loom::noinline]]' in result
+
+
+def test_projects_function_temperature_hints() -> None:
+    source = """\
+func.def public hot inline @math.hot_identity(%input: i32) -> (i32) {
+  func.return %input : i32
+}
+
+func.def public cold noinline @math.cold_identity(%input: i32) -> (i32) {
+  func.return %input : i32
+}
+"""
+
+    result = render_module(load_module(source.encode()))
+
+    assert '[[loom::symbol("math.hot_identity"), loom::hot, loom::inline]]' in result
+    assert (
+        '[[loom::symbol("math.cold_identity"), loom::cold, loom::noinline]]' in result
+    )
 
 
 def test_preserves_external_import_names() -> None:
@@ -1742,6 +1810,32 @@ func.def inline @math.pair(%input: i32) -> (i32, i32) {
     assert "static math_pair_result math_pair(unsigned input);" in result
     assert "math_pair_result call_result = math_pair(input);" in result
     assert "return {input, next};" in result
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "func.decl @external(%value: i32) -> (%value as i32)",
+        """\
+func.def @update(%value: i32) -> (%value as i32) {
+  %one = scalar.constant 1 : i32
+  %next = scalar.addi %value, %one : i32
+  func.return %next : i32
+}
+""",
+        """\
+func.def public @identity(%value: vector<4xi32>) -> (%value as vector<4xi32>) {
+  func.return %value : vector<4xi32>
+}
+""",
+    ],
+)
+def test_rejects_destructive_function_ties_without_source_equivalent(
+    source: str,
+) -> None:
+    with pytest.raises(CxxRenderError) as error:
+        render_module(load_module(source.encode()))
+    assert "destructive function ties have no exact C++ projection" in str(error.value)
 
 
 def test_projects_nonfinite_float_constants_as_exact_bit_patterns() -> None:

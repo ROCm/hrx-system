@@ -1159,9 +1159,12 @@ static iree_status_t loom_amdgpu_materialize_fp8_encode_f32_lane(
     loom_value_id_t low_source, loom_type_t source_lane_type,
     loom_type_t lane_type, uint32_t lane_index, loom_value_id_t* out_lane) {
   if (plan->source_element_type == LOOM_SCALAR_TYPE_F32) {
-    return loom_amdgpu_extract_low_register_unit(
+    loom_value_id_t source_lane = LOOM_VALUE_ID_INVALID;
+    IREE_RETURN_IF_ERROR(loom_amdgpu_extract_low_register_unit(
         context, source_op, low_source, plan->source_register_count, lane_index,
-        source_lane_type, out_lane);
+        source_lane_type, &source_lane));
+    return loom_amdgpu_materialize_low_vgpr_b32(context, source_op, source_lane,
+                                                out_lane);
   }
 
   IREE_ASSERT(plan->source_element_type == LOOM_SCALAR_TYPE_F16 ||

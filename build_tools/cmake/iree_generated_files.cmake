@@ -4,6 +4,8 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+include("${CMAKE_CURRENT_LIST_DIR}/iree_third_party_helpers.cmake")
+
 # A generator action with resolved output paths and command arguments. Python
 # entry points retain their declared module closure; native tools retain their
 # executable dependency. A freshness stamp records successful generation even
@@ -44,7 +46,32 @@ function(iree_generated_files)
     set(_GENERATOR_INPUTS "${_GENERATOR_TARGET}")
   endif()
 
+  # External source-file labels retain their repository and path through the
+  # converter. Resolve the declared archive input and the matching argument
+  # together so both build systems consume the same checksummed source.
+  set(_INPUTS)
   set(_ARGS ${_RULE_ARGS})
+  foreach(_INPUT IN LISTS _RULE_INPUTS)
+    if(_INPUT MATCHES "^@([^/]+)//+(.+)$")
+      set(_DEPENDENCY "${CMAKE_MATCH_1}")
+      set(_RELATIVE_PATH "${CMAKE_MATCH_2}")
+      iree_dependency_require_pinned_source_allowed("${_DEPENDENCY}")
+      iree_populate_locked_fetch_content("${_DEPENDENCY}" _SOURCE_DIR)
+      set(_RESOLVED_INPUT "${_SOURCE_DIR}/${_RELATIVE_PATH}")
+      if(NOT EXISTS "${_RESOLVED_INPUT}")
+        message(FATAL_ERROR "Generator ${_RULE_NAME}: missing input ${_INPUT}")
+      endif()
+      set(_RESOLVED_ARGS)
+      foreach(_ARG IN LISTS _ARGS)
+        string(REPLACE "${_INPUT}" "${_RESOLVED_INPUT}" _ARG "${_ARG}")
+        list(APPEND _RESOLVED_ARGS "${_ARG}")
+      endforeach()
+      set(_ARGS ${_RESOLVED_ARGS})
+      list(APPEND _INPUTS "${_RESOLVED_INPUT}")
+    else()
+      list(APPEND _INPUTS "${_INPUT}")
+    endif()
+  endforeach()
   if(_RULE_USE_PARAM_FILE)
     set(_PARAM_FILE "${_IREE_PACKAGE_BINARY_DIR}/CMakeFiles/${_GEN_TARGET}-$<CONFIG>.args")
     list(JOIN _ARGS "\n" _PARAM_CONTENT)
@@ -52,7 +79,7 @@ function(iree_generated_files)
     set(_ARGS "@${_PARAM_FILE}")
     list(APPEND _GENERATOR_INPUTS "${_PARAM_FILE}")
   endif()
-  iree_resolve_source_files(_RULE_INPUTS ${_RULE_INPUTS})
+  iree_resolve_source_files(_RULE_INPUTS ${_INPUTS})
   add_custom_command(
     # Makefile generators need output rules to repair missing files. Ninja
     # restat preserves content-stable outputs without rebuilding consumers.

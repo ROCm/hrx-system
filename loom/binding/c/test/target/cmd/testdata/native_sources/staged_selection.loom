@@ -1,0 +1,94 @@
+// Staged inputs participate before provider applicability and shape grouping.
+template.decl @staged_required_choose(%matches: i1, %columns: index, %input: view<32xi32>) -> (i32)
+
+template.def<@staged_required_choose> priority(10) @staged_required_matching(%matches: i1, %columns: index, %input: view<32xi32>) -> (i32) where [eq(%matches, 1)] {
+  %values = vector.load %input[0] : view<32xi32> -> vector<[%columns]xi32>
+  %c0 = scalar.constant 0 : i32
+  %value = vector.reduce<addi> %values, %c0 : vector<[%columns]xi32>, i32
+  template.return %value : i32
+}
+
+pipeline.def<kernel> @staged_required_classified(%width: index) run(%columns: index, %input: view<32xi32>, %output: view<1xi32>) {
+  %width_limit = index.constant 6 : index
+  %matches = index.cmp slt, %width, %width_limit : index
+  pipeline.strand<cooperative> workers([0], [1], [1]) {
+    %result = template.apply<@staged_required_choose>(%matches, %columns, %input) : (i1, index, view<32xi32>) -> (i32)
+    %thread = kernel.workitem.id<x> : index
+    %c0 = index.constant 0 : index
+    %first = index.cmp eq, %thread, %c0 : index
+    scf.if %first {
+      view.store %result, %output[0] : i32, view<1xi32>
+    }
+  }
+}
+
+command.def @staged_required_interleaved() launch(%input_storage: buffer, %output0_storage: buffer, %output1_storage: buffer, %output2_storage: buffer, %output3_storage: buffer, %output4_storage: buffer) {
+  %base = index.constant 0 : offset
+  %input = buffer.view %input_storage[%base] : buffer -> view<32xi32>
+  %output0 = buffer.view %output0_storage[%base] : buffer -> view<1xi32>
+  %output1 = buffer.view %output1_storage[%base] : buffer -> view<1xi32>
+  %output2 = buffer.view %output2_storage[%base] : buffer -> view<1xi32>
+  %output3 = buffer.view %output3_storage[%base] : buffer -> view<1xi32>
+  %output4 = buffer.view %output4_storage[%base] : buffer -> view<1xi32>
+  %width4 = index.constant 4 : index
+  %width5 = index.constant 5 : index
+  %columns16 = index.constant 16 : index
+  %columns32 = index.constant 32 : index
+  kernel.launch @staged_required_classified[%width4](%columns16, %input, %output0) : [index](index, view<32xi32>, view<1xi32>)
+  kernel.launch @staged_required_classified[%width5](%columns32, %input, %output1) : [index](index, view<32xi32>, view<1xi32>)
+  kernel.launch @staged_required_classified[%width4](%columns32, %input, %output2) : [index](index, view<32xi32>, view<1xi32>)
+  kernel.launch @staged_required_classified[%width5](%columns16, %input, %output3) : [index](index, view<32xi32>, view<1xi32>)
+  kernel.launch @staged_required_classified[%width4](%columns16, %input, %output4) : [index](index, view<32xi32>, view<1xi32>)
+  command.return
+}
+
+func.def @staged_required_oracle(%input_storage: buffer, %output0_storage: buffer, %output1_storage: buffer, %output2_storage: buffer, %output3_storage: buffer, %output4_storage: buffer) {
+  %base = index.constant 0 : offset
+  %input = buffer.view %input_storage[%base] : buffer -> view<32xi32>
+  %output0 = buffer.view %output0_storage[%base] : buffer -> view<1xi32>
+  %output1 = buffer.view %output1_storage[%base] : buffer -> view<1xi32>
+  %output2 = buffer.view %output2_storage[%base] : buffer -> view<1xi32>
+  %output3 = buffer.view %output3_storage[%base] : buffer -> view<1xi32>
+  %output4 = buffer.view %output4_storage[%base] : buffer -> view<1xi32>
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %end16 = index.constant 16 : index
+  %end32 = index.constant 32 : index
+  %initial = scalar.constant 0 : i32
+  %sum16 = scf.for %item = [%begin to %end16 step %step](%sum = %initial : i32) -> (i32) {
+    %value = view.load %input[%item] : view<32xi32> -> i32
+    %next = scalar.addi %sum, %value : i32
+    scf.yield %next : i32
+  }
+  %sum32 = scf.for %item = [%begin to %end32 step %step](%sum = %initial : i32) -> (i32) {
+    %value = view.load %input[%item] : view<32xi32> -> i32
+    %next = scalar.addi %sum, %value : i32
+    scf.yield %next : i32
+  }
+  view.store %sum16, %output0[0] : i32, view<1xi32>
+  view.store %sum32, %output1[0] : i32, view<1xi32>
+  view.store %sum32, %output2[0] : i32, view<1xi32>
+  view.store %sum16, %output3[0] : i32, view<1xi32>
+  view.store %sum16, %output4[0] : i32, view<1xi32>
+  func.return
+}
+
+check.scenario @staged_required_interleaved_staged_selection {
+  check.trial[3](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-1000 to 1000) : tensor<32xi32>
+    %output0 = check.generate.fill value(0) : tensor<1xi32>
+    %output1 = check.generate.fill value(0) : tensor<1xi32>
+    %output2 = check.generate.fill value(0) : tensor<1xi32>
+    %output3 = check.generate.fill value(0) : tensor<1xi32>
+    %output4 = check.generate.fill value(0) : tensor<1xi32>
+    check.compare<@staged_required_interleaved, @staged_required_oracle>(%input, %output0, %output1, %output2, %output3, %output4) : (tensor<32xi32>, tensor<1xi32>, tensor<1xi32>, tensor<1xi32>, tensor<1xi32>, tensor<1xi32>) -> () {
+      check.expect.equal actual(%output0) expected(%output0) : tensor<1xi32>
+      check.expect.equal actual(%output1) expected(%output1) : tensor<1xi32>
+      check.expect.equal actual(%output2) expected(%output2) : tensor<1xi32>
+      check.expect.equal actual(%output3) expected(%output3) : tensor<1xi32>
+      check.expect.equal actual(%output4) expected(%output4) : tensor<1xi32>
+    }
+  }
+  check.return
+}

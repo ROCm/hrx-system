@@ -45,6 +45,9 @@ from loom.target.arch.wasm.predicate import (
     NNAN_FLOAT_PREDICATES,
     predicate_rules,
 )
+from loom.target.arch.wasm.scalar_integer_extension import (
+    scalar_integer_extension_rules,
+)
 from loom.target.arch.wasm.vector_integer_arithmetic import (
     integer_arithmetic_rules,
 )
@@ -84,6 +87,7 @@ from loom.target.contracts import (
 )
 from loom.target.contracts.templates import (
     ReductionDescriptorCase,
+    integer_absolute_descriptor_rule,
     reduction_descriptor_rules,
 )
 from loom.target.low_descriptors import Descriptor
@@ -242,34 +246,14 @@ def _type_text(type_pattern: TypePattern) -> str:
         return " or ".join(
             f"vector<{shape}x{element}>" for element in type_pattern.elements
         )
-    if type_pattern == _I1:
-        return "i1 scalar"
-    if type_pattern == _I8:
-        return "i8 scalar"
     if type_pattern == _BYTE_STORAGE:
         return "i8, f8E4M3, or f8E5M2 scalar"
-    if type_pattern == _I16:
-        return "i16 scalar"
     if type_pattern == _WORD_STORAGE:
         return "i16, f16, or bf16 scalar"
-    if type_pattern == _I32:
-        return "i32 scalar"
-    if type_pattern == _I64:
-        return "i64 scalar"
-    if type_pattern == _F8E4M3:
-        return "f8E4M3 scalar"
-    if type_pattern == _F8E5M2:
-        return "f8E5M2 scalar"
-    if type_pattern == _F16:
-        return "f16 scalar"
-    if type_pattern == _BF16:
-        return "bf16 scalar"
-    if type_pattern == _F32:
-        return "f32 scalar"
-    if type_pattern == _F64:
-        return "f64 scalar"
     if type_pattern in (_INDEX, _OFFSET):
         return "index or offset scalar"
+    if type_pattern.kind == "scalar":
+        return " or ".join(type_pattern.elements) + " scalar"
     raise ValueError(f"unknown Wasm type pattern: {type_pattern!r}")
 
 
@@ -518,59 +502,50 @@ def _integer_sign_rules(
     value_type: TypePattern, type_name: str, sign_shift: int
 ) -> Iterable[DescriptorRule]:
     subtract = _descriptor(f"wasm.{type_name}.sub")
+    constant = _descriptor(f"wasm.{type_name}.const")
     input_value = ValueRef.operand("input")
-    for source_op, constant, intermediate_emits, lhs, rhs in (
-        (
-            scalar_arithmetic.scalar_negi,
-            0,
-            (),
-            ValueRef.temporary("constant"),
-            input_value,
-        ),
-        (
-            scalar_arithmetic.scalar_absi,
-            sign_shift,
-            (
-                EmitDescriptorOp(
-                    descriptor=_descriptor(f"wasm.{type_name}.shr_s"),
-                    operands={
-                        "lhs": input_value,
-                        "rhs": ValueRef.temporary("constant"),
-                    },
-                    results={"dst": ValueRef.temporary("sign")},
-                    result_types={"dst": value_type},
-                ),
-                EmitDescriptorOp(
-                    descriptor=_descriptor(f"wasm.{type_name}.xor"),
-                    operands={"lhs": input_value, "rhs": ValueRef.temporary("sign")},
-                    results={"dst": ValueRef.temporary("magnitude")},
-                    result_types={"dst": value_type},
-                ),
+    yield DescriptorRule(
+        source_op=scalar_arithmetic.scalar_negi,
+        descriptor=subtract,
+        guards=_typed_guards(("input", "result"), value_type),
+        emit=(
+            EmitDescriptorOp(
+                descriptor=constant,
+                results={"dst": ValueRef.temporary("constant")},
+                result_types={"dst": value_type},
+                immediates={f"{type_name}_value": 0},
+                form=DescriptorEmitForm.CONST,
             ),
-            ValueRef.temporary("magnitude"),
-            ValueRef.temporary("sign"),
-        ),
-    ):
-        yield DescriptorRule(
-            source_op=source_op,
-            descriptor=subtract,
-            guards=_typed_guards(("input", "result"), value_type),
-            emit=(
-                EmitDescriptorOp(
-                    descriptor=_descriptor(f"wasm.{type_name}.const"),
-                    results={"dst": ValueRef.temporary("constant")},
-                    result_types={"dst": value_type},
-                    immediates={f"{type_name}_value": constant},
-                    form=DescriptorEmitForm.CONST,
-                ),
-                *intermediate_emits,
-                EmitDescriptorOp(
-                    descriptor=subtract,
-                    operands={"lhs": lhs, "rhs": rhs},
-                    results={"dst": ValueRef.result("result")},
-                ),
+            EmitDescriptorOp(
+                descriptor=subtract,
+                operands={"lhs": ValueRef.temporary("constant"), "rhs": input_value},
+                results={"dst": ValueRef.result("result")},
+                form=DescriptorEmitForm.OP,
             ),
-        )
+        ),
+    )
+    yield integer_absolute_descriptor_rule(
+        scalar_arithmetic.scalar_absi,
+        value_type,
+        (
+            EmitDescriptorOp(
+                descriptor=constant,
+                results={"dst": ValueRef.temporary("constant")},
+                result_types={"dst": value_type},
+                immediates={f"{type_name}_value": sign_shift},
+                form=DescriptorEmitForm.CONST,
+            ),
+            EmitDescriptorOp(
+                descriptor=_descriptor(f"wasm.{type_name}.shr_s"),
+                operands={"lhs": input_value, "rhs": ValueRef.temporary("constant")},
+                results={"dst": ValueRef.temporary("sign")},
+                result_types={"dst": value_type},
+                form=DescriptorEmitForm.OP,
+            ),
+        ),
+        _descriptor(f"wasm.{type_name}.xor"),
+        subtract,
+    )
 
 
 def _index_madd_rule() -> DescriptorRule:
@@ -942,39 +917,6 @@ def _integer_to_predicate_rules(
                     },
                     results={"dst": ValueRef.result("result")},
                 ),
-            ),
-        ),
-    )
-
-
-def _masked_extui_rule(
-    source_type: TypePattern,
-    mask: int,
-) -> DescriptorRule:
-    const_descriptor = _descriptor("wasm.i32.const")
-    and_descriptor = _descriptor("wasm.i32.and")
-    return DescriptorRule(
-        source_op=scalar_conversion.scalar_extui,
-        descriptor=and_descriptor,
-        guards=(
-            _value_type("input", source_type),
-            _value_type("result", _I32),
-        ),
-        emit=(
-            EmitDescriptorOp(
-                descriptor=const_descriptor,
-                results={"dst": ValueRef.temporary("mask")},
-                result_types={"dst": _I32},
-                immediates={"i32_value": mask},
-                form=DescriptorEmitForm.CONST,
-            ),
-            EmitDescriptorOp(
-                descriptor=and_descriptor,
-                operands={
-                    "lhs": ValueRef.operand("input"),
-                    "rhs": ValueRef.temporary("mask"),
-                },
-                results={"dst": ValueRef.result("result")},
             ),
         ),
     )
@@ -1460,6 +1402,54 @@ def _view_carrier_rules() -> Iterable[DescriptorRule]:
                 )
 
 
+def _buffer_compare_address_rules() -> tuple[DescriptorRule, ...]:
+    # Widen before adding: memory32's valid one-past endpoint can be 2**32
+    # and must not wrap onto the null address.
+    emits = []
+    for side in ("lhs", "rhs"):
+        emits.extend(
+            EmitDescriptorOp(
+                descriptor=_descriptor("wasm.i64.extend_i32_u"),
+                operands={"input": ValueRef.operand(field)},
+                results={"dst": ValueRef.temporary(f"{field}_wide")},
+                result_types={"dst": _I64},
+                form=DescriptorEmitForm.OP,
+            )
+            for field in (side, f"{side}_offset")
+        )
+        emits.append(
+            EmitDescriptorOp(
+                descriptor=_descriptor("wasm.i64.add"),
+                operands={
+                    "lhs": ValueRef.temporary(f"{side}_wide"),
+                    "rhs": ValueRef.temporary(f"{side}_offset_wide"),
+                },
+                results={"dst": ValueRef.temporary(f"{side}_address")},
+                result_types={"dst": _I64},
+                form=DescriptorEmitForm.OP,
+            )
+        )
+    return tuple(
+        DescriptorRule(
+            source_op=buffer.buffer_compare_address,
+            guards=(Guard.enum_attr_equals("predicate", predicate),),
+            emit=(
+                *emits,
+                EmitDescriptorOp(
+                    descriptor=_descriptor(f"wasm.i64.{predicate}"),
+                    operands={
+                        "lhs": ValueRef.temporary("lhs_address"),
+                        "rhs": ValueRef.temporary("rhs_address"),
+                    },
+                    results={"dst": ValueRef.result("result")},
+                    form=DescriptorEmitForm.OP,
+                ),
+            ),
+        )
+        for predicate in ("eq", "ne")
+    )
+
+
 def _buffer_byte_address_emits(
     buffer_field: str,
 ) -> tuple[ValueRef, tuple[EmitDescriptorOp, ...]]:
@@ -1657,6 +1647,7 @@ WASM_CORE_SIMD128_CONTRACT_FRAGMENT = ContractFragment(
     cases=(
         *uniform_shift_rules(),
         *_view_carrier_rules(),
+        *_buffer_compare_address_rules(),
         ValueAliasRule(
             source_op=view.view_refine,
             source=ValueRef.operand("source"),
@@ -1664,10 +1655,42 @@ WASM_CORE_SIMD128_CONTRACT_FRAGMENT = ContractFragment(
         ),
         _buffer_load_i8_u_rule(),
         _buffer_store_i8_rule(),
+        DescriptorRule(
+            source_op=buffer.buffer_null,
+            emit=(
+                EmitDescriptorOp(
+                    descriptor=_descriptor("wasm.i32.const"),
+                    results={"dst": ValueRef.result("result")},
+                    immediates={"i32_value": 0},
+                    form=DescriptorEmitForm.CONST,
+                ),
+            ),
+        ),
+        DescriptorRule(
+            source_op=buffer.buffer_compare_null,
+            emit=(
+                EmitDescriptorOp(
+                    descriptor=_descriptor("wasm.i32.eqz"),
+                    operands={"input": ValueRef.operand("buffer")},
+                    results={"dst": ValueRef.result("result")},
+                    form=DescriptorEmitForm.OP,
+                ),
+            ),
+        ),
         *_integer_sign_rules(_I32, "i32", 31),
         *_integer_sign_rules(_I64, "i64", 63),
+        # These modular operations depend only on the logical low bits. Keep
+        # narrow source semantics until emission; signed consumers and right
+        # shifts still normalize their carriers through separate contracts.
         *(
-            _binary_rule(source_op, value_type, f"wasm.{type_name}.{operation}")
+            _binary_rule(
+                source_op,
+                Scalar(("i8", "i16", "i32"))
+                if type_name == "i32"
+                and operation in ("add", "sub", "mul", "and", "or", "xor", "shl")
+                else value_type,
+                f"wasm.{type_name}.{operation}",
+            )
             for value_type, type_name in ((_I32, "i32"), (_I64, "i64"))
             for source_op, operation in (
                 (scalar_arithmetic.scalar_addi, "add"),
@@ -1899,20 +1922,7 @@ WASM_CORE_SIMD128_CONTRACT_FRAGMENT = ContractFragment(
             )
         ),
         _conversion_alias_rule(scalar_conversion.scalar_extui, _I1, _I32),
-        _masked_extui_rule(_I8, 0xFF),
-        _masked_extui_rule(_I16, 0xFFFF),
-        _conversion_rule(
-            scalar_conversion.scalar_extsi,
-            _I32,
-            _I64,
-            "wasm.i64.extend_i32_s",
-        ),
-        _conversion_rule(
-            scalar_conversion.scalar_extui,
-            _I32,
-            _I64,
-            "wasm.i64.extend_i32_u",
-        ),
+        *scalar_integer_extension_rules(_descriptor),
         _const_i1_rule(),
         _const_i32_rule(scalar_conversion.scalar_constant, _I8),
         _const_i32_rule(scalar_conversion.scalar_constant, _I16),

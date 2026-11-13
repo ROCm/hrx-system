@@ -1,0 +1,151 @@
+// RUN: roundtrip
+// Exclusive uses keep the original identity in either branch ordering.
+static void increment(unsigned& value) { ++value; }
+unsigned left(bool choose, unsigned value) {
+  unsigned saved = value;
+  if (choose) {
+    increment(value);
+    return value;
+  }
+  return saved;
+}
+unsigned right(bool choose, unsigned value) {
+  unsigned saved = value;
+  if (choose) return saved;
+  increment(value);
+  return value;
+}
+
+// ----
+func.def public @left(%choose: i1, %value$1: i32) -> (i32) {
+  %3 = scf.if %choose -> (i32) {
+    %value = func.call pure @increment(%value$1) : (i32) -> (i32)
+    scf.yield %value : i32
+  } else {
+    scf.yield %value$1 : i32
+  }
+  func.return %3 : i32
+}
+
+func.def public @right(%choose: i1, %value$6: i32) -> (i32) {
+  %8 = scf.if %choose -> (i32) {
+    scf.yield %value$6 : i32
+  } else {
+    %value = func.call pure @increment(%value$6) : (i32) -> (i32)
+    scf.yield %value : i32
+  }
+  func.return %8 : i32
+}
+
+func.def @increment(%value$10: i32) -> (i32) {
+  %12 = scalar.constant 1 : i32
+  %value$13 = scalar.addi %value$10, %12 : i32
+  func.return %value$13 : i32
+}
+
+// ====
+// The completed left operand retains its SSA value across source rebinding.
+static unsigned replace(unsigned& value) { value = 22; return 0; }
+unsigned snapshot(unsigned value) { return value << replace(value); }
+
+// ----
+func.def public @snapshot(%value$0: i32) -> (i32) {
+  %2, %value$3 = func.call pure @replace() : () -> (i32, i32)
+  %4 = scalar.shli %value$0, %2 : i32
+  func.return %4 : i32
+}
+
+func.def @replace() -> (i32, i32) {
+  %value = scalar.constant 22 : i32
+  %8 = scalar.constant 0 : i32
+  func.return %8, %value : i32, i32
+}
+
+// ====
+// Loops and earlier reads use ordinary SSA results without copy bookkeeping.
+[[loom::import("example", "observe")]] void observe(unsigned value);
+static void increment(unsigned& value) { ++value; }
+unsigned last_use(unsigned value) {
+  unsigned unused = value;
+  observe(value);
+  increment(value);
+  return value;
+}
+unsigned carried(unsigned value, unsigned count) {
+  for (unsigned i = 0; i < count; ++i) increment(value);
+  return value;
+}
+
+// ----
+func.def public @last_use(%value$0: i32) -> (i32) {
+  func.call @observe(%value$0) : (i32)
+  %value$2 = func.call pure @increment(%value$0) : (i32) -> (i32)
+  func.return %value$2 : i32
+}
+
+func.def public @carried(%value$3: i32, %count: i32) -> (i32) {
+  %i = scalar.constant 0 : i32
+  %7 = index.cast %i : i32 to offset
+  %8 = index.cast %count : i32 to offset
+  %9 = index.constant 1 : offset
+  %value$12 = scf.for %i = [%7 to %8 step %9](%value$11 = %value$3 : i32) -> (i32) {
+    %13 = index.cast %i : offset to i32
+    %value$14 = func.call pure @increment(%value$11) : (i32) -> (i32)
+    scf.yield %value$14 : i32
+  }
+  func.return %value$12 : i32
+}
+
+func.def @increment(%value$15: i32) -> (i32) {
+  %17 = scalar.constant 1 : i32
+  %value$18 = scalar.addi %value$15, %17 : i32
+  func.return %value$18 : i32
+}
+
+func.decl import("example", "observe") @observe(%19: i32)
+
+// ====
+// Rebinding an opaque value preserves earlier uses without duplicating it.
+class [[loom::type("check.entropy")]] Entropy {};
+static void replace_entropy(Entropy& value, Entropy replacement) {
+  value = replacement;
+}
+Entropy opaque_copy(Entropy value, Entropy replacement) {
+  const Entropy snapshot = value;
+  replace_entropy(value, replacement);
+  return snapshot;
+}
+
+// ----
+func.def public @opaque_copy(%value$0: check.entropy, %replacement: check.entropy) -> (check.entropy) {
+  %value$3 = func.call pure @replace_entropy(%replacement) : (check.entropy) -> (check.entropy)
+  func.return %value$0 : check.entropy
+}
+
+func.def @replace_entropy(%replacement: check.entropy) -> (check.entropy) {
+  func.return %replacement : check.entropy
+}
+
+// ====
+// Rebinding an opaque value preserves earlier uses without duplicating it.
+#include <loomcxx/pipeline.h>
+using Payload = loom::type::tile<loom::type::shape<4>, unsigned>;
+using Stream = loom::type::channel<Payload>;
+static void replace_stream(Stream& stream, Stream replacement) {
+  stream = replacement;
+}
+Stream channel_copy(Stream stream, Stream replacement) {
+  const Stream snapshot = stream;
+  replace_stream(stream, replacement);
+  return snapshot;
+}
+
+// ----
+func.def public @channel_copy(%stream$0: channel<tile<4xi32>>, %replacement: channel<tile<4xi32>>) -> (channel<tile<4xi32>>) {
+  %stream$3 = func.call pure @replace_stream(%replacement) : (channel<tile<4xi32>>) -> (channel<tile<4xi32>>)
+  func.return %stream$0 : channel<tile<4xi32>>
+}
+
+func.def @replace_stream(%replacement: channel<tile<4xi32>>) -> (channel<tile<4xi32>>) {
+  func.return %replacement : channel<tile<4xi32>>
+}

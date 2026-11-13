@@ -15,7 +15,7 @@ namespace {
 
 TEST(ConfigBindingsReportTest, RecordingAndMergingOwnStrings) {
   loom_target_compile_report_t source;
-  loom_target_compile_report_initialize(&source, iree_allocator_system());
+  loom_target_compile_report_initialize(iree_allocator_system(), &source);
   source.requested_detail_flags =
       LOOM_TARGET_COMPILE_REPORT_DETAIL_CONFIG_BINDING_ROWS;
   std::string key = "motif.left_depth";
@@ -29,7 +29,7 @@ TEST(ConfigBindingsReportTest, RecordingAndMergingOwnStrings) {
   key.assign(key.size(), 'x');
   value.assign(value.size(), '9');
   loom_target_compile_report_t merged;
-  loom_target_compile_report_initialize(&merged, iree_allocator_system());
+  loom_target_compile_report_initialize(iree_allocator_system(), &merged);
   IREE_ASSERT_OK(
       loom_target_compile_report_record_entry_report(&merged, &source));
   loom_target_compile_report_deinitialize(&source);

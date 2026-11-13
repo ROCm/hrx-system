@@ -98,6 +98,40 @@ def test_pointer_updates_can_recreate_owned_input_chains() -> None:
             } == {("ptr_out", "ptr")}
 
 
+def test_pointer_updates_offer_only_timing_equivalent_address_lanes() -> None:
+    descriptors = {
+        descriptor.key: descriptor
+        for descriptor in AIE2P_CORE_DESCRIPTOR_SET.descriptors
+    }
+    schedules = {
+        schedule.name: schedule
+        for schedule in AIE2P_CORE_DESCRIPTOR_SET.schedule_classes
+    }
+    for addressing in ("immediate", "register", "2d", "3d"):
+        updates = {
+            lane: descriptors[f"amd.xdna.aie2p.address.add.{lane}.{addressing}"]
+            for lane in ("a", "b", "s")
+        }
+        assert updates["a"].schedule_alternatives == ()
+        for lane, alternate in (("b", "s"), ("s", "b")):
+            source = updates[lane]
+            target = updates[alternate]
+            assert source.schedule_alternatives == (target.key,)
+            assert source.constraints == target.constraints
+            assert source.effects == target.effects
+            assert [
+                (operand.read_event, operand.write_event) for operand in source.operands
+            ] == [
+                (operand.read_event, operand.write_event) for operand in target.operands
+            ]
+            assert schedules[source.schedule_class].latency_cycles == (
+                schedules[target.schedule_class].latency_cycles
+            )
+        assert schedules[updates["a"].schedule_class].latency_cycles > (
+            schedules[updates["b"].schedule_class].latency_cycles
+        )
+
+
 def test_modifier_moves_preserve_pure_move_family_contracts() -> None:
     descriptors = {
         descriptor.key: descriptor
@@ -443,6 +477,8 @@ def test_fifo_stores_preserve_the_fixed_tuple_and_overflow_state() -> None:
         assert descriptor.asm_forms[0].operands == (
             ("fifo_reg", "ptr", "avail")
             if descriptor in flushes
+            else ("src", "ptr", "avail")
+            if descriptor.key.endswith(".empty")
             else ("fifo_reg", "src", "ptr", "avail")
         )
         assert descriptor.effects[0].kind is EffectKind.WRITE
@@ -455,16 +491,30 @@ def test_fifo_stores_preserve_the_fixed_tuple_and_overflow_state() -> None:
             for constraint in descriptor.constraints
             if constraint.kind is ConstraintKind.TIED
         } == {
-            ("fifo_reg_out", "fifo_reg"),
             ("ptr_out", "ptr"),
             ("avail_out", "avail"),
-        }
+        } | (
+            set()
+            if descriptor.key.endswith(".empty")
+            else {("fifo_reg_out", "fifo_reg")}
+        )
         overflow = next(
             operand
             for operand in descriptor.operands
             if operand.field_name == "implicit_def_srfifo_of"
         )
         assert OperandFlag.STATE_WRITE in overflow.flags
+
+    ordinary = [
+        descriptor for descriptor in pushes if not descriptor.key.endswith(".empty")
+    ]
+    assert len(pushes) == 2 * len(ordinary)
+    for descriptor in ordinary:
+        empty = descriptors[descriptor.key + ".empty"]
+        assert empty.encoding_id == descriptor.encoding_id
+        assert empty.schedule_class == descriptor.schedule_class
+        assert empty.effects == descriptor.effects
+        assert not any(operand.field_name == "fifo_reg" for operand in empty.operands)
 
 
 def test_fused_vector_memory_descriptors_preserve_conversion_and_memory_contracts() -> (

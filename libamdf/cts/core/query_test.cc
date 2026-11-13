@@ -29,6 +29,7 @@ TEST(QueryApiTest, NegotiatesSupportedVersion) {
   EXPECT_NE(api->endpoint_close, nullptr);
   EXPECT_NE(api->query_extension, nullptr);
   EXPECT_NE(api->endpoint_query_queue_family_info, nullptr);
+  EXPECT_NE(api->device_query_queue_family_placement_info, nullptr);
   EXPECT_NE(api->device_destroy, nullptr);
   EXPECT_NE(api->instance_enumerate_memory_scopes, nullptr);
   EXPECT_NE(api->device_enumerate_memory_scopes, nullptr);

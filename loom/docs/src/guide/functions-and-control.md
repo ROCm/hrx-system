@@ -19,7 +19,7 @@ In this chapter, you will learn:
 ## Define a typed callable
 
 A [`func.def`](../reference/dialects/func/ops/def.md) owns a symbol, signature,
-and body. Every exit uses [`func.return`](../reference/dialects/func/ops/return.md)
+and body. Each returning path uses [`func.return`](../reference/dialects/func/ops/return.md)
 with the declared result types:
 
 ```loom
@@ -41,6 +41,19 @@ caller, and argument predicates describe those same inputs. Structured loops
 bind separate carried values. When authoring CFG directly, a separate loop
 header owns the changing block arguments; branches cannot target the function
 entry block. This contract also applies to template, kernel, and Low bodies.
+
+An early return from inside a structured loop or selection uses
+[`func.exit`](../reference/dialects/func/ops/exit.md). Its condition selects a
+region ending in the enclosing callable's return operation: `func.return` for
+an ordinary function or `kernel.return` for a kernel. The exit leaves the
+callable, including every intervening loop and selection.
+
+If a direct function or kernel body has no defined continuation, it can end in
+[`func.unreachable`](../reference/dialects/func/ops/unreachable.md) without a
+result tuple. This is useful after a selection whose arms all return or after
+a loop that cannot finish. Reaching it is undefined behavior; it is not a
+runtime trap or assertion. C++ export spells it `__builtin_unreachable()` and
+preserves early returns as C++ `return` statements.
 
 Functions may return several values. Results remain ordinary SSA values at the
 call site:
@@ -97,6 +110,42 @@ needed merely because a helper is small; it is used when the source contract
 requires the boundary to disappear at the current stage. Without an explicit
 policy, the consuming pass decides from target, call graph, and cost evidence.
 
+The default `inline-callables` policy expands an unannotated callee when its
+expanded body cost, multiplied by the selected call count, fits the ordinary
+budget of 128 materialization units. Every operation costs at least one unit;
+operations over scalar, vector, tile, or tensor payloads also account for their
+static 32-bit payload word count. Hot call sites and calls to hot functions may
+instead use the hot budget of 512 units. Cold call sites and calls to cold
+functions retain their boundaries unless target legality requires expansion.
+A private helper with one remaining selected call transfers into its caller
+instead of cloning its body, but it still must fit the budget: a call boundary
+can contain register pressure even when removing it would not duplicate code.
+Required `inline` calls and target-required calls do not consume either budget.
+
+Target-required expansion takes precedence over this cost policy. AMDGPU and
+AIE2P core helpers use the same budgets, with leaf-only native call boundaries.
+For `entry → outer → inner`, the compiler can retain `inner` and expand `outer`,
+or expand `inner` and retain `outer`. An authored `noinline` on `outer` requires
+its subordinate calls to expand; two nested `noinline` boundaries cannot satisfy
+these targets' callable contracts and produce a diagnostic.
+
+Automatic calls also expand when their physical arguments or results exceed
+the native register banks, or when the helper owns storage that its target
+cannot support at a call boundary. These decisions use the selected Low types.
+An authored `noinline` makes an incompatible boundary an error. AIE2P array
+construction and configuration calls still expand where realization requires
+their effects in the enclosing program.
+
+Custom pipelines can tune the two optional classes independently:
+
+```text
+inline-callables{budget=64,hot-budget=1024}
+```
+
+A zero budget disables optional inlining for that class. For example,
+`inline-callables{budget=0,hot-budget=0}` performs only source-required,
+structural, and target-required expansion.
+
 Effect modifiers are checked on definitions and carried by call sites. A
 `pure` call can target only a pure callable. A `readonly` call may target a
 pure or read-only callable, and retains its read effect so memory-aware passes
@@ -109,11 +158,12 @@ stronger contract.
 [`low.invoke`](../reference/dialects/low/ops/invoke.md) lets a source function
 delegate part of its device implementation to an authored `low.func.def`.
 A helper can express a target instruction sequence while indexing, launch
-geometry, and the surrounding algorithm remain in source IR. On AMDGPU and
-x86, the compiler inlines these helpers before emission, and their instructions
-normally participate in scheduling and register allocation with the caller.
-The call's inline policy follows the same rules as other callable boundaries;
-`noinline` is rejected on targets that require Low calls to inline.
+geometry, and the surrounding algorithm remain in source IR. When the boundary
+is inlined, the helper's instructions participate in scheduling and register
+allocation with the caller. A retained boundary uses the selected target's
+callable ABI and keeps the helper as a separate function. The call's inline
+policy follows the same rules as other callable boundaries; `noinline` is
+rejected when the target cannot retain that boundary.
 
 The call site retains source types while the helper signature uses target-Low
 register types. Physical register classes are carrier-only: source semantic
@@ -133,12 +183,57 @@ low.func.def target<amdgpu.gfx11.generic.core>(@schedule_target) @pack_pair(%eve
 %packed = low.invoke @pack_pair(%even, %odd) : (vector<2xf16>, vector<2xf16>) -> (vector<2xf16>)
 ```
 
-Lowering proves that each source operand and result maps exactly to the
-helper's register signature. Inlined helpers use virtual register allocation
-and receive inputs through arguments rather than `low.resource` or
-`low.live_in`. They may contain multiple control-flow blocks and nested Low
-calls. Each nested call must satisfy its own signature, target, and inline
-contracts; every returning path supplies the helper's declared results.
+Lowering matches the helper's register signature and can convert argument
+carriers when retained source facts prove the conversion is lossless. For
+example, AMDGPU can pass a subgroup-uniform value from vector registers to a
+scalar-register helper, including every word of a packed vector. A lane mask
+can become scalar truth only when participating lanes agree; inactive lanes
+do not contribute. A proven range can also permit a narrower native index
+argument, including SPIR-V's signed index carriers. Missing proofs reject the
+invocation. These are physical conversions at the explicit `low.invoke`
+boundary; ordinary source calls retain exact source-type matching. The native
+call returns the helper's declared carriers. Loom then preserves the source
+result for every lane that observes it: a scalar native result produced inside
+a divergent loop is saved before retiring lanes stop participating, so later
+iterations cannot overwrite their results.
+
+A subgroup broadcast can feed a scalar helper within the same loop iteration,
+including from a nested branch. Arithmetic derived from that broadcast retains
+the same guarantee. The value collected after a divergent loop can differ
+between lanes, so a later scalar call needs its own proof of agreement.
+
+For example, with the target above, this helper increments one shared value.
+In the source fragment, `%word` is each lane’s `i32` payload, `%lane` is its
+index, and `%zero` and `%one` are index constants:
+
+```loom
+low.func.def target<amdgpu.gfx11.generic.core>(@schedule_target) @increment(%value: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
+  %one = s_mov_b32 1
+  %result = s_add_u32 %value, %one
+  return %result
+}
+
+%counter, %result = scf.while(%counter = %zero : index) -> (index, i32) {
+  %observed = kernel.subgroup.broadcast.first %word : i32
+  %incremented = low.invoke @increment(%observed) : (i32) -> (i32)
+  %more = index.cmp ult, %counter, %lane : index
+  scf.condition %more, %counter, %incremented : i1, index, i32
+} do(%position: index, %unused: i32) {
+  %next = index.add %position, %one : index
+  scf.yield %next : index
+}
+```
+
+The broadcast proves agreement at `@increment`, and each lane retains its
+result when it leaves the loop. `%result` is not generally a valid argument to
+another scalar helper after the loop. A pure helper called with inputs that
+remain uniform across all iterations keeps its invariant result uniform.
+
+Inlined helpers use virtual register allocation and receive inputs through
+arguments rather than `low.resource` or `low.live_in`. They may contain
+multiple control-flow blocks and nested Low calls. Each nested call must
+satisfy its own signature, target, and inline contracts; every returning path
+supplies the helper's declared results.
 
 Target compatibility is directional. A concrete `gfx1151` caller can invoke a
 helper authored for `gfx11-generic` because the concrete target satisfies the
@@ -533,6 +628,19 @@ iteration advances the whole carried tuple once. Empty ranges execute no body,
 and a remainder executes only the iterations in the original half-open range:
 three iterations still produce `22`, including the final view identity.
 Unrolling preserves the program's data and completion dependencies.
+
+`schedule(recurrence)` overlaps independent work in a two-iteration rolling
+window. When the body has independent ordinary reads, their address and payload
+prerequisites run ahead; arithmetic consuming the loaded values stays with the
+current iteration's carried update. Without such reads, the window overlaps
+independent computation. In a read-only recurrence, explicit full linear
+unrolling of a nested read-containing body exposes its operations to this
+schedule when its original bounds already prove a nonzero iteration count.
+Inner bounds that need outer-iteration specialization retain that ordering.
+Effectful bodies retain their source grouping while scheduling the parent.
+Memory effects, collective
+participation, and authored fences continue to constrain which operations can
+advance.
 
 The [loop-tuning walkthrough](../workflows/tune-loop-schedules.md) combines
 these controls in checked row-sum and packed-dot examples, including serial

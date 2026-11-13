@@ -55,7 +55,8 @@ class Pm4CommandWriter {
 
   // Joins preceding compute waves and acquires code and data from SYSTEM.
   void SystemBarrier();
-  // Joins preceding compute waves without performing cache operations.
+  // Joins preceding compute waves with MEC offload while EOP work drains,
+  // without performing cache operations.
   void WaitCompute();
   // Acquires SYSTEM data while retaining instruction-cache contents. The
   // caller has already published immutable code and joined preceding waves
@@ -159,12 +160,14 @@ class Pm4CommandWriter {
   void WriteData(uint64_t target_address, const uint32_t* values,
                  size_t value_count);
   void WriteData32(uint64_t target_address, uint32_t value);
-  // Explicit memory dependencies with ordinary MEC execution, without ACE
-  // offload. These operations do not acquire payload caches.
+  // Explicit DWORD dependency with MEC polling offload. This does not acquire
+  // payload caches or select the preemptable wait operation.
   void WaitMemory32(
       uint64_t address, uint32_t value,
       Pm4MemoryComparison comparison = Pm4MemoryComparison::kEqual,
       uint32_t mask = UINT32_MAX);
+  // Explicit 64-bit dependency without polling offload, preserving the poll
+  // address during unresolved waits. This does not acquire payload caches.
   void WaitMemory64(
       uint64_t address, uint64_t value,
       Pm4MemoryComparison comparison = Pm4MemoryComparison::kEqual,

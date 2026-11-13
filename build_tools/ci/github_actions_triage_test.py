@@ -177,23 +177,21 @@ class GitHubActionsTriageTest(unittest.TestCase):
                 "hardware completion epoch 2 exceeds host publication epoch 1 "
                 "after submission quiescence",
                 "hrx-78tqc",
-                triage.KNOWN_PRODUCT,
             ),
             (
                 "ColdStateTransitionsPreserveWarmWaveformProgress/0 "
                 "loom_serve_device_memory_statistics(device).retained.pending_bytes "
                 "Which is: 12288",
                 "hrx-b1gxf3",
-                triage.KNOWN_FLAKE,
             ),
         )
-        for log, issue, category in cases:
+        for log, issue in cases:
             with self.subTest(issue=issue):
                 unconfirmed = self.classify(log)
                 self.assertEqual(unconfirmed.category, triage.REPOSITORY)
                 self.assertEqual(unconfirmed.issue, issue)
                 confirmed = self.classify(log, open_issues=frozenset({issue}))
-                self.assertEqual(confirmed.category, category)
+                self.assertEqual(confirmed.category, triage.REPOSITORY)
                 self.assertEqual(confirmed.issue, issue)
 
     def test_windows_application_control_precedes_reported_test_failure(self):
@@ -215,6 +213,77 @@ class GitHubActionsTriageTest(unittest.TestCase):
         self.assertEqual(confirmed.category, triage.INFRASTRUCTURE)
         self.assertEqual(confirmed.code, "windows_application_control_denial")
         self.assertEqual(confirmed.issue, "hrx-vvf9c")
+
+    def test_windows_bazel_dns_failure_requires_owning_issue_and_boundary(self):
+        log = (
+            "Download failed: UnrecoverableHttpException Unknown host: github.com\n"
+            "Error in download_and_extract: java.io.IOException: Unknown host: "
+            "github.com"
+        )
+        input_job = job(
+            job_name="Bazel / Windows x86-64 / Clang CL / Fastbuild",
+            failed_step="Run IREE Bazel CI",
+        )
+        unconfirmed = self.classify(log, input_job=input_job)
+        self.assertEqual(unconfirmed.category, triage.REPOSITORY)
+        self.assertEqual(unconfirmed.issue, "hrx-m2tne4")
+
+        confirmed = self.classify(
+            log,
+            input_job=input_job,
+            open_issues=frozenset({"hrx-m2tne4"}),
+        )
+        self.assertEqual(confirmed.category, triage.INFRASTRUCTURE)
+        self.assertEqual(confirmed.code, "windows_bazel_dependency_dns_failure")
+        self.assertEqual(confirmed.issue, "hrx-m2tne4")
+
+        linux_job = job(job_name="Bazel / Linux x86-64 / Clang / Fastbuild")
+        self.assertEqual(
+            self.classify(
+                log,
+                input_job=linux_job,
+                open_issues=frozenset({"hrx-m2tne4"}),
+            ).category,
+            triage.UNKNOWN,
+        )
+
+    def test_windows_generator_ebadf_requires_exact_boundary_and_issue(self):
+        log = (
+            "c_errors.exe failed: error executing IreeGenerate command\n"
+            "return io.open(self, mode, buffering, encoding, errors, newline)\n"
+            "OSError: [Errno 9] Bad file descriptor: "
+            "'bazel-out\\\\x64_windows-opt-exec\\\\bin\\\\catalog.c'"
+        )
+        input_job = job(
+            job_name="Bazel / Windows x86-64 / Clang CL / Fastbuild",
+            failed_step="Run IREE Bazel CI",
+        )
+        unconfirmed = self.classify(log, input_job=input_job)
+        self.assertEqual(unconfirmed.category, triage.REPOSITORY)
+        self.assertEqual(unconfirmed.issue, "hrx-b8oh4d")
+
+        confirmed = self.classify(
+            log,
+            input_job=input_job,
+            open_issues=frozenset({"hrx-b8oh4d"}),
+        )
+        self.assertEqual(confirmed.category, triage.REPOSITORY)
+        self.assertEqual(confirmed.code, "windows_generator_output_open_ebadf")
+
+        for changed_job, changed_log in (
+            (job(job_name="Bazel / Linux x86-64 / Clang / Fastbuild"), log),
+            (input_job, log.replace("IreeGenerate", "OtherAction")),
+            (input_job, log.replace("bazel-out", "C:\\\\host")),
+        ):
+            with self.subTest(job=changed_job["name"], log=changed_log):
+                self.assertEqual(
+                    self.classify(
+                        changed_log,
+                        input_job=changed_job,
+                        open_issues=frozenset({"hrx-b8oh4d"}),
+                    ).category,
+                    triage.UNKNOWN,
+                )
 
     def test_unknown_failures_do_not_share_an_identity_across_jobs(self):
         first = self.classify("opaque", input_job=job(job_id=10))
@@ -246,7 +315,7 @@ class GitHubActionsTriageTest(unittest.TestCase):
             triage.JobFinding(3, "GPU", "https://example/3", infrastructure),
         ]
         groups = triage.group_findings(findings)
-        self.assertEqual([len(group.jobs) for group in groups], [2, 1])
+        self.assertEqual([len(group.jobs) for group in groups], [1, 1, 1])
         self.assertEqual(
             triage.failure_disposition(findings),
             triage.REPOSITORY,

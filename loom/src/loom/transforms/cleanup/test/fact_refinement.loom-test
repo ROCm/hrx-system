@@ -1,5 +1,122 @@
 // RUN: pass canonicalize
 
+// An exact alias inherits relations from its operand even when its own
+// predicate only states the exact value. Preserve every signed relation kind
+// on the surviving participants; earlier uses retain the original values.
+func.def @inherited_scalar_relations(%input: i32, %lower: i32, %upper: i32, %excluded: i32, %equal: i32) {
+  %bounded = scalar.assume %input [ge(%input, %lower), lt(%input, %upper), ne(%input, %excluded), eq(%input, %equal)] : i32
+  test.use %bounded, %lower, %upper, %excluded, %equal : i32, i32, i32, i32, i32
+  %exact = scalar.assume %bounded [eq(%bounded, 0)] : i32
+  test.use %exact, %lower, %upper, %excluded, %equal : i32, i32, i32, i32, i32
+  func.return
+}
+
+// ----
+func.def @inherited_scalar_relations(%input: i32, %lower: i32, %upper: i32, %excluded: i32, %equal: i32) {
+  %bounded = scalar.assume %input [ge(%input, %lower), lt(%input, %upper), ne(%input, %excluded), eq(%input, %equal)] : i32
+  test.use %bounded, %lower, %upper, %excluded, %equal : i32, i32, i32, i32, i32
+  %exact = scalar.constant 0 : i32
+  %equal_refined = scalar.constant 0 : i32
+  %excluded_refined = scalar.assume %excluded [ne(%excluded, 0)] : i32
+  %upper_refined = scalar.assume %upper [gt(%upper, 0)] : i32
+  %lower_refined = scalar.assume %lower [le(%lower, 0)] : i32
+  test.use %exact, %lower_refined, %upper_refined, %excluded_refined, %equal_refined : i32, i32, i32, i32, i32
+  func.return
+}
+
+// ====
+
+// Transitive relations are already retained by the fact owner. Transport
+// consumes that index when an alias becomes exact, including the far endpoint.
+func.def @inherited_transitive_relations(%input: index, %middle: index, %upper: index) {
+  %bounded_middle = index.assume %middle [le(%middle, %upper)] : index
+  %bounded = index.assume %input [lt(%input, %bounded_middle)] : index
+  %exact = index.assume %bounded [eq(%bounded, 3)] : index
+  test.use %exact, %middle, %bounded_middle, %upper : index, index, index, index
+  func.return
+}
+
+// ----
+func.def @inherited_transitive_relations(%input: index, %middle: index, %upper: index) {
+  %bounded_middle = index.assume %middle [le(%middle, %upper)] : index
+  %exact = index.constant 3 : index
+  %upper_refined = index.assume %upper [gt(%upper, 3)] : index
+  %middle_refined = index.assume %middle [gt(%middle, 3)] : index
+  test.use %exact, %middle_refined, %bounded_middle, %upper_refined : index, index, index, index
+  func.return
+}
+
+// ====
+
+// Unsigned ordering in a known sign partition contributes signed retained
+// relations. The original unsigned predicate keeps its domain.
+func.def @inherited_unsigned_partition(%input: i64, %upper_value: i64) {
+  %upper = scalar.assume %upper_value [ge(%upper_value, 0)] : i64
+  %bounded = scalar.assume %input [range(%input, 0, 1), ult(%input, %upper)] : i64
+  %exact = scalar.assume %bounded [eq(%bounded, 0)] : i64
+  test.use %exact, %upper_value, %upper : i64, i64, i64
+  func.return
+}
+
+// ----
+func.def @inherited_unsigned_partition(%input: i64, %upper_value: i64) {
+  %upper = scalar.assume %upper_value [ge(%upper_value, 0)] : i64
+  %exact = scalar.constant 0 : i64
+  %upper_value_refined = scalar.assume %upper_value [gt(%upper_value, 0)] : i64
+  test.use %exact, %upper_value_refined, %upper : i64, i64, i64
+  func.return
+}
+
+// ====
+// RUN: pass canonicalize,vector-memory-footprint
+
+// Branch specialization makes each index exact. Its inherited upper bound
+// must refine the view in that branch without strengthening sibling or later
+// uses of the original extent.
+func.def @inherited_view_bound(%storage: buffer, %first_value: index, %capacity: index) -> (i32, index) {
+  %first = index.assume %first_value [range(%first_value, 0, 1)] : index
+  %origin = index.constant 0 : offset
+  %primary_row = index.constant 0 : index
+  %records = buffer.view %storage[%origin] : buffer -> view<[%capacity]x9xi32>
+  %position = index.assume %first [lt(%first, %capacity)] : index
+  %primary = index.cmp eq, %position, %primary_row : index
+  %item = scf.if %primary -> (i32) {
+    %loaded = view.load %records[%position, 2] : view<[%capacity]x9xi32> -> i32
+    scf.yield %loaded : i32
+  } else {
+    %loaded = view.load %records[%position, 8] : view<[%capacity]x9xi32> -> i32
+    scf.yield %loaded : i32
+  }
+  func.return %item, %capacity : i32, index
+}
+
+// ----
+func.def @inherited_view_bound(%storage: buffer, %first_value: index, %capacity: index) -> (i32, index) {
+  %first = index.assume %first_value [range(%first_value, 0, 1)] : index
+  %origin = index.constant 0 : offset
+  %primary_row = index.constant 0 : index
+  %records = buffer.view %storage[%origin] : buffer -> view<[%capacity]x9xi32>
+  %position = index.assume %first [lt(%first, %capacity)] : index
+  %primary = index.cmp eq, %position, %primary_row : index
+  %item = scf.if %primary -> (i32) {
+    %21 = index.constant 0 : index
+    %capacity_refined = index.assume %capacity [gt(%capacity, 0)] : index
+    %records_refined = view.refine %records : view<[%capacity]x9xi32> -> view<[%capacity_refined]x9xi32>
+    %loaded = view.load %records_refined[%21, 2] : view<[%capacity_refined]x9xi32> -> i32
+    scf.yield %loaded : i32
+  } else {
+    %20 = index.constant 1 : index
+    %capacity_refined = index.assume %capacity [gt(%capacity, 1)] : index
+    %records_refined = view.refine %records : view<[%capacity]x9xi32> -> view<[%capacity_refined]x9xi32>
+    %loaded = view.load %records_refined[%20, 8] : view<[%capacity_refined]x9xi32> -> i32
+    scf.yield %loaded : i32
+  }
+  func.return %item, %capacity : i32, index
+}
+
+// ====
+// RUN: pass canonicalize
+
 // The exact identity folds while the dynamic participant receives a new SSA
 // representative. Uses before the assumption retain the original value.
 func.def @same_block(%upper: index) -> (index, index, index) {
@@ -141,7 +258,7 @@ func.def @unsigned_relation_orientation(%less: i32, %less_equal: i32, %greater: 
   %less_refined = scalar.constant 0 : i32
   test.use %less_anchor, %less_refined : i32, i32
   %less_equal_anchor = scalar.constant 2 : i32
-  %less_equal_refined = scalar.assume %less_equal [ule(%less_equal, 2)] : i32
+  %less_equal_refined = scalar.assume %less_equal [le(%less_equal, 2), ule(%less_equal, 2)] : i32
   test.use %less_equal_anchor, %less_equal_refined : i32, i32
   %greater_anchor = scalar.constant 3 : i32
   %greater_refined = scalar.assume %greater [ugt(%greater, 3)] : i32
@@ -827,4 +944,93 @@ func.def @batched_exact_relations(%upper: index, %storage: view<[%upper]xi32>) -
   %loaded = view.load %storage_refined[%c0] : view<[%upper_refined$13]xi32> -> i32
   test.use %loaded : i32
   func.return %bounded, %bounded_again : index, index
+}
+
+// ====
+// RUN: pass canonicalize,vector-memory-footprint
+
+// A view between two refinements takes the first dimension at its definition
+// and the stronger dimension at its later use. Both mappings share the original
+// dimension identity until their target types have been computed.
+func.def @sequential_view_dimensions(%count: index, %storage: buffer) -> (i16, i16) {
+  %origin = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %first_view = buffer.view %storage[%origin] : buffer -> view<[%count]xi16>
+  %first_column = index.assume %c0 [ge(%c0, 0), lt(%c0, %count)] : index
+  %first = view.load %first_view[%first_column] : view<[%count]xi16> -> i16
+  %second_view = buffer.view %storage[%origin] : buffer -> view<[%count]xi16>
+  %second_column = index.assume %c1 [ge(%c1, 0), lt(%c1, %count)] : index
+  %second = view.load %second_view[%second_column] : view<[%count]xi16> -> i16
+  func.return %first, %second : i16, i16
+}
+
+// ----
+func.def @sequential_view_dimensions(%count: index, %storage: buffer) -> (i16, i16) {
+  %origin = index.constant 0 : offset
+  %first_view = buffer.view %storage[%origin] : buffer -> view<[%count]xi16>
+  %first_column = index.constant 0 : index
+  %count_refined$13 = index.assume %count [gt(%count, 0)] : index
+  %first_view_refined = view.refine %first_view : view<[%count]xi16> -> view<[%count_refined$13]xi16>
+  %first = view.load %first_view_refined[%first_column] : view<[%count_refined$13]xi16> -> i16
+  %second_view = buffer.view %storage[%origin] : buffer -> view<[%count_refined$13]xi16>
+  %second_column = index.constant 1 : index
+  %count_refined$14 = index.assume %count_refined$13 [gt(%count_refined$13, 1)] : index
+  %second_view_refined = view.refine %second_view : view<[%count_refined$13]xi16> -> view<[%count_refined$14]xi16>
+  %second = view.load %second_view_refined[%second_column] : view<[%count_refined$14]xi16> -> i16
+  func.return %first, %second : i16, i16
+}
+
+// ====
+// RUN: pass canonicalize,vector-memory-footprint
+
+// Definition and use refinements compose across every embedded dimension.
+func.def @sequential_view_axes(%rows: index, %columns: index, %storage: buffer) -> (i32, i32) {
+  %origin = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %first_row = index.assume %c0 [lt(%c0, %rows)] : index
+  %first_column = index.assume %c0 [lt(%c0, %columns)] : index
+  %view = buffer.view %storage[%origin] : buffer -> view<[%rows]x[%columns]xi32>
+  %first = view.load %view[%first_row, %first_column] : view<[%rows]x[%columns]xi32> -> i32
+  %second_row = index.assume %c1 [lt(%c1, %rows)] : index
+  %second_column = index.assume %c2 [lt(%c2, %columns)] : index
+  %second = view.load %view[%second_row, %second_column] : view<[%rows]x[%columns]xi32> -> i32
+  func.return %first, %second : i32, i32
+}
+
+// ----
+func.def @sequential_view_axes(%rows: index, %columns: index, %storage: buffer) -> (i32, i32) {
+  %origin = index.constant 0 : offset
+  %first_row = index.constant 0 : index
+  %rows_refined$16 = index.assume %rows [gt(%rows, 0)] : index
+  %first_column = index.constant 0 : index
+  %columns_refined$18 = index.assume %columns [gt(%columns, 0)] : index
+  %view = buffer.view %storage[%origin] : buffer -> view<[%rows_refined$16]x[%columns_refined$18]xi32>
+  %first = view.load %view[%first_row, %first_column] : view<[%rows_refined$16]x[%columns_refined$18]xi32> -> i32
+  %second_row = index.constant 1 : index
+  %rows_refined$17 = index.assume %rows_refined$16 [gt(%rows_refined$16, 1)] : index
+  %second_column = index.constant 2 : index
+  %columns_refined$19 = index.assume %columns_refined$18 [gt(%columns_refined$18, 2)] : index
+  %view_refined = view.refine %view : view<[%rows_refined$16]x[%columns_refined$18]xi32> -> view<[%rows_refined$17]x[%columns_refined$19]xi32>
+  %second = view.load %view_refined[%second_row, %second_column] : view<[%rows_refined$17]x[%columns_refined$19]xi32> -> i32
+  func.return %first, %second : i32, i32
+}
+
+// ====
+// RUN: pass canonicalize,vector-memory-footprint
+
+// A later refinement cannot strengthen a use preceding its assumption.
+func.def @earlier_view_use_keeps_its_bound(%count: index, %storage: buffer) -> (i16, i16) {
+  %origin = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %first_column = index.assume %c0 [lt(%c0, %count)] : index
+  %view = buffer.view %storage[%origin] : buffer -> view<[%count]xi16>
+  // ERROR@+1: SUBRANGE/024
+  %first = view.load %view[%c1] : view<[%count]xi16> -> i16
+  %second_column = index.assume %c1 [lt(%c1, %count)] : index
+  %second = view.load %view[%second_column] : view<[%count]xi16> -> i16
+  func.return %first, %second : i16, i16
 }

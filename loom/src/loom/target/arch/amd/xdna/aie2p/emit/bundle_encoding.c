@@ -6,7 +6,7 @@
 
 #include "loom/target/arch/amd/xdna/aie2p/emit/bundle_encoding.h"
 
-#include "loom/codegen/low/function_requirements.h"
+#include "loom/codegen/low/read_only_data.h"
 #include "loom/ops/low/ops.h"
 #include "loom/target/arch/amd/xdna/aie2p/descriptors/core_descriptors.h"
 
@@ -99,7 +99,7 @@ loom_aie2p_bundle_encoding_packet_move_group(
       &frame->allocation, packet->node_index);
 }
 
-void loom_aie2p_bundle_encoding_encode_packet(
+uint32_t loom_aie2p_bundle_encoding_encode_packet(
     const loom_low_emission_frame_t* frame,
     const loom_low_packet_view_t* packet,
     loom_aie2p_encoded_slot_t* out_encoded_slot,
@@ -145,9 +145,9 @@ void loom_aie2p_bundle_encoding_encode_packet(
     if (value.kind == LOOM_ATTR_SYMBOL) {
       IREE_ASSERT_EQ(packet->descriptor_ordinal,
                      AIE2P_CORE_DESCRIPTOR_REF_MATERIALIZE_LOCAL_ADDRESS_I32);
-      const uint32_t ordinal =
-          loom_low_function_requirements_read_only_data_ordinal(
-              &frame->schedule.requirements, loom_attr_as_symbol(value));
+      const uint32_t ordinal = loom_low_read_only_data_ordinal(
+          &frame->schedule.requirements.read_only_data,
+          loom_attr_as_symbol(value));
       IREE_ASSERT_NE(ordinal, UINT32_MAX);
       IREE_ASSERT_EQ(*out_read_only_data_ordinal, UINT32_MAX);
       *out_read_only_data_ordinal = ordinal;
@@ -157,9 +157,13 @@ void loom_aie2p_bundle_encoding_encode_packet(
     immediate_values[i] = value.i64;
   }
 
+  const uint32_t descriptor_ordinal =
+      loom_aie2p_descriptor_select_constant_encoding(packet->descriptor_ordinal,
+                                                     immediate_values);
   *out_encoded_slot =
-      loom_aie2p_descriptor_encode(descriptor_set, packet->descriptor_ordinal,
+      loom_aie2p_descriptor_encode(descriptor_set, descriptor_ordinal,
                                    operand_assignments, immediate_values);
+  return descriptor_ordinal;
 }
 
 void loom_aie2p_bundle_encoding_encode_storage_address(
@@ -218,8 +222,7 @@ loom_aie2p_bundle_encoding_encode_structural_descriptor(
                                       NULL);
 }
 
-loom_aie2p_encoded_slot_t
-loom_aie2p_bundle_encoding_encode_loop_setup_descriptor(
+loom_aie2p_encoded_slot_t loom_aie2p_bundle_encoding_encode_state_immediate(
     const loom_low_descriptor_set_t* descriptor_set,
     uint32_t descriptor_ordinal, int64_t immediate) {
   const loom_low_descriptor_t* descriptor =
@@ -228,7 +231,7 @@ loom_aie2p_bundle_encoding_encode_loop_setup_descriptor(
     const loom_low_operand_t* operand =
         loom_low_descriptor_operand(descriptor_set, descriptor, i);
     IREE_ASSERT(operand->source_value_index == LOOM_LOW_ID_NONE &&
-                "hardware-loop state must use an implicit physical register");
+                "state setup must use an implicit physical register");
   }
   IREE_ASSERT_EQ(
       loom_low_descriptor_layout(descriptor_set, descriptor)->immediate_count,

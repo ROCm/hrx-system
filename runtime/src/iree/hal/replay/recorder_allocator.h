@@ -18,8 +18,8 @@ extern "C" {
 
 iree_status_t iree_hal_replay_recorder_wrap_allocator(
     iree_hal_replay_recorder_t* recorder, iree_hal_replay_object_id_t device_id,
-    iree_hal_device_t* placement_device, iree_hal_allocator_t* base_allocator,
-    iree_allocator_t host_allocator, iree_hal_allocator_t** out_allocator);
+    iree_hal_allocator_t* base_allocator, iree_allocator_t host_allocator,
+    iree_hal_allocator_t** out_allocator);
 
 #ifdef __cplusplus
 }  // extern "C"

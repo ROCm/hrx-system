@@ -44,6 +44,12 @@ typedef struct loom_aie2p_join_plan_t {
   iree_host_size_t edge_count;
 } loom_aie2p_join_plan_t;
 
+// Estimates whether repeated expansion of this fixed lock program costs more
+// code than one leaf helper and its call boundaries. Ties remain inline. The
+// final packet plan, including allocation and alignment, owns exact byte size.
+bool loom_aie2p_join_program_prefers_sharing(
+    const loom_aie2p_join_program_t* program, iree_host_size_t use_count);
+
 // Selects a reusable gather/release tree over common core lock apertures.
 // participants and allocated_locks have one entry per column-major physical
 // tile. Only compute cores participate; other tiles may own reachable locks.

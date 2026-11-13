@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-"""Source-of-truth rows for ordinary SPIR-V scalar storage-buffer memory."""
+"""Source-of-truth rows for ordinary SPIR-V storage-buffer memory carriers."""
 
 from __future__ import annotations
 
@@ -156,6 +156,44 @@ RAW_STORAGE_BUFFER_BYTE = StorageBufferScalar(
 
 SOURCE_STORAGE_BUFFER_SCALARS = tuple(
     scalar for scalar in STORAGE_BUFFER_SCALARS if scalar.source_rule_enabled
+)
+
+
+@dataclass(frozen=True, slots=True)
+class StorageBufferVector:
+    """Integer memory packet with alignment determined by its component."""
+
+    # Scalar component type, including its storage and arithmetic capabilities.
+    component: StorageBufferScalar
+    # Number of components in one native SPIR-V vector transfer.
+    lane_count: int
+
+    @property
+    def suffix(self) -> str:
+        return f"v{self.lane_count}{self.component.suffix}"
+
+    @property
+    def scalar_enum(self) -> str:
+        return self.component.scalar_enum
+
+    @property
+    def byte_width(self) -> int:
+        return self.component.byte_width * self.lane_count
+
+    @property
+    def feature_bits(self) -> int:
+        return self.component.feature_bits
+
+
+# Integer packets covering a 16-, 32-, or 64-bit payload with narrower
+# components. A physical pointer's alignment follows its largest scalar
+# component, so these carriers preserve exact under-aligned word accesses.
+PACKED_STORAGE_BUFFER_VECTORS = tuple(
+    StorageBufferVector(scalar, byte_width // scalar.byte_width)
+    for scalar in SOURCE_STORAGE_BUFFER_SCALARS
+    if scalar.source_type in ("i8", "i16", "i32")
+    for byte_width in (2, 4, 8)
+    if byte_width % scalar.byte_width == 0 and 2 <= byte_width // scalar.byte_width <= 4
 )
 
 

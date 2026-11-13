@@ -135,8 +135,8 @@ typedef struct loom_amdgpu_hsaco_input_t {
 // All payload storage referenced by the plan is allocated from |arena|. The
 // input and arena must remain live until the plan has been written.
 iree_status_t loom_amdgpu_hsaco_plan_build(
-    const loom_amdgpu_hsaco_input_t* input, loom_amdgpu_hsaco_plan_t* out_plan,
-    iree_arena_allocator_t* arena);
+    const loom_amdgpu_hsaco_input_t* input, iree_arena_allocator_t* arena,
+    loom_amdgpu_hsaco_plan_t* out_plan);
 
 #ifdef __cplusplus
 }  // extern "C"

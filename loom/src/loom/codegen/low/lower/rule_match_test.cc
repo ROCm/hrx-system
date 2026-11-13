@@ -26,6 +26,50 @@
 namespace loom {
 namespace {
 
+constexpr uint8_t kTestEmitRefDescriptorBitCount = 8;
+
+loom_low_lower_emit_ref_storage_t MakeTestEmitRef(
+    loom_low_lower_descriptor_ref_t descriptor_ref, uint16_t emit_index) {
+  const uint32_t encoded_descriptor_ref =
+      descriptor_ref == LOOM_LOW_LOWER_DESCRIPTOR_REF_NONE
+          ? 0u
+          : (uint32_t)descriptor_ref + 1u;
+  const uint32_t packed_ref =
+      encoded_descriptor_ref |
+      ((uint32_t)emit_index << kTestEmitRefDescriptorBitCount);
+  return {
+      .bytes =
+          {
+              (uint8_t)packed_ref,
+              (uint8_t)(packed_ref >> 8),
+              (uint8_t)(packed_ref >> 16),
+          },
+  };
+}
+
+TEST(LowLowerRuleStorageTest, EmitReferenceDecodesPackedFieldBounds) {
+  const loom_low_lower_emit_ref_storage_t max_ref = {
+      .bytes = {0xff, 0xff, 0xff},
+  };
+  loom_low_lower_rule_set_t rule_set = {
+      .emit_refs = &max_ref,
+      .emit_ref_count = 1,
+      .emit_ref_descriptor_bit_count = 12,
+  };
+  loom_low_lower_emit_ref_t decoded =
+      loom_low_lower_rule_set_emit_ref_at(&rule_set, 0);
+  EXPECT_EQ(decoded.descriptor_ref, 4094);
+  EXPECT_EQ(decoded.emit_index, 4095);
+
+  const loom_low_lower_emit_ref_storage_t none_ref = {
+      .bytes = {0x00, 0xf0, 0xff},
+  };
+  rule_set.emit_refs = &none_ref;
+  decoded = loom_low_lower_rule_set_emit_ref_at(&rule_set, 0);
+  EXPECT_EQ(decoded.descriptor_ref, LOOM_LOW_LOWER_DESCRIPTOR_REF_NONE);
+  EXPECT_EQ(decoded.emit_index, 4095);
+}
+
 iree_status_t ResolveDescriptorFromArray(
     void* user_data, const loom_low_lower_rule_match_context_t* context,
     const loom_low_lower_rule_set_t* rule_set,
@@ -456,10 +500,8 @@ class LowLowerRuleMatchTest : public ::testing::Test {
       source_nodes[0].guard_count = 1;
     }
     loom_low_lower_emit_t emit = {};
-    const loom_low_lower_emit_ref_t emit_ref = {
-        .descriptor_ref = LOOM_LOW_LOWER_DESCRIPTOR_REF_NONE,
-        .emit_index = 0,
-    };
+    const loom_low_lower_emit_ref_storage_t emit_ref =
+        MakeTestEmitRef(LOOM_LOW_LOWER_DESCRIPTOR_REF_NONE, /*emit_index=*/0);
     const bool has_related_user_chain =
         iree_any_bit_set(flags, kSourceGraphSelectionRelatedUserChain);
     loom_low_lower_rule_t rule = {
@@ -511,6 +553,7 @@ class LowLowerRuleMatchTest : public ::testing::Test {
     if (rule.emit_count != 0) {
       rule_set.emit_refs = &emit_ref;
       rule_set.emit_ref_count = 1;
+      rule_set.emit_ref_descriptor_bit_count = kTestEmitRefDescriptorBitCount;
       rule_set.emits = &emit;
       rule_set.emit_count = 1;
     }
@@ -683,6 +726,70 @@ TEST_F(LowLowerRuleMatchTest, SelectsFirstMatchAndResetsReusedSelection) {
   EXPECT_EQ(selection.source_node_count, 0u);
   EXPECT_FALSE(selection.failure.has_source_op_span);
   EXPECT_EQ(selection.failure.diagnostic_index, LOOM_LOW_LOWER_DIAGNOSTIC_NONE);
+}
+
+TEST_F(LowLowerRuleMatchTest, DecodesCompactGuardProgramsWithScaledOffsets) {
+  loom_low_lower_guard_t guards[257] = {};
+  guards[256].kind = LOOM_LOW_LOWER_GUARD_ATTR_I64_RANGE;
+  guards[256].diagnostic_index = LOOM_LOW_LOWER_DIAGNOSTIC_NONE;
+  guards[256].payload_ordinal = 1;
+  guards[256].selector.attribute.attr_index = 0;
+  guards[1] = guards[256];
+  guards[0] = guards[256];
+  guards[0].payload_ordinal = 2;
+  const loom_low_lower_guard_payload_t guard_payloads[] = {
+      {.i64_range = {.minimum = 4, .maximum = 8}},
+      {.i64_range = {.minimum = 0, .maximum = 3}},
+  };
+  const loom_low_lower_guard_ref_t compact_guard_refs[] = {
+      0x01, LOOM_LOW_LOWER_GUARD_REF_ESCAPE, 0x00, 0x01};
+  const loom_low_lower_guard_ref_t halfword_guard_refs[] = {
+      0x00, 0x00, 0x01, LOOM_LOW_LOWER_GUARD_REF_ESCAPE, 0x00, 0x01};
+  const loom_low_lower_guard_ref_t word_guard_refs[] = {
+      0x00, 0x00, 0x00, 0x00, 0x01, LOOM_LOW_LOWER_GUARD_REF_ESCAPE,
+      0x00, 0x01};
+  loom_low_lower_rule_t rule = {.guard_count = 2};
+  const loom_low_lower_rule_span_t span = {
+      .source_op_kind = LOOM_OP_INDEX_CONSTANT,
+      .rule_start = 0,
+      .rule_count = 1,
+  };
+  loom_low_lower_rule_set_t rule_set = {
+      .spans = &span,
+      .span_count = 1,
+      .rules = &rule,
+      .rule_count = 1,
+      .guard_payloads = guard_payloads,
+      .guard_payload_count = IREE_ARRAYSIZE(guard_payloads),
+      .guards = guards,
+      .guard_count = IREE_ARRAYSIZE(guards),
+      .guard_refs = compact_guard_refs,
+      .guard_ref_count = IREE_ARRAYSIZE(compact_guard_refs),
+  };
+  const loom_low_lower_rule_match_context_t match_context = {
+      .module = module_,
+  };
+  const loom_op_t* source_op = BuildConstant(5);
+
+  loom_low_lower_rule_selection_t selection = {};
+  IREE_ASSERT_OK(loom_low_lower_rule_set_select_with_match_context(
+      &match_context, &rule_set, source_op, &selection));
+  EXPECT_EQ(selection.rule, &rule);
+
+  rule.guard_start = 1;
+  rule_set.guard_refs = halfword_guard_refs;
+  rule_set.guard_ref_count = IREE_ARRAYSIZE(halfword_guard_refs);
+  rule_set.guard_ref_offset_shift = 1;
+  IREE_ASSERT_OK(loom_low_lower_rule_set_select_with_match_context(
+      &match_context, &rule_set, source_op, &selection));
+  EXPECT_EQ(selection.rule, &rule);
+
+  rule_set.guard_refs = word_guard_refs;
+  rule_set.guard_ref_count = IREE_ARRAYSIZE(word_guard_refs);
+  rule_set.guard_ref_offset_shift = 2;
+  IREE_ASSERT_OK(loom_low_lower_rule_set_select_with_match_context(
+      &match_context, &rule_set, source_op, &selection));
+  EXPECT_EQ(selection.rule, &rule);
 }
 
 TEST_F(LowLowerRuleMatchTest, MatchesExactScalarOperandSegments) {
@@ -1006,6 +1113,8 @@ TEST_F(LowLowerRuleMatchTest, SeparatesExactFiniteValuesFromNanExclusion) {
   guards[1].kind = LOOM_LOW_LOWER_GUARD_VALUE_NOT_NAN;
   guards[1].diagnostic_index = LOOM_LOW_LOWER_DIAGNOSTIC_NONE;
   const loom_low_lower_guard_ref_t guard_refs[] = {0, 1};
+  loom_low_lower_guard_payload_t payload = {};
+  payload.u64 = LOOM_SCALAR_TYPE_BF16;
   const loom_low_lower_value_ref_t value_refs[] = {
       {.kind = LOOM_LOW_LOWER_VALUE_REF_OPERAND},
       {.kind = LOOM_LOW_LOWER_VALUE_REF_RESULT},
@@ -1023,6 +1132,8 @@ TEST_F(LowLowerRuleMatchTest, SeparatesExactFiniteValuesFromNanExclusion) {
       .rule_count = 1,
       .value_refs = value_refs,
       .value_ref_count = IREE_ARRAYSIZE(value_refs),
+      .guard_payloads = &payload,
+      .guard_payload_count = 1,
       .guards = guards,
       .guard_count = IREE_ARRAYSIZE(guards),
       .guard_refs = guard_refs,
@@ -1072,14 +1183,21 @@ TEST_F(LowLowerRuleMatchTest, SeparatesExactFiniteValuesFromNanExclusion) {
         .module = module_,
         .fact_table = &facts,
     };
-    for (bool require_not_nan : {false, true}) {
-      rule.guard_count = require_not_nan ? 2 : 1;
-      loom_low_lower_rule_selection_t selection = {};
-      IREE_ASSERT_OK(loom_low_lower_rule_set_select_with_match_context(
-          &match_context, &rule_set, source_op, &selection));
-      EXPECT_EQ(selection.rule != nullptr,
-                test_case.exact_finite_values &&
-                    (!require_not_nan || test_case.not_nan));
+    for (bool literal_type : {false, true}) {
+      guards[0].kind =
+          literal_type
+              ? LOOM_LOW_LOWER_GUARD_VALUE_EXACT_FLOAT_TYPE
+              : LOOM_LOW_LOWER_GUARD_VALUE_FLOAT_EXACTLY_REPRESENTABLE_AS;
+      guards[0].payload_ordinal = literal_type ? 1 : 0;
+      for (bool require_not_nan : {false, true}) {
+        rule.guard_count = require_not_nan ? 2 : 1;
+        loom_low_lower_rule_selection_t selection = {};
+        IREE_ASSERT_OK(loom_low_lower_rule_set_select_with_match_context(
+            &match_context, &rule_set, source_op, &selection));
+        EXPECT_EQ(selection.rule != nullptr,
+                  test_case.exact_finite_values &&
+                      (!require_not_nan || test_case.not_nan));
+      }
     }
     match_context.fact_table = nullptr;
     loom_low_lower_rule_selection_t selection = {};
@@ -1300,9 +1418,9 @@ TEST_F(LowLowerRuleMatchTest,
   const loom_low_lower_emit_t emit = {
       .kind = LOOM_LOW_LOWER_EMIT_DESCRIPTOR_OP,
   };
-  const loom_low_lower_emit_ref_t emit_refs[] = {
-      {.descriptor_ref = 0, .emit_index = 0},
-      {.descriptor_ref = 1, .emit_index = 0},
+  const loom_low_lower_emit_ref_storage_t emit_refs[] = {
+      MakeTestEmitRef(/*descriptor_ref=*/0, /*emit_index=*/0),
+      MakeTestEmitRef(/*descriptor_ref=*/1, /*emit_index=*/0),
   };
   loom_low_lower_rule_t rules[2] = {};
   rules[0].emit_count = 1;
@@ -1326,6 +1444,7 @@ TEST_F(LowLowerRuleMatchTest,
       .descriptor_ref_count = IREE_ARRAYSIZE(descriptors),
       .emit_refs = emit_refs,
       .emit_ref_count = IREE_ARRAYSIZE(emit_refs),
+      .emit_ref_descriptor_bit_count = kTestEmitRefDescriptorBitCount,
       .emits = &emit,
       .emit_count = 1,
   };

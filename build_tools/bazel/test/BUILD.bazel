@@ -21,6 +21,7 @@ load(":cc_rules_test.bzl", "cc_rules_test_suite", "execution_platform_runner")
 load(":cc_shared_library_test.bzl", "cc_shared_library_test_suite")
 load(":cc_static_library_test.bzl", "cc_static_library_test_suite")
 load(":compile_commands_rules_test.bzl", "compile_commands_rules_test_suite")
+load(":debug_info_rules_test.bzl", "debug_info_test_suite")
 load(
     ":dynamic_library_bundle_rules_test.bzl",
     "dynamic_library_bundle_rules_test_suite",
@@ -53,6 +54,11 @@ constraint_value(
 constraint_value(
     name = "test_execution_incompatible",
     constraint_setting = ":test_execution_requirement",
+)
+
+config_setting(
+    name = "on_test_execution_platform",
+    constraint_values = [":test_execution_required"],
 )
 
 platform(
@@ -172,6 +178,8 @@ cc_fuzz_rules_test_suite(name = "cc_fuzz_tests")
 cc_rules_test_suite(name = "cc_tests")
 
 cc_link_test_suite(name = "cc_link_tests")
+
+debug_info_test_suite(name = "debug_info_tests")
 
 cc_static_library_test_suite(name = "cc_static_library_tests")
 

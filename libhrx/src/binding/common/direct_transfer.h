@@ -55,6 +55,17 @@ iree_status_t iree_hal_streaming_direct_transfer_and_wait(
     iree_hal_streaming_stream_t* stream, iree_host_size_t operation_count,
     const iree_hal_transfer_operation_t* operations);
 
+// Performs a blocking transfer on |context|'s device in |stream| order.
+// Same-device contexts use the stream's native submission path. A different
+// device cannot use the stream's queue or execution lease: the caller joins
+// preceding stream work, transfers on the owning context, and publishes the
+// result to a reserved stream point. No stream mutex is held while waiting.
+// Descriptors and host bytes remain borrowed through return.
+iree_status_t iree_hal_streaming_direct_transfer_on_context_and_wait(
+    iree_hal_streaming_context_t* context, iree_hal_streaming_stream_t* stream,
+    iree_host_size_t operation_count,
+    const iree_hal_transfer_operation_t* operations);
+
 // Performs a blocking device-to-device transfer using the context's small/bulk
 // queue selection. The caller has established any preceding dependencies.
 iree_status_t iree_hal_streaming_direct_transfer_d2d(

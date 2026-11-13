@@ -1,0 +1,306 @@
+// RUN: roundtrip
+#include <loomcxx/atomic.h>
+using loom::atomic::kind;
+using loom::atomic::ordering;
+using loom::atomic::scope;
+
+// Interior pointers retain their allocation and byte origin through helpers.
+static unsigned ticket(volatile unsigned* counter) {
+  return loom::view::atomic::rmw<kind::addi, ordering::relaxed, scope::device>(
+      1u, counter);
+}
+unsigned claim(unsigned* counter) { return ticket(counter + 1); }
+
+void accumulate(long long value, long long* destination) {
+  loom::view::atomic::reduce<kind::maxsi, ordering::release, scope::workgroup>(
+      value, destination);
+}
+
+unsigned long long replace(unsigned long long expected,
+                           unsigned long long replacement,
+                           unsigned long long* destination) {
+  return loom::view::atomic::cmpxchg<ordering::acq_rel, ordering::acquire,
+                                    scope::system>(
+      expected, replacement, destination);
+}
+
+// ----
+func.def public @claim(%counter: buffer, %counter_byte_offset: offset) -> (i32) {
+  %3 = scalar.constant 1 : i32
+  %4 = scalar.extsi %3 : i32 to i64
+  %5 = scalar.constant 4 : i64
+  %6 = scalar.muli %4, %5 : i64
+  %7 = index.cast %counter_byte_offset : offset to i64
+  %8 = scalar.addi %7, %6 : i64
+  %9 = scalar.assume %8 [range(%8, 0, 9223372036854775807)] : i64
+  %10 = index.cast %9 : i64 to offset
+  %11 = func.call @ticket(%counter, %10) : (buffer, offset) -> (i32)
+  func.return %11 : i32
+}
+
+func.def public @accumulate(%value: i64, %destination: buffer, %destination_byte_offset: offset) {
+  %15 = buffer.view %destination[%destination_byte_offset] : buffer -> view<1xi64>
+  view.atomic.reduce<maxsi, root_in_bounds> %value, %15[0] {ordering = release, scope = workgroup} : i64, view<1xi64>
+  func.return
+}
+
+func.def public @replace(%expected: i64, %replacement: i64, %destination: buffer, %destination_byte_offset: offset) -> (i64) {
+  %21 = buffer.view %destination[%destination_byte_offset] : buffer -> view<1xi64>
+  %22 = view.atomic.cmpxchg<root_in_bounds> %expected, %replacement, %21[0] {failure_ordering = acquire, scope = system, success_ordering = acq_rel} : i64, view<1xi64> -> i64
+  func.return %22 : i64
+}
+
+func.def @ticket(%counter: buffer, %counter_byte_offset: offset) -> (i32) {
+  %26 = scalar.constant 1 : i32
+  %27 = buffer.view %counter[%counter_byte_offset] : buffer -> view<1xi32>
+  %28 = view.atomic.rmw<addi, root_in_bounds> %26, %27[0] {ordering = relaxed, scope = device} : i32, view<1xi32> -> i32
+  func.return %28 : i32
+}
+
+// ====
+#include <loomcxx/atomic.h>
+using loom::atomic::kind;
+using loom::atomic::ordering;
+using loom::atomic::scope;
+
+// Source widths are retained; the selected target owns native width support.
+unsigned char add_byte(unsigned char value, unsigned char* destination) {
+  return loom::view::atomic::rmw<kind::addi, ordering::relaxed, scope::device>(
+      value, destination);
+}
+
+unsigned short replace_half(unsigned short expected,
+                            unsigned short replacement,
+                            volatile unsigned short* destination) {
+  return loom::view::atomic::cmpxchg<ordering::acq_rel, ordering::acquire,
+                                    scope::device>(
+      expected, replacement, destination);
+}
+
+// ----
+func.def public @add_byte(%value: i8, %destination: buffer, %destination_byte_offset: offset) -> (i8) {
+  %4 = buffer.view %destination[%destination_byte_offset] : buffer -> view<1xi8>
+  %5 = view.atomic.rmw<addi, root_in_bounds> %value, %4[0] {ordering = relaxed, scope = device} : i8, view<1xi8> -> i8
+  func.return %5 : i8
+}
+
+func.def public @replace_half(%expected: i16, %replacement: i16, %destination: buffer, %destination_byte_offset: offset) -> (i16) {
+  %11 = buffer.view %destination[%destination_byte_offset] : buffer -> view<1xi16>
+  %12 = view.atomic.cmpxchg<root_in_bounds> %expected, %replacement, %11[0] {failure_ordering = acquire, scope = device, success_ordering = acq_rel} : i16, view<1xi16> -> i16
+  func.return %12 : i16
+}
+
+// ====
+#include <loomcxx/atomic.h>
+using loom::atomic::ordering;
+using loom::atomic::scope;
+
+struct Publication {
+  // Unobserved leading field establishes an interior pointer origin.
+  unsigned padding;
+  // Publication counter observed through const volatile storage.
+  unsigned generation;
+};
+
+// Const affects mutation permission, not the observability of an atomic load.
+unsigned observe(const volatile Publication* source) {
+  return loom::view::atomic::load<ordering::acquire, scope::system>(
+      &source->generation);
+}
+
+// Fences are ordinary function operations, without a kernel context or pointer.
+void publish(unsigned value, volatile unsigned* destination) {
+  loom::buffer::fence<ordering::release, scope::system>();
+  loom::view::atomic::store<ordering::relaxed, scope::system>(value, destination);
+  (void)loom::view::atomic::load<ordering::seq_cst, scope::system>(destination);
+}
+
+// ----
+func.def public @observe(%source: buffer, %source_byte_offset: offset) -> (i32) {
+  %3 = index.constant 4 : offset
+  %4 = index.add %source_byte_offset, %3 : offset
+  %5 = buffer.view %source[%4] : buffer -> view<1xi32>
+  %6 = view.atomic.load<root_in_bounds> %5[0] {ordering = acquire, scope = system} : view<1xi32> -> i32
+  func.return %6 : i32
+}
+
+func.def public @publish(%value: i32, %destination: buffer, %destination_byte_offset: offset) {
+  buffer.fence scope(system) ordering(release)
+  %10 = buffer.view %destination[%destination_byte_offset] : buffer -> view<1xi32>
+  view.atomic.store<root_in_bounds> %value, %10[0] {ordering = relaxed, scope = system} : i32, view<1xi32>
+  %11 = buffer.view %destination[%destination_byte_offset] : buffer -> view<1xi32>
+  %12 = view.atomic.load<root_in_bounds> %11[0] {ordering = seq_cst, scope = system} : view<1xi32> -> i32
+  func.return
+}
+
+// ====
+// GCC order constants differ from High; consume is an acquire observation.
+unsigned observe_builtin(const volatile unsigned* source) {
+  return __atomic_load_n(source + 1, __ATOMIC_CONSUME);
+}
+void publish_builtin(unsigned value, volatile unsigned* destination) {
+  __atomic_thread_fence(__ATOMIC_RELEASE);
+  __atomic_store_n(destination + 1, value, __ATOMIC_RELAXED);
+}
+void fences_builtin() {
+  __atomic_thread_fence(__ATOMIC_RELAXED);
+  __atomic_thread_fence(__ATOMIC_CONSUME);
+  __atomic_thread_fence(__ATOMIC_ACQUIRE);
+  __atomic_thread_fence(__ATOMIC_ACQ_REL);
+  __atomic_thread_fence(__ATOMIC_SEQ_CST);
+}
+// ----
+func.def public @observe_builtin(%source: buffer, %source_byte_offset: offset) -> (i32) {
+  %3 = scalar.constant 1 : i32
+  %4 = scalar.extsi %3 : i32 to i64
+  %5 = scalar.constant 4 : i64
+  %6 = scalar.muli %4, %5 : i64
+  %7 = index.cast %source_byte_offset : offset to i64
+  %8 = scalar.addi %7, %6 : i64
+  %9 = scalar.assume %8 [range(%8, 0, 9223372036854775807)] : i64
+  %10 = index.cast %9 : i64 to offset
+  %11 = buffer.view %source[%10] : buffer -> view<1xi32>
+  %12 = view.atomic.load<root_in_bounds> %11[0] {ordering = acquire, scope = system} : view<1xi32> -> i32
+  func.return %12 : i32
+}
+
+func.def public @publish_builtin(%value: i32, %destination: buffer, %destination_byte_offset: offset) {
+  buffer.fence scope(system) ordering(release)
+  %16 = scalar.constant 1 : i32
+  %17 = scalar.extsi %16 : i32 to i64
+  %18 = scalar.constant 4 : i64
+  %19 = scalar.muli %17, %18 : i64
+  %20 = index.cast %destination_byte_offset : offset to i64
+  %21 = scalar.addi %20, %19 : i64
+  %22 = scalar.assume %21 [range(%21, 0, 9223372036854775807)] : i64
+  %23 = index.cast %22 : i64 to offset
+  %24 = buffer.view %destination[%23] : buffer -> view<1xi32>
+  view.atomic.store<root_in_bounds> %value, %24[0] {ordering = relaxed, scope = system} : i32, view<1xi32>
+  func.return
+}
+
+func.def public @fences_builtin() {
+  buffer.fence scope(system) ordering(acquire)
+  buffer.fence scope(system) ordering(acquire)
+  buffer.fence scope(system) ordering(acq_rel)
+  buffer.fence scope(system) ordering(seq_cst)
+  func.return
+}
+
+// ====
+// INPUT: cxx std=c23
+// Builtins need no facade header or C++ template support.
+unsigned advance(unsigned* destination) {
+  unsigned value = __atomic_load_n(destination, __ATOMIC_SEQ_CST) + 1u;
+  __atomic_store_n(destination, value, __ATOMIC_RELEASE);
+  return value;
+}
+// ----
+func.def public source_signature(#func.abi.c.signature<arguments = [0], results = [1], types = [#func.abi.c.type<pointer, byte_length = 8, byte_alignment = 8, component_count = 2>, #func.abi.c.type<unsigned_integer, byte_length = 4, byte_alignment = 4, component_count = 1, bitwidth = 32>]>) @advance(%destination: buffer, %destination_byte_offset: offset) -> (i32) {
+  %3 = buffer.view %destination[%destination_byte_offset] : buffer -> view<1xi32>
+  %4 = view.atomic.load<root_in_bounds> %3[0] {ordering = seq_cst, scope = system} : view<1xi32> -> i32
+  %5 = scalar.constant 1 : i32
+  %value = scalar.addi %4, %5 : i32
+  %7 = buffer.view %destination[%destination_byte_offset] : buffer -> view<1xi32>
+  view.atomic.store<root_in_bounds> %value, %7[0] {ordering = release, scope = system} : i32, view<1xi32>
+  func.return %value : i32
+}
+
+// ====
+#include <loomcxx/atomic.h>
+using loom::atomic::kind;
+using loom::atomic::ordering;
+using loom::atomic::scope;
+using size_t = __SIZE_TYPE__;
+using ptrdiff_t = __PTRDIFF_TYPE__;
+
+// ABI-sized C++ object types remain fixed-width atomic payloads after import;
+// they do not become Loom address-domain index or offset values.
+size_t replace_size(size_t expected, size_t replacement, size_t* destination) {
+  return loom::view::atomic::cmpxchg<ordering::acq_rel, ordering::acquire,
+                                    scope::system>(
+      expected, replacement, destination);
+}
+
+ptrdiff_t add_difference(ptrdiff_t value, ptrdiff_t* destination) {
+  return loom::view::atomic::rmw<kind::addi, ordering::relaxed, scope::device>(
+      value, destination);
+}
+
+// ----
+func.def public @replace_size(%expected: i64, %replacement: i64, %destination: buffer, %destination_byte_offset: offset) -> (i64) {
+  %5 = buffer.view %destination[%destination_byte_offset] : buffer -> view<1xi64>
+  %6 = view.atomic.cmpxchg<root_in_bounds> %expected, %replacement, %5[0] {failure_ordering = acquire, scope = system, success_ordering = acq_rel} : i64, view<1xi64> -> i64
+  func.return %6 : i64
+}
+
+func.def public @add_difference(%value: i64, %destination: buffer, %destination_byte_offset: offset) -> (i64) {
+  %11 = buffer.view %destination[%destination_byte_offset] : buffer -> view<1xi64>
+  %12 = view.atomic.rmw<addi, root_in_bounds> %value, %11[0] {ordering = relaxed, scope = device} : i64, view<1xi64> -> i64
+  func.return %12 : i64
+}
+
+// ====
+#include <loomcxx/atomic.h>
+using loom::atomic::kind;
+using loom::atomic::ordering;
+using loom::atomic::scope;
+
+// Typed view atomics retain their full-rank logical coordinates rather than
+// projecting each access through an interior pointer.
+void update_view(unsigned* storage, unsigned row, loom::type::index column) {
+  auto values = loom::buffer::view<4, 8>(storage, {}, loom::encoding::layout::dense<2>());
+  unsigned observed = loom::view::atomic::load<ordering::acquire, scope::device>(values, row, column);
+  loom::view::atomic::store<ordering::release, scope::device>(observed, values, row, column);
+  unsigned old = loom::view::atomic::rmw<kind::addi, ordering::acq_rel, scope::device>(1u, values, row, column);
+  loom::view::atomic::reduce<kind::maxui, ordering::relaxed, scope::device>(old, values, row, column);
+  (void)loom::view::atomic::cmpxchg<ordering::acq_rel, ordering::acquire, scope::device>(observed, old, values, row, column);
+}
+
+unsigned observe_const_view(const unsigned* storage, loom::type::index index) {
+  auto values = loom::buffer::view<16>(storage, {}, loom::encoding::layout::dense<1>());
+  return loom::view::atomic::load<ordering::seq_cst, scope::system>(values, index);
+}
+
+unsigned update_volatile_view(volatile unsigned* storage, loom::type::index index) {
+  auto values = loom::buffer::view<16>(storage, {}, loom::encoding::layout::dense<1>());
+  return loom::view::atomic::rmw<kind::xchgi, ordering::relaxed, scope::system>(1u, values, index);
+}
+
+// ----
+func.def public @update_view(%storage: buffer, %storage_byte_offset: offset, %row: i32, %column: index) {
+  %values_layout = encoding.layout.dense : encoding<layout>
+  %values = buffer.view %storage[%storage_byte_offset] : buffer -> view<4x8xi32, %values_layout>
+  %6 = scalar.extui %row : i32 to i64
+  %7 = index.cast %6 : i64 to index
+  %observed = view.atomic.load %values[%7, %column] {ordering = acquire, scope = device} : view<4x8xi32, %values_layout> -> i32
+  %9 = scalar.extui %row : i32 to i64
+  %10 = index.cast %9 : i64 to index
+  view.atomic.store %observed, %values[%10, %column] {ordering = release, scope = device} : i32, view<4x8xi32, %values_layout>
+  %11 = scalar.constant 1 : i32
+  %12 = scalar.extui %row : i32 to i64
+  %13 = index.cast %12 : i64 to index
+  %old = view.atomic.rmw<addi> %11, %values[%13, %column] {ordering = acq_rel, scope = device} : i32, view<4x8xi32, %values_layout> -> i32
+  %15 = scalar.extui %row : i32 to i64
+  %16 = index.cast %15 : i64 to index
+  view.atomic.reduce<maxui> %old, %values[%16, %column] {ordering = relaxed, scope = device} : i32, view<4x8xi32, %values_layout>
+  %17 = scalar.extui %row : i32 to i64
+  %18 = index.cast %17 : i64 to index
+  %19 = view.atomic.cmpxchg %observed, %old, %values[%18, %column] {failure_ordering = acquire, scope = device, success_ordering = acq_rel} : i32, view<4x8xi32, %values_layout> -> i32
+  func.return
+}
+
+func.def public @observe_const_view(%storage: buffer, %storage_byte_offset: offset, %index: index) -> (i32) {
+  %values_layout = encoding.layout.dense : encoding<layout>
+  %values = buffer.view %storage[%storage_byte_offset] : buffer -> view<16xi32, %values_layout>
+  %26 = view.atomic.load %values[%index] {ordering = seq_cst, scope = system} : view<16xi32, %values_layout> -> i32
+  func.return %26 : i32
+}
+
+func.def public @update_volatile_view(%storage: buffer, %storage_byte_offset: offset, %index: index) -> (i32) {
+  %values_layout = encoding.layout.dense : encoding<layout>
+  %values = buffer.view %storage[%storage_byte_offset] : buffer -> view<16xi32, %values_layout>
+  %33 = scalar.constant 1 : i32
+  %34 = view.atomic.rmw<xchgi> %33, %values[%index] {ordering = relaxed, scope = system} : i32, view<16xi32, %values_layout> -> i32
+  func.return %34 : i32
+}

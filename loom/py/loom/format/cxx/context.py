@@ -13,10 +13,11 @@ import math
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from loom.dsl import Op, TargetLikeInterface
 from loom.fields import compute_layout, resolve_fields
+from loom.format.cxx.buffer_access import BufferAccessPlan, BufferProjection
 from loom.format.cxx.errors import CxxRenderError
 from loom.format.cxx.naming import clean_identifier
 from loom.format.cxx.printer import CxxWriter
@@ -40,7 +41,11 @@ from loom.ir import (
     ShapedType,
     SignedEnumSetAttr,
     TypeKind,
+    Utf8Attr,
 )
+
+if TYPE_CHECKING:
+    from loom.format.cxx.commands import SourceParameter
 
 _OPS: tuple[Op, ...] = source_ops()
 _OP_BY_NAME = {operation.name: operation for operation in _OPS}
@@ -127,6 +132,30 @@ def _strip_outer_parentheses(expression: str) -> str:
     return expression[1:-1] if depth == 0 else expression
 
 
+def cxx_string_literal(contents: bytes | Utf8Attr) -> str:
+    """Quotes exact payload code units without greedy hexadecimal escapes."""
+
+    text = (
+        contents.value if isinstance(contents, Utf8Attr) else contents.decode("latin1")
+    )
+    prefix = "u8" if isinstance(contents, Utf8Attr) else ""
+    escaped: list[str] = []
+    for character in text:
+        if character in {'"', "\\"}:
+            escaped.append("\\" + character)
+        elif character in {"\n", "\r", "\t"}:
+            escaped.append({"\n": "\\n", "\r": "\\r", "\t": "\\t"}[character])
+        elif (
+            ord(character) < 32
+            or ord(character) == 127
+            or (not prefix and ord(character) >= 128)
+        ):
+            escaped.append(f"\\{ord(character):03o}")
+        else:
+            escaped.append(character)
+    return prefix + '"' + "".join(escaped) + '"'
+
+
 @dataclass(slots=True)
 class BufferInfo:
     root: int
@@ -156,11 +185,6 @@ class CxxRenderContext:
             list
         )
         self.parent_operations: dict[int, Operation] = {}
-        # Dynamic view type identities become constructor arguments in C++.
-        # Record those uses because they are not ordinary operation operands.
-        self.view_construction_type_users: dict[int, list[Operation]] = (
-            collections.defaultdict(list)
-        )
         self.assumption_inputs: set[int] = set()
         for operation, block, parent in _walk_operations_with_blocks(self.module.body):
             if parent is not None:
@@ -173,26 +197,6 @@ class CxxRenderContext:
             for result in operation.results:
                 self.definitions[result] = operation
                 self.definition_blocks[result] = block
-                result_type = self.module.values[result].type
-                if not isinstance(result_type, ShapedType) or operation.name not in {
-                    "buffer.view",
-                    "view.subview",
-                }:
-                    continue
-                for dimension in result_type.dims:
-                    if (
-                        isinstance(dimension, DynamicDim)
-                        and dimension.value_id is not None
-                    ):
-                        self.view_construction_type_users[dimension.value_id].append(
-                            operation
-                        )
-                if operation.name == "buffer.view" and isinstance(
-                    result_type.encoding, DynamicEncoding
-                ):
-                    self.view_construction_type_users[
-                        result_type.encoding.value_id
-                    ].append(operation)
             if operation.name in {"scalar.assume", "index.assume"}:
                 self.assumption_inputs.update(operation.operands)
         self.operation_scopes, self.value_scopes = self._collect_value_scopes()
@@ -204,9 +208,14 @@ class CxxRenderContext:
         self.record_types: dict[tuple[str, tuple[tuple[str, str], ...]], str] = {}
         self.uses_scalar_functions = False
         self.uses_numeric_conversion = False
+        self.uses_predicate_functions = False
         self.signed_values = self._analyze_signed_values()
         self.types = CxxTypes(module, self.signed_values)
         self.view_access: ViewAccessPlan | None = None
+        self.buffer_access: BufferAccessPlan | None = None
+        self.buffer_projection: BufferProjection | None = None
+        self.function_projection_names: dict[BufferProjection, str] = {}
+        self.function_projection_symbols: dict[BufferProjection, str] = {}
         self.unsigned_upper_bounds: dict[int, int | None] = {}
         self.assumption_inputs = {
             operand
@@ -225,11 +234,28 @@ class CxxRenderContext:
         self.value_origins = list(range(len(self.module.values)))
         self.rendered_assumptions_by_block: dict[int, set[tuple[object, ...]]] = {}
         self.assignment_targets: dict[int, int] = {}
-        self.suppressed_forwarding_values: set[int] = set()
+        # Structured identities carried implicitly or never independently used.
+        self.suppressed_forwarding_values: frozenset[int] = frozenset()
+        # Complete positional groups retained for the immutable input module.
+        self.flat_source_parameter_cache: dict[
+            tuple[int, ...], list[SourceParameter]
+        ] = {}
+        # Staged groups indexed by source values, split position, and binding kind.
+        self.staged_source_parameter_cache: dict[
+            tuple[tuple[int, ...], int, bool],
+            tuple[list[SourceParameter], list[SourceParameter]],
+        ] = {}
+        # Formal/actual payload pairs shared by demand analysis and call rendering.
+        self.pipeline_argument_bindings: dict[int, list[tuple[int, int]]] = {}
+        # Payload whose source binding hides each dimension or layout expression.
+        self.hidden_source_dependencies: dict[int, int] = {}
         self.target_names: dict[str, str] = {}
         self.target_type_names: dict[str, str] = {}
         self.function_names: dict[str, str] = {}
-        self.function_buffer_elements: dict[str, tuple[str | None, ...]] = {}
+        self.kernel_names: dict[str, str] = {}
+        self.function_buffer_elements: dict[
+            BufferProjection, tuple[str | None, ...]
+        ] = {}
         self.command_names: dict[str, str] = {}
         self.pipeline_names: dict[str, str] = {}
         self.pipeline_callables: dict[str, Operation] = {}
@@ -462,6 +488,7 @@ class CxxRenderContext:
                 if any(operand in signed for operand in operation.operands):
                     signed.update(operation.results)
             elif operation.name in {
+                "scalar.absi",
                 "scalar.sitofp",
                 "scalar.extsi",
                 "scalar.divsi",
@@ -469,6 +496,7 @@ class CxxRenderContext:
                 "scalar.minsi",
                 "scalar.maxsi",
                 "scalar.ashri",
+                "vector.absi",
                 "vector.sitofp",
                 "vector.extsi",
                 "vector.divsi",
@@ -480,7 +508,7 @@ class CxxRenderContext:
                 if operation.operands:
                     signed.add(operation.operands[0])
                 if operation.name.endswith(
-                    ("extsi", "divsi", "remsi", "minsi", "maxsi", "ashri")
+                    ("absi", "extsi", "divsi", "remsi", "minsi", "maxsi", "ashri")
                 ):
                     signed.update(operation.results)
             elif operation.name in {"scalar.cmpi", "vector.cmpi"}:
@@ -493,6 +521,10 @@ class CxxRenderContext:
                     signed.update(operation.operands)
             elif operation.name in {"scalar.fptosi", "vector.fptosi"}:
                 signed.update(operation.results)
+            elif operation.name == "scalar.frexpf":
+                signed.add(operation.results[1])
+            elif operation.name == "scalar.ldexpf":
+                signed.add(operation.operands[1])
             elif operation.name == "vector.table.lookup":
                 if operation.operands and operation.operands[0] in signed:
                     signed.update(operation.results)
@@ -1017,6 +1049,11 @@ class CxxRenderContext:
                     return f"loom::type::index{{{value}}}"
                 if name == "offset":
                     return f"loom::type::offset{{{value}}}"
+                if name in {"i8", "i16"} and isinstance(value_type, ScalarType):
+                    element = self.types.scalar(
+                        literal_type, result_id in self.signed_values
+                    )
+                    return f"static_cast<{element}>({value})"
                 if name == "i64" and value >= 0:
                     return f"{value}ull"
                 if (
@@ -1227,6 +1264,14 @@ class CxxRenderContext:
     def expression(self, value_id: int) -> str:
         expression = self.expressions.get(value_id)
         if expression is None:
+            owner = self.hidden_source_dependencies.get(value_id)
+            if owner is not None:
+                raise CxxRenderError(
+                    None,
+                    f"dependency %{self.module.values[value_id].name} carried by "
+                    f"%{self.module.values[owner].name} has no independent C++ "
+                    "expression",
+                )
             raise CxxRenderError(
                 None, f"value %{self.module.values[value_id].name} is not in scope"
             )
@@ -1238,6 +1283,39 @@ class CxxRenderContext:
             expression_type if expression_type is not None else self.cpp_type(value_id)
         )
 
+    def numeric_argument(self, value_id: int, expected_type: str) -> str:
+        """Adapts source signedness without changing the signless IR value."""
+
+        expression = self.expression(value_id)
+        value_type = self.module.values[value_id].type
+        if (
+            isinstance(value_type, ScalarType)
+            and self.expression_type(value_id) != expected_type
+        ):
+            # Implicit signedness changes are narrowing in list initialization,
+            # including aggregate returns used for multiple function results.
+            return f"static_cast<{expected_type}>({expression})"
+        if (
+            isinstance(value_type, ShapedType)
+            and value_type.type_kind == TypeKind.VECTOR
+            and self.expression_type(value_id) != expected_type
+        ):
+            # Native and semantic C++ vectors do not implicitly convert across
+            # signedness. The numeric facade preserves bits at the same width.
+            self.uses_numeric_conversion = True
+            return f"loom::convert<{expected_type}>({expression})"
+        return expression
+
+    def dynamic_dimensions(self, value_type: ShapedType) -> str:
+        """Spells the explicit index record for a constructor's result shape."""
+
+        values = [
+            self.expression(dimension.value_id)
+            for dimension in value_type.dims
+            if isinstance(dimension, DynamicDim) and dimension.value_id is not None
+        ]
+        return "loom::type::indices{" + ", ".join(values) + "}" if values else "{}"
+
     def dynamic_view_encoding_expression(
         self, operation: Operation, value_type: ShapedType
     ) -> str:
@@ -1247,12 +1325,7 @@ class CxxRenderContext:
         if not isinstance(encoding, DynamicEncoding):
             raise CxxRenderError(operation, "view does not have a dynamic encoding")
         definition = self.definitions.get(encoding.value_id)
-        if definition is None:
-            raise CxxRenderError(
-                operation,
-                "view encoding value is not defined in the projected scope",
-            )
-        if definition.name == "encoding.layout.dense":
+        if definition is not None and definition.name == "encoding.layout.dense":
             return f"loom::encoding::layout::dense<{value_type.rank}>()"
         return self.expression(encoding.value_id)
 

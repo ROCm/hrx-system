@@ -19,7 +19,7 @@ from pathlib import Path
 
 from loom.model import ModelCard
 from loom.model.lock import FileIdentity, ModelLock, file_digest, lock_files
-from model_card_test import check_model
+from model_card_test import check_models
 
 
 def main():
@@ -188,11 +188,33 @@ def main():
         )
         assert result.returncode == 0, result.stderr
         outputs.append(offline)
-        for output in outputs:
-            check_model(serve, output / "model.json", "abab")
+        checks = [(outputs[0], "abab")]
+        for index, output in enumerate(outputs):
+            deployment = output / "serve.json"
+            deployment.write_text(
+                json.dumps(
+                    {
+                        "name": f"fixture-text-fetched-{index}",
+                        "model": {"path": "model.json", "preset": "check"},
+                        "definition": {"kind": "text"},
+                    }
+                )
+            )
+            checks.append((deployment, "abab"))
         # The multiplier edit changes the recurrence's four-token result while
         # the exact same checkpoint and preset remain selected.
-        check_model(serve, editable / "model.json", "abbb")
+        editable_deployment = editable / "serve.json"
+        editable_deployment.write_text(
+            json.dumps(
+                {
+                    "name": "fixture-text-editable",
+                    "model": {"path": "model.json", "preset": "check"},
+                    "definition": {"kind": "text"},
+                }
+            )
+        )
+        checks.append((editable_deployment, "abbb"))
+        check_models(serve, checks)
 
 
 if __name__ == "__main__":

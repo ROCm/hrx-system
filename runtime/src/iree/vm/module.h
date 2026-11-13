@@ -46,14 +46,26 @@ typedef uint16_t iree_vm_module_signature_type_kind_t;
 enum iree_vm_module_signature_type_kind_e {
   // Invalid type reserved for zero-initialized declarations.
   IREE_VM_MODULE_SIGNATURE_TYPE_KIND_INVALID = 0x0000,
-  // Module-local ref type named by |type_ordinal|.
+  // Owning managed handle to the module-local type named by |type_ordinal|.
+  // Physical transport may use a proven borrow without changing this contract.
   IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF = 0x0100,
+  // Borrowed managed handle to the module-local type named by |type_ordinal|.
+  // Transport may carry an owner that protects the borrow across a handoff.
+  IREE_VM_MODULE_SIGNATURE_TYPE_KIND_PTR = 0x0101,
   // Module-local callable type named by |type_ordinal|.
   IREE_VM_MODULE_SIGNATURE_TYPE_KIND_FUNCTION = 0x0200,
 };
 
+// Returns whether |kind| uses the managed-ref bank. Declared ownership is part
+// of callable identity, independently of the physical carrier's ownership tag.
+static inline bool iree_vm_module_signature_type_kind_is_ref(
+    iree_vm_module_signature_type_kind_t kind) {
+  return kind == IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF ||
+         kind == IREE_VM_MODULE_SIGNATURE_TYPE_KIND_PTR;
+}
+
 typedef struct iree_vm_module_signature_type_t {
-  // Scalar ID, REF, or FUNCTION.
+  // Scalar ID, REF, PTR, or FUNCTION.
   iree_vm_module_signature_type_kind_t kind;
   // Module-local ref/callable ordinal, or zero for a scalar.
   uint16_t type_ordinal;

@@ -6,6 +6,27 @@
 
 HRX_CTS_TEST_ATTRIBUTE_KERNEL void hrx_noop(void) {}
 
+typedef unsigned int hrx_read_vector_t __attribute__((ext_vector_type(4)));
+
+// Grid-stride reads repeated over the same allocation, with a unique output
+// per work-item so host validation can check the complete reduction.
+HRX_CTS_TEST_ATTRIBUTE_KERNEL void hrx_read_repeated(
+    const hrx_read_vector_t* restrict input, unsigned long element_count,
+    unsigned int passes, unsigned int* restrict output) {
+  const unsigned long stride = __builtin_amdgcn_grid_size_x();
+  const unsigned long index =
+      __builtin_amdgcn_workgroup_id_x() * __builtin_amdgcn_workgroup_size_x() +
+      __builtin_amdgcn_workitem_id_x();
+  unsigned int accumulator = 0;
+  for (unsigned int pass = 0; pass < passes; ++pass) {
+    for (unsigned long i = index; i < element_count; i += stride) {
+      hrx_read_vector_t value = input[i];
+      accumulator ^= value.x + value.y + value.z + value.w + pass;
+    }
+  }
+  output[index] = accumulator;
+}
+
 HRX_CTS_TEST_ATTRIBUTE_KERNEL void hrx_store_output(unsigned int* output,
                                                     unsigned int value) {
   output[0] = value;

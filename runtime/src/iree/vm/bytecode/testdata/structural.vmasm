@@ -226,6 +226,8 @@ vm.module core(0.0) {
       %v0 = ref.compare.null %r0
       %v0 = ref.compare.eq %r0, %r0
       %r0 = ref.retain %r0
+      %r1 = ref.borrow %r0
+      %r1 = ref.copy %r0
       %r0 = ref.select %v0, %r0, %r1
       %r0 = ref.move %r1
       ref.discard %r0
@@ -233,6 +235,8 @@ vm.module core(0.0) {
       %r0 = ref.stack.load.move #r0
       ref.stack.store.retain %r0, #r0
       ref.stack.store.move %r0, #r0
+      %r0 = ref.stack.load.copy #r0
+      ref.stack.store.copy %r0, #r0
       ref.stack.discard #r0
       %r0 = buffer.allocate %v0 {minimum_alignment_log2 = 0}
       %v0 = buffer.length %r0
@@ -245,6 +249,8 @@ vm.module core(0.0) {
       buffer.fill %r0, %v0, %v0, %v0 {pattern_width = 1}
       buffer.copy %r0, %v0, %r0, %v0, %v0
       %v0 = buffer.compare %r0, %v0, %r0, %v0, %v0
+      %v0 = buffer.compare.address %r0, %v0, %r0, %v0 {predicate = eq}
+      %v0 = buffer.compare.address %r0, %v0, %r0, %v0 {predicate = ne}
       buffer.copy.rodata %r0, %v0, @rodata0+0, %v0
       %r0 = buffer.rodata.load @rodata0
       control.return

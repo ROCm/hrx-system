@@ -9,10 +9,13 @@
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
+from functools import cache
 from itertools import combinations, product
 from math import gcd
 from pathlib import Path
+from types import MappingProxyType
 
 from loom.target.arch.amd.xdna.aie.encoding import EncodingTable
 from loom.target.arch.amd.xdna.aie.machine import (
@@ -45,6 +48,9 @@ from loom.target.arch.amd.xdna.aie2p.core_move_topology import (
     SCALAR_MOVE_TOPOLOGY,
 )
 from loom.target.arch.amd.xdna.aie2p.core_schedule_data import CORE_SCHEDULE_TABLE
+from loom.target.arch.amd.xdna.aie2p.core_stack_descriptors import (
+    STACK_SPILLABLE_CLASSES,
+)
 from loom.target.arch.amd.xdna.aie2p.core_stream_descriptors import (
     _SCALAR_STREAM_ISSUE_EVENT,
 )
@@ -193,11 +199,12 @@ _IMMEDIATE_IDS = {
 }
 
 
+@cache
 def _operand_override_map(
     spec: descriptor_specs._DescriptorSpec,
     rows: tuple[tuple[str, str], ...],
     description: str,
-) -> dict[str, str]:
+) -> Mapping[str, str]:
     names = [name for name, _ in rows]
     if len(names) != len(set(names)):
         raise ValueError(f"{spec.form_name}: {description} names must be unique")
@@ -209,7 +216,7 @@ def _operand_override_map(
             f"{spec.form_name}: {description} name unknown operands "
             f"{sorted(unknown_names)}"
         )
-    return dict(rows)
+    return MappingProxyType(dict(rows))
 
 
 def _operand_machine_class(operand: MachineOperand) -> str:
@@ -220,6 +227,7 @@ def _operand_machine_class(operand: MachineOperand) -> str:
     raise ValueError(f"{operand.name}: immediate is not a register operand")
 
 
+@cache
 def _operand_encoding_machine_class(
     spec: descriptor_specs._DescriptorSpec, operand: MachineOperand
 ) -> str:
@@ -261,6 +269,7 @@ def _operand_encoding_machine_class(
     return adapter.register_class
 
 
+@cache
 def _storage_unit_count(source: str, target: str) -> int:
     source_bits = _MACHINE_CLASSES[source].layout.register_size_bits
     target_bits = _MACHINE_CLASSES[target].layout.register_size_bits
@@ -272,6 +281,7 @@ def _storage_unit_count(source: str, target: str) -> int:
     return source_bits // target_bits
 
 
+@cache
 def _is_ordered_candidate_subset(source: str, target: str) -> bool:
     source_candidates = _MACHINE_CLASSES[source].candidates
     target_candidates = _MACHINE_CLASSES[target].candidates
@@ -283,6 +293,7 @@ def _is_ordered_candidate_subset(source: str, target: str) -> bool:
     return selected_candidates == target_candidates
 
 
+@cache
 def _aggregate_register_units(
     source_class_name: str,
     target_class_name: str,
@@ -347,6 +358,7 @@ def _aggregate_register_units(
     return units
 
 
+@cache
 def _validate_aggregate_storage_domain(source: str, target: str) -> None:
     source_class = _MACHINE_CLASSES[source]
     target_class = _MACHINE_CLASSES[target]
@@ -363,6 +375,7 @@ def _validate_aggregate_storage_domain(source: str, target: str) -> None:
         )
 
 
+@cache
 def _operand_storage_machine_class(
     spec: descriptor_specs._DescriptorSpec,
     operand: MachineOperand,
@@ -480,6 +493,7 @@ def _operand_storage_machine_class(
     return low_class
 
 
+@cache
 def _operand_unit_count(
     spec: descriptor_specs._DescriptorSpec, operand: MachineOperand
 ) -> int:
@@ -504,6 +518,7 @@ def _low_register_class_name(machine_class: str) -> str:
     return f"aie2p.{machine_class.lower()}"
 
 
+@cache
 def _operand_register_class(
     spec: descriptor_specs._DescriptorSpec, operand: MachineOperand
 ) -> str:
@@ -528,6 +543,7 @@ _IMPLICIT_REGISTER_LAYOUT_OVERRIDES = {
     # The link register participates in both the 20-bit address and 32-bit
     # scalar domains. RET consumes the architectural return address.
     "lr": "mLRa",
+    "sp": "mSPm",
 }
 
 _IMPLICIT_REGISTER_LAYOUTS = {
@@ -609,10 +625,20 @@ def _reg_classes() -> tuple[RegClass, ...]:
             RegClass(
                 name=_low_register_class_name(machine_name),
                 alloc_unit_bits=machine_class.layout.register_size_bits,
-                spill_slot_space=SpillSlotSpace.PRIVATE,
+                spill_unit_bits=machine_class.layout.spill_size_bits,
+                spill_min_alignment=(machine_class.layout.spill_alignment_bits + 7)
+                // 8,
+                spill_max_alignment=64
+                if machine_name == "VEC256"
+                else (machine_class.layout.spill_alignment_bits + 7) // 8,
+                spill_slot_space=SpillSlotSpace.STACK,
                 flags=(
                     RegClassFlag.PHYSICAL,
-                    RegClassFlag.UNSPILLABLE,
+                    *(
+                        (RegClassFlag.UNSPILLABLE,)
+                        if machine_name not in STACK_SPILLABLE_CLASSES
+                        else ()
+                    ),
                     RegClassFlag.EXPLICIT_PHYSICAL_REGISTERS,
                 ),
                 target_bank_id=target_bank_id,
@@ -642,6 +668,9 @@ def _reg_classes() -> tuple[RegClass, ...]:
             RegClass(
                 name=register_class_name,
                 alloc_unit_bits=layout.register_size_bits,
+                spill_unit_bits=layout.spill_size_bits,
+                spill_min_alignment=(layout.spill_alignment_bits + 7) // 8,
+                spill_max_alignment=(layout.spill_alignment_bits + 7) // 8,
                 spill_slot_space=SpillSlotSpace.PRIVATE,
                 flags=(
                     RegClassFlag.PHYSICAL,
@@ -768,6 +797,11 @@ def _register_packing_resources() -> tuple[RegisterPackingResource, ...]:
         for register_name in _MACHINE_CLASSES["eR"].candidates
         for atomic_unit in _MACHINE_REGISTERS[register_name].atomic_units
     )
+    pointer_atomic_units = frozenset(
+        atomic_unit
+        for register_name in _MACHINE_CLASSES["eP"].candidates
+        for atomic_unit in _MACHINE_REGISTERS[register_name].atomic_units
+    )
     return (
         RegisterPackingResource(
             name=f"{descriptor_specs._TARGET_KEY}.register.x.pairs",
@@ -783,6 +817,15 @@ def _register_packing_resources() -> tuple[RegisterPackingResource, ...]:
             capacity_register_class=_low_register_class_name("eR"),
             members=_register_packing_members(
                 scalar_atomic_units, resource_unit_atom_count=1
+            ),
+        ),
+        RegisterPackingResource(
+            name=f"{descriptor_specs._TARGET_KEY}.register.pointer.units",
+            capacity_register_class=_low_register_class_name("eP"),
+            # Load and store FIFO pointers occupy subsets of the same eight
+            # registers as ordinary addresses.
+            members=_register_packing_members(
+                pointer_atomic_units, resource_unit_atom_count=1
             ),
         ),
     )
@@ -910,6 +953,16 @@ def _low_operand(
     register_parts = _operand_override_map(
         spec, spec.operand_register_parts, "register-part overrides"
     )
+    # DIVS carries its quotient state in r31 across instructions. Explicit SSA
+    # operands preserve the value chain; state accesses also prevent the next
+    # dividend from clobbering r31 before the quotient has been extracted.
+    state_flags = ()
+    if _operand_storage_machine_class(spec, operand) == "mR31_divs":
+        state_flags = (
+            OperandFlag.STATE_WRITE
+            if role is OperandRole.RESULT
+            else OperandFlag.STATE_READ,
+        )
     return Operand(
         field_name=operand.name,
         role=role,
@@ -920,6 +973,7 @@ def _low_operand(
             ),
         ),
         unit_count=_operand_unit_count(spec, operand),
+        flags=state_flags,
         encoding_field_id=encoding_field_id,
         encoding_adapter_id=encoding_adapter_id,
         read_stage=read_stage,
@@ -934,16 +988,15 @@ def _storage_continuation_operand(
     register_outputs: tuple[MachineOperand, ...],
 ) -> Operand | None:
     part_name = spec.storage_continuation_part
-    if part_name is None:
+    if part_name is None and not spec.preserves_unwritten_parts:
         return None
+    if part_name is not None and spec.preserves_unwritten_parts:
+        raise ValueError(
+            f"{spec.form_name}: storage continuation has two source contracts"
+        )
     if len(register_outputs) != 1:
         raise ValueError(
             f"{spec.form_name}: storage continuation requires exactly one result"
-        )
-    part = descriptor_specs._REGISTER_PARTS_BY_NAME.get(part_name)
-    if part is None:
-        raise ValueError(
-            f"{spec.form_name}: unknown storage-continuation part {part_name}"
         )
     result_part_name = _operand_override_map(
         spec, spec.operand_register_parts, "register-part overrides"
@@ -953,15 +1006,21 @@ def _storage_continuation_operand(
             f"{spec.form_name}: storage continuation requires a partial result"
         )
     result_part = descriptor_specs._REGISTER_PARTS_BY_NAME[result_part_name]
-    if result_part.reg_class != part.reg_class or result_part.mask & part.mask:
-        raise ValueError(
-            f"{spec.form_name}: storage continuation must preserve a disjoint "
-            "part of the result register"
-        )
+    if part_name is not None:
+        part = descriptor_specs._REGISTER_PARTS_BY_NAME.get(part_name)
+        if part is None:
+            raise ValueError(
+                f"{spec.form_name}: unknown storage-continuation part {part_name}"
+            )
+        if result_part.reg_class != part.reg_class or result_part.mask & part.mask:
+            raise ValueError(
+                f"{spec.form_name}: storage continuation must preserve a disjoint "
+                "part of the result register"
+            )
     return Operand(
         field_name="storage",
         role=OperandRole.OPERAND,
-        reg_alts=(RegClassAlt(part.reg_class, register_part=part.name),),
+        reg_alts=(RegClassAlt(result_part.reg_class, register_part=part_name),),
         flags=(OperandFlag.IMPLICIT, OperandFlag.STORAGE_CONTINUATION),
     )
 
@@ -1429,6 +1488,27 @@ def _descriptor(spec: descriptor_specs._DescriptorSpec) -> Descriptor:
             f"{form.name}: implicit inputs name unknown machine inputs "
             f"{sorted(unknown_implicit_inputs)}"
         )
+    if len(set(spec.overwritten_inputs)) != len(spec.overwritten_inputs):
+        raise ValueError(f"{form.name}: overwritten input names must be unique")
+    encoded_fields = {
+        field.name for field in _INSTRUCTION_ENCODINGS[spec.form_name].fields
+    }
+    for name in spec.overwritten_inputs:
+        operand = next(
+            (operand for operand in form.inputs if operand.name == name), None
+        )
+        if (
+            operand is None
+            or operand.kind is MachineOperandKind.IMMEDIATE
+            or name in encoded_fields
+            or name in spec.implicit_inputs
+            or not any(tie.use == name for tie in form.ties)
+        ):
+            raise ValueError(
+                f"{form.name}: overwritten input {name!r} must be an unencoded "
+                "explicit tied register input"
+            )
+        _fixed_operand_storage(spec, operand)
     if len(set(spec.symbolic_immediates)) != len(spec.symbolic_immediates):
         raise ValueError(f"{form.name}: symbolic immediate names must be unique")
     machine_immediate_names = {
@@ -1463,6 +1543,7 @@ def _descriptor(spec: descriptor_specs._DescriptorSpec) -> Descriptor:
         for operand in form.inputs
         if operand.kind is not MachineOperandKind.IMMEDIATE
         and operand.name not in spec.implicit_inputs
+        and operand.name not in spec.overwritten_inputs
     )
     immediate_inputs = tuple(
         operand

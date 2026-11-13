@@ -55,3 +55,30 @@ func.def @dead_remainder(%lhs: i64, %rhs: i64) -> (i64) {
   %quotient = scalar.divsi %lhs, %rhs : i64
   func.return %quotient : i64
 }
+
+// ====
+
+// Both paired quotient families retain dynamic size predicates independently
+// of their remainder results.
+func.def @paired_powers(%choose: i1) -> (i1, i1, i1, i1) {
+  %c2 = scalar.constant 2 : i32
+  %c4 = scalar.constant 4 : i32
+  %c16 = scalar.constant 16 : i32
+  %divisor = scf.select %choose, %c2, %c4 : i32
+  %signed, %signed_remainder = scalar.divremsi %c16, %divisor : i32
+  %unsigned, %unsigned_remainder = scalar.divremui %c16, %divisor : i32
+  %sp = test.fact_power_of_two %signed : i32 -> i1
+  %up = test.fact_power_of_two %unsigned : i32 -> i1
+  %srp = test.fact_power_of_two %signed_remainder : i32 -> i1
+  %urp = test.fact_power_of_two %unsigned_remainder : i32 -> i1
+  func.return %sp, %up, %srp, %urp : i1, i1, i1, i1
+}
+
+// ----
+func.def @paired_powers(%choose: i1) -> (i1, i1, i1, i1) {
+  %sp = scalar.constant true : i1
+  %up = scalar.constant true : i1
+  %srp = scalar.constant false : i1
+  %urp = scalar.constant false : i1
+  func.return %sp, %up, %srp, %urp : i1, i1, i1, i1
+}

@@ -16,6 +16,7 @@ loom_check_test_suite(
     name = "test",
     srcs = [
         "facts.loom-test",
+        "identity.loom-test",
         "roundtrip.loom-test",
         "verify.loom-test",
     ],

@@ -201,6 +201,14 @@ iree_status_t loom_pass_value_fact_owner_prepare(
     loom_pass_value_fact_owner_t* owner, const loom_module_t* module,
     loom_pass_value_fact_scope_t scope, loom_value_fact_table_t** out_table);
 
+// Prepares caller-maintained facts with a producer-owned direct-storage hint.
+// Definitions outside the reserved interval grow storage normally. An empty
+// range is equivalent to loom_pass_value_fact_owner_prepare.
+iree_status_t loom_pass_value_fact_owner_prepare_range(
+    loom_pass_value_fact_owner_t* owner, const loom_module_t* module,
+    loom_pass_value_fact_scope_t scope, loom_value_fact_range_t reserved_values,
+    loom_value_fact_table_t** out_table);
+
 // Acquires computed facts for |scope|. The returned table is borrowed and
 // remains valid until the owner is invalidated, prepared or acquired for
 // another scope, or deinitialized. Appending values outside the active scope

@@ -136,36 +136,28 @@ class CiCoreLinuxTest(unittest.TestCase):
             ),
         )
 
-    def test_amdgpu_device_binary_source_options_pin_rocm_root(self):
+    def test_amdgpu_device_toolchain_options_pin_rocm_root(self):
         self.assertEqual(
-            ci_core_linux.amdgpu_device_binary_source_options(Path("/tmp/rocm-root")),
+            ci_core_linux.amdgpu_device_toolchain_options(Path("/tmp/rocm-root")),
             [
-                "IREE_HAL_AMDGPU_DEVICE_BINARY_BUILD_MODE=source",
                 "IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN=rocm",
                 "IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_ROCM_PATH=/tmp/rocm-root",
             ],
         )
 
-    def test_build_core_preserves_linux_ci_feature_defaults(self):
-        commands = self.build_core_commands()
-        configure_cmd = commands[0]
-        self.assertIn("-DIREE_BUILD_TESTS=ON", configure_cmd)
-        self.assertIn("-DIREE_BUILD_BENCHMARKS=OFF", configure_cmd)
-        self.assertIn("-DLOOM_BUILD=ON", configure_cmd)
-        self.assertIn("-DIREE_HAL_DRIVER_AMD=ON", configure_cmd)
-        self.assertIn("-DAMDF_BUILD=ON", configure_cmd)
-        self.assertIn("-DLIBHRX_BUILD=ON", configure_cmd)
-        self.assertIn("-DLIBHRX_BUILD_CTS=ON", configure_cmd)
-        self.assertIn("-DLIBHRX_BUILD_HIP_BINDING=ON", configure_cmd)
-        self.assertIn("-DLIBHRX_BUILD_PASSTHROUGH=ON", configure_cmd)
-        self.assertIn("-DIREE_HAL_DRIVER_AMDGPU=ON", configure_cmd)
-        self.assertNotIn("-DCMAKE_C_COMPILER_LAUNCHER=ccache", configure_cmd)
-        self.assertNotIn("-DCMAKE_CXX_COMPILER_LAUNCHER=ccache", configure_cmd)
+    def test_package_build_precedes_component_installation(self):
+        component = "requested-public-component"
+        commands = self.build_core_commands({"HRX_PUBLIC_COMPONENT": component})
+        self.assertIn("-S", commands[0])
+        self.assertIn("-B", commands[0])
         self.assertEqual(commands[1][0:2], ["cmake", "--build"])
-        self.assertIn("all", commands[1])
-        self.assertEqual(
-            [command[0:2] for command in commands[2:]],
-            [["cmake", "--install"]],
+        installs = commands[2:]
+        self.assertTrue(installs)
+        for command in installs:
+            self.assertEqual(command[0:2], ["cmake", "--install"])
+        self.assertIn(
+            component,
+            [command[command.index("--component") + 1] for command in installs],
         )
 
     def test_sanitizer_build_only_configures_the_source_test_tree(self):
@@ -184,7 +176,7 @@ class CiCoreLinuxTest(unittest.TestCase):
             }
         )
         self.assertEqual(len(commands), 1)
-        self.assertIn("-DIREE_HAL_DRIVER_AMDGPU=ON", commands[0])
+        self.assertIn("-DIREE_HAL_DRIVER_AMD_GPU=ON", commands[0])
         self.assertIn("-DLIBHRX_BUILD_CTS=ON", commands[0])
 
     def test_build_core_can_exclude_loom_from_the_product(self):
@@ -232,8 +224,14 @@ class CiCoreLinuxTest(unittest.TestCase):
         step_type.assert_called_once()
         step_args = step_type.call_args.kwargs
         self.assertEqual(step_args["build_dir"], build_dir)
+        arguments = step_args["arguments"].copy()
+        label_index = arguments.index("-LE")
+        label_exclude_regex = arguments.pop(label_index + 1)
+        arguments.pop(label_index)
+        self.assertRegex("manual", label_exclude_regex)
+        self.assertRegex("runtime-resource=amd-gpu", label_exclude_regex)
         self.assertEqual(
-            step_args["arguments"],
+            arguments,
             [
                 "--parallel",
                 "3",
@@ -241,8 +239,6 @@ class CiCoreLinuxTest(unittest.TestCase):
                 "^iree/",
                 "-E",
                 "(^build_tools/cmake/)|(excluded)",
-                "-LE",
-                "runtime-resource=|manual",
                 "--no-tests=error",
             ],
         )

@@ -4,15 +4,15 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-"""Analysis tests for shared execution-test Bazel macros."""
+"""Analysis tests for shared CLI-test Bazel macros."""
 
 load("@rules_testing//lib:analysis_test.bzl", "analysis_test", "test_suite")
 load("@rules_testing//lib:util.bzl", "TestingAspectInfo", "util")
-load(":build_defs.bzl", "iree_execution_test_suite")
+load(":build_defs.bzl", "iree_cli_test")
 
-def _test_execution_test_suite_applies_resource_group_tags(name, **kwargs):
+def _test_cli_test_applies_resource_group_tags(name, **kwargs):
     util.helper_target(
-        iree_execution_test_suite,
+        iree_cli_test,
         name = name + "_subject",
         manifests = ["//build_tools/testing/test:smoke.test.json"],
         resource_group = "gpu",
@@ -26,12 +26,12 @@ def _test_execution_test_suite_applies_resource_group_tags(name, **kwargs):
         attr_values = {
             "timeout": "short",
         },
-        impl = _test_execution_test_suite_applies_resource_group_tags_impl,
+        impl = _test_cli_test_applies_resource_group_tags_impl,
         target = name + "_subject",
         **kwargs
     )
 
-def _test_execution_test_suite_applies_resource_group_tags_impl(env, target):
+def _test_cli_test_applies_resource_group_tags_impl(env, target):
     tags = target[TestingAspectInfo].attrs.tags
     for expected_tag in [
         "exclusive-if-local",
@@ -45,6 +45,6 @@ def build_defs_test_suite(name):
     test_suite(
         name = name,
         tests = [
-            _test_execution_test_suite_applies_resource_group_tags,
+            _test_cli_test_applies_resource_group_tags,
         ],
     )

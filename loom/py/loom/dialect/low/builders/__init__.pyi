@@ -19,6 +19,7 @@ class LowBuilder(DialectBuilder):
         retain: str | None = ...,
         cc: str | None = ...,
         effect_contract: str | None = ...,
+        temperature: str | None = ...,
         inline_policy: str | None = ...,
         allocation: str | None = ...,
         schedule: str | None = ...,
@@ -72,6 +73,7 @@ class LowBuilder(DialectBuilder):
         retain: str | None = ...,
         cc: str | None = ...,
         effect_contract: str | None = ...,
+        temperature: str | None = ...,
         inline_policy: str | None = ...,
         allocation: str | None = ...,
         schedule: str | None = ...,
@@ -104,6 +106,7 @@ class LowBuilder(DialectBuilder):
         self,
         *,
         effect_contract: str | None = ...,
+        temperature: str | None = ...,
         inline_policy: str | None = ...,
         callee: str,
         operands: list[ValueRef] = ...,
@@ -184,6 +187,7 @@ class LowBuilder(DialectBuilder):
         self,
         *,
         effect_contract: str | None = ...,
+        temperature: str | None = ...,
         inline_policy: str | None = ...,
         callee: str,
         operands: list[ValueRef] = ...,
@@ -403,3 +407,38 @@ class LowBuilder(DialectBuilder):
         args: list[ValueRef] = ...,
         location_id: int | None = ...,
     ) -> None: ...
+    def spill_move(
+        self,
+        *,
+        value: ValueRef,
+        storage: ValueRef,
+        offset: int,
+        location_id: int | None = ...,
+    ) -> None: ...
+    def reload_move(
+        self,
+        *,
+        storage: ValueRef,
+        offset: int,
+        results: list[Type | TiedResultSpec],
+        name: str | None = ...,
+        names: Sequence[str] | None = ...,
+        result_names: Sequence[str] | None = ...,
+        location_id: int | None = ...,
+    ) -> ValueRef: ...
+    def release(
+        self,
+        *,
+        value: ValueRef,
+        location_id: int | None = ...,
+    ) -> None: ...
+    def borrow(
+        self,
+        *,
+        owner: ValueRef,
+        results: list[Type | TiedResultSpec],
+        name: str | None = ...,
+        names: Sequence[str] | None = ...,
+        result_names: Sequence[str] | None = ...,
+        location_id: int | None = ...,
+    ) -> ValueRef: ...

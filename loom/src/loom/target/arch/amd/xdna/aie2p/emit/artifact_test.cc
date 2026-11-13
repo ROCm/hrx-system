@@ -8,10 +8,11 @@
 
 #include <algorithm>
 #include <cstring>
+#include <string>
 #include <vector>
 
-#include "iree/hal/drivers/amd/xdna/image/aie2p/npu2.h"
-#include "iree/hal/drivers/amd/xdna/image/image.h"
+#include "iree/hal/driver/amd/xdna/image/aie2p/npu2.h"
+#include "iree/hal/driver/amd/xdna/image/image.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/codegen/low/text_asm.h"
@@ -454,6 +455,74 @@ TEST_F(XdnaArtifactTest, CompilesSharedConfigurationWorkerOnce) {
                                                     &entry_ordinal));
   IREE_ASSERT_OK(iree_hal_amd_xdna_image_find_entry(image_, IREE_SV("second"),
                                                     &entry_ordinal));
+}
+
+TEST_F(XdnaArtifactTest, RejectsHelperOwnedStorageAndImportsBeforeEmission) {
+  for (const char* declaration : {
+           "%storage = storage {byte_alignment = 32, byte_length = 32} : "
+           "low.storage<stack>",
+           "%storage = storage {byte_alignment = 32, byte_length = 32} : "
+           "low.storage<scratch>",
+           "%storage = storage {byte_alignment = 32, byte_length = 32} : "
+           "low.storage<private>",
+           "%storage = storage {byte_alignment = 32, byte_length = 32} : "
+           "low.storage<workgroup>",
+           "%input = resource<native_pointer> {index = 0, source_type = "
+           "buffer} : reg<aie2p.ep>",
+       }) {
+    std::string source = kSharedConfigurationWorkerSource;
+    const size_t insertion = source.find("  %one = mova.i32 1");
+    ASSERT_NE(insertion, std::string::npos);
+    source.insert(insertion, "  low.func.call @helper() : ()\n");
+    source +=
+        "low.func.def target<amd.xdna.aie2p.core>(@core_target) @helper() asm "
+        "{\n";
+    source += declaration;
+    source += "\n  return\n}\n";
+    ModulePtr module;
+    IREE_ASSERT_OK(
+        ParseModule(iree_make_cstring_view(source.c_str()), &module));
+    DiagnosticEmissionCapture capture;
+    const loom_aie2p_xdna_artifact_request_t request = {
+        .module = module.get(),
+        .low_descriptor_registry = &low_registry_.registry,
+        .diagnostic_emitter = capture.emitter(),
+        .scratch_arena = &scratch_arena_,
+        .allocator = iree_allocator_null(),
+    };
+    bool emitted = false;
+    IREE_ASSERT_OK(
+        loom_aie2p_xdna_compile_artifact(&request, &emitted, &contents_));
+    EXPECT_FALSE(emitted);
+    ASSERT_FALSE(capture.emissions.empty());
+    EXPECT_EQ(capture.emissions[0].error, LOOM_ERR_XDNA_065);
+    EXPECT_EQ(capture.emissions[0].string_params[0], "helper");
+  }
+}
+
+TEST_F(XdnaArtifactTest, DiagnosesUnrepresentableStackFrameBeforeEncoding) {
+  std::string source = kSharedConfigurationWorkerSource;
+  const size_t insertion = source.find("  %one = mova.i32 1");
+  ASSERT_NE(insertion, std::string::npos);
+  source.insert(insertion,
+                "  %storage = storage {byte_alignment = 64, byte_length = "
+                "262144} : low.storage<stack>\n");
+  ModulePtr module;
+  IREE_ASSERT_OK(ParseModule(iree_make_cstring_view(source.c_str()), &module));
+  DiagnosticEmissionCapture capture;
+  const loom_aie2p_xdna_artifact_request_t request = {
+      .module = module.get(),
+      .low_descriptor_registry = &low_registry_.registry,
+      .diagnostic_emitter = capture.emitter(),
+      .scratch_arena = &scratch_arena_,
+      .allocator = iree_allocator_system(),
+  };
+  bool emitted = false;
+  IREE_ASSERT_OK(
+      loom_aie2p_xdna_compile_artifact(&request, &emitted, &contents_));
+  EXPECT_FALSE(emitted);
+  ASSERT_FALSE(capture.emissions.empty());
+  EXPECT_EQ(capture.emissions[0].error, LOOM_ERR_XDNA_064);
 }
 
 TEST_F(XdnaArtifactTest, RejectsNonArtifactEntryRootWithDiagnostic) {

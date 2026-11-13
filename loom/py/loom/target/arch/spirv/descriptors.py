@@ -44,8 +44,10 @@ from loom.target.arch.spirv.builtins import (
     BUILTIN_SCALAR_INDEX_QUERIES,
 )
 from loom.target.arch.spirv.cooperative_matrix import (
+    COOPERATIVE_MATRIX_ARITHMETIC,
     COOPERATIVE_MATRIX_CASES,
     COOPERATIVE_MATRIX_TYPES,
+    CooperativeMatrixArithmetic,
     CooperativeMatrixCase,
     CooperativeMatrixMemory,
     CooperativeMatrixType,
@@ -81,6 +83,7 @@ from loom.target.arch.spirv.ordinary_vector_float import (
 )
 from loom.target.arch.spirv.ordinary_vector_integer import (
     INTEGER_BIT_COUNT_INSTRUCTIONS,
+    INTEGER_DOT_INSTRUCTIONS,
     ORDINARY_VECTOR_INTEGER_INSTRUCTIONS,
 )
 from loom.target.arch.spirv.scalar_alu import (
@@ -121,9 +124,11 @@ from loom.target.arch.spirv.scalar_conversion import (
     ScalarConversion,
 )
 from loom.target.arch.spirv.scalar_memory import (
+    PACKED_STORAGE_BUFFER_VECTORS,
     RAW_STORAGE_BUFFER_BYTE,
     STORAGE_BUFFER_SCALARS,
     StorageBufferScalar,
+    StorageBufferVector,
 )
 from loom.target.arch.spirv.subgroup import (
     SPIRV_SUBGROUP_BALLOT_PACKING_INSTRUCTIONS,
@@ -531,14 +536,30 @@ def _builtin_scalar_index_descriptors() -> tuple[Descriptor, ...]:
     )
 
 
-def _coordinate_copy_descriptor() -> Descriptor:
-    key = "spirv.op_copy_object.i32"
-    return _unary_typed_descriptor(
-        key=key,
-        mnemonic="OpCopyObject.i32",
-        semantic_tag=key,
-        operands=(_id_result(), _id_operand("input")),
-        result_value_type=_scalar_result_value_type("i32"),
+def _carrier_copy_descriptors() -> tuple[Descriptor, ...]:
+    return tuple(
+        _unary_typed_descriptor(
+            key=f"spirv.op_copy_object.{suffix}",
+            mnemonic=f"OpCopyObject.{suffix}",
+            semantic_tag=f"spirv.op_copy_object.{suffix}",
+            operands=operands,
+            result_value_type=result_value_type,
+        )
+        for suffix, operands, result_value_type in (
+            (
+                "i32",
+                (_id_result(), _id_operand("input")),
+                _scalar_result_value_type("i32"),
+            ),
+            (
+                "storage_buffer",
+                (
+                    _ptr_storage_buffer_result("dst"),
+                    _ptr_storage_buffer_operand("input"),
+                ),
+                None,
+            ),
+        )
     )
 
 
@@ -867,7 +888,7 @@ def _address_conversion_descriptors() -> tuple[Descriptor, ...]:
 
 def _storage_buffer_effect(
     kind: EffectKind,
-    scalar: StorageBufferScalar,
+    scalar: StorageBufferScalar | StorageBufferVector,
 ) -> Effect:
     return Effect(
         kind,
@@ -1222,7 +1243,7 @@ def _float_atomic_descriptors() -> tuple[Descriptor, ...]:
 
 
 def _ptr_access_chain_storage_buffer_descriptor(
-    scalar: StorageBufferScalar,
+    scalar: StorageBufferScalar | StorageBufferVector,
 ) -> Descriptor:
     return Descriptor(
         key=f"spirv.op_ptr_access_chain.storage_buffer.{scalar.suffix}.byte_offset",
@@ -1241,10 +1262,12 @@ def _ptr_access_chain_storage_buffer_descriptor(
     )
 
 
-def _load_storage_buffer_descriptor(scalar: StorageBufferScalar) -> Descriptor:
+def _load_storage_buffer_descriptor(
+    scalar: StorageBufferScalar | StorageBufferVector,
+) -> Descriptor:
     result_value_type = (
         _scalar_result_value_type(scalar.source_type)
-        if scalar.source_rule_enabled
+        if isinstance(scalar, StorageBufferScalar) and scalar.source_rule_enabled
         else None
     )
     return Descriptor(
@@ -1264,7 +1287,9 @@ def _load_storage_buffer_descriptor(scalar: StorageBufferScalar) -> Descriptor:
     )
 
 
-def _store_storage_buffer_descriptor(scalar: StorageBufferScalar) -> Descriptor:
+def _store_storage_buffer_descriptor(
+    scalar: StorageBufferScalar | StorageBufferVector,
+) -> Descriptor:
     return Descriptor(
         key=f"spirv.op_store.storage_buffer.{scalar.suffix}",
         mnemonic=f"OpStore.storage_buffer.{scalar.suffix}",
@@ -1280,7 +1305,7 @@ def _store_storage_buffer_descriptor(scalar: StorageBufferScalar) -> Descriptor:
 
 def _storage_buffer_descriptors() -> tuple[Descriptor, ...]:
     descriptors: list[Descriptor] = []
-    for scalar in STORAGE_BUFFER_SCALARS:
+    for scalar in (*STORAGE_BUFFER_SCALARS, *PACKED_STORAGE_BUFFER_VECTORS):
         descriptors.append(_ptr_access_chain_storage_buffer_descriptor(scalar))
         descriptors.append(_load_storage_buffer_descriptor(scalar))
         descriptors.append(_store_storage_buffer_descriptor(scalar))
@@ -1434,11 +1459,10 @@ _COOPERATIVE_MATRIX_LAYOUT_IMMEDIATE = Immediate(
 
 def _cooperative_matrix_load_descriptor(
     *,
-    role: str,
     matrix_type: CooperativeMatrixType,
     memory: CooperativeMatrixMemory,
 ) -> Descriptor:
-    key = matrix_type.memory_key(role, memory)
+    key = matrix_type.memory_key("load", memory)
     feature_bits = matrix_type.feature_bits | memory.feature_bits
     pointer = (
         _ptr_workgroup_scalar_operand(memory.carrier, "ptr")
@@ -1471,7 +1495,7 @@ def _cooperative_matrix_store_descriptor(
     matrix_type: CooperativeMatrixType,
     memory: CooperativeMatrixMemory,
 ) -> Descriptor:
-    key = matrix_type.memory_key("result", memory)
+    key = matrix_type.memory_key("store", memory)
     feature_bits = matrix_type.feature_bits | memory.feature_bits
     pointer = (
         _ptr_workgroup_scalar_operand(memory.carrier, "ptr")
@@ -1536,6 +1560,28 @@ def _cooperative_matrix_mul_add_descriptor(
     )
 
 
+def _cooperative_matrix_arithmetic_descriptor(
+    matrix_type: CooperativeMatrixType, operation: CooperativeMatrixArithmetic
+) -> Descriptor:
+    key = matrix_type.arithmetic_key(operation)
+    names = ("lhs", "rhs") if operation.operand_count == 2 else ("value",)
+    immediates = (
+        (_ALLOW_CONTRACTION_IMMEDIATE,) if operation.controls_contraction else ()
+    )
+    return Descriptor(
+        key=key,
+        mnemonic=key.replace(f"spirv.op_{operation.suffix}", operation.mnemonic),
+        semantic_tag=key,
+        operands=(_id_result(), *(_id_operand(name) for name in names)),
+        immediates=immediates,
+        feature_mask_words=(matrix_type.feature_bits,),
+        effects=(Effect(EffectKind.CONVERGENT, flags=(EffectFlag.ORDERED,)),),
+        asm_forms=_asm(results=("dst",), operands=names),
+        schedule_class=_SCHEDULE_ALU,
+        flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    )
+
+
 def _cooperative_matrix_descriptors() -> tuple[Descriptor, ...]:
     descriptors = [
         Descriptor(
@@ -1554,14 +1600,21 @@ def _cooperative_matrix_descriptors() -> tuple[Descriptor, ...]:
         for matrix_type in COOPERATIVE_MATRIX_TYPES
     ]
     descriptors.extend(
-        _cooperative_matrix_store_descriptor(matrix_type=matrix_type, memory=memory)
-        if role == "result"
-        else _cooperative_matrix_load_descriptor(
-            role=role, matrix_type=matrix_type, memory=memory
-        )
+        _cooperative_matrix_arithmetic_descriptor(matrix_type, operation)
         for matrix_type in COOPERATIVE_MATRIX_TYPES
-        for role in matrix_type.source_roles
+        for operation in COOPERATIVE_MATRIX_ARITHMETIC
+        if operation.supports(matrix_type)
+    )
+    descriptors.extend(
+        descriptor
+        for matrix_type in COOPERATIVE_MATRIX_TYPES
         for memory in cooperative_matrix_memory_variants(matrix_type.scalar)
+        for descriptor in (
+            _cooperative_matrix_load_descriptor(matrix_type=matrix_type, memory=memory),
+            _cooperative_matrix_store_descriptor(
+                matrix_type=matrix_type, memory=memory
+            ),
+        )
     )
     descriptors.extend(
         _cooperative_matrix_mul_add_descriptor(case=case)
@@ -1987,6 +2040,40 @@ SPIRV_LOGICAL_CORE_DESCRIPTOR_SET = DescriptorSet(
             schedule_class=_SCHEDULE_ALU,
             flags=(DescriptorFlag.DEAD_REMOVABLE,),
         ),
+        Descriptor(
+            key="spirv.op_constant.storage_buffer",
+            mnemonic="OpConstant.storage_buffer",
+            semantic_tag="spirv.op_constant.storage_buffer",
+            operands=(_ptr_storage_buffer_result("dst"),),
+            op_kind=DescriptorOpKind.CONST,
+            immediates=(_OFFSET64_VALUE_IMMEDIATE,),
+            asm_forms=_asm(results=("dst",), immediates=("offset64_value",)),
+            schedule_class=_SCHEDULE_ALU,
+            flags=(DescriptorFlag.DEAD_REMOVABLE,),
+        ),
+        *(
+            Descriptor(
+                key=f"spirv.op_{suffix}.storage_buffer",
+                mnemonic=f"{mnemonic}.storage_buffer",
+                semantic_tag=f"spirv.op_{suffix}.storage_buffer",
+                operands=(
+                    _id_result(),
+                    _ptr_storage_buffer_operand("lhs"),
+                    _ptr_storage_buffer_operand("rhs"),
+                ),
+                asm_forms=_asm(
+                    results=("dst",),
+                    operands=("lhs", "rhs"),
+                    result_value_types=(_scalar_result_value_type("i1"),),
+                ),
+                schedule_class=_SCHEDULE_ALU,
+                flags=(DescriptorFlag.DEAD_REMOVABLE,),
+            )
+            for suffix, mnemonic in (
+                ("iequal", "OpIEqual"),
+                ("inotequal", "OpINotEqual"),
+            )
+        ),
         *_scalar_binary_descriptors(),
         *_conversion_descriptors(),
         *(_ordinary_vector_descriptor(row) for row in ORDINARY_VECTOR_INSTRUCTIONS),
@@ -2026,7 +2113,18 @@ SPIRV_LOGICAL_CORE_DESCRIPTOR_SET = DescriptorSet(
         ),
         *(_subgroup_instruction_descriptor(row) for row in SPIRV_SUBGROUP_INSTRUCTIONS),
         *(_extended_math_descriptor(row) for row in EXTENDED_MATH_INSTRUCTIONS),
-        _coordinate_copy_descriptor(),
+        *_carrier_copy_descriptors(),
+        _binary_same_type_descriptor(
+            key="spirv.op_iadd.storage_buffer.byte_offset",
+            mnemonic="OpIAdd.storage_buffer.byte_offset",
+            semantic_tag="spirv.op_iadd.storage_buffer.byte_offset",
+            operands=(
+                _ptr_storage_buffer_result("dst"),
+                _ptr_storage_buffer_operand("lhs"),
+                _offset64_operand("rhs"),
+            ),
+            result_value_type=None,
+        ),
         _ternary_same_type_descriptor(
             key="spirv.op_imul_add.i32",
             mnemonic="OpIMulAdd",
@@ -2073,6 +2171,7 @@ SPIRV_LOGICAL_CORE_DESCRIPTOR_SET = DescriptorSet(
             result_value_type=None,
         ),
         *(_ordinary_vector_descriptor(row) for row in INTEGER_BIT_COUNT_INSTRUCTIONS),
+        *(_ordinary_vector_descriptor(row) for row in INTEGER_DOT_INSTRUCTIONS),
         *_address_conversion_descriptors(),
         *_builtin_index_descriptors(),
         *_builtin_scalar_index_descriptors(),

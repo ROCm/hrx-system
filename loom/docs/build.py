@@ -5,7 +5,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-"""Builds and serves the Loom programming guide."""
+"""Builds and serves the Loom documentation."""
 
 from __future__ import annotations
 
@@ -48,7 +48,7 @@ def _run_mkdocs(arguments: list[str]) -> None:
 def _build(args: argparse.Namespace) -> None:
     site_dir = _repo_path(args.site_dir).resolve()
     _run_mkdocs(["build", "--site-dir", str(site_dir)])
-    print(f"Loom programming guide: {site_dir / 'index.html'}")
+    print(f"Loom documentation: {site_dir / 'index.html'}")
 
 
 def _serve(args: argparse.Namespace) -> None:
@@ -57,7 +57,7 @@ def _serve(args: argparse.Namespace) -> None:
 
 def _parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Build or serve the Loom programming guide."
+        description="Build or serve the Loom documentation."
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 

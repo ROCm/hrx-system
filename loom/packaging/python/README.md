@@ -5,7 +5,7 @@ The `hrx-loom` wheel contains the Loom compiler, runtime, command-line tools, an
 environment's `bin/` directory on Unix or `Scripts/` directory on Windows. An
 activated virtual environment makes them available on PATH.
 
-The native commands are `loom-benchmark`, `loom-check`, `loom-compile`,
+The native commands are `amdf-info`, `loom-benchmark`, `loom-check`, `loom-compile`,
 `loom-format`, `loom-import-cxx`, `loom-link`, `loom-opt`, `loom-run`, `loom-serve`,
 and `loom-test`. Python supplies `loom-compile-report`, `loom-export-cxx`,
 `loom-fetch`, and `loom-lint`. The wheel includes the matching native shared
@@ -13,6 +13,13 @@ libraries beside the executables. C++ import includes its standard and Loom
 headers, so it works without a separate compiler or source checkout.
 Linux wheel packaging gives each native file an adjacent-library search path;
 installed commands load their matching companions without Bazel build paths.
+
+`amdf-info` reports native AMD GPUs, NPUs, memory pools, and capabilities without
+ROCr or XRT. Use `amdf-info --format=json` for automation or
+`amdf-info --device=xdna --activate` to check native device acquisition and
+release. Ordinary inventory does not activate devices. The
+[tool reference](../../../libamdf/tool/amdf-info/README.md) describes selection,
+activation, and structured output.
 
 Linux wheels also install `loom-serve-sandbox`, a small Bash launcher using the
 host's bubblewrap package. It exposes selected model paths and accelerators to
@@ -33,7 +40,7 @@ newer. For Linux x86-64:
 
 ```sh
 iree-bazel-build --config=loom-sdk --config=opt //loom/packaging/python:wheel
-python -m pip install bazel-bin/loom/packaging/python/hrx_loom-0.0.0.dev0-py3-none-linux_x86_64.whl
+python -m pip install bazel-bin/loom/packaging/python/hrx_loom-0.2.0.dev0-py3-none-linux_x86_64.whl
 loom-serve --help
 loom-benchmark --help
 loom-fetch model.json --list --json
@@ -44,7 +51,7 @@ python -m loom.model.documentation --card model.json --output=model.md
 To include the optional provider when installing a local wheel:
 
 ```sh
-python -m pip install 'bazel-bin/loom/packaging/python/hrx_loom-0.0.0.dev0-py3-none-linux_x86_64.whl[hf]'
+python -m pip install 'bazel-bin/loom/packaging/python/hrx_loom-0.2.0.dev0-py3-none-linux_x86_64.whl[hf]'
 ```
 
 The wheel filename describes the selected target platform: `linux_x86_64`,
@@ -170,7 +177,7 @@ with:
 ```sh
 iree-bazel-build --config=loom-sdk --config=opt \
   --//runtime/config/base/tracing:provider=tracy //loom/packaging/python:wheel
-python -m pip install bazel-bin/loom/packaging/python/hrx_loom-0.0.0.dev0+tracy-py3-none-linux_x86_64.whl
+python -m pip install bazel-bin/loom/packaging/python/hrx_loom-0.2.0.dev0+tracy-py3-none-linux_x86_64.whl
 ```
 
 Tracy records startup events before a collector attaches. The

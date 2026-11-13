@@ -20,7 +20,10 @@ package(
 
 loom_check_test_suite(
     name = "representation_test",
-    srcs = ["representation_filters.loom-test"],
+    srcs = [
+        "diagnostic_context.loom-test",
+        "representation_filters.loom-test",
+    ],
 )
 
 loom_cc_library(
@@ -32,6 +35,7 @@ loom_cc_library(
         "//loom/src/loom/error:error_defs",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/cfg",
         "//loom/src/loom/ops/test",
         "//loom/src/loom/pass:environment",
         "//loom/src/loom/pass:options",

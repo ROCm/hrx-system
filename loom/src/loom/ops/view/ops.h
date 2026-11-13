@@ -94,15 +94,16 @@ iree_status_t loom_view_refine_build(
     loom_type_t result_type,
     loom_location_id_t location,
     loom_op_t** out_op);
+iree_status_t loom_value_refinement_canonicalize(loom_op_t* op, loom_rewriter_t* rewriter);
 iree_status_t loom_view_reinterpret_facts(
     loom_fact_context_t* context,
     const loom_module_t* module, const loom_op_t* op,
     const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts);
-iree_status_t loom_view_refine_type_transfer(
+iree_status_t loom_value_refinement_type_transfer(
     loom_type_transfer_context_t* context,
     const loom_module_t* module, loom_op_t* op);
-iree_status_t loom_view_refine_verify(
+iree_status_t loom_value_refinement_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
 
@@ -274,6 +275,7 @@ LOOM_DEFINE_OPERAND(loom_view_atomic_cmpxchg_replacement, 1)
 LOOM_DEFINE_OPERAND(loom_view_atomic_cmpxchg_view, 2)
 LOOM_DEFINE_VARIADIC_OPERANDS(loom_view_atomic_cmpxchg_indices, 3)
 LOOM_DEFINE_RESULT(loom_view_atomic_cmpxchg_old, 0)
+LOOM_DEFINE_INSTANCE_FLAGS(loom_view_atomic_cmpxchg_memory_flags)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_view_atomic_cmpxchg_success_ordering, 0, loom_atomic_ordering_t)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_view_atomic_cmpxchg_failure_ordering, 1, loom_atomic_ordering_t)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_view_atomic_cmpxchg_scope, 2, loom_atomic_scope_t)
@@ -288,6 +290,7 @@ typedef uint32_t loom_view_atomic_cmpxchg_build_flags_t;
 iree_status_t loom_view_atomic_cmpxchg_build(
     loom_builder_t* builder,
     loom_view_atomic_cmpxchg_build_flags_t build_flags,
+    uint8_t instance_flags,
     loom_may_consume loom_value_id_t expected,
     loom_may_consume loom_value_id_t replacement,
     loom_may_consume loom_value_id_t view,
@@ -341,6 +344,7 @@ LOOM_DEFINE_ISA(loom_view_atomic_load_isa, LOOM_OP_VIEW_ATOMIC_LOAD)
 LOOM_DEFINE_OPERAND(loom_view_atomic_load_view, 0)
 LOOM_DEFINE_VARIADIC_OPERANDS(loom_view_atomic_load_indices, 1)
 LOOM_DEFINE_RESULT(loom_view_atomic_load_result, 0)
+LOOM_DEFINE_INSTANCE_FLAGS(loom_view_atomic_load_memory_flags)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_view_atomic_load_ordering, 0, loom_atomic_ordering_t)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_view_atomic_load_scope, 1, loom_atomic_scope_t)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_view_atomic_load_cache_scope, 2, loom_cache_scope_t)
@@ -354,6 +358,7 @@ typedef uint32_t loom_view_atomic_load_build_flags_t;
 iree_status_t loom_view_atomic_load_build(
     loom_builder_t* builder,
     loom_view_atomic_load_build_flags_t build_flags,
+    uint8_t instance_flags,
     loom_may_consume loom_value_id_t view,
     const loom_value_id_t* indices,
     iree_host_size_t indices_count,
@@ -383,6 +388,7 @@ LOOM_DEFINE_ISA(loom_view_atomic_store_isa, LOOM_OP_VIEW_ATOMIC_STORE)
 LOOM_DEFINE_OPERAND(loom_view_atomic_store_value, 0)
 LOOM_DEFINE_OPERAND(loom_view_atomic_store_view, 1)
 LOOM_DEFINE_VARIADIC_OPERANDS(loom_view_atomic_store_indices, 2)
+LOOM_DEFINE_INSTANCE_FLAGS(loom_view_atomic_store_memory_flags)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_view_atomic_store_ordering, 0, loom_atomic_ordering_t)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_view_atomic_store_scope, 1, loom_atomic_scope_t)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_view_atomic_store_cache_scope, 2, loom_cache_scope_t)
@@ -396,6 +402,7 @@ typedef uint32_t loom_view_atomic_store_build_flags_t;
 iree_status_t loom_view_atomic_store_build(
     loom_builder_t* builder,
     loom_view_atomic_store_build_flags_t build_flags,
+    uint8_t instance_flags,
     loom_value_id_t value,
     loom_value_id_t view,
     const loom_value_id_t* indices,

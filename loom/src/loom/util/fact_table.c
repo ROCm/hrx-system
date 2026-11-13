@@ -19,6 +19,90 @@
 #include "loom/util/fact_relation.h"
 #include "loom/util/fact_vector_partition.h"
 
+struct loom_value_fact_definition_distributions_t {
+  // Uniform-scope ordinals; zero withdraws a definition's stronger proof.
+  uint8_t* scopes;
+  // Module-local value-ID span covered by scopes.
+  loom_value_fact_range_t range;
+};
+
+static uint8_t* loom_value_fact_table_definition_scope_entry(
+    const loom_value_fact_table_t* table, loom_value_id_t value_id) {
+  loom_value_fact_definition_distributions_t* definitions =
+      table->definition_distributions;
+  if (!definitions ||
+      !loom_value_fact_range_contains(definitions->range, value_id)) {
+    return NULL;
+  }
+  return &definitions->scopes[loom_value_fact_range_offset(definitions->range,
+                                                           value_id)];
+}
+
+loom_value_fact_uniform_scope_t loom_value_fact_table_definition_uniform_scope(
+    const loom_value_fact_table_t* table, loom_value_id_t value_id) {
+  const uint8_t* entry =
+      loom_value_fact_table_definition_scope_entry(table, value_id);
+  return entry ? (loom_value_fact_uniform_scope_t)*entry
+               : LOOM_VALUE_FACT_UNIFORM_SCOPE_NONE;
+}
+
+loom_value_facts_t loom_value_fact_table_lookup_at(
+    const loom_value_fact_table_t* table, const loom_module_t* module,
+    loom_value_id_t value_id, const loom_op_t* observer) {
+  loom_value_facts_t facts = loom_value_fact_table_lookup(table, value_id);
+  const loom_value_fact_uniform_scope_t scope =
+      loom_value_fact_table_definition_uniform_scope(table, value_id);
+  if (scope == LOOM_VALUE_FACT_UNIFORM_SCOPE_NONE) {
+    return facts;
+  }
+  const loom_value_t* value = loom_module_value(module, value_id);
+  const loom_block_t* definition = loom_value_is_block_arg(value)
+                                       ? loom_value_def_block(value)
+                                       : loom_value_def_op(value)->parent_block;
+  if (definition == observer->parent_block) {
+    loom_value_facts_mark_uniform_at_scope(&facts, scope);
+  } else if (definition->parent_region ==
+             observer->parent_block->parent_region) {
+    const loom_value_fact_cfg_region_t* region =
+        loom_value_fact_table_lookup_cfg_region(table,
+                                                definition->parent_region);
+    if (region && region->loops.reducible) {
+      // Builder inference can precede publication of a CFG edit. Only blocks
+      // owned by the retained snapshot have a cross-block observation proof.
+      const iree_host_size_t definition_index =
+          loom_cfg_graph_block_index(&region->graph, definition);
+      const iree_host_size_t observation_index =
+          loom_cfg_graph_block_index(&region->graph, observer->parent_block);
+      if (definition_index == IREE_HOST_SIZE_MAX ||
+          observation_index == IREE_HOST_SIZE_MAX) {
+        return facts;
+      }
+      const uint16_t loop = loom_cfg_loop_nest_innermost(
+          &region->loops, (uint16_t)definition_index);
+      // Verified SSA visibility supplies dominance. A use inside the same
+      // natural loop cannot combine values from different exits of that loop.
+      if (loop == LOOM_CFG_LOOP_NEST_NONE ||
+          loom_cfg_loop_nest_contains(&region->loops, loop,
+                                      (uint16_t)observation_index)) {
+        loom_value_facts_mark_uniform_at_scope(&facts, scope);
+      }
+    }
+  }
+  return facts;
+}
+
+loom_value_id_t loom_value_fact_table_lookup_inference_value(
+    const loom_value_fact_table_t* table, loom_value_id_t value,
+    loom_value_facts_t* out_facts) {
+  *out_facts = loom_value_fact_table_lookup(table, value);
+  if (table->context.publication && table->context.refine_operands.value_fn) {
+    return table->context.refine_operands.value_fn(
+        table->context.refine_operands.user_data, table,
+        table->context.publication->op, value, out_facts);
+  }
+  return loom_value_fact_table_query_numeric_identity(table, value);
+}
+
 //===----------------------------------------------------------------------===//
 // Capacity management
 //===----------------------------------------------------------------------===//
@@ -62,6 +146,37 @@ struct loom_value_fact_region_entry_t {
 static_assert(sizeof(loom_value_fact_region_entry_t) <= 80,
               "region execution facts must retain a compact cache footprint");
 
+static loom_value_facts_t* loom_value_fact_table_mutable_entry(
+    loom_value_fact_table_t* table, loom_value_id_t value_id) {
+  const iree_host_size_t index =
+      (iree_host_size_t)value_id - table->first_value_id;
+  if (index >= table->capacity) {
+    return NULL;
+  }
+  return &table->segments[index >> LOOM_VALUE_FACT_SEGMENT_SHIFT]
+              ->entries[index & LOOM_VALUE_FACT_SEGMENT_MASK];
+}
+
+static iree_status_t loom_value_fact_table_allocate_segment(
+    loom_value_fact_table_t* table, loom_value_fact_segment_t** out_segment) {
+  loom_value_fact_segment_t* segment = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate(table->arena, sizeof(*segment), (void**)&segment));
+  memset(segment, 0, sizeof(*segment));
+  segment->next_touched_segment_id = LOOM_VALUE_ID_INVALID;
+  if (table->replay.generation) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        table->transient_arena, LOOM_VALUE_FACT_SEGMENT_CAPACITY,
+        sizeof(*segment->replay_generations),
+        (void**)&segment->replay_generations));
+    memset(segment->replay_generations, 0,
+           LOOM_VALUE_FACT_SEGMENT_CAPACITY *
+               sizeof(*segment->replay_generations));
+  }
+  *out_segment = segment;
+  return iree_ok_status();
+}
+
 static iree_status_t loom_value_fact_table_ensure_range(
     loom_value_fact_table_t* table, loom_value_id_t first_value_id,
     iree_host_size_t end_value_id) {
@@ -70,83 +185,98 @@ static iree_status_t loom_value_fact_table_ensure_range(
     return iree_ok_status();
   }
   const iree_host_size_t old_capacity = table->capacity;
-  first_value_id &= ~UINT32_C(63);
+  first_value_id &= ~(loom_value_id_t)LOOM_VALUE_FACT_SEGMENT_MASK;
+  end_value_id =
+      iree_host_align(end_value_id, LOOM_VALUE_FACT_SEGMENT_CAPACITY);
   if (old_capacity) {
     first_value_id = iree_min(first_value_id, table->first_value_id);
     end_value_id = iree_max(end_value_id, table->first_value_id + old_capacity);
   }
-  iree_host_size_t new_capacity = old_capacity;
-  loom_value_facts_t* entries = table->entries;
-  IREE_RETURN_IF_ERROR(iree_arena_grow_array(
-      table->arena, 0, end_value_id - first_value_id,
-      sizeof(loom_value_facts_t), &new_capacity, (void**)&entries));
-  // Prepending reserves headroom before the old range. Round upward to retain
-  // the old suffix while moving touched membership by whole words.
-  if (old_capacity && first_value_id < table->first_value_id) {
-    first_value_id =
-        end_value_id > new_capacity
-            ? (loom_value_id_t)iree_host_align(end_value_id - new_capacity, 64)
-            : 0;
-  }
-  const iree_host_size_t prefix_count =
-      old_capacity ? table->first_value_id - first_value_id : 0;
-  memset(entries, 0, prefix_count * sizeof(*entries));
-  if (old_capacity) {
-    memcpy(entries + prefix_count, table->entries,
-           old_capacity * sizeof(*entries));
-  }
-  memset(entries + prefix_count + old_capacity, 0,
-         (new_capacity - prefix_count - old_capacity) * sizeof(*entries));
-  iree_host_size_t old_word_count = (old_capacity + 63) / 64;
-  iree_host_size_t word_count = (new_capacity + 63) / 64;
-  uint64_t* touched_bits = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      table->arena, word_count, sizeof(*touched_bits), (void**)&touched_bits));
-  const iree_host_size_t prefix_word_count = prefix_count / 64;
-  memset(touched_bits, 0, prefix_word_count * sizeof(*touched_bits));
-  if (old_word_count) {
-    memcpy(touched_bits + prefix_word_count, table->touched_bits,
-           old_word_count * sizeof(*touched_bits));
-  }
-  memset(touched_bits + prefix_word_count + old_word_count, 0,
-         (word_count - prefix_word_count - old_word_count) *
-             sizeof(*touched_bits));
-  if (table->replay.generation) {
-    uint32_t* generations = NULL;
-    IREE_RETURN_IF_ERROR(
-        iree_arena_allocate_array(table->transient_arena, new_capacity,
-                                  sizeof(*generations), (void**)&generations));
-    memset(generations, 0, prefix_count * sizeof(*generations));
-    if (old_capacity) {
-      memcpy(generations + prefix_count, table->replay.generations,
-             old_capacity * sizeof(*generations));
+  const iree_host_size_t new_capacity = end_value_id - first_value_id;
+  const iree_host_size_t old_segment_count =
+      old_capacity >> LOOM_VALUE_FACT_SEGMENT_SHIFT;
+  const iree_host_size_t new_segment_count =
+      new_capacity >> LOOM_VALUE_FACT_SEGMENT_SHIFT;
+  const iree_host_size_t prefix_segment_count =
+      old_capacity ? (table->first_value_id - first_value_id) >>
+                         LOOM_VALUE_FACT_SEGMENT_SHIFT
+                   : 0;
+
+  loom_value_fact_segment_t** segments = NULL;
+  const iree_host_size_t old_directory_offset =
+      old_capacity
+          ? (iree_host_size_t)(table->segments - table->segment_directory)
+          : 0;
+  const iree_host_size_t old_directory_suffix =
+      table->segment_directory_capacity - old_directory_offset -
+      old_segment_count;
+  const iree_host_size_t suffix_segment_count =
+      new_segment_count - prefix_segment_count - old_segment_count;
+  loom_value_fact_segment_t** segment_directory = table->segment_directory;
+  iree_host_size_t segment_directory_capacity =
+      table->segment_directory_capacity;
+  if (prefix_segment_count <= old_directory_offset &&
+      suffix_segment_count <= old_directory_suffix) {
+    segments = table->segments - prefix_segment_count;
+  } else {
+    iree_host_size_t directory_capacity = 1;
+    if (table->segment_directory_capacity &&
+        !iree_host_size_checked_mul(table->segment_directory_capacity, 2,
+                                    &directory_capacity)) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "fact segment directory overflow");
     }
-    memset(generations + prefix_count + old_capacity, 0,
-           (new_capacity - prefix_count - old_capacity) * sizeof(*generations));
-    table->replay.generations = generations;
+    while (directory_capacity < new_segment_count) {
+      if (!iree_host_size_checked_mul(directory_capacity, 2,
+                                      &directory_capacity)) {
+        return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                "fact segment directory overflow");
+      }
+    }
+    loom_value_fact_segment_t** directory = NULL;
+    IREE_RETURN_IF_ERROR(
+        iree_arena_allocate_array(table->arena, directory_capacity,
+                                  sizeof(*directory), (void**)&directory));
+    memset(directory, 0, directory_capacity * sizeof(*directory));
+    const iree_host_size_t directory_offset =
+        (directory_capacity - new_segment_count) / 2;
+    segments = directory + directory_offset;
+    if (old_segment_count) {
+      memcpy(segments + prefix_segment_count, table->segments,
+             old_segment_count * sizeof(*segments));
+    }
+    segment_directory = directory;
+    segment_directory_capacity = directory_capacity;
   }
-  table->entries = entries;
+
+  // Visit only the newly exposed directory slots. Scanning retained segments
+  // would make repeated one-segment growth quadratic even though their
+  // payloads never move.
+  for (iree_host_size_t i = 0; i < prefix_segment_count; ++i) {
+    if (!segments[i]) {
+      IREE_RETURN_IF_ERROR(
+          loom_value_fact_table_allocate_segment(table, &segments[i]));
+    }
+  }
+  const iree_host_size_t suffix_segment_start =
+      prefix_segment_count + old_segment_count;
+  for (iree_host_size_t i = suffix_segment_start; i < new_segment_count; ++i) {
+    if (!segments[i]) {
+      IREE_RETURN_IF_ERROR(
+          loom_value_fact_table_allocate_segment(table, &segments[i]));
+    }
+  }
+  table->segment_directory = segment_directory;
+  table->segment_directory_capacity = segment_directory_capacity;
+  table->segments = segments;
   table->first_value_id = first_value_id;
   table->capacity = new_capacity;
-  table->touched_bits = touched_bits;
   return iree_ok_status();
 }
 
 static iree_status_t loom_value_fact_table_allocate_initial_capacity(
     loom_value_fact_table_t* table, iree_host_size_t capacity) {
   return loom_value_fact_table_ensure_range(table, 0, capacity);
-}
-
-static iree_status_t loom_value_fact_table_append_touched_value(
-    loom_value_fact_table_t* table, loom_value_id_t value_id) {
-  if (table->touched_count >= table->touched_capacity) {
-    IREE_RETURN_IF_ERROR(iree_arena_grow_array(
-        table->arena, table->touched_count, table->touched_count + 1,
-        sizeof(*table->touched_values), &table->touched_capacity,
-        (void**)&table->touched_values));
-  }
-  table->touched_values[table->touched_count++] = value_id;
-  return iree_ok_status();
 }
 
 //===----------------------------------------------------------------------===//
@@ -205,6 +335,7 @@ iree_status_t loom_value_fact_table_initialize_with_arenas(
   memset(table, 0, sizeof(*table));
   table->arena = arena;
   table->transient_arena = transient_arena;
+  table->first_touched_segment_id = LOOM_VALUE_ID_INVALID;
   table->context.table = table;
   return loom_value_fact_table_allocate_initial_capacity(table,
                                                          initial_capacity);
@@ -255,16 +386,26 @@ void loom_value_fact_table_clear_scope(loom_value_fact_table_t* table) {
   table->condition_integer_projection_count = 0;
   table->result_type_kind_bits = 0;
   loom_value_fact_table_clear_identities(table);
-  for (iree_host_size_t i = 0; i < table->touched_count; ++i) {
-    loom_value_id_t value_id = table->touched_values[i];
-    const iree_host_size_t index = value_id - table->first_value_id;
-    table->entries[index] = (loom_value_facts_t){0};
-    table->touched_bits[index / 64] &= ~(UINT64_C(1) << (index % 64));
-  }
   loom_value_fact_table_clear_origin_scope(table);
+  loom_value_id_t segment_value_id = table->first_touched_segment_id;
+  while (segment_value_id != LOOM_VALUE_ID_INVALID) {
+    const iree_host_size_t index = segment_value_id - table->first_value_id;
+    loom_value_fact_segment_t* segment =
+        table->segments[index >> LOOM_VALUE_FACT_SEGMENT_SHIFT];
+    uint64_t touched_bits = segment->touched_bits;
+    while (touched_bits) {
+      const uint32_t segment_offset =
+          iree_math_count_trailing_zeros_u64(touched_bits);
+      segment->entries[segment_offset] = (loom_value_facts_t){0};
+      touched_bits &= touched_bits - 1;
+    }
+    segment_value_id = segment->next_touched_segment_id;
+    segment->touched_bits = 0;
+    segment->next_touched_segment_id = LOOM_VALUE_ID_INVALID;
+  }
+  table->first_touched_segment_id = LOOM_VALUE_ID_INVALID;
   table->touched_count = 0;
   table->replay.generation = 0;
-  table->replay.generations = NULL;
   table->replay.loop = NULL;
   table->replay.reads = NULL;
   table->count = 0;
@@ -282,6 +423,8 @@ void loom_value_fact_table_clear_scope(loom_value_fact_table_t* table) {
   table->regions.has_structured_summaries = false;
   table->regions.has_independent_targets = false;
   table->layout_origins = NULL;
+  table->integer_casts = NULL;
+  table->definition_distributions = NULL;
   table->vector_partitions = NULL;
   table->select_dependencies.index = NULL;
   table->select_dependencies.pages = NULL;
@@ -767,13 +910,64 @@ iree_status_t loom_value_fact_table_touch(loom_value_fact_table_t* table,
   IREE_RETURN_IF_ERROR(loom_value_fact_table_ensure_range(
       table, value_id, (iree_host_size_t)value_id + 1));
   const iree_host_size_t index = value_id - table->first_value_id;
-  const uint64_t touched_bit = UINT64_C(1) << (index % 64);
-  if (!(table->touched_bits[index / 64] & touched_bit)) {
-    IREE_RETURN_IF_ERROR(
-        loom_value_fact_table_append_touched_value(table, value_id));
-    table->touched_bits[index / 64] |= touched_bit;
+  loom_value_fact_segment_t* segment =
+      table->segments[index >> LOOM_VALUE_FACT_SEGMENT_SHIFT];
+  const uint64_t touched_bit = UINT64_C(1)
+                               << (index & LOOM_VALUE_FACT_SEGMENT_MASK);
+  if (!(segment->touched_bits & touched_bit)) {
+    if (!segment->touched_bits) {
+      segment->next_touched_segment_id = table->first_touched_segment_id;
+      table->first_touched_segment_id =
+          value_id & ~(loom_value_id_t)LOOM_VALUE_FACT_SEGMENT_MASK;
+    }
+    segment->touched_bits |= touched_bit;
+    ++table->touched_count;
   }
   return iree_ok_status();
+}
+
+void loom_value_fact_table_scope_begin(
+    const loom_value_fact_table_t* table,
+    loom_value_fact_scope_iterator_t* out_iterator) {
+  *out_iterator = (loom_value_fact_scope_iterator_t){
+      .table = table,
+      .segment_value_id = LOOM_VALUE_ID_INVALID,
+  };
+  if (!table || table->touched_count == 0) {
+    return;
+  }
+  const loom_value_id_t segment_value_id = table->first_touched_segment_id;
+  const iree_host_size_t index = segment_value_id - table->first_value_id;
+  out_iterator->segment_value_id = segment_value_id;
+  out_iterator->remaining_bits =
+      table->segments[index >> LOOM_VALUE_FACT_SEGMENT_SHIFT]->touched_bits;
+}
+
+loom_value_id_t loom_value_fact_scope_next(
+    loom_value_fact_scope_iterator_t* iterator) {
+  while (iterator->segment_value_id != LOOM_VALUE_ID_INVALID) {
+    if (iterator->remaining_bits) {
+      const loom_value_id_t value_id =
+          iterator->segment_value_id +
+          iree_math_count_trailing_zeros_u64(iterator->remaining_bits);
+      iterator->remaining_bits &= iterator->remaining_bits - 1;
+      return value_id;
+    }
+    const loom_value_fact_table_t* table = iterator->table;
+    const iree_host_size_t index =
+        iterator->segment_value_id - table->first_value_id;
+    const loom_value_fact_segment_t* segment =
+        table->segments[index >> LOOM_VALUE_FACT_SEGMENT_SHIFT];
+    iterator->segment_value_id = segment->next_touched_segment_id;
+    if (iterator->segment_value_id != LOOM_VALUE_ID_INVALID) {
+      const iree_host_size_t next_index =
+          iterator->segment_value_id - table->first_value_id;
+      iterator->remaining_bits =
+          table->segments[next_index >> LOOM_VALUE_FACT_SEGMENT_SHIFT]
+              ->touched_bits;
+    }
+  }
+  return LOOM_VALUE_ID_INVALID;
 }
 
 iree_status_t loom_value_fact_table_enable_replay_generations(
@@ -781,13 +975,17 @@ iree_status_t loom_value_fact_table_enable_replay_generations(
   if (table->replay.generation) {
     return iree_ok_status();
   }
-  if (table->capacity) {
-    IREE_RETURN_IF_ERROR(
-        iree_arena_allocate_array(table->transient_arena, table->capacity,
-                                  sizeof(*table->replay.generations),
-                                  (void**)&table->replay.generations));
-    memset(table->replay.generations, 0,
-           table->capacity * sizeof(*table->replay.generations));
+  const iree_host_size_t segment_count =
+      table->capacity >> LOOM_VALUE_FACT_SEGMENT_SHIFT;
+  for (iree_host_size_t i = 0; i < segment_count; ++i) {
+    loom_value_fact_segment_t* segment = table->segments[i];
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        table->transient_arena, LOOM_VALUE_FACT_SEGMENT_CAPACITY,
+        sizeof(*segment->replay_generations),
+        (void**)&segment->replay_generations));
+    memset(segment->replay_generations, 0,
+           LOOM_VALUE_FACT_SEGMENT_CAPACITY *
+               sizeof(*segment->replay_generations));
   }
   table->replay.generation = 2;
   return iree_ok_status();
@@ -798,10 +996,47 @@ static void loom_value_fact_table_advance_generation(
   table->replay.generation += 2;
   if (IREE_UNLIKELY(!table->replay.generation)) {
     // Zero invalidates every evaluation watermark before the counter restarts.
-    memset(table->replay.generations, 0,
-           table->capacity * sizeof(*table->replay.generations));
+    const iree_host_size_t segment_count =
+        table->capacity >> LOOM_VALUE_FACT_SEGMENT_SHIFT;
+    for (iree_host_size_t i = 0; i < segment_count; ++i) {
+      memset(table->segments[i]->replay_generations, 0,
+             LOOM_VALUE_FACT_SEGMENT_CAPACITY *
+                 sizeof(*table->segments[i]->replay_generations));
+    }
     table->replay.generation = 2;
   }
+}
+
+iree_status_t loom_value_fact_table_define_uniform_scope(
+    loom_value_fact_table_t* table, loom_value_id_t value_id,
+    loom_value_fact_uniform_scope_t scope) {
+  uint8_t* entry =
+      loom_value_fact_table_definition_scope_entry(table, value_id);
+  if ((entry ? *entry : 0) == scope) {
+    return iree_ok_status();
+  }
+  if (!entry) {
+    if (!table->definition_distributions) {
+      IREE_RETURN_IF_ERROR(iree_arena_allocate(
+          table->transient_arena, sizeof(*table->definition_distributions),
+          (void**)&table->definition_distributions));
+      memset(table->definition_distributions, 0,
+             sizeof(*table->definition_distributions));
+    }
+    loom_value_fact_definition_distributions_t* definitions =
+        table->definition_distributions;
+    IREE_RETURN_IF_ERROR(loom_value_fact_range_grow(
+        table->transient_arena, value_id, sizeof(*definitions->scopes), NULL,
+        &definitions->range, (void**)&definitions->scopes));
+    entry = loom_value_fact_table_definition_scope_entry(table, value_id);
+  }
+  *entry = (uint8_t)scope;
+  if (table->replay.generation) {
+    loom_value_fact_table_advance_generation(table);
+    loom_value_fact_table_set_replay_generation(
+        table, value_id, table->replay.generation | UINT32_C(1));
+  }
+  return iree_ok_status();
 }
 
 iree_status_t loom_value_fact_table_define(loom_value_fact_table_t* table,
@@ -809,15 +1044,23 @@ iree_status_t loom_value_fact_table_define(loom_value_fact_table_t* table,
                                            loom_value_facts_t facts) {
   IREE_ASSERT_NE(facts.known_divisor, 0);
   IREE_RETURN_IF_ERROR(loom_value_fact_table_touch(table, value_id));
-  const iree_host_size_t index = value_id - table->first_value_id;
+  loom_value_facts_t* entry =
+      loom_value_fact_table_mutable_entry(table, value_id);
+  uint8_t* definition_scope =
+      loom_value_fact_table_definition_scope_entry(table, value_id);
+  const bool clears_definition = definition_scope && *definition_scope != 0;
+  if (definition_scope) {
+    *definition_scope = 0;
+  }
   if (table->replay.generation &&
-      !loom_value_facts_equal(table->entries[index], facts)) {
+      (clears_definition || !loom_value_facts_equal(*entry, facts))) {
     loom_value_fact_table_advance_generation(table);
     // Loop arguments, seeds, and resets publish without evaluating an ordinary
     // equation. Its defining operation must establish this result before reuse.
-    table->replay.generations[index] = table->replay.generation | UINT32_C(1);
+    loom_value_fact_table_set_replay_generation(
+        table, value_id, table->replay.generation | UINT32_C(1));
   }
-  table->entries[index] = facts;
+  *entry = facts;
   if ((iree_host_size_t)value_id + 1 > table->count) {
     table->count = (iree_host_size_t)value_id + 1;
   }
@@ -829,16 +1072,22 @@ void loom_value_fact_table_undefine(loom_value_fact_table_t* table,
   loom_value_fact_loop_replay_invalidate(table);
   loom_value_fact_integer_relations_undefine(table, value_id);
   loom_value_fact_table_clear_origins(table, value_id);
+  uint8_t* definition_scope =
+      loom_value_fact_table_definition_scope_entry(table, value_id);
+  if (definition_scope) {
+    *definition_scope = 0;
+  }
   if (table->vector_partitions) {
     loom_value_fact_table_clear_vector_partition(table, value_id);
   }
-  const iree_host_size_t index =
-      (iree_host_size_t)value_id - table->first_value_id;
-  if (index < table->capacity) {
-    table->entries[index] = (loom_value_facts_t){0};
+  loom_value_facts_t* entry =
+      loom_value_fact_table_mutable_entry(table, value_id);
+  if (entry) {
+    *entry = (loom_value_facts_t){0};
     if (table->replay.generation) {
       loom_value_fact_table_advance_generation(table);
-      table->replay.generations[index] = table->replay.generation | UINT32_C(1);
+      loom_value_fact_table_set_replay_generation(
+          table, value_id, table->replay.generation | UINT32_C(1));
     }
   }
   loom_value_fact_table_undefine_identity(table, value_id);
@@ -936,14 +1185,22 @@ static iree_status_t loom_value_fact_table_record_exact_relation(
     return iree_ok_status();
   }
   const loom_value_id_t* results = loom_op_const_results(op);
+  bool has_retained_relations = false;
   for (uint16_t i = 0; i < op->result_count; ++i) {
     if (results[i] == LOOM_VALUE_ID_INVALID ||
         !loom_value_facts_is_exact(
             loom_value_fact_table_lookup(table, results[i]))) {
       return iree_ok_status();
     }
+    const loom_value_fact_relation_roots_t roots =
+        loom_value_fact_integer_relations_snapshot(table, results[i]);
+    for (uint8_t outcome = 0; outcome < LOOM_INTEGER_ORDER_OUTCOME_COUNT;
+         ++outcome) {
+      has_retained_relations |= roots.excluded[outcome] != 0;
+    }
   }
-  if (!loom_value_fact_table_op_has_dynamic_predicate(table, op)) {
+  if (!has_retained_relations &&
+      !loom_value_fact_table_op_has_dynamic_predicate(table, op)) {
     return iree_ok_status();
   }
   if (table->exact_relations.count == table->exact_relations.capacity) {
@@ -958,18 +1215,6 @@ static iree_status_t loom_value_fact_table_record_exact_relation(
   }
   table->exact_relations.ops[table->exact_relations.count++] = (loom_op_t*)op;
   return iree_ok_status();
-}
-
-void loom_value_fact_table_scope_values(const loom_value_fact_table_t* table,
-                                        const loom_value_id_t** out_value_ids,
-                                        iree_host_size_t* out_value_count) {
-  if (table == NULL) {
-    *out_value_ids = NULL;
-    *out_value_count = 0;
-    return;
-  }
-  *out_value_ids = table->touched_values;
-  *out_value_count = table->touched_count;
 }
 
 iree_status_t loom_value_fact_table_clone_values(

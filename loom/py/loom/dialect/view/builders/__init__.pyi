@@ -92,6 +92,7 @@ class ViewBuilder(DialectBuilder):
     def cmpxchg(
         self,
         *,
+        memory_flags: str = ...,
         expected: ValueRef,
         replacement: ValueRef,
         view: ValueRef,
@@ -119,6 +120,7 @@ class ViewBuilder(DialectBuilder):
     def atomic_load(
         self,
         *,
+        memory_flags: str = ...,
         view: ValueRef,
         indices: list[int | ValueRef],
         ordering: str,
@@ -134,6 +136,7 @@ class ViewBuilder(DialectBuilder):
     def atomic_store(
         self,
         *,
+        memory_flags: str = ...,
         value: ValueRef,
         view: ValueRef,
         indices: list[int | ValueRef],

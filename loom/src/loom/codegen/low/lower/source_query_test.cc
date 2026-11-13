@@ -228,6 +228,9 @@ class LowLowerSourceQueryTest : public ::testing::Test {
         .user_data = probe,
         .first_op_kind = probe->handled_op->kind,
         .op_kind_count = 1,
+        .first_terminal_rejection_op_kind = probe->handled_op->kind,
+        .terminal_rejection_op_kind_count = static_cast<uint16_t>(
+            probe->outcome == LOOM_TARGET_CONTRACT_QUERY_TERMINAL_REJECTION),
     };
     options_.policy = policy;
   }
@@ -591,7 +594,8 @@ TEST_F(LowLowerSourceQueryTest, SelectsGeneratedTargetContract) {
   ASSERT_NE(result.selected_descriptor, nullptr);
   const iree_string_view_t semantic_tag = loom_low_descriptor_set_string(
       mapping_context_.descriptor_set,
-      result.selected_descriptor->semantic_tag_string_ref);
+      loom_low_descriptor_semantic_tag_string_ref(
+          mapping_context_.descriptor_set, result.selected_descriptor));
   EXPECT_TRUE(iree_string_view_equal(semantic_tag, IREE_SV("integer.add.i32")));
 }
 
@@ -610,11 +614,13 @@ TEST_F(LowLowerSourceQueryTest, RelatedOpsUseSelectedSourceGraphContract) {
       loom_target_contract_query_result_empty();
   IREE_ASSERT_OK(QueryContract(fused_root_op_, &root_result));
   ASSERT_NE(root_result.selected_descriptor, nullptr);
-  EXPECT_TRUE(iree_string_view_equal(
-      loom_low_descriptor_set_string(
-          mapping_context_.descriptor_set,
-          root_result.selected_descriptor->semantic_tag_string_ref),
-      IREE_SV("integer.add.i32")));
+  EXPECT_TRUE(
+      iree_string_view_equal(loom_low_descriptor_set_string(
+                                 mapping_context_.descriptor_set,
+                                 loom_low_descriptor_semantic_tag_string_ref(
+                                     mapping_context_.descriptor_set,
+                                     root_result.selected_descriptor)),
+                             IREE_SV("integer.add.i32")));
 
   // Equal-score graphs use stable candidate order at their shared tree top, so
   // the later add claims the multiply independently of query order.
@@ -622,11 +628,13 @@ TEST_F(LowLowerSourceQueryTest, RelatedOpsUseSelectedSourceGraphContract) {
       loom_target_contract_query_result_empty();
   IREE_ASSERT_OK(QueryContract(overlap_root_op_, &overlap_result));
   ASSERT_NE(overlap_result.selected_descriptor, nullptr);
-  EXPECT_TRUE(iree_string_view_equal(
-      loom_low_descriptor_set_string(
-          mapping_context_.descriptor_set,
-          overlap_result.selected_descriptor->semantic_tag_string_ref),
-      IREE_SV("test.fused.mul_add.i32")));
+  EXPECT_TRUE(
+      iree_string_view_equal(loom_low_descriptor_set_string(
+                                 mapping_context_.descriptor_set,
+                                 loom_low_descriptor_semantic_tag_string_ref(
+                                     mapping_context_.descriptor_set,
+                                     overlap_result.selected_descriptor)),
+                             IREE_SV("test.fused.mul_add.i32")));
 }
 
 TEST_F(LowLowerSourceQueryTest, TargetOwnedContractComposesWithGeneratedCases) {
@@ -649,6 +657,25 @@ TEST_F(LowLowerSourceQueryTest, TargetOwnedContractComposesWithGeneratedCases) {
   EXPECT_FALSE(probe.observed_unaccepted_op_kind);
 }
 
+TEST_F(LowLowerSourceQueryTest, TargetOwnedTerminalRejectionUsesDeclaredRange) {
+  QueryProbe probe = {
+      .handled_op = mapped_source_op_,
+      .outcome = LOOM_TARGET_CONTRACT_QUERY_TERMINAL_REJECTION,
+  };
+  loom_low_lower_policy_t policy;
+  InstallTargetContract(&probe, &policy);
+  EXPECT_TRUE(loom_low_lower_op_contract_query_may_return_terminal_rejection(
+      &policy.query_op_contract, mapped_source_op_->kind));
+  EXPECT_FALSE(loom_low_lower_op_contract_query_may_return_terminal_rejection(
+      &policy.query_op_contract, source_op_->kind));
+  CreateQueryScope();
+
+  loom_target_contract_query_result_t result =
+      loom_target_contract_query_result_empty();
+  IREE_ASSERT_OK(QueryContract(mapped_source_op_, &result));
+  EXPECT_EQ(result.outcome, LOOM_TARGET_CONTRACT_QUERY_TERMINAL_REJECTION);
+}
+
 TEST_F(LowLowerSourceQueryTest, TargetOwnedRelatedOpExcludesGeneratedGraphs) {
   QueryProbe probe = {.handled_op = fused_related_op_};
   loom_low_lower_policy_t policy;
@@ -666,11 +693,13 @@ TEST_F(LowLowerSourceQueryTest, TargetOwnedRelatedOpExcludesGeneratedGraphs) {
         loom_target_contract_query_result_empty();
     IREE_ASSERT_OK(QueryContract(root, &root_result));
     ASSERT_NE(root_result.selected_descriptor, nullptr);
-    EXPECT_TRUE(iree_string_view_equal(
-        loom_low_descriptor_set_string(
-            mapping_context_.descriptor_set,
-            root_result.selected_descriptor->semantic_tag_string_ref),
-        IREE_SV("integer.add.i32")));
+    EXPECT_TRUE(
+        iree_string_view_equal(loom_low_descriptor_set_string(
+                                   mapping_context_.descriptor_set,
+                                   loom_low_descriptor_semantic_tag_string_ref(
+                                       mapping_context_.descriptor_set,
+                                       root_result.selected_descriptor)),
+                               IREE_SV("integer.add.i32")));
   }
 }
 
@@ -693,11 +722,13 @@ TEST_F(LowLowerSourceQueryTest,
       loom_target_contract_query_result_empty();
   IREE_ASSERT_OK(QueryContract(fused_root_op_, &root_result));
   ASSERT_NE(root_result.selected_descriptor, nullptr);
-  EXPECT_TRUE(iree_string_view_equal(
-      loom_low_descriptor_set_string(
-          mapping_context_.descriptor_set,
-          root_result.selected_descriptor->semantic_tag_string_ref),
-      IREE_SV("integer.add.i32")));
+  EXPECT_TRUE(
+      iree_string_view_equal(loom_low_descriptor_set_string(
+                                 mapping_context_.descriptor_set,
+                                 loom_low_descriptor_semantic_tag_string_ref(
+                                     mapping_context_.descriptor_set,
+                                     root_result.selected_descriptor)),
+                             IREE_SV("integer.add.i32")));
 }
 
 TEST_F(LowLowerSourceQueryTest, NativeContractWithoutMetadataCallback) {

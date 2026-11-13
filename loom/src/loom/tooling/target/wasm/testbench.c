@@ -310,8 +310,8 @@ static iree_status_t loom_wasm_testbench_compile_product(
   if (iree_status_is_ok(status)) {
     status = loom_wasm_host_module_load(
         iree_make_const_byte_span(contents.data, contents.data_length),
-        export_name, product->parameter_count, product->parameter_types,
-        product->result_count, product->result_types, &product->host_module);
+        export_name, product->parameter_count, product->result_count,
+        product->parameter_types, product->result_types, &product->host_module);
   }
   if (iree_status_is_ok(status)) {
     *out_product = product;
@@ -582,7 +582,8 @@ static iree_status_t loom_wasm_testbench_execute_call(
   iree_status_t status = iree_ok_status();
   const bool has_memory = iree_any_bit_set(
       product->host_module.flags, LOOM_WASM_HOST_MODULE_FLAG_HAS_MEMORY);
-  uint64_t next_address = 0;
+  // Address zero represents a null buffer in the Wasm embedding ABI.
+  uint64_t next_address = LOOM_WASM_TESTBENCH_ROOT_ALIGNMENT;
   uint32_t mapped_count = 0;
   for (uint32_t i = 0; i < product->root_count && iree_status_is_ok(status);
        ++i) {

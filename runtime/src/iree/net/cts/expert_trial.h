@@ -93,8 +93,8 @@ struct ExpertTrialResult : CollectiveTransportResult {
 iree_status_t RunExpertTrial(
     const TransportBackend& transport,
     const iree::async::cts::ProactorFactory& create_proactor,
-    const ExpertTrialOptions& options, ExpertTrialResult* out_result,
-    TransferTrialMeasurement measurement = {});
+    const ExpertTrialOptions& options, TransferTrialMeasurement measurement,
+    ExpertTrialResult* out_result);
 
 }  // namespace iree::net::cts
 

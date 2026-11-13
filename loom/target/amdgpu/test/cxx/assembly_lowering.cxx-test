@@ -21,3 +21,26 @@ low.func.def public target<amdgpu.rdna3_5.core>(@__loom_target_context_0_0) abi(
 }
 
 amdgpu.target<gfx1151> @__loom_target_context_0_0 {subgroup_size = 32}
+
+// ====
+#include <loomcxx/low.h>
+
+struct [[loom::representation("amdgpu.gfx11.generic.core")]] Contract {};
+unsigned pack(unsigned even, unsigned odd) {
+  return loom::low::assembly<Contract, unsigned>(R"loom(
+      (%even: reg<amdgpu.vgpr>, %odd: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) {
+        %selector = s_mov_b32 0x05040100
+        %packed = v_perm_b32 %odd, %even, %selector
+        return %packed
+      }
+  )loom", even, odd);
+}
+
+// ----
+low.func.def public target<amdgpu.rdna3_5.core>(@__loom_target_context_0_0) abi(hal_kernel) @pack(%even: reg<amdgpu.vgpr>, %odd: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %selector = s_mov_b32 84148480
+  %packed = v_perm_b32 %odd, %even, %selector
+  return %packed
+}
+
+amdgpu.target<gfx1151> @__loom_target_context_0_0 {subgroup_size = 32}

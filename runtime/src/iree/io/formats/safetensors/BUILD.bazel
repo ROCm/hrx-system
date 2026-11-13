@@ -5,6 +5,7 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
+load("//runtime/build_tools/bazel:cc_fuzz.bzl", "iree_runtime_cc_fuzz")
 load("//runtime/build_tools/bazel:cc_test.bzl", "iree_runtime_cc_test")
 
 package(
@@ -26,6 +27,28 @@ iree_runtime_cc_library(
         "//runtime/src/iree/base/internal:json",
         "//runtime/src/iree/io:file_handle",
         "//runtime/src/iree/io:parameter_index",
+    ],
+)
+
+SAFETENSORS_FUZZ_SEEDS = [
+    "//runtime/src/iree/io/formats/safetensors/testdata:empty.safetensors",
+    "//runtime/src/iree/io/formats/safetensors/testdata:multiple.safetensors",
+    "//runtime/src/iree/io/formats/safetensors/testdata:single.safetensors",
+]
+
+iree_runtime_cc_fuzz(
+    name = "safetensors_parser_fuzz",
+    srcs = ["safetensors_parser_fuzz.cc"],
+    args = [
+        "-seed_inputs=" + ",".join([
+            "$(rootpath %s)" % seed
+            for seed in SAFETENSORS_FUZZ_SEEDS
+        ]),
+    ],
+    data = SAFETENSORS_FUZZ_SEEDS,
+    deps = [
+        ":safetensors",
+        "//runtime/src/iree/io/formats:parameter_index_fuzz_util",
     ],
 )
 

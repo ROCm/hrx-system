@@ -46,21 +46,23 @@ static iree_status_t loom_serve_text_check_parameters(
 }
 
 static iree_status_t loom_serve_text_check_layouts(
-    const loom_serve_preparation_t* preparation, iree_host_size_t shared_count,
-    iree_host_size_t stage_count, const loom_serve_text_stage_t* stages) {
+    const loom_runtime_preparation_t* preparation,
+    iree_host_size_t shared_count, iree_host_size_t stage_count,
+    const loom_serve_text_stage_t* stages) {
   const loom_cmd_program_t* prefill = &stages[0].program;
-  const loom_serve_preparation_stage_t* first =
-      loom_serve_preparation_stage(preparation, 0);
+  const loom_runtime_preparation_stage_t* first =
+      loom_runtime_preparation_stage(preparation, 0);
   if (!first->parameter_count) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "source must declare a checkpoint domain");
   }
-  const loom_serve_preparation_parameter_t* checkpoint = &first->parameters[0];
+  const loom_runtime_preparation_parameter_t* checkpoint =
+      &first->parameters[0];
   for (iree_host_size_t i = 0; i < stage_count; ++i) {
     const loom_cmd_program_t* program = &stages[i].program;
-    const loom_serve_preparation_stage_t* declaration =
-        loom_serve_preparation_stage(preparation, i);
-    IREE_RETURN_IF_ERROR(loom_serve_preparation_stage_check_workspace(
+    const loom_runtime_preparation_stage_t* declaration =
+        loom_runtime_preparation_stage(preparation, i);
+    IREE_RETURN_IF_ERROR(loom_runtime_preparation_stage_check_workspace(
         declaration, program->requirements.transient.required_byte_length));
     const uint32_t binding_count =
         program->requirements.rebindable_binding_count;
@@ -79,7 +81,7 @@ static iree_status_t loom_serve_text_check_layouts(
                               "stage does not match the token runner bindings");
     }
     for (uint32_t root = 0; root < roots; ++root) {
-      const loom_serve_preparation_parameter_t* parameter =
+      const loom_runtime_preparation_parameter_t* parameter =
           &declaration->parameters[root];
       if (parameter->binding != root ||
           loom_cmd_program_parameter_root_at(program, root)
@@ -97,8 +99,8 @@ static iree_status_t loom_serve_text_check_layouts(
           IREE_STATUS_INVALID_ARGUMENT,
           "shared stages must implement the target bindings");
     }
-    if (!loom_serve_preparation_parameter_equal(&declaration->parameters[0],
-                                                checkpoint)) {
+    if (!loom_runtime_preparation_parameter_equal(&declaration->parameters[0],
+                                                  checkpoint)) {
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
           "shared target stages must use one checkpoint domain");
@@ -133,10 +135,11 @@ static iree_status_t loom_serve_text_stages_initialize(
 // Group roots once during binding. The original stage order preserves the
 // identical-layout target prefix in the first domain.
 iree_status_t loom_serve_text_stages_bind(
-    loom_serve_device_t* device, loom_serve_pool_t* pool,
-    const loom_serve_preparation_t* preparation, iree_host_size_t shared_count,
-    iree_host_size_t stage_count, loom_serve_text_stage_t* stages,
-    loom_serve_text_parameters_t* parameters, iree_allocator_t host_allocator) {
+    loom_runtime_device_t* device, loom_runtime_pool_t* pool,
+    const loom_runtime_preparation_t* preparation,
+    iree_host_size_t shared_count, iree_host_size_t stage_count,
+    loom_serve_text_stage_t* stages, loom_serve_text_parameters_t* parameters,
+    iree_allocator_t host_allocator) {
   iree_host_size_t root_count = 0;
   IREE_RETURN_IF_ERROR(loom_serve_text_stages_initialize(
       stage_count, stages, host_allocator, &root_count));
@@ -148,7 +151,7 @@ iree_status_t loom_serve_text_stages_bind(
   IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
       host_allocator, root_count, sizeof(*parameters->sources),
       (void**)&parameters->sources));
-  loom_serve_weight_root_t* roots = NULL;
+  loom_runtime_weight_root_t* roots = NULL;
   iree_host_size_t* domains = NULL;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
       host_allocator, root_count, sizeof(*roots), (void**)&roots));
@@ -157,16 +160,16 @@ iree_status_t loom_serve_text_stages_bind(
   if (iree_status_is_ok(status)) {
     iree_host_size_t root_index = 0;
     for (iree_host_size_t i = 0; i < stage_count; ++i) {
-      const loom_serve_preparation_stage_t* declaration =
-          loom_serve_preparation_stage(preparation, i);
+      const loom_runtime_preparation_stage_t* declaration =
+          loom_runtime_preparation_stage(preparation, i);
       for (uint32_t r = 0; r < declaration->parameter_count; ++r) {
-        const loom_serve_preparation_parameter_t* source =
+        const loom_runtime_preparation_parameter_t* source =
             &declaration->parameters[r];
         iree_host_size_t domain = 0;
         for (; domain < parameters->count; ++domain) {
-          const loom_serve_preparation_parameter_t* prior =
+          const loom_runtime_preparation_parameter_t* prior =
               parameters->sources[domain];
-          if (loom_serve_preparation_parameter_equal(source, prior)) {
+          if (loom_runtime_preparation_parameter_equal(source, prior)) {
             break;
           }
         }
@@ -180,14 +183,14 @@ iree_status_t loom_serve_text_stages_bind(
          domain < parameters->count && iree_status_is_ok(status); ++domain) {
       iree_host_size_t root_index = 0;
       iree_host_size_t count = 0;
-      loom_serve_pool_t* domain_pool = NULL;
+      loom_runtime_pool_t* domain_pool = NULL;
       for (iree_host_size_t i = 0; i < stage_count; ++i) {
         const loom_cmd_program_t* program = &stages[i].program;
         for (uint32_t r = 0; r < program->parameter_roots.count; ++r) {
           if (domains[root_index++] != domain) {
             continue;
           }
-          loom_serve_pool_t* consumer_pool =
+          loom_runtime_pool_t* consumer_pool =
               stages[i].parameter_pool ? stages[i].parameter_pool : pool;
           if (domain_pool && domain_pool != consumer_pool) {
             status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -197,22 +200,26 @@ iree_status_t loom_serve_text_stages_bind(
           domain_pool = consumer_pool;
           const loom_cmd_program_parameter_root_t root =
               loom_cmd_program_parameter_root_at(program, r);
-          roots[count++] = (loom_serve_weight_root_t){
+          roots[count++] = (loom_runtime_weight_root_t){
               .program = program,
               .root = root,
               .buffer = &stages[i].fixed_buffers[root.fixed_buffer_index],
           };
         }
       }
-      if (!iree_status_is_ok(status)) break;
-      status = loom_serve_weights_allocate(
-          loom_serve_device_handle(device),
-          loom_serve_device_transfer_queue(device),
-          loom_serve_device_dispatch_queue(device),
-          loom_serve_pool_storage(domain_pool), loom_serve_pool_memory(domain_pool),
-          loom_serve_pool_weight_geometry(domain_pool), NULL,
-          loom_serve_pool_workspace(domain_pool), domain == 0 ? shared_count : 0,
-          count, roots, host_allocator, &parameters->plans[domain]);
+      if (!iree_status_is_ok(status)) {
+        break;
+      }
+      status = loom_runtime_weights_allocate(
+          loom_runtime_device_handle(device),
+          loom_runtime_device_transfer_queue(device),
+          loom_runtime_device_dispatch_queue(device),
+          loom_runtime_pool_storage(domain_pool),
+          loom_runtime_pool_memory(domain_pool),
+          loom_runtime_pool_weight_geometry(domain_pool), NULL,
+          loom_runtime_pool_workspace(domain_pool),
+          domain == 0 ? shared_count : 0, count, roots, host_allocator,
+          &parameters->plans[domain]);
     }
   }
   iree_allocator_free(host_allocator, domains);
@@ -221,9 +228,10 @@ iree_status_t loom_serve_text_stages_bind(
 }
 
 iree_status_t loom_serve_text_stages_rebind(
-    const loom_serve_preparation_t* preparation, iree_host_size_t shared_count,
-    iree_host_size_t stage_count, const loom_serve_text_stage_t* baseline,
-    loom_serve_text_stage_t* stages, iree_allocator_t host_allocator) {
+    const loom_runtime_preparation_t* preparation,
+    iree_host_size_t shared_count, iree_host_size_t stage_count,
+    const loom_serve_text_stage_t* baseline, loom_serve_text_stage_t* stages,
+    iree_allocator_t host_allocator) {
   iree_host_size_t root_count = 0;
   IREE_RETURN_IF_ERROR(loom_serve_text_stages_initialize(
       stage_count, stages, host_allocator, &root_count));
@@ -321,9 +329,9 @@ static void loom_serve_text_record_execute(loomc_task_t* base,
       break;
     }
     loom_serve_text_stage_t* stage = &job->stages[index];
-    task->status = loom_serve_jit_stage_record(
+    task->status = loom_runtime_jit_stage_record(
         stage->compiled,
-        stage->execution ? loom_serve_jit_stage_queue_family(stage->compiled)
+        stage->execution ? loom_runtime_jit_stage_queue_family(stage->compiled)
                          : job->queue_family,
         job->mode, NULL, stage->fixed_buffers, &stage->command);
   }
@@ -386,11 +394,11 @@ iree_status_t loom_serve_text_stages_record_async(
   return iree_ok_status();
 }
 
-loom_serve_stage_t loom_serve_text_stage_binding(
+loom_runtime_stage_t loom_serve_text_stage_binding(
     const loom_serve_text_stage_t* stage) {
   const loom_cmd_program_requirements_t* requirements =
       &stage->program.requirements;
-  return (loom_serve_stage_t){
+  return (loom_runtime_stage_t){
       .command_buffer = stage->command,
       .binding_count = requirements->rebindable_binding_count -
                        (requirements->transient.required_byte_length != 0),

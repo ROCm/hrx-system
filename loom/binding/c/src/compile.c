@@ -920,23 +920,26 @@ loomc_status_t loomc_compile_artifact(
 
   if (loomc_status_is_ok(status) && loomc_result_succeeded(result)) {
     loomc_module_invalidate_compilation(module);
-    loomc_config_options_t materialization_config =
-        config ? *config : (loomc_config_options_t){0};
+    loom_config_text_binding_set_t bindings;
+    status = loomc_config_prepare_text_bindings(
+        config, iree_allocator_from_loomc(allocator), result, &bindings);
     // Root materialization may prune unresolved config declarations that are
     // unreachable from the selected program. Validate the survivors below.
-    materialization_config.flags &= ~LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED;
     const loomc_config_apply_text_to_module_options_t config_apply_options = {
         .context = compiler->context,
-        .config = config ? &materialization_config : NULL,
+        .bindings = &bindings,
+        .policy_flags = (config ? config->flags : 0) &
+                        ~LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED,
         .module = internal_module,
         .source_resolver = loomc_module_source_resolver(module),
         .applied_value_sink = loomc_module_config_applied_value_sink(module),
         .result = result,
-        .diagnostic_code = loomc_make_cstring_view("CONFIG/INVALID"),
         .block_pool = loomc_workspace_block_pool(workspace),
-        .allocator = allocator,
     };
-    status = loomc_config_apply_text_to_module(&config_apply_options);
+    if (loomc_status_is_ok(status) && loomc_result_succeeded(result)) {
+      status = loomc_config_apply_text_to_module(&config_apply_options);
+    }
+    loom_config_text_binding_set_deinitialize(&bindings);
   }
 
   loom_function_version_owner_t* function_versions =

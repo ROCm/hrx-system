@@ -403,6 +403,7 @@ loom_cc_library(
         "//loom/src/loom/util:cfg_regions",
         "//loom/src/loom/util:fact_table",
         "//loom/src/loom/util:numeric_format",
+        "//loom/src/loom/util:walk",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
     ],
@@ -457,24 +458,6 @@ loom_cc_test(
 )
 
 loom_cc_test(
-    name = "data_symbol_test",
-    srcs = ["data_symbol_test.cc"],
-    deps = [
-        ":component_api",
-        ":lower",
-        "//loom/src/loom/ir",
-        "//loom/src/loom/ops:op_defs",
-        "//loom/src/loom/ops/low",
-        "//loom/src/loom/target:registers",
-        "//loom/src/loom/target/arch/amdgpu/descriptors:low_registry",
-        "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
-        "//runtime/src/iree/base/internal:arena",
-        "//runtime/src/iree/testing:gtest",
-        "//runtime/src/iree/testing:gtest_main",
-    ],
-)
-
-loom_cc_test(
     name = "source_type_mapping_test",
     srcs = ["source_type_mapping_test.cc"],
     deps = [
@@ -482,6 +465,9 @@ loom_cc_test(
         ":lower",
         "//loom/src/loom/codegen/low/lower",
         "//loom/src/loom/ir",
+        "//loom/src/loom/ops/index",
+        "//loom/src/loom/ops/kernel",
+        "//loom/src/loom/ops/low",
         "//loom/src/loom/ops/test",
         "//loom/src/loom/target/arch/amdgpu/descriptors:low_registry",
         "//loom/src/loom/util:fact_table",
@@ -527,6 +513,32 @@ loom_cc_test(
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
+)
+
+loom_check_test(
+    name = "buffer_null_test",
+    src = "buffer_null_test.loom-test",
+)
+
+loom_check_test(
+    name = "control_operands_test",
+    src = "control_operands_test.loom-test",
+)
+
+loom_cc_test(
+    name = "control_operands_api_test",
+    srcs = ["control_operands_test.cc"],
+    deps = [
+        ":component_api",
+        ":lower",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_check_test(
+    name = "source_representation_test",
+    src = "source_representation_test.loom-test",
 )
 
 loom_check_test(

@@ -1,0 +1,90 @@
+// RUN: pass source-to-low{control-flow=structured-low},low-dce
+
+amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
+
+// RDNA wave64 combines two native 32-lane partitions for this workgroup.
+// The false edge proves a normalized coordinate is zero. The unrelated inner
+// branch inherits that guarantee without changing collective publication.
+kernel.def target(@target) @workgroup_reduce_structured_nested_guard() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer, %flags: buffer) {
+  %tid = kernel.workitem.id<x> : index
+  %start = index.constant 0 : offset
+  %leader_index = index.constant 0 : index
+  %c0 = scalar.constant 0 : i32
+  %input_view = buffer.view %input[%start] : buffer -> view<64xf32>
+  %output_view = buffer.view %output[%start] : buffer -> view<1xf32>
+  %flags_view = buffer.view %flags[%start] : buffer -> view<1xi32>
+  %value = view.load %input_view[%tid] : view<64xf32> -> f32
+  %sum = kernel.workgroup.reduce<addf> %value : f32
+  %flag = view.load %flags_view[%leader_index] : view<1xi32> -> i32
+  %has_output = scalar.cmpi ne, %flag, %c0 : i32
+  %coordinate = index.add %tid, %leader_index : index
+  %is_nonleader = index.cmp ne, %coordinate, %leader_index : index
+  scf.if %is_nonleader {
+  } else {
+    scf.if %has_output {
+      view.store %sum, %output_view[%leader_index] : f32, view<1xf32>
+    }
+  }
+  kernel.return
+}
+
+// ----
+amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
+
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 3, resource_count = 3, resource_offsets = [0, 8, 16], resource_parameter_indices = [0, 1, 2], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @workgroup_reduce_structured_nested_guard() asm {
+  %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %input_view = resource<hal_binding> {extent = 256, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %output_view = resource<hal_binding> {extent = 4, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %flags_view = resource<hal_binding> {extent = 4, index = 2, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %leader_index = s_mov_b32 0
+  %c0 = s_mov_b32 0
+  %24 = v_lshlrev_b32_src0_inline %tid, 2
+  %value = global_load_b32_saddr %24, %input_view
+  %26 = v_and_b32_src0_inline %tid, 31
+  %27 = storage {byte_alignment = 4, byte_length = 8} : low.storage<workgroup>
+  %28 = storage_address %27 : low.storage<workgroup> -> reg<amdgpu.vgpr>
+  %29 = v_add_f32_dpp16 %value, %value {dpp_ctrl = 177}
+  %30 = v_add_f32_dpp16 %29, %29 {dpp_ctrl = 78}
+  %31 = v_add_f32_dpp16 %30, %30 {dpp_ctrl = 321}
+  %32 = v_add_f32_dpp16 %31, %31 {dpp_ctrl = 320}
+  %33 = v_permlanex16_b32_src12_inline %32, 0, 0
+  %34 = v_add_f32 %32, %33
+  %35 = v_lshrrev_b32_src0_inline %tid, 5
+  %36 = v_lshlrev_b32_src0_inline %35, 2
+  %37 = v_mov_b32 1
+  %38 = v_cmp_lt_u32 %26, %37
+  %39, %40 = s_and_saveexec_b64 %38
+  %41 = v_add_u32 %28, %36
+  ds_write_b32 %41, %34
+  s_mov_b64_exec %39
+  s_barrier
+  %42 = v_mov_b32 1
+  %43 = v_cmp_lt_u32 %tid, %42
+  %44, %45 = s_and_saveexec_b64 %43
+  %46 = ds_read_b32 %28
+  %47 = v_add_u32_src0_inline %28, 4
+  %48 = ds_read_b32 %47
+  %sum = v_add_f32 %46, %48
+  s_mov_b64_exec %44
+  s_barrier
+  %50 = s_mov_b32 0
+  %flag = s_load_dword %flags_view, %50
+  %52 = s_cmp_lg_i32 %flag, %c0
+  %53 = s_mov_b32 0
+  %54 = s_mov_b32 1
+  %has_output = s_cselect_b32 %54, %53, %52
+  %coordinate = v_add_u32 %leader_index, %tid
+  %is_nonleader = v_cmp_ne_i32_src1_inline %coordinate {rhs = 0}
+  low.scf.if %is_nonleader {
+  } else {
+    low.scf.if %has_output {
+      %58 = v_mov_b32 0
+      global_store_b32_saddr %58, %sum, %output_view
+    }
+  }
+  return
+}

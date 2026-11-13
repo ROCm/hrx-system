@@ -149,6 +149,8 @@ def _dimension_descriptor_specs() -> tuple[_DescriptorSpec, ...]:
                     dimension,
                 )
             )
+        # B and S have identical completion timing. A retains a longer AGU
+        # itinerary and cannot participate in their schedule alternatives.
         for lane in ("a", "b", "s"):
             form = f"PADD{lane.upper()}_{dimension}D"
             result.append(
@@ -159,6 +161,11 @@ def _dimension_descriptor_specs() -> tuple[_DescriptorSpec, ...]:
                         f"address.add.{dimension}d.i20",
                         f"II_{form}",
                         asm_mnemonic=f"padd{lane}.{dimension}d",
+                        schedule_alternatives=tuple(
+                            f"{_TARGET_KEY}.address.add.{alternate}.{dimension}d"
+                            for alternate in ("b", "s")
+                            if lane != "a" and alternate != lane
+                        ),
                     ),
                     dimension,
                 )
@@ -247,6 +254,11 @@ def _address_descriptor_specs() -> tuple[_DescriptorSpec, ...]:
                     asm_mnemonic=f"padd{lane}{mnemonic_suffix}",
                     flags=(DescriptorFlag.SAFE_TO_SPECULATE,),
                     rematerializable=True,
+                    schedule_alternatives=tuple(
+                        f"{_TARGET_KEY}.address.add.{alternate}.{addressing}"
+                        for alternate in ("b", "s")
+                        if lane != "a" and alternate != lane
+                    ),
                 )
             )
     return tuple(result)

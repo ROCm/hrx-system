@@ -58,6 +58,20 @@ static iree_status_t loom_cmd_program_plan_diagnose_unresolved_definitions(
   return iree_ok_status();
 }
 
+static iree_status_t loom_cmd_program_plan_produce_kernel_requests(
+    void* user_data,
+    const loom_link_plan_materialization_environment_t* environment,
+    iree_host_size_t source_symbol_ordinal, const loom_module_t* site_module,
+    const loom_kernel_class_site_t* sites, iree_host_size_t site_count,
+    const loom_kernel_class_collection_options_t* collection_options,
+    loom_kernel_request_sink_t sink, iree_arena_allocator_t* scratch_arena,
+    const loom_decision_class_ordinal_t** out_site_classes) {
+  return loom_kernel_request_producer_publish(
+      (loom_kernel_request_producer_t*)user_data, environment,
+      source_symbol_ordinal, site_module, sites, site_count, collection_options,
+      sink, scratch_arena, out_site_classes);
+}
+
 static bool loom_cmd_program_plan_has_source_kernels(
     const loom_link_module_index_t* index,
     const loom_link_plan_materialization_t* materialization) {
@@ -178,10 +192,16 @@ iree_status_t loom_cmd_program_plan_build_from_index(
     };
     if (loom_cmd_program_plan_has_source_kernels(index,
                                                  &materialization.product)) {
-      status = loom_kernel_request_producer_allocate(
-          index, materialization_environment, &kernel_request_producer);
+      kernel_source.provider = options->kernel_request_provider;
+      if (kernel_source.provider.publish == NULL) {
+        status = loom_kernel_request_producer_allocate(
+            index, materialization_environment, &kernel_request_producer);
+        kernel_source.provider = (loom_kernel_request_provider_t){
+            .publish = loom_cmd_program_plan_produce_kernel_requests,
+            .user_data = kernel_request_producer,
+        };
+      }
       if (iree_status_is_ok(status)) {
-        kernel_source.producer = kernel_request_producer;
         kernel_source.source_definitions.values =
             materialization.product.target_source_definitions.values;
         kernel_source.source_definitions.count =
@@ -198,8 +218,8 @@ iree_status_t loom_cmd_program_plan_build_from_index(
             ? &options->live_kernel_entry_validator
             : NULL,
         pass_registry, cleanup_pattern_provider_set, diagnostic_emitter,
-        materialization_environment->block_pool, out_valid, out_plan,
-        materialization_environment->allocator);
+        materialization_environment->block_pool,
+        materialization_environment->allocator, out_valid, out_plan);
   }
 
   loom_kernel_request_producer_free(kernel_request_producer);

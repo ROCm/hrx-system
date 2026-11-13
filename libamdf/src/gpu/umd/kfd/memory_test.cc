@@ -40,11 +40,12 @@ TEST(LinuxGpuMemoryProfileTest, InstanceLifetimeExposesOwnedSystemMemory) {
   EXPECT_EQ(profile.roles, AMDF_MEMORY_PROFILE_ROLE_CREATE |
                                AMDF_MEMORY_PROFILE_ROLE_EXPORT |
                                AMDF_MEMORY_PROFILE_ROLE_HOST_MAP);
-  EXPECT_EQ(profile.guaranteed_flags, AMDF_MEMORY_FLAG_HOST_VISIBLE |
-                                          AMDF_MEMORY_FLAG_SHAREABLE |
-                                          AMDF_MEMORY_FLAG_HOST_COHERENT |
-                                          AMDF_MEMORY_FLAG_DEVICE_ADDRESS |
-                                          AMDF_MEMORY_FLAG_DEVICE_UNCACHED);
+  EXPECT_EQ(profile.guaranteed_flags,
+            AMDF_MEMORY_FLAG_HOST_VISIBLE | AMDF_MEMORY_FLAG_SHAREABLE |
+                AMDF_MEMORY_FLAG_HOST_COHERENT |
+                AMDF_MEMORY_FLAG_DEVICE_ADDRESS |
+                AMDF_MEMORY_FLAG_DEVICE_UNCACHED |
+                AMDF_MEMORY_FLAG_HOST_ADDRESS_IDENTITY);
   EXPECT_EQ(profile.guaranteed_device_access, AMDF_MEMORY_ACCESS_READ);
   EXPECT_EQ(profile.supported_device_access, AMDF_MEMORY_ACCESS_READ |
                                                  AMDF_MEMORY_ACCESS_WRITE |
@@ -173,6 +174,7 @@ TEST(LinuxGpuMemoryProfileTest,
   EXPECT_EQ(local.memory_class, AMDF_MEMORY_CLASS_LOCAL);
   EXPECT_EQ(local.host_mapping.properties, AMDF_HOST_MEMORY_PROPERTY_NONE);
   EXPECT_NE(local.supported_flags & AMDF_MEMORY_FLAG_HOST_VISIBLE, 0u);
+  EXPECT_NE(local.supported_flags & AMDF_MEMORY_FLAG_HOST_ADDRESS_IDENTITY, 0u);
   EXPECT_NE(local.guaranteed_flags & AMDF_MEMORY_FLAG_DEVICE_LOCAL, 0u);
   EXPECT_EQ(local.supported_flags & AMDF_MEMORY_FLAG_HOST_FILE_IO, 0u);
 }
@@ -299,6 +301,9 @@ TEST(LinuxGpuMemoryProfileTest, ProcessLifetimeUsesDenseOptionalProfiles) {
             AMDF_MEMORY_FLAG_DEVICE_LOCAL | AMDF_MEMORY_FLAG_DEVICE_ADDRESS);
   EXPECT_NE(local_profile.supported_flags & AMDF_MEMORY_FLAG_QUEUE_STORAGE, 0u);
   EXPECT_NE(local_profile.supported_flags & AMDF_MEMORY_FLAG_HOST_VISIBLE, 0u);
+  EXPECT_NE(
+      local_profile.supported_flags & AMDF_MEMORY_FLAG_HOST_ADDRESS_IDENTITY,
+      0u);
   EXPECT_EQ(local_profile.guaranteed_device_access, AMDF_MEMORY_ACCESS_READ);
   EXPECT_EQ(local_profile.supported_device_access,
             AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE |
@@ -336,6 +341,9 @@ TEST(LinuxGpuMemoryProfileTest, ProcessLifetimeUsesDenseOptionalProfiles) {
             registered_profile.guaranteed_flags |
                 AMDF_MEMORY_FLAG_QUEUE_STORAGE |
                 AMDF_MEMORY_FLAG_DEVICE_UNCACHED);
+  EXPECT_EQ(registered_profile.supported_flags &
+                AMDF_MEMORY_FLAG_HOST_ADDRESS_IDENTITY,
+            0u);
   EXPECT_EQ(registered_profile.guaranteed_device_access,
             AMDF_MEMORY_ACCESS_READ);
   EXPECT_EQ(registered_profile.supported_device_access,

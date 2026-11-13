@@ -42,8 +42,7 @@ func.def @refine_propagates_static_shape(%width: index, %value: i32) -> (vector<
 // ----
 func.def @refine_propagates_static_shape(%width: index, %value: i32) -> (vector<8xi32>) {
   %source = vector.splat %value : vector<8xi32>
-  %refined = vector.refine %source : vector<8xi32> -> vector<8xi32>
-  func.return %refined : vector<8xi32>
+  func.return %source : vector<8xi32>
 }
 
 // ====
@@ -154,6 +153,90 @@ func.def @bitcast_inverse(%value: vector<2x3xi16>) -> (vector<2x3xi16>) {
 // ----
 func.def @bitcast_inverse(%value: vector<2x3xi16>) -> (vector<2x3xi16>) {
   func.return %value : vector<2x3xi16>
+}
+
+// ====
+
+// Flattening keeps the constructor's scalar lane order across ranks.
+func.def @reshape_constructed_predicates(%first: i1, %second: i1, %third: i1, %fourth: i1) -> (vector<4xi1>) {
+  %matrix = vector.from_elements %first, %second, %third, %fourth : vector<2x1x2xi1>
+  %result = vector.bitcast %matrix : vector<2x1x2xi1> to vector<4xi1>
+  func.return %result : vector<4xi1>
+}
+
+// ----
+func.def @reshape_constructed_predicates(%first: i1, %second: i1, %third: i1, %fourth: i1) -> (vector<4xi1>) {
+  %matrix = vector.from_elements %first, %second, %third, %fourth : vector<4xi1>
+  func.return %matrix : vector<4xi1>
+}
+
+// ====
+
+// Flattening reuses the exclusively owned constructor. Subsequent shape
+// restoration remains explicit instead of recreating a ranked constructor.
+func.def @reshape_constructor_chain(%first: f32, %second: f32, %third: f32, %fourth: f32) -> (vector<1x2x2xf32>) {
+  %matrix = vector.from_elements %first, %second, %third, %fourth : vector<2x2xf32>
+  %flat = vector.bitcast %matrix : vector<2x2xf32> to vector<4xf32>
+  %column = vector.bitcast %flat : vector<4xf32> to vector<4x1xf32>
+  %result = vector.bitcast %column : vector<4x1xf32> to vector<1x2x2xf32>
+  func.return %result : vector<1x2x2xf32>
+}
+
+// ----
+func.def @reshape_constructor_chain(%first: f32, %second: f32, %third: f32, %fourth: f32) -> (vector<1x2x2xf32>) {
+  %matrix = vector.from_elements %first, %second, %third, %fourth : vector<4xf32>
+  %column = vector.bitcast %matrix : vector<4xf32> to vector<4x1xf32>
+  %result = vector.bitcast %column : vector<4x1xf32> to vector<1x2x2xf32>
+  func.return %result : vector<1x2x2xf32>
+}
+
+// ====
+
+// Shape restoration keeps flat construction in the canonical direction used
+// by target legalization.
+func.def @restore_constructor_shape(%first: i8, %second: i8, %third: i8, %fourth: i8) -> (vector<2x2xi8>) {
+  %flat = vector.from_elements %first, %second, %third, %fourth : vector<4xi8>
+  %matrix = vector.bitcast %flat : vector<4xi8> to vector<2x2xi8>
+  func.return %matrix : vector<2x2xi8>
+}
+
+// ====
+
+// Retyping a shared constructor would change its other result's contract.
+func.def @reshape_shared_constructor(%first: i16, %second: i16, %third: i16, %fourth: i16) -> (vector<2x2xi16>, vector<4xi16>) {
+  %matrix = vector.from_elements %first, %second, %third, %fourth : vector<2x2xi16>
+  %flat = vector.bitcast %matrix : vector<2x2xi16> to vector<4xi16>
+  func.return %matrix, %flat : vector<2x2xi16>, vector<4xi16>
+}
+
+// ----
+func.def @reshape_shared_constructor(%first: i16, %second: i16, %third: i16, %fourth: i16) -> (vector<2x2xi16>, vector<4xi16>) {
+  %matrix = vector.from_elements %first, %second, %third, %fourth : vector<2x2xi16>
+  %flat = vector.from_elements %first, %second, %third, %fourth : vector<4xi16>
+  func.return %matrix, %flat : vector<2x2xi16>, vector<4xi16>
+}
+
+// ====
+
+// Reinterpreting element bits is not a constructor reshape.
+func.def @reinterpret_constructed_elements(%first: f32, %second: f32) -> (vector<2xi32>) {
+  %floats = vector.from_elements %first, %second : vector<1x2xf32>
+  %bits = vector.bitcast %floats : vector<1x2xf32> to vector<2xi32>
+  func.return %bits : vector<2xi32>
+}
+
+// ====
+
+func.def @reshape_empty_constructor() -> (vector<0xi8>) {
+  %empty = vector.from_elements : vector<2x0xi8>
+  %flat = vector.bitcast %empty : vector<2x0xi8> to vector<0xi8>
+  func.return %flat : vector<0xi8>
+}
+
+// ----
+func.def @reshape_empty_constructor() -> (vector<0xi8>) {
+  %flat = vector.empty : vector<0xi8>
+  func.return %flat : vector<0xi8>
 }
 
 // ====

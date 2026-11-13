@@ -65,8 +65,8 @@ typedef struct loom_amdgpu_loop_exit_region_plan_t {
   loom_low_lower_block_ref_t direct_forward_block;
   // Transfers an all-retired second arm with only clean-arm survivors.
   loom_low_lower_block_ref_t no_repeat_block;
-  // Per-argument logical constants at the arm merge.
-  const loom_amdgpu_mask_merge_constants_t* merge_constants;
+  // Per-argument payload semantics and logical constants at the arm merge.
+  const loom_amdgpu_mask_merge_flags_t* merge_flags;
   // Entry EXEC saved while the source selection executes.
   loom_value_id_t saved_exec;
   // Original source predicate used to merge the authored result tuple.

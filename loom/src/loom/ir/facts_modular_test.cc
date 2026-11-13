@@ -81,6 +81,55 @@ TEST(ModularIntegerFacts, ExactUnaryAndShiftAcrossWidths) {
   }
 }
 
+TEST(ModularIntegerFacts, ExactCarryAndBorrowAcrossWidths) {
+  for (int32_t bit_count : {1, 8, 16, 32, 64}) {
+    SCOPED_TRACE(bit_count);
+    const loom_value_facts_t all_bits =
+        loom_value_facts_exact_i64(bit_count == 1 ? 1 : -1);
+    const loom_value_facts_t zero = loom_value_facts_exact_i64(0);
+    const loom_value_facts_t one = loom_value_facts_exact_i64(1);
+    loom_value_facts_t value;
+    loom_value_facts_t carry_or_borrow;
+
+    loom_value_facts_addcarryui(&all_bits, &one, bit_count, &value,
+                                &carry_or_borrow);
+    ExpectExact(value, 0);
+    ExpectExact(carry_or_borrow, 1);
+
+    loom_value_facts_subborrowui(&zero, &all_bits, bit_count, &value,
+                                 &carry_or_borrow);
+    ExpectExact(value, 1);
+    ExpectExact(carry_or_borrow, 1);
+
+    loom_value_facts_addcarryui(&zero, &zero, bit_count, &value,
+                                &carry_or_borrow);
+    ExpectExact(value, 0);
+    ExpectExact(carry_or_borrow, 0);
+    loom_value_facts_subborrowui(&all_bits, &zero, bit_count, &value,
+                                 &carry_or_borrow);
+    ExpectExact(value, bit_count == 1 ? 1 : -1);
+    ExpectExact(carry_or_borrow, 0);
+  }
+}
+
+TEST(ModularIntegerFacts, CarryAndBorrowPreserveLanePredicates) {
+  loom_value_facts_t lhs = loom_value_facts_make(INT8_MIN, INT8_MAX, 1);
+  loom_value_facts_mark_lane_varying(&lhs);
+  const loom_value_facts_t rhs = loom_value_facts_make(INT8_MIN, INT8_MAX, 1);
+  loom_value_facts_t value;
+  loom_value_facts_t carry_or_borrow;
+
+  loom_value_facts_addcarryui(&lhs, &rhs, 8, &value, &carry_or_borrow);
+  EXPECT_TRUE(loom_value_facts_is_lane_varying(value));
+  EXPECT_FALSE(loom_value_facts_is_lane_predicate(value));
+  EXPECT_TRUE(loom_value_facts_is_lane_predicate(carry_or_borrow));
+
+  loom_value_facts_subborrowui(&lhs, &rhs, 8, &value, &carry_or_borrow);
+  EXPECT_TRUE(loom_value_facts_is_lane_varying(value));
+  EXPECT_FALSE(loom_value_facts_is_lane_predicate(value));
+  EXPECT_TRUE(loom_value_facts_is_lane_predicate(carry_or_borrow));
+}
+
 TEST(ModularIntegerFacts, RangesRemainSoundAcrossWrap) {
   loom_value_facts_t lhs = loom_value_facts_make(120, 127, 1);
   loom_value_facts_mark_lane_varying(&lhs);
@@ -108,6 +157,29 @@ TEST(ModularIntegerFacts, OutOfDomainShiftDoesNotFold) {
   EXPECT_EQ(result.range_hi, INT8_MAX);
 }
 
+TEST(ModularIntegerFacts, ZeroMultiplyAddTermsRetainDivisibilityAcrossWidths) {
+  const loom_value_facts_t zero = loom_value_facts_exact_i64(0);
+  for (int32_t bit_count : {1, 8, 16, 32, 64}) {
+    SCOPED_TRACE(bit_count);
+    const int64_t divisor = bit_count == 1 ? 1 : 16;
+    const loom_value_facts_t factor = loom_value_facts_exact_i64(divisor);
+    const loom_value_facts_t input =
+        loom_value_facts_make(0, bit_count == 1 ? 1 : 31, 1);
+    loom_value_facts_t output;
+    loom_value_facts_fmai_modular(&input, &factor, &zero, bit_count, &output);
+    EXPECT_EQ(output.known_divisor, divisor);
+    EXPECT_EQ(output.range_lo, bit_count == 8 ? INT8_MIN : 0);
+    EXPECT_EQ(output.range_hi, bit_count == 1   ? 1
+                               : bit_count == 8 ? INT8_MAX
+                                                : 496);
+    const loom_value_facts_t addend = output;
+    loom_value_facts_fmai_modular(&input, &zero, &addend, bit_count, &output);
+    EXPECT_TRUE(loom_value_facts_equal(output, addend));
+    loom_value_facts_fmai_modular(&zero, &input, &addend, bit_count, &output);
+    EXPECT_TRUE(loom_value_facts_equal(output, addend));
+  }
+}
+
 TEST(ModularIntegerFacts, OutputMayAliasInputs) {
   loom_value_facts_t lhs = loom_value_facts_exact_i64(INT64_MAX);
   const loom_value_facts_t one = loom_value_facts_exact_i64(1);
@@ -117,6 +189,90 @@ TEST(ModularIntegerFacts, OutputMayAliasInputs) {
   loom_value_facts_t rhs = loom_value_facts_exact_i64(1);
   loom_value_facts_subi_modular(&lhs, &rhs, 64, &rhs);
   ExpectExact(rhs, INT64_MAX);
+}
+
+TEST(ModularIntegerFacts, ProductPredicatesRespectCarrierOverflow) {
+  for (int32_t bit_count : {8, 16, 32, 64}) {
+    SCOPED_TRACE(bit_count);
+    auto small = loom_value_facts_make(2, 4, 2);
+    small.flags |= LOOM_VALUE_FACT_POWER_OF_TWO;
+    loom_value_facts_t result;
+    loom_value_facts_muli_modular(&small, &small, bit_count, &result);
+    EXPECT_TRUE(loom_value_facts_is_power_of_two(result));
+    const auto factor = loom_value_facts_exact_i64(4);
+    auto large = loom_value_facts_make(INT64_C(1) << (bit_count - 3),
+                                       INT64_C(1) << (bit_count - 2), 1);
+    large.flags |= LOOM_VALUE_FACT_POWER_OF_TWO;
+    loom_value_facts_muli_modular(&large, &factor, bit_count, &result);
+    EXPECT_FALSE(loom_value_facts_is_power_of_two(result));
+    EXPECT_FALSE(loom_value_facts_is_non_zero(result));
+    const auto zero = loom_value_facts_exact_i64(0);
+    loom_value_facts_fmai_modular(&large, &factor, &zero, bit_count, &result);
+    EXPECT_FALSE(loom_value_facts_is_power_of_two(result));
+    EXPECT_FALSE(loom_value_facts_is_non_zero(result));
+  }
+}
+
+TEST(ModularIntegerFacts, UnaryNonzeroIncludesSignedMinimum) {
+  for (int32_t bit_count : {8, 16, 32, 64}) {
+    const int64_t minimum =
+        bit_count == 64 ? INT64_MIN : -(INT64_C(1) << (bit_count - 1));
+    auto input = loom_value_facts_make(minimum, 7, 1);
+    input.flags |= LOOM_VALUE_FACT_NON_ZERO;
+    for (auto transfer :
+         {loom_value_facts_negi_modular, loom_value_facts_absi_modular}) {
+      loom_value_facts_t result;
+      transfer(&input, bit_count, &result);
+      EXPECT_TRUE(loom_value_facts_is_non_zero(result));
+      EXPECT_FALSE(loom_value_facts_is_positive(result));
+      EXPECT_LE(result.range_lo, minimum);
+      auto alias = input;
+      transfer(&alias, bit_count, &alias);
+      EXPECT_TRUE(loom_value_facts_equal(alias, result));
+    }
+    const auto zero = loom_value_facts_exact_i64(0);
+    loom_value_facts_t result;
+    loom_value_facts_subi_modular(&zero, &input, bit_count, &result);
+    EXPECT_TRUE(loom_value_facts_is_non_zero(result));
+  }
+}
+
+TEST(ModularIntegerFacts, UnaryPredicatesContainEverySmallCarrierResult) {
+  for (int64_t lo : {-8, -4, -1, 0, 1, 4, 7}) {
+    for (int64_t hi : {-8, -4, -1, 0, 1, 4, 7}) {
+      if (lo > hi) {
+        continue;
+      }
+      for (bool nonzero : {false, true}) {
+        if (nonzero && lo == 0 && hi == 0) {
+          continue;
+        }
+        auto input = loom_value_facts_make(lo, hi, 1);
+        if (nonzero) {
+          input.flags |= LOOM_VALUE_FACT_NON_ZERO;
+        }
+        loom_value_facts_t results[3];
+        loom_value_facts_negi_modular(&input, 4, &results[0]);
+        loom_value_facts_absi_modular(&input, 4, &results[1]);
+        loom_value_facts_signi(&input, &results[2]);
+        for (int64_t value = lo; value <= hi; ++value) {
+          if (nonzero && value == 0) {
+            continue;
+          }
+          const int64_t negative = value == -8 ? -8 : -value;
+          const int64_t expected[] = {negative, value < 0 ? negative : value,
+                                      (value > 0) - (value < 0)};
+          for (size_t i = 0; i < IREE_ARRAYSIZE(results); ++i) {
+            EXPECT_LE(results[i].range_lo, expected[i]);
+            EXPECT_GE(results[i].range_hi, expected[i]);
+            if (loom_value_facts_is_non_zero(results[i])) {
+              EXPECT_NE(expected[i], 0);
+            }
+          }
+        }
+      }
+    }
+  }
 }
 
 }  // namespace

@@ -23,7 +23,7 @@ AUTHORING_CORPUS_ROOT = REPOSITORY_SOURCE_ROOT + "test/corpus/authoring/"
 FORMAT_EXCLUDED_PREFIXES = (REPOSITORY_SOURCE_ROOT + "format/testdata/",)
 FORMAT_EXCLUDED_PATHS = frozenset(
     {
-        "loom/src/loom/serve/runtime/program/testdata/compilation/invalid.loom",
+        "loom/src/loom/runtime/program/testdata/compilation/invalid.loom",
         "loom/src/loom/tools/loom-benchmark/testdata/duplicate_symbol.loom",
     }
 )

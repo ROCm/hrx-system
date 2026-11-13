@@ -35,6 +35,10 @@ typedef enum loom_low_allocation_location_kind_e {
   // is consumed or produced directly by a callable boundary, without a
   // simultaneous register occurrence at that boundary.
   LOOM_LOW_ALLOCATION_LOCATION_STORAGE = 5,
+  // Final cell in an outgoing call packet, addressed in register-class units.
+  // Its coordinate is local to one call boundary and disjoint from register
+  // homes, ordinary storage bindings, and move scratch. It is not an SSA home.
+  LOOM_LOW_ALLOCATION_LOCATION_CALL_STORAGE = 6,
 } loom_low_allocation_location_kind_t;
 
 enum loom_low_allocation_assignment_flag_bits_e {
@@ -50,6 +54,11 @@ enum loom_low_allocation_assignment_flag_bits_e {
   // immutable value requirement for every subsequent victim search. Producer
   // leases remain separate because spilling can release their reservations.
   LOOM_LOW_ALLOCATION_ASSIGNMENT_FLAG_REQUIRES_REGISTER = 1u << 2,
+  // Complete set of defined assignment flags.
+  LOOM_LOW_ALLOCATION_ASSIGNMENT_FLAG_ALL =
+      LOOM_LOW_ALLOCATION_ASSIGNMENT_FLAG_REFINED_UNIT_STARTS |
+      LOOM_LOW_ALLOCATION_ASSIGNMENT_FLAG_EXPANDED_EXECUTION_DEFINITION |
+      LOOM_LOW_ALLOCATION_ASSIGNMENT_FLAG_REQUIRES_REGISTER,
 };
 typedef uint16_t loom_low_allocation_assignment_flags_t;
 

@@ -98,6 +98,18 @@ class FloatRootFamily:
 
 
 @dataclass(frozen=True, slots=True)
+class FloatRoundingFamily:
+    """Scalar and packed instructions sharing one rounding control byte."""
+
+    # Source and result floating-point format.
+    element: VectorElement
+    # Scalar instruction with an explicit upper-lane passthrough operand.
+    scalar_mnemonic: str
+    # Lane-wise packed instruction.
+    vector_mnemonic: str
+
+
+@dataclass(frozen=True, slots=True)
 class FloatIntegerVectorForm:
     """One native floating-to-integer packet shape."""
 
@@ -498,6 +510,26 @@ AVX512_FP16_FLOAT_ROOT_FAMILIES = (
 AVX512_FP16_SCALAR_FLOAT_ROOT_FAMILIES = (
     FloatRootFamily("sqrtf", "vsqrtsh", "float.sqrt", FP16_ELEMENT, False),
     FloatRootFamily("rsqrtf", "vrsqrtsh", "float.rsqrt.approx", FP16_ELEMENT, True),
+)
+
+# Immediate bit 3 suppresses precision exceptions; bit 2 stays clear so the
+# instruction's rounding direction is independent of MXCSR.RC.
+FLOAT_ROUNDING_MODES = (
+    ("ceilf", 0x0A),
+    ("floorf", 0x09),
+    ("roundevenf", 0x08),
+    ("truncf", 0x0B),
+)
+AVX2_FLOAT_ROUNDING_FAMILIES = (
+    FloatRoundingFamily(FLOAT_ELEMENTS[0], "vroundss", "vroundps"),
+    FloatRoundingFamily(FLOAT_ELEMENTS[1], "vroundsd", "vroundpd"),
+)
+AVX512_FLOAT_ROUNDING_FAMILIES = (
+    FloatRoundingFamily(FLOAT_ELEMENTS[0], "vrndscaless", "vrndscaleps"),
+    FloatRoundingFamily(FLOAT_ELEMENTS[1], "vrndscalesd", "vrndscalepd"),
+)
+AVX512_FP16_FLOAT_ROUNDING_FAMILIES = (
+    FloatRoundingFamily(FP16_ELEMENT, "vrndscalesh", "vrndscaleph"),
 )
 
 AVX2_BITWISE_FAMILIES = (

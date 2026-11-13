@@ -1441,6 +1441,11 @@ TEST(TargetSpirvProfileTest, RefinesCooperativeRowsWithOwnedProvenance) {
           .provenance = loomc_make_cstring_view("probe:matrix"),
       },
   };
+  const loomc_spirv_feature_fact_t unavailable = {
+      .feature = LOOMC_SPIRV_FEATURE_FLOAT64,
+      .state = LOOMC_TARGET_FACT_STATE_FALSE,
+      .provenance = loomc_make_cstring_view("device:no-f64"),
+  };
   std::string provenance = "base:matrix-row";
   loomc_spirv_cooperative_matrix_row_t matrix_rows[] = {
       MakeCustomMatrixRow(
@@ -1470,8 +1475,26 @@ TEST(TargetSpirvProfileTest, RefinesCooperativeRowsWithOwnedProvenance) {
   for (char& character : provenance) {
     character = 'x';
   }
+  loomc_spirv_profile_options_t negative_options = {
+      .feature_facts = &unavailable,
+      .feature_fact_count = 1,
+  };
+  base_profile = RefineSpirvProfile(base_profile.get(), &negative_options);
+  loomc_target_profile_t* raw_capacity = nullptr;
+  LOOMC_ASSERT_OK(loomc_target_profile_refine_execution_unit_count(
+      base_profile.get(), 40, loomc_allocator_system(), &raw_capacity));
+  TargetProfilePtr capacity(raw_capacity);
+  base_profile.reset();
   TargetProfilePtr refined_profile =
-      RefineSpirvProfile(base_profile.get(), /*options=*/nullptr);
+      RefineSpirvProfile(capacity.get(), /*options=*/nullptr);
+  capacity.reset();
+  EXPECT_EQ(loomc_target_profile_loom_target_profile(refined_profile.get())
+                ->target_bundle->snapshot->execution_unit_count,
+            40u);
+  loomc_target_fact_state_t state = LOOMC_TARGET_FACT_STATE_UNKNOWN;
+  LOOMC_ASSERT_OK(loomc_spirv_target_profile_query_feature(
+      refined_profile.get(), LOOMC_SPIRV_FEATURE_FLOAT64, &state));
+  EXPECT_EQ(state, LOOMC_TARGET_FACT_STATE_FALSE);
 
   loomc_spirv_cooperative_matrix_row_t matrix_row = {};
   ASSERT_TRUE(FindCooperativeMatrixRow(refined_profile.get(),

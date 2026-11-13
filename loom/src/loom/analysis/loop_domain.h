@@ -105,6 +105,20 @@ typedef struct loom_loop_recurrence_facts_t {
   loom_loop_trip_count_kind_t trip_count_kind;
 } loom_loop_recurrence_facts_t;
 
+// Proves the finite recurrence produced by a header-tested loop that continues
+// while its current fixed-width integer state is nonzero and updates that
+// state with a logical right shift. |shift| must be one exact amount in
+// [1, bitwidth); otherwise no execution count or ranges are proven.
+//
+// Exact initial values produce exact execution counts. Ranged initial values
+// produce an inclusive upper bound derived from the greatest possible active
+// bit. Header facts include the terminal zero, body facts contain only nonzero
+// observations, and the exit is exactly zero. Inputs and results use Loom's
+// signed fact representation for the |bitwidth|-bit raw carrier.
+loom_loop_recurrence_facts_t loom_loop_domain_shrui_to_zero_recurrence_facts(
+    uint8_t bitwidth, loom_value_facts_t initial_values,
+    loom_value_facts_t shift);
+
 // Evaluates initial_values + iteration * step for the supplied exact trip
 // count. |initial_values| contains integer range and divisibility facts. The
 // header includes iterations [0, trip_count], the body [0, trip_count), and

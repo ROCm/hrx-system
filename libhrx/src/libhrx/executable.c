@@ -6,37 +6,23 @@
 
 #include "hrx_internal.h"
 #ifdef HRX_HAS_IREE_AMD_GPU_DRIVER
-#include "iree/hal/drivers/amd/gpu/target/selection.h"
+#include "iree/hal/driver/amd/gpu/target/selection.h"
 #endif  // HRX_HAS_IREE_AMD_GPU_DRIVER
-#ifdef HRX_HAS_IREE_AMDGPU_DRIVER
-#include "iree/hal/drivers/amdgpu/target/selection.h"
-#endif  // HRX_HAS_IREE_AMDGPU_DRIVER
 
 static iree_status_t hrx_executable_select_target(
     const iree_hal_device_spec_t* device_spec, iree_string_view_t target_family,
     iree_string_view_t artifact_target_key,
     iree_hal_physical_device_affinity_t physical_device_affinity,
     iree_hal_executable_target_selection_result_t* out_result) {
-#if defined(HRX_HAS_IREE_AMD_GPU_DRIVER) || defined(HRX_HAS_IREE_AMDGPU_DRIVER)
-  if (iree_string_view_equal(target_family, IREE_SV("amdgpu"))) {
-    const iree_string_view_t driver_id =
-        iree_hal_device_spec_identity(device_spec)->driver_id;
 #ifdef HRX_HAS_IREE_AMD_GPU_DRIVER
-    if (iree_string_view_equal(driver_id, IREE_SV("amd"))) {
-      return iree_hal_amd_gpu_device_spec_select_executable_target(
-          device_spec, artifact_target_key, physical_device_affinity,
-          out_result);
-    }
-#endif  // HRX_HAS_IREE_AMD_GPU_DRIVER
-#ifdef HRX_HAS_IREE_AMDGPU_DRIVER
-    if (iree_string_view_equal(driver_id, IREE_SV("legacy-amdgpu"))) {
-      return iree_hal_amdgpu_device_spec_select_executable_target(
-          device_spec, artifact_target_key, physical_device_affinity,
-          out_result);
-    }
-#endif  // HRX_HAS_IREE_AMDGPU_DRIVER
+  if (iree_string_view_equal(target_family, IREE_SV("amdgpu")) &&
+      iree_string_view_equal(
+          iree_hal_device_spec_identity(device_spec)->driver_id,
+          IREE_SV("amd"))) {
+    return iree_hal_amd_gpu_device_spec_select_executable_target(
+        device_spec, artifact_target_key, physical_device_affinity, out_result);
   }
-#endif  // GPU driver support
+#endif  // HRX_HAS_IREE_AMD_GPU_DRIVER
 
   const iree_hal_executable_target_selection_t selection = {
       .family = target_family,
@@ -265,8 +251,6 @@ void hrx_executable_retain(hrx_executable_t executable) {
   if (!executable) {
     return;
   }
-  iree_hal_executable_retain(executable->hal_executable);
-  hrx_device_retain(executable->device);
   iree_atomic_ref_count_inc(&executable->ref_count);
 }
 
@@ -274,14 +258,13 @@ void hrx_executable_release(hrx_executable_t executable) {
   if (!executable) {
     return;
   }
-  iree_hal_executable_t* hal_executable = executable->hal_executable;
-  hrx_device_t device = executable->device;
-  if (iree_atomic_ref_count_dec(&executable->ref_count) == 1) {
-    iree_allocator_free(iree_allocator_system(), executable->export_names);
-    iree_allocator_free(iree_allocator_system(), executable);
+  if (iree_atomic_ref_count_dec(&executable->ref_count) != 1) {
+    return;
   }
-  iree_hal_executable_release(hal_executable);
-  hrx_device_release(device);
+  iree_hal_executable_release(executable->hal_executable);
+  hrx_device_release(executable->device);
+  iree_allocator_free(iree_allocator_system(), executable->export_names);
+  iree_allocator_free(iree_allocator_system(), executable);
 }
 
 hrx_status_t hrx_executable_export_count(hrx_executable_t executable,

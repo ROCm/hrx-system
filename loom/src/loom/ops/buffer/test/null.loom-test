@@ -1,0 +1,111 @@
+// RUN: pass canonicalize
+
+// Null has zero extent; empty allocated storage still has an identity.
+func.def @null_value() -> (i1, offset) {
+  %buffer = buffer.null : buffer
+  %missing = buffer.compare.null %buffer : buffer
+  %length = buffer.length %buffer
+  func.return %missing, %length : i1, offset
+}
+
+func.def @empty_constant() -> (i1) {
+  %buffer = buffer.constant bytes("") : buffer
+  %missing = buffer.compare.null %buffer : buffer
+  func.return %missing : i1
+}
+
+func.def @empty_allocation() -> (i1) {
+  %empty_length = index.constant 0 : offset
+  %buffer = buffer.alloca<private> align(4) %empty_length : buffer
+  %missing = buffer.compare.null %buffer : buffer
+  func.return %missing : i1
+}
+
+// A conditional root is not the identity of either arm. The test remains
+// dynamic when an incoming buffer or a selected alternative may be null.
+func.def @optional(%input: buffer, %use: i1) -> (buffer, i1) {
+  %empty = buffer.null : buffer
+  %selected = scf.select %use, %input, %empty : buffer
+  %missing = buffer.compare.null %selected : buffer
+  func.return %selected, %missing : buffer, i1
+}
+
+func.def @nonnull_join(%choose: i1) -> (i1) {
+  %left = buffer.constant bytes("") : buffer
+  %right = buffer.constant bytes("01") : buffer
+  %selected = scf.select %choose, %left, %right : buffer
+  %missing = buffer.compare.null %selected : buffer
+  func.return %missing : i1
+}
+
+func.def @structured_join(%use: i1) -> (buffer, i1, offset) {
+  %selected = scf.if %use -> (buffer) {
+    %storage = buffer.constant bytes("00010203") : buffer
+    scf.yield %storage : buffer
+  } else {
+    %empty = buffer.null : buffer
+    scf.yield %empty : buffer
+  }
+  %missing = buffer.compare.null %selected : buffer
+  %length = buffer.length %selected
+  func.return %selected, %missing, %length : buffer, i1, offset
+}
+
+func.def @null_join(%choose: i1) -> (i1) {
+  %selected = scf.if %choose -> (buffer) {
+    %left = buffer.null : buffer
+    scf.yield %left : buffer
+  } else {
+    %right = buffer.null : buffer
+    scf.yield %right : buffer
+  }
+  %missing = buffer.compare.null %selected : buffer
+  func.return %missing : i1
+}
+
+// ----
+func.def @null_value() -> (i1, offset) {
+  %missing = scalar.constant true : i1
+  %length = index.constant 0 : offset
+  func.return %missing, %length : i1, offset
+}
+
+func.def @empty_constant() -> (i1) {
+  %missing = scalar.constant false : i1
+  func.return %missing : i1
+}
+
+func.def @empty_allocation() -> (i1) {
+  %missing = scalar.constant false : i1
+  func.return %missing : i1
+}
+
+func.def @optional(%input: buffer, %use: i1) -> (buffer, i1) {
+  %empty = buffer.null : buffer
+  %selected = scf.select %use, %input, %empty : buffer
+  %missing = buffer.compare.null %selected : buffer
+  func.return %selected, %missing : buffer, i1
+}
+
+func.def @nonnull_join(%choose: i1) -> (i1) {
+  %missing = scalar.constant false : i1
+  func.return %missing : i1
+}
+
+func.def @structured_join(%use: i1) -> (buffer, i1, offset) {
+  %selected = scf.if %use -> (buffer) {
+    %storage = buffer.constant bytes("00010203") : buffer
+    scf.yield %storage : buffer
+  } else {
+    %empty = buffer.null : buffer
+    scf.yield %empty : buffer
+  }
+  %missing = buffer.compare.null %selected : buffer
+  %length = buffer.length %selected
+  func.return %selected, %missing, %length : buffer, i1, offset
+}
+
+func.def @null_join(%choose: i1) -> (i1) {
+  %missing = scalar.constant true : i1
+  func.return %missing : i1
+}

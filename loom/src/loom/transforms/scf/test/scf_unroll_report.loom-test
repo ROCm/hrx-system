@@ -181,3 +181,27 @@ func.def @conditioned_full_tile_unroll(%input: view<8xi32>, %initial: i32, %rema
 CHECK: *"changed":true,*
 CHECK: *"statistics":{"loops-unrolled":1,"iterations-materialized":8,"policies-cleared":0}*
 CHECK: *{"category":"scf-unroll","outcome":"unrolled","op":"scf.for","policy":"bare","schedule":"recurrence","trip_count":8,"step":1,"lower_bound_kind":"static","lower":0}*
+
+// ====
+// RUN: with-checks pass-report unroll-scf-for
+
+// The nested write loop remains one unit while the parent is scheduled, even
+// when its expansion exceeds the scheduled body's effect-row limit.
+func.def @nested_writes(%output: view<65xi32>, %initial: i32, %increment: i32) -> (i32) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %outer_count = index.constant 2 : index
+  %inner_count = index.constant 65 : index
+  %result = scf.for %row = [%begin to %outer_count step %step](%sum = %initial : i32) -> (i32) unroll schedule(recurrence) {
+    %value = scalar.muli %increment, %increment : i32
+    scf.for %part = [%begin to %inner_count step %step] unroll {
+      view.store %value, %output[%part] : i32, view<65xi32>
+    }
+    %next = scalar.addi %sum, %value : i32
+    scf.yield %next : i32
+  }
+  func.return %result : i32
+}
+
+// ----
+CHECK: *"statistics":{"loops-unrolled":3,"iterations-materialized":132,"policies-cleared":0}*

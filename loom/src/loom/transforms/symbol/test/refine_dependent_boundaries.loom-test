@@ -1,0 +1,120 @@
+// RUN: pass refine-boundaries{mode=encodings}
+
+// Exact dimensions retain their signature identities in encoding-only mode.
+// The returned layout refines both the result signature and its callers.
+func.def noinline @crop(%count: index, %layout: encoding<layout>, %rows: view<[%count]xi8, %layout>) -> (%result_count: index, %result_layout: encoding<layout>, view<[%result_count]xi8, %result_layout>) {
+  %c1 = index.constant 1 : index
+  %tail = view.subview %rows[%c1] : view<[%count]xi8, %layout> -> view<[%c1]xi8, %layout>
+  func.return %c1, %layout, %tail : index, encoding<layout>, view<[%c1]xi8, %layout>
+}
+
+func.def public @entry(%data: buffer) {
+  %count = index.constant 2 : index
+  %c0 = index.constant 0 : offset
+  %layout = encoding.layout.dense : encoding<layout>
+  %rows = buffer.view %data[%c0] : buffer -> view<[%count]xi8, %layout>
+  %tail_count, %tail_layout, %tail = func.call @crop(%count, %layout, %rows) : (index, encoding<layout>, view<[%count]xi8, %layout>) -> (index, encoding<layout>, view<[%tail_count]xi8, %tail_layout>)
+  test.use %rows, %tail : view<[%count]xi8, %layout>, view<[%tail_count]xi8, %tail_layout>
+  func.return
+}
+
+// ----
+func.def noinline @crop(%count: index, %rows: view<[%count]xi8>) -> (%result_count: index, view<[%result_count]xi8>) {
+  %c1 = index.constant 1 : index
+  %tail = view.subview %rows[%c1] : view<[%count]xi8> -> view<[%c1]xi8>
+  func.return %c1, %tail : index, view<[%c1]xi8>
+}
+
+func.def public @entry(%data: buffer) {
+  %count = index.constant 2 : index
+  %c0 = index.constant 0 : offset
+  %layout = encoding.layout.dense : encoding<layout>
+  %rows = buffer.view %data[%c0] : buffer -> view<[%count]xi8>
+  %tail_count, %tail = func.call @crop(%count, %rows) : (index, view<[%count]xi8>) -> (index, view<[%tail_count]xi8>)
+  test.use %rows, %tail : view<[%count]xi8>, view<[%tail_count]xi8>
+  func.return
+}
+
+// ====
+
+// RUN: pass refine-boundaries
+
+// Full refinement instead makes the same dimensions static and prunes their
+// now-unused ABI slots. No signature can refer to a constant in its body.
+func.def noinline @crop(%count: index, %layout: encoding<layout>, %rows: view<[%count]xi8, %layout>) -> (%result_count: index, %result_layout: encoding<layout>, view<[%result_count]xi8, %result_layout>) {
+  %c1 = index.constant 1 : index
+  %tail = view.subview %rows[%c1] : view<[%count]xi8, %layout> -> view<[%c1]xi8, %layout>
+  func.return %c1, %layout, %tail : index, encoding<layout>, view<[%c1]xi8, %layout>
+}
+
+func.def public @entry(%data: buffer) {
+  %count = index.constant 2 : index
+  %c0 = index.constant 0 : offset
+  %layout = encoding.layout.dense : encoding<layout>
+  %rows = buffer.view %data[%c0] : buffer -> view<[%count]xi8, %layout>
+  %tail_count, %tail_layout, %tail = func.call @crop(%count, %layout, %rows) : (index, encoding<layout>, view<[%count]xi8, %layout>) -> (index, encoding<layout>, view<[%tail_count]xi8, %tail_layout>)
+  test.use %rows, %tail : view<[%count]xi8, %layout>, view<[%tail_count]xi8, %tail_layout>
+  func.return
+}
+
+// ----
+func.def noinline @crop(%rows: view<2xi8>) -> (view<1xi8>) {
+  %c1 = index.constant 1 : index
+  %tail = view.subview %rows[%c1] : view<2xi8> -> view<1xi8>
+  func.return %tail : view<1xi8>
+}
+
+func.def public @entry(%data: buffer) {
+  %c0 = index.constant 0 : offset
+  %rows = buffer.view %data[%c0] : buffer -> view<2xi8>
+  %tail = func.call pure @crop(%rows) : (view<2xi8>) -> (view<1xi8>)
+  test.use %rows, %tail : view<2xi8>, view<1xi8>
+  func.return
+}
+
+// ====
+
+// RUN: pass refine-boundaries{mode=encodings}
+
+// All exits agree on dense layout but disagree on the returned extent. The
+// signature receives their joined facts, preserving the varying dimension.
+func.def noinline @select_rows(%choose: i1, %data: buffer) -> (%count: index, %layout: encoding<layout>, view<[%count]xi8, %layout>) {
+  %c0 = index.constant 0 : offset
+  %dense = encoding.layout.dense : encoding<layout>
+  cfg.cond_br %choose, ^one, ^two
+^one:
+  %c1 = index.constant 1 : index
+  %first = buffer.view %data[%c0] : buffer -> view<[%c1]xi8, %dense>
+  func.return %c1, %dense, %first : index, encoding<layout>, view<[%c1]xi8, %dense>
+^two:
+  %c2 = index.constant 2 : index
+  %both = buffer.view %data[%c0] : buffer -> view<[%c2]xi8, %dense>
+  func.return %c2, %dense, %both : index, encoding<layout>, view<[%c2]xi8, %dense>
+}
+
+func.def public @entry(%choose: i1, %data: buffer) {
+  %count, %layout, %rows = func.call @select_rows(%choose, %data) : (i1, buffer) -> (index, encoding<layout>, view<[%count]xi8, %layout>)
+  test.use %rows : view<[%count]xi8, %layout>
+  func.return
+}
+
+// ----
+func.def noinline @select_rows(%choose: i1, %data: buffer) -> (%count: index, view<[%count]xi8>) {
+  %c0 = index.constant 0 : offset
+  %dense = encoding.layout.dense : encoding<layout>
+  cfg.cond_br %choose, ^one, ^two
+^one:
+  %c1 = index.constant 1 : index
+  %first = buffer.view %data[%c0] : buffer -> view<[%c1]xi8>
+  func.return %c1, %first : index, view<[%c1]xi8>
+^two:
+  %c2 = index.constant 2 : index
+  %both = buffer.view %data[%c0] : buffer -> view<[%c2]xi8>
+  func.return %c2, %both : index, view<[%c2]xi8>
+}
+
+func.def public @entry(%choose: i1, %data: buffer) {
+  %count, %rows = func.call @select_rows(%choose, %data) : (i1, buffer) -> (index, view<[%count]xi8>)
+  test.use %rows : view<[%count]xi8>
+  func.return
+}

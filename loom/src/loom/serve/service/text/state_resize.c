@@ -64,15 +64,9 @@ static iree_status_t loom_serve_text_state_validate_resize(
   for (iree_host_size_t i = 0; i < LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT;
        ++i) {
     iree_hal_buffer_t* root = *loom_serve_text_state_allocation(state, i);
-    const uint8_t* record =
-        storage->bytes[LOOM_SERVE_TEXT_STORAGE_ALLOCATIONS].data + i * 24;
-    const uint64_t length = iree_unaligned_load_le_u64(record);
-    const uint64_t alignment = iree_unaligned_load_le_u64(record + 8);
-    const uint64_t clear_length = iree_unaligned_load_le_u64(record + 16);
+    const iree_device_size_t length = storage->allocations[i].length;
     const bool resizable = i == 1 || i == 3 || i == 6 || i >= 9;
-    if ((length != 0) != (root != NULL) || length > INT64_MAX ||
-        clear_length > length || !alignment ||
-        !iree_is_power_of_two_uint64(alignment) ||
+    if ((length != 0) != (root != NULL) ||
         (root && !resizable && length != iree_hal_buffer_byte_length(root)) ||
         (root && resizable && !state->memory.buffers[i] &&
          length < iree_hal_buffer_byte_length(root))) {
@@ -124,7 +118,7 @@ static iree_status_t loom_serve_text_state_resize_directories(
       state->host_allocator, state->recurrent.pool.capacity, slot_count,
       sizeof(*state->recurrent.buffers), (void**)&state->recurrent.buffers));
   IREE_RETURN_IF_ERROR(
-      loom_serve_block_pool_grow(&state->recurrent.pool, slot_count));
+      loom_runtime_block_pool_grow(&state->recurrent.pool, slot_count));
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = state->row_count;
        i < row_count && iree_status_is_ok(status); ++i) {
@@ -197,10 +191,10 @@ iree_status_t loom_serve_text_state_resize(loom_serve_text_state_t* state,
   IREE_TRACE_ZONE_BEGIN(z0);
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, loom_serve_text_state_validate_resize(state, row_count, storage));
-  const bool backed =
-      loom_serve_memory_operation_is_complete(state->memory.backing.operation);
+  const bool backed = loom_runtime_memory_operation_is_complete(
+      state->memory.backing.operation);
   IREE_ASSERT(backed && !state->prepared_reservations);
-  loom_serve_memory_operation_free(state->memory.backing.operation);
+  loom_runtime_memory_operation_free(state->memory.backing.operation);
   state->memory.backing.operation = NULL;
   const iree_host_size_t previous_count = state->row_count;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
@@ -218,10 +212,8 @@ iree_status_t loom_serve_text_state_resize(loom_serve_text_state_t* state,
   for (iree_host_size_t i = 0;
        i < IREE_ARRAYSIZE(previous) && iree_status_is_ok(status); ++i) {
     iree_hal_buffer_t** root = loom_serve_text_state_allocation(state, i);
-    const uint8_t* record =
-        state->storage.bytes[LOOM_SERVE_TEXT_STORAGE_ALLOCATIONS].data + i * 24;
-    const uint64_t length = iree_unaligned_load_le_u64(record);
-    const uint64_t alignment = iree_unaligned_load_le_u64(record + 8);
+    const loom_serve_text_allocation_t* record = &state->storage.allocations[i];
+    const iree_device_size_t length = record->length;
     // Carry endpoints change index even when the source reserved spare bytes.
     // Give that bank a fresh target so overlapping old/new ranges never alias.
     if (!*root || (i != 6 && length <= iree_hal_buffer_byte_length(*root))) {
@@ -233,31 +225,31 @@ iree_status_t loom_serve_text_state_resize(loom_serve_text_state_t* state,
           state->device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
           IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &state->memory.growth.semaphores[i]);
       if (iree_status_is_ok(status)) {
-        status = loom_serve_virtual_buffer_grow_async(
+        status = loom_runtime_virtual_buffer_grow_async(
             state->memory.buffers[i], length,
             state->memory.growth.semaphores[i], 1,
             &state->memory.growth.operations[i]);
       }
       if (iree_status_is_ok(status)) {
         uint64_t value = 1;
-        status = loom_serve_execution_barrier(
+        status = loom_runtime_execution_barrier(
             state->execution,
             (iree_hal_semaphore_list_t){1, &state->memory.growth.semaphores[i],
                                         &value});
         replacement =
-            loom_serve_virtual_buffer_handle(state->memory.buffers[i]);
+            loom_runtime_virtual_buffer_handle(state->memory.buffers[i]);
         iree_hal_buffer_retain(replacement);
       }
     } else {
       const iree_hal_pool_reservation_request_t request =
-          iree_hal_make_pool_reservation_request(length, alignment);
-      status = loom_serve_execution_alloca_from_pool(
-          state->execution, loom_serve_pool_storage(state->pool), 1, &request,
+          iree_hal_make_pool_reservation_request(length, record->alignment);
+      status = loom_runtime_execution_alloca_from_pool(
+          state->execution, loom_runtime_pool_storage(state->pool), 1, &request,
           &replacement);
     }
     if (iree_status_is_ok(status)) {
-      status = loom_serve_retirement_track(&state->retirement, &replacement,
-                                           state->host_allocator);
+      status = loom_runtime_retirement_track(&state->retirement, &replacement,
+                                             state->host_allocator);
     }
     if (iree_status_is_ok(status)) {
       previous[i] = *root;
@@ -318,8 +310,8 @@ iree_status_t loom_serve_text_state_resize(loom_serve_text_state_t* state,
       }
     }
     uint64_t completion = 0;
-    status = loom_serve_execution_transfer(state->execution, transfer_count,
-                                           transfers, &completion);
+    status = loom_runtime_execution_transfer(state->execution, transfer_count,
+                                             transfers, &completion);
   }
   for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(previous); ++i) {
     iree_hal_buffer_release(previous[i]);
@@ -333,10 +325,10 @@ iree_status_t loom_serve_text_state_resize(loom_serve_text_state_t* state,
 void loom_serve_text_state_complete_resize(loom_serve_text_state_t* state) {
   for (iree_host_size_t i = 0; i < LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT;
        ++i) {
-    const bool complete = loom_serve_memory_operation_is_complete(
+    const bool complete = loom_runtime_memory_operation_is_complete(
         state->memory.growth.operations[i]);
     IREE_ASSERT(complete);
-    loom_serve_memory_operation_free(state->memory.growth.operations[i]);
+    loom_runtime_memory_operation_free(state->memory.growth.operations[i]);
     state->memory.growth.operations[i] = NULL;
     iree_hal_semaphore_release(state->memory.growth.semaphores[i]);
     state->memory.growth.semaphores[i] = NULL;

@@ -7,7 +7,7 @@
 #include <stdint.h>
 
 typedef struct iree_status_handle_t* iree_status_t;
-typedef struct iree_hal_amdgpu_reclaim_entry_t iree_hal_amdgpu_reclaim_entry_t;
+typedef struct iree_clang_tidy_reclaim_entry_t iree_clang_tidy_reclaim_entry_t;
 typedef intptr_t iree_host_size_t;
 typedef int iree_status_code_t;
 typedef void (*iree_clang_tidy_status_const_callback_t)(
@@ -530,7 +530,7 @@ void iree_clang_tidy_status_borrowed_parameter_sink(
 }
 
 void iree_clang_tidy_status_borrowed_parameter_reclaim_callback(
-    iree_hal_amdgpu_reclaim_entry_t* entry, void* user_data,
+    iree_clang_tidy_reclaim_entry_t* entry, void* user_data,
     const iree_status_t reclaim_callback_parameter_status) {
   (void)entry;
   *(iree_status_code_t*)user_data =

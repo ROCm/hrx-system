@@ -118,3 +118,87 @@ low.func.def target<amdgpu.cdna4.core>(@lane_target) @wave64_physical_lane_id() 
   v_mbcnt_lo_u32_b32 v0, -1, 0
   v_mbcnt_hi_u32_b32 v0, -1, v0
   s_endpgm
+
+// ====
+
+// The half-wave exchange snapshots its input and permits in-place allocation.
+// RUN: emit amdgpu-assembly @exchange_halves
+
+amdgpu.target<gfx1100> @target {subgroup_size = 64}
+
+low.func.def target<amdgpu.rdna3.core>(@target) @exchange_halves(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %exchanged = v_permlane64_b32 %value
+  return %exchanged
+}
+
+// ----
+  v_permlane64_b32 v0, v0
+  s_endpgm
+
+// ====
+
+// The half-wave exchange snapshots its input and permits in-place allocation.
+// RUN: emit amdgpu-native-words @exchange_halves
+
+amdgpu.target<gfx1200> @target {subgroup_size = 64}
+
+low.func.def target<amdgpu.rdna4.core>(@target) @exchange_halves(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %exchanged = v_permlane64_b32 %value
+  return %exchanged
+}
+
+// ----
+0x7E00CF00
+0xBFB00000
+
+// ====
+
+// Partial-read refinements retain the native signed/unsigned BFE encoding.
+// RUN: emit amdgpu-native-words @scalar_bitfield_carriers
+
+amdgpu.target<gfx942> @target
+
+low.func.def target<amdgpu.cdna3.core>(@target) @scalar_bitfield_carriers(%input: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) asm {
+  %unsigned_byte = s_bfe_u32_lit_low16 %input {imm32 = 524288}
+  %signed_byte = s_bfe_i32_lit_low16 %input {imm32 = 524288}
+  %unsigned_half = s_bfe_u32_lit_low16 %input
+  %signed_half = s_bfe_i32_lit_low16 %input
+  return %unsigned_byte, %signed_byte, %unsigned_half, %signed_half
+}
+
+// ----
+0x9281FF00
+0x00080000
+0x9302FF00
+0x00080000
+0x9283FF00
+0x00100000
+0x9300FF00
+0x00100000
+0xBF810000
+
+// ====
+
+// Partial-read refinements retain the native signed/unsigned BFE encoding.
+// RUN: emit amdgpu-native-words @scalar_bitfield_carriers
+
+amdgpu.target<gfx1200> @target
+
+low.func.def target<amdgpu.rdna4.core>(@target) @scalar_bitfield_carriers(%input: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) asm {
+  %unsigned_byte = s_bfe_u32_lit_low16 %input {imm32 = 524288}
+  %signed_byte = s_bfe_i32_lit_low16 %input {imm32 = 524288}
+  %unsigned_half = s_bfe_u32_lit_low16 %input
+  %signed_half = s_bfe_i32_lit_low16 %input
+  return %unsigned_byte, %signed_byte, %unsigned_half, %signed_half
+}
+
+// ----
+0x9301FF00
+0x00080000
+0x9382FF00
+0x00080000
+0x9303FF00
+0x00100000
+0x9380FF00
+0x00100000
+0xBFB00000

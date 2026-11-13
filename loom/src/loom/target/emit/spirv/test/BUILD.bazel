@@ -14,12 +14,12 @@ package(
 loom_check_test_suite(
     name = "test",
     srcs = glob(["*.loom-test"]),
-    data = [
-        "//third_party:spirv_dis",
-        "//third_party:spirv_val",
-    ],
     env = {
         "LOOM_SPIRV_DIS": "$(rootpath //third_party:spirv_dis)",
         "LOOM_SPIRV_VAL": "$(rootpath //third_party:spirv_val)",
     },
+    tools = [
+        "//third_party:spirv_dis",
+        "//third_party:spirv_val",
+    ],
 )

@@ -103,6 +103,46 @@ void loom_run_hal_testbench_context_set_device_event_sink(
   context->device_event_sink = device_event_sink;
 }
 
+void loom_run_hal_testbench_context_set_progress_sink(
+    loom_run_hal_testbench_context_t* context,
+    loom_run_hal_testbench_progress_sink_t progress_sink) {
+  IREE_ASSERT(!context->runtime_initialized);
+  context->progress_sink = progress_sink;
+}
+
+iree_status_t loom_run_hal_testbench_context_emit_progress(
+    loom_run_hal_testbench_context_t* context,
+    loom_run_hal_testbench_progress_phase_t phase) {
+  if (context->progress_sink.fn == NULL) {
+    return iree_ok_status();
+  }
+  return context->progress_sink.fn(context->progress_sink.user_data, phase);
+}
+
+static iree_status_t loom_run_hal_testbench_context_emit_runtime_progress(
+    void* user_data, loom_run_hal_runtime_progress_phase_t phase) {
+  static const loom_run_hal_testbench_progress_phase_t kPhaseMap[] = {
+      LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_RUNTIME_PROACTOR_POOL_CREATE,
+      LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_RUNTIME_FRONTIER_TRACKER_CREATE,
+      LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_RUNTIME_DEVICE_CREATE,
+      LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_RUNTIME_PROACTOR_POOL_RELEASE,
+      LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_RUNTIME_DEVICE_GROUP_CREATE,
+      LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_RUNTIME_FRONTIER_TRACKER_RELEASE,
+      LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_RUNTIME_DISPATCH_QUEUE_SELECT,
+      LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_RUNTIME_TRANSFER_QUEUE_SELECT,
+      LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_RUNTIME_DEVICE_SOURCE_POOL_CREATE,
+      LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_RUNTIME_DEVICE_POOL_CREATE,
+      LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_RUNTIME_STAGING_POOL_CREATE,
+      LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_RUNTIME_FAILURE_DEINITIALIZE,
+  };
+  static_assert(
+      IREE_ARRAYSIZE(kPhaseMap) == LOOM_RUN_HAL_RUNTIME_PROGRESS_PHASE_COUNT,
+      "runtime progress phase map must remain complete");
+  IREE_ASSERT((uint32_t)phase < IREE_ARRAYSIZE(kPhaseMap));
+  return loom_run_hal_testbench_context_emit_progress(
+      (loom_run_hal_testbench_context_t*)user_data, kPhaseMap[phase]);
+}
+
 iree_status_t loom_run_hal_testbench_context_add_module_runtime_requirements(
     loom_run_hal_testbench_context_t* context, const loomc_module_t* module,
     const loomc_sanitizer_options_t* sanitizer_options,
@@ -193,6 +233,12 @@ iree_status_t loom_run_hal_testbench_context_ensure_runtime(
                                           &runtime_options);
   runtime_options.event_sink = context->device_event_sink;
   runtime_options.runtime_features = context->runtime_features;
+  runtime_options.progress_sink = (loom_run_hal_runtime_progress_sink_t){
+      .fn = loom_run_hal_testbench_context_emit_runtime_progress,
+      .user_data = context,
+  };
+  IREE_RETURN_IF_ERROR(loom_run_hal_testbench_context_emit_progress(
+      context, LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_RUNTIME_INITIALIZE));
   iree_status_t status = loom_run_hal_runtime_initialize(
       &runtime_options, context->host_allocator, &context->runtime);
   IREE_RETURN_IF_ERROR(status);
@@ -216,6 +262,7 @@ iree_status_t loom_run_hal_testbench_context_select_target(
       .structure_size = sizeof(options),
       .identifier = identifier,
       .device = context->runtime.device,
+      .queue = context->runtime.dispatch_queue,
       .physical_device_affinity =
           loom_run_hal_runtime_dispatch_physical_device_affinity(
               &context->runtime),
@@ -223,6 +270,8 @@ iree_status_t loom_run_hal_testbench_context_select_target(
       .providers = target_providers,
       .provider_count = IREE_ARRAYSIZE(target_providers),
   };
+  IREE_RETURN_IF_ERROR(loom_run_hal_testbench_context_emit_progress(
+      context, LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_TARGET_SELECT));
   return iree_status_from_loomc(loomc_target_select_iree_hal(
       context->target_environment, &options,
       loomc_allocator_from_iree(context->host_allocator), out_selection,
@@ -640,6 +689,8 @@ iree_status_t loom_run_hal_testbench_actual_provider_compile(
     return status;
   }
 
+  IREE_RETURN_IF_ERROR(loom_run_hal_testbench_context_emit_progress(
+      provider->context, LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_COMPILE));
   loomc_module_t* compile_module = NULL;
   status = iree_status_from_loomc(loomc_module_clone(
       provider->module, provider->compilation->workspace,
@@ -714,6 +765,10 @@ iree_status_t loom_run_hal_testbench_actual_provider_compile(
         IREE_STATUS_INTERNAL,
         "compiler did not return executable and launch-config artifacts");
   }
+
+  IREE_RETURN_IF_ERROR(loom_run_hal_testbench_context_emit_progress(
+      provider->context,
+      LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_EXECUTABLE_LOAD));
 
   if (provider->sequence_representation ==
       LOOM_RUN_HAL_DISPATCH_SEQUENCE_REPRESENTATION_DIRECT) {
@@ -1092,6 +1147,8 @@ iree_status_t loom_run_hal_testbench_actual_invoke(
     return iree_ok_status();
   }
 
+  IREE_RETURN_IF_ERROR(loom_run_hal_testbench_context_emit_progress(
+      provider->context, LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_MATERIALIZE));
   loom_run_hal_invocation_options_t invocation_options = {0};
   loom_run_hal_binding_list_t bindings = {0};
   IREE_RETURN_IF_ERROR(
@@ -1106,6 +1163,10 @@ iree_status_t loom_run_hal_testbench_actual_invoke(
       &invocation_options, &bindings, /*expected_bindings=*/NULL,
       /*max_output_element_count=*/0, provider->context->host_allocator, &plan);
   loom_run_hal_binding_list_deinitialize(&bindings);
+  if (iree_status_is_ok(status)) {
+    status = loom_run_hal_testbench_context_emit_progress(
+        provider->context, LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_STAGE);
+  }
   if (iree_status_is_ok(status)) {
     iree_hal_buffer_binding_t device_bindings[LOOM_RUN_HAL_MAX_BINDING_COUNT];
     for (iree_host_size_t i = 0; i < plan.bindings.count; ++i) {
@@ -1134,18 +1195,34 @@ iree_status_t loom_run_hal_testbench_actual_invoke(
     }
   }
   if (iree_status_is_ok(status)) {
+    status = loom_run_hal_testbench_context_emit_progress(
+        provider->context, LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_DISPATCH);
+  }
+  if (iree_status_is_ok(status)) {
     status = loom_run_hal_invocation_dispatch_plan(
         &provider->context->runtime, &provider->prepared_candidate, &plan,
         provider->context->host_allocator, &iteration);
   }
   if (iree_status_is_ok(status)) {
+    status = loom_run_hal_testbench_context_emit_progress(
+        provider->context, LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_READBACK);
+  }
+  if (iree_status_is_ok(status)) {
     status = loom_run_hal_testbench_staging_readback(
         &provider->context->runtime, &staging);
   }
+  status = iree_status_join(
+      status,
+      loom_run_hal_testbench_context_emit_progress(
+          provider->context, LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_RETIRE));
   loom_run_hal_iteration_deinitialize(&iteration);
   loom_run_hal_invocation_plan_deinitialize(&plan);
   status = iree_status_join(
       status, loom_run_hal_testbench_staging_deinitialize(&staging));
+  if (iree_status_is_ok(status)) {
+    status = loom_run_hal_testbench_context_emit_progress(
+        provider->context, LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_COMPLETE);
+  }
   return status;
 }
 
@@ -1588,17 +1665,29 @@ static iree_status_t loom_run_hal_testbench_actual_sequence_invoke_span(
     return iree_ok_status();
   }
 
+  IREE_RETURN_IF_ERROR(loom_run_hal_testbench_context_emit_progress(
+      span->context, LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_MATERIALIZE));
   loom_run_hal_dispatch_sequence_t* execution_sequence =
       &span->execution_sequences[execution_index];
   if (!loom_run_hal_dispatch_sequence_is_prepared(execution_sequence)) {
+    IREE_RETURN_IF_ERROR(loom_run_hal_testbench_context_emit_progress(
+        span->context, LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_DISPATCH_PREPARE));
     IREE_RETURN_IF_ERROR(loom_run_hal_testbench_actual_sequence_prepare_sample(
         span, execution_index));
   }
   loom_run_hal_testbench_actual_sequence_populate_binding_table(span);
   loom_run_hal_testbench_staging_t staging = {0};
-  iree_status_t status = loom_run_hal_testbench_staging_initialize(
-      &span->context->runtime, span->binding_count, span->binding_table,
-      execution->host_allocator, &staging);
+  iree_status_t status = loom_run_hal_testbench_context_emit_progress(
+      span->context, LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_STAGE);
+  if (iree_status_is_ok(status)) {
+    status = loom_run_hal_testbench_staging_initialize(
+        &span->context->runtime, span->binding_count, span->binding_table,
+        execution->host_allocator, &staging);
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_run_hal_testbench_context_emit_progress(
+        span->context, LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_DISPATCH);
+  }
   if (iree_status_is_ok(status)) {
     status = loom_run_hal_dispatch_sequence_execute(
         &span->context->runtime, execution_sequence,
@@ -1608,11 +1697,22 @@ static iree_status_t loom_run_hal_testbench_actual_sequence_invoke_span(
         });
   }
   if (iree_status_is_ok(status)) {
+    status = loom_run_hal_testbench_context_emit_progress(
+        span->context, LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_READBACK);
+  }
+  if (iree_status_is_ok(status)) {
     status = loom_run_hal_testbench_staging_readback(&span->context->runtime,
                                                      &staging);
   }
   status = iree_status_join(
+      status, loom_run_hal_testbench_context_emit_progress(
+                  span->context, LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_RETIRE));
+  status = iree_status_join(
       status, loom_run_hal_testbench_staging_deinitialize(&staging));
+  if (iree_status_is_ok(status)) {
+    status = loom_run_hal_testbench_context_emit_progress(
+        span->context, LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_COMPLETE);
+  }
   return status;
 }
 

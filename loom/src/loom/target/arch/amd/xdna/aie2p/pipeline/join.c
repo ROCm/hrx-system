@@ -6,6 +6,25 @@
 
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/join.h"
 
+bool loom_aie2p_join_program_prefers_sharing(
+    const loom_aie2p_join_program_t* program, iree_host_size_t use_count) {
+  // Each lock instruction occupies four bytes; the two credit constants add
+  // eight. Omit lock-wait padding from the estimate so small bodies keep the
+  // opportunity to coissue and reuse constants in their caller.
+  const iree_host_size_t body_bytes = 4 * program->count + 8;
+  // A no-argument call is a six-byte JL and five two-byte delay positions.
+  // Reserve another 48 bytes for return, link preservation, and alignment.
+  const iree_host_size_t call_bytes = 16;
+  const iree_host_size_t helper_overhead_bytes = 48;
+  if (body_bytes <= call_bytes) {
+    return false;
+  }
+  // Compare N*body with body + N*call + overhead without multiplying by the
+  // use count. Program size is bounded by the physical lock-tree degree.
+  return use_count >
+         (body_bytes + helper_overhead_bytes) / (body_bytes - call_bytes);
+}
+
 typedef struct loom_aie2p_join_edge_t {
   // Physical tiles sharing one lock aperture, independent of tree orientation.
   iree_host_size_t nodes[2];
@@ -47,7 +66,8 @@ iree_status_t loom_aie2p_join_plan_build(const loom_xdna_array_family_t* family,
                                          bool* out_valid) {
   *out_plan = (loom_aie2p_join_plan_t){0};
   *out_valid = false;
-  const iree_host_size_t tile_count = family->column_count * family->row_count;
+  const iree_host_size_t tile_count =
+      (iree_host_size_t)family->column_count * family->row_count;
   iree_host_size_t node_count = 0, root = IREE_HOST_SIZE_MAX;
   for (iree_host_size_t i = 0; i < tile_count; ++i) {
     if (participants[i]) {

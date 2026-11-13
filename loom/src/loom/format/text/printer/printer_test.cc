@@ -1790,7 +1790,7 @@ TEST_F(PrintOpTest, BlockLabel) {
   IREE_ASSERT_OK(loom_module_intern_string(module_, IREE_SV("next"),
                                            &second_block->label_id));
   IREE_ASSERT_OK(loom_block_add_arg(module_, second_block, def(f32)));
-  loom_op_regions(op)[0] = then_region;
+  loom_op_set_region(op, 0, then_region);
 
   std::string output = print_op(op, LOOM_TEXT_PRINT_DEFAULT);
   EXPECT_EQ(output,
@@ -2428,11 +2428,9 @@ TEST_F(PrintOpTest, LocationOpaque) {
       loom_module_register_source(module_, IREE_SV("torch"), &source_id));
 
   // Add an opaque location.
-  loom_location_entry_t opaque_loc = {.kind = LOOM_LOCATION_OPAQUE};
-  opaque_loc.opaque.source_id = 0;
   const char* data = "node_id=42";
-  opaque_loc.opaque.data = (const uint8_t*)data;
-  opaque_loc.opaque.data_length = (uint32_t)strlen(data);
+  loom_location_entry_t opaque_loc = loom_location_opaque(
+      source_id, (const uint8_t*)data, (uint32_t)strlen(data));
   loom_location_id_t loc_id = LOOM_LOCATION_UNKNOWN;
   IREE_ASSERT_OK(loom_module_add_location(module_, opaque_loc, &loc_id));
 
@@ -2452,11 +2450,9 @@ TEST_F(PrintOpTest, LocationOpaqueUsesCanonicalStringEscapes) {
   IREE_ASSERT_OK(loom_module_register_source(module_, IREE_SV("torch \"aten\""),
                                              &source_id));
 
-  loom_location_entry_t opaque_loc = {.kind = LOOM_LOCATION_OPAQUE};
-  opaque_loc.opaque.source_id = source_id;
   const char* data = "node\\id\n\x01";
-  opaque_loc.opaque.data = (const uint8_t*)data;
-  opaque_loc.opaque.data_length = (uint32_t)strlen(data);
+  loom_location_entry_t opaque_loc = loom_location_opaque(
+      source_id, (const uint8_t*)data, (uint32_t)strlen(data));
   loom_location_id_t loc_id = LOOM_LOCATION_UNKNOWN;
   IREE_ASSERT_OK(loom_module_add_location(module_, opaque_loc, &loc_id));
 
@@ -2477,11 +2473,9 @@ TEST_F(PrintOpTest, LocationOpaqueRejectsInvalidUtf8Data) {
   IREE_ASSERT_OK(
       loom_module_register_source(module_, IREE_SV("torch"), &source_id));
 
-  loom_location_entry_t opaque_loc = {.kind = LOOM_LOCATION_OPAQUE};
-  opaque_loc.opaque.source_id = source_id;
   const uint8_t data[] = {0xFF};
-  opaque_loc.opaque.data = data;
-  opaque_loc.opaque.data_length = IREE_ARRAYSIZE(data);
+  loom_location_entry_t opaque_loc =
+      loom_location_opaque(source_id, data, IREE_ARRAYSIZE(data));
   loom_location_id_t loc_id = LOOM_LOCATION_UNKNOWN;
   IREE_ASSERT_OK(loom_module_add_location(module_, opaque_loc, &loc_id));
 
@@ -2600,11 +2594,9 @@ TEST_F(PrintOpTest, LocationFusedPrintsNestedLocationBodies) {
   loom_source_id_t torch_source_id = LOOM_SOURCE_ID_INVALID;
   IREE_ASSERT_OK(
       loom_module_register_source(module_, IREE_SV("torch"), &torch_source_id));
-  loom_location_entry_t opaque_loc = {.kind = LOOM_LOCATION_OPAQUE};
-  opaque_loc.opaque.source_id = torch_source_id;
   const char* data = "node\n42";
-  opaque_loc.opaque.data = (const uint8_t*)data;
-  opaque_loc.opaque.data_length = (uint32_t)strlen(data);
+  loom_location_entry_t opaque_loc = loom_location_opaque(
+      torch_source_id, (const uint8_t*)data, (uint32_t)strlen(data));
   loom_location_id_t opaque_loc_id = LOOM_LOCATION_UNKNOWN;
   IREE_ASSERT_OK(loom_module_add_location(module_, opaque_loc, &opaque_loc_id));
 
@@ -2613,9 +2605,8 @@ TEST_F(PrintOpTest, LocationFusedPrintsNestedLocationBodies) {
       &module_->arena, 2, sizeof(*nested_children), (void**)&nested_children));
   nested_children[0] = recipe_loc_id;
   nested_children[1] = opaque_loc_id;
-  loom_location_entry_t nested_fused_loc = {.kind = LOOM_LOCATION_FUSED};
-  nested_fused_loc.fused.count = 2;
-  nested_fused_loc.fused.children = nested_children;
+  loom_location_entry_t nested_fused_loc =
+      loom_location_fused(nested_children, 2);
   loom_location_id_t nested_fused_loc_id = LOOM_LOCATION_UNKNOWN;
   IREE_ASSERT_OK(loom_module_add_location(module_, nested_fused_loc,
                                           &nested_fused_loc_id));
@@ -2625,9 +2616,7 @@ TEST_F(PrintOpTest, LocationFusedPrintsNestedLocationBodies) {
       &module_->arena, 2, sizeof(*root_children), (void**)&root_children));
   root_children[0] = jax_loc_id;
   root_children[1] = nested_fused_loc_id;
-  loom_location_entry_t fused_loc = {.kind = LOOM_LOCATION_FUSED};
-  fused_loc.fused.count = 2;
-  fused_loc.fused.children = root_children;
+  loom_location_entry_t fused_loc = loom_location_fused(root_children, 2);
   loom_location_id_t fused_loc_id = LOOM_LOCATION_UNKNOWN;
   IREE_ASSERT_OK(loom_module_add_location(module_, fused_loc, &fused_loc_id));
 
@@ -2650,9 +2639,7 @@ TEST_F(PrintOpTest, LocationFusedRejectsOutOfRangeChildId) {
   IREE_ASSERT_OK(iree_arena_allocate_array(
       &module_->arena, 1, sizeof(*children), (void**)&children));
   children[0] = 42;
-  loom_location_entry_t fused_loc = {.kind = LOOM_LOCATION_FUSED};
-  fused_loc.fused.count = 1;
-  fused_loc.fused.children = children;
+  loom_location_entry_t fused_loc = loom_location_fused(children, 1);
   loom_location_id_t fused_loc_id = LOOM_LOCATION_UNKNOWN;
   IREE_ASSERT_OK(loom_module_add_location(module_, fused_loc, &fused_loc_id));
 

@@ -67,6 +67,7 @@ loom_generated_cc_library(
         "//loom/src/loom/ir:facts",
         "//loom/src/loom/ops:atomic",
         "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops:value_refinement",
         "//loom/src/loom/ops/view",
         "//loom/src/loom/rewrite:rewriter",
         "//loom/src/loom/rewrite:type_propagation",

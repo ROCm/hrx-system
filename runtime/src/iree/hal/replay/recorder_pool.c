@@ -167,8 +167,8 @@ static iree_status_t iree_hal_replay_recorder_pool_intercept_allocation(
 
   if (iree_status_is_ok(status)) {
     *out_buffer = iree_hal_replay_recorder_buffer_initialize_proxy(
-        pool->recorder, device_id, buffer_id, IREE_HAL_REPLAY_OBJECT_ID_NONE,
-        placement_device, native_buffer, pool->host_allocator, proxy_storage);
+        pool->recorder, device_id, buffer_id, placement_device, native_buffer,
+        pool->host_allocator, proxy_storage);
     proxy_storage = NULL;
   }
   iree_hal_replay_recorder_buffer_free_proxy(pool->host_allocator,
@@ -181,15 +181,15 @@ static iree_status_t iree_hal_replay_recorder_pool_acquire_reservations(
     iree_hal_pool_t* base_pool, iree_host_size_t request_count,
     const iree_hal_pool_reservation_request_t* requests,
     const iree_async_frontier_t* requester_frontier,
-    iree_hal_pool_reservation_t* out_reservations,
-    iree_hal_pool_acquire_info_t* out_infos,
     iree_hal_pool_acquire_callback_t completion,
-    iree_hal_pool_reserve_flags_t flags) {
+    iree_hal_pool_reserve_flags_t flags,
+    iree_hal_pool_reservation_t* out_reservations,
+    iree_hal_pool_acquire_info_t* out_infos) {
   iree_hal_replay_recorder_pool_t* pool =
       iree_hal_replay_recorder_pool_cast(base_pool);
   return iree_hal_pool_acquire_reservations(
-      pool->base_pool, request_count, requests, requester_frontier,
-      out_reservations, out_infos, completion, flags);
+      pool->base_pool, request_count, requests, requester_frontier, completion,
+      flags, out_reservations, out_infos);
 }
 
 static void iree_hal_replay_recorder_pool_release_reservations(
@@ -256,8 +256,8 @@ static iree_status_t iree_hal_replay_recorder_pool_materialize_reservations(
               pool, native_buffers[i], &device_id);
       out_buffers[i] = iree_hal_replay_recorder_buffer_initialize_proxy(
           pool->recorder, device_id, IREE_HAL_REPLAY_OBJECT_ID_NONE,
-          IREE_HAL_REPLAY_OBJECT_ID_NONE, placement_device, native_buffers[i],
-          pool->host_allocator, proxy_storage[i]);
+          placement_device, native_buffers[i], pool->host_allocator,
+          proxy_storage[i]);
       proxy_storage[i] = NULL;
     }
   }
@@ -431,8 +431,8 @@ static iree_status_t iree_hal_replay_recorder_pool_import_buffer(
   }
   if (iree_status_is_ok(status)) {
     *out_buffer = iree_hal_replay_recorder_buffer_initialize_proxy(
-        pool->recorder, device_id, buffer_id, IREE_HAL_REPLAY_OBJECT_ID_NONE,
-        placement_device, native_buffer, pool->host_allocator, proxy_storage);
+        pool->recorder, device_id, buffer_id, placement_device, native_buffer,
+        pool->host_allocator, proxy_storage);
     proxy_storage = NULL;
   }
   iree_hal_replay_recorder_buffer_free_proxy(pool->host_allocator,

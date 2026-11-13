@@ -396,10 +396,9 @@ static iree_status_t loom_print_dim(loom_output_stream_t* stream,
 
 // Shared in source but kept inline in both complete-type and result-type hot
 // paths so declaration-driven spelling does not add a call per printed type.
-IREE_ATTRIBUTE_ALWAYS_INLINE static inline iree_status_t
-loom_print_shaped_interior(loom_output_stream_t* stream, loom_type_t type,
-                           const loom_module_t* module,
-                           const loom_print_context_t* ctx) {
+static IREE_ATTRIBUTE_ALWAYS_INLINE iree_status_t loom_print_shaped_interior(
+    loom_output_stream_t* stream, loom_type_t type, const loom_module_t* module,
+    const loom_print_context_t* ctx) {
   uint8_t rank = loom_type_rank(type);
   for (uint8_t i = 0; i < rank; ++i) {
     if (i > 0) {
@@ -456,6 +455,15 @@ static iree_status_t loom_print_descriptor_backed_type(
     descriptor = parameterized->type_descriptor;
     parameter_count = loom_type_parameterized_parameter_count(type);
     parameters = loom_type_parameterized_parameters(type);
+  } else if (loom_type_is_reference(type)) {
+    descriptor = loom_type_registry_lookup_reference(
+        loom_type_reference_ownership(type));
+    parameterized = descriptor->parameterized;
+    inline_parameter = loom_attr_symbol((loom_symbol_ref_t){
+        .symbol_id = loom_type_reference_declaration_id(type),
+    });
+    parameter_count = 1;
+    parameters = &inline_parameter;
   } else {
     descriptor = loom_type_registry_lookup_builtin(loom_type_kind(type));
     if (descriptor) {
@@ -596,6 +604,7 @@ static iree_status_t loom_text_print_type_impl(
       return iree_ok_status();
     }
     case LOOM_TYPE_PARAMETERIZED:
+    case LOOM_TYPE_REFERENCE:
       return loom_print_descriptor_backed_type(type, module, stream, ctx);
     case LOOM_TYPE_REGISTER: {
       IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "reg<"));

@@ -105,6 +105,8 @@ typedef struct loom_low_target_legalize_function_state_t {
   loom_module_t* module;
   // Selected target-bound source function.
   const loom_low_source_selection_t* selection;
+  // Function-local export context forwarded through legalization diagnostics.
+  loom_diagnostic_export_scope_t diagnostic_scope;
   // Source-to-low query options shared by eager and final legality checks.
   loom_low_lower_options_t lower_options;
   // Complete Low binding selected once for this function legalization.
@@ -287,12 +289,15 @@ static iree_string_view_t loom_low_target_legalize_report_descriptor_key(
     const loom_low_target_legalize_function_state_t* state,
     const loom_target_contract_query_result_t* query_result) {
   const loom_low_descriptor_t* descriptor = query_result->selected_descriptor;
-  if (descriptor == NULL ||
-      descriptor->key_string_ref == LOOM_STRING_REF_NONE) {
+  if (descriptor == NULL) {
     return iree_string_view_empty();
   }
-  return loom_low_descriptor_set_string(state->source_binding.descriptor_set,
-                                        descriptor->key_string_ref);
+  const loom_string_ref_t key_string_ref = loom_low_descriptor_key_string_ref(
+      state->source_binding.descriptor_set, descriptor);
+  return key_string_ref == LOOM_STRING_REF_NONE
+             ? iree_string_view_empty()
+             : loom_low_descriptor_set_string(
+                   state->source_binding.descriptor_set, key_string_ref);
 }
 
 static bool loom_low_target_legalize_report_wants_rows(
@@ -350,6 +355,19 @@ static bool loom_low_target_legalize_op_is_deferred_for_shaped_load(
   const loom_value_id_t result = loom_op_const_results(op)[0];
   return result < state->deferred_shaped_component_ops.capacity &&
          state->deferred_shaped_component_ops.by_value_id[result] != 0;
+}
+
+static bool loom_low_target_legalize_op_has_shaped_vector_access(
+    const loom_module_t* module, const loom_op_t* op) {
+  loom_value_id_t bank = LOOM_VALUE_ID_INVALID;
+  if (loom_vector_extract_isa(op)) {
+    bank = loom_vector_extract_source(op);
+  } else if (loom_vector_insert_isa(op)) {
+    bank = loom_vector_insert_dest(op);
+  } else {
+    return false;
+  }
+  return loom_type_rank(loom_module_value_type(module, bank)) > 1;
 }
 
 static iree_status_t loom_low_target_legalize_defer_shaped_component_op(
@@ -1141,8 +1159,8 @@ loom_low_target_legalize_reference_entry_has_terminal_input(
       continue;
     }
     const loom_op_t* producer = loom_value_def_op(value);
-    if (!loom_low_lower_op_contract_query_accepts(target_query,
-                                                  producer->kind)) {
+    if (!loom_low_lower_op_contract_query_may_return_terminal_rejection(
+            target_query, producer->kind)) {
       continue;
     }
     loom_target_contract_query_result_t producer_result =
@@ -1226,6 +1244,14 @@ static iree_status_t loom_low_target_legalize_rewrite_op(
   bool erased = false;
   IREE_RETURN_IF_ERROR(
       loom_rewriter_erase_if_dead(&driver->rewriter, op, &erased));
+  // Shape legalization may flatten a value restored by an earlier rewrite.
+  // Cancel inverse bitcasts in this worklist so packet consumers can still
+  // reach their native producers before the legalization fixed point closes.
+  if (!erased && loom_vector_bitcast_isa(op)) {
+    IREE_RETURN_IF_ERROR(
+        loom_vector_bitcast_canonicalize(op, &driver->rewriter));
+    erased = iree_any_bit_set(op->flags, LOOM_OP_FLAG_DEAD);
+  }
   if (erased) {
     if (report_decision != NULL && !is_report_source) {
       loom_low_target_legalize_accumulate_descendant_rewrite(
@@ -1283,8 +1309,14 @@ static iree_status_t loom_low_target_legalize_rewrite_op(
         &state->legalization_context, op, &query_result_storage));
     query_result = &query_result_storage;
   }
+  // Unrolling exposes static bank slots before boundary projection. Preserve
+  // multidimensional access structure until complete legalization; flattening
+  // it here hides independent recurrence values. Linear packet accesses retain
+  // their native legalization alongside their memory producers and consumers.
   if (state->legalization_context.mode == LOOM_TARGET_LEGALIZATION_MODE_EAGER &&
-      loom_low_target_legalize_op_is_deferred_for_shaped_load(state, op)) {
+      (loom_low_target_legalize_op_has_shaped_vector_access(state->module,
+                                                            op) ||
+       loom_low_target_legalize_op_is_deferred_for_shaped_load(state, op))) {
     if (is_report_source) {
       IREE_RETURN_IF_ERROR(loom_low_target_legalize_retain_report_decision(
           state, report_decision, source_op_name, source_op_kind,
@@ -1295,11 +1327,11 @@ static iree_status_t loom_low_target_legalize_rewrite_op(
     ++state->statistics->ops_deferred;
     return iree_ok_status();
   }
-  // Packet materialization earlier in this worklist can create a
-  // shape-preserving vector operation after the iteration's component plan has
-  // run. Give the next plan first claim when the target admits a multi-lane
-  // packet width. Ordinary target and reference rewrites never enter this
-  // handoff and consume their generated operations in the current worklist.
+  // Packet materialization earlier in this worklist can create a vector
+  // operation or memory input after the iteration's component plan has run.
+  // Give the next plan first claim when the target admits a multi-lane packet
+  // width. Ordinary target and reference rewrites never enter this handoff and
+  // consume their generated operations in the current worklist.
   if (!state->legalization_context
            .source_function_has_unsupported_vector_carrier &&
       state->legalization_context.vector_packet_policy != NULL &&
@@ -1606,7 +1638,7 @@ static iree_status_t loom_low_target_legalize_verify_final(
       .structural_legality_flags =
           LOOM_TARGET_LOW_STRUCTURAL_LEGALITY_ALLOW_SOURCE_SCF |
           LOOM_TARGET_LOW_STRUCTURAL_LEGALITY_ALLOW_SOURCE_CFG,
-      .emitter = state->pass->diagnostic_emitter,
+      .emitter = state->lower_options.emitter,
       .max_errors = pass_state->max_errors,
   };
   state->use_final_rejections = true;
@@ -1683,10 +1715,14 @@ IREE_ATTRIBUTE_NOINLINE static iree_status_t loom_low_target_legalize_function(
   IREE_RETURN_IF_ERROR(loom_target_low_source_binding_select(
       descriptor_registry, loom_low_source_selection_target_bundle(selection),
       &state.source_binding));
+  const iree_diagnostic_emitter_t diagnostic_emitter =
+      loom_low_source_selection_scope_diagnostics(
+          selection, pass->diagnostic_emitter, &state.diagnostic_scope);
+  const loom_target_bundle_t* target_bundle =
+      loom_low_source_selection_target_bundle(selection);
   loom_low_target_legalize_preflight_initialize(
-      module, selection->func,
-      loom_low_source_selection_target_bundle(selection),
-      pass->diagnostic_emitter, pass_state->max_errors, &state.preflight);
+      module, selection->func, target_bundle, diagnostic_emitter,
+      pass_state->max_errors, &state.preflight);
 
   loom_pass_value_fact_scope_t fact_scope =
       loom_pass_value_fact_scope_function_for_target(selection->func,
@@ -1703,7 +1739,7 @@ IREE_ATTRIBUTE_NOINLINE static iree_status_t loom_low_target_legalize_function(
       .legality_provider_list = legality_provider_list,
       .policy = selection->policy,
       .fact_table = fact_table,
-      .emitter = pass->diagnostic_emitter,
+      .emitter = diagnostic_emitter,
       .max_errors = pass_state->max_errors,
   };
 

@@ -9,12 +9,13 @@
 #include <math.h>
 
 #include "loom/ir/module.h"
+#include "loom/ops/scalar/combining.h"
 #include "loom/ops/scalar/ops.h"
 #include "loom/ops/scf/ops.h"
 #include "loom/rewrite/rewriter.h"
 #include "loom/transforms/scalar/combine_patterns.h"
+#include "loom/transforms/scalar/division_refinement.h"
 #include "loom/util/numeric_format.h"
-#include "loom/util/predicate_facts.h"
 
 bool loom_scalar_match_multiply_add(
     const loom_module_t* module, const loom_op_t* multiply_op,
@@ -698,7 +699,8 @@ static iree_status_t loom_scalar_legalize_narrow_integer_extension(
   IREE_RETURN_IF_ERROR(loom_scalar_extui_build(
       builder, input, input_type, working_type, op->location, &conversion));
   loom_value_id_t value = loom_scalar_extui_result(conversion);
-  if (signed_extension) {
+  if (signed_extension && !loom_value_facts_is_non_negative(
+                              loom_rewriter_value_facts(rewriter, input))) {
     loom_value_id_t shift = LOOM_VALUE_ID_INVALID;
     IREE_RETURN_IF_ERROR(loom_scalar_legalize_build_i32_constant(
         builder, op->location, 32 - input_width, &shift));
@@ -992,9 +994,7 @@ static iree_status_t loom_scalar_legalize_narrow_binary(
       loom_module_value_type(context->module, loom_op_results(op)[0]);
 
   // A left shift may sign-extend its narrow operands: every defined shift
-  // amount is nonnegative and truncation preserves the low result bits. Unlike
-  // zero extension, this form remains stable when generic canonicalization
-  // moves a proven shift before an extension.
+  // amount is nonnegative and truncation preserves the low result bits.
   const bool sign_extend_operands =
       op->kind == LOOM_OP_SCALAR_DIVSI || op->kind == LOOM_OP_SCALAR_REMSI ||
       op->kind == LOOM_OP_SCALAR_SHLI || op->kind == LOOM_OP_SCALAR_SHRSI;
@@ -1034,32 +1034,6 @@ static iree_status_t loom_scalar_legalize_narrow_binary(
 // integer carriers. Targets that accept the i32 combined operation can select
 // one native divide. The portable fallback computes the quotient once and
 // reconstructs the remainder so every target can reuse its quotient recipe.
-static iree_status_t loom_scalar_preserve_reconstructed_facts(
-    loom_target_legalization_context_t* context,
-    loom_value_id_t original_result, loom_value_id_t reconstructed_result,
-    loom_type_t result_type, loom_location_id_t location,
-    loom_value_id_t* out_result) {
-  *out_result = reconstructed_result;
-  if (!context->fact_table) {
-    return iree_ok_status();
-  }
-  loom_predicate_t predicates[LOOM_VALUE_FACT_INTEGER_REFINEMENT_CAPACITY];
-  const uint16_t predicate_count = loom_value_facts_export_integer_refinements(
-      reconstructed_result,
-      loom_value_fact_table_lookup(context->fact_table, reconstructed_result),
-      loom_value_fact_table_lookup(context->fact_table, original_result),
-      predicates, IREE_ARRAYSIZE(predicates));
-  if (predicate_count == 0) {
-    return iree_ok_status();
-  }
-  loom_op_t* assumption = NULL;
-  IREE_RETURN_IF_ERROR(loom_scalar_assume_build(
-      &context->rewriter->builder, &reconstructed_result, 1, predicates,
-      predicate_count, &result_type, 1, location, &assumption));
-  *out_result = loom_scalar_assume_results(assumption).values[0];
-  return iree_ok_status();
-}
-
 static iree_status_t loom_scalar_legalize_divrem(
     const loom_target_legalizer_entry_t* entry,
     loom_target_legalization_context_t* context, loom_op_t* op,
@@ -1125,11 +1099,75 @@ static iree_status_t loom_scalar_legalize_divrem(
         builder, /*instance_flags=*/0, lhs, loom_scalar_muli_result(product),
         result_type, op->location, &remainder));
     replacements[0] = loom_op_results(quotient)[0];
-    IREE_RETURN_IF_ERROR(loom_scalar_preserve_reconstructed_facts(
-        context, old_results[1], loom_scalar_subi_result(remainder),
-        result_type, op->location, &replacements[1]));
+    replacements[1] = loom_scalar_subi_result(remainder);
+    IREE_RETURN_IF_ERROR(loom_scalar_division_refine_reconstructed_remainder(
+        builder, context->fact_table, old_results[1], replacements[1], rhs,
+        result_type, is_signed, op->location, &replacements[1]));
   }
 
+  IREE_RETURN_IF_ERROR(loom_rewriter_preserve_result_names_on_new_values(
+      rewriter, op, replacements, IREE_ARRAYSIZE(replacements), checkpoint));
+  IREE_RETURN_IF_ERROR(loom_rewriter_replace_all_uses_and_erase(
+      rewriter, op, replacements, IREE_ARRAYSIZE(replacements)));
+  out_result->action = LOOM_TARGET_LEGALIZER_ACTION_REWRITTEN;
+  return iree_ok_status();
+}
+
+// Native carry/borrow contracts take precedence. The reference form preserves
+// the source width through the comparison so narrow overflow is not confused
+// with overflow of a widened target carrier.
+static iree_status_t loom_scalar_legalize_unsigned_carry_borrow(
+    const loom_target_legalizer_entry_t* entry,
+    loom_target_legalization_context_t* context, loom_op_t* op,
+    loom_target_legalizer_result_t* out_result) {
+  (void)entry;
+  const bool is_subtraction = loom_scalar_subborrowui_isa(op);
+  const loom_value_id_t lhs = loom_op_const_operands(op)[0];
+  const loom_value_id_t rhs = loom_op_const_operands(op)[1];
+  const loom_type_t result_type =
+      loom_module_value_type(context->module, loom_op_const_results(op)[0]);
+  loom_rewriter_t* rewriter = context->rewriter;
+  loom_builder_t* builder = &rewriter->builder;
+  loom_builder_set_before(builder, op);
+  const loom_value_id_t checkpoint = loom_rewriter_value_checkpoint(rewriter);
+
+  loom_value_id_t replacements[2] = {
+      LOOM_VALUE_ID_INVALID,
+      LOOM_VALUE_ID_INVALID,
+  };
+  if (loom_type_element_type(result_type) == LOOM_SCALAR_TYPE_I1) {
+    // One-bit modular addition and subtraction both produce XOR. Their carry
+    // and borrow are respectively lhs AND rhs and rhs AND (lhs XOR rhs).
+    loom_op_t* value_op = NULL;
+    IREE_RETURN_IF_ERROR(loom_scalar_xori_build(builder, lhs, rhs, result_type,
+                                                op->location, &value_op));
+    replacements[0] = loom_scalar_xori_result(value_op);
+    loom_op_t* predicate_op = NULL;
+    IREE_RETURN_IF_ERROR(
+        loom_scalar_andi_build(builder, is_subtraction ? rhs : lhs,
+                               is_subtraction ? replacements[0] : rhs,
+                               result_type, op->location, &predicate_op));
+    replacements[1] = loom_scalar_andi_result(predicate_op);
+  } else {
+    loom_op_t* arithmetic = NULL;
+    if (is_subtraction) {
+      IREE_RETURN_IF_ERROR(loom_scalar_subi_build(builder, /*instance_flags=*/0,
+                                                  lhs, rhs, result_type,
+                                                  op->location, &arithmetic));
+      replacements[0] = loom_scalar_subi_result(arithmetic);
+    } else {
+      IREE_RETURN_IF_ERROR(loom_scalar_addi_build(builder, /*instance_flags=*/0,
+                                                  lhs, rhs, result_type,
+                                                  op->location, &arithmetic));
+      replacements[0] = loom_scalar_addi_result(arithmetic);
+    }
+    loom_op_t* comparison = NULL;
+    IREE_RETURN_IF_ERROR(loom_scalar_cmpi_build(
+        builder, LOOM_SCALAR_CMPI_PREDICATE_ULT,
+        is_subtraction ? lhs : replacements[0], is_subtraction ? rhs : lhs,
+        op->location, &comparison));
+    replacements[1] = loom_scalar_cmpi_result(comparison);
+  }
   IREE_RETURN_IF_ERROR(loom_rewriter_preserve_result_names_on_new_values(
       rewriter, op, replacements, IREE_ARRAYSIZE(replacements), checkpoint));
   IREE_RETURN_IF_ERROR(loom_rewriter_replace_all_uses_and_erase(
@@ -1236,9 +1274,18 @@ static iree_status_t loom_scalar_legalize_signed_unary(
       IREE_RETURN_IF_ERROR(loom_scalar_extsi_build(
           builder, value, input_type, working_type, op->location, &extension));
       value = loom_scalar_extsi_result(extension);
-    }
-
-    if (loom_scalar_negi_isa(op)) {
+      // Widen the semantic operation before choosing its implementation. The
+      // native carrier may have a contract even when the authored width does
+      // not; the legalization worklist owns that selection.
+      loom_op_t* widened = NULL;
+      IREE_RETURN_IF_ERROR(loom_builder_allocate_op(
+          builder, op->kind, 1, 1, 0, 0, 0, op->location, &widened));
+      loom_op_operands(widened)[0] = value;
+      IREE_RETURN_IF_ERROR(loom_builder_define_result(
+          builder, working_type, &loom_op_results(widened)[0]));
+      IREE_RETURN_IF_ERROR(loom_builder_finalize_op(builder, widened));
+      replacement = loom_op_results(widened)[0];
+    } else if (loom_scalar_negi_isa(op)) {
       loom_value_id_t zero = LOOM_VALUE_ID_INVALID;
       IREE_RETURN_IF_ERROR(loom_scalar_legalize_build_scalar_constant(
           builder, op->location, working_type, 0, &zero));
@@ -1373,12 +1420,6 @@ static iree_status_t loom_scalar_legalize_integer_extrema(
   return iree_ok_status();
 }
 
-typedef uint8_t loom_scalar_float_extremum_kind_t;
-enum loom_scalar_float_extremum_kind_e {
-  LOOM_SCALAR_FLOAT_EXTREMUM_MINIMUM = 0,
-  LOOM_SCALAR_FLOAT_EXTREMUM_MAXIMUM = 1,
-};
-
 // Builds an exact number-preferring extremum from terminal scalar operations.
 // Ordered comparisons select unequal numeric operands. Equal finite operands
 // have identical bits, except for opposing signed zeros: OR selects -0 for
@@ -1386,9 +1427,9 @@ enum loom_scalar_float_extremum_kind_e {
 // peer when exactly one operand is NaN and a quiet NaN when both are NaN.
 static iree_status_t loom_scalar_legalize_build_number_extremum(
     loom_builder_t* builder, loom_location_id_t location,
-    loom_scalar_float_extremum_kind_t kind, uint8_t fastmath,
-    loom_value_id_t lhs, loom_value_id_t rhs, loom_type_t type,
-    loom_value_id_t* out_result) {
+    loom_combining_kind_t kind, uint8_t fastmath, loom_value_id_t lhs,
+    loom_value_id_t rhs, loom_type_t type, loom_value_id_t* out_result) {
+  const bool is_minimum = loom_combining_kind_is_minimum_float_extremum(kind);
   loom_numeric_float_encoding_t encoding = {0};
   const bool has_encoding =
       loom_numeric_float_encoding(loom_type_element_type(type), &encoding);
@@ -1403,7 +1444,7 @@ static iree_status_t loom_scalar_legalize_build_number_extremum(
   IREE_RETURN_IF_ERROR(loom_scalar_bitcast_build(
       builder, rhs, type, integer_type, location, &rhs_bits_op));
   loom_op_t* tie_bits_op = NULL;
-  if (kind == LOOM_SCALAR_FLOAT_EXTREMUM_MINIMUM) {
+  if (is_minimum) {
     IREE_RETURN_IF_ERROR(
         loom_scalar_ori_build(builder, loom_scalar_bitcast_result(lhs_bits_op),
                               loom_scalar_bitcast_result(rhs_bits_op),
@@ -1421,9 +1462,8 @@ static iree_status_t loom_scalar_legalize_build_number_extremum(
   const loom_value_id_t tie = loom_scalar_bitcast_result(tie_op);
 
   const loom_scalar_cmpf_predicate_t predicate =
-      kind == LOOM_SCALAR_FLOAT_EXTREMUM_MINIMUM
-          ? LOOM_SCALAR_CMPF_PREDICATE_OLT
-          : LOOM_SCALAR_CMPF_PREDICATE_OGT;
+      is_minimum ? LOOM_SCALAR_CMPF_PREDICATE_OLT
+                 : LOOM_SCALAR_CMPF_PREDICATE_OGT;
   loom_op_t* lhs_ordered_op = NULL;
   IREE_RETURN_IF_ERROR(loom_scalar_cmpf_build(builder, fastmath, predicate, lhs,
                                               rhs, location, &lhs_ordered_op));
@@ -1474,13 +1514,12 @@ iree_status_t loom_scalar_legalize_number_extremum(
   const loom_value_id_t checkpoint = loom_rewriter_value_checkpoint(rewriter);
   const loom_type_t type =
       loom_module_value_type(context->module, loom_op_operands(op)[0]);
+  const loom_combining_kind_t kind =
+      loom_scalar_float_extremum_combining_kind(op->kind);
   loom_value_id_t replacement = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_scalar_legalize_build_number_extremum(
-      builder, op->location,
-      loom_scalar_minnumf_isa(op) ? LOOM_SCALAR_FLOAT_EXTREMUM_MINIMUM
-                                  : LOOM_SCALAR_FLOAT_EXTREMUM_MAXIMUM,
-      op->instance_flags, loom_op_operands(op)[0], loom_op_operands(op)[1],
-      type, &replacement));
+      builder, op->location, kind, op->instance_flags, loom_op_operands(op)[0],
+      loom_op_operands(op)[1], type, &replacement));
   IREE_RETURN_IF_ERROR(loom_rewriter_preserve_result_names_on_new_values(
       rewriter, op, &replacement, 1, checkpoint));
   IREE_RETURN_IF_ERROR(
@@ -1525,10 +1564,10 @@ iree_status_t loom_scalar_legalize_clamp(
     }
     case LOOM_SCALAR_CLAMPF_MODE_NUMBER: {
       IREE_RETURN_IF_ERROR(loom_scalar_legalize_build_number_extremum(
-          builder, op->location, LOOM_SCALAR_FLOAT_EXTREMUM_MAXIMUM, fastmath,
-          value, lower, type, &lower_bounded));
+          builder, op->location, LOOM_COMBINING_KIND_MAXNUMF, fastmath, value,
+          lower, type, &lower_bounded));
       IREE_RETURN_IF_ERROR(loom_scalar_legalize_build_number_extremum(
-          builder, op->location, LOOM_SCALAR_FLOAT_EXTREMUM_MINIMUM, fastmath,
+          builder, op->location, LOOM_COMBINING_KIND_MINNUMF, fastmath,
           lower_bounded, upper, type, &replacement));
       break;
     }
@@ -1634,14 +1673,17 @@ iree_status_t loom_scalar_legalize_ieee_extrema(
   const loom_value_id_t rhs = loom_op_operands(op)[1];
   const loom_type_t type = loom_module_value_type(context->module, lhs);
 
-  loom_op_t* number = NULL;
-  if (loom_scalar_minimumf_isa(op)) {
+  const loom_combining_kind_t kind =
+      loom_scalar_float_extremum_combining_kind(op->kind);
+  loom_op_t* number_op = NULL;
+  if (loom_combining_kind_is_minimum_float_extremum(kind)) {
     IREE_RETURN_IF_ERROR(loom_scalar_minnumf_build(
-        builder, op->instance_flags, lhs, rhs, type, op->location, &number));
+        builder, op->instance_flags, lhs, rhs, type, op->location, &number_op));
   } else {
     IREE_RETURN_IF_ERROR(loom_scalar_maxnumf_build(
-        builder, op->instance_flags, lhs, rhs, type, op->location, &number));
+        builder, op->instance_flags, lhs, rhs, type, op->location, &number_op));
   }
+  const loom_value_id_t number = loom_op_results(number_op)[0];
   loom_op_t* unordered = NULL;
   IREE_RETURN_IF_ERROR(loom_scalar_cmpf_build(
       builder, op->instance_flags, LOOM_SCALAR_CMPF_PREDICATE_UNO, lhs, rhs,
@@ -1652,8 +1694,7 @@ iree_status_t loom_scalar_legalize_ieee_extrema(
   loom_op_t* select = NULL;
   IREE_RETURN_IF_ERROR(loom_scf_select_build(
       builder, loom_scalar_cmpf_result(unordered),
-      loom_scalar_constant_result(nan), loom_op_results(number)[0], type,
-      op->location, &select));
+      loom_scalar_constant_result(nan), number, type, op->location, &select));
   const loom_value_id_t replacement = loom_scf_select_result(select);
   IREE_RETURN_IF_ERROR(loom_rewriter_preserve_result_names_on_new_values(
       rewriter, op, &replacement, 1, checkpoint));
@@ -1814,7 +1855,6 @@ static const loom_target_legalizer_rule_t kScalarLegalizerRules[] = {
     {
         .root_kind = LOOM_OP_SCALAR_CLAMPF,
         .first_operand_element_types = LOOM_SCALAR_TYPE_SET_FLOAT_LE16,
-        .flags = LOOM_TARGET_LEGALIZER_ENTRY_FLAG_REQUIRE_CONTRACT_REJECTION,
         .legalize = loom_scalar_legalize_exact_narrow_float,
     },
     {
@@ -1879,6 +1919,16 @@ static const loom_target_legalizer_rule_t kScalarLegalizerRules[] = {
         .first_operand_element_types =
             LOOM_SCALAR_TYPE_SET_I8 | LOOM_SCALAR_TYPE_SET_I16,
         .legalize = loom_scalar_legalize_narrow_cmpi,
+    },
+    {
+        .root_kind = LOOM_OP_SCALAR_ADDCARRYUI,
+        .first_operand_element_types = LOOM_SCALAR_TYPE_SET_INTEGER,
+        .legalize = loom_scalar_legalize_unsigned_carry_borrow,
+    },
+    {
+        .root_kind = LOOM_OP_SCALAR_SUBBORROWUI,
+        .first_operand_element_types = LOOM_SCALAR_TYPE_SET_INTEGER,
+        .legalize = loom_scalar_legalize_unsigned_carry_borrow,
     },
     {
         .root_kind = LOOM_OP_SCALAR_ADDI,

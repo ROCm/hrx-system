@@ -211,7 +211,7 @@ func.def @condition_bound_must_be_invariant(%output: buffer) {
     scf.condition %more, %before : i1, index
   } do(%position: index) {
     %value = index.cast %position : index to i32
-    // ERROR@+1: SUBRANGE/023
+    // ERROR@+1: SUBRANGE/024
     view.store %value, %view[%position] : i32, view<4xi32>
     %next = index.add %step, %position : index
     scf.yield %next : index
@@ -556,4 +556,63 @@ kernel.def target(@cdna) @cfg_loop_compound_store_guard() {
   cfg.br ^loop(%next: index)
 ^exit:
   kernel.return
+}
+
+// ====
+
+// RUN: pass vector-memory-footprint
+
+// A logical right shift reaches zero in at most ceil(bitwidth / shift) steps.
+// The independently carried row therefore visits [0, 31], even when the
+// nonzero guard is expressed as the false result of an equality comparison.
+func.def @logical_shift_bounds(%output: buffer, %initial: i64) {
+  %c0 = scalar.constant 0 : i64
+  %c1 = scalar.constant 1 : i64
+  %c2 = scalar.constant 2 : i64
+  %true = scalar.constant true : i1
+  %origin = index.constant 0 : offset
+  %safe = buffer.view %output[%origin] : buffer -> view<32xi32>
+  %short = buffer.view %output[%origin] : buffer -> view<31xi32>
+  %terminal_value, %terminal_row = scf.while(%value_before = %initial : i64, %row_before = %c0 : i64) -> (i64, i64) {
+    %is_zero = scalar.cmpi eq, %value_before, %c0 : i64
+    %active = scalar.xori %is_zero, %true : i1
+    scf.condition %active, %value_before, %row_before : i1, i64, i64
+  } do(%value: i64, %row: i64) {
+    %row_index = index.cast %row : i64 to index
+    %stored = scalar.trunci %row : i64 to i32
+    view.store %stored, %safe[%row_index] : i32, view<32xi32>
+    // ERROR@+1: SUBRANGE/024
+    view.store %stored, %short[%row_index] : i32, view<31xi32>
+    %next_value = scalar.shrui %value, %c2 : i64
+    %next_row = scalar.addi %row, %c1 : i64
+    scf.yield %next_value, %next_row : i64, i64
+  }
+  func.return
+}
+
+// ====
+
+// RUN: pass scf-to-cfg,vector-memory-footprint
+
+// CFG recognition accepts the index operation family and either ordering of
+// the nonzero comparison while preserving the same finite count proof.
+func.def @logical_shift_index_bounds(%output: buffer, %initial: index) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %origin = index.constant 0 : offset
+  %safe = buffer.view %output[%origin] : buffer -> view<64xi32>
+  %short = buffer.view %output[%origin] : buffer -> view<63xi32>
+  %terminal_value, %terminal_row = scf.while(%value_before = %initial : index, %row_before = %c0 : index) -> (index, index) {
+    %active = index.cmp ult, %c0, %value_before : index
+    scf.condition %active, %value_before, %row_before : i1, index, index
+  } do(%value: index, %row: index) {
+    %stored = index.cast %row : index to i32
+    view.store %stored, %safe[%row] : i32, view<64xi32>
+    // ERROR@+1: SUBRANGE/024
+    view.store %stored, %short[%row] : i32, view<63xi32>
+    %next_value = index.shrui %value, %c1 : index
+    %next_row = index.add %row, %c1 : index
+    scf.yield %next_value, %next_row : index, index
+  }
+  func.return
 }

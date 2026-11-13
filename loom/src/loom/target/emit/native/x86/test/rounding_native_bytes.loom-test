@@ -1,0 +1,111 @@
+// RUN: emit x86-native-bytes @avx2_xmm
+x86.target<avx2> @target
+
+low.func.def target<x86.avx2.core>(@target) @avx2_xmm(%input: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
+  %packed_s = vroundps.xmm %input, 8
+  %packed_d = vroundpd.xmm %packed_s, 9
+  %scalar_s = vroundss.xmm %packed_d, %packed_d, 10
+  %scalar_d = vroundsd.xmm %scalar_s, %scalar_s, 11
+  return %scalar_d
+}
+
+// ----
+code: c4 e3 79 08 c0 08 c4 e3 79 09 c0 09 c4 e3 79 0a c0 0a c4 e3 79 0b c0 0b c3
+
+// ====
+
+// RUN: emit x86-native-bytes @avx2_ymm
+x86.target<avx2> @target
+
+low.func.def target<x86.avx2.core>(@target) @avx2_ymm(%input: reg<x86.ymm>) -> (reg<x86.ymm>) asm {
+  %packed_s = vroundps.ymm %input, 8
+  %packed_d = vroundpd.ymm %packed_s, 9
+  return %packed_d
+}
+
+// ----
+code: c4 e3 7d 08 c0 08 c4 e3 7d 09 c0 09 c3
+
+// ====
+
+// RUN: emit x86-native-bytes @avx512_xmm
+x86.target<avx512> @target
+
+low.func.def target<x86.avx512.core>(@target) @avx512_xmm(%input: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
+  %packed_s = vrndscaleps.xmm %input, 8
+  %packed_d = vrndscalepd.xmm %packed_s, 9
+  %scalar_s = vrndscaless.xmm %packed_d, %packed_d, 10
+  %scalar_d = vrndscalesd.xmm %scalar_s, %scalar_s, 11
+  return %scalar_d
+}
+
+// ----
+code: 62 f3 7d 08 08 c0 08 62 f3 fd 08 09 c0 09 62 f3 7d 08 0a c0 0a 62 f3 fd 08 0b c0 0b c3
+
+// ====
+
+// RUN: emit x86-native-bytes @avx512_ymm
+x86.target<avx512> @target
+
+low.func.def target<x86.avx512.core>(@target) @avx512_ymm(%input: reg<x86.ymm>) -> (reg<x86.ymm>) asm {
+  %packed_s = vrndscaleps.ymm %input, 8
+  %packed_d = vrndscalepd.ymm %packed_s, 9
+  return %packed_d
+}
+
+// ----
+code: 62 f3 7d 28 08 c0 08 62 f3 fd 28 09 c0 09 c3
+
+// ====
+
+// RUN: emit x86-native-bytes @avx512_zmm
+x86.target<avx512> @target
+
+low.func.def target<x86.avx512.core>(@target) @avx512_zmm(%input: reg<x86.zmm>) -> (reg<x86.zmm>) asm {
+  %packed_s = vrndscaleps %input, 8
+  %packed_d = vrndscalepd %packed_s, 9
+  return %packed_d
+}
+
+// ----
+code: 62 f3 7d 48 08 c0 08 62 f3 fd 48 09 c0 09 c3
+
+// ====
+
+// RUN: emit x86-native-bytes @avx512_features_half_xmm
+x86.target<avx512> @target {features = [avx512fp16]}
+
+low.func.def target<x86.avx512_features.core>(@target) @avx512_features_half_xmm(%input: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
+  %packed_h = vrndscaleph.xmm %input, 8
+  %scalar_h = vrndscalesh.xmm %packed_h, %packed_h, 10
+  return %scalar_h
+}
+
+// ----
+code: 62 f3 7c 08 08 c0 08 62 f3 7c 08 0a c0 0a c3
+
+// ====
+
+// RUN: emit x86-native-bytes @avx512_features_half_ymm
+x86.target<avx512> @target {features = [avx512fp16]}
+
+low.func.def target<x86.avx512_features.core>(@target) @avx512_features_half_ymm(%input: reg<x86.ymm>) -> (reg<x86.ymm>) asm {
+  %packed_h = vrndscaleph.ymm %input, 8
+  return %packed_h
+}
+
+// ----
+code: 62 f3 7c 28 08 c0 08 c3
+
+// ====
+
+// RUN: emit x86-native-bytes @avx512_features_half_zmm
+x86.target<avx512> @target {features = [avx512fp16]}
+
+low.func.def target<x86.avx512_features.core>(@target) @avx512_features_half_zmm(%input: reg<x86.zmm>) -> (reg<x86.zmm>) asm {
+  %packed_h = vrndscaleph %input, 8
+  return %packed_h
+}
+
+// ----
+code: 62 f3 7c 48 08 c0 08 c3

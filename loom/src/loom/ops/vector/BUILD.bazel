@@ -140,6 +140,7 @@ loom_generated_cc_library(
         "//loom/src/loom/ops:cache",
         "//loom/src/loom/ops:combining",
         "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops:value_refinement",
         "//loom/src/loom/ops/encoding",
         "//loom/src/loom/ops/index",
         "//loom/src/loom/ops/index:cast",
@@ -188,6 +189,19 @@ loom_cc_test(
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops/encoding",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "lane_origin_test",
+    srcs = ["lane_origin_test.cc"],
+    deps = [
+        ":vector",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/util:fact_table",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",

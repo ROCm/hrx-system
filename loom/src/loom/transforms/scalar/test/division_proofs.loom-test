@@ -1,0 +1,152 @@
+// RUN: pass target-legalize{mode=eager,policy=reference-only},unroll-scf-for,dce
+
+// Both pair results stay live. The signed divisor is only positive in the
+// branch, and the remainder has a separate sign guard.
+// The strict distance proof must unroll to one test.use after reconstruction.
+test.target<low_core> @target
+
+func.def target(@target) @signed_pair(%dividend: i32, %divisor: i32) {
+  %c0 = scalar.constant 0 : i32
+  %limit = scalar.constant 16 : i32
+  %positive = scalar.cmpi sgt, %divisor, %c0 : i32
+  %small = scalar.cmpi sle, %divisor, %limit : i32
+  %valid = scalar.andi %positive, %small : i1
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  scf.if %valid {
+    %quotient, %remainder = scalar.divremsi %dividend, %divisor : i32
+    test.use %quotient : i32
+    %nonnegative = scalar.cmpi sge, %remainder, %c0 : i32
+    scf.if %nonnegative {
+      %position = index.cast %remainder : i32 to index
+      %extent = index.cast %divisor : i32 to index
+      %distance = index.sub %extent, %position : index
+      %ordered = test.fact_positive %distance : index -> i1
+      %count = index.cast %ordered : i1 to index
+      scf.for %iteration = [%begin to %count step %step] unroll {
+        test.use %iteration : index
+      }
+    }
+  }
+  func.return
+}
+
+// ----
+test.target<low_core> @target
+
+func.def target(@target) @signed_pair(%dividend: i32, %divisor: i32) {
+  %c0 = scalar.constant 0 : i32
+  %limit = scalar.constant 16 : i32
+  %positive = scalar.cmpi sgt, %divisor, %c0 : i32
+  %small = scalar.cmpi sle, %divisor, %limit : i32
+  %valid = scalar.andi %positive, %small : i1
+  scf.if %valid {
+    %quotient = scalar.divsi %dividend, %divisor : i32
+    %19 = scalar.muli %quotient, %divisor : i32
+    %20 = scalar.subi %dividend, %19 : i32
+    %21 = scalar.constant 31 : i32
+    %22 = scalar.shrsi %divisor, %21 : i32
+    %23 = scalar.xori %divisor, %22 : i32
+    %24 = scalar.subi %23, %22 : i32
+    %25 = scalar.constant 1 : i32
+    %26 = scalar.subi %24, %25 : i32
+    %27 = scalar.assume %26 [ge(%26, 0), ult(%26, %24)] : i32
+    %30 = scalar.constant 0 : i32
+    %31 = scalar.subi %30, %27 : i32
+    %remainder = scalar.assume %20 [range(%20, %31, %27)] : i32
+    test.use %quotient : i32
+    %nonnegative = scalar.cmpi sge, %remainder, %c0 : i32
+    scf.if %nonnegative {
+      %iteration_0 = index.constant 0 : index
+      test.use %iteration_0 : index
+    }
+  }
+  func.return
+}
+
+// ====
+
+// The unsigned i8 pair crosses widening, reconstruction, and truncation.
+// Retaining its unsigned relation cannot assume the dividend is nonnegative
+// in its signed carrier.
+test.target<low_core> @target
+
+func.def target(@target) @unsigned_narrow_pair(%dividend: i8, %divisor: i64) {
+  %byte = scalar.trunci %divisor : i64 to i8
+  %c0 = scalar.constant 0 : i64
+  %limit = scalar.constant 16 : i64
+  %positive = scalar.cmpi sgt, %divisor, %c0 : i64
+  %small = scalar.cmpi sle, %divisor, %limit : i64
+  %valid = scalar.andi %positive, %small : i1
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  scf.if %valid {
+    %quotient, %remainder = scalar.divremui %dividend, %byte : i8
+    test.use %quotient : i8
+    %position = index.cast %remainder : i8 to index
+    %extent = index.cast %divisor : i64 to index
+    %distance = index.sub %extent, %position : index
+    %ordered = test.fact_positive %distance : index -> i1
+    %count = index.cast %ordered : i1 to index
+    scf.for %iteration = [%begin to %count step %step] unroll {
+      test.use %iteration : index
+    }
+  }
+  func.return
+}
+
+// ----
+test.target<low_core> @target
+
+func.def target(@target) @unsigned_narrow_pair(%dividend: i8, %divisor: i64) {
+  %c0 = scalar.constant 0 : i64
+  %limit = scalar.constant 16 : i64
+  %positive = scalar.cmpi sgt, %divisor, %c0 : i64
+  %small = scalar.cmpi sle, %divisor, %limit : i64
+  %valid = scalar.andi %positive, %small : i1
+  scf.if %valid {
+    %18 = scalar.extui %dividend : i8 to i32
+    %29 = scalar.constant 255 : i64
+    %30 = scalar.andi %divisor, %29 : i64
+    %31 = scalar.trunci %30 : i64 to i32
+    %24 = scalar.divui %18, %31 : i32
+    %quotient = scalar.trunci %24 : i32 to i8
+    test.use %quotient : i8
+    %iteration_0 = index.constant 0 : index
+    test.use %iteration_0 : index
+  }
+  func.return
+}
+
+// ====
+
+// Signed minimum divisors have a representable remainder bound of signed max.
+// The quotient stays live while the remainder bound proves one iteration.
+test.target<low_core> @target
+
+func.def target(@target) @minimum_divisor(%dividend: i64) {
+  %divisor = scalar.constant -9223372036854775808 : i64
+  %quotient, %remainder = scalar.divremsi %dividend, %divisor : i64
+  %minimum = scalar.constant -9223372036854775808 : i64
+  %above_minimum = scalar.cmpi sgt, %remainder, %minimum : i64
+  test.use %quotient : i64
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %count = index.cast %above_minimum : i1 to index
+  scf.for %iteration = [%begin to %count step %step] unroll {
+    test.use %iteration : index
+  }
+  func.return
+}
+
+// ----
+test.target<low_core> @target
+
+func.def target(@target) @minimum_divisor(%dividend: i64) {
+  %divisor = scalar.constant -9223372036854775808 : i64
+  %quotient = scalar.divsi %dividend, %divisor : i64
+  test.use %quotient : i64
+  %iteration_0 = index.constant 0 : index
+  test.use %iteration_0 : index
+  func.return
+}

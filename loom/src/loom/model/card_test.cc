@@ -116,8 +116,9 @@ TEST_F(CardTest, NamedPartitionOwnsItsCompleteClosure) {
 TEST_F(CardTest, VersionTwoDevicePlacementOwnsDecodedNames) {
   std::string json = Replace("\"schema_version\": 1", "\"schema_version\": 2");
   const auto position = json.find("\"directory\": \"program\",");
-  json.insert(position,
-              R"("device_placement":{"ffn_gate":"xdna","*":"amdgpu"},"exchange_pool":"shared",)");
+  json.insert(
+      position,
+      R"("device_placement":{"ffn_gate":"xdna","*":"amdgpu"},"exchange_pool":"shared",)");
   IREE_ASSERT_OK(Parse(json));
   json.assign(json.size(), 'x');
   const auto placement = loom_model_card_selection(card_)->device_placement;
@@ -131,15 +132,17 @@ TEST_F(CardTest, VersionTwoDevicePlacementOwnsDecodedNames) {
 
 TEST_F(CardTest, ExchangePoolRejectsV1AndInvalidNames) {
   for (const char* value : {"0", "null", "false", "[]", "{}", "\"\""}) {
-    std::string json = Replace("\"schema_version\": 1", "\"schema_version\": 2");
+    std::string json =
+        Replace("\"schema_version\": 1", "\"schema_version\": 2");
     json.insert(json.find("\"directory\": \"program\","),
                 std::string("\"exchange_pool\":") + value + ",");
     IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT, Parse(json));
   }
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
-      Parse(Replace("\"directory\": \"program\",",
-                    "\"exchange_pool\":\"shared\",\"directory\":\"program\",")));
+      Parse(
+          Replace("\"directory\": \"program\",",
+                  "\"exchange_pool\":\"shared\",\"directory\":\"program\",")));
 }
 
 TEST_F(CardTest, DevicePlacementRejectsV1AndMalformedMappings) {

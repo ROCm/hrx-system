@@ -158,7 +158,7 @@ def _assert_address_forms(
         ]
         for rule in rules
     ]
-    assert [len(emits) for emits in descriptor_emits] == [1, 3, 2, 2, 2, 3, 2]
+    assert [len(emits) for emits in descriptor_emits] == [1, 2, 2, 2, 2, 3, 2]
     assert [
         (
             _source_memory_emit(rule).source_memory.static_byte_offset_minimum,
@@ -185,13 +185,18 @@ def _assert_address_forms(
     assert isinstance(immediate, SourceMemoryProject)
     assert immediate.kind is SourceMemoryProjectKind.STATIC_BYTE_OFFSET
     assert [emits[-2].descriptor.key for emits in descriptor_emits[1:]] == [
-        "amd.xdna.aie2p.move.to.address-index",
+        "amd.xdna.aie2p.materialize.static-address-index.i20",
         "amd.xdna.aie2p.move.to.address-index",
         "amd.xdna.aie2p.address.index.add.immediate",
         "amd.xdna.aie2p.address.index.add.immediate",
         "amd.xdna.aie2p.address.index.add.register",
         "amd.xdna.aie2p.move.to.address-index",
     ]
+    static_offset_emit = descriptor_emits[1][-2]
+    assert static_offset_emit.operands == {}
+    assert static_offset_emit.immediates == {"i": immediate}
+    assert static_offset_emit.result_types == {"dst": DescriptorResultType()}
+    assert descriptor_emits[1][-1].operands["dj"] == (static_offset_emit.results["dst"])
     dynamic_offset_emit = descriptor_emits[2][-2]
     assert dynamic_offset_emit.operands["src"].kind is (
         SourceValueKind.SOURCE_MEMORY_DYNAMIC_BYTE_OFFSET
@@ -215,10 +220,10 @@ def test_view_carriers_materialize_every_supported_view_as_one_address() -> None
     view_type = View(AIE2P_VIEW_ELEMENT_TYPES)
     expected_descriptor_keys = (
         None,
-        "amd.xdna.aie2p.address.add.a.immediate",
-        "amd.xdna.aie2p.address.add.a.register",
-        "amd.xdna.aie2p.address.add.a.register",
-        "amd.xdna.aie2p.address.add.a.register",
+        "amd.xdna.aie2p.address.add.b.immediate",
+        "amd.xdna.aie2p.address.add.b.register",
+        "amd.xdna.aie2p.address.add.b.register",
+        "amd.xdna.aie2p.address.add.b.register",
     )
     expected_shapes = (
         (0, 0, 0, 0, False, False, 0),
@@ -297,7 +302,7 @@ def test_view_carriers_materialize_every_supported_view_as_one_address() -> None
                 if isinstance(emit, EmitDescriptorOp)
             ] == [
                 f"amd.xdna.aie2p.constant.modifier.{form}",
-                "amd.xdna.aie2p.address.add.a.register",
+                "amd.xdna.aie2p.address.add.b.register",
             ]
             modifier = rule.emit[1]
             assert modifier.immediates == {
@@ -313,7 +318,7 @@ def test_view_carriers_materialize_every_supported_view_as_one_address() -> None
             if isinstance(emit, EmitDescriptorOp)
         ] == [
             "amd.xdna.aie2p.move.er.to.em",
-            "amd.xdna.aie2p.address.add.a.register",
+            "amd.xdna.aie2p.address.add.b.register",
         ]
         dynamic_offset = dynamic_register.emit[1]
         assert dynamic_offset.operands["src"].kind is (
@@ -465,9 +470,15 @@ def test_indexed_memory_families_materialize_the_complete_planned_address() -> N
                 ]
                 for memory_emit, project in zip(memory_emits, projects, strict=True):
                     address = producers[memory_emit.operands["dj"]]
-                    if address_form == 1 or (
-                        address_form in (2, 6) and project.literal_i64 == 0
-                    ):
+                    if address_form == 1:
+                        assert address.descriptor.key == (
+                            "amd.xdna.aie2p.materialize.static-address-index.i20"
+                        )
+                        assert address.operands == {}
+                        assert address.immediates == {"i": project}
+                        assert address.result_types == {"dst": DescriptorResultType()}
+                        continue
+                    if address_form in (2, 6) and project.literal_i64 == 0:
                         assert address.descriptor.key == (
                             "amd.xdna.aie2p.move.to.address-index"
                         )

@@ -89,9 +89,12 @@ static void loom_low_lower_report_populate_descriptor(
     return;
   }
   row->descriptor_key = loom_low_lower_report_descriptor_string(
-      context, descriptor, descriptor->key_string_ref);
+      context, descriptor,
+      loom_low_descriptor_key_string_ref(context->descriptor_set, descriptor));
   row->descriptor_semantic_tag = loom_low_lower_report_descriptor_string(
-      context, descriptor, descriptor->semantic_tag_string_ref);
+      context, descriptor,
+      loom_low_descriptor_semantic_tag_string_ref(context->descriptor_set,
+                                                  descriptor));
 }
 
 void loom_low_lower_result_deinitialize(loom_low_lower_result_t* result) {
@@ -200,35 +203,41 @@ static iree_status_t loom_low_lower_report_prepare_selected_plan(
   };
   IREE_RETURN_IF_ERROR(loom_low_lower_source_op_execution_count_plus_one(
       context, selected_plan->source_op, &row.execution_count_plus_one));
-  if (selected_plan->kind == LOOM_LOW_LOWER_SELECTED_PLAN_CALLBACK ||
-      selected_plan->kind == LOOM_LOW_LOWER_SELECTED_PLAN_DESCRIPTOR_MATRIX) {
-    row.plan_id = selected_plan->data.target_plan.id;
+  const loom_low_lower_rule_set_t* rule_set =
+      loom_low_lower_selected_plan_rule_set(selected_plan);
+  const loom_low_lower_rule_t* rule =
+      loom_low_lower_selected_plan_rule(selected_plan);
+  const bool has_target_plan =
+      selected_plan->kind == LOOM_LOW_LOWER_SELECTED_PLAN_CALLBACK ||
+      selected_plan->kind == LOOM_LOW_LOWER_SELECTED_PLAN_DESCRIPTOR_MATRIX;
+  const loom_low_lower_plan_t target_plan =
+      has_target_plan ? loom_low_lower_selected_plan_target(selected_plan)
+                      : loom_low_lower_plan_empty();
+  if (has_target_plan) {
+    row.plan_id = target_plan.id;
   }
-  if (selected_plan->rule != NULL) {
+  if (rule != NULL) {
     row.selection_kind = LOOM_LOW_LOWER_REPORT_SELECTION_RULE;
-    row.rule_set_index = selected_plan->rule_set_index;
-    row.rule_index = selected_plan->rule_index;
+    row.rule_set_index = selected_plan->selection.rule.rule_set_index;
+    row.rule_index = selected_plan->selection.rule.rule_index;
     row.plan_id = LOOM_LOW_LOWER_PLAN_ID_NONE;
     const uint16_t report_key_ordinal = loom_low_lower_report_key_ordinal(
-        selected_plan->rule_set, selected_plan->rule_index,
-        selected_plan->rule);
+        rule_set, selected_plan->selection.rule.rule_index, rule);
     if (report_key_ordinal != LOOM_LOW_LOWER_RULE_REPORT_KEY_NONE) {
       const uint16_t report_key_index = report_key_ordinal - 1u;
-      IREE_ASSERT_LT(report_key_index,
-                     selected_plan->rule_set->report_key_count);
+      IREE_ASSERT_LT(report_key_index, rule_set->report_key_count);
       row.plan_key = loom_low_lower_rule_set_string(
-          selected_plan->rule_set,
-          selected_plan->rule_set->report_key_string_refs[report_key_index]);
+          rule_set, rule_set->report_key_string_refs[report_key_index]);
     }
-    if (selected_plan->rule->emit_count != 0 &&
-        selected_plan->resolved_emits != NULL) {
+    if (rule->emit_count != 0 &&
+        selected_plan->data.rule.resolved_emits != NULL) {
       const uint16_t primary_emit_ordinal =
-          loom_low_lower_rule_primary_emit_ordinal(selected_plan->rule);
+          loom_low_lower_rule_primary_emit_ordinal(rule);
       if (primary_emit_ordinal != LOOM_LOW_LOWER_RULE_PRIMARY_EMIT_NONE) {
-        IREE_ASSERT_LT(primary_emit_ordinal, selected_plan->rule->emit_count);
+        IREE_ASSERT_LT(primary_emit_ordinal, rule->emit_count);
         loom_low_lower_report_populate_descriptor(
             context,
-            selected_plan->resolved_emits[primary_emit_ordinal]
+            selected_plan->data.rule.resolved_emits[primary_emit_ordinal]
                 .descriptor.descriptor,
             &row);
       }
@@ -236,14 +245,15 @@ static iree_status_t loom_low_lower_report_prepare_selected_plan(
   } else if (selected_plan->kind ==
              LOOM_LOW_LOWER_SELECTED_PLAN_DESCRIPTOR_MATRIX) {
     const loom_low_lower_descriptor_matrix_plan_t* plan =
-        (const loom_low_lower_descriptor_matrix_plan_t*)
-            selected_plan->data.target_plan.target_data;
+        (const loom_low_lower_descriptor_matrix_plan_t*)target_plan.target_data;
     loom_low_lower_report_populate_descriptor(
         context, plan->descriptor.descriptor, &row);
     row.native_contraction_facts = plan->native_contraction_facts;
   } else if (selected_plan->kind ==
              LOOM_LOW_LOWER_SELECTED_PLAN_FUNCTION_STORAGE) {
     row.plan_key = IREE_SV("function-storage.alloca");
+  } else if (selected_plan->kind == LOOM_LOW_LOWER_SELECTED_PLAN_CALL) {
+    row.plan_key = IREE_SV("call.direct");
   } else if (selected_plan->kind == LOOM_LOW_LOWER_SELECTED_PLAN_INVOKE) {
     row.plan_key = IREE_SV("call.invoke");
   } else if (selected_plan->kind ==
@@ -252,13 +262,11 @@ static iree_status_t loom_low_lower_report_prepare_selected_plan(
   } else if (selected_plan->kind == LOOM_LOW_LOWER_SELECTED_PLAN_STRUCTURAL) {
     row.plan_key = IREE_SV("structural.cond_br");
   }
-  if ((selected_plan->kind == LOOM_LOW_LOWER_SELECTED_PLAN_CALLBACK ||
-       selected_plan->kind == LOOM_LOW_LOWER_SELECTED_PLAN_DESCRIPTOR_MATRIX) &&
-      context->policy->describe_plan.fn != NULL) {
+  if (has_target_plan && context->policy->describe_plan.fn != NULL) {
     loom_low_lower_plan_report_t plan_report = {0};
     IREE_RETURN_IF_ERROR(context->policy->describe_plan.fn(
         context->policy->describe_plan.user_data, context,
-        selected_plan->source_op, selected_plan->data.target_plan,
+        selected_plan->source_op, target_plan,
         iree_any_bit_set(selected_plan->flags,
                          LOOM_LOW_LOWER_SELECTED_PLAN_ELIDED),
         row.execution_count_plus_one, &plan_report));

@@ -20,7 +20,7 @@ func.def @subview_nested_dynamic(%input: buffer, %output: buffer, %base: offset,
 }
 
 // ----
-low.func.def target<vm.core> abi(vm_function) @subview_nested_dynamic(%source_refined: reg<vm.ref : buffer>, %destination_inner: reg<vm.ref : buffer>, %origin: reg<vm.value : i64>, %row_bounded: reg<vm.value : i64>, %column_bounded: reg<vm.value : i64>) -> (reg<vm.value : i32>) asm {
+low.func.def target<vm.core> abi(vm_function) @subview_nested_dynamic(%source_inner: reg<vm.ref : buffer>, %destination_inner: reg<vm.ref : buffer>, %origin: reg<vm.value : i64>, %row_bounded: reg<vm.value : i64>, %column_bounded: reg<vm.value : i64>) -> (reg<vm.value : i32>) asm {
   %30 = constant.i64 76
   %31 = constant.i64 5 : reg<vm.value>
   %32 = integer.shift.left.i64 %row_bounded, %31
@@ -29,7 +29,7 @@ low.func.def target<vm.core> abi(vm_function) @subview_nested_dynamic(%source_re
   %35 = integer.shift.left.i64 %column_bounded, %34
   %36 = integer.add.i64 %33, %35
   %37 = integer.add.i64 %36, %30
-  %value = buffer.load %source_refined, %37, %37, 0, "i32.x1" : reg<vm.value : i32>
+  %value = buffer.load %source_inner, %37, %37, 0, "i32.x1" : reg<vm.value : i32>
   %39 = constant.i64 68
   %40 = integer.add.i64 %36, %39
   buffer.store %destination_inner, %40, %40, %value, 0, "i32.x1"
@@ -121,7 +121,7 @@ low.func.def target<vm.core> abi(vm_function) @subview_prefetch_strided(%input: 
 
 // ====
 
-func.def @make_storage_crop(%input: buffer, %origin: offset, %columns: index) -> (%result_storage: encoding<storage>, view<2x3xf32, %result_storage>) {
+func.def noinline @make_storage_crop(%input: buffer, %origin: offset, %columns: index) -> (%result_storage: encoding<storage>, view<2x3xf32, %result_storage>) {
   %layout = encoding.layout.strided [%columns, 1] : encoding<layout>
   %schema = encoding.define #encoding.f32 : encoding<schema>
   %storage = encoding.define #encoding.storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
@@ -131,7 +131,7 @@ func.def @make_storage_crop(%input: buffer, %origin: offset, %columns: index) ->
   func.return %crop_storage, %crop : encoding<storage>, view<2x3xf32, %crop_storage>
 }
 
-func.def @read_storage_crop(%storage: encoding<storage>, %crop: view<2x3xf32, %storage>) -> (f32) {
+func.def noinline @read_storage_crop(%storage: encoding<storage>, %crop: view<2x3xf32, %storage>) -> (f32) {
   %value = view.load %crop[1, 1] : view<2x3xf32, %storage> -> f32
   func.return %value : f32
 }
@@ -149,7 +149,7 @@ func.def public @subview_composed_helpers(%input: buffer, %output: buffer, %widt
 }
 
 // ----
-low.func.def target<vm.core> @make_storage_crop(%input_aligned: reg<vm.ref : buffer>, %columns: reg<vm.value : i64>) -> (%result_storage_stride_0: reg<vm.value : i64>, %result_storage_stride_1: reg<vm.value : i64>, reg<vm.ref : buffer>, reg<vm.value : i64>) asm {
+low.func.def noinline target<vm.core> @make_storage_crop(%input_aligned: reg<vm.ref : buffer>, %columns: reg<vm.value : i64>) -> (%result_storage_stride_0: reg<vm.value : i64>, %result_storage_stride_1: reg<vm.value : i64>, reg<vm.ref : buffer>, reg<vm.value : i64>) asm {
   %67 = constant.i64 16
   %68 = constant.i64 4
   %69 = integer.mul.i64 %columns, %68
@@ -158,21 +158,21 @@ low.func.def target<vm.core> @make_storage_crop(%input_aligned: reg<vm.ref : buf
   return %columns, %71, %input_aligned, %70
 }
 
-low.func.def target<vm.core> @read_storage_crop(%storage_stride_0: reg<vm.value : i64>, %storage_stride_1: reg<vm.value : i64>, %crop: reg<vm.ref : buffer>, %crop_offset: reg<vm.value : i64>) -> (reg<vm.value : f32>) asm {
-  %77 = constant.i64 2 : reg<vm.value>
-  %78 = integer.shift.left.i64 %storage_stride_0, %77
-  %79 = integer.add.i64 %crop_offset, %78
-  %81 = integer.shift.left.i64 %storage_stride_1, %77
-  %82 = integer.add.i64 %79, %81
-  %value = buffer.load %crop, %82, %82, 0, "i32.x1" : reg<vm.value : f32>
+low.func.def noinline target<vm.core> @read_storage_crop(%storage_stride_0: reg<vm.value : i64>, %storage_stride_1: reg<vm.value : i64>, %crop: reg<vm.ref : buffer>, %crop_offset: reg<vm.value : i64>) -> (reg<vm.value : f32>) asm {
+  %77 = constant.i64 4
+  %78 = constant.i64 2 : reg<vm.value>
+  %79 = integer.shift.left.i64 %storage_stride_0, %78
+  %80 = integer.add.i64 %crop_offset, %79
+  %81 = integer.add.i64 %80, %77
+  %value = buffer.load %crop, %81, %81, 0, "i32.x1" : reg<vm.value : f32>
   return %value
 }
 
 low.func.def public target<vm.core> abi(vm_function) @subview_composed_helpers(%input: reg<vm.ref : buffer>, %destination: reg<vm.ref : buffer>, %columns: reg<vm.value : i64>) asm {
   %storage_stride_0, %storage_stride_1, %crop_root, %crop_offset = low.func.call pure @make_storage_crop(%input, %columns) : (reg<vm.ref : buffer>, reg<vm.value : i64>) -> (reg<vm.value : i64>, reg<vm.value : i64>, reg<vm.ref : buffer>, reg<vm.value : i64>)
   %value = low.func.call @read_storage_crop(%storage_stride_0, %storage_stride_1, %crop_root, %crop_offset) : (reg<vm.value : i64>, reg<vm.value : i64>, reg<vm.ref : buffer>, reg<vm.value : i64>) -> (reg<vm.value : f32>)
-  %92 = constant.i64 4
-  buffer.store %destination, %92, %92, %value, 0, "i32.x1"
+  %91 = constant.i64 4
+  buffer.store %destination, %91, %91, %value, 0, "i32.x1"
   return
 }
 

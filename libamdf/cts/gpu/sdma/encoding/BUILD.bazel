@@ -21,7 +21,7 @@ amdf_cc_library(
     visibility = [
         "//libamdf/cts:__subpackages__",
         "//libamdf/src/gpu/umd:__pkg__",
-        "//runtime/src/iree/hal/drivers/amd/fabric/cts:__pkg__",
+        "//runtime/src/iree/hal/driver/amd/fabric/cts:__pkg__",
     ],
 )
 

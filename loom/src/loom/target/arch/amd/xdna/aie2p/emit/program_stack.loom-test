@@ -1,0 +1,63 @@
+// RUN: with-checks emit aie2p-xdna output=sections
+
+// Three helpers need a frame, but at most two frames are live together:
+// worker -> deep -> middle -> read_bias, or worker -> shallow -> read_bias.
+// Stack backing is therefore 128 bytes, not 64 or the 192-byte sum. The table
+// referenced only by their shared descendant is also retained exactly once.
+global.rodata.def @bias = align(4) bytes("01000000")
+
+aie2p.target<configuration> @configuration {device_profile = "amd.xdna.strix_halo.17f0_11"}
+
+aie2p.target<core> @core
+
+low.func.def public retain target<amd.xdna.aie2p.configuration>(@configuration) abi(array_program) @configure() asm {
+  %columns = constant 1 : reg<aie2p.config.scalar : i64>
+  entry %columns, @initialize, @invoke
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.configuration>(@configuration) @initialize() asm {
+  %column = constant 0 : reg<aie2p.config.scalar : i64>
+  %row = constant 2 : reg<aie2p.config.scalar : i64>
+  program.load %column, %row, @worker
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.configuration>(@configuration) @invoke() asm {
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@core) abi(object_function) @worker() asm {
+  %left = low.func.call @deep() : () -> (reg<aie2p.er>)
+  %right = low.func.call @shallow() : () -> (reg<aie2p.er>)
+  %sum = add.rr %left, %right
+  %output = mov.local-address 458752
+  st %sum, %output, 0
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@core) @deep() -> (reg<aie2p.er>) asm {
+  %value = low.func.call @middle() : () -> (reg<aie2p.er>)
+  return %value
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@core) @middle() -> (reg<aie2p.er>) asm {
+  %value = low.func.call @read_bias() : () -> (reg<aie2p.er>)
+  return %value
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@core) @shallow() -> (reg<aie2p.er>) asm {
+  %value = low.func.call @read_bias() : () -> (reg<aie2p.er>)
+  %incremented = add %value, 1
+  return %incremented
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@core) @read_bias() -> (reg<aie2p.er>) asm {
+  %address = mov.local-address @bias
+  %value = lda %address, 0
+  return %value
+}
+
+// ----
+CHECK: .storage.worker.stack: address=* bytes=128 reserved
+CHECK: .rodata.bias: address=* bytes=4 initialized

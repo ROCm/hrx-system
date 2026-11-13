@@ -1248,8 +1248,8 @@ loom_amdgpu_hal_binding_materialize_buffer_descriptors_with_types(
 iree_status_t loom_amdgpu_hal_binding_materialize_buffer_descriptors(
     loom_module_t* module, loom_op_t* function_op,
     const loom_low_descriptor_set_t* descriptor_set,
-    iree_host_size_t* out_materialized_count,
-    iree_arena_allocator_t* scratch_arena) {
+    iree_arena_allocator_t* scratch_arena,
+    iree_host_size_t* out_materialized_count) {
   if (module == NULL || function_op == NULL || descriptor_set == NULL ||
       out_materialized_count == NULL || scratch_arena == NULL) {
     return iree_make_status(
@@ -1284,9 +1284,8 @@ iree_status_t loom_amdgpu_hal_binding_materialize_buffer_descriptors(
 iree_status_t loom_amdgpu_hal_binding_materialize(
     loom_module_t* module, loom_op_t* function_op,
     const loom_low_descriptor_set_t* descriptor_set,
-    loom_value_id_t kernarg_ptr,
-    loom_amdgpu_hal_binding_materialization_result_t* out_result,
-    iree_arena_allocator_t* scratch_arena) {
+    loom_value_id_t kernarg_ptr, iree_arena_allocator_t* scratch_arena,
+    loom_amdgpu_hal_binding_materialization_result_t* out_result) {
   if (module == NULL || function_op == NULL || descriptor_set == NULL ||
       out_result == NULL || scratch_arena == NULL) {
     return iree_make_status(
@@ -1308,7 +1307,7 @@ iree_status_t loom_amdgpu_hal_binding_materialize(
 
   loom_amdgpu_hal_kernel_abi_layout_t layout = {0};
   IREE_RETURN_IF_ERROR(loom_amdgpu_hal_kernel_abi_layout_from_low(
-      module, function_op, &layout, scratch_arena));
+      module, function_op, scratch_arena, &layout));
   layout.uses_kernarg_segment_ptr =
       kernarg_ptr != LOOM_VALUE_ID_INVALID ||
       loom_amdgpu_hal_binding_layout_uses_kernarg_segment_ptr(module, &layout);

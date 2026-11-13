@@ -194,8 +194,8 @@ static amdf_status_t amdf_windows_device_pci_address(
 amdf_status_t amdf_windows_query_endpoint_metadata(
     const amdf_windows_endpoint_metadata_api_t* api, const amdf_kmt_api_t* kmt,
     D3DKMT_HANDLE adapter, uint32_t physical_adapter_index,
-    amdf_windows_endpoint_metadata_t* out_metadata,
-    amdf_allocator_t host_allocator) {
+    amdf_allocator_t host_allocator,
+    amdf_windows_endpoint_metadata_t* out_metadata) {
   amdf_windows_endpoint_metadata_t metadata = {.host_numa_node = UINT32_MAX};
   if (api->locate_device == NULL || api->get_property == NULL ||
       api->map_error == NULL) {

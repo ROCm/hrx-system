@@ -1,0 +1,8 @@
+target.generic<reference> @request_target {abi = object_function, subgroup_size = 64}
+
+template.decl @outer() -> (index)
+
+func.def public target(@request_target) @entry() -> (index) {
+  %result = template.apply<@outer>() : () -> (index)
+  func.return %result : index
+}

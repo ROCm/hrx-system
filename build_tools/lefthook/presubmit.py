@@ -50,7 +50,7 @@ from build_tools.devtools.source_lock import (
     NonEmptyTrackedFileSnapshot,
     source_mutation_lock,
 )
-from build_tools.lefthook import package_boundary
+from build_tools.lefthook import package_boundary, repository_policy
 
 BUILDIFIER_EXTENSIONS = {".bzl", ".BUILD"}
 BUILDIFIER_NAMES = {
@@ -83,33 +83,12 @@ C_ANALYSIS_EXTENSIONS = C_FORMAT_EXTENSIONS | C_INCLUDE_FRAGMENT_EXTENSIONS
 COMMAND_LINE_CHARACTER_LIMIT = 16_000
 C_FORMAT_BATCH_SIZE = 64
 C_FORMAT_DEFAULT_MAX_JOBS = 16
-SEMGREP_CONFIG = "build_tools/static_analysis/semgrep/iree.yml"
-SEMGREP_DOCUMENTATION_CONFIG = "build_tools/static_analysis/semgrep/amd-docs.yml"
-SEMGREP_DOCUMENTATION_TEST = "build_tools/static_analysis/semgrep/amd_docs_test.py"
-SEMGREP_CONFIGS = (
-    SEMGREP_CONFIG,
-    SEMGREP_DOCUMENTATION_CONFIG,
-)
-SEMGREP_EXTENSIONS = C_ANALYSIS_EXTENSIONS
-# Exact non-C policy surfaces scanned without broadening Semgrep to all Python.
-SEMGREP_POLICY_PATHS = frozenset(
+REPOSITORY_POLICY_INFRA_PATHS = frozenset(
     {
-        "loom/py/loom/error/target.py",
+        "build_tools/lefthook/repository_policy.py",
+        "build_tools/lefthook/repository_policy_test.py",
     }
 )
-# Expected-finding fixtures run through `semgrep test`, never an ordinary scan.
-SEMGREP_TEST_PATHS = frozenset(
-    {
-        "build_tools/static_analysis/semgrep/test/target_diagnostic_domain.py",
-    }
-)
-SEMGREP_PATH_PREFIXES = (
-    "runtime/src/iree/",
-    "loom/src/loom/",
-    "libamdf/",
-    "libhrx/",
-)
-SEMGREP_DEFAULT_MAX_JOBS = 14
 ZIZMOR_PATH_PREFIXES = (
     ".github/actions/",
     ".github/workflows/",
@@ -144,7 +123,13 @@ CLANG_TIDY_FIXES_OUTPUT_GROUP = "iree_clang_tidy_fixes"
 CLANG_TIDY_LOCAL_FIXES_OUTPUT_GROUP = "iree_clang_tidy_local_fixes"
 CLANG_TIDY_LOCAL_OUTPUT_GROUP = "iree_clang_tidy_local_reports"
 CLANG_TIDY_OUTPUT_GROUP = "iree_clang_tidy_reports"
-CLANG_TIDY_PATH_PREFIXES = SEMGREP_PATH_PREFIXES + ("loom/binding/c/",)
+CLANG_TIDY_PATH_PREFIXES = (
+    "runtime/src/iree/",
+    "loom/src/loom/",
+    "loom/binding/c/",
+    "libamdf/",
+    "libhrx/",
+)
 CLANG_TIDY_REPO_ENV = "--repo_env=IREE_CLANG_TIDY_LLVM=auto"
 CLANG_TIDY_SELECTED_FILES_FLAG = "--aspects_parameters=selected_files"
 CLANG_TIDY_OWNER_TARGET_PATTERNS = (
@@ -1072,19 +1057,6 @@ def is_c_format_file(path: str) -> bool:
     return Path(path).suffix in C_FORMAT_EXTENSIONS
 
 
-def is_semgrep_candidate_file(path: str) -> bool:
-    return (
-        path in SEMGREP_POLICY_PATHS
-        or path.startswith("docs/reference/amd/")
-        or path.startswith("libamdf/docs/")
-        or path == "libamdf/README.md"
-        or (
-            path.startswith(SEMGREP_PATH_PREFIXES)
-            and Path(path).suffix in SEMGREP_EXTENSIONS
-        )
-    )
-
-
 def is_clang_tidy_candidate_file(path: str) -> bool:
     return path.startswith(CLANG_TIDY_PATH_PREFIXES) and (
         Path(path).suffix in CLANG_TIDY_EXTENSIONS
@@ -1290,18 +1262,6 @@ def bazel_package_target_for_path(path: str) -> str | None:
     return None
 
 
-def semgrep_jobs() -> int:
-    configured_jobs = os.environ.get("IREE_SEMGREP_JOBS")
-    if configured_jobs:
-        try:
-            jobs = int(configured_jobs)
-        except ValueError:
-            return 1
-        return max(1, jobs)
-    cpu_count = os.cpu_count() or 1
-    return min(SEMGREP_DEFAULT_MAX_JOBS, max(1, int(cpu_count * 0.85)))
-
-
 def configured_clang_tidy_jobs() -> int | None:
     configured_jobs = os.environ.get("IREE_CLANG_TIDY_JOBS")
     if not configured_jobs:
@@ -1327,47 +1287,6 @@ def clang_tidy_jobs() -> int:
         // CLANG_TIDY_DEFAULT_CORE_DIVISOR,
     )
     return min(cpu_count, CLANG_TIDY_DEFAULT_MAX_JOBS, default_jobs)
-
-
-def semgrep_scan_command(files: list[str]) -> list[str]:
-    return [
-        "semgrep",
-        "scan",
-        "--metrics=off",
-        "--disable-version-check",
-        "--strict",
-        "--error",
-        "--severity",
-        "ERROR",
-        "--jobs",
-        str(semgrep_jobs()),
-        *[arg for config in SEMGREP_CONFIGS for arg in ("--config", config)],
-        "--",
-        *files,
-    ]
-
-
-def semgrep_validate_command() -> list[str]:
-    return [
-        "semgrep",
-        "scan",
-        "--metrics=off",
-        "--disable-version-check",
-        "--strict",
-        "--validate",
-        *[arg for config in SEMGREP_CONFIGS for arg in ("--config", config)],
-    ]
-
-
-def semgrep_test_command() -> list[str]:
-    return [
-        "semgrep",
-        "test",
-        "--strict",
-        "--config",
-        SEMGREP_CONFIG,
-        *sorted(SEMGREP_TEST_PATHS),
-    ]
 
 
 def is_python_file(path: str) -> bool:
@@ -1549,9 +1468,7 @@ def run_amdgpu_target_map(paths: list[str], fix: bool, verbose: bool) -> bool:
     relevant_prefixes = (
         "build_tools/amdgpu/elf_machine_map.inl",
         "build_tools/amdgpu/target_map.",
-        "runtime/src/iree/hal/drivers/amdgpu/util/device_library_target_map.inl",
-        "runtime/src/iree/hal/drivers/amdgpu/target/identity_catalog.inl",
-        "runtime/src/iree/hal/drivers/amd/gpu/target/identity_catalog.inl",
+        "runtime/src/iree/hal/driver/amd/gpu/target/identity_catalog.inl",
     )
     if not any(path.startswith(relevant_prefixes) for path in paths):
         return skip_step("AMDGPU target map", "no AMDGPU target-map inputs")
@@ -1566,9 +1483,7 @@ def run_amdgpu_target_map(paths: list[str], fix: bool, verbose: bool) -> bool:
                 "build_tools/amdgpu/target_map.bzl",
                 "build_tools/amdgpu/target_map.cmake",
                 "build_tools/amdgpu/target_map.h",
-                "runtime/src/iree/hal/drivers/amdgpu/util/device_library_target_map.inl",
-                "runtime/src/iree/hal/drivers/amdgpu/target/identity_catalog.inl",
-                "runtime/src/iree/hal/drivers/amd/gpu/target/identity_catalog.inl",
+                "runtime/src/iree/hal/driver/amd/gpu/target/identity_catalog.inl",
             ],
             verbose,
         )
@@ -1611,6 +1526,7 @@ def run_hygiene(paths: list[str], fix: bool, verbose: bool) -> bool:
         and ok
     )
     ok = run_inline_check("Watchwords", lambda: run_watchwords(paths), verbose) and ok
+    ok = run_repository_policy(paths, verbose) and ok
     ok = run_buildifier(paths, fix=fix, verbose=verbose) and ok
     ok = run_package_boundary_check(paths, verbose=verbose) and ok
     ok = run_ruff(paths, fix=fix, verbose=verbose) and ok
@@ -1792,51 +1708,30 @@ def is_devtools_checkout_trigger(path: str) -> bool:
     )
 
 
-def run_semgrep(inputs: PresubmitInputs, profile: str, verbose: bool) -> bool:
-    paths = inputs.selected_paths
-    validate_config = any(config in paths for config in SEMGREP_CONFIGS)
-    test_rules = SEMGREP_CONFIG in paths or bool(SEMGREP_TEST_PATHS.intersection(paths))
-    test_documentation = (
-        SEMGREP_DOCUMENTATION_CONFIG in paths or SEMGREP_DOCUMENTATION_TEST in paths
+def run_repository_policy(paths: list[str], verbose: bool) -> bool:
+    if any(path in REPOSITORY_POLICY_INFRA_PATHS for path in paths):
+        paths = git_list(["ls-files", "-z"])
+    files = existing_files(
+        [path for path in paths if repository_policy.is_candidate_path(path)]
     )
-    candidate_paths = [path for path in paths if is_semgrep_candidate_file(path)]
-    if SEMGREP_CONFIG in paths:
-        candidate_paths.extend(SEMGREP_POLICY_PATHS)
-    files = existing_files(candidate_paths)
-    if not files and not validate_config and not test_rules and not test_documentation:
-        return skip_step("Semgrep", "no selected policy inputs")
-    if sys.platform == "win32":
-        return skip_step(
-            "Semgrep",
-            "semgrep-core.exe is not distributed for native Windows; "
-            "enforced by the Linux paranoid presubmit",
-        )
-    if shutil.which("semgrep") is None:
-        return require_static_tool("semgrep", "Semgrep", profile)
+    if not files:
+        return skip_step("Repository policy", "no selected policy inputs")
 
-    ok = True
-    if validate_config:
-        ok = run_command(
-            semgrep_validate_command(), "Semgrep config validation", verbose
-        )
-    if test_rules:
-        ok = run_command(semgrep_test_command(), "Semgrep rule tests", verbose) and ok
-    if test_documentation:
-        ok = (
-            run_command(
-                [sys.executable, SEMGREP_DOCUMENTATION_TEST],
-                "Semgrep documentation rule tests",
-                verbose,
-            )
-            and ok
-        )
-    if files:
-        commands = command_argument_batches(semgrep_scan_command([]), files)
-        ok = (
-            run_parallel_commands(commands, "Semgrep hard rules", verbose, jobs=1)
-            and ok
-        )
-    return ok
+    def check() -> bool:
+        ok = True
+        for path in files:
+            text = text_for_path(path)
+            if text is None:
+                continue
+            for finding in repository_policy.findings_for_text(path, text):
+                print(
+                    f"{finding.path}:{finding.line}:{finding.column}: "
+                    f"{finding.rule_id}: {finding.message}"
+                )
+                ok = False
+        return ok
+
+    return run_inline_check("Repository policy", check, verbose)
 
 
 def zizmor_command() -> list[str]:
@@ -2709,13 +2604,6 @@ STATIC_ANALYSIS_PROVIDERS = (
         name="Zizmor",
         profiles=frozenset(("paranoid", "ci")),
         runner=lambda inputs, profile, lane, verbose: run_zizmor(
-            inputs, profile, verbose
-        ),
-    ),
-    StaticAnalysisProvider(
-        name="Semgrep",
-        profiles=frozenset(("paranoid", "ci")),
-        runner=lambda inputs, profile, lane, verbose: run_semgrep(
             inputs, profile, verbose
         ),
     ),

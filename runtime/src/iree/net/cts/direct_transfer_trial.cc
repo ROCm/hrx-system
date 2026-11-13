@@ -801,8 +801,8 @@ iree_status_t RunDirectTransferTrial(
     const TransportBackend& transport,
     const iree::async::cts::ProactorFactory& create_proactor,
     const DirectTransferTrialOptions& options,
-    DirectTransferTrialResult* out_result,
-    TransferTrialMeasurement measurement) {
+    TransferTrialMeasurement measurement,
+    DirectTransferTrialResult* out_result) {
   *out_result = {};
   if (!transport.create_registered_factory) {
     return iree_make_status(IREE_STATUS_UNAVAILABLE,

@@ -12,7 +12,6 @@
 #include "loom/format/bytecode/reader/selected_tables.h"
 #include "loom/format/bytecode/reader/type.h"
 #include "loom/ir/parameterized_type.h"
-#include "loom/ops/type_registry.h"
 
 typedef loom_bytecode_selected_table_materializer_t
     loom_bytecode_attribute_policy_materializer_t;

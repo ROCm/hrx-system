@@ -17,13 +17,11 @@ func.def @scalar_word_immediates(%value: i32) -> (i32, i32, i32, i32, i32) {
 low.func.def target<x86.scalar.core> abi(object_function) @scalar_word_immediates(%value: reg<x86.gpr32>) -> (reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>) asm {
   %22 = copy %value : reg<x86.gpr32> -> reg<x86.gpr32>
   %lhs_sum = add.imm.gpr32 %22 {imm32 = 23}
-  %24 = copy %value : reg<x86.gpr32> -> reg<x86.gpr32>
-  %rhs_sum = add.imm.gpr32 %24 {imm32 = 23}
   %26 = copy %value : reg<x86.gpr32> -> reg<x86.gpr32>
   %difference = sub.imm.gpr32 %26 {imm32 = 17}
   %lhs_product = imul.imm.gpr32 %value {imm32 = 129}
   %rhs_product = imul.imm.gpr32 %value {imm32 = 130}
-  return %lhs_sum, %rhs_sum, %difference, %lhs_product, %rhs_product
+  return %lhs_sum, %lhs_sum, %difference, %lhs_product, %rhs_product
 }
 
 // ====

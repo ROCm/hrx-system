@@ -109,6 +109,7 @@ from loom.dsl import (
     CallLikeKind,
     Consume,
     ContractFamily,
+    CopiedResult,
     Dialect,
     DimIndexInBounds,
     ElementWidthAtLeastAttr,
@@ -184,6 +185,7 @@ from loom.dsl import (
     SymbolKernelContract,
     SymbolReference,
     SymbolReferenceRole,
+    SymbolTypeContract,
     TargetFactSpecialization,
     TargetLikeInterface,
     TotalBitCountEqual,
@@ -3266,6 +3268,74 @@ class TestEffects:
 
 
 class TestOwnershipEffects:
+    def test_pure_observation_borrows_without_transferring_ownership(self) -> None:
+        op = Op(
+            "test.resource.is_null",
+            operands=[Operand("resource", POOL)],
+            results=[Result("result", I1)],
+            traits=[PURE],
+            ownership_effects=[Borrow("resource")],
+        )
+        assert op.is_pure
+        assert op.ownership_effects == (Borrow("resource"),)
+
+    def test_copied_result_preserves_each_source_identity(self) -> None:
+        op = Op(
+            "test.resource.copy_twice",
+            operands=[Operand("source", POOL)],
+            results=[Result("first", POOL), Result("second", POOL)],
+            ownership_effects=[
+                CopiedResult("first", "source"),
+                CopiedResult("second", "source"),
+            ],
+        )
+        assert [effect.source for effect in op.ownership_effects] == [
+            "source",
+            "source",
+        ]
+        assert not op.is_pure
+
+    def test_copied_result_requires_fixed_fields(self) -> None:
+        with _raises(ValueError, match="fixed operand/result"):
+            Op(
+                "test.resource.copy_many",
+                operands=[Operand("sources", POOL, variadic=True)],
+                results=[Result("results", POOL, variadic=True)],
+                ownership_effects=[CopiedResult("results", "sources")],
+            )
+
+    def test_copied_result_requires_a_declared_source(self) -> None:
+        with _raises(ValueError, match="not declared"):
+            Op(
+                "test.resource.copy",
+                operands=[Operand("source", POOL)],
+                results=[Result("result", POOL)],
+                ownership_effects=[CopiedResult("result", "missing")],
+            )
+
+    def test_copied_result_cannot_also_consume_its_source(self) -> None:
+        for consume in (Consume, dsl.Release, dsl.Discard, dsl.Escape, dsl.Move):
+            with _raises(ValueError, match="must remain live"):
+                Op(
+                    "test.resource.invalid_copy",
+                    operands=[Operand("source", POOL)],
+                    results=[Result("result", POOL)],
+                    ownership_effects=[
+                        consume("source"),
+                        CopiedResult("result", "source"),
+                    ],
+                )
+        with _raises(ValueError, match="must remain live"):
+            Op(
+                "test.resource.copy_and_move",
+                operands=[Operand("source", POOL)],
+                results=[Result("copy", POOL), Result("moved", POOL)],
+                ownership_effects=[
+                    CopiedResult("copy", "source"),
+                    MovedResult("moved", "source"),
+                ],
+            )
+
     def test_valid_operand_and_result_ownership_effects(self) -> None:
         op = Op(
             "test.resource.retain",
@@ -3359,13 +3429,28 @@ class TestOwnershipEffects:
             )
 
     def test_pure_with_ownership_effects_raises(self) -> None:
-        with _raises(ValueError, match="PURE.*ownership"):
-            Op(
-                "test.bad",
-                operands=[Operand("resource", POOL)],
-                traits=[PURE],
-                ownership_effects=[Consume("resource")],
-            )
+        for effect in (
+            Consume("resource"),
+            dsl.Retain("resource"),
+            dsl.Release("resource"),
+            dsl.Discard("resource"),
+            dsl.Escape("resource"),
+            dsl.Move("resource"),
+            FreshResult("result"),
+            dsl.BorrowedResult("result"),
+            dsl.RetainedResult("result"),
+            AliasResult("result", "resource"),
+            MovedResult("result", "resource"),
+            CopiedResult("result", "resource"),
+        ):
+            with _raises(ValueError, match="PURE.*ownership"):
+                Op(
+                    "test.bad",
+                    operands=[Operand("resource", POOL)],
+                    results=[Result("result", POOL)],
+                    traits=[PURE],
+                    ownership_effects=[effect],
+                )
 
     def test_result_ownership_effect_on_missing_result_raises(self) -> None:
         with _raises(ValueError, match="not declared"):
@@ -3591,6 +3676,42 @@ class TestSymbolReference:
     def test_rejects_untyped_role(self) -> None:
         with _raises(ValueError, match="role must be a SymbolReferenceRole"):
             SymbolReference("record", ["record"], role="availability")  # type: ignore[arg-type]
+
+
+class TestSymbolTypeContract:
+    def test_key_requires_distinct_fields(self) -> None:
+        with _raises(ValueError, match="distinct fields"):
+            SymbolTypeContract(namespace="key", name="key")
+
+    def test_key_requires_two_required_strings(self) -> None:
+        for kind, optional in (("i64", False), ("string", True)):
+            with _raises(ValueError, match="must be"):
+                Op(
+                    "test.type",
+                    traits=[SYMBOL_DEFINE],
+                    attrs=[
+                        AttrDef("name", "symbol"),
+                        AttrDef("provider", "string"),
+                        AttrDef("payload", kind, optional=optional),
+                    ],
+                    symbol_def=SymbolDefinition(
+                        field="name",
+                        name="managed type",
+                        interfaces=["record"],
+                        type_contract=SymbolTypeContract(
+                            namespace="provider", name="payload"
+                        ),
+                    ),
+                )
+
+    def test_type_contract_excludes_callable_contracts(self) -> None:
+        with _raises(ValueError, match="requires a record"):
+            SymbolDefinition(
+                field="name",
+                name="managed type",
+                interfaces=["callable"],
+                type_contract=SymbolTypeContract(namespace="provider", name="payload"),
+            )
 
 
 class TestSymbolKernelContract:
@@ -4233,6 +4354,80 @@ def test_execution_condition_requires_complete_integer_arithmetic_shape() -> Non
             traits=[PURE],
             execution_condition=dsl.ExecutionCondition.INTEGER_MULTIPLY_ADD,
         )
+
+
+def test_execution_condition_checks_division_results_and_domains() -> None:
+    for condition, domains in (
+        (dsl.ExecutionCondition.INTEGER_NONZERO_DIVISOR, (INTEGER, dsl.VECTOR)),
+        (dsl.ExecutionCondition.INTEGER_SIGNED_QUOTIENT, (INTEGER, dsl.VECTOR)),
+        (dsl.ExecutionCondition.INDEX_DIVISION, (INDEX,)),
+    ):
+        for domain in domains:
+            for result_count in (1, 2):
+                results = [
+                    Result(name, domain)
+                    for name in ("quotient", "remainder")[:result_count]
+                ]
+                constraints = [
+                    SameType("lhs", "rhs", *(result.name for result in results))
+                ]
+                if domain is dsl.VECTOR:
+                    constraints.append(HasIntegerElement("quotient"))
+                fields = dict(
+                    operands=[Operand("lhs", domain), Operand("rhs", domain)],
+                    results=results,
+                    constraints=constraints,
+                    traits=[PURE],
+                    execution_condition=condition,
+                )
+                Op("test.divide", **fields)
+                with _raises(ValueError, match="does not accept instance attributes"):
+                    Op(
+                        "test.divide",
+                        **fields,
+                        attrs=[AttrDef("mode", dsl.ATTR_TYPE_I64)],
+                    )
+                with _raises(ValueError, match="one or two required results"):
+                    Op(
+                        "test.divide",
+                        **(
+                            fields
+                            | {
+                                "results": [
+                                    *results,
+                                    Result("extra", domain),
+                                    Result("another", domain),
+                                ]
+                            }
+                        ),
+                    )
+                with _raises(ValueError, match="same-typed"):
+                    Op("test.divide", **(fields | {"constraints": []}))
+                if result_count == 2:
+                    with _raises(ValueError, match="same-typed"):
+                        Op(
+                            "test.divide",
+                            **(
+                                fields
+                                | {"results": [results[0], Result("remainder", FLOAT)]}
+                            ),
+                        )
+
+        for domain in (INTEGER, INDEX, ADDRESS, dsl.VECTOR):
+            if domain in domains:
+                continue
+            with _raises(ValueError, match="same-typed"):
+                Op(
+                    "test.wrong_domain",
+                    operands=[Operand("lhs", domain), Operand("rhs", domain)],
+                    results=[Result("quotient", domain)],
+                    constraints=[
+                        SameType("lhs", "rhs", "quotient"),
+                        HasIntegerElement("quotient"),
+                    ],
+                    traits=[PURE],
+                    execution_condition=condition,
+                )
 
 
 def test_assembly_format_rejects_undeclared_fields() -> None:

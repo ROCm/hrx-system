@@ -126,9 +126,11 @@ typedef struct iree_profile_att_rocprofiler_library_t {
   iree_dynamic_library_t* library;
   // Directory passed to rocprofiler_thread_trace_decoder_create.
   char* decoder_library_path;
-  // Creates a trace decoder handle.
+  // Creates a trace decoder handle. The imported rocprofiler ABI places its
+  // output before the library path input.
   iree_profile_att_rocprofiler_status_t (*decoder_create)(
-      iree_profile_att_rocprofiler_decoder_id_t* out_decoder,
+      iree_profile_att_rocprofiler_decoder_id_t*
+          out_decoder,  // NOLINT(iree-output-parameter-order)
       const char* library_path);
   // Destroys a trace decoder handle.
   void (*decoder_destroy)(iree_profile_att_rocprofiler_decoder_id_t decoder);

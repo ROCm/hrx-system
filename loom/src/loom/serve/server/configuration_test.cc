@@ -42,7 +42,7 @@ class ConfigurationTest : public ::testing::Test {
 
   iree_status_t Parse(const std::string& json,
                       iree_string_view_t directory = IREE_SV("models/local"),
-                      loom_serve_package_t* package = nullptr) {
+                      loom_runtime_package_t* package = nullptr) {
     loom_serve_model_configuration_deinitialize(&model_);
     return loom_serve_model_configuration_initialize(
         iree_make_string_view(json.data(), json.size()), directory, package,
@@ -134,14 +134,14 @@ INSTANTIATE_TEST_SUITE_P(NativeServices, CardConfigurationTest,
 TEST_F(ConfigurationTest, GroupModesAreTypedPerDeployment) {
   IREE_ASSERT_OK(
       Parse(Text(R"(,"group_mode":"two_bank","plan_provider":"two_bank_v1")")));
-  EXPECT_EQ(model_.text.group_mode, LOOM_SERVE_GROUP_MODE_TWO_BANK);
+  EXPECT_EQ(model_.text.group_mode, LOOM_RUNTIME_GROUP_MODE_TWO_BANK);
   EXPECT_EQ(String(model_.text.plan_provider), "two_bank_v1");
   loom_serve_model_configuration_deinitialize(&model_);
   IREE_ASSERT_OK(Parse(Text(R"(,"group_mode":"single")")));
-  EXPECT_EQ(model_.text.group_mode, LOOM_SERVE_GROUP_MODE_SINGLE);
+  EXPECT_EQ(model_.text.group_mode, LOOM_RUNTIME_GROUP_MODE_SINGLE);
   loom_serve_model_configuration_deinitialize(&model_);
   IREE_ASSERT_OK(Parse(Text(R"(,"group_mode":"two_\u0062ank")")));
-  EXPECT_EQ(model_.text.group_mode, LOOM_SERVE_GROUP_MODE_TWO_BANK);
+  EXPECT_EQ(model_.text.group_mode, LOOM_RUNTIME_GROUP_MODE_TWO_BANK);
   loom_serve_model_configuration_deinitialize(&model_);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         Parse(Text(R"(,"group_mode":"auto")")));
@@ -237,7 +237,7 @@ TEST_F(ConfigurationTest, SpeechOwnsAssetsAndSourceOptions) {
   IREE_ASSERT_OK(Parse(Document(
       "speech",
       R"(,"assets":"voices","pending_requests":4,"options":{"voice":"alba"})")));
-  EXPECT_EQ(model_.kind, LOOM_SERVE_MODEL_KIND_SPEECH);
+  EXPECT_EQ(model_.kind, LOOM_SERVICE_KIND_SPEECH);
   EXPECT_EQ(String(model_.assets), "voices");
   EXPECT_EQ(model_.pending_requests, 4u);
   EXPECT_EQ(model_.variant_capacity, 0u);
@@ -260,7 +260,7 @@ TEST_F(ConfigurationTest, SequenceRequiresWeightsButNoTokenizerOrSampler) {
   IREE_ASSERT_OK(Parse(Document(
       "sequence",
       R"(,"weights":"model.irpa","rows":4,"context_capacity":96,"prefill_capacity":32,"checkpoint_capacity":4,"session_cache_capacity":1)")));
-  EXPECT_EQ(model_.kind, LOOM_SERVE_MODEL_KIND_SEQUENCE);
+  EXPECT_EQ(model_.kind, LOOM_SERVICE_KIND_SEQUENCE);
   EXPECT_EQ(String(model_.text.weights), "model.irpa");
   EXPECT_EQ(model_.text.tokenizer.size, 0u);
   EXPECT_EQ(model_.text.max_tokens, 0u);
@@ -313,8 +313,8 @@ TEST_F(ConfigurationTest, ContinuingRecognitionOwnsAssetsAndSourceOptions) {
         kind,
         R"(,"assets":"checkpoint","pending_requests":4,"options":{"context_frames":4096})")));
     EXPECT_EQ(model_.kind, std::string(kind) == "recognition"
-                               ? LOOM_SERVE_MODEL_KIND_RECOGNITION
-                               : LOOM_SERVE_MODEL_KIND_ACTIVITY);
+                               ? LOOM_SERVICE_KIND_RECOGNITION
+                               : LOOM_SERVICE_KIND_ACTIVITY);
     EXPECT_EQ(String(model_.assets), "checkpoint");
     EXPECT_EQ(model_.pending_requests, 4u);
     EXPECT_EQ(model_.variant_capacity, 0u);
@@ -402,23 +402,23 @@ TEST_F(ConfigurationTest,
 }
 
 TEST_F(ConfigurationTest, OptionalImageUsesTheEnclosingPackageAndPathBase) {
-  const loom_serve_package_file_t file = {
+  const loom_runtime_package_file_t file = {
       IREE_SV("model/vision/prepare.loombc"),
       iree_make_const_byte_span("image", 5)};
-  loom_serve_package_t* package = nullptr;
-  IREE_ASSERT_OK(loom_serve_package_create(IREE_SV("model/model.json"), 1,
-                                           &file, iree_allocator_system(),
-                                           &package));
+  loom_runtime_package_t* package = nullptr;
+  IREE_ASSERT_OK(loom_runtime_package_create(IREE_SV("model/model.json"), 1,
+                                             &file, iree_allocator_system(),
+                                             &package));
   IREE_ASSERT_OK(Parse(
       Document(
           "text",
           R"(,"weights":"//files/text.gguf","tokenizer":"tokenizer.json","image":{"prepare":"vision/prepare.loombc","control":"vision/control.loom","assets":"vision"})"),
       {}, package));
-  loom_serve_package_release(package);
+  loom_runtime_package_release(package);
   loomc_source_t* source = nullptr;
-  IREE_ASSERT_OK(loom_serve_sources_open(&model_.sources,
-                                         model_.text.image.prepare,
-                                         iree_allocator_system(), &source));
+  IREE_ASSERT_OK(loom_runtime_sources_open(&model_.sources,
+                                           model_.text.image.prepare,
+                                           iree_allocator_system(), &source));
   loom_serve_model_configuration_deinitialize(&model_);
   const auto bytes = loomc_source_contents(source);
   EXPECT_EQ(
@@ -442,22 +442,22 @@ TEST_F(ConfigurationTest, OptionalImageUsesTheEnclosingPackageAndPathBase) {
 }
 
 TEST_F(ConfigurationTest, UploadedSourcesSurviveTheirRegistrationRequest) {
-  const loom_serve_package_file_t file = {
+  const loom_runtime_package_file_t file = {
       IREE_SV("model/boot.loombc"), iree_make_const_byte_span("bytes", 5)};
-  loom_serve_package_t* package = nullptr;
-  IREE_ASSERT_OK(loom_serve_package_create(IREE_SV("model/model.json"), 1,
-                                           &file, iree_allocator_system(),
-                                           &package));
+  loom_runtime_package_t* package = nullptr;
+  IREE_ASSERT_OK(loom_runtime_package_create(IREE_SV("model/model.json"), 1,
+                                             &file, iree_allocator_system(),
+                                             &package));
   IREE_ASSERT_OK(Parse(
       Document("embedding", R"(,"assets":".")", R"(,"admission":"drained")"),
       {}, package));
-  loom_serve_package_release(package);
+  loom_runtime_package_release(package);
   EXPECT_TRUE(model_.start_drained);
   EXPECT_EQ(model_.sources.base_directory.size, 0u);
   loomc_source_t* source = nullptr;
-  IREE_ASSERT_OK(loom_serve_sources_open(&model_.sources,
-                                         model_.sources.prepare,
-                                         iree_allocator_system(), &source));
+  IREE_ASSERT_OK(loom_runtime_sources_open(&model_.sources,
+                                           model_.sources.prepare,
+                                           iree_allocator_system(), &source));
   loom_serve_model_configuration_deinitialize(&model_);
   const auto bytes = loomc_source_contents(source);
   EXPECT_EQ(
@@ -467,9 +467,9 @@ TEST_F(ConfigurationTest, UploadedSourcesSurviveTheirRegistrationRequest) {
 }
 
 TEST_F(ConfigurationTest, PackagesDoNotSupplyAFileBaseForCheckpoints) {
-  loom_serve_package_t* package = nullptr;
-  IREE_ASSERT_OK(loom_serve_package_create(IREE_SV("model.json"), 0, nullptr,
-                                           iree_allocator_system(), &package));
+  loom_runtime_package_t* package = nullptr;
+  IREE_ASSERT_OK(loom_runtime_package_create(
+      IREE_SV("model.json"), 0, nullptr, iree_allocator_system(), &package));
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         Parse(Text(), {}, package));
   EXPECT_EQ(model_.sources.package, nullptr);
@@ -483,7 +483,7 @@ TEST_F(ConfigurationTest, PackagesDoNotSupplyAFileBaseForCheckpoints) {
       IREE_STATUS_INVALID_ARGUMENT,
       Parse(Image(R"(,"adapter":"adapter.gguf")"), {}, package));
   IREE_ASSERT_OK(Parse(Text(), IREE_SV("//files/model"), package));
-  loom_serve_package_release(package);
+  loom_runtime_package_release(package);
 }
 
 TEST_F(ConfigurationTest, OmittedDeviceRequiresExactlyOneGroupMember) {
@@ -540,7 +540,7 @@ TEST_F(ConfigurationTest, InvalidDeviceNamesRejectBeforeIo) {
 }
 
 TEST_F(ConfigurationTest, PoolSelectionIsIndependentOfExecutionPlacement) {
-  const loom_serve_pool_binding_t pools[] = {
+  const loom_runtime_pool_binding_t pools[] = {
       {IREE_SV("shared"), 3},
       {IREE_SV("foreground"), 1},
       {IREE_SV("background"), 1},
@@ -688,7 +688,7 @@ TEST_F(ConfigurationTest, MissingDefinitionNamesTheRequiredObject) {
 TEST_F(ConfigurationTest,
        TextDefaultsAndSpecializationsRemainModelIndependent) {
   IREE_ASSERT_OK(Parse(Text()));
-  EXPECT_EQ(model_.kind, LOOM_SERVE_MODEL_KIND_TEXT);
+  EXPECT_EQ(model_.kind, LOOM_SERVICE_KIND_TEXT);
   EXPECT_EQ(model_.text.rows, 4u);
   EXPECT_EQ(model_.text.max_sessions, 0u);
   EXPECT_EQ(model_.variant_capacity, 16u);
@@ -841,7 +841,7 @@ TEST_F(ConfigurationTest, CardPresetMayBoundSessionsWithoutInitialRows) {
 
 TEST_F(ConfigurationTest, ImageDefaultsAndSpecializations) {
   IREE_ASSERT_OK(Parse(Image()));
-  EXPECT_EQ(model_.kind, LOOM_SERVE_MODEL_KIND_IMAGE);
+  EXPECT_EQ(model_.kind, LOOM_SERVICE_KIND_IMAGE);
   EXPECT_EQ(model_.image.width, 384u);
   EXPECT_EQ(model_.image.height, 384u);
   EXPECT_EQ(model_.image.text_tokens, 512u);

@@ -12,7 +12,6 @@ load(
 load(
     "//loom/build_tools/amdgpu:target_config.bzl",
     "LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_KEY",
-    "LOOM_AMDGPU_SUPPORTED_TARGETS",
 )
 load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
 load("//loom/build_tools/bazel:defs.bzl", "loom_test")
@@ -51,128 +50,6 @@ _CDNA3_COMPATIBLE_WITH = loom_config_compatible_with([
     "//loom/config/arch/amdgpu:iree_hal_descriptor_set_cdna3_core",
 ])
 
-# Qualification is explicit: publishing a source module does not imply support
-# for its operations on every target.
-_MODULES = [
-    "assumptions",
-    "atomics",
-    "barrier_helpers",
-    "boolean_storage",
-    "borrowed_storage",
-    "collective_scans",
-    "constant_loops",
-    "control_flow",
-    "early_returns",
-    "enum_values",
-    "flash_attention",
-    "increment_values",
-    "integer_increment",
-    "mxfp_group_dot",
-    "packed_byte_arithmetic",
-    "packed_float16_conversion",
-    "packed_float8_conversion",
-    "packed_group_dot",
-    "packed_memory",
-    "padded_vectors",
-    "pointer_origins",
-    "pointer_walk",
-    "record_memory",
-    "record_values",
-    "scheduled_sum",
-    "shaped_intrinsics",
-    "short_circuit",
-    "storage_updates",
-    "structured_break",
-    "structured_continue",
-    "subgroup_shuffles",
-    "symbol_exports",
-    "typed_views",
-    "vector_depth",
-    "vector_initializers",
-    "vector_lookup",
-    "vector_math",
-    "vector_values",
-    "volatile_memory",
-    "workload_configuration",
-]
-
-_AUTHORING_MODULES = {
-    "flash_attention": "//loom/src/loom/test/corpus/authoring/cxx:flash_attention_module",
-}
-
-_XFAILS = {
-    "vector_values": {},
-}
-
-[
-    loom_test(
-        name = module + "_test",
-        execution_profiles = _EXECUTION_PROFILES,
-        module = _AUTHORING_MODULES.get(
-            module,
-            "//loom/src/loom/import/cxx/test:" + module + "_module",
-        ),
-        target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
-    )
-    for module in _MODULES
-    if module not in _XFAILS
-]
-
-[
-    loom_test(
-        name = module + "_test",
-        args = [
-            "--xfail=%s=%s" % (
-                record,
-                _XFAILS[module][record],
-            )
-            for record in sorted(_XFAILS[module])
-        ],
-        execution_profiles = _EXECUTION_PROFILES,
-        module = _AUTHORING_MODULES.get(
-            module,
-            "//loom/src/loom/import/cxx/test:" + module + "_module",
-        ),
-        target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
-    )
-    for module in _MODULES
-    if module in _XFAILS
-]
-
-test_suite(
-    name = "kernels_test",
-    tests = [":" + module + "_test" for module in _MODULES],
-)
-
-loom_test(
-    name = "bitcast_test",
-    execution_profiles = _EXECUTION_PROFILES,
-    module = "//loom/src/loom/import/cxx/test:bitcast_execution_module",
-    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
-)
-
-loom_test(
-    name = "packed_slices_test",
-    compile_targets = ["//loom/target/amdgpu:" + target for target in LOOM_AMDGPU_SUPPORTED_TARGETS],
-    execution_profiles = _EXECUTION_PROFILES,
-    module = "//loom/src/loom/import/cxx/test:packed_slices_module",
-    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
-)
-
-loom_test(
-    name = "check_resources_test",
-    execution_profiles = _EXECUTION_PROFILES,
-    module = "//loom/src/loom/import/cxx/test:check_resources_module",
-    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
-)
-
-loom_test(
-    name = "opaque_pointers_test",
-    execution_profiles = _EXECUTION_PROFILES,
-    module = "//loom/src/loom/import/cxx/test:opaque_pointers_module",
-    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
-)
-
 loom_test(
     name = "assembly_test",
     srcs = [
@@ -183,13 +60,6 @@ loom_test(
     target_compatible_with = loom_config_compatible_with([
         "//loom/config/import:cxx",
     ]) + _GFX11_ASSEMBLY_COMPATIBLE_WITH,
-)
-
-loom_test(
-    name = "atomic_publication_test",
-    execution_profiles = _EXECUTION_PROFILES,
-    module = "//loom/src/loom/import/cxx/test:atomic_publication_module",
-    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
 )
 
 loom_test(
@@ -252,39 +122,6 @@ _IQ4XS_GATE_UP_BUFFERING_VARIANTS = {
     },
     "single_buffered": {},
 }
-
-_CONFIGURED_WORKGROUP_STORAGE_VARIANTS = {
-    "four_stages": {
-        "case": "configured_workgroup_four_stages",
-        "configs": {"test.buffer.stage_count": "4"},
-    },
-    "one_stage": {
-        "case": "configured_workgroup_one_stage",
-        "configs": {"test.buffer.stage_count": "1"},
-    },
-}
-
-loom_test(
-    name = "configured_workgroup_storage_test",
-    benchmark_smoke = False,
-    execution_profiles = _EXECUTION_PROFILES,
-    module = "//loom/src/loom/import/cxx/test:configured_workgroup_storage_module",
-    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
-    variants = _CONFIGURED_WORKGROUP_STORAGE_VARIANTS,
-)
-
-loom_test(
-    name = "vector_slices_test",
-    benchmark_smoke = False,
-    execution_profiles = _EXECUTION_PROFILES,
-    module = "//loom/src/loom/import/cxx/test:vector_slices_module",
-    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
-    variants = {
-        "width_12": {"configs": {"test.vector.slice.width": "12"}},
-        "width_16": {"configs": {"test.vector.slice.width": "16"}},
-        "width_4": {"configs": {"test.vector.slice.width": "4"}},
-    },
-)
 
 loom_test(
     name = "nvfp4_matrix_test",
@@ -366,6 +203,7 @@ loom_check_test(
         "barrier_control_invalid",
         "dynamic_vector_slices",
         "integer_extrema",
+        "local_addresses",
         "matrix_fragments",
         "opaque_pointers",
         "parameter_alignment",
@@ -374,62 +212,6 @@ loom_check_test(
         "vector_lookup",
     ]
 ]
-
-loom_test(
-    name = "parameter_noalias_test",
-    execution_profiles = _EXECUTION_PROFILES,
-    module = "//loom/src/loom/import/cxx/test:parameter_noalias_module",
-    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
-)
-
-loom_test(
-    name = "parameter_alignment_test",
-    execution_profiles = _EXECUTION_PROFILES,
-    module = "//loom/src/loom/import/cxx/test:parameter_alignment_module",
-    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
-)
-
-loom_test(
-    name = "float16_test",
-    execution_profiles = _EXECUTION_PROFILES,
-    module = "//loom/src/loom/import/cxx/test:float16_module",
-    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
-)
-
-loom_test(
-    name = "bfloat16_test",
-    execution_profiles = _EXECUTION_PROFILES,
-    module = "//loom/src/loom/import/cxx/test:bfloat16_module",
-    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
-)
-
-loom_test(
-    name = "float8_test",
-    execution_profiles = _EXECUTION_PROFILES,
-    module = "//loom/src/loom/import/cxx/test:float8_module",
-    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
-)
-
-loom_test(
-    name = "vector_constants_test",
-    execution_profiles = _EXECUTION_PROFILES,
-    module = "//loom/src/loom/import/cxx/test:vector_constants_module",
-    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
-)
-
-loom_test(
-    name = "vector_conversion_test",
-    execution_profiles = _EXECUTION_PROFILES,
-    module = "//loom/src/loom/import/cxx/test:vector_conversion_module",
-    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
-)
-
-loom_test(
-    name = "vector_list_assignment_test",
-    execution_profiles = _EXECUTION_PROFILES,
-    module = "//loom/src/loom/import/cxx/test:vector_list_assignment_module",
-    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
-)
 
 loom_test(
     name = "iq4xs_blocks_test",
@@ -471,15 +253,8 @@ loom_test(
 )
 
 loom_test(
-    name = "packed_byte_shifts_test",
+    name = "flash_attention_test",
     execution_profiles = _EXECUTION_PROFILES,
-    module = "//loom/src/loom/import/cxx/test:packed_byte_shifts_module",
-    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
-)
-
-loom_test(
-    name = "narrow_float_subtraction_test",
-    execution_profiles = _EXECUTION_PROFILES,
-    module = "//loom/src/loom/import/cxx/test:narrow_float_subtraction_module",
+    module = "//loom/src/loom/test/corpus/authoring/cxx:flash_attention_module",
     target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
 )

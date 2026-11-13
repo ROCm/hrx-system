@@ -1,0 +1,97 @@
+// RUN: pass canonicalize
+
+// A captured dense source uses explicit source strides, not the smaller
+// result extents. The captured encoding has a complete strided identity.
+func.def @dense_capture(%buffer: buffer) -> (i1) {
+  %offset = index.constant 0 : offset
+  %source = buffer.view %buffer[%offset] : buffer -> view<5x8xf32>
+  %crop, %physical = view.subview %source[1, 2] : view<5x8xf32> -> view<1x2xf32, %physical>
+  %matches = encoding.isa<#encoding.layout.strided<strides=[8, 1]>> %physical : encoding<layout>
+  func.return %matches : i1
+}
+
+// ----
+func.def @dense_capture(%buffer: buffer) -> (i1) {
+  %matches = scalar.constant true : i1
+  func.return %matches : i1
+}
+
+// ====
+
+// Already-strided sources retain the same element strides when cropped.
+func.def @strided_capture(%buffer: buffer) -> (i1) {
+  %offset = index.constant 0 : offset
+  %source = buffer.view %buffer[%offset] : buffer -> view<5x8xf32, #encoding.layout.strided<strides=[12, 1]>>
+  %crop, %physical = view.subview %source[1, 2] : view<5x8xf32, #encoding.layout.strided<strides=[12, 1]>> -> view<1x2xf32, %physical>
+  %matches = encoding.isa<#encoding.layout.strided<strides=[12, 1]>> %physical : encoding<layout>
+  func.return %matches : i1
+}
+
+// ----
+func.def @strided_capture(%buffer: buffer) -> (i1) {
+  %matches = scalar.constant true : i1
+  func.return %matches : i1
+}
+
+// ====
+
+// The source assumption proves geometry only. The subview separately creates
+// a known strided encoding from that geometry; it does not refine the source.
+func.def @geometry_capture(%buffer: buffer, %layout: encoding<layout>) -> (i1, i1) {
+  %dense = encoding.layout.assume.dense %layout : encoding<layout>
+  %original_matches = encoding.isa<#encoding.layout.dense> %dense : encoding<layout>
+  %offset = index.constant 0 : offset
+  %source = buffer.view %buffer[%offset] : buffer -> view<5x8xf32, %dense>
+  %crop, %physical = view.subview %source[1, 2] : view<5x8xf32, %dense> -> view<1x2xf32, %physical>
+  %captured_matches = encoding.isa<#encoding.layout.strided<strides=[8, 1]>> %physical : encoding<layout>
+  func.return %original_matches, %captured_matches : i1, i1
+}
+
+// ----
+func.def @geometry_capture(%buffer: buffer, %layout: encoding<layout>) -> (i1, i1) {
+  %dense = encoding.layout.assume.dense %layout : encoding<layout>
+  %original_matches = encoding.isa<#encoding.layout.dense> %dense : encoding<layout>
+  %captured_matches = scalar.constant true : i1
+  func.return %original_matches, %captured_matches : i1, i1
+}
+
+// ====
+
+// Physical storage captures the new strides and the unchanged complete schema.
+func.def @storage_capture(%buffer: buffer) -> (i1, i1) {
+  %offset = index.constant 0 : offset
+  %source = buffer.view %buffer[%offset] : buffer -> view<5x18xi8, #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q4_0>>
+  %crop, %physical = view.subview %source[1, 0] : view<5x18xi8, #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q4_0>> -> view<1x18xi8, %physical>
+  %matches = encoding.isa<#encoding.storage<layout=#encoding.layout.strided<strides=[18, 1]>, schema=#ggml.q4_0>> %physical : encoding<storage>
+  %different = encoding.isa<#encoding.storage<layout=#encoding.layout.strided<strides=[18, 1]>, schema=#ggml.q8_0>> %physical : encoding<storage>
+  func.return %matches, %different : i1, i1
+}
+
+// ----
+func.def @storage_capture(%buffer: buffer) -> (i1, i1) {
+  %matches = scalar.constant true : i1
+  %different = scalar.constant false : i1
+  func.return %matches, %different : i1, i1
+}
+
+// ====
+
+// A known family with unknown strides cannot prove a complete specification.
+func.def @dynamic_capture(%buffer: buffer, %width: index) -> (i1, i1) {
+  %offset = index.constant 0 : offset
+  %source = buffer.view %buffer[%offset] : buffer -> view<5x[%width]xf32>
+  %crop, %physical = view.subview %source[1, 0] : view<5x[%width]xf32> -> view<1x[%width]xf32, %physical>
+  %matches = encoding.isa<#encoding.layout.strided<strides=[8, 1]>> %physical : encoding<layout>
+  %dense = encoding.isa<#encoding.layout.dense> %physical : encoding<layout>
+  func.return %matches, %dense : i1, i1
+}
+
+// ----
+func.def @dynamic_capture(%buffer: buffer, %width: index) -> (i1, i1) {
+  %offset = index.constant 0 : offset
+  %source = buffer.view %buffer[%offset] : buffer -> view<5x[%width]xf32>
+  %crop, %physical = view.subview %source[1, 0] : view<5x[%width]xf32> -> view<1x[%width]xf32, %physical>
+  %matches = encoding.isa<#encoding.layout.strided<strides=[8, 1]>> %physical : encoding<layout>
+  %dense = scalar.constant false : i1
+  func.return %matches, %dense : i1, i1
+}

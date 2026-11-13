@@ -6,8 +6,6 @@
 
 #include "libamdf/src/gpu/umd/kfd/target/user_queue.h"
 
-#include <cstring>
-
 #include "gtest/gtest.h"
 #include "libamdf/src/gpu/umd/kfd/topology.h"
 
@@ -36,7 +34,7 @@ static amdf_gpu_kfd_topology_t MakeTopology() {
   return topology;
 }
 
-TEST(KfdTargetUserQueueTest, DiscoversPlacementWithoutAnAddressDomain) {
+TEST(KfdTargetUserQueueTest, LiveMemoryFactsDeterminePlacementAndPublication) {
   auto topology = MakeTopology();
   amdf_gpu_kfd_user_queue_plans_t plans;
   for (unsigned mode = 0; mode < 3; ++mode) {
@@ -48,37 +46,42 @@ TEST(KfdTargetUserQueueTest, DiscoversPlacementWithoutAnAddressDomain) {
                                                     &plans);
     ASSERT_EQ(plans.count, 3u);
     for (uint32_t i = 0; i < plans.count; ++i) {
+      const auto command_type = plans.values[i].family.command_type;
+      SCOPED_TRACE(command_type);
+      const auto placement = amdf_gpu_kfd_target_user_queue_placement(
+          &topology, 4096, command_type);
       EXPECT_EQ(plans.values[i].family.priority_capabilities,
                 AMDF_QUEUE_PRIORITY_CAPABILITY_LOW |
                     AMDF_QUEUE_PRIORITY_CAPABILITY_NORMAL |
                     AMDF_QUEUE_PRIORITY_CAPABILITY_HIGH);
-      EXPECT_EQ(plans.values[i].family.placement_capabilities,
-                AMDF_QUEUE_PLACEMENT_CAPABILITY_HOST_LOCAL |
-                    (mode ? AMDF_QUEUE_PLACEMENT_CAPABILITY_DEVICE_LOCAL : 0));
       EXPECT_EQ(plans.values[i].ring.placement,
                 AMDF_QUEUE_PLACEMENT_HOST_LOCAL);
       EXPECT_EQ(plans.values[i].ring.host_publish_fence,
                 AMDF_HOST_CACHE_FENCE_NONE);
-      EXPECT_EQ(
-          plans.values[i].family.host_publication[AMDF_QUEUE_PLACEMENT_DEFAULT],
-          AMDF_QUEUE_HOST_PUBLICATION_FLAG_KNOWN);
-      EXPECT_EQ(plans.values[i]
-                    .family.host_publication[AMDF_QUEUE_PLACEMENT_HOST_LOCAL],
+      EXPECT_EQ(placement.placement_capabilities,
+                AMDF_QUEUE_PLACEMENT_CAPABILITY_HOST_LOCAL |
+                    (mode ? AMDF_QUEUE_PLACEMENT_CAPABILITY_DEVICE_LOCAL : 0));
+      EXPECT_EQ(placement.host_publication[AMDF_QUEUE_PLACEMENT_DEFAULT],
                 AMDF_QUEUE_HOST_PUBLICATION_FLAG_KNOWN);
-      EXPECT_EQ(plans.values[i]
-                    .family.host_publication[AMDF_QUEUE_PLACEMENT_DEVICE_LOCAL],
-                mode == 0   ? AMDF_QUEUE_HOST_PUBLICATION_FLAG_UNKNOWN
-                : mode == 1 ? AMDF_QUEUE_HOST_PUBLICATION_FLAG_KNOWN
-                            : AMDF_QUEUE_HOST_PUBLICATION_FLAG_KNOWN |
-                                  AMDF_QUEUE_HOST_PUBLICATION_FLAG_DEVICE_READ |
-                                  AMDF_QUEUE_HOST_PUBLICATION_FLAG_KERNEL_CALL);
+      EXPECT_EQ(placement.host_publication[AMDF_QUEUE_PLACEMENT_HOST_LOCAL],
+                AMDF_QUEUE_HOST_PUBLICATION_FLAG_KNOWN);
+      EXPECT_EQ(placement.host_publication[AMDF_QUEUE_PLACEMENT_DEVICE_LOCAL],
+                mode == 0 ? AMDF_QUEUE_HOST_PUBLICATION_FLAG_UNKNOWN
+                : mode == 1 || command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL
+                    ? AMDF_QUEUE_HOST_PUBLICATION_FLAG_KNOWN
+                    : AMDF_QUEUE_HOST_PUBLICATION_FLAG_KNOWN |
+                          AMDF_QUEUE_HOST_PUBLICATION_FLAG_DEVICE_READ |
+                          AMDF_QUEUE_HOST_PUBLICATION_FLAG_KERNEL_CALL);
     }
   }
   topology.vram.visible_byte_length /= 2;
-  amdf_gpu_kfd_target_user_queue_plans_initialize(&topology, 4096, 64, &plans);
-  for (uint32_t i = 0; i < plans.count; ++i) {
-    EXPECT_EQ(plans.values[i].family.placement_capabilities,
-              AMDF_QUEUE_PLACEMENT_CAPABILITY_HOST_LOCAL);
+  for (const auto command_type :
+       {AMDF_QUEUE_COMMAND_TYPE_GPU_PM4, AMDF_QUEUE_COMMAND_TYPE_GPU_AQL,
+        AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA}) {
+    EXPECT_EQ(
+        amdf_gpu_kfd_target_user_queue_placement(&topology, 4096, command_type)
+            .placement_capabilities,
+        AMDF_QUEUE_PLACEMENT_CAPABILITY_HOST_LOCAL);
   }
 }
 
@@ -160,60 +163,6 @@ TEST(KfdTargetUserQueueTest, KeepsSupportedPlansDense) {
   topology.properties.gfx_ip.major = 0;
   amdf_gpu_kfd_target_user_queue_plans_initialize(&topology, 4096, 64, &plans);
   EXPECT_EQ(plans.count, 0u);
-}
-
-TEST(KfdTargetUserQueueTest, NativeRestrictionsPreserveOtherQueueServices) {
-  struct Case {
-    // Native GC identity, distinct from the compiler target used below.
-    amdf_gpu_kfd_ip_version_t gc_ip;
-    // Installed module identity, or empty when unavailable.
-    const char* driver_version;
-    // Whether this native combination loses device-driven SDMA publication.
-    bool restricted;
-  };
-  const Case cases[] = {
-      {{9, 4, 3, true}, "6.16.13", true},
-      {{9, 4, 4, true}, "6.16.13", true},
-      {{9, 5, 0, true}, "6.16.13", true},
-      {{9, 4, 2, true}, "6.16.13", false},
-      {{9, 4, 5, true}, "6.16.13", false},
-      {{11, 5, 1, true}, "6.16.13", false},
-      {{9, 4, 3, false}, "6.16.13", false},
-      {{9, 4, 3, true}, "", false},
-      {{9, 4, 3, true}, "6.16.14", false},
-      {{9, 4, 3, true}, "6.16.130", false},
-      {{9, 4, 3, true}, "6.16.13-custom", false},
-  };
-  for (const auto& test : cases) {
-    SCOPED_TRACE(test.gc_ip.major * 10000 + test.gc_ip.minor * 100 +
-                 test.gc_ip.revision);
-    SCOPED_TRACE(test.driver_version);
-    auto topology = MakeTopology();
-    topology.properties.gfx_ip = {9, 4, 2};
-    topology.properties.compute.wavefront_size = 64;
-    topology.gc_ip = test.gc_ip;
-    topology.sdma.ip = {4, 4, 2, true};
-    topology.properties.execution_resources =
-        amdf_gpu_kfd_topology_execution_resources(&topology);
-    std::strcpy(topology.driver_version, test.driver_version);
-    amdf_gpu_kfd_user_queue_plans_t plans;
-    amdf_gpu_kfd_target_user_queue_plans_initialize(&topology, 4096, 64,
-                                                    &plans);
-    ASSERT_EQ(plans.count, 2u);
-    EXPECT_EQ(plans.values[0].family.command_type,
-              AMDF_QUEUE_COMMAND_TYPE_GPU_AQL);
-    EXPECT_EQ(plans.values[0].family.user_queue_capabilities,
-              AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER |
-                  AMDF_USER_QUEUE_CAPABILITY_DEVICE_PRODUCER |
-                  AMDF_USER_QUEUE_CAPABILITY_EXECUTION_RESOURCE_SELECTION);
-    EXPECT_EQ(plans.values[1].family.command_type,
-              AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA);
-    EXPECT_EQ(plans.values[1].family.roles, AMDF_QUEUE_ROLE_TRANSFER);
-    EXPECT_EQ(
-        plans.values[1].family.user_queue_capabilities,
-        AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER |
-            (test.restricted ? 0 : AMDF_USER_QUEUE_CAPABILITY_DEVICE_PRODUCER));
-  }
 }
 
 TEST(KfdTargetUserQueueTest, ExposesBothComputeLanguagesOnRdna) {

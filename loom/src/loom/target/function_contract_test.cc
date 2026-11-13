@@ -346,6 +346,31 @@ func.def abi(object_function) @helper() {
                                                   LOOM_TARGET_FACT_FIELD_ABI));
 }
 
+TEST(TargetFunctionArtifactContractTest, RequiresConcreteAbi) {
+  const loom_module_t module = {};
+  loom_func_symbol_facts_t function = {
+      .name = IREE_SVL("entry"),
+  };
+  loom_target_export_plan_t export_plan = {};
+  loom_target_bundle_t bundle = *loom_test_target_bundles.values[1];
+  bundle.export_plan = &export_plan;
+
+  bool valid = true;
+  loom_target_bundle_storage_t storage = {};
+  IREE_ASSERT_OK(loom_target_function_contract_resolve_from_bundle(
+      &module, &function, IREE_SV("target"), &bundle,
+      iree_diagnostic_emitter_t{}, &valid, &storage));
+  EXPECT_FALSE(valid);
+
+  function.has_abi = true;
+  function.abi_kind = LOOM_TARGET_ABI_OBJECT_FUNCTION;
+  IREE_ASSERT_OK(loom_target_function_contract_resolve_from_bundle(
+      &module, &function, IREE_SV("target"), &bundle,
+      iree_diagnostic_emitter_t{}, &valid, &storage));
+  EXPECT_TRUE(valid);
+  EXPECT_EQ(storage.export_plan.abi_kind, LOOM_TARGET_ABI_OBJECT_FUNCTION);
+}
+
 TEST_F(TargetFunctionContractTest,
        BundleCompatibilityIgnoresDeviceLimitsAndFunctionAbi) {
   const loom_target_snapshot_t module_snapshot = {

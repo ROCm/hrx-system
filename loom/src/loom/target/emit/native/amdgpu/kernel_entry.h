@@ -44,9 +44,8 @@ typedef struct loom_amdgpu_kernel_entry_envelope_t {
 iree_status_t loom_amdgpu_kernel_entry_envelope_build(
     const loom_amdgpu_processor_properties_t* properties,
     const loom_amdgpu_hal_kernel_abi_verify_result_t* abi,
-    uint32_t private_segment_size,
-    const loom_amdgpu_kernel_entry_envelope_t** out_envelope,
-    iree_arena_allocator_t* arena);
+    uint32_t private_segment_size, iree_arena_allocator_t* arena,
+    const loom_amdgpu_kernel_entry_envelope_t** out_envelope);
 
 // Prepends |envelope| to |body_text| and displaces all body-relative fixups.
 // Empty envelopes return the original body storage and fixup array directly.
@@ -54,9 +53,9 @@ iree_status_t loom_amdgpu_kernel_entry_prepend_text(
     const loom_amdgpu_kernel_entry_envelope_t* envelope,
     iree_const_byte_span_t body_text,
     const loom_amdgpu_hsaco_text_fixup_t* body_fixups,
-    iree_host_size_t body_fixup_count, iree_const_byte_span_t* out_text,
-    const loom_amdgpu_hsaco_text_fixup_t** out_fixups,
-    iree_arena_allocator_t* arena);
+    iree_host_size_t body_fixup_count, iree_arena_allocator_t* arena,
+    iree_const_byte_span_t* out_text,
+    const loom_amdgpu_hsaco_text_fixup_t** out_fixups);
 
 #ifdef __cplusplus
 }  // extern "C"

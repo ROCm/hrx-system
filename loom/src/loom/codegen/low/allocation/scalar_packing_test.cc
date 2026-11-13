@@ -7,6 +7,7 @@
 #include "loom/codegen/low/allocation/scalar_packing.h"
 
 #include <algorithm>
+#include <utility>
 #include <vector>
 
 #include "iree/base/internal/arena.h"
@@ -49,8 +50,8 @@ class LowAllocationScalarPackingTest : public ::testing::Test {
   }
 
   iree_status_t Build(std::vector<loom_liveness_interval_t> intervals,
-                      loom_low_allocation_scalar_packing_t* out_packing,
-                      iree_bitmap_t repair_reg_classes = {}) {
+                      iree_bitmap_t repair_reg_classes,
+                      loom_low_allocation_scalar_packing_t* out_packing) {
     std::vector<uint32_t> interval_indices(intervals.size());
     std::vector<loom_value_id_t> value_ids(intervals.size());
     std::vector<loom_low_allocation_unit_liveness_value_t> values(
@@ -84,6 +85,11 @@ class LowAllocationScalarPackingTest : public ::testing::Test {
     return loom_low_allocation_scalar_packing_build(&descriptor_set_, &liveness,
                                                     &order, repair_reg_classes,
                                                     &arena_, out_packing);
+  }
+
+  iree_status_t Build(std::vector<loom_liveness_interval_t> intervals,
+                      loom_low_allocation_scalar_packing_t* out_packing) {
+    return Build(std::move(intervals), {}, out_packing);
   }
 
   // Pool shared by the fixture's planning arena.
@@ -157,7 +163,7 @@ TEST_F(LowAllocationScalarPackingTest, RestrictsPlanToSelectedClasses) {
   iree_bitmap_t classes = {IREE_ARRAYSIZE(classes_), class_words};
   iree_bitmap_set(classes, 1);
   loom_low_allocation_scalar_packing_t packing = {};
-  IREE_ASSERT_OK(Build(intervals, &packing, classes));
+  IREE_ASSERT_OK(Build(intervals, classes, &packing));
   EXPECT_EQ(packing.frontiers_by_reg_class[0], 0u);
   EXPECT_EQ(packing.frontiers_by_reg_class[1], 9u);
   EXPECT_FALSE(iree_bitmap_test(packing.overlapping_intervals, 0));

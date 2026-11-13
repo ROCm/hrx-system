@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library", "loom_cc_test")
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_benchmark", "loom_cc_library", "loom_cc_test")
 
 package(
     default_visibility = ["//visibility:private"],
@@ -102,6 +102,17 @@ loom_cc_library(
     deps = ["//loom/src/loom/ir"],
 )
 
+loom_cc_test(
+    name = "vector_carrier_test",
+    srcs = ["vector_carrier_test.cc"],
+    deps = [
+        ":vector_carrier",
+        "//loom/src/loom/ir",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 loom_cc_library(
     name = "gather",
     srcs = ["gather.c"],
@@ -136,6 +147,7 @@ loom_cc_library(
         ":vector_carrier",
         "//loom/src/loom/codegen/low:source_memory_plan",
         "//loom/src/loom/ir",
+        "//loom/src/loom/ir:facts",
         "//loom/src/loom/ops/scalar",
         "//loom/src/loom/ops/vector",
         "//loom/src/loom/target:legalization",
@@ -204,16 +216,38 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "program_clone",
+    srcs = ["program_clone.c"],
+    hdrs = ["program_clone.h"],
+    visibility = ["//loom/src/loom/target/arch/amd/xdna/aie2p:implementation"],
+    deps = [
+        ":program_source",
+        "//loom/src/loom/codegen/low:loop_execution",
+        "//loom/src/loom/codegen/low:memory_access",
+        "//loom/src/loom/codegen/low:read_only_data",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/global",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/rewrite:materialize",
+        "//loom/src/loom/rewrite:remap",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
     name = "program_source",
     srcs = ["program_source.c"],
     hdrs = ["program_source.h"],
     visibility = ["//loom/src/loom/target/arch/amd/xdna/aie2p:implementation"],
     deps = [
+        "//loom/src/loom/analysis:scc",
         "//loom/src/loom/analysis:symbol_facts",
         "//loom/src/loom/codegen/low:diagnostics",
         "//loom/src/loom/codegen/low:function_requirements",
         "//loom/src/loom/codegen/low:loop_execution",
         "//loom/src/loom/codegen/low:memory_access",
+        "//loom/src/loom/codegen/low:read_only_data",
         "//loom/src/loom/codegen/low:target_binding",
         "//loom/src/loom/error:emitter",
         "//loom/src/loom/error:parameter",
@@ -224,6 +258,39 @@ loom_cc_library(
         "//loom/src/loom/target/arch/amd/xdna/aie2p/descriptors:core",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "program_source_test_util",
+    testonly = True,
+    hdrs = ["program_source_test_util.h"],
+    deps = [
+        ":program_source",
+        "//loom/src/loom/codegen/low:function_requirements",
+        "//loom/src/loom/ir",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_benchmark(
+    name = "program_source_benchmark",
+    srcs = ["program_source_benchmark.cc"],
+    deps = [
+        ":program_source_test_util",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:benchmark_main",
+    ],
+)
+
+loom_cc_test(
+    name = "program_source_test",
+    srcs = ["program_source_test.cc"],
+    deps = [
+        ":program_source_test_util",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 
@@ -257,11 +324,12 @@ loom_cc_library(
         "//loom/src/loom/pass:builder",
         "//loom/src/loom/target:provider",
         "//loom/src/loom/target/arch/amd/xdna/aie2p/descriptors:configuration",
+        "//loom/src/loom/target/arch/amd/xdna/aie2p/descriptors:core",
         "//loom/src/loom/target/arch/amd/xdna/aie2p/descriptors:registry",
         "//loom/src/loom/target/arch/amd/xdna/aie2p/lower",
         "//loom/src/loom/target/arch/amd/xdna/aie2p/ops",
         "//loom/src/loom/target/arch/amd/xdna/aie2p/pipeline:pass",
-        "//loom/src/loom/transforms/scalar:wide_remainder_legalization",
+        "//loom/src/loom/transforms/scalar:wide_division_legalization",
         "//runtime/src/iree/base",
     ],
 )

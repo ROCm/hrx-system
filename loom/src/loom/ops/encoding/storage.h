@@ -45,9 +45,10 @@ iree_status_t loom_encoding_register_storage_family(loom_context_t* context);
 
 // Interns a canonical static encoding equivalent to |summary| when its
 // semantics can be represented without losing information. Exact named specs
-// reuse their existing module ID. Exact dense/strided layouts and physical
-// storage compositions are reconstructed from their facts. Other summaries
-// leave |out_encoding_id| zero.
+// reuse their existing module ID, including nested layout specifications.
+// Known built-in dense/strided families and physical-storage compositions are
+// reconstructed from complete facts. Address geometry alone does not establish
+// a family identity. Other summaries leave |out_encoding_id| zero.
 //
 // This mutates the module encoding table and is intended for specialization
 // transforms that need a durable static type attachment after the defining SSA

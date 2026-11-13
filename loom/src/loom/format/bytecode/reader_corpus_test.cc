@@ -233,7 +233,7 @@ class ReaderCorpusTest : public ::testing::Test {
   loom_bytecode_read_result_t ReadModule(
       const std::vector<uint8_t>& bytes,
       const loom_low_repr_environment_t& low_repr_environment,
-      loom_module_t** out_module, std::vector<std::string>* error_ids) {
+      std::vector<std::string>* error_ids, loom_module_t** out_module) {
     loom_bytecode_read_options_t options = {
         .diagnostic_sink =
             {
@@ -245,8 +245,8 @@ class ReaderCorpusTest : public ::testing::Test {
     loom_bytecode_read_result_t result = {0};
     IREE_EXPECT_OK(loom_bytecode_read_module(
         iree_make_const_byte_span(bytes.data(), bytes.size()),
-        IREE_SV("corpus.loombc"), &context_, &block_pool_, &options, &result,
-        out_module, iree_allocator_system()));
+        IREE_SV("corpus.loombc"), &context_, &block_pool_, &options,
+        iree_allocator_system(), &result, out_module));
     return result;
   }
 
@@ -283,13 +283,15 @@ TEST_F(ReaderCorpusTest, TextCorpusBytecodeRoundTripsCanonically) {
       continue;
     }
     std::string source_text = Print(module);
+    const auto read_spaces = loom_region_read_memory_spaces(module->body);
+    const auto write_spaces = loom_region_written_memory_spaces(module->body);
     loom_module_free(module);
     ++supported_count;
 
     loom_module_t* read_module = nullptr;
     std::vector<std::string> error_ids;
     loom_bytecode_read_result_t result =
-        ReadModule(first, low_repr_environment_, &read_module, &error_ids);
+        ReadModule(first, low_repr_environment_, &error_ids, &read_module);
     EXPECT_EQ(result.error_count, 0u)
         << (error_ids.empty() ? "" : error_ids.front());
     EXPECT_TRUE(error_ids.empty())
@@ -297,6 +299,9 @@ TEST_F(ReaderCorpusTest, TextCorpusBytecodeRoundTripsCanonically) {
     ASSERT_NE(read_module, nullptr);
 
     EXPECT_EQ(source_text, Print(read_module));
+    EXPECT_EQ(loom_region_read_memory_spaces(read_module->body), read_spaces);
+    EXPECT_EQ(loom_region_written_memory_spaces(read_module->body),
+              write_spaces);
 
     std::vector<uint8_t> second;
     IREE_EXPECT_OK(WriteModule(read_module, low_repr_environment_, &second));
@@ -336,7 +341,7 @@ low.func.def target<test.low.core>(@test_target) @add(
   loom_module_t* reordered_module = nullptr;
   std::vector<std::string> error_ids;
   loom_bytecode_read_result_t result =
-      ReadModule(first, kReorderedEnvironment, &reordered_module, &error_ids);
+      ReadModule(first, kReorderedEnvironment, &error_ids, &reordered_module);
   ASSERT_EQ(result.error_count, 0u)
       << (error_ids.empty() ? "" : error_ids.front());
   ASSERT_TRUE(error_ids.empty())
@@ -357,7 +362,7 @@ low.func.def target<test.low.core>(@test_target) @add(
   loom_module_t* restored_module = nullptr;
   error_ids.clear();
   result =
-      ReadModule(second, low_repr_environment_, &restored_module, &error_ids);
+      ReadModule(second, low_repr_environment_, &error_ids, &restored_module);
   ASSERT_EQ(result.error_count, 0u)
       << (error_ids.empty() ? "" : error_ids.front());
   ASSERT_TRUE(error_ids.empty())

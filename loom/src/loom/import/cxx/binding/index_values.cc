@@ -112,7 +112,7 @@ void require_index_components(cxx::TranslationUnit& unit,
     case ValueKind::Record: {
       const auto& record = static_cast<const RecordPartition&>(partition);
       for (const auto& member : record.members) {
-        require_index_components(unit, diagnostics, types, member.field->type(),
+        require_index_components(unit, diagnostics, types, member.type(),
                                  *member.partition, owner, role,
                                  unsigned_component_mask, component_index);
       }
@@ -344,8 +344,8 @@ std::optional<AddressIntrinsic> AddressIntrinsic::resolve(
                        : nullptr;
     if (!record || record->members.size() != 2 ||
         record->component_count != 2 ||
-        !types.is_index(record->members[0].field->type(), owner) ||
-        !types.is_index(record->members[1].field->type(), owner)) {
+        !types.is_index(record->members[0].type(), owner) ||
+        !types.is_index(record->members[1].type(), owner)) {
       diagnostics.reject(unit, owner,
                          "index.divrem requires a two-index result record");
     }

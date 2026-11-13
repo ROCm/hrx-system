@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//build_tools/bazel:executable.bzl", "iree_executable_test")
+load("//build_tools/bazel:executable.bzl", "iree_tool_test")
 load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
 load(
     "//loom/build_tools/bazel:defs.bzl",
@@ -64,7 +64,7 @@ loom_kernel_binary(
     visibility = ["//visibility:private"],
 )
 
-iree_executable_test(
+iree_tool_test(
     name = "copy_i32_test",
     src = "//third_party:spirv_val",
     args = [

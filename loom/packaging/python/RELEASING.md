@@ -2,9 +2,10 @@
 
 An SDK release publishes `hrx-loom` for Linux x86-64 and Windows x86-64 from one
 reviewed source revision. Each platform has Release, Tracy, Debug, and ASAN
-wheels. GitHub Releases receives all eight wheels and `SHA256SUMS`; PyPI receives
-the two Release wheels. Publication uses the exact artifacts that passed the
-installed tests.
+wheels. GitHub Releases receives all eight wheels, standalone `loom-serve` and
+`amdf-info` archives for each platform, and `SHA256SUMS`. Stable releases also
+publish the two Release wheels to PyPI. Publication uses the exact artifacts
+that passed the installed tests.
 
 This guide covers release ownership and maintenance. The [SDK build guide](README.md)
 covers local builds, native profiles, and installed tests. Commands below run
@@ -16,7 +17,8 @@ from the repository root with Python 3.12 or newer; GitHub commands use `gh`.
 | --- | --- | --- |
 | Ordinary PR / main CI | Release | Workflow artifacts only |
 | Manual SDK workflow | Requested profiles | Workflow artifacts only |
-| Release tag or manual release workflow on that tag | Release, Tracy, Debug, ASAN | GitHub Releases, then PyPI |
+| Prerelease tag or manual release workflow on that tag | Release, Tracy, Debug, ASAN | Public GitHub prerelease |
+| Stable tag or manual release workflow on that tag | Release, Tracy, Debug, ASAN | GitHub Releases, then PyPI |
 
 The shared [artifact producer](../../../.github/workflows/build_loom_sdk_artifacts.yml)
 runs once per requested profile on Linux. It builds and tests the Linux wheel,
@@ -31,17 +33,35 @@ uses one Windows job to qualify every requested profile. Windows qualification
 invokes no build tool. Existing PR sanitizer jobs retain their source-test
 coverage; they do not produce instrumented SDK wheels.
 
-The publication workflow consumes only `loom-sdk-wheel-*` artifacts. The
-`loom-sdk-inputs-windows-*` artifacts contain inputs awaiting native qualification
-and are not publication artifacts. Build and qualification artifacts are retained
-for 14 days.
+The publication workflow consumes `loom-sdk-wheel-*` and
+`loom-standalone-archive-*` artifacts. The `loom-sdk-inputs-windows-*` artifacts
+contain inputs awaiting native qualification and are not publication artifacts.
+Build and qualification artifacts are retained for 14 days.
+
+The standalone `amdf-info` archive contains the exact executable from the Release
+wheel. Destination-OS qualification runs help, text inventory, and JSON inventory
+with only that executable in its directory, an empty `PATH`, and no SDK loader
+overrides before exporting the archive. It adds no build or Python installation.
+The executable embeds libamdf; Linux retains the wheel's glibc baseline, and
+Windows retains its Microsoft C runtime prerequisite. Device activation remains
+separate hardware qualification. CI bootstrap consumers can pin a release archive
+and its SHA-256 without configuring the repository's build graph.
 
 ## Publishing account setup
 
 The [release workflow](../../../.github/workflows/release_loom_sdk.yml) uses the
-repository's `GITHUB_TOKEN` to create or complete the GitHub release. Its PyPI
-job runs in the `pypi` GitHub environment and uses OIDC with attestations through
-the official PyPA publishing action. It does not require a stored PyPI API token.
+repository's `GITHUB_TOKEN` to create or complete a draft GitHub release and
+publish it after its asset set is complete. Its PyPI job runs in the `pypi`
+GitHub environment and uses OIDC with attestations through the official PyPA
+publishing action. It does not require a stored PyPI API token.
+
+Repository owners enable
+[immutable releases](https://docs.github.com/en/code-security/concepts/supply-chain-security/immutable-releases)
+before creating the first release governed by this process. GitHub applies the
+setting only to releases created after it is enabled. Drafts remain repairable;
+publication then locks the release's tag and assets. The workflow therefore
+attaches and verifies every artifact while the release is a draft and performs
+publication as its final GitHub mutation.
 
 The PyPI trusted publisher configuration matches these fields:
 
@@ -73,6 +93,12 @@ matching `v`-prefixed Git tag. A `.devN` version is buildable but cannot pass th
 release gate. The gate also requires a catalog association, such as
 `github:ROCm/hrx-loom-library@v1.2.3`.
 
+The main branch carries the next planned SDK version as `X.Y.Z.dev0`. Advancing
+it after a stable release prevents ordinary CI artifacts from reusing the
+published version for different bytes. Its catalog remains an immutable commit
+and can advance independently as model changes qualify. A frozen release line
+replaces the development version with its first candidate version.
+
 The catalog supplies the default `loom-fetch --list` and picker contents.
 Several SDK versions may share a catalog reference when its models are qualified
 for those consumers. The identity checker validates the reference's syntax; it
@@ -91,15 +117,27 @@ python loom/packaging/python/release.py \
 
 Repeating without `--dry-run` edits only the named JSON. The release-preparation
 PR includes that change and any updates to [PYPI_README.md](PYPI_README.md), the
-package description embedded in every wheel. Review and CI establish the source
-revision to release; the preparation helper creates neither a commit nor a tag.
+package description embedded in every wheel. Its pull request description also
+contains the exact version-marked editorial section selected for publication.
+The [release-note authoring contract](release_notes/README.md) starts from the
+previous public tag and candidate commit, audits migrations before feature
+prose, and records only evidence-backed outcomes and notable changes. A missing,
+ambiguous, stale, empty, or placeholder-bearing section cannot publish.
+
+Review and CI establish the source revision to release. The release tag points
+directly at the commit GitHub records as the version-bump pull request's merge
+result; the publisher resolves the pull request from that commit rather than
+accepting an independently supplied description. The preparation helper creates
+neither a commit nor a tag.
 
 Ordinary PR CI covers the Release SDK. To qualify the other profiles on a branch
 named `sdk-release-preparation`:
 
-```sh
-gh workflow run build_loom_sdk.yml --repo ROCm/hrx-system \
-  --ref sdk-release-preparation -f 'profiles=["Tracy","Debug","ASAN"]'
+```bash
+for profile in Tracy Debug ASAN; do
+  gh workflow run build_loom_sdk.yml --repo ROCm/hrx-system \
+    --ref sdk-release-preparation -f profile="$profile"
+done
 ```
 
 This workflow builds and tests artifacts without publishing them. The installed
@@ -107,6 +145,50 @@ tests cover command availability, C++ import, HTTP and offline fixture fetching,
 native inference, and independent server shutdown. Native Windows additionally
 exercises real console control events. The [build guide](README.md#build-and-test)
 describes local execution of the same checks.
+
+## Run a release-candidate cycle
+
+A release line isolates candidate stabilization from continued work on `main`.
+Create `release/vX.Y` from the reviewed main revision selected for the release,
+then target the identity-preparation pull request at that branch. The repository
+tag and release line can be shared by additional HRX packages in the future;
+this workflow publishes the Loom SDK assets. The release branch owns the
+candidate and stable identities, while ordinary development continues on
+`main`.
+
+The first candidate sets `package-version` to `X.Y.Zrc1` and names the
+coordinated library tag
+`github:ROCm/hrx-loom-library@vX.Y.Zrc1`. Build and qualify the SDK candidate
+before that tag exists, then use the library's SDK qualification workflow to
+pin the exact candidate wheel and source revision. After its host and hardware
+gates pass, merge the library pin and run **Loom Library / Release**. That
+workflow creates the same-version library tag, proves that the candidate SDK's
+implicit `loom-fetch --list` path resolves the tagged admitted catalog, and
+publishes the empty immutable library release.
+
+Only after that catalog release is immutable, tag the merged HRX release-line
+commit as `vX.Y.Zrc1`. The SDK workflow requires the matching immutable catalog
+release before any SDK release mutation, then publishes a public GitHub
+prerelease with direct wheel and standalone-executable installation instructions.
+It does not enter the PyPI environment or stage a PyPI upload.
+
+Feedback fixes land on `main` first and are then cherry-picked onto the release
+line. Each changed candidate increments the package version and tag (`rc2`,
+`rc3`, and so on), which preserves the exact bytes testers used and keeps every
+feedback report attributable to one source revision. Unrelated features remain
+on `main`; the release line takes only fixes needed to qualify the selected
+release.
+
+When the candidate is accepted, a final identity pull request on the same
+release line changes both `package-version` to `X.Y.Z` and `model-catalog` to
+the coordinated `github:ROCm/hrx-loom-library@vX.Y.Z` tag. Build the stable SDK
+candidate, qualify its exact wheel and source revision through the library pin
+workflow, and publish the immutable stable library release before creating the
+HRX tag. The stable tag then runs the complete qualification again, publishes a
+normal GitHub release, and publishes its two Release wheels to PyPI. Promoting
+GitHub metadata or reusing candidate artifacts cannot substitute for the stable
+build: the stable version has its own library association, tag, wheel metadata,
+checksums, and attestations.
 
 ## Publish the reviewed tag
 
@@ -123,26 +205,40 @@ can also be selected explicitly:
 gh workflow run release_loom_sdk.yml --repo ROCm/hrx-system --ref v1.2.3
 ```
 
-This is a publishing workflow. It checks the tag against the committed identity,
-builds all four profiles for both platforms, and requires every installed test
-to pass. The bundle job verifies the complete set and writes `SHA256SUMS`.
-Both publication jobs verify the bundle again and consume its bytes without
-recompiling. GitHub publication completes before PyPI publication starts.
+This is a publishing workflow. It checks the tag against the committed identity
+and requires the identity's same-version catalog tag to be an immutable public
+library release. It builds all four profiles for both platforms and requires
+every installed test to pass. The bundle job verifies the complete set and
+writes `SHA256SUMS`.
+Publication consumes those bytes without recompiling. The GitHub job creates or
+resumes a draft, verifies its exact asset inventory and SHA-256 digests, uploads
+only missing assets, and publishes only after the set is complete. GitHub
+publication completes before the stable-only PyPI publication starts.
 
-GitHub publication writes a compact SDK description naming the PyPI install,
-attached native profiles, and checksum document. The body comes from the
-committed SDK identity and artifact contract, so the first release cannot expand
-into the repository's complete pull-request history.
+GitHub publication copies the marked editorial section from the exact merged
+version-bump pull request, followed by a generated appendix naming the
+installation path, attached native profiles, standalone executables, checksum
+document, and qualification shape. The body records the source pull request,
+merge commit, version, and editorial digest. Stable releases install from PyPI;
+prereleases install their attached Release wheel directly.
+
+A draft retry resolves the source pull request again and requires the complete
+composed body to match. After publication, the immutable release body is the
+authoritative snapshot: retries validate its source provenance, editorial
+digest, and generated appendix without depending on the still-editable pull
+request description.
 
 The normal filenames have no local-version suffix; instrumented filenames use
 `+tracy`, `+debug`, or `+asan`. Linux release wheels carry the audited
-`manylinux_2_39_x86_64` tag; Windows wheels carry `win_amd64`. Prerelease versions
-create GitHub prereleases. All profiles install the same distribution, so users
-choose an instrumented wheel explicitly or use separate virtual environments.
+`manylinux_2_39_x86_64` tag; Windows wheels carry `win_amd64`. Versions containing
+`aN`, `bN`, or `rcN` create public GitHub prereleases and never publish to PyPI.
+All profiles install the same distribution, so users choose an instrumented
+wheel explicitly or use separate virtual environments.
 
-A complete release has eight wheels and `SHA256SUMS` on GitHub, and the two
-normal wheels on PyPI. From a checkout of the release tag, a downloaded complete
-bundle can be checked without network access:
+A complete GitHub release has eight wheels, four standalone executable archives,
+and `SHA256SUMS`. A stable release additionally has the two normal wheels on PyPI.
+From a checkout of the release tag, a downloaded complete bundle can be checked
+without network access:
 
 ```sh
 python -m build_tools.ci.loom_release verify \
@@ -168,26 +264,31 @@ The retry behavior is deliberate:
 
 | Condition | Result |
 | --- | --- |
-| Matching GitHub assets already exist | Download and compare their SHA-256, then upload only missing assets. |
+| A matching GitHub draft exists | Require its body to match the merged version-bump pull request, compare API-reported SHA-256 digests, upload only missing assets, then publish it. |
+| A complete matching GitHub release is already public | Validate its self-contained editorial provenance and exact assets, then accept it without another release mutation. |
+| The coordinated library release is absent, mutable, or mismatched | Fail before creating or changing the SDK release. |
 | Matching normal wheels already exist on PyPI | Compare published hashes and yanked state, then upload only missing wheels. |
-| Existing bytes differ, a wheel is unexpected, or a PyPI wheel is yanked | Fail; changed artifacts need a new version. |
-| A GitHub asset is incompletely uploaded, or release draft/prerelease metadata conflicts | Fail for release-owner review before further uploads. |
+| Existing bytes differ, an asset is unexpected, or a PyPI wheel is yanked | Fail; changed artifacts need a new version. |
+| A public GitHub release is incomplete | Fail; an immutable public release cannot be repaired, so the corrected release needs a new version. |
+| A GitHub asset is incompletely uploaded, or release tag/channel metadata conflicts | Fail for release-owner review before further uploads. |
 | Authentication, rate limiting, or a service fails | Report the error; retry after the cause is resolved. |
 
-No publication operation overwrites an existing asset. After the 14-day workflow
-artifact retention expires, a new build must produce byte-identical artifacts to
-resume a partial release. Different bytes require a new version. A new workflow
-dispatch starts new producers; it is not the same operation as rerunning failed
-publication jobs.
+No publication operation overwrites an existing asset, and no operation mutates
+a completed public release. After the 14-day workflow artifact retention
+expires, a new build must produce byte-identical artifacts to resume a partial
+draft. Different bytes require a new version. A new workflow dispatch starts new
+producers; it is not the same operation as rerunning failed publication jobs.
 
 ## Maintaining the release machinery
 
 | Concern | Source of truth |
 | --- | --- |
 | Version, catalog association, and package description | [version.json](version.json), [PYPI_README.md](PYPI_README.md) |
+| Editorial release-note contract and pull request template | [release_notes/README.md](release_notes/README.md), [release_notes/TEMPLATE.md](release_notes/TEMPLATE.md) |
 | Wheel contents, native profiles, and Linux ABI audit | [BUILD.bazel](BUILD.bazel), [defs.bzl](defs.bzl), [native.bzl](native.bzl), [manylinux.bzl](manylinux.bzl) |
 | Compiler, runner image, and cross-SDK pins | [Artifact workflow](../../../.github/workflows/build_loom_sdk_artifacts.yml), [Windows setup](../../../.github/scripts/setup_windows_cross.sh), [SDK manifest](../../../.github/scripts/windows-sdk-channel.json) |
 | Artifact export and installed qualification | [loom_wheel.py](../../../build_tools/ci/loom_wheel.py), [installed oracle](../../src/loom/tooling/target/cpu/serve/wheel_model_card_test.py) |
+| Standalone executables | [loom_server.py](../../../build_tools/ci/loom_server.py), [amdf_info_archive.py](../../../build_tools/ci/amdf_info_archive.py) |
 | Identity, bundle checks, and publication retries | [release.py](release.py), [loom_release.py](../../../build_tools/ci/loom_release.py), [release workflow](../../../.github/workflows/release_loom_sdk.yml) |
 
 A compiler, sysroot, native-library, or packaging change is qualified through

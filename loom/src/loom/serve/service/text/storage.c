@@ -65,6 +65,24 @@ iree_status_t loom_serve_text_storage_initialize(
     }
   }
   IREE_RETURN_IF_ERROR(status);
+  for (iree_host_size_t i = 0; i < LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT &&
+                               iree_status_is_ok(status);
+       ++i) {
+    const uint8_t* record =
+        out_storage->bytes[LOOM_SERVE_TEXT_STORAGE_ALLOCATIONS].data + i * 24;
+    loom_serve_text_allocation_t* allocation = &out_storage->allocations[i];
+    allocation->length = iree_unaligned_load_le_u64(record);
+    allocation->alignment = iree_unaligned_load_le_u64(record + 8);
+    allocation->clear_length = iree_unaligned_load_le_u64(record + 16);
+    if (allocation->length > INT64_MAX ||
+        allocation->clear_length > allocation->length ||
+        !allocation->alignment ||
+        !iree_is_power_of_two_uint64(allocation->alignment)) {
+      status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "invalid source allocation record %zu", i);
+    }
+  }
+  IREE_RETURN_IF_ERROR(status);
   const uint8_t* geometry =
       out_storage->bytes[LOOM_SERVE_TEXT_STORAGE_GEOMETRY].data;
   const uint64_t block_size = iree_unaligned_load_le_u64(geometry);
@@ -88,13 +106,9 @@ iree_status_t loom_serve_text_storage_initialize(
   const uint64_t slot_stride = iree_unaligned_load_le_u64(geometry + 40);
   const uint64_t slot_length = iree_unaligned_load_le_u64(geometry + 48);
   const uint64_t slot_count = iree_unaligned_load_le_u64(geometry + 56);
-  const uint8_t* arena =
-      out_storage->bytes[LOOM_SERVE_TEXT_STORAGE_ALLOCATIONS].data + 24;
-  const uint64_t arena_length = iree_unaligned_load_le_u64(arena);
-  const uint64_t clear_length = iree_unaligned_load_le_u64(arena + 16);
+  const uint64_t arena_length = out_storage->allocations[1].length;
   if (!slot_length || slot_stride < slot_length || slot_count < row_count ||
-      slot_count > UINT32_MAX || clear_length > arena_length ||
-      arena_length > INT64_MAX || slot_origin > arena_length ||
+      slot_count > UINT32_MAX || slot_origin > arena_length ||
       slot_length > arena_length - slot_origin ||
       slot_count - 1 >
           (arena_length - slot_origin - slot_length) / slot_stride) {
@@ -140,9 +154,8 @@ iree_status_t loom_serve_text_storage_initialize(
   // records. Optional unallocated tables have no upload or map consumers.
   const iree_host_size_t table_allocations[] = {3, 10};
   for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(table_allocations); ++i) {
-    const uint64_t length = iree_unaligned_load_le_u64(
-        out_storage->bytes[LOOM_SERVE_TEXT_STORAGE_ALLOCATIONS].data +
-        table_allocations[i] * 24);
+    const uint64_t length =
+        out_storage->allocations[table_allocations[i]].length;
     if (!length) {
       continue;
     }
@@ -192,12 +205,9 @@ iree_status_t loom_serve_text_storage_initialize(
       return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                               "cache page byte size is not representable");
     }
-    const uint64_t length = iree_unaligned_load_le_u64(
-        out_storage->bytes[LOOM_SERVE_TEXT_STORAGE_ALLOCATIONS].data +
-        allocation * 24);
-    const uint64_t clear_length = iree_unaligned_load_le_u64(
-        out_storage->bytes[LOOM_SERVE_TEXT_STORAGE_ALLOCATIONS].data +
-        allocation * 24 + 16);
+    const uint64_t length = out_storage->allocations[allocation].length;
+    const uint64_t clear_length =
+        out_storage->allocations[allocation].clear_length;
     const uint64_t blocks = pool_capacity / block_size;
     if (origin < clear_length || origin > length ||
         count - 1 > (length - origin) / stride ||
@@ -214,6 +224,7 @@ iree_status_t loom_serve_text_storage_initialize(
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "cache region %zu overlaps private storage", i);
     }
+    out_storage->allocations[allocation].cache = true;
     out_storage->regions[i] = (loom_serve_text_cache_region_t){
         .allocation = allocation,
         .blocks = {origin, count, stride, block_bytes}};
@@ -233,7 +244,7 @@ iree_status_t loom_serve_text_storage_plan_snapshot(
     iree_hal_buffer_t* const* private_views, bool include_carry,
     uint32_t block_count, const uint32_t* blocks,
     iree_allocator_t host_allocator, iree_host_size_t* out_count,
-    loom_serve_snapshot_range_t** out_ranges) {
+    loom_runtime_snapshot_range_t** out_ranges) {
   *out_count = 0;
   *out_ranges = NULL;
   include_carry &= storage->carry_stride != 0;
@@ -255,10 +266,10 @@ iree_status_t loom_serve_text_storage_plan_snapshot(
   iree_host_size_t allocation_size = 0, runs_offset = 0;
   IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
       0, &allocation_size,
-      IREE_STRUCT_FIELD(capacity, loom_serve_snapshot_range_t, NULL),
+      IREE_STRUCT_FIELD(capacity, loom_runtime_snapshot_range_t, NULL),
       IREE_STRUCT_FIELD(run_count, loom_serve_text_storage_block_run_t,
                         &runs_offset)));
-  loom_serve_snapshot_range_t* ranges = NULL;
+  loom_runtime_snapshot_range_t* ranges = NULL;
   IREE_RETURN_IF_ERROR(
       iree_allocator_malloc(host_allocator, allocation_size, (void**)&ranges));
   loom_serve_text_storage_block_run_t* runs =
@@ -274,20 +285,20 @@ iree_status_t loom_serve_text_storage_plan_snapshot(
   iree_host_size_t count = 0;
   for (iree_host_size_t i = 0; i < 5; ++i) {
     if (private_views[i]) {
-      ranges[count++] = (loom_serve_snapshot_range_t){
+      ranges[count++] = (loom_runtime_snapshot_range_t){
           1, iree_hal_buffer_byte_offset(private_views[i]),
           iree_hal_buffer_byte_length(private_views[i])};
     }
   }
   if (include_carry) {
-    ranges[count++] = (loom_serve_snapshot_range_t){
+    ranges[count++] = (loom_runtime_snapshot_range_t){
         6, carry_index * storage->carry_stride, storage->carry_stride};
   }
   for (iree_host_size_t r = 0; r < storage->region_count; ++r) {
     const loom_serve_text_cache_region_t* region = &storage->regions[r];
     for (iree_host_size_t plane = 0; plane < region->blocks.count; ++plane) {
       for (uint32_t run = 0; run < run_count; ++run) {
-        ranges[count++] = (loom_serve_snapshot_range_t){
+        ranges[count++] = (loom_runtime_snapshot_range_t){
             region->allocation,
             region->blocks.origin + plane * region->blocks.stride +
                 runs[run].first * region->blocks.block_bytes,

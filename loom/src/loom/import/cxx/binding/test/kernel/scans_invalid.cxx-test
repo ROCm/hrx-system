@@ -1,0 +1,78 @@
+// RUN: verify
+#include <loomcxx/kernel.h>
+
+LOOM_INLINE unsigned wrong_domain(unsigned value) {
+  // ERROR@+1: LOWERING/059 "kernel collective combining kind does not match the value type"
+  return loom::kernel::workgroup::scan::addf(value);
+}
+
+// ====
+#include <loomcxx/kernel.h>
+
+LOOM_INLINE unsigned wrong_signedness(unsigned value) {
+  // ERROR@+1: LOWERING/059 "kernel collective signedness does not match the combining kind"
+  return loom::kernel::subgroup::scan::minsi(value);
+}
+
+// ====
+#include <loomcxx/kernel.h>
+
+LOOM_INLINE bool scan_predicate(bool value) {
+  // ERROR@+1: LOWERING/059 "kernel collective combining kind does not match the value type"
+  return loom::kernel::workgroup::scan::andi(value);
+}
+
+// ====
+#include <loomcxx/kernel.h>
+
+LOOM_INLINE int invalid_mode(int value) {
+  // ERROR@+1: LOWERING/059 "kernel scan selector is not a permitted enum value"
+  return loom::kernel::subgroup::scan::addi<static_cast<loom::kernel::scan_mode>(2)>(value);
+}
+
+// ====
+#include <loomcxx/kernel.h>
+
+LOOM_INLINE int invalid_direction(int value) {
+  // ERROR@+1: LOWERING/059 "kernel scan selector is not a permitted enum value"
+  return loom::kernel::workgroup::scan::addi<loom::kernel::scan_mode::inclusive, static_cast<loom::kernel::scan_direction>(255)>(value);
+}
+
+// ====
+#include <loomcxx/kernel.h>
+
+LOOM_INLINE int stride_without_size(int value) {
+  // ERROR@+1: LOWERING/059 "kernel collective cluster stride requires a cluster size"
+  return loom::kernel::subgroup::scan::addi<loom::kernel::scan_mode::inclusive, loom::kernel::scan_direction::forward, 0, 2>(value);
+}
+
+// ====
+#include <loomcxx/kernel.h>
+
+LOOM_INLINE int oversized_cluster(int value) {
+  // ERROR@+1: LOWERING/059 "kernel collective cluster arguments must be unsigned 32-bit constants"
+  return loom::kernel::subgroup::scan::addi<loom::kernel::scan_mode::inclusive, loom::kernel::scan_direction::forward, 0x100000000ull>(value);
+}
+
+// ====
+// ERROR@+1: LOWERING/059 "unsupported kernel collective combining kind"
+[[loom::op("kernel.workgroup.scan", "unknown")]] float scan(float);
+
+// ====
+// ERROR@+1: LOWERING/059 "kernel collective requires matching scalar or rank-one vector value and result types"
+[[loom::op("kernel.subgroup.scan", "addf")]] float scan(int);
+
+// ====
+// ERROR@+1: LOWERING/059 "kernel collective declaration has the wrong operand count"
+[[loom::op("kernel.workgroup.scan", "addi")]] int scan(int, int);
+
+// ====
+// ERROR@+1: LOWERING/059 "kernel scan templates require leading mode and direction arguments"
+[[loom::op("kernel.workgroup.scan", "addi")]] int scan(int);
+
+// ====
+#include <loomcxx/kernel.h>
+int outside_kernel(int value) {
+  // ERROR@+1: LOWERING/059 "kernel intrinsic requires a kernel or inline helper"
+  return loom::kernel::workgroup::scan::addi(value);
+}

@@ -23,6 +23,7 @@
 #include "loom/target/arch/amdgpu/lower/materializers.h"
 #include "loom/target/arch/amdgpu/lower/matrix_fragment_repack_packed_b16.h"
 #include "loom/target/arch/amdgpu/lower/subgroup.h"
+#include "loom/target/arch/amdgpu/lower/topology.h"
 #include "loom/target/arch/amdgpu/lower/types.h"
 #include "loom/target/arch/amdgpu/matrix/contract.h"
 #include "loom/util/fact_table.h"
@@ -210,6 +211,10 @@ typedef struct loom_amdgpu_result_to_lhs_bf16_projection_t {
   uint8_t source_lane_group_right_shift;
   // Number of low source-value bits exchanged with lane bits.
   uint8_t transpose_bit_count;
+  // Paired destinations request the same source register and local lane.
+  bool half_wave_request_invariant;
+  // Destination lanes whose source owner lies in the other 32-lane half.
+  uint64_t cross_half_lane_mask;
   // Generated native source-owner movement implemented by this projection.
   const loom_native_transition_facts_t* native_transition_facts;
 } loom_amdgpu_result_to_lhs_bf16_projection_t;
@@ -530,6 +535,7 @@ static bool
 loom_amdgpu_fragment_repack_select_result_to_lhs_bf16_bpermute_strategy(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_amdgpu_matrix_fragment_layout_t* layout,
+    const loom_amdgpu_target_facts_t* target_facts,
     loom_amdgpu_fragment_repack_plan_t* plan) {
   const uint8_t projection_ordinal =
       kResultToLhsBf16ProjectionOrdinals[layout->kind];
@@ -563,6 +569,29 @@ loom_amdgpu_fragment_repack_select_result_to_lhs_bf16_bpermute_strategy(
       .and_mask = projection->source_lane_group_and_mask,
       .right_shift = projection->source_lane_group_right_shift,
   };
+  plan->gather_kind = LOOM_AMDGPU_FRAGMENT_REPACK_GATHER_DIRECT;
+  plan->cross_half_lane_mask = 0;
+  if (projection->cross_half_lane_mask != 0 &&
+      !loom_amdgpu_target_supports_direct_subgroup_width(
+          target_facts, layout->wave_size, layout->wave_size)) {
+    static const loom_amdgpu_descriptor_ref_t kHalfWaveExchangeRefs[] = {
+        LOOM_AMDGPU_DESCRIPTOR_REF_V_PERMLANE64_B32,
+        LOOM_AMDGPU_DESCRIPTOR_REF_V_CNDMASK_B32,
+        LOOM_AMDGPU_DESCRIPTOR_REF_S_MOV_B32,
+    };
+    if (!loom_amdgpu_descriptor_set_has_all_refs(
+            descriptor_set, kHalfWaveExchangeRefs,
+            IREE_ARRAYSIZE(kHalfWaveExchangeRefs))) {
+      plan->reason = LOOM_AMDGPU_FRAGMENT_REPACK_REASON_TARGET_PACKETS;
+      plan->strategy = LOOM_AMDGPU_FRAGMENT_REPACK_STRATEGY_DIAGNOSTIC;
+      return false;
+    }
+    plan->cross_half_lane_mask = projection->cross_half_lane_mask;
+    plan->gather_kind =
+        projection->half_wave_request_invariant
+            ? LOOM_AMDGPU_FRAGMENT_REPACK_GATHER_EXCHANGE_RESULT
+            : LOOM_AMDGPU_FRAGMENT_REPACK_GATHER_EXCHANGE_SOURCE;
+  }
 
   if (loom_amdgpu_fragment_repack_select_adjacent_source_lane_packing(
           descriptor_set, plan)) {
@@ -667,7 +696,7 @@ static bool loom_amdgpu_fragment_repack_select_target_strategy(
       return true;
     }
     if (loom_amdgpu_fragment_repack_select_result_to_lhs_bf16_bpermute_strategy(
-            descriptor_set, layout, plan)) {
+            descriptor_set, layout, target_facts, plan)) {
       return true;
     }
   }
@@ -953,20 +982,19 @@ static iree_status_t loom_amdgpu_emit_fragment_repack_lane_group_byte_base(
       *out_low_byte_base, low_lane_div_byte_base, vgpr_type, out_low_byte_base);
 }
 
-static iree_status_t loom_amdgpu_emit_fragment_repack_bpermute_candidates(
-    loom_low_lower_context_t* context, const loom_op_t* source_op,
-    const loom_low_lower_resolved_descriptor_t* bpermute_descriptor,
-    const loom_value_id_t* source_registers, uint16_t source_register_count,
-    loom_value_id_t low_source_byte_offset, uint32_t static_byte_offset,
-    loom_type_t vgpr_type, loom_value_id_t* out_low_candidates) {
-  for (uint16_t i = 0; i < source_register_count; ++i) {
-    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_subgroup_bpermute_register(
-        context, source_op, bpermute_descriptor, low_source_byte_offset,
-        static_byte_offset, source_registers[i], vgpr_type,
-        &out_low_candidates[i]));
-  }
-  return iree_ok_status();
-}
+// Emission state shared by every gather in one selected fragment transition.
+typedef struct loom_amdgpu_fragment_repack_gather_t {
+  // Direct gather packet for the selected target.
+  loom_low_lower_resolved_descriptor_t bpermute_descriptor;
+  // Whole-wave register exchange, populated only for split gathers.
+  loom_low_lower_resolved_descriptor_t exchange_descriptor;
+  // Predicate selecting owners in the other 32-lane half, or INVALID.
+  loom_value_id_t cross_half_mask;
+  // Selected direct, source-exchange, or result-exchange transport.
+  uint16_t kind;
+  // Spacing between prepared register candidates after the local transpose.
+  uint16_t register_stride;
+} loom_amdgpu_fragment_repack_gather_t;
 
 static bool loom_amdgpu_fragment_repack_packed_pair_is_fused(
     const loom_amdgpu_fragment_repack_plan_t* plan) {
@@ -1069,14 +1097,17 @@ static iree_status_t loom_amdgpu_emit_fragment_repack_bpermute_element(
     const loom_value_id_t* source_registers, uint16_t source_register_count,
     const loom_value_id_t* source_register_masks,
     loom_value_id_t low_source_byte_offset, uint32_t static_byte_offset,
-    loom_type_t vgpr_type, loom_value_id_t* out_low_element) {
+    uint16_t source_register_stride, loom_type_t vgpr_type,
+    loom_value_id_t* out_low_element) {
   *out_low_element = LOOM_VALUE_ID_INVALID;
   loom_value_id_t selected[LOOM_AMDGPU_MAX_SCALARIZED_32BIT_LANES] = {
       LOOM_VALUE_ID_INVALID};
-  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fragment_repack_bpermute_candidates(
-      context, source_op, bpermute_descriptor, source_registers,
-      source_register_count, low_source_byte_offset, static_byte_offset,
-      vgpr_type, selected));
+  for (uint16_t i = 0; i < source_register_count; ++i) {
+    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_subgroup_bpermute_register(
+        context, source_op, bpermute_descriptor, low_source_byte_offset,
+        static_byte_offset, source_registers[i * source_register_stride],
+        vgpr_type, &selected[i]));
+  }
 
   if (!loom_amdgpu_fragment_repack_uses_source_register_bit_tree(
           source_register_count)) {
@@ -1100,6 +1131,38 @@ static iree_status_t loom_amdgpu_emit_fragment_repack_bpermute_element(
   }
   *out_low_element = selected[0];
   return iree_ok_status();
+}
+
+static iree_status_t loom_amdgpu_emit_fragment_repack_gather_element(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_amdgpu_fragment_repack_gather_t* gather,
+    const loom_value_id_t* source_registers,
+    const loom_value_id_t* peer_source_registers,
+    uint16_t source_register_count,
+    const loom_value_id_t* source_register_masks,
+    loom_value_id_t low_source_byte_offset, uint32_t static_byte_offset,
+    loom_type_t vgpr_type, loom_value_id_t* out_low_element) {
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fragment_repack_bpermute_element(
+      context, source_op, &gather->bpermute_descriptor, source_registers,
+      source_register_count, source_register_masks, low_source_byte_offset,
+      static_byte_offset, gather->register_stride, vgpr_type, out_low_element));
+  if (gather->kind == LOOM_AMDGPU_FRAGMENT_REPACK_GATHER_DIRECT) {
+    return iree_ok_status();
+  }
+  loom_value_id_t peer_element = LOOM_VALUE_ID_INVALID;
+  if (gather->kind == LOOM_AMDGPU_FRAGMENT_REPACK_GATHER_EXCHANGE_RESULT) {
+    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_resolved_vgpr_unary(
+        context, source_op, &gather->exchange_descriptor, *out_low_element,
+        vgpr_type, &peer_element));
+  } else {
+    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fragment_repack_bpermute_element(
+        context, source_op, &gather->bpermute_descriptor, peer_source_registers,
+        source_register_count, source_register_masks, low_source_byte_offset,
+        static_byte_offset, gather->register_stride, vgpr_type, &peer_element));
+  }
+  return loom_amdgpu_emit_vgpr_select(context, source_op, *out_low_element,
+                                      peer_element, gather->cross_half_mask,
+                                      vgpr_type, out_low_element);
 }
 
 static bool loom_amdgpu_fragment_repack_uses_packed_source_pairs(
@@ -1526,10 +1589,24 @@ loom_amdgpu_emit_fragment_repack_result_to_lhs_bf16_bpermute(
             low_source_selector, vgpr_type, &low_lane_group_byte_base));
   }
 
-  loom_low_lower_resolved_descriptor_t bpermute_descriptor = {0};
+  loom_amdgpu_fragment_repack_gather_t gather = {
+      .cross_half_mask = LOOM_VALUE_ID_INVALID,
+      .kind = plan->gather_kind,
+      .register_stride =
+          (uint16_t)(use_transpose ? UINT16_C(1) << plan->transpose_bit_count
+                                   : 1),
+  };
   IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_descriptor_ref(
       context, LOOM_AMDGPU_DESCRIPTOR_REF_DS_BPERMUTE_B32,
-      &bpermute_descriptor));
+      &gather.bpermute_descriptor));
+  if (gather.kind != LOOM_AMDGPU_FRAGMENT_REPACK_GATHER_DIRECT) {
+    IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_descriptor_ref(
+        context, LOOM_AMDGPU_DESCRIPTOR_REF_V_PERMLANE64_B32,
+        &gather.exchange_descriptor));
+    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_sgpr64_constant_u64(
+        context, source_op, plan->cross_half_lane_mask,
+        &gather.cross_half_mask));
+  }
   const loom_low_lower_resolved_descriptor_t* pack_u16_descriptor =
       iree_any_bit_set(bf16_pack_descriptors->flags,
                        LOOM_AMDGPU_FLOAT16_PACK_DESCRIPTOR_FLAG_HAS_PACK_U16)
@@ -1587,6 +1664,19 @@ loom_amdgpu_emit_fragment_repack_result_to_lhs_bf16_bpermute(
     }
   }
 
+  const loom_value_id_t* gather_source_registers =
+      use_transpose ? transposed_source_registers
+                    : (use_packed_source_pairs ? packed_source_registers
+                                               : source_registers);
+  loom_value_id_t peer_source_registers[LOOM_AMDGPU_MAX_SCALARIZED_32BIT_LANES];
+  if (gather.kind == LOOM_AMDGPU_FRAGMENT_REPACK_GATHER_EXCHANGE_SOURCE) {
+    for (uint16_t i = 0; i < plan->source_register_count; ++i) {
+      IREE_RETURN_IF_ERROR(loom_amdgpu_emit_resolved_vgpr_unary(
+          context, source_op, &gather.exchange_descriptor,
+          gather_source_registers[i], vgpr_type, &peer_source_registers[i]));
+    }
+  }
+
   loom_value_id_t result_registers[LOOM_AMDGPU_MAX_SCALARIZED_32BIT_LANES] = {
       LOOM_VALUE_ID_INVALID};
   for (uint16_t register_index = 0;
@@ -1594,25 +1684,16 @@ loom_amdgpu_emit_fragment_repack_result_to_lhs_bf16_bpermute(
     if (use_transpose) {
       const uint16_t transpose_mask =
           (uint16_t)((UINT16_C(1) << plan->transpose_bit_count) - 1u);
-      loom_value_id_t
-          candidate_registers[LOOM_AMDGPU_MAX_SCALARIZED_32BIT_LANES] = {
-              LOOM_VALUE_ID_INVALID};
-      for (uint16_t candidate_index = 0;
-           candidate_index < selected_source_register_count;
-           ++candidate_index) {
-        const uint16_t source_register_index =
-            (uint16_t)((candidate_index << plan->transpose_bit_count) |
-                       (register_index & transpose_mask));
-        candidate_registers[candidate_index] =
-            transposed_source_registers[source_register_index];
-      }
+      const uint16_t source_register_base = register_index & transpose_mask;
       const uint32_t static_byte_offset =
           (uint32_t)(register_index & (uint16_t)~transpose_mask) *
               LOOM_AMDGPU_FRAGMENT_REGISTER_BYTE_COUNT *
               LOOM_AMDGPU_FRAGMENT_PACKED_B16_ELEMENT_COUNT +
           packed_pair_source_lane_byte_offset;
-      IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fragment_repack_bpermute_element(
-          context, source_op, &bpermute_descriptor, candidate_registers,
+      IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fragment_repack_gather_element(
+          context, source_op, &gather,
+          gather_source_registers + source_register_base,
+          peer_source_registers + source_register_base,
           selected_source_register_count, source_register_masks,
           low_lane_group_byte_base, static_byte_offset, vgpr_type,
           &result_registers[register_index]));
@@ -1624,11 +1705,11 @@ loom_amdgpu_emit_fragment_repack_result_to_lhs_bf16_bpermute(
           (uint32_t)register_index * LOOM_AMDGPU_FRAGMENT_REGISTER_BYTE_COUNT *
               LOOM_AMDGPU_FRAGMENT_PACKED_B16_ELEMENT_COUNT +
           packed_pair_source_lane_byte_offset;
-      IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fragment_repack_bpermute_element(
-          context, source_op, &bpermute_descriptor, packed_source_registers,
-          selected_source_register_count, source_register_masks,
-          low_lane_group_byte_base, static_byte_offset, vgpr_type,
-          &result_registers[register_index]));
+      IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fragment_repack_gather_element(
+          context, source_op, &gather, gather_source_registers,
+          peer_source_registers, selected_source_register_count,
+          source_register_masks, low_lane_group_byte_base, static_byte_offset,
+          vgpr_type, &result_registers[register_index]));
       continue;
     }
 
@@ -1643,11 +1724,11 @@ loom_amdgpu_emit_fragment_repack_result_to_lhs_bf16_bpermute(
                      element_index);
       const uint32_t static_byte_offset =
           (uint32_t)reduction * LOOM_AMDGPU_FRAGMENT_REGISTER_BYTE_COUNT;
-      IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fragment_repack_bpermute_element(
-          context, source_op, &bpermute_descriptor, source_registers,
-          selected_source_register_count, source_register_masks,
-          low_lane_group_byte_base, static_byte_offset, vgpr_type,
-          &elements[element_index]));
+      IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fragment_repack_gather_element(
+          context, source_op, &gather, gather_source_registers,
+          peer_source_registers, selected_source_register_count,
+          source_register_masks, low_lane_group_byte_base, static_byte_offset,
+          vgpr_type, &elements[element_index]));
     }
     if (pre_narrow_source_registers) {
       IREE_RETURN_IF_ERROR(loom_amdgpu_emit_packed_u16_lane_pair(

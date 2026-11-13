@@ -22,12 +22,14 @@
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/func/ops.h"
+#include "loom/ops/func_symbol_facts.h"
 #include "loom/ops/target/facts.h"
 #include "loom/ops/target/ops.h"
 #include "loom/ops/template/ops.h"
 #include "loom/ops/test/ops.h"
 #include "loom/testing/module_ptr.h"
 #include "loom/util/fact_table.h"
+#include "loom/verify/verify.h"
 
 namespace loom {
 namespace {
@@ -220,6 +222,7 @@ class TemplateDecisionModelTest : public ::testing::Test {
         .target_facts = {},
         .argument_ids = facts->argument_ids,
         .result_ids = facts->result_ids,
+        .input_contract = loom_func_symbol_input_contract(facts),
         .predicates = facts->predicates,
         .target_conditions = facts->target_conditions,
         .argument_count = facts->argument_count,
@@ -265,15 +268,15 @@ class TemplateDecisionModelTest : public ::testing::Test {
       loom_decision_program_result_t actual = {};
       loom_template_decision_evidence_summary_t actual_summary = {};
       loom_template_decision_model_evaluate_all(
-          model, &site, policy, evidence.data(), &actual_summary,
-          live_actions.data(), &live_action_count, &actual);
+          model, &site, policy, evidence.data(), live_actions.data(),
+          &actual_summary, &live_action_count, &actual);
 
       std::array<uint32_t, 8> minimal_live_actions = {};
       uint32_t minimal_live_action_count = 0;
       loom_decision_program_result_t minimal_result = {};
       loom_template_decision_evidence_summary_t minimal_summary = {};
       loom_template_decision_model_evaluate(
-          model, &site, policy, &minimal_summary, minimal_live_actions.data(),
+          model, &site, policy, minimal_live_actions.data(), &minimal_summary,
           &minimal_live_action_count, &minimal_result);
       EXPECT_EQ(minimal_result.kind, actual.kind);
       EXPECT_EQ(minimal_result.action_ordinal, actual.action_ordinal);
@@ -394,6 +397,83 @@ class TemplateDecisionModelTest : public ::testing::Test {
   iree_arena_allocator_t analysis_arena_;
 };
 
+TEST_F(TemplateDecisionModelTest, PreservesWideDependentSignatureCoordinates) {
+  std::string parameters = "%input: tensor<[%extent]xi32>";
+  std::string operands = "%input";
+  std::string types = "tensor<[%extent]xi32>";
+  for (uint32_t i = 1; i < 64; ++i) {
+    parameters += ", %v" + std::to_string(i) + ": index";
+    operands += ", %v" + std::to_string(i);
+    types += ", index";
+  }
+  parameters += ", %extent: index";
+  operands += ", %extent";
+  types += ", index";
+  const std::string results = " -> (%first: index, %second: index)";
+  const std::string source =
+      "template.decl @family(" + parameters + ")" + results +
+      " where [eq(%extent, %v32)]\n"
+      "template.def<@family> priority(10) @body(" +
+      parameters + ")" + results +
+      " where [eq(%v63, %extent), eq(%second, %v32)] {\n"
+      "  template.return %extent, %v32 : index, index\n}\n"
+      "template.ukernel<@family> priority(1) @declaration(" +
+      parameters + ")" + results +
+      " where [eq(%v1, %extent), eq(%first, %v32)]\n"
+      "func.def public @entry(" +
+      parameters +
+      ") -> (index, index) {\n"
+      "  %first, %second = template.apply<@family>(" +
+      operands + ") : (" + types +
+      ") -> (index, index)\n"
+      "  func.return %first, %second : index, index\n}\n";
+  ModulePtr module =
+      ParseModule(iree_make_string_view(source.data(), source.size()));
+  loom_verify_options_t verify_options = {};
+  verify_options.sink.fn = loom_diagnostic_stderr_sink;
+  loom_verify_result_t verify_result = {};
+  IREE_ASSERT_OK(
+      loom_verify_module(module.get(), &verify_options, &verify_result));
+  ASSERT_EQ(verify_result.error_count, 0u);
+
+  loom_symbol_fact_table_t symbol_facts = {};
+  loom_symbol_fact_table_initialize(&symbol_facts, &analysis_arena_);
+  loom_template_provider_catalog_t providers = {};
+  loom_template_provider_catalog_initialize(&providers, &analysis_arena_);
+  IREE_ASSERT_OK(loom_template_provider_catalog_build_local(
+      &providers, module.get(), &symbol_facts));
+  loom_symbol_reference_table_t references = {};
+  IREE_ASSERT_OK(loom_symbol_reference_table_build(
+      module.get(), &analysis_arena_, &references));
+  loom_template_decision_model_catalog_t models = {};
+  IREE_ASSERT_OK(loom_template_decision_model_catalog_build(
+      module.get(), &symbol_facts, &references, &providers, &analysis_arena_,
+      &models));
+  ASSERT_EQ(models.model_count, 1u);
+  const auto& program = models.models[0].program;
+  ASSERT_EQ(program.predicate_count, 5u);
+  const std::array<std::array<loom_decision_program_operand_ref_t, 2>, 5>
+      expected = {{
+          {loom_decision_program_argument_ref(64),
+           loom_decision_program_argument_ref(32)},
+          {loom_decision_program_argument_ref(63),
+           loom_decision_program_argument_ref(64)},
+          {loom_decision_program_result_ref(1),
+           loom_decision_program_argument_ref(32)},
+          {loom_decision_program_argument_ref(1),
+           loom_decision_program_argument_ref(64)},
+          {loom_decision_program_result_ref(0),
+           loom_decision_program_argument_ref(32)},
+      }};
+  for (size_t i = 0; i < expected.size(); ++i) {
+    SCOPED_TRACE(i);
+    EXPECT_EQ(program.predicates[i].kind, LOOM_PREDICATE_EQ);
+    ASSERT_EQ(program.predicates[i].operand_count, 2u);
+    EXPECT_EQ(program.predicates[i].operands[0], expected[i][0]);
+    EXPECT_EQ(program.predicates[i].operands[1], expected[i][1]);
+  }
+}
+
 loom_value_facts_t RandomFacts(std::mt19937_64& random) {
   switch (random() % 4) {
     case 0:
@@ -443,12 +523,46 @@ func.def public @entry(%x: index, %y: index, %m: index) -> (index, index) {
 }
 )");
 
+  // External headers retain signature positions, including result positions,
+  // while the local providers above retain their original SSA identities.
+  std::array<loom_predicate_t, 2> external_predicates = {};
+  std::array<loom_template_provider_summary_t, 2> external_providers = {};
+  const std::array<iree_string_view_t, 2> families = {IREE_SV("family.a"),
+                                                      IREE_SV("family.b")};
+  for (size_t i = 0; i < external_providers.size(); ++i) {
+    const uint16_t argument_count = i == 0 ? 2 : 9;
+    external_predicates[i] = {
+        .kind = LOOM_PREDICATE_EQ,
+        .arg_count = 2,
+        .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_VALUE},
+        .args = {argument_count - 1, argument_count},
+    };
+    const loom_template_provider_contract_t contract = {
+        .kind = LOOM_TEMPLATE_PROVIDER_KIND_DEF,
+        .has_body = true,
+        .argument_count = argument_count,
+        .result_count = 1,
+        .predicate_count = 1,
+        .name = IREE_SV("external_result"),
+        .priority = 10,
+        .predicates = &external_predicates[i],
+    };
+    const loom_symbol_ref_t family = {
+        .module_id = 0,
+        .symbol_id = FindSymbol(module.get(), families[i]),
+    };
+    loom_template_provider_contract_bind_family(&contract, module.get(), family,
+                                                loom_symbol_ref_null(), i,
+                                                &external_providers[i]);
+  }
+
   loom_symbol_fact_table_t symbol_facts = {};
   loom_symbol_fact_table_initialize(&symbol_facts, &analysis_arena_);
   loom_template_provider_catalog_t providers = {};
   loom_template_provider_catalog_initialize(&providers, &analysis_arena_);
-  IREE_ASSERT_OK(loom_template_provider_catalog_build_local(
-      &providers, module.get(), &symbol_facts));
+  IREE_ASSERT_OK(loom_template_provider_catalog_build(
+      &providers, module.get(), &symbol_facts, external_providers.data(),
+      external_providers.size()));
   loom_symbol_reference_table_t references = {};
   IREE_ASSERT_OK(loom_symbol_reference_table_build(
       module.get(), &analysis_arena_, &references));
@@ -484,8 +598,9 @@ func.def public @entry(%x: index, %y: index, %m: index) -> (index, index) {
   std::mt19937_64 random(0xdec1510ada77ULL);
   for (uint32_t iteration = 0; iteration < 5000; ++iteration) {
     loom_value_fact_table_clear_scope(&value_facts);
-    std::array<loom_value_facts_t, 3> facts = {
-        RandomFacts(random), RandomFacts(random), RandomFacts(random)};
+    std::array<loom_value_facts_t, 4> facts = {
+        RandomFacts(random), RandomFacts(random), RandomFacts(random),
+        RandomFacts(random)};
     for (iree_host_size_t i = 0; i < references.template_demands.count; ++i) {
       const loom_template_demand_t& demand =
           references.template_demands.values[i];
@@ -503,6 +618,9 @@ func.def public @entry(%x: index, %y: index, %m: index) -> (index, index) {
               &value_facts, operands.values[j], facts[2]));
         }
       }
+      IREE_ASSERT_OK(loom_value_fact_table_define(
+          &value_facts, loom_template_apply_results(demand.apply_op).values[0],
+          facts[3]));
       const loom_symbol_ref_t family = {
           .module_id = 0,
           .symbol_id = demand.family_symbol_id,
@@ -675,7 +793,7 @@ func.def public target(@application_target) @entry(%value: i32) -> (i32, i32) {
     loom_template_decision_evidence_summary_t summary = {};
     loom_template_decision_model_evaluate_all(
         model, &site, LOOM_DECISION_PROGRAM_DEFER_UNRESOLVED, evidence.data(),
-        &summary, live_actions.data(), &live_action_count, &result);
+        live_actions.data(), &summary, &live_action_count, &result);
 
     if (model->family.symbol_id ==
         FindSymbol(module.get(), IREE_SV("select_target"))) {

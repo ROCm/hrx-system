@@ -10,6 +10,8 @@ from enum import IntEnum, IntFlag
 
 from loom.target.arch.x86.vector_encoding import (
     VECTOR_ENCODING_FORMAT_MARKER,
+    VECTOR_IMMEDIATE_ENCODING_FIELD,
+    VectorEncodingBehavior,
     validate_vector_encoding_recipe,
     vector_encoding_address_base_input,
 )
@@ -51,6 +53,8 @@ class Form(IntEnum):
     COMPARE_BRANCH = 37
     COMPARE_IMMEDIATE_BRANCH = 38
     UNARY_F3_R_RM = 39
+    # Destructive add/sub followed by SETB and MOVZX of carry/borrow.
+    BINARY_CARRY_OUT = 40
 
 
 class Flag(IntFlag):
@@ -64,7 +68,8 @@ class Flag(IntFlag):
 def encoding(opcode: int, *, extension: int = 0, flags: int = 0) -> int:
     """Packs immutable native instruction fields into a descriptor encoding ID."""
     if (
-        not (0 < opcode <= 0xFF or 0x0F00 <= opcode <= 0x0FFF)
+        not (0 <= opcode <= 0xFF or 0x0F00 <= opcode <= 0x0FFF)
+        or (opcode == 0 and not flags)
         or not 0 <= extension <= 7
     ):
         raise ValueError("invalid native opcode or ModRM extension")
@@ -78,6 +83,16 @@ def validate_descriptor_encoding(descriptor: Descriptor) -> None:
     if not descriptor.encoding_format_id:
         return
     is_vector = bool(descriptor.encoding_format_id & VECTOR_ENCODING_FORMAT_MARKER)
+    if descriptor.encoding_field_values and (
+        not is_vector
+        or (descriptor.encoding_format_id >> 12) & 7 != VectorEncodingBehavior.IMMEDIATE
+        or descriptor.immediates
+        or len(descriptor.encoding_field_values) != 1
+        or descriptor.encoding_field_values[0].encoding_field_id
+        != VECTOR_IMMEDIATE_ENCODING_FIELD
+        or not 0 <= descriptor.encoding_field_values[0].value <= 0xFF
+    ):
+        raise ValueError(f"{descriptor.key}: invalid fixed native immediate")
     input_operands = tuple(
         operand
         for operand in descriptor.operands
@@ -147,7 +162,7 @@ def validate_descriptor_encoding(descriptor: Descriptor) -> None:
     )
     if (
         inputs > input_limit
-        or results > (2 if form == Form.DIVIDE else 1)
+        or results > (2 if form in (Form.DIVIDE, Form.BINARY_CARRY_OUT) else 1)
         or len(descriptor.immediates) > 2
     ):
         raise ValueError(f"{descriptor.key}: native operand carrier overflow")

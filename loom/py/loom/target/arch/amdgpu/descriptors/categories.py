@@ -11,11 +11,16 @@
 
 from __future__ import annotations
 
+from functools import cache
+
 from .common import *
 
 
-def _amdgpu_descriptor_category(descriptor: Descriptor) -> DescriptorCategory:
-    semantic_tag = descriptor.semantic_tag or ""
+@cache
+def _amdgpu_descriptor_category_for_identity(
+    key: str, semantic_tag: str | None
+) -> DescriptorCategory:
+    semantic_tag = semantic_tag or ""
     if semantic_tag.startswith(("matrix.", "dot.")):
         return AMDGPU_MATRIX_DESCRIPTOR_CATEGORY
     if ".atomic." in semantic_tag:
@@ -32,19 +37,31 @@ def _amdgpu_descriptor_category(descriptor: Descriptor) -> DescriptorCategory:
         return AMDGPU_COMPARE_SELECT_DESCRIPTOR_CATEGORY
     if semantic_tag.startswith("convert."):
         return AMDGPU_CONVERT_DESCRIPTOR_CATEGORY
-    if descriptor.key.startswith("amdgpu.s_"):
+    if key.startswith("amdgpu.s_"):
         return AMDGPU_SCALAR_DESCRIPTOR_CATEGORY
-    if descriptor.key.startswith("amdgpu.v_"):
+    if key.startswith("amdgpu.v_"):
         return AMDGPU_VECTOR_DESCRIPTOR_CATEGORY
     return AMDGPU_MISC_DESCRIPTOR_CATEGORY
+
+
+def _amdgpu_descriptor_category(descriptor: Descriptor) -> DescriptorCategory:
+    return _amdgpu_descriptor_category_for_identity(
+        descriptor.key, descriptor.semantic_tag
+    )
+
+
+def _with_amdgpu_descriptor_category(descriptor: Descriptor) -> Descriptor:
+    category = _amdgpu_descriptor_category(descriptor)
+    if descriptor.category == category:
+        return descriptor
+    return replace(descriptor, category=category)
 
 
 def _categorize_amdgpu_descriptors(
     descriptors: tuple[Descriptor, ...],
 ) -> tuple[Descriptor, ...]:
     return tuple(
-        replace(descriptor, category=_amdgpu_descriptor_category(descriptor))
-        for descriptor in descriptors
+        _with_amdgpu_descriptor_category(descriptor) for descriptor in descriptors
     )
 
 

@@ -66,6 +66,7 @@ loom_cc_library(
     textual_hdrs = [":register_tables.inl"],
     visibility = ["//visibility:public"],
     deps = [
+        ":core",
         "//loom/src/loom/codegen/low:descriptors",
         "//loom/src/loom/codegen/low/allocation:assignment",
         "//loom/src/loom/target/arch/amd/xdna/aie2p/encoding",

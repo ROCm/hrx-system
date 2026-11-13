@@ -97,7 +97,7 @@ iree_status_t loom_kernel_target_legalize_subgroup_packets(
                                      LOOM_VALUE_ID_INVALID};
   for (uint32_t i = 0; i < shape.chunk_count && iree_status_is_ok(status);
        ++i) {
-    const int64_t offset = i * shape.chunk_lane_count;
+    const int64_t offset = (int64_t)i * shape.chunk_lane_count;
     const uint32_t lane_count =
         iree_min(shape.chunk_lane_count, shape.lane_count - offset);
     const loom_type_t packet_type =
@@ -726,7 +726,7 @@ static iree_status_t loom_kernel_scan_build_packet_operation(
   iree_status_t status = iree_ok_status();
   for (uint32_t i = 0; i < shape->chunk_count && iree_status_is_ok(status);
        ++i) {
-    const int64_t offset = i * shape->chunk_lane_count;
+    const int64_t offset = (int64_t)i * shape->chunk_lane_count;
     const uint32_t lane_count =
         iree_min(shape->chunk_lane_count, shape->lane_count - offset);
     const loom_type_t packet_type =

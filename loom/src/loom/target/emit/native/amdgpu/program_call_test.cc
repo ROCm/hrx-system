@@ -124,7 +124,8 @@ class AmdgpuProgramCallTest : public ::testing::Test {
     };
     IREE_ASSERT_OK(loom_low_func_def_build(
         &builder, /*build_flags=*/0, /*visibility=*/0, /*retain=*/0,
-        /*cc=*/0, /*effect_contract=*/0, /*inline_policy=*/0,
+        /*cc=*/0, /*effect_contract=*/0, /*temperature=*/0,
+        /*inline_policy=*/0,
         /*allocation=*/0, /*schedule=*/0, descriptor_set_name,
         /*target=*/loom_symbol_ref_t{}, /*abi=*/0, loom_named_attr_slice_t{},
         loom_named_attr_slice_t{}, LOOM_STRING_ID_INVALID,
@@ -152,7 +153,7 @@ TEST_F(AmdgpuProgramCallTest, PublishesCarrierAndClobberContracts) {
   bool prepared = false;
   IREE_ASSERT_OK(loom_amdgpu_program_callable_prepare_abi(
       module_, function_op_, &descriptor_set_, iree_diagnostic_emitter_t{},
-      &arena_, &prepared, &callable));
+      &arena_, &callable, &prepared));
   ASSERT_TRUE(prepared);
   ASSERT_EQ(callable.argument_count, 2u);
   ASSERT_EQ(callable.result_count, 2u);
@@ -229,7 +230,8 @@ TEST_F(AmdgpuProgramCallTest, EmptySignatureHasNoCarrierPointers) {
   loom_op_t* void_op = nullptr;
   IREE_ASSERT_OK(loom_low_func_def_build(
       &builder, /*build_flags=*/0, /*visibility=*/0, /*retain=*/0,
-      /*cc=*/0, /*effect_contract=*/0, /*inline_policy=*/0,
+      /*cc=*/0, /*effect_contract=*/0, /*temperature=*/0,
+      /*inline_policy=*/0,
       /*allocation=*/0, /*schedule=*/0, descriptor_set_name,
       /*target=*/loom_symbol_ref_t{}, /*abi=*/0, loom_named_attr_slice_t{},
       loom_named_attr_slice_t{}, LOOM_STRING_ID_INVALID,
@@ -243,7 +245,7 @@ TEST_F(AmdgpuProgramCallTest, EmptySignatureHasNoCarrierPointers) {
   bool prepared = false;
   IREE_ASSERT_OK(loom_amdgpu_program_callable_prepare_abi(
       module_, void_op, &descriptor_set_, iree_diagnostic_emitter_t{}, &arena_,
-      &prepared, &callable));
+      &callable, &prepared));
   ASSERT_TRUE(prepared);
   EXPECT_EQ(callable.locations, nullptr);
   EXPECT_EQ(callable.call_contract.arguments, nullptr);

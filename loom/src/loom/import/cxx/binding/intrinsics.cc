@@ -18,6 +18,7 @@
 #include <utility>
 #include <vector>
 
+#include "loom/import/cxx/binding/math.h"
 #include "loom/import/cxx/source/attributes.h"
 #include "loom/import/cxx/source/error.h"
 #include "loom/import/cxx/source/locations.h"
@@ -153,7 +154,8 @@ void Intrinsics::declaration(cxx::FunctionSymbol* function,
                    unit_, diagnostics_, module_->context, function, *selected,
                    owner)) {
       binding.operation = *encoding;
-    } else if (TemplateApplyIntrinsic::admit(unit_, diagnostics_, *selected,
+    } else if (!TemplateApplyIntrinsic::is_explicit(*selected) &&
+               TemplateApplyIntrinsic::admit(unit_, diagnostics_, *selected,
                                              owner)) {
       diagnostics_.reject(unit_, owner,
                           "template.apply requires an ordinary function");
@@ -166,7 +168,9 @@ void Intrinsics::declaration(cxx::FunctionSymbol* function,
       // Concrete specialization owns source type and template-argument
       // validation. Retain the complete descriptor until those are known.
     } else if (selected->arguments.size() != 1 ||
-               (!ViewIntrinsic::supports(selected->arguments[0]->name()) &&
+               (!RefinementIntrinsic::supports(
+                    selected->arguments[0]->name()) &&
+                !ViewIntrinsic::supports(selected->arguments[0]->name()) &&
                 !VectorMemoryIntrinsic::supports(
                     selected->arguments[0]->name()) &&
                 !AddressIntrinsic::supports(selected->arguments[0]->name()) &&
@@ -222,6 +226,22 @@ Intrinsics::Binding Intrinsics::resolve(cxx::FunctionSymbol* function,
                                         const cxx::Attribute& attribute,
                                         cxx::AST* owner) {
   auto* signature = cxx::type_cast<cxx::FunctionType>(function->type());
+  if (TemplateApplyIntrinsic::is_explicit(attribute)) {
+    auto* family = TemplateApplyIntrinsic::resolve_family_argument(
+        unit_, diagnostics_, function, owner);
+    auto entry = bindings_.find(family->canonical());
+    auto* application =
+        entry != bindings_.end()
+            ? std::get_if<TemplateApplyIntrinsic>(&entry->second)
+            : nullptr;
+    if (!application || application->source_function() != family->canonical()) {
+      diagnostics_.reject(
+          unit_, owner,
+          "template.apply family requires a LOOM_TEMPLATE_DECL declaration");
+    }
+    return application->bind_application(unit_, diagnostics_, types_, function,
+                                         owner);
+  }
   if (auto family = TemplateApplyIntrinsic::admit(unit_, diagnostics_,
                                                   attribute, owner)) {
     return TemplateApplyIntrinsic::resolve(
@@ -316,12 +336,16 @@ Intrinsics::Binding Intrinsics::resolve(cxx::FunctionSymbol* function,
                                            attribute, owner)) {
     return *fence;
   }
-  if (auto view = ViewIntrinsic::resolve(unit_, diagnostics_, types_, signature,
+  if (auto refinement = RefinementIntrinsic::resolve(
+          unit_, diagnostics_, types_, function, attribute, owner)) {
+    return *refinement;
+  }
+  if (auto view = ViewIntrinsic::resolve(unit_, diagnostics_, types_, function,
                                          attribute, owner)) {
     return *view;
   }
   if (auto memory = VectorMemoryIntrinsic::resolve(
-          unit_, diagnostics_, types_, signature, attribute, owner)) {
+          unit_, diagnostics_, types_, function, attribute, owner)) {
     return *memory;
   }
   if (auto shuffle = SubgroupShuffleIntrinsic::resolve(
@@ -383,7 +407,7 @@ Intrinsics::ScalarBinding Intrinsics::resolve_scalar(
                             "intrinsic result members must be scalar values");
       }
     }
-    return_type = types_.unqualified(record->members.front().field->type());
+    return_type = types_.unqualified(record->members.front().type());
   }
   if (operation.scalar->category == LOOM_CXX_SCALAR_CATEGORY_INTEGER) {
     if (!traits.is_integral(return_type) ||
@@ -424,7 +448,7 @@ Intrinsics::ScalarBinding Intrinsics::resolve_scalar(
   }
   if (record) {
     for (const auto& member : record->members) {
-      check_field(member.field->type(), index++,
+      check_field(member.type(), index++,
                   "intrinsic result members must share the primary type");
     }
   }
@@ -447,11 +471,29 @@ TemplateApplyIntrinsic::Family* Intrinsics::intern_template_family(
   return &entry->second;
 }
 
+Intrinsics::Binding* Intrinsics::bind_math(cxx::FunctionSymbol* function,
+                                           cxx::AST* owner) {
+  const auto* scalar = math_binding(unit_, diagnostics_, function, owner);
+  if (!scalar) {
+    return nullptr;
+  }
+  const auto* signature = cxx::type_cast<cxx::FunctionType>(function->type());
+  Binding binding =
+      std::string_view(scalar->name) == "scalar.frexpf"
+          ? Binding(ExponentIntrinsic::resolve(types_, signature, owner))
+          : Binding(resolve_scalar({scalar}, signature, owner));
+  return &bindings_.try_emplace(function->canonical(), std::move(binding))
+              .first->second;
+}
+
 Intrinsics::Binding* Intrinsics::concrete_binding(cxx::FunctionSymbol* function,
                                                   cxx::AST* owner) {
   auto entry = bindings_.find(function->canonical());
   if (entry != bindings_.end()) {
     return &entry->second;
+  }
+  if (function->builtinKind() != cxx::BuiltinFunctionKind::T_NONE) {
+    return bind_math(function, owner);
   }
   if (!function->isSpecialization()) {
     return nullptr;
@@ -560,6 +602,9 @@ IntrinsicCallResult Intrinsics::call(const Binding& admitted,
   if (auto* channel = std::get_if<ChannelIntrinsic>(binding)) {
     return {channel->call(arguments, arena, builder, location)};
   }
+  if (auto* refinement = std::get_if<RefinementIntrinsic>(binding)) {
+    return {refinement->call(arguments, arena, builder, location)};
+  }
   if (auto* view = std::get_if<ViewIntrinsic>(binding)) {
     return {view->call(arguments, types_, arena, storage, owner, builder,
                        location)};
@@ -605,6 +650,9 @@ IntrinsicCallResult Intrinsics::call(const Binding& admitted,
   }
   if (auto* conversion = std::get_if<NumericConversionIntrinsic>(binding)) {
     return {conversion->call(arguments, arena, scalars_, vectors_, owner)};
+  }
+  if (auto* exponent = std::get_if<ExponentIntrinsic>(binding)) {
+    return {exponent->call(arguments, storage, owner, builder, location)};
   }
   std::array<loom_value_id_t, 8> inline_values;
   std::vector<loom_value_id_t> overflow;

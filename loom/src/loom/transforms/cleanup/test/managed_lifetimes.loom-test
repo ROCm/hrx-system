@@ -1,0 +1,478 @@
+// Null construction and its lifetime-only uses disappear in one cleanup.
+// RUN: pass dce,ownership-lifetime
+type.decl import("images", "frame") @Frame
+
+func.def @empty() {
+  %owner = ref.null : ref<@Frame>
+  %unused = ref.null : ptr<@Frame>
+  %copy = ref.duplicate %owner : ref<@Frame>
+  %pointer = ref.borrow %copy : ref<@Frame> -> ptr<@Frame>
+  %dead = ref.compare.null %pointer : ptr<@Frame>
+  ref.release %copy : ref<@Frame>
+  ref.release %owner : ref<@Frame>
+  func.return
+}
+
+// ----
+type.decl import("images", "frame") @Frame
+
+func.def @empty() {
+  func.return
+}
+
+// ====
+
+// Pure producer dependencies cascade through scalar and managed results.
+// RUN: pass canonicalize,cse,dce,ownership-lifetime
+type.decl import("images", "frame") @Frame
+
+func.decl pure @size(%input: i32) -> (i32)
+
+func.decl pure @create(%size: i32) -> (ref<@Frame>)
+
+func.def @discard(%input: i32) {
+  %size = func.call pure @size(%input) : (i32) -> (i32)
+  %owner = func.call pure @create(%size) : (i32) -> (ref<@Frame>)
+  %copy = ref.duplicate %owner : ref<@Frame>
+  ref.release %owner : ref<@Frame>
+  ref.release %copy : ref<@Frame>
+  func.return
+}
+
+// ----
+type.decl import("images", "frame") @Frame
+
+func.decl pure @size(%input: i32) -> (i32)
+
+func.decl pure @create(%size: i32) -> (ref<@Frame>)
+
+func.def @discard(%input: i32) {
+  func.return
+}
+
+// ====
+
+// A live scalar result requires the producer and cleanup of its owner result.
+// RUN: pass dce,ownership-lifetime
+type.decl import("images", "frame") @Frame
+
+func.decl pure @create() -> (i32, ref<@Frame>)
+
+func.def @size() -> (i32) {
+  %size, %owner = func.call pure @create() : () -> (i32, ref<@Frame>)
+  ref.release %owner : ref<@Frame>
+  func.return %size : i32
+}
+
+// ----
+type.decl import("images", "frame") @Frame
+
+func.decl pure @create() -> (i32, ref<@Frame>)
+
+func.def @size() -> (i32) {
+  %size, %owner = func.call pure @create() : () -> (i32, ref<@Frame>)
+  ref.release %owner : ref<@Frame>
+  func.return %size : i32
+}
+
+// ====
+
+// Effectful acquisition keeps the entire explicit lifetime and finalization.
+// RUN: pass dce,ownership-lifetime
+type.decl import("images", "frame") @Frame
+
+func.decl @capture() -> (ref<@Frame>)
+
+func.def @discard_capture() {
+  %owner = func.call @capture() : () -> (ref<@Frame>)
+  %copy = ref.duplicate %owner : ref<@Frame>
+  ref.release %owner : ref<@Frame>
+  ref.release %copy : ref<@Frame>
+  func.return
+}
+
+// ----
+type.decl import("images", "frame") @Frame
+
+func.decl @capture() -> (ref<@Frame>)
+
+func.def @discard_capture() {
+  %owner = func.call @capture() : () -> (ref<@Frame>)
+  %copy = ref.duplicate %owner : ref<@Frame>
+  ref.release %owner : ref<@Frame>
+  ref.release %copy : ref<@Frame>
+  func.return
+}
+
+// ====
+
+// An incoming owner retains cleanup even through a pure consuming call.
+// RUN: pass canonicalize,cse,dce,ownership-lifetime
+type.decl import("images", "frame") @Frame
+
+func.decl pure @consume(%frame: ref<@Frame>)
+
+func.def @consume_input(%frame: ref<@Frame>) {
+  %copy = ref.duplicate %frame : ref<@Frame>
+  ref.release %frame : ref<@Frame>
+  func.call pure @consume(%copy) : (ref<@Frame>)
+  func.return
+}
+
+// ----
+type.decl import("images", "frame") @Frame
+
+func.decl pure @consume(%frame: ref<@Frame>)
+
+func.def @consume_input(%frame: ref<@Frame>) {
+  %copy = ref.duplicate %frame : ref<@Frame>
+  ref.release %frame : ref<@Frame>
+  func.call pure @consume(%copy) : (ref<@Frame>)
+  func.return
+}
+
+// ====
+
+// Pure obtains borrow their input; a live input does not pin unused outputs.
+// RUN: pass canonicalize,cse,dce,ownership-lifetime
+type.decl import("images", "frame") @Frame
+
+func.decl pure @obtain(%frame: ptr<@Frame>) -> (ref<@Frame>)
+
+func.def @discard_obtained(%input: ptr<@Frame>) {
+  %owner = func.call pure @obtain(%input) : (ptr<@Frame>) -> (ref<@Frame>)
+  ref.release %owner : ref<@Frame>
+  func.return
+}
+
+// ----
+type.decl import("images", "frame") @Frame
+
+func.decl pure @obtain(%frame: ptr<@Frame>) -> (ref<@Frame>)
+
+func.def @discard_obtained(%input: ptr<@Frame>) {
+  func.return
+}
+
+// ====
+
+// Independent live factory results cannot be commoned through pure calls.
+// RUN: pass canonicalize,cse,dce,ownership-lifetime
+type.decl import("images", "frame") @Frame
+
+func.decl pure @create() -> (ref<@Frame>)
+
+func.def @pair() -> (ref<@Frame>, ref<@Frame>) {
+  %left = func.call pure @create() : () -> (ref<@Frame>)
+  %right = func.call pure @create() : () -> (ref<@Frame>)
+  func.return %left, %right : ref<@Frame>, ref<@Frame>
+}
+
+// ----
+type.decl import("images", "frame") @Frame
+
+func.decl pure @create() -> (ref<@Frame>)
+
+func.def @pair() -> (ref<@Frame>, ref<@Frame>) {
+  %left = func.call pure @create() : () -> (ref<@Frame>)
+  %right = func.call pure @create() : () -> (ref<@Frame>)
+  func.return %left, %right : ref<@Frame>, ref<@Frame>
+}
+
+// ====
+
+// A used identity comparison keeps both creators and their distinct owners.
+// RUN: pass canonicalize,cse,dce,ownership-lifetime
+type.decl import("images", "frame") @Frame
+
+func.decl pure @create() -> (ref<@Frame>)
+
+func.def @compare() -> (i1) {
+  %left = func.call pure @create() : () -> (ref<@Frame>)
+  %right = func.call pure @create() : () -> (ref<@Frame>)
+  %same = ref.compare.eq %left, %right : ref<@Frame>, ref<@Frame>
+  ref.release %left : ref<@Frame>
+  ref.release %right : ref<@Frame>
+  func.return %same : i1
+}
+
+// ----
+type.decl import("images", "frame") @Frame
+
+func.decl pure @create() -> (ref<@Frame>)
+
+func.def @compare() -> (i1) {
+  %left = func.call pure @create() : () -> (ref<@Frame>)
+  %right = func.call pure @create() : () -> (ref<@Frame>)
+  %same = ref.compare.eq %left, %right : ref<@Frame>, ref<@Frame>
+  ref.release %left : ref<@Frame>
+  ref.release %right : ref<@Frame>
+  func.return %same : i1
+}
+
+// ====
+
+// Branch payloads carry ownership, not an independent observation.
+// RUN: pass dce,ownership-lifetime
+type.decl import("images", "frame") @Frame
+
+func.decl pure @create() -> (ref<@Frame>)
+
+func.def @dead_choice(%condition: i1) {
+  %owner = func.call pure @create() : () -> (ref<@Frame>)
+  cfg.cond_br %condition, ^left, ^right
+^left:
+  %copy = ref.duplicate %owner : ref<@Frame>
+  ref.release %owner : ref<@Frame>
+  cfg.br ^join(%copy: ref<@Frame>)
+^right:
+  cfg.br ^join(%owner: ref<@Frame>)
+^join(%selected: ref<@Frame>):
+  ref.release %selected : ref<@Frame>
+  func.return
+}
+
+// ----
+type.decl import("images", "frame") @Frame
+
+func.decl pure @create() -> (ref<@Frame>)
+
+func.def @dead_choice(%condition: i1) {
+  cfg.cond_br %condition, ^left, ^right
+^left:
+  cfg.br ^join
+^right:
+  cfg.br ^join
+^join:
+  func.return
+}
+
+// ====
+
+// A closed pointer recurrence does not keep its pure origin allocated.
+// RUN: pass dce,ownership-lifetime
+type.decl import("images", "frame") @Frame
+
+func.decl pure @create() -> (ref<@Frame>)
+
+func.def @dead_cycle(%again: i1) {
+  %owner = func.call pure @create() : () -> (ref<@Frame>)
+  %pointer = ref.borrow %owner : ref<@Frame> -> ptr<@Frame>
+  ref.release %owner : ref<@Frame>
+  cfg.br ^loop(%pointer: ptr<@Frame>)
+^loop(%state: ptr<@Frame>):
+  %next = ref.duplicate %state : ptr<@Frame>
+  cfg.cond_br %again, ^repeat, ^done
+^repeat:
+  cfg.br ^loop(%next: ptr<@Frame>)
+^done:
+  func.return
+}
+
+// ----
+type.decl import("images", "frame") @Frame
+
+func.decl pure @create() -> (ref<@Frame>)
+
+func.def @dead_cycle(%again: i1) {
+  cfg.br ^loop
+^loop:
+  cfg.cond_br %again, ^repeat, ^done
+^repeat:
+  cfg.br ^loop
+^done:
+  func.return
+}
+
+// ====
+
+// Live external arguments cannot lose cleanup when forwarded into a join.
+// RUN: pass dce,ownership-lifetime
+type.decl import("images", "frame") @Frame
+
+func.def @forward(%owner: ref<@Frame>) {
+  cfg.br ^join(%owner: ref<@Frame>)
+^join(%selected: ref<@Frame>):
+  ref.release %selected : ref<@Frame>
+  func.return
+}
+
+// ----
+type.decl import("images", "frame") @Frame
+
+func.def @forward(%owner: ref<@Frame>) {
+  cfg.br ^join(%owner: ref<@Frame>)
+^join(%selected: ref<@Frame>):
+  ref.release %selected : ref<@Frame>
+  func.return
+}
+
+// ====
+
+// Lifetime-only bodies may satisfy a pure callable contract. Their callers
+// still distinguish independent result identities and consumed inputs.
+// RUN: pass canonicalize,cse,dce,ownership-lifetime
+type.decl import("images", "frame") @Frame
+
+func.def pure noinline @empty() -> (ref<@Frame>) {
+  %owner = ref.null : ref<@Frame>
+  func.return %owner : ref<@Frame>
+}
+
+func.def pure noinline @drop(%owner: ref<@Frame>) {
+  ref.release %owner : ref<@Frame>
+  func.return
+}
+
+func.def @unused() {
+  %owner = func.call pure @empty() : () -> (ref<@Frame>)
+  func.call pure @drop(%owner) : (ref<@Frame>)
+  func.return
+}
+
+// ----
+type.decl import("images", "frame") @Frame
+
+func.def pure noinline @empty() -> (ref<@Frame>) {
+  %owner = ref.null : ref<@Frame>
+  func.return %owner : ref<@Frame>
+}
+
+func.def pure noinline @drop(%owner: ref<@Frame>) {
+  ref.release %owner : ref<@Frame>
+  func.return
+}
+
+func.def @unused() {
+  func.return
+}
+
+// ====
+
+// A discarded region may contain another queued lifetime cleanup scope.
+// RUN: pass dce,ownership-lifetime
+type.decl import("images", "frame") @Frame
+
+func.def @discard_region(%condition: i1) {
+  scf.if %condition {
+    scf.if %condition {
+      %unused = ref.null : ptr<@Frame>
+    } else {
+    }
+  } else {
+  }
+  func.return
+}
+
+// ----
+type.decl import("images", "frame") @Frame
+
+func.def @discard_region(%condition: i1) {
+  func.return
+}
+
+// ====
+
+// Nested cleanup preserves the incoming owner's release while removing a
+// separate pure lifetime inside the same scope.
+// RUN: pass dce
+type.decl import("images", "frame") @Frame
+
+func.decl pure @create() -> (ref<@Frame>)
+
+func.def @captured_owner(%input: ref<@Frame>, %condition: i1) {
+  scf.if %condition {
+    %unused = func.call pure @create() : () -> (ref<@Frame>)
+    ref.release %unused : ref<@Frame>
+    ref.release %input : ref<@Frame>
+  } else {
+    ref.release %input : ref<@Frame>
+  }
+  func.return
+}
+
+// ----
+type.decl import("images", "frame") @Frame
+
+func.decl pure @create() -> (ref<@Frame>)
+
+func.def @captured_owner(%input: ref<@Frame>, %condition: i1) {
+  scf.if %condition {
+    ref.release %input : ref<@Frame>
+  } else {
+    ref.release %input : ref<@Frame>
+  }
+  func.return
+}
+
+// ====
+
+// Deterministic readonly obtains can die, but consuming an incoming owner
+// remains a lifetime boundary even when the computed result is unused.
+// RUN: pass canonicalize,cse,dce,ownership-lifetime
+type.decl import("images", "frame") @Frame
+
+func.decl readonly @snapshot(%input: ptr<@Frame>) -> (ref<@Frame>)
+
+func.decl pure @finish(%input: ref<@Frame>) -> (i32)
+
+func.def @unused_computation(%owner: ref<@Frame>, %input: ptr<@Frame>) {
+  %snapshot = func.call readonly @snapshot(%input) : (ptr<@Frame>) -> (ref<@Frame>)
+  ref.release %snapshot : ref<@Frame>
+  %unused = func.call pure @finish(%owner) : (ref<@Frame>) -> (i32)
+  func.return
+}
+
+// ----
+type.decl import("images", "frame") @Frame
+
+func.decl readonly @snapshot(%input: ptr<@Frame>) -> (ref<@Frame>)
+
+func.decl pure @finish(%input: ref<@Frame>) -> (i32)
+
+func.def @unused_computation(%owner: ref<@Frame>, %input: ptr<@Frame>) {
+  %unused = func.call pure @finish(%owner) : (ref<@Frame>) -> (i32)
+  func.return
+}
+
+// ====
+
+// Template demand and exact provider calls preserve the same ownership
+// obligations as runtime calls before expansion.
+// RUN: pass canonicalize,cse,dce
+type.decl import("images", "frame") @Frame
+
+template.decl pure @make() -> (ref<@Frame>)
+
+template.decl pure @drop(%input: ref<@Frame>)
+
+template.def<@make> pure @empty() -> (ref<@Frame>) {
+  %null = ref.null : ref<@Frame>
+  template.return %null : ref<@Frame>
+}
+
+func.def @template_lifetimes(%input: ref<@Frame>) {
+  %demand = template.apply<@make>() pure : () -> (ref<@Frame>)
+  %exact = template.call pure @empty() : () -> (ref<@Frame>)
+  template.apply<@drop>(%demand) pure : (ref<@Frame>)
+  ref.release %exact : ref<@Frame>
+  template.apply<@drop>(%input) pure : (ref<@Frame>)
+  func.return
+}
+
+// ----
+type.decl import("images", "frame") @Frame
+
+template.decl pure @make() -> (ref<@Frame>)
+
+template.decl pure @drop(%input: ref<@Frame>)
+
+template.def<@make> pure @empty() -> (ref<@Frame>) {
+  %null = ref.null : ref<@Frame>
+  template.return %null : ref<@Frame>
+}
+
+func.def @template_lifetimes(%input: ref<@Frame>) {
+  template.apply<@drop>(%input) pure : (ref<@Frame>)
+  func.return
+}

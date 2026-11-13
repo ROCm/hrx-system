@@ -1,15 +1,271 @@
 # Copyright 2026 The IREE Authors
 #
 # Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//build_tools/bazel:query.bzl", "iree_assert_dependency_boundary")
-load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library", "loom_cc_test")
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_benchmark", "loom_cc_library", "loom_cc_test", "loom_config_compatible_with")
 
 package(
-    default_visibility = ["//visibility:private"],
+    default_visibility = ["//loom/src/loom/runtime:__subpackages__"],
     features = ["layering_check"],
     licenses = ["notice"],
+)
+
+exports_files(
+    [
+        "relocation_test.cc",
+        "snapshot_test.cc",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+loom_cc_library(
+    name = "virtual_pool",
+    srcs = ["virtual_pool.c"],
+    hdrs = ["virtual_pool.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":memory",
+        "//loom/src/loom/runtime:wake",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/memory:buffer_range",
+    ],
+)
+
+loom_cc_library(
+    name = "backing_directory",
+    srcs = ["backing_directory.c"],
+    hdrs = ["backing_directory.h"],
+    visibility = ["//visibility:private"],
+    deps = ["//runtime/src/iree/base"],
+)
+
+loom_cc_library(
+    name = "backing_pages",
+    srcs = ["backing_pages.c"],
+    hdrs = ["backing_pages.h"],
+    visibility = ["//visibility:private"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/internal:atomic_slist",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+loom_cc_library(
+    name = "memory_geometry",
+    srcs = ["memory_geometry.c"],
+    hdrs = ["memory_geometry.h"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+loom_cc_library(
+    name = "memory",
+    srcs = ["memory.c"],
+    hdrs = ["memory.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":backing_directory",
+        ":backing_pages",
+        ":memory_geometry",
+        "//loom/src/loom/runtime:wake",
+        "//loom/src/loom/runtime/storage:statistics",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:atomic_slist",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/memory:tlsf",
+    ],
+)
+
+loom_cc_library(
+    name = "ranges",
+    srcs = ["ranges.c"],
+    hdrs = ["ranges.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//loom/src/loom/runtime:wake",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/vm",
+    ],
+)
+
+loom_cc_test(
+    name = "ranges_test",
+    srcs = ["ranges_test.cc"],
+    deps = [
+        ":ranges",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/vm",
+    ],
+)
+
+loom_cc_library(
+    name = "rows",
+    srcs = ["rows.c"],
+    hdrs = ["rows.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":memory",
+        "//loom/src/loom/runtime/device",
+        "//loom/src/loom/runtime/execution",
+        "//loom/src/loom/runtime/execution:retirement",
+        "//loom/src/loom/runtime/parameter:residency",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+loom_cc_library(
+    name = "block_pool",
+    srcs = ["block_pool.c"],
+    hdrs = ["block_pool.h"],
+    visibility = ["//visibility:public"],
+    deps = ["//runtime/src/iree/base"],
+)
+
+loom_cc_library(
+    name = "relocation",
+    srcs = ["relocation.c"],
+    hdrs = ["relocation.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//loom/src/loom/runtime/execution",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+loom_cc_library(
+    name = "snapshot",
+    srcs = ["snapshot.c"],
+    hdrs = ["snapshot.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//loom/src/loom/runtime/execution",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+loom_cc_test(
+    name = "backing_directory_test",
+    srcs = ["backing_directory_test.cc"],
+    deps = [
+        ":backing_directory",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_benchmark(
+    name = "backing_directory_benchmark",
+    srcs = ["backing_directory_benchmark.cc"],
+    deps = [
+        ":backing_directory",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:benchmark_main",
+    ],
+)
+
+loom_cc_test(
+    name = "block_pool_test",
+    srcs = ["block_pool_test.cc"],
+    deps = [
+        ":block_pool",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "memory_tests",
+    testonly = True,
+    srcs = [
+        "memory_failure_test.cc",
+        "memory_mapping_test.cc",
+        "memory_query_test.cc",
+        "memory_test.cc",
+        "memory_test_fixture.cc",
+        "virtual_pool_test.cc",
+    ],
+    hdrs = ["memory_test_fixture.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":memory",
+        ":virtual_pool",
+        "//loom/src/loom/runtime/device",
+        "//loom/src/loom/runtime/execution",
+        "//loom/src/loom/runtime/execution:queues",
+        "//loom/src/loom/runtime/execution:workspace",
+        "//loom/src/loom/runtime/parameter:residency",
+        "//loom/src/loom/runtime/testing:device",
+        "//loom/src/loom/runtime/testing:native_allocator",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/memory:fixed_block_pool",
+        "//runtime/src/iree/hal/memory:tlsf_pool",
+        "//runtime/src/iree/hal/testing:deferred_pool",
+        "//runtime/src/iree/testing:gtest",
+    ],
+    alwayslink = True,
+)
+
+loom_cc_test(
+    name = "memory_loss_test",
+    srcs = ["memory_loss_test.cc"],
+    target_compatible_with = loom_config_compatible_with([
+        "//runtime/config/hal:driver_task",
+    ]),
+    deps = [
+        ":memory",
+        "//loom/src/loom/runtime/device",
+        "//loom/src/loom/runtime/execution",
+        "//loom/src/loom/runtime/host",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/memory:cpu_slab_provider",
+        "//runtime/src/iree/hal/memory:passthrough_pool",
+        "//runtime/src/iree/hal/memory:slab_provider",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_benchmark(
+    name = "memory_benchmark",
+    srcs = ["memory_benchmark.cc"],
+    target_compatible_with = loom_config_compatible_with([
+        "//runtime/config/hal:driver_task",
+    ]),
+    deps = [
+        ":memory",
+        "//loom/src/loom/runtime/device",
+        "//loom/src/loom/runtime/host",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:benchmark_main",
+    ],
 )
 
 loom_cc_library(
@@ -25,19 +281,6 @@ loom_cc_library(
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
     ],
-)
-
-iree_assert_dependency_boundary(
-    name = "telemetry_is_storage_only",
-    forbidden_subtrees = [
-        "//loom/binding/...",
-        "//loom/src/loom/runtime/parameter/...",
-        "//loom/src/loom/serve/...",
-        "//loom/src/loom/service/...",
-        "//loom/src/loom/target/...",
-    ],
-    message = "Storage telemetry must not depend on parameter telemetry, serving, services, or compiler implementation",
-    target = ":telemetry",
 )
 
 loom_cc_test(

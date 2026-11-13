@@ -64,7 +64,7 @@ class ConfigureBazelTest(unittest.TestCase):
             config = self.configure_bazel.generate_config(
                 self.configure_bazel.parse_arguments(
                     [
-                        "-DIREE_HAL_DRIVER_AMDGPU=ON",
+                        "-DIREE_HAL_DRIVER_AMD_GPU=ON",
                         "-DIREE_HAL_DRIVER_AMD_XDNA=OFF",
                         "-DAMDF_FAMILY_CDNA=OFF",
                         "-DLOOM_TARGET_ALL_CPU=ON",
@@ -76,7 +76,7 @@ class ConfigureBazelTest(unittest.TestCase):
             )
 
         for expected in (
-            "build --//runtime/config/hal:drivers=task,amdgpu,amd-gpu",
+            "build --//runtime/config/hal:drivers=task,amd-gpu",
             "build --//libamdf/config:enabled=true",
             "build --//libamdf/config:families=rdna,xdna",
             "build --//build_tools/vulkan/config:enabled=false",
@@ -93,25 +93,47 @@ class ConfigureBazelTest(unittest.TestCase):
         )
 
     def test_non_windows_host_does_not_probe_windows_capabilities(self):
+        long_paths_reader = mock.Mock(return_value=False)
         symbolic_link_probe = mock.Mock(return_value=False)
 
         self.configure_bazel.require_windows_bazel_host(
             platform_name="linux",
+            long_paths_reader=long_paths_reader,
             symbolic_link_probe=symbolic_link_probe,
         )
 
+        long_paths_reader.assert_not_called()
         symbolic_link_probe.assert_not_called()
 
     def test_windows_host_accepts_required_capabilities(self):
         self.configure_bazel.require_windows_bazel_host(
             platform_name="win32",
+            long_paths_reader=lambda: True,
             symbolic_link_probe=lambda: True,
         )
+
+    def test_windows_host_reports_exact_long_path_setup(self):
+        with self.assertRaisesRegex(
+            SystemExit, "Open PowerShell as Administrator"
+        ) as context:
+            self.configure_bazel.require_windows_bazel_host(
+                platform_name="win32",
+                long_paths_reader=lambda: False,
+                symbolic_link_probe=lambda: True,
+            )
+
+        message = str(context.exception)
+        self.assertIn("LongPathsEnabled", message)
+        self.assertIn("-Value 1", message)
+        self.assertIn("base image", message)
+        self.assertIn("python dev.py bazel shutdown", message)
+        self.assertNotIn("Symbolic-link creation", message)
 
     def test_windows_host_reports_missing_symbolic_link_capability(self):
         with self.assertRaisesRegex(SystemExit, "Symbolic-link creation") as context:
             self.configure_bazel.require_windows_bazel_host(
                 platform_name="win32",
+                long_paths_reader=lambda: True,
                 symbolic_link_probe=lambda: False,
             )
 
@@ -119,6 +141,19 @@ class ConfigureBazelTest(unittest.TestCase):
         self.assertIn("Developer Mode", message)
         self.assertIn("Create symbolic links", message)
         self.assertIn("base image", message)
+        self.assertNotIn("LongPathsEnabled", message)
+
+    def test_windows_host_reports_all_missing_capabilities(self):
+        with self.assertRaises(SystemExit) as context:
+            self.configure_bazel.require_windows_bazel_host(
+                platform_name="win32",
+                long_paths_reader=lambda: False,
+                symbolic_link_probe=lambda: False,
+            )
+
+        message = str(context.exception)
+        self.assertIn("LongPathsEnabled", message)
+        self.assertIn("Symbolic-link creation", message)
 
     def test_api_options_have_equivalent_native_and_portable_spellings(self):
         portable = self.configure_bazel.generate_config(
@@ -168,14 +203,14 @@ class ConfigureBazelTest(unittest.TestCase):
         config = self.configure_bazel.generate_config(
             self.configure_bazel.parse_arguments(
                 [
-                    "--//runtime/src/iree/hal/drivers/amdgpu:targets=gfx942,gfx125X-all",
+                    "--//runtime/src/iree/hal/driver/amd/gpu:targets=gfx942,gfx125X-all",
                     "--//loom/config/arch/amdgpu:targets=gfx942,gfx125X-all",
                 ]
             )
         )
 
         self.assertIn(
-            "build --//runtime/src/iree/hal/drivers/amdgpu:targets=gfx125X-all,gfx942\n",
+            "build --//runtime/src/iree/hal/driver/amd/gpu:targets=gfx125X-all,gfx942\n",
             config,
         )
         self.assertIn(

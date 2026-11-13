@@ -21,6 +21,19 @@ static amdf_status_t amdf_gpu_linux_dxg_query_adapter_info(
       amdf_linux_dxg_kmt_query_adapter_info(&endpoint->instance->kmt, &query));
 }
 
+amdf_status_t amdf_gpu_linux_dxg_query_local_capacity(
+    const amdf_platform_endpoint_t* endpoint, uint64_t* out_capacity) {
+  D3DKMT_SEGMENTGROUPSIZEINFO sizes = {
+      .PhysicalAdapterIndex = endpoint->physical_adapter_index,
+  };
+  const amdf_status_t status = amdf_gpu_linux_dxg_query_adapter_info(
+      endpoint, KMTQAITYPE_GETSEGMENTGROUPSIZE, &sizes, sizeof(sizes));
+  if (amdf_status_is_ok(status)) {
+    *out_capacity = sizes.LocalMemory;
+  }
+  return status;
+}
+
 amdf_status_t amdf_gpu_linux_dxg_query_memory_capabilities(
     const amdf_platform_endpoint_t* endpoint,
     amdf_gpu_dxg_memory_capabilities_t* out_capabilities) {

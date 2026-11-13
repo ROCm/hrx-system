@@ -1,0 +1,42 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
+load("//loom/build_tools/bazel:loom_check.bzl", "loom_check_test_suite")
+
+package(
+    default_visibility = ["//visibility:private"],
+    licenses = ["notice"],
+)
+
+loom_check_test_suite(
+    name = "compiler_test",
+    srcs = [
+        "address_counted_loops.cxx-test",
+        "condition_declarations.cxx-test",
+        "condition_loop_cleanup.cxx-test",
+        "conditionals.cxx-test",
+        "constexpr_selection.cxx-test",
+        "construction.cxx-test",
+        "construction_carriers.cxx-test",
+        "construction_invalid.cxx-test",
+        "construction_native.cxx-test",
+        "construction_ssa.cxx-test",
+        "control_invalid.cxx-test",
+        "counted_loops.cxx-test",
+        "deep_conditionals.cxx-test",
+        "logical.cxx-test",
+        "loop_bodies.cxx-test",
+        "loop_exits.cxx-test",
+        "loop_schedules.cxx-test",
+        "loops.cxx-test",
+        "range_loops.cxx-test",
+        "structured_returns.cxx-test",
+        "switches.cxx-test",
+        "unreachable.cxx-test",
+    ],
+    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
+)

@@ -5,7 +5,7 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 load("//build_tools/bazel:cmake.bzl", "iree_cmake_extra_content")
-load("//libhrx/build_tools/bazel:cc.bzl", "hrx_cc_shared_library")
+load("//libhrx/build_tools/bazel:cc.bzl", "hrx_cc_shared_library", "hrx_cc_test")
 
 package(
     default_visibility = ["//visibility:public"],
@@ -56,6 +56,23 @@ _PASSTHROUGH_LIBRARIES = [
     )
     for name, source, deps in _PASSTHROUGH_LIBRARIES
 ]
+
+hrx_cc_test(
+    name = "hip_buffer_tracer_test",
+    srcs = [
+        "hip_buffer_tracer.c",
+        "hip_buffer_tracer_test.cc",
+        "hip_function_table.h",
+    ],
+    includes = [".."],
+    target_compatible_with = ["@platforms//os:linux"],
+    deps = [
+        "//build_tools/bazel:pthreads",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/testing:temp_file",
+    ],
+)
 
 [
     iree_cmake_extra_content(

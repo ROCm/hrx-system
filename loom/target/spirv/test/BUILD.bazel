@@ -38,17 +38,6 @@ _SPIRV_VULKAN_HAL_COMPATIBLE_WITH = loom_config_compatible_with([
     "//loom/config/execute:spirv_vulkan_hal",
 ])
 
-_CONFIGURED_WORKGROUP_STORAGE_VARIANTS = {
-    "four_stages": {
-        "case": "configured_workgroup_four_stages",
-        "configs": {"test.buffer.stage_count": "4"},
-    },
-    "one_stage": {
-        "case": "configured_workgroup_one_stage",
-        "configs": {"test.buffer.stage_count": "1"},
-    },
-}
-
 loom_test(
     name = "vulkan_explicit_target_tests",
     srcs = ["spirv_vulkan_hal_actual.loom"],
@@ -57,45 +46,17 @@ loom_test(
 )
 
 loom_test(
-    name = "cxx_configured_workgroup_storage_test",
-    benchmark_smoke = False,
-    execution_profiles = [SPIRV_VULKAN_HARDWARE_PROFILE],
-    module = "//loom/src/loom/import/cxx/test:configured_workgroup_storage_module",
-    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
-    variants = _CONFIGURED_WORKGROUP_STORAGE_VARIANTS,
-)
-
-[
-    loom_test(
-        name = "cxx_" + module + "_test",
-        execution_profiles = [SPIRV_VULKAN_HARDWARE_PROFILE],
-        module = "//loom/src/loom/import/cxx/test:" + module + "_module",
-        target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
-    )
-    for module in [
-        "barrier_helpers",
-        "borrowed_storage",
-        "packed_byte_arithmetic",
-        "packed_float8_conversion",
-        "padded_vectors",
-        "pointer_origins",
-        "subgroup_shuffles",
-        "vector_lookup",
-        "workload_configuration",
-    ]
-]
-
-loom_test(
-    name = "cxx_collective_scans_test",
-    execution_profiles = [SPIRV_VULKAN_HARDWARE_PROFILE],
-    module = "//loom/src/loom/import/cxx/test:collective_scans_module",
-    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
-)
-
-loom_test(
     name = "index_scale_tests",
     srcs = ["index_scale.loom"],
     benchmark_smoke = False,
+    execution_profiles = [SPIRV_VULKAN_HARDWARE_PROFILE],
+)
+
+loom_test(
+    name = "native_arguments_tests",
+    srcs = ["native_arguments.loom"],
+    benchmark_smoke = False,
+    compile_targets = ["//loom/target/spirv:vulkan1.3+bda+extended-types"],
     execution_profiles = [SPIRV_VULKAN_HARDWARE_PROFILE],
 )
 
@@ -251,7 +212,7 @@ loom_cc_test(
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/cts/util:registry",
         "//runtime/src/iree/hal/cts/util:test_base",
-        "//runtime/src/iree/hal/drivers/vulkan/cts:backends",
+        "//runtime/src/iree/hal/driver/vulkan/cts:backends",
         "//runtime/src/iree/testing:gtest",
     ],
 )
@@ -299,7 +260,7 @@ loom_cc_test(
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/cts/util:registry",
         "//runtime/src/iree/hal/cts/util:test_base",
-        "//runtime/src/iree/hal/drivers/vulkan/cts:backends",
+        "//runtime/src/iree/hal/driver/vulkan/cts:backends",
         "//runtime/src/iree/testing:gtest",
     ],
 )

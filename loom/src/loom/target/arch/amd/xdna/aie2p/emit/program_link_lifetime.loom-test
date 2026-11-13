@@ -1,11 +1,9 @@
-// RUN: emit aie2p-xdna
+// The returning caller reserves its incoming-link shadow while retaining
+// twenty-four input snapshots across a helper call. Spills must preserve that
+// link and the caller values in separate storage. The final ELF checks both
+// the relocated stack backing and the complete call/return instruction stream.
+// RUN: emit aie2p-xdna output=sections
 
-// These paired programs exercise the call-preserved scalar capacity boundary.
-// Twenty-four loaded values remain live across a helper that clobbers eight
-// scalar registers. The sum depends on the helper result, so scheduling cannot
-// shorten those lifetimes by moving the sum before the call. A nonreturning
-// worker can allocate the incoming-link shadow; the returning variant below
-// must reserve it and diagnose exhaustion instead of corrupting its return.
 aie2p.target<configuration> @configuration {device_profile = "amd.xdna.strix_halo.17f0_11"}
 
 aie2p.target<core> @core {device_profile = "amd.xdna.strix_halo.17f0_11"}
@@ -94,109 +92,10 @@ low.func.def target<amd.xdna.aie2p.core>(@core) abi(object_function) @worker() a
   %sum22 = add.rr %sum21, %value22
   %sum23 = add.rr %sum22, %value23
   st %sum23, %state0, 0
-  low.br ^park
-^park:
-  low.br ^park
+  return
 }
 
 // ----
-partition: 1 columns, 6 rows
-entries: 1
-entry 0: 0 bindings, 0 dynamic relocations
-  invocation 0: bytes=384 next=1
-  invocation 1: bytes=16 next=1
-
-// ====
-// RUN: emit aie2p-xdna
-
-aie2p.target<configuration> @configuration {device_profile = "amd.xdna.strix_halo.17f0_11"}
-
-aie2p.target<core> @core {device_profile = "amd.xdna.strix_halo.17f0_11"}
-
-low.func.def public retain target<amd.xdna.aie2p.configuration>(@configuration) abi(array_program) @configure() asm {
-  %columns = constant 1 : reg<aie2p.config.scalar : i64>
-  entry %columns, @initialize, @invoke
-  return
-}
-
-low.func.def target<amd.xdna.aie2p.configuration>(@configuration) @initialize() asm {
-  %column = constant 0 : reg<aie2p.config.scalar : i64>
-  %row = constant 2 : reg<aie2p.config.scalar : i64>
-  program.load %column, %row, @worker
-  return
-}
-
-low.func.def target<amd.xdna.aie2p.configuration>(@configuration) @invoke() asm {
-  return
-}
-
-low.func.def target<amd.xdna.aie2p.core>(@core) @notify(%storage: reg<aie2p.ep>, %a0: reg<aie2p.er>, %a1: reg<aie2p.er>, %a2: reg<aie2p.er>, %a3: reg<aie2p.er>, %a4: reg<aie2p.er>, %a5: reg<aie2p.er>, %a6: reg<aie2p.er>, %a7: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>) asm {
-  %updated0 = add %a0, 1
-  %updated1 = add %a1, 1
-  %updated2 = add %a2, 1
-  %updated3 = add %a3, 1
-  %updated4 = add %a4, 1
-  %updated5 = add %a5, 1
-  %updated6 = add %a6, 1
-  %updated7 = add %a7, 1
-  st %updated0, %storage, 0
-  return %updated0, %updated1, %updated2, %updated3, %updated4, %updated5, %updated6, %updated7
-}
-
-low.func.def target<amd.xdna.aie2p.core>(@core) abi(object_function) @worker() asm {
-  %state0 = mov.local-address 458752
-  %state1 = mov.local-address 458784
-  %state2 = mov.local-address 458816
-  %value0 = lda %state0, 0
-  %value1 = lda %state0, 4
-  %value2 = lda %state0, 8
-  %value3 = lda %state0, 12
-  %value4 = lda %state0, 16
-  %value5 = lda %state0, 20
-  %value6 = lda %state0, 24
-  %value7 = lda %state0, 28
-  %value8 = lda %state1, 0
-  %value9 = lda %state1, 4
-  %value10 = lda %state1, 8
-  %value11 = lda %state1, 12
-  %value12 = lda %state1, 16
-  %value13 = lda %state1, 20
-  %value14 = lda %state1, 24
-  %value15 = lda %state1, 28
-  %value16 = lda %state2, 0
-  %value17 = lda %state2, 4
-  %value18 = lda %state2, 8
-  %value19 = lda %state2, 12
-  %value20 = lda %state2, 16
-  %value21 = lda %state2, 20
-  %value22 = lda %state2, 24
-  // ERROR@+1: BACKEND/005
-  %value23 = lda %state2, 28
-  %result0, %result1, %result2, %result3, %result4, %result5, %result6, %result7 = low.func.call @notify(%state0, %value0, %value1, %value2, %value3, %value4, %value5, %value6, %value7) : (reg<aie2p.ep>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>)
-  %sum0 = add.rr %result0, %value0
-  %sum1 = add.rr %sum0, %value1
-  %sum2 = add.rr %sum1, %value2
-  %sum3 = add.rr %sum2, %value3
-  %sum4 = add.rr %sum3, %value4
-  %sum5 = add.rr %sum4, %value5
-  %sum6 = add.rr %sum5, %value6
-  %sum7 = add.rr %sum6, %value7
-  %sum8 = add.rr %sum7, %value8
-  %sum9 = add.rr %sum8, %value9
-  %sum10 = add.rr %sum9, %value10
-  %sum11 = add.rr %sum10, %value11
-  %sum12 = add.rr %sum11, %value12
-  %sum13 = add.rr %sum12, %value13
-  %sum14 = add.rr %sum13, %value14
-  %sum15 = add.rr %sum14, %value15
-  %sum16 = add.rr %sum15, %value16
-  %sum17 = add.rr %sum16, %value17
-  %sum18 = add.rr %sum17, %value18
-  %sum19 = add.rr %sum18, %value19
-  %sum20 = add.rr %sum19, %value20
-  %sum21 = add.rr %sum20, %value21
-  %sum22 = add.rr %sum21, %value22
-  %sum23 = add.rr %sum22, %value23
-  st %sum23, %state0, 0
-  return
-}
+.text.worker: address=0x00000000 bytes=384 initialized
+  4480e0090700f8e0d11d4400c0000700ba1020b0c00100d0a200ba101030c10100d0822e9836050298561500987625009896350098b6450098d6550098f66500981676009836160298562602987636029896460298b6560298d66602981677029836070198561701987627019896370198b6470198d6570198f667019815fc0f000000000000000000000270100a00601150f8205518f8a09518040100a80000f820d618f8a01619221c0000e6205701221c0000e6a09701221c0000e620d801f820d0199880c01198a0001098b0001098c0001098d0001098e0001098f00010980001109890001098100110982001109830011098400110985001102cc1022086ff988001109890011098a0011098b0011098c0011098d0011098e0011098f001109810001098110408c4010000f8fff8a07b1f18002810000000000000000000000000000000000000000000000000180700105c0e84308240180784101807c6101807081118074a1118078c111807ce111800281000000000000000000000
+.storage.worker.stack: address=0x00070000 bytes=64 reserved

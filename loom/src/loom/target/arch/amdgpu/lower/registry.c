@@ -1677,9 +1677,11 @@ static iree_string_view_t loom_amdgpu_tensor_memory_plan_key(
   if (plan->descriptor.descriptor == NULL) {
     return iree_string_view_empty();
   }
+  const loom_low_descriptor_set_t* descriptor_set =
+      loom_low_lower_context_descriptor_set(context);
   return loom_low_descriptor_set_string(
-      loom_low_lower_context_descriptor_set(context),
-      plan->descriptor.descriptor->key_string_ref);
+      descriptor_set, loom_low_descriptor_key_string_ref(
+                          descriptor_set, plan->descriptor.descriptor));
 }
 #endif  // LOOM_AMDGPU_LOWER_CAPABILITY_ASYNC_TENSOR_LOAD_TO_LDS
 
@@ -1815,8 +1817,9 @@ static iree_status_t loom_amdgpu_finalize_plan(
     case LOOM_OP_VECTOR_LOAD:
     case LOOM_OP_VECTOR_LOAD_MASK:
     case LOOM_OP_VECTOR_STORE:
-      return loom_amdgpu_finalize_memory_plan(
+      loom_amdgpu_finalize_memory_plan(
           context, (loom_amdgpu_memory_access_plan_t*)plan.target_data);
+      return iree_ok_status();
     case LOOM_OP_VIEW_ATOMIC_REDUCE:
     case LOOM_OP_VIEW_ATOMIC_RMW:
     case LOOM_OP_VIEW_ATOMIC_CMPXCHG:
@@ -1826,8 +1829,8 @@ static iree_status_t loom_amdgpu_finalize_plan(
           (loom_amdgpu_atomic_plan_t*)plan.target_data;
       if (atomic->source.memory_space == LOOM_VALUE_FACT_MEMORY_SPACE_GLOBAL &&
           atomic->address_form == LOOM_AMDGPU_MEMORY_ADDRESS_FORM_DEFAULT) {
-        return loom_amdgpu_plan_buffer_extent(context, &atomic->source,
-                                              &atomic->buffer_extent);
+        loom_amdgpu_finalize_buffer_extent(context, &atomic->source,
+                                           &atomic->buffer_extent);
       }
       return iree_ok_status();
     }
@@ -1837,14 +1840,14 @@ static iree_status_t loom_amdgpu_finalize_plan(
           (loom_amdgpu_fragment_memory_plan_t*)plan.target_data;
       if (fragment->source.memory_space ==
           LOOM_VALUE_FACT_MEMORY_SPACE_DESCRIPTOR) {
-        return loom_amdgpu_plan_buffer_extent(context, &fragment->source,
-                                              &fragment->buffer_extent);
+        loom_amdgpu_finalize_buffer_extent(context, &fragment->source,
+                                           &fragment->buffer_extent);
       }
       return iree_ok_status();
     }
     case LOOM_OP_INDEX_CAST:
       return loom_amdgpu_finalize_index_cast_plan(
-          context, (const loom_amdgpu_index_cast_plan_t*)plan.target_data);
+          context, (loom_amdgpu_index_cast_plan_t*)plan.target_data);
     case LOOM_OP_SCALAR_DIVSI:
     case LOOM_OP_SCALAR_DIVUI:
     case LOOM_OP_SCALAR_DIVREMSI:
@@ -1855,8 +1858,8 @@ static iree_status_t loom_amdgpu_finalize_plan(
     case LOOM_OP_INDEX_DIVREM:
     case LOOM_OP_INDEX_REM:
       return loom_amdgpu_finalize_integer_division_plan(
-          context,
-          (const loom_amdgpu_integer_division_plan_t*)plan.target_data);
+          context, source_op,
+          (loom_amdgpu_integer_division_plan_t*)plan.target_data);
     case LOOM_OP_SCALAR_TRUNCI:
     case LOOM_OP_SCALAR_EXTF:
     case LOOM_OP_SCALAR_FPTRUNC:
@@ -2027,13 +2030,15 @@ static const loom_low_lower_policy_t kAmdgpuLowLowerPolicy = {
                            .user_data = NULL},
     .map_argument = {.fn = loom_amdgpu_map_argument, .user_data = NULL},
     .join_result_type = loom_amdgpu_join_result_type,
+    .native_result_distribution = loom_amdgpu_native_result_distribution,
     .map_abi_layout = {.fn = loom_amdgpu_map_abi_layout, .user_data = NULL},
     .emit_preamble = {.fn = loom_amdgpu_emit_preamble, .user_data = NULL},
     .entry_setup = {.plan = loom_amdgpu_plan_entry_setup,
                     .emit = loom_amdgpu_emit_entry_setup,
                     .user_data = NULL},
     .prepare_branch = {.fn = loom_amdgpu_prepare_branch, .user_data = NULL},
-    .control_operand = {.prepare = loom_amdgpu_prepare_control_operand,
+    .control_operand = {.accepts = loom_amdgpu_control_operand_accepts,
+                        .prepare = loom_amdgpu_prepare_control_operand,
                         .emit = loom_amdgpu_emit_control_operand,
                         .user_data = NULL},
     .materialize_structural_operand =
@@ -2105,5 +2110,5 @@ void loom_amdgpu_low_lower_policy_registry_initialize(
 #undef LOOM_AMDGPU_TARGET_DESCRIPTOR_SET
   };
   loom_low_lower_policy_registry_initialize_from_entries(
-      out_registry, kEntries, IREE_ARRAYSIZE(kEntries));
+      kEntries, IREE_ARRAYSIZE(kEntries), out_registry);
 }

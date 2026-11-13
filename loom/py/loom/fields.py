@@ -175,7 +175,10 @@ class FieldLayout:
     variadic_successor: str | None  # Name of the variadic successor, if any.
     variadic_region: str | None  # Name of the variadic region, if any.
     segmented_operands: bool = False
+    # Direct callable body, whose exits obey the function result contract.
     func_body_region_index: int | None = None
+    # Alternate zero-result exit permitted only in the direct callable body.
+    func_unreachable: str | None = None
     # Signature fields introduced by FuncArgs in the operation format.
     func_args_fields: frozenset[str] = frozenset()
     # Regions whose entry arguments are declared in their parent's format.
@@ -389,6 +392,7 @@ def compute_layout(op_decl: Op) -> FieldLayout:
     func_args_fields, entry_args_declared_by_parent = _signature_fields_and_regions(
         op_decl
     )
+    func_body_region_index, func_unreachable = _func_body(op_decl)
     return FieldLayout(
         fields=fields,
         fixed_operand_count=fixed_operand_count,
@@ -401,24 +405,21 @@ def compute_layout(op_decl: Op) -> FieldLayout:
         variadic_successor=variadic_successor,
         variadic_region=variadic_region,
         segmented_operands=segmented_operands,
-        func_body_region_index=_func_body_region_index(op_decl),
+        func_body_region_index=func_body_region_index,
+        func_unreachable=func_unreachable,
         func_args_fields=func_args_fields,
         entry_args_declared_by_parent=entry_args_declared_by_parent,
     )
 
 
-def _func_body_region_index(op_decl: Op) -> int | None:
-    body_name: str | None = None
+def _func_body(op_decl: Op) -> tuple[int | None, str | None]:
     for interface in op_decl.interfaces:
         if isinstance(interface, FuncLikeInterface):
-            body_name = interface.body
+            for index, region in enumerate(op_decl.regions):
+                if region.name == interface.body:
+                    return index, interface.unreachable
             break
-    if body_name is None:
-        return None
-    for index, region in enumerate(op_decl.regions):
-        if region.name == body_name:
-            return index
-    return None
+    return None, None
 
 
 # ============================================================================

@@ -19,6 +19,7 @@
 #include "iree/vm/bytecode/wire/core.h"
 #include "iree/vm/bytecode/wire/module.h"
 #include "iree/vm/execution.h"
+#include "iree/vm/module.h"
 
 typedef struct iree_vm_bytecode_assembler_numeric_value_t {
   // Offset of the accepted spelling in the generated text pool.
@@ -1487,21 +1488,21 @@ static iree_status_t iree_vm_bytecode_assembler_parse_signature_fields(
     uint8_t descriptor[IREE_VM_BYTECODE_ASSEMBLER_MAX_RECORD_SIZE] = {0};
     iree_vm_bytecode_assembler_store(descriptor + kind_offset, kind_width,
                                      kind);
-    if (kind == IREE_VM_BYTECODE_SIGNATURE_KIND_REF ||
+    if (iree_vm_module_signature_type_kind_is_ref(kind) ||
         kind == IREE_VM_BYTECODE_SIGNATURE_KIND_FUNCTION) {
       IREE_RETURN_IF_ERROR(iree_vm_bytecode_assembler_parse_char(
           assembler, '(', "expected '(' before signature type"));
       IREE_RETURN_IF_ERROR(iree_vm_bytecode_assembler_parse_symbol_fixup(
           assembler, '@',
-          kind == IREE_VM_BYTECODE_SIGNATURE_KIND_REF ? ref_domain
-                                                      : callable_domain,
+          iree_vm_module_signature_type_kind_is_ref(kind) ? ref_domain
+                                                          : callable_domain,
           type_width, descriptor_offset + type_offset,
           IREE_VM_BYTECODE_ASSEMBLER_FIXUP_ORDINAL, 0, 0, 0, 0));
       IREE_RETURN_IF_ERROR(iree_vm_bytecode_assembler_parse_char(
           assembler, ')', "expected ')' after signature type"));
     }
     uint32_t count_ordinal = 0;
-    if (kind == IREE_VM_BYTECODE_SIGNATURE_KIND_REF) {
+    if (iree_vm_module_signature_type_kind_is_ref(kind)) {
       count_ordinal = 1;
     } else if (kind == IREE_VM_BYTECODE_SIGNATURE_KIND_FUNCTION) {
       count_ordinal = 2;

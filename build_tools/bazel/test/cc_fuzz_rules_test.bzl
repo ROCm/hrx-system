@@ -91,10 +91,37 @@ def _test_cc_fuzz_adds_fuzzer_contract_impl(env, target):
     if not library_path.endswith("dynamic_library_root.so"):
         env.fail("unexpected fuzz dynamic-library path %r" % library_path)
 
+def _test_cc_fuzz_accepts_external_engine(name, **kwargs):
+    util.helper_target(
+        iree_cc_fuzz,
+        name = name + "_subject",
+        linkopts = ["/fuzzing-engine/libFuzzingEngine.a", "-Wl,--user-linkopt"],
+        srcs = [name + "_subject.cc"],
+    )
+    analysis_test(
+        name = name,
+        config_settings = {
+            str(Label("//build_tools/bazel:external_fuzzing_engine")): True,
+        },
+        impl = _test_cc_fuzz_accepts_external_engine_impl,
+        target = name + "_subject",
+        **kwargs
+    )
+
+def _test_cc_fuzz_accepts_external_engine_impl(env, target):
+    linkopts = target[TestingAspectInfo].attrs.linkopts
+    engines = [value for value in linkopts if value == "/fuzzing-engine/libFuzzingEngine.a"]
+    env.expect.that_collection(engines).contains_exactly(["/fuzzing-engine/libFuzzingEngine.a"])
+    if "-Wl,--user-linkopt" not in linkopts:
+        env.fail("expected the user link option in fuzz linkopts %r" % linkopts)
+    if "-fsanitize=fuzzer" in linkopts:
+        env.fail("unexpected default fuzz engine alongside the external engine: %r" % linkopts)
+
 def cc_fuzz_rules_test_suite(name):
     test_suite(
         name = name,
         tests = [
             _test_cc_fuzz_adds_fuzzer_contract,
+            _test_cc_fuzz_accepts_external_engine,
         ],
     )

@@ -33,6 +33,7 @@ class PipelineBuilder(DialectBuilder):
     def strand(
         self,
         *,
+        participation: str | None = ...,
         target: str | None = ...,
         origins: list[int | ValueRef],
         counts: list[int | ValueRef],

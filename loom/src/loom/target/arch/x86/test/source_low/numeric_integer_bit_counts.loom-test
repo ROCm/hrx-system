@@ -85,7 +85,7 @@ func.def @vector_i8x4_counts(%input: vector<4xi8>) -> (vector<4xi8>, vector<4xi8
 
 // ----
 low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = (vector<4xi8>) -> (vector<4xi8>, vector<4xi8>, vector<4xi8>)}) @vector_i8x4_counts(%input: reg<x86.xmm>) -> (reg<x86.xmm>, reg<x86.xmm>, reg<x86.xmm>) asm {
-  %11 = vpcmpeqd.xmm %input, %input
+  %11 = vpcmpeqd.ones.xmm
   %12 = vpsrlw.xmm %input, 1
   %13 = avx2.vmovdqu.rodata.xmm @__low_rodata_e27de4ff
   %14 = vpand.xmm %12, %13
@@ -163,7 +163,7 @@ func.def @predicate_i1x8_counts(%input: vector<8xi1>) -> (vector<8xi1>, vector<8
 
 // ----
 low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = (vector<8xi1>) -> (vector<8xi1>, vector<8xi1>, vector<8xi1>)}) @predicate_i1x8_counts(%population: reg<x86.xmm>) -> (reg<x86.xmm>, reg<x86.xmm>, reg<x86.xmm>) asm {
-  %11 = vpcmpeqd.xmm %population, %population
+  %11 = vpcmpeqd.ones.xmm
   %leading = vpxor.xmm %population, %11
   return %leading, %leading, %population
 }

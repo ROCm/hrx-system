@@ -11,13 +11,12 @@ load("//build_tools/bazel:test_resources.bzl", "GPU_DEVICE_RESOURCE_GROUP")
 AMD_GPU_CTS_RESOURCE_GROUP = GPU_DEVICE_RESOURCE_GROUP
 
 AMD_GPU_CTS_TAGS = [
-    "iree-run-requirement=runtime.resource.amd_gpu",
+    "iree-run-requirement=libamdf.resource.amd_gpu",
     "runtime-resource=amd-gpu",
 ]
 
-# Native kernel fixtures require the AMDGPU backend and its device toolchain.
+# GPU consumer tests use the native AMD GPU backend and its device toolchain.
 AMDGPU_CTS_COMPATIBILITY_CONDITIONS = {
     "//runtime/config/hal:driver_amd_gpu": [],
-    "//runtime/config/hal:driver_amdgpu": [],
     "//conditions:default": ["@platforms//:incompatible"],
 }

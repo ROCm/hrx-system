@@ -1,0 +1,48 @@
+// RUN: emit source-low target=amd.xdna.aie2p:core output=low
+
+func.def @zero_equality(%value: f32) -> (i1, i1) {
+  %comparison_zero = scalar.constant 0.0 : f32
+  %equal = scalar.cmpf oeq, %value, %comparison_zero : f32
+  %different = scalar.cmpf une, %comparison_zero, %value : f32
+  func.return %equal, %different : i1, i1
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @zero_equality(%value: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>) asm {
+  %9 = mov.i32 2147483647
+  %10 = and %value, %9
+  %equal = eqz %10
+  %different = nez %10
+  return %equal, %different
+}
+
+// ====
+
+// RUN: emit source-low target=amd.xdna.aie2p:core output=low
+
+func.def @zero_ordering(%value: f32) -> (i1, i1) {
+  %comparison_zero = scalar.constant -0.0 : f32
+  %greater_equal = scalar.cmpf oge, %value, %comparison_zero : f32
+  %reverse = scalar.cmpf<nnan> ugt, %comparison_zero, %value : f32
+  func.return %greater_equal, %reverse : i1, i1
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @zero_ordering(%value: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>) asm {
+  %9 = mov.i32 2147483647
+  %10 = and %value, %9
+  %11 = mov.short 0
+  %12 = ge %value, %11
+  %13 = eqz %10
+  %14 = or %12, %13
+  %15 = mov.i32 2139095040
+  %16 = ltu %15, %10
+  %17 = mov.short 1
+  %18 = xor %16, %17
+  %greater_equal = and %14, %18
+  %23 = lt %value, %11
+  %24 = nez %10
+  %25 = and %23, %24
+  %reverse = or %25, %25
+  return %greater_equal, %reverse
+}

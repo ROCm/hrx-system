@@ -30,7 +30,8 @@ typedef iree_status_t (*loom_bytecode_source_symbol_resolver_fn_t)(
 
 // Source-to-output symbol projection for incremental materialization.
 typedef struct loom_bytecode_source_symbol_resolver_t {
-  // Resolver invoked for references outside the complete symbol selection.
+  // Resolver invoked for reached source identities, including selected symbols
+  // whose output identities may already have been reserved by the caller.
   loom_bytecode_source_symbol_resolver_fn_t fn;
   // Caller-owned payload passed to |fn|.
   void* user_data;
@@ -57,8 +58,8 @@ iree_status_t loom_bytecode_materialize_module_symbols(
     const loom_bytecode_file_metadata_t* metadata, uint16_t module_ordinal,
     loom_bytecode_symbol_ordinal_list_t selection,
     const loom_bytecode_read_options_t* options,
-    loom_bytecode_read_result_t* out_result, loom_module_t** out_module,
-    iree_allocator_t host_allocator);
+    iree_allocator_t host_allocator, loom_bytecode_read_result_t* out_result,
+    loom_module_t** out_module);
 
 // Materializes exact complete symbols into a caller-owned module.
 //
@@ -75,9 +76,8 @@ iree_status_t loom_bytecode_materialize_module_symbols_into(
     const loom_bytecode_file_metadata_t* metadata, uint16_t module_ordinal,
     loom_bytecode_symbol_ordinal_list_t selection,
     loom_bytecode_source_symbol_resolver_t symbol_resolver,
-    const loom_bytecode_read_options_t* options,
-    loom_bytecode_read_result_t* out_result, loom_module_t* output_module,
-    iree_allocator_t host_allocator);
+    const loom_bytecode_read_options_t* options, loom_module_t* output_module,
+    iree_allocator_t host_allocator, loom_bytecode_read_result_t* out_result);
 
 #ifdef __cplusplus
 }  // extern "C"

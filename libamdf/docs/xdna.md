@@ -124,6 +124,28 @@ sharing AIE2P does not imply equal row or column counts. The AIE2IPU register
 tables and AIE4 native interfaces discussed in the observability reference are
 separately scoped source contracts, not additional execution admission.
 
+Passive discovery also identifies the AIE4 family using numeric target names
+of the form `amd.xdna.aie4.<device>_<revision>`. The published native identity
+table distinguishes these roles:
+
+| Native role | PCI device | Revisions |
+| --- | --- | --- |
+| Classic | `17f1` | `10`, `13`, `14`, `15` |
+| Management PF | `17f2` | `10`, `13`, `14`, `15` |
+| Execution VF | `17f3` | `10`, `13`, `14`, `15` |
+| Classic | `1b0a` | `00` |
+| Management PF | `1b0b` | `00` |
+| Execution VF | `1b0c` | `00` |
+
+These identities come from the [native PCI and revision table](https://github.com/amd/xdna-driver/blob/24dfd68696d4aba8708ba32da39c008de73c2618/drivers/accel/amdxdna/amdxdna_pci_drv.c#L106-L128).
+Recognition supplies an exact identity without opening the device. It does not
+advertise a compiler implementation, memory services, or a queue. AIE4 and
+Phoenix currently have passive identities only: device creation returns
+`UNSUPPORTED` before native activation. Live device creation requires a complete
+architecture and memory profile; it cannot publish zero address-width facts.
+
+The following native execution contracts apply to the admitted AIE2P profiles:
+
 | Boundary | Linux modern DRM | Windows MCDM |
 | --- | --- | --- |
 | Context admission | Native hardware context; queue creation qualifies direct instruction execution and completion. | Native private adapter query selects direct or metadata partition admission. |

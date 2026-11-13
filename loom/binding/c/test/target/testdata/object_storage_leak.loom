@@ -1,0 +1,10 @@
+vm.target<core> @vm
+
+type.decl import("provider", "object") @Object
+
+low.func.def public target<vm.core>(@vm) abi(vm_function) @run(%owner: reg<vm.ref : ref<@Object>>) asm {
+  %slot = storage {byte_alignment = 16, byte_length = 16} : low.storage<private>
+  low.spill.move %owner, %slot : reg<vm.ref : ref<@Object>>, low.storage<private>
+  %restored = low.reload.move %slot : low.storage<private> -> reg<vm.ref : ref<@Object>>
+  return
+}

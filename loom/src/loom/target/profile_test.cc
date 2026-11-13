@@ -13,6 +13,7 @@ namespace {
 
 const loom_target_profile_type_t kBaseProfileType = {
     .name = IREE_SVL("base"),
+    .storage_size = sizeof(loom_target_profile_t),
     .equal = loom_target_profile_equal_common,
 };
 
@@ -64,6 +65,7 @@ TEST(TargetProfileTest,
       SCALAR(snapshot.max_flat_workgroup_size),
       SCALAR(snapshot.max_workgroup_storage_bytes),
       SCALAR(snapshot.subgroup_size),
+      SCALAR(snapshot.execution_unit_count),
       SCALAR(snapshot.max_grid_size.x),
       SCALAR(snapshot.max_grid_size.y),
       SCALAR(snapshot.max_grid_size.z),

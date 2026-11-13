@@ -209,6 +209,19 @@ typedef struct loom_decision_program_binding_t {
   const loom_value_id_t* result_values;
 } loom_decision_program_binding_t;
 
+// Dense synthetic-fact binding for one program evaluation. Synthetic value
+// IDs directly index |facts| and each distinct ID is its own runtime identity.
+typedef struct loom_decision_program_indexed_binding_t {
+  // Borrowed facts indexed by synthetic value ID.
+  const loom_value_facts_t* facts;
+
+  // Borrowed application argument value IDs in signature order.
+  const loom_value_id_t* argument_values;
+
+  // Borrowed application result value IDs in signature order.
+  const loom_value_id_t* result_values;
+} loom_decision_program_indexed_binding_t;
+
 // Evaluates one adapter-owned contextual feature.
 typedef loom_decision_truth_t (*loom_decision_program_evaluate_feature_fn_t)(
     void* user_data, uint32_t feature_ordinal);
@@ -323,6 +336,19 @@ static_assert(sizeof(loom_decision_program_choice_evidence_t) == 8,
 void loom_decision_program_evaluate(
     const loom_decision_program_t* program,
     const loom_decision_program_binding_t* binding,
+    loom_decision_program_feature_evaluator_t feature_evaluator,
+    loom_decision_program_predicate_refiner_t predicate_refiner,
+    loom_decision_program_resolution_policy_t resolution_policy,
+    uint32_t* live_action_ordinals, uint32_t* out_live_action_count,
+    loom_decision_program_result_t* out_result);
+
+// Evaluates one program over a dense synthetic-fact binding. Result and live
+// action semantics are identical to loom_decision_program_evaluate. This entry
+// point avoids manufacturing an owning SSA fact table for already-projected
+// adapter facts.
+void loom_decision_program_evaluate_indexed(
+    const loom_decision_program_t* program,
+    const loom_decision_program_indexed_binding_t* binding,
     loom_decision_program_feature_evaluator_t feature_evaluator,
     loom_decision_program_predicate_refiner_t predicate_refiner,
     loom_decision_program_resolution_policy_t resolution_policy,

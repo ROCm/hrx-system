@@ -98,6 +98,21 @@ static iree_status_t loom_buffer_meet_reference_extension(
   }
   reference.origin = loom_value_fact_reference_origin_meet(
       lhs_reference.origin, rhs_reference.origin);
+  // Null contributes no storage domain, but selecting it must not turn the
+  // other arm's root identity into an unconditional identity for the result.
+  // Retain only the storage class; the joined value remains its own root.
+  const loom_value_fact_buffer_reference_t* storage_reference = NULL;
+  if (lhs_reference.nullability == LOOM_VALUE_FACT_REFERENCE_NULLABILITY_NULL) {
+    storage_reference = &rhs_reference;
+  } else if (rhs_reference.nullability ==
+             LOOM_VALUE_FACT_REFERENCE_NULLABILITY_NULL) {
+    storage_reference = &lhs_reference;
+  }
+  if (storage_reference) {
+    reference.memory_space = storage_reference->memory_space;
+    reference.origin = storage_reference->origin;
+    reference.origin.entry_value_id = LOOM_VALUE_ID_INVALID;
+  }
   loom_value_facts_meet(&lhs_extent, &rhs_extent,
                         &reference.maximum_byte_extent);
   if (reference.minimum_alignment == 0) {
@@ -119,10 +134,110 @@ static iree_status_t loom_buffer_widen_reference_extension(
                                               next_table, next, inout_facts);
 }
 
+static iree_status_t loom_buffer_narrow_reference_extension(
+    const loom_value_fact_domain_t* domain, const loom_module_t* module,
+    loom_type_t type, loom_value_fact_table_t* target,
+    const loom_value_fact_table_t* previous_table, loom_value_facts_t previous,
+    const loom_value_fact_table_t* next_table, loom_value_facts_t next,
+    loom_value_facts_t* inout_facts) {
+  (void)domain;
+  (void)module;
+  (void)type;
+  loom_value_fact_buffer_reference_t reference = {0};
+  loom_value_fact_buffer_reference_t incoming = {0};
+  loom_value_facts_query_buffer_reference(&previous_table->context, previous,
+                                          &reference);
+  loom_value_facts_query_buffer_reference(&next_table->context, next,
+                                          &incoming);
+  reference.maximum_byte_extent = loom_value_facts_narrow(
+      LOOM_SCALAR_TYPE_OFFSET, reference.maximum_byte_extent,
+      incoming.maximum_byte_extent);
+  if (reference.minimum_alignment == 1) {
+    reference.minimum_alignment = incoming.minimum_alignment;
+  }
+  if (reference.memory_space == LOOM_VALUE_FACT_MEMORY_SPACE_UNKNOWN) {
+    reference.memory_space = incoming.memory_space;
+  }
+  if (reference.nullability == LOOM_VALUE_FACT_REFERENCE_NULLABILITY_UNKNOWN) {
+    reference.nullability = incoming.nullability;
+  }
+  // Identity is deliberately retained from the existing coordinate. A new
+  // numeric/storage proof does not authorize importing a different root.
+  loom_value_facts_t narrowed = loom_value_facts_unknown();
+  IREE_RETURN_IF_ERROR(loom_value_facts_make_buffer_reference(
+      &target->context, reference, &narrowed));
+  inout_facts->extension_id = narrowed.extension_id;
+  return iree_ok_status();
+}
+
 const loom_value_fact_domain_t loom_buffer_fact_domain = {
     .meet_extension = loom_buffer_meet_reference_extension,
     .widen_extension = loom_buffer_widen_reference_extension,
+    .narrow_extension = loom_buffer_narrow_reference_extension,
 };
+
+iree_status_t loom_buffer_null_facts(loom_fact_context_t* context,
+                                     const loom_module_t* module,
+                                     const loom_op_t* op,
+                                     const loom_value_facts_t* operand_facts,
+                                     loom_value_facts_t* result_facts) {
+  loom_value_fact_buffer_reference_t reference =
+      loom_buffer_default_reference(loom_buffer_null_result(op));
+  reference.maximum_byte_extent = loom_value_facts_exact_i64(0);
+  reference.nullability = LOOM_VALUE_FACT_REFERENCE_NULLABILITY_NULL;
+  return loom_value_facts_make_buffer_reference(context, reference,
+                                                &result_facts[0]);
+}
+
+iree_status_t loom_buffer_compare_null_facts(
+    loom_fact_context_t* context, const loom_module_t* module,
+    const loom_op_t* op, const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts) {
+  loom_value_fact_buffer_reference_t reference = {0};
+  result_facts[0] = loom_value_facts_make(0, 1, 1);
+  if (loom_value_facts_query_buffer_reference(context, operand_facts[0],
+                                              &reference) &&
+      reference.nullability != LOOM_VALUE_FACT_REFERENCE_NULLABILITY_UNKNOWN) {
+    result_facts[0] = loom_value_facts_exact_i64(
+        reference.nullability == LOOM_VALUE_FACT_REFERENCE_NULLABILITY_NULL);
+  }
+  loom_value_facts_propagate_unary_distribution(operand_facts[0],
+                                                &result_facts[0]);
+  if (loom_value_facts_is_lane_varying(result_facts[0])) {
+    loom_value_facts_mark_lane_predicate(&result_facts[0]);
+  }
+  return iree_ok_status();
+}
+
+iree_status_t loom_buffer_compare_address_facts(
+    loom_fact_context_t* context, const loom_module_t* module,
+    const loom_op_t* op, const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts) {
+  result_facts[0] = loom_value_facts_make(0, 1, 1);
+  loom_value_fact_buffer_reference_t lhs = {0};
+  loom_value_fact_buffer_reference_t rhs = {0};
+  if (loom_value_facts_query_buffer_reference(context, operand_facts[0],
+                                              &lhs) &&
+      loom_value_facts_query_buffer_reference(context, operand_facts[2],
+                                              &rhs) &&
+      lhs.nullability != LOOM_VALUE_FACT_REFERENCE_NULLABILITY_UNKNOWN &&
+      rhs.nullability != LOOM_VALUE_FACT_REFERENCE_NULLABILITY_UNKNOWN &&
+      (lhs.nullability == LOOM_VALUE_FACT_REFERENCE_NULLABILITY_NULL ||
+       rhs.nullability == LOOM_VALUE_FACT_REFERENCE_NULLABILITY_NULL)) {
+    const bool equal = lhs.nullability == rhs.nullability;
+    result_facts[0] = loom_value_facts_exact_i64(
+        equal != (loom_buffer_compare_address_predicate(op) ==
+                  LOOM_BUFFER_COMPARE_ADDRESS_PREDICATE_NE));
+  }
+  loom_value_facts_propagate_ternary_distribution(
+      operand_facts[0], operand_facts[1], operand_facts[2], &result_facts[0]);
+  loom_value_facts_propagate_binary_distribution(
+      result_facts[0], operand_facts[3], &result_facts[0]);
+  if (loom_value_facts_is_lane_varying(result_facts[0])) {
+    loom_value_facts_mark_lane_predicate(&result_facts[0]);
+  }
+  return iree_ok_status();
+}
 
 iree_status_t loom_buffer_constant_facts(
     loom_fact_context_t* context, const loom_module_t* module,

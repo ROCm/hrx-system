@@ -10,9 +10,11 @@
 
 #include "loom/codegen/low/builder.h"
 #include "loom/ops/low/ops.h"
+#include "loom/target/arch/amdgpu/lower/bitpack.h"
 #include "loom/target/arch/amdgpu/lower/constants.h"
 #include "loom/target/arch/amdgpu/lower/emit.h"
 #include "loom/target/arch/amdgpu/lower/types.h"
+#include "loom/target/arch/amdgpu/lower/value/integer64.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 #include "loom/target/arch/amdgpu/target_info_defs.h"
 
@@ -145,7 +147,9 @@ iree_status_t loom_amdgpu_prepare_native_i1_mask(
 }
 
 loom_type_t loom_amdgpu_materialized_vgpr_register_type(
-    const loom_low_lower_context_t* context, loom_value_id_t source_value) {
+    const loom_low_lower_context_t* context, loom_value_id_t source_value,
+    const void* plan) {
+  (void)plan;
   const loom_type_t type =
       loom_low_lower_value_binding_type(context, source_value);
   if (loom_low_register_type_class_id(type) == LOOM_AMDGPU_REG_CLASS_ID_VGPR) {
@@ -157,7 +161,9 @@ loom_type_t loom_amdgpu_materialized_vgpr_register_type(
 }
 
 loom_type_t loom_amdgpu_materialized_i64_low_words_type(
-    const loom_low_lower_context_t* context, loom_value_id_t source_value) {
+    const loom_low_lower_context_t* context, loom_value_id_t source_value,
+    const void* plan) {
+  (void)plan;
   const loom_type_t type =
       loom_low_lower_value_binding_type(context, source_value);
   return loom_low_register_carrier_type_with_unit_count(
@@ -170,7 +176,7 @@ iree_status_t loom_amdgpu_materialize_i64_low_words(
   const loom_value_id_t source =
       loom_low_lower_lookup_value(context, source_value);
   const loom_type_t result_type =
-      loom_amdgpu_materialized_i64_low_words_type(context, source_value);
+      loom_amdgpu_materialized_i64_low_words_type(context, source_value, NULL);
   const uint32_t lane_count = loom_low_register_type_unit_count(result_type);
   const loom_type_t word_type =
       loom_low_register_carrier_type_with_unit_count(result_type, 1);
@@ -184,7 +190,9 @@ iree_status_t loom_amdgpu_materialize_i64_low_words(
 }
 
 loom_type_t loom_amdgpu_materialized_vop3_binary_rhs_type(
-    const loom_low_lower_context_t* context, loom_value_id_t source_value) {
+    const loom_low_lower_context_t* context, loom_value_id_t source_value,
+    const void* plan) {
+  (void)plan;
   const loom_amdgpu_descriptor_set_info_t* info =
       loom_amdgpu_target_info_descriptor_set_at(
           loom_low_lower_context_descriptor_set(context)
@@ -193,11 +201,14 @@ loom_type_t loom_amdgpu_materialized_vop3_binary_rhs_type(
           info, LOOM_AMDGPU_DESCRIPTOR_SET_INFO_FLAG_VOP3_TWO_SCALAR_SOURCES)) {
     return loom_low_lower_value_binding_type(context, source_value);
   }
-  return loom_amdgpu_materialized_vgpr_register_type(context, source_value);
+  return loom_amdgpu_materialized_vgpr_register_type(context, source_value,
+                                                     plan);
 }
 
 loom_type_t loom_amdgpu_materialized_vgpr_address_type(
-    const loom_low_lower_context_t* context, loom_value_id_t source_value) {
+    const loom_low_lower_context_t* context, loom_value_id_t source_value,
+    const void* plan) {
+  (void)plan;
   (void)source_value;
   return loom_low_register_type(
       loom_low_lower_context_descriptor_set(context)->stable_id,
@@ -205,21 +216,64 @@ loom_type_t loom_amdgpu_materialized_vgpr_address_type(
 }
 
 loom_type_t loom_amdgpu_materialized_sgpr_address_type(
-    const loom_low_lower_context_t* context, loom_value_id_t source_value) {
+    const loom_low_lower_context_t* context, loom_value_id_t source_value,
+    const void* plan) {
+  (void)plan;
   (void)source_value;
   return loom_low_register_type(
       loom_low_lower_context_descriptor_set(context)->stable_id,
       LOOM_AMDGPU_REG_CLASS_ID_SGPR, 1);
 }
 
+loom_type_t loom_amdgpu_materialized_sgpr64_address_type(
+    const loom_low_lower_context_t* context, loom_value_id_t source_value,
+    const void* plan) {
+  (void)plan;
+  (void)source_value;
+  return loom_low_register_type(
+      loom_low_lower_context_descriptor_set(context)->stable_id,
+      LOOM_AMDGPU_REG_CLASS_ID_SGPR, 2);
+}
+
+iree_status_t loom_amdgpu_prepare_sgpr64_address(
+    loom_low_lower_context_t* context, loom_value_id_t source_value,
+    const void** out_plan) {
+  static const loom_amdgpu_integer_operand_form_t kForms[] = {
+      [LOOM_AMDGPU_INTEGER_OPERAND_UNSIGNED_PAIR] =
+          LOOM_AMDGPU_INTEGER_OPERAND_UNSIGNED_PAIR,
+      [LOOM_AMDGPU_INTEGER_OPERAND_SIGNED_PAIR] =
+          LOOM_AMDGPU_INTEGER_OPERAND_SIGNED_PAIR,
+  };
+  const loom_amdgpu_integer_operand_form_t form =
+      loom_amdgpu_select_integer_operand_form(
+          loom_value_fact_table_lookup(
+              loom_low_lower_context_fact_table(context), source_value),
+          2);
+  *out_plan = &kForms[form];
+  return iree_ok_status();
+}
+
+iree_status_t loom_amdgpu_emit_prepared_sgpr64_address(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_value_id_t source_value, const void* plan,
+    loom_value_id_t* out_low_value) {
+  return loom_amdgpu_lookup_or_materialize_integer_operand(
+      context, source_op, source_value, LOOM_AMDGPU_REG_CLASS_ID_SGPR,
+      *(const loom_amdgpu_integer_operand_form_t*)plan, out_low_value);
+}
+
 loom_type_t loom_amdgpu_materialized_address_register_type(
-    const loom_low_lower_context_t* context, loom_value_id_t source_value) {
+    const loom_low_lower_context_t* context, loom_value_id_t source_value,
+    const void* plan) {
+  (void)plan;
   return loom_low_register_carrier_type_with_unit_count(
       loom_low_lower_value_binding_type(context, source_value), 1);
 }
 
 loom_type_t loom_amdgpu_materialized_native_i1_mask_type(
-    const loom_low_lower_context_t* context, loom_value_id_t source_value) {
+    const loom_low_lower_context_t* context, loom_value_id_t source_value,
+    const void* plan) {
+  (void)plan;
   (void)source_value;
   return loom_low_register_type(
       loom_low_lower_context_descriptor_set(context)->stable_id,
@@ -236,8 +290,7 @@ static bool loom_amdgpu_low_type_can_materialize_as_vgpr_registers(
                                              LOOM_AMDGPU_REG_CLASS_ID_VGPR)) {
     return true;
   }
-  return unit_count <= LOOM_AMDGPU_MAX_SCALARIZED_32BIT_LANES &&
-         loom_amdgpu_low_type_is_register_class(context, low_type,
+  return loom_amdgpu_low_type_is_register_class(context, low_type,
                                                 LOOM_AMDGPU_REG_CLASS_ID_SGPR);
 }
 
@@ -402,6 +455,19 @@ iree_status_t loom_amdgpu_value_can_materialize_as_sgpr_address(
   *out_can_materialize =
       loom_value_facts_is_subgroup_uniform(loom_value_fact_table_lookup(
           loom_low_lower_context_fact_table(context), value_id));
+  return iree_ok_status();
+}
+
+iree_status_t loom_amdgpu_value_can_materialize_as_sgpr_address_compare(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_value_id_t value_id, bool* out_can_materialize) {
+  IREE_RETURN_IF_ERROR(loom_amdgpu_value_can_materialize_as_sgpr_address(
+      context, source_op, value_id, out_can_materialize));
+  const loom_module_t* module = loom_low_lower_context_module(context);
+  *out_can_materialize =
+      *out_can_materialize &&
+      !loom_amdgpu_address_comparison_needs_pair(
+          module, loom_low_lower_context_fact_table(context), source_op);
   return iree_ok_status();
 }
 
@@ -610,9 +676,9 @@ iree_status_t loom_amdgpu_lookup_or_materialize_sgpr_address(
       context, source_op, source_value, out_low_value);
 }
 
-// Materializes a subgroup-uniform scalar stored in one or two VGPRs as an
-// SGPR payload without changing its canonical source mapping.
-static iree_status_t loom_amdgpu_materialize_uniform_vgpr_scalar_as_sgpr(
+// Materializes every word of a subgroup-uniform VGPR payload in SGPRs
+// without changing its canonical source mapping.
+static iree_status_t loom_amdgpu_materialize_uniform_vgpr_payload_as_sgpr(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_value_id_t low_value_id, loom_type_t required_low_type,
     loom_value_id_t* out_low_value_id) {
@@ -626,17 +692,17 @@ static iree_status_t loom_amdgpu_materialize_uniform_vgpr_scalar_as_sgpr(
 
   const uint32_t register_count =
       loom_low_register_type_unit_count(actual_type);
-  IREE_ASSERT_GE(register_count, 1);
-  IREE_ASSERT_LE(register_count, 2);
   const loom_type_t vgpr_type =
       loom_low_register_carrier_type_with_unit_count(actual_type, 1);
   const loom_type_t sgpr_type =
       loom_low_register_carrier_type_with_unit_count(required_low_type, 1);
-  // Scalar carriers contain at most two 32-bit register units.
-  loom_value_id_t sgpr_registers[2] = {
-      LOOM_VALUE_ID_INVALID,
-      LOOM_VALUE_ID_INVALID,
-  };
+  loom_value_id_t inline_registers[LOOM_AMDGPU_MAX_SCALARIZED_32BIT_LANES];
+  loom_value_id_t* sgpr_registers = inline_registers;
+  if (register_count > IREE_ARRAYSIZE(inline_registers)) {
+    IREE_RETURN_IF_ERROR(loom_low_lower_allocate_emission_array(
+        context, register_count, sizeof(*sgpr_registers),
+        (void**)&sgpr_registers));
+  }
   for (uint32_t i = 0; i < register_count; ++i) {
     loom_value_id_t vgpr_register = low_value_id;
     if (register_count != 1) {
@@ -662,7 +728,7 @@ static iree_status_t loom_amdgpu_materialize_uniform_vgpr_scalar_as_sgpr(
                                               result_type, out_low_value_id);
 }
 
-iree_status_t loom_amdgpu_materialize_low_scalar_carrier(
+iree_status_t loom_amdgpu_materialize_low_numeric_carrier(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_value_id_t low_value_id, loom_type_t required_low_type,
     loom_value_id_t* out_low_value_id) {
@@ -670,6 +736,15 @@ iree_status_t loom_amdgpu_materialize_low_scalar_carrier(
 
   const loom_module_t* module = loom_low_lower_context_module(context);
   loom_type_t actual_type = loom_module_value_type(module, *out_low_value_id);
+  if (loom_low_register_type_unit_count(actual_type) == 1 &&
+      loom_amdgpu_low_value_defines_register_low16(context, low_value_id)) {
+    // Structural carriers define a complete word even when the producer only
+    // writes a halfword. Normalize before either transport or bank conversion.
+    IREE_RETURN_IF_ERROR(loom_amdgpu_extract_register_bitfield(
+        context, source_op, low_value_id, 0, 16,
+        LOOM_AMDGPU_BITFIELD_EXTRACT_MODE_ZERO_EXTEND, actual_type,
+        out_low_value_id));
+  }
   if (loom_type_equal(actual_type, required_low_type)) {
     return iree_ok_status();
   }
@@ -680,7 +755,7 @@ iree_status_t loom_amdgpu_materialize_low_scalar_carrier(
       context, required_low_type, LOOM_AMDGPU_REG_CLASS_ID_VGPR);
   if (!requires_sgpr && !requires_vgpr) {
     IREE_ASSERT_UNREACHABLE(
-        "AMDGPU scalar carrier selected non-register low type");
+        "AMDGPU numeric carrier selected non-register low type");
     IREE_BUILTIN_UNREACHABLE();
   }
 
@@ -693,7 +768,7 @@ iree_status_t loom_amdgpu_materialize_low_scalar_carrier(
         context, source_op, *out_low_value_id, out_low_value_id));
     actual_type = loom_module_value_type(module, *out_low_value_id);
   } else if (requires_sgpr && actual_is_vgpr) {
-    IREE_RETURN_IF_ERROR(loom_amdgpu_materialize_uniform_vgpr_scalar_as_sgpr(
+    IREE_RETURN_IF_ERROR(loom_amdgpu_materialize_uniform_vgpr_payload_as_sgpr(
         context, source_op, *out_low_value_id, required_low_type,
         out_low_value_id));
     actual_type = loom_module_value_type(module, *out_low_value_id);
@@ -710,7 +785,7 @@ iree_status_t loom_amdgpu_materialize_low_scalar_carrier(
                         : LOOM_AMDGPU_REG_CLASS_ID_SGPR);
   if (!actual_matches_required_class) {
     IREE_ASSERT_UNREACHABLE(
-        "AMDGPU scalar carrier materialized wrong register class");
+        "AMDGPU numeric carrier materialized wrong register class");
     IREE_BUILTIN_UNREACHABLE();
   }
 
@@ -727,7 +802,7 @@ iree_status_t loom_amdgpu_materialize_low_scalar_carrier(
   }
   if (actual_unit_count != 1 || required_unit_count != 2) {
     IREE_ASSERT_UNREACHABLE(
-        "AMDGPU scalar carrier materialized wrong register shape");
+        "AMDGPU numeric carrier materialized wrong register shape");
     IREE_BUILTIN_UNREACHABLE();
   }
 

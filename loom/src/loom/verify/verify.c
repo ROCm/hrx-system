@@ -35,9 +35,9 @@ typedef struct loom_verify_region_contract_t {
 // Operation verification is part of the recursive region loop. An out-of-line
 // call here is paid for every operation and prevents the compiler from
 // scheduling region bookkeeping with the operation checks.
-IREE_ATTRIBUTE_ALWAYS_INLINE static inline iree_status_t loom_verify_op(
-    loom_verify_state_t* state, const loom_op_t* op,
-    const loom_op_vtable_t* vtable);
+static IREE_ATTRIBUTE_ALWAYS_INLINE iree_status_t
+loom_verify_op(loom_verify_state_t* state, const loom_op_t* op,
+               const loom_op_vtable_t* vtable);
 
 static iree_string_view_t loom_verify_region_op_kind_name(
     loom_verify_state_t* state, loom_op_kind_t kind) {
@@ -126,6 +126,20 @@ loom_verify_emit_wrong_terminator(loom_verify_state_t* state,
   return loom_verify_pending_diagnostic_status(state);
 }
 
+IREE_ATTRIBUTE_NOINLINE IREE_ATTRIBUTE_COLD static iree_status_t
+loom_verify_emit_wrong_region_owner(loom_verify_state_t* state,
+                                    const loom_op_t* op,
+                                    const loom_op_vtable_t* vtable,
+                                    uint8_t region_index) {
+  loom_diagnostic_param_t params[] = {
+      loom_param_string(loom_op_vtable_name(vtable)),
+      loom_param_u32(region_index),
+  };
+  loom_verify_emit_structured(state, op, LOOM_ERR_STRUCTURE_067, params,
+                              IREE_ARRAYSIZE(params));
+  return loom_verify_pending_diagnostic_status(state);
+}
+
 IREE_ATTRIBUTE_NOINLINE IREE_ATTRIBUTE_COLD static void
 loom_verify_emit_non_command_effect(loom_verify_state_t* state,
                                     const loom_op_t* op,
@@ -137,11 +151,9 @@ loom_verify_emit_non_command_effect(loom_verify_state_t* state,
                               IREE_ARRAYSIZE(params));
 }
 
-IREE_ATTRIBUTE_ALWAYS_INLINE static inline void
-loom_verify_command_effect_scope(loom_verify_state_t* state,
-                                 const loom_op_t* op,
-                                 const loom_op_vtable_t* vtable,
-                                 loom_trait_flags_t traits) {
+static IREE_ATTRIBUTE_ALWAYS_INLINE void loom_verify_command_effect_scope(
+    loom_verify_state_t* state, const loom_op_t* op,
+    const loom_op_vtable_t* vtable, loom_trait_flags_t traits) {
   if (!state->region_scope.command_effects_only) {
     return;
   }
@@ -434,9 +446,9 @@ static iree_status_t loom_verify_region(
   return status;
 }
 
-IREE_ATTRIBUTE_ALWAYS_INLINE static inline iree_status_t loom_verify_op(
-    loom_verify_state_t* state, const loom_op_t* op,
-    const loom_op_vtable_t* vtable) {
+static IREE_ATTRIBUTE_ALWAYS_INLINE iree_status_t
+loom_verify_op(loom_verify_state_t* state, const loom_op_t* op,
+               const loom_op_vtable_t* vtable) {
   const uint32_t initial_error_count = state->result->error_count;
   if (!vtable) {
     // Unknown op kind — emit structured diagnostic.
@@ -574,10 +586,13 @@ IREE_ATTRIBUTE_ALWAYS_INLINE static inline iree_status_t loom_verify_op(
   loom_verify_semantic_constraints(state, op, vtable);
   IREE_RETURN_IF_ERROR(loom_verify_pending_diagnostic_status(state));
 
-  // Tied result validation and path-sensitive tied/moved source consumption.
+  // Tied results, moved sources, and owning callable fields share the same
+  // path-sensitive consumption check.
   IREE_RETURN_IF_ERROR(loom_verify_tied_results(state, op, vtable));
   IREE_RETURN_IF_ERROR(loom_verify_pending_diagnostic_status(state));
-  IREE_RETURN_IF_ERROR(loom_verify_moved_results(state, op));
+  IREE_RETURN_IF_ERROR(loom_verify_moves(state, op));
+  IREE_RETURN_IF_ERROR(loom_verify_pending_diagnostic_status(state));
+  IREE_RETURN_IF_ERROR(loom_verify_callable_ownership(state, op));
   IREE_RETURN_IF_ERROR(loom_verify_pending_diagnostic_status(state));
 
   // Symbol reference attributes must point to valid symbol table entries.
@@ -623,6 +638,10 @@ IREE_ATTRIBUTE_ALWAYS_INLINE static inline iree_status_t loom_verify_op(
           .owner_initial_error_count = initial_error_count,
           .region_index = i,
       };
+      if (regions[i] && loom_region_parent_op(regions[i]) != op) {
+        IREE_RETURN_IF_ERROR(
+            loom_verify_emit_wrong_region_owner(state, op, vtable, i));
+      }
       IREE_RETURN_IF_ERROR(loom_verify_region(
           state, regions[i], descriptor ? &contract : NULL, isolated));
     }

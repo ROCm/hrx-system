@@ -9,8 +9,10 @@ executable.
 `loom_tooling_input_admit_loomc_module` receives the selected format and admits
 text, bytecode, or an optional importer through LoomC. Returned modules and
 results retain their source identities and bytes after frontend teardown.
-`loom-link` snapshots admitted text/C++ modules into its reusable link index;
-bytecode inputs retain their file buffers for metadata-first selective linking.
+`loom-link` snapshots admitted Loom text or bytecode modules into its reusable
+link index. Source languages are translated to Loom modules by their owning
+frontends before that boundary; bytecode inputs retain their file buffers for
+metadata-first selective linking.
 
 Native compiler tools use `loom_input_provider_t` to pair the same format
 metadata with a native loader. `loom_input_module_t` retains the native module,
@@ -72,10 +74,11 @@ Adding a native importer requires its descriptor and adapter, conditional
 composition in each final binary, and importer-owned integration tests. The
 shared test rules accept `.<format>-test`; envelopes, diagnostic matching,
 output comparison, and updates stay common. Language options belong to the
-provider. Multi-input tools accept `--input-options=format:options` once per
-format and select each source or library by filename unless `--input-format`
+provider. Source-consuming tools accept `--input-options=format:options` once
+per format and select each source by filename unless `--input-format`
 overrides that selection. Bytecode remains a native input independently of
-source providers. `loom_test` and `loom_library` pass source admission options
-to the same linker. Projecting a source language into executable check cases
-is an importer-owned language contract; the resulting operations use the
-shared testbench and its existing invocation providers.
+source providers. `loom_test` and `loom_library` run the selected source
+importer first and pass only resulting Loom modules to `loom-link`. Projecting
+a source language into executable check cases is an importer-owned language
+contract; the resulting operations use the shared testbench and its existing
+invocation providers.

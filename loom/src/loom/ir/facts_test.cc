@@ -104,6 +104,162 @@ TEST(FactsFlags, FloatClassesAndUniformityScopesAreIndependent) {
 // Constructors
 //===----------------------------------------------------------------------===//
 
+TEST(FactsNarrowing, IntegerFeedbackHasFiniteDescendingHeight) {
+  const loom_scalar_type_t types[] = {
+      LOOM_SCALAR_TYPE_I8,  LOOM_SCALAR_TYPE_I16,   LOOM_SCALAR_TYPE_I32,
+      LOOM_SCALAR_TYPE_I64, LOOM_SCALAR_TYPE_INDEX, LOOM_SCALAR_TYPE_OFFSET};
+  for (auto type : types) {
+    SCOPED_TRACE(type);
+    int64_t lower;
+    int64_t upper;
+    ASSERT_TRUE(loom_value_facts_scalar_type_domain(type, &lower, &upper));
+    auto facts = loom_value_facts_make(lower, upper, 1);
+    loom_value_facts_mark_lane_varying(&facts);
+    auto incoming = loom_value_facts_make(4, 100, 2);
+    facts = loom_value_facts_narrow(type, facts, incoming);
+    EXPECT_EQ(facts.range_lo, 4);
+    EXPECT_EQ(facts.range_hi, 100);
+    EXPECT_EQ(facts.known_divisor, 2);
+    incoming = loom_value_facts_make(8, 96, 4);
+    loom_value_facts_mark_workgroup_uniform(&incoming);
+    facts = loom_value_facts_narrow(type, facts, incoming);
+    EXPECT_EQ(facts.range_lo, 4);
+    EXPECT_EQ(facts.range_hi, 100);
+    EXPECT_EQ(facts.known_divisor, 2);
+    EXPECT_TRUE(loom_value_facts_is_workgroup_uniform(facts));
+    EXPECT_FALSE(loom_value_facts_is_lane_varying(facts));
+    EXPECT_TRUE(loom_value_facts_equal(
+        facts, loom_value_facts_narrow(type, facts, incoming)));
+  }
+}
+
+TEST(FactsNarrowing, UnknownEndpointCanRefineAfterTheOtherEndpoint) {
+  const auto left_bounded = loom_value_facts_make(4, INT64_MAX, 1);
+  auto facts = loom_value_facts_narrow(
+      LOOM_SCALAR_TYPE_I64, loom_value_facts_unknown(), left_bounded);
+  facts = loom_value_facts_narrow(LOOM_SCALAR_TYPE_I64, facts,
+                                  loom_value_facts_make(8, 64, 8));
+  EXPECT_EQ(facts.range_lo, 4);
+  EXPECT_EQ(facts.range_hi, 64);
+  EXPECT_EQ(facts.known_divisor, 8);
+}
+
+TEST(FactsNarrowing, SignRefinementPreservesFiniteDescendingHeight) {
+  const loom_scalar_type_t types[] = {
+      LOOM_SCALAR_TYPE_I8, LOOM_SCALAR_TYPE_I16, LOOM_SCALAR_TYPE_I32,
+      LOOM_SCALAR_TYPE_I64, LOOM_SCALAR_TYPE_INDEX};
+  struct Bound {
+    // Lower endpoint observed by the next completed analysis.
+    int64_t observed;
+    // Lower endpoint retained after bounded narrowing.
+    int64_t expected;
+  };
+  const Bound bounds[] = {{-8, -8}, {-4, -8}, {0, 0}, {2, 2},
+                          {3, 2},   {4, 2},   {5, 2}};
+  for (auto type : types) {
+    SCOPED_TRACE(type);
+    int64_t minimum;
+    int64_t maximum;
+    ASSERT_TRUE(loom_value_facts_scalar_type_domain(type, &minimum, &maximum));
+    auto lower = loom_value_facts_make(minimum, maximum, 1);
+    auto upper = lower;
+    for (const auto& bound : bounds) {
+      SCOPED_TRACE(bound.observed);
+      lower = loom_value_facts_narrow(
+          type, lower, loom_value_facts_make(bound.observed, 100, 1));
+      upper = loom_value_facts_narrow(
+          type, upper, loom_value_facts_make(-100, -bound.observed, 1));
+      EXPECT_EQ(lower.range_lo, bound.expected);
+      EXPECT_EQ(lower.range_hi, 100);
+      EXPECT_EQ(upper.range_lo, -100);
+      EXPECT_EQ(upper.range_hi, -bound.expected);
+    }
+  }
+}
+
+TEST(FactsNarrowing, NonnegativeDomainCanDiscoverPositiveExtent) {
+  const loom_scalar_type_t types[] = {
+      LOOM_SCALAR_TYPE_I1,    LOOM_SCALAR_TYPE_I8,  LOOM_SCALAR_TYPE_I16,
+      LOOM_SCALAR_TYPE_I32,   LOOM_SCALAR_TYPE_I64, LOOM_SCALAR_TYPE_INDEX,
+      LOOM_SCALAR_TYPE_OFFSET};
+  for (auto type : types) {
+    SCOPED_TRACE(type);
+    int64_t minimum;
+    int64_t maximum;
+    ASSERT_TRUE(loom_value_facts_scalar_type_domain(type, &minimum, &maximum));
+    const auto positive = type == LOOM_SCALAR_TYPE_I1
+                              ? loom_value_facts_exact_i64(1)
+                              : loom_value_facts_make(2, 5, 1);
+    const auto facts = loom_value_facts_narrow(
+        type, loom_value_facts_make(0, maximum, 1), positive);
+    EXPECT_EQ(facts.range_lo, positive.range_lo);
+    EXPECT_EQ(facts.range_hi, positive.range_hi);
+    EXPECT_TRUE(facts.flags & LOOM_VALUE_FACT_POSITIVE);
+    EXPECT_TRUE(facts.flags & LOOM_VALUE_FACT_NON_ZERO);
+    EXPECT_TRUE(facts.flags & LOOM_VALUE_FACT_NON_NEGATIVE);
+  }
+}
+
+TEST(FactsNarrowing, SignRefinementCanSkipZero) {
+  const auto previous = loom_value_facts_make(-8, 8, 1);
+  const auto positive = loom_value_facts_narrow(
+      LOOM_SCALAR_TYPE_INDEX, previous, loom_value_facts_make(2, 5, 1));
+  EXPECT_EQ(positive.range_lo, 2);
+  EXPECT_EQ(positive.range_hi, 8);
+  const auto negative = loom_value_facts_narrow(
+      LOOM_SCALAR_TYPE_INDEX, previous, loom_value_facts_make(-5, -2, 1));
+  EXPECT_EQ(negative.range_lo, -8);
+  EXPECT_EQ(negative.range_hi, -2);
+}
+
+TEST(FactsNarrowing, UntypedUnknownDoesNotEraseTheIntegerDomain) {
+  const auto domain = loom_value_facts_make(INT32_MIN, INT32_MAX, 1);
+  const auto facts = loom_value_facts_narrow(LOOM_SCALAR_TYPE_I32, domain,
+                                             loom_value_facts_unknown());
+  EXPECT_EQ(facts.range_lo, INT32_MIN);
+  EXPECT_EQ(facts.range_hi, INT32_MAX);
+}
+
+TEST(FactsNarrowing, ExactValuesRemainDiscoverableAfterBoundedIntervals) {
+  const auto integer = loom_value_facts_narrow(LOOM_SCALAR_TYPE_I32,
+                                               loom_value_facts_make(-8, 8, 2),
+                                               loom_value_facts_exact_i64(4));
+  EXPECT_TRUE(loom_value_facts_is_exact(integer));
+  EXPECT_EQ(integer.range_lo, 4);
+  const auto floating = loom_value_facts_narrow(
+      LOOM_SCALAR_TYPE_F32,
+      loom_value_facts_make_float_range(LOOM_SCALAR_TYPE_F32, -8.0, 8.0),
+      loom_value_facts_exact_float(LOOM_SCALAR_TYPE_F32, 4.0));
+  EXPECT_TRUE(loom_value_facts_is_exact(floating));
+}
+
+TEST(FactsNarrowing, FloatClassesCanRefineBeforeAndAfterTheInterval) {
+  const loom_scalar_type_t types[] = {
+      LOOM_SCALAR_TYPE_F8E4M3, LOOM_SCALAR_TYPE_F8E5M2, LOOM_SCALAR_TYPE_F16,
+      LOOM_SCALAR_TYPE_BF16,   LOOM_SCALAR_TYPE_F32,    LOOM_SCALAR_TYPE_F64};
+  for (auto type : types) {
+    SCOPED_TRACE(type);
+    auto classes = loom_value_facts_unknown();
+    classes.flags = LOOM_VALUE_FACT_FLOAT | LOOM_VALUE_FACT_NOT_NAN;
+    auto facts =
+        loom_value_facts_narrow(type, loom_value_facts_unknown(), classes);
+    facts = loom_value_facts_narrow(
+        type, facts, loom_value_facts_make_float_range(type, -8.0, 8.0));
+    auto incoming = loom_value_facts_make_float_range(type, -4.0, 4.0);
+    incoming.flags |= LOOM_VALUE_FACT_NOT_SUBNORMAL;
+    facts = loom_value_facts_narrow(type, facts, incoming);
+    double lower;
+    double upper;
+    ASSERT_TRUE(loom_value_facts_as_float_range(type, facts, &lower, &upper));
+    EXPECT_EQ(lower, -8.0);
+    EXPECT_EQ(upper, 8.0);
+    EXPECT_TRUE(facts.flags & LOOM_VALUE_FACT_NOT_NAN);
+    EXPECT_TRUE(facts.flags & LOOM_VALUE_FACT_NOT_SUBNORMAL);
+    EXPECT_TRUE(loom_value_facts_equal(
+        facts, loom_value_facts_narrow(type, facts, incoming)));
+  }
+}
+
 TEST(FactsUnknown, IsUnknown) {
   loom_value_facts_t f = loom_value_facts_unknown();
   EXPECT_TRUE(loom_value_facts_is_unknown(f));
@@ -920,6 +1076,100 @@ TEST(FactsMeet, OverlappingRanges) {
   EXPECT_EQ(out.known_divisor, 4);  // gcd(8, 12) = 4.
 }
 
+TEST(FactsMeet, RetainsCommonIntegerPredicates) {
+  const int64_t values[] = {INT64_MIN,        -8,       -1, 0, 1, 2, 3, 4, 8,
+                            INT64_C(1) << 62, INT64_MAX};
+  for (int64_t left : values) {
+    for (int64_t right : values) {
+      SCOPED_TRACE(left);
+      SCOPED_TRACE(right);
+      const auto lhs = loom_value_facts_exact_i64(left);
+      const auto rhs = loom_value_facts_exact_i64(right);
+      loom_value_facts_t joined;
+      loom_value_facts_meet(&lhs, &rhs, &joined);
+      EXPECT_EQ(loom_value_facts_is_non_zero(joined), left != 0 && right != 0);
+      const bool left_power = left > 0 && (left & (left - 1)) == 0;
+      const bool right_power = right > 0 && (right & (right - 1)) == 0;
+      EXPECT_EQ(loom_value_facts_is_power_of_two(joined),
+                left_power && right_power);
+      EXPECT_LE(joined.range_lo, left);
+      EXPECT_GE(joined.range_hi, right);
+    }
+  }
+}
+
+TEST(FactsMeet, RangedPredicatesSurviveOnlyCommonArms) {
+  loom_value_facts_t small = loom_value_facts_make(2, 8, 2);
+  small.flags |= LOOM_VALUE_FACT_POWER_OF_TWO;
+  loom_value_facts_t large = loom_value_facts_make(16, 64, 16);
+  large.flags |= LOOM_VALUE_FACT_POWER_OF_TWO;
+  loom_value_facts_t joined;
+  loom_value_facts_meet(&small, &large, &joined);
+  EXPECT_TRUE(loom_value_facts_is_power_of_two(joined));
+  EXPECT_EQ(joined.range_lo, 2);
+  EXPECT_EQ(joined.range_hi, 64);
+  EXPECT_EQ(joined.known_divisor, 2);
+
+  const auto unproven = loom_value_facts_make(16, 64, 16);
+  loom_value_facts_meet(&joined, &unproven, &joined);
+  EXPECT_FALSE(loom_value_facts_is_power_of_two(joined));
+
+  loom_value_facts_t nonzero = loom_value_facts_make(-8, 8, 1);
+  nonzero.flags |= LOOM_VALUE_FACT_NON_ZERO;
+  const auto negative = loom_value_facts_make(-16, -1, 1);
+  loom_value_facts_meet(&nonzero, &negative, &joined);
+  EXPECT_TRUE(loom_value_facts_is_non_zero(joined));
+  EXPECT_FALSE(loom_value_facts_is_non_negative(joined));
+  const auto unknown = loom_value_facts_unknown();
+  loom_value_facts_meet(&joined, &unknown, &joined);
+  EXPECT_FALSE(loom_value_facts_is_non_zero(joined));
+}
+
+TEST(FactsMeet, OutputAliasingPreservesPredicatesAndDistribution) {
+  std::vector<loom_value_facts_t> inputs = {
+      loom_value_facts_unknown(), loom_value_facts_exact_i64(0),
+      loom_value_facts_exact_i64(1), loom_value_facts_exact_i64(8),
+      loom_value_facts_make(-16, -1, 1)};
+  for (auto scope : {LOOM_VALUE_FACT_UNIFORM_SCOPE_NONE,
+                     LOOM_VALUE_FACT_UNIFORM_SCOPE_SUBGROUP,
+                     LOOM_VALUE_FACT_UNIFORM_SCOPE_WORKGROUP,
+                     LOOM_VALUE_FACT_UNIFORM_SCOPE_CLUSTER}) {
+    auto input = loom_value_facts_make(2, 16, 2);
+    input.flags |= LOOM_VALUE_FACT_POWER_OF_TWO;
+    loom_value_facts_mark_uniform_at_scope(&input, scope);
+    inputs.push_back(input);
+  }
+  auto varying = loom_value_facts_make(-8, 8, 1);
+  varying.flags |= LOOM_VALUE_FACT_NON_ZERO;
+  loom_value_facts_mark_lane_varying(&varying);
+  inputs.push_back(varying);
+  auto predicate = loom_value_facts_make(0, 1, 1);
+  loom_value_facts_mark_lane_predicate(&predicate);
+  inputs.push_back(predicate);
+  auto lane_mask = loom_value_facts_make(0, INT64_MAX, 1);
+  loom_value_facts_mark_subgroup_lane_mask(&lane_mask);
+  loom_value_facts_mark_subgroup_uniform(&lane_mask);
+  inputs.push_back(lane_mask);
+
+  for (const auto& lhs : inputs) {
+    for (const auto& rhs : inputs) {
+      SCOPED_TRACE(lhs.flags);
+      SCOPED_TRACE(rhs.flags);
+      loom_value_facts_t expected;
+      loom_value_facts_meet(&lhs, &rhs, &expected);
+      loom_value_facts_t reverse;
+      loom_value_facts_meet(&rhs, &lhs, &reverse);
+      EXPECT_TRUE(loom_value_facts_equal(reverse, expected));
+      auto output = lhs;
+      loom_value_facts_meet(&output, &rhs, &output);
+      EXPECT_TRUE(loom_value_facts_equal(output, expected));
+      output = rhs;
+      loom_value_facts_meet(&lhs, &output, &output);
+      EXPECT_TRUE(loom_value_facts_equal(output, expected));
+    }
+  }
+}
+
 //===----------------------------------------------------------------------===//
 // Execution distribution
 //===----------------------------------------------------------------------===//
@@ -1179,6 +1429,88 @@ TEST(MuliTransfer, InPlaceAccumulation) {
   EXPECT_EQ(accumulator.known_divisor, 64);
 }
 
+TEST(MuliTransfer, RetainsCommonPredicatesWithoutOverflow) {
+  auto powers = loom_value_facts_make(2, 8, 2);
+  powers.flags |= LOOM_VALUE_FACT_POWER_OF_TWO;
+  auto nonzero = loom_value_facts_make(-8, 8, 2);
+  nonzero.flags |= LOOM_VALUE_FACT_NON_ZERO;
+  const auto ordinary = loom_value_facts_make(-8, 8, 2);
+  for (const auto input : {powers, nonzero, ordinary}) {
+    for (int output_index = 0; output_index < 3; ++output_index) {
+      loom_value_facts_t operands[] = {input, input,
+                                       loom_value_facts_unknown()};
+      loom_value_facts_muli(&operands[0], &operands[1],
+                            &operands[output_index]);
+      EXPECT_EQ(loom_value_facts_is_power_of_two(operands[output_index]),
+                loom_value_facts_is_power_of_two(input));
+      EXPECT_EQ(loom_value_facts_is_non_zero(operands[output_index]),
+                loom_value_facts_is_non_zero(input));
+    }
+  }
+  const auto zero = loom_value_facts_exact_i64(0);
+  loom_value_facts_t output;
+  loom_value_facts_fmai(&powers, &powers, &zero, &output);
+  EXPECT_TRUE(loom_value_facts_is_power_of_two(output));
+  const auto unproven = loom_value_facts_make(2, 8, 2);
+  loom_value_facts_muli(&powers, &unproven, &output);
+  EXPECT_FALSE(loom_value_facts_is_power_of_two(output));
+  loom_value_facts_muli(&nonzero, &ordinary, &output);
+  EXPECT_FALSE(loom_value_facts_is_non_zero(output));
+}
+
+//===----------------------------------------------------------------------===//
+// Transfer functions: fmai
+//===----------------------------------------------------------------------===//
+
+TEST(FmaiTransfer, ZeroAddendPreservesProductDivisibility) {
+  const loom_value_facts_t multiplier = loom_value_facts_exact_i64(768);
+  const loom_value_facts_t zero = loom_value_facts_exact_i64(0);
+  for (const auto input :
+       {loom_value_facts_make(0, 7, 1), loom_value_facts_make(-7, 0, 1),
+        loom_value_facts_unknown()}) {
+    loom_value_facts_t output;
+    loom_value_facts_fmai(&input, &multiplier, &zero, &output);
+    EXPECT_EQ(output.known_divisor, 768);
+    if (input.range_lo != INT64_MIN) {
+      EXPECT_EQ(output.range_lo, input.range_lo * 768);
+      EXPECT_EQ(output.range_hi, input.range_hi * 768);
+    } else {
+      EXPECT_EQ(output.range_lo, INT64_MIN);
+      EXPECT_EQ(output.range_hi, INT64_MAX);
+    }
+  }
+}
+
+TEST(FmaiTransfer, ZeroProductPreservesAddendFacts) {
+  loom_value_facts_t addend = loom_value_facts_make(16, 64, 16);
+  loom_value_facts_mark_workgroup_uniform(&addend);
+  loom_value_facts_t varying = loom_value_facts_unknown();
+  loom_value_facts_mark_lane_varying(&varying);
+  const loom_value_facts_t zero = loom_value_facts_exact_i64(0);
+  for (int zero_operand = 0; zero_operand < 2; ++zero_operand) {
+    for (int output_operand = 0; output_operand < 3; ++output_operand) {
+      loom_value_facts_t operands[] = {varying, varying, addend};
+      operands[zero_operand] = zero;
+      loom_value_facts_fmai(&operands[0], &operands[1], &operands[2],
+                            &operands[output_operand]);
+      EXPECT_TRUE(loom_value_facts_equal(operands[output_operand], addend));
+    }
+  }
+}
+
+TEST(FmaiTransfer, ZeroAddendSupportsEveryOutputAlias) {
+  for (int output_operand = 0; output_operand < 3; ++output_operand) {
+    loom_value_facts_t operands[] = {loom_value_facts_make(0, 7, 1),
+                                     loom_value_facts_exact_i64(768),
+                                     loom_value_facts_exact_i64(0)};
+    loom_value_facts_fmai(&operands[0], &operands[1], &operands[2],
+                          &operands[output_operand]);
+    EXPECT_EQ(operands[output_operand].range_lo, 0);
+    EXPECT_EQ(operands[output_operand].range_hi, 5376);
+    EXPECT_EQ(operands[output_operand].known_divisor, 768);
+  }
+}
+
 //===----------------------------------------------------------------------===//
 // Transfer functions: negi / absi
 //===----------------------------------------------------------------------===//
@@ -1241,109 +1573,69 @@ TEST(AbsiTransfer, MinimumSignedValueMayRemainNegative) {
   }
 }
 
-//===----------------------------------------------------------------------===//
-// Transfer functions: minsi / maxsi
-//===----------------------------------------------------------------------===//
-
-TEST(MinsiTransfer, ExactValues) {
-  loom_value_facts_t a = loom_value_facts_exact_i64(5);
-  loom_value_facts_t b = loom_value_facts_exact_i64(3);
-  loom_value_facts_t out;
-  loom_value_facts_minsi(&a, &b, 64, &out);
-  EXPECT_TRUE(loom_value_facts_is_exact(out));
-  EXPECT_EQ(out.range_lo, 3);
+TEST(UnaryIntegerFacts, NonzeroAliasesAndMagnitudeBounds) {
+  auto input = loom_value_facts_make(-8, 8, 2);
+  input.flags |= LOOM_VALUE_FACT_NON_ZERO;
+  loom_value_facts_mark_workgroup_uniform(&input);
+  for (auto transfer :
+       {loom_value_facts_negi, loom_value_facts_absi, loom_value_facts_signi}) {
+    loom_value_facts_t output;
+    transfer(&input, &output);
+    EXPECT_TRUE(loom_value_facts_is_non_zero(output));
+    EXPECT_TRUE(loom_value_facts_is_workgroup_uniform(output));
+    auto aliased = input;
+    transfer(&aliased, &aliased);
+    EXPECT_TRUE(loom_value_facts_equal(output, aliased));
+  }
+  loom_value_facts_t output;
+  loom_value_facts_absi(&input, &output);
+  EXPECT_EQ(output.range_lo, 1);
+  EXPECT_EQ(output.range_hi, 8);
+  EXPECT_EQ(output.known_divisor, 2);
+  auto powers = loom_value_facts_make(2, 8, 2);
+  powers.flags |= LOOM_VALUE_FACT_POWER_OF_TWO;
+  loom_value_facts_absi(&powers, &output);
+  EXPECT_TRUE(loom_value_facts_equal(powers, output));
+  loom_value_facts_signi(&powers, &output);
+  EXPECT_TRUE(loom_value_facts_is_exact(output));
+  EXPECT_EQ(output.range_lo, 1);
+  const auto zero = loom_value_facts_exact_i64(0);
+  loom_value_facts_subi(&zero, &input, &output);
+  EXPECT_TRUE(loom_value_facts_is_non_zero(output));
 }
 
-TEST(MaxsiTransfer, Ranges) {
-  loom_value_facts_t a = loom_value_facts_make(1, 10, 1);
-  loom_value_facts_t b = loom_value_facts_make(5, 20, 1);
-  loom_value_facts_t out;
-  loom_value_facts_maxsi(&a, &b, 64, &out);
-  EXPECT_EQ(out.range_lo, 5);
-  EXPECT_EQ(out.range_hi, 20);
-}
-
-TEST(IntegerExtremaTransfer, DeclaredWidthAndAliasing) {
-  struct Case {
-    // Declared integer storage width.
-    int32_t bit_count;
-    // Left input in its declared signed or Boolean fact representation.
-    int64_t lhs;
-    // Right input in the same declared width.
-    int64_t rhs;
-    // Signed min/max followed by unsigned min/max, in fact representation.
-    int64_t expected[4];
-  };
-  const Case cases[] = {
-      {1, 0, 1, {1, 0, 0, 1}},
-      {1, 1, 0, {1, 0, 0, 1}},
-      {1, 1, 1, {1, 1, 1, 1}},
-      {8, -128, 127, {-128, 127, 127, -128}},
-      {8, -128, -1, {-128, -1, -128, -1}},
-      {16, -1, 0, {-1, 0, 0, -1}},
-      {32, INT32_MIN, INT32_MAX, {INT32_MIN, INT32_MAX, INT32_MAX, INT32_MIN}},
-      {64, INT64_MIN, INT64_MAX, {INT64_MIN, INT64_MAX, INT64_MAX, INT64_MIN}},
-      {64, 0, -1, {-1, 0, 0, -1}},
-      {64, INT64_MIN, -1, {INT64_MIN, -1, INT64_MIN, -1}},
-  };
-  using Transfer =
-      void (*)(const loom_value_facts_t*, const loom_value_facts_t*, int32_t,
-               loom_value_facts_t*);
-  const Transfer transfers[] = {
-      loom_value_facts_minsi,
-      loom_value_facts_maxsi,
-      [](const loom_value_facts_t* lhs, const loom_value_facts_t* rhs, int32_t,
-         loom_value_facts_t* out) { loom_value_facts_minui(lhs, rhs, out); },
-      [](const loom_value_facts_t* lhs, const loom_value_facts_t* rhs, int32_t,
-         loom_value_facts_t* out) { loom_value_facts_maxui(lhs, rhs, out); },
-  };
-  for (const auto& test_case : cases) {
-    SCOPED_TRACE(test_case.bit_count);
-    SCOPED_TRACE(test_case.lhs);
-    SCOPED_TRACE(test_case.rhs);
-    for (size_t operation = 0; operation < IREE_ARRAYSIZE(transfers);
-         ++operation) {
-      SCOPED_TRACE(operation);
-      for (int output_index = 0; output_index < 3; ++output_index) {
-        loom_value_facts_t facts[] = {
-            loom_value_facts_exact_i64(test_case.lhs),
-            loom_value_facts_exact_i64(test_case.rhs),
-            loom_value_facts_unknown(),
-        };
-        transfers[operation](&facts[0], &facts[1], test_case.bit_count,
-                             &facts[output_index]);
-        EXPECT_TRUE(loom_value_facts_is_exact(facts[output_index]));
-        EXPECT_EQ(facts[output_index].range_lo, test_case.expected[operation]);
+TEST(IntegerExtensionFacts, NonzeroAndDivisibilityAcrossWidths) {
+  for (int32_t bit_count : {1, 8, 16, 32}) {
+    SCOPED_TRACE(bit_count);
+    const int64_t extent = INT64_C(1) << bit_count;
+    const int64_t minimum = bit_count == 1 ? 0 : -extent / 2;
+    const int64_t maximum = bit_count == 1 ? 1 : extent / 2 - 1;
+    auto input = loom_value_facts_make(minimum, maximum, 1);
+    input.flags |= LOOM_VALUE_FACT_NON_ZERO;
+    loom_value_facts_mark_lane_varying(&input);
+    auto widened = loom_value_facts_zero_extend(input, bit_count);
+    EXPECT_TRUE(loom_value_facts_is_non_zero(widened));
+    EXPECT_TRUE(loom_value_facts_is_lane_varying(widened));
+    for (int64_t value : {minimum, INT64_C(-1), INT64_C(1), maximum}) {
+      if (value == 0 || value < input.range_lo || value > input.range_hi) {
+        continue;
       }
+      const int64_t expected = static_cast<uint64_t>(value) & (extent - 1);
+      EXPECT_LE(widened.range_lo, expected);
+      EXPECT_GE(widened.range_hi, expected);
+    }
+    auto signed_widened = loom_value_facts_sign_extend(input, bit_count);
+    EXPECT_TRUE(loom_value_facts_is_non_zero(signed_widened));
+    input.flags &= ~LOOM_VALUE_FACT_NON_ZERO;
+    widened = loom_value_facts_zero_extend(input, bit_count);
+    EXPECT_FALSE(loom_value_facts_is_non_zero(widened));
+    EXPECT_EQ(widened.range_lo, 0);
+    if (bit_count > 1) {
+      input.known_divisor = 4;
+      widened = loom_value_facts_zero_extend(input, bit_count);
+      EXPECT_EQ(widened.known_divisor, 4);
     }
   }
-}
-
-TEST(IntegerExtremaTransfer, BooleanAndNarrowRanges) {
-  loom_value_facts_t boolean = loom_value_facts_make(0, 1, 1);
-  loom_value_facts_mark_lane_varying(&boolean);
-  loom_value_facts_t zero = loom_value_facts_exact_i64(0);
-  loom_value_facts_t one = loom_value_facts_exact_i64(1);
-  loom_value_facts_t result;
-  loom_value_facts_minsi(&boolean, &zero, 1, &result);
-  EXPECT_EQ(result.range_lo, 0);
-  EXPECT_EQ(result.range_hi, 1);
-  EXPECT_TRUE(loom_value_facts_is_lane_varying(result));
-  loom_value_facts_maxsi(&boolean, &one, 1, &result);
-  EXPECT_EQ(result.range_lo, 0);
-  EXPECT_EQ(result.range_hi, 1);
-  EXPECT_TRUE(loom_value_facts_is_lane_varying(result));
-
-  loom_value_facts_t negative = loom_value_facts_make(-128, -124, 2);
-  loom_value_facts_t positive = loom_value_facts_make(2, 10, 2);
-  loom_value_facts_minsi(&negative, &positive, 8, &result);
-  EXPECT_EQ(result.range_lo, -128);
-  EXPECT_EQ(result.range_hi, -124);
-  EXPECT_EQ(result.known_divisor, 2);
-  loom_value_facts_maxsi(&negative, &positive, 8, &result);
-  EXPECT_EQ(result.range_lo, 2);
-  EXPECT_EQ(result.range_hi, 10);
-  EXPECT_EQ(result.known_divisor, 2);
 }
 
 //===----------------------------------------------------------------------===//

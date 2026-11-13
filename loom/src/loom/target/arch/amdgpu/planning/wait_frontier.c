@@ -32,6 +32,8 @@ static_assert(LOOM_AMDGPU_WAIT_COUNTER_MASK_ALL ==
 static_assert(sizeof(loom_amdgpu_wait_memory_state_t) ==
                   LOOM_AMDGPU_WAIT_MEMORY_SPACE_COUNT * sizeof(uint16_t),
               "memory frontier state must not acquire padding");
+static_assert(sizeof(loom_amdgpu_wait_memory_completion_t) == 2,
+              "memory completions must retain two compact alias sets");
 loom_amdgpu_wait_memory_space_flags_t loom_amdgpu_wait_memory_space_flag(
     loom_low_memory_space_t memory_space) {
   const loom_low_memory_space_t normalized_space =
@@ -264,6 +266,58 @@ static void loom_amdgpu_wait_memory_state_drain(
   }
 }
 
+static void loom_amdgpu_wait_memory_completion_add_node(
+    loom_amdgpu_wait_memory_completion_t* completion,
+    loom_amdgpu_wait_memory_completion_t* refined_completion,
+    const loom_amdgpu_wait_frontier_node_t* node) {
+  const bool orders_memory = iree_any_bit_set(
+      node->flags, LOOM_AMDGPU_WAIT_FRONTIER_NODE_FLAG_ORDERS_MEMORY);
+  const loom_amdgpu_wait_memory_space_flags_t generic_space_flag =
+      loom_amdgpu_wait_memory_space_flag(LOOM_LOW_MEMORY_SPACE_GENERIC);
+  const loom_amdgpu_wait_memory_space_flags_t read_space_flags =
+      orders_memory ||
+              iree_any_bit_set(node->write_space_flags, generic_space_flag)
+          ? LOOM_AMDGPU_WAIT_MEMORY_SPACE_FLAG_MASK
+          : node->write_space_flags;
+  const loom_amdgpu_wait_memory_space_flags_t write_space_flags =
+      orders_memory ||
+              iree_any_bit_set(node->read_space_flags, generic_space_flag)
+          ? LOOM_AMDGPU_WAIT_MEMORY_SPACE_FLAG_MASK
+          : node->read_space_flags;
+  completion->read_space_flags |= read_space_flags;
+  completion->write_space_flags |= write_space_flags;
+  if (refined_completion != NULL) {
+    // Refined accesses carry exact dependency edges. Only unrefined accesses
+    // or ordering operations require all aliasing incoming effects to finish.
+    if (orders_memory ||
+        !iree_any_bit_set(node->flags,
+                          LOOM_AMDGPU_WAIT_FRONTIER_NODE_FLAG_REFINED_WRITE)) {
+      refined_completion->read_space_flags |= read_space_flags;
+    }
+    if (orders_memory ||
+        !iree_any_bit_set(node->flags,
+                          LOOM_AMDGPU_WAIT_FRONTIER_NODE_FLAG_REFINED_READ)) {
+      refined_completion->write_space_flags |= write_space_flags;
+    }
+  }
+}
+
+static void loom_amdgpu_wait_memory_state_complete_incoming(
+    loom_amdgpu_wait_memory_state_t* state,
+    const loom_amdgpu_wait_memory_completion_t* completion) {
+  for (uint32_t space = 0; space < LOOM_AMDGPU_WAIT_MEMORY_SPACE_COUNT;
+       ++space) {
+    const uint32_t space_flag = 1u << (space + LOOM_LOW_MEMORY_SPACE_GENERIC);
+    const uint16_t completed_access_mask =
+        (iree_any_bit_set(completion->read_space_flags, space_flag) ? UINT8_MAX
+                                                                    : 0) |
+        (iree_any_bit_set(completion->write_space_flags, space_flag)
+             ? UINT8_MAX << LOOM_AMDGPU_WAIT_MEMORY_WRITE_COUNTER_SHIFT
+             : 0);
+    state->access_counter_masks[space] &= ~completed_access_mask;
+  }
+}
+
 static void loom_amdgpu_wait_memory_state_add_access(
     loom_amdgpu_wait_memory_state_t* state,
     loom_amdgpu_wait_memory_space_flags_t producer_space_flags,
@@ -469,6 +523,12 @@ static void loom_amdgpu_wait_frontier_build_local_states(
       incoming_completion_counter_mask |=
           drain_counter_mask | completed_counter_mask;
       if (memory_state != NULL) {
+        loom_amdgpu_wait_memory_completion_add_node(
+            &frontier->memory.incoming_completions[block_index],
+            refined_memory_state == NULL
+                ? NULL
+                : &frontier->memory.refined_incoming_completions[block_index],
+            node);
         loom_amdgpu_wait_memory_state_drain(memory_state, drain_counter_mask);
         if (refined_memory_state != NULL) {
           loom_amdgpu_wait_memory_state_drain(refined_memory_state,
@@ -613,6 +673,8 @@ static bool loom_amdgpu_wait_frontier_block_state_union_changed(
     loom_amdgpu_wait_memory_state_t incoming_state =
         frontier->memory.static_outgoing_states[source_block];
     loom_amdgpu_wait_memory_state_drain(&incoming_state, drain_counter_mask);
+    loom_amdgpu_wait_memory_state_complete_incoming(
+        &incoming_state, &frontier->memory.incoming_completions[target_block]);
     changed |= loom_amdgpu_wait_memory_state_union_changed(
         &frontier->memory.static_outgoing_states[target_block],
         &incoming_state);
@@ -621,8 +683,15 @@ static bool loom_amdgpu_wait_frontier_block_state_union_changed(
     loom_amdgpu_wait_memory_state_t incoming_state =
         frontier->memory.refined_static_outgoing_states[source_block];
     loom_amdgpu_wait_memory_state_drain(&incoming_state, drain_counter_mask);
+    // Backedges lose source refinement before entering the target block.
+    const bool retains_refinement = source_block < target_block;
+    loom_amdgpu_wait_memory_state_complete_incoming(
+        &incoming_state,
+        retains_refinement
+            ? &frontier->memory.refined_incoming_completions[target_block]
+            : &frontier->memory.incoming_completions[target_block]);
     loom_amdgpu_wait_memory_state_t* target_state =
-        source_block < target_block
+        retains_refinement
             ? &frontier->memory.refined_static_outgoing_states[target_block]
             : &frontier->memory.static_outgoing_states[target_block];
     changed |= loom_amdgpu_wait_memory_state_union_changed(target_state,
@@ -851,6 +920,13 @@ iree_status_t loom_amdgpu_wait_frontier_initialize(
         schedule->block_count * (has_refined_memory_producer ? 2u : 1u);
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
         arena, memory_state_count,
+        sizeof(*out_frontier->memory.incoming_completions),
+        (void**)&out_frontier->memory.incoming_completions));
+    memset(out_frontier->memory.incoming_completions, 0,
+           memory_state_count *
+               sizeof(*out_frontier->memory.incoming_completions));
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        arena, memory_state_count,
         sizeof(*out_frontier->memory.static_outgoing_states),
         (void**)&out_frontier->memory.static_outgoing_states));
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
@@ -864,6 +940,8 @@ iree_status_t loom_amdgpu_wait_frontier_initialize(
            memory_state_count *
                sizeof(*out_frontier->memory.resolved_outgoing_states));
     if (has_refined_memory_producer) {
+      out_frontier->memory.refined_incoming_completions =
+          out_frontier->memory.incoming_completions + schedule->block_count;
       out_frontier->memory.refined_static_outgoing_states =
           out_frontier->memory.static_outgoing_states + schedule->block_count;
       out_frontier->memory.refined_resolved_outgoing_states =

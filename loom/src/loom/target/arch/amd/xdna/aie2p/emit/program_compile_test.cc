@@ -326,9 +326,9 @@ class Aie2pProgramCompileTest : public ::testing::Test {
 
   iree_status_t CompileProgram(
       loom_module_t* module, loom_op_t* entry,
-      const loom_aie2p_leaf_compile_options_t* options, bool* out_compiled,
-      loom_aie2p_leaf_contribution_t* out_contribution,
-      loom_aie2p_program_compiler_t* compiler = nullptr) {
+      const loom_aie2p_leaf_compile_options_t* options,
+      loom_aie2p_program_compiler_t* compiler, bool* out_compiled,
+      loom_aie2p_leaf_contribution_t* out_contribution) {
     if (compiler == nullptr) {
       IREE_RETURN_IF_ERROR(loom_aie2p_program_compiler_allocate(
           module, &program_arena_, options->compile_report, &compiler));
@@ -346,16 +346,25 @@ class Aie2pProgramCompileTest : public ::testing::Test {
         direct_helpers[i].function =
             requirements.direct_callees.values[i].symbol;
       }
-      status = loom_aie2p_program_compile(
-          compiler, entry, requirements.return_count != 0,
-          loom_aie2p_program_helper_list_t{
-              .values = direct_helpers.data(),
-              .count = direct_helpers.size(),
-          },
-          options, out_compiled, out_contribution);
+      status = loom_aie2p_program_compile(compiler, entry,
+                                          requirements.return_count != 0,
+                                          loom_aie2p_program_helper_list_t{
+                                              .values = direct_helpers.data(),
+                                              .count = direct_helpers.size(),
+                                          },
+                                          &requirements.read_only_data, options,
+                                          out_compiled, out_contribution);
     }
     iree_arena_deinitialize(&requirements_arena);
     return status;
+  }
+
+  iree_status_t CompileProgram(
+      loom_module_t* module, loom_op_t* entry,
+      const loom_aie2p_leaf_compile_options_t* options, bool* out_compiled,
+      loom_aie2p_leaf_contribution_t* out_contribution) {
+    return CompileProgram(module, entry, options, /*compiler=*/nullptr,
+                          out_compiled, out_contribution);
   }
 
   iree_arena_block_pool_t module_block_pool_;
@@ -364,6 +373,134 @@ class Aie2pProgramCompileTest : public ::testing::Test {
   loom_context_t context_ = {};
   loom_target_low_descriptor_registry_t low_registry_ = {};
 };
+
+// Both native result banks need a parallel permutation, including a repeated
+// source. Decode the emitted register moves and apply each packet atomically:
+// presence alone would also accept a destructive or reversed move sequence.
+TEST_F(Aie2pProgramCompileTest, TransportsParallelScalarAndPointerResults) {
+  const struct {
+    // Low carrier type selected by the native scalar/pointer ABI.
+    const char* type;
+    // Physical register class containing every transport endpoint.
+    uint16_t register_class;
+    // First incoming value and second outgoing result.
+    const char* first;
+    // Second incoming value and first outgoing result.
+    const char* second;
+    // Additional outgoing result repeating the first incoming value.
+    const char* repeated;
+  } cases[] = {
+      {"aie2p.er", AIE2P_CORE_REG_CLASS_ID_AIE2P_ER, "r0", "r1", "r2"},
+      {"aie2p.ep", AIE2P_CORE_REG_CLASS_ID_AIE2P_EP, "p2", "p3", "p4"},
+  };
+  const loom_low_descriptor_set_t* descriptor_set =
+      loom_aie2p_core_descriptor_set();
+  for (const auto& test_case : cases) {
+    SCOPED_TRACE(test_case.type);
+    const std::string type = "reg<" + std::string(test_case.type) + ">";
+    const std::string source =
+        "aie2p.target<core> @target\n"
+        "low.func.def target<amd.xdna.aie2p.core>(@target) "
+        "abi(object_function) @entry(%first: " +
+        type + ", %second: " + type + ") -> (" + type + ", " + type + ", " +
+        type +
+        ") asm {\n"
+        "  return %first, %second, %first\n}\n";
+    ModulePtr module =
+        ParseModule(iree_make_string_view(source.data(), source.size()));
+    loom_op_t* entry = FindFunction(module.get(), IREE_SV("entry"));
+    ASSERT_NE(entry, nullptr);
+    uint16_t argument_count = 0;
+    const loom_value_id_t* arguments = loom_func_like_arg_ids(
+        loom_func_like_cast(module.get(), entry), &argument_count);
+    ASSERT_EQ(argument_count, 2u);
+    const loom_aie2p_physical_register_id_t registers[] = {
+        loom_aie2p_machine_find_physical_register(
+            iree_make_cstring_view(test_case.first)),
+        loom_aie2p_machine_find_physical_register(
+            iree_make_cstring_view(test_case.second)),
+        loom_aie2p_machine_find_physical_register(
+            iree_make_cstring_view(test_case.repeated)),
+    };
+    loom_low_allocation_fixed_value_t fixed_values[2] = {};
+    for (uint16_t i = 0; i < 2; ++i) {
+      fixed_values[i] = {
+          .value_id = arguments[i],
+          .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+          .location_base = registers[i],
+          .location_count = 1,
+      };
+    }
+    loom_low_allocation_abi_location_t exits[3] = {};
+    const uint16_t destinations[] = {1, 0, 2};
+    for (uint16_t i = 0; i < 3; ++i) {
+      exits[i] = {
+          .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+          .descriptor_reg_class_id = test_case.register_class,
+          .location_base = registers[destinations[i]],
+      };
+    }
+    const loom_aie2p_leaf_compile_options_t options = {
+        .descriptor_registry = &low_registry_.registry,
+        .allocation_fixed_values = fixed_values,
+        .allocation_fixed_value_count = IREE_ARRAYSIZE(fixed_values),
+        .allocation_exit_locations = exits,
+        .allocation_exit_location_count = IREE_ARRAYSIZE(exits),
+    };
+    bool compiled = false;
+    loom_aie2p_leaf_contribution_t contribution = {};
+    IREE_ASSERT_OK(CompileProgram(module.get(), entry, &options, &compiled,
+                                  &contribution));
+    ASSERT_TRUE(compiled);
+    const auto& symbol =
+        contribution.object
+            .symbols[contribution.realization.entry_symbol_index];
+    std::vector<DecodedProgramBundle> bundles;
+    IREE_ASSERT_OK(DecodeProgram(
+        contribution.object.sections[symbol.section_contribution_index]
+            .contents,
+        &bundles));
+
+    const uint16_t register_count =
+        descriptor_set->reg_classes[test_case.register_class].allocatable_count;
+    std::vector<loom_aie2p_physical_register_id_t> candidates(register_count);
+    std::vector<uint32_t> values(register_count);
+    for (uint16_t i = 0; i < register_count; ++i) {
+      candidates[i] = loom_low_descriptor_set_physical_register_candidate(
+          descriptor_set, test_case.register_class, i);
+      values[i] = 100 + i;
+      if (candidates[i] == registers[0]) {
+        values[i] = 7;
+      }
+      if (candidates[i] == registers[1]) {
+        values[i] = 9;
+      }
+    }
+    for (const auto& bundle : bundles) {
+      auto next = values;
+      for (uint16_t from = 0; from < register_count; ++from) {
+        for (uint16_t to = 0; to < register_count; ++to) {
+          if (from == to) {
+            continue;
+          }
+          if (BundleHasEncodedSlot(bundle,
+                                   EncodeMove(descriptor_set, candidates[from],
+                                              candidates[to]))) {
+            next[to] = values[from];
+          }
+        }
+      }
+      values = std::move(next);
+    }
+    const uint32_t expected[] = {9, 7, 7};
+    for (uint16_t i = 0; i < 3; ++i) {
+      auto position =
+          std::find(candidates.begin(), candidates.end(), registers[i]);
+      ASSERT_NE(position, candidates.end());
+      EXPECT_EQ(values[position - candidates.begin()], expected[i]);
+    }
+  }
+}
 
 TEST_F(Aie2pProgramCompileTest, RetainsHelperObjectsAcrossProgramCompilations) {
   const iree_string_view_t sources[] = {
@@ -386,8 +523,8 @@ TEST_F(Aie2pProgramCompileTest, RetainsHelperObjectsAcrossProgramCompilations) {
     for (int program_index = 0; program_index < 3; ++program_index) {
       bool compiled = false;
       loom_aie2p_leaf_contribution_t contribution = {};
-      IREE_ASSERT_OK(CompileProgram(module.get(), entry, &options, &compiled,
-                                    &contribution, compiler));
+      IREE_ASSERT_OK(CompileProgram(module.get(), entry, &options, compiler,
+                                    &compiled, &contribution));
       ASSERT_TRUE(compiled);
       ASSERT_EQ(contribution.object.section_count, 2u);
       // Each caller is allocated independently. Its native call still borrows
@@ -428,8 +565,8 @@ TEST_F(Aie2pProgramCompileTest, ReportsCompleteProgramIncludingRetainedHelper) {
   ASSERT_NE(helper, nullptr);
 
   loom_target_compile_report_t report_template;
-  loom_target_compile_report_initialize(&report_template,
-                                        iree_allocator_system());
+  loom_target_compile_report_initialize(iree_allocator_system(),
+                                        &report_template);
   loom_aie2p_program_compiler_t* compiler = nullptr;
   IREE_ASSERT_OK(loom_aie2p_program_compiler_allocate(
       module.get(), &program_arena_, &report_template, &compiler));
@@ -437,15 +574,15 @@ TEST_F(Aie2pProgramCompileTest, ReportsCompleteProgramIncludingRetainedHelper) {
 
   for (int program_index = 0; program_index < 2; ++program_index) {
     loom_target_compile_report_t report;
-    loom_target_compile_report_initialize(&report, iree_allocator_system());
+    loom_target_compile_report_initialize(iree_allocator_system(), &report);
     const loom_aie2p_leaf_compile_options_t options = {
         .descriptor_registry = &low_registry_.registry,
         .compile_report = &report,
     };
     bool compiled = false;
     loom_aie2p_leaf_contribution_t contribution = {};
-    IREE_ASSERT_OK(CompileProgram(module.get(), entry, &options, &compiled,
-                                  &contribution, compiler));
+    IREE_ASSERT_OK(CompileProgram(module.get(), entry, &options, compiler,
+                                  &compiled, &contribution));
     ASSERT_TRUE(compiled);
     ASSERT_EQ(contribution.object.section_count, 2u);
 
@@ -1079,6 +1216,96 @@ TEST_F(Aie2pProgramCompileTest,
                             return BundleHasInstruction(bundle,
                                                         second_fifo_pop);
                           }));
+}
+
+TEST_F(Aie2pProgramCompileTest,
+       InitializesAndReleasesWorkerStackAtEveryReturn) {
+  constexpr char kSource[] = R"(
+aie2p.target<core> @target
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @entry(%condition: reg<aie2p.er>) asm {
+  %storage = storage {byte_alignment = 32, byte_length = 32} : low.storage<stack>
+  %address = storage_address %storage : low.storage<stack> -> reg<aie2p.ep>
+  st %condition, %address, 0
+  low.cond_br %condition, ^first, ^second : reg<aie2p.er>
+^first:
+  return
+^second:
+  return
+}
+)";
+  ModulePtr module = ParseModule(IREE_SV(kSource));
+  loom_op_t* entry = FindFunction(module.get(), IREE_SV("entry"));
+  const loom_aie2p_leaf_compile_options_t options = {
+      .descriptor_registry = &low_registry_.registry,
+  };
+  bool compiled = false;
+  loom_aie2p_leaf_contribution_t contribution = {};
+  IREE_ASSERT_OK(
+      CompileProgram(module.get(), entry, &options, &compiled, &contribution));
+  ASSERT_TRUE(compiled);
+  EXPECT_EQ(contribution.realization.stack_frame_byte_length, 64u);
+  EXPECT_EQ(contribution.realization.stack.byte_length, 64u);
+  EXPECT_EQ(contribution.realization.stack.minimum_alignment, 64u);
+  ASSERT_EQ(contribution.realization.storage_domain_count, 1u);
+
+  const auto adjust =
+      loom_aie2p_encoding_find_instruction(IREE_SV("PADDXM_pstm_sp_imm"));
+  const auto movxm = loom_aie2p_encoding_find_instruction(IREE_SV("MOVXM"));
+  const auto sp = loom_aie2p_machine_find_physical_register(IREE_SV("sp"));
+  const auto adapter =
+      loom_aie2p_machine_find_register_adapter(IREE_SV("OP_mMvSclDstCg"));
+  uint8_t sp_encoding = 0;
+  ASSERT_TRUE(loom_aie2p_machine_encode_register(adapter, sp, &sp_encoding));
+
+  // The same detached code is placed independently in two tile apertures.
+  for (uint32_t address : {0x70000u, 0x78000u}) {
+    const loom_aie2p_tile_storage_placement_t storage = {
+        .storage_space = LOOM_STORAGE_SPACE_STACK,
+        .owner_offset = 0,
+        .load_address = address,
+    };
+    const loom_aie2p_tile_link_layout_t placement = {
+        .program_address = 0,
+        .program_byte_capacity = LOOM_AIE2P_CORE_PROGRAM_MEMORY_SIZE,
+        .storage_placements = &storage,
+        .storage_placement_count = 1,
+    };
+    loom_aie2p_linked_tile_t linked = {};
+    IREE_ASSERT_OK(loom_aie2p_tile_link(&contribution, &placement,
+                                        &program_arena_, &linked));
+    std::vector<DecodedProgramBundle> bundles;
+    IREE_ASSERT_OK(
+        DecodeProgram(linked.assembly.sections[0].contents, &bundles));
+    size_t initialization_count = 0;
+    size_t release_count = 0;
+    for (const auto& bundle : bundles) {
+      if (const auto* slot = FindInstructionSlot(bundle, movxm)) {
+        loom_aie2p_encoding_field_value_t fields[2];
+        iree_host_size_t count = 0;
+        IREE_ASSERT_OK(loom_aie2p_encoding_unpack_instruction(
+            movxm, slot->value, IREE_ARRAYSIZE(fields), fields, &count));
+        ASSERT_EQ(count, 2u);
+        if (fields[0].value == sp_encoding) {
+          EXPECT_EQ(fields[1].value, address + 64u);
+          ++initialization_count;
+        } else {
+          EXPECT_EQ(fields[1].value, address + 32u);
+        }
+      }
+      if (const auto* slot = FindInstructionSlot(bundle, adjust)) {
+        loom_aie2p_encoding_field_value_t fields[1];
+        iree_host_size_t count = 0;
+        IREE_ASSERT_OK(loom_aie2p_encoding_unpack_instruction(
+            adjust, slot->value, IREE_ARRAYSIZE(fields), fields, &count));
+        ASSERT_EQ(count, 1u);
+        // Signed 19-bit byte displacement with six implicit low zero bits.
+        EXPECT_EQ(fields[0].value, 0x1fffu);
+        ++release_count;
+      }
+    }
+    EXPECT_EQ(initialization_count, 1u);
+    EXPECT_EQ(release_count, 2u);
+  }
 }
 
 }  // namespace

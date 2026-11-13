@@ -147,11 +147,9 @@ static void loom_amdgpu_replay_clause_record_packet(
 
 // Keep the non-memory fast path in the sole native traversal caller while
 // retaining an external definition for non-LTO builds.
-IREE_ATTRIBUTE_ALWAYS_INLINE extern inline uint32_t
-loom_amdgpu_replay_clause_apply(loom_amdgpu_replay_clause_t* state,
-                                const loom_low_packet_view_t* packet,
-                                loom_amdgpu_descriptor_traits_t traits,
-                                uint64_t instruction_count) {
+extern IREE_ATTRIBUTE_ALWAYS_INLINE uint32_t loom_amdgpu_replay_clause_apply(
+    loom_amdgpu_replay_clause_t* state, const loom_low_packet_view_t* packet,
+    loom_amdgpu_descriptor_traits_t traits, uint64_t instruction_count) {
   if (instruction_count == 0) {
     return LOOM_LOW_PACKET_INDEX_NONE;
   }

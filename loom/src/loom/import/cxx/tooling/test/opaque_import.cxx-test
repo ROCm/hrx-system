@@ -1,0 +1,24 @@
+// RUN: roundtrip
+// Imported calls preserve opaque references and address-domain results without
+// a service-specific C++ lowering path.
+#include <loomcxx/index.h>
+
+class [[loom::type("hal.buffer")]] Buffer {};
+
+struct BufferDescription {
+  Buffer buffer;
+  loom::type::index length;
+};
+
+[[loom::import("hal", "buffer.describe")]]
+BufferDescription describe(Buffer buffer);
+
+BufferDescription inspect(Buffer buffer) { return describe(buffer); }
+
+// ----
+func.def public @inspect(%buffer: hal.buffer) -> (hal.buffer, index) {
+  %3, %4 = func.call @describe(%buffer) : (hal.buffer) -> (hal.buffer, index)
+  func.return %3, %4 : hal.buffer, index
+}
+
+func.decl import("hal", "buffer.describe") @describe(%5: hal.buffer) -> (hal.buffer, index)

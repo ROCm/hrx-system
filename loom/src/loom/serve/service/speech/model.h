@@ -7,9 +7,9 @@
 #ifndef LOOM_SERVE_SERVICE_SPEECH_MODEL_H_
 #define LOOM_SERVE_SERVICE_SPEECH_MODEL_H_
 
-#include "loom/serve/runtime/device/device.h"
-#include "loom/serve/runtime/program/compilation.h"
-#include "loom/serve/runtime/program/sources.h"
+#include "loom/runtime/device/device.h"
+#include "loom/runtime/program/compilation.h"
+#include "loom/runtime/program/sources.h"
 #include "loom/serve/service/speech/generator.h"
 
 #ifdef __cplusplus
@@ -24,7 +24,7 @@ typedef struct loom_serve_speech_load_t loom_serve_speech_load_t;
 
 typedef struct loom_serve_speech_model_options_t {
   // Explicit source providers and local base, borrowed through load completion.
-  loom_serve_sources_t sources;
+  loom_runtime_sources_t sources;
   // Model package assets, interpreted by its cold source program.
   iree_string_view_t asset_directory;
   // Source-owned JSON object selecting capacities, voices and model policy.
@@ -39,7 +39,7 @@ typedef void (*loom_serve_speech_load_wake_fn_t)(void* user_data);
 // work. Private preparation/JIT uses the shared host; owner turns alone mutate
 // shared residency and allocation state.
 iree_status_t loom_serve_speech_load_allocate(
-    loom_serve_device_t* device, loom_serve_pool_t* pool,
+    loom_runtime_device_t* device, loom_runtime_pool_t* pool,
     const loom_serve_speech_model_options_t* options,
     loom_serve_speech_load_wake_fn_t wake, void* user_data,
     iree_allocator_t host_allocator, loom_serve_speech_load_t** out_load);
@@ -58,7 +58,7 @@ iree_status_t loom_serve_speech_load_advance(
 
 // Terminal-only queries. Evidence is borrowed; take transfers a successful
 // unactivated model and leaves the load empty.
-const loom_serve_compilation_report_t* loom_serve_speech_load_report(
+const loom_runtime_compilation_report_t* loom_serve_speech_load_report(
     const loom_serve_speech_load_t* load);
 loom_serve_speech_model_t* loom_serve_speech_load_take_model(
     loom_serve_speech_load_t* load);
@@ -162,7 +162,7 @@ iree_status_t loom_serve_speech_load_free(loom_serve_speech_load_t* load);
 // and compiles stages without loading checkpoint payloads. The execution device
 // and storage pool outlive the model. Failure leaves *out_model NULL.
 iree_status_t loom_serve_speech_model_allocate(
-    loom_serve_device_t* device, loom_serve_pool_t* pool,
+    loom_runtime_device_t* device, loom_runtime_pool_t* pool,
     const loom_serve_speech_model_options_t* options,
     iree_allocator_t host_allocator, loom_serve_speech_model_t** out_model);
 
@@ -183,7 +183,7 @@ iree_status_t loom_serve_speech_model_free(loom_serve_speech_model_t* model);
 
 // Borrowed admission and serialized invocation interfaces, live through model
 // retirement. The generator preserves request ownership on terminal failure.
-loom_serve_residency_t* loom_serve_speech_model_residency(
+loom_runtime_residency_t* loom_serve_speech_model_residency(
     const loom_serve_speech_model_t* model);
 loom_serve_speech_generator_t loom_serve_speech_model_generator(
     loom_serve_speech_model_t* model);

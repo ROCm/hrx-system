@@ -78,6 +78,7 @@ iree_py_library(
         "core_descriptors.py",
         "core_fifo_descriptors.py",
         "core_move_topology.py",
+        "core_stack_descriptors.py",
         "core_stream_descriptors.py",
     ],
     visibility = ["//visibility:public"],

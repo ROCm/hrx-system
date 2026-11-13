@@ -29,8 +29,8 @@
 #include "loom/target/function_version.h"
 #include "loom/transforms/scf/scf_unroll_bounds.h"
 #include "loom/transforms/scf/scf_unroll_tile.h"
+#include "loom/transforms/scf/scf_unroll_worklist.h"
 #include "loom/util/fact_table.h"
-#include "loom/util/walk.h"
 
 //===----------------------------------------------------------------------===//
 // Options and statistics
@@ -67,73 +67,6 @@ iree_status_t loom_scf_unroll_create(loom_pass_t* pass,
                             "pass 'unroll-scf-for' takes no options");
   }
   return iree_ok_status();
-}
-
-//===----------------------------------------------------------------------===//
-// Candidate collection
-//===----------------------------------------------------------------------===//
-
-#define LOOM_SCF_UNROLL_INITIAL_LOOP_CAPACITY 16
-
-static bool loom_scf_unroll_policy_present(loom_op_t* op) {
-  return loom_scf_for_unroll_factor_is_present(op) ||
-         loom_scf_for_has_unroll_policy(op) ||
-         loom_scf_for_has_unroll_schedule(op);
-}
-
-typedef struct loom_scf_unroll_loop_list_t {
-  // Collected scf.for operations in traversal order.
-  loom_op_t** ops;
-  // Number of collected loop operations.
-  iree_host_size_t count;
-  // Allocated loop pointer capacity.
-  iree_host_size_t capacity;
-} loom_scf_unroll_loop_list_t;
-
-typedef struct loom_scf_unroll_collect_context_t {
-  // Pass scratch arena used for the collected loop pointer list.
-  iree_arena_allocator_t* arena;
-  // Collected scf.for operations.
-  loom_scf_unroll_loop_list_t* loops;
-  // True when at least one collected loop requests unrolling.
-  bool has_policy;
-} loom_scf_unroll_collect_context_t;
-
-static iree_status_t loom_scf_unroll_loop_list_initialize(
-    iree_arena_allocator_t* arena, loom_scf_unroll_loop_list_t* list) {
-  list->count = 0;
-  list->capacity = LOOM_SCF_UNROLL_INITIAL_LOOP_CAPACITY;
-  return iree_arena_allocate_array(arena, list->capacity, sizeof(loom_op_t*),
-                                   (void**)&list->ops);
-}
-
-static iree_status_t loom_scf_unroll_loop_list_push(
-    iree_arena_allocator_t* arena, loom_scf_unroll_loop_list_t* list,
-    loom_op_t* op) {
-  if (list->count >= list->capacity) {
-    IREE_RETURN_IF_ERROR(iree_arena_grow_array(
-        arena, list->count, list->count + 1, sizeof(loom_op_t*),
-        &list->capacity, (void**)&list->ops));
-  }
-  list->ops[list->count++] = op;
-  return iree_ok_status();
-}
-
-static iree_status_t loom_scf_unroll_collect_loop(
-    void* user_data, loom_op_t* op, const loom_walk_context_t* context,
-    loom_walk_result_t* out_result) {
-  (void)context;
-  loom_scf_unroll_collect_context_t* collect_context =
-      (loom_scf_unroll_collect_context_t*)user_data;
-  *out_result = LOOM_WALK_CONTINUE;
-  if (!loom_scf_for_isa(op)) {
-    return iree_ok_status();
-  }
-  if (!collect_context->has_policy) {
-    collect_context->has_policy = loom_scf_unroll_policy_present(op);
-  }
-  return loom_scf_unroll_loop_list_push(collect_context->arena,
-                                        collect_context->loops, op);
 }
 
 //===----------------------------------------------------------------------===//
@@ -889,29 +822,19 @@ static iree_status_t loom_scf_unroll_clone_guarded_iteration(
       IREE_RETURN_IF_ERROR(loom_scf_unroll_build_strided_iteration_index(
           context, source_iv, base, type, step, ordinal, location,
           &iteration_index));
-      // This guard proves the materialized lane is inside the source domain.
-      const loom_predicate_t predicates[] = {
-          {.kind = LOOM_PREDICATE_GE,
-           .arg_count = 2,
-           .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_VALUE,
-                        LOOM_PRED_ARG_NONE},
-           .args = {iteration_index, base, 0}},
-          {.kind = LOOM_PREDICATE_LT,
-           .arg_count = 2,
-           .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_VALUE,
-                        LOOM_PRED_ARG_NONE},
-           .args = {iteration_index, loom_scf_for_upper_bound(source), 0}},
-      };
-      loom_op_t* assume = NULL;
-      IREE_RETURN_IF_ERROR(loom_index_assume_build(
-          builder, &iteration_index, 1, predicates, IREE_ARRAYSIZE(predicates),
-          &type, 1, location, &assume));
-      const loom_value_id_t bounded_index =
-          loom_index_assume_results(assume).values[0];
-      IREE_RETURN_IF_ERROR(loom_rewriter_move_value_name(
-          context->rewriter, iteration_index, bounded_index));
-      iteration_index = bounded_index;
     }
+    // An executed copy retains the source domain, including a last reachable
+    // IV tighter than upper - 1. The distance guard also establishes the
+    // materialized index's ordering without requiring an overflowing add.
+    const loom_value_id_t upper_bound = loom_scf_for_upper_bound(source);
+    IREE_RETURN_IF_ERROR(loom_scf_unroll_refine_indices(
+        context->rewriter, iv_facts,
+        loom_scf_unroll_guarded_index_facts(
+            iv_facts,
+            loom_value_fact_table_lookup(context->fact_table, upper_bound)),
+        candidate_fits ? LOOM_VALUE_ID_INVALID : base,
+        candidate_fits ? LOOM_VALUE_ID_INVALID : upper_bound, 1,
+        &iteration_index, location, context->pass->arena));
     IREE_RETURN_IF_ERROR(
         loom_ir_remap_map_value(remap, source_iv, iteration_index));
   }
@@ -1205,40 +1128,18 @@ static iree_status_t loom_scf_unroll_emit_scheduled_tile(
     }
 
     remapped_iteration_indices = iteration_indices;
-    // Dynamic partial unrolling replaces the source upper bound with an aligned
-    // main-loop bound. Preserve the source bound on every materialized index so
-    // consumers do not have to reconstruct the split arithmetic.
+    // A changed main-loop bound can lose the source domain even with an exact
+    // trip count: a ranged lower bound and its aligned split are correlated.
+    // Materializing an ordinal can also overflow the independent interval
+    // before the source bound is applied. Retain the complete source facts
+    // and bound relations on every executed tile lane.
     if (iteration_upper_bound != LOOM_VALUE_ID_INVALID) {
-      loom_predicate_t* predicates = NULL;
-      IREE_RETURN_IF_ERROR(
-          iree_arena_allocate_array(scratch_arena, trip_count->count,
-                                    sizeof(*predicates), (void**)&predicates));
-      loom_type_t* result_types = NULL;
-      IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-          scratch_arena, trip_count->count, sizeof(*result_types),
-          (void**)&result_types));
-      for (uint32_t ordinal = 0; ordinal < trip_count->count; ++ordinal) {
-        predicates[ordinal] = (loom_predicate_t){
-            .kind = LOOM_PREDICATE_LT,
-            .arg_count = 2,
-            .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_VALUE,
-                         LOOM_PRED_ARG_NONE},
-            .args = {iteration_indices[ordinal], iteration_upper_bound, 0},
-        };
-        result_types[ordinal] =
-            loom_module_value_type(context->module, iteration_indices[ordinal]);
-      }
-      loom_op_t* assume_op = NULL;
-      IREE_RETURN_IF_ERROR(loom_index_assume_build(
-          &context->rewriter->builder, iteration_indices, trip_count->count,
-          predicates, trip_count->count, result_types, trip_count->count,
-          op->location, &assume_op));
-      remapped_iteration_indices = loom_index_assume_results(assume_op).values;
-      for (uint32_t ordinal = 0; ordinal < trip_count->count; ++ordinal) {
-        IREE_RETURN_IF_ERROR(loom_rewriter_move_value_name(
-            context->rewriter, iteration_indices[ordinal],
-            remapped_iteration_indices[ordinal]));
-      }
+      const loom_value_facts_t iv_facts =
+          loom_value_fact_table_lookup(context->fact_table, induction_variable);
+      IREE_RETURN_IF_ERROR(loom_scf_unroll_refine_indices(
+          context->rewriter, iv_facts, loom_value_facts_unknown(),
+          loom_scf_for_lower_bound(op), iteration_upper_bound,
+          trip_count->count, iteration_indices, op->location, scratch_arena));
     }
   }
   return loom_scf_unroll_tile_emit(
@@ -1318,9 +1219,10 @@ static iree_status_t loom_scf_unroll_build_exact_scheduled_main_upper(
     loom_scf_unroll_context_t* context, loom_op_t* op,
     const loom_scf_unroll_trip_count_t* trip_count, uint32_t unroll_factor,
     loom_type_t index_type, loom_value_id_t* out_scaled_step,
-    loom_value_id_t* out_main_upper) {
+    loom_scf_unroll_split_t* out_split) {
   *out_scaled_step = LOOM_VALUE_ID_INVALID;
-  *out_main_upper = LOOM_VALUE_ID_INVALID;
+  *out_split = (loom_scf_unroll_split_t){.value = LOOM_VALUE_ID_INVALID,
+                                         .facts = loom_value_facts_unknown()};
 
   IREE_RETURN_IF_ERROR(loom_scf_unroll_build_scaled_step(
       context, op, trip_count->step, unroll_factor, index_type,
@@ -1331,7 +1233,9 @@ static iree_status_t loom_scf_unroll_build_exact_scheduled_main_upper(
   // With no remainder the original upper bound terminates exactly the full
   // tiles. Materializing lower + main_span could overflow after the last IV.
   if (main_iteration_count == trip_count->count) {
-    *out_main_upper = loom_scf_for_upper_bound(op);
+    out_split->value = loom_scf_for_upper_bound(op);
+    out_split->facts =
+        loom_value_fact_table_lookup(context->fact_table, out_split->value);
     return iree_ok_status();
   }
 
@@ -1356,7 +1260,8 @@ static iree_status_t loom_scf_unroll_build_exact_scheduled_main_upper(
       IREE_RETURN_IF_ERROR(loom_index_constant_build(
           &context->rewriter->builder, loom_attr_i64(main_upper), index_type,
           op->location, &upper_op));
-      *out_main_upper = loom_index_constant_result(upper_op);
+      out_split->value = loom_index_constant_result(upper_op);
+      out_split->facts = loom_value_facts_exact_i64(main_upper);
       return iree_ok_status();
     }
     case LOOM_SCF_UNROLL_LOWER_BOUND_DYNAMIC:
@@ -1365,10 +1270,12 @@ static iree_status_t loom_scf_unroll_build_exact_scheduled_main_upper(
               loom_value_facts_exact_i64(main_span))) {
         return loom_scf_unroll_build_dynamic_split(
             &context->rewriter->builder, context->fact_table, op,
-            trip_count->step, unroll_factor, *out_scaled_step, out_main_upper);
+            trip_count->step, unroll_factor, *out_scaled_step, out_split);
       }
       if (main_span == 0) {
-        *out_main_upper = trip_count->lower_value;
+        out_split->value = trip_count->lower_value;
+        out_split->facts =
+            loom_value_fact_table_lookup(context->fact_table, out_split->value);
         return iree_ok_status();
       }
       loom_op_t* span_op = NULL;
@@ -1380,15 +1287,23 @@ static iree_status_t loom_scf_unroll_build_exact_scheduled_main_upper(
           &context->rewriter->builder, trip_count->lower_value,
           loom_index_constant_result(span_op), index_type, op->location,
           &upper_op));
-      *out_main_upper = loom_index_add_result(upper_op);
+      out_split->value = loom_index_add_result(upper_op);
+      const loom_value_facts_t lower_facts = loom_value_fact_table_lookup(
+          context->fact_table, trip_count->lower_value);
+      const loom_value_facts_t span_facts =
+          loom_value_facts_exact_i64(main_span);
+      loom_value_facts_addi(&lower_facts, &span_facts, &out_split->facts);
       return iree_ok_status();
   }
   return iree_ok_status();
 }
 
 static iree_status_t loom_scf_unroll_clone_loop_body(
-    loom_scf_unroll_context_t* context, const loom_block_t* source_block,
-    loom_block_t* target_block, iree_arena_allocator_t* scratch_arena) {
+    loom_scf_unroll_context_t* context, loom_op_t* source,
+    loom_block_t* target_block, loom_value_facts_t split_facts,
+    iree_arena_allocator_t* scratch_arena) {
+  const loom_block_t* source_block =
+      loom_region_entry_block(loom_scf_for_body(source));
   loom_ir_remap_t remap = {0};
   IREE_RETURN_IF_ERROR(loom_ir_remap_initialize(
       context->module, context->module, scratch_arena,
@@ -1404,6 +1319,27 @@ static iree_status_t loom_scf_unroll_clone_loop_body(
     IREE_RETURN_IF_ERROR(
         loom_ir_remap_map_value(&remap, loom_block_arg_id(source_block, i),
                                 loom_block_arg_id(target_block, i)));
+  }
+  const loom_value_id_t source_iv = loom_block_arg_id(source_block, 0);
+  if (loom_scf_unroll_value_has_references(context->module, source_iv)) {
+    loom_value_id_t tail_iv = loom_block_arg_id(target_block, 0);
+    const loom_value_facts_t source_facts =
+        loom_value_fact_table_lookup(context->fact_table, source_iv);
+    const loom_value_facts_t upper_facts = loom_value_fact_table_lookup(
+        context->fact_table, loom_scf_for_upper_bound(source));
+    const loom_value_facts_t step_facts = loom_value_fact_table_lookup(
+        context->fact_table, loom_scf_for_step(source));
+    loom_value_facts_t inferred = source_facts;
+    inferred.range_lo = iree_min(source_facts.range_lo, split_facts.range_lo);
+    inferred.known_divisor = 1;
+    inferred = loom_scf_unroll_guarded_index_facts(inferred, upper_facts);
+    inferred.known_divisor =
+        iree_math_gcd_i64(split_facts.known_divisor, step_facts.known_divisor);
+    loom_value_facts_refine_divisible_range(&inferred);
+    IREE_RETURN_IF_ERROR(loom_scf_unroll_refine_indices(
+        context->rewriter, source_facts, inferred, LOOM_VALUE_ID_INVALID,
+        LOOM_VALUE_ID_INVALID, 1, &tail_iv, source->location, scratch_arena));
+    IREE_RETURN_IF_ERROR(loom_ir_remap_map_value(&remap, source_iv, tail_iv));
   }
   return loom_ir_clone_block_ops(&context->rewriter->builder, source_block,
                                  &remap, NULL);
@@ -1430,18 +1366,19 @@ static iree_status_t loom_scf_unroll_partial_unroll_scheduled_with_arena(
       loom_module_value_type(context->module, loom_scf_for_lower_bound(op));
 
   loom_value_id_t scaled_step = LOOM_VALUE_ID_INVALID;
-  loom_value_id_t main_upper = LOOM_VALUE_ID_INVALID;
+  loom_scf_unroll_split_t split;
   if (trip_count) {
     IREE_RETURN_IF_ERROR(loom_scf_unroll_build_exact_scheduled_main_upper(
         context, op, trip_count, unroll_factor, index_type, &scaled_step,
-        &main_upper));
+        &split));
   } else {
     IREE_RETURN_IF_ERROR(loom_scf_unroll_build_scaled_step(
         context, op, step, unroll_factor, index_type, &scaled_step));
     IREE_RETURN_IF_ERROR(loom_scf_unroll_build_dynamic_split(
         &context->rewriter->builder, context->fact_table, op, step,
-        unroll_factor, scaled_step, &main_upper));
+        unroll_factor, scaled_step, &split));
   }
+  const loom_value_id_t main_upper = split.value;
 
   loom_type_t* main_result_types = NULL;
   IREE_RETURN_IF_ERROR(
@@ -1490,7 +1427,8 @@ static iree_status_t loom_scf_unroll_partial_unroll_scheduled_with_arena(
   };
   iree_status_t status = loom_scf_unroll_emit_scheduled_tile(
       context, op, old_block, &tile_trip_count,
-      trip_count ? LOOM_VALUE_ID_INVALID : loom_scf_for_upper_bound(op),
+      main_upper == loom_scf_for_upper_bound(op) ? LOOM_VALUE_ID_INVALID
+                                                 : loom_scf_for_upper_bound(op),
       main_carried_values, schedule, scratch_arena, final_main_carried_values);
   if (iree_status_is_ok(status) &&
       !loom_pass_has_error_diagnostics(context->pass)) {
@@ -1535,7 +1473,8 @@ static iree_status_t loom_scf_unroll_partial_unroll_scheduled_with_arena(
     saved_ip = loom_builder_enter_region(&context->rewriter->builder, tail_loop,
                                          tail_body);
     IREE_RETURN_IF_ERROR(loom_scf_unroll_clone_loop_body(
-        context, old_block, loom_region_entry_block(tail_body), scratch_arena));
+        context, op, loom_region_entry_block(tail_body), split.facts,
+        scratch_arena));
     loom_builder_restore(&context->rewriter->builder, saved_ip);
     if (op->result_count > 0) {
       replacement_values = loom_scf_for_results(tail_loop).values;
@@ -1635,9 +1574,9 @@ static iree_status_t loom_scf_unroll_full_linear(
   return iree_ok_status();
 }
 
-bool loom_scf_unroll_plan_full(loom_pass_t* pass, loom_module_t* module,
-                               loom_value_fact_table_t* facts, loom_op_t* op,
-                               loom_scf_unroll_full_plan_t* out_plan) {
+static bool loom_scf_unroll_plan_full_domain(
+    const loom_scf_unroll_context_t* context, loom_op_t* op,
+    loom_scf_unroll_trip_count_t* out_domain) {
   if (loom_scf_for_pipeline_depth_is_present(op) ||
       !loom_scf_unroll_policy_present(op) ||
       (loom_scf_for_has_unroll_schedule(op) &&
@@ -1647,28 +1586,39 @@ bool loom_scf_unroll_plan_full(loom_pass_t* pass, loom_module_t* module,
        loom_scf_for_unroll_factor_is_present(op))) {
     return false;
   }
-  loom_scf_unroll_context_t context = {
-      .pass = pass,
-      .module = module,
-      .fact_table = facts,
-  };
   loom_op_t* yield = NULL;
   if (!loom_scf_unroll_shape_is_supported(op, &yield)) {
     return false;
   }
   loom_scf_unroll_trip_count_t domain = {0};
-  if (loom_scf_unroll_resolve_trip_count(&context, op, &domain) !=
+  if (loom_scf_unroll_resolve_trip_count(context, op, &domain) !=
       LOOM_SCF_UNROLL_TRIP_COUNT_EXACT) {
     return false;
   }
   if (loom_scf_for_unroll_factor_is_present(op)) {
     int64_t factor = 0;
-    if (!loom_scf_unroll_exact_i64(facts, loom_scf_for_unroll_factor(op),
-                                   &factor) ||
+    if (!loom_scf_unroll_exact_i64(context->fact_table,
+                                   loom_scf_for_unroll_factor(op), &factor) ||
         factor <= 1 || factor != domain.count) {
       return false;
     }
   } else if (!loom_scf_for_has_unroll_policy(op)) {
+    return false;
+  }
+  *out_domain = domain;
+  return true;
+}
+
+bool loom_scf_unroll_plan_full(loom_pass_t* pass, loom_module_t* module,
+                               loom_value_fact_table_t* facts, loom_op_t* op,
+                               loom_scf_unroll_full_plan_t* out_plan) {
+  loom_scf_unroll_context_t context = {
+      .pass = pass,
+      .module = module,
+      .fact_table = facts,
+  };
+  loom_scf_unroll_trip_count_t domain = {0};
+  if (!loom_scf_unroll_plan_full_domain(&context, op, &domain)) {
     return false;
   }
   *out_plan = (loom_scf_unroll_full_plan_t){
@@ -1879,33 +1829,79 @@ static iree_status_t loom_scf_unroll_try_unroll(
   return iree_ok_status();
 }
 
+static iree_status_t loom_scf_unroll_materialize_preparation(
+    loom_scf_unroll_context_t* context, loom_op_t* op,
+    loom_scf_unroll_trip_count_t* domain) {
+  domain->lower_value = loom_scf_for_lower_bound(op);
+  const bool has_factor = loom_scf_for_unroll_factor_is_present(op);
+  IREE_RETURN_IF_ERROR(loom_scf_unroll_append_report_detail(
+      context, op, has_factor ? IREE_SV("factor") : IREE_SV("bare"),
+      LOOM_SCF_FOR_UNROLL_SCHEDULE_LINEAR,
+      has_factor ? (int64_t)domain->count : -1, domain));
+  loom_ir_remap_t remap = {0};
+  IREE_RETURN_IF_ERROR(
+      loom_scf_unroll_initialize_iteration_remap(context, &remap));
+  loom_op_t* yield = loom_region_entry_block(loom_scf_for_body(op))->last_op;
+  IREE_RETURN_IF_ERROR(
+      loom_scf_unroll_full_linear(context, op, yield, domain, &remap));
+  ++context->statistics->loops_unrolled;
+  context->statistics->iterations_materialized += domain->count;
+  return iree_ok_status();
+}
+
+static iree_status_t loom_scf_unroll_prepare_descendants(
+    loom_scf_unroll_context_t* context,
+    const loom_scf_unroll_worklist_t* worklist, iree_arena_allocator_t* arena,
+    bool* out_changed) {
+  // Select every preparation from the original facts before rewriting any
+  // source value. Reverse source order exposes innermost linear bodies first;
+  // unresolved bounds stay in the ordinary parent-first specialization path.
+  typedef struct loom_scf_unroll_preparation_t {
+    // Source loop selected for full linear materialization.
+    loom_op_t* op;
+    // Proven iteration domain, retained across child rewrites.
+    loom_scf_unroll_trip_count_t domain;
+  } loom_scf_unroll_preparation_t;
+  loom_scf_unroll_preparation_t* preparations = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate_array(arena, worklist->preparation_candidate_count,
+                                sizeof(*preparations), (void**)&preparations));
+  iree_host_size_t preparation_count = 0;
+  for (iree_host_size_t i = 0; i < worklist->count; ++i) {
+    loom_scf_unroll_trip_count_t domain = {0};
+    if (worklist->items[i].prepare &&
+        loom_scf_unroll_plan_full_domain(context, worklist->items[i].op,
+                                         &domain) &&
+        domain.count != 0) {
+      preparations[preparation_count++] = (loom_scf_unroll_preparation_t){
+          .op = worklist->items[i].op, .domain = domain};
+    }
+  }
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = preparation_count;
+       i > 0 && iree_status_is_ok(status); --i) {
+    loom_scf_unroll_preparation_t* preparation = &preparations[i - 1];
+    status = loom_scf_unroll_materialize_preparation(context, preparation->op,
+                                                     &preparation->domain);
+  }
+  *out_changed = preparation_count != 0;
+  return status;
+}
+
 static iree_status_t loom_scf_unroll_process_function_once(
     loom_scf_unroll_context_t* context, loom_func_like_t function,
-    bool* out_changed) {
+    iree_arena_allocator_t* arena, bool* out_changed) {
   *out_changed = false;
-  loom_scf_unroll_loop_list_t loops = {0};
-  IREE_RETURN_IF_ERROR(
-      loom_scf_unroll_loop_list_initialize(context->pass->arena, &loops));
-
-  loom_walk_result_t walk_result = LOOM_WALK_CONTINUE;
-  loom_scf_unroll_collect_context_t collect_context = {
-      .arena = context->pass->arena,
-      .loops = &loops,
-  };
-  IREE_RETURN_IF_ERROR(
-      loom_walk_function(context->module, function, LOOM_WALK_PRE_ORDER,
-                         (loom_walk_callback_t){
-                             .fn = loom_scf_unroll_collect_loop,
-                             .user_data = &collect_context,
-                         },
-                         &walk_result));
+  loom_scf_unroll_worklist_t worklist = {0};
+  IREE_RETURN_IF_ERROR(loom_scf_unroll_worklist_build(context->module, function,
+                                                      arena, &worklist));
 
   // Fact computation is proportional to the entire function. Avoid it when
   // the terminal convergence iteration has no loops or when all remaining
   // loops have no unroll policy. Report mode still resolves trip counts for
   // policy-free loops to explain why they remain structured.
-  if (loops.count == 0 ||
-      (!collect_context.has_policy && !context->reports_enabled)) {
+  if (worklist.count == 0 ||
+      (!worklist.has_policy && !context->reports_enabled)) {
     return iree_ok_status();
   }
   IREE_RETURN_IF_ERROR(loom_pass_value_facts_acquire(
@@ -1915,12 +1911,21 @@ static iree_status_t loom_scf_unroll_process_function_once(
                         context->pass->function_version)),
       &context->fact_table));
 
+  if (worklist.preparation_candidate_count != 0) {
+    IREE_RETURN_IF_ERROR(loom_scf_unroll_prepare_descendants(
+        context, &worklist, arena, out_changed));
+    if (*out_changed) {
+      // The convergence boundary renews facts for the exposed recurrence body.
+      return iree_ok_status();
+    }
+  }
+
   for (iree_host_size_t i = 0;
-       i < loops.count && !loom_pass_has_error_diagnostics(context->pass);
+       i < worklist.count && !loom_pass_has_error_diagnostics(context->pass);
        ++i) {
     bool changed = false;
     IREE_RETURN_IF_ERROR(
-        loom_scf_unroll_try_unroll(context, loops.ops[i], &changed));
+        loom_scf_unroll_try_unroll(context, worklist.items[i].op, &changed));
     *out_changed = *out_changed || changed;
   }
   return iree_ok_status();
@@ -1948,13 +1953,16 @@ iree_status_t loom_scf_unroll_run(loom_pass_t* pass, loom_module_t* module,
   };
 
   iree_status_t status = iree_ok_status();
+  iree_arena_allocator_t scratch_arena;
+  iree_arena_initialize(pass->arena->block_pool, &scratch_arena);
   bool changed = true;
   bool any_changed = false;
   while (iree_status_is_ok(status) && changed &&
          !loom_pass_has_error_diagnostics(pass)) {
     changed = false;
-    status =
-        loom_scf_unroll_process_function_once(&context, function, &changed);
+    iree_arena_reset(&scratch_arena);
+    status = loom_scf_unroll_process_function_once(&context, function,
+                                                   &scratch_arena, &changed);
     if (changed) {
       any_changed = true;
       loom_pass_value_fact_owner_invalidate(pass->value_facts);
@@ -1965,5 +1973,6 @@ iree_status_t loom_scf_unroll_run(loom_pass_t* pass, loom_module_t* module,
     loom_pass_mark_changed(pass);
   }
   loom_rewriter_deinitialize(&rewriter);
+  iree_arena_deinitialize(&scratch_arena);
   return status;
 }

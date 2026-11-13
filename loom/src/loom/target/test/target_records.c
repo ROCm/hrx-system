@@ -137,6 +137,7 @@ static const loom_target_bundle_t* const kTestTargetBundleValues[] = {
     &kTestLowTargetBundleCore,
     &kTestLowTargetBundleQuirky,
     &kTestDeviceTargetBundle,
+    &kTestLowTargetBundleCore,
 };
 
 const loom_target_bundle_table_t loom_test_target_bundles = {

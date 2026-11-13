@@ -305,12 +305,12 @@ func.def @captured_bitcast(%buffer: buffer, %initial: vector<4xi32>) -> (vector<
   %position_0 = index.constant 0 : index
   %position_4 = index.constant 4 : index
   %value = vector.load %words[%position_0] : view<8xi32> -> vector<4xi32>
-  vector.store %value, %words[%position_0] : vector<4xi32>, view<8xi32>
-  %value_1 = vector.load %words[%position_4] : view<8xi32> -> vector<4xi32>
-  vector.store %value_1, %words[%position_4] : vector<4xi32>, view<8xi32>
   scf.schedule.fence
+  vector.store %value, %words[%position_0] : vector<4xi32>, view<8xi32>
   %next = vector.addi %initial, %value : vector<4xi32>
   scf.schedule.fence
+  %value_1 = vector.load %words[%position_4] : view<8xi32> -> vector<4xi32>
+  vector.store %value_1, %words[%position_4] : vector<4xi32>, view<8xi32>
   %next_1 = vector.addi %next, %value_1 : vector<4xi32>
   func.return %next_1 : vector<4xi32>
 }

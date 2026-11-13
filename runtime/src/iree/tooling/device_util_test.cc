@@ -8,7 +8,7 @@
 
 #include "iree/async/util/proactor_pool.h"
 #include "iree/base/threading/numa.h"
-#include "iree/hal/drivers/task/registration/driver_module.h"
+#include "iree/hal/driver/task/registration/driver_module.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 

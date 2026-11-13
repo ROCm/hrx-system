@@ -11,6 +11,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from .common import *
 
 _SENDMSG_RTN_MESSAGE_IMMEDIATE = Immediate(
@@ -19,6 +21,8 @@ _SENDMSG_RTN_MESSAGE_IMMEDIATE = Immediate(
     bit_width=8,
     unsigned_max=(2**8) - 1,
 )
+
+_PREFETCH_OFFSET_IMMEDIATE = _signed_offset_immediate(24)
 
 # Scalar mutations complete out of order, so later reads depend on their write.
 # Vector invalidation remains ordered with loads; it contributes a load-counter
@@ -544,6 +548,7 @@ def _s_prefetch_overlay(
     semantic_tag: str,
     base_operand: Operand | None,
     effect: Effect,
+    offset: Immediate = _PREFETCH_OFFSET_IMMEDIATE,
 ) -> AmdgpuDescriptorOverlay:
     operands = []
     if base_operand is not None:
@@ -559,7 +564,7 @@ def _s_prefetch_overlay(
         operands=tuple(operands),
         immediate_fields=("IOFFSET", "SDATA"),
         immediates=(
-            _signed_offset_immediate(24),
+            offset,
             _PREFETCH_COUNT_IMMEDIATE,
         ),
         effects=(effect,),
@@ -600,6 +605,7 @@ def _gfx12_prefetch_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
             semantic_tag="memory.cache.prefetch.data.buffer",
             base_operand=_sgpr_resource("resource", units=4),
             effect=_GLOBAL_PREFETCH_EFFECT,
+            offset=replace(_PREFETCH_OFFSET_IMMEDIATE, signed_min=0),
         ),
         _s_prefetch_overlay(
             descriptor_key="amdgpu.s_prefetch_data_pc_rel",

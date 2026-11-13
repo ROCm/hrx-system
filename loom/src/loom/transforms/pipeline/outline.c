@@ -44,6 +44,8 @@ typedef struct loom_pipeline_outline_entry_t {
     // Stable strand environment retained before construction changes.
     const loom_target_facts_t* target_facts;
   } context;
+  // Enclosing construction's retained execution context, when resolved.
+  const loom_target_function_version_t* construction_version;
 } loom_pipeline_outline_entry_t;
 
 typedef struct loom_pipeline_outline_collection_t {
@@ -55,6 +57,8 @@ typedef struct loom_pipeline_outline_collection_t {
   iree_arena_allocator_t* target_arena;
   // Canonical target scopes seeded during the construction traversal.
   loom_value_fact_table_t* facts;
+  // Enclosing construction being collected; each strand retains this witness.
+  const loom_target_function_version_t* construction_version;
   // Enclosing pipeline currently being inventoried.
   const loom_op_t* pipeline;
   // Lexical bodies in preorder; reverse consumption factors inner bodies first.
@@ -80,10 +84,19 @@ static iree_status_t loom_pipeline_outline_collect(
   loom_region_t* body = concurrent ? loom_pipeline_concurrent_body(op)
                                    : loom_pipeline_strand_body(op);
   const loom_op_t* first = loom_region_entry_block(body)->first_op;
-  if (!concurrent && body->block_count == 1 &&
-      (loom_pipeline_end_isa(first) ||
-       (loom_func_call_isa(first) && loom_pipeline_end_isa(first->next_op)))) {
-    return iree_ok_status();
+  if (!concurrent && body->block_count == 1) {
+    if (loom_pipeline_end_isa(first)) {
+      return iree_ok_status();
+    }
+    if (loom_func_call_isa(first) && loom_pipeline_end_isa(first->next_op)) {
+      const loom_symbol_ref_t callee = loom_func_call_callee(first);
+      if (callee.module_id == 0 &&
+          loom_func_def_isa(
+              collection->module->symbols.entries[callee.symbol_id]
+                  .defining_op)) {
+        return iree_ok_status();
+      }
+    }
   }
   if (collection->count == collection->capacity) {
     IREE_RETURN_IF_ERROR(iree_arena_grow_array(
@@ -109,6 +122,7 @@ static iree_status_t loom_pipeline_outline_collect(
   } else {
     entry->context.target_facts = target_facts;
   }
+  entry->construction_version = collection->construction_version;
   return iree_ok_status();
 }
 
@@ -226,15 +240,27 @@ static iree_status_t loom_pipeline_outline_body(
     return iree_ok_status();
   }
 
-  loom_block_t* moved_entry = NULL;
-  IREE_RETURN_IF_ERROR(
-      loom_rewriter_move_region_blocks(rewriter, source_body, declaration,
-                                       target_body, 1, function, &moved_entry));
-  loom_builder_enter_region(&builder, function, target_body);
-  loom_op_t* branch = NULL;
-  IREE_RETURN_IF_ERROR(loom_cfg_br_build(&builder, moved_entry, NULL, 0,
-                                         declaration->location, &branch));
-  for (uint16_t i = 1; i < target_body->block_count; ++i) {
+  uint16_t first_body_block = 0;
+  if (source_body->block_count == 1) {
+    // A structured strand stays structured. Its captures become entry
+    // arguments without introducing a forwarding block or CFG branch.
+    loom_block_t* source_entry = loom_region_entry_block(source_body);
+    while (source_entry->first_op) {
+      IREE_RETURN_IF_ERROR(loom_rewriter_move_to_block_end(
+          rewriter, source_entry->first_op, entry, function));
+    }
+  } else {
+    loom_block_t* moved_entry = NULL;
+    IREE_RETURN_IF_ERROR(loom_rewriter_move_region_blocks(
+        rewriter, source_body, declaration, target_body, 1, function,
+        &moved_entry));
+    loom_builder_enter_region(&builder, function, target_body);
+    loom_op_t* branch = NULL;
+    IREE_RETURN_IF_ERROR(loom_cfg_br_build(&builder, moved_entry, NULL, 0,
+                                           declaration->location, &branch));
+    first_body_block = 1;
+  }
+  for (uint16_t i = first_body_block; i < target_body->block_count; ++i) {
     loom_block_t* block = target_body->blocks[i];
     for (uint16_t a = 0; a < block->arg_count; ++a) {
       const loom_value_id_t value = loom_block_arg_id(block, a);
@@ -272,6 +298,7 @@ static iree_status_t loom_pipeline_outline_body(
 static iree_status_t loom_pipeline_outline_register_worker(
     loom_pass_t* pass, loom_module_t* module, loom_op_t* function,
     const loom_target_facts_t* target_facts,
+    const loom_target_function_version_t* construction_version,
     const loom_target_environment_t* environment,
     loom_function_version_owner_t* versions,
     iree_host_size_t* next_target_context) {
@@ -284,13 +311,27 @@ static iree_status_t loom_pipeline_outline_register_worker(
   if (provider == NULL) {
     return iree_ok_status();
   }
-  if (*next_target_context >= LOOM_TARGET_CONTEXT_ORDINAL_INVALID) {
-    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                            "outlined workers exceed %u target contexts",
-                            (unsigned)LOOM_TARGET_CONTEXT_ORDINAL_INVALID);
-  }
   IREE_RETURN_IF_ERROR(loom_target_facts_builder_select_execution(
       target_facts, versions->arena, &target_facts));
+  // Outlining changes the callable boundary, not an inherited target context.
+  // Preserve its identity so contextual helpers can still inline when a
+  // realization places the worker in its construction's kernel launch.
+  const bool inherits_context =
+      construction_version &&
+      loom_target_facts_are_equivalent(
+          target_facts, construction_version->resolved_target.facts);
+  loom_target_context_ordinal_t target_context;
+  if (inherits_context) {
+    target_facts = construction_version->resolved_target.facts;
+    target_context = construction_version->target_context_ordinal;
+  } else {
+    if (*next_target_context >= LOOM_TARGET_CONTEXT_ORDINAL_INVALID) {
+      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                              "outlined workers exceed %u target contexts",
+                              (unsigned)LOOM_TARGET_CONTEXT_ORDINAL_INVALID);
+    }
+    target_context = (loom_target_context_ordinal_t)(*next_target_context)++;
+  }
   const loom_symbol_ref_t symbol = loom_func_def_callee(function);
   const loom_func_symbol_facts_t function_facts = {
       .func_op = function,
@@ -312,9 +353,11 @@ static iree_status_t loom_pipeline_outline_register_worker(
               .type = &loom_target_function_version_type,
               .function = loom_func_like_cast(module, function),
           },
-      .resolved_target = {.provider = provider, .facts = target_facts},
-      .target_context_ordinal =
-          (loom_target_context_ordinal_t)(*next_target_context)++,
+      .resolved_target = inherits_context
+                             ? construction_version->resolved_target
+                             : (loom_resolved_target_t){.provider = provider,
+                                                        .facts = target_facts},
+      .target_context_ordinal = target_context,
       .function_target_facts = function_target_facts,
   };
   return loom_function_version_owner_append(versions, &version->base);
@@ -352,6 +395,7 @@ iree_status_t loom_pipeline_outline_run(loom_pass_t* pass,
     const loom_target_function_version_t* version =
         loom_target_function_version_snapshot_at(&snapshot,
                                                  (loom_symbol_id_t)i);
+    collection.construction_version = version;
     const loom_target_facts_t* target_facts =
         version ? version->function_target_facts : NULL;
     if (version == NULL) {
@@ -403,8 +447,9 @@ iree_status_t loom_pipeline_outline_run(loom_pass_t* pass,
                                           &function);
       if (iree_status_is_ok(status) && !concurrent) {
         status = loom_pipeline_outline_register_worker(
-            pass, module, function, entry->context.target_facts, environment,
-            versions, &next_target_context);
+            pass, module, function, entry->context.target_facts,
+            entry->construction_version, environment, versions,
+            &next_target_context);
       }
     }
   }

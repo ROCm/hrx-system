@@ -1,0 +1,100 @@
+// RUN: verify
+// ERROR@+1: LOWERING/059 "import requires a module string and optional symbol string"
+[[loom::import]] unsigned external(unsigned value);
+
+// ====
+// ERROR@+1: LOWERING/059 "import requires a module string and optional symbol string"
+[[loom::import("service", "symbol", "extra")]] unsigned external(unsigned value);
+
+// ====
+// ERROR@+1: LOWERING/059 "import names require nonempty string literals"
+[[loom::import(42)]] unsigned external(unsigned value);
+
+// ====
+// ERROR@+1: LOWERING/059 "import names require nonempty string literals"
+[[loom::import("")]] unsigned external(unsigned value);
+
+// ====
+// ERROR@+1: LOWERING/059 "import bindings require concrete namespace-scope functions"
+[[loom::import("service")]] extern const unsigned value;
+
+// ====
+// ERROR@+1: LOWERING/059 "import bindings require functions with external linkage"
+[[loom::import("service")]] static unsigned external(unsigned value);
+
+// ====
+[[loom::import("first")]] unsigned external(unsigned value);
+// ERROR@+1: LOWERING/059 "conflicting import bindings across function redeclarations"
+[[loom::import("second")]] unsigned external(unsigned value);
+
+// ====
+// ERROR@+1: LOWERING/059 "import bindings require bodyless functions"
+[[loom::import("service")]] unsigned external(unsigned value) { return value; }
+
+// ====
+// ERROR@+1: LOWERING/059 "import bindings require bodyless functions"
+[[loom::import("service")]] unsigned external(unsigned value);
+unsigned external(unsigned value) { return value; }
+
+// ====
+unsigned external(unsigned value) { return value; }
+// ERROR@+1: LOWERING/059 "import bindings require bodyless functions"
+[[loom::import("service")]] unsigned external(unsigned value);
+
+// ====
+// ERROR@+1: LOWERING/059 "import bindings require ordinary non-inline functions"
+[[loom::import("service"), loom::inline]] unsigned external(unsigned value);
+
+// ====
+static unsigned external(unsigned value);
+unsigned entry(unsigned value) {
+  // ERROR@+1: LOWERING/059 "called function with internal linkage requires a definition"
+  return external(value);
+}
+
+// ====
+// ERROR@+1: LOWERING/059 "linkable overloads, templates and operators require an explicit loom::symbol name"
+unsigned external(unsigned value);
+float external(float value);
+unsigned entry(unsigned value) { return external(value); }
+
+// ====
+// ERROR@+1: LOWERING/059 "variadic functions are not admitted"
+unsigned external(unsigned value, ...);
+unsigned entry(unsigned value) { return external(value); }
+
+// ====
+// ERROR@+1: LOWERING/059 "bodyless function declarations cannot carry fastmath contracts"
+[[loom::fastmath]] float external(float value);
+float entry(float value) { return external(value); }
+
+// ====
+// ERROR@+1: LOWERING/059 "import bindings require ordinary non-inline functions"
+[[loom::import("service"), loom::op("scalar.addi")]]
+unsigned external(unsigned left, unsigned right);
+
+// ====
+// ERROR@+1: LOWERING/059 "import bindings require namespace-scope functions with a leading attribute"
+unsigned external(unsigned value) [[loom::import("service")]];
+
+// ====
+// ERROR@+2: LOWERING/059 "import bindings require concrete namespace-scope functions"
+template <class T>
+[[loom::import("service")]] T external(T value);
+
+// ====
+// ERROR@+1: LOWERING/059 "retain takes no argument clause"
+[[loom::retain("always")]] unsigned retained(unsigned value);
+
+// ====
+// ERROR@+1: LOWERING/059 "retain requires a concrete namespace-scope Loom callable"
+[[loom::retain]] extern const unsigned retained_value;
+
+// ====
+// ERROR@+1: LOWERING/059 "retain requires a leading attribute on a namespace-scope callable"
+unsigned retained(unsigned value) [[loom::retain]];
+
+// ====
+// ERROR@+1: LOWERING/059 "retain requires a concrete namespace-scope Loom callable"
+[[loom::retain, loom::op("scalar.addi")]]
+unsigned retained_add(unsigned left, unsigned right);

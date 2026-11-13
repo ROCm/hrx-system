@@ -1,0 +1,175 @@
+// Three computational shapes share one source kernel. Changing output offsets
+// and the two terms forming a width must not change the resulting computation.
+func.def inline @cohort_width(%width: index, %unused_offset: offset) -> (index) {
+  func.return %width : index
+}
+
+func.def inline @write_cohort(%width: index, %offset: offset, %output: buffer) {
+  %extent = func.call @cohort_width(%width, %offset) : (index, offset) -> (index)
+  %values = vector.splati 7 : vector<[%extent]xi32>
+  %destination = buffer.view %output[%offset] : buffer -> view<[%extent]xi32>
+  vector.store %values, %destination[0] : vector<[%extent]xi32>, view<[%extent]xi32>
+  func.return
+}
+
+template.decl @cohort(%width: index, %fixed: i1, %offset: offset, %output: buffer)
+
+template.def<@cohort> priority(10) @fixed_cohort(%width: index, %fixed: i1, %offset: offset, %output: buffer) where [eq(%fixed, 1)] {
+  %extent = index.constant 4 : index
+  func.call @write_cohort(%extent, %offset, %output) : (index, offset, buffer)
+  template.return
+}
+
+template.def<@cohort> priority(1) @dynamic_cohort(%width: index, %fixed: i1, %offset: offset, %output: buffer) {
+  func.call @write_cohort(%width, %offset, %output) : (index, offset, buffer)
+  template.return
+}
+
+kernel.def @cohort_kernel() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%rows: index, %padding: index, %fixed: i1, %offset: offset, %output: buffer) {
+  %sum = index.add %rows, %padding : index
+  %width = func.call @cohort_width(%sum, %offset) : (index, offset) -> (index)
+  template.apply<@cohort>(%width, %fixed, %offset, %output) : (index, i1, offset, buffer)
+  kernel.return
+}
+
+command.def @cohort_sequence() launch(%output: buffer) {
+  %narrow_width = index.constant 8 : index
+  %wide_width = index.constant 16 : index
+  %unused_width = index.constant 37 : index
+  %no_padding = index.constant 0 : index
+  %shift_padding = index.constant 3 : index
+  %first_rows = index.constant 5 : index
+  %second_rows = index.constant 13 : index
+  %dynamic = scalar.constant false : i1
+  %fixed = scalar.constant true : i1
+  %first = index.constant 0 : offset
+  %second = index.constant 128 : offset
+  %third = index.constant 256 : offset
+  %fourth = index.constant 384 : offset
+  %fifth = index.constant 512 : offset
+  %sixth = index.constant 640 : offset
+  kernel.launch @cohort_kernel(%narrow_width, %no_padding, %dynamic, %first, %output) : (index, index, i1, offset, buffer)
+  kernel.launch @cohort_kernel(%wide_width, %no_padding, %dynamic, %second, %output) : (index, index, i1, offset, buffer)
+  kernel.launch @cohort_kernel(%unused_width, %no_padding, %fixed, %third, %output) : (index, index, i1, offset, buffer)
+  kernel.launch @cohort_kernel(%first_rows, %shift_padding, %dynamic, %fourth, %output) : (index, index, i1, offset, buffer)
+  kernel.launch @cohort_kernel(%second_rows, %shift_padding, %dynamic, %fifth, %output) : (index, index, i1, offset, buffer)
+  kernel.launch @cohort_kernel(%unused_width, %shift_padding, %fixed, %sixth, %output) : (index, index, i1, offset, buffer)
+  command.return
+}
+
+func.def @cohort_reference(%output: buffer) {
+  %origin = index.constant 0 : offset
+  %values = buffer.view %output[%origin] : buffer -> view<6x32xi32>
+  %begin = index.constant 0 : index
+  %unit = index.constant 1 : index
+  %rows = index.constant 6 : index
+  %period = index.constant 3 : index
+  %narrow_width = index.constant 8 : index
+  %wide_width = index.constant 16 : index
+  %fixed_width = index.constant 4 : index
+  %expected = scalar.constant 7 : i32
+  scf.for %row = [%begin to %rows step %unit] {
+    %kind = index.rem %row, %period : index
+    %first = index.cmp eq, %kind, %begin : index
+    %second = index.cmp eq, %kind, %unit : index
+    %other = scf.select %second, %wide_width, %fixed_width : index
+    %width = scf.select %first, %narrow_width, %other : index
+    scf.for %column = [%begin to %width step %unit] {
+      view.store %expected, %values[%row, %column] : i32, view<6x32xi32>
+    }
+  }
+  func.return
+}
+
+check.scenario @mixed_cohort_widths {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %output = check.generate.fill value(-1) : tensor<6x32xi32>
+    check.compare<@cohort_sequence, @cohort_reference>(%output) : (tensor<6x32xi32>) -> () {
+      check.expect.equal actual(%output) expected(%output) : tensor<6x32xi32>
+    }
+  }
+  check.return
+}
+
+// Launch facts can resolve a computed template condition after class grouping.
+// The two widths must remain distinct even though the scalar fallback has no
+// structural requirements. Runtime input data prevents constant-folded sums.
+template.decl @choose(%matches: i1, %columns: index, %input: view<32xi32>) -> (i32)
+
+template.def<@choose> priority(10) @matching(%matches: i1, %columns: index, %input: view<32xi32>) -> (i32) where [eq(%matches, 1)] {
+  %values = vector.load %input[0] : view<32xi32> -> vector<[%columns]xi32>
+  %sum_identity = scalar.constant 0 : i32
+  %value = vector.reduce<addi> %values, %sum_identity : vector<[%columns]xi32>, i32
+  template.return %value : i32
+}
+
+template.def<@choose> @other(%matches: i1, %columns: index, %input: view<32xi32>) -> (i32) {
+  %value = scalar.constant 8 : i32
+  template.return %value : i32
+}
+
+kernel.def @classified() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%mode: index, %columns: index, %input: view<32xi32>, %output: view<1xi32>) {
+  %vector_mode = index.constant 4 : index
+  %matches = index.cmp eq, %mode, %vector_mode : index
+  %result = template.apply<@choose>(%matches, %columns, %input) : (i1, index, view<32xi32>) -> (i32)
+  view.store %result, %output[0] : i32, view<1xi32>
+  kernel.return
+}
+
+command.def @run_both() launch(%input_storage: buffer, %output16_storage: buffer, %output32_storage: buffer) {
+  %mode = index.constant 4 : index
+  %columns16 = index.constant 16 : index
+  %columns32 = index.constant 32 : index
+  %base = index.constant 0 : offset
+  %input = buffer.view %input_storage[%base] : buffer -> view<32xi32>
+  %output16 = buffer.view %output16_storage[%base] : buffer -> view<1xi32>
+  %output32 = buffer.view %output32_storage[%base] : buffer -> view<1xi32>
+  kernel.launch @classified(%mode, %columns16, %input, %output16) : (index, index, view<32xi32>, view<1xi32>)
+  kernel.launch @classified(%mode, %columns32, %input, %output32) : (index, index, view<32xi32>, view<1xi32>)
+  command.return
+}
+
+func.def @oracle(%input_storage: buffer, %output16_storage: buffer, %output32_storage: buffer) {
+  %base = index.constant 0 : offset
+  %input = buffer.view %input_storage[%base] : buffer -> view<32xi32>
+  %output16 = buffer.view %output16_storage[%base] : buffer -> view<1xi32>
+  %output32 = buffer.view %output32_storage[%base] : buffer -> view<1xi32>
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %end16 = index.constant 16 : index
+  %end32 = index.constant 32 : index
+  %initial = scalar.constant 0 : i32
+  %sum16 = scf.for %item = [%begin to %end16 step %step](%sum = %initial : i32) -> (i32) {
+    %value = view.load %input[%item] : view<32xi32> -> i32
+    %next = scalar.addi %sum, %value : i32
+    scf.yield %next : i32
+  }
+  %sum32 = scf.for %item = [%begin to %end32 step %step](%sum = %initial : i32) -> (i32) {
+    %value = view.load %input[%item] : view<32xi32> -> i32
+    %next = scalar.addi %sum, %value : i32
+    scf.yield %next : i32
+  }
+  view.store %sum16, %output16[0] : i32, view<1xi32>
+  view.store %sum32, %output32[0] : i32, view<1xi32>
+  func.return
+}
+
+check.scenario @deferred_template_shapes {
+  check.trial[3](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-1000 to 1000) : tensor<32xi32>
+    %output16 = check.generate.fill value(0) : tensor<1xi32>
+    %output32 = check.generate.fill value(0) : tensor<1xi32>
+    check.compare<@run_both, @oracle>(%input, %output16, %output32) : (tensor<32xi32>, tensor<1xi32>, tensor<1xi32>) -> () {
+      check.expect.equal actual(%output16) expected(%output16) : tensor<1xi32>
+      check.expect.equal actual(%output32) expected(%output32) : tensor<1xi32>
+    }
+  }
+  check.return
+}

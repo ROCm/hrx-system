@@ -1,0 +1,683 @@
+// RUN: emit vm-object-lifetime
+// INPUT: cxx root=run
+// A copy returned by value belongs to the caller. The constructor's implicit
+// conversion and argument initializer describe one result object.
+[[loom::import("lifetime", "event")]] void observe(unsigned value);
+
+struct Guard {
+  // Payload reported at the actual destruction boundary.
+  unsigned value;
+  ~Guard() { observe(value); }
+};
+
+[[loom::noinline]] static Guard copy_of(const Guard& source) { return source; }
+
+void run() {
+  Guard source{7};
+  {
+    Guard copied = copy_of(source);
+    observe(copied.value + 10);
+  }
+  observe(20);
+}
+
+// ----
+event 17
+event 7
+event 20
+event 7
+OK 0
+retired 0
+
+// ====
+// Direct reference binding extends a temporary; returning its reference through
+// a function does not. The expired reference is never read.
+[[loom::import("lifetime", "event")]] void observe(unsigned value);
+
+struct Guard {
+  // Payload reported at the actual destruction boundary.
+  unsigned value;
+  [[loom::noinline]] Guard& self() { return *this; }
+  ~Guard() { observe(value); }
+};
+
+void run() {
+  {
+    const Guard& extended = Guard{1};
+    observe(2);
+  }
+  {
+    const Guard& expired = Guard{3}.self();
+    observe(4);
+  }
+}
+
+// ----
+event 2
+event 1
+event 3
+event 4
+OK 0
+retired 0
+
+// ====
+// The temporary closure owns its capture. It destroys that capture after the
+// invocation and before the following statement.
+[[loom::import("lifetime", "event")]] void observe(unsigned value);
+
+struct Guard {
+  // Payload reported by the closure's captured object's destructor.
+  unsigned value;
+  ~Guard() { observe(value); }
+};
+
+void run() {
+  [captured = Guard{5}] { observe(captured.value + 1); }();
+  observe(7);
+}
+
+// ----
+event 6
+event 5
+event 7
+OK 0
+retired 0
+
+// ====
+// Both temporaries begin with identical SSA components. The receiver is
+// constructed before its argument, and only the receiver is replaced.
+[[loom::import("lifetime", "event")]] void observe(unsigned value);
+
+struct Guard {
+  // Each object owns a distinct current value even when the values compare equal.
+  unsigned value;
+  [[loom::noinline]] unsigned replace_from(const Guard& other) {
+    value = other.value + 10;
+    return value;
+  }
+  ~Guard() { observe(value); }
+};
+
+void run() {
+  unsigned shared = 1;
+  const auto result = Guard{shared}.replace_from(Guard{shared});
+  observe(result + 100);
+}
+
+// ----
+event 1
+event 11
+event 111
+OK 0
+retired 0
+
+// ====
+// A returned reference into a nonzero-offset base still names the complete
+// temporary. Addressing that base preserves the other fields for destruction.
+[[loom::import("lifetime", "event")]] void observe(unsigned value);
+
+struct Prefix {
+  // Earlier base occupying a distinct component and source-layout interval.
+  unsigned prefix;
+};
+struct Base {
+  // Component replaced through the returned base reference.
+  unsigned value;
+  [[loom::noinline]] Base& replace(unsigned next) {
+    value = next;
+    return *this;
+  }
+};
+struct Derived : Prefix, Base {
+  // Later component that remains part of the complete temporary.
+  unsigned tail;
+  ~Derived() { observe(prefix * 100 + value * 10 + tail); }
+};
+
+void run() {
+  const auto result = (Derived{{4}, {5}, 6}.replace(7).value = 8);
+  observe(result);
+}
+
+// ----
+event 486
+event 8
+OK 0
+retired 0
+
+// ====
+// Converted reference temporaries execute the selected constructor and retain
+// their complete-expression or extended lexical lifetime, including mutations.
+[[loom::import("lifetime", "event")]] void observe(unsigned value);
+struct Input {
+  // Aggregate argument whose cleanup follows the converted temporary.
+  unsigned value;
+  ~Input() { observe(50u + value); }
+};
+struct Doubled {
+  // The selected constructor computes this payload before the reference binds.
+  unsigned value;
+  Doubled(const unsigned& source) : value(source * 2u) { observe(10u + source); }
+  Doubled(const Input& source) : value(source.value * 3u) { observe(40u + source.value); }
+  ~Doubled() { observe(20u + value); }
+};
+static void consume(const Doubled& value) { const Doubled* pointer = &value; observe(pointer->value); }
+static void modify(Doubled&& value) { Doubled* pointer = &value; ++pointer->value; observe(pointer->value); }
+void run() {
+  consume(3u);
+  observe(1);
+  { const Doubled& held = 5u; observe(held.value); observe(2); }
+  modify(7u);
+  observe(3);
+  { Doubled&& held = 9u; ++held.value; observe(held.value); }
+  consume(Input{4});
+  {
+    const Doubled& parenthesized(11u);
+    const Doubled& braced{13u};
+    observe(parenthesized.value);
+    observe(braced.value);
+  }
+}
+// ----
+event 13
+event 6
+event 26
+event 1
+event 15
+event 10
+event 2
+event 30
+event 17
+event 15
+event 35
+event 3
+event 19
+event 19
+event 39
+event 44
+event 12
+event 32
+event 54
+event 21
+event 23
+event 22
+event 26
+event 46
+event 42
+OK 0
+retired 0
+
+// ====
+// Conversion, indexing, and ordinary operator results all materialize the
+// returned object once and retire it after the addressed consumer finishes.
+[[loom::import("lifetime", "event")]] void observe(unsigned value);
+struct Result {
+  // Distinguishes the returned object from the operator's input.
+  unsigned value;
+  ~Result() { observe(80u + value); }
+};
+struct Source {
+  // Shared source for the four independent value-producing operators.
+  unsigned value;
+  operator Result() const { observe(1); return Result{value * 2u}; }
+  Result operator[](unsigned index) const { observe(2); return Result{value + index}; }
+  Result operator+() const { observe(3); return Result{value + 3u}; }
+  Result operator+(unsigned amount) const { observe(4); return Result{value + amount}; }
+};
+static void consume(const Result& result) { const Result* pointer = &result; observe(pointer->value); }
+void run() {
+  Source source{4};
+  consume(source);
+  consume(source[2]);
+  consume(+source);
+  consume(source + 5u);
+}
+// ----
+event 1
+event 8
+event 88
+event 2
+event 6
+event 86
+event 3
+event 7
+event 87
+event 4
+event 9
+event 89
+OK 0
+retired 0
+
+// ====
+// Semantic pointer fields remain SSA values while a reference declaration owns
+// the complete temporary. Mutable updates reach cleanup, and a reference to a
+// field keeps the enclosing object alive until the lexical scope exits.
+[[loom::import("lifetime", "event")]] void observe(unsigned value);
+
+struct Semantic {
+  // Pointer transport cannot be represented as bytes in a C++ object.
+  unsigned* pointer;
+  // Scalar payload distinguishes mutation from the constructed value.
+  unsigned tag;
+  ~Semantic() { observe(*pointer + tag); }
+};
+
+void run() {
+  unsigned first = 5;
+  unsigned second = 9;
+  {
+    const Semantic& selected = Semantic{&first, 1};
+    observe(*selected.pointer + selected.tag);
+  }
+  {
+    Semantic&& mutable_value = Semantic{&first, 1};
+    mutable_value.pointer = &second;
+    mutable_value.tag = 2;
+    observe(*mutable_value.pointer);
+  }
+  {
+    unsigned* const& pointer = Semantic{&first, 3}.pointer;
+    observe(*pointer);
+  }
+}
+
+// ----
+event 6
+event 6
+event 9
+event 11
+event 5
+event 8
+OK 0
+retired 0
+
+// ====
+// The hidden iterator copies begin()'s reference. Element destruction happens
+// on continue and break before iterator and temporary-range destruction.
+[[loom::import("lifetime", "event")]] void observe(unsigned value);
+struct Sentinel {
+  // Exclusive upper bound, with a different type from the iterator.
+  unsigned limit;
+};
+struct Element {
+  // Value observed during the iteration and at its cleanup boundary.
+  unsigned value;
+  ~Element() { observe(10 + value); }
+};
+struct Iterator {
+  // Current iteration value; copying must preserve the original range member.
+  unsigned value;
+  Iterator(unsigned initial) : value(initial) {}
+  Iterator(const Iterator& source) : value(source.value) { observe(5); }
+  ~Iterator() { observe(30 + value); }
+  Element operator*() const { return {value}; }
+  void operator++() { ++value; }
+  bool operator!=(Sentinel end) const { return value != end.limit; }
+};
+struct Range {
+  // Original iterator, never advanced by the loop's independent copy.
+  Iterator first{0};
+  // Bound supplied to the distinct sentinel.
+  unsigned limit;
+  Range(unsigned count) : limit(count) { observe(1); }
+  ~Range() { observe(40 + first.value); }
+  Iterator& begin() { observe(2); return first; }
+  Sentinel end() { observe(3); return {limit}; }
+};
+void run() {
+  for (auto value : Range{4}) {
+    observe(value.value);
+    if (value.value == 1) continue;
+    if (value.value == 2) break;
+  }
+  observe(50);
+}
+
+// ----
+event 1
+event 2
+event 5
+event 3
+event 0
+event 10
+event 1
+event 11
+event 2
+event 12
+event 32
+event 40
+event 30
+event 50
+OK 0
+retired 0
+
+// ====
+// C++23 extends caller-owned temporaries throughout the range initializer,
+// including a discarded comma operand and a range returned through an accessor.
+[[loom::import("lifetime", "event")]] void observe(unsigned value);
+struct Guard {
+  // Destruction marker for a temporary preceding the selected range.
+  unsigned value;
+  ~Guard() { observe(value); }
+};
+struct Iterator {
+  // Current scalar index.
+  unsigned value;
+  unsigned operator*() const { return value; }
+  void operator++() { ++value; }
+  bool operator!=(const Iterator& other) const { return value != other.value; }
+};
+struct Range {
+  // Exclusive upper bound.
+  unsigned count;
+  Range& self() { return *this; }
+  Iterator begin() { return {0}; }
+  Iterator end() { return {count}; }
+  ~Range() { observe(100); }
+};
+void run() {
+  for (unsigned value : (Guard{7}, Range{3}.self())) observe(value);
+  observe(200);
+}
+
+// ----
+event 0
+event 1
+event 2
+event 100
+event 7
+event 200
+OK 0
+retired 0
+
+// ====
+// Temporary cleanup follows construction order even when the selected range
+// was constructed before a later subscript operand. Function parameters keep
+// their own cleanup boundary, and early return unwinds the entire loop scope.
+[[loom::import("lifetime", "event")]] void observe(unsigned value);
+struct Guard {
+  // Marker observed when this temporary or parameter is destroyed.
+  unsigned value;
+  ~Guard() { observe(value); }
+};
+struct Ranges {
+  // Selected subarray keeps its containing temporary alive through the loop.
+  unsigned values[1][2] = {{11, 12}};
+  ~Ranges() { observe(100); }
+};
+static void consume(Guard value) { observe(value.value + 1); }
+static unsigned select(const Guard& value) { return value.value; }
+static unsigned early() {
+  for (unsigned value : Ranges{}.values[(consume(Guard{20}), Guard{30}, select(Guard{0}))]) {
+    if (value == 12) return value;
+    observe(value);
+  }
+  return 0;
+}
+void run() { observe(early()); }
+
+// ----
+event 21
+event 20
+event 11
+event 0
+event 30
+event 100
+event 12
+OK 0
+retired 0
+
+// ====
+// The semantic range stays in SSA. Binding its reference retains the original
+// temporary's cleanup position instead of appending another destructor. A
+// constructor member initializer still finishes its own temporary immediately.
+[[loom::import("lifetime", "event")]] void observe(unsigned value);
+struct Guard {
+  // Marker for the temporary preceding the range object.
+  unsigned value;
+  ~Guard() { observe(value); }
+};
+struct Range {
+  // Borrowed elements, represented as a buffer identity and offset.
+  unsigned* first;
+  // Number of elements owned by the caller.
+  unsigned count;
+  Range(unsigned* input, unsigned length) : first(input), count((Guard{8}, length)) {}
+  unsigned* begin() { return first; }
+  unsigned* end() { return first + count; }
+  ~Range() { observe(100 + *first); }
+};
+void run() {
+  unsigned values[] = {1, 2};
+  for (auto& value : (Guard{7}, Range{values, 2})) value += 10;
+  observe(values[1]);
+}
+
+// ----
+event 8
+event 111
+event 7
+event 12
+OK 0
+retired 0
+
+// ====
+// Only the selected conditional arm constructs objects. Its materialized
+// range and side temporary survive the full expression and die at loop exit.
+[[loom::import("lifetime", "event")]] void observe(unsigned value);
+struct Guard {
+  // Branch-local marker.
+  unsigned value;
+  ~Guard() { observe(value); }
+};
+struct Range {
+  // One element whose address is returned by begin and end.
+  unsigned value;
+  Range& self() { return *this; }
+  unsigned* begin() { return &value; }
+  unsigned* end() { return &value + 1; }
+  ~Range() { observe(100 + value); }
+};
+static void selected(bool condition) {
+  for (unsigned value : condition ? (Guard{1}, Range{2}.self()) : (Guard{3}, Range{4}.self())) observe(value);
+}
+void run() { selected(true); selected(false); }
+
+// ----
+event 2
+event 102
+event 1
+event 4
+event 104
+event 3
+OK 0
+retired 0
+
+// ====
+// A named list extends its backing array. A copied list only borrows that
+// array. A call-argument array is destroyed at the full-expression boundary.
+#include <initializer_list>
+[[loom::import("lifetime", "event")]] void observe(unsigned value);
+struct Guard {
+  // Marker emitted once when this backing-array element is destroyed.
+  unsigned value;
+  ~Guard() { observe(value); }
+};
+static void consume(std::initializer_list<Guard> values) {
+  unsigned sum = 0;
+  for (const auto& value : values) sum += value.value;
+  observe(100 + sum);
+}
+void run() {
+  {
+    std::initializer_list<Guard> values = {Guard{2}, Guard{3}};
+    observe(4);
+    auto copy = values;
+    consume(copy);
+    observe(5);
+  }
+  observe(6);
+  consume({Guard{7}, Guard{8}});
+  observe(9);
+}
+
+// ----
+event 4
+event 105
+event 5
+event 3
+event 2
+event 6
+event 115
+event 8
+event 7
+event 9
+OK 0
+retired 0
+
+// ====
+// Aggregate members extend their own backing arrays. References to a list
+// temporary and braced range initializers retain the same element lifetimes.
+#include <initializer_list>
+[[loom::import("lifetime", "event")]] void observe(unsigned value);
+struct Guard {
+  // Payload used for the read and reverse destruction observations.
+  unsigned value;
+  ~Guard() { observe(value); }
+};
+struct Holder {
+  // Borrowed list whose array lifetime is established by this initializer.
+  std::initializer_list<Guard> values;
+};
+static unsigned early() {
+  for (const auto& value : {Guard{5}, Guard{6}}) return value.value + 10;
+  return 0;
+}
+void run() {
+  {
+    Holder owner{{Guard{1}, Guard{2}}};
+    observe(owner.values.begin()->value + 10);
+  }
+  {
+    const auto& values = std::initializer_list<Guard>{Guard{3}, Guard{4}};
+    observe(values.begin()->value + 10);
+  }
+  observe(early());
+}
+
+// ----
+event 11
+event 2
+event 1
+event 13
+event 4
+event 3
+event 6
+event 5
+event 15
+OK 0
+retired 0
+
+// ====
+// Only a selected list constructs its backing elements. Its local lifetime
+// ends on either an early return or the normal exit through the joined scope.
+#include <initializer_list>
+[[loom::import("lifetime", "event")]] void observe(unsigned value);
+struct Guard {
+  // Value identifying the selected construction and its destruction.
+  unsigned value;
+  ~Guard() { observe(value); }
+};
+static void selected(bool condition, bool early) {
+  auto values = condition ? std::initializer_list<Guard>{Guard{1}, Guard{2}}
+                          : std::initializer_list<Guard>{Guard{3}};
+  observe(values.begin()->value + 10);
+  if (early) return;
+  observe(20);
+}
+void run() { selected(true, true); selected(false, false); }
+
+// ----
+event 11
+event 2
+event 1
+event 13
+event 20
+event 3
+OK 0
+retired 0
+
+// ====
+// Copy initialization invokes the selected copy constructor once. Elided
+// prvalues construct in the backing array, preserving escaped this pointers.
+#include <initializer_list>
+[[loom::import("lifetime", "event")]] void observe(unsigned value);
+struct Element {
+  // Payload distinguishing the source from the constructed copy.
+  unsigned value;
+  Element(unsigned input, const Element*& identity) : value(input) { identity = this; }
+  Element(const Element& other) : value(other.value + 10) { observe(100 + value); }
+  ~Element() { observe(value); }
+};
+void run() {
+  const Element* original = nullptr;
+  const Element* second = nullptr;
+  Element source{1, original};
+  {
+    std::initializer_list<Element> values{source, Element{2, second}};
+    observe(original == &source);
+    observe(second == values.begin() + 1);
+    observe(values.begin()->value + second->value);
+  }
+  observe(9);
+}
+
+// ----
+event 111
+event 1
+event 1
+event 13
+event 2
+event 11
+event 9
+event 1
+OK 0
+retired 0
+
+// ====
+// Reusing a default initializer evaluates a fresh backing array at each call.
+// Assignment to a list borrows a full-expression array without extending it.
+#include <initializer_list>
+[[loom::import("lifetime", "event")]] void observe(unsigned value);
+struct Guard {
+  // Marker emitted for each dynamic construction's cleanup.
+  unsigned value;
+  ~Guard() { observe(value); }
+};
+static void consume(std::initializer_list<Guard> values = {Guard{2}, Guard{3}}) {
+  observe(values.begin()->value + 10);
+}
+void run() {
+  consume();
+  observe(4);
+  consume();
+  observe(5);
+  std::initializer_list<Guard> borrowed;
+  borrowed = {Guard{6}, Guard{7}};
+  observe(8);
+}
+
+// ----
+event 12
+event 3
+event 2
+event 4
+event 12
+event 3
+event 2
+event 5
+event 7
+event 6
+event 8
+OK 0
+retired 0

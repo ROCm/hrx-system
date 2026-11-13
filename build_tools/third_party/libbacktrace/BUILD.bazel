@@ -11,8 +11,13 @@ load("//build_tools/bazel:cc.bzl", "iree_cc_library")
 package(default_visibility = ["//visibility:private"])
 
 exports_files([
+    "explicit_integer_conversions.patch",
+    "ignore_nonruntime_symbols.patch",
+    "iterative_function_scopes.patch",
     "libbacktrace.BUILD.bazel",
+    "portable_test_warnings.patch",
     "threaded_cache_reads.patch",
+    "zero_size_vectors.patch",
 ])
 
 expand_template(
@@ -82,5 +87,13 @@ cc_test(
         "//runtime/src/iree/base",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+test_suite(
+    name = "upstream_tests",
+    tests = [
+        "@libbacktrace//:btest",
+        "@libbacktrace//:unittest",
     ],
 )

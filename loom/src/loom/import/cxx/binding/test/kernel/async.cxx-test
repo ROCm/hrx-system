@@ -1,0 +1,85 @@
+// RUN: roundtrip
+#include <loomcxx/kernel.h>
+
+using layout1 = loom::type::encoding<loom::encoding::role::layout, 1>;
+using layout2 = loom::type::encoding<loom::encoding::role::layout, 2>;
+using lane_view =
+    loom::type::view<loom::type::shape<4>, unsigned char, layout1>;
+using tile_view =
+    loom::type::view<loom::type::shape<64, 4>, unsigned char, layout2>;
+
+LOOM_INLINE void copy_pair(lane_view source, lane_view destination,
+                                 bool enabled) {
+  auto load = loom::kernel::async::copy<
+      loom::kernel::async::direction::global_to_workgroup,
+      loom::cache::scope::workgroup, loom::cache::temporal::regular>(
+      source, destination);
+  auto store = loom::kernel::async::copy_mask<
+      loom::kernel::async::direction::workgroup_to_global,
+      loom::cache::scope::device,
+      loom::cache::temporal::non_temporal_writeback>(source, destination,
+                                                     enabled);
+  auto transfers = loom::kernel::async::group(load, store);
+  loom::kernel::async::wait<0>(transfers);
+}
+
+LOOM_INLINE void gather_pair(lane_view source, tile_view destination,
+                                   bool enabled) {
+  auto first = loom::kernel::async::gather<loom::cache::scope::workgroup,
+                                           loom::cache::temporal::regular>(
+      source, destination);
+  auto tail = loom::kernel::async::gather_mask<loom::cache::scope::cluster,
+                                               loom::cache::temporal::last_use>(
+      source, destination, enabled);
+  auto transfers = loom::kernel::async::group(first, tail);
+  loom::kernel::async::wait<0>(transfers);
+}
+
+LOOM_INLINE void cluster_pair(lane_view source, lane_view destination,
+                                    unsigned participants, bool enabled) {
+  auto first = loom::kernel::async::cluster::gather<
+      loom::cache::scope::cluster, loom::cache::temporal::high_temporal>(
+      source, destination, participants);
+  auto tail =
+      loom::kernel::async::cluster::gather_mask<loom::cache::scope::system,
+                                                loom::cache::temporal::bypass>(
+          source, destination, participants, enabled);
+  auto transfers = loom::kernel::async::group(first, tail);
+  loom::kernel::async::wait<0>(transfers);
+}
+
+LOOM_INLINE void empty_stage() {
+  auto stage = loom::kernel::async::group();
+  loom::kernel::async::wait<0>(stage);
+}
+
+// ----
+func.def public linkonce inline @copy_pair(%source_layout: encoding<layout>, %source: view<4xi8, %source_layout>, %destination_layout: encoding<layout>, %destination: view<4xi8, %destination_layout>, %enabled: i1) {
+  %load = kernel.async.copy %source to %destination {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<4xi8, %source_layout> to view<4xi8, %destination_layout> -> kernel.async.token
+  %store = kernel.async.copy.mask %source to %destination, %enabled {cache_scope = device, cache_temporal = non_temporal_writeback, direction = workgroup_to_global} : view<4xi8, %source_layout> to view<4xi8, %destination_layout>, i1 -> kernel.async.token
+  %transfers = kernel.async.group %load, %store : kernel.async.token, kernel.async.token -> kernel.async.group
+  kernel.async.wait %transfers {newer_groups = 0} : kernel.async.group
+  func.return
+}
+
+func.def public linkonce inline @gather_pair(%source_layout: encoding<layout>, %source: view<4xi8, %source_layout>, %destination_layout: encoding<layout>, %destination: view<64x4xi8, %destination_layout>, %enabled: i1) {
+  %first = kernel.async.gather %source to %destination {cache_scope = workgroup, cache_temporal = regular} : view<4xi8, %source_layout> to view<64x4xi8, %destination_layout> -> kernel.async.token
+  %tail = kernel.async.gather.mask %source to %destination, %enabled {cache_scope = cluster, cache_temporal = last_use} : view<4xi8, %source_layout> to view<64x4xi8, %destination_layout>, i1 -> kernel.async.token
+  %transfers = kernel.async.group %first, %tail : kernel.async.token, kernel.async.token -> kernel.async.group
+  kernel.async.wait %transfers {newer_groups = 0} : kernel.async.group
+  func.return
+}
+
+func.def public linkonce inline @cluster_pair(%source_layout: encoding<layout>, %source: view<4xi8, %source_layout>, %destination_layout: encoding<layout>, %destination: view<4xi8, %destination_layout>, %participants: i32, %enabled: i1) {
+  %first = kernel.async.cluster.gather %source to %destination using %participants {cache_scope = cluster, cache_temporal = high_temporal} : view<4xi8, %source_layout> to view<4xi8, %destination_layout>, i32 -> kernel.async.token
+  %tail = kernel.async.cluster.gather.mask %source to %destination using %participants, %enabled {cache_scope = system, cache_temporal = bypass} : view<4xi8, %source_layout> to view<4xi8, %destination_layout>, i32, i1 -> kernel.async.token
+  %transfers = kernel.async.group %first, %tail : kernel.async.token, kernel.async.token -> kernel.async.group
+  kernel.async.wait %transfers {newer_groups = 0} : kernel.async.group
+  func.return
+}
+
+func.def public linkonce inline @empty_stage() {
+  %stage = kernel.async.group -> kernel.async.group
+  kernel.async.wait %stage {newer_groups = 0} : kernel.async.group
+  func.return
+}

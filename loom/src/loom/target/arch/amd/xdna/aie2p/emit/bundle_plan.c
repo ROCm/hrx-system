@@ -72,6 +72,8 @@ typedef struct loom_aie2p_bundle_plan_builder_t {
   const loom_low_emission_frame_t* frame;
   // Target-owned entry and exit mechanics for this function.
   const loom_aie2p_bundle_plan_options_t* options;
+  // Entry/return instructions encoded once for this allocated function.
+  const loom_aie2p_function_envelope_t* envelope;
   // Arena owning the detached program plan.
   iree_arena_allocator_t* arena;
   // Build-lifetime storage used by transactional alignment selection.
@@ -294,6 +296,10 @@ static uint16_t loom_aie2p_bundle_plan_resolve_instruction_register(
         &descriptor_set->reg_classes[reg_class_id];
     return descriptor_set->physical_register_candidate_ids
         [reg_class->physical_register_candidate_start];
+  }
+  if (iree_any_bit_set(slot->flags,
+                       LOOM_AIE2P_PLANNED_SLOT_FLAG_LINK_SHADOW_STORAGE)) {
+    return builder->options->return_address.shadow_register;
   }
   if (move != NULL) {
     return operand_index == 0 ? move->destination : move->source;
@@ -904,14 +910,15 @@ static iree_status_t loom_aie2p_bundle_plan_try_place_control(
       builder, (uint16_t)candidate_slot_count);
   if (!loom_aie2p_bundle_plan_instruction_group_fits(
           builder, (uint16_t)candidate_slot_count) ||
-      loom_low_physical_issue_register_ready_cycle(
-          &builder->issue, &builder->instructions[retained_slot_count], 1) >
-          candidate_cycle) {
+      loom_low_physical_issue_find_earliest_issue_cycle(
+          &builder->issue, &builder->instructions[retained_slot_count], 1,
+          candidate_cycle) != candidate_cycle) {
     return iree_ok_status();
   }
   // Generated validation limits shared control resources to issue-stage uses.
-  // The group check and retained frontier cover every concrete register read
-  // and write, including JL's link write, and therefore prove retrospective
+  // The group check covers the surviving packet, while physical admission
+  // also retains reservations from constants removed during packet closure.
+  // Register events include JL's link write. Together these prove retrospective
   // placement among already-timed tail bundles without replaying the block.
 
   const uint8_t old_byte_length =
@@ -1102,26 +1109,26 @@ static iree_status_t loom_aie2p_bundle_plan_append_move(
       route_id, packet_index, logical_issue_cycle);
 }
 
-static iree_status_t loom_aie2p_bundle_plan_append_link_move(
-    loom_aie2p_bundle_plan_builder_t* builder, bool save_link,
+// ABI instructions enter the same fixed-register timing and resource admission
+// as body packets. Entry instructions can coissue; each exit step completes
+// before the next one releases or restores its architectural state.
+static iree_status_t loom_aie2p_bundle_plan_append_envelope(
+    loom_aie2p_bundle_plan_builder_t* builder,
+    const loom_aie2p_function_envelope_sequence_t* sequence, bool entering,
     uint32_t logical_issue_cycle) {
-  const loom_aie2p_physical_register_id_t link_register =
-      loom_aie2p_machine_find_physical_register(IREE_SV("lr"));
-  IREE_ASSERT(link_register != LOOM_AIE2P_PHYSICAL_REGISTER_ID_INVALID);
-  const loom_aie2p_register_move_t move = {
-      .source =
-          save_link ? link_register : builder->options->link_shadow_register,
-      .destination =
-          save_link ? builder->options->link_shadow_register : link_register,
-  };
-  const loom_aie2p_move_route_id_t route_id =
-      loom_aie2p_descriptor_resolve_move_route(move.source, move.destination);
-  IREE_ASSERT(route_id != LOOM_AIE2P_MOVE_ROUTE_ID_INVALID &&
-              loom_aie2p_descriptor_move_route_step_count(route_id) == 1 &&
-              "AIE2P link transport must have one native route step");
-  return loom_aie2p_bundle_plan_append_register_move(
-      builder, move, route_id, LOOM_AIE2P_BUNDLE_PLAN_PACKET_NONE,
-      logical_issue_cycle);
+  iree_status_t status = iree_ok_status();
+  for (uint8_t i = 0; i < sequence->count && iree_status_is_ok(status); ++i) {
+    const loom_aie2p_function_envelope_instruction_t* instruction =
+        &sequence->instructions[i];
+    status = loom_aie2p_bundle_plan_admit_instruction(
+        builder, logical_issue_cycle, instruction->slot,
+        instruction->realization);
+    if (!entering && iree_status_is_ok(status)) {
+      status = loom_aie2p_bundle_plan_flush_pending(builder,
+                                                    builder->pending.end_cycle);
+    }
+  }
+  return status;
 }
 
 static iree_status_t loom_aie2p_bundle_plan_append_edge_moves(
@@ -1505,13 +1512,14 @@ static iree_status_t loom_aie2p_bundle_plan_append_terminator(
     const loom_aie2p_block_analysis_t* block_analysis,
     iree_host_size_t block_bundle_start) {
   if (block_analysis->terminator == LOOM_AIE2P_BLOCK_TERMINATOR_RETURN) {
-    if (builder->options->preserve_link_register) {
-      IREE_RETURN_IF_ERROR(loom_aie2p_bundle_plan_append_link_move(
-          builder, /*save_link=*/false,
-          block_analysis->terminator_issue_cycle));
-      IREE_RETURN_IF_ERROR(loom_aie2p_bundle_plan_flush_pending(
-          builder, builder->pending.end_cycle));
-    }
+    IREE_RETURN_IF_ERROR(loom_aie2p_bundle_plan_append_move_range(
+        builder, block_analysis->return_moves,
+        block_analysis->terminator_issue_cycle));
+    IREE_RETURN_IF_ERROR(loom_aie2p_bundle_plan_flush_pending(
+        builder, builder->pending.end_cycle));
+    IREE_RETURN_IF_ERROR(loom_aie2p_bundle_plan_append_envelope(
+        builder, &builder->envelope->exit, /*entering=*/false,
+        block_analysis->terminator_issue_cycle));
     uint32_t bundle_index = 0;
     return loom_aie2p_bundle_plan_append_control(
         builder, block_analysis->terminator_packet_index,
@@ -1576,8 +1584,9 @@ static iree_status_t loom_aie2p_bundle_plan_append_packet(
     if (packet->descriptor != NULL) {
       loom_aie2p_encoded_slot_t encoded_slot;
       uint32_t read_only_data_ordinal = UINT32_MAX;
-      loom_aie2p_bundle_encoding_encode_packet(
-          builder->frame, packet, &encoded_slot, &read_only_data_ordinal);
+      const uint32_t descriptor_ordinal =
+          loom_aie2p_bundle_encoding_encode_packet(
+              builder->frame, packet, &encoded_slot, &read_only_data_ordinal);
       if (read_only_data_ordinal != UINT32_MAX) {
         loom_aie2p_bundle_plan_append_read_only_data_fixup(
             builder, packet_index, read_only_data_ordinal);
@@ -1592,7 +1601,7 @@ static iree_status_t loom_aie2p_bundle_plan_append_packet(
                            : 0,
           },
           (loom_aie2p_slot_realization_t){.descriptor_ordinal =
-                                              packet->descriptor_ordinal});
+                                              descriptor_ordinal});
     }
     const loom_aie2p_core_structure_kind_t structure_kind =
         loom_aie2p_core_structure_classify(packet->node->op);
@@ -1854,9 +1863,8 @@ static iree_status_t loom_aie2p_bundle_plan_append_loop_setup_instruction(
   return loom_aie2p_bundle_plan_admit_instruction(
       builder, logical_issue_cycle,
       (loom_aie2p_planned_slot_t){
-          .encoded_slot =
-              loom_aie2p_bundle_encoding_encode_loop_setup_descriptor(
-                  builder->descriptor_set, descriptor_ordinal, immediate),
+          .encoded_slot = loom_aie2p_bundle_encoding_encode_state_immediate(
+              builder->descriptor_set, descriptor_ordinal, immediate),
           .scheduled_packet_index = LOOM_AIE2P_BUNDLE_PLAN_PACKET_NONE,
           .flags = LOOM_AIE2P_PLANNED_SLOT_FLAG_HARDWARE_LOOP_SETUP,
       },
@@ -2146,7 +2154,10 @@ static iree_status_t loom_aie2p_bundle_plan_try_append_hardware_loop_impl(
   analysis->blocks[loop->header_block_index].elide_control = true;
   body_analysis->elide_control = true;
 
-  loom_low_physical_issue_reset_execution_state(&builder->issue);
+  // The fixed body's physical history also describes its final iteration,
+  // relative to the continuation. Recurrence admits a following iteration,
+  // not arbitrary consumers: preserve outstanding register and resource
+  // deadlines so continuation instructions wait only for their own hazards.
   builder->execution_bundle_start = builder->bundle_count;
   builder->execution_issue_cycle = builder->next_issue_cycle;
   builder->pending.minimum_issue_cycle = builder->next_issue_cycle;
@@ -2189,21 +2200,27 @@ static iree_status_t loom_aie2p_bundle_plan_build_impl(
   loom_aie2p_bundle_plan_analysis_t analysis;
   bool analysis_accepted = false;
   IREE_RETURN_IF_ERROR(loom_aie2p_bundle_plan_analyze(
-      frame, options->diagnostic_emitter, arena, scratch_arena, &analysis,
-      &analysis_accepted));
+      frame, &options->stack.storage_layout, options->diagnostic_emitter, arena,
+      scratch_arena, &analysis, &analysis_accepted));
   if (!analysis_accepted) {
     return iree_ok_status();
   }
-  if (options->preserve_link_register) {
-    iree_host_size_t link_move_count = 1;
+  loom_aie2p_function_envelope_t envelope;
+  loom_aie2p_function_envelope_build(frame->target.descriptor_set,
+                                     &options->stack, options->return_address,
+                                     &envelope);
+  if (envelope.entry.count != 0 || envelope.exit.count != 0) {
+    iree_host_size_t envelope_slot_count = envelope.entry.count;
     for (iree_host_size_t i = 0; i < frame->schedule.block_count; ++i) {
-      link_move_count +=
-          analysis.blocks[i].terminator == LOOM_AIE2P_BLOCK_TERMINATOR_RETURN;
+      envelope_slot_count +=
+          envelope.exit.count *
+          (analysis.blocks[i].terminator == LOOM_AIE2P_BLOCK_TERMINATOR_RETURN);
     }
-    if (!iree_host_size_checked_add(analysis.move_slot_count, link_move_count,
+    if (!iree_host_size_checked_add(analysis.move_slot_count,
+                                    envelope_slot_count,
                                     &analysis.move_slot_count)) {
       return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "AIE2P link-preservation capacity exceeds host "
+                              "AIE2P function-envelope capacity exceeds host "
                               "size");
     }
   }
@@ -2279,6 +2296,7 @@ static iree_status_t loom_aie2p_bundle_plan_build_impl(
   loom_aie2p_bundle_plan_builder_t builder = {
       .frame = frame,
       .options = options,
+      .envelope = &envelope,
       .arena = arena,
       .scratch_arena = scratch_arena,
       .descriptor_set = descriptor_set,
@@ -2364,10 +2382,9 @@ static iree_status_t loom_aie2p_bundle_plan_build_impl(
   builder.current_block_index = 0;
   builder.pending.minimum_issue_cycle = 0;
   builder.pending.end_cycle = 0;
-  if (options->preserve_link_register) {
-    IREE_RETURN_IF_ERROR(loom_aie2p_bundle_plan_append_link_move(
-        &builder, /*save_link=*/true, /*logical_issue_cycle=*/0));
-  }
+  IREE_RETURN_IF_ERROR(loom_aie2p_bundle_plan_append_envelope(
+      &builder, &envelope.entry, /*entering=*/true,
+      /*logical_issue_cycle=*/0));
   IREE_RETURN_IF_ERROR(loom_aie2p_bundle_plan_append_move_range(
       &builder, frame->allocation.entry_moves.moves,
       /*logical_issue_cycle=*/0));
@@ -2432,6 +2449,8 @@ static iree_status_t loom_aie2p_bundle_plan_build_impl(
   };
   IREE_RETURN_IF_ERROR(
       loom_aie2p_leaf_plan_retain_metadata(frame, arena, &plan));
+  plan.stack_frame_byte_length = options->stack.byte_length;
+  plan.storage_requirements[LOOM_STORAGE_SPACE_STACK] = options->stack.storage;
   *out_plan = plan;
   *out_planned = true;
   return iree_ok_status();

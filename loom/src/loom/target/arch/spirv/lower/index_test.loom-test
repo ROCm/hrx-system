@@ -1,4 +1,4 @@
-// RUN: pass source-to-low
+// RUN: pass source-to-low{control-flow=structured-low}
 
 // Scaling accepts the complete signed coordinate carrier. Unlike index.cast,
 // the product wraps in the offset domain, so a negative input needs no guard.
@@ -16,4 +16,116 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @signed
   %7 = OpSConvert.i32.offset64 %coordinate
   %result = OpIMul.offset64 %7, %stride
   return %result
+}
+
+// ====
+
+// Positive high-bit coordinates stay positive through signed min/max. The
+// result cannot be narrowed using the native payload's signed domain.
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @positive_product(%input: index) -> (i64) {
+  %coordinate = index.assume %input [range(%input, 1073741823, 1073741825)] : index
+  %factor = index.constant 3 : index
+  %c1 = index.constant 1 : index
+  %product = index.mul %coordinate, %factor : index
+  %maximum = index.max %product, %c1 : index
+  %result = index.cast %maximum : index to i64
+  func.return %result : i64
+}
+
+// ----
+spirv.target<vulkan1_3> @target
+
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @positive_product(%coordinate: reg<spirv.id : index>) -> (reg<spirv.id : i64>) asm {
+  %factor = OpConstant.i32 3 : reg<spirv.id : index>
+  %c1 = OpConstant.i32 1 : reg<spirv.id : index>
+  %12 = OpSConvert.i32.i64 %coordinate
+  %13 = OpSConvert.i32.i64 %factor
+  %product = OpIMul.i64 %12, %13
+  %15 = OpSConvert.i32.i64 %c1
+  %16 = OpSGreaterThan.i64 %product, %15
+  %17 = OpSConvert.i32.i64 %c1
+  %result = OpSelect.i64 %16, %product, %17
+  return %result
+}
+
+// ====
+
+// A variable shift loses its interval but retains its wide representation.
+// Counted control, the carried result, and the final cast preserve that width.
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @shifted_loop(%input: index, %amount_input: index) -> (i64) {
+  %coordinate = index.assume %input [range(%input, 1073741823, 1073741825)] : index
+  %amount = index.assume %amount_input [range(%amount_input, 0, 2)] : index
+  %factor = index.constant 3 : index
+  %wide = index.mul %coordinate, %factor : index
+  %end = index.shli %wide, %amount : index
+  %c1 = index.constant 1 : index
+  %begin = index.sub %end, %c1 : index
+  %initial = index.constant -7 : index
+  %last = scf.for %position = [%begin to %end step %c1](%current = %initial : index) -> (index) {
+    scf.yield %position : index
+  }
+  %result = index.cast %last : index to i64
+  func.return %result : i64
+}
+
+// ----
+spirv.target<vulkan1_3> @target
+
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @shifted_loop(%coordinate: reg<spirv.id : index>, %amount: reg<spirv.id : index>) -> (reg<spirv.id : i64>) asm {
+  %factor = OpConstant.i32 3 : reg<spirv.id : index>
+  %19 = OpSConvert.i32.i64 %coordinate
+  %20 = OpSConvert.i32.i64 %factor
+  %wide = OpIMul.i64 %19, %20
+  %22 = OpSConvert.i32.i64 %amount
+  %end = OpShiftLeftLogical.i64 %wide, %22
+  %c1 = OpConstant.i32 1 : reg<spirv.id : index>
+  %25 = OpSConvert.i32.i64 %c1
+  %begin = OpISub.i64 %end, %25
+  %initial = OpConstant.i64 -7
+  %28 = OpSConvert.i32.i64 %c1
+  %result = low.scf.for signed [%begin to %end step %28] iter_args(%initial: reg<spirv.id : i64>) -> (reg<spirv.id : i64>) do(%position: reg<spirv.id : i64>, %current: reg<spirv.id : i64>) {
+    low.scf.yield %position : reg<spirv.id : i64>
+  }
+  return %result
+}
+
+
+// ====
+
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @offset_to_index_preserves_wide_coordinate(%input: offset) -> (index) {
+  %result = index.cast %input : offset to index
+  func.return %result : index
+}
+
+// ----
+spirv.target<vulkan1_3> @target
+
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @offset_to_index_preserves_wide_coordinate(%input: reg<spirv.offset64>) -> (reg<spirv.id : i64>) asm {
+  %result = OpBitcast.offset64.i64 %input
+  return %result
+}
+
+// ====
+
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @computed_index_uses_wide_carrier(%lhs: index, %rhs: index) -> (index) where [range(%lhs, 65536, 65537), range(%rhs, 65536, 65537)] {
+  %product = index.mul %lhs, %rhs : index
+  func.return %product : index
+}
+
+// ----
+spirv.target<vulkan1_3> @target
+
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @computed_index_uses_wide_carrier(%lhs: reg<spirv.id : index>, %rhs: reg<spirv.id : index>) -> (reg<spirv.id : i64>) where [range(%lhs, 65536, 65537), range(%rhs, 65536, 65537)] asm {
+  %7 = OpSConvert.i32.i64 %lhs
+  %8 = OpSConvert.i32.i64 %rhs
+  %product = OpIMul.i64 %7, %8
+  return %product
 }

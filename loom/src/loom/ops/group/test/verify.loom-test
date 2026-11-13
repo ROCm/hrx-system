@@ -12,3 +12,32 @@ func.def @wrong_group_result(%lanes: index) {
   %workers = group.create %lanes : index -> i32
   func.return
 }
+
+// ====
+
+// RUN: pass ownership-lifetime
+
+// The assertion aliases the fresh participant domain; returning its refined
+// view transfers the original owner exactly once.
+func.def @return_refined_group(%count: index) -> (group<16>) {
+  %workers = group.create %count : index -> group<[%count]>
+  %refined = group.refine %workers : group<[%count]> -> group<16>
+  func.return %refined : group<16>
+}
+// ----
+func.def @return_refined_group(%count: index) -> (group<16>) {
+  %workers = group.create %count : index -> group<[%count]>
+  %refined = group.refine %workers : group<[%count]> -> group<16>
+  func.return %refined : group<16>
+}
+
+// ====
+
+// RUN: pass ownership-lifetime
+
+func.def @return_group_twice(%count: index) -> (%extent: index, group<[%extent]>, group<16>) {
+  %workers = group.create %count : index -> group<[%count]>
+  %refined = group.refine %workers : group<[%count]> -> group<16>
+  // ERROR@+1: DOMINANCE/012
+  func.return %count, %workers, %refined : index, group<[%count]>, group<16>
+}

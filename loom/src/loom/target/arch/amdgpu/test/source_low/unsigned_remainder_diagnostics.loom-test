@@ -1,0 +1,77 @@
+// RUN: emit source-low output=none
+
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @zero_divisor(%value: i32) -> (i32) {
+  %c0 = scalar.constant 0 : i32
+  // ERROR@+1: TARGET/003 {op_name="scalar.remui"}
+  %result = scalar.remui %value, %c0 : i32
+  func.return %result : i32
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @wide_zero_divisor(%value: i64) -> (i64) {
+  %c0 = scalar.constant 0 : i64
+  // ERROR@+1: AMDGPU/023 {constraint_key="unsigned_i64_remainder.constant_nonzero_or_positive_u32_divisor"}
+  %result = scalar.remui %value, %c0 : i64
+  func.return %result : i64
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @zero_unsigned_quotient(%value: i32) -> (i32) {
+  %c0 = scalar.constant 0 : i32
+  // ERROR@+1: TARGET/003 {op_name="scalar.divui"}
+  %result = scalar.divui %value, %c0 : i32
+  func.return %result : i32
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @unbounded_index_remainder(%value: index, %divisor: index) -> (index) {
+  // ERROR@+1: TARGET/003 {subject_role="address-width", subject_name="u32", constraint_key="amdgpu.address.u32"}
+  %result = index.rem %value, %divisor : index
+  func.return %result : index
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @nonpositive_index_divisor(%value: index, %divisor: index) -> (index) {
+  %bounded_value = index.assume %value [range(%value, 0, 4294967295)] : index
+  %zero_inclusive_divisor = index.assume %divisor [range(%divisor, 0, 4294967295)] : index
+  // ERROR@+1: TARGET/003 {subject_role="divisor", subject_name="u32", constraint_key="amdgpu.divisor.positive_u32"}
+  %result = index.rem %bounded_value, %zero_inclusive_divisor : index
+  func.return %result : index
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @wide_index_remainder_out_of_range(%dividend0: index, %divisor0: index) -> (index) where [range(%dividend0, 4294967296, 8589934591), range(%divisor0, 1, 4294967295)] {
+  %dividend = index.assume %dividend0 [range(%dividend0, 4294967296, 8589934591)] : index
+  %divisor = index.assume %divisor0 [range(%divisor0, 1, 4294967295)] : index
+  // ERROR@+1: AMDGPU/033 {constraint_key="index_cast.target_width_range"}
+  %result = index.rem %dividend, %divisor : index
+  func.return %result : index
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @wide_zero_unsigned_quotient(%value: i64) -> (i64) {
+  %c0 = scalar.constant 0 : i64
+  // ERROR@+1: AMDGPU/023 {constraint_key="unsigned_i64_division.constant_nonzero_divisor"}
+  %result = scalar.divui %value, %c0 : i64
+  func.return %result : i64
+}

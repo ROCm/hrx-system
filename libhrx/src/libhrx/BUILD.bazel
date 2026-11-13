@@ -5,6 +5,7 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 load("//build_tools/bazel:select.bzl", "iree_select")
+load("//build_tools/bazel:test_resources.bzl", "GPU_DEVICE_RESOURCE_GROUP")
 load(
     "//libhrx/build_tools/bazel:cc.bzl",
     "hrx_cc_library",
@@ -20,19 +21,25 @@ package(
 
 HRX_SRCS = [
     "allocator.c",
+    "barrier.c",
     "buffer.c",
     "buffer_table.c",
     "buffer_view.c",
     "device.c",
+    "device_group.c",
     "event.c",
+    "event_timestamp.c",
     "executable.c",
     "fence.c",
     "graph.c",
     "graph_analysis.c",
+    "graph_dependencies.c",
     "graph_exec.c",
     "host_allocator.c",
     "mem_pool.c",
     "mem_pool_backing.c",
+    "memory_transition.c",
+    "queue.c",
     "queue_ops.c",
     "runtime.c",
     "semaphore.c",
@@ -43,13 +50,21 @@ HRX_SRCS = [
 ]
 
 HRX_HDRS = [
+    "barrier.h",
     "buffer.h",
     "buffer_table.h",
     "device.h",
+    "device_group.h",
+    "event_timestamp.h",
+    "graph_analysis.h",
+    "graph_dependencies.h",
+    "graph_exec.h",
     "hrx_internal.h",
     "mem_pool.h",
     "mem_pool_backing.h",
+    "queue.h",
     "runtime.h",
+    "stream.h",
     "transfer.h",
     "//libhrx/src:iree_hal_compat.h",
 ]
@@ -67,6 +82,8 @@ HRX_DEPS = [
     "//runtime/src/iree/base:core_headers",
     "//runtime/src/iree/base/internal",
     "//runtime/src/iree/base/internal:arena",
+    "//runtime/src/iree/base/internal:dynamic_library",
+    "//runtime/src/iree/base/internal:path",
     "//runtime/src/iree/base/threading",
     "//runtime/src/iree/async/util:proactor_pool",
     "//runtime/src/iree/hal",
@@ -75,34 +92,31 @@ HRX_DEPS = [
     "//runtime/src/iree/hal/memory:slab_provider",
     "//runtime/src/iree/hal/memory:slab_cache",
     "//runtime/src/iree/hal/memory:tlsf_pool",
-    "//runtime/src/iree/hal/drivers/task:driver",
-    "//runtime/src/iree/hal/drivers/task/executable/loaders/registration",
-    "//runtime/src/iree/hal/utils:profile_file",
+    "//runtime/src/iree/hal/driver/task:driver",
+    "//runtime/src/iree/hal/driver/task/executable/loaders/registration",
     "//runtime/src/iree/hal/utils:resource_set",
     "//runtime/src/iree/io:file_handle",
     "//runtime/src/iree/task:api",
 ] + iree_select({
-    "//runtime/config/hal:driver_amd_gpu": [
-        "//runtime/src/iree/hal/drivers/amd/registration",
-        "//runtime/src/iree/hal/drivers/amd/gpu/target:selection",
+    "//runtime/config/hal:driver_amd": [
+        "//runtime/src/iree/hal/driver/amd/registration",
     ],
     "//conditions:default": [],
 }) + iree_select({
-    "//runtime/config/hal:driver_amdgpu": [
-        "//runtime/src/iree/hal/drivers/amdgpu/registration",
-        "//runtime/src/iree/hal/drivers/amdgpu/target:selection",
+    "//runtime/config/hal:driver_amd_gpu": [
+        "//runtime/src/iree/hal/driver/amd/gpu/target:selection",
     ],
     "//conditions:default": [],
 })
 
 HRX_AMDGPU_COPTS = iree_select({
-    "//runtime/config/hal:driver_amd_gpu": [
-        "-DHRX_HAS_IREE_AMD_GPU_DRIVER",
+    "//runtime/config/hal:driver_amd": [
+        "-DHRX_HAS_IREE_AMD_DRIVER",
     ],
     "//conditions:default": [],
 }) + iree_select({
-    "//runtime/config/hal:driver_amdgpu": [
-        "-DHRX_HAS_IREE_AMDGPU_DRIVER",
+    "//runtime/config/hal:driver_amd_gpu": [
+        "-DHRX_HAS_IREE_AMD_GPU_DRIVER",
     ],
     "//conditions:default": [],
 })
@@ -137,13 +151,103 @@ hrx_cc_shared_library(
 )
 
 hrx_cc_test(
+    name = "event_timestamp_test",
+    srcs = ["event_timestamp_test.cc"],
+    deps = [
+        ":hrx_static",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/memory:heap_pool",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
+    name = "event_test",
+    srcs = ["event_test.cc"],
+    deps = [
+        ":hrx_static",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
+    name = "stream_test",
+    srcs = ["stream_test.cc"],
+    deps = [
+        ":hrx_static",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
     name = "graph_exec_test",
     srcs = ["graph_exec_test.cc"],
     deps = [
         ":hrx_static",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
-        "//runtime/src/iree/hal/testing:mock_device",
+        "//runtime/src/iree/hal/driver/task/executable",
+        "//runtime/src/iree/hal/driver/task/executable/library:abi",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
+    name = "queue_test",
+    srcs = ["queue_test.cc"],
+    deps = [
+        ":hrx_static",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
+    name = "memory_transition_test",
+    srcs = ["memory_transition_test.cc"],
+    deps = [
+        ":hrx_static",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
+    name = "mem_pool_test",
+    srcs = ["mem_pool_test.cc"],
+    deps = [
+        ":hrx_static",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
+    name = "runtime_test",
+    srcs = ["runtime_test.cc"],
+    deps = [
+        ":hrx_static",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
+    name = "device_group_test",
+    srcs = ["device_group_test.cc"],
+    deps = [
+        ":hrx_static",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
@@ -200,8 +304,8 @@ hrx_cc_test(
 )
 
 hrx_cc_test(
-    name = "graph_buffer_test",
-    srcs = ["graph_buffer_test.cc"],
+    name = "graph_ordering_test",
+    srcs = ["graph_ordering_test.cc"],
     deps = [
         ":hrx_static",
         "//runtime/src/iree/base",
@@ -212,8 +316,8 @@ hrx_cc_test(
 )
 
 hrx_cc_test(
-    name = "pool_test",
-    srcs = ["pool_test.cc"],
+    name = "graph_buffer_test",
+    srcs = ["graph_buffer_test.cc"],
     deps = [
         ":hrx_static",
         "//runtime/src/iree/base",
@@ -237,12 +341,49 @@ hrx_cc_test(
 )
 
 hrx_cc_test(
+    name = "runtime_lifecycle_gpu_test",
+    srcs = ["runtime_lifecycle_gpu_test.cc"],
+    data = [":hrx"],
+    env = {
+        "HRX_GPU_DRIVER": "amdgpu",
+        "HRX_TEST_RUNTIME_LIBRARY": "$(location :hrx)",
+    },
+    resource_group = GPU_DEVICE_RESOURCE_GROUP,
+    tags = [
+        "iree-run-requirement=libamdf.resource.amd_gpu",
+        "runtime-resource=amd-gpu",
+    ],
+    target_compatible_with = select({
+        "//runtime/config/hal:driver_amd_gpu": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:dynamic_library",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
+    name = "runtime_profile_test",
+    srcs = ["runtime_profile_test.cc"],
+    deps = [
+        ":hrx_static",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
     name = "mem_pool_backing_gpu_test",
     srcs = ["mem_pool_backing_test.cc"],
-    copts = ["-DHRX_TEST_GPU=1"],
-    resource_group = "iree-hal-drivers-amdgpu-tests",
+    env = {"HRX_TEST_DEVICE_URI": "amdgpu://0"},
+    resource_group = GPU_DEVICE_RESOURCE_GROUP,
     tags = [
-        "iree-run-requirement=runtime.resource.amd_gpu",
+        "iree-run-requirement=libamdf.resource.amd_gpu",
         "runtime-resource=amd-gpu",
     ],
     deps = [
@@ -259,14 +400,37 @@ hrx_cc_test(
     name = "mem_pool_backing_uncached_gpu_test",
     srcs = ["mem_pool_backing_uncached_gpu_test.cc"],
     env = {"HRX_GPU_DRIVER": "amdgpu"},
-    resource_group = "iree-hal-drivers-amdgpu-tests",
+    resource_group = GPU_DEVICE_RESOURCE_GROUP,
     tags = [
-        "iree-run-requirement=runtime.resource.amd_gpu",
+        "iree-run-requirement=libamdf.resource.amd_gpu",
         "runtime-resource=amd-gpu",
     ],
     deps = [
         ":hrx_static",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
+    name = "graph_analysis_test",
+    srcs = ["graph_analysis_test.cc"],
+    deps = [
+        ":hrx_static",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
+    name = "graph_dependencies_test",
+    srcs = ["graph_dependencies_test.cc"],
+    deps = [
+        ":hrx_static",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",

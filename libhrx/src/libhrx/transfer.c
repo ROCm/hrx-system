@@ -41,6 +41,11 @@ iree_status_t hrx_hal_queue_transfer_and_wait(
 
 static hrx_status_t hrx_stream_transfer(
     hrx_stream_t stream, const iree_hal_transfer_operation_t* operation) {
+  if (!iree_any_bit_set(stream->command_categories,
+                        IREE_HAL_COMMAND_CATEGORY_TRANSFER)) {
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                           "stream queue does not support transfers");
+  }
   hrx_status_t status = hrx_stream_flush(stream);
   if (!hrx_status_is_ok(status)) {
     return status;
@@ -64,7 +69,7 @@ static hrx_status_t hrx_stream_transfer(
       .payload_values = &signal_value,
   };
   iree_status_t iree_status = iree_hal_queue_transfer(
-      stream->device->transfer_queue, wait_semaphores, signal_semaphores,
+      stream->hal_queue, wait_semaphores, signal_semaphores,
       /*operation_count=*/1, operation, /*barriers=*/NULL);
   if (iree_status_is_ok(iree_status)) {
     stream->timepoint = signal_value;
@@ -76,24 +81,31 @@ static hrx_status_t hrx_stream_transfer(
 // Synchronous data transfer
 //===----------------------------------------------------------------------===//
 
-hrx_status_t hrx_synchronous_h2d(hrx_device_t device, const void* host_src,
+hrx_status_t hrx_synchronous_h2d(hrx_queue_t queue, const void* host_src,
                                  hrx_buffer_t dst, size_t dst_offset,
                                  size_t size) {
   HRX_TRACE_ZONE_BEGIN(z0, "hrx_synchronous_h2d");
   HRX_TRACE_ZONE_APPEND_BYTES(z0, size);
-  if (!device || !host_src || !dst) {
+  if (!queue || !host_src || !dst) {
     HRX_RETURN_AND_END_ZONE(
         z0, hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "NULL argument"));
   }
-  if (dst->device != device) {
+  if (dst->group != queue->device->group) {
     HRX_RETURN_AND_END_ZONE(
-        z0, hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
-                            "destination buffer belongs to another device"));
+        z0,
+        hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                        "destination buffer belongs to another device group"));
   }
   if (dst_offset > dst->size || size > dst->size - dst_offset) {
     HRX_RETURN_AND_END_ZONE(z0,
                             hrx_make_status(HRX_STATUS_OUT_OF_RANGE,
                                             "transfer exceeds buffer size"));
+  }
+
+  iree_status_t status =
+      hrx_queue_validate_roles(queue, IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER);
+  if (!iree_status_is_ok(status)) {
+    HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(status));
   }
 
   const iree_hal_transfer_operation_t operation = {
@@ -107,29 +119,34 @@ hrx_status_t hrx_synchronous_h2d(hrx_device_t device, const void* host_src,
           },
   };
   HRX_RETURN_AND_END_ZONE(
-      z0,
-      hrx_status_from_iree(hrx_hal_queue_transfer_and_wait(
-          device->transfer_queue, 1, &operation, IREE_ASYNC_WAIT_FLAG_NONE)));
+      z0, hrx_status_from_iree(hrx_hal_queue_transfer_and_wait(
+              queue->hal_queue, 1, &operation, IREE_ASYNC_WAIT_FLAG_NONE)));
 }
 
-hrx_status_t hrx_synchronous_d2h(hrx_device_t device, hrx_buffer_t src,
+hrx_status_t hrx_synchronous_d2h(hrx_queue_t queue, hrx_buffer_t src,
                                  size_t src_offset, void* host_dst,
                                  size_t size) {
   HRX_TRACE_ZONE_BEGIN(z0, "hrx_synchronous_d2h");
   HRX_TRACE_ZONE_APPEND_BYTES(z0, size);
-  if (!device || !src || !host_dst) {
+  if (!queue || !src || !host_dst) {
     HRX_RETURN_AND_END_ZONE(
         z0, hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "NULL argument"));
   }
-  if (src->device != device) {
+  if (src->group != queue->device->group) {
     HRX_RETURN_AND_END_ZONE(
         z0, hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
-                            "source buffer belongs to another device"));
+                            "source buffer belongs to another device group"));
   }
   if (src_offset > src->size || size > src->size - src_offset) {
     HRX_RETURN_AND_END_ZONE(z0,
                             hrx_make_status(HRX_STATUS_OUT_OF_RANGE,
                                             "transfer exceeds buffer size"));
+  }
+
+  iree_status_t status =
+      hrx_queue_validate_roles(queue, IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER);
+  if (!iree_status_is_ok(status)) {
+    HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(status));
   }
 
   const iree_hal_transfer_operation_t operation = {
@@ -143,9 +160,8 @@ hrx_status_t hrx_synchronous_d2h(hrx_device_t device, hrx_buffer_t src,
           },
   };
   HRX_RETURN_AND_END_ZONE(
-      z0,
-      hrx_status_from_iree(hrx_hal_queue_transfer_and_wait(
-          device->transfer_queue, 1, &operation, IREE_ASYNC_WAIT_FLAG_NONE)));
+      z0, hrx_status_from_iree(hrx_hal_queue_transfer_and_wait(
+              queue->hal_queue, 1, &operation, IREE_ASYNC_WAIT_FLAG_NONE)));
 }
 
 //===----------------------------------------------------------------------===//
@@ -155,15 +171,13 @@ hrx_status_t hrx_synchronous_d2h(hrx_device_t device, hrx_buffer_t src,
 hrx_status_t hrx_stream_copy_h2d(hrx_stream_t stream, const void* host_src,
                                  hrx_buffer_t dst, size_t dst_offset,
                                  size_t size) {
-  if (!host_src || !dst) {
+  if (!stream || !host_src || !dst) {
     return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "NULL argument");
   }
-  if (!stream) {
-    return hrx_synchronous_h2d(dst->device, host_src, dst, dst_offset, size);
-  }
-  if (dst->device != stream->device) {
-    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
-                           "destination buffer belongs to another device");
+  if (dst->group != stream->queue->device->group) {
+    return hrx_make_status(
+        HRX_STATUS_INVALID_ARGUMENT,
+        "destination buffer belongs to another device group");
   }
   if (dst_offset > dst->size || size > dst->size - dst_offset) {
     return hrx_make_status(HRX_STATUS_OUT_OF_RANGE,
@@ -186,15 +200,12 @@ hrx_status_t hrx_stream_copy_h2d(hrx_stream_t stream, const void* host_src,
 hrx_status_t hrx_stream_copy_d2h(hrx_stream_t stream, hrx_buffer_t src,
                                  size_t src_offset, void* host_dst,
                                  size_t size) {
-  if (!src || !host_dst) {
+  if (!stream || !src || !host_dst) {
     return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "NULL argument");
   }
-  if (!stream) {
-    return hrx_synchronous_d2h(src->device, src, src_offset, host_dst, size);
-  }
-  if (src->device != stream->device) {
+  if (src->group != stream->queue->device->group) {
     return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
-                           "source buffer belongs to another device");
+                           "source buffer belongs to another device group");
   }
   if (src_offset > src->size || size > src->size - src_offset) {
     return hrx_make_status(HRX_STATUS_OUT_OF_RANGE,

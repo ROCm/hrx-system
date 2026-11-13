@@ -674,7 +674,6 @@ iree_status_t loom_amdgpu_emit_fragment_memory_fp8_to_packed_16bit_load_packet(
     loom_type_t mask_type, loom_value_id_t low_soffset,
     loom_value_id_t* out_low_packet) {
   *out_low_packet = LOOM_VALUE_ID_INVALID;
-  loom_amdgpu_fragment_memory_address_t address;
   const loom_amdgpu_fp8_decode_action_kind_t decode_kind =
       plan->fp8_load_decode.kind;
   const loom_amdgpu_fp8_decode_value_flags_t decode_value_flags =
@@ -751,26 +750,10 @@ iree_status_t loom_amdgpu_emit_fragment_memory_fp8_to_packed_16bit_load_packet(
                          LOOM_AMDGPU_FP8_NATIVE_DESCRIPTOR_FLAG_HAS_PAIR));
   }
 
-  loom_amdgpu_fragment_memory_issued_access_t issued_accesses
-      [LOOM_AMDGPU_FRAGMENT_MEMORY_MAX_ISSUED_ACCESSES_PER_PACKET];
-  const uint16_t issued_access_count =
-      loom_amdgpu_fragment_memory_query_issued_accesses(plan, packet,
-                                                        issued_accesses);
-  IREE_ASSERT_EQ(issued_access_count, 1u);
-  const loom_amdgpu_fragment_memory_issued_access_t* access =
-      &issued_accesses[0];
-  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fragment_memory_vaddr(
-      context, source_op, plan, access->register_index, access->element_index,
-      access->descriptor_ref, address_state, vgpr_type, &address));
-
-  loom_type_t packet_type = vgpr_type;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_fragment_memory_packet_type(
-      context, packet->packet_register_count, vgpr_type, &packet_type));
   loom_value_id_t low_source_packet = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fragment_load_packet(
-      context, source_op, plan, packet, access->element_index,
-      access->element_count, packet_type, &address, low_packet_resource,
-      low_soffset, &low_source_packet));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fragment_memory_load_packet(
+      context, source_op, plan, packet, address_state, low_packet_resource,
+      vgpr_type, low_soffset, &low_source_packet));
   if (packet->result_register_count == 1) {
     IREE_RETURN_IF_ERROR(
         loom_amdgpu_emit_fragment_memory_low_subword_load_packet(

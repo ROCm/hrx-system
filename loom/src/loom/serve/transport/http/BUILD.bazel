@@ -4,7 +4,8 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library", "loom_cc_test")
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_fuzz", "loom_cc_library", "loom_cc_test")
+load("//loom/build_tools/bazel:python.bzl", "loom_py_test")
 
 package(
     default_visibility = ["//loom/src/loom/serve:implementation"],
@@ -52,6 +53,28 @@ loom_cc_test(
     ],
 )
 
+loom_cc_fuzz(
+    name = "request_fuzz",
+    srcs = ["request_fuzz.cc"],
+    deps = [
+        ":multipart",
+        ":request",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_py_test(
+    name = "request_fuzz_test",
+    size = "small",
+    srcs = ["request_fuzz_test.py"],
+    args = ["$(rootpath :request_fuzz)"],
+    data = [":request_fuzz"],
+    tags = [
+        "manual",
+        "skip-bazel_to_cmake",
+    ],
+)
+
 loom_cc_library(
     name = "origin",
     srcs = ["origin.c"],
@@ -82,8 +105,8 @@ loom_cc_library(
     deps = [
         ":origin",
         ":request",
+        "//loom/src/loom/runtime:wake",
         "//loom/src/loom/runtime/telemetry:stream",
-        "//loom/src/loom/serve/runtime/host:wake",
         "//loom/src/loom/service/telemetry:record",
         "//runtime/src/iree/async",
         "//runtime/src/iree/async/util:proactor_pool",

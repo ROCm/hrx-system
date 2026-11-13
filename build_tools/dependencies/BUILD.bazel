@@ -1,0 +1,112 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+# Dependency inventory tooling has no CMake target surface.
+# bazel-to-cmake: skip
+
+load("@rules_python//python:defs.bzl", "py_binary", "py_library", "py_test")
+
+package(default_visibility = ["//visibility:public"])
+
+py_library(
+    name = "inventory",
+    srcs = [
+        "__init__.py",
+        "inventory.py",
+    ],
+    deps = ["//build_tools/bazel_to_cmake:dependency_metadata"],
+)
+
+py_binary(
+    name = "dependency_inventory",
+    srcs = ["inventory_main.py"],
+    main = "inventory_main.py",
+    deps = [
+        ":inventory",
+        "//build_tools/bazel_to_cmake:dependency_metadata",
+    ],
+)
+
+py_library(
+    name = "github_snapshot",
+    srcs = ["github_snapshot.py"],
+    deps = [":inventory"],
+)
+
+py_library(
+    name = "github_sbom",
+    srcs = ["github_sbom.py"],
+    deps = [":inventory"],
+)
+
+py_library(
+    name = "github_alerts",
+    srcs = ["github_alerts.py"],
+)
+
+py_binary(
+    name = "github_alerts_jsonl",
+    srcs = ["github_alerts_main.py"],
+    main = "github_alerts_main.py",
+    deps = [":github_alerts"],
+)
+
+py_binary(
+    name = "github_snapshot_json",
+    srcs = ["github_snapshot_main.py"],
+    main = "github_snapshot_main.py",
+    deps = [":github_snapshot"],
+)
+
+py_binary(
+    name = "github_sbom_verify",
+    srcs = ["github_sbom_main.py"],
+    main = "github_sbom_main.py",
+    deps = [":github_sbom"],
+)
+
+py_test(
+    name = "inventory_test",
+    srcs = ["inventory_test.py"],
+    deps = [
+        ":inventory",
+        "//build_tools/bazel_to_cmake:dependency_metadata",
+    ],
+)
+
+py_test(
+    name = "github_alerts_test",
+    srcs = ["github_alerts_test.py"],
+    deps = [":github_alerts"],
+)
+
+py_test(
+    name = "github_snapshot_test",
+    srcs = ["github_snapshot_test.py"],
+    deps = [
+        ":github_snapshot",
+        ":inventory",
+    ],
+)
+
+py_test(
+    name = "github_sbom_test",
+    srcs = ["github_sbom_test.py"],
+    deps = [
+        ":github_sbom",
+        ":inventory",
+    ],
+)
+
+test_suite(
+    name = "dependencies_tests",
+    tests = [
+        ":github_alerts_test",
+        ":github_sbom_test",
+        ":github_snapshot_test",
+        ":inventory_test",
+    ],
+)

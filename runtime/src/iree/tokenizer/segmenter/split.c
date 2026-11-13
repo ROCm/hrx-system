@@ -37,8 +37,11 @@ typedef struct iree_tokenizer_segmenter_split_state_t {
   iree_tokenizer_segmenter_state_t base;
   iree_tokenizer_regex_exec_state_t regex_state;
 
-  // Position tracking (all absolute byte offsets).
-  iree_host_size_t bytes_processed;
+  // Absolute position corresponding to the start of the next caller input.
+  iree_host_size_t input_base;
+  // Absolute position one past the input already scanned by the matcher.
+  iree_host_size_t scan_end;
+  // Absolute end of the last regex match committed to split behavior state.
   iree_host_size_t last_emit_end;
 
   // Pending segment for MERGED_WITH_NEXT and CONTIGUOUS behaviors.
@@ -51,15 +54,11 @@ typedef struct iree_tokenizer_segmenter_split_state_t {
   bool is_literal;
   bool has_pending;
 
-  // Set when process() caps consumed due to a pending regex match. The regex
-  // state was reset to avoid position underflow, but finalize() will re-scan
-  // the unconsumed bytes to emit the deferred match. has_pending() checks this
-  // flag to correctly indicate that finalize() is needed.
-  bool deferred_to_finalize;
-
   // Set after finalize's feed+regex phases complete. Prevents re-running them
   // on re-entrant finalize calls (where only trailing flush needs to resume).
   bool finalize_feed_done;
+  // A limited-capacity flush emitted only a prefix of scanned input.
+  bool flush_pending;
 
   // Literal mode: tracks partial match position when pattern spans chunks.
   // Value is number of pattern bytes matched so far (0 = no partial match).
@@ -275,7 +274,7 @@ iree_tokenizer_split_handle_contiguous(iree_host_size_t gap_start,
 //===----------------------------------------------------------------------===//
 
 // Dispatches to the appropriate behavior handler.
-IREE_ATTRIBUTE_ALWAYS_INLINE static inline iree_tokenizer_split_match_result_t
+static IREE_ATTRIBUTE_ALWAYS_INLINE iree_tokenizer_split_match_result_t
 iree_tokenizer_split_handle_match(
     iree_tokenizer_regex_split_behavior_t behavior, iree_host_size_t gap_start,
     iree_host_size_t gap_end, iree_host_size_t match_start,
@@ -723,13 +722,24 @@ static iree_status_t iree_tokenizer_segmenter_split_state_process(
     return iree_ok_status();
   }
 
-  iree_host_size_t chunk_base = self->bytes_processed;
+  iree_host_size_t input_base = self->input_base;
+  IREE_ASSERT(input_base <= self->scan_end);
+  iree_host_size_t scanned_prefix = self->scan_end - input_base;
+  if (IREE_UNLIKELY(input.size < scanned_prefix)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "split input omitted %" PRIhsz " retained bytes",
+                            scanned_prefix - input.size);
+  }
+  iree_host_size_t scan_base = self->scan_end;
+  iree_string_view_t new_input =
+      iree_string_view_substr(input, scanned_prefix, IREE_HOST_SIZE_MAX);
+  iree_host_size_t input_end = input_base + input.size;
 
   // Set up emitter and callback context. The context holds a transient copy
   // of mutable state that the inline callback updates per-match.
   iree_tokenizer_split_emitter_t emitter = {
       .output = output,
-      .chunk_base = chunk_base,
+      .chunk_base = input_base,
       .count = 0,
       .last_end = self->last_emit_end,
       .full = false,
@@ -748,11 +758,11 @@ static iree_status_t iree_tokenizer_segmenter_split_state_process(
   // Feed pattern matcher; matches are processed inline via callback.
   iree_status_t feed_status;
   if (self->is_literal) {
-    feed_status = iree_tokenizer_split_literal_process(segmenter, self, input,
-                                                       chunk_base, &context);
+    feed_status = iree_tokenizer_split_literal_process(
+        segmenter, self, new_input, scan_base, &context);
   } else {
     feed_status = iree_tokenizer_regex_exec_feed(
-        &segmenter->regex.dfa, &self->regex_state, input, chunk_base,
+        &segmenter->regex.dfa, &self->regex_state, new_input, scan_base,
         segmenter->regex.stride, iree_tokenizer_split_inline_callback,
         &context);
   }
@@ -766,14 +776,17 @@ static iree_status_t iree_tokenizer_segmenter_split_state_process(
   iree_status_ignore(feed_status);
 
   // Determine consumption and commit state based on output capacity.
-  if (emitter.full && emitter.last_end > chunk_base) {
+  if (emitter.full && emitter.count > 0) {
     // Output filled mid-chunk: consume up to last emitted segment.
     // Discard any pending state accumulated after the last emit — those bytes
     // are beyond our consumption point and will be re-fed on the next call.
-    *out_consumed = emitter.last_end - chunk_base;
-    self->bytes_processed = emitter.last_end;
+    *out_consumed = emitter.last_end - input_base;
+    self->input_base = emitter.last_end;
+    self->scan_end = emitter.last_end;
     self->last_emit_end = emitter.last_end;
     self->has_pending = false;
+    self->pending_start = 0;
+    self->pending_end = 0;
     self->literal_match_position = 0;
     if (!self->is_literal) {
       iree_tokenizer_regex_exec_initialize(&self->regex_state,
@@ -781,75 +794,54 @@ static iree_status_t iree_tokenizer_segmenter_split_state_process(
     }
   } else if (emitter.full) {
     // Output filled but no progress (capacity too small for first result).
-    // Leave persistent state unchanged — nothing was consumed or emitted.
+    // Restart from the caller-retained input because the matcher may have
+    // advanced before discovering that the first result would not fit.
     *out_consumed = 0;
+    self->scan_end = input_base;
+    self->last_emit_end = input_base;
+    self->has_pending = false;
+    self->pending_start = 0;
+    self->pending_end = 0;
     self->literal_match_position = 0;
     if (!self->is_literal) {
       iree_tokenizer_regex_exec_initialize(&self->regex_state,
                                            &segmenter->regex.dfa);
     }
   } else {
-    // Normal case: consume all input, commit full callback state.
-    self->bytes_processed = chunk_base + input.size;
+    // The matcher may scan beyond bytes that split behavior can release. Keep
+    // those bytes in the caller's next input while feeding only newly appended
+    // bytes on the next call.
+    self->scan_end = input_end;
     self->last_emit_end = context.last_emit_end;
     self->has_pending = context.has_pending;
     self->pending_start = context.pending_start;
     self->pending_end = context.pending_end;
 
-    // Check if the regex has a pending match that finalize() will need to emit.
-    // A pending regex match exists when in_match is true AND there's an
-    // accepting position (either lookahead-passed or fallback).
-    //
-    // CRITICAL: When there's a pending regex match, we must NOT consume past
-    // last_emit_end. The regex tracks match positions cumulatively from init,
-    // but finalize() uses chunk_base=bytes_processed for position arithmetic.
-    // If we consume past the pending match's start position, finalize() will
-    // compute start - chunk_base = underflow.
-    //
-    // Example: Input "    if" matches [0,3) and [3,6). The [3,6) match is
-    // pending after process() (greedy match waits for confirming byte).
-    // If we set bytes_processed=6, finalize() gets chunk_base=6 and computes
-    // 3 - 6 = underflow. By capping at last_emit_end=3, finalize() gets
-    // chunk_base=3 and re-scans " if", producing the correct [0,3) relative
-    // position (absolute [3,6)).
-    bool has_pending_regex_match =
-        !self->is_literal && self->regex_state.in_match &&
-        (self->regex_state.has_accept || self->regex_state.has_accept_fallback);
-
-    // Check if we should use wraparound arithmetic for this behavior.
-    // ISOLATED+invert needs wraparound because trailing gaps must be emitted
-    // and has_pending relies on last_emit_end < bytes_processed.
-    bool uses_wraparound =
-        self->invert &&
-        self->behavior == IREE_TOKENIZER_UTIL_REGEX_SPLIT_ISOLATED;
-
-    // Determine if we need to cap consumed bytes:
-    // 1. Pending regex match: ALWAYS cap to avoid position underflow
-    // 2. Trailing data: cap when not handled by pending segment logic
-    bool has_trailing_data = self->last_emit_end < self->bytes_processed;
-    bool should_cap_trailing =
-        !self->has_pending && !uses_wraparound && has_trailing_data;
-
-    if (has_pending_regex_match || should_cap_trailing) {
-      // Cap consumed at last emitted segment. The unconsumed bytes will be
-      // passed to finalize(), which can re-scan them with correct chunk_base.
-      *out_consumed = self->last_emit_end - chunk_base;
-      self->bytes_processed = self->last_emit_end;
-      self->literal_match_position = 0;
-      if (!self->is_literal) {
-        iree_tokenizer_regex_exec_initialize(&self->regex_state,
-                                             &segmenter->regex.dfa);
-      }
-      // Set deferred flag only when capping specifically for the pending regex
-      // match case that previously used wraparound arithmetic. This preserves
-      // has_pending()=true for ISOLATED+invert mode, which relies on it.
-      // For other cases (should_cap_trailing), the original behavior was
-      // has_pending()=false after capping.
-      self->deferred_to_finalize = has_pending_regex_match && uses_wraparound;
-    } else {
-      *out_consumed = input.size;
-      self->deferred_to_finalize = false;
+    iree_host_size_t commit_end = self->last_emit_end;
+    if (self->has_pending && self->pending_start < commit_end) {
+      commit_end = self->pending_start;
     }
+
+    // Inverted REMOVED drops original-regex gaps. Once the matcher proves a
+    // gap prefix cannot participate in a match, no future segment references
+    // it and the caller may release it immediately.
+    if (self->invert &&
+        self->behavior == IREE_TOKENIZER_UTIL_REGEX_SPLIT_REMOVED &&
+        !self->has_pending) {
+      if (self->is_literal) {
+        commit_end = self->literal_match_position > 0
+                         ? self->literal_match_start
+                         : self->scan_end;
+      } else {
+        commit_end = self->regex_state.in_match ? self->regex_state.match_start
+                                                : self->scan_end;
+      }
+    }
+
+    IREE_ASSERT(commit_end >= input_base);
+    IREE_ASSERT(commit_end <= input_end);
+    *out_consumed = commit_end - input_base;
+    self->input_base = commit_end;
   }
 
   *out_segment_count = emitter.count;
@@ -867,12 +859,23 @@ static iree_status_t iree_tokenizer_segmenter_split_state_finalize(
 
   *out_segment_count = 0;
 
-  iree_host_size_t chunk_base = self->bytes_processed;
+  iree_host_size_t input_base = self->input_base;
+  IREE_ASSERT(input_base <= self->scan_end);
+  iree_host_size_t scanned_prefix = self->scan_end - input_base;
+  if (IREE_UNLIKELY(remaining_input.size < scanned_prefix)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "split finalization omitted %" PRIhsz
+                            " retained bytes",
+                            scanned_prefix - remaining_input.size);
+  }
+  iree_host_size_t scan_base = self->scan_end;
+  iree_string_view_t new_input = iree_string_view_substr(
+      remaining_input, scanned_prefix, IREE_HOST_SIZE_MAX);
 
   // Set up emitter and callback context (same pattern as process).
   iree_tokenizer_split_emitter_t emitter = {
       .output = output,
-      .chunk_base = chunk_base,
+      .chunk_base = input_base,
       .count = 0,
       .last_end = self->last_emit_end,
       .full = false,
@@ -888,7 +891,7 @@ static iree_status_t iree_tokenizer_segmenter_split_state_finalize(
       .absolute = false,
   };
 
-  iree_host_size_t input_end = chunk_base + remaining_input.size;
+  iree_host_size_t input_end = input_base + remaining_input.size;
 
   // Phase 1: Feed remaining input and finalize pattern matcher. This phase
   // runs once; on re-entrant calls (after trailing flush overflow), it is
@@ -897,7 +900,7 @@ static iree_status_t iree_tokenizer_segmenter_split_state_finalize(
     if (self->is_literal) {
       // Literal mode: finalize handles partial matches and remaining input.
       iree_status_t finalize_status = iree_tokenizer_split_literal_finalize(
-          segmenter, self, remaining_input, chunk_base, &context);
+          segmenter, self, new_input, scan_base, &context);
       if (iree_status_is_resource_exhausted(finalize_status)) {
         // Output full - translate to emitter.full flag.
         iree_status_ignore(finalize_status);
@@ -907,11 +910,11 @@ static iree_status_t iree_tokenizer_segmenter_split_state_finalize(
       }
     } else {
       // Regex mode: feed remaining input through regex.
-      if (remaining_input.size > 0) {
+      if (new_input.size > 0) {
         iree_status_t feed_status = iree_tokenizer_regex_exec_feed(
-            &segmenter->regex.dfa, &self->regex_state, remaining_input,
-            chunk_base, segmenter->regex.stride,
-            iree_tokenizer_split_inline_callback, &context);
+            &segmenter->regex.dfa, &self->regex_state, new_input, scan_base,
+            segmenter->regex.stride, iree_tokenizer_split_inline_callback,
+            &context);
         if (iree_status_is_resource_exhausted(feed_status)) {
           // Output full during feed - preserve regex state for re-entry.
           iree_status_ignore(feed_status);
@@ -950,8 +953,8 @@ static iree_status_t iree_tokenizer_segmenter_split_state_finalize(
       self->has_pending = context.has_pending;
       self->pending_start = context.pending_start;
       self->pending_end = context.pending_end;
+      self->scan_end = input_end;
       self->finalize_feed_done = true;
-      self->deferred_to_finalize = false;  // Deferred regex work is done.
     }
   }
 
@@ -1017,8 +1020,10 @@ static iree_status_t iree_tokenizer_segmenter_split_state_finalize(
     self->last_emit_end = emitter.last_end;
     return iree_ok_status();
   }
-  // All phases complete. Advance bytes_processed and reset for potential reuse.
-  self->bytes_processed = input_end;
+  // All phases complete. Advance the retained-input origin and reset for
+  // potential reuse.
+  self->input_base = input_end;
+  self->scan_end = input_end;
   self->finalize_feed_done = false;
   return iree_ok_status();
 }
@@ -1038,10 +1043,7 @@ static bool iree_tokenizer_segmenter_split_state_has_pending(
     return true;
   }
 
-  // Check if process() capped consumed due to a pending regex match.
-  // The regex state was reset, but finalize() will re-scan the unconsumed
-  // bytes to emit the deferred match.
-  if (self->deferred_to_finalize) {
+  if (self->flush_pending) {
     return true;
   }
 
@@ -1051,16 +1053,6 @@ static bool iree_tokenizer_segmenter_split_state_has_pending(
   if (!self->is_literal && self->regex_state.in_match &&
       (self->regex_state.has_accept || self->regex_state.has_accept_fallback)) {
     return true;
-  }
-
-  // Check if finalize() will emit trailing data.
-  // In normal mode, trailing gaps (content) are emitted.
-  // In invert mode, trailing gaps (delimiters) are only emitted for ISOLATED.
-  if (self->last_emit_end < self->bytes_processed) {
-    bool emit_trailing =
-        !self->invert ||
-        self->behavior == IREE_TOKENIZER_UTIL_REGEX_SPLIT_ISOLATED;
-    return emit_trailing;
   }
 
   return false;
@@ -1107,6 +1099,7 @@ static iree_status_t iree_tokenizer_segmenter_split_state_flush(
     if (!iree_tokenizer_split_emit_result(&emitter, &result, true)) {
       *out_segment_count = emitter.count;
       *out_bytes_committed = emitter.last_end;
+      self->flush_pending = true;
       return iree_ok_status();
     }
 
@@ -1116,7 +1109,7 @@ static iree_status_t iree_tokenizer_segmenter_split_state_flush(
     self->pending_end = result.pending_end;
   }
 
-  // Emit trailing gap up to bytes_processed, like finalize does.
+  // Emit the trailing gap up to the scanned input end, like finalize does.
   // This ensures we commit all scanned bytes so the buffer can compact.
   // State updates are guarded per-emit for correctness of out_bytes_committed.
   //
@@ -1124,7 +1117,7 @@ static iree_status_t iree_tokenizer_segmenter_split_state_flush(
   bool emit_trailing_gap =
       !self->invert ||
       self->behavior == IREE_TOKENIZER_UTIL_REGEX_SPLIT_ISOLATED;
-  iree_host_size_t trailing_end = self->bytes_processed;
+  iree_host_size_t trailing_end = self->scan_end;
   if (!emitter.full && trailing_end > self->last_emit_end) {
     if (self->has_pending) {
       if (self->behavior == IREE_TOKENIZER_UTIL_REGEX_SPLIT_MERGED_WITH_NEXT) {
@@ -1171,6 +1164,7 @@ static iree_status_t iree_tokenizer_segmenter_split_state_flush(
   *out_segment_count = emitter.count;
   *out_bytes_committed = self->last_emit_end;
   if (emitter.full) {
+    self->flush_pending = true;
     return iree_ok_status();
   }
 
@@ -1185,8 +1179,10 @@ static iree_status_t iree_tokenizer_segmenter_split_state_flush(
   // Reset position tracking to 0. After flush, the tokenizer compacts the
   // buffer and refills from position 0, so our next process() call will
   // receive a fresh chunk at offset 0.
-  self->bytes_processed = 0;
+  self->input_base = 0;
+  self->scan_end = 0;
   self->last_emit_end = 0;
+  self->flush_pending = false;
 
   return iree_ok_status();
 }

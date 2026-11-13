@@ -1,0 +1,271 @@
+// RUN: pass canonicalize,cse,dce
+// A generated record carries its result predicate and dynamic input extent
+// through tensor creation and the kernel/reference comparison.
+#include <hip/hip_runtime.h>
+#include <loomcxx/check.h>
+#include <loomcxx/predicate.h>
+#include <loomcxx/view.h>
+
+struct ScheduledSumConfiguration {
+  // Per-row reduction extent.
+  unsigned columns;
+  // Logical element count used to construct the input tensor.
+  loom::type::index input_count;
+};
+
+LOOM_INLINE static ScheduledSumConfiguration make_configuration(
+    unsigned columns, unsigned input_count) {
+  return {columns, loom::index::cast(input_count)};
+}
+
+static ScheduledSumConfiguration scheduled_sum_configuration(
+    loom::check::ordinal trial) [[loom::where(loom::predicate::range(
+    loom::predicate::result<ScheduledSumConfiguration>().columns, 0u, 33u))]] {
+  unsigned trial_value = trial;
+  if (trial_value == 0u) {
+    return make_configuration(0u, 7u);
+  }
+  if (trial_value == 1u) {
+    return make_configuration(1u, 7u);
+  }
+  if (trial_value == 2u) {
+    return make_configuration(2u, 14u);
+  }
+  if (trial_value == 3u) {
+    return make_configuration(5u, 35u);
+  }
+  if (trial_value == 4u) {
+    return make_configuration(17u, 119u);
+  }
+  return make_configuration(33u, 231u);
+}
+
+__device__ __forceinline__ int sum(const int* input, unsigned row,
+                                   unsigned columns, unsigned factor,
+                                   unsigned depth) {
+  int total = 0;
+  [[loom::unroll(factor), loom::pipeline(depth), loom::schedule("linear")]]
+  for (unsigned column = 0; column < columns; ++column) {
+    total += input[row * columns + column];
+  }
+  return total;
+}
+
+__global__ [[loom::workgroup_size(64, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void scheduled_sum_unroll_3_depth_2(const int* input, int* output,
+                                   unsigned rows, unsigned columns) {
+  unsigned row = threadIdx.x;
+  if (row < rows) {
+    unsigned factor = 3 + 1u;
+    --factor;
+    unsigned depth = blockDim.x / 64u * 2;
+    output[row] = sum(input, row, columns, factor, depth);
+  }
+}
+
+static void scheduled_sum_oracle(loom::type::buffer<int> input,
+                                 loom::type::buffer<int> output, unsigned rows,
+                                 unsigned columns) {
+  loom::assume(rows == 7u);
+  loom::assume(columns <= 33u);
+  unsigned input_count = rows * columns;
+  auto input_extent = loom::index::cast(input_count);
+  auto output_values =
+      loom::buffer::view<7>(output, {}, loom::encoding::layout::dense<1>());
+  for (unsigned row = 0; row < rows; ++row) {
+    int total = 0;
+    for (unsigned column = 0; column < columns; ++column) {
+      unsigned position = row * columns + column;
+      auto input_position = loom::index::cast(position);
+      loom::assume(loom::predicate::lt(input_position, input_extent));
+      auto input_values = loom::buffer::view<loom::type::dynamic>(
+          input, loom::type::indices{input_extent},
+          loom::encoding::layout::dense<1>());
+      total += loom::view::load(input_values, input_position);
+    }
+    loom::view::store(total, output_values, row);
+  }
+}
+
+LOOM_CHECK_SCENARIO(scheduled_sum_values) {
+  loom::check::trial<6>([](loom::check::ordinal trial,
+                         loom::check::entropy entropy) {
+    const auto configuration =
+        loom::check::generate<scheduled_sum_configuration>(trial);
+    const auto input = loom::check::iota(configuration.input_count, -100, 37);
+    const auto storage = loom::check::fill<39, int>(-123);
+    const auto output = loom::check::slice<7>(storage, 16);
+    loom::check::compare<scheduled_sum_unroll_3_depth_2, scheduled_sum_oracle>(
+        input, output, 7u, configuration.columns, [&] {
+          loom::check::expect_bitwise(input, input);
+          loom::check::expect_bitwise(storage, storage);
+        });
+  });
+}
+
+// ----
+func.def public linkonce device inline @sum(%input: buffer, %input_byte_offset: offset, %row: i32, %columns: i32, %factor: i32, %depth: i32) -> (i32) {
+  %total$7 = scalar.constant 0 : i32
+  %170 = index.constant 0 : offset
+  %10 = index.cast %columns : i32 to offset
+  %11 = index.constant 1 : offset
+  %12 = scalar.extui %depth : i32 to i64
+  %13 = index.cast %12 : i64 to index
+  %14 = scalar.extui %factor : i32 to i64
+  %15 = index.cast %14 : i64 to index
+  %total$18 = scf.for %column = [%170 to %10 step %11](%total$17 = %total$7 : i32) -> (i32) pipeline(%13) unroll(%15) schedule(linear) {
+    %19 = index.cast %column : offset to i32
+    %20 = scalar.muli %row, %columns : i32
+    %21 = scalar.addi %20, %19 : i32
+    %22 = scalar.extui %21 : i32 to i64
+    %171 = scalar.constant 2 : i64
+    %172 = scalar.shli %22, %171 : i64
+    %25 = index.cast %input_byte_offset : offset to i64
+    %26 = scalar.addi %25, %172 : i64
+    %27 = scalar.assume %26 [range(%26, 0, 9223372036854775807)] : i64
+    %28 = index.cast %27 : i64 to offset
+    %29 = buffer.view %input[%28] : buffer -> view<1xi32>
+    %30 = view.load<root_in_bounds> %29[0] : view<1xi32> -> i32
+    %total$31 = scalar.addi %total$17, %30 : i32
+    scf.yield %total$31 : i32
+  }
+  func.return %total$18 : i32
+}
+
+kernel.def @scheduled_sum_unroll_3_depth_2() {
+  %36 = index.constant 1 : index
+  %39 = index.constant 64 : index
+  kernel.launch.config workgroups(%36, %36, %36) workgroup_size(%39, %36, %36) : index
+} launch(%input: buffer, %output: buffer, %rows: i32, %columns: i32) {
+  %input_byte_offset = index.constant 0 : offset
+  %workitem_id_x = kernel.workitem.id<x> : index
+  %row = index.cast %workitem_id_x : index to i32
+  %46 = scalar.cmpi ult, %row, %rows : i32
+  scf.if %46 {
+    %factor = scalar.constant 3 : i32
+    %depth = scalar.constant 2 : i32
+    %58 = func.call readonly @sum(%input, %input_byte_offset, %row, %columns, %factor, %depth) : (buffer, offset, i32, i32, i32, i32) -> (i32)
+    %59 = scalar.extui %row : i32 to i64
+    %176 = scalar.constant 2 : i64
+    %177 = scalar.shli %59, %176 : i64
+    %64 = scalar.assume %177 [range(%177, 0, 9223372036854775807)] : i64
+    %65 = index.cast %64 : i64 to offset
+    %66 = buffer.view %output[%65] : buffer -> view<1xi32>
+    view.store<root_in_bounds> %58, %66[0] : i32, view<1xi32>
+  }
+  kernel.return
+}
+
+check.scenario public @scheduled_sum_values {
+  check.trial[6](%trial: index, %entropy: check.entropy) {
+    %configuration_columns, %configuration_input_count = check.generate<@scheduled_sum_configuration>(%trial) : (index) -> (i32, index)
+    %input = check.generate.iota offset(-100) step(37) : tensor<[%configuration_input_count]xi32>
+    %storage = check.generate.fill value(-123) : tensor<39xi32>
+    %output = check.tensor.view %storage offset(64) : tensor<39xi32> -> tensor<7xi32>
+    %74 = check.literal value(7) : i32
+    check.compare<@scheduled_sum_unroll_3_depth_2, @scheduled_sum_oracle>(%input, %output, %74, %configuration_columns) : (tensor<[%configuration_input_count]xi32>, tensor<7xi32>, i32, i32) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<[%configuration_input_count]xi32>
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<39xi32>
+    }
+  }
+  check.return
+}
+
+func.def @scheduled_sum_configuration(%trial: index) -> (%76: i32, index) where [range(%76, 0, 33)] {
+  %78 = index.cast %trial : index to i64
+  %trial_value = scalar.trunci %78 : i64 to i32
+  %80 = scalar.constant 0 : i32
+  %81 = scalar.cmpi eq, %trial_value, %80 : i32
+  %82, %83 = scf.if %81 -> (i32, index) {
+    %85 = scalar.constant 7 : i32
+    %86, %87 = func.call pure @make_configuration(%80, %85) : (i32, i32) -> (i32, index)
+    scf.yield %86, %87 : i32, index
+  } else {
+    %178 = scalar.assume %trial_value [ne(%trial_value, 0)] : i32
+    %88 = scalar.constant 1 : i32
+    %89 = scalar.cmpi eq, %178, %88 : i32
+    %90, %91 = scf.if %89 -> (i32, index) {
+      %93 = scalar.constant 7 : i32
+      %94, %95 = func.call pure @make_configuration(%88, %93) : (i32, i32) -> (i32, index)
+      scf.yield %94, %95 : i32, index
+    } else {
+      %179 = scalar.assume %178 [ne(%178, 1)] : i32
+      %96 = scalar.constant 2 : i32
+      %97 = scalar.cmpi eq, %179, %96 : i32
+      %98, %99 = scf.if %97 -> (i32, index) {
+        %101 = scalar.constant 14 : i32
+        %102, %103 = func.call pure @make_configuration(%96, %101) : (i32, i32) -> (i32, index)
+        scf.yield %102, %103 : i32, index
+      } else {
+        %180 = scalar.assume %179 [ne(%179, 2)] : i32
+        %104 = scalar.constant 3 : i32
+        %105 = scalar.cmpi eq, %180, %104 : i32
+        %106, %107 = scf.if %105 -> (i32, index) {
+          %108 = scalar.constant 5 : i32
+          %109 = scalar.constant 35 : i32
+          %110, %111 = func.call pure @make_configuration(%108, %109) : (i32, i32) -> (i32, index)
+          scf.yield %110, %111 : i32, index
+        } else {
+          %181 = scalar.assume %180 [ne(%180, 3)] : i32
+          %112 = scalar.constant 4 : i32
+          %113 = scalar.cmpi eq, %181, %112 : i32
+          %114, %115 = scf.if %113 -> (i32, index) {
+            %116 = scalar.constant 17 : i32
+            %117 = scalar.constant 119 : i32
+            %118, %119 = func.call pure @make_configuration(%116, %117) : (i32, i32) -> (i32, index)
+            scf.yield %118, %119 : i32, index
+          } else {
+            %120 = scalar.constant 33 : i32
+            %121 = scalar.constant 231 : i32
+            %122, %123 = func.call pure @make_configuration(%120, %121) : (i32, i32) -> (i32, index)
+            scf.yield %122, %123 : i32, index
+          }
+          scf.yield %114, %115 : i32, index
+        }
+        scf.yield %106, %107 : i32, index
+      }
+      scf.yield %98, %99 : i32, index
+    }
+    scf.yield %90, %91 : i32, index
+  }
+  func.return %82, %83 : i32, index
+}
+
+func.def @scheduled_sum_oracle(%input: buffer, %output: buffer, %rows$126: i32, %columns$127: i32) {
+  %rows$185 = scalar.constant 7 : i32
+  %columns$129 = scalar.assume %columns$127 [range(%columns$127, 0, 33)] : i32
+  %input_count = scalar.muli %rows$185, %columns$129 : i32
+  %131 = scalar.extui %input_count : i32 to i64
+  %input_extent$132 = index.cast %131 : i64 to index
+  %134 = index.constant 0 : offset
+  %output_values = buffer.view %output[%134] : buffer -> view<7xi32>
+  %183 = index.constant 7 : offset
+  %139 = index.constant 1 : offset
+  scf.for %row = [%134 to %183 step %139] {
+    %141 = index.cast %row : offset to i32
+    %total$142 = scalar.constant 0 : i32
+    %145 = index.cast %columns$129 : i32 to offset
+    %total$149 = scf.for %column = [%134 to %145 step %139](%total$148 = %total$142 : i32) -> (i32) {
+      %150 = index.cast %column : offset to i32
+      %151 = scalar.muli %141, %columns$129 : i32
+      %position = scalar.addi %151, %150 : i32
+      %153 = scalar.extui %position : i32 to i64
+      %input_position$154 = index.cast %153 : i64 to index
+      %input_position$155, %input_extent = index.assume %input_position$154, %input_extent$132 [lt(%input_position$154, %input_extent$132)] : index, index
+      %input_values = buffer.view %input[%134] : buffer -> view<[%input_extent]xi32>
+      %160 = view.load %input_values[%input_position$155] : view<[%input_extent]xi32> -> i32
+      %total$161 = scalar.addi %total$148, %160 : i32
+      scf.yield %total$161 : i32
+    }
+    %162 = scalar.extui %141 : i32 to i64
+    %163 = index.cast %162 : i64 to index
+    view.store %total$149, %output_values[%163] : i32, view<7xi32>
+  }
+  func.return
+}
+
+func.def inline @make_configuration(%columns: i32, %input_count: i32) -> (i32, index) {
+  %168 = scalar.extui %input_count : i32 to i64
+  %169 = index.cast %168 : i64 to index
+  func.return %columns, %169 : i32, index
+}

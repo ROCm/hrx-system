@@ -106,18 +106,31 @@ loom_cc_library(
         "facts.c",
         "facts_bitwise.c",
         "facts_division.c",
+        "facts_extrema.c",
         "facts_modular.c",
         "float_facts.c",
+        "integer_cast.c",
     ],
     hdrs = [
         "facts.h",
         "float_facts.h",
+        "integer_cast.h",
     ],
     deps = [
         ":types",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
         "//runtime/src/iree/math",
+    ],
+)
+
+loom_cc_test(
+    name = "integer_cast_test",
+    srcs = ["integer_cast_test.cc"],
+    deps = [
+        ":facts",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 
@@ -130,6 +143,7 @@ loom_cc_test(
         "facts_division_test.cc",
         "facts_division_test_util.cc",
         "facts_division_test_util.h",
+        "facts_extrema_test.cc",
         "facts_modular_test.cc",
         "facts_refinement_test.cc",
         "facts_test.cc",
@@ -190,6 +204,7 @@ loom_cc_instance_library(
         "location.c",
         "location_compaction.c",
         "module.c",
+        "module_lifecycle.c",
         "module_record.c",
         "module_source.c",
         "type_dependencies.c",
@@ -276,6 +291,27 @@ loom_cc_test(
     deps = [
         ":ir",
         "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "input_contract",
+    srcs = ["input_contract.c"],
+    hdrs = ["input_contract.h"],
+    deps = [
+        ":builders",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "input_contract_test",
+    srcs = ["input_contract_test.cc"],
+    deps = [
+        ":builders",
+        ":input_contract",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

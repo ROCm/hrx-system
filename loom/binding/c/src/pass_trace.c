@@ -212,7 +212,8 @@ static iree_status_t loomc_pass_trace_project_snapshot(
   }
   return loom_target_function_versions_project_module(
       source_module, state->function_versions, state->block_pool,
-      source_module->allocator, /*out_versions=*/NULL, out_projected_module);
+      source_module->host_allocator, /*out_versions=*/NULL,
+      out_projected_module);
 }
 
 void loomc_pass_trace_state_initialize(

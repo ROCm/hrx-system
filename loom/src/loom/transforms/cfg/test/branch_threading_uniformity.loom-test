@@ -270,3 +270,101 @@ kernel.def @uniform_predecessor() {
 ^_bb4:
   kernel.return
 }
+
+// ====
+// RUN: pass scf-to-cfg,cfg-simplify,cfg-converge
+
+// A uniform selector retains its control owner under partial participation.
+// Both known-false and known-true incoming paths must reach that decision
+// before entering its arms; the surrounding lane guard stays intact.
+kernel.def @partial_uniform_choices() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%mode: i32) {
+  %c0 = scalar.constant 0 : i32
+  %c1 = scalar.constant 1 : i32
+  %c2 = scalar.constant 2 : i32
+  %limit = index.constant 37 : index
+  %lane = kernel.workitem.id<x> : index
+  %active = index.cmp ult, %lane, %limit : index
+  scf.if %active {
+    %guarded = scalar.cmpi eq, %mode, %c1 : i32
+    %skip = scf.if %guarded -> (i1) {
+      %value = index.cast %lane : index to i32
+      %bit = scalar.andi %value, %c1 : i32
+      %odd = scalar.cmpi ne, %bit, %c0 : i32
+      scf.yield %odd : i1
+    } else {
+      scf.yield %guarded : i1
+    }
+    scf.if %skip {
+      test.use %c0 : i32
+    } else {
+      %packed = scalar.cmpi eq, %mode, %c2 : i32
+      scf.if %packed {
+        test.use %c2 : i32
+      } else {
+        test.use %c1 : i32
+      }
+      %dense = scalar.cmpi ne, %mode, %c2 : i32
+      scf.if %dense {
+        test.use %lane : index
+      } else {
+        test.use %c0 : i32
+      }
+    }
+  }
+  kernel.return
+}
+
+// ----
+kernel.def @partial_uniform_choices() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%mode: i32) {
+  %c0 = scalar.constant 0 : i32
+  %c1 = scalar.constant 1 : i32
+  %c2 = scalar.constant 2 : i32
+  %limit = index.constant 37 : index
+  %lane = kernel.workitem.id<x> : index
+  %active = index.cmp ult, %lane, %limit : index
+  cfg.cond_br %active, ^_bb1, ^_bb12
+^_bb1:
+  %guarded = scalar.cmpi eq, %mode, %c1 : i32
+  cfg.cond_br %guarded, ^_bb2, ^_bb3
+^_bb2:
+  %value = index.cast %lane : index to i32
+  %bit = scalar.andi %value, %c1 : i32
+  %odd = scalar.cmpi ne, %bit, %c0 : i32
+  cfg.br ^_bb4(%odd: i1)
+^_bb3:
+  %18 = scalar.constant 0 : i1
+  cfg.br ^_bb4(%18: i1)
+^_bb4(%17: i1):
+  cfg.cond_br %17, ^_bb5, ^_bb6
+^_bb5:
+  test.use %c0 : i32
+  cfg.br ^_bb12
+^_bb6:
+  %packed = scalar.cmpi eq, %mode, %c2 : i32
+  cfg.cond_br %packed, ^_bb7, ^_bb8
+^_bb7:
+  test.use %c2 : i32
+  cfg.br ^_bb9
+^_bb8:
+  test.use %c1 : i32
+  cfg.br ^_bb9
+^_bb9:
+  %dense = scalar.cmpi ne, %mode, %c2 : i32
+  cfg.cond_br %dense, ^_bb10, ^_bb11
+^_bb10:
+  test.use %lane : index
+  cfg.br ^_bb12
+^_bb11:
+  test.use %c0 : i32
+  cfg.br ^_bb12
+^_bb12:
+  kernel.return
+}

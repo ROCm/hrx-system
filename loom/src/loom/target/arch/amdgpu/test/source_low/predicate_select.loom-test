@@ -95,47 +95,95 @@ low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @predicate_scf_select_r
 
 // ====
 
-func.def @predicate_scf_select_uniform(%selector: i32, %true_value: vector<4xi1>, %false_value: vector<4xi1>) -> (vector<4xi1>) {
+kernel.def @predicate_scf_select_uniform() {
+  %launch_unit = index.constant 1 : index
+  %launch_width = index.constant 64 : index
+  kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
+} launch(%selector: i32, %true_value_buffer: buffer, %false_value_buffer: buffer, %result_buffer_0: buffer) {
+  %fixture_base = index.constant 0 : offset
+  %fixture_lane = kernel.workitem.id<x> : index
+  %true_value_view = buffer.view %true_value_buffer[%fixture_base] : buffer -> view<64x4xi8>
+  %true_value_bits = vector.load %true_value_view[%fixture_lane, 0] : view<64x4xi8> -> vector<4xi8>
+  %true_value = vector.trunci %true_value_bits : vector<4xi8> to vector<4xi1>
+  %false_value_view = buffer.view %false_value_buffer[%fixture_base] : buffer -> view<64x4xi8>
+  %false_value_bits = vector.load %false_value_view[%fixture_lane, 0] : view<64x4xi8> -> vector<4xi8>
+  %false_value = vector.trunci %false_value_bits : vector<4xi8> to vector<4xi1>
+  %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<64x4xi8>
   %c0 = scalar.constant 0 : i32
   %condition = scalar.cmpi ne, %selector, %c0 : i32
   %selected = scf.select %condition, %true_value, %false_value : vector<4xi1>
-  func.return %selected : vector<4xi1>
+  %result_bits_1_0 = vector.extui %selected : vector<4xi1> to vector<4xi8>
+  vector.store %result_bits_1_0, %result_view_0[%fixture_lane, 0] : vector<4xi8>, view<64x4xi8>
+  kernel.return
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @predicate_scf_select_uniform(%selector: reg<amdgpu.sgpr>, %true_value: reg<amdgpu.sgpr x8>, %false_value: reg<amdgpu.sgpr x8>) -> (reg<amdgpu.sgpr x8>) asm {
-  %c0 = s_mov_b32 0
-  %condition = s_cmp_lg_i32 %selector, %c0
-  %65 = slice %true_value[0] : reg<amdgpu.sgpr x8> -> reg<amdgpu.sgpr>
-  %64 = slice %false_value[0] : reg<amdgpu.sgpr x8> -> reg<amdgpu.sgpr>
-  %17 = s_cselect_b32 %65, %64, %condition
-  %63 = slice %true_value[1] : reg<amdgpu.sgpr x8> -> reg<amdgpu.sgpr>
-  %62 = slice %false_value[1] : reg<amdgpu.sgpr x8> -> reg<amdgpu.sgpr>
-  %20 = s_cselect_b32 %63, %62, %condition
-  %21 = concat(%17, %20) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %61 = slice %true_value[2] : reg<amdgpu.sgpr x8> -> reg<amdgpu.sgpr>
-  %60 = slice %false_value[2] : reg<amdgpu.sgpr x8> -> reg<amdgpu.sgpr>
-  %26 = s_cselect_b32 %61, %60, %condition
-  %59 = slice %true_value[3] : reg<amdgpu.sgpr x8> -> reg<amdgpu.sgpr>
-  %58 = slice %false_value[3] : reg<amdgpu.sgpr x8> -> reg<amdgpu.sgpr>
-  %29 = s_cselect_b32 %59, %58, %condition
-  %30 = concat(%26, %29) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %57 = slice %true_value[4] : reg<amdgpu.sgpr x8> -> reg<amdgpu.sgpr>
-  %56 = slice %false_value[4] : reg<amdgpu.sgpr x8> -> reg<amdgpu.sgpr>
-  %35 = s_cselect_b32 %57, %56, %condition
-  %55 = slice %true_value[5] : reg<amdgpu.sgpr x8> -> reg<amdgpu.sgpr>
-  %54 = slice %false_value[5] : reg<amdgpu.sgpr x8> -> reg<amdgpu.sgpr>
-  %38 = s_cselect_b32 %55, %54, %condition
-  %39 = concat(%35, %38) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %53 = slice %true_value[6] : reg<amdgpu.sgpr x8> -> reg<amdgpu.sgpr>
-  %52 = slice %false_value[6] : reg<amdgpu.sgpr x8> -> reg<amdgpu.sgpr>
-  %44 = s_cselect_b32 %53, %52, %condition
-  %51 = slice %true_value[7] : reg<amdgpu.sgpr x8> -> reg<amdgpu.sgpr>
-  %50 = slice %false_value[7] : reg<amdgpu.sgpr x8> -> reg<amdgpu.sgpr>
-  %47 = s_cselect_b32 %51, %50, %condition
-  %48 = concat(%44, %47) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %selected = concat(%21, %30, %39, %48) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>) -> reg<amdgpu.sgpr x8>
-  return %selected
+low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "selector"}, direct_arg_offsets = [0], direct_arg_parameter_indices = [0], direct_arg_sizes = [4], parameter_count = 4, resource_count = 3, resource_offsets = [8, 16, 24], resource_parameter_indices = [1, 2, 3], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @predicate_scf_select_uniform(%selector: reg<amdgpu.sgpr>) asm {
+  %fixture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %true_value_view = resource<hal_binding> {extent = 256, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %false_value_view = resource<hal_binding> {extent = 256, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %result_view_0 = resource<hal_binding> {extent = 256, index = 2, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %164 = v_lshlrev_b32_src0_inline %fixture_lane, 2
+  %true_value_bits = global_load_b32_saddr %164, %true_value_view
+  %166 = v_and_b32_lit %true_value_bits, 255
+  %167 = v_and_b32_src0_inline %166, 1
+  %168 = v_and_b32_lit %167, 255
+  %169 = v_cmp_ne_i32_src1_inline %168 {rhs = 0}
+  %170 = v_bfe_u32_offset_width_inline %true_value_bits {offset = 8, width = 8}
+  %171 = v_and_b32_src0_inline %170, 1
+  %172 = v_and_b32_lit %171, 255
+  %173 = v_cmp_ne_i32_src1_inline %172 {rhs = 0}
+  %174 = v_bfe_u32_offset_width_inline %true_value_bits {offset = 16, width = 8}
+  %175 = v_and_b32_src0_inline %174, 1
+  %176 = v_and_b32_lit %175, 255
+  %177 = v_cmp_ne_i32_src1_inline %176 {rhs = 0}
+  %178 = v_bfe_u32_offset_width_inline %true_value_bits {offset = 24, width = 8}
+  %179 = v_and_b32_src0_inline %178, 1
+  %180 = v_and_b32_lit %179, 255
+  %181 = v_cmp_ne_i32_src1_inline %180 {rhs = 0}
+  %false_value_bits = global_load_b32_saddr %164, %false_value_view
+  %185 = v_and_b32_lit %false_value_bits, 255
+  %186 = v_and_b32_src0_inline %185, 1
+  %187 = v_and_b32_lit %186, 255
+  %188 = v_cmp_ne_i32_src1_inline %187 {rhs = 0}
+  %189 = v_bfe_u32_offset_width_inline %false_value_bits {offset = 8, width = 8}
+  %190 = v_and_b32_src0_inline %189, 1
+  %191 = v_and_b32_lit %190, 255
+  %192 = v_cmp_ne_i32_src1_inline %191 {rhs = 0}
+  %193 = v_bfe_u32_offset_width_inline %false_value_bits {offset = 16, width = 8}
+  %194 = v_and_b32_src0_inline %193, 1
+  %195 = v_and_b32_lit %194, 255
+  %196 = v_cmp_ne_i32_src1_inline %195 {rhs = 0}
+  %197 = v_bfe_u32_offset_width_inline %false_value_bits {offset = 24, width = 8}
+  %198 = v_and_b32_src0_inline %197, 1
+  %199 = v_and_b32_lit %198, 255
+  %200 = v_cmp_ne_i32_src1_inline %199 {rhs = 0}
+  %condition = v_cmp_ne_i32_src1_inline %selector {rhs = 0}
+  %203 = s_mov_b64_exec_read
+  %204 = s_xor_b64 %condition, %203
+  %206 = s_and_b64 %condition, %169
+  %208 = s_and_b64 %204, %188
+  %209 = s_or_b64 %206, %208
+  %211 = s_and_b64 %condition, %173
+  %213 = s_and_b64 %204, %192
+  %214 = s_or_b64 %211, %213
+  %216 = s_and_b64 %condition, %177
+  %218 = s_and_b64 %204, %196
+  %219 = s_or_b64 %216, %218
+  %221 = s_and_b64 %condition, %181
+  %223 = s_and_b64 %204, %200
+  %224 = s_or_b64 %221, %223
+  %226 = v_mov_b32 16843009
+  %227 = v_mov_b32 0
+  %229 = v_cndmask_b32 %227, %226, %209
+  %231 = v_cndmask_b32 %227, %226, %214
+  %232 = v_bfi_b32_src0_lit %231, %229, 65280
+  %234 = v_cndmask_b32 %227, %226, %219
+  %235 = v_bfi_b32_src0_lit %234, %232, 16711680
+  %237 = v_cndmask_b32 %227, %226, %224
+  %result_bits_1_0 = v_bfi_b32_src0_lit %237, %235, 4278190080
+  global_store_b32_saddr %164, %result_bits_1_0, %result_view_0
+  return
 }
 
 // ====
@@ -148,16 +196,8 @@ func.def @predicate_scf_select_constants_max(%condition: i1) -> (vector<32xi1>) 
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @predicate_scf_select_constants_max(%condition: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr x64>) asm {
-  %13 = s_cmp_lg_i32_src1_inline %condition {rhs = 0}
-  %14 = s_mov_b64_exec_read
-  %15 = s_mov_b32 0
-  %18 = slice %14[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %20 = s_cselect_b32 %18, %15, %13
-  %21 = slice %14[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %23 = s_cselect_b32 %21, %15, %13
-  %24 = concat(%20, %23) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %selected = concat(%24, %24, %24, %24, %24, %24, %24, %24, %24, %24, %24, %24, %24, %24, %24, %24, %24, %24, %24, %24, %24, %24, %24, %24, %24, %24, %24, %24, %24, %24, %24, %24) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>) -> reg<amdgpu.sgpr x64>
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @predicate_scf_select_constants_max(%condition: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr x64>) asm {
+  %selected = concat(%condition, %condition, %condition, %condition, %condition, %condition, %condition, %condition, %condition, %condition, %condition, %condition, %condition, %condition, %condition, %condition, %condition, %condition, %condition, %condition, %condition, %condition, %condition, %condition, %condition, %condition, %condition, %condition, %condition, %condition, %condition, %condition) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>) -> reg<amdgpu.sgpr x64>
   return %selected
 }
 

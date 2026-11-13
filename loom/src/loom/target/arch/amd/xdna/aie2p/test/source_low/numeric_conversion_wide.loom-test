@@ -20,8 +20,36 @@ func.def @vector_fptrunc_bf16x32(%input: vector<32xf32>) -> (vector<32xbf16>) {
 
 // ----
 low.func.def target<amd.xdna.aie2p.core> abi(object_function) @vector_fptrunc_bf16x32(%input: reg<aie2p.mbms x2>) -> (reg<aie2p.vec256 x2>) asm {
+  %5 = slice %input[0] : reg<aie2p.mbms x2> -> reg<aie2p.mbms>
+  %6 = vmov.accumulator512.to.vector512 %5
+  %7 = slice %input[1] : reg<aie2p.mbms x2> -> reg<aie2p.mbms>
+  %8 = vmov.accumulator512.to.vector512 %7
+  %9 = mov.i32 2147483647
+  %10 = vbcst.32 %9
+  %11 = mov.i32 2139095040
+  %12 = vbcst.32 %11
+  %13 = mov.i32 32704
+  %14 = vbcst.16 %13
   set.rounding 12
-  %converted = vconv.bf16.fp32 %input
+  %15 = slice %6[1] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %16 = vmov.vector512.to.accumulator512 %6
+  %17 = vconv.bf16.fp32x16 %16
+  %18 = concat(%17, %15) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %19 = vband %6, %10
+  %20 = vlt.u32x16.el.low32 %12, %19
+  %21 = predicate.complete.zero.high32 %20, 0
+  %22 = vsel.16.mask64 %18, %14, %21
+  %23 = slice %8[1] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %24 = vmov.vector512.to.accumulator512 %8
+  %25 = vconv.bf16.fp32x16 %24
+  %26 = concat(%25, %23) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %27 = vband %8, %10
+  %28 = vlt.u32x16.el.low32 %12, %27
+  %29 = predicate.complete.zero.high32 %28, 0
+  %30 = vsel.16.mask64 %26, %14, %29
+  %31 = slice %22[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %32 = slice %30[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %converted = concat(%31, %32) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
   return %converted
 }
 

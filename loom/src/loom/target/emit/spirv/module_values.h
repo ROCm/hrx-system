@@ -33,20 +33,25 @@ typedef struct loom_spirv_module_value_ref_t {
   loom_spirv_value_type_t value_type;
 } loom_spirv_module_value_ref_t;
 
+typedef struct loom_spirv_module_value_segment_t
+    loom_spirv_module_value_segment_t;
+
 typedef struct loom_spirv_module_value_table_t {
   // Function-local value domain that owns the dense ordinal map.
   const loom_local_value_domain_t* value_domain;
-  // SPIR-V refs indexed by function-local value ordinal.
-  loom_spirv_module_value_ref_t* refs;
-  // Number of entries in refs.
+  // Compact SPIR-V refs indexed by function-local value ordinal segments.
+  loom_spirv_module_value_segment_t** ref_segments;
+  // Number of entries covered by ref_segments.
   iree_host_size_t ref_count;
+  // Number of initialized ref_segments.
+  iree_host_size_t ref_segment_count;
 } loom_spirv_module_value_table_t;
 
 // Initializes a zeroed value-ref table covering every value in |value_domain|.
 iree_status_t loom_spirv_module_value_table_initialize(
     const loom_local_value_domain_t* value_domain,
-    loom_spirv_module_value_table_t* out_table,
-    iree_arena_allocator_t* scratch_arena);
+    iree_arena_allocator_t* scratch_arena,
+    loom_spirv_module_value_table_t* out_table);
 
 // Defines |value_id| as |value_ref|.
 //

@@ -55,7 +55,7 @@ iree_status_t loom_aie2p_configuration_report_allocate(
                   LOOM_TARGET_COMPILE_REPORT_PIPELINE_FACT_PROGRAMS |
                   LOOM_TARGET_COMPILE_REPORT_PIPELINE_FACT_MEMORY,
           },
-      .memory_count = column_count * family->row_count,
+      .memory_count = (iree_host_size_t)column_count * family->row_count,
   };
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, report->memory_count,
                                                  sizeof(*report->memories),

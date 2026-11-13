@@ -18,11 +18,11 @@ struct loom_serve_text_capture_t {
   // Exact concatenated output length in bytes.
   iree_host_size_t length;
   // Retained submission domain and shared pool, independent of the model.
-  loom_serve_execution_t* execution;
+  loom_runtime_execution_t* execution;
   // Owned allocation root, not a model-retirement-tracked view.
   iree_hal_buffer_t* buffer;
   // Accepted gather frontier, whose semaphores are owned by execution.
-  loom_serve_execution_frontier_t ready;
+  loom_runtime_execution_frontier_t ready;
   // Destination span ranges followed by source residual ranges.
   iree_hal_buffer_range_t ranges[];
 };
@@ -33,7 +33,7 @@ struct loom_serve_text_capture_snapshot_t {
   // Owns this header, copied ranges, and downloaded bytes together.
   iree_allocator_t host_allocator;
   // Retained domain and source-pool ownership, independent of the model.
-  loom_serve_execution_t* execution;
+  loom_runtime_execution_t* execution;
   // Number of span ranges preceding downloaded payload bytes.
   iree_host_size_t span_count;
   // Copied destination ranges followed by exact downloaded payload bytes.
@@ -109,18 +109,18 @@ iree_status_t loom_serve_text_capture_create(
   return status;
 }
 
-iree_status_t loom_serve_text_capture_submit(loom_serve_text_capture_t* capture,
-                                             loom_serve_execution_t* execution,
-                                             iree_hal_buffer_t* residual) {
+iree_status_t loom_serve_text_capture_submit(
+    loom_serve_text_capture_t* capture, loom_runtime_execution_t* execution,
+    iree_hal_buffer_t* residual) {
   capture->execution = execution;
-  loom_serve_execution_retain(execution);
+  loom_runtime_execution_retain(execution);
   IREE_RETURN_IF_ERROR(
-      loom_serve_execution_reserve_workspace(execution, capture->length, 1));
+      loom_runtime_execution_reserve_workspace(execution, capture->length, 1));
   const iree_hal_pool_reservation_request_t request = {
       .allocation_size = capture->length, .min_alignment = 1};
   iree_hal_buffer_t* output = NULL;
   IREE_RETURN_IF_ERROR(
-      loom_serve_execution_alloca(execution, 1, &request, &output));
+      loom_runtime_execution_alloca(execution, 1, &request, &output));
   capture->buffer = iree_hal_buffer_allocated_buffer(output);
   iree_hal_buffer_retain(capture->buffer);
   iree_hal_transfer_operation_t operations[64];
@@ -141,17 +141,17 @@ iree_status_t loom_serve_text_capture_submit(loom_serve_text_capture_t* capture,
                  .length = range.byte_length}};
     offset += range.byte_length;
     if (operation_count == IREE_ARRAYSIZE(operations)) {
-      status = loom_serve_execution_transfer(execution, operation_count,
-                                             operations, &completion);
+      status = loom_runtime_execution_transfer(execution, operation_count,
+                                               operations, &completion);
       operation_count = 0;
     }
   }
   if (iree_status_is_ok(status) && operation_count) {
-    status = loom_serve_execution_transfer(execution, operation_count,
-                                           operations, &completion);
+    status = loom_runtime_execution_transfer(execution, operation_count,
+                                             operations, &completion);
   }
   iree_hal_buffer_release(output);
-  capture->ready = loom_serve_execution_frontier(execution);
+  capture->ready = loom_runtime_execution_frontier(execution);
   return status;
 }
 
@@ -164,12 +164,12 @@ void loom_serve_text_capture_retain(loom_serve_text_capture_t* capture) {
 void loom_serve_text_capture_release(loom_serve_text_capture_t* capture) {
   if (capture && iree_atomic_ref_count_dec(&capture->ref_count) == 1) {
     iree_hal_buffer_release(capture->buffer);
-    loom_serve_execution_release(capture->execution);
+    loom_runtime_execution_release(capture->execution);
     iree_allocator_free(capture->host_allocator, capture);
   }
 }
 
-loom_serve_execution_frontier_t loom_serve_text_capture_ready(
+loom_runtime_execution_frontier_t loom_serve_text_capture_ready(
     const loom_serve_text_capture_t* capture) {
   return capture->ready;
 }
@@ -184,7 +184,7 @@ iree_hal_buffer_ref_t loom_serve_text_capture_span(
 void loom_serve_text_capture_snapshot_release(
     loom_serve_text_capture_snapshot_t* snapshot) {
   if (snapshot && iree_atomic_ref_count_dec(&snapshot->ref_count) == 1) {
-    loom_serve_execution_release(snapshot->execution);
+    loom_runtime_execution_release(snapshot->execution);
     iree_allocator_free(snapshot->host_allocator, snapshot);
   }
 }
@@ -197,9 +197,9 @@ static void loom_serve_text_capture_snapshot_retired(
 iree_status_t loom_serve_text_capture_download(
     loom_serve_text_capture_t* capture,
     loom_serve_text_capture_snapshot_t** out_snapshot,
-    loom_serve_execution_frontier_t* out_frontier) {
+    loom_runtime_execution_frontier_t* out_frontier) {
   *out_snapshot = NULL;
-  *out_frontier = (loom_serve_execution_frontier_t){0};
+  *out_frontier = (loom_runtime_execution_frontier_t){0};
   const iree_host_size_t range_bytes =
       capture->span_count * sizeof(iree_hal_buffer_range_t);
   iree_host_size_t allocation_size = 0;
@@ -216,7 +216,7 @@ iree_status_t loom_serve_text_capture_download(
   iree_atomic_ref_count_init(&snapshot->ref_count);
   snapshot->host_allocator = capture->host_allocator;
   snapshot->execution = capture->execution;
-  loom_serve_execution_retain(snapshot->execution);
+  loom_runtime_execution_retain(snapshot->execution);
   snapshot->span_count = capture->span_count;
   memcpy(snapshot->ranges, capture->ranges, range_bytes);
   iree_hal_buffer_t* source = NULL;
@@ -233,13 +233,13 @@ iree_status_t loom_serve_text_capture_download(
                      .target = snapshot->ranges + snapshot->span_count,
                      .length = capture->length}};
     uint64_t value = 0;
-    status =
-        loom_serve_execution_feedback(capture->execution, 1, &download, &value);
+    status = loom_runtime_execution_feedback(capture->execution, 1, &download,
+                                             &value);
   }
   iree_hal_buffer_release(source);
   if (iree_status_is_ok(status)) {
     *out_snapshot = snapshot;
-    *out_frontier = loom_serve_execution_frontier(capture->execution);
+    *out_frontier = loom_runtime_execution_frontier(capture->execution);
   } else {
     loom_serve_text_capture_snapshot_release(snapshot);
   }

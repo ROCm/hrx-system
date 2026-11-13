@@ -1,0 +1,180 @@
+// RUN: pass canonicalize
+
+// Runtime widths retain their power-of-two guarantee without an authored
+// predicate on the computed result. Both right-shift spellings retain it too.
+func.def @index_widths(%input: index) -> (i1, i1, i1) {
+  %amount = index.assume %input [range(%input, 0, 4)] : index
+  %unit = index.constant 1 : index
+  %large = index.constant 128 : index
+  %left = index.shli %unit, %amount : index
+  %logical = index.shrui %large, %amount : index
+  %signed = index.shrsi %large, %amount : index
+  %left_power = test.fact_power_of_two %left : index -> i1
+  %logical_power = test.fact_power_of_two %logical : index -> i1
+  %signed_power = test.fact_power_of_two %signed : index -> i1
+  func.return %left_power, %logical_power, %signed_power : i1, i1, i1
+}
+
+// ----
+func.def @index_widths(%input: index) -> (i1, i1, i1) {
+  %left_power = scalar.constant true : i1
+  %logical_power = scalar.constant true : i1
+  %signed_power = scalar.constant true : i1
+  func.return %left_power, %logical_power, %signed_power : i1, i1, i1
+}
+
+// ====
+
+func.def @narrow_widths(%input: i8) -> (i1, i1, i1) {
+  %amount = scalar.assume %input [range(%input, 0, 5)] : i8
+  %unit = scalar.constant 1 : i8
+  %large = scalar.constant 64 : i8
+  %left = scalar.shli %unit, %amount : i8
+  %logical = scalar.shrui %large, %amount : i8
+  %signed = scalar.shrsi %large, %amount : i8
+  %left_power = test.fact_power_of_two %left : i8 -> i1
+  %logical_power = test.fact_power_of_two %logical : i8 -> i1
+  %signed_power = test.fact_power_of_two %signed : i8 -> i1
+  func.return %left_power, %logical_power, %signed_power : i1, i1, i1
+}
+
+// ----
+func.def @narrow_widths(%input: i8) -> (i1, i1, i1) {
+  %left_power = scalar.constant true : i1
+  %logical_power = scalar.constant true : i1
+  %signed_power = scalar.constant true : i1
+  func.return %left_power, %logical_power, %signed_power : i1, i1, i1
+}
+
+// ====
+
+func.def @wide_widths(%input: i64) -> (i1, i1, i1) {
+  %amount = scalar.assume %input [range(%input, 1, 4)] : i64
+  %unit = scalar.constant 1 : i64
+  %large = scalar.constant 4611686018427387904 : i64
+  %left = scalar.shli %unit, %amount : i64
+  %logical = scalar.shrui %large, %amount : i64
+  %signed = scalar.shrsi %large, %amount : i64
+  %left_power = test.fact_power_of_two %left : i64 -> i1
+  %logical_power = test.fact_power_of_two %logical : i64 -> i1
+  %signed_power = test.fact_power_of_two %signed : i64 -> i1
+  func.return %left_power, %logical_power, %signed_power : i1, i1, i1
+}
+
+// ----
+func.def @wide_widths(%input: i64) -> (i1, i1, i1) {
+  %left_power = scalar.constant true : i1
+  %logical_power = scalar.constant true : i1
+  %signed_power = scalar.constant true : i1
+  func.return %left_power, %logical_power, %signed_power : i1, i1, i1
+}
+
+// ====
+
+// The guarantee may originate in a public input contract, not just a constant.
+func.def @constrained_power(%input: i32, %shift: i32) -> (i1, i1, i1) {
+  %source = scalar.assume %input [range(%input, 4, 16), power_of_two(%input)] : i32
+  %amount = scalar.assume %shift [range(%shift, 0, 2)] : i32
+  %left = scalar.shli %source, %amount : i32
+  %logical = scalar.shrui %source, %amount : i32
+  %signed = scalar.shrsi %source, %amount : i32
+  %left_power = test.fact_power_of_two %left : i32 -> i1
+  %logical_power = test.fact_power_of_two %logical : i32 -> i1
+  %signed_power = test.fact_power_of_two %signed : i32 -> i1
+  func.return %left_power, %logical_power, %signed_power : i1, i1, i1
+}
+
+// ----
+func.def @constrained_power(%input: i32, %shift: i32) -> (i1, i1, i1) {
+  %left_power = scalar.constant true : i1
+  %logical_power = scalar.constant true : i1
+  %signed_power = scalar.constant true : i1
+  func.return %left_power, %logical_power, %signed_power : i1, i1, i1
+}
+
+// ====
+
+// Each vector lane uses the shared numeric transfer with its own runtime shift.
+func.def @vector_widths(%input: vector<4xi16>) -> (i1, i1, i1) {
+  %mask = vector.splati 3 : vector<4xi16>
+  %amount = vector.andi %input, %mask : vector<4xi16>
+  %source = vector.splati 16 : vector<4xi16>
+  %left = vector.shli %source, %amount : vector<4xi16>
+  %logical = vector.shrui %source, %amount : vector<4xi16>
+  %signed = vector.shrsi %source, %amount : vector<4xi16>
+  %left_lane = vector.extract %left[0] : vector<4xi16> -> i16
+  %logical_lane = vector.extract %logical[1] : vector<4xi16> -> i16
+  %signed_lane = vector.extract %signed[2] : vector<4xi16> -> i16
+  %left_power = test.fact_power_of_two %left_lane : i16 -> i1
+  %logical_power = test.fact_power_of_two %logical_lane : i16 -> i1
+  %signed_power = test.fact_power_of_two %signed_lane : i16 -> i1
+  func.return %left_power, %logical_power, %signed_power : i1, i1, i1
+}
+
+// ----
+func.def @vector_widths(%input: vector<4xi16>) -> (i1, i1, i1) {
+  %left_power = scalar.constant true : i1
+  %logical_power = scalar.constant true : i1
+  %signed_power = scalar.constant true : i1
+  func.return %left_power, %logical_power, %signed_power : i1, i1, i1
+}
+
+// ====
+
+// Independent lane summaries retain the guarantee only where every admitted
+// shift preserves a positive result.
+func.def @independent_vector_widths(%input: vector<4xi16>) -> (i1, i1, i1, i1) {
+  %masks = vector.constanti [1, 3, 7, 15] : vector<4xi16>
+  %amounts = vector.andi %input, %masks : vector<4xi16>
+  %source = vector.splati 16 : vector<4xi16>
+  %left = vector.shli %source, %amounts : vector<4xi16>
+  %logical = vector.shrui %source, %amounts : vector<4xi16>
+  %signed = vector.shrsi %source, %amounts : vector<4xi16>
+  %left_lane = vector.extract %left[0] : vector<4xi16> -> i16
+  %wrapped_lane = vector.extract %left[3] : vector<4xi16> -> i16
+  %discarded_lane = vector.extract %logical[2] : vector<4xi16> -> i16
+  %signed_lane = vector.extract %signed[1] : vector<4xi16> -> i16
+  %left_power = test.fact_power_of_two %left_lane : i16 -> i1
+  %wrapped_power = test.fact_power_of_two %wrapped_lane : i16 -> i1
+  %discarded_power = test.fact_power_of_two %discarded_lane : i16 -> i1
+  %signed_power = test.fact_power_of_two %signed_lane : i16 -> i1
+  func.return %left_power, %wrapped_power, %discarded_power, %signed_power : i1, i1, i1, i1
+}
+
+// ----
+func.def @independent_vector_widths(%input: vector<4xi16>) -> (i1, i1, i1, i1) {
+  %left_power = scalar.constant true : i1
+  %wrapped_power = scalar.constant false : i1
+  %discarded_power = scalar.constant false : i1
+  %signed_power = scalar.constant true : i1
+  func.return %left_power, %wrapped_power, %discarded_power, %signed_power : i1, i1, i1, i1
+}
+
+// ====
+
+// Shifting into the sign bit or discarding the last set bit loses the positive
+// power-of-two guarantee. Narrow wrapping must not retain a wider promise.
+func.def @lost_power(%input: i8, %wide_input: i64) -> (i1, i1, i1, i1) {
+  %amount = scalar.assume %input [range(%input, 0, 7)] : i8
+  %wide_amount = scalar.assume %wide_input [range(%wide_input, 62, 63)] : i64
+  %unit = scalar.constant 1 : i8
+  %wide_unit = scalar.constant 1 : i64
+  %left = scalar.shli %unit, %amount : i8
+  %logical = scalar.shrui %unit, %amount : i8
+  %signed = scalar.shrsi %unit, %amount : i8
+  %wide_left = scalar.shli %wide_unit, %wide_amount : i64
+  %left_power = test.fact_power_of_two %left : i8 -> i1
+  %logical_power = test.fact_power_of_two %logical : i8 -> i1
+  %signed_power = test.fact_power_of_two %signed : i8 -> i1
+  %wide_power = test.fact_power_of_two %wide_left : i64 -> i1
+  func.return %left_power, %logical_power, %signed_power, %wide_power : i1, i1, i1, i1
+}
+
+// ----
+func.def @lost_power(%input: i8, %wide_input: i64) -> (i1, i1, i1, i1) {
+  %left_power = scalar.constant false : i1
+  %logical_power = scalar.constant false : i1
+  %signed_power = scalar.constant false : i1
+  %wide_power = scalar.constant false : i1
+  func.return %left_power, %logical_power, %signed_power, %wide_power : i1, i1, i1, i1
+}

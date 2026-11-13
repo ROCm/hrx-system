@@ -4,6 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
 load("//loom/build_tools/bazel:loom_check.bzl", "loom_check_test_suite")
 
 package(
@@ -20,6 +21,7 @@ loom_check_test_suite(
         "buffer_selection.loom-test",
         "callable_values.loom-test",
         "carried_counter_store.loom-test",
+        "carried_view_address.loom-test",
         "function_boundary.loom-test",
         "function_storage.loom-test",
         "lane_constants.loom-test",
@@ -80,6 +82,7 @@ loom_check_test_suite(
         "numeric_scalar_i64_shift_counts.loom-test",
         "numeric_scalar_i64_subtract.loom-test",
         "numeric_signed_unary.loom-test",
+        "numeric_unsigned_carry_borrow.loom-test",
         "numeric_unsigned_constant_division.loom-test",
         "numeric_unsigned_word_offsets.loom-test",
         "numeric_vector_bitfield.loom-test",
@@ -111,6 +114,7 @@ loom_check_test_suite(
         "source_low_bmi2_variable_shift.loom-test",
         "source_low_contraction.loom-test",
         "source_low_float_roots.loom-test",
+        "source_low_float_rounding.loom-test",
         "source_low_invoke.loom-test",
         "source_low_math_legalization_report.loom-test",
         "source_low_packed_dot.loom-test",
@@ -141,4 +145,16 @@ loom_check_test_suite(
         "view_carriers.loom-test",
         "view_transport.loom-test",
     ],
+)
+
+loom_check_test_suite(
+    name = "cxx_test",
+    srcs = [
+        "x86_c_abi_lowering.cxx-test",
+        "x86_lowering.cxx-test",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/import:cxx",
+        "//loom/config/arch:x86",
+    ]),
 )

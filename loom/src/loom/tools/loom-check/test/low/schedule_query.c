@@ -634,7 +634,9 @@ static iree_status_t loom_check_test_low_schedule_append_descriptors(
       continue;
     }
     const iree_string_view_t descriptor_key = loom_low_descriptor_set_string(
-        schedule->target.descriptor_set, descriptor->key_string_ref);
+        schedule->target.descriptor_set,
+        loom_low_descriptor_key_string_ref(schedule->target.descriptor_set,
+                                           descriptor));
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
         builder, "node %" PRIu32 " descriptor: %.*s\n", node_index,
         (int)descriptor_key.size, descriptor_key.data));

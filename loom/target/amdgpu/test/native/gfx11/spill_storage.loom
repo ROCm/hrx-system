@@ -1,11 +1,12 @@
 // A live comparison set exceeds the hardware SGPR budget. The locked fragment
 // keeps those masks live together so automatic spill repair is exercised.
 // A snapshot in a later block must keep its address as repair extends storage.
+// The retained helper's scratch frame must not overwrite caller spill slots.
 // One active lane makes a true comparison mask equal to one.
 
 amdgpu.target<gfx11-generic> @spill_target
 
-low.func.def schedule(locked) target<amdgpu.gfx11.generic.core>(@spill_target) @spill_snapshot(%input: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+low.func.def noinline schedule(locked) target<amdgpu.gfx11.generic.core>(@spill_target) @spill_snapshot(%input: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %uniform = v_readfirstlane_b32 %input
   %bound = s_mov_b32 64
   %condition = s_cmp_lt_u32 %uniform, %bound
@@ -206,10 +207,11 @@ kernel.def target(@spill_target) @spill_snapshot_kernel() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%input_buffer: buffer, %output_buffer: buffer) {
+  %source, %destination = buffer.assume.noalias %input_buffer, %output_buffer : buffer, buffer
   %base = index.constant 0 : offset
   %index = index.constant 0 : index
-  %input_view = buffer.view %input_buffer[%base] : buffer -> view<1xi32>
-  %output_view = buffer.view %output_buffer[%base] : buffer -> view<1xi32>
+  %input_view = buffer.view %source[%base] : buffer -> view<1xi32>
+  %output_view = buffer.view %destination[%base] : buffer -> view<1xi32>
   %input = vector.load %input_view[%index] : view<1xi32> -> vector<1xi32>
   %output = low.invoke @spill_snapshot(%input) : (vector<1xi32>) -> (vector<1xi32>)
   vector.store %output, %output_view[%index] : vector<1xi32>, view<1xi32>

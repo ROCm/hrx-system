@@ -6,6 +6,9 @@
 
 #include "loom/util/call_graph.h"
 
+#include <string>
+#include <vector>
+
 #include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -63,6 +66,7 @@ class CallGraphTest : public ::testing::Test {
     kSemantic,
     kLowInternal,
     kLowInvoke,
+    kCommandProgram,
   };
 
   loom_symbol_ref_t add_symbol(const char* name) {
@@ -85,6 +89,15 @@ class CallGraphTest : public ::testing::Test {
     return {(uint16_t)callee.symbol_id, func_op, nullptr, body};
   }
 
+  loom_symbol_ref_t create_decl(const char* name) {
+    const auto symbol = add_symbol(name);
+    loom_op_t* declaration = nullptr;
+    IREE_CHECK_OK(loom_test_decl_build(&module_builder_, 0, 0, 0, symbol,
+                                       nullptr, 0, nullptr, 0, nullptr, 0,
+                                       LOOM_LOCATION_UNKNOWN, &declaration));
+    return symbol;
+  }
+
   FuncInfo create_split_func(const char* name) {
     loom_symbol_ref_t callee = add_symbol(name);
     loom_op_t* func_op = NULL;
@@ -96,8 +109,8 @@ class CallGraphTest : public ::testing::Test {
             loom_test_split_func_body(func_op)};
   }
 
-  void add_call_to_region(FuncInfo& caller, loom_region_t* region,
-                          uint16_t callee_symbol_id, CallKind kind) {
+  loom_op_t* add_call_to_region(FuncInfo& caller, loom_region_t* region,
+                                uint16_t callee_symbol_id, CallKind kind) {
     loom_builder_t body_builder;
     loom_builder_initialize(module_, &module_->arena,
                             loom_region_entry_block(region), &body_builder);
@@ -126,12 +139,19 @@ class CallGraphTest : public ::testing::Test {
             LOOM_LOCATION_UNKNOWN, &call_op));
         break;
       }
+      case CallKind::kCommandProgram: {
+        IREE_CHECK_OK(loom_test_partitioned_call_build(
+            &body_builder, callee_ref, NULL, 0, NULL, 0, NULL, 0,
+            LOOM_LOCATION_UNKNOWN, &call_op));
+        break;
+      }
     }
+    return call_op;
   }
 
-  void add_call(FuncInfo& caller, uint16_t callee_symbol_id,
-                CallKind kind = CallKind::kSemantic) {
-    add_call_to_region(caller, caller.body, callee_symbol_id, kind);
+  loom_op_t* add_call(FuncInfo& caller, uint16_t callee_symbol_id,
+                      CallKind kind = CallKind::kSemantic) {
+    return add_call_to_region(caller, caller.body, callee_symbol_id, kind);
   }
 
   void finalize() { IREE_ASSERT_OK(loom_module_compute_uses(module_)); }
@@ -147,6 +167,143 @@ class CallGraphTest : public ::testing::Test {
 // Tests
 //===----------------------------------------------------------------------===//
 
+TEST_F(CallGraphTest, EmptyModule) {
+  finalize();
+  loom_call_graph_t graph;
+  IREE_ASSERT_OK(loom_call_graph_build(module_, &graph_arena_, &graph));
+  EXPECT_EQ(graph.node_count, 0u);
+  EXPECT_EQ(graph.scc_count, 0u);
+  EXPECT_EQ(graph.call_kinds, 0u);
+  EXPECT_EQ(graph.nodes, nullptr);
+  EXPECT_EQ(graph_arena_.used_allocation_size, 0u);
+}
+
+TEST_F(CallGraphTest, TrackedCallKinds) {
+  EXPECT_TRUE(loom_call_graph_tracks_call_kind(LOOM_CALL_LIKE_KIND_SEMANTIC));
+  EXPECT_TRUE(
+      loom_call_graph_tracks_call_kind(LOOM_CALL_LIKE_KIND_LOW_INTERNAL));
+  EXPECT_TRUE(loom_call_graph_tracks_call_kind(LOOM_CALL_LIKE_KIND_LOW_INVOKE));
+  EXPECT_TRUE(
+      loom_call_graph_tracks_call_kind(LOOM_CALL_LIKE_KIND_COMMAND_PROGRAM));
+  EXPECT_FALSE(loom_call_graph_tracks_call_kind(LOOM_CALL_LIKE_KIND_NONE));
+  EXPECT_FALSE(loom_call_graph_tracks_call_kind(LOOM_CALL_LIKE_KIND_TEMPLATE));
+  EXPECT_FALSE(
+      loom_call_graph_tracks_call_kind(LOOM_CALL_LIKE_KIND_COMPOSITION));
+}
+
+TEST_F(CallGraphTest, VisitsEveryCallsiteAcrossKindsAndRoots) {
+  auto caller = create_split_func("caller");
+  auto callee = create_func("callee");
+  const auto declaration = create_decl("declaration");
+  std::vector<loom_op_t*> expected = {
+      add_call_to_region(caller, caller.config, callee.symbol_id,
+                         CallKind::kLowInvoke),
+      add_call(caller, callee.symbol_id, CallKind::kSemantic),
+      add_call(caller, callee.symbol_id, CallKind::kLowInternal),
+      add_call(caller, declaration.symbol_id, CallKind::kCommandProgram),
+      add_call(callee, declaration.symbol_id),
+  };
+  finalize();
+  struct Visits {
+    // Walk-ordered callsites, including duplicates and declarations.
+    std::vector<loom_op_t*> operations;
+    // Function supplying each callsite.
+    std::vector<loom_symbol_id_t> callers;
+  } visits;
+  loom_call_graph_t graph;
+  IREE_ASSERT_OK(loom_call_graph_build_with_calls(
+      module_, &graph_arena_,
+      {&visits,
+       [](void* user_data, loom_symbol_id_t caller, loom_call_like_t call) {
+         auto* visits = static_cast<Visits*>(user_data);
+         visits->operations.push_back(call.op);
+         visits->callers.push_back(caller);
+         return iree_ok_status();
+       }},
+      &graph));
+  EXPECT_EQ(visits.operations, expected);
+  EXPECT_TRUE(
+      loom_call_graph_has_call_kind(&graph, LOOM_CALL_LIKE_KIND_SEMANTIC));
+  EXPECT_TRUE(
+      loom_call_graph_has_call_kind(&graph, LOOM_CALL_LIKE_KIND_LOW_INTERNAL));
+  EXPECT_TRUE(
+      loom_call_graph_has_call_kind(&graph, LOOM_CALL_LIKE_KIND_LOW_INVOKE));
+  EXPECT_TRUE(loom_call_graph_has_call_kind(
+      &graph, LOOM_CALL_LIKE_KIND_COMMAND_PROGRAM));
+  EXPECT_FALSE(
+      loom_call_graph_has_call_kind(&graph, LOOM_CALL_LIKE_KIND_TEMPLATE));
+  EXPECT_FALSE(
+      loom_call_graph_has_call_kind(&graph, LOOM_CALL_LIKE_KIND_COMPOSITION));
+  EXPECT_EQ(visits.callers,
+            (std::vector<loom_symbol_id_t>{caller.symbol_id, caller.symbol_id,
+                                           caller.symbol_id, caller.symbol_id,
+                                           callee.symbol_id}));
+  const auto* node = loom_call_graph_node(&graph, caller.symbol_id);
+  ASSERT_EQ(node->callee_count, 2u);
+  EXPECT_EQ(node->callees[0], callee.symbol_id);
+  EXPECT_EQ(node->callees[1], declaration.symbol_id);
+  EXPECT_EQ(loom_call_graph_node(&graph, callee.symbol_id)->caller_count, 1u);
+  EXPECT_EQ(loom_call_graph_node(&graph, declaration.symbol_id), nullptr);
+  EXPECT_FALSE(loom_call_graph_is_recursive(&graph, caller.symbol_id));
+  EXPECT_FALSE(loom_call_graph_is_recursive(&graph, declaration.symbol_id));
+}
+
+TEST_F(CallGraphTest, DeclarationCallContributesKindWithoutCalleeNode) {
+  auto caller = create_func("caller");
+  const auto declaration = create_decl("declaration");
+  add_call(caller, declaration.symbol_id);
+  finalize();
+  loom_call_graph_t graph;
+  IREE_ASSERT_OK(loom_call_graph_build(module_, &graph_arena_, &graph));
+  EXPECT_TRUE(
+      loom_call_graph_has_call_kind(&graph, LOOM_CALL_LIKE_KIND_SEMANTIC));
+  EXPECT_FALSE(
+      loom_call_graph_has_call_kind(&graph, LOOM_CALL_LIKE_KIND_LOW_INVOKE));
+  EXPECT_EQ(graph.node_count, 1u);
+  EXPECT_EQ(loom_call_graph_node(&graph, declaration.symbol_id), nullptr);
+}
+
+TEST_F(CallGraphTest, DistinctCalleesPreserveOrderAcrossCallers) {
+  auto first = create_func("first");
+  auto second = create_func("second");
+  std::vector<FuncInfo> callees;
+  for (uint32_t i = 0; i < 257; ++i) {
+    callees.push_back(create_func(("callee_" + std::to_string(i)).c_str()));
+  }
+  for (const auto& callee : callees) {
+    add_call(first, callee.symbol_id);
+    add_call(first, callee.symbol_id);
+  }
+  for (auto it = callees.rbegin(); it != callees.rend(); ++it) {
+    add_call(second, it->symbol_id);
+    add_call(second, it->symbol_id);
+  }
+  // A backedge into each caller creates one SCC across the two fanouts.
+  add_call(callees.front(), first.symbol_id);
+  add_call(callees.back(), second.symbol_id);
+  finalize();
+  loom_call_graph_t graph;
+  IREE_ASSERT_OK(loom_call_graph_build(module_, &graph_arena_, &graph));
+  const auto* first_node = loom_call_graph_node(&graph, first.symbol_id);
+  const auto* second_node = loom_call_graph_node(&graph, second.symbol_id);
+  ASSERT_EQ(first_node->callee_count, callees.size());
+  ASSERT_EQ(second_node->callee_count, callees.size());
+  for (size_t i = 0; i < callees.size(); ++i) {
+    EXPECT_EQ(first_node->callees[i], callees[i].symbol_id);
+    EXPECT_EQ(second_node->callees[i],
+              callees[callees.size() - 1 - i].symbol_id);
+    EXPECT_EQ(loom_call_graph_node(&graph, callees[i].symbol_id)->caller_count,
+              2u);
+  }
+  EXPECT_TRUE(loom_call_graph_is_recursive(&graph, first.symbol_id));
+  EXPECT_EQ(first_node->scc_id, second_node->scc_id);
+  EXPECT_EQ(first_node->scc_id,
+            loom_call_graph_node(&graph, callees.front().symbol_id)->scc_id);
+  EXPECT_EQ(first_node->scc_id,
+            loom_call_graph_node(&graph, callees.back().symbol_id)->scc_id);
+  EXPECT_FALSE(loom_call_graph_is_recursive(&graph, callees[1].symbol_id));
+}
+
 TEST_F(CallGraphTest, SingleFunctionNoCalls) {
   auto f = create_func("foo");
   (void)f;
@@ -156,12 +313,14 @@ TEST_F(CallGraphTest, SingleFunctionNoCalls) {
   IREE_ASSERT_OK(loom_call_graph_build(module_, &graph_arena_, &graph));
 
   EXPECT_EQ(graph.node_count, 1u);
+  EXPECT_EQ(graph.call_kinds, 0u);
   EXPECT_FALSE(loom_call_graph_is_recursive(&graph, f.symbol_id));
 
   const loom_call_graph_node_t* node =
       loom_call_graph_node(&graph, f.symbol_id);
   ASSERT_NE(node, nullptr);
   EXPECT_EQ(node->callee_count, 0u);
+  EXPECT_EQ(node->caller_count, 0u);
 }
 
 TEST_F(CallGraphTest, LinearChain) {
@@ -191,10 +350,30 @@ TEST_F(CallGraphTest, LinearChain) {
   EXPECT_EQ(na->callee_count, 1u);
   EXPECT_EQ(nb->callee_count, 1u);
   EXPECT_EQ(nc->callee_count, 0u);
+  EXPECT_EQ(na->caller_count, 0u);
+  EXPECT_EQ(nb->caller_count, 1u);
+  EXPECT_EQ(nc->caller_count, 1u);
 
   // SCC IDs are assigned in callee-first order.
   EXPECT_LT(nc->scc_id, nb->scc_id);
   EXPECT_LT(nb->scc_id, na->scc_id);
+}
+
+TEST_F(CallGraphTest, DistinctCallersCountRepeatedCallsOnce) {
+  auto first = create_func("first");
+  auto second = create_func("second");
+  auto shared = create_func("shared");
+  add_call(first, shared.symbol_id);
+  add_call(first, shared.symbol_id);
+  add_call(second, shared.symbol_id);
+  finalize();
+
+  loom_call_graph_t graph;
+  IREE_ASSERT_OK(loom_call_graph_build(module_, &graph_arena_, &graph));
+
+  EXPECT_EQ(loom_call_graph_node(&graph, first.symbol_id)->caller_count, 0u);
+  EXPECT_EQ(loom_call_graph_node(&graph, second.symbol_id)->caller_count, 0u);
+  EXPECT_EQ(loom_call_graph_node(&graph, shared.symbol_id)->caller_count, 2u);
 }
 
 TEST_F(CallGraphTest, FindsCallsInEveryFunctionRootRegion) {
@@ -224,6 +403,7 @@ TEST_F(CallGraphTest, SelfRecursion) {
 
   EXPECT_EQ(graph.node_count, 1u);
   EXPECT_TRUE(loom_call_graph_is_recursive(&graph, f.symbol_id));
+  EXPECT_EQ(loom_call_graph_node(&graph, f.symbol_id)->caller_count, 1u);
 }
 
 TEST_F(CallGraphTest, MutualRecursion) {
@@ -273,6 +453,11 @@ TEST_F(CallGraphTest, LowInternalCallEdge) {
   loom_call_graph_t graph;
   IREE_ASSERT_OK(loom_call_graph_build(module_, &graph_arena_, &graph));
 
+  EXPECT_TRUE(
+      loom_call_graph_has_call_kind(&graph, LOOM_CALL_LIKE_KIND_LOW_INTERNAL));
+  EXPECT_FALSE(
+      loom_call_graph_has_call_kind(&graph, LOOM_CALL_LIKE_KIND_SEMANTIC));
+
   const loom_call_graph_node_t* node =
       loom_call_graph_node(&graph, a.symbol_id);
   ASSERT_NE(node, nullptr);
@@ -288,6 +473,11 @@ TEST_F(CallGraphTest, LowInvokeCallEdge) {
 
   loom_call_graph_t graph;
   IREE_ASSERT_OK(loom_call_graph_build(module_, &graph_arena_, &graph));
+
+  EXPECT_TRUE(
+      loom_call_graph_has_call_kind(&graph, LOOM_CALL_LIKE_KIND_LOW_INVOKE));
+  EXPECT_FALSE(
+      loom_call_graph_has_call_kind(&graph, LOOM_CALL_LIKE_KIND_SEMANTIC));
 
   const loom_call_graph_node_t* node =
       loom_call_graph_node(&graph, a.symbol_id);

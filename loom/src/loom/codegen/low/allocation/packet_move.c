@@ -7,9 +7,8 @@
 #include "loom/codegen/low/allocation/packet_move.h"
 
 #include "loom/codegen/low/allocation/live_range.h"
-#include "loom/codegen/low/allocation/move_topology.h"
 #include "loom/codegen/low/allocation/storage.h"
-#include "loom/ops/low/ops.h"
+#include "loom/ops/low/storage.h"
 
 typedef enum loom_low_allocation_packet_transfer_kind_e {
   LOOM_LOW_ALLOCATION_PACKET_TRANSFER_DEAD = 0,
@@ -57,18 +56,17 @@ loom_low_allocation_packet_move_try_assignment(
 }
 
 static loom_value_id_t loom_low_allocation_packet_move_result(
-    const loom_op_t* op,
-    loom_low_allocation_packet_move_op_kind_t packet_move_kind) {
+    const loom_op_t* op, loom_low_register_transfer_kind_t packet_move_kind) {
   switch (packet_move_kind) {
-    case LOOM_LOW_ALLOCATION_PACKET_MOVE_OP_COPY:
+    case LOOM_LOW_REGISTER_TRANSFER_COPY:
       return loom_low_copy_result(op);
-    case LOOM_LOW_ALLOCATION_PACKET_MOVE_OP_MOVE:
+    case LOOM_LOW_REGISTER_TRANSFER_MOVE:
       return loom_low_move_result(op);
-    case LOOM_LOW_ALLOCATION_PACKET_MOVE_OP_SLICE:
+    case LOOM_LOW_REGISTER_TRANSFER_SLICE:
       return loom_low_slice_result(op);
-    case LOOM_LOW_ALLOCATION_PACKET_MOVE_OP_CONCAT:
+    case LOOM_LOW_REGISTER_TRANSFER_CONCAT:
       return loom_low_concat_result(op);
-    case LOOM_LOW_ALLOCATION_PACKET_MOVE_OP_NONE:
+    case LOOM_LOW_REGISTER_TRANSFER_NONE:
       IREE_ASSERT_UNREACHABLE("packet-move operation must have a result");
       return LOOM_VALUE_ID_INVALID;
   }
@@ -77,17 +75,17 @@ static loom_value_id_t loom_low_allocation_packet_move_result(
 }
 
 static loom_low_placement_cause_t loom_low_allocation_packet_move_cause(
-    loom_low_allocation_packet_move_op_kind_t packet_move_kind) {
+    loom_low_register_transfer_kind_t packet_move_kind) {
   switch (packet_move_kind) {
-    case LOOM_LOW_ALLOCATION_PACKET_MOVE_OP_COPY:
+    case LOOM_LOW_REGISTER_TRANSFER_COPY:
       return LOOM_LOW_PLACEMENT_CAUSE_LOW_COPY;
-    case LOOM_LOW_ALLOCATION_PACKET_MOVE_OP_MOVE:
+    case LOOM_LOW_REGISTER_TRANSFER_MOVE:
       return LOOM_LOW_PLACEMENT_CAUSE_LOW_MOVE;
-    case LOOM_LOW_ALLOCATION_PACKET_MOVE_OP_SLICE:
+    case LOOM_LOW_REGISTER_TRANSFER_SLICE:
       return LOOM_LOW_PLACEMENT_CAUSE_LOW_SLICE;
-    case LOOM_LOW_ALLOCATION_PACKET_MOVE_OP_CONCAT:
+    case LOOM_LOW_REGISTER_TRANSFER_CONCAT:
       return LOOM_LOW_PLACEMENT_CAUSE_LOW_CONCAT;
-    case LOOM_LOW_ALLOCATION_PACKET_MOVE_OP_NONE:
+    case LOOM_LOW_REGISTER_TRANSFER_NONE:
       IREE_ASSERT_UNREACHABLE("packet-move group must have a placement cause");
       return LOOM_LOW_PLACEMENT_CAUSE_UNKNOWN;
   }
@@ -96,18 +94,16 @@ static loom_low_placement_cause_t loom_low_allocation_packet_move_cause(
 }
 
 static bool loom_low_allocation_packet_move_has_relations(
-    const loom_op_t* op,
-    loom_low_allocation_packet_move_op_kind_t packet_move_kind) {
-  return packet_move_kind != LOOM_LOW_ALLOCATION_PACKET_MOVE_OP_NONE &&
-         (packet_move_kind != LOOM_LOW_ALLOCATION_PACKET_MOVE_OP_CONCAT ||
+    const loom_op_t* op, loom_low_register_transfer_kind_t packet_move_kind) {
+  return packet_move_kind != LOOM_LOW_REGISTER_TRANSFER_NONE &&
+         (packet_move_kind != LOOM_LOW_REGISTER_TRANSFER_CONCAT ||
           loom_low_concat_sources(op).count != 0);
 }
 
 static loom_low_placement_relation_range_t
 loom_low_allocation_packet_move_relation_range(
     const loom_low_allocation_packet_move_context_t* context,
-    const loom_op_t* op,
-    loom_low_allocation_packet_move_op_kind_t packet_move_kind) {
+    const loom_op_t* op, loom_low_register_transfer_kind_t packet_move_kind) {
   loom_value_ordinal_t result_ordinal = LOOM_VALUE_ORDINAL_INVALID;
   const bool result_found =
       loom_low_allocation_assignment_map_value_ordinal_for_value(
@@ -169,7 +165,8 @@ loom_low_allocation_packet_move_append_relation(
     loom_low_allocation_packet_move_builder_t* builder,
     const loom_low_placement_relation_t* relation,
     const loom_low_allocation_assignment_t* source_assignment,
-    const loom_low_allocation_assignment_t* destination_assignment) {
+    const loom_low_allocation_assignment_t* destination_assignment,
+    uint32_t end_point) {
   if (relation->unit_count == 0 || destination_assignment == NULL) {
     return LOOM_LOW_ALLOCATION_PACKET_TRANSFER_PRESENCE_DEAD;
   }
@@ -189,11 +186,33 @@ loom_low_allocation_packet_move_append_relation(
   }
 
   const iree_host_size_t move_start = builder->raw_move_count;
-  loom_low_allocation_move_plan_append_assignment(
-      builder->context->move_plan, source_assignment,
-      relation->source_unit_offset, destination_assignment,
-      relation->result_unit_offset, relation->unit_count,
-      &builder->raw_move_count);
+  const loom_low_allocation_move_plan_context_t* move_context =
+      &builder->context->move_plan->context;
+  const bool is_reference = iree_any_bit_set(
+      move_context->descriptor_set
+          ->reg_classes[source_assignment->descriptor_reg_class_id]
+          .flags,
+      LOOM_LOW_REG_CLASS_FLAG_REFERENCE);
+  // A final observation transfers the guard instead of leaving a stale owner
+  // behind. Each reference unit can end independently; required aliases are
+  // included in its retained storage-component lifetime.
+  const uint32_t transfer_unit_count = is_reference ? 1 : relation->unit_count;
+  for (uint32_t unit = 0; unit < relation->unit_count;
+       unit += transfer_unit_count) {
+    const bool consume_source =
+        relation->cause == LOOM_LOW_PLACEMENT_CAUSE_LOW_MOVE ||
+        (is_reference &&
+         !loom_low_allocation_unit_liveness_storage_component_live_at_point(
+             move_context->unit_liveness, move_context->assignment_map.liveness,
+             builder->context->placement, relation->source_ordinal,
+             relation->source_unit_offset + unit, transfer_unit_count,
+             end_point));
+    loom_low_allocation_move_plan_append_assignment(
+        builder->context->move_plan, source_assignment,
+        relation->source_unit_offset + unit, destination_assignment,
+        relation->result_unit_offset + unit, transfer_unit_count,
+        consume_source, &builder->raw_move_count);
+  }
   const iree_host_size_t live_unit_count = builder->raw_move_count - move_start;
   return live_unit_count == relation->unit_count
              ? 0
@@ -266,7 +285,7 @@ IREE_ATTRIBUTE_NOINLINE IREE_ATTRIBUTE_COLD static void
 loom_low_allocation_packet_move_scan_exact_group(
     loom_low_allocation_packet_move_builder_t* builder,
     const loom_low_allocation_packet_move_group_t* group, const loom_op_t* op,
-    loom_low_allocation_packet_move_op_kind_t packet_move_kind,
+    loom_low_register_transfer_kind_t packet_move_kind,
     loom_low_allocation_packet_transfer_phase_t phase) {
   const loom_low_allocation_packet_move_context_t* context = builder->context;
   const loom_low_placement_relation_range_t range =
@@ -298,7 +317,7 @@ loom_low_allocation_packet_move_build_group(
     loom_low_allocation_packet_move_builder_t* builder,
     const loom_liveness_operation_point_t* operation_point,
     uint32_t source_ordinal,
-    loom_low_allocation_packet_move_op_kind_t packet_move_kind) {
+    loom_low_register_transfer_kind_t packet_move_kind) {
   IREE_ASSERT_LT(builder->plan.group_count, builder->group_capacity);
   const loom_op_t* op = operation_point->op;
   loom_low_allocation_packet_move_group_t* group =
@@ -329,7 +348,8 @@ loom_low_allocation_packet_move_build_group(
         loom_low_allocation_packet_move_try_assignment(
             assignment_map, relation->source_ordinal);
     presence |= loom_low_allocation_packet_move_append_relation(
-        builder, relation, source_assignment, destination_assignment);
+        builder, relation, source_assignment, destination_assignment,
+        operation_point->end_point);
   }
 
   loom_low_move_sequence_input_flags_t input_flags = 0;
@@ -399,8 +419,8 @@ static iree_status_t loom_low_allocation_packet_move_build_region(
       const loom_liveness_operation_point_t* operation_point =
           loom_low_allocation_move_plan_next_operation(
               builder->context->move_plan, op, &builder->cursor);
-      const loom_low_allocation_packet_move_op_kind_t packet_move_kind =
-          loom_low_allocation_move_topology_packet_move_op_kind(op);
+      const loom_low_register_transfer_kind_t packet_move_kind =
+          loom_low_register_transfer_kind(op);
       if (loom_low_allocation_packet_move_has_relations(op, packet_move_kind)) {
         IREE_RETURN_IF_ERROR(loom_low_allocation_packet_move_build_group(
             builder, operation_point, *inout_source_ordinal, packet_move_kind));
@@ -439,8 +459,8 @@ loom_low_allocation_packet_move_fill_region(
   loom_region_for_each_block(region, block) {
     const loom_op_t* op = NULL;
     loom_block_for_each_op(block, op) {
-      const loom_low_allocation_packet_move_op_kind_t packet_move_kind =
-          loom_low_allocation_move_topology_packet_move_op_kind(op);
+      const loom_low_register_transfer_kind_t packet_move_kind =
+          loom_low_register_transfer_kind(op);
       if (loom_low_allocation_packet_move_has_relations(op, packet_move_kind)) {
         IREE_ASSERT_LT(builder->fill_group_index, builder->plan.group_count);
         const loom_low_allocation_packet_move_group_t* group =

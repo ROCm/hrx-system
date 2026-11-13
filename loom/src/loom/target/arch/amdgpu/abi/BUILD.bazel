@@ -151,5 +151,5 @@ loom_cc_library(
         "tsan.h",
         "ubsan.h",
     ],
-    visibility = ["//runtime/src/iree/hal/drivers/amd/gpu:__pkg__"],
+    visibility = ["//runtime/src/iree/hal/driver/amd/gpu:__pkg__"],
 )

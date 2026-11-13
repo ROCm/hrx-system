@@ -1,15 +1,10 @@
 # Acquiring Loom
 
-The `hrx-loom` Python wheel installs the Loom compiler, runtime, Python APIs,
-and command-line tools, including `loom-fetch`, `loom-serve`, and
+The [hrx-loom Python wheel](https://pypi.org/project/hrx-loom/) installs the
+Loom compiler, runtime, Python APIs, and command-line tools, including
+`loom-fetch`, `loom-serve`, and
 `loom-benchmark`. Source models use the included JIT compiler. Running a
 published model requires neither a repository checkout nor a build toolchain.
-
-!!! info "First release"
-
-    The first PyPI release has not been published. Until then, install a tested
-    development wheel from a successful [Loom CI run](https://github.com/ROCm/hrx-system/actions/workflows/ci_iree.yml).
-    The PyPI commands below describe installation once a release is available.
 
 ## Platform requirements
 
@@ -58,7 +53,7 @@ the `.whl` inside it instead of the package name. For example, the Linux
 development release profile uses:
 
 ```sh
-python -m pip install './hrx_loom-0.0.0.dev0-py3-none-manylinux_2_39_x86_64.whl[hf]'
+python -m pip install './hrx_loom-0.2.0.dev0-py3-none-manylinux_2_39_x86_64.whl[hf]'
 ```
 
 Windows uses the corresponding `win_amd64.whl`. Use the exact filename in the
@@ -141,8 +136,8 @@ native device-access mechanism, not Linux device-node mounts.
 
 Compiler contributors can build the tools from the
 [HRX System repository](https://github.com/ROCm/hrx-system). The repository's
-[Loom quickstart](https://github.com/ROCm/hrx-system/tree/main/loom#build-the-tools)
-tracks the source-build prerequisites and Bazel targets. The
+[source-development guide](https://github.com/ROCm/hrx-system/tree/main/loom#develop-from-source)
+links to build prerequisites and compiler examples. The
 [SDK build guide](https://github.com/ROCm/hrx-system/tree/main/loom/packaging/python)
 describes building and testing wheels through Bazel.
 

@@ -82,6 +82,25 @@ for fixed-width and floating-point values:
 The generated [type reference](../reference/types/index.md) is the complete
 catalog of scalar and aggregate forms.
 
+## Opaque objects have explicit handle ownership
+
+Runtime-provided payloads use a symbolic declaration and typed managed handles:
+
+```loom
+type.decl import("images", "frame") @Frame
+```
+
+`ref<@Frame>` owns a reference; `ptr<@Frame>` borrows the payload. Neither type
+exposes a raw address or native field layout. Passing an owning handle transfers
+its owner, while a borrowed call preserves the caller's handle. The exact
+external namespace, payload name, and ownership mode determine type equality;
+the local declaration name supplies a readable spelling.
+
+[Runtime-provided objects](../integration/runtime-objects.md) follows these
+types through native function imports, saved-pointer protection, explicit
+source-owner lifetimes, and VM execution. Buffer and view types continue to own
+the separate contracts for memory storage and access.
+
 ## Cross address boundaries explicitly
 
 [`index.scale`](../reference/dialects/index/ops/scale.md) is the ordinary
@@ -136,6 +155,43 @@ The name in a dynamic dimension is not decorative text. It resolves to an SSA
 value in the lexical scope and lets operations, facts, and specialization agree
 on the exact extent. Two values can have the same structural dynamic type while
 binding its dimensions to different SSA values at different call sites.
+
+## Shape assertions are explicit
+
+Ordinary function boundaries require exact types. A named dimension whose value
+happens to be four does not implicitly change `vector<[%width]xi32>` into
+`vector<4xi32>`. An explicit refinement expresses that assertion:
+
+```loom
+%packet = vector.refine %values : vector<[%width]xi32> -> vector<4xi32>
+```
+
+The source and result describe the same lanes. Refinement preserves rank and
+element type, performs no conversion or copy, and inserts no runtime check.
+Contradictory static extents diagnose; a dynamic assertion is a promise from the
+program and must be true. The corresponding `view.refine`, `tile.refine`,
+`tensor.refine`, and `group.refine` operations preserve their value or storage
+identity while asserting shape and applicable encoding information.
+
+C++ authors spell the vector boundary with an explicit result type:
+
+```cpp
+#include <loomcxx/vector.h>
+using Packet = unsigned __attribute__((ext_vector_type(4)));
+using Values = loom::type::vector<
+    loom::type::shape<loom::type::dynamic>, unsigned>;
+
+// The caller guarantees exactly four lanes.
+Packet fixed_packet(Values values) {
+  return loom::vector::refine<Packet>(values);
+}
+```
+
+`loom::view::refine` and `loom::tile::refine` preserve the source encoding for an
+encoded result unless an explicit replacement is supplied. A replacement asserts the same physical
+mapping; it does not rearrange bytes. Dynamic result dimensions are supplied
+explicitly as native indices. Template provider matching has its own declared
+selection rules and does not relax ordinary function typing.
 
 ## Value space and storage are separate
 

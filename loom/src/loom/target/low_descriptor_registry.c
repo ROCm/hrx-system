@@ -9,9 +9,9 @@
 #include <inttypes.h>
 
 void loom_target_low_descriptor_registry_initialize_from_tables(
-    loom_target_low_descriptor_registry_t* out_registry,
     const loom_low_descriptor_set_provider_t* descriptor_set_providers,
-    iree_host_size_t descriptor_set_provider_count) {
+    iree_host_size_t descriptor_set_provider_count,
+    loom_target_low_descriptor_registry_t* out_registry) {
   *out_registry = (loom_target_low_descriptor_registry_t){
       .descriptor_set_providers = descriptor_set_providers,
       .descriptor_set_provider_count = descriptor_set_provider_count,

@@ -84,6 +84,7 @@ class VectorAtomicMixin:
     def cmpxchg(
         self,
         *,
+        memory_flags: str = ...,
         expected: ValueRef,
         replacement: ValueRef,
         view: ValueRef,

@@ -1,0 +1,470 @@
+// RUN: emit vm-object-lifetime
+// INPUT: cxx root=run
+// Reference arguments name the current object, including through an accessor
+// and when the callee returns that reference to its caller.
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+
+static unsigned replace(unsigned& owner) { owner = 22; return 0; }
+static void observe(const unsigned& value, unsigned) { event(value); }
+static void increment(unsigned& value, unsigned) { ++value; event(value); }
+static const unsigned& alias(const unsigned& value) { return value; }
+static unsigned& identity(unsigned& value, unsigned) { return value; }
+
+void run() {
+  unsigned owner = 11;
+  observe(owner, replace(owner));
+  owner = 11;
+  increment(owner, replace(owner));
+  event(owner);
+  owner = 11;
+  observe(alias(owner), replace(owner));
+  owner = 11;
+  ++identity(owner, replace(owner));
+  event(owner);
+  owner = 11;
+  observe(owner + 1u, replace(owner));
+  event(owner);
+}
+
+// ----
+event 22
+event 23
+event 23
+event 22
+event 23
+event 12
+event 22
+OK 0
+retired 0
+
+// ====
+// Source selections transport only required groups and preserve read-only
+// aliases of a selected receiver while evaluating exactly one helper call.
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+struct Slice { unsigned* data; unsigned length; };
+[[loom::noinline]] static unsigned advance(Slice& slice, unsigned step) {
+  event(1);
+  slice.length += step;
+  return slice.length;
+}
+struct Cell {
+  unsigned value;
+  [[loom::noinline]] unsigned compare(const Cell& other) const { return value * 10 + other.value; }
+};
+void run() {
+  for (unsigned choice = 0; choice < 2; ++choice) {
+    Slice left, right;
+    left.length = 5;
+    right.length = 7;
+    auto& chosen = choice ? left : right;
+    event(advance(chosen, 3));
+    event(left.length);
+    event(right.length);
+    Cell first{2}, second{3};
+    event((choice ? first : second).compare(first));
+  }
+}
+// ----
+event 1
+event 10
+event 5
+event 10
+event 32
+event 1
+event 8
+event 8
+event 7
+event 22
+OK 0
+retired 0
+
+// ====
+// Direct and reference-returning receivers both read the completed argument
+// updates. Receiver evaluation is sequenced before the explicit argument.
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+
+struct Owner {
+  // Current payload observed after argument evaluation.
+  unsigned value;
+  Owner& self() { event(1); return *this; }
+  unsigned replace() { event(2); value = 22; return 0; }
+  void observe(unsigned) const { event(value); }
+  void increment(unsigned) { ++value; event(value); }
+};
+
+void run() {
+  Owner owner{11};
+  owner.observe(owner.replace());
+  owner.value = 11;
+  owner.self().observe(owner.replace());
+  owner.value = 11;
+  owner.self().increment(owner.replace());
+  event(owner.value);
+}
+
+// ----
+event 2
+event 22
+event 1
+event 2
+event 22
+event 1
+event 2
+event 23
+event 23
+OK 0
+retired 0
+
+// ====
+// Operator notation preserves reference identity through operand evaluation.
+// Shift operands are sequenced left to right in ordinary C++ as well.
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+
+struct Owner {
+  // Current payload observed by the operator body.
+  unsigned value;
+};
+static unsigned replace(Owner& owner) { owner.value = 22; return 0; }
+static void operator<<(const Owner& owner, unsigned) { event(owner.value); }
+static void operator>>(Owner& owner, unsigned) { ++owner.value; }
+
+void run() {
+  Owner owner{11};
+  owner << replace(owner);
+  owner.value = 11;
+  owner >> replace(owner);
+  event(owner.value);
+}
+
+// ----
+event 22
+event 23
+OK 0
+retired 0
+
+// ====
+// Storage-backed references retain the once-evaluated address, and later
+// argument evaluation may mutate the pointee before the callee reads it.
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+
+static unsigned replace(unsigned& owner) { owner = 22; return 0; }
+static void observe(const unsigned& value, unsigned) { event(value); }
+static unsigned& at(unsigned* values) { return values[1]; }
+
+void run() {
+  unsigned values[2]{11, 33};
+  observe(at(values), replace(values[1]));
+  event(values[0]);
+  event(values[1]);
+}
+
+// ----
+event 22
+event 11
+event 22
+OK 0
+retired 0
+
+// ====
+// A forwarding call and both arms of the caller initialize only length. No
+// pointer value is invented for the untouched field.
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+struct Slice { unsigned* data; unsigned length; };
+[[loom::noinline]] static void initialize(unsigned& value, unsigned input) { value = input; }
+[[loom::noinline]] static unsigned length(const Slice& slice) { return slice.length; }
+[[loom::noinline]] static unsigned forwarded(const Slice& slice) { return length(slice); }
+[[loom::noinline]] static void conditional(Slice& slice, bool choose) {
+  if (choose) { slice.length = 19; return; }
+}
+void run() {
+  for (unsigned choice = 0; choice < 2; ++choice) {
+    Slice slice;
+    if (choice) initialize(slice.length, 11);
+    else initialize(slice.length, 13);
+    event(forwarded(slice));
+    conditional(slice, choice != 0);
+    event(forwarded(slice));
+  }
+  unsigned value;
+  initialize(value, 23);
+  event(value);
+}
+// ----
+event 13
+event 13
+event 11
+event 19
+event 23
+OK 0
+retired 0
+
+// ====
+// Every source read precedes or follows definitions according to C++ sequencing,
+// including assignment destinations, loop increments, and short-circuit paths.
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+struct State { unsigned length; unsigned unused; };
+[[loom::noinline]] static void store(unsigned* output, State& state) {
+  output[state.length = 1] = state.length;
+}
+[[loom::noinline]] static unsigned define(State& state) { state.length = 3; return 1; }
+[[loom::noinline]] static void loop(State& state, unsigned count) {
+  for (unsigned index = 0; index < count; index += state.length) {
+    state.length = 1;
+    if (count == 9) break;
+  }
+}
+[[loom::noinline]] static void ordered(State& state, unsigned* output) {
+  store(output, state);
+  event(state.length);
+  event(state.length && define(state));
+  event(state.length);
+}
+void run() {
+  unsigned output[2]{0, 0};
+  State state;
+  state.length = 17;
+  ordered(state, output);
+  event(output[1]);
+  loop(state, 0);
+  event(state.length);
+  loop(state, 2);
+  event(state.length);
+  state.length = 5;
+  loop(state, 9);
+  event(state.length);
+}
+// ----
+event 1
+event 1
+event 3
+event 17
+event 3
+event 1
+event 1
+OK 0
+retired 0
+
+// ====
+// A sparse result updates the temporary's destructor payload and preserves the
+// fields which the helper never touched.
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+struct Owner {
+  unsigned value;
+  unsigned preserved;
+  ~Owner() { event(value); event(preserved); }
+};
+[[loom::noinline]] static void update(Owner&& owner) { owner.value = 29; }
+[[loom::noinline]] static void initialize(unsigned& updated, const unsigned& observed) {
+  updated = 31;
+  event(observed);
+}
+void run() {
+  update(Owner{7, 11});
+  event(101);
+  unsigned shared;
+  initialize(shared, shared);
+  event(shared);
+}
+// ----
+event 29
+event 11
+event 101
+event 31
+event 31
+OK 0
+retired 0
+
+// ====
+// Conditional outputs preserve the unselected object, including a reference
+// selected against a by-value formal and a pointer's two-component payload.
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+static void initialize(unsigned& value) { value = 17; }
+[[loom::noinline]] static void maybe_initialize(unsigned& output, unsigned other, bool choose) {
+  initialize(choose ? output : other);
+}
+struct Slice { const unsigned* data; unsigned unused; };
+[[loom::noinline]] static void advance(Slice& slice) { ++slice.data; }
+void run() {
+  unsigned first[2]{5, 7};
+  unsigned second[2]{11, 13};
+  for (unsigned choice = 0; choice < 2; ++choice) {
+    unsigned value = 3;
+    maybe_initialize(value, 19, choice != 0);
+    event(value);
+    Slice left, right;
+    left.data = first;
+    right.data = second;
+    advance(choice ? left : right);
+    event(*left.data);
+    event(*right.data);
+  }
+}
+// ----
+event 3
+event 5
+event 13
+event 17
+event 7
+event 11
+OK 0
+retired 0
+
+// ====
+// Partial receiver fields survive method calls and every lexical cleanup exit.
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+struct Cursor {
+  const float* data;
+  unsigned position;
+  unsigned* output;
+  void reset() { position = 0; }
+  ~Cursor() { *output = position; }
+};
+static void cursor(unsigned* output, bool early) {
+  Cursor current;
+  current.output = output;
+  current.reset();
+  if (early) { current.position = 3; return; }
+  current.position = 4;
+}
+struct Leaf {
+  float* unused;
+  unsigned position;
+  void reset() { position = 7; }
+  void increment() { ++position; }
+  ~Leaf() { event(position); }
+};
+struct Holder {
+  Leaf nested;
+  void reset() { nested.reset(); }
+  void increment() { nested.increment(); }
+  ~Holder() { nested.increment(); }
+};
+struct Derived : Leaf {
+  unsigned unrelated;
+  void initialize() { reset(); }
+};
+static void nested(bool early) {
+  Holder holder;
+  holder.reset();
+  if (early) { holder.increment(); return; }
+  holder.increment();
+  holder.increment();
+}
+void run() {
+  unsigned output = 99;
+  cursor(&output, true);
+  event(output);
+  cursor(&output, false);
+  event(output);
+  nested(false);
+  nested(true);
+  { Derived item; item.initialize(); }
+  for (unsigned i = 0; i < 3; ++i) {
+    Leaf local;
+    local.reset();
+    if (i == 0) continue;
+    local.increment();
+    if (i == 1) break;
+  }
+}
+// ----
+event 3
+event 4
+event 10
+event 9
+event 7
+event 7
+event 8
+OK 0
+retired 0
+
+// ====
+// Destructor-body initialization precedes member/base destruction. Reference
+// members retain their binding, and nested arrays destroy in reverse order.
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+struct Leaf {
+  float* unused;
+  unsigned position;
+  void reset() { position = 7; }
+  ~Leaf() { event(position); }
+};
+struct InitializeOnExit {
+  Leaf child;
+  ~InitializeOnExit() { child.reset(); }
+};
+struct Reference {
+  unsigned& output;
+  unsigned ignored;
+  void set(unsigned value) { output = value; }
+  ~Reference() { event(output); }
+};
+struct Array {
+  Leaf items[2];
+};
+void run() {
+  { InitializeOnExit holder; }
+  unsigned output = 0;
+  { Reference reference{output, 19}; reference.set(12); }
+  event(output);
+  float unused = 0;
+  { Array array{{{&unused, 2}, {&unused, 3}}}; }
+}
+// ----
+event 7
+event 12
+event 12
+event 3
+event 2
+OK 0
+retired 0
+
+// ====
+// Converted references hold their converted value independently of the source;
+// same-type references and reference-returning conversions preserve aliases.
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+static double widen(const double& value) { const double* pointer = &value; return *pointer; }
+struct Alias {
+  // A conversion to a reference must keep this exact field as its destination.
+  unsigned value;
+  operator unsigned&() { event(4); return value; }
+};
+static void increment(unsigned& value) { ++value; }
+void run() {
+  float source = 1.5f;
+  event(static_cast<unsigned>(widen(source) * 10.0));
+  const double& parenthesized(source);
+  const double& braced{source};
+  source = 2.0f;
+  event(static_cast<unsigned>(parenthesized * 10.0));
+  event(static_cast<unsigned>(braced * 10.0));
+  unsigned number = 259;
+  const unsigned char& narrowed = number;
+  number = 7;
+  event(narrowed);
+  const float& converted = static_cast<const float&>(number);
+  number = 8;
+  event(static_cast<unsigned>(converted * 10.0f));
+  const unsigned& original = number;
+  const unsigned& braced_alias{number};
+  number = 9;
+  event(original);
+  event(braced_alias);
+  const unsigned& zero{};
+  event(zero);
+  Alias alias{11};
+  increment(alias);
+  event(alias.value);
+}
+// ----
+event 15
+event 15
+event 15
+event 3
+event 70
+event 9
+event 9
+event 0
+event 4
+event 12
+OK 0
+retired 0

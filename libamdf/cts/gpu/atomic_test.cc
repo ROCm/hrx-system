@@ -54,6 +54,8 @@ class GpuAtomicAddTest : public GpuCommandTest,
                                  AMDF_ATOMIC_OPERATION_STORE |
                                  AMDF_ATOMIC_OPERATION_ADD;
     const bool is_aql = family_.command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL;
+    const auto wait_offload =
+        is_aql ? pm4::WaitOffload::kDisabled : pm4::WaitOffload::kEnabled;
     const auto& atomics = family_.atomic_capabilities;
     const auto operations =
         sizeof(T) == 4 ? atomics.operations_32 : atomics.operations_64;
@@ -176,7 +178,7 @@ class GpuAtomicAddTest : public GpuCommandTest,
           CreateMemory(AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE, 4096,
                        &completion));
     } else {
-      ASSERT_NO_FATAL_FAILURE(CreateQueue(&pm4_queue, 32768));
+      ASSERT_NO_FATAL_FAILURE(CreateQueue(32768, &pm4_queue));
     }
     const uintptr_t host_address =
         reinterpret_cast<uintptr_t>(control->host.pointer);
@@ -228,9 +230,9 @@ class GpuAtomicAddTest : public GpuCommandTest,
       word_count += pm4::StoreImmediate(words.data() + word_count,
                                         gpu_address + kEnteredOffset, epoch,
                                         pm4::CopyDataWidth::k32Bit);
-      word_count += pm4::WaitMemory32(words.data() + word_count,
-                                      gpu_address + kStartedOffset, epoch,
-                                      Pm4MemoryComparison::kEqual, UINT32_MAX);
+      word_count += pm4::WaitMemory32(
+          words.data() + word_count, gpu_address + kStartedOffset, epoch,
+          Pm4MemoryComparison::kEqual, UINT32_MAX, wait_offload);
       for (uint32_t i = 0; i < kGpuAddCount; ++i) {
         if constexpr (sizeof(T) == 4) {
           word_count +=
@@ -245,9 +247,9 @@ class GpuAtomicAddTest : public GpuCommandTest,
       word_count += pm4::StoreImmediate(words.data() + word_count,
                                         gpu_address + kObservedOffset, epoch,
                                         pm4::CopyDataWidth::k32Bit);
-      word_count += pm4::WaitMemory32(words.data() + word_count,
-                                      gpu_address + kAcknowledgedOffset, epoch,
-                                      Pm4MemoryComparison::kEqual, UINT32_MAX);
+      word_count += pm4::WaitMemory32(
+          words.data() + word_count, gpu_address + kAcknowledgedOffset, epoch,
+          Pm4MemoryComparison::kEqual, UINT32_MAX, wait_offload);
       word_count += pm4::StoreImmediate(words.data() + word_count,
                                         gpu_address + kCompletedOffset, epoch,
                                         pm4::CopyDataWidth::k32Bit);

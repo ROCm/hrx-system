@@ -407,8 +407,8 @@ static iree_status_t iree_tokenizer_segmenter_sequence_advance_child(
 static iree_status_t iree_tokenizer_segmenter_sequence_pull_next_output_segment(
     iree_tokenizer_segmenter_sequence_state_t* state,
     const iree_tokenizer_segmenter_sequence_t* segmenter,
-    iree_string_view_t input, iree_tokenizer_segment_t* out_segment,
-    bool* out_exhausted, iree_host_size_t final_level) {
+    iree_string_view_t input, iree_host_size_t final_level,
+    iree_tokenizer_segment_t* out_segment, bool* out_exhausted) {
   iree_host_size_t level = final_level;
 
   for (;;) {
@@ -495,7 +495,7 @@ static iree_status_t iree_tokenizer_segmenter_sequence_state_process(
       iree_tokenizer_segment_t segment;
       IREE_RETURN_IF_ERROR(
           iree_tokenizer_segmenter_sequence_pull_next_output_segment(
-              state, segmenter, input, &segment, &exhausted, final_level));
+              state, segmenter, input, final_level, &segment, &exhausted));
       if (exhausted) {
         break;
       }
@@ -602,6 +602,13 @@ static iree_status_t iree_tokenizer_segmenter_sequence_state_process(
         };
         iree_host_size_t passthrough_size = total_probe_consumed;
 
+        // The identity decision commits this prefix without asking child[0]
+        // to consume it. Reset the child's matcher so its retained scan state
+        // cannot refer to bytes the sequence reports as consumed.
+        IREE_RETURN_IF_ERROR(
+            iree_tokenizer_segmenter_sequence_reinit_child_state(state,
+                                                                 segmenter, 0));
+
         iree_tokenizer_segmenter_sequence_setup_level_parent(
             &state->levels[0], passthrough_segment);
         IREE_RETURN_IF_ERROR(
@@ -614,7 +621,7 @@ static iree_status_t iree_tokenizer_segmenter_sequence_state_process(
           bool exhausted = false;
           IREE_RETURN_IF_ERROR(
               iree_tokenizer_segmenter_sequence_pull_next_output_segment(
-                  state, segmenter, input, &segment, &exhausted, final_level));
+                  state, segmenter, input, final_level, &segment, &exhausted));
           if (exhausted) {
             expansion_complete = true;
             break;
@@ -659,7 +666,7 @@ static iree_status_t iree_tokenizer_segmenter_sequence_state_process(
       bool exhausted = false;
       IREE_RETURN_IF_ERROR(
           iree_tokenizer_segmenter_sequence_pull_next_output_segment(
-              state, segmenter, input, &segment, &exhausted, final_level));
+              state, segmenter, input, final_level, &segment, &exhausted));
       if (exhausted) {
         expansion_complete = true;
         break;
@@ -720,8 +727,8 @@ static iree_status_t iree_tokenizer_segmenter_sequence_state_finalize(
       iree_tokenizer_segment_t segment;
       IREE_RETURN_IF_ERROR(
           iree_tokenizer_segmenter_sequence_pull_next_output_segment(
-              state, segmenter, remaining_input, &segment, &exhausted,
-              final_level));
+              state, segmenter, remaining_input, final_level, &segment,
+              &exhausted));
       if (exhausted) {
         break;
       }
@@ -806,8 +813,8 @@ static iree_status_t iree_tokenizer_segmenter_sequence_state_finalize(
       bool exhausted = false;
       IREE_RETURN_IF_ERROR(
           iree_tokenizer_segmenter_sequence_pull_next_output_segment(
-              state, segmenter, remaining_input, &segment, &exhausted,
-              final_level));
+              state, segmenter, remaining_input, final_level, &segment,
+              &exhausted));
       if (exhausted) {
         expansion_complete = true;
         break;

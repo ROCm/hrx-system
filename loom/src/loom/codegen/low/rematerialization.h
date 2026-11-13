@@ -11,11 +11,13 @@
 // structural composition can recreate a closed graph over operand-free target
 // leaves. A narrow view retains its wider input as a capture instead of
 // rebuilding that input for each use.
-// Other native recipes recreate tied ownership predecessors and available
-// descriptor-declared sources, retaining their remaining inputs as external
-// captures with stable contents and ownership. Recipes preserve consuming
-// order. Each distinct user receives a private producer graph, shared by
-// repeated operands of that user.
+// Other native recipes recreate tied ownership predecessors, explicit state
+// inputs, and available descriptor-declared sources, retaining their remaining
+// inputs as external captures with stable contents and ownership. Recipes
+// preserve consuming order and clone each producer once, remapping all of its
+// results together. The original producer survives while any sibling result
+// remains used. Each distinct user receives a private producer graph, shared
+// by repeated operands of that user.
 //
 // Allocation and scheduling supply function-local value domains and ordering
 // facts. Rematerialization computes closure once per original value in a repair
@@ -121,7 +123,9 @@ iree_status_t loom_low_allocation_rematerialize_failure(
 // Candidate selection consumes the immutable allocation snapshot. Application
 // retains only value IDs and ordering facts, then queries fresh uses for each
 // rewrite so producers see uses introduced by earlier consumer clones.
-// Every recipe producer and use retains its repeated execution domain.
+// Multi-packet recipes retain their repeated execution domain. One recreatable
+// packet can replace a reload at a repeated use. Detached storage boundaries
+// remain in place instead of extending their original source lifetimes again.
 // Callers rebuild allocation once after the complete batch. One optional
 // diagnostic summarizes the batch; its trigger class is the first spill plan.
 //
@@ -137,16 +141,13 @@ iree_status_t loom_low_allocation_rematerialize_spill_plans(
 // execute at those same users, including users inside loops. Each private
 // result requires a register, preventing reconstruction/spill cycles. The
 // caller supplies state->required_register_values and retains it across
-// rebuilds. Returns the remaining storage plans, borrowing |table| when no
-// reconstruction applies or allocated from |arena| otherwise. Other allocation
-// facts remain an immutable snapshot. Consume the returned plans before
-// rebuilding allocation.
+// rebuilds. After any rewrite, callers rebuild allocation before materializing
+// memory traffic: shortening constant lifetimes can free the registers needed
+// by the other values in the old spill plan.
 iree_status_t loom_low_allocation_reconstruct_spills(
     loom_module_t* module, const loom_low_allocation_table_t* table,
     loom_low_rematerialization_state_t* state,
     iree_diagnostic_emitter_t emitter, iree_arena_allocator_t* arena,
-    const loom_low_allocation_spill_plan_t** out_spill_plans,
-    iree_host_size_t* out_spill_plan_count,
     loom_low_rematerialization_batch_result_t* out_result);
 
 #ifdef __cplusplus

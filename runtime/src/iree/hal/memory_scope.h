@@ -64,6 +64,9 @@ enum iree_hal_pool_access_requirement_bits_e {
   IREE_HAL_POOL_ACCESS_REQUIRE_COHERENT_WITH_HOST = 1u << 0,
   // This family uses an uncached native device access path.
   IREE_HAL_POOL_ACCESS_REQUIRE_UNCACHED = 1u << 1,
+  // This family's native execution address for each byte must equal the
+  // corresponding pointer in the pool's public host mapping.
+  IREE_HAL_POOL_ACCESS_REQUIRE_HOST_ADDRESS_IDENTITY = 1u << 2,
 };
 
 typedef enum iree_hal_pool_placement_mode_e {

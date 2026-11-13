@@ -17,6 +17,7 @@
 #include "loom/error/parameter.h"
 #include "loom/ir/module.h"
 #include "loom/ops/low/ops.h"
+#include "loom/ops/low/storage.h"
 #include "loom/ops/op_defs.h"
 #include "loom/ops/type_registry.h"
 #include "loom/rewrite/rewriter.h"
@@ -690,28 +691,33 @@ static iree_status_t loom_low_allocation_emit_spill_traffic(
     const loom_low_spill_materialization_traffic_plan_t* traffic_plan,
     iree_host_size_t instruction_index,
     const loom_low_spill_materialization_traffic_t* traffic,
-    loom_builder_t* builder, loom_value_id_t storage_value_id,
-    loom_value_id_t source_value_id, loom_location_id_t location,
-    iree_arena_allocator_t* arena, loom_op_t** out_last_op,
-    loom_low_spill_materialized_action_t* out_action) {
+    uint32_t slot_byte_size, loom_builder_t* builder,
+    loom_value_id_t storage_value_id, loom_value_id_t source_value_id,
+    loom_location_id_t location, iree_arena_allocator_t* arena,
+    loom_op_t** out_last_op, loom_low_spill_materialized_action_t* out_action) {
   *out_last_op = NULL;
   *out_action = (loom_low_spill_materialized_action_t){
       .value_id = LOOM_VALUE_ID_INVALID,
   };
   if (traffic_plan->emit == NULL) {
+    const int64_t byte_offset =
+        loom_low_spill_materialization_traffic_byte_offset(traffic,
+                                                           slot_byte_size);
     if (traffic->kind == LOOM_LOW_SPILL_MATERIALIZATION_TRAFFIC_STORE) {
       IREE_ASSERT_NE(source_value_id, LOOM_VALUE_ID_INVALID);
-      IREE_RETURN_IF_ERROR(
-          loom_low_spill_build(builder, source_value_id, storage_value_id,
-                               traffic->byte_offset, location, out_last_op));
+      IREE_RETURN_IF_ERROR((traffic->moves_source ? loom_low_spill_move_build
+                                                  : loom_low_spill_build)(
+          builder, source_value_id, storage_value_id, byte_offset, location,
+          out_last_op));
     } else {
       IREE_ASSERT_EQ(traffic->kind,
                      LOOM_LOW_SPILL_MATERIALIZATION_TRAFFIC_RELOAD);
       IREE_ASSERT_EQ(source_value_id, LOOM_VALUE_ID_INVALID);
-      IREE_RETURN_IF_ERROR(
-          loom_low_reload_build(builder, storage_value_id, traffic->byte_offset,
-                                traffic->value_type, location, out_last_op));
-      out_action->value_id = loom_low_reload_result(*out_last_op);
+      IREE_RETURN_IF_ERROR((traffic->moves_source ? loom_low_reload_move_build
+                                                  : loom_low_reload_build)(
+          builder, storage_value_id, byte_offset, traffic->value_type, location,
+          out_last_op));
+      out_action->value_id = loom_low_storage_load_result(*out_last_op);
     }
     return iree_ok_status();
   }
@@ -811,9 +817,9 @@ static iree_status_t loom_low_allocation_apply_spill_materialization_plan(
       case LOOM_LOW_SPILL_MATERIALIZATION_ACTION_DEFINITION_STORE: {
         IREE_ASSERT(has_traffic);
         IREE_RETURN_IF_ERROR(loom_low_allocation_emit_spill_traffic(
-            traffic_plan, i, &traffic, &builder, storage_value_id,
-            spill_plan->value_id, insertion.location, traffic_arena,
-            &last_traffic_op, &materialized_action));
+            traffic_plan, i, &traffic, spill_plan->byte_size, &builder,
+            storage_value_id, spill_plan->value_id, insertion.location,
+            traffic_arena, &last_traffic_op, &materialized_action));
         break;
       }
       case LOOM_LOW_SPILL_MATERIALIZATION_ACTION_EDGE_STORE: {
@@ -825,17 +831,17 @@ static iree_status_t loom_low_allocation_apply_spill_materialization_plan(
                       action->value.edge_store.source, action_states,
                       materialization_plan->action_count);
         IREE_RETURN_IF_ERROR(loom_low_allocation_emit_spill_traffic(
-            traffic_plan, i, &traffic, &builder, storage_value_id,
-            source_value_id, insertion.location, traffic_arena,
-            &last_traffic_op, &materialized_action));
+            traffic_plan, i, &traffic, spill_plan->byte_size, &builder,
+            storage_value_id, source_value_id, insertion.location,
+            traffic_arena, &last_traffic_op, &materialized_action));
         break;
       }
       case LOOM_LOW_SPILL_MATERIALIZATION_ACTION_OPERAND_RELOAD: {
         IREE_ASSERT(has_traffic);
         IREE_RETURN_IF_ERROR(loom_low_allocation_emit_spill_traffic(
-            traffic_plan, i, &traffic, &builder, storage_value_id,
-            LOOM_VALUE_ID_INVALID, insertion.location, traffic_arena,
-            &last_traffic_op, &materialized_action));
+            traffic_plan, i, &traffic, spill_plan->byte_size, &builder,
+            storage_value_id, LOOM_VALUE_ID_INVALID, insertion.location,
+            traffic_arena, &last_traffic_op, &materialized_action));
         const loom_value_id_t reload_value_id = materialized_action.value_id;
         action_states[action_index].value_id = reload_value_id;
         const loom_low_spill_materialization_target_t* target =
@@ -861,9 +867,9 @@ static iree_status_t loom_low_allocation_apply_spill_materialization_plan(
         loom_op_t* slice_op = action->value.narrow_slice_reload.slice_op;
         const loom_value_id_t slice_result = loom_low_slice_result(slice_op);
         IREE_RETURN_IF_ERROR(loom_low_allocation_emit_spill_traffic(
-            traffic_plan, i, &traffic, &builder, storage_value_id,
-            LOOM_VALUE_ID_INVALID, insertion.location, traffic_arena,
-            &last_traffic_op, &materialized_action));
+            traffic_plan, i, &traffic, spill_plan->byte_size, &builder,
+            storage_value_id, LOOM_VALUE_ID_INVALID, insertion.location,
+            traffic_arena, &last_traffic_op, &materialized_action));
         const loom_value_id_t reload_value_id = materialized_action.value_id;
         action_states[action_index].value_id = reload_value_id;
         IREE_RETURN_IF_ERROR(loom_value_replace_all_uses_with(
@@ -874,9 +880,9 @@ static iree_status_t loom_low_allocation_apply_spill_materialization_plan(
       case LOOM_LOW_SPILL_MATERIALIZATION_ACTION_SHARED_SLICE_RELOAD: {
         IREE_ASSERT(has_traffic);
         IREE_RETURN_IF_ERROR(loom_low_allocation_emit_spill_traffic(
-            traffic_plan, i, &traffic, &builder, storage_value_id,
-            LOOM_VALUE_ID_INVALID, insertion.location, traffic_arena,
-            &last_traffic_op, &materialized_action));
+            traffic_plan, i, &traffic, spill_plan->byte_size, &builder,
+            storage_value_id, LOOM_VALUE_ID_INVALID, insertion.location,
+            traffic_arena, &last_traffic_op, &materialized_action));
         const loom_value_id_t reload_value_id = materialized_action.value_id;
         action_states[action_index].value_id = reload_value_id;
         const uint32_t target_start =
@@ -1032,13 +1038,6 @@ iree_status_t loom_low_allocation_materialize_spills(
       options ? options->emitter : (iree_diagnostic_emitter_t){0};
   const iree_bitmap_t per_user_placement_values =
       options ? options->per_user_placement_values : (iree_bitmap_t){0};
-  if (options && options->max_spill_plan_count > 0 &&
-      options->max_spill_plan_count < spill_plan_count) {
-    spill_plan_count = options->max_spill_plan_count;
-  }
-  if (spill_plan_count == 0) {
-    return iree_ok_status();
-  }
   if (spill_plan_count > UINT32_MAX) {
     return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                             "materialized storage count overflow");
@@ -1065,6 +1064,43 @@ iree_status_t loom_low_allocation_materialize_spills(
         options->plan_traffic_user_data, table, spill_plans, spill_plan_count,
         &materialization_plan, arena, &traffic_plan));
     IREE_ASSERT(traffic_plan.emit != NULL);
+  }
+  if (traffic_plan.emit == NULL) {
+    for (iree_host_size_t i = 0; i < spill_plan_count; ++i) {
+      if (spill_plans[i].defined_parts != 0 &&
+          loom_low_spill_materialization_record_has_traffic(
+              &materialization_plan.records[i])) {
+        const loom_low_allocation_spill_plan_t* plan = &spill_plans[i];
+        const loom_low_allocation_assignment_t* assignment =
+            loom_low_allocation_spill_plan_assignment(table, plan);
+        const loom_diagnostic_param_t params[] = {
+            loom_param_string(
+                loom_low_diagnostic_function_name(module, table->function_op)),
+            loom_param_string(
+                loom_low_diagnostic_value_name(module, plan->value_id)),
+            loom_param_string(loom_low_diagnostic_reg_class_name(
+                table->target.descriptor_set,
+                assignment->descriptor_reg_class_id)),
+            loom_param_u32(plan->defined_parts),
+        };
+        const loom_diagnostic_emission_t emission = {
+            .module = module,
+            .op = loom_low_diagnostic_value_origin_op(module, plan->value_id,
+                                                      table->function_op),
+            .error = LOOM_ERR_BACKEND_058,
+            .params = params,
+            .param_count = IREE_ARRAYSIZE(params),
+        };
+        IREE_RETURN_IF_ERROR(iree_diagnostic_emit(emitter, &emission));
+        ++result.error_count;
+      }
+    }
+    if (result.error_count != 0) {
+      if (out_result) {
+        *out_result = result;
+      }
+      return iree_ok_status();
+    }
   }
 
   loom_low_allocation_storage_prefix_t storage_prefix;

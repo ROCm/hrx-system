@@ -11,7 +11,7 @@
 
 #include "iree/base/threading/call_once.h"
 #include "iree/base/tooling/flags.h"
-#include "iree/hal/drivers/init.h"
+#include "iree/hal/driver/init.h"
 #include "iree/hal/utils/mpi_channel_provider.h"
 
 //===----------------------------------------------------------------------===//

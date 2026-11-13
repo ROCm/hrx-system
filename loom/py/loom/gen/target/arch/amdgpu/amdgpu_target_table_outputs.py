@@ -22,6 +22,7 @@ from loom.gen.target.arch.amdgpu.descriptors.amdgpu_descriptors import (
 from loom.gen.target.arch.amdgpu.encoding.amdgpu_encoding_tables import (
     generate_amdgpu_encoding_table_source,
 )
+from loom.gen.target.low.native_assembly import NativeAsmValuePool
 from loom.target.arch.amdgpu.isa_xml import AmdgpuIsaFactSource
 from loom.target.low_descriptors import DescriptorSet
 
@@ -38,6 +39,7 @@ def generate_amdgpu_target_table_outputs(
     encoding_source_path: Path,
     primary_strings: CStringBank | None = None,
     shared_strings: CStringBank | None = None,
+    native_asm_values: NativeAsmValuePool | None = None,
 ) -> None:
     """Emits the descriptor and encoding sources for one storage family."""
 
@@ -47,6 +49,7 @@ def generate_amdgpu_target_table_outputs(
         source_public_header=_DESCRIPTOR_SOURCE_HEADER,
         primary_strings=primary_strings,
         shared_strings=shared_strings,
+        native_asm_values=native_asm_values,
     )
     encoding_source = generate_amdgpu_encoding_table_source(
         family,

@@ -39,8 +39,10 @@
 //     not.
 //
 //   Linear ownership transfers
-//     Operands consumed by tied or moved results are not used after the
-//     consuming op, including through required nonwriting storage aliases.
+//     Operands consumed by tied or moved results and owning managed callable
+//     fields are not used after the consuming op, including through required
+//     nonwriting storage aliases. Each consuming field needs an independent
+//     owner; borrowed callable fields preserve the original owner.
 //     Independent copies and the consuming operation's results have separate
 //     ownership. Mutually exclusive paths may each consume the same owner;
 //     recurrence is cut by the original owner's definition, not an alias.

@@ -1,0 +1,474 @@
+// RUN: pass unroll-scf-for,dce
+
+// The upper endpoint is referenced only by the predicate. Its pre-guard
+// conversion becomes a numeric identity only inside the guarded region.
+func.def @unsigned_upper(%input: i64, %bound: i64) {
+  %narrow = scalar.trunci %bound : i64 to i16
+  %wide = scalar.extui %narrow : i16 to i64
+  %c0 = scalar.constant 0 : i64
+  %limit = scalar.constant 128 : i64
+  %positive = scalar.cmpi sgt, %bound, %c0 : i64
+  %small = scalar.cmpi sle, %bound, %limit : i64
+  %valid = scalar.andi %positive, %small : i1
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  scf.if %valid {
+    %bounded = scalar.assume %input [ult(%input, %wide)] : i64
+    %position = index.cast %bounded : i64 to index
+    %extent = index.cast %bound : i64 to index
+    %distance = index.sub %extent, %position : index
+    %ordered = test.fact_positive %distance : index -> i1
+    %count = index.cast %ordered : i1 to index
+    scf.for %iteration = [%begin to %count step %step] unroll {
+      test.use %iteration : index
+    }
+  }
+  func.return
+}
+
+// ----
+func.def @unsigned_upper(%input: i64, %bound: i64) {
+  %c0 = scalar.constant 0 : i64
+  %limit = scalar.constant 128 : i64
+  %positive = scalar.cmpi sgt, %bound, %c0 : i64
+  %small = scalar.cmpi sle, %bound, %limit : i64
+  %valid = scalar.andi %positive, %small : i1
+  scf.if %valid {
+    %iteration_0 = index.constant 0 : index
+    test.use %iteration_0 : index
+  }
+  func.return
+}
+
+// ====
+
+// Reversed operands and an inclusive relation retain the same scoped
+// counterpart. The alias tuple has an unused result.
+func.def @unsigned_upper_reversed(%input: i64, %bound: i64) {
+  %narrow = scalar.trunci %bound : i64 to i8
+  %wide = scalar.extui %narrow : i8 to i64
+  %c0 = scalar.constant 0 : i64
+  %limit = scalar.constant 128 : i64
+  %positive = scalar.cmpi sgt, %bound, %c0 : i64
+  %small = scalar.cmpi sle, %bound, %limit : i64
+  %valid = scalar.andi %positive, %small : i1
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  scf.if %valid {
+    %bounded, %unused = scalar.assume %input, %wide [uge(%wide, %input)] : i64, i64
+    %position = index.cast %bounded : i64 to index
+    %extent = index.cast %bound : i64 to index
+    %distance = index.sub %extent, %position : index
+    %ordered = test.fact_non_negative %distance : index -> i1
+    %count = index.cast %ordered : i1 to index
+    scf.for %iteration = [%begin to %count step %step] unroll {
+      test.use %iteration : index
+    }
+  }
+  func.return
+}
+
+// ----
+func.def @unsigned_upper_reversed(%input: i64, %bound: i64) {
+  %c0 = scalar.constant 0 : i64
+  %limit = scalar.constant 128 : i64
+  %positive = scalar.cmpi sgt, %bound, %c0 : i64
+  %small = scalar.cmpi sle, %bound, %limit : i64
+  %valid = scalar.andi %positive, %small : i1
+  scf.if %valid {
+    %iteration_0 = index.constant 0 : index
+    test.use %iteration_0 : index
+  }
+  func.return
+}
+
+// ====
+
+// Both negative carriers also share signed and unsigned order. This branch
+// tests the lower bound rather than relying on nonnegative conversion facts.
+func.def @negative_lower(%input: i64, %bound: i64) {
+  %narrow = scalar.trunci %bound : i64 to i8
+  %wide = scalar.extsi %narrow : i8 to i64
+  %lower = scalar.constant -128 : i64
+  %c0 = scalar.constant 0 : i64
+  %small = scalar.cmpi sge, %bound, %lower : i64
+  %negative = scalar.cmpi slt, %bound, %c0 : i64
+  %valid = scalar.andi %small, %negative : i1
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  scf.if %valid {
+    %bounded = scalar.assume %input [ugt(%input, %wide)] : i64
+    %position = index.cast %bounded : i64 to index
+    %extent = index.cast %bound : i64 to index
+    %distance = index.sub %position, %extent : index
+    %ordered = test.fact_positive %distance : index -> i1
+    %count = index.cast %ordered : i1 to index
+    scf.for %iteration = [%begin to %count step %step] unroll {
+      test.use %iteration : index
+    }
+  }
+  func.return
+}
+
+// ----
+func.def @negative_lower(%input: i64, %bound: i64) {
+  %lower = scalar.constant -128 : i64
+  %c0 = scalar.constant 0 : i64
+  %small = scalar.cmpi sge, %bound, %lower : i64
+  %negative = scalar.cmpi slt, %bound, %c0 : i64
+  %valid = scalar.andi %small, %negative : i1
+  scf.if %valid {
+    %iteration_0 = index.constant 0 : index
+    test.use %iteration_0 : index
+  }
+  func.return
+}
+
+// ====
+
+// Dynamic RANGE endpoints use the same reference resolver. Each branch
+// independently projects the original value onto a different exact endpoint.
+func.def @sibling_bounds(%input: i64, %bound: i64) {
+  %narrow = scalar.trunci %bound : i64 to i16
+  %wide = scalar.extsi %narrow : i16 to i64
+  %c1 = scalar.constant 1 : i64
+  %c2 = scalar.constant 2 : i64
+  %first = scalar.cmpi eq, %bound, %c1 : i64
+  %second = scalar.cmpi eq, %bound, %c2 : i64
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  scf.if %first {
+    %bounded = scalar.assume %input [range(%input, %wide, %wide)] : i64
+    %count = index.cast %bounded : i64 to index
+    scf.for %iteration = [%begin to %count step %step] unroll {
+      test.use %iteration : index
+    }
+  }
+  scf.if %second {
+    %bounded = scalar.assume %input [range(%input, %wide, %wide)] : i64
+    %count = index.cast %bounded : i64 to index
+    scf.for %iteration = [%begin to %count step %step] unroll {
+      test.use %iteration : index
+    }
+  }
+  %outside = test.fact_non_zero %input : i64 -> i1
+  %count = index.cast %outside : i1 to index
+  scf.for %iteration = [%begin to %count step %step] unroll {
+    test.use %iteration : index
+  }
+  func.return
+}
+
+// ----
+func.def @sibling_bounds(%input: i64, %bound: i64) {
+  %c1 = scalar.constant 1 : i64
+  %c2 = scalar.constant 2 : i64
+  %first = scalar.cmpi eq, %bound, %c1 : i64
+  %second = scalar.cmpi eq, %bound, %c2 : i64
+  scf.if %first {
+    %iteration_0 = index.constant 0 : index
+    test.use %iteration_0 : index
+  }
+  scf.if %second {
+    %iteration_0 = index.constant 0 : index
+    test.use %iteration_0 : index
+    %iteration_1 = index.constant 1 : index
+    test.use %iteration_1 : index
+  }
+  func.return
+}
+
+// ====
+
+// A sign-changing conversion cannot lend its numeric identity to a bound.
+// The unsigned relation permits values on either side of the signed order.
+func.def @changing_conversion(%input: i64, %bound: i64) {
+  %narrow = scalar.trunci %bound : i64 to i8
+  %wide = scalar.extui %narrow : i8 to i64
+  %all_bits = scalar.constant -1 : i64
+  %selected = scalar.cmpi eq, %bound, %all_bits : i64
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  scf.if %selected {
+    %bounded = scalar.assume %input [ult(%input, %wide)] : i64
+    %incorrect = scalar.cmpi slt, %bounded, %bound : i64
+    %count = index.cast %incorrect : i1 to index
+    scf.for %iteration = [%begin to %count step %step] unroll {
+      test.use %iteration : index
+    }
+  }
+  func.return
+}
+
+// ----
+func.def @changing_conversion(%input: i64, %bound: i64) {
+  func.return
+}
+
+// ====
+
+// A relation across the sign boundary cannot prove a signed distance. The
+// finite ranges ensure that overflow cannot hide a wrongly retained order.
+func.def @unsigned_crossing(%left: i64, %right: i64, %selected: i1) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  scf.if %selected {
+    %ordered_left, %ordered_right = scalar.assume %left, %right [range(%left, -64, 63), range(%right, -64, 63), ult(%left, %right)] : i64, i64
+    %lower = index.cast %ordered_left : i64 to index
+    %upper = index.cast %ordered_right : i64 to index
+    %distance = index.sub %upper, %lower : index
+    %positive = test.fact_positive %distance : index -> i1
+    %count = index.cast %positive : i1 to index
+    scf.for %iteration = [%begin to %count step %step] unroll {
+      test.use %iteration : index
+    }
+  }
+  func.return
+}
+
+// ----
+func.def @unsigned_crossing(%left: i64, %right: i64, %selected: i1) {
+  func.return
+}
+
+// ====
+
+// Unrolling clones predicate-only references and invalidates the old scope.
+// Each copy must recover the same relation from its own live SSA definitions.
+func.def @cloned_predicates(%input: i64, %bound: i64) {
+  %narrow = scalar.trunci %bound : i64 to i16
+  %wide = scalar.extui %narrow : i16 to i64
+  %c0 = scalar.constant 0 : i64
+  %limit = scalar.constant 128 : i64
+  %positive = scalar.cmpi sgt, %bound, %c0 : i64
+  %small = scalar.cmpi sle, %bound, %limit : i64
+  %valid = scalar.andi %positive, %small : i1
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %end = index.constant 2 : index
+  scf.for %outer = [%begin to %end step %step] unroll {
+    scf.if %valid {
+      %bounded = scalar.assume %input [ult(%input, %wide)] : i64
+      %position = index.cast %bounded : i64 to index
+      %extent = index.cast %bound : i64 to index
+      %distance = index.sub %extent, %position : index
+      %positive_distance = test.fact_positive %distance : index -> i1
+      %count = index.cast %positive_distance : i1 to index
+      scf.for %inner = [%begin to %count step %step] unroll {
+        test.use %outer, %inner : index, index
+      }
+    }
+  }
+  func.return
+}
+
+// ----
+func.def @cloned_predicates(%input: i64, %bound: i64) {
+  %c0 = scalar.constant 0 : i64
+  %limit = scalar.constant 128 : i64
+  %positive = scalar.cmpi sgt, %bound, %c0 : i64
+  %small = scalar.cmpi sle, %bound, %limit : i64
+  %valid = scalar.andi %positive, %small : i1
+  %outer_0 = index.constant 0 : index
+  scf.if %valid {
+    %inner_0 = index.constant 0 : index
+    test.use %outer_0, %inner_0 : index, index
+  }
+  %outer_1 = index.constant 1 : index
+  scf.if %valid {
+    %inner_0 = index.constant 0 : index
+    test.use %outer_1, %inner_0 : index, index
+  }
+  func.return
+}
+
+// ====
+
+// CSE can merge identical aliases while preserving the scoped relation used
+// by a fresh conditioned analysis.
+// RUN: pass cse,unroll-scf-for,dce
+func.def @common_predicates(%input: i64, %bound: i64) {
+  %narrow = scalar.trunci %bound : i64 to i16
+  %wide = scalar.extui %narrow : i16 to i64
+  %c0 = scalar.constant 0 : i64
+  %limit = scalar.constant 128 : i64
+  %positive = scalar.cmpi sgt, %bound, %c0 : i64
+  %small = scalar.cmpi sle, %bound, %limit : i64
+  %valid = scalar.andi %positive, %small : i1
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  scf.if %valid {
+    %first = scalar.assume %input [ult(%input, %wide)] : i64
+    %second = scalar.assume %input [ult(%input, %wide)] : i64
+    test.use %first, %second : i64, i64
+    %position = index.cast %second : i64 to index
+    %extent = index.cast %bound : i64 to index
+    %distance = index.sub %extent, %position : index
+    %positive_distance = test.fact_positive %distance : index -> i1
+    %count = index.cast %positive_distance : i1 to index
+    scf.for %iteration = [%begin to %count step %step] unroll {
+      test.use %iteration : index
+    }
+  }
+  func.return
+}
+
+// ----
+func.def @common_predicates(%input: i64, %bound: i64) {
+  %narrow = scalar.trunci %bound : i64 to i16
+  %wide = scalar.extui %narrow : i16 to i64
+  %c0 = scalar.constant 0 : i64
+  %limit = scalar.constant 128 : i64
+  %positive = scalar.cmpi sgt, %bound, %c0 : i64
+  %small = scalar.cmpi sle, %bound, %limit : i64
+  %valid = scalar.andi %positive, %small : i1
+  scf.if %valid {
+    %first = scalar.assume %input [ult(%input, %wide)] : i64
+    test.use %first, %first : i64, i64
+    %iteration_0 = index.constant 0 : index
+    test.use %iteration_0 : index
+  }
+  func.return
+}
+
+// ====
+
+// The relation belongs to the guarded results, not the originals. The
+// sibling and join have bounded arithmetic but no proof of positive distance.
+// RUN: pass unroll-scf-for,dce
+func.def @relation_scope(%left_input: i64, %right_input: i64, %selected: i1) {
+  %left, %right = scalar.assume %left_input, %right_input [range(%left_input, 0, 63), range(%right_input, 0, 63)] : i64, i64
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  scf.if %selected {
+    %ordered_left, %ordered_right = scalar.assume %left, %right [ult(%left, %right)] : i64, i64
+    %lower = index.cast %ordered_left : i64 to index
+    %upper = index.cast %ordered_right : i64 to index
+    %distance = index.sub %upper, %lower : index
+    %positive = test.fact_positive %distance : index -> i1
+    %count = index.cast %positive : i1 to index
+    scf.for %iteration = [%begin to %count step %step] unroll {
+      test.use %iteration : index
+    }
+  } else {
+    %lower = index.cast %left : i64 to index
+    %upper = index.cast %right : i64 to index
+    %distance = index.sub %upper, %lower : index
+    %positive = test.fact_positive %distance : index -> i1
+    %count = index.cast %positive : i1 to index
+    scf.for %iteration = [%begin to %count step %step] unroll {
+      test.use %iteration : index
+    }
+  }
+  %lower = index.cast %left : i64 to index
+  %upper = index.cast %right : i64 to index
+  %distance = index.sub %upper, %lower : index
+  %positive = test.fact_positive %distance : index -> i1
+  %count = index.cast %positive : i1 to index
+  scf.for %iteration = [%begin to %count step %step] unroll {
+    test.use %iteration : index
+  }
+  func.return
+}
+
+// ----
+func.def @relation_scope(%left_input: i64, %right_input: i64, %selected: i1) {
+  scf.if %selected {
+    %iteration_0 = index.constant 0 : index
+    test.use %iteration_0 : index
+  } else {
+  }
+  func.return
+}
+
+// ====
+
+// RUN: pass canonicalize,unroll-scf-for,dce
+
+// A predicate-only reference observes its guard even after ordinary folding
+// removes arithmetic from the assumption's input.
+func.def @predicate_reference(%input: i64, %divisor: i64) {
+  %halfword = scalar.trunci %divisor : i64 to i16
+  %wide = scalar.extui %halfword : i16 to i64
+  %c0 = scalar.constant 0 : i64
+  %c1 = index.constant 1 : index
+  %begin = index.constant 0 : index
+  %c2 = scalar.constant 2 : i64
+  %selected = scalar.cmpi eq, %divisor, %c2 : i64
+  scf.if %selected {
+    %identity = scalar.addi %input, %c0 : i64
+    %bounded = scalar.assume %identity [ge(%identity, 1), ult(%identity, %wide)] : i64
+    %count = index.cast %bounded : i64 to index
+    scf.for %iteration = [%begin to %count step %c1] unroll {
+      test.use %iteration : index
+    }
+  }
+  %outside_nonzero = test.fact_non_zero %input : i64 -> i1
+  %outside_count = index.cast %outside_nonzero : i1 to index
+  scf.for %outside = [%begin to %outside_count step %c1] unroll {
+    test.use %outside : index
+  }
+  func.return
+}
+
+// ----
+func.def @predicate_reference(%input: i64, %divisor: i64) {
+  %c2 = scalar.constant 2 : i64
+  %selected = scalar.cmpi eq, %divisor, %c2 : i64
+  scf.if %selected {
+    %iteration_0 = index.constant 0 : index
+    test.use %iteration_0 : index
+  }
+  func.return
+}
+
+// ====
+
+// RUN: pass unroll-scf-for,dce
+
+// A bitmask loop proves nonzero only in its body, including after the backedge
+// clears the lowest set bit. Scoped trip-count queries observe that distinction.
+func.def @bitmask_loop_scope(%input: i32) {
+  %c0 = scalar.constant 0 : i32
+  %c1 = scalar.constant 1 : i32
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %outside = test.fact_non_zero %input : i32 -> i1
+  %outside_count = index.cast %outside : i1 to index
+  scf.for %unexpected = [%begin to %outside_count step %step] unroll {
+    test.use %unexpected : index
+  }
+  %result = scf.while(%before = %input : i32) -> (i32) {
+    %nonempty = scalar.cmpi ne, %before, %c0 : i32
+    scf.condition %nonempty, %before : i1, i32
+  } do(%mask: i32) {
+    %inside = test.fact_non_zero %mask : i32 -> i1
+    %inside_count = index.cast %inside : i1 to index
+    scf.for %observed = [%begin to %inside_count step %step] unroll {
+      test.use %observed : index
+    }
+    %below = scalar.subi %mask, %c1 : i32
+    %next = scalar.andi %mask, %below : i32
+    scf.yield %next : i32
+  }
+  test.use %result : i32
+  func.return
+}
+
+// ----
+func.def @bitmask_loop_scope(%input: i32) {
+  %c0 = scalar.constant 0 : i32
+  %c1 = scalar.constant 1 : i32
+  %result = scf.while(%before = %input : i32) -> (i32) {
+    %nonempty = scalar.cmpi ne, %before, %c0 : i32
+    scf.condition %nonempty, %before : i1, i32
+  } do(%mask: i32) {
+    %observed_0 = index.constant 0 : index
+    test.use %observed_0 : index
+    %below = scalar.subi %mask, %c1 : i32
+    %next = scalar.andi %mask, %below : i32
+    scf.yield %next : i32
+  }
+  test.use %result : i32
+  func.return
+}

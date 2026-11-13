@@ -8,8 +8,8 @@
 #define LOOM_SERVE_SERVICE_TEXT_STORAGE_H_
 
 #include "iree/vm/buffer.h"
-#include "loom/serve/runtime/storage/relocation.h"
-#include "loom/serve/runtime/storage/snapshot.h"
+#include "loom/runtime/storage/relocation.h"
+#include "loom/runtime/storage/snapshot.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -26,11 +26,23 @@ enum {
   LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT = 11,
 };
 
+// One validated physical root requested by source bootstrap.
+typedef struct loom_serve_text_allocation_t {
+  // Addressable byte extent; zero omits this root.
+  iree_device_size_t length;
+  // Required power-of-two device address alignment.
+  iree_device_size_t alignment;
+  // Initialized prefix outside demand-backed cache planes.
+  iree_device_size_t clear_length;
+  // A source cache region names this root, allowing demand backing.
+  bool cache;
+} loom_serve_text_allocation_t;
+
 typedef struct loom_serve_text_cache_region_t {
   // Source allocation slot containing these repeated cache planes.
   iree_host_size_t allocation;
   // Source-owned disjoint cache planes inside that allocation.
-  loom_serve_block_region_t blocks;
+  loom_runtime_block_region_t blocks;
 } loom_serve_text_cache_region_t;
 
 // Source storage description, separate from device ownership and model work.
@@ -42,6 +54,9 @@ typedef struct loom_serve_text_storage_t {
   iree_vm_buffer_t* buffers[LOOM_SERVE_TEXT_STORAGE_RESULT_COUNT];
   // Immutable mappings borrowing buffers until release_payloads.
   iree_const_byte_span_t bytes[LOOM_SERVE_TEXT_STORAGE_RESULT_COUNT];
+  // Validated root records, retained after source payload release.
+  loom_serve_text_allocation_t
+      allocations[LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT];
   // Positions in one page, declared by the model source.
   iree_host_size_t block_size;
   // Useful bytes contributed by one physical page across every cache plane.
@@ -102,7 +117,7 @@ iree_status_t loom_serve_text_storage_plan_snapshot(
     iree_hal_buffer_t* const* private_views, bool include_carry,
     uint32_t block_count, const uint32_t* blocks,
     iree_allocator_t host_allocator, iree_host_size_t* out_count,
-    loom_serve_snapshot_range_t** out_ranges);
+    loom_runtime_snapshot_range_t** out_ranges);
 
 #ifdef __cplusplus
 }  // extern "C"

@@ -40,12 +40,30 @@ kernel.def target(@fixture_target) @colors() {
   kernel.return
 }
 
+template.decl @rgba_channel(%value: f32) -> (i8)
+
+template.def<@rgba_channel> @rgba_channel_impl(%value: f32) -> (i8) {
+  %minimum = scalar.constant -1.0 : f32
+  %maximum = scalar.constant 1.0 : f32
+  %half = scalar.constant 0.5 : f32
+  %scale = scalar.constant 255.0 : f32
+  %above = scalar.maxnumf %value, %minimum : f32
+  %clamped = scalar.minnumf %above, %maximum : f32
+  %scaled = scalar.mulf %clamped, %half : f32
+  %shifted = scalar.addf %scaled, %half : f32
+  %intensity = scalar.mulf %shifted, %scale : f32
+  %rounded = scalar.roundevenf %intensity : f32
+  %wide = scalar.fptoui %rounded : f32 to i32
+  %byte = scalar.trunci %wide : i32 to i8
+  template.return %byte : i8
+}
+
 kernel.def target(@fixture_target) @pixels() {
   %count = config.get @fixture.pixels : index
   %batch = config.get @fixture.batch : index
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%count, %batch, %c1) workgroup_size(%c1, %c1, %c1) : index
-} launch(%colors: buffer, %rgb: buffer) {
+} launch(%colors: buffer, %rgba: buffer) {
   %count = config.get @fixture.pixels : index
   %batch = config.get @fixture.batch : index
   %pixel = kernel.workgroup.id<x> : index
@@ -54,7 +72,7 @@ kernel.def target(@fixture_target) @pixels() {
   scf.if %valid {
     %origin = index.constant 0 : offset
     %palette = buffer.view %colors[%origin] : buffer -> view<[%batch]x2xf32>
-    %output = buffer.view %rgb[%origin] : buffer -> view<[%batch]x3x[%count]xf32>
+    %output = buffer.view %rgba[%origin] : buffer -> view<[%batch]x[%count]x4xi8>
     %red = view.load %palette[%item, 0] : view<[%batch]x2xf32> -> f32
     %green = view.load %palette[%item, 1] : view<[%batch]x2xf32> -> f32
     %pixel32 = index.cast %pixel : index to i32
@@ -62,22 +80,25 @@ kernel.def target(@fixture_target) @pixels() {
     %c0 = scalar.constant 0 : i32
     %bit = scalar.andi %pixel32, %c1 : i32
     %odd = scalar.cmpi ne, %bit, %c0 : i32
-    %low = scalar.constant -1.0 : f32
-    %high = scalar.constant 1.0 : f32
-    %blue = scf.select %odd, %high, %low : f32
-    view.store %red, %output[%item, 0, %pixel] : f32, view<[%batch]x3x[%count]xf32>
-    view.store %green, %output[%item, 1, %pixel] : f32, view<[%batch]x3x[%count]xf32>
-    view.store %blue, %output[%item, 2, %pixel] : f32, view<[%batch]x3x[%count]xf32>
+    %low = scalar.constant 0 : i8
+    %high = scalar.constant -1 : i8
+    %red_byte = template.apply<@rgba_channel>(%red) : (f32) -> (i8)
+    %green_byte = template.apply<@rgba_channel>(%green) : (f32) -> (i8)
+    %blue_byte = scf.select %odd, %high, %low : i8
+    view.store %red_byte, %output[%item, %pixel, 0] : i8, view<[%batch]x[%count]x4xi8>
+    view.store %green_byte, %output[%item, %pixel, 1] : i8, view<[%batch]x[%count]x4xi8>
+    view.store %blue_byte, %output[%item, %pixel, 2] : i8, view<[%batch]x[%count]x4xi8>
+    view.store %high, %output[%item, %pixel, 3] : i8, view<[%batch]x[%count]x4xi8>
   }
   kernel.return
 }
 
-command.def public @generate_image() launch(%request: buffer, %rgb: buffer) {
+command.def public @generate_image() launch(%request: buffer, %rgba: buffer) {
   %batch = config.get @fixture.batch : index
   %stride = index.constant 8 : offset
   %length = index.scale %batch, %stride : index, offset -> offset
   %colors = buffer.alloca<global> align(16) %length : buffer
   kernel.launch @colors(%request, %colors) : (buffer, buffer)
-  kernel.launch @pixels(%colors, %rgb) : (buffer, buffer)
+  kernel.launch @pixels(%colors, %rgba) : (buffer, buffer)
   command.return
 }

@@ -224,7 +224,12 @@ _PROVIDER_FORMAT = [
 template_def = Op(
     "template.def",
     group=template_ops,
-    doc="Constraint-matched bodyful implementation of a template family.",
+    doc=(
+        "Constraint-matched bodyful implementation of a template family. "
+        "Declared input dimensions and complete encodings are applicability "
+        "requirements. Other input structure and the family result contract "
+        "remain exact."
+    ),
     traits=[SYMBOL_DEFINE, ISOLATED_FROM_ABOVE],
     attrs=list(_PROVIDER_ATTRS),
     symbol_def=SymbolDefinition(
@@ -312,7 +317,10 @@ template_apply = Op(
     group=template_ops,
     doc=(
         "Compile-time family application. A specializing link selects one "
-        "applicable implementation before executable lowering. In a command "
+        "applicable implementation before executable lowering. Input shape and "
+        "complete encoding requirements are proven from application-site facts; "
+        "result types do not select providers. Selected inputs are explicitly "
+        "refined before an exactly typed call. In a command "
         "program this is source composition whose selected implementation is "
         "inlined before portable command planning."
     ),
@@ -328,6 +336,7 @@ template_apply = Op(
     ],
     results=[Result("results", ANY, variadic=True)],
     traits=[UNKNOWN_EFFECTS, COMMAND_EFFECT, CONTEXTUAL, CALLABLE_BOUNDARY],
+    callable_effect_contract="effect_contract",
     verify="loom_template_apply_verify",
     canonicalize="loom_template_apply_canonicalize",
     effective_traits="loom_template_apply_effective_traits",

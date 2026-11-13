@@ -27,6 +27,7 @@
 #include "loom/codegen/low/memory_access.h"
 #include "loom/codegen/low/placement.h"
 #include "loom/codegen/low/register_requirements.h"
+#include "loom/codegen/low/schedule/borrow.h"
 #include "loom/codegen/low/schedule/dependencies.h"
 #include "loom/codegen/low/target_binding.h"
 #include "loom/error/emitter.h"
@@ -186,18 +187,14 @@ enum loom_low_schedule_flag_bits_e {
   LOOM_LOW_SCHEDULE_FLAG_RETAIN_VALUE_PRODUCER_NODES = 1u << 5,
   // Retains exact memory-completion edges across acyclic CFG paths.
   LOOM_LOW_SCHEDULE_FLAG_RETAIN_ACYCLIC_MEMORY_COMPLETIONS = 1u << 6,
-  // Orders single-successor structural setup chains after their consumers'
-  // external prerequisites. Allocation repair enables this while retrying a
-  // rematerialized program; spill insertion resets that scheduling policy.
-  LOOM_LOW_SCHEDULE_FLAG_ORDER_STRUCTURAL_SETUP = 1u << 7,
   // Retains every raw dependency row for complete schedule inspection.
-  LOOM_LOW_SCHEDULE_FLAG_RETAIN_DEPENDENCIES = 1u << 8,
+  LOOM_LOW_SCHEDULE_FLAG_RETAIN_DEPENDENCIES = 1u << 7,
   // Indicates that target lowering has replaced authored or materialized spill
   // traffic in the scheduled function. Mandatory helper chains and retained
   // private placements remain demand driven around their consumers.
-  LOOM_LOW_SCHEDULE_FLAG_HAS_LOWERED_SPILL_TRAFFIC = 1u << 9,
+  LOOM_LOW_SCHEDULE_FLAG_HAS_LOWERED_SPILL_TRAFFIC = 1u << 8,
   // Reconciles private setup ownership after required-register exhaustion.
-  LOOM_LOW_SCHEDULE_FLAG_REPAIR_PRIVATE_SETUP = 1u << 10,
+  LOOM_LOW_SCHEDULE_FLAG_REPAIR_PRIVATE_SETUP = 1u << 9,
 };
 typedef uint32_t loom_low_schedule_flags_t;
 
@@ -820,6 +817,8 @@ typedef struct loom_low_schedule_table_t {
   const loom_low_memory_access_map_t* memory_accesses;
   // Declared interfaces and storage retained from the immutable function model.
   loom_low_function_requirements_t requirements;
+  // Lifetime coverage selected over this exact scheduled snapshot.
+  loom_low_borrow_plan_t borrows;
   // Function-local value IDs indexed by local value ordinal.
   const loom_value_id_t* value_ids;
   // Number of entries in |value_ids|.

@@ -10,10 +10,6 @@
 #include "loom/ops/low/ops.h"
 #include "loom/target/arch/amd/xdna/aie2p/ops/ops.h"
 
-enum {
-  LOOM_AIE2P_FIFO_STATE_PLAN_IMPORT = 0x404,
-};
-
 typedef struct loom_aie2p_fifo_state_import_t {
   // First source query selected for this function. Preamble emission binds its
   // two results; later queries alias those canonical values.
@@ -36,10 +32,6 @@ iree_status_t loom_aie2p_query_fifo_state_contract(
     out_result->outcome = LOOM_TARGET_CONTRACT_QUERY_LEGAL;
   }
   return iree_ok_status();
-}
-
-bool loom_aie2p_fifo_state_plan_isa(loom_low_lower_plan_t plan) {
-  return plan.id == LOOM_AIE2P_FIFO_STATE_PLAN_IMPORT;
 }
 
 iree_status_t loom_aie2p_select_fifo_state_plan(
@@ -67,7 +59,7 @@ iree_status_t loom_aie2p_select_fifo_state_plan(
   IREE_RETURN_IF_ERROR(loom_low_lower_plan_value_type(
       context, loom_aie2p_load_fifo_state_fifo1(source_op), import->low_type));
   *out_plan =
-      loom_low_lower_plan_make(LOOM_AIE2P_FIFO_STATE_PLAN_IMPORT, import);
+      loom_low_lower_plan_make(LOOM_AIE2P_PLAN_FIFO_STATE_IMPORT, import);
   return iree_ok_status();
 }
 

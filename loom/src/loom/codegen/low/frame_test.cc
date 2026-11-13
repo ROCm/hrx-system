@@ -83,10 +83,9 @@ low.func.def target<test.low.core> @structural_model() -> (reg<test.i32 x4>) asm
   iree_status_t BuildFrame(
       loom_module_t* module,
       loom_low_schedule_structural_model_list_t structural_models,
-      loom_low_emission_frame_t* out_frame,
-      loom_low_schedule_strategy_t schedule_strategy =
-          LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL,
-      loom_low_schedule_flags_t schedule_flags = 0) {
+      loom_low_schedule_strategy_t schedule_strategy,
+      loom_low_schedule_flags_t schedule_flags,
+      loom_low_emission_frame_t* out_frame) {
     loom_block_t* module_block = loom_module_block(module);
     IREE_ASSERT_EQ(module_block->op_count, 1);
     loom_low_emission_frame_options_t options = {
@@ -106,6 +105,24 @@ low.func.def target<test.low.core> @structural_model() -> (reg<test.i32 x4>) asm
       iree_arena_block_pool_trim(&block_pool_);
     }
     return status;
+  }
+
+  iree_status_t BuildFrame(
+      loom_module_t* module,
+      loom_low_schedule_structural_model_list_t structural_models,
+      loom_low_emission_frame_t* out_frame) {
+    return BuildFrame(module, structural_models,
+                      LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL,
+                      /*schedule_flags=*/0, out_frame);
+  }
+
+  iree_status_t BuildFrame(
+      loom_module_t* module,
+      loom_low_schedule_structural_model_list_t structural_models,
+      loom_low_schedule_strategy_t schedule_strategy,
+      loom_low_emission_frame_t* out_frame) {
+    return BuildFrame(module, structural_models, schedule_strategy,
+                      /*schedule_flags=*/0, out_frame);
   }
 
   const loom_low_schedule_node_t* FindNode(
@@ -1251,8 +1268,8 @@ low.func.def target<test.low.core> @directional_effect(%address: reg<test.ptr>, 
 }
 )");
   loom_low_emission_frame_t frame = {};
-  IREE_ASSERT_OK(BuildFrame(module.get(), {}, &frame,
-                            LOOM_LOW_SCHEDULE_STRATEGY_SOURCE_PRIORITY));
+  IREE_ASSERT_OK(BuildFrame(
+      module.get(), {}, LOOM_LOW_SCHEDULE_STRATEGY_SOURCE_PRIORITY, &frame));
 
   ASSERT_GE(frame.schedule.node_count, 3u);
   EXPECT_EQ(frame.schedule.nodes[0].issue_cycle, 0u);
@@ -1290,9 +1307,9 @@ low.func.def target<test.low.core> @directional_effect(%address: reg<test.ptr>, 
   const auto dependency_count = frame.schedule.dependency_count;
   const auto effect_dependency_count = frame.schedule.effect_dependencies.count;
   loom_low_emission_frame_t inspected_frame = {};
-  IREE_ASSERT_OK(BuildFrame(module.get(), {}, &inspected_frame,
-                            LOOM_LOW_SCHEDULE_STRATEGY_SOURCE_PRIORITY,
-                            LOOM_LOW_SCHEDULE_FLAG_RETAIN_DEPENDENCIES));
+  IREE_ASSERT_OK(
+      BuildFrame(module.get(), {}, LOOM_LOW_SCHEDULE_STRATEGY_SOURCE_PRIORITY,
+                 LOOM_LOW_SCHEDULE_FLAG_RETAIN_DEPENDENCIES, &inspected_frame));
   ASSERT_NE(inspected_frame.schedule.dependency_graph, nullptr);
   EXPECT_EQ(inspected_frame.schedule.dependency_count, dependency_count);
   EXPECT_EQ(inspected_frame.schedule.dependency_graph->count, dependency_count);

@@ -109,6 +109,14 @@ static const loom_amdgpu_lower_dispatch_row_t
                 loom_amdgpu_emit_scalar_i64_alu_dispatch,
                 loom_amdgpu_low_legality_verify_scalar_i64_alu, 2,
                 LOOM_AMDGPU_PRESELECT_TARGET_PLAN),
+        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_SCALAR_ADDCARRYUI)] =
+            LOOM_AMDGPU_GENERATED_PRESELECT_DATA_SOURCE_POLICY_ROW(
+                LOOM_OP_SCALAR_ADDCARRYUI,
+                loom_amdgpu_scalar_i64_alu_plan_t,
+                loom_amdgpu_select_scalar_i64_alu_dispatch,
+                loom_amdgpu_emit_scalar_i64_alu_dispatch,
+                loom_amdgpu_low_legality_verify_scalar_i64_alu, 2,
+                LOOM_AMDGPU_PRESELECT_TARGET_PLAN),
         [LOOM_AMDGPU_OP_INDEX(LOOM_OP_SCALAR_CMPI)] =
             LOOM_AMDGPU_GENERATED_PRESELECT_DATA_SOURCE_POLICY_ROW(
                 LOOM_OP_SCALAR_CMPI, loom_amdgpu_i64_compare_plan_t,
@@ -197,23 +205,10 @@ static const loom_amdgpu_lower_dispatch_row_t
                 loom_amdgpu_emit_scalar_i64_alu_dispatch,
                 loom_amdgpu_low_legality_verify_scalar_i64_alu, 2,
                 LOOM_AMDGPU_PRESELECT_TARGET_PLAN),
-        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_SCALAR_SHLI)] =
+        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_SCALAR_SUBBORROWUI)] =
             LOOM_AMDGPU_GENERATED_PRESELECT_DATA_SOURCE_POLICY_ROW(
-                LOOM_OP_SCALAR_SHLI, loom_amdgpu_scalar_i64_alu_plan_t,
-                loom_amdgpu_select_scalar_i64_alu_dispatch,
-                loom_amdgpu_emit_scalar_i64_alu_dispatch,
-                loom_amdgpu_low_legality_verify_scalar_i64_alu, 2,
-                LOOM_AMDGPU_PRESELECT_TARGET_PLAN),
-        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_SCALAR_SHRUI)] =
-            LOOM_AMDGPU_GENERATED_PRESELECT_DATA_SOURCE_POLICY_ROW(
-                LOOM_OP_SCALAR_SHRUI, loom_amdgpu_scalar_i64_alu_plan_t,
-                loom_amdgpu_select_scalar_i64_alu_dispatch,
-                loom_amdgpu_emit_scalar_i64_alu_dispatch,
-                loom_amdgpu_low_legality_verify_scalar_i64_alu, 2,
-                LOOM_AMDGPU_PRESELECT_TARGET_PLAN),
-        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_SCALAR_SHRSI)] =
-            LOOM_AMDGPU_GENERATED_PRESELECT_DATA_SOURCE_POLICY_ROW(
-                LOOM_OP_SCALAR_SHRSI, loom_amdgpu_scalar_i64_alu_plan_t,
+                LOOM_OP_SCALAR_SUBBORROWUI,
+                loom_amdgpu_scalar_i64_alu_plan_t,
                 loom_amdgpu_select_scalar_i64_alu_dispatch,
                 loom_amdgpu_emit_scalar_i64_alu_dispatch,
                 loom_amdgpu_low_legality_verify_scalar_i64_alu, 2,
@@ -1071,9 +1066,13 @@ static const loom_amdgpu_lower_dispatch_row_t
                 loom_amdgpu_low_legality_verify_kernel_async,
                 LOOM_AMDGPU_STORAGE_ASYNC_GATHER),
         [LOOM_AMDGPU_OP_INDEX(LOOM_OP_KERNEL_ASYNC_GATHER_MASK)] =
-            LOOM_AMDGPU_LEGALITY_ROW(
+            LOOM_AMDGPU_RECIPE_DATA_STORAGE_ROW(
                 LOOM_OP_KERNEL_ASYNC_GATHER_MASK,
-                loom_amdgpu_low_legality_verify_kernel_async),
+                loom_amdgpu_async_gather_plan_t,
+                loom_amdgpu_select_kernel_async_gather_dispatch,
+                loom_amdgpu_emit_kernel_async_gather_dispatch,
+                loom_amdgpu_low_legality_verify_kernel_async,
+                LOOM_AMDGPU_STORAGE_ASYNC_GATHER),
         [LOOM_AMDGPU_OP_INDEX(LOOM_OP_KERNEL_ASYNC_GROUP)] =
             LOOM_AMDGPU_LEGALITY_ROW(
                 LOOM_OP_KERNEL_ASYNC_GROUP,

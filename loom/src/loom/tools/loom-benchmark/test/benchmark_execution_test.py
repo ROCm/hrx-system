@@ -18,6 +18,7 @@ SCENARIO_SOURCE = Path(sys.argv.pop(1)).resolve()
 COMMAND_SOURCE = Path(sys.argv.pop(1)).resolve()
 SEQUENCE_SOURCE = Path(sys.argv.pop(1)).resolve()
 HOST_VALUES_SOURCE = Path(sys.argv.pop(1)).resolve()
+REUSED_PRODUCTS_SOURCE = Path(sys.argv.pop(1)).resolve()
 
 
 class BenchmarkExecutionTest(unittest.TestCase):
@@ -62,6 +63,46 @@ class BenchmarkExecutionTest(unittest.TestCase):
             "--batch-size=1",
             "--input-ring-count=2",
         )
+
+    def test_reused_products_keep_trial_values_and_layouts(self):
+        result, rows = self.run_tool(
+            REUSED_PRODUCTS_SOURCE,
+            "--scenario-correctness=true",
+            "--input-ring-count=2",
+            "--batch-size=2",
+            "--profile-final-batch=true",
+            "--profile-data=dispatch-events",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+        results = {
+            (value["benchmark"], value["trial_index"]): value
+            for row in rows
+            if row["row"] == "benchmark"
+            for value in (row["benchmark_result"],)
+        }
+        self.assertEqual(
+            set(results),
+            {
+                (f"reused_{kind}_latency", trial)
+                for kind in ("function", "kernel", "command")
+                for trial in (0, 1)
+            },
+        )
+        for (benchmark, trial), value in results.items():
+            self.assertEqual(value["state"], "ok")
+            self.assertEqual(value["correctness"]["state"], "passed")
+            self.assertEqual(value["correctness"]["sample_count"], 1)
+            self.assertEqual(value["correctness"]["failed_sample_count"], 0)
+            dispatch_count = 2 if benchmark == "reused_command_latency" else 1
+            self.assertEqual(
+                value["measurement"]["physical_dispatches_per_logical_operation"],
+                dispatch_count,
+            )
+            if benchmark != "reused_function_latency":
+                self.assertEqual(
+                    value["data_cache"]["binding_set_bytes"], 4 if trial == 0 else 12
+                )
 
     def test_equivalent_scenarios_share_one_interleaved_schedule(self):
         result, rows = self.run_comparison("scenario_benchmark_candidate_throughput")

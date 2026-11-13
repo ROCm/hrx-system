@@ -197,6 +197,10 @@ iree_status_t loom_type_specialize_encoding_with_value_facts(
       }
     }
   }
+  if (result == LOOM_TYPE_REFINEMENT_NARROWED) {
+    IREE_RETURN_IF_ERROR(
+        loom_module_intern_type(module, refined_type, &refined_type));
+  }
   *out_type = refined_type;
   *out_result = result;
   return iree_ok_status();
@@ -219,6 +223,10 @@ iree_status_t loom_type_specialize_with_value_facts(
         &encoding_result));
     loom_type_refinement_merge_analysis_result(encoding_result, &result);
     refined_type = encoding_refined_type;
+  }
+  if (result == LOOM_TYPE_REFINEMENT_NARROWED) {
+    IREE_RETURN_IF_ERROR(
+        loom_module_intern_type(module, refined_type, &refined_type));
   }
   *out_type = refined_type;
   *out_result = result;

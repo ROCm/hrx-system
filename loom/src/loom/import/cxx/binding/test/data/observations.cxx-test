@@ -1,0 +1,124 @@
+// RUN: pass canonicalize,cse,dce
+// Independent results map to distinct elements through one shared view.
+#include <loomcxx/view.h>
+unsigned schedule_call(unsigned count);
+unsigned schedule_snapshot(unsigned count);
+unsigned schedule_wide(unsigned count);
+unsigned schedule_narrow(unsigned count);
+unsigned schedule_signed(int count);
+unsigned schedule_unevaluated(unsigned count);
+unsigned schedule_initializer(unsigned count);
+unsigned schedule_serial(unsigned count);
+
+void schedule_observations(unsigned count,
+                           loom::type::buffer<unsigned> output) {
+  auto values =
+      loom::buffer::view<8>(output, {}, loom::encoding::layout::dense<1>());
+  loom::view::store(schedule_call(count), values, 0);
+  loom::view::store(schedule_snapshot(count), values, 1);
+  loom::view::store(schedule_wide(count), values, 2);
+  loom::view::store(schedule_narrow(count), values, 3);
+  loom::view::store(schedule_signed(count), values, 4);
+  loom::view::store(schedule_unevaluated(count), values, 5);
+  loom::view::store(schedule_initializer(count), values, 6);
+  loom::view::store(schedule_serial(count), values, 7);
+}
+
+// ----
+func.def public @schedule_observations(%count: i32, %output: buffer) {
+  %3 = index.constant 0 : offset
+  %values = buffer.view %output[%3] : buffer -> view<8xi32>
+  %5 = func.call @schedule_call(%count) : (i32) -> (i32)
+  %52 = index.constant 0 : index
+  view.store %5, %values[%52] : i32, view<8xi32>
+  %8 = func.call @schedule_snapshot(%count) : (i32) -> (i32)
+  %51 = index.constant 1 : index
+  view.store %8, %values[%51] : i32, view<8xi32>
+  %11 = func.call @schedule_wide(%count) : (i32) -> (i32)
+  %50 = index.constant 2 : index
+  view.store %11, %values[%50] : i32, view<8xi32>
+  %14 = func.call @schedule_narrow(%count) : (i32) -> (i32)
+  %49 = index.constant 3 : index
+  view.store %14, %values[%49] : i32, view<8xi32>
+  %17 = func.call @schedule_signed(%count) : (i32) -> (i32)
+  %48 = index.constant 4 : index
+  view.store %17, %values[%48] : i32, view<8xi32>
+  %20 = func.call @schedule_unevaluated(%count) : (i32) -> (i32)
+  %47 = index.constant 5 : index
+  view.store %20, %values[%47] : i32, view<8xi32>
+  %23 = func.call @schedule_initializer(%count) : (i32) -> (i32)
+  %46 = index.constant 6 : index
+  view.store %23, %values[%46] : i32, view<8xi32>
+  %26 = func.call @schedule_serial(%count) : (i32) -> (i32)
+  %45 = index.constant 7 : index
+  view.store %26, %values[%45] : i32, view<8xi32>
+  func.return
+}
+
+func.decl @schedule_call(%29: i32) -> (i32)
+
+func.decl @schedule_snapshot(%31: i32) -> (i32)
+
+func.decl @schedule_wide(%33: i32) -> (i32)
+
+func.decl @schedule_narrow(%35: i32) -> (i32)
+
+func.decl @schedule_signed(%37: i32) -> (i32)
+
+func.decl @schedule_unevaluated(%39: i32) -> (i32)
+
+func.decl @schedule_initializer(%41: i32) -> (i32)
+
+func.decl @schedule_serial(%43: i32) -> (i32)
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// Loop reference arithmetic reuses one total while retaining slot-specific
+// adjustments and every observation.
+#include <loomcxx/view.h>
+void schedule_oracle(unsigned count, loom::type::buffer<unsigned> output) {
+  auto values =
+      loom::buffer::view<8>(output, {}, loom::encoding::layout::dense<1>());
+  unsigned sum = count * (count - 1u) / 2u;
+  loom::view::store(sum, values, 0);
+  loom::view::store(sum + count + 3u, values, 1);
+  loom::view::store(sum, values, 2);
+  loom::view::store(sum, values, 3);
+  loom::view::store(sum, values, 4);
+  loom::view::store(sum + count + 73u, values, 5);
+  loom::view::store(sum, values, 6);
+  loom::view::store(sum, values, 7);
+}
+
+// ----
+func.def public @schedule_oracle(%count: i32, %output: buffer) {
+  %3 = index.constant 0 : offset
+  %values = buffer.view %output[%3] : buffer -> view<8xi32>
+  %42 = scalar.constant -1 : i32
+  %43 = scalar.addi %count, %42 : i32
+  %7 = scalar.muli %count, %43 : i32
+  %40 = scalar.constant 1 : i32
+  %sum = scalar.shrui %7, %40 : i32
+  %39 = index.constant 0 : index
+  view.store %sum, %values[%39] : i32, view<8xi32>
+  %12 = scalar.addi %sum, %count : i32
+  %13 = scalar.constant 3 : i32
+  %14 = scalar.addi %12, %13 : i32
+  %38 = index.constant 1 : index
+  view.store %14, %values[%38] : i32, view<8xi32>
+  %37 = index.constant 2 : index
+  view.store %sum, %values[%37] : i32, view<8xi32>
+  %36 = index.constant 3 : index
+  view.store %sum, %values[%36] : i32, view<8xi32>
+  %35 = index.constant 4 : index
+  view.store %sum, %values[%35] : i32, view<8xi32>
+  %24 = scalar.constant 73 : i32
+  %25 = scalar.addi %12, %24 : i32
+  %34 = index.constant 5 : index
+  view.store %25, %values[%34] : i32, view<8xi32>
+  %33 = index.constant 6 : index
+  view.store %sum, %values[%33] : i32, view<8xi32>
+  %32 = index.constant 7 : index
+  view.store %sum, %values[%32] : i32, view<8xi32>
+  func.return
+}

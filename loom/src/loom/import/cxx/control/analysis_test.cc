@@ -7,12 +7,14 @@
 #include "loom/import/cxx/control/analysis.h"
 
 #include <cxx/ast.h>
+#include <cxx/lambda_captures.h>
 #include <cxx/names.h>
 #include <cxx/symbols.h>
 
 #include <algorithm>
 #include <cstdint>
 #include <limits>
+#include <string>
 
 #include "iree/testing/gtest.h"
 #include "loom/import/cxx/source/expressions.h"
@@ -30,6 +32,109 @@ cxx::FunctionDefinitionAST* definition(Source& source) {
     }
   }
   return nullptr;
+}
+
+class FirstLambda final : private cxx::ASTVisitor {
+ public:
+  static cxx::LambdaExpressionAST* find(cxx::AST* root) {
+    FirstLambda finder;
+    finder.accept(root);
+    return finder.result_;
+  }
+
+ private:
+  void visit(cxx::LambdaExpressionAST* ast) override {
+    if (!result_) {
+      result_ = ast;
+    }
+  }
+
+  cxx::LambdaExpressionAST* result_ = nullptr;
+};
+
+TEST(ControlFlowTest, LambdaConstructionVisitsCapturesButNotDeferredBody) {
+  loom_cxx_import_options_t options;
+  loom_cxx_import_options_initialize(&options);
+  Source source(IREE_SV(R"(
+    static unsigned initialize();
+    static void deferred();
+    void entry(unsigned value) {
+      [&value, initialized = initialize()]() mutable {
+        value += initialized;
+        deferred();
+      };
+    }
+  )"),
+                IREE_SV("lambda_boundary.cxx"), options);
+  auto* function = definition(source);
+  ASSERT_NE(function, nullptr);
+  auto* body = cxx::ast_cast<cxx::CompoundStatementFunctionBodyAST>(
+                   function->functionBody)
+                   ->statement;
+  auto* lambda = FirstLambda::find(body);
+  ASSERT_NE(lambda, nullptr);
+  ASSERT_NE(lambda->captureList, nullptr);
+  auto* value_capture = lambda->captureList->next->value;
+  auto* initializer = cxx::capture_initializer(value_capture);
+  ASSERT_NE(initializer, nullptr);
+
+  Types types(source.unit(), source.diagnostics());
+  ControlFlow analysis(source.unit(), source.diagnostics(), types, body,
+                       function->symbol);
+  auto calls = analysis.calls();
+  ASSERT_EQ(calls.size(), 1u);
+  ASSERT_NE(calls[0].function, nullptr);
+  EXPECT_EQ(cxx::to_string(calls[0].function->name()), "initialize");
+  EXPECT_TRUE(analysis.written(body).empty());
+}
+
+// Comparison classification is independent of pointer comparison lowering:
+// the capture analysis consumes resolved value reads, not operator spelling.
+TEST(ControlFlowTest, DependentPointerComparisonsReadCapturedValues) {
+  for (const char* comparison : {"==", "!=", "<", "<=", ">", ">="}) {
+    SCOPED_TRACE(comparison);
+    std::string text = R"(
+      bool entry(const int* input, const int* other) {
+        auto compare = [&input](auto value) { return input )";
+    text += comparison;
+    text += R"( value; };
+        return compare(other);
+      }
+    )";
+    loom_cxx_import_options_t options;
+    loom_cxx_import_options_initialize(&options);
+    Source source(iree_make_string_view(text.data(), text.size()),
+                  IREE_SV("capture_comparisons.cxx"), options);
+    auto* function = definition(source);
+    ASSERT_NE(function, nullptr);
+    auto* body = cxx::ast_cast<cxx::CompoundStatementFunctionBodyAST>(
+                     function->functionBody)
+                     ->statement;
+    auto* lambda = FirstLambda::find(body);
+    ASSERT_NE(lambda, nullptr);
+    auto* field = cxx::capture_field(lambda->captureList->value);
+    ASSERT_NE(field, nullptr);
+    auto* primary = lambda->symbol->closureType()->functionCallOperator();
+    ASSERT_EQ(primary->specializations().size(), 1u);
+    auto* concrete = cxx::symbol_cast<cxx::FunctionSymbol>(
+        primary->specializations().front().symbol);
+    ASSERT_NE(concrete, nullptr);
+    auto* concrete_body = cxx::ast_cast<cxx::CompoundStatementFunctionBodyAST>(
+        concrete->declaration()->functionBody);
+    ASSERT_NE(concrete_body, nullptr);
+
+    Types types(source.unit(), source.diagnostics());
+    ControlFlow construction(source.unit(), source.diagnostics(), types, body,
+                             function->symbol);
+    ControlFlow invocation(source.unit(), source.diagnostics(), types,
+                           concrete_body->statement, concrete);
+    std::unordered_set<cxx::FieldSymbol*> identities;
+    invocation.collect_pointer_capture_identities(identities);
+    EXPECT_TRUE(identities.empty());
+    EXPECT_FALSE(construction.resolve_pointer_reference_captures(identities));
+    construction.publish_pointer_reference_snapshots(types);
+    EXPECT_TRUE(types.pointer_reference_is_snapshot(field));
+  }
 }
 
 TEST(ControlFlowTest,
@@ -470,6 +575,211 @@ TEST(ControlFlowTest, SourceSelectionRetainsInitializerAndSelectedWrites) {
   EXPECT_TRUE(std::ranges::equal(writes, analysis.written(body)));
 }
 
+TEST(ControlFlowTest, AutomaticObjectStorageRemainsDistinctFromAddressDemand) {
+  loom_cxx_import_options_t options;
+  loom_cxx_import_options_initialize(&options);
+  Source source(IREE_SV(R"(
+    struct Pair { unsigned first; unsigned second; };
+    struct Constructed { Constructed(); unsigned value; };
+    void entry(unsigned input) {
+      Pair value{input, input + 1u};
+      Pair output;
+      unsigned scalar;
+      unsigned values[2] = {};
+      volatile unsigned observed = input;
+      unsigned addressed = input;
+      (void)&addressed;
+      Constructed constructed;
+    }
+    Constructed::Constructed() : value(0u) {}
+  )"),
+                IREE_SV("automatic_storage.cpp"), options);
+  auto* function = definition(source);
+  ASSERT_NE(function, nullptr);
+  auto* body = cxx::ast_cast<cxx::CompoundStatementFunctionBodyAST>(
+                   function->functionBody)
+                   ->statement;
+  Types types(source.unit(), source.diagnostics());
+  ControlFlow analysis(source.unit(), source.diagnostics(), types, body,
+                       function->symbol);
+
+  std::vector<cxx::Symbol*> bindings;
+  for (auto* statement : cxx::ListView{body->statementList}) {
+    auto* declaration = cxx::ast_cast<cxx::DeclarationStatementAST>(statement);
+    if (!declaration) {
+      continue;
+    }
+    auto* simple =
+        cxx::ast_cast<cxx::SimpleDeclarationAST>(declaration->declaration);
+    ASSERT_NE(simple, nullptr);
+    bindings.push_back(simple->initDeclaratorList->value->symbol);
+  }
+  ASSERT_EQ(bindings.size(), 7u);
+  EXPECT_FALSE(analysis.storage_backed(bindings[0]));
+  for (auto* binding : std::span{bindings}.subspan(1)) {
+    EXPECT_TRUE(analysis.storage_backed(binding));
+  }
+  for (size_t index = 0; index < bindings.size(); ++index) {
+    EXPECT_EQ(analysis.addressed(bindings[index]), index == 5u);
+  }
+}
+
+TEST(ControlFlowTest, ArraySelectionRetainsValuesUntilAnAddressIsObserved) {
+  loom_cxx_import_options_t options;
+  loom_cxx_import_options_initialize(&options);
+  Source source(IREE_SV(R"(
+    struct View { int* data; int values[3]; };
+    struct Box { int values[3]; };
+    void consume(const int* values);
+    int entry(int* data, unsigned index) {
+      View value{data, {1, 2, 3}};
+      Box addressed{{4, 5, 6}};
+      consume(addressed.values);
+      return value.values[index] + 1[value.values];
+    }
+  )"),
+                IREE_SV("array_selection.cxx"), options);
+  auto* function = definition(source);
+  ASSERT_NE(function, nullptr);
+  auto* body = cxx::ast_cast<cxx::CompoundStatementFunctionBodyAST>(
+                   function->functionBody)
+                   ->statement;
+  Types types(source.unit(), source.diagnostics());
+  ControlFlow analysis(source.unit(), source.diagnostics(), types, body,
+                       function->symbol);
+  std::vector<cxx::Symbol*> bindings;
+  cxx::ReturnStatementAST* returned = nullptr;
+  for (auto* statement : cxx::ListView{body->statementList}) {
+    if (auto* declaration =
+            cxx::ast_cast<cxx::DeclarationStatementAST>(statement)) {
+      auto* simple =
+          cxx::ast_cast<cxx::SimpleDeclarationAST>(declaration->declaration);
+      bindings.push_back(simple->initDeclaratorList->value->symbol);
+    } else if (auto* result =
+                   cxx::ast_cast<cxx::ReturnStatementAST>(statement)) {
+      returned = result;
+    }
+  }
+  ASSERT_EQ(bindings.size(), 2u);
+  EXPECT_FALSE(analysis.storage_backed(bindings[0]));
+  EXPECT_FALSE(analysis.addressed(bindings[0]));
+  EXPECT_TRUE(analysis.storage_backed(bindings[1]));
+  EXPECT_TRUE(analysis.addressed(bindings[1]));
+
+  ASSERT_NE(returned, nullptr);
+  auto* sum = cxx::ast_cast<cxx::BinaryExpressionAST>(returned->expression);
+  ASSERT_NE(sum, nullptr);
+  auto* dynamic = cxx::ast_cast<cxx::SubscriptExpressionAST>(
+      unwrap_expression(sum->leftExpression));
+  auto* constant = cxx::ast_cast<cxx::SubscriptExpressionAST>(
+      unwrap_expression(sum->rightExpression));
+  ASSERT_NE(dynamic, nullptr);
+  ASSERT_NE(constant, nullptr);
+  auto* dynamic_selection = analysis.array_subscript(dynamic);
+  auto* constant_selection = analysis.array_subscript(constant);
+  ASSERT_NE(dynamic_selection, nullptr);
+  ASSERT_NE(constant_selection, nullptr);
+  EXPECT_TRUE(dynamic_selection->array_first);
+  EXPECT_FALSE(dynamic_selection->constant_index.has_value());
+  EXPECT_FALSE(constant_selection->array_first);
+  EXPECT_EQ(constant_selection->constant_index, 1u);
+  EXPECT_FALSE(analysis.destination(dynamic).has_value());
+  auto selected = analysis.destination(constant);
+  ASSERT_TRUE(selected.has_value());
+  EXPECT_EQ(selected->binding, bindings[0]);
+  EXPECT_EQ(selected->component_offset, 3u);
+  EXPECT_EQ(selected->member->component_count, 1u);
+}
+
+TEST(ControlFlowTest, StructuredBindingsAnalyzeTheSynthesizedDeclarationOnce) {
+  loom_cxx_import_options_t options;
+  loom_cxx_import_options_initialize(&options);
+  Source source(IREE_SV(R"(
+    struct Pair { unsigned first; unsigned second; };
+    Pair make_pair(unsigned input);
+    void entry(unsigned input) {
+      auto [first, second] = make_pair(input);
+      (void)(first + second);
+    }
+    Pair make_pair(unsigned input) { return {input, input + 1u}; }
+  )"),
+                IREE_SV("structured_bindings.cpp"), options);
+  auto* function = definition(source);
+  ASSERT_NE(function, nullptr);
+  auto* body = cxx::ast_cast<cxx::CompoundStatementFunctionBodyAST>(
+                   function->functionBody)
+                   ->statement;
+  auto* statement =
+      cxx::ast_cast<cxx::DeclarationStatementAST>(body->statementList->value);
+  ASSERT_NE(statement, nullptr);
+  auto* declaration = cxx::ast_cast<cxx::StructuredBindingDeclarationAST>(
+      statement->declaration);
+  ASSERT_NE(declaration, nullptr);
+  ASSERT_NE(declaration->hiddenVariable, nullptr);
+
+  Types types(source.unit(), source.diagnostics());
+  ControlFlow analysis(source.unit(), source.diagnostics(), types, body,
+                       function->symbol);
+
+  auto calls = analysis.calls();
+  ASSERT_EQ(calls.size(), 1u);
+  EXPECT_NE(calls.front().function, nullptr);
+  EXPECT_FALSE(analysis.storage_backed(declaration->hiddenVariable->symbol));
+  for (auto* binding : cxx::ListView{declaration->bindingDeclaratorList}) {
+    EXPECT_FALSE(analysis.storage_backed(binding->symbol));
+    EXPECT_FALSE(analysis.addressed(binding->symbol));
+  }
+}
+
+TEST(ControlFlowTest, CallArgumentsRetainExactAutomaticObjectIntervals) {
+  loom_cxx_import_options_t options;
+  loom_cxx_import_options_initialize(&options);
+  Source source(IREE_SV(R"(
+    struct Pair { unsigned first; unsigned second; };
+    static void update(Pair& whole, unsigned& second, const unsigned& first);
+    void entry(Pair value) { update(value, value.second, value.first); }
+    static void update(Pair& whole, unsigned& second, const unsigned& first) {
+      whole.first += first;
+      ++second;
+    }
+  )"),
+                IREE_SV("call_intervals.cpp"), options);
+  auto* function = definition(source);
+  ASSERT_NE(function, nullptr);
+  auto* body = cxx::ast_cast<cxx::CompoundStatementFunctionBodyAST>(
+                   function->functionBody)
+                   ->statement;
+  Types types(source.unit(), source.diagnostics());
+  ControlFlow analysis(source.unit(), source.diagnostics(), types, body,
+                       function->symbol);
+
+  auto calls = analysis.calls();
+  ASSERT_EQ(calls.size(), 1u);
+  ASSERT_EQ(calls.front().arguments.size(), 3u);
+  auto* value = function->symbol->parameters().front();
+  const ObjectInterval expected[] = {
+      {value, 0, ObjectInterval::kWholeObjectEnd},
+      {value, 1, 2},
+      {value, 0, 1},
+  };
+  for (size_t ordinal = 0; ordinal < std::size(expected); ++ordinal) {
+    const auto& argument = calls.front().arguments[ordinal];
+    if (expected[ordinal].end == ObjectInterval::kWholeObjectEnd) {
+      ASSERT_EQ(argument.identity_bindings.size(), 1u);
+      EXPECT_EQ(argument.identity_bindings.front(), expected[ordinal].binding);
+      EXPECT_EQ(argument.identity_intervals, nullptr);
+      continue;
+    }
+    ASSERT_NE(argument.identity_intervals, nullptr);
+    ASSERT_EQ(argument.identity_intervals->size(), 1u);
+    EXPECT_EQ(argument.identity_intervals->front().binding,
+              expected[ordinal].binding);
+    EXPECT_EQ(argument.identity_intervals->front().begin,
+              expected[ordinal].begin);
+    EXPECT_EQ(argument.identity_intervals->front().end, expected[ordinal].end);
+  }
+}
+
 TEST(ControlFlowTest, DecisionSyntaxAndInitializerWritesStayWithTheBinding) {
   loom_cxx_import_options_t options;
   loom_cxx_import_options_initialize(&options);
@@ -619,8 +929,8 @@ TEST(ControlFlowTest, VectorLaneWritesRetainTheOwningVectorSlice) {
   ControlFlow analysis(source.unit(), source.diagnostics(), types, body);
   auto writes = analysis.written(branch);
   ASSERT_EQ(writes.size(), 2u);
-  EXPECT_EQ(writes[0], function->symbol->parameters()[0]);
-  EXPECT_EQ(writes[1], function->symbol->parameters()[2]);
+  EXPECT_EQ(writes[0], function->symbol->parameters()[2]);
+  EXPECT_EQ(writes[1], function->symbol->parameters()[0]);
   auto lane = analysis.destination(automatic->targetExpression);
   ASSERT_TRUE(lane.has_value());
   EXPECT_EQ(lane->binding, function->symbol->parameters()[0]);
@@ -671,6 +981,43 @@ TEST(ControlFlowTest, MemoryMembersRetainStorageIdentityAndAddressSideEffects) {
   }
 }
 
+TEST(ControlFlowTest, ReferenceResultsRetainNestedMemberCorrespondence) {
+  loom_cxx_import_options_t options;
+  loom_cxx_import_options_initialize(&options);
+  Source source(IREE_SV(R"(
+    struct Pair { unsigned first; unsigned second; };
+    struct Packet { unsigned prefix; Pair pair; unsigned suffix; };
+    Packet& identity(Packet&);
+    void consume(unsigned&, const unsigned&);
+    void entry(Packet& packet) {
+      Pair& pair = identity(packet).pair;
+      consume(pair.first, pair.second);
+    }
+  )"),
+                IREE_SV("projected_reference.cxx"), options);
+  auto* function = definition(source);
+  ASSERT_NE(function, nullptr);
+  auto* body = cxx::ast_cast<cxx::CompoundStatementFunctionBodyAST>(
+                   function->functionBody)
+                   ->statement;
+  Types types(source.unit(), source.diagnostics());
+  ControlFlow analysis(source.unit(), source.diagnostics(), types, body,
+                       function->symbol);
+  auto calls = analysis.calls();
+  ASSERT_EQ(calls.size(), 2u);
+  const auto& invocation = calls[1];
+  ASSERT_EQ(invocation.arguments.size(), 2u);
+  for (size_t ordinal = 0; ordinal < invocation.arguments.size(); ++ordinal) {
+    const auto& argument = invocation.arguments[ordinal];
+    ASSERT_EQ(argument.reference_calls.size(), 1u);
+    const auto& result = argument.reference_calls.front();
+    EXPECT_EQ(result.call, calls[0].source);
+    EXPECT_EQ(result.projection.component_offset, 1u + ordinal);
+    EXPECT_EQ(result.projection.component_count, 1u);
+    EXPECT_FALSE(argument.inherent_storage);
+  }
+}
+
 TEST(ControlFlowTest, ReturnSummariesRetainFallthroughAndNestedExits) {
   struct Case {
     // Source body whose nested outcomes are aggregated once.
@@ -701,6 +1048,25 @@ TEST(ControlFlowTest, ReturnSummariesRetainFallthroughAndNestedExits) {
       {"while (true) { break; }", ExitFlow::None, true},
       {"do { break; } while (true);", ExitFlow::None, true},
       {"while (x) { while (true) {} return; }", ExitFlow::None, true},
+      {"__builtin_unreachable();", ExitFlow::None, false},
+      {"(__builtin_unreachable());", ExitFlow::None, false},
+      {"(void)__builtin_unreachable();", ExitFlow::None, false},
+      {"(x = 3, __builtin_unreachable());", ExitFlow::None, false},
+      {"x ? __builtin_unreachable() : __builtin_unreachable();", ExitFlow::None,
+       false},
+      {"x ? __builtin_unreachable() : void();", ExitFlow::None, true},
+      {"(void)noexcept(__builtin_unreachable()); return;", ExitFlow::All,
+       false},
+      {"using T = decltype(__builtin_unreachable()); return;", ExitFlow::All,
+       false},
+      {"(void)sizeof((__builtin_unreachable(), 1)); return;", ExitFlow::All,
+       false},
+      {"(void)requires { __builtin_unreachable(); }; return;", ExitFlow::All,
+       false},
+      {"(void)[&] { __builtin_unreachable(); }; return;", ExitFlow::All, false},
+      {"if (x) __builtin_unreachable(); else return;", ExitFlow::Some, false},
+      {"if (x) return; else __builtin_unreachable();", ExitFlow::Some, false},
+      {"__builtin_unreachable(); return;", ExitFlow::None, false},
   };
   loom_cxx_import_options_t options;
   loom_cxx_import_options_initialize(&options);
@@ -740,6 +1106,10 @@ TEST(ControlFlowTest, ReturnSummariesRetainCallableExitRequirements) {
       {"if constexpr(false) { while (y) return; } else return;", false, 0},
       {"if (x) return; for (;;) { if (y) return; }", true, 1},
       {"while (x) return; for (;;) { if (y) return; }", true, 2},
+      {"if (x) return; else __builtin_unreachable();", true, 1},
+      {"if (x) return; else for (;;) {}", true, 1},
+      {"if (x) return; __builtin_unreachable();", true, 1},
+      {"if (x) return; for (;;) {}", true, 1},
   };
   loom_cxx_import_options_t options;
   loom_cxx_import_options_initialize(&options);
@@ -1026,40 +1396,6 @@ TEST(ControlFlowTest, IterationExitsStopAtTheirLoopAndExcludeUnreachablePaths) {
     EXPECT_EQ(analysis.iteration_exits(body), ExitFlow::None);
     EXPECT_NE(analysis.counted(loop), nullptr);
   }
-}
-
-TEST(ControlFlowTest, ValueUseAnalysisRetainsLaterLexicalUses) {
-  loom_cxx_import_options_t options;
-  loom_cxx_import_options_initialize(&options);
-  Source source(IREE_SV(R"(
-    static void mutate(unsigned& value);
-    unsigned entry(unsigned value, unsigned count) {
-      mutate(value);
-      unsigned later = value;
-      mutate(value);
-      for (unsigned i = 0; i < count; ++i) {
-        later += value;
-        mutate(value);
-      }
-      return later;
-    }
-  )"),
-                IREE_SV("value_uses.cxx"), options);
-  auto* function = definition(source);
-  ASSERT_NE(function, nullptr);
-  auto* body = cxx::ast_cast<cxx::CompoundStatementFunctionBodyAST>(
-                   function->functionBody)
-                   ->statement;
-  Types types(source.unit(), source.diagnostics());
-  ControlFlow analysis(source.unit(), source.diagnostics(), types, body,
-                       function->symbol);
-  auto calls = analysis.calls();
-  ASSERT_EQ(calls.size(), 3u);
-  auto* value = function->symbol->parameters()[0];
-
-  EXPECT_TRUE(analysis.value_has_later_lexical_use(value, calls[0].source));
-  EXPECT_TRUE(analysis.value_has_later_lexical_use(value, calls[1].source));
-  EXPECT_FALSE(analysis.value_has_later_lexical_use(value, calls[2].source));
 }
 
 }  // namespace

@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "iree/base/internal/math.h"
+#include "loom/target/arch/amdgpu/planning/descriptor_semantics.h"
 #include "loom/target/arch/amdgpu/target_info.h"
 #include "loom/util/cfg_dataflow.h"
 
@@ -508,7 +509,8 @@ loom_amdgpu_short_wait_match_t loom_amdgpu_short_wait_begin_packet(
                                       LOOM_AMDGPU_SHORT_WAIT_DGEMM_MEMORY);
   state->pending_cycles =
       packet->descriptor != NULL
-          ? 1
+          ? loom_amdgpu_descriptor_instruction_count(
+                state->schedule->target.descriptor_set, packet->descriptor)
           : loom_amdgpu_structural_packet_minimum_instruction_count(structural);
   if (state->blocks != NULL &&
       state->position < LOOM_AMDGPU_SHORT_WAIT_MAX_CYCLES) {

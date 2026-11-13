@@ -696,6 +696,8 @@ typedef enum loom_dialect_id_e {
   LOOM_DIALECT_GROUP = 0x22,
   LOOM_DIALECT_PIPELINE = 0x23,
   LOOM_DIALECT_CHANNEL = 0x24,
+  LOOM_DIALECT_TYPE = 0x25,
+  LOOM_DIALECT_REF = 0x26,
   LOOM_DIALECT_RESERVED = 0xFF,
 } loom_dialect_id_t;
 #define LOOM_OP_KIND_UNKNOWN ((loom_op_kind_t)0)
@@ -707,7 +709,7 @@ typedef enum loom_dialect_id_e {
 
 // Maximum number of built-in dialects. Dialect IDs must be less than
 // this value. Matches the size of the dialect vtable registry array.
-#define LOOM_DIALECT_BUILTIN_COUNT_ 37
+#define LOOM_DIALECT_BUILTIN_COUNT_ (LOOM_DIALECT_REF + 1)
 
 // Extracts the dialect ID (high byte) from an op kind.
 static inline uint8_t loom_op_dialect_id(loom_op_kind_t kind) {
@@ -743,10 +745,10 @@ enum loom_op_flag_bits_e {
   // non-semantic source presentation preserved across exact cloning.
   LOOM_OP_FLAG_LEADING_BLANK_LINE = 1u << 3,
 
-  // The operation implements an ordinary semantic call boundary. This is
+  // The operation implements a source-typed semantic or native call. This is
   // cached from its immutable vtable so module inventories do not resolve the
   // operation kind again as summaries are recorded and dropped.
-  LOOM_OP_FLAG_SEMANTIC_CALL = 1u << 4,
+  LOOM_OP_FLAG_SOURCE_CALL = 1u << 4,
 
   // The operation implements the generated DirectBranch interface. Cached
   // from its immutable vtable so CFG, scheduling, and emission hot paths can
@@ -756,6 +758,11 @@ enum loom_op_flag_bits_e {
   // The operation implements a target-Low internal call boundary. This is
   // cached from its immutable vtable for the module call inventory.
   LOOM_OP_FLAG_LOW_INTERNAL_CALL = 1u << 6,
+
+  // The operation is an attribute-free variadic DirectBranch whose complete
+  // positional payload may be rebuilt generically. Attributed branches retain
+  // dialect-owned payload mutation because attributes may qualify positions.
+  LOOM_OP_FLAG_REBUILDABLE_DIRECT_BRANCH = 1u << 7,
 };
 typedef uint8_t loom_op_flags_t;
 
@@ -845,10 +852,11 @@ enum loom_trait_bits_e {
   LOOM_TRAIT_CONVERGENT = 1u << 21,
   // Op fact inference defines target-independent result distribution facts.
   LOOM_TRAIT_DISTRIBUTION_TRANSFER = 1u << 22,
-  // Op creates storage relations between SSA values. Passes use this as a
-  // hot-path guard before asking a dialect-owned helper for exact source/result
-  // ranges. Fresh identities on these relations own local register contents,
-  // rather than separately addressable resources crossing callable boundaries.
+  // Op owns local register storage or relates storage between SSA values.
+  // Passes use this as a hot-path guard before asking a dialect-owned helper
+  // for exact source/result ranges. Fresh identities on these relations own
+  // local register contents rather than separately addressable resources
+  // crossing callable boundaries.
   LOOM_TRAIT_STORAGE_RELATION = 1u << 23,
   // Op orders memory accesses without directly reading or writing a resource.
   // Generic effect queries treat fences as read/write barriers so existing
@@ -873,11 +881,13 @@ enum loom_trait_bits_e {
   // sentinel that propagates through ordinary pure computation until erased
   // or rejected at an observation boundary.
   LOOM_TRAIT_POISON = 1u << 28,
-  // Each dynamic execution is externally observable independently of its SSA
-  // results. Generic transforms must preserve the execution count and control
+  // Execution may be observable independently of its SSA results. Generic
+  // value transforms must preserve the execution count and control
   // predicate: the op cannot be erased, merged, duplicated, rematerialized, or
   // relocated. This does not itself imply a memory footprint, memory ordering,
   // non-determinism, or convergence; operations declare those independently.
+  // A declared lifetime-only effect can disappear with its complete unused
+  // lifetime, after a shared ownership-aware rewrite establishes closure.
   LOOM_TRAIT_OBSERVABLE_EFFECT = 1u << 29,
   // Op's source expansion depends on facts at its control-flow position.
   // Identical operands do not make applications in different contexts
@@ -898,8 +908,9 @@ typedef uint32_t loom_trait_flags_t;
 // Absence (0) leaves effects unspecified and therefore conservative.
 typedef enum loom_callable_effect_contract_e {
   LOOM_CALLABLE_EFFECT_CONTRACT_UNSPECIFIED = 0,
-  // No memory, non-deterministic, fresh-resource, convergent, or observable
-  // effects. Function-local virtual-register ownership is independent.
+  // No memory, non-deterministic, convergent, or observable payload effects.
+  // Managed allocation and handle bookkeeping may disappear with an unused
+  // lifetime; live result identities and consumed input owners stay distinct.
   LOOM_CALLABLE_EFFECT_CONTRACT_PURE = 1,
   // Deterministic memory reads with no other effects.
   LOOM_CALLABLE_EFFECT_CONTRACT_READONLY = 2,
@@ -965,14 +976,15 @@ static inline bool loom_traits_has_unique_identity(loom_trait_flags_t traits) {
   return (traits & LOOM_TRAIT_UNIQUE_IDENTITY) != 0;
 }
 
-// Returns true when an op creates a resource identity visible across callable
-// boundaries. Register storage relations create local owners for value
-// contents; their independent ownership still prevents direct CSE and
-// constrains motion, but does not make a value-returning callable allocate a
+// Returns true when an op may create a resource identity visible across
+// callable boundaries. Unknown effects include possible resource creation.
+// Register storage relations create local owners for value contents; their
+// independent ownership still prevents direct CSE and constrains motion,
+// but does not make a value-returning callable allocate a
 // resource.
-static inline bool loom_traits_has_resource_identity(
-    loom_trait_flags_t traits) {
-  return (traits & (LOOM_TRAIT_UNIQUE_IDENTITY |
+static inline bool loom_traits_may_create_resources(loom_trait_flags_t traits) {
+  return (traits & LOOM_TRAIT_UNKNOWN_EFFECTS) != 0 ||
+         (traits & (LOOM_TRAIT_UNIQUE_IDENTITY |
                     LOOM_TRAIT_STORAGE_RELATION)) == LOOM_TRAIT_UNIQUE_IDENTITY;
 }
 
@@ -1117,6 +1129,8 @@ typedef struct loom_value_facts_t loom_value_facts_t;
 // write result_facts[0]. Multi-result ops fill the entire array.
 // |module| provides type access (int vs float detection, bitwidth
 // queries via loom_module_value_type). Must not mutate IR.
+// A context without a publication returns summaries under query-local facts;
+// indexed result origins and solver observations require an active publication.
 typedef iree_status_t (*loom_op_infer_facts_fn_t)(
     loom_fact_context_t* context, const loom_module_t* module,
     const loom_op_t* op, const loom_value_facts_t* operand_facts,
@@ -1865,6 +1879,10 @@ typedef struct loom_op_t {
   // semantics. Bit layout is dialect-specific (each flag enum defines
   // its own mask constants in the per-dialect ops.h).
   uint8_t instance_flags;
+  // Intrinsic upper bound on read memory spaces, independent of operands.
+  // Zero leaves payload reads unqualified; observations of nonmemory state
+  // contribute no memory spaces.
+  loom_memory_space_mask_t intrinsic_read_spaces;
   // Intrinsic upper bound on written memory spaces, independent of operands.
   // Zero leaves write effects unqualified. Unknown effects and fences remain
   // conservative even when an instruction also has a precise storage write.
@@ -1900,6 +1918,23 @@ typedef struct loom_op_t {
   //   uint32_t           attribute_owners[attribute_count]
   //   uint16_t           operand_segment_counts[operand_descriptor_count]
 } loom_op_t;
+
+// Projects payload reads under the supplied traits. Nonmemory observations
+// remain effectful without inventing a storage access.
+static inline loom_memory_space_mask_t loom_op_read_memory_spaces(
+    const loom_op_t* op, loom_trait_flags_t traits) {
+  if (iree_any_bit_set(traits, LOOM_TRAIT_UNKNOWN_EFFECTS)) {
+    return (loom_memory_space_mask_t)(1u
+                                      << LOOM_VALUE_FACT_MEMORY_SPACE_UNKNOWN);
+  }
+  if (!iree_any_bit_set(traits, LOOM_TRAIT_READS_MEMORY)) {
+    return 0;
+  }
+  return op->intrinsic_read_spaces
+             ? op->intrinsic_read_spaces
+             : (loom_memory_space_mask_t)(1u
+                                          << LOOM_VALUE_FACT_MEMORY_SPACE_UNKNOWN);
+}
 
 // Projects an operation's intrinsic write bound under the supplied traits.
 // Trait-changing rewrites use the same intrinsic instruction semantics for
@@ -2068,6 +2103,8 @@ typedef struct loom_block_t {
   uint16_t arg_capacity;
   // Number of live operations linked into this block.
   uint32_t op_count;
+  // Number of live operations that produce at least one result.
+  uint32_t result_operation_count;
   // Per-block instance flags.
   loom_block_flags_t flags;
   // Position in parent_region->blocks, or LOOM_BLOCK_REGION_INDEX_INVALID.
@@ -2083,7 +2120,7 @@ typedef struct loom_block_t {
   loom_region_t* parent_region;
 } loom_block_t;
 
-static_assert(sizeof(loom_block_t) == (IREE_PTR_SIZE == 8 ? 48 : 32),
+static_assert(sizeof(loom_block_t) == (IREE_PTR_SIZE == 8 ? 56 : 36),
               "loom_block_t must retain its pointer-width layout");
 
 // Returns the |arg_index|-th block argument value ID.
@@ -2184,13 +2221,18 @@ typedef struct loom_region_t {
   // nested in this region. These ops remain live even when their SSA results
   // are unused.
   uint32_t observable_effect_count;
-  // Transitive count of fresh resource identities produced by live nested ops.
+  // Transitive count of live nested ops that may create resource identities,
+  // including operations with unknown effects.
   // Function-local register storage relations retain independent ownership
   // without contributing to this callable effect summary.
   uint32_t resource_identity_count;
   // Transitive count of actual or unknown memory accesses. Unlike read/write
   // effects, this excludes ordering and observations of non-memory state.
   uint32_t memory_access_count;
+  // Transitive contributors to each read memory space. Unknown reads
+  // contribute UNKNOWN; observations of nonmemory state contribute nothing.
+  // Counts preserve the bound when the last contributor is erased.
+  uint32_t read_space_counts[LOOM_VALUE_FACT_MEMORY_SPACE_COUNT_];
   // Transitive contributors to each written memory space. Unknown writes and
   // fences contribute UNKNOWN; precise intrinsic writes contribute their
   // spaces. Counts preserve the bound when the last contributor is erased.
@@ -2205,10 +2247,55 @@ typedef struct loom_region_t {
   loom_block_t** blocks;
   // Inline block pointer table for the common single-block case.
   loom_block_t* inline_blocks[1];
+  // Operation whose trailing region table owns this region. NULL for the
+  // module body and detached regions that have not yet been attached.
+  loom_op_t* parent_op;
 } loom_region_t;
 
-static_assert(sizeof(loom_region_t) == (IREE_PTR_SIZE == 8 ? 136 : 108),
+static_assert(sizeof(loom_region_t) == (IREE_PTR_SIZE == 8 ? 184 : 148),
               "loom_region_t must retain its pointer-width layout");
+
+// Returns the operation that owns |region|, or NULL for the module body and
+// detached regions.
+static inline loom_op_t* loom_region_parent_op(const loom_region_t* region) {
+  return region ? region->parent_op : NULL;
+}
+
+// Attaches |region| at |region_index| and releases the previous region's owner
+// link when present. Attached regions have exactly one owning operation;
+// |region| must be detached before it is supplied here.
+static inline void loom_op_set_region(loom_op_t* op, uint8_t region_index,
+                                      loom_region_t* region) {
+  IREE_ASSERT(op != NULL);
+  IREE_ASSERT(region_index < op->region_count);
+  loom_region_t** regions = loom_op_regions(op);
+  loom_region_t* previous_region = regions[region_index];
+  if (previous_region == region) {
+    IREE_ASSERT(region == NULL || region->parent_op == op);
+    return;
+  }
+  IREE_ASSERT(previous_region == NULL || previous_region->parent_op == op);
+  IREE_ASSERT(region == NULL || region->parent_op == NULL);
+  if (previous_region) {
+    previous_region->parent_op = NULL;
+  }
+  regions[region_index] = region;
+  if (region) {
+    region->parent_op = op;
+  }
+}
+
+// Returns the retained union of payload reads in this region.
+static inline loom_memory_space_mask_t loom_region_read_memory_spaces(
+    const loom_region_t* region) {
+  loom_memory_space_mask_t spaces = 0;
+  for (uint32_t i = 0; i < LOOM_VALUE_FACT_MEMORY_SPACE_COUNT_; ++i) {
+    if (region->read_space_counts[i]) {
+      spaces |= (loom_memory_space_mask_t)(1u << i);
+    }
+  }
+  return spaces;
+}
 
 // Returns the retained union of write-like memory effects in this region.
 static inline loom_memory_space_mask_t loom_region_written_memory_spaces(
@@ -2289,8 +2376,8 @@ static inline bool loom_region_has_observable_effects(
   return region && region->observable_effect_count != 0;
 }
 
-// Returns true when any live nested op creates a fresh resource identity.
-static inline bool loom_region_has_resource_identities(
+// Returns true when any live nested op may create a fresh resource identity.
+static inline bool loom_region_may_create_resources(
     const loom_region_t* region) {
   return region && region->resource_identity_count != 0;
 }
@@ -2721,8 +2808,9 @@ typedef struct loom_module_t {
   // Owning context (provides vtables for op resolution).
   loom_context_t* context;
 
-  // Allocator used to allocate and free the module struct itself.
-  iree_allocator_t allocator;
+  // Host allocator inherited by compiler operations that derive modules or
+  // associated host objects from this module.
+  iree_allocator_t host_allocator;
 
   // Arena backing IR storage with bump-pointer allocation and batched return
   // of reusable workspace blocks.
@@ -2795,8 +2883,8 @@ typedef struct loom_module_t {
   // Number of live poison-materializing operations in the module.
   uint32_t poison_op_count;
 
-  // Number of live ordinary semantic call operations in the module.
-  uint32_t semantic_call_op_count;
+  // Number of live source-typed semantic or native call operations.
+  uint32_t source_call_op_count;
 
   // Number of live target-Low internal call operations in the module.
   uint32_t low_internal_call_op_count;
@@ -2807,9 +2895,9 @@ static inline bool loom_module_has_poison(const loom_module_t* module) {
   return module && module->poison_op_count != 0;
 }
 
-// Returns true when the module contains any live ordinary semantic call.
-static inline bool loom_module_has_semantic_calls(const loom_module_t* module) {
-  return module && module->semantic_call_op_count != 0;
+// Returns true when the module contains any live source-typed call.
+static inline bool loom_module_has_source_calls(const loom_module_t* module) {
+  return module && module->source_call_op_count != 0;
 }
 
 // Returns true when the module contains any live target-Low internal call.

@@ -1,0 +1,94 @@
+// REQUIRES: loom-export-cxx
+// RUN: emit cxx @selected
+#include <loomcxx/kernel.h>
+
+unsigned helper(unsigned value) { return value + 1u; }
+
+[[loom::kernel, loom::workgroup_count(1, 1, 1), loom::workgroup_size(1, 1, 1)]]
+void ignored(float* output) {
+  auto values = loom::buffer::view<1>(output, {}, loom::encoding::layout::dense<1>());
+  loom::view::store(0.0f, values, 0);
+}
+
+[[loom::kernel, loom::workgroup_count(1, 1, 1), loom::workgroup_size(1, 1, 1)]]
+void selected(const float* input, float* output) {
+  auto input_values = loom::buffer::view<1>(input, {}, loom::encoding::layout::dense<1>());
+  auto output_values = loom::buffer::view<1>(output, {}, loom::encoding::layout::dense<1>());
+  float value = loom::view::load(input_values, 0);
+  loom::view::store(value, output_values, 0);
+}
+
+// ----
+#include <loomcxx/kernel.h>
+
+[[loom::kernel, loom::workgroup_count(1, 1, 1), loom::workgroup_size(1, 1, 1)]]
+void selected(const float* input, float* output) {
+  auto input_values = loom::buffer::view<1>(input, {}, loom::encoding::layout::dense<1>());
+  auto output_values = loom::buffer::view<1>(output, {}, loom::encoding::layout::dense<1>());
+  float value = loom::view::load(input_values, loom::type::index{0});
+  loom::view::store(value, output_values, loom::type::index{0});
+}
+
+// ====
+// REQUIRES: loom-export-cxx
+// RUN: emit cxx @math.copy_double
+#include <loomcxx/vector.h>
+
+using Float4 = float __attribute__((ext_vector_type(4)));
+using Row = loom::type::view<loom::type::shape<4>, float>;
+
+[[loom::symbol("math.double"), loom::inline]] static Float4 double_values(Float4 input) {
+  return input + input;
+}
+
+[[loom::symbol("math.copy_double"), loom::inline]] void copy_double(Row source, Row destination) {
+  Float4 input = loom::vector::load<Float4>(source, {0});
+  Float4 result = double_values(input);
+  loom::vector::store(result, destination, {0});
+}
+
+// ----
+#include <loomcxx/vector.h>
+
+using Float32x4 = float __attribute__((ext_vector_type(4)));
+
+[[loom::symbol("math.copy_double"), loom::inline]]
+void math_copy_double(loom::type::view<loom::type::shape<4>, const float> source, loom::type::view<loom::type::shape<4>, float> destination);
+
+[[loom::symbol("math.double"), loom::inline]]
+static Float32x4 math_double(Float32x4 input);
+
+[[loom::symbol("math.copy_double"), loom::inline]]
+void math_copy_double(loom::type::view<loom::type::shape<4>, const float> source, loom::type::view<loom::type::shape<4>, float> destination) {
+  Float32x4 input = loom::vector::load<Float32x4>(source, loom::type::indices{loom::type::index{0}});
+  Float32x4 result = math_double(input);
+  loom::vector::store(result, destination, loom::type::indices{loom::type::index{0}});
+  return;
+}
+
+[[loom::symbol("math.double"), loom::inline]]
+static Float32x4 math_double(Float32x4 input) {
+  return (input + input);
+}
+
+// ====
+// REQUIRES: loom-export-cxx
+// RUN: emit cxx roundtrip
+#include <loomcxx/kernel.h>
+
+[[loom::kernel, loom::symbol("library.dispatch"), loom::workgroup_count(1, 1, 1), loom::workgroup_size(1, 1, 1)]]
+void dotted_kernel() {}
+
+[[loom::kernel, loom::symbol("library_dispatch"), loom::workgroup_count(1, 1, 1), loom::workgroup_size(1, 1, 1)]]
+void underscored_kernel() {}
+
+// ----
+#include <loomcxx/kernel.h>
+
+[[loom::kernel, loom::symbol("library.dispatch"), loom::workgroup_count(1, 1, 1), loom::workgroup_size(1, 1, 1)]]
+void library_dispatch() {
+}
+
+[[loom::kernel, loom::symbol("library_dispatch"), loom::workgroup_count(1, 1, 1), loom::workgroup_size(1, 1, 1)]]
+void library_dispatch_2() {
+}

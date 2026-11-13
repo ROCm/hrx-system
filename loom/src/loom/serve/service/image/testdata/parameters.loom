@@ -47,7 +47,7 @@ func.def public @prepare(%height: i64, %width: i64, %text: i64, %directory: buff
   %second = func.call @source(%directory, %second_path) : (buffer, buffer) -> (i32)
   %root = buffer.constant utf8("bank_image_base") : buffer
   %stage = func.call @stage(%root, %zero64) : (buffer, i64) -> (i32)
-  %policy = buffer.constant utf8("loom/src/loom/serve/runtime/parameter/testdata/weights/policy.loom") : buffer
+  %policy = buffer.constant utf8("loom/src/loom/runtime/parameter/testdata/weights/policy.loom") : buffer
   func.call @parameter(%stage, %c0, %c0, %first, %policy) : (i32, i32, i32, i32, buffer)
   %capacity = scalar.constant 1073741824 : i64
   %arena = func.call @parameter_arena(%capacity) : (i64) -> (i32)
@@ -111,7 +111,7 @@ func.def public @prepare_batch(%state: buffer, %tags: buffer, %ranges: buffer, %
   %length = index.constant 4 : offset
   %sources = buffer.alloca<private> align(4) %length : buffer
   %source_view = buffer.view %sources[%origin] : buffer -> view<1xi32>
-  %policy = buffer.constant utf8("loom/src/loom/serve/runtime/parameter/testdata/weights/policy.loom") : buffer
+  %policy = buffer.constant utf8("loom/src/loom/runtime/parameter/testdata/weights/policy.loom") : buffer
   %c0 = scalar.constant 0 : i32
   %begin = index.constant 1 : index
   %end = index.constant 3 : index
@@ -174,17 +174,15 @@ kernel.def @bank_pixels() {
   %b_bias = scalar.addi %b, %bias : i32
   %sum = scalar.addi %a, %b : i32
   %sum_bias = scalar.addi %sum, %bias : i32
-  %r = scalar.sitofp %a_bias : i32 to f32
-  %g = scalar.sitofp %b_bias : i32 to f32
-  %sum_float = scalar.sitofp %sum_bias : i32 to f32
-  %scale = scalar.constant 0.00390625 : f32
-  %red = scalar.mulf %r, %scale : f32
-  %green = scalar.mulf %g, %scale : f32
-  %blue = scalar.mulf %sum_float, %scale : f32
-  %rgb = buffer.view %output[%origin] : buffer -> view<3xf32>
-  view.store %red, %rgb[0] : f32, view<3xf32>
-  view.store %green, %rgb[1] : f32, view<3xf32>
-  view.store %blue, %rgb[2] : f32, view<3xf32>
+  %red = scalar.trunci %a_bias : i32 to i8
+  %green = scalar.trunci %b_bias : i32 to i8
+  %blue = scalar.trunci %sum_bias : i32 to i8
+  %opaque = scalar.constant -1 : i8
+  %rgba = buffer.view %output[%origin] : buffer -> view<4xi8>
+  view.store %red, %rgba[0] : i8, view<4xi8>
+  view.store %green, %rgba[1] : i8, view<4xi8>
+  view.store %blue, %rgba[2] : i8, view<4xi8>
+  view.store %opaque, %rgba[3] : i8, view<4xi8>
   kernel.return
 }
 
@@ -193,21 +191,17 @@ kernel.def @publish_pixels() {
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%colors: buffer, %output: buffer) {
   %origin = index.constant 0 : offset
-  %source = buffer.view %colors[%origin] : buffer -> view<3xf32>
-  %target = buffer.view %output[%origin] : buffer -> view<3xf32>
-  %red = view.load %source[0] : view<3xf32> -> f32
-  %green = view.load %source[1] : view<3xf32> -> f32
-  %blue = view.load %source[2] : view<3xf32> -> f32
-  view.store %red, %target[0] : f32, view<3xf32>
-  view.store %green, %target[1] : f32, view<3xf32>
-  view.store %blue, %target[2] : f32, view<3xf32>
+  %source = buffer.view %colors[%origin] : buffer -> view<1xi32>
+  %target = buffer.view %output[%origin] : buffer -> view<1xi32>
+  %pixel = view.load %source[0] : view<1xi32> -> i32
+  view.store %pixel, %target[0] : i32, view<1xi32>
   kernel.return
 }
 
 command.def public @bank_image_base() launch(%weights: buffer, %request: buffer, %output: buffer) {
   %a = command.parameter %weights, "a" : view<8xi32>
   %base = command.parameter.base %a : view<8xi32> -> buffer
-  %length = index.constant 12 : offset
+  %length = index.constant 4 : offset
   %colors = buffer.alloca<global> align(16) %length : buffer
   kernel.launch @bank_pixels(%base, %request, %colors) : (buffer, buffer, buffer)
   kernel.launch @publish_pixels(%colors, %output) : (buffer, buffer)
@@ -217,7 +211,7 @@ command.def public @bank_image_base() launch(%weights: buffer, %request: buffer,
 command.def public @bank_image_adapted() launch(%arena: buffer, %request: buffer, %output: buffer) {
   %a = command.parameter %arena, "a" : view<8xi32>
   %base = command.parameter.base %a : view<8xi32> -> buffer
-  %length = index.constant 12 : offset
+  %length = index.constant 4 : offset
   %colors = buffer.alloca<global> align(16) %length : buffer
   kernel.launch @bank_pixels(%base, %request, %colors) : (buffer, buffer, buffer)
   kernel.launch @publish_pixels(%colors, %output) : (buffer, buffer)

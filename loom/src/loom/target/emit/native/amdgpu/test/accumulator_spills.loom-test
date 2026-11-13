@@ -11,8 +11,8 @@ amdgpu.target<gfx90a> @target
 
 low.func.def target<amdgpu.cdna2.core>(@target) @tuple_spill(%value: reg<amdgpu.agpr x7>) -> (reg<amdgpu.agpr x7>) asm {
   %storage = storage {byte_alignment = 16, byte_length = 32} : low.storage<private>
-  low.spill %value, %storage : reg<amdgpu.agpr x7>, low.storage<private>
-  %reload = low.reload %storage : low.storage<private> -> reg<amdgpu.agpr x7>
+  low.spill.move %value, %storage : reg<amdgpu.agpr x7>, low.storage<private>
+  %reload = low.reload.move %storage : low.storage<private> -> reg<amdgpu.agpr x7>
   return %reload
 }
 // ----

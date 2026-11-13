@@ -42,7 +42,10 @@ _LOW_OPS_VISIBILITY = [
 # dialect's verification, inference, or rewriting implementation.
 loom_cc_library(
     name = "op_defs",
-    hdrs = ["ops.h"],
+    hdrs = [
+        "ops.h",
+        "storage.h",
+    ],
     textual_hdrs = ["ops.inc"],
     deps = [
         "//loom/src/loom/ir:headers",
@@ -89,6 +92,7 @@ loom_generated_cc_library(
         "kernel.h",
         "ops.h",
         "schedule_scope.h",
+        "storage.h",
     ],
     args = ["--dialect=low"],
     extra_output_flags = [
@@ -116,6 +120,7 @@ loom_generated_cc_library(
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops:storage_facts",
         "//loom/src/loom/ops:successor_verify",
+        "//loom/src/loom/ops/ref",
         "//loom/src/loom/ops/target",
         "//loom/src/loom/rewrite:remap",
         "//loom/src/loom/rewrite:rewriter",

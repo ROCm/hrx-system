@@ -48,7 +48,7 @@ class PamTest : public ::testing::Test {
     const auto destination = iree_make_byte_span(pixels.data(), pixels.size());
     iree_status_t result;
     IREE_RETURN_IF_ERROR(loom_serve_media_image_decode_batch(
-        1, &input, &destination, &result, iree_allocator_system()));
+        1, &input, &destination, iree_allocator_system(), &result));
     return result;
   }
 

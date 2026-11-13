@@ -1,0 +1,199 @@
+// A pair of narrow records, one wide record, and two more narrow pairs share
+// one multicast path. The third phase changes destination storage without
+// changing its source; the fourth reuses the original descriptors. Both
+// consumers observe every payload byte, including guards on invocation replay.
+aie2p.target<array> @device
+
+template.decl @geometry.make_channel(%memory: pool, %record_bytes: index, %capacity: index) -> (channel<tile<[%record_bytes]xi8>>)
+
+template.decl @geometry.fill(%record_bytes: index, %count: index, %input: buffer, %base: offset, %destination: channel<tile<[%record_bytes]xi8>>)
+
+template.decl @geometry.forward(%record_bytes: index, %read: read<tile<[%record_bytes]xi8>>, %left: channel<tile<[%record_bytes]xi8>>, %right: channel<tile<[%record_bytes]xi8>>) -> (read<tile<[%record_bytes]xi8>>)
+
+template.decl @geometry.broadcast_pair(%bytes: index, %source: channel<tile<[%bytes]xi8>>, %left: channel<tile<[%bytes]xi8>>, %right: channel<tile<[%bytes]xi8>>)
+
+template.decl @geometry.drain(%record_bytes: index, %count: index, %source: channel<tile<[%record_bytes]xi8>>, %output: buffer, %base: offset)
+
+template.def<@geometry.make_channel> @geometry.make_channel_impl(%memory: pool, %record_bytes: index, %capacity: index) -> (channel<tile<[%record_bytes]xi8>>) {
+  %origin = index.constant 0 : offset
+  %length = index.mul %record_bytes, %capacity : index
+  %bytes = index.cast %length : index to offset
+  %storage = buffer.alloca<workgroup> pool(%memory) align(64) %bytes : buffer
+  %slots = buffer.view %storage[%origin] : buffer -> view<[%capacity]x[%record_bytes]xi8>
+  %channel = channel.bind<fifo> %slots, %capacity : view<[%capacity]x[%record_bytes]xi8>, index -> channel<tile<[%record_bytes]xi8>>
+  template.return %channel : channel<tile<[%record_bytes]xi8>>
+}
+
+template.def<@geometry.fill> @geometry.fill_impl(%record_bytes: index, %count: index, %input: buffer, %base: offset, %destination: channel<tile<[%record_bytes]xi8>>) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %stride = index.cast %record_bytes : index to offset
+  scf.for %record = [%begin to %count step %step] unroll {
+    %relative = index.scale %record, %stride : index, offset -> offset
+    %offset = index.add %base, %relative : offset
+    %external = buffer.view %input[%offset] : buffer -> view<[%record_bytes]xi8>
+    %write, %payload = channel.reserve %destination : channel<tile<[%record_bytes]xi8>> -> (write<tile<[%record_bytes]xi8>>, view<[%record_bytes]xi8>)
+    %copy = kernel.async.copy %external to %payload {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<[%record_bytes]xi8> to view<[%record_bytes]xi8> -> kernel.async.token
+    %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+    kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+    channel.publish %write : write<tile<[%record_bytes]xi8>>
+  }
+  template.return
+}
+
+template.def<@geometry.forward> @geometry.forward_impl(%record_bytes: index, %read: read<tile<[%record_bytes]xi8>>, %left: channel<tile<[%record_bytes]xi8>>, %right: channel<tile<[%record_bytes]xi8>>) -> (read<tile<[%record_bytes]xi8>>) {
+  %keep, %left_read, %right_read = channel.fanout %read : read<tile<[%record_bytes]xi8>> -> (read<tile<[%record_bytes]xi8>>, read<tile<[%record_bytes]xi8>>, read<tile<[%record_bytes]xi8>>)
+  %left_write, %left_payload = channel.reserve %left : channel<tile<[%record_bytes]xi8>> -> (write<tile<[%record_bytes]xi8>>, view<[%record_bytes]xi8>)
+  channel.copy %left_read -> %left_write : read<tile<[%record_bytes]xi8>>, write<tile<[%record_bytes]xi8>>
+  %right_write, %right_payload = channel.reserve %right : channel<tile<[%record_bytes]xi8>> -> (write<tile<[%record_bytes]xi8>>, view<[%record_bytes]xi8>)
+  channel.copy %right_read -> %right_write : read<tile<[%record_bytes]xi8>>, write<tile<[%record_bytes]xi8>>
+  template.return %keep : read<tile<[%record_bytes]xi8>>
+}
+
+template.def<@geometry.broadcast_pair> @geometry.broadcast_pair_impl(%bytes: index, %source: channel<tile<[%bytes]xi8>>, %left: channel<tile<[%bytes]xi8>>, %right: channel<tile<[%bytes]xi8>>) {
+  %first = channel.accept %source : channel<tile<[%bytes]xi8>> -> read<tile<[%bytes]xi8>>
+  %second = channel.accept %source : channel<tile<[%bytes]xi8>> -> read<tile<[%bytes]xi8>>
+  %keep_first = template.apply<@geometry.forward>(%bytes, %first, %left, %right) : (index, read<tile<[%bytes]xi8>>, channel<tile<[%bytes]xi8>>, channel<tile<[%bytes]xi8>>) -> (read<tile<[%bytes]xi8>>)
+  %keep_second = template.apply<@geometry.forward>(%bytes, %second, %left, %right) : (index, read<tile<[%bytes]xi8>>, channel<tile<[%bytes]xi8>>, channel<tile<[%bytes]xi8>>) -> (read<tile<[%bytes]xi8>>)
+  channel.release %keep_first : read<tile<[%bytes]xi8>>
+  channel.release %keep_second : read<tile<[%bytes]xi8>>
+  template.return
+}
+
+template.def<@geometry.drain> @geometry.drain_impl(%record_bytes: index, %count: index, %source: channel<tile<[%record_bytes]xi8>>, %output: buffer, %base: offset) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %stride = index.cast %record_bytes : index to offset
+  scf.for %record = [%begin to %count step %step] {
+    %read, %payload = channel.acquire %source : channel<tile<[%record_bytes]xi8>> -> (read<tile<[%record_bytes]xi8>>, view<[%record_bytes]xi8>)
+    %relative = index.scale %record, %stride : index, offset -> offset
+    %offset = index.add %base, %relative : offset
+    %external = buffer.view %output[%offset] : buffer -> view<[%record_bytes]xi8>
+    %copy = kernel.async.copy %payload to %external {cache_scope = workgroup, cache_temporal = regular, direction = workgroup_to_global} : view<[%record_bytes]xi8> to view<[%record_bytes]xi8> -> kernel.async.token
+    %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+    kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+    channel.release %read : read<tile<[%record_bytes]xi8>>
+  }
+  template.return
+}
+
+func.def inline @consume(%narrow_bytes: index, %wide_bytes: index, %narrow: channel<tile<[%narrow_bytes]xi8>>, %wide: channel<tile<[%wide_bytes]xi8>>, %alternate: channel<tile<[%narrow_bytes]xi8>>, %output: buffer) {
+  %pair = index.constant 2 : index
+  %singleton = index.constant 1 : index
+  %first_phase = index.constant 0 : offset
+  %wide_phase = index.constant 128 : offset
+  %alternate_phase = index.constant 256 : offset
+  %reused_phase = index.constant 384 : offset
+  template.apply<@geometry.drain>(%narrow_bytes, %pair, %narrow, %output, %first_phase) : (index, index, channel<tile<[%narrow_bytes]xi8>>, buffer, offset)
+  template.apply<@geometry.drain>(%wide_bytes, %singleton, %wide, %output, %wide_phase) : (index, index, channel<tile<[%wide_bytes]xi8>>, buffer, offset)
+  template.apply<@geometry.drain>(%narrow_bytes, %pair, %alternate, %output, %alternate_phase) : (index, index, channel<tile<[%narrow_bytes]xi8>>, buffer, offset)
+  template.apply<@geometry.drain>(%narrow_bytes, %pair, %narrow, %output, %reused_phase) : (index, index, channel<tile<[%narrow_bytes]xi8>>, buffer, offset)
+  func.return
+}
+
+pipeline.def<kernel> @geometry(%source_row: index) run(%input_arg: buffer, %left_arg: buffer, %right_arg: buffer) {
+  %input_unique, %left_unique, %right_unique = buffer.assume.noalias %input_arg, %left_arg, %right_arg : buffer, buffer, buffer
+  %input, %left_output, %right_output = buffer.assume.alignment %input_unique, %left_unique, %right_unique {minimum_alignment = 64} : buffer, buffer, buffer
+  %narrow_bytes = index.constant 64 : index
+  %wide_bytes = index.constant 128 : index
+  %pair = index.constant 2 : index
+  %singleton = index.constant 1 : index
+  %first_phase = index.constant 0 : offset
+  %wide_phase = index.constant 128 : offset
+  %alternate_phase = index.constant 256 : offset
+  %reused_phase = index.constant 384 : offset
+  %source_memory = pipeline.memory<workgroup>[0, %source_row] : pool
+  %left_memory = pipeline.memory<workgroup>[0, 3] : pool
+  %right_memory = pipeline.memory<workgroup>[1, 3] : pool
+  %narrow_source = template.apply<@geometry.make_channel>(%source_memory, %narrow_bytes, %pair) : (pool, index, index) -> (channel<tile<[%narrow_bytes]xi8>>)
+  %wide_source = template.apply<@geometry.make_channel>(%source_memory, %wide_bytes, %singleton) : (pool, index, index) -> (channel<tile<[%wide_bytes]xi8>>)
+  %left_narrow = template.apply<@geometry.make_channel>(%left_memory, %narrow_bytes, %pair) : (pool, index, index) -> (channel<tile<[%narrow_bytes]xi8>>)
+  %right_narrow = template.apply<@geometry.make_channel>(%right_memory, %narrow_bytes, %pair) : (pool, index, index) -> (channel<tile<[%narrow_bytes]xi8>>)
+  %left_wide = template.apply<@geometry.make_channel>(%left_memory, %wide_bytes, %singleton) : (pool, index, index) -> (channel<tile<[%wide_bytes]xi8>>)
+  %right_wide = template.apply<@geometry.make_channel>(%right_memory, %wide_bytes, %singleton) : (pool, index, index) -> (channel<tile<[%wide_bytes]xi8>>)
+  %left_alternate = template.apply<@geometry.make_channel>(%left_memory, %narrow_bytes, %pair) : (pool, index, index) -> (channel<tile<[%narrow_bytes]xi8>>)
+  %right_alternate = template.apply<@geometry.make_channel>(%right_memory, %narrow_bytes, %pair) : (pool, index, index) -> (channel<tile<[%narrow_bytes]xi8>>)
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    template.apply<@geometry.fill>(%narrow_bytes, %pair, %input, %first_phase, %narrow_source) : (index, index, buffer, offset, channel<tile<[%narrow_bytes]xi8>>)
+    template.apply<@geometry.fill>(%wide_bytes, %singleton, %input, %wide_phase, %wide_source) : (index, index, buffer, offset, channel<tile<[%wide_bytes]xi8>>)
+    template.apply<@geometry.fill>(%narrow_bytes, %pair, %input, %alternate_phase, %narrow_source) : (index, index, buffer, offset, channel<tile<[%narrow_bytes]xi8>>)
+    template.apply<@geometry.fill>(%narrow_bytes, %pair, %input, %reused_phase, %narrow_source) : (index, index, buffer, offset, channel<tile<[%narrow_bytes]xi8>>)
+  }
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    template.apply<@geometry.broadcast_pair>(%narrow_bytes, %narrow_source, %left_narrow, %right_narrow) : (index, channel<tile<[%narrow_bytes]xi8>>, channel<tile<[%narrow_bytes]xi8>>, channel<tile<[%narrow_bytes]xi8>>)
+    %wide_read = channel.accept %wide_source : channel<tile<[%wide_bytes]xi8>> -> read<tile<[%wide_bytes]xi8>>
+    %wide_keep = template.apply<@geometry.forward>(%wide_bytes, %wide_read, %left_wide, %right_wide) : (index, read<tile<[%wide_bytes]xi8>>, channel<tile<[%wide_bytes]xi8>>, channel<tile<[%wide_bytes]xi8>>) -> (read<tile<[%wide_bytes]xi8>>)
+    channel.release %wide_keep : read<tile<[%wide_bytes]xi8>>
+    template.apply<@geometry.broadcast_pair>(%narrow_bytes, %narrow_source, %left_alternate, %right_alternate) : (index, channel<tile<[%narrow_bytes]xi8>>, channel<tile<[%narrow_bytes]xi8>>, channel<tile<[%narrow_bytes]xi8>>)
+    template.apply<@geometry.broadcast_pair>(%narrow_bytes, %narrow_source, %left_narrow, %right_narrow) : (index, channel<tile<[%narrow_bytes]xi8>>, channel<tile<[%narrow_bytes]xi8>>, channel<tile<[%narrow_bytes]xi8>>)
+  }
+  pipeline.strand workers([0, 3], [1, 1], [1, 1]) {
+    func.call @consume(%narrow_bytes, %wide_bytes, %left_narrow, %left_wide, %left_alternate, %left_output) : (index, index, channel<tile<[%narrow_bytes]xi8>>, channel<tile<[%wide_bytes]xi8>>, channel<tile<[%narrow_bytes]xi8>>, buffer)
+  }
+  pipeline.strand workers([1, 3], [1, 1], [1, 1]) {
+    func.call @consume(%narrow_bytes, %wide_bytes, %right_narrow, %right_wide, %right_alternate, %right_output) : (index, index, channel<tile<[%narrow_bytes]xi8>>, channel<tile<[%wide_bytes]xi8>>, channel<tile<[%narrow_bytes]xi8>>, buffer)
+  }
+}
+
+// Independent logical copy, with no transport records or physical geometry.
+func.def @reference(%input: buffer, %left: buffer, %right: buffer) {
+  %origin = index.constant 0 : offset
+  %source = buffer.view %input[%origin] : buffer -> view<128xi32>
+  %left_view = buffer.view %left[%origin] : buffer -> view<128xi32>
+  %right_view = buffer.view %right[%origin] : buffer -> view<128xi32>
+  %begin = index.constant 0 : index
+  %end = index.constant 128 : index
+  %step = index.constant 1 : index
+  scf.for %position = [%begin to %end step %step] {
+    %value = view.load %source[%position] : view<128xi32> -> i32
+    view.store %value, %left_view[%position] : i32, view<128xi32>
+    view.store %value, %right_view[%position] : i32, view<128xi32>
+  }
+  func.return
+}
+
+pipeline.def<kernel> public retain target(@device) @sram_geometry() run(%input: buffer, %left: buffer, %right: buffer) {
+  %source_row = index.constant 1 : index
+  pipeline.compose @geometry[%source_row](%input, %left, %right) : [index](buffer, buffer, buffer)
+}
+
+pipeline.def<kernel> public retain target(@device) @core_geometry() run(%input: buffer, %left: buffer, %right: buffer) {
+  %source_row = index.constant 2 : index
+  pipeline.compose @geometry[%source_row](%input, %left, %right) : [index](buffer, buffer, buffer)
+}
+
+check.scenario public @ordered_sram_geometry {
+  check.trial[3](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input_storage = check.generate.random.uniform seed(%seed) range(-1000000 to 1000000) : tensor<160xi32>
+    %left_storage = check.generate.fill value(-9999) : tensor<160xi32>
+    %right_storage = check.generate.fill value(1234567) : tensor<160xi32>
+    %input = check.tensor.view %input_storage offset(64) : tensor<160xi32> -> tensor<128xi32>
+    %left = check.tensor.view %left_storage offset(64) : tensor<160xi32> -> tensor<128xi32>
+    %right = check.tensor.view %right_storage offset(64) : tensor<160xi32> -> tensor<128xi32>
+    check.compare<@sram_geometry, @reference>(%input, %left, %right) : (tensor<128xi32>, tensor<128xi32>, tensor<128xi32>) -> () {
+      check.expect.bitwise actual(%input_storage) expected(%input_storage) : tensor<160xi32>
+      check.expect.bitwise actual(%left_storage) expected(%left_storage) : tensor<160xi32>
+      check.expect.bitwise actual(%right_storage) expected(%right_storage) : tensor<160xi32>
+    }
+  }
+  check.return
+}
+
+check.scenario public @ordered_core_geometry {
+  check.trial[3](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input_storage = check.generate.random.uniform seed(%seed) range(-1000000 to 1000000) : tensor<160xi32>
+    %left_storage = check.generate.fill value(-9999) : tensor<160xi32>
+    %right_storage = check.generate.fill value(1234567) : tensor<160xi32>
+    %input = check.tensor.view %input_storage offset(64) : tensor<160xi32> -> tensor<128xi32>
+    %left = check.tensor.view %left_storage offset(64) : tensor<160xi32> -> tensor<128xi32>
+    %right = check.tensor.view %right_storage offset(64) : tensor<160xi32> -> tensor<128xi32>
+    check.compare<@core_geometry, @reference>(%input, %left, %right) : (tensor<128xi32>, tensor<128xi32>, tensor<128xi32>) -> () {
+      check.expect.bitwise actual(%input_storage) expected(%input_storage) : tensor<160xi32>
+      check.expect.bitwise actual(%left_storage) expected(%left_storage) : tensor<160xi32>
+      check.expect.bitwise actual(%right_storage) expected(%right_storage) : tensor<160xi32>
+    }
+  }
+  check.return
+}

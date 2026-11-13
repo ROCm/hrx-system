@@ -38,6 +38,41 @@ uniformity domains.
 This analysis is always on. Authors add facts at boundaries where the compiler
 cannot derive them; they do not manually annotate every intermediate result.
 
+## Compose runtime sizes from facts
+
+Runtime sizes can retain useful guarantees through arithmetic without becoming
+constants. For example, this group width remains a power of two after capping
+and scaling, and divides an extent whose caller promises a multiple of sixteen:
+
+```loom
+%extent = index.assume %extent_input [range(%extent_input, 16, 4096), multiple_of(%extent_input, 16)] : index
+%shift = index.assume %shift_input [range(%shift_input, 0, 4)] : index
+%unit = index.constant 1 : index
+%cap = index.constant 8 : index
+%scale = index.constant 2 : index
+%requested_width = index.shli %unit, %shift : index
+%capped_width = index.min %requested_width, %cap : index
+%group_width = index.mul %capped_width, %scale : index
+%group_count = index.div %extent, %group_width : index
+```
+
+The caller contracts belong on `%extent_input` and `%shift_input`. The derived
+width needs no repeated `power_of_two` assumption. The same guarantees survive
+`index.max`, selection between qualifying alternatives, and positive quotients
+of powers of two. These facts let bounds analysis relate a channel's group
+coordinate to a dynamically sized group view.
+
+Carrier semantics still matter. Unsigned widening preserves a nonzero bit
+pattern; truncation may turn it into zero. A wrapping multiplication may lose
+its power-of-two guarantee, and a quotient that can be zero is not a positive
+power of two. Casts remain explicit. `index.cast` maps Booleans to 0 or 1;
+other narrow integer payloads enter `index` as signed values and `offset` as
+unsigned bit patterns.
+
+The executable [integer lookup examples](https://github.com/ROCm/hrx-system/blob/main/loom/src/loom/test/corpus/numeric/integer/division.loom)
+show grouped and remainder-addressed views with runtime policy choices, an
+independent oracle, and guarded input/output storage.
+
 ## Declare compile-time configuration
 
 [`config.decl`](../reference/dialects/config/ops/decl.md) names a value that a
@@ -213,7 +248,9 @@ template.def<@guide.scale> priority(1) @portable_scale(%tile_size: index, %value
 An explicitly supplied library makes providers visible. For every reachable
 apply, specialization evaluates candidates in this order:
 
-1. Family symbol and exact operand/result types must match.
+1. The family must match. Ordinary types, shaped carrier kinds, element types,
+   ranks, and view alignment stay exact; declared input dimensions and complete
+   encodings must be proven. Result types follow the family contract exactly.
 2. Calling context and any explicit target identity must be compatible.
 3. Value predicates in `where` must be proven at the application site.
 4. Typed target requirements in `requires` must be proven by the active
@@ -227,6 +264,110 @@ device program.
 
 Distinct providers tied at the best priority are ambiguous. File order,
 library order, and symbol spelling never become accidental tie breakers.
+
+### Input shapes are requirements
+
+A provider can specialize the shape declared by its family. Here `@last16`
+requires a sixteen-element view; the generic provider accepts the family's
+input extent:
+
+```loom
+template.decl @last(%n: index, %input: view<[%n]xf32>) -> (f32)
+
+template.def<@last> priority(20) @last16(%n: index, %input: view<16xf32>) -> (f32) {
+  %value = view.load %input[15] : view<16xf32> -> f32
+  template.return %value : f32
+}
+
+template.def<@last> priority(1) @last_dynamic(%n: index, %input: view<[%n]xf32>) -> (f32) {
+  %one = index.constant 1 : index
+  %position = index.sub %n, %one : index
+  %value = view.load %input[%position] : view<[%n]xf32> -> f32
+  template.return %value : f32
+}
+
+func.def public @read_last(%input: view<16xf32>) -> (f32) {
+  %n = index.constant 16 : index
+  %value = template.apply<@last>(%n, %input) : (index, view<16xf32>) -> (f32)
+  func.return %value : f32
+}
+```
+
+The application selects `@last16`. A dynamic view can select the same provider
+when its extent is proven to be sixteen, including inside a branch that
+establishes that equality. The family requirement still applies: `%n` must
+agree with the actual view's extent before any provider is eligible. A fallback
+cannot repair an invalid family application.
+
+This rule applies to `group`, `tensor`, `tile`, `vector`, and `view` inputs.
+Selection makes any necessary shape change explicit with the corresponding
+`*.refine` operation before an exactly typed call. A refinement preserves the
+value and its storage; it does not allocate, copy, or reshape data. Ordinary
+`func.call` typing remains exact.
+
+### Complete encodings select storage-specific implementations
+
+An encoding-bearing family can accept several complete representations while
+each provider names the representation it implements:
+
+```loom
+template.decl @first(%layout: encoding<layout>, %input: view<16xf32, %layout>) -> (f32)
+
+template.def<@first> priority(20) @first_dense(%layout: encoding<layout>, %input: view<16xf32>) -> (f32) {
+  %value = view.load %input[0] : view<16xf32> -> f32
+  template.return %value : f32
+}
+
+template.def<@first> priority(1) @first_encoded(%layout: encoding<layout>, %input: view<16xf32, %layout>) -> (f32) {
+  %value = view.load %input[0] : view<16xf32, %layout> -> f32
+  template.return %value : f32
+}
+
+func.def public @read_dense(%input: view<16xf32>) -> (f32) {
+  %layout = encoding.define #encoding.layout.dense : encoding<layout>
+  %value = template.apply<@first>(%layout, %input) : (encoding<layout>, view<16xf32>) -> (f32)
+  func.return %value : f32
+}
+```
+
+The omitted encoding on `@first_dense` means native dense representation.
+A provider can instead name a complete static encoding, including a strided
+layout, a GGML schema, or a storage composition such as
+`#encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q4_0>`.
+Matching preserves the complete identity: a one-dimensional strided layout
+with stride one has the same addresses as dense storage but remains a distinct
+encoding. A custom encoding exposing dense geometry likewise retains its own
+identity. Converting representations requires explicit operations.
+
+Input requirements determine applicability. The requested result type never
+selects a provider, and a provider's results must satisfy its family's exact
+result contract. Dependent results and separate extent/encoding co-results
+retain their ordinary binding rules.
+
+### Staged inputs reach provider predicates
+
+A kernel-scoped pipeline's leading specialization arguments become known from
+the launching command. They participate before final provider selection,
+including through ordinary computations in the kernel source:
+
+```loom
+%width_limit = index.constant 6 : index
+%supported = index.cmp slt, %tile_width, %width_limit : index
+%result = template.apply<@reduce_tile>(%supported, %columns, %input) : (i1, index, view<32xi32>) -> (i32)
+```
+
+Here `%tile_width` is a leading specialization argument of the enclosing
+`pipeline.def<kernel>`. A provider with `where [eq(%supported, 1)]` is applicable
+when a command launches that pipeline with a tile width of four or five. The
+family does not need a fallback just because the pipeline was originally
+declared with an unbound width. A launch with width eight fails selection if
+the family has no other applicable provider.
+
+Staged schemas, layouts, storage encodings, vectors, and buffer literals follow
+the same rule: binding exposes their facts before evaluating the declared
+provider constraints. This does not change the types of ordinary calls or
+choose a provider from the requested result type. The family contract and
+explicit input requirements determine selection.
 
 ## Requirements filter; they do not manufacture facts
 

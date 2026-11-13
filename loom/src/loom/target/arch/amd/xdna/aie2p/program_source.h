@@ -37,8 +37,15 @@ typedef struct loom_aie2p_program_source_function_t {
   const loom_low_loop_execution_map_t* loop_execution;
   // Source imports, storage, data, and direct calls.
   loom_low_function_requirements_t requirements;
-  // Whether the direct-leaf native call contract has been admitted.
-  bool direct_helpers_admitted;
+  // Unique immutable definitions used by this entry and its admitted helpers.
+  // Aliases the function inventory until helper admission adds definitions.
+  const loom_low_read_only_data_set_t* program_data;
+  // Unique reachable helpers for a requested program root, in
+  // callee-before-caller order. Interior functions keep direct edges in
+  // requirements without materializing their own transitive closures.
+  loom_symbol_ref_array_t helpers;
+  // Whether this function's complete program-root closure has been admitted.
+  bool helpers_admitted;
 } loom_aie2p_program_source_function_t;
 
 // Lazily populated source-function index for one immutable artifact module.
@@ -76,15 +83,18 @@ iree_status_t loom_aie2p_program_source_table_resolve(
     bool* out_resolved, loom_aie2p_program_source_function_t** out_function);
 
 // Returns an already resolved source record. |symbol| must have been admitted
-// through resolve or direct-helper admission in the same table.
+// through resolve or helper admission in the same table.
 const loom_aie2p_program_source_function_t*
 loom_aie2p_program_source_table_lookup(
     const loom_aie2p_program_source_table_t* table, loom_symbol_ref_t symbol);
 
-// Admits the entry-to-direct-leaf native call closure of |entry|. A nested
-// retained helper emits one XDNA diagnostic and leaves |out_admitted| false.
-// The entry and every admitted helper remain indexed for materialization.
-iree_status_t loom_aie2p_program_source_admit_direct_helpers(
+// Admits and retains the acyclic native call closure of |entry|. Recursion,
+// helper resource imports, or authored mutable helper storage emit an XDNA
+// diagnostic and leave |out_admitted| false. Compiler-generated frames are
+// admitted separately after allocation. Shared SCC traversal consumes retained
+// direct edges; previously admitted subtrees reuse their immutable closures.
+// program_data retains the unique data union in entry-then-helper order.
+iree_status_t loom_aie2p_program_source_admit_helpers(
     loom_aie2p_program_source_table_t* table,
     loom_aie2p_program_source_function_t* entry, bool* out_admitted);
 

@@ -484,6 +484,7 @@ TEST_F(CfgGraphTest, TerminatorPayloadForSuccessorUsesSingleSuccessorOperands) {
   loom_op_t* branch_op = BuildBranchWithArgs(target, &payload, 1);
 
   EXPECT_TRUE(loom_direct_branch_isa(branch_op));
+  EXPECT_TRUE(loom_direct_branch_can_rebuild_payload(branch_op));
   EXPECT_EQ(loom_direct_branch_dest(branch_op), target);
   loom_value_slice_t branch_args = loom_direct_branch_args(branch_op);
   ASSERT_EQ(branch_args.count, 1u);
@@ -497,6 +498,15 @@ TEST_F(CfgGraphTest, TerminatorPayloadForSuccessorUsesSingleSuccessorOperands) {
                                                         &args, &arg_count));
   ASSERT_EQ(arg_count, 1u);
   EXPECT_EQ(args[0], payload);
+
+  loom_block_t* fixed_source = AppendBlock();
+  loom_block_t* fixed_target = AppendBlock();
+  SetBlock(fixed_source);
+  loom_op_t* fixed_branch = nullptr;
+  IREE_ASSERT_OK(loom_test_br_build(&builder_, fixed_target,
+                                    LOOM_LOCATION_UNKNOWN, &fixed_branch));
+  EXPECT_TRUE(loom_direct_branch_isa(fixed_branch));
+  EXPECT_FALSE(loom_direct_branch_can_rebuild_payload(fixed_branch));
 }
 
 TEST_F(CfgGraphTest,

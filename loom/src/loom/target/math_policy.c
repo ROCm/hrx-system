@@ -52,9 +52,9 @@ const loom_pass_environment_capability_type_t
 };
 
 void loom_target_math_policy_registry_initialize_from_entries(
-    loom_target_math_policy_registry_t* out_registry,
     const loom_target_math_policy_registry_entry_t* entries,
-    iree_host_size_t entry_count) {
+    iree_host_size_t entry_count,
+    loom_target_math_policy_registry_t* out_registry) {
   *out_registry = (loom_target_math_policy_registry_t){
       .entries = entries,
       .entry_count = entry_count,
@@ -202,7 +202,7 @@ static void loom_target_math_policy_decision_from_rule(
   }
 }
 
-IREE_ATTRIBUTE_ALWAYS_INLINE static inline void
+static IREE_ATTRIBUTE_ALWAYS_INLINE void
 loom_target_math_policy_decision_from_direct_rule(
     const loom_target_math_policy_t* policy,
     const loom_target_math_policy_direct_rule_t* rule,
@@ -437,7 +437,11 @@ bool loom_target_math_policy_prefers_fma(
   _(RSQRT_NEWTON_TWO, recipe_rsqrt_newton_two, "rsqrt-newton-two")             \
   _(TRIGONOMETRIC_F32, recipe_trigonometric_f32, "trigonometric-f32")          \
   _(PRESERVE_TRIGONOMETRIC_ZEROS, recipe_preserve_trigonometric_zeros,         \
-    "preserve-trigonometric-zeros")
+    "preserve-trigonometric-zeros")                                            \
+  _(APPROXIMATE_LOGARITHM, recipe_approximate_logarithm,                       \
+    "approximate-logarithm")                                                   \
+  _(APPROXIMATE_EXPONENTIAL, recipe_approximate_exponential,                   \
+    "approximate-exponential")
 
 typedef struct loom_target_math_name_strings_t {
 #define LOOM_TARGET_MATH_NAME_FIELD(name, field, value) \

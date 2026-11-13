@@ -1,0 +1,18 @@
+# Copyright 2026 The IREE Authors
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/bazel:python.bzl", "iree_py_library")
+
+package(
+    default_visibility = ["//visibility:public"],
+    licenses = ["notice"],
+)
+
+iree_py_library(
+    name = "type",
+    srcs = [
+        "__init__.py",
+        "defs.py",
+    ],
+    deps = ["//loom/py/loom:core"],
+)

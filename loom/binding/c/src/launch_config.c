@@ -318,8 +318,8 @@ static loomc_status_t loomc_launch_config_program_load_impl(
     status = loomc_status_from_iree(loom_bytecode_read_module(
         iree_make_const_byte_span(contents.data, contents.data_length),
         identifier, loomc_context_loom_context(program->context),
-        &program->module_block_pool, &read_options, &read_result,
-        &program->module, iree_allocator_from_loomc(allocator)));
+        &program->module_block_pool, &read_options,
+        iree_allocator_from_loomc(allocator), &read_result, &program->module));
     if (loomc_status_is_ok(status) &&
         (read_result.error_count != 0 || program->module == NULL)) {
       status = loomc_make_status(

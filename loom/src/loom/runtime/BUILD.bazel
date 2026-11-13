@@ -1,0 +1,53 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library", "loom_cc_test")
+
+package(
+    default_visibility = ["//visibility:private"],
+    features = ["layering_check"],
+    licenses = ["notice"],
+)
+
+loom_cc_library(
+    name = "wake",
+    hdrs = ["wake.h"],
+    visibility = ["//visibility:public"],
+)
+
+loom_cc_library(
+    name = "service",
+    hdrs = ["service.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":wake",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "driver",
+    srcs = ["driver.c"],
+    hdrs = ["driver.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":service",
+        ":wake",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "driver_test",
+    srcs = ["driver_test.cc"],
+    deps = [
+        ":driver",
+        ":service",
+        ":wake",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)

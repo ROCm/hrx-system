@@ -1,0 +1,57 @@
+// RUN: emit cxx roundtrip
+// REQUIRES: loom-export-cxx
+// Export uses the public scalar operations, preserving floating precision,
+// source permissions, and signed integer absolute value on reimport.
+struct Results {
+  // Float result.
+  float single;
+  // Double result.
+  double wide;
+  // Integer magnitude.
+  int magnitude;
+};
+[[loom::fastmath("contract")]] Results evaluate(float single, double wide, int integer) {
+  return {__builtin_sqrtf(single), __builtin_fma(wide, wide, wide), __builtin_abs(integer)};
+}
+// ----
+#include <loomcxx/scalar.h>
+
+struct evaluate_result {
+  float value0;
+  double value1;
+  unsigned value2;
+};
+
+[[loom::symbol("evaluate")]]
+evaluate_result evaluate(float single, double wide, int integer);
+
+[[loom::symbol("evaluate")]]
+evaluate_result evaluate(float single, double wide, int integer) {
+  [[loom::fastmath("contract")]] float v6 = loom::scalar::sqrtf(single);
+  [[loom::fastmath("contract")]] double v7 = loom::scalar::fmaf(wide, wide, wide);
+  return {v6, v7, static_cast<unsigned>(loom::scalar::absi(integer))};
+}
+
+// ====
+// Library pointer-output math exports as scalar operations and an explicit
+// store, so reimport preserves both results without a library dependency.
+extern "C" {
+double frexp(double, int*);
+double ldexp(double, int);
+}
+double rebuild(double value, int power, int* exponent) { return ldexp(frexp(value, exponent), power); }
+
+// ----
+#include <loomcxx/scalar.h>
+#include <loomcxx/view.h>
+
+[[loom::symbol("rebuild")]]
+double rebuild(double value, int power, loom::type::buffer<int> exponent, loom::type::offset exponent_byte_offset);
+
+[[loom::symbol("rebuild")]]
+double rebuild(double value, int power, loom::type::buffer<int> exponent, loom::type::offset exponent_byte_offset) {
+  auto decomposition = loom::scalar::frexpf(value);
+  auto exponent_view = loom::buffer::view<1>(exponent, exponent_byte_offset, {});
+  loom::view::store<loom::memory_access::root_in_bounds>(decomposition.exponent, exponent_view, 0);
+  return loom::scalar::ldexpf(decomposition.fraction, power);
+}

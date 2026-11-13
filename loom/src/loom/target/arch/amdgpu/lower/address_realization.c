@@ -912,6 +912,7 @@ static iree_status_t loom_amdgpu_prepare_complete_offset_realization(
     loom_amdgpu_memory_access_t* access) {
   if (source_op->parent_block != loop->backedge->parent_block ||
       loop->initial_value != 0 || access->realization.vaddr != NULL ||
+      access->uses_dynamic_root_address ||
       access->vaddr_realization_mask != 0 ||
       !loom_amdgpu_address_form_supports_complete_offset(
           access->address_form) ||

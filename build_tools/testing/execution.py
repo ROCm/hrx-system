@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-"""JSON execution test runner for command-line tooling tests."""
+"""Manifest runner backing public command-line interface tests."""
 
 from __future__ import annotations
 
@@ -226,7 +226,7 @@ class _Substituter:
 
 
 class ExecutionRunner:
-    """Runs one or more JSON execution manifests."""
+    """Runs one or more CLI-test manifests."""
 
     def __init__(
         self,

@@ -256,6 +256,8 @@ loom_location_field_span_array_wide(const loom_location_field_span_t* spans,
 // The kind field determines which union variant is active. File location rows
 // retain full uint32_t operation coordinates. Their field spans independently
 // select compact 16-bit or wide 32-bit physical storage per operation.
+// Constructors initialize the active variant directly: initializing only the
+// anonymous common prefix does not initialize variant-only storage.
 //
 // File lines and Unicode code-point columns are one-based, with an exclusive
 // end; zero denotes an unavailable coordinate. The source_id field indexes into
@@ -418,6 +420,17 @@ loom_location_entry_t loom_location_file_range(loom_source_id_t source_id,
                                                uint32_t start_col,
                                                uint32_t end_line,
                                                uint32_t end_col);
+
+// Constructs a fused location. The child array is borrowed from the caller and
+// must outlive the containing module entry.
+loom_location_entry_t loom_location_fused(loom_location_id_t* children,
+                                          uint32_t count);
+
+// Constructs an opaque location. The data payload is borrowed from the caller
+// and must outlive the containing module entry.
+loom_location_entry_t loom_location_opaque(loom_source_id_t source_id,
+                                           const uint8_t* data,
+                                           uint32_t data_length);
 
 // Constructs a tagged metadata location. The data payload is borrowed from the
 // caller and must outlive the containing module entry.

@@ -1,0 +1,54 @@
+// RUN: verify
+// Observing whether a pointer is null requires its actual pointer identity.
+// The local record therefore takes the ordinary storage path, which correctly
+// rejects pointer members until native stored-pointer support is available.
+struct NullableState {
+  const int* data;
+  int index;
+};
+
+[[loom::noinline]] static int nullable(const NullableState* state) {
+  return state ? state->index : 0;
+}
+
+int null_observation(const int* data, int index) {
+  // ERROR@+1: LOWERING/059 "stored pointers and references require an object storage representation"
+  NullableState state{data, index};
+  return nullable(&state);
+}
+
+// ====
+// Overlapping mutable pointer arguments require one shared storage identity;
+// independent value writebacks would not preserve source-language ordering.
+struct OverlapState {
+  const int* data;
+  int index;
+};
+
+[[loom::noinline]] static void overlap(const OverlapState* source,
+                                      OverlapState* target) {
+  target->index += source->index;
+}
+
+int overlapping_borrows(const int* data, int index) {
+  // ERROR@+1: LOWERING/059 "stored pointers and references require an object storage representation"
+  OverlapState state{data, index};
+  overlap(&state, &state);
+  return state.index;
+}
+
+// ====
+// A declaration without an internal definition cannot establish the semantic
+// borrow contract. Its address argument therefore requires ordinary storage.
+struct ExternalState {
+  const int* data;
+  int index;
+};
+
+[[loom::noinline]] static int external_read(const ExternalState* state);
+
+int bodyless_callee(const int* data, int index) {
+  // ERROR@+1: LOWERING/059 "stored pointers and references require an object storage representation"
+  ExternalState state{data, index};
+  return external_read(&state);
+}

@@ -64,6 +64,10 @@ void loom_value_facts_addi_modular(const loom_value_facts_t* lhs,
 void loom_value_facts_subi_modular(const loom_value_facts_t* lhs,
                                    const loom_value_facts_t* rhs,
                                    int32_t bit_count, loom_value_facts_t* out) {
+  if (loom_value_facts_is_zero(*lhs)) {
+    loom_value_facts_negi_modular(rhs, bit_count, out);
+    return;
+  }
   const loom_value_facts_t lhs_facts = *lhs;
   const loom_value_facts_t rhs_facts = *rhs;
   if (loom_value_facts_try_modular_binary_exact(
@@ -73,6 +77,56 @@ void loom_value_facts_subi_modular(const loom_value_facts_t* lhs,
   }
   loom_value_facts_subi(&lhs_facts, &rhs_facts, out);
   *out = loom_value_facts_wrap_integer(*out, bit_count);
+}
+
+static void loom_value_facts_unsigned_carry_or_borrow(
+    const loom_value_facts_t* lhs, const loom_value_facts_t* rhs,
+    int32_t bit_count, bool is_subtraction,
+    loom_value_facts_t* out_carry_or_borrow) {
+  const loom_value_facts_t lhs_facts = *lhs;
+  const loom_value_facts_t rhs_facts = *rhs;
+  uint64_t lhs_bits = 0;
+  uint64_t rhs_bits = 0;
+  if (loom_value_facts_as_exact_raw_bits(lhs_facts, bit_count, &lhs_bits) &&
+      loom_value_facts_as_exact_raw_bits(rhs_facts, bit_count, &rhs_bits)) {
+    const bool carry_or_borrow =
+        is_subtraction
+            ? lhs_bits < rhs_bits
+            : (bit_count == 64 ? lhs_bits + rhs_bits < lhs_bits
+                               : ((lhs_bits + rhs_bits) >> bit_count) != 0);
+    *out_carry_or_borrow = loom_value_facts_exact_i64(carry_or_borrow ? 1 : 0);
+  } else {
+    *out_carry_or_borrow = loom_value_facts_make(0, 1, 1);
+  }
+  loom_value_facts_propagate_binary_distribution(lhs_facts, rhs_facts,
+                                                 out_carry_or_borrow);
+  if (loom_value_facts_is_lane_varying(*out_carry_or_borrow)) {
+    loom_value_facts_mark_lane_predicate(out_carry_or_borrow);
+  }
+}
+
+void loom_value_facts_addcarryui(const loom_value_facts_t* lhs,
+                                 const loom_value_facts_t* rhs,
+                                 int32_t bit_count, loom_value_facts_t* out_sum,
+                                 loom_value_facts_t* out_carry) {
+  const loom_value_facts_t lhs_facts = *lhs;
+  const loom_value_facts_t rhs_facts = *rhs;
+  loom_value_facts_addi_modular(&lhs_facts, &rhs_facts, bit_count, out_sum);
+  loom_value_facts_unsigned_carry_or_borrow(
+      &lhs_facts, &rhs_facts, bit_count, /*is_subtraction=*/false, out_carry);
+}
+
+void loom_value_facts_subborrowui(const loom_value_facts_t* lhs,
+                                  const loom_value_facts_t* rhs,
+                                  int32_t bit_count,
+                                  loom_value_facts_t* out_difference,
+                                  loom_value_facts_t* out_borrow) {
+  const loom_value_facts_t lhs_facts = *lhs;
+  const loom_value_facts_t rhs_facts = *rhs;
+  loom_value_facts_subi_modular(&lhs_facts, &rhs_facts, bit_count,
+                                out_difference);
+  loom_value_facts_unsigned_carry_or_borrow(
+      &lhs_facts, &rhs_facts, bit_count, /*is_subtraction=*/true, out_borrow);
 }
 
 void loom_value_facts_muli_modular(const loom_value_facts_t* lhs,
@@ -97,7 +151,7 @@ void loom_value_facts_shli_modular(const loom_value_facts_t* lhs,
   uint64_t lhs_bits = 0;
   int64_t shift = 0;
   const bool shift_is_exact = loom_value_facts_as_exact_i64(rhs_facts, &shift);
-  if (shift_is_exact && (shift < 0 || shift >= bit_count)) {
+  if (rhs_facts.range_lo < 0 || rhs_facts.range_hi >= bit_count) {
     *out = loom_value_facts_wrap_integer(loom_value_facts_unknown(), bit_count);
     loom_value_facts_propagate_binary_distribution(lhs_facts, rhs_facts, out);
     return;
@@ -123,6 +177,8 @@ void loom_value_facts_negi_modular(const loom_value_facts_t* input,
   }
   loom_value_facts_negi(&input_facts, out);
   *out = loom_value_facts_wrap_integer(*out, bit_count);
+  // These operations map only zero to zero, even when signed minimum wraps.
+  out->flags |= input_facts.flags & LOOM_VALUE_FACT_NON_ZERO;
 }
 
 void loom_value_facts_absi_modular(const loom_value_facts_t* input,
@@ -139,6 +195,8 @@ void loom_value_facts_absi_modular(const loom_value_facts_t* input,
   }
   loom_value_facts_absi(&input_facts, out);
   *out = loom_value_facts_wrap_integer(*out, bit_count);
+  // These operations map only zero to zero, even when signed minimum wraps.
+  out->flags |= input_facts.flags & LOOM_VALUE_FACT_NON_ZERO;
 }
 
 void loom_value_facts_fmai_modular(const loom_value_facts_t* a,

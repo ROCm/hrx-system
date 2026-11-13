@@ -28,8 +28,8 @@ typedef struct loom_native_elf_hash_t {
 // the producer. The serialized bucket and chain arrays are the construction
 // state; no temporary host-endian copies or later finalization are needed.
 iree_status_t loom_native_elf_hash_initialize(iree_host_size_t symbol_count,
-                                              loom_native_elf_hash_t* out_hash,
-                                              iree_arena_allocator_t* arena);
+                                              iree_arena_allocator_t* arena,
+                                              loom_native_elf_hash_t* out_hash);
 
 // Inserts one named symbol at its nonzero producer-owned table index. Each
 // index is inserted once, after initialization and before the payload is read.

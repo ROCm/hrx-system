@@ -15,9 +15,8 @@
 #include <vector>
 
 #include "iree/async/frontier_tracker.h"
-#include "iree/async/notification.h"
 #include "iree/async/util/proactor_pool.h"
-#include "iree/hal/drivers/task/registration/driver_module.h"
+#include "iree/hal/driver/task/registration/driver_module.h"
 #include "iree/hal/memory/tlsf_pool.h"
 #include "iree/hal/replay/file_reader.h"
 #include "iree/hal/replay/recorder.h"
@@ -913,9 +912,13 @@ static void CaptureFdBackedQueueRead(
 
   iree_hal_device_t* wrapped_device =
       iree_hal_device_group_device_at(wrapped_group, 0);
-  iree_hal_queue_t* queue = iree_hal_device_queue(
-      wrapped_device, /*family_ordinal=*/0, /*queue_ordinal=*/0);
-  ASSERT_NE(nullptr, queue);
+  const iree_hal_queue_family_t* queue_family =
+      iree_hal_device_queue_family(wrapped_device, /*family_ordinal=*/0);
+  ASSERT_NE(nullptr, queue_family);
+  iree_hal_queue_params_t queue_params;
+  iree_hal_queue_params_initialize(&queue_params);
+  iree_hal_queue_t* queue = nullptr;
+  IREE_ASSERT_OK(iree_hal_queue_acquire(queue_family, &queue_params, &queue));
 
   iree_io_file_handle_t* file_handle = nullptr;
   IREE_ASSERT_OK(iree_io_file_handle_open(
@@ -962,15 +965,12 @@ static void CaptureFdBackedQueueRead(
   }
 
   iree_hal_semaphore_release(signal_semaphore);
-  iree_async_notification_t* pool_notification =
-      iree_hal_pool_notification(target_pool);
-  ASSERT_NE(nullptr, pool_notification);
-  const uint32_t retirement_token =
-      iree_async_notification_begin_observe(pool_notification);
+  // Final queue release joins the no-signal operation and its cleanup tail.
+  // Pool capacity notifications do not establish that lifetime boundary.
+  // Queue release records no replay operation: replay must still synthesize
+  // completion for the captured no-signal read at end-of-file.
+  iree_hal_queue_release(queue);
   iree_hal_buffer_release(target_buffer);
-  EXPECT_TRUE(iree_async_notification_wait_for_token(
-      pool_notification, retirement_token, iree_infinite_timeout()));
-  iree_async_notification_end_observe(pool_notification);
   iree_hal_file_release(file);
 
   IREE_ASSERT_OK(iree_hal_replay_recorder_close(recorder));

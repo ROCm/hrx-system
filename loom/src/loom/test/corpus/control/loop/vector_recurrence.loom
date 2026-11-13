@@ -44,3 +44,136 @@ check.scenario @vector_recurrence_values {
   }
   check.return
 }
+
+// A packed row-major history crosses both the loop boundary and a native packet
+// boundary. Each step drops one row and appends the current row. Compare raw
+// bits so every BF16 payload, including NaNs, is preserved without arithmetic.
+func.def @packed_history(%input: buffer, %output: buffer, %count: index) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %base = index.constant 0 : offset
+  %source = buffer.view %input[%base] : buffer -> view<10x4xbf16>
+  %destination = buffer.view %output[%base] : buffer -> view<9x4xbf16>
+  %initial = vector.load %source[0, 0] : view<10x4xbf16> -> vector<9x4xbf16>
+  %current = vector.load %source[9, 0] : view<10x4xbf16> -> vector<4xbf16>
+  %final = scf.for %iteration = [%c0 to %count step %c1](%old = %initial : vector<9x4xbf16>) -> (vector<9x4xbf16>) {
+    %tail = vector.slice %old[1, 0] : vector<9x4xbf16> -> vector<8x4xbf16>
+    %row = vector.broadcast %current : vector<4xbf16> -> vector<1x4xbf16>
+    %next = vector.concat<0> %tail, %row : vector<8x4xbf16>, vector<1x4xbf16> -> vector<9x4xbf16>
+    scf.yield %next : vector<9x4xbf16>
+  }
+  vector.store %final, %destination[0, 0] : vector<9x4xbf16>, view<9x4xbf16>
+  func.return
+}
+
+// Select the surviving source row directly, without vector operations or a
+// recurrence. Counts past the history depth replace every row.
+func.def @packed_history_oracle(%input: buffer, %output: buffer, %count: index) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %width = index.constant 4 : index
+  %depth = index.constant 9 : index
+  %elements = index.constant 36 : index
+  %base = index.constant 0 : offset
+  %source = buffer.view %input[%base] : buffer -> view<40xi16>
+  %destination = buffer.view %output[%base] : buffer -> view<36xi16>
+  %nonnegative = index.max %count, %c0 : index
+  %distance = index.min %nonnegative, %depth : index
+  scf.for %position = [%c0 to %elements step %c1] {
+    %row = index.div %position, %width : index
+    %column = index.rem %position, %width : index
+    %shifted_row = index.add %row, %distance : index
+    %source_row = index.min %shifted_row, %depth : index
+    %source_position = index.madd %source_row, %width, %column : index
+    %value = view.load %source[%source_position] : view<40xi16> -> i16
+    view.store %value, %destination[%position] : i16, view<36xi16>
+  }
+  func.return
+}
+
+check.scenario @packed_history_values {
+  check.trial[11](%count: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(-32768) step(1680) : tensor<40xi16>
+    %storage = check.generate.fill value(23130) : tensor<44xi16>
+    %output = check.tensor.view %storage offset(8) : tensor<44xi16> -> tensor<36xi16>
+    check.compare<@packed_history, @packed_history_oracle>(%input, %output, %count) : (tensor<40xi16>, tensor<36xi16>, index) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<40xi16>
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<44xi16>
+    }
+  }
+  check.return
+}
+
+// A wide accumulator crosses a nested conditional and a loop backedge.
+// Its trailing lanes must retain the same recurrence as its complete packets.
+func.def @wide_conditional_accumulation(%input: buffer, %output: buffer, %iteration_count: index, %scale: f32, %enabled: i1) {
+  %base = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %input_noalias, %output_noalias = buffer.assume.noalias %input, %output : buffer, buffer
+  %input_view = buffer.view %input_noalias[%base] : buffer -> view<36xf32>
+  %output_view = buffer.view %output_noalias[%base] : buffer -> view<36xf32>
+  %c0 = scalar.constant 0.0 : f32
+  %initial = vector.splat %c0 : vector<36xf32>
+  %result = scf.for %iteration = [%begin to %iteration_count step %step](%accumulator = %initial : vector<36xf32>) -> (vector<36xf32>) {
+    %next = scf.if %enabled -> (vector<36xf32>) {
+      %values = vector.load %input_view[0] : view<36xf32> -> vector<36xf32>
+      %scales = vector.splat %scale : vector<36xf32>
+      %updated = vector.fmaf %values, %scales, %accumulator : vector<36xf32>
+      scf.yield %updated : vector<36xf32>
+    } else {
+      scf.yield %accumulator : vector<36xf32>
+    }
+    scf.yield %next : vector<36xf32>
+  }
+  vector.store %result, %output_view[0] : vector<36xf32>, view<36xf32>
+  func.return
+}
+
+// The inputs and scale are exact binary fractions, so multiplication by the
+// iteration count is an independent exact oracle for repeated accumulation.
+func.def @wide_conditional_accumulation_oracle(%input: buffer, %output: buffer, %iteration_count: index, %scale: f32, %enabled: i1) {
+  %base = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %end = index.constant 36 : index
+  %step = index.constant 1 : index
+  %source = buffer.view %input[%base] : buffer -> view<36xf32>
+  %destination = buffer.view %output[%base] : buffer -> view<36xf32>
+  %count_word = index.cast %iteration_count : index to i32
+  %count = scalar.sitofp %count_word : i32 to f32
+  %factor = scalar.mulf %count, %scale : f32
+  %nonempty = index.cmp sgt, %iteration_count, %begin : index
+  %active = scalar.andi %nonempty, %enabled : i1
+  %initial = scalar.constant 0.0 : f32
+  scf.for %position = [%begin to %end step %step] {
+    %value = view.load %source[%position] : view<36xf32> -> f32
+    %scaled = scalar.mulf %value, %factor : f32
+    %result = scf.select %active, %scaled, %initial : f32
+    view.store %result, %destination[%position] : f32, view<36xf32>
+  }
+  func.return
+}
+
+func.def @wide_accumulation_inputs(%trial: index) -> (index, i1) {
+  %c0 = index.constant 0 : index
+  %c2 = index.constant 2 : index
+  %count = index.div %trial, %c2 : index
+  %parity = index.rem %trial, %c2 : index
+  %enabled = index.cmp ne, %parity, %c0 : index
+  func.return %count, %enabled : index, i1
+}
+
+check.scenario @wide_conditional_accumulation_values {
+  check.trial[16](%trial: index, %entropy: check.entropy) {
+    %count, %enabled = check.generate<@wide_accumulation_inputs>(%trial) : (index) -> (index, i1)
+    %input = check.generate.iota offset(-4.5) step(0.25) : tensor<36xf32>
+    %storage = check.generate.fill value(-777.0) : tensor<44xf32>
+    %output = check.tensor.view %storage offset(16) : tensor<44xf32> -> tensor<36xf32>
+    %scale = check.literal value(0.5) : f32
+    check.compare<@wide_conditional_accumulation, @wide_conditional_accumulation_oracle>(%input, %output, %count, %scale, %enabled) : (tensor<36xf32>, tensor<36xf32>, index, f32, i1) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<36xf32>
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<44xf32>
+    }
+  }
+  check.return
+}

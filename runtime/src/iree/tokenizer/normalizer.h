@@ -147,7 +147,8 @@ static inline void iree_tokenizer_normalizer_state_deinitialize(
 // normalizer is waiting for more input to complete a normalization unit (e.g.,
 // combining characters for NFC composition). Partial UTF-8 sequences are not
 // handled here — the caller is responsible for ensuring input chunks end on
-// codepoint boundaries.
+// codepoint boundaries. Malformed sequences are processed one byte at a time;
+// Unicode-aware normalizers interpret each malformed byte as U+FFFD.
 //
 // Output credit never establishes an input boundary. The caller retains any
 // unconsumed input and calls state_finalize() only after all input is accepted.

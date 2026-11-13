@@ -42,20 +42,6 @@ iree_status_t loom_parse_predicate_list(loom_parser_t* parser,
 iree_status_t loom_parse_attr_dict(loom_parser_t* parser,
                                    loom_attribute_t* out_attr);
 
-typedef struct loom_parsed_attr_dict_entry_t {
-  // Parsed attribute payload in canonical module storage form.
-  loom_named_attr_t attr;
-  // Source token for duplicate-key diagnostics.
-  loom_token_t key_token;
-} loom_parsed_attr_dict_entry_t;
-
-iree_status_t loom_parser_emit_duplicate_attr_dict_key(
-    loom_parser_t* parser, loom_token_t key_token,
-    loom_token_t previous_key_token);
-void loom_parser_sort_attr_dict_entries(const loom_module_t* module,
-                                        loom_parsed_attr_dict_entry_t* entries,
-                                        uint16_t count);
-
 #ifdef __cplusplus
 }  // extern "C"
 #endif

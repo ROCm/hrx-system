@@ -1,0 +1,61 @@
+// RUN: pass canonicalize,cse,dce
+// A header helper controls a uniform barrier independently for each workgroup.
+#include <loomcxx/check.h>
+#include <loomcxx/kernel.h>
+
+constexpr unsigned kWorkgroupSize = 64u;
+constexpr unsigned kWorkgroupCount = 2u;
+constexpr unsigned kElementCount = kWorkgroupSize * kWorkgroupCount;
+
+LOOM_INLINE unsigned read_active_workgroups(const unsigned* header) {
+  return header[0];
+}
+
+[[loom::kernel, loom::workgroup_size(64, 1, 1), loom::workgroup_count(2, 1, 1)]]
+void uniform_helper_barrier(const unsigned* header, unsigned* output) {
+  unsigned workgroup = loom::kernel::workgroup::id.x;
+  if (workgroup < read_active_workgroups(header)) {
+    loom::kernel::workgroup::barrier();
+  }
+  unsigned item = workgroup * kWorkgroupSize + loom::kernel::workitem::id.x;
+  output[item] = item;
+}
+// ----
+func.def public linkonce inline @read_active_workgroups(%header: buffer, %header_byte_offset: offset) -> (i32) {
+  %7 = index.cast %header_byte_offset : offset to i64
+  %9 = scalar.assume %7 [range(%7, 0, 9223372036854775807)] : i64
+  %10 = index.cast %9 : i64 to offset
+  %11 = buffer.view %header[%10] : buffer -> view<1xi32>
+  %12 = view.load<root_in_bounds> %11[0] : view<1xi32> -> i32
+  func.return %12 : i32
+}
+
+kernel.def @uniform_helper_barrier() {
+  %15 = index.constant 2 : index
+  %16 = index.constant 1 : index
+  %18 = index.constant 64 : index
+  kernel.launch.config workgroups(%15, %16, %16) workgroup_size(%18, %16, %16) : index
+} launch(%header: buffer, %output: buffer) {
+  %header_byte_offset = index.constant 0 : offset
+  %workgroup_id_x = kernel.workgroup.id<x> : index
+  %workgroup = index.cast %workgroup_id_x : index to i32
+  %25 = func.call readonly @read_active_workgroups(%header, %header_byte_offset) : (buffer, offset) -> (i32)
+  %26 = scalar.cmpi ult, %workgroup, %25 : i32
+  scf.if %26 {
+    kernel.barrier<global> scope(workgroup) ordering(acq_rel)
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  }
+  %43 = scalar.constant 6 : i32
+  %44 = scalar.shli %workgroup, %43 : i32
+  %workitem_id_x = kernel.workitem.id<x> : index
+  %30 = index.cast %workitem_id_x : index to i32
+  %item = scalar.addi %44, %30 : i32
+  %32 = scalar.extui %item : i32 to i64
+  %41 = scalar.constant 2 : i64
+  %42 = scalar.shli %32, %41 : i64
+  %37 = scalar.assume %42 [range(%42, 0, 9223372036854775807)] : i64
+  %38 = index.cast %37 : i64 to offset
+  %39 = buffer.view %output[%38] : buffer -> view<1xi32>
+  view.store<root_in_bounds> %item, %39[0] : i32, view<1xi32>
+  kernel.return
+}

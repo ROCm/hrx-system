@@ -33,6 +33,9 @@ class _DescriptorSpec:
     implicit_outputs: tuple[str, ...] = ()
     # Machine inputs fixed to architectural state instead of SSA operands.
     implicit_inputs: tuple[str, ...] = ()
+    # Tied fixed-register inputs not read by this semantic specialization.
+    # Their output state is independent of the incoming register contents.
+    overwritten_inputs: tuple[str, ...] = ()
     # Authored Low spelling when the physical mnemonic is ambiguous.
     asm_mnemonic: str | None = None
     # Named partial-register views accessed by individual machine operands.
@@ -45,6 +48,8 @@ class _DescriptorSpec:
     read_only_data_immediates: tuple[str, ...] = ()
     # Disjoint part preserved through the first result's tied storage input.
     storage_continuation_part: str | None = None
+    # Preserve available unwritten parts without requiring a named source part.
+    preserves_unwritten_parts: bool = False
     # Result/input pairs constrained to the same storage.
     tied_updates: tuple[tuple[str, str], ...] = ()
     # Result/input pairs constrained as destructive same-storage updates.

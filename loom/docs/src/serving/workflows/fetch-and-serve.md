@@ -1,16 +1,33 @@
 # Fetch and serve a model
 
-`loom-fetch` installs the files for one model preset. Pass the resulting
-`model.json` to `loom-serve` to run it. The card connects the model's programs,
+`loom-fetch` installs the files for one model preset. Pass the installation
+directory to `loom-serve` to run it. Its `model.json` connects the model's programs,
 parameters, tokenizer, and service contract; a separate server configuration is
 optional.
+
+## Quickstart
+
+With [the SDK installed](../../getting-started/acquiring-loom.md), including
+the `hf` extra, fetch Moonshine Streaming Tiny and start it on an AMD GPU:
+
+<div class="loom-quickstart" markdown>
+
+```sh
+loom-fetch https://raw.githubusercontent.com/ROCm/hrx-loom-library/4317508bf5adb251a284ea8dc4e5a24a11bd1c17/model/moonshine-ai/moonshine-streaming-tiny/model.json --preset=streaming --output=./moonshine
+loom-serve --device=amdgpu --workers=4 --listen=127.0.0.1:8080 --model=./moonshine
+```
+
+</div>
+
+Leave the server running. In another terminal,
+[transcribe a recording](#transcribe-a-recording) or
+[check startup status](#start-the-server). The sections below explain source
+selection, acquisition, and serving in detail; the installed `model.json` is
+all the server needs from fetch.
 
 To share your own programs and model cards, the
 [Hugging Face publishing guide](../sharing/hugging-face.md) provides a small
 copyable repository, explicit metadata refresh, and an end-to-end smoke test.
-
-Start with [the SDK installed](../../getting-started/acquiring-loom.md), including
-the `hf` extra for Hugging Face repositories.
 
 ## Fetch a published repository
 
@@ -217,8 +234,12 @@ describes credential setup.
 ## Start the server
 
 ```sh
-loom-serve --device=amdgpu --workers=4 --listen=127.0.0.1:8080 --model=./moonshine/model.json
+loom-serve --device=amdgpu --workers=4 --listen=127.0.0.1:8080 --model=./moonshine
 ```
+
+`--model=./moonshine` selects `./moonshine/model.json`. An explicit model-card
+or deployment-document path is also accepted. Relative paths inside the
+document resolve from its directory.
 
 Leave this terminal running. The server loads only local files; it does not
 contact Hugging Face or interpret the acquisition lock. Preparation, linking,

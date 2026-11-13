@@ -20,6 +20,9 @@
 
 IREE_FLAG(string, hip_wait_mode, "auto",
           "HIP synchronization policy: auto, spin, yield, or blocking.");
+IREE_FLAG(bool, hip_native_runtime, false,
+          "Benchmark native HIP selected by HRX_TEST_LIBAMDHIP64, without "
+          "requiring HRX's private hipHALDeinit entry point.");
 IREE_FLAG(
     string, hip_download_source, "fill",
     "Initialize download sources with GPU fills or host uploads: fill or "
@@ -93,9 +96,14 @@ class HipRuntime {
   ~HipRuntime() {
     Wait();
     Check(Resolve<decltype(&hipStreamDestroy)>("hipStreamDestroy")(stream_));
+    if (copy_source_) {
+      Check(Resolve<decltype(&hipFree)>("hipFree")(copy_source_));
+    }
     Check(Resolve<decltype(&hipFree)>("hipFree")(output_));
     Check(Resolve<decltype(&hipModuleUnload)>("hipModuleUnload")(module_));
-    Check(Resolve<decltype(&hipHALDeinit)>("hipHALDeinit")());
+    if (!FLAG_hip_native_runtime) {
+      Check(Resolve<decltype(&hipHALDeinit)>("hipHALDeinit")());
+    }
     if (!library_.Close()) {
       Require(false, library_.error().c_str());
     }
@@ -129,11 +137,30 @@ class HipRuntime {
     Check(graph_launch_(executable, stream_));
   }
 
+  void PrepareCopy() {
+    if (copy_source_) {
+      return;
+    }
+    Check(Resolve<decltype(&hipMalloc)>("hipMalloc")(&copy_source_,
+                                                     sizeof(uint32_t)));
+    copy_ = Resolve<decltype(&hipMemcpyAsync)>("hipMemcpyAsync");
+    Check(copy_(copy_source_, &kExpectedOutput, sizeof(uint32_t),
+                hipMemcpyHostToDevice, stream_));
+    Wait();
+  }
+
+  void Copy() {
+    Check(copy_(output_, copy_source_, sizeof(uint32_t),
+                hipMemcpyDeviceToDevice, stream_));
+  }
+
   void Wait() { Check(synchronize_(stream_)); }
 
   void ResetOutput() {
-    Check(Resolve<decltype(&hipMemset)>("hipMemset")(output_, 0,
-                                                     sizeof(uint32_t)));
+    // The nonblocking stream has no implicit dependency on default-stream
+    // initialization, including hipMemset's asynchronous device-memory case.
+    Check(Resolve<decltype(&hipMemsetAsync)>("hipMemsetAsync")(
+        output_, 0, sizeof(uint32_t), stream_));
     Wait();
   }
 
@@ -141,7 +168,11 @@ class HipRuntime {
     uint32_t actual = 0;
     Check(Resolve<decltype(&hipMemcpy)>("hipMemcpy")(
         &actual, output_, sizeof(actual), hipMemcpyDeviceToHost));
-    Require(actual == kExpectedOutput, "kernel output mismatch");
+    if (actual != kExpectedOutput) {
+      std::fprintf(stderr, "output mismatch: expected %08x, actual %08x\n",
+                   kExpectedOutput, actual);
+      std::abort();
+    }
   }
 
   hipStream_t stream() const { return stream_; }
@@ -159,6 +190,8 @@ class HipRuntime {
   hipFunction_t function_ = nullptr;
   // Four-byte device allocation live through final completion.
   hipDeviceptr_t output_ = nullptr;
+  // Optional immutable source for captured copies, initialized before capture.
+  hipDeviceptr_t copy_source_ = nullptr;
   // Nonblocking HIP stream shared by recording and streaming rows.
   hipStream_t stream_ = nullptr;
   // Cached public launch entry point used in the timed region.
@@ -167,6 +200,8 @@ class HipRuntime {
   decltype(&hipStreamSynchronize) synchronize_ = nullptr;
   // Cached public graph entry point used in the timed region.
   decltype(&hipGraphLaunch) graph_launch_ = nullptr;
+  // Cached copy entry point used only after PrepareCopy initializes its source.
+  decltype(&hipMemcpyAsync) copy_ = nullptr;
   // Backend, actual architecture/PCI identity, and adapter submission policy.
   std::string label_;
 };
@@ -448,18 +483,34 @@ void DownloadSerial(benchmark::State& state, DownloadMode mode) {
   state.SetBytesProcessed(state.iterations() * length);
 }
 
+enum class GraphOperation { kDispatch, kCopy };
+
+hipGraph_t CaptureGraph(HipRuntime& runtime, int64_t operation_count,
+                        GraphOperation operation) {
+  if (operation == GraphOperation::kCopy) {
+    runtime.PrepareCopy();
+  }
+  HipRuntime::Check(runtime.Resolve<decltype(&hipStreamBeginCapture)>(
+      "hipStreamBeginCapture")(runtime.stream(),
+                               hipStreamCaptureModeThreadLocal));
+  for (int64_t i = 0; i < operation_count; ++i) {
+    if (operation == GraphOperation::kDispatch) {
+      runtime.Launch();
+    } else {
+      runtime.Copy();
+    }
+  }
+  hipGraph_t graph = nullptr;
+  HipRuntime::Check(runtime.Resolve<decltype(&hipStreamEndCapture)>(
+      "hipStreamEndCapture")(runtime.stream(), &graph));
+  return graph;
+}
+
 // Owns the public capture and executable until every measured replay completes.
 class HipGraph {
  public:
   HipGraph(HipRuntime& runtime, int64_t dispatch_count) : runtime_(runtime) {
-    HipRuntime::Check(runtime_.Resolve<decltype(&hipStreamBeginCapture)>(
-        "hipStreamBeginCapture")(runtime_.stream(),
-                                 hipStreamCaptureModeThreadLocal));
-    for (int64_t i = 0; i < dispatch_count; ++i) {
-      runtime_.Launch();
-    }
-    HipRuntime::Check(runtime_.Resolve<decltype(&hipStreamEndCapture)>(
-        "hipStreamEndCapture")(runtime_.stream(), &graph_));
+    graph_ = CaptureGraph(runtime_, dispatch_count, GraphOperation::kDispatch);
     HipRuntime::Check(runtime_.Resolve<decltype(&hipGraphInstantiate)>(
         "hipGraphInstantiate")(&executable_, graph_, nullptr, nullptr, 0));
   }
@@ -484,6 +535,56 @@ class HipGraph {
   // Reused executable; each measured batch joins all of its replays.
   hipGraphExec_t executable_ = nullptr;
 };
+
+// First instantiation of fresh captures. Capture and teardown are untimed;
+// the warmup executes the same program and verifies its exact output.
+void GraphInstantiate(benchmark::State& state, GraphOperation operation) {
+  auto& runtime = Runtime();
+  auto instantiate = runtime.Resolve<decltype(&hipGraphInstantiateWithFlags)>(
+      "hipGraphInstantiateWithFlags");
+  auto destroy = runtime.Resolve<decltype(&hipGraphDestroy)>("hipGraphDestroy");
+  auto destroy_executable =
+      runtime.Resolve<decltype(&hipGraphExecDestroy)>("hipGraphExecDestroy");
+  runtime.ResetOutput();
+  hipGraph_t graph = CaptureGraph(runtime, state.range(0), operation);
+  hipGraphExec_t executable = nullptr;
+  HipRuntime::Check(instantiate(&executable, graph, 0));
+  runtime.LaunchGraph(executable);
+  runtime.Wait();
+  runtime.VerifyOutput();
+  HipRuntime::Check(destroy_executable(executable));
+  HipRuntime::Check(destroy(graph));
+  for (auto _ : state) {
+    state.PauseTiming();
+    graph = CaptureGraph(runtime, state.range(0), operation);
+    state.ResumeTiming();
+    HipRuntime::Check(instantiate(&executable, graph, 0));
+    benchmark::DoNotOptimize(executable);
+    state.PauseTiming();
+    HipRuntime::Check(destroy_executable(executable));
+    HipRuntime::Check(destroy(graph));
+    state.ResumeTiming();
+  }
+  state.SetLabel(runtime.label());
+  state.SetItemsProcessed(state.iterations() * state.range(0));
+}
+
+BENCHMARK_CAPTURE(GraphInstantiate, Dispatch, GraphOperation::kDispatch)
+    ->Name("HIP/Graph/Instantiate/Dispatch")
+    ->ArgName("nodes")
+    ->Arg(1)
+    ->Arg(16)
+    ->Arg(256)
+    ->Arg(4096)
+    ->Unit(benchmark::kMicrosecond);
+BENCHMARK_CAPTURE(GraphInstantiate, Copy, GraphOperation::kCopy)
+    ->Name("HIP/Graph/Instantiate/Copy")
+    ->ArgName("nodes")
+    ->Arg(1)
+    ->Arg(16)
+    ->Arg(256)
+    ->Arg(4096)
+    ->Unit(benchmark::kMicrosecond);
 
 template <bool kGraph, bool kEndToEnd, bool kBurst = false>
 void Dispatch(benchmark::State& state) {

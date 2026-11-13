@@ -7,41 +7,33 @@
 #include <stddef.h>
 
 #include "libamdf/src/allocator.h"
+#include "libamdf/src/gpu/umd/dxg/adapter.h"
 #include "libamdf/src/gpu/umd/dxg/endpoint_properties.h"
 #include "libamdf/src/gpu/umd/dxg/linux/api.h"
-#include "libamdf/src/gpu/umd/dxg/linux/logical_device.h"
+#include "libamdf/src/gpu/umd/dxg/linux/memory_profile.h"
 #include "libamdf/src/gpu/umd/dxg/wsl/api.h"
 #include "libamdf/src/host_memory.h"
 #include "libamdf/src/platform/linux/dxg/endpoint.h"
 
-static amdf_status_t amdf_gpu_linux_dxg_query_local_capacity(
-    const amdf_platform_endpoint_t* endpoint, uint64_t* out_capacity) {
-  D3DKMT_SEGMENTGROUPSIZEINFO sizes = {
-      .PhysicalAdapterIndex = endpoint->physical_adapter_index,
-  };
-  D3DKMT_QUERYADAPTERINFO query = {
-      .hAdapter = endpoint->adapter,
-      .Type = KMTQAITYPE_GETSEGMENTGROUPSIZE,
-      .pPrivateDriverData = &sizes,
-      .PrivateDriverDataSize = sizeof(sizes),
-  };
-  const amdf_status_t status = amdf_linux_dxg_kmt_make_status(
-      amdf_linux_dxg_kmt_query_adapter_info(&endpoint->instance->kmt, &query));
-  if (amdf_status_is_ok(status)) {
-    *out_capacity = sizes.LocalMemory;
-  }
-  return status;
-}
-
 amdf_status_t amdf_gpu_linux_dxg_create_endpoint_profile(
     amdf_platform_endpoint_t* endpoint, amdf_allocator_t host_allocator,
     amdf_gpu_endpoint_profile_t** out_profile) {
-  amdf_gpu_linux_dxg_logical_device_t logical_device = {0};
+  amdf_gpu_dxg_adapter_t adapter = {0};
   amdf_dxg_provider_gpu_properties_t provider_properties = {0};
   amdf_gpu_endpoint_profile_t profile = {0};
 
-  amdf_status_t status = amdf_gpu_linux_dxg_logical_device_initialize(
-      amdf_gpu_dxg_wsl_default_api(), endpoint, host_allocator, &logical_device,
+  const amdf_dxg_provider_gpu_adapter_open_info_t open_info = {
+      .adapter_handle = endpoint->adapter,
+      .physical_adapter_index = endpoint->physical_adapter_index,
+      .adapter_luid = endpoint->info.native_identity.value.windows_adapter.luid,
+      .native_transport =
+          {
+              .context = (void*)&endpoint->instance->kmt,
+              .invoke = amdf_linux_dxg_kmt_invoke,
+          },
+  };
+  amdf_status_t status = amdf_gpu_dxg_adapter_initialize(
+      amdf_gpu_dxg_wsl_default_api(), &open_info, host_allocator, &adapter,
       &provider_properties);
   if (amdf_status_is_ok(status)) {
     amdf_gpu_endpoint_properties_t properties = {0};
@@ -52,16 +44,11 @@ amdf_status_t amdf_gpu_linux_dxg_create_endpoint_profile(
     }
   }
 
-  if (logical_device.native != 0) {
-    amdf_gpu_linux_dxg_logical_device_deinitialize(&logical_device);
-  }
-  if (amdf_status_is_ok(status)) {
-    profile.memory.flags = AMDF_MEMORY_SCOPE_FLAG_AVAILABLE_BYTES;
-    if (provider_properties.is_discrete != 0) {
-      status = amdf_gpu_linux_dxg_query_local_capacity(
-          endpoint, &profile.memory.capacity_byte_length);
-    } else {
-      profile.memory.flags |= AMDF_MEMORY_SCOPE_FLAG_SYSTEM_BACKED;
+  if (adapter.native != NULL) {
+    const amdf_status_t release_status =
+        amdf_gpu_dxg_adapter_deinitialize(&adapter);
+    if (!amdf_status_is_ok(release_status)) {
+      status = release_status;
     }
   }
 

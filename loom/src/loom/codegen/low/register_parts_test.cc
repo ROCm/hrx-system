@@ -17,7 +17,7 @@
 namespace loom {
 namespace {
 
-class RegisterPartsTest : public ::testing::Test {
+class RegisterPartsTest : public ::testing::TestWithParam<bool> {
  protected:
   void SetUp() override {
     iree_arena_block_pool_initialize(32768, iree_allocator_system(), &pool_);
@@ -40,14 +40,33 @@ class RegisterPartsTest : public ::testing::Test {
       IREE_ASSERT_OK(loom_module_define_untyped_values(
           module_, count - module_->values.count, &base));
     }
-    loom_value_u32_scratch_acquire_zeroed(&module_->scratch.values,
-                                          module_->values.count);
     parts_ = {};
-    parts_.masks = &module_->scratch.values;
     parts_.arena = &arena_;
+    if (GetParam()) {
+      IREE_ASSERT_OK(loom_local_value_domain_acquire_for_region(
+          module_, module_->body, &arena_, &domain_));
+      // Reverse ordinals ensure the solver never confuses IDs with ordinals.
+      for (size_t i = count; i != 0; --i) {
+        loom_value_ordinal_t ordinal;
+        IREE_ASSERT_OK(
+            loom_local_value_domain_register_value(&domain_, i - 1, &ordinal));
+      }
+      masks_.assign(count, 0);
+      parts_.value_domain = &domain_;
+      parts_.local_masks = masks_.data();
+    } else {
+      loom_value_u32_scratch_acquire_zeroed(&module_->scratch.values,
+                                            module_->values.count);
+      parts_.masks = &module_->scratch.values;
+    }
+    setup_bytes_ = arena_.used_allocation_size;
   }
   void Release() {
-    loom_value_u32_scratch_release_zeroed(&module_->scratch.values);
+    if (GetParam()) {
+      loom_local_value_domain_release(&domain_);
+    } else {
+      loom_value_u32_scratch_release_zeroed(&module_->scratch.values);
+    }
     iree_arena_reset(&arena_);
   }
 
@@ -59,11 +78,17 @@ class RegisterPartsTest : public ::testing::Test {
   loom_context_t context_;
   // Module provides real value-indexed scratch without any authored IR.
   loom_module_t* module_ = nullptr;
+  // Acquired local ordinal map for the allocation-owned mask representation.
+  loom_local_value_domain_t domain_ = {};
+  // Dense mask storage whose order differs from value IDs.
+  std::vector<uint32_t> masks_;
+  // Arena bytes already used by domain setup, before solving dependencies.
+  iree_host_size_t setup_bytes_ = 0;
   // Register facts under test.
   loom_low_register_parts_t parts_ = {};
 };
 
-TEST_F(RegisterPartsTest, FullMasksNeedNoDependencyStorage) {
+TEST_P(RegisterPartsTest, FullMasksNeedNoDependencyStorage) {
   Acquire(3);
   loom_low_register_parts_define(&parts_, 0, 1);
   IREE_ASSERT_OK(loom_low_register_parts_continue(&parts_, 1, 0, 2, 3));
@@ -76,11 +101,11 @@ TEST_F(RegisterPartsTest, FullMasksNeedNoDependencyStorage) {
   loom_low_register_part_requirement_t requirement = {.value = 2, .mask = 3};
   IREE_ASSERT_OK(loom_low_register_parts_require(&parts_, &requirement));
   EXPECT_EQ(parts_.requirements.count, 0u);
-  EXPECT_EQ(arena_.used_allocation_size, 0u);
+  EXPECT_EQ(arena_.used_allocation_size, setup_bytes_);
   Release();
 }
 
-TEST_F(RegisterPartsTest, DeferredRequirementsKeepTheirOriginalFacts) {
+TEST_P(RegisterPartsTest, DeferredRequirementsKeepTheirOriginalFacts) {
   constexpr uint32_t count = 256;
   Acquire(count);
   for (uint32_t i = 0; i < count; ++i) {
@@ -114,7 +139,7 @@ TEST_F(RegisterPartsTest, DeferredRequirementsKeepTheirOriginalFacts) {
   Release();
 }
 
-TEST_F(RegisterPartsTest, ReverseChainWithSparseValueIds) {
+TEST_P(RegisterPartsTest, ReverseChainWithSparseValueIds) {
   constexpr uint32_t count = 32768;
   Acquire(count * 2);
   for (uint32_t i = 0; i + 1 < count; ++i) {
@@ -131,7 +156,7 @@ TEST_F(RegisterPartsTest, ReverseChainWithSparseValueIds) {
   Release();
 }
 
-TEST_F(RegisterPartsTest, CycleDoesNotInheritIncomingPathMasks) {
+TEST_P(RegisterPartsTest, CycleDoesNotInheritIncomingPathMasks) {
   Acquire(5);
   IREE_ASSERT_OK(loom_low_register_parts_continue(&parts_, 0, 1, 4, 15));
   IREE_ASSERT_OK(loom_low_register_parts_continue(&parts_, 1, 2, 1, 15));
@@ -147,7 +172,7 @@ TEST_F(RegisterPartsTest, CycleDoesNotInheritIncomingPathMasks) {
   Release();
 }
 
-TEST_F(RegisterPartsTest, ArbitraryGraphsAgainstFixedPoint) {
+TEST_P(RegisterPartsTest, ArbitraryGraphsAgainstFixedPoint) {
   uint32_t seed = 1977;
   auto random = [&]() { return seed = seed * 1664525u + 1013904223u; };
   for (int iteration = 0; iteration < 2000; ++iteration) {
@@ -191,6 +216,8 @@ TEST_F(RegisterPartsTest, ArbitraryGraphsAgainstFixedPoint) {
     Release();
   }
 }
+
+INSTANTIATE_TEST_SUITE_P(MaskStorage, RegisterPartsTest, ::testing::Bool());
 
 }  // namespace
 }  // namespace loom

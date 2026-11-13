@@ -245,6 +245,16 @@ TEST_F(HipDeviceContractsApiTest,
   EXPECT_EQ(hipSuccess, api_.peek_at_last_error());
 }
 
+TEST_F(HipDeviceContractsApiTest, EventSinkCannotChangeAfterActivation) {
+  const auto set_event_sink = dso_.Resolve<decltype(&hipHRXSetDeviceEventSink)>(
+      "hipHRXSetDeviceEventSink");
+  ASSERT_NE(nullptr, set_event_sink);
+  const hrx_device_event_sink_t sink = {
+      .fn = [](void*, const hrx_device_event_t*) {},
+  };
+  EXPECT_EQ(hipErrorSetOnActiveProcess, set_event_sink(sink));
+}
+
 TEST_F(HipDeviceContractsApiTest, DeviceFlagsRoundTripUnderConcurrentAccess) {
   unsigned int flags = UINT_MAX;
   ASSERT_EQ(hipSuccess, api_.get_device_flags(&flags));

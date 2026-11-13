@@ -44,6 +44,7 @@ loom_check_test_suite(
         ("accumulator_memory", "gfx90a", "amdgpu.cdna2.core"),
         ("accumulator_moves", "gfx90a", "amdgpu.cdna2.core"),
         ("dot_wait_windows", "gfx90a", "amdgpu.cdna2.core"),
+        ("invoke_results", "gfx11-generic", "amdgpu.gfx11.generic.core"),
         ("matrix_result_windows", "gfx90a", "amdgpu.cdna2.core"),
         ("operand_ties", "gfx1100", "amdgpu.rdna3.core"),
         ("retained_calls", "gfx11-generic", "amdgpu.gfx11.generic.core"),

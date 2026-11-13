@@ -36,12 +36,12 @@ struct loom_serve_text_model_t {
   // Source-owned metadata and bytecode, independent of native model bindings.
   loom_serve_text_source_t source;
   // Model-local diagnostics and work evidence from VM and native compilation.
-  loom_serve_compilation_report_t compilation;
+  loom_runtime_compilation_report_t compilation;
   // Borrowed shared owner outliving every model resource and host I/O payload.
-  loom_serve_device_t* device_owner;
+  loom_runtime_device_t* device_owner;
   // Borrowed storage and residency owner, independent of execution placement.
-  loom_serve_pool_t* pool;
-  loom_serve_pool_t* exchange_pool;
+  loom_runtime_pool_t* pool;
+  loom_runtime_pool_t* exchange_pool;
   // Native execution device borrowed from device_owner.
   iree_hal_device_t* device;
   // Semaphore namespace borrowed from device_owner.
@@ -51,23 +51,23 @@ struct loom_serve_text_model_t {
   // Borrowed exact transfer queue, retained by execution.
   iree_hal_queue_t* transfer;
   // Owned model stage/input timeline with independently retired feedback.
-  loom_serve_execution_t* execution;
+  loom_runtime_execution_t* execution;
   // Cold recording policy for every reusable stage in this residency.
   iree_hal_command_buffer_mode_t command_mode;
-  // Shared source index and compiler for this model residency.
-  loom_serve_jit_t* jit;
+  // Load-owned source index and compiler, released after preparation retires.
+  loom_runtime_jit_t* jit;
   struct {
     iree_host_size_t count;
     struct loom_serve_text_lane_t* lanes;
     uint32_t* stages;
-    loom_serve_jit_t** catalogs;
+    loom_runtime_jit_t** catalogs;
   } placement;
   // Checkpoint domains owning stable parameter reservations across all stages.
   loom_serve_text_parameters_t parameters;
   // Owned physical parameter group, outliving borrowing invocation residencies.
-  loom_serve_residency_group_t* parameter_group;
+  loom_runtime_residency_group_t* parameter_group;
   // Atomic invocation working set and independent admission interest.
-  loom_serve_residency_t* residency;
+  loom_runtime_residency_t* residency;
   // Independent demanded parameter I/O, retained across service publication.
   loom_serve_text_warmup_t* warmup;
   // Source-declared command programs, owned in declaration order.
@@ -75,7 +75,7 @@ struct loom_serve_text_model_t {
   // Number of allocated stages, including partially initialized cold entries.
   iree_host_size_t stage_count;
   // Original native bindings borrowing stages, retained for explicit restore.
-  loom_serve_stage_t* stage_bindings;
+  loom_runtime_stage_t* stage_bindings;
   // Original command private peak, retained for explicit variant restoration.
   uint64_t stage_workspace_bytes;
   // Number of target packed shapes, independent of auxiliary draft stages.
@@ -118,8 +118,8 @@ struct loom_serve_text_model_t {
   } invocation;
   // Immutable configuration and retained source-aware provider for this model.
   bool two_bank;
-  loom_serve_plan_provider_v1_t plan_provider;
-  loom_serve_execution_plan_t* execution_plan;
+  loom_runtime_plan_provider_v1_t plan_provider;
+  loom_runtime_execution_plan_t* execution_plan;
   loom_serve_text_bank_t banks[2];
   struct {
     iree_vm_function_t describe;
@@ -127,10 +127,10 @@ struct loom_serve_text_model_t {
     iree_vm_function_t publish;
     // Retained descriptors of a selected native variant; NULL uses the
     // original stage_bindings.
-    loom_serve_stage_t* stages;
+    loom_runtime_stage_t* stages;
     // Allocation request backing each bank's private workspace.
     iree_hal_pool_reservation_request_t workspace;
-    loom_serve_execution_group_t* pending;
+    loom_runtime_execution_group_t* pending;
     // Source descriptor v3 resident producer/consumer and exchange ranges.
     struct loom_serve_text_resident_binding_t* transport;
     iree_host_size_t transport_count;

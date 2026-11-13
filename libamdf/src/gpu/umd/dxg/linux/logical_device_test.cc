@@ -65,16 +65,17 @@ extern "C" uint32_t __wrap_amdf_linux_dxg_connection_invoke(void* context,
 amdf_dxg_provider_result_t FakeAdapterOpen(
     const amdf_dxg_provider_gpu_adapter_open_info_t* open_info,
     const amdf_allocator_t*, amdf_dxg_provider_gpu_adapter_t** out_adapter,
-    amdf_dxg_provider_gpu_properties_t* out_properties, uint32_t*) {
+    amdf_dxg_provider_gpu_properties_t* out_properties,
+    uint32_t* out_native_status) {
   current_state->operations.push_back(Operation::kOpenBridgeAdapter);
   EXPECT_EQ(open_info->adapter_handle, current_endpoint->adapter);
-  EXPECT_EQ(open_info->device_handle, current_state->device);
   EXPECT_EQ(open_info->physical_adapter_index,
             current_endpoint->physical_adapter_index);
   EXPECT_EQ(open_info->adapter_luid,
             current_endpoint->info.native_identity.value.windows_adapter.luid);
   EXPECT_EQ(open_info->native_transport.context, current_kmt);
   EXPECT_EQ(open_info->native_transport.invoke, amdf_linux_dxg_kmt_invoke);
+  *out_native_status = 0;
   if (current_state->provider_open_result != AMDF_DXG_PROVIDER_RESULT_SUCCESS) {
     return current_state->provider_open_result;
   }

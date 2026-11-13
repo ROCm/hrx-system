@@ -1,6 +1,7 @@
 // RUN: emit source-low output=low
 
-// A direct-call target retains semantic calls, including noinline policy.
+// A direct-call target admits semantic calls. Profitability expands the
+// ordinary cohort while authored noinline retains its boundary.
 vm.target<core> @target
 
 func.def target(@target) @callee(%value: i32, %delta: i32) -> (i32) {
@@ -21,9 +22,9 @@ low.func.def target<vm.core>(@target) @callee(%value: reg<vm.value : i32>, %delt
 }
 
 low.func.def public target<vm.core>(@target) abi(vm_function) @caller(%value: reg<vm.value : i32>, %delta: reg<vm.value : i32>) -> (reg<vm.value : i32>, reg<vm.value : i32>) asm {
-  %ordinary = low.func.call pure @callee(%value, %delta) : (reg<vm.value : i32>, reg<vm.value : i32>) -> (reg<vm.value : i32>)
-  %explicit = low.func.call pure noinline @callee(%ordinary, %delta) : (reg<vm.value : i32>, reg<vm.value : i32>) -> (reg<vm.value : i32>)
-  return %ordinary, %explicit
+  %result = integer.add.i32 %value, %delta
+  %explicit = low.func.call pure noinline @callee(%result, %delta) : (reg<vm.value : i32>, reg<vm.value : i32>) -> (reg<vm.value : i32>)
+  return %result, %explicit
 }
 
 // ====

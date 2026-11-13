@@ -208,7 +208,7 @@ static bool iree_async_proactor_iocp_operation_is_cancelled(
 // cancellation. Returns the status to use for dispatch.
 static iree_status_t iree_async_proactor_iocp_get_socket_io_result(
     iree_async_iocp_carrier_t* carrier, iree_async_operation_t* operation,
-    DWORD* out_bytes_transferred, DWORD* out_flags, const char* error_context) {
+    const char* error_context, DWORD* out_bytes_transferred, DWORD* out_flags) {
   *out_bytes_transferred = 0;
   *out_flags = 0;
   iree_status_t io_status = iree_ok_status();
@@ -248,7 +248,7 @@ static iree_status_t iree_async_proactor_iocp_complete_socket_io(
   DWORD bytes_transferred = 0;
   DWORD flags = 0;
   iree_status_t io_status = iree_async_proactor_iocp_get_socket_io_result(
-      carrier, operation, &bytes_transferred, &flags, "socket I/O failed");
+      carrier, operation, "socket I/O failed", &bytes_transferred, &flags);
 
   // Write results to the operation.
   switch (operation->type) {
@@ -343,8 +343,8 @@ static iree_status_t iree_async_proactor_iocp_complete_accept(
   DWORD bytes_transferred = 0;
   DWORD flags = 0;
   iree_status_t io_status = iree_async_proactor_iocp_get_socket_io_result(
-      carrier, operation, &bytes_transferred, &flags,
-      "AcceptEx completion failed");
+      carrier, operation, "AcceptEx completion failed", &bytes_transferred,
+      &flags);
 
   SOCKET listen_sock = (SOCKET)carrier->io_handle;
   iree_async_socket_accept_operation_t* accept_op =
@@ -471,8 +471,8 @@ static void iree_async_proactor_iocp_complete_connect(
   DWORD bytes_transferred = 0;
   DWORD flags = 0;
   iree_status_t io_status = iree_async_proactor_iocp_get_socket_io_result(
-      carrier, operation, &bytes_transferred, &flags,
-      "ConnectEx completion failed");
+      carrier, operation, "ConnectEx completion failed", &bytes_transferred,
+      &flags);
 
   if (iree_status_is_ok(io_status)) {
     // SO_UPDATE_CONNECT_CONTEXT transfers connection state to the socket.
@@ -503,8 +503,8 @@ static iree_status_t iree_async_proactor_iocp_complete_recv_pool(
   DWORD bytes_transferred = 0;
   DWORD flags = 0;
   iree_status_t io_status = iree_async_proactor_iocp_get_socket_io_result(
-      carrier, operation, &bytes_transferred, &flags,
-      "WSARecv (pool) completion failed");
+      carrier, operation, "WSARecv (pool) completion failed",
+      &bytes_transferred, &flags);
 
   iree_async_socket_recv_pool_operation_t* recv_pool_op =
       (iree_async_socket_recv_pool_operation_t*)operation;

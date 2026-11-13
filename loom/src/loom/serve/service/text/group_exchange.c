@@ -177,8 +177,7 @@ static int loom_serve_text_exchange_poll(void* self) {
         }
         const iree_atomic_int32_t* words =
             (const iree_atomic_int32_t*)slot->request.contents.data;
-        if ((uint32_t)iree_atomic_load(&words[16],
-                                     iree_memory_order_acquire) ==
+        if ((uint32_t)iree_atomic_load(&words[16], iree_memory_order_acquire) ==
             slot->generations) {
           break;
         }

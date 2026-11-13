@@ -387,9 +387,8 @@ TEST_P(ResetTest, Reset_CloseWithUnreadData) {
   iree_async_socket_t* server = nullptr;
   iree_async_socket_t* listener = nullptr;
   EstablishConnectionWithOptions(
-      &client, &server, &listener,
       IREE_ASYNC_SOCKET_OPTION_NO_DELAY | IREE_ASYNC_SOCKET_OPTION_LINGER_ZERO,
-      IREE_ASYNC_SOCKET_OPTION_NONE);
+      IREE_ASYNC_SOCKET_OPTION_NONE, &client, &server, &listener);
 
   // Server sends data to client.
   const char* message = "This data will not be read";

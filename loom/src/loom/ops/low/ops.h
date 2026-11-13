@@ -56,7 +56,11 @@ enum {
   LOOM_OP_LOW_FUNC_EXIT = LOOM_OP_KIND(LOOM_DIALECT_LOW, 32),
   LOOM_OP_LOW_UNREACHABLE = LOOM_OP_KIND(LOOM_DIALECT_LOW, 33),
   LOOM_OP_LOW_BR_IDENTITY = LOOM_OP_KIND(LOOM_DIALECT_LOW, 34),
-  LOOM_OP_LOW_COUNT_ = 35,
+  LOOM_OP_LOW_SPILL_MOVE = LOOM_OP_KIND(LOOM_DIALECT_LOW, 35),
+  LOOM_OP_LOW_RELOAD_MOVE = LOOM_OP_KIND(LOOM_DIALECT_LOW, 36),
+  LOOM_OP_LOW_RELEASE = LOOM_OP_KIND(LOOM_DIALECT_LOW, 37),
+  LOOM_OP_LOW_BORROW = LOOM_OP_KIND(LOOM_DIALECT_LOW, 38),
+  LOOM_OP_LOW_COUNT_ = 39,
 };
 
 // Symbol visibility. Absent (0) means private (module-internal).
@@ -73,6 +77,13 @@ typedef enum loom_low_cc_e {
   LOOM_LOW_CC_DEINITIALIZER = 4,
   LOOM_LOW_CC_COUNT_ = 5,
 } loom_low_cc_t;
+
+// Execution temperature hint. Absent (0) means unspecified.
+typedef enum loom_low_temperature_e {
+  LOOM_LOW_TEMPERATURE_HOT = 1,
+  LOOM_LOW_TEMPERATURE_COLD = 2,
+  LOOM_LOW_TEMPERATURE_COUNT_ = 3,
+} loom_low_temperature_t;
 
 // Register allocation exactness mode for a low function. Absent means virtual.
 typedef enum loom_low_allocation_e {
@@ -144,27 +155,29 @@ LOOM_DEFINE_ATTR_DICT(loom_low_func_def_export_attrs, 7)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_def_visibility, 8, loom_low_visibility_t)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_def_cc, 9, loom_low_cc_t)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_def_effect_contract, 10, loom_callable_effect_contract_t)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_def_inline_policy, 11, loom_inline_policy_t)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_def_allocation, 12, loom_low_allocation_t)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_def_schedule, 13, loom_low_schedule_t)
-LOOM_DEFINE_ATTR_PREDICATE_LIST(loom_low_func_def_predicates, 14)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_def_retain, 15, loom_low_retain_t)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_def_temperature, 11, loom_low_temperature_t)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_def_inline_policy, 12, loom_inline_policy_t)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_def_allocation, 13, loom_low_allocation_t)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_def_schedule, 14, loom_low_schedule_t)
+LOOM_DEFINE_ATTR_PREDICATE_LIST(loom_low_func_def_predicates, 15)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_def_retain, 16, loom_low_retain_t)
 LOOM_DEFINE_REGION(loom_low_func_def_body, 0)
 enum loom_low_func_def_build_flag_bits_e {
   LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_VISIBILITY = 1u << 0,
   LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_RETAIN = 1u << 1,
   LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_CC = 1u << 2,
   LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_EFFECT_CONTRACT = 1u << 3,
-  LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_INLINE_POLICY = 1u << 4,
-  LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_ALLOCATION = 1u << 5,
-  LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_SCHEDULE = 1u << 6,
-  LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_TARGET = 1u << 7,
-  LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_ABI = 1u << 8,
-  LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_EXPORT_SYMBOL = 1u << 9,
-  LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_ABI_ATTRS = 1u << 10,
-  LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_ABI_LAYOUT = 1u << 11,
-  LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_EXPORT_ATTRS = 1u << 12,
-  LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_PREDICATES = 1u << 13,
+  LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_TEMPERATURE = 1u << 4,
+  LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_INLINE_POLICY = 1u << 5,
+  LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_ALLOCATION = 1u << 6,
+  LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_SCHEDULE = 1u << 7,
+  LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_TARGET = 1u << 8,
+  LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_ABI = 1u << 9,
+  LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_EXPORT_SYMBOL = 1u << 10,
+  LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_ABI_ATTRS = 1u << 11,
+  LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_ABI_LAYOUT = 1u << 12,
+  LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_EXPORT_ATTRS = 1u << 13,
+  LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_PREDICATES = 1u << 14,
 };
 typedef uint32_t loom_low_func_def_build_flags_t;
 iree_status_t loom_low_func_def_build(
@@ -174,6 +187,7 @@ iree_status_t loom_low_func_def_build(
     loom_optional uint8_t retain,
     loom_optional uint8_t cc,
     loom_optional uint8_t effect_contract,
+    loom_optional uint8_t temperature,
     loom_optional uint8_t inline_policy,
     loom_optional uint8_t allocation,
     loom_optional uint8_t schedule,
@@ -291,32 +305,34 @@ LOOM_DEFINE_ATTR_DICT(loom_low_func_decl_export_attrs, 7)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_decl_visibility, 8, loom_low_visibility_t)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_decl_cc, 9, loom_low_cc_t)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_decl_effect_contract, 10, loom_callable_effect_contract_t)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_decl_inline_policy, 11, loom_inline_policy_t)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_decl_allocation, 12, loom_low_allocation_t)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_decl_schedule, 13, loom_low_schedule_t)
-LOOM_DEFINE_ATTR_PREDICATE_LIST(loom_low_func_decl_predicates, 14)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_decl_retain, 15, loom_low_retain_t)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_decl_import_kind, 16, loom_low_func_decl_import_kind_t)
-LOOM_DEFINE_ATTR_STRING(loom_low_func_decl_code_symbol, 17)
-LOOM_DEFINE_ATTR_STRING(loom_low_func_decl_import_module, 18)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_decl_temperature, 11, loom_low_temperature_t)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_decl_inline_policy, 12, loom_inline_policy_t)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_decl_allocation, 13, loom_low_allocation_t)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_decl_schedule, 14, loom_low_schedule_t)
+LOOM_DEFINE_ATTR_PREDICATE_LIST(loom_low_func_decl_predicates, 15)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_decl_retain, 16, loom_low_retain_t)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_decl_import_kind, 17, loom_low_func_decl_import_kind_t)
+LOOM_DEFINE_ATTR_STRING(loom_low_func_decl_code_symbol, 18)
+LOOM_DEFINE_ATTR_STRING(loom_low_func_decl_import_module, 19)
 enum loom_low_func_decl_build_flag_bits_e {
   LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_VISIBILITY = 1u << 0,
   LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_RETAIN = 1u << 1,
   LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_CC = 1u << 2,
   LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_EFFECT_CONTRACT = 1u << 3,
-  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_INLINE_POLICY = 1u << 4,
-  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_ALLOCATION = 1u << 5,
-  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_SCHEDULE = 1u << 6,
-  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_IMPORT_KIND = 1u << 7,
-  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_CODE_SYMBOL = 1u << 8,
-  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_IMPORT_MODULE = 1u << 9,
-  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_TARGET = 1u << 10,
-  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_ABI = 1u << 11,
-  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_EXPORT_SYMBOL = 1u << 12,
-  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_ABI_ATTRS = 1u << 13,
-  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_ABI_LAYOUT = 1u << 14,
-  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_EXPORT_ATTRS = 1u << 15,
-  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_PREDICATES = 1u << 16,
+  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_TEMPERATURE = 1u << 4,
+  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_INLINE_POLICY = 1u << 5,
+  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_ALLOCATION = 1u << 6,
+  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_SCHEDULE = 1u << 7,
+  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_IMPORT_KIND = 1u << 8,
+  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_CODE_SYMBOL = 1u << 9,
+  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_IMPORT_MODULE = 1u << 10,
+  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_TARGET = 1u << 11,
+  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_ABI = 1u << 12,
+  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_EXPORT_SYMBOL = 1u << 13,
+  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_ABI_ATTRS = 1u << 14,
+  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_ABI_LAYOUT = 1u << 15,
+  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_EXPORT_ATTRS = 1u << 16,
+  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_PREDICATES = 1u << 17,
 };
 typedef uint32_t loom_low_func_decl_build_flags_t;
 iree_status_t loom_low_func_decl_build(
@@ -326,6 +342,7 @@ iree_status_t loom_low_func_decl_build(
     loom_optional uint8_t retain,
     loom_optional uint8_t cc,
     loom_optional uint8_t effect_contract,
+    loom_optional uint8_t temperature,
     loom_optional uint8_t inline_policy,
     loom_optional uint8_t allocation,
     loom_optional uint8_t schedule,
@@ -372,16 +389,19 @@ LOOM_DEFINE_VARIADIC_OPERANDS(loom_low_func_call_operands, 0)
 LOOM_DEFINE_VARIADIC_RESULTS(loom_low_func_call_results, 0)
 LOOM_DEFINE_ATTR_SYMBOL(loom_low_func_call_callee, 0)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_call_effect_contract, 1, loom_callable_effect_contract_t)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_call_inline_policy, 2, loom_inline_policy_t)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_call_temperature, 2, loom_low_temperature_t)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_call_inline_policy, 3, loom_inline_policy_t)
 enum loom_low_func_call_build_flag_bits_e {
   LOOM_LOW_FUNC_CALL_BUILD_FLAG_HAS_EFFECT_CONTRACT = 1u << 0,
-  LOOM_LOW_FUNC_CALL_BUILD_FLAG_HAS_INLINE_POLICY = 1u << 1,
+  LOOM_LOW_FUNC_CALL_BUILD_FLAG_HAS_TEMPERATURE = 1u << 1,
+  LOOM_LOW_FUNC_CALL_BUILD_FLAG_HAS_INLINE_POLICY = 1u << 2,
 };
 typedef uint32_t loom_low_func_call_build_flags_t;
 iree_status_t loom_low_func_call_build(
     loom_builder_t* builder,
     loom_low_func_call_build_flags_t build_flags,
     loom_optional uint8_t effect_contract,
+    loom_optional uint8_t temperature,
     loom_optional uint8_t inline_policy,
     loom_symbol_ref_t callee,
     loom_may_consume const loom_value_id_t* operands,
@@ -399,7 +419,7 @@ iree_status_t loom_low_func_call_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
 
-// LOOM_OP_LOW_OP: Descriptor-backed target instruction over virtual registers. Memory access flags constrain each instruction instance independently of its descriptor and machine cache controls. Volatile preserves dynamic memory observations and their order; it supplies no atomicity, synchronization, or cache-coherence guarantee.
+// LOOM_OP_LOW_OP: Descriptor-backed target instruction over virtual registers. Memory access flags constrain each instruction instance independently of its descriptor and machine cache controls. Volatile preserves dynamic memory observations and their order; it supplies no atomicity, synchronization, or cache-coherence guarantee. Atomic preserves each indivisible observation and same-location issue order without ordering completion across independent addresses. The instruction, alignment, fences, and cache controls supply the physical atomic memory contract.
 // %sum = low.op<amdgpu.v_add_u32>(%lhs, %rhs) : (reg<amdgpu.vgpr x1>, reg<amdgpu.vgpr x1>) -> reg<amdgpu.vgpr x1>
 LOOM_DEFINE_ISA(loom_low_op_isa, LOOM_OP_LOW_OP)
 LOOM_DEFINE_VARIADIC_OPERANDS(loom_low_op_operands, 0)
@@ -422,7 +442,7 @@ iree_status_t loom_low_const_facts(
     const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts);
 
-// LOOM_OP_LOW_COPY: Explicit virtual-register copy used by lowering and allocation. Each copy produces a fresh virtual-register identity and may constrain the result to a different target register class with the same unit count and semantic value type.
+// LOOM_OP_LOW_COPY: Explicit virtual-register copy used by lowering and allocation. Each copy produces a fresh virtual-register identity and may constrain the result to a different target register class with the same unit count and semantic value type. The result copies the source ownership mode without consuming it: an owner creates an independent owner, while a borrow remains borrowed. Managed copies cannot share their physical carrier while both lifetimes remain live.
 // %copy = low.copy %value : reg<amdgpu.vgpr x1> -> reg<amdgpu.vgpr x1>
 LOOM_DEFINE_ISA(loom_low_copy_isa, LOOM_OP_LOW_COPY)
 LOOM_DEFINE_OPERAND(loom_low_copy_source, 0)
@@ -435,6 +455,8 @@ iree_status_t loom_low_copy_build(
     loom_type_t result_type,
     loom_location_id_t location,
     loom_op_t** out_op);
+loom_trait_flags_t loom_low_transfer_effective_traits(
+    const loom_module_t* module, const loom_op_t* op);
 iree_status_t loom_low_copy_facts(
     loom_fact_context_t* context,
     const loom_module_t* module, const loom_op_t* op,
@@ -457,6 +479,8 @@ iree_status_t loom_low_move_build(
     loom_type_t result_type,
     loom_location_id_t location,
     loom_op_t** out_op);
+loom_trait_flags_t loom_low_transfer_effective_traits(
+    const loom_module_t* module, const loom_op_t* op);
 iree_status_t loom_low_move_facts(
     loom_fact_context_t* context,
     const loom_module_t* module, const loom_op_t* op,
@@ -510,23 +534,26 @@ iree_status_t loom_low_concat_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
 
-// LOOM_OP_LOW_INVOKE: Source-typed call edge to an explicitly selected target-Low function. Source-to-Low lowering maps the source operands and results to the helper register signature, proves the helper argument predicates, and normalizes the edge to low.func.call. Each source value maps to one register-typed value. Views require storage and layout information beyond that carrier and are not accepted as operands or results; use a source helper taking views or pass buffers and offsets explicitly. Authored inline policy has the same meaning as on low.func.call; targets without a Low call ABI may require the normalized edge to inline before emission.
+// LOOM_OP_LOW_INVOKE: Source-typed call edge to an explicitly selected target-Low function. Source-to-Low lowering maps the source operands and results to the helper register signature, proves the helper argument predicates, and normalizes the edge to low.func.call. Argument carriers may be converted when source facts prove a target-supported lossless conversion. The native call returns the helper's declared carriers; lowering converts them to source result storage when needed to preserve each lane's observation across divergent control. This does not change source-type matching for ordinary calls. Each source value maps to one register-typed value. Views require storage and layout information beyond that carrier and are not accepted as operands or results; use a source helper taking views or pass buffers and offsets explicitly. Authored temperature and inline policy have the same meaning as on low.func.call; targets without a Low call ABI may require the normalized edge to inline before emission.
 // %result = low.invoke @extern_add(%lhs, %rhs) : (i32, i32) -> (i32)
 LOOM_DEFINE_ISA(loom_low_invoke_isa, LOOM_OP_LOW_INVOKE)
 LOOM_DEFINE_VARIADIC_OPERANDS(loom_low_invoke_operands, 0)
 LOOM_DEFINE_VARIADIC_RESULTS(loom_low_invoke_results, 0)
 LOOM_DEFINE_ATTR_SYMBOL(loom_low_invoke_callee, 0)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_invoke_effect_contract, 1, loom_callable_effect_contract_t)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_invoke_inline_policy, 2, loom_inline_policy_t)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_invoke_temperature, 2, loom_low_temperature_t)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_invoke_inline_policy, 3, loom_inline_policy_t)
 enum loom_low_invoke_build_flag_bits_e {
   LOOM_LOW_INVOKE_BUILD_FLAG_HAS_EFFECT_CONTRACT = 1u << 0,
-  LOOM_LOW_INVOKE_BUILD_FLAG_HAS_INLINE_POLICY = 1u << 1,
+  LOOM_LOW_INVOKE_BUILD_FLAG_HAS_TEMPERATURE = 1u << 1,
+  LOOM_LOW_INVOKE_BUILD_FLAG_HAS_INLINE_POLICY = 1u << 2,
 };
 typedef uint32_t loom_low_invoke_build_flags_t;
 iree_status_t loom_low_invoke_build(
     loom_builder_t* builder,
     loom_low_invoke_build_flags_t build_flags,
     loom_optional uint8_t effect_contract,
+    loom_optional uint8_t temperature,
     loom_optional uint8_t inline_policy,
     loom_symbol_ref_t callee,
     loom_may_consume const loom_value_id_t* operands,
@@ -965,6 +992,68 @@ iree_status_t loom_low_br_identity_build(
     loom_location_id_t location,
     loom_op_t** out_op);
 iree_status_t loom_low_br_identity_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter);
+
+// LOOM_OP_LOW_SPILL_MOVE: Transfer a register value into low storage, invalidating the source register value. Managed carriers move without retaining and clear their source; scalar carriers need no physical clearing.
+// low.spill.move %value, %slot : reg<amdgpu.vgpr x4>, low.storage<private>
+LOOM_DEFINE_ISA(loom_low_spill_move_isa, LOOM_OP_LOW_SPILL_MOVE)
+LOOM_DEFINE_OPERAND(loom_low_spill_move_value, 0)
+LOOM_DEFINE_OPERAND(loom_low_spill_move_storage, 1)
+LOOM_DEFINE_ATTR_I64(loom_low_spill_move_offset, 0)
+iree_status_t loom_low_spill_move_build(
+    loom_builder_t* builder,
+    loom_value_id_t value,
+    loom_value_id_t storage,
+    int64_t offset,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+iree_status_t loom_low_spill_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter);
+
+// LOOM_OP_LOW_RELOAD_MOVE: Transfer a stored value into a register, ending the stored value's lifetime. Managed storage becomes canonical null; scalar storage is unspecified until rewritten.
+// %value = low.reload.move %slot : low.storage<private> -> reg<amdgpu.vgpr x4>
+LOOM_DEFINE_ISA(loom_low_reload_move_isa, LOOM_OP_LOW_RELOAD_MOVE)
+LOOM_DEFINE_OPERAND(loom_low_reload_move_storage, 0)
+LOOM_DEFINE_RESULT(loom_low_reload_move_result, 0)
+LOOM_DEFINE_ATTR_I64(loom_low_reload_move_offset, 0)
+iree_status_t loom_low_reload_move_build(
+    loom_builder_t* builder,
+    loom_may_consume loom_value_id_t storage,
+    int64_t offset,
+    loom_type_t result_type,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+iree_status_t loom_low_reload_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter);
+
+// LOOM_OP_LOW_RELEASE: End the lifetime of a complete typed managed-reference carrier. The source identity is invalid afterward. An owned carrier releases its reference; a borrowed or null carrier is only cleared. A ptr carrier may hold compiler-acquired protection, which is released here without changing its borrowed source type. Native finalization occurs at this operation when the carrier holds the last owner.
+// low.release %owner : reg<vm.ref : ref<@Object>>
+LOOM_DEFINE_ISA(loom_low_release_isa, LOOM_OP_LOW_RELEASE)
+LOOM_DEFINE_OPERAND(loom_low_release_value, 0)
+iree_status_t loom_low_release_build(
+    loom_builder_t* builder,
+    loom_value_id_t value,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+iree_status_t loom_low_release_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter);
+
+// LOOM_OP_LOW_BORROW: Project an owning managed reference into an independent pointer carrier of the same nominal payload. The owner remains valid and keeps its explicit lifetime. The pointer remains live through its final use: emission acquires protection unless a covering owner is proven. This safe operation does not expose an unchecked machine borrow.
+// %pointer = low.borrow %owner : reg<vm.ref : ref<@Frame>> -> reg<vm.ref : ptr<@Frame>>
+LOOM_DEFINE_ISA(loom_low_borrow_isa, LOOM_OP_LOW_BORROW)
+LOOM_DEFINE_OPERAND(loom_low_borrow_owner, 0)
+LOOM_DEFINE_RESULT(loom_low_borrow_pointer, 0)
+iree_status_t loom_low_borrow_build(
+    loom_builder_t* builder,
+    loom_may_consume loom_value_id_t owner,
+    loom_type_t result_type,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+iree_status_t loom_low_borrow_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
 

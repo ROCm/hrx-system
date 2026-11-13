@@ -95,9 +95,8 @@ iree_status_t loom_liveness_dataflow_solve(
     const loom_cfg_graph_t* cfg_graph, const loom_value_id_t* value_ids,
     loom_value_ordinal_t value_count,
     const loom_liveness_block_transfer_t* block_transfers, uint16_t block_count,
-    loom_liveness_block_relation_t* out_block_relations,
-    iree_arena_allocator_t* result_arena,
-    iree_arena_allocator_t* scratch_arena);
+    iree_arena_allocator_t* result_arena, iree_arena_allocator_t* scratch_arena,
+    loom_liveness_block_relation_t* out_block_relations);
 
 #ifdef __cplusplus
 }  // extern "C"

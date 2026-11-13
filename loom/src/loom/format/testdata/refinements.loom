@@ -1,0 +1,10 @@
+// Dependent input types and complete output encodings remain stable through
+// serialization. Refinement changes the asserted type, not the value identity.
+func.def @refine_carriers(%extent: index, %storage: encoding<storage>, %tensor: tensor<[%extent]xi8, %storage>, %tile: tile<[%extent]xi8, %storage>, %vector: vector<[%extent]xi8>, %view: view<[%extent]xi8, %storage>, %group: group<[%extent]>) -> (tensor<18xi8, #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q4_0>>, tile<18xi8, #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q4_0>>, vector<18xi8>, view<18xi8, #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q4_0>>, group<18>) {
+  %exact_tensor = tensor.refine %tensor : tensor<[%extent]xi8, %storage> -> tensor<18xi8, #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q4_0>>
+  %exact_tile = tile.refine %tile : tile<[%extent]xi8, %storage> -> tile<18xi8, #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q4_0>>
+  %exact_vector = vector.refine %vector : vector<[%extent]xi8> -> vector<18xi8>
+  %exact_view = view.refine %view : view<[%extent]xi8, %storage> -> view<18xi8, #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q4_0>>
+  %exact_group = group.refine %group : group<[%extent]> -> group<18>
+  func.return %exact_tensor, %exact_tile, %exact_vector, %exact_view, %exact_group : tensor<18xi8, #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q4_0>>, tile<18xi8, #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q4_0>>, vector<18xi8>, view<18xi8, #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q4_0>>, group<18>
+}

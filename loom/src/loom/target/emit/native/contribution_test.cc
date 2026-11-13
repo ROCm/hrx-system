@@ -75,7 +75,7 @@ TEST(NativeContributionTest, AssemblesAlignedSectionsAndCopiesStorage) {
   TestArena arena;
   loom_native_section_contribution_assembly_t assembly = {0};
   IREE_ASSERT_OK(loom_native_assemble_section_contributions(
-      contributions, IREE_ARRAYSIZE(contributions), &assembly, arena.arena()));
+      contributions, IREE_ARRAYSIZE(contributions), arena.arena(), &assembly));
   text0[0] = 0xff;
   text_section_name[1] = 'X';
   rodata_section_name[1] = 'X';
@@ -129,7 +129,7 @@ TEST(NativeContributionTest, AssemblesAlignedReservationsWithoutPayloadBytes) {
   TestArena arena;
   loom_native_section_contribution_assembly_t assembly = {0};
   IREE_ASSERT_OK(loom_native_assemble_section_contributions(
-      contributions, IREE_ARRAYSIZE(contributions), &assembly, arena.arena()));
+      contributions, IREE_ARRAYSIZE(contributions), arena.arena(), &assembly));
 
   ASSERT_EQ(assembly.section_count, 1u);
   EXPECT_EQ(assembly.sections[0].storage,
@@ -174,7 +174,7 @@ TEST(NativeContributionTest, RejectsReservationLayoutOverflow) {
     IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
                           loom_native_assemble_section_contributions(
                               contributions, IREE_ARRAYSIZE(contributions),
-                              &assembly, arena.arena()));
+                              arena.arena(), &assembly));
     EXPECT_EQ(assembly.sections, nullptr);
     EXPECT_EQ(assembly.section_count, 0u);
     EXPECT_EQ(assembly.contribution_layouts, nullptr);

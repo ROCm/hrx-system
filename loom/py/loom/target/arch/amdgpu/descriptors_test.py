@@ -145,8 +145,8 @@ from loom.target.arch.amdgpu.descriptors import (
 from loom.target.arch.amdgpu.descriptors.api import (
     _AMDGPU_CORE_DESCRIPTOR_SET_BUILDER_FLAG_GFX125X,
     _order_descriptor_sets_for_shared_ordinals,
-    _with_instruction_classes,
     _with_storage_lease_rows,
+    amdgpu_core_descriptor_set_instruction_encoding_names_by_isa_key,
     amdgpu_core_descriptor_set_instruction_names,
 )
 from loom.target.arch.amdgpu.descriptors.cluster import (
@@ -156,6 +156,9 @@ from loom.target.arch.amdgpu.descriptors.cluster import (
 from loom.target.arch.amdgpu.descriptors.control import (
     _s_delay_alu_descriptor,
     _s_set_vgpr_msb_descriptor,
+)
+from loom.target.arch.amdgpu.descriptors.finalization import (
+    _with_instruction_classes,
 )
 from loom.target.arch.amdgpu.descriptors.tensor import (
     _s_wait_tensorcnt_descriptor,
@@ -183,6 +186,7 @@ from loom.target.arch.amdgpu.matrix_formats import (
     AMDGPU_CDNA4_MATRIX_FORMAT_ENUM_DOMAIN_NAMES,
     AMDGPU_F8F6F4_MATRIX_PHYSICAL_FORMATS,
 )
+from loom.target.arch.amdgpu.target_info import sorted_descriptor_set_infos
 from loom.target.low_descriptors import (
     Constraint,
     ConstraintKind,
@@ -1913,6 +1917,18 @@ def test_dynamic_u32_division_primitives_are_available_on_all_targets() -> None:
         )
 
 
+def test_instruction_encoding_fact_demands_preserve_complete_donors() -> None:
+    demands_by_isa_key = (
+        amdgpu_core_descriptor_set_instruction_encoding_names_by_isa_key(
+            sorted_descriptor_set_infos()
+        )
+    )
+
+    assert demands_by_isa_key["rdna4"]["S_MOV_B32"] == ("ENC_SOP1",)
+    assert demands_by_isa_key["rdna4"]["BUFFER_ATOMIC_ADD_U64"] is None
+    assert demands_by_isa_key["rdna3_5"]["V_MIN_F32"] is None
+
+
 def test_scc_free_scalar_integer_results_are_rematerializable() -> None:
     descriptor_keys = (
         "amdgpu.s_mul_i32",
@@ -2930,6 +2946,7 @@ def test_scalar_carry_forms_preserve_native_unsigned_addition() -> None:
         _gfx940_core_overlays(),
         _gfx950_core_overlays(),
         _gfx11_core_overlays(),
+        _gfx115x_core_overlays(),
         _gfx12_core_overlays(),
         _gfx125x_core_overlays(),
     ):
@@ -2942,6 +2959,9 @@ def test_scalar_carry_forms_preserve_native_unsigned_addition() -> None:
             assert carry.encoding_name == ordinary.encoding_name
             assert carry.schedule_class == ordinary.schedule_class
             assert carry.flags == ordinary.flags
+            assert carry.constraints == (
+                Constraint(ConstraintKind.REMATERIALIZABLE, 1),
+            )
             assert (
                 ordinary.implicit_operands[0].descriptor_operand.role
                 is OperandRole.IMPLICIT
@@ -2964,6 +2984,7 @@ def test_scalar_carry_and_borrow_forms_preserve_scc_dependencies() -> None:
         _gfx940_core_overlays(),
         _gfx950_core_overlays(),
         _gfx11_core_overlays(),
+        _gfx115x_core_overlays(),
         _gfx12_core_overlays(),
         _gfx125x_core_overlays(),
     ):
@@ -2977,6 +2998,9 @@ def test_scalar_carry_and_borrow_forms_preserve_scc_dependencies() -> None:
             for suffix in ("", ".lhs_inline", ".rhs_inline"):
                 descriptor = descriptors[f"amdgpu.{mnemonic}{suffix}"]
                 assert descriptor.instruction_name == instruction
+                assert descriptor.constraints == (
+                    Constraint(ConstraintKind.REMATERIALIZABLE, 1),
+                )
                 assert descriptor.implicit_operands == base.implicit_operands
                 assert descriptor.asm_forms[0].results == base.asm_forms[0].results
                 state = descriptor.implicit_operands[0].descriptor_operand
@@ -3020,6 +3044,7 @@ def test_symbol_relative_salu_descriptors_have_lossless_low_asm_forms() -> None:
         descriptors = {descriptor.descriptor_key: descriptor for descriptor in overlays}
 
         add_lo = descriptors["amdgpu.s_add_u32.rhs_symbol_rel32_lo"]
+        assert add_lo.constraints == ()
         assert add_lo.effects == pc_relative_effect
         assert add_lo.asm_forms is not None
         assert add_lo.asm_forms[0].mnemonic == "s_add_u32_rhs_symbol_rel32_lo"
@@ -3035,6 +3060,7 @@ def test_symbol_relative_salu_descriptors_have_lossless_low_asm_forms() -> None:
         )
 
         addc_hi = descriptors["amdgpu.s_addc_u32.rhs_symbol_rel32_hi"]
+        assert addc_hi.constraints == ()
         assert addc_hi.effects == pc_relative_effect
         assert addc_hi.asm_forms is not None
         assert addc_hi.asm_forms[0].mnemonic == "s_addc_u32_rhs_symbol_rel32_hi"
@@ -3795,9 +3821,14 @@ def test_binary_vop3_comparisons_admit_scalar_and_vector_sources() -> None:
         "uno",
     )
     families = (
-        [(f"amdgpu.v_cmp_{predicate}_i32", 32) for predicate in integer_predicates[:6]]
+        [
+            (f"amdgpu.v_cmp_{predicate}_i{width}", width)
+            for width in (32, 64)
+            for predicate in integer_predicates[:6]
+        ]
         + [
-            (f"amdgpu.v_cmp_{predicate}_u32", 32)
+            (f"amdgpu.v_cmp_{predicate}_u{width}", width)
+            for width in (32, 64)
             for predicate in integer_predicates[6:]
         ]
         + [

@@ -6,10 +6,13 @@
 
 #include "loom/util/fact_origin.h"
 
+#include <vector>
+
 #include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/ir/context.h"
+#include "loom/ir/float_facts.h"
 #include "loom/ir/module.h"
 #include "loom/ops/cfg/ops.h"
 #include "loom/ops/encoding/ops.h"
@@ -23,6 +26,20 @@
 
 namespace loom {
 namespace {
+
+static iree_status_t CloneScopeValues(loom_value_fact_table_t* target,
+                                      const loom_value_fact_table_t* source) {
+  std::vector<loom_value_id_t> values;
+  loom_value_fact_scope_iterator_t iterator;
+  loom_value_fact_table_scope_begin(source, &iterator);
+  for (loom_value_id_t value_id = loom_value_fact_scope_next(&iterator);
+       value_id != LOOM_VALUE_ID_INVALID;
+       value_id = loom_value_fact_scope_next(&iterator)) {
+    values.push_back(value_id);
+  }
+  return loom_value_fact_table_clone_values(
+      target, {source, values.data(), values.size()}, nullptr);
+}
 
 class FactOriginStorageTest : public ::testing::Test {
  protected:
@@ -102,11 +119,9 @@ TEST_F(FactOriginStorageTest, UniformElementOriginsClearOnlyTouchedEntries) {
 
   loom_value_fact_uniform_element_origin_t* const entries =
       table.uniform_element_origins.entries;
-  loom_value_id_t* const touched_values = table.touched_values;
   loom_value_fact_table_clear_scope(&table);
 
   EXPECT_EQ(table.uniform_element_origins.entries, entries);
-  EXPECT_EQ(table.touched_values, touched_values);
   EXPECT_EQ(table.touched_count, 0u);
   EXPECT_EQ(OriginEntry(table.uniform_element_origins, 5).scalar_value_id,
             LOOM_VALUE_ID_INVALID);
@@ -152,11 +167,9 @@ TEST_F(FactOriginStorageTest, UniformScaleOriginsClearOnlyTouchedEntries) {
 
   loom_value_fact_uniform_scale_origin_t* const entries =
       table.uniform_scale_origins.entries;
-  loom_value_id_t* const touched_values = table.touched_values;
   loom_value_fact_table_clear_scope(&table);
 
   EXPECT_EQ(table.uniform_scale_origins.entries, entries);
-  EXPECT_EQ(table.touched_values, touched_values);
   EXPECT_EQ(table.touched_count, 0u);
   EXPECT_EQ(OriginEntry(table.uniform_scale_origins, 5).source_value_id,
             LOOM_VALUE_ID_INVALID);
@@ -398,9 +411,7 @@ TEST_F(FactOriginStorageTest, CloneValuesCopiesUniformElementOrigins) {
   iree_arena_initialize(&block_pool_, &target_arena);
   loom_value_fact_table_t target = {0};
   IREE_ASSERT_OK(loom_value_fact_table_initialize(&target, &target_arena, 8));
-  IREE_ASSERT_OK(loom_value_fact_table_clone_values(
-      &target, {&source, source.touched_values, source.touched_count},
-      nullptr));
+  IREE_ASSERT_OK(CloneScopeValues(&target, &source));
 
   EXPECT_TRUE(loom_value_facts_query_uniform_element(
       &target.context, loom_value_fact_table_lookup(&target, 7), nullptr));
@@ -411,9 +422,7 @@ TEST_F(FactOriginStorageTest, CloneValuesCopiesUniformElementOrigins) {
       OriginEntry(target.uniform_element_origins, 7).exact_scalar_value_id, 1u);
 
   loom_value_fact_table_clear_origins(&source, 7);
-  IREE_ASSERT_OK(loom_value_fact_table_clone_values(
-      &target, {&source, source.touched_values, source.touched_count},
-      nullptr));
+  IREE_ASSERT_OK(CloneScopeValues(&target, &source));
   EXPECT_EQ(OriginEntry(target.uniform_element_origins, 7).scalar_value_id,
             LOOM_VALUE_ID_INVALID);
 
@@ -435,9 +444,7 @@ TEST_F(FactOriginStorageTest, CloneValuesCopiesUniformScaleOrigins) {
   iree_arena_initialize(&block_pool_, &target_arena);
   loom_value_fact_table_t target = {0};
   IREE_ASSERT_OK(loom_value_fact_table_initialize(&target, &target_arena, 8));
-  IREE_ASSERT_OK(loom_value_fact_table_clone_values(
-      &target, {&source, source.touched_values, source.touched_count},
-      nullptr));
+  IREE_ASSERT_OK(CloneScopeValues(&target, &source));
 
   ASSERT_TRUE(
       loom_value_fact_range_contains(target.uniform_scale_origins.range, 7));
@@ -445,9 +452,7 @@ TEST_F(FactOriginStorageTest, CloneValuesCopiesUniformScaleOrigins) {
   EXPECT_EQ(OriginEntry(target.uniform_scale_origins, 7).scale_value_id, 3u);
 
   loom_value_fact_table_clear_origins(&source, 7);
-  IREE_ASSERT_OK(loom_value_fact_table_clone_values(
-      &target, {&source, source.touched_values, source.touched_count},
-      nullptr));
+  IREE_ASSERT_OK(CloneScopeValues(&target, &source));
   EXPECT_EQ(OriginEntry(target.uniform_scale_origins, 7).source_value_id,
             LOOM_VALUE_ID_INVALID);
 
@@ -470,9 +475,7 @@ TEST_F(FactOriginStorageTest, CloneValuesCopiesExactLaneOrigins) {
   iree_arena_initialize(&block_pool_, &target_arena);
   loom_value_fact_table_t target = {0};
   IREE_ASSERT_OK(loom_value_fact_table_initialize(&target, &target_arena, 8));
-  IREE_ASSERT_OK(loom_value_fact_table_clone_values(
-      &target, {&source, source.touched_values, source.touched_count},
-      nullptr));
+  IREE_ASSERT_OK(CloneScopeValues(&target, &source));
 
   EXPECT_EQ(target.exact_lane_origins.count, 1u);
   EXPECT_LT(target.exact_lane_origins.capacity, (iree_host_size_t)8);
@@ -493,9 +496,7 @@ TEST_F(FactOriginStorageTest, CloneValuesCopiesExactScalarOrigins) {
   iree_arena_initialize(&block_pool_, &target_arena);
   loom_value_fact_table_t target = {0};
   IREE_ASSERT_OK(loom_value_fact_table_initialize(&target, &target_arena, 8));
-  IREE_ASSERT_OK(loom_value_fact_table_clone_values(
-      &target, {&source, source.touched_values, source.touched_count},
-      nullptr));
+  IREE_ASSERT_OK(CloneScopeValues(&target, &source));
 
   ASSERT_TRUE(
       loom_value_fact_range_contains(target.exact_scalar_origins.range, 7));
@@ -521,9 +522,7 @@ TEST_F(FactOriginStorageTest, CloneValuesCopiesContextualQueryOrigins) {
   iree_arena_initialize(&block_pool_, &target_arena);
   loom_value_fact_table_t target = {0};
   IREE_ASSERT_OK(loom_value_fact_table_initialize(&target, &target_arena, 8));
-  IREE_ASSERT_OK(loom_value_fact_table_clone_values(
-      &target, {&source, source.touched_values, source.touched_count},
-      nullptr));
+  IREE_ASSERT_OK(CloneScopeValues(&target, &source));
 
   ASSERT_TRUE(
       loom_value_fact_range_contains(target.contextual_query_origins.range, 7));
@@ -537,14 +536,10 @@ TEST_F(FactOriginStorageTest, CloneValuesCopiesContextualQueryOrigins) {
   const auto bytes = target_arena.used_allocation_size;
   IREE_ASSERT_OK(loom_value_fact_table_define_contextual_query_origin(
       &source, 7, ContextualQueryOrigin(family_kind, loom_attr_i64(64))));
-  IREE_ASSERT_OK(loom_value_fact_table_clone_values(
-      &target, {&source, source.touched_values, source.touched_count},
-      nullptr));
+  IREE_ASSERT_OK(CloneScopeValues(&target, &source));
   EXPECT_EQ(loom_attr_as_i64(origin.key), 64);
   loom_value_fact_table_clear_origins(&source, 7);
-  IREE_ASSERT_OK(loom_value_fact_table_clone_values(
-      &target, {&source, source.touched_values, source.touched_count},
-      nullptr));
+  IREE_ASSERT_OK(CloneScopeValues(&target, &source));
   EXPECT_EQ(origin.family_kind, LOOM_PARAMETERIZED_ATTR_KIND_ANY);
   EXPECT_EQ(target.contextual_query_origins.touched_count, 1u);
   EXPECT_EQ(target_arena.used_allocation_size, bytes);
@@ -813,6 +808,79 @@ TEST_F(FactOriginTest, ExactScalarCastOriginsFlattenThroughAliases) {
       &table_, module_, loom_index_cast_result(unsigned_cast), &origin));
 }
 
+TEST_F(FactOriginTest, IntegerCastPublicationRetargetsAndWithdraws) {
+  const auto byte_type = loom_type_scalar(LOOM_SCALAR_TYPE_I8);
+  const auto offset_type = loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET);
+  loom_op_t* narrow = nullptr;
+  IREE_ASSERT_OK(loom_index_cast_build(&rewriter_.builder, inputs_[4],
+                                       index_type_, byte_type,
+                                       LOOM_LOCATION_UNKNOWN, &narrow));
+  const auto byte = loom_index_cast_result(narrow);
+  loom_op_t* widen = nullptr;
+  IREE_ASSERT_OK(loom_index_cast_build(&rewriter_.builder, byte, byte_type,
+                                       offset_type, LOOM_LOCATION_UNKNOWN,
+                                       &widen));
+  const auto wide = loom_index_cast_result(widen);
+  auto cast = loom_value_fact_table_query_integer_cast(&table_, wide);
+  EXPECT_EQ(cast.immediate.source_value_id, byte);
+  EXPECT_EQ(cast.composed.source_value_id, inputs_[4]);
+  EXPECT_EQ(cast.composed.kind, LOOM_INTEGER_CAST_UNSIGNED);
+  EXPECT_EQ(cast.composed.bit_count, 8);
+
+  IREE_ASSERT_OK(loom_rewriter_set_operand(&rewriter_, narrow, 0, inputs_[5]));
+  EXPECT_TRUE(Compute(widen));
+  cast = loom_value_fact_table_query_integer_cast(&table_, wide);
+  EXPECT_EQ(cast.composed.source_value_id, inputs_[5]);
+
+  loom_op_t* constant = nullptr;
+  IREE_ASSERT_OK(loom_index_constant_build(&rewriter_.builder, loom_attr_i64(5),
+                                           index_type_, LOOM_LOCATION_UNKNOWN,
+                                           &constant));
+  IREE_ASSERT_OK(loom_rewriter_set_operand(
+      &rewriter_, narrow, 0, loom_index_constant_result(constant)));
+  EXPECT_EQ(loom_value_fact_table_query_integer_cast(&table_, byte)
+                .immediate.bit_count,
+            0);
+  EXPECT_TRUE(Compute(widen));
+  EXPECT_EQ(loom_value_fact_table_query_integer_cast(&table_, wide)
+                .immediate.bit_count,
+            0);
+
+  IREE_ASSERT_OK(loom_rewriter_set_operand(&rewriter_, narrow, 0, inputs_[4]));
+  EXPECT_TRUE(Compute(widen));
+  cast = loom_value_fact_table_query_integer_cast(&table_, wide);
+  EXPECT_EQ(cast.composed.source_value_id, inputs_[4]);
+  const auto bytes = arena_.used_allocation_size;
+  EXPECT_FALSE(Compute(narrow));
+  EXPECT_FALSE(Compute(widen));
+  EXPECT_EQ(arena_.used_allocation_size, bytes);
+}
+
+TEST_F(FactOriginTest, NumericQueryDoesNotPublishIntegerCasts) {
+  const auto byte_type = loom_type_scalar(LOOM_SCALAR_TYPE_I8);
+  loom_op_t* narrow = nullptr;
+  IREE_ASSERT_OK(loom_index_cast_build(&rewriter_.builder, inputs_[4],
+                                       index_type_, byte_type,
+                                       LOOM_LOCATION_UNKNOWN, &narrow));
+  const auto result = loom_index_cast_result(narrow);
+  loom_value_fact_table_clear_origins(&table_, result);
+  const auto input = loom_value_facts_unknown();
+  loom_value_facts_t output;
+  loom_fact_context_t query = table_.context;
+  ASSERT_EQ(query.publication, nullptr);
+  IREE_ASSERT_OK(loom_op_vtable(module_, narrow)
+                     ->infer_facts(&query, module_, narrow, &input, &output));
+  EXPECT_EQ(output.range_lo, INT8_MIN);
+  EXPECT_EQ(output.range_hi, INT8_MAX);
+  EXPECT_EQ(loom_value_fact_table_query_integer_cast(&table_, result)
+                .immediate.bit_count,
+            0);
+  EXPECT_TRUE(Compute(narrow));
+  EXPECT_EQ(loom_value_fact_table_query_integer_cast(&table_, result)
+                .immediate.bit_count,
+            8);
+}
+
 TEST_F(FactOriginTest, CyclicPublicationRefreshesOutsideMaterialization) {
   const auto function =
       loom_func_like_cast(module_, rewriter_.builder.ip.parent_op);
@@ -1035,6 +1103,60 @@ TEST_F(FactOriginTest, LayoutAliasPublishesOnlyChangedBindings) {
       loom_value_fact_table_query_layout_origin(&table_, result).values.data,
       after.values.data);
   EXPECT_EQ(arena_.used_allocation_size, bytes);
+}
+
+TEST_F(FactOriginTest, NumericQueryDoesNotPublishUniformOrigins) {
+  auto* splat = Splat(inputs_[0]);
+  const auto result = loom_vector_splat_result(splat);
+  loom_value_fact_table_clear_origins(&table_, result);
+  ASSERT_EQ(Uniform(result), LOOM_VALUE_ID_INVALID);
+  const auto input = loom_value_facts_exact_float(LOOM_SCALAR_TYPE_F32, 2.0);
+  loom_value_facts_t output;
+  loom_fact_context_t query = table_.context;
+  ASSERT_EQ(query.publication, nullptr);
+  IREE_ASSERT_OK(loom_op_vtable(module_, splat)
+                     ->infer_facts(&query, module_, splat, &input, &output));
+  loom_value_fact_uniform_element_t element;
+  ASSERT_TRUE(loom_value_facts_query_uniform_element(&query, output, &element));
+  double value;
+  ASSERT_TRUE(loom_value_facts_as_exact_float(LOOM_SCALAR_TYPE_F32,
+                                              element.element, &value));
+  EXPECT_EQ(value, 2.0);
+  EXPECT_EQ(Uniform(result), LOOM_VALUE_ID_INVALID);
+  EXPECT_TRUE(Compute(splat));
+  EXPECT_EQ(Uniform(result), inputs_[0]);
+}
+
+TEST_F(FactOriginTest, NumericQueryDoesNotPublishLayoutOrigins) {
+  const auto type =
+      loom_type_encoding_with_role(LOOM_ENCODING_ROLE_ADDRESS_LAYOUT);
+  const int64_t dynamic = INT64_MIN;
+  loom_op_t* layout = nullptr;
+  IREE_ASSERT_OK(loom_encoding_layout_strided_build(
+      &rewriter_.builder, &inputs_[4], 1, &dynamic, 1, type,
+      LOOM_LOCATION_UNKNOWN, &layout));
+  const auto result = loom_encoding_layout_strided_result(layout);
+  loom_value_fact_table_clear_origins(&table_, result);
+  const auto input = loom_value_facts_exact_i64(4);
+  loom_value_facts_t output;
+  loom_fact_context_t query = table_.context;
+  ASSERT_EQ(query.publication, nullptr);
+  IREE_ASSERT_OK(loom_op_vtable(module_, layout)
+                     ->infer_facts(&query, module_, layout, &input, &output));
+  loom_value_fact_encoding_summary_t summary;
+  ASSERT_TRUE(
+      loom_value_facts_query_encoding_summary(&query, output, &summary));
+  ASSERT_EQ(summary.address_layout.rank, 1);
+  EXPECT_EQ(summary.address_layout.strides[0].range_lo, 4);
+  EXPECT_EQ(summary.address_layout.strides[0].range_hi, 4);
+  EXPECT_EQ(loom_value_fact_table_query_layout_origin(&table_, result).kind,
+            LOOM_VALUE_FACT_LAYOUT_ORIGIN_NONE);
+  EXPECT_TRUE(Compute(layout));
+  const auto origin =
+      loom_value_fact_table_query_layout_origin(&table_, result);
+  ASSERT_EQ(origin.kind, LOOM_VALUE_FACT_LAYOUT_ORIGIN_EXPLICIT_STRIDES);
+  ASSERT_EQ(origin.count, 1);
+  EXPECT_EQ(origin.values.explicit_strides[0], inputs_[4]);
 }
 
 }  // namespace

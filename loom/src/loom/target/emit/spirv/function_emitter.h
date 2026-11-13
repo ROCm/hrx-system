@@ -23,7 +23,6 @@
 #include "loom/target/arch/spirv/packet_rows.h"
 #include "loom/target/emit/spirv/module_abi.h"
 #include "loom/target/emit/spirv/module_builder.h"
-#include "loom/target/emit/spirv/module_storage.h"
 #include "loom/target/emit/spirv/module_types.h"
 #include "loom/target/emit/spirv/module_values.h"
 #include "loom/target/emit/spirv/program.h"
@@ -110,8 +109,6 @@ typedef struct loom_spirv_emit_state_t {
   uint32_t current_label_id;
   // Selected ABI plan for entry materialization.
   loom_spirv_module_abi_plan_t abi_plan;
-  // Function-local Workgroup storage materialization state.
-  loom_spirv_module_workgroup_storage_state_t workgroup_storage;
   // Input variables referenced by this function's entry-point interface.
   uint32_t builtin_interface_variable_ids[LOOM_SPIRV_BUILTIN_VARIABLE_COUNT];
 } loom_spirv_emit_state_t;

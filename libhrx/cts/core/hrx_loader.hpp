@@ -62,23 +62,76 @@ class HrxLoader {
   decltype(&hrx_status_free_message) status_free_message;
   decltype(&hrx_status_ignore) status_ignore;
 
-  // GPU lifecycle.
-  decltype(&hrx_gpu_initialize) gpu_initialize;
-  decltype(&hrx_gpu_shutdown) gpu_shutdown;
-  decltype(&hrx_gpu_device_count) gpu_device_count;
-  decltype(&hrx_gpu_device_get) gpu_device_get;
+  // Explicit runtime and immutable groups.
+  decltype(&hrx_runtime_create) runtime_create;
+  decltype(&hrx_runtime_retain) runtime_retain;
+  decltype(&hrx_runtime_release) runtime_release;
+  decltype(&hrx_runtime_query_available_devices)
+      runtime_query_available_devices;
+  decltype(&hrx_device_group_create) device_group_create;
+  decltype(&hrx_device_group_retain) device_group_retain;
+  decltype(&hrx_device_group_release) device_group_release;
+  decltype(&hrx_device_group_device_count) device_group_device_count;
+  decltype(&hrx_device_group_get_device) device_group_get_device;
+  decltype(&hrx_device_get_device_group) device_get_device_group;
 
-  // CPU lifecycle.
-  decltype(&hrx_cpu_initialize) cpu_initialize;
-  decltype(&hrx_cpu_shutdown) cpu_shutdown;
-  decltype(&hrx_cpu_device_count) cpu_device_count;
-  decltype(&hrx_cpu_device_get) cpu_device_get;
+  decltype(&hrx_slab_pool_create) slab_pool_create;
+  decltype(&hrx_slab_cache_create) slab_cache_create;
+  decltype(&hrx_tlsf_pool_query_backing_request)
+      tlsf_pool_query_backing_request;
+  decltype(&hrx_fixed_block_pool_query_backing_request)
+      fixed_block_pool_query_backing_request;
+  decltype(&hrx_tlsf_pool_create) tlsf_pool_create;
+  decltype(&hrx_fixed_block_pool_create) fixed_block_pool_create;
+  decltype(&hrx_tlsf_pool_create_from_buffer) tlsf_pool_create_from_buffer;
+  decltype(&hrx_fixed_block_pool_create_from_buffer)
+      fixed_block_pool_create_from_buffer;
+  decltype(&hrx_mem_pool_retain) mem_pool_retain;
+  decltype(&hrx_mem_pool_release) mem_pool_release;
+  decltype(&hrx_mem_pool_get_device_group) mem_pool_get_device_group;
+  decltype(&hrx_mem_pool_trim) mem_pool_trim;
+  decltype(&hrx_mem_pool_query_capabilities) mem_pool_query_capabilities;
+  decltype(&hrx_mem_pool_query_host_access) mem_pool_query_host_access;
+  decltype(&hrx_mem_pool_query_atomic_operations)
+      mem_pool_query_atomic_operations;
+  decltype(&hrx_mem_pool_query_zero_compute_atomic_operations)
+      mem_pool_query_zero_compute_atomic_operations;
+  decltype(&hrx_buffer_query_atomic_operations) buffer_query_atomic_operations;
+  decltype(&hrx_buffer_query_zero_compute_atomic_operations)
+      buffer_query_zero_compute_atomic_operations;
+  decltype(&hrx_mem_pool_query_stats) mem_pool_query_stats;
+  decltype(&hrx_mem_pool_transition_table) mem_pool_transition_table;
+  decltype(&hrx_buffer_transition_table) buffer_transition_table;
+  decltype(&hrx_memory_transition_prepare_pair) memory_transition_prepare_pair;
+  decltype(&hrx_memory_transition_recipe) memory_transition_recipe;
+  decltype(&hrx_buffer_mapping_memory_barrier) buffer_mapping_memory_barrier;
+  decltype(&hrx_device_group_topology_node_count)
+      device_group_topology_node_count;
+  decltype(&hrx_device_group_query_topology_node)
+      device_group_query_topology_node;
+  decltype(&hrx_queue_alloca) queue_alloca;
+  decltype(&hrx_queue_dealloca) queue_dealloca;
 
   // Device ops.
   decltype(&hrx_device_get_property) device_get_property;
   decltype(&hrx_device_get_type) device_get_type;
   decltype(&hrx_device_retain) device_retain;
   decltype(&hrx_device_release) device_release;
+
+  // Exact queues.
+  decltype(&hrx_device_queue_family_count) device_queue_family_count;
+  decltype(&hrx_device_query_queue_family) device_query_queue_family;
+  decltype(&hrx_device_query_queue_execution_resource)
+      device_query_queue_execution_resource;
+  decltype(&hrx_device_query_queue_execution_resource_group)
+      device_query_queue_execution_resource_group;
+  decltype(&hrx_device_get_queue) device_get_queue;
+  decltype(&hrx_queue_acquire) queue_acquire;
+  decltype(&hrx_queue_retain) queue_retain;
+  decltype(&hrx_queue_release) queue_release;
+  decltype(&hrx_queue_get_device) queue_get_device;
+  decltype(&hrx_queue_get_family_ordinal) queue_get_family_ordinal;
+  decltype(&hrx_queue_query_params) queue_query_params;
 
   // Semaphores.
   decltype(&hrx_semaphore_create) semaphore_create;
@@ -92,6 +145,7 @@ class HrxLoader {
   decltype(&hrx_stream_create) stream_create;
   decltype(&hrx_stream_retain) stream_retain;
   decltype(&hrx_stream_release) stream_release;
+  decltype(&hrx_stream_get_queue) stream_get_queue;
   decltype(&hrx_stream_synchronize) stream_synchronize;
   decltype(&hrx_stream_wait) stream_wait;
   decltype(&hrx_stream_query) stream_query;
@@ -101,7 +155,17 @@ class HrxLoader {
   decltype(&hrx_stream_get_timeline_position) stream_get_timeline_position;
   decltype(&hrx_stream_wait_on) stream_wait_on;
   decltype(&hrx_stream_dispatch) stream_dispatch;
-  decltype(&hrx_stream_execution_barrier) stream_execution_barrier;
+  decltype(&hrx_stream_barrier) stream_barrier;
+
+  // Event snapshots and queue timestamps.
+  decltype(&hrx_event_create) event_create;
+  decltype(&hrx_event_retain) event_retain;
+  decltype(&hrx_event_release) event_release;
+  decltype(&hrx_event_record) event_record;
+  decltype(&hrx_event_query) event_query;
+  decltype(&hrx_event_synchronize) event_synchronize;
+  decltype(&hrx_event_elapsed_time) event_elapsed_time;
+  decltype(&hrx_stream_wait_event) stream_wait_event;
 
   // Allocator.
   decltype(&hrx_device_allocator) device_allocator;
@@ -116,7 +180,7 @@ class HrxLoader {
   decltype(&hrx_buffer_release) buffer_release;
   decltype(&hrx_buffer_map) buffer_map;
   decltype(&hrx_buffer_unmap) buffer_unmap;
-  decltype(&hrx_buffer_get_device_ptr) buffer_get_device_ptr;
+  decltype(&hrx_buffer_query_address) buffer_query_address;
   decltype(&hrx_buffer_get_size) buffer_get_size;
 
   // Host/device transfers.
@@ -147,6 +211,18 @@ class HrxLoader {
   decltype(&hrx_queue_dispatch) queue_dispatch;
   decltype(&hrx_queue_host_call) queue_host_call;
 
+  // Graphs.
+  decltype(&hrx_graph_create) graph_create;
+  decltype(&hrx_graph_release) graph_release;
+  decltype(&hrx_graph_add_kernel_node) graph_add_kernel_node;
+  decltype(&hrx_graph_add_copy_buffer_node) graph_add_copy_buffer_node;
+  decltype(&hrx_graph_add_fill_buffer_node) graph_add_fill_buffer_node;
+  decltype(&hrx_graph_add_host_call_node) graph_add_host_call_node;
+  decltype(&hrx_graph_instantiate) graph_instantiate;
+  decltype(&hrx_graph_exec_release) graph_exec_release;
+  decltype(&hrx_graph_exec_launch) graph_exec_launch;
+  decltype(&hrx_graph_exec_update) graph_exec_update;
+
   // Fences.
   decltype(&hrx_fence_create) fence_create;
   decltype(&hrx_fence_create_at) fence_create_at;
@@ -164,24 +240,10 @@ class HrxLoader {
   decltype(&hrx_buffer_view_rank) buffer_view_rank;
   decltype(&hrx_buffer_view_dim) buffer_view_dim;
 
-  // Legacy scalar VMM retained for ROCr-backed HIP.
-  decltype(&hrx_allocator_query_virtual_memory) allocator_query_virtual_memory;
-  decltype(&hrx_allocator_virtual_memory_reserve)
-      allocator_virtual_memory_reserve;
-  decltype(&hrx_allocator_virtual_memory_release)
-      allocator_virtual_memory_release;
-  decltype(&hrx_allocator_physical_memory_allocate)
-      allocator_physical_memory_allocate;
-  decltype(&hrx_allocator_physical_memory_free) allocator_physical_memory_free;
-  decltype(&hrx_allocator_virtual_memory_map) allocator_virtual_memory_map;
-  decltype(&hrx_allocator_virtual_memory_unmap) allocator_virtual_memory_unmap;
-  decltype(&hrx_allocator_virtual_memory_protect)
-      allocator_virtual_memory_protect;
-  decltype(&hrx_allocator_virtual_memory_protect_scoped)
-      allocator_virtual_memory_protect_scoped;
-
   // Address owners and batched mappings.
-  decltype(&hrx_device_query_memory_scope) device_query_memory_scope;
+  decltype(&hrx_device_query_host_memory_scope) device_query_host_memory_scope;
+  decltype(&hrx_device_query_queue_family_memory_scope)
+      device_query_queue_family_memory_scope;
   decltype(&hrx_virtual_buffer_query_capabilities)
       virtual_buffer_query_capabilities;
   decltype(&hrx_virtual_buffer_create) virtual_buffer_create;
@@ -189,18 +251,9 @@ class HrxLoader {
   decltype(&hrx_virtual_buffer_resolve_projection)
       virtual_buffer_resolve_projection;
   decltype(&hrx_virtual_buffer_detach) virtual_buffer_detach;
-  decltype(&hrx_allocator_query_mapping_requirements)
-      allocator_query_mapping_requirements;
+  decltype(&hrx_mem_pool_query_mapping_requirements)
+      mem_pool_query_mapping_requirements;
   decltype(&hrx_queue_map) queue_map;
-
-  // Memory pools.
-  decltype(&hrx_mem_pool_create) mem_pool_create;
-  decltype(&hrx_mem_pool_retain) mem_pool_retain;
-  decltype(&hrx_mem_pool_release) mem_pool_release;
-  decltype(&hrx_mem_pool_get_attribute) mem_pool_get_attribute;
-  decltype(&hrx_mem_pool_set_attribute) mem_pool_set_attribute;
-  decltype(&hrx_mem_pool_trim) mem_pool_trim;
-  decltype(&hrx_mem_pool_allocate_buffer) mem_pool_allocate_buffer;
 
  private:
   HrxLoader();

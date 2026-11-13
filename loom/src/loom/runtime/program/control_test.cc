@@ -1,0 +1,945 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+#include <array>
+#include <filesystem>
+#include <string>
+
+#include "iree/async/frontier_tracker.h"
+#include "iree/async/util/proactor_pool.h"
+#include "iree/base/threading/numa.h"
+#include "iree/base/tooling/flags.h"
+#include "iree/testing/gtest.h"
+#include "iree/testing/status_matchers.h"
+#include "iree/vm/bytecode/module.h"
+#include "iree/vm/sync.h"
+#include "loom/runtime/execution/execution.h"
+#include "loom/runtime/execution/queues.h"
+#include "loom/runtime/host/host.h"
+#include "loom/runtime/program/jit.h"
+#include "loom/runtime/program/module.h"
+#include "loom/runtime/testing/compiler.h"
+#include "loom/runtime/testing/device.h"
+
+IREE_FLAG(string, control_sources, "", "Portable control source catalog.");
+
+namespace {
+
+iree_hal_queue_t* SelectQueue(iree_hal_device_t* device,
+                              iree_hal_queue_family_role_flags_t role) {
+  const auto* queues =
+      iree_hal_device_spec_queues(iree_hal_device_spec(device));
+  for (iree_host_size_t i = 0; i < queues->family_count; ++i) {
+    const auto& family = queues->families[i];
+    if (family.provisioned_queue_count &&
+        iree_all_bits_set(family.role_flags, role)) {
+      return iree_hal_device_queue(device, i, 0);
+    }
+  }
+  return nullptr;
+}
+
+struct loom_runtime_test_control_state_t {
+  // Prefill token count/position base/EOS, then decode position/count/EOS.
+  std::array<int32_t, 3> control = {};
+  // Current selected token followed by retained generated-token history.
+  std::array<int32_t, 129> tokens = {};
+  // Generated count, padding canaries, and EOS at element seven.
+  std::array<int32_t, 8> progress = {};
+};
+
+class ControlTest
+    : public ::testing::TestWithParam<iree_hal_command_buffer_mode_t> {
+ protected:
+  static void SetUpTestSuite() {
+    IREE_ASSERT_OK(
+        loom_runtime_test_host_create(2, iree_allocator_system(), &host_));
+    IREE_ASSERT_OK(loom_runtime_test_driver_acquire(host_, &driver_));
+    device_status_ = CreateDevice();
+  }
+
+  static void TearDownTestSuite() {
+    iree_hal_device_group_release(group_);
+    iree_hal_device_release(device_);
+    iree_async_frontier_tracker_release(frontier_tracker_);
+    iree_status_free(device_status_);
+    group_ = nullptr;
+    device_ = nullptr;
+    frontier_tracker_ = nullptr;
+    device_status_ = iree_ok_status();
+    iree_hal_driver_release(driver_);
+    loom_runtime_host_release(host_);
+    driver_ = nullptr;
+    host_ = nullptr;
+  }
+
+  void SetUp() override {
+    iree::Status status = iree_status_clone(device_status_);
+    if (status.code() == iree::StatusCode::kUnimplemented ||
+        status.code() == iree::StatusCode::kUnavailable) {
+      GTEST_SKIP() << status.ToString();
+    }
+    IREE_ASSERT_OK(status);
+    auto* dispatch =
+        SelectQueue(device_, IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH);
+    auto* transfer =
+        SelectQueue(device_, IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER);
+    ASSERT_NE(dispatch, nullptr);
+    ASSERT_NE(transfer, nullptr);
+    const auto* family = iree_hal_queue_family(dispatch);
+    const auto* transfer_family = iree_hal_queue_family(transfer);
+    const iree_hal_pool_family_access_t families[] = {
+        {
+            .family = family,
+            .usage = IREE_HAL_BUFFER_USAGE_STORAGE |
+                     IREE_HAL_BUFFER_USAGE_TRANSFER |
+                     IREE_HAL_BUFFER_USAGE_DISPATCH_INDIRECT_PARAMETERS,
+        },
+        {.family = transfer_family, .usage = IREE_HAL_BUFFER_USAGE_TRANSFER},
+    };
+    const iree_hal_pool_scope_t scope = {
+        .family_count = family == transfer_family ? 1u : 2u,
+        .families = families,
+    };
+    const iree_hal_slab_pool_options_t pool_options = {};
+    IREE_ASSERT_OK(iree_hal_slab_pool_create(group_, scope, &pool_options,
+                                             host_allocator_, &storage_pool_));
+    iree_hal_asan_pool_options_t asan_options = {};
+    const auto* sanitizer =
+        iree_hal_device_spec_sanitizer(iree_hal_device_spec(device_));
+    if (iree_any_bit_set(sanitizer->flags,
+                         IREE_HAL_DEVICE_SANITIZER_FLAG_ASAN)) {
+      asan_options = sanitizer->asan.pool_options;
+    }
+    IREE_ASSERT_OK(loom_runtime_workspace_create(
+        group_, storage_pool_, &asan_options, host_allocator_, &workspace_));
+    IREE_ASSERT_OK(loom_runtime_execution_queues_create(
+        family, transfer_family, host_allocator_, &execution_queues_));
+    IREE_ASSERT_OK(loom_runtime_execution_create(execution_queues_, workspace_,
+                                                 host_allocator_, &execution_));
+    directory_ =
+        std::filesystem::path(FLAG_control_sources).parent_path().string();
+    const iree_string_view_t providers[] = {IREE_SV("kernels.loom")};
+    const loom_runtime_sources_t sources = {
+        .base_directory = iree_make_cstring_view(directory_.c_str()),
+        .count = IREE_ARRAYSIZE(providers),
+        .values = providers,
+    };
+    IREE_ASSERT_OK(loom_runtime_jit_create(device_, dispatch, host_, &sources,
+                                           nullptr, &compilation_,
+                                           host_allocator_, &jit_));
+    IREE_ASSERT_OK(
+        Prepare(family, "prefill_to_decode", nullptr, &commands_[0]));
+    IREE_ASSERT_OK(
+        Prepare(family, "decode_transition", nullptr, &commands_[1]));
+    IREE_ASSERT_OK(Prepare(family, "device_continuation",
+                           &continuation_.transient, &commands_[2]));
+    ASSERT_GT(continuation_.transient.required_byte_length, 0u);
+    ASSERT_LT(continuation_.transient.binding_index,
+              continuation_.buffers.size());
+    for (auto& row : buffers_) {
+      for (size_t i = 0; i < row.size(); ++i) {
+        IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+            storage_pool_,
+            iree_hal_make_pool_reservation_request(kLengths[i], 0),
+            iree_infinite_timeout(), &row[i]));
+      }
+    }
+    for (size_t i = 0; i < continuation_.buffers.size(); ++i) {
+      const iree_device_size_t length =
+          i < kContinuationLengths.size()
+              ? kContinuationLengths[i]
+              : continuation_.transient.required_byte_length;
+      IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+          storage_pool_, iree_hal_make_pool_reservation_request(length, 0),
+          iree_infinite_timeout(), &continuation_.buffers[i]));
+    }
+    IREE_ASSERT_OK(CreateModel());
+  }
+
+  void TearDown() override {
+    // Host transfer payloads are fixture members so even a failed assertion
+    // leaves their storage alive until all accepted work has retired here.
+    if (gate_) {
+      // Advance beyond the normal release value so teardown also releases a
+      // gate left pending by an earlier assertion without signaling it twice.
+      IREE_EXPECT_OK(iree_hal_semaphore_signal(gate_, 2, nullptr));
+    }
+    if (execution_) {
+      IREE_EXPECT_OK(loom_runtime_execution_drain(execution_));
+    }
+    iree_hal_fence_release(produced_);
+    iree_hal_fence_release(dependency_);
+    iree_hal_semaphore_release(gate_);
+    iree_vm_process_release(process_);
+    if (invocation_) {
+      iree_vm_invocation_deinitialize(invocation_);
+    }
+    iree_vm_program_release(program_);
+    iree_vm_module_release(native_module_);
+    iree_vm_module_release(bytecode_module_);
+    iree_vm_environment_free(environment_);
+    for (auto& row : buffers_) {
+      for (auto* buffer : row) {
+        iree_hal_buffer_release(buffer);
+      }
+    }
+    for (auto* buffer : continuation_.buffers) {
+      iree_hal_buffer_release(buffer);
+    }
+    for (auto* command : commands_) {
+      iree_hal_command_buffer_release(command);
+    }
+    loom_runtime_jit_release(jit_);
+    loom_runtime_execution_release(execution_);
+    loom_runtime_execution_queues_release(execution_queues_);
+    loom_runtime_workspace_release(workspace_);
+    iree_hal_pool_release(storage_pool_);
+  }
+
+  static iree_status_t CreateDevice() {
+    auto params = iree_hal_device_create_params_default();
+    params.proactor_pool = loom_runtime_host_proactor_pool(host_);
+    iree_status_t status = iree_hal_driver_create_device_by_uri(
+        driver_, loom_runtime_test_device()->device_uri, &params,
+        host_allocator_, &device_);
+    if (iree_status_is_ok(status)) {
+      status = iree_async_frontier_tracker_create(
+          iree_async_frontier_tracker_options_default(), host_allocator_,
+          &frontier_tracker_);
+    }
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_device_group_create_from_device(
+          device_, frontier_tracker_, host_allocator_, &group_);
+    }
+    return status;
+  }
+
+  iree_status_t Prepare(const iree_hal_queue_family_t* family, const char* root,
+                        loom_cmd_program_transient_requirement_t* out_transient,
+                        iree_hal_command_buffer_t** out_command) {
+    const loomc_config_options_t config = {};
+    loom_runtime_jit_stage_t* stage = nullptr;
+    auto status = loom_runtime_jit_compile(jit_, iree_make_cstring_view(root),
+                                           &config, &stage);
+    if (iree_status_is_ok(status) && out_transient) {
+      *out_transient =
+          loom_runtime_jit_stage_program(stage)->requirements.transient;
+    }
+    if (iree_status_is_ok(status)) {
+      status = loom_runtime_jit_stage_record(stage, family, GetParam(), nullptr,
+                                             nullptr, out_command);
+    }
+    loom_runtime_jit_stage_free(stage);
+    return status;
+  }
+
+  iree_status_t CreateModel() {
+    IREE_RETURN_IF_ERROR(
+        iree_vm_environment_allocate(host_allocator_, &environment_));
+    const iree_vm_ref_type_table_t* table = nullptr;
+    IREE_RETURN_IF_ERROR(iree_hal_vm_register_types(environment_, &table));
+    IREE_RETURN_IF_ERROR(iree_hal_vm_types_resolve(table, &types_));
+    const loom_runtime_stage_t stages[] = {
+        {commands_[0], 3},
+        {commands_[1], 3},
+    };
+    const iree_byte_span_t feedback[] = {
+        iree_make_byte_span(outputs_[0].tokens.data(), kLengths[1]),
+        iree_make_byte_span(outputs_[0].progress.data(), kLengths[2]),
+        iree_make_byte_span(outputs_[1].progress.data(), kLengths[2]),
+    };
+    loom_runtime_module_options_t options = {
+        .binding_capacity = 12,
+        .stages = {IREE_ARRAYSIZE(stages), stages},
+        .feedback = {IREE_ARRAYSIZE(feedback), feedback},
+    };
+    IREE_RETURN_IF_ERROR(loom_runtime_module_create(
+        &types_, execution_, options, host_allocator_, &native_module_));
+    const std::string path = directory_ + "/control.loom";
+    iree_const_byte_span_t image;
+    const iree_string_view_t roots[] = {
+        IREE_SVL("step"), IREE_SVL("fork"), IREE_SVL("dependencies"),
+        IREE_SVL("clock"), IREE_SVL("timed_step")};
+    const loom_runtime_sources_t sources = {.base_directory = IREE_SV(".")};
+    IREE_RETURN_IF_ERROR(loom_runtime_jit_compile_vm(
+        loom_runtime_host_target_environment(host_), &sources,
+        iree_make_cstring_view(path.c_str()), IREE_ARRAYSIZE(roots), roots,
+        &compilation_, host_allocator_, &image));
+    iree_status_t status = iree_vm_bytecode_module_create_trusted(
+        environment_, IREE_SV("model"), {image, host_allocator_},
+        host_allocator_, &bytecode_module_);
+    if (!iree_status_is_ok(status)) {
+      iree_allocator_free(host_allocator_, (void*)image.data);
+      return status;
+    }
+    iree_vm_module_t* libraries[] = {native_module_};
+    IREE_RETURN_IF_ERROR(iree_vm_program_create(
+        {bytecode_module_, iree_vm_module_span_from_array(libraries)},
+        host_allocator_, &program_));
+    IREE_RETURN_IF_ERROR(iree_vm_invocation_initialize(
+        iree_make_byte_span(invocation_storage_.data(),
+                            invocation_storage_.size()),
+        &invocation_));
+    IREE_RETURN_IF_ERROR(iree_vm_process_create(program_, invocation_,
+                                                iree_vm_variant_span_empty(),
+                                                host_allocator_, &process_));
+    return iree_vm_process_lookup_function(process_, IREE_SV("model"),
+                                           IREE_SV("step"), &step_);
+  }
+
+  iree_status_t InvokeFunction(iree_vm_function_t function,
+                               iree_vm_variant_span_t arguments,
+                               uint64_t* out_value) {
+    iree_vm_variant_t results[1] = {};
+    iree_status_t status =
+        iree_vm_invoke(invocation_, function, arguments,
+                       iree_vm_variant_span_from_array(results));
+    iree_vm_variant_span_reset(arguments);
+    int64_t value = 0;
+    if (iree_status_is_ok(status)) {
+      status = iree_vm_i64_from_variant(results[0], &value);
+    }
+    iree_vm_variant_span_reset(iree_vm_variant_span_from_array(results));
+    if (iree_status_is_ok(status)) {
+      *out_value = static_cast<uint64_t>(value);
+    }
+    return status;
+  }
+
+  iree_status_t Invoke(int initialize,
+                       const std::array<iree_hal_buffer_t*, 3>& buffers,
+                       uint64_t* out_value) {
+    iree_vm_variant_t arguments[] = {
+        iree_vm_variant_from_i32(initialize),
+        iree_hal_buffer_variant_from_ptr_borrowed(&types_, buffers[0]),
+        iree_hal_buffer_variant_from_ptr_borrowed(&types_, buffers[1]),
+        iree_hal_buffer_variant_from_ptr_borrowed(&types_, buffers[2]),
+    };
+    return InvokeFunction(step_, iree_vm_variant_span_from_array(arguments),
+                          out_value);
+  }
+
+  iree_status_t InvokeFork(int next_stage, uint64_t* out_value) {
+    iree_vm_function_t function = {};
+    IREE_RETURN_IF_ERROR(iree_vm_process_lookup_function(
+        process_, IREE_SV("model"), IREE_SV("fork"), &function));
+    iree_vm_variant_t arguments[7] = {};
+    arguments[0] = iree_vm_variant_from_i32(next_stage);
+    for (size_t row = 0; row < 2; ++row) {
+      for (size_t i = 0; i < 3; ++i) {
+        arguments[1 + row * 3 + i] = iree_hal_buffer_variant_from_ptr_borrowed(
+            &types_, buffers_[row][i]);
+      }
+    }
+    return InvokeFunction(function, iree_vm_variant_span_from_array(arguments),
+                          out_value);
+  }
+
+  iree_status_t Upload(size_t row, size_t first, size_t count,
+                       uint64_t* out_value) {
+    std::array<const void*, 3> data = {inputs_[row].control.data(),
+                                       inputs_[row].tokens.data(),
+                                       inputs_[row].progress.data()};
+    std::array<iree_hal_transfer_operation_t, 3> operations = {};
+    for (size_t i = 0; i < count; ++i) {
+      const size_t slot = first + i;
+      operations[i].type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD;
+      operations[i].upload.source = data[slot];
+      operations[i].upload.target_buffer = buffers_[row][slot];
+      operations[i].upload.length =
+          count == 1 ? sizeof(int32_t) : kLengths[slot];
+    }
+    return loom_runtime_execution_transfer(execution_, count, operations.data(),
+                                           out_value);
+  }
+
+  iree_status_t Download(size_t row, uint64_t* out_value) {
+    std::array<void*, 3> data = {outputs_[row].control.data(),
+                                 outputs_[row].tokens.data(),
+                                 outputs_[row].progress.data()};
+    std::array<iree_hal_transfer_operation_t, 3> operations = {};
+    for (size_t i = 0; i < operations.size(); ++i) {
+      operations[i].type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD;
+      operations[i].download.source_buffer = buffers_[row][i];
+      operations[i].download.target = data[i];
+      operations[i].download.length = kLengths[i];
+    }
+    return loom_runtime_execution_feedback(execution_, operations.size(),
+                                           operations.data(), out_value);
+  }
+
+  // Exact byte extents of the three generation-state buffers.
+  static constexpr std::array<size_t, 3> kLengths = {12, 516, 32};
+  // Schedule and counters/canary supplied to the continuation command.
+  static constexpr std::array<size_t, 2> kContinuationLengths = {96, 16};
+  // Host allocation policy used for all runtime objects.
+  inline static iree_allocator_t host_allocator_ = iree_allocator_system();
+  // Copied compiler evidence retained beyond individual results.
+  loom_runtime_compilation_report_t compilation_ = {};
+  // Shared compiler workers and I/O services outliving the device.
+  inline static loom_runtime_host_t* host_ = nullptr;
+  // One application driver retains process-owned native context across devices.
+  inline static iree_hal_driver_t* driver_ = nullptr;
+  // Cross-queue frontier registry retained through suite group destruction.
+  inline static iree_async_frontier_tracker_t* frontier_tracker_ = nullptr;
+  // Suite-owned target device shared by every independent model execution.
+  inline static iree_hal_device_t* device_ = nullptr;
+  // Suite-owned domain for the device's semaphores.
+  inline static iree_hal_device_group_t* group_ = nullptr;
+  // Construction result replayed per case so unsupported devices still skip.
+  inline static iree_status_t device_status_ = iree_ok_status();
+  // Retained roots, including indirect counts, qualified on both queue
+  // families.
+  iree_hal_pool_t* storage_pool_ = nullptr;
+  // Shared command backing independent of model ordering.
+  loom_runtime_workspace_t* workspace_ = nullptr;
+  // Fixed queue inventory retained by each model execution.
+  loom_runtime_execution_queues_t* execution_queues_ = nullptr;
+  // Owned model execution capability.
+  loom_runtime_execution_t* execution_ = nullptr;
+  // Explicit external producer, released during teardown even after failure.
+  iree_hal_semaphore_t* gate_ = nullptr;
+  // Retained external dependency imported by the source controller.
+  iree_hal_fence_t* dependency_ = nullptr;
+  // Escaped source-produced completion independent of later submissions.
+  iree_hal_fence_t* produced_ = nullptr;
+  // Source directory shared by the catalog and VM program.
+  std::string directory_;
+  // One source index and compiler for all prepared control stages.
+  loom_runtime_jit_t* jit_ = nullptr;
+  // Cached stage commands and the device-owned continuation loop.
+  std::array<iree_hal_command_buffer_t*, 4> commands_ = {};
+  // Two independently retained session states.
+  std::array<std::array<iree_hal_buffer_t*, 3>, 2> buffers_ = {};
+  // Persistent host upload storage, never recycled ahead of completion.
+  std::array<loom_runtime_test_control_state_t, 2> inputs_;
+  // Persistent host readback storage, inspected only after completion.
+  std::array<loom_runtime_test_control_state_t, 2> outputs_;
+  // Device-produced grids and all host payloads retained until the final drain.
+  struct {
+    // Source schedule/state followed by compiler-owned transient storage.
+    std::array<iree_hal_buffer_t*, 3> buffers = {};
+    // Private workspace requirement retained from the command product.
+    loom_cmd_program_transient_requirement_t transient = {};
+    // Disabled X/Y/Z/all-axis grids, each followed by one live grid.
+    std::array<int32_t, 24> schedule = {0, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1,
+                                        1, 1, 0, 1, 1, 1, 0, 0, 0, 1, 1, 1};
+    // Initial producer, consumer and heartbeat counters, followed by a canary.
+    std::array<int32_t, 4> input = {0, 0, 0, -12345};
+    // Final counters/canary, inspected only after feedback completion.
+    std::array<int32_t, 4> output = {};
+  } continuation_;
+  // Environment owning the type-registration namespace.
+  iree_vm_environment_t* environment_ = nullptr;
+  // Canonical HAL type handles.
+  iree_hal_vm_types_t types_ = {};
+  // Owned native execution module.
+  iree_vm_module_t* native_module_ = nullptr;
+  // Owned compiled model-control module.
+  iree_vm_module_t* bytecode_module_ = nullptr;
+  // Single linked model program shared by all rows.
+  iree_vm_program_t* program_ = nullptr;
+  // Preallocated host call storage.
+  alignas(iree_max_align_t) std::array<uint8_t, 16384> invocation_storage_ = {};
+  // Invocation borrowing invocation_storage_.
+  iree_vm_invocation_t* invocation_ = nullptr;
+  // Single shared model process, not a process per session.
+  iree_vm_process_t* process_ = nullptr;
+  // Cold-resolved entry used without string lookup on every step.
+  iree_vm_function_t step_ = iree_vm_function_null();
+};
+
+TEST_P(ControlTest, TargetFactsConfigureWorkgroupCounts) {
+  const auto* family = iree_hal_queue_family(
+      SelectQueue(device_, IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH));
+  IREE_ASSERT_OK(Prepare(family, "geometry_fill", nullptr, &commands_[3]));
+  inputs_[0].tokens.fill(-12345);
+  uint64_t completion = 0;
+  IREE_ASSERT_OK(Upload(0, 0, 3, &completion));
+  const iree_hal_buffer_binding_t binding = {buffers_[0][1], 0, kLengths[1]};
+  IREE_ASSERT_OK(loom_runtime_execution_execute(execution_, commands_[3],
+                                                {1, &binding}, &completion));
+  IREE_ASSERT_OK(Download(0, &completion));
+  IREE_ASSERT_OK(loom_runtime_execution_feedback_wait(execution_, completion));
+  for (size_t i = 0; i < 127; ++i) {
+    EXPECT_EQ(outputs_[0].tokens[i], static_cast<int32_t>(i * 7 + 3));
+  }
+  EXPECT_EQ(outputs_[0].tokens[127], -12345);
+  EXPECT_EQ(outputs_[0].tokens[128], -12345);
+}
+
+TEST_P(ControlTest, InterleavedRowsRetainHistory) {
+  inputs_[0].control = {3, 17, 99};
+  inputs_[1].control = {4, 100, 31};
+  for (auto& input : inputs_) {
+    input.tokens.fill(-1000);
+    input.progress.fill(-2000);
+  }
+  auto expected = inputs_;
+  std::array<int32_t, 2> positions = {20, 104};
+  std::array<int32_t, 2> steps = {};
+  uint64_t completion = 0;
+  for (int tick = 0; tick < 8; ++tick) {
+    for (size_t j = 0; j < 2; ++j) {
+      const size_t row = (j + tick) % 2;
+      // Row zero pauses for a tool while row one continues on shared commands.
+      if (row == 0 && tick >= 2 && tick < 5) {
+        continue;
+      }
+      const int32_t step = steps[row]++;
+      const int32_t token = tick == 7 ? inputs_[row].control[2]
+                                      : static_cast<int32_t>(10 * row + tick);
+      inputs_[row].tokens[0] = token;
+      IREE_ASSERT_OK(
+          Upload(row, step == 0 ? 0 : 1, step == 0 ? 3 : 1, &completion));
+      IREE_ASSERT_OK(Invoke(step == 0, buffers_[row], &completion));
+      expected[row].tokens[0] = token;
+      if (step == 0) {
+        expected[row].tokens[1] = token;
+      }
+      expected[row].tokens[step + 2] = token;
+      expected[row].control[0] = positions[row] + step + 1;
+      expected[row].control[1] = step + 2;
+      expected[row].progress[0] = step + 2;
+      expected[row].progress[7] = tick == 7 ? 1 : 0;
+    }
+    // Both VM calls return before waiting. Device work owns the binding values
+    // even though the shared process's native-call scratch has been
+    // overwritten.
+    IREE_ASSERT_OK(Download(0, &completion));
+    IREE_ASSERT_OK(Download(1, &completion));
+    IREE_ASSERT_OK(
+        loom_runtime_execution_feedback_wait(execution_, completion));
+    for (size_t row = 0; row < 2; ++row) {
+      EXPECT_EQ(outputs_[row].control, expected[row].control);
+      EXPECT_EQ(outputs_[row].tokens, expected[row].tokens);
+      EXPECT_EQ(outputs_[row].progress, expected[row].progress);
+    }
+  }
+}
+
+TEST_P(ControlTest, RejectedNativeCallLeavesTheTimelineUsable) {
+  uint64_t completion = 777;
+  auto invalid = buffers_[0];
+  invalid[1] = nullptr;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        Invoke(1, invalid, &completion));
+  EXPECT_EQ(completion, 777u);
+  IREE_ASSERT_OK(loom_runtime_execution_drain(execution_));
+  inputs_[0].control = {3, 17, 99};
+  inputs_[0].tokens[0] = 7;
+  IREE_ASSERT_OK(Upload(0, 0, 3, &completion));
+  EXPECT_EQ(completion, 1u);
+  IREE_ASSERT_OK(Invoke(1, buffers_[0], &completion));
+  EXPECT_EQ(completion, 2u);
+  IREE_ASSERT_OK(Download(0, &completion));
+  IREE_ASSERT_OK(loom_runtime_execution_feedback_wait(execution_, completion));
+  EXPECT_EQ(outputs_[0].control[0], 21);
+  EXPECT_EQ(outputs_[0].control[1], 2);
+  EXPECT_EQ(outputs_[0].tokens[1], 7);
+  EXPECT_EQ(outputs_[0].tokens[2], 7);
+}
+
+TEST_P(ControlTest, FeedbackForkDoesNotAdvanceWork) {
+  inputs_[0].control = {3, 17, 99};
+  inputs_[0].tokens[0] = 7;
+  inputs_[1].control = {4, 100, 31};
+  inputs_[1].tokens[0] = 11;
+  uint64_t work_completion = 0;
+  uint64_t feedback_completion = 0;
+  IREE_ASSERT_OK(Upload(0, 0, 3, &work_completion));
+  IREE_ASSERT_OK(Upload(1, 0, 3, &work_completion));
+  IREE_ASSERT_OK(Invoke(1, buffers_[0], &work_completion));
+  EXPECT_EQ(work_completion, 3u);
+  iree_hal_transfer_operation_t invalid = {
+      .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
+  };
+  invalid.download.source_buffer = buffers_[0][1];
+  invalid.download.source_offset = kLengths[1];
+  invalid.download.target = outputs_[0].tokens.data();
+  invalid.download.length = sizeof(int32_t);
+  feedback_completion = 777;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
+                        loom_runtime_execution_feedback(execution_, 1, &invalid,
+                                                        &feedback_completion));
+  EXPECT_EQ(feedback_completion, 777u);
+  IREE_ASSERT_OK(Download(0, &feedback_completion));
+  EXPECT_EQ(feedback_completion, 1u);
+
+  // Later model work consumes distinct state and may proceed independently of
+  // row zero's feedback. Neither host output has been inspected or recycled.
+  IREE_ASSERT_OK(Invoke(1, buffers_[1], &work_completion));
+  EXPECT_EQ(work_completion, 4u);
+  IREE_ASSERT_OK(Download(1, &feedback_completion));
+  EXPECT_EQ(feedback_completion, 2u);
+  IREE_ASSERT_OK(loom_runtime_execution_drain(execution_));
+  EXPECT_EQ(outputs_[0].control[0], 21);
+  EXPECT_EQ(outputs_[0].control[1], 2);
+  EXPECT_EQ(outputs_[0].tokens[2], 7);
+  EXPECT_EQ(outputs_[1].control[0], 105);
+  EXPECT_EQ(outputs_[1].control[1], 2);
+  EXPECT_EQ(outputs_[1].tokens[2], 11);
+}
+
+TEST_P(ControlTest, IndexedArityFamilyRejectsBeforeSubmission) {
+  for (int count = 0; count <= 12; ++count) {
+    SCOPED_TRACE(count);
+    const std::string name = "execute_" + std::to_string(count);
+    iree_vm_function_t function = {};
+    IREE_ASSERT_OK(iree_vm_process_lookup_function(
+        process_, IREE_SV("runner"), iree_make_cstring_view(name.c_str()),
+        &function));
+    iree_vm_variant_t arguments[13] = {};
+    arguments[0] = iree_vm_variant_from_i32(count == 3 ? -1 : 0);
+    for (int i = 0; i < count; ++i) {
+      arguments[i + 1] = iree_hal_buffer_variant_from_ptr_borrowed(
+          &types_, buffers_[0][i % 3]);
+    }
+    uint64_t completion = 777;
+    IREE_EXPECT_STATUS_IS(
+        count == 3 ? IREE_STATUS_OUT_OF_RANGE : IREE_STATUS_INVALID_ARGUMENT,
+        InvokeFunction(function,
+                       iree_vm_variant_span_from_ptr(arguments, count + 1),
+                       &completion));
+    EXPECT_EQ(completion, 777u);
+  }
+  inputs_[0].control = {3, 17, 99};
+  inputs_[0].tokens[0] = 7;
+  uint64_t completion = 0;
+  IREE_ASSERT_OK(Upload(0, 0, 3, &completion));
+  EXPECT_EQ(completion, 1u);
+  IREE_ASSERT_OK(Invoke(1, buffers_[0], &completion));
+  EXPECT_EQ(completion, 2u);
+}
+
+TEST_P(ControlTest, FeedbackChecksBothExtentsAndAllowsSubranges) {
+  iree_vm_function_t function = {};
+  IREE_ASSERT_OK(iree_vm_process_lookup_function(
+      process_, IREE_SV("runner"), IREE_SV("feedback"), &function));
+  struct loom_runtime_test_control_range_t {
+    // Host feedback slot supplied by source.
+    int32_t slot;
+    // Byte range in the device source.
+    int64_t offset;
+    // Requested byte count in both source and destination.
+    int64_t length;
+  };
+  const loom_runtime_test_control_range_t invalid[] = {
+      {3, 0, 4}, {0, 0, 520}, {0, 516, 4}, {0, -1, 4}, {0, 0, -1}};
+  for (auto range : invalid) {
+    iree_vm_variant_t arguments[] = {
+        iree_vm_variant_from_i32(range.slot),
+        iree_hal_buffer_variant_from_ptr_borrowed(&types_, buffers_[0][1]),
+        iree_vm_variant_from_i64(range.offset),
+        iree_vm_variant_from_i64(range.length),
+    };
+    uint64_t completion = 777;
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_OUT_OF_RANGE,
+        InvokeFunction(function, iree_vm_variant_span_from_array(arguments),
+                       &completion));
+    EXPECT_EQ(completion, 777u);
+  }
+  iree_vm_variant_t null_arguments[] = {
+      iree_vm_variant_from_i32(0),
+      iree_hal_buffer_variant_from_ptr_borrowed(&types_, nullptr),
+      iree_vm_variant_from_i64(0),
+      iree_vm_variant_from_i64(4),
+  };
+  uint64_t completion = 777;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      InvokeFunction(function, iree_vm_variant_span_from_array(null_arguments),
+                     &completion));
+  EXPECT_EQ(completion, 777u);
+  inputs_[0].tokens[1] = 41;
+  outputs_[0].tokens.fill(-12345);
+  IREE_ASSERT_OK(Upload(0, 0, 3, &completion));
+  iree_vm_variant_t arguments[] = {
+      iree_vm_variant_from_i32(0),
+      iree_hal_buffer_variant_from_ptr_borrowed(&types_, buffers_[0][1]),
+      iree_vm_variant_from_i64(4),
+      iree_vm_variant_from_i64(4),
+  };
+  IREE_ASSERT_OK(InvokeFunction(
+      function, iree_vm_variant_span_from_array(arguments), &completion));
+  EXPECT_EQ(completion, 1u);
+  IREE_ASSERT_OK(loom_runtime_execution_feedback_wait(execution_, completion));
+  EXPECT_EQ(outputs_[0].tokens[0], 41);
+  for (size_t i = 1; i < outputs_[0].tokens.size(); ++i) {
+    EXPECT_EQ(outputs_[0].tokens[i], -12345);
+  }
+
+  // Rebinding updates the borrowed address and its public extent together.
+  int32_t& rebound = outputs_[1].tokens[0];
+  rebound = -1;
+  loom_runtime_module_bind_feedback(
+      native_module_, 0, iree_make_byte_span(&rebound, sizeof(rebound)));
+  for (int64_t length : {8, 4}) {
+    iree_vm_variant_t rebound_arguments[] = {
+        iree_vm_variant_from_i32(0),
+        iree_hal_buffer_variant_from_ptr_borrowed(&types_, buffers_[0][1]),
+        iree_vm_variant_from_i64(4),
+        iree_vm_variant_from_i64(length),
+    };
+    IREE_EXPECT_STATUS_IS(
+        length == 4 ? IREE_STATUS_OK : IREE_STATUS_OUT_OF_RANGE,
+        InvokeFunction(function,
+                       iree_vm_variant_span_from_array(rebound_arguments),
+                       &completion));
+  }
+  IREE_ASSERT_OK(loom_runtime_execution_feedback_wait(execution_, completion));
+  EXPECT_EQ(rebound, 41);
+  loom_runtime_module_bind_feedback(
+      native_module_, 0,
+      iree_make_byte_span(outputs_[0].tokens.data(), kLengths[1]));
+}
+
+TEST_P(ControlTest, SourceTimestampsFollowWorkAndPublishIndependentBanks) {
+  const auto* clock = iree_hal_queue_family_spec(
+      loom_runtime_execution_dispatch_family(execution_));
+  iree_vm_function_t query = {};
+  IREE_ASSERT_OK(iree_vm_process_lookup_function(process_, IREE_SV("model"),
+                                                 IREE_SV("clock"), &query));
+  iree_vm_variant_t facts[2] = {};
+  IREE_ASSERT_OK(iree_vm_invoke(invocation_, query,
+                                iree_vm_variant_span_empty(),
+                                iree_vm_variant_span_from_array(facts)));
+  int64_t frequency = 0;
+  int32_t width = 0;
+  IREE_ASSERT_OK(iree_vm_i64_from_variant(facts[0], &frequency));
+  IREE_ASSERT_OK(iree_vm_i32_from_variant(facts[1], &width));
+  iree_vm_variant_span_reset(iree_vm_variant_span_from_array(facts));
+  EXPECT_EQ(static_cast<uint64_t>(frequency), clock->timestamp_frequency_hz);
+  EXPECT_EQ(static_cast<uint32_t>(width), clock->timestamp_valid_bits);
+  if (!frequency || !width) {
+    GTEST_SKIP() << "Queue family does not advertise a timestamp clock";
+  }
+
+  uint64_t completion = 0;
+  for (size_t row = 0; row < 2; ++row) {
+    inputs_[row].control = {3, 17, 99};
+    inputs_[row].tokens[0] = 7;
+    inputs_[row].progress.fill(-12345);
+    IREE_ASSERT_OK(Upload(row, 0, 3, &completion));
+  }
+  IREE_ASSERT_OK(
+      iree_hal_semaphore_create(device_, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
+                                IREE_HAL_SEMAPHORE_FLAG_NONE, &gate_));
+  uint64_t gate_value = 1;
+  IREE_ASSERT_OK(
+      loom_runtime_execution_barrier(execution_, {1, &gate_, &gate_value}));
+  iree_vm_function_t step = {};
+  IREE_ASSERT_OK(iree_vm_process_lookup_function(process_, IREE_SV("model"),
+                                                 IREE_SV("timed_step"), &step));
+  for (size_t row = 0; row < 2; ++row) {
+    iree_vm_variant_t arguments[] = {
+        iree_vm_variant_from_i32(static_cast<int32_t>(row + 1)),
+        iree_vm_variant_from_i64(16),
+        iree_hal_buffer_variant_from_ptr_borrowed(&types_, buffers_[row][0]),
+        iree_hal_buffer_variant_from_ptr_borrowed(&types_, buffers_[row][1]),
+        iree_hal_buffer_variant_from_ptr_borrowed(&types_, buffers_[row][2]),
+    };
+    IREE_ASSERT_OK(InvokeFunction(
+        step, iree_vm_variant_span_from_array(arguments), &completion));
+  }
+  // Both invocations return while their device dependency remains unsatisfied.
+  // Each has two captures and one command; feedback is a separate branch.
+  const auto frontier = loom_runtime_execution_frontier(execution_);
+  EXPECT_EQ(frontier.values[0], 9u);
+  EXPECT_EQ(frontier.values[1], 2u);
+  uint64_t reached = 0;
+  IREE_ASSERT_OK(iree_hal_semaphore_query(frontier.semaphores[0], &reached));
+  EXPECT_LT(reached, completion);
+  IREE_ASSERT_OK(iree_hal_semaphore_signal(gate_, gate_value, nullptr));
+  IREE_ASSERT_OK(loom_runtime_execution_feedback_wait(execution_, 2));
+  for (const auto& output : outputs_) {
+    EXPECT_EQ(output.progress[0], 2);
+    EXPECT_EQ(output.progress[1], -12345);
+    EXPECT_EQ(output.progress[6], -12345);
+    EXPECT_EQ(output.progress[7], 0);
+    const uint64_t sentinel = (uint64_t{static_cast<uint32_t>(-12345)} << 32) |
+                              static_cast<uint32_t>(-12345);
+    EXPECT_NE(iree_unaligned_load_le_u64(&output.progress[2]), sentinel);
+    EXPECT_NE(iree_unaligned_load_le_u64(&output.progress[4]), sentinel);
+  }
+
+  // The first capture and command are accepted before the second capture is
+  // rejected. Rejection must not leave an unsignaled work or feedback value.
+  iree_vm_variant_t invalid[] = {
+      iree_vm_variant_from_i32(1),
+      iree_vm_variant_from_i64(kLengths[2]),
+      iree_hal_buffer_variant_from_ptr_borrowed(&types_, buffers_[0][0]),
+      iree_hal_buffer_variant_from_ptr_borrowed(&types_, buffers_[0][1]),
+      iree_hal_buffer_variant_from_ptr_borrowed(&types_, buffers_[0][2]),
+  };
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_OUT_OF_RANGE,
+      InvokeFunction(step, iree_vm_variant_span_from_array(invalid),
+                     &completion));
+  const auto rejected = loom_runtime_execution_frontier(execution_);
+  EXPECT_EQ(rejected.values[0], frontier.values[0] + 2);
+  EXPECT_EQ(rejected.values[1], frontier.values[1]);
+  IREE_ASSERT_OK(loom_runtime_execution_drain(execution_));
+}
+
+TEST_P(ControlTest, SourceForkAndPartialFailureRetireBorrowedStorage) {
+  inputs_[0].control = {3, 17, 99};
+  inputs_[0].tokens[0] = 7;
+  inputs_[1].control = {4, 100, 31};
+  inputs_[1].tokens[0] = 11;
+  uint64_t completion = 0;
+  IREE_ASSERT_OK(Upload(0, 0, 3, &completion));
+  IREE_ASSERT_OK(Upload(1, 0, 3, &completion));
+  IREE_ASSERT_OK(InvokeFork(0, &completion));
+  // Two uploads, then producer and independent continuation; the source's
+  // feedback call did not advance the work frontier.
+  EXPECT_EQ(completion, 4u);
+  IREE_ASSERT_OK(loom_runtime_execution_drain(execution_));
+  EXPECT_EQ(outputs_[0].tokens[2], 7);
+  IREE_ASSERT_OK(Download(1, &completion));
+  IREE_ASSERT_OK(loom_runtime_execution_feedback_wait(execution_, completion));
+  EXPECT_EQ(outputs_[1].control[0], 105);
+  EXPECT_EQ(outputs_[1].tokens[2], 11);
+
+  // Reset the producer, then reject the final call after producer and feedback
+  // have both been accepted. Storage stays alive through the explicit join.
+  inputs_[0].tokens[0] = 19;
+  IREE_ASSERT_OK(Upload(0, 0, 3, &completion));
+  completion = 777;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE, InvokeFork(99, &completion));
+  EXPECT_EQ(completion, 777u);
+  IREE_ASSERT_OK(loom_runtime_execution_drain(execution_));
+  EXPECT_EQ(outputs_[0].tokens[2], 19);
+  IREE_ASSERT_OK(Invoke(0, buffers_[0], &completion));
+  EXPECT_EQ(completion, 7u);
+  IREE_ASSERT_OK(Download(0, &completion));
+  IREE_ASSERT_OK(loom_runtime_execution_feedback_wait(execution_, completion));
+  EXPECT_EQ(outputs_[0].control[0], 22);
+  EXPECT_EQ(outputs_[0].tokens[3], 19);
+}
+
+TEST_P(ControlTest, SourceFencesExcludeLaterWorkAndJoinExternalDependencies) {
+  inputs_[0].control = {3, 17, 99};
+  inputs_[0].tokens[0] = 7;
+  inputs_[1].control = {4, 100, 31};
+  inputs_[1].tokens[0] = 11;
+  uint64_t completion = 0;
+  IREE_ASSERT_OK(Upload(0, 0, 3, &completion));
+  IREE_ASSERT_OK(Upload(1, 0, 3, &completion));
+  IREE_ASSERT_OK(
+      iree_hal_semaphore_create(device_, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
+                                IREE_HAL_SEMAPHORE_FLAG_NONE, &gate_));
+  IREE_ASSERT_OK(
+      iree_hal_fence_create_at(gate_, 1, host_allocator_, &dependency_));
+  iree_vm_function_t function = {};
+  IREE_ASSERT_OK(iree_vm_process_lookup_function(
+      process_, IREE_SV("model"), IREE_SV("dependencies"), &function));
+  iree_vm_variant_t arguments[7] = {
+      iree_hal_fence_variant_from_ptr_borrowed(&types_, dependency_)};
+  for (size_t row = 0; row < 2; ++row) {
+    for (size_t i = 0; i < 3; ++i) {
+      arguments[1 + row * 3 + i] =
+          iree_hal_buffer_variant_from_ptr_borrowed(&types_, buffers_[row][i]);
+    }
+  }
+  iree_vm_variant_t result = {};
+  auto status = iree_vm_invoke(invocation_, function,
+                               iree_vm_variant_span_from_array(arguments),
+                               iree_vm_variant_span_from_ptr(&result, 1));
+  iree_vm_variant_span_reset(iree_vm_variant_span_from_array(arguments));
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_fence_ptr_from_variant_move(&types_, &result, &produced_);
+  }
+  iree_vm_variant_reset(&result);
+  IREE_ASSERT_OK(status);
+  const auto frontier = loom_runtime_execution_frontier(execution_);
+  const auto produced = iree_hal_fence_semaphore_list(produced_);
+  ASSERT_EQ(produced.count, 1u);
+  EXPECT_EQ(produced.semaphores[0], frontier.semaphores[0]);
+  EXPECT_EQ(produced.payload_values[0], 3u);
+  EXPECT_EQ(frontier.values[0], 5u);
+  // Waiting for the earlier producer cannot require releasing the later gate.
+  IREE_ASSERT_OK(loom_runtime_execution_wait(execution_, 3));
+  IREE_ASSERT_OK(iree_hal_fence_query(produced_));
+  uint64_t value = 0;
+  IREE_ASSERT_OK(iree_hal_semaphore_query(frontier.semaphores[0], &value));
+  EXPECT_EQ(value, 3u);
+  IREE_ASSERT_OK(iree_hal_semaphore_signal(gate_, 1, nullptr));
+  IREE_ASSERT_OK(Download(1, &completion));
+  IREE_ASSERT_OK(loom_runtime_execution_feedback_wait(execution_, completion));
+  EXPECT_EQ(outputs_[1].control[0], 105);
+  EXPECT_EQ(outputs_[1].tokens[2], 11);
+}
+
+TEST_P(ControlTest, FutureWorkFenceIsRejectedWithoutAdvancingTheTimeline) {
+  iree_vm_function_t function = {};
+  IREE_ASSERT_OK(iree_vm_process_lookup_function(process_, IREE_SV("runner"),
+                                                 IREE_SV("fence"), &function));
+  for (int64_t value : {int64_t{1}, int64_t{-1}}) {
+    auto argument = iree_vm_variant_from_i64(value);
+    iree_vm_variant_t result = {};
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_OUT_OF_RANGE,
+        iree_vm_invoke(invocation_, function,
+                       iree_vm_variant_span_from_ptr(&argument, 1),
+                       iree_vm_variant_span_from_ptr(&result, 1)));
+    iree_vm_variant_reset(&result);
+    EXPECT_EQ(loom_runtime_execution_frontier(execution_).values[0], 0u);
+  }
+}
+
+TEST_P(ControlTest, DeviceProducedCountsGateConcurrentContinuation) {
+  std::array<iree_hal_transfer_operation_t, 2> uploads = {};
+  const void* sources[] = {continuation_.schedule.data(),
+                           continuation_.input.data()};
+  for (size_t i = 0; i < uploads.size(); ++i) {
+    uploads[i].type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD;
+    uploads[i].upload.source = sources[i];
+    uploads[i].upload.target_buffer = continuation_.buffers[i];
+    uploads[i].upload.length = kContinuationLengths[i];
+  }
+  uint64_t completion = 0;
+  IREE_ASSERT_OK(loom_runtime_execution_transfer(execution_, uploads.size(),
+                                                 uploads.data(), &completion));
+  std::array<iree_hal_buffer_binding_t, 3> bindings = {};
+  ASSERT_LT(continuation_.transient.binding_index, bindings.size());
+  for (size_t i = 0; i < kContinuationLengths.size(); ++i) {
+    const size_t target =
+        i + (i >= continuation_.transient.binding_index ? 1 : 0);
+    bindings[target] = {continuation_.buffers[i], 0, kContinuationLengths[i]};
+  }
+  bindings[continuation_.transient.binding_index] = {
+      continuation_.buffers.back(), 0,
+      continuation_.transient.required_byte_length};
+  // Every replay contains eight compiler-generated producer/consumer epochs.
+  // The private transient binding is reused across serial epochs. Submission
+  // dependencies order replays; no host result gates them.
+  for (int i = 0; i < 16; ++i) {
+    IREE_ASSERT_OK(loom_runtime_execution_execute(
+        execution_, commands_[2], {bindings.size(), bindings.data()},
+        &completion));
+  }
+  iree_hal_transfer_operation_t download = {
+      .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
+  };
+  download.download.source_buffer = continuation_.buffers[1];
+  download.download.target = continuation_.output.data();
+  download.download.length = kContinuationLengths[1];
+  IREE_ASSERT_OK(
+      loom_runtime_execution_feedback(execution_, 1, &download, &completion));
+  IREE_ASSERT_OK(loom_runtime_execution_feedback_wait(execution_, completion));
+  const std::array<int32_t, 4> expected = {128, 64, 128, -12345};
+  EXPECT_EQ(continuation_.output, expected);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    RecordingPolicy, ControlTest,
+    ::testing::Values(IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
+                      IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_PROFILE_METADATA));
+
+}  // namespace

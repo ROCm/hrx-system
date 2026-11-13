@@ -7,7 +7,7 @@
 #ifndef LOOM_TARGET_ARCH_AMD_XDNA_AIE2P_PIPELINE_SWITCH_H_
 #define LOOM_TARGET_ARCH_AMD_XDNA_AIE2P_PIPELINE_SWITCH_H_
 
-#include "loom/target/arch/amd/xdna/aie2p/array/plan.h"
+#include "loom/target/arch/amd/xdna/aie2p/array/route.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -15,12 +15,24 @@ extern "C" {
 
 struct loom_aie2p_native_context_t;
 
+// Complete endpoint ownership for one compiler-generated control stream.
+// Commands, replies, and collective words retain their framing on circuits.
+typedef struct loom_aie2p_native_control_source_t {
+  // Source-owned physical prefixes, independent of destination route labels.
+  loom_aie2p_array_route_tree_t tree;
+  // Sole owned endpoint, or UINT32_MAX for multiple/external destinations
+  // or any route borrowing payload lanes.
+  uint32_t destination;
+} loom_aie2p_native_control_source_t;
+
 // One physical route edge carrying the packet identity used during admission.
 typedef struct loom_aie2p_native_route_t {
   // Corresponding edge in the canonical route builder.
   const loom_aie2p_array_route_plan_t* edge;
-  // Packet ID, or UINT8_MAX for an unframed circuit.
+  // Packet ID, or UINT8_MAX for a circuit without packet filtering.
   uint8_t packet;
+  // Retained control source, or UINT32_MAX for ordinary payload transport.
+  uint32_t control_source;
 } loom_aie2p_native_route_t;
 
 typedef enum loom_aie2p_native_switch_bank_e {
@@ -46,12 +58,18 @@ typedef struct loom_aie2p_native_register_bank_t {
 typedef struct loom_aie2p_native_switch_t {
   // Next routed switch in first-use order, excluding untouched tiles.
   struct loom_aie2p_native_switch_t* next;
+  // Physical owner retained from switch admission.
+  loom_xdna_tile_coordinate_t coordinate;
   // Master, slave, and packet-filter banks from the generated register facts.
   loom_aie2p_native_register_bank_t banks[LOOM_AIE2P_NATIVE_SWITCH_BANK_COUNT];
 } loom_aie2p_native_switch_t;
 
 // Admits physical route edges against packet/circuit ownership and switch
 // resources, retaining the complete initialization banks in the pass arena.
+// Destination sets connected by a shared output require one arbiter. Disjoint
+// sets share only when fed exclusively by the same input, so arbitration adds
+// no blocking dependency between independent streams. This does not prove
+// progress for dependencies already present in the selected routes.
 // Allocation errors return a status; route conflicts emit the pipeline's
 // target-support diagnostic and leave the caller's false |out_valid| intact.
 iree_status_t loom_aie2p_native_switches_build(

@@ -128,7 +128,7 @@ TEST(NativeElfTest, WritesAieElf32ExecutableEnvelope) {
   TestArena arena;
   loom_native_elf_layout_t layout = {};
   IREE_ASSERT_OK(
-      loom_native_elf32le_build_layout(&file, &layout, arena.arena()));
+      loom_native_elf32le_build_layout(&file, arena.arena(), &layout));
   IREE_ASSERT_OK(loom_native_elf32le_write_file(&file, &layout, stream.get()));
   const std::string bytes = StreamBytes(stream.get());
 
@@ -244,7 +244,7 @@ TEST(NativeElfTest, WritesNobitsMemoryWithoutFilePayload) {
   TestArena arena;
   loom_native_elf_layout_t layout = {};
   IREE_ASSERT_OK(
-      loom_native_elf32le_build_layout(&file, &layout, arena.arena()));
+      loom_native_elf32le_build_layout(&file, arena.arena(), &layout));
   IREE_ASSERT_OK(loom_native_elf32le_write_file(&file, &layout, stream.get()));
   const std::string bytes = StreamBytes(stream.get());
 
@@ -296,13 +296,13 @@ TEST(NativeElfTest, RejectsMixedPayloadAndZeroFillSectionStates) {
   loom_native_elf_layout_t layout = {};
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
-      loom_native_elf32le_build_layout(&file, &layout, arena.arena()));
+      loom_native_elf32le_build_layout(&file, arena.arena(), &layout));
 
   section.type = LOOM_NATIVE_ELF_SECTION_TYPE_PROGBITS;
   section.contents = iree_const_byte_span_empty();
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
-      loom_native_elf32le_build_layout(&file, &layout, arena.arena()));
+      loom_native_elf32le_build_layout(&file, arena.arena(), &layout));
 }
 
 TEST(NativeElfTest, RejectsElf32FieldOverflowBeforeWriting) {
@@ -333,7 +333,7 @@ TEST(NativeElfTest, RejectsElf32FieldOverflowBeforeWriting) {
   TestArena arena;
   loom_native_elf_layout_t layout = {};
   IREE_ASSERT_OK(
-      loom_native_elf32le_build_layout(&file, &layout, arena.arena()));
+      loom_native_elf32le_build_layout(&file, arena.arena(), &layout));
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_OUT_OF_RANGE,
       loom_native_elf32le_write_file(&file, &layout, stream.get()));
@@ -389,7 +389,7 @@ TEST(NativeElfTest, WritesAmdgpuNoteElfEnvelope) {
   TestArena arena;
   loom_native_elf_layout_t layout = {};
   IREE_ASSERT_OK(
-      loom_native_elf64le_build_layout(&file, &layout, arena.arena()));
+      loom_native_elf64le_build_layout(&file, arena.arena(), &layout));
   IREE_ASSERT_OK(loom_native_elf64le_write_file(&file, &layout, stream.get()));
   const std::string bytes = StreamBytes(stream.get());
   const size_t note_offset = 120;
@@ -488,7 +488,7 @@ TEST(NativeElfTest, FinalizesAddressesAndPayloadAfterLayout) {
   TestArena arena;
   loom_native_elf_layout_t layout = {};
   IREE_ASSERT_OK(
-      loom_native_elf64le_build_layout(&file, &layout, arena.arena()));
+      loom_native_elf64le_build_layout(&file, arena.arena(), &layout));
   ASSERT_EQ(layout.section_count, 3u);
   EXPECT_EQ(layout.program_header_offset, 64u);
   EXPECT_EQ(layout.program_header_size, 56u);
@@ -540,7 +540,7 @@ TEST(NativeElfTest, RejectsInvalidSectionAlignment) {
   loom_native_elf_layout_t layout = {};
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
-      loom_native_elf64le_build_layout(&file, &layout, arena.arena()));
+      loom_native_elf64le_build_layout(&file, arena.arena(), &layout));
 }
 
 TEST(NativeElfTest, RejectsInvalidSegmentRange) {
@@ -585,7 +585,7 @@ TEST(NativeElfTest, RejectsInvalidSegmentRange) {
   loom_native_elf_layout_t layout = {};
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_OUT_OF_RANGE,
-      loom_native_elf64le_build_layout(&file, &layout, arena.arena()));
+      loom_native_elf64le_build_layout(&file, arena.arena(), &layout));
 }
 
 TEST(NativeElfTest, RejectsSectionBackedSegmentMemoryUnderflow) {
@@ -630,7 +630,7 @@ TEST(NativeElfTest, RejectsSectionBackedSegmentMemoryUnderflow) {
   TestArena arena;
   loom_native_elf_layout_t layout = {};
   IREE_ASSERT_OK(
-      loom_native_elf32le_build_layout(&file, &layout, arena.arena()));
+      loom_native_elf32le_build_layout(&file, arena.arena(), &layout));
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
       loom_native_elf32le_write_file(&file, &layout, stream.get()));

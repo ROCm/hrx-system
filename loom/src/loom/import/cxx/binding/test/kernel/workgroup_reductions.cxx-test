@@ -1,0 +1,101 @@
+// RUN: roundtrip
+#include <loomcxx/kernel.h>
+
+using Integers4 = int __attribute__((ext_vector_type(4)));
+using Floats4 = float __attribute__((ext_vector_type(4)));
+
+struct IntegerReductions {
+  // Sum of participating values.
+  int sum;
+  // Product of participating values.
+  int product;
+  // Smallest signed value.
+  int signed_minimum;
+  // Largest signed value.
+  int signed_maximum;
+  // Smallest unsigned value.
+  unsigned unsigned_minimum;
+  // Largest unsigned value.
+  unsigned unsigned_maximum;
+  // Bitwise intersection.
+  int bitwise_and;
+  // Bitwise union.
+  int bitwise_or;
+  // Bitwise parity.
+  int bitwise_xor;
+  // Component-wise sum.
+  Integers4 vector_sum;
+};
+
+struct FloatReductions {
+  // Sum of participating values.
+  float sum;
+  // Product of participating values.
+  float product;
+  // IEEE minimum.
+  float minimum;
+  // IEEE maximum.
+  float maximum;
+  // Minimum number.
+  float minnum;
+  // Maximum number.
+  float maxnum;
+  // Component-wise sum.
+  Floats4 vector_sum;
+};
+
+LOOM_INLINE IntegerReductions reduce_integers(int signed_value,
+                                                    unsigned unsigned_value,
+                                                    Integers4 vector_value) {
+  return {
+      loom::kernel::workgroup::reduce::addi(signed_value),
+      loom::kernel::workgroup::reduce::muli(signed_value),
+      loom::kernel::workgroup::reduce::minsi(signed_value),
+      loom::kernel::workgroup::reduce::maxsi(signed_value),
+      loom::kernel::workgroup::reduce::minui(unsigned_value),
+      loom::kernel::workgroup::reduce::maxui(unsigned_value),
+      loom::kernel::workgroup::reduce::andi(signed_value),
+      loom::kernel::workgroup::reduce::ori(signed_value),
+      loom::kernel::workgroup::reduce::xori(signed_value),
+      loom::kernel::workgroup::reduce::addi(vector_value),
+  };
+}
+
+LOOM_INLINE FloatReductions reduce_floats(float value,
+                                                Floats4 vector_value) {
+  return {
+      loom::kernel::workgroup::reduce::addf(value),
+      loom::kernel::workgroup::reduce::mulf(value),
+      loom::kernel::workgroup::reduce::minimumf(value),
+      loom::kernel::workgroup::reduce::maximumf(value),
+      loom::kernel::workgroup::reduce::minnumf(value),
+      loom::kernel::workgroup::reduce::maxnumf(value),
+      loom::kernel::workgroup::reduce::addf(vector_value),
+  };
+}
+
+// ----
+func.def public linkonce inline @reduce_integers(%signed_value: i32, %unsigned_value: i32, %vector_value: vector<4xi32>) -> (i32, i32, i32, i32, i32, i32, i32, i32, i32, vector<4xi32>) {
+  %13 = kernel.workgroup.reduce<addi> %signed_value : i32
+  %14 = kernel.workgroup.reduce<muli> %signed_value : i32
+  %15 = kernel.workgroup.reduce<minsi> %signed_value : i32
+  %16 = kernel.workgroup.reduce<maxsi> %signed_value : i32
+  %17 = kernel.workgroup.reduce<minui> %unsigned_value : i32
+  %18 = kernel.workgroup.reduce<maxui> %unsigned_value : i32
+  %19 = kernel.workgroup.reduce<andi> %signed_value : i32
+  %20 = kernel.workgroup.reduce<ori> %signed_value : i32
+  %21 = kernel.workgroup.reduce<xori> %signed_value : i32
+  %22 = kernel.workgroup.reduce<addi> %vector_value : vector<4xi32>
+  func.return %13, %14, %15, %16, %17, %18, %19, %20, %21, %22 : i32, i32, i32, i32, i32, i32, i32, i32, i32, vector<4xi32>
+}
+
+func.def public linkonce inline @reduce_floats(%value: f32, %vector_value: vector<4xf32>) -> (f32, f32, f32, f32, f32, f32, vector<4xf32>) {
+  %32 = kernel.workgroup.reduce<addf> %value : f32
+  %33 = kernel.workgroup.reduce<mulf> %value : f32
+  %34 = kernel.workgroup.reduce<minimumf> %value : f32
+  %35 = kernel.workgroup.reduce<maximumf> %value : f32
+  %36 = kernel.workgroup.reduce<minnumf> %value : f32
+  %37 = kernel.workgroup.reduce<maxnumf> %value : f32
+  %38 = kernel.workgroup.reduce<addf> %vector_value : vector<4xf32>
+  func.return %32, %33, %34, %35, %36, %37, %38 : f32, f32, f32, f32, f32, f32, vector<4xf32>
+}

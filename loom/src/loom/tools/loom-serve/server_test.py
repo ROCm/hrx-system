@@ -23,36 +23,41 @@ FORMAT = Path(sys.argv.pop(1)).resolve()
 
 
 class ServerTest(unittest.TestCase):
-    def test_wait_mode_accepts_both_policies(self):
-        for mode in ("active", "blocking"):
-            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as temporary:
-                log = Path(temporary) / "server.log"
-                with running_server(
-                    [
-                        str(SERVER),
-                        "--device=task",
-                        "--pool_backing=fixed",
-                        f"--wait_mode={mode}",
-                        "--workers=1",
-                        "--listen=127.0.0.1:0",
-                    ],
-                    log,
-                ) as (process, bound_address):
-                    self.assertIsNotNone(bound_address, log.read_text())
-                    address = urlsplit(f"http://{bound_address}")
-                    control(address, "GET", "/v1/status", 200)
-                self.assertEqual(process.returncode, 0, log.read_text())
-
-    def test_invalid_wait_mode_fails_before_opening_a_device(self):
+    def test_profiling_policy_is_validated_before_opening_a_device(self):
         result = subprocess.run(
-            [str(SERVER), "--device=not-opened", "--wait_mode=busy"],
+            [
+                str(SERVER),
+                "--device=not-opened",
+                "--device_profiling_mode=not-a-family",
+            ],
             capture_output=True,
             text=True,
         )
         self.assertNotEqual(result.returncode, 0, result.stderr)
-        self.assertIn("--wait_mode", result.stderr)
-        self.assertIn("must be active or blocking", result.stderr)
+        self.assertIn("unsupported profiling data family 'not-a-family'", result.stderr)
         self.assertNotIn('"event":"ready"', result.stderr)
+
+    def test_profiling_session_encloses_server_lifetime(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            log = Path(temporary) / "server.log"
+            profile = Path(temporary) / "server.profile"
+            with running_server(
+                [
+                    str(SERVER),
+                    "--device=task",
+                    "--pool_backing=fixed",
+                    "--workers=1",
+                    "--listen=127.0.0.1:0",
+                    "--device_profiling_mode=queue-events",
+                    f"--device_profiling_output={profile}",
+                ],
+                log,
+            ) as (process, bound_address):
+                self.assertIsNotNone(bound_address, log.read_text())
+                address = urlsplit(f"http://{bound_address}")
+                control(address, "GET", "/v1/status", 200)
+            self.assertEqual(process.returncode, 0, log.read_text())
+            self.assertGreater(profile.stat().st_size, 0)
 
     def test_byte_size_flags_publish_exact_limits(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -77,136 +82,6 @@ class ServerTest(unittest.TestCase):
                 self.assertEqual(memory["retained"]["limit_bytes"], 64 << 30)
                 self.assertEqual(memory["retained"]["committed_bytes"], 0)
             self.assertEqual(process.returncode, 0, log.read_text())
-
-    def test_byte_size_errors_name_the_flag_before_opening_a_device(self):
-        cases = (
-            ("weight_slab_bytes", "123fb", "INVALID_ARGUMENT"),
-            ("state_slab_bytes", "1.5gib", "INVALID_ARGUMENT"),
-            ("memory_bytes", "17179869184gib", "OUT_OF_RANGE"),
-        )
-        for flag, value, status in cases:
-            with self.subTest(flag=flag):
-                result = subprocess.run(
-                    [str(SERVER), "--device=not-opened", f"--{flag}={value}"],
-                    capture_output=True,
-                    text=True,
-                )
-                self.assertNotEqual(result.returncode, 0, result.stderr)
-                self.assertIn(status, result.stderr)
-                self.assertIn(f"--{flag}", result.stderr)
-                self.assertNotIn('"event":"ready"', result.stderr)
-
-    def test_idle_durations_are_nonnegative(self):
-        for flag in ("workspace_idle_ms", "parameter_idle_ms"):
-            with self.subTest(flag=flag):
-                result = subprocess.run(
-                    [str(SERVER), "--device=task", f"--{flag}=-1"],
-                    capture_output=True,
-                    text=True,
-                )
-                self.assertNotEqual(result.returncode, 0, result.stderr)
-                self.assertIn("INVALID_ARGUMENT", result.stderr)
-                self.assertNotIn('"event":"ready"', result.stderr)
-
-    def test_device_is_required_before_listening(self):
-        for arguments in ([], ["--device="]):
-            with self.subTest(arguments=arguments):
-                result = subprocess.run(
-                    [
-                        str(SERVER),
-                        *arguments,
-                        "--pool_backing=fixed",
-                        "--workers=1",
-                        "--listen=127.0.0.1:0",
-                    ],
-                    capture_output=True,
-                    text=True,
-                )
-                self.assertNotEqual(result.returncode, 0, result.stderr)
-                self.assertIn("--device is required", result.stderr)
-                self.assertNotIn('"event":"ready"', result.stderr)
-
-    def test_device_uri_runtime_services_fail_before_listening(self):
-        cases = (
-            ("task:?feedback&asan&tsan", "feature flags 0x7"),
-            ("task://?feedback=enabled", "does not accept a value"),
-        )
-        for device, diagnostic in cases:
-            with self.subTest(device=device):
-                result = subprocess.run(
-                    [
-                        str(SERVER),
-                        f"--device={device}",
-                        "--pool_backing=fixed",
-                        "--workers=1",
-                        "--listen=127.0.0.1:0",
-                    ],
-                    capture_output=True,
-                    text=True,
-                )
-                self.assertNotEqual(result.returncode, 0, result.stderr)
-                self.assertIn(diagnostic, result.stderr)
-                self.assertNotIn('"event":"ready"', result.stderr)
-
-    def test_multiple_devices_require_named_configuration(self):
-        result = subprocess.run(
-            [
-                str(SERVER),
-                "--device=task",
-                "--device=task",
-                "--memory_bytes=4096",
-                "--workers=1",
-                "--listen=127.0.0.1:0",
-            ],
-            capture_output=True,
-            text=True,
-        )
-        self.assertNotEqual(result.returncode, 0, result.stderr)
-        self.assertIn("multiple devices require named entries", result.stderr)
-        self.assertNotIn('"event":"ready"', result.stderr)
-
-    def test_named_devices_do_not_merge_single_device_flags(self):
-        for flag in (
-            "--device=task",
-            "--pool_backing=elastic",
-            "--weight_slab_bytes=1073741824",
-            "--state_slab_bytes=67108864",
-            "--memory_bytes=0",
-            "--workspace_idle_ms=0",
-            "--parameter_idle_ms=0",
-        ):
-            with self.subTest(flag=flag):
-                result = subprocess.run(
-                    [str(SERVER), "--devices=not-opened.json", flag],
-                    capture_output=True,
-                    text=True,
-                )
-                self.assertNotEqual(result.returncode, 0, result.stderr)
-                self.assertIn("--devices cannot be combined", result.stderr)
-                self.assertNotIn('"event":"ready"', result.stderr)
-
-    def test_positional_model_is_rejected_before_listening(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            directory = Path(temporary)
-            log = directory / "server.log"
-            with running_server(
-                [
-                    str(SERVER),
-                    "--device=task",
-                    "--pool_backing=fixed",
-                    "--workers=1",
-                    "--listen=127.0.0.1:0",
-                    "models.json",
-                ],
-                log,
-                cwd=directory,
-            ) as (process, address):
-                self.assertIsNone(address, log.read_text())
-                self.assertNotEqual(process.wait(), 0)
-            self.assertIn(
-                "Unexpected positional argument 'models.json'", log.read_text()
-            )
-            self.assertIn("--model=path", log.read_text())
 
     def test_empty_server_runs_external_source_and_retires(self):
         for workers in (1, 4):
@@ -352,6 +227,75 @@ class ServerTest(unittest.TestCase):
                     )
                 self.assertEqual(process.returncode, 0, log.read_text())
 
+    def test_model_directory_and_explicit_file_execute_from_their_own_base(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            package = directory / "model package"
+            shutil.copytree(PACKAGE, package, copy_function=shutil.copyfile)
+            document = json.loads((package / "model.json").read_text())
+            document["name"] = "explicit-file"
+            (package / "deployment.json").write_text(json.dumps(document))
+            cases = (
+                ("relative", "model package", directory, "vectors"),
+                ("absolute", str(package), directory, "vectors"),
+                ("trailing", str(package) + "/", directory, "vectors"),
+                ("current", ".", package, "vectors"),
+                (
+                    "explicit",
+                    str(package / "deployment.json"),
+                    directory,
+                    "explicit-file",
+                ),
+            )
+            for name, model_path, working_directory, model in cases:
+                with self.subTest(name=name):
+                    log = directory / f"{name}.log"
+                    with running_server(
+                        [
+                            str(SERVER),
+                            "--device=task",
+                            "--pool_backing=fixed",
+                            "--workers=1",
+                            "--listen=127.0.0.1:0",
+                            f"--model={model_path}",
+                        ],
+                        log,
+                        cwd=working_directory,
+                    ) as (process, bound_address):
+                        self.assertIsNotNone(bound_address, log.read_text())
+                        address = urlsplit(f"http://{bound_address}")
+                        result = self.post(
+                            address,
+                            "/v1/embeddings",
+                            {"model": model, "input": "ab", "dimensions": 2},
+                        )
+                        self.assertEqual(result["data"][0]["embedding"], [3, 2])
+                    self.assertEqual(process.returncode, 0, log.read_text())
+
+    def test_model_directory_requires_its_model_json_before_listening(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            package = directory / "model package"
+            package.mkdir()
+            shutil.copyfile(PACKAGE / "model.json", package / "other.json")
+            nested = package / "nested"
+            nested.mkdir()
+            shutil.copyfile(PACKAGE / "model.json", nested / "model.json")
+            for state in ("missing", "malformed"):
+                with self.subTest(state=state):
+                    if state == "malformed":
+                        (package / "model.json").write_text("{")
+                    result = subprocess.run(
+                        [str(SERVER), f"--model={package}"],
+                        capture_output=True,
+                        text=True,
+                    )
+                    self.assertNotEqual(result.returncode, 0, result.stderr)
+                    self.assertNotIn("--device is required", result.stderr)
+                    self.assertNotIn('"event":"ready"', result.stderr)
+                    if state == "missing":
+                        self.assertIn(str(package / "model.json"), result.stderr)
+
     def test_repeated_documents_share_cli_and_http_registration(self):
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
@@ -398,7 +342,7 @@ class ServerTest(unittest.TestCase):
             )
             # Flagfile arguments keep ordinary process-CWD semantics; the model
             # document's own references instead use its containing directory.
-            (settings / "server.flags").write_text("--model=models/alpha/model.json\n")
+            (settings / "server.flags").write_text("--model=models/alpha\n")
             log = directory / "server.log"
             with running_server(
                 [

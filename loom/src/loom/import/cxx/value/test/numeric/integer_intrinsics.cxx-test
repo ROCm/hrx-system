@@ -1,0 +1,352 @@
+// RUN: roundtrip
+#include <loomcxx/scalar.h>
+
+unsigned char narrow(unsigned char value) {
+  return loom::scalar::ctlzi(value);
+}
+unsigned first_lane(unsigned mask) {
+  return loom::scalar::cttzi(mask);
+}
+long long wide(long long value) {
+  return loom::scalar::ctpopi(value);
+}
+// ----
+func.def public @narrow(%value: i8) -> (i8) {
+  %2 = scalar.ctlzi %value : i8
+  func.return %2 : i8
+}
+
+func.def public @first_lane(%mask: i32) -> (i32) {
+  %5 = scalar.cttzi %mask : i32
+  func.return %5 : i32
+}
+
+func.def public @wide(%value: i64) -> (i64) {
+  %8 = scalar.ctpopi %value : i64
+  func.return %8 : i64
+}
+
+// ====
+// RUN: verify
+// Bit counts do not admit floating-point permissions or implicit width changes.
+// ERROR@+1: LOWERING/059 "intrinsic has an unsupported math flag"
+[[loom::op("scalar.cttzi", "afn")]] unsigned count(unsigned);
+
+// ====
+// RUN: verify
+// ERROR@+1: LOWERING/059 "intrinsic operands must have the result's type"
+[[loom::op("scalar.ctpopi")]] unsigned count(unsigned long long);
+
+// ====
+// RUN: verify
+// ERROR@+1: LOWERING/059 "scalar intrinsic result must be a non-boolean integer"
+[[loom::op("scalar.ctlzi")]] float count(float);
+
+// ====
+// RUN: verify
+#include <loomcxx/scalar.h>
+template <class T>
+concept HasCount = requires(T value) { loom::scalar::cttzi(value); };
+static_assert(HasCount<signed char>);
+static_assert(HasCount<unsigned short>);
+static_assert(HasCount<unsigned>);
+static_assert(HasCount<long long>);
+static_assert(!HasCount<bool>);
+static_assert(!HasCount<float>);
+
+// ====
+// RUN: roundtrip
+// Template deduction keeps signed char bit counts at their source width.
+#include <loomcxx/scalar.h>
+template <class T>
+static unsigned counts(T value) {
+  return static_cast<unsigned>(loom::scalar::ctlzi(value)) * 10000u +
+         static_cast<unsigned>(loom::scalar::cttzi(value)) * 100u +
+         static_cast<unsigned>(loom::scalar::ctpopi(value));
+}
+unsigned evaluate(signed char value) { return counts(value); }
+// ----
+func.def public @evaluate(%value: i8) -> (i32) {
+  %2 = func.call pure @counts_signed_char(%value) : (i8) -> (i32)
+  func.return %2 : i32
+}
+
+func.def @counts_signed_char(%value: i8) -> (i32) {
+  %5 = scalar.ctlzi %value : i8
+  %6 = scalar.extsi %5 : i8 to i32
+  %7 = scalar.constant 10000 : i32
+  %8 = scalar.muli %6, %7 : i32
+  %9 = scalar.cttzi %value : i8
+  %10 = scalar.extsi %9 : i8 to i32
+  %11 = scalar.constant 100 : i32
+  %12 = scalar.muli %10, %11 : i32
+  %13 = scalar.addi %8, %12 : i32
+  %14 = scalar.ctpopi %value : i8
+  %15 = scalar.extsi %14 : i8 to i32
+  %16 = scalar.addi %13, %15 : i32
+  func.return %16 : i32
+}
+
+// ====
+// RUN: roundtrip
+// Template deduction keeps unsigned char bit counts at their source width.
+#include <loomcxx/scalar.h>
+template <class T>
+static unsigned counts(T value) {
+  return static_cast<unsigned>(loom::scalar::ctlzi(value)) * 10000u +
+         static_cast<unsigned>(loom::scalar::cttzi(value)) * 100u +
+         static_cast<unsigned>(loom::scalar::ctpopi(value));
+}
+unsigned evaluate(unsigned char value) { return counts(value); }
+// ----
+func.def public @evaluate(%value: i8) -> (i32) {
+  %2 = func.call pure @counts_unsigned_char(%value) : (i8) -> (i32)
+  func.return %2 : i32
+}
+
+func.def @counts_unsigned_char(%value: i8) -> (i32) {
+  %5 = scalar.ctlzi %value : i8
+  %6 = scalar.extui %5 : i8 to i32
+  %7 = scalar.constant 10000 : i32
+  %8 = scalar.muli %6, %7 : i32
+  %9 = scalar.cttzi %value : i8
+  %10 = scalar.extui %9 : i8 to i32
+  %11 = scalar.constant 100 : i32
+  %12 = scalar.muli %10, %11 : i32
+  %13 = scalar.addi %8, %12 : i32
+  %14 = scalar.ctpopi %value : i8
+  %15 = scalar.extui %14 : i8 to i32
+  %16 = scalar.addi %13, %15 : i32
+  func.return %16 : i32
+}
+
+// ====
+// RUN: roundtrip
+// Template deduction keeps short bit counts at their source width.
+#include <loomcxx/scalar.h>
+template <class T>
+static unsigned counts(T value) {
+  return static_cast<unsigned>(loom::scalar::ctlzi(value)) * 10000u +
+         static_cast<unsigned>(loom::scalar::cttzi(value)) * 100u +
+         static_cast<unsigned>(loom::scalar::ctpopi(value));
+}
+unsigned evaluate(short value) { return counts(value); }
+// ----
+func.def public @evaluate(%value: i16) -> (i32) {
+  %2 = func.call pure @counts_short(%value) : (i16) -> (i32)
+  func.return %2 : i32
+}
+
+func.def @counts_short(%value: i16) -> (i32) {
+  %5 = scalar.ctlzi %value : i16
+  %6 = scalar.extsi %5 : i16 to i32
+  %7 = scalar.constant 10000 : i32
+  %8 = scalar.muli %6, %7 : i32
+  %9 = scalar.cttzi %value : i16
+  %10 = scalar.extsi %9 : i16 to i32
+  %11 = scalar.constant 100 : i32
+  %12 = scalar.muli %10, %11 : i32
+  %13 = scalar.addi %8, %12 : i32
+  %14 = scalar.ctpopi %value : i16
+  %15 = scalar.extsi %14 : i16 to i32
+  %16 = scalar.addi %13, %15 : i32
+  func.return %16 : i32
+}
+
+// ====
+// RUN: roundtrip
+// Template deduction keeps unsigned short bit counts at their source width.
+#include <loomcxx/scalar.h>
+template <class T>
+static unsigned counts(T value) {
+  return static_cast<unsigned>(loom::scalar::ctlzi(value)) * 10000u +
+         static_cast<unsigned>(loom::scalar::cttzi(value)) * 100u +
+         static_cast<unsigned>(loom::scalar::ctpopi(value));
+}
+unsigned evaluate(unsigned short value) { return counts(value); }
+// ----
+func.def public @evaluate(%value: i16) -> (i32) {
+  %2 = func.call pure @counts_unsigned_short(%value) : (i16) -> (i32)
+  func.return %2 : i32
+}
+
+func.def @counts_unsigned_short(%value: i16) -> (i32) {
+  %5 = scalar.ctlzi %value : i16
+  %6 = scalar.extui %5 : i16 to i32
+  %7 = scalar.constant 10000 : i32
+  %8 = scalar.muli %6, %7 : i32
+  %9 = scalar.cttzi %value : i16
+  %10 = scalar.extui %9 : i16 to i32
+  %11 = scalar.constant 100 : i32
+  %12 = scalar.muli %10, %11 : i32
+  %13 = scalar.addi %8, %12 : i32
+  %14 = scalar.ctpopi %value : i16
+  %15 = scalar.extui %14 : i16 to i32
+  %16 = scalar.addi %13, %15 : i32
+  func.return %16 : i32
+}
+
+// ====
+// RUN: roundtrip
+// Template deduction keeps int bit counts at their source width.
+#include <loomcxx/scalar.h>
+template <class T>
+static unsigned counts(T value) {
+  return static_cast<unsigned>(loom::scalar::ctlzi(value)) * 10000u +
+         static_cast<unsigned>(loom::scalar::cttzi(value)) * 100u +
+         static_cast<unsigned>(loom::scalar::ctpopi(value));
+}
+unsigned evaluate(int value) { return counts(value); }
+// ----
+func.def public @evaluate(%value: i32) -> (i32) {
+  %2 = func.call pure @counts_int(%value) : (i32) -> (i32)
+  func.return %2 : i32
+}
+
+func.def @counts_int(%value: i32) -> (i32) {
+  %5 = scalar.ctlzi %value : i32
+  %6 = scalar.constant 10000 : i32
+  %7 = scalar.muli %5, %6 : i32
+  %8 = scalar.cttzi %value : i32
+  %9 = scalar.constant 100 : i32
+  %10 = scalar.muli %8, %9 : i32
+  %11 = scalar.addi %7, %10 : i32
+  %12 = scalar.ctpopi %value : i32
+  %13 = scalar.addi %11, %12 : i32
+  func.return %13 : i32
+}
+
+// ====
+// RUN: roundtrip
+// Template deduction keeps unsigned bit counts at their source width.
+#include <loomcxx/scalar.h>
+template <class T>
+static unsigned counts(T value) {
+  return static_cast<unsigned>(loom::scalar::ctlzi(value)) * 10000u +
+         static_cast<unsigned>(loom::scalar::cttzi(value)) * 100u +
+         static_cast<unsigned>(loom::scalar::ctpopi(value));
+}
+unsigned evaluate(unsigned value) { return counts(value); }
+// ----
+func.def public @evaluate(%value: i32) -> (i32) {
+  %2 = func.call pure @counts_unsigned_int(%value) : (i32) -> (i32)
+  func.return %2 : i32
+}
+
+func.def @counts_unsigned_int(%value: i32) -> (i32) {
+  %5 = scalar.ctlzi %value : i32
+  %6 = scalar.constant 10000 : i32
+  %7 = scalar.muli %5, %6 : i32
+  %8 = scalar.cttzi %value : i32
+  %9 = scalar.constant 100 : i32
+  %10 = scalar.muli %8, %9 : i32
+  %11 = scalar.addi %7, %10 : i32
+  %12 = scalar.ctpopi %value : i32
+  %13 = scalar.addi %11, %12 : i32
+  func.return %13 : i32
+}
+
+// ====
+// RUN: roundtrip
+// Template deduction keeps long long bit counts at their source width.
+#include <loomcxx/scalar.h>
+template <class T>
+static unsigned counts(T value) {
+  return static_cast<unsigned>(loom::scalar::ctlzi(value)) * 10000u +
+         static_cast<unsigned>(loom::scalar::cttzi(value)) * 100u +
+         static_cast<unsigned>(loom::scalar::ctpopi(value));
+}
+unsigned evaluate(long long value) { return counts(value); }
+// ----
+func.def public @evaluate(%value: i64) -> (i32) {
+  %2 = func.call pure @counts_long_long(%value) : (i64) -> (i32)
+  func.return %2 : i32
+}
+
+func.def @counts_long_long(%value: i64) -> (i32) {
+  %5 = scalar.ctlzi %value : i64
+  %6 = scalar.trunci %5 : i64 to i32
+  %7 = scalar.constant 10000 : i32
+  %8 = scalar.muli %6, %7 : i32
+  %9 = scalar.cttzi %value : i64
+  %10 = scalar.trunci %9 : i64 to i32
+  %11 = scalar.constant 100 : i32
+  %12 = scalar.muli %10, %11 : i32
+  %13 = scalar.addi %8, %12 : i32
+  %14 = scalar.ctpopi %value : i64
+  %15 = scalar.trunci %14 : i64 to i32
+  %16 = scalar.addi %13, %15 : i32
+  func.return %16 : i32
+}
+
+// ====
+// RUN: roundtrip
+// Template deduction keeps unsigned long long bit counts at their source width.
+#include <loomcxx/scalar.h>
+template <class T>
+static unsigned counts(T value) {
+  return static_cast<unsigned>(loom::scalar::ctlzi(value)) * 10000u +
+         static_cast<unsigned>(loom::scalar::cttzi(value)) * 100u +
+         static_cast<unsigned>(loom::scalar::ctpopi(value));
+}
+unsigned evaluate(unsigned long long value) { return counts(value); }
+// ----
+func.def public @evaluate(%value: i64) -> (i32) {
+  %2 = func.call pure @counts_unsigned_long_long(%value) : (i64) -> (i32)
+  func.return %2 : i32
+}
+
+func.def @counts_unsigned_long_long(%value: i64) -> (i32) {
+  %5 = scalar.ctlzi %value : i64
+  %6 = scalar.trunci %5 : i64 to i32
+  %7 = scalar.constant 10000 : i32
+  %8 = scalar.muli %6, %7 : i32
+  %9 = scalar.cttzi %value : i64
+  %10 = scalar.trunci %9 : i64 to i32
+  %11 = scalar.constant 100 : i32
+  %12 = scalar.muli %10, %11 : i32
+  %13 = scalar.addi %8, %12 : i32
+  %14 = scalar.ctpopi %value : i64
+  %15 = scalar.trunci %14 : i64 to i32
+  %16 = scalar.addi %13, %15 : i32
+  func.return %16 : i32
+}
+
+// ====
+// RUN: roundtrip
+// An effectful intrinsic operand is evaluated once before its updated state is read.
+#include <loomcxx/scalar.h>
+unsigned once(unsigned value) {
+  unsigned count = loom::scalar::cttzi(value++);
+  return value * 100u + count;
+}
+// ----
+func.def public @once(%value$0: i32) -> (i32) {
+  %2 = scalar.constant 1 : i32
+  %value$3 = scalar.addi %value$0, %2 : i32
+  %count = scalar.cttzi %value$0 : i32
+  %5 = scalar.constant 100 : i32
+  %6 = scalar.muli %value$3, %5 : i32
+  %7 = scalar.addi %6, %count : i32
+  func.return %7 : i32
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// Constant source operands retain narrow widths through folding.
+#include <loomcxx/scalar.h>
+unsigned narrow_counts() {
+  return static_cast<unsigned>(
+             loom::scalar::ctlzi(static_cast<unsigned char>(0))) *
+             10000u +
+         static_cast<unsigned>(
+             loom::scalar::cttzi(static_cast<signed char>(-128))) *
+             100u +
+         static_cast<unsigned>(
+             loom::scalar::ctpopi(static_cast<unsigned short>(0x8000)));
+}
+// ----
+func.def public @narrow_counts() -> (i32) {
+  %21 = scalar.constant 80701 : i32
+  func.return %21 : i32
+}

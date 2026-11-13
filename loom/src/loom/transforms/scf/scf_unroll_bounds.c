@@ -6,6 +6,7 @@
 
 #include "loom/transforms/scf/scf_unroll_bounds.h"
 
+#include "iree/base/internal/arena.h"
 #include "loom/ir/attribute.h"
 #include "loom/ir/module.h"
 #include "loom/ir/types.h"
@@ -13,6 +14,97 @@
 #include "loom/ops/index/ops.h"
 #include "loom/ops/scalar/ops.h"
 #include "loom/ops/scf/ops.h"
+#include "loom/util/predicate_facts.h"
+
+loom_value_facts_t loom_scf_unroll_guarded_index_facts(
+    loom_value_facts_t source_facts, loom_value_facts_t upper_facts) {
+  const int64_t upper =
+      upper_facts.range_hi == INT64_MIN ? INT64_MAX : upper_facts.range_hi - 1;
+  return loom_value_facts_make(source_facts.range_lo,
+                               iree_max(source_facts.range_hi, upper),
+                               source_facts.known_divisor);
+}
+
+iree_status_t loom_scf_unroll_refine_indices(
+    loom_rewriter_t* rewriter, loom_value_facts_t source_facts,
+    loom_value_facts_t inferred_facts, loom_value_id_t lower_bound,
+    loom_value_id_t upper_bound, uint32_t index_count, loom_value_id_t* indices,
+    loom_location_id_t location, iree_arena_allocator_t* scratch_arena) {
+  if (index_count == 0) {
+    return iree_ok_status();
+  }
+
+  loom_predicate_t prototype[LOOM_VALUE_FACT_INTEGER_REFINEMENT_CAPACITY + 2];
+  uint16_t predicates_per_index = loom_value_facts_export_integer_refinements(
+      indices[0], inferred_facts, source_facts, prototype,
+      LOOM_VALUE_FACT_INTEGER_REFINEMENT_CAPACITY);
+  if (lower_bound != LOOM_VALUE_ID_INVALID) {
+    prototype[predicates_per_index++] = (loom_predicate_t){
+        .kind = LOOM_PREDICATE_GE,
+        .arg_count = 2,
+        .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_VALUE,
+                     LOOM_PRED_ARG_NONE},
+        .args = {indices[0], lower_bound, 0},
+    };
+  }
+  if (upper_bound != LOOM_VALUE_ID_INVALID) {
+    prototype[predicates_per_index++] = (loom_predicate_t){
+        .kind = LOOM_PREDICATE_LT,
+        .arg_count = 2,
+        .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_VALUE,
+                     LOOM_PRED_ARG_NONE},
+        .args = {indices[0], upper_bound, 0},
+    };
+  }
+  if (predicates_per_index == 0) {
+    return iree_ok_status();
+  }
+
+  const uint16_t group_capacity =
+      (uint16_t)iree_min(index_count, UINT16_MAX / predicates_per_index);
+  const loom_type_t type = loom_module_value_type(rewriter->module, indices[0]);
+  loom_type_t singleton_type = type;
+  loom_type_t* types = &singleton_type;
+  loom_predicate_t* predicates = prototype;
+  if (group_capacity > 1) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        scratch_arena, group_capacity, sizeof(*types), (void**)&types));
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        scratch_arena, (iree_host_size_t)group_capacity * predicates_per_index,
+        sizeof(*predicates), (void**)&predicates));
+    for (uint16_t i = 0; i < group_capacity; ++i) {
+      types[i] = type;
+    }
+  }
+
+  iree_status_t status = iree_ok_status();
+  for (uint32_t position = 0;
+       position < index_count && iree_status_is_ok(status);) {
+    const uint16_t count =
+        (uint16_t)iree_min(index_count - position, group_capacity);
+    for (uint16_t i = 0; i < count; ++i) {
+      for (uint16_t j = 0; j < predicates_per_index; ++j) {
+        loom_predicate_t predicate = prototype[j];
+        predicate.args[0] = indices[position + i];
+        predicates[i * predicates_per_index + j] = predicate;
+      }
+    }
+    loom_op_t* assume = NULL;
+    status = loom_index_assume_build(
+        &rewriter->builder, indices + position, count, predicates,
+        count * predicates_per_index, types, count, location, &assume);
+    if (iree_status_is_ok(status)) {
+      const loom_value_slice_t results = loom_index_assume_results(assume);
+      for (uint16_t i = 0; i < count && iree_status_is_ok(status); ++i) {
+        status = loom_rewriter_move_value_name(rewriter, indices[position + i],
+                                               results.values[i]);
+        indices[position + i] = results.values[i];
+      }
+    }
+    position += count;
+  }
+  return status;
+}
 
 static iree_status_t loom_scf_unroll_bound_constant(
     loom_builder_t* builder, const loom_op_t* op, int64_t value,
@@ -153,13 +245,22 @@ static loom_type_t loom_scf_unroll_split_integer_type(
 iree_status_t loom_scf_unroll_build_dynamic_split(
     loom_builder_t* builder, const loom_value_fact_table_t* facts,
     const loom_op_t* op, int64_t step, uint32_t factor,
-    loom_value_id_t scaled_step, loom_value_id_t* out_main_upper) {
+    loom_value_id_t scaled_step, loom_scf_unroll_split_t* out_split) {
   const loom_value_id_t lower = loom_scf_for_lower_bound(op);
   const loom_value_id_t upper = loom_scf_for_upper_bound(op);
   const loom_type_t type = loom_module_value_type(builder->module, lower);
+  const loom_value_facts_t lower_facts =
+      loom_value_fact_table_lookup(facts, lower);
+  const int64_t tile_span = step * factor;
   if (loom_scf_unroll_padded_split_fits(facts, op, type, step)) {
+    const int64_t divisor =
+        loom_value_facts_is_zero(lower_facts)
+            ? tile_span
+            : iree_math_gcd_i64(lower_facts.known_divisor, tile_span);
+    out_split->facts =
+        loom_value_facts_make(lower_facts.range_lo, INT64_MAX, divisor);
     return loom_scf_unroll_build_padded_split(builder, op, step, factor, type,
-                                              scaled_step, out_main_upper);
+                                              scaled_step, &out_split->value);
   }
 
   // Clamp empty domains before subtraction. Fixed-width unsigned arithmetic
@@ -176,7 +277,6 @@ iree_status_t loom_scf_unroll_build_dynamic_split(
       loom_scf_select_build(builder, loom_index_cmp_result(nonempty), lower,
                             upper, type, op->location, &bounded_lower));
   const loom_value_id_t begin = loom_scf_select_result(bounded_lower);
-  const int64_t tile_span = step * factor;
   int64_t tile_span_literal = 0;
   const loom_type_t integer_type = loom_scf_unroll_split_integer_type(
       facts, op, loom_type_element_type(type), tile_span, &tile_span_literal);
@@ -245,6 +345,14 @@ iree_status_t loom_scf_unroll_build_dynamic_split(
   IREE_RETURN_IF_ERROR(loom_index_assume_build(
       builder, &split_value, 1, predicates, IREE_ARRAYSIZE(predicates), &type,
       1, op->location, &bounded_split));
-  *out_main_upper = loom_index_assume_results(bounded_split).values[0];
+  out_split->value = loom_index_assume_results(bounded_split).values[0];
+  // The unsigned remainder/select expression does not retain the source grid.
+  // A split equal to upper can be off-grid when the tail is empty, so its
+  // divisibility cannot be strengthened until the tail body is entered.
+  const loom_value_facts_t upper_facts =
+      loom_value_fact_table_lookup(facts, upper);
+  out_split->facts = loom_value_facts_make(
+      iree_min(lower_facts.range_lo, upper_facts.range_lo),
+      upper_facts.range_hi, 1);
   return iree_ok_status();
 }

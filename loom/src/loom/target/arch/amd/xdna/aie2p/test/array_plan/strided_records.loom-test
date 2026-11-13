@@ -341,8 +341,7 @@ binding-dimension channel=0 index=0 step=1 wrap=32
 binding-dimension channel=0 index=1 step=384 wrap=16
 binding-dimension channel=0 index=2 step=32 wrap=0
 binding-patch ordinal=1 channel=1 shim=(0,0) direction=stream-to-memory dma-channel=0 partition=0/1 offset=128 span=356 transfer=48 repeat=1 completion-route=0
-binding-dimension channel=1 index=0 step=1 wrap=1
-binding-dimension channel=1 index=1 step=8 wrap=0
+binding-dimension channel=1 index=0 step=8 wrap=0
 
 array-program records=39 writes=21 masked-writes=13 block-writes=4 tile-loads=1 waits=0
 array-block record=26 address=0x0021d000 words=[0x00000200,0x00000000,0x00000000,0x00000000,0x00000000,0x0e043fe0]
@@ -353,7 +352,7 @@ array-tile-load record=30 tile-program=0
 control-program records=6 writes=2 masked-writes=1 block-writes=2 tile-loads=0 waits=1 relocations=2
 control-block record=0 address=0x0001d000 words=[0x00001800,0x00000000,0x00000000,0x02000000,0xc100017f,0x0200001f,0x00000000,0x02000000]
 control-write record=1 address=0x0001d214 value=0x00000000
-control-block record=2 address=0x0001d020 words=[0x0000000c,0x00000000,0x00000000,0x00100000,0xc0000007,0x02000000,0x00000000,0x02000000]
+control-block record=2 address=0x0001d020 words=[0x0000000c,0x00000000,0x00000000,0x00000007,0xc0000000,0x02000000,0x00000000,0x02000000]
 control-mask-write record=3 address=0x0001d200 mask=0x00001f00 value=0x00000000
 control-write record=4 address=0x0001d204 value=0x80000001
 control-wait record=5 tile=(0,0) direction=stream-to-memory dma-channel=0 columns=1 rows=1

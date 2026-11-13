@@ -51,6 +51,12 @@ typedef enum loom_pipeline_retain_e {
   LOOM_PIPELINE_RETAIN_COUNT_ = 2,
 } loom_pipeline_retain_t;
 
+// Channel participation within a strand. Absent participation creates an independent instance per selected worker.
+typedef enum loom_pipeline_strand_participation_e {
+  LOOM_PIPELINE_STRAND_PARTICIPATION_COOPERATIVE = 1,
+  LOOM_PIPELINE_STRAND_PARTICIPATION_COUNT_ = 2,
+} loom_pipeline_strand_participation_t;
+
 // LOOM_OP_PIPELINE_DEF: Persistent dataflow program. Leading specialization arguments remain ordinary SSA values and typed run arguments are supplied by each invocation. Their source types are independent of the eventual target export ABI. The optional scope fixes the artifact boundary that lowering must satisfy.
 // pipeline.def<kernel> target(@array) @resident() run(%input: buffer, %output: buffer) {
 // }
@@ -99,7 +105,7 @@ iree_status_t loom_pipeline_finish_build(
     loom_location_id_t location,
     loom_op_t** out_op);
 
-// LOOM_OP_PIPELINE_STRAND: Construct independently progressing strand instances over a target-relative worker domain. Each selected worker enters its instance once; ordinary loops in the body express repeated work. The region captures lexical SSA values and declares work rather than executing inline. Multiple strands may share a worker, with channel dependencies controlling their progress. Origins, counts and strides select coordinates as origin + index * stride. An omitted target inherits the enclosing pipeline's target environment.
+// LOOM_OP_PIPELINE_STRAND: Construct strand instances over a target-relative worker domain. By default each selected worker enters an independent instance once. A cooperative strand instead enters one instance with all selected workers: channel actions collectively acquire, publish or release one record, while ordinary payload operations execute per participant. Channel actions require converged participation, including through calls. Ordinary loops in the body express repeated work. The region captures lexical SSA values and declares work rather than executing inline. Multiple strands may share a worker, with channel dependencies controlling their progress. Origins, counts and strides select coordinates as origin + index * stride. An omitted target inherits the enclosing pipeline's target environment.
 // pipeline.strand target(@npu) workers([%column, 2], [1, 1], [1, 1]) {
 // }
 LOOM_DEFINE_ISA(loom_pipeline_strand_isa, LOOM_OP_PIPELINE_STRAND)
@@ -110,14 +116,17 @@ LOOM_DEFINE_ATTR_SYMBOL(loom_pipeline_strand_target, 0)
 LOOM_DEFINE_ATTR_I64_ARRAY(loom_pipeline_strand_static_origins, 1)
 LOOM_DEFINE_ATTR_I64_ARRAY(loom_pipeline_strand_static_counts, 2)
 LOOM_DEFINE_ATTR_I64_ARRAY(loom_pipeline_strand_static_strides, 3)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_pipeline_strand_participation, 4, loom_pipeline_strand_participation_t)
 LOOM_DEFINE_REGION(loom_pipeline_strand_body, 0)
 enum loom_pipeline_strand_build_flag_bits_e {
-  LOOM_PIPELINE_STRAND_BUILD_FLAG_HAS_TARGET = 1u << 0,
+  LOOM_PIPELINE_STRAND_BUILD_FLAG_HAS_PARTICIPATION = 1u << 0,
+  LOOM_PIPELINE_STRAND_BUILD_FLAG_HAS_TARGET = 1u << 1,
 };
 typedef uint32_t loom_pipeline_strand_build_flags_t;
 iree_status_t loom_pipeline_strand_build(
     loom_builder_t* builder,
     loom_pipeline_strand_build_flags_t build_flags,
+    loom_optional uint8_t participation,
     loom_optional loom_symbol_ref_t target,
     const loom_value_id_t* origins,
     iree_host_size_t origins_count,

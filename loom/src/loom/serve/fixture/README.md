@@ -95,7 +95,7 @@ Expected results:
 | Detokenize | `{"content":"bab"}` |
 | Embeddings | Input indices 0/1 contain `[1,1]` / `[6,3]`; prompt/total usage is 4 |
 | Decision | `truth` has type `noul` and probability approximately 2/3 for this single-question cohort; token usage is zero |
-| Image | `data[0].b64_json` decodes to a 7×5 RGB PNG. R/G are 255; B alternates 0/255 by row-major pixel index |
+| Image | `data[0].b64_json` decodes to a 7×5 RGBA PNG. R/G/A are 255; B alternates 0/255 by row-major pixel index |
 
 The decision fixture intentionally changes its probabilities with cohort size.
 Its [oracle](decision/README.md) defines the calculation and floating-point
@@ -167,8 +167,8 @@ CPU protocol and catalog checks run without model files or a GPU:
 build_tools/bin/iree-bazel-test --config=asan \
   //loom/src/loom/serve/server:configuration_test \
   //loom/src/loom/serve/server:router_test \
-  //loom/src/loom/serve/service/finite/embedding:protocol_test \
-  //loom/src/loom/serve/service/finite/decision:protocol_test
+  //loom/src/loom/service/finite/embedding:protocol_test \
+  //loom/src/loom/service/finite/decision:protocol_test
 ```
 
 The source ABI checks execute actual GPU commands and HTTP results with one and

@@ -166,7 +166,10 @@ _DESCRIPTORS = (
             ),
         ),
     ),
-    _instruction("write.address", (_operand("address"), _operand("buffer", _SPAN))),
+    _instruction(
+        "write.address",
+        (_operand("address"), _operand("buffer", _SPAN), _operand("flags")),
+    ),
     _instruction(
         "shim.descriptor",
         (

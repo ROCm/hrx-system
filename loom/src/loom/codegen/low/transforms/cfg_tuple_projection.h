@@ -15,7 +15,8 @@
 extern "C" {
 #endif
 
-// Returns the compiler-owned rule that eliminates lane-local register tuples.
+// Returns the compiler-owned rule that projects partially sliced register
+// tuples into unit-register components at CFG boundaries.
 const loom_boundary_projection_rule_t*
 loom_low_cfg_tuple_boundary_projection_rule(void);
 

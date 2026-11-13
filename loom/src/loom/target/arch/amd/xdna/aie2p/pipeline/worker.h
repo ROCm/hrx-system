@@ -13,6 +13,10 @@
 #include "loom/target/arch/amd/xdna/aie2p/descriptors/core_descriptors.h"
 #include "loom/transforms/pipeline/realization.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 // Typed emitter shared by the selected channel and DMA helper bodies. Helpers
 // remain ordinary Low callables and use the normal inlining and codegen path.
 typedef struct loom_aie2p_worker_builder_t {
@@ -76,6 +80,15 @@ iree_status_t loom_aie2p_worker_binary(loom_aie2p_worker_builder_t* context,
                                        uint32_t descriptor, loom_value_id_t lhs,
                                        loom_value_id_t rhs,
                                        loom_value_id_t* out_value);
+
+// Forms a shim descriptor's address words from an immutable relocated base and
+// a proven 32-bit byte offset. Carry updates the high address portion without
+// replacing the descriptor's disjoint non-address bits in that word.
+iree_status_t loom_aie2p_worker_external_address(
+    loom_aie2p_worker_builder_t* context, loom_builder_t* builder,
+    loom_value_id_t base, loom_value_id_t offset, uint32_t descriptor_high_bits,
+    loom_value_id_t* out_low, loom_value_id_t* out_high);
+
 iree_status_t loom_aie2p_worker_return(loom_builder_t* builder,
                                        const loom_value_id_t* values,
                                        iree_host_size_t count);
@@ -83,6 +96,10 @@ iree_status_t loom_aie2p_worker_lock(loom_aie2p_worker_builder_t* context,
                                      loom_builder_t* builder,
                                      uint32_t descriptor, uint16_t selector,
                                      int32_t delta);
+// Emits a routed data packet, including odd-parity header and final TLAST.
+iree_status_t loom_aie2p_worker_packet_write(
+    loom_aie2p_worker_builder_t* context, loom_builder_t* builder,
+    uint8_t packet_id, const loom_value_id_t* words, iree_host_size_t count);
 // Emits a native control packet. The admitted register offset fits 20 bits;
 // count is 1..4 words and the payload's last word carries TLAST.
 iree_status_t loom_aie2p_worker_control_write(
@@ -103,12 +120,26 @@ iree_status_t loom_aie2p_worker_control_write_encoded(
     uint8_t packet_id, loom_value_id_t command, const loom_value_id_t* words,
     iree_host_size_t count);
 
-// Reads 1..4 consecutive registers from a 16-byte-aligned address through a
-// selected return route. The scalar stream has been drained before the request:
-// its packet header and values cannot interleave with outstanding task tokens.
+// Reads 1..4 consecutive registers at the exact supplied byte address through
+// a selected return route. The caller satisfies the register aperture's
+// alignment; no prefix registers are read. The stream is drained before
+// request: its packet header and values cannot interleave with outstanding task
+// tokens.
 iree_status_t loom_aie2p_worker_control_read(
     loom_aie2p_worker_builder_t* context, loom_builder_t* builder,
     uint8_t packet_id, uint8_t reply_id, uint32_t register_offset,
     iree_host_size_t count, loom_value_id_t* out_values);
+
+// Polls until the masked register bits are clear and leaves builder in the
+// completion block. The caller owns the scalar reply stream exclusively across
+// the wait, as for control_read. register_offset selects one 32-bit register.
+iree_status_t loom_aie2p_worker_control_wait_clear(
+    loom_aie2p_worker_builder_t* context, loom_builder_t* builder,
+    loom_region_t* region, uint8_t packet_id, uint8_t reply_id,
+    uint32_t register_offset, uint32_t mask);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif  // LOOM_TARGET_ARCH_AMD_XDNA_AIE2P_PIPELINE_WORKER_H_

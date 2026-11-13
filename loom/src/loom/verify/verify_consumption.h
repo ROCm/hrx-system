@@ -29,7 +29,8 @@ iree_status_t loom_verify_consumption_record_region(
 iree_status_t loom_verify_consumption_record_aliases(loom_verify_state_t* state,
                                                      const loom_op_t* op);
 
-// Records a validated tied/moved operand for the grouped ownership check.
+// Records an operand whose ownership transfers at this operation, for the
+// grouped ownership check.
 iree_status_t loom_verify_consumption_record(loom_verify_state_t* state,
                                              const loom_op_t* op,
                                              uint16_t operand_index);

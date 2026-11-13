@@ -8,8 +8,8 @@
 
 #include <string.h>
 
+#include "loom/codegen/low/schedule/completion_pressure.h"
 #include "loom/codegen/low/schedule/pressure.h"
-#include "loom/codegen/low/schedule/required_pressure.h"
 
 #define LOOM_LOW_SCHEDULE_PRESSURE_ALIAS_SOURCE_OWNS_BIT (UINT32_C(1) << 31)
 #define LOOM_LOW_SCHEDULE_PRESSURE_ALIAS_EPOCH_MASK \
@@ -43,6 +43,17 @@ static bool loom_low_schedule_storage_relation_can_alias_pressure(
       &state->values[source_ordinal];
   if (result->register_class_id == LOOM_LOW_REG_CLASS_NONE ||
       result->register_class_id != source->register_class_id) {
+    return false;
+  }
+  // Reserve storage for a preferred alias feeding an in-place update while
+  // its source remains live. Charging the acquisition here prevents
+  // apparently free copies from occupying the registers needed by their later
+  // consumers. Physical coalescing may still prove that storage can be reused;
+  // required ties retain their shared footprint in this pressure model.
+  if (iree_any_bit_set(relation->flags,
+                       LOOM_LOW_STORAGE_RELATION_FLAG_PREFERRED) &&
+      iree_any_bit_set(result->flags,
+                       LOOM_LOW_SCHEDULE_VALUE_FLAG_WRITTEN_IN_PLACE)) {
     return false;
   }
   IREE_ASSERT(relation->destination_unit_offset <= result->unit_count &&
@@ -229,7 +240,7 @@ uint32_t loom_low_schedule_pressure_alias_transfer_from_source(
                             result->unit_count - record->unit_count,
                     "alias units must fit result pressure units");
         result->live_unit_count += record->unit_count;
-        loom_low_schedule_required_pressure_adjust_live(
+        loom_low_schedule_completion_pressure_adjust_live(
             state, pressure_state, result, record->unit_count);
         record->epoch_and_flags &=
             ~LOOM_LOW_SCHEDULE_PRESSURE_ALIAS_SOURCE_OWNS_BIT;
@@ -267,7 +278,7 @@ uint32_t loom_low_schedule_pressure_alias_transfer_to_source(
       if (iree_any_bit_set(result->flags, LOOM_LOW_SCHEDULE_VALUE_FLAG_LIVE)) {
         IREE_ASSERT_LE(record->unit_count, result->live_unit_count);
         result->live_unit_count -= record->unit_count;
-        loom_low_schedule_required_pressure_adjust_live(
+        loom_low_schedule_completion_pressure_adjust_live(
             state, pressure_state, result, -(int64_t)record->unit_count);
         record->epoch_and_flags |=
             LOOM_LOW_SCHEDULE_PRESSURE_ALIAS_SOURCE_OWNS_BIT;
@@ -511,7 +522,7 @@ loom_low_schedule_pressure_alias_candidate_transfer_from_source(
                             result->unit_count - record->unit_count,
                     "alias units must fit result pressure units");
         transfer.live_units += record->unit_count;
-        loom_low_schedule_required_pressure_adjust_candidate(
+        loom_low_schedule_completion_pressure_adjust_candidate(
             state, pressure_state, result, record->unit_count,
             iree_any_bit_set(state->values[source_ordinal].flags,
                              LOOM_LOW_SCHEDULE_VALUE_FLAG_CANDIDATE_LATE_READ));
@@ -538,8 +549,8 @@ loom_low_schedule_pressure_alias_candidate_transfer_from_source(
         if (!iree_any_bit_set(
                 state->values[source_ordinal].flags,
                 LOOM_LOW_SCHEDULE_VALUE_FLAG_CANDIDATE_LATE_READ)) {
-          loom_low_schedule_required_pressure_t* required =
-              loom_low_schedule_required_pressure_for_value(
+          loom_low_schedule_completion_pressure_t* required =
+              loom_low_schedule_completion_pressure_for_value(
                   state, pressure_state, result);
           if (required != NULL) {
             required->candidate_write_delta_units += record->unit_count;

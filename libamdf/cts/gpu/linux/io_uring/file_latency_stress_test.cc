@@ -19,7 +19,12 @@ TEST_P(GpuFileLatencyTest, FailedInputDrainsAcceptedReads) {
   Run({4096, 4, 1, 0, 8}, InputFault::kAbsentFile);
 }
 TEST_P(GpuFileLatencyTest, ShortInputThenEofDrainsWithoutConsumption) {
-  Run({4096, 4, 1, 0, 8}, InputFault::kShortFile);
+  // The short completion and its EOF retry must both satisfy direct alignment.
+  const uint32_t byte_length =
+      GetParam() == FileMode::kDirect
+          ? 2 * static_cast<uint32_t>(page_byte_length_)
+          : 4096;
+  Run({byte_length, 4, 1, 0, 8}, InputFault::kShortFile);
 }
 
 INSTANTIATE_TEST_SUITE_P(FileModes, GpuFileLatencyTest,
@@ -62,7 +67,11 @@ TEST_P(GpuFileDemandTest, InvalidFileDrainsConcurrentDemands) {
             InputFault::kAbsentFile);
 }
 TEST_P(GpuFileDemandTest, PartialInputDrainsHeldDemands) {
-  RunDemand({"partial", 4096, 32, 1, 1, 1000, 200, 1, false},
+  const uint32_t byte_length =
+      GetParam() == FileMode::kDirect
+          ? 2 * static_cast<uint32_t>(page_byte_length_)
+          : 4096;
+  RunDemand({"partial", byte_length, 32, 1, 1, 1000, 200, 1, false},
             InputFault::kShortFile);
 }
 

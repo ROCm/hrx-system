@@ -27,6 +27,7 @@ loom_cc_test(
         "//loom/binding/c/target/amd/xdna",
         "//loom/binding/c/target/cmd",
         "//loom/binding/c/test:test_util",
+        "//loom/binding/c/test/target/amd/xdna/testdata:configuration",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

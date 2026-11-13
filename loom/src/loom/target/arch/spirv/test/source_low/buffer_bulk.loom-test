@@ -237,31 +237,28 @@ func.def @dynamic_aligned_copy(%input: buffer, %output: buffer, %length: offset)
 
 // ----
 low.func.def target<spirv.logical.core> abi(shader_entry_point) @dynamic_aligned_copy(%source: reg<spirv.ptr.storage_buffer>, %destination: reg<spirv.ptr.storage_buffer>, %length: reg<spirv.offset64>) asm {
-  %28 = OpConstant.offset64 0
-  %29 = OpUConvert.offset64.u32 %length
-  %30 = OpBitcast.u32.i32 %29
-  %31 = OpConstant.i32 3
-  %32 = OpBitwiseAnd %30, %31
-  %33 = OpBitcast.i32.u32 %32
-  %34 = OpUConvert.u32.offset64 %33
-  %35 = OpISub.offset64 %length, %34
-  %36 = OpConstant.offset64 4
-  low.scf.for unsigned [%28 to %35 step %36] do(%37: reg<spirv.offset64>) {
-    %38 = OpPtrAccessChain.storage_buffer.i32.byte_offset %source, %37
-    %39 = OpLoad.storage_buffer.i32 %38
-    %40 = OpPtrAccessChain.storage_buffer.i32.byte_offset %destination, %37
-    OpStore.storage_buffer.i32 %40, %39
+  %26 = OpConstant.offset64 0
+  %27 = OpBitcast.offset64.i64 %length
+  %28 = OpConstant.i64 -4
+  %29 = OpBitwiseAnd.i64 %27, %28
+  %30 = OpBitcast.i64.offset64 %29
+  %31 = OpConstant.offset64 4
+  low.scf.for unsigned [%26 to %30 step %31] do(%32: reg<spirv.offset64>) {
+    %33 = OpPtrAccessChain.storage_buffer.i32.byte_offset %source, %32
+    %34 = OpLoad.storage_buffer.i32 %33
+    %35 = OpPtrAccessChain.storage_buffer.i32.byte_offset %destination, %32
+    OpStore.storage_buffer.i32 %35, %34
   }
-  %41 = OpConstant.offset64 1
-  low.scf.for unsigned [%35 to %length step %41] do(%42: reg<spirv.offset64>) {
-    %43 = OpPtrAccessChain.storage_buffer.raw_u8.byte_offset %source, %42
-    %44 = OpLoad.storage_buffer.raw_u8 %43
-    %45 = OpUConvert.raw_u8.u32 %44
-    %46 = OpBitcast.u32.i32 %45
-    %47 = OpPtrAccessChain.storage_buffer.raw_u8.byte_offset %destination, %42
-    %48 = OpBitcast.i32.u32 %46
-    %49 = OpUConvert.u32.raw_u8 %48
-    OpStore.storage_buffer.raw_u8 %47, %49
+  %36 = OpConstant.offset64 1
+  low.scf.for unsigned [%30 to %length step %36] do(%37: reg<spirv.offset64>) {
+    %38 = OpPtrAccessChain.storage_buffer.raw_u8.byte_offset %source, %37
+    %39 = OpLoad.storage_buffer.raw_u8 %38
+    %40 = OpUConvert.raw_u8.u32 %39
+    %41 = OpBitcast.u32.i32 %40
+    %42 = OpPtrAccessChain.storage_buffer.raw_u8.byte_offset %destination, %37
+    %43 = OpBitcast.i32.u32 %41
+    %44 = OpUConvert.u32.raw_u8 %43
+    OpStore.storage_buffer.raw_u8 %42, %44
   }
   return
 }
