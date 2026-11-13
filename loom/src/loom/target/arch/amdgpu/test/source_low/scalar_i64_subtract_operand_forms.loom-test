@@ -94,25 +94,52 @@ low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 2, direc
 
 // ====
 
-func.def @mixed_subtract(%uniform: i64, %values: vector<2xi64>) -> (i64, i64) {
+kernel.def @mixed_subtract() {
+  %launch_unit = index.constant 1 : index
+  %launch_width = index.constant 64 : index
+  kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
+} launch(%uniform: i64, %values_buffer: buffer, %captured_buffer: buffer) {
+  %capture_base = index.constant 0 : offset
+  %capture_lane = kernel.workitem.id<x> : index
+  %values_view = buffer.view %values_buffer[%capture_base] : buffer -> view<64x2xi64>
+  %values = vector.load %values_view[%capture_lane, 0] : view<64x2xi64> -> vector<2xi64>
+  %captured = buffer.view %captured_buffer[%capture_base] : buffer -> view<2x64xi64>
   %varying = vector.extract %values[0] : vector<2xi64> -> i64
   %uniform_left = scalar.subi %uniform, %varying : i64
   %uniform_right = scalar.subi %varying, %uniform : i64
-  func.return %uniform_left, %uniform_right : i64, i64
+  view.store %uniform_left, %captured[0, %capture_lane] : i64, view<2x64xi64>
+  view.store %uniform_right, %captured[1, %capture_lane] : i64, view<2x64xi64>
+  kernel.return
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @mixed_subtract(%uniform: reg<amdgpu.vgpr x2>, %values: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
+low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 2, direct_arg_count = 1, direct_arg_names = {arg0 = "uniform"}, direct_arg_offsets = [0], direct_arg_parameter_indices = [0], direct_arg_sizes = [8], parameter_count = 3, resource_count = 2, resource_offsets = [8, 16], resource_parameter_indices = [1, 2], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @mixed_subtract(%uniform: reg<amdgpu.sgpr x2>) asm {
+  %capture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %values_view = resource<hal_binding> {extent = 1024, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %captured = resource<hal_binding> {extent = 1024, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %17 = v_lshlrev_b32_src0_inline %capture_lane, 4
+  %values = global_load_b128_saddr %17, %values_view
   %varying = slice %values[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
-  %12 = slice %uniform[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %13 = slice %uniform[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %14 = slice %varying[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %15 = slice %varying[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %16, %17 = v_sub_co_u32 %12, %14
-  %18, %19 = v_sub_co_ci_u32 %13, %15, %17
-  %uniform_left = concat(%16, %18) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %25, %26 = v_sub_co_u32 %14, %12
-  %27, %28 = v_sub_co_ci_u32 %15, %13, %26
-  %uniform_right = concat(%25, %27) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  return %uniform_left, %uniform_right
+  %20 = slice %uniform[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %21 = v_mov_b32_copy %20
+  %22 = slice %uniform[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %23 = v_mov_b32_copy %22
+  %24 = concat(%21, %23) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %25 = slice %24[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %26 = slice %24[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %27 = slice %varying[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %28 = slice %varying[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %29, %30 = v_sub_co_u32 %25, %27
+  %31, %32 = v_sub_co_ci_u32 %26, %28, %30
+  %uniform_left = concat(%29, %31) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %38 = concat(%21, %23) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %41 = slice %38[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %42 = slice %38[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %43, %44 = v_sub_co_u32 %27, %41
+  %45, %46 = v_sub_co_ci_u32 %28, %42, %44
+  %uniform_right = concat(%43, %45) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %48 = v_lshlrev_b32_src0_inline %capture_lane, 3
+  global_store_b64_saddr %48, %uniform_left, %captured
+  global_store_b64_saddr %48, %uniform_right, %captured {offset = 512}
+  return
 }

@@ -46,22 +46,44 @@ low.kernel.def target<amdgpu.cdna2.core> abi_layout({constant_count = 4, direct_
 // RUN: emit source-low target=amdgpu:gfx90a output=low
 
 // Either operand may retain the single scalar-source slot without commuting.
-func.def @mixed_binary(%varying: f64, %uniform_bits: i64) -> (f64, f64, f64, f64) {
+kernel.def @mixed_binary() {
+  %launch_unit = index.constant 1 : index
+  %launch_width = index.constant 64 : index
+  kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
+} launch(%varying_buffer: buffer, %uniform_bits: i64, %captured_buffer: buffer) {
+  %capture_base = index.constant 0 : offset
+  %capture_lane = kernel.workitem.id<x> : index
+  %varying_view = buffer.view %varying_buffer[%capture_base] : buffer -> view<64xf64>
+  %varying = view.load %varying_view[%capture_lane] : view<64xf64> -> f64
+  %captured = buffer.view %captured_buffer[%capture_base] : buffer -> view<4x64xf64>
   %uniform = scalar.bitcast %uniform_bits : i64 to f64
   %sum = scalar.addf %varying, %uniform : f64
   %left_difference = scalar.subf %varying, %uniform : f64
   %right_difference = scalar.subf %uniform, %varying : f64
   %product = scalar.mulf %varying, %uniform : f64
-  func.return %sum, %left_difference, %right_difference, %product : f64, f64, f64, f64
+  view.store %sum, %captured[0, %capture_lane] : f64, view<4x64xf64>
+  view.store %left_difference, %captured[1, %capture_lane] : f64, view<4x64xf64>
+  view.store %right_difference, %captured[2, %capture_lane] : f64, view<4x64xf64>
+  view.store %product, %captured[3, %capture_lane] : f64, view<4x64xf64>
+  kernel.return
 }
 
 // ----
-low.func.def target<amdgpu.cdna2.core> abi(hal_kernel) @mixed_binary(%varying: reg<amdgpu.vgpr x2>, %uniform: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
+low.kernel.def target<amdgpu.cdna2.core> abi_layout({constant_count = 2, direct_arg_count = 1, direct_arg_names = {arg0 = "uniform_bits"}, direct_arg_offsets = [8], direct_arg_parameter_indices = [1], direct_arg_sizes = [8], parameter_count = 3, resource_count = 2, resource_offsets = [0, 16], resource_parameter_indices = [0, 2], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @mixed_binary(%uniform: reg<amdgpu.sgpr x2>) asm {
+  %capture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %varying_view = resource<hal_binding> {extent = 512, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %captured = resource<hal_binding> {extent = 2048, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %26 = v_lshlrev_b32_src0_inline %capture_lane, 3
+  %varying = global_load_dwordx2_saddr %26, %varying_view : reg<amdgpu.vgpr x2>
   %sum = v_add_f64 %varying, %uniform
   %left_difference = v_sub_f64 %varying, %uniform
   %right_difference = v_sub_f64 %uniform, %varying
   %product = v_mul_f64 %varying, %uniform
-  return %sum, %left_difference, %right_difference, %product
+  global_store_dwordx2_saddr %26, %sum, %captured
+  global_store_dwordx2_saddr %26, %left_difference, %captured {offset = 512}
+  global_store_dwordx2_saddr %26, %right_difference, %captured {offset = 1024}
+  global_store_dwordx2_saddr %26, %product, %captured {offset = 1536}
+  return
 }
 
 // ====

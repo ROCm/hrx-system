@@ -1,7 +1,16 @@
 // RUN: emit source-low target=amdgpu:gfx1151 output=low
 
 // A varying coordinate consumes a uniform pitch directly in SRC0.
-func.def @varying_coordinate_scalar_pitch(%input: buffer, %coordinates: vector<2xi32>, %pitch_input: index) -> (i32) {
+kernel.def @varying_coordinate_scalar_pitch() {
+  %launch_unit = index.constant 1 : index
+  %launch_width = index.constant 64 : index
+  kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
+} launch(%input: buffer, %coordinates_buffer: buffer, %pitch_input: index, %captured_buffer: buffer) {
+  %capture_base = index.constant 0 : offset
+  %capture_lane = kernel.workitem.id<x> : index
+  %coordinates_view = buffer.view %coordinates_buffer[%capture_base] : buffer -> view<64x2xi32>
+  %coordinates = vector.load %coordinates_view[%capture_lane, 0] : view<64x2xi32> -> vector<2xi32>
+  %captured = buffer.view %captured_buffer[%capture_base] : buffer -> view<64xi32>
   %raw_coordinate = vector.extract %coordinates[0] : vector<2xi32> -> i32
   %coordinate_input = index.cast %raw_coordinate : i32 to index
   %coordinate = index.assume %coordinate_input [range(%coordinate_input, 0, 7)] : index
@@ -11,30 +20,39 @@ func.def @varying_coordinate_scalar_pitch(%input: buffer, %coordinates: vector<2
   %layout = encoding.layout.strided [%pitch, 1] : encoding<layout>
   %view = buffer.view %global[%base] : buffer -> view<8x1xi32, %layout>
   %value = view.load %view[%coordinate, 0] : view<8x1xi32, %layout> -> i32
-  func.return %value : i32
+  view.store %value, %captured[%capture_lane] : i32, view<64xi32>
+  kernel.return
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @varying_coordinate_scalar_pitch(%coordinates: reg<amdgpu.vgpr x2>, %pitch: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "pitch_input"}, direct_arg_offsets = [16], direct_arg_parameter_indices = [2], direct_arg_sizes = [4], parameter_count = 4, resource_count = 3, resource_offsets = [0, 8, 24], resource_parameter_indices = [0, 1, 3], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @varying_coordinate_scalar_pitch(%pitch: reg<amdgpu.sgpr>) asm {
+  %capture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %coordinate = slice %coordinates[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %18 = v_mul_lo_u32 %coordinate, %pitch
-  %19 = v_lshlrev_b32_src0_inline %18, 2
-  %20 = v_mov_b32 0
-  %21 = slice %view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %22 = slice %view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %23, %24 = v_add_co_u32 %21, %19
-  %25 = v_mov_b32_copy %22
-  %26, %27 = v_add_co_ci_u32 %25, %20, %24
-  %28 = concat(%23, %26) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %value = global_load_b32_vaddr %28
-  return %value
+  %coordinates_view = resource<hal_binding> {extent = 512, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %captured = resource<hal_binding> {extent = 256, index = 2, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %30 = v_lshlrev_b32_src0_inline %capture_lane, 3
+  %coordinate = global_load_b32_saddr %30, %coordinates_view
+  %32 = v_mul_lo_u32 %pitch, %coordinate
+  %33 = v_lshlrev_b32_src0_inline %32, 2
+  %value = global_load_b32_saddr %33, %view
+  %35 = v_lshlrev_b32_src0_inline %capture_lane, 2
+  global_store_b32_saddr %35, %value, %captured
+  return
 }
 
 // ====
 
 // Uniform coordinates and varying pitches commute the other way.
-func.def @scalar_coordinate_varying_pitch(%input: buffer, %coordinate_input: index, %pitches: vector<2xi32>) -> (i32) {
+kernel.def @scalar_coordinate_varying_pitch() {
+  %launch_unit = index.constant 1 : index
+  %launch_width = index.constant 64 : index
+  kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
+} launch(%input: buffer, %coordinate_input: index, %pitches_buffer: buffer, %captured_buffer: buffer) {
+  %capture_base = index.constant 0 : offset
+  %capture_lane = kernel.workitem.id<x> : index
+  %pitches_view = buffer.view %pitches_buffer[%capture_base] : buffer -> view<64x2xi32>
+  %pitches = vector.load %pitches_view[%capture_lane, 0] : view<64x2xi32> -> vector<2xi32>
+  %captured = buffer.view %captured_buffer[%capture_base] : buffer -> view<64xi32>
   %coordinate = index.assume %coordinate_input [range(%coordinate_input, 0, 7)] : index
   %raw_pitch = vector.extract %pitches[0] : vector<2xi32> -> i32
   %pitch_input = index.cast %raw_pitch : i32 to index
@@ -44,24 +62,24 @@ func.def @scalar_coordinate_varying_pitch(%input: buffer, %coordinate_input: ind
   %layout = encoding.layout.strided [%pitch, 1] : encoding<layout>
   %view = buffer.view %global[%base] : buffer -> view<8x1xi32, %layout>
   %value = view.load %view[%coordinate, 0] : view<8x1xi32, %layout> -> i32
-  func.return %value : i32
+  view.store %value, %captured[%capture_lane] : i32, view<64xi32>
+  kernel.return
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @scalar_coordinate_varying_pitch(%coordinate: reg<amdgpu.vgpr>, %pitches: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>) asm {
+low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "coordinate_input"}, direct_arg_offsets = [8], direct_arg_parameter_indices = [1], direct_arg_sizes = [4], parameter_count = 4, resource_count = 3, resource_offsets = [0, 16, 24], resource_parameter_indices = [0, 2, 3], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @scalar_coordinate_varying_pitch(%coordinate: reg<amdgpu.sgpr>) asm {
+  %capture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %pitch = slice %pitches[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %18 = v_mul_lo_u32 %coordinate, %pitch
-  %19 = v_lshlrev_b32_src0_inline %18, 2
-  %20 = v_mov_b32 0
-  %21 = slice %view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %22 = slice %view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %23, %24 = v_add_co_u32 %21, %19
-  %25 = v_mov_b32_copy %22
-  %26, %27 = v_add_co_ci_u32 %25, %20, %24
-  %28 = concat(%23, %26) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %value = global_load_b32_vaddr %28
-  return %value
+  %pitches_view = resource<hal_binding> {extent = 512, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %captured = resource<hal_binding> {extent = 256, index = 2, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %30 = v_lshlrev_b32_src0_inline %capture_lane, 3
+  %pitch = global_load_b32_saddr %30, %pitches_view
+  %32 = v_mul_lo_u32 %coordinate, %pitch
+  %33 = v_lshlrev_b32_src0_inline %32, 2
+  %value = global_load_b32_saddr %33, %view
+  %35 = v_lshlrev_b32_src0_inline %capture_lane, 2
+  global_store_b32_saddr %35, %value, %captured
+  return
 }
 
 // ====

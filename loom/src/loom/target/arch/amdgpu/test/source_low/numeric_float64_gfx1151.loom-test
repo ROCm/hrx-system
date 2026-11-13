@@ -64,16 +64,32 @@ low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 4, direc
 // ====
 
 // A mixed VGPR/SGPR pair already consumes only one VOP3 scalar source.
-func.def @float64_mixed_add(%lhs: f64, %rhs_bits: i64) -> (f64) {
+kernel.def @float64_mixed_add() {
+  %launch_unit = index.constant 1 : index
+  %launch_width = index.constant 64 : index
+  kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
+} launch(%lhs_buffer: buffer, %rhs_bits: i64, %captured_buffer: buffer) {
+  %capture_base = index.constant 0 : offset
+  %capture_lane = kernel.workitem.id<x> : index
+  %lhs_view = buffer.view %lhs_buffer[%capture_base] : buffer -> view<64xf64>
+  %lhs = view.load %lhs_view[%capture_lane] : view<64xf64> -> f64
+  %captured = buffer.view %captured_buffer[%capture_base] : buffer -> view<64xf64>
   %rhs = scalar.bitcast %rhs_bits : i64 to f64
   %sum = scalar.addf %lhs, %rhs : f64
-  func.return %sum : f64
+  view.store %sum, %captured[%capture_lane] : f64, view<64xf64>
+  kernel.return
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @float64_mixed_add(%lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm {
+low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 2, direct_arg_count = 1, direct_arg_names = {arg0 = "rhs_bits"}, direct_arg_offsets = [8], direct_arg_parameter_indices = [1], direct_arg_sizes = [8], parameter_count = 3, resource_count = 2, resource_offsets = [0, 16], resource_parameter_indices = [0, 2], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @float64_mixed_add(%rhs: reg<amdgpu.sgpr x2>) asm {
+  %capture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %lhs_view = resource<hal_binding> {extent = 512, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %captured = resource<hal_binding> {extent = 512, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %16 = v_lshlrev_b32_src0_inline %capture_lane, 3
+  %lhs = global_load_b64_saddr %16, %lhs_view
   %sum = v_add_f64 %lhs, %rhs
-  return %sum
+  global_store_b64_saddr %16, %sum, %captured
+  return
 }
 
 // ====
