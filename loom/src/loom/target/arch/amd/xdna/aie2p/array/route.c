@@ -539,15 +539,21 @@ bool loom_aie2p_array_route_stream(loom_aie2p_array_route_builder_t* builder,
   // copies. These are switch hops, not additional DMA or core execution.
   uint16_t horizontal_row = shim_dma ? destination.row : source.row;
   if (source.column != destination.column &&
-      loom_xdna_array_tile_facts(builder->family, source)->kind ==
-          LOOM_XDNA_TILE_KIND_MEMORY) {
-    horizontal_row =
-        loom_xdna_array_tile_facts(builder->family, destination)->kind ==
-                LOOM_XDNA_TILE_KIND_MEMORY
-            ? loom_xdna_array_tile_kind_facts(builder->family,
-                                              LOOM_XDNA_TILE_KIND_COMPUTE)
-                  ->first_row
-            : destination.row;
+      source_kind == LOOM_XDNA_TILE_KIND_MEMORY) {
+    horizontal_row = destination_kind == LOOM_XDNA_TILE_KIND_MEMORY
+                         ? loom_xdna_array_tile_kind_facts(
+                               builder->family, LOOM_XDNA_TILE_KIND_COMPUTE)
+                               ->first_row
+                         : destination.row;
+  }
+  // Completion packets share a shim source even when they return to different
+  // cores. Keep their upward prefix in that column, leaving the receiving
+  // column's vertical lanes available for ingress payloads.
+  if (source.column != destination.column &&
+      source_kind == LOOM_XDNA_TILE_KIND_SHIM_NOC &&
+      source_port == LOOM_XDNA_STREAM_PORT_TILE_CONTROL &&
+      destination_kind == LOOM_XDNA_TILE_KIND_COMPUTE) {
+    horizontal_row = destination.row;
   }
   const uint8_t shim_channel =
       shim_dma

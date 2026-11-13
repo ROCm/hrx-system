@@ -178,6 +178,54 @@ TEST(Aie2pRouteTest, RelocatedEgressAvoidsSaturatedSourceColumn) {
   iree_arena_block_pool_deinitialize(&blocks);
 }
 
+TEST(Aie2pRouteTest, CompletionRepliesShareTheirSourceColumnPrefix) {
+  iree_arena_block_pool_t blocks;
+  iree_arena_block_pool_initialize(4096, iree_allocator_system(), &blocks);
+  iree_arena_allocator_t arena;
+  iree_arena_initialize(&blocks, &arena);
+  const auto* family = loom_xdna_npu2_array_family();
+  loom_aie2p_array_route_builder_t routing;
+  loom_aie2p_array_route_tree_t payloads[6] = {};
+  loom_aie2p_array_route_tree_t replies = {};
+  IREE_ASSERT_OK(
+      loom_aie2p_array_route_builder_initialize(family, 64, &arena, &routing));
+  for (uint16_t i = 0; i < IREE_ARRAYSIZE(payloads); ++i) {
+    ASSERT_TRUE(loom_aie2p_array_route_workers(
+        &routing, i, &payloads[i], {1, 1}, i,
+        {1, static_cast<uint16_t>(2 + i / 2)}, i % 2, false));
+  }
+  // The receiving column's SRAM-to-core links are full of payloads. Replies
+  // can still reach its cores by sharing an upward prefix in the shim column.
+  EXPECT_EQ(routing.link_channels.northbound[family->column_count + 1], 63u);
+  const uint16_t destinations[] = {3, 5, 4};
+  for (uint32_t i = 0; i < IREE_ARRAYSIZE(destinations); ++i) {
+    const size_t begin = routing.route_count;
+    ASSERT_TRUE(loom_aie2p_array_route_stream(
+        &routing, 6 + i, &replies, {0, 0}, LOOM_XDNA_STREAM_PORT_TILE_CONTROL,
+        0, {1, destinations[i]}, LOOM_XDNA_STREAM_PORT_CORE, 0, true));
+    ASSERT_EQ(routing.route_count - begin, destinations[i] + 2);
+    for (size_t row = 0; row < destinations[i]; ++row) {
+      const auto& edge = routing.routes[begin + row];
+      EXPECT_EQ(edge.coordinate.column, 0);
+      EXPECT_EQ(edge.coordinate.row, row);
+      EXPECT_EQ(edge.destination_port, LOOM_XDNA_STREAM_PORT_NORTH);
+      EXPECT_EQ(edge.destination_channel, 0);
+    }
+    const auto& turn = routing.routes[begin + destinations[i]];
+    EXPECT_EQ(turn.coordinate.row, destinations[i]);
+    EXPECT_EQ(turn.destination_port, LOOM_XDNA_STREAM_PORT_EAST);
+    const auto& end = routing.routes[routing.route_count - 1];
+    EXPECT_EQ(end.coordinate.column, 1);
+    EXPECT_EQ(end.coordinate.row, destinations[i]);
+    EXPECT_EQ(end.destination_port, LOOM_XDNA_STREAM_PORT_CORE);
+  }
+  for (size_t row = 0; row < 5; ++row) {
+    EXPECT_EQ(routing.link_channels.northbound[row * family->column_count], 1u);
+  }
+  iree_arena_deinitialize(&arena);
+  iree_arena_block_pool_deinitialize(&blocks);
+}
+
 TEST(Aie2pRouteTest, FailedSuffixDiscardsTentativePacketPrefix) {
   iree_arena_block_pool_t blocks;
   iree_arena_block_pool_initialize(4096, iree_allocator_system(), &blocks);
