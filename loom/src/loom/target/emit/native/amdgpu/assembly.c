@@ -3179,30 +3179,11 @@ static iree_status_t loom_amdgpu_append_branch_packet(
   return loom_amdgpu_append_original_branch_target(emit_state, context, dest);
 }
 
-static iree_status_t loom_amdgpu_verify_scc_condition_assignment(
-    const loom_native_assembly_packet_context_t* context) {
-  const loom_low_allocation_assignment_t* assignment =
-      loom_low_packet_operand_assignment(context->allocation, context->packet,
-                                         0);
-  if (assignment->descriptor_reg_class_id != LOOM_AMDGPU_REG_CLASS_ID_SCC) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "AMDGPU assembly conditional branch condition must "
-                            "be allocated to SCC");
-  }
-  if (assignment->location_base != 0 || assignment->location_count != 1) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "AMDGPU assembly SCC condition must use the single "
-                            "architectural SCC register");
-  }
-  return iree_ok_status();
-}
-
 static iree_status_t loom_amdgpu_append_cond_branch_packet(
     void* user_data, const loom_native_assembly_packet_context_t* context) {
   loom_amdgpu_assembly_emit_state_t* emit_state =
       (loom_amdgpu_assembly_emit_state_t*)user_data;
   const loom_op_t* op = context->packet->node->op;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_verify_scc_condition_assignment(context));
   const loom_block_t* true_dest = loom_low_cond_br_true_dest(op);
   const loom_block_t* false_dest = loom_low_cond_br_false_dest(op);
   const uint32_t current_block_index = context->packet->node->block_index;

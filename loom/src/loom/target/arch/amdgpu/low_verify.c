@@ -8,6 +8,7 @@
 
 #include "loom/codegen/low/diagnostics.h"
 #include "loom/codegen/low/packet.h"
+#include "loom/error/error_catalog.h"
 #include "loom/error/parameter.h"
 #include "loom/ops/low/ops.h"
 #include "loom/ops/low/storage.h"
@@ -295,6 +296,32 @@ static iree_status_t loom_amdgpu_low_verify_register_transfer(
   return iree_ok_status();
 }
 
+static iree_status_t loom_amdgpu_low_verify_condition(
+    loom_low_verify_context_t* context,
+    const loom_amdgpu_low_verify_state_t* state, const loom_op_t* op) {
+  if (!loom_low_cond_br_isa(op)) {
+    return iree_ok_status();
+  }
+  const loom_value_id_t condition = loom_low_cond_br_condition(op);
+  const loom_type_t type = loom_module_value_type(
+      loom_low_verify_context_module(context), condition);
+  if (loom_low_register_type_descriptor_set_stable_id(type) ==
+          state->target->descriptor_set->stable_id &&
+      loom_low_register_type_class_id(type) == LOOM_AMDGPU_REG_CLASS_ID_SCC &&
+      loom_low_register_type_unit_count(type) == 1) {
+    return iree_ok_status();
+  }
+  const loom_diagnostic_param_t params[] = {
+      loom_param_string(IREE_SV("condition")),
+      loom_param_with_field_ref(
+          loom_param_type(type),
+          loom_diagnostic_field_ref(LOOM_DIAGNOSTIC_FIELD_OPERAND, 0)),
+      loom_param_string(IREE_SV("a single amdgpu.scc register")),
+  };
+  return loom_low_verify_context_emit(context, op, LOOM_ERR_TYPE_003, params,
+                                      IREE_ARRAYSIZE(params));
+}
+
 static iree_status_t loom_amdgpu_low_verify_op(
     const loom_low_verify_provider_t* provider,
     loom_low_verify_context_t* context, void* provider_state,
@@ -309,6 +336,8 @@ static iree_status_t loom_amdgpu_low_verify_op(
       loom_amdgpu_low_verify_storage_address(context, state, packet->op));
   IREE_RETURN_IF_ERROR(
       loom_amdgpu_low_verify_register_transfer(context, state, packet->op));
+  IREE_RETURN_IF_ERROR(
+      loom_amdgpu_low_verify_condition(context, state, packet->op));
   if (packet->kind == LOOM_LOW_DESCRIPTOR_PACKET_NONE) {
     return iree_ok_status();
   }
