@@ -20,6 +20,7 @@ loom_check_test_suite(
         "allocation_ordinal_spills.loom-test",
         "allocation_partial_spills.loom-test",
         "allocation_storage_prefix.loom-test",
+        "allocation_unreachable.loom-test",
         "attr_projection.loom-test",
         "borrow_lifetime.loom-test",
         "cfg_tuple_decomposition.loom-test",

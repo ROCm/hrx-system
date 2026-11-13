@@ -108,6 +108,8 @@ static const char* loom_low_schedule_json_failure_kind(
       return "dependency_cycle";
     case LOOM_LOW_SCHEDULE_FAILURE_STATE_CLOBBER:
       return "state_clobber";
+    case LOOM_LOW_SCHEDULE_FAILURE_UNBOUND_CALL:
+      return "unbound_call";
     default:
       return "unknown";
   }

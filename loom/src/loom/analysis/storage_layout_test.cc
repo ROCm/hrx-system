@@ -7,7 +7,6 @@
 #include "loom/analysis/storage_layout.h"
 
 #include "iree/testing/gtest.h"
-#include "iree/testing/status_matchers.h"
 
 namespace loom {
 namespace {
@@ -15,12 +14,12 @@ namespace {
 TEST(StorageLayoutTest, AppendsAlignedRanges) {
   uint64_t byte_extent = 0;
   uint64_t byte_offset = UINT64_MAX;
-  IREE_ASSERT_OK(loom_storage_layout_append(
+  ASSERT_TRUE(loom_storage_layout_append(
       /*byte_length=*/12, /*byte_alignment=*/4, &byte_extent, &byte_offset));
   EXPECT_EQ(byte_offset, 0u);
   EXPECT_EQ(byte_extent, 12u);
 
-  IREE_ASSERT_OK(loom_storage_layout_append(
+  ASSERT_TRUE(loom_storage_layout_append(
       /*byte_length=*/4, /*byte_alignment=*/16, &byte_extent, &byte_offset));
   EXPECT_EQ(byte_offset, 16u);
   EXPECT_EQ(byte_extent, 20u);
@@ -29,10 +28,8 @@ TEST(StorageLayoutTest, AppendsAlignedRanges) {
 TEST(StorageLayoutTest, AlignmentOverflowPreservesExtent) {
   uint64_t byte_extent = UINT64_MAX - 2;
   uint64_t byte_offset = UINT64_MAX;
-  iree_status_t status = loom_storage_layout_append(
-      /*byte_length=*/1, /*byte_alignment=*/4, &byte_extent, &byte_offset);
-  EXPECT_EQ(iree_status_code(status), IREE_STATUS_OUT_OF_RANGE);
-  iree_status_free(status);
+  EXPECT_FALSE(loom_storage_layout_append(
+      /*byte_length=*/1, /*byte_alignment=*/4, &byte_extent, &byte_offset));
   EXPECT_EQ(byte_offset, 0u);
   EXPECT_EQ(byte_extent, UINT64_MAX - 2);
 }
@@ -40,10 +37,8 @@ TEST(StorageLayoutTest, AlignmentOverflowPreservesExtent) {
 TEST(StorageLayoutTest, ExtentOverflowPreservesExtent) {
   uint64_t byte_extent = UINT64_MAX - 1;
   uint64_t byte_offset = UINT64_MAX;
-  iree_status_t status = loom_storage_layout_append(
-      /*byte_length=*/2, /*byte_alignment=*/1, &byte_extent, &byte_offset);
-  EXPECT_EQ(iree_status_code(status), IREE_STATUS_OUT_OF_RANGE);
-  iree_status_free(status);
+  EXPECT_FALSE(loom_storage_layout_append(
+      /*byte_length=*/2, /*byte_alignment=*/1, &byte_extent, &byte_offset));
   EXPECT_EQ(byte_offset, 0u);
   EXPECT_EQ(byte_extent, UINT64_MAX - 1);
 }

@@ -103,11 +103,7 @@ void loom_x86_module_abi_bind(loom_x86_module_abi_t* module_abi,
 const loom_x86_function_abi_t* loom_x86_module_abi_lookup(
     const loom_x86_module_abi_t* module_abi, loom_symbol_ref_t function);
 
-// Validates that a retained call resolves inside the prepared native module.
-iree_status_t loom_x86_function_call_contract_validate(
-    void* user_data, loom_symbol_ref_t callee);
-
-// Returns the retained allocation contract for an admitted callee.
+// Returns the retained allocation contract, or NULL for an unbound callee.
 const loom_low_call_contract_t* loom_x86_function_call_contract(
     void* user_data, loom_symbol_ref_t callee);
 

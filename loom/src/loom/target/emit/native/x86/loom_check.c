@@ -168,7 +168,6 @@ static iree_status_t loom_x86_loom_check_emit_provider_execute(
       .resolved_target = function_abi != NULL ? &function_abi->target : NULL,
       .call_contracts =
           {
-              .validate = loom_x86_function_call_contract_validate,
               .query = loom_x86_function_call_contract,
               .query_common_clobbers = loom_x86_function_common_call_clobbers,
               .user_data = &module_abi,

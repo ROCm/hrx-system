@@ -252,10 +252,15 @@ static iree_status_t loom_spirv_program_build_function(
   const loom_target_facts_t* function_target_facts =
       loom_spirv_program_function_target_facts(build, function_op,
                                                selected_target_facts);
+  loom_diagnostic_export_scope_t diagnostic_scope = {
+      .export_name = loom_target_facts_export_name(function_target_facts),
+      .target = build->diagnostic_emitter,
+  };
   loom_low_resolved_target_t target = {0};
   IREE_RETURN_IF_ERROR(loom_low_resolve_function_target(
       build->module, &build->symbol_facts, function_op, function_target_facts,
-      build->descriptor_registry, build->diagnostic_emitter, &target));
+      build->descriptor_registry,
+      loom_diagnostic_export_scope_emitter(&diagnostic_scope), &target));
   if (target.descriptor_set == NULL) {
     *out_disposition = LOOM_SPIRV_PROGRAM_FUNCTION_REJECTED;
     return iree_ok_status();

@@ -23,11 +23,11 @@ extern "C" {
 // first aligned byte at or after |*inout_byte_extent|. On success the range
 // offset is returned in |out_byte_offset| when non-NULL and
 // |inout_byte_extent| advances past the range. Overflow leaves the input
-// extent unchanged.
-iree_status_t loom_storage_layout_append(uint64_t byte_length,
-                                         uint64_t byte_alignment,
-                                         uint64_t* inout_byte_extent,
-                                         uint64_t* out_byte_offset);
+// extent unchanged and returns false. The owning verifier or planner diagnoses
+// overflow with its source operation; arithmetic does not produce statuses.
+bool loom_storage_layout_append(uint64_t byte_length, uint64_t byte_alignment,
+                                uint64_t* inout_byte_extent,
+                                uint64_t* out_byte_offset);
 
 #ifdef __cplusplus
 }  // extern "C"

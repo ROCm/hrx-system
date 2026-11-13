@@ -1,0 +1,25 @@
+// RUN: emit vm-dis
+
+vm.target<core> @target
+
+low.func.decl target<vm.core>(@target) @missing()
+
+low.func.def public target<vm.core>(@target) @caller() asm {
+  // ERROR@+1: BACKEND/059 {export="caller", function_name="caller", callee_name="missing"}
+  low.func.call @missing() : ()
+  return
+}
+
+// ====
+
+// Source lowering preserves the callsite and export when a declaration has no
+// runtime import binding.
+vm.target<core> @target
+
+func.decl target(@target) @missing(%input: i32) -> (i32)
+
+func.def public target(@target) @source_caller(%input: i32) -> (i32) {
+  // ERROR@+1: BACKEND/059 {export="source_caller", callee_name="missing"}
+  %output = func.call @missing(%input) : (i32) -> (i32)
+  func.return %output : i32
+}

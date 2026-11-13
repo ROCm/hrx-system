@@ -492,8 +492,13 @@ static iree_status_t loom_kernel_launch_config_workgroup_storage_bytes(
     const loom_op_t* op = NULL;
     loom_block_for_each_op(block, op) {
       if (loom_low_storage_reserve_isa(op)) {
-        IREE_RETURN_IF_ERROR(
-            loom_low_storage_layout_accumulate_reservation(module, op, &sizes));
+        loom_low_storage_layout_reservation_t reservation;
+        loom_low_storage_layout_pack_reservation(
+            loom_type_storage_space(loom_module_value_type(
+                module, loom_low_storage_reserve_storage(op))),
+            (uint64_t)loom_low_storage_reserve_byte_length(op),
+            (uint64_t)loom_low_storage_reserve_byte_alignment(op), &sizes,
+            &reservation);
       }
     }
   }

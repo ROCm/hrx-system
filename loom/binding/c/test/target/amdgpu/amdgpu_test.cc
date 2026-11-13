@@ -389,6 +389,50 @@ ResultPtr EmitModule(loomc_target_environment_t* target_environment,
   return ResultPtr(result);
 }
 
+TEST(AmdgpuTargetTest, LateDiagnosticsRetainExportAndOptionalSourceContents) {
+  auto environment = CreateAmdgpuTargetEnvironment();
+  auto context = CreateAmdgpuContext(environment.get());
+  auto workspace = CreateWorkspace();
+  for (bool bytecode_input : {false, true}) {
+    SCOPED_TRACE(bytecode_input);
+    auto source =
+        CreateTextSource("exports.loom", R"(amdgpu.target<gfx90a> @target
+low.kernel.def target<amdgpu.cdna2.core>(@target) workgroup_size(64, 1, 1) @small() asm {
+  return
+}
+low.kernel.def target<amdgpu.cdna2.core>(@target) workgroup_size(64, 1, 1) @large() asm {
+  %storage = storage {byte_alignment = 16, byte_length = 160000} : low.storage<private>
+  return
+}
+)");
+    auto module =
+        DeserializeModule(context.get(), workspace.get(), source.get());
+    ASSERT_NE(module.get(), nullptr);
+    if (bytecode_input) {
+      auto bytecode =
+          SerializeModule(module.get(), LOOMC_SOURCE_FORMAT_BYTECODE);
+      module =
+          DeserializeModule(context.get(), workspace.get(), bytecode.get());
+    }
+    auto result = EmitModule(environment.get(), workspace.get(), module.get());
+    EXPECT_FALSE(loomc_result_succeeded(result.get()));
+    ASSERT_EQ(loomc_result_diagnostic_count(result.get()), 1u);
+    const auto* diagnostic = loomc_result_diagnostic_at(result.get(), 0);
+    EXPECT_EQ(ToString(diagnostic->code), "AMDGPU/053");
+    EXPECT_EQ(ToString(diagnostic->export_name), "large");
+    ASSERT_NE(diagnostic->range.source, nullptr);
+    EXPECT_EQ(ToString(loomc_source_identifier(diagnostic->range.source)),
+              "exports.loom");
+    EXPECT_EQ(diagnostic->range.start_line, 5u);
+    EXPECT_NE(diagnostic->range.start_column, 0u);
+    EXPECT_GE(diagnostic->range.end_line, diagnostic->range.start_line);
+    EXPECT_EQ(loomc_source_contents(diagnostic->range.source).data == nullptr,
+              bytecode_input);
+    EXPECT_NE(ToString(diagnostic->formatted_text).find("exports.loom:5:"),
+              std::string::npos);
+  }
+}
+
 void ExpectReplayEmission(const loomc_result_t* result, const char* selector,
                           const char* artifact_target_key,
                           const char* code_object_target,

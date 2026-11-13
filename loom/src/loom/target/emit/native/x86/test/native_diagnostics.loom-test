@@ -3,7 +3,7 @@ x86.target<scalar> @target
 
 low.func.def public target<x86.scalar.core>(@target) @small_address() -> (reg<x86.gpr32>) asm {
   %slot = storage {byte_alignment = 8, byte_length = 8} : low.storage<stack>
-  // ERROR@+1: X86/004 {constraint="one 64-bit GPR for storage addresses"}
+  // ERROR@+1: X86/004 {export="small_address", constraint="one 64-bit GPR for storage addresses"}
   %pointer = storage_address %slot : low.storage<stack> -> reg<x86.gpr32>
   return %pointer
 }
@@ -31,7 +31,7 @@ low.func.def public target<x86.scalar.core>(@target) @large_frame() -> (reg<x86.
 
 x86.target<scalar> @target
 
-// ERROR@+1: X86/004 {constraint="stack, scratch, or private storage; host functions have no workgroup storage ABI"}
+// ERROR@+1: X86/004 {export="workgroup_storage", constraint="stack, scratch, or private storage; host functions have no workgroup storage ABI"}
 low.func.def public target<x86.scalar.core>(@target) @workgroup_storage() -> (reg<x86.gpr64>) asm {
   %slot = storage {byte_alignment = 8, byte_length = 8} : low.storage<workgroup>
   %pointer = storage_address %slot : low.storage<workgroup> -> reg<x86.gpr64>

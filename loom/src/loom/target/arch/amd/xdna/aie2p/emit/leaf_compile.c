@@ -129,11 +129,20 @@ static iree_status_t loom_aie2p_leaf_build_frame(
 
 iree_status_t loom_aie2p_leaf_compile(
     loom_module_t* module, loom_op_t* function_op,
-    const loom_aie2p_leaf_compile_options_t* options,
+    const loom_aie2p_leaf_compile_options_t* requested_options,
     iree_arena_allocator_t* arena, bool* out_compiled,
     loom_aie2p_leaf_contribution_t* out_contribution) {
   *out_compiled = false;
   *out_contribution = (loom_aie2p_leaf_contribution_t){0};
+  loom_diagnostic_export_scope_t diagnostic_scope = {
+      .export_name = loom_target_facts_export_name(
+          requested_options->function_target_facts),
+      .target = requested_options->diagnostic_emitter,
+  };
+  loom_aie2p_leaf_compile_options_t scoped_options = *requested_options;
+  scoped_options.diagnostic_emitter =
+      loom_diagnostic_export_scope_emitter(&diagnostic_scope);
+  const loom_aie2p_leaf_compile_options_t* options = &scoped_options;
   // The contribution and optional report retain no frame scratch. Schedule,
   // allocation, and packet-planning storage is reusable by the next worker.
   iree_arena_allocator_t scratch_arena;

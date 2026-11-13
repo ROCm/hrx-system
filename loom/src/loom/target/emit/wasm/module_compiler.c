@@ -496,6 +496,11 @@ static iree_status_t loom_wasm_program_build_function(
     iree_diagnostic_emitter_t diagnostic_emitter, iree_arena_allocator_t* arena,
     bool* out_accepted) {
   *out_accepted = false;
+  loom_diagnostic_export_scope_t diagnostic_scope = {
+      .export_name = loom_target_facts_export_name(function_target_facts),
+      .target = diagnostic_emitter,
+  };
+  diagnostic_emitter = loom_diagnostic_export_scope_emitter(&diagnostic_scope);
   loom_low_allocation_table_t allocation = {0};
   bool allocation_accepted = false;
   IREE_RETURN_IF_ERROR(loom_wasm_program_build_function_allocation(

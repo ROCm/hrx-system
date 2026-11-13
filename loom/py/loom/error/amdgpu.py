@@ -1282,6 +1282,30 @@ ERR_AMDGPU_057 = ErrorDef(
     ),
 )
 
+# ERR_AMDGPU_058: structural transport has no value-preserving register move.
+ERR_AMDGPU_058 = ErrorDef(
+    domain=ErrorDomain.AMDGPU,
+    code=58,
+    severity=Severity.ERROR,
+    summary="AMDGPU register transfer is not value preserving.",
+    message=(
+        "AMDGPU operation '{op_name}' cannot transfer {source_type} to "
+        "{result_type}: the selected target has no value-preserving move "
+        "between these register classes"
+    ),
+    params=(
+        ErrorParam("op_name", ParamKind.STRING),
+        ErrorParam("source_type", ParamKind.TYPE),
+        ErrorParam("result_type", ParamKind.TYPE),
+    ),
+    fix_hint=(
+        "Keep varying values in vector registers. A lane selection requires "
+        "an explicit operation; structural copies cannot select a lane. "
+        "If source lowering produced this transfer, report the source program "
+        "and selected target as a compiler bug"
+    ),
+)
+
 ALL_AMDGPU_ERRORS = (
     ERR_AMDGPU_001,
     ERR_AMDGPU_006,
@@ -1336,4 +1360,5 @@ ALL_AMDGPU_ERRORS = (
     ERR_AMDGPU_055,
     ERR_AMDGPU_056,
     ERR_AMDGPU_057,
+    ERR_AMDGPU_058,
 )

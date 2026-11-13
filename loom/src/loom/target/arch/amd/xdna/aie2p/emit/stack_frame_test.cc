@@ -38,9 +38,9 @@ TEST(Aie2pStackFrameTest, PreservesSlotDepthsAcrossRepairAndRecompilation) {
       {LOOM_STORAGE_SPACE_STACK, 32, 32},
   };
   for (size_t i = 0; i < records.size(); ++i) {
-    IREE_ASSERT_OK(loom_low_storage_layout_pack_reservation(
+    loom_low_storage_layout_pack_reservation(
         shapes[i].space, shapes[i].size, shapes[i].alignment,
-        &source.space_sizes, &records[i].reservation));
+        &source.space_sizes, &records[i].reservation);
   }
   source.record_count = 2;
   IREE_ASSERT_OK(loom_aie2p_stack_layout_extend(&source, &layout));
@@ -106,9 +106,9 @@ TEST(Aie2pStackFrameTest, ReturnShadowStaysSeparateFromAppendedSpills) {
   };
   std::array<loom_low_storage_layout_record_t, 2> records = {};
   loom_low_storage_layout_t source = {.records = records.data()};
-  IREE_ASSERT_OK(loom_low_storage_layout_pack_reservation(
-      LOOM_STORAGE_SPACE_STACK, 4, 4, &source.space_sizes,
-      &records[0].reservation));
+  loom_low_storage_layout_pack_reservation(LOOM_STORAGE_SPACE_STACK, 4, 4,
+                                           &source.space_sizes,
+                                           &records[0].reservation);
   source.record_count = 1;
   IREE_ASSERT_OK(loom_aie2p_stack_layout_extend(&source, &layout));
   EXPECT_EQ(layout.depths[0], 8u);
@@ -117,9 +117,9 @@ TEST(Aie2pStackFrameTest, ReturnShadowStaysSeparateFromAppendedSpills) {
   IREE_ASSERT_OK(loom_aie2p_stack_layout_append(LOOM_STORAGE_SPACE_STACK, 64,
                                                 64, &layout, &depth));
   EXPECT_EQ(depth, 128u);
-  IREE_ASSERT_OK(loom_low_storage_layout_pack_reservation(
-      LOOM_STORAGE_SPACE_STACK, 64, 64, &source.space_sizes,
-      &records[1].reservation));
+  loom_low_storage_layout_pack_reservation(LOOM_STORAGE_SPACE_STACK, 64, 64,
+                                           &source.space_sizes,
+                                           &records[1].reservation);
   source.record_count = 2;
   bool accepted = false;
   loom_aie2p_stack_frame_t frame;

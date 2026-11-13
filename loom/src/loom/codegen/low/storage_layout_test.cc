@@ -186,9 +186,9 @@ TEST_F(LowStorageLayoutTest, PacksReservationShapeWithoutIR) {
       .scratch_bytes = 12,
   };
   loom_low_storage_layout_reservation_t reservation = {};
-  IREE_ASSERT_OK(loom_low_storage_layout_pack_reservation(
+  loom_low_storage_layout_pack_reservation(
       LOOM_STORAGE_SPACE_SCRATCH, /*byte_size=*/8, /*byte_alignment=*/16,
-      &sizes, &reservation));
+      &sizes, &reservation);
   EXPECT_EQ(reservation.space, LOOM_STORAGE_SPACE_SCRATCH);
   EXPECT_EQ(reservation.byte_offset, 16u);
   EXPECT_EQ(reservation.byte_size, 8u);

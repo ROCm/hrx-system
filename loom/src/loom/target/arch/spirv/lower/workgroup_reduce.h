@@ -25,8 +25,9 @@ iree_status_t loom_spirv_emit_workgroup_reduce(
 
 // Appends each implicit typed scratch reservation to the function's existing
 // storage extent, including alignment between differently typed payloads.
-iree_status_t loom_spirv_workgroup_reduce_measure_storage(
-    loom_low_lower_plan_t plan, uint64_t* inout_byte_extent);
+// Returns false when the aggregate exceeds the 64-bit address space.
+bool loom_spirv_workgroup_reduce_measure_storage(loom_low_lower_plan_t plan,
+                                                 uint64_t* inout_byte_extent);
 
 #ifdef __cplusplus
 }  // extern "C"

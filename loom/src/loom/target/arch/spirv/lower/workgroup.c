@@ -292,7 +292,7 @@ void loom_spirv_mark_workgroup_plan_storage_demands(
   IREE_ASSERT_UNREACHABLE("SPIR-V Workgroup plan selected unknown op kind");
 }
 
-static iree_status_t loom_spirv_workgroup_measure_storage(
+static bool loom_spirv_workgroup_measure_storage(
     loom_low_lower_context_t* context, uint64_t* out_byte_extent) {
   *out_byte_extent = 0;
   const iree_host_size_t storage_root_count =
@@ -300,9 +300,11 @@ static iree_status_t loom_spirv_workgroup_measure_storage(
   for (iree_host_size_t i = 0; i < storage_root_count; ++i) {
     const loom_spirv_workgroup_storage_root_requirement_t requirement =
         loom_spirv_workgroup_layout_storage_root_requirement(context, i);
-    IREE_RETURN_IF_ERROR(loom_storage_layout_append(
-        requirement.byte_length, requirement.byte_alignment, out_byte_extent,
-        /*out_byte_offset=*/NULL));
+    if (!loom_storage_layout_append(requirement.byte_length,
+                                    requirement.byte_alignment, out_byte_extent,
+                                    /*out_byte_offset=*/NULL)) {
+      return false;
+    }
   }
 
   const iree_host_size_t selected_plan_count =
@@ -314,8 +316,10 @@ static iree_status_t loom_spirv_workgroup_measure_storage(
       continue;
     }
     if (selected_plan.plan.id == LOOM_OP_KERNEL_WORKGROUP_REDUCE) {
-      IREE_RETURN_IF_ERROR(loom_spirv_workgroup_reduce_measure_storage(
-          selected_plan.plan, out_byte_extent));
+      if (!loom_spirv_workgroup_reduce_measure_storage(selected_plan.plan,
+                                                       out_byte_extent)) {
+        return false;
+      }
       continue;
     }
     if (selected_plan.plan.id != LOOM_SPIRV_WORKGROUP_PLAN_ALLOCA) {
@@ -328,19 +332,28 @@ static iree_status_t loom_spirv_workgroup_measure_storage(
     if (alloca_plan->packed) {
       continue;
     }
-    IREE_RETURN_IF_ERROR(loom_storage_layout_append(
-        (uint64_t)alloca_plan->byte_length,
-        (uint64_t)alloca_plan->byte_alignment, out_byte_extent,
-        /*out_byte_offset=*/NULL));
+    if (!loom_storage_layout_append((uint64_t)alloca_plan->byte_length,
+                                    (uint64_t)alloca_plan->byte_alignment,
+                                    out_byte_extent,
+                                    /*out_byte_offset=*/NULL)) {
+      return false;
+    }
   }
-  return iree_ok_status();
+  return true;
 }
 
 iree_status_t loom_spirv_plan_workgroup_entry_setup(
     loom_low_lower_context_t* context) {
   uint64_t byte_extent = 0;
-  IREE_RETURN_IF_ERROR(
-      loom_spirv_workgroup_measure_storage(context, &byte_extent));
+  if (!loom_spirv_workgroup_measure_storage(context, &byte_extent)) {
+    const loom_diagnostic_param_t params[] = {
+        loom_param_string(loom_low_lower_context_function_name(context)),
+        loom_param_string(IREE_SV("workgroup")),
+    };
+    return loom_low_lower_emit_error_ref(
+        context, loom_low_lower_context_source_function(context).op,
+        LOOM_ERR_TARGET_096_REF, params, IREE_ARRAYSIZE(params));
+  }
   const uint64_t byte_limit = loom_low_lower_context_bundle(context)
                                   ->snapshot->max_workgroup_storage_bytes;
   if (byte_limit != 0 && byte_extent > byte_limit) {

@@ -1313,6 +1313,26 @@ ERR_BACKEND_058 = ErrorDef(
     fix_hint="Select native spill transfers that preserve individual register parts",
 )
 
+ERR_BACKEND_059 = ErrorDef(
+    domain=ErrorDomain.BACKEND,
+    code=59,
+    severity=Severity.ERROR,
+    summary="A retained call has no executable binding.",
+    message=(
+        "call to '@{callee_name}' in '@{function_name}' has no executable "
+        "binding for target '{target_key}'"
+    ),
+    params=(
+        ErrorParam("function_name", ParamKind.STRING),
+        ErrorParam("callee_name", ParamKind.STRING),
+        ErrorParam("target_key", ParamKind.STRING),
+    ),
+    fix_hint=(
+        "Provide a compatible function definition or an import supported by "
+        "the selected target"
+    ),
+)
+
 ALL_BACKEND_ERRORS: tuple[ErrorDef, ...] = (
     ERR_BACKEND_003,
     ERR_BACKEND_005,
@@ -1363,4 +1383,5 @@ ALL_BACKEND_ERRORS: tuple[ErrorDef, ...] = (
     ERR_BACKEND_056,
     ERR_BACKEND_057,
     ERR_BACKEND_058,
+    ERR_BACKEND_059,
 )

@@ -1,0 +1,35 @@
+// RUN: verify
+
+// Structural transfers preserve every lane. None can implicitly select a
+// vector lane to satisfy a scalar destination, including subrange transfers.
+amdgpu.target<gfx90a> @target
+
+low.func.def public target<amdgpu.cdna2.core>(@target) @transfers(%vector: reg<amdgpu.vgpr>, %pair: reg<amdgpu.vgpr x2>) asm {
+  // ERROR@+1: AMDGPU/058 {export="transfers", op_name="low.copy", source_type="reg<amdgpu.vgpr>", result_type="reg<amdgpu.sgpr>"}
+  %copy = copy %vector : reg<amdgpu.vgpr> -> reg<amdgpu.sgpr>
+  // ERROR@+1: AMDGPU/058 {export="transfers", op_name="low.slice", source_type="reg<amdgpu.vgpr x2>", result_type="reg<amdgpu.sgpr>"}
+  %slice = slice %pair[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.sgpr>
+  return
+}
+
+// ====
+
+// Accumulators also hold per-lane values; a scalar result requires an explicit
+// lane operation. The selected descriptor set owns accumulator availability.
+amdgpu.target<gfx942> @target
+
+low.func.def public target<amdgpu.cdna3.core>(@target) @accumulator(%value: reg<amdgpu.agpr>) asm {
+  // ERROR@+1: AMDGPU/058 {export="accumulator", source_type="reg<amdgpu.agpr>", result_type="reg<amdgpu.sgpr>"}
+  %scalar = copy %value : reg<amdgpu.agpr> -> reg<amdgpu.sgpr>
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+
+low.func.def public target<amdgpu.rdna3.core>(@target) @vector_to_scalar(%value: reg<amdgpu.vgpr>) asm {
+  // ERROR@+1: AMDGPU/058 {export="vector_to_scalar", source_type="reg<amdgpu.vgpr>", result_type="reg<amdgpu.sgpr>"}
+  %scalar = copy %value : reg<amdgpu.vgpr> -> reg<amdgpu.sgpr>
+  return
+}

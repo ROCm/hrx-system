@@ -70,6 +70,13 @@ iree_status_t loom_amdgpu_function_compile(
     loom_amdgpu_function_compilation_t* out_compilation) {
   *out_compiled = false;
   *out_compilation = (loom_amdgpu_function_compilation_t){0};
+  loom_diagnostic_export_scope_t diagnostic_scope = {
+      .export_name =
+          loom_target_facts_export_name(options->resolved_target->target_facts),
+      .target = options->emitter,
+  };
+  const iree_diagnostic_emitter_t emitter =
+      loom_diagnostic_export_scope_emitter(&diagnostic_scope);
 
   loom_low_schedule_pair_affinity_list_t schedule_pair_affinities =
       loom_low_schedule_pair_affinity_list_empty();
@@ -115,7 +122,7 @@ iree_status_t loom_amdgpu_function_compile(
       .allocation_reserved_range_count =
           options->allocation_reserved_range_count,
       .storage_lease_provider = &storage_lease_provider,
-      .emitter = options->emitter,
+      .emitter = emitter,
       .statistics = options->report != NULL
                         ? &out_compilation->planning_statistics
                         : NULL,
@@ -136,7 +143,7 @@ iree_status_t loom_amdgpu_function_compile(
                       LOOM_TARGET_COMPILE_REPORT_DETAIL_SPILL_ROWS),
               .plan_traffic = loom_amdgpu_plan_spill_materialization_traffic,
               .plan_traffic_user_data = &spill_context.segment_prefix,
-              .emitter = options->emitter,
+              .emitter = emitter,
           },
       .lower_spill_traffic = loom_amdgpu_function_compile_lower_spill_traffic,
       .lower_spill_traffic_user_data = &spill_context,
@@ -156,7 +163,7 @@ iree_status_t loom_amdgpu_function_compile(
       .callable = options->callable,
   };
   IREE_RETURN_IF_ERROR(loom_amdgpu_function_plan_build(
-      &out_compilation->frame, options->emitter, &packet_options,
+      &out_compilation->frame, emitter, &packet_options,
       options->storage_segment_prefix, arena, &plan_accepted,
       &out_compilation->plan));
   if (!plan_accepted) {

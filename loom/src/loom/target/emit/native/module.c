@@ -305,12 +305,21 @@ IREE_ATTRIBUTE_NOINLINE static iree_status_t loom_native_module_report_function(
 }
 
 static iree_status_t loom_native_module_function(
-    const loom_target_emit_request_t* request, const loom_target_entry_t* entry,
+    const loom_target_emit_request_t* module_request,
+    const loom_target_entry_t* entry,
     const loom_native_module_elf_target_t* target, const void* target_context,
     const uint32_t* symbol_indices, iree_string_view_t symbol_name,
     iree_host_size_t section_index, loom_native_module_fixups_t* fixups,
     bool* out_accepted, loom_native_section_contribution_t* out_section) {
   *out_section = (loom_native_section_contribution_t){0};
+  loom_diagnostic_export_scope_t diagnostic_scope = {
+      .export_name = loom_target_facts_export_name(entry->target_facts),
+      .target = module_request->diagnostic_emitter,
+  };
+  loom_target_emit_request_t entry_request = *module_request;
+  entry_request.diagnostic_emitter =
+      loom_diagnostic_export_scope_emitter(&diagnostic_scope);
+  const loom_target_emit_request_t* request = &entry_request;
   iree_io_stream_t* stream = NULL;
   IREE_RETURN_IF_ERROR(iree_io_vec_stream_create(
       IREE_IO_STREAM_MODE_READABLE | IREE_IO_STREAM_MODE_WRITABLE |

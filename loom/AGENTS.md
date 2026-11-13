@@ -265,8 +265,11 @@ merely because their declarations live in non-static headers.
 Internal transforms and fact queries expose that ownership in their signatures:
 an infallible query returns its value, and an infallible transform returns
 `void`. An `iree_status_t` below the public boundary identifies a possible
-failure owned by that operation, such as arena allocation, output growth,
-user-dependent target support, or a representational format limit. Rechecking
+infrastructure failure owned by that operation, such as arena allocation or
+output IO. User-dependent target support and representational format limits
+are structured diagnostics at their owning boundary, never status failures.
+Converting a rejection status into a diagnostic later loses the operation and
+export context and does not satisfy this contract. Rechecking
 producer-owned table bounds, assignment presence, op shape, or cross-stage
 identity as recoverable statuses both adds hot-path work and disguises compiler
 bugs as runtime conditions.

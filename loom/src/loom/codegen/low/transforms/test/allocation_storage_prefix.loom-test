@@ -146,3 +146,23 @@ low.func.def target<test.low.core>(@target) @entry_traffic(%a: reg<test.i32>, %b
   %out = test.add.i32 %sum, %13
   return %out
 }
+
+// ====
+
+// Authored reservations fit u64; appending a spill must diagnose overflow
+// before the next frame consumes the extended storage layout.
+// RUN: with-low-asm pass low-materialize-allocation{budgets=test.i32=3}
+
+test.target<low_core> @target
+
+// ERROR@+1: TARGET/096 {function_name="spill_storage_overflow", storage_space="private"}
+low.func.def target<test.low.core>(@target) @spill_storage_overflow(%a: reg<test.i32>, %b: reg<test.i32>, %c: reg<test.i32>) -> (reg<test.i32>) asm {
+  %first = storage {byte_alignment = 1, byte_length = 9223372036854775807} : low.storage<private>
+  %second = storage {byte_alignment = 1, byte_length = 9223372036854775807} : low.storage<private>
+  %twice = test.add.i32 %b, %b
+  %ab = test.add.i32 %a, %twice
+  %bc = test.add.i32 %twice, %c
+  %sum = test.add.i32 %ab, %bc
+  %out = test.add.i32 %sum, %a
+  return %out
+}

@@ -23,6 +23,7 @@
 #include "loom/ops/global/ops.h"
 #include "loom/ops/low/ops.h"
 #include "loom/ops/low/schedule_scope.h"
+#include "loom/ops/type_builders.h"
 #include "loom/target/function_version.h"
 #include "loom/target/registers.h"
 #include "loom/util/walk.h"
@@ -2172,9 +2173,20 @@ static iree_status_t loom_low_verify_walk_op(void* user_data, loom_op_t* op,
   }
   if (loom_low_storage_reserve_isa(op) && op->parent_block != NULL &&
       op->parent_block->parent_region == function_state->body) {
-    IREE_RETURN_IF_ERROR(loom_low_storage_layout_accumulate_reservation(
-        function_state->state->module, op,
-        &function_state->storage_space_sizes));
+    if (!loom_low_storage_layout_accumulate_reservation(
+            function_state->state->module, op,
+            &function_state->storage_space_sizes)) {
+      const loom_storage_space_t space = loom_type_storage_space(
+          loom_module_value_type(function_state->state->module,
+                                 loom_low_storage_reserve_storage(op)));
+      const loom_diagnostic_param_t params[] = {
+          loom_param_string(function_state->function_name),
+          loom_param_string(loom_low_storage_type_space_name(space)),
+      };
+      return loom_low_verify_emit(function_state->state, op,
+                                  LOOM_ERR_TARGET_096, params,
+                                  IREE_ARRAYSIZE(params), NULL, 0);
+    }
   }
 
   loom_low_descriptor_packet_t packet = {0};
@@ -2285,19 +2297,21 @@ static iree_status_t loom_low_verify_initialize_block_arg_masks(
   return iree_ok_status();
 }
 
-static iree_status_t loom_low_verify_function(loom_low_verify_state_t* state,
-                                              const loom_op_t* low_func_op) {
+static iree_status_t loom_low_verify_function_impl(
+    loom_low_verify_state_t* state, const loom_op_t* low_func_op,
+    const loom_target_function_version_t* version,
+    loom_diagnostic_export_scope_t* diagnostic_scope) {
   iree_diagnostic_emitter_t counting_emitter = {
       .fn = loom_low_verify_counting_emitter,
       .user_data = state,
   };
-  const loom_target_function_version_t* version =
-      loom_low_verify_function_version(state, low_func_op);
   loom_low_resolved_target_t target = {0};
   IREE_RETURN_IF_ERROR(loom_low_resolve_function_target(
       state->module, &state->symbol_facts, low_func_op,
       version != NULL ? version->function_target_facts : NULL, state->registry,
       counting_emitter, &target));
+  diagnostic_scope->export_name =
+      loom_target_facts_export_name(target.target_facts);
   loom_region_t* body = loom_low_verify_function_body(low_func_op);
   if (target.descriptor_set == NULL || loom_low_verify_should_stop(state)) {
     return iree_ok_status();
@@ -2370,6 +2384,22 @@ static iree_status_t loom_low_verify_function(loom_low_verify_state_t* state,
   if (iree_status_is_ok(status)) {
     status = loom_low_verify_end_function_providers(&function_state);
   }
+  return status;
+}
+
+static iree_status_t loom_low_verify_function(loom_low_verify_state_t* state,
+                                              const loom_op_t* low_func_op) {
+  const loom_target_function_version_t* version =
+      loom_low_verify_function_version(state, low_func_op);
+  loom_diagnostic_export_scope_t diagnostic_scope = {
+      .export_name = loom_target_facts_export_name(
+          version != NULL ? version->function_target_facts : NULL),
+      .target = state->emitter,
+  };
+  state->emitter = loom_diagnostic_export_scope_emitter(&diagnostic_scope);
+  const iree_status_t status = loom_low_verify_function_impl(
+      state, low_func_op, version, &diagnostic_scope);
+  state->emitter = diagnostic_scope.target;
   return status;
 }
 

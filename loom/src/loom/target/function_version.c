@@ -15,11 +15,7 @@ static iree_string_view_t loom_target_function_version_export_name(
     const loom_function_version_t* base_version) {
   const loom_target_function_version_t* version =
       (const loom_target_function_version_t*)base_version;
-  const loom_target_bundle_t* bundle =
-      loom_target_facts_bundle(version->function_target_facts);
-  return bundle != NULL && bundle->export_plan != NULL
-             ? bundle->export_plan->name
-             : iree_string_view_empty();
+  return loom_target_facts_export_name(version->function_target_facts);
 }
 
 const loom_function_version_type_t loom_target_function_version_type = {

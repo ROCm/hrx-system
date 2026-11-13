@@ -311,19 +311,18 @@ iree_status_t loom_spirv_select_workgroup_reduce(
   return status;
 }
 
-iree_status_t loom_spirv_workgroup_reduce_measure_storage(
+bool loom_spirv_workgroup_reduce_measure_storage(
     loom_low_lower_plan_t selected_plan, uint64_t* inout_byte_extent) {
   const loom_spirv_workgroup_reduce_plan_t* plan = selected_plan.target_data;
-  iree_status_t status = iree_ok_status();
-  for (uint16_t i = 0; i < plan->payload_count && iree_status_is_ok(status);
-       ++i) {
+  bool fits = true;
+  for (uint16_t i = 0; i < plan->payload_count && fits; ++i) {
     const loom_spirv_workgroup_payload_t* payload = &plan->payloads[i];
-    status = loom_storage_layout_append(
+    fits = loom_storage_layout_append(
         ((uint64_t)plan->capacity + 1) * payload->carrier->byte_count *
             payload->component_count,
         payload->carrier->byte_count, inout_byte_extent, NULL);
   }
-  return status;
+  return fits;
 }
 
 static iree_status_t loom_spirv_workgroup_emit_attributes(

@@ -41,13 +41,6 @@ loom_amdgpu_native_preflight_emit_unsupported_storage_space(
     loom_amdgpu_native_preflight_t* preflight) {
   const iree_string_view_t storage_space =
       loom_low_storage_type_space_name(reservation->space);
-  if (!options || options->emitter.fn == NULL) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU native emission cannot emit storage space '%.*s'",
-        (int)storage_space.size, storage_space.data);
-  }
-
   iree_string_view_t supported_storage_space_names[LOOM_STORAGE_SPACE_COUNT_];
   const iree_host_size_t supported_storage_space_count =
       loom_low_storage_space_set_names(
@@ -73,7 +66,9 @@ loom_amdgpu_native_preflight_emit_unsupported_storage_space(
       .params = params,
       .param_count = IREE_ARRAYSIZE(params),
   };
-  IREE_RETURN_IF_ERROR(iree_diagnostic_emit(options->emitter, &emission));
+  IREE_RETURN_IF_ERROR(iree_diagnostic_emit(
+      options != NULL ? options->emitter : (iree_diagnostic_emitter_t){0},
+      &emission));
   ++preflight->error_count;
   return iree_ok_status();
 }
@@ -124,13 +119,6 @@ loom_amdgpu_native_preflight_emit_unsupported_register_metadata(
   const iree_string_view_t register_class =
       loom_amdgpu_native_preflight_assignment_register_class_name(allocation,
                                                                   assignment);
-  if (!options || options->emitter.fn == NULL) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU native emission register class '%.*s' requires %.*s metadata",
-        (int)register_class.size, register_class.data,
-        (int)metadata_contract.size, metadata_contract.data);
-  }
   loom_diagnostic_param_t params[] = {
       loom_param_string(loom_low_diagnostic_target_key(&allocation->target)),
       loom_param_string(loom_low_diagnostic_export_name(&allocation->target)),
@@ -152,7 +140,9 @@ loom_amdgpu_native_preflight_emit_unsupported_register_metadata(
       .params = params,
       .param_count = IREE_ARRAYSIZE(params),
   };
-  IREE_RETURN_IF_ERROR(iree_diagnostic_emit(options->emitter, &emission));
+  IREE_RETURN_IF_ERROR(iree_diagnostic_emit(
+      options != NULL ? options->emitter : (iree_diagnostic_emitter_t){0},
+      &emission));
   ++preflight->error_count;
   return iree_ok_status();
 }

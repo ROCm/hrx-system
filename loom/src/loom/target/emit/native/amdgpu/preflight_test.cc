@@ -316,6 +316,16 @@ TEST_F(AmdgpuNativePreflightTest, StackStorageUnsupportedEmitsDiagnostic) {
   ASSERT_EQ(emission.string_list_params.size(), 1u);
   EXPECT_THAT(emission.string_list_params[0],
               ::testing::ElementsAre("scratch", "private", "workgroup"));
+
+  // Rejection is independent of whether a caller collects its explanation.
+  options.emitter = {};
+  const loom_amdgpu_native_preflight_options_t* optional_options[] = {&options,
+                                                                      nullptr};
+  for (const auto* option : optional_options) {
+    IREE_ASSERT_OK(loom_amdgpu_native_preflight_analyze(&schedule, &allocation,
+                                                        option, &preflight));
+    EXPECT_EQ(preflight.error_count, 1u);
+  }
 }
 
 }  // namespace

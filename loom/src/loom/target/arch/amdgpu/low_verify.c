@@ -10,6 +10,7 @@
 #include "loom/codegen/low/packet.h"
 #include "loom/error/parameter.h"
 #include "loom/ops/low/ops.h"
+#include "loom/ops/low/storage.h"
 #include "loom/target/arch/amdgpu/encoding/encoding.h"
 #include "loom/target/arch/amdgpu/error_catalog.h"
 #include "loom/target/arch/amdgpu/facts.h"
@@ -249,6 +250,51 @@ static iree_status_t loom_amdgpu_low_verify_storage_address(
                                       IREE_ARRAYSIZE(params));
 }
 
+static iree_status_t loom_amdgpu_low_verify_register_transfer(
+    loom_low_verify_context_t* context,
+    const loom_amdgpu_low_verify_state_t* state, const loom_op_t* op) {
+  // Moves and concatenations already require one register class. Copies and
+  // slices permit cross-class transfers and need the target's move contract.
+  const loom_low_register_transfer_kind_t kind =
+      loom_low_register_transfer_kind(op);
+  if (kind != LOOM_LOW_REGISTER_TRANSFER_COPY &&
+      kind != LOOM_LOW_REGISTER_TRANSFER_SLICE) {
+    return iree_ok_status();
+  }
+  const loom_module_t* module = loom_low_verify_context_module(context);
+  const loom_type_t result_type =
+      loom_module_value_type(module, loom_op_const_results(op)[0]);
+  const uint16_t result_class = loom_low_register_type_class_id(result_type);
+  for (uint16_t i = 0; i < op->operand_count; ++i) {
+    const loom_type_t source_type =
+        loom_module_value_type(module, loom_op_const_operands(op)[i]);
+    const uint16_t source_class = loom_low_register_type_class_id(source_type);
+    if (source_class == result_class ||
+        (source_class == LOOM_AMDGPU_REG_CLASS_ID_SGPR &&
+         result_class == LOOM_AMDGPU_REG_CLASS_ID_VGPR) ||
+        loom_amdgpu_accumulator_copy_ref(state->target->descriptor_set,
+                                         result_class, source_class) !=
+            LOOM_AMDGPU_DESCRIPTOR_REF_NONE) {
+      continue;
+    }
+    const loom_diagnostic_param_t params[] = {
+        loom_param_string(loom_low_diagnostic_operation_name(module, op)),
+        loom_param_with_field_ref(
+            loom_param_type(source_type),
+            loom_diagnostic_field_ref(LOOM_DIAGNOSTIC_FIELD_OPERAND, i)),
+        loom_param_with_field_ref(
+            loom_param_type(result_type),
+            loom_diagnostic_field_ref(LOOM_DIAGNOSTIC_FIELD_RESULT, 0)),
+    };
+    IREE_RETURN_IF_ERROR(loom_low_verify_context_emit(
+        context, op, LOOM_ERR_AMDGPU_058, params, IREE_ARRAYSIZE(params)));
+    if (loom_low_verify_context_should_stop(context)) {
+      break;
+    }
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_amdgpu_low_verify_op(
     const loom_low_verify_provider_t* provider,
     loom_low_verify_context_t* context, void* provider_state,
@@ -261,6 +307,8 @@ static iree_status_t loom_amdgpu_low_verify_op(
   }
   IREE_RETURN_IF_ERROR(
       loom_amdgpu_low_verify_storage_address(context, state, packet->op));
+  IREE_RETURN_IF_ERROR(
+      loom_amdgpu_low_verify_register_transfer(context, state, packet->op));
   if (packet->kind == LOOM_LOW_DESCRIPTOR_PACKET_NONE) {
     return iree_ok_status();
   }
