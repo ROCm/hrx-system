@@ -57,6 +57,30 @@ iree_status_t loom_pipeline_entry_scope_clone(
     iree_arena_allocator_t* arena,
     const loom_pipeline_entry_scope_t** out_scope);
 
+// Retained direct-call uses of one entry in a complete acyclic closure. The
+// caller supplies callee-before-caller order from its admitted call graph;
+// this projection never discovers edges or orders functions itself.
+typedef struct loom_pipeline_entry_calls_t {
+  // Construction bound to a phase entry, or IREE_HOST_SIZE_MAX for an ordinary
+  // helper that inherits the common enclosing owner of all its callers.
+  iree_host_size_t owner;
+  // Direct callee indices in the same callee-before-caller inventory.
+  const iree_host_size_t* callees;
+  // Number of direct edges in callees.
+  iree_host_size_t callee_count;
+} loom_pipeline_entry_calls_t;
+
+// Projects construction lifetimes onto a complete entry closure. The final
+// entry is a bound root and reaches every preceding entry. Bound phase entries
+// keep their source lifetimes; ordinary helpers inherit all caller uses,
+// including transitive shared uses. The caller owns entry_count output slots.
+// Allocation-free; each direct edge is visited once, with indexed common-owner
+// joins independent of source nesting depth.
+void loom_pipeline_entry_owners_project(
+    const loom_pipeline_lifetimes_t* lifetimes,
+    const loom_pipeline_entry_calls_t* entries, iree_host_size_t entry_count,
+    iree_host_size_t* out_owners);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif

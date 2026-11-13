@@ -243,6 +243,7 @@ loom_cc_library(
     deps = [
         "//loom/src/loom/analysis:scc",
         "//loom/src/loom/analysis:symbol_facts",
+        "//loom/src/loom/analysis/pipeline:entries",
         "//loom/src/loom/codegen/low:diagnostics",
         "//loom/src/loom/codegen/low:function_requirements",
         "//loom/src/loom/codegen/low:loop_execution",
@@ -288,6 +289,8 @@ loom_cc_test(
     srcs = ["program_source_test.cc"],
     deps = [
         ":program_source_test_util",
+        "//loom/src/loom/analysis/pipeline:entries",
+        "//loom/src/loom/analysis/pipeline:invocations",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",

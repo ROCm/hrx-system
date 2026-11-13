@@ -8,6 +8,8 @@
 
 #include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
+#include "iree/testing/status_matchers.h"
+#include "loom/analysis/pipeline/entries.h"
 #include "loom/target/arch/amd/xdna/aie2p/program_source_test_util.h"
 
 namespace loom::aie2p::testing {
@@ -82,6 +84,111 @@ TEST_F(ProgramSourceTest, IndependentRootsOwnCompleteClosures) {
   EXPECT_EQ(Helpers(source, 0), (std::vector<loom_symbol_id_t>{3, 2}));
   EXPECT_EQ(Helpers(source, 1), (std::vector<loom_symbol_id_t>{3, 2}));
   EXPECT_EQ(source.RetainedHelperCount(), 4u);
+}
+
+TEST_F(ProgramSourceTest, RetainedPhaseOwnersFollowTheAdmittedHelperOrder) {
+  constexpr auto none = IREE_HOST_SIZE_MAX;
+  const loom_pipeline_lifetime_t nodes[] = {
+      {LOOM_PIPELINE_LIFETIME_CONCURRENT, 0, none, 1, none},
+      {LOOM_PIPELINE_LIFETIME_OWNER, 0, 0, none, 2},
+      {LOOM_PIPELINE_LIFETIME_SERIAL, 0, 0, 3, none},
+      {LOOM_PIPELINE_LIFETIME_CONCURRENT, 1, 2, 5, 4},
+      {LOOM_PIPELINE_LIFETIME_CONCURRENT, 2, 2, 6, none},
+      {LOOM_PIPELINE_LIFETIME_OWNER, 1, 3, none, none},
+      {LOOM_PIPELINE_LIFETIME_OWNER, 2, 4, none, none},
+  };
+  const iree_host_size_t owners[] = {1, 5, 6};
+  loom_pipeline_entry_scope_t scope = {
+      .lifetimes =
+          {
+              .nodes = nodes,
+              .count = IREE_ARRAYSIZE(nodes),
+              .owners = owners,
+              .has_serial = true,
+          },
+      .owner_count = IREE_ARRAYSIZE(owners),
+  };
+  IREE_ASSERT_OK(loom_pipeline_lifetimes_index(&arena_, &scope.lifetimes));
+  const loom_pipeline_entry_binding_t bindings[] = {
+      {
+          .scope = &scope,
+          .owner = 0,
+          .engine = 7,
+          .role = LOOM_PIPELINE_ENTRY_ROOT,
+      },
+      {
+          .scope = &scope,
+          .owner = 1,
+          .engine = 7,
+          .role = LOOM_PIPELINE_ENTRY_COMPLETE,
+      },
+      {
+          .scope = &scope,
+          .owner = 2,
+          .engine = 7,
+          .role = LOOM_PIPELINE_ENTRY_COMPLETE,
+      },
+  };
+  // A/B share H -> G, while a third helper belongs only to A.
+  SourceInventory source({{1, 2}, {3, 5}, {3}, {4}, {}, {}});
+  source.Reset(&arena_);
+  for (size_t i = 0; i < IREE_ARRAYSIZE(bindings); ++i) {
+    source.BindPipeline(i, &bindings[i]);
+  }
+  source.Admit(0);
+  const auto& root = source.function(0);
+  ASSERT_NE(root.entry_owners, nullptr);
+  const iree_host_size_t expected[] = {0, 1, 2, 0, 0, 1};
+  for (size_t i = 0; i < root.helpers.count; ++i) {
+    EXPECT_EQ(root.entry_owners[i], expected[root.helpers.values[i].symbol_id]);
+  }
+  EXPECT_EQ(root.entry_owners[root.helpers.count], 0u);
+
+  // The same helper graph under A alone has a different ownership projection.
+  // Admitting that root must not overwrite the complete pipeline's result.
+  const size_t used = arena_.used_allocation_size;
+  source.Admit(0);
+  EXPECT_EQ(arena_.used_allocation_size, used);
+  source.Admit(1);
+  const auto& phase = source.function(1);
+  ASSERT_NE(phase.entry_owners, nullptr);
+  for (size_t i = 0; i <= phase.helpers.count; ++i) {
+    EXPECT_EQ(phase.entry_owners[i], 1u);
+  }
+  for (size_t i = 0; i < root.helpers.count; ++i) {
+    EXPECT_EQ(root.entry_owners[i], expected[root.helpers.values[i].symbol_id]);
+  }
+}
+
+TEST_F(ProgramSourceTest, CallFreePhaseBorrowsItsImmutableOwner) {
+  constexpr auto none = IREE_HOST_SIZE_MAX;
+  const loom_pipeline_lifetime_t nodes[] = {
+      {LOOM_PIPELINE_LIFETIME_CONCURRENT, 0, none, 1, none},
+      {LOOM_PIPELINE_LIFETIME_OWNER, 0, 0, none, none},
+  };
+  const iree_host_size_t owner = 1;
+  loom_pipeline_entry_scope_t scope = {
+      .lifetimes =
+          {
+              .nodes = nodes,
+              .count = IREE_ARRAYSIZE(nodes),
+              .owners = &owner,
+          },
+      .owner_count = 1,
+  };
+  IREE_ASSERT_OK(loom_pipeline_lifetimes_index(&arena_, &scope.lifetimes));
+  const loom_pipeline_entry_binding_t binding = {
+      .scope = &scope,
+      .owner = 0,
+      .role = LOOM_PIPELINE_ENTRY_COMPLETE,
+  };
+  SourceInventory source({{}});
+  source.Reset(&arena_);
+  source.BindPipeline(0, &binding);
+  const size_t used = arena_.used_allocation_size;
+  source.Admit(0);
+  EXPECT_EQ(source.function(0).entry_owners, &binding.owner);
+  EXPECT_EQ(arena_.used_allocation_size, used);
 }
 
 }  // namespace

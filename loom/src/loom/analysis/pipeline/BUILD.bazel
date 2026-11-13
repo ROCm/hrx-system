@@ -38,6 +38,18 @@ loom_cc_library(
     ],
 )
 
+loom_cc_test(
+    name = "entries_test",
+    srcs = ["entries_test.cc"],
+    deps = [
+        ":entries",
+        ":invocations",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 loom_cc_library(
     name = "schedule",
     srcs = ["schedule.c"],

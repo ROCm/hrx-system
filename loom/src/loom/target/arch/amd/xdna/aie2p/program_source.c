@@ -8,6 +8,7 @@
 
 #include <string.h>
 
+#include "loom/analysis/pipeline/entries.h"
 #include "loom/analysis/scc.h"
 #include "loom/codegen/low/diagnostics.h"
 #include "loom/codegen/low/read_only_data.h"
@@ -204,6 +205,59 @@ static iree_status_t loom_aie2p_program_source_append_closure(
   return status;
 }
 
+static iree_status_t loom_aie2p_program_source_project_owners(
+    loom_aie2p_program_source_table_t* table,
+    loom_aie2p_program_source_function_t* entry,
+    loom_symbol_ref_array_t helpers, iree_arena_allocator_t* scratch_arena) {
+  const loom_pipeline_entry_binding_t* binding = entry->pipeline_entry;
+  if (binding == NULL) {
+    return iree_ok_status();
+  }
+  iree_host_size_t* indices = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate_array(scratch_arena, table->module->symbols.count,
+                                sizeof(*indices), (void**)&indices));
+  for (iree_host_size_t i = 0; i < helpers.count; ++i) {
+    indices[helpers.values[i].symbol_id] = i;
+  }
+  const iree_host_size_t entry_count = helpers.count + 1;
+  loom_pipeline_entry_calls_t* entries = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      scratch_arena, entry_count, sizeof(*entries), (void**)&entries));
+  for (iree_host_size_t i = 0; i < entry_count; ++i) {
+    const loom_aie2p_program_source_function_t* source =
+        i == helpers.count
+            ? entry
+            : loom_aie2p_program_source_table_lookup(table, helpers.values[i]);
+    const loom_low_direct_callee_requirement_list_t calls =
+        source->requirements.direct_callees;
+    iree_host_size_t* callees = NULL;
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        scratch_arena, calls.count, sizeof(*callees), (void**)&callees));
+    for (iree_host_size_t j = 0; j < calls.count; ++j) {
+      callees[j] = indices[calls.values[j].symbol.symbol_id];
+    }
+    const loom_pipeline_entry_binding_t* source_binding =
+        source->pipeline_entry;
+    IREE_ASSERT(source_binding == NULL ||
+                (source_binding->scope == binding->scope &&
+                 source_binding->engine == binding->engine));
+    entries[i] = (loom_pipeline_entry_calls_t){
+        .owner =
+            source_binding != NULL ? source_binding->owner : IREE_HOST_SIZE_MAX,
+        .callees = callees,
+        .callee_count = calls.count,
+    };
+  }
+  iree_host_size_t* owners = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      table->arena, entry_count, sizeof(*owners), (void**)&owners));
+  loom_pipeline_entry_owners_project(&binding->scope->lifetimes, entries,
+                                     entry_count, owners);
+  entry->entry_owners = owners;
+  return iree_ok_status();
+}
+
 static iree_status_t loom_aie2p_program_source_finish_closure(
     loom_aie2p_program_source_table_t* table,
     loom_aie2p_program_source_function_t* entry,
@@ -298,6 +352,11 @@ static iree_status_t loom_aie2p_program_source_admit_helpers_impl(
     }
   }
   if (admitted && iree_status_is_ok(status)) {
+    status = loom_aie2p_program_source_project_owners(
+        table, entry, loom_make_symbol_ref_array(helpers, helper_count),
+        scratch_arena);
+  }
+  if (admitted && iree_status_is_ok(status)) {
     status = loom_aie2p_program_source_finish_closure(
         table, entry, loom_make_symbol_ref_array(helpers, helper_count));
   }
@@ -313,6 +372,9 @@ iree_status_t loom_aie2p_program_source_admit_helpers(
     return iree_ok_status();
   }
   if (entry->requirements.direct_callees.count == 0) {
+    if (entry->pipeline_entry != NULL) {
+      entry->entry_owners = &entry->pipeline_entry->owner;
+    }
     entry->helpers_admitted = true;
     *out_admitted = true;
     return iree_ok_status();

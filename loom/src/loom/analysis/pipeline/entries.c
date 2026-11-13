@@ -39,3 +39,26 @@ iree_status_t loom_pipeline_entry_scope_clone(
   *out_scope = scope;
   return iree_ok_status();
 }
+
+void loom_pipeline_entry_owners_project(
+    const loom_pipeline_lifetimes_t* lifetimes,
+    const loom_pipeline_entry_calls_t* entries, iree_host_size_t entry_count,
+    iree_host_size_t* out_owners) {
+  for (iree_host_size_t i = 0; i < entry_count; ++i) {
+    out_owners[i] = entries[i].owner;
+  }
+  for (iree_host_size_t remaining = entry_count; remaining != 0; --remaining) {
+    const iree_host_size_t caller = remaining - 1;
+    for (iree_host_size_t i = 0; i < entries[caller].callee_count; ++i) {
+      const iree_host_size_t callee = entries[caller].callees[i];
+      if (entries[callee].owner != IREE_HOST_SIZE_MAX) {
+        continue;
+      }
+      out_owners[callee] =
+          out_owners[callee] == IREE_HOST_SIZE_MAX
+              ? out_owners[caller]
+              : loom_pipeline_lifetimes_common_owner(
+                    lifetimes, out_owners[callee], out_owners[caller]);
+    }
+  }
+}
