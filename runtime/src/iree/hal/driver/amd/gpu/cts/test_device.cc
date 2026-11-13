@@ -79,9 +79,6 @@ void GpuNativeTest::SelectControlMemory(
 void GpuNativeTest::PublishCode(uint32_t compute_family_ordinal,
                                 iree_hal_amd_fabric_memory_t* memory,
                                 iree_hal_amd_gpu_code_upload_t** upload) {
-  if (!*upload) {
-    return;
-  }
   const auto modes =
       context_->families[compute_family_ordinal].publication_modes;
   const auto mode = modes & AMDF_QUEUE_PUBLICATION_MODE_USER

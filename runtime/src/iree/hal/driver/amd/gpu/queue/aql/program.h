@@ -51,6 +51,7 @@ typedef struct iree_hal_amd_gpu_aql_program_pool_t {
 
 // Cold construction before queue creation. A failure leaves a deinitializable
 // partial owner. Every queue and resident recording is joined before teardown.
+// The owner publishes code with iree_hal_amd_gpu_code_publish before use.
 iree_status_t iree_hal_amd_gpu_aql_program_pool_initialize(
     iree_hal_amd_gpu_context_t* context, uint32_t native_family_ordinal,
     uint32_t queue_count, iree_allocator_t host_allocator,

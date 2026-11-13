@@ -83,8 +83,6 @@ iree_status_t iree_hal_amd_gpu_code_publish(
   iree_const_byte_span_t contents = iree_const_byte_span_empty();
   iree_status_t status = iree_ok_status();
   if (upload) {
-    // Construction selects the publisher before exposing unmapped code.
-    IREE_ASSERT(queue);
     contents = iree_make_const_byte_span(upload->contents, upload->byte_length);
   } else {
     status = IREE_HAL_AMD_STATUS_FROM_AMDF(
@@ -93,7 +91,7 @@ iree_status_t iree_hal_amd_gpu_code_publish(
             memory->contents.data_length),
         "publish code host writes");
   }
-  if (iree_status_is_ok(status) && queue) {
+  if (iree_status_is_ok(status)) {
     status =
         iree_hal_amd_gpu_code_queue_publish(queue, timeout, memory, contents);
   }

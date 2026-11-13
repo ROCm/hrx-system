@@ -44,7 +44,7 @@ iree_status_t iree_hal_amd_gpu_code_queue_publish(
     iree_hal_amd_fabric_memory_t* memory, iree_const_byte_span_t contents);
 
 // Closes publication and wakes the loading caller without claiming native
-// access cessation. NULL represents mapped PM4 code needing no private queue.
+// access cessation. NULL is safe during partial construction.
 amdf_status_t iree_hal_amd_gpu_code_queue_close(
     iree_hal_amd_gpu_code_queue_t* queue, amdf_status_t failure);
 

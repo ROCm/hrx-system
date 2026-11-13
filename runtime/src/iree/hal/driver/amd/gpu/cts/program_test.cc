@@ -239,7 +239,7 @@ class GpuProgramTest : public GpuNativeTest {
           IREE_HAL_AMD_GPU_PM4_COMPARISON_EQUAL);
     }
     words = iree_hal_amd_gpu_pm4_emit_compute_flush(words);
-    words = iree_hal_amd_gpu_pm4_emit_acquire(words, barriers_.acquire | 1u);
+    words = iree_hal_amd_gpu_pm4_emit_acquire(words, barriers_.acquire);
     if (!instance->initialized) {
       words = iree_hal_amd_gpu_pm4_emit_dma_copy(
           words, source.address, instance->address,

@@ -9,7 +9,6 @@
 #include <vector>
 
 #include "iree/base/internal/atomics.h"
-#include "iree/hal/driver/amd/gpu/code_queue.h"
 #include "iree/hal/driver/amd/gpu/cts/test_device.h"
 #include "iree/hal/driver/amd/gpu/queue/aql/program.h"
 #include "iree/hal/driver/amd/gpu/queue/aql/ring.h"
@@ -54,13 +53,6 @@ class AqlProgramTest : public GpuNativeTest,
     pool_.storage.resident.host_access = 0;
     pool_.storage.resident.required_flags &= ~AMDF_MEMORY_FLAG_HOST_VISIBLE;
     ASSERT_NO_FATAL_FAILURE(SelectControlMemory(&access_, &control_policy_));
-    IREE_ASSERT_OK(iree_hal_amd_gpu_code_queue_allocate(
-        context_, options_.queue_family_ordinal,
-        AMDF_QUEUE_PUBLICATION_MODE_USER, &control_policy_,
-        iree_allocator_system(), &code_));
-    IREE_ASSERT_OK(iree_hal_amd_gpu_code_queue_publish(
-        code_, iree_infinite_timeout(), &pool_.code,
-        iree_const_byte_span_empty()));
     IREE_ASSERT_OK(iree_hal_amd_fabric_memory_allocate(
         context_->api, &control_policy_,
         4096 + output_count() * sizeof(uint32_t), 256, context_->event_sink,
@@ -112,8 +104,6 @@ class AqlProgramTest : public GpuNativeTest,
       iree_hal_amd_gpu_program_cancel(&program_, instance_);
     }
     iree_hal_amd_gpu_program_deinitialize(&program_);
-    IREE_ASSERT_OK(IREE_HAL_AMD_STATUS_FROM_AMDF(
-        iree_hal_amd_gpu_code_queue_free(code_), "join code publication"));
     iree_hal_amd_gpu_aql_program_pool_deinitialize(&pool_);
     if (control_.handle) {
       iree_hal_amd_fabric_memory_deinitialize(context_->api,
@@ -158,8 +148,6 @@ class AqlProgramTest : public GpuNativeTest,
 
   // Cold builtin placement and resident instance registry.
   iree_hal_amd_gpu_aql_program_pool_t pool_ = {};
-  // Cold publication uses the same owner as ordinary executable loading.
-  iree_hal_amd_gpu_code_queue_t* code_ = nullptr;
   // Sealed native packet/private-data allocation.
   iree_hal_amd_gpu_program_t program_ = {};
   // Exclusive invocation lease, retained across every published chunk.

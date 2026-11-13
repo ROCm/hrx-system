@@ -31,10 +31,11 @@ iree_status_t iree_hal_amd_gpu_code_allocate(
     iree_hal_amd_gpu_code_upload_t** out_upload,
     iree_byte_span_t* out_contents);
 
-// Flushes mapped code or uploads through the selected compute family's cold
-// code publisher. A non-NULL publisher also completes instruction-cache
-// invalidation. No queue or worker is created here. Unmapped code requires a
-// publisher; mapped PM4 code can omit it and invalidate before shader use.
+// Publishes initialized code through the selected compute family's required
+// cold publisher. Flushes mapped host writes or uploads the initialization
+// image, then completes instruction-cache invalidation before returning.
+// Consumers can execute the immutable image from any queue without repeating
+// instruction publication. No queue or worker is created here.
 //
 // Consumes upload on every outcome. Native commands capture input bytes, so no
 // temporary native allocation remains borrowed after failure. An accepted but

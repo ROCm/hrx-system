@@ -355,6 +355,7 @@ iree_runtime_cc_test(
     srcs = ["executable_test.cc"],
     target_compatible_with = _NATIVE_DEVICE_COMPATIBLE_WITH,
     deps = [
+        ":code_queue",
         ":context",
         ":executable",
         ":feedback",
@@ -366,6 +367,7 @@ iree_runtime_cc_test(
         "//runtime/src/iree/base/threading",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/driver/amd/fabric",
+        "//runtime/src/iree/hal/driver/amd/fabric:event",
         "//runtime/src/iree/hal/driver/amd/fabric:memory",
         "//runtime/src/iree/hal/driver/amd/gpu/image",
         "//runtime/src/iree/hal/driver/amd/gpu/image:hsaco",
