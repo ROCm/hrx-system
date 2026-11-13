@@ -23,7 +23,7 @@ static bool loom_spirv_index_type_is_wide(loom_type_t type) {
 iree_status_t loom_spirv_prepare_control_operand(
     void* user_data, loom_low_lower_context_t* context,
     const loom_op_t* source_op, loom_value_id_t source_value,
-    loom_type_t required_type, const void** out_plan) {
+    loom_type_t actual_type, loom_type_t required_type, const void** out_plan) {
   (void)user_data;
   (void)source_op;
   static const uint32_t kConversions[] = {
@@ -36,8 +36,6 @@ iree_status_t loom_spirv_prepare_control_operand(
       SPIRV_LOGICAL_CORE_DESCRIPTOR_REF_OP_BITCAST_OFFSET64_I64;
   static const uint32_t kZeroExtend =
       SPIRV_LOGICAL_CORE_DESCRIPTOR_REF_OP_U_CONVERT_U32_U64;
-  const loom_type_t actual_type =
-      loom_low_lower_value_binding_type(context, source_value);
   const bool actual_wide = loom_spirv_index_type_is_wide(actual_type);
   const bool required_wide = loom_spirv_index_type_is_wide(required_type);
   if (loom_low_register_type_class_id(actual_type) ==
@@ -193,7 +191,8 @@ static iree_status_t loom_spirv_prepare_index_operand(
       loom_type_scalar(wide ? LOOM_SCALAR_TYPE_I64 : LOOM_SCALAR_TYPE_INDEX),
       &plan->type));
   IREE_RETURN_IF_ERROR(loom_spirv_prepare_control_operand(
-      NULL, context, NULL, source_value, plan->type, &plan->conversion));
+      NULL, context, NULL, source_value, actual_type, plan->type,
+      &plan->conversion));
   *out_plan = plan;
   return iree_ok_status();
 }

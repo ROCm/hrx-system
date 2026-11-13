@@ -277,12 +277,12 @@ static bool loom_amdgpu_source_scalar_value_register_shape(
     }
     return true;
   }
-  // Native numeric results already have a declared bank. Keep the source
-  // payload width so call validation still rejects incompatible signatures.
+  // Native results retain their declared bank only while it preserves every
+  // observation. Keep the source payload width for signature validation.
   loom_amdgpu_register_shape_t native_shape = {0};
   if (mapping->policy != LOOM_AMDGPU_SCALAR_VALUE_REGISTER_POLICY_I1 &&
-      loom_amdgpu_source_invoke_result_shape(
-          module, loom_module_value(module, source_value_id), &native_shape) &&
+      loom_amdgpu_source_invoke_result_shape(module, fact_table,
+                                             source_value_id, &native_shape) &&
       (native_shape.class_id == LOOM_AMDGPU_REG_CLASS_ID_SGPR ||
        native_shape.class_id == LOOM_AMDGPU_REG_CLASS_ID_VGPR)) {
     out_shape->class_id = native_shape.class_id;
@@ -344,8 +344,8 @@ static bool loom_amdgpu_source_vector_value_register_shape(
     return true;
   }
   loom_amdgpu_register_shape_t native_shape = {0};
-  if (loom_amdgpu_source_invoke_result_shape(
-          module, loom_module_value(module, source_value_id), &native_shape) &&
+  if (loom_amdgpu_source_invoke_result_shape(module, fact_table,
+                                             source_value_id, &native_shape) &&
       (native_shape.class_id == LOOM_AMDGPU_REG_CLASS_ID_SGPR ||
        native_shape.class_id == LOOM_AMDGPU_REG_CLASS_ID_VGPR)) {
     *out_shape = loom_amdgpu_register_shape(native_shape.class_id,

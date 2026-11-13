@@ -56,7 +56,7 @@ iree_status_t loom_spirv_emit_index_operand(loom_low_lower_context_t* context,
 iree_status_t loom_spirv_prepare_control_operand(
     void* user_data, loom_low_lower_context_t* context,
     const loom_op_t* source_op, loom_value_id_t source_value,
-    loom_type_t required_type, const void** out_plan);
+    loom_type_t actual_type, loom_type_t required_type, const void** out_plan);
 
 // Emits the retained receiving-carrier conversion without source fact queries.
 iree_status_t loom_spirv_emit_control_operand(

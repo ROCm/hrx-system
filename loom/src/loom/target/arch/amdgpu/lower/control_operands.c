@@ -62,7 +62,7 @@ bool loom_amdgpu_control_operand_accepts(loom_type_t source_type,
 iree_status_t loom_amdgpu_prepare_control_operand(
     void* user_data, loom_low_lower_context_t* context,
     const loom_op_t* source_terminator, loom_value_id_t source_value,
-    loom_type_t required_type, const void** out_plan) {
+    loom_type_t actual_type, loom_type_t required_type, const void** out_plan) {
   (void)user_data;
   (void)source_terminator;
   *out_plan = NULL;
@@ -72,8 +72,6 @@ iree_status_t loom_amdgpu_prepare_control_operand(
       context, required_type, LOOM_AMDGPU_REG_CLASS_ID_SGPR);
   const bool requires_vgpr = loom_amdgpu_low_type_is_register_class(
       context, required_type, LOOM_AMDGPU_REG_CLASS_ID_VGPR);
-  const loom_type_t actual_type =
-      loom_low_lower_value_binding_type(context, source_value);
   if (loom_type_is_buffer(source_type) &&
       loom_amdgpu_buffer_is_null(context, source_value)) {
     // A non-null recipe records semantic rematerialization instead of a
@@ -145,10 +143,7 @@ iree_status_t loom_amdgpu_emit_control_operand(
         out_low_value_id);
   }
   if (requires_vgpr) {
-    if (loom_amdgpu_type_is_i32(source_type) ||
-        loom_amdgpu_vector_i32_register_count(source_type) != 0 ||
-        loom_amdgpu_type_is_f32(source_type) ||
-        loom_amdgpu_vector_f32_register_count(source_type) != 0) {
+    if (plan != NULL) {
       return loom_amdgpu_emit_prepared_vgpr_value(
           context, source_terminator, source_value_id, plan, out_low_value_id);
     }
@@ -158,8 +153,13 @@ iree_status_t loom_amdgpu_emit_control_operand(
 
   if (requires_sgpr && loom_amdgpu_type_is_i1(source_type)) {
     if (loom_low_register_type_unit_count(required_low_type) == 2) {
-      return loom_amdgpu_emit_prepared_native_i1_mask(
-          context, source_terminator, source_value_id, plan, out_low_value_id);
+      if (plan != NULL) {
+        return loom_amdgpu_emit_prepared_native_i1_mask(
+            context, source_terminator, source_value_id, plan,
+            out_low_value_id);
+      }
+      return loom_amdgpu_materialize_low_native_i1_mask(
+          context, source_terminator, low_value_id, out_low_value_id);
     }
     // A scalar destination has a uniformity proof. Its source can still use a
     // native mask (for example, a Boolean select), or transient SCC state.

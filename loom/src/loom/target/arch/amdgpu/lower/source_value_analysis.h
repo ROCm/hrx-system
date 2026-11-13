@@ -29,14 +29,16 @@ typedef struct loom_amdgpu_register_shape_t {
   uint32_t unit_count;
 } loom_amdgpu_register_shape_t;
 
-// Reads a low.invoke result's declared carrier by symbol and result ordinal.
-// Compatible AMDGPU representations preserve register classes and unit counts;
-// shared call planning owns target projection and signature compatibility.
+// Selects durable storage for a low.invoke result from its declared carrier
+// and the shared facts valid at every observation. A per-execution scalar
+// return needs lane storage when different lanes can observe different calls.
+// Shared call planning owns target projection, signature compatibility, and
+// conversion from the declared carrier to the selected source storage.
 // Unresolved or malformed call boundaries have no shape here and are diagnosed
 // by shared call planning, before Low construction.
 bool loom_amdgpu_source_invoke_result_shape(
-    const loom_module_t* module, const loom_value_t* value,
-    loom_amdgpu_register_shape_t* out_shape);
+    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
+    loom_value_id_t source_value_id, loom_amdgpu_register_shape_t* out_shape);
 
 // Identifies the FuncLike body arguments whose representation is a callable
 // contract. Local control-flow arguments have no callable ABI.

@@ -311,7 +311,8 @@ typedef struct loom_low_lower_prepare_branch_callback_t {
 typedef iree_status_t (*loom_low_lower_prepare_control_operand_fn_t)(
     void* user_data, loom_low_lower_context_t* context,
     const loom_op_t* source_terminator, loom_value_id_t source_value_id,
-    loom_type_t required_low_type, const void** out_plan);
+    loom_type_t actual_low_type, loom_type_t required_low_type,
+    const void** out_plan);
 
 typedef iree_status_t (*loom_low_lower_emit_control_operand_fn_t)(
     void* user_data, loom_low_lower_context_t* context,
@@ -320,22 +321,26 @@ typedef iree_status_t (*loom_low_lower_emit_control_operand_fn_t)(
     const void* plan, loom_value_id_t* out_low_value_id);
 
 typedef struct loom_low_lower_control_operand_t {
-  // Admits an authored native receiver whose carrier differs from its source.
+  // Admits a conversion across an authored native argument or result boundary.
   // Consumes retained facts without inspecting IR; missing requires equality.
   // Compiler-selected branch, call, and return receivers already own this
   // proof and go directly to preparation instead of repeating admission.
   bool (*accepts)(loom_type_t source_type, loom_value_facts_t source_facts,
                   loom_type_t actual_type, loom_type_t required_type);
-  // Prepares a branch, call, or callable-exit operand whose producer carrier
-  // differs from its receiving signature. Source facts are available here;
-  // rejection emits diagnostics before any Low construction. Retained data
-  // belongs to the function arena or immutable target storage. NULL is a
+  // Prepares a branch, call, or callable-exit operand, or a native call result,
+  // whose producer carrier differs from its receiving storage. Source facts
+  // are available here; rejection emits diagnostics before Low construction.
+  // Both carrier types are explicit: the producer of a native result is its
+  // declared return signature, not the selected source-value binding. Retained
+  // data belongs to the function arena or immutable target storage. NULL is a
   // valid recipe for a conversion determined entirely by the selected types.
   loom_low_lower_prepare_control_operand_fn_t prepare;
   // Emits the prepared conversion without consulting source analysis or
-  // changing the source value's canonical mapping. Only infrastructure
-  // failures remain possible. Preparation and emission are paired; admission
-  // requires both and is optional for targets without authored conversions.
+  // changing the source value's canonical mapping. The supplied Low value is
+  // authoritative; a native result has no source binding until converted.
+  // Only infrastructure failures remain possible. Preparation and emission are
+  // paired; admission requires both and is optional for targets without
+  // authored conversions.
   loom_low_lower_emit_control_operand_fn_t emit;
   // Caller-owned payload passed to both callbacks.
   void* user_data;

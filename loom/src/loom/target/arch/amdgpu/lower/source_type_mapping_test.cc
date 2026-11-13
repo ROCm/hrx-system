@@ -4,6 +4,8 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include <optional>
+#include <tuple>
 #include <vector>
 
 #include "iree/testing/gtest.h"
@@ -110,7 +112,7 @@ class AmdgpuSourceTypeMappingTest : public ::testing::Test {
   }
 
   void ExpectDirectMapping(uint16_t register_class, uint32_t unit_count,
-                           bool needs_analysis) {
+                           std::optional<bool> needs_analysis) {
     loom_type_t low_type = loom_type_none();
     IREE_ASSERT_OK(loom_amdgpu_map_value(
         nullptr, &mapping_, user_, value_,
@@ -121,7 +123,9 @@ class AmdgpuSourceTypeMappingTest : public ::testing::Test {
       EXPECT_EQ(loom_low_register_type_class_id(low_type), register_class);
       EXPECT_EQ(loom_low_register_type_unit_count(low_type), unit_count);
     }
-    ExpectAnalysis(needs_analysis);
+    if (needs_analysis.has_value()) {
+      ExpectAnalysis(*needs_analysis);
+    }
   }
 
   void InvokeIdentity(uint16_t register_class, uint32_t unit_count) {
@@ -164,7 +168,8 @@ class AmdgpuSourceTypeMappingTest : public ::testing::Test {
   }
 
   void ExpectContractMapping(
-      uint16_t register_class, uint32_t unit_count, bool needs_analysis,
+      uint16_t register_class, uint32_t unit_count,
+      std::optional<bool> needs_analysis,
       loom_target_contract_vector_lane_projection_t projection = {}) {
     loom_target_contract_query_environment_t environment = {
         .module = module_,
@@ -205,7 +210,9 @@ class AmdgpuSourceTypeMappingTest : public ::testing::Test {
     EXPECT_EQ(mapped.is_register, unit_count != 0);
     EXPECT_EQ(mapped.descriptor_register_class_id, register_class);
     EXPECT_EQ(mapped.register_unit_count, unit_count);
-    ExpectAnalysis(needs_analysis);
+    if (needs_analysis.has_value()) {
+      ExpectAnalysis(*needs_analysis);
+    }
   }
 
   void ExpectAnalysis(bool acquired) {
@@ -358,46 +365,33 @@ TEST(AmdgpuNativeDistributionTest, ScalarTruthAndPerLanePredicates) {
 
 class AmdgpuInvokeMappingTest
     : public AmdgpuSourceTypeMappingTest,
-      public ::testing::WithParamInterface<MappingCase> {};
+      public ::testing::WithParamInterface<
+          std::tuple<MappingCase, loom_value_fact_flags_t>> {};
 
-TEST_P(AmdgpuInvokeMappingTest, DeclaredCarrierControlsBothMappingPaths) {
-  const auto& test = GetParam();
+TEST_P(AmdgpuInvokeMappingTest, NativeStoragePreservesEveryObservation) {
+  const auto& [test, distribution] = GetParam();
   CreateValue(test.type, loom_value_facts_unknown());
   InvokeIdentity(test.register_class, test.unit_count);
-  ExpectDirectMapping(test.register_class, test.unit_count, true);
-  ExpectContractMapping(test.register_class, test.unit_count, true);
+  // Native ABI facts describe one invocation. Mapping receives the immutable
+  // solved table, whose distribution also accounts for divergent observations.
+  auto facts = loom_value_facts_unknown();
+  facts.flags |= distribution;
+  IREE_ASSERT_OK(loom_value_fact_table_define(&facts_, value_, facts));
+  uint16_t register_class = test.register_class;
+  uint32_t unit_count = test.unit_count;
+  if (distribution != LOOM_VALUE_FACT_SUBGROUP_UNIFORM) {
+    if (loom_type_element_type(test.type) == LOOM_SCALAR_TYPE_I1) {
+      if (loom_type_is_scalar(test.type)) {
+        register_class = LOOM_AMDGPU_REG_CLASS_ID_SGPR;
+        unit_count = 2;
+      }
+    } else if (register_class == LOOM_AMDGPU_REG_CLASS_ID_SGPR) {
+      register_class = LOOM_AMDGPU_REG_CLASS_ID_VGPR;
+    }
+  }
+  ExpectDirectMapping(register_class, unit_count, std::nullopt);
+  ExpectContractMapping(register_class, unit_count, std::nullopt);
 }
-
-INSTANTIATE_TEST_SUITE_P(
-    NativeResults, AmdgpuInvokeMappingTest,
-    ::testing::Values(MappingCase{loom_type_scalar(LOOM_SCALAR_TYPE_I32),
-                                  LOOM_AMDGPU_REG_CLASS_ID_VGPR, 1},
-                      MappingCase{loom_type_scalar(LOOM_SCALAR_TYPE_I64),
-                                  LOOM_AMDGPU_REG_CLASS_ID_VGPR, 2},
-                      MappingCase{loom_type_scalar(LOOM_SCALAR_TYPE_F16),
-                                  LOOM_AMDGPU_REG_CLASS_ID_SGPR, 1},
-                      MappingCase{loom_type_scalar(LOOM_SCALAR_TYPE_F32),
-                                  LOOM_AMDGPU_REG_CLASS_ID_SGPR, 1},
-                      MappingCase{loom_type_scalar(LOOM_SCALAR_TYPE_F64),
-                                  LOOM_AMDGPU_REG_CLASS_ID_VGPR, 2},
-                      MappingCase{loom_type_scalar(LOOM_SCALAR_TYPE_INDEX),
-                                  LOOM_AMDGPU_REG_CLASS_ID_VGPR, 1},
-                      MappingCase{loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET),
-                                  LOOM_AMDGPU_REG_CLASS_ID_VGPR, 2},
-                      MappingCase{loom_type_scalar(LOOM_SCALAR_TYPE_I1),
-                                  LOOM_AMDGPU_REG_CLASS_ID_SCC, 1},
-                      MappingCase{loom_type_scalar(LOOM_SCALAR_TYPE_I1),
-                                  LOOM_AMDGPU_REG_CLASS_ID_SGPR, 1},
-                      MappingCase{loom_type_scalar(LOOM_SCALAR_TYPE_I1),
-                                  LOOM_AMDGPU_REG_CLASS_ID_SGPR, 2},
-                      MappingCase{VectorType(LOOM_SCALAR_TYPE_I32, 4),
-                                  LOOM_AMDGPU_REG_CLASS_ID_SGPR, 4},
-                      MappingCase{VectorType(LOOM_SCALAR_TYPE_I64, 2),
-                                  LOOM_AMDGPU_REG_CLASS_ID_SGPR, 4},
-                      MappingCase{VectorType(LOOM_SCALAR_TYPE_F32, 4),
-                                  LOOM_AMDGPU_REG_CLASS_ID_SGPR, 4},
-                      MappingCase{VectorType(LOOM_SCALAR_TYPE_F64, 2),
-                                  LOOM_AMDGPU_REG_CLASS_ID_SGPR, 4}));
 
 class AmdgpuArgumentMappingTest
     : public AmdgpuSourceTypeMappingTest,
@@ -478,6 +472,30 @@ std::vector<MappingCase> ArgumentMappingCases() {
 
 INSTANTIATE_TEST_SUITE_P(StorageFamilies, AmdgpuArgumentMappingTest,
                          ::testing::ValuesIn(ArgumentMappingCases()));
+
+std::vector<MappingCase> NativeMappingCases() {
+  auto cases = ArgumentMappingCases();
+  const size_t count = cases.size();
+  for (size_t i = 0; i < count; ++i) {
+    auto test = cases[i];
+    if (test.register_class == LOOM_AMDGPU_REG_CLASS_ID_VGPR) {
+      test.register_class = LOOM_AMDGPU_REG_CLASS_ID_SGPR;
+      cases.push_back(test);
+    }
+  }
+  cases.push_back(
+      {loom_type_scalar(LOOM_SCALAR_TYPE_I1), LOOM_AMDGPU_REG_CLASS_ID_SCC, 1});
+  cases.push_back({loom_type_scalar(LOOM_SCALAR_TYPE_I1),
+                   LOOM_AMDGPU_REG_CLASS_ID_SGPR, 1});
+  return cases;
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    NativeResults, AmdgpuInvokeMappingTest,
+    ::testing::Combine(::testing::ValuesIn(NativeMappingCases()),
+                       ::testing::Values(loom_value_fact_flags_t{0},
+                                         LOOM_VALUE_FACT_SUBGROUP_UNIFORM,
+                                         LOOM_VALUE_FACT_LANE_VARYING)));
 
 TEST_F(AmdgpuSourceTypeMappingTest, ProjectedWidthDoesNotReuseAuthoredWidth) {
   CreateValue(VectorType(LOOM_SCALAR_TYPE_F64, 8), VaryingFacts());

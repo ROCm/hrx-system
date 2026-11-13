@@ -125,3 +125,191 @@ check.scenario @native_temporal_broadcast_values {
   }
   check.return
 }
+
+// Header results dominate the continuation in CFG form, but each lane must
+// retain the result from its own final header visit.
+kernel.def target(@temporal_broadcast_gfx11_wave64) @native_header_observation() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%output: buffer, %trial: index) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %stride = index.constant 17 : index
+  %active_count = index.mul %trial, %stride : index
+  %base = index.constant 0 : offset
+  %lane = kernel.workitem.id<x> : index
+  %word = index.cast %lane : index to i32
+  %active = index.cmp ult, %lane, %active_count : index
+  %result = scf.if %active -> (i32) {
+    %counter, %last = scf.while(%counter = %begin : index) -> (index, i32) {
+      %observed = low.invoke @native_first_lane(%word) : (i32) -> (i32)
+      %more = index.cmp ult, %counter, %lane : index
+      scf.condition %more, %counter, %observed : i1, index, i32
+    } do(%position: index, %unused: i32) {
+      %next = index.add %position, %step : index
+      scf.yield %next : index
+    }
+    scf.yield %last : i32
+  } else {
+    scf.yield %word : i32
+  }
+  %destination = buffer.view %output[%base] : buffer -> view<64xi32>
+  view.store %result, %destination[%lane] : i32, view<64xi32>
+  kernel.return
+}
+
+func.def @native_header_observation_oracle(%output: buffer, %trial: index) {
+  %begin = index.constant 0 : index
+  %end = index.constant 64 : index
+  %step = index.constant 1 : index
+  %base = index.constant 0 : offset
+  %destination = buffer.view %output[%base] : buffer -> view<64xi32>
+  scf.for %lane = [%begin to %end step %step] {
+    %value = index.cast %lane : index to i32
+    view.store %value, %destination[%lane] : i32, view<64xi32>
+  }
+  func.return
+}
+
+check.scenario @native_header_observation_values {
+  check.trial[5](%trial: index, %entropy: check.entropy) {
+    %storage = check.generate.fill value(-99) : tensor<72xi32>
+    %output = check.tensor.view %storage offset(16) : tensor<72xi32> -> tensor<64xi32>
+    check.compare<@native_header_observation, @native_header_observation_oracle>(%output, %trial) : (tensor<64xi32>, index) -> () {
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<72xi32>
+    }
+  }
+  check.return
+}
+
+// Scalar truth and a per-lane mask are different native result encodings.
+// Both retain each lane's final observation when the call lives in a header.
+low.func.def target<amdgpu.gfx11.generic.core>(@temporal_broadcast_gfx11_wave64) @native_predicates(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr x2>) asm {
+  %first = v_readfirstlane_b32 %value
+  %low_bit = s_mov_b32 1
+  %odd = s_and_b32 %first, %low_bit
+  %participating = v_cmp_eq_i32 %value, %value
+  return %odd, %participating
+}
+
+kernel.def target(@temporal_broadcast_gfx11_wave64) @native_header_predicates() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%output: buffer) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %base = index.constant 0 : offset
+  %lane = kernel.workitem.id<x> : index
+  %word = index.cast %lane : index to i32
+  %counter, %odd, %participating = scf.while(%counter = %begin : index) -> (index, i1, i1) {
+    %odd_observation, %participating_observation = low.invoke @native_predicates(%word) : (i32) -> (i1, i1)
+    %more = index.cmp ult, %counter, %lane : index
+    scf.condition %more, %counter, %odd_observation, %participating_observation : i1, index, i1, i1
+  } do(%position: index, %unused_odd: i1, %unused_participating: i1) {
+    %next = index.add %position, %step : index
+    scf.yield %next : index
+  }
+  %odd_word = scalar.extui %odd : i1 to i32
+  %participating_word = scalar.extui %participating : i1 to i32
+  %destination = buffer.view %output[%base] : buffer -> view<64x2xi32>
+  view.store %odd_word, %destination[%lane, 0] : i32, view<64x2xi32>
+  view.store %participating_word, %destination[%lane, 1] : i32, view<64x2xi32>
+  kernel.return
+}
+
+func.def @native_header_predicates_oracle(%output: buffer) {
+  %begin = index.constant 0 : index
+  %end = index.constant 64 : index
+  %step = index.constant 1 : index
+  %base = index.constant 0 : offset
+  %low_bit = scalar.constant 1 : i32
+  %destination = buffer.view %output[%base] : buffer -> view<64x2xi32>
+  scf.for %lane = [%begin to %end step %step] {
+    %word = index.cast %lane : index to i32
+    %odd = scalar.andi %word, %low_bit : i32
+    view.store %odd, %destination[%lane, 0] : i32, view<64x2xi32>
+    view.store %low_bit, %destination[%lane, 1] : i32, view<64x2xi32>
+  }
+  func.return
+}
+
+check.scenario @native_header_predicate_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %actual = check.generate.fill value(-1) : tensor<64x2xi32>
+    check.compare<@native_header_predicates, @native_header_predicates_oracle>(%actual) : (tensor<64x2xi32>) -> () {
+      check.expect.bitwise actual(%actual) expected(%actual) : tensor<64x2xi32>
+    }
+  }
+  check.return
+}
+
+// The same two native words can carry a wide scalar or a packed vector with
+// a partial final word. Every word must be captured at the call site.
+low.func.def target<amdgpu.gfx11.generic.core>(@temporal_broadcast_gfx11_wave64) @native_pair(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>) asm {
+  %first = v_readfirstlane_b32 %value
+  %pair = concat(%first, %first) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  return %pair, %pair
+}
+
+kernel.def target(@temporal_broadcast_gfx11_wave64) @native_header_payloads() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%wide_output: buffer, %packed_output: buffer) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %base = index.constant 0 : offset
+  %lane = kernel.workitem.id<x> : index
+  %word = index.cast %lane : index to i32
+  %counter, %wide, %packed = scf.while(%counter = %begin : index) -> (index, i64, vector<3xf16>) {
+    %wide_observation, %packed_observation = low.invoke @native_pair(%word) : (i32) -> (i64, vector<3xf16>)
+    %more = index.cmp ult, %counter, %lane : index
+    scf.condition %more, %counter, %wide_observation, %packed_observation : i1, index, i64, vector<3xf16>
+  } do(%position: index, %unused_wide: i64, %unused_packed: vector<3xf16>) {
+    %next = index.add %position, %step : index
+    scf.yield %next : index
+  }
+  %wide_destination = buffer.view %wide_output[%base] : buffer -> view<64xi64>
+  %packed_destination = buffer.view %packed_output[%base] : buffer -> view<64x3xi16>
+  %packed_bits = vector.bitcast %packed : vector<3xf16> to vector<3xi16>
+  view.store %wide, %wide_destination[%lane] : i64, view<64xi64>
+  vector.store %packed_bits, %packed_destination[%lane, 0] : vector<3xi16>, view<64x3xi16>
+  kernel.return
+}
+
+func.def @native_header_payloads_oracle(%wide_output: buffer, %packed_output: buffer) {
+  %begin = index.constant 0 : index
+  %end = index.constant 64 : index
+  %step = index.constant 1 : index
+  %base = index.constant 0 : offset
+  %shift = scalar.constant 32 : i64
+  %padding_bits = scalar.constant 0 : i16
+  %wide_destination = buffer.view %wide_output[%base] : buffer -> view<64xi64>
+  %packed_destination = buffer.view %packed_output[%base] : buffer -> view<64x3xi16>
+  scf.for %lane = [%begin to %end step %step] {
+    %word = index.cast %lane : index to i32
+    %narrow = scalar.trunci %word : i32 to i16
+    %low = scalar.extui %word : i32 to i64
+    %high = scalar.shli %low, %shift : i64
+    %wide = scalar.ori %low, %high : i64
+    view.store %wide, %wide_destination[%lane] : i64, view<64xi64>
+    view.store %narrow, %packed_destination[%lane, 0] : i16, view<64x3xi16>
+    view.store %padding_bits, %packed_destination[%lane, 1] : i16, view<64x3xi16>
+    view.store %narrow, %packed_destination[%lane, 2] : i16, view<64x3xi16>
+  }
+  func.return
+}
+
+check.scenario @native_header_payload_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %wide = check.generate.fill value(-1) : tensor<64xi64>
+    %packed = check.generate.fill value(-1) : tensor<64x3xi16>
+    check.compare<@native_header_payloads, @native_header_payloads_oracle>(%wide, %packed) : (tensor<64xi64>, tensor<64x3xi16>) -> () {
+      check.expect.bitwise actual(%wide) expected(%wide) : tensor<64xi64>
+      check.expect.bitwise actual(%packed) expected(%packed) : tensor<64x3xi16>
+    }
+  }
+  check.return
+}

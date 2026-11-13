@@ -99,15 +99,16 @@ iree_status_t loom_low_lower_structural_finalize_boundaries(
           receiver_ids[i] == LOOM_VALUE_ID_INVALID
               ? context->lowering->boundary.result_types[i]
               : loom_low_lower_value_binding_type(context, receiver_ids[i]);
-      if (loom_type_equal(loom_low_lower_value_binding_type(
-                              context, operands[operand_index]),
-                          required_type)) {
+      const loom_type_t actual_type =
+          loom_low_lower_value_binding_type(context, operands[operand_index]);
+      if (loom_type_equal(actual_type, required_type)) {
         continue;
       }
       const void* recipe = NULL;
       status = context->policy->control_operand.prepare(
           context->policy->control_operand.user_data, context,
-          boundary->source_op, operands[operand_index], required_type, &recipe);
+          boundary->source_op, operands[operand_index], actual_type,
+          required_type, &recipe);
       loom_low_lower_structural_conversion_t* conversion = NULL;
       if (iree_status_is_ok(status) && context->result->error_count == 0) {
         status = loom_low_lower_allocate_function_array(

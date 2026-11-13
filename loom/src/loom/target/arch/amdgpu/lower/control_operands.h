@@ -28,7 +28,7 @@ bool loom_amdgpu_control_operand_accepts(loom_type_t source_type,
 iree_status_t loom_amdgpu_prepare_control_operand(
     void* user_data, loom_low_lower_context_t* context,
     const loom_op_t* source_terminator, loom_value_id_t source_value,
-    loom_type_t required_type, const void** out_plan);
+    loom_type_t actual_type, loom_type_t required_type, const void** out_plan);
 
 // Emits the selected carrier conversion without source analysis. The canonical
 // source binding is preserved, so each edge can use its own receiving carrier.

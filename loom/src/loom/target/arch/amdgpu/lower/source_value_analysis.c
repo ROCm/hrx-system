@@ -44,8 +44,9 @@ bool loom_amdgpu_source_value_is_entry_argument(const loom_module_t* module,
 }
 
 bool loom_amdgpu_source_invoke_result_shape(
-    const loom_module_t* module, const loom_value_t* value,
-    loom_amdgpu_register_shape_t* out_shape) {
+    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
+    loom_value_id_t source_value_id, loom_amdgpu_register_shape_t* out_shape) {
+  const loom_value_t* value = loom_module_value(module, source_value_id);
   if (loom_value_is_block_arg(value)) {
     return false;
   }
@@ -73,6 +74,23 @@ bool loom_amdgpu_source_invoke_result_shape(
       .class_id = loom_low_register_type_class_id(type),
       .unit_count = loom_low_register_type_unit_count(type),
   };
+  const loom_type_t source_type =
+      loom_module_value_type(module, source_value_id);
+  if (!fact_table ||
+      !loom_value_facts_is_subgroup_uniform(
+          loom_value_fact_table_lookup(fact_table, source_value_id))) {
+    if (loom_amdgpu_type_is_i1(source_type)) {
+      if ((out_shape->class_id == LOOM_AMDGPU_REG_CLASS_ID_SCC ||
+           out_shape->class_id == LOOM_AMDGPU_REG_CLASS_ID_SGPR) &&
+          out_shape->unit_count == 1) {
+        *out_shape = (loom_amdgpu_register_shape_t){
+            .class_id = LOOM_AMDGPU_REG_CLASS_ID_SGPR, .unit_count = 2};
+      }
+    } else if (!loom_amdgpu_native_type_is_lane_mask(source_type, type) &&
+               out_shape->class_id == LOOM_AMDGPU_REG_CLASS_ID_SGPR) {
+      out_shape->class_id = LOOM_AMDGPU_REG_CLASS_ID_VGPR;
+    }
+  }
   return true;
 }
 
