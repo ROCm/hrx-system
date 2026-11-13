@@ -2029,6 +2029,9 @@ iree_status_t iree_hal_amdxdna_device_create(
           max_retained_code_bytes =
               device->native_caps.max_shared_code_memory_bytes / 4;
         }
+        max_retained_code_bytes = iree_hal_amdxdna_clamp_retained_command_code(
+            max_retained_code_bytes,
+            device->native_caps.max_retained_command_code_bytes);
       }
       if (max_retained_code_bytes != 0) {
         iree_hal_amdxdna_single_command_cache_set_max_retained_code_bytes(

@@ -113,6 +113,20 @@ TEST(SharedCodeMemoryBudgetTest, SaturatedDomainIsZero) {
             0u);
 }
 
+// An empty 64 MiB domain would let a cache retain 60 MiB of idle code; a
+// backend retained-code ceiling bounds that, and zero keeps the budget.
+TEST(SharedCodeMemoryBudgetTest, RetainedCommandCodeCeilingClampsBudget) {
+  const iree_host_size_t budget =
+      iree_hal_amdxdna_shared_code_memory_command_budget(
+          kTestSharedCodeMemoryBytes, kTestMissReserveBytes, 0, 0);
+  const iree_host_size_t ceiling = 4u * 1024u * 1024u;
+  EXPECT_EQ(iree_hal_amdxdna_clamp_retained_command_code(budget, ceiling),
+            ceiling);
+  EXPECT_EQ(iree_hal_amdxdna_clamp_retained_command_code(budget, 0), budget);
+  EXPECT_EQ(iree_hal_amdxdna_clamp_retained_command_code(ceiling / 2, ceiling),
+            ceiling / 2);
+}
+
 // The context-image budget reserves the single-miss construction block plus a
 // command-cache working set, capping resident context images below the heap so
 // the command caches and command construction always retain headroom.

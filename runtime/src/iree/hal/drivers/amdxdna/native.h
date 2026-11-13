@@ -174,6 +174,12 @@ typedef struct iree_hal_amdxdna_native_c_device_caps_t {
   // so one cache miss can construct its native resources. Ignored when
   // max_shared_code_memory_bytes is zero.
   uint32_t shared_code_memory_miss_reserve_bytes;
+  // Ceiling on idle command code each command cache (single and chain) keeps
+  // in the shared code-memory domain. The driver places every retained buffer
+  // individually, so a large retained set scatters across a fixed heap and
+  // leaves no single range for a large instruction buffer. Zero keeps the
+  // cache defaults. Ignored when max_shared_code_memory_bytes is zero.
+  uint32_t max_retained_command_code_bytes;
 } iree_hal_amdxdna_native_c_device_caps_t;
 
 // Returns how many prepared-command bytes may remain cached after accounting
@@ -192,6 +198,18 @@ iree_hal_amdxdna_shared_code_memory_command_budget(
     return 0;
   }
   return max_shared_code_memory_bytes - reserved;
+}
+
+// Clamps one command cache's retained-code ceiling to the backend's
+// max_retained_command_code_bytes. Zero leaves |retained_code_bytes| unchanged.
+static inline iree_host_size_t iree_hal_amdxdna_clamp_retained_command_code(
+    iree_host_size_t retained_code_bytes,
+    iree_host_size_t max_retained_command_code_bytes) {
+  if (max_retained_command_code_bytes != 0 &&
+      retained_code_bytes > max_retained_command_code_bytes) {
+    return max_retained_command_code_bytes;
+  }
+  return retained_code_bytes;
 }
 
 // Returns the ceiling on resident native context-image bytes that keeps the

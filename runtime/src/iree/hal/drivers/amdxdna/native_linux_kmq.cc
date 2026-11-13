@@ -157,6 +157,14 @@ constexpr uint32_t kSharedCodeMemoryBytes = 64u * 1024u * 1024u;
 // proactive alternative to the old "allocation failed, drop idle caches and
 // retry" recovery, which we deliberately avoid (it can leave the NPU wedged).
 constexpr uint32_t kSharedCodeMemoryMissReserveBytes = 16u * 1024u * 1024u;
+// Idle command code retained per command cache. Each retained BO is placed
+// individually in the heap, so retention comes out of the largest instruction
+// BO the process can still allocate, and image prefill can need one ~54 MiB
+// BO (qwen3.5:0.8b). Retaining the 32 MiB chain default as 36-44 KiB BOs left
+// holes across the heap that later long-lived BOs filled, so that range was
+// gone after a few dozen short requests. Code past this ceiling is recreated
+// per submit, as XRT does.
+constexpr uint32_t kRetainedCommandCodeBytes = 4u * 1024u * 1024u;
 
 // The exec BO is large enough to hold many chain slots, but XRT's runlist
 // implementation chunks native command chains at 24 children. Match that
@@ -738,11 +746,13 @@ iree_status_t iree_hal_amdxdna_native_device_query_caps(
   caps.max_shared_code_memory_bytes = kSharedCodeMemoryBytes;
   caps.shared_code_memory_miss_reserve_bytes =
       kSharedCodeMemoryMissReserveBytes;
+  caps.max_retained_command_code_bytes = kRetainedCommandCodeBytes;
   if (device_is_aie4(device)) {
     // UMQ has no DEV heap. Leave the shared-memory domain disabled so the
     // KMQ 64 MiB budget and 16 MiB reserve are not applied here.
     caps.max_shared_code_memory_bytes = 0;
     caps.shared_code_memory_miss_reserve_bytes = 0;
+    caps.max_retained_command_code_bytes = 0;
     caps.context_image_models =
         IREE_HAL_AMDXDNA_NATIVE_C_CONTEXT_IMAGE_MODEL_NONE;
     caps.dispatch_models = IREE_HAL_AMDXDNA_NATIVE_C_DISPATCH_MODEL_START_DPU;

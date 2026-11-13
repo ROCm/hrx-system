@@ -202,19 +202,22 @@ static void iree_hal_amdxdna_chain_cache_apply_shared_code_memory_budget(
     iree_hal_amdxdna_device_chain_command_cache_t* cache,
     iree_host_size_t max_shared_code_memory_bytes,
     iree_host_size_t miss_reserve_bytes,
+    iree_host_size_t max_retained_code_bytes,
     iree_host_size_t live_context_image_bytes,
     iree_host_size_t single_cache_code_bytes,
     iree_host_size_t real_dev_heap_used_bytes) {
   // Estimate-based upper bound: keep retained chain code under
   // (heap - images - single - reserve). This matches the original count-based
-  // behavior and lets the cache grow to the 32MiB ceiling when the heap is not
-  // under pressure.
+  // behavior and lets the cache grow to the 32MiB ceiling (or the backend's
+  // retained-code ceiling) when the heap is not under pressure.
   iree_host_size_t budget = iree_hal_amdxdna_shared_code_memory_command_budget(
       max_shared_code_memory_bytes, miss_reserve_bytes,
       live_context_image_bytes, single_cache_code_bytes);
   if (budget > (iree_host_size_t)kAmdxdnaChainCommandCacheMaxInstructionBytes) {
     budget = kAmdxdnaChainCommandCacheMaxInstructionBytes;
   }
+  budget = iree_hal_amdxdna_clamp_retained_command_code(
+      budget, max_retained_code_bytes);
   // The instruction-word estimate undercounts real chain DEV-heap occupancy
   // (each BO costs roundup(size, 32 KiB)). Lower the chain ceiling only by the
   // chain cache's own overshoot. Context-image pressure is handled by the
@@ -2577,6 +2580,8 @@ static iree_status_t iree_hal_amdxdna_direct_command_buffer_flush_chains(
               command_buffer->device->native_caps.max_shared_code_memory_bytes,
               command_buffer->device->native_caps
                   .shared_code_memory_miss_reserve_bytes,
+              command_buffer->device->native_caps
+                  .max_retained_command_code_bytes,
               live_context_image_bytes, single_cache_code_bytes,
               real_dev_heap_used_bytes);
         }

@@ -14,6 +14,7 @@ namespace {
 
 constexpr iree_host_size_t kLinuxDevHeapBytes = 64u * 1024u * 1024u;
 constexpr iree_host_size_t kLinuxMissReserveBytes = 16u * 1024u * 1024u;
+constexpr iree_host_size_t kLinuxRetainedCommandCodeBytes = 4u * 1024u * 1024u;
 
 iree_hal_amdxdna_native_device_t* TryOpenNativeDevice() {
   iree_hal_amdxdna_device_params params;
@@ -44,14 +45,18 @@ TEST(AmdxdnaDevHeapE2E, QueryCapsAdvertisesLinuxHeapOnlyOnKmq) {
     // AIE4/UMQ has no DEV heap, so the KMQ domain stays disabled.
     EXPECT_EQ(caps.max_shared_code_memory_bytes, 0u);
     EXPECT_EQ(caps.shared_code_memory_miss_reserve_bytes, 0u);
+    EXPECT_EQ(caps.max_retained_command_code_bytes, 0u);
   } else {
     EXPECT_EQ(caps.max_shared_code_memory_bytes, kLinuxDevHeapBytes);
     EXPECT_EQ(caps.shared_code_memory_miss_reserve_bytes,
               kLinuxMissReserveBytes);
+    EXPECT_EQ(caps.max_retained_command_code_bytes,
+              kLinuxRetainedCommandCodeBytes);
   }
 #else
   EXPECT_EQ(caps.max_shared_code_memory_bytes, 0u);
   EXPECT_EQ(caps.shared_code_memory_miss_reserve_bytes, 0u);
+  EXPECT_EQ(caps.max_retained_command_code_bytes, 0u);
 #endif
   iree_hal_amdxdna_native_device_c_destroy(device);
 }
