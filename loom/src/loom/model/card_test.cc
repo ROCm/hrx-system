@@ -421,4 +421,36 @@ TEST_F(CardTest, PlainJsonAndScalarConfigurationAreRequired) {
                                       "\"config_typo\": {\"width\": 4")));
 }
 
+TEST_F(CardTest, RetainsLoaderTransformAndRejectsUnknownRecipes) {
+  std::string file =
+      R"json({"path":"cache/key/panels_gu.i8","format":"raw","transform":{"kind":"i8-panel","version":1,"source":"parameter/model.gguf","layout":"v2","cache":"cache","output":"resident-halves","kernel_version":"resident-full-k-i8-i32-bf16-column-scale-v1"}})json";
+  auto make = [&](const std::string& f) {
+    std::string json =
+        Replace("\"schema_version\": 1", "\"schema_version\": 2");
+    const std::string old = "\"weight/a.safetensors\"";
+    json.replace(json.find(old), old.size(), f);
+    return json;
+  };
+  IREE_ASSERT_OK(Parse(make(file)));
+  const auto* selection = loom_model_card_selection(card_);
+  const auto* parameter =
+      loom_model_selection_parameter(selection, IREE_SV("model"));
+  ASSERT_NE(parameter, nullptr);
+  const auto& transform = parameter->files.values[0].transform;
+  EXPECT_EQ(String(transform.source), "parameter/model.gguf");
+  EXPECT_EQ(String(transform.cache), "cache");
+  EXPECT_EQ(transform.output, LOOM_MODEL_TRANSFORM_I8_RESIDENT_HALVES);
+  for (const auto& change :
+       {std::pair<std::string, std::string>{"\"v2\"", "\"v3\""},
+        {"\"version\":1", "\"version\":2"},
+        {"parameter/model.gguf", "../model.gguf"},
+        {"resident-halves", "other"},
+        {"resident-full-k-i8-i32-bf16-column-scale-v1", "other"},
+        {"\"raw\"", "\"safetensors\""}}) {
+    std::string bad = file;
+    bad.replace(bad.find(change.first), change.first.size(), change.second);
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT, Parse(make(bad)));
+  }
+}
+
 }  // namespace

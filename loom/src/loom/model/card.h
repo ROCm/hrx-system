@@ -13,6 +13,19 @@
 extern "C" {
 #endif
 
+typedef enum loom_model_transform_output_e {
+  LOOM_MODEL_TRANSFORM_NONE = 0,
+  LOOM_MODEL_TRANSFORM_I8_RESIDENT_HALVES,
+  LOOM_MODEL_TRANSFORM_I8_COLSCALE,
+} loom_model_transform_output_t;
+
+// Validated i8-panel v1, layout v2, resident-full-k column-scale recipe.
+typedef struct loom_model_transform_t {
+  iree_string_view_t source;
+  iree_string_view_t cache;
+  loom_model_transform_output_t output;
+} loom_model_transform_t;
+
 // Local runtime coordinates. Acquisition origins and integrity locks are not
 // runtime inputs. Paths are relative to the directory containing the card.
 typedef struct loom_model_file_t {
@@ -20,6 +33,8 @@ typedef struct loom_model_file_t {
   iree_string_view_t path;
   // Explicit format, or empty when the consumer must infer it unambiguously.
   iree_string_view_t format;
+  // Optional loader-owned derivation, retained through parameter declarations.
+  loom_model_transform_t transform;
 } loom_model_file_t;
 
 typedef struct loom_model_file_list_t {

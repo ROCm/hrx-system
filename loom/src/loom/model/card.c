@@ -275,6 +275,64 @@ static iree_status_t loom_model_file(loom_model_card_t* card,
         loom_model_string_field(out_object, "path", true, &out_file->path));
     IREE_RETURN_IF_ERROR(loom_model_string_field(out_object, "format", false,
                                                  &out_file->format));
+    iree_string_view_t json = iree_string_view_empty();
+    IREE_RETURN_IF_ERROR(loom_model_value(
+        out_object, "transform", IREE_JSON_VALUE_TYPE_OBJECT, false, &json));
+    if (json.size) {
+      loom_model_json_object_t transform;
+      IREE_RETURN_IF_ERROR(loom_model_object(card, json, NULL, &transform));
+      iree_string_view_t kind;
+      IREE_RETURN_IF_ERROR(
+          loom_model_string_field(&transform, "kind", true, &kind));
+      if (iree_string_view_equal(kind, IREE_SV("i8-panel"))) {
+        if (card->selection.schema_version != 2) {
+          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                  "i8-panel requires model-card version 2");
+        }
+        IREE_RETURN_IF_ERROR(loom_model_check_fields(
+            &transform,
+            "kind version source layout cache output kernel_version"));
+        iree_string_view_t version, layout, kernel, output;
+        IREE_RETURN_IF_ERROR(loom_model_value(&transform, "version",
+                                              IREE_JSON_VALUE_TYPE_NUMBER, true,
+                                              &version));
+        IREE_RETURN_IF_ERROR(
+            loom_model_string_field(&transform, "layout", true, &layout));
+        IREE_RETURN_IF_ERROR(loom_model_string_field(
+            &transform, "kernel_version", true, &kernel));
+        IREE_RETURN_IF_ERROR(
+            loom_model_string_field(&transform, "output", true, &output));
+        if (!iree_string_view_equal(version, IREE_SV("1")) ||
+            !iree_string_view_equal(layout, IREE_SV("v2")) ||
+            !iree_string_view_equal(
+                kernel,
+                IREE_SV("resident-full-k-i8-i32-bf16-column-scale-v1")) ||
+            !iree_string_view_equal(out_file->format, IREE_SV("raw"))) {
+          return iree_make_status(
+              IREE_STATUS_INVALID_ARGUMENT,
+              "i8-panel requires version 1, layout v2, "
+              "resident-full-k-i8-i32-bf16-column-scale-v1 and raw storage");
+        }
+        if (iree_string_view_equal(output, IREE_SV("resident-halves"))) {
+          out_file->transform.output = LOOM_MODEL_TRANSFORM_I8_RESIDENT_HALVES;
+        } else if (iree_string_view_equal(output, IREE_SV("colscale"))) {
+          out_file->transform.output = LOOM_MODEL_TRANSFORM_I8_COLSCALE;
+        } else {
+          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                  "unsupported i8-panel output");
+        }
+        IREE_RETURN_IF_ERROR(loom_model_string_field(
+            &transform, "source", true, &out_file->transform.source));
+        IREE_RETURN_IF_ERROR(loom_model_string_field(
+            &transform, "cache", true, &out_file->transform.cache));
+        IREE_RETURN_IF_ERROR(loom_model_path(out_file->transform.source));
+        IREE_RETURN_IF_ERROR(loom_model_path(out_file->transform.cache));
+      } else if (!iree_string_view_equal(kind, IREE_SV("safetensors"))) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "unsupported parameter transform '%.*s'",
+                                (int)kind.size, kind.data);
+      }
+    }
   } else {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "model files require a path string or file object");
@@ -287,7 +345,7 @@ typedef struct loom_model_files_parse_t {
   loom_model_card_t* card;
   // Preallocated ordered output file array.
   loom_model_file_t* files;
-  // Parameter files may retain acquisition operations ignored by runtime IO.
+  // Parameter files may declare loader-owned transforms.
   bool parameter;
 } loom_model_files_parse_t;
 

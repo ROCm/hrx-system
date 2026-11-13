@@ -8,6 +8,7 @@
 
 #include "iree/io/parameter_index_provider.h"
 #include "iree/tooling/parameter_util.h"
+#include "loom/runtime/parameter/i8_panel.h"
 
 typedef struct loom_runtime_parameter_source_t {
   // Owned canonical keys, metadata, and open checkpoint files.
@@ -52,12 +53,19 @@ iree_status_t loom_runtime_parameter_sources_create(
   loom_runtime_parameter_sources_retain(prefix);
   catalog->first = loom_runtime_parameter_sources_count(prefix);
   iree_status_t status = iree_ok_status();
+  loom_runtime_i8_panel_cache_t* derived = NULL;
   for (uint32_t s = 0; s < count && iree_status_is_ok(status); ++s) {
     loom_runtime_parameter_source_t* source = &catalog->values[s];
     ++catalog->count;
     status = iree_io_parameter_index_create(host_allocator, &source->index);
     for (iree_host_size_t p = 0;
          p < paths[s].count && iree_status_is_ok(status); ++p) {
+      if (paths[s].values[p].transform.output != LOOM_MODEL_TRANSFORM_NONE) {
+        status = loom_runtime_i8_panel_append(sources, &paths[s].values[p],
+                                              host_allocator, &derived,
+                                              source->index);
+        continue;
+      }
       char* path = NULL;
       status = loom_runtime_path_resolve(sources->base_directory,
                                          paths[s].values[p].path,
@@ -75,6 +83,7 @@ iree_status_t loom_runtime_parameter_sources_create(
           host_allocator, &source->provider);
     }
   }
+  loom_runtime_i8_panel_cache_free(derived);
   if (iree_status_is_ok(status)) {
     *out_sources = catalog;
   } else {
