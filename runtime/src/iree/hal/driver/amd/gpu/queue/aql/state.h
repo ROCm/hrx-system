@@ -150,8 +150,8 @@ struct iree_hal_amd_gpu_aql_queue_t {
     uint64_t last;
     // Complete first header/setup word retained in ordinary CPU memory.
     uint32_t header;
-    // Accepted dispatch count, bounded independently of argument byte sizes.
-    uint32_t count;
+    // Complete final header/setup word, mutable until the first is published.
+    uint32_t last_header;
     // First logical position plus one; zero means no open run.
     iree_atomic_int64_t position;
     // Coalesced request to seal when the run becomes oldest outstanding work.

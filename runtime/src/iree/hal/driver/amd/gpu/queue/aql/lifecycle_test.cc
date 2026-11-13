@@ -448,7 +448,6 @@ TEST_F(AqlLifecycleTest, NativeStopReleasesAnUnpublishedRun) {
   Capture();
   queue_.run.completion = issued_[0].signal;
   iree_hal_amd_gpu_signal_retain(queue_.run.completion);
-  queue_.run.count = 1;
   queue_.run.position = 1;
   FailIssued();
   EXPECT_NE(queue_.run.completion, nullptr);
@@ -456,7 +455,6 @@ TEST_F(AqlLifecycleTest, NativeStopReleasesAnUnpublishedRun) {
   EXPECT_EQ(*issued_[0].signal->host_value, 1u);
   StopAndRetire();
   EXPECT_EQ(queue_.run.completion, nullptr);
-  EXPECT_EQ(queue_.run.count, 0u);
   EXPECT_EQ(queue_.run.position, 0);
   EXPECT_EQ(*readers_[0]->host_value, 1u);
   EXPECT_EQ(destroyed_, 6u);

@@ -175,7 +175,9 @@ class AqlPublicationTest
   void Publish(iree_hal_semaphore_t* output,
                std::vector<iree_hal_amd_gpu_aql_wait_t>& waits,
                bool reverse_scopes = false,
-               uint32_t acquire = IREE_HAL_AMD_GPU_AQL_HEADER_ACQUIRE_SYSTEM) {
+               uint32_t acquire = IREE_HAL_AMD_GPU_AQL_HEADER_ACQUIRE_SYSTEM,
+               uint32_t release = IREE_HAL_AMD_GPU_AQL_HEADER_RELEASE_SYSTEM,
+               bool release_before = false) {
     iree_hal_amd_gpu_aql_wait_counts_t counts;
     iree_host_size_t wait_index = 0;
     iree_hal_amd_gpu_aql_wait_kind_t kind;
@@ -183,8 +185,8 @@ class AqlPublicationTest
         &context_, &signals_[0].cache.pool, waits.size(), waits.data(), true,
         &counts, &wait_index, &kind));
     ASSERT_EQ(kind, IREE_HAL_AMD_GPU_AQL_WAIT_READY);
-    uint32_t before = acquire;
-    uint32_t after = IREE_HAL_AMD_GPU_AQL_HEADER_RELEASE_SYSTEM;
+    uint32_t before = acquire | (release_before ? release : 0);
+    uint32_t after = release_before ? 0 : release;
     if (reverse_scopes) {
       before |= IREE_HAL_AMD_GPU_AQL_HEADER_RELEASE_SYSTEM;
       after |= IREE_HAL_AMD_GPU_AQL_HEADER_ACQUIRE_SYSTEM;
@@ -279,7 +281,7 @@ TEST_P(AqlPublicationTest, SharedCompletionPreservesEveryDispatchBoundary) {
     EXPECT_NE(issued_[i].signal->host_value, issued_[0].signal->host_value);
   }
   EXPECT_EQ(doorbell_, 0u);
-  EXPECT_EQ(queue_.run.count, 4u);
+  EXPECT_EQ(queue_.run.last - queue_.run.first + 1, 4u);
   EXPECT_EQ(queue_.run.position, 2);
   ASSERT_EQ(iree_hal_amd_gpu_aql_publish_run(&queue_), AMDF_STATUS_OK);
   EXPECT_EQ(queue_.run.completion, nullptr);
@@ -319,6 +321,135 @@ TEST_P(AqlPublicationTest, HostPublicationAcquiresEachRunBeforePayloadScopes) {
     }
     EXPECT_EQ(doorbell_, first + 3);
   }
+}
+
+TEST_P(AqlPublicationTest, TerminalReleaseSharesTheUnpublishedFinalDispatch) {
+  const auto [release_kind, multiple_packets] = GetParam();
+  const uint32_t terminal_release =
+      release_kind ? IREE_HAL_AMD_GPU_AQL_HEADER_RELEASE_SYSTEM : 1u << 11;
+  const uint32_t run_length = multiple_packets ? 3 : 1;
+  std::array<uint8_t, 128> argument_bytes = {};
+  arguments_.memory.contents =
+      iree_make_byte_span(argument_bytes.data(), argument_bytes.size());
+  arguments_.address = 0x7000;
+  arguments_.capacity = argument_bytes.size();
+  const uint64_t constant = 0x123456789abcdef0;
+  layout_.byte_length = sizeof(constant);
+  request_.constants = iree_make_const_byte_span(&constant, sizeof(constant));
+  std::vector<iree_hal_amd_gpu_aql_wait_t> waits;
+  Publish(Semaphore(), waits);
+
+  for (uint32_t release : {0u, 1u << 11, 2u << 11}) {
+    const uint64_t first = queue_.producer.ring.reserved;
+    iree_hal_semaphore_t* tail = nullptr;
+    for (uint32_t i = 0; i < run_length; ++i) {
+      tail = Semaphore();
+      Publish(tail, waits, false, 0, release);
+    }
+    const uint64_t logical = queue_.producer.count;
+    const uint64_t argument_end = arguments_.end;
+    ASSERT_NE(queue_.run.completion, nullptr);
+    EXPECT_EQ(packets_[first].words[0], IREE_HAL_AMD_GPU_AQL_HEADER_INVALID);
+    waits = {{.semaphore = tail, .value = 1}};
+    request_.function = nullptr;
+    Publish(Semaphore(), waits, false, 0, terminal_release, release_kind & 1);
+    request_.function = &function_;
+    waits.clear();
+
+    EXPECT_EQ(queue_.producer.ring.reserved, first + run_length);
+    EXPECT_EQ(arguments_.end, argument_end);
+    EXPECT_EQ(queue_.producer.count, logical + 1);
+    EXPECT_EQ(queue_.run.completion, nullptr);
+    EXPECT_EQ(queue_.run.position, 0);
+    EXPECT_EQ(doorbell_, first + run_length - 1);
+    EXPECT_EQ(issued_[logical].submission->wait_count, 1u);
+    EXPECT_EQ(issued_[logical].submission->native_wait_count, 0u);
+    EXPECT_NE(issued_[logical].signal, issued_[logical - 1].signal);
+    EXPECT_EQ(issued_[logical].signal->host_value,
+              issued_[logical - 1].signal->host_value);
+    for (uint64_t position : {logical - 1, logical}) {
+      std::array<uint64_t, 2> frontier = {};
+      iree_hal_amd_gpu_signal_join_frontier(issued_[position].signal,
+                                            frontier.size(), frontier.data());
+      EXPECT_EQ(frontier[0], position + 1);
+    }
+    for (uint32_t i = 0; i < run_length; ++i) {
+      EXPECT_EQ(packets_[first + i].words[0],
+                (1u << 16) | IREE_HAL_AMD_GPU_AQL_HEADER_DISPATCH |
+                    IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED |
+                    (i ? 0 : IREE_HAL_AMD_GPU_AQL_HEADER_ACQUIRE_SYSTEM) |
+                    (i + 1 == run_length ? iree_max(release, terminal_release)
+                                         : release));
+      EXPECT_EQ(
+          PacketAddress(first + i, 14),
+          i + 1 == run_length ? issued_[logical].signal->device_address : 0u);
+    }
+  }
+}
+
+TEST_P(AqlPublicationTest, TerminalReleasePreservesForeignWaitsAndAcquires) {
+  const auto [other_count, acquire] = GetParam();
+  std::vector<iree_hal_amd_gpu_aql_wait_t> waits;
+  Publish(Semaphore(), waits, false, 0, 0);
+  auto* tail = Semaphore();
+  Publish(tail, waits, false, 0, 0);
+  waits = {{.semaphore = tail, .value = 1}};
+  for (int i = 0; i < other_count; ++i) {
+    auto* signal =
+        iree_hal_amd_gpu_signal_pool_try_acquire(&signals_[1].cache.pool, 1);
+    ASSERT_NE(signal, nullptr);
+    other_producers_.push_back(signal);
+    const uint64_t frontier[2] = {0, static_cast<uint64_t>(i + 1)};
+    iree_hal_amd_gpu_signal_publish_frontier(signal, frontier);
+    auto* semaphore = Semaphore();
+    IREE_ASSERT_OK(
+        iree_hal_amd_gpu_semaphore_publish_signal(semaphore, 1, signal));
+    waits.push_back({.semaphore = semaphore, .value = 1});
+  }
+  request_.function = nullptr;
+  Publish(Semaphore(), waits, false,
+          acquire ? IREE_HAL_AMD_GPU_AQL_HEADER_ACQUIRE_SYSTEM : 0);
+  const bool separate = acquire || other_count;
+  EXPECT_EQ(queue_.producer.ring.reserved,
+            2u + (other_count + 4) / 5 + separate);
+  EXPECT_EQ(queue_.run.completion, nullptr);
+  EXPECT_EQ(frontier_[1], other_count);
+  EXPECT_EQ(issued_[2].submission->native_wait_count, other_count);
+  EXPECT_EQ(issued_[2].signal->host_value == issued_[1].signal->host_value,
+            !separate);
+  if (separate) {
+    const uint64_t terminal = queue_.producer.ring.reserved - 1;
+    EXPECT_EQ(packets_[terminal].words[0],
+              IREE_HAL_AMD_GPU_AQL_HEADER_BARRIER_AND |
+                  IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED |
+                  (acquire ? IREE_HAL_AMD_GPU_AQL_HEADER_ACQUIRE_SYSTEM : 0) |
+                  IREE_HAL_AMD_GPU_AQL_HEADER_RELEASE_SYSTEM);
+    EXPECT_EQ(PacketAddress(terminal, 14), issued_[2].signal->device_address);
+  }
+}
+
+TEST_P(AqlPublicationTest, ProfiledBarriersRetainIndependentCompletions) {
+  std::vector<iree_hal_amd_gpu_aql_wait_t> waits;
+  Publish(Semaphore(), waits);
+  Publish(Semaphore(), waits);
+  auto operation = BeginProfile();
+  iree_hal_amd_gpu_profile_operation_initialize(
+      queue_.profile, 0, IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_BARRIER, 0, 0, 0,
+      &operation);
+  const iree_hal_amd_gpu_aql_dispatch_request_t request = {};
+  iree_hal_amd_gpu_aql_submission_t* submission = nullptr;
+  iree_status_t status = iree_ok_status();
+  ASSERT_EQ(
+      iree_hal_amd_gpu_aql_publish(&queue_, &request, 0, nullptr, {}, {}, 0,
+                                   IREE_HAL_AMD_GPU_AQL_HEADER_RELEASE_SYSTEM,
+                                   nullptr, &operation, &submission, &status),
+      IREE_HAL_AMD_GPU_AQL_PUBLISH_DONE);
+  IREE_ASSERT_OK(status);
+  EXPECT_EQ(queue_.producer.ring.reserved, 3u);
+  EXPECT_EQ(queue_.run.completion, nullptr);
+  EXPECT_NE(issued_[2].signal->host_value, issued_[1].signal->host_value);
+  EXPECT_NE(iree_hal_amd_gpu_aql_submission_profile(submission), nullptr);
+  EXPECT_EQ(PacketAddress(2, 14), issued_[2].signal->device_address);
 }
 
 TEST_P(AqlPublicationTest, EmitsOnlyRequiredDependenciesAndCacheBoundaries) {

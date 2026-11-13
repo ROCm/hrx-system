@@ -41,7 +41,6 @@ amdf_status_t iree_hal_amd_gpu_aql_publish_run(
   iree_memcpy_write_only(words + 14, &completion->device_address,
                          sizeof(completion->device_address));
   queue->run.completion = NULL;
-  queue->run.count = 0;
   iree_atomic_store(&queue->run.position, 0, iree_memory_order_release);
   const amdf_status_t status = iree_hal_amd_gpu_aql_ring_publish_header(
       ring, &queue->storage, queue->run.first, queue->run.header);
@@ -287,7 +286,13 @@ iree_hal_amd_gpu_aql_publish_result_t iree_hal_amd_gpu_aql_publish(
   const bool run_eligible = dispatch && !indirect && !indirect_arguments &&
                             !cooperative && !prefix && !suffix &&
                             !counts.native_count && !operation;
-  if (!run_eligible) {
+  const bool run_release =
+      queue->run.completion && !request->function && !operation &&
+      !counts.native_count && !((before | after) & (3u << 9)) &&
+      ((before | after) & (3u << 11)) &&
+      (!*inout_submission || (*inout_submission)->entry.kind ==
+                                 IREE_HAL_AMD_GPU_AQL_ENTRY_SUBMISSION);
+  if (!run_eligible && !run_release) {
     const amdf_status_t seal_status = iree_hal_amd_gpu_aql_publish_run(queue);
     if (!amdf_status_is_ok(seal_status)) {
       *out_status = IREE_HAL_AMD_STATUS_FROM_AMDF(seal_status,
@@ -295,8 +300,10 @@ iree_hal_amd_gpu_aql_publish_result_t iree_hal_amd_gpu_aql_publish(
       return IREE_HAL_AMD_GPU_AQL_PUBLISH_DONE;
     }
   }
-  const uint32_t packet_count = (counts.native_count + 4) / 5 + prefix +
-                                indirect + dispatch + suffix + cooperative;
+  const uint32_t packet_count = run_release ? 0
+                                            : (counts.native_count + 4) / 5 +
+                                                  prefix + indirect + dispatch +
+                                                  suffix + cooperative;
   iree_hal_amd_gpu_aql_ring_t* ring = &queue->producer.ring;
   if (ring->reserved - ring->consumed + packet_count > ring->capacity) {
     ring->consumed =
@@ -336,7 +343,7 @@ iree_hal_amd_gpu_aql_publish_result_t iree_hal_amd_gpu_aql_publish(
     return IREE_HAL_AMD_GPU_AQL_PUBLISH_DONE;
   }
   iree_hal_amd_gpu_signal_t* signal =
-      run_eligible && queue->run.completion
+      (run_eligible || run_release) && queue->run.completion
           ? iree_hal_amd_gpu_signal_pool_try_acquire_alias(
                 &queue->options.signals->pool, queue->run.completion)
           : iree_hal_amd_gpu_signal_pool_try_acquire(
@@ -358,6 +365,34 @@ iree_hal_amd_gpu_aql_publish_result_t iree_hal_amd_gpu_aql_publish(
       return IREE_HAL_AMD_GPU_AQL_PUBLISH_DONE;
     }
     *inout_submission = submission;
+  }
+  for (iree_host_size_t i = 0; i < wait_count; ++i) {
+    if (waits[i].signal) {
+      iree_hal_amd_gpu_signal_join_frontier(waits[i].signal,
+                                            queue->producer.queue_count,
+                                            queue->producer.frontier);
+    }
+  }
+  if (run_release) {
+    // The first INVALID header still guards every packet in this run. Its
+    // ordered final dispatch can perform the terminal release without another
+    // packet. Preserve independent logical ownership on a completion alias.
+    const uint32_t release = iree_max(before & (3u << 11), after & (3u << 11));
+    const uint32_t header =
+        (queue->run.last_header & ~(3u << 11)) |
+        iree_max(queue->run.last_header & (3u << 11), release);
+    if (queue->run.first == queue->run.last) {
+      queue->run.header = header;
+    } else {
+      iree_memcpy_write_only(
+          ring->packets[queue->run.last & (ring->capacity - 1)].words, &header,
+          sizeof(header));
+    }
+    iree_hal_amd_gpu_aql_accept(queue, submission, signal, position,
+                                argument_end, true, true);
+    iree_hal_amd_gpu_aql_publish_retirement(queue, position);
+    iree_hal_amd_gpu_aql_publish_run(queue);
+    return IREE_HAL_AMD_GPU_AQL_PUBLISH_DONE;
   }
   const uint64_t grid_offset = iree_align_uint64(
       indirect ? iree_align_uint64(kernarg_length, 8) +
@@ -438,7 +473,6 @@ iree_hal_amd_gpu_aql_publish_result_t iree_hal_amd_gpu_aql_publish(
       queue->run.completion = signal;
       iree_hal_amd_gpu_signal_retain(signal);
     }
-    ++queue->run.count;
   }
   // Prepare the terminal packet before a retirement slot can be consumed.
   // A ready request may borrow the same capture which native retirement frees.
@@ -492,13 +526,6 @@ iree_hal_amd_gpu_aql_publish_result_t iree_hal_amd_gpu_aql_publish(
   IREE_ASSERT(reserved, "exclusive publication retains admitted packet credit");
   (void)reserved;
   arguments->end = argument_end;
-  for (iree_host_size_t i = 0; i < wait_count; ++i) {
-    if (waits[i].signal) {
-      iree_hal_amd_gpu_signal_join_frontier(waits[i].signal,
-                                            queue->producer.queue_count,
-                                            queue->producer.frontier);
-    }
-  }
   iree_hal_amd_gpu_aql_accept(queue, submission, signal, position, argument_end,
                               true, true);
   amdf_status_t publication_status = iree_hal_amd_gpu_aql_emit_waits(
@@ -511,6 +538,7 @@ iree_hal_amd_gpu_aql_publish_result_t iree_hal_amd_gpu_aql_publish(
       queue->run.header = payload.words[0];
     }
     queue->run.last = packet_position;
+    queue->run.last_header = payload.words[0];
     iree_hal_amd_gpu_aql_ring_write_body(ring, packet_position, &payload);
     if (!first_in_run) {
       iree_memcpy_write_only(
@@ -520,7 +548,7 @@ iree_hal_amd_gpu_aql_publish_result_t iree_hal_amd_gpu_aql_publish(
       iree_atomic_store(&queue->run.position, position + 1,
                         iree_memory_order_release);
     }
-    if (queue->run.count == 64) {
+    if (queue->run.last - queue->run.first + 1 == 64) {
       iree_hal_amd_gpu_aql_publish_run(queue);
     } else if (first_in_run) {
       // A predecessor can retire between admission and this handoff. This
