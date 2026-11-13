@@ -31,22 +31,22 @@ func.def @prepare_linear_contribution(%input: view<8xi32>, %initial: i32) -> (i3
   %part_0 = index.constant 0 : index
   %address = index.madd %row_0, %count, %part_0 : index
   %value = view.load %input[%address] : view<8xi32> -> i32
-  %next_partial = scalar.addi %identity, %value : i32
   %part_1 = index.constant 1 : index
-  %address_1$32 = index.madd %row_0, %count, %part_1 : index
-  %value_1$33 = view.load %input[%address_1$32] : view<8xi32> -> i32
-  %next_partial_1$34 = scalar.addi %next_partial, %value_1$33 : i32
+  %address_1$31 = index.madd %row_0, %count, %part_1 : index
+  %value_1$32 = view.load %input[%address_1$31] : view<8xi32> -> i32
   %part_0_1 = index.constant 0 : index
-  %address_1$36 = index.madd %row_1, %count, %part_0_1 : index
-  %value_1$37 = view.load %input[%address_1$36] : view<8xi32> -> i32
-  %next_partial_1$38 = scalar.addi %identity, %value_1$37 : i32
+  %address_1$34 = index.madd %row_1, %count, %part_0_1 : index
+  %value_1$35 = view.load %input[%address_1$34] : view<8xi32> -> i32
   %part_1_1 = index.constant 1 : index
   %address_1_1 = index.madd %row_1, %count, %part_1_1 : index
   %value_1_1 = view.load %input[%address_1_1] : view<8xi32> -> i32
-  %next_partial_1_1 = scalar.addi %next_partial_1$38, %value_1_1 : i32
   scf.schedule.fence
-  %next = scalar.addi %initial, %next_partial_1$34 : i32
+  %next_partial = scalar.addi %identity, %value : i32
+  %next_partial_1$40 = scalar.addi %next_partial, %value_1$32 : i32
+  %next = scalar.addi %initial, %next_partial_1$40 : i32
   scf.schedule.fence
+  %next_partial_1$42 = scalar.addi %identity, %value_1$35 : i32
+  %next_partial_1_1 = scalar.addi %next_partial_1$42, %value_1_1 : i32
   %next_1 = scalar.addi %next, %next_partial_1_1 : i32
   func.return %next_1 : i32
 }

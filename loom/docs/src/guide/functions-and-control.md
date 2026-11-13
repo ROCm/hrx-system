@@ -584,6 +584,16 @@ and a remainder executes only the iterations in the original half-open range:
 three iterations still produce `22`, including the final view identity.
 Unrolling preserves the program's data and completion dependencies.
 
+`schedule(recurrence)` overlaps independent work in a two-iteration rolling
+window. When the body has independent ordinary reads, their address and payload
+prerequisites run ahead; arithmetic consuming the loaded values stays with the
+current iteration's carried update. Without such reads, the window overlaps
+independent computation. Explicit full linear unrolling of a nested body exposes
+its operations to this schedule when its original bounds already prove the full
+iteration count. Inner bounds that need outer-iteration specialization retain
+that ordering. Memory effects, collective participation, and authored fences
+continue to constrain which operations can advance.
+
 The [loop-tuning walkthrough](../workflows/tune-loop-schedules.md) combines
 these controls in checked row-sum and packed-dot examples, including serial
 controls, configuration sweeps, and compiler evidence.
