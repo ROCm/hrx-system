@@ -16,6 +16,12 @@ static iree_status_t loom_amdgpu_artifact_symbol_claim(
     const loom_module_t* module, iree_string_view_t symbol,
     const loom_op_t* source_op, iree_diagnostic_emitter_t emitter,
     iree_bitmap_t claimed_names, bool* accepted) {
+  if (symbol.size > UINT32_MAX - 1u) {
+    *accepted = false;
+    return loom_target_artifact_emit_limit(
+        emitter, source_op, IREE_SV("AMDGPU HSACO"),
+        IREE_SV("symbol name byte length"), symbol.size, UINT32_MAX - 1u);
+  }
   if (!loom_amdgpu_symbol_name_is_valid(symbol)) {
     *accepted = false;
     return loom_target_artifact_emit_symbol_requirement(

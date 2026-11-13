@@ -250,12 +250,12 @@ iree_status_t loom_amdgpu_kernel_record_build(
 
   const iree_string_view_t symbol = loom_amdgpu_kernel_record_export_symbol(
       &schedule->target, schedule->module, schedule->function_op);
-  // The descriptor appends ".kd" to this name. Both names are MessagePack
-  // strings in the metadata note, whose encoded lengths are unsigned u32.
-  if (symbol.size > UINT32_MAX - 3u) {
+  // The descriptor appends ".kd" and the ELF string table appends a NUL.
+  // Both ELF name offsets and MessagePack string lengths are unsigned u32.
+  if (symbol.size > UINT32_MAX - 4u) {
     return loom_target_artifact_emit_limit(
-        emitter, schedule->function_op, IREE_SV("AMDGPU metadata"),
-        IREE_SV("kernel name byte length"), symbol.size, UINT32_MAX - 3u);
+        emitter, schedule->function_op, IREE_SV("AMDGPU HSACO"),
+        IREE_SV("kernel name byte length"), symbol.size, UINT32_MAX - 4u);
   }
   if (!loom_amdgpu_symbol_name_is_valid(symbol)) {
     return loom_target_artifact_emit_symbol_requirement(
