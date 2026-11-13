@@ -6,7 +6,6 @@
 
 #include "loom/target/emit/spirv/binary_writer.h"
 
-#include <inttypes.h>
 #include <string.h>
 
 void loom_spirv_binary_writer_initialize(
@@ -40,7 +39,7 @@ static iree_status_t loom_spirv_binary_writer_reserve(
   iree_host_size_t minimum_word_capacity = 0;
   if (!iree_host_size_checked_add(writer->word_count, additional_words,
                                   &minimum_word_capacity)) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                             "SPIR-V binary word count overflow");
   }
   if (minimum_word_capacity <= writer->word_capacity) {
@@ -56,7 +55,7 @@ static iree_status_t loom_spirv_binary_writer_reserve(
   iree_host_size_t new_byte_capacity = 0;
   if (!iree_host_size_checked_mul(new_word_capacity, sizeof(uint32_t),
                                   &new_byte_capacity)) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                             "SPIR-V binary byte count overflow");
   }
   IREE_RETURN_IF_ERROR(iree_allocator_realloc(
@@ -91,12 +90,7 @@ iree_status_t loom_spirv_binary_write_words(loom_spirv_binary_writer_t* writer,
 static iree_status_t loom_spirv_binary_write_instruction_header(
     loom_spirv_binary_writer_t* writer, uint16_t opcode,
     iree_host_size_t operand_word_count) {
-  if (operand_word_count > UINT16_MAX - 1u) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "SPIR-V opcode %" PRIu16
-                            " operand count exceeds instruction limit",
-                            opcode);
-  }
+  IREE_ASSERT_LE(operand_word_count, UINT16_MAX - 1u);
   const uint32_t instruction_word_count = (uint32_t)operand_word_count + 1u;
   const uint32_t header = (instruction_word_count << 16) | opcode;
   return loom_spirv_binary_write_word(writer, header);
@@ -114,12 +108,7 @@ iree_status_t loom_spirv_binary_write_instruction(
 static iree_status_t loom_spirv_binary_write_string_words(
     loom_spirv_binary_writer_t* writer, iree_string_view_t string,
     iree_host_size_t* out_word_count) {
-  iree_host_size_t byte_count = 0;
-  if (!iree_host_size_checked_add(string.size, 1, &byte_count)) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "SPIR-V literal string length overflow");
-  }
-  const iree_host_size_t word_count = iree_host_size_ceil_div(byte_count, 4);
+  const iree_host_size_t word_count = string.size / 4 + 1;
   IREE_RETURN_IF_ERROR(loom_spirv_binary_writer_reserve(writer, word_count));
   uint32_t* string_words = writer->words + writer->word_count;
   memset(string_words, 0, word_count * sizeof(uint32_t));
@@ -135,21 +124,9 @@ iree_status_t loom_spirv_binary_write_string_instruction(
     iree_string_view_t string, const uint32_t* suffix_operands,
     iree_host_size_t suffix_operand_count) {
   IREE_ASSERT_ARGUMENT(writer);
-  iree_host_size_t string_byte_count = 0;
-  if (!iree_host_size_checked_add(string.size, 1, &string_byte_count)) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "SPIR-V literal string length overflow");
-  }
-  const iree_host_size_t string_word_count =
-      iree_host_size_ceil_div(string_byte_count, 4);
-  iree_host_size_t operand_word_count = 0;
-  if (!iree_host_size_checked_add(prefix_operand_count, string_word_count,
-                                  &operand_word_count) ||
-      !iree_host_size_checked_add(operand_word_count, suffix_operand_count,
-                                  &operand_word_count)) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "SPIR-V instruction word count overflow");
-  }
+  const iree_host_size_t string_word_count = string.size / 4 + 1;
+  const iree_host_size_t operand_word_count =
+      prefix_operand_count + string_word_count + suffix_operand_count;
 
   IREE_RETURN_IF_ERROR(loom_spirv_binary_write_instruction_header(
       writer, opcode, operand_word_count));

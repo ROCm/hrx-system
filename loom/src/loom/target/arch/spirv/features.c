@@ -6,7 +6,6 @@
 
 #include "loom/target/arch/spirv/features.h"
 
-#include <inttypes.h>
 #include <string.h>
 
 #include "loom/target/arch/spirv/features_tables.inl"
@@ -109,58 +108,9 @@ static void loom_spirv_feature_set_apply_models(
   }
 }
 
-static const loom_spirv_feature_atom_descriptor_t*
-loom_spirv_feature_set_find_missing_dependency(
-    loom_spirv_feature_bits_t missing_atom_bits) {
-  for (uint32_t i = LOOM_SPIRV_FEATURE_ATOM_UNKNOWN + 1;
-       i < LOOM_SPIRV_FEATURE_ATOM_COUNT; ++i) {
-    const loom_spirv_feature_atom_t atom = (loom_spirv_feature_atom_t)i;
-    if (iree_any_bit_set(missing_atom_bits,
-                         loom_spirv_feature_atom_bit(atom))) {
-      return &kSpirvFeatureAtoms[atom];
-    }
-  }
-  return NULL;
-}
-
-static iree_string_view_t loom_spirv_feature_atom_primary_extension(
-    const loom_spirv_feature_atom_descriptor_t* descriptor) {
-  return descriptor->extension_count != 0 ? descriptor->extension_names[0]
-                                          : IREE_SV("<core>");
-}
-
-static uint32_t loom_spirv_feature_atom_primary_capability(
-    const loom_spirv_feature_atom_descriptor_t* descriptor) {
-  return descriptor->capability_count != 0 ? descriptor->capabilities[0]
-                                           : UINT32_MAX;
-}
-
-static iree_status_t loom_spirv_feature_set_apply_atom(
+static void loom_spirv_feature_set_apply_atom(
     const loom_spirv_feature_atom_descriptor_t* descriptor,
-    iree_string_view_t target_name,
-    loom_spirv_feature_bits_t requested_atom_bits,
     loom_spirv_feature_set_t* feature_set) {
-  const loom_spirv_feature_bits_t missing_bits =
-      descriptor->required_atom_bits & ~requested_atom_bits;
-  if (missing_bits != 0) {
-    const loom_spirv_feature_atom_descriptor_t* missing_descriptor =
-        loom_spirv_feature_set_find_missing_dependency(missing_bits);
-    const iree_string_view_t missing_name = missing_descriptor != NULL
-                                                ? missing_descriptor->name
-                                                : IREE_SV("<unknown>");
-    const iree_string_view_t extension_name =
-        loom_spirv_feature_atom_primary_extension(descriptor);
-    const uint32_t capability =
-        loom_spirv_feature_atom_primary_capability(descriptor);
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "SPIR-V target '%.*s' feature atom '%.*s' from extension '%.*s' and "
-        "capability %" PRIu32
-        " is missing dependency '%.*s' (bits 0x%016" PRIx64 ")",
-        (int)target_name.size, target_name.data, (int)descriptor->name.size,
-        descriptor->name.data, (int)extension_name.size, extension_name.data,
-        capability, (int)missing_name.size, missing_name.data, missing_bits);
-  }
   feature_set->minimum_spirv_version = iree_max(
       feature_set->minimum_spirv_version, descriptor->minimum_spirv_version);
   loom_spirv_feature_set_apply_models(descriptor, feature_set);
@@ -188,25 +138,13 @@ static iree_status_t loom_spirv_feature_set_apply_atom(
                                          &feature_set->decoration_count,
                                          descriptor->decorations[i]);
   }
-  return iree_ok_status();
 }
 
-iree_status_t loom_spirv_feature_set_prepare(
-    iree_string_view_t target_name,
+void loom_spirv_feature_set_prepare(
     loom_spirv_feature_bits_t requested_atom_bits,
     loom_spirv_feature_set_t* out_feature_set) {
-  IREE_ASSERT_ARGUMENT(out_feature_set);
-
-  const loom_spirv_feature_bits_t unknown_bits =
-      requested_atom_bits & ~loom_spirv_known_feature_bits();
-  if (unknown_bits != 0) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "SPIR-V target '%.*s' requested unknown feature "
-                            "bits 0x%016" PRIx64,
-                            (int)target_name.size, target_name.data,
-                            unknown_bits);
-  }
-
+  requested_atom_bits =
+      loom_spirv_feature_bits_with_dependencies(requested_atom_bits);
   memset(out_feature_set, 0, sizeof(*out_feature_set));
   out_feature_set->atom_bits = requested_atom_bits;
   out_feature_set->addressing_model = LOOM_SPIRV_ADDRESSING_MODEL_UNSPECIFIED;
@@ -218,9 +156,8 @@ iree_status_t loom_spirv_feature_set_prepare(
                           loom_spirv_feature_atom_bit(atom))) {
       continue;
     }
-    IREE_RETURN_IF_ERROR(loom_spirv_feature_set_apply_atom(
-        &kSpirvFeatureAtoms[atom], target_name, requested_atom_bits,
-        out_feature_set));
+    loom_spirv_feature_set_apply_atom(&kSpirvFeatureAtoms[atom],
+                                      out_feature_set);
   }
   if (out_feature_set->addressing_model ==
       LOOM_SPIRV_ADDRESSING_MODEL_UNSPECIFIED) {
@@ -229,5 +166,4 @@ iree_status_t loom_spirv_feature_set_prepare(
   if (out_feature_set->memory_model == LOOM_SPIRV_MEMORY_MODEL_UNSPECIFIED) {
     out_feature_set->memory_model = LOOM_SPIRV_MEMORY_MODEL_GLSL450;
   }
-  return iree_ok_status();
 }

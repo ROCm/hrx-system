@@ -20,6 +20,7 @@
 #include "loom/ops/op_defs.h"
 #include "loom/target/arch/spirv/descriptors/descriptors.h"
 #include "loom/target/arch/spirv/error_catalog.h"
+#include "loom/target/arch/spirv/features.h"
 #include "loom/target/arch/spirv/registers.h"
 #include "loom/target/artifact_diagnostics.h"
 #include "loom/target/emit/spirv/module_emitter.h"
@@ -177,20 +178,39 @@ static iree_status_t loom_spirv_program_build_value_types(
 
 static iree_status_t loom_spirv_program_build_internal_signature(
     loom_spirv_program_build_t* build, loom_op_t* function_op,
-    loom_spirv_function_plan_t* function) {
+    loom_spirv_function_plan_t* function,
+    iree_diagnostic_emitter_t diagnostic_emitter, bool* out_accepted) {
+  *out_accepted = false;
   const loom_func_like_t function_like =
       loom_func_like_cast(build->module, function_op);
   const loom_value_id_t* parameter_ids =
       loom_func_like_arg_ids(function_like, &function->parameter_count);
+  const loom_value_slice_t results = loom_low_func_def_results(function_op);
+  function->result_count = results.count;
+  // Every non-entry definition is reached through a call. OpFunctionCall's
+  // header, result type, result ID, and callee leave 65531 argument words;
+  // this also admits the less restrictive OpTypeFunction declaration.
+  if (function->parameter_count > UINT16_MAX - 4u) {
+    return loom_target_artifact_emit_limit(
+        diagnostic_emitter, function_op, IREE_SV("SPIR-V"),
+        IREE_SV("function parameters"), function->parameter_count,
+        UINT16_MAX - 4u);
+  }
+  // Aggregate returns need a header, result type, and result ID before their
+  // members. This also admits the result OpTypeStruct declaration.
+  if (function->result_count > UINT16_MAX - 3u) {
+    return loom_target_artifact_emit_limit(
+        diagnostic_emitter, function_op, IREE_SV("SPIR-V"),
+        IREE_SV("function results"), function->result_count, UINT16_MAX - 3u);
+  }
   IREE_RETURN_IF_ERROR(loom_spirv_program_build_value_types(
       build->module, parameter_ids, function->parameter_count,
       build->symbol_facts.arena, &function->parameter_types));
-
-  const loom_value_slice_t results = loom_low_func_def_results(function_op);
-  function->result_count = results.count;
-  return loom_spirv_program_build_value_types(
+  IREE_RETURN_IF_ERROR(loom_spirv_program_build_value_types(
       build->module, results.values, function->result_count,
-      build->symbol_facts.arena, &function->result_types);
+      build->symbol_facts.arena, &function->result_types));
+  *out_accepted = true;
+  return iree_ok_status();
 }
 
 static iree_status_t loom_spirv_program_build_function(
@@ -237,6 +257,21 @@ static iree_status_t loom_spirv_program_build_function(
   diagnostic_scope.export_name =
       loom_target_facts_export_name(target.target_facts);
 
+  if (target_bundle->snapshot->artifact_format !=
+      LOOM_TARGET_ARTIFACT_FORMAT_SPIRV_BINARY) {
+    *out_disposition = LOOM_SPIRV_PROGRAM_FUNCTION_REJECTED;
+    return loom_target_artifact_emit_requirement(
+        loom_diagnostic_export_scope_emitter(&diagnostic_scope), function_op,
+        IREE_SV("SPIR-V"), IREE_SV("the SPIR-V binary artifact format"));
+  }
+  if (target_bundle->config->contract_feature_bits &
+      ~loom_spirv_known_feature_bits()) {
+    *out_disposition = LOOM_SPIRV_PROGRAM_FUNCTION_REJECTED;
+    return loom_target_artifact_emit_requirement(
+        loom_diagnostic_export_scope_emitter(&diagnostic_scope), function_op,
+        IREE_SV("SPIR-V"), IREE_SV("supported target features"));
+  }
+
   const loom_func_type_data_t* logical_signature = NULL;
   if (target_bundle->export_plan->abi_kind == LOOM_TARGET_ABI_HAL_KERNEL) {
     logical_signature = loom_spirv_program_function_logical_signature(
@@ -268,8 +303,15 @@ static iree_status_t loom_spirv_program_build_function(
       .is_entry = build->entry_symbols[function_ref.symbol_id],
   };
   if (!function->is_entry) {
+    bool signature_accepted = false;
     IREE_RETURN_IF_ERROR(loom_spirv_program_build_internal_signature(
-        build, function_op, function));
+        build, function_op, function,
+        loom_diagnostic_export_scope_emitter(&diagnostic_scope),
+        &signature_accepted));
+    if (!signature_accepted) {
+      *out_disposition = LOOM_SPIRV_PROGRAM_FUNCTION_REJECTED;
+      return iree_ok_status();
+    }
   }
   const uint32_t function_index = (uint32_t)build->function_count++;
   build->function_indices_by_symbol[function_ref.symbol_id] = function_index;
@@ -384,14 +426,28 @@ static iree_status_t loom_spirv_program_validate_call_closure(
                                                  occurrence_id);
       if (occurrence->kind == LOOM_SYMBOL_REFERENCE_OCCURRENCE_CALL &&
           occurrence->user_op != NULL &&
-          loom_low_func_call_isa(occurrence->user_op) &&
-          build->function_indices_by_symbol[occurrence->target_symbol_id] ==
-              LOOM_SPIRV_PROGRAM_FUNCTION_INDEX_NONE) {
+          loom_low_func_call_isa(occurrence->user_op)) {
+        const uint32_t callee_index =
+            build->function_indices_by_symbol[occurrence->target_symbol_id];
+        if (callee_index != LOOM_SPIRV_PROGRAM_FUNCTION_INDEX_NONE &&
+            !build->functions[callee_index].is_entry) {
+          occurrence_id = occurrence->next_outgoing_occurrence_id;
+          continue;
+        }
         loom_diagnostic_export_scope_t diagnostic_scope = {
             .export_name =
                 loom_target_facts_export_name(function->target_facts),
             .target = build->diagnostic_emitter,
         };
+        if (callee_index != LOOM_SPIRV_PROGRAM_FUNCTION_INDEX_NONE) {
+          return loom_target_artifact_emit_symbol_requirement(
+              loom_diagnostic_export_scope_emitter(&diagnostic_scope),
+              occurrence->user_op, IREE_SV("SPIR-V"),
+              loom_low_diagnostic_symbol_name(
+                  build->module,
+                  loom_low_func_call_callee(occurrence->user_op)),
+              IREE_SV("an internal function callee instead of an entry point"));
+        }
         const loom_diagnostic_param_t params[] = {
             loom_param_string(loom_low_diagnostic_function_name(
                 build->module, function->function_op)),
@@ -567,10 +623,8 @@ static iree_status_t loom_spirv_program_compile(
   if (!accepted) {
     return iree_ok_status();
   }
-  IREE_RETURN_IF_ERROR(loom_spirv_program_emit_binary(out_program, arena,
-                                                      allocator, out_module));
-  *out_emitted = true;
-  return iree_ok_status();
+  return loom_spirv_program_emit_binary(out_program, diagnostic_emitter, arena,
+                                        allocator, out_emitted, out_module);
 }
 
 iree_status_t loom_spirv_compile_module_binary(

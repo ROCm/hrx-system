@@ -72,28 +72,29 @@ static iree_string_view_t loom_spirv_emit_export_name(
 }
 
 static iree_status_t loom_spirv_emit_op_name(loom_spirv_emit_state_t* state,
+                                             const loom_op_t* source_op,
                                              uint32_t id,
                                              iree_string_view_t name) {
   if (id == 0 || iree_string_view_is_empty(name)) {
     return iree_ok_status();
   }
   const uint32_t prefix_operands[] = {id};
-  return loom_spirv_binary_write_string_instruction(
-      loom_spirv_emit_section(state, LOOM_SPIRV_MODULE_SECTION_DEBUG),
-      LOOM_SPIRV_OP_NAME, prefix_operands, IREE_ARRAYSIZE(prefix_operands),
-      name, NULL, 0);
+  return loom_spirv_module_builder_emit_string(
+      state->builder, LOOM_SPIRV_MODULE_SECTION_DEBUG, LOOM_SPIRV_OP_NAME,
+      prefix_operands, IREE_ARRAYSIZE(prefix_operands), name, NULL, 0,
+      state->context->diagnostic_emitter, source_op, state->context->accepted);
 }
 
 static iree_status_t loom_spirv_emit_value_name(loom_spirv_emit_state_t* state,
                                                 loom_value_id_t value_id,
                                                 uint32_t id) {
-  if (value_id >= state->module->values.count) {
-    return iree_ok_status();
-  }
   const loom_value_t* value = loom_module_value(state->module, value_id);
   return loom_spirv_emit_op_name(
-      state, id,
-      loom_spirv_emit_string_or_empty(state->module, value->name_id));
+      state,
+      loom_value_is_block_arg(value)
+          ? loom_value_def_block(value)->parent_region->parent_op
+          : loom_value_def_op(value),
+      id, loom_spirv_emit_string_or_empty(state->module, value->name_id));
 }
 
 iree_status_t loom_spirv_emit_define_value(
@@ -148,6 +149,8 @@ static loom_spirv_module_abi_context_t loom_spirv_emit_abi_context(
       .module = state->module,
       .function_op = state->function_op,
       .function_plan = state->function_plan,
+      .diagnostic_emitter = state->context->diagnostic_emitter,
+      .accepted = state->context->accepted,
       .scratch_arena = state->scratch_arena,
       .builder = state->builder,
       .type_context = state->type_context,
@@ -205,7 +208,8 @@ static iree_status_t loom_spirv_emit_builtin_variable(
       loom_spirv_emit_section(state, LOOM_SPIRV_MODULE_SECTION_DECLARATION),
       LOOM_SPIRV_OP_VARIABLE, variable_operands,
       IREE_ARRAYSIZE(variable_operands)));
-  IREE_RETURN_IF_ERROR(loom_spirv_emit_op_name(state, variable_id, info->name));
+  IREE_RETURN_IF_ERROR(loom_spirv_emit_op_name(state, state->function_op,
+                                               variable_id, info->name));
   state->context->builtin_variable_ids[variable] = variable_id;
   state->builtin_interface_variable_ids[variable] = variable_id;
   *out_variable_id = variable_id;
@@ -1362,11 +1366,12 @@ static iree_status_t loom_spirv_emit_entry_point(
           state->builtin_interface_variable_ids[i];
     }
   }
-  IREE_RETURN_IF_ERROR(loom_spirv_binary_write_string_instruction(
-      loom_spirv_emit_section(state, LOOM_SPIRV_MODULE_SECTION_ENTRY_POINT),
+  IREE_RETURN_IF_ERROR(loom_spirv_module_builder_emit_string(
+      state->builder, LOOM_SPIRV_MODULE_SECTION_ENTRY_POINT,
       LOOM_SPIRV_OP_ENTRY_POINT, prefix_operands,
       IREE_ARRAYSIZE(prefix_operands), entry_name, interface_operands,
-      interface_operand_count));
+      interface_operand_count, state->context->diagnostic_emitter,
+      state->function_op, state->context->accepted));
   uint32_t workgroup_size_x = 1;
   uint32_t workgroup_size_y = 1;
   uint32_t workgroup_size_z = 1;
@@ -1560,8 +1565,9 @@ static iree_status_t loom_spirv_emit_function_contents(
   IREE_ASSERT_EQ(state->emission_plan->function_id, 0u);
   state->function_id = loom_spirv_emit_allocate_id(state);
   state->emission_plan->function_id = state->function_id;
-  IREE_RETURN_IF_ERROR(loom_spirv_emit_op_name(
-      state, state->function_id, loom_spirv_emit_function_name(state)));
+  IREE_RETURN_IF_ERROR(
+      loom_spirv_emit_op_name(state, state->function_op, state->function_id,
+                              loom_spirv_emit_function_name(state)));
   if (state->function_plan->is_entry) {
     loom_spirv_module_abi_context_t context =
         loom_spirv_emit_abi_context(state);

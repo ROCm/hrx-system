@@ -29,8 +29,7 @@ constexpr loom_spirv_feature_bits_t kIntegerCooperativeMatrixFeatures =
 void PreparePropertySet(loom_spirv_feature_bits_t feature_bits,
                         loom_spirv_cooperative_property_set_t* property_set) {
   loom_spirv_feature_set_t feature_set = {};
-  IREE_ASSERT_OK(loom_spirv_feature_set_prepare(IREE_SV("test.spirv"),
-                                                feature_bits, &feature_set));
+  loom_spirv_feature_set_prepare(feature_bits, &feature_set);
   loom_spirv_cooperative_property_set_prepare(&feature_set, property_set);
 }
 

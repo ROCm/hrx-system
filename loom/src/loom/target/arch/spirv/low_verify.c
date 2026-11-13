@@ -319,7 +319,11 @@ static iree_status_t loom_spirv_low_decode_boundary_value_type(
     loom_low_verify_context_t* context, loom_spirv_low_verify_state_t* state,
     loom_value_id_t value_id, loom_spirv_value_type_t* out_value_type) {
   const loom_type_t low_type = loom_module_value_type(state->module, value_id);
-  if (loom_spirv_value_type_from_low_register_type(low_type, out_value_type)) {
+  // Workgroup array pointers carry a storage-reservation extent, not a complete
+  // boundary type. Only element pointers may cross a function boundary.
+  if (loom_spirv_value_type_from_low_register_type(low_type, out_value_type) &&
+      out_value_type->value_class !=
+          LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP_ARRAY) {
     return iree_ok_status();
   }
   IREE_RETURN_IF_ERROR(loom_spirv_low_emit_unsupported_register_type(

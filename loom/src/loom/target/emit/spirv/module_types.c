@@ -222,9 +222,7 @@ static iree_status_t loom_spirv_emit_type_declaration(
           LOOM_SPIRV_OP_TYPE_FUNCTION, operands, 1 + key->operand_count);
     }
   }
-  return iree_make_status(IREE_STATUS_INTERNAL,
-                          "unknown SPIR-V type key kind %u",
-                          (uint32_t)key->kind);
+  IREE_CHECK_UNREACHABLE("generated SPIR-V type key kind");
 }
 
 static iree_status_t loom_spirv_emit_type_id(loom_spirv_type_context_t* context,
@@ -308,11 +306,6 @@ iree_status_t loom_spirv_emit_type_scalar(loom_spirv_type_context_t* context,
                                           uint32_t* out_type_id) {
   const loom_spirv_scalar_type_descriptor_t* descriptor =
       loom_spirv_scalar_type_descriptor(scalar_type);
-  if (descriptor == NULL) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "unknown SPIR-V scalar type %u",
-                            (uint32_t)scalar_type);
-  }
   switch (descriptor->kind) {
     case LOOM_SPIRV_SCALAR_TYPE_KIND_FLOAT:
       return loom_spirv_emit_type_float(context, descriptor->bit_width,
@@ -326,9 +319,7 @@ iree_status_t loom_spirv_emit_type_scalar(loom_spirv_type_context_t* context,
     case LOOM_SPIRV_SCALAR_TYPE_KIND_UNKNOWN:
       break;
   }
-  return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                          "unknown SPIR-V scalar type kind %u",
-                          (uint32_t)descriptor->kind);
+  IREE_CHECK_UNREACHABLE("verified SPIR-V scalar type kind");
 }
 
 iree_status_t loom_spirv_emit_type_vector(loom_spirv_type_context_t* context,
@@ -754,12 +745,6 @@ iree_status_t loom_spirv_emit_type_ptr_physical_storage_buffer_scalar(
     uint32_t* out_type_id) {
   const loom_spirv_scalar_type_descriptor_t* scalar_descriptor =
       loom_spirv_scalar_type_descriptor(scalar_type);
-  if (scalar_descriptor == NULL || scalar_descriptor->bit_width == 0 ||
-      (scalar_descriptor->bit_width % 8) != 0) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "SPIR-V physical storage scalar pointer requires "
-                            "a byte-addressable scalar type");
-  }
   uint32_t scalar_type_id = 0;
   IREE_RETURN_IF_ERROR(
       loom_spirv_emit_type_scalar(context, scalar_type, &scalar_type_id));
@@ -941,6 +926,5 @@ iree_status_t loom_spirv_emit_type_id_for_value_type(
     case LOOM_SPIRV_VALUE_CLASS_UNKNOWN:
       break;
   }
-  return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                          "SPIR-V packet row does not select a result type");
+  IREE_CHECK_UNREACHABLE("verified SPIR-V packet or boundary value type");
 }

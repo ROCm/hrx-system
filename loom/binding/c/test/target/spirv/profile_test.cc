@@ -68,7 +68,8 @@ void ExpectSucceededResult(const loomc_result_t* result) {
   EXPECT_TRUE(loomc_result_succeeded(result));
 }
 
-void ExpectFailedResult(const loomc_result_t* result) {
+void ExpectFailedResult(const loomc_result_t* result,
+                        const char* code = "SPIRV/PROFILE") {
   ASSERT_NE(result, nullptr);
   EXPECT_FALSE(loomc_result_succeeded(result));
   EXPECT_EQ(loomc_result_state(result), LOOMC_RESULT_STATE_FAILED);
@@ -76,7 +77,7 @@ void ExpectFailedResult(const loomc_result_t* result) {
   const loomc_diagnostic_t* diagnostic = loomc_result_diagnostic_at(result, 0);
   ASSERT_NE(diagnostic, nullptr);
   EXPECT_EQ(diagnostic->severity, LOOMC_DIAGNOSTIC_SEVERITY_ERROR);
-  EXPECT_EQ(ToString(diagnostic->code), "SPIRV/PROFILE");
+  EXPECT_EQ(ToString(diagnostic->code), code);
 }
 
 TargetEnvironmentPtr CreateSpirvTargetEnvironment() {
@@ -2084,12 +2085,12 @@ TEST(TargetSpirvProfileTest, ReportsMissingFeatureDependenciesAsResult) {
   TargetProfilePtr profile_ptr(profile);
   ResultPtr result_ptr(result);
   EXPECT_EQ(profile_ptr.get(), nullptr);
-  ExpectFailedResult(result_ptr.get());
+  ExpectFailedResult(result_ptr.get(), "SPIRV/034");
   const loomc_diagnostic_t* diagnostic =
       loomc_result_diagnostic_at(result_ptr.get(), 0);
   ASSERT_NE(diagnostic, nullptr);
   EXPECT_THAT(ToString(diagnostic->message),
-              ::testing::HasSubstr("missing dependency"));
+              ::testing::HasSubstr("requires feature"));
   EXPECT_THAT(ToString(diagnostic->message),
               ::testing::HasSubstr("spirv.physical_storage_buffer"));
   EXPECT_THAT(ToString(diagnostic->message),

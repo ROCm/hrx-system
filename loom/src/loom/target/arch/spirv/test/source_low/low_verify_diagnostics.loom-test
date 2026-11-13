@@ -438,3 +438,27 @@ low.func.def target<spirv.logical.core>(@target) @assumed_return_value_type_mism
   // ERROR@+1: SPIRV/014 {function_name="assumed_return_value_type_mismatch", result_index="0", value_name="unsigned_alias", expected_value_type="s32", actual_value_type="u32"}
   return %unsigned_alias
 }
+
+// ====
+
+// RUN: verify
+
+spirv.target<vulkan1_3> @target
+
+// ERROR@+1: SPIRV/005 {function_name="array_pointer_argument", value_name="storage", actual_type="reg<spirv.ptr.workgroup.array.i32>"}
+low.func.def target<spirv.logical.core>(@target) @array_pointer_argument(%storage: reg<spirv.ptr.workgroup.array.i32>) asm {
+  return
+}
+
+// ====
+
+// RUN: verify
+
+spirv.target<vulkan1_3> @target
+
+// ERROR@+1: SPIRV/005 {function_name="array_pointer_result", value_name="result", actual_type="reg<spirv.ptr.workgroup.array.f32>"}
+low.func.def target<spirv.logical.core>(@target) @array_pointer_result() -> (%result: reg<spirv.ptr.workgroup.array.f32>) asm {
+  %storage = storage {byte_alignment = 4, byte_length = 4} : low.storage<workgroup>
+  %address = storage_address %storage : low.storage<workgroup> -> reg<spirv.ptr.workgroup.array.f32>
+  return %address
+}

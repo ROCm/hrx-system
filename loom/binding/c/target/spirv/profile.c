@@ -11,6 +11,7 @@
 
 #include "diagnostic.h"
 #include "loom/target/arch/spirv/cooperative_properties.h"
+#include "loom/target/arch/spirv/error_catalog.h"
 #include "loom/target/arch/spirv/features.h"
 #include "loom/target/arch/spirv/profile.h"
 #include "loom/target/arch/spirv/records/target_records.h"
@@ -592,6 +593,46 @@ static loom_spirv_feature_bits_t loomc_spirv_profile_feature_bits(
   return feature_bits;
 }
 
+// Profile facts describe observed support. Unlike emitted capability lists,
+// their dependencies cannot be inferred as supported when absent or false.
+static loomc_status_t loomc_spirv_profile_validate_feature_dependencies(
+    loomc_string_view_t identifier, loom_spirv_feature_bits_t feature_bits,
+    loomc_result_t* result) {
+  for (uint32_t i = LOOM_SPIRV_FEATURE_ATOM_UNKNOWN + 1;
+       i < LOOM_SPIRV_FEATURE_ATOM_COUNT; ++i) {
+    const loom_spirv_feature_atom_t atom = (loom_spirv_feature_atom_t)i;
+    if (!iree_any_bit_set(feature_bits, loom_spirv_feature_atom_bit(atom))) {
+      continue;
+    }
+    const loom_spirv_feature_atom_descriptor_t* descriptor =
+        loom_spirv_feature_atom_descriptor(atom);
+    const loom_spirv_feature_bits_t missing_bits =
+        descriptor->required_atom_bits & ~feature_bits;
+    if (missing_bits == 0) {
+      continue;
+    }
+    const loom_spirv_feature_atom_t missing_atom =
+        (loom_spirv_feature_atom_t)iree_math_count_trailing_zeros_u64(
+            missing_bits);
+    const loom_diagnostic_param_t params[] = {
+        loom_param_string(iree_string_view_from_loomc(identifier)),
+        loom_param_string(descriptor->name),
+        loom_param_string(loom_spirv_feature_atom_name(missing_atom)),
+    };
+    const loom_diagnostic_emission_t emission = {
+        .error = LOOM_ERR_SPIRV_034,
+        .params = params,
+        .param_count = IREE_ARRAYSIZE(params),
+    };
+    LOOMC_RETURN_IF_ERROR(loomc_result_add_loom_diagnostic_emission(
+        result, NULL, (loom_source_resolver_t){0}, LOOM_EMITTER_VERIFIER,
+        &emission, NULL));
+    loomc_result_set_status_code(result, LOOMC_STATUS_FAILED_PRECONDITION);
+    return loomc_ok_status();
+  }
+  return loomc_ok_status();
+}
+
 static void loomc_spirv_profile_deinitialize_feature_states(
     loomc_allocator_t allocator, loomc_spirv_feature_state_t* states,
     uint32_t count) {
@@ -855,14 +896,13 @@ static loomc_status_t loomc_spirv_target_profile_create_from_states(
         &profile_storage->cooperative_row_facts);
   }
   if (loomc_status_is_ok(status) && loomc_result_succeeded(result)) {
-    status = loomc_status_from_iree(loom_spirv_feature_set_prepare(
-        iree_string_view_from_loomc(identifier),
-        loomc_spirv_profile_feature_bits(feature_states),
-        &profile_storage->feature_set));
-    if (!loomc_status_is_ok(status) &&
-        loomc_status_is_result_diagnostic(status)) {
-      status = loomc_spirv_profile_fail_status(
-          result, loomc_make_cstring_view("SPIRV/PROFILE"), status);
+    const loom_spirv_feature_bits_t feature_bits =
+        loomc_spirv_profile_feature_bits(feature_states);
+    status = loomc_spirv_profile_validate_feature_dependencies(
+        identifier, feature_bits, result);
+    if (loomc_status_is_ok(status) && loomc_result_succeeded(result)) {
+      loom_spirv_feature_set_prepare(feature_bits,
+                                     &profile_storage->feature_set);
     }
   }
   if (loomc_status_is_ok(status) && loomc_result_succeeded(result)) {
@@ -1026,19 +1066,17 @@ static loomc_spirv_limit_value_t loomc_spirv_profile_limit_value(
 // Only their cold enumeration queries need this fixed-size temporary; ordinary
 // fact queries read the native record directly and constructed profiles borrow
 // the lists prepared by their constructor.
-static loomc_status_t loomc_spirv_profile_query_feature_set(
+static void loomc_spirv_profile_query_feature_set(
     const loomc_spirv_profile_query_t* query,
     loom_spirv_feature_set_t* temporary,
     const loom_spirv_feature_set_t** out_feature_set) {
   if (query->storage) {
     *out_feature_set = &query->storage->feature_set;
-    return loomc_ok_status();
+    return;
   }
-  LOOMC_RETURN_IF_ERROR(loomc_status_from_iree(loom_spirv_feature_set_prepare(
-      query->profile->base.type->name,
-      loomc_spirv_profile_query_feature_bits(query), temporary)));
+  loom_spirv_feature_set_prepare(loomc_spirv_profile_query_feature_bits(query),
+                                 temporary);
   *out_feature_set = temporary;
-  return loomc_ok_status();
 }
 
 static const loomc_spirv_cooperative_row_fact_set_t*
@@ -1243,8 +1281,8 @@ loomc_status_t loomc_spirv_target_profile_query_info(
   LOOMC_RETURN_IF_ERROR(loomc_spirv_profile_validate_query(profile, &query));
   loom_spirv_feature_set_t temporary_features;
   const loom_spirv_feature_set_t* feature_set = NULL;
-  LOOMC_RETURN_IF_ERROR(loomc_spirv_profile_query_feature_set(
-      &query, &temporary_features, &feature_set));
+  loomc_spirv_profile_query_feature_set(&query, &temporary_features,
+                                        &feature_set);
   loomc_spirv_cooperative_row_fact_set_t temporary_rows;
   const loomc_spirv_cooperative_row_fact_set_t* rows =
       loomc_spirv_profile_query_rows(&query, &temporary_rows);
@@ -1277,8 +1315,7 @@ loomc_status_t loomc_spirv_target_profile_extension_at(
   LOOMC_RETURN_IF_ERROR(loomc_spirv_profile_validate_query(profile, &query));
   loom_spirv_feature_set_t temporary;
   const loom_spirv_feature_set_t* feature_set = NULL;
-  LOOMC_RETURN_IF_ERROR(
-      loomc_spirv_profile_query_feature_set(&query, &temporary, &feature_set));
+  loomc_spirv_profile_query_feature_set(&query, &temporary, &feature_set);
   if (index >= feature_set->extension_count) {
     return loomc_make_status(LOOMC_STATUS_OUT_OF_RANGE,
                              "SPIR-V extension index is out of range");
@@ -1300,8 +1337,7 @@ loomc_status_t loomc_spirv_target_profile_capability_at(
   LOOMC_RETURN_IF_ERROR(loomc_spirv_profile_validate_query(profile, &query));
   loom_spirv_feature_set_t temporary;
   const loom_spirv_feature_set_t* feature_set = NULL;
-  LOOMC_RETURN_IF_ERROR(
-      loomc_spirv_profile_query_feature_set(&query, &temporary, &feature_set));
+  loomc_spirv_profile_query_feature_set(&query, &temporary, &feature_set);
   if (index >= feature_set->capability_count) {
     return loomc_make_status(LOOMC_STATUS_OUT_OF_RANGE,
                              "SPIR-V capability index is out of range");
@@ -1322,8 +1358,7 @@ loomc_status_t loomc_spirv_target_profile_opcode_at(
   LOOMC_RETURN_IF_ERROR(loomc_spirv_profile_validate_query(profile, &query));
   loom_spirv_feature_set_t temporary;
   const loom_spirv_feature_set_t* feature_set = NULL;
-  LOOMC_RETURN_IF_ERROR(
-      loomc_spirv_profile_query_feature_set(&query, &temporary, &feature_set));
+  loomc_spirv_profile_query_feature_set(&query, &temporary, &feature_set);
   if (index >= feature_set->opcode_count) {
     return loomc_make_status(LOOMC_STATUS_OUT_OF_RANGE,
                              "SPIR-V opcode index is out of range");
@@ -1344,8 +1379,7 @@ loomc_status_t loomc_spirv_target_profile_storage_class_at(
   LOOMC_RETURN_IF_ERROR(loomc_spirv_profile_validate_query(profile, &query));
   loom_spirv_feature_set_t temporary;
   const loom_spirv_feature_set_t* feature_set = NULL;
-  LOOMC_RETURN_IF_ERROR(
-      loomc_spirv_profile_query_feature_set(&query, &temporary, &feature_set));
+  loomc_spirv_profile_query_feature_set(&query, &temporary, &feature_set);
   if (index >= feature_set->storage_class_count) {
     return loomc_make_status(LOOMC_STATUS_OUT_OF_RANGE,
                              "SPIR-V storage class index is out of range");
@@ -1366,8 +1400,7 @@ loomc_status_t loomc_spirv_target_profile_decoration_at(
   LOOMC_RETURN_IF_ERROR(loomc_spirv_profile_validate_query(profile, &query));
   loom_spirv_feature_set_t temporary;
   const loom_spirv_feature_set_t* feature_set = NULL;
-  LOOMC_RETURN_IF_ERROR(
-      loomc_spirv_profile_query_feature_set(&query, &temporary, &feature_set));
+  loomc_spirv_profile_query_feature_set(&query, &temporary, &feature_set);
   if (index >= feature_set->decoration_count) {
     return loomc_make_status(LOOMC_STATUS_OUT_OF_RANGE,
                              "SPIR-V decoration index is out of range");

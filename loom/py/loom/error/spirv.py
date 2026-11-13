@@ -509,6 +509,23 @@ ERR_SPIRV_033 = ErrorDef(
     ),
 )
 
+# ERR_SPIRV_034: A target profile omits a required feature fact.
+ERR_SPIRV_034 = ErrorDef(
+    domain=ErrorDomain.SPIRV,
+    code=34,
+    severity=Severity.ERROR,
+    summary="SPIR-V target profile is missing a feature dependency.",
+    message=(
+        "SPIR-V target profile '{profile_name}' feature '{feature_name}' "
+        "requires feature '{required_feature_name}'"
+    ),
+    params=(
+        ErrorParam("profile_name", ParamKind.STRING),
+        ErrorParam("feature_name", ParamKind.STRING),
+        ErrorParam("required_feature_name", ParamKind.STRING),
+    ),
+)
+
 ALL_SPIRV_ERRORS: tuple[ErrorDef, ...] = (
     ERR_SPIRV_005,
     ERR_SPIRV_006,
@@ -536,4 +553,5 @@ ALL_SPIRV_ERRORS: tuple[ErrorDef, ...] = (
     ERR_SPIRV_031,
     ERR_SPIRV_032,
     ERR_SPIRV_033,
+    ERR_SPIRV_034,
 )

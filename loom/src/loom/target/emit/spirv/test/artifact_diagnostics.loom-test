@@ -19,3 +19,20 @@ low.func.def public target<spirv.logical.core>(@target) abi(shader_entry_point) 
 low.func.def public target<spirv.logical.core> abi(wasm_function) @wrong_abi() asm {
   return
 }
+
+// ====
+
+// RUN: emit spirv-dis
+
+spirv.target<vulkan1_3> @target
+
+low.func.def public target<spirv.logical.core>(@target) abi(shader_entry_point) @entry_callee() -> (reg<spirv.id : i32>) asm {
+  %value = OpConstant.i32 1
+  return %value
+}
+
+low.func.def public target<spirv.logical.core>(@target) abi(shader_entry_point) @entry_caller() asm {
+  // ERROR@+1: BACKEND/057 {export="entry_caller", format="SPIR-V", symbol_name="entry_callee", constraint="an internal function callee instead of an entry point"}
+  %value = low.func.call @entry_callee() : () -> (reg<spirv.id : i32>)
+  return
+}

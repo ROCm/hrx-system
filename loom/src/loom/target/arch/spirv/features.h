@@ -458,8 +458,7 @@ iree_string_view_t loom_spirv_feature_atom_name(loom_spirv_feature_atom_t atom);
 loom_spirv_feature_bits_t loom_spirv_known_feature_bits(void);
 
 // Includes the generated transitive dependencies of every selected atom.
-// Unknown bits are preserved for validation by
-// |loom_spirv_feature_set_prepare|.
+// Unknown bits are preserved; target admission owns validation.
 loom_spirv_feature_bits_t loom_spirv_feature_bits_with_dependencies(
     loom_spirv_feature_bits_t atom_bits);
 
@@ -468,9 +467,9 @@ bool loom_spirv_feature_set_has_atom(
     const loom_spirv_feature_set_t* feature_set,
     loom_spirv_feature_atom_t atom);
 
-// Prepares a deterministic feature-set view from selected target feature bits.
-iree_status_t loom_spirv_feature_set_prepare(
-    iree_string_view_t target_name,
+// Prepares a deterministic feature-set view including generated dependencies.
+// Target admission must establish that every requested bit is known.
+void loom_spirv_feature_set_prepare(
     loom_spirv_feature_bits_t requested_atom_bits,
     loom_spirv_feature_set_t* out_feature_set);
 

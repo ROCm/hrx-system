@@ -81,7 +81,7 @@ loom_generated_cc_library(
     generated_hdrs = ["error_catalog.h"],
     generator = "//loom/py/loom/gen/error:c_errors",
     source = "error_catalog.c",
-    visibility = _SPIRV_EMIT_VISIBILITY + _SPIRV_LOWER_VISIBILITY,
+    visibility = _SPIRV_EMIT_VISIBILITY + _SPIRV_LOWER_VISIBILITY + _SPIRV_C_API_VISIBILITY,
     deps = ["//loom/src/loom/error:error_defs"],
 )
 
