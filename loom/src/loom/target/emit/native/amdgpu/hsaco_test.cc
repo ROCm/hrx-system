@@ -924,23 +924,24 @@ TEST(AmdgpuHsacoTest, RejectsUnrepresentableImageBeforePayloadAllocation) {
   struct LayoutCase {
     // Number of aligned one-byte data symbols to place.
     size_t symbol_count;
-    // Whether the data symbols occupy the writable section.
-    bool writable;
+    // Placement and access flags for each data symbol.
+    loom_amdgpu_hsaco_data_symbol_flags_t flags;
     // Aggregate constraint that rejects this layout.
     const loom_error_def_t* error;
     // Constraint or quantity parameter identifying the failed admission.
     const char* quantity;
   };
   const LayoutCase cases[] = {
-      {4, false, LOOM_ERR_BACKEND_055,
+      {4, LOOM_AMDGPU_HSACO_DATA_SYMBOL_FLAG_NONE, LOOM_ERR_BACKEND_055,
        "a read-only data layout representable in 64 bits"},
-      {5, true, LOOM_ERR_BACKEND_055,
+      {5, LOOM_AMDGPU_HSACO_DATA_SYMBOL_FLAG_WRITABLE, LOOM_ERR_BACKEND_055,
        "a writable data layout representable in 64 bits"},
-      {3, false, LOOM_ERR_BACKEND_055,
+      {3, LOOM_AMDGPU_HSACO_DATA_SYMBOL_FLAG_NONE, LOOM_ERR_BACKEND_055,
        "an executable image layout representable in 64 bits"},
-      {4, true, LOOM_ERR_BACKEND_055,
+      {4, LOOM_AMDGPU_HSACO_DATA_SYMBOL_FLAG_WRITABLE, LOOM_ERR_BACKEND_055,
        "an executable image layout representable in 64 bits"},
-      {2, false, LOOM_ERR_BACKEND_060, "kernel entry displacement"},
+      {2, LOOM_AMDGPU_HSACO_DATA_SYMBOL_FLAG_NONE, LOOM_ERR_BACKEND_060,
+       "kernel entry displacement"},
   };
   const char* names[] = {"a", "b", "c", "d", "e"};
   for (const auto& test_case : cases) {
@@ -952,9 +953,7 @@ TEST(AmdgpuHsacoTest, RejectsUnrepresentableImageBeforePayloadAllocation) {
           .name = iree_make_cstring_view(names[i]),
           .byte_length = 1,
           .alignment = UINT64_C(1) << 62,
-          .flags = test_case.writable
-                       ? LOOM_AMDGPU_HSACO_DATA_SYMBOL_FLAG_WRITABLE
-                       : LOOM_AMDGPU_HSACO_DATA_SYMBOL_FLAG_NONE,
+          .flags = test_case.flags,
       };
     }
     const loom_amdgpu_hsaco_input_t input = {
