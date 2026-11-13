@@ -69,12 +69,40 @@ TEST(XdnaDeviceProfileTest, IdentityDoesNotPromiseExecution) {
   ASSERT_TRUE(amdf_xdna_query_endpoint_info(&endpoint, &identity));
   EXPECT_EQ(identity.architecture, AMDF_XDNA_ARCHITECTURE_AIE2);
   EXPECT_STREQ(identity.target_id, "amd.xdna.phoenix.1502_00");
-  amdf_xdna_device_info_t info = {};
-  amdf_xdna_device_profile_t profile = {};
-  ASSERT_TRUE(amdf_xdna_device_profile_initialize(&endpoint, &info, &profile));
-  EXPECT_EQ(profile.execution_capabilities, 0u);
-  EXPECT_EQ(profile.bootstrap, nullptr);
-  EXPECT_EQ(info.instruction.maximum_byte_length, 0u);
+  amdf_xdna_device_info_t info = {.reset_epoch = UINT64_MAX};
+  amdf_xdna_device_profile_t profile = {.execution_capabilities = UINT64_MAX};
+  EXPECT_FALSE(amdf_xdna_device_profile_initialize(&endpoint, &info, &profile));
+  EXPECT_EQ(info.reset_epoch, UINT64_MAX);
+  EXPECT_EQ(profile.execution_capabilities, UINT64_MAX);
+}
+
+TEST(XdnaDeviceProfileTest, DistinguishesPassiveRolesWithoutDeviceAdmission) {
+  // Classic, management PF, and execution VF identities remain distinct even
+  // when they share an architecture. Passive queries require no native state.
+  for (uint32_t device_id : {0x17f1u, 0x17f2u, 0x17f3u}) {
+    SCOPED_TRACE(device_id);
+    const auto endpoint = MakeXdnaEndpointInfo(device_id, 0x13u);
+    amdf_xdna_endpoint_info_t identity = {};
+    ASSERT_TRUE(amdf_xdna_query_endpoint_info(&endpoint, &identity));
+    EXPECT_EQ(identity.architecture, AMDF_XDNA_ARCHITECTURE_AIE4);
+    EXPECT_NE(identity.target_id[0], '\0');
+    // Recognition cannot construct a device with zero address-width and
+    // instruction properties. The unavailable profile preserves both outputs.
+    amdf_xdna_device_info_t info = {.reset_epoch = UINT64_MAX};
+    amdf_xdna_device_profile_t profile = {.execution_capabilities = UINT64_MAX};
+    EXPECT_FALSE(
+        amdf_xdna_device_profile_initialize(&endpoint, &info, &profile));
+    EXPECT_EQ(info.reset_epoch, UINT64_MAX);
+    EXPECT_EQ(profile.execution_capabilities, UINT64_MAX);
+  }
+
+  const auto classic = MakeXdnaEndpointInfo(0x17f1u, 0x13u);
+  const auto function = MakeXdnaEndpointInfo(0x17f3u, 0x13u);
+  amdf_xdna_endpoint_info_t classic_identity = {};
+  amdf_xdna_endpoint_info_t function_identity = {};
+  ASSERT_TRUE(amdf_xdna_query_endpoint_info(&classic, &classic_identity));
+  ASSERT_TRUE(amdf_xdna_query_endpoint_info(&function, &function_identity));
+  EXPECT_STRNE(classic_identity.target_id, function_identity.target_id);
 }
 
 TEST(XdnaDeviceProfileTest, UnknownIdentityLeavesOutputsUnchanged) {
