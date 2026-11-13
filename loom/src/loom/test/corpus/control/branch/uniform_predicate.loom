@@ -380,3 +380,72 @@ check.scenario @call_argument_distribution_values {
   }
   check.return
 }
+
+// Uniform loop control must not overwrite the three independent Boolean values
+// rotating through its backedge. Constants and a runtime comparison share the
+// same carried representation, and every final component is observable.
+kernel.def @uniform_predicate_rotation() {
+  %c1 = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%width, %c1, %c1) : index
+} launch(%count: index, %output: buffer) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %true = scalar.constant true : i1
+  %false = scalar.constant false : i1
+  %parity = index.andi %count, %c1 : index
+  %compared = index.cmp ne, %parity, %c0 : index
+  %first, %second, %third = scf.for %iteration = [%c0 to %count step %c1](%head = %true : i1, %middle = %false : i1, %tail = %compared : i1) -> (i1, i1, i1) {
+    scf.yield %middle, %tail, %head : i1, i1, i1
+  }
+  %base = index.constant 0 : offset
+  %lane = kernel.workitem.id<x> : index
+  %view = buffer.view %output[%base] : buffer -> view<3x64xi32>
+  %first_word = scalar.extui %first : i1 to i32
+  %second_word = scalar.extui %second : i1 to i32
+  %third_word = scalar.extui %third : i1 to i32
+  view.store %first_word, %view[0, %lane] : i32, view<3x64xi32>
+  view.store %second_word, %view[1, %lane] : i32, view<3x64xi32>
+  view.store %third_word, %view[2, %lane] : i32, view<3x64xi32>
+  kernel.return
+}
+
+func.def @uniform_predicate_rotation_oracle(%count: index, %output: buffer) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c3 = index.constant 3 : index
+  %width = index.constant 64 : index
+  %c0_i32 = scalar.constant 0 : i32
+  %c1_i32 = scalar.constant 1 : i32
+  %base = index.constant 0 : offset
+  %view = buffer.view %output[%base] : buffer -> view<3x64xi32>
+  %parity = index.rem %count, %c2 : index
+  %compared = index.cast %parity : index to i32
+  %rotation = index.rem %count, %c3 : index
+  %unchanged = index.cmp eq, %rotation, %c0 : index
+  %once = index.cmp eq, %rotation, %c1 : index
+  %first_rotated = scf.select %once, %c0_i32, %compared : i32
+  %second_rotated = scf.select %once, %compared, %c1_i32 : i32
+  %third_rotated = scf.select %once, %c1_i32, %c0_i32 : i32
+  %first = scf.select %unchanged, %c1_i32, %first_rotated : i32
+  %second = scf.select %unchanged, %c0_i32, %second_rotated : i32
+  %third = scf.select %unchanged, %compared, %third_rotated : i32
+  scf.for %lane = [%c0 to %width step %c1] {
+    view.store %first, %view[0, %lane] : i32, view<3x64xi32>
+    view.store %second, %view[1, %lane] : i32, view<3x64xi32>
+    view.store %third, %view[2, %lane] : i32, view<3x64xi32>
+  }
+  func.return
+}
+
+check.scenario @uniform_predicate_rotation_values {
+  check.trial[7](%count: index, %entropy: check.entropy) {
+    %storage = check.generate.fill value(-123) : tensor<200xi32>
+    %output = check.tensor.view %storage offset(16) : tensor<200xi32> -> tensor<3x64xi32>
+    check.compare<@uniform_predicate_rotation, @uniform_predicate_rotation_oracle>(%count, %output) : (index, tensor<3x64xi32>) -> () {
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<200xi32>
+    }
+  }
+  check.return
+}

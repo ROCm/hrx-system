@@ -488,3 +488,71 @@ low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @after_reset_
   s_mov_b32 s0, s2
   s_mov_b32 s1, s3
   s_branch .Lbb1
+
+// ====
+
+// RUN: emit amdgpu-assembly @uniform_branch_condition_combined_with_lane_mask_assembly
+
+amdgpu.target<gfx11-generic> @target
+
+low.func.def target<amdgpu.gfx11.generic.core>(@target) @uniform_branch_condition_combined_with_lane_mask_assembly(%values: reg<amdgpu.vgpr x2>, %x: reg<amdgpu.sgpr>, %limit: reg<amdgpu.sgpr>, %true_value: reg<amdgpu.sgpr>, %false_value: reg<amdgpu.sgpr>, %output: reg<amdgpu.sgpr x2>) asm {
+  %zero = s_mov_b32 0
+  %lane = slice %values[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %limit_vgpr = v_mov_b32_copy %limit
+  %lane_ok = v_cmp_lt_i32 %lane, %limit_vgpr
+  %x_lower = s_cmp_ge_i32 %x, %zero
+  %x_upper = s_cmp_lt_i32 %x, %limit
+  %one = s_mov_b32 1
+  %x_lower_bool = s_cselect_b32 %one, %zero, %x_lower
+  %x_upper_bool = s_cselect_b32 %one, %zero, %x_upper
+  %x_ok = s_and_b32 %x_lower_bool, %x_upper_bool
+  %x_ok_for_mask = s_cmp_lg_i32 %x_ok, %zero
+  %lane_ok_low = slice %lane_ok[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %combined_low = s_cselect_b32 %lane_ok_low, %zero, %x_ok_for_mask
+  %lane_ok_high = slice %lane_ok[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %combined_high = s_cselect_b32 %lane_ok_high, %zero, %x_ok_for_mask
+  %combined = concat(%combined_low, %combined_high) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %x_ok_for_branch = s_cmp_lg_i32 %x_ok, %zero
+  low.cond_br %x_ok_for_branch, ^valid, ^clamped : reg<amdgpu.scc>
+^valid:
+  low.br ^join(%true_value: reg<amdgpu.sgpr>)
+^clamped:
+  low.br ^join(%false_value: reg<amdgpu.sgpr>)
+^join(%selected: reg<amdgpu.sgpr>):
+  %selected_vgpr = v_mov_b32_copy %selected
+  %sum = v_add_u32 %selected_vgpr, %lane
+  %result = v_cndmask_b32 %lane, %sum, %combined
+  global_store_b32_saddr %lane, %result, %output
+  return
+}
+
+// ----
+  v_mov_b32 v1, s1
+  s_mov_b32 s6, 0
+  s_cmp_ge_i32 s0, s6
+  s_mov_b32 s7, 1
+  s_cselect_b32 s8, s7, s6
+  s_cmp_lt_i32 s0, s1
+  s_delay_alu instid0(VALU_DEP_1)
+  v_cmp_lt_i32 s[0:1], v0, v1
+  s_cselect_b32 s7, s7, s6
+  s_and_b32 s7, s8, s7
+  s_cmp_lg_i32 s7, s6
+  s_delay_alu instid0(VALU_DEP_1) | instid1(SALU_CYCLE_1)
+  s_cselect_b32 s0, s0, s6
+  s_cselect_b32 s1, s1, s6
+  s_cmp_lg_i32 s7, s6
+  s_delay_alu instid0(SALU_CYCLE_1)
+  s_cbranch_scc0 .Lbb2
+.Lbb1:
+  s_branch .Lbb3
+.Lbb2:
+  s_mov_b32 s2, s3
+.Lbb3:
+  v_mov_b32 v1, s2
+  s_delay_alu instid0(VALU_DEP_1) | instskip(NEXT) | instid1(VALU_DEP_1)
+  v_add_u32 v1, v1, v0
+  v_cndmask_b32 v1, v0, v1, s[0:1]
+  global_store_b32 v0, v1, s[4:5] offset:0
+  s_waitcnt_vscnt vscnt(0)
+  s_endpgm
