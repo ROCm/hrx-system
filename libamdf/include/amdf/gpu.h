@@ -475,6 +475,26 @@ enum amdf_gpu_sdma_format_feature_bits_e {
 /// releases ring storage, not code, kernargs, scratch, or kernel data: those
 /// require native execution completion.
 ///
+/// HOST_NON_TEMPORAL_PUBLICATION additionally qualifies host-authored data,
+/// including kernargs, read by dispatches on this queue. The caller creates
+/// and host-maps LOCAL memory on this exact device, with a readable device
+/// access. Imported, registered, and foreign-device backing are excluded. The
+/// caller owns each written extent exclusively after all previous readers and
+/// writers complete; ring consumption alone does not permit payload reuse.
+/// Every authored payload byte uses a non-temporal store, including padding
+/// and patched fields. Cached stores and destination reads are excluded.
+///
+/// Prepare all payloads and packet bodies in a finite run while its first
+/// header remains INVALID. Execute SFENCE before publishing that header with
+/// SYSTEM acquire, and retain the header-to-doorbell SFENCE above. Later data
+/// consumers are ordered after that acquisition. This sequence supplies the
+/// host release and device acquisition for the prepared payloads without a
+/// host cache-control call or device posting read. It does not publish code or
+/// data to independently executing queues. Coherent signals retain their own
+/// protocol. This capability requires DEVICE_LOCAL ring placement; HOST_LOCAL
+/// rings do not qualify separately allocated LOCAL payloads through it. Native
+/// memory movement preserves the protocol, not immutable physical residency.
+///
 /// DEVICE_PRODUCER mappings expose the owning GPU's ring, indices and
 /// doorbell addresses. A device publisher uses system-scope release stores
 /// for the complete header/setup dword and notification. A host may reserve

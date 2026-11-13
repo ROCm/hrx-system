@@ -18,6 +18,8 @@ class KfdQueuePlacementTest
     }
     device_.topology.vram.total_byte_length = UINT64_C(1) << 30;
     device_.topology.vram.visible_byte_length = UINT64_C(1) << 30;
+    device_.topology.memory_features = amdf_gpu_kfd_topology_memory_features(
+        &device_.topology, device_.topology.integrated);
     device_.hdp = reinterpret_cast<amdf_gpu_kfd_hdp_t*>(uintptr_t{1});
   }
 };
@@ -34,6 +36,9 @@ TEST_P(KfdQueuePlacementTest, LocalRingKeepsCoherentControlAndProducerAccess) {
                                            &queue_result_),
             AMDF_STATUS_OK);
   EXPECT_EQ(queue_result_.placement, AMDF_QUEUE_PLACEMENT_DEVICE_LOCAL);
+  EXPECT_EQ((queue_result_.capabilities &
+             AMDF_USER_QUEUE_CAPABILITY_HOST_NON_TEMPORAL_PUBLICATION) != 0,
+            GetParam() == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL);
   const auto ring_flags = native_state_.buffers[0].create_info.native_flags;
   EXPECT_NE(ring_flags & KFD_IOC_ALLOC_MEM_FLAGS_VRAM, 0u);
   EXPECT_NE(ring_flags & KFD_IOC_ALLOC_MEM_FLAGS_PUBLIC, 0u);
@@ -76,16 +81,20 @@ TEST_P(KfdQueuePlacementTest, LocalRingKeepsCoherentControlAndProducerAccess) {
 }
 
 TEST_P(KfdQueuePlacementTest, UnifiedLocalRingUsesSystemBacking) {
-  if (GetParam() == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL) {
-    SelectAqlTopology();
-  }
+  SelectLocalTopology();
   device_.topology.integrated = true;
+  device_.topology.gtt_byte_length = UINT64_C(2) << 30;
+  device_.topology.memory_features = amdf_gpu_kfd_topology_memory_features(
+      &device_.topology, device_.topology.integrated);
   auto create = MakeCreateInfo(GetParam());
   create.placement = AMDF_QUEUE_PLACEMENT_DEVICE_LOCAL;
   ASSERT_EQ(amdf_gpu_umd_user_queue_create(&device_, &create, &queue_,
                                            &queue_result_),
             AMDF_STATUS_OK);
   EXPECT_EQ(queue_result_.placement, AMDF_QUEUE_PLACEMENT_DEVICE_LOCAL);
+  EXPECT_EQ(queue_result_.capabilities &
+                AMDF_USER_QUEUE_CAPABILITY_HOST_NON_TEMPORAL_PUBLICATION,
+            0u);
   EXPECT_NE(native_state_.buffers[0].create_info.native_flags &
                 KFD_IOC_ALLOC_MEM_FLAGS_GTT,
             0u);
@@ -175,10 +184,51 @@ TEST_P(KfdQueuePlacementTest, HostLocalRingNeedsNoNativeRelease) {
   ASSERT_NO_FATAL_FAILURE(CreateQueue(GetParam()));
   ASSERT_NO_FATAL_FAILURE(MapQueue());
   EXPECT_EQ(queue_result_.placement, AMDF_QUEUE_PLACEMENT_HOST_LOCAL);
+  EXPECT_EQ(queue_result_.capabilities &
+                AMDF_USER_QUEUE_CAPABILITY_HOST_NON_TEMPORAL_PUBLICATION,
+            0u);
   EXPECT_EQ(mapping_result_.host_publish_executor,
             AMDF_CACHE_TRANSITION_EXECUTOR_NONE);
   EXPECT_EQ(mapping_result_.host_publish_fence, AMDF_HOST_CACHE_FENCE_NONE);
   EXPECT_EQ(native_state_.host_publication.call_count, 0u);
+}
+
+TEST_P(KfdQueuePlacementTest,
+       NonTemporalPayloadPublicationRequiresQualifiedPlacement) {
+  SelectLocalTopology();
+  for (const auto placement :
+       {AMDF_QUEUE_PLACEMENT_DEFAULT, AMDF_QUEUE_PLACEMENT_HOST_LOCAL,
+        AMDF_QUEUE_PLACEMENT_DEVICE_LOCAL}) {
+    SCOPED_TRACE(placement);
+    auto create = MakeCreateInfo(GetParam());
+    create.placement = placement;
+    create.required_capabilities |=
+        AMDF_USER_QUEUE_CAPABILITY_HOST_NON_TEMPORAL_PUBLICATION;
+    if (GetParam() == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL &&
+        placement == AMDF_QUEUE_PLACEMENT_DEVICE_LOCAL) {
+      ASSERT_EQ(amdf_gpu_umd_user_queue_create(&device_, &create, &queue_,
+                                               &queue_result_),
+                AMDF_STATUS_OK);
+      EXPECT_NE(queue_result_.capabilities &
+                    AMDF_USER_QUEUE_CAPABILITY_HOST_NON_TEMPORAL_PUBLICATION,
+                0u);
+    } else {
+      auto* const sentinel =
+          reinterpret_cast<amdf_gpu_umd_user_queue_t*>(uintptr_t{1});
+      auto* queue = sentinel;
+      amdf_gpu_umd_user_queue_result_t result;
+      std::memset(&result, 0xA5, sizeof(result));
+      const auto original_result = result;
+      EXPECT_EQ(
+          amdf_gpu_umd_user_queue_create(&device_, &create, &queue, &result),
+          amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED));
+      EXPECT_EQ(queue, sentinel);
+      EXPECT_EQ(std::memcmp(&result, &original_result, sizeof(result)), 0);
+      EXPECT_EQ(native_state_.creation_operation_count, 0);
+      EXPECT_EQ(native_state_.buffer_create_count, 0);
+      EXPECT_EQ(native_state_.queue_create_count, 0);
+    }
+  }
 }
 
 INSTANTIATE_TEST_SUITE_P(Formats, KfdQueuePlacementTest,

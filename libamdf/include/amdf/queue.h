@@ -167,6 +167,14 @@ enum amdf_user_queue_capability_bits_e {
   /// the engine's advertised geometry. Selection confines kernels; it neither
   /// reserves resources exclusively nor isolates shared caches or bandwidth.
   AMDF_USER_QUEUE_CAPABILITY_EXECUTION_RESOURCE_SELECTION = UINT64_C(1) << 3,
+  /// Host non-temporal stores can publish separately allocated payloads through
+  /// the queue's format-defined commit protocol. The format specifies eligible
+  /// memory, ownership, store instructions, and consumer acquisition. This does
+  /// not change generic memory-pair cache transitions or qualify cached stores.
+  /// Family discovery reports potential support; the live queue reports
+  /// achievement for its placement and activated memory profile. Currently
+  /// defined by GPU AQL format version 1.
+  AMDF_USER_QUEUE_CAPABILITY_HOST_NON_TEMPORAL_PUBLICATION = UINT64_C(1) << 4,
 };
 
 /// Optional kernel-mediated queue operations.

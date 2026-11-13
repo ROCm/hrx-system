@@ -56,6 +56,9 @@ TEST(KfdTargetUserQueueTest, LiveMemoryFactsDeterminePlacementAndPublication) {
                     AMDF_QUEUE_PRIORITY_CAPABILITY_HIGH);
       EXPECT_EQ(plans.values[i].ring.placement,
                 AMDF_QUEUE_PLACEMENT_HOST_LOCAL);
+      EXPECT_EQ((plans.values[i].family.user_queue_capabilities &
+                 AMDF_USER_QUEUE_CAPABILITY_HOST_NON_TEMPORAL_PUBLICATION) != 0,
+                mode == 2 && command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL);
       EXPECT_EQ(plans.values[i].ring.host_publish_fence,
                 AMDF_HOST_CACHE_FENCE_NONE);
       EXPECT_EQ(placement.placement_capabilities,
@@ -75,6 +78,12 @@ TEST(KfdTargetUserQueueTest, LiveMemoryFactsDeterminePlacementAndPublication) {
     }
   }
   topology.vram.visible_byte_length /= 2;
+  amdf_gpu_kfd_target_user_queue_plans_initialize(&topology, 4096, 64, &plans);
+  for (uint32_t i = 0; i < plans.count; ++i) {
+    EXPECT_EQ(plans.values[i].family.user_queue_capabilities &
+                  AMDF_USER_QUEUE_CAPABILITY_HOST_NON_TEMPORAL_PUBLICATION,
+              0u);
+  }
   for (const auto command_type :
        {AMDF_QUEUE_COMMAND_TYPE_GPU_PM4, AMDF_QUEUE_COMMAND_TYPE_GPU_AQL,
         AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA}) {
