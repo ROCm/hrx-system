@@ -1,0 +1,67 @@
+// Unreachable blocks may have used arguments without any incoming edges.
+// RUN: pass low-materialize-allocation
+
+test.target<low_core> @target
+
+low.func.def schedule(locked) target<test.low.core>(@target) @unreachable_argument(%initial: reg<test.pressure.alias32 x7>, %seed: reg<test.i32>) -> (reg<test.pressure.alias32 x7>, reg<test.i32>) asm {
+  return %initial, %seed
+^dead(%wide: reg<test.pressure.alias32 x7>, %source0: reg<test.i32>, %source1: reg<test.i32>):
+  %first = test.move.to.pressure.alias32 %source0
+  %second = test.move.to.pressure.alias32 %source1
+  %first_value = copy %first : reg<test.pressure.alias32> -> reg<test.i32>
+  %second_value = copy %second : reg<test.pressure.alias32> -> reg<test.i32>
+  %pair = test.add.i32 %first_value, %second_value
+  return %wide, %pair
+}
+
+// ----
+test.target<low_core> @target
+
+low.func.def schedule(locked) target<test.low.core>(@target) @unreachable_argument(%initial: reg<test.pressure.alias32 x7>, %seed: reg<test.i32>) -> (reg<test.pressure.alias32 x7>, reg<test.i32>) asm {
+  %unreachable_argument_spill_storage_0 = storage {byte_alignment = 16, byte_length = 28} : low.storage<stack>
+  return %initial, %seed
+^dead(%source0: reg<test.i32>, %source1: reg<test.i32>):
+  %first = test.move.to.pressure.alias32 %source0
+  %second = test.move.to.pressure.alias32 %source1
+  %first_value = copy %first : reg<test.pressure.alias32> -> reg<test.i32>
+  %second_value = copy %second : reg<test.pressure.alias32> -> reg<test.i32>
+  %pair = test.add.i32 %first_value, %second_value
+  %13 = low.reload %unreachable_argument_spill_storage_0 : low.storage<stack> -> reg<test.pressure.alias32 x7>
+  return %13, %pair
+}
+
+// ====
+
+// A dead cycle can forward its own argument without any incoming definition.
+// RUN: pass low-materialize-allocation
+
+test.target<low_core> @target
+
+low.func.def schedule(locked) target<test.low.core>(@target) @unreachable_cycle(%initial: reg<test.pressure.alias32 x7>, %seed: reg<test.i32>) -> (reg<test.pressure.alias32 x7>, reg<test.i32>) asm {
+  return %initial, %seed
+^dead(%wide: reg<test.pressure.alias32 x7>, %source0: reg<test.i32>, %source1: reg<test.i32>):
+  %first = test.move.to.pressure.alias32 %source0
+  %second = test.move.to.pressure.alias32 %source1
+  %first_value = copy %first : reg<test.pressure.alias32> -> reg<test.i32>
+  %second_value = copy %second : reg<test.pressure.alias32> -> reg<test.i32>
+  %pair = test.add.i32 %first_value, %second_value
+  %wide_copy = copy %wide : reg<test.pressure.alias32 x7> -> reg<test.i32 x7>
+  low.br ^dead(%wide: reg<test.pressure.alias32 x7>, %source0: reg<test.i32>, %source1: reg<test.i32>)
+}
+
+// ----
+test.target<low_core> @target
+
+low.func.def schedule(locked) target<test.low.core>(@target) @unreachable_cycle(%initial: reg<test.pressure.alias32 x7>, %seed: reg<test.i32>) -> (reg<test.pressure.alias32 x7>, reg<test.i32>) asm {
+  %unreachable_cycle_spill_storage_0 = storage {byte_alignment = 16, byte_length = 28} : low.storage<stack>
+  return %initial, %seed
+^dead(%source0: reg<test.i32>, %source1: reg<test.i32>):
+  %first = test.move.to.pressure.alias32 %source0
+  %second = test.move.to.pressure.alias32 %source1
+  %first_value = copy %first : reg<test.pressure.alias32> -> reg<test.i32>
+  %second_value = copy %second : reg<test.pressure.alias32> -> reg<test.i32>
+  %pair = test.add.i32 %first_value, %second_value
+  %14 = low.reload %unreachable_cycle_spill_storage_0 : low.storage<stack> -> reg<test.pressure.alias32 x7>
+  %wide_copy = copy %14 : reg<test.pressure.alias32 x7> -> reg<test.i32 x7>
+  low.br ^dead(%source0: reg<test.i32>, %source1: reg<test.i32>)
+}

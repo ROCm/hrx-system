@@ -989,8 +989,6 @@ static void loom_low_spill_materialization_plan_one(
           });
       payload->present = false;
     }
-    IREE_ASSERT(record->reload_count == 0 || record->store_count != 0,
-                "a live non-entry block argument has an incoming payload");
     loom_low_spill_materialization_append_action(
         builder,
         (loom_low_spill_materialization_action_t){
@@ -1603,18 +1601,16 @@ static void loom_low_allocation_spill_plan_value_reload_traffic(
   *out_reload_bytes = reload_bytes;
 }
 
-static iree_status_t loom_low_allocation_spill_plan_value_store_count(
+static uint32_t loom_low_allocation_spill_plan_value_store_count(
     const loom_module_t* module, const loom_cfg_graph_t* cfg_graph,
-    loom_value_id_t value_id, const loom_value_t* value, uint32_t reload_count,
-    uint32_t* out_store_count) {
-  *out_store_count = 0;
+    loom_value_id_t value_id, const loom_value_t* value,
+    uint32_t reload_count) {
   if (reload_count == 0) {
-    return iree_ok_status();
+    return 0;
   }
   if (!loom_low_allocation_spill_plan_removes_argument(
           module, cfg_graph->region, value_id)) {
-    *out_store_count = 1;
-    return iree_ok_status();
+    return 1;
   }
 
   const loom_block_t* block = loom_value_def_block(value);
@@ -1634,17 +1630,12 @@ static iree_status_t loom_low_allocation_spill_plan_value_store_count(
     }
     ++store_count;
   }
-  if (store_count == 0) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "spilled non-entry block argument has reloads but no incoming value "
-        "to store");
-  }
-  *out_store_count = store_count;
-  return iree_ok_status();
+  // A disconnected block or dead cycle can have uses without an incoming
+  // value. Its spill storage is never read by an executable path.
+  return store_count;
 }
 
-static iree_status_t loom_low_allocation_spill_plan_traffic_for_layout(
+static void loom_low_allocation_spill_plan_traffic_for_layout(
     const loom_module_t* module, const loom_cfg_graph_t* cfg_graph,
     const loom_low_allocation_assignment_t* assignment, uint32_t byte_size,
     loom_low_allocation_spill_plan_traffic_workspace_t* workspace,
@@ -1658,9 +1649,8 @@ static iree_status_t loom_low_allocation_spill_plan_traffic_for_layout(
   loom_low_allocation_spill_plan_value_reload_traffic(
       module, assignment, byte_size, value, cfg_graph->region, workspace,
       &reload_count, &reload_bytes, &has_narrow_uses);
-  uint32_t store_count = 0;
-  IREE_RETURN_IF_ERROR(loom_low_allocation_spill_plan_value_store_count(
-      module, cfg_graph, value_id, value, reload_count, &store_count));
+  const uint32_t store_count = loom_low_allocation_spill_plan_value_store_count(
+      module, cfg_graph, value_id, value, reload_count);
   *out_traffic = (loom_low_allocation_spill_plan_traffic_t){
       .store_count = store_count,
       .has_narrow_uses = has_narrow_uses,
@@ -1668,7 +1658,6 @@ static iree_status_t loom_low_allocation_spill_plan_traffic_for_layout(
       .reload_count = reload_count,
       .reload_bytes = reload_bytes,
   };
-  return iree_ok_status();
 }
 
 uint64_t loom_low_allocation_spill_plan_traffic_cost(
@@ -1695,8 +1684,9 @@ iree_status_t loom_low_allocation_spill_plan_traffic(
   uint32_t byte_size = 0;
   IREE_RETURN_IF_ERROR(loom_low_allocation_spill_plan_byte_size(
       assignment->unit_count, spill_unit_bits, &byte_size));
-  return loom_low_allocation_spill_plan_traffic_for_layout(
+  loom_low_allocation_spill_plan_traffic_for_layout(
       module, cfg_graph, assignment, byte_size, workspace, out_traffic);
+  return iree_ok_status();
 }
 
 iree_status_t loom_low_allocation_spill_plan_append(
