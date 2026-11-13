@@ -4,6 +4,8 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include <tuple>
+
 #include "libamdf/src/gpu/umd/kfd/user_queue_test_fixture.h"
 
 namespace {
@@ -181,7 +183,11 @@ TEST_P(KfdQueueNativePublicationTest,
 
 TEST_P(KfdQueuePlacementTest, HostLocalRingNeedsNoNativeRelease) {
   SelectLocalTopology();
-  ASSERT_NO_FATAL_FAILURE(CreateQueue(GetParam()));
+  auto create = MakeCreateInfo(GetParam());
+  create.placement = AMDF_QUEUE_PLACEMENT_HOST_LOCAL;
+  ASSERT_EQ(amdf_gpu_umd_user_queue_create(&device_, &create, &queue_,
+                                           &queue_result_),
+            AMDF_STATUS_OK);
   ASSERT_NO_FATAL_FAILURE(MapQueue());
   EXPECT_EQ(queue_result_.placement, AMDF_QUEUE_PLACEMENT_HOST_LOCAL);
   EXPECT_EQ(queue_result_.capabilities &
@@ -205,13 +211,17 @@ TEST_P(KfdQueuePlacementTest,
     create.required_capabilities |=
         AMDF_USER_QUEUE_CAPABILITY_HOST_NON_TEMPORAL_PUBLICATION;
     if (GetParam() == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL &&
-        placement == AMDF_QUEUE_PLACEMENT_DEVICE_LOCAL) {
+        placement != AMDF_QUEUE_PLACEMENT_HOST_LOCAL) {
       ASSERT_EQ(amdf_gpu_umd_user_queue_create(&device_, &create, &queue_,
                                                &queue_result_),
                 AMDF_STATUS_OK);
       EXPECT_NE(queue_result_.capabilities &
                     AMDF_USER_QUEUE_CAPABILITY_HOST_NON_TEMPORAL_PUBLICATION,
                 0u);
+      ASSERT_EQ(amdf_gpu_umd_user_queue_destroy(queue_), AMDF_STATUS_OK);
+      queue_ = nullptr;
+      EXPECT_EQ(native_state_.LiveBufferCount(), 0u);
+      native_state_.Reset();
     } else {
       auto* const sentinel =
           reinterpret_cast<amdf_gpu_umd_user_queue_t*>(uintptr_t{1});
@@ -230,6 +240,119 @@ TEST_P(KfdQueuePlacementTest,
     }
   }
 }
+
+enum class AqlMemoryRoute {
+  kVisibleLocal,
+  kPartialBar,
+  kUnified,
+  kNoLocalProfile,
+  kNoHostRelease,
+  kVirtualFunction,
+};
+
+class KfdAqlPlacementTest
+    : public KfdUserQueueTest,
+      public ::testing::WithParamInterface<
+          std::tuple<uint32_t, AqlMemoryRoute, amdf_queue_placement_t>> {};
+
+TEST_P(KfdAqlPlacementTest, ResolvesPlacementBeforeAllocationAndPublication) {
+  const auto [target, route, requested] = GetParam();
+  const uint32_t major = target / 10000;
+  const uint32_t minor = target / 100 % 100;
+  const uint32_t stepping = target % 100;
+  if (major == 9) {
+    SelectAqlTopology();
+  }
+  device_.topology.properties.gfx_ip = {major, minor, stepping};
+  device_.topology.gc_ip = {major, minor, stepping, true};
+  if (target == 120500) {
+    device_.topology.gc_ip = {12, 1, 0, true};
+  }
+  device_.topology.integrated = route == AqlMemoryRoute::kUnified;
+  device_.topology.virtual_function = route == AqlMemoryRoute::kVirtualFunction;
+  device_.topology.vram.total_byte_length = UINT64_C(1) << 30;
+  device_.topology.vram.visible_byte_length =
+      UINT64_C(1) << (route == AqlMemoryRoute::kPartialBar ? 28 : 30);
+  device_.topology.gtt_byte_length = UINT64_C(2) << 30;
+  device_.topology.memory_features =
+      route == AqlMemoryRoute::kNoLocalProfile
+          ? 0
+          : amdf_gpu_kfd_topology_memory_features(&device_.topology,
+                                                  device_.topology.integrated);
+  device_.hdp = route == AqlMemoryRoute::kNoHostRelease
+                    ? nullptr
+                    : reinterpret_cast<amdf_gpu_kfd_hdp_t*>(uintptr_t{1});
+  auto create = MakeCreateInfo(AMDF_QUEUE_COMMAND_TYPE_GPU_AQL);
+  create.placement = requested;
+  const bool supported = requested != AMDF_QUEUE_PLACEMENT_DEVICE_LOCAL ||
+                         (route != AqlMemoryRoute::kPartialBar &&
+                          route != AqlMemoryRoute::kNoHostRelease &&
+                          route != AqlMemoryRoute::kVirtualFunction);
+  if (!supported) {
+    auto* const sentinel =
+        reinterpret_cast<amdf_gpu_umd_user_queue_t*>(uintptr_t{1});
+    auto* queue = sentinel;
+    amdf_gpu_umd_user_queue_result_t result;
+    std::memset(&result, 0xA5, sizeof(result));
+    const auto original_result = result;
+    EXPECT_EQ(
+        amdf_gpu_umd_user_queue_create(&device_, &create, &queue, &result),
+        amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED));
+    EXPECT_EQ(queue, sentinel);
+    EXPECT_EQ(std::memcmp(&result, &original_result, sizeof(result)), 0);
+    EXPECT_EQ(native_state_.creation_operation_count, 0);
+    return;
+  }
+  const bool local = requested == AMDF_QUEUE_PLACEMENT_DEVICE_LOCAL ||
+                     (requested == AMDF_QUEUE_PLACEMENT_DEFAULT && major == 9 &&
+                      route == AqlMemoryRoute::kVisibleLocal);
+  const bool local_backing = local && route != AqlMemoryRoute::kUnified;
+  const bool local_payload =
+      local_backing && route == AqlMemoryRoute::kVisibleLocal;
+  ASSERT_EQ(amdf_gpu_umd_user_queue_create(&device_, &create, &queue_,
+                                           &queue_result_),
+            AMDF_STATUS_OK);
+  EXPECT_EQ(queue_result_.placement, local ? AMDF_QUEUE_PLACEMENT_DEVICE_LOCAL
+                                           : AMDF_QUEUE_PLACEMENT_HOST_LOCAL);
+  EXPECT_EQ((queue_result_.capabilities &
+             AMDF_USER_QUEUE_CAPABILITY_HOST_NON_TEMPORAL_PUBLICATION) != 0,
+            local_payload);
+  const auto ring_flags = native_state_.buffers[0].create_info.native_flags;
+  EXPECT_EQ((ring_flags & KFD_IOC_ALLOC_MEM_FLAGS_VRAM) != 0, local_backing);
+  EXPECT_EQ((ring_flags & KFD_IOC_ALLOC_MEM_FLAGS_PUBLIC) != 0, local_backing);
+  EXPECT_EQ((ring_flags & KFD_IOC_ALLOC_MEM_FLAGS_UNCACHED) != 0,
+            local_backing);
+  EXPECT_EQ((ring_flags & KFD_IOC_ALLOC_MEM_FLAGS_GTT) != 0, !local_backing);
+  EXPECT_NE(ring_flags & KFD_IOC_ALLOC_MEM_FLAGS_COHERENT, 0u);
+  EXPECT_NE(native_state_.buffers[1].create_info.native_flags &
+                KFD_IOC_ALLOC_MEM_FLAGS_GTT,
+            0u);
+  EXPECT_EQ(native_state_.host_publication.calls_before_activation,
+            local_backing ? 1u : 0u);
+  ASSERT_NO_FATAL_FAILURE(MapQueue());
+  EXPECT_EQ(mapping_result_.host_publish_executor,
+            local_backing ? AMDF_CACHE_TRANSITION_EXECUTOR_HOST_DIRECT
+                          : AMDF_CACHE_TRANSITION_EXECUTOR_NONE);
+  EXPECT_EQ(mapping_result_.host_publish_fence,
+            local_backing ? AMDF_HOST_CACHE_FENCE_X86_SFENCE
+                          : AMDF_HOST_CACHE_FENCE_NONE);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    MemoryContracts, KfdAqlPlacementTest,
+    ::testing::Combine(::testing::Values(90010u, 90400u, 90401u, 90402u, 90500u,
+                                         110000u, 110001u, 110002u, 110003u,
+                                         110500u, 110501u, 120000u, 120001u,
+                                         120500u),
+                       ::testing::Values(AqlMemoryRoute::kVisibleLocal,
+                                         AqlMemoryRoute::kPartialBar,
+                                         AqlMemoryRoute::kUnified,
+                                         AqlMemoryRoute::kNoLocalProfile,
+                                         AqlMemoryRoute::kNoHostRelease,
+                                         AqlMemoryRoute::kVirtualFunction),
+                       ::testing::Values(AMDF_QUEUE_PLACEMENT_DEFAULT,
+                                         AMDF_QUEUE_PLACEMENT_HOST_LOCAL,
+                                         AMDF_QUEUE_PLACEMENT_DEVICE_LOCAL)));
 
 INSTANTIATE_TEST_SUITE_P(Formats, KfdQueuePlacementTest,
                          ::testing::Values(AMDF_QUEUE_COMMAND_TYPE_GPU_PM4,

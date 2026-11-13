@@ -324,9 +324,25 @@ static bool amdf_gpu_kfd_user_queue_select_plan(
     const amdf_gpu_queue_family_properties_t* family = &plan->family;
     amdf_user_queue_capabilities_t capabilities =
         family->user_queue_capabilities;
+    amdf_queue_placement_t ring_placement = create_info->placement;
+    if (ring_placement == AMDF_QUEUE_PLACEMENT_DEFAULT) {
+      // CDNA's AQL fetch path benefits from keeping the ring and ABI payloads
+      // on the qualified LOCAL route. RDNA uses coherent SYSTEM rings to
+      // avoid the startup latency of CPU-written LOCAL packet headers.
+      const bool local_aql =
+          family->command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL &&
+          device->topology.properties.gfx_ip.major == 9 &&
+          !device->topology.integrated && device->hdp != NULL &&
+          (capabilities &
+           AMDF_USER_QUEUE_CAPABILITY_HOST_NON_TEMPORAL_PUBLICATION) != 0 &&
+          (device->topology.memory_features &
+           AMDF_GPU_DEVICE_FEATURE_HOST_VISIBLE_LOCAL_MEMORY) != 0;
+      ring_placement = local_aql ? AMDF_QUEUE_PLACEMENT_DEVICE_LOCAL
+                                 : AMDF_QUEUE_PLACEMENT_HOST_LOCAL;
+    }
     // Unified DEVICE_LOCAL rings use SYSTEM backing. Separate LOCAL payloads
     // require the live memory profile and ring to share the LOCAL route.
-    if (create_info->placement != AMDF_QUEUE_PLACEMENT_DEVICE_LOCAL ||
+    if (ring_placement != AMDF_QUEUE_PLACEMENT_DEVICE_LOCAL ||
         device->topology.integrated ||
         (device->topology.memory_features &
          AMDF_GPU_DEVICE_FEATURE_HOST_VISIBLE_LOCAL_MEMORY) == 0) {
@@ -337,17 +353,15 @@ static bool amdf_gpu_kfd_user_queue_select_plan(
         (family->priority_capabilities & (1u << create_info->priority)) != 0 &&
         (family->producer_modes & (1u << create_info->producer_mode)) != 0 &&
         (create_info->required_capabilities & ~capabilities) == 0 &&
-        (create_info->placement == AMDF_QUEUE_PLACEMENT_DEFAULT ||
-         (create_info->placement <= AMDF_QUEUE_PLACEMENT_DEVICE_LOCAL &&
-          (placement.placement_capabilities & (1u << create_info->placement)) !=
-              0)) &&
+        (ring_placement <= AMDF_QUEUE_PLACEMENT_DEVICE_LOCAL &&
+         (placement.placement_capabilities & (1u << ring_placement)) != 0) &&
         create_info->roles == family->roles &&
         (create_info->ring_byte_length == 0 ||
          (create_info->ring_byte_length >= family->minimum_ring_byte_length &&
           create_info->ring_byte_length <= family->maximum_ring_byte_length))) {
       *out_plan = *plan;
       out_plan->family.user_queue_capabilities = capabilities;
-      if (create_info->placement == AMDF_QUEUE_PLACEMENT_DEVICE_LOCAL) {
+      if (ring_placement == AMDF_QUEUE_PLACEMENT_DEVICE_LOCAL) {
         out_plan->ring.placement = AMDF_QUEUE_PLACEMENT_DEVICE_LOCAL;
         if (!device->topology.integrated) {
           if (device->hdp == NULL) {
