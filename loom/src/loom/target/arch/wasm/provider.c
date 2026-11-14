@@ -471,7 +471,7 @@ static const loom_target_legalizer_rule_t kLoomWasmLegalizerRules[] = {
     {
         .root_kind = LOOM_OP_VECTOR_INSERT,
         .first_operand_element_types =
-            LOOM_SCALAR_TYPE_SET_INTEGER_PAYLOAD | LOOM_SCALAR_TYPE_SET_FLOAT,
+            LOOM_SCALAR_TYPE_SET_INTEGER | LOOM_SCALAR_TYPE_SET_FLOAT,
         .legalize = loom_wasm_legalize_vector_insert,
     },
     {
