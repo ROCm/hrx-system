@@ -1071,7 +1071,7 @@ jobs:
       - name: Build and publish test closure
         run: |
           set -euo pipefail
-          target='//runtime/src/iree/base/testing:dynamic_library_test'
+          selection='tests(//runtime/src/iree/base/...)'
 
           package_dir="$RUNNER_TEMP/windows-cache-handoff-package"
           evidence_dir="$package_dir/evidence"
@@ -1091,20 +1091,31 @@ jobs:
             --remote_download_outputs=all
             --remote_verify_downloads
             --noremote_cache_async
+            --skip_incompatible_explicit_targets
           )
+          target_patterns="$evidence_dir/target-patterns.txt"
+          target_query="$evidence_dir/target-query.txt"
+          bazel "--output_base=$IREE_CACHE_HANDOFF_OUTPUT_BASE" query \
+            --output=label "$selection" > "$target_patterns"
+          {
+            echo 'set('
+            sed 's/^/  /' "$target_patterns"
+            echo ')'
+          } > "$target_query"
           bazel "--output_base=$IREE_CACHE_HANDOFF_OUTPUT_BASE" build \
             "${common_flags[@]}" \
             --remote_upload_local_results=true \
             --profile="$evidence_dir/producer.profile.gz" \
-            "$target"
+            --target_pattern_file="$target_patterns"
 
           bazel "--output_base=$IREE_CACHE_HANDOFF_OUTPUT_BASE" cquery \
-            "${common_flags[@]}" --output=jsonproto "$target" \
+            "${common_flags[@]}" --output=jsonproto \
+            --query_file="$target_query" \
             > "$evidence_dir/target.json"
           bazel "--output_base=$IREE_CACHE_HANDOFF_OUTPUT_BASE" cquery \
             "${common_flags[@]}" --output=starlark \
             --starlark:file=build_tools/windows/cache_handoff/manifest_query.bzl \
-            "$target" > "$evidence_dir/providers.json"
+            --query_file="$target_query" > "$evidence_dir/providers.json"
           execution_root="$(
             bazel "--output_base=$IREE_CACHE_HANDOFF_OUTPUT_BASE" info execution_root
           )"
@@ -1114,6 +1125,7 @@ jobs:
             --execution-root="$execution_root" \
             --cas-url=http://bazelremote-svc.bazelremote-ns.svc.cluster.local:8080 \
             --output-dir="$package_dir"
+          jq . "$package_dir/handoff-summary.json"
           du --human-readable --summarize "$package_dir"
 
       # Product bytes stay in bazel-remote. This artifact contains only the
@@ -1161,10 +1173,8 @@ jobs:
           $root = Join-Path $drive.Root "hrx\cache-handoff\$runKey"
           $outputBase = Join-Path $env:SystemDrive "hc\$runKey\consumer"
           $environment = [ordered]@{
-            BAZEL_LLVM = Join-Path $env:SystemDrive 'r\lib\llvm'
             HRX_DOWNLOAD_CACHE_DIR = Join-Path $root 'downloads'
             HRX_OUTPUT_DIR = $root
-            HRX_ROCM_ROOT = Join-Path $env:SystemDrive 'r'
             IREE_CACHE_HANDOFF_EVIDENCE = Join-Path $root 'consumer-evidence'
             IREE_CACHE_HANDOFF_OUTPUT_BASE = $outputBase.Replace('\', '/')
             PIP_CACHE_DIR = Join-Path $root 'pip-cache'
@@ -1175,14 +1185,6 @@ jobs:
             "$($entry.Key)=$($entry.Value)" |
               Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           }
-
-      - name: Fetch ROCm toolchain
-        shell: powershell
-        run: |
-          python -m pip install --upgrade boto3 zstandard
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python build_tools/ci/ci_core_windows.py fetch-rocm
-          exit $LASTEXITCODE
 
       - name: Download test manifest
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -1207,13 +1209,11 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
-          $target = '//.iree/windows-cache-handoff:dynamic_library_test'
+          $target = '//.iree/windows-cache-handoff/runtime/src/iree/base/...'
           $evidenceDir = $env:IREE_CACHE_HANDOFF_EVIDENCE
           $executionLog = Join-Path $evidenceDir 'consumer-execution.json'
           $profile = Join-Path $evidenceDir 'consumer.profile.gz'
           bazel "--output_base=$env:IREE_CACHE_HANDOFF_OUTPUT_BASE" test `
-            '--config=windows-x86_64' `
-            '--config=windows-clang-cl' `
             '--strategy=TestRunner=local' `
             '--cache_test_results=no' `
             "--profile=$profile" `
