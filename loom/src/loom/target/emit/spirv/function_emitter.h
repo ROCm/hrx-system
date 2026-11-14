@@ -75,6 +75,8 @@ typedef struct loom_spirv_function_emission_context_t {
   loom_spirv_module_shared_bda_root_t* shared_bda_root;
   // Module-wide Input variable IDs indexed by supported builtin kind.
   uint32_t* builtin_variable_ids;
+  // Borrowed module cache cell, allocated lazily for typed component helpers.
+  uint32_t** component_math_function_ids;
 } loom_spirv_function_emission_context_t;
 
 // Mutable state for one function emission.

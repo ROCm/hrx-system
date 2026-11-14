@@ -1,0 +1,93 @@
+// RUN: emit spirv-low target=spirv:vulkan1.3+bda+hal features=COOPERATIVE_MATRIX_KHR
+
+// A source activation keeps the accumulator opaque through the entire recipe.
+kernel.def @matrix_silu() {
+  %unit = index.constant 1 : index
+  %width = target.subgroup.size : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %tile = index.constant 16 : index
+  %source = buffer.assume.alignment %input {minimum_alignment = 16} : buffer
+  %destination = buffer.assume.alignment %output {minimum_alignment = 16} : buffer
+  %in = buffer.view %source[%origin] : buffer -> view<16x16xf32>
+  %out = buffer.view %destination[%origin] : buffer -> view<16x16xf32>
+  %matrix = vector.fragment.load<init> %in[0, 0] shape [%tile, %tile] : view<16x16xf32> -> vector<8xf32>
+  %result = vector.siluf<afn> %matrix : vector<8xf32>
+  vector.fragment.store<result> %result, %out[0, 0] shape [%tile, %tile] : vector<8xf32>, view<16x16xf32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<spirv.logical.core> abi_layout({signature = (buffer, buffer) -> ()}) workgroup_count(1, 1, 1) @matrix_silu() asm {
+  %source = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %destination = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %24 = OpConstant.offset64 16
+  %25 = OpUConvert.offset64.u32 %24
+  %26 = OpConstant.offset64 0
+  %27 = OpPtrAccessChain.storage_buffer.f32.byte_offset %source, %26
+  %matrix = OpCooperativeMatrixLoadKHR.accumulator.f32.16x16.subgroup.storage_buffer %27, %25, 0 : reg<spirv.id : spirv.cooperative_matrix<16x16xf32, subgroup, matrix_accumulator>>
+  %29 = OpConstant.f32 3216550459 : reg<spirv.id>
+  %30 = OpCompositeConstruct.cooperative.f32.16x16.accumulator %29 : reg<spirv.id : spirv.cooperative_matrix<16x16xf32, subgroup, matrix_accumulator>>
+  %31 = OpConstant.f32 1065353216 : reg<spirv.id>
+  %32 = OpCompositeConstruct.cooperative.f32.16x16.accumulator %31 : reg<spirv.id : spirv.cooperative_matrix<16x16xf32, subgroup, matrix_accumulator>>
+  %33 = OpFMul.cooperative.f32.16x16.accumulator %matrix, %30 : reg<spirv.id : spirv.cooperative_matrix<16x16xf32, subgroup, matrix_accumulator>>
+  %34 = OpExtInst.GLSL.std.450.Exp2.cooperative.f32.16x16.accumulator %33 : reg<spirv.id : spirv.cooperative_matrix<16x16xf32, subgroup, matrix_accumulator>>
+  %35 = OpFAdd.cooperative.f32.16x16.accumulator %32, %34 : reg<spirv.id : spirv.cooperative_matrix<16x16xf32, subgroup, matrix_accumulator>>
+  %36 = OpFDiv.cooperative.f32.16x16.accumulator %32, %35 : reg<spirv.id : spirv.cooperative_matrix<16x16xf32, subgroup, matrix_accumulator>>
+  %result = OpFMul.cooperative.f32.16x16.accumulator %matrix, %36 : reg<spirv.id : spirv.cooperative_matrix<16x16xf32, subgroup, matrix_accumulator>>
+  %38 = OpConstant.offset64 16
+  %39 = OpUConvert.offset64.u32 %38
+  %40 = OpConstant.offset64 0
+  %41 = OpPtrAccessChain.storage_buffer.f32.byte_offset %destination, %40
+  OpCooperativeMatrixStoreKHR.accumulator.f32.16x16.subgroup.storage_buffer %41, %result, %39, 0
+  return
+}
+
+// ====
+
+// RUN: emit spirv-low target=spirv:vulkan1.3+bda+hal features=COOPERATIVE_MATRIX_KHR
+
+// Opaque matrix math requires the same approximation permission as scalar math.
+kernel.def @strict_sine() {
+  %unit = index.constant 1 : index
+  %width = target.subgroup.size : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %tile = index.constant 16 : index
+  %source = buffer.assume.alignment %input {minimum_alignment = 16} : buffer
+  %destination = buffer.assume.alignment %output {minimum_alignment = 16} : buffer
+  %in = buffer.view %source[%origin] : buffer -> view<16x16xf32>
+  %out = buffer.view %destination[%origin] : buffer -> view<16x16xf32>
+  %matrix = vector.fragment.load<init> %in[0, 0] shape [%tile, %tile] : view<16x16xf32> -> vector<8xf32>
+  // ERROR@+1: LOWERING/036 "math.transcendental.afn"
+  %result = vector.sinf %matrix : vector<8xf32>
+  vector.fragment.store<result> %result, %out[0, 0] shape [%tile, %tile] : vector<8xf32>, view<16x16xf32>
+  kernel.return
+}
+
+// ====
+
+// RUN: with-checks compile-report target=spirv:vulkan1.3+bda+hal target-legalize
+
+// Missing controls above bit 31 survive the production query and report path.
+kernel.def @half_minimum_report() {
+  %unit = index.constant 1 : index
+  %width = target.subgroup.size : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%first: buffer, %second: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %tile = index.constant 16 : index
+  %first_view = buffer.view %first[%origin] : buffer -> view<16x16xf16>
+  %second_view = buffer.view %second[%origin] : buffer -> view<16x16xf16>
+  %output_view = buffer.view %output[%origin] : buffer -> view<16x16xf16>
+  %a = vector.fragment.load<init> %first_view[0, 0] shape [%tile, %tile] : view<16x16xf16> -> vector<8xf16>
+  %b = vector.fragment.load<init> %second_view[0, 0] shape [%tile, %tile] : view<16x16xf16> -> vector<8xf16>
+  %minimum = vector.minnumf<nnan|ninf|nsz> %a, %b : vector<8xf16>
+  vector.fragment.store<result> %minimum, %output_view[0, 0] shape [%tile, %tile] : vector<8xf16>, view<16x16xf16>
+  kernel.return
+}
+
+// ----
+CHECK: COMPILE-REPORT: target_legalization[*] * source_op=vector.minnumf * missing_features=0x80000000000808 *

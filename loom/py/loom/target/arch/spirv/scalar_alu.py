@@ -169,11 +169,7 @@ FLOAT_COMPARE_TYPES = FLOAT_SCALAR_ALU_TYPES
 def float_preservation_feature_atoms(scalar: ScalarAluType) -> tuple[str, str]:
     bit_width = int(scalar.source_type.removeprefix("f"))
     return (
-        (
-            "float32_denorm_preserve"
-            if bit_width == 32
-            else "float16_64_denorm_preserve"
-        ),
+        f"float{bit_width}_denorm_preserve",
         f"float{bit_width}_signed_zero_inf_nan_preserve",
     )
 

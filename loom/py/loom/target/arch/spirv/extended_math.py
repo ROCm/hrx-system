@@ -10,6 +10,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from loom.target.arch.spirv.cooperative_matrix import (
+    COOPERATIVE_MATRIX_TYPES,
+    CooperativeMatrixType,
+)
 from loom.target.arch.spirv.features import feature_bits_value
 from loom.target.arch.spirv.ordinary_vector import (
     ORDINARY_VECTOR_COMPONENT_TYPES,
@@ -38,6 +42,11 @@ class ExtendedMathOperation:
     # Whether exact selection depends on the operand width's denormal mode.
     preserve_denormals: bool = False
 
+    def feature_bits(self, bit_width: int) -> int:
+        if not self.preserve_denormals:
+            return 0
+        return feature_bits_value((f"float{bit_width}_denorm_preserve",))
+
 
 @dataclass(frozen=True, slots=True)
 class ExtendedMathInstruction:
@@ -64,21 +73,45 @@ class ExtendedMathInstruction:
 
     @property
     def feature_bits(self) -> int:
-        bits = self.value_type.feature_bits
-        if self.operation.preserve_denormals:
-            component = (
-                self.value_type.component_type
-                if isinstance(self.value_type, OrdinaryVectorType)
-                else self.value_type
-            )
-            bits |= feature_bits_value(
-                (
-                    "float32_denorm_preserve"
-                    if component.bit_width == 32
-                    else "float16_64_denorm_preserve",
-                )
-            )
-        return bits
+        component = (
+            self.value_type.component_type
+            if isinstance(self.value_type, OrdinaryVectorType)
+            else self.value_type
+        )
+        return self.value_type.feature_bits | self.operation.feature_bits(
+            component.bit_width
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class CooperativeMatrixMathInstruction:
+    """A scalar primitive mapped over an opaque matrix's native components."""
+
+    # Scalar semantics, permissions, and extended-instruction identity.
+    operation: ExtendedMathOperation
+    # One native matrix type shared by every operand and the result.
+    value_type: CooperativeMatrixType
+
+    @property
+    def descriptor_key(self) -> str:
+        matrix = self.value_type
+        return (
+            f"spirv.op_ext_inst.glsl_std_450.{self.operation.source_op_key}."
+            f"cooperative.{matrix.scalar.suffix}.{matrix.rows}x{matrix.columns}.{matrix.role}"
+        )
+
+    @property
+    def mnemonic(self) -> str:
+        return self.descriptor_key.replace(
+            f"spirv.op_ext_inst.glsl_std_450.{self.operation.source_op_key}",
+            f"OpExtInst.GLSL.std.450.{self.operation.instruction_name}",
+        )
+
+    @property
+    def feature_bits(self) -> int:
+        return self.value_type.feature_bits | self.operation.feature_bits(
+            self.value_type.scalar.byte_width * 8
+        )
 
 
 EXTENDED_MATH_OPERATIONS = (
@@ -189,6 +222,19 @@ INTEGER_MATH_OPERATIONS = (
         instruction_c_enum="LOOM_SPIRV_GLSL_STD_450_FIND_UMSB",
         source_types=("i32",),
     ),
+)
+
+COOPERATIVE_MATRIX_MATH_OPERATIONS = (
+    *EXTENDED_MATH_OPERATIONS,
+    *EXTREMA_MATH_OPERATIONS,
+    *ROUNDING_MATH_OPERATIONS,
+)
+
+COOPERATIVE_MATRIX_MATH_INSTRUCTIONS = tuple(
+    CooperativeMatrixMathInstruction(operation, matrix_type)
+    for operation in COOPERATIVE_MATRIX_MATH_OPERATIONS
+    for matrix_type in COOPERATIVE_MATRIX_TYPES
+    if matrix_type.scalar.source_type in operation.source_types
 )
 
 EXTENDED_MATH_INSTRUCTIONS = tuple(

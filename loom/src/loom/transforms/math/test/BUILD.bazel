@@ -41,6 +41,14 @@ loom_check_test(
 )
 
 loom_check_test(
+    name = "matrix_constants",
+    src = "matrix_constants.loom-test",
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/arch:spirv",
+    ]),
+)
+
+loom_check_test(
     name = "trigonometry_narrow",
     src = "trigonometry_narrow.loom-test",
     target_compatible_with = loom_config_compatible_with([
@@ -53,6 +61,7 @@ test_suite(
     tests = [
         ":generic_test",
         ":logarithm",
+        ":matrix_constants",
         ":trigonometry",
         ":trigonometry_narrow",
     ],

@@ -57,6 +57,7 @@ from loom.target.arch.spirv.cooperative_matrix import (  # noqa: E402
 )
 from loom.target.arch.spirv.descriptors import SPIRV_LOGICAL_CORE_DESCRIPTOR_SET  # noqa: E402
 from loom.target.arch.spirv.extended_math import (  # noqa: E402
+    COOPERATIVE_MATRIX_MATH_INSTRUCTIONS,
     EXTENDED_MATH_INSTRUCTIONS,
 )
 from loom.target.arch.spirv.ordinary_vector import (  # noqa: E402
@@ -278,6 +279,8 @@ class _PacketRow:
     atomic_float_operation: int | None = None
     extended_instruction_set: str | None = None
     extended_instruction: str | None = None
+    # Dense helper ordinal plus one; absent for a direct OpExtInst.
+    component_function: int | None = None
 
     @property
     def result_count(self) -> int:
@@ -327,6 +330,7 @@ class _PacketRow:
             "extended_instruction": {
                 "instruction_set": self.extended_instruction_set,
                 "instruction": self.extended_instruction,
+                "component_function": self.component_function,
             },
         }
         initializers = []
@@ -1029,7 +1033,7 @@ def _subgroup_rows() -> list[_PacketRow]:
 
 
 def _extended_math_rows() -> list[_PacketRow]:
-    return [
+    rows = [
         _PacketRow(
             row.descriptor_key,
             opcode="LOOM_SPIRV_OP_EXT_INST",
@@ -1041,6 +1045,29 @@ def _extended_math_rows() -> list[_PacketRow]:
         )
         for row in EXTENDED_MATH_INSTRUCTIONS
     ]
+    for ordinal, row in enumerate(COOPERATIVE_MATRIX_MATH_INSTRUCTIONS, start=1):
+        matrix = row.value_type
+        value = _cooperative_matrix_value(
+            scalar_enum=matrix.scalar.scalar_enum,
+            rows=matrix.rows,
+            columns=matrix.columns,
+            matrix_use=matrix.use_c_expression,
+        )
+        rows.append(
+            _PacketRow(
+                row.descriptor_key,
+                opcode="LOOM_SPIRV_OP_EXT_INST",
+                form="LOOM_SPIRV_PACKET_FORM_EXTENDED_INSTRUCTION",
+                result_type=value,
+                operand_types=(value,) * len(row.operation.operand_names),
+                extended_instruction_set="LOOM_SPIRV_EXTENDED_INSTRUCTION_SET_GLSL_STD_450",
+                extended_instruction=row.operation.instruction_c_enum,
+                component_function=ordinal,
+            )
+        )
+    if len(COOPERATIVE_MATRIX_MATH_INSTRUCTIONS) > 0xFFFF:
+        raise ValueError("cooperative component-function ordinals exceed uint16_t storage")
+    return rows
 
 
 def _builtin_index_rows() -> list[_PacketRow]:
@@ -1379,6 +1406,14 @@ def _validate_rows(rows: tuple[_PacketRow, ...], descriptors: tuple[Descriptor, 
 
     for row in rows:
         descriptor = descriptors_by_key[row.descriptor_key]
+        if row.component_function is not None and (
+            row.form != "LOOM_SPIRV_PACKET_FORM_EXTENDED_INSTRUCTION"
+            or row.result_type is None
+            or "LOOM_SPIRV_VALUE_CLASS_COOPERATIVE_MATRIX" not in row.result_type
+            or not 1 <= len(row.operand_types) <= 2
+            or any(operand != row.result_type for operand in row.operand_types)
+        ):
+            raise ValueError(f"{row.descriptor_key}: component math requires one or two same-typed matrix operands")
         if row.no_contraction and row.fp_fast_math_none:
             raise ValueError(f"{row.descriptor_key}: incompatible floating-point decorations")
         result_count = sum(operand.role is OperandRole.RESULT for operand in descriptor.operands)
@@ -1405,6 +1440,10 @@ def _validate_rows(rows: tuple[_PacketRow, ...], descriptors: tuple[Descriptor, 
             expected = "no immediates" if row.immediate_count == 0 else ("one required integer immediate" if row.immediate_count == 1 else f"{row.immediate_count} required integer immediates")
         if not valid_immediates:
             raise ValueError(f"{row.descriptor_key}: emission requires {expected}")
+
+    component_functions = sorted(row.component_function for row in rows if row.component_function is not None)
+    if component_functions != list(range(1, len(COOPERATIVE_MATRIX_MATH_INSTRUCTIONS) + 1)):
+        raise ValueError("component math requires unique dense helper ordinals")
 
     over_capacity_rows = sorted(row.descriptor_key for row in rows if len(row.operand_types) > _PACKET_MAX_OPERAND_COUNT)
     if over_capacity_rows:
@@ -1486,6 +1525,8 @@ def generate_tables() -> str:
         "const loom_spirv_packet_payload_t loom_spirv_packet_payloads[] = {",
         *(f"    {payload}," for payload in payloads),
         "};",
+        "",
+        f"const uint16_t loom_spirv_component_math_function_count = {len(COOPERATIVE_MATRIX_MATH_INSTRUCTIONS)};",
         "",
         "static const loom_spirv_packet_row_t kSpirvLogicalCorePacketRows[] = {",
         *(row.render(value_type_refs, payload_ref) for row, payload_ref in zip(rows, payload_refs, strict=True)),

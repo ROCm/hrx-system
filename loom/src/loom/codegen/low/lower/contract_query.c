@@ -170,7 +170,7 @@ iree_status_t loom_low_lower_descriptor_matrix_reject(
     const loom_target_contract_descriptor_matrix_rule_t* rule,
     const loom_op_t* source_op, iree_string_view_t constraint,
     loom_contract_rejection_bits_t source_rejection_bits,
-    uint32_t target_rejection_bits, uint32_t missing_feature_bits,
+    uint32_t target_rejection_bits, uint64_t missing_feature_bits,
     loom_target_contract_query_result_t* out_result) {
   const loom_target_contract_rejection_t* rejection = NULL;
   IREE_RETURN_IF_ERROR(loom_low_lower_descriptor_matrix_make_rejection(
@@ -510,8 +510,8 @@ static iree_status_t loom_low_lower_materialize_target_contract_case(
       .selected_descriptor = selected_descriptor,
       .source_rejection_bits = 0,
       .target_rejection_bits = 0,
-      .missing_feature_bits = 0,
       .missing_fact_bits = 0,
+      .missing_feature_bits = 0,
       .rejection = NULL,
   };
   if (out_accepted != NULL) {
@@ -713,8 +713,8 @@ static iree_status_t loom_low_lower_query_target_contract_index(
       .selected_descriptor = NULL,
       .source_rejection_bits = 0,
       .target_rejection_bits = 0,
-      .missing_feature_bits = 0,
       .missing_fact_bits = 0,
+      .missing_feature_bits = 0,
       .rejection = rejection,
   };
   return iree_ok_status();

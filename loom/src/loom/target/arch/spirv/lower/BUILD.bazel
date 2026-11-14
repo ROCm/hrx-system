@@ -211,7 +211,10 @@ loom_check_test_suite(
 
 loom_check_test_suite(
     name = "cooperative_arithmetic_tests",
-    srcs = ["cooperative_arithmetic_test.loom-test"],
+    srcs = [
+        "component_math_test.loom-test",
+        "cooperative_arithmetic_test.loom-test",
+    ],
     tags = ["hostonly"],
     target_compatible_with = loom_config_compatible_with(["//loom/config/emit:spirv_binary"]),
 )

@@ -15,6 +15,7 @@
 #include "loom/target/arch/spirv/descriptors/descriptors.h"
 #include "loom/target/arch/spirv/packet_rows.h"
 #include "loom/target/emit/spirv/binary_format.h"
+#include "loom/target/emit/spirv/component_math.h"
 #include "loom/target/emit/spirv/function_atomic.h"
 #include "loom/target/emit/spirv/function_control.h"
 #include "loom/target/emit/spirv/module_abi.h"
@@ -1004,12 +1005,21 @@ static iree_status_t loom_spirv_emit_extended_instruction_packet(
       instruction_set_id,
       payload->extended_instruction.instruction,
   };
+  uint16_t opcode = row->opcode;
+  uint8_t prefix_count = 4;
+  if (payload->extended_instruction.component_function != 0) {
+    IREE_RETURN_IF_ERROR(loom_spirv_emit_component_math_function(
+        state->context, row, result_type_id, instruction_set_id,
+        &instruction_operands[2]));
+    opcode = LOOM_SPIRV_OP_FUNCTION_CALL;
+    prefix_count = 3;
+  }
   for (uint8_t i = 0; i < row->operand_count; ++i) {
-    instruction_operands[4 + i] = operands[i].id;
+    instruction_operands[prefix_count + i] = operands[i].id;
   }
   IREE_RETURN_IF_ERROR(loom_spirv_binary_write_instruction(
       loom_spirv_emit_section(state, LOOM_SPIRV_MODULE_SECTION_FUNCTION),
-      row->opcode, instruction_operands, 4 + row->operand_count));
+      opcode, instruction_operands, prefix_count + row->operand_count));
   return loom_spirv_emit_define_packet_result(
       state, packet, result_id, result_type_id,
       loom_spirv_packet_row_result_type(row));

@@ -55,7 +55,9 @@ from loom.target.arch.spirv.cooperative_matrix import (
     cooperative_matrix_memory_variants,
 )
 from loom.target.arch.spirv.extended_math import (
+    COOPERATIVE_MATRIX_MATH_INSTRUCTIONS,
     EXTENDED_MATH_INSTRUCTIONS,
+    CooperativeMatrixMathInstruction,
     ExtendedMathInstruction,
 )
 from loom.target.arch.spirv.features import feature_bit_value
@@ -1607,6 +1609,10 @@ def _cooperative_matrix_descriptors() -> tuple[Descriptor, ...]:
         if operation.supports(matrix_type)
     )
     descriptors.extend(
+        _cooperative_matrix_math_descriptor(row)
+        for row in COOPERATIVE_MATRIX_MATH_INSTRUCTIONS
+    )
+    descriptors.extend(
         descriptor
         for matrix_type in COOPERATIVE_MATRIX_TYPES
         for memory in cooperative_matrix_memory_variants(matrix_type.scalar)
@@ -1622,6 +1628,25 @@ def _cooperative_matrix_descriptors() -> tuple[Descriptor, ...]:
         for case in COOPERATIVE_MATRIX_CASES
     )
     return tuple(descriptors)
+
+
+def _cooperative_matrix_math_descriptor(
+    row: CooperativeMatrixMathInstruction,
+) -> Descriptor:
+    return Descriptor(
+        key=row.descriptor_key,
+        mnemonic=row.mnemonic,
+        semantic_tag=row.descriptor_key,
+        operands=(
+            _id_result(),
+            *(_id_operand(name) for name in row.operation.operand_names),
+        ),
+        feature_mask_words=(row.feature_bits,),
+        effects=(Effect(EffectKind.CONVERGENT, flags=(EffectFlag.ORDERED,)),),
+        asm_forms=_asm(results=("dst",), operands=row.operation.operand_names),
+        schedule_class=_SCHEDULE_ALU,
+        flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    )
 
 
 def _scalar_binary_descriptor(

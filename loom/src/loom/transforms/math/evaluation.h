@@ -11,6 +11,7 @@
 
 #include "iree/base/api.h"
 #include "loom/ir/module.h"
+#include "loom/ops/vector/ops.h"
 #include "loom/rewrite/rewriter.h"
 #include "loom/target/math_policy.h"
 
@@ -68,6 +69,18 @@ typedef struct loom_math_evaluation_t {
   loom_type_t paired_product_type;
   // Number of logical elements represented by the source value.
   uint64_t source_element_count;
+  // Matrix interpretation shared by source-shaped recipe constants. An invalid
+  // row value denotes an ordinary scalar/vector evaluation.
+  struct {
+    // Optional leading block extent, or invalid for a rank-two matrix.
+    loom_value_id_t blocks;
+    // Logical matrix row extent retained from the input's fragment facts.
+    loom_value_id_t rows;
+    // Logical matrix column extent retained from the input's fragment facts.
+    loom_value_id_t columns;
+    // Operand or accumulator interpretation of the logical matrix.
+    loom_vector_role_t role;
+  } matrix;
   // Source fast-math flags forwarded to replacement floating-point ops.
   uint8_t fastmath_flags;
   // Target-authorized flags used only by recipe-internal operations.

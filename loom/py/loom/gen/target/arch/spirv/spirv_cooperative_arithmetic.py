@@ -19,23 +19,35 @@ from loom.target.arch.spirv.cooperative_matrix import (
     COOPERATIVE_MATRIX_TYPES,
 )
 from loom.target.arch.spirv.descriptors import SPIRV_LOGICAL_CORE_DESCRIPTOR_SET
+from loom.target.arch.spirv.extended_math import (
+    COOPERATIVE_MATRIX_MATH_INSTRUCTIONS,
+    COOPERATIVE_MATRIX_MATH_OPERATIONS,
+)
 from loom.target.low_descriptors import descriptor_set_relative_name
 
 
 def generate_tables() -> str:
     descriptor_set = SPIRV_LOGICAL_CORE_DESCRIPTOR_SET
     descriptors = {descriptor.key: descriptor for descriptor in descriptor_set.descriptors}
+    sources = tuple(operation.source for operation in COOPERATIVE_MATRIX_ARITHMETIC) + tuple(operation.source_op_key for operation in COOPERATIVE_MATRIX_MATH_OPERATIONS)
+    math_keys = {(row.operation.source_op_key, row.value_type): row.descriptor_key for row in COOPERATIVE_MATRIX_MATH_INSTRUCTIONS}
+    required_flags = {operation.source_op_key: operation.required_fastmath_flags for operation in COOPERATIVE_MATRIX_MATH_OPERATIONS}
     lines = [
         *line_comment_header("//", generator="loom.gen.target.arch.spirv.spirv_cooperative_arithmetic"),
         "",
-        "static const uint8_t kCooperativeArithmeticSlots[LOOM_OP_VECTOR_NEGI - LOOM_OP_VECTOR_ADDF + 1] = {",
+        "static const uint8_t kCooperativeArithmeticSlots[] = {",
     ]
-    for index, operation in enumerate(COOPERATIVE_MATRIX_ARITHMETIC):
-        lines.append(f"  [LOOM_OP_VECTOR_{operation.source.upper()} - LOOM_OP_VECTOR_ADDF] = {index + 1},")
+    for index, source in enumerate(sources):
+        lines.append(f"  [LOOM_OP_VECTOR_{source.upper()} - LOOM_OP_VECTOR_ADDF] = {index + 1},")
+    lines.extend(("};", "", "static const uint8_t kCooperativeArithmeticRequiredFlags[] = {"))
+    for source in sources:
+        flags = " | ".join(f"LOOM_VECTOR_FASTMATHFLAGS_{flag.upper()}" for flag in required_flags.get(source, ())) or "0"
+        lines.append(f"  {flags},")
     lines.extend(("};", "", "static const loom_spirv_cooperative_arithmetic_row_t kCooperativeArithmeticRows[] = {"))
     for matrix_type in COOPERATIVE_MATRIX_TYPES:
-        operations = tuple(operation for operation in COOPERATIVE_MATRIX_ARITHMETIC if operation.supports(matrix_type))
-        if not operations:
+        keys = {operation.source: matrix_type.arithmetic_key(operation) for operation in COOPERATIVE_MATRIX_ARITHMETIC if operation.supports(matrix_type)}
+        keys.update({source: key for (source, value_type), key in math_keys.items() if value_type == matrix_type})
+        if not keys:
             continue
         lines.extend(
             (
@@ -51,10 +63,10 @@ def generate_tables() -> str:
                 "    .descriptors = {",
             )
         )
-        for index, operation in enumerate(COOPERATIVE_MATRIX_ARITHMETIC):
-            if operation not in operations:
+        for index, source in enumerate(sources):
+            key = keys.get(source)
+            if key is None:
                 continue
-            key = matrix_type.arithmetic_key(operation)
             if key not in descriptors:
                 raise ValueError(f"native arithmetic has no descriptor: {key}")
             if len(descriptors[key].feature_mask_words) != 1:
@@ -65,7 +77,7 @@ def generate_tables() -> str:
     lines.extend(
         (
             "};",
-            f"static_assert(IREE_ARRAYSIZE(kCooperativeArithmeticRows[0].descriptors) == {len(COOPERATIVE_MATRIX_ARITHMETIC)},",
+            f"static_assert(IREE_ARRAYSIZE(kCooperativeArithmeticRows[0].descriptors) == {len(sources)},",
             '              "cooperative arithmetic slots must match their generated rows");',
             "",
         )

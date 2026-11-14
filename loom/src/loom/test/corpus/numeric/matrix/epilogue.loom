@@ -1,0 +1,138 @@
+// Whole-tile activation, binary selection, and rounding retain matrix element
+// ownership. Runtime inputs vary by coordinate so permuting or replicating a
+// physical fragment cannot satisfy the scalar oracle.
+kernel.def @matrix_epilogue() {
+  %unit = index.constant 1 : index
+  %width = target.subgroup.size : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%first: buffer, %second: buffer, %activation: buffer, %minimum: buffer, %rounded: buffer) {
+  %base = index.constant 0 : offset
+  %tile = index.constant 16 : index
+  %elements = index.constant 256 : index
+  %width = target.subgroup.size : index
+  %lanes = index.div %elements, %width : index
+  %first_aligned = buffer.assume.alignment %first {minimum_alignment = 16} : buffer
+  %second_aligned = buffer.assume.alignment %second {minimum_alignment = 16} : buffer
+  %activation_aligned = buffer.assume.alignment %activation {minimum_alignment = 16} : buffer
+  %minimum_aligned = buffer.assume.alignment %minimum {minimum_alignment = 16} : buffer
+  %rounded_aligned = buffer.assume.alignment %rounded {minimum_alignment = 16} : buffer
+  %first_view = buffer.view %first_aligned[%base] : buffer -> view<16x16xf32>
+  %second_view = buffer.view %second_aligned[%base] : buffer -> view<16x16xf32>
+  %activation_view = buffer.view %activation_aligned[%base] : buffer -> view<16x16xf32>
+  %minimum_view = buffer.view %minimum_aligned[%base] : buffer -> view<16x16xf32>
+  %rounded_view = buffer.view %rounded_aligned[%base] : buffer -> view<16x16xf32>
+  %a = vector.fragment.load<init> %first_view[0, 0] shape [%tile, %tile] : view<16x16xf32> -> vector<[%lanes]xf32>
+  %b = vector.fragment.load<init> %second_view[0, 0] shape [%tile, %tile] : view<16x16xf32> -> vector<[%lanes]xf32>
+  %activated = vector.siluf<afn> %a : vector<[%lanes]xf32>
+  %selected = vector.minnumf<nnan|ninf|nsz> %a, %b : vector<[%lanes]xf32>
+  %floor = vector.floorf %a : vector<[%lanes]xf32>
+  vector.fragment.store<result> %activated, %activation_view[0, 0] shape [%tile, %tile] : vector<[%lanes]xf32>, view<16x16xf32>
+  vector.fragment.store<result> %selected, %minimum_view[0, 0] shape [%tile, %tile] : vector<[%lanes]xf32>, view<16x16xf32>
+  vector.fragment.store<result> %floor, %rounded_view[0, 0] shape [%tile, %tile] : vector<[%lanes]xf32>, view<16x16xf32>
+  kernel.return
+}
+
+// SiLU is evaluated with f64 exp rather than the target's f32 exp2 recipe.
+// Ordered scalar selection supplies an independent binary-operation oracle.
+func.def @matrix_epilogue_oracle(%first: buffer, %second: buffer, %activation: buffer, %minimum: buffer, %rounded: buffer) {
+  %base = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %end = index.constant 256 : index
+  %step = index.constant 1 : index
+  %c1 = scalar.constant 1.0 : f64
+  %first_view = buffer.view %first[%base] : buffer -> view<256xf32>
+  %second_view = buffer.view %second[%base] : buffer -> view<256xf32>
+  %activation_view = buffer.view %activation[%base] : buffer -> view<256xf32>
+  %minimum_view = buffer.view %minimum[%base] : buffer -> view<256xf32>
+  %rounded_view = buffer.view %rounded[%base] : buffer -> view<256xf32>
+  scf.for %position = [%begin to %end step %step] {
+    %a = view.load %first_view[%position] : view<256xf32> -> f32
+    %b = view.load %second_view[%position] : view<256xf32> -> f32
+    %wide = scalar.extf %a : f32 to f64
+    %negative = scalar.negf %wide : f64
+    %exponential = scalar.expf<afn> %negative : f64
+    %denominator = scalar.addf %c1, %exponential : f64
+    %quotient = scalar.divf %wide, %denominator : f64
+    %activated = scalar.fptrunc %quotient : f64 to f32
+    %less = scalar.cmpf olt, %a, %b : f32
+    %selected = scf.select %less, %a, %b : f32
+    %floor = scalar.floorf %a : f32
+    view.store %activated, %activation_view[%position] : f32, view<256xf32>
+    view.store %selected, %minimum_view[%position] : f32, view<256xf32>
+    view.store %floor, %rounded_view[%position] : f32, view<256xf32>
+  }
+  func.return
+}
+
+check.scenario @matrix_epilogue_values {
+  check.trial[3](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %first = check.generate.random.uniform seed(%seed) range(-8.0 to 8.0) : tensor<16x16xf32>
+    %second = check.generate.random.uniform seed(%seed) range(-3.0 to 7.0) : tensor<16x16xf32>
+    %activation = check.generate.fill value(-123.0) : tensor<16x16xf32>
+    %minimum = check.generate.fill value(-123.0) : tensor<16x16xf32>
+    %rounded = check.generate.fill value(-123.0) : tensor<16x16xf32>
+    check.compare<@matrix_epilogue, @matrix_epilogue_oracle>(%first, %second, %activation, %minimum, %rounded) : (tensor<16x16xf32>, tensor<16x16xf32>, tensor<16x16xf32>, tensor<16x16xf32>, tensor<16x16xf32>) -> () {
+      check.expect.bitwise actual(%first) expected(%first) : tensor<16x16xf32>
+      check.expect.bitwise actual(%second) expected(%second) : tensor<16x16xf32>
+      check.expect.approximate actual(%activation) expected(%activation) atol(1.9999999999999999e-06) rtol(1.9999999999999999e-06) nan(different) : tensor<16x16xf32>, tensor<16x16xf32>
+      check.expect.bitwise actual(%minimum) expected(%minimum) : tensor<16x16xf32>
+      check.expect.bitwise actual(%rounded) expected(%rounded) : tensor<16x16xf32>
+    }
+  }
+  check.return
+}
+
+// Finite half subnormals expose both component mapping and denormal-mode demand.
+kernel.def @matrix_half_minimum() {
+  %unit = index.constant 1 : index
+  %width = target.subgroup.size : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%first: buffer, %second: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %tile = index.constant 16 : index
+  %elements = index.constant 256 : index
+  %width = target.subgroup.size : index
+  %lanes = index.div %elements, %width : index
+  %first_aligned = buffer.assume.alignment %first {minimum_alignment = 16} : buffer
+  %second_aligned = buffer.assume.alignment %second {minimum_alignment = 16} : buffer
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 16} : buffer
+  %first_view = buffer.view %first_aligned[%base] : buffer -> view<16x16xf16>
+  %second_view = buffer.view %second_aligned[%base] : buffer -> view<16x16xf16>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<16x16xf16>
+  %a = vector.fragment.load<init> %first_view[0, 0] shape [%tile, %tile] : view<16x16xf16> -> vector<[%lanes]xf16>
+  %b = vector.fragment.load<init> %second_view[0, 0] shape [%tile, %tile] : view<16x16xf16> -> vector<[%lanes]xf16>
+  %minimum = vector.minnumf<nnan|ninf|nsz> %a, %b : vector<[%lanes]xf16>
+  vector.fragment.store<result> %minimum, %output_view[0, 0] shape [%tile, %tile] : vector<[%lanes]xf16>, view<16x16xf16>
+  kernel.return
+}
+
+func.def @matrix_half_minimum_oracle(%first: buffer, %second: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %end = index.constant 256 : index
+  %step = index.constant 1 : index
+  %first_view = buffer.view %first[%base] : buffer -> view<256xf16>
+  %second_view = buffer.view %second[%base] : buffer -> view<256xf16>
+  %output_view = buffer.view %output[%base] : buffer -> view<256xf16>
+  scf.for %position = [%begin to %end step %step] {
+    %a = view.load %first_view[%position] : view<256xf16> -> f16
+    %b = view.load %second_view[%position] : view<256xf16> -> f16
+    %less = scalar.cmpf olt, %a, %b : f16
+    %minimum = scf.select %less, %a, %b : f16
+    view.store %minimum, %output_view[%position] : f16, view<256xf16>
+  }
+  func.return
+}
+
+check.scenario @matrix_half_subnormal_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %first = check.generate.iota offset(5.9604644775390625e-08) step(5.9604644775390625e-08) : tensor<16x16xf16>
+    %second = check.generate.iota offset(1.52587890625e-05) step(-5.9604644775390625e-08) : tensor<16x16xf16>
+    %output = check.generate.fill value(-1.0) : tensor<16x16xf16>
+    check.compare<@matrix_half_minimum, @matrix_half_minimum_oracle>(%first, %second, %output) : (tensor<16x16xf16>, tensor<16x16xf16>, tensor<16x16xf16>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<16x16xf16>
+    }
+  }
+  check.return
+}

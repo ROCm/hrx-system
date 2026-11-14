@@ -140,9 +140,7 @@ def test_ieee_widening_covers_all_shapes_without_integer_width_features() -> Non
 def test_ieee_widening_prefers_native_only_with_every_required_guarantee() -> None:
     for source, result in (("f16", "f32"), ("f16", "f64"), ("f32", "f64")):
         controls = (
-            "float32_denorm_preserve"
-            if source == "f32"
-            else "float16_64_denorm_preserve",
+            f"{source.replace('f', 'float')}_denorm_preserve",
             f"{source.replace('f', 'float')}_signed_zero_inf_nan_preserve",
             f"{result.replace('f', 'float')}_signed_zero_inf_nan_preserve",
         )

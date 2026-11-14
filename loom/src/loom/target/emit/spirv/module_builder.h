@@ -50,7 +50,9 @@ typedef enum loom_spirv_module_section_e {
   LOOM_SPIRV_MODULE_SECTION_DECLARATION = 9,
   // Function definitions.
   LOOM_SPIRV_MODULE_SECTION_FUNCTION = 10,
-  LOOM_SPIRV_MODULE_SECTION_COUNT = 11,
+  // Lazily emitted component helpers, kept outside an open source function.
+  LOOM_SPIRV_MODULE_SECTION_COMPONENT_FUNCTION = 11,
+  LOOM_SPIRV_MODULE_SECTION_COUNT = 12,
 } loom_spirv_module_section_t;
 
 typedef struct loom_spirv_module_binary_t {

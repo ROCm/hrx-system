@@ -88,7 +88,9 @@ def test_portable_extrema_never_depend_on_floating_arithmetic_or_controls() -> N
             ), key
             optional_controls = feature_bits_value(
                 (
+                    "float16_denorm_preserve",
                     "float32_denorm_preserve",
+                    "float64_denorm_preserve",
                     "float16_64_denorm_preserve",
                     "float16_signed_zero_inf_nan_preserve",
                     "float32_signed_zero_inf_nan_preserve",
@@ -153,9 +155,7 @@ def test_ordered_clamp_retains_short_core_comparisons_with_required_controls() -
         element = _pattern(rule).elements[0]
         required = feature_bits_value(
             (
-                "float32_denorm_preserve"
-                if element == "f32"
-                else "float16_64_denorm_preserve",
+                f"float{element[1:]}_denorm_preserve",
                 f"float{element[1:]}_signed_zero_inf_nan_preserve",
             )
         )
@@ -172,13 +172,7 @@ def test_native_extrema_require_precise_permissions_and_preserve_denormals() -> 
     for rule in native:
         assert _permissions(rule) == {"nnan", "ninf", "nsz"}
         element = _pattern(rule).elements[0]
-        denorm = feature_bits_value(
-            (
-                "float32_denorm_preserve"
-                if element == "f32"
-                else "float16_64_denorm_preserve",
-            )
-        )
+        denorm = feature_bits_value((f"float{element[1:]}_denorm_preserve",))
         assert all(
             any(mask & denorm for mask in step.descriptor.feature_mask_words)
             for step in rule.emit

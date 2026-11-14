@@ -13,6 +13,7 @@
 #include "loom/ir/module.h"
 #include "loom/ops/scalar/ops.h"
 #include "loom/ops/scf/ops.h"
+#include "loom/ops/vector/fragment.h"
 #include "loom/ops/vector/ops.h"
 
 static_assert(LOOM_TARGET_MATH_FLOAT_CONVERSION_FLAG_DAZ ==
@@ -386,6 +387,9 @@ iree_status_t loom_math_evaluation_initialize(
       .secondary_input = loom_math_evaluation_value_invalid(),
       .source_result_type = source_result_type,
       .value_type = source_result_type,
+      .matrix = {.blocks = LOOM_VALUE_ID_INVALID,
+                 .rows = LOOM_VALUE_ID_INVALID,
+                 .columns = LOOM_VALUE_ID_INVALID},
       .fastmath_flags = query->fastmath_flags,
       .recipe_fastmath_flags =
           decision->recipe_fastmath_flags & LOOM_TARGET_MATH_FASTMATH_FLAG_FAST,
@@ -395,6 +399,36 @@ iree_status_t loom_math_evaluation_initialize(
       .zero_accumulator = LOOM_VALUE_ID_INVALID,
       .zero_product = LOOM_VALUE_ID_INVALID,
   };
+
+  // Scalar recipes and grouped-product packets have their own lane domains.
+  // Other vector recipes preserve the source matrix coordinates even when
+  // their arithmetic widens the component type. Constants must name that same
+  // logical matrix; an ordinary splat alone only describes a thread's payload.
+  if (query->lane_domain == LOOM_TARGET_MATH_LANE_DOMAIN_VECTOR &&
+      decision->evaluation.kind !=
+          LOOM_TARGET_MATH_EVALUATION_GROUPED_PRODUCT) {
+    loom_vector_fragment_fact_t fragment;
+    if (loom_vector_fragment_fact_query_value_facts(
+            &rewriter->fact_table->context,
+            loom_rewriter_value_facts(rewriter, operands[0]), &fragment) &&
+        loom_vector_fragment_fact_has_matrix_shape(fragment) &&
+        (fragment.role_flags == LOOM_VECTOR_FRAGMENT_ROLE_FLAG_LHS ||
+         fragment.role_flags == LOOM_VECTOR_FRAGMENT_ROLE_FLAG_RHS ||
+         loom_vector_fragment_fact_is_accumulator_like(fragment))) {
+      out_evaluation->matrix.blocks =
+          loom_vector_fragment_fact_block_value(fragment);
+      out_evaluation->matrix.rows =
+          loom_vector_fragment_fact_row_value(fragment);
+      out_evaluation->matrix.columns =
+          loom_vector_fragment_fact_column_value(fragment);
+      out_evaluation->matrix.role =
+          fragment.role_flags == LOOM_VECTOR_FRAGMENT_ROLE_FLAG_LHS
+              ? LOOM_VECTOR_ROLE_LHS
+          : fragment.role_flags == LOOM_VECTOR_FRAGMENT_ROLE_FLAG_RHS
+              ? LOOM_VECTOR_ROLE_RHS
+              : LOOM_VECTOR_ROLE_INIT;
+    }
+  }
 
   switch (decision->evaluation.kind) {
     case LOOM_TARGET_MATH_EVALUATION_SOURCE:
@@ -596,6 +630,17 @@ iree_status_t loom_math_evaluation_build_constant(
   IREE_RETURN_IF_ERROR(evaluation->lane_ops->constantf(
       &evaluation->rewriter->builder, value, evaluation->value_type,
       evaluation->location, &op));
+  if (evaluation->matrix.rows != LOOM_VALUE_ID_INVALID) {
+    const loom_vector_fragment_build_flags_t flags =
+        evaluation->matrix.blocks == LOOM_VALUE_ID_INVALID
+            ? 0
+            : LOOM_VECTOR_FRAGMENT_BUILD_FLAG_HAS_BLOCKS;
+    IREE_RETURN_IF_ERROR(loom_vector_fragment_build(
+        &evaluation->rewriter->builder, flags, evaluation->matrix.role,
+        loom_op_results(op)[0], evaluation->matrix.blocks,
+        evaluation->matrix.rows, evaluation->matrix.columns, NULL, 0, NULL, 0,
+        evaluation->value_type, evaluation->location, &op));
+  }
   *out_value = loom_math_evaluation_value_from_id(loom_op_results(op)[0]);
   return iree_ok_status();
 }

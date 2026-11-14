@@ -127,6 +127,7 @@ iree_py_library(
     name = "extended_math",
     srcs = ["extended_math.py"],
     deps = [
+        ":cooperative_matrix",
         ":features",
         ":ordinary_vector",
     ],
