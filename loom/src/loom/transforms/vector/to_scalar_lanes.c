@@ -24,6 +24,7 @@
 #include "loom/transforms/vector/to_scalar_structural.h"
 #include "loom/transforms/vector/to_scalar_tables.h"
 #include "loom/transforms/vector/to_scalar_transforms.h"
+#include "loom/util/fact_cast.h"
 
 typedef enum loom_vector_to_scalar_lane_cache_conversion_e {
   LOOM_VECTOR_TO_SCALAR_LANE_CACHE_IDENTITY = 0,
@@ -693,6 +694,27 @@ static iree_status_t loom_vector_to_scalar_build_generic_lane(
   for (uint16_t i = 0; i < operand_count; ++i) {
     IREE_RETURN_IF_ERROR(loom_vector_to_scalar_materialize_lane(
         state, operands[i], indices, &lane_operands[i]));
+  }
+
+  if (state->descriptor.lane_op_kind == LOOM_OP_SCALAR_TRUNCI) {
+    // Lane construction has already published its operand's conversion facts.
+    // Reuse a same-typed payload when every requested low bit survived, without
+    // building a round trip that later fact propagation must follow and erase.
+    const loom_value_fact_table_t* facts = state->rewriter->fact_table;
+    loom_value_id_t source =
+        loom_value_fact_table_query_numeric_identity(facts, lane_operands[0]);
+    const loom_integer_cast_t cast =
+        loom_value_fact_table_query_integer_cast(facts, source).composed;
+    const uint32_t bit_count = loom_scalar_type_bitwidth(
+        loom_type_element_type(state->result_scalar_type));
+    if (cast.bit_count >= bit_count) {
+      source = cast.source_value_id;
+    }
+    if (loom_type_equal(loom_module_value_type(state->rewriter->module, source),
+                        state->result_scalar_type)) {
+      *out_lane = source;
+      return iree_ok_status();
+    }
   }
 
   const loom_attribute_t* attrs = loom_op_attrs(state->op);
