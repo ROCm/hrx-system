@@ -9,7 +9,7 @@
 #include "loom/codegen/low/lower/participation.h"
 #include "loom/ops/vector/fragment.h"
 
-static bool loom_spirv_initializer_has_native_payload(
+bool loom_spirv_cooperative_initializer_has_native_payload(
     const loom_value_fact_table_t* facts, const loom_op_t* source_op) {
   loom_vector_fragment_fact_t fragment;
   if (!loom_vector_fragment_fact_query_value_facts(
@@ -49,7 +49,8 @@ iree_status_t loom_spirv_can_materialize_cooperative_initializer_component(
   const loom_value_fact_table_t* facts =
       loom_low_lower_context_fact_table(context);
   *out_can_materialize = false;
-  if (!loom_spirv_initializer_has_native_payload(facts, source_op) ||
+  if (!loom_spirv_cooperative_initializer_has_native_payload(facts,
+                                                             source_op) ||
       !loom_value_facts_is_subgroup_uniform(
           loom_value_fact_table_lookup(facts, source_value_id))) {
     return iree_ok_status();

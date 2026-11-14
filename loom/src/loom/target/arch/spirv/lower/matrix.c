@@ -10,8 +10,11 @@
 
 #include "loom/error/error_catalog.h"
 #include "loom/ir/context.h"
+#include "loom/ops/vector/ops.h"
 #include "loom/target/arch/spirv/cooperative_properties.h"
+#include "loom/target/arch/spirv/error_catalog.h"
 #include "loom/target/arch/spirv/facts.h"
+#include "loom/target/arch/spirv/lower/cooperative_initializer.h"
 
 bool loom_spirv_matrix_component_type(
     loom_contract_numeric_type_t numeric_type,
@@ -298,6 +301,115 @@ static void loom_spirv_matrix_diagnostic_make_context_params(
   params[4] = loom_param_string(loom_op_name(environment->module, source_op));
   params[5] = loom_param_string(IREE_SV("spirv.cooperative_matrix"));
   params[6] = loom_param_string(matrix_constraint);
+}
+
+iree_status_t loom_spirv_query_cooperative_fragment(
+    const loom_target_contract_query_environment_t* environment,
+    const loom_op_t* source_op,
+    loom_target_contract_query_result_t* out_result) {
+  *out_result = loom_target_contract_query_result_empty();
+  const loom_value_fact_table_t* facts = environment->fact_table;
+  const loom_value_id_t data = loom_vector_fragment_data(source_op);
+  const loom_value_id_t result = loom_vector_fragment_result(source_op);
+  loom_vector_fragment_fact_t data_fragment;
+  const bool has_data_fragment =
+      loom_spirv_matrix_fragment(facts, data, &data_fragment);
+  loom_vector_fragment_fact_t result_fragment;
+  if (!loom_spirv_matrix_fragment(facts, result, &result_fragment)) {
+    return iree_ok_status();
+  }
+  // Logical reference lowering owns unresolved shapes and complete dense
+  // matrices. Only a partial, statically shaped per-thread payload requires a
+  // native subgroup representation at this boundary.
+  if (!has_data_fragment &&
+      (!iree_any_bit_set(result_fragment.flags,
+                         LOOM_VECTOR_FRAGMENT_FACT_FLAG_HAS_SCHEMA) ||
+       result_fragment.encoded_operand.payload_packing ==
+           LOOM_VALUE_FACT_PAYLOAD_PACKING_DENSE_LANES)) {
+    uint16_t rows = 0, columns = 0, blocks = 1;
+    uint64_t element_count = 0;
+    if (!loom_spirv_fragment_dimension(
+            facts, loom_vector_fragment_fact_row_value(result_fragment),
+            &rows) ||
+        !loom_spirv_fragment_dimension(
+            facts, loom_vector_fragment_fact_column_value(result_fragment),
+            &columns) ||
+        (result_fragment.shape_rank == 3 &&
+         !loom_spirv_fragment_dimension(
+             facts, loom_vector_fragment_fact_block_value(result_fragment),
+             &blocks)) ||
+        !loom_type_static_element_count(
+            loom_module_value_type(environment->module, data),
+            &element_count) ||
+        element_count == (uint64_t)blocks * rows * columns) {
+      return iree_ok_status();
+    }
+  }
+  loom_spirv_value_type_t result_type;
+  const bool has_matrix_type = loom_spirv_matrix_fragment_type(
+      environment->module, facts, result, result_fragment, &result_type);
+  iree_string_view_t reason;
+  const bool native_payload =
+      loom_spirv_cooperative_initializer_has_native_payload(facts, source_op);
+  if (!native_payload) {
+    reason = IREE_SV(
+        "the fragment requires a single matrix with native "
+        "component bits, without packed, scaled, or sparse encoding");
+  } else if (has_data_fragment) {
+    loom_spirv_value_type_t data_type;
+    if (loom_spirv_matrix_fragment_type(environment->module, facts, data,
+                                        data_fragment, &data_type) &&
+        has_matrix_type &&
+        loom_spirv_value_type_equal(data_type, result_type)) {
+      return iree_ok_status();
+    }
+    reason = IREE_SV(
+        "the native fragment's role, shape, or component type "
+        "does not match the requested cooperative matrix");
+  } else {
+    reason = IREE_SV(
+        "an ordinary per-thread vector is not an opaque Vulkan "
+        "cooperative matrix");
+  }
+  // Equal elements can construct a new matrix even when a prior fragment's
+  // interpretation differs. The descriptor rules own shape, feature,
+  // and participation requirements for that constructor.
+  const loom_value_facts_t data_facts =
+      loom_value_fact_table_lookup(facts, data);
+  loom_value_facts_t element_facts;
+  if (native_payload &&
+      loom_value_facts_query_all_equal_element(&facts->context, data_facts,
+                                               &element_facts) &&
+      loom_value_facts_is_exact(element_facts)) {
+    return iree_ok_status();
+  }
+  loom_value_id_t scalar = LOOM_VALUE_ID_INVALID;
+  if (native_payload &&
+      loom_value_fact_table_query_uniform_element_origin(
+          facts, environment->module, data, &scalar) &&
+      loom_value_facts_is_subgroup_uniform(
+          loom_value_fact_table_lookup(facts, scalar))) {
+    return iree_ok_status();
+  }
+
+  loom_target_contract_rejection_t* rejection = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate(
+      environment->arena, sizeof(*rejection), (void**)&rejection));
+  loom_diagnostic_param_t* params = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      environment->arena, 7, sizeof(*params), (void**)&params));
+  loom_spirv_matrix_diagnostic_make_context_params(environment, source_op,
+                                                   reason, params);
+  params[5] =
+      loom_param_type(loom_module_value_type(environment->module, data));
+  *rejection = (loom_target_contract_rejection_t){
+      .error_ref = LOOM_ERR_SPIRV_043_REF,
+      .params = params,
+      .param_count = 7,
+  };
+  out_result->outcome = LOOM_TARGET_CONTRACT_QUERY_TERMINAL_REJECTION;
+  out_result->rejection = rejection;
+  return iree_ok_status();
 }
 
 iree_status_t loom_spirv_matrix_contract_query_reject(

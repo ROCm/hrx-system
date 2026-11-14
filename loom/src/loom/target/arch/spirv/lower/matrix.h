@@ -44,6 +44,13 @@ bool loom_spirv_matrix_fragment_type(const loom_module_t* module,
                                      loom_vector_fragment_fact_t fragment,
                                      loom_spirv_value_type_t* out_type);
 
+// Rejects physical payload interpretations that cannot preserve an opaque
+// cooperative matrix. Uniform constructors continue through descriptor rules.
+iree_status_t loom_spirv_query_cooperative_fragment(
+    const loom_target_contract_query_environment_t* environment,
+    const loom_op_t* source_op,
+    loom_target_contract_query_result_t* out_result);
+
 // Retains the shared matrix-contract diagnostic for unsupported authored input.
 iree_status_t loom_spirv_matrix_contract_query_reject(
     const loom_target_contract_query_environment_t* environment,

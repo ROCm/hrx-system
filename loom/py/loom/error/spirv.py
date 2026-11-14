@@ -676,6 +676,28 @@ ERR_SPIRV_042 = ErrorDef(
     ),
 )
 
+ERR_SPIRV_043 = ErrorDef(
+    domain=ErrorDomain.SPIRV,
+    code=43,
+    severity=Severity.ERROR,
+    summary="Unsupported Vulkan cooperative matrix construction.",
+    message=(
+        "target '{target_key}' export '{export_name}' config '{config_key}' "
+        "cannot construct '{op_name}' from {input_type} in '@{function_name}': "
+        "{reason}"
+    ),
+    params=(
+        *_TARGET_CONTEXT_PARAMS,
+        ErrorParam("input_type", ParamKind.TYPE),
+        ErrorParam("reason", ParamKind.STRING),
+    ),
+    fix_hint=(
+        "Use vector.fragment.load for a logical matrix tile, preserve a compatible "
+        "native fragment, or initialize with a subgroup-uniform splat; Vulkan "
+        "does not specify the mapping of matrix elements to per-thread registers"
+    ),
+)
+
 ALL_SPIRV_ERRORS: tuple[ErrorDef, ...] = (
     ERR_SPIRV_005,
     ERR_SPIRV_006,
@@ -712,4 +734,5 @@ ALL_SPIRV_ERRORS: tuple[ErrorDef, ...] = (
     ERR_SPIRV_040,
     ERR_SPIRV_041,
     ERR_SPIRV_042,
+    ERR_SPIRV_043,
 )

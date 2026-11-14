@@ -180,8 +180,8 @@ COOPERATIVE_MATRIX_INITIALIZER_RULES = (
         )
         for constant in (True, False)
     ),
-    # Loaded opaque fragments and ordinary physical interpretations retain their
-    # existing storage when no uniform constructor applies.
+    # The target query admits only compatible opaque fragments or uniform
+    # constructors. Compatible aliases retain their existing storage.
     ValueAliasRule(
         source_op=vector.vector_fragment,
         source=ValueRef.operand("data"),

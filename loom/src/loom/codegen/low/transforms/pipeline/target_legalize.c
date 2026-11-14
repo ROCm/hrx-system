@@ -1291,11 +1291,15 @@ static iree_status_t loom_low_target_legalize_rewrite_op(
   loom_target_legalizer_op_entry_t op_entry =
       loom_target_legalizer_registry_lookup_kind(state->legalizer_registry,
                                                  op->kind);
-  if (loom_target_legalizer_op_entry_is_empty(op_entry)) {
-    return iree_ok_status();
+  if (!loom_target_legalizer_op_entry_is_empty(op_entry)) {
+    op_entry = loom_low_target_legalize_filter_entries(state, op, op_entry);
   }
-  op_entry = loom_low_target_legalize_filter_entries(state, op, op_entry);
-  if (loom_target_legalizer_op_entry_is_empty(op_entry)) {
+  const bool has_legalizer = !loom_target_legalizer_op_entry_is_empty(op_entry);
+  // An operation requiring no rewrite can still have a target-owned
+  // representation constraint. Query those boundaries in the same worklist.
+  if (!has_legalizer &&
+      !loom_low_lower_op_contract_query_may_return_terminal_rejection(
+          &state->selection->policy->query_op_contract, op->kind)) {
     return iree_ok_status();
   }
   const bool report_wants_rows =
@@ -1316,6 +1320,39 @@ static iree_status_t loom_low_target_legalize_rewrite_op(
     IREE_RETURN_IF_ERROR(loom_target_legalization_query_contract(
         &state->legalization_context, op, &query_result_storage));
     query_result = &query_result_storage;
+  }
+  if (loom_target_contract_query_result_is_terminal_rejection(query_result)) {
+    const bool final =
+        state->legalization_context.mode == LOOM_TARGET_LEGALIZATION_MODE_FINAL;
+    if (is_report_source) {
+      const loom_target_compile_report_legalization_action_t report_action =
+          final
+              ? LOOM_TARGET_COMPILE_REPORT_LEGALIZATION_ACTION_REJECT_UNSUPPORTED_FINAL
+              : LOOM_TARGET_COMPILE_REPORT_LEGALIZATION_ACTION_DEFERRED;
+      IREE_RETURN_IF_ERROR(loom_low_target_legalize_retain_report_decision(
+          state, report_decision, source_op_name, source_op_kind, report_action,
+          query_result, /*legalizer_entry=*/NULL, /*scalarized=*/false,
+          /*created_op_count=*/0, /*erased_op_count=*/0));
+    }
+    if (final && !has_legalizer) {
+      const loom_target_contract_rejection_t* rejection =
+          query_result->rejection;
+      const loom_diagnostic_emission_t emission = {
+          .op = op,
+          .error = loom_error_catalog_lookup_ref(
+              state->selection->policy->error_catalog, rejection->error_ref),
+          .params = rejection->params,
+          .param_count = rejection->param_count,
+      };
+      IREE_RETURN_IF_ERROR(
+          iree_diagnostic_emit(state->preflight.emitter, &emission));
+      ++state->preflight.error_count;
+    }
+    ++state->statistics->ops_deferred;
+    return iree_ok_status();
+  }
+  if (!has_legalizer) {
+    return iree_ok_status();
   }
   // Unrolling exposes static bank slots before boundary projection. Preserve
   // multidimensional access structure until complete legalization; flattening
@@ -1364,22 +1401,6 @@ static iree_status_t loom_low_target_legalize_rewrite_op(
           LOOM_TARGET_COMPILE_REPORT_LEGALIZATION_ACTION_REJECT_INVALID_IR,
           query_result, /*legalizer_entry=*/NULL, /*scalarized=*/false,
           /*created_op_count=*/0,
-          /*erased_op_count=*/0));
-    }
-    ++state->statistics->ops_deferred;
-    return iree_ok_status();
-  }
-  if (loom_target_contract_query_result_is_terminal_rejection(query_result)) {
-    if (is_report_source) {
-      const loom_target_compile_report_legalization_action_t report_action =
-          state->legalization_context.mode ==
-                  LOOM_TARGET_LEGALIZATION_MODE_FINAL
-              ? LOOM_TARGET_COMPILE_REPORT_LEGALIZATION_ACTION_REJECT_UNSUPPORTED_FINAL
-              : LOOM_TARGET_COMPILE_REPORT_LEGALIZATION_ACTION_DEFERRED;
-      IREE_RETURN_IF_ERROR(loom_low_target_legalize_retain_report_decision(
-          state, report_decision, source_op_name, source_op_kind, report_action,
-          query_result, /*legalizer_entry=*/NULL,
-          /*scalarized=*/false, /*created_op_count=*/0,
           /*erased_op_count=*/0));
     }
     ++state->statistics->ops_deferred;

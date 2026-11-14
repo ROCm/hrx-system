@@ -1,0 +1,139 @@
+// A physical RHS payload cannot be reassembled into an opaque matrix. Report
+// the authored interpretation instead of the concat created for the wide load.
+// RUN: emit spirv-low target=spirv:vulkan1.3+bda+hal features=FLOAT16,STORAGE_BUFFER_16BIT_ACCESS,COOPERATIVE_MATRIX_KHR
+
+kernel.def @physical_rhs() {
+  %unit = index.constant 1 : index
+  %width = target.subgroup.size : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %tile = index.constant 16 : index
+  %aligned_input = buffer.assume.alignment %input {minimum_alignment = 16} : buffer
+  %aligned_output = buffer.assume.alignment %output {minimum_alignment = 16} : buffer
+  %source = buffer.view %aligned_input[%origin] : buffer -> view<16x16xf16>
+  %destination = buffer.view %aligned_output[%origin] : buffer -> view<16x16xf32>
+  %lhs = vector.fragment.load<lhs> %source[0, 0] shape [%tile, %tile] : view<16x16xf16> -> vector<16xf16>
+  %values = vector.load %source[0, 0] : view<16x16xf16> -> vector<16xf16>
+  // ERROR@+1: SPIRV/043 {op_name="vector.fragment", input_type="vector<16xf16>"}
+  %rhs = vector.fragment<rhs> %values shape [%tile, %tile] : vector<16xf16>
+  %initial_values = vector.splatf 0.0 : vector<8xf32>
+  %initial = vector.fragment<init> %initial_values shape [%tile, %tile] : vector<8xf32>
+  %result = vector.mma %lhs, %rhs, %initial : vector<16xf16>, vector<16xf16>, vector<8xf32>
+  vector.fragment.store<result> %result, %destination[0, 0] shape [%tile, %tile] : vector<8xf32>, view<16x16xf32>
+  kernel.return
+}
+
+// ====
+
+// Native-width ordinary vectors have the same boundary as wide packets.
+// RUN: emit spirv-low target=spirv:vulkan1.3+bda+hal features=INT8,STORAGE_BUFFER_8BIT_ACCESS,COOPERATIVE_MATRIX_KHR
+
+kernel.def @physical_lhs() {
+  %unit = index.constant 1 : index
+  %width = target.subgroup.size : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %tile = index.constant 16 : index
+  %aligned = buffer.assume.alignment %output {minimum_alignment = 16} : buffer
+  %source = buffer.view %input[%origin] : buffer -> view<4xi8>
+  %destination = buffer.view %aligned[%origin] : buffer -> view<16x16xi32>
+  %values = vector.load %source[0] : view<4xi8> -> vector<4xi8>
+  // ERROR@+1: SPIRV/043 {op_name="vector.fragment", input_type="vector<4xi8>"}
+  %lhs = vector.fragment<lhs> %values shape [%tile, %tile] : vector<4xi8>
+  %rhs_values = vector.splati 1 : vector<4xi8>
+  %rhs = vector.fragment<rhs> %rhs_values shape [%tile, %tile] : vector<4xi8>
+  %initial_values = vector.splati 0 : vector<8xi32>
+  %initial = vector.fragment<init> %initial_values shape [%tile, %tile] : vector<8xi32>
+  %result = vector.mma %lhs, %rhs, %initial : vector<4xi8>, vector<4xi8>, vector<8xi32>
+  vector.fragment.store<result> %result, %destination[0, 0] shape [%tile, %tile] : vector<8xi32>, view<16x16xi32>
+  kernel.return
+}
+
+// ====
+
+// Result fragments do not give ordinary vectors a target-defined layout either.
+// RUN: emit spirv-low target=spirv:vulkan1.3+bda+hal features=COOPERATIVE_MATRIX_KHR
+
+kernel.def @physical_result() {
+  %unit = index.constant 1 : index
+  %width = target.subgroup.size : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %tile = index.constant 16 : index
+  %aligned = buffer.assume.alignment %output {minimum_alignment = 16} : buffer
+  %source = buffer.view %input[%origin] : buffer -> view<8xf32>
+  %destination = buffer.view %aligned[%origin] : buffer -> view<16x16xf32>
+  %values = vector.load %source[0] : view<8xf32> -> vector<8xf32>
+  // ERROR@+1: SPIRV/043 {op_name="vector.fragment", input_type="vector<8xf32>"}
+  %result = vector.fragment<result> %values shape [%tile, %tile] : vector<8xf32>
+  vector.fragment.store<result> %result, %destination[0, 0] shape [%tile, %tile] : vector<8xf32>, view<16x16xf32>
+  kernel.return
+}
+
+// ====
+
+// Equal source vector types do not make native A and B matrix layouts aliases.
+// RUN: emit spirv-low target=spirv:vulkan1.3+bda+hal features=FLOAT16,STORAGE_BUFFER_16BIT_ACCESS,COOPERATIVE_MATRIX_KHR
+
+kernel.def @native_role_change() {
+  %unit = index.constant 1 : index
+  %width = target.subgroup.size : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %tile = index.constant 16 : index
+  %aligned_input = buffer.assume.alignment %input {minimum_alignment = 16} : buffer
+  %aligned_output = buffer.assume.alignment %output {minimum_alignment = 16} : buffer
+  %source = buffer.view %aligned_input[%origin] : buffer -> view<16x16xf16>
+  %destination = buffer.view %aligned_output[%origin] : buffer -> view<16x16xf32>
+  %lhs = vector.fragment.load<lhs> %source[0, 0] shape [%tile, %tile] : view<16x16xf16> -> vector<16xf16>
+  // ERROR@+1: SPIRV/043 "the native fragment's role, shape, or component type does not match"
+  %rhs = vector.fragment<rhs> %lhs shape [%tile, %tile] : vector<16xf16>
+  %initial_values = vector.splatf 0.0 : vector<8xf32>
+  %initial = vector.fragment<init> %initial_values shape [%tile, %tile] : vector<8xf32>
+  %result = vector.mma %lhs, %rhs, %initial : vector<16xf16>, vector<16xf16>, vector<8xf32>
+  vector.fragment.store<result> %result, %destination[0, 0] shape [%tile, %tile] : vector<8xf32>, view<16x16xf32>
+  kernel.return
+}
+
+// ====
+
+// Init and result name the same native accumulator representation.
+// RUN: emit spirv-low target=spirv:vulkan1.3+bda+hal features=COOPERATIVE_MATRIX_KHR
+
+kernel.def @accumulator_alias() {
+  %unit = index.constant 1 : index
+  %width = target.subgroup.size : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %tile = index.constant 16 : index
+  %aligned_input = buffer.assume.alignment %input {minimum_alignment = 16} : buffer
+  %aligned_output = buffer.assume.alignment %output {minimum_alignment = 16} : buffer
+  %source = buffer.view %aligned_input[%origin] : buffer -> view<16x16xf32>
+  %destination = buffer.view %aligned_output[%origin] : buffer -> view<16x16xf32>
+  %loaded = vector.fragment.load<result> %source[0, 0] shape [%tile, %tile] : view<16x16xf32> -> vector<8xf32>
+  %initial = vector.fragment<init> %loaded shape [%tile, %tile] : vector<8xf32>
+  vector.fragment.store<init> %initial, %destination[0, 0] shape [%tile, %tile] : vector<8xf32>, view<16x16xf32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<spirv.logical.core> abi_layout({signature = (buffer, buffer) -> ()}) workgroup_count(1, 1, 1) @accumulator_alias() asm {
+  %aligned_input = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %aligned_output = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %14 = OpConstant.offset64 16
+  %15 = OpUConvert.offset64.u32 %14
+  %16 = OpConstant.offset64 0
+  %17 = OpPtrAccessChain.storage_buffer.f32.byte_offset %aligned_input, %16
+  %initial = OpCooperativeMatrixLoadKHR.accumulator.f32.16x16.subgroup.storage_buffer %17, %15, 0 : reg<spirv.id : spirv.cooperative_matrix<16x16xf32, subgroup, matrix_accumulator>>
+  %19 = OpConstant.offset64 16
+  %20 = OpUConvert.offset64.u32 %19
+  %21 = OpConstant.offset64 0
+  %22 = OpPtrAccessChain.storage_buffer.f32.byte_offset %aligned_output, %21
+  OpCooperativeMatrixStoreKHR.accumulator.f32.16x16.subgroup.storage_buffer %22, %initial, %20, 0
+  return
+}

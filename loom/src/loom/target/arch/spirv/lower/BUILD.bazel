@@ -69,6 +69,7 @@ loom_cc_library(
     ],
     visibility = _SPIRV_ROOT_VISIBILITY,
     deps = [
+        ":cooperative_initializer",
         ":index",
         "//loom/src/loom/analysis:contract_vector",
         "//loom/src/loom/analysis:source_storage_packing",
@@ -197,6 +198,13 @@ loom_check_test_suite(
 loom_check_test_suite(
     name = "cooperative_initializer_tests",
     srcs = ["cooperative_initializer_test.loom-test"],
+    tags = ["hostonly"],
+    target_compatible_with = loom_config_compatible_with(["//loom/config/emit:spirv_binary"]),
+)
+
+loom_check_test_suite(
+    name = "cooperative_fragment_tests",
+    srcs = ["cooperative_fragment_test.loom-test"],
     tags = ["hostonly"],
     target_compatible_with = loom_config_compatible_with(["//loom/config/emit:spirv_binary"]),
 )
