@@ -63,10 +63,13 @@ TEST(Aie2pProgramLayoutTest, SharesInstructionMemoryWithoutLoadingEmptyWindow) {
         .kind = LOOM_NATIVE_OBJECT_SYMBOL_KIND_FUNCTION,
     };
     functions[i] = {
-        .object = {.sections = &sections[i],
-                   .section_count = 1,
-                   .symbols = &symbols[i],
-                   .symbol_count = 1},
+        .object =
+            {
+                .sections = &sections[i],
+                .section_count = 1,
+                .symbols = &symbols[i],
+                .symbol_count = 1,
+            },
         .realization = {.code = {lengths[i], 16}},
     };
     contributions[i] = &functions[i];

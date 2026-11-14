@@ -26,13 +26,15 @@ TEST(Aie2pProgramCatalogTest, SharesRelocatedStreamsAndPreservesInvocation) {
   loom_aie2p_code_transport_t transport = {};
   transport.plan.tiles = occupancy.data();
   transport.plan.routing.family = family;
-  const loom_aie2p_code_transport_binding_t binding = {.compute = {0, 2},
-                                                       .memory = {0, 1},
-                                                       .engine = 3,
-                                                       .first_descriptor = 24,
-                                                       .descriptor_count = 3,
-                                                       .queue_packet = 7,
-                                                       .reply_packet = 23};
+  const loom_aie2p_code_transport_binding_t binding = {
+      .compute = {0, 2},
+      .memory = {0, 1},
+      .engine = 3,
+      .first_descriptor = 24,
+      .descriptor_count = 3,
+      .queue_packet = 7,
+      .reply_packet = 23,
+  };
   uint8_t bytes[18];
   for (size_t i = 0; i < sizeof(bytes); ++i) {
     bytes[i] = static_cast<uint8_t>(i + 1);
@@ -41,22 +43,30 @@ TEST(Aie2pProgramCatalogTest, SharesRelocatedStreamsAndPreservesInvocation) {
   loom_native_section_contribution_layout_t contributions[4] = {};
   loom_aie2p_program_layout_group_t groups[4] = {};
   for (size_t i = 0; i < 4; ++i) {
-    sections[i] = {.storage = LOOM_NATIVE_SECTION_STORAGE_CONTENTS,
-                   .access = LOOM_NATIVE_SECTION_ACCESS_READ |
-                             LOOM_NATIVE_SECTION_ACCESS_EXECUTE,
-                   .address = i == 3 ? 128u : 64u,
-                   .alignment = 16,
-                   .contents = iree_make_const_byte_span(bytes, sizeof(bytes))};
+    sections[i] = {
+        .storage = LOOM_NATIVE_SECTION_STORAGE_CONTENTS,
+        .access = LOOM_NATIVE_SECTION_ACCESS_READ |
+                  LOOM_NATIVE_SECTION_ACCESS_EXECUTE,
+        .address = i == 3 ? 128u : 64u,
+        .alignment = 16,
+        .contents = iree_make_const_byte_span(bytes, sizeof(bytes)),
+    };
     contributions[i].section_index = i;
     groups[i].native.section_contribution_index = i;
   }
-  const loom_aie2p_program_layout_t layout = {.groups = groups,
-                                              .group_count = 4};
+  const loom_aie2p_program_layout_t layout = {
+      .groups = groups,
+      .group_count = 4,
+  };
   const loom_aie2p_linked_tile_t linked = {
-      .assembly = {.sections = sections,
-                   .section_count = 4,
-                   .contribution_layouts = contributions,
-                   .contribution_layout_count = 4}};
+      .assembly =
+          {
+              .sections = sections,
+              .section_count = 4,
+              .contribution_layouts = contributions,
+              .contribution_layout_count = 4,
+          },
+  };
   loom_aie2p_program_catalog_t catalog;
   iree_string_view_t requirement;
   IREE_ASSERT_OK(loom_aie2p_program_catalog_build(
@@ -106,14 +116,18 @@ TEST(Aie2pProgramCatalogTest, SharesRelocatedStreamsAndPreservesInvocation) {
   }
   const loom_aie2p_program_record_t initial = {
       .type = LOOM_AIE2P_PROGRAM_RECORD_REGISTER_WRITE32,
-      .value = {.register_write32 = {0x232000, 2}}};
+      .value = {.register_write32 = {0x232000, 2}},
+  };
   const loom_aie2p_program_record_t invoke = {
       .type = LOOM_AIE2P_PROGRAM_RECORD_REGISTER_WRITE32,
-      .value = {.register_write32 = {0x232000, 1}}};
-  loom_aie2p_array_program_t program = {.array_records = &initial,
-                                        .array_record_count = 1,
-                                        .control_records = &invoke,
-                                        .control_record_count = 1};
+      .value = {.register_write32 = {0x232000, 1}},
+  };
+  loom_aie2p_array_program_t program = {
+      .array_records = &initial,
+      .array_record_count = 1,
+      .control_records = &invoke,
+      .control_record_count = 1,
+  };
   IREE_ASSERT_OK(loom_aie2p_program_catalog_install(&transport, &catalog, 1,
                                                     &arena, &program));
   EXPECT_EQ(program.array_record_count, 7u);

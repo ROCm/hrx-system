@@ -49,7 +49,10 @@ TEST_F(ExecutionPlanTest, SourceRetirementPreservesRoutesAndPhysicalOwnership) {
   }
   loom_pass_t pass = {.arena = &source_arena_};
   loom_aie2p_native_context_t context = {
-      .pass = &pass, .family = family, .tiles = tiles.data()};
+      .pass = &pass,
+      .family = family,
+      .tiles = tiles.data(),
+  };
   IREE_ASSERT_OK(loom_aie2p_array_route_builder_initialize(
       family, 64, &source_arena_, &context.routing));
   std::vector<loom_aie2p_native_control_source_t> sources(tile_count * 2);
@@ -69,13 +72,17 @@ TEST_F(ExecutionPlanTest, SourceRetirementPreservesRoutesAndPhysicalOwnership) {
   loom_aie2p_native_payload_endpoint_t receivers[] = {
       {&tiles[2], 1}, {&tiles[family->row_count + 2], 0}};
   loom_aie2p_native_payload_source_t payload_source = {
-      .endpoint = {&tiles[1], 0}, .class_count = 1, .framed = true};
+      .endpoint = {&tiles[1], 0},
+      .class_count = 1,
+      .framed = true,
+  };
   loom_aie2p_native_payload_class_t payload = {
       .source = &payload_source,
       .destinations = receivers,
       .destination_count = IREE_ARRAYSIZE(receivers),
       .packet = 9,
-      .routed = true};
+      .routed = true,
+  };
   payload_source.classes = &payload;
   for (const auto& receiver : receivers) {
     ASSERT_TRUE(loom_aie2p_array_route_workers(
@@ -115,19 +122,27 @@ TEST_F(ExecutionPlanTest, SourceRetirementPreservesRoutesAndPhysicalOwnership) {
   };
   const iree_host_size_t owners[] = {1};
   loom_pipeline_lifetimes_t lifetimes = {
-      .nodes = nodes, .count = IREE_ARRAYSIZE(nodes), .owners = owners};
+      .nodes = nodes,
+      .count = IREE_ARRAYSIZE(nodes),
+      .owners = owners,
+  };
   IREE_ASSERT_OK(loom_pipeline_lifetimes_index(&source_arena_, &lifetimes));
   loom_pipeline_entry_scope_t* scope = nullptr;
   IREE_ASSERT_OK(loom_pipeline_entry_scope_allocate(
       &loom_aie2p_execution_plan_type, &lifetimes, 1, &source_arena_, &scope));
   std::vector<loom_aie2p_execution_tile_t> occupancy(tile_count);
   occupancy[1] = {
-      .memory_length = 128, .descriptor_counts = {1, 0}, .mm2s_count = 1};
-  occupancy[2] = {.memory_length = 2560,
-                  .lock_count = 3,
-                  .descriptor_counts = {2, 0},
-                  .mm2s_count = 1,
-                  .s2mm_count = 1};
+      .memory_length = 128,
+      .descriptor_counts = {1, 0},
+      .mm2s_count = 1,
+  };
+  occupancy[2] = {
+      .memory_length = 2560,
+      .lock_count = 3,
+      .descriptor_counts = {2, 0},
+      .mm2s_count = 1,
+      .s2mm_count = 1,
+  };
   const loom_aie2p_execution_plan_t selected = {
       .tiles = occupancy.data(),
       .routing = context.routing,
