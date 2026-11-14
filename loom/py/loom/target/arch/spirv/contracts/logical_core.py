@@ -124,7 +124,8 @@ from loom.target.arch.spirv.contracts.packed_memory import packed_storage_buffer
 from loom.target.arch.spirv.contracts.predicate import integer_to_boolean_rule
 from loom.target.arch.spirv.contracts.private_storage import (
     PRIVATE_STORAGE_MATERIALIZERS,
-    private_storage_rules,
+    private_memory_rules,
+    private_reference_rules,
 )
 from loom.target.arch.spirv.contracts.reference_fallback import (
     SPIRV_REFERENCE_FALLBACK_CONTRACT_CASES,
@@ -1517,7 +1518,8 @@ SPIRV_LOGICAL_CORE_CONTRACT_FRAGMENT = ContractFragment(
         _select_rule(Vector("bf16", lanes=1), "spirv.op_select.i32"),
         *SPIRV_ORDINARY_VECTOR_ALU_CONTRACT_CASES,
         *_compare_rules(),
-        *private_storage_rules(),
+        # Private reference transport specializes the generic buffer rules.
+        *private_reference_rules(),
         *_select_rules(),
         *(
             RecipeRule(
@@ -1564,6 +1566,9 @@ SPIRV_LOGICAL_CORE_CONTRACT_FRAGMENT = ContractFragment(
         *_storage_buffer_rules(),
         *bfloat_carrier_memory_rules(),
         *packed_storage_buffer_rules(),
+        # Memory spaces make these families disjoint. Ordinary device accesses
+        # need not consider private-cell decompositions before their own rules.
+        *private_memory_rules(),
         *SPIRV_ATOMIC_CONTRACT_CASES,
         *SPIRV_SUBGROUP_CONTRACT_CASES,
         *_control_barrier_rules(),

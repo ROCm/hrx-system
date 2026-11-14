@@ -7,14 +7,14 @@
 from loom.target.arch.spirv.contracts.logical_core import (
     SPIRV_LOGICAL_CORE_CONTRACT_FRAGMENT,
 )
-from loom.target.arch.spirv.contracts.private_storage import private_storage_rules
+from loom.target.arch.spirv.contracts.private_storage import private_memory_rules
 from loom.target.arch.spirv.descriptors import SPIRV_LOGICAL_CORE_DESCRIPTOR_SET
 from loom.target.arch.spirv.features import feature_bits_value
 from loom.target.contracts import DescriptorRule, GuardKind
 
 
 def _typed_memory_rules():
-    for rule in private_storage_rules():
+    for rule in private_memory_rules():
         if rule.source_op.name in ("view.load", "view.store"):
             yield rule
 

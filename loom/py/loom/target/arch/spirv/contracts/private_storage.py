@@ -315,7 +315,7 @@ def _private_subview_rule(dynamic: bool) -> DescriptorRule:
     )
 
 
-def private_storage_rules() -> tuple[DescriptorRule, ...]:
+def private_reference_rules() -> tuple[DescriptorRule, ...]:
     rules = [_private_subview_rule(dynamic) for dynamic in (False, True)]
 
     def private_operand(field: str) -> ValueRef:
@@ -430,6 +430,11 @@ def private_storage_rules() -> tuple[DescriptorRule, ...]:
                     ),
                 )
             )
+    return tuple(rules)
+
+
+def private_memory_rules() -> tuple[DescriptorRule, ...]:
+    rules = []
     for scalar in SOURCE_STORAGE_BUFFER_SCALARS:
         for shift in range(scalar.byte_width.bit_length()):
             for is_load in (False, True):
