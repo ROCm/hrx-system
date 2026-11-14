@@ -35,11 +35,15 @@ class BytecodeRegionTest : public ::testing::Test {
         IREE_SV("body_test.loombc"), &error_count_, &decoder_);
   }
 
-  iree_status_t ReadSummary(const uint8_t* data, iree_host_size_t length,
-                            loom_bytecode_region_summary_t* out_summary) {
+  bool ReadSummary(const uint8_t* data, iree_host_size_t length,
+                   loom_bytecode_region_summary_t* out_summary) {
     return loom_bytecode_region_summary_read(
         &decoder_, IREE_SV("@test"), iree_make_const_byte_span(data, length),
         /*payload_absolute_offset=*/4096, out_summary);
+  }
+
+  void TearDown() override {
+    IREE_EXPECT_OK(loom_bytecode_reader_consume_status(&decoder_));
   }
 
   // Bounded decoder under test.
@@ -59,7 +63,7 @@ TEST_F(BytecodeRegionTest, ReadsExactAllocationSummaryPrefix) {
       0xAA,  // first payload byte
   };
   loom_bytecode_region_summary_t summary;
-  IREE_ASSERT_OK(ReadSummary(data, sizeof(data), &summary));
+  ASSERT_TRUE(ReadSummary(data, sizeof(data), &summary));
 
   EXPECT_EQ(summary.value_count, 3u);
   EXPECT_EQ(summary.region_count, 2u);
@@ -77,8 +81,7 @@ TEST_F(BytecodeRegionTest, RejectsSummaryCountLargerThanBoundedRegion) {
       0x00,  // op_count
   };
   loom_bytecode_region_summary_t summary = {.value_count = 99};
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_DEFERRED,
-                        ReadSummary(data, sizeof(data), &summary));
+  EXPECT_FALSE(ReadSummary(data, sizeof(data), &summary));
 
   EXPECT_EQ(summary.value_count, 0u);
   EXPECT_EQ(summary.payload_offset, 0u);
@@ -96,8 +99,7 @@ TEST_F(BytecodeRegionTest, RejectsTruncatedSummaryPrefix) {
       0x00,  // block_count
   };
   loom_bytecode_region_summary_t summary;
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_DEFERRED,
-                        ReadSummary(data, sizeof(data), &summary));
+  EXPECT_FALSE(ReadSummary(data, sizeof(data), &summary));
 
   EXPECT_EQ(error_count_, 1u);
   ASSERT_NE(captured_.error, nullptr);

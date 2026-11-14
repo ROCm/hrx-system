@@ -88,9 +88,34 @@ TEST_P(UvarintRoundTripTest, RoundTrip) {
   loom_bytecode_cursor_t cursor;
   loom_bytecode_cursor_initialize(raw_buffer, encoded_length, &cursor);
   uint64_t decoded = UINT64_MAX;
-  IREE_ASSERT_OK(loom_uvarint_decode(&cursor, &decoded));
+  ASSERT_EQ(loom_uvarint_decode(&cursor, &decoded),
+            LOOM_VARINT_DECODE_COMPLETE);
   EXPECT_EQ(decoded, value);
   EXPECT_EQ(cursor.position, encoded_length);
+}
+
+TEST_P(UvarintRoundTripTest, TruncatedPrefixesPreserveCursorAndOutput) {
+  uint8_t data[1 + LOOM_VARINT_MAX_LENGTH] = {0xA5};
+  iree_host_size_t encoded_length = 0;
+  IREE_ASSERT_OK(loom_uvarint_encode(
+      GetParam(), iree_make_byte_span(data + 1, LOOM_VARINT_MAX_LENGTH),
+      &encoded_length));
+  for (iree_host_size_t prefix_length = 0; prefix_length < encoded_length;
+       ++prefix_length) {
+    loom_bytecode_cursor_t cursor;
+    loom_bytecode_cursor_initialize(data, 1 + prefix_length, &cursor);
+    cursor.position = 1;
+    uint64_t unsigned_value = UINT64_MAX;
+    EXPECT_EQ(loom_uvarint_decode(&cursor, &unsigned_value),
+              LOOM_VARINT_DECODE_TRUNCATED);
+    EXPECT_EQ(cursor.position, 1u);
+    EXPECT_EQ(unsigned_value, UINT64_MAX);
+    int64_t signed_value = INT64_MIN;
+    EXPECT_EQ(loom_svarint_decode(&cursor, &signed_value),
+              LOOM_VARINT_DECODE_TRUNCATED);
+    EXPECT_EQ(cursor.position, 1u);
+    EXPECT_EQ(signed_value, INT64_MIN);
+  }
 }
 
 INSTANTIATE_TEST_SUITE_P(UvarintValues, UvarintRoundTripTest,
@@ -133,7 +158,8 @@ TEST_P(SvarintRoundTripTest, RoundTrip) {
   loom_bytecode_cursor_t cursor;
   loom_bytecode_cursor_initialize(raw_buffer, encoded_length, &cursor);
   int64_t decoded = 0;
-  IREE_ASSERT_OK(loom_svarint_decode(&cursor, &decoded));
+  ASSERT_EQ(loom_svarint_decode(&cursor, &decoded),
+            LOOM_VARINT_DECODE_COMPLETE);
   EXPECT_EQ(decoded, value);
   EXPECT_EQ(cursor.position, encoded_length);
 }
@@ -217,11 +243,11 @@ TEST(UvarintEncode, ZeroLengthBuffer) {
 TEST(UvarintDecode, EmptyData) {
   loom_bytecode_cursor_t cursor;
   loom_bytecode_cursor_initialize(NULL, 0, &cursor);
-  uint64_t value = 0;
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
-                        loom_uvarint_decode(&cursor, &value));
+  uint64_t value = UINT64_MAX;
+  EXPECT_EQ(loom_uvarint_decode(&cursor, &value), LOOM_VARINT_DECODE_TRUNCATED);
   // Cursor unchanged on failure.
   EXPECT_EQ(cursor.position, 0u);
+  EXPECT_EQ(value, UINT64_MAX);
 }
 
 TEST(UvarintDecode, TruncatedVarint) {
@@ -229,10 +255,10 @@ TEST(UvarintDecode, TruncatedVarint) {
   uint8_t data[] = {0x80};
   loom_bytecode_cursor_t cursor;
   loom_bytecode_cursor_initialize(data, sizeof(data), &cursor);
-  uint64_t value = 0;
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
-                        loom_uvarint_decode(&cursor, &value));
+  uint64_t value = UINT64_MAX;
+  EXPECT_EQ(loom_uvarint_decode(&cursor, &value), LOOM_VARINT_DECODE_TRUNCATED);
   EXPECT_EQ(cursor.position, 0u);
+  EXPECT_EQ(value, UINT64_MAX);
 }
 
 TEST(UvarintDecode, TruncatedMultiByte) {
@@ -240,40 +266,40 @@ TEST(UvarintDecode, TruncatedMultiByte) {
   uint8_t data[] = {0x80, 0x80, 0x80};
   loom_bytecode_cursor_t cursor;
   loom_bytecode_cursor_initialize(data, sizeof(data), &cursor);
-  uint64_t value = 0;
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
-                        loom_uvarint_decode(&cursor, &value));
+  uint64_t value = UINT64_MAX;
+  EXPECT_EQ(loom_uvarint_decode(&cursor, &value), LOOM_VARINT_DECODE_TRUNCATED);
   EXPECT_EQ(cursor.position, 0u);
+  EXPECT_EQ(value, UINT64_MAX);
 }
 
 TEST(UvarintDecode, NonCanonicalZero) {
   uint8_t data[] = {0x80, 0x00};
   loom_bytecode_cursor_t cursor;
   loom_bytecode_cursor_initialize(data, sizeof(data), &cursor);
-  uint64_t value = 0;
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
-                        loom_uvarint_decode(&cursor, &value));
+  uint64_t value = UINT64_MAX;
+  EXPECT_EQ(loom_uvarint_decode(&cursor, &value), LOOM_VARINT_DECODE_INVALID);
   EXPECT_EQ(cursor.position, 0u);
+  EXPECT_EQ(value, UINT64_MAX);
 }
 
 TEST(UvarintDecode, NonCanonicalSmallValue) {
   uint8_t data[] = {0x81, 0x00};
   loom_bytecode_cursor_t cursor;
   loom_bytecode_cursor_initialize(data, sizeof(data), &cursor);
-  uint64_t value = 0;
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
-                        loom_uvarint_decode(&cursor, &value));
+  uint64_t value = UINT64_MAX;
+  EXPECT_EQ(loom_uvarint_decode(&cursor, &value), LOOM_VARINT_DECODE_INVALID);
   EXPECT_EQ(cursor.position, 0u);
+  EXPECT_EQ(value, UINT64_MAX);
 }
 
 TEST(SvarintDecode, NonCanonicalFails) {
   uint8_t data[] = {0x80, 0x00};
   loom_bytecode_cursor_t cursor;
   loom_bytecode_cursor_initialize(data, sizeof(data), &cursor);
-  int64_t value = 0;
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
-                        loom_svarint_decode(&cursor, &value));
+  int64_t value = INT64_MIN;
+  EXPECT_EQ(loom_svarint_decode(&cursor, &value), LOOM_VARINT_DECODE_INVALID);
   EXPECT_EQ(cursor.position, 0u);
+  EXPECT_EQ(value, INT64_MIN);
 }
 
 TEST(UvarintDecode, Overflow10thByteTooLarge) {
@@ -282,10 +308,10 @@ TEST(UvarintDecode, Overflow10thByteTooLarge) {
   uint8_t data[] = {0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x02};
   loom_bytecode_cursor_t cursor;
   loom_bytecode_cursor_initialize(data, sizeof(data), &cursor);
-  uint64_t value = 0;
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
-                        loom_uvarint_decode(&cursor, &value));
+  uint64_t value = UINT64_MAX;
+  EXPECT_EQ(loom_uvarint_decode(&cursor, &value), LOOM_VARINT_DECODE_INVALID);
   EXPECT_EQ(cursor.position, 0u);
+  EXPECT_EQ(value, UINT64_MAX);
 }
 
 TEST(UvarintDecode, OverflowTooManyBytes) {
@@ -294,10 +320,10 @@ TEST(UvarintDecode, OverflowTooManyBytes) {
                     0x80, 0x80, 0x80, 0x80, 0x00};
   loom_bytecode_cursor_t cursor;
   loom_bytecode_cursor_initialize(data, sizeof(data), &cursor);
-  uint64_t value = 0;
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
-                        loom_uvarint_decode(&cursor, &value));
+  uint64_t value = UINT64_MAX;
+  EXPECT_EQ(loom_uvarint_decode(&cursor, &value), LOOM_VARINT_DECODE_INVALID);
   EXPECT_EQ(cursor.position, 0u);
+  EXPECT_EQ(value, UINT64_MAX);
 }
 
 TEST(UvarintDecode, MaxValidValue) {
@@ -307,7 +333,7 @@ TEST(UvarintDecode, MaxValidValue) {
   loom_bytecode_cursor_t cursor;
   loom_bytecode_cursor_initialize(data, sizeof(data), &cursor);
   uint64_t value = 0;
-  IREE_ASSERT_OK(loom_uvarint_decode(&cursor, &value));
+  ASSERT_EQ(loom_uvarint_decode(&cursor, &value), LOOM_VARINT_DECODE_COMPLETE);
   EXPECT_EQ(value, UINT64_MAX);
   EXPECT_EQ(cursor.position, 10u);
 }
@@ -322,11 +348,11 @@ TEST(CursorReadU8, Basic) {
   loom_bytecode_cursor_initialize(data, sizeof(data), &cursor);
 
   uint8_t value = 0;
-  IREE_ASSERT_OK(loom_bytecode_cursor_read_u8(&cursor, &value));
+  ASSERT_TRUE(loom_bytecode_cursor_read_u8(&cursor, &value));
   EXPECT_EQ(value, 0x42);
   EXPECT_EQ(cursor.position, 1u);
 
-  IREE_ASSERT_OK(loom_bytecode_cursor_read_u8(&cursor, &value));
+  ASSERT_TRUE(loom_bytecode_cursor_read_u8(&cursor, &value));
   EXPECT_EQ(value, 0xFF);
   EXPECT_EQ(cursor.position, 2u);
 }
@@ -335,8 +361,7 @@ TEST(CursorReadU8, PastEnd) {
   loom_bytecode_cursor_t cursor;
   loom_bytecode_cursor_initialize(NULL, 0, &cursor);
   uint8_t value = 0;
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
-                        loom_bytecode_cursor_read_u8(&cursor, &value));
+  EXPECT_FALSE(loom_bytecode_cursor_read_u8(&cursor, &value));
 }
 
 TEST(CursorReadU16, LittleEndian) {
@@ -344,7 +369,7 @@ TEST(CursorReadU16, LittleEndian) {
   loom_bytecode_cursor_t cursor;
   loom_bytecode_cursor_initialize(data, sizeof(data), &cursor);
   uint16_t value = 0;
-  IREE_ASSERT_OK(loom_bytecode_cursor_read_u16_le(&cursor, &value));
+  ASSERT_TRUE(loom_bytecode_cursor_read_u16_le(&cursor, &value));
   EXPECT_EQ(value, 0x1234);
 }
 
@@ -353,8 +378,7 @@ TEST(CursorReadU16, InsufficientData) {
   loom_bytecode_cursor_t cursor;
   loom_bytecode_cursor_initialize(data, sizeof(data), &cursor);
   uint16_t value = 0;
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
-                        loom_bytecode_cursor_read_u16_le(&cursor, &value));
+  EXPECT_FALSE(loom_bytecode_cursor_read_u16_le(&cursor, &value));
 }
 
 TEST(CursorReadU16, PositionOverflowFailsWithoutAdvancing) {
@@ -363,8 +387,7 @@ TEST(CursorReadU16, PositionOverflowFailsWithoutAdvancing) {
   loom_bytecode_cursor_initialize(data, sizeof(data), &cursor);
   cursor.position = IREE_HOST_SIZE_MAX - 1;
   uint16_t value = 0;
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
-                        loom_bytecode_cursor_read_u16_le(&cursor, &value));
+  EXPECT_FALSE(loom_bytecode_cursor_read_u16_le(&cursor, &value));
   EXPECT_EQ(cursor.position, IREE_HOST_SIZE_MAX - 1);
 }
 
@@ -373,7 +396,7 @@ TEST(CursorReadU32, LittleEndian) {
   loom_bytecode_cursor_t cursor;
   loom_bytecode_cursor_initialize(data, sizeof(data), &cursor);
   uint32_t value = 0;
-  IREE_ASSERT_OK(loom_bytecode_cursor_read_u32_le(&cursor, &value));
+  ASSERT_TRUE(loom_bytecode_cursor_read_u32_le(&cursor, &value));
   EXPECT_EQ(value, 0x12345678u);
 }
 
@@ -382,7 +405,7 @@ TEST(CursorReadU64, LittleEndian) {
   loom_bytecode_cursor_t cursor;
   loom_bytecode_cursor_initialize(data, sizeof(data), &cursor);
   uint64_t value = 0;
-  IREE_ASSERT_OK(loom_bytecode_cursor_read_u64_le(&cursor, &value));
+  ASSERT_TRUE(loom_bytecode_cursor_read_u64_le(&cursor, &value));
   EXPECT_EQ(value, 0x1234567890ABCDEFull);
 }
 
@@ -396,7 +419,7 @@ TEST(CursorReadSpan, Basic) {
   loom_bytecode_cursor_initialize(data, sizeof(data), &cursor);
 
   iree_const_byte_span_t span = iree_const_byte_span_empty();
-  IREE_ASSERT_OK(loom_bytecode_cursor_read_span(&cursor, 3, &span));
+  ASSERT_TRUE(loom_bytecode_cursor_read_span(&cursor, 3, &span));
   EXPECT_EQ(span.data, data);
   EXPECT_EQ(span.data_length, 3u);
   EXPECT_EQ(cursor.position, 3u);
@@ -407,8 +430,7 @@ TEST(CursorReadSpan, PastEnd) {
   loom_bytecode_cursor_t cursor;
   loom_bytecode_cursor_initialize(data, sizeof(data), &cursor);
   iree_const_byte_span_t span = iree_const_byte_span_empty();
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
-                        loom_bytecode_cursor_read_span(&cursor, 2, &span));
+  EXPECT_FALSE(loom_bytecode_cursor_read_span(&cursor, 2, &span));
   EXPECT_EQ(cursor.position, 0u);
 }
 
@@ -416,10 +438,10 @@ TEST(CursorSkip, Basic) {
   uint8_t data[] = {0x01, 0x02, 0x03};
   loom_bytecode_cursor_t cursor;
   loom_bytecode_cursor_initialize(data, sizeof(data), &cursor);
-  IREE_ASSERT_OK(loom_bytecode_cursor_skip(&cursor, 2));
+  ASSERT_TRUE(loom_bytecode_cursor_skip(&cursor, 2));
   EXPECT_EQ(cursor.position, 2u);
   uint8_t value = 0;
-  IREE_ASSERT_OK(loom_bytecode_cursor_read_u8(&cursor, &value));
+  ASSERT_TRUE(loom_bytecode_cursor_read_u8(&cursor, &value));
   EXPECT_EQ(value, 0x03);
 }
 
@@ -427,8 +449,7 @@ TEST(CursorSkip, PastEnd) {
   uint8_t data[] = {0x01};
   loom_bytecode_cursor_t cursor;
   loom_bytecode_cursor_initialize(data, sizeof(data), &cursor);
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
-                        loom_bytecode_cursor_skip(&cursor, 2));
+  EXPECT_FALSE(loom_bytecode_cursor_skip(&cursor, 2));
   EXPECT_EQ(cursor.position, 0u);
 }
 
@@ -444,10 +465,10 @@ TEST(CursorState, RemainingAndEmpty) {
   EXPECT_FALSE(loom_bytecode_cursor_is_empty(&cursor));
 
   uint8_t v;
-  IREE_ASSERT_OK(loom_bytecode_cursor_read_u8(&cursor, &v));
+  ASSERT_TRUE(loom_bytecode_cursor_read_u8(&cursor, &v));
   EXPECT_EQ(loom_bytecode_cursor_remaining(&cursor), 1u);
 
-  IREE_ASSERT_OK(loom_bytecode_cursor_read_u8(&cursor, &v));
+  ASSERT_TRUE(loom_bytecode_cursor_read_u8(&cursor, &v));
   EXPECT_EQ(loom_bytecode_cursor_remaining(&cursor), 0u);
   EXPECT_TRUE(loom_bytecode_cursor_is_empty(&cursor));
 }
@@ -488,7 +509,8 @@ TEST(UvarintDecode, MultipleSequential) {
   loom_bytecode_cursor_initialize(raw_buffer, total_length, &cursor);
   for (iree_host_size_t i = 0; i < value_count; ++i) {
     uint64_t decoded = 0;
-    IREE_ASSERT_OK(loom_uvarint_decode(&cursor, &decoded));
+    ASSERT_EQ(loom_uvarint_decode(&cursor, &decoded),
+              LOOM_VARINT_DECODE_COMPLETE);
     EXPECT_EQ(decoded, values[i]) << "mismatch at index " << i;
   }
   EXPECT_TRUE(loom_bytecode_cursor_is_empty(&cursor));
@@ -514,7 +536,8 @@ TEST(SvarintDecode, MultipleSequential) {
   loom_bytecode_cursor_initialize(raw_buffer, total_length, &cursor);
   for (iree_host_size_t i = 0; i < value_count; ++i) {
     int64_t decoded = 0;
-    IREE_ASSERT_OK(loom_svarint_decode(&cursor, &decoded));
+    ASSERT_EQ(loom_svarint_decode(&cursor, &decoded),
+              LOOM_VARINT_DECODE_COMPLETE);
     EXPECT_EQ(decoded, values[i]) << "mismatch at index " << i;
   }
   EXPECT_TRUE(loom_bytecode_cursor_is_empty(&cursor));

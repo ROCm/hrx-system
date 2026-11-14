@@ -305,12 +305,6 @@ iree_status_t loom_bytecode_selected_table_resolve_symbol(
   IREE_RETURN_IF_ERROR(
       materializer->symbol_resolver.fn(materializer->symbol_resolver.user_data,
                                        source_symbol_ordinal, &target_ref));
-  if (!loom_symbol_ref_is_valid(target_ref) || target_ref.module_id != 0 ||
-      target_ref.symbol_id >= materializer->output_module->symbols.count) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "external bytecode symbol resolver returned an "
-                            "invalid output-module reference");
-  }
   IREE_RETURN_IF_ERROR(loom_bytecode_selected_table_bind_symbol(
       materializer, source_name_ordinal, target_ref.symbol_id));
   *out_target_symbol_ref = target_ref;
@@ -376,7 +370,7 @@ iree_status_t loom_bytecode_selected_table_project_location(
       out_target_location_id);
 }
 
-static iree_status_t loom_bytecode_selected_table_prepare_encoding(
+static bool loom_bytecode_selected_table_prepare_encoding(
     loom_bytecode_selected_table_materializer_t* materializer,
     uint32_t source_ordinal, loom_encoding_t* out_encoding) {
   const loom_bytecode_encoding_metadata_t* metadata =
@@ -393,15 +387,15 @@ static iree_status_t loom_bytecode_selected_table_prepare_encoding(
       IREE_SV("ENCODINGS"), &cursor);
 
   uint64_t unused_family_index = 0;
-  IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
+  LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_reader_read_uvarint(
       materializer->decoder, &cursor, &unused_family_index));
   uint64_t alias_plus_one = 0;
-  IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
+  LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_reader_read_uvarint(
       materializer->decoder, &cursor, &alias_plus_one));
   uint64_t parameter_count = 0;
   const uint64_t parameter_count_offset =
       loom_bytecode_reader_cursor_absolute_position(&cursor);
-  IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
+  LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_reader_read_uvarint(
       materializer->decoder, &cursor, &parameter_count));
   if (parameter_count > UINT8_MAX || parameter_count > IREE_HOST_SIZE_MAX) {
     return loom_bytecode_reader_emit_count_exceeds(
@@ -410,38 +404,46 @@ static iree_status_t loom_bytecode_selected_table_prepare_encoding(
   }
 
   loom_string_id_t target_name_id = LOOM_STRING_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_bytecode_selected_table_intern_string(
-      materializer, metadata->name_string_index, &target_name_id));
+  LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_reader_check_status(
+      materializer->decoder,
+      loom_bytecode_selected_table_intern_string(
+          materializer, metadata->name_string_index, &target_name_id)));
   loom_string_id_t target_alias_id = LOOM_STRING_ID_INVALID;
   if (alias_plus_one > 0) {
-    IREE_RETURN_IF_ERROR(loom_bytecode_selected_table_intern_string(
-        materializer, (uint32_t)(alias_plus_one - 1), &target_alias_id));
+    LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_reader_check_status(
+        materializer->decoder,
+        loom_bytecode_selected_table_intern_string(
+            materializer, (uint32_t)(alias_plus_one - 1), &target_alias_id)));
   }
 
   loom_named_attr_t* parameters = NULL;
   if (parameter_count > 0) {
-    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        materializer->scratch_arena, (iree_host_size_t)parameter_count,
-        sizeof(*parameters), (void**)&parameters));
+    LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_reader_check_status(
+        materializer->decoder,
+        iree_arena_allocate_array(materializer->scratch_arena,
+                                  (iree_host_size_t)parameter_count,
+                                  sizeof(*parameters), (void**)&parameters)));
   }
   for (uint64_t parameter_index = 0; parameter_index < parameter_count;
        ++parameter_index) {
     uint64_t source_name_id = 0;
-    IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
+    LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_reader_read_uvarint(
         materializer->decoder, &cursor, &source_name_id));
-    IREE_RETURN_IF_ERROR(loom_bytecode_selected_table_intern_string(
-        materializer, (uint32_t)source_name_id,
-        &parameters[parameter_index].name_id));
+    LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_reader_check_status(
+        materializer->decoder, loom_bytecode_selected_table_intern_string(
+                                   materializer, (uint32_t)source_name_id,
+                                   &parameters[parameter_index].name_id)));
     parameters[parameter_index].reserved = 0;
     loom_bytecode_attr_kind_t value_kind = LOOM_BYTECODE_ATTR_I64;
-    IREE_RETURN_IF_ERROR(loom_bytecode_attribute_read_kind(
+    LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_attribute_read_kind(
         materializer->decoder, &cursor, &value_kind));
-    IREE_RETURN_IF_ERROR(loom_bytecode_selected_attribute_decode_named(
-        materializer, &cursor, /*descriptor=*/NULL, value_kind,
-        materializer->metadata->types.count,
-        &parameters[parameter_index].value));
+    LOOM_BYTECODE_RETURN_IF_REJECTED(
+        loom_bytecode_selected_attribute_decode_named(
+            materializer, &cursor, /*descriptor=*/NULL, value_kind,
+            materializer->metadata->types.count,
+            &parameters[parameter_index].value));
   }
-  IREE_RETURN_IF_ERROR(loom_bytecode_reader_expect_empty(
+  LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_reader_expect_empty(
       materializer->decoder, &cursor, IREE_SV("encoding_entry")));
   *out_encoding = (loom_encoding_t){
       .name_id = target_name_id,
@@ -449,7 +451,7 @@ static iree_status_t loom_bytecode_selected_table_prepare_encoding(
       .attribute_count = (uint8_t)parameter_count,
       .attributes = parameters,
   };
-  return iree_ok_status();
+  return true;
 }
 
 static iree_status_t loom_bytecode_selected_table_project_type_dependencies(
@@ -495,7 +497,7 @@ static iree_status_t loom_bytecode_selected_table_prepare_structural_type(
   return iree_ok_status();
 }
 
-static iree_status_t loom_bytecode_selected_table_prepare_type_plan(
+static bool loom_bytecode_selected_table_prepare_type_plan(
     loom_bytecode_selected_table_materializer_t* materializer,
     const loom_bytecode_type_plan_entry_t* plan_entry,
     const loom_bytecode_type_fact_t* fact,
@@ -505,50 +507,67 @@ static iree_status_t loom_bytecode_selected_table_prepare_type_plan(
         (const loom_bytecode_reference_type_fact_t*)fact;
     loom_string_id_t namespace_id = LOOM_STRING_ID_INVALID;
     loom_string_id_t name_id = LOOM_STRING_ID_INVALID;
-    IREE_RETURN_IF_ERROR(loom_bytecode_selected_table_intern_string(
-        materializer, reference->namespace_id, &namespace_id));
-    IREE_RETURN_IF_ERROR(loom_bytecode_selected_table_intern_string(
-        materializer, reference->name_id, &name_id));
+    LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_reader_check_status(
+        materializer->decoder,
+        loom_bytecode_selected_table_intern_string(
+            materializer, reference->namespace_id, &namespace_id)));
+    LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_reader_check_status(
+        materializer->decoder,
+        loom_bytecode_selected_table_intern_string(
+            materializer, reference->name_id, &name_id)));
     loom_symbol_ref_t declaration = loom_symbol_ref_null();
     bool found = false;
-    IREE_RETURN_IF_ERROR(loom_bytecode_selected_table_resolve_symbol(
-        materializer, reference->declaration_name_id, &declaration, &found));
+    LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_reader_check_status(
+        materializer->decoder, loom_bytecode_selected_table_resolve_symbol(
+                                   materializer, reference->declaration_name_id,
+                                   &declaration, &found)));
     if (!found) {
-      return iree_make_status(
-          IREE_STATUS_NOT_FOUND,
-          "managed type declaration is outside the selected symbol closure");
+      return loom_bytecode_reader_emit_invalid_field(
+          materializer->decoder, IREE_SV("TYPES"), IREE_SV("reference"),
+          reference->base.type_id, IREE_SV("declaration"),
+          plan_entry->bytecode_offset,
+          IREE_SV(
+              "managed_type_declaration_is_outside_selected_symbol_closure"));
     }
     payload->type.form = LOOM_BYTECODE_SELECTED_TYPE_DIRECT;
     payload->type.direct.value = loom_type_reference(
         reference->ownership, namespace_id, name_id, declaration.symbol_id);
     payload->type.direct.encoding_id = NULL;
-    return iree_ok_status();
+    return true;
   } else if (fact != NULL) {
-    return loom_bytecode_selected_table_prepare_structural_type(
-        materializer, plan_entry, fact, payload);
+    return loom_bytecode_reader_check_status(
+        materializer->decoder,
+        loom_bytecode_selected_table_prepare_structural_type(
+            materializer, plan_entry, fact, payload));
   }
 
   payload->type.form = LOOM_BYTECODE_SELECTED_TYPE_DIRECT;
   loom_type_t type = plan_entry->direct_type;
   if (loom_type_kind(type) == LOOM_TYPE_DIALECT) {
     loom_string_id_t target_name_id = LOOM_STRING_ID_INVALID;
-    IREE_RETURN_IF_ERROR(loom_bytecode_selected_table_intern_string(
-        materializer, loom_type_dialect_name_id(type), &target_name_id));
+    LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_reader_check_status(
+        materializer->decoder,
+        loom_bytecode_selected_table_intern_string(
+            materializer, loom_type_dialect_name_id(type), &target_name_id)));
     type = loom_type_dialect_opaque(target_name_id);
   }
   payload->type.direct.value = type;
   payload->type.direct.encoding_id = NULL;
   if (loom_type_has_static_encoding(type)) {
-    IREE_RETURN_IF_ERROR(iree_arena_allocate(
-        materializer->scratch_arena, sizeof(*payload->type.direct.encoding_id),
-        (void**)&payload->type.direct.encoding_id));
-    IREE_RETURN_IF_ERROR(loom_bytecode_selected_table_project_encoding(
-        materializer, type.encoding_id, payload->type.direct.encoding_id));
+    LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_reader_check_status(
+        materializer->decoder,
+        iree_arena_allocate(materializer->scratch_arena,
+                            sizeof(*payload->type.direct.encoding_id),
+                            (void**)&payload->type.direct.encoding_id)));
+    LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_reader_check_status(
+        materializer->decoder,
+        loom_bytecode_selected_table_project_encoding(
+            materializer, type.encoding_id, payload->type.direct.encoding_id)));
   }
-  return iree_ok_status();
+  return true;
 }
 
-static iree_status_t loom_bytecode_selected_table_prepare_type(
+static bool loom_bytecode_selected_table_prepare_type(
     loom_bytecode_selected_table_materializer_t* materializer,
     uint32_t source_ordinal, loom_bytecode_selected_table_payload_t* payload) {
   const loom_bytecode_table_entry_metadata_t* metadata =
@@ -564,10 +583,11 @@ static iree_status_t loom_bytecode_selected_table_prepare_type(
         IREE_SV("TYPES"), &cursor);
     cursor.cursor.position = 1;
     payload->type.form = LOOM_BYTECODE_SELECTED_TYPE_PARAMETERIZED;
-    IREE_RETURN_IF_ERROR(loom_bytecode_selected_attribute_decode_static_type(
-        materializer, &cursor, source_ordinal,
-        &payload->type.parameterized.descriptor,
-        &payload->type.parameterized.parameters));
+    LOOM_BYTECODE_RETURN_IF_REJECTED(
+        loom_bytecode_selected_attribute_decode_static_type(
+            materializer, &cursor, source_ordinal,
+            &payload->type.parameterized.descriptor,
+            &payload->type.parameterized.parameters));
     return loom_bytecode_reader_expect_empty(materializer->decoder, &cursor,
                                              IREE_SV("type_entry"));
   }
@@ -588,7 +608,7 @@ static iree_status_t loom_bytecode_selected_table_prepare_type(
   };
   loom_bytecode_type_plan_entry_t plan_entry = {0};
   loom_bytecode_type_fact_t* fact = NULL;
-  IREE_RETURN_IF_ERROR(loom_bytecode_type_plan_decode_indexed_entry(
+  LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_type_plan_decode_indexed_entry(
       materializer->decoder, materializer->context, &module_view,
       materializer->scratch_arena, (loom_type_id_t)source_ordinal, entry_bytes,
       metadata->entry_offset, &plan_entry, &fact));
@@ -628,13 +648,13 @@ static iree_status_t loom_bytecode_selected_table_finish_type(
   IREE_BUILTIN_UNREACHABLE();
 }
 
-static iree_status_t loom_bytecode_selected_table_read_location_coordinate(
+static bool loom_bytecode_selected_table_read_location_coordinate(
     loom_bytecode_selected_table_materializer_t* materializer,
     loom_bytecode_reader_cursor_t* cursor, uint32_t source_ordinal,
     iree_string_view_t field_name, uint32_t* out_value) {
   const uint64_t offset = loom_bytecode_reader_cursor_absolute_position(cursor);
   uint64_t value = 0;
-  IREE_RETURN_IF_ERROR(
+  LOOM_BYTECODE_RETURN_IF_REJECTED(
       loom_bytecode_reader_read_uvarint(materializer->decoder, cursor, &value));
   if (value > LOOM_LOCATION_COORDINATE_MAX) {
     return loom_bytecode_reader_emit_invalid_field(
@@ -643,23 +663,25 @@ static iree_status_t loom_bytecode_selected_table_read_location_coordinate(
         IREE_SV("file_location_coordinate_exceeds_supported_range"));
   }
   *out_value = (uint32_t)value;
-  return iree_ok_status();
+  return true;
 }
 
-static iree_status_t loom_bytecode_selected_table_read_source(
+static bool loom_bytecode_selected_table_read_source(
     loom_bytecode_selected_table_materializer_t* materializer,
     loom_bytecode_reader_cursor_t* cursor, loom_source_id_t* out_source_id) {
   const uint64_t offset = loom_bytecode_reader_cursor_absolute_position(cursor);
   uint64_t source_ordinal = 0;
-  IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
+  LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_reader_read_uvarint(
       materializer->decoder, cursor, &source_ordinal));
   if (source_ordinal >= materializer->metadata->sources.count) {
     return loom_bytecode_reader_emit_table_ref(
         materializer->decoder, IREE_SV("SOURCES"), source_ordinal,
         materializer->metadata->sources.count, offset);
   }
-  return loom_bytecode_selected_table_project_source(
-      materializer, (uint32_t)source_ordinal, out_source_id);
+  return loom_bytecode_reader_check_status(
+      materializer->decoder,
+      loom_bytecode_selected_table_project_source(
+          materializer, (uint32_t)source_ordinal, out_source_id));
 }
 
 static iree_status_t loom_bytecode_selected_table_copy_location_payload(
@@ -710,7 +732,7 @@ static iree_status_t loom_bytecode_selected_table_copy_location_payload(
   IREE_BUILTIN_UNREACHABLE();
 }
 
-static iree_status_t loom_bytecode_selected_table_prepare_location(
+static bool loom_bytecode_selected_table_prepare_location(
     loom_bytecode_selected_table_materializer_t* materializer,
     uint32_t source_ordinal, loom_bytecode_selected_table_payload_t* payload) {
   loom_location_entry_t* entry = &payload->location.value;
@@ -726,9 +748,9 @@ static iree_status_t loom_bytecode_selected_table_prepare_location(
   uint8_t flags = 0;
   const uint64_t kind_offset =
       loom_bytecode_reader_cursor_absolute_position(&cursor);
-  IREE_RETURN_IF_ERROR(
+  LOOM_BYTECODE_RETURN_IF_REJECTED(
       loom_bytecode_reader_read_u8(materializer->decoder, &cursor, &kind));
-  IREE_RETURN_IF_ERROR(
+  LOOM_BYTECODE_RETURN_IF_REJECTED(
       loom_bytecode_reader_read_u8(materializer->decoder, &cursor, &flags));
   if (flags & ~LOOM_LOCATION_FLAG_SYNTHETIC) {
     return loom_bytecode_reader_emit_invalid_field(
@@ -739,25 +761,25 @@ static iree_status_t loom_bytecode_selected_table_prepare_location(
   switch ((loom_location_kind_t)kind) {
     case LOOM_LOCATION_NONE:
       IREE_ASSERT(source_ordinal == 0 && flags == 0);
-      return iree_ok_status();
+      return true;
     case LOOM_LOCATION_FILE: {
       loom_source_id_t source_id = LOOM_SOURCE_ID_INVALID;
-      IREE_RETURN_IF_ERROR(loom_bytecode_selected_table_read_source(
+      LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_selected_table_read_source(
           materializer, &cursor, &source_id));
       uint32_t coordinates[4];
-      IREE_RETURN_IF_ERROR(
+      LOOM_BYTECODE_RETURN_IF_REJECTED(
           loom_bytecode_selected_table_read_location_coordinate(
               materializer, &cursor, source_ordinal, IREE_SV("start_line"),
               &coordinates[0]));
-      IREE_RETURN_IF_ERROR(
+      LOOM_BYTECODE_RETURN_IF_REJECTED(
           loom_bytecode_selected_table_read_location_coordinate(
               materializer, &cursor, source_ordinal, IREE_SV("start_col"),
               &coordinates[1]));
-      IREE_RETURN_IF_ERROR(
+      LOOM_BYTECODE_RETURN_IF_REJECTED(
           loom_bytecode_selected_table_read_location_coordinate(
               materializer, &cursor, source_ordinal, IREE_SV("end_line"),
               &coordinates[2]));
-      IREE_RETURN_IF_ERROR(
+      LOOM_BYTECODE_RETURN_IF_REJECTED(
           loom_bytecode_selected_table_read_location_coordinate(
               materializer, &cursor, source_ordinal, IREE_SV("end_col"),
               &coordinates[3]));
@@ -783,7 +805,7 @@ static iree_status_t loom_bytecode_selected_table_prepare_location(
       const uint64_t child_count_offset =
           loom_bytecode_reader_cursor_absolute_position(&cursor);
       uint64_t child_count = 0;
-      IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
+      LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_reader_read_uvarint(
           materializer->decoder, &cursor, &child_count));
       if (child_count > LOOM_LOCATION_FUSED_CHILD_COUNT_MAX ||
           child_count > IREE_HOST_SIZE_MAX) {
@@ -793,24 +815,28 @@ static iree_status_t loom_bytecode_selected_table_prepare_location(
       }
       loom_location_id_t* children = NULL;
       if (child_count > 0) {
-        IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-            materializer->scratch_arena, (iree_host_size_t)child_count,
-            sizeof(*children), (void**)&children));
+        LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_reader_check_status(
+            materializer->decoder,
+            iree_arena_allocate_array(materializer->scratch_arena,
+                                      (iree_host_size_t)child_count,
+                                      sizeof(*children), (void**)&children)));
       }
       for (uint64_t child_index = 0; child_index < child_count; ++child_index) {
         const uint64_t child_offset =
             loom_bytecode_reader_cursor_absolute_position(&cursor);
         uint64_t source_child = 0;
-        IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
+        LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_reader_read_uvarint(
             materializer->decoder, &cursor, &source_child));
         if (source_child >= source_ordinal) {
           return loom_bytecode_reader_emit_table_ref(
               materializer->decoder, IREE_SV("LOCATIONS"), source_child,
               source_ordinal, child_offset);
         }
-        IREE_RETURN_IF_ERROR(loom_bytecode_selected_table_project_location(
-            materializer, (loom_location_id_t)source_child,
-            &children[child_index]));
+        LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_reader_check_status(
+            materializer->decoder,
+            loom_bytecode_selected_table_project_location(
+                materializer, (loom_location_id_t)source_child,
+                &children[child_index])));
       }
       *entry = (loom_location_entry_t){
           .fused =
@@ -826,12 +852,12 @@ static iree_status_t loom_bytecode_selected_table_prepare_location(
     }
     case LOOM_LOCATION_OPAQUE: {
       loom_source_id_t source_id = LOOM_SOURCE_ID_INVALID;
-      IREE_RETURN_IF_ERROR(loom_bytecode_selected_table_read_source(
+      LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_selected_table_read_source(
           materializer, &cursor, &source_id));
       uint64_t data_length = 0;
       const uint64_t data_length_offset =
           loom_bytecode_reader_cursor_absolute_position(&cursor);
-      IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
+      LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_reader_read_uvarint(
           materializer->decoder, &cursor, &data_length));
       if (data_length > LOOM_LOCATION_DATA_LENGTH_MAX ||
           data_length > IREE_HOST_SIZE_MAX) {
@@ -840,7 +866,7 @@ static iree_status_t loom_bytecode_selected_table_prepare_location(
             LOOM_LOCATION_DATA_LENGTH_MAX, data_length_offset);
       }
       iree_const_byte_span_t span = iree_const_byte_span_empty();
-      IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_span(
+      LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_reader_read_span(
           materializer->decoder, &cursor, data_length, &span));
       *entry = (loom_location_entry_t){
           .opaque =
@@ -858,7 +884,7 @@ static iree_status_t loom_bytecode_selected_table_prepare_location(
       uint64_t tag = 0;
       const uint64_t tag_offset =
           loom_bytecode_reader_cursor_absolute_position(&cursor);
-      IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
+      LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_reader_read_uvarint(
           materializer->decoder, &cursor, &tag));
       if (tag == LOOM_LOCATION_TAG_INVALID || tag > LOOM_LOCATION_TAG_MAX) {
         return loom_bytecode_reader_emit_invalid_field(
@@ -869,23 +895,27 @@ static iree_status_t loom_bytecode_selected_table_prepare_location(
       uint64_t source_child = 0;
       const uint64_t child_offset =
           loom_bytecode_reader_cursor_absolute_position(&cursor);
-      IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
+      LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_reader_read_uvarint(
           materializer->decoder, &cursor, &source_child));
       if (source_child >= source_ordinal) {
         return loom_bytecode_reader_emit_table_ref(
             materializer->decoder, IREE_SV("LOCATIONS"), source_child,
             source_ordinal, child_offset);
       }
-      IREE_RETURN_IF_ERROR(iree_arena_allocate(
-          materializer->scratch_arena, sizeof(*payload->location.child),
-          (void**)&payload->location.child));
-      IREE_RETURN_IF_ERROR(loom_bytecode_selected_table_project_location(
-          materializer, (loom_location_id_t)source_child,
-          payload->location.child));
+      LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_reader_check_status(
+          materializer->decoder,
+          iree_arena_allocate(materializer->scratch_arena,
+                              sizeof(*payload->location.child),
+                              (void**)&payload->location.child)));
+      LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_reader_check_status(
+          materializer->decoder,
+          loom_bytecode_selected_table_project_location(
+              materializer, (loom_location_id_t)source_child,
+              payload->location.child)));
       uint64_t data_length = 0;
       const uint64_t data_length_offset =
           loom_bytecode_reader_cursor_absolute_position(&cursor);
-      IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
+      LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_reader_read_uvarint(
           materializer->decoder, &cursor, &data_length));
       if (data_length > LOOM_LOCATION_DATA_LENGTH_MAX ||
           data_length > IREE_HOST_SIZE_MAX) {
@@ -894,7 +924,7 @@ static iree_status_t loom_bytecode_selected_table_prepare_location(
             LOOM_LOCATION_DATA_LENGTH_MAX, data_length_offset);
       }
       iree_const_byte_span_t span = iree_const_byte_span_empty();
-      IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_span(
+      LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_reader_read_span(
           materializer->decoder, &cursor, data_length, &span));
       *entry = (loom_location_entry_t){
           .tagged =
@@ -918,7 +948,7 @@ static iree_status_t loom_bytecode_selected_table_prepare_location(
                                            IREE_SV("location_entry"));
 }
 
-static iree_status_t loom_bytecode_selected_table_prepare_entry(
+static bool loom_bytecode_selected_table_prepare_entry(
     loom_bytecode_selected_table_materializer_t* materializer,
     loom_bytecode_selected_table_kind_t table_kind, uint32_t source_ordinal,
     loom_bytecode_selected_table_payload_t* payload) {
@@ -983,18 +1013,20 @@ static iree_status_t loom_bytecode_selected_table_finish_entry(
 }
 
 // Keeps dependency construction off the completed-identity lookup path.
-IREE_ATTRIBUTE_NOINLINE static iree_status_t
+IREE_ATTRIBUTE_NOINLINE static bool
 loom_bytecode_selected_table_materialize_unresolved(
     loom_bytecode_selected_table_materializer_t* materializer,
     loom_bytecode_selected_table_kind_t table_kind, uint32_t source_ordinal,
     uint32_t* out_target_id) {
   IREE_ASSERT(materializer->worklist.count == 0);
-  IREE_RETURN_IF_ERROR(loom_bytecode_selected_table_push(
-      materializer, table_kind, source_ordinal, out_target_id));
+  LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_reader_check_status(
+      materializer->decoder,
+      loom_bytecode_selected_table_push(materializer, table_kind,
+                                        source_ordinal, out_target_id)));
   const iree_arena_checkpoint_t root_checkpoint =
       iree_arena_checkpoint_save(materializer->scratch_arena);
-  iree_status_t status = iree_ok_status();
-  while (materializer->worklist.count > 0 && iree_status_is_ok(status)) {
+  bool accepted = true;
+  while (materializer->worklist.count > 0 && accepted) {
     const iree_host_size_t frame_depth = materializer->worklist.count;
     loom_bytecode_selected_table_chunk_t* chunk =
         materializer->worklist.current;
@@ -1019,14 +1051,15 @@ loom_bytecode_selected_table_materialize_unresolved(
       } else {
         checkpoint = iree_arena_checkpoint_save(materializer->scratch_arena);
       }
-      status = loom_bytecode_selected_table_prepare_entry(
+      accepted = loom_bytecode_selected_table_prepare_entry(
           materializer, frame->table_kind, frame->source_ordinal, payload);
-      if (iree_status_is_ok(status) &&
-          materializer->worklist.count != frame_depth) {
-        status = iree_arena_allocate(materializer->scratch_arena,
-                                     sizeof(*frame->pending),
-                                     (void**)&frame->pending);
-        if (iree_status_is_ok(status)) {
+      if (accepted && materializer->worklist.count != frame_depth) {
+        accepted = loom_bytecode_reader_check_status(
+            materializer->decoder,
+            iree_arena_allocate(materializer->scratch_arena,
+                                sizeof(*frame->pending),
+                                (void**)&frame->pending));
+        if (accepted) {
           *frame->pending = (loom_bytecode_selected_table_pending_t){
               .checkpoint = checkpoint,
               .payload = *payload,
@@ -1037,11 +1070,12 @@ loom_bytecode_selected_table_materialize_unresolved(
       payload = &frame->pending->payload;
       checkpoint = frame->pending->checkpoint;
     }
-    if (iree_status_is_ok(status) &&
-        materializer->worklist.count == frame_depth) {
-      status = loom_bytecode_selected_table_finish_entry(
-          materializer, frame->table_kind, frame->source_ordinal, payload,
-          frame->destination);
+    if (accepted && materializer->worklist.count == frame_depth) {
+      accepted = loom_bytecode_reader_check_status(
+          materializer->decoder,
+          loom_bytecode_selected_table_finish_entry(
+              materializer, frame->table_kind, frame->source_ordinal, payload,
+              frame->destination));
       if (frame_depth != 1) {
         iree_arena_checkpoint_restore(&checkpoint);
       }
@@ -1052,10 +1086,10 @@ loom_bytecode_selected_table_materialize_unresolved(
   materializer->worklist.current = materializer->worklist.first;
   materializer->worklist.first->count = 0;
   iree_arena_checkpoint_restore(&root_checkpoint);
-  return status;
+  return accepted;
 }
 
-static iree_status_t loom_bytecode_selected_table_materialize_root(
+static bool loom_bytecode_selected_table_materialize_root(
     loom_bytecode_selected_table_materializer_t* materializer,
     loom_bytecode_selected_table_kind_t table_kind, uint32_t source_ordinal,
     uint32_t* out_target_id) {
@@ -1063,50 +1097,53 @@ static iree_status_t loom_bytecode_selected_table_materialize_root(
           &materializer->projection,
           loom_bytecode_selected_table_projection_domain(table_kind),
           source_ordinal, out_target_id)) {
-    return iree_ok_status();
+    return true;
   }
   return loom_bytecode_selected_table_materialize_unresolved(
       materializer, table_kind, source_ordinal, out_target_id);
 }
 
-iree_status_t loom_bytecode_selected_table_materialize_encoding(
+bool loom_bytecode_selected_table_materialize_encoding(
     loom_bytecode_selected_table_materializer_t* materializer,
     uint16_t source_encoding_id, uint16_t* out_target_encoding_id) {
   IREE_ASSERT(source_encoding_id > 0);
   IREE_ASSERT(source_encoding_id <= materializer->metadata->encodings.count);
   uint32_t target_id = 0;
-  IREE_RETURN_IF_ERROR(loom_bytecode_selected_table_materialize_root(
-      materializer, LOOM_BYTECODE_SELECTED_TABLE_ENCODING,
-      source_encoding_id - 1, &target_id));
+  LOOM_BYTECODE_RETURN_IF_REJECTED(
+      loom_bytecode_selected_table_materialize_root(
+          materializer, LOOM_BYTECODE_SELECTED_TABLE_ENCODING,
+          source_encoding_id - 1, &target_id));
   *out_target_encoding_id = (uint16_t)target_id;
-  return iree_ok_status();
+  return true;
 }
 
-iree_status_t loom_bytecode_selected_table_materialize_type(
+bool loom_bytecode_selected_table_materialize_type(
     loom_bytecode_selected_table_materializer_t* materializer,
     loom_type_id_t source_type_id, loom_type_id_t* out_target_type_id) {
   IREE_ASSERT(source_type_id < materializer->metadata->types.count);
   uint32_t target_id = 0;
-  IREE_RETURN_IF_ERROR(loom_bytecode_selected_table_materialize_root(
-      materializer, LOOM_BYTECODE_SELECTED_TABLE_TYPE, source_type_id,
-      &target_id));
+  LOOM_BYTECODE_RETURN_IF_REJECTED(
+      loom_bytecode_selected_table_materialize_root(
+          materializer, LOOM_BYTECODE_SELECTED_TABLE_TYPE, source_type_id,
+          &target_id));
   *out_target_type_id = (loom_type_id_t)target_id;
-  return iree_ok_status();
+  return true;
 }
 
-iree_status_t loom_bytecode_selected_table_materialize_location(
+bool loom_bytecode_selected_table_materialize_location(
     loom_bytecode_selected_table_materializer_t* materializer,
     loom_location_id_t source_location_id,
     loom_location_id_t* out_target_location_id) {
   IREE_ASSERT(source_location_id < materializer->metadata->locations.count);
   if (source_location_id == LOOM_LOCATION_UNKNOWN) {
     *out_target_location_id = LOOM_LOCATION_UNKNOWN;
-    return iree_ok_status();
+    return true;
   }
   uint32_t target_id = 0;
-  IREE_RETURN_IF_ERROR(loom_bytecode_selected_table_materialize_root(
-      materializer, LOOM_BYTECODE_SELECTED_TABLE_LOCATION, source_location_id,
-      &target_id));
+  LOOM_BYTECODE_RETURN_IF_REJECTED(
+      loom_bytecode_selected_table_materialize_root(
+          materializer, LOOM_BYTECODE_SELECTED_TABLE_LOCATION,
+          source_location_id, &target_id));
   *out_target_location_id = (loom_location_id_t)target_id;
-  return iree_ok_status();
+  return true;
 }

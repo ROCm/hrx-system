@@ -40,7 +40,7 @@ typedef struct loom_bytecode_selected_module_materializer_t {
 // |ordinals| must be strictly increasing and in the metadata symbol domain.
 // Body summaries are decoded once before output allocation and reused during
 // materialization. Rejected symbol entries and bodies are never read.
-iree_status_t loom_bytecode_selected_module_materialize(
+bool loom_bytecode_selected_module_materialize(
     const loom_bytecode_selected_module_materializer_t* materializer,
     const iree_host_size_t* ordinals, iree_host_size_t ordinal_count,
     loom_module_t** out_module);
@@ -52,7 +52,7 @@ iree_status_t loom_bytecode_selected_module_materialize(
 // regions are decoded; predeclared symbols remain otherwise untouched. This
 // is the composition boundary used when a semantic projector replaces some
 // source symbols while retaining complete siblings from the same module.
-iree_status_t loom_bytecode_selected_module_materialize_into(
+bool loom_bytecode_selected_module_materialize_into(
     const loom_bytecode_selected_module_materializer_t* materializer,
     const iree_host_size_t* ordinals, iree_host_size_t ordinal_count,
     loom_bytecode_selected_symbol_resolver_t symbol_resolver,

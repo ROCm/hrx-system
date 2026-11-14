@@ -6,8 +6,8 @@
 
 #include "loom/format/bytecode/varint.h"
 
-iree_status_t loom_uvarint_decode(loom_bytecode_cursor_t* cursor,
-                                  uint64_t* out_value) {
+loom_varint_decode_result_t loom_uvarint_decode(loom_bytecode_cursor_t* cursor,
+                                                uint64_t* out_value) {
   iree_host_size_t start_position = cursor->position;
   uint64_t value = 0;
   uint32_t shift = 0;
@@ -21,10 +21,7 @@ iree_status_t loom_uvarint_decode(loom_bytecode_cursor_t* cursor,
     uint8_t payload = byte & 0x7F;
     if (shift == 63 && payload > 1) {
       cursor->position = start_position;
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "uvarint overflow at offset %" PRIhsz
-                              ": 10th byte is 0x%02x (must be 0 or 1)",
-                              start_position, byte);
+      return LOOM_VARINT_DECODE_INVALID;
     }
 
     value |= (uint64_t)payload << shift;
@@ -32,14 +29,11 @@ iree_status_t loom_uvarint_decode(loom_bytecode_cursor_t* cursor,
     if ((byte & 0x80) == 0) {
       if (shift > 0 && payload == 0) {
         cursor->position = start_position;
-        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                "non-canonical uvarint at offset %" PRIhsz
-                                ": final byte carries no payload bits",
-                                start_position);
+        return LOOM_VARINT_DECODE_INVALID;
       }
       // Continuation bit clear: varint complete.
       *out_value = value;
-      return iree_ok_status();
+      return LOOM_VARINT_DECODE_COMPLETE;
     }
 
     shift += 7;
@@ -47,26 +41,24 @@ iree_status_t loom_uvarint_decode(loom_bytecode_cursor_t* cursor,
     // After 10 bytes (shift would be 70), the varint is too long.
     if (shift > 63) {
       cursor->position = start_position;
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "uvarint too long at offset %" PRIhsz
-                              ": exceeds 10-byte maximum",
-                              start_position);
+      return LOOM_VARINT_DECODE_INVALID;
     }
   }
 
   // Ran out of data with continuation bit still set.
   cursor->position = start_position;
-  return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                          "truncated uvarint at offset %" PRIhsz
-                          ": continuation bit set at end of data",
-                          start_position);
+  return LOOM_VARINT_DECODE_TRUNCATED;
 }
 
-iree_status_t loom_svarint_decode(loom_bytecode_cursor_t* cursor,
-                                  int64_t* out_value) {
+loom_varint_decode_result_t loom_svarint_decode(loom_bytecode_cursor_t* cursor,
+                                                int64_t* out_value) {
   uint64_t zigzag = 0;
-  IREE_RETURN_IF_ERROR(loom_uvarint_decode(cursor, &zigzag));
+  const loom_varint_decode_result_t result =
+      loom_uvarint_decode(cursor, &zigzag);
+  if (IREE_UNLIKELY(result != LOOM_VARINT_DECODE_COMPLETE)) {
+    return result;
+  }
   // Zigzag decode: inverse of (value << 1) ^ (value >> 63).
   *out_value = (int64_t)((zigzag >> 1) ^ -(zigzag & 1));
-  return iree_ok_status();
+  return LOOM_VARINT_DECODE_COMPLETE;
 }

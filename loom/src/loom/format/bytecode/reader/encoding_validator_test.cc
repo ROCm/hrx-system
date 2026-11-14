@@ -77,13 +77,14 @@ class BytecodeEncodingValidatorTest : public ::testing::Test {
     strings_[5] = IREE_SV("element");
     module_view_.strings.values = strings_;
     module_view_.strings.count = IREE_ARRAYSIZE(strings_);
-    IREE_ASSERT_OK(loom_bytecode_type_validation_begin(
+    ASSERT_TRUE(loom_bytecode_type_validation_begin(
         &decoder_, &context_, &module_view_,
         iree_make_const_byte_span(empty_types_, sizeof(empty_types_)), 0,
         LOOM_BYTECODE_TYPE_RETAIN_NONE, nullptr, &types_));
   }
 
   void TearDown() override {
+    IREE_EXPECT_OK(loom_bytecode_reader_consume_status(&decoder_));
     loom_context_deinitialize(&context_);
     iree_arena_deinitialize(&retained_arena_);
     iree_arena_deinitialize(&scratch_arena_);
@@ -140,7 +141,7 @@ TEST_F(BytecodeEncodingValidatorTest, ValidatesWithoutRetainingEntries) {
   const loom_bytecode_reader_section_t section =
       MakeSection(data, sizeof(data));
 
-  IREE_ASSERT_OK(loom_bytecode_encoding_table_validate(
+  ASSERT_TRUE(loom_bytecode_encoding_table_validate(
       &decoder_, &context_, &module_view_, &scratch_arena_, &types_, &section));
 
   ASSERT_EQ(module_view_.encodings.family_count, 1u);
@@ -167,7 +168,7 @@ TEST_F(BytecodeEncodingValidatorTest, IndexesExactInstanceRange) {
 
   loom_bytecode_encoding_metadata_t* entries = nullptr;
   iree_host_size_t count = 0;
-  IREE_ASSERT_OK(loom_bytecode_encoding_table_index(
+  ASSERT_TRUE(loom_bytecode_encoding_table_index(
       &decoder_, &context_, &module_view_, &scratch_arena_, &types_, &section,
       &retained_arena_, &entries, &count));
 
@@ -187,10 +188,8 @@ TEST_F(BytecodeEncodingValidatorTest, RejectsFamilyCountBeforeRetainingIds) {
   const loom_bytecode_reader_section_t section =
       MakeSection(data, sizeof(data));
 
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_DEFERRED,
-                        loom_bytecode_encoding_table_validate(
-                            &decoder_, &context_, &module_view_,
-                            &scratch_arena_, &types_, &section));
+  EXPECT_FALSE(loom_bytecode_encoding_table_validate(
+      &decoder_, &context_, &module_view_, &scratch_arena_, &types_, &section));
 
   EXPECT_EQ(error_count_, 1u);
   EXPECT_EQ(scratch_arena_.used_allocation_size, 0u);
@@ -206,11 +205,9 @@ TEST_F(BytecodeEncodingValidatorTest, RejectsInstanceCountBeforeIndexing) {
   loom_bytecode_encoding_metadata_t* entries = nullptr;
   iree_host_size_t count = 0;
 
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_DEFERRED,
-      loom_bytecode_encoding_table_index(&decoder_, &context_, &module_view_,
-                                         &scratch_arena_, &types_, &section,
-                                         &retained_arena_, &entries, &count));
+  EXPECT_FALSE(loom_bytecode_encoding_table_index(
+      &decoder_, &context_, &module_view_, &scratch_arena_, &types_, &section,
+      &retained_arena_, &entries, &count));
 
   EXPECT_EQ(error_count_, 1u);
   EXPECT_EQ(retained_arena_.used_allocation_size, 0u);
@@ -243,19 +240,19 @@ TEST_F(BytecodeEncodingValidatorTest, IndexesMixedTypeAndEncodingPrefixes) {
       1, 0, 0, 1, 5, LOOM_BYTECODE_ATTR_TYPE, 0,
       2, 0, 0, 1, 5, LOOM_BYTECODE_ATTR_TYPE, 1,
   };
-  IREE_ASSERT_OK(loom_bytecode_type_validation_begin(
+  ASSERT_TRUE(loom_bytecode_type_validation_begin(
       &decoder_, &context_, &module_view_,
       iree_make_const_byte_span(type_data, sizeof(type_data)), 0,
       LOOM_BYTECODE_TYPE_RETAIN_RANGES, &retained_arena_, &types_));
   const auto section = MakeSection(encoding_data, sizeof(encoding_data));
   loom_bytecode_encoding_metadata_t* entries = nullptr;
   iree_host_size_t count = 0;
-  IREE_ASSERT_OK(loom_bytecode_encoding_table_index(
+  ASSERT_TRUE(loom_bytecode_encoding_table_index(
       &decoder_, &context_, &module_view_, &scratch_arena_, &types_, &section,
       &retained_arena_, &entries, &count));
   EXPECT_EQ(types_.position, 2u);
   EXPECT_EQ(module_view_.encodings.count, 2u);
-  IREE_ASSERT_OK(loom_bytecode_type_validation_finish(&types_));
+  ASSERT_TRUE(loom_bytecode_type_validation_finish(&types_));
   EXPECT_EQ(types_.position, 3u);
   iree_arena_reset(&scratch_arena_);
   ASSERT_EQ(count, 2u);
@@ -292,7 +289,7 @@ TEST_F(BytecodeEncodingValidatorTest, RejectsInvalidMixedTableOrdering) {
     SCOPED_TRACE(static_cast<unsigned>(prefix[0]));
     SCOPED_TRACE(static_cast<unsigned>(prefix[1]));
     error_count_ = 0;
-    IREE_ASSERT_OK(loom_bytecode_type_validation_begin(
+    ASSERT_TRUE(loom_bytecode_type_validation_begin(
         &decoder_, &context_, &module_view_,
         iree_make_const_byte_span(type_data, sizeof(type_data)), 0,
         LOOM_BYTECODE_TYPE_RETAIN_NONE, nullptr, &types_));
@@ -316,10 +313,9 @@ TEST_F(BytecodeEncodingValidatorTest, RejectsInvalidMixedTableOrdering) {
         1,
     };
     const auto section = MakeSection(data, sizeof(data));
-    IREE_EXPECT_STATUS_IS(IREE_STATUS_DEFERRED,
-                          loom_bytecode_encoding_table_validate(
-                              &decoder_, &context_, &module_view_,
-                              &scratch_arena_, &types_, &section));
+    EXPECT_FALSE(loom_bytecode_encoding_table_validate(
+        &decoder_, &context_, &module_view_, &scratch_arena_, &types_,
+        &section));
     EXPECT_EQ(error_count_, 1u);
   }
 }
@@ -332,13 +328,13 @@ TEST_F(BytecodeEncodingValidatorTest, AcceptsPriorEncodingReferences) {
       0x00, 0x00, 0x00, 0x01, 0x03, LOOM_BYTECODE_ATTR_ENCODING, 0x02,
   };
   const auto section = MakeSection(data, sizeof(data));
-  IREE_ASSERT_OK(loom_bytecode_encoding_table_validate(
+  ASSERT_TRUE(loom_bytecode_encoding_table_validate(
       &decoder_, &context_, &module_view_, &scratch_arena_, &types_, &section));
   EXPECT_EQ(module_view_.encodings.count, 3u);
 
   loom_bytecode_encoding_metadata_t* entries = nullptr;
   iree_host_size_t count = 0;
-  IREE_ASSERT_OK(loom_bytecode_encoding_table_index(
+  ASSERT_TRUE(loom_bytecode_encoding_table_index(
       &decoder_, &context_, &module_view_, &scratch_arena_, &types_, &section,
       &retained_arena_, &entries, &count));
   EXPECT_EQ(count, 3u);
@@ -358,20 +354,17 @@ TEST_F(BytecodeEncodingValidatorTest, RejectsNonPriorEncodingReferences) {
     };
     const auto section = MakeSection(data, sizeof(data));
     error_count_ = 0;
-    IREE_EXPECT_STATUS_IS(IREE_STATUS_DEFERRED,
-                          loom_bytecode_encoding_table_validate(
-                              &decoder_, &context_, &module_view_,
-                              &scratch_arena_, &types_, &section));
+    EXPECT_FALSE(loom_bytecode_encoding_table_validate(
+        &decoder_, &context_, &module_view_, &scratch_arena_, &types_,
+        &section));
     EXPECT_EQ(error_count_, 1u);
 
     loom_bytecode_encoding_metadata_t* entries = nullptr;
     iree_host_size_t count = 0;
     error_count_ = 0;
-    IREE_EXPECT_STATUS_IS(
-        IREE_STATUS_DEFERRED,
-        loom_bytecode_encoding_table_index(&decoder_, &context_, &module_view_,
-                                           &scratch_arena_, &types_, &section,
-                                           &retained_arena_, &entries, &count));
+    EXPECT_FALSE(loom_bytecode_encoding_table_index(
+        &decoder_, &context_, &module_view_, &scratch_arena_, &types_, &section,
+        &retained_arena_, &entries, &count));
     EXPECT_EQ(error_count_, 1u);
     EXPECT_EQ(entries, nullptr);
     EXPECT_EQ(count, 0u);
@@ -409,10 +402,9 @@ TEST_F(BytecodeEncodingValidatorTest, RejectsNestedNonPriorEncodingReferences) {
     };
     const auto section = MakeSection(data, sizeof(data));
     error_count_ = 0;
-    IREE_EXPECT_STATUS_IS(IREE_STATUS_DEFERRED,
-                          loom_bytecode_encoding_table_validate(
-                              &decoder_, &context_, &module_view_,
-                              &scratch_arena_, &types_, &section));
+    EXPECT_FALSE(loom_bytecode_encoding_table_validate(
+        &decoder_, &context_, &module_view_, &scratch_arena_, &types_,
+        &section));
     EXPECT_EQ(error_count_, 1u);
   }
 }
@@ -421,7 +413,7 @@ TEST_F(BytecodeEncodingValidatorTest, EmptyTableHasNoAvailableEncodings) {
   const uint8_t data[] = {0x01, 0x01, 0x00};
   const auto section = MakeSection(data, sizeof(data));
   module_view_.encodings.count = 3;
-  IREE_ASSERT_OK(loom_bytecode_encoding_table_validate(
+  ASSERT_TRUE(loom_bytecode_encoding_table_validate(
       &decoder_, &context_, &module_view_, &scratch_arena_, &types_, &section));
   EXPECT_EQ(module_view_.encodings.count, 0u);
   EXPECT_EQ(error_count_, 0u);
@@ -448,7 +440,7 @@ TEST_F(BytecodeEncodingValidatorTest, AcceptsNestedPriorEncodingReference) {
       0x01,
   };
   const auto section = MakeSection(data, sizeof(data));
-  IREE_ASSERT_OK(loom_bytecode_encoding_table_validate(
+  ASSERT_TRUE(loom_bytecode_encoding_table_validate(
       &decoder_, &context_, &module_view_, &scratch_arena_, &types_, &section));
   EXPECT_EQ(module_view_.encodings.count, 2u);
   EXPECT_EQ(error_count_, 0u);

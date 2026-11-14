@@ -8,30 +8,31 @@
 // canonicalized once after all referenced nodes have completed. Only final type
 // IDs survive the per-record scratch checkpoint.
 
-iree_status_t LOOM_BYTECODE_TYPE_PROJECT_COMPLETED(
+bool LOOM_BYTECODE_TYPE_PROJECT_COMPLETED(
     loom_bytecode_attribute_policy_materializer_t* materializer,
     loom_bytecode_reader_cursor_t* cursor,
     const loom_bytecode_attribute_ssa_materialization_scope_t* scope,
     uint64_t reference, loom_type_id_t* out_type) {
-  IREE_RETURN_IF_ERROR(loom_bytecode_type_validate_completed_reference(
-      materializer->decoder, cursor, reference,
-      LOOM_BYTECODE_ATTRIBUTE_TABLES(materializer)->types.count,
-      scope->bindings->count));
+  LOOM_BYTECODE_RETURN_IF_REJECTED(
+      loom_bytecode_type_validate_completed_reference(
+          materializer->decoder, cursor, reference,
+          LOOM_BYTECODE_ATTRIBUTE_TABLES(materializer)->types.count,
+          scope->bindings->count));
   const uint64_t ordinal = reference >> 1;
   if (reference & 1) {
     *out_type = scope->bindings->entries[ordinal].type;
-    return iree_ok_status();
+    return true;
   }
 #if LOOM_BYTECODE_ATTRIBUTE_SELECTED
   return loom_bytecode_selected_table_materialize_type(materializer, ordinal,
                                                        out_type);
 #else
   *out_type = materializer->module_view->types.entries[ordinal].completed_type;
-  return iree_ok_status();
+  return true;
 #endif
 }
 
-static iree_status_t loom_bytecode_read_complete_type(
+static bool loom_bytecode_read_complete_type(
     loom_bytecode_attribute_policy_materializer_t* materializer,
     loom_bytecode_reader_cursor_t* cursor,
     const loom_bytecode_attribute_ssa_materialization_scope_t* scope,
@@ -39,10 +40,10 @@ static iree_status_t loom_bytecode_read_complete_type(
   const uint64_t kind_offset =
       loom_bytecode_reader_cursor_absolute_position(cursor);
   uint8_t kind_byte = 0;
-  IREE_RETURN_IF_ERROR(
+  LOOM_BYTECODE_RETURN_IF_REJECTED(
       loom_bytecode_reader_read_u8(materializer->decoder, cursor, &kind_byte));
   loom_type_kind_t kind = LOOM_TYPE_NONE;
-  IREE_RETURN_IF_ERROR(loom_bytecode_type_decode_kind(
+  LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_type_decode_kind(
       materializer->decoder, kind_byte, kind_offset, &kind));
   if (kind == LOOM_TYPE_PARAMETERIZED) {
     return LOOM_BYTECODE_ATTRIBUTE_DECODE_COMPLETE_TYPE(materializer, cursor,
@@ -52,14 +53,15 @@ static iree_status_t loom_bytecode_read_complete_type(
       kind == LOOM_TYPE_TENSOR || kind == LOOM_TYPE_VECTOR ||
       kind == LOOM_TYPE_VIEW) {
     loom_bytecode_scoped_shape_t shape;
-    IREE_RETURN_IF_ERROR(loom_bytecode_type_read_scoped_shape(
+    LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_type_read_scoped_shape(
         materializer->decoder, cursor, kind, scope->value_count,
         LOOM_BYTECODE_ATTRIBUTE_TABLES(materializer)->encodings.count, &shape));
     uint16_t target_encoding = 0;
     if (shape.attachment == LOOM_BYTECODE_ENCODING_ATTACHMENT_STATIC) {
 #if LOOM_BYTECODE_ATTRIBUTE_SELECTED
-      IREE_RETURN_IF_ERROR(loom_bytecode_selected_table_materialize_encoding(
-          materializer, shape.encoding_ordinal, &target_encoding));
+      LOOM_BYTECODE_RETURN_IF_REJECTED(
+          loom_bytecode_selected_table_materialize_encoding(
+              materializer, shape.encoding_ordinal, &target_encoding));
 #else
       target_encoding = (uint16_t)shape.encoding_ordinal;
 #endif
@@ -99,8 +101,10 @@ static iree_status_t loom_bytecode_read_complete_type(
         type.dims[i] = shape.dimensions[i];
       }
     }
-    return loom_module_intern_topological_type_id(materializer->output_module,
-                                                  type, NULL, 0, out_type);
+    return loom_bytecode_reader_check_status(
+        materializer->decoder,
+        loom_module_intern_topological_type_id(materializer->output_module,
+                                               type, NULL, 0, out_type));
   }
   loom_bytecode_structural_type_plan_t plan = {0};
   loom_bytecode_structural_type_fact_t fact = {0};
@@ -110,72 +114,78 @@ static iree_status_t loom_bytecode_read_complete_type(
         materializer->decoder, cursor, IREE_SV("invalid_scoped_type_kind"));
   }
   fact.base.kind = kind;
-  IREE_RETURN_IF_ERROR(loom_bytecode_type_read_structural_header(
+  LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_type_read_structural_header(
       materializer->decoder, cursor, kind, 0,
       LOOM_BYTECODE_ATTRIBUTE_TABLES(materializer)->strings.count, &plan,
       fact.payload_prefix));
 #if LOOM_BYTECODE_ATTRIBUTE_SELECTED
   if (kind == LOOM_TYPE_DIALECT) {
-    IREE_RETURN_IF_ERROR(loom_bytecode_selected_table_intern_string(
-        materializer, plan.name_id, &plan.name_id));
+    LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_reader_check_status(
+        materializer->decoder, loom_bytecode_selected_table_intern_string(
+                                   materializer, plan.name_id, &plan.name_id)));
   }
 #endif
-  IREE_RETURN_IF_ERROR(loom_bytecode_reader_validate_count_bytes(
+  LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_reader_validate_count_bytes(
       materializer->decoder, cursor, IREE_SV("scoped_type_children"),
       plan.dependency_count,
       /*minimum_entry_length=*/1, /*minimum_trailing_length=*/0, kind_offset));
   loom_type_id_t* children = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      materializer->scratch_arena, plan.dependency_count, sizeof(*children),
-      (void**)&children));
+  LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_reader_check_status(
+      materializer->decoder,
+      iree_arena_allocate_array(materializer->scratch_arena,
+                                plan.dependency_count, sizeof(*children),
+                                (void**)&children)));
   for (uint32_t i = 0; i < plan.dependency_count; ++i) {
     uint64_t reference = 0;
-    IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
+    LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_reader_read_uvarint(
         materializer->decoder, cursor, &reference));
-    IREE_RETURN_IF_ERROR(LOOM_BYTECODE_TYPE_PROJECT_COMPLETED(
+    LOOM_BYTECODE_RETURN_IF_REJECTED(LOOM_BYTECODE_TYPE_PROJECT_COMPLETED(
         materializer, cursor, scope, reference, &children[i]));
   }
-  return loom_bytecode_type_materialize_structural(
-      &plan, &fact, children, materializer->output_module, out_type);
+  return loom_bytecode_reader_check_status(
+      materializer->decoder,
+      loom_bytecode_type_materialize_structural(
+          &plan, &fact, children, materializer->output_module, out_type));
 }
 
-iree_status_t LOOM_BYTECODE_TYPE_MATERIALIZE_BINDINGS(
+bool LOOM_BYTECODE_TYPE_MATERIALIZE_BINDINGS(
     loom_bytecode_attribute_policy_materializer_t* materializer,
     loom_bytecode_reader_cursor_t* cursor,
     const loom_bytecode_attribute_ssa_materialization_scope_t* scope,
     uint64_t source_type_id, loom_type_id_t* out_type_id) {
   loom_bytecode_reader_cursor_t records;
   uint64_t count = 0;
-  IREE_RETURN_IF_ERROR(loom_bytecode_type_open_scoped_records(
+  LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_type_open_scoped_records(
       materializer->decoder, cursor, source_type_id, &records, &count));
   if (records.cursor.length == 0) {
     return LOOM_BYTECODE_TYPE_PROJECT_COMPLETED(materializer, cursor, scope,
                                                 source_type_id, out_type_id);
   }
-  iree_status_t status = iree_ok_status();
-  for (uint64_t i = 0; i < count && iree_status_is_ok(status); ++i) {
+  bool accepted = true;
+  for (uint64_t i = 0; i < count && accepted; ++i) {
     const iree_arena_checkpoint_t checkpoint =
         iree_arena_checkpoint_save(materializer->scratch_arena);
     loom_type_id_t type = LOOM_TYPE_ID_INVALID;
-    status =
+    accepted =
         loom_bytecode_read_complete_type(materializer, &records, scope, &type);
     iree_arena_checkpoint_restore(&checkpoint);
-    if (iree_status_is_ok(status) &&
-        scope->bindings->count == scope->bindings->capacity) {
-      status = iree_arena_grow_array(
-          scope->bindings->arena, scope->bindings->count,
-          scope->bindings->count + 1, sizeof(*scope->bindings->entries),
-          &scope->bindings->capacity, (void**)&scope->bindings->entries);
+    if (accepted && scope->bindings->count == scope->bindings->capacity) {
+      accepted = loom_bytecode_reader_check_status(
+          materializer->decoder,
+          iree_arena_grow_array(
+              scope->bindings->arena, scope->bindings->count,
+              scope->bindings->count + 1, sizeof(*scope->bindings->entries),
+              &scope->bindings->capacity, (void**)&scope->bindings->entries));
     }
-    if (iree_status_is_ok(status)) {
+    if (accepted) {
       scope->bindings->entries[scope->bindings->count++] =
           (loom_bytecode_type_binding_t){.type = type};
     }
   }
-  IREE_RETURN_IF_ERROR(status);
+  LOOM_BYTECODE_RETURN_IF_REJECTED(accepted);
   uint64_t root = 0;
-  IREE_RETURN_IF_ERROR(loom_bytecode_type_close_scoped_records(
+  LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_type_close_scoped_records(
       materializer->decoder, &records, scope->bindings->count, &root));
   *out_type_id = scope->bindings->entries[root].type;
-  return iree_ok_status();
+  return true;
 }

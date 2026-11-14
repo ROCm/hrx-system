@@ -88,8 +88,11 @@ static void BM_MaterializeTypeChain(benchmark::State& state) {
     state.ResumeTiming();
 
     loom_type_id_t target_type_id = LOOM_TYPE_ID_INVALID;
-    IREE_CHECK_OK(loom_bytecode_selected_table_materialize_type(
-        &materializer, type_count - 1, &target_type_id));
+    if (!loom_bytecode_selected_table_materialize_type(
+            &materializer, type_count - 1, &target_type_id)) {
+      IREE_CHECK_OK(loom_bytecode_reader_consume_status(&decoder));
+      IREE_CHECK_UNREACHABLE("bytecode benchmark input was rejected");
+    }
     benchmark::DoNotOptimize(target_type_id);
 
     state.PauseTiming();
@@ -154,8 +157,11 @@ static void BM_MaterializeWideFunction(benchmark::State& state) {
     state.ResumeTiming();
 
     loom_type_id_t target_type_id = LOOM_TYPE_ID_INVALID;
-    IREE_CHECK_OK(loom_bytecode_selected_table_materialize_type(
-        &materializer, /*source_type_id=*/1, &target_type_id));
+    if (!loom_bytecode_selected_table_materialize_type(
+            &materializer, /*source_type_id=*/1, &target_type_id)) {
+      IREE_CHECK_OK(loom_bytecode_reader_consume_status(&decoder));
+      IREE_CHECK_UNREACHABLE("bytecode benchmark input was rejected");
+    }
     benchmark::DoNotOptimize(target_type_id);
 
     state.PauseTiming();
@@ -223,8 +229,11 @@ static void BM_MaterializeLocationChain(benchmark::State& state) {
     state.ResumeTiming();
 
     loom_location_id_t target_location_id = LOOM_LOCATION_UNKNOWN;
-    IREE_CHECK_OK(loom_bytecode_selected_table_materialize_location(
-        &materializer, location_count - 1, &target_location_id));
+    if (!loom_bytecode_selected_table_materialize_location(
+            &materializer, location_count - 1, &target_location_id)) {
+      IREE_CHECK_OK(loom_bytecode_reader_consume_status(&decoder));
+      IREE_CHECK_UNREACHABLE("bytecode benchmark input was rejected");
+    }
     benchmark::DoNotOptimize(target_location_id);
 
     state.PauseTiming();

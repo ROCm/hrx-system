@@ -24,7 +24,7 @@ extern "C" {
 // Immutable inputs for one complete module materialization.
 typedef struct loom_bytecode_module_materializer_t {
   // Bounded decoder and shared diagnostic result state.
-  const loom_bytecode_reader_decoder_t* decoder;
+  loom_bytecode_reader_decoder_t* decoder;
   // Complete source bytecode containing retained table spans.
   iree_const_byte_span_t bytecode;
   // Finalized dialect and registry context.
@@ -43,7 +43,7 @@ typedef struct loom_bytecode_module_materializer_t {
 
 // Materializes a standalone module and publishes it only after all tables and
 // bodies have been constructed successfully.
-iree_status_t loom_bytecode_module_materialize(
+bool loom_bytecode_module_materialize(
     const loom_bytecode_module_materializer_t* materializer,
     loom_module_t** out_module);
 

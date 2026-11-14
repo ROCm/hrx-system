@@ -98,17 +98,10 @@ loom_link_bytecode_template_retained_attribute(
   return &symbol->attributes[ordinal_plus_one - 1];
 }
 
-static iree_status_t loom_link_bytecode_template_read_svarint(
-    loom_bytecode_cursor_t* cursor, int64_t* out_value) {
-  uint64_t zigzag = 0;
-  IREE_RETURN_IF_ERROR(loom_uvarint_decode(cursor, &zigzag));
-  *out_value = (int64_t)((zigzag >> 1) ^ -(zigzag & 1));
-  return iree_ok_status();
-}
-
 // Decodes the closed immediate domain used by target facts and conditions.
 // Structural bytecode validation has already established kind, bounds, and
 // descriptor compatibility; this projection owns only persistent storage.
+// Raw reads consume that validation without a second rejection path.
 static iree_status_t loom_link_bytecode_template_decode_immediate(
     loom_link_bytecode_template_contract_reader_t* reader,
     const loom_attr_descriptor_t* descriptor,
@@ -118,15 +111,14 @@ static iree_status_t loom_link_bytecode_template_decode_immediate(
     case LOOM_BYTECODE_ATTR_I64: {
       IREE_ASSERT(descriptor->attr_kind == LOOM_ATTR_I64);
       int64_t value = 0;
-      IREE_RETURN_IF_ERROR(
-          loom_link_bytecode_template_read_svarint(cursor, &value));
+      (void)loom_svarint_decode(cursor, &value);
       *out_attribute = loom_attr_i64(value);
       return iree_ok_status();
     }
     case LOOM_BYTECODE_ATTR_F64: {
       IREE_ASSERT(descriptor->attr_kind == LOOM_ATTR_F64);
       uint64_t bits = 0;
-      IREE_RETURN_IF_ERROR(loom_bytecode_cursor_read_u64_le(cursor, &bits));
+      (void)loom_bytecode_cursor_read_u64_le(cursor, &bits);
       double value = 0.0;
       memcpy(&value, &bits, sizeof(value));
       *out_attribute = loom_attr_f64(value);
@@ -135,7 +127,7 @@ static iree_status_t loom_link_bytecode_template_decode_immediate(
     case LOOM_BYTECODE_ATTR_BOOL: {
       IREE_ASSERT(descriptor->attr_kind == LOOM_ATTR_BOOL);
       uint8_t value = 0;
-      IREE_RETURN_IF_ERROR(loom_bytecode_cursor_read_u8(cursor, &value));
+      (void)loom_bytecode_cursor_read_u8(cursor, &value);
       IREE_ASSERT(value <= 1);
       *out_attribute = loom_attr_bool(value != 0);
       return iree_ok_status();
@@ -143,7 +135,7 @@ static iree_status_t loom_link_bytecode_template_decode_immediate(
     case LOOM_BYTECODE_ATTR_ENUM: {
       IREE_ASSERT(descriptor->attr_kind == LOOM_ATTR_ENUM);
       uint8_t value = 0;
-      IREE_RETURN_IF_ERROR(loom_bytecode_cursor_read_u8(cursor, &value));
+      (void)loom_bytecode_cursor_read_u8(cursor, &value);
       *out_attribute = loom_attr_enum(value);
       return iree_ok_status();
     }
@@ -155,7 +147,7 @@ static iree_status_t loom_link_bytecode_template_decode_immediate(
             "target condition parameters must not carry module-local strings");
       }
       uint64_t source_string_ordinal = 0;
-      IREE_RETURN_IF_ERROR(loom_uvarint_decode(cursor, &source_string_ordinal));
+      (void)loom_uvarint_decode(cursor, &source_string_ordinal);
       IREE_ASSERT(source_string_ordinal < reader->metadata->strings.count);
       *out_attribute =
           loom_attr_string((loom_string_id_t)source_string_ordinal);
@@ -164,7 +156,7 @@ static iree_status_t loom_link_bytecode_template_decode_immediate(
     case LOOM_BYTECODE_ATTR_SIGNED_ENUM_SET: {
       IREE_ASSERT(descriptor->attr_kind == LOOM_ATTR_SIGNED_ENUM_SET);
       uint8_t word_count = 0;
-      IREE_RETURN_IF_ERROR(loom_bytecode_cursor_read_u8(cursor, &word_count));
+      (void)loom_bytecode_cursor_read_u8(cursor, &word_count);
       IREE_ASSERT(word_count <= LOOM_SIGNED_ENUM_SET_MAX_WORD_COUNT);
       uint64_t* words = NULL;
       const iree_host_size_t total_word_count =
@@ -174,8 +166,7 @@ static iree_status_t loom_link_bytecode_template_decode_immediate(
             reader->arena, total_word_count, sizeof(*words), (void**)&words));
       }
       for (iree_host_size_t i = 0; i < total_word_count; ++i) {
-        IREE_RETURN_IF_ERROR(
-            loom_bytecode_cursor_read_u64_le(cursor, &words[i]));
+        (void)loom_bytecode_cursor_read_u64_le(cursor, &words[i]);
       }
       *out_attribute = loom_attr_signed_enum_set(words, word_count);
       return iree_ok_status();
@@ -193,7 +184,7 @@ static iree_status_t loom_link_bytecode_template_decode_condition(
     loom_parameterized_attr_kind_t expected_family_kind,
     loom_bytecode_cursor_t* cursor, loom_attribute_t* out_condition) {
   uint64_t family_name_ordinal = 0;
-  IREE_RETURN_IF_ERROR(loom_uvarint_decode(cursor, &family_name_ordinal));
+  (void)loom_uvarint_decode(cursor, &family_name_ordinal);
   IREE_ASSERT(family_name_ordinal < reader->metadata->strings.count);
   const loom_parameterized_attr_descriptor_t* family =
       loom_context_lookup_parameterized_attr_by_name(
@@ -204,7 +195,7 @@ static iree_status_t loom_link_bytecode_template_decode_condition(
               expected_family_kind == family->kind);
 
   uint64_t present_count = 0;
-  IREE_RETURN_IF_ERROR(loom_uvarint_decode(cursor, &present_count));
+  (void)loom_uvarint_decode(cursor, &present_count);
   IREE_ASSERT(present_count <= family->parameter_count);
   loom_attribute_t* slots = NULL;
   if (family->parameter_count != 0) {
@@ -215,7 +206,7 @@ static iree_status_t loom_link_bytecode_template_decode_condition(
   }
   for (uint64_t i = 0; i < present_count; ++i) {
     uint64_t parameter_name_ordinal = 0;
-    IREE_RETURN_IF_ERROR(loom_uvarint_decode(cursor, &parameter_name_ordinal));
+    (void)loom_uvarint_decode(cursor, &parameter_name_ordinal);
     IREE_ASSERT(parameter_name_ordinal < reader->metadata->strings.count);
     uint8_t parameter_index = LOOM_ATTR_INDEX_NONE;
     const loom_attr_descriptor_t* parameter = loom_attr_descriptor_find_by_name(
@@ -224,7 +215,7 @@ static iree_status_t loom_link_bytecode_template_decode_condition(
         &parameter_index);
     IREE_ASSERT(parameter != NULL);
     uint8_t raw_kind = 0;
-    IREE_RETURN_IF_ERROR(loom_bytecode_cursor_read_u8(cursor, &raw_kind));
+    (void)loom_bytecode_cursor_read_u8(cursor, &raw_kind);
     IREE_ASSERT(raw_kind < LOOM_BYTECODE_ATTR_COUNT);
     IREE_RETURN_IF_ERROR(loom_link_bytecode_template_decode_immediate(
         reader, parameter, (loom_bytecode_attr_kind_t)raw_kind,
@@ -255,7 +246,7 @@ static iree_status_t loom_link_bytecode_template_decode_conditions(
   loom_bytecode_cursor_t cursor;
   loom_link_bytecode_template_attribute_cursor(reader, attribute, &cursor);
   uint64_t condition_count = 0;
-  IREE_RETURN_IF_ERROR(loom_uvarint_decode(&cursor, &condition_count));
+  (void)loom_uvarint_decode(&cursor, &condition_count);
   IREE_ASSERT(condition_count <= UINT16_MAX);
   loom_target_condition_t* conditions = NULL;
   if (condition_count != 0) {
@@ -282,31 +273,31 @@ static iree_status_t loom_link_bytecode_template_decode_conditions(
   return iree_ok_status();
 }
 
-static iree_status_t loom_link_bytecode_template_target_symbol_ordinal(
+static uint32_t loom_link_bytecode_template_target_symbol_ordinal(
     loom_link_bytecode_template_contract_reader_t* reader,
     const loom_bytecode_symbol_metadata_t* symbol,
-    const loom_func_like_vtable_t* function, uint32_t* out_symbol_ordinal) {
-  *out_symbol_ordinal = UINT32_MAX;
+    const loom_func_like_vtable_t* function) {
   const loom_bytecode_symbol_attribute_metadata_t* attribute =
       loom_link_bytecode_template_retained_attribute(
           symbol, symbol->template_target_attribute_ordinal_plus_one);
   if (attribute == NULL) {
-    return iree_ok_status();
+    return UINT32_MAX;
   }
   IREE_ASSERT(attribute->attribute_index == function->target_attr_index);
   IREE_ASSERT(attribute->kind == LOOM_BYTECODE_ATTR_SYMBOL);
   loom_bytecode_cursor_t cursor;
   loom_link_bytecode_template_attribute_cursor(reader, attribute, &cursor);
   uint64_t source_name_ordinal = 0;
-  IREE_RETURN_IF_ERROR(loom_uvarint_decode(&cursor, &source_name_ordinal));
+  (void)loom_uvarint_decode(&cursor, &source_name_ordinal);
   IREE_ASSERT(loom_bytecode_cursor_is_empty(&cursor));
   if (source_name_ordinal == 0) {
-    return iree_ok_status();
+    return UINT32_MAX;
   }
+  uint32_t symbol_ordinal = UINT32_MAX;
   const bool found = loom_bytecode_module_metadata_lookup_symbol_ordinal(
-      reader->metadata, (uint32_t)source_name_ordinal, out_symbol_ordinal);
+      reader->metadata, (uint32_t)source_name_ordinal, &symbol_ordinal);
   IREE_ASSERT(found);
-  return iree_ok_status();
+  return symbol_ordinal;
 }
 
 static iree_string_view_t loom_link_bytecode_template_target_string(
@@ -460,8 +451,9 @@ iree_status_t loom_link_bytecode_template_contract_reader_load(
 
   if (!projection->initialized) {
     *projection = (loom_link_bytecode_template_provider_projection_t){0};
-    IREE_RETURN_IF_ERROR(loom_link_bytecode_template_target_symbol_ordinal(
-        reader, symbol, vtable->func_like, &projection->target_symbol_ordinal));
+    projection->target_symbol_ordinal =
+        loom_link_bytecode_template_target_symbol_ordinal(reader, symbol,
+                                                          vtable->func_like);
     IREE_RETURN_IF_ERROR(loom_link_bytecode_template_decode_conditions(
         reader, symbol, vtable->func_like, &projection->conditions,
         &projection->condition_count));

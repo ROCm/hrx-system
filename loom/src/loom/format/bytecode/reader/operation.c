@@ -28,7 +28,7 @@ typedef struct loom_bytecode_operation_table_t {
   iree_host_size_t count;
 } loom_bytecode_operation_table_t;
 
-static iree_status_t loom_bytecode_operation_table_begin(
+static bool loom_bytecode_operation_table_begin(
     loom_bytecode_operation_validator_t* validator,
     const loom_bytecode_reader_section_t* section,
     loom_bytecode_operation_table_t* out_table) {
@@ -39,40 +39,44 @@ static iree_status_t loom_bytecode_operation_table_begin(
   uint64_t count = 0;
   const uint64_t count_offset =
       loom_bytecode_reader_cursor_absolute_position(&table.cursor);
-  IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
+  LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_reader_read_uvarint(
       validator->decoder, &table.cursor, &count));
   if (count > LOOM_BYTECODE_MAX_OP_COUNT || count > IREE_HOST_SIZE_MAX) {
     return loom_bytecode_reader_emit_count_exceeds(
         validator->decoder, IREE_SV("OPS"), count, LOOM_BYTECODE_MAX_OP_COUNT,
         count_offset);
   }
-  IREE_RETURN_IF_ERROR(loom_bytecode_reader_validate_count_bytes(
+  LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_reader_validate_count_bytes(
       validator->decoder, &table.cursor, IREE_SV("OPS"), count,
       /*minimum_entry_length=*/1, /*minimum_trailing_length=*/0, count_offset));
   if (count > 0) {
-    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        validator->scratch_arena, (iree_host_size_t)count,
-        sizeof(*validator->module_view->ops.values),
-        (void**)&validator->module_view->ops.values));
-    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        validator->scratch_arena, (iree_host_size_t)count,
-        sizeof(*validator->module_view->ops.kinds),
-        (void**)&validator->module_view->ops.kinds));
+    LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_reader_check_status(
+        validator->decoder,
+        iree_arena_allocate_array(
+            validator->scratch_arena, (iree_host_size_t)count,
+            sizeof(*validator->module_view->ops.values),
+            (void**)&validator->module_view->ops.values)));
+    LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_reader_check_status(
+        validator->decoder,
+        iree_arena_allocate_array(validator->scratch_arena,
+                                  (iree_host_size_t)count,
+                                  sizeof(*validator->module_view->ops.kinds),
+                                  (void**)&validator->module_view->ops.kinds)));
   }
   table.count = (iree_host_size_t)count;
   validator->module_view->ops.count = table.count;
   *out_table = table;
-  return iree_ok_status();
+  return true;
 }
 
-static iree_status_t loom_bytecode_operation_decode_entry(
+static bool loom_bytecode_operation_decode_entry(
     loom_bytecode_operation_validator_t* validator,
     loom_bytecode_operation_table_t* table, iree_host_size_t index,
     loom_bytecode_op_metadata_t* out_metadata) {
   const uint64_t name_offset =
       loom_bytecode_reader_cursor_absolute_position(&table->cursor);
   uint64_t name_id = 0;
-  IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
+  LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_reader_read_uvarint(
       validator->decoder, &table->cursor, &name_id));
   if (name_id >= validator->module_view->strings.count) {
     const loom_diagnostic_param_t params[] = {
@@ -102,17 +106,17 @@ static iree_status_t loom_bytecode_operation_decode_entry(
       .vtable = vtable,
       .kind = kind,
   };
-  return iree_ok_status();
+  return true;
 }
 
-static iree_status_t loom_bytecode_operation_table_finish(
+static bool loom_bytecode_operation_table_finish(
     loom_bytecode_operation_validator_t* validator,
     loom_bytecode_operation_table_t* table) {
   return loom_bytecode_reader_expect_empty(validator->decoder, &table->cursor,
                                            IREE_SV("OPS"));
 }
 
-iree_status_t loom_bytecode_operation_table_validate(
+bool loom_bytecode_operation_table_validate(
     loom_bytecode_reader_decoder_t* decoder, loom_context_t* context,
     loom_bytecode_reader_module_view_t* module_view,
     iree_arena_allocator_t* scratch_arena,
@@ -124,17 +128,17 @@ iree_status_t loom_bytecode_operation_table_validate(
       .module_view = module_view,
   };
   loom_bytecode_operation_table_t table;
-  IREE_RETURN_IF_ERROR(
+  LOOM_BYTECODE_RETURN_IF_REJECTED(
       loom_bytecode_operation_table_begin(&validator, section, &table));
   for (iree_host_size_t i = 0; i < table.count; ++i) {
     loom_bytecode_op_metadata_t discarded_metadata;
-    IREE_RETURN_IF_ERROR(loom_bytecode_operation_decode_entry(
+    LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_operation_decode_entry(
         &validator, &table, i, &discarded_metadata));
   }
   return loom_bytecode_operation_table_finish(&validator, &table);
 }
 
-iree_status_t loom_bytecode_operation_table_index(
+bool loom_bytecode_operation_table_index(
     loom_bytecode_reader_decoder_t* decoder, loom_context_t* context,
     loom_bytecode_reader_module_view_t* module_view,
     iree_arena_allocator_t* scratch_arena,
@@ -150,21 +154,23 @@ iree_status_t loom_bytecode_operation_table_index(
       .module_view = module_view,
   };
   loom_bytecode_operation_table_t table;
-  IREE_RETURN_IF_ERROR(
+  LOOM_BYTECODE_RETURN_IF_REJECTED(
       loom_bytecode_operation_table_begin(&validator, section, &table));
 
   loom_bytecode_op_metadata_t* entries = NULL;
   if (table.count > 0) {
-    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        retained_arena, table.count, sizeof(*entries), (void**)&entries));
+    LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_reader_check_status(
+        decoder,
+        iree_arena_allocate_array(retained_arena, table.count, sizeof(*entries),
+                                  (void**)&entries)));
   }
   for (iree_host_size_t i = 0; i < table.count; ++i) {
-    IREE_RETURN_IF_ERROR(loom_bytecode_operation_decode_entry(
+    LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_operation_decode_entry(
         &validator, &table, i, &entries[i]));
   }
-  IREE_RETURN_IF_ERROR(
+  LOOM_BYTECODE_RETURN_IF_REJECTED(
       loom_bytecode_operation_table_finish(&validator, &table));
   *out_entries = entries;
   *out_count = table.count;
-  return iree_ok_status();
+  return true;
 }

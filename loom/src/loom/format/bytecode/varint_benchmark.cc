@@ -107,7 +107,10 @@ static void BM_UvarintDecode_1Byte(benchmark::State& state) {
   for (auto _ : state) {
     loom_bytecode_cursor_t cursor;
     loom_bytecode_cursor_initialize(raw, encoded_length, &cursor);
-    IREE_CHECK_OK(loom_uvarint_decode(&cursor, &decoded));
+    if (loom_uvarint_decode(&cursor, &decoded) != LOOM_VARINT_DECODE_COMPLETE) {
+      state.SkipWithError("failed to decode encoded benchmark input");
+      return;
+    }
     benchmark::DoNotOptimize(decoded);
   }
 }
@@ -122,7 +125,10 @@ static void BM_UvarintDecode_2Byte(benchmark::State& state) {
   for (auto _ : state) {
     loom_bytecode_cursor_t cursor;
     loom_bytecode_cursor_initialize(raw, encoded_length, &cursor);
-    IREE_CHECK_OK(loom_uvarint_decode(&cursor, &decoded));
+    if (loom_uvarint_decode(&cursor, &decoded) != LOOM_VARINT_DECODE_COMPLETE) {
+      state.SkipWithError("failed to decode encoded benchmark input");
+      return;
+    }
     benchmark::DoNotOptimize(decoded);
   }
 }
@@ -137,7 +143,10 @@ static void BM_UvarintDecode_5Byte(benchmark::State& state) {
   for (auto _ : state) {
     loom_bytecode_cursor_t cursor;
     loom_bytecode_cursor_initialize(raw, encoded_length, &cursor);
-    IREE_CHECK_OK(loom_uvarint_decode(&cursor, &decoded));
+    if (loom_uvarint_decode(&cursor, &decoded) != LOOM_VARINT_DECODE_COMPLETE) {
+      state.SkipWithError("failed to decode encoded benchmark input");
+      return;
+    }
     benchmark::DoNotOptimize(decoded);
   }
 }
@@ -152,7 +161,10 @@ static void BM_UvarintDecode_10Byte(benchmark::State& state) {
   for (auto _ : state) {
     loom_bytecode_cursor_t cursor;
     loom_bytecode_cursor_initialize(raw, encoded_length, &cursor);
-    IREE_CHECK_OK(loom_uvarint_decode(&cursor, &decoded));
+    if (loom_uvarint_decode(&cursor, &decoded) != LOOM_VARINT_DECODE_COMPLETE) {
+      state.SkipWithError("failed to decode encoded benchmark input");
+      return;
+    }
     benchmark::DoNotOptimize(decoded);
   }
 }
@@ -206,7 +218,11 @@ static void BM_UvarintDecode_Batch(benchmark::State& state) {
     loom_bytecode_cursor_t cursor;
     loom_bytecode_cursor_initialize(raw, total, &cursor);
     for (int i = 0; i < kBatchSize; ++i) {
-      IREE_CHECK_OK(loom_uvarint_decode(&cursor, &decoded));
+      if (loom_uvarint_decode(&cursor, &decoded) !=
+          LOOM_VARINT_DECODE_COMPLETE) {
+        state.SkipWithError("failed to decode encoded benchmark input");
+        return;
+      }
     }
     benchmark::DoNotOptimize(decoded);
   }
@@ -238,7 +254,10 @@ static void BM_SvarintDecode_1Byte(benchmark::State& state) {
   for (auto _ : state) {
     loom_bytecode_cursor_t cursor;
     loom_bytecode_cursor_initialize(raw, encoded_length, &cursor);
-    IREE_CHECK_OK(loom_svarint_decode(&cursor, &decoded));
+    if (loom_svarint_decode(&cursor, &decoded) != LOOM_VARINT_DECODE_COMPLETE) {
+      state.SkipWithError("failed to decode encoded benchmark input");
+      return;
+    }
     benchmark::DoNotOptimize(decoded);
   }
 }
@@ -264,7 +283,10 @@ static void BM_SvarintDecode_10Byte(benchmark::State& state) {
   for (auto _ : state) {
     loom_bytecode_cursor_t cursor;
     loom_bytecode_cursor_initialize(raw, encoded_length, &cursor);
-    IREE_CHECK_OK(loom_svarint_decode(&cursor, &decoded));
+    if (loom_svarint_decode(&cursor, &decoded) != LOOM_VARINT_DECODE_COMPLETE) {
+      state.SkipWithError("failed to decode encoded benchmark input");
+      return;
+    }
     benchmark::DoNotOptimize(decoded);
   }
 }

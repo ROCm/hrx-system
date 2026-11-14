@@ -22,7 +22,7 @@ extern "C" {
 // Validates the canonical STRINGS section and retains borrowed UTF-8 views in
 // |storage_arena|. Temporary uniqueness-validation storage is reclaimed from
 // |scratch_arena| before returning.
-iree_status_t loom_bytecode_string_table_read(
+bool loom_bytecode_string_table_read(
     loom_bytecode_reader_decoder_t* decoder,
     const loom_bytecode_reader_section_t* section,
     iree_arena_allocator_t* scratch_arena,
@@ -32,7 +32,7 @@ iree_status_t loom_bytecode_string_table_read(
 // Validates the SOURCES section and retains borrowed UTF-8 views in
 // |storage_arena|. The source count is bounded by the runtime source-ID space
 // and source spellings are unique in wire order.
-iree_status_t loom_bytecode_source_table_read(
+bool loom_bytecode_source_table_read(
     loom_bytecode_reader_decoder_t* decoder,
     const loom_bytecode_reader_section_t* section,
     iree_arena_allocator_t* scratch_arena,

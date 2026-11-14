@@ -21,7 +21,7 @@ extern "C" {
 #endif
 
 // Validates one complete OPS section and resolves its dense operation table.
-iree_status_t loom_bytecode_operation_table_validate(
+bool loom_bytecode_operation_table_validate(
     loom_bytecode_reader_decoder_t* decoder, loom_context_t* context,
     loom_bytecode_reader_module_view_t* module_view,
     iree_arena_allocator_t* scratch_arena,
@@ -29,7 +29,7 @@ iree_status_t loom_bytecode_operation_table_validate(
 
 // Validates one complete OPS section, resolves its dense operation table, and
 // retains the registered operation names in wire order.
-iree_status_t loom_bytecode_operation_table_index(
+bool loom_bytecode_operation_table_index(
     loom_bytecode_reader_decoder_t* decoder, loom_context_t* context,
     loom_bytecode_reader_module_view_t* module_view,
     iree_arena_allocator_t* scratch_arena,

@@ -39,7 +39,7 @@ typedef struct loom_bytecode_reference_bindings_t {
 } loom_bytecode_reference_bindings_t;
 
 // Records a type's expected declaration key, rejecting conflicting uses.
-iree_status_t loom_bytecode_reference_binding_expect(
+bool loom_bytecode_reference_binding_expect(
     loom_bytecode_reader_decoder_t* decoder, iree_arena_allocator_t* arena,
     loom_bytecode_reference_bindings_t* bindings,
     loom_string_id_t declaration_name_id, loom_string_id_t namespace_id,
@@ -47,14 +47,14 @@ iree_status_t loom_bytecode_reference_binding_expect(
 
 // Matches a decoded symbol against its pending type expectation. A non-type
 // symbol supplies INVALID key IDs, which cannot satisfy a type binding.
-iree_status_t loom_bytecode_reference_binding_match(
+bool loom_bytecode_reference_binding_match(
     loom_bytecode_reader_decoder_t* decoder,
     loom_bytecode_reference_bindings_t* bindings,
     loom_string_id_t declaration_name_id, loom_string_id_t namespace_id,
     loom_string_id_t name_id);
 
 // Rejects any type declaration name absent from the complete SYMBOLS table.
-iree_status_t loom_bytecode_reference_bindings_finish(
+bool loom_bytecode_reference_bindings_finish(
     loom_bytecode_reader_decoder_t* decoder,
     const loom_bytecode_reference_bindings_t* bindings);
 

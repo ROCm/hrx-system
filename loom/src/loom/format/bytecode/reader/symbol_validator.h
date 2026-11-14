@@ -21,8 +21,8 @@ extern "C" {
 
 // Transactional state for validating one SYMBOLS table.
 typedef struct loom_bytecode_symbol_validator_t {
-  // Bounded decoder copied from the owning public read.
-  loom_bytecode_reader_decoder_t decoder;
+  // Borrowed decoder owned by the public read.
+  loom_bytecode_reader_decoder_t* decoder;
   // Finalized dialect and attribute registry context.
   loom_context_t* context;
   // Resettable storage owning validated symbol facts.
@@ -35,20 +35,20 @@ typedef struct loom_bytecode_symbol_validator_t {
 
 // Initializes a transactional SYMBOLS validator over |module_view|.
 void loom_bytecode_symbol_validator_initialize(
-    const loom_bytecode_reader_decoder_t* decoder, loom_context_t* context,
+    loom_bytecode_reader_decoder_t* decoder, loom_context_t* context,
     iree_arena_allocator_t* arena,
     loom_bytecode_reader_module_view_t* module_view,
     loom_bytecode_symbol_validator_t* out_validator);
 
 // Validates the complete SYMBOLS table and publishes its immutable facts.
-iree_status_t loom_bytecode_symbols_validate(
+bool loom_bytecode_symbols_validate(
     loom_bytecode_symbol_validator_t* validator,
     const loom_bytecode_reader_section_t* symbols_section,
     const loom_bytecode_reader_section_t* ir_section);
 
 // Validates the complete SYMBOLS table and writes its retained index directly
 // into |retained_arena|.
-iree_status_t loom_bytecode_symbols_index(
+bool loom_bytecode_symbols_index(
     loom_bytecode_symbol_validator_t* validator,
     const loom_bytecode_reader_section_t* symbols_section,
     const loom_bytecode_reader_section_t* ir_section,

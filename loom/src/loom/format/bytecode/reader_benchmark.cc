@@ -499,8 +499,12 @@ static SelectedMaterializationStats InspectSelectedMaterialization(
       .host_allocator = iree_allocator_system(),
   };
   loom_module_t* output_module = nullptr;
-  IgnoreStatusOrAbort(loom_bytecode_selected_module_materialize(
-      &materializer, ordinals.data(), ordinals.size(), &output_module));
+  const bool accepted = loom_bytecode_selected_module_materialize(
+      &materializer, ordinals.data(), ordinals.size(), &output_module);
+  IgnoreStatusOrAbort(loom_bytecode_reader_consume_status(&decoder));
+  if (!accepted) {
+    abort();
+  }
   if (error_count != 0 || output_module == nullptr) {
     abort();
   }

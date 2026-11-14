@@ -33,14 +33,14 @@ typedef struct loom_bytecode_source_trivia_t {
 // Validates one source-trivia record and advances |cursor| past it.
 //
 // This operation performs no allocation and retains no decoded state.
-iree_status_t loom_bytecode_source_trivia_validate(
+bool loom_bytecode_source_trivia_validate(
     loom_bytecode_reader_decoder_t* decoder,
     loom_bytecode_reader_cursor_t* cursor);
 
 // Materializes one source-trivia record and advances |cursor| past it.
 //
 // The output is published only after the complete record has been decoded.
-iree_status_t loom_bytecode_source_trivia_materialize(
+bool loom_bytecode_source_trivia_materialize(
     loom_bytecode_reader_decoder_t* decoder,
     loom_bytecode_reader_cursor_t* cursor, iree_arena_allocator_t* arena,
     loom_bytecode_source_trivia_t* out_source_trivia);

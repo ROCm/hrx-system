@@ -226,6 +226,7 @@ loom_cc_test(
     srcs = [
         "function_projection_reader_test.cc",
         "mixed_tables_test.cc",
+        "reader_failure_test.cc",
         "reader_test.cc",
     ],
     deps = [
@@ -242,6 +243,7 @@ loom_cc_test(
         "//loom/src/loom/ops/kernel",
         "//loom/src/loom/ops/template",
         "//loom/src/loom/ops/test",
+        "//loom/src/loom/testing:gen",
         "//loom/src/loom/verify",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/io:stream",

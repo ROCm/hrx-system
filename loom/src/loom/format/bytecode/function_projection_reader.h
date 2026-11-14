@@ -43,6 +43,9 @@ typedef struct loom_bytecode_function_projection_reader_options_t {
 
 // Allocates a reader in |arena| that projects selected source identities into
 // |output_module|. The arena must retain the reader until it is deinitialized.
+// |metadata| and |bytecode| must come from successful index admission using
+// the same finalized context as |output_module|. Indexed headers and shared
+// tables are validated; root-region payloads are admitted when materialized.
 //
 // The reader borrows every input and owns only transient projections. Source
 // symbols must be bound explicitly before a decoded header or root region

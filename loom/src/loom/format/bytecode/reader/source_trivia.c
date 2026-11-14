@@ -11,14 +11,14 @@
 
 #define LOOM_BYTECODE_MAX_SOURCE_COMMENT_LENGTH (UINT64_C(1) << 24)
 
-static iree_status_t loom_bytecode_source_trivia_read_header(
+static bool loom_bytecode_source_trivia_read_header(
     loom_bytecode_reader_decoder_t* decoder,
     loom_bytecode_reader_cursor_t* cursor, bool* out_leading_blank_line,
     uint16_t* out_comment_count) {
   const uint64_t source_trivia_offset =
       loom_bytecode_reader_cursor_absolute_position(cursor);
   uint64_t source_trivia = 0;
-  IREE_RETURN_IF_ERROR(
+  LOOM_BYTECODE_RETURN_IF_REJECTED(
       loom_bytecode_reader_read_uvarint(decoder, cursor, &source_trivia));
   const uint64_t comment_count =
       source_trivia >> LOOM_BYTECODE_SOURCE_TRIVIA_COMMENT_COUNT_SHIFT;
@@ -31,10 +31,10 @@ static iree_status_t loom_bytecode_source_trivia_read_header(
   *out_leading_blank_line =
       (source_trivia & LOOM_BYTECODE_SOURCE_TRIVIA_LEADING_BLANK_LINE) != 0;
   *out_comment_count = (uint16_t)comment_count;
-  return iree_ok_status();
+  return true;
 }
 
-static IREE_ATTRIBUTE_ALWAYS_INLINE iree_status_t
+static IREE_ATTRIBUTE_ALWAYS_INLINE bool
 loom_bytecode_source_trivia_read_comment(
     loom_bytecode_reader_decoder_t* decoder,
     loom_bytecode_reader_cursor_t* cursor, uint16_t comment_index,
@@ -42,7 +42,7 @@ loom_bytecode_source_trivia_read_comment(
   const uint64_t length_offset =
       loom_bytecode_reader_cursor_absolute_position(cursor);
   uint64_t length = 0;
-  IREE_RETURN_IF_ERROR(
+  LOOM_BYTECODE_RETURN_IF_REJECTED(
       loom_bytecode_reader_read_uvarint(decoder, cursor, &length));
   if (length > LOOM_BYTECODE_MAX_SOURCE_COMMENT_LENGTH) {
     return loom_bytecode_reader_emit_invalid_field(
@@ -51,7 +51,7 @@ loom_bytecode_source_trivia_read_comment(
         IREE_SV("comment_length_exceeds_maximum"));
   }
   iree_const_byte_span_t span = iree_const_byte_span_empty();
-  IREE_RETURN_IF_ERROR(
+  LOOM_BYTECODE_RETURN_IF_REJECTED(
       loom_bytecode_reader_read_span(decoder, cursor, length, &span));
   *out_comment =
       iree_make_string_view((const char*)span.data, span.data_length);
@@ -65,25 +65,25 @@ loom_bytecode_source_trivia_read_comment(
   if (iree_string_view_starts_with(*out_comment, IREE_SV(" "))) {
     *out_comment = iree_string_view_remove_prefix(*out_comment, 1);
   }
-  return iree_ok_status();
+  return true;
 }
 
-iree_status_t loom_bytecode_source_trivia_validate(
+bool loom_bytecode_source_trivia_validate(
     loom_bytecode_reader_decoder_t* decoder,
     loom_bytecode_reader_cursor_t* cursor) {
   bool leading_blank_line = false;
   uint16_t comment_count = 0;
-  IREE_RETURN_IF_ERROR(loom_bytecode_source_trivia_read_header(
+  LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_source_trivia_read_header(
       decoder, cursor, &leading_blank_line, &comment_count));
   for (uint16_t i = 0; i < comment_count; ++i) {
     iree_string_view_t comment = iree_string_view_empty();
-    IREE_RETURN_IF_ERROR(
+    LOOM_BYTECODE_RETURN_IF_REJECTED(
         loom_bytecode_source_trivia_read_comment(decoder, cursor, i, &comment));
   }
-  return iree_ok_status();
+  return true;
 }
 
-iree_status_t loom_bytecode_source_trivia_materialize(
+bool loom_bytecode_source_trivia_materialize(
     loom_bytecode_reader_decoder_t* decoder,
     loom_bytecode_reader_cursor_t* cursor, iree_arena_allocator_t* arena,
     loom_bytecode_source_trivia_t* out_source_trivia) {
@@ -91,20 +91,22 @@ iree_status_t loom_bytecode_source_trivia_materialize(
       loom_bytecode_reader_cursor_absolute_position(cursor);
   bool leading_blank_line = false;
   uint16_t comment_count = 0;
-  IREE_RETURN_IF_ERROR(loom_bytecode_source_trivia_read_header(
+  LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_source_trivia_read_header(
       decoder, cursor, &leading_blank_line, &comment_count));
 
   iree_string_view_t* comments = NULL;
   if (comment_count > 0) {
-    IREE_RETURN_IF_ERROR(loom_bytecode_reader_validate_count_bytes(
+    LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_reader_validate_count_bytes(
         decoder, cursor, IREE_SV("comment_list"), comment_count,
         /*minimum_entry_length=*/1, /*minimum_trailing_length=*/0,
         source_trivia_offset));
-    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        arena, comment_count, sizeof(*comments), (void**)&comments));
+    LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_reader_check_status(
+        decoder,
+        iree_arena_allocate_array(arena, comment_count, sizeof(*comments),
+                                  (void**)&comments)));
   }
   for (uint16_t i = 0; i < comment_count; ++i) {
-    IREE_RETURN_IF_ERROR(loom_bytecode_source_trivia_read_comment(
+    LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_source_trivia_read_comment(
         decoder, cursor, i, &comments[i]));
   }
 
@@ -113,5 +115,5 @@ iree_status_t loom_bytecode_source_trivia_materialize(
       .comment_count = comment_count,
       .leading_blank_line = leading_blank_line,
   };
-  return iree_ok_status();
+  return true;
 }

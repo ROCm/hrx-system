@@ -53,8 +53,9 @@ extern "C" {
 //===----------------------------------------------------------------------===//
 
 // Bounded read cursor over a contiguous byte range. All decode operations
-// read through the cursor and cannot exceed its bounds. The cursor advances
-// on successful reads and remains unchanged on failure.
+// read through the cursor and cannot exceed its bounds. Reads return true
+// when complete, advancing the cursor; false leaves the cursor and output
+// unchanged. Varint reads additionally distinguish truncated and invalid data.
 //
 // Initialize from a byte span:
 //   loom_bytecode_cursor_t cursor;
@@ -101,59 +102,45 @@ static inline bool loom_bytecode_cursor_is_empty(
 }
 
 // Reads a single byte from the cursor, advancing the position.
-static inline iree_status_t loom_bytecode_cursor_read_u8(
-    loom_bytecode_cursor_t* cursor, uint8_t* out_value) {
+static inline bool loom_bytecode_cursor_read_u8(loom_bytecode_cursor_t* cursor,
+                                                uint8_t* out_value) {
   if (IREE_UNLIKELY(!loom_bytecode_cursor_has_bytes(cursor, 1))) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "unexpected end of bytecode data at offset %" PRIhsz, cursor->position);
+    return false;
   }
   *out_value = cursor->data[cursor->position++];
-  return iree_ok_status();
+  return true;
 }
 
 // Reads a little-endian uint16 from the cursor, advancing the position.
-static inline iree_status_t loom_bytecode_cursor_read_u16_le(
+static inline bool loom_bytecode_cursor_read_u16_le(
     loom_bytecode_cursor_t* cursor, uint16_t* out_value) {
   if (IREE_UNLIKELY(!loom_bytecode_cursor_has_bytes(cursor, 2))) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "need 2 bytes for u16 at offset %" PRIhsz
-                            " but only %" PRIhsz " remain",
-                            cursor->position,
-                            loom_bytecode_cursor_remaining(cursor));
+    return false;
   }
   const uint8_t* p = cursor->data + cursor->position;
   *out_value = (uint16_t)p[0] | ((uint16_t)p[1] << 8);
   cursor->position += 2;
-  return iree_ok_status();
+  return true;
 }
 
 // Reads a little-endian uint32 from the cursor, advancing the position.
-static inline iree_status_t loom_bytecode_cursor_read_u32_le(
+static inline bool loom_bytecode_cursor_read_u32_le(
     loom_bytecode_cursor_t* cursor, uint32_t* out_value) {
   if (IREE_UNLIKELY(!loom_bytecode_cursor_has_bytes(cursor, 4))) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "need 4 bytes for u32 at offset %" PRIhsz
-                            " but only %" PRIhsz " remain",
-                            cursor->position,
-                            loom_bytecode_cursor_remaining(cursor));
+    return false;
   }
   const uint8_t* p = cursor->data + cursor->position;
   *out_value = (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) |
                ((uint32_t)p[3] << 24);
   cursor->position += 4;
-  return iree_ok_status();
+  return true;
 }
 
 // Reads a little-endian uint64 from the cursor, advancing the position.
-static inline iree_status_t loom_bytecode_cursor_read_u64_le(
+static inline bool loom_bytecode_cursor_read_u64_le(
     loom_bytecode_cursor_t* cursor, uint64_t* out_value) {
   if (IREE_UNLIKELY(!loom_bytecode_cursor_has_bytes(cursor, 8))) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "need 8 bytes for u64 at offset %" PRIhsz
-                            " but only %" PRIhsz " remain",
-                            cursor->position,
-                            loom_bytecode_cursor_remaining(cursor));
+    return false;
   }
   const uint8_t* p = cursor->data + cursor->position;
   *out_value = (uint64_t)p[0] | ((uint64_t)p[1] << 8) | ((uint64_t)p[2] << 16) |
@@ -161,57 +148,44 @@ static inline iree_status_t loom_bytecode_cursor_read_u64_le(
                ((uint64_t)p[5] << 40) | ((uint64_t)p[6] << 48) |
                ((uint64_t)p[7] << 56);
   cursor->position += 8;
-  return iree_ok_status();
+  return true;
 }
 
 // Reads |byte_count| raw bytes from the cursor into |out_data|.
 // |out_data| must have room for |byte_count| bytes.
-static inline iree_status_t loom_bytecode_cursor_read_bytes(
+static inline bool loom_bytecode_cursor_read_bytes(
     loom_bytecode_cursor_t* cursor, iree_host_size_t byte_count,
     uint8_t* out_data) {
   if (IREE_UNLIKELY(!loom_bytecode_cursor_has_bytes(cursor, byte_count))) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "need %" PRIhsz " bytes at offset %" PRIhsz
-                            " but only %" PRIhsz " remain",
-                            byte_count, cursor->position,
-                            loom_bytecode_cursor_remaining(cursor));
+    return false;
   }
   memcpy(out_data, cursor->data + cursor->position, byte_count);
   cursor->position += byte_count;
-  return iree_ok_status();
+  return true;
 }
 
-// Returns a const pointer to |byte_count| bytes at the current position
-// and advances the cursor. The returned pointer is valid for the lifetime
-// of the underlying data. No copy is made.
-static inline iree_status_t loom_bytecode_cursor_read_span(
+// Borrows |byte_count| bytes at the current position into |out_span| and
+// advances the cursor. The span is valid for the lifetime of the input.
+static inline bool loom_bytecode_cursor_read_span(
     loom_bytecode_cursor_t* cursor, iree_host_size_t byte_count,
     iree_const_byte_span_t* out_span) {
   if (IREE_UNLIKELY(!loom_bytecode_cursor_has_bytes(cursor, byte_count))) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "need %" PRIhsz " bytes at offset %" PRIhsz
-                            " but only %" PRIhsz " remain",
-                            byte_count, cursor->position,
-                            loom_bytecode_cursor_remaining(cursor));
+    return false;
   }
   out_span->data = cursor->data + cursor->position;
   out_span->data_length = byte_count;
   cursor->position += byte_count;
-  return iree_ok_status();
+  return true;
 }
 
 // Advances the cursor position by |byte_count| without reading.
-static inline iree_status_t loom_bytecode_cursor_skip(
-    loom_bytecode_cursor_t* cursor, iree_host_size_t byte_count) {
+static inline bool loom_bytecode_cursor_skip(loom_bytecode_cursor_t* cursor,
+                                             iree_host_size_t byte_count) {
   if (IREE_UNLIKELY(!loom_bytecode_cursor_has_bytes(cursor, byte_count))) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "cannot skip %" PRIhsz " bytes at offset %" PRIhsz
-                            " with only %" PRIhsz " remaining",
-                            byte_count, cursor->position,
-                            loom_bytecode_cursor_remaining(cursor));
+    return false;
   }
   cursor->position += byte_count;
-  return iree_ok_status();
+  return true;
 }
 
 //===----------------------------------------------------------------------===//
@@ -278,23 +252,24 @@ static inline iree_status_t loom_svarint_encode(int64_t value,
 // Varint decoding (read path)
 //===----------------------------------------------------------------------===//
 
-// Decodes an unsigned LEB128 varint from |cursor|.
-// Advances the cursor past the varint on success. On failure, the cursor
-// position is unchanged.
-//
-// Returns IREE_STATUS_OUT_OF_RANGE if:
-//   - The cursor has insufficient data (truncated varint).
-// Returns IREE_STATUS_INVALID_ARGUMENT if:
-//   - The varint uses a non-canonical overlong representation.
-//   - The varint overflows uint64 (>10 bytes or 10th byte > 1).
-iree_status_t loom_uvarint_decode(loom_bytecode_cursor_t* cursor,
-                                  uint64_t* out_value);
+// Outcome of decoding one canonical LEB128 value. These are wire-format
+// outcomes, independent of diagnostic delivery and infrastructure failures.
+typedef enum loom_varint_decode_result_e {
+  LOOM_VARINT_DECODE_COMPLETE = 0,
+  LOOM_VARINT_DECODE_TRUNCATED,
+  LOOM_VARINT_DECODE_INVALID,
+} loom_varint_decode_result_t;
 
-// Decodes a signed zigzag + LEB128 varint from |cursor|.
-// Advances the cursor past the varint on success. On failure, the cursor
-// position is unchanged.
-iree_status_t loom_svarint_decode(loom_bytecode_cursor_t* cursor,
-                                  int64_t* out_value);
+// Decodes an unsigned LEB128 varint from |cursor|. Advances the cursor and
+// writes |out_value| only on COMPLETE. TRUNCATED means more bytes are needed;
+// INVALID means a non-canonical representation or uint64 overflow.
+loom_varint_decode_result_t loom_uvarint_decode(loom_bytecode_cursor_t* cursor,
+                                                uint64_t* out_value);
+
+// Decodes a signed zigzag + LEB128 varint with the same transactional cursor
+// and output behavior as loom_uvarint_decode.
+loom_varint_decode_result_t loom_svarint_decode(loom_bytecode_cursor_t* cursor,
+                                                int64_t* out_value);
 
 #ifdef __cplusplus
 }

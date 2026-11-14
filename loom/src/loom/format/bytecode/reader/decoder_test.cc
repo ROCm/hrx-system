@@ -49,6 +49,10 @@ class BytecodeDecoderTest : public ::testing::Test {
         IREE_SV("decoder_test.loombc"), &error_count_, &decoder_);
   }
 
+  void TearDown() override {
+    IREE_EXPECT_OK(loom_bytecode_reader_consume_status(&decoder_));
+  }
+
   loom_bytecode_reader_decoder_t decoder_ = {};
   uint32_t error_count_ = 0;
   CapturedDiagnostic captured_ = {};
@@ -70,19 +74,16 @@ TEST_F(BytecodeDecoderTest, ReadsCanonicalScalarsAndVarints) {
   uint64_t unsigned_varint = 0;
   int64_t signed_varint = 0;
   iree_const_byte_span_t tail = iree_const_byte_span_empty();
-  IREE_ASSERT_OK(loom_bytecode_reader_read_u8(&decoder_, &cursor, &value8));
-  IREE_ASSERT_OK(
-      loom_bytecode_reader_read_u16_le(&decoder_, &cursor, &value16));
-  IREE_ASSERT_OK(
-      loom_bytecode_reader_read_u32_le(&decoder_, &cursor, &value32));
-  IREE_ASSERT_OK(
-      loom_bytecode_reader_read_u64_le(&decoder_, &cursor, &value64));
-  IREE_ASSERT_OK(
+  ASSERT_TRUE(loom_bytecode_reader_read_u8(&decoder_, &cursor, &value8));
+  ASSERT_TRUE(loom_bytecode_reader_read_u16_le(&decoder_, &cursor, &value16));
+  ASSERT_TRUE(loom_bytecode_reader_read_u32_le(&decoder_, &cursor, &value32));
+  ASSERT_TRUE(loom_bytecode_reader_read_u64_le(&decoder_, &cursor, &value64));
+  ASSERT_TRUE(
       loom_bytecode_reader_read_uvarint(&decoder_, &cursor, &unsigned_varint));
-  IREE_ASSERT_OK(
+  ASSERT_TRUE(
       loom_bytecode_reader_read_svarint(&decoder_, &cursor, &signed_varint));
-  IREE_ASSERT_OK(loom_bytecode_reader_read_span(&decoder_, &cursor, 2, &tail));
-  IREE_ASSERT_OK(
+  ASSERT_TRUE(loom_bytecode_reader_read_span(&decoder_, &cursor, 2, &tail));
+  ASSERT_TRUE(
       loom_bytecode_reader_expect_empty(&decoder_, &cursor, IREE_SV("TEST")));
 
   EXPECT_EQ(value8, 0xABu);
@@ -104,10 +105,8 @@ TEST_F(BytecodeDecoderTest, TruncatedReadPreservesCursorAndAbsoluteOffset) {
                                          IREE_SV("TEST"), &cursor);
 
   uint16_t value = 0xCAFE;
-  iree_status_t status =
-      loom_bytecode_reader_read_u16_le(&decoder_, &cursor, &value);
-  EXPECT_EQ(status, iree_status_from_code(IREE_STATUS_DEFERRED));
-  iree_status_ignore(status);
+  bool accepted = loom_bytecode_reader_read_u16_le(&decoder_, &cursor, &value);
+  EXPECT_FALSE(accepted);
 
   EXPECT_EQ(cursor.cursor.position, 0u);
   EXPECT_EQ(value, 0xCAFEu);
@@ -126,8 +125,7 @@ TEST_F(BytecodeDecoderTest, InvalidVarintPreservesCursorAndReportsStart) {
                                          IREE_SV("TEST"), &cursor);
 
   uint64_t value = 0;
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_DEFERRED, loom_bytecode_reader_read_uvarint(
-                                                  &decoder_, &cursor, &value));
+  EXPECT_FALSE(loom_bytecode_reader_read_uvarint(&decoder_, &cursor, &value));
 
   EXPECT_EQ(cursor.cursor.position, 0u);
   EXPECT_EQ(error_count_, 1u);
@@ -143,10 +141,9 @@ TEST_F(BytecodeDecoderTest, TrailingBytesReportCurrentAbsoluteOffset) {
   loom_bytecode_reader_cursor_initialize(data, sizeof(data), 12288,
                                          IREE_SV("TEST"), &cursor);
   uint8_t value = 0;
-  IREE_ASSERT_OK(loom_bytecode_reader_read_u8(&decoder_, &cursor, &value));
+  ASSERT_TRUE(loom_bytecode_reader_read_u8(&decoder_, &cursor, &value));
 
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_DEFERRED,
+  EXPECT_FALSE(
       loom_bytecode_reader_expect_empty(&decoder_, &cursor, IREE_SV("table")));
 
   EXPECT_EQ(error_count_, 1u);
@@ -158,10 +155,8 @@ TEST_F(BytecodeDecoderTest, TrailingBytesReportCurrentAbsoluteOffset) {
 }
 
 TEST_F(BytecodeDecoderTest, RangeValidationRejectsOverflow) {
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_DEFERRED,
-      loom_bytecode_reader_validate_range(&decoder_, IREE_SV("body"),
-                                          UINT64_MAX - 3, 8, UINT64_MAX));
+  EXPECT_FALSE(loom_bytecode_reader_validate_range(
+      &decoder_, IREE_SV("body"), UINT64_MAX - 3, 8, UINT64_MAX));
 
   EXPECT_EQ(error_count_, 1u);
   ASSERT_NE(captured_.error, nullptr);
@@ -175,7 +170,7 @@ TEST_F(BytecodeDecoderTest, CountBytesAcceptExactFitWithTrailingBytes) {
   loom_bytecode_reader_cursor_initialize(data, sizeof(data), 16384,
                                          IREE_SV("TEST"), &cursor);
 
-  IREE_EXPECT_OK(loom_bytecode_reader_validate_count_bytes(
+  EXPECT_TRUE(loom_bytecode_reader_validate_count_bytes(
       &decoder_, &cursor, IREE_SV("entries"), /*count=*/3,
       /*minimum_entry_length=*/2, /*minimum_trailing_length=*/1,
       /*count_offset=*/123));
@@ -190,12 +185,10 @@ TEST_F(BytecodeDecoderTest, CountBytesRejectMissingEntriesAtCount) {
   loom_bytecode_reader_cursor_initialize(data, sizeof(data), 16384,
                                          IREE_SV("TEST"), &cursor);
 
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_DEFERRED,
-      loom_bytecode_reader_validate_count_bytes(
-          &decoder_, &cursor, IREE_SV("entries"), /*count=*/3,
-          /*minimum_entry_length=*/2, /*minimum_trailing_length=*/1,
-          /*count_offset=*/123));
+  EXPECT_FALSE(loom_bytecode_reader_validate_count_bytes(
+      &decoder_, &cursor, IREE_SV("entries"), /*count=*/3,
+      /*minimum_entry_length=*/2, /*minimum_trailing_length=*/1,
+      /*count_offset=*/123));
 
   EXPECT_EQ(error_count_, 1u);
   ASSERT_NE(captured_.error, nullptr);
@@ -210,12 +203,10 @@ TEST_F(BytecodeDecoderTest, CountBytesRejectMissingTrailingBytes) {
   loom_bytecode_reader_cursor_initialize(data, sizeof(data), 16384,
                                          IREE_SV("TEST"), &cursor);
 
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_DEFERRED,
-      loom_bytecode_reader_validate_count_bytes(
-          &decoder_, &cursor, IREE_SV("entries"), /*count=*/0,
-          /*minimum_entry_length=*/1, /*minimum_trailing_length=*/3,
-          /*count_offset=*/123));
+  EXPECT_FALSE(loom_bytecode_reader_validate_count_bytes(
+      &decoder_, &cursor, IREE_SV("entries"), /*count=*/0,
+      /*minimum_entry_length=*/1, /*minimum_trailing_length=*/3,
+      /*count_offset=*/123));
 
   EXPECT_EQ(error_count_, 1u);
   ASSERT_NE(captured_.error, nullptr);
@@ -230,12 +221,10 @@ TEST_F(BytecodeDecoderTest, CountBytesRejectWithoutProductOverflow) {
   loom_bytecode_reader_cursor_initialize(data, sizeof(data), 16384,
                                          IREE_SV("TEST"), &cursor);
 
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_DEFERRED,
-      loom_bytecode_reader_validate_count_bytes(
-          &decoder_, &cursor, IREE_SV("entries"), UINT64_MAX,
-          /*minimum_entry_length=*/2, /*minimum_trailing_length=*/0,
-          /*count_offset=*/123));
+  EXPECT_FALSE(loom_bytecode_reader_validate_count_bytes(
+      &decoder_, &cursor, IREE_SV("entries"), UINT64_MAX,
+      /*minimum_entry_length=*/2, /*minimum_trailing_length=*/0,
+      /*count_offset=*/123));
 
   EXPECT_EQ(error_count_, 1u);
   ASSERT_NE(captured_.error, nullptr);
@@ -253,13 +242,14 @@ TEST_F(BytecodeDecoderTest, DiagnosticSinkFailurePropagates) {
                                          &cursor);
 
   uint16_t value = 0;
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_DATA_LOSS, loom_bytecode_reader_read_u16_le(
-                                                   &decoder_, &cursor, &value));
+  EXPECT_FALSE(loom_bytecode_reader_read_u16_le(&decoder_, &cursor, &value));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_DATA_LOSS,
+                        loom_bytecode_reader_consume_status(&decoder_));
 
   EXPECT_EQ(error_count_, 1u);
 }
 
-TEST_F(BytecodeDecoderTest, DiagnosticSinkCannotReturnReservedDeferred) {
+TEST_F(BytecodeDecoderTest, DiagnosticSinkDeferredStatusIsPreserved) {
   loom_bytecode_reader_decoder_initialize(
       loom_diagnostic_sink_t{DeferDiagnostic, nullptr},
       IREE_SV("decoder_test.loombc"), &error_count_, &decoder_);
@@ -269,9 +259,9 @@ TEST_F(BytecodeDecoderTest, DiagnosticSinkCannotReturnReservedDeferred) {
                                          &cursor);
 
   uint16_t value = 0;
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_FAILED_PRECONDITION,
-      loom_bytecode_reader_read_u16_le(&decoder_, &cursor, &value));
+  EXPECT_FALSE(loom_bytecode_reader_read_u16_le(&decoder_, &cursor, &value));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_DEFERRED,
+                        loom_bytecode_reader_consume_status(&decoder_));
 
   EXPECT_EQ(error_count_, 1u);
 }

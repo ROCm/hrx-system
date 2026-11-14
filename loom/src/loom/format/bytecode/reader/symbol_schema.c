@@ -8,7 +8,7 @@
 
 #include "loom/error/error_catalog.h"
 
-iree_status_t loom_bytecode_symbol_validate_string_ref(
+bool loom_bytecode_symbol_validate_string_ref(
     loom_bytecode_reader_decoder_t* decoder,
     const loom_bytecode_reader_module_view_t* module_view, uint64_t string_id,
     iree_string_view_t field_name, uint64_t offset,
@@ -24,10 +24,10 @@ iree_status_t loom_bytecode_symbol_validate_string_ref(
                                            offset, 0);
   }
   *out_string = module_view->strings.values[string_id];
-  return iree_ok_status();
+  return true;
 }
 
-iree_status_t loom_bytecode_symbol_validate_type_ref(
+bool loom_bytecode_symbol_validate_type_ref(
     loom_bytecode_reader_decoder_t* decoder,
     const loom_bytecode_reader_module_view_t* module_view, uint64_t type_id,
     uint64_t offset) {
@@ -36,10 +36,10 @@ iree_status_t loom_bytecode_symbol_validate_type_ref(
     return loom_bytecode_reader_emit_table_ref(
         decoder, IREE_SV("TYPES"), type_id, module_view->types.count, offset);
   }
-  return iree_ok_status();
+  return true;
 }
 
-iree_status_t loom_bytecode_symbol_resolve_op_ref(
+bool loom_bytecode_symbol_resolve_op_ref(
     loom_bytecode_reader_decoder_t* decoder,
     const loom_bytecode_reader_module_view_t* module_view,
     uint64_t op_table_index_plus1, uint64_t offset,
@@ -51,15 +51,15 @@ iree_status_t loom_bytecode_symbol_resolve_op_ref(
                                                module_view->ops.count, offset);
   }
   *out_vtable = module_view->ops.values[op_table_index_plus1 - 1];
-  return iree_ok_status();
+  return true;
 }
 
-iree_status_t loom_bytecode_symbol_validate_func_enum(
+bool loom_bytecode_symbol_validate_func_enum(
     loom_bytecode_reader_decoder_t* decoder, uint64_t symbol_index,
     const loom_op_vtable_t* vtable, uint8_t attr_index,
     iree_string_view_t field_name, uint8_t value, uint64_t offset) {
   if (value == 0) {
-    return iree_ok_status();
+    return true;
   }
   if (!vtable || attr_index == LOOM_ATTR_INDEX_NONE ||
       attr_index >= vtable->attribute_count || !vtable->attr_descriptors) {
@@ -82,7 +82,7 @@ iree_status_t loom_bytecode_symbol_validate_func_enum(
         decoder, field_name, value,
         loom_attr_descriptor_enum_case_span(descriptor), offset);
   }
-  return iree_ok_status();
+  return true;
 }
 
 uint8_t loom_bytecode_symbol_find_op_attr_index_by_name(
@@ -151,7 +151,7 @@ uint8_t loom_bytecode_symbol_find_identity_attr_index(
   return LOOM_ATTR_INDEX_NONE;
 }
 
-iree_status_t loom_bytecode_symbol_validate_global_vtable(
+bool loom_bytecode_symbol_validate_global_vtable(
     loom_bytecode_reader_decoder_t* decoder, uint64_t symbol_index,
     const loom_op_vtable_t* vtable, uint64_t op_ref_offset) {
   if (!iree_all_bits_set(vtable->traits, LOOM_TRAIT_SYMBOL_DEFINE) ||
@@ -180,10 +180,10 @@ iree_status_t loom_bytecode_symbol_validate_global_vtable(
         IREE_SV("def_op_table_index_plus1"), op_ref_offset,
         IREE_SV("global_symbol_defining_op_must_declare_a_symbol_attribute"));
   }
-  return iree_ok_status();
+  return true;
 }
 
-iree_status_t loom_bytecode_symbol_validate_record_vtable(
+bool loom_bytecode_symbol_validate_record_vtable(
     loom_bytecode_reader_decoder_t* decoder, uint64_t symbol_index,
     const loom_op_vtable_t* vtable, uint64_t op_ref_offset) {
   if (!iree_all_bits_set(vtable->traits, LOOM_TRAIT_SYMBOL_DEFINE) ||
@@ -220,5 +220,5 @@ iree_status_t loom_bytecode_symbol_validate_record_vtable(
         IREE_SV("def_op_table_index_plus1"), op_ref_offset,
         IREE_SV("record_symbol_defining_op_must_declare_a_symbol_attribute"));
   }
-  return iree_ok_status();
+  return true;
 }

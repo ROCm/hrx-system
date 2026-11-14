@@ -98,8 +98,11 @@ iree_status_t loom_bytecode_function_projection_reader_read_header(
     loom_bytecode_function_header_t* out_header) {
   IREE_ASSERT_ARGUMENT(reader);
   IREE_ASSERT_ARGUMENT(out_header);
-  return loom_bytecode_selected_function_header_materialize(
+  // Index admission validated this entire header. Only allocation and the
+  // caller's symbol resolver can fail while projecting its identities.
+  (void)loom_bytecode_selected_function_header_materialize(
       &reader->symbols, source_symbol_ordinal, out_header);
+  return loom_bytecode_reader_consume_status(&reader->decoder);
 }
 
 iree_status_t loom_bytecode_function_projection_reader_materialize_region(
@@ -136,26 +139,26 @@ iree_status_t loom_bytecode_function_projection_reader_materialize_region(
       reader->bytecode.data + (iree_host_size_t)payload->absolute_offset,
       payload->length);
   loom_bytecode_region_summary_t summary = {0};
-  iree_status_t status = loom_bytecode_region_summary_read(
+  bool accepted = loom_bytecode_region_summary_read(
       &reader->decoder, header->name, payload_bytes, payload->absolute_offset,
       &summary);
-  if (iree_status_is_ok(status)) {
-    status = loom_bytecode_selected_body_materialize_region(
+  if (accepted) {
+    accepted = loom_bytecode_selected_body_materialize_region(
         &reader->symbols.body_materializer, header->name, payload_bytes,
         payload->absolute_offset, &summary, builder, target_parent_op,
         target_region_index,
         LOOM_BYTECODE_REGION_MATERIALIZATION_FLAG_BIND_ENTRY_ARGUMENTS,
         predefined_values, predefined_value_count, low_descriptor_set);
   }
-  IREE_RETURN_IF_ERROR(loom_bytecode_reader_normalize_diagnosed_error(
-      status, reader->error_count));
-  *out_accepted = reader->error_count == 0;
-  return iree_ok_status();
+  *out_accepted = accepted;
+  return loom_bytecode_reader_consume_status(&reader->decoder);
 }
 
 iree_status_t loom_bytecode_function_projection_reader_import_encoding(
     loom_bytecode_function_projection_reader_t* reader,
     uint16_t source_encoding_id, uint16_t* out_encoding_id) {
-  return loom_bytecode_selected_table_materialize_encoding(
+  // Indexed encodings and their declaration closure have already been admitted.
+  (void)loom_bytecode_selected_table_materialize_encoding(
       &reader->tables, source_encoding_id, out_encoding_id);
+  return loom_bytecode_reader_consume_status(&reader->decoder);
 }

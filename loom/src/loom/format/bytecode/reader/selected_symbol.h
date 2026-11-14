@@ -28,8 +28,8 @@ typedef struct loom_bytecode_selected_symbol_t {
 
 // State required to materialize an exact prepared source-symbol sequence.
 typedef struct loom_bytecode_selected_symbol_materializer_t {
-  // Bounded decoder copied from the owning selected read.
-  loom_bytecode_reader_decoder_t decoder;
+  // Borrowed decoder owned by the selected read.
+  loom_bytecode_reader_decoder_t* decoder;
   // Resettable storage for one symbol payload at a time.
   iree_arena_allocator_t* arena;
   // Module receiving compact selected symbols and body IR.
@@ -44,7 +44,7 @@ typedef struct loom_bytecode_selected_symbol_materializer_t {
 
 // Initializes selected symbol materialization over a reached-table projection.
 void loom_bytecode_selected_symbol_materializer_initialize(
-    const loom_bytecode_reader_decoder_t* decoder,
+    loom_bytecode_reader_decoder_t* decoder,
     iree_arena_block_pool_t* block_pool,
     loom_bytecode_selected_table_materializer_t* tables,
     const loom_low_repr_environment_t* low_repr_environment,
@@ -61,7 +61,7 @@ iree_status_t loom_bytecode_selected_symbols_predeclare(
     iree_host_size_t selected_symbol_count);
 
 // Materializes payloads for the already predeclared selected symbol sequence.
-iree_status_t loom_bytecode_selected_symbols_materialize(
+bool loom_bytecode_selected_symbols_materialize(
     loom_bytecode_selected_symbol_materializer_t* materializer,
     const loom_bytecode_selected_symbol_t* selected_symbols,
     iree_host_size_t selected_symbol_count);
@@ -71,7 +71,7 @@ iree_status_t loom_bytecode_selected_symbols_materialize(
 // Shared types, attributes, and external symbol references are projected
 // through materializer->tables. The source symbol itself must be resolvable by
 // that table's predeclared bindings or external resolver.
-iree_status_t loom_bytecode_selected_function_header_materialize(
+bool loom_bytecode_selected_function_header_materialize(
     loom_bytecode_selected_symbol_materializer_t* materializer,
     uint32_t source_symbol_ordinal,
     loom_bytecode_function_header_t* out_header);

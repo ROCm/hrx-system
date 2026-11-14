@@ -124,9 +124,10 @@ static bool loom_bytecode_input_shape_equal(const void* opaque,
                 existing->rank * sizeof(*existing->dimensions)) == 0;
 }
 
-static iree_status_t loom_bytecode_input_projection_intern(
+static bool loom_bytecode_input_projection_intern(
     loom_bytecode_input_projection_t* projection, loom_type_kind_t kind,
-    const loom_bytecode_scoped_shape_t* source, uint32_t* out_shape_id) {
+    const loom_bytecode_scoped_shape_t* source, uint64_t source_offset,
+    uint32_t* out_shape_id) {
   const loom_input_shape_t header = {
       .kind = (uint8_t)kind,
       .element_type = source->element_type,
@@ -165,31 +166,34 @@ static iree_status_t loom_bytecode_input_projection_intern(
                               loom_bytecode_input_shape_equal, &context);
   if (probe.index != UINT32_MAX) {
     *out_shape_id = probe.index + 1;
-    return iree_ok_status();
+    return true;
   }
   if (projection->shape_index.count == UINT32_MAX) {
-    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                            "source shape identity space exhausted");
+    return loom_bytecode_reader_emit_count_exceeds(
+        projection->decoder, IREE_SV("input_shapes"),
+        (uint64_t)projection->shape_index.count + 1, UINT32_MAX, source_offset);
   }
   const uint32_t index = (uint32_t)projection->shape_index.count;
   loom_input_shape_t* shape = NULL;
-  IREE_RETURN_IF_ERROR(loom_bytecode_input_projection_allocate_row(
-      projection->arena, &projection->shape_index, &projection->shapes, hash,
-      &probe, length, (void**)&shape));
+  LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_reader_check_status(
+      projection->decoder,
+      loom_bytecode_input_projection_allocate_row(
+          projection->arena, &projection->shape_index, &projection->shapes,
+          hash, &probe, length, (void**)&shape)));
   memcpy(shape, key, sizeof(*key));
   memcpy(shape->dimensions, source->dimensions,
          source->rank * sizeof(*source->dimensions));
   loom_intern_table_insert(&projection->shape_index, probe.slot, hash, index);
   *out_shape_id = index + 1;
-  return iree_ok_status();
+  return true;
 }
 
-static iree_status_t loom_bytecode_input_projection_static(
+static bool loom_bytecode_input_projection_static(
     loom_bytecode_input_projection_t* projection, uint32_t type_index,
     uint32_t* out_shape_id) {
   if (loom_ordinal_map_lookup(&projection->static_types, 0, type_index,
                               out_shape_id)) {
-    return iree_ok_status();
+    return true;
   }
   const loom_bytecode_table_entry_metadata_t* entry =
       &projection->type_entries[type_index];
@@ -202,13 +206,12 @@ static iree_status_t loom_bytecode_input_projection_static(
       iree_arena_checkpoint_save(projection->arena);
   loom_bytecode_type_plan_entry_t plan;
   loom_bytecode_type_fact_t* fact = NULL;
-  iree_status_t status = loom_bytecode_type_plan_decode_indexed_entry(
+  bool accepted = loom_bytecode_type_plan_decode_indexed_entry(
       projection->decoder, projection->context, projection->view,
       projection->arena, type_index, bytes, entry->entry_offset, &plan, &fact);
   loom_type_kind_t kind = LOOM_TYPE_NONE;
   loom_bytecode_scoped_shape_t shape = {0};
-  if (iree_status_is_ok(status) && !fact &&
-      loom_type_has_dimensions(plan.direct_type)) {
+  if (accepted && !fact && loom_type_has_dimensions(plan.direct_type)) {
     const loom_type_t type = plan.direct_type;
     kind = loom_type_kind(type);
     shape.rank = loom_type_rank(type);
@@ -229,14 +232,15 @@ static iree_status_t loom_bytecode_input_projection_static(
     }
   }
   iree_arena_checkpoint_restore(&checkpoint);
-  IREE_RETURN_IF_ERROR(status);
+  LOOM_BYTECODE_RETURN_IF_REJECTED(accepted);
   *out_shape_id = 0;
   if (kind != LOOM_TYPE_NONE) {
-    IREE_RETURN_IF_ERROR(loom_bytecode_input_projection_intern(
-        projection, kind, &shape, out_shape_id));
+    LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_input_projection_intern(
+        projection, kind, &shape, entry->entry_offset, out_shape_id));
   }
-  return loom_ordinal_map_insert(&projection->static_types, 0, type_index,
-                                 *out_shape_id);
+  return loom_bytecode_reader_check_status(
+      projection->decoder, loom_ordinal_map_insert(&projection->static_types, 0,
+                                                   type_index, *out_shape_id));
 }
 
 static uint32_t loom_bytecode_input_projection_binding(
@@ -247,7 +251,7 @@ static uint32_t loom_bytecode_input_projection_binding(
   return segment[index % LOOM_BYTECODE_INPUT_SEGMENT_CAPACITY];
 }
 
-static iree_status_t loom_bytecode_input_projection_record(
+static bool loom_bytecode_input_projection_record(
     loom_bytecode_input_projection_t* projection,
     loom_bytecode_reader_cursor_t* cursor,
     const loom_bytecode_attribute_ssa_validation_scope_t* scope,
@@ -255,10 +259,10 @@ static iree_status_t loom_bytecode_input_projection_record(
   *out_shape_id = 0;
   const uint64_t offset = loom_bytecode_reader_cursor_absolute_position(cursor);
   uint8_t kind_byte = 0;
-  IREE_RETURN_IF_ERROR(
+  LOOM_BYTECODE_RETURN_IF_REJECTED(
       loom_bytecode_reader_read_u8(projection->decoder, cursor, &kind_byte));
   loom_type_kind_t kind = LOOM_TYPE_NONE;
-  IREE_RETURN_IF_ERROR(loom_bytecode_type_decode_kind(
+  LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_type_decode_kind(
       projection->decoder, kind_byte, offset, &kind));
   if (kind == LOOM_TYPE_PARAMETERIZED) {
     loom_bytecode_attribute_validator_t validator = {
@@ -273,11 +277,11 @@ static iree_status_t loom_bytecode_input_projection_record(
       kind == LOOM_TYPE_TILE || kind == LOOM_TYPE_VECTOR ||
       kind == LOOM_TYPE_VIEW) {
     loom_bytecode_scoped_shape_t shape;
-    IREE_RETURN_IF_ERROR(loom_bytecode_type_read_scoped_shape(
+    LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_type_read_scoped_shape(
         projection->decoder, cursor, kind, scope->value_count,
         projection->view->encodings.count, &shape));
     return loom_bytecode_input_projection_intern(projection, kind, &shape,
-                                                 out_shape_id);
+                                                 offset, out_shape_id);
   }
   if (kind != LOOM_TYPE_FUNCTION && kind != LOOM_TYPE_DIALECT &&
       kind != LOOM_TYPE_REGISTER) {
@@ -286,32 +290,33 @@ static iree_status_t loom_bytecode_input_projection_record(
   }
   loom_bytecode_structural_type_plan_t plan;
   uint64_t payload[2];
-  IREE_RETURN_IF_ERROR(loom_bytecode_type_read_structural_header(
+  LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_type_read_structural_header(
       projection->decoder, cursor, kind, 0, projection->view->strings.count,
       &plan, payload));
-  IREE_RETURN_IF_ERROR(loom_bytecode_reader_validate_count_bytes(
+  LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_reader_validate_count_bytes(
       projection->decoder, cursor, IREE_SV("scoped_type_children"),
       plan.dependency_count, /*minimum_entry_length=*/1,
       /*minimum_trailing_length=*/0, offset));
   for (uint32_t i = 0; i < plan.dependency_count; ++i) {
     uint64_t reference = 0;
-    IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(projection->decoder,
-                                                           cursor, &reference));
-    IREE_RETURN_IF_ERROR(loom_bytecode_type_validate_completed_reference(
-        projection->decoder, cursor, reference, projection->view->types.count,
-        projection->binding_count));
+    LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_reader_read_uvarint(
+        projection->decoder, cursor, &reference));
+    LOOM_BYTECODE_RETURN_IF_REJECTED(
+        loom_bytecode_type_validate_completed_reference(
+            projection->decoder, cursor, reference,
+            projection->view->types.count, projection->binding_count));
   }
-  return iree_ok_status();
+  return true;
 }
 
-iree_status_t loom_bytecode_input_projection_read(
+bool loom_bytecode_input_projection_read(
     loom_bytecode_input_projection_t* projection,
     loom_bytecode_reader_cursor_t* cursor, uint64_t source_reference,
     const loom_bytecode_attribute_ssa_validation_scope_t* scope,
     uint32_t* out_shape_id) {
   loom_bytecode_reader_cursor_t records;
   uint64_t count = 0;
-  IREE_RETURN_IF_ERROR(loom_bytecode_type_open_scoped_records(
+  LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_type_open_scoped_records(
       projection->decoder, cursor, source_reference, &records, &count));
   if (!records.cursor.length) {
     return loom_bytecode_input_projection_static(
@@ -319,15 +324,17 @@ iree_status_t loom_bytecode_input_projection_read(
   }
   for (uint64_t i = 0; i < count; ++i) {
     uint32_t shape_id = 0;
-    IREE_RETURN_IF_ERROR(loom_bytecode_input_projection_record(
+    LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_input_projection_record(
         projection, &records, scope, &shape_id));
     const uint32_t segment_index =
         (uint32_t)(projection->binding_count /
                    LOOM_BYTECODE_INPUT_SEGMENT_CAPACITY);
     uint32_t* segment = NULL;
     if (segment_index == projection->bindings.segment_count) {
-      IREE_RETURN_IF_ERROR(loom_segmented_storage_append(
-          &projection->bindings, projection->arena, (void**)&segment));
+      LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_reader_check_status(
+          projection->decoder,
+          loom_segmented_storage_append(&projection->bindings,
+                                        projection->arena, (void**)&segment)));
     } else {
       segment =
           loom_segmented_storage_segment(&projection->bindings, segment_index);
@@ -337,10 +344,10 @@ iree_status_t loom_bytecode_input_projection_read(
     ++projection->binding_count;
   }
   uint64_t root = 0;
-  IREE_RETURN_IF_ERROR(loom_bytecode_type_close_scoped_records(
+  LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_type_close_scoped_records(
       projection->decoder, &records, projection->binding_count, &root));
   *out_shape_id = loom_bytecode_input_projection_binding(projection, root);
-  return iree_ok_status();
+  return true;
 }
 
 iree_status_t loom_bytecode_input_projection_add_argument(
@@ -519,7 +526,7 @@ static bool loom_bytecode_input_contract_equal(const void* opaque,
          probe->signatures;
 }
 
-iree_status_t loom_bytecode_input_projection_finish_module(
+bool loom_bytecode_input_projection_finish_module(
     loom_bytecode_input_projection_t* projection,
     iree_arena_allocator_t* retained_arena,
     loom_bytecode_module_metadata_t* metadata) {
@@ -587,10 +594,12 @@ iree_status_t loom_bytecode_input_projection_finish_module(
             projection, signature_id, family_id, NULL);
         if (count) {
           loom_input_contract_t* contract = NULL;
-          IREE_RETURN_IF_ERROR(iree_arena_allocate(
-              retained_arena,
-              sizeof(*contract) + count * sizeof(*contract->values),
-              (void**)&contract));
+          LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_reader_check_status(
+              projection->decoder,
+              iree_arena_allocate(
+                  retained_arena,
+                  sizeof(*contract) + count * sizeof(*contract->values),
+                  (void**)&contract)));
           contract->count = count;
           contract->reserved = 0;
           loom_bytecode_input_projection_requirements(
@@ -599,8 +608,10 @@ iree_status_t loom_bytecode_input_projection_finish_module(
               contract_count / LOOM_BYTECODE_INPUT_SEGMENT_CAPACITY;
           const loom_input_contract_t** segment = NULL;
           if (segment_index == contracts.segment_count) {
-            IREE_RETURN_IF_ERROR(loom_segmented_storage_append(
-                &contracts, projection->arena, (void**)&segment));
+            LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_reader_check_status(
+                projection->decoder,
+                loom_segmented_storage_append(&contracts, projection->arena,
+                                              (void**)&segment)));
           } else {
             segment = loom_segmented_storage_segment(&contracts, segment_index);
           }
@@ -609,22 +620,28 @@ iree_status_t loom_bytecode_input_projection_finish_module(
           ordinal = ++contract_count;
         }
         if (!contracts_by_signature_pair.capacity) {
-          IREE_RETURN_IF_ERROR(loom_intern_table_initialize(
-              projection->arena, 32, &contracts_by_signature_pair));
+          LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_reader_check_status(
+              projection->decoder,
+              loom_intern_table_initialize(projection->arena, 32,
+                                           &contracts_by_signature_pair)));
           probe.slot = loom_intern_table_find_empty_slot(
               &contracts_by_signature_pair, hash);
         } else {
-          IREE_RETURN_IF_ERROR(loom_intern_table_reserve_insert(
-              projection->arena, &contracts_by_signature_pair, hash, 1,
-              &probe.slot));
+          LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_reader_check_status(
+              projection->decoder,
+              loom_intern_table_reserve_insert(projection->arena,
+                                               &contracts_by_signature_pair,
+                                               hash, 1, &probe.slot)));
         }
         const uint32_t index = (uint32_t)contracts_by_signature_pair.count;
         const uint32_t segment_index =
             index / LOOM_BYTECODE_INPUT_SEGMENT_CAPACITY;
         loom_bytecode_input_contract_key_t* segment = NULL;
         if (segment_index == keys.segment_count) {
-          IREE_RETURN_IF_ERROR(loom_segmented_storage_append(
-              &keys, projection->arena, (void**)&segment));
+          LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_reader_check_status(
+              projection->decoder,
+              loom_segmented_storage_append(&keys, projection->arena,
+                                            (void**)&segment)));
         } else {
           segment = loom_segmented_storage_segment(&keys, segment_index);
         }
@@ -644,9 +661,11 @@ iree_status_t loom_bytecode_input_projection_finish_module(
     }
   }
   if (contract_count) {
-    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        retained_arena, contract_count, sizeof(*metadata->input_contracts),
-        (void**)&metadata->input_contracts));
+    LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_reader_check_status(
+        projection->decoder,
+        iree_arena_allocate_array(retained_arena, contract_count,
+                                  sizeof(*metadata->input_contracts),
+                                  (void**)&metadata->input_contracts)));
     for (uint32_t i = 0; i < contract_count; ++i) {
       const loom_input_contract_t* const* segment =
           loom_segmented_storage_const_segment(
@@ -656,5 +675,5 @@ iree_status_t loom_bytecode_input_projection_finish_module(
     }
   }
   metadata->input_contract_count = contract_count;
-  return iree_ok_status();
+  return true;
 }

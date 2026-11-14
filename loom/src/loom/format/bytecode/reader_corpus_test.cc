@@ -312,6 +312,50 @@ TEST_F(ReaderCorpusTest, TextCorpusBytecodeRoundTripsCanonically) {
   EXPECT_GT(supported_count, 0u);
 }
 
+TEST_F(ReaderCorpusTest, MissingLowCodecIsDiagnosedWithoutPublishingModule) {
+  const char source[] = R"(
+test.target<low_core> @target
+low.func.def target<test.low.core>(@target) @f() {
+  low.return
+}
+)";
+  loom_module_t* module =
+      Parse(iree_make_cstring_view(source), IREE_SV("codec.loom"));
+  ASSERT_NE(module, nullptr);
+  std::vector<uint8_t> bytes;
+  IREE_ASSERT_OK(WriteModule(module, low_repr_environment_, &bytes));
+  loom_module_free(module);
+  for (bool capture : {false, true}) {
+    uint32_t diagnostics = 0;
+    loom_bytecode_read_options_t options = {};
+    if (capture) {
+      options.diagnostic_sink = {
+          [](void* data, const loom_diagnostic_t* diagnostic) {
+            ++*static_cast<uint32_t*>(data);
+            EXPECT_STREQ(loom_error_def_id(diagnostic->error),
+                         "ERR_BYTECODE_006");
+            EXPECT_TRUE(iree_string_view_equal(diagnostic->origin.filename,
+                                               IREE_SV("codec.loombc")));
+            EXPECT_GT(diagnostic->origin.start, 0u);
+            EXPECT_EQ(diagnostic->origin.end, diagnostic->origin.start + 1);
+            return iree_ok_status();
+          },
+          &diagnostics,
+      };
+    }
+    loom_bytecode_read_result_t result = {};
+    module = nullptr;
+    IREE_ASSERT_OK(loom_bytecode_read_module(
+        iree_make_const_byte_span(bytes.data(), bytes.size()),
+        IREE_SV("codec.loombc"), &context_, &block_pool_, &options,
+        iree_allocator_system(), &result, &module));
+    EXPECT_EQ(result.error_count, 1u);
+    EXPECT_EQ(diagnostics, capture ? 1u : 0u);
+    EXPECT_EQ(module, nullptr);
+    loom_module_free(module);
+  }
+}
+
 TEST_F(ReaderCorpusTest, DescriptorRowOrderIsNotSerialized) {
   static constexpr char kSource[] = R"(
 test.target<low_core> @test_target

@@ -112,14 +112,14 @@ typedef struct loom_bytecode_selected_table_materializer_t {
 } loom_bytecode_selected_table_materializer_t;
 
 // Constructs completed scoped types without interning decoding templates.
-iree_status_t loom_bytecode_selected_type_project_completed(
+bool loom_bytecode_selected_type_project_completed(
     loom_bytecode_selected_table_materializer_t* materializer,
     loom_bytecode_reader_cursor_t* cursor,
     const loom_bytecode_attribute_ssa_materialization_scope_t* scope,
     uint64_t reference, loom_type_id_t* out_type);
 
 // Constructs completed scoped types without interning decoding templates.
-iree_status_t loom_bytecode_selected_type_materialize_bindings(
+bool loom_bytecode_selected_type_materialize_bindings(
     loom_bytecode_selected_table_materializer_t* materializer,
     loom_bytecode_reader_cursor_t* cursor,
     const loom_bytecode_attribute_ssa_materialization_scope_t* scope,
@@ -189,17 +189,17 @@ iree_status_t loom_bytecode_selected_table_project_location(
     loom_location_id_t* out_target_location_id);
 
 // Materializes the closure of one source encoding and returns its compact ID.
-iree_status_t loom_bytecode_selected_table_materialize_encoding(
+bool loom_bytecode_selected_table_materialize_encoding(
     loom_bytecode_selected_table_materializer_t* materializer,
     uint16_t source_encoding_id, uint16_t* out_target_encoding_id);
 
 // Materializes the closure of one source type and returns its compact ID.
-iree_status_t loom_bytecode_selected_table_materialize_type(
+bool loom_bytecode_selected_table_materialize_type(
     loom_bytecode_selected_table_materializer_t* materializer,
     loom_type_id_t source_type_id, loom_type_id_t* out_target_type_id);
 
 // Materializes the closure of one source location and returns its compact ID.
-iree_status_t loom_bytecode_selected_table_materialize_location(
+bool loom_bytecode_selected_table_materialize_location(
     loom_bytecode_selected_table_materializer_t* materializer,
     loom_location_id_t source_location_id,
     loom_location_id_t* out_target_location_id);

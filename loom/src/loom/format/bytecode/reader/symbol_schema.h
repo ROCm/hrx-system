@@ -19,27 +19,27 @@ extern "C" {
 #endif  // __cplusplus
 
 // Resolves a string-table reference used by a symbol payload.
-iree_status_t loom_bytecode_symbol_validate_string_ref(
+bool loom_bytecode_symbol_validate_string_ref(
     loom_bytecode_reader_decoder_t* decoder,
     const loom_bytecode_reader_module_view_t* module_view, uint64_t string_id,
     iree_string_view_t field_name, uint64_t offset,
     iree_string_view_t* out_string);
 
 // Validates a type-table reference used by a symbol payload.
-iree_status_t loom_bytecode_symbol_validate_type_ref(
+bool loom_bytecode_symbol_validate_type_ref(
     loom_bytecode_reader_decoder_t* decoder,
     const loom_bytecode_reader_module_view_t* module_view, uint64_t type_id,
     uint64_t offset);
 
 // Resolves a one-based operation-table reference used by a symbol payload.
-iree_status_t loom_bytecode_symbol_resolve_op_ref(
+bool loom_bytecode_symbol_resolve_op_ref(
     loom_bytecode_reader_decoder_t* decoder,
     const loom_bytecode_reader_module_view_t* module_view,
     uint64_t op_table_index_plus1, uint64_t offset,
     const loom_op_vtable_t** out_vtable);
 
 // Validates one optional function metadata enumeration value.
-iree_status_t loom_bytecode_symbol_validate_func_enum(
+bool loom_bytecode_symbol_validate_func_enum(
     loom_bytecode_reader_decoder_t* decoder, uint64_t symbol_index,
     const loom_op_vtable_t* vtable, uint8_t attr_index,
     iree_string_view_t field_name, uint8_t value, uint64_t offset);
@@ -62,12 +62,12 @@ uint8_t loom_bytecode_symbol_find_identity_attr_index(
     const loom_op_vtable_t* vtable);
 
 // Validates a GLOBAL payload operation contract.
-iree_status_t loom_bytecode_symbol_validate_global_vtable(
+bool loom_bytecode_symbol_validate_global_vtable(
     loom_bytecode_reader_decoder_t* decoder, uint64_t symbol_index,
     const loom_op_vtable_t* vtable, uint64_t op_ref_offset);
 
 // Validates a RECORD payload operation contract.
-iree_status_t loom_bytecode_symbol_validate_record_vtable(
+bool loom_bytecode_symbol_validate_record_vtable(
     loom_bytecode_reader_decoder_t* decoder, uint64_t symbol_index,
     const loom_op_vtable_t* vtable, uint64_t op_ref_offset);
 

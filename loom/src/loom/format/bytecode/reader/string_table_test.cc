@@ -38,6 +38,7 @@ class BytecodeStringTableTest : public ::testing::Test {
   }
 
   void TearDown() override {
+    IREE_EXPECT_OK(loom_bytecode_reader_consume_status(&decoder_));
     loom_module_free(module_);
     loom_context_deinitialize(&context_);
     iree_arena_deinitialize(&storage_arena_);
@@ -89,7 +90,7 @@ TEST_F(BytecodeStringTableTest, ReadsCanonicalStringsAndReclaimsScratch) {
   const iree_host_size_t scratch_size_before =
       scratch_arena_.used_allocation_size;
 
-  IREE_ASSERT_OK(loom_bytecode_string_table_read(
+  ASSERT_TRUE(loom_bytecode_string_table_read(
       &decoder_, &section, &scratch_arena_, &storage_arena_, &module_view_));
 
   ASSERT_EQ(module_view_.strings.count, 3u);
@@ -106,10 +107,8 @@ TEST_F(BytecodeStringTableTest, RejectsMissingEmptyStringZero) {
   const loom_bytecode_reader_section_t section =
       MakeSection(LOOM_BYTECODE_SECTION_STRINGS, data, sizeof(data));
 
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_DEFERRED,
-      loom_bytecode_string_table_read(&decoder_, &section, &scratch_arena_,
-                                      &storage_arena_, &module_view_));
+  EXPECT_FALSE(loom_bytecode_string_table_read(
+      &decoder_, &section, &scratch_arena_, &storage_arena_, &module_view_));
 
   EXPECT_EQ(error_count_, 1u);
 }
@@ -119,10 +118,8 @@ TEST_F(BytecodeStringTableTest, RejectsNonemptyStringZero) {
   const loom_bytecode_reader_section_t section =
       MakeSection(LOOM_BYTECODE_SECTION_STRINGS, data, sizeof(data));
 
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_DEFERRED,
-      loom_bytecode_string_table_read(&decoder_, &section, &scratch_arena_,
-                                      &storage_arena_, &module_view_));
+  EXPECT_FALSE(loom_bytecode_string_table_read(
+      &decoder_, &section, &scratch_arena_, &storage_arena_, &module_view_));
 
   EXPECT_EQ(error_count_, 1u);
 }
@@ -132,10 +129,8 @@ TEST_F(BytecodeStringTableTest, RejectsCountBeforeRetainingViews) {
   const loom_bytecode_reader_section_t section =
       MakeSection(LOOM_BYTECODE_SECTION_STRINGS, data, sizeof(data));
 
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_DEFERRED,
-      loom_bytecode_string_table_read(&decoder_, &section, &scratch_arena_,
-                                      &storage_arena_, &module_view_));
+  EXPECT_FALSE(loom_bytecode_string_table_read(
+      &decoder_, &section, &scratch_arena_, &storage_arena_, &module_view_));
 
   EXPECT_EQ(error_count_, 1u);
   EXPECT_EQ(storage_arena_.used_allocation_size, 0u);
@@ -151,10 +146,8 @@ TEST_F(BytecodeStringTableTest, RejectsDuplicateStrings) {
   const loom_bytecode_reader_section_t section =
       MakeSection(LOOM_BYTECODE_SECTION_STRINGS, data, sizeof(data));
 
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_DEFERRED,
-      loom_bytecode_string_table_read(&decoder_, &section, &scratch_arena_,
-                                      &storage_arena_, &module_view_));
+  EXPECT_FALSE(loom_bytecode_string_table_read(
+      &decoder_, &section, &scratch_arena_, &storage_arena_, &module_view_));
 
   EXPECT_EQ(error_count_, 1u);
   EXPECT_EQ(scratch_arena_.used_allocation_size, 0u);
@@ -165,10 +158,8 @@ TEST_F(BytecodeStringTableTest, RejectsInvalidUtf8) {
   const loom_bytecode_reader_section_t section =
       MakeSection(LOOM_BYTECODE_SECTION_STRINGS, data, sizeof(data));
 
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_DEFERRED,
-      loom_bytecode_string_table_read(&decoder_, &section, &scratch_arena_,
-                                      &storage_arena_, &module_view_));
+  EXPECT_FALSE(loom_bytecode_string_table_read(
+      &decoder_, &section, &scratch_arena_, &storage_arena_, &module_view_));
 
   EXPECT_EQ(error_count_, 1u);
 }
@@ -184,7 +175,7 @@ TEST_F(BytecodeStringTableTest, MaterializesCanonicalStringIds) {
   };
   const loom_bytecode_reader_section_t section =
       MakeSection(LOOM_BYTECODE_SECTION_STRINGS, data, sizeof(data));
-  IREE_ASSERT_OK(loom_bytecode_string_table_read(
+  ASSERT_TRUE(loom_bytecode_string_table_read(
       &decoder_, &section, &scratch_arena_, &storage_arena_, &module_view_));
 
   IREE_ASSERT_OK(
@@ -206,10 +197,8 @@ TEST_F(BytecodeStringTableTest, RejectsDuplicateSources) {
   const loom_bytecode_reader_section_t section =
       MakeSection(LOOM_BYTECODE_SECTION_SOURCES, data, sizeof(data));
 
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_DEFERRED,
-      loom_bytecode_source_table_read(&decoder_, &section, &scratch_arena_,
-                                      &storage_arena_, &module_view_));
+  EXPECT_FALSE(loom_bytecode_source_table_read(
+      &decoder_, &section, &scratch_arena_, &storage_arena_, &module_view_));
 
   EXPECT_EQ(error_count_, 1u);
   EXPECT_EQ(scratch_arena_.used_allocation_size, 0u);
@@ -223,7 +212,7 @@ TEST_F(BytecodeStringTableTest, MaterializesCanonicalSourceIds) {
   };
   const loom_bytecode_reader_section_t section =
       MakeSection(LOOM_BYTECODE_SECTION_SOURCES, data, sizeof(data));
-  IREE_ASSERT_OK(loom_bytecode_source_table_read(
+  ASSERT_TRUE(loom_bytecode_source_table_read(
       &decoder_, &section, &scratch_arena_, &storage_arena_, &module_view_));
 
   IREE_ASSERT_OK(
@@ -241,10 +230,8 @@ TEST_F(BytecodeStringTableTest, RejectsSourceCountOutsideRuntimeIdSpace) {
   const loom_bytecode_reader_section_t section =
       MakeSection(LOOM_BYTECODE_SECTION_SOURCES, data, sizeof(data));
 
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_DEFERRED,
-      loom_bytecode_source_table_read(&decoder_, &section, &scratch_arena_,
-                                      &storage_arena_, &module_view_));
+  EXPECT_FALSE(loom_bytecode_source_table_read(
+      &decoder_, &section, &scratch_arena_, &storage_arena_, &module_view_));
 
   EXPECT_EQ(error_count_, 1u);
 }

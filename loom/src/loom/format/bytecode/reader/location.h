@@ -21,21 +21,21 @@ extern "C" {
 #endif
 
 // Validates one complete LOCATIONS section without retaining entry ranges.
-iree_status_t loom_bytecode_location_table_validate(
+bool loom_bytecode_location_table_validate(
     loom_bytecode_reader_decoder_t* decoder,
     loom_bytecode_reader_module_view_t* module_view,
     const loom_bytecode_reader_section_t* section);
 
 // Reads table bounds before full construction. Entry validation is deferred to
 // materialization, which must complete before the tentative output is exposed.
-iree_status_t loom_bytecode_location_table_read_count(
+bool loom_bytecode_location_table_read_count(
     loom_bytecode_reader_decoder_t* decoder,
     loom_bytecode_reader_module_view_t* module_view,
     const loom_bytecode_reader_section_t* section);
 
 // Validates one complete LOCATIONS section and retains the exact byte range of
 // every entry.
-iree_status_t loom_bytecode_location_table_index(
+bool loom_bytecode_location_table_index(
     loom_bytecode_reader_decoder_t* decoder,
     loom_bytecode_reader_module_view_t* module_view,
     const loom_bytecode_reader_section_t* section,
@@ -55,7 +55,7 @@ typedef struct loom_bytecode_location_materializer_t {
 
 // Validates and constructs every entry once into tentative module-owned
 // storage.
-iree_status_t loom_bytecode_location_table_materialize(
+bool loom_bytecode_location_table_materialize(
     loom_bytecode_location_materializer_t* materializer,
     const loom_bytecode_reader_section_t* section);
 

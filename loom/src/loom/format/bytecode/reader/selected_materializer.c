@@ -17,16 +17,18 @@ static iree_const_byte_span_t loom_bytecode_selected_region_span(
       payload->length);
 }
 
-static iree_status_t loom_bytecode_selected_module_prepare(
+static bool loom_bytecode_selected_module_prepare(
     const loom_bytecode_selected_module_materializer_t* materializer,
     const iree_host_size_t* ordinals, iree_host_size_t ordinal_count,
     loom_bytecode_selected_symbol_t** out_symbols) {
   *out_symbols = NULL;
   loom_bytecode_selected_symbol_t* selected_symbols = NULL;
   if (ordinal_count > 0) {
-    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        materializer->scratch_arena, ordinal_count, sizeof(*selected_symbols),
-        (void**)&selected_symbols));
+    LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_reader_check_status(
+        materializer->decoder,
+        iree_arena_allocate_array(materializer->scratch_arena, ordinal_count,
+                                  sizeof(*selected_symbols),
+                                  (void**)&selected_symbols)));
   }
   for (iree_host_size_t i = 0; i < ordinal_count; ++i) {
     const iree_host_size_t source_ordinal = ordinals[i];
@@ -38,10 +40,12 @@ static iree_status_t loom_bytecode_selected_module_prepare(
     selected->source_ordinal = (uint32_t)source_ordinal;
     selected->region_summary_count = symbol->region_payload_count;
     if (selected->region_summary_count > 0) {
-      IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-          materializer->scratch_arena, selected->region_summary_count,
-          sizeof(*selected->region_summaries),
-          (void**)&selected->region_summaries));
+      LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_reader_check_status(
+          materializer->decoder,
+          iree_arena_allocate_array(materializer->scratch_arena,
+                                    selected->region_summary_count,
+                                    sizeof(*selected->region_summaries),
+                                    (void**)&selected->region_summaries)));
       for (uint8_t region_ordinal = 0;
            region_ordinal < selected->region_summary_count; ++region_ordinal) {
         const loom_bytecode_region_payload_metadata_t* payload =
@@ -50,7 +54,7 @@ static iree_status_t loom_bytecode_selected_module_prepare(
                                    region_ordinal];
         const iree_const_byte_span_t payload_bytes =
             loom_bytecode_selected_region_span(materializer, payload);
-        IREE_RETURN_IF_ERROR(loom_bytecode_region_summary_read(
+        LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_region_summary_read(
             materializer->decoder, symbol->name, payload_bytes,
             payload->absolute_offset,
             &selected->region_summaries[region_ordinal]));
@@ -58,17 +62,14 @@ static iree_status_t loom_bytecode_selected_module_prepare(
     }
   }
   *out_symbols = selected_symbols;
-  return iree_ok_status();
+  return true;
 }
 
 static iree_status_t loom_bytecode_selected_module_allocate(
     const loom_bytecode_selected_module_materializer_t* materializer,
     iree_host_size_t selected_symbol_count, loom_module_t** out_module) {
-  iree_host_size_t string_count = 0;
-  if (!iree_host_size_checked_add(selected_symbol_count, 1, &string_count)) {
-    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                            "selected module string count overflow");
-  }
+  // The selection is bounded by the indexed module's 16-bit symbol domain.
+  const iree_host_size_t string_count = selected_symbol_count + 1;
   loom_module_size_hints_t hints = {
       .string_count = string_count,
       .type_count = selected_symbol_count,
@@ -82,7 +83,7 @@ static iree_status_t loom_bytecode_selected_module_allocate(
                               materializer->host_allocator, out_module);
 }
 
-static iree_status_t loom_bytecode_selected_module_materialize_prepared_into(
+static bool loom_bytecode_selected_module_materialize_prepared_into(
     const loom_bytecode_selected_module_materializer_t* materializer,
     const loom_bytecode_selected_symbol_t* selected_symbols,
     iree_host_size_t selected_symbol_count,
@@ -97,42 +98,45 @@ static iree_status_t loom_bytecode_selected_module_materialize_prepared_into(
   loom_bytecode_selected_symbol_materializer_initialize(
       materializer->decoder, materializer->block_pool, &tables,
       &materializer->low_repr_environment, &symbols);
-  iree_status_t status = loom_bytecode_selected_symbols_predeclare(
-      &symbols, selected_symbols, selected_symbol_count);
-  if (iree_status_is_ok(status)) {
-    status = loom_bytecode_selected_symbols_materialize(
+  bool accepted = loom_bytecode_reader_check_status(
+      materializer->decoder,
+      loom_bytecode_selected_symbols_predeclare(&symbols, selected_symbols,
+                                                selected_symbol_count));
+  if (accepted) {
+    accepted = loom_bytecode_selected_symbols_materialize(
         &symbols, selected_symbols, selected_symbol_count);
   }
   loom_bytecode_selected_table_materializer_deinitialize(&tables);
-  return status;
+  return accepted;
 }
 
-iree_status_t loom_bytecode_selected_module_materialize(
+bool loom_bytecode_selected_module_materialize(
     const loom_bytecode_selected_module_materializer_t* materializer,
     const iree_host_size_t* ordinals, iree_host_size_t ordinal_count,
     loom_module_t** out_module) {
   *out_module = NULL;
   loom_bytecode_selected_symbol_t* selected_symbols = NULL;
-  IREE_RETURN_IF_ERROR(loom_bytecode_selected_module_prepare(
+  LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_selected_module_prepare(
       materializer, ordinals, ordinal_count, &selected_symbols));
 
   loom_module_t* output_module = NULL;
-  iree_status_t status = loom_bytecode_selected_module_allocate(
-      materializer, ordinal_count, &output_module);
-  if (iree_status_is_ok(status)) {
-    status = loom_bytecode_selected_module_materialize_prepared_into(
+  bool accepted = loom_bytecode_reader_check_status(
+      materializer->decoder, loom_bytecode_selected_module_allocate(
+                                 materializer, ordinal_count, &output_module));
+  if (accepted) {
+    accepted = loom_bytecode_selected_module_materialize_prepared_into(
         materializer, selected_symbols, ordinal_count,
         loom_bytecode_selected_symbol_resolver_empty(), output_module);
   }
-  if (iree_status_is_ok(status)) {
+  if (accepted) {
     *out_module = output_module;
     output_module = NULL;
   }
   loom_module_free(output_module);
-  return status;
+  return accepted;
 }
 
-iree_status_t loom_bytecode_selected_module_materialize_into(
+bool loom_bytecode_selected_module_materialize_into(
     const loom_bytecode_selected_module_materializer_t* materializer,
     const iree_host_size_t* ordinals, iree_host_size_t ordinal_count,
     loom_bytecode_selected_symbol_resolver_t symbol_resolver,
@@ -141,7 +145,7 @@ iree_status_t loom_bytecode_selected_module_materialize_into(
   IREE_ASSERT_ARGUMENT(output_module);
   IREE_ASSERT(output_module->context == materializer->context);
   loom_bytecode_selected_symbol_t* selected_symbols = NULL;
-  IREE_RETURN_IF_ERROR(loom_bytecode_selected_module_prepare(
+  LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_selected_module_prepare(
       materializer, ordinals, ordinal_count, &selected_symbols));
   return loom_bytecode_selected_module_materialize_prepared_into(
       materializer, selected_symbols, ordinal_count, symbol_resolver,

@@ -9,41 +9,6 @@
 #include "loom/format/bytecode/reader/selected_materializer.h"
 #include "loom/format/bytecode/reader/validation.h"
 
-static iree_status_t loom_bytecode_validate_symbol_selection(
-    const loom_bytecode_file_metadata_t* metadata, uint16_t module_ordinal,
-    loom_bytecode_symbol_ordinal_list_t selection,
-    const loom_bytecode_module_metadata_t** out_module_metadata) {
-  if (module_ordinal >= metadata->module_count) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "module ordinal %u is out of range [0, %" PRIhsz
-                            ")",
-                            module_ordinal, metadata->module_count);
-  }
-  if (selection.count > 0 && selection.ordinals == NULL) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "selected symbol count is non-zero but ordinals is NULL");
-  }
-  const loom_bytecode_module_metadata_t* module_metadata =
-      &metadata->modules[module_ordinal];
-  for (iree_host_size_t i = 0; i < selection.count; ++i) {
-    if (selection.ordinals[i] >= module_metadata->symbol_count) {
-      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "selected symbol ordinal %" PRIhsz
-                              " is out of range [0, %" PRIhsz ")",
-                              selection.ordinals[i],
-                              module_metadata->symbol_count);
-    }
-    if (i > 0 && selection.ordinals[i - 1] >= selection.ordinals[i]) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "selected symbol ordinals must be strictly increasing");
-    }
-  }
-  *out_module_metadata = module_metadata;
-  return iree_ok_status();
-}
-
 static void loom_bytecode_initialize_selected_read_result(
     const loom_bytecode_file_metadata_t* metadata, uint16_t module_ordinal,
     loom_bytecode_read_result_t* out_result) {
@@ -71,9 +36,8 @@ iree_status_t loom_bytecode_materialize_module_symbols(
   IREE_ASSERT_ARGUMENT(out_module);
   *out_result = (loom_bytecode_read_result_t){0};
   *out_module = NULL;
-  const loom_bytecode_module_metadata_t* module_metadata = NULL;
-  IREE_RETURN_IF_ERROR(loom_bytecode_validate_symbol_selection(
-      metadata, module_ordinal, selection, &module_metadata));
+  const loom_bytecode_module_metadata_t* module_metadata =
+      &metadata->modules[module_ordinal];
   loom_bytecode_initialize_selected_read_result(metadata, module_ordinal,
                                                 out_result);
   loom_bytecode_reader_decoder_t decoder;
@@ -94,11 +58,10 @@ iree_status_t loom_bytecode_materialize_module_symbols(
       .host_allocator = host_allocator,
   };
   loom_module_t* output_module = NULL;
-  iree_status_t status = loom_bytecode_selected_module_materialize(
+  const bool accepted = loom_bytecode_selected_module_materialize(
       &materializer, selection.ordinals, selection.count, &output_module);
-  status = loom_bytecode_reader_normalize_diagnosed_error(
-      status, out_result->error_count);
-  if (iree_status_is_ok(status) && out_result->error_count == 0) {
+  iree_status_t status = loom_bytecode_reader_consume_status(&decoder);
+  if (accepted) {
     *out_module = output_module;
     output_module = NULL;
   }
@@ -120,9 +83,8 @@ iree_status_t loom_bytecode_materialize_module_symbols_into(
   IREE_ASSERT_ARGUMENT(out_result);
   IREE_ASSERT_ARGUMENT(output_module);
   *out_result = (loom_bytecode_read_result_t){0};
-  const loom_bytecode_module_metadata_t* module_metadata = NULL;
-  IREE_RETURN_IF_ERROR(loom_bytecode_validate_symbol_selection(
-      metadata, module_ordinal, selection, &module_metadata));
+  const loom_bytecode_module_metadata_t* module_metadata =
+      &metadata->modules[module_ordinal];
   loom_bytecode_initialize_selected_read_result(metadata, module_ordinal,
                                                 out_result);
 
@@ -147,11 +109,10 @@ iree_status_t loom_bytecode_materialize_module_symbols_into(
       .fn = symbol_resolver.fn,
       .user_data = symbol_resolver.user_data,
   };
-  iree_status_t status = loom_bytecode_selected_module_materialize_into(
+  (void)loom_bytecode_selected_module_materialize_into(
       &materializer, selection.ordinals, selection.count, internal_resolver,
       output_module);
-  status = loom_bytecode_reader_normalize_diagnosed_error(
-      status, out_result->error_count);
+  iree_status_t status = loom_bytecode_reader_consume_status(&decoder);
   iree_arena_deinitialize(&arena);
   return status;
 }
