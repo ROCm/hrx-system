@@ -19,7 +19,8 @@ loom_corpus_test(
         X86_TASK_HARDWARE_PROFILE.name: {
             "function/rodata.loom:@immutable_gather_values": "X86/005",
             "numeric/conversion/f32_narrowing.loom:@f32_narrowing_values": "TARGET/031",
-            "numeric/float/fused_arithmetic.loom:@fma_nan_f16_values": "TARGET/003",
+            # Base profiles lack FP16 rules; feature profiles can disable them.
+            "numeric/float/fused_arithmetic.loom:@fma_nan_f16_values": "TARGET/002,TARGET/003",
             "numeric/vector/floating.loom:@bfloat_lookup_arithmetic_values": "X86/005",
         },
     },
