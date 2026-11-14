@@ -1,0 +1,201 @@
+// Signaling NaNs in each FMA operand must produce quiet arithmetic NaNs.
+// Observe the exponent and quiet bit directly, ignoring only sign and payload.
+// Runtime-loaded lanes exercise native vector packets under both denorm policies.
+
+func.def @fma_nan_f16(%input: buffer, %finite: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %inputs = buffer.view %input[%origin] : buffer -> view<4xi16>
+  %outputs = buffer.view %output[%origin] : buffer -> view<24xi16>
+  %bits = vector.load %inputs[0] : view<4xi16> -> vector<4xi16>
+  %values = vector.bitcast %bits : vector<4xi16> to vector<4xf16>
+  %finite_view = buffer.view %finite[%origin] : buffer -> view<4xf16>
+  %peer = vector.load %finite_view[0] : view<4xf16> -> vector<4xf16>
+  %mask = vector.splati 32256 : vector<4xi16>
+  %a_strict = vector.fmaf %values, %peer, %peer : vector<4xf16>
+  %a_strict_bits = vector.bitcast %a_strict : vector<4xf16> to vector<4xi16>
+  %a_strict_observed = vector.andi %a_strict_bits, %mask : vector<4xi16>
+  vector.store %a_strict_observed, %outputs[0] : vector<4xi16>, view<24xi16>
+  %a_native = vector.fmaf<afn> %values, %peer, %peer : vector<4xf16>
+  %a_native_bits = vector.bitcast %a_native : vector<4xf16> to vector<4xi16>
+  %a_native_observed = vector.andi %a_native_bits, %mask : vector<4xi16>
+  vector.store %a_native_observed, %outputs[12] : vector<4xi16>, view<24xi16>
+  %b_strict = vector.fmaf %peer, %values, %peer : vector<4xf16>
+  %b_strict_bits = vector.bitcast %b_strict : vector<4xf16> to vector<4xi16>
+  %b_strict_observed = vector.andi %b_strict_bits, %mask : vector<4xi16>
+  vector.store %b_strict_observed, %outputs[4] : vector<4xi16>, view<24xi16>
+  %b_native = vector.fmaf<afn> %peer, %values, %peer : vector<4xf16>
+  %b_native_bits = vector.bitcast %b_native : vector<4xf16> to vector<4xi16>
+  %b_native_observed = vector.andi %b_native_bits, %mask : vector<4xi16>
+  vector.store %b_native_observed, %outputs[16] : vector<4xi16>, view<24xi16>
+  %c_strict = vector.fmaf %peer, %peer, %values : vector<4xf16>
+  %c_strict_bits = vector.bitcast %c_strict : vector<4xf16> to vector<4xi16>
+  %c_strict_observed = vector.andi %c_strict_bits, %mask : vector<4xi16>
+  vector.store %c_strict_observed, %outputs[8] : vector<4xi16>, view<24xi16>
+  %c_native = vector.fmaf<afn> %peer, %peer, %values : vector<4xf16>
+  %c_native_bits = vector.bitcast %c_native : vector<4xf16> to vector<4xi16>
+  %c_native_observed = vector.andi %c_native_bits, %mask : vector<4xi16>
+  vector.store %c_native_observed, %outputs[20] : vector<4xi16>, view<24xi16>
+  func.return
+}
+
+// Every input lane is a NaN and its other operands are finite. The result
+// must have an all-ones exponent and a set quiet bit, independently of payload.
+func.def @fma_nan_f16_reference(%input: buffer, %finite: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %outputs = buffer.view %output[%origin] : buffer -> view<24xi16>
+  %expected = vector.splati 32256 : vector<24xi16>
+  vector.store %expected, %outputs[0] : vector<24xi16>, view<24xi16>
+  func.return
+}
+
+check.scenario @fma_nan_f16_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(31745) step(1) : tensor<4xi16>
+    %finite = check.generate.fill value(2.0) : tensor<4xf16>
+    %output = check.generate.fill value(0) : tensor<24xi16>
+    check.compare<@fma_nan_f16, @fma_nan_f16_reference>(%input, %finite, %output) : (tensor<4xi16>, tensor<4xf16>, tensor<24xi16>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<24xi16>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(-1023) step(1) : tensor<4xi16>
+    %finite = check.generate.fill value(2.0) : tensor<4xf16>
+    %output = check.generate.fill value(0) : tensor<24xi16>
+    check.compare<@fma_nan_f16, @fma_nan_f16_reference>(%input, %finite, %output) : (tensor<4xi16>, tensor<4xf16>, tensor<24xi16>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<24xi16>
+    }
+  }
+  check.return
+}
+
+func.def @fma_nan_f32(%input: buffer, %finite: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %inputs = buffer.view %input[%origin] : buffer -> view<4xi32>
+  %outputs = buffer.view %output[%origin] : buffer -> view<24xi32>
+  %bits = vector.load %inputs[0] : view<4xi32> -> vector<4xi32>
+  %values = vector.bitcast %bits : vector<4xi32> to vector<4xf32>
+  %finite_view = buffer.view %finite[%origin] : buffer -> view<4xf32>
+  %peer = vector.load %finite_view[0] : view<4xf32> -> vector<4xf32>
+  %mask = vector.splati 2143289344 : vector<4xi32>
+  %a_strict = vector.fmaf %values, %peer, %peer : vector<4xf32>
+  %a_strict_bits = vector.bitcast %a_strict : vector<4xf32> to vector<4xi32>
+  %a_strict_observed = vector.andi %a_strict_bits, %mask : vector<4xi32>
+  vector.store %a_strict_observed, %outputs[0] : vector<4xi32>, view<24xi32>
+  %a_native = vector.fmaf<afn> %values, %peer, %peer : vector<4xf32>
+  %a_native_bits = vector.bitcast %a_native : vector<4xf32> to vector<4xi32>
+  %a_native_observed = vector.andi %a_native_bits, %mask : vector<4xi32>
+  vector.store %a_native_observed, %outputs[12] : vector<4xi32>, view<24xi32>
+  %b_strict = vector.fmaf %peer, %values, %peer : vector<4xf32>
+  %b_strict_bits = vector.bitcast %b_strict : vector<4xf32> to vector<4xi32>
+  %b_strict_observed = vector.andi %b_strict_bits, %mask : vector<4xi32>
+  vector.store %b_strict_observed, %outputs[4] : vector<4xi32>, view<24xi32>
+  %b_native = vector.fmaf<afn> %peer, %values, %peer : vector<4xf32>
+  %b_native_bits = vector.bitcast %b_native : vector<4xf32> to vector<4xi32>
+  %b_native_observed = vector.andi %b_native_bits, %mask : vector<4xi32>
+  vector.store %b_native_observed, %outputs[16] : vector<4xi32>, view<24xi32>
+  %c_strict = vector.fmaf %peer, %peer, %values : vector<4xf32>
+  %c_strict_bits = vector.bitcast %c_strict : vector<4xf32> to vector<4xi32>
+  %c_strict_observed = vector.andi %c_strict_bits, %mask : vector<4xi32>
+  vector.store %c_strict_observed, %outputs[8] : vector<4xi32>, view<24xi32>
+  %c_native = vector.fmaf<afn> %peer, %peer, %values : vector<4xf32>
+  %c_native_bits = vector.bitcast %c_native : vector<4xf32> to vector<4xi32>
+  %c_native_observed = vector.andi %c_native_bits, %mask : vector<4xi32>
+  vector.store %c_native_observed, %outputs[20] : vector<4xi32>, view<24xi32>
+  func.return
+}
+
+// Every input lane is a NaN and its other operands are finite. The result
+// must have an all-ones exponent and a set quiet bit, independently of payload.
+func.def @fma_nan_f32_reference(%input: buffer, %finite: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %outputs = buffer.view %output[%origin] : buffer -> view<24xi32>
+  %expected = vector.splati 2143289344 : vector<24xi32>
+  vector.store %expected, %outputs[0] : vector<24xi32>, view<24xi32>
+  func.return
+}
+
+check.scenario @fma_nan_f32_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(2139095041) step(1) : tensor<4xi32>
+    %finite = check.generate.fill value(2.0) : tensor<4xf32>
+    %output = check.generate.fill value(0) : tensor<24xi32>
+    check.compare<@fma_nan_f32, @fma_nan_f32_reference>(%input, %finite, %output) : (tensor<4xi32>, tensor<4xf32>, tensor<24xi32>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<24xi32>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(-8388607) step(1) : tensor<4xi32>
+    %finite = check.generate.fill value(2.0) : tensor<4xf32>
+    %output = check.generate.fill value(0) : tensor<24xi32>
+    check.compare<@fma_nan_f32, @fma_nan_f32_reference>(%input, %finite, %output) : (tensor<4xi32>, tensor<4xf32>, tensor<24xi32>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<24xi32>
+    }
+  }
+  check.return
+}
+
+func.def @fma_nan_f64(%input: buffer, %finite: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %inputs = buffer.view %input[%origin] : buffer -> view<4xi64>
+  %outputs = buffer.view %output[%origin] : buffer -> view<24xi64>
+  %bits = vector.load %inputs[0] : view<4xi64> -> vector<4xi64>
+  %values = vector.bitcast %bits : vector<4xi64> to vector<4xf64>
+  %finite_view = buffer.view %finite[%origin] : buffer -> view<4xf64>
+  %peer = vector.load %finite_view[0] : view<4xf64> -> vector<4xf64>
+  %mask = vector.splati 9221120237041090560 : vector<4xi64>
+  %a_strict = vector.fmaf %values, %peer, %peer : vector<4xf64>
+  %a_strict_bits = vector.bitcast %a_strict : vector<4xf64> to vector<4xi64>
+  %a_strict_observed = vector.andi %a_strict_bits, %mask : vector<4xi64>
+  vector.store %a_strict_observed, %outputs[0] : vector<4xi64>, view<24xi64>
+  %a_native = vector.fmaf<afn> %values, %peer, %peer : vector<4xf64>
+  %a_native_bits = vector.bitcast %a_native : vector<4xf64> to vector<4xi64>
+  %a_native_observed = vector.andi %a_native_bits, %mask : vector<4xi64>
+  vector.store %a_native_observed, %outputs[12] : vector<4xi64>, view<24xi64>
+  %b_strict = vector.fmaf %peer, %values, %peer : vector<4xf64>
+  %b_strict_bits = vector.bitcast %b_strict : vector<4xf64> to vector<4xi64>
+  %b_strict_observed = vector.andi %b_strict_bits, %mask : vector<4xi64>
+  vector.store %b_strict_observed, %outputs[4] : vector<4xi64>, view<24xi64>
+  %b_native = vector.fmaf<afn> %peer, %values, %peer : vector<4xf64>
+  %b_native_bits = vector.bitcast %b_native : vector<4xf64> to vector<4xi64>
+  %b_native_observed = vector.andi %b_native_bits, %mask : vector<4xi64>
+  vector.store %b_native_observed, %outputs[16] : vector<4xi64>, view<24xi64>
+  %c_strict = vector.fmaf %peer, %peer, %values : vector<4xf64>
+  %c_strict_bits = vector.bitcast %c_strict : vector<4xf64> to vector<4xi64>
+  %c_strict_observed = vector.andi %c_strict_bits, %mask : vector<4xi64>
+  vector.store %c_strict_observed, %outputs[8] : vector<4xi64>, view<24xi64>
+  %c_native = vector.fmaf<afn> %peer, %peer, %values : vector<4xf64>
+  %c_native_bits = vector.bitcast %c_native : vector<4xf64> to vector<4xi64>
+  %c_native_observed = vector.andi %c_native_bits, %mask : vector<4xi64>
+  vector.store %c_native_observed, %outputs[20] : vector<4xi64>, view<24xi64>
+  func.return
+}
+
+// Every input lane is a NaN and its other operands are finite. The result
+// must have an all-ones exponent and a set quiet bit, independently of payload.
+func.def @fma_nan_f64_reference(%input: buffer, %finite: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %outputs = buffer.view %output[%origin] : buffer -> view<24xi64>
+  %expected = vector.splati 9221120237041090560 : vector<24xi64>
+  vector.store %expected, %outputs[0] : vector<24xi64>, view<24xi64>
+  func.return
+}
+
+check.scenario @fma_nan_f64_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(9218868437227405313) step(1) : tensor<4xi64>
+    %finite = check.generate.fill value(2.0) : tensor<4xf64>
+    %output = check.generate.fill value(0) : tensor<24xi64>
+    check.compare<@fma_nan_f64, @fma_nan_f64_reference>(%input, %finite, %output) : (tensor<4xi64>, tensor<4xf64>, tensor<24xi64>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<24xi64>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(-4503599627370495) step(1) : tensor<4xi64>
+    %finite = check.generate.fill value(2.0) : tensor<4xf64>
+    %output = check.generate.fill value(0) : tensor<24xi64>
+    check.compare<@fma_nan_f64, @fma_nan_f64_reference>(%input, %finite, %output) : (tensor<4xi64>, tensor<4xf64>, tensor<24xi64>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<24xi64>
+    }
+  }
+  check.return
+}

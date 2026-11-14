@@ -150,6 +150,7 @@ loom_corpus_build(
             "memory/buffer/positions.loom:@storage_domain_observations": "TARGET/003",
             "memory/view/offset_recurrence.loom:@window_recurrence_observations": "SUBRANGE/026",
             "numeric/conversion/float8_schema_conversion.loom:@float8_schema_conversion": "TARGET/031",
+            "numeric/float/fused_arithmetic.loom:@fma_nan_f16": "TARGET/002",
             "numeric/matrix/nvfp4.loom:@nvfp4_matrix": "TARGET/031",
         },
     },

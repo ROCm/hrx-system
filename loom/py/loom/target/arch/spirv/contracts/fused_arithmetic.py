@@ -14,8 +14,97 @@ from loom.target.arch.spirv.contracts.descriptor_rule import (
     logical_core_descriptor,
 )
 from loom.target.arch.spirv.ordinary_vector import OrdinaryVectorType
-from loom.target.arch.spirv.ordinary_vector_float import FUSED_MULTIPLY_ADD_INSTRUCTIONS
-from loom.target.contracts import DescriptorRule, Guard, Scalar, ValueRef, Vector
+from loom.target.arch.spirv.ordinary_vector_float import (
+    FUSED_MULTIPLY_ADD_INSTRUCTIONS,
+    FusedMultiplyAddInstruction,
+)
+from loom.target.contracts import (
+    DescriptorEmitForm,
+    DescriptorResultType,
+    DescriptorRule,
+    EmitDescriptorOp,
+    Guard,
+    Scalar,
+    ValueRef,
+    Vector,
+)
+
+
+def _fused_multiply_add_emits(
+    instruction: FusedMultiplyAddInstruction,
+) -> tuple[EmitDescriptorOp, ...]:
+    # Vulkan permits signaling NaNs to survive floating-point instructions.
+    # Preserve the native rounded result, but make arithmetic NaNs quiet.
+    quiet_nan = "nnan" not in instruction.required_fastmath_flags
+    result = ValueRef.temporary("fused") if quiet_nan else ValueRef.result("result")
+    emits = [
+        emit_descriptor_op(
+            descriptor=logical_core_descriptor(instruction.key),
+            operands={name: ValueRef.operand(name) for name in ("a", "b", "c")},
+            results={"dst": result},
+            result_types={"dst": DescriptorResultType()} if quiet_nan else None,
+        )
+    ]
+    if not quiet_nan:
+        return tuple(emits)
+    value_type = instruction.result_type
+    scalar = (
+        value_type.component_type
+        if isinstance(value_type, OrdinaryVectorType)
+        else value_type
+    )
+    nan = ValueRef.temporary("nan")
+    quiet = ValueRef.temporary("quiet_nan")
+    emits.extend(
+        (
+            emit_descriptor_op(
+                descriptor=logical_core_descriptor(
+                    f"spirv.op_f_unord_not_equal.{value_type.suffix}"
+                ),
+                operands={"lhs": result, "rhs": result},
+                results={"dst": nan},
+                result_types={"dst": DescriptorResultType()},
+            ),
+            EmitDescriptorOp(
+                descriptor=logical_core_descriptor(
+                    f"spirv.op_constant.{scalar.suffix}"
+                ),
+                results={"dst": quiet},
+                result_types={"dst": DescriptorResultType()},
+                immediates={
+                    f"{scalar.suffix}_bits": {
+                        "f16": 0x7E00,
+                        "f32": 0x7FC00000,
+                        "f64": 0x7FF8000000000000,
+                    }[scalar.suffix]
+                },
+                form=DescriptorEmitForm.CONST,
+            ),
+        )
+    )
+    if isinstance(value_type, OrdinaryVectorType):
+        lanes = ValueRef.temporary("quiet_nan_lanes")
+        emits.append(
+            emit_descriptor_op(
+                descriptor=logical_core_descriptor(
+                    f"spirv.op_composite_construct.{value_type.suffix}"
+                ),
+                operands={
+                    f"component{lane}": quiet for lane in range(value_type.lane_count)
+                },
+                results={"dst": lanes},
+                result_types={"dst": DescriptorResultType()},
+            )
+        )
+        quiet = lanes
+    emits.append(
+        emit_descriptor_op(
+            descriptor=logical_core_descriptor(f"spirv.op_select.{value_type.suffix}"),
+            operands={"condition": nan, "true_value": quiet, "false_value": result},
+            results={"dst": ValueRef.result("result")},
+        )
+    )
+    return tuple(emits)
 
 
 def fused_multiply_add_rules() -> tuple[DescriptorRule, ...]:
@@ -59,15 +148,7 @@ def fused_multiply_add_rules() -> tuple[DescriptorRule, ...]:
                         ),
                         *descriptor_feature_guards(descriptor),
                     ),
-                    emit=(
-                        emit_descriptor_op(
-                            descriptor=descriptor,
-                            operands={
-                                name: ValueRef.operand(name) for name in ("a", "b", "c")
-                            },
-                            results={"dst": ValueRef.result("result")},
-                        ),
-                    ),
+                    emit=_fused_multiply_add_emits(instruction),
                 )
             )
     return tuple(rules)
