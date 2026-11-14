@@ -24,7 +24,10 @@ func.def @native_denorms(%a: f32, %b: f32, %c: f32) -> (f32) {
 
 // ----
 low.func.def target<spirv.logical.core> abi(shader_entry_point) @native_denorms(%a: reg<spirv.id : f32>, %b: reg<spirv.id : f32>, %c: reg<spirv.id : f32>) -> (reg<spirv.id : f32>) asm {
-  %result = OpFmaKHR.afn.f32 %a, %b, %c
+  %9 = OpFmaKHR.afn.f32 %a, %b, %c : reg<spirv.id>
+  %10 = OpFUnordNotEqual.f32 %9, %9 : reg<spirv.id>
+  %11 = OpConstant.f32 2143289344 : reg<spirv.id>
+  %result = OpSelect.f32 %10, %11, %9
   return %result
 }
 

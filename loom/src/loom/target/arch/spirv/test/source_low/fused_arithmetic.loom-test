@@ -1,7 +1,7 @@
 // RUN: emit spirv-low target=spirv:vulkan1.3+bda+extended-types control-flow=structured-low features=FMA_FLOAT16,FMA_FLOAT32,FMA_FLOAT64,FLOAT_CONTROLS2,FLOAT16_ROUNDING_RTE,FLOAT32_ROUNDING_RTE,FLOAT64_ROUNDING_RTE,FLOAT16_DENORM_PRESERVE,FLOAT32_DENORM_PRESERVE,FLOAT64_DENORM_PRESERVE,FLOAT16_SIGNED_ZERO_INF_NAN_PRESERVE,FLOAT32_SIGNED_ZERO_INF_NAN_PRESERVE,FLOAT64_SIGNED_ZERO_INF_NAN_PRESERVE
 
-// Every source permission combination selects one native instruction. AFN only
-// relaxes subnormal handling; finite also requires NNAN, NINF, and NSZ together.
+// Every policy retains native fused arithmetic. Strict NaN results are quiet;
+// AFN only relaxes subnormals. Finite requires NNAN, NINF, and NSZ together.
 func.def @policies(%a: f32, %b: f32, %c: f32) -> (f32, f32, f32, f32) {
   %strict = scalar.fmaf %a, %b, %c : f32
   %native_denorms = scalar.fmaf<afn> %a, %b, %c : f32
@@ -12,8 +12,13 @@ func.def @policies(%a: f32, %b: f32, %c: f32) -> (f32, f32, f32, f32) {
 
 // ----
 low.func.def target<spirv.logical.core> abi(shader_entry_point) @policies(%a: reg<spirv.id : f32>, %b: reg<spirv.id : f32>, %c: reg<spirv.id : f32>) -> (reg<spirv.id : f32>, reg<spirv.id : f32>, reg<spirv.id : f32>, reg<spirv.id : f32>) asm {
-  %strict = OpFmaKHR.f32 %a, %b, %c
-  %native_denorms = OpFmaKHR.afn.f32 %a, %b, %c
+  %18 = OpFmaKHR.f32 %a, %b, %c : reg<spirv.id>
+  %19 = OpFUnordNotEqual.f32 %18, %18 : reg<spirv.id>
+  %20 = OpConstant.f32 2143289344 : reg<spirv.id>
+  %strict = OpSelect.f32 %19, %20, %18
+  %22 = OpFmaKHR.afn.f32 %a, %b, %c : reg<spirv.id>
+  %23 = OpFUnordNotEqual.f32 %22, %22 : reg<spirv.id>
+  %native_denorms = OpSelect.f32 %23, %20, %22
   %finite = OpFmaKHR.finite.f32 %a, %b, %c
   %finite_native_denorms = OpFmaKHR.finite_afn.f32 %a, %b, %c
   return %strict, %native_denorms, %finite, %finite_native_denorms
@@ -28,7 +33,10 @@ func.def @half(%a: f16, %b: f16, %c: f16) -> (f16) {
 
 // ----
 low.func.def target<spirv.logical.core> abi(shader_entry_point) @half(%a: reg<spirv.id : f16>, %b: reg<spirv.id : f16>, %c: reg<spirv.id : f16>) -> (reg<spirv.id : f16>) asm {
-  %result = OpFmaKHR.f16 %a, %b, %c
+  %9 = OpFmaKHR.f16 %a, %b, %c : reg<spirv.id>
+  %10 = OpFUnordNotEqual.f16 %9, %9 : reg<spirv.id>
+  %11 = OpConstant.f16 32256 : reg<spirv.id>
+  %result = OpSelect.f16 %10, %11, %9
   return %result
 }
 
@@ -41,7 +49,10 @@ func.def @double(%a: f64, %b: f64, %c: f64) -> (f64) {
 
 // ----
 low.func.def target<spirv.logical.core> abi(shader_entry_point) @double(%a: reg<spirv.id : f64>, %b: reg<spirv.id : f64>, %c: reg<spirv.id : f64>) -> (reg<spirv.id : f64>) asm {
-  %result = OpFmaKHR.f64 %a, %b, %c
+  %9 = OpFmaKHR.f64 %a, %b, %c : reg<spirv.id>
+  %10 = OpFUnordNotEqual.f64 %9, %9 : reg<spirv.id>
+  %11 = OpConstant.f64 9221120237041090560 : reg<spirv.id>
+  %result = OpSelect.f64 %10, %11, %9
   return %result
 }
 
@@ -81,22 +92,28 @@ low.kernel.def target<spirv.logical.core> abi_layout({signature = (buffer, buffe
   %38 = OpConstant.offset64 16
   %39 = OpPtrAccessChain.storage_buffer.f32.byte_offset %input, %38
   %40 = OpLoad.storage_buffer.f32 %39
-  %41 = OpFmaKHR.v4f32 %37, %37, %37
-  %42 = OpFmaKHR.f32 %40, %40, %40
-  %43 = OpCompositeExtract.v4f32.f32 %41, 0
-  %44 = OpCompositeExtract.v4f32.f32 %41, 1
-  %45 = OpCompositeExtract.v4f32.f32 %41, 2
-  %46 = OpCompositeExtract.v4f32.f32 %41, 3
-  %48 = OpPtrAccessChain.storage_buffer.f32.byte_offset %output, %25
-  OpStore.storage_buffer.f32 %48, %43
-  %50 = OpPtrAccessChain.storage_buffer.f32.byte_offset %output, %28
-  OpStore.storage_buffer.f32 %50, %44
-  %52 = OpPtrAccessChain.storage_buffer.f32.byte_offset %output, %31
-  OpStore.storage_buffer.f32 %52, %45
-  %54 = OpPtrAccessChain.storage_buffer.f32.byte_offset %output, %34
-  OpStore.storage_buffer.f32 %54, %46
-  %56 = OpPtrAccessChain.storage_buffer.f32.byte_offset %output, %38
-  OpStore.storage_buffer.f32 %56, %42
+  %41 = OpFmaKHR.v4f32 %37, %37, %37 : reg<spirv.id>
+  %42 = OpFUnordNotEqual.v4f32 %41, %41 : reg<spirv.id>
+  %43 = OpConstant.f32 2143289344 : reg<spirv.id>
+  %44 = OpCompositeConstruct.v4f32 %43, %43, %43, %43 : reg<spirv.id>
+  %45 = OpSelect.v4f32 %42, %44, %41
+  %46 = OpFmaKHR.f32 %40, %40, %40 : reg<spirv.id>
+  %47 = OpFUnordNotEqual.f32 %46, %46 : reg<spirv.id>
+  %49 = OpSelect.f32 %47, %43, %46
+  %50 = OpCompositeExtract.v4f32.f32 %45, 0
+  %51 = OpCompositeExtract.v4f32.f32 %45, 1
+  %52 = OpCompositeExtract.v4f32.f32 %45, 2
+  %53 = OpCompositeExtract.v4f32.f32 %45, 3
+  %55 = OpPtrAccessChain.storage_buffer.f32.byte_offset %output, %25
+  OpStore.storage_buffer.f32 %55, %50
+  %57 = OpPtrAccessChain.storage_buffer.f32.byte_offset %output, %28
+  OpStore.storage_buffer.f32 %57, %51
+  %59 = OpPtrAccessChain.storage_buffer.f32.byte_offset %output, %31
+  OpStore.storage_buffer.f32 %59, %52
+  %61 = OpPtrAccessChain.storage_buffer.f32.byte_offset %output, %34
+  OpStore.storage_buffer.f32 %61, %53
+  %63 = OpPtrAccessChain.storage_buffer.f32.byte_offset %output, %38
+  OpStore.storage_buffer.f32 %63, %49
   return
 }
 
@@ -110,6 +127,9 @@ func.def @partial_permissions(%a: f32, %b: f32, %c: f32) -> (f32) {
 
 // ----
 low.func.def target<spirv.logical.core> abi(shader_entry_point) @partial_permissions(%a: reg<spirv.id : f32>, %b: reg<spirv.id : f32>, %c: reg<spirv.id : f32>) -> (reg<spirv.id : f32>) asm {
-  %result = OpFmaKHR.f32 %a, %b, %c
+  %9 = OpFmaKHR.f32 %a, %b, %c : reg<spirv.id>
+  %10 = OpFUnordNotEqual.f32 %9, %9 : reg<spirv.id>
+  %11 = OpConstant.f32 2143289344 : reg<spirv.id>
+  %result = OpSelect.f32 %10, %11, %9
   return %result
 }

@@ -50,42 +50,50 @@ func.def public @caller(%value: f32) -> (f32) {
                OpName %caller "caller"
                OpName %value "value"
                OpName %result_0 "result"
-               OpDecorate %strict FPFastMathMode None
+               OpDecorate %8 FPFastMathMode None
                OpDecorate %finite NoContraction
                OpDecorate %result NoContraction
-               OpMemberDecorate %_struct_15 0 Offset 0
-               OpDecorate %_struct_15 Block
-               OpDecorate %14 DescriptorSet 0
-               OpDecorate %14 Binding 0
-               OpDecorate %18 DescriptorSet 0
-               OpDecorate %18 Binding 1
+               OpMemberDecorate %_struct_23 0 Offset 0
+               OpDecorate %_struct_23 Block
+               OpDecorate %22 DescriptorSet 0
+               OpDecorate %22 Binding 0
+               OpDecorate %26 DescriptorSet 0
+               OpDecorate %26 Binding 1
       %float = OpTypeFloat 32
           %3 = OpTypeFunction %float %float
     %float_2 = OpConstant %float 2
     %float_3 = OpConstant %float 3
+       %bool = OpTypeBool
+%float_0x1_8p_128 = OpConstant %float 0x1.8p+128
+       %uint = OpTypeInt 32 0
         %int = OpTypeInt 32 1
       %int_0 = OpConstant %int 0
- %_struct_15 = OpTypeStruct %float
-%_ptr_StorageBuffer__struct_15 = OpTypePointer StorageBuffer %_struct_15
+ %_struct_23 = OpTypeStruct %float
+%_ptr_StorageBuffer__struct_23 = OpTypePointer StorageBuffer %_struct_23
 %_ptr_StorageBuffer_float = OpTypePointer StorageBuffer %float
-         %14 = OpVariable %_ptr_StorageBuffer__struct_15 StorageBuffer
-         %18 = OpVariable %_ptr_StorageBuffer__struct_15 StorageBuffer
+         %22 = OpVariable %_ptr_StorageBuffer__struct_23 StorageBuffer
+         %26 = OpVariable %_ptr_StorageBuffer__struct_23 StorageBuffer
        %void = OpTypeVoid
-         %20 = OpTypeFunction %void
+         %28 = OpTypeFunction %void
      %helper = OpFunction %float DontInline %3
           %a = OpFunctionParameter %float
           %5 = OpLabel
-     %strict = OpFmaKHR %float %a %float_2 %float_3
+          %8 = OpFmaKHR %float %a %float_2 %float_3
+         %10 = OpFUnordNotEqual %bool %8 %8
+         %14 = OpBitcast %uint %float_0x1_8p_128
+         %15 = OpBitcast %uint %8
+         %16 = OpSelect %uint %10 %14 %15
+     %strict = OpBitcast %float %16
      %finite = OpFmaKHR %float %float_3 %float_2 %a
      %result = OpFAdd %float %strict %finite
                OpReturnValue %result
                OpFunctionEnd
-     %caller = OpFunction %void None %20
-         %21 = OpLabel
-         %22 = OpAccessChain %_ptr_StorageBuffer_float %14 %int_0
-      %value = OpLoad %float %22 Aligned 4
+     %caller = OpFunction %void None %28
+         %29 = OpLabel
+         %30 = OpAccessChain %_ptr_StorageBuffer_float %22 %int_0
+      %value = OpLoad %float %30 Aligned 4
    %result_0 = OpFunctionCall %float %helper %value
-         %25 = OpAccessChain %_ptr_StorageBuffer_float %18 %int_0
-               OpStore %25 %result_0 Aligned 4
+         %33 = OpAccessChain %_ptr_StorageBuffer_float %26 %int_0
+               OpStore %33 %result_0 Aligned 4
                OpReturn
                OpFunctionEnd

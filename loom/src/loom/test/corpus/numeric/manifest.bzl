@@ -37,6 +37,7 @@ NUMERIC_CORPUS = loom_corpus_manifest(
         "float/exponent.loom",
         "float/exponential.loom",
         "float/extrema.loom",
+        "float/fused_arithmetic.loom",
         "float/half_extrema.loom",
         "float/hyperbolic.loom",
         "float/inverse_hyperbolic.loom",

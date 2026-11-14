@@ -7,6 +7,7 @@
 from loom.target.arch.spirv.contracts.logical_core import (
     SPIRV_LOGICAL_CORE_CONTRACT_FRAGMENT,
 )
+from loom.target.arch.spirv.descriptors import SPIRV_LOGICAL_CORE_DESCRIPTOR_SET
 from loom.target.arch.spirv.features import feature_bits_value
 from loom.target.contracts import GuardKind, TypePattern, ValueRef
 
@@ -37,12 +38,54 @@ def test_fused_arithmetic_family_preserves_rounding_and_source_permissions() -> 
             )
         )
         assert rule.priority == len(permissions)
-        assert len(rule.emit) == 1
+        rule.validate(SPIRV_LOGICAL_CORE_DESCRIPTOR_SET)
         assert rule.emit[0].descriptor is rule.descriptor
         assert rule.emit[0].operands == {
             name: ValueRef.operand(name) for name in ("a", "b", "c")
         }
-        assert rule.emit[0].results == {"dst": ValueRef.result("result")}
+        if "nnan" in permissions:
+            assert len(rule.emit) == 1
+            assert rule.emit[0].results == {"dst": ValueRef.result("result")}
+        else:
+            pattern = type_guards["result"]
+            element = pattern.elements[0]
+            lanes = pattern.lanes if pattern.kind == "vector" else 1
+            carrier = element if lanes == 1 else f"v{lanes}{element}"
+            assert len(rule.emit) == (4 if lanes == 1 else 5)
+            fused = rule.emit[0].results["dst"]
+            classify, literal = rule.emit[1:3]
+            assert classify.descriptor.key == f"spirv.op_f_unord_not_equal.{carrier}"
+            assert classify.operands == {"lhs": fused, "rhs": fused}
+            assert literal.immediates == {
+                f"{element}_bits": {
+                    "f16": 0x7E00,
+                    "f32": 0x7FC00000,
+                    "f64": 0x7FF8000000000000,
+                }[element]
+            }
+            quiet = literal.results["dst"]
+            if lanes != 1:
+                broadcast = rule.emit[3]
+                assert broadcast.operands == {
+                    f"component{lane}": quiet for lane in range(lanes)
+                }
+                quiet = broadcast.results["dst"]
+            assert rule.emit[-1].descriptor.key == f"spirv.op_select.{carrier}"
+            assert rule.emit[-1].operands == {
+                "condition": classify.results["dst"],
+                "true_value": quiet,
+                "false_value": fused,
+            }
+            assert rule.emit[-1].results == {"dst": ValueRef.result("result")}
+        # Result normalization must not add optional integer-width requirements.
+        for step in rule.emit:
+            assert len(step.descriptor.feature_mask_words) <= len(
+                rule.descriptor.feature_mask_words
+            )
+            assert not any(
+                required & ~rule.descriptor.feature_mask_words[index]
+                for index, required in enumerate(step.descriptor.feature_mask_words)
+            )
 
     expected = set()
     descriptors = {}
