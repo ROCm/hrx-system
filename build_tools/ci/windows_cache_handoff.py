@@ -679,6 +679,29 @@ def _publish_blobs(cas: CasClient, blobs: dict[str, BlobSource], jobs: int = 8) 
         list(executor.map(publish, blobs.items()))
 
 
+def _verify_blobs_resident(
+    cas: CasClient, blobs: dict[str, BlobSource], jobs: int = 8
+) -> None:
+    """Verifies one complete handoff closure is resident after publication."""
+
+    def verify(entry: tuple[str, BlobSource]) -> str | None:
+        digest, source = entry
+        return None if cas.contains(digest, source.size) else digest
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as executor:
+        missing = [
+            digest
+            for digest in executor.map(verify, blobs.items())
+            if digest is not None
+        ]
+    if missing:
+        examples = ", ".join(missing[:3])
+        raise HandoffError(
+            f"CAS evicted {len(missing)} handoff blob(s) during publication; "
+            f"first missing digest(s): {examples}"
+        )
+
+
 def _render_build_file(rules: list[dict[str, Any]]) -> str:
     lines = [
         'load("//handoff:build_defs.bzl", "windows_cache_handoff_test")',
@@ -800,6 +823,10 @@ def emit_handoff_packages(
             _render_build_file(rules), encoding="utf-8"
         )
     _publish_blobs(cas, blobs)
+    # A remote cache is not durable storage. Promote the complete closure to
+    # the front of bazel-remote's LRU and fail the producer before publishing
+    # its manifest if the closure cannot remain resident for one full pass.
+    _verify_blobs_resident(cas, blobs)
     summary = {
         "schema_version": SCHEMA_VERSION,
         "cas_url": cas.base_url,

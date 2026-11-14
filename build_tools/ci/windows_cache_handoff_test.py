@@ -205,7 +205,10 @@ class WindowsCacheHandoffTest(unittest.TestCase):
         self.assertEqual(manifest["test"]["environment"], {"FIXTURE_ENV": "present"})
         self.assertEqual(manifest["test"]["inherited_environment"], ["PATH"])
         self.assertEqual(len(_CasHandler.blobs), 2)
-        self.assertCountEqual(_CasHandler.heads, _CasHandler.blobs)
+        self.assertCountEqual(
+            _CasHandler.heads,
+            [digest for digest in _CasHandler.blobs for _ in range(2)],
+        )
         self.assertCountEqual(_CasHandler.puts, _CasHandler.blobs)
         self.assertEqual(summary["compatible_test_count"], 1)
         self.assertEqual(summary["unique_blob_count"], 2)
@@ -249,7 +252,22 @@ class WindowsCacheHandoffTest(unittest.TestCase):
         )
 
         self.assertEqual(_CasHandler.puts, first_puts)
-        self.assertEqual(len(_CasHandler.heads), 2 * len(_CasHandler.blobs))
+        self.assertEqual(len(_CasHandler.heads), 4 * len(_CasHandler.blobs))
+
+    def test_residency_gate_rejects_evicted_blob(self):
+        source = self.root / "blob"
+        source.write_bytes(b"handoff product")
+        digest = hashlib.sha256(source.read_bytes()).hexdigest()
+
+        with self.assertRaisesRegex(
+            handoff.HandoffError,
+            rf"evicted 1 handoff blob.*{digest}",
+        ):
+            handoff._verify_blobs_resident(
+                handoff.CasClient(self.cas_url),
+                {digest: handoff.BlobSource(path=source, size=source.stat().st_size)},
+                jobs=1,
+            )
 
     def test_emit_resolves_rootpath_arguments_against_exact_runfiles(self):
         execution_root, target_metadata, provider_metadata = self._write_fixture()
