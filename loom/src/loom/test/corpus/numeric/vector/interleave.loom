@@ -357,9 +357,13 @@ func.def inline @route_packets_oracle(%count: index, %element_bytes: index, %pos
 func.def @native_packet_routes(%input: buffer, %other: buffer, %output: buffer) {
   %c1 = index.constant 1 : index
   %c2 = index.constant 2 : index
+  %c3 = index.constant 3 : index
   %c4 = index.constant 4 : index
+  %c5 = index.constant 5 : index
   %c8 = index.constant 8 : index
+  %c9 = index.constant 9 : index
   %c16 = index.constant 16 : index
+  %c17 = index.constant 17 : index
   %c32 = index.constant 32 : index
   %b0 = index.constant 0 : offset
   %b1 = index.constant 8 : offset
@@ -376,6 +380,10 @@ func.def @native_packet_routes(%input: buffer, %other: buffer, %output: buffer) 
   %q0 = index.constant 1400 : offset
   %q1 = index.constant 1464 : offset
   %q2 = index.constant 1592 : offset
+  %byte_tail = index.constant 1848 : offset
+  %word_tail = index.constant 1984 : offset
+  %dword_tail = index.constant 2128 : offset
+  %qword_tail = index.constant 2288 : offset
   func.call @route_byte_packets(%c1, %b0, %input, %other, %output) : (index, offset, buffer, buffer, buffer)
   func.call @route_byte_packets(%c8, %b1, %input, %other, %output) : (index, offset, buffer, buffer, buffer)
   func.call @route_byte_packets(%c16, %b2, %input, %other, %output) : (index, offset, buffer, buffer, buffer)
@@ -391,15 +399,24 @@ func.def @native_packet_routes(%input: buffer, %other: buffer, %output: buffer) 
   func.call @route_qword_packets(%c1, %q0, %input, %other, %output) : (index, offset, buffer, buffer, buffer)
   func.call @route_qword_packets(%c2, %q1, %input, %other, %output) : (index, offset, buffer, buffer, buffer)
   func.call @route_qword_packets(%c4, %q2, %input, %other, %output) : (index, offset, buffer, buffer, buffer)
+  // These packets cross native boundaries with a final partial group.
+  func.call @route_byte_packets(%c17, %byte_tail, %input, %other, %output) : (index, offset, buffer, buffer, buffer)
+  func.call @route_word_packets(%c9, %word_tail, %input, %other, %output) : (index, offset, buffer, buffer, buffer)
+  func.call @route_dword_packets(%c5, %dword_tail, %input, %other, %output) : (index, offset, buffer, buffer, buffer)
+  func.call @route_qword_packets(%c3, %qword_tail, %input, %other, %output) : (index, offset, buffer, buffer, buffer)
   func.return
 }
 
 func.def @native_packet_routes_oracle(%input: buffer, %other: buffer, %output: buffer) {
   %c1 = index.constant 1 : index
   %c2 = index.constant 2 : index
+  %c3 = index.constant 3 : index
   %c4 = index.constant 4 : index
+  %c5 = index.constant 5 : index
   %c8 = index.constant 8 : index
+  %c9 = index.constant 9 : index
   %c16 = index.constant 16 : index
+  %c17 = index.constant 17 : index
   %c32 = index.constant 32 : index
   %b0 = index.constant 0 : offset
   %b1 = index.constant 8 : offset
@@ -416,6 +433,10 @@ func.def @native_packet_routes_oracle(%input: buffer, %other: buffer, %output: b
   %q0 = index.constant 1400 : offset
   %q1 = index.constant 1464 : offset
   %q2 = index.constant 1592 : offset
+  %byte_tail = index.constant 1848 : offset
+  %word_tail = index.constant 1984 : offset
+  %dword_tail = index.constant 2128 : offset
+  %qword_tail = index.constant 2288 : offset
   func.call @route_packets_oracle(%c1, %c1, %b0, %input, %other, %output) : (index, index, offset, buffer, buffer, buffer)
   func.call @route_packets_oracle(%c8, %c1, %b1, %input, %other, %output) : (index, index, offset, buffer, buffer, buffer)
   func.call @route_packets_oracle(%c16, %c1, %b2, %input, %other, %output) : (index, index, offset, buffer, buffer, buffer)
@@ -431,6 +452,10 @@ func.def @native_packet_routes_oracle(%input: buffer, %other: buffer, %output: b
   func.call @route_packets_oracle(%c1, %c8, %q0, %input, %other, %output) : (index, index, offset, buffer, buffer, buffer)
   func.call @route_packets_oracle(%c2, %c8, %q1, %input, %other, %output) : (index, index, offset, buffer, buffer, buffer)
   func.call @route_packets_oracle(%c4, %c8, %q2, %input, %other, %output) : (index, index, offset, buffer, buffer, buffer)
+  func.call @route_packets_oracle(%c17, %c1, %byte_tail, %input, %other, %output) : (index, index, offset, buffer, buffer, buffer)
+  func.call @route_packets_oracle(%c9, %c2, %word_tail, %input, %other, %output) : (index, index, offset, buffer, buffer, buffer)
+  func.call @route_packets_oracle(%c5, %c4, %dword_tail, %input, %other, %output) : (index, index, offset, buffer, buffer, buffer)
+  func.call @route_packets_oracle(%c3, %c8, %qword_tail, %input, %other, %output) : (index, index, offset, buffer, buffer, buffer)
   func.return
 }
 
@@ -440,12 +465,12 @@ check.scenario @native_packet_routes_values {
     %right_seed = check.entropy.read %entropy[1] : check.entropy -> i64
     %input = check.generate.random.uniform seed(%left_seed) range(-128 to 127) : tensor<64xi8>
     %other = check.generate.random.uniform seed(%right_seed) range(-128 to 127) : tensor<64xi8>
-    %storage = check.generate.fill value(91) : tensor<1880xi8>
-    %output = check.tensor.view %storage offset(16) : tensor<1880xi8> -> tensor<1848xi8>
-    check.compare<@native_packet_routes, @native_packet_routes_oracle>(%input, %other, %output) : (tensor<64xi8>, tensor<64xi8>, tensor<1848xi8>) -> () {
+    %storage = check.generate.fill value(91) : tensor<2512xi8>
+    %output = check.tensor.view %storage offset(16) : tensor<2512xi8> -> tensor<2480xi8>
+    check.compare<@native_packet_routes, @native_packet_routes_oracle>(%input, %other, %output) : (tensor<64xi8>, tensor<64xi8>, tensor<2480xi8>) -> () {
       check.expect.bitwise actual(%input) expected(%input) : tensor<64xi8>
       check.expect.bitwise actual(%other) expected(%other) : tensor<64xi8>
-      check.expect.bitwise actual(%storage) expected(%storage) : tensor<1880xi8>
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<2512xi8>
     }
   }
   check.return

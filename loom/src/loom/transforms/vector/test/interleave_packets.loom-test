@@ -1,0 +1,97 @@
+// RUN: pass target-legalize{mode=eager,policy=require-native},canonicalize,dce
+
+x86.target<avx2> @target
+
+// Both result packets consume native halves. The input remains independently
+// live so legalization cannot replace its value with the interleaved result.
+func.def target(@target) @zip_packets(%left: vector<32xi8>, %right: vector<32xi8>) -> (vector<32xi8>, vector<32xi8>, vector<32xi8>) {
+  %joined = vector.interleave<0> %left, %right : vector<32xi8>, vector<32xi8> -> vector<64xi8>
+  %head = vector.slice %joined[0] : vector<64xi8> -> vector<32xi8>
+  %tail = vector.slice %joined[32] : vector<64xi8> -> vector<32xi8>
+  func.return %head, %tail, %left : vector<32xi8>, vector<32xi8>, vector<32xi8>
+}
+
+// ----
+x86.target<avx2> @target
+
+func.def target(@target) @zip_packets(%left: vector<32xi8>, %right: vector<32xi8>) -> (vector<32xi8>, vector<32xi8>, vector<32xi8>) {
+  %8 = vector.slice %left[0] : vector<32xi8> -> vector<16xi8>
+  %9 = vector.slice %right[0] : vector<32xi8> -> vector<16xi8>
+  %10 = vector.interleave<0> %8, %9 : vector<16xi8>, vector<16xi8> -> vector<32xi8>
+  %11 = vector.slice %left[16] : vector<32xi8> -> vector<16xi8>
+  %12 = vector.slice %right[16] : vector<32xi8> -> vector<16xi8>
+  %13 = vector.interleave<0> %11, %12 : vector<16xi8>, vector<16xi8> -> vector<32xi8>
+  func.return %10, %13, %left : vector<32xi8>, vector<32xi8>, vector<32xi8>
+}
+
+// ====
+// RUN: pass target-legalize{mode=eager,policy=require-native},canonicalize,dce
+
+x86.target<avx2> @target
+
+// Source packets are retained from the producer. Both result streams preserve
+// their original ordering across the native packet boundary.
+func.def target(@target) @unzip_packets(%head: vector<32xi8>, %tail: vector<32xi8>) -> (vector<32xi8>, vector<32xi8>, vector<32xi8>) {
+  %source = vector.concat<0> %head, %tail : vector<32xi8>, vector<32xi8> -> vector<64xi8>
+  %even, %odd = vector.deinterleave<0> %source : vector<64xi8> -> vector<32xi8>, vector<32xi8>
+  func.return %even, %odd, %head : vector<32xi8>, vector<32xi8>, vector<32xi8>
+}
+
+// ----
+x86.target<avx2> @target
+
+func.def target(@target) @unzip_packets(%head: vector<32xi8>, %tail: vector<32xi8>) -> (vector<32xi8>, vector<32xi8>, vector<32xi8>) {
+  %9, %10 = vector.deinterleave<0> %head : vector<32xi8> -> vector<16xi8>, vector<16xi8>
+  %12, %13 = vector.deinterleave<0> %tail : vector<32xi8> -> vector<16xi8>, vector<16xi8>
+  %even = vector.concat<0> %9, %12 : vector<16xi8>, vector<16xi8> -> vector<32xi8>
+  %odd = vector.concat<0> %10, %13 : vector<16xi8>, vector<16xi8> -> vector<32xi8>
+  func.return %even, %odd, %head : vector<32xi8>, vector<32xi8>, vector<32xi8>
+}
+
+// ====
+// RUN: pass target-legalize{mode=eager,policy=require-native},canonicalize,dce
+
+x86.target<avx2> @target
+
+// The final pair uses a smaller native form. A repeated source still supplies
+// both halves, while exact partition facts preserve the irregular tail.
+func.def target(@target) @zip_tail(%head: vector<16xi8>, %tail: vector<1xi8>) -> (vector<32xi8>, vector<2xi8>) {
+  %source = vector.concat<0> %head, %tail : vector<16xi8>, vector<1xi8> -> vector<17xi8>
+  %joined = vector.interleave<0> %source, %source : vector<17xi8>, vector<17xi8> -> vector<34xi8>
+  %body = vector.slice %joined[0] : vector<34xi8> -> vector<32xi8>
+  %end = vector.slice %joined[32] : vector<34xi8> -> vector<2xi8>
+  func.return %body, %end : vector<32xi8>, vector<2xi8>
+}
+
+// ----
+x86.target<avx2> @target
+
+func.def target(@target) @zip_tail(%head: vector<16xi8>, %tail: vector<1xi8>) -> (vector<32xi8>, vector<2xi8>) {
+  %10 = vector.interleave<0> %head, %head : vector<16xi8>, vector<16xi8> -> vector<32xi8>
+  %13 = vector.interleave<0> %tail, %tail : vector<1xi8>, vector<1xi8> -> vector<2xi8>
+  func.return %10, %13 : vector<32xi8>, vector<2xi8>
+}
+
+// ====
+// RUN: pass target-legalize{mode=eager,policy=require-native},canonicalize,dce
+
+x86.target<avx2> @target
+
+func.def target(@target) @unzip_tail(%head: vector<32xi8>, %tail: vector<2xi8>) -> (vector<16xi8>, vector<1xi8>, vector<16xi8>, vector<1xi8>) {
+  %source = vector.concat<0> %head, %tail : vector<32xi8>, vector<2xi8> -> vector<34xi8>
+  %even, %odd = vector.deinterleave<0> %source : vector<34xi8> -> vector<17xi8>, vector<17xi8>
+  %even_head = vector.slice %even[0] : vector<17xi8> -> vector<16xi8>
+  %even_tail = vector.slice %even[16] : vector<17xi8> -> vector<1xi8>
+  %odd_head = vector.slice %odd[0] : vector<17xi8> -> vector<16xi8>
+  %odd_tail = vector.slice %odd[16] : vector<17xi8> -> vector<1xi8>
+  func.return %even_head, %even_tail, %odd_head, %odd_tail : vector<16xi8>, vector<1xi8>, vector<16xi8>, vector<1xi8>
+}
+
+// ----
+x86.target<avx2> @target
+
+func.def target(@target) @unzip_tail(%head: vector<32xi8>, %tail: vector<2xi8>) -> (vector<16xi8>, vector<1xi8>, vector<16xi8>, vector<1xi8>) {
+  %14, %15 = vector.deinterleave<0> %head : vector<32xi8> -> vector<16xi8>, vector<16xi8>
+  %17, %18 = vector.deinterleave<0> %tail : vector<2xi8> -> vector<1xi8>, vector<1xi8>
+  func.return %14, %17, %15, %18 : vector<16xi8>, vector<1xi8>, vector<16xi8>, vector<1xi8>
+}
