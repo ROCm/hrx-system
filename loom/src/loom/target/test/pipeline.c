@@ -242,8 +242,15 @@ static iree_status_t loom_test_pipeline_programs(
                .collective_end = loom_test_pipeline_collective_end,
                .user_data = state}};
   loom_pipeline_control_function_t* functions = NULL;
+  loom_pipeline_entry_scope_t* scope = NULL;
+  IREE_RETURN_IF_ERROR(loom_pipeline_entry_scope_create(
+      &loom_pipeline_entry_scope_type, &realization->invocations.lifetimes,
+      realization->invocations.count,
+      realization->version_owner ? realization->version_owner->arena
+                                 : rewriter->arena,
+      &scope));
   IREE_RETURN_IF_ERROR(loom_pipeline_control_materialize(
-      rewriter, realization, &state->execution, &options, &functions));
+      rewriter, realization, &state->execution, scope, &options, &functions));
   for (iree_host_size_t i = 0; i < state->execution.offsets[1]; ++i) {
     IREE_RETURN_IF_ERROR(
         loom_rewriter_set_attr(rewriter, functions[i].function.op, 1,

@@ -711,6 +711,7 @@ static iree_status_t loom_pipeline_control_project(
 iree_status_t loom_pipeline_control_materialize(
     loom_rewriter_t* rewriter, const loom_pipeline_realization_t* realization,
     const loom_pipeline_execution_t* execution,
+    const loom_pipeline_entry_scope_t* scope,
     const loom_pipeline_control_options_t* options,
     loom_pipeline_control_function_t** out_functions) {
   *out_functions = NULL;
@@ -718,12 +719,6 @@ iree_status_t loom_pipeline_control_materialize(
     return iree_ok_status();
   }
   const loom_pipeline_invocations_t* invocations = &realization->invocations;
-  const loom_pipeline_entry_scope_t* scope = NULL;
-  IREE_RETURN_IF_ERROR(loom_pipeline_entry_scope_clone(
-      &invocations->lifetimes, invocations->count,
-      realization->version_owner ? realization->version_owner->arena
-                                 : rewriter->arena,
-      &scope));
   loom_pipeline_control_function_t* functions = NULL;
   IREE_RETURN_IF_ERROR(
       iree_arena_allocate_array(rewriter->arena, execution->participant_count,

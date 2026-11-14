@@ -108,6 +108,9 @@ typedef struct loom_pipeline_control_function_t {
 // already been materialized and their original ordinal domains retain argument
 // correspondence after signature pruning. Source constructions remain
 // immutable.
+// The caller owns |scope| in the surrounding compilation and completes its
+// concrete execution state before publishing these programs. Every projected
+// entry shares that same owner; this routine adds no private lifetime copy.
 //
 // The returned table uses execution's compact invocation/engine slots. Every
 // entry represents an actual participant; execution_index maps engine
@@ -119,6 +122,7 @@ typedef struct loom_pipeline_control_function_t {
 iree_status_t loom_pipeline_control_materialize(
     loom_rewriter_t* rewriter, const loom_pipeline_realization_t* realization,
     const loom_pipeline_execution_t* execution,
+    const loom_pipeline_entry_scope_t* scope,
     const loom_pipeline_control_options_t* options,
     loom_pipeline_control_function_t** out_functions);
 

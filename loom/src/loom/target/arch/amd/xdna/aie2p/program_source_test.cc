@@ -99,6 +99,7 @@ TEST_F(ProgramSourceTest, RetainedPhaseOwnersFollowTheAdmittedHelperOrder) {
   };
   const iree_host_size_t owners[] = {1, 5, 6};
   loom_pipeline_entry_scope_t scope = {
+      .type = &loom_pipeline_entry_scope_type,
       .lifetimes =
           {
               .nodes = nodes,
@@ -168,6 +169,7 @@ TEST_F(ProgramSourceTest, CallFreePhaseBorrowsItsImmutableOwner) {
   };
   const iree_host_size_t owner = 1;
   loom_pipeline_entry_scope_t scope = {
+      .type = &loom_pipeline_entry_scope_type,
       .lifetimes =
           {
               .nodes = nodes,

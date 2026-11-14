@@ -140,6 +140,18 @@ loom_cc_test(
 )
 
 loom_cc_library(
+    name = "execution_plan",
+    srcs = ["execution_plan.c"],
+    hdrs = ["execution_plan.h"],
+    deps = [
+        "//loom/src/loom/analysis/pipeline:entries",
+        "//loom/src/loom/target/arch/amd/xdna/aie2p/array:plan",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
     name = "native",
     srcs = [
         "channel_state.c",
@@ -187,11 +199,13 @@ loom_cc_library(
     ],
     deps = [
         ":dma_plan",
+        ":execution_plan",
         ":join",
         ":worker",
         "//loom/src/loom/analysis:source_storage_packing",
         "//loom/src/loom/analysis:storage_geometry",
         "//loom/src/loom/analysis/pipeline:continuations",
+        "//loom/src/loom/analysis/pipeline:entries",
         "//loom/src/loom/analysis/pipeline:execution",
         "//loom/src/loom/analysis/pipeline:invocations",
         "//loom/src/loom/analysis/pipeline:progress",
@@ -234,6 +248,22 @@ loom_cc_library(
         "//runtime/src/iree/base:core_headers",
         "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "execution_plan_test",
+    srcs = ["execution_plan_test.cc"],
+    deps = [
+        ":execution_plan",
+        ":native",
+        "//loom/src/loom/analysis/pipeline:entries",
+        "//loom/src/loom/pass:types",
+        "//loom/src/loom/target/arch/amd/xdna/aie2p/array:plan",
+        "//loom/src/loom/target/arch/amd/xdna/array:facts",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 

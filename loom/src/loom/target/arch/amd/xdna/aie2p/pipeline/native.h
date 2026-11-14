@@ -833,6 +833,8 @@ typedef struct loom_aie2p_native_context_t {
   iree_host_size_t distribution_sharing_capacity;
   // Complete entry program per physical core, initialized and joined once.
   loom_func_like_t* programs;
+  // Owned physical selection published after program construction completes.
+  const loom_aie2p_execution_plan_t* plan;
   // Source descriptor relocations for stable caller-buffer input phases.
   struct loom_aie2p_native_input_descriptor_t* input_descriptors;
   // Caller buffer contracts in source argument order.

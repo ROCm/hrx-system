@@ -111,6 +111,47 @@ static iree_status_t loom_aie2p_native_program_frame(
       realization->invocations.entries[0]);
 }
 
+static iree_status_t loom_aie2p_native_retain_plan(
+    loom_aie2p_native_context_t* context, iree_arena_allocator_t* arena,
+    loom_aie2p_execution_plan_t* plan) {
+  const iree_host_size_t tile_count =
+      (iree_host_size_t)context->family->column_count *
+      context->family->row_count;
+  loom_aie2p_execution_tile_t* tiles = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      context->pass->arena, tile_count, sizeof(*tiles), (void**)&tiles));
+  for (iree_host_size_t i = 0; i < tile_count; ++i) {
+    const loom_aie2p_native_tile_t* tile = &context->tiles[i];
+    tiles[i] = (loom_aie2p_execution_tile_t){
+        .memory_length =
+            tile->pool_index == UINT32_MAX
+                ? 0
+                : loom_source_storage_packing_requirement(
+                      context->inventory.pools[tile->pool_index].packing)
+                      .byte_length,
+        .lock_count = tile->next_lock,
+        .descriptor_counts = {tile->descriptor_counts[0],
+                              tile->descriptor_counts[1]},
+        .mm2s_count = tile->mm2s_count,
+        .s2mm_count = tile->s2mm_count,
+    };
+  }
+  const loom_aie2p_execution_plan_t selected = {
+      .tiles = tiles,
+      .routing = context->routing,
+      .routes = context->routes,
+      .control_sources = context->control_sources,
+      .control_destination_sources = context->control_destination_sources,
+      .switches = context->switches,
+      .connections = context->control_connections,
+      .connection_count = context->control_connection_count,
+  };
+  IREE_RETURN_IF_ERROR(
+      loom_aie2p_execution_plan_copy_resources(&selected, arena, plan));
+  context->plan = plan;
+  return iree_ok_status();
+}
+
 iree_status_t loom_aie2p_native_emit_programs(
     void* user_data, loom_rewriter_t* rewriter,
     const loom_pipeline_realization_t* realization, bool* out_valid) {
@@ -138,6 +179,13 @@ iree_status_t loom_aie2p_native_emit_programs(
     }
   }
   context->code.realization = realization;
+  iree_arena_allocator_t* owner_arena = realization->version_owner
+                                            ? realization->version_owner->arena
+                                            : rewriter->arena;
+  loom_pipeline_entry_scope_t* scope = NULL;
+  IREE_RETURN_IF_ERROR(loom_pipeline_entry_scope_create(
+      &loom_aie2p_execution_plan_type, &realization->invocations.lifetimes,
+      realization->invocations.count, owner_arena, &scope));
   const loom_type_t frame_type = loom_type_buffer();
   const loom_pipeline_control_options_t options = {
       .retain_phase_calls = true,
@@ -155,7 +203,7 @@ iree_status_t loom_aie2p_native_emit_programs(
                .user_data = context}};
   loom_pipeline_control_function_t* functions = NULL;
   IREE_RETURN_IF_ERROR(loom_pipeline_control_materialize(
-      rewriter, realization, &context->execution, &options, &functions));
+      rewriter, realization, &context->execution, scope, &options, &functions));
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       context->pass->arena, context->execution.engine_count,
       sizeof(*context->programs), (void**)&context->programs));
@@ -232,6 +280,8 @@ iree_status_t loom_aie2p_native_emit_programs(
                                                 LOOM_LOCATION_UNKNOWN, &call));
     context->programs[engine] = function;
   }
+  IREE_RETURN_IF_ERROR(loom_aie2p_native_retain_plan(
+      context, owner_arena, (loom_aie2p_execution_plan_t*)scope));
   *out_valid = true;
   return iree_ok_status();
 }

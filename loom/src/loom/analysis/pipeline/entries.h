@@ -13,16 +13,37 @@
 extern "C" {
 #endif
 
+typedef struct loom_pipeline_entry_scope_t loom_pipeline_entry_scope_t;
+
+// Static representation contract for compilation-owned execution state. A
+// concrete scope embeds the common scope first and owns every additional fact
+// needed by its execution owner. No source IR or pass storage may be borrowed.
+typedef struct loom_pipeline_entry_scope_type_t {
+  // Size of the complete concrete scope, including the common prefix.
+  iree_host_size_t size;
+  // Copies concrete state after the common lifetime facts have been cloned.
+  // NULL for a scope containing only the common prefix. Allocation is the
+  // only failure; the source is already admitted compiler-owned state.
+  iree_status_t (*clone)(const loom_pipeline_entry_scope_t* source,
+                         iree_arena_allocator_t* arena,
+                         loom_pipeline_entry_scope_t* target);
+} loom_pipeline_entry_scope_type_t;
+
 // Source-independent execution lifetimes shared by the entries implementing
 // one pipeline. Ordinary projected control owns runtime order and repetition;
 // this retained tree owns coexistence and outer resource lifetimes. It contains
 // no source operations, value IDs, or references to transient analysis storage.
-typedef struct loom_pipeline_entry_scope_t {
+struct loom_pipeline_entry_scope_t {
+  // Static identity and independent-copy contract of the concrete owner.
+  const loom_pipeline_entry_scope_type_t* type;
   // Complete indexed construction lifetimes, independent of the source IR.
   loom_pipeline_lifetimes_t lifetimes;
   // Number of construction owners in lifetimes.owners.
   iree_host_size_t owner_count;
-} loom_pipeline_entry_scope_t;
+};
+
+// Representation containing only the common execution lifetime facts.
+extern const loom_pipeline_entry_scope_type_t loom_pipeline_entry_scope_type;
 
 typedef enum loom_pipeline_entry_role_e {
   // Runs this engine's complete contribution to a construction.
@@ -49,12 +70,19 @@ typedef struct loom_pipeline_entry_binding_t {
   loom_pipeline_entry_role_t role;
 } loom_pipeline_entry_binding_t;
 
-// Copies the producer's indexed lifetime facts into their compilation owner.
+// Allocates a concrete scope and copies the producer's indexed lifetime facts.
+// The caller initializes its concrete fields before publishing the scope to
+// consumers. All fields and referenced storage belong to the compilation arena.
+iree_status_t loom_pipeline_entry_scope_create(
+    const loom_pipeline_entry_scope_type_t* type,
+    const loom_pipeline_lifetimes_t* lifetimes, iree_host_size_t owner_count,
+    iree_arena_allocator_t* arena, loom_pipeline_entry_scope_t** out_scope);
+
+// Copies a complete scope into an independent compilation owner.
 // No source traversal, ancestry reconstruction, or physical planning occurs.
 // The result can outlive both source IR and its original analysis arena.
 iree_status_t loom_pipeline_entry_scope_clone(
-    const loom_pipeline_lifetimes_t* lifetimes, iree_host_size_t owner_count,
-    iree_arena_allocator_t* arena,
+    const loom_pipeline_entry_scope_t* source, iree_arena_allocator_t* arena,
     const loom_pipeline_entry_scope_t** out_scope);
 
 // Retained direct-call uses of one entry in a complete acyclic closure. The

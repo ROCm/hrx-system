@@ -1064,11 +1064,39 @@ TEST_F(TargetFunctionVersionProjectionTest,
       .has_serial = true,
   };
   IREE_ASSERT_OK(loom_pipeline_lifetimes_index(&version_arena_, &lifetimes));
-  const loom_pipeline_entry_scope_t* scopes[2];
-  for (auto& scope : scopes) {
-    IREE_ASSERT_OK(loom_pipeline_entry_scope_clone(
-        &lifetimes, IREE_ARRAYSIZE(owners), &version_arena_, &scope));
+  struct ResourceScope {
+    // Shared lifetime owner embedded first for compilation projection.
+    loom_pipeline_entry_scope_t base;
+    // Owned per-engine resource extents, independent of source IR identities.
+    uint64_t* extents;
+  };
+  static const loom_pipeline_entry_scope_type_t resource_type = {
+      .size = sizeof(ResourceScope),
+      .clone = [](const loom_pipeline_entry_scope_t* source,
+                  iree_arena_allocator_t* arena,
+                  loom_pipeline_entry_scope_t* target) -> iree_status_t {
+        auto* copy = reinterpret_cast<ResourceScope*>(target);
+        IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+            arena, 2, sizeof(*copy->extents),
+            reinterpret_cast<void**>(&copy->extents)));
+        const auto* original = reinterpret_cast<const ResourceScope*>(source);
+        copy->extents[0] = original->extents[0];
+        copy->extents[1] = original->extents[1];
+        return iree_ok_status();
+      },
+  };
+  loom_pipeline_entry_scope_t* scopes[2];
+  for (size_t i = 0; i < IREE_ARRAYSIZE(scopes); ++i) {
+    IREE_ASSERT_OK(loom_pipeline_entry_scope_create(
+        i == 0 ? &resource_type : &loom_pipeline_entry_scope_type, &lifetimes,
+        IREE_ARRAYSIZE(owners), &version_arena_, &scopes[i]));
   }
+  auto* resources = reinterpret_cast<ResourceScope*>(scopes[0]);
+  IREE_ASSERT_OK(
+      iree_arena_allocate_array(&version_arena_, 2, sizeof(*resources->extents),
+                                reinterpret_cast<void**>(&resources->extents)));
+  resources->extents[0] = 4096;
+  resources->extents[1] = 8192;
   const loom_pipeline_entry_role_t roles[] = {
       LOOM_PIPELINE_ENTRY_ROOT, LOOM_PIPELINE_ENTRY_START,
       LOOM_PIPELINE_ENTRY_RETIRE, LOOM_PIPELINE_ENTRY_COMPLETE};
@@ -1102,8 +1130,14 @@ TEST_F(TargetFunctionVersionProjectionTest,
   EXPECT_NE(first->scope->lifetimes.nodes, scopes[0]->lifetimes.nodes);
   EXPECT_NE(first->scope->lifetimes.ancestry, scopes[0]->lifetimes.ancestry);
   EXPECT_NE(first->scope->lifetimes.owners, scopes[0]->lifetimes.owners);
+  EXPECT_EQ(first->scope->type, &resource_type);
+  const auto* projected_resources =
+      reinterpret_cast<const ResourceScope*>(first->scope);
+  EXPECT_NE(projected_resources->extents, resources->extents);
   source.reset();
   iree_arena_reset(&version_arena_);
+  EXPECT_EQ(projected_resources->extents[0], 4096u);
+  EXPECT_EQ(projected_resources->extents[1], 8192u);
 
   for (size_t i = 0; i < IREE_ARRAYSIZE(roles); ++i) {
     const auto* version =

@@ -77,9 +77,8 @@ static iree_status_t loom_target_function_version_project_scopes(
     }
     const loom_pipeline_entry_scope_t* source = scopes[i].source;
     scopes[unique_count].source = source;
-    IREE_RETURN_IF_ERROR(
-        loom_pipeline_entry_scope_clone(&source->lifetimes, source->owner_count,
-                                        arena, &scopes[unique_count].target));
+    IREE_RETURN_IF_ERROR(loom_pipeline_entry_scope_clone(
+        source, arena, &scopes[unique_count].target));
     ++unique_count;
   }
   *out_scopes = scopes;

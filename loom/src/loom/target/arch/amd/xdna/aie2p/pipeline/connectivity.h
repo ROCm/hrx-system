@@ -14,28 +14,6 @@
 extern "C" {
 #endif
 
-// Physical endpoint identity, independent of selected route edges. DMA channels
-// name engines, including on shim tiles; other ports name stream channels.
-typedef struct loom_aie2p_native_connection_endpoint_t {
-  // Tile containing the endpoint.
-  loom_xdna_tile_coordinate_t coordinate;
-  // Endpoint's architectural port class.
-  loom_xdna_stream_port_t port;
-  // Direction-specific channel within the port.
-  uint8_t channel;
-} loom_aie2p_native_connection_endpoint_t;
-
-// One requested control delivery, retained before physical routing. Equal
-// source/packet pairs form one multicast destination set.
-typedef struct loom_aie2p_native_control_connection_t {
-  // Physical sender of the framed control record.
-  loom_aie2p_native_connection_endpoint_t source;
-  // Intended consumer of that record, independent of chosen switch paths.
-  loom_aie2p_native_connection_endpoint_t destination;
-  // Five-bit packet identity within the sender's namespace.
-  uint8_t packet;
-} loom_aie2p_native_control_connection_t;
-
 typedef enum loom_aie2p_native_connectivity_failure_e {
   LOOM_AIE2P_NATIVE_CONNECTIVITY_NONE = 0,
   LOOM_AIE2P_NATIVE_CONNECTIVITY_DEAD_END,
