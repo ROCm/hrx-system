@@ -109,6 +109,18 @@ static const loomc_spirv_iree_hal_feature_row_t
             IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_SUBGROUP_EXTENDED_TYPES,
             SUBGROUP_EXTENDED_TYPES, "shader_subgroup_extended_types"),
         LOOMC_SPIRV_IREE_HAL_GENERAL_FEATURE_ROW(
+            IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_FMA_FLOAT16 | IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_FLOAT16,
+            FMA_FLOAT16, "shader_fma_float16"),
+        LOOMC_SPIRV_IREE_HAL_GENERAL_FEATURE_ROW(
+            IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_FMA_FLOAT32,
+            FMA_FLOAT32, "shader_fma_float32"),
+        LOOMC_SPIRV_IREE_HAL_GENERAL_FEATURE_ROW(
+            IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_FMA_FLOAT64 | IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_FLOAT64,
+            FMA_FLOAT64, "shader_fma_float64"),
+        LOOMC_SPIRV_IREE_HAL_GENERAL_FEATURE_ROW(
+            IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_FLOAT_CONTROLS2,
+            FLOAT_CONTROLS2, "shader_float_controls2"),
+        LOOMC_SPIRV_IREE_HAL_GENERAL_FEATURE_ROW(
             IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_BFLOAT16_TYPE,
             BFLOAT16_TYPE_KHR, "shader_bfloat16_type"),
         LOOMC_SPIRV_IREE_HAL_GENERAL_FEATURE_ROW(
@@ -185,6 +197,36 @@ static const loomc_spirv_iree_hal_feature_row_t
             IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_FLOAT64,
             IREE_HAL_VULKAN_SHADER_ATOMIC_FEATURE_SHARED_FLOAT64_ADD,
             WORKGROUP_FLOAT64_ATOMIC_ADD, "shader_shared_float64_atomic_add"),
+        {
+            .required_device_flags = IREE_HAL_VULKAN_DEVICE_SPEC_FLAG_FLOAT16_DENORM_PRESERVE,
+            .feature = LOOMC_SPIRV_FEATURE_FLOAT16_DENORM_PRESERVE,
+            .provenance = "iree-hal:vulkan.device.float16_denorm_preserve",
+        },
+        {
+            .required_device_flags = IREE_HAL_VULKAN_DEVICE_SPEC_FLAG_FLOAT64_DENORM_PRESERVE,
+            .feature = LOOMC_SPIRV_FEATURE_FLOAT64_DENORM_PRESERVE,
+            .provenance = "iree-hal:vulkan.device.float64_denorm_preserve",
+        },
+        {
+            .required_device_flags = IREE_HAL_VULKAN_DEVICE_SPEC_FLAG_FLOAT16_ROUNDING_RTE,
+            .feature = LOOMC_SPIRV_FEATURE_FLOAT16_ROUNDING_RTE,
+            .provenance = "iree-hal:vulkan.device.float16_rounding_rte",
+        },
+        {
+            .required_device_flags = IREE_HAL_VULKAN_DEVICE_SPEC_FLAG_FLOAT64_ROUNDING_RTE,
+            .feature = LOOMC_SPIRV_FEATURE_FLOAT64_ROUNDING_RTE,
+            .provenance = "iree-hal:vulkan.device.float64_rounding_rte",
+        },
+        {
+            .required_device_flags = IREE_HAL_VULKAN_DEVICE_SPEC_FLAG_FLOAT_ALL_DENORM_PRESERVE,
+            .feature = LOOMC_SPIRV_FEATURE_FLOAT_ALL_DENORM_PRESERVE,
+            .provenance = "iree-hal:vulkan.device.float_all_denorm_preserve",
+        },
+        {
+            .required_device_flags = IREE_HAL_VULKAN_DEVICE_SPEC_FLAG_FLOAT_ALL_ROUNDING_RTE,
+            .feature = LOOMC_SPIRV_FEATURE_FLOAT_ALL_ROUNDING_RTE,
+            .provenance = "iree-hal:vulkan.device.float_all_rounding_rte",
+        },
         {
             .required_device_flags =
                 IREE_HAL_VULKAN_DEVICE_SPEC_FLAG_FLOAT32_DENORM_PRESERVE,

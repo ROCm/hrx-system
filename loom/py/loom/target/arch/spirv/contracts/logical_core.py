@@ -70,6 +70,7 @@ from loom.target.arch.spirv.contracts.float_width import (
     float_width_narrow_rules,
     float_width_widen_rules,
 )
+from loom.target.arch.spirv.contracts.fused_arithmetic import fused_multiply_add_rules
 from loom.target.arch.spirv.contracts.index import (
     NATIVE_INDEX_ARITHMETIC_MATERIALIZER,
     NATIVE_INDEX_MATERIALIZER,
@@ -1488,6 +1489,7 @@ SPIRV_LOGICAL_CORE_CONTRACT_FRAGMENT = ContractFragment(
         *_vector_float_scale_rules(),
         *_vector_float_binary_rules(),
         *SPIRV_EXTENDED_MATH_CONTRACT_CASES,
+        *fused_multiply_add_rules(),
         *extrema_rules(),
         *rounding_rules(),
         *bit_count_rules(),

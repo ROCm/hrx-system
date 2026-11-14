@@ -209,6 +209,16 @@ iree_hal_vulkan_available_device_extensions_from_list(
     available_extensions |=
         IREE_HAL_VULKAN_DEVICE_EXTENSION_EXT_SHADER_ATOMIC_FLOAT2;
   }
+  if (iree_hal_vulkan_extension_list_contains(
+          extension_count, extensions, VK_KHR_SHADER_FMA_EXTENSION_NAME)) {
+    available_extensions |= IREE_HAL_VULKAN_DEVICE_EXTENSION_KHR_SHADER_FMA;
+  }
+  if (iree_hal_vulkan_extension_list_contains(
+          extension_count, extensions,
+          VK_KHR_SHADER_FLOAT_CONTROLS_2_EXTENSION_NAME)) {
+    available_extensions |=
+        IREE_HAL_VULKAN_DEVICE_EXTENSION_KHR_SHADER_FLOAT_CONTROLS2;
+  }
   return available_extensions;
 }
 
@@ -344,6 +354,43 @@ static void iree_hal_vulkan_query_shader_bfloat16_features(
   VkPhysicalDeviceFeatures2 features2 = {
       .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
       .pNext = &snapshot->shader_bfloat16_features,
+  };
+  IREE_LEAK_CHECK_DISABLE_PUSH();
+  iree_vkGetPhysicalDeviceFeatures2(IREE_VULKAN_INSTANCE(&instance->syms),
+                                    handle, &features2);
+  IREE_LEAK_CHECK_DISABLE_POP();
+}
+
+static void iree_hal_vulkan_query_shader_arithmetic_features(
+    const iree_hal_vulkan_instance_t* instance, VkPhysicalDevice handle,
+    iree_hal_vulkan_physical_device_snapshot_t* snapshot) {
+  snapshot->shader_fma_features = (VkPhysicalDeviceShaderFmaFeaturesKHR){
+      .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FMA_FEATURES_KHR,
+  };
+  snapshot->shader_float_controls2_features =
+      (VkPhysicalDeviceShaderFloatControls2Features){
+          .sType =
+              VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT_CONTROLS_2_FEATURES,
+      };
+  void* feature_chain = NULL;
+  if (snapshot->properties2.properties.apiVersion >= VK_API_VERSION_1_4 ||
+      iree_hal_vulkan_physical_device_has_extension(
+          snapshot,
+          IREE_HAL_VULKAN_DEVICE_EXTENSION_KHR_SHADER_FLOAT_CONTROLS2)) {
+    snapshot->shader_float_controls2_features.pNext = feature_chain;
+    feature_chain = &snapshot->shader_float_controls2_features;
+  }
+  if (iree_hal_vulkan_physical_device_has_extension(
+          snapshot, IREE_HAL_VULKAN_DEVICE_EXTENSION_KHR_SHADER_FMA)) {
+    snapshot->shader_fma_features.pNext = feature_chain;
+    feature_chain = &snapshot->shader_fma_features;
+  }
+  if (!feature_chain) {
+    return;
+  }
+  VkPhysicalDeviceFeatures2 features2 = {
+      .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
+      .pNext = feature_chain,
   };
   IREE_LEAK_CHECK_DISABLE_PUSH();
   iree_vkGetPhysicalDeviceFeatures2(IREE_VULKAN_INSTANCE(&instance->syms),
@@ -890,6 +937,10 @@ iree_status_t iree_hal_vulkan_physical_device_snapshot_initialize(
     iree_hal_vulkan_query_shader_bfloat16_features(instance, handle,
                                                    out_snapshot);
   }
+  if (iree_status_is_ok(status)) {
+    iree_hal_vulkan_query_shader_arithmetic_features(instance, handle,
+                                                     out_snapshot);
+  }
   if (iree_status_is_ok(status) &&
       (iree_hal_vulkan_physical_device_has_extension(
            out_snapshot,
@@ -1311,7 +1362,8 @@ iree_status_t iree_hal_vulkan_dump_physical_device_info(
         "shaderBFloat16Type=%s shaderBFloat16DotProduct=%s "
         "shaderBFloat16CooperativeMatrix=%s shaderIntegerDotProduct=%s "
         "subgroupSizeControl=%s "
-        "cooperativeMatrix=%s\n",
+        "cooperativeMatrix=%s shaderFmaFloat16=%s shaderFmaFloat32=%s "
+        "shaderFmaFloat64=%s shaderFloatControls2=%s\n",
         iree_hal_vulkan_bool_string(snapshot.features12.bufferDeviceAddress),
         iree_hal_vulkan_bool_string(snapshot.features12.timelineSemaphore),
         iree_hal_vulkan_bool_string(snapshot.features12.scalarBlockLayout),
@@ -1332,7 +1384,15 @@ iree_status_t iree_hal_vulkan_dump_physical_device_info(
             snapshot.features13.shaderIntegerDotProduct),
         iree_hal_vulkan_bool_string(snapshot.features13.subgroupSizeControl),
         iree_hal_vulkan_bool_string(
-            snapshot.cooperative_matrix_features.cooperativeMatrix)));
+            snapshot.cooperative_matrix_features.cooperativeMatrix),
+        iree_hal_vulkan_bool_string(
+            snapshot.shader_fma_features.shaderFmaFloat16),
+        iree_hal_vulkan_bool_string(
+            snapshot.shader_fma_features.shaderFmaFloat32),
+        iree_hal_vulkan_bool_string(
+            snapshot.shader_fma_features.shaderFmaFloat64),
+        iree_hal_vulkan_bool_string(
+            snapshot.shader_float_controls2_features.shaderFloatControls2)));
     IREE_HAL_VULKAN_APPEND(iree_string_builder_append_format(
         builder,
         "atomic_features: shaderBufferInt64Atomics=%s "

@@ -607,30 +607,76 @@ static iree_status_t iree_hal_vulkan_device_spec_populate_facet(
   };
   const VkPhysicalDeviceFloatControlsProperties* float_controls =
       &params->physical_device->float_controls_properties;
-  if (float_controls->shaderDenormPreserveFloat32 &&
-      float_controls->denormBehaviorIndependence !=
-          VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_NONE) {
+  const bool denorm_all = float_controls->denormBehaviorIndependence ==
+                              VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_NONE &&
+                          float_controls->shaderDenormPreserveFloat16 &&
+                          float_controls->shaderDenormPreserveFloat32 &&
+                          float_controls->shaderDenormPreserveFloat64;
+  const bool denorm_pair = float_controls->shaderDenormPreserveFloat16 &&
+                           float_controls->shaderDenormPreserveFloat64 &&
+                           (float_controls->denormBehaviorIndependence !=
+                                VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_NONE ||
+                            denorm_all);
+  if (denorm_all) {
     vulkan_spec.flags |=
-        IREE_HAL_VULKAN_DEVICE_SPEC_FLAG_FLOAT32_DENORM_PRESERVE;
+        IREE_HAL_VULKAN_DEVICE_SPEC_FLAG_FLOAT_ALL_DENORM_PRESERVE;
   }
-  if (float_controls->shaderDenormPreserveFloat16 &&
-      float_controls->shaderDenormPreserveFloat64 &&
-      float_controls->denormBehaviorIndependence !=
-          VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_NONE) {
+  if (denorm_pair) {
     vulkan_spec.flags |=
         IREE_HAL_VULKAN_DEVICE_SPEC_FLAG_FLOAT16_64_DENORM_PRESERVE;
   }
-  if (float_controls->shaderRoundingModeRTEFloat16 &&
-      float_controls->shaderRoundingModeRTEFloat64 &&
-      float_controls->roundingModeIndependence !=
-          VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_NONE) {
+  if (float_controls->shaderDenormPreserveFloat32 &&
+      (float_controls->denormBehaviorIndependence !=
+           VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_NONE ||
+       denorm_all)) {
+    vulkan_spec.flags |=
+        IREE_HAL_VULKAN_DEVICE_SPEC_FLAG_FLOAT32_DENORM_PRESERVE;
+  }
+  if (denorm_pair || (float_controls->shaderDenormPreserveFloat16 &&
+                      float_controls->denormBehaviorIndependence ==
+                          VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_ALL)) {
+    vulkan_spec.flags |=
+        IREE_HAL_VULKAN_DEVICE_SPEC_FLAG_FLOAT16_DENORM_PRESERVE;
+  }
+  if (denorm_pair || (float_controls->shaderDenormPreserveFloat64 &&
+                      float_controls->denormBehaviorIndependence ==
+                          VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_ALL)) {
+    vulkan_spec.flags |=
+        IREE_HAL_VULKAN_DEVICE_SPEC_FLAG_FLOAT64_DENORM_PRESERVE;
+  }
+  const bool rounding_all = float_controls->roundingModeIndependence ==
+                                VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_NONE &&
+                            float_controls->shaderRoundingModeRTEFloat16 &&
+                            float_controls->shaderRoundingModeRTEFloat32 &&
+                            float_controls->shaderRoundingModeRTEFloat64;
+  const bool rounding_pair = float_controls->shaderRoundingModeRTEFloat16 &&
+                             float_controls->shaderRoundingModeRTEFloat64 &&
+                             (float_controls->roundingModeIndependence !=
+                                  VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_NONE ||
+                              rounding_all);
+  if (rounding_all) {
+    vulkan_spec.flags |=
+        IREE_HAL_VULKAN_DEVICE_SPEC_FLAG_FLOAT_ALL_ROUNDING_RTE;
+  }
+  if (rounding_pair) {
     vulkan_spec.flags |=
         IREE_HAL_VULKAN_DEVICE_SPEC_FLAG_FLOAT16_64_ROUNDING_RTE;
   }
   if (float_controls->shaderRoundingModeRTEFloat32 &&
-      float_controls->roundingModeIndependence !=
-          VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_NONE) {
+      (float_controls->roundingModeIndependence !=
+           VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_NONE ||
+       rounding_all)) {
     vulkan_spec.flags |= IREE_HAL_VULKAN_DEVICE_SPEC_FLAG_FLOAT32_ROUNDING_RTE;
+  }
+  if (rounding_pair || (float_controls->shaderRoundingModeRTEFloat16 &&
+                        float_controls->roundingModeIndependence ==
+                            VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_ALL)) {
+    vulkan_spec.flags |= IREE_HAL_VULKAN_DEVICE_SPEC_FLAG_FLOAT16_ROUNDING_RTE;
+  }
+  if (rounding_pair || (float_controls->shaderRoundingModeRTEFloat64 &&
+                        float_controls->roundingModeIndependence ==
+                            VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_ALL)) {
+    vulkan_spec.flags |= IREE_HAL_VULKAN_DEVICE_SPEC_FLAG_FLOAT64_ROUNDING_RTE;
   }
   if (float_controls->shaderSignedZeroInfNanPreserveFloat16) {
     vulkan_spec.flags |=

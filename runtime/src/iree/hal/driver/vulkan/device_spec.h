@@ -25,13 +25,13 @@ typedef uint32_t iree_hal_vulkan_device_spec_flags_t;
 typedef enum iree_hal_vulkan_device_spec_flag_bits_e {
   // No Vulkan device spec flags are present.
   IREE_HAL_VULKAN_DEVICE_SPEC_FLAG_NONE = 0u,
-  // F32 subnormals can be preserved independently of other floating widths.
+  // F32 subnormals can be preserved with any required companion modes.
   IREE_HAL_VULKAN_DEVICE_SPEC_FLAG_FLOAT32_DENORM_PRESERVE = 1u << 0,
-  // F16/F64 subnormals can be preserved together without changing F32.
+  // F16/F64 subnormals can be preserved together, including F32 when required.
   IREE_HAL_VULKAN_DEVICE_SPEC_FLAG_FLOAT16_64_DENORM_PRESERVE = 1u << 1,
-  // F16/F64 can use round-to-nearest-even together without changing F32.
+  // F16/F64 can use round-to-nearest-even together with required companions.
   IREE_HAL_VULKAN_DEVICE_SPEC_FLAG_FLOAT16_64_ROUNDING_RTE = 1u << 2,
-  // F32 can use round-to-nearest-even independently of other widths.
+  // F32 can use round-to-nearest-even with any required companion modes.
   IREE_HAL_VULKAN_DEVICE_SPEC_FLAG_FLOAT32_ROUNDING_RTE = 1u << 3,
   // F16 operations preserve signed zero, infinity, and NaN semantics.
   IREE_HAL_VULKAN_DEVICE_SPEC_FLAG_FLOAT16_SIGNED_ZERO_INF_NAN_PRESERVE = 1u
@@ -42,6 +42,18 @@ typedef enum iree_hal_vulkan_device_spec_flag_bits_e {
   // F64 operations preserve signed zero, infinity, and NaN semantics.
   IREE_HAL_VULKAN_DEVICE_SPEC_FLAG_FLOAT64_SIGNED_ZERO_INF_NAN_PRESERVE = 1u
                                                                           << 6,
+  // F16 DenormPreserve with any required companion-width modes.
+  IREE_HAL_VULKAN_DEVICE_SPEC_FLAG_FLOAT16_DENORM_PRESERVE = 1u << 7,
+  // F64 DenormPreserve with any required companion-width modes.
+  IREE_HAL_VULKAN_DEVICE_SPEC_FLAG_FLOAT64_DENORM_PRESERVE = 1u << 8,
+  // F16 RoundingModeRTE with any required companion-width modes.
+  IREE_HAL_VULKAN_DEVICE_SPEC_FLAG_FLOAT16_ROUNDING_RTE = 1u << 9,
+  // F64 RoundingModeRTE with any required companion-width modes.
+  IREE_HAL_VULKAN_DEVICE_SPEC_FLAG_FLOAT64_ROUNDING_RTE = 1u << 10,
+  // DenormPreserve requires the mode on all floating-point widths.
+  IREE_HAL_VULKAN_DEVICE_SPEC_FLAG_FLOAT_ALL_DENORM_PRESERVE = 1u << 11,
+  // RoundingModeRTE requires the mode on all floating-point widths.
+  IREE_HAL_VULKAN_DEVICE_SPEC_FLAG_FLOAT_ALL_ROUNDING_RTE = 1u << 12,
 } iree_hal_vulkan_device_spec_flag_bits_t;
 
 // Borrowed view of encoded Vulkan cooperative matrix property rows.

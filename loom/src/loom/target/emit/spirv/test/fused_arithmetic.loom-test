@@ -1,0 +1,91 @@
+// RUN: emit spirv-dis input=source-low target=spirv:vulkan1.3+bda @caller features=FMA_FLOAT32,FLOAT_CONTROLS2,FLOAT32_SIGNED_ZERO_INF_NAN_PRESERVE,FLOAT16_DENORM_PRESERVE,FLOAT32_DENORM_PRESERVE,FLOAT64_DENORM_PRESERVE,FLOAT16_64_DENORM_PRESERVE,FLOAT_ALL_DENORM_PRESERVE,FLOAT16_ROUNDING_RTE,FLOAT32_ROUNDING_RTE,FLOAT64_ROUNDING_RTE,FLOAT16_64_ROUNDING_RTE,FLOAT_ALL_ROUNDING_RTE validate
+// REQUIRES: spirv-dis, spirv-val
+
+// The helper's decorations preserve each source policy. Its caller inherits
+// the required floating modes, including hardware-coupled companion widths.
+func.def noinline @helper(%a: f32, %b: f32, %c: f32) -> (f32) {
+  %strict = scalar.fmaf %a, %b, %c : f32
+  %finite = scalar.fmaf<nnan|ninf|nsz|afn> %c, %b, %a : f32
+  %result = scalar.addf %strict, %finite : f32
+  func.return %result : f32
+}
+
+func.def public @caller(%value: f32) -> (f32) {
+  %c2 = scalar.constant 2.0 : f32
+  %c3 = scalar.constant 3.0 : f32
+  %result = func.call noinline @helper(%value, %c2, %c3) : (f32, f32, f32) -> (f32)
+  func.return %result : f32
+}
+
+// ----
+               OpCapability Shader
+               OpCapability VulkanMemoryModel
+               OpCapability PhysicalStorageBufferAddresses
+               OpCapability Int64
+               OpCapability DenormPreserve
+               OpCapability RoundingModeRTE
+               OpCapability SignedZeroInfNanPreserve
+               OpCapability FMAKHR
+               OpCapability FloatControls2
+               OpExtension "SPV_KHR_vulkan_memory_model"
+               OpExtension "SPV_KHR_physical_storage_buffer"
+               OpExtension "SPV_KHR_float_controls"
+               OpExtension "SPV_KHR_fma"
+               OpExtension "SPV_KHR_float_controls2"
+               OpMemoryModel PhysicalStorageBuffer64 Vulkan
+               OpEntryPoint GLCompute %caller "caller"
+               OpExecutionMode %caller LocalSize 1 1 1
+               OpExecutionMode %caller DenormPreserve 32
+               OpExecutionMode %caller DenormPreserve 16
+               OpExecutionMode %caller DenormPreserve 64
+               OpExecutionMode %caller RoundingModeRTE 16
+               OpExecutionMode %caller RoundingModeRTE 64
+               OpExecutionMode %caller RoundingModeRTE 32
+               OpExecutionMode %caller SignedZeroInfNanPreserve 32
+               OpName %helper "helper"
+               OpName %a "a"
+               OpName %strict "strict"
+               OpName %finite "finite"
+               OpName %result "result"
+               OpName %caller "caller"
+               OpName %value "value"
+               OpName %result_0 "result"
+               OpDecorate %strict FPFastMathMode None
+               OpDecorate %finite NoContraction
+               OpDecorate %result NoContraction
+               OpMemberDecorate %_struct_15 0 Offset 0
+               OpDecorate %_struct_15 Block
+               OpDecorate %14 DescriptorSet 0
+               OpDecorate %14 Binding 0
+               OpDecorate %18 DescriptorSet 0
+               OpDecorate %18 Binding 1
+      %float = OpTypeFloat 32
+          %3 = OpTypeFunction %float %float
+    %float_2 = OpConstant %float 2
+    %float_3 = OpConstant %float 3
+        %int = OpTypeInt 32 1
+      %int_0 = OpConstant %int 0
+ %_struct_15 = OpTypeStruct %float
+%_ptr_StorageBuffer__struct_15 = OpTypePointer StorageBuffer %_struct_15
+%_ptr_StorageBuffer_float = OpTypePointer StorageBuffer %float
+         %14 = OpVariable %_ptr_StorageBuffer__struct_15 StorageBuffer
+         %18 = OpVariable %_ptr_StorageBuffer__struct_15 StorageBuffer
+       %void = OpTypeVoid
+         %20 = OpTypeFunction %void
+     %helper = OpFunction %float DontInline %3
+          %a = OpFunctionParameter %float
+          %5 = OpLabel
+     %strict = OpFmaKHR %float %a %float_2 %float_3
+     %finite = OpFmaKHR %float %float_3 %float_2 %a
+     %result = OpFAdd %float %strict %finite
+               OpReturnValue %result
+               OpFunctionEnd
+     %caller = OpFunction %void None %20
+         %21 = OpLabel
+         %22 = OpAccessChain %_ptr_StorageBuffer_float %14 %int_0
+      %value = OpLoad %float %22 Aligned 4
+   %result_0 = OpFunctionCall %float %helper %value
+         %25 = OpAccessChain %_ptr_StorageBuffer_float %18 %int_0
+               OpStore %25 %result_0 Aligned 4
+               OpReturn
+               OpFunctionEnd

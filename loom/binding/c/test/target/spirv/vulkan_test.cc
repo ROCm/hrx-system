@@ -90,6 +90,14 @@ struct MockVulkanDevice {
   VkBool32 shader_shared_float64_atomics = VK_FALSE;
   VkBool32 shader_buffer_float64_atomic_add = VK_FALSE;
   VkBool32 shader_shared_float64_atomic_add = VK_FALSE;
+  // Widths of correctly rounded fused arithmetic reported by the device.
+  VkPhysicalDeviceShaderFmaFeaturesKHR shader_fma = {};
+  // Whether the FMA feature struct may be queried.
+  bool reports_shader_fma_extension = false;
+  // Per-instruction floating-point control support.
+  VkBool32 shader_float_controls2 = VK_FALSE;
+  // Whether FloatControls2 is exposed before its promotion to Vulkan 1.4.
+  bool reports_shader_float_controls2_extension = false;
   VkBool32 cooperative_matrix = VK_TRUE;
   bool reports_shader_float16_int8_extension = false;
   // Whether the pre-Vulkan-1.2 extended subgroup type feature is advertised.
@@ -336,6 +344,28 @@ void VKAPI_PTR MockGetPhysicalDeviceFeatures2(
             g_mock_vulkan_device->shader_shared_float16_atomic_add;
         break;
       }
+      case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT_CONTROLS_2_FEATURES: {
+        auto* controls =
+            reinterpret_cast<VkPhysicalDeviceShaderFloatControls2Features*>(
+                out);
+        EXPECT_TRUE(
+            g_mock_vulkan_device->api_version >= VK_API_VERSION_1_4 ||
+            g_mock_vulkan_device->reports_shader_float_controls2_extension);
+        controls->shaderFloatControls2 =
+            g_mock_vulkan_device->shader_float_controls2;
+        break;
+      }
+      case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FMA_FEATURES_KHR: {
+        auto* fma =
+            reinterpret_cast<VkPhysicalDeviceShaderFmaFeaturesKHR*>(out);
+        fma->shaderFmaFloat16 =
+            g_mock_vulkan_device->shader_fma.shaderFmaFloat16;
+        fma->shaderFmaFloat32 =
+            g_mock_vulkan_device->shader_fma.shaderFmaFloat32;
+        fma->shaderFmaFloat64 =
+            g_mock_vulkan_device->shader_fma.shaderFmaFloat64;
+        break;
+      }
 #if defined(VK_KHR_cooperative_matrix)
       case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_FEATURES_KHR:
         reinterpret_cast<VkPhysicalDeviceCooperativeMatrixFeaturesKHR*>(out)
@@ -350,6 +380,9 @@ void VKAPI_PTR MockGetPhysicalDeviceFeatures2(
 
 uint32_t MockDeviceExtensionCount(const MockVulkanDevice& device) {
   uint32_t extension_count = 0;
+  if (device.reports_shader_fma_extension) {
+    ++extension_count;
+  }
   if (device.reports_subgroup_size_control_extension) {
     ++extension_count;
   }
@@ -372,6 +405,9 @@ uint32_t MockDeviceExtensionCount(const MockVulkanDevice& device) {
     ++extension_count;
   }
   if (device.reports_shader_float_controls_extension) {
+    ++extension_count;
+  }
+  if (device.reports_shader_float_controls2_extension) {
     ++extension_count;
   }
   if (device.reports_vulkan_memory_model_extension) {
@@ -467,10 +503,20 @@ VkResult VKAPI_PTR MockEnumerateDeviceExtensionProperties(
                                 VK_KHR_SHADER_ATOMIC_INT64_EXTENSION_NAME,
                                 VK_KHR_SHADER_ATOMIC_INT64_SPEC_VERSION);
   }
+  if (device.reports_shader_fma_extension) {
+    MaybeWriteExtensionProperty(properties, capacity, &written_count,
+                                VK_KHR_SHADER_FMA_EXTENSION_NAME,
+                                VK_KHR_SHADER_FMA_SPEC_VERSION);
+  }
   if (device.reports_shader_float_controls_extension) {
     MaybeWriteExtensionProperty(properties, capacity, &written_count,
                                 VK_KHR_SHADER_FLOAT_CONTROLS_EXTENSION_NAME,
                                 VK_KHR_SHADER_FLOAT_CONTROLS_SPEC_VERSION);
+  }
+  if (device.reports_shader_float_controls2_extension) {
+    MaybeWriteExtensionProperty(properties, capacity, &written_count,
+                                VK_KHR_SHADER_FLOAT_CONTROLS_2_EXTENSION_NAME,
+                                VK_KHR_SHADER_FLOAT_CONTROLS_2_SPEC_VERSION);
   }
   if (device.reports_vulkan_memory_model_extension) {
     MaybeWriteExtensionProperty(properties, capacity, &written_count,
@@ -628,6 +674,105 @@ TEST(TargetSpirvVulkanTest, ImportsSelectableComputeSubgroups) {
         EXPECT_EQ(value.state, selectable ? LOOMC_TARGET_FACT_STATE_TRUE
                                           : LOOMC_TARGET_FACT_STATE_UNKNOWN);
         EXPECT_EQ(value.value, selectable ? 32u : 0u);
+      }
+    }
+  }
+}
+
+TEST(TargetSpirvVulkanTest, PreservesEveryLegalFloatingControlWidthGroup) {
+  auto environment = CreateSpirvTargetEnvironment();
+  // Masks use F16/F32/F64 in bits 0/1/2. Coupled groups are selectable only
+  // when every member supports the requested mode.
+  const VkShaderFloatControlsIndependence independence[] = {
+      VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_ALL,
+      VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_32_BIT_ONLY,
+      VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_NONE};
+  const uint32_t legal_widths[3][8] = {{0, 1, 2, 3, 4, 5, 6, 7},
+                                       {0, 0, 2, 2, 0, 5, 2, 7},
+                                       {0, 0, 0, 0, 0, 0, 0, 7}};
+  const loomc_spirv_feature_t denorm[] = {
+      LOOMC_SPIRV_FEATURE_FLOAT16_DENORM_PRESERVE,
+      LOOMC_SPIRV_FEATURE_FLOAT32_DENORM_PRESERVE,
+      LOOMC_SPIRV_FEATURE_FLOAT64_DENORM_PRESERVE};
+  const loomc_spirv_feature_t rounding[] = {
+      LOOMC_SPIRV_FEATURE_FLOAT16_ROUNDING_RTE,
+      LOOMC_SPIRV_FEATURE_FLOAT32_ROUNDING_RTE,
+      LOOMC_SPIRV_FEATURE_FLOAT64_ROUNDING_RTE};
+  for (uint32_t group = 0; group < 3; ++group) {
+    for (uint32_t mask = 0; mask < 8; ++mask) {
+      SCOPED_TRACE(::testing::Message() << group << ":" << mask);
+      MockVulkanDevice device;
+      device.denorm_behavior_independence = independence[group];
+      device.rounding_mode_independence = independence[group];
+      device.shader_denorm_preserve_float16 = (mask & 1) != 0;
+      device.shader_denorm_preserve_float32 = (mask & 2) != 0;
+      device.shader_denorm_preserve_float64 = (mask & 4) != 0;
+      device.shader_rounding_mode_rte_float16 = (mask & 1) == 0;
+      device.shader_rounding_mode_rte_float32 = (mask & 2) == 0;
+      device.shader_rounding_mode_rte_float64 = (mask & 4) == 0;
+      auto profile = CreateVulkanProfile(environment.get(), device);
+      for (uint32_t width = 0; width < 3; ++width) {
+        ExpectFeatureState(profile.get(), denorm[width],
+                           legal_widths[group][mask] & (1u << width)
+                               ? LOOMC_TARGET_FACT_STATE_TRUE
+                               : LOOMC_TARGET_FACT_STATE_FALSE);
+        ExpectFeatureState(profile.get(), rounding[width],
+                           legal_widths[group][mask ^ 7] & (1u << width)
+                               ? LOOMC_TARGET_FACT_STATE_TRUE
+                               : LOOMC_TARGET_FACT_STATE_FALSE);
+      }
+      ExpectFeatureState(
+          profile.get(), LOOMC_SPIRV_FEATURE_FLOAT_ALL_DENORM_PRESERVE,
+          group == 2 && mask == 7 ? LOOMC_TARGET_FACT_STATE_TRUE
+                                  : LOOMC_TARGET_FACT_STATE_FALSE);
+      ExpectFeatureState(
+          profile.get(), LOOMC_SPIRV_FEATURE_FLOAT_ALL_ROUNDING_RTE,
+          group == 2 && mask == 0 ? LOOMC_TARGET_FACT_STATE_TRUE
+                                  : LOOMC_TARGET_FACT_STATE_FALSE);
+    }
+  }
+}
+
+TEST(TargetSpirvVulkanTest, ImportsFloatControls2FromCoreOrExtension) {
+  auto environment = CreateSpirvTargetEnvironment();
+  for (bool core : {false, true}) {
+    for (bool extension : {false, true}) {
+      for (bool enabled : {false, true}) {
+        SCOPED_TRACE(::testing::Message()
+                     << core << ":" << extension << ":" << enabled);
+        MockVulkanDevice device;
+        device.api_version = core ? VK_API_VERSION_1_4 : VK_API_VERSION_1_3;
+        device.reports_shader_float_controls2_extension = extension;
+        device.shader_float_controls2 = enabled;
+        auto profile = CreateVulkanProfile(environment.get(), device);
+        ExpectFeatureState(profile.get(), LOOMC_SPIRV_FEATURE_FLOAT_CONTROLS2,
+                           (core || extension) && enabled
+                               ? LOOMC_TARGET_FACT_STATE_TRUE
+                               : LOOMC_TARGET_FACT_STATE_FALSE);
+      }
+    }
+  }
+}
+
+TEST(TargetSpirvVulkanTest, ImportsFusedArithmeticByAdvertisedWidth) {
+  const loomc_spirv_feature_t features[] = {LOOMC_SPIRV_FEATURE_FMA_FLOAT16,
+                                            LOOMC_SPIRV_FEATURE_FMA_FLOAT32,
+                                            LOOMC_SPIRV_FEATURE_FMA_FLOAT64};
+  auto environment = CreateSpirvTargetEnvironment();
+  for (bool advertised : {false, true}) {
+    for (uint32_t width_mask = 0; width_mask < 8; ++width_mask) {
+      SCOPED_TRACE(::testing::Message() << advertised << ":" << width_mask);
+      MockVulkanDevice device;
+      device.reports_shader_fma_extension = advertised;
+      device.shader_fma.shaderFmaFloat16 = (width_mask & 1) != 0;
+      device.shader_fma.shaderFmaFloat32 = (width_mask & 2) != 0;
+      device.shader_fma.shaderFmaFloat64 = (width_mask & 4) != 0;
+      auto profile = CreateVulkanProfile(environment.get(), device);
+      for (uint32_t i = 0; i < 3; ++i) {
+        ExpectFeatureState(profile.get(), features[i],
+                           advertised && (width_mask & (1u << i))
+                               ? LOOMC_TARGET_FACT_STATE_TRUE
+                               : LOOMC_TARGET_FACT_STATE_FALSE);
       }
     }
   }

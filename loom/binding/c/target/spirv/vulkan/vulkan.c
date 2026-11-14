@@ -79,6 +79,12 @@ typedef struct loomc_spirv_vulkan_extensions_t {
   // VK_KHR_shader_atomic_int64 is supported.
   bool shader_atomic_int64_khr;
 
+  // VK_KHR_shader_fma is supported.
+  bool shader_fma_khr;
+
+  // VK_KHR_shader_float_controls2 is supported.
+  bool shader_float_controls2_khr;
+
   // VK_KHR_shader_float_controls is supported.
   bool shader_float_controls_khr;
 
@@ -219,36 +225,82 @@ static loomc_status_t loomc_spirv_vulkan_add_limit_fact(
 static loomc_status_t loomc_spirv_vulkan_add_float_control_features(
     loomc_spirv_vulkan_profile_facts_t* facts,
     const loomc_spirv_vulkan_float_controls_t* controls) {
-  const bool denorm_widths_separable =
-      controls->denorm_independence !=
-      VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_NONE;
-  const bool rounding_widths_separable =
-      controls->rounding_independence !=
-      VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_NONE;
+  const bool denorm_all = controls->denorm_independence ==
+                              VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_NONE &&
+                          controls->denorm_preserve.f16 &&
+                          controls->denorm_preserve.f32 &&
+                          controls->denorm_preserve.f64;
+  const bool denorm_pair = controls->denorm_preserve.f16 &&
+                           controls->denorm_preserve.f64 &&
+                           (controls->denorm_independence !=
+                                VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_NONE ||
+                            denorm_all);
   LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkan_add_bool_feature(
-      facts, controls->denorm_preserve.f32 && denorm_widths_separable,
+      facts, denorm_all, LOOMC_SPIRV_FEATURE_FLOAT_ALL_DENORM_PRESERVE,
+      loomc_make_cstring_view("vulkan:float_all_denorm_preserve")));
+  LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkan_add_bool_feature(
+      facts, denorm_pair, LOOMC_SPIRV_FEATURE_FLOAT16_64_DENORM_PRESERVE,
+      loomc_make_cstring_view("vulkan:float16_64_denorm_preserve")));
+  LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkan_add_bool_feature(
+      facts,
+      controls->denorm_preserve.f32 &&
+          (controls->denorm_independence !=
+               VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_NONE ||
+           denorm_all),
       LOOMC_SPIRV_FEATURE_FLOAT32_DENORM_PRESERVE,
-      loomc_make_cstring_view(
-          "vulkan:shaderDenormPreserveFloat32+denormBehaviorIndependence")));
+      loomc_make_cstring_view("vulkan:float32_denorm_preserve")));
   LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkan_add_bool_feature(
       facts,
-      controls->denorm_preserve.f16 && controls->denorm_preserve.f64 &&
-          denorm_widths_separable,
-      LOOMC_SPIRV_FEATURE_FLOAT16_64_DENORM_PRESERVE,
-      loomc_make_cstring_view("vulkan:shaderDenormPreserveFloat16+Float64+"
-                              "denormBehaviorIndependence")));
+      denorm_pair || (controls->denorm_preserve.f16 &&
+                      controls->denorm_independence ==
+                          VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_ALL),
+      LOOMC_SPIRV_FEATURE_FLOAT16_DENORM_PRESERVE,
+      loomc_make_cstring_view("vulkan:float16_denorm_preserve")));
   LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkan_add_bool_feature(
       facts,
-      controls->rounding_rte.f16 && controls->rounding_rte.f64 &&
-          rounding_widths_separable,
-      LOOMC_SPIRV_FEATURE_FLOAT16_64_ROUNDING_RTE,
-      loomc_make_cstring_view("vulkan:shaderRoundingModeRTEFloat16+Float64+"
-                              "roundingModeIndependence")));
+      denorm_pair || (controls->denorm_preserve.f64 &&
+                      controls->denorm_independence ==
+                          VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_ALL),
+      LOOMC_SPIRV_FEATURE_FLOAT64_DENORM_PRESERVE,
+      loomc_make_cstring_view("vulkan:float64_denorm_preserve")));
+  const bool rounding_all = controls->rounding_independence ==
+                                VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_NONE &&
+                            controls->rounding_rte.f16 &&
+                            controls->rounding_rte.f32 &&
+                            controls->rounding_rte.f64;
+  const bool rounding_pair = controls->rounding_rte.f16 &&
+                             controls->rounding_rte.f64 &&
+                             (controls->rounding_independence !=
+                                  VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_NONE ||
+                              rounding_all);
   LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkan_add_bool_feature(
-      facts, controls->rounding_rte.f32 && rounding_widths_separable,
+      facts, rounding_all, LOOMC_SPIRV_FEATURE_FLOAT_ALL_ROUNDING_RTE,
+      loomc_make_cstring_view("vulkan:float_all_rounding_rte")));
+  LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkan_add_bool_feature(
+      facts, rounding_pair, LOOMC_SPIRV_FEATURE_FLOAT16_64_ROUNDING_RTE,
+      loomc_make_cstring_view("vulkan:float16_64_rounding_rte")));
+  LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkan_add_bool_feature(
+      facts,
+      controls->rounding_rte.f32 &&
+          (controls->rounding_independence !=
+               VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_NONE ||
+           rounding_all),
       LOOMC_SPIRV_FEATURE_FLOAT32_ROUNDING_RTE,
-      loomc_make_cstring_view(
-          "vulkan:shaderRoundingModeRTEFloat32+roundingModeIndependence")));
+      loomc_make_cstring_view("vulkan:float32_rounding_rte")));
+  LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkan_add_bool_feature(
+      facts,
+      rounding_pair || (controls->rounding_rte.f16 &&
+                        controls->rounding_independence ==
+                            VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_ALL),
+      LOOMC_SPIRV_FEATURE_FLOAT16_ROUNDING_RTE,
+      loomc_make_cstring_view("vulkan:float16_rounding_rte")));
+  LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkan_add_bool_feature(
+      facts,
+      rounding_pair || (controls->rounding_rte.f64 &&
+                        controls->rounding_independence ==
+                            VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_ALL),
+      LOOMC_SPIRV_FEATURE_FLOAT64_ROUNDING_RTE,
+      loomc_make_cstring_view("vulkan:float64_rounding_rte")));
   LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkan_add_bool_feature(
       facts, controls->signed_zero_inf_nan_preserve.f16,
       LOOMC_SPIRV_FEATURE_FLOAT16_SIGNED_ZERO_INF_NAN_PRESERVE,
@@ -329,6 +381,12 @@ static void loomc_spirv_vulkan_record_extension(
   } else if (loomc_spirv_vulkan_extension_name_equal(
                  extension, VK_KHR_SHADER_FLOAT_CONTROLS_EXTENSION_NAME)) {
     out_extensions->shader_float_controls_khr = true;
+  } else if (loomc_spirv_vulkan_extension_name_equal(
+                 extension, VK_KHR_SHADER_FMA_EXTENSION_NAME)) {
+    out_extensions->shader_fma_khr = true;
+  } else if (loomc_spirv_vulkan_extension_name_equal(
+                 extension, VK_KHR_SHADER_FLOAT_CONTROLS_2_EXTENSION_NAME)) {
+    out_extensions->shader_float_controls2_khr = true;
   } else if (loomc_spirv_vulkan_extension_name_equal(
                  extension, VK_KHR_VULKAN_MEMORY_MODEL_EXTENSION_NAME)) {
     out_extensions->vulkan_memory_model_khr = true;
@@ -684,7 +742,23 @@ static loomc_status_t loomc_spirv_vulkan_query_features(
           VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_FLOAT_2_FEATURES_EXT,
   };
 
+  VkPhysicalDeviceShaderFmaFeaturesKHR fma_features = {
+      .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FMA_FEATURES_KHR,
+  };
+  VkPhysicalDeviceShaderFloatControls2Features float_controls2_features = {
+      .sType =
+          VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT_CONTROLS_2_FEATURES,
+  };
+
   void* feature_chain = NULL;
+  if (api_version >= VK_API_VERSION_1_4 ||
+      extensions->shader_float_controls2_khr) {
+    loomc_spirv_vulkan_link_out_struct(&feature_chain,
+                                       &float_controls2_features);
+  }
+  if (extensions->shader_fma_khr) {
+    loomc_spirv_vulkan_link_out_struct(&feature_chain, &fma_features);
+  }
   if (api_version >= VK_API_VERSION_1_3 ||
       extensions->subgroup_size_control_ext) {
     loomc_spirv_vulkan_link_out_struct(&feature_chain,
@@ -782,6 +856,22 @@ static loomc_status_t loomc_spirv_vulkan_query_features(
   LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkan_add_feature_fact(
       facts, LOOMC_SPIRV_FEATURE_VULKAN_SHADER, LOOMC_TARGET_FACT_STATE_TRUE,
       loomc_make_cstring_view("vulkan:physicalDevice")));
+  LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkan_add_bool_feature(
+      facts, float_controls2_features.shaderFloatControls2,
+      LOOMC_SPIRV_FEATURE_FLOAT_CONTROLS2,
+      loomc_make_cstring_view("vulkan:shaderFloatControls2")));
+  LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkan_add_bool_feature(
+      facts, extensions->shader_fma_khr && fma_features.shaderFmaFloat16,
+      LOOMC_SPIRV_FEATURE_FMA_FLOAT16,
+      loomc_make_cstring_view("vulkan:shaderFmaFloat16")));
+  LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkan_add_bool_feature(
+      facts, extensions->shader_fma_khr && fma_features.shaderFmaFloat32,
+      LOOMC_SPIRV_FEATURE_FMA_FLOAT32,
+      loomc_make_cstring_view("vulkan:shaderFmaFloat32")));
+  LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkan_add_bool_feature(
+      facts, extensions->shader_fma_khr && fma_features.shaderFmaFloat64,
+      LOOMC_SPIRV_FEATURE_FMA_FLOAT64,
+      loomc_make_cstring_view("vulkan:shaderFmaFloat64")));
   LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkan_add_bool_feature(
       facts, features2.features.shaderFloat64, LOOMC_SPIRV_FEATURE_FLOAT64,
       loomc_make_cstring_view("vulkan:shaderFloat64")));

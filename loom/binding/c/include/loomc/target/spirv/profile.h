@@ -185,19 +185,21 @@ typedef enum loomc_spirv_feature_e {
   /// 64-bit floating-point atomic add in workgroup memory.
   LOOMC_SPIRV_FEATURE_WORKGROUP_FLOAT64_ATOMIC_ADD = 31,
 
-  /// F32 DenormPreserve independent of other floating-point widths.
+  /// F32 DenormPreserve with any required companion-width modes.
   LOOMC_SPIRV_FEATURE_FLOAT32_DENORM_PRESERVE = 32,
 
   /// Subgroup ballot operations.
   LOOMC_SPIRV_FEATURE_GROUP_NON_UNIFORM_BALLOT = 33,
 
-  /// F16/F64 DenormPreserve modes selectable together without changing F32.
+  /// F16/F64 DenormPreserve modes selectable together, including F32 when
+  /// required.
   LOOMC_SPIRV_FEATURE_FLOAT16_64_DENORM_PRESERVE = 34,
 
-  /// F16/F64 RoundingModeRTE modes selectable together without changing F32.
+  /// F16/F64 RoundingModeRTE modes selectable together, including F32 when
+  /// required.
   LOOMC_SPIRV_FEATURE_FLOAT16_64_ROUNDING_RTE = 35,
 
-  /// F32 RoundingModeRTE independent of other floating-point widths.
+  /// F32 RoundingModeRTE with any required companion-width modes.
   LOOMC_SPIRV_FEATURE_FLOAT32_ROUNDING_RTE = 36,
 
   /// F16 SignedZeroInfNanPreserve execution-mode support.
@@ -242,8 +244,33 @@ typedef enum loomc_spirv_feature_e {
   /// Integer dots admit four bytes packed in an i32.
   LOOMC_SPIRV_FEATURE_INTEGER_DOT_PRODUCT_INPUT4X8_BIT_PACKED = 50,
 
+  /// Correctly rounded 16-bit fused multiply-add.
+  LOOMC_SPIRV_FEATURE_FMA_FLOAT16 = 51,
+
+  /// Correctly rounded 32-bit fused multiply-add.
+  LOOMC_SPIRV_FEATURE_FMA_FLOAT32 = 52,
+
+  /// Correctly rounded 64-bit fused multiply-add.
+  LOOMC_SPIRV_FEATURE_FMA_FLOAT64 = 53,
+
+  /// Per-instruction floating-point semantics.
+  LOOMC_SPIRV_FEATURE_FLOAT_CONTROLS2 = 54,
+
+  /// F16 DenormPreserve with any required companion-width modes.
+  LOOMC_SPIRV_FEATURE_FLOAT16_DENORM_PRESERVE = 55,
+  /// F64 DenormPreserve with any required companion-width modes.
+  LOOMC_SPIRV_FEATURE_FLOAT64_DENORM_PRESERVE = 56,
+  /// F16 RoundingModeRTE with any required companion-width modes.
+  LOOMC_SPIRV_FEATURE_FLOAT16_ROUNDING_RTE = 57,
+  /// F64 RoundingModeRTE with any required companion-width modes.
+  LOOMC_SPIRV_FEATURE_FLOAT64_ROUNDING_RTE = 58,
+  /// DenormPreserve requires the mode on all floating-point widths.
+  LOOMC_SPIRV_FEATURE_FLOAT_ALL_DENORM_PRESERVE = 59,
+  /// RoundingModeRTE requires the mode on all floating-point widths.
+  LOOMC_SPIRV_FEATURE_FLOAT_ALL_ROUNDING_RTE = 60,
+
   /// Number of public SPIR-V feature identifiers.
-  LOOMC_SPIRV_FEATURE_COUNT = 51,
+  LOOMC_SPIRV_FEATURE_COUNT = 61,
 } loomc_spirv_feature_t;
 
 /// Bitset of `loomc_spirv_feature_t` values.

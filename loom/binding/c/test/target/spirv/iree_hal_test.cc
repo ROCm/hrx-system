@@ -48,6 +48,12 @@ constexpr uint64_t kMaximumWorkgroupLocalMemorySize = 32 * 1024;
 constexpr uint32_t kAmdVendorId = 0x1002;
 constexpr uint32_t kNvidiaVendorId = 0x10DE;
 constexpr iree_hal_vulkan_device_spec_flags_t kAllFloatControlFlags =
+    IREE_HAL_VULKAN_DEVICE_SPEC_FLAG_FLOAT_ALL_DENORM_PRESERVE |
+    IREE_HAL_VULKAN_DEVICE_SPEC_FLAG_FLOAT_ALL_ROUNDING_RTE |
+    IREE_HAL_VULKAN_DEVICE_SPEC_FLAG_FLOAT16_DENORM_PRESERVE |
+    IREE_HAL_VULKAN_DEVICE_SPEC_FLAG_FLOAT64_DENORM_PRESERVE |
+    IREE_HAL_VULKAN_DEVICE_SPEC_FLAG_FLOAT16_ROUNDING_RTE |
+    IREE_HAL_VULKAN_DEVICE_SPEC_FLAG_FLOAT64_ROUNDING_RTE |
     IREE_HAL_VULKAN_DEVICE_SPEC_FLAG_FLOAT32_DENORM_PRESERVE |
     IREE_HAL_VULKAN_DEVICE_SPEC_FLAG_FLOAT16_64_DENORM_PRESERVE |
     IREE_HAL_VULKAN_DEVICE_SPEC_FLAG_FLOAT16_64_ROUNDING_RTE |
@@ -549,6 +555,47 @@ TEST(LoomcSpirvIreeHalTargetTest, DisablesBrokenAmdFloat64ToFloat16Conversion) {
   EXPECT_EQ(feature_state, LOOMC_TARGET_FACT_STATE_FALSE);
 }
 
+TEST(LoomcSpirvIreeHalTargetTest, ImportsEnabledArithmeticFeatures) {
+  const iree_hal_vulkan_general_features_t enabled_flags[] = {
+      IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_FMA_FLOAT16,
+      IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_FMA_FLOAT32,
+      IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_FMA_FLOAT64,
+      IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_FLOAT_CONTROLS2};
+  const loomc_spirv_feature_t features[] = {
+      LOOMC_SPIRV_FEATURE_FMA_FLOAT16, LOOMC_SPIRV_FEATURE_FMA_FLOAT32,
+      LOOMC_SPIRV_FEATURE_FMA_FLOAT64, LOOMC_SPIRV_FEATURE_FLOAT_CONTROLS2};
+  auto environment = CreateSpirvTargetEnvironment();
+  for (uint32_t feature_mask = 0; feature_mask < 16; ++feature_mask) {
+    SCOPED_TRACE(feature_mask);
+    auto enabled = RequiredVulkanFeatures();
+    enabled.general |= IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_FLOAT16 |
+                       IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_FLOAT64;
+    for (uint32_t i = 0; i < IREE_ARRAYSIZE(features); ++i) {
+      if (feature_mask & (1u << i)) {
+        enabled.general |= enabled_flags[i];
+      }
+    }
+    DeviceSpecPtr device_spec;
+    IREE_ASSERT_OK(CreateVulkanDeviceSpec(enabled, kCompleteDeviceSpecFlags,
+                                          &device_spec));
+    FakeHalDevice device = {};
+    InitializeFakeDevice(device_spec.get(), &device);
+    loomc_result_t* result = nullptr;
+    auto profile = SelectTargetFromHal(environment.get(), &device, &result);
+    ResultPtr result_ptr(result);
+    ExpectSucceededResult(result);
+    ASSERT_NE(profile.get(), nullptr);
+    for (uint32_t i = 0; i < IREE_ARRAYSIZE(features); ++i) {
+      loomc_target_fact_state_t state = LOOMC_TARGET_FACT_STATE_UNKNOWN;
+      LOOMC_EXPECT_OK(loomc_spirv_target_profile_query_feature(
+          profile.get(), features[i], &state));
+      EXPECT_EQ(state, (feature_mask & (1u << i))
+                           ? LOOMC_TARGET_FACT_STATE_TRUE
+                           : LOOMC_TARGET_FACT_STATE_FALSE);
+    }
+  }
+}
+
 TEST(LoomcSpirvIreeHalTargetTest, PreservesExtendedCompilerFeatureFamily) {
   iree_hal_vulkan_features_t enabled_features = RequiredVulkanFeatures();
   enabled_features.general |=
@@ -986,6 +1033,23 @@ TEST(LoomcSpirvIreeHalTargetTest, ForcedProfilesCheckTheCompleteFeatureFamily) {
           {.feature = dependency, .state = LOOMC_TARGET_FACT_STATE_TRUE});
     };
     switch (feature) {
+      case LOOMC_SPIRV_FEATURE_FLOAT_ALL_DENORM_PRESERVE:
+        require(LOOMC_SPIRV_FEATURE_FLOAT32_DENORM_PRESERVE);
+        require(LOOMC_SPIRV_FEATURE_FLOAT16_64_DENORM_PRESERVE);
+        [[fallthrough]];
+      case LOOMC_SPIRV_FEATURE_FLOAT16_64_DENORM_PRESERVE:
+        require(LOOMC_SPIRV_FEATURE_FLOAT16_DENORM_PRESERVE);
+        require(LOOMC_SPIRV_FEATURE_FLOAT64_DENORM_PRESERVE);
+        break;
+      case LOOMC_SPIRV_FEATURE_FLOAT_ALL_ROUNDING_RTE:
+        require(LOOMC_SPIRV_FEATURE_FLOAT32_ROUNDING_RTE);
+        require(LOOMC_SPIRV_FEATURE_FLOAT16_64_ROUNDING_RTE);
+        [[fallthrough]];
+      case LOOMC_SPIRV_FEATURE_FLOAT16_64_ROUNDING_RTE:
+        require(LOOMC_SPIRV_FEATURE_FLOAT16_ROUNDING_RTE);
+        require(LOOMC_SPIRV_FEATURE_FLOAT64_ROUNDING_RTE);
+        break;
+
       case LOOMC_SPIRV_FEATURE_INTEGER_DOT_PRODUCT_INPUT4X8_BIT:
         require(LOOMC_SPIRV_FEATURE_INT8);
         [[fallthrough]];
@@ -1002,12 +1066,14 @@ TEST(LoomcSpirvIreeHalTargetTest, ForcedProfilesCheckTheCompleteFeatureFamily) {
       case LOOMC_SPIRV_FEATURE_BFLOAT16_DOT_PRODUCT_KHR:
         require(LOOMC_SPIRV_FEATURE_BFLOAT16_TYPE_KHR);
         break;
+      case LOOMC_SPIRV_FEATURE_FMA_FLOAT16:
       case LOOMC_SPIRV_FEATURE_STORAGE_BUFFER_FLOAT16_ATOMICS:
       case LOOMC_SPIRV_FEATURE_WORKGROUP_FLOAT16_ATOMICS:
       case LOOMC_SPIRV_FEATURE_STORAGE_BUFFER_FLOAT16_ATOMIC_ADD:
       case LOOMC_SPIRV_FEATURE_WORKGROUP_FLOAT16_ATOMIC_ADD:
         require(LOOMC_SPIRV_FEATURE_FLOAT16);
         break;
+      case LOOMC_SPIRV_FEATURE_FMA_FLOAT64:
       case LOOMC_SPIRV_FEATURE_STORAGE_BUFFER_FLOAT64_ATOMICS:
       case LOOMC_SPIRV_FEATURE_WORKGROUP_FLOAT64_ATOMICS:
       case LOOMC_SPIRV_FEATURE_STORAGE_BUFFER_FLOAT64_ATOMIC_ADD:

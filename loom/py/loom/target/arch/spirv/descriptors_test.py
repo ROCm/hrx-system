@@ -46,6 +46,7 @@ from loom.target.arch.spirv.ordinary_vector_conversion import (
     ORDINARY_VECTOR_CONVERSION_INSTRUCTIONS,
 )
 from loom.target.arch.spirv.ordinary_vector_float import (
+    FUSED_MULTIPLY_ADD_INSTRUCTIONS,
     ORDINARY_VECTOR_FLOAT_BINARY_INSTRUCTIONS,
     ORDINARY_VECTOR_FLOAT_COMPARE_INSTRUCTIONS,
     ORDINARY_VECTOR_FLOAT_PRESERVE_COMPARE_INSTRUCTIONS,
@@ -499,6 +500,7 @@ def test_result_asm_recipes_cover_every_spirv_descriptor_family() -> None:
 
     for row in (
         *ORDINARY_VECTOR_INSTRUCTIONS,
+        *FUSED_MULTIPLY_ADD_INSTRUCTIONS,
         *ORDINARY_VECTOR_SHUFFLE_INSTRUCTIONS,
         *ORDINARY_VECTOR_FLOAT_BINARY_INSTRUCTIONS,
         *ORDINARY_VECTOR_FLOAT_SCALE_INSTRUCTIONS,

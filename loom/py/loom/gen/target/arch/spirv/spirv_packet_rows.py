@@ -74,6 +74,7 @@ from loom.target.arch.spirv.ordinary_vector_conversion import (  # noqa: E402
     ORDINARY_VECTOR_CONVERSION_INSTRUCTIONS,
 )
 from loom.target.arch.spirv.ordinary_vector_float import (  # noqa: E402
+    FUSED_MULTIPLY_ADD_INSTRUCTIONS,
     ORDINARY_VECTOR_FLOAT_BINARY_INSTRUCTIONS,
     ORDINARY_VECTOR_FLOAT_COMPARE_INSTRUCTIONS,
     ORDINARY_VECTOR_FLOAT_PRESERVE_COMPARE_INSTRUCTIONS,
@@ -258,6 +259,8 @@ class _PacketRow:
     memory_alignment: int = 0
     no_contraction: bool = False
     contraction_controlled: bool = False
+    # Preserve special values and evaluation order with FPFastMathMode None.
+    fp_fast_math_none: bool = False
     coordinate_byte_shift: int = 0
     builtin_variable: str | None = None
     component_index: int | None = None
@@ -356,6 +359,8 @@ class _PacketRow:
             flags.append("LOOM_SPIRV_PACKET_FLAG_NO_CONTRACTION")
         if self.contraction_controlled:
             flags.append("LOOM_SPIRV_PACKET_FLAG_CONTRACTION_CONTROLLED")
+        if self.fp_fast_math_none:
+            flags.append("LOOM_SPIRV_PACKET_FLAG_FP_FAST_MATH_NONE")
         if flags:
             lines.append(f"            .flags = {' | '.join(flags)},")
         lines.append("        },")
@@ -961,6 +966,7 @@ def _ordinary_vector_rows() -> list[_PacketRow]:
     rows = []
     for row in (
         *ORDINARY_VECTOR_INSTRUCTIONS,
+        *FUSED_MULTIPLY_ADD_INSTRUCTIONS,
         *ORDINARY_VECTOR_FLOAT_BINARY_INSTRUCTIONS,
         *ORDINARY_VECTOR_FLOAT_SCALE_INSTRUCTIONS,
         *ORDINARY_VECTOR_FLOAT_COMPARE_INSTRUCTIONS,
@@ -981,8 +987,9 @@ def _ordinary_vector_rows() -> list[_PacketRow]:
                 result_type=_ordinary_vector_instruction_value(row.result_type),
                 operand_types=tuple(_ordinary_vector_instruction_value(operand_type) for operand_type in row.operand_types),
                 immediate_count=int(row.component_index_maximum is not None) + int(controls_contraction),
-                no_contraction=controls_contraction or row.opcode in _FLOAT_CONVERSION_OPCODES,
+                no_contraction=row.no_contraction or controls_contraction or row.opcode in _FLOAT_CONVERSION_OPCODES,
                 contraction_controlled=controls_contraction,
+                fp_fast_math_none=row.fp_fast_math_none,
             )
         )
     return rows
@@ -1372,6 +1379,8 @@ def _validate_rows(rows: tuple[_PacketRow, ...], descriptors: tuple[Descriptor, 
 
     for row in rows:
         descriptor = descriptors_by_key[row.descriptor_key]
+        if row.no_contraction and row.fp_fast_math_none:
+            raise ValueError(f"{row.descriptor_key}: incompatible floating-point decorations")
         result_count = sum(operand.role is OperandRole.RESULT for operand in descriptor.operands)
         if row.result_type == _unknown_value() or row.result_count != result_count:
             raise ValueError(f"{row.descriptor_key}: packet result type must match descriptor result count")

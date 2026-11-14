@@ -138,6 +138,14 @@ typedef enum iree_hal_vulkan_general_feature_bits_e {
   IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_SUBGROUP_EXTENDED_TYPES = 1u << 25,
   // Reports computeFullSubgroups support enabled on a logical device.
   IREE_HAL_VULKAN_FEATURE_ENABLE_COMPUTE_FULL_SUBGROUPS = 1u << 26,
+  // Requests and reports correctly rounded 16-bit fused multiply-add.
+  IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_FMA_FLOAT16 = 1u << 27,
+  // Requests and reports correctly rounded 32-bit fused multiply-add.
+  IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_FMA_FLOAT32 = 1u << 28,
+  // Requests and reports correctly rounded 64-bit fused multiply-add.
+  IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_FMA_FLOAT64 = 1u << 29,
+  // Requests and reports per-instruction floating-point semantics.
+  IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_FLOAT_CONTROLS2 = 1u << 30,
 } iree_hal_vulkan_general_feature_bits_t;
 
 typedef uint32_t iree_hal_vulkan_general_features_t;
@@ -172,7 +180,11 @@ typedef uint32_t iree_hal_vulkan_general_features_t;
    IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_BFLOAT16_TYPE |               \
    IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_BFLOAT16_DOT_PRODUCT |        \
    IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_BFLOAT16_COOPERATIVE_MATRIX | \
-   IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_SUBGROUP_EXTENDED_TYPES)
+   IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_SUBGROUP_EXTENDED_TYPES |     \
+   IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_FMA_FLOAT16 |                 \
+   IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_FMA_FLOAT32 |                 \
+   IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_FMA_FLOAT64 |                 \
+   IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_FLOAT_CONTROLS2)
 
 // Shader atomic capabilities required or enabled on a logical device.
 typedef enum iree_hal_vulkan_shader_atomic_feature_bits_e {
@@ -271,6 +283,10 @@ typedef enum iree_hal_vulkan_device_extension_bits_t {
   IREE_HAL_VULKAN_DEVICE_EXTENSION_EXT_SHADER_ATOMIC_FLOAT = 1u << 10,
   // VK_EXT_shader_atomic_float2.
   IREE_HAL_VULKAN_DEVICE_EXTENSION_EXT_SHADER_ATOMIC_FLOAT2 = 1u << 11,
+  // VK_KHR_shader_fma.
+  IREE_HAL_VULKAN_DEVICE_EXTENSION_KHR_SHADER_FMA = 1u << 12,
+  // VK_KHR_shader_float_controls2 (promoted to Vulkan 1.4).
+  IREE_HAL_VULKAN_DEVICE_EXTENSION_KHR_SHADER_FLOAT_CONTROLS2 = 1u << 13,
   // Recognized extension bits accepted by public Vulkan HAL APIs.
   IREE_HAL_VULKAN_DEVICE_EXTENSION_ALL_RECOGNIZED =
       IREE_HAL_VULKAN_DEVICE_EXTENSION_KHR_PORTABILITY_SUBSET |
@@ -284,7 +300,9 @@ typedef enum iree_hal_vulkan_device_extension_bits_t {
       IREE_HAL_VULKAN_DEVICE_EXTENSION_KHR_COOPERATIVE_MATRIX |
       IREE_HAL_VULKAN_DEVICE_EXTENSION_KHR_SHADER_BFLOAT16 |
       IREE_HAL_VULKAN_DEVICE_EXTENSION_EXT_SHADER_ATOMIC_FLOAT |
-      IREE_HAL_VULKAN_DEVICE_EXTENSION_EXT_SHADER_ATOMIC_FLOAT2,
+      IREE_HAL_VULKAN_DEVICE_EXTENSION_EXT_SHADER_ATOMIC_FLOAT2 |
+      IREE_HAL_VULKAN_DEVICE_EXTENSION_KHR_SHADER_FMA |
+      IREE_HAL_VULKAN_DEVICE_EXTENSION_KHR_SHADER_FLOAT_CONTROLS2,
 } iree_hal_vulkan_device_extension_bits_t;
 
 typedef uint32_t iree_hal_vulkan_device_extensions_t;

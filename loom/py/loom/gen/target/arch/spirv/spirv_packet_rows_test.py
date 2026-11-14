@@ -61,6 +61,7 @@ from loom.target.arch.spirv.ordinary_vector_conversion import (
     ORDINARY_VECTOR_CONVERSION_INSTRUCTIONS,
 )
 from loom.target.arch.spirv.ordinary_vector_float import (
+    FUSED_MULTIPLY_ADD_INSTRUCTIONS,
     ORDINARY_VECTOR_FLOAT_BINARY_INSTRUCTIONS,
     ORDINARY_VECTOR_FLOAT_COMPARE_INSTRUCTIONS,
     ORDINARY_VECTOR_FLOAT_PRESERVE_COMPARE_INSTRUCTIONS,
@@ -893,6 +894,7 @@ def test_floating_packets_control_operation_contraction() -> None:
         if operation.supports(matrix_type) and operation.controls_contraction
     }
     expected_keys.update(cooperative_keys)
+    expected_keys.update(row.key for row in FUSED_MULTIPLY_ADD_INSTRUCTIONS if row.no_contraction)
     assert {key for key, row in rows.items() if row.no_contraction} == expected_keys
     arithmetic_keys = {f"spirv.op_{operation}.{prefix}{scalar}" for operation in ("fadd", "fsub", "fmul", "fdiv", "frem") for prefix in ("", "v2", "v3", "v4") for scalar in ("f16", "f32", "f64")}
     arithmetic_keys.update(f"spirv.op_vector_times_scalar.v{lanes}{element}" for lanes in (2, 3, 4) for element in ("f16", "f32", "f64"))
@@ -900,6 +902,24 @@ def test_floating_packets_control_operation_contraction() -> None:
     assert {key for key, row in rows.items() if row.contraction_controlled} == arithmetic_keys
     generated_fmul = _generated_row(generate_tables(), "spirv.op_fmul.f32")
     assert (".flags = LOOM_SPIRV_PACKET_FLAG_NO_CONTRACTION | LOOM_SPIRV_PACKET_FLAG_CONTRACTION_CONTROLLED,") in generated_fmul
+
+
+def test_fma_packets_keep_three_operands_and_exclusive_arithmetic_controls() -> None:
+    rows = {row.descriptor_key: row for row in _packet_rows()}
+    _assert_generated_ordinary_vector_instructions(FUSED_MULTIPLY_ADD_INSTRUCTIONS)
+    assert len(FUSED_MULTIPLY_ADD_INSTRUCTIONS) == 48
+    for instruction in FUSED_MULTIPLY_ADD_INSTRUCTIONS:
+        row = rows[instruction.key]
+        assert row.opcode == "LOOM_SPIRV_OP_FMA_KHR"
+        assert row.form == "LOOM_SPIRV_PACKET_FORM_TYPED"
+        assert row.operand_types == (row.result_type,) * 3
+        assert row.immediate_count == 0
+        assert not row.contraction_controlled
+        assert row.fp_fast_math_none == ("nnan" not in instruction.required_fastmath_flags)
+        assert row.no_contraction != row.fp_fast_math_none
+    invalid = replace(rows["spirv.op_fma.f32"], no_contraction=True)
+    with pytest.raises(ValueError, match="incompatible floating-point decorations"):
+        _validate_rows(tuple(invalid if row.descriptor_key == invalid.descriptor_key else row for row in rows.values()), SPIRV_LOGICAL_CORE_DESCRIPTOR_SET.descriptors)
 
 
 def test_cooperative_arithmetic_preserves_native_component_shape_and_use() -> None:
