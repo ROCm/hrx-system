@@ -77,7 +77,7 @@
       "patterns": [
         {
           "name": "meta.operation-name.loom",
-          "match": "\\b(buffer)\\.(assume\\.memory_space|assume\\.alignment|assume\\.same_root|compare\\.address|assume\\.noalias|compare\\.null|alloca\\.init|duplicate|load\\.i8\\.u|constant|distance|store\\.i8|compare|alloca|length|fence|copy|fill|null|pack|view)\\b",
+          "match": "\\b(buffer)\\.(assume\\.memory_space|assume\\.alignment|assume\\.same_root|compare\\.address|assume\\.noalias|restrict\\.begin|compare\\.null|restrict\\.end|alloca\\.init|duplicate|load\\.i8\\.u|constant|distance|store\\.i8|compare|alloca|length|fence|copy|fill|null|pack|view)\\b",
           "captures": {
             "1": {
               "name": "support.namespace.dialect.loom"
@@ -341,7 +341,7 @@
       "patterns": [
         {
           "name": "keyword.other.loom",
-          "match": "\\b(?:source_signature|workgroup_count|workgroup_size|memory_access|cluster_size|max_distance|abi_layout|allocation|workgroups|configure|conflicts|iter_args|subnormal|artifact|capacity|expected|ordering|pipeline|priority|requires|schedule|default|dgroups|linkage|ordinal|workers|across|actual|blocks|bounds|callee|config|device|export|extent|import|inputs|launch|layout|module|offset|period|public|reason|source|symbol|target|unroll|values|align|attrs|count|range|scope|shape|using|value|where|atol|axes|base|case|else|from|host|into|mode|name|path|pool|rtol|seed|step|abi|for|nan|run|as|do|on|to|x)\\b"
+          "match": "\\b(?:source_signature|workgroup_count|workgroup_size|memory_access|cluster_size|max_distance|abi_layout|allocation|workgroups|configure|conflicts|iter_args|subnormal|artifact|capacity|expected|ordering|pipeline|priority|requires|schedule|default|dgroups|linkage|ordinal|workers|across|actual|blocks|bounds|callee|config|device|export|extent|import|inputs|launch|layout|module|offset|period|public|reason|source|symbol|target|unroll|values|align|attrs|count|peers|range|scope|shape|using|value|where|atol|axes|base|case|else|from|host|into|mode|name|path|pool|rtol|seed|step|abi|for|nan|run|as|do|on|to|x)\\b"
         },
         {
           "name": "constant.language.boolean.loom",

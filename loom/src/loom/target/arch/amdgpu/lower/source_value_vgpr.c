@@ -90,9 +90,9 @@ static bool loom_amdgpu_source_memory_access_prefers_vgpr(
           plan.cache_policy.build_flags,
           LOOM_VECTOR_MEMORY_CACHE_POLICY_BUILD_FLAG_SCOPE |
               LOOM_VECTOR_MEMORY_CACHE_POLICY_BUILD_FLAG_TEMPORAL) ||
-      !(loom_view_region_table_root_is_stable(view_regions, plan.root_value_id,
-                                              plan.alias_scope_id,
-                                              plan.memory_space) ||
+      !(loom_view_region_table_access_is_stable(
+            view_regions, plan.root_value_id, plan.alias_scope_id,
+            plan.restrict_access, plan.memory_space) ||
         (plan.reads_entry_contents &&
          loom_kernel_def_isa(view_regions->value_domain->region->parent_op))) ||
       loom_amdgpu_source_memory_terms_prefer_vgpr(

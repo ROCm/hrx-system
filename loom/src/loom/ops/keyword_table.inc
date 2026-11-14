@@ -100,3 +100,4 @@
     [LOOM_KW_SOURCE_SIGNATURE] = (const uint8_t*)"\x10" "source_signature",
     [LOOM_KW_MAX_DISTANCE] = (const uint8_t*)"\x0c" "max_distance",
     [LOOM_KW_SUBNORMAL] = (const uint8_t*)"\x09" "subnormal",
+    [LOOM_KW_PEERS] = (const uint8_t*)"\x05" "peers",

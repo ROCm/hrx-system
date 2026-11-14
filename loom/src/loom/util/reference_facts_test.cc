@@ -67,5 +67,22 @@ TEST(ReferenceFactsTest, JoinsKeepCommonEntryGuarantees) {
             LOOM_VALUE_FACT_REFERENCE_ORIGIN_UNKNOWN);
 }
 
+TEST(ReferenceFactsTest, RestrictIndependenceRequiresOneSharedDomain) {
+  const loom_value_fact_restrict_access_t accesses[] = {
+      {}, {1, 0}, {1, 2}, {1, 3}, {2, 2},
+  };
+  const uint8_t independent_masks[] = {
+      0, (1u << 2) | (1u << 3), (1u << 1) | (1u << 3), (1u << 1) | (1u << 2), 0,
+  };
+  for (size_t i = 0; i < IREE_ARRAYSIZE(accesses); ++i) {
+    for (size_t j = 0; j < IREE_ARRAYSIZE(accesses); ++j) {
+      EXPECT_EQ(loom_value_fact_restrict_accesses_are_independent(accesses[i],
+                                                                  accesses[j]),
+                (independent_masks[i] & (1u << j)) != 0)
+          << "restrict access pair " << i << ", " << j;
+    }
+  }
+}
+
 }  // namespace
 }  // namespace loom

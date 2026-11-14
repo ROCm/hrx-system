@@ -1229,6 +1229,30 @@ class Translator final : private Initialization::Evaluation {
     return returned;
   }
 
+  void end_function_restrict_scope(Returned& returned) {
+    if (!function_restrict_scope_active_ || returned.unreachable) {
+      return;
+    }
+    std::vector<loom_value_id_t> references;
+    for (auto value : returned.values) {
+      const auto type = value_type(value);
+      if (loom_type_is_buffer(type) || loom_type_is_view(type)) {
+        references.push_back(value);
+      }
+    }
+    if (references.empty()) {
+      return;
+    }
+    auto results = storage_.end_restrict_scope(references, returned.source);
+    size_t result_index = 0;
+    for (auto& value : returned.values) {
+      const auto type = value_type(value);
+      if (loom_type_is_buffer(type) || loom_type_is_view(type)) {
+        value = results[result_index++];
+      }
+    }
+  }
+
   bool supports_function_exit() const {
     return current_function_.kind == FunctionKind::Ordinary ||
            current_function_.kind == FunctionKind::Kernel;
@@ -1391,6 +1415,7 @@ class Translator final : private Initialization::Evaluation {
     auto returned = return_values(statement);
     emit_destructions(0);
     returned = complete_return(std::move(returned));
+    end_function_restrict_scope(returned);
     auto source = locations_.get(statement);
     auto condition = scalars_.integer(true, LOOM_SCALAR_TYPE_I1, source);
     loom_op_t* op;
@@ -1417,11 +1442,169 @@ class Translator final : private Initialization::Evaluation {
     function_body(defined.body);
   }
 
+  std::optional<loom_value_id_t> function_parameter_reference(
+      cxx::Symbol* parameter) {
+    if (values_.initialized(parameter)) {
+      const auto& value = values_.at(parameter);
+      if (value.is_pointer()) {
+        return value.pointer().root;
+      }
+      if (value.is_buffer() || value.is_view()) {
+        return value.components().back();
+      }
+    }
+    auto found = references_.find(parameter);
+    if (found == references_.end()) {
+      return std::nullopt;
+    }
+    auto* object = std::get_if<ObjectLvalue>(&found->second.projection);
+    auto* storage =
+        object ? std::get_if<StorageProjection>(&object->location) : nullptr;
+    return storage ? std::optional<loom_value_id_t>{storage->pointer.root}
+                   : std::nullopt;
+  }
+
+  void replace_function_parameter_reference(cxx::Symbol* parameter,
+                                            loom_value_id_t reference) {
+    if (values_.initialized(parameter)) {
+      const auto value = values_.at(parameter);
+      if (value.is_pointer()) {
+        auto pointer = value.pointer();
+        pointer.root = reference;
+        values_.set(parameter, Value(pointer));
+      } else if (value.is_buffer() || value.is_view()) {
+        values_.set(parameter, value_arena_.replace(
+                                   value, value.partition().component_count - 1,
+                                   Value(reference)));
+      }
+      return;
+    }
+    auto found = references_.find(parameter);
+    if (found == references_.end()) {
+      return;
+    }
+    auto* object = std::get_if<ObjectLvalue>(&found->second.projection);
+    auto* storage =
+        object ? std::get_if<StorageProjection>(&object->location) : nullptr;
+    if (storage) {
+      storage->pointer.root = reference;
+    }
+  }
+
+  enum class FunctionRestrictBindingKind {
+    ResultDestination,
+    Receiver,
+    Parameter,
+    Destruction,
+  };
+
+  struct FunctionRestrictBinding {
+    // Compiler state receiving the refined root.
+    FunctionRestrictBindingKind kind;
+    // Source parameter for Parameter bindings; null otherwise.
+    cxx::Symbol* parameter;
+    // Cleanup action for Destruction bindings; null otherwise.
+    DestructionAction* destruction;
+    // Unrefined incoming buffer or view supplied to buffer.restrict.begin.
+    loom_value_id_t reference;
+    // Whether this path carries its own restrict association in the domain.
+    bool restricted = false;
+    // Position of this path in the segmented restrict operation results.
+    size_t result_index = 0;
+  };
+
+  void begin_function_restrict_scope(
+      const std::vector<cxx::ParameterSymbol*>& parameters, cxx::AST* source) {
+    const bool receiver_restricted =
+        current_function_.implicit_object &&
+        unit_.typeTraits().is_restrict(
+            current_function_.implicit_object->object_type);
+    const bool parameter_restricted =
+        std::ranges::any_of(parameters, [&](cxx::Symbol* parameter) {
+          return unit_.typeTraits().is_restrict(parameter->type());
+        });
+    if (!receiver_restricted && !parameter_restricted) {
+      return;
+    }
+
+    std::vector<FunctionRestrictBinding> bindings;
+    auto append = [&](FunctionRestrictBinding binding, bool is_restricted) {
+      binding.restricted = is_restricted;
+      bindings.push_back(binding);
+    };
+    if (result_destination_) {
+      append({FunctionRestrictBindingKind::ResultDestination, nullptr, nullptr,
+              result_destination_->pointer.root},
+             false);
+    }
+    if (current_function_.implicit_object && receivers_.current()->storage) {
+      append({FunctionRestrictBindingKind::Receiver, nullptr, nullptr,
+              receivers_.current()->storage->pointer.root},
+             receiver_restricted);
+    }
+    for (auto* parameter : parameters) {
+      if (auto reference = function_parameter_reference(parameter)) {
+        append({FunctionRestrictBindingKind::Parameter, parameter, nullptr,
+                *reference},
+               unit_.typeTraits().is_restrict(parameter->type()));
+      }
+    }
+    for (auto& destruction : active_destructions_) {
+      if (destruction.storage) {
+        append({FunctionRestrictBindingKind::Destruction, nullptr, &destruction,
+                destruction.storage->pointer.root},
+               false);
+      }
+    }
+    std::vector<loom_value_id_t> references;
+    references.reserve(bindings.size());
+    for (auto& binding : bindings) {
+      if (binding.restricted) {
+        binding.result_index = references.size();
+        references.push_back(binding.reference);
+      }
+    }
+    const size_t restricted_count = references.size();
+    if (restricted_count == 0) {
+      return;
+    }
+    for (auto& binding : bindings) {
+      if (!binding.restricted) {
+        binding.result_index = references.size();
+        references.push_back(binding.reference);
+      }
+    }
+    auto results =
+        storage_.begin_restrict_scope(references, restricted_count, source);
+    auto apply = [&](const FunctionRestrictBinding& binding,
+                     loom_value_id_t result) {
+      switch (binding.kind) {
+        case FunctionRestrictBindingKind::ResultDestination:
+          result_destination_->pointer.root = result;
+          break;
+        case FunctionRestrictBindingKind::Receiver:
+          receivers_.replace_current_storage_root(result);
+          break;
+        case FunctionRestrictBindingKind::Parameter:
+          replace_function_parameter_reference(binding.parameter, result);
+          break;
+        case FunctionRestrictBindingKind::Destruction:
+          binding.destruction->storage->pointer.root = result;
+          break;
+      }
+    };
+    for (const auto& binding : bindings) {
+      apply(binding, results[binding.result_index]);
+    }
+    function_restrict_scope_active_ = true;
+  }
+
   void function_body(const FunctionBody& body_contract) {
     FastMathScope math_scope(lexical_fastmath_flags_,
                              fastmath_.function(body_contract.source->symbol)
                                  .value_or(default_fastmath_flags_));
     current_function_ = body_contract;
+    function_restrict_scope_active_ = false;
     pipeline_strand_depth_ = 0;
     const auto& defined = current_function_;
     auto* body = defined.body;
@@ -1523,6 +1706,13 @@ class Translator final : private Initialization::Evaluation {
     size_t parameter_index = 0;
     size_t indirect_index = 0;
     for (auto* parameter : parameters) {
+      if (unit_.typeTraits().is_pointer(parameter->type()) &&
+          unit_.typeTraits().is_restrict(parameter->type()) &&
+          control_->addressed(parameter)) {
+        fail(parameter->declaration(),
+             "address-taken restrict-qualified parameters require a stored "
+             "pointer representation");
+      }
       const IndirectParameter* indirect = nullptr;
       if (indirect_index < defined.indirect_parameters.size() &&
           defined.indirect_parameters[indirect_index].ordinal ==
@@ -1640,6 +1830,7 @@ class Translator final : private Initialization::Evaluation {
       activate_automatic_destruction(parameter, defined.source);
       ++parameter_index;
     }
+    begin_function_restrict_scope(parameters, defined.source);
     if (defined.source->symbol->isConstructor()) {
       IREE_ASSERT(defined.implicit_object && receivers_.current());
       auto initializers = control_->constructor_initializers();
@@ -1667,6 +1858,7 @@ class Translator final : private Initialization::Evaluation {
     if (defined.implicit_object) {
       leave_receiver();
     }
+    end_function_restrict_scope(returned);
     loom_op_t* terminator;
     if (returned.unreachable) {
       check(loom_func_unreachable_build(
@@ -1966,6 +2158,11 @@ class Translator final : private Initialization::Evaluation {
         variable && control_->addressed(variable), declaration);
     if (cxx::symbol_cast<cxx::TypeAliasSymbol>(declaration->symbol)) {
       return;
+    }
+    if (variable && unit_.typeTraits().is_restrict(variable->type())) {
+      fail(declaration,
+           "restrict-qualified local bindings require a lexical access "
+           "scope");
     }
     if (variable && variable->isStatic() && !variable->isThreadLocal()) {
       if (annotated(variable, "workgroup")) {
@@ -8598,6 +8795,9 @@ class Translator final : private Initialization::Evaluation {
   FunctionBody current_function_ = {};
   // Caller-owned result object; this function constructs but never destroys it.
   std::optional<StorageProjection> result_destination_;
+  // Whether the current callable introduced source restrict associations that
+  // must be removed from reference results crossing its return boundary.
+  bool function_restrict_scope_active_ = false;
   // Lexical pipeline strand nesting admits kernel operations only in worker
   // execution regions and rejects construction-only memory queries there.
   size_t pipeline_strand_depth_ = 0;

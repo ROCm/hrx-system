@@ -54,6 +54,7 @@ iree_status_t loom_value_facts_rebase_reference(
     buffer.root_value_id = receiving_value;
     buffer.root_is_byte_origin = true;
     buffer.alias_scope_id = LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE;
+    buffer.restrict_access = (loom_value_fact_restrict_access_t){0};
     buffer.origin = receiving_origin;
     IREE_RETURN_IF_ERROR(
         loom_value_facts_make_buffer_reference(context, buffer, &rebound));
@@ -72,6 +73,7 @@ iree_status_t loom_value_facts_rebase_reference(
     view.root_value_id = receiving_value;
     view.buffer_value_id = LOOM_VALUE_ID_INVALID;
     view.alias_scope_id = LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE;
+    view.restrict_access = (loom_value_fact_restrict_access_t){0};
     view.origin = receiving_origin;
     IREE_RETURN_IF_ERROR(
         loom_value_facts_make_view_reference(context, view, &rebound));

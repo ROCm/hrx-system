@@ -77,3 +77,43 @@ func.def @positions_require_byte_offsets(%lhs: buffer, %rhs: buffer, %position: 
   %equal = buffer.compare.address eq, %lhs[%position], %rhs[%origin]
   func.return %equal : i1
 }
+
+// ====
+
+func.def @restrict_requires_a_restricted_reference(%peer: buffer) -> (buffer) {
+  // ERROR@+1: STRUCTURE/014 "restricted operand count" "0" "at least one restricted reference"
+  %peer_scoped = buffer.restrict.begin peers %peer : buffer
+  func.return %peer_scoped : buffer
+}
+
+// ====
+
+func.def @restrict_preserves_value_arity(%source: buffer, %peer: buffer) -> (buffer) {
+  // ERROR@+1: STRUCTURE/013 "restricted and peer operands" "2" "results" "1"
+  %source_scoped = buffer.restrict.begin %source peers %peer : buffer
+  func.return %source_scoped : buffer
+}
+
+// ====
+
+func.def @restrict_requires_storage_references(%source: i32) -> (i32) {
+  // ERROR@+1: TYPE/003 "reference operand 0" "i32" "buffer or view"
+  %source_scoped = buffer.restrict.begin %source : i32
+  func.return %source_scoped : i32
+}
+
+// ====
+
+func.def @restrict_preserves_reference_type(%source: buffer) -> (view<1xi32>) {
+  // ERROR@+1: TYPE/001 "reference operand 0" "buffer" "result 0" "view<1xi32>"
+  %source_scoped = buffer.restrict.begin %source : view<1xi32>
+  func.return %source_scoped : view<1xi32>
+}
+
+// ====
+
+func.def @restrict_end_requires_storage_references(%source: i32) -> (i32) {
+  // ERROR@+1: TYPE/003 "reference operand 0" "i32" "buffer or view"
+  %source_result = buffer.restrict.end %source : i32
+  func.return %source_result : i32
+}

@@ -33,6 +33,7 @@ from loom.assembly import (
 from loom.dialect.atomic import AtomicFenceOrdering, AtomicScope
 from loom.dialect.memory import MemorySpace
 from loom.dsl import (
+    ANY,
     ATTR_TYPE_BYTES,
     ATTR_TYPE_ENUM,
     ATTR_TYPE_I64,
@@ -574,6 +575,97 @@ buffer_assume_noalias = Op(
 )
 
 # ============================================================================
+# buffer.restrict.begin/end — scoped source access independence
+# ============================================================================
+
+buffer_restrict_begin = Op(
+    name="buffer.restrict.begin",
+    group=buffer_ops,
+    doc=(
+        "Begin a source-language restrict access scope over buffer roots and "
+        "typed views. Restricted references name independent access paths; "
+        "peers name the other incoming storage paths covered by the same "
+        "scope. The results preserve physical storage identity and differ only "
+        "in access-provenance facts. A restrict scope may prove that "
+        "overlapping accesses do not occur in a defined program only when at "
+        "least one access writes. It does not prove that roots are physically "
+        "disjoint, and shared read-only storage remains valid. "
+        "buffer.restrict.end removes the scope from values that leave it."
+    ),
+    operands=[
+        Operand(
+            "restricted",
+            ANY,
+            doc=("Buffer or view references accessed through distinct restricted paths."),
+            variadic=True,
+        ),
+        Operand(
+            "peers",
+            ANY,
+            doc=("Other incoming buffer or view references covered by the same access scope."),
+            variadic=True,
+        ),
+    ],
+    results=[
+        Result(
+            "results",
+            ANY,
+            doc="Same references carrying the active access-scope association.",
+            variadic=True,
+        )
+    ],
+    traits=[PURE, FACT_IDENTITY],
+    verify="loom_buffer_restrict_begin_verify",
+    facts="loom_buffer_restrict_begin_facts",
+    format=[
+        Refs("restricted"),
+        OptionalGroup([kw("peers"), Refs("peers")], anchor="peers"),
+        COLON,
+        TypesOf("results"),
+    ],
+    examples=[
+        "%source_r = buffer.restrict.begin %source : buffer",
+        ("%source_r, %output_r, %scratch_peer = buffer.restrict.begin %source, %output peers %scratch : buffer, view<16xf32>, view<16xf32>"),
+    ],
+)
+
+buffer_restrict_end = Op(
+    name="buffer.restrict.end",
+    group=buffer_ops,
+    doc=(
+        "End source-language restrict access scopes carried by buffer roots or "
+        "typed views. The results preserve every physical storage fact while "
+        "removing the scoped access association, preventing it from escaping "
+        "a lexical or invocation boundary."
+    ),
+    operands=[
+        Operand(
+            "references",
+            ANY,
+            doc="Buffer or view references leaving their access scopes.",
+            variadic=True,
+        )
+    ],
+    results=[
+        Result(
+            "results",
+            ANY,
+            doc="Same references without restrict access associations.",
+            variadic=True,
+        )
+    ],
+    constraints=[VariadicValuesMatch("references", "results")],
+    traits=[PURE, FACT_IDENTITY],
+    facts="loom_buffer_restrict_end_facts",
+    verify="loom_buffer_restrict_end_verify",
+    format=[Refs("references"), COLON, TypesOf("results")],
+    examples=[
+        "%returned = buffer.restrict.end %scoped : buffer",
+        "%lhs_out, %rhs_out = buffer.restrict.end %lhs, %rhs : buffer, view<16xf32>",
+    ],
+)
+
+# ============================================================================
 # buffer.assume.same_root — refine a buffer root to share another root identity
 # ============================================================================
 
@@ -932,4 +1024,6 @@ ALL_BUFFER_OPS: tuple[Op, ...] = (
     buffer_compare_null,
     buffer_compare_address,
     buffer_distance,
+    buffer_restrict_begin,
+    buffer_restrict_end,
 )

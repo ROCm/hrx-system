@@ -240,6 +240,8 @@ typedef struct loom_low_source_memory_access_plan_t {
   uint32_t root_minimum_alignment;
   // Comparable alias scope for disjointness proofs, or NONE.
   loom_value_fact_alias_scope_id_t alias_scope_id;
+  // Active source restrict domain and access-path association.
+  loom_value_fact_restrict_access_t restrict_access;
   // Byte count of one addressed view element.
   uint32_t element_byte_count;
   // Static number of vector lanes addressed by the operation.

@@ -189,9 +189,10 @@ static iree_status_t loom_scf_unroll_build_movement_scopes(
       if (iree_all_bits_set(scopes[effect],
                             LOOM_SCF_UNROLL_SCOPE_INVARIANT_ROOT |
                                 LOOM_SCF_UNROLL_SCOPE_INVARIANT_RANGE) &&
-          loom_view_region_table_root_is_stable(
+          loom_view_region_table_access_is_stable(
               &movement->view_regions, source->root_value_id,
-              source->alias_scope_id, source->memory_space)) {
+              source->alias_scope_id, source->restrict_access,
+              source->memory_space)) {
         varying = false;
       }
     }
@@ -210,11 +211,11 @@ static iree_status_t loom_scf_unroll_build_movement_scopes(
   return iree_ok_status();
 }
 
-static iree_status_t loom_scf_unroll_endpoints_no_overlap(
+static iree_status_t loom_scf_unroll_endpoints_nonconflicting(
     loom_movement_analysis_t* movement_analysis,
     const loom_movement_endpoint_t* left, const loom_movement_endpoint_t* right,
-    uint8_t left_scope, uint8_t right_scope, bool* out_no_overlap) {
-  *out_no_overlap = false;
+    uint8_t left_scope, uint8_t right_scope, bool* out_nonconflicting) {
+  *out_nonconflicting = false;
   if (left->kind != LOOM_MOVEMENT_ENDPOINT_VIEW ||
       right->kind != LOOM_MOVEMENT_ENDPOINT_VIEW) {
     return iree_ok_status();
@@ -223,7 +224,7 @@ static iree_status_t loom_scf_unroll_endpoints_no_overlap(
                                                      right->origin) ||
       loom_view_memory_spaces_are_disjoint(left->memory_space,
                                            right->memory_space)) {
-    *out_no_overlap = true;
+    *out_nonconflicting = true;
     return iree_ok_status();
   }
   if (left->root_value_id == LOOM_VALUE_ID_INVALID ||
@@ -245,10 +246,10 @@ static iree_status_t loom_scf_unroll_endpoints_no_overlap(
                           LOOM_SCF_UNROLL_SCOPE_INVARIANT_RANGE)) {
       // These marginal ranges quantify both expressions independently. Shared
       // varying SSA symbols cannot cancel across two different iterations.
-      *out_no_overlap = left->end_byte_offset.facts.range_hi <=
-                            right->begin_byte_offset.facts.range_lo ||
-                        right->end_byte_offset.facts.range_hi <=
-                            left->begin_byte_offset.facts.range_lo;
+      *out_nonconflicting = left->end_byte_offset.facts.range_hi <=
+                                right->begin_byte_offset.facts.range_lo ||
+                            right->end_byte_offset.facts.range_hi <=
+                                left->begin_byte_offset.facts.range_lo;
       return iree_ok_status();
     }
   }
@@ -257,9 +258,9 @@ static iree_status_t loom_scf_unroll_endpoints_no_overlap(
       !loom_movement_endpoint_as_view_region(right, &right_region)) {
     return iree_ok_status();
   }
-  return loom_view_regions_prove_no_overlap(&movement_analysis->view_regions,
-                                            &left_region, &right_region,
-                                            out_no_overlap);
+  return loom_view_regions_prove_no_conflict(
+      &movement_analysis->view_regions, &left_region, left_region.access_flags,
+      &right_region, right_region.access_flags, out_nonconflicting);
 }
 
 static bool loom_scf_unroll_request_access_endpoint(
@@ -329,10 +330,11 @@ static iree_status_t loom_scf_unroll_movement_requests_conflict(
     return iree_ok_status();
   }
 
-  bool no_overlap = false;
-  IREE_RETURN_IF_ERROR(loom_scf_unroll_endpoints_no_overlap(
-      movement_analysis, left, right, left_scope, right_scope, &no_overlap));
-  *out_conflict = !no_overlap;
+  bool nonconflicting = false;
+  IREE_RETURN_IF_ERROR(loom_scf_unroll_endpoints_nonconflicting(
+      movement_analysis, left, right, left_scope, right_scope,
+      &nonconflicting));
+  *out_conflict = !nonconflicting;
   return iree_ok_status();
 }
 

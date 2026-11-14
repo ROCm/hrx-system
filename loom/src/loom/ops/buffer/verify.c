@@ -70,6 +70,44 @@ static iree_status_t loom_buffer_emit_attribute_value_constraint(
                           IREE_ARRAYSIZE(params));
 }
 
+static iree_status_t loom_buffer_verify_restrict_reference_types(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter) {
+  const loom_value_id_t* operands = loom_op_const_operands(op);
+  const loom_value_id_t* results = loom_op_results(op);
+  for (uint16_t i = 0; i < op->operand_count; ++i) {
+    const loom_type_t operand_type =
+        loom_module_value_type(module, operands[i]);
+    char operand_name[32];
+    iree_snprintf(operand_name, sizeof(operand_name), "reference operand %u",
+                  i);
+    if (!loom_type_is_buffer(operand_type) &&
+        !loom_type_is_view(operand_type)) {
+      const loom_diagnostic_param_t params[] = {
+          loom_param_string(iree_make_cstring_view(operand_name)),
+          loom_param_type(operand_type),
+          loom_param_string(IREE_SV("buffer or view")),
+      };
+      return loom_buffer_emit(emitter, op, LOOM_ERR_TYPE_003, params,
+                              IREE_ARRAYSIZE(params));
+    }
+    const loom_type_t result_type = loom_module_value_type(module, results[i]);
+    if (!loom_type_equal(operand_type, result_type)) {
+      char result_name[32];
+      iree_snprintf(result_name, sizeof(result_name), "result %u", i);
+      const loom_diagnostic_param_t params[] = {
+          loom_param_string(iree_make_cstring_view(operand_name)),
+          loom_param_type(operand_type),
+          loom_param_string(iree_make_cstring_view(result_name)),
+          loom_param_type(result_type),
+      };
+      return loom_buffer_emit(emitter, op, LOOM_ERR_TYPE_001, params,
+                              IREE_ARRAYSIZE(params));
+    }
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_buffer_verify_concrete_memory_space(
     iree_diagnostic_emitter_t emitter, const loom_op_t* op,
     iree_string_view_t attr_name, loom_value_fact_memory_space_t value) {
@@ -259,6 +297,35 @@ iree_status_t loom_buffer_assume_alignment_verify(
   return loom_buffer_emit_attribute_value_constraint(
       emitter, op, IREE_SV("minimum_alignment"), minimum_alignment,
       IREE_SV("positive power-of-two byte alignment"));
+}
+
+iree_status_t loom_buffer_restrict_begin_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter) {
+  const loom_value_slice_t restricted =
+      loom_buffer_restrict_begin_restricted(op);
+  if (restricted.count == 0) {
+    return loom_buffer_emit_attribute_value_constraint(
+        emitter, op, IREE_SV("restricted operand count"), 0,
+        IREE_SV("at least one restricted reference"));
+  }
+  if (op->operand_count == op->result_count) {
+    return loom_buffer_verify_restrict_reference_types(module, op, emitter);
+  }
+  const loom_diagnostic_param_t params[] = {
+      loom_param_string(IREE_SV("restricted and peer operands")),
+      loom_param_u32(op->operand_count),
+      loom_param_string(IREE_SV("results")),
+      loom_param_u32(op->result_count),
+  };
+  return loom_buffer_emit(emitter, op, LOOM_ERR_STRUCTURE_013, params,
+                          IREE_ARRAYSIZE(params));
+}
+
+iree_status_t loom_buffer_restrict_end_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter) {
+  return loom_buffer_verify_restrict_reference_types(module, op, emitter);
 }
 
 iree_status_t loom_buffer_view_verify(const loom_module_t* module,

@@ -41,6 +41,7 @@ iree_status_t loom_command_parameter_base_facts(
     buffer.root_value_id = loom_value_fact_view_reference_resolve_root_value(
         view, loom_command_parameter_base_source(op));
     buffer.alias_scope_id = view.alias_scope_id;
+    buffer.restrict_access = view.restrict_access;
     buffer.nullability = view.nullability;
     buffer.origin = view.origin;
   }

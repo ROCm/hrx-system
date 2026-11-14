@@ -1,0 +1,309 @@
+// RUN: roundtrip
+// Restricted pointer paths and every representable incoming storage peer enter
+// one callable scope. Returning a restricted path removes that association
+// without changing its physical root or byte origin.
+using restricted_pointer = int* __restrict__;
+
+int* combine(restricted_pointer left, int* __restrict right, int* peer) {
+  left += 1;
+  int* derived = left - 1;
+  derived[0] += right[0];
+  peer[0] = derived[0];
+  return derived;
+}
+
+// ----
+func.def public @combine(%left$0: buffer, %left_byte_offset$1: offset, %right: buffer, %right_byte_offset: offset, %peer: buffer, %peer_byte_offset: offset) -> (buffer, offset) {
+  %left$8, %9, %10 = buffer.restrict.begin %left$0, %right peers %peer : buffer, buffer, buffer
+  %11 = scalar.constant 1 : i32
+  %12 = scalar.extsi %11 : i32 to i64
+  %13 = scalar.constant 4 : i64
+  %14 = scalar.muli %12, %13 : i64
+  %15 = index.cast %left_byte_offset$1 : offset to i64
+  %16 = scalar.addi %15, %14 : i64
+  %17 = scalar.assume %16 [range(%16, 0, 9223372036854775807)] : i64
+  %left_byte_offset$18 = index.cast %17 : i64 to offset
+  %19 = scalar.constant 1 : i32
+  %20 = scalar.extsi %19 : i32 to i64
+  %21 = scalar.constant 4 : i64
+  %22 = scalar.muli %20, %21 : i64
+  %23 = index.cast %left_byte_offset$18 : offset to i64
+  %24 = scalar.subi %23, %22 : i64
+  %25 = scalar.assume %24 [range(%24, 0, 9223372036854775807)] : i64
+  %derived_byte_offset = index.cast %25 : i64 to offset
+  %27 = scalar.constant 0 : i32
+  %28 = scalar.extsi %27 : i32 to i64
+  %29 = scalar.constant 4 : i64
+  %30 = scalar.muli %28, %29 : i64
+  %31 = index.cast %right_byte_offset : offset to i64
+  %32 = scalar.addi %31, %30 : i64
+  %33 = scalar.assume %32 [range(%32, 0, 9223372036854775807)] : i64
+  %34 = index.cast %33 : i64 to offset
+  %35 = buffer.view %9[%34] : buffer -> view<1xi32>
+  %36 = view.load<root_in_bounds> %35[0] : view<1xi32> -> i32
+  %37 = scalar.constant 0 : i32
+  %38 = scalar.extsi %37 : i32 to i64
+  %39 = scalar.constant 4 : i64
+  %40 = scalar.muli %38, %39 : i64
+  %41 = index.cast %derived_byte_offset : offset to i64
+  %42 = scalar.addi %41, %40 : i64
+  %43 = scalar.assume %42 [range(%42, 0, 9223372036854775807)] : i64
+  %44 = index.cast %43 : i64 to offset
+  %45 = buffer.view %left$8[%44] : buffer -> view<1xi32>
+  %46 = view.load<root_in_bounds> %45[0] : view<1xi32> -> i32
+  %47 = scalar.addi %46, %36 : i32
+  view.store<root_in_bounds> %47, %45[0] : i32, view<1xi32>
+  %48 = scalar.constant 0 : i32
+  %49 = scalar.extsi %48 : i32 to i64
+  %50 = scalar.constant 4 : i64
+  %51 = scalar.muli %49, %50 : i64
+  %52 = index.cast %derived_byte_offset : offset to i64
+  %53 = scalar.addi %52, %51 : i64
+  %54 = scalar.assume %53 [range(%53, 0, 9223372036854775807)] : i64
+  %55 = index.cast %54 : i64 to offset
+  %56 = buffer.view %left$8[%55] : buffer -> view<1xi32>
+  %57 = view.load<root_in_bounds> %56[0] : view<1xi32> -> i32
+  %58 = scalar.constant 0 : i32
+  %59 = scalar.extsi %58 : i32 to i64
+  %60 = scalar.constant 4 : i64
+  %61 = scalar.muli %59, %60 : i64
+  %62 = index.cast %peer_byte_offset : offset to i64
+  %63 = scalar.addi %62, %61 : i64
+  %64 = scalar.assume %63 [range(%63, 0, 9223372036854775807)] : i64
+  %65 = index.cast %64 : i64 to offset
+  %66 = buffer.view %10[%65] : buffer -> view<1xi32>
+  view.store<root_in_bounds> %57, %66[0] : i32, view<1xi32>
+  %67 = buffer.restrict.end %left$8 : buffer
+  func.return %67, %derived_byte_offset : buffer, offset
+}
+
+// ====
+// Address observation retains reference parameters as storage paths. The
+// restricted reference and ordinary reference share one access domain while
+// remaining ordinary physical roots.
+static int combine_references(int& __restrict__ left, int& peer) {
+  int* left_address = &left;
+  int* peer_address = &peer;
+  left += peer;
+  return left_address == peer_address ? left : peer;
+}
+
+int reference_access(int* left, int* peer) {
+  return combine_references(*left, *peer);
+}
+
+// ----
+func.def public @reference_access(%left: buffer, %left_byte_offset: offset, %peer: buffer, %peer_byte_offset: offset) -> (i32) {
+  %5 = func.call @combine_references(%left, %left_byte_offset, %peer, %peer_byte_offset) : (buffer, offset, buffer, offset) -> (i32)
+  func.return %5 : i32
+}
+
+func.def @combine_references(%left: buffer, %left_byte_offset: offset, %peer$8: buffer, %peer_byte_offset: offset) -> (i32) {
+  %left_address, %peer_address = buffer.restrict.begin %left peers %peer$8 : buffer, buffer
+  %13 = buffer.view %peer_address[%peer_byte_offset] : buffer -> view<1xi32>
+  %peer$14 = view.load<root_in_bounds> %13[0] : view<1xi32> -> i32
+  %15 = buffer.view %left_address[%left_byte_offset] : buffer -> view<1xi32>
+  %16 = view.load<root_in_bounds> %15[0] : view<1xi32> -> i32
+  %17 = scalar.addi %16, %peer$14 : i32
+  %18 = buffer.view %left_address[%left_byte_offset] : buffer -> view<1xi32>
+  view.store<root_in_bounds> %17, %18[0] : i32, view<1xi32>
+  %19 = buffer.compare.address eq, %left_address[%left_byte_offset], %peer_address[%peer_byte_offset]
+  %20 = scf.if %19 -> (i32) {
+    %21 = buffer.view %left_address[%left_byte_offset] : buffer -> view<1xi32>
+    %left = view.load<root_in_bounds> %21[0] : view<1xi32> -> i32
+    scf.yield %left : i32
+  } else {
+    %23 = buffer.view %peer_address[%peer_byte_offset] : buffer -> view<1xi32>
+    %peer = view.load<root_in_bounds> %23[0] : view<1xi32> -> i32
+    scf.yield %peer : i32
+  }
+  func.return %20 : i32
+}
+
+// ====
+// A trailing restrict qualifier applies to the storage-backed implicit object.
+// Its explicit pointer argument is the ordinary peer path in the same scope.
+struct Counter {
+  int value;
+
+  int add(int* peer) __restrict__ {
+    value += peer[0];
+    return value;
+  }
+};
+
+int update_counter(Counter* counter, int* peer) {
+  return counter->add(peer);
+}
+
+// ----
+func.def public @update_counter(%counter: buffer, %counter_byte_offset: offset, %peer: buffer, %peer_byte_offset: offset) -> (i32) {
+  %5 = func.call @Counter__add_storage(%counter, %counter_byte_offset, %peer, %peer_byte_offset) : (buffer, offset, buffer, offset) -> (i32)
+  func.return %5 : i32
+}
+
+func.def @Counter__add_storage(%this: buffer, %this_byte_offset: offset, %peer: buffer, %peer_byte_offset: offset) -> (i32) {
+  %11, %12 = buffer.restrict.begin %this peers %peer : buffer, buffer
+  %13 = scalar.constant 0 : i32
+  %14 = scalar.extsi %13 : i32 to i64
+  %15 = scalar.constant 4 : i64
+  %16 = scalar.muli %14, %15 : i64
+  %17 = index.cast %peer_byte_offset : offset to i64
+  %18 = scalar.addi %17, %16 : i64
+  %19 = scalar.assume %18 [range(%18, 0, 9223372036854775807)] : i64
+  %20 = index.cast %19 : i64 to offset
+  %21 = buffer.view %12[%20] : buffer -> view<1xi32>
+  %22 = view.load<root_in_bounds> %21[0] : view<1xi32> -> i32
+  %23 = index.constant 0 : offset
+  %24 = index.add %this_byte_offset, %23 : offset
+  %25 = buffer.view %11[%24] : buffer -> view<1xi32>
+  %26 = view.load<root_in_bounds> %25[0] : view<1xi32> -> i32
+  %27 = scalar.addi %26, %22 : i32
+  view.store<root_in_bounds> %27, %25[0] : i32, view<1xi32>
+  %28 = index.constant 0 : offset
+  %29 = index.add %this_byte_offset, %28 : offset
+  %30 = buffer.view %11[%29] : buffer -> view<1xi32>
+  %value = view.load<root_in_bounds> %30[0] : view<1xi32> -> i32
+  func.return %value : i32
+}
+
+// ====
+// Concrete template instances retain the qualifier on their own parameters.
+// The returned root leaves the instantiated helper's scope before crossing the
+// function boundary.
+template <class T>
+static T* select_restricted(T* __restrict__ selected, T* peer) {
+  selected[0] += peer[0];
+  return selected;
+}
+
+int template_access(int* selected, int* peer) {
+  return select_restricted(selected, peer)[0];
+}
+
+// ----
+func.def public @template_access(%selected: buffer, %selected_byte_offset: offset, %peer: buffer, %peer_byte_offset: offset) -> (i32) {
+  %5, %6 = func.call @select_restricted_int(%selected, %selected_byte_offset, %peer, %peer_byte_offset) : (buffer, offset, buffer, offset) -> (buffer, offset)
+  %7 = scalar.constant 0 : i32
+  %8 = scalar.extsi %7 : i32 to i64
+  %9 = scalar.constant 4 : i64
+  %10 = scalar.muli %8, %9 : i64
+  %11 = index.cast %6 : offset to i64
+  %12 = scalar.addi %11, %10 : i64
+  %13 = scalar.assume %12 [range(%12, 0, 9223372036854775807)] : i64
+  %14 = index.cast %13 : i64 to offset
+  %15 = buffer.view %5[%14] : buffer -> view<1xi32>
+  %16 = view.load<root_in_bounds> %15[0] : view<1xi32> -> i32
+  func.return %16 : i32
+}
+
+func.def @select_restricted_int(%selected: buffer, %selected_byte_offset: offset, %peer: buffer, %peer_byte_offset: offset) -> (buffer, offset) {
+  %23, %24 = buffer.restrict.begin %selected peers %peer : buffer, buffer
+  %25 = scalar.constant 0 : i32
+  %26 = scalar.extsi %25 : i32 to i64
+  %27 = scalar.constant 4 : i64
+  %28 = scalar.muli %26, %27 : i64
+  %29 = index.cast %peer_byte_offset : offset to i64
+  %30 = scalar.addi %29, %28 : i64
+  %31 = scalar.assume %30 [range(%30, 0, 9223372036854775807)] : i64
+  %32 = index.cast %31 : i64 to offset
+  %33 = buffer.view %24[%32] : buffer -> view<1xi32>
+  %34 = view.load<root_in_bounds> %33[0] : view<1xi32> -> i32
+  %35 = scalar.constant 0 : i32
+  %36 = scalar.extsi %35 : i32 to i64
+  %37 = scalar.constant 4 : i64
+  %38 = scalar.muli %36, %37 : i64
+  %39 = index.cast %selected_byte_offset : offset to i64
+  %40 = scalar.addi %39, %38 : i64
+  %41 = scalar.assume %40 [range(%40, 0, 9223372036854775807)] : i64
+  %42 = index.cast %41 : i64 to offset
+  %43 = buffer.view %23[%42] : buffer -> view<1xi32>
+  %44 = view.load<root_in_bounds> %43[0] : view<1xi32> -> i32
+  %45 = scalar.addi %44, %34 : i32
+  view.store<root_in_bounds> %45, %43[0] : i32, view<1xi32>
+  %46 = buffer.restrict.end %23 : buffer
+  func.return %46, %selected_byte_offset : buffer, offset
+}
+
+// ====
+// Kernel buffer bindings use the same source access contract as helpers. A
+// void boundary has no reference result requiring an explicit scope end.
+[[loom::kernel, loom::workgroup_size(1, 1, 1),
+  loom::workgroup_count(1, 1, 1)]]
+void restricted_kernel(const int* __restrict__ input, int* output) {
+  output[0] = input[0];
+}
+
+// ----
+kernel.def @restricted_kernel() {
+  %2 = index.constant 1 : index
+  %3 = index.constant 1 : index
+  %4 = index.constant 1 : index
+  %5 = index.constant 1 : index
+  %6 = index.constant 1 : index
+  %7 = index.constant 1 : index
+  kernel.launch.config workgroups(%2, %3, %4) workgroup_size(%5, %6, %7) : index
+} launch(%input: buffer, %output: buffer) {
+  %input_byte_offset = index.constant 0 : offset
+  %output_byte_offset = index.constant 0 : offset
+  %10, %11 = buffer.restrict.begin %input peers %output : buffer, buffer
+  %12 = scalar.constant 0 : i32
+  %13 = scalar.extsi %12 : i32 to i64
+  %14 = scalar.constant 4 : i64
+  %15 = scalar.muli %13, %14 : i64
+  %16 = index.cast %input_byte_offset : offset to i64
+  %17 = scalar.addi %16, %15 : i64
+  %18 = scalar.assume %17 [range(%17, 0, 9223372036854775807)] : i64
+  %19 = index.cast %18 : i64 to offset
+  %20 = buffer.view %10[%19] : buffer -> view<1xi32>
+  %21 = view.load<root_in_bounds> %20[0] : view<1xi32> -> i32
+  %22 = scalar.constant 0 : i32
+  %23 = scalar.extsi %22 : i32 to i64
+  %24 = scalar.constant 4 : i64
+  %25 = scalar.muli %23, %24 : i64
+  %26 = index.cast %output_byte_offset : offset to i64
+  %27 = scalar.addi %26, %25 : i64
+  %28 = scalar.assume %27 [range(%27, 0, 9223372036854775807)] : i64
+  %29 = index.cast %28 : i64 to offset
+  %30 = buffer.view %11[%29] : buffer -> view<1xi32>
+  view.store<root_in_bounds> %21, %30[0] : i32, view<1xi32>
+  kernel.return
+}
+
+// ====
+// Typed-view references participate in the same access domain as raw storage
+// roots; restrict is not limited to the pointer representation.
+#include <loomcxx/view.h>
+
+using word_view = loom::type::view<loom::type::shape<4>, unsigned>;
+
+static word_view update_view(word_view& __restrict__ target, word_view& peer) {
+  unsigned value = loom::view::load(peer, 0);
+  loom::view::store(value, target, 0);
+  return target;
+}
+
+unsigned view_access(word_view target, word_view peer) {
+  return loom::view::load(update_view(target, peer), 0);
+}
+
+// ----
+func.def public @view_access(%target: view<4xi32>, %peer: view<4xi32>) -> (i32) {
+  %3 = func.call @update_view(%target, %peer) : (view<4xi32>, view<4xi32>) -> (view<4xi32>)
+  %4 = scalar.constant 0 : i32
+  %5 = index.cast %4 : i32 to index
+  %6 = view.load %3[%5] : view<4xi32> -> i32
+  func.return %6 : i32
+}
+
+func.def @update_view(%target: view<4xi32>, %peer: view<4xi32>) -> (view<4xi32>) {
+  %10, %11 = buffer.restrict.begin %target peers %peer : view<4xi32>, view<4xi32>
+  %12 = scalar.constant 0 : i32
+  %13 = index.cast %12 : i32 to index
+  %value = view.load %11[%13] : view<4xi32> -> i32
+  %15 = scalar.constant 0 : i32
+  %16 = index.cast %15 : i32 to index
+  view.store %value, %10[%16] : i32, view<4xi32>
+  %17 = buffer.restrict.end %10 : view<4xi32>
+  func.return %17 : view<4xi32>
+}

@@ -38,6 +38,8 @@ loom_check_test_suite(
         "pointer_updates.cxx-test",
         "pointer_walk.cxx-test",
         "pointers.cxx-test",
+        "restrict_access.cxx-test",
+        "restrict_access_invalid.cxx-test",
         "storage_composition.cxx-test",
         "storage_updates.cxx-test",
         "volatile.cxx-test",

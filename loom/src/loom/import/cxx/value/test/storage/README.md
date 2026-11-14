@@ -11,6 +11,7 @@ checks operands and order as well as the operations emitted.
 | Array initialization, element origins, zero-fill, and volatile access | `local_arrays` |
 | Addressable local objects across retained calls | `call_storage` |
 | Ordinary pointer ABI, signed offsets, and cursor loops | `pointers`, `pointer_origins`, `pointer_walk` |
+| Scoped restrict access paths, peers, returns, references, and receivers | `restrict_access*` |
 | Selected roots and simultaneous pointer permutations | `buffer_selection` |
 | Opaque transport, type recovery, and access qualification | `opaque_pointers*` |
 | Typed allocation and borrowed memory-space refinement | `buffer_alloca*`, `buffer_memory_space*` |

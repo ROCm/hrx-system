@@ -8,8 +8,10 @@
 #define LOOM_IMPORT_CXX_VALUE_STORAGE_H_
 
 #include <optional>
+#include <span>
 #include <unordered_map>
 #include <unordered_set>
+#include <vector>
 
 #include "loom/import/cxx/value/representation.h"
 #include "loom/import/cxx/value/scalar.h"
@@ -223,6 +225,17 @@ class Storage {
   loom_value_id_t assume_memory_space(
       loom_value_id_t root, loom_value_fact_memory_space_t memory_space,
       cxx::AST* owner);
+  // Begins one source-language restrict scope over incoming buffer or view
+  // paths. Restricted references carry distinct access associations; peers
+  // carry the shared domain without becoming independent from one another.
+  // Physical root identity and allocation facts remain unchanged.
+  std::vector<loom_value_id_t> begin_restrict_scope(
+      std::span<const loom_value_id_t> references, size_t restricted_count,
+      cxx::AST* owner);
+  // Removes restrict associations from references escaping their source scope.
+  // Other physical and source-storage facts survive unchanged.
+  std::vector<loom_value_id_t> end_restrict_scope(
+      std::span<const loom_value_id_t> references, cxx::AST* owner);
 
  private:
   // Publishes the defined-source dereference range for a compiler-owned

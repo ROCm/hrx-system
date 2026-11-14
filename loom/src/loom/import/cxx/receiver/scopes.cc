@@ -114,4 +114,8 @@ void ReceiverScopes::mark_complete(cxx::Symbol* subobject) {
   owner.complete = true;
 }
 
+void ReceiverScopes::replace_current_storage_root(loom_value_id_t root) {
+  frames_.back().receiver.storage->pointer.root = root;
+}
+
 }  // namespace loom::cxx_import
