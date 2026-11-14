@@ -6,20 +6,19 @@
 _MANIFEST_ENVIRONMENT_VARIABLE = "IREE_WINDOWS_CACHE_HANDOFF_MANIFEST"
 _PYTHON_ENVIRONMENT_VARIABLE = "IREE_WINDOWS_CACHE_HANDOFF_PYTHON"
 
-def _runfile_path(ctx, file):
-    if file.short_path.startswith("../"):
-        return file.short_path[3:]
-    return ctx.workspace_name + "/" + file.short_path
-
 def _windows_cache_handoff_test_impl(ctx):
-    runner = ctx.file._runner
+    runner = ctx.actions.declare_file(ctx.label.name + ".runner.py")
+    ctx.actions.expand_template(
+        template = ctx.file._runner,
+        output = runner,
+        substitutions = {},
+    )
     executable = ctx.actions.declare_file(ctx.label.name + ".bat")
-    runner_path = _runfile_path(ctx, runner).replace("/", "\\")
     ctx.actions.write(
         output = executable,
         content = (
             "@echo off\r\n" +
-            '"%%%s%%" "%%TEST_SRCDIR%%\\%s" run -- %%*\r\n' % (_PYTHON_ENVIRONMENT_VARIABLE, runner_path) +
+            '"%%%s%%" "%%~dp0%s" run -- %%*\r\n' % (_PYTHON_ENVIRONMENT_VARIABLE, runner.basename) +
             "exit /b %ERRORLEVEL%\r\n"
         ),
         is_executable = True,
@@ -30,6 +29,7 @@ def _windows_cache_handoff_test_impl(ctx):
     return [
         DefaultInfo(
             executable = executable,
+            files = depset([executable, runner]),
             runfiles = runfiles,
         ),
         testing.TestEnvironment(
