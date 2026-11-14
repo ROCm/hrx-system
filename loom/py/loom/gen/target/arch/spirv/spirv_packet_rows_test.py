@@ -794,7 +794,7 @@ def test_generation_emits_complete_ordinary_vector_structural_matrix() -> None:
 
 def test_generation_emits_complete_ordinary_vector_shuffle_matrix() -> None:
     rows = {row.descriptor_key: row for row in _packet_rows() if row.descriptor_key in {instruction.key for instruction in ORDINARY_VECTOR_SHUFFLE_INSTRUCTIONS}}
-    assert len(rows) == len(ORDINARY_VECTOR_SHUFFLE_INSTRUCTIONS) == 70
+    assert len(rows) == len(ORDINARY_VECTOR_SHUFFLE_INSTRUCTIONS)
 
     for instruction in ORDINARY_VECTOR_SHUFFLE_INSTRUCTIONS:
         row = rows[instruction.key]

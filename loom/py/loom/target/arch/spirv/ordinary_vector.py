@@ -457,7 +457,17 @@ ORDINARY_VECTOR_CONCAT_SHUFFLE_INSTRUCTIONS = tuple(
     )
 )
 
+ORDINARY_VECTOR_DEINTERLEAVE_SHUFFLE_INSTRUCTIONS = tuple(
+    OrdinaryVectorShuffleInstruction(
+        source0_type=OrdinaryVectorType(component_type, 4),
+        source1_type=OrdinaryVectorType(component_type, 4),
+        result_type=OrdinaryVectorType(component_type, 2),
+    )
+    for component_type in ORDINARY_VECTOR_COMPONENT_TYPES
+)
+
 ORDINARY_VECTOR_SHUFFLE_INSTRUCTIONS = (
     *ORDINARY_VECTOR_SOURCE_SHUFFLE_INSTRUCTIONS,
     *ORDINARY_VECTOR_CONCAT_SHUFFLE_INSTRUCTIONS,
+    *ORDINARY_VECTOR_DEINTERLEAVE_SHUFFLE_INSTRUCTIONS,
 )

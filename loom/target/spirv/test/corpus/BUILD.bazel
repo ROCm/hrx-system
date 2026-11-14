@@ -558,7 +558,6 @@ _SPIRV_EXECUTION_XFAILS = {
     # the narrow carrier before arithmetic selection.
     "numeric/vector/broadcast_arithmetic.loom:@broadcast_arithmetic_bf16_values": "TARGET/002,TARGET/003",
     "numeric/vector/f32.loom:@vector_f32_square_root_values": "LOWERING/036",
-    "numeric/vector/interleave.loom:@native_packet_routes_values": "TARGET/001",
 }
 
 # The hardware-discovered profile selects descriptors from the physical device.

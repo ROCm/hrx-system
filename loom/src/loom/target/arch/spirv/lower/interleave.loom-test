@@ -1,0 +1,126 @@
+// RUN: pass target=spirv:vulkan1.3+bda source-to-low,low-dce
+
+// Isolate native selection before canonicalization can fold constructed lanes.
+func.def @zip_two(%even: f32, %odd: f32) -> (f32, f32) {
+  %left = vector.from_elements %even : vector<1xf32>
+  %right = vector.from_elements %odd : vector<1xf32>
+  %result = vector.interleave<0> %left, %right : vector<1xf32>, vector<1xf32> -> vector<2xf32>
+  %first = vector.extract %result[0] : vector<2xf32> -> f32
+  %second = vector.extract %result[1] : vector<2xf32> -> f32
+  func.return %first, %second : f32, f32
+}
+
+// ----
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @zip_two(%left: reg<spirv.id : f32>, %right: reg<spirv.id : f32>) -> (reg<spirv.id : f32>, reg<spirv.id : f32>) asm {
+  %result = OpCompositeConstruct.v2f32 %left, %right
+  %first = OpCompositeExtract.v2f32.f32 %result, 0
+  %second = OpCompositeExtract.v2f32.f32 %result, 1
+  return %first, %second
+}
+
+// ====
+// RUN: pass target=spirv:vulkan1.3+bda source-to-low,low-dce
+
+func.def @unzip_two(%first: i32, %second: i32) -> (i32, i32) {
+  %source = vector.from_elements %first, %second : vector<2xi32>
+  %even, %odd = vector.deinterleave<0> %source : vector<2xi32> -> vector<1xi32>, vector<1xi32>
+  %left = vector.extract %even[0] : vector<1xi32> -> i32
+  %right = vector.extract %odd[0] : vector<1xi32> -> i32
+  func.return %left, %right : i32, i32
+}
+
+// ----
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @unzip_two(%first: reg<spirv.id : i32>, %second: reg<spirv.id : i32>) -> (reg<spirv.id : i32>, reg<spirv.id : i32>) asm {
+  %source = OpCompositeConstruct.v2i32 %first, %second
+  %left = OpCompositeExtract.v2i32.i32 %source, 0
+  %right = OpCompositeExtract.v2i32.i32 %source, 1
+  return %left, %right
+}
+
+// ====
+// RUN: pass target=spirv:vulkan1.3+bda+extended-types source-to-low,low-dce
+
+func.def @zip_four(%a: i16, %b: i16, %c: i16, %d: i16) -> (i16, i16, i16, i16) {
+  %even = vector.from_elements %a, %c : vector<2xi16>
+  %odd = vector.from_elements %b, %d : vector<2xi16>
+  %result = vector.interleave<0> %even, %odd : vector<2xi16>, vector<2xi16> -> vector<4xi16>
+  %first = vector.extract %result[0] : vector<4xi16> -> i16
+  %second = vector.extract %result[1] : vector<4xi16> -> i16
+  %third = vector.extract %result[2] : vector<4xi16> -> i16
+  %fourth = vector.extract %result[3] : vector<4xi16> -> i16
+  func.return %first, %second, %third, %fourth : i16, i16, i16, i16
+}
+
+// ----
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @zip_four(%a: reg<spirv.id : i16>, %b: reg<spirv.id : i16>, %c: reg<spirv.id : i16>, %d: reg<spirv.id : i16>) -> (reg<spirv.id : i16>, reg<spirv.id : i16>, reg<spirv.id : i16>, reg<spirv.id : i16>) asm {
+  %even = OpCompositeConstruct.v2i16 %a, %c
+  %odd = OpCompositeConstruct.v2i16 %b, %d
+  %result = OpVectorShuffle.v2i16.v4i16 %even, %odd, 0, 2, 1, 3
+  %first = OpCompositeExtract.v4i16.i16 %result, 0
+  %second = OpCompositeExtract.v4i16.i16 %result, 1
+  %third = OpCompositeExtract.v4i16.i16 %result, 2
+  %fourth = OpCompositeExtract.v4i16.i16 %result, 3
+  return %first, %second, %third, %fourth
+}
+
+// ====
+// RUN: pass target=spirv:vulkan1.3+bda source-to-low,low-dce
+
+func.def @unzip_four(%a: i1, %b: i1, %c: i1, %d: i1) -> (i1, i1, i1, i1) {
+  %source = vector.from_elements %a, %b, %c, %d : vector<4xi1>
+  %even, %odd = vector.deinterleave<0> %source : vector<4xi1> -> vector<2xi1>, vector<2xi1>
+  %even_first = vector.extract %even[0] : vector<2xi1> -> i1
+  %even_second = vector.extract %even[1] : vector<2xi1> -> i1
+  %odd_first = vector.extract %odd[0] : vector<2xi1> -> i1
+  %odd_second = vector.extract %odd[1] : vector<2xi1> -> i1
+  func.return %even_first, %even_second, %odd_first, %odd_second : i1, i1, i1, i1
+}
+
+// ----
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @unzip_four(%a: reg<spirv.id : i1>, %b: reg<spirv.id : i1>, %c: reg<spirv.id : i1>, %d: reg<spirv.id : i1>) -> (reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>) asm {
+  %source = OpCompositeConstruct.v4bool %a, %b, %c, %d
+  %even = OpVectorShuffle.v4bool.v2bool %source, %source, 0, 2
+  %odd = OpVectorShuffle.v4bool.v2bool %source, %source, 1, 3
+  %even_first = OpCompositeExtract.v2bool.bool %even, 0
+  %even_second = OpCompositeExtract.v2bool.bool %even, 1
+  %odd_first = OpCompositeExtract.v2bool.bool %odd, 0
+  %odd_second = OpCompositeExtract.v2bool.bool %odd, 1
+  return %even_first, %even_second, %odd_first, %odd_second
+}
+
+// ====
+// RUN: pass target=spirv:vulkan1.3+bda target-legalize{mode=eager,policy=require-native},canonicalize,dce
+
+// The shared packet transform must retain the final pair and the live input.
+func.def @zip_tail(%head: vector<2xi32>, %tail: vector<1xi32>) -> (vector<4xi32>, vector<2xi32>, vector<2xi32>) {
+  %source = vector.concat<0> %head, %tail : vector<2xi32>, vector<1xi32> -> vector<3xi32>
+  %joined = vector.interleave<0> %source, %source : vector<3xi32>, vector<3xi32> -> vector<6xi32>
+  %body = vector.slice %joined[0] : vector<6xi32> -> vector<4xi32>
+  %end = vector.slice %joined[4] : vector<6xi32> -> vector<2xi32>
+  func.return %body, %end, %head : vector<4xi32>, vector<2xi32>, vector<2xi32>
+}
+
+// ----
+func.def @zip_tail(%head: vector<2xi32>, %tail: vector<1xi32>) -> (vector<4xi32>, vector<2xi32>, vector<2xi32>) {
+  %11 = vector.interleave<0> %head, %head : vector<2xi32>, vector<2xi32> -> vector<4xi32>
+  %14 = vector.interleave<0> %tail, %tail : vector<1xi32>, vector<1xi32> -> vector<2xi32>
+  func.return %11, %14, %head : vector<4xi32>, vector<2xi32>, vector<2xi32>
+}
+
+// ====
+// RUN: pass target=spirv:vulkan1.3+bda target-legalize{mode=eager,policy=require-native},canonicalize,dce
+
+func.def @unzip_tail(%head: vector<4xf32>, %tail: vector<2xf32>) -> (vector<3xf32>, vector<3xf32>) {
+  %source = vector.concat<0> %head, %tail : vector<4xf32>, vector<2xf32> -> vector<6xf32>
+  %even, %odd = vector.deinterleave<0> %source : vector<6xf32> -> vector<3xf32>, vector<3xf32>
+  func.return %even, %odd : vector<3xf32>, vector<3xf32>
+}
+
+// ----
+func.def @unzip_tail(%head: vector<4xf32>, %tail: vector<2xf32>) -> (vector<3xf32>, vector<3xf32>) {
+  %8, %9 = vector.deinterleave<0> %head : vector<4xf32> -> vector<2xf32>, vector<2xf32>
+  %11, %12 = vector.deinterleave<0> %tail : vector<2xf32> -> vector<1xf32>, vector<1xf32>
+  %even = vector.concat<0> %8, %11 : vector<2xf32>, vector<1xf32> -> vector<3xf32>
+  %odd = vector.concat<0> %9, %12 : vector<2xf32>, vector<1xf32> -> vector<3xf32>
+  func.return %even, %odd : vector<3xf32>, vector<3xf32>
+}
