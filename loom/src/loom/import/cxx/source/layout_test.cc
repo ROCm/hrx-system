@@ -146,7 +146,7 @@ TEST_P(LayoutTest, LayoutRequestsAndResolvedLayoutSurviveSemanticArchives) {
   ASSERT_FALSE(aliases.begin() == aliases.end());
   auto* alias = cxx::symbol_cast<cxx::TypeAliasSymbol>(*aliases.begin());
   ASSERT_NE(alias, nullptr);
-  auto* aligned = cxx::type_cast<cxx::AlignedType>(alias->type());
+  auto* aligned = cxx::type_cast<cxx::AttributedType>(alias->type());
   ASSERT_NE(aligned, nullptr);
   EXPECT_EQ(aligned->alignment(), 32u);
   EXPECT_NE(cxx::type_cast<cxx::UnsignedIntType>(aligned->elementType()),

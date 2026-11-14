@@ -43,7 +43,7 @@ std::optional<std::string_view> constant_string(
 std::optional<std::string> constant_enum_name(
     cxx::TranslationUnit& unit, const cxx::Type* source_type,
     const cxx::ConstValue& source_value) {
-  auto* type = cxx::unaligned_type(unit.typeTraits().remove_cv(source_type));
+  auto* type = cxx::unattributed_type(unit.typeTraits().remove_cv(source_type));
   cxx::ScopeSymbol* scope = nullptr;
   if (auto* enumeration = cxx::type_cast<cxx::EnumType>(type)) {
     scope = enumeration->symbol();
@@ -75,7 +75,7 @@ ConstantAttributeResult decode_constant_attribute(
     cxx::TranslationUnit& unit, loom_module_t* module,
     const loom_attr_descriptor_t& descriptor, const cxx::Type* source_type,
     const cxx::ConstValue& source_value) {
-  auto* type = cxx::unaligned_type(unit.typeTraits().remove_cv(source_type));
+  auto* type = cxx::unattributed_type(unit.typeTraits().remove_cv(source_type));
   auto traits = unit.typeTraits();
   cxx::ASTInterpreter interpreter(&unit);
   if (descriptor.attr_kind == LOOM_ATTR_BOOL &&

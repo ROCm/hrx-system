@@ -5314,7 +5314,8 @@ std::optional<CountedLoop> ControlFlow::classify(cxx::ForStatementAST* loop) {
   if (!induction || traits.is_volatile(induction->type())) {
     return std::nullopt;
   }
-  auto kind = cxx::unaligned_type(traits.remove_cv(induction->type()))->kind();
+  auto kind =
+      cxx::unattributed_type(traits.remove_cv(induction->type()))->kind();
   if (kind == cxx::TypeKind::kUnsignedInt) {
     return classify_unsigned(loop, induction, condition);
   }
@@ -5336,9 +5337,9 @@ std::optional<CountedLoop> ControlFlow::classify_unsigned(
   auto* left = cxx::ast_cast<cxx::IdExpressionAST>(
       unwrap_expression(condition->leftExpression));
   if (condition->symbol || !left || left->symbol != induction ||
-      cxx::unaligned_type(traits.remove_cv(condition->leftExpression->type))
+      cxx::unattributed_type(traits.remove_cv(condition->leftExpression->type))
               ->kind() != cxx::TypeKind::kUnsignedInt ||
-      cxx::unaligned_type(traits.remove_cv(condition->rightExpression->type))
+      cxx::unattributed_type(traits.remove_cv(condition->rightExpression->type))
               ->kind() != cxx::TypeKind::kUnsignedInt) {
     return std::nullopt;
   }
@@ -5390,9 +5391,9 @@ std::optional<CountedLoop> ControlFlow::classify_signed(
   auto* left = cxx::ast_cast<cxx::IdExpressionAST>(
       unwrap_expression(condition->leftExpression));
   if (condition->symbol || !left || left->symbol != induction ||
-      cxx::unaligned_type(traits.remove_cv(condition->leftExpression->type))
+      cxx::unattributed_type(traits.remove_cv(condition->leftExpression->type))
               ->kind() != cxx::TypeKind::kInt ||
-      cxx::unaligned_type(traits.remove_cv(condition->rightExpression->type))
+      cxx::unattributed_type(traits.remove_cv(condition->rightExpression->type))
               ->kind() != cxx::TypeKind::kInt) {
     return std::nullopt;
   }
@@ -5400,7 +5401,7 @@ std::optional<CountedLoop> ControlFlow::classify_signed(
   if (auto* compound = cxx::ast_cast<cxx::CompoundAssignmentExpressionAST>(
           unwrap_expression(loop->expression));
       compound &&
-      cxx::unaligned_type(traits.remove_cv(compound->rightExpression->type))
+      cxx::unattributed_type(traits.remove_cv(compound->rightExpression->type))
               ->kind() != cxx::TypeKind::kInt) {
     return std::nullopt;
   }
