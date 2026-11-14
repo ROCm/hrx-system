@@ -378,6 +378,45 @@ struct iree_hal_amd_gpu_profile_t {
   // Stable directory for the device's bounded native coordinates. Only actual
   // participants allocate rings; ordinary devices allocate no profiling state.
   iree_hal_amd_gpu_profile_stream_t* streams[256];
+  // The device's single thread-trace bracket. A publisher claims it, host
+  // completion fills |pending|, and the next flush emits and frees it. Each
+  // owner touches |pending| only in its own state, so it needs no lock.
+  struct {
+    // Borrowed device resources, or NULL when the session cannot trace.
+    const iree_hal_amd_gpu_profile_trace_storage_t* storage;
+    // One of iree_hal_amd_gpu_profile_trace_state_e.
+    iree_atomic_int32_t state;
+    // Granted claims not returned by cancel; bounded by storage->trace_limit.
+    iree_atomic_int32_t started;
+    // Matching operations refused while an earlier trace held the bracket.
+    iree_atomic_int32_t skipped;
+    // Identifier of the last completed trace; completion-owned.
+    uint64_t last_trace_id;
+    // Completed trace awaiting flush.
+    struct {
+      // Trace identity; shader engine and data length are filled per engine.
+      iree_hal_profile_executable_trace_record_t record;
+      // Retained code-object owner of every dispatch inside the bracket.
+      iree_hal_amd_gpu_profile_metadata_t metadata;
+      // Dispatches executed inside the bracket.
+      uint32_t dispatch_count;
+      // Matching operations refused while this trace held the bracket.
+      uint32_t skipped_count;
+    } pending;
+    // Engines whose capture record and trace chunk a failed flush already
+    // wrote; flush-owned.
+    uint32_t emitted_captures;
+    uint32_t emitted_traces;
+  } trace;
+};
+
+enum iree_hal_amd_gpu_profile_trace_state_e {
+  // No trace in flight; a publisher may claim the bracket.
+  IREE_HAL_AMD_GPU_PROFILE_TRACE_FREE = 0,
+  // Claimed by a publication that has not completed on the host.
+  IREE_HAL_AMD_GPU_PROFILE_TRACE_CLAIMED = 1,
+  // Stopped and collected; buffers stay untouched until flush emits them.
+  IREE_HAL_AMD_GPU_PROFILE_TRACE_COMPLETE = 2,
 };
 
 static void iree_hal_amd_gpu_profile_metadata_release(
@@ -390,6 +429,10 @@ static void iree_hal_amd_gpu_profile_metadata_release(
 }
 
 static void iree_hal_amd_gpu_profile_free(iree_hal_amd_gpu_profile_t* profile) {
+  if (iree_atomic_load(&profile->trace.state, iree_memory_order_acquire) ==
+      IREE_HAL_AMD_GPU_PROFILE_TRACE_COMPLETE) {
+    iree_hal_amd_gpu_profile_metadata_release(profile->trace.pending.metadata);
+  }
   for (uint32_t i = 0; i < profile->queue_count; ++i) {
     iree_hal_amd_gpu_profile_stream_t* stream = profile->streams[i];
     if (!stream) {
@@ -623,9 +666,11 @@ iree_status_t iree_hal_amd_gpu_profile_begin(
   if (!families) {
     return iree_ok_status();
   }
-  const uint64_t supported = IREE_HAL_DEVICE_PROFILING_DATA_QUEUE_EVENTS |
-                             IREE_HAL_DEVICE_PROFILING_DATA_DISPATCH_EVENTS |
-                             IREE_HAL_DEVICE_PROFILING_DATA_EXECUTABLE_METADATA;
+  const uint64_t supported =
+      IREE_HAL_DEVICE_PROFILING_DATA_QUEUE_EVENTS |
+      IREE_HAL_DEVICE_PROFILING_DATA_DISPATCH_EVENTS |
+      IREE_HAL_DEVICE_PROFILING_DATA_EXECUTABLE_METADATA |
+      IREE_HAL_DEVICE_PROFILING_DATA_EXECUTABLE_TRACES;
   if (families & ~supported) {
     return iree_make_status(
         IREE_STATUS_UNIMPLEMENTED,
@@ -649,9 +694,11 @@ iree_status_t iree_hal_amd_gpu_profile_begin(
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "GPU profiling stream capacity overflows");
   }
+  // Traces are attributed through the captured dispatches' code objects.
   const iree_host_size_t dispatch_count =
       (families & (IREE_HAL_DEVICE_PROFILING_DATA_DISPATCH_EVENTS |
-                   IREE_HAL_DEVICE_PROFILING_DATA_EXECUTABLE_METADATA))
+                   IREE_HAL_DEVICE_PROFILING_DATA_EXECUTABLE_METADATA |
+                   IREE_HAL_DEVICE_PROFILING_DATA_EXECUTABLE_TRACES))
           ? record_count
           : 0;
   iree_host_size_t size = 0, streams_offset = 0, records_offset = 0;
@@ -682,6 +729,7 @@ iree_status_t iree_hal_amd_gpu_profile_begin(
   iree_hal_profile_sink_retain(profile->sink);
   profile->queue_count = queue_count;
   profile->initial_queue_count = queue_count;
+  memset(&profile->trace, 0, sizeof(profile->trace));
   iree_slim_mutex_initialize(&profile->streams_mutex);
   profile->families = families;
   profile->filter = options->capture_filter;
@@ -756,11 +804,162 @@ iree_status_t iree_hal_amd_gpu_profile_begin(
   return status;
 }
 
+// Emits the completed trace and frees the bracket. Engines a failed attempt
+// already wrote are not repeated; the bracket stays held until all are out.
+static iree_status_t iree_hal_amd_gpu_profile_flush_trace(
+    iree_hal_amd_gpu_profile_t* profile) {
+  const iree_hal_amd_gpu_profile_trace_storage_t* storage =
+      profile->trace.storage;
+  const iree_hal_amd_gpu_pm4_thread_trace_config_t* config = &storage->config;
+  const iree_hal_amd_gpu_profile_metadata_t* owner =
+      &profile->trace.pending.metadata;
+  // Every code object that ran inside the bracket precedes the trace, whether
+  // or not its dispatch event passed the capture filter.
+  iree_status_t status = iree_ok_status();
+  if (owner->commands) {
+    for (uint32_t i = 0;
+         i < owner->commands->count && iree_status_is_ok(status); ++i) {
+      status = iree_hal_amd_gpu_profile_write_executable(
+          profile, owner->commands->dispatches[i].executable);
+    }
+    if (iree_status_is_ok(status) &&
+        owner->commands->emitted_session != profile->metadata.session_id) {
+      status = iree_hal_amd_gpu_profile_write(
+          profile, IREE_HAL_PROFILE_CONTENT_TYPE_COMMAND_BUFFERS, UINT32_MAX,
+          iree_make_const_byte_span(&owner->commands->record,
+                                    sizeof(owner->commands->record)));
+      if (iree_status_is_ok(status)) {
+        owner->commands->emitted_session = profile->metadata.session_id;
+      }
+    }
+  } else {
+    status =
+        iree_hal_amd_gpu_profile_write_executable(profile, owner->executable);
+  }
+  const uint32_t engines =
+      config->engine_mask & ((1u << config->engine_count) - 1);
+  // Sampled once per trace, when its first record goes out: every refusal
+  // between this trace's claim and now waited on this trace.
+  if (!profile->trace.emitted_captures) {
+    profile->trace.pending.skipped_count = (uint32_t)iree_atomic_exchange(
+        &profile->trace.skipped, 0, iree_memory_order_relaxed);
+  }
+  for (uint32_t i = 0; i < config->engine_count && iree_status_is_ok(status);
+       ++i) {
+    if (!(engines & (1u << i))) {
+      continue;
+    }
+    iree_hal_amd_gpu_pm4_thread_trace_result_t result;
+    iree_hal_amd_gpu_pm4_thread_trace_read_info(
+        config, i,
+        storage->info_words +
+            (iree_host_size_t)i *
+                IREE_HAL_AMD_GPU_PM4_THREAD_TRACE_INFO_WORD_COUNT,
+        &result);
+    const bool incomplete = !result.collected || !result.finish_done ||
+                            result.write_error || result.buffer_full ||
+                            result.dropped_count;
+    iree_hal_profile_chunk_metadata_t metadata = profile->metadata;
+    metadata.queue_ordinal = profile->trace.pending.record.queue_ordinal;
+    metadata.stream_id = profile->trace.pending.record.stream_id;
+    if (!(profile->trace.emitted_captures & (1u << i))) {
+      iree_hal_profile_executable_trace_capture_record_t capture =
+          iree_hal_profile_executable_trace_capture_record_default();
+      capture.trace_id = profile->trace.pending.record.trace_id;
+      capture.shader_engine = i;
+      capture.physical_device_ordinal = 0;
+      capture.shader_engine_mask = engines;
+      capture.target_compute_unit = config->workgroup_processor;
+      capture.simd_select = config->simd;
+      capture.dispatch_count = profile->trace.pending.dispatch_count;
+      capture.buffer_byte_length = config->buffer_length;
+      capture.written_byte_length = result.written_length;
+      capture.dropped_count = result.collected ? result.dropped_count : 0;
+      capture.hardware_status = result.collected ? result.status : 0;
+      capture.token_mask = config->profile->token_mask_value;
+      capture.trace_limit = storage->trace_limit;
+      capture.skipped_count = profile->trace.pending.skipped_count;
+      if (storage->stable_power_state) {
+        capture.flags |=
+            IREE_HAL_PROFILE_EXECUTABLE_TRACE_CAPTURE_FLAG_STABLE_POWER_STATE;
+      }
+      if (result.finish_done) {
+        capture.flags |=
+            IREE_HAL_PROFILE_EXECUTABLE_TRACE_CAPTURE_FLAG_FINISHED;
+      }
+      if (result.buffer_full) {
+        capture.flags |=
+            IREE_HAL_PROFILE_EXECUTABLE_TRACE_CAPTURE_FLAG_BUFFER_FULL;
+      }
+      if (result.write_error) {
+        capture.flags |=
+            IREE_HAL_PROFILE_EXECUTABLE_TRACE_CAPTURE_FLAG_WRITE_ERROR;
+      }
+      if (owner->commands) {
+        capture.flags |=
+            IREE_HAL_PROFILE_EXECUTABLE_TRACE_CAPTURE_FLAG_COMMAND_BUFFER_SCOPE;
+      }
+      if (!result.collected) {
+        capture.flags |=
+            IREE_HAL_PROFILE_EXECUTABLE_TRACE_CAPTURE_FLAG_UNCOLLECTED;
+      }
+      metadata.content_type =
+          IREE_HAL_PROFILE_CONTENT_TYPE_EXECUTABLE_TRACE_CAPTURES;
+      const iree_const_byte_span_t span =
+          iree_make_const_byte_span(&capture, sizeof(capture));
+      status = iree_hal_profile_sink_write(profile->sink, &metadata, 1, &span);
+      if (iree_status_is_ok(status)) {
+        profile->trace.emitted_captures |= 1u << i;
+      }
+    }
+    // No bytes means no trace chunk: an empty artifact would claim a partition
+    // the capture record already reports as uncollected or silent.
+    if (iree_status_is_ok(status) && result.written_length &&
+        !(profile->trace.emitted_traces & (1u << i))) {
+      iree_hal_profile_executable_trace_record_t record =
+          profile->trace.pending.record;
+      record.shader_engine = i;
+      record.data_length = result.written_length;
+      metadata.content_type = IREE_HAL_PROFILE_CONTENT_TYPE_EXECUTABLE_TRACES;
+      metadata.flags = profile->metadata.flags;
+      metadata.dropped_record_count = result.dropped_count;
+      if (incomplete) {
+        metadata.flags |= IREE_HAL_PROFILE_CHUNK_FLAG_TRUNCATED;
+      }
+      const iree_const_byte_span_t spans[] = {
+          iree_make_const_byte_span(&record, sizeof(record)),
+          iree_make_const_byte_span(storage->buffers[i],
+                                    (iree_host_size_t)result.written_length),
+      };
+      status = iree_hal_profile_sink_write(profile->sink, &metadata,
+                                           IREE_ARRAYSIZE(spans), spans);
+      if (iree_status_is_ok(status)) {
+        profile->trace.emitted_traces |= 1u << i;
+      }
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    iree_hal_amd_gpu_profile_metadata_release(*owner);
+    profile->trace.pending.metadata = (iree_hal_amd_gpu_profile_metadata_t){0};
+    profile->trace.emitted_captures = 0;
+    profile->trace.emitted_traces = 0;
+    iree_atomic_store(&profile->trace.state,
+                      IREE_HAL_AMD_GPU_PROFILE_TRACE_FREE,
+                      iree_memory_order_release);
+  }
+  return status;
+}
+
 iree_status_t iree_hal_amd_gpu_profile_flush(
     iree_hal_amd_gpu_profile_t* profile) {
   if (!profile) {
     return iree_ok_status();
   }
+  // Sampled before the streams: completion publishes a trace after its
+  // dispatch events, so events of a trace seen here are in this flush.
+  const bool trace_complete =
+      iree_atomic_load(&profile->trace.state, iree_memory_order_acquire) ==
+      IREE_HAL_AMD_GPU_PROFILE_TRACE_COMPLETE;
   // Explicit lifecycle calls are externally serialized. Registration may run
   // during output, but every captured stream remains valid through session end.
   iree_hal_amd_gpu_profile_stream_t* streams[IREE_ARRAYSIZE(profile->streams)];
@@ -835,6 +1034,9 @@ iree_status_t iree_hal_amd_gpu_profile_flush(
       iree_hal_profile_event_ring_commit_snapshot(&stream->events, &snapshot);
       iree_slim_mutex_unlock(&stream->mutex);
     }
+  }
+  if (trace_complete && iree_status_is_ok(status)) {
+    status = iree_hal_amd_gpu_profile_flush_trace(profile);
   }
   return status;
 }
@@ -914,7 +1116,22 @@ bool iree_hal_amd_gpu_profile_captures_dispatches(
     const iree_hal_amd_gpu_profile_t* profile) {
   return profile && (profile->families &
                      (IREE_HAL_DEVICE_PROFILING_DATA_DISPATCH_EVENTS |
-                      IREE_HAL_DEVICE_PROFILING_DATA_EXECUTABLE_METADATA));
+                      IREE_HAL_DEVICE_PROFILING_DATA_EXECUTABLE_METADATA |
+                      IREE_HAL_DEVICE_PROFILING_DATA_EXECUTABLE_TRACES));
+}
+
+bool iree_hal_amd_gpu_profile_traces_executables(
+    const iree_hal_amd_gpu_profile_t* profile) {
+  return profile &&
+         (profile->families & IREE_HAL_DEVICE_PROFILING_DATA_EXECUTABLE_TRACES);
+}
+
+void iree_hal_amd_gpu_profile_set_trace_storage(
+    iree_hal_amd_gpu_profile_t* profile,
+    const iree_hal_amd_gpu_profile_trace_storage_t* storage) {
+  if (iree_hal_amd_gpu_profile_traces_executables(profile)) {
+    profile->trace.storage = storage;
+  }
 }
 
 bool iree_hal_amd_gpu_profile_timestamps_dispatches(
@@ -957,6 +1174,129 @@ bool iree_hal_amd_gpu_profile_captures_dispatch(
                                          filter->executable_function_pattern));
 }
 
+// A direct dispatch was selected at acceptance. A recording is traced whole
+// when any of its dispatches passes the session's predicates.
+static bool iree_hal_amd_gpu_profile_trace_matches(
+    const iree_hal_amd_gpu_profile_t* profile,
+    const iree_hal_amd_gpu_profile_operation_t* operation) {
+  if (!operation->completion.count) {
+    return false;
+  }
+  if (!operation->commands || !profile->filter.flags) {
+    return true;
+  }
+  const bool named =
+      profile->filter.flags &
+      IREE_HAL_PROFILE_CAPTURE_FILTER_FLAG_EXECUTABLE_FUNCTION_PATTERN;
+  for (uint32_t i = 0; i < operation->commands->count; ++i) {
+    const iree_hal_amd_gpu_profile_dispatch_t* dispatch =
+        &operation->commands->dispatches[i];
+    if (iree_hal_amd_gpu_profile_captures_dispatch(
+            profile, operation->event.queue_ordinal,
+            dispatch->event.command_buffer_id, dispatch->event.command_index,
+            named ? dispatch->executable
+                        ->function_names[dispatch->event.function_ordinal]
+                  : iree_string_view_empty())) {
+      return true;
+    }
+  }
+  return false;
+}
+
+const iree_hal_amd_gpu_pm4_thread_trace_config_t*
+iree_hal_amd_gpu_profile_trace_claim(
+    iree_hal_amd_gpu_profile_t* profile,
+    iree_hal_amd_gpu_profile_operation_t* operation) {
+  if (!profile || !operation) {
+    return NULL;
+  }
+  const iree_hal_amd_gpu_profile_trace_storage_t* storage =
+      profile->trace.storage;
+  if (!storage ||
+      (uint32_t)iree_atomic_load(&profile->trace.started,
+                                 iree_memory_order_relaxed) >=
+          storage->trace_limit ||
+      !iree_hal_amd_gpu_profile_trace_matches(profile, operation)) {
+    return NULL;
+  }
+  int32_t expected = IREE_HAL_AMD_GPU_PROFILE_TRACE_FREE;
+  if (!iree_atomic_compare_exchange_strong(
+          &profile->trace.state, &expected,
+          IREE_HAL_AMD_GPU_PROFILE_TRACE_CLAIMED, iree_memory_order_acq_rel,
+          iree_memory_order_relaxed)) {
+    // Publication can be attempted several times before it is accepted.
+    if (!operation->trace_refused) {
+      operation->trace_refused = true;
+      iree_atomic_fetch_add(&profile->trace.skipped, 1,
+                            iree_memory_order_relaxed);
+    }
+    return NULL;
+  }
+  // The bracket is exclusive from here; the bound is exact under that owner.
+  if ((uint32_t)iree_atomic_fetch_add(&profile->trace.started, 1,
+                                      iree_memory_order_relaxed) >=
+      storage->trace_limit) {
+    iree_hal_amd_gpu_profile_trace_cancel(profile);
+    return NULL;
+  }
+  // An info word the stop sequence never replaced must not read as a result.
+  const iree_host_size_t info_word_count =
+      (iree_host_size_t)storage->config.engine_count *
+      IREE_HAL_AMD_GPU_PM4_THREAD_TRACE_INFO_WORD_COUNT;
+  for (iree_host_size_t i = 0; i < info_word_count; ++i) {
+    ((volatile uint32_t*)storage->info_words)[i] =
+        (uint32_t)IREE_HAL_AMD_GPU_PM4_THREAD_TRACE_INFO_UNWRITTEN;
+  }
+  return &storage->config;
+}
+
+void iree_hal_amd_gpu_profile_trace_cancel(
+    iree_hal_amd_gpu_profile_t* profile) {
+  iree_atomic_fetch_sub(&profile->trace.started, 1, iree_memory_order_relaxed);
+  iree_atomic_store(&profile->trace.state, IREE_HAL_AMD_GPU_PROFILE_TRACE_FREE,
+                    iree_memory_order_release);
+}
+
+// Hands a stopped trace to the next flush. The buffers and info words stay
+// untouched until that flush frees the bracket, so nothing is copied here.
+static void iree_hal_amd_gpu_profile_trace_complete(
+    iree_hal_amd_gpu_profile_t* profile,
+    const iree_hal_amd_gpu_profile_operation_t* operation,
+    const iree_hal_amd_gpu_profile_completion_t* completion,
+    bool has_dispatch_event, uint64_t dispatch_event_id) {
+  iree_hal_profile_executable_trace_record_t record =
+      iree_hal_profile_executable_trace_record_default();
+  record.format = IREE_HAL_PROFILE_EXECUTABLE_TRACE_FORMAT_AMDGPU_ATT;
+  record.trace_id = ++profile->trace.last_trace_id;
+  record.submission_id = operation->event.submission_id;
+  record.stream_id = operation->event.stream_id;
+  record.physical_device_ordinal = 0;
+  record.queue_ordinal = operation->event.queue_ordinal;
+  iree_hal_amd_gpu_profile_metadata_t metadata = {0};
+  if (operation->commands) {
+    // The bracket encloses the whole recording: no single dispatch or command
+    // owns the trace, so neither correlation flag is set.
+    record.command_buffer_id = operation->event.command_buffer_id;
+    metadata.commands = operation->commands;
+    iree_hal_amd_gpu_profile_commands_retain(operation->commands);
+  } else {
+    record.executable_id = operation->dispatch.event.executable_id;
+    record.function_ordinal = operation->dispatch.event.function_ordinal;
+    if (has_dispatch_event) {
+      record.flags |= IREE_HAL_PROFILE_EXECUTABLE_TRACE_FLAG_DISPATCH_EVENT;
+      record.dispatch_event_id = dispatch_event_id;
+    }
+    metadata.executable = operation->dispatch.executable;
+    iree_hal_amd_gpu_profile_executable_retain(metadata.executable);
+  }
+  profile->trace.pending.record = record;
+  profile->trace.pending.metadata = metadata;
+  profile->trace.pending.dispatch_count = completion->count;
+  iree_atomic_store(&profile->trace.state,
+                    IREE_HAL_AMD_GPU_PROFILE_TRACE_COMPLETE,
+                    iree_memory_order_release);
+}
+
 void iree_hal_amd_gpu_profile_operation_complete(
     iree_hal_amd_gpu_profile_t* profile,
     const iree_hal_amd_gpu_profile_operation_t* operation,
@@ -964,6 +1304,9 @@ void iree_hal_amd_gpu_profile_operation_complete(
   if (!completion->count) {
     return;
   }
+  // Identity of a direct dispatch's event, when the ring kept one.
+  bool has_dispatch_event = false;
+  uint64_t dispatch_event_id = 0;
   iree_hal_amd_gpu_profile_stream_t* stream =
       profile->streams[operation->event.queue_ordinal];
   // Only completed native owners reach this boundary. Each retained record
@@ -1000,6 +1343,11 @@ void iree_hal_amd_gpu_profile_operation_complete(
     *event = dispatch->event;
     event->event_id = event_id;
     event->submission_id = operation->event.submission_id;
+    if (!operation->commands &&
+        (profile->families & IREE_HAL_DEVICE_PROFILING_DATA_DISPATCH_EVENTS)) {
+      has_dispatch_event = true;
+      dispatch_event_id = event_id;
+    }
     if (completion->samples) {
       const iree_hal_amd_gpu_profile_sample_t* sample =
           (const void*)((const uint8_t*)completion->samples +
@@ -1019,4 +1367,9 @@ void iree_hal_amd_gpu_profile_operation_complete(
     }
   }
   iree_slim_mutex_unlock(&stream->mutex);
+  // After the events: a flush that sees the completed trace also sees them.
+  if (operation->traced) {
+    iree_hal_amd_gpu_profile_trace_complete(
+        profile, operation, completion, has_dispatch_event, dispatch_event_id);
+  }
 }

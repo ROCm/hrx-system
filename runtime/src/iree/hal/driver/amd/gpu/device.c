@@ -6,6 +6,7 @@
 
 #include "iree/hal/driver/amd/gpu/device.h"
 
+#include <inttypes.h>
 #include <stdio.h>
 
 #include "iree/async/frontier_tracker.h"
@@ -21,6 +22,7 @@
 #include "iree/hal/driver/amd/gpu/code_queue.h"
 #include "iree/hal/driver/amd/gpu/device_failure.h"
 #include "iree/hal/driver/amd/gpu/executable.h"
+#include "iree/hal/driver/amd/gpu/perfmon.h"
 #include "iree/hal/driver/amd/gpu/profile.h"
 #include "iree/hal/driver/amd/gpu/publication.h"
 #include "iree/hal/driver/amd/gpu/queue/allocation.h"
@@ -195,6 +197,23 @@ typedef struct iree_hal_amd_gpu_device_t {
   iree_hal_amd_gpu_feedback_t feedback;
   // Optional profiling session, owned until externally serialized idle end.
   iree_hal_amd_gpu_profile_t* profile;
+  // Native resources of a session that traces executables; inactive otherwise.
+  // The session borrows |storage| from begin through end.
+  struct {
+    // Render-node owner holding the stable power state.
+    iree_hal_amd_gpu_perfmon_t perfmon;
+    // Target register table borrowed by |storage|.
+    iree_hal_amd_gpu_pm4_thread_trace_profile_t registers;
+    // Bracket and host views handed to the session.
+    iree_hal_amd_gpu_profile_trace_storage_t storage;
+    // One finite trace buffer per traced shader engine, indexed by engine.
+    iree_hal_amd_fabric_memory_t
+        buffers[IREE_HAL_AMD_GPU_PM4_THREAD_TRACE_MAX_ENGINE_COUNT];
+    // Info words written by the stop sequence.
+    iree_hal_amd_fabric_memory_t info;
+    // The resources above are prepared.
+    bool active;
+  } trace;
   // Retained placement-local process infrastructure, independent of the pool.
   iree_async_proactor_pool_entry_t* proactor_entry;
   // Final public release closes queue admission before joining completion.
@@ -236,6 +255,28 @@ typedef struct iree_hal_amd_gpu_device_t {
   // Group assignment; membership retains its tracker through final retirement.
   iree_hal_device_topology_info_t topology;
 } iree_hal_amd_gpu_device_t;
+
+// Returns the session's trace resources. The session has ended and every
+// queue is idle, so no bracket is in flight and no flush reads the buffers.
+static void iree_hal_amd_gpu_device_trace_release(
+    iree_hal_amd_gpu_device_t* device) {
+  if (!device->trace.active) {
+    return;
+  }
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(device->trace.buffers); ++i) {
+    if (device->trace.buffers[i].handle) {
+      iree_hal_amd_fabric_memory_deinitialize(device->context->api,
+                                              device->context->event_sink,
+                                              &device->trace.buffers[i]);
+    }
+  }
+  if (device->trace.info.handle) {
+    iree_hal_amd_fabric_memory_deinitialize(
+        device->context->api, device->context->event_sink, &device->trace.info);
+  }
+  iree_hal_amd_gpu_perfmon_close(&device->trace.perfmon);
+  memset(&device->trace, 0, sizeof(device->trace));
+}
 
 static const iree_hal_device_vtable_t iree_hal_amd_gpu_device_vtable;
 
@@ -724,6 +765,7 @@ static bool iree_hal_amd_gpu_device_release_children(
       &device->memory.mappings);
   iree_status_t profile_status = iree_hal_amd_gpu_profile_end(device->profile);
   device->profile = NULL;
+  iree_hal_amd_gpu_device_trace_release(device);
   if (!iree_status_is_ok(profile_status)) {
     iree_hal_amd_gpu_context_report_status(
         device->context, (iree_hal_device_t*)device, profile_status);
@@ -1788,6 +1830,117 @@ static iree_status_t iree_hal_amd_gpu_device_import_file(
       device->host_allocator, out_file);
 }
 
+enum {
+  // Per-engine trace buffer when the caller names none. Dense compute fills
+  // roughly half a megabyte per engine per millisecond, so this covers tens
+  // of milliseconds of a recording; a full buffer truncates the trace.
+  IREE_HAL_AMD_GPU_DEVICE_TRACE_DEFAULT_BUFFER_LENGTH = 16 * 1024 * 1024,
+  // Traced operations per session when the caller names no bound. A trace
+  // adds a compute join, register programming and megabytes of output to its
+  // operation, so the default is a single trace.
+  IREE_HAL_AMD_GPU_DEVICE_TRACE_DEFAULT_LIMIT = 1,
+};
+
+// Acquires the session's trace buffers, register table and power state before
+// any queue can publish a bracket. Leaves nothing behind on failure.
+static iree_status_t iree_hal_amd_gpu_device_trace_prepare(
+    iree_hal_amd_gpu_device_t* device,
+    const iree_hal_profile_executable_trace_options_t* options) {
+  // Brackets are published by the host on the primary PM4 ring.
+  if (device->command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL ||
+      device->queue_options.publication_mode !=
+          AMDF_QUEUE_PUBLICATION_MODE_USER) {
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "GPU executable traces require USER-published PM4 compute queues");
+  }
+  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_thread_trace_profile_initialize(
+      device->target.version, &device->trace.registers));
+  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_perfmon_open(
+      &device->context->endpoint_info, &device->trace.perfmon));
+  device->trace.active = true;
+  iree_hal_amd_gpu_profile_trace_storage_t* storage = &device->trace.storage;
+  *storage = (iree_hal_amd_gpu_profile_trace_storage_t){
+      .config =
+          {
+              .profile = &device->trace.registers,
+              .engine_count = device->trace.perfmon.shader_engine_count,
+              .workgroup_processor = options->target_compute_unit,
+              .simd = options->simd_select,
+              .buffer_length =
+                  options->buffer_byte_length
+                      ? options->buffer_byte_length
+                      : IREE_HAL_AMD_GPU_DEVICE_TRACE_DEFAULT_BUFFER_LENGTH,
+          },
+      .trace_limit = options->max_trace_count
+                         ? options->max_trace_count
+                         : IREE_HAL_AMD_GPU_DEVICE_TRACE_DEFAULT_LIMIT,
+      .stable_power_state = device->trace.perfmon.stable_power_state,
+  };
+  iree_hal_amd_gpu_pm4_thread_trace_config_t* config = &storage->config;
+  iree_status_t status = iree_ok_status();
+  if (config->engine_count >
+      IREE_HAL_AMD_GPU_PM4_THREAD_TRACE_MAX_ENGINE_COUNT) {
+    status =
+        iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                         "GPU reports %u shader engines; thread traces "
+                         "address at most %d",
+                         config->engine_count,
+                         IREE_HAL_AMD_GPU_PM4_THREAD_TRACE_MAX_ENGINE_COUNT);
+  }
+  const uint32_t all_engines =
+      iree_status_is_ok(status) ? (1u << config->engine_count) - 1 : 0;
+  config->engine_mask =
+      options->shader_engine_mask ? options->shader_engine_mask : all_engines;
+  if (iree_status_is_ok(status) && (config->engine_mask & ~all_engines)) {
+    status = iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "executable trace shader-engine mask 0x%x names engines outside the "
+        "device's %u",
+        config->engine_mask, config->engine_count);
+  }
+  // Validated before allocation: a wrong size must not reserve memory first.
+  if (iree_status_is_ok(status) &&
+      (config->buffer_length <
+           IREE_HAL_AMD_GPU_PM4_THREAD_TRACE_MIN_BUFFER_LENGTH ||
+       config->buffer_length >=
+           IREE_HAL_AMD_GPU_PM4_THREAD_TRACE_MAX_BUFFER_LENGTH ||
+       config->buffer_length %
+           IREE_HAL_AMD_GPU_PM4_THREAD_TRACE_BUFFER_ALIGNMENT)) {
+    status = iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "executable trace buffer size %" PRIu64
+        " must be a 4 KiB multiple of at least 128 KiB and below 512 MiB",
+        config->buffer_length);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_amd_gpu_backing_allocate(
+        device->context, &device->memory.control,
+        IREE_HAL_AMD_GPU_PM4_THREAD_TRACE_BUFFER_ALIGNMENT,
+        IREE_HAL_AMD_GPU_PM4_THREAD_TRACE_BUFFER_ALIGNMENT, &device->trace.info,
+        &config->info_address);
+    storage->info_words = (uint32_t*)device->trace.info.contents.data;
+  }
+  for (uint32_t i = 0; i < config->engine_count && iree_status_is_ok(status);
+       ++i) {
+    if (!(config->engine_mask & (1u << i))) {
+      continue;
+    }
+    status = iree_hal_amd_gpu_backing_allocate(
+        device->context, &device->memory.control, config->buffer_length,
+        IREE_HAL_AMD_GPU_PM4_THREAD_TRACE_BUFFER_ALIGNMENT,
+        &device->trace.buffers[i], &config->buffer_addresses[i]);
+    storage->buffers[i] = device->trace.buffers[i].contents.data;
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_amd_gpu_pm4_thread_trace_config_validate(config);
+  }
+  if (!iree_status_is_ok(status)) {
+    iree_hal_amd_gpu_device_trace_release(device);
+  }
+  return status;
+}
+
 static iree_status_t iree_hal_amd_gpu_device_profiling_begin(
     iree_hal_device_t* base, const iree_hal_device_profiling_options_t* options,
     iree_hal_profile_session_id_t session_id) {
@@ -1822,18 +1975,32 @@ static iree_status_t iree_hal_amd_gpu_device_profiling_begin(
             device->memory.families[0].queue_family_ordinal, &clock),
         "device_query_queue_clock_info"));
   }
+  // Unsupported targets and queue protocols reject the family before the
+  // sink session starts, like every other unsupported family.
+  if (iree_hal_device_profiling_options_requests_executable_traces(options)) {
+    IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_device_trace_prepare(
+        device, &options->executable_traces));
+  }
   iree_hal_amd_gpu_profile_t* profile = NULL;
-  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_profile_begin(
+  iree_status_t status = iree_hal_amd_gpu_profile_begin(
       options, session_id, device->queue_count, clock.frequency_hz,
-      device->host_allocator, &profile));
-  iree_status_t status = iree_hal_amd_gpu_queue_membership_set_profile(
-      &device->membership, profile);
+      device->host_allocator, &profile);
+  if (!iree_status_is_ok(status)) {
+    iree_hal_amd_gpu_device_trace_release(device);
+    return status;
+  }
+  if (device->trace.active) {
+    iree_hal_amd_gpu_profile_set_trace_storage(profile, &device->trace.storage);
+  }
+  status = iree_hal_amd_gpu_queue_membership_set_profile(&device->membership,
+                                                         profile);
   if (iree_status_is_ok(status)) {
     device->profile = profile;
     device->memory.mappings.profile = profile;
   } else {
     // Membership has already cleared all queue borrows after a failed begin.
     status = iree_status_join(status, iree_hal_amd_gpu_profile_end(profile));
+    iree_hal_amd_gpu_device_trace_release(device);
   }
   return status;
 }
@@ -1852,7 +2019,10 @@ static iree_status_t iree_hal_amd_gpu_device_profiling_end(
   device->memory.mappings.profile = NULL;
   iree_status_t status =
       iree_hal_amd_gpu_queue_membership_set_profile(&device->membership, NULL);
-  return iree_status_join(status, iree_hal_amd_gpu_profile_end(profile));
+  status = iree_status_join(status, iree_hal_amd_gpu_profile_end(profile));
+  // The final flush has read the trace buffers; queues are idle.
+  iree_hal_amd_gpu_device_trace_release(device);
+  return status;
 }
 
 static const iree_hal_device_vtable_t iree_hal_amd_gpu_device_vtable = {

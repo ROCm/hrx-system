@@ -9,6 +9,7 @@
 
 #include "iree/hal/api.h"
 #include "iree/hal/driver/amd/gpu/image/image.h"
+#include "iree/hal/driver/amd/gpu/queue/pm4/thread_trace.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -124,11 +125,65 @@ typedef struct iree_hal_amd_gpu_profile_operation_t {
   iree_hal_amd_gpu_profile_completion_t completion;
   // The stream has received this operation, including a possible ring drop.
   bool recorded;
+  // This operation's publication carries the session's claimed thread-trace
+  // bracket; completion hands the written extent to the next flush.
+  bool traced;
+  // A claim for this operation was refused because the bracket was held. Set
+  // once, so publication retries count one untraced operation, not several.
+  bool trace_refused;
 } iree_hal_amd_gpu_profile_operation_t;
+
+// Device-owned native resources of the session's single thread-trace bracket.
+// The device prepares them before queues join the session and releases them
+// after the session ends. Buffers are GPU-writable and host-readable; the
+// hardware writes trace bytes directly and the stop sequence fills the info
+// words. Only one bracket exists per device because the trace registers are
+// device-wide.
+typedef struct iree_hal_amd_gpu_profile_trace_storage_t {
+  // Validated bracket naming every buffer and the info words.
+  iree_hal_amd_gpu_pm4_thread_trace_config_t config;
+  // Host view of each traced engine's buffer, indexed by engine.
+  const uint8_t* buffers[IREE_HAL_AMD_GPU_PM4_THREAD_TRACE_MAX_ENGINE_COUNT];
+  // Host view of the info words, INFO_WORD_COUNT per engine.
+  uint32_t* info_words;
+  // Upper bound on traced operations in the session.
+  uint32_t trace_limit;
+  // A stable device power state is held for the session.
+  bool stable_power_state;
+} iree_hal_amd_gpu_profile_trace_storage_t;
+
+// Installs the bracket of a session that admitted executable traces. Called
+// once, before any queue borrows the session. The storage is borrowed until
+// the session ends. Without it the session traces nothing.
+void iree_hal_amd_gpu_profile_set_trace_storage(
+    iree_hal_amd_gpu_profile_t* profile,
+    const iree_hal_amd_gpu_profile_trace_storage_t* storage);
+
+// True when the session admitted the executable-trace family.
+bool iree_hal_amd_gpu_profile_traces_executables(
+    const iree_hal_amd_gpu_profile_t* profile);
+
+// Claims the device's bracket for a captured operation about to be published.
+// Returns NULL when the session does not trace, the operation is not captured
+// or matches no trace predicate, the trace bound is reached, or an earlier
+// trace is still in flight or awaiting flush. A claim is exclusive across
+// queues. The publisher either publishes both sequences around the operation
+// and sets operation->traced, or returns the claim with trace_cancel. A refusal
+// by a held bracket is recorded on the operation, which the publisher keeps
+// across its retries. Performs no allocation, sink call or native call.
+const iree_hal_amd_gpu_pm4_thread_trace_config_t*
+iree_hal_amd_gpu_profile_trace_claim(
+    iree_hal_amd_gpu_profile_t* profile,
+    iree_hal_amd_gpu_profile_operation_t* operation);
+
+// Returns an unpublished claim; the bracket and its budget are available again.
+void iree_hal_amd_gpu_profile_trace_cancel(iree_hal_amd_gpu_profile_t* profile);
 
 // Begins the requested capture and emits device/queue metadata. Unsupported
 // families fail before starting a sink session. An empty request returns NULL.
 // The filter pattern is copied and the sink remains retained until end.
+// Executable traces are admitted here and need set_trace_storage to produce
+// data.
 iree_status_t iree_hal_amd_gpu_profile_begin(
     const iree_hal_device_profiling_options_t* options,
     iree_hal_profile_session_id_t session_id, uint32_t queue_count,

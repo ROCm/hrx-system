@@ -11,6 +11,7 @@
 #include "iree/hal/driver/amd/gpu/queue/control_program.h"
 #include "iree/hal/driver/amd/gpu/queue/dma_transfer.h"
 #include "iree/hal/driver/amd/gpu/queue/pm4/state.h"
+#include "iree/hal/driver/amd/gpu/queue/pm4/thread_trace.h"
 
 // A local compute join followed by full cache acquisition establishes the
 // payload dependency independently of the producer's asynchronous signal write.
@@ -443,12 +444,28 @@ iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish_transfer(
       words, after, arguments->end, chunk.download, terminal);
 }
 
+// Claims the session's thread-trace bracket for a captured operation on a
+// USER ring. KERNEL publication prepares a piece that native capacity can
+// defer, which a device-wide bracket cannot follow.
+static const iree_hal_amd_gpu_pm4_thread_trace_config_t*
+iree_hal_amd_gpu_pm4_trace_claim(
+    iree_hal_amd_gpu_pm4_queue_t* queue,
+    iree_hal_amd_gpu_profile_operation_t* profile) {
+  return queue->kernel
+             ? NULL
+             : iree_hal_amd_gpu_profile_trace_claim(queue->profile, profile);
+}
+
 // One bounded primary sequence invokes the entire resident program. Native
 // copy/fixup work scales with program size; host work scales only with its
 // dense input table and semaphore edges. No recorded operation is visited here.
-iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish_execute(
+// A claimed thread trace brackets the whole program: a resident recording is
+// immutable, so its dispatches cannot be bracketed one at a time.
+static iree_hal_amd_gpu_pm4_publication_result_t
+iree_hal_amd_gpu_pm4_publish_execute_traced(
     iree_hal_amd_gpu_pm4_queue_t* queue,
-    iree_hal_amd_gpu_pm4_submission_t* submission, uint64_t position) {
+    iree_hal_amd_gpu_pm4_submission_t* submission, uint64_t position,
+    const iree_hal_amd_gpu_pm4_thread_trace_config_t* trace) {
   iree_hal_amd_gpu_pm4_command_invocation_t* invocation = &submission->execute;
   iree_hal_amd_gpu_pm4_command_program_t* command = invocation->program;
   iree_hal_amd_gpu_program_t* program = &command->resident;
@@ -526,8 +543,13 @@ iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish_execute(
   const uint32_t scratch_words = iree_hal_amd_gpu_pm4_scratch_word_count(
       &queue->producer.scratch, command->scratch_wave_byte_length,
       queue->kernel != NULL);
-  const uint32_t prefix_words =
-      submission->native_wait_count * 7 + scratch_words + program_words - 4;
+  const uint32_t trace_start_words =
+      trace ? iree_hal_amd_gpu_pm4_thread_trace_start_word_count(trace) : 0;
+  const uint32_t trace_stop_words =
+      trace ? iree_hal_amd_gpu_pm4_thread_trace_stop_word_count(trace) : 0;
+  const uint32_t prefix_words = submission->native_wait_count * 7 +
+                                scratch_words + trace_start_words +
+                                program_words - 4;
   bool native_signal = false;
   for (iree_host_size_t i = 0; i < submission->signals.count; ++i) {
     native_signal |=
@@ -538,7 +560,7 @@ iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish_execute(
           sample_length ? queue->options.barriers.release : 0,
   };
   const uint32_t tail_words =
-      iree_hal_amd_gpu_pm4_barrier_tail_word_count(after) +
+      trace_stop_words + iree_hal_amd_gpu_pm4_barrier_tail_word_count(after) +
       (native_signal ? 8 : 14);
   uint32_t root_padding = 0;
   if (queue->kernel) {
@@ -613,22 +635,50 @@ iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish_execute(
       reservation.words, NULL, submission->wait_count, submission->waits);
   words = iree_hal_amd_gpu_pm4_scratch_emit(words, &queue->producer.scratch,
                                             scratch_words);
+  if (trace) {
+    // Nothing can reject this piece now; completion owns the bracket.
+    profile->traced = true;
+    words = iree_hal_amd_gpu_pm4_thread_trace_emit_start(words, trace);
+  }
   words = iree_hal_amd_gpu_pm4_program_emit(
       program, instance, command->entry, &queue->options.barriers,
       arguments->address + offset, values_address, (void*)upload, fixup_count,
       fixup_word_count, fixup_words, root_padding, words);
+  if (trace) {
+    // The primary ring resumes here when the resident program returns.
+    words = iree_hal_amd_gpu_pm4_thread_trace_emit_stop(words, trace);
+  }
   return iree_hal_amd_gpu_pm4_publish_commit(
       queue, submission, position, &reservation, body_words, entry_words,
       submission->native_wait_count, words, after, arguments->end,
       (iree_hal_amd_gpu_download_t){0}, true);
 }
 
-iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish_dispatch(
+iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish_execute(
+    iree_hal_amd_gpu_pm4_queue_t* queue,
+    iree_hal_amd_gpu_pm4_submission_t* submission, uint64_t position) {
+  iree_hal_amd_gpu_profile_operation_t* profile =
+      iree_hal_amd_gpu_pm4_submission_profile(submission);
+  const iree_hal_amd_gpu_pm4_thread_trace_config_t* trace =
+      iree_hal_amd_gpu_pm4_trace_claim(queue, profile);
+  const iree_hal_amd_gpu_pm4_publication_result_t result =
+      iree_hal_amd_gpu_pm4_publish_execute_traced(queue, submission, position,
+                                                  trace);
+  // Capacity, growth and rejection all leave before any word is written.
+  if (trace && !profile->traced) {
+    iree_hal_amd_gpu_profile_trace_cancel(queue->profile);
+  }
+  return result;
+}
+
+static iree_hal_amd_gpu_pm4_publication_result_t
+iree_hal_amd_gpu_pm4_publish_dispatch_traced(
     iree_hal_amd_gpu_pm4_queue_t* queue, uint64_t position,
     uint32_t scratch_required,
     const iree_hal_amd_gpu_pm4_dispatch_publication_t* request,
     uint64_t* addresses, iree_hal_amd_gpu_pm4_submission_t** inout_submission,
-    iree_status_t* out_status) {
+    iree_status_t* out_status,
+    const iree_hal_amd_gpu_pm4_thread_trace_config_t* trace, bool* out_traced) {
   const iree_hal_amd_gpu_pm4_dispatch_request_t* dispatch_request =
       request->dispatch;
   const iree_hal_amd_gpu_pm4_function_t* function = dispatch_request->function;
@@ -753,8 +803,16 @@ iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish_dispatch(
   const uint32_t wait_words = iree_hal_amd_gpu_pm4_wait_word_count(
       joined_pool, request->wait_count, request->waits,
       request->native_wait_count);
+  // A dispatch with no workgroups launches nothing to trace.
+  if (!dispatch) {
+    trace = NULL;
+  }
+  const uint32_t trace_words =
+      trace ? iree_hal_amd_gpu_pm4_thread_trace_start_word_count(trace) +
+                  iree_hal_amd_gpu_pm4_thread_trace_stop_word_count(trace)
+            : 0;
   const uint32_t body_words =
-      wait_words + launch_words + scratch_words +
+      wait_words + launch_words + scratch_words + trace_words +
       (cooperative ? 4 + sizeof(iree_hal_amd_gpu_grid_sync_t) / sizeof(uint32_t)
                    : 0) +
       (sample_length ? 16 : 0) +
@@ -903,6 +961,13 @@ iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish_dispatch(
         &function->launch, dispatch_request->launch.geometry.partial_size);
     const uint64_t sample_address =
         sample_length ? queue->samples->current->address + sample_offset : 0;
+    if (trace) {
+      // Outside the clock samples: the dispatch interval excludes the trace's
+      // own register programming and its finish wait.
+      profile->traced = true;
+      *out_traced = true;
+      words = iree_hal_amd_gpu_pm4_thread_trace_emit_start(words, trace);
+    }
     if (sample_length) {
       profile->completion.samples =
           (void*)(queue->samples->current->memory.contents.data +
@@ -929,10 +994,38 @@ iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish_dispatch(
       words = iree_hal_amd_gpu_pm4_emit_compute_flush(words);
       words = iree_hal_amd_gpu_pm4_emit_clock(words, sample_address + 8, true);
     }
+    if (trace) {
+      words = iree_hal_amd_gpu_pm4_thread_trace_emit_stop(words, trace);
+    }
   }
   return iree_hal_amd_gpu_pm4_publish_commit(
       queue, submission, position, &reservation, body_words, 0, wait_words / 7,
       words, after, argument_end, (iree_hal_amd_gpu_download_t){0}, true);
+}
+
+iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish_dispatch(
+    iree_hal_amd_gpu_pm4_queue_t* queue, uint64_t position,
+    uint32_t scratch_required,
+    const iree_hal_amd_gpu_pm4_dispatch_publication_t* request,
+    uint64_t* addresses, iree_hal_amd_gpu_pm4_submission_t** inout_submission,
+    iree_status_t* out_status) {
+  // The operation still lives in the request or an earlier deferred capture;
+  // either way its selection facts are final.
+  iree_hal_amd_gpu_profile_operation_t* profile =
+      *inout_submission
+          ? iree_hal_amd_gpu_pm4_submission_profile(*inout_submission)
+          : request->profile;
+  const iree_hal_amd_gpu_pm4_thread_trace_config_t* trace =
+      iree_hal_amd_gpu_pm4_trace_claim(queue, profile);
+  bool traced = false;
+  const iree_hal_amd_gpu_pm4_publication_result_t result =
+      iree_hal_amd_gpu_pm4_publish_dispatch_traced(
+          queue, position, scratch_required, request, addresses,
+          inout_submission, out_status, trace, &traced);
+  if (trace && !traced) {
+    iree_hal_amd_gpu_profile_trace_cancel(queue->profile);
+  }
+  return result;
 }
 
 iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish_control(

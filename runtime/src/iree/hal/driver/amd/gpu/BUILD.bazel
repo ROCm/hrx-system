@@ -79,6 +79,7 @@ iree_runtime_cc_library(
         ":device_failure",
         ":executable",
         ":feedback",
+        ":perfmon",
         ":profile",
         ":publication",
         ":tsan",
@@ -118,6 +119,7 @@ iree_runtime_cc_library(
         "//runtime/src/iree/hal/driver/amd/gpu/queue/pm4:program",
         "//runtime/src/iree/hal/driver/amd/gpu/queue/pm4:queue",
         "//runtime/src/iree/hal/driver/amd/gpu/queue/pm4:scratch",
+        "//runtime/src/iree/hal/driver/amd/gpu/queue/pm4:thread_trace",
         "//runtime/src/iree/hal/driver/amd/gpu/queue/sdma:barrier",
         "//runtime/src/iree/hal/driver/amd/gpu/queue/sdma:command_buffer",
         "//runtime/src/iree/hal/driver/amd/gpu/queue/sdma:native_queue",
@@ -537,6 +539,17 @@ iree_runtime_cc_benchmark(
 )
 
 iree_runtime_cc_library(
+    name = "perfmon",
+    srcs = ["perfmon.c"],
+    hdrs = ["perfmon.h"],
+    target_compatible_with = _NATIVE_DEVICE_COMPATIBLE_WITH,
+    deps = [
+        "//libamdf:headers",
+        "//runtime/src/iree/base",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "profile",
     srcs = ["profile.c"],
     hdrs = ["profile.h"],
@@ -546,6 +559,7 @@ iree_runtime_cc_library(
         "//runtime/src/iree/base/threading",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/driver/amd/gpu/image",
+        "//runtime/src/iree/hal/driver/amd/gpu/queue/pm4:thread_trace",
         "//runtime/src/iree/hal/utils:profile_event_ring",
     ],
 )
@@ -557,6 +571,7 @@ iree_runtime_cc_test(
         ":profile",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/driver/amd/gpu/queue/pm4:thread_trace",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

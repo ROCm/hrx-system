@@ -73,6 +73,13 @@ struct ProfileSink {
   std::vector<std::vector<uint8_t>> images;
   // Every native placement sharing an emitted image.
   std::vector<iree_hal_profile_executable_code_object_load_record_t> loads;
+  // Executable trace records and their raw bytes, in emission order.
+  std::vector<iree_hal_profile_executable_trace_record_t> traces;
+  std::vector<std::vector<uint8_t>> trace_bytes;
+  // Chunk flags of each trace chunk.
+  std::vector<uint64_t> trace_flags;
+  // How each trace partition was captured, in emission order.
+  std::vector<iree_hal_profile_executable_trace_capture_record_t> captures;
   // Metadata loss with an unknown number of missing unique executables.
   size_t incomplete_metadata = 0;
   // Optional producer work during a sink write, exercising lock separation.
@@ -214,12 +221,42 @@ struct ProfileSink {
                     sink.executables.end());
           sink.dispatches.push_back(records[j]);
         }
+      } else if (iree_string_view_equal(
+                     metadata->content_type,
+                     IREE_HAL_PROFILE_CONTENT_TYPE_EXECUTABLE_TRACES)) {
+        iree_hal_profile_executable_trace_record_t record;
+        std::memcpy(&record, spans[i].data, sizeof(record));
+        EXPECT_EQ(record.record_length, sizeof(record));
+        EXPECT_EQ(record.data_length, spans[i].data_length - sizeof(record));
+        EXPECT_EQ(record.queue_ordinal, metadata->queue_ordinal);
+        EXPECT_EQ(record.stream_id, metadata->stream_id);
+        sink.traces.push_back(record);
+        sink.trace_bytes.emplace_back(spans[i].data + sizeof(record),
+                                      spans[i].data + spans[i].data_length);
+        sink.trace_flags.push_back(metadata->flags);
+      } else if (iree_string_view_equal(
+                     metadata->content_type,
+                     IREE_HAL_PROFILE_CONTENT_TYPE_EXECUTABLE_TRACE_CAPTURES)) {
+        iree_hal_profile_executable_trace_capture_record_t record = {};
+        EXPECT_EQ(spans[i].data_length, sizeof(record));
+        std::memcpy(&record, spans[i].data,
+                    std::min<size_t>(spans[i].data_length, sizeof(record)));
+        sink.captures.push_back(record);
       }
     }
     sink.dropped += metadata->dropped_record_count;
-    if (iree_string_view_equal(metadata->content_type,
-                               IREE_HAL_PROFILE_CONTENT_TYPE_EXECUTABLES) &&
-        (metadata->flags & IREE_HAL_PROFILE_CHUNK_FLAG_TRUNCATED)) {
+    if (iree_string_view_equal(
+            metadata->content_type,
+            IREE_HAL_PROFILE_CONTENT_TYPE_EXECUTABLE_TRACES)) {
+      // A trace is also truncated by a full buffer or an unfinished stop, where
+      // the hardware counts no dropped token.
+      if (metadata->dropped_record_count) {
+        EXPECT_TRUE(metadata->flags & IREE_HAL_PROFILE_CHUNK_FLAG_TRUNCATED);
+      }
+    } else if (iree_string_view_equal(
+                   metadata->content_type,
+                   IREE_HAL_PROFILE_CONTENT_TYPE_EXECUTABLES) &&
+               (metadata->flags & IREE_HAL_PROFILE_CHUNK_FLAG_TRUNCATED)) {
       ++sink.incomplete_metadata;
       EXPECT_EQ(count, 0u);
       EXPECT_EQ(metadata->dropped_record_count, 0u);
@@ -1209,6 +1246,366 @@ TEST_F(GpuProfileTest, LiveRetirementAndFlushPreserveSamplesAcrossRingWraps) {
   }
   EXPECT_EQ(sink_.executables.size(), 1u);
   iree_hal_amd_gpu_profile_executable_release(metadata);
+}
+
+// Host stand-in for the device's trace buffers and info words. Tests write the
+// values the stop sequence would copy back.
+struct TraceStorage {
+  // GFX11.5 register table borrowed by the bracket.
+  iree_hal_amd_gpu_pm4_thread_trace_profile_t registers;
+  // Bracket handed to the session.
+  iree_hal_amd_gpu_profile_trace_storage_t storage = {};
+  // One buffer per engine with a recognizable byte pattern.
+  std::array<std::vector<uint8_t>, 2> buffers;
+  // Info words of both engines.
+  std::array<uint32_t, 8> info = {};
+
+  explicit TraceStorage(uint32_t limit = 2) {
+    IREE_EXPECT_OK(iree_hal_amd_gpu_pm4_thread_trace_profile_initialize(
+        {11, 5, 1}, &registers));
+    auto& config = storage.config;
+    config.profile = &registers;
+    config.engine_count = 2;
+    config.engine_mask = 3;
+    config.workgroup_processor = 4;
+    config.simd = 1;
+    config.buffer_length = 128 * 1024;
+    for (uint32_t i = 0; i < 2; ++i) {
+      buffers[i].resize(config.buffer_length);
+      for (size_t j = 0; j < buffers[i].size(); ++j) {
+        buffers[i][j] = static_cast<uint8_t>(j * 7 + i);
+      }
+      storage.buffers[i] = buffers[i].data();
+      config.buffer_addresses[i] = 0x100000000ull + i * 0x1000000ull;
+    }
+    config.info_address = 0x200000000ull;
+    storage.info_words = info.data();
+    storage.trace_limit = limit;
+    storage.stable_power_state = true;
+  }
+
+  // What the stop sequence leaves for one engine.
+  void Stop(uint32_t engine, uint32_t units, uint32_t status,
+            uint32_t dropped) {
+    info[engine * 4] = units;
+    info[engine * 4 + 1] = status;
+    info[engine * 4 + 2] = dropped;
+  }
+};
+
+class GpuProfileTraceTest : public GpuProfileTest {
+ protected:
+  void BeginTracing(
+      uint64_t families = IREE_HAL_DEVICE_PROFILING_DATA_DISPATCH_EVENTS |
+                          IREE_HAL_DEVICE_PROFILING_DATA_EXECUTABLE_TRACES) {
+    options_.data_families = families;
+    ASSERT_NO_FATAL_FAILURE(Begin(100000000));
+    iree_hal_amd_gpu_profile_set_trace_storage(profile_, &trace_.storage);
+    IREE_ASSERT_OK(executable_.Capture(&metadata_));
+  }
+  void TearDown() override {
+    iree_hal_amd_gpu_profile_executable_release(metadata_);
+    GpuProfileTest::TearDown();
+    iree_hal_executable_release(&executable_.base);
+  }
+  // A captured direct dispatch of the first function.
+  iree_hal_amd_gpu_profile_operation_t Direct() {
+    iree_hal_amd_gpu_profile_operation_t operation;
+    iree_hal_amd_gpu_profile_operation_initialize(
+        profile_, 0, IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_DISPATCH, 0, 1, 1,
+        &operation);
+    operation.dispatch = {metadata_, iree_hal_profile_dispatch_event_default()};
+    operation.dispatch.event.executable_id =
+        iree_hal_amd_gpu_profile_executable_id(metadata_);
+    operation.dispatch.event.function_ordinal = 0;
+    operation.completion.count = 1;
+    return operation;
+  }
+  // Publishes the claimed bracket and retires the operation.
+  void Complete(iree_hal_amd_gpu_profile_operation_t* operation) {
+    operation->traced = true;
+    iree_hal_amd_gpu_profile_operation_complete(profile_, operation,
+                                                &operation->completion);
+  }
+  // Device trace resources, outliving the session.
+  TraceStorage trace_;
+  // Source of code-object metadata for traced dispatches.
+  ReflectionExecutable executable_;
+  // Retained host metadata of executable_.
+  iree_hal_amd_gpu_profile_executable_t* metadata_ = nullptr;
+};
+
+TEST_F(GpuProfileTraceTest, FamilyIsAdmittedButTracesNothingWithoutStorage) {
+  options_.data_families = IREE_HAL_DEVICE_PROFILING_DATA_DISPATCH_EVENTS |
+                           IREE_HAL_DEVICE_PROFILING_DATA_EXECUTABLE_TRACES;
+  ASSERT_NO_FATAL_FAILURE(Begin(100000000));
+  EXPECT_TRUE(iree_hal_amd_gpu_profile_traces_executables(profile_));
+  EXPECT_TRUE(iree_hal_amd_gpu_profile_captures_dispatches(profile_));
+  IREE_ASSERT_OK(executable_.Capture(&metadata_));
+  auto operation = Direct();
+  EXPECT_EQ(iree_hal_amd_gpu_profile_trace_claim(profile_, &operation),
+            nullptr);
+  EXPECT_EQ(iree_hal_amd_gpu_profile_trace_claim(profile_, nullptr), nullptr);
+  EXPECT_EQ(iree_hal_amd_gpu_profile_trace_claim(nullptr, &operation), nullptr);
+}
+
+TEST_F(GpuProfileTraceTest, StorageIsIgnoredBySessionsThatDoNotTrace) {
+  options_.data_families = IREE_HAL_DEVICE_PROFILING_DATA_DISPATCH_EVENTS;
+  ASSERT_NO_FATAL_FAILURE(Begin(100000000));
+  iree_hal_amd_gpu_profile_set_trace_storage(profile_, &trace_.storage);
+  IREE_ASSERT_OK(executable_.Capture(&metadata_));
+  auto operation = Direct();
+  EXPECT_EQ(iree_hal_amd_gpu_profile_trace_claim(profile_, &operation),
+            nullptr);
+}
+
+TEST_F(GpuProfileTraceTest, BracketIsExclusiveBoundedAndHeldUntilFlush) {
+  ASSERT_NO_FATAL_FAILURE(BeginTracing());
+  auto first = Direct();
+  trace_.info.fill(0);
+  const auto* config = iree_hal_amd_gpu_profile_trace_claim(profile_, &first);
+  ASSERT_EQ(config, &trace_.storage.config);
+  // Claiming resets the info words so a stale stop cannot read as a result.
+  for (const uint32_t word : trace_.info) {
+    EXPECT_EQ(word, 0xffffffffu);
+  }
+  // Another queue's candidate runs untraced while the bracket is held. Its
+  // publication retries count as one untraced operation.
+  auto second = Direct();
+  EXPECT_EQ(iree_hal_amd_gpu_profile_trace_claim(profile_, &second), nullptr);
+  EXPECT_EQ(iree_hal_amd_gpu_profile_trace_claim(profile_, &second), nullptr);
+  EXPECT_TRUE(second.trace_refused);
+  // An unpublished claim returns both the bracket and its budget.
+  iree_hal_amd_gpu_profile_trace_cancel(profile_);
+  ASSERT_NE(iree_hal_amd_gpu_profile_trace_claim(profile_, &first), nullptr);
+  trace_.Stop(0, 4, 0x90008000, 0);
+  trace_.Stop(1, 2, 0x90008000, 0);
+  ASSERT_NO_FATAL_FAILURE(Complete(&first));
+  // Stopped but not flushed: the buffers still hold the only copy.
+  auto waiting = Direct();
+  EXPECT_EQ(iree_hal_amd_gpu_profile_trace_claim(profile_, &waiting), nullptr);
+  IREE_ASSERT_OK(iree_hal_amd_gpu_profile_flush(profile_));
+  ASSERT_EQ(sink_.traces.size(), 2u);
+  // Two operations were refused while the first trace held the bracket.
+  ASSERT_EQ(sink_.captures.size(), 2u);
+  EXPECT_EQ(sink_.captures[0].skipped_count, 2u);
+  EXPECT_EQ(sink_.captures[0].trace_limit, 2u);
+  // The second and last trace of the bound.
+  ASSERT_NE(iree_hal_amd_gpu_profile_trace_claim(profile_, &second), nullptr);
+  trace_.Stop(0, 1, 0x90008000, 0);
+  trace_.Stop(1, 1, 0x90008000, 0);
+  ASSERT_NO_FATAL_FAILURE(Complete(&second));
+  IREE_ASSERT_OK(iree_hal_amd_gpu_profile_flush(profile_));
+  ASSERT_EQ(sink_.traces.size(), 4u);
+  EXPECT_EQ(sink_.traces[0].trace_id, 1u);
+  EXPECT_EQ(sink_.traces[2].trace_id, 2u);
+  EXPECT_EQ(sink_.captures[2].skipped_count, 0u);
+  auto third = Direct();
+  EXPECT_EQ(iree_hal_amd_gpu_profile_trace_claim(profile_, &third), nullptr);
+}
+
+TEST_F(GpuProfileTraceTest, DirectTraceJoinsItsDispatchEventAndStatesCoverage) {
+  ASSERT_NO_FATAL_FAILURE(BeginTracing());
+  auto operation = Direct();
+  ASSERT_NE(iree_hal_amd_gpu_profile_trace_claim(profile_, &operation),
+            nullptr);
+  // Engine 0 wrote 96 bytes cleanly; engine 1 dropped tokens.
+  trace_.Stop(0, 3, 0x90008000, 0);
+  trace_.Stop(1, 5, 0x90008000, 41268);
+  ASSERT_NO_FATAL_FAILURE(Complete(&operation));
+  IREE_ASSERT_OK(iree_hal_amd_gpu_profile_flush(profile_));
+  ASSERT_EQ(sink_.dispatches.size(), 1u);
+  ASSERT_EQ(sink_.traces.size(), 2u);
+  for (size_t i = 0; i < 2; ++i) {
+    const auto& record = sink_.traces[i];
+    EXPECT_EQ(record.format,
+              IREE_HAL_PROFILE_EXECUTABLE_TRACE_FORMAT_AMDGPU_ATT);
+    EXPECT_EQ(record.flags,
+              IREE_HAL_PROFILE_EXECUTABLE_TRACE_FLAG_DISPATCH_EVENT);
+    EXPECT_EQ(record.dispatch_event_id, sink_.dispatches[0].event_id);
+    EXPECT_EQ(record.submission_id, sink_.dispatches[0].submission_id);
+    EXPECT_EQ(record.executable_id, sink_.dispatches[0].executable_id);
+    EXPECT_EQ(record.function_ordinal, 0u);
+    EXPECT_EQ(record.command_buffer_id, 0u);
+    EXPECT_EQ(record.shader_engine, i);
+    EXPECT_EQ(record.physical_device_ordinal, 0u);
+  }
+  EXPECT_EQ(sink_.trace_bytes[0],
+            std::vector<uint8_t>(trace_.buffers[0].begin(),
+                                 trace_.buffers[0].begin() + 96));
+  EXPECT_EQ(sink_.trace_bytes[1],
+            std::vector<uint8_t>(trace_.buffers[1].begin(),
+                                 trace_.buffers[1].begin() + 160));
+  EXPECT_EQ(sink_.trace_flags[0], 0u);
+  EXPECT_EQ(sink_.trace_flags[1], IREE_HAL_PROFILE_CHUNK_FLAG_TRUNCATED);
+  EXPECT_EQ(sink_.dropped, 41268u);
+  ASSERT_EQ(sink_.captures.size(), 2u);
+  const auto& capture = sink_.captures[1];
+  EXPECT_EQ(capture.trace_id, sink_.traces[1].trace_id);
+  EXPECT_EQ(capture.shader_engine, 1u);
+  EXPECT_EQ(capture.shader_engine_mask, 3u);
+  EXPECT_EQ(capture.target_compute_unit, 4u);
+  EXPECT_EQ(capture.simd_select, 1u);
+  EXPECT_EQ(capture.dispatch_count, 1u);
+  EXPECT_EQ(capture.buffer_byte_length, 128u * 1024);
+  EXPECT_EQ(capture.written_byte_length, 160u);
+  EXPECT_EQ(capture.dropped_count, 41268u);
+  EXPECT_EQ(capture.hardware_status, 0x90008000u);
+  EXPECT_EQ(capture.token_mask, 0x003f0683u);
+  EXPECT_EQ(capture.flags,
+            IREE_HAL_PROFILE_EXECUTABLE_TRACE_CAPTURE_FLAG_STABLE_POWER_STATE |
+                IREE_HAL_PROFILE_EXECUTABLE_TRACE_CAPTURE_FLAG_FINISHED);
+  // The code object the trace's addresses resolve against precedes it.
+  ASSERT_EQ(sink_.code_objects.size(), 1u);
+  EXPECT_EQ(sink_.code_objects[0].executable_id, sink_.traces[0].executable_id);
+}
+
+TEST_F(GpuProfileTraceTest, UncollectedAndFullEnginesNeverClaimCoverage) {
+  ASSERT_NO_FATAL_FAILURE(BeginTracing());
+  auto operation = Direct();
+  ASSERT_NE(iree_hal_amd_gpu_profile_trace_claim(profile_, &operation),
+            nullptr);
+  // Engine 0: the stop sequence never ran. Engine 1: the buffer filled.
+  trace_.Stop(1, 128 * 1024 / 32 - 1, 0x91008000, 0);
+  ASSERT_NO_FATAL_FAILURE(Complete(&operation));
+  IREE_ASSERT_OK(iree_hal_amd_gpu_profile_flush(profile_));
+  ASSERT_EQ(sink_.captures.size(), 2u);
+  EXPECT_EQ(sink_.captures[0].flags,
+            IREE_HAL_PROFILE_EXECUTABLE_TRACE_CAPTURE_FLAG_STABLE_POWER_STATE |
+                IREE_HAL_PROFILE_EXECUTABLE_TRACE_CAPTURE_FLAG_UNCOLLECTED);
+  EXPECT_EQ(sink_.captures[0].written_byte_length, 0u);
+  EXPECT_EQ(sink_.captures[1].flags,
+            IREE_HAL_PROFILE_EXECUTABLE_TRACE_CAPTURE_FLAG_STABLE_POWER_STATE |
+                IREE_HAL_PROFILE_EXECUTABLE_TRACE_CAPTURE_FLAG_FINISHED |
+                IREE_HAL_PROFILE_EXECUTABLE_TRACE_CAPTURE_FLAG_BUFFER_FULL |
+                IREE_HAL_PROFILE_EXECUTABLE_TRACE_CAPTURE_FLAG_WRITE_ERROR);
+  // Only the engine that wrote bytes has a trace chunk, marked truncated.
+  ASSERT_EQ(sink_.traces.size(), 1u);
+  EXPECT_EQ(sink_.traces[0].shader_engine, 1u);
+  EXPECT_EQ(sink_.trace_bytes[0].size(), 128u * 1024 - 32);
+  EXPECT_EQ(sink_.trace_flags[0], IREE_HAL_PROFILE_CHUNK_FLAG_TRUNCATED);
+}
+
+TEST_F(GpuProfileTraceTest, RecordingIsTracedWholeWhenAnyDispatchMatches) {
+  options_.capture_filter.flags =
+      IREE_HAL_PROFILE_CAPTURE_FILTER_FLAG_EXECUTABLE_FUNCTION_PATTERN;
+  options_.capture_filter.executable_function_pattern = IREE_SV("sec*");
+  ASSERT_NO_FATAL_FAILURE(BeginTracing());
+  auto record = iree_hal_profile_command_buffer_record_default();
+  record.command_buffer_id = 51;
+  auto make = [&](std::initializer_list<uint32_t> ordinals) {
+    iree_hal_amd_gpu_profile_commands_t* commands = nullptr;
+    IREE_EXPECT_OK(iree_hal_amd_gpu_profile_commands_create(
+        &record, iree_allocator_system(), &commands));
+    uint32_t index = 0;
+    for (const uint32_t ordinal : ordinals) {
+      iree_hal_amd_gpu_profile_dispatch_t dispatch = {
+          .executable = metadata_,
+          .event = iree_hal_profile_dispatch_event_default(),
+      };
+      dispatch.event.executable_id =
+          iree_hal_amd_gpu_profile_executable_id(metadata_);
+      dispatch.event.function_ordinal = ordinal;
+      dispatch.event.command_buffer_id = 51;
+      dispatch.event.command_index = index++;
+      IREE_EXPECT_OK(
+          iree_hal_amd_gpu_profile_commands_append(commands, dispatch));
+    }
+    return commands;
+  };
+  auto operation_for = [&](iree_hal_amd_gpu_profile_commands_t* commands) {
+    iree_hal_amd_gpu_profile_operation_t operation;
+    iree_hal_amd_gpu_profile_operation_initialize(
+        profile_, 0, IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_EXECUTE, 0, 1, 1,
+        &operation);
+    operation.event.command_buffer_id = 51;
+    operation.commands = commands;
+    operation.completion.count =
+        iree_hal_amd_gpu_profile_commands_count(commands);
+    return operation;
+  };
+  // No dispatch of this recording matches the function pattern.
+  auto* unmatched = make({0, 0});
+  auto skipped = operation_for(unmatched);
+  EXPECT_EQ(iree_hal_amd_gpu_profile_trace_claim(profile_, &skipped), nullptr);
+  iree_hal_amd_gpu_profile_commands_release(unmatched);
+  // One of three does: the whole recording is bracketed.
+  auto* commands = make({0, 1, 0});
+  auto operation = operation_for(commands);
+  ASSERT_NE(iree_hal_amd_gpu_profile_trace_claim(profile_, &operation),
+            nullptr);
+  trace_.Stop(0, 2, 0x90008000, 0);
+  trace_.Stop(1, 2, 0x90008000, 0);
+  ASSERT_NO_FATAL_FAILURE(Complete(&operation));
+  iree_hal_amd_gpu_profile_commands_release(commands);
+  IREE_ASSERT_OK(iree_hal_amd_gpu_profile_flush(profile_));
+  // Only the matching dispatch has an event; the trace names the submission.
+  ASSERT_EQ(sink_.dispatches.size(), 1u);
+  ASSERT_EQ(sink_.traces.size(), 2u);
+  const auto& trace = sink_.traces[0];
+  EXPECT_EQ(trace.flags, IREE_HAL_PROFILE_EXECUTABLE_TRACE_FLAG_NONE);
+  EXPECT_EQ(trace.dispatch_event_id, 0u);
+  EXPECT_EQ(trace.command_buffer_id, 51u);
+  EXPECT_EQ(trace.command_index, UINT32_MAX);
+  EXPECT_EQ(trace.function_ordinal, UINT32_MAX);
+  EXPECT_EQ(trace.submission_id, sink_.dispatches[0].submission_id);
+  ASSERT_EQ(sink_.captures.size(), 2u);
+  EXPECT_EQ(sink_.captures[0].dispatch_count, 3u);
+  EXPECT_TRUE(
+      sink_.captures[0].flags &
+      IREE_HAL_PROFILE_EXECUTABLE_TRACE_CAPTURE_FLAG_COMMAND_BUFFER_SCOPE);
+  EXPECT_EQ(sink_.commands, std::vector<uint64_t>({51}));
+  EXPECT_EQ(sink_.code_objects.size(), 1u);
+}
+
+TEST_F(GpuProfileTraceTest, FailedTraceWriteRetriesWithoutRepeatingRecords) {
+  ASSERT_NO_FATAL_FAILURE(BeginTracing());
+  auto operation = Direct();
+  ASSERT_NE(iree_hal_amd_gpu_profile_trace_claim(profile_, &operation),
+            nullptr);
+  trace_.Stop(0, 1, 0x90008000, 0);
+  trace_.Stop(1, 1, 0x90008000, 0);
+  ASSERT_NO_FATAL_FAILURE(Complete(&operation));
+  sink_.fail_content_type = IREE_HAL_PROFILE_CONTENT_TYPE_EXECUTABLE_TRACES;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_DATA_LOSS,
+                        iree_hal_amd_gpu_profile_flush(profile_));
+  EXPECT_EQ(sink_.captures.size(), 1u);
+  EXPECT_TRUE(sink_.traces.empty());
+  // The bracket stays held: its buffers are still the only copy.
+  auto next = Direct();
+  EXPECT_EQ(iree_hal_amd_gpu_profile_trace_claim(profile_, &next), nullptr);
+  sink_.fail_content_type = {};
+  IREE_ASSERT_OK(iree_hal_amd_gpu_profile_flush(profile_));
+  EXPECT_EQ(sink_.captures.size(), 2u);
+  EXPECT_EQ(sink_.traces.size(), 2u);
+  EXPECT_NE(iree_hal_amd_gpu_profile_trace_claim(profile_, &next), nullptr);
+  iree_hal_amd_gpu_profile_trace_cancel(profile_);
+}
+
+TEST_F(GpuProfileTraceTest, EndEmitsACompletedTraceAndReleasesAnUnflushedOne) {
+  ASSERT_NO_FATAL_FAILURE(BeginTracing());
+  auto operation = Direct();
+  ASSERT_NE(iree_hal_amd_gpu_profile_trace_claim(profile_, &operation),
+            nullptr);
+  trace_.Stop(0, 1, 0x90008000, 0);
+  trace_.Stop(1, 1, 0x90008000, 0);
+  ASSERT_NO_FATAL_FAILURE(Complete(&operation));
+  auto* profile = profile_;
+  profile_ = nullptr;
+  IREE_ASSERT_OK(iree_hal_amd_gpu_profile_end(profile));
+  EXPECT_EQ(sink_.traces.size(), 2u);
+  // A session whose sink fails at the end still releases the trace's owner.
+  ASSERT_NO_FATAL_FAILURE(Begin(100000000));
+  iree_hal_amd_gpu_profile_set_trace_storage(profile_, &trace_.storage);
+  auto second = Direct();
+  ASSERT_NE(iree_hal_amd_gpu_profile_trace_claim(profile_, &second), nullptr);
+  ASSERT_NO_FATAL_FAILURE(Complete(&second));
+  sink_.fail_write = true;
+  profile = profile_;
+  profile_ = nullptr;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_DATA_LOSS,
+                        iree_hal_amd_gpu_profile_end(profile));
+  sink_.fail_write = false;
 }
 
 }  // namespace
