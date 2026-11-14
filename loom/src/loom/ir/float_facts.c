@@ -10,6 +10,7 @@
 #include <string.h>
 
 #include "iree/base/internal/math.h"
+#include "iree/math/float_bits.h"
 #include "iree/math/fma.h"
 #include "iree/math/rounding.h"
 #include "iree/math/scaling.h"
@@ -278,7 +279,12 @@ loom_value_facts_exact_float(loom_scalar_type_t scalar_type, double value) {
   if (!loom_float_type_is_supported(scalar_type)) {
     return loom_value_facts_unknown();
   }
-  const double rounded_value = loom_float_round_to_type(scalar_type, value);
+  double rounded_value = loom_float_round_to_type(scalar_type, value);
+  if (isnan(rounded_value)) {
+    // Exact facts intentionally retain no NaN payload identity. Give every
+    // materializable NaN one host-independent representation.
+    rounded_value = iree_math_f64_canonical_nan();
+  }
   loom_value_facts_t facts =
       loom_value_facts_exact_rounded_float(rounded_value);
   loom_value_facts_add_exact_float_types(

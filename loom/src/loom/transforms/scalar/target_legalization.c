@@ -8,6 +8,7 @@
 
 #include <math.h>
 
+#include "iree/math/float_bits.h"
 #include "loom/ir/module.h"
 #include "loom/ops/scalar/combining.h"
 #include "loom/ops/scalar/ops.h"
@@ -1489,7 +1490,8 @@ static iree_status_t loom_scalar_legalize_build_number_extremum(
                                               rhs, rhs, location, &rhs_nan_op));
   loom_op_t* quiet_nan_op = NULL;
   IREE_RETURN_IF_ERROR(loom_scalar_constant_build(
-      builder, loom_attr_f64(NAN), type, location, &quiet_nan_op));
+      builder, loom_attr_f64(iree_math_f64_canonical_nan()), type, location,
+      &quiet_nan_op));
   loom_value_id_t lhs_nan_result = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_scalar_legalize_build_select(
       builder, location, type, loom_scalar_cmpf_result(rhs_nan_op),
@@ -1689,8 +1691,9 @@ iree_status_t loom_scalar_legalize_ieee_extrema(
       builder, op->instance_flags, LOOM_SCALAR_CMPF_PREDICATE_UNO, lhs, rhs,
       op->location, &unordered));
   loom_op_t* nan = NULL;
-  IREE_RETURN_IF_ERROR(loom_scalar_constant_build(builder, loom_attr_f64(NAN),
-                                                  type, op->location, &nan));
+  IREE_RETURN_IF_ERROR(loom_scalar_constant_build(
+      builder, loom_attr_f64(iree_math_f64_canonical_nan()), type, op->location,
+      &nan));
   loom_op_t* select = NULL;
   IREE_RETURN_IF_ERROR(loom_scf_select_build(
       builder, loom_scalar_cmpf_result(unordered),

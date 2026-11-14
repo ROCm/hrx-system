@@ -63,5 +63,6 @@ loom_cc_library(
         "//loom/src/loom/util:numeric_format",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/math",
     ],
 )

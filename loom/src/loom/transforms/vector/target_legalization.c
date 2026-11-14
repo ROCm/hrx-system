@@ -11,6 +11,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "iree/math/float_bits.h"
 #include "loom/ir/module.h"
 #include "loom/ir/types.h"
 #include "loom/ops/kernel/ops.h"
@@ -1414,8 +1415,8 @@ static iree_status_t loom_vector_legalize_build_number_extremum(
       builder, fastmath, LOOM_VECTOR_CMPF_PREDICATE_UNE, rhs, rhs, type,
       predicate_type, location, &rhs_nan_op));
   loom_op_t* quiet_nan_op = NULL;
-  IREE_RETURN_IF_ERROR(
-      loom_vector_splatf_build(builder, NAN, type, location, &quiet_nan_op));
+  IREE_RETURN_IF_ERROR(loom_vector_splatf_build(
+      builder, iree_math_f64_canonical_nan(), type, location, &quiet_nan_op));
   loom_value_id_t lhs_nan_result = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_vector_legalize_build_select(
       builder, location, type, loom_vector_cmpf_result(rhs_nan_op),
@@ -1515,8 +1516,8 @@ static iree_status_t loom_vector_legalize_build_ieee_extremum(
       builder, op->instance_flags, LOOM_VECTOR_CMPF_PREDICATE_UNO, lhs, rhs,
       type, predicate_type, op->location, &unordered));
   loom_op_t* nan = NULL;
-  IREE_RETURN_IF_ERROR(
-      loom_vector_splatf_build(builder, NAN, type, op->location, &nan));
+  IREE_RETURN_IF_ERROR(loom_vector_splatf_build(
+      builder, iree_math_f64_canonical_nan(), type, op->location, &nan));
   loom_op_t* select = NULL;
   IREE_RETURN_IF_ERROR(loom_vector_select_build(
       builder, loom_vector_cmpf_result(unordered),
