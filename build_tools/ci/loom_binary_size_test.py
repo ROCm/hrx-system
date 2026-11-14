@@ -72,6 +72,38 @@ def history(*observations: dict) -> dict:
     }
 
 
+def create_git_history(root: Path, *messages: str) -> list[str]:
+    subprocess.run(["git", "init", "--quiet", root], check=True)
+    commits = []
+    for message in messages:
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                root,
+                "-c",
+                "user.name=Fixture",
+                "-c",
+                "user.email=fixture@example.com",
+                "commit",
+                "--quiet",
+                "--allow-empty",
+                "-m",
+                message,
+            ],
+            check=True,
+        )
+        commits.append(
+            subprocess.run(
+                ["git", "-C", root, "rev-parse", "HEAD"],
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+        )
+    return commits
+
+
 class LoomBinarySizeTest(unittest.TestCase):
     def test_measures_the_final_archive_without_building_or_stripping(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -254,79 +286,89 @@ class LoomBinarySizeTest(unittest.TestCase):
         self.assertIn("new series", summary)
 
     def test_nearest_ancestor_artifact_wins_over_creation_time(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            commit_a, commit_b, commit_c = create_git_history(root, "a", "b", "c")
+            artifacts = [
+                {
+                    "id": 0,
+                    "created_at": "2026-08-31T04:00:00Z",
+                    "workflow_run": {"head_sha": "not-a-git-sha"},
+                },
+                {
+                    "id": 1,
+                    "created_at": "2026-08-31T03:00:00Z",
+                    "workflow_run": {"head_sha": commit_a},
+                },
+                {
+                    "id": 2,
+                    "created_at": "2026-08-31T01:00:00Z",
+                    "workflow_run": {"head_sha": commit_b},
+                },
+            ]
+
+            selected = loom_binary_size.select_nearest_artifact(
+                artifacts,
+                anchor=commit_c,
+                exclude_commit=None,
+                repo_root=root,
+            )
+
+        self.assertEqual(selected["id"], 2)
+
+    def test_exact_anchor_uses_newest_rerun_without_reading_history(self):
         artifacts = [
             {
                 "id": 1,
-                "created_at": "2026-08-31T03:00:00Z",
-                "workflow_run": {"head_sha": COMMIT_A},
+                "created_at": "2026-08-31T01:00:00Z",
+                "workflow_run": {"head_sha": COMMIT_C},
             },
             {
                 "id": 2,
-                "created_at": "2026-08-31T01:00:00Z",
-                "workflow_run": {"head_sha": COMMIT_B},
+                "created_at": "2026-08-31T03:00:00Z",
+                "workflow_run": {"head_sha": COMMIT_C},
             },
         ]
-        distances = {COMMIT_A: 5, COMMIT_B: 1}
 
         selected = loom_binary_size.select_nearest_artifact(
             artifacts,
             anchor=COMMIT_C,
             exclude_commit=None,
-            distance=lambda commit, _anchor: distances[commit],
+            repo_root=Path("repository-must-not-be-read"),
         )
 
         self.assertEqual(selected["id"], 2)
 
     def test_current_main_commit_is_excluded_from_baseline(self):
-        artifacts = [
-            {
-                "id": 1,
-                "created_at": "2026-08-31T03:00:00Z",
-                "workflow_run": {"head_sha": COMMIT_C},
-            },
-            {
-                "id": 2,
-                "created_at": "2026-08-31T01:00:00Z",
-                "workflow_run": {"head_sha": COMMIT_B},
-            },
-        ]
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            commit_b, commit_c = create_git_history(root, "b", "c")
+            artifacts = [
+                {
+                    "id": 1,
+                    "created_at": "2026-08-31T03:00:00Z",
+                    "workflow_run": {"head_sha": commit_c},
+                },
+                {
+                    "id": 2,
+                    "created_at": "2026-08-31T01:00:00Z",
+                    "workflow_run": {"head_sha": commit_b},
+                },
+            ]
 
-        selected = loom_binary_size.select_nearest_artifact(
-            artifacts,
-            anchor=COMMIT_C,
-            exclude_commit=COMMIT_C,
-            distance=lambda commit, _anchor: 1 if commit == COMMIT_B else 0,
-        )
+            selected = loom_binary_size.select_nearest_artifact(
+                artifacts,
+                anchor=commit_c,
+                exclude_commit=commit_c,
+                repo_root=root,
+            )
 
         self.assertEqual(selected["id"], 2)
 
     def test_unavailable_artifact_commit_is_skipped(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            subprocess.run(["git", "init", "--quiet", root], check=True)
-            subprocess.run(
-                [
-                    "git",
-                    "-C",
-                    root,
-                    "-c",
-                    "user.name=Fixture",
-                    "-c",
-                    "user.email=fixture@example.com",
-                    "commit",
-                    "--quiet",
-                    "--allow-empty",
-                    "-m",
-                    "anchor",
-                ],
-                check=True,
-            )
-            anchor = subprocess.run(
-                ["git", "-C", root, "rev-parse", "HEAD"],
-                check=True,
-                capture_output=True,
-                text=True,
-            ).stdout.strip()
+            baseline, anchor = create_git_history(root, "baseline", "anchor")
             artifacts = [
                 {
                     "id": 1,
@@ -336,7 +378,7 @@ class LoomBinarySizeTest(unittest.TestCase):
                 {
                     "id": 2,
                     "created_at": "2026-08-31T01:00:00Z",
-                    "workflow_run": {"head_sha": anchor},
+                    "workflow_run": {"head_sha": baseline},
                 },
             ]
 
@@ -344,20 +386,18 @@ class LoomBinarySizeTest(unittest.TestCase):
                 artifacts,
                 anchor=anchor,
                 exclude_commit=None,
-                distance=lambda commit, comparison: loom_binary_size._git_distance(
-                    root, commit, comparison
-                ),
+                repo_root=root,
             )
 
         self.assertEqual(selected["id"], 2)
 
-    def test_git_distance_preserves_repository_failures(self):
+    def test_first_parent_history_preserves_repository_failures(self):
         with tempfile.TemporaryDirectory() as temporary:
             with self.assertRaisesRegex(
                 loom_binary_size.BinarySizeError,
-                "could not test ancestry",
+                "could not read first-parent history",
             ):
-                loom_binary_size._git_distance(Path(temporary), COMMIT_A, COMMIT_B)
+                loom_binary_size._git_first_parent_history(Path(temporary), COMMIT_A)
 
     def test_history_zip_must_match_workflow_head(self):
         payload = BytesIO()

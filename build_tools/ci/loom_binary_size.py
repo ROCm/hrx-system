@@ -538,37 +538,20 @@ def list_main_artifacts(
         page += 1
 
 
-def _git_distance(repo_root: Path, ancestor: str, anchor: str) -> int | None:
-    ancestry = subprocess.run(
-        ["git", "merge-base", "--is-ancestor", ancestor, anchor],
-        cwd=repo_root,
-        check=False,
-        capture_output=True,
-    )
-    if ancestry.returncode == 1:
-        return None
-    if ancestry.returncode != 0:
-        availability = subprocess.run(
-            ["git", "rev-parse", "--verify", "--quiet", f"{ancestor}^{{commit}}"],
+def _git_first_parent_history(repo_root: Path, anchor: str) -> list[str]:
+    _require_sha(anchor, "comparison anchor")
+    try:
+        result = _run(
+            ["git", "rev-list", "--first-parent", anchor],
             cwd=repo_root,
-            check=False,
             capture_output=True,
         )
-        if availability.returncode == 1:
-            return None
+    except subprocess.CalledProcessError as exc:
+        detail = exc.stderr.strip() if exc.stderr else "unknown Git error"
         raise BinarySizeError(
-            f"git could not test ancestry for {ancestor} and {anchor}: "
-            f"{ancestry.stderr.decode(errors='replace')}"
-        )
-    result = _run(
-        ["git", "rev-list", "--count", f"{ancestor}..{anchor}"],
-        cwd=repo_root,
-        capture_output=True,
-    )
-    try:
-        return int(result.stdout.strip())
-    except ValueError as exc:
-        raise BinarySizeError("git rev-list returned an invalid distance") from exc
+            f"git could not read first-parent history for {anchor}: {detail}"
+        ) from exc
+    return result.stdout.splitlines()
 
 
 def select_nearest_artifact(
@@ -576,12 +559,12 @@ def select_nearest_artifact(
     *,
     anchor: str,
     exclude_commit: str | None,
-    distance: Callable[[str, str], int | None],
+    repo_root: Path,
 ) -> dict[str, Any] | None:
     _require_sha(anchor, "comparison anchor")
     if exclude_commit:
         _require_sha(exclude_commit, "excluded commit")
-    candidates = []
+    artifacts_by_commit: dict[str, dict[str, Any]] = {}
     for artifact in artifacts:
         workflow_run = artifact.get("workflow_run", {})
         commit = workflow_run.get("head_sha")
@@ -591,17 +574,25 @@ def select_nearest_artifact(
             commit = _require_sha(commit, "artifact head commit")
         except BinarySizeError:
             continue
-        commit_distance = distance(commit, anchor)
-        if commit_distance is not None:
-            candidates.append(
-                (commit_distance, artifact.get("created_at", ""), artifact)
-            )
-    if not candidates:
+        existing = artifacts_by_commit.get(commit)
+        if existing is None or artifact.get("created_at", "") > existing.get(
+            "created_at", ""
+        ):
+            artifacts_by_commit[commit] = artifact
+    if not artifacts_by_commit:
         return None
-    candidates.sort(key=lambda item: (item[0], item[1]), reverse=False)
-    nearest_distance = candidates[0][0]
-    nearest = [item for item in candidates if item[0] == nearest_distance]
-    return max(nearest, key=lambda item: item[1])[2]
+    # Pull requests normally have an artifact at their exact base revision. No
+    # other candidate can be closer, so avoid reading Git history altogether.
+    if anchor in artifacts_by_commit:
+        return artifacts_by_commit[anchor]
+    # Main artifacts describe successive branch heads. Follow only the current
+    # main lineage so a reachable commit from a merged or rewritten side does
+    # not become the baseline.
+    for commit in _git_first_parent_history(repo_root, anchor):
+        artifact = artifacts_by_commit.get(commit)
+        if artifact is not None:
+            return artifact
+    return None
 
 
 def history_from_zip(payload: bytes, expected_head_sha: str) -> dict[str, Any]:
@@ -638,9 +629,7 @@ def fetch_history(args: argparse.Namespace) -> None:
         artifacts,
         anchor=args.anchor,
         exclude_commit=args.exclude_commit,
-        distance=lambda ancestor, anchor: _git_distance(
-            args.repo_root, ancestor, anchor
-        ),
+        repo_root=args.repo_root,
     )
     if selected is None:
         print("No compatible ancestor main artifact was found; starting a new history.")
