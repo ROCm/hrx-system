@@ -1360,9 +1360,12 @@ jobs:
             --execution_log_json_file="$evidence_dir/producer-execution.json" \
             "$target"
 
-          query='mnemonic(CppCompile, //build_tools/windows:compiler_runtime_test) union mnemonic(CppLink, //build_tools/windows:compiler_runtime_test)'
+          query_file="$evidence_dir/cpp-actions.aquery"
+          printf '%s\n' \
+            'mnemonic("CppCompile|CppLink", //build_tools/windows:compiler_runtime_test)' \
+            > "$query_file"
           bazel "--output_base=$IREE_CACHE_HANDOFF_OUTPUT_BASE" aquery \
-            "${common_flags[@]}" --output=text "$query" \
+            "${common_flags[@]}" --output=text --query_file="$query_file" \
             > "$evidence_dir/producer-aquery.txt"
           grep '^  ActionKey:' "$evidence_dir/producer-aquery.txt" \
             > "$evidence_dir/producer-action-keys.txt"
@@ -1510,10 +1513,11 @@ jobs:
             '--remote_verify_downloads',
             '--noremote_cache_async'
           )
-          $query = 'mnemonic(CppCompile, //build_tools/windows:compiler_runtime_test) union mnemonic(CppLink, //build_tools/windows:compiler_runtime_test)'
+          $queryFile = Join-Path $env:IREE_CACHE_HANDOFF_ARTIFACT_ROOT 'evidence\cpp-actions.aquery'
           $consumerAquery = Join-Path $evidenceDir 'consumer-aquery.txt'
           bazel "--output_base=$env:IREE_CACHE_HANDOFF_OUTPUT_BASE" aquery `
-            @commonFlags '--output=text' $query | Out-File -LiteralPath $consumerAquery -Encoding utf8
+            @commonFlags '--output=text' "--query_file=$queryFile" |
+              Out-File -LiteralPath $consumerAquery -Encoding utf8
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $producerKeys = @(
             Get-Content -LiteralPath (Join-Path $env:IREE_CACHE_HANDOFF_ARTIFACT_ROOT 'evidence\producer-action-keys.txt')
