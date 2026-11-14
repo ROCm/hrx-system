@@ -7,6 +7,7 @@
 #include "iree/hal/driver/amd/gpu/queue/sdma/command_buffer.h"
 
 #include "iree/base/internal/arena.h"
+#include "iree/base/internal/memory_copy.h"
 #include "iree/hal/driver/amd/gpu/queue/sdma/recording.h"
 #include "iree/hal/utils/resource_set.h"
 
@@ -183,8 +184,9 @@ static iree_status_t iree_hal_amd_gpu_sdma_command_seal(
     IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_program_initialize(
         buffer->pool, 64, (uint32_t)buffer->program.data.data_length, 0,
         &buffer->storage));
-    memcpy(buffer->storage.contents.data, buffer->program.data.data,
-           buffer->program.data.data_length);
+    iree_memcpy_write_only(buffer->storage.contents.data,
+                           buffer->program.data.data,
+                           buffer->program.data.data_length);
     IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_program_seal(&buffer->storage));
   }
   if (buffer->resources) {
