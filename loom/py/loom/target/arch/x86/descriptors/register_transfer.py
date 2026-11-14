@@ -12,6 +12,7 @@ from loom.target.low_descriptors import (
     ConstraintKind,
     Descriptor,
     DescriptorFlag,
+    InstructionClass,
 )
 
 from .common import (
@@ -68,6 +69,7 @@ def register_transfer_descriptors(*, evex: bool) -> tuple[Descriptor, ...]:
                     operands=("input",),
                 ),
                 schedule_class=_SCHEDULE_VECTOR_I32_XMM,
+                instruction_classes=(InstructionClass.REGISTER_MOVE,),
                 flags=(DescriptorFlag.DEAD_REMOVABLE,),
             )
             descriptors.append(
