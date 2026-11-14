@@ -6,6 +6,7 @@
 
 #include "loom/target/testing/low_provider_verify.h"
 
+#include "loom/codegen/low/descriptor_scope.h"
 #include "loom/ir/context.h"
 
 iree_status_t loom_target_low_legality_provider_list_verify(
@@ -23,7 +24,8 @@ iree_status_t loom_target_low_legality_provider_list_verify(
   }
   for (iree_host_size_t i = 0; i < list.count; ++i) {
     const loom_target_low_legality_provider_t* provider = list.values[i];
-    if (provider == NULL || provider->try_verify_op == NULL) {
+    if (provider == NULL || provider->try_verify_op == NULL ||
+        !loom_low_descriptor_scope_is_valid(provider->scope)) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "target-low legality provider is invalid");
     }
@@ -51,7 +53,8 @@ iree_status_t loom_target_low_packet_diagnostic_provider_list_verify(
   for (iree_host_size_t i = 0; i < list.count; ++i) {
     const loom_target_low_packet_diagnostic_provider_t* provider =
         list.values[i];
-    if (provider == NULL || provider->try_diagnose_packet == NULL) {
+    if (provider == NULL || provider->try_diagnose_packet == NULL ||
+        !loom_low_descriptor_scope_is_valid(provider->scope)) {
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
           "target-low packet diagnostic provider is invalid");

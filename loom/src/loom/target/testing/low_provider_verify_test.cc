@@ -48,9 +48,10 @@ TEST(TargetLowProviderVerifyTest, AcceptsEmptyLists) {
       loom_target_low_packet_diagnostic_provider_list_verify(diagnostic_list));
 }
 
-TEST(TargetLowProviderVerifyTest, AcceptsProviderRows) {
-  const loom_target_low_legality_provider_t legality_provider = {
+TEST(TargetLowProviderVerifyTest, RequiresExplicitProviderScopes) {
+  loom_target_low_legality_provider_t legality_provider = {
       .name = IREE_SVL("test-legality-provider"),
+      .scope = LOOM_LOW_DESCRIPTOR_SCOPE_SHARED,
       .builtin_dialect_bits = 1u << LOOM_DIALECT_VECTOR,
       .try_verify_op = IgnoreProviderOp,
   };
@@ -62,8 +63,9 @@ TEST(TargetLowProviderVerifyTest, AcceptsProviderRows) {
           legality_values, IREE_ARRAYSIZE(legality_values));
   IREE_EXPECT_OK(loom_target_low_legality_provider_list_verify(legality_list));
 
-  const loom_target_low_packet_diagnostic_provider_t diagnostic_provider = {
+  loom_target_low_packet_diagnostic_provider_t diagnostic_provider = {
       .name = IREE_SVL("test-packet-provider"),
+      .scope = LOOM_LOW_DESCRIPTOR_SCOPE_SHARED,
       .try_diagnose_packet = IgnorePacketDiagnostic,
   };
   const loom_target_low_packet_diagnostic_provider_t* diagnostic_values[] = {
@@ -73,6 +75,15 @@ TEST(TargetLowProviderVerifyTest, AcceptsProviderRows) {
       loom_target_low_packet_diagnostic_provider_list_make(
           diagnostic_values, IREE_ARRAYSIZE(diagnostic_values));
   IREE_EXPECT_OK(
+      loom_target_low_packet_diagnostic_provider_list_verify(diagnostic_list));
+
+  legality_provider.scope = {};
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      loom_target_low_legality_provider_list_verify(legality_list));
+  diagnostic_provider.scope = {};
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
       loom_target_low_packet_diagnostic_provider_list_verify(diagnostic_list));
 }
 

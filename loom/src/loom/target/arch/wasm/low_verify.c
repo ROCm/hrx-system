@@ -119,11 +119,6 @@ static iree_status_t loom_wasm_low_begin_function(
   *out_provider_state = NULL;
   const loom_low_resolved_target_t* target =
       loom_low_verify_context_target(context);
-  if (target->descriptor_set == NULL ||
-      target->descriptor_set->stable_id !=
-          WASM_CORE_SIMD128_DESCRIPTOR_SET_ID) {
-    return iree_ok_status();
-  }
 
   loom_wasm_low_verify_state_t* state = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate(
@@ -146,7 +141,7 @@ static iree_status_t loom_wasm_low_verify_op(
   (void)provider;
   loom_wasm_low_verify_state_t* state =
       (loom_wasm_low_verify_state_t*)provider_state;
-  if (state == NULL || loom_low_verify_context_should_stop(context)) {
+  if (loom_low_verify_context_should_stop(context)) {
     return iree_ok_status();
   }
   if (loom_low_scf_if_isa(packet->op)) {
@@ -170,6 +165,7 @@ static iree_status_t loom_wasm_low_verify_op(
 
 const loom_low_verify_provider_t loom_wasm_low_verify_provider = {
     .name = IREE_SVL("wasm"),
+    .scope = {.descriptor_set_stable_id = WASM_CORE_SIMD128_DESCRIPTOR_SET_ID},
     .begin_function = loom_wasm_low_begin_function,
     .verify_op = loom_wasm_low_verify_op,
 };

@@ -15,6 +15,7 @@
 #define LOOM_TARGET_LOW_PACKET_DIAGNOSTICS_H_
 
 #include "iree/base/api.h"
+#include "loom/codegen/low/descriptor_scope.h"
 #include "loom/codegen/low/frame.h"
 #include "loom/codegen/low/packet.h"
 #include "loom/error/emitter.h"
@@ -45,6 +46,8 @@ typedef iree_status_t (*loom_target_low_packet_diagnostic_try_packet_fn_t)(
 struct loom_target_low_packet_diagnostic_provider_t {
   // Stable provider name available to callbacks when emitting diagnostics.
   iree_string_view_t name;
+  // Explicit target applicability enforced before function-local callbacks.
+  loom_low_descriptor_scope_t scope;
   // Attempts to diagnose one packet. Sets |out_handled| false when the packet
   // does not belong to this provider.
   loom_target_low_packet_diagnostic_try_packet_fn_t try_diagnose_packet;

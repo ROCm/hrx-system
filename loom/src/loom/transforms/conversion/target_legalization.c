@@ -259,6 +259,7 @@ static const loom_target_legalizer_rule_t kConversionLegalizerRules[] = {
 
 static const loom_target_legalizer_provider_t kConversionLegalizerProvider = {
     .name = IREE_SVL("conversion"),
+    .scope = LOOM_LOW_DESCRIPTOR_SCOPE_SHARED,
     .strategy = LOOM_TARGET_LEGALIZER_STRATEGY_REFERENCE,
     .rules = kConversionLegalizerRules,
     .rule_count = IREE_ARRAYSIZE(kConversionLegalizerRules),

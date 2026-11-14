@@ -90,6 +90,7 @@ static const loom_target_legalizer_rule_t kViewLegalizerRules[] = {
 
 static const loom_target_legalizer_provider_t kViewLegalizerProvider = {
     .name = IREE_SVL("view"),
+    .scope = LOOM_LOW_DESCRIPTOR_SCOPE_SHARED,
     .strategy = LOOM_TARGET_LEGALIZER_STRATEGY_REFERENCE,
     .rules = kViewLegalizerRules,
     .rule_count = IREE_ARRAYSIZE(kViewLegalizerRules),

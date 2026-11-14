@@ -2268,6 +2268,7 @@ static const loom_target_legalizer_rule_t kVectorLegalizerRules[] = {
 
 static const loom_target_legalizer_provider_t kVectorLegalizerProvider = {
     .name = IREE_SVL("vector"),
+    .scope = LOOM_LOW_DESCRIPTOR_SCOPE_SHARED,
     .strategy = LOOM_TARGET_LEGALIZER_STRATEGY_REFERENCE,
     .rules = kVectorLegalizerRules,
     .rule_count = IREE_ARRAYSIZE(kVectorLegalizerRules),

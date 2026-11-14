@@ -10,7 +10,6 @@
 #include "loom/ir/module.h"
 #include "loom/ops/vector/combining.h"
 #include "loom/ops/vector/ops.h"
-#include "loom/target/arch/amd/xdna/aie2p/descriptors/core_descriptors.h"
 #include "loom/util/fact_table.h"
 #include "loom/util/numeric_format.h"
 
@@ -835,8 +834,7 @@ iree_status_t loom_aie2p_legalize_vector_cmpf(
   *out_result = (loom_target_legalizer_result_t){
       .action = LOOM_TARGET_LEGALIZER_ACTION_NO_COMMENT,
   };
-  if (context->descriptor_set != loom_aie2p_core_descriptor_set() ||
-      !loom_target_legalization_op_has_source_vector_carriers(context, op)) {
+  if (!loom_target_legalization_op_has_source_vector_carriers(context, op)) {
     return iree_ok_status();
   }
 
@@ -974,8 +972,7 @@ iree_status_t loom_aie2p_legalize_vector_float_extrema(
   *out_result = (loom_target_legalizer_result_t){
       .action = LOOM_TARGET_LEGALIZER_ACTION_NO_COMMENT,
   };
-  if (context->descriptor_set != loom_aie2p_core_descriptor_set() ||
-      !loom_target_legalization_op_has_source_vector_carriers(context, op)) {
+  if (!loom_target_legalization_op_has_source_vector_carriers(context, op)) {
     return iree_ok_status();
   }
 

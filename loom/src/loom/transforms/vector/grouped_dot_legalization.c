@@ -222,6 +222,7 @@ static const loom_target_legalizer_rule_t kGroupedDotLegalizerRules[] = {
 
 static const loom_target_legalizer_provider_t kGroupedDotLegalizerProvider = {
     .name = IREE_SVL("vector-grouped-dot"),
+    .scope = LOOM_LOW_DESCRIPTOR_SCOPE_SHARED,
     .strategy = LOOM_TARGET_LEGALIZER_STRATEGY_TARGET,
     .rules = kGroupedDotLegalizerRules,
     .rule_count = IREE_ARRAYSIZE(kGroupedDotLegalizerRules),

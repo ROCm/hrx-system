@@ -38,12 +38,6 @@ bool loom_spirv_source_callable_requires_inline(const loom_module_t* module,
   return false;
 }
 
-static bool loom_spirv_call_boundary_applies(
-    const loom_low_descriptor_set_t* descriptor_set) {
-  return descriptor_set->target_stable_id ==
-         loom_spirv_logical_core_descriptor_set()->target_stable_id;
-}
-
 // All interpretation comes from the existing value-fact owner. In particular,
 // an unavailable exact matrix shape still denotes an opaque matrix payload.
 static loom_value_id_t loom_spirv_call_boundary_fragment(
@@ -117,8 +111,7 @@ bool loom_spirv_match_call_boundary(
     const loom_target_legalizer_entry_t* entry,
     const loom_target_legalization_context_t* context, const loom_op_t* op) {
   (void)entry;
-  if (context->mode != LOOM_TARGET_LEGALIZATION_MODE_FINAL ||
-      !loom_spirv_call_boundary_applies(context->descriptor_set)) {
+  if (context->mode != LOOM_TARGET_LEGALIZATION_MODE_FINAL) {
     return false;
   }
   loom_symbol_ref_t callee = loom_symbol_ref_null();
@@ -156,10 +149,6 @@ static iree_status_t loom_spirv_verify_call_boundary(
     bool* out_handled) {
   (void)provider;
   *out_handled = false;
-  if (!loom_spirv_call_boundary_applies(
-          loom_target_low_legality_descriptor_set(context))) {
-    return iree_ok_status();
-  }
   const loom_module_t* module = loom_target_low_legality_module(context);
   loom_symbol_ref_t callee = loom_symbol_ref_null();
   const loom_value_id_t value = loom_spirv_call_boundary_fragment(
@@ -179,6 +168,7 @@ static iree_status_t loom_spirv_verify_call_boundary(
 const loom_target_low_legality_provider_t
     loom_spirv_call_boundary_legality_provider = {
         .name = IREE_SVL("spirv-call-boundary"),
+        .scope = {.target_stable_id = SPIRV_LOGICAL_CORE_TARGET_ID},
         .builtin_dialect_bits = UINT64_C(1) << LOOM_DIALECT_FUNC,
         .try_verify_op = loom_spirv_verify_call_boundary,
 };

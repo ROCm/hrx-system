@@ -1942,10 +1942,6 @@ static iree_status_t loom_amdgpu_low_legality_try_verify_op(
     loom_target_low_legality_context_t* context, const loom_op_t* op,
     bool* out_handled) {
   *out_handled = false;
-  if (loom_target_low_legality_descriptor_set(context)->target_stable_id !=
-      LOOM_AMDGPU_TARGET_STABLE_ID) {
-    return iree_ok_status();
-  }
   const loom_amdgpu_lower_dispatch_row_t* row =
       loom_amdgpu_find_lower_dispatch_row(op->kind);
   if (row == NULL || row->verify == NULL) {
@@ -2085,6 +2081,7 @@ static const loom_low_lower_policy_t kAmdgpuLowLowerPolicy = {
 const loom_target_low_legality_provider_t
     loom_amdgpu_low_legality_provider_storage = {
         .name = IREE_SVL("amdgpu"),
+        .scope = {.target_stable_id = LOOM_AMDGPU_TARGET_STABLE_ID},
         .builtin_dialect_bits =
             (1u << LOOM_DIALECT_INDEX) | (1u << LOOM_DIALECT_BUFFER) |
             (1u << LOOM_DIALECT_SCALAR) | (1u << LOOM_DIALECT_SANITIZER) |

@@ -34,6 +34,7 @@ loom_cc_library(
     srcs = ["low_provider_verify.c"],
     hdrs = ["low_provider_verify.h"],
     deps = [
+        "//loom/src/loom/codegen/low:descriptor_scope",
         "//loom/src/loom/ir",
         "//loom/src/loom/target:low_legality",
         "//loom/src/loom/target:low_packet_diagnostics",

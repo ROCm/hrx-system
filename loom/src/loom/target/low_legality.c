@@ -718,7 +718,9 @@ static iree_status_t loom_target_low_legality_try_provider_op(
     const loom_target_low_legality_provider_t* provider =
         context->options->provider_list.values[i];
     if (!loom_target_low_legality_builtin_dialect_bits_contain(
-            provider->builtin_dialect_bits, dialect_id)) {
+            provider->builtin_dialect_bits, dialect_id) ||
+        !loom_low_descriptor_scope_matches(provider->scope,
+                                           context->descriptor_set)) {
       continue;
     }
     bool handled = false;

@@ -14,6 +14,7 @@
 #define LOOM_CODEGEN_LOW_VERIFY_H_
 
 #include "iree/base/api.h"
+#include "loom/codegen/low/descriptor_scope.h"
 #include "loom/codegen/low/representation_binding.h"
 #include "loom/codegen/low/target_binding.h"
 #include "loom/error/emitter.h"
@@ -49,7 +50,11 @@ typedef iree_status_t (*loom_low_verify_provider_end_module_fn_t)(
 struct loom_low_verify_provider_t {
   // Stable provider name available to callbacks.
   iree_string_view_t name;
-  // Initializes target-owned module-level verification state.
+  // Explicit target applicability enforced before function-local callbacks.
+  loom_low_descriptor_scope_t scope;
+  // Initializes target-owned module-level verification state. Module callbacks
+  // run once regardless of scope; function callbacks populate only matching
+  // functions, including in heterogeneous modules.
   loom_low_verify_provider_begin_module_fn_t begin_module;
   // Initializes target-owned function-local verification state.
   loom_low_verify_provider_begin_function_fn_t begin_function;

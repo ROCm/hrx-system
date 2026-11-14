@@ -21,11 +21,11 @@
 extern "C" {
 #endif
 
-// Verifies target-low legality provider list shape.
+// Verifies target-low legality provider shape, explicit scope, and dialects.
 iree_status_t loom_target_low_legality_provider_list_verify(
     loom_target_low_legality_provider_list_t list);
 
-// Verifies target-low packet diagnostic provider list shape.
+// Verifies target-low packet diagnostic provider shape and explicit scope.
 iree_status_t loom_target_low_packet_diagnostic_provider_list_verify(
     loom_target_low_packet_diagnostic_provider_list_t list);
 

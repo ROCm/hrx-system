@@ -1473,11 +1473,6 @@ static iree_status_t loom_spirv_low_begin_function(
   *out_provider_state = NULL;
   const loom_low_resolved_target_t* target =
       loom_low_verify_context_target(context);
-  if (target->descriptor_set == NULL ||
-      target->descriptor_set->stable_id !=
-          SPIRV_LOGICAL_CORE_DESCRIPTOR_SET_ID) {
-    return iree_ok_status();
-  }
 
   loom_spirv_low_verify_state_t* state = NULL;
   iree_arena_allocator_t* arena = loom_low_verify_context_arena(context);
@@ -1551,8 +1546,7 @@ static iree_status_t loom_spirv_low_verify_op(
   (void)provider;
   loom_spirv_low_verify_state_t* state =
       (loom_spirv_low_verify_state_t*)provider_state;
-  if (state == NULL || state->skip_body_checks ||
-      loom_low_verify_context_should_stop(context)) {
+  if (state->skip_body_checks || loom_low_verify_context_should_stop(context)) {
     return iree_ok_status();
   }
   const loom_op_t* op = packet->op;
@@ -1613,9 +1607,6 @@ static iree_status_t loom_spirv_low_end_function(
   (void)provider;
   loom_spirv_low_verify_state_t* state =
       (loom_spirv_low_verify_state_t*)provider_state;
-  if (state == NULL) {
-    return iree_ok_status();
-  }
   loom_spirv_low_value_type_table_reset(&state->value_types);
   if (state->logical_signature == NULL || state->skip_body_checks) {
     return iree_ok_status();
@@ -1628,6 +1619,7 @@ static iree_status_t loom_spirv_low_end_function(
 
 const loom_low_verify_provider_t loom_spirv_low_verify_provider = {
     .name = IREE_SVL("spirv"),
+    .scope = {.descriptor_set_stable_id = SPIRV_LOGICAL_CORE_DESCRIPTOR_SET_ID},
     .begin_module = loom_spirv_low_begin_module,
     .begin_function = loom_spirv_low_begin_function,
     .verify_op = loom_spirv_low_verify_op,

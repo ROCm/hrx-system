@@ -50,8 +50,8 @@ static void ExpectReferenceProvider(
   for (uint32_t i = 0; i < op_entry.entry_count; ++i) {
     const loom_target_legalizer_entry_t& entry =
         registry->entries[op_entry.entry_start + i];
-    EXPECT_TRUE(iree_string_view_equal(entry.provider_name, expected_name));
-    EXPECT_EQ(entry.provider_strategy,
+    EXPECT_TRUE(iree_string_view_equal(entry.provider->name, expected_name));
+    EXPECT_EQ(entry.provider->strategy,
               LOOM_TARGET_LEGALIZER_STRATEGY_REFERENCE);
   }
 }
@@ -69,12 +69,12 @@ static const loom_target_legalizer_entry_t* ExpectReferenceProviders(
   const loom_target_legalizer_entry_t* entries =
       &registry->entries[op_entry.entry_start];
   EXPECT_TRUE(
-      iree_string_view_equal(entries[0].provider_name, first_expected_name));
+      iree_string_view_equal(entries[0].provider->name, first_expected_name));
   EXPECT_TRUE(
-      iree_string_view_equal(entries[1].provider_name, second_expected_name));
-  EXPECT_EQ(entries[0].provider_strategy,
+      iree_string_view_equal(entries[1].provider->name, second_expected_name));
+  EXPECT_EQ(entries[0].provider->strategy,
             LOOM_TARGET_LEGALIZER_STRATEGY_REFERENCE);
-  EXPECT_EQ(entries[1].provider_strategy,
+  EXPECT_EQ(entries[1].provider->strategy,
             LOOM_TARGET_LEGALIZER_STRATEGY_REFERENCE);
   return entries;
 }
@@ -91,6 +91,7 @@ TEST(LowLegalizerRegistryTest, TargetProvidersPrecedeGenericProviders) {
   };
   const loom_target_legalizer_provider_t target_provider = {
       .name = IREE_SVL("target"),
+      .scope = LOOM_LOW_DESCRIPTOR_SCOPE_SHARED,
       .strategy = LOOM_TARGET_LEGALIZER_STRATEGY_TARGET,
       .rules = target_rules,
       .rule_count = IREE_ARRAYSIZE(target_rules),
@@ -112,16 +113,16 @@ TEST(LowLegalizerRegistryTest, TargetProvidersPrecedeGenericProviders) {
   ASSERT_EQ(extf_entry.entry_count, 2u);
   const loom_target_legalizer_entry_t* extf_entries =
       &registry->entries[extf_entry.entry_start];
-  EXPECT_TRUE(
-      iree_string_view_equal(extf_entries[0].provider_name, IREE_SV("target")));
-  EXPECT_EQ(extf_entries[0].provider_strategy,
+  EXPECT_TRUE(iree_string_view_equal(extf_entries[0].provider->name,
+                                     IREE_SV("target")));
+  EXPECT_EQ(extf_entries[0].provider->strategy,
             LOOM_TARGET_LEGALIZER_STRATEGY_TARGET);
   EXPECT_EQ(extf_entries[0].flags,
             LOOM_TARGET_LEGALIZER_ENTRY_FLAG_REWRITE_LEGAL);
   EXPECT_EQ(extf_entries[0].legalize, &TargetLegalize);
-  EXPECT_TRUE(
-      iree_string_view_equal(extf_entries[1].provider_name, IREE_SV("scalar")));
-  EXPECT_EQ(extf_entries[1].provider_strategy,
+  EXPECT_TRUE(iree_string_view_equal(extf_entries[1].provider->name,
+                                     IREE_SV("scalar")));
+  EXPECT_EQ(extf_entries[1].provider->strategy,
             LOOM_TARGET_LEGALIZER_STRATEGY_REFERENCE);
   EXPECT_EQ(extf_entries[1].first_operand_element_types,
             LOOM_SCALAR_TYPE_SET_FLOAT_LE16);

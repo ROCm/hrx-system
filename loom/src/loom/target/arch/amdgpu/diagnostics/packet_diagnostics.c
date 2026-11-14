@@ -41,12 +41,6 @@ static iree_status_t loom_amdgpu_low_packet_diagnostic_try_packet(
   }
   const loom_low_schedule_table_t* schedule =
       loom_target_low_packet_diagnostics_schedule(context);
-  // Descriptor ordinals are local to a target family, while the diagnostic
-  // provider list includes every configured target.
-  if (schedule->target.descriptor_set->target_stable_id !=
-      LOOM_AMDGPU_TARGET_STABLE_ID) {
-    return iree_ok_status();
-  }
   if (!loom_amdgpu_packet_diagnostics_is_crosslane(
           schedule->target.descriptor_set, packet->descriptor)) {
     return iree_ok_status();
@@ -59,5 +53,6 @@ static iree_status_t loom_amdgpu_low_packet_diagnostic_try_packet(
 const loom_target_low_packet_diagnostic_provider_t
     loom_amdgpu_low_packet_diagnostic_provider_storage = {
         .name = IREE_SVL("amdgpu.packet_diagnostics"),
+        .scope = {.target_stable_id = LOOM_AMDGPU_TARGET_STABLE_ID},
         .try_diagnose_packet = loom_amdgpu_low_packet_diagnostic_try_packet,
 };

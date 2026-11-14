@@ -1040,6 +1040,7 @@ static const loom_target_legalizer_rule_t kMathLegalizerRules[] = {
 
 static const loom_target_legalizer_provider_t kMathLegalizerProvider = {
     .name = IREE_SVL("math"),
+    .scope = LOOM_LOW_DESCRIPTOR_SCOPE_SHARED,
     .strategy = LOOM_TARGET_LEGALIZER_STRATEGY_REFERENCE,
     .rules = kMathLegalizerRules,
     .rule_count = IREE_ARRAYSIZE(kMathLegalizerRules),
