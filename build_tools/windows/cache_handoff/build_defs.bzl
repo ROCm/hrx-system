@@ -5,20 +5,30 @@
 
 _MANIFEST_ENVIRONMENT_VARIABLE = "IREE_WINDOWS_CACHE_HANDOFF_MANIFEST"
 
+def _runfile_path(ctx, file):
+    if file.short_path.startswith("../"):
+        return file.short_path[3:]
+    return ctx.workspace_name + "/" + file.short_path
+
 def _windows_cache_handoff_test_impl(ctx):
     runner = ctx.attr._runner[DefaultInfo]
     runner_executable = runner.files_to_run.executable
     if runner_executable == None:
         fail("cache handoff runner has no executable")
-    extension = runner_executable.extension
-    output_name = ctx.label.name + (("." + extension) if extension else "")
-    executable = ctx.actions.declare_file(output_name)
-    ctx.actions.symlink(
-        is_executable = True,
+    executable = ctx.actions.declare_file(ctx.label.name + ".bat")
+    runner_path = _runfile_path(ctx, runner_executable).replace("/", "\\")
+    ctx.actions.write(
         output = executable,
-        target_file = runner_executable,
+        content = (
+            "@echo off\r\n" +
+            '"%%TEST_SRCDIR%%\\%s" run\r\n' % runner_path +
+            "exit /b %ERRORLEVEL%\r\n"
+        ),
+        is_executable = True,
     )
-    runfiles = ctx.runfiles(files = [ctx.file.manifest]).merge(runner.default_runfiles)
+    runfiles = ctx.runfiles(
+        files = [ctx.file.manifest, runner_executable],
+    ).merge(runner.default_runfiles)
     return [
         DefaultInfo(
             executable = executable,
