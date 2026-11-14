@@ -1054,7 +1054,17 @@ iree_status_t loom_aie2p_configuration_plan_materialize(
     if (program->contribution.realization.code.byte_length >
         facts->memory.program_capacity) {
       const loom_pipeline_entry_binding_t* entry = load->source->pipeline_entry;
-      if (!entry) {
+      if (entry) {
+        IREE_RETURN_IF_ERROR(iree_arena_allocate(request->scratch_arena,
+                                                 sizeof(*program_layout),
+                                                 (void**)&program_layout));
+        IREE_RETURN_IF_ERROR(loom_aie2p_program_replacement_prepare(
+            plan->program_sources, load->source, program,
+            request->scratch_arena, program_layout));
+      }
+      // A single lifetime cannot reuse instruction storage. Reject its exact
+      // native size before reserving transport or compiling loading support.
+      if (!program_layout || program_layout->group_count == 1) {
         bool admitted = false;
         IREE_RETURN_IF_ERROR(loom_aie2p_program_capacity_admit(
             request->module, load->source->function_op,
@@ -1078,12 +1088,6 @@ iree_status_t loom_aie2p_configuration_plan_materialize(
         memset(catalogs, 0, plan->entry->tile_count * sizeof(*catalogs));
       }
       IREE_ASSERT(entry->scope == replacement_scope);
-      IREE_RETURN_IF_ERROR(iree_arena_allocate(request->scratch_arena,
-                                               sizeof(*program_layout),
-                                               (void**)&program_layout));
-      IREE_RETURN_IF_ERROR(loom_aie2p_program_replacement_prepare(
-          plan->program_sources, load->source, program, request->scratch_arena,
-          program_layout));
       iree_string_view_t requirement;
       loom_aie2p_code_transport_bind(&transport, load->coordinate,
                                      program_layout->group_count - 1, &binding,

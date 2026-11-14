@@ -4,7 +4,6 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//build_tools/bazel:executable.bzl", "iree_executable_test")
 load("//libamdf/requirements:defs.bzl", "LIBAMDF")
 load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library", "loom_cc_test", "loom_config_compatible_with", "loom_generated_source")
 load("//loom/build_tools/bazel:defs.bzl", "loom_test")
@@ -41,17 +40,6 @@ loom_test(
     srcs = ["program_replacement.loom"],
     benchmark_smoke = False,
     execution_profiles = [XDNA_HARDWARE_PROFILE],
-)
-
-iree_executable_test(
-    name = "program_replacement_compile_test",
-    src = "//loom/src/loom/tools/loom-check",
-    args = [
-        "--target=amd.xdna.aie2p:amd.xdna.strix_halo.17f0_11",
-        "$(rootpath program_replacement.loom)",
-    ],
-    data = ["program_replacement.loom"],
-    target_compatible_with = _XDNA_IMAGE_COMPATIBLE_WITH,
 )
 
 loom_check_test_suite(
