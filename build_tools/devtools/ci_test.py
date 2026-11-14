@@ -1796,6 +1796,21 @@ class CiTest(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertIn(command, ci.BAZEL_COMMANDS)
 
+    def test_windows_msvc_tests_consume_linux_built_closure(self):
+        workflow_path = ".github/workflows/ci_iree.yml"
+        linux_matrix = self.workflow_job_block(workflow_path, "bazel_linux")
+        producer = self.workflow_job_block(workflow_path, "bazel_windows_msvc_build")
+        consumer = self.workflow_job_block(workflow_path, "bazel_windows_msvc_test")
+
+        self.assertNotIn("windows_msvc", linux_matrix)
+        self.assertIn("iree-bazel-repository-build", producer)
+        self.assertIn("windows_cache_handoff.py emit", producer)
+        self.assertIn("windows-msvc-test-handoff-", producer)
+        self.assertIn("needs: bazel_windows_msvc_build", consumer)
+        self.assertIn("windows-msvc-test-handoff-", consumer)
+        self.assertIn("--strategy=TestRunner=local", consumer)
+        self.assertIn("Upload failed native test results", consumer)
+
     def test_amdgpu_container_jobs_initialize_git_home(self):
         for path, job_name in (
             (".github/workflows/ci_iree.yml", "bazel_linux"),

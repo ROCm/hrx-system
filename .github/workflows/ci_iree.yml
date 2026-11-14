@@ -8,12 +8,6 @@ name: Loom
 
 on:
   workflow_dispatch:
-    inputs:
-      windows_cache_handoff:
-        description: Run the bounded Linux-build/Windows-test CAS handoff
-        required: false
-        type: boolean
-        default: false
   pull_request:
     paths:
       - ".bazelrc"
@@ -73,7 +67,6 @@ permissions:
 
 jobs:
   bazel_linux:
-    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.windows_cache_handoff }}
     name: Bazel / ${{ matrix.platform || 'Linux x86-64' }} / ${{ matrix.name }}
     strategy:
       fail-fast: false
@@ -135,13 +128,6 @@ jobs:
             host_ar: ar
             host_cc: gcc
             host_cxx: g++
-          - name: MSVC / Fastbuild / Repository Build
-            kind: windows_msvc
-            command: iree-bazel-repository-build
-            platform: Windows x86-64 (via Linux)
-            runner: az-linux-scale-rocm-default-prod
-            artifact_set: core
-            host_toolchain: artifact
           - name: GCC / Fastbuild / AMD gfx120x Vulkan
             kind: vulkan
             command: iree-bazel-vulkan
@@ -226,7 +212,7 @@ jobs:
       run:
         shell: bash
     container:
-      image: ${{ matrix.command == 'iree-bazel-repository-build' && matrix.kind != 'windows_msvc' && 'ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:702a5133851e6d1daf1207d2c9fbb01c2667914a5b6dc5a01faeb3ce66ea6421' || 'ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98' }}
+      image: ${{ matrix.command == 'iree-bazel-repository-build' && 'ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:702a5133851e6d1daf1207d2c9fbb01c2667914a5b6dc5a01faeb3ce66ea6421' || 'ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98' }}
       options: ${{ matrix.container_options || '' }}
     env:
       IREE_CI_PLATFORM_COVERAGE: ${{ matrix.platform_coverage && '1' || '0' }}
@@ -262,17 +248,6 @@ jobs:
               echo "HRX_PYTHON=${output_dir}/python/bin/python3"
               echo "HRX_RELEASE_TYPE=nightly"
               echo "HRX_ROCM_ROOT=${output_dir}/rocm-root"
-            } >> "$GITHUB_ENV"
-          fi
-          if [[ "${{ matrix.kind }}" == windows_msvc ]]; then
-            {
-              echo "LLVM_ROOT=${output_dir}/rocm-root/lib/llvm"
-              echo "WINDOWS_CROSS_ROOT=${output_dir}/windows-toolchain"
-              echo "WINDOWS_COMPILER_RT_ROOT=${output_dir}/windows-toolchain/compiler-rt"
-              echo "WINSDK_ROOT=${output_dir}/windows-toolchain/sdk"
-              echo "MSVC_WINE_ROOT=${output_dir}/msvc-wine"
-              echo "WINEARCH=win64"
-              echo "WINEPREFIX=${RUNNER_TEMP}/msvc-wine-prefix"
             } >> "$GITHUB_ENV"
           fi
           case "${{ matrix.kind }}/${{ matrix.host_toolchain }}" in
@@ -336,7 +311,7 @@ jobs:
           dpkg-query -W gcc g++ libvulkan1 mesa-vulkan-drivers vulkan-tools
 
       - name: Set up Python
-        if: matrix.command != 'iree-bazel-repository-build' || matrix.kind == 'windows_msvc'
+        if: matrix.command != 'iree-bazel-repository-build'
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"
@@ -357,30 +332,6 @@ jobs:
         if: env.IREE_CI_ARTIFACT_SET != ''
         run: bash .github/scripts/fetch_rocm_toolchain.sh
 
-      - name: Install Wine host tools
-        if: matrix.kind == 'windows_msvc'
-        run: |
-          apt_options=(-o Acquire::ForceIPv4=true -o Acquire::Retries=3)
-          sudo apt-get "${apt_options[@]}" update
-          sudo apt-get "${apt_options[@]}" install --yes --no-install-recommends \
-            p7zip-full wine64
-
-      - name: Restore Windows SDK inputs
-        if: matrix.kind == 'windows_msvc'
-        id: windows_toolchain
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ${{ env.WINDOWS_CROSS_ROOT }}
-          key: windows-cross-${{ hashFiles('.github/scripts/setup_windows_cross.sh', '.github/scripts/windows-sdk-channel.json', 'build_tools/ci/windows_stl_asan.py') }}
-
-      - name: Prepare Windows SDK inputs
-        if: matrix.kind == 'windows_msvc' && steps.windows_toolchain.outputs.cache-hit != 'true'
-        run: bash .github/scripts/setup_windows_cross.sh
-
-      - name: Prepare genuine MSVC tools
-        if: matrix.kind == 'windows_msvc'
-        run: bash .github/scripts/setup_windows_msvc.sh
-
       - name: Check Vulkan hardware environment
         if: matrix.kind == 'vulkan'
         timeout-minutes: 1
@@ -390,14 +341,6 @@ jobs:
         run: |
           python3 --version
           python3 dev.py bazel setup --venv
-          if [[ "${{ matrix.kind }}" == windows_msvc ]]; then
-            {
-              # Keep Wine-visible generated paths below MSVC's path limits.
-              echo "startup --output_base=${RUNNER_TEMP}/b"
-              echo 'build --config=windows-x86_64'
-              echo 'build --config=windows-msvc'
-            } >> .bazelrc.local
-          fi
           echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
 
       - name: Check Bazel sandbox environment
@@ -410,7 +353,7 @@ jobs:
           "$sandbox" -W "$execution_root" -- /bin/true
 
       - name: Check tool versions
-        if: matrix.kind == 'cpu' || matrix.kind == 'vulkan' || matrix.kind == 'amdgpu' || matrix.kind == 'windows_msvc'
+        if: matrix.kind == 'cpu' || matrix.kind == 'vulkan' || matrix.kind == 'amdgpu'
         run: |
           bazel --version
           if [[ "${{ matrix.kind }}" == vulkan ]]; then
@@ -428,20 +371,6 @@ jobs:
               test -d "${HRX_ROCM_ROOT}/include"
             fi
           fi
-          if [[ "${{ matrix.kind }}" == windows_msvc ]]; then
-            compiler_dir="$(find "$MSVC_WINE_ROOT/VC/Tools/MSVC" -mindepth 1 -maxdepth 1 -type d -print -quit)/bin/Hostx64/x64"
-            wine_executable=/usr/lib/wine/wine64
-            test -x "$wine_executable"
-            version_source="$RUNNER_TEMP/msvc-version.c"
-            version_object="$RUNNER_TEMP/msvc-version.obj"
-            printf 'int msvc_version_probe(void) { return 0; }\n' > "$version_source"
-            version_source_windows="z:${version_source//\//\\}"
-            version_object_windows="z:${version_object//\//\\}"
-            WINEDEBUG=-all WINEPATH="${compiler_dir//\//\\}" \
-              "$wine_executable" "$compiler_dir/cl.exe" /nologo /Bv /c \
-              "$version_source_windows" "/Fo$version_object_windows"
-            test -s "$version_object"
-          fi
 
       - name: Report ROCm environment
         if: matrix.kind == 'amdgpu'
@@ -452,7 +381,7 @@ jobs:
           --amdgpu-target "${{ matrix.target_selector }}"
 
       - name: Run IREE Bazel CI
-        if: matrix.kind == 'cpu' || matrix.kind == 'vulkan' || matrix.kind == 'amdgpu' || matrix.kind == 'windows_msvc'
+        if: matrix.kind == 'cpu' || matrix.kind == 'vulkan' || matrix.kind == 'amdgpu'
         id: iree_bazel_ci
         shell: bash
         env:
@@ -489,7 +418,7 @@ jobs:
             result_args=(--bazel-test-results-dir "${RUNNER_TEMP}/repository-test-results-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}")
           fi
           failure_args=()
-          if [[ "$IREE_CI_KIND" == cpu || "$IREE_CI_KIND" == windows_msvc ]]; then
+          if [[ "$IREE_CI_KIND" == cpu ]]; then
             failure_args=(--keep-going)
           fi
           python3 build_tools/devtools/ci.py "$IREE_CI_COMMAND" \
@@ -569,7 +498,6 @@ jobs:
           retention-days: 7
 
   sdk:
-    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.windows_cache_handoff }}
     name: SDK
     uses: $/.github/workflows/build_loom_sdk.yml
     with:
@@ -596,7 +524,6 @@ jobs:
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
 
   bazel_windows:
-    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.windows_cache_handoff }}
     name: Bazel / Windows x86-64 / ${{ matrix.name }}
     strategy:
       fail-fast: false
@@ -991,9 +918,8 @@ jobs:
           include-hidden-files: true
           retention-days: 7
 
-  windows_cache_handoff_producer:
-    name: Bazel / Windows x86-64 (via Linux) / MSVC CAS Test Producer
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.windows_cache_handoff }}
+  bazel_windows_msvc_build:
+    name: Bazel / Windows x86-64 (via Linux) / MSVC / Fastbuild / Repository Build
     runs-on:
       group: therock-ci-az-prod-2
       labels: az-linux-scale-rocm-default-prod
@@ -1077,13 +1003,24 @@ jobs:
           } >> .bazelrc.local
           echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
 
-      - name: Build repository and publish native test closure
+      - name: Build repository
         run: |
           set -euo pipefail
 
           package_dir="$RUNNER_TEMP/windows-cache-handoff-package"
           evidence_dir="$package_dir/evidence"
           mkdir -p "$evidence_dir"
+          python3 build_tools/devtools/ci.py \
+            iree-bazel-repository-build \
+            --keep-going \
+            --bazel-profile-dir="$evidence_dir/profiles"
+
+      - name: Publish native test closure
+        run: |
+          set -euo pipefail
+
+          package_dir="$RUNNER_TEMP/windows-cache-handoff-package"
+          evidence_dir="$package_dir/evidence"
           selection_query="$evidence_dir/test-selection.query"
           cat > "$selection_query" <<'EOF'
           let repository_targets = //... in
@@ -1093,10 +1030,6 @@ jobs:
               except attr(tags, '(^|, |\[)manual(,|\]|$)', $native_tests))
             except attr(tags, 'iree-run-requirement=', $native_tests)
           EOF
-          python3 build_tools/devtools/ci.py \
-            iree-bazel-repository-build \
-            --keep-going \
-            --bazel-profile-dir="$evidence_dir/profiles"
           cp .bazelrc.configured "$evidence_dir/configured.bazelrc"
           bazel --version > "$evidence_dir/bazel-version.txt"
           curl --fail --silent --show-error \
@@ -1139,16 +1072,15 @@ jobs:
       - name: Upload test manifest
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: windows-cache-handoff-${{ github.run_id }}-${{ github.run_attempt }}
+          name: windows-msvc-test-handoff-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/windows-cache-handoff-package/
           if-no-files-found: error
           compression-level: 6
           retention-days: 7
 
-  windows_cache_handoff_consumer:
-    name: Bazel / Windows x86-64 / Native CAS Test
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.windows_cache_handoff }}
-    needs: windows_cache_handoff_producer
+  bazel_windows_msvc_test:
+    name: Bazel / Windows x86-64 / MSVC / Fastbuild / Native Tests
+    needs: bazel_windows_msvc_build
     runs-on:
       group: therock-ci-az-prod-2
       labels: az-windows-scale-rocm-default-prod
@@ -1207,7 +1139,7 @@ jobs:
       - name: Download test manifest
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: windows-cache-handoff-${{ github.run_id }}-${{ github.run_attempt }}
+          name: windows-msvc-test-handoff-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ github.workspace }}/.iree/windows-cache-handoff
 
       - name: Install Bazel host tools
@@ -1218,6 +1150,7 @@ jobs:
           "$PWD\.venv\Scripts" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Materialize CAS closure and run native test
+        id: native_tests
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
@@ -1257,11 +1190,23 @@ jobs:
             Pop-Location
           }
 
+      - name: Upload failed native test results
+        if: ${{ always() && steps.native_tests.outcome == 'failure' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-msvc-native-test-results-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ env.IREE_CACHE_HANDOFF_OUTPUT_BASE }}/execroot/_main/bazel-out/*/testlogs/**/test.log
+            ${{ env.IREE_CACHE_HANDOFF_OUTPUT_BASE }}/execroot/_main/bazel-out/*/testlogs/**/test.xml
+            ${{ env.IREE_CACHE_HANDOFF_OUTPUT_BASE }}/execroot/_main/bazel-out/*/testlogs/**/test.outputs/**
+          if-no-files-found: warn
+          retention-days: 7
+
       - name: Upload consumer evidence
         if: ${{ always() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: windows-cache-handoff-consumer-${{ github.run_id }}-${{ github.run_attempt }}
+          name: windows-msvc-native-test-evidence-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ env.IREE_CACHE_HANDOFF_EVIDENCE }}
           if-no-files-found: warn
           compression-level: 0
@@ -1269,7 +1214,7 @@ jobs:
 
   cmake_linux:
     name: CMake / Linux x86-64 / Clang / RelWithDebInfo
-    if: ${{ github.event_name != 'push' && (github.event_name != 'workflow_dispatch' || !inputs.windows_cache_handoff) }}
+    if: github.event_name != 'push'
     concurrency:
       group: iree-cmake-linux-repository-build-${{ (github.event_name == 'push' && github.ref) || github.run_id }}
       cancel-in-progress: true
@@ -1344,7 +1289,7 @@ jobs:
 
   cmake_windows_cross:
     name: CMake / Windows x86-64 (via Linux) / Clang CL / RelWithDebInfo
-    if: ${{ github.event_name != 'push' && (github.event_name != 'workflow_dispatch' || !inputs.windows_cache_handoff) }}
+    if: github.event_name != 'push'
     concurrency:
       group: iree-cmake-windows-cross-${{ (github.event_name == 'push' && github.ref) || github.run_id }}
       cancel-in-progress: true
