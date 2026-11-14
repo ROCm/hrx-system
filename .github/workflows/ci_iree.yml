@@ -1086,7 +1086,8 @@ jobs:
           mkdir -p "$evidence_dir"
           selection_query="$evidence_dir/test-selection.query"
           cat > "$selection_query" <<'EOF'
-          let all_tests = tests(//...) in
+          let repository_targets = //... in
+          let all_tests = tests($repository_targets) intersect $repository_targets in
             (($all_tests except attr(tags, '(^|, |\[)manual(,|\]|$)', $all_tests))
               except kind('py_.* rule', $all_tests))
             except attr(tags, 'iree-run-requirement=', $all_tests)
