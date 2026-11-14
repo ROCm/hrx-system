@@ -282,9 +282,10 @@ kernel.def retain target(@device) @__command_launch_counts_4() {
 
 // ====
 
-// Independent target symbols with identical semantics share count production.
-// A different subgroup requirement remains a separate execution context.
-// RUN: emit command-program @target_contexts
+// Count production shares one sample across independent symbols and subgroup
+// modes. Each configuration's subgroup query folds before fusion; the repeated
+// wave32 consumer reuses its tuple after the wave64 consumer.
+// RUN: emit command-program @target_contexts kernels
 
 test.target<device> @first {subgroup_size = 32}
 
@@ -293,62 +294,222 @@ test.target<device> @equivalent {subgroup_size = 32}
 test.target<device> @wide {subgroup_size = 64}
 
 kernel.def target(@first) @first_kernel(%count: index) {
+  %width = target.subgroup.size : index
+  %groups = index.mul %count, %width : index
   %c1 = index.constant 1 : index
-  kernel.launch.config workgroups(%count, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+  kernel.launch.config workgroups(%groups, %c1, %c1) workgroup_size(%width, %c1, %c1) : index
 } launch() {
   kernel.return
 }
 
 kernel.def target(@equivalent) @equivalent_kernel(%count: index) {
+  %width = target.subgroup.size : index
+  %groups = index.mul %count, %width : index
   %c1 = index.constant 1 : index
-  kernel.launch.config workgroups(%count, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+  kernel.launch.config workgroups(%groups, %c1, %c1) workgroup_size(%width, %c1, %c1) : index
 } launch() {
   kernel.return
 }
 
 kernel.def target(@wide) @wide_kernel(%count: index) {
+  %width = target.subgroup.size : index
+  %groups = index.mul %count, %width : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %c1, %c1) workgroup_size(%width, %c1, %c1) : index
+} launch() {
+  kernel.return
+}
+
+command.def public @target_contexts() launch(%source: view<1xi16>) {
+  %word = view.load %source[0] : view<1xi16> -> i16
+  %wide = scalar.extui %word : i16 to i64
+  %count = index.cast %wide : i64 to index
+  kernel.launch @first_kernel[%count]() : [index]()
+  kernel.launch @equivalent_kernel[%count]() : [index]()
+  kernel.launch @wide_kernel[%count]() : [index]()
+  kernel.launch @first_kernel[%count]() : [index]()
+  command.return
+}
+
+// ----
+low.func.def public retain target<cmd.core> abi(command_program) abi_layout({entry_count = 4, executable_count = 4, fixed_buffer_count = 0, rebindable_binding_count = 2}) @target_contexts() asm {
+  %77 = resource<command_input> {index = 0, source_type = buffer} : reg<cmd.binding>
+  %78 = resource<command_input> {index = 1, source_type = buffer} : reg<cmd.binding>
+  %79 = resource<command_input> {index = 0, source_type = index} : reg<cmd.executable>
+  %80 = resource<command_input> {index = 1, source_type = index} : reg<cmd.executable>
+  %81 = resource<command_input> {index = 2, source_type = index} : reg<cmd.executable>
+  %82 = resource<command_input> {index = 3, source_type = index} : reg<cmd.executable>
+  %83 = resource<command_input> {index = 0, source_type = index} : reg<cmd.entry>
+  %84 = resource<command_input> {index = 1, source_type = index} : reg<cmd.entry>
+  %85 = resource<command_input> {index = 2, source_type = index} : reg<cmd.entry>
+  %86 = resource<command_input> {index = 3, source_type = index} : reg<cmd.entry>
+  %87 = cmd.constant.u64 0
+  %88 = cmd.constant.u64 -1
+  %89 = cmd.constant.u64 24
+  %90 = cmd.constant.u64 12
+  %91 = cmd.constant.u32 1
+  cmd.dispatch.direct<%79, %83>[%91, %91, %91](%77, %87, %88, %78, %87, %89)
+  %92 = cmd.buffer.ref.binding %78, %87, %90
+  cmd.dispatch.indirect.dynamic.barrier<%80, %84>[%92]()
+  %93 = cmd.buffer.ref.binding %78, %87, %90
+  cmd.dispatch.indirect.dynamic.barrier<%81, %85>[%93]()
+  %94 = cmd.buffer.ref.binding %78, %90, %90
+  cmd.dispatch.indirect.dynamic.barrier<%82, %86>[%94]()
+  %95 = cmd.buffer.ref.binding %78, %87, %90
+  cmd.dispatch.indirect.dynamic.barrier<%80, %84>[%95]()
+  return
+}
+test.target<device> @first {subgroup_size = 32}
+
+kernel.def retain target(@first) @first_kernel(%count: index) {
+  %width = target.subgroup.size : index
+  %groups = index.mul %count, %width : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %c1, %c1) workgroup_size(%width, %c1, %c1) : index
+} launch() {
+  kernel.return
+}
+test.target<device> @equivalent {subgroup_size = 32}
+
+kernel.def retain target(@equivalent) @equivalent_kernel(%count: index) {
+  %width = target.subgroup.size : index
+  %groups = index.mul %count, %width : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %c1, %c1) workgroup_size(%width, %c1, %c1) : index
+} launch() {
+  kernel.return
+}
+test.target<device> @wide {subgroup_size = 64}
+
+kernel.def retain target(@wide) @wide_kernel(%count: index) {
+  %width = target.subgroup.size : index
+  %groups = index.mul %count, %width : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %c1, %c1) workgroup_size(%width, %c1, %c1) : index
+} launch() {
+  kernel.return
+}
+test.target<device> @first {subgroup_size = 32}
+
+kernel.def retain target(@first) @__command_launch_counts_0() {
+  %2 = index.constant 1 : index
+  kernel.launch.config workgroups(%2, %2, %2) workgroup_size(%2, %2, %2) : index
+} launch(%source: view<1xi16>, %1: view<6xi32>) {
+  %3 = index.constant 5 : index
+  %c1 = index.constant 1 : index
+  %5 = index.constant 6 : index
+  %word = view.load %source[0] : view<1xi16> -> i16
+  %wide = scalar.extui %word : i16 to i64
+  %count = index.cast %wide : i64 to index
+  %groups$9 = index.shli %count, %3 : index
+  %groups$10 = index.shli %count, %5 : index
+  %11 = index.cast %groups$9 : index to i32
+  view.store %11, %1[0] : i32, view<6xi32>
+  %12 = index.cast %c1 : index to i32
+  view.store %12, %1[1] : i32, view<6xi32>
+  %13 = index.cast %c1 : index to i32
+  view.store %13, %1[2] : i32, view<6xi32>
+  %14 = index.cast %groups$10 : index to i32
+  view.store %14, %1[3] : i32, view<6xi32>
+  %15 = index.cast %c1 : index to i32
+  view.store %15, %1[4] : i32, view<6xi32>
+  %16 = index.cast %c1 : index to i32
+  view.store %16, %1[5] : i32, view<6xi32>
+  kernel.return
+}
+
+// ====
+
+// A shared observation does not make different representations interchangeable.
+// The adjacent contexts change index width, global address space, and hardware
+// identity independently. Each boundary retains a separate count producer.
+// RUN: emit command-program @representation_boundaries
+
+test.target<low_core> @wide_indices
+
+test.target<low_core> @narrow_indices {index_bitwidth = 32}
+
+test.target<low_core> @separate_space {index_bitwidth = 32, memory_space_global = 7}
+
+test.target<linear_subgroups> @other_identity {index_bitwidth = 32, memory_space_global = 7}
+
+kernel.def target(@wide_indices) @wide_counts(%count: index) {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%count, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch() {
   kernel.return
 }
 
-command.def public @target_contexts() launch(%source: view<1xi32>) {
+kernel.def target(@narrow_indices) @narrow_counts(%count: index) {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%count, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch() {
+  kernel.return
+}
+
+kernel.def target(@separate_space) @mapped_counts(%count: index) {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%count, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch() {
+  kernel.return
+}
+
+kernel.def target(@other_identity) @other_counts(%count: index) {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%count, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch() {
+  kernel.return
+}
+
+command.def public @representation_boundaries() launch(%source: view<1xi32>) {
   %word = view.load %source[0] : view<1xi32> -> i32
   %wide = scalar.extui %word : i32 to i64
   %count = index.cast %wide : i64 to index
-  kernel.launch @first_kernel[%count]() : [index]()
-  kernel.launch @equivalent_kernel[%count]() : [index]()
-  kernel.launch @wide_kernel[%count]() : [index]()
+  kernel.launch @wide_counts[%count]() : [index]()
+  kernel.launch @narrow_counts[%count]() : [index]()
+  kernel.launch @mapped_counts[%count]() : [index]()
+  kernel.launch @other_counts[%count]() : [index]()
   command.return
 }
 
 // ----
-low.func.def public retain target<cmd.core> abi(command_program) abi_layout({entry_count = 5, executable_count = 5, fixed_buffer_count = 0, rebindable_binding_count = 2}) @target_contexts() asm {
-  %65 = resource<command_input> {index = 0, source_type = buffer} : reg<cmd.binding>
-  %66 = resource<command_input> {index = 1, source_type = buffer} : reg<cmd.binding>
-  %67 = resource<command_input> {index = 0, source_type = index} : reg<cmd.executable>
-  %68 = resource<command_input> {index = 1, source_type = index} : reg<cmd.executable>
-  %69 = resource<command_input> {index = 2, source_type = index} : reg<cmd.executable>
-  %70 = resource<command_input> {index = 3, source_type = index} : reg<cmd.executable>
-  %71 = resource<command_input> {index = 4, source_type = index} : reg<cmd.executable>
-  %72 = resource<command_input> {index = 0, source_type = index} : reg<cmd.entry>
-  %73 = resource<command_input> {index = 1, source_type = index} : reg<cmd.entry>
-  %74 = resource<command_input> {index = 2, source_type = index} : reg<cmd.entry>
-  %75 = resource<command_input> {index = 3, source_type = index} : reg<cmd.entry>
-  %76 = resource<command_input> {index = 4, source_type = index} : reg<cmd.entry>
-  %77 = cmd.constant.u64 0
-  %78 = cmd.constant.u64 -1
-  %79 = cmd.constant.u64 12
-  %80 = cmd.constant.u32 1
-  cmd.dispatch.direct<%67, %72>[%80, %80, %80](%65, %77, %78, %66, %77, %79)
-  cmd.dispatch.direct.barrier<%68, %73>[%80, %80, %80](%65, %77, %78, %66, %79, %79)
-  %81 = cmd.buffer.ref.binding %66, %79, %79
-  cmd.dispatch.indirect.dynamic.barrier<%69, %74>[%81]()
-  %82 = cmd.buffer.ref.binding %66, %79, %79
-  cmd.dispatch.indirect.dynamic.barrier<%70, %75>[%82]()
-  %83 = cmd.buffer.ref.binding %66, %77, %79
-  cmd.dispatch.indirect.dynamic.barrier<%71, %76>[%83]()
+low.func.def public retain target<cmd.core> abi(command_program) abi_layout({entry_count = 8, executable_count = 8, fixed_buffer_count = 0, rebindable_binding_count = 2}) @representation_boundaries() asm {
+  %108 = resource<command_input> {index = 0, source_type = buffer} : reg<cmd.binding>
+  %109 = resource<command_input> {index = 1, source_type = buffer} : reg<cmd.binding>
+  %110 = resource<command_input> {index = 0, source_type = index} : reg<cmd.executable>
+  %111 = resource<command_input> {index = 1, source_type = index} : reg<cmd.executable>
+  %112 = resource<command_input> {index = 2, source_type = index} : reg<cmd.executable>
+  %113 = resource<command_input> {index = 3, source_type = index} : reg<cmd.executable>
+  %114 = resource<command_input> {index = 4, source_type = index} : reg<cmd.executable>
+  %115 = resource<command_input> {index = 5, source_type = index} : reg<cmd.executable>
+  %116 = resource<command_input> {index = 6, source_type = index} : reg<cmd.executable>
+  %117 = resource<command_input> {index = 7, source_type = index} : reg<cmd.executable>
+  %118 = resource<command_input> {index = 0, source_type = index} : reg<cmd.entry>
+  %119 = resource<command_input> {index = 1, source_type = index} : reg<cmd.entry>
+  %120 = resource<command_input> {index = 2, source_type = index} : reg<cmd.entry>
+  %121 = resource<command_input> {index = 3, source_type = index} : reg<cmd.entry>
+  %122 = resource<command_input> {index = 4, source_type = index} : reg<cmd.entry>
+  %123 = resource<command_input> {index = 5, source_type = index} : reg<cmd.entry>
+  %124 = resource<command_input> {index = 6, source_type = index} : reg<cmd.entry>
+  %125 = resource<command_input> {index = 7, source_type = index} : reg<cmd.entry>
+  %126 = cmd.constant.u64 0
+  %127 = cmd.constant.u64 -1
+  %128 = cmd.constant.u64 12
+  %129 = cmd.constant.u64 24
+  %130 = cmd.constant.u64 36
+  %131 = cmd.constant.u32 1
+  cmd.dispatch.direct<%110, %118>[%131, %131, %131](%108, %126, %127, %109, %126, %128)
+  cmd.dispatch.direct.barrier<%111, %119>[%131, %131, %131](%108, %126, %127, %109, %128, %128)
+  cmd.dispatch.direct.barrier<%112, %120>[%131, %131, %131](%108, %126, %127, %109, %129, %128)
+  cmd.dispatch.direct.barrier<%113, %121>[%131, %131, %131](%108, %126, %127, %109, %130, %128)
+  %132 = cmd.buffer.ref.binding %109, %130, %128
+  cmd.dispatch.indirect.dynamic.barrier<%114, %122>[%132]()
+  %133 = cmd.buffer.ref.binding %109, %126, %128
+  cmd.dispatch.indirect.dynamic.barrier<%115, %123>[%133]()
+  %134 = cmd.buffer.ref.binding %109, %128, %128
+  cmd.dispatch.indirect.dynamic.barrier<%116, %124>[%134]()
+  %135 = cmd.buffer.ref.binding %109, %129, %128
+  cmd.dispatch.indirect.dynamic.barrier<%117, %125>[%135]()
   return
 }
 

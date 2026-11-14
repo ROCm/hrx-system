@@ -88,25 +88,36 @@ static bool loom_target_limit_satisfies(uint64_t effective_limit,
   return required_limit == 0 || effective_limit >= required_limit;
 }
 
+bool loom_target_snapshot_has_same_data_layout(
+    const loom_target_snapshot_t* lhs, const loom_target_snapshot_t* rhs) {
+  return lhs->default_pointer_bitwidth == rhs->default_pointer_bitwidth &&
+         lhs->index_bitwidth == rhs->index_bitwidth &&
+         loom_target_snapshot_maximum_index_bitwidth(lhs) ==
+             loom_target_snapshot_maximum_index_bitwidth(rhs) &&
+         lhs->offset_bitwidth == rhs->offset_bitwidth &&
+         lhs->memory_spaces.generic == rhs->memory_spaces.generic &&
+         lhs->memory_spaces.global == rhs->memory_spaces.global &&
+         lhs->memory_spaces.workgroup == rhs->memory_spaces.workgroup &&
+         lhs->memory_spaces.constant == rhs->memory_spaces.constant &&
+         lhs->memory_spaces.private_memory ==
+             rhs->memory_spaces.private_memory &&
+         lhs->memory_spaces.host == rhs->memory_spaces.host &&
+         lhs->memory_spaces.descriptor == rhs->memory_spaces.descriptor;
+}
+
 bool loom_target_snapshot_satisfies_specialization_requirement(
     const loom_target_snapshot_t* effective_snapshot,
     const loom_target_snapshot_t* target_requirement) {
   IREE_ASSERT_ARGUMENT(effective_snapshot);
   IREE_ASSERT_ARGUMENT(target_requirement);
-  return effective_snapshot->codegen_format ==
+  return loom_target_snapshot_has_same_data_layout(effective_snapshot,
+                                                   target_requirement) &&
+         effective_snapshot->codegen_format ==
              target_requirement->codegen_format &&
          effective_snapshot->artifact_format ==
              target_requirement->artifact_format &&
          effective_snapshot->subgroup_partition >=
              target_requirement->subgroup_partition &&
-         effective_snapshot->default_pointer_bitwidth ==
-             target_requirement->default_pointer_bitwidth &&
-         effective_snapshot->index_bitwidth ==
-             target_requirement->index_bitwidth &&
-         loom_target_snapshot_maximum_index_bitwidth(effective_snapshot) ==
-             loom_target_snapshot_maximum_index_bitwidth(target_requirement) &&
-         effective_snapshot->offset_bitwidth ==
-             target_requirement->offset_bitwidth &&
          loom_target_limit_satisfies(
              effective_snapshot->max_workgroup_size.x,
              target_requirement->max_workgroup_size.x) &&
@@ -144,19 +155,5 @@ bool loom_target_snapshot_satisfies_specialization_requirement(
              target_requirement->max_workgroup_count.z) &&
          loom_target_limit_satisfies(
              effective_snapshot->max_workgroup_storage_bytes,
-             target_requirement->max_workgroup_storage_bytes) &&
-         effective_snapshot->memory_spaces.generic ==
-             target_requirement->memory_spaces.generic &&
-         effective_snapshot->memory_spaces.global ==
-             target_requirement->memory_spaces.global &&
-         effective_snapshot->memory_spaces.workgroup ==
-             target_requirement->memory_spaces.workgroup &&
-         effective_snapshot->memory_spaces.constant ==
-             target_requirement->memory_spaces.constant &&
-         effective_snapshot->memory_spaces.private_memory ==
-             target_requirement->memory_spaces.private_memory &&
-         effective_snapshot->memory_spaces.host ==
-             target_requirement->memory_spaces.host &&
-         effective_snapshot->memory_spaces.descriptor ==
-             target_requirement->memory_spaces.descriptor;
+             target_requirement->max_workgroup_storage_bytes);
 }

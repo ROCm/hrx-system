@@ -91,8 +91,9 @@ typedef bool (*loom_target_fact_satisfies_specialization_requirement_fn_t)(
     const loom_target_facts_t* effective,
     const loom_target_facts_t* requirement);
 
-// Returns whether family-owned state has the same durable semantics after
-// common explicitness and mutual specialization have matched.
+// Returns whether family-owned state has the same durable semantics. Both
+// inputs have the same fact type; the caller separately compares common
+// snapshot/configuration fields and explicit-input provenance as required.
 typedef bool (*loom_target_fact_family_state_equivalent_fn_t)(
     const loom_target_facts_t* lhs, const loom_target_facts_t* rhs);
 
@@ -270,6 +271,13 @@ bool loom_target_facts_are_equivalent(const loom_target_facts_t* lhs,
 bool loom_target_facts_structural_satisfy_specialization_requirement(
     const loom_target_facts_t* effective,
     const loom_target_facts_t* requirement);
+
+// Returns whether both snapshots use the same scalar and reference
+// representation: pointer/index/offset widths and address-space assignments.
+// Hardware identity, executable format, and execution geometry are independent
+// contracts and do not participate in this relation.
+bool loom_target_snapshot_has_same_data_layout(
+    const loom_target_snapshot_t* lhs, const loom_target_snapshot_t* rhs);
 
 // Returns whether |effective_snapshot| satisfies the structural requirements
 // in |target_requirement|. Representation widths and address spaces must

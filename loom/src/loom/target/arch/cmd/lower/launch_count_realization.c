@@ -30,6 +30,7 @@
 #include "loom/rewrite/materialize.h"
 #include "loom/rewrite/remap.h"
 #include "loom/rewrite/rewriter.h"
+#include "loom/target/function_contract.h"
 #include "loom/util/dominance.h"
 #include "loom/util/fact_extensions.h"
 #include "loom/util/reference_facts.h"
@@ -614,27 +615,47 @@ static iree_status_t loom_cmd_launch_count_collect_dispatches(
   return iree_ok_status();
 }
 
-static iree_status_t loom_cmd_launch_count_targets_are_equivalent(
+static iree_status_t loom_cmd_launch_count_targets_can_share_producer(
     const loom_module_t* module, loom_symbol_fact_table_t* symbol_facts,
-    loom_symbol_ref_t left, loom_symbol_ref_t right, bool* out_equivalent) {
-  *out_equivalent =
+    loom_symbol_ref_t left, loom_symbol_ref_t right, bool* out_can_share) {
+  *out_can_share =
       left.module_id == right.module_id && left.symbol_id == right.symbol_id;
-  if (*out_equivalent || !loom_symbol_ref_is_valid(left) ||
+  if (*out_can_share || !loom_symbol_ref_is_valid(left) ||
       !loom_symbol_ref_is_valid(right)) {
     return iree_ok_status();
   }
-  // Independent library imports may name the same target semantics through
-  // distinct symbols. Reuse the canonical projection and equivalence relation;
-  // symbol identity alone does not require another count producer.
+  // Configuration normalization has already resolved every consumer's target
+  // queries. Its deterministic, nonconvergent count arithmetic can share a
+  // producer across execution modes of the same hardware identity. Preserve
+  // data representation without requiring equal subgroup widths or scheduling
+  // choices for the numerical consumers.
   const loom_symbol_facts_base_t* left_facts = NULL;
   const loom_symbol_facts_base_t* right_facts = NULL;
   IREE_RETURN_IF_ERROR(loom_symbol_fact_table_lookup_ref(symbol_facts, module,
                                                          left, &left_facts));
   IREE_RETURN_IF_ERROR(loom_symbol_fact_table_lookup_ref(symbol_facts, module,
                                                          right, &right_facts));
-  *out_equivalent = loom_target_facts_are_equivalent(
-      loom_target_symbol_facts_cast(left_facts)->projection,
-      loom_target_symbol_facts_cast(right_facts)->projection);
+  const loom_target_facts_t* left_target =
+      loom_target_symbol_facts_cast(left_facts)->projection;
+  const loom_target_facts_t* right_target =
+      loom_target_symbol_facts_cast(right_facts)->projection;
+  const loom_target_bundle_t* left_bundle =
+      loom_target_facts_bundle(left_target);
+  const loom_target_bundle_t* right_bundle =
+      loom_target_facts_bundle(right_target);
+  *out_can_share = loom_target_facts_satisfy_identity_requirement(
+                       left_target, right_target) &&
+                   loom_target_facts_satisfy_identity_requirement(
+                       right_target, left_target) &&
+                   loom_target_function_contract_bundles_compatible(
+                       left_bundle, right_bundle) &&
+                   left_bundle->config->contract_feature_bits ==
+                       right_bundle->config->contract_feature_bits &&
+                   loom_target_snapshot_has_same_data_layout(
+                       left_bundle->snapshot, right_bundle->snapshot) &&
+                   (left_target->fact_type->family_state_equivalent == NULL ||
+                    left_target->fact_type->family_state_equivalent(
+                        left_target, right_target));
   return iree_ok_status();
 }
 
@@ -1652,7 +1673,7 @@ static iree_status_t loom_cmd_launch_count_plan_root(
         cluster_active && loom_cmd_launch_count_producer_precedes_consumer(
                               &cluster, dispatch, &dominance);
     if (can_join) {
-      status = loom_cmd_launch_count_targets_are_equivalent(
+      status = loom_cmd_launch_count_targets_can_share_producer(
           module, symbol_facts, target, cluster.target, &can_join);
       if (!iree_status_is_ok(status)) {
         break;
