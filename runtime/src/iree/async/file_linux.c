@@ -12,9 +12,11 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <linux/btrfs.h>
+#include <linux/magic.h>
 #include <linux/stat.h>
 #include <sys/ioctl.h>
 #include <sys/syscall.h>
+#include <sys/vfs.h>
 #include <unistd.h>
 
 #include "iree/async/file_platform.h"
@@ -44,6 +46,21 @@ iree_status_t iree_async_file_query_direct_requirements(
         errno != EOPNOTSUPP) {
       return iree_make_status(iree_status_code_from_errno(errno),
                               "statx direct I/O requirements query failed");
+    }
+    struct statfs filesystem_attributes;
+    if (fstatfs(fd, &filesystem_attributes) != 0) {
+      return iree_make_status(iree_status_code_from_errno(errno),
+                              "direct I/O filesystem query failed");
+    }
+    if (filesystem_attributes.f_type == TMPFS_MAGIC) {
+      // Linux shmem admits O_DIRECT but transfers resident memory in arbitrary
+      // byte ranges. It does not report STATX_DIOALIGN. This describes legal
+      // geometry, not disk-cache bypass or a change to the open file's mode.
+      *out_requirements = (iree_async_file_requirements_t){
+          .read = {1, 1, 1},
+          .write = {1, 1, 1},
+      };
+      return iree_ok_status();
     }
     // Btrfs checks buffer and extent alignment against its filesystem sector
     // size, including kernels that do not expose STATX_DIOALIGN. This query
