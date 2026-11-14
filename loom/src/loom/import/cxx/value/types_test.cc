@@ -24,6 +24,38 @@ namespace {
 
 using TypesWithModuleTest = ValueBuilderTest;
 
+TEST_F(TypesWithModuleTest,
+       ObjectPropertiesFollowOwnershipWithoutValueAdmission) {
+  Source source(IREE_SV(R"(
+    struct Plain { unsigned value; };
+    struct Observed { volatile unsigned value; };
+    struct Derived : Observed { Plain other; };
+    struct Owned { Derived elements[3]; };
+    struct Borrowed { Owned& reference; volatile unsigned* pointer; };
+    struct VolatilePointer { unsigned* volatile pointer; };
+    using Qualified = const volatile Plain;
+    using Array = volatile unsigned[4];
+  )"),
+                IREE_SV("object_properties.cxx"), options());
+  Types types(source.unit(), source.diagnostics());
+  auto source_type = [&](const char* name) {
+    return (*source.unit().globalScope()->find(name).begin())->type();
+  };
+  for (const char* name :
+       {"Observed", "Derived", "Owned", "Qualified", "Array"}) {
+    EXPECT_TRUE(types.has_volatile_subobject(source_type(name))) << name;
+    EXPECT_FALSE(types.requires_value_transport(source_type(name))) << name;
+  }
+  EXPECT_FALSE(types.has_volatile_subobject(source_type("Plain")));
+  EXPECT_FALSE(types.has_volatile_subobject(source_type("Borrowed")));
+  EXPECT_TRUE(types.requires_value_transport(source_type("Borrowed")));
+  EXPECT_TRUE(types.has_volatile_subobject(source_type("VolatilePointer")));
+  EXPECT_TRUE(types.requires_value_transport(source_type("VolatilePointer")));
+  // The qualified and unqualified objects share a representation schema.
+  EXPECT_EQ(&types.partition(source_type("Plain"), source.unit().ast()),
+            &types.partition(source_type("Qualified"), source.unit().ast()));
+}
+
 TEST_F(TypesWithModuleTest, ConstructionGroupsKeepDependentHandlesWhole) {
   Source source(IREE_SV(R"(
     namespace loom::type {
@@ -468,7 +500,8 @@ TEST(TypesTest, RecordMemoryUsesSourceLayoutIndependentlyOfValuePartitions) {
   EXPECT_EQ(types.storage_size(observed, owner), 4);
   EXPECT_EQ(types.partition(control->getPointerType(observed), owner).kind,
             ValueKind::Pointer);
-  EXPECT_THROW(types.partition(observed, owner), SourceRejected);
+  EXPECT_EQ(types.partition(observed, owner).kind, ValueKind::Record);
+  EXPECT_TRUE(types.has_volatile_subobject(observed));
   auto* transport = source_type("Transport");
   EXPECT_EQ(types.partition(transport, owner).component_count, 3u);
   EXPECT_THROW(types.storage_size(transport, owner), SourceRejected);
@@ -1058,7 +1091,7 @@ TEST(TypesTest, RejectsRepresentationsThatLoseSourceSemantics) {
   EXPECT_THROW(types.get(control->getLongDoubleType(), owner), SourceRejected);
 }
 
-TEST(TypesTest, SeparatesLoadedRepresentationFromVolatileObjectAdmission) {
+TEST(TypesTest, SeparatesRepresentationFromVolatileObservation) {
   loom_cxx_import_options_t options;
   loom_cxx_import_options_initialize(&options);
   Source source(IREE_SV("int entry();"), IREE_SV("types.cpp"), options);
@@ -1075,11 +1108,14 @@ TEST(TypesTest, SeparatesLoadedRepresentationFromVolatileObjectAdmission) {
   EXPECT_EQ(types.memory_access_flags(observed),
             LOOM_MEMORY_ACCESS_FLAG_VOLATILE);
   EXPECT_EQ(types.partition(pointer, owner).kind, ValueKind::Pointer);
-  EXPECT_THROW(types.partition(observed, owner), SourceRejected);
-  EXPECT_THROW(
-      types.partition(
-          control->getQualType(pointer, cxx::CvQualifiers::kVolatile), owner),
-      SourceRejected);
+  EXPECT_EQ(types.partition(observed, owner).kind, ValueKind::SSA);
+  EXPECT_TRUE(types.has_volatile_subobject(observed));
+  auto* observed_pointer =
+      control->getQualType(pointer, cxx::CvQualifiers::kVolatile);
+  EXPECT_EQ(types.partition(observed_pointer, owner).kind, ValueKind::Pointer);
+  EXPECT_TRUE(types.has_volatile_subobject(observed_pointer));
+  EXPECT_FALSE(types.has_volatile_subobject(pointer));
+  EXPECT_THROW(types.storage_size(observed_pointer, owner), SourceRejected);
 }
 
 TEST(TypesTest, EnumProjectionPreservesSourceWidthSignednessAndIdentity) {

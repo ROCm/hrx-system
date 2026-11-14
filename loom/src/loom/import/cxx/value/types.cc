@@ -381,38 +381,57 @@ bool Types::requires_binding(const cxx::Type* input, cxx::AST* owner) {
 }
 
 bool Types::requires_value_transport(const cxx::Type* input) {
+  return object_properties(input).value_transport;
+}
+
+bool Types::has_volatile_subobject(const cxx::Type* input) {
+  return unit_.typeTraits().is_volatile(input) ||
+         object_properties(input).volatile_subobject;
+}
+
+Types::ObjectProperties Types::object_properties(const cxx::Type* input) {
   input = unqualified(input);
   auto traits = unit_.typeTraits();
   if (traits.is_pointer(input) || traits.is_reference(input) ||
       traits.is_null_pointer(input)) {
-    return true;
+    return {.value_transport = true};
   }
   if (auto* array = cxx::type_cast<cxx::BoundedArrayType>(input)) {
-    return requires_value_transport(array->elementType());
+    auto result = object_properties(array->elementType());
+    result.volatile_subobject |= traits.is_volatile(array->elementType());
+    return result;
   }
   auto* record_type = cxx::type_cast<cxx::ClassType>(input);
   if (!record_type) {
-    return false;
+    return {};
   }
-  if (auto found = value_transport_.find(input);
-      found != value_transport_.end()) {
+  if (auto found = object_properties_.find(input);
+      found != object_properties_.end()) {
     return found->second;
   }
   auto* source = record_type->definition();
   traits.require_complete_class(source);
   source = record_type->definition();
-  bool required = type_binding(source) != nullptr;
+  ObjectProperties result = {
+      .value_transport = type_binding(source) != nullptr,
+  };
+  auto append = [&](const cxx::Type* type) {
+    const auto properties = object_properties(type);
+    result.value_transport |= properties.value_transport;
+    result.volatile_subobject |=
+        traits.is_volatile(type) || properties.volatile_subobject;
+  };
   for (auto* base : source->baseClasses()) {
-    required |= requires_value_transport(source_object_type(base));
+    append(source_object_type(base));
   }
   for (auto* symbol : source->members()) {
     auto* field = cxx::symbol_cast<cxx::FieldSymbol>(symbol);
     if (field && !field->isStatic()) {
-      required |= requires_value_transport(field->type());
+      append(field->type());
     }
   }
-  value_transport_.emplace(input, required);
-  return required;
+  object_properties_.emplace(input, result);
+  return result;
 }
 
 std::span<const ValueProjection> Types::projections(const cxx::Type* input,
@@ -465,10 +484,6 @@ const ArrayPartition* Types::array(const cxx::Type* input, cxx::AST* owner) {
   if (!source) {
     return nullptr;
   }
-  if (unit_.typeTraits().is_volatile(input)) {
-    diagnostics_.reject(unit_, owner,
-                        "volatile objects require addressable storage");
-  }
   if (auto found = arrays_.find(source); found != arrays_.end()) {
     return found->second.get();
   }
@@ -493,10 +508,6 @@ const Partition* Types::special(const cxx::Type* input, cxx::AST* owner) {
   if (!input) {
     return nullptr;
   }
-  if (unit_.typeTraits().is_volatile(input)) {
-    diagnostics_.reject(unit_, owner,
-                        "volatile objects require addressable storage");
-  }
   auto* type = cxx::type_cast<cxx::ClassType>(unqualified(input));
   if (!type) {
     return nullptr;
@@ -505,6 +516,11 @@ const Partition* Types::special(const cxx::Type* input, cxx::AST* owner) {
   auto* binding = type_binding(source);
   if (!binding) {
     return nullptr;
+  }
+  if (unit_.typeTraits().is_volatile(input)) {
+    diagnostics_.reject(unit_, owner,
+                        "volatile Loom source types require an addressable "
+                        "storage representation");
   }
   if (binding->arguments.size() != 1) {
     diagnostics_.reject(unit_, owner,
@@ -1238,10 +1254,6 @@ const RecordPartition* Types::record(const cxx::Type* input, cxx::AST* owner) {
     return nullptr;
   }
   auto traits = unit_.typeTraits();
-  if (traits.is_volatile(input)) {
-    diagnostics_.reject(unit_, owner,
-                        "volatile objects require addressable storage");
-  }
   auto* source = type->definition();
   if (auto found = records_.find(source); found != records_.end()) {
     return found->second.get();

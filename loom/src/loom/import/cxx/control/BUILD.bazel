@@ -112,6 +112,20 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "object_identity",
+    srcs = ["object_identity.cc"],
+    hdrs = ["object_identity.h"],
+    cxx_features = CXX_COMPILER_OPTIONS["cxx_features"],
+    cxx_standard = CXX_COMPILER_OPTIONS["cxx_standard"],
+    deps = [
+        "//loom/src/loom/import/cxx/source:expressions",
+        "//loom/src/loom/import/cxx/source:objects",
+        "//loom/src/loom/import/cxx/value:types",
+        "//third_party:cxx_parser",
+    ],
+)
+
+loom_cc_library(
     name = "analysis",
     srcs = ["analysis.cc"],
     hdrs = ["analysis.h"],
@@ -120,6 +134,7 @@ loom_cc_library(
     deps = [
         ":call_aliases",
         ":construction",
+        ":object_identity",
         "//loom/src/loom/import/cxx/lifetime:destruction",
         "//loom/src/loom/import/cxx/lifetime:origins",
         "//loom/src/loom/import/cxx/source",
@@ -133,6 +148,22 @@ loom_cc_library(
         "//loom/src/loom/import/cxx/value:bindings",
         "//loom/src/loom/import/cxx/value:types",
         "//runtime/src/iree/base/internal:arena",
+        "//third_party:cxx_parser",
+    ],
+)
+
+loom_cc_test(
+    name = "object_identity_test",
+    srcs = ["object_identity_test.cc"],
+    cxx_features = CXX_COMPILER_OPTIONS["cxx_features"],
+    cxx_standard = CXX_COMPILER_OPTIONS["cxx_standard"],
+    deps = [
+        ":object_identity",
+        "//loom/src/loom/import/cxx/source",
+        "//loom/src/loom/import/cxx/source:options",
+        "//loom/src/loom/import/cxx/value:types",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
         "//third_party:cxx_parser",
     ],
 )

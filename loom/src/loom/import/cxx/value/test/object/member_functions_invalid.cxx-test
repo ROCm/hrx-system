@@ -19,14 +19,3 @@ unsigned explicit_object(ExplicitObject object) {
   // ERROR@+1: LOWERING/059 "explicit object member functions are not admitted"
   return object.read();
 }
-
-// ====
-struct VolatileValue {
-  unsigned value;
-  unsigned read() volatile { return value; }
-};
-
-unsigned volatile_value_receiver(VolatileValue object) {
-  // ERROR@+1: LOWERING/059 "member call requires a storage-backed receiver"
-  return object.read();
-}

@@ -475,6 +475,18 @@ void Functions::analyze(Types& types) {
       const bool reference = unit_.typeTraits().is_reference(parameter->type());
       auto* borrowed_object_type =
           analysis->borrowed_pointer_object_type(parameter);
+      // Top-level cv qualifies this body's parameter object. Owned subobject
+      // qualification also constrains transport across the call boundary.
+      if (!reference && unit_.typeTraits().is_class(parameter->type()) &&
+          analysis->addressed(parameter) &&
+          (!exported_.contains(function) ||
+           unit_.typeTraits().is_non_trivial_for_calls(parameter->type()) ||
+           types.has_volatile_subobject(
+               types.unqualified(parameter->type())))) {
+        analysis->configure_parameter(parameter,
+                                      Construction::ParameterMode::Storage);
+        continue;
+      }
       if (!reference && !borrowed_object_type) {
         continue;
       }
@@ -496,6 +508,7 @@ void Functions::analyze(Types& types) {
   check(resolve_call_fields(control_flows_, analyzed_calls,
                             module_->arena.block_pool));
   indirect_parameters_.clear();
+  storage_results_.clear();
   receiver_projections_.clear();
   for (const auto& [canonical, analysis] : analyzed_functions) {
     analysis->publish_reference_snapshots(types);
@@ -515,6 +528,22 @@ void Functions::analyze(Types& types) {
         !analysis->projected_reference_return_origins(true).empty();
     for (size_t ordinal = 0; ordinal < parameters.size(); ++ordinal) {
       auto* parameter = parameters[ordinal];
+      if (unit_.typeTraits().is_class(parameter->type()) &&
+          analysis->addressed(parameter) &&
+          (!exported_.contains(function) ||
+           unit_.typeTraits().is_non_trivial_for_calls(parameter->type()) ||
+           types.has_volatile_subobject(
+               types.unqualified(parameter->type())))) {
+        indirect_parameters.push_back({
+            .ordinal = ordinal,
+            .object_type = parameter->type(),
+            .borrowed_pointer = false,
+            .abi = IndirectParameterABI::Storage,
+            .mutable_access = false,
+            .owned = true,
+        });
+        continue;
+      }
       const bool source_reference =
           unit_.typeTraits().is_reference(parameter->type());
       auto* borrowed_object_type =
@@ -563,6 +592,28 @@ void Functions::analyze(Types& types) {
         }
       }
       indirect_parameter.projection = std::move(projection);
+    }
+    const bool result_storage =
+        analysis->result_requires_storage() &&
+        (!exported_.contains(function) ||
+         unit_.typeTraits().is_non_trivial_for_calls(signature->returnType()) ||
+         types.has_volatile_subobject(signature->returnType()));
+    if (result_storage ||
+        std::ranges::any_of(indirect_parameters, [](const auto& parameter) {
+          return parameter.owned;
+        })) {
+      if (exported_.contains(function) || external_.contains(canonical) ||
+          annotated(function, "kernel") || is_check_record(function) ||
+          launches_.is_configuration(function) ||
+          template_definitions_.lookup(function)) {
+        diagnostics_.reject(
+            unit_, function->declaration(),
+            "identity-sensitive object signatures require an internal ordinary "
+            "function definition");
+      }
+    }
+    if (result_storage) {
+      storage_results_.insert(canonical);
     }
     if (!indirect_parameters.empty()) {
       indirect_parameters_.emplace(canonical, std::move(indirect_parameters));
@@ -1336,6 +1387,19 @@ void Functions::admit_reference_parameters(cxx::FunctionSymbol* symbol,
                         "value references require a function type");
   }
   auto traits = unit_.typeTraits();
+  if (!definition(symbol)) {
+    auto requires_owned_identity = [&](const cxx::Type* type) {
+      return traits.is_class(type) && traits.is_non_trivial_for_calls(type);
+    };
+    if (requires_owned_identity(signature->returnType()) ||
+        std::ranges::any_of(symbol->parameters(), [&](auto* parameter) {
+          return requires_owned_identity(parameter->type());
+        })) {
+      diagnostics_.reject(unit_, source,
+                          "nontrivial object transport requires a source "
+                          "function definition");
+    }
+  }
   if (traits.is_reference(signature->returnType()) &&
       traits.is_function(traits.remove_reference(signature->returnType()))) {
     diagnostics_.reject(unit_, source,
@@ -1395,6 +1459,10 @@ ControlFlow* Functions::mutable_control_flow(cxx::FunctionSymbol* symbol) {
 bool Functions::receiver_requires_storage(cxx::FunctionSymbol* symbol) const {
   auto* analysis = control_flow(symbol);
   return analysis && analysis->receiver_requires_storage();
+}
+
+bool Functions::result_requires_storage(cxx::FunctionSymbol* symbol) const {
+  return storage_results_.contains(symbol->canonical());
 }
 
 bool Functions::returns_current_receiver_reference(
@@ -1504,6 +1572,7 @@ BoundSignature Functions::bind_callable_signature(
   auto parameters = symbol->parameters();
   auto indirect_parameters = this->indirect_parameters(symbol);
   auto receiver = implicit_object(instance, source);
+  const bool result_storage = result_requires_storage(symbol);
   const bool returns_void = unit_.typeTraits().is_void(signature->returnType());
   const bool returns_reference =
       unit_.typeTraits().is_reference(signature->returnType());
@@ -1518,20 +1587,24 @@ BoundSignature Functions::bind_callable_signature(
       returns_current_receiver_reference(symbol);
   const bool returns_exact_projection =
       returns_projected_reference && projected_reference_origins.size() == 1;
-  const bool has_ordinary_result = !returns_void && !returns_receiver_alias &&
-                                   !returns_parameter_alias &&
-                                   !returns_exact_projection;
+  const bool has_ordinary_result =
+      !result_storage && !returns_void && !returns_receiver_alias &&
+      !returns_parameter_alias && !returns_exact_projection;
   sources.reserve(receiver.has_value() + parameters.size() +
                   has_ordinary_result + indirect_parameters.size() +
                   (receiver ? receiver->written_fields.size() : 0));
   size_t argument_count = 0;
   size_t receiver_argument_count = 0;
+  if (result_storage) {
+    sources.push_back(unit_.typeTraits().add_pointer(signature->returnType()));
+    argument_count = kPointerPartition.component_count;
+  }
   if (receiver && receiver->projection) {
     for (const auto& group : receiver->projection->inputs) {
       sources.push_back(group.type);
     }
     receiver_argument_count = receiver->projection->input_component_count;
-    argument_count = receiver_argument_count;
+    argument_count += receiver_argument_count;
   } else if (receiver) {
     const cxx::Type* receiver_type =
         receiver->abi == ImplicitObjectABI::Value
@@ -1540,7 +1613,7 @@ BoundSignature Functions::bind_callable_signature(
     sources.push_back(receiver_type);
     receiver_argument_count =
         types.partition(receiver_type, source).component_count;
-    argument_count = receiver_argument_count;
+    argument_count += receiver_argument_count;
   }
   size_t indirect_parameter_index = 0;
   for (size_t ordinal = 0; ordinal < parameters.size(); ++ordinal) {
@@ -1548,6 +1621,13 @@ BoundSignature Functions::bind_callable_signature(
     const bool is_indirect =
         indirect_parameter_index < indirect_parameters.size() &&
         indirect_parameters[indirect_parameter_index].ordinal == ordinal;
+    if (unit_.typeTraits().is_class(parameter->type()) &&
+        external_.contains(symbol->canonical()) &&
+        types.has_volatile_subobject(types.unqualified(parameter->type()))) {
+      diagnostics_.reject(unit_, source,
+                          "volatile object transport requires a source "
+                          "function definition");
+    }
     auto* value_type =
         !is_indirect ? types.unqualified(parameter->type())
         : indirect_parameters[indirect_parameter_index].abi ==
@@ -1572,6 +1652,13 @@ BoundSignature Functions::bind_callable_signature(
   size_t ordinary_result_count = 0;
   if (has_ordinary_result) {
     const cxx::Type* result_type = signature->returnType();
+    if (unit_.typeTraits().is_class(result_type) &&
+        external_.contains(symbol->canonical()) &&
+        types.has_volatile_subobject(result_type)) {
+      diagnostics_.reject(unit_, source,
+                          "volatile object transport requires a source "
+                          "function definition");
+    }
     if (returns_projected_reference) {
       result_type = unit_.control()->getUnsignedIntType();
     } else if (returns_reference) {
@@ -1613,23 +1700,52 @@ BoundSignature Functions::bind_callable_signature(
   results.assign(callable.types.begin() + argument_count, callable.types.end());
   auto predicate_identities = std::span(callable.identities);
   std::vector<loom_value_id_t> projected_predicate_identities;
-  if (receiver && !predicate_identities.empty()) {
-    projected_predicate_identities.reserve(
-        argument_count - receiver_argument_count + ordinary_result_count);
-    auto explicit_arguments = predicate_identities.subspan(
-        receiver_argument_count, argument_count - receiver_argument_count);
-    projected_predicate_identities.insert(projected_predicate_identities.end(),
-                                          explicit_arguments.begin(),
-                                          explicit_arguments.end());
-    auto ordinary_results =
-        predicate_identities.subspan(argument_count, ordinary_result_count);
-    projected_predicate_identities.insert(projected_predicate_identities.end(),
-                                          ordinary_results.begin(),
-                                          ordinary_results.end());
+  if (has_predicates) {
+    // Predicate names refer to source values, not hidden object pointers.
+    // Retain positions for storage-only objects so a predicate selecting one
+    // diagnoses its source instead of silently reading memory at entry.
+    size_t native_offset =
+        receiver_argument_count +
+        (result_storage ? kPointerPartition.component_count : 0);
+    size_t indirect_index = 0;
+    for (size_t ordinal = 0; ordinal < parameters.size(); ++ordinal) {
+      const bool indirect =
+          indirect_index < indirect_parameters.size() &&
+          indirect_parameters[indirect_index].ordinal == ordinal;
+      const bool storage =
+          indirect && indirect_parameters[indirect_index].abi ==
+                          IndirectParameterABI::Storage;
+      const size_t count =
+          types
+              .partition(types.unqualified_value(parameters[ordinal]->type()),
+                         source)
+              .component_count;
+      if (storage) {
+        projected_predicate_identities.insert(
+            projected_predicate_identities.end(), count, LOOM_VALUE_ID_INVALID);
+        native_offset += kPointerPartition.component_count;
+      } else {
+        auto identities = predicate_identities.subspan(native_offset, count);
+        projected_predicate_identities.insert(
+            projected_predicate_identities.end(), identities.begin(),
+            identities.end());
+        native_offset += count;
+      }
+      indirect_index += indirect;
+    }
+    if (result_storage) {
+      projected_predicate_identities.insert(
+          projected_predicate_identities.end(),
+          types.partition(signature->returnType(), source).component_count,
+          LOOM_VALUE_ID_INVALID);
+    } else {
+      auto identities =
+          predicate_identities.subspan(argument_count, ordinary_result_count);
+      projected_predicate_identities.insert(
+          projected_predicate_identities.end(), identities.begin(),
+          identities.end());
+    }
     predicate_identities = projected_predicate_identities;
-  } else if (!predicate_identities.empty()) {
-    predicate_identities =
-        predicate_identities.first(argument_count + ordinary_result_count);
   }
   predicates =
       function_contracts_.bind(symbol, types, predicate_identities,

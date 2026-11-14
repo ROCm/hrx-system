@@ -988,7 +988,10 @@ class Translator final : private Initialization::Evaluation {
     // A later evaluation of the same source construction is a distinct object.
     auto found = temporary_results_.find(origin);
     if (found != temporary_results_.end() && found->second >= evaluation_mark) {
-      temporary_destructions_[found->second]->value = value;
+      auto& action = *temporary_destructions_[found->second];
+      if (!action.storage) {
+        action.value = value;
+      }
       return value;
     }
     IREE_ASSERT(full_expression_mark_);
@@ -1147,7 +1150,7 @@ class Translator final : private Initialization::Evaluation {
         returns_projected_reference && projected_origins.size() == 1;
     if (!unit_.typeTraits().is_void(current_function_.return_type) &&
         !returns_receiver_alias && !returns_parameter_alias &&
-        !returns_exact_projection) {
+        !returns_exact_projection && !result_destination_) {
       const cxx::Type* result_type = current_function_.return_type;
       if (returns_projected_reference) {
         result_type = unit_.control()->getUnsignedIntType();
@@ -1365,6 +1368,10 @@ class Translator final : private Initialization::Evaluation {
         reference_value(statement->expression, statement)
             .append_to(returned.values);
       }
+    } else if (result_destination_) {
+      initialization_.object(*result_destination_,
+                             current_function_.return_type,
+                             statement->expression, nullptr, statement);
     } else {
       auto value = convert(statement->expression, current_function_.return_type,
                            statement);
@@ -1464,6 +1471,13 @@ class Translator final : private Initialization::Evaluation {
     receivers_.clear();
     value_arena_.reset();
     size_t argument_index = 0;
+    result_destination_.reset();
+    if (functions_.result_requires_storage(defined.source->symbol)) {
+      auto value = name(region_value(region, argument_index, kPointerPartition),
+                        "result");
+      result_destination_ = storage_.project(
+          value.pointer(), defined.return_type, defined.source);
+    }
     if (defined.implicit_object) {
       const auto& implicit = *defined.implicit_object;
       auto* record = types_.record(types_.unqualified(implicit.object_type),
@@ -1588,7 +1602,19 @@ class Translator final : private Initialization::Evaluation {
             value.pointer(), indirect->object_type, defined.source);
         references_[parameter] = {
             ObjectLvalue{indirect->object_type, projection}};
-        activate_automatic_destruction(parameter, defined.source);
+        if (indirect->owned) {
+          if (const auto* destruction =
+                  control_->automatic_destruction(parameter)) {
+            active_destructions_.push_back({
+                .destruction = *destruction,
+                .object_type = indirect->object_type,
+                .storage = projection,
+                .source = defined.source,
+            });
+          }
+        } else {
+          activate_automatic_destruction(parameter, defined.source);
+        }
         ++parameter_index;
         continue;
       }
@@ -2397,6 +2423,10 @@ class Translator final : private Initialization::Evaluation {
     // Value-producing operators and conversions materialize their result just
     // like ordinary calls. Only glvalues below follow an existing identity.
     if (ast->valueCategory == cxx::ValueCategory::kPrValue) {
+      if (control_->object_requires_storage(ast) &&
+          unit_.typeTraits().is_class(ast->type)) {
+        return materialize_object(ast);
+      }
       auto value = expression(ast);
       if (unit_.typeTraits().is_class(ast->type) ||
           unit_.typeTraits().is_array(ast->type)) {
@@ -3579,6 +3609,16 @@ class Translator final : private Initialization::Evaluation {
       adopt_temporary_result(argument);
       return {.value = value};
     }
+    if (indirect->owned) {
+      auto allocation =
+          storage_.allocate(indirect->object_type,
+                            LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE, 0, argument);
+      auto object =
+          storage_.project(allocation.pointer, indirect->object_type, argument);
+      initialization_.object(object, indirect->object_type, argument, nullptr,
+                             argument);
+      return {.value = Value(object.pointer)};
+    }
     auto* expected_type = types_.unqualified(indirect->object_type);
     const auto& expected_partition =
         indirect->abi == IndirectParameterABI::Storage
@@ -3874,6 +3914,34 @@ class Translator final : private Initialization::Evaluation {
     return ordinary_call(call, function, locations_.get(call));
   }
 
+  bool call_result(StorageProjection destination,
+                   cxx::ExpressionAST* expression) override {
+    expression = unwrap_object_identity(unit_, expression);
+    if (auto call = direct_operator_call(expression)) {
+      if (!functions_.result_requires_storage(call->function)) {
+        return false;
+      }
+      ordinary_operator_call(expression, *call, destination);
+      return true;
+    }
+    if (auto* subscript =
+            cxx::ast_cast<cxx::SubscriptExpressionAST>(expression);
+        subscript && subscript->symbol) {
+      if (!functions_.result_requires_storage(subscript->symbol)) {
+        return false;
+      }
+      overloaded_subscript_call(subscript, destination);
+      return true;
+    }
+    auto* call = cxx::ast_cast<cxx::CallExpressionAST>(expression);
+    auto* function = call ? direct_callee(call) : nullptr;
+    if (!function || !functions_.result_requires_storage(function)) {
+      return false;
+    }
+    ordinary_call(call, function, locations_.get(call), destination);
+    return true;
+  }
+
   ReceiverArgument unprojected_receiver_argument(
       cxx::FunctionSymbol* function, cxx::ExpressionAST* receiver,
       cxx::TokenKind access_op, cxx::AST* owner,
@@ -4127,14 +4195,20 @@ class Translator final : private Initialization::Evaluation {
     }
   }
 
-  EvaluatedCallResult ordinary_call(cxx::CallExpressionAST* call,
-                                    cxx::FunctionSymbol* function,
-                                    loom_location_id_t source) {
+  EvaluatedCallResult ordinary_call(
+      cxx::CallExpressionAST* call, cxx::FunctionSymbol* function,
+      loom_location_id_t source,
+      std::optional<StorageProjection> destination = std::nullopt) {
     if (call->isVirtualDispatch) {
       fail(call, "virtual member dispatch is not admitted");
     }
     if (function->hasExplicitObjectParameter()) {
       fail(call, "explicit object member functions are not admitted");
+    }
+    if (!destination && functions_.result_requires_storage(function)) {
+      return {
+          .value = objects_.load(materialize_object(call), call->type, call),
+      };
     }
     std::optional<ReceiverArgument> receiver;
     if (function->isImplicitObjectMemberFunction()) {
@@ -4146,17 +4220,23 @@ class Translator final : private Initialization::Evaluation {
       effect(member->baseExpression);
     }
     return emit_ordinary_call(call, function, {call->expressionList},
-                              std::move(receiver), source);
+                              std::move(receiver), source, destination);
   }
 
-  EvaluatedCallResult ordinary_call(cxx::SubscriptExpressionAST* call,
-                                    cxx::FunctionSymbol* function,
-                                    loom_location_id_t source) {
+  EvaluatedCallResult ordinary_call(
+      cxx::SubscriptExpressionAST* call, cxx::FunctionSymbol* function,
+      loom_location_id_t source,
+      std::optional<StorageProjection> destination = std::nullopt) {
     if (call->isVirtualDispatch) {
       fail(call, "virtual member dispatch is not admitted");
     }
     if (function->hasExplicitObjectParameter()) {
       fail(call, "explicit object member functions are not admitted");
+    }
+    if (!destination && functions_.result_requires_storage(function)) {
+      return {
+          .value = objects_.load(materialize_object(call), call->type, call),
+      };
     }
     std::optional<ReceiverArgument> receiver;
     if (function->isImplicitObjectMemberFunction()) {
@@ -4167,11 +4247,12 @@ class Translator final : private Initialization::Evaluation {
       effect(call->baseExpression);
     }
     return emit_ordinary_call(call, function, {call->expressionList},
-                              std::move(receiver), source);
+                              std::move(receiver), source, destination);
   }
 
   EvaluatedCallResult overloaded_subscript_call(
-      cxx::SubscriptExpressionAST* call) {
+      cxx::SubscriptExpressionAST* call,
+      std::optional<StorageProjection> destination = std::nullopt) {
     auto* function = call->symbol;
     IREE_ASSERT(function);
     if (intrinsics_.check_binding(function, call) ||
@@ -4185,7 +4266,7 @@ class Translator final : private Initialization::Evaluation {
     if (annotated(function, "kernel")) {
       fail(call, "kernels require an explicit launch operation");
     }
-    return ordinary_call(call, function, locations_.get(call));
+    return ordinary_call(call, function, locations_.get(call), destination);
   }
 
   cxx::CallExpressionAST* direct_wrapped_call(cxx::ExpressionAST* source) {
@@ -4590,12 +4671,11 @@ class Translator final : private Initialization::Evaluation {
     IREE_ASSERT(unit_.typeTraits().is_same(types_.unqualified(object_type),
                                            types_.unqualified(receiver_type)));
     if (functions_.receiver_requires_storage(constructor)) {
-      auto allocation = storage_.allocate(
-          object_type, LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE, 0, owner);
       auto destination =
-          storage_.project(allocation.pointer, object_type, owner);
-      emit_constructor_call(destination, record, constructor,
-                            SourceArguments{.range = arguments}, owner);
+          construct_temporary(object_type, owner, [&](auto storage) {
+            emit_constructor_call(storage, record, constructor,
+                                  SourceArguments{.range = arguments}, owner);
+          });
       return objects_.load(destination, object_type, owner);
     }
     ReceiverArgument receiver = {
@@ -4620,27 +4700,29 @@ class Translator final : private Initialization::Evaluation {
     return control_->initializer_list(expression);
   }
 
-  Pointer materialize_array(cxx::BracedInitListAST* expression) override {
+  template <typename Initialize>
+  StorageProjection construct_temporary(const cxx::Type* type, cxx::AST* owner,
+                                        Initialize&& initialize) {
+    auto* expression = cxx::ast_cast<cxx::ExpressionAST>(owner);
+    auto* origin =
+        expression ? control_->temporary_origins().result(expression) : nullptr;
     std::optional<DestructionAction> cleanup;
     StorageProjection storage;
-    if (auto* origin = control_->temporary_origins().result(expression)) {
+    if (origin) {
       cleanup.emplace(DestructionAction{
           .destruction = control_->temporary_origins().destruction(origin),
-          .object_type = expression->type,
+          .object_type = type,
           .origin = origin,
-          .source = expression,
+          .source = owner,
       });
       allocate_temporary_storage(*cleanup);
       storage = *cleanup->storage;
     } else {
-      auto allocation = storage_.allocate(expression->type,
-                                          LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE,
-                                          0, expression);
-      storage =
-          storage_.project(allocation.pointer, expression->type, expression);
+      auto allocation = storage_.allocate(
+          type, LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE, 0, owner);
+      storage = storage_.project(allocation.pointer, type, owner);
     }
-    initialization_.object(storage, expression->type, expression, nullptr,
-                           expression);
+    initialize(storage);
     if (cleanup) {
       activate_temporary_storage(*cleanup);
       auto index = temporary_destructions_.size();
@@ -4648,7 +4730,18 @@ class Translator final : private Initialization::Evaluation {
       temporary_destructions_.push_back(std::move(*cleanup));
       extend_materialized_temporary(index);
     }
-    return storage.pointer;
+    return storage;
+  }
+
+  StorageProjection materialize_object(cxx::ExpressionAST* expression) {
+    return construct_temporary(expression->type, expression, [&](auto storage) {
+      initialization_.object(storage, expression->type, expression, nullptr,
+                             expression);
+    });
+  }
+
+  Pointer materialize_array(cxx::BracedInitListAST* expression) override {
+    return materialize_object(expression).pointer;
   }
 
   void call_copy_constructor(
@@ -4692,15 +4785,19 @@ class Translator final : private Initialization::Evaluation {
     };
   }
 
-  EvaluatedCallResult emit_simple_call(cxx::AST* call,
-                                       cxx::FunctionSymbol* function,
-                                       loom_symbol_ref_t callee,
-                                       std::vector<loom_value_id_t> arguments,
-                                       loom_location_id_t source) {
+  EvaluatedCallResult emit_simple_call(
+      cxx::AST* call, cxx::FunctionSymbol* function, loom_symbol_ref_t callee,
+      std::vector<loom_value_id_t> arguments, loom_location_id_t source,
+      std::optional<StorageProjection> destination = std::nullopt) {
     auto* signature = cxx::type_cast<cxx::FunctionType>(function->type());
     IREE_ASSERT(signature);
+    if (destination) {
+      const auto pointer = Value(destination->pointer);
+      auto components = pointer.components();
+      arguments.insert(arguments.begin(), components.begin(), components.end());
+    }
     loom_op_t* op;
-    if (unit_.typeTraits().is_void(signature->returnType())) {
+    if (destination || unit_.typeTraits().is_void(signature->returnType())) {
       check(loom_func_call_build(&builder_, 0, 0, 0, 0, callee,
                                  arguments.data(), arguments.size(), nullptr, 0,
                                  nullptr, 0, source, &op));
@@ -4735,7 +4832,8 @@ class Translator final : private Initialization::Evaluation {
       std::optional<ReferenceResultAlias> reference_result_alias,
       std::span<const ReferenceResultOrigin> projected_origins,
       std::vector<SelectedReferenceCandidate> selected_reference_candidates,
-      loom_location_id_t source) {
+      loom_location_id_t source,
+      std::optional<StorageProjection> destination = std::nullopt) {
     auto* signature = cxx::type_cast<cxx::FunctionType>(function->type());
     IREE_ASSERT(signature);
     const auto* receiver_projection =
@@ -4764,7 +4862,13 @@ class Translator final : private Initialization::Evaluation {
                   arguments.end());
     }
 
+    if (destination) {
+      const auto pointer = Value(destination->pointer);
+      auto components = pointer.components();
+      arguments.insert(arguments.begin(), components.begin(), components.end());
+    }
     const bool returns_void =
+        destination.has_value() ||
         unit_.typeTraits().is_void(signature->returnType());
     const bool returns_reference =
         unit_.typeTraits().is_reference(signature->returnType());
@@ -5013,7 +5117,8 @@ class Translator final : private Initialization::Evaluation {
   EvaluatedCallResult emit_ordinary_call(
       cxx::AST* call, cxx::FunctionSymbol* function,
       SourceArguments source_arguments,
-      std::optional<ReceiverArgument> receiver, loom_location_id_t source) {
+      std::optional<ReceiverArgument> receiver, loom_location_id_t source,
+      std::optional<StorageProjection> destination = std::nullopt) {
     auto* signature = cxx::type_cast<cxx::FunctionType>(function->type());
     IREE_ASSERT(signature);
     auto parameters = function->parameters();
@@ -5038,10 +5143,10 @@ class Translator final : private Initialization::Evaluation {
             function, receiver->abi);
         return emit_evaluated_call(call, function, callee, std::move(receiver),
                                    std::move(arguments), {}, std::nullopt,
-                                   projected_origins, {}, source);
+                                   projected_origins, {}, source, destination);
       }
       return emit_simple_call(call, function, callee, std::move(arguments),
-                              source);
+                              source, destination);
     }
     std::vector<EvaluatedCallArgument> evaluated_arguments;
     evaluated_arguments.reserve(parameters.size());
@@ -5074,7 +5179,8 @@ class Translator final : private Initialization::Evaluation {
     }
     return emit_projected_call(call, function, callee, std::move(receiver),
                                std::move(evaluated_arguments),
-                               std::move(variadic_arguments), source);
+                               std::move(variadic_arguments), source,
+                               destination);
   }
 
   EvaluatedCallResult emit_projected_call(
@@ -5082,7 +5188,8 @@ class Translator final : private Initialization::Evaluation {
       std::optional<ReceiverArgument> receiver,
       std::vector<EvaluatedCallArgument> evaluated_arguments,
       std::vector<loom_value_id_t> variadic_arguments,
-      loom_location_id_t source) {
+      loom_location_id_t source,
+      std::optional<StorageProjection> destination = std::nullopt) {
     auto* signature = cxx::type_cast<cxx::FunctionType>(function->type());
     auto return_parameter =
         unit_.typeTraits().is_reference(signature->returnType())
@@ -5129,13 +5236,21 @@ class Translator final : private Initialization::Evaluation {
     return emit_evaluated_call(
         call, function, callee, std::move(receiver), std::move(arguments),
         std::move(writebacks), std::move(reference_result_alias),
-        projected_origins, std::move(selected_reference_candidates), source);
+        projected_origins, std::move(selected_reference_candidates), source,
+        destination);
   }
 
-  EvaluatedCallResult ordinary_operator_call(cxx::ExpressionAST* expression,
-                                             const DirectOperatorCall& call) {
+  EvaluatedCallResult ordinary_operator_call(
+      cxx::ExpressionAST* expression, const DirectOperatorCall& call,
+      std::optional<StorageProjection> destination = std::nullopt) {
     admit_ordinary_operator(call, expression);
     auto* function = call.function;
+    if (!destination && functions_.result_requires_storage(function)) {
+      return {
+          .value = objects_.load(materialize_object(expression),
+                                 expression->type, expression),
+      };
+    }
     auto* signature = cxx::type_cast<cxx::FunctionType>(function->type());
     IREE_ASSERT(signature);
     auto parameters = function->parameters();
@@ -5208,7 +5323,8 @@ class Translator final : private Initialization::Evaluation {
         evaluated_arguments[ordinal]->value->append_to(arguments);
       }
       return emit_simple_call(expression, function, callee,
-                              std::move(arguments), locations_.get(expression));
+                              std::move(arguments), locations_.get(expression),
+                              destination);
     }
 
     const size_t receiver_argument_count =
@@ -5256,7 +5372,7 @@ class Translator final : private Initialization::Evaluation {
         expression, function, callee, std::move(receiver), std::move(arguments),
         std::move(writebacks), std::move(reference_result_alias),
         projected_origins, std::move(selected_reference_candidates),
-        locations_.get(expression));
+        locations_.get(expression), destination);
   }
 
   EvaluatedCallResult ordinary_operator_call(cxx::ExpressionAST* expression) {
@@ -5531,6 +5647,12 @@ class Translator final : private Initialization::Evaluation {
   }
 
   Value conditional_value(cxx::ConditionalExpressionAST* expression) {
+    if (expression->valueCategory == cxx::ValueCategory::kPrValue &&
+        unit_.typeTraits().is_class(expression->type) &&
+        control_->object_requires_storage(expression)) {
+      return objects_.load(materialize_object(expression), expression->type,
+                           expression);
+    }
     if (!parenthesized_conditional(expression->iftrueExpression) &&
         !parenthesized_conditional(expression->iffalseExpression)) {
       if (types_.native_vector(expression->condition->type)) {
@@ -5936,6 +6058,9 @@ class Translator final : private Initialization::Evaluation {
       }
       if (types_.record(ast->type, ast)) {
         types_.admit_construction(cast->constructorSymbol, ast->type, ast);
+        if (control_->object_requires_storage(ast)) {
+          return objects_.load(materialize_object(ast), ast->type, ast);
+        }
         return initialization_.value(ast->type, ast, cast->constructorSymbol,
                                      ast);
       }
@@ -5965,10 +6090,18 @@ class Translator final : private Initialization::Evaluation {
       }
       types_.admit_construction(construction->constructorSymbol, ast->type,
                                 ast);
+      if (unit_.typeTraits().is_class(ast->type) &&
+          control_->object_requires_storage(ast)) {
+        return objects_.load(materialize_object(ast), ast->type, ast);
+      }
       return initialization_.value(ast->type, ast,
                                    construction->constructorSymbol, ast);
     }
     if (cxx::ast_cast<cxx::BracedInitListAST>(ast)) {
+      if (unit_.typeTraits().is_class(ast->type) &&
+          control_->object_requires_storage(ast)) {
+        return objects_.load(materialize_object(ast), ast->type, ast);
+      }
       return initialization_.value(ast->type, ast, nullptr, ast);
     }
     if (cxx::ast_cast<cxx::ParenInitializerAST>(ast)) {
@@ -8124,6 +8257,12 @@ class Translator final : private Initialization::Evaluation {
   }
 
   void effect(cxx::ExpressionAST* ast) override {
+    if (control_->object_requires_storage(ast) &&
+        ast->valueCategory == cxx::ValueCategory::kPrValue &&
+        unit_.typeTraits().is_class(ast->type)) {
+      materialize_object(ast);
+      return;
+    }
     if (auto* binary = cxx::ast_cast<cxx::BinaryExpressionAST>(ast);
         binary && !binary->symbol && binary->op == cxx::TokenKind::T_COMMA) {
       effect(binary->leftExpression);
@@ -8457,6 +8596,8 @@ class Translator final : private Initialization::Evaluation {
   uint8_t lexical_fastmath_flags_ = 0;
   // Source and native definition contracts for the body being translated.
   FunctionBody current_function_ = {};
+  // Caller-owned result object; this function constructs but never destroys it.
+  std::optional<StorageProjection> result_destination_;
   // Lexical pipeline strand nesting admits kernel operations only in worker
   // execution regions and rejects construction-only memory queries there.
   size_t pipeline_strand_depth_ = 0;

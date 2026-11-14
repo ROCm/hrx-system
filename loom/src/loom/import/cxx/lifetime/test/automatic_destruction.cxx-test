@@ -323,9 +323,9 @@ func.def public @direct_result_ownership(%choose: i1) {
   %48 = index.constant 4 : offset
   %holder_storage = buffer.alloca<private> align(4) %48 : buffer
   %holder_storage_byte_offset = index.constant 0 : offset
-  %56 = scalar.constant 18 : i32
+  %54 = scalar.constant 18 : i32
   %58 = buffer.view %holder_storage[%holder_storage_byte_offset] : buffer -> view<1xi32>
-  view.store %56, %58[0] : i32, view<1xi32>
+  view.store %54, %58[0] : i32, view<1xi32>
   %60 = scalar.constant 16 : i32
   %61 = scalar.constant 17 : i32
   %131 = scf.select %choose, %60, %61 : i32

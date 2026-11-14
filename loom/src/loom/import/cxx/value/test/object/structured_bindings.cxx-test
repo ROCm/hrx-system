@@ -106,19 +106,19 @@ func.def public @array_reference_binding(%first: i32, %second: i32) -> (i32, i32
 
 func.def public @record_array_value_binding(%first: i32, %second: i32) -> (i32) {
   %201 = scalar.constant 1 : i32
-  %441 = scalar.addi %first, %second : i32
-  %443 = scalar.addi %441, %second : i32
-  %445 = scalar.addi %443, %first : i32
-  %446 = scalar.addi %445, %201 : i32
-  func.return %446 : i32
+  %428 = scalar.addi %first, %second : i32
+  %430 = scalar.addi %428, %second : i32
+  %432 = scalar.addi %430, %first : i32
+  %433 = scalar.addi %432, %201 : i32
+  func.return %433 : i32
 }
 
 func.def public @nested_array_value_binding(%value: i32) -> (i32) {
-  %472 = scalar.addi %value, %value : i32
-  %474 = scalar.addi %472, %value : i32
-  %476 = scalar.constant 15 : i32
-  %477 = scalar.addi %474, %476 : i32
-  func.return %477 : i32
+  %459 = scalar.addi %value, %value : i32
+  %461 = scalar.addi %459, %value : i32
+  %463 = scalar.constant 15 : i32
+  %464 = scalar.addi %461, %463 : i32
+  func.return %464 : i32
 }
 
 // ====

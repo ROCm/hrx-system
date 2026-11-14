@@ -31,6 +31,8 @@
 
 namespace loom::cxx_import {
 
+class ObjectIdentity;
+
 struct DirectOperatorCall;
 class RangeLoops;
 class InitializerLists;
@@ -290,6 +292,9 @@ class ControlFlow final : private cxx::ASTVisitor {
   // components. Automatic declaration requirements and later address demand
   // are both retained before callable signatures are frozen.
   bool storage_backed(cxx::Symbol* binding) const;
+  // Retained construction identity of an owned prvalue or function result.
+  bool object_requires_storage(cxx::AST* source) const;
+  bool result_requires_storage() const;
   // Retained automatic-object destination, or no value for a memory access or
   // unsupported lvalue. A vector lane names its owning vector slice; whole
   // identifiers need no indexed projection record.
@@ -469,9 +474,10 @@ class ControlFlow final : private cxx::ASTVisitor {
   void finalize_callable_effects();
 
  private:
+  void retain_owned_binding(cxx::Symbol* binding,
+                            cxx::ExpressionAST* initializer);
   bool receiver_can_construct_value() const;
 
-  struct TemporaryDestructionFacts;
   struct ReferenceIdentityFacts;
   struct ReferenceWriteFacts;
   struct ProjectedReferenceReturnFacts;
@@ -645,7 +651,6 @@ class ControlFlow final : private cxx::ASTVisitor {
                                     const cxx::Type* object_type = nullptr);
   void retain_subobject_destructions();
   void retain_temporary_destruction(cxx::ExpressionAST* expression);
-  void retain_temporary_destructions();
   void retain_destructor_call(const Destruction& destruction,
                               std::optional<CallArgument> receiver,
                               bool current_receiver, cxx::AST* owner);
@@ -801,9 +806,8 @@ class ControlFlow final : private cxx::ASTVisitor {
   std::unordered_map<cxx::Symbol*, Destruction> automatic_destructions_;
   // Current destructor's direct nontrivial members in declaration order.
   std::vector<SubobjectDestruction> subobject_destructions_;
-  // Sparse anonymous-result cleanup facts. Most source functions allocate no
-  // temporary objects and retain only this null pointer.
-  std::unique_ptr<TemporaryDestructionFacts> temporary_destruction_facts_;
+  // Prvalue/destination construction groups, absent without ordinary objects.
+  std::unique_ptr<ObjectIdentity> object_identity_;
   // Constructor conversions whose destination is retained by the enclosing
   // declaration instead of an anonymous temporary.
   std::unordered_set<cxx::ImplicitCastExpressionAST*>

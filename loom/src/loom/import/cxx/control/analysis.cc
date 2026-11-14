@@ -26,6 +26,7 @@
 #include <utility>
 
 #include "loom/import/cxx/control/call_aliases.h"
+#include "loom/import/cxx/control/object_identity.h"
 #include "loom/import/cxx/source/attributes.h"
 #include "loom/import/cxx/source/constants.h"
 #include "loom/import/cxx/source/error.h"
@@ -35,15 +36,6 @@
 #include "loom/import/cxx/source/range_loops.h"
 
 namespace loom::cxx_import {
-
-struct ControlFlow::TemporaryDestructionFacts {
-  // Unique anonymous result-object destructions in source encounter order.
-  std::vector<std::pair<Destruction, cxx::ExpressionAST*>> destructions;
-  // Canonical destructors already represented by an ordinary cleanup edge.
-  std::unordered_set<cxx::FunctionSymbol*> retained;
-  // Canonical destructors admitted once into |destructions|.
-  std::unordered_set<cxx::FunctionSymbol*> candidates;
-};
 
 struct ControlFlow::ReferenceIdentityFacts {
   struct IntervalHash {
@@ -417,6 +409,7 @@ ControlFlow::ControlFlow(cxx::TranslationUnit& unit, Diagnostics& diagnostics,
       temporary_origins_(unit, types) {
   if (function_) {
     if (auto* object_type = implicit_object_type(unit_, function_)) {
+      receiver_requires_storage_ = types_.has_volatile_subobject(object_type);
       receiver_partition_ = types_.record(types_.unqualified(object_type),
                                           function_->declaration());
       for (const auto& member : receiver_partition_->members) {
@@ -432,6 +425,7 @@ ControlFlow::ControlFlow(cxx::TranslationUnit& unit, Diagnostics& diagnostics,
           name && name->op() == cxx::TokenKind::T_LPAREN;
     }
     for (auto* parameter : function_->parameters()) {
+      retain_owned_binding(parameter, nullptr);
       const auto traits = unit_.typeTraits();
       const auto* type = traits.remove_reference(parameter->type());
       if (!traits.is_reference(parameter->type()) && traits.is_volatile(type)) {
@@ -484,7 +478,9 @@ ControlFlow::ControlFlow(cxx::TranslationUnit& unit, Diagnostics& diagnostics,
     projected_reference_return_facts_.reset();
   }
   temporary_origins_.finish();
-  retain_temporary_destructions();
+  if (object_identity_) {
+    object_identity_->finish();
+  }
   construction_.finish_function();
 }
 
@@ -552,13 +548,35 @@ std::span<cxx::Symbol* const> ControlFlow::written(cxx::AST* owner) const {
 
 bool ControlFlow::addressed(cxx::Symbol* binding) const {
   auto found = binding_storage_.find(binding);
-  return found != binding_storage_.end() && found->second.addressed;
+  return (found != binding_storage_.end() && found->second.addressed) ||
+         (object_identity_ && object_identity_->requires_storage(binding));
 }
 
 bool ControlFlow::storage_backed(cxx::Symbol* binding) const {
   auto found = binding_storage_.find(binding);
-  return found != binding_storage_.end() &&
-         (found->second.addressed || found->second.automatic_storage);
+  return (found != binding_storage_.end() &&
+          (found->second.addressed || found->second.automatic_storage)) ||
+         (object_identity_ && object_identity_->requires_storage(binding));
+}
+
+bool ControlFlow::object_requires_storage(cxx::AST* source) const {
+  return object_identity_ && object_identity_->requires_storage(source);
+}
+
+bool ControlFlow::result_requires_storage() const {
+  return object_identity_ && object_identity_->requires_storage(function_);
+}
+
+void ControlFlow::retain_owned_binding(cxx::Symbol* binding,
+                                       cxx::ExpressionAST* initializer) {
+  auto* type = source_object_type(binding);
+  if (!unit_.typeTraits().is_class(type)) {
+    return;
+  }
+  if (!object_identity_) {
+    object_identity_ = std::make_unique<ObjectIdentity>(unit_, types_);
+  }
+  object_identity_->bind(binding, initializer, addressed(binding));
 }
 
 bool ControlFlow::reference_requires_storage(cxx::Symbol* binding) const {
@@ -854,7 +872,7 @@ void ControlFlow::retain_complete_receiver_reference_origin(
 
 bool ControlFlow::argument_requires_storage(const CallArgument& argument,
                                             StorageDemand demand) const {
-  if (argument.inherent_storage ||
+  if (object_requires_storage(argument.source) || argument.inherent_storage ||
       (argument.current_receiver && receiver_requires_storage_)) {
     return true;
   }
@@ -935,6 +953,7 @@ bool ControlFlow::storage_backed(cxx::MemberExpressionAST* expression) const {
   }
   auto* owner = object_owner(expression);
   return storage_expressions_.contains(expression) ||
+         object_requires_storage(expression) ||
          (owner && storage_backed(owner));
 }
 
@@ -1138,6 +1157,14 @@ bool ControlFlow::preVisit(cxx::AST* ast) {
 
 void ControlFlow::postVisit(cxx::AST* ast) {
   if (auto* expression = cxx::ast_cast<cxx::ExpressionAST>(ast)) {
+    if (!object_identity_ && expression->type &&
+        expression->valueCategory == cxx::ValueCategory::kPrValue &&
+        unit_.typeTraits().is_class(expression->type)) {
+      object_identity_ = std::make_unique<ObjectIdentity>(unit_, types_);
+    }
+    if (object_identity_) {
+      object_identity_->retain(expression);
+    }
     auto* list = cxx::ast_cast<cxx::BracedInitListAST>(expression);
     auto* initialized = list ? initializer_list(list) : nullptr;
     if (initialized) {
@@ -1931,6 +1958,13 @@ void ControlFlow::visit(cxx::ReturnStatementAST* ast) {
   }
   cxx::ASTVisitor::visit(ast);
   borrowed_pointer_expression_ = saved_borrowed_expression;
+  if (signature && ast->expression &&
+      unit_.typeTraits().is_class(signature->returnType())) {
+    if (!object_identity_) {
+      object_identity_ = std::make_unique<ObjectIdentity>(unit_, types_);
+    }
+    object_identity_->returned(function_, ast->expression);
+  }
   if (signature && !unit_.typeTraits().is_reference(signature->returnType()) &&
       ast->expression) {
     record_parameter_read(ast->expression);
@@ -2706,6 +2740,12 @@ void ControlFlow::record_member_binding_read(cxx::ExpressionAST* expression) {
 CallArgument ControlFlow::retain_call_argument(
     cxx::ExpressionAST* expression, const cxx::Type* borrowed_object_type) {
   CallArgument argument = {.source = expression};
+  if (unit_.typeTraits().is_pointer(expression->type) &&
+      is_current_object(unit_, unwrap_expression(expression))) {
+    // An explicit this pointer crosses the call as an address. Implicit
+    // receivers and value references still select their own native transport.
+    receiver_requires_storage_ = true;
+  }
   if (borrowed_object_type) {
     auto* source = unwrap_expression(expression);
     auto* address = cxx::ast_cast<cxx::UnaryExpressionAST>(source);
@@ -3091,8 +3131,11 @@ bool ControlFlow::require_identity(cxx::ExpressionAST* expression) {
 
 bool ControlFlow::require_address(cxx::Symbol* binding) {
   auto& facts = binding_storage_[binding];
-  const bool changed = !facts.addressed;
+  bool changed = !facts.addressed;
   facts.addressed = true;
+  if (object_identity_) {
+    changed = object_identity_->require_storage(binding) || changed;
+  }
   return changed;
 }
 
@@ -3112,7 +3155,8 @@ void ControlFlow::retain_automatic_storage(cxx::VariableSymbol* variable,
 }
 
 bool ControlFlow::require_identity(const CallArgument& argument) {
-  bool changed = false;
+  bool changed =
+      object_identity_ && object_identity_->require_storage(argument.source);
   for (const auto& reference : argument.reference_calls) {
     changed = identity_call_results_.insert(reference.call).second || changed;
   }
@@ -3366,6 +3410,10 @@ void ControlFlow::retain_constructor_call(cxx::FunctionSymbol* constructor,
                                           CallArgument receiver,
                                           bool storage_receiver,
                                           cxx::AST* owner) {
+  if (!receiver.source && !receiver.write_binding &&
+      !receiver.current_receiver && receiver.identity_bindings.empty()) {
+    receiver.source = cxx::ast_cast<cxx::ExpressionAST>(owner);
+  }
   DirectCall retained = {
       .function = constructor,
       .source = owner,
@@ -3418,10 +3466,6 @@ void ControlFlow::retain_destructor_call(const Destruction& destruction,
                                          std::optional<CallArgument> receiver,
                                          bool current_receiver,
                                          cxx::AST* owner) {
-  if (temporary_destruction_facts_) {
-    temporary_destruction_facts_->retained.insert(
-        destruction.function->canonical());
-  }
   calls_.push_back({
       .function = destruction.function,
       .source = owner,
@@ -3438,35 +3482,10 @@ void ControlFlow::retain_temporary_destruction(cxx::ExpressionAST* expression) {
     return;
   }
   const auto& selected = temporary_origins_.destruction(origin);
-  if (!temporary_destruction_facts_) {
-    temporary_destruction_facts_ =
-        std::make_unique<TemporaryDestructionFacts>();
-    for (const auto& call : calls_) {
-      if (call.function && call.function->isDestructor()) {
-        temporary_destruction_facts_->retained.insert(
-            call.function->canonical());
-      }
-    }
-  }
-  auto* canonical = selected.function->canonical();
-  if (temporary_destruction_facts_->candidates.insert(canonical).second) {
-    temporary_destruction_facts_->destructions.emplace_back(selected,
-                                                            expression);
-  }
-}
-
-void ControlFlow::retain_temporary_destructions() {
-  if (!temporary_destruction_facts_) {
-    return;
-  }
-  for (const auto& [destruction, expression] :
-       temporary_destruction_facts_->destructions) {
-    if (!temporary_destruction_facts_->retained.contains(
-            destruction.function->canonical())) {
-      retain_destructor_call(destruction, std::nullopt,
-                             /*current_receiver=*/false, expression);
-    }
-  }
+  // Each constructed result retains its own receiver edge. A destructor can
+  // observe that object's identity even when its constructor did not.
+  retain_destructor_call(selected, CallArgument{.source = expression},
+                         /*current_receiver=*/false, expression);
 }
 
 void ControlFlow::retain_automatic_destruction(cxx::Symbol* binding,
@@ -4093,6 +4112,15 @@ CallPropagation ControlFlow::propagate_call(
     iree_arena_allocator_t* scratch_arena) {
   bool caller_changed = propagate_projected_reference_return(call, callee);
   bool callee_changed = false;
+  if (object_identity_ && callee.object_identity_ &&
+      (object_requires_storage(call.source) ||
+       callee.result_requires_storage())) {
+    caller_changed =
+        object_identity_->require_storage(call.source) || caller_changed;
+    callee_changed =
+        callee.object_identity_->require_storage(callee.function_) ||
+        callee_changed;
+  }
   auto parameters = callee.function_->parameters();
   const bool storage_receiver_result =
       call.storage_receiver && callee.projected_reference_return_facts_ &&
@@ -4103,6 +4131,17 @@ CallPropagation ControlFlow::propagate_call(
       continue;
     }
     const bool reference = unit_.typeTraits().is_reference(parameter->type());
+    if (!reference && unit_.typeTraits().is_class(parameter->type()) &&
+        callee.object_identity_ &&
+        (callee.addressed(parameter) ||
+         object_requires_storage(call.arguments[ordinal].source))) {
+      callee_changed = callee.require_address(parameter) || callee_changed;
+      if (object_identity_) {
+        caller_changed =
+            object_identity_->require_storage(call.arguments[ordinal].source) ||
+            caller_changed;
+      }
+    }
     auto borrowed = callee.pointer_aliases_.find(parameter);
     const bool borrowed_pointer = borrowed != callee.pointer_aliases_.end() &&
                                   borrowed->second.parameter_object_type;
@@ -4526,6 +4565,9 @@ void ControlFlow::visit(cxx::InitDeclaratorAST* ast) {
   auto* initializer = variable && variable->initializer()
                           ? variable->initializer()
                           : ast->initializer;
+  if (variable) {
+    retain_owned_binding(variable, nullptr);
+  }
   auto* saved_initializing_binding = initializing_binding_;
   initializing_binding_ = variable;
   auto* saved_borrowed_expression = borrowed_pointer_expression_;
@@ -4595,6 +4637,7 @@ void ControlFlow::visit(cxx::InitDeclaratorAST* ast) {
   retain_reference_materializations_ = saved_retain_reference_materializations;
   if (variable) {
     auto traits = unit_.typeTraits();
+    retain_owned_binding(variable, initializer);
     auto* folded_constant = folded_variable_constant(variable);
     const bool aliases_subobject = variable->isStructuredBindingAlias();
     const bool reference_binding =

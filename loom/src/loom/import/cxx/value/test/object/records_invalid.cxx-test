@@ -30,9 +30,9 @@ struct Value { unsigned member : 7; };
 Value entry(Value value) { return value; }
 
 // ====
-// Volatile fields retain their access semantics.
+// Public value signatures cannot erase owned volatile observations.
 struct Value { volatile unsigned member; };
-// ERROR@+1: LOWERING/059 "volatile objects require addressable storage"
+// ERROR@+1: LOWERING/059 "identity-sensitive object signatures require an internal ordinary function definition"
 Value entry(Value value) { return value; }
 
 // ====
