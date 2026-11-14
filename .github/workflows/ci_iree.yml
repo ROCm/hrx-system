@@ -9,15 +9,11 @@ name: Loom
 on:
   workflow_dispatch:
     inputs:
-      windows_cache_probe:
-        description: Run one bounded Windows remote-cache probe instead of normal jobs
+      windows_cache_handoff:
+        description: Run the bounded Linux-build/Windows-test CAS handoff
         required: false
-        type: choice
-        options:
-          - none
-          - integrity
-          - handoff
-        default: none
+        type: boolean
+        default: false
   pull_request:
     paths:
       - ".bazelrc"
@@ -77,7 +73,7 @@ permissions:
 
 jobs:
   bazel_linux:
-    if: ${{ github.event_name != 'workflow_dispatch' || inputs.windows_cache_probe == 'none' }}
+    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.windows_cache_handoff }}
     name: Bazel / ${{ matrix.platform || 'Linux x86-64' }} / ${{ matrix.name }}
     strategy:
       fail-fast: false
@@ -573,7 +569,7 @@ jobs:
           retention-days: 7
 
   sdk:
-    if: ${{ github.event_name != 'workflow_dispatch' || inputs.windows_cache_probe == 'none' }}
+    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.windows_cache_handoff }}
     name: SDK
     uses: $/.github/workflows/build_loom_sdk.yml
     with:
@@ -600,7 +596,7 @@ jobs:
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
 
   bazel_windows:
-    if: ${{ github.event_name != 'workflow_dispatch' || inputs.windows_cache_probe == 'none' }}
+    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.windows_cache_handoff }}
     name: Bazel / Windows x86-64 / ${{ matrix.name }}
     strategy:
       fail-fast: false
@@ -995,263 +991,9 @@ jobs:
           include-hidden-files: true
           retention-days: 7
 
-  windows_cache_canary:
-    name: Bazel / Windows x86-64 / Remote Cache Integrity Canary
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.windows_cache_probe == 'integrity' }}
-    runs-on: azure-windows-scale-rocm
-    timeout-minutes: 30
-    env:
-      HRX_ARTIFACT_SET: core
-      HRX_RELEASE_TYPE: nightly
-      IREE_CACHE_CANARY_ARTIFACT_DIR: ${{ github.workspace }}\build\cache-canary-evidence-${{ github.run_id }}-${{ github.run_attempt }}
-      IREE_CI_PYTHON: python
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Set up Python
-        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
-        with:
-          python-version: "3.12"
-
-      - name: Select Windows build storage
-        shell: powershell
-        run: |
-          $drives = @(
-            Get-PSDrive -PSProvider FileSystem -ErrorAction Stop |
-              Where-Object { $_.Root -match '^[A-Za-z]:\\$' -and $null -ne $_.Free } |
-              Sort-Object Free -Descending
-          )
-          $preferredDrive = $drives | Where-Object Name -eq 'B' | Select-Object -First 1
-          $candidateDrives = @($preferredDrive) + @($drives | Where-Object Name -ne 'B')
-          $selectedDrive = $null
-          foreach ($drive in $candidateDrives) {
-            if (-not $drive) { continue }
-            $probe = Join-Path $drive.Root ".hrx-cache-canary-write-probe-$PID"
-            try {
-              [IO.File]::WriteAllText($probe, '')
-              Remove-Item -LiteralPath $probe -Force
-              $selectedDrive = $drive
-              break
-            } catch {
-              Remove-Item -LiteralPath $probe -Force -ErrorAction SilentlyContinue
-            }
-          }
-          if (-not $selectedDrive) { throw 'No writable filesystem volume is available.' }
-          $runKey = "$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
-          $outputDir = Join-Path $selectedDrive.Root 'hrx\iree-bazel-windows'
-          $probeRoot = Join-Path $outputDir "cache-canary\$runKey"
-          $environment = [ordered]@{
-            BAZEL_LLVM = Join-Path $env:SystemDrive 'r\lib\llvm'
-            HRX_DOWNLOAD_CACHE_DIR = Join-Path $outputDir 'downloads'
-            HRX_OUTPUT_DIR = $outputDir
-            HRX_ROCM_ROOT = Join-Path $env:SystemDrive 'r'
-            IREE_CACHE_CANARY_ARTIFACT_DIR = Join-Path $probeRoot 'evidence'
-            IREE_CACHE_CANARY_CONSUMER_BACKING = Join-Path $probeRoot 'consumer-execroot'
-            IREE_CACHE_CANARY_CONSUMER_OUTPUT_BASE = Join-Path $env:SystemDrive "hc\$runKey\consumer"
-            IREE_CACHE_CANARY_REPOSITORY_CACHE = (Join-Path $outputDir 'caches\bazel-repository').Replace('\', '/')
-            IREE_CACHE_CANARY_SEED_BACKING = Join-Path $probeRoot 'seed-execroot'
-            IREE_CACHE_CANARY_SEED_OUTPUT_BASE = Join-Path $env:SystemDrive "hc\$runKey\seed"
-            PIP_CACHE_DIR = Join-Path $outputDir 'caches\pip'
-          }
-          New-Item -ItemType Directory -Path $probeRoot -Force | Out-Null
-          foreach ($entry in $environment.GetEnumerator()) {
-            "$($entry.Key)=$($entry.Value)" |
-              Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          }
-          Write-Output "Selected cache-canary build volume $($selectedDrive.Root)."
-
-      - name: Check Windows host capabilities
-        shell: powershell
-        run: |
-          $computerSystem = Get-CimInstance Win32_ComputerSystem -ErrorAction Stop
-          $computerSystem |
-            Format-List Manufacturer, Model, NumberOfProcessors, NumberOfLogicalProcessors, TotalPhysicalMemory
-          $bazelJobs = [Math]::Min(40, [int]$computerSystem.NumberOfLogicalProcessors)
-          if ($bazelJobs -lt 1) { throw 'Windows host did not report any logical processors.' }
-          "IREE_CI_BAZEL_JOBS=$bazelJobs" |
-            Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          python build_tools/bazel/configure.py --check-windows-host
-
-      - name: Fetch ROCm toolchain
-        shell: powershell
-        run: |
-          python -m pip install --upgrade boto3 zstandard
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python build_tools/ci/ci_core_windows.py fetch-rocm
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-      - name: Install developer tools
-        shell: powershell
-        run: |
-          "common --repository_cache=$env:IREE_CACHE_CANARY_REPOSITORY_CACHE" |
-            Out-File -FilePath .bazelrc.local -Encoding ascii -Append
-          "build --jobs=$env:IREE_CI_BAZEL_JOBS" |
-            Out-File -FilePath .bazelrc.local -Encoding ascii -Append
-          python --version
-          python dev.py bazel setup --venv
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          "$PWD\.venv\Scripts" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-
-      - name: Seed and consume cached Windows image
-        id: cache_canary
-        shell: powershell
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $artifactDir = $env:IREE_CACHE_CANARY_ARTIFACT_DIR
-          New-Item -ItemType Directory -Path $artifactDir -Force | Out-Null
-          $cacheStatus = Invoke-RestMethod `
-            -Uri 'http://bazelremote-svc.bazelremote-ns.svc.cluster.local:8080/status' `
-            -Method Get -TimeoutSec 10
-          $cacheStatus | ConvertTo-Json -Depth 8 |
-            Out-File -LiteralPath (Join-Path $artifactDir 'cache-status.json') -Encoding utf8
-
-          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
-          $installation = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-          if ($LASTEXITCODE -ne 0 -or -not $installation) { throw 'Visual Studio C++ tools discovery failed.' }
-          Import-Module (Join-Path $installation 'Common7\Tools\Microsoft.VisualStudio.DevShell.dll')
-          Enter-VsDevShell -VsInstallPath $installation -SkipAutomaticLocation -DevCmdArguments '-arch=x64 -host_arch=x64'
-          $env:CC = Join-Path $env:BAZEL_LLVM 'bin\clang-cl.exe'
-          $env:CXX = $env:CC
-          $env:AR = Join-Path $env:BAZEL_LLVM 'bin\llvm-lib.exe'
-
-          $sourcePath = 'loom/src/loom/tools/loom-link/loom-link.c'
-          $source = [IO.File]::ReadAllText($sourcePath)
-          $needle = 'Links Loom text and bytecode modules into one Loom module.'
-          $identity = "cache canary $env:GITHUB_RUN_ID/$env:GITHUB_RUN_ATTEMPT"
-          if ([regex]::Matches($source, [regex]::Escape($needle)).Count -ne 1) {
-            throw "Expected exactly one cache-canary source marker in $sourcePath."
-          }
-          $source = $source.Replace($needle, "$needle $identity")
-          [IO.File]::WriteAllText(
-            (Resolve-Path $sourcePath), $source, [Text.UTF8Encoding]::new($false))
-
-          python dev.py bazel configure `
-            --//runtime/config/hal:drivers=amd-gpu,amd-xdna,task,vulkan,webgpu `
-            -DIREE_ROCM_DEPENDENCY_MODE=pinned `
-            -DIREE_ROCM_PATH="$env:HRX_ROCM_ROOT" `
-            --//loom/config/arch:enable=aie2p,amdgpu,spirv,vm,wasm,x86 `
-            --//loom/config/emit:enable=elf,spirv,vm,wasm `
-            --//loom/config/execute:enable=iree_hal,iree_vm,wasm_host `
-            --//loom/config/import:enable=cxx `
-            --//loom/config/serve:image_codecs= `
-            --//loom/config/serve:audio_codecs= `
-            --//libamdf/config:enabled=true `
-            --//build_tools/vulkan/config:enabled=true `
-            --//build_tools/d3d12/config:enabled=true
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-          function New-CanaryOutputBase([string]$outputBase, [string]$backing) {
-            New-Item -ItemType Directory -Path $outputBase -Force | Out-Null
-            New-Item -ItemType Directory -Path $backing -Force | Out-Null
-            $execroot = Join-Path $outputBase 'execroot'
-            if (Test-Path -LiteralPath $execroot) {
-              throw "Cache-canary execroot already exists: $execroot"
-            }
-            New-Item -ItemType Junction -Path $execroot -Target $backing | Out-Null
-          }
-          New-CanaryOutputBase `
-            $env:IREE_CACHE_CANARY_SEED_OUTPUT_BASE $env:IREE_CACHE_CANARY_SEED_BACKING
-          New-CanaryOutputBase `
-            $env:IREE_CACHE_CANARY_CONSUMER_OUTPUT_BASE $env:IREE_CACHE_CANARY_CONSUMER_BACKING
-
-          $target = '//loom/src/loom/tools/loom-link:loom-link'
-          $commonFlags = @(
-            '--config=rocm-ci-cache',
-            '--remote_download_outputs=all',
-            '--remote_verify_downloads',
-            '--noremote_cache_async',
-            '--record_full_profiler_data',
-            '--noslim_profile',
-            '--experimental_profile_include_primary_output'
-          )
-          $seedProfile = Join-Path $artifactDir 'seed.profile.gz'
-          bazel "--output_base=$env:IREE_CACHE_CANARY_SEED_OUTPUT_BASE" build `
-            @commonFlags "--profile=$seedProfile" '--remote_upload_local_results=true' $target
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $seedBin = bazel "--output_base=$env:IREE_CACHE_CANARY_SEED_OUTPUT_BASE" info bazel-bin
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $seedExe = Join-Path $seedBin 'loom\src\loom\tools\loom-link\loom-link.exe'
-          $seedItem = Get-Item -LiteralPath $seedExe -ErrorAction Stop
-          $seedHash = (Get-FileHash -LiteralPath $seedItem.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-
-          $casCopy = Join-Path $env:RUNNER_TEMP "loom-link-$seedHash.exe"
-          Invoke-WebRequest `
-            -Uri "http://bazelremote-svc.bazelremote-ns.svc.cluster.local:8080/cas/$seedHash" `
-            -Headers @{'Accept-Encoding' = 'identity'} -OutFile $casCopy -TimeoutSec 60
-          $casItem = Get-Item -LiteralPath $casCopy -ErrorAction Stop
-          $casHash = (Get-FileHash -LiteralPath $casItem.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-          if ($casHash -ne $seedHash -or $casItem.Length -ne $seedItem.Length) {
-            throw "CAS bytes $casHash/$($casItem.Length) do not match seed $seedHash/$($seedItem.Length)."
-          }
-
-          $consumerProfile = Join-Path $artifactDir 'consumer.profile.gz'
-          $corruptDir = Join-Path $artifactDir 'bazel-corrupt-downloads'
-          New-Item -ItemType Directory -Path $corruptDir -Force | Out-Null
-          bazel "--output_base=$env:IREE_CACHE_CANARY_CONSUMER_OUTPUT_BASE" build `
-            @commonFlags "--profile=$consumerProfile" `
-            '--remote_upload_local_results=false' '--experimental_remote_require_cached' `
-            "--experimental_remote_capture_corrupted_outputs=$corruptDir" $target
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $consumerBin = bazel "--output_base=$env:IREE_CACHE_CANARY_CONSUMER_OUTPUT_BASE" info bazel-bin
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $consumerExe = Join-Path $consumerBin 'loom\src\loom\tools\loom-link\loom-link.exe'
-          $consumerItem = Get-Item -LiteralPath $consumerExe -ErrorAction Stop
-          $consumerHash = (Get-FileHash -LiteralPath $consumerItem.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-          if ($consumerHash -ne $seedHash -or $consumerItem.Length -ne $seedItem.Length) {
-            throw "Materialized bytes $consumerHash/$($consumerItem.Length) do not match seed $seedHash/$($seedItem.Length)."
-          }
-
-          $receipt = [ordered]@{
-            bazel_version = (& bazel --version)
-            cache_status = $cacheStatus
-            source_identity = $identity
-            seed = [ordered]@{
-              output_base = $env:IREE_CACHE_CANARY_SEED_OUTPUT_BASE
-              execroot_backing = $env:IREE_CACHE_CANARY_SEED_BACKING
-              executable = $seedItem.FullName
-              length = $seedItem.Length
-              sha256 = $seedHash
-            }
-            cas = [ordered]@{
-              length = $casItem.Length
-              sha256 = $casHash
-            }
-            consumer = [ordered]@{
-              output_base = $env:IREE_CACHE_CANARY_CONSUMER_OUTPUT_BASE
-              execroot_backing = $env:IREE_CACHE_CANARY_CONSUMER_BACKING
-              executable = $consumerItem.FullName
-              length = $consumerItem.Length
-              sha256 = $consumerHash
-            }
-          }
-          $receipt | ConvertTo-Json -Depth 8 |
-            Out-File -LiteralPath (Join-Path $artifactDir 'cache-receipt.json') -Encoding utf8
-
-          python .github/scripts/windows_cache_integrity_canary.py `
-            --executable $consumerItem.FullName `
-            --input loom/src/loom/tools/loom-link/testdata/dependency_direct.loom `
-            --expected-sha256 $seedHash `
-            --artifact-dir $artifactDir `
-            --parallelism $env:IREE_CI_BAZEL_JOBS `
-            --waves 100
-          exit $LASTEXITCODE
-
-      - name: Upload cache-canary evidence
-        if: ${{ always() }}
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: windows-cache-integrity-canary-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ env.IREE_CACHE_CANARY_ARTIFACT_DIR }}
-          if-no-files-found: error
-          compression-level: 0
-          retention-days: 7
-
   windows_cache_handoff_producer:
     name: Bazel / Windows x86-64 (via Linux) / CAS Test Producer
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.windows_cache_probe == 'handoff' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.windows_cache_handoff }}
     runs-on:
       group: therock-ci-az-prod-2
       labels: az-linux-scale-rocm-default-prod
@@ -1391,7 +1133,7 @@ jobs:
 
   windows_cache_handoff_consumer:
     name: Bazel / Windows x86-64 / Native CAS Test
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.windows_cache_probe == 'handoff' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.windows_cache_handoff }}
     needs: windows_cache_handoff_producer
     runs-on:
       group: therock-ci-az-prod-2
@@ -1501,7 +1243,7 @@ jobs:
 
   cmake_linux:
     name: CMake / Linux x86-64 / Clang / RelWithDebInfo
-    if: ${{ github.event_name != 'push' && (github.event_name != 'workflow_dispatch' || inputs.windows_cache_probe == 'none') }}
+    if: ${{ github.event_name != 'push' && (github.event_name != 'workflow_dispatch' || !inputs.windows_cache_handoff) }}
     concurrency:
       group: iree-cmake-linux-repository-build-${{ (github.event_name == 'push' && github.ref) || github.run_id }}
       cancel-in-progress: true
@@ -1576,7 +1318,7 @@ jobs:
 
   cmake_windows_cross:
     name: CMake / Windows x86-64 (via Linux) / Clang CL / RelWithDebInfo
-    if: ${{ github.event_name != 'push' && (github.event_name != 'workflow_dispatch' || inputs.windows_cache_probe == 'none') }}
+    if: ${{ github.event_name != 'push' && (github.event_name != 'workflow_dispatch' || !inputs.windows_cache_handoff) }}
     concurrency:
       group: iree-cmake-windows-cross-${{ (github.event_name == 'push' && github.ref) || github.run_id }}
       cancel-in-progress: true
