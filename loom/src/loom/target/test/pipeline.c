@@ -208,9 +208,10 @@ static iree_status_t loom_test_pipeline_collective_end(
   return iree_ok_status();
 }
 
-static iree_status_t loom_test_pipeline_entry(
+static iree_status_t loom_test_pipeline_programs(
     void* user_data, loom_rewriter_t* rewriter,
-    const loom_pipeline_realization_t* realization) {
+    const loom_pipeline_realization_t* realization, bool* out_valid) {
+  *out_valid = false;
   loom_test_pipeline_t* state = user_data;
   loom_builder_enter_region(&rewriter->builder, NULL, rewriter->module->body);
   const char* names[] = {"__test_phase_join", "__test_phase_enter"};
@@ -247,6 +248,14 @@ static iree_status_t loom_test_pipeline_entry(
         loom_rewriter_set_attr(rewriter, functions[i].function.op, 1,
                                loom_attr_enum(LOOM_FUNC_VISIBILITY_PUBLIC)));
   }
+  *out_valid = true;
+  return iree_ok_status();
+}
+
+static iree_status_t loom_test_pipeline_entry(
+    void* user_data, loom_rewriter_t* rewriter,
+    const loom_pipeline_realization_t* realization) {
+  (void)user_data;
   return loom_rewriter_erase(rewriter, realization->function.op);
 }
 
@@ -263,6 +272,7 @@ static iree_status_t loom_test_pipeline_run(loom_pass_t* pass,
       .select = loom_test_pipeline_select,
       .has_worker_body = loom_test_pipeline_has_worker_body,
       .worker = loom_test_pipeline_worker,
+      .programs = loom_test_pipeline_programs,
       .entry = loom_test_pipeline_entry,
       .user_data = &state};
   return loom_pipeline_realize(pass, module, function, &inventory, &callbacks);

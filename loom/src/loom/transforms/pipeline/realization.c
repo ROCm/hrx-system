@@ -566,7 +566,11 @@ iree_status_t loom_pipeline_realize_invocations(
     }
   }
   if (iree_status_is_ok(status) && valid) {
-    status = callback->entry(callback->user_data, &rewriter, &realization);
+    status = callback->programs(callback->user_data, &rewriter, &realization,
+                                &valid);
+    if (iree_status_is_ok(status) && valid) {
+      status = callback->entry(callback->user_data, &rewriter, &realization);
+    }
     loom_function_version_owner_prune_erased(realization.version_owner);
   }
   loom_pass_value_fact_owner_invalidate(pass->value_facts);

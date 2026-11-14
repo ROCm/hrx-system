@@ -83,9 +83,18 @@ typedef struct loom_pipeline_realization_callback_t {
   iree_status_t (*worker)(void* user_data, loom_rewriter_t* rewriter,
                           const loom_pipeline_realization_t* realization,
                           iree_host_size_t worker_index);
-  // Emits the execution container referring to the materialized workers. The
-  // callback replaces the source definition and updates the active function
-  // version when its callable or target contract changes.
+  // Builds execution functions around the materialized workers. The source
+  // construction and its entry version remain intact; the entry callback
+  // consumes these functions when replacing that construction. Authored
+  // support failures emit diagnostics and leave out_valid false; status
+  // carries allocation and emission failures.
+  iree_status_t (*programs)(void* user_data, loom_rewriter_t* rewriter,
+                            const loom_pipeline_realization_t* realization,
+                            bool* out_valid);
+  // Emits the execution container referring to the completed programs. Called
+  // only after programs succeeds and admits its invocation contract. Replaces
+  // the source definition and updates the active function version when its
+  // callable or target contract changes.
   iree_status_t (*entry)(void* user_data, loom_rewriter_t* rewriter,
                          const loom_pipeline_realization_t* realization);
   // Borrowed physical selection and emission state.
@@ -105,9 +114,10 @@ iree_status_t loom_pipeline_realization_register_helper(
 
 // Consumes an already analyzed occurrence within its enclosing execution.
 // The caller has closed source-stability proofs over all concurrent children.
-// Source definitions stay immutable during selection and worker emission;
-// entry emission owns replacing the admitted execution boundary. No resource,
-// channel, movement, or source-stability analysis is repeated here.
+// Source definitions stay immutable during selection, worker emission, and
+// program construction; entry emission owns replacing the admitted execution
+// boundary. No resource, channel, movement, or source-stability analysis is
+// repeated here.
 // versions is the source snapshot already used to bind this occurrence's
 // execution environment; generated definitions are registered with its owner.
 iree_status_t loom_pipeline_realize_invocations(

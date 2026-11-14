@@ -888,7 +888,7 @@ iree_status_t loom_aie2p_native_emit_configuration(
 // and the final completion publication and quiescent wait.
 // Unsupported caller captures emit a diagnostic and leave out_valid false.
 iree_status_t loom_aie2p_native_emit_programs(
-    loom_aie2p_native_context_t* context, loom_rewriter_t* rewriter,
+    void* user_data, loom_rewriter_t* rewriter,
     const loom_pipeline_realization_t* realization, bool* out_valid);
 
 // Selects the lock trees consumed by serial child retirement, using retained

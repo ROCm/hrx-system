@@ -112,8 +112,9 @@ static iree_status_t loom_aie2p_native_program_frame(
 }
 
 iree_status_t loom_aie2p_native_emit_programs(
-    loom_aie2p_native_context_t* context, loom_rewriter_t* rewriter,
+    void* user_data, loom_rewriter_t* rewriter,
     const loom_pipeline_realization_t* realization, bool* out_valid) {
+  loom_aie2p_native_context_t* context = user_data;
   *out_valid = false;
   const loom_value_id_t** state_arguments = NULL;
   iree_host_size_t* preparation_engines = NULL;

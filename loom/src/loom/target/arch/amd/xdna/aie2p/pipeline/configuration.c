@@ -907,12 +907,6 @@ iree_status_t loom_aie2p_native_emit_configuration(
     const loom_pipeline_realization_t* realization) {
   loom_aie2p_native_context_t* context = user_data;
   loom_module_t* module = rewriter->module;
-  bool valid = false;
-  IREE_RETURN_IF_ERROR(
-      loom_aie2p_native_emit_programs(context, rewriter, realization, &valid));
-  if (!valid) {
-    return iree_ok_status();
-  }
   loom_aie2p_native_configuration_t config = {
       .context = context,
       .descriptors = loom_aie2p_configuration_descriptor_set()};
