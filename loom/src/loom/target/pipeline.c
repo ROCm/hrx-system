@@ -657,6 +657,34 @@ loom_target_pipeline_build_boundary_projection_cleanup_body(
              : iree_ok_status();
 }
 
+static iree_status_t
+loom_target_pipeline_build_projected_legalization_cleanup_body(
+    loom_builder_t* builder, void* user_data) {
+  const loom_target_pipeline_build_context_t* context =
+      (const loom_target_pipeline_build_context_t*)user_data;
+  loom_target_control_flow_lowering_t control_flow_lowering =
+      LOOM_TARGET_CONTROL_FLOW_LOWERING_CFG;
+  IREE_RETURN_IF_ERROR(loom_target_pipeline_resolve_control_flow_lowering(
+      context->options, &control_flow_lowering));
+
+  if (control_flow_lowering == LOOM_TARGET_CONTROL_FLOW_LOWERING_CFG) {
+    IREE_RETURN_IF_ERROR(
+        loom_target_pipeline_build_run(builder, IREE_SV("scf-to-cfg")));
+    IREE_RETURN_IF_ERROR(
+        loom_target_pipeline_build_run(builder, IREE_SV("cfg-simplify")));
+  }
+  return loom_target_pipeline_build_cleanup(builder);
+}
+
+static iree_status_t loom_target_pipeline_build_projected_legalization_cleanup(
+    loom_builder_t* builder, void* user_data) {
+  loom_op_t* for_op = NULL;
+  return loom_target_pipeline_build_for_target_functions(
+      builder, IREE_SV("source"),
+      loom_target_pipeline_build_projected_legalization_cleanup_body, user_data,
+      &for_op);
+}
+
 static iree_status_t loom_target_pipeline_build_boundary_projection_cleanup(
     loom_builder_t* builder, void* user_data) {
   loom_op_t* for_op = NULL;
@@ -664,12 +692,16 @@ static iree_status_t loom_target_pipeline_build_boundary_projection_cleanup(
       builder, IREE_SV("source"),
       loom_target_pipeline_build_boundary_projection_cleanup_body, user_data,
       &for_op));
+  // Projected legalization consumes the finalized physical CFG but can
+  // materialize new structured source guards, such as dynamic native-packet
+  // selection. Re-finalize the target source set only when legalization
+  // changed it, before source-to-Low consumes the CFG contract.
   IREE_RETURN_IF_ERROR(
       loom_target_pipeline_build_projected_target_legalize(builder));
   loom_op_t* legalization_changed_op = NULL;
   return loom_pass_ir_build_if_changed(
-      builder, loom_target_pipeline_build_cleanup_target_functions, NULL,
-      &legalization_changed_op);
+      builder, loom_target_pipeline_build_projected_legalization_cleanup,
+      user_data, &legalization_changed_op);
 }
 
 static iree_status_t loom_target_pipeline_build_boundary_projection(

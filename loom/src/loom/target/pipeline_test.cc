@@ -57,6 +57,10 @@ typedef struct PipelineRunCounts {
   int first_target_legalization_ordinal = 0;
   // First complete source-reference legalization, before boundary projection.
   int first_complete_target_legalization_ordinal = 0;
+  // Last target legalization pass, after physical boundary projection.
+  int last_target_legalization_ordinal = 0;
+  // Projected-boundary target legalization pass.
+  int projected_target_legalization_ordinal = 0;
   // Number of common-buffer view-transport decomposition pass runs.
   int view_transport_decomposition = 0;
   // Lexical pass position of common-buffer view-origin materialization.
@@ -93,6 +97,8 @@ typedef struct PipelineRunCounts {
   int scf_to_cfg = 0;
   // Lexical pass-run ordinal of the first structured-to-CFG lowering.
   int first_scf_to_cfg_ordinal = 0;
+  // Lexical pass-run ordinal of the final structured-to-CFG lowering.
+  int last_scf_to_cfg_ordinal = 0;
   // Number of composed boundary projection pass runs.
   int boundary_projection = 0;
   // Lexical pass-run ordinal of composed boundary projection.
@@ -250,6 +256,8 @@ iree_status_t InspectPipelineRun(void* user_data, loom_op_t* op,
     counts->last_source_combination_ordinal =
         count_context->current_run_ordinal;
   } else if (iree_string_view_equal(key, IREE_SV("target-legalize"))) {
+    counts->last_target_legalization_ordinal =
+        count_context->current_run_ordinal;
     if (counts->first_target_legalization_ordinal == 0) {
       counts->first_target_legalization_ordinal =
           count_context->current_run_ordinal;
@@ -260,6 +268,13 @@ iree_status_t InspectPipelineRun(void* user_data, loom_op_t* op,
                              IREE_SV("mode")),
             IREE_SV("complete"))) {
       counts->first_complete_target_legalization_ordinal =
+          count_context->current_run_ordinal;
+    }
+    if (iree_string_view_equal(
+            FindStringOption(count_context->module, loom_pass_run_options(op),
+                             IREE_SV("boundaries")),
+            IREE_SV("projected"))) {
+      counts->projected_target_legalization_ordinal =
           count_context->current_run_ordinal;
     }
   } else if (iree_string_view_equal(key,
@@ -290,6 +305,7 @@ iree_status_t InspectPipelineRun(void* user_data, loom_op_t* op,
     counts->sink_single_use_reads_ordinal = count_context->current_run_ordinal;
   } else if (iree_string_view_equal(key, IREE_SV("scf-to-cfg"))) {
     ++counts->scf_to_cfg;
+    counts->last_scf_to_cfg_ordinal = count_context->current_run_ordinal;
     if (counts->first_scf_to_cfg_ordinal == 0) {
       counts->first_scf_to_cfg_ordinal = count_context->current_run_ordinal;
     }
@@ -505,6 +521,13 @@ TEST_F(TargetPipelineTest, ZeroChecksStillMaterializesAuthoredAssertions) {
             counts.boundary_projection_ordinal);
   EXPECT_LT(counts.first_target_legalization_ordinal,
             counts.boundary_projection_ordinal);
+  EXPECT_LT(counts.boundary_projection_ordinal,
+            counts.projected_target_legalization_ordinal);
+  EXPECT_EQ(counts.projected_target_legalization_ordinal,
+            counts.last_target_legalization_ordinal);
+  EXPECT_LT(counts.last_target_legalization_ordinal,
+            counts.last_scf_to_cfg_ordinal);
+  EXPECT_LT(counts.last_scf_to_cfg_ordinal, counts.source_to_low_ordinal);
   EXPECT_LT(counts.boundary_projection_ordinal, counts.source_to_low_ordinal);
   EXPECT_LT(counts.source_to_low_ordinal, counts.last_target_inlining_ordinal);
   EXPECT_LT(counts.source_to_low_ordinal, counts.symbol_dce_ordinal);
