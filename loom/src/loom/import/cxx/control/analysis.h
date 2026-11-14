@@ -18,6 +18,7 @@
 #include <span>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -384,6 +385,9 @@ class ControlFlow final : private cxx::ASTVisitor {
   cxx::ExpressionAST* reference_materialization(cxx::Symbol* binding) const;
   // Whether execution may modify the object named by an indirect parameter.
   bool indirect_parameter_written(cxx::Symbol* parameter) const;
+  // Records a write through storage outside the callable's value bindings.
+  // Calls without an analyzed body conservatively have this effect.
+  bool record_memory_write() { return !std::exchange(writes_memory_, true); }
   // Semantic object type eligible for a private pointer-parameter borrow.
   const cxx::Type* borrowed_pointer_object_type(cxx::Symbol* parameter) const;
   // Whether an eligible pointer parameter must retain its ordinary pointer ABI.
@@ -654,9 +658,9 @@ class ControlFlow final : private cxx::ASTVisitor {
   void retain_destructor_call(const Destruction& destruction,
                               std::optional<CallArgument> receiver,
                               bool current_receiver, cxx::AST* owner);
-  void retain_reference_initializers(cxx::VariableSymbol* variable,
-                                     cxx::ExpressionAST* initializer,
-                                     cxx::AST* owner);
+  void retain_aggregate_reference_identities(
+      const cxx::Type* type, cxx::List<cxx::ExpressionAST*>* elements,
+      cxx::AST* owner);
   static bool append_interval(std::vector<ObjectInterval>& intervals,
                               ObjectInterval interval);
   template <typename Visitor>
@@ -830,6 +834,9 @@ class ControlFlow final : private cxx::ASTVisitor {
   // Only concrete closure call operators classify reference capture uses;
   // synthesized copies transfer references without observing their referents.
   bool observes_reference_captures_ = false;
+  // Direct or transitive memory writes not represented by indirect-parameter
+  // or receiver writebacks. Such writes may alias a stored reference argument.
+  bool writes_memory_ = false;
   // Common origin of every runtime reference return seen in the body.
   ReferenceReturn reference_return_ = ReferenceReturn::None;
   // Source ordinal retained by the allocation-free single-parameter case.

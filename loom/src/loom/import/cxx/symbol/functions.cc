@@ -377,8 +377,12 @@ void Functions::prepare_analysis(cxx::FunctionSymbol* function, Types& types,
       prepare_analysis(call.function, types, functions, calls);
       if (auto* callee = mutable_control_flow(call.function)) {
         calls.push_back({retained, &call, callee});
+        continue;
       }
     }
+    // Only an analyzed source body proves that an indirect argument remains
+    // unchanged. Intrinsics and external calls keep their conservative ABI.
+    retained->record_memory_write();
   }
 }
 

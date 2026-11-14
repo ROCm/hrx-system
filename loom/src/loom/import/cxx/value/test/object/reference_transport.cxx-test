@@ -1,0 +1,486 @@
+// RUN: pass canonicalize,cse,dce
+// Both callers share one constructor. A stored layout must not force the
+// pointer-bearing local View into byte storage in the other caller.
+struct Layout { long stride; };
+struct View {
+  double* pointer;
+  Layout layout;
+  View(double* pointer, const Layout& layout) : pointer(pointer), layout(layout) {}
+};
+long from_memory(double* pointer, const Layout* layouts) {
+  View view(pointer, layouts[0]);
+  return view.layout.stride;
+}
+long from_field(double* pointer, long stride) {
+  View first(pointer, Layout{stride});
+  View second(pointer, first.layout);
+  return second.layout.stride;
+}
+// ----
+func.def public @from_memory(%pointer: buffer, %pointer_byte_offset: offset, %layouts: buffer, %layouts_byte_offset: offset) -> (i64) {
+  %9 = index.cast %layouts_byte_offset : offset to i64
+  %11 = scalar.assume %9 [range(%9, 0, 9223372036854775807)] : i64
+  %12 = index.cast %11 : i64 to offset
+  %15 = buffer.view %layouts[%12] : buffer -> view<1xi64>
+  %16 = view.load<root_in_bounds> %15[0] : view<1xi64> -> i64
+  %view_pointer, %view_pointer_byte_offset, %view_layout_stride = func.call pure @View__View_value(%pointer, %pointer_byte_offset, %16) : (buffer, offset, i64) -> (buffer, offset, i64)
+  func.return %view_layout_stride : i64
+}
+
+func.def public @from_field(%pointer: buffer, %pointer_byte_offset: offset, %stride: i64) -> (i64) {
+  %first_pointer, %first_pointer_byte_offset, %first_layout_stride = func.call pure @View__View_value(%pointer, %pointer_byte_offset, %stride) : (buffer, offset, i64) -> (buffer, offset, i64)
+  %second_pointer, %second_pointer_byte_offset, %second_layout_stride = func.call pure @View__View_value(%pointer, %pointer_byte_offset, %first_layout_stride) : (buffer, offset, i64) -> (buffer, offset, i64)
+  func.return %second_layout_stride : i64
+}
+
+func.def inline @View__View_value(%pointer: buffer, %pointer_byte_offset: offset, %layout_stride: i64) -> (buffer, offset, i64) {
+  func.return %pointer, %pointer_byte_offset, %layout_stride : buffer, offset, i64
+}
+
+// ====
+// Reverse root discovery order and forward scalar/vector references through
+// templates. Value transport depends on observations, not const qualification.
+using Words = unsigned __attribute__((vector_size(16)));
+struct Values { unsigned* pointer; unsigned scalar; Words vector; };
+template <typename T> static T read(T& value) { return value; }
+template <typename T> static T forward(T& value) { return read(value); }
+unsigned from_fields(unsigned* pointer, unsigned scalar, Words vector) {
+  Values values{pointer, scalar, vector};
+  return forward(values.scalar) + forward(values.vector)[1];
+}
+unsigned from_memory(unsigned* scalar, Words* vector) {
+  return forward(*scalar) + forward(*vector)[1];
+}
+// ----
+func.def public @from_fields(%pointer: buffer, %pointer_byte_offset: offset, %scalar: i32, %vector: vector<4xi32>) -> (i32) {
+  %5 = func.call pure @forward_unsigned_int(%scalar) : (i32) -> (i32)
+  %6 = func.call pure @forward_unsigned_int___attribute____vector_size_4___sizeof_unsigned_int____(%vector) : (vector<4xi32>) -> (vector<4xi32>)
+  %36 = vector.extract %6[1] : vector<4xi32> -> i32
+  %10 = scalar.addi %5, %36 : i32
+  func.return %10 : i32
+}
+
+func.def public @from_memory(%scalar: buffer, %scalar_byte_offset: offset, %vector: buffer, %vector_byte_offset: offset) -> (i32) {
+  %16 = buffer.view %scalar[%scalar_byte_offset] : buffer -> view<1xi32>
+  %17 = view.load<root_in_bounds> %16[0] : view<1xi32> -> i32
+  %18 = func.call pure @forward_unsigned_int(%17) : (i32) -> (i32)
+  %19 = buffer.view %vector[%vector_byte_offset] : buffer -> view<4xi32>
+  %20 = vector.load<root_in_bounds> %19[0] : view<4xi32> -> vector<4xi32>
+  %21 = func.call pure @forward_unsigned_int___attribute____vector_size_4___sizeof_unsigned_int____(%20) : (vector<4xi32>) -> (vector<4xi32>)
+  %37 = vector.extract %21[1] : vector<4xi32> -> i32
+  %25 = scalar.addi %18, %37 : i32
+  func.return %25 : i32
+}
+
+func.def @forward_unsigned_int(%value: i32) -> (i32) {
+  %28 = func.call pure @read_unsigned_int(%value) : (i32) -> (i32)
+  func.return %28 : i32
+}
+
+func.def @forward_unsigned_int___attribute____vector_size_4___sizeof_unsigned_int____(%value: vector<4xi32>) -> (vector<4xi32>) {
+  %31 = func.call pure @read_unsigned_int___attribute____vector_size_4___sizeof_unsigned_int____(%value) : (vector<4xi32>) -> (vector<4xi32>)
+  func.return %31 : vector<4xi32>
+}
+
+func.def @read_unsigned_int(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+func.def @read_unsigned_int___attribute____vector_size_4___sizeof_unsigned_int____(%value: vector<4xi32>) -> (vector<4xi32>) {
+  func.return %value : vector<4xi32>
+}
+
+// ====
+// A const reference must observe writes through an independently passed pointer.
+static int observe(const int& value, int* alias) {
+  int before = value;
+  *alias = 9;
+  return before * 10 + value;
+}
+int pointer_alias(int* value) { return observe(*value, value); }
+// ----
+func.def public @pointer_alias(%value: buffer, %value_byte_offset: offset) -> (i32) {
+  %3 = func.call @observe(%value, %value_byte_offset, %value, %value_byte_offset) : (buffer, offset, buffer, offset) -> (i32)
+  func.return %3 : i32
+}
+
+func.def @observe(%value$4: buffer, %value_byte_offset: offset, %alias: buffer, %alias_byte_offset: offset) -> (i32) {
+  %9 = buffer.view %value$4[%value_byte_offset] : buffer -> view<1xi32>
+  %value$10 = view.load<root_in_bounds> %9[0] : view<1xi32> -> i32
+  %11 = scalar.constant 9 : i32
+  %12 = buffer.view %alias[%alias_byte_offset] : buffer -> view<1xi32>
+  view.store<root_in_bounds> %11, %12[0] : i32, view<1xi32>
+  %13 = scalar.constant 10 : i32
+  %14 = scalar.muli %value$10, %13 : i32
+  %value$16 = view.load<root_in_bounds> %9[0] : view<1xi32> -> i32
+  %17 = scalar.addi %14, %value$16 : i32
+  func.return %17 : i32
+}
+
+// ====
+// Writes found through another analyzed call participate in the same fixed point.
+static void modify(int* value) { *value = 9; }
+static int observe(const int& value, int* alias) {
+  int before = value;
+  modify(alias);
+  return before * 10 + value;
+}
+int transitive_alias(int* value) { return observe(*value, value); }
+// ----
+func.def public @transitive_alias(%value: buffer, %value_byte_offset: offset) -> (i32) {
+  %3 = func.call @observe(%value, %value_byte_offset, %value, %value_byte_offset) : (buffer, offset, buffer, offset) -> (i32)
+  func.return %3 : i32
+}
+
+func.def @observe(%value$4: buffer, %value_byte_offset: offset, %alias: buffer, %alias_byte_offset: offset) -> (i32) {
+  %9 = buffer.view %value$4[%value_byte_offset] : buffer -> view<1xi32>
+  %value$10 = view.load<root_in_bounds> %9[0] : view<1xi32> -> i32
+  func.call @modify(%alias, %alias_byte_offset) : (buffer, offset)
+  %11 = scalar.constant 10 : i32
+  %12 = scalar.muli %value$10, %11 : i32
+  %value$14 = view.load<root_in_bounds> %9[0] : view<1xi32> -> i32
+  %15 = scalar.addi %12, %value$14 : i32
+  func.return %15 : i32
+}
+
+func.def @modify(%value: buffer, %value_byte_offset: offset) {
+  %18 = scalar.constant 9 : i32
+  %19 = buffer.view %value[%value_byte_offset] : buffer -> view<1xi32>
+  view.store<root_in_bounds> %18, %19[0] : i32, view<1xi32>
+  func.return
+}
+
+// ====
+// A stored receiver can alias an explicit reference parameter.
+struct Record {
+  int value;
+  int observe(const int& alias) {
+    int before = alias;
+    value = 9;
+    return before * 10 + alias;
+  }
+};
+int receiver_alias(Record* value) { return value->observe(value->value); }
+// ----
+func.def public @receiver_alias(%value: buffer, %value_byte_offset: offset) -> (i32) {
+  %5 = func.call @Record__observe_storage(%value, %value_byte_offset, %value, %value_byte_offset) : (buffer, offset, buffer, offset) -> (i32)
+  func.return %5 : i32
+}
+
+func.def @Record__observe_storage(%this: buffer, %this_byte_offset: offset, %alias$8: buffer, %alias_byte_offset: offset) -> (i32) {
+  %11 = buffer.view %alias$8[%alias_byte_offset] : buffer -> view<1xi32>
+  %alias$12 = view.load<root_in_bounds> %11[0] : view<1xi32> -> i32
+  %13 = scalar.constant 9 : i32
+  %16 = buffer.view %this[%this_byte_offset] : buffer -> view<1xi32>
+  view.store<root_in_bounds> %13, %16[0] : i32, view<1xi32>
+  %17 = scalar.constant 10 : i32
+  %18 = scalar.muli %alias$12, %17 : i32
+  %alias$20 = view.load<root_in_bounds> %11[0] : view<1xi32> -> i32
+  %21 = scalar.addi %18, %alias$20 : i32
+  func.return %21 : i32
+}
+
+// ====
+// Receiver writes must also reach a caller that reads a separate reference.
+struct Record {
+  int value;
+  void modify() { value = 9; }
+};
+static int observe(const int& value, Record* alias) {
+  int before = value;
+  alias->modify();
+  return before * 10 + value;
+}
+int transitive_receiver(Record* value) { return observe(value->value, value); }
+// ----
+func.def public @transitive_receiver(%value: buffer, %value_byte_offset: offset) -> (i32) {
+  %5 = func.call @observe(%value, %value_byte_offset, %value, %value_byte_offset) : (buffer, offset, buffer, offset) -> (i32)
+  func.return %5 : i32
+}
+
+func.def @observe(%value$6: buffer, %value_byte_offset: offset, %alias: buffer, %alias_byte_offset: offset) -> (i32) {
+  %11 = buffer.view %value$6[%value_byte_offset] : buffer -> view<1xi32>
+  %value$12 = view.load<root_in_bounds> %11[0] : view<1xi32> -> i32
+  func.call @Record__modify_storage(%alias, %alias_byte_offset) : (buffer, offset)
+  %13 = scalar.constant 10 : i32
+  %14 = scalar.muli %value$12, %13 : i32
+  %value$16 = view.load<root_in_bounds> %11[0] : view<1xi32> -> i32
+  %17 = scalar.addi %14, %value$16 : i32
+  func.return %17 : i32
+}
+
+func.def @Record__modify_storage(%this: buffer, %this_byte_offset: offset) {
+  %20 = scalar.constant 9 : i32
+  %23 = buffer.view %this[%this_byte_offset] : buffer -> view<1xi32>
+  view.store<root_in_bounds> %20, %23[0] : i32, view<1xi32>
+  func.return
+}
+
+// ====
+// Unmodeled calls cannot establish that a reference is stable across the call.
+[[loom::import("external", "modify")]] void modify(int* value);
+static int observe(const int& value, int* alias) {
+  int before = value;
+  modify(alias);
+  return before * 10 + value;
+}
+int external_alias(int* value) { return observe(*value, value); }
+// ----
+func.def public @external_alias(%value: buffer, %value_byte_offset: offset) -> (i32) {
+  %3 = func.call @observe(%value, %value_byte_offset, %value, %value_byte_offset) : (buffer, offset, buffer, offset) -> (i32)
+  func.return %3 : i32
+}
+
+func.def @observe(%value$4: buffer, %value_byte_offset: offset, %alias: buffer, %alias_byte_offset: offset) -> (i32) {
+  %9 = buffer.view %value$4[%value_byte_offset] : buffer -> view<1xi32>
+  %value$10 = view.load<root_in_bounds> %9[0] : view<1xi32> -> i32
+  func.call @modify(%alias, %alias_byte_offset) : (buffer, offset)
+  %11 = scalar.constant 10 : i32
+  %12 = scalar.muli %value$10, %11 : i32
+  %value$14 = view.load<root_in_bounds> %9[0] : view<1xi32> -> i32
+  %15 = scalar.addi %12, %value$14 : i32
+  func.return %15 : i32
+}
+
+func.decl import("external", "modify") @modify(%16: buffer, %17: offset)
+
+// ====
+// A volatile subobject requires each source read, even through a const record.
+struct Record { volatile int value; };
+static int observe(const Record& value) { return value.value + value.value; }
+int volatile_member(const Record* value) { return observe(*value); }
+// ----
+func.def public @volatile_member(%value: buffer, %value_byte_offset: offset) -> (i32) {
+  %3 = func.call @observe(%value, %value_byte_offset) : (buffer, offset) -> (i32)
+  func.return %3 : i32
+}
+
+func.def @observe(%value: buffer, %value_byte_offset: offset) -> (i32) {
+  %9 = buffer.view %value[%value_byte_offset] : buffer -> view<1xi32>
+  %value_value$10 = view.load<volatile|root_in_bounds> %9[0] : view<1xi32> -> i32
+  %value_value$14 = view.load<volatile|root_in_bounds> %9[0] : view<1xi32> -> i32
+  %15 = scalar.addi %value_value$10, %value_value$14 : i32
+  func.return %15 : i32
+}
+
+// ====
+// Mutable members are writes despite the const-qualified reference.
+struct Record { mutable int value; };
+static int observe(const Record& value, const int& alias) {
+  int before = alias;
+  value.value = 9;
+  return before * 10 + alias;
+}
+int mutable_member(const Record* value) { return observe(*value, value->value); }
+// ----
+func.def public @mutable_member(%value: buffer, %value_byte_offset: offset) -> (i32) {
+  %5 = func.call @observe(%value, %value_byte_offset, %value, %value_byte_offset) : (buffer, offset, buffer, offset) -> (i32)
+  func.return %5 : i32
+}
+
+func.def @observe(%value: buffer, %value_byte_offset: offset, %alias$8: buffer, %alias_byte_offset: offset) -> (i32) {
+  %11 = buffer.view %alias$8[%alias_byte_offset] : buffer -> view<1xi32>
+  %alias$12 = view.load<root_in_bounds> %11[0] : view<1xi32> -> i32
+  %13 = scalar.constant 9 : i32
+  %16 = buffer.view %value[%value_byte_offset] : buffer -> view<1xi32>
+  view.store<root_in_bounds> %13, %16[0] : i32, view<1xi32>
+  %17 = scalar.constant 10 : i32
+  %18 = scalar.muli %alias$12, %17 : i32
+  %alias$20 = view.load<root_in_bounds> %11[0] : view<1xi32> -> i32
+  %21 = scalar.addi %18, %alias$20 : i32
+  func.return %21 : i32
+}
+
+// ====
+// Address observation requires the original object even without any write.
+static bool same(const int& left, const int& right) { return &left == &right; }
+bool reference_identity(const int* left, const int* right) { return same(*left, *right); }
+// ----
+func.def public @reference_identity(%left: buffer, %left_byte_offset: offset, %right: buffer, %right_byte_offset: offset) -> (i1) {
+  %5 = func.call pure @same(%left, %left_byte_offset, %right, %right_byte_offset) : (buffer, offset, buffer, offset) -> (i1)
+  func.return %5 : i1
+}
+
+func.def @same(%left: buffer, %left_byte_offset: offset, %right: buffer, %right_byte_offset: offset) -> (i1) {
+  %11 = buffer.compare.address eq, %left[%left_byte_offset], %right[%right_byte_offset]
+  func.return %11 : i1
+}
+
+// ====
+// Returning a reference preserves its origin for a later address observation.
+static const int& borrow(const int& value) { return value; }
+const int* escape(const int* value) { return &borrow(*value); }
+// ----
+func.def public @escape(%value: buffer, %value_byte_offset: offset) -> (buffer, offset) {
+  func.return %value, %value_byte_offset : buffer, offset
+}
+
+func.def @borrow(%value: buffer, %value_byte_offset: offset) {
+  func.return
+}
+
+// ====
+// A plain helper returning a pointer-bearing value has the same contract as a
+// constructor, including references to nested subobjects.
+struct Layout { unsigned stride; unsigned width; };
+struct View { float* pointer; Layout layout; };
+struct Tile { View view; unsigned count; };
+static View make(float* pointer, const Layout& layout) { return {pointer, layout}; }
+unsigned from_local(float* pointer, unsigned stride) {
+  Tile tile{make(pointer, Layout{stride, 4}), 2};
+  View copied = make(pointer, tile.view.layout);
+  return copied.layout.stride + copied.layout.width;
+}
+unsigned from_memory(float* pointer, const Layout* layouts) {
+  View view = make(pointer, *layouts);
+  return view.layout.stride + view.layout.width;
+}
+// ----
+func.def public @from_local(%pointer: buffer, %pointer_byte_offset: offset, %stride: i32) -> (i32) {
+  %4 = scalar.constant 4 : i32
+  %tile_view_pointer, %tile_view_pointer_byte_offset, %tile_view_layout_stride, %tile_view_layout_width = func.call pure @make(%pointer, %pointer_byte_offset, %stride, %4) : (buffer, offset, i32, i32) -> (buffer, offset, i32, i32)
+  %copied_pointer, %copied_pointer_byte_offset, %copied_layout_stride, %copied_layout_width = func.call pure @make(%pointer, %pointer_byte_offset, %tile_view_layout_stride, %tile_view_layout_width) : (buffer, offset, i32, i32) -> (buffer, offset, i32, i32)
+  %14 = scalar.addi %copied_layout_stride, %copied_layout_width : i32
+  func.return %14 : i32
+}
+
+func.def public @from_memory(%pointer: buffer, %pointer_byte_offset: offset, %layouts: buffer, %layouts_byte_offset: offset) -> (i32) {
+  %22 = buffer.view %layouts[%layouts_byte_offset] : buffer -> view<1xi32>
+  %23 = view.load<root_in_bounds> %22[0] : view<1xi32> -> i32
+  %24 = index.constant 4 : offset
+  %25 = index.add %layouts_byte_offset, %24 : offset
+  %26 = buffer.view %layouts[%25] : buffer -> view<1xi32>
+  %27 = view.load<root_in_bounds> %26[0] : view<1xi32> -> i32
+  %view_pointer, %view_pointer_byte_offset, %view_layout_stride, %view_layout_width = func.call pure @make(%pointer, %pointer_byte_offset, %23, %27) : (buffer, offset, i32, i32) -> (buffer, offset, i32, i32)
+  %32 = scalar.addi %view_layout_stride, %view_layout_width : i32
+  func.return %32 : i32
+}
+
+func.def @make(%pointer: buffer, %pointer_byte_offset: offset, %layout_stride: i32, %layout_width: i32) -> (buffer, offset, i32, i32) {
+  func.return %pointer, %pointer_byte_offset, %layout_stride, %layout_width : buffer, offset, i32, i32
+}
+
+// ====
+// A reference stored in a member is an alias, not a replaced receiver field.
+struct Reference {
+  int& value;
+  void modify() { value = 9; }
+};
+static int observe(const int& value, Reference& alias) {
+  int before = value;
+  alias.modify();
+  return before * 10 + value;
+}
+int member_reference(int* value) {
+  Reference reference{*value};
+  return observe(*value, reference);
+}
+// ----
+func.def public @member_reference(%value: buffer, %value_byte_offset: offset) -> (i32) {
+  %3 = func.call @observe(%value, %value_byte_offset, %value, %value_byte_offset) : (buffer, offset, buffer, offset) -> (i32)
+  func.return %3 : i32
+}
+
+func.def @observe(%value$4: buffer, %value_byte_offset: offset, %alias_value: buffer, %alias_value_byte_offset: offset) -> (i32) {
+  %9 = buffer.view %value$4[%value_byte_offset] : buffer -> view<1xi32>
+  %value$10 = view.load<root_in_bounds> %9[0] : view<1xi32> -> i32
+  func.call @Reference__modify_value(%alias_value, %alias_value_byte_offset) : (buffer, offset)
+  %11 = scalar.constant 10 : i32
+  %12 = scalar.muli %value$10, %11 : i32
+  %value$14 = view.load<root_in_bounds> %9[0] : view<1xi32> -> i32
+  %15 = scalar.addi %12, %value$14 : i32
+  func.return %15 : i32
+}
+
+func.def @Reference__modify_value(%this_value: buffer, %this_value_byte_offset: offset) {
+  %18 = scalar.constant 9 : i32
+  %19 = buffer.view %this_value[%this_value_byte_offset] : buffer -> view<1xi32>
+  view.store<root_in_bounds> %18, %19[0] : i32, view<1xi32>
+  func.return
+}
+
+// ====
+// An escaped reference inside a returned record also keeps the original object.
+struct Borrow { const int& value; };
+static Borrow capture(const int& value) { return {value}; }
+int escaped_member(int* value) {
+  Borrow borrowed = capture(*value);
+  *value = 9;
+  return borrowed.value;
+}
+// ----
+func.def public @escaped_member(%value$0: buffer, %value_byte_offset: offset) -> (i32) {
+  %borrowed_value, %borrowed_value_byte_offset = func.call pure @capture(%value$0, %value_byte_offset) : (buffer, offset) -> (buffer, offset)
+  %5 = scalar.constant 9 : i32
+  %6 = buffer.view %value$0[%value_byte_offset] : buffer -> view<1xi32>
+  view.store<root_in_bounds> %5, %6[0] : i32, view<1xi32>
+  %7 = buffer.view %borrowed_value[%borrowed_value_byte_offset] : buffer -> view<1xi32>
+  %value$8 = view.load<root_in_bounds> %7[0] : view<1xi32> -> i32
+  func.return %value$8 : i32
+}
+
+func.def @capture(%value: buffer, %value_byte_offset: offset) -> (buffer, offset) {
+  func.return %value, %value_byte_offset : buffer, offset
+}
+
+// ====
+// Parenthesized aggregates, nested aggregates, and member initializers all
+// create reference bindings at the initialization site, including temporaries.
+struct Borrow { const int& value; };
+struct Pair { Borrow values[2]; };
+struct Constructed {
+  const int& value;
+  Constructed(const int& source) : value(source) {}
+};
+static Borrow capture_parenthesized(const int& value) { return Borrow(value); }
+static Pair capture_nested(const int& left, const int& right) { return {{{left}, {right}}}; }
+static Constructed capture_constructed(const int& value) { return Constructed(value); }
+int escaped_initializers(int* left, int* right) {
+  auto parenthesized = capture_parenthesized(*left);
+  auto nested = capture_nested(*left, *right);
+  auto constructed = capture_constructed(*right);
+  *left = 3;
+  *right = 7;
+  return parenthesized.value + nested.values[0].value + nested.values[1].value + constructed.value;
+}
+// ----
+func.def public @escaped_initializers(%left: buffer, %left_byte_offset: offset, %right: buffer, %right_byte_offset: offset) -> (i32) {
+  %parenthesized_value, %parenthesized_value_byte_offset = func.call pure @capture_parenthesized(%left, %left_byte_offset) : (buffer, offset) -> (buffer, offset)
+  %nested_values_0_value, %nested_values_0_value_byte_offset, %nested_values_1_value, %nested_values_1_value_byte_offset = func.call pure @capture_nested(%left, %left_byte_offset, %right, %right_byte_offset) : (buffer, offset, buffer, offset) -> (buffer, offset, buffer, offset)
+  %constructed_value, %constructed_value_byte_offset = func.call pure @capture_constructed(%right, %right_byte_offset) : (buffer, offset) -> (buffer, offset)
+  %13 = scalar.constant 3 : i32
+  %14 = buffer.view %left[%left_byte_offset] : buffer -> view<1xi32>
+  view.store<root_in_bounds> %13, %14[0] : i32, view<1xi32>
+  %15 = scalar.constant 7 : i32
+  %16 = buffer.view %right[%right_byte_offset] : buffer -> view<1xi32>
+  view.store<root_in_bounds> %15, %16[0] : i32, view<1xi32>
+  %17 = buffer.view %parenthesized_value[%parenthesized_value_byte_offset] : buffer -> view<1xi32>
+  %value$18 = view.load<root_in_bounds> %17[0] : view<1xi32> -> i32
+  %20 = buffer.view %nested_values_0_value[%nested_values_0_value_byte_offset] : buffer -> view<1xi32>
+  %value$21 = view.load<root_in_bounds> %20[0] : view<1xi32> -> i32
+  %22 = scalar.addi %value$18, %value$21 : i32
+  %24 = buffer.view %nested_values_1_value[%nested_values_1_value_byte_offset] : buffer -> view<1xi32>
+  %value$25 = view.load<root_in_bounds> %24[0] : view<1xi32> -> i32
+  %26 = scalar.addi %22, %value$25 : i32
+  %27 = buffer.view %constructed_value[%constructed_value_byte_offset] : buffer -> view<1xi32>
+  %value$28 = view.load<root_in_bounds> %27[0] : view<1xi32> -> i32
+  %29 = scalar.addi %26, %value$28 : i32
+  func.return %29 : i32
+}
+
+func.def @capture_parenthesized(%value: buffer, %value_byte_offset: offset) -> (buffer, offset) {
+  func.return %value, %value_byte_offset : buffer, offset
+}
+
+func.def @capture_nested(%left: buffer, %left_byte_offset: offset, %right: buffer, %right_byte_offset: offset) -> (buffer, offset, buffer, offset) {
+  func.return %left, %left_byte_offset, %right, %right_byte_offset : buffer, offset, buffer, offset
+}
+
+func.def @capture_constructed(%value: buffer, %value_byte_offset: offset) -> (buffer, offset) {
+  %46, %47 = func.call pure @Constructed__Constructed_value(%value, %value_byte_offset) : (buffer, offset) -> (buffer, offset)
+  func.return %46, %47 : buffer, offset
+}
+
+func.def inline @Constructed__Constructed_value(%source: buffer, %source_byte_offset: offset) -> (buffer, offset) {
+  func.return %source, %source_byte_offset : buffer, offset
+}

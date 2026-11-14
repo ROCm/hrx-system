@@ -441,12 +441,17 @@ ControlFlow::ControlFlow(cxx::TranslationUnit& unit, Diagnostics& diagnostics,
         append_identity({parameter, 0, nullptr}, identity);
         pointer_aliases_.emplace(
             parameter, PointerAlias{nullptr, object_type, std::move(identity)});
-      } else if (traits.is_reference(parameter->type()) &&
-                 !traits.is_array(type) && !traits.is_volatile(type)) {
-        construction_.declare_parameter(
-            parameter,
-            types_.partition(types_.unqualified(type), function_->declaration())
-                .component_count);
+      } else if (traits.is_reference(parameter->type())) {
+        if (types_.has_volatile_subobject(type)) {
+          storage_references_.insert(parameter);
+        }
+        if (!traits.is_array(type) && !traits.is_volatile(type)) {
+          construction_.declare_parameter(
+              parameter,
+              types_
+                  .partition(types_.unqualified(type), function_->declaration())
+                  .component_count);
+        }
       }
       retain_automatic_destruction(parameter, function_->declaration());
     }
@@ -2183,6 +2188,7 @@ void ControlFlow::visit(cxx::CallExpressionAST* ast) {
     return;
   }
   if (!function) {
+    record_memory_write();
     return;
   }
   retain_call(ast, function);
@@ -2375,17 +2381,6 @@ void ControlFlow::analyze_default_constructor(const cxx::Type* type,
   auto enclosing_owners = std::move(owners_);
   owners_.clear();
   for (auto* initializer : cxx::ListView{cxx::ctor_initializers(constructor)}) {
-    auto* field = cxx::symbol_cast<cxx::FieldSymbol>(initializer->symbol);
-    if (field && unit_.typeTraits().is_lvalue_reference(field->type())) {
-      auto* source = cxx::memInitializerClause(unit_.arena(), initializer);
-      auto* referent = reference_initializer(unit_, source);
-      if (!referent) {
-        diagnostics_.reject(unit_, source,
-                            "reference members require one initializer "
-                            "expression");
-      }
-      require_identity(referent);
-    }
     accept(initializer);
     auto* empty = cxx::ast_cast<cxx::ParenMemInitializerAST>(initializer);
     if (empty && !empty->lparenLoc && !empty->expressionList) {
@@ -3207,6 +3202,12 @@ bool ControlFlow::record_callable_write(cxx::Symbol* binding) {
   if (!binding) {
     return false;
   }
+  if (auto* variable = cxx::symbol_cast<cxx::VariableSymbol>(binding);
+      variable && (variable->isStatic() || variable->isExtern() ||
+                   cxx::symbol_cast<cxx::NamespaceSymbol>(
+                       variable->canonical()->parent()))) {
+    return record_memory_write();
+  }
   if (auto found = pointer_aliases_.find(binding);
       found != pointer_aliases_.end() && found->second.parameter_object_type) {
     return written_indirect_parameters_.insert(binding).second;
@@ -3220,7 +3221,9 @@ bool ControlFlow::record_callable_write(cxx::Symbol* binding) {
   }
   if (!is_direct_subobject(binding) ||
       traits.is_lvalue_reference(source_object_type(binding))) {
-    return false;
+    return cxx::symbol_cast<cxx::FieldSymbol>(binding) &&
+           traits.is_reference(source_object_type(binding)) &&
+           record_memory_write();
   }
   return add_receiver_write(binding);
 }
@@ -3341,7 +3344,7 @@ bool ControlFlow::record_projected_write(const CallArgument& argument,
   // Storage origins keep addresses live; writing through them does not replace
   // the pointer or array binding that supplied the address.
   if (argument.inherent_storage) {
-    return false;
+    return effect == WriteEffect::Callable && record_memory_write();
   }
   bool changed = false;
   visit_intervals(argument, projection, [&](ObjectInterval interval) {
@@ -3581,29 +3584,31 @@ void ControlFlow::select_constructor_receiver_storage() {
   }
 }
 
-void ControlFlow::retain_reference_initializers(cxx::VariableSymbol* variable,
-                                                cxx::ExpressionAST* initializer,
-                                                cxx::AST* owner) {
-  if (!initializer || variable->isStructuredBindingAlias() ||
-      unit_.typeTraits().is_reference(variable->type()) ||
-      !unit_.typeTraits().is_class(variable->type())) {
+void ControlFlow::retain_aggregate_reference_identities(
+    const cxx::Type* type, cxx::List<cxx::ExpressionAST*>* elements,
+    cxx::AST* owner) {
+  auto traits = unit_.typeTraits();
+  if (!elements || !traits.is_class(type) || !traits.is_aggregate(type)) {
     return;
   }
-  auto* record = types_.record(types_.unqualified(variable->type()), owner);
+  auto* record = types_.record(types_.unqualified(type), owner);
   if (!record) {
     return;
   }
-  cxx::Initializer source(initializer);
-  auto arguments = source.arguments();
-  if (arguments.size() == 1 && types_.unqualified(arguments[0]->type) ==
-                                   types_.unqualified(variable->type())) {
+  // Copy construction transfers existing bindings instead of creating a new
+  // reference to the source record itself.
+  if (!elements->next &&
+      types_.unqualified(elements->value->type) == types_.unqualified(type)) {
     return;
   }
-  const size_t count = std::min(arguments.size(), record->members.size());
-  for (size_t index = 0; index < count; ++index) {
-    if (unit_.typeTraits().is_lvalue_reference(record->members[index].type())) {
-      require_identity(arguments[index]);
+  for (const auto& member : record->members) {
+    if (!elements) {
+      break;
     }
+    if (traits.is_reference(member.type())) {
+      require_identity(elements->value);
+    }
+    elements = elements->next;
   }
 }
 
@@ -4112,6 +4117,22 @@ CallPropagation ControlFlow::propagate_call(
     iree_arena_allocator_t* scratch_arena) {
   bool caller_changed = propagate_projected_reference_return(call, callee);
   bool callee_changed = false;
+  const bool stored_receiver_write =
+      !callee.receiver_writes().empty() &&
+      (call.storage_receiver || callee.receiver_requires_storage_ ||
+       (call.current_receiver && receiver_requires_storage_) ||
+       (call.receiver && argument_requires_storage(*call.receiver)));
+  if (callee.writes_memory_ || stored_receiver_write) {
+    caller_changed = record_memory_write() || caller_changed;
+  }
+  // Value transport snapshots a reference at the call boundary. A write can
+  // change it through another alias; a returned reference can expose a stored
+  // subobject whose identity must survive the call. Other identity and volatile
+  // demands still select storage independently below.
+  const bool observes_reference_storage =
+      callee.writes_memory_ || !callee.written_indirect_parameters_.empty() ||
+      stored_receiver_write ||
+      callee.reference_return_ != ReferenceReturn::None;
   if (object_identity_ && callee.object_identity_ &&
       (object_requires_storage(call.source) ||
        callee.result_requires_storage())) {
@@ -4157,7 +4178,8 @@ CallPropagation ControlFlow::propagate_call(
       callee_changed =
           callee.require_reference_storage(parameter) || callee_changed;
     }
-    if (argument_requires_storage(argument, StorageDemand::Identity)) {
+    if ((!reference || observes_reference_storage) &&
+        argument_requires_storage(argument, StorageDemand::Identity)) {
       callee_changed =
           (reference ? callee.require_reference_storage(parameter)
                      : callee.require_borrowed_pointer_storage(parameter)) ||
@@ -4680,7 +4702,6 @@ void ControlFlow::visit(cxx::InitDeclaratorAST* ast) {
       temporary_origins_.extend_members(initializer);
     }
     if (!folded_constant) {
-      retain_reference_initializers(variable, initializer, ast);
       retain_constructor(variable, initializer, ast);
     }
     retain_automatic_storage(variable, initializer);
@@ -4802,6 +4823,18 @@ bool ControlFlow::retain_array_copy(const cxx::Type* type,
 void ControlFlow::retain_member_constructor(
     cxx::MemInitializerAST* initializer) {
   if (auto* field = cxx::symbol_cast<cxx::FieldSymbol>(initializer->symbol);
+      field && unit_.typeTraits().is_reference(field->type())) {
+    auto* source = cxx::memInitializerClause(unit_.arena(), initializer);
+    auto* referent = reference_initializer(unit_, source);
+    if (!referent) {
+      diagnostics_.reject(unit_, source,
+                          "reference members require one initializer "
+                          "expression");
+    }
+    require_identity(referent);
+    return;
+  }
+  if (auto* field = cxx::symbol_cast<cxx::FieldSymbol>(initializer->symbol);
       field && unit_.typeTraits().is_array(field->type()) &&
       retain_array_copy(field->type(),
                         cxx::memInitializerClause(unit_.arena(), initializer),
@@ -4869,7 +4902,6 @@ void ControlFlow::visit(cxx::ConditionExpressionAST* ast) {
   cxx::ASTVisitor::visit(ast);
   if (ast->symbol) {
     temporary_origins_.extend_members(ast->initializer);
-    retain_reference_initializers(ast->symbol, ast->initializer, ast);
     retain_constructor(ast->symbol, ast->initializer, ast);
     retain_automatic_storage(ast->symbol, ast->initializer);
     analyze_default_constructor(ast->symbol->type(), ast->symbol->constructor(),
@@ -4891,6 +4923,8 @@ void ControlFlow::visit(cxx::BracedInitListAST* ast) {
   for (auto* element : cxx::ListView{cxx::Initializer(ast).expressionList()}) {
     accept(element);
   }
+  retain_aggregate_reference_identities(
+      ast->type, cxx::Initializer(ast).expressionList(), ast);
   if (!ast->implicitElement) {
     return;
   }
@@ -4903,10 +4937,13 @@ void ControlFlow::visit(cxx::ParenInitializerAST* ast) {
   for (auto* element : cxx::ListView{cxx::Initializer(ast).expressionList()}) {
     accept(element);
   }
+  retain_aggregate_reference_identities(
+      ast->type, cxx::Initializer(ast).expressionList(), ast);
 }
 
 void ControlFlow::visit(cxx::TypeConstructionAST* ast) {
   cxx::ASTVisitor::visit(ast);
+  retain_aggregate_reference_identities(ast->type, ast->expressionList, ast);
   if (types_.record_constructor_requires_call(ast->type, ast->constructorSymbol,
                                               ast)) {
     retain_constructor_call(ast->constructorSymbol, ast, CallArgument{},
