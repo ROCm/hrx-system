@@ -98,6 +98,9 @@ option(LOOM_IMPORT_CXX
   "Enables the native Loom C/C++ importer, tools, and binding." OFF)
 option(LOOM_IMPORT_CXX_EMBED_INCLUDES
   "Embeds Loom C++ and HIP source headers in the C++ importer." ON)
+cmake_dependent_option(LOOM_CXX_HOST_CODEGEN
+  "Builds loom-cxx, the single-source C++ driver that parses each translation unit once for host code generation (cxx's MLIR/LLVM back end) and device import. Needs MLIR_DIR/LLVM_DIR for an MLIR >= 21 install; the importer then links cxx's own parser library."
+  OFF "LOOM_IMPORT_CXX" OFF)
 
 set(_LOOM_SERVE_MEDIA_HOST OFF)
 if(CMAKE_SYSTEM_NAME MATCHES "^(Linux|Darwin|Windows)$")
