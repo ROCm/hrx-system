@@ -180,6 +180,24 @@ py_test(
     deps = [":windows_diagnostics"],
 )
 
+py_binary(
+    name = "windows_cache_handoff",
+    srcs = ["windows_cache_handoff.py"],
+    data = ["//build_tools/windows/cache_handoff:build_defs.bzl"],
+    visibility = ["//visibility:public"],
+)
+
+py_test(
+    name = "windows_cache_handoff_test",
+    size = "small",
+    srcs = [
+        "windows_cache_handoff.py",
+        "windows_cache_handoff_test.py",
+    ],
+    data = ["//build_tools/windows/cache_handoff:build_defs.bzl"],
+    main = "windows_cache_handoff_test.py",
+)
+
 py_test(
     name = "windows_stl_asan_test",
     size = "small",

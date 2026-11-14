@@ -286,7 +286,10 @@ def _test_cc_binary_preserves_rules_cc_providers(name, **kwargs):
     util.helper_target(
         iree_cc_binary,
         name = name + "_subject",
-        args = ["--binary-argument"],
+        args = [
+            "'--binary argument'",
+            "--binary-argument",
+        ],
         env = {"IREE_TEST_BINARY_ENV": "binary"},
         srcs = [name + "_subject.cc"],
         tags = ["manual"],
@@ -302,7 +305,7 @@ def _test_cc_binary_preserves_rules_cc_providers(name, **kwargs):
 def _test_cc_binary_preserves_rules_cc_providers_impl(env, target):
     _expect_cc_executable_providers(env, target)
     attrs = target[TestingAspectInfo].attrs
-    if attrs.args != ["--binary-argument"]:
+    if attrs.args != ["'--binary argument'", "--binary-argument"]:
         env.fail("expected rules_cc binary arguments, got %r" % attrs.args)
     env.expect.that_str(
         target[RunEnvironmentInfo].environment["IREE_TEST_BINARY_ENV"],
@@ -311,8 +314,15 @@ def _test_cc_binary_preserves_rules_cc_providers_impl(env, target):
         env.fail("binary without a bundle received a dynamic-library environment")
     if IreeRunfilesEnvironmentInfo in target:
         env.fail("binary without a bundle received runfiles environment metadata")
-    if IreeRunfilesArgumentsInfo in target:
-        env.fail("binary without runfile arguments received argument metadata")
+    runfiles_arguments = target[IreeRunfilesArgumentsInfo]
+    env.expect.that_collection(runfiles_arguments.arguments).contains_exactly([
+        "--binary argument",
+        "--binary-argument",
+    ]).in_order()
+    env.expect.that_collection(runfiles_arguments.marked_arguments).contains_exactly([
+        "--binary argument",
+        "--binary-argument",
+    ]).in_order()
 
 def _test_cc_binary_injects_dynamic_library_bindings(name, **kwargs):
     util.helper_target(
@@ -507,7 +517,10 @@ def _test_cc_test_preserves_rules_cc_providers(name, **kwargs):
     util.helper_target(
         iree_cc_test,
         name = name + "_subject",
-        args = ["--test-argument"],
+        args = [
+            "'--test argument'",
+            "--test-argument",
+        ],
         env = {"IREE_TEST_RULE_ENV": "test"},
         env_inherit = ["IREE_TEST_INHERITED_ENV"],
         shard_count = 2,
@@ -525,7 +538,7 @@ def _test_cc_test_preserves_rules_cc_providers(name, **kwargs):
 def _test_cc_test_preserves_rules_cc_providers_impl(env, target):
     _expect_cc_executable_providers(env, target)
     attrs = target[TestingAspectInfo].attrs
-    if attrs.args != ["--test-argument"]:
+    if attrs.args != ["'--test argument'", "--test-argument"]:
         env.fail("expected rules_cc test arguments, got %r" % attrs.args)
     if attrs.shard_count != 2:
         env.fail("expected rules_cc test shard count, got %r" % attrs.shard_count)
@@ -542,8 +555,15 @@ def _test_cc_test_preserves_rules_cc_providers_impl(env, target):
         env.fail("test without a bundle received a dynamic-library environment")
     if IreeRunfilesEnvironmentInfo in target:
         env.fail("test without a bundle received runfiles environment metadata")
-    if IreeRunfilesArgumentsInfo in target:
-        env.fail("test without runfile arguments received argument metadata")
+    runfiles_arguments = target[IreeRunfilesArgumentsInfo]
+    env.expect.that_collection(runfiles_arguments.arguments).contains_exactly([
+        "--test argument",
+        "--test-argument",
+    ]).in_order()
+    env.expect.that_collection(runfiles_arguments.marked_arguments).contains_exactly([
+        "--test argument",
+        "--test-argument",
+    ]).in_order()
 
 def _test_cc_test_injects_dynamic_library_bindings(name, **kwargs):
     util.helper_target(
