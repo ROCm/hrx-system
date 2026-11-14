@@ -33,6 +33,15 @@
 namespace loom {
 namespace {
 
+template <typename ProviderList>
+void ExpectExplicitScopes(ProviderList providers) {
+  for (iree_host_size_t i = 0; i < providers.count; ++i) {
+    const auto* provider = providers.values[i];
+    EXPECT_TRUE(loom_low_descriptor_scope_is_valid(provider->scope))
+        << std::string(provider->name.data, provider->name.size);
+  }
+}
+
 TEST(ConfiguredCompilerProviderSetTest, ComposesSelectedTargetCompilers) {
   const loom_target_provider_set_t* emitter_provider_set =
       loom_configured_emitter_provider_set();
@@ -54,13 +63,15 @@ TEST(ConfiguredCompilerProviderSetTest, ComposesSelectedTargetCompilers) {
   loom_target_environment_t environment;
   IREE_ASSERT_OK(
       loom_target_environment_initialize(compiler_provider_set, &environment));
-  const loom_target_legalizer_provider_list_t legalizers =
-      loom_target_environment_legalizer_provider_list(&environment);
-  for (iree_host_size_t i = 0; i < legalizers.count; ++i) {
-    const loom_target_legalizer_provider_t* provider = legalizers.values[i];
-    EXPECT_TRUE(loom_low_descriptor_scope_is_valid(provider->scope))
-        << std::string(provider->name.data, provider->name.size);
-  }
+  ExpectExplicitScopes(
+      loom_target_environment_legalizer_provider_list(&environment));
+  ExpectExplicitScopes(
+      loom_target_environment_low_legality_provider_list(&environment));
+  ExpectExplicitScopes(
+      loom_target_environment_low_packet_diagnostic_provider_list(
+          &environment));
+  ExpectExplicitScopes(
+      loom_target_environment_low_verify_provider_list(&environment));
   EXPECT_EQ(loom_target_environment_lookup_emitter(&environment,
                                                    IREE_SV("x86-elf")) != NULL,
             static_cast<bool>(LOOM_CONFIG_COMPILER_HAVE_X86));

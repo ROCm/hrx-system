@@ -1,7 +1,8 @@
 // RUN: with-checks compile-report target-legalize{mode=final},source-to-low
 
 // Keep every AMDGPU vector storage family native through target legalization
-// and selected by source-to-Low lowering. Exact lowering cases separately cover
+// and selected by source-to-Low lowering. Unrelated linked targets must not add
+// legalization decisions for these native operations. Exact cases separately cover
 // both literal-selector and register-selector byte-permutation packet forms.
 
 amdgpu.target<gfx11-generic> @target
@@ -125,5 +126,5 @@ func.def target(@target) @last_axis(%even: vector<2x1xi64>, %odd: vector<2x1xi64
 
 // ----
 CHECK: COMPILE-REPORT: source_low selected_ops=38 * rows=38 *
-CHECK-NOT: COMPILE-REPORT: target_legalization[*] * action=rewritten *
+CHECK-NOT: COMPILE-REPORT: target_legalization[*] *
 CHECK-NOT: scalarized=true

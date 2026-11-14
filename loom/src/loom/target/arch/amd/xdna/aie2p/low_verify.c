@@ -211,13 +211,6 @@ static iree_status_t loom_aie2p_low_verify_begin_function(
   *out_provider_state = NULL;
   const loom_low_resolved_target_t* target =
       loom_low_verify_context_target(context);
-  if (target->descriptor_set == NULL ||
-      (target->descriptor_set->stable_id != AIE2P_ARRAY_DESCRIPTOR_SET_ID &&
-       target->descriptor_set->stable_id !=
-           AIE2P_CONFIGURATION_DESCRIPTOR_SET_ID &&
-       target->descriptor_set->stable_id != AIE2P_CORE_DESCRIPTOR_SET_ID)) {
-    return iree_ok_status();
-  }
 
   loom_aie2p_low_verify_state_t* state = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate(
@@ -648,7 +641,7 @@ static iree_status_t loom_aie2p_low_verify_op(
     const loom_low_descriptor_packet_t* packet) {
   (void)provider;
   loom_aie2p_low_verify_state_t* state = provider_state;
-  if (state == NULL || state->skip_body_checks || !state->abi_layout_valid ||
+  if (state->skip_body_checks || !state->abi_layout_valid ||
       loom_low_verify_context_should_stop(context)) {
     return iree_ok_status();
   }
@@ -797,7 +790,7 @@ static iree_status_t loom_aie2p_low_verify_end_function(
     loom_low_verify_context_t* context, void* provider_state) {
   (void)provider;
   const loom_aie2p_low_verify_state_t* state = provider_state;
-  if (!state || state->skip_body_checks || !state->abi_layout_valid ||
+  if (state->skip_body_checks || !state->abi_layout_valid ||
       state->target->descriptor_set->stable_id !=
           AIE2P_CONFIGURATION_DESCRIPTOR_SET_ID) {
     return iree_ok_status();
@@ -885,6 +878,7 @@ static iree_status_t loom_aie2p_low_verify_end_module(
 
 const loom_low_verify_provider_t loom_aie2p_low_verify_provider = {
     .name = IREE_SVL("amd-xdna-aie2p"),
+    .scope = {.target_stable_id = AIE2P_CORE_TARGET_ID},
     .begin_module = loom_aie2p_low_verify_begin_module,
     .begin_function = loom_aie2p_low_verify_begin_function,
     .verify_op = loom_aie2p_low_verify_op,

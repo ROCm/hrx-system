@@ -1998,7 +1998,9 @@ static iree_status_t loom_low_verify_begin_function_providers(
   };
   for (iree_host_size_t i = 0; i < provider_list.count; ++i) {
     const loom_low_verify_provider_t* provider = provider_list.values[i];
-    if (provider->begin_function != NULL) {
+    if (provider->begin_function != NULL &&
+        loom_low_descriptor_scope_matches(
+            provider->scope, function_state->target->descriptor_set)) {
       context.provider_module_state =
           function_state->state->provider_module_states[i];
       IREE_RETURN_IF_ERROR(provider->begin_function(
@@ -2022,7 +2024,9 @@ static iree_status_t loom_low_verify_run_op_providers(
   };
   for (iree_host_size_t i = 0; i < provider_list.count; ++i) {
     const loom_low_verify_provider_t* provider = provider_list.values[i];
-    if (provider->verify_op != NULL) {
+    if (provider->verify_op != NULL &&
+        loom_low_descriptor_scope_matches(
+            provider->scope, function_state->target->descriptor_set)) {
       context.provider_module_state =
           function_state->state->provider_module_states[i];
       IREE_RETURN_IF_ERROR(provider->verify_op(
@@ -2047,7 +2051,9 @@ static iree_status_t loom_low_verify_end_function_providers(
   };
   for (iree_host_size_t i = 0; i < provider_list.count; ++i) {
     const loom_low_verify_provider_t* provider = provider_list.values[i];
-    if (provider->end_function != NULL) {
+    if (provider->end_function != NULL &&
+        loom_low_descriptor_scope_matches(
+            provider->scope, function_state->target->descriptor_set)) {
       context.provider_module_state =
           function_state->state->provider_module_states[i];
       IREE_RETURN_IF_ERROR(provider->end_function(

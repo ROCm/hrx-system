@@ -19,6 +19,7 @@
 #define LOOM_TARGET_LOW_LEGALITY_H_
 
 #include "iree/base/api.h"
+#include "loom/codegen/low/descriptor_scope.h"
 #include "loom/error/emitter.h"
 #include "loom/error/parameter.h"
 #include "loom/ir/ir.h"
@@ -106,11 +107,12 @@ typedef struct loom_target_low_legality_defer_missing_contract_callback_t {
 struct loom_target_low_legality_provider_t {
   // Stable provider name available to callbacks when emitting diagnostics.
   iree_string_view_t name;
+  // Explicit target applicability enforced before function-local callbacks.
+  loom_low_descriptor_scope_t scope;
   // Built-in source dialect ids this provider can answer.
   loom_target_low_legality_builtin_dialect_bits_t builtin_dialect_bits;
-  // Attempts to verify one source op. Providers from all configured targets can
-  // be present; sets |out_handled| false when the context's descriptor target
-  // or the source op does not belong to this provider.
+  // Attempts to verify one source op within the declared scope. Sets
+  // |out_handled| false when the source op does not belong to this provider.
   loom_target_low_legality_try_op_fn_t try_verify_op;
 };
 

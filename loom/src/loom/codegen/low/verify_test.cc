@@ -34,6 +34,71 @@ using ::loom::testing::CapturedDiagnosticEmission;
 using ::loom::testing::DiagnosticEmissionCapture;
 using ModulePtr = ::loom::testing::ModulePtr;
 
+struct CountingVerifyProvider : loom_low_verify_provider_t {
+  // Lifecycle calls observed for this provider during one verification run.
+  struct Counts {
+    // Module initialization and finalization calls, independent of scope.
+    unsigned module_calls = 0;
+    // Function initialization and finalization calls, restricted by scope.
+    unsigned function_calls = 0;
+    // Body operations presented to this provider.
+    unsigned op_calls = 0;
+  };
+  // Test-owned observation state; registration metadata remains immutable.
+  mutable Counts counts;
+
+  explicit CountingVerifyProvider(loom_low_descriptor_scope_t scope)
+      : loom_low_verify_provider_t{
+            .name = IREE_SVL("counting"),
+            .scope = scope,
+            .begin_module = BeginModule,
+            .begin_function = BeginFunction,
+            .verify_op = VerifyOp,
+            .end_function = EndFunction,
+            .end_module = EndModule,
+        } {}
+
+  static iree_status_t BeginModule(const loom_low_verify_provider_t* provider,
+                                   loom_low_verify_module_context_t*,
+                                   void** out_state) {
+    auto* counts =
+        &static_cast<const CountingVerifyProvider*>(provider)->counts;
+    ++counts->module_calls;
+    *out_state = counts;
+    return iree_ok_status();
+  }
+
+  static iree_status_t BeginFunction(const loom_low_verify_provider_t*,
+                                     loom_low_verify_context_t* context,
+                                     void** out_state) {
+    auto* counts = static_cast<Counts*>(
+        loom_low_verify_context_provider_module_state(context));
+    ++counts->function_calls;
+    *out_state = counts;
+    return iree_ok_status();
+  }
+
+  static iree_status_t VerifyOp(const loom_low_verify_provider_t*,
+                                loom_low_verify_context_t*, void* state,
+                                const loom_low_descriptor_packet_t*) {
+    ++static_cast<Counts*>(state)->op_calls;
+    return iree_ok_status();
+  }
+
+  static iree_status_t EndFunction(const loom_low_verify_provider_t*,
+                                   loom_low_verify_context_t*, void* state) {
+    ++static_cast<Counts*>(state)->function_calls;
+    return iree_ok_status();
+  }
+
+  static iree_status_t EndModule(const loom_low_verify_provider_t*,
+                                 loom_low_verify_module_context_t*,
+                                 void* state) {
+    ++static_cast<Counts*>(state)->module_calls;
+    return iree_ok_status();
+  }
+};
+
 class LowVerifyTest : public ::testing::Test {
  protected:
   void SetUp() override {
@@ -87,12 +152,13 @@ class LowVerifyTest : public ::testing::Test {
 
   void VerifyModule(loom_module_t* module, DiagnosticEmissionCapture* capture,
                     const loom_function_version_list_t* function_versions,
+                    loom_low_verify_provider_list_t providers,
                     loom_low_verify_result_t* out_result) {
     loom_low_verify_options_t options = {
         .descriptor_registry = &registry_.registry,
         .function_versions = function_versions,
         .emitter = capture->emitter(),
-        .provider_list = loom_low_verify_provider_list_empty(),
+        .provider_list = providers,
         .max_errors = 20,
     };
     loom_low_verify_scratch_t scratch =
@@ -103,7 +169,8 @@ class LowVerifyTest : public ::testing::Test {
 
   void VerifyModule(loom_module_t* module, DiagnosticEmissionCapture* capture,
                     loom_low_verify_result_t* out_result) {
-    VerifyModule(module, capture, /*function_versions=*/nullptr, out_result);
+    VerifyModule(module, capture, /*function_versions=*/nullptr, {},
+                 out_result);
   }
 
   iree_arena_block_pool_t block_pool_;
@@ -122,9 +189,36 @@ low.func.def target<test.low.core>(@target) @uses_workgroup_storage() {
 )");
   DiagnosticEmissionCapture capture;
   loom_low_verify_result_t result = {};
-  VerifyModule(module.get(), &capture, &result);
+  const loom_low_descriptor_set_t* descriptor_set =
+      loom_low_descriptor_registry_lookup(&registry_.registry,
+                                          IREE_SV("test.low.core"));
+  ASSERT_NE(descriptor_set, nullptr);
+  const CountingVerifyProvider providers[] = {
+      CountingVerifyProvider(LOOM_LOW_DESCRIPTOR_SCOPE_SHARED),
+      CountingVerifyProvider(
+          {.target_stable_id = descriptor_set->target_stable_id}),
+      CountingVerifyProvider(
+          {.descriptor_set_stable_id = descriptor_set->stable_id}),
+      CountingVerifyProvider(
+          {.target_stable_id = descriptor_set->target_stable_id ^ 1}),
+  };
+  const loom_low_verify_provider_t* provider_values[] = {
+      &providers[0],
+      &providers[1],
+      &providers[2],
+      &providers[3],
+  };
+  VerifyModule(module.get(), &capture, nullptr,
+               loom_low_verify_provider_list_make(
+                   provider_values, IREE_ARRAYSIZE(provider_values)),
+               &result);
   EXPECT_EQ(result.error_count, 0u);
   EXPECT_TRUE(capture.emissions.empty());
+  for (size_t i = 0; i < IREE_ARRAYSIZE(providers); ++i) {
+    EXPECT_EQ(providers[i].counts.module_calls, 2u) << i;
+    EXPECT_EQ(providers[i].counts.function_calls, i < 3 ? 2u : 0u) << i;
+    EXPECT_EQ(providers[i].counts.op_calls, i < 3 ? 2u : 0u) << i;
+  }
 }
 
 TEST_F(LowVerifyTest, RejectsWorkgroupStorageAboveDurableTargetLimit) {
@@ -207,7 +301,7 @@ low.func.def target<test.low.core> @uses_workgroup_storage() {
 
   DiagnosticEmissionCapture capture;
   loom_low_verify_result_t result = {};
-  VerifyModule(module.get(), &capture, &function_versions, &result);
+  VerifyModule(module.get(), &capture, &function_versions, {}, &result);
   EXPECT_EQ(result.error_count, 1u);
   ASSERT_EQ(capture.emissions.size(), 1u);
 

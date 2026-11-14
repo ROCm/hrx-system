@@ -38,10 +38,6 @@ static bool loom_x86_descriptor_features_available(
   return true;
 }
 
-// Expand literals independently from their patch users so x86 construction
-// selection can retain an immutable vector load before sparse lane updates.
-// Other targets continue to the shared construction selector when this
-// provider is linked into an all-target compiler.
 static bool loom_x86_match_vector_float8_extension(
     const loom_target_legalizer_entry_t* entry,
     const loom_target_legalization_context_t* context, const loom_op_t* op) {
@@ -215,6 +211,8 @@ static const loom_target_legalizer_rule_t kX86LegalizerRules[] = {
         .root_kind = LOOM_OP_VECTOR_TABLE_LOOKUP,
         .legalize = loom_x86_legalize_vector_packets,
     },
+    // Expand literals independently from their patch users so x86 construction
+    // selection can retain an immutable vector load before sparse lane updates.
     {
         .root_kind = LOOM_OP_VECTOR_CONSTANTI,
         .legalize = loom_vector_legalize_literal_base_elements,

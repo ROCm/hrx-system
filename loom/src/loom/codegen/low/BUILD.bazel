@@ -1359,6 +1359,7 @@ loom_cc_library(
     hdrs = ["verify.h"],
     deps = [
         ":call_context",
+        ":descriptor_scope",
         ":diagnostics",
         ":function",
         ":packet",

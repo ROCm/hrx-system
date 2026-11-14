@@ -147,6 +147,10 @@ iree_status_t loom_target_low_packet_diagnostics_emit_function(
          provider_index < options->provider_list.count; ++provider_index) {
       const loom_target_low_packet_diagnostic_provider_t* provider =
           options->provider_list.values[provider_index];
+      if (!loom_low_descriptor_scope_matches(
+              provider->scope, frame->schedule.target.descriptor_set)) {
+        continue;
+      }
       bool handled = false;
       IREE_RETURN_IF_ERROR(
           provider->try_diagnose_packet(provider, &context, &packet, &handled));
