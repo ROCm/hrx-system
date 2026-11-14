@@ -1,3 +1,5 @@
+config.def @fixture.dynamic_group = false : i1
+
 func.decl import("input") @require(%condition: i32, %diagnostic: buffer)
 
 func.decl import("input") @encode(%text: buffer, %flags: i32, %capacity: i64) -> (buffer, i64)
@@ -5,6 +7,8 @@ func.decl import("input") @encode(%text: buffer, %flags: i32, %capacity: i64) ->
 func.decl import("json") @members(%json: buffer) -> (buffer, i32, i64)
 
 func.decl import("json") @unescape(%source: buffer, %offset: i64, %length: i64, %target: buffer, %target_offset: i64) -> (i64)
+
+func.decl import("runner") @execute_4(%stage: i32, %b0: hal.buffer, %b1: hal.buffer, %b2: hal.buffer, %b3: hal.buffer) -> (i64)
 
 func.decl import("runner") @execute_6(%stage: i32, %b0: hal.buffer, %b1: hal.buffer, %b2: hal.buffer, %b3: hal.buffer, %b4: hal.buffer, %b5: hal.buffer) -> (i64)
 
@@ -722,7 +726,23 @@ func.def public @epoch(%control_state: buffer, %shape: i32, %proposes: i32, %ver
   %c0 = scalar.constant 0 : i32
   %has_media = scalar.cmpi ne, %media_count, %c0 : i32
   %stage = scf.select %has_media, %media_stage, %text_stage : i32
-  %completion = func.call @execute_6(%stage, %residual, %metadata, %origins, %state, %tokens, %outputs) : (i32, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (i64)
+  %advanced = func.call @execute_6(%stage, %residual, %metadata, %origins, %state, %tokens, %outputs) : (i32, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (i64)
+  %draft_origin = index.constant 144 : offset
+  %draft_state = buffer.view %control_state[%draft_origin] : buffer -> view<4xi32>
+  %draft_flag = view.load %draft_state[0] : view<4xi32> -> i32
+  %drafts = scalar.cmpi ne, %draft_flag, %c0 : i32
+  %completion = scf.if %drafts -> (i64) {
+    %speculative = scalar.ori %proposes, %verifies : i32
+    %known = scalar.cmpi eq, %speculative, %c0 : i32
+    %known32 = scalar.extui %known : i1 to i32
+    %error = buffer.constant utf8("text fixture drafting only warms its draft cache") : buffer
+    func.call @require(%known32, %error) : (i32, buffer)
+    %warm = view.load %draft_state[1] : view<4xi32> -> i32
+    %warmed = func.call @execute_4(%warm, %residual, %metadata, %tokens, %draft_cache) : (i32, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (i64)
+    scf.yield %warmed : i64
+  } else {
+    scf.yield %advanced : i64
+  }
   %c0_i64 = scalar.constant 0 : i64
   %c4_i64 = scalar.constant 4 : i64
   %count64 = scalar.extui %span_count : i32 to i64
@@ -731,7 +751,7 @@ func.def public @epoch(%control_state: buffer, %shape: i32, %proposes: i32, %ver
   func.return %completion : i64
 }
 
-func.decl @fixture_storage(%maximum: i64, %span_capacity: i64, %context: i64, %pool: i64, %rows: i64, %pins: i64) -> (buffer, buffer, buffer, buffer, buffer)
+func.decl @fixture_storage(%maximum: i64, %span_capacity: i64, %context: i64, %pool: i64, %rows: i64, %pins: i64, %draft: i64, %ffn_flag: i64) -> (buffer, buffer, buffer, buffer, buffer)
 
 func.def public @resize_state(%state: buffer, %rows: i64) -> (buffer, buffer, buffer, buffer, buffer, buffer) {
   %layout_origin = index.constant 88 : offset
@@ -741,6 +761,242 @@ func.def public @resize_state(%state: buffer, %rows: i64) -> (buffer, buffer, bu
   %context = view.load %layout[2] : view<5xi64> -> i64
   %pool = view.load %layout[3] : view<5xi64> -> i64
   %pins = view.load %layout[4] : view<5xi64> -> i64
-  %allocations, %views, %origins, %draft, %geometry = func.call @fixture_storage(%maximum, %span_capacity, %context, %pool, %rows, %pins) : (i64, i64, i64, i64, i64, i64) -> (buffer, buffer, buffer, buffer, buffer)
+  %draft_origin = index.constant 144 : offset
+  %draft_state = buffer.view %state[%draft_origin] : buffer -> view<4xi32>
+  %draft_flag = view.load %draft_state[0] : view<4xi32> -> i32
+  %draft64 = scalar.extui %draft_flag : i32 to i64
+  %group_origin = index.constant 128 : offset
+  %group = buffer.view %state[%group_origin] : buffer -> view<4xi32>
+  %ffn_flag = view.load %group[3] : view<4xi32> -> i32
+  %ffn64 = scalar.extui %ffn_flag : i32 to i64
+  %allocations, %views, %origins, %draft, %geometry = func.call @fixture_storage(%maximum, %span_capacity, %context, %pool, %rows, %pins, %draft64, %ffn64) : (i64, i64, i64, i64, i64, i64, i64, i64) -> (buffer, buffer, buffer, buffer, buffer)
   func.return %state, %allocations, %views, %origins, %draft, %geometry : buffer, buffer, buffer, buffer, buffer, buffer
+}
+
+// The group ABI reserves source positions in private host plans. It never
+// commits retained row state or invokes the runner while encoding a group.
+func.def @ordered_prefill_group_plan(%state: buffer) -> (buffer) {
+  %origin = index.constant 0 : offset
+  %state_origin = index.constant 128 : offset
+  %state_view = buffer.view %state[%state_origin] : buffer -> view<4xi32>
+  %shapes32 = view.load %state_view[0] : view<4xi32> -> i32
+  %prefix = view.load %state_view[1] : view<4xi32> -> i32
+  %ordinary_residual = view.load %state_view[2] : view<4xi32> -> i32
+  // Draft models declare resource ABI 2 and warm their draft cache in the
+  // bank-local residual leaf.
+  %draft_origin = index.constant 144 : offset
+  %draft_state = buffer.view %state[%draft_origin] : buffer -> view<4xi32>
+  %draft_flag = view.load %draft_state[0] : view<4xi32> -> i32
+  %group_warm = view.load %draft_state[2] : view<4xi32> -> i32
+  %zero = scalar.constant 0 : i32
+  %drafts = scalar.cmpi ne, %draft_flag, %zero : i32
+  %residual = scf.select %drafts, %group_warm, %ordinary_residual : i32
+  %shape_bound = scalar.assume %shapes32 [range(%shapes32, 1, 1024)] : i32
+  %shapes = index.cast %shape_bound : i32 to index
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %stride = index.constant 12 : offset
+  %header_bytes = index.constant 16 : offset
+  %table_bytes = index.scale %shapes, %stride : index, offset -> offset
+  %bytes = index.add %header_bytes, %table_bytes : offset
+  %result = buffer.alloca<private> align(4) %bytes : buffer
+  %header = buffer.view %result[%origin] : buffer -> view<4xi32>
+  %one = scalar.constant 1 : i32
+  %none = scalar.constant -1 : i32
+  %abi = scalar.addi %draft_flag, %one : i32
+  view.store %one, %header[0] : i32, view<4xi32>
+  view.store %shapes32, %header[1] : i32, view<4xi32>
+  view.store %one, %header[2] : i32, view<4xi32>
+  view.store %abi, %header[3] : i32, view<4xi32>
+  %table = buffer.view %result[%header_bytes] : buffer -> view<[%shapes]x3xi32>
+  scf.for %i = [%c0 to %shapes step %c1] {
+    view.store %prefix, %table[%i, 0] : i32, view<[%shapes]x3xi32>
+    view.store %none, %table[%i, 1] : i32, view<[%shapes]x3xi32>
+    view.store %residual, %table[%i, 2] : i32, view<[%shapes]x3xi32>
+  }
+  func.return %result : buffer
+}
+
+func.def public @text_encode_prefill_group_v1(%state: buffer, %plan_a: buffer, %inputs_a: buffer, %plan_b: buffer, %inputs_b: buffer, %metadata_a: buffer, %tokens_a: buffer, %metadata_b: buffer, %tokens_b: buffer) {
+  %origin = index.constant 0 : offset
+  %dynamic = config.get @fixture.dynamic_group : i1
+  scf.if %dynamic {
+    %group_at = index.constant 128 : offset
+    %group = buffer.view %state[%group_at] : buffer -> view<4xi32>
+    %advance = scalar.constant 0 : i32
+    view.store %advance,%group[1] : i32,view<4xi32>
+  }
+  %a = buffer.view %plan_a[%origin] : buffer -> view<1x9xi32>
+  %b = buffer.view %plan_b[%origin] : buffer -> view<1x9xi32>
+  %length_a = view.load %a[0, 0] : view<1x9xi32> -> i32
+  %length_b = view.load %b[0, 0] : view<1x9xi32> -> i32
+  %position_a = view.load %a[0, 1] : view<1x9xi32> -> i32
+  %source_a = view.load %a[0, 2] : view<1x9xi32> -> i32
+  %two = scalar.constant 2 : i32
+  %source_advance = scalar.muli %length_a, %two : i32
+  %position_b = scalar.addi %position_a, %length_a : i32
+  %source_b = scalar.addi %source_a, %source_advance : i32
+  view.store %position_b, %b[0, 1] : i32, view<1x9xi32>
+  view.store %source_b, %b[0, 2] : i32, view<1x9xi32>
+  %zero = scalar.constant 0 : i32
+  %one = scalar.constant 1 : i32
+  %eos = scalar.constant 3 : i32
+  %out_a, %transfers_a, %begin_a, %bytes_a = func.call @encode_epoch(%state, %plan_a, %inputs_a, %inputs_a, %one, %zero, %length_a, %zero, %zero, %zero, %zero, %eos, %metadata_a, %tokens_a) : (buffer, buffer, buffer, buffer, i32, i32, i32, i32, i32, i32, i32, i32, buffer, buffer) -> (i32, buffer, i64, i64)
+  %out_b, %transfers_b, %begin_b, %bytes_b = func.call @encode_epoch(%state, %plan_b, %inputs_b, %inputs_b, %one, %zero, %length_b, %zero, %zero, %zero, %zero, %eos, %metadata_b, %tokens_b) : (buffer, buffer, buffer, buffer, i32, i32, i32, i32, i32, i32, i32, i32, buffer, buffer) -> (i32, buffer, i64, i64)
+  func.return
+}
+
+func.def public @text_publish_prefill_group_v1(%state: buffer, %plan_a: buffer, %plan_b: buffer, %outputs: buffer, %progress: buffer) {
+  %zero = scalar.constant 0 : i32
+  %one = scalar.constant 1 : i32
+  func.call @publish_epoch(%state, %plan_b, %plan_b, %one, %zero, %zero, %zero, %zero, %plan_b, %outputs, %outputs, %outputs, %progress) : (buffer, buffer, buffer, i32, i32, i32, i32, i32, buffer, buffer, buffer, buffer, buffer)
+  %origin = index.constant 0 : offset
+  %a = buffer.view %plan_a[%origin] : buffer -> view<1x9xi32>
+  %length_a = view.load %a[0, 0] : view<1x9xi32> -> i32
+  %result = buffer.view %progress[%origin] : buffer -> view<21xi32>
+  %length_b = view.load %result[0] : view<21xi32> -> i32
+  %total = scalar.addi %length_a, %length_b : i32
+  view.store %total, %result[0] : i32, view<21xi32>
+  view.store %total, %result[1] : i32, view<21xi32>
+  func.return
+}
+
+func.def public @text_prefill_group_plan_v1(%state: buffer) -> (buffer) {
+  %group_origin = index.constant 128 : offset
+  %group_state = buffer.view %state[%group_origin] : buffer -> view<4xi32>
+  %flag = view.load %group_state[3] : view<4xi32> -> i32
+  %zero = scalar.constant 0 : i32
+  %ffn = scalar.cmpi ne, %flag, %zero : i32
+  %resident_flag = scalar.constant 2 : i32
+  %resident = scalar.cmpi eq, %flag, %resident_flag : i32
+  %result = scf.if %resident -> (buffer) {
+    %descriptor = func.call @resident_prefill_group_plan(%state) : (buffer) -> (buffer)
+    scf.yield %descriptor : buffer
+  } else {
+    %ordinary = scf.if %ffn -> (buffer) {
+      %descriptor = func.call @ffn_prefill_group_plan(%state) : (buffer) -> (buffer)
+      scf.yield %descriptor : buffer
+    } else {
+      %descriptor = func.call @ordered_prefill_group_plan(%state) : (buffer) -> (buffer)
+      scf.yield %descriptor : buffer
+    }
+    scf.yield %ordinary : buffer
+  }
+  func.return %result : buffer
+}
+
+func.def @resident_prefill_group_plan(%state: buffer) -> (buffer) {
+  %ordinary = func.call @ffn_prefill_group_plan(%state) : (buffer) -> (buffer)
+  %origin = index.constant 0 : offset
+  %source_header = buffer.view %ordinary[%origin] : buffer -> view<4xi32>
+  %shapes32 = view.load %source_header[1] : view<4xi32> -> i32
+  %bounded = scalar.assume %shapes32 [range(%shapes32,1,1024)] : i32
+  %shapes = index.cast %bounded : i32 to index
+  %stride = index.constant 48 : offset
+  %header_bytes = index.constant 16 : offset
+  %table_bytes = index.scale %shapes, %stride : index, offset -> offset
+  %records_at = index.add %header_bytes, %table_bytes : offset
+  %trailer_bytes = index.constant 52 : offset
+  %bytes = index.add %records_at, %trailer_bytes : offset
+  %result = buffer.alloca<private> align(8) %bytes : buffer
+  %none = scalar.constant -1 : i32
+  buffer.fill %none, %result[%origin], %bytes : i32
+  buffer.copy %ordinary[%origin], %result[%origin], %header_bytes
+  %header = buffer.view %result[%origin] : buffer -> view<4xi32>
+  %version = scalar.constant 3 : i32
+  view.store %version, %header[0] : i32, view<4xi32>
+  %source = buffer.view %ordinary[%header_bytes] : buffer -> view<[%shapes]x8xi32>
+  %target = buffer.view %result[%header_bytes] : buffer -> view<[%shapes]x12xi32>
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  scf.for %s = [%c0 to %shapes step %c1] {
+    %prefix = view.load %source[%s,0] : view<[%shapes]x8xi32> -> i32
+    %a = view.load %source[%s,1] : view<[%shapes]x8xi32> -> i32
+    %b = view.load %source[%s,2] : view<[%shapes]x8xi32> -> i32
+    %merge = view.load %source[%s,3] : view<[%shapes]x8xi32> -> i32
+    %down_a = view.load %source[%s,4] : view<[%shapes]x8xi32> -> i32
+    %down_b = view.load %source[%s,5] : view<[%shapes]x8xi32> -> i32
+    %down_merge = view.load %source[%s,6] : view<[%shapes]x8xi32> -> i32
+    %residual = view.load %source[%s,7] : view<[%shapes]x8xi32> -> i32
+    view.store %prefix, %target[%s,0] : i32, view<[%shapes]x12xi32>
+    view.store %a, %target[%s,1] : i32, view<[%shapes]x12xi32>
+    view.store %b, %target[%s,2] : i32, view<[%shapes]x12xi32>
+    view.store %merge, %target[%s,3] : i32, view<[%shapes]x12xi32>
+    view.store %down_a, %target[%s,8] : i32, view<[%shapes]x12xi32>
+    view.store %down_b, %target[%s,9] : i32, view<[%shapes]x12xi32>
+    view.store %down_merge, %target[%s,10] : i32, view<[%shapes]x12xi32>
+    view.store %residual, %target[%s,11] : i32, view<[%shapes]x12xi32>
+  }
+  %records = buffer.view %result[%records_at] : buffer -> view<13xi32>
+  %two = scalar.constant 2 : i32
+  view.store %two, %records[0] : i32, view<13xi32>
+  %producer = view.load %source[0,2] : view<[%shapes]x8xi32> -> i32
+  %consumer = view.load %source[0,3] : view<[%shapes]x8xi32> -> i32
+  %down_producer = view.load %source[0,5] : view<[%shapes]x8xi32> -> i32
+  %down_consumer = view.load %source[0,6] : view<[%shapes]x8xi32> -> i32
+  %zero = scalar.constant 0 : i32
+  %request = scalar.constant 512 : i32
+  %response = scalar.constant 704 : i32
+  %down_request = scalar.constant 1920 : i32
+  %down_response = scalar.constant 2112 : i32
+  view.store %producer, %records[1] : i32, view<13xi32>
+  view.store %consumer, %records[2] : i32, view<13xi32>
+  view.store %request, %records[3] : i32, view<13xi32>
+  view.store %zero, %records[4] : i32, view<13xi32>
+  view.store %response, %records[5] : i32, view<13xi32>
+  view.store %zero, %records[6] : i32, view<13xi32>
+  view.store %down_producer, %records[7] : i32, view<13xi32>
+  view.store %down_consumer, %records[8] : i32, view<13xi32>
+  view.store %down_request, %records[9] : i32, view<13xi32>
+  view.store %zero, %records[10] : i32, view<13xi32>
+  view.store %down_response, %records[11] : i32, view<13xi32>
+  view.store %zero, %records[12] : i32, view<13xi32>
+  func.return %result : buffer
+}
+
+func.def @ffn_prefill_group_plan(%state: buffer) -> (buffer) {
+  %origin = index.constant 0 : offset
+  %group_origin = index.constant 128 : offset
+  %ffn_origin = index.constant 160 : offset
+  %group = buffer.view %state[%group_origin] : buffer -> view<4xi32>
+  %ffn = buffer.view %state[%ffn_origin] : buffer -> view<6xi32>
+  %shapes32 = view.load %group[0] : view<4xi32> -> i32
+  %prefix = view.load %group[1] : view<4xi32> -> i32
+  %ordinary_residual = view.load %group[2] : view<4xi32> -> i32
+  %draft_origin = index.constant 144 : offset
+  %draft = buffer.view %state[%draft_origin] : buffer -> view<4xi32>
+  %draft_flag = view.load %draft[0] : view<4xi32> -> i32
+  %warm = view.load %draft[2] : view<4xi32> -> i32
+  %zero = scalar.constant 0 : i32
+  %drafts = scalar.cmpi ne, %draft_flag, %zero : i32
+  %residual = scf.select %drafts, %warm, %ordinary_residual : i32
+  %one = scalar.constant 1 : i32
+  %two = scalar.constant 2 : i32
+  %abi = scalar.addi %draft_flag, %one : i32
+  %bounded = scalar.assume %shapes32 [range(%shapes32, 1, 1024)] : i32
+  %shapes = index.cast %bounded : i32 to index
+  %stride = index.constant 32 : offset
+  %header_bytes = index.constant 16 : offset
+  %table_bytes = index.scale %shapes, %stride : index, offset -> offset
+  %bytes = index.add %header_bytes, %table_bytes : offset
+  %result = buffer.alloca<private> align(4) %bytes : buffer
+  %header = buffer.view %result[%origin] : buffer -> view<4xi32>
+  view.store %two, %header[0] : i32, view<4xi32>
+  view.store %shapes32, %header[1] : i32, view<4xi32>
+  view.store %one, %header[2] : i32, view<4xi32>
+  view.store %abi, %header[3] : i32, view<4xi32>
+  %table = buffer.view %result[%header_bytes] : buffer -> view<[%shapes]x8xi32>
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c6 = index.constant 6 : index
+  scf.for %i = [%c0 to %shapes step %c1] {
+    view.store %prefix, %table[%i, 0] : i32, view<[%shapes]x8xi32>
+    scf.for %j = [%c0 to %c6 step %c1] {
+      %stage = view.load %ffn[%j] : view<6xi32> -> i32
+      %phase = index.add %j, %c1 : index
+      view.store %stage, %table[%i, %phase] : i32, view<[%shapes]x8xi32>
+    }
+    view.store %residual, %table[%i, 7] : i32, view<[%shapes]x8xi32>
+  }
+  func.return %result : buffer
 }

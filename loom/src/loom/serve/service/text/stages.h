@@ -28,6 +28,9 @@ typedef struct loom_serve_text_stage_t {
   uint32_t fixed_buffer_count;
   // Owned views of immutable parameter groups, in reflected fixed-root order.
   iree_hal_buffer_t** fixed_buffers;
+  // Borrowed exact foreign lane, owned by the model. NULL uses its primary.
+  loom_runtime_execution_t* execution;
+  loom_runtime_pool_t* parameter_pool;
 } loom_serve_text_stage_t;
 
 // Checkpoint domains shared by every stage and retained by one model residency.

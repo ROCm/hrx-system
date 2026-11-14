@@ -279,12 +279,16 @@ loom_cc_library(
 loom_cc_library(
     name = "device_group_tests",
     testonly = True,
-    srcs = ["device_group_test.cc"],
+    srcs = [
+        "device_group_test.cc",
+        "model_instance.h",
+    ],
     target_compatible_with = _SOURCE_TEST_COMPATIBILITY,
     deps = [
         ":model",
         ":source_service_fixture",
         "//loom/src/loom/runtime/device",
+        "//loom/src/loom/runtime/execution:execution_testing",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/threading",
         "//runtime/src/iree/hal",
@@ -300,6 +304,7 @@ loom_cc_library(
     srcs = [
         "capture_execution_test.cc",
         "epoch_upload_test.cc",
+        "group_execution_test.cc",
         "model_instance.h",
         "response_service_test.cc",
         "service_capacity_test.cc",
@@ -320,6 +325,9 @@ loom_cc_library(
         ":stream",
         "//loom/src/loom/runtime/device",
         "//loom/src/loom/runtime/execution",
+        "//loom/src/loom/runtime/execution:execution_testing",
+        "//loom/src/loom/runtime/execution:plan",
+        "//loom/src/loom/runtime/execution:retirement",
         "//loom/src/loom/runtime/execution:workspace",
         "//loom/src/loom/runtime/host",
         "//loom/src/loom/runtime/host:reclamation",
@@ -705,12 +713,15 @@ loom_cc_library(
 loom_cc_library(
     name = "model",
     srcs = [
+        "bank.c",
         "capacity.c",
         "control.c",
         "epoch_plan.c",
+        "group_exchange.c",
         "media_epoch.c",
         "model.c",
         "model_instance.h",
+        "prefill_group.c",
         "reservation.c",
         "reservation_plan.h",
         "retention.c",
@@ -723,11 +734,14 @@ loom_cc_library(
         "warmup.c",
     ],
     hdrs = [
+        "bank.h",
         "control.h",
         "epoch_plan.h",
+        "group_exchange.h",
         "media_epoch.h",
         "media_input.h",
         "model.h",
+        "prefill_group.h",
         "reservation.h",
         "retention.h",
         "source.h",
@@ -748,6 +762,7 @@ loom_cc_library(
         "//loom/binding/c:loomc",
         "//loom/src/loom/runtime/device",
         "//loom/src/loom/runtime/execution",
+        "//loom/src/loom/runtime/execution:plan",
         "//loom/src/loom/runtime/execution:retirement",
         "//loom/src/loom/runtime/execution:workspace",
         "//loom/src/loom/runtime/host",
@@ -1368,4 +1383,26 @@ loom_cc_test(
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
+)
+
+# Elastic backing needs its own process because application configuration is
+# immutable across the shared source fixture's tests.
+loom_cc_library(
+    name = "group_elastic_tests",
+    testonly = True,
+    srcs = [
+        "group_elastic_execution_test.cc",
+        "model_instance.h",
+    ],
+    target_compatible_with = _SOURCE_TEST_COMPATIBILITY,
+    deps = [
+        ":model",
+        ":source_service_fixture",
+        "//loom/src/loom/runtime/execution",
+        "//loom/src/loom/runtime/execution:plan",
+        "//loom/src/loom/runtime/execution:retirement",
+        "//loom/src/loom/runtime/testing:application",
+        "//runtime/src/iree/testing:gtest",
+    ],
+    alwayslink = True,
 )

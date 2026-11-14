@@ -68,6 +68,19 @@ typedef struct loom_model_voice_t {
   iree_string_view_t content_type;
 } loom_model_voice_t;
 
+// An exact preparation stage root and a logical device name supplied by the
+// deployment's device inventory. "*" selects the default for unmatched roots.
+// Kernel bodies within one command root remain on that root's device.
+typedef struct loom_model_device_placement_t {
+  iree_string_view_t root;
+  iree_string_view_t device;
+} loom_model_device_placement_t;
+
+typedef struct loom_model_device_placement_list_t {
+  iree_host_size_t count;
+  const loom_model_device_placement_t* values;
+} loom_model_device_placement_list_t;
+
 // A caller may select a canonical preset and override its choices.
 // Empty choices use that preset, or the sole available compatible
 // choice. Ambiguity is an error; no hardware or payload inspection occurs.
@@ -111,6 +124,8 @@ typedef struct loom_model_component_t {
 // Immutable selected model facts, with no device, HTTP, or acquisition policy.
 // Every view is owned by the enclosing card and remains valid until release.
 typedef struct loom_model_selection_t {
+  // Portable card schema; v2 adds source-aware execution plan defaults.
+  uint32_t schema_version;
   // Base model identity from its original training source.
   iree_string_view_t model_id;
   // Human-readable model name.
@@ -133,6 +148,10 @@ typedef struct loom_model_selection_t {
   loom_model_provider_list_t libraries;
   // Merged JIT configuration JSON: variant values override provider defaults.
   iree_string_view_t config;
+  // V2 program-set placement, resolved before compilation and readiness.
+  loom_model_device_placement_list_t device_placement;
+  // Optional pool for cross-device exchange and secondary parameters.
+  iree_string_view_t exchange_pool;
   // Number of independent parameter indexes.
   iree_host_size_t parameter_count;
   // Borrowed parameter indexes keyed by their code-facing scope.

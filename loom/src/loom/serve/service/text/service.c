@@ -481,6 +481,58 @@ static iree_status_t loom_serve_text_submit_epoch(
   service->cursor = loom_serve_text_epoch_prepare(
       &service->scheduling, rows, service->row_count, plan, scheduled,
       &service->epoch, &continuation);
+  loom_serve_text_span_t second = {0};
+  iree_host_size_t second_shape = 0;
+  bool paired = false;
+  if (loom_serve_text_model_two_bank(service->model) &&
+      service->scheduling.schedule_mode == LOOM_SERVICE_TEXT_SCHEDULE_PACKED &&
+      service->scheduling.model_mode == LOOM_SERVE_TEXT_MODE_GENERATE &&
+      service->epoch.count == 1 && service->epoch.prefill[0] &&
+      !continuation.span_count && !service->epoch.proposal_count &&
+      !service->epoch.spans[0].media && !service->epoch.spans[0].flags &&
+      rows[0].input_count > service->epoch.spans[0].token_count) {
+    const loom_serve_text_span_t* first = &service->epoch.spans[0];
+    const iree_host_size_t remaining = rows[0].input_count - first->token_count;
+    const iree_host_size_t count = iree_min(remaining, first->token_count);
+    iree_host_size_t best = IREE_HOST_SIZE_MAX;
+    for (iree_host_size_t i = 0; i < service->scheduling.shape_count; ++i) {
+      const loom_serve_packing_shape_t* shape = &service->scheduling.shapes[i];
+      if (shape->span_capacity >= 1 && shape->token_capacity >= count &&
+          (best == IREE_HOST_SIZE_MAX ||
+           shape->token_capacity <
+               service->scheduling.shapes[best].token_capacity)) {
+        best = i;
+      }
+    }
+    if (best != IREE_HOST_SIZE_MAX) {
+      paired = true;
+      for (iree_host_size_t row = 0; row < service->row_count; ++row) {
+        if (row != first->row_index &&
+            (service->ready[row].token_count ||
+             (service->sessions[row]->request.consumer.self &&
+              service->sessions[row]->request.phase ==
+                  LOOM_SERVE_TEXT_REQUEST_DECODE))) {
+          paired = false;
+        }
+      }
+      second_shape = best;
+      second = (loom_serve_text_span_t){
+          .row_index = first->row_index,
+          .token_count = count,
+          .token_ids = first->token_ids + first->token_count,
+          .flags = count == remaining ? LOOM_SERVICE_TEXT_SPAN_FLAG_SELECT : 0,
+          .input_offset = first->input_offset + first->token_count,
+          .media = NULL,
+      };
+      paired &= loom_serve_text_model_can_pair(service->model,
+                                               service->epoch.shape_index,
+                                               first, second_shape, &second);
+      if (paired) {
+        service->epoch.input_count += count;
+        service->epoch.device_epochs = 2;
+      }
+    }
+  }
   loom_serve_text_observe(service, "execute");
   const iree_time_t start = iree_time_now();
   iree_slim_mutex_lock(&service->heartbeat.mutex);
@@ -497,10 +549,22 @@ static iree_status_t loom_serve_text_submit_epoch(
   const bool encodes =
       service->scheduling.model_mode == LOOM_SERVE_TEXT_MODE_ENCODE;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, loom_serve_text_epoch_submit(
-              service->model, service->scheduling.schedule_mode,
-              &service->epoch, &continuation, encodes ? &capture : NULL,
-              &service->completion.frontier));
+      z0, paired
+              ? loom_serve_text_model_submit_epoch_pair(
+                    service->model, service->epoch.shape_index,
+                    &service->epoch.spans[0], second_shape, &second,
+                    &service->completion.frontier)
+              : loom_serve_text_epoch_submit(
+                    service->model, service->scheduling.schedule_mode,
+                    &service->epoch, &continuation, encodes ? &capture : NULL,
+                    &service->completion.frontier));
+  if (paired) {
+    service->epoch.spans[0].token_count += second.token_count;
+    service->epoch.spans[0].flags = second.flags;
+    service->epoch.token_slots +=
+        service->scheduling.shapes[second_shape].token_capacity;
+    service->epoch.continued_prefill_count += second.token_count;
+  }
   iree_status_t status = iree_ok_status();
   if (capture) {
     status = loom_serve_text_capture_download(capture, &service->capture,

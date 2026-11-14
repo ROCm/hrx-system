@@ -542,3 +542,68 @@ def test_voice_recordings_require_one_explicit_role_and_format_contract(voice):
     _service(document)["voices"] = {"narrator": voice}
     with pytest.raises(ManifestError):
         ModelCard(document)
+
+
+def test_group_execution_requires_version_two_and_keeps_source_closure():
+    document = _document()
+    before = ModelCard(document).select("check")
+    document["presets"]["check"]["execution"]["group_mode"] = "two_bank"
+    document["presets"]["check"]["execution"]["plan_provider"] = "two_bank_v1"
+    with pytest.raises(ManifestError, match="version 2"):
+        ModelCard(document)
+    document["schema_version"] = 2
+    after = ModelCard(document).select("check")
+    assert after.settings["execution"]["group_mode"] == "two_bank"
+    assert after.settings["execution"]["plan_provider"] == "two_bank_v1"
+    assert after.files == before.files
+
+
+@pytest.mark.parametrize("mode", ["auto", "", True, 1, None])
+def test_group_execution_rejects_invalid_modes(mode):
+    document = _document()
+    document["schema_version"] = 2
+    document["presets"]["check"]["execution"]["group_mode"] = mode
+    with pytest.raises(ManifestError, match="single or two_bank"):
+        ModelCard(document)
+
+
+def test_device_placement_survives_selection_and_projection():
+    document = _document()
+    document["schema_version"] = 2
+    program = next(iter(document["programs"].values()))
+    placement = {"ffn_gate": "xdna", "*": "amdgpu"}
+    program["device_placement"] = placement
+    program["exchange_pool"] = "shared"
+    selected = ModelCard(document).select("check")
+    assert selected.program["device_placement"] == placement
+    assert selected.program["exchange_pool"] == "shared"
+    assert (
+        ModelCard(selected.document).select().program["device_placement"] == placement
+    )
+    assert ModelCard(selected.document).select().program["exchange_pool"] == "shared"
+
+
+@pytest.mark.parametrize("pool", [None, False, 0, [], {}, ""])
+def test_invalid_exchange_pool_is_rejected(pool):
+    document = _document()
+    document["schema_version"] = 2
+    next(iter(document["programs"].values()))["exchange_pool"] = pool
+    with pytest.raises(ManifestError):
+        ModelCard(document)
+
+
+@pytest.mark.parametrize("placement", [{"ffn": 1}, {"ffn": ""}, {"": "gpu"}, []])
+def test_invalid_device_placement_is_rejected(placement):
+    document = _document()
+    document["schema_version"] = 2
+    next(iter(document["programs"].values()))["device_placement"] = placement
+    with pytest.raises(ManifestError):
+        ModelCard(document)
+
+
+def test_v1_rejects_device_placement():
+    document = _document()
+    document["schema_version"] = 1
+    next(iter(document["programs"].values()))["device_placement"] = {}
+    with pytest.raises(ManifestError, match="requires model schema version 2"):
+        ModelCard(document)

@@ -5,6 +5,7 @@
 
 #include "loom/runtime/host/host.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 #include "iree/async/util/proactor_thread.h"
@@ -19,7 +20,17 @@
 #include "loomc/target/vm.h"
 #include "loomc/task_queue.h"
 
+typedef struct loom_runtime_host_plan_entry_t {
+  struct loom_runtime_host_plan_entry_t* next;
+  loom_runtime_plan_provider_v1_t provider;
+  iree_string_view_t id;
+} loom_runtime_host_plan_entry_t;
+
 struct loom_runtime_host_t {
+  iree_slim_mutex_t plan_mutex;
+  loom_runtime_host_plan_entry_t* plan_providers;
+  bool plans_frozen;
+  bool legacy_two_bank;
   // Application and dependent device owners of the shared host resources.
   iree_atomic_ref_count_t ref_count;
   // Allocation policy for the host and its shared services.
@@ -172,6 +183,9 @@ iree_status_t loom_runtime_host_create(
   IREE_RETURN_IF_ERROR(
       iree_allocator_malloc(host_allocator, sizeof(*host), (void**)&host));
   host->host_allocator = host_allocator;
+  iree_slim_mutex_initialize(&host->plan_mutex);
+  const char* legacy = getenv("LOOM_SERVE_TWO_BANK");
+  host->legacy_two_bank = legacy && !strcmp(legacy, "1");
   iree_atomic_ref_count_init(&host->ref_count);
   iree_slim_mutex_initialize(&host->preparation.mutex);
   iree_arena_block_pool_initialize(64 * 1024, host_allocator,
@@ -250,6 +264,15 @@ iree_status_t loom_runtime_host_create(
         node_count, node_ids, options, host_allocator, &host->proactor_pool);
   }
   if (iree_status_is_ok(status)) {
+    status = loom_runtime_host_register_plan_provider(
+        host, IREE_SV("two_bank_v1"), loom_runtime_two_bank_plan_provider());
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_runtime_host_register_plan_provider(
+        host, IREE_SV("sequential_v1"),
+        loom_runtime_sequential_plan_provider());
+  }
+  if (iree_status_is_ok(status)) {
     *out_host = host;
   } else {
     loom_runtime_host_release(host);
@@ -282,6 +305,16 @@ void loom_runtime_host_release(loom_runtime_host_t* host) {
     loomc_target_environment_release(host->target_environment);
     iree_allocator_free(host->host_allocator, host->target_providers);
     iree_arena_block_pool_deinitialize(&host->block_pool);
+    loom_runtime_host_plan_entry_t* entry = host->plan_providers;
+    while (entry) {
+      loom_runtime_host_plan_entry_t* next = entry->next;
+      if (entry->provider.release) {
+        entry->provider.release(entry->provider.self);
+      }
+      iree_allocator_free(host->host_allocator, entry);
+      entry = next;
+    }
+    iree_slim_mutex_deinitialize(&host->plan_mutex);
     iree_slim_mutex_deinitialize(&host->preparation.mutex);
     iree_allocator_free(host->host_allocator, host);
   }
@@ -446,4 +479,79 @@ loom_runtime_host_target_providers(const loom_runtime_host_t* host,
 iree_async_proactor_pool_t* loom_runtime_host_proactor_pool(
     const loom_runtime_host_t* host) {
   return host->proactor_pool;
+}
+
+iree_status_t loom_runtime_host_register_plan_provider(
+    loom_runtime_host_t* host, iree_string_view_t id,
+    const loom_runtime_plan_provider_v1_t* provider) {
+  if (!id.size || !provider || provider->struct_size != sizeof(*provider) ||
+      provider->abi_version != 1 || !provider->prepare ||
+      (!!provider->retain != !!provider->release) ||
+      (provider->self && !provider->retain)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "invalid plan provider ABI");
+  }
+  loom_runtime_host_plan_entry_t* entry = NULL;
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc_struct_array(
+      host->host_allocator, sizeof(*entry), id.size, 1, (void**)&entry));
+  entry->id = iree_make_string_view((char*)(entry + 1), id.size);
+  memcpy((void*)entry->id.data, id.data, id.size);
+  entry->provider = *provider;
+  if (provider->retain) {
+    provider->retain(provider->self);
+  }
+  iree_slim_mutex_lock(&host->plan_mutex);
+  iree_status_t status = iree_ok_status();
+  if (host->plans_frozen) {
+    status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                              "plan registry is frozen");
+  }
+  for (loom_runtime_host_plan_entry_t* prior = host->plan_providers;
+       prior && iree_status_is_ok(status); prior = prior->next) {
+    if (iree_string_view_equal(prior->id, id)) {
+      status = iree_make_status(IREE_STATUS_ALREADY_EXISTS,
+                                "plan provider already registered");
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    entry->next = host->plan_providers;
+    host->plan_providers = entry;
+  }
+  iree_slim_mutex_unlock(&host->plan_mutex);
+  if (!iree_status_is_ok(status)) {
+    if (provider->release) {
+      provider->release(provider->self);
+    }
+    iree_allocator_free(host->host_allocator, entry);
+  }
+  return status;
+}
+
+iree_status_t loom_runtime_host_lookup_plan_provider(
+    loom_runtime_host_t* host, iree_string_view_t id,
+    loom_runtime_plan_provider_v1_t* out_provider) {
+  *out_provider = (loom_runtime_plan_provider_v1_t){0};
+  iree_slim_mutex_lock(&host->plan_mutex);
+  host->plans_frozen = true;
+  for (loom_runtime_host_plan_entry_t* entry = host->plan_providers; entry;
+       entry = entry->next) {
+    if (iree_string_view_equal(entry->id, id)) {
+      *out_provider = entry->provider;
+      break;
+    }
+  }
+  iree_slim_mutex_unlock(&host->plan_mutex);
+  if (!out_provider->prepare) {
+    return iree_make_status(IREE_STATUS_NOT_FOUND,
+                            "execution plan provider '%.*s' is not registered",
+                            (int)id.size, id.data);
+  }
+  if (out_provider->retain) {
+    out_provider->retain(out_provider->self);
+  }
+  return iree_ok_status();
+}
+
+bool loom_runtime_host_legacy_two_bank(const loom_runtime_host_t* host) {
+  return host->legacy_two_bank;
 }

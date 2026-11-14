@@ -95,6 +95,19 @@ iree_status_t loom_serve_text_variant_bind(
   return iree_ok_status();
 }
 
+iree_status_t loom_serve_text_variant_stages(
+    const loom_serve_text_variant_t* variant,
+    const loom_serve_text_model_t* owner,
+    const loom_runtime_stage_t** out_stages) {
+  *out_stages = NULL;
+  if (variant->owner != owner || !variant->ready) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "variant is not ready for this model");
+  }
+  *out_stages = variant->bindings;
+  return iree_ok_status();
+}
+
 static void loom_serve_text_variant_recorded(void* user_data,
                                              iree_status_t status) {
   loom_serve_text_variant_job_t* job = user_data;

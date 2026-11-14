@@ -11,6 +11,7 @@
 #include "iree/tokenizer/tokenizer.h"
 #include "loom/runtime/device/device.h"
 #include "loom/runtime/execution/execution.h"
+#include "loom/runtime/execution/plan.h"
 #include "loom/runtime/parameter/weights.h"
 #include "loom/runtime/program/compilation.h"
 #include "loom/runtime/program/sources.h"
@@ -71,7 +72,9 @@ iree_status_t loom_serve_text_model_compile_variant_async(
 // replacement peak fits beside accepted peers. Failure preserves current code
 // and its admission allowance. Selection does not wait or copy retained state.
 // The native module retains selected commands independently of variant
-// lifetime.
+// lifetime. A group model must have no invocation in flight; its source plan
+// and bank workspaces are prepared again for the candidate and published with
+// the native rebinding, or not at all.
 iree_status_t loom_serve_text_model_select_variant(
     loom_serve_text_model_t* model, const loom_serve_text_variant_t* variant);
 
@@ -107,10 +110,20 @@ iree_status_t loom_serve_text_model_prepare_request(
     iree_vm_buffer_t** out_options);
 
 typedef struct loom_serve_text_options_t {
+  // Explicit deployment choice. DEFAULT is SINGLE for native callers; the
+  // server translates startup compatibility settings before model allocation.
+  loom_runtime_group_mode_t group_mode;
+  // Registered plan ID; empty selects two_bank_v1 for explicit TWO_BANK.
+  iree_string_view_t plan_provider;
   // Source root contract and request semantics, fixed for this residency.
   loom_serve_text_mode_t mode;
   // Explicit program inputs and local base, borrowed through load completion.
   loom_runtime_sources_t sources;
+  // Exact preparation roots mapped to logical names in the owning device
+  // group. Nonempty native options override the selected v2 card mapping.
+  // All selected devices must be consumers of the supplied storage pool.
+  loom_model_device_placement_list_t device_placement;
+  iree_string_view_t exchange_pool;
   // Maximum input count specialized into isolated prefill.
   iree_host_size_t prefill_capacity;
   // Logical attention-position ceiling per row, not a pooled reservation.
@@ -607,6 +620,26 @@ iree_status_t loom_serve_text_model_submit_epoch(
     const uint32_t* output_limits,
     const loom_serve_text_continuation_t* continuation,
     loom_serve_text_capture_t** out_capture,
+    loom_runtime_execution_frontier_t* out_frontier);
+
+// Submits a source-declared two-bank group without a device wait. Only known,
+// contiguous input for one row is accepted; A cannot select. Both banks and the
+// source publication record survive through completion/failure retirement.
+// Committed positions and request/cache publication remain unchanged until
+// complete_epoch consumes successful group readiness.
+bool loom_serve_text_model_two_bank(const loom_serve_text_model_t* model);
+// Queries the retained provider with immutable facts before choosing a group.
+// False selects the ordinary primary path without source/state mutation.
+bool loom_serve_text_model_can_pair(const loom_serve_text_model_t* model,
+                                    iree_host_size_t first_shape,
+                                    const loom_serve_text_span_t* first,
+                                    iree_host_size_t second_shape,
+                                    const loom_serve_text_span_t* second);
+
+iree_status_t loom_serve_text_model_submit_epoch_pair(
+    loom_serve_text_model_t* model, iree_host_size_t first_shape,
+    const loom_serve_text_span_t* first, iree_host_size_t second_shape,
+    const loom_serve_text_span_t* second,
     loom_runtime_execution_frontier_t* out_frontier);
 
 // Consumes one successfully completed epoch after both submitted frontiers
