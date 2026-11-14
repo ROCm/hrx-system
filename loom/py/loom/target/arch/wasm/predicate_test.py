@@ -18,11 +18,21 @@ from loom.target.arch.wasm.predicate import (
     PREDICATE_LANE_TYPE,
     PREDICATE_PAYLOAD_FAMILIES,
     PREDICATE_REPRESENTATIONS,
+    PREDICATE_TUPLE_TYPE,
     PREDICATE_TYPE,
     _predicate_conversion_lanes,
     predicate_rules,
 )
-from loom.target.contracts import DescriptorRule, Guard, GuardKind, TypePattern
+from loom.target.contracts import (
+    DescriptorEmitForm,
+    DescriptorRule,
+    EmitDescriptorOp,
+    EmitRegisterConcat,
+    Guard,
+    GuardKind,
+    SourceValueKind,
+    TypePattern,
+)
 from loom.target.low_descriptors import Descriptor
 
 
@@ -292,8 +302,6 @@ def test_lane_access_has_one_rule_for_each_physical_representation():
 
 def test_representation_invariant_rules_are_single_shared_rows():
     for source_op in (
-        vector.vector_splati,
-        vector.vector_splat,
         vector.vector_andi,
         vector.vector_ori,
         vector.vector_xori,
@@ -308,3 +316,25 @@ def test_representation_invariant_rules_are_single_shared_rows():
     assert PREDICATE_TYPE.minimum_static_elements == 1
     assert PREDICATE_TYPE.maximum_static_elements == 16
     assert PREDICATE_TYPE.minimum_lanes is None
+
+
+def test_uniform_predicates_reuse_one_native_packet_for_the_complete_tuple():
+    for source_op in (vector.vector_splati, vector.vector_splat):
+        native, aggregate = _rules_for(source_op)
+        assert _type_guard(native, "result") == PREDICATE_TYPE
+        assert _type_guard(aggregate, "result") == PREDICATE_TUPLE_TYPE
+        # Single-packet construction retains its direct result binding. The
+        # wider rule performs identical native work once, then repeats aliases.
+        assert all(isinstance(emit, EmitDescriptorOp) for emit in native.emit)
+        assert native.emit[-1].results["dst"].kind is SourceValueKind.RESULT
+        assert [emit.descriptor for emit in aggregate.emit[:-1]] == [
+            emit.descriptor for emit in native.emit
+        ]
+        collect = aggregate.emit[-1]
+        assert isinstance(collect, EmitRegisterConcat)
+        assert collect.form is DescriptorEmitForm.PER_LANE_SEQUENCE
+        assert collect.unit_count == 1
+        assert collect.sources == (aggregate.emit[-2].results["dst"],)
+        assert collect.result.kind is SourceValueKind.RESULT
+    assert PREDICATE_TUPLE_TYPE.minimum_static_elements == 17
+    assert PREDICATE_TUPLE_TYPE.maximum_static_elements == 65535

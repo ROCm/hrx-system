@@ -19,8 +19,10 @@ from loom.target.contracts import (
     AttrProject,
     ContractCase,
     DescriptorEmitForm,
+    DescriptorResultType,
     DescriptorRule,
     EmitDescriptorOp,
+    EmitRegisterConcat,
     Guard,
     Scalar,
     TypePattern,
@@ -55,6 +57,10 @@ class FloatPredicateRecipe:
 PREDICATE_REPRESENTATIONS = (8, 16, 32, 64)
 PREDICATE_TYPE = Vector("i1", minimum_static_elements=1, maximum_static_elements=16)
 PREDICATE_LANE_TYPE = Vector("i1", minimum_lanes=1, maximum_lanes=16)
+# Wider predicates use byte lanes within the carrier's uint16 byte extent.
+PREDICATE_TUPLE_TYPE = Vector(
+    "i1", minimum_static_elements=17, maximum_static_elements=65535
+)
 PREDICATE_PAYLOAD_FAMILIES = (
     (8, Vector(("i8", "f8E4M3", "f8E5M2"), minimum_lanes=1, maximum_lanes=16)),
     (16, Vector(("i16", "f16", "bf16"), minimum_lanes=1, maximum_lanes=8)),
@@ -240,49 +246,89 @@ def _predicate_conversion_emits(
 
 
 def _predicate_constant_rule(
-    descriptor_lookup: DescriptorLookup, value_type_guard: ValueTypeGuard
+    descriptor_lookup: DescriptorLookup,
+    value_type_guard: ValueTypeGuard,
+    *,
+    packet_tuple: bool,
 ) -> DescriptorRule:
     descriptor = descriptor_lookup("wasm.v128.const")
     value = ValueProject.exact_i64_negate("result")
+    packet = ValueRef.temporary("packet") if packet_tuple else ValueRef.result("result")
     return DescriptorRule(
         source_op=vector.vector_splati,
         descriptor=descriptor,
         guards=(
-            value_type_guard("result", PREDICATE_TYPE),
+            value_type_guard(
+                "result",
+                PREDICATE_TUPLE_TYPE if packet_tuple else PREDICATE_TYPE,
+            ),
             Guard.value_exact_i64("result"),
         ),
         emit=(
             EmitDescriptorOp(
                 descriptor=descriptor,
-                results={"dst": ValueRef.result("result")},
+                results={"dst": packet},
+                result_types={"dst": DescriptorResultType()} if packet_tuple else None,
                 immediates={"lo64": value, "hi64": value},
                 form=DescriptorEmitForm.CONST,
             ),
+        )
+        + (
+            (
+                EmitRegisterConcat(
+                    sources=(packet,),
+                    result=ValueRef.result("result"),
+                    unit_count=1,
+                    form=DescriptorEmitForm.PER_LANE_SEQUENCE,
+                ),
+            )
+            if packet_tuple
+            else ()
         ),
     )
 
 
 def _predicate_splat_rule(
-    descriptor_lookup: DescriptorLookup, value_type_guard: ValueTypeGuard
+    descriptor_lookup: DescriptorLookup,
+    value_type_guard: ValueTypeGuard,
+    *,
+    packet_tuple: bool,
 ) -> DescriptorRule:
     descriptor = descriptor_lookup("wasm.i32x4.splat")
     mask_emits, mask = _predicate_mask_emits(
         descriptor_lookup, ValueRef.operand("scalar"), 32
     )
+    packet = ValueRef.temporary("packet") if packet_tuple else ValueRef.result("result")
     return DescriptorRule(
         source_op=vector.vector_splat,
         descriptor=descriptor,
         guards=(
             value_type_guard("scalar", _I1),
-            value_type_guard("result", PREDICATE_TYPE),
+            value_type_guard(
+                "result", PREDICATE_TUPLE_TYPE if packet_tuple else PREDICATE_TYPE
+            ),
         ),
         emit=(
             *mask_emits,
-            _op_emit(
-                descriptor,
-                {"value": mask},
-                ValueRef.result("result"),
+            EmitDescriptorOp(
+                descriptor=descriptor,
+                operands={"value": mask},
+                results={"dst": packet},
+                result_types={"dst": DescriptorResultType()} if packet_tuple else None,
+                form=DescriptorEmitForm.OP,
             ),
+        )
+        + (
+            (
+                EmitRegisterConcat(
+                    sources=(packet,),
+                    result=ValueRef.result("result"),
+                    unit_count=1,
+                    form=DescriptorEmitForm.PER_LANE_SEQUENCE,
+                ),
+            )
+            if packet_tuple
+            else ()
         ),
     )
 
@@ -898,8 +944,11 @@ def predicate_rules(
 ) -> tuple[ContractCase, ...]:
     """Builds the complete Wasm SIMD predicate contract family."""
     return (
-        _predicate_constant_rule(descriptor_lookup, value_type_guard),
-        _predicate_splat_rule(descriptor_lookup, value_type_guard),
+        *(
+            rule(descriptor_lookup, value_type_guard, packet_tuple=packet_tuple)
+            for rule in (_predicate_constant_rule, _predicate_splat_rule)
+            for packet_tuple in (False, True)
+        ),
         _whole_predicate_select_rule(descriptor_lookup, value_type_guard),
         *_vector_select_rules(descriptor_lookup, value_type_guard),
         *_predicate_bitwise_rules(descriptor_lookup, value_type_guard),

@@ -392,10 +392,10 @@ static iree_status_t loom_amdgpu_legalize_static_vector_shape(
   bool rewritten = false;
   loom_type_t carrier_type = loom_type_none();
   loom_amdgpu_vector_storage_t carrier_storage = {0};
-  // A rectangular slice can stream only its selected runs from a source
-  // larger than the native carrier. The shared rewrite bounds expansion;
-  // packet legalization retains ownership of the resulting rank-one windows.
-  if (loom_vector_slice_isa(op) ||
+  // Rectangular slices and row insertions can preserve native packets within
+  // a larger aggregate. The shared rewrite bounds expansion; packet
+  // legalization retains ownership of the resulting rank-one windows.
+  if (loom_vector_slice_isa(op) || loom_vector_insert_isa(op) ||
       (loom_amdgpu_static_shape_carrier_type(context->module, op,
                                              &carrier_type) &&
        loom_amdgpu_type_vector_storage(carrier_type, &carrier_storage) &&

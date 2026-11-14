@@ -719,3 +719,171 @@ check.scenario @address_lane_insertion_values {
   }
   check.return
 }
+
+// Whole predicate rows cross native packets. Fixed and runtime row insertion
+// use literal and runtime inversions while preserving the original matrix.
+func.def @predicate_row_insertion(%input: buffer, %output: buffer, %row_input: index) {
+  %origin = index.constant 0 : offset
+  %rows = index.constant 3 : index
+  %row_mask = index.constant 7 : index
+  %bounded_row = index.andi %row_input, %row_mask : index
+  %row = index.rem %bounded_row, %rows : index
+  %source = buffer.view %input[%origin] : buffer -> view<51xi8>
+  %destination = buffer.view %output[%origin] : buffer -> view<153xi8>
+  %values = vector.load %source[0] : view<51xi8> -> vector<51xi8>
+  %inactive_values = vector.splati 0 : vector<51xi8>
+  %true_values = vector.splati 1 : vector<51xi8>
+  %original = vector.cmpi ne, %values, %inactive_values : vector<51xi8> -> vector<51xi1>
+  %first = vector.slice %original[0] : vector<51xi1> -> vector<17xi1>
+  %true_row = vector.splati 1 : vector<17xi1>
+  %replacement = vector.xori %first, %true_row : vector<17xi1>
+  %selector_bits = index.cast %row_input : index to i64
+  %invert = scalar.trunci %selector_bits : i64 to i1
+  %invert_row = vector.splat %invert : vector<17xi1>
+  %dynamic_replacement = vector.xori %first, %invert_row : vector<17xi1>
+  %matrix = vector.bitcast %original : vector<51xi1> to vector<3x17xi1>
+  %fixed = vector.insert %replacement into %matrix[1] : vector<17xi1>, vector<3x17xi1>
+  %dynamic = vector.insert %dynamic_replacement into %matrix[%row] : vector<17xi1>, vector<3x17xi1>
+  %fixed_flat = vector.bitcast %fixed : vector<3x17xi1> to vector<51xi1>
+  %dynamic_flat = vector.bitcast %dynamic : vector<3x17xi1> to vector<51xi1>
+  %fixed_values = vector.select %fixed_flat, %true_values, %inactive_values : vector<51xi8>
+  %dynamic_values = vector.select %dynamic_flat, %true_values, %inactive_values : vector<51xi8>
+  %saved = vector.select %original, %true_values, %inactive_values : vector<51xi8>
+  vector.store %fixed_values, %destination[0] : vector<51xi8>, view<153xi8>
+  vector.store %dynamic_values, %destination[51] : vector<51xi8>, view<153xi8>
+  vector.store %saved, %destination[102] : vector<51xi8>, view<153xi8>
+  func.return
+}
+
+func.def @predicate_row_insertion_oracle(%input: buffer, %output: buffer, %row_input: index) {
+  %origin = index.constant 0 : offset
+  %rows = index.constant 3 : index
+  %row_mask = index.constant 7 : index
+  %bounded_row = index.andi %row_input, %row_mask : index
+  %row = index.rem %bounded_row, %rows : index
+  %source = buffer.view %input[%origin] : buffer -> view<51xi8>
+  %destination = buffer.view %output[%origin] : buffer -> view<153xi8>
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %columns = index.constant 17 : index
+  %end = index.constant 51 : index
+  %saved_origin = index.constant 102 : index
+  %inactive_value = scalar.constant 0 : i8
+  %selector_bits = index.cast %row_input : index to i64
+  %invert = scalar.trunci %selector_bits : i64 to i1
+  scf.for %lane = [%begin to %end step %step] {
+    %column = index.rem %lane, %columns : index
+    %current_row = index.div %lane, %columns : index
+    %value = view.load %source[%lane] : view<51xi8> -> i8
+    %first = view.load %source[%column] : view<51xi8> -> i8
+    %original = scalar.cmpi ne, %value, %inactive_value : i8
+    %replacement = scalar.cmpi eq, %first, %inactive_value : i8
+    %first_bit = scalar.cmpi ne, %first, %inactive_value : i8
+    %dynamic_replacement = scalar.xori %first_bit, %invert : i1
+    %at_fixed = index.cmp eq, %current_row, %step : index
+    %at_dynamic = index.cmp eq, %current_row, %row : index
+    %fixed = scf.select %at_fixed, %replacement, %original : i1
+    %dynamic = scf.select %at_dynamic, %dynamic_replacement, %original : i1
+    %fixed_value = scalar.extui %fixed : i1 to i8
+    %dynamic_value = scalar.extui %dynamic : i1 to i8
+    %saved = scalar.extui %original : i1 to i8
+    %dynamic_position = index.add %lane, %end : index
+    %saved_position = index.add %lane, %saved_origin : index
+    view.store %fixed_value, %destination[%lane] : i8, view<153xi8>
+    view.store %dynamic_value, %destination[%dynamic_position] : i8, view<153xi8>
+    view.store %saved, %destination[%saved_position] : i8, view<153xi8>
+  }
+  func.return
+}
+
+check.scenario @predicate_row_insertion_values {
+  check.trial[6](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(0 to 3) : tensor<51xi8>
+    %storage = check.generate.fill value(37) : tensor<155xi8>
+    %output = check.tensor.view %storage offset(1) : tensor<155xi8> -> tensor<153xi8>
+    check.compare<@predicate_row_insertion, @predicate_row_insertion_oracle>(%input, %output, %trial) : (tensor<51xi8>, tensor<153xi8>, index) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<51xi8>
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<155xi8>
+    }
+  }
+  check.return
+}
+
+// All three carriers describe the same bytes. Their complete matrices exceed
+// one native operation's register limit, while each replacement is one row.
+func.def @payload_row_insertion(%input: buffer, %replacement: buffer, %output: buffer, %row_input: index) {
+  %origin = index.constant 0 : offset
+  %rows = index.constant 3 : index
+  %row_mask = index.constant 7 : index
+  %bounded_row = index.andi %row_input, %row_mask : index
+  %row = index.rem %bounded_row, %rows : index
+  %byte_source = buffer.view %input[%origin] : buffer -> view<3x72xi8>
+  %half_source = buffer.view %input[%origin] : buffer -> view<3x36xf16>
+  %wide_source = buffer.view %input[%origin] : buffer -> view<3x9xf64>
+  %byte_row = buffer.view %replacement[%origin] : buffer -> view<72xi8>
+  %half_row = buffer.view %replacement[%origin] : buffer -> view<36xf16>
+  %wide_row = buffer.view %replacement[%origin] : buffer -> view<9xf64>
+  %destination = buffer.view %output[%origin] : buffer -> view<648xi8>
+  %byte_matrix = vector.load %byte_source[0, 0] : view<3x72xi8> -> vector<3x72xi8>
+  %half_matrix = vector.load %half_source[0, 0] : view<3x36xf16> -> vector<3x36xf16>
+  %wide_matrix = vector.load %wide_source[0, 0] : view<3x9xf64> -> vector<3x9xf64>
+  %byte_values = vector.load %byte_row[0] : view<72xi8> -> vector<72xi8>
+  %half_values = vector.load %half_row[0] : view<36xf16> -> vector<36xf16>
+  %wide_values = vector.load %wide_row[0] : view<9xf64> -> vector<9xf64>
+  %byte_updated = vector.insert %byte_values into %byte_matrix[%row] : vector<72xi8>, vector<3x72xi8>
+  %half_updated = vector.insert %half_values into %half_matrix[%row] : vector<36xf16>, vector<3x36xf16>
+  %wide_updated = vector.insert %wide_values into %wide_matrix[%row] : vector<9xf64>, vector<3x9xf64>
+  %byte_bits = vector.bitcast %byte_updated : vector<3x72xi8> to vector<216xi8>
+  %half_bits = vector.bitcast %half_updated : vector<3x36xf16> to vector<216xi8>
+  %wide_bits = vector.bitcast %wide_updated : vector<3x9xf64> to vector<216xi8>
+  vector.store %byte_bits, %destination[0] : vector<216xi8>, view<648xi8>
+  vector.store %half_bits, %destination[216] : vector<216xi8>, view<648xi8>
+  vector.store %wide_bits, %destination[432] : vector<216xi8>, view<648xi8>
+  func.return
+}
+
+func.def @payload_row_insertion_oracle(%input: buffer, %replacement: buffer, %output: buffer, %row_input: index) {
+  %origin = index.constant 0 : offset
+  %rows = index.constant 3 : index
+  %row_mask = index.constant 7 : index
+  %bounded_row = index.andi %row_input, %row_mask : index
+  %row = index.rem %bounded_row, %rows : index
+  %source = buffer.view %input[%origin] : buffer -> view<216xi8>
+  %row_source = buffer.view %replacement[%origin] : buffer -> view<72xi8>
+  %destination = buffer.view %output[%origin] : buffer -> view<648xi8>
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %row_bytes = index.constant 72 : index
+  %matrix_bytes = index.constant 216 : index
+  %end = index.constant 648 : index
+  scf.for %position = [%begin to %end step %step] {
+    %source_position = index.rem %position, %matrix_bytes : index
+    %current_row = index.div %source_position, %row_bytes : index
+    %column = index.rem %source_position, %row_bytes : index
+    %original = view.load %source[%source_position] : view<216xi8> -> i8
+    %inserted = view.load %row_source[%column] : view<72xi8> -> i8
+    %at_row = index.cmp eq, %current_row, %row : index
+    %value = scf.select %at_row, %inserted, %original : i8
+    view.store %value, %destination[%position] : i8, view<648xi8>
+  }
+  func.return
+}
+
+check.scenario @payload_row_insertion_values {
+  check.trial[6](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %replacement_entropy = check.entropy.fork %entropy name("replacement") : check.entropy
+    %replacement_seed = check.entropy.read %replacement_entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-128 to 127) : tensor<216xi8>
+    %replacement = check.generate.random.uniform seed(%replacement_seed) range(-128 to 127) : tensor<72xi8>
+    %storage = check.generate.fill value(37) : tensor<664xi8>
+    %output = check.tensor.view %storage offset(8) : tensor<664xi8> -> tensor<648xi8>
+    check.compare<@payload_row_insertion, @payload_row_insertion_oracle>(%input, %replacement, %output, %trial) : (tensor<216xi8>, tensor<72xi8>, tensor<648xi8>, index) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<216xi8>
+      check.expect.bitwise actual(%replacement) expected(%replacement) : tensor<72xi8>
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<664xi8>
+    }
+  }
+  check.return
+}
