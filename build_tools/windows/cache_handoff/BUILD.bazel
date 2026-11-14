@@ -1,0 +1,33 @@
+# Copyright 2026 The IREE Authors
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+package(default_visibility = ["//visibility:private"])
+
+# This platform describes build actions already executed by the Linux producer.
+# A Windows cache consumer may analyze those actions but must fail on a miss
+# instead of attempting to execute a Linux tool locally.
+platform(
+    name = "linux_x86_64",
+    constraint_values = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:linux",
+    ],
+)
+
+# Register explicitly for the cache-handoff experiment. Keeping this out of the
+# repository-wide toolchain registration prevents ordinary native Windows
+# builds from loading the Linux cross-toolchain repository.
+toolchain(
+    name = "windows_x86_64_clang_cl",
+    exec_compatible_with = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:linux",
+    ],
+    target_compatible_with = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:windows",
+    ],
+    target_settings = ["//build_tools/windows:compiler_clang_cl"],
+    toolchain = "@iree_windows_toolchain//:toolchain",
+    toolchain_type = "@bazel_tools//tools/cpp:toolchain_type",
+)
