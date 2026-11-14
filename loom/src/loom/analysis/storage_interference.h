@@ -64,7 +64,8 @@ bool loom_storage_interference_root_may_be_accessed(
 // functions every path from an access through reallocation to another access
 // must cross such a rendezvous; different paths may use different barriers.
 // Declarations and alias construction do not access storage. Structured
-// allocations use a cut in the allocation block.
+// allocations also accept enclosing cuts reached before every reentry through
+// conditional regions. A cut outside an inner loop cannot retire its instances.
 // The proof is retained during construction; this query neither traverses IR
 // nor computes liveness.
 bool loom_storage_interference_root_has_single_live_instance(
