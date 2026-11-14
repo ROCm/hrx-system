@@ -579,3 +579,143 @@ check.scenario @wide_predicate_insertion_values {
   }
   check.return
 }
+
+// Fixed updates straddle a packet boundary and the final singleton. The
+// original mask remains live after both updates and has its own output.
+func.def @predicate_tail_updates(%input: buffer, %output: buffer, %replacement_index: index) {
+  %origin = index.constant 0 : offset
+  %source = buffer.view %input[%origin] : buffer -> view<33xi8>
+  %destination = buffer.view %output[%origin] : buffer -> view<66xi8>
+  %values = vector.load %source[0] : view<33xi8> -> vector<33xi8>
+  %inactive_values = vector.splati 0 : vector<33xi8>
+  %true_values = vector.splati 1 : vector<33xi8>
+  %original = vector.cmpi ne, %values, %inactive_values : vector<33xi8> -> vector<33xi1>
+  %replacement = index.cast %replacement_index : index to i64
+  %value = scalar.trunci %replacement : i64 to i1
+  %invert_bit = scalar.constant 1 : i1
+  %inverse = scalar.xori %value, %invert_bit : i1
+  %middle = vector.insert %value into %original[16] : i1, vector<33xi1>
+  %updated = vector.insert %inverse into %middle[32] : i1, vector<33xi1>
+  %selected = vector.select %updated, %values, %inactive_values : vector<33xi8>
+  %saved = vector.select %original, %true_values, %inactive_values : vector<33xi8>
+  vector.store %selected, %destination[0] : vector<33xi8>, view<66xi8>
+  vector.store %saved, %destination[33] : vector<33xi8>, view<66xi8>
+  func.return
+}
+
+func.def @predicate_tail_updates_oracle(%input: buffer, %output: buffer, %replacement_index: index) {
+  %origin = index.constant 0 : offset
+  %source = buffer.view %input[%origin] : buffer -> view<33xi8>
+  %destination = buffer.view %output[%origin] : buffer -> view<66xi8>
+  %begin = index.constant 0 : index
+  %end = index.constant 33 : index
+  %step = index.constant 1 : index
+  %middle = index.constant 16 : index
+  %tail = index.constant 32 : index
+  %inactive_value = scalar.constant 0 : i8
+  %invert_bit = scalar.constant 1 : i1
+  %replacement = index.cast %replacement_index : index to i64
+  %replacement_bit = scalar.trunci %replacement : i64 to i1
+  %inverse = scalar.xori %replacement_bit, %invert_bit : i1
+  scf.for %lane = [%begin to %end step %step] {
+    %value = view.load %source[%lane] : view<33xi8> -> i8
+    %original = scalar.cmpi ne, %value, %inactive_value : i8
+    %at_middle = index.cmp eq, %lane, %middle : index
+    %at_tail = index.cmp eq, %lane, %tail : index
+    %first = scf.select %at_middle, %replacement_bit, %original : i1
+    %updated = scf.select %at_tail, %inverse, %first : i1
+    %selected = scf.select %updated, %value, %inactive_value : i8
+    %saved = scalar.extui %original : i1 to i8
+    %saved_position = index.add %lane, %end : index
+    view.store %selected, %destination[%lane] : i8, view<66xi8>
+    view.store %saved, %destination[%saved_position] : i8, view<66xi8>
+  }
+  func.return
+}
+
+check.scenario @predicate_tail_update_values {
+  check.trial[8](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(0 to 3) : tensor<33xi8>
+    %storage = check.generate.fill value(37) : tensor<68xi8>
+    %output = check.tensor.view %storage offset(1) : tensor<68xi8> -> tensor<66xi8>
+    check.compare<@predicate_tail_updates, @predicate_tail_updates_oracle>(%input, %output, %trial) : (tensor<33xi8>, tensor<66xi8>, index) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<33xi8>
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<68xi8>
+    }
+  }
+  check.return
+}
+
+// Address vectors retain their values through insertion and dynamic extraction.
+// Scalar casts make the observed output independent of target address width.
+func.def @address_lane_insertion(%position_input: index, %value: i64, %output: buffer) {
+  %count = index.constant 17 : index
+  %position_mask = index.constant 31 : index
+  %bounded = index.andi %position_input, %position_mask : index
+  %position = index.rem %bounded, %count : index
+  %value_mask = scalar.constant 65535 : i64
+  %bits = scalar.andi %value, %value_mask : i64
+  %index_value = index.cast %bits : i64 to index
+  %offset_value = index.cast %bits : i64 to offset
+  %index_seed = index.constant 11 : index
+  %offset_seed = index.constant 29 : offset
+  %indices = vector.splat %index_seed : vector<17xindex>
+  %offsets = vector.splat %offset_seed : vector<17xoffset>
+  %updated_indices = vector.insert %index_value into %indices[%position] : index, vector<17xindex>
+  %updated_offsets = vector.insert %offset_value into %offsets[%position] : offset, vector<17xoffset>
+  %origin = index.constant 0 : offset
+  %destination = buffer.view %output[%origin] : buffer -> view<34xi64>
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  scf.for %lane = [%begin to %count step %step] {
+    %selected_index = vector.extract %updated_indices[%lane] : vector<17xindex> -> index
+    %selected_offset = vector.extract %updated_offsets[%lane] : vector<17xoffset> -> offset
+    %index_bits = index.cast %selected_index : index to i64
+    %offset_bits = index.cast %selected_offset : offset to i64
+    %offset_position = index.add %lane, %count : index
+    view.store %index_bits, %destination[%lane] : i64, view<34xi64>
+    view.store %offset_bits, %destination[%offset_position] : i64, view<34xi64>
+  }
+  func.return
+}
+
+func.def @address_lane_insertion_oracle(%position_input: index, %value: i64, %output: buffer) {
+  %count = index.constant 17 : index
+  %position_mask = index.constant 31 : index
+  %bounded = index.andi %position_input, %position_mask : index
+  %position = index.rem %bounded, %count : index
+  %value_mask = scalar.constant 65535 : i64
+  %bits = scalar.andi %value, %value_mask : i64
+  %index_value = index.cast %bits : i64 to index
+  %offset_value = index.cast %bits : i64 to offset
+  %index_seed = index.constant 11 : index
+  %offset_seed = index.constant 29 : offset
+  %origin = index.constant 0 : offset
+  %destination = buffer.view %output[%origin] : buffer -> view<34xi64>
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  scf.for %lane = [%begin to %count step %step] {
+    %matches = index.cmp eq, %lane, %position : index
+    %selected_index = scf.select %matches, %index_value, %index_seed : index
+    %selected_offset = scf.select %matches, %offset_value, %offset_seed : offset
+    %index_bits = index.cast %selected_index : index to i64
+    %offset_bits = index.cast %selected_offset : offset to i64
+    %offset_position = index.add %lane, %count : index
+    view.store %index_bits, %destination[%lane] : i64, view<34xi64>
+    view.store %offset_bits, %destination[%offset_position] : i64, view<34xi64>
+  }
+  func.return
+}
+
+check.scenario @address_lane_insertion_values {
+  check.trial[17](%trial: index, %entropy: check.entropy) {
+    %value = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %storage = check.generate.fill value(37) : tensor<288xi8>
+    %output = check.tensor.view %storage offset(8) : tensor<288xi8> -> tensor<272xi8>
+    check.compare<@address_lane_insertion, @address_lane_insertion_oracle>(%trial, %value, %output) : (index, i64, tensor<272xi8>) -> () {
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<288xi8>
+    }
+  }
+  check.return
+}
