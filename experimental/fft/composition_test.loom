@@ -1,0 +1,23 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+func.decl @composed_test(%input: buffer, %output: buffer, %table: buffer, %workspace: buffer, %intermediate: buffer, %frames: i32)
+
+check.scenario @composition {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(0.03125) step(0.03125) : tensor<30xf32>
+    %output = check.generate.fill value(-123.0) : tensor<30xf32>
+    %table = check.file.read.npy path("f32_f32-table.npy") : tensor<24xf32>
+    %workspace = check.generate.fill value(-123.0) : tensor<40xf32>
+    %intermediate = check.generate.fill value(-123.0) : tensor<36xf32>
+    %frames = check.literal value(3) : i32
+    check.compare<@composed_test>(%input, %output, %table, %workspace, %intermediate, %frames) : (tensor<30xf32>, tensor<30xf32>, tensor<24xf32>, tensor<40xf32>, tensor<36xf32>, i32) -> () {
+      check.expect.close actual(%output) expected(%input) atol(0.00003) rtol(0.00002) nan(different) : tensor<30xf32>
+      check.expect.close actual(%output) expected(%output) atol(0.00003) rtol(0.00002) nan(different) : tensor<30xf32>
+    }
+  }
+  check.return
+}
