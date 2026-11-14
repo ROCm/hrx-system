@@ -193,6 +193,7 @@ loom_cc_test(
     deps = [
         ":location",
         "//loom/src/loom/format/bytecode:format",
+        "//loom/src/loom/format/bytecode:indexed_source",
         "//loom/src/loom/ir",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",

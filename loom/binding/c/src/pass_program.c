@@ -588,6 +588,10 @@ loomc_status_t loomc_pass_program_create_from_module_symbol(
   const loom_module_t* source_module = loomc_module_const_loom_module(module);
   const loom_op_t* pipeline_op = NULL;
   loom_pass_pipeline_snapshot_t snapshot = {0};
+  loomc_diagnostic_capture_t capture;
+  loomc_diagnostic_capture_initialize(result, NULL, source_module,
+                                      loomc_module_source_resolver(module),
+                                      LOOM_EMITTER_PASS, NULL, &capture);
   loomc_status_t status =
       loomc_pass_program_allocate_storage(context, allocator, &pass_program);
   if (loomc_status_is_ok(status)) {
@@ -596,15 +600,21 @@ loomc_status_t loomc_pass_program_create_from_module_symbol(
   if (loomc_status_is_ok(status)) {
     status = loomc_status_from_iree(loom_pass_pipeline_snapshot_initialize(
         source_module, iree_string_view_from_loomc(pipeline_symbol),
-        loomc_pass_program_identifier(options), &pass_program->block_pool,
+        loomc_pass_program_identifier(options),
+        (iree_diagnostic_emitter_t){.fn = loomc_diagnostic_capture_emission,
+                                    .user_data = &capture},
+        &pass_program->block_pool,
         iree_allocator_from_loomc(pass_program->allocator), &snapshot));
   }
-  if (loomc_status_is_ok(status)) {
+  if (loomc_status_is_ok(status) && snapshot.module == NULL) {
+    loomc_result_set_status_code(result, LOOMC_STATUS_INVALID_ARGUMENT);
+  }
+  if (loomc_status_is_ok(status) && loomc_result_succeeded(result)) {
     pass_program->pipeline_module = snapshot.module;
     pipeline_op = snapshot.pipeline_op;
     snapshot = (loom_pass_pipeline_snapshot_t){0};
   }
-  if (loomc_status_is_ok(status)) {
+  if (loomc_status_is_ok(status) && loomc_result_succeeded(result)) {
     status = loomc_pass_program_compile_pipeline_op(pass_program, pipeline_op);
   }
   if (!loomc_status_is_ok(status) &&
@@ -615,9 +625,11 @@ loomc_status_t loomc_pass_program_create_from_module_symbol(
   }
 
   if (loomc_status_is_ok(status)) {
-    *out_pass_program = pass_program;
+    if (loomc_result_succeeded(result)) {
+      *out_pass_program = pass_program;
+      pass_program = NULL;
+    }
     *out_result = result;
-    pass_program = NULL;
     result = NULL;
   }
   loomc_pass_program_release(pass_program);

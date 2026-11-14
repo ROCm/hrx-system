@@ -624,7 +624,12 @@ TEST_F(CxxTest, LaunchRangesUseNormalCompilationConfigValidation) {
       EXPECT_FALSE(loomc_result_succeeded(result));
       ASSERT_GT(loomc_result_diagnostic_count(result), 0u);
       EXPECT_EQ(ToString(loomc_result_diagnostic_at(result, 0)->code),
-                "CONFIG/INVALID");
+                "SYMBOL/008");
+      const auto& range = loomc_result_diagnostic_at(result, 0)->range;
+      ASSERT_NE(range.source, nullptr);
+      EXPECT_EQ(ToString(loomc_source_identifier(range.source)), "bounded.cpp");
+      EXPECT_GT(range.start_line, 0u);
+      EXPECT_GT(range.start_column, 0u);
     }
   }
 }

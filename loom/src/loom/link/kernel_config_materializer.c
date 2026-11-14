@@ -10,11 +10,14 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "loom/error/error_catalog.h"
+#include "loom/error/parameter.h"
 #include "loom/format/bytecode/function_projection_reader.h"
 #include "loom/format/bytecode/selected_reader.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ir/symbol_map.h"
+#include "loom/link/index_diagnostics.h"
 #include "loom/ops/func/ops.h"
 #include "loom/ops/kernel/launch_config.h"
 #include "loom/ops/kernel/ops.h"
@@ -27,19 +30,28 @@
 #include "loom/util/adaptive_sort.h"
 
 typedef struct loom_link_bytecode_kernel_config_source_t {
-  // Indexed bytecode provider retaining the source storage.
-  const loom_link_module_index_provider_t* provider;
-  // Provider-local source module metadata.
-  const loom_bytecode_module_metadata_t* module;
-  // Indexed source module containing the selected kernel.
-  const loom_link_module_index_module_t* indexed_module;
-  // Module-local source kernel metadata.
-  const loom_bytecode_symbol_metadata_t* symbol;
-  // Module-local source kernel ordinal.
-  uint32_t symbol_ordinal;
+  // Source index retaining the selected definition and source identity.
+  const loom_link_module_index_t* index;
+  // Original indexed definition, independently of projected helper names.
+  const loom_link_module_index_symbol_t* symbol;
+  // Borrowed diagnostic destination and exact-source lookup.
+  loom_link_diagnostic_environment_t diagnostics;
   // Symbol-local ordinal of the launch-configuration payload.
   uint8_t config_payload_ordinal;
 } loom_link_bytecode_kernel_config_source_t;
+
+static iree_status_t loom_link_kernel_config_emit_rejection(
+    const loom_link_module_index_t* index,
+    loom_link_diagnostic_environment_t diagnostics,
+    const loom_link_module_index_symbol_t* symbol, iree_string_view_t reason) {
+  const loom_diagnostic_param_t parameters[] = {
+      loom_param_string(symbol->name),
+      loom_param_string(reason),
+  };
+  return loom_link_index_emit_diagnostic(index, diagnostics, symbol, NULL,
+                                         LOOM_ERR_SYMBOL_024, parameters,
+                                         IREE_ARRAYSIZE(parameters));
+}
 
 // Cross-module state for projecting selected materialized IR.
 typedef struct loom_link_kernel_config_ir_projection_t {
@@ -135,10 +147,6 @@ static iree_status_t loom_link_kernel_config_add_helper_symbol(
     const int suffix_length =
         snprintf(storage + source_name.size + suffix.size, 32, "$%" PRIhsz,
                  (*next_conflict_ordinal)++);
-    if (suffix_length < 0 || suffix_length >= 32) {
-      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                              "configuration symbol suffix overflow");
-    }
     name_length =
         source_name.size + suffix.size + (iree_host_size_t)suffix_length;
   }
@@ -148,10 +156,6 @@ static iree_status_t loom_link_kernel_config_build_declaration(
     loom_module_t* module, const loom_bytecode_function_header_t* header,
     loom_link_plan_symbol_projection_t projection, loom_builder_t* builder,
     loom_op_t** out_declaration) {
-  if (header->result_count != 0) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "kernel definition has function results");
-  }
   const bool is_entry =
       projection == LOOM_LINK_PLAN_SYMBOL_PROJECTION_KERNEL_ENTRY;
   const bool is_pipeline =
@@ -160,10 +164,6 @@ static iree_status_t loom_link_kernel_config_build_declaration(
       is_entry ? 0 : header->workload_argument_count;
   const iree_host_size_t operand_count =
       (iree_host_size_t)workload_count + header->argument_count;
-  if (operand_count > UINT16_MAX) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "kernel signature exceeds operand capacity");
-  }
   const loom_op_kind_t op_kind = is_pipeline ? LOOM_OP_PIPELINE_DECL
                                  : is_entry  ? LOOM_OP_KERNEL_ENTRY_DECL
                                              : LOOM_OP_KERNEL_DECL;
@@ -384,7 +384,8 @@ static iree_status_t loom_link_kernel_config_materialize_body(
     const loom_link_bytecode_kernel_config_source_t* source,
     loom_bytecode_function_projection_reader_t* reader,
     const loom_bytecode_function_header_t* header, loom_module_t* module,
-    loom_builder_t* builder, loom_func_like_t helper) {
+    loom_builder_t* builder, loom_func_like_t helper, bool* out_accepted) {
+  *out_accepted = false;
   uint16_t helper_argument_count = 0;
   const loom_value_id_t* helper_arguments =
       loom_func_like_arg_ids(helper, &helper_argument_count);
@@ -392,14 +393,18 @@ static iree_status_t loom_link_kernel_config_materialize_body(
       loom_bytecode_function_projection_reader_materialize_region(
           reader, header, source->config_payload_ordinal, builder, helper.op,
           loom_func_like_body_region_index(helper), helper_arguments,
-          helper_argument_count, /*low_descriptor_set=*/NULL));
+          helper_argument_count, /*low_descriptor_set=*/NULL, out_accepted));
+  if (!*out_accepted) {
+    return iree_ok_status();
+  }
+  *out_accepted = false;
 
   loom_block_t* block = loom_region_entry_block(loom_func_like_body(helper));
-  loom_op_t* launch_config = block->last_op;
+  loom_op_t* launch_config = block ? block->last_op : NULL;
   if (!loom_kernel_launch_config_isa(launch_config)) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "kernel configuration does not end in kernel.launch.config");
+    return loom_link_kernel_config_emit_rejection(
+        source->index, source->diagnostics, source->symbol,
+        IREE_SV("configuration must end in kernel.launch.config"));
   }
   loom_value_id_t return_values[3];
   memcpy(return_values, loom_op_const_operands(launch_config),
@@ -412,6 +417,7 @@ static iree_status_t loom_link_kernel_config_materialize_body(
                                               IREE_ARRAYSIZE(return_values),
                                               location, &return_op));
   loom_link_kernel_config_finalize_helper(module, helper);
+  *out_accepted = true;
   return iree_ok_status();
 }
 
@@ -419,11 +425,12 @@ static iree_status_t loom_link_kernel_config_materialize_projection_body(
     const loom_link_bytecode_kernel_config_source_t* source,
     loom_bytecode_function_projection_reader_t* reader,
     iree_arena_allocator_t* scratch_arena, loom_module_t* module,
-    loom_link_plan_symbol_projection_t projection,
-    loom_symbol_ref_t config_ref) {
+    loom_link_plan_symbol_projection_t projection, loom_symbol_ref_t config_ref,
+    bool* out_accepted) {
+  *out_accepted = true;
   loom_bytecode_function_header_t header = {0};
   iree_status_t status = loom_bytecode_function_projection_reader_read_header(
-      reader, source->symbol_ordinal, &header);
+      reader, (uint32_t)source->symbol->module_symbol_ordinal, &header);
 
   loom_builder_t builder;
   loom_op_t* declaration = NULL;
@@ -441,8 +448,8 @@ static iree_status_t loom_link_kernel_config_materialize_projection_body(
   }
   if (iree_status_is_ok(status) &&
       projection == LOOM_LINK_PLAN_SYMBOL_PROJECTION_KERNEL_CONFIGURATION) {
-    status = loom_link_kernel_config_materialize_body(source, reader, &header,
-                                                      module, &builder, helper);
+    status = loom_link_kernel_config_materialize_body(
+        source, reader, &header, module, &builder, helper, out_accepted);
   }
 
   return status;
@@ -486,12 +493,6 @@ static iree_status_t loom_link_kernel_config_resolve_bytecode_symbol(
   const loom_link_plan_module_symbol_t* selected =
       loom_link_kernel_config_find_selected_source_symbol(
           projection->selection, source_symbol_ordinal);
-  if (!selected) {
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
-        "kernel configuration plan omitted referenced source symbol %u",
-        (unsigned)source_symbol_ordinal);
-  }
   *out_target_ref = (loom_symbol_ref_t){
       .module_id = 0,
       .symbol_id = (uint16_t)selected->materialized_symbol_ordinal,
@@ -510,12 +511,6 @@ static iree_status_t loom_link_kernel_config_remap_ir_symbol(
   const loom_link_plan_module_symbol_t* selected =
       loom_link_kernel_config_find_selected_source_symbol(projection->selection,
                                                           source_ref.symbol_id);
-  if (!selected) {
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
-        "kernel configuration plan omitted referenced source symbol %u",
-        (unsigned)source_ref.symbol_id);
-  }
   *out_target_ref = (loom_symbol_ref_t){
       .module_id = 0,
       .symbol_id = (uint16_t)selected->materialized_symbol_ordinal,
@@ -835,11 +830,6 @@ static iree_status_t loom_link_kernel_config_build_ir_helper(
   const loom_block_t* source_block =
       loom_region_const_entry_block(source_region);
   const loom_op_t* launch_config = loom_kernel_def_launch_config_op(source_op);
-  if (!launch_config) {
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
-        "selected kernel configuration has no launch terminator");
-  }
   loom_builder_t body_builder;
   loom_builder_initialize(
       projection->target_module, &projection->target_module->arena,
@@ -1070,20 +1060,72 @@ iree_status_t loom_link_plan_project_kernel_config_module(
   IREE_ASSERT_ARGUMENT(arena);
   IREE_ASSERT_ARGUMENT(out_projection);
   *out_projection = (loom_link_kernel_config_module_projection_t){0};
-  if (!loom_link_plan_module_requires_symbol_projection(selection)) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "source module has no partial symbol projections");
-  }
-
+  const loom_link_module_index_t* index = loom_link_plan_index(plan);
+  const loom_link_module_index_provider_t* provider =
+      loom_link_module_index_provider_at(
+          index, selection->source_module->provider_ordinal);
+  const loom_module_t* materialized_module =
+      selection->source_module->materialized_module;
+  const loom_bytecode_module_metadata_t* bytecode_module =
+      materialized_module
+          ? NULL
+          : &provider->bytecode.metadata
+                 .modules[selection->source_module->provider_module_ordinal];
   for (iree_host_size_t i = 0; i < selection->symbols.count; ++i) {
-    const loom_link_plan_module_symbol_t* symbol =
+    const loom_link_plan_module_symbol_t* selected =
         &selection->symbols.values[i];
-    if (symbol->projection == LOOM_LINK_PLAN_SYMBOL_PROJECTION_UNSUPPORTED) {
-      return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                              "partial materialization of symbol '@%.*s' has "
-                              "no contract projection",
-                              (int)symbol->source_symbol->name.size,
-                              symbol->source_symbol->name.data);
+    if (selected->projection == LOOM_LINK_PLAN_SYMBOL_PROJECTION_COMPLETE) {
+      continue;
+    }
+    const loom_link_module_index_symbol_t* symbol = selected->source_symbol;
+    if (selected->projection == LOOM_LINK_PLAN_SYMBOL_PROJECTION_UNSUPPORTED) {
+      return loom_link_kernel_config_emit_rejection(
+          index, environment->diagnostics, symbol,
+          IREE_SV("selected facets have no partial contract representation"));
+    }
+    uint16_t argument_count = 0;
+    uint16_t workload_count = 0;
+    if (materialized_module) {
+      const loom_op_t* source_op =
+          materialized_module->symbols.entries[symbol->module_symbol_ordinal]
+              .defining_op;
+      loom_func_like_arg_ids(
+          loom_func_like_const_cast(materialized_module, source_op),
+          &argument_count);
+      if (selected->projection ==
+          LOOM_LINK_PLAN_SYMBOL_PROJECTION_KERNEL_CONFIGURATION) {
+        workload_count =
+            loom_kernel_workload_arg_ids(materialized_module, source_op).count;
+        if (!loom_kernel_def_launch_config_op(source_op)) {
+          return loom_link_kernel_config_emit_rejection(
+              index, environment->diagnostics, symbol,
+              IREE_SV("configuration must end in kernel.launch.config"));
+        }
+      }
+    } else {
+      const loom_bytecode_symbol_metadata_t* metadata =
+          &bytecode_module->symbols[symbol->module_symbol_ordinal];
+      argument_count = metadata->argument_count;
+      if (metadata->result_count != 0) {
+        return loom_link_kernel_config_emit_rejection(
+            index, environment->diagnostics, symbol,
+            IREE_SV("kernel and pipeline declarations cannot have results"));
+      }
+      if (selected->projection ==
+          LOOM_LINK_PLAN_SYMBOL_PROJECTION_KERNEL_CONFIGURATION) {
+        workload_count = metadata->kernel_workload_argument_count;
+      }
+    }
+    const uint32_t operand_count = (uint32_t)workload_count + argument_count;
+    if (operand_count > UINT16_MAX) {
+      const loom_diagnostic_param_t parameters[] = {
+          loom_param_string(symbol->name),
+          loom_param_u64(operand_count),
+          loom_param_u64(UINT16_MAX),
+      };
+      return loom_link_index_emit_diagnostic(
+          index, environment->diagnostics, symbol, NULL, LOOM_ERR_SYMBOL_025,
+          parameters, IREE_ARRAYSIZE(parameters));
     }
   }
 
@@ -1108,15 +1150,7 @@ iree_status_t loom_link_plan_project_kernel_config_module(
     return iree_ok_status();
   }
 
-  const loom_link_module_index_t* index = loom_link_plan_index(plan);
-  const loom_link_module_index_provider_t* provider =
-      loom_link_module_index_provider_at(
-          index, selection->source_module->provider_ordinal);
-  IREE_ASSERT(provider != NULL);
-  IREE_ASSERT_EQ(provider->kind, LOOM_LINK_PROVIDER_BYTECODE);
-  const loom_bytecode_module_metadata_t* source_module =
-      &provider->bytecode.metadata
-           .modules[selection->source_module->provider_module_ordinal];
+  const loom_bytecode_module_metadata_t* source_module = bytecode_module;
 
   loom_bytecode_symbol_ordinal_list_t complete_symbols = {0};
   IREE_RETURN_IF_ERROR(loom_link_kernel_config_select_complete_symbols(
@@ -1152,15 +1186,10 @@ iree_status_t loom_link_plan_project_kernel_config_module(
         complete_symbols, symbol_resolver, &read_options, module,
         environment->allocator, &read_result);
   }
-  if (iree_status_is_ok(status) && read_result.error_count != 0) {
-    status = iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "kernel configuration projection emitted %u bytecode error(s)",
-        (unsigned)read_result.error_count);
-  }
+  bool accepted = read_result.error_count == 0;
 
   loom_bytecode_function_projection_reader_t* reader = NULL;
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && accepted) {
     const loom_bytecode_function_projection_reader_options_t reader_options = {
         .diagnostic_sink =
             loom_link_kernel_config_diagnostic_sink(environment, provider),
@@ -1171,7 +1200,8 @@ iree_status_t loom_link_plan_project_kernel_config_module(
         module, &reader_options, arena, &reader);
   }
   for (iree_host_size_t i = 0;
-       i < selection->symbols.count && iree_status_is_ok(status); ++i) {
+       i < selection->symbols.count && iree_status_is_ok(status) && accepted;
+       ++i) {
     const loom_link_plan_module_symbol_t* symbol =
         &selection->symbols.values[i];
     status = loom_bytecode_function_projection_reader_bind_symbol(
@@ -1182,7 +1212,8 @@ iree_status_t loom_link_plan_project_kernel_config_module(
         });
   }
   for (iree_host_size_t i = 0;
-       i < selection->symbols.count && iree_status_is_ok(status); ++i) {
+       i < selection->symbols.count && iree_status_is_ok(status) && accepted;
+       ++i) {
     const loom_link_plan_module_symbol_t* symbol =
         &selection->symbols.values[i];
     if (!loom_link_kernel_config_selection_is_partial(symbol)) {
@@ -1190,22 +1221,10 @@ iree_status_t loom_link_plan_project_kernel_config_module(
     }
     const loom_bytecode_symbol_metadata_t* source_symbol =
         &source_module->symbols[symbol->source_symbol->module_symbol_ordinal];
-    if (symbol->projection ==
-            LOOM_LINK_PLAN_SYMBOL_PROJECTION_KERNEL_CONFIGURATION &&
-        source_symbol->kernel_workload_region_payload_ordinal_plus_one == 0) {
-      status = iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "selected kernel '@%.*s' has no launch-configuration payload",
-          (int)source_symbol->name.size, source_symbol->name.data);
-      break;
-    }
     const loom_link_bytecode_kernel_config_source_t source = {
-        .provider = provider,
-        .module = source_module,
-        .indexed_module = selection->source_module,
-        .symbol = source_symbol,
-        .symbol_ordinal =
-            (uint32_t)symbol->source_symbol->module_symbol_ordinal,
+        .index = index,
+        .symbol = symbol->source_symbol,
+        .diagnostics = environment->diagnostics,
         .config_payload_ordinal =
             symbol->projection ==
                     LOOM_LINK_PLAN_SYMBOL_PROJECTION_KERNEL_CONFIGURATION
@@ -1216,11 +1235,11 @@ iree_status_t loom_link_plan_project_kernel_config_module(
     };
     status = loom_link_kernel_config_materialize_projection_body(
         &source, reader, arena, module, symbol->projection,
-        configuration_functions[i]);
+        configuration_functions[i], &accepted);
   }
   loom_bytecode_function_projection_reader_deinitialize(reader);
 
-  if (!iree_status_is_ok(status)) {
+  if (!iree_status_is_ok(status) || !accepted) {
     loom_module_free(module);
     return status;
   }

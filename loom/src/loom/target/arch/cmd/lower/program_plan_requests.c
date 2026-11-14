@@ -105,7 +105,8 @@ iree_status_t loom_cmd_program_plan_publish_kernel_requests(
     const loom_value_fact_table_t* source_facts,
     const loom_cmd_program_kernel_source_t* kernel_source,
     loom_cmd_program_kernel_site_root_t* roots, iree_host_size_t root_count,
-    iree_arena_allocator_t* scratch_arena) {
+    iree_arena_allocator_t* scratch_arena, bool* out_valid) {
+  *out_valid = true;
   IREE_ASSERT_ARGUMENT(plan);
   IREE_ASSERT_ARGUMENT(plan_module);
   IREE_ASSERT_ARGUMENT(source_facts);
@@ -238,6 +239,11 @@ iree_status_t loom_cmd_program_plan_publish_kernel_requests(
             .user_data = &bridge,
         },
         scratch_arena, &site_classes));
+    if (site_classes == NULL) {
+      *out_valid = false;
+      iree_arena_checkpoint_restore(&kernel_checkpoint);
+      return iree_ok_status();
+    }
     for (iree_host_size_t site_index = 0; site_index < site_count;
          ++site_index) {
       const loom_decision_class_ordinal_t class_ordinal =

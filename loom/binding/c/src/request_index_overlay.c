@@ -17,11 +17,6 @@ static loomc_status_t loomc_request_index_overlay_map_roots(
     iree_host_size_t* out_symbol_ordinals) {
   const loom_link_module_index_provider_t* provider =
       loom_link_module_index_provider_at(module_index, provider_ordinal);
-  if (provider == NULL) {
-    return loomc_make_status(LOOMC_STATUS_INTERNAL,
-                             "request provider is absent from its index");
-  }
-
   const loomc_request_root_t* roots = loomc_request_roots(request);
   const iree_host_size_t root_count = loomc_request_root_count(request);
   for (iree_host_size_t i = 0; i < root_count; ++i) {
@@ -85,7 +80,7 @@ loomc_status_t loomc_request_index_overlay_initialize(
         module_index, request_provider_ordinal, request, root_symbol_ordinals);
   }
 
-  if (loomc_status_is_ok(status)) {
+  if (loomc_status_is_ok(status) && loomc_result_succeeded(result)) {
     *out_overlay = (loomc_request_index_overlay_t){
         .module_index = module_index,
         .request_provider_ordinal = request_provider_ordinal,

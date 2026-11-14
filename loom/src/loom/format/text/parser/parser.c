@@ -1315,6 +1315,53 @@ iree_status_t loom_text_parse_with_symbol_references(
                               out_module);
 }
 
+iree_status_t loom_text_parse_attribute(
+    iree_string_view_t source, iree_string_view_t filename,
+    loom_module_t* module, const loom_attr_descriptor_t* descriptor,
+    const loom_text_parse_options_t* options, loom_attribute_t* out_attr,
+    bool* out_accepted) {
+  *out_attr = loom_attr_absent();
+  *out_accepted = false;
+  const loom_source_range_t range = {
+      .provenance = LOOM_SOURCE_PROVENANCE_EXACT_SOURCE,
+      .filename = filename,
+      .source = source,
+      .end = source.size,
+      .start_line = 1,
+      .start_column = 1,
+  };
+  loom_parser_scope_t root_scope = {0};
+  loom_parser_t parser;
+  IREE_RETURN_IF_ERROR(
+      loom_parser_initialize(module, range, options, &root_scope, &parser));
+  loom_attribute_t attr = loom_attr_absent();
+  iree_status_t status = loom_parse_attr_value(&parser, descriptor, &attr);
+  if (iree_status_is_ok(status) && !parser.error_count &&
+      !loom_tokenizer_at(&parser.tokenizer, LOOM_TOKEN_EOF)) {
+    status = loom_parser_emit_unexpected_token(
+        &parser, loom_tokenizer_peek(&parser.tokenizer),
+        IREE_SV("end of attribute"));
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_tokenizer_consume_status(&parser.tokenizer);
+  }
+  for (iree_host_size_t i = 0;
+       iree_status_is_ok(status) && i < parser.symbol_origins.count &&
+       !loom_parser_at_error_limit(&parser);
+       ++i) {
+    const loom_token_t token = parser.symbol_origins.entries[i].token;
+    const loom_diagnostic_param_t param = loom_param_string(token.text);
+    status = loom_parser_emit(&parser, LOOM_ERR_SYMBOL_002, &param, 1, token);
+  }
+  if (iree_status_is_ok(status) && !parser.error_count) {
+    *out_attr = attr;
+    *out_accepted = true;
+  }
+  loom_tokenizer_deinitialize(&parser.tokenizer);
+  iree_arena_deinitialize(&parser.parser_arena);
+  return status;
+}
+
 static iree_status_t loom_parse_low_assembly_function(
     loom_parser_t* parser, iree_string_view_t representation_contract,
     loom_symbol_id_t symbol, loom_op_t** out_function) {

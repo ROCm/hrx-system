@@ -11,6 +11,7 @@
 #include "loom/link/materialization_environment.h"
 #include "loomc/config.h"
 #include "loomc/context.h"
+#include "loomc/link.h"
 #include "loomc/link_index.h"
 #include "loomc/result.h"
 #include "loomc/source.h"
@@ -72,6 +73,15 @@ typedef struct loomc_link_materialization_state_t {
     struct {
       // Frozen index supplying the base provider source domain, or NULL.
       const loomc_link_index_t* link_index;
+
+      // Invocation-local module providers appended after the frozen index.
+      const loomc_link_module_provider_t* module_providers;
+
+      // First provider ordinal represented by |module_providers|.
+      iree_host_size_t module_provider_base;
+
+      // Number of invocation-local module providers.
+      iree_host_size_t module_provider_count;
 
       // One appended provider not owned by |link_index|.
       struct {

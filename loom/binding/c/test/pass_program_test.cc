@@ -125,13 +125,14 @@ pass.pipeline<module> @finish pipeline {
   return DeserializeModule(context, workspace, source.get());
 }
 
-void ExpectInvalidPassProgramResult(const loomc_result_t* result) {
+void ExpectInvalidPassProgramResult(const loomc_result_t* result,
+                                    const char* code = "PASS_PROGRAM/INVALID") {
   ASSERT_NE(result, nullptr);
   EXPECT_FALSE(loomc_result_succeeded(result));
   ASSERT_EQ(loomc_result_diagnostic_count(result), 1u);
   const loomc_diagnostic_t* diagnostic = loomc_result_diagnostic_at(result, 0);
   ASSERT_NE(diagnostic, nullptr);
-  EXPECT_EQ(ToString(diagnostic->code), "PASS_PROGRAM/INVALID");
+  EXPECT_EQ(ToString(diagnostic->code), code);
 }
 
 TEST(PassProgramTest, RetainRelease) {
@@ -290,8 +291,9 @@ TEST(PassProgramTest, ReportsMissingModuleSymbolInResult) {
   LOOMC_EXPECT_OK(status);
   EXPECT_EQ(pass_program, nullptr);
   ResultPtr result_ptr(result);
-  ExpectInvalidPassProgramResult(result_ptr.get());
-  EXPECT_EQ(loomc_result_status_code(result_ptr.get()), LOOMC_STATUS_NOT_FOUND);
+  ExpectInvalidPassProgramResult(result_ptr.get(), "SYMBOL/017");
+  EXPECT_EQ(loomc_result_status_code(result_ptr.get()),
+            LOOMC_STATUS_INVALID_ARGUMENT);
 }
 
 TEST(PassProgramTest, ReportsNonPipelineModuleSymbolInResult) {
@@ -313,7 +315,14 @@ func.def @not_pipeline() {
   LOOMC_EXPECT_OK(status);
   EXPECT_EQ(pass_program, nullptr);
   ResultPtr result_ptr(result);
-  ExpectInvalidPassProgramResult(result_ptr.get());
+  ExpectInvalidPassProgramResult(result_ptr.get(), "SYMBOL/003");
+  const auto* diagnostic = loomc_result_diagnostic_at(result_ptr.get(), 0);
+  ASSERT_NE(diagnostic->range.source, nullptr);
+  EXPECT_EQ(ToString(loomc_source_identifier(diagnostic->range.source)),
+            "not_pipeline.loom");
+  EXPECT_EQ(diagnostic->range.start_line, 2u);
+  EXPECT_EQ(diagnostic->range.end_line, 4u);
+  EXPECT_GT(loomc_source_contents(diagnostic->range.source).data_length, 0u);
 }
 
 TEST(PassProgramTest, RejectsUnknownOptionStructure) {

@@ -37,10 +37,14 @@ std::string ToString(loomc_string_view_t value) {
   return std::string(value.data, value.size);
 }
 
-ContextPtr CreateContext() {
+ContextPtr CreateContext(
+    loomc_source_retention_t retention = LOOMC_SOURCE_RETENTION_EXACT) {
+  const loomc_context_options_t options = {
+      .source_retention = retention,
+  };
   loomc_context_t* context = nullptr;
   loomc_status_t status =
-      loomc_context_create(nullptr, loomc_allocator_system(), &context);
+      loomc_context_create(&options, loomc_allocator_system(), &context);
   LOOMC_EXPECT_OK(status);
   return ContextPtr(context);
 }
@@ -419,6 +423,105 @@ func.def public @broken(%x: i32) -> (i32) {
   EXPECT_EQ(diagnostic->severity, LOOMC_DIAGNOSTIC_SEVERITY_ERROR);
   EXPECT_EQ(ToString(loomc_source_identifier(diagnostic->range.source)),
             "broken.loom");
+}
+
+TEST(LinkIndexTest, NestedDefinitionRetainsOriginAcrossInputOwnership) {
+  for (auto retention :
+       {LOOMC_SOURCE_RETENTION_EXACT, LOOMC_SOURCE_RETENTION_METADATA_ONLY}) {
+    for (bool materialized : {false, true}) {
+      SCOPED_TRACE(retention);
+      SCOPED_TRACE(materialized);
+      ContextPtr context = CreateContext(retention);
+      BuilderPtr builder = CreateBuilder(context.get());
+      SourcePtr source = CreateTextSource("nested.loom", R"(
+func.def @parent() {
+  func.def @child() {
+    func.return
+  }
+  func.return
+}
+)");
+      if (materialized) {
+        loomc_workspace_t* workspace = nullptr;
+        LOOMC_ASSERT_OK(loomc_workspace_create(
+            nullptr, loomc_allocator_system(), &workspace));
+        HandlePtr<loomc_workspace_t, loomc_workspace_release> workspace_ptr(
+            workspace);
+        loomc_module_t* module = nullptr;
+        loomc_result_t* parsed = nullptr;
+        LOOMC_ASSERT_OK(loomc_module_deserialize_from_source(
+            context.get(), workspace, source.get(), nullptr,
+            loomc_allocator_system(), &module, &parsed));
+        HandlePtr<loomc_module_t, loomc_module_release> module_ptr(module);
+        ResultPtr parsed_ptr(parsed);
+        ASSERT_TRUE(loomc_result_succeeded(parsed));
+        LOOMC_ASSERT_OK(loomc_link_index_builder_add_module(
+            builder.get(), module, nullptr, nullptr));
+      } else {
+        LOOMC_ASSERT_OK(loomc_link_index_builder_add_source(
+            builder.get(), source.get(), nullptr, nullptr));
+      }
+      loomc_link_index_t* link_index = nullptr;
+      loomc_result_t* result = nullptr;
+      LOOMC_ASSERT_OK(
+          loomc_link_index_builder_finish(builder.get(), &link_index, &result));
+      LinkIndexPtr link_index_ptr(link_index);
+      ResultPtr result_ptr(result);
+      source.reset();
+      builder.reset();
+      EXPECT_EQ(link_index, nullptr);
+      ASSERT_FALSE(loomc_result_succeeded(result));
+      ASSERT_EQ(loomc_result_diagnostic_count(result), 1u);
+      const auto* diagnostic = loomc_result_diagnostic_at(result, 0);
+      EXPECT_EQ(ToString(diagnostic->code), "STRUCTURE/049");
+      ASSERT_NE(diagnostic->range.source, nullptr);
+      EXPECT_EQ(ToString(loomc_source_identifier(diagnostic->range.source)),
+                "nested.loom");
+      EXPECT_EQ(diagnostic->range.start_line, 3u);
+      EXPECT_EQ(diagnostic->range.end_line, 5u);
+      EXPECT_EQ(
+          loomc_source_contents(diagnostic->range.source).data_length != 0,
+          retention == LOOMC_SOURCE_RETENTION_EXACT);
+    }
+  }
+}
+
+TEST(LinkIndexTest, SourceAdmissionAllocationFailureIsNotACompilerDiagnostic) {
+  bool fail_next_allocation = false;
+  const loomc_allocator_t allocator = {
+      .self = &fail_next_allocation,
+      .ctl =
+          [](void* self, loomc_allocator_command_t command, const void* params,
+             void** inout_pointer) {
+            bool& fail = *static_cast<bool*>(self);
+            if (fail && command <= LOOMC_ALLOCATOR_COMMAND_REALLOC) {
+              fail = false;
+              return loomc_status_from_code(LOOMC_STATUS_RESOURCE_EXHAUSTED);
+            }
+            const auto backing = loomc_allocator_system();
+            return backing.ctl(backing.self, command, params, inout_pointer);
+          },
+  };
+  ContextPtr context = CreateContext();
+  loomc_link_index_builder_t* raw_builder = nullptr;
+  LOOMC_ASSERT_OK(loomc_link_index_builder_allocate(context.get(), nullptr,
+                                                    allocator, &raw_builder));
+  BuilderPtr builder(raw_builder);
+  SourcePtr source = CreateTextSource("empty.loom", "");
+  LOOMC_ASSERT_OK(loomc_link_index_builder_add_source(
+      builder.get(), source.get(), nullptr, nullptr));
+
+  fail_next_allocation = true;
+  loomc_link_index_t* link_index = nullptr;
+  loomc_result_t* result = nullptr;
+  LOOMC_EXPECT_STATUS_IS(
+      LOOMC_STATUS_RESOURCE_EXHAUSTED,
+      loomc_link_index_builder_finish(builder.get(), &link_index, &result));
+  LinkIndexPtr link_index_ptr(link_index);
+  ResultPtr result_ptr(result);
+  EXPECT_FALSE(fail_next_allocation);
+  EXPECT_EQ(link_index, nullptr);
+  EXPECT_EQ(result, nullptr);
 }
 
 TEST(LinkIndexTest, EmptyReservedSlotProducesFailedResult) {

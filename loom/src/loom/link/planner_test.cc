@@ -441,29 +441,6 @@ func.def @helper(%x: i32) -> (i32) {
   EXPECT_TRUE(ContainsSymbol(plan.get(), second_helper));
 }
 
-TEST_F(LinkPlannerTest, LinkExactRootOrdinalRejectsOutOfRangeIdentity) {
-  loom_module_t* module = Parse(Fixture(IREE_SV(
-      "link_root_closure_selects_private_dependency_only_module.loom")));
-  IndexPtr index = CreateIndex();
-  AddMaterialized(index.get(), module, IREE_SV("input"),
-                  LOOM_LINK_PROVIDER_ROLE_INPUT);
-
-  const iree_host_size_t root_ordinals[] = {
-      loom_link_module_index_symbol_count(index.get()),
-  };
-  loom_link_plan_options_t options = {
-      .mode = LOOM_LINK_PLAN_LINK,
-      .root_symbol_ordinals =
-          {
-              .count = IREE_ARRAYSIZE(root_ordinals),
-              .values = root_ordinals,
-          },
-  };
-  PlanPtr plan;
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
-                        BuildPlanStatus(index.get(), &options, &plan));
-}
-
 TEST_F(LinkPlannerTest,
        OrdinaryDefinitionFacetCombinesEveryRootAcrossProviderForms) {
   const iree_string_view_t source =
@@ -571,19 +548,6 @@ TEST_F(LinkPlannerTest,
     EXPECT_FALSE(loom_link_plan_contains_facet(
         contract_plan.get(), root->ordinal,
         LOOM_LINK_SYMBOL_FACET_COMMAND_IMPLEMENTATION));
-
-    const loom_link_plan_root_facet_t invalid_root = {
-        .symbol_ordinal = root->ordinal,
-        .kind = LOOM_LINK_SYMBOL_FACET_KERNEL_CONFIGURATION,
-    };
-    loom_link_plan_options_t invalid_options = {
-        .mode = LOOM_LINK_PLAN_LINK,
-        .root_facets = {1, &invalid_root},
-    };
-    PlanPtr invalid_plan;
-    IREE_EXPECT_STATUS_IS(
-        IREE_STATUS_INVALID_ARGUMENT,
-        BuildPlanStatus(index, &invalid_options, &invalid_plan));
 
     const loom_link_plan_root_facet_t implementation_root = {
         .symbol_ordinal = root->ordinal,
@@ -1329,8 +1293,8 @@ TEST_F(LinkPlannerTest, LinkDeclarationRejectsPrivateLibraryDefinition) {
       .root_symbols = {.count = IREE_ARRAYSIZE(roots), .values = roots},
   };
   PlanPtr plan;
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_NOT_FOUND,
-                        BuildPlanStatus(index.get(), &options, &plan));
+  IREE_ASSERT_OK(BuildPlanStatus(index.get(), &options, &plan));
+  EXPECT_EQ(plan.get(), nullptr);
 }
 
 TEST_F(LinkPlannerTest, LinkDeclarationRejectsWrongSymbolInterface) {
@@ -1350,8 +1314,8 @@ TEST_F(LinkPlannerTest, LinkDeclarationRejectsWrongSymbolInterface) {
       .root_symbols = {.count = IREE_ARRAYSIZE(roots), .values = roots},
   };
   PlanPtr plan;
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_NOT_FOUND,
-                        BuildPlanStatus(index.get(), &options, &plan));
+  IREE_ASSERT_OK(BuildPlanStatus(index.get(), &options, &plan));
+  EXPECT_EQ(plan.get(), nullptr);
 }
 
 TEST_F(LinkPlannerTest, LinkDeclarationMayUsePrivateOwnerDefinition) {
@@ -1686,40 +1650,6 @@ TEST_F(LinkPlannerTest, ProviderRootsExposeTransitiveDiamondDemands) {
       loom_link_plan_template_demand_occurrence_count(complete_plan.get()), 4u);
 }
 
-TEST_F(LinkPlannerTest, ProviderRootOrdinalsAreValidated) {
-  loom_module_t* module = Parse(
-      Fixture(IREE_SV("selected_provider_ordinals_are_validated_module.loom")));
-  IndexPtr index = CreateIndex();
-  AddMaterialized(index.get(), module, IREE_SV("input"),
-                  LOOM_LINK_PROVIDER_ROLE_INPUT);
-  const loom_link_module_index_symbol_t* entry =
-      loom_link_module_index_lookup_global(index.get(), IREE_SV("entry"));
-  ASSERT_NE(entry, nullptr);
-
-  iree_string_view_t roots[] = {IREE_SV("@entry")};
-  loom_link_plan_options_t options = {
-      .mode = LOOM_LINK_PLAN_LINK,
-      .root_symbols = {.count = IREE_ARRAYSIZE(roots), .values = roots},
-  };
-  options.template_provider_roots = {
-      .count = 1,
-      .values = nullptr,
-  };
-  PlanPtr plan;
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
-                        BuildPlanStatus(index.get(), &options, &plan));
-
-  const iree_host_size_t out_of_range_ordinal =
-      loom_link_module_index_symbol_count(index.get());
-  options.template_provider_roots.values = &out_of_range_ordinal;
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
-                        BuildPlanStatus(index.get(), &options, &plan));
-
-  options.template_provider_roots.values = &entry->ordinal;
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
-                        BuildPlanStatus(index.get(), &options, &plan));
-}
-
 TEST_F(LinkPlannerTest, LinkRootIgnoresUnreachableDuplicateDefinition) {
   loom_module_t* harness = Parse(Fixture(IREE_SV(
       "link_root_ignores_unreachable_duplicate_definition_harness.loom")));
@@ -1775,8 +1705,8 @@ TEST_F(LinkPlannerTest, InputExportRejectsAmbiguousLibraryDefinitions) {
                     reverse_libraries ? IREE_SV("first") : IREE_SV("second"),
                     LOOM_LINK_PROVIDER_ROLE_LIBRARY);
     PlanPtr plan;
-    IREE_EXPECT_STATUS_IS(IREE_STATUS_ALREADY_EXISTS,
-                          BuildPlanStatus(index.get(), &options, &plan));
+    IREE_ASSERT_OK(BuildPlanStatus(index.get(), &options, &plan));
+    EXPECT_EQ(plan.get(), nullptr);
   }
 }
 
@@ -1800,8 +1730,8 @@ TEST_F(LinkPlannerTest, ExplicitLibraryRootRejectsAmbiguousDefinitions) {
                     reverse_libraries ? IREE_SV("first") : IREE_SV("second"),
                     LOOM_LINK_PROVIDER_ROLE_LIBRARY);
     PlanPtr plan;
-    IREE_EXPECT_STATUS_IS(IREE_STATUS_ALREADY_EXISTS,
-                          BuildPlanStatus(index.get(), &options, &plan));
+    IREE_ASSERT_OK(BuildPlanStatus(index.get(), &options, &plan));
+    EXPECT_EQ(plan.get(), nullptr);
   }
 }
 
@@ -1858,8 +1788,8 @@ TEST_F(LinkPlannerTest, LinkReportsMissingRoot) {
   };
 
   PlanPtr plan;
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_NOT_FOUND,
-                        BuildPlanStatus(index.get(), &options, &plan));
+  IREE_ASSERT_OK(BuildPlanStatus(index.get(), &options, &plan));
+  EXPECT_EQ(plan.get(), nullptr);
 }
 
 static bool StripNamedSymbol(void* user_data,
@@ -1890,8 +1820,8 @@ TEST_F(LinkPlannerTest, StripPolicyControlsRequiredDependencies) {
   };
 
   PlanPtr plan;
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_NOT_FOUND,
-                        BuildPlanStatus(index.get(), &options, &plan));
+  IREE_ASSERT_OK(BuildPlanStatus(index.get(), &options, &plan));
+  EXPECT_EQ(plan.get(), nullptr);
 
   options.unresolved_policy = LOOM_LINK_PLAN_UNRESOLVED_ALLOW;
   plan = BuildPlan(index.get(), &options);
@@ -2144,8 +2074,8 @@ TEST_F(LinkPlannerTest, TestSymbolStripPolicyRejectsStrippedRoots) {
   };
 
   PlanPtr plan;
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_NOT_FOUND,
-                        BuildPlanStatus(index.get(), &options, &plan));
+  IREE_ASSERT_OK(BuildPlanStatus(index.get(), &options, &plan));
+  EXPECT_EQ(plan.get(), nullptr);
 }
 
 TEST_F(LinkPlannerTest, ExportedRootPolicySelectsExportsAndDependencies) {

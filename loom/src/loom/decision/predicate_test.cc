@@ -228,13 +228,96 @@ TEST(PredicateTest, IntegerExtremesDoNotOverflow) {
             LOOM_DECISION_TRUTH_TRUE);
 }
 
-TEST(PredicateTest, FloatRelationsRemainUnknown) {
-  const loom_decision_predicate_operand_t operands[3] = {
-      Operand(loom_value_facts_exact_float(LOOM_SCALAR_TYPE_F32, 1.0), 7),
-      Operand(loom_value_facts_exact_float(LOOM_SCALAR_TYPE_F32, 1.0), 7),
+TEST(PredicateTest, ExactFloatEqualityUsesRoundedValues) {
+  constexpr loom_scalar_type_t kTypes[] = {
+      LOOM_SCALAR_TYPE_F8E4M3, LOOM_SCALAR_TYPE_F8E5M2, LOOM_SCALAR_TYPE_F16,
+      LOOM_SCALAR_TYPE_BF16,   LOOM_SCALAR_TYPE_F32,    LOOM_SCALAR_TYPE_F64,
+  };
+  constexpr double kValues[] = {-INFINITY, -2.5,   -0.0,     0.0,
+                                1.0,       2049.0, INFINITY, NAN};
+  for (auto type : kTypes) {
+    SCOPED_TRACE(loom_scalar_type_name(type));
+    for (double lhs : kValues) {
+      for (double rhs : kValues) {
+        loom_decision_predicate_operand_t operands[3] = {
+            Operand(loom_value_facts_exact_float(type, lhs)),
+            Operand(loom_value_facts_exact_float(type, rhs)),
+        };
+        double rounded_lhs = 0.0;
+        double rounded_rhs = 0.0;
+        ASSERT_TRUE(loom_value_facts_as_exact_float(type, operands[0].facts,
+                                                    &rounded_lhs));
+        ASSERT_TRUE(loom_value_facts_as_exact_float(type, operands[1].facts,
+                                                    &rounded_rhs));
+        EXPECT_EQ(loom_decision_predicate_evaluate(LOOM_PREDICATE_EQ, operands),
+                  rounded_lhs == rounded_rhs ? LOOM_DECISION_TRUTH_TRUE
+                                             : LOOM_DECISION_TRUTH_FALSE);
+        EXPECT_EQ(loom_decision_predicate_evaluate(LOOM_PREDICATE_NE, operands),
+                  rounded_lhs != rounded_rhs ? LOOM_DECISION_TRUTH_TRUE
+                                             : LOOM_DECISION_TRUTH_FALSE);
+      }
+    }
+  }
+}
+
+TEST(PredicateTest, FloatEqualityPreservesIntegerLiterals) {
+  const struct {
+    // Already rounded floating operand.
+    double value;
+    // Exact integer literal in the predicate.
+    int64_t literal;
+    // Expected mathematical equality.
+    bool equal;
+  } cases[] = {
+      {0.0, 0, true},
+      {-0.0, 0, true},
+      {1.5, 1, false},
+      {2048.0, 2049, false},
+      {0x1p53, INT64_C(9007199254740992), true},
+      {0x1p53, INT64_C(9007199254740993), false},
+      {-0x1p63, INT64_MIN, true},
+      {0x1p63, INT64_MAX, false},
+      {INFINITY, INT64_MAX, false},
+      {-INFINITY, INT64_MIN, false},
+      {NAN, 0, false},
+  };
+  for (const auto& test_case : cases) {
+    for (unsigned float_index : {0u, 1u}) {
+      loom_decision_predicate_operand_t operands[3] = {};
+      operands[float_index] = Operand(
+          loom_value_facts_exact_float(LOOM_SCALAR_TYPE_F64, test_case.value));
+      operands[1 - float_index] =
+          Operand(loom_value_facts_exact_i64(test_case.literal));
+      EXPECT_EQ(loom_decision_predicate_evaluate(LOOM_PREDICATE_EQ, operands),
+                test_case.equal ? LOOM_DECISION_TRUTH_TRUE
+                                : LOOM_DECISION_TRUTH_FALSE);
+      EXPECT_EQ(loom_decision_predicate_evaluate(LOOM_PREDICATE_NE, operands),
+                test_case.equal ? LOOM_DECISION_TRUTH_FALSE
+                                : LOOM_DECISION_TRUTH_TRUE);
+    }
+  }
+}
+
+TEST(PredicateTest, FloatEqualityRequiresValueOrClassEvidence) {
+  loom_value_facts_t unknown = loom_value_facts_unknown();
+  unknown.flags |= LOOM_VALUE_FACT_FLOAT;
+  loom_decision_predicate_operand_t operands[3] = {
+      Operand(unknown, 7),
+      Operand(unknown, 7),
   };
   EXPECT_EQ(loom_decision_predicate_evaluate(LOOM_PREDICATE_EQ, operands),
             LOOM_DECISION_TRUTH_UNKNOWN);
+  operands[0].facts.flags |= LOOM_VALUE_FACT_NOT_NAN;
+  EXPECT_EQ(loom_decision_predicate_evaluate(LOOM_PREDICATE_EQ, operands),
+            LOOM_DECISION_TRUTH_TRUE);
+  operands[1].identity = 8;
+  EXPECT_EQ(loom_decision_predicate_evaluate(LOOM_PREDICATE_EQ, operands),
+            LOOM_DECISION_TRUTH_UNKNOWN);
+  operands[0].facts = loom_value_facts_known_nan();
+  EXPECT_EQ(loom_decision_predicate_evaluate(LOOM_PREDICATE_EQ, operands),
+            LOOM_DECISION_TRUTH_FALSE);
+  EXPECT_EQ(loom_decision_predicate_evaluate(LOOM_PREDICATE_NE, operands),
+            LOOM_DECISION_TRUTH_TRUE);
 }
 
 TEST(PredicateTest, ExhaustiveExactMultiples) {

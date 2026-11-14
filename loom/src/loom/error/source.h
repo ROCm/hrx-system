@@ -63,6 +63,11 @@ void loom_source_resolve_diagnostic(
     loom_diagnostic_related_location_t* related_locations,
     loom_diagnostic_t* out_diagnostic);
 
+// Returns the file origin of a location, following transparent tags. Fused and
+// opaque locations have no designated origin and return NULL.
+const loom_location_entry_t* loom_source_file_location(
+    const loom_module_t* module, loom_location_id_t location);
+
 // Source bytes associated with a source identity in the module being resolved.
 typedef struct loom_source_entry_t {
   // Module-local source identity, or LOOM_SOURCE_ID_INVALID for an empty entry.
@@ -72,6 +77,13 @@ typedef struct loom_source_entry_t {
   // Borrowed source filename.
   iree_string_view_t filename;
 } loom_source_entry_t;
+
+// Resolves a file-location entry against the matching exact snapshot. Returns
+// false for coordinates outside the snapshot; the recorded metadata remains
+// usable through loom_source_resolve without source text.
+bool loom_source_resolve_snapshot(const loom_source_entry_t* source_entry,
+                                  const loom_location_entry_t* file_location,
+                                  loom_source_range_t* out_range);
 
 // Borrowed source entries for loom_source_table_resolve. Entries are indexed
 // by source ID; missing snapshots have an invalid source ID. Linking projects
@@ -107,14 +119,6 @@ typedef struct loom_source_storage_t {
   iree_host_size_t capacity;
 } loom_source_storage_t;
 
-// Copies one link input's source snapshots into target-owned storage.
-typedef struct loom_source_storage_projection_t {
-  // Input snapshots borrowed for the duration of the linker callback.
-  const loom_source_table_resolver_t* source;
-  // Destination storage owned by the linked module.
-  loom_source_storage_t* target;
-} loom_source_storage_projection_t;
-
 // Initializes empty owned source storage using |allocator|.
 void loom_source_storage_initialize(iree_allocator_t allocator,
                                     loom_source_storage_t* out_storage);
@@ -123,18 +127,13 @@ void loom_source_storage_initialize(iree_allocator_t allocator,
 void loom_source_storage_deinitialize(loom_source_storage_t* storage);
 
 // Copies a source snapshot into |storage| at a module-owned source ID.
-// Repeated admission of the same identity requires identical name and bytes.
+// The producer owns source identity: repeated insertion names the same
+// snapshot. Linking admits cross-input snapshot conflicts before publishing
+// this storage.
 iree_status_t loom_source_storage_insert(loom_source_storage_t* storage,
                                          loom_source_id_t source_id,
                                          iree_string_view_t filename,
                                          iree_string_view_t source);
-
-// Linker source callback for a loom_source_storage_projection_t. Copies
-// snapshots through the producer-owned source correspondence. Inputs without
-// snapshots allocate nothing; invalid target IDs represent omitted sources.
-iree_status_t loom_source_storage_project(
-    void* user_data, const loom_module_t* source_module,
-    const loom_module_t* target_module, const loom_source_id_t* target_sources);
 
 // Returns a resolver borrowing |storage| and its source snapshots.
 loom_source_resolver_t loom_source_storage_resolver(
@@ -147,7 +146,8 @@ loom_source_resolver_t loom_source_storage_resolver(
 iree_status_t loom_source_table_project(void* user_data,
                                         const loom_module_t* source_module,
                                         const loom_module_t* target_module,
-                                        const loom_source_id_t* target_sources);
+                                        const loom_source_id_t* target_sources,
+                                        bool* out_accepted);
 
 // Resolves file locations against a loom_source_table_resolver_t passed as
 // |user_data|. Other modules, unknown, non-file, and missing sources return

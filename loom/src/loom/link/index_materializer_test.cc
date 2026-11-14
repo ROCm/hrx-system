@@ -994,8 +994,7 @@ func.def public @same(%x: i32) -> (i32) {
               LOOM_LINK_PROVIDER_ROLE_INPUT);
 
   loom_link_index_materialization_t materialization = {};
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_ALREADY_EXISTS,
-                        TryMerge(index.get(), &materialization));
+  IREE_EXPECT_OK(TryMerge(index.get(), &materialization));
   EXPECT_EQ(materialization.plan, nullptr);
   EXPECT_EQ(materialization.product.module, nullptr);
 }
@@ -1738,26 +1737,9 @@ func.def public export("partial_unused") @partial_unused(%x: i32) -> (i32) {
         TryMaterializeWithOptions(index.get(), &options, &materialization));
     Verify(materialization.product.module);
 
-    ASSERT_EQ(materialization.product.target_sources.count,
-              loom_link_module_index_module_count(index.get()));
-    for (iree_host_size_t i = 0;
-         i < materialization.product.target_sources.count; ++i) {
-      const auto* input = loom_link_module_index_module_at(index.get(), i);
-      const auto& sources = materialization.product.target_sources.values[i];
-      if (!input->materialized_module) {
-        EXPECT_EQ(sources.count, 0u);
-        continue;
-      }
-      ASSERT_EQ(sources.count, input->materialized_module->sources.count);
-      for (iree_host_size_t j = 0; j < sources.count; ++j) {
-        ASSERT_LT(sources.values[j],
-                  materialization.product.module->sources.count);
-        EXPECT_TRUE(iree_string_view_equal(
-            input->materialized_module->sources.entries[j],
-            materialization.product.module->sources
-                .entries[sources.values[j]]));
-      }
-    }
+    // This embedding supplies no source snapshots. Recorded locations remain
+    // in the linked IR without allocating a snapshot table.
+    EXPECT_EQ(materialization.product.sources.count, 0u);
 
     EXPECT_EQ(loom_link_plan_symbol_count(materialization.plan), 10u);
     EXPECT_EQ(materialization.product.module->symbols.count, 7u);
@@ -1980,12 +1962,10 @@ TEST_F(LinkIndexMaterializerTest, ConfigProvidersRejectIncompatibleContracts) {
       AddProvider(index.get(), form, source, provider, bytecode, name,
                   LOOM_LINK_PROVIDER_ROLE_LIBRARY);
       loom_link_index_materialization_t linked = {};
-      IREE_EXPECT_STATUS_IS(
-          iree_string_view_equal(name, IREE_SV("conflict.loom"))
-              ? IREE_STATUS_ALREADY_EXISTS
-              : IREE_STATUS_INVALID_ARGUMENT,
-          TryMaterialize(index.get(), IREE_SV("entry"), LOOM_LINK_PLAN_LINK,
-                         LOOM_LINK_PLAN_UNRESOLVED_ERROR, &linked));
+      IREE_EXPECT_OK(TryMaterialize(index.get(), IREE_SV("entry"),
+                                    LOOM_LINK_PLAN_LINK,
+                                    LOOM_LINK_PLAN_UNRESOLVED_ERROR, &linked));
+      EXPECT_EQ(linked.product.module, nullptr);
       loom_link_index_materialization_deinitialize(&linked);
     }
   }

@@ -32,7 +32,7 @@ TEST_F(PassPipelineSnapshotTest, MaterializesSelectedPipelineClosure) {
 
   loom_pass_pipeline_snapshot_t snapshot = {};
   IREE_ASSERT_OK(loom_pass_pipeline_snapshot_initialize(
-      source_module, IREE_SV("@@selected"), IREE_SV("pipeline_snapshot"),
+      source_module, IREE_SV("@@selected"), IREE_SV("pipeline_snapshot"), {},
       block_pool(), iree_allocator_system(), &snapshot));
   ASSERT_NE(snapshot.module, nullptr);
   ASSERT_NE(snapshot.pipeline_op, nullptr);
@@ -63,11 +63,9 @@ TEST_F(PassPipelineSnapshotTest, RejectsMissingPipelineSymbol) {
   ASSERT_NE(source_module, nullptr);
 
   loom_pass_pipeline_snapshot_t snapshot = {};
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_NOT_FOUND,
-      loom_pass_pipeline_snapshot_initialize(
-          source_module, IREE_SV("@missing"), IREE_SV("pipeline_snapshot"),
-          block_pool(), iree_allocator_system(), &snapshot));
+  IREE_EXPECT_OK(loom_pass_pipeline_snapshot_initialize(
+      source_module, IREE_SV("@missing"), IREE_SV("pipeline_snapshot"), {},
+      block_pool(), iree_allocator_system(), &snapshot));
   EXPECT_EQ(snapshot.module, nullptr);
   EXPECT_EQ(snapshot.pipeline_op, nullptr);
 }

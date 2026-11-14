@@ -10,6 +10,7 @@
 #include "loom/config/text.h"
 #include "loom/config/text_binding.h"
 #include "loom/format/text/printer.h"
+#include "loom/tools/loom-check/diagnostics.h"
 #include "loom/tools/loom-check/test/config/providers.h"
 #include "loom/util/stream.h"
 
@@ -33,15 +34,6 @@ static iree_status_t loom_check_test_config_materialize_record_value(
   return iree_string_builder_append_cstring(output, "\n");
 }
 
-static iree_status_t loom_check_test_config_materialize_record_status(
-    iree_status_t application_status, iree_string_builder_t* output) {
-  const iree_status_code_t status_code = iree_status_code(application_status);
-  iree_status_t output_status = iree_string_builder_append_format(
-      output, "status: %s\n", iree_status_code_string(status_code));
-  iree_status_free(application_status);
-  return output_status;
-}
-
 static iree_status_t loom_check_test_config_materialize_execute(
     const loom_check_emit_provider_t* provider,
     const loom_check_emit_provider_request_t* request,
@@ -61,7 +53,6 @@ static iree_status_t loom_check_test_config_materialize_execute(
   iree_status_t status =
       loom_config_text_binding_set_append(&binding_set, key, value);
   loom_config_application_result_t application_result = {0};
-  iree_status_t application_status = iree_ok_status();
   if (iree_status_is_ok(status)) {
     loom_config_text_materialize_options_t options;
     loom_config_text_materialize_options_initialize(&options);
@@ -70,29 +61,26 @@ static iree_status_t loom_check_test_config_materialize_execute(
         .fn = loom_check_test_config_materialize_record_value,
         .user_data = &request->result->actual_output,
     };
-    application_status = loom_config_text_materialize_module(
-        native_module->module, &options, request->block_pool,
-        &application_result);
+    options.diagnostic_sink = (loom_diagnostic_sink_t){
+        .fn = loom_check_diagnostic_collector_sink,
+        .user_data = request->diagnostic_collector,
+    };
+    options.source_resolver = native_module->source_resolver;
+    status = loom_config_text_materialize_module(native_module->module,
+                                                 &options, &application_result);
   }
-  if (iree_status_is_ok(status)) {
-    const bool application_succeeded = iree_status_is_ok(application_status);
-    status = loom_check_test_config_materialize_record_status(
-        application_status, &request->result->actual_output);
-    application_status = iree_ok_status();
-    if (iree_status_is_ok(status) && application_succeeded) {
-      status = iree_string_builder_append_format(
-          &request->result->actual_output,
-          "materialized: %" PRIhsz "\nignored: %" PRIhsz "\n",
-          application_result.materialized_count,
-          application_result.ignored_count);
-    }
+  if (iree_status_is_ok(status) && !application_result.error_count) {
+    status = iree_string_builder_append_format(
+        &request->result->actual_output,
+        "materialized: %" PRIhsz "\nignored: %" PRIhsz "\n",
+        application_result.materialized_count,
+        application_result.ignored_count);
   }
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && !application_result.error_count) {
     status = loom_text_print_module_to_builder(native_module->module,
                                                &request->result->actual_output,
                                                LOOM_TEXT_PRINT_DEFAULT);
   }
-  iree_status_free(application_status);
   loom_config_text_binding_set_deinitialize(&binding_set);
   return status;
 }

@@ -702,7 +702,6 @@ static loomc_status_t loomc_compile_module_into_result(
         .applied_value_sink = loomc_module_config_applied_value_sink(module),
         .policy_flags = options ? options->config_flags : 0,
         .result = result,
-        .diagnostic_code = loomc_make_cstring_view("CONFIG/INVALID"),
         .block_pool = loomc_workspace_block_pool(workspace),
     };
     status =
@@ -934,7 +933,6 @@ loomc_status_t loomc_compile_artifact(
         .source_resolver = loomc_module_source_resolver(module),
         .applied_value_sink = loomc_module_config_applied_value_sink(module),
         .result = result,
-        .block_pool = loomc_workspace_block_pool(workspace),
     };
     if (loomc_status_is_ok(status) && loomc_result_succeeded(result)) {
       status = loomc_config_apply_text_to_module(&config_apply_options);
@@ -1059,12 +1057,9 @@ loomc_status_t loomc_compile_artifact(
   }
   if (loomc_status_is_ok(status) && loomc_result_succeeded(result) &&
       require_resolved_config) {
-    status = loomc_status_from_iree(loom_config_require_resolved_module(
-        loomc_module_loom_module(module), NULL));
-    if (!loomc_status_is_ok(status)) {
-      status = loomc_compile_fail_result_from_status(
-          result, loomc_make_cstring_view("CONFIG/INVALID"), status);
-    }
+    status = loomc_config_require_resolved_module(
+        loomc_module_loom_module(module), loomc_module_source_resolver(module),
+        result);
   }
 
   loomc_pass_program_t* default_pass_program = NULL;

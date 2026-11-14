@@ -868,6 +868,7 @@ static IREE_ATTRIBUTE_ALWAYS_INLINE iree_status_t loom_bytecode_symbol_decode(
         &reader->decoder, IREE_SV("LOCATIONS"), location_id,
         reader->view.locations.count, location_offset);
   }
+  symbol_metadata->location = (loom_location_id_t)location_id;
   if (kind >= LOOM_BYTECODE_SYMBOL_COUNT_) {
     return loom_bytecode_reader_emit_enum_value(
         &reader->decoder, IREE_SV("symbol_kind"), kind,

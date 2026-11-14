@@ -67,7 +67,8 @@ typedef struct loom_kernel_request_sink_t {
 // preparation; explicitly materialized products own independent storage. The
 // returned site map uses caller scratch and retains no preparation state. This
 // lets an embedding retain immutable prepared sources while custom
-// materialization environments keep their ordinary one-shot lifetime.
+// materialization environments keep their ordinary one-shot lifetime. Rejected
+// preparation returns OK with a NULL site map; no class is published.
 typedef struct loom_kernel_request_provider_t {
   // Publishes all classes after collecting the complete source-kernel site set.
   iree_status_t (*publish)(
@@ -87,6 +88,7 @@ typedef struct loom_kernel_request_provider_t {
 // linked module, classifier analyses, and candidate-header backing. Borrows the
 // fixed index, context, and block pool until freed; the environment's callbacks
 // and user data are used only during this call and are never retained.
+// Rejection returns OK with a NULL preparation after emitting diagnostics.
 iree_status_t loom_kernel_request_preparation_allocate(
     const loom_link_module_index_t* index,
     const loom_link_plan_materialization_environment_t* environment,

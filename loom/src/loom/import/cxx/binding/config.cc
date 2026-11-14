@@ -15,7 +15,6 @@
 #include <span>
 #include <string>
 
-#include "loom/analysis/symbol_value_constraints.h"
 #include "loom/import/cxx/binding/predicates.h"
 #include "loom/import/cxx/source/attributes.h"
 #include "loom/import/cxx/source/error.h"
@@ -275,19 +274,6 @@ void Configs::build(loom_builder_t* builder) {
     binding.reference.module_id = 0;
     loom_op_t* op;
     if (binding.value) {
-      if (!binding.predicates.empty()) {
-        iree_status_t status = loom_symbol_value_constraints_check_exact(
-            view(binding.name), binding.type, /*contract_value=*/0,
-            *binding.value,
-            loom_attr_predicate_list(binding.predicates.data(),
-                                     binding.predicates.size()));
-        if (!iree_status_is_ok(status)) {
-          auto message = iree_status_message(status);
-          std::string text(message.data, message.size);
-          iree_status_free(status);
-          diagnostics_.reject(unit_, binding.owner, text);
-        }
-      }
       auto predicates = binding.predicates;
       loom_config_def_build_flags_t flags = 0;
       loom_value_id_t identity = LOOM_VALUE_ID_INVALID;

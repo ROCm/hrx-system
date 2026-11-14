@@ -118,6 +118,18 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "indexed_source",
+    srcs = ["indexed_source.c"],
+    hdrs = ["indexed_source.h"],
+    deps = [
+        ":index",
+        "//loom/src/loom/error:diagnostic",
+        "//loom/src/loom/ir",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
     name = "index_reader",
     srcs = ["index.c"],
     deps = [
@@ -169,6 +181,7 @@ loom_cc_library(
         "//loom/src/loom/format/bytecode/reader:selected_body",
         "//loom/src/loom/format/bytecode/reader:selected_symbol",
         "//loom/src/loom/format/bytecode/reader:selected_tables",
+        "//loom/src/loom/format/bytecode/reader:validation",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
         "//runtime/src/iree/base",

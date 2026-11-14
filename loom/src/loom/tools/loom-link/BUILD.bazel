@@ -55,9 +55,12 @@ iree_assert_dependency_boundary(
 iree_cli_test(
     name = "cli_test",
     data = [
+        "//loom/src/loom/tooling/input/testdata:duplicate_symbols.loom-test",
         "//loom/src/loom/tools/loom-link/testdata:dependency_component.loom",
         "//loom/src/loom/tools/loom-link/testdata:dependency_direct.loom",
         "//loom/src/loom/tools/loom-link/testdata:dependency_transitive.loom",
+        "//loom/src/loom/tools/loom-link/testdata:rejected_configuration.loom-test",
+        "//loom/src/loom/tools/loom-link/testdata:unresolved_configuration.loom",
     ],
     manifests = ["loom-link.test.json"],
     tags = ["hostonly"],

@@ -885,17 +885,16 @@ loomc_status_t loomc_cmd_program_product_build_module(
                 iree_allocator_from_loomc(allocator), &module_index));
   iree_host_size_t module_provider_ordinal = IREE_HOST_SIZE_MAX;
   if (loomc_status_is_ok(status)) {
-    const loom_link_module_index_add_options_t add_options = {
-        .provider_name = iree_string_view_from_loomc(options->provider_name),
-        .role = LOOM_LINK_PROVIDER_ROLE_INPUT,
+    const loomc_link_index_source_options_t add_options = {
+        .provider_name = options->provider_name,
+        .role = LOOMC_LINK_PROVIDER_ROLE_INPUT,
     };
-    status = loomc_status_from_iree(loom_link_module_index_add_materialized(
-        module_index, loomc_module_const_loom_module(module), &add_options,
-        &module_provider_ordinal));
+    status = loomc_link_index_add_module_to_module_index(
+        module_index, module, &add_options, result, &module_provider_ordinal);
   }
 
   const iree_host_size_t* explicit_root_symbol_ordinals = NULL;
-  if (loomc_status_is_ok(status)) {
+  if (loomc_status_is_ok(status) && loomc_result_succeeded(result)) {
     status = loomc_cmd_program_product_resolve_module_roots(
         module_index, module_provider_ordinal, options->root_symbols,
         options->root_symbol_count, &scratch_arena,
@@ -903,13 +902,13 @@ loomc_status_t loomc_cmd_program_product_build_module(
   }
   const iree_host_size_t* root_symbol_ordinals = NULL;
   iree_host_size_t root_symbol_count = 0;
-  if (loomc_status_is_ok(status)) {
+  if (loomc_status_is_ok(status) && loomc_result_succeeded(result)) {
     status = loomc_cmd_program_product_resolve_roots(
         module_index, explicit_root_symbol_ordinals, options->root_symbol_count,
         options->flags, &scratch_arena, &root_symbol_ordinals,
         &root_symbol_count);
   }
-  if (loomc_status_is_ok(status)) {
+  if (loomc_status_is_ok(status) && loomc_result_succeeded(result)) {
     loomc_link_materialization_state_t materialization_state = {0};
     status = loomc_link_materialization_state_initialize_overlay(
         context, workspace, options->library_index, module_provider_ordinal,

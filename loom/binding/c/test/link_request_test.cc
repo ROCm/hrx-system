@@ -593,10 +593,133 @@ TEST_F(LinkRequestTest, RejectsProviderArityMismatchAcrossLibraryForms) {
       ASSERT_NE(result, nullptr);
       EXPECT_FALSE(loomc_result_succeeded(result.get()));
       ASSERT_EQ(loomc_result_diagnostic_count(result.get()), 1u);
-      EXPECT_THAT(
-          ToString(loomc_result_diagnostic_at(result.get(), 0)->message),
-          ::testing::HasSubstr(
-              "provider signature does not match its bound template family"));
+      const auto* diagnostic = loomc_result_diagnostic_at(result.get(), 0);
+      EXPECT_EQ(ToString(diagnostic->code), "SYMBOL/014");
+      EXPECT_EQ(
+          ToString(diagnostic->message),
+          std::string("declaration for '@candidate' has 1 ") +
+              (strcmp(filename, "arity_arguments.loom") == 0 ? "arguments"
+                                                             : "results") +
+              ", but the selected symbol has 2");
+      ASSERT_NE(diagnostic->range.source, nullptr);
+      EXPECT_EQ(ToString(loomc_source_identifier(diagnostic->range.source)),
+                "arity_input.loom");
+      EXPECT_EQ(diagnostic->range.start_line, 1u);
+      ASSERT_EQ(diagnostic->related_location_count, 1u);
+      const auto& provider = diagnostic->related_locations[0].range;
+      ASSERT_NE(provider.source, nullptr);
+      EXPECT_EQ(ToString(loomc_source_identifier(provider.source)), filename);
+      EXPECT_EQ(provider.start_line, 3u);
+    }
+  }
+}
+
+struct LinkOperationAllocator {
+  // Allocation ordinal rejected once, or the maximum to allow every request.
+  size_t failure_at = LOOMC_HOST_SIZE_MAX;
+  // Allocation requests made since the start of the link invocation.
+  size_t allocation_count = 0;
+  // Live allocations belonging to the linker and its products.
+  size_t live_count = 0;
+
+  static loomc_status_t Control(void* user_data,
+                                loomc_allocator_command_t command,
+                                const void* params, void** pointer) {
+    auto& self = *static_cast<LinkOperationAllocator*>(user_data);
+    const bool was_live = *pointer != nullptr;
+    if (command != LOOMC_ALLOCATOR_COMMAND_FREE &&
+        self.allocation_count++ == self.failure_at) {
+      return loomc_status_from_code(LOOMC_STATUS_RESOURCE_EXHAUSTED);
+    }
+    const auto backing = loomc_allocator_system();
+    auto status = backing.ctl(backing.self, command, params, pointer);
+    if (loomc_status_is_ok(status)) {
+      if (command == LOOMC_ALLOCATOR_COMMAND_FREE) {
+        self.live_count -= was_live;
+      } else if (!was_live && *pointer) {
+        ++self.live_count;
+      }
+    }
+    return status;
+  }
+};
+
+TEST_F(LinkRequestTest, InfrastructureFailureIsNotACompilerRejection) {
+  for (bool reject : {false, true}) {
+    SCOPED_TRACE(reject);
+    auto input_source =
+        CreateTemplateSource(reject ? "arity_input.loom" : "root.loom");
+    auto input_module =
+        DeserializeModule(context_.get(), workspace_.get(), input_source.get());
+    auto request = CreateRequest(context_.get(), input_module.get(), {"entry"});
+    auto library_source = CreateTemplateSource(reject ? "arity_arguments.loom"
+                                                      : "providers.loom");
+    auto library = CreateIndex(context_.get(), library_source.get(),
+                               LOOMC_LINK_PROVIDER_ROLE_LIBRARY);
+    const loomc_link_module_provider_t provider = {
+        .module = input_module.get(),
+        .role = LOOMC_LINK_PROVIDER_ROLE_INPUT,
+    };
+    const auto root = loomc_make_cstring_view("entry");
+    const loomc_link_options_t module_options = {
+        .type = LOOMC_STRUCTURE_TYPE_LINK_OPTIONS,
+        .structure_size = sizeof(module_options),
+        .link_index = library.get(),
+        .mode = LOOMC_LINK_MODE_LINK,
+        .root_symbols = &root,
+        .root_symbol_count = 1,
+        .module_providers = &provider,
+        .module_provider_count = 1,
+    };
+    const loomc_link_request_options_t request_options = {
+        .library_index = library.get(),
+    };
+    for (bool link_request : {false, true}) {
+      SCOPED_TRACE(link_request);
+      size_t allocation_count = 0;
+      // Observe the complete success or diagnostic path, then fail each of
+      // its allocation requests once. No allocation ordinal is hardcoded.
+      for (size_t attempt = 0; attempt <= allocation_count; ++attempt) {
+        SCOPED_TRACE(attempt);
+        LinkOperationAllocator tracking;
+        const loomc_allocator_t allocator = {&tracking,
+                                             LinkOperationAllocator::Control};
+        loomc_linker_t* linker_pointer = nullptr;
+        LOOMC_ASSERT_OK(loomc_linker_create(context_.get(), nullptr, allocator,
+                                            &linker_pointer));
+        LinkerPtr linker(linker_pointer);
+        tracking.allocation_count = 0;
+        tracking.failure_at = attempt == 0 ? LOOMC_HOST_SIZE_MAX : attempt - 1;
+        loomc_module_t* output_module = nullptr;
+        loomc_request_t* output_request = nullptr;
+        loomc_result_t* result = nullptr;
+        auto status =
+            link_request
+                ? loomc_link_request(linker.get(), workspace_.get(),
+                                     request.get(), &request_options, allocator,
+                                     &output_request, &result)
+                : loomc_link_module(linker.get(), workspace_.get(),
+                                    &module_options, &output_module, &result);
+        if (attempt == 0) {
+          LOOMC_EXPECT_OK(status);
+          EXPECT_NE(result, nullptr);
+          EXPECT_EQ(loomc_result_succeeded(result), !reject);
+          EXPECT_EQ(output_request != nullptr, link_request && !reject);
+          EXPECT_EQ(output_module != nullptr, !link_request && !reject);
+          allocation_count = tracking.allocation_count;
+          EXPECT_GT(allocation_count, 0u);
+        } else {
+          LOOMC_EXPECT_STATUS_IS(LOOMC_STATUS_RESOURCE_EXHAUSTED, status);
+          EXPECT_EQ(result, nullptr);
+          EXPECT_EQ(output_module, nullptr);
+          EXPECT_EQ(output_request, nullptr);
+        }
+        loomc_result_release(result);
+        loomc_module_release(output_module);
+        loomc_request_release(output_request);
+        linker.reset();
+        EXPECT_EQ(tracking.live_count, 0u);
+      }
     }
   }
 }

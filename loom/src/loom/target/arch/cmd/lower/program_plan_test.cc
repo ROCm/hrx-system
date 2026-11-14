@@ -1072,7 +1072,7 @@ command.def public @configured_root() launch() {
     iree_arena_initialize(&block_pool_, &request_arena);
     loom_cmd_program_plan_t request_plan = {};
     bool request_valid = false;
-    IREE_EXPECT_NOT_OK(loom_cmd_program_plan_build_from_index(
+    IREE_EXPECT_OK(loom_cmd_program_plan_build_from_index(
         index, &root->ordinal, /*program_count=*/1, &request_options,
         loom_pass_builtin_registry(),
         loom_cleanup_configured_pattern_provider_set(),

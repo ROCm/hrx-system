@@ -9,10 +9,14 @@
 #include <string.h>
 
 #include "loom/analysis/symbol_facts.h"
+#include "loom/error/error_catalog.h"
+#include "loom/error/parameter.h"
+#include "loom/error/source.h"
 #include "loom/ir/intern_table.h"
 #include "loom/ir/module.h"
 #include "loom/ir/structural_hash.h"
 #include "loom/link/bytecode_template_contract.h"
+#include "loom/link/index_diagnostics.h"
 #include "loom/link/template_input_binding.h"
 #include "loom/ops/func_symbol_facts.h"
 #include "loom/ops/op_defs.h"
@@ -325,10 +329,10 @@ loom_link_template_candidate_materialized_summary(
   return summary;
 }
 
-static iree_status_t loom_link_template_candidate_capacity(
+static iree_host_size_t loom_link_template_candidate_capacity(
     const loom_link_template_candidate_loader_t* loader,
-    const loom_link_plan_t* plan, iree_host_size_t* out_capacity) {
-  *out_capacity = 0;
+    const loom_link_plan_t* plan) {
+  iree_host_size_t capacity = 0;
   const iree_host_size_t family_count =
       loom_link_plan_demanded_template_family_count(plan);
   for (iree_host_size_t i = 0; i < family_count; ++i) {
@@ -338,15 +342,11 @@ static iree_status_t loom_link_template_candidate_capacity(
         loom_link_module_index_template_family_at(loader->index,
                                                   family_ordinal);
     IREE_ASSERT(family != NULL);
-    iree_host_size_t capacity = 0;
-    if (!iree_host_size_checked_add(*out_capacity, family->providers.count,
-                                    &capacity)) {
-      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                              "template candidate capacity overflow");
-    }
-    *out_capacity = capacity;
+    // The plan demands each family once, and every provider belongs to exactly
+    // one family. Their sum is bounded by the index's symbol count.
+    capacity += family->providers.count;
   }
-  return iree_ok_status();
+  return capacity;
 }
 
 iree_status_t loom_link_template_candidate_loader_allocate(
@@ -382,12 +382,58 @@ void loom_link_template_candidate_loader_free(
   iree_allocator_free(allocator, loader);
 }
 
+static IREE_ATTRIBUTE_NOINLINE iree_status_t
+loom_link_template_candidate_emit_signature_mismatch(
+    const loom_link_template_candidate_loader_t* loader,
+    loom_link_plan_materialization_t* materialization,
+    loom_link_diagnostic_environment_t diagnostics,
+    const loom_link_module_index_template_family_t* family,
+    const loom_link_module_index_symbol_t* provider,
+    const loom_template_provider_summary_t* candidate,
+    loom_func_like_t target_function, uint16_t argument_count,
+    uint16_t result_count) {
+  const bool arguments = candidate->argument_count != argument_count;
+  const loom_diagnostic_param_t parameters[] = {
+      loom_param_string(family->name),
+      loom_param_string(arguments ? IREE_SV("arguments") : IREE_SV("results")),
+      loom_param_u64(arguments ? argument_count : result_count),
+      loom_param_u64(arguments ? candidate->argument_count
+                               : candidate->result_count),
+  };
+  const loom_source_resolver_t resolver = {
+      .fn = loom_source_table_resolve,
+      .user_data = &materialization->sources,
+  };
+  loom_source_range_t origin;
+  const bool has_origin = loom_source_resolve(
+      resolver, materialization->module, target_function.op->location, &origin);
+  loom_source_range_t provider_origin;
+  const bool has_provider_origin = loom_link_index_resolve_source(
+      loader->index, diagnostics, provider, &provider_origin);
+  const loom_diagnostic_related_op_t related = {
+      .label = IREE_SV("candidate defined here"),
+      .origin = &provider_origin,
+  };
+  const loom_diagnostic_emission_t emission = {
+      .module = materialization->module,
+      .op = target_function.op,
+      .origin = has_origin ? &origin : NULL,
+      .error = LOOM_ERR_SYMBOL_014,
+      .params = parameters,
+      .param_count = IREE_ARRAYSIZE(parameters),
+      .related_ops = has_provider_origin ? &related : NULL,
+      .related_op_count = has_provider_origin ? 1 : 0,
+  };
+  return iree_diagnostic_emit(diagnostics.emitter, &emission);
+}
+
 static iree_status_t loom_link_template_candidate_loader_load_impl(
     loom_link_template_candidate_loader_t* loader, const loom_link_plan_t* plan,
     loom_link_plan_materialization_t* materialization,
+    loom_link_diagnostic_environment_t diagnostics,
     iree_arena_allocator_t* arena,
     loom_link_template_input_binding_t* input_binding,
-    loom_template_provider_slice_t* out_candidates) {
+    loom_template_provider_slice_t* out_candidates, bool* out_accepted) {
   IREE_ASSERT_ARGUMENT(loader);
   IREE_ASSERT_ARGUMENT(plan);
   IREE_ASSERT_ARGUMENT(materialization);
@@ -395,10 +441,11 @@ static iree_status_t loom_link_template_candidate_loader_load_impl(
   IREE_ASSERT_ARGUMENT(arena);
   IREE_ASSERT_ARGUMENT(out_candidates);
   *out_candidates = loom_template_provider_slice_empty();
-  iree_host_size_t candidate_capacity = 0;
-  IREE_RETURN_IF_ERROR(
-      loom_link_template_candidate_capacity(loader, plan, &candidate_capacity));
+  *out_accepted = false;
+  const iree_host_size_t candidate_capacity =
+      loom_link_template_candidate_capacity(loader, plan);
   if (candidate_capacity == 0) {
+    *out_accepted = true;
     return iree_ok_status();
   }
   IREE_RETURN_IF_ERROR(
@@ -488,9 +535,9 @@ static iree_status_t loom_link_template_candidate_loader_load_impl(
             input_binding, provider, &candidate->input_contract));
         if (candidate->argument_count != argument_count ||
             candidate->result_count != result_count) {
-          return iree_make_status(
-              IREE_STATUS_INVALID_ARGUMENT,
-              "provider signature does not match its bound template family");
+          return loom_link_template_candidate_emit_signature_mismatch(
+              loader, materialization, diagnostics, family, provider, candidate,
+              target_function, argument_count, result_count);
         }
         ++candidate_count;
       }
@@ -504,21 +551,24 @@ static iree_status_t loom_link_template_candidate_loader_load_impl(
       .providers = candidates,
       .count = candidate_count,
   };
+  *out_accepted = true;
   return iree_ok_status();
 }
 
 iree_status_t loom_link_template_candidate_loader_load(
     loom_link_template_candidate_loader_t* loader, const loom_link_plan_t* plan,
     loom_link_plan_materialization_t* materialization,
+    loom_link_diagnostic_environment_t diagnostics,
     iree_arena_allocator_t* arena,
-    loom_template_provider_slice_t* out_candidates) {
+    loom_template_provider_slice_t* out_candidates, bool* out_accepted) {
   loom_link_template_input_binding_t inputs = {
       .index = loader->index,
       .materialization = materialization,
       .arena = arena,
   };
   const iree_status_t status = loom_link_template_candidate_loader_load_impl(
-      loader, plan, materialization, arena, &inputs, out_candidates);
+      loader, plan, materialization, diagnostics, arena, &inputs,
+      out_candidates, out_accepted);
   loom_link_template_input_binding_deinitialize(&inputs);
   return status;
 }

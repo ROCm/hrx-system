@@ -18,27 +18,14 @@
 extern "C" {
 #endif
 
-// Source-ID correspondence for one indexed materialized input module.
-typedef struct loom_link_source_projection_t {
-  // Arena-owned target IDs indexed by original input source ID.
-  const loom_source_id_t* values;
-  // Source table size, or zero for unselected and bytecode-only inputs.
-  iree_host_size_t count;
-} loom_link_source_projection_t;
-
 // Result of materializing one exact plan.
 typedef struct loom_link_plan_materialization_t {
-  // Standalone linked module owned by the caller.
+  // Standalone linked module owned by the caller, or NULL on rejection.
   loom_module_t* module;
-  // Source correspondence indexed by index-wide module ordinal. Includes
-  // intermediate kernel-configuration projections. Storage belongs to the
-  // caller's arena and remains valid after transient input modules are freed.
-  struct {
-    // Per-input source correspondence produced by materialization.
-    loom_link_source_projection_t* values;
-    // Number of index-wide module slots.
-    iree_host_size_t count;
-  } target_sources;
+  // Exact snapshots indexed by linked source ID. Rows belong to the caller's
+  // arena; strings borrow from the environment's input snapshots. Empty when
+  // the embedding omits exact-source retention.
+  loom_source_table_resolver_t sources;
   // Dense target refs indexed by source index symbol ordinal. Unselected
   // symbols contain null refs. Storage belongs to the caller's arena.
   struct {
@@ -100,7 +87,8 @@ loom_symbol_ref_t loom_link_plan_materialization_lookup_symbol(
 // plan's root/dependency reasons authoritatively determine the output surface;
 // no second root list is resolved during materialization. The
 // returned target-symbol projection preserves exact indexed source identity
-// across private names and duplicate global declarations.
+// across private names and duplicate global declarations. Semantic rejection
+// emits diagnostics and returns an empty materialization with OK status.
 iree_status_t loom_link_plan_materialize(
     const loom_link_plan_t* plan,
     const loom_link_plan_materialization_environment_t* environment,

@@ -24,6 +24,8 @@ typedef struct loom_op_t loom_op_t;
 typedef struct loom_module_t loom_module_t;
 typedef struct loom_error_def_t loom_error_def_t;
 typedef struct loom_diagnostic_param_t loom_diagnostic_param_t;
+typedef struct loom_source_resolver_t loom_source_resolver_t;
+typedef struct loom_source_range_t loom_source_range_t;
 
 // Structured reference to an op field associated with a diagnostic parameter or
 // related-op note. This lives in the lightweight emitter layer so IR headers
@@ -91,6 +93,8 @@ typedef struct loom_diagnostic_related_op_t {
   const loom_module_t* module;
   // Secondary operation associated with the diagnostic.
   const loom_op_t* op;
+  // Recorded origin when indexed input has no materialized operation.
+  const loom_source_range_t* origin;
   // Optional source field to highlight on |op|.
   loom_diagnostic_field_ref_t field_ref;
 } loom_diagnostic_related_op_t;
@@ -103,6 +107,13 @@ typedef struct loom_diagnostic_emission_t {
   const loom_module_t* module;
   // Primary operation associated with the diagnostic.
   const loom_op_t* op;
+  // Optional exact-source resolver owned by the producing stage. Overrides
+  // the sink's resolver when a nested materialization has a different source
+  // namespace. Borrowed only for the synchronous emission callback.
+  const loom_source_resolver_t* source_resolver;
+  // Recorded origin for indexed or textual input without a materialized op.
+  // Borrowed only for the synchronous emission callback.
+  const loom_source_range_t* origin;
   // Stable error definition selecting the diagnostic message contract.
   const loom_error_def_t* error;
   // Error parameters in definition order.

@@ -248,6 +248,7 @@ loom_cc_test(
     srcs = ["context_test.cc"],
     deps = [
         ":lower",
+        "//loom/src/loom/error:error_defs",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

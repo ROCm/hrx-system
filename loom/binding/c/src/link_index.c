@@ -356,8 +356,10 @@ loomc_status_t loomc_link_index_add_source_to_module_index(
     const loomc_source_t* source,
     const loomc_link_index_source_options_t* source_options,
     loomc_result_t* result, iree_host_size_t* out_provider_ordinal) {
-  const iree_host_size_t before_diagnostics =
-      loomc_result_diagnostic_count(result);
+  iree_host_size_t provider_ordinal = LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL;
+  if (out_provider_ordinal) {
+    *out_provider_ordinal = LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL;
+  }
   loomc_diagnostic_capture_t capture;
   loomc_diagnostic_capture_initialize(result, source, /*module=*/NULL,
                                       (loom_source_resolver_t){0},
@@ -367,6 +369,7 @@ loomc_status_t loomc_link_index_add_source_to_module_index(
       .provider_name =
           iree_string_view_from_loomc(source_options->provider_name),
       .role = loomc_link_provider_role_to_loom(source_options->role),
+      .diagnostic_emitter = {loomc_diagnostic_capture_emission, &capture},
   };
   if (iree_string_view_is_empty(options.provider_name)) {
     options.provider_name =
@@ -388,7 +391,7 @@ loomc_status_t loomc_link_index_add_source_to_module_index(
         module_index,
         iree_make_const_byte_span(contents.data, contents.data_length),
         iree_string_view_from_loomc(identifier), &index_options, &options,
-        out_provider_ordinal);
+        &provider_ordinal);
   } else {
     loom_text_parse_options_t parse_options = {
         .diagnostic_sink =
@@ -404,25 +407,45 @@ loomc_status_t loomc_link_index_add_source_to_module_index(
         module_index,
         iree_make_string_view((const char*)contents.data, contents.data_length),
         iree_string_view_from_loomc(identifier), &parse_options, &options,
-        out_provider_ordinal);
+        &provider_ordinal);
   }
 
-  if (iree_status_is_ok(status)) {
-    return loomc_ok_status();
+  LOOMC_RETURN_IF_ERROR(loomc_status_from_iree(status));
+  if (provider_ordinal == LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL) {
+    loomc_result_set_status_code(result, LOOMC_STATUS_INVALID_ARGUMENT);
+  } else if (out_provider_ordinal) {
+    *out_provider_ordinal = provider_ordinal;
   }
+  return loomc_ok_status();
+}
 
-  loomc_status_t public_status = loomc_status_from_iree(status);
-  if (loomc_result_diagnostic_count(result) == before_diagnostics) {
-    loomc_status_t add_status = loomc_result_add_status_diagnostic(
-        result, source, LOOMC_DIAGNOSTIC_SEVERITY_ERROR,
-        loomc_make_cstring_view("LINK_INDEX/SOURCE"), public_status);
-    if (!loomc_status_is_ok(add_status)) {
-      loomc_status_free(public_status);
-      return add_status;
-    }
+loomc_status_t loomc_link_index_add_module_to_module_index(
+    loom_link_module_index_t* module_index, const loomc_module_t* module,
+    const loomc_link_index_source_options_t* source_options,
+    loomc_result_t* result, iree_host_size_t* out_provider_ordinal) {
+  if (out_provider_ordinal) {
+    *out_provider_ordinal = LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL;
   }
-  loomc_result_set_status_code(result, loomc_status_code(public_status));
-  loomc_status_free(public_status);
+  loomc_diagnostic_capture_t capture;
+  loomc_diagnostic_capture_initialize(
+      result, NULL, loomc_module_const_loom_module(module),
+      loomc_module_source_resolver(module), LOOM_EMITTER_PASS, NULL, &capture);
+  const loom_link_module_index_add_options_t options = {
+      .provider_name =
+          iree_string_view_from_loomc(source_options->provider_name),
+      .role = loomc_link_provider_role_to_loom(source_options->role),
+      .diagnostic_emitter = {loomc_diagnostic_capture_emission, &capture},
+  };
+  iree_host_size_t provider_ordinal = LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL;
+  LOOMC_RETURN_IF_ERROR(
+      loomc_status_from_iree(loom_link_module_index_add_materialized(
+          module_index, loomc_module_const_loom_module(module), &options,
+          &provider_ordinal)));
+  if (provider_ordinal == LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL) {
+    loomc_result_set_status_code(result, LOOMC_STATUS_INVALID_ARGUMENT);
+  } else if (out_provider_ordinal) {
+    *out_provider_ordinal = provider_ordinal;
+  }
   return loomc_ok_status();
 }
 
@@ -798,21 +821,10 @@ loomc_status_t loomc_link_index_builder_finish(
                   &source_options, builder->result,
                   /*out_provider_ordinal=*/NULL));
     } else {
-      const loom_link_module_index_add_options_t options = {
-          .provider_name = iree_string_view_from_loomc(source->provider_name),
-          .role = loomc_link_provider_role_to_loom(source->role),
-      };
-      loomc_status_t status =
-          loomc_status_from_iree(loom_link_module_index_add_materialized(
-              builder->index,
-              loomc_module_const_loom_module(source->payload.module), &options,
-              /*out_provider_ordinal=*/NULL));
-      if (!loomc_status_is_ok(status)) {
-        IREE_RETURN_AND_END_ZONE_IF_ERROR(
-            z0, loomc_result_fail_status_diagnostic_consume(
-                    builder->result, NULL, LOOMC_DIAGNOSTIC_SEVERITY_ERROR,
-                    loomc_make_cstring_view("LINK_INDEX/MODULE"), status));
-      }
+      IREE_RETURN_AND_END_ZONE_IF_ERROR(
+          z0, loomc_link_index_add_module_to_module_index(
+                  builder->index, source->payload.module, &source_options,
+                  builder->result, /*out_provider_ordinal=*/NULL));
     }
   }
 

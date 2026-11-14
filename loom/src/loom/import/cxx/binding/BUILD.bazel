@@ -236,7 +236,6 @@ loom_cc_library(
     cxx_standard = CXX_COMPILER_OPTIONS["cxx_standard"],
     deps = [
         ":predicates",
-        "//loom/src/loom/analysis:symbol_value_constraints",
         "//loom/src/loom/import/cxx/source:attributes",
         "//loom/src/loom/import/cxx/source:error",
         "//loom/src/loom/import/cxx/source:locations",

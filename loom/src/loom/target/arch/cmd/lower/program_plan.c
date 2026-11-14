@@ -1013,9 +1013,9 @@ iree_status_t loom_cmd_program_plan_build_from_materialization(
         effective_kernel_source->provider.publish != NULL) {
       status = loom_cmd_program_plan_publish_kernel_requests(
           &plan, plan_module, &source_facts, effective_kernel_source,
-          kernel_site_roots, program_count, &scratch_arena);
+          kernel_site_roots, program_count, &scratch_arena, &valid);
     }
-    if (iree_status_is_ok(status) &&
+    if (valid && iree_status_is_ok(status) &&
         launch_count_realization.kernel_count != 0) {
       status = loom_cmd_program_plan_publish_generated_kernel_requests(
           &plan, plan_module, &launch_count_realization,

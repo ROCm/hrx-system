@@ -161,6 +161,8 @@ typedef struct loom_bytecode_symbol_metadata_t {
   const loom_predicate_t* predicates;
   // Number of retained predicate entries.
   uint16_t predicate_count;
+  // Validated source location retained for diagnostics before materialization.
+  loom_location_id_t location;
   // Arena-owned attribute payloads required by retained linker contracts.
   const loom_bytecode_symbol_attribute_metadata_t* attributes;
   // Number of retained attribute payloads.

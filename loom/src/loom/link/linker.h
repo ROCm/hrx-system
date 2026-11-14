@@ -7,8 +7,11 @@
 // Incremental materialized module linker for in-memory Loom IR.
 //
 // This is the inner link step for modules that have already been parsed,
-// bytecode-decoded, or otherwise materialized into loom_module_t. Larger
-// library workflows should discover reachable symbols through a module index,
+// bytecode-decoded, or otherwise materialized into loom_module_t. Callers
+// establish valid IR identities, a shared finalized context, and dependency-
+// closed selections before linking; this is not an external input boundary.
+//
+// Larger library workflows discover reachable symbols through a module index,
 // materialize only those modules/functions, and then stream those inputs
 // through this linker. Each added module is cloned into the output immediately;
 // callers may release a source module as soon as loom_linker_add_module()
@@ -19,6 +22,7 @@
 
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
+#include "loom/error/emitter.h"
 #include "loom/ir/ir.h"
 
 #ifdef __cplusplus
@@ -33,13 +37,15 @@ typedef struct loom_linker_t loom_linker_t;
 // scratch storage is released. The array is indexed by source-module source
 // ID and has source_module->sources.count entries. Callers can retain external
 // source snapshots using this mapping; neither the array nor the source module
-// is retained by the linker. Allocation or conflicting source snapshots may
-// fail the add through this callback.
+// is retained by the linker. A consumer may diagnose conflicting snapshots and
+// reject the add through |out_accepted|. Status carries infrastructure failure.
 typedef struct loom_linker_source_callback_t {
-  // Optional callback invoked after successfully cloning each input module.
+  // Optional callback invoked after remapping source IDs and before cloning
+  // any input operations, so their diagnostics can resolve exact snapshots.
   iree_status_t (*fn)(void* user_data, const loom_module_t* source_module,
                       const loom_module_t* target_module,
-                      const loom_source_id_t* target_sources);
+                      const loom_source_id_t* target_sources,
+                      bool* out_accepted);
   // Caller-owned state that remains valid until the linker is freed.
   void* user_data;
 } loom_linker_source_callback_t;
@@ -67,6 +73,8 @@ typedef struct loom_link_options_t {
   // Optional linked symbol references parallel to root_symbols. An empty list
   // ignores the resolved identities; otherwise the counts must match.
   loom_linker_target_symbol_list_t root_target_symbols;
+  // Optional diagnostic delivery; rejection is retained without a callback.
+  iree_diagnostic_emitter_t diagnostic_emitter;
   // Optional consumer of the source correspondence produced by each input.
   loom_linker_source_callback_t source_callback;
 } loom_link_options_t;
@@ -78,6 +86,8 @@ typedef struct loom_linker_options_t {
   // Maximum number of target symbols carrying sparse-plan state.
   // Zero keeps merge/dense links allocation-free for this state.
   iree_host_size_t planned_symbol_capacity;
+  // Optional diagnostic delivery; rejection is retained without a callback.
+  iree_diagnostic_emitter_t diagnostic_emitter;
   // Optional consumer of the source correspondence produced by each add.
   loom_linker_source_callback_t source_callback;
 } loom_linker_options_t;
@@ -173,6 +183,11 @@ iree_status_t loom_linker_allocate(loom_context_t* context,
                                    iree_allocator_t allocator,
                                    loom_linker_t** out_linker);
 
+// Returns whether a source contract or requested root has been rejected.
+// Rejection is monotonic: subsequent adds/finalization do nothing, and finish
+// returns no module. Diagnostic delivery failure is an infrastructure status.
+bool loom_linker_is_rejected(const loom_linker_t* linker);
+
 // Frees |linker| and any unfinished target module it still owns.
 void loom_linker_free(loom_linker_t* linker);
 
@@ -202,8 +217,8 @@ iree_status_t loom_linker_add_module(loom_linker_t* linker,
 // Adds an exact precomputed source symbol selection to |linker|.
 //
 // |source_symbols| must be strictly increasing. The caller owns dependency
-// closure: references from selected IR to omitted source symbols fail unless
-// |source_bindings| explicitly maps them to symbols projected by a prior add.
+// closure: every reference from selected IR to an omitted source symbol must
+// have a |source_bindings| entry projected by a prior add.
 // Bindings do not clone, merge, or otherwise inspect the omitted source
 // definition; the caller owns compatibility with the projected target. When
 // |selected_targets| is non-empty it must have one entry per selected source
@@ -257,7 +272,8 @@ iree_status_t loom_linker_finalize_roots(loom_linker_t* linker,
 
 // Finalizes the linked output module and transfers ownership to the caller.
 //
-// The caller owns *out_module on success and must release it with
+// A rejected link returns OK with *out_module NULL. Otherwise the caller
+// owns *out_module and must release it with
 // loom_module_free(). The linker remains valid only for loom_linker_free().
 iree_status_t loom_linker_finish(loom_linker_t* linker,
                                  loom_module_t** out_module);
@@ -265,8 +281,10 @@ iree_status_t loom_linker_finish(loom_linker_t* linker,
 // Links already-materialized source modules into a freshly allocated output
 // module. This is a compatibility wrapper around the incremental linker.
 //
-// All source modules must share the same finalized context. The returned module
-// is owned by the caller and must be released with loom_module_free().
+// At least one source module is required. All source modules must share the
+// same finalized context. Rejection returns OK and a NULL module. The caller
+// owns an accepted module and releases it
+// with loom_module_free().
 //
 // Symbol policy:
 // - Concrete private definitions keep per-input identity and are renamed on

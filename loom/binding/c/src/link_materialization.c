@@ -17,6 +17,7 @@
 #include "loom/link/plan_materializer.h"
 #include "loom/target/module_specialization.h"
 #include "loomc/iree.h"
+#include "module.h"
 #include "target.h"
 #include "workspace.h"
 
@@ -49,6 +50,14 @@ static iree_status_t loomc_link_materialization_capture_diagnostic(
       /*text_print_options=*/NULL));
 }
 
+static iree_status_t loomc_link_materialization_capture_emission(
+    void* user_data, const loom_diagnostic_emission_t* emission) {
+  loomc_link_materialization_state_t* state = user_data;
+  return iree_status_from_loomc(loomc_result_add_loom_diagnostic_emission(
+      state->diagnostics.result, emission->module, (loom_source_resolver_t){0},
+      LOOM_EMITTER_PASS, emission, NULL));
+}
+
 static loom_diagnostic_sink_t loomc_link_materialization_diagnostic_sink(
     void* user_data, const loom_link_module_index_provider_t* provider) {
   loomc_link_materialization_state_t* state =
@@ -67,6 +76,51 @@ static loom_diagnostic_sink_t loomc_link_materialization_diagnostic_sink(
       .fn = loomc_link_materialization_capture_diagnostic,
       .user_data = state,
   };
+}
+
+static loom_source_entry_t loomc_link_materialization_source_entry(
+    void* user_data, const loom_link_module_index_module_t* indexed_module,
+    loom_source_id_t source_id) {
+  const loomc_link_materialization_state_t* state = user_data;
+  const iree_host_size_t ordinal = indexed_module->provider_ordinal;
+  const loomc_module_t* module = NULL;
+  if (ordinal >= state->composition.sources.module_provider_base &&
+      ordinal - state->composition.sources.module_provider_base <
+          state->composition.sources.module_provider_count) {
+    module =
+        state->composition.sources
+            .module_providers[ordinal -
+                              state->composition.sources.module_provider_base]
+            .module;
+  } else {
+    module = loomc_link_index_module_for_provider(
+        state->composition.sources.link_index, ordinal);
+  }
+  if (module) {
+    const loom_source_table_resolver_t* table =
+        loomc_module_source_table(module);
+    if (source_id < table->count) {
+      return table->entries[source_id];
+    }
+  } else if (source_id == indexed_module->primary_source_id) {
+    const loomc_source_t* source =
+        state->composition.sources.appended.source &&
+                ordinal == state->composition.sources.appended.provider_ordinal
+            ? state->composition.sources.appended.source
+            : loomc_link_index_source_for_provider(
+                  state->composition.sources.link_index, ordinal);
+    if (source) {
+      const loomc_byte_span_t contents = loomc_source_contents(source);
+      return (loom_source_entry_t){
+          .source_id = source_id,
+          .source = iree_make_string_view((const char*)contents.data,
+                                          contents.data_length),
+          .filename =
+              iree_string_view_from_loomc(loomc_source_identifier(source)),
+      };
+    }
+  }
+  return (loom_source_entry_t){.source_id = LOOM_SOURCE_ID_INVALID};
 }
 
 static loom_symbol_ref_t loomc_link_configuration_function(
@@ -283,7 +337,8 @@ static iree_status_t loomc_link_target_specializations_project(
 static iree_status_t loomc_link_materialization_prepare_module(
     void* user_data, const loom_link_module_index_t* index,
     iree_arena_block_pool_t* block_pool, iree_allocator_t allocator,
-    loom_link_plan_materialization_t* materialization) {
+    loom_link_plan_materialization_t* materialization, bool* out_accepted) {
+  *out_accepted = false;
   loom_module_t** inout_module = &materialization->module;
   loomc_link_materialization_state_t* state =
       (loomc_link_materialization_state_t*)user_data;
@@ -292,16 +347,16 @@ static iree_status_t loomc_link_materialization_prepare_module(
       .bindings = &state->specialization.config_bindings,
       .policy_flags = state->specialization.config_policy_flags,
       .module = *inout_module,
-      .source_resolver = (loom_source_resolver_t){0},
+      .source_resolver = {.fn = loom_source_table_resolve,
+                          .user_data = &materialization->sources},
       .result = state->diagnostics.result,
-      .block_pool = block_pool,
   };
   loomc_status_t status = loomc_config_apply_text_to_module(&apply_options);
   if (!loomc_status_is_ok(status)) {
     return iree_status_from_loomc(status);
   }
   if (!loomc_result_succeeded(state->diagnostics.result)) {
-    return iree_status_from_code(IREE_STATUS_INVALID_ARGUMENT);
+    return iree_ok_status();
   }
 
   const loomc_target_specialization_options_t* target =
@@ -311,6 +366,7 @@ static iree_status_t loomc_link_materialization_prepare_module(
   if (deployment_profile == NULL &&
       (target == NULL || (target->specialization_count == 0 &&
                           target->target_binding_count == 0))) {
+    *out_accepted = true;
     return iree_ok_status();
   }
 
@@ -323,7 +379,9 @@ static iree_status_t loomc_link_materialization_prepare_module(
   loomc_diagnostic_capture_t capture;
   loomc_diagnostic_capture_initialize(
       state->diagnostics.result, /*source=*/NULL, *inout_module,
-      (loom_source_resolver_t){0}, LOOM_EMITTER_PASS,
+      (loom_source_resolver_t){.fn = loom_source_table_resolve,
+                               .user_data = &materialization->sources},
+      LOOM_EMITTER_PASS,
       pass_environment ? &pass_environment->diagnostic_type_print_options
                        : NULL,
       &capture);
@@ -373,11 +431,12 @@ static iree_status_t loomc_link_materialization_prepare_module(
     return iree_status_from_loomc(status);
   }
   if (error_count == 0) {
+    *out_accepted = true;
     return iree_ok_status();
   }
   loomc_result_set_status_code(state->diagnostics.result,
                                LOOMC_STATUS_FAILED_PRECONDITION);
-  return iree_status_from_code(IREE_STATUS_INVALID_ARGUMENT);
+  return iree_ok_status();
 }
 
 iree_status_t loomc_link_materialization_validate_command_kernel_entries(
@@ -503,6 +562,17 @@ loomc_link_materialization_state_environment(
       .block_pool = loomc_workspace_block_pool(state->composition.workspace),
       .low_repr_environment = low_repr_environment,
       .diagnostic_sink = loomc_link_materialization_diagnostic_sink,
+      .diagnostics =
+          {
+              .emitter = {.fn = loomc_link_materialization_capture_emission,
+                          .user_data = state},
+              .source_entry =
+                  loomc_context_source_retention(state->composition.context) ==
+                          LOOMC_SOURCE_RETENTION_EXACT
+                      ? loomc_link_materialization_source_entry
+                      : NULL,
+              .user_data = state,
+          },
       .prepare_module = loomc_link_materialization_prepare_module,
       .user_data = state,
       .allocator = iree_allocator_from_loomc(state->allocator),

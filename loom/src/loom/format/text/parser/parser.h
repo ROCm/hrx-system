@@ -100,6 +100,20 @@ iree_status_t loom_text_parse_with_symbol_references(
     loom_symbol_reference_table_t* out_symbol_references,
     loom_module_t** out_module);
 
+// Parses exactly one attribute into |module| using its registered dialects.
+// The descriptor supplies the expected kind and parameter schema. SSA values,
+// symbol references, and aliases are unavailable in this self-contained input.
+// Trailing tokens are rejected. Storage is owned by |module|; source bytes are
+// borrowed only during the call. Diagnostics retain their input ranges.
+// On rejection |*out_accepted| is false and |*out_attr| is absent,
+// independently of diagnostic callback presence. Status carries infrastructure
+// failures only.
+iree_status_t loom_text_parse_attribute(
+    iree_string_view_t source, iree_string_view_t filename,
+    loom_module_t* module, const loom_attr_descriptor_t* descriptor,
+    const loom_text_parse_options_t* options, loom_attribute_t* out_attr,
+    bool* out_accepted);
+
 // Parses a self-contained Low assembly signature and body into |module|.
 //
 // The source range names the literal contents within a borrowed source file.

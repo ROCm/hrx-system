@@ -39,7 +39,8 @@ void loom_link_index_materialization_deinitialize(
 // Template applicability remains open to later specialization regardless of
 // unresolved-symbol policy. That policy governs missing symbol definitions,
 // not unknown provider predicates. Root retention and outward linkage come
-// exclusively from |plan_options|.
+// exclusively from |plan_options|. Rejection emits diagnostics and returns OK
+// with an empty materialization. Status reports only infrastructure failure.
 iree_status_t loom_link_index_materialize(
     const loom_link_module_index_t* index,
     const loom_link_plan_options_t* plan_options,

@@ -841,7 +841,7 @@ TEST(CompileTest, CompileModuleReportsUnresolvedConfigAsResultDiagnostic) {
       &options, loomc_allocator_system(), &result);
   LOOMC_EXPECT_OK(status);
   ResultPtr result_ptr(result);
-  ExpectFailedResultCode(result_ptr.get(), "CONFIG/INVALID");
+  ExpectFailedResultCode(result_ptr.get(), "SYMBOL/007");
 }
 
 TEST(CompileTest, CompileModuleReportsNonConfigProviderAsDiagnostic) {
@@ -867,7 +867,7 @@ TEST(CompileTest, CompileModuleReportsNonConfigProviderAsDiagnostic) {
       &options, loomc_allocator_system(), &result);
   LOOMC_EXPECT_OK(status);
   ResultPtr result_ptr(result);
-  ExpectFailedResultCode(result_ptr.get(), "CONFIG/INVALID");
+  ExpectFailedResultCode(result_ptr.get(), "SYMBOL/009");
 }
 
 TEST(CompileTest, CompileModuleReportsConfigConstraintFailure) {
@@ -895,7 +895,50 @@ TEST(CompileTest, CompileModuleReportsConfigConstraintFailure) {
       &options, loomc_allocator_system(), &result);
   LOOMC_EXPECT_OK(status);
   ResultPtr result_ptr(result);
-  ExpectFailedResultCode(result_ptr.get(), "CONFIG/INVALID");
+  ExpectFailedResultCode(result_ptr.get(), "SYMBOL/008");
+}
+
+TEST(CompileTest, ConfigTypeMismatchRetainsBothSourceModules) {
+  for (bool strip_source : {false, true}) {
+    ContextPtr context = CreateContext();
+    WorkspacePtr workspace = CreateWorkspace();
+    CompilerPtr compiler = CreateCompiler(context.get());
+    PassProgramPtr pass_program = CreateEmptyPassProgram(context.get());
+    ModulePtr module =
+        CreateConfigConsumerModule(context.get(), workspace.get());
+    ModulePtr provider = CreateConfigProviderModule(
+        context.get(), workspace.get(),
+        "config.def @model36.model.hidden_size = 16 : i32\n");
+    if (strip_source) {
+      module = RoundTripModuleThroughBytecode(context.get(), workspace.get(),
+                                              std::move(module));
+      provider = RoundTripModuleThroughBytecode(context.get(), workspace.get(),
+                                                std::move(provider));
+    }
+    const loomc_compile_options_t options = {.config_module = provider.get()};
+    loomc_result_t* result = nullptr;
+    LOOMC_ASSERT_OK(loomc_compile_module(
+        compiler.get(), workspace.get(), pass_program.get(), module.get(),
+        &options, loomc_allocator_system(), &result));
+    ResultPtr result_owner(result);
+    ExpectFailedResultCode(result, "SYMBOL/010");
+    ASSERT_EQ(loomc_result_diagnostic_count(result), 1u);
+    const auto* diagnostic = loomc_result_diagnostic_at(result, 0);
+    ASSERT_NE(diagnostic->range.source, nullptr);
+    EXPECT_EQ(ToString(loomc_source_identifier(diagnostic->range.source)),
+              "config.loom");
+    EXPECT_EQ(diagnostic->range.start_line, 2u);
+    ASSERT_EQ(diagnostic->related_location_count, 1u);
+    const auto& definition = diagnostic->related_locations[0].range;
+    ASSERT_NE(definition.source, nullptr);
+    EXPECT_EQ(ToString(loomc_source_identifier(definition.source)),
+              "config-provider.loom");
+    EXPECT_EQ(definition.start_line, 1u);
+    EXPECT_EQ(loomc_source_contents(definition.source).data_length == 0,
+              strip_source);
+    EXPECT_EQ(loomc_source_contents(diagnostic->range.source).data_length == 0,
+              strip_source);
+  }
 }
 
 TEST(CompileTest, CompileModuleRejectsProgramAsConfigModule) {

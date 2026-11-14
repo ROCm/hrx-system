@@ -396,7 +396,7 @@ class SourceStorageTest : public ::testing::Test {
   loom_context_t context_;
 };
 
-TEST_F(SourceStorageTest, CopiesEmptyAndSparseSnapshotsAndRejectsConflicts) {
+TEST_F(SourceStorageTest, CopiesEmptyAndSparseSnapshots) {
   std::string filename = "header.h";
   std::string source = "const int value = 5;\n";
   IREE_ASSERT_OK(loom_source_storage_insert(
@@ -413,54 +413,6 @@ TEST_F(SourceStorageTest, CopiesEmptyAndSparseSnapshotsAndRejectsConflicts) {
   IREE_ASSERT_OK(loom_source_storage_insert(&sources_, 0, IREE_SV("empty.h"),
                                             iree_string_view_empty()));
   EXPECT_EQ(sources_.table.entries[0].source_id, 0u);
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_INVALID_ARGUMENT,
-      loom_source_storage_insert(&sources_, 0, IREE_SV("empty.h"),
-                                 IREE_SV("different")));
-}
-
-TEST_F(SourceStorageTest, LinkMappingRetainsBytesAfterInputTeardown) {
-  loom_source_table_resolver_t input_sources = {};
-  loom_source_storage_projection_t projection = {
-      &input_sources,
-      &sources_,
-  };
-  loom_linker_options_t options = {
-      .source_callback = {loom_source_storage_project, &projection},
-  };
-  loom_linker_t* linker = nullptr;
-  IREE_ASSERT_OK(loom_linker_allocate(&context_, &options, &pool_,
-                                      iree_allocator_system(), &linker));
-  for (int i = 0; i < 2; ++i) {
-    loom_module_t* input = Module();
-    const auto filename = i == 0 ? IREE_SV("main.cc") : IREE_SV("library.h");
-    loom_source_id_t source_id;
-    IREE_ASSERT_OK(loom_module_register_source(input, filename, &source_id));
-    EXPECT_EQ(source_id, 0u);
-    std::string bytes = i == 0 ? "first\nmain\n" : "second\nlibrary\n";
-    loom_source_entry_t entry = {
-        source_id, iree_make_cstring_view(bytes.c_str()), filename};
-    input_sources = {input, &entry, 1};
-    IREE_ASSERT_OK(loom_linker_add_module(linker, input, nullptr));
-    loom_module_free(input);
-    bytes.assign("released");
-  }
-  loom_module_t* linked = nullptr;
-  IREE_ASSERT_OK(loom_linker_finish(linker, &linked));
-  loom_linker_free(linker);
-  ASSERT_EQ(linked->sources.count, 2u);
-  loom_location_id_t location;
-  IREE_ASSERT_OK(loom_module_add_location(
-      linked, loom_location_file_range(1, 2, 1, 2, 8), &location));
-  loom_source_range_t range = {};
-  ASSERT_TRUE(loom_source_resolve(loom_source_storage_resolver(&sources_),
-                                  linked, location, &range));
-  EXPECT_TRUE(iree_string_view_equal(range.filename, IREE_SV("library.h")));
-  EXPECT_TRUE(
-      iree_string_view_equal(range.source, IREE_SV("second\nlibrary\n")));
-  EXPECT_EQ(range.start_line, 2u);
-  EXPECT_EQ(range.start, 7u);
-  loom_module_free(linked);
 }
 
 TEST_F(SourceStorageTest, LinkProjectionBorrowsBytesAndReindexesSources) {

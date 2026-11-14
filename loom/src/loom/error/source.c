@@ -13,7 +13,7 @@
 
 // Tagged locations preserve a single origin. Fused locations have no designated
 // primary file and cannot be represented by one source range.
-static const loom_location_entry_t* loom_source_file_location(
+const loom_location_entry_t* loom_source_file_location(
     const loom_module_t* module, loom_location_id_t location) {
   if (!module) {
     return NULL;
@@ -61,6 +61,9 @@ void loom_source_resolve_diagnostic(
     loom_emitter_t emitter, const loom_diagnostic_emission_t* emission,
     loom_diagnostic_related_location_t* related_locations,
     loom_diagnostic_t* out_diagnostic) {
+  if (emission->source_resolver) {
+    resolver = *emission->source_resolver;
+  }
   *out_diagnostic = (loom_diagnostic_t){
       .severity = loom_error_def_severity(emission->error),
       .error = emission->error,
@@ -73,7 +76,10 @@ void loom_source_resolve_diagnostic(
       .source_location = {.provenance =
                               LOOM_SOURCE_PROVENANCE_UNAVAILABLE_SOURCE},
   };
-  if (emission->op) {
+  if (emission->origin) {
+    out_diagnostic->origin = *emission->origin;
+    out_diagnostic->source_location = *emission->origin;
+  } else if (emission->op) {
     loom_source_range_t range;
     if (loom_source_resolve(resolver, out_diagnostic->module,
                             emission->op->location, &range)) {
@@ -86,8 +92,11 @@ void loom_source_resolve_diagnostic(
     const loom_module_t* related_module =
         related->module ? related->module : module;
     loom_source_range_t range;
-    if (!related->op || !loom_source_resolve(resolver, related_module,
-                                             related->op->location, &range)) {
+    if (related->origin) {
+      range = *related->origin;
+    } else if (!related->op ||
+               !loom_source_resolve(resolver, related_module,
+                                    related->op->location, &range)) {
       continue;
     }
     if (out_diagnostic->related_location_count ==
@@ -230,10 +239,12 @@ iree_host_size_t loom_source_range_byte_offset(const loom_source_range_t* range,
   return offset;
 }
 
-iree_status_t loom_source_table_project(
-    void* user_data, const loom_module_t* source_module,
-    const loom_module_t* target_module,
-    const loom_source_id_t* target_sources) {
+iree_status_t loom_source_table_project(void* user_data,
+                                        const loom_module_t* source_module,
+                                        const loom_module_t* target_module,
+                                        const loom_source_id_t* target_sources,
+                                        bool* out_accepted) {
+  *out_accepted = true;
   loom_source_table_projection_t* projection = user_data;
   const loom_source_table_resolver_t* table = &projection->table;
   iree_host_size_t count = table->count ? target_module->sources.count : 0;
@@ -288,7 +299,7 @@ static iree_status_t loom_source_storage_allocate_entry(
       !iree_host_size_checked_add(filename_capacity, source.size,
                                   &allocation_size) ||
       !iree_host_size_checked_add(allocation_size, 1, &allocation_size)) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                             "source snapshot allocation size overflow");
   }
   char* storage_ptr = NULL;
@@ -315,10 +326,6 @@ iree_status_t loom_source_storage_insert(loom_source_storage_t* storage,
                                          loom_source_id_t source_id,
                                          iree_string_view_t filename,
                                          iree_string_view_t source) {
-  if (source_id == LOOM_SOURCE_ID_INVALID) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "cannot capture an invalid source ID");
-  }
   iree_host_size_t required_count = (iree_host_size_t)source_id + 1;
   if (required_count > storage->capacity) {
     const iree_host_size_t old_capacity = storage->capacity;
@@ -334,40 +341,11 @@ iree_status_t loom_source_storage_insert(loom_source_storage_t* storage,
   loom_source_entry_t* entry =
       (loom_source_entry_t*)&storage->table.entries[source_id];
   if (entry->source_id != LOOM_SOURCE_ID_INVALID) {
-    if (!iree_string_view_equal(entry->filename, filename) ||
-        !iree_string_view_equal(entry->source, source)) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "conflicting source snapshots for '%.*s'",
-                              (int)filename.size, filename.data);
-    }
     return iree_ok_status();
   }
   IREE_RETURN_IF_ERROR(loom_source_storage_allocate_entry(
       storage, source_id, filename, source, entry));
   storage->table.count = iree_max(storage->table.count, required_count);
-  return iree_ok_status();
-}
-
-iree_status_t loom_source_storage_project(
-    void* user_data, const loom_module_t* source_module,
-    const loom_module_t* target_module,
-    const loom_source_id_t* target_sources) {
-  loom_source_storage_projection_t* projection = user_data;
-  loom_source_storage_t* storage = projection->target;
-  const loom_source_table_resolver_t* source_table = projection->source;
-  storage->table.module = target_module;
-  for (iree_host_size_t i = 0; i < source_table->count; ++i) {
-    const loom_source_entry_t* entry = &source_table->entries[i];
-    if (entry->source_id == LOOM_SOURCE_ID_INVALID) {
-      continue;
-    }
-    loom_source_id_t target_id = target_sources[entry->source_id];
-    if (target_id == LOOM_SOURCE_ID_INVALID) {
-      continue;
-    }
-    IREE_RETURN_IF_ERROR(loom_source_storage_insert(
-        storage, target_id, entry->filename, entry->source));
-  }
   return iree_ok_status();
 }
 
@@ -401,6 +379,12 @@ bool loom_source_table_resolve(void* user_data, const loom_module_t* module,
   const loom_source_entry_t* source_entry =
       &table->entries[entry->file.source_id];
 
+  return loom_source_resolve_snapshot(source_entry, entry, out_range);
+}
+
+bool loom_source_resolve_snapshot(const loom_source_entry_t* source_entry,
+                                  const loom_location_entry_t* entry,
+                                  loom_source_range_t* out_range) {
   // Only an ordered range actually present in the snapshot has exact spelling.
   // Explicit debug locations can name unavailable or out-of-snapshot positions.
   iree_host_size_t start_offset = 0, end_offset = 0;

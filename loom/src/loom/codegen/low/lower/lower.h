@@ -1785,6 +1785,13 @@ iree_status_t loom_low_lower_emit_source_signature_unsupported(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     iree_string_view_t reason);
 
+// Records a structured lowering diagnostic and forwards its complete source
+// context. Errors reject planning even when no diagnostic callback is
+// installed.
+iree_status_t loom_low_lower_emit_diagnostic(
+    loom_low_lower_context_t* context,
+    const loom_diagnostic_emission_t* emission);
+
 // Emits a generated structured lowering diagnostic.
 iree_status_t loom_low_lower_emit_error_ref(
     loom_low_lower_context_t* context, const loom_op_t* source_op,

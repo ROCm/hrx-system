@@ -75,7 +75,6 @@ loomc_status_t loomc_module_apply_config(
         .source_resolver = loomc_module_source_resolver(module),
         .applied_value_sink = loomc_module_config_applied_value_sink(module),
         .result = result,
-        .block_pool = loomc_workspace_block_pool(workspace),
     };
     if (loomc_status_is_ok(status) && loomc_result_succeeded(result)) {
       status = loomc_config_apply_text_to_module(&apply_options);

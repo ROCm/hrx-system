@@ -612,9 +612,7 @@ static bool loom_x86_abi_type_has_default_boundary(loom_type_t type) {
 
 static iree_status_t loom_x86_emit_abi_diagnostic(
     void* user_data, const loom_diagnostic_emission_t* emission) {
-  return loom_low_lower_emit_error_ref(user_data, emission->op,
-                                       loom_error_def_ref(emission->error),
-                                       emission->params, emission->param_count);
+  return loom_low_lower_emit_diagnostic(user_data, emission);
 }
 
 static iree_status_t loom_x86_map_native_abi_layout(

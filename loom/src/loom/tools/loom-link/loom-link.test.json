@@ -2,6 +2,149 @@
   "version": 1,
   "cases": [
     {
+      "name": "rejected input does not publish a symbol list",
+      "run": {
+        "tool": "loom-link",
+        "args": [
+          "{srcdir}/testdata/dependency_direct.loom",
+          "{srcdir}/../../tooling/input/testdata/duplicate_symbols.loom-test",
+          "{srcdir}/testdata/dependency_transitive.loom",
+          "--list-symbols",
+          "--output={tmp}/symbols.txt"
+        ]
+      },
+      "exit": 1,
+      "stdout": {"empty": true},
+      "stderr": {
+        "non_empty": true,
+        "not_contains": ["loom-link.c", "AddressSanitizer", "runtime error:"]
+      },
+      "files": [{"path": "{tmp}/symbols.txt", "exists": false}]
+    },
+    {
+      "name": "rejected bytecode index does not publish a symbol list",
+      "run": {
+        "tool": "loom-link",
+        "args": [
+          "{srcdir}/testdata/dependency_direct.loom",
+          "--from=bc",
+          "--list-symbols",
+          "--output={tmp}/symbols.txt"
+        ]
+      },
+      "exit": 1,
+      "stdout": {"empty": true},
+      "stderr": {
+        "non_empty": true,
+        "not_contains": ["loom-link.c", "AddressSanitizer", "runtime error:"]
+      },
+      "files": [{"path": "{tmp}/symbols.txt", "exists": false}]
+    },
+    {
+      "name": "rejected link does not publish a plan",
+      "run": {
+        "tool": "loom-link",
+        "args": [
+          "{srcdir}/testdata/dependency_direct.loom",
+          "--mode=link",
+          "--root=missing",
+          "--print-plan",
+          "--output={tmp}/plan.txt"
+        ]
+      },
+      "exit": 1,
+      "stdout": {"empty": true},
+      "stderr": {
+        "non_empty": true,
+        "not_contains": ["loom-link.c", "AddressSanitizer", "runtime error:"]
+      },
+      "files": [{"path": "{tmp}/plan.txt", "exists": false}]
+    },
+    {
+      "name": "rejected configuration does not publish linked output",
+      "run": {
+        "tool": "loom-link",
+        "args": [
+          "{srcdir}/testdata/unresolved_configuration.loom",
+          "--mode=merge",
+          "--config=limit=128",
+          "--output={tmp}/linked.loom"
+        ]
+      },
+      "exit": 1,
+      "stdout": {"empty": true},
+      "stderr": {
+        "non_empty": true,
+        "not_contains": ["loom-link.c", "AddressSanitizer", "runtime error:"]
+      },
+      "files": [{"path": "{tmp}/linked.loom", "exists": false}]
+    },
+    {
+      "name": "unresolved configuration does not publish bytecode",
+      "run": {
+        "tool": "loom-link",
+        "args": [
+          "{srcdir}/testdata/unresolved_configuration.loom",
+          "--mode=merge",
+          "--require-resolved-config",
+          "--to=bc",
+          "--output={tmp}/linked.loombc"
+        ]
+      },
+      "exit": 1,
+      "stdout": {"empty": true},
+      "stderr": {
+        "non_empty": true,
+        "not_contains": ["loom-link.c", "AddressSanitizer", "runtime error:"]
+      },
+      "files": [{"path": "{tmp}/linked.loombc", "exists": false}]
+    },
+    {
+      "name": "failed verification does not publish a configuration schema",
+      "run": {
+        "tool": "loom-link",
+        "args": [
+          "{srcdir}/testdata/rejected_configuration.loom-test",
+          "--mode=merge",
+          "--print-config-schema",
+          "--output={tmp}/schema.json"
+        ]
+      },
+      "exit": 1,
+      "stdout": {"empty": true},
+      "stderr": {
+        "non_empty": true,
+        "not_contains": ["loom-link.c", "AddressSanitizer", "runtime error:"]
+      },
+      "files": [{"path": "{tmp}/schema.json", "exists": false}]
+    },
+    {
+      "name": "rejected strict dependencies publish only the requested report",
+      "run": {
+        "tool": "loom-link",
+        "args": [
+          "{srcdir}/testdata/dependency_component.loom",
+          "--library={srcdir}/testdata/dependency_direct.loom",
+          "--transitive-library={srcdir}/testdata/dependency_transitive.loom",
+          "--mode=merge",
+          "--strict-deps",
+          "--dependency-report={tmp}/dependencies.json",
+          "--to=bc",
+          "--output={tmp}/linked.loombc"
+        ]
+      },
+      "exit": 1,
+      "stdout": {"empty": true},
+      "stderr": {
+        "non_empty": true,
+        "not_contains": ["loom-link.c", "AddressSanitizer", "runtime error:"]
+      },
+      "files": [
+        {"path": "{tmp}/dependencies.json", "non_empty": true},
+        {"path": "{tmp}/linked.loombc", "exists": false}
+      ]
+    },
+    {
       "name": "rejects source-language input",
       "run": {
         "tool": "loom-link",

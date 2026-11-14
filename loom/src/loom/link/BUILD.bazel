@@ -163,6 +163,9 @@ loom_cc_library(
         ":symbol_policy",
         "//loom/src/loom/analysis:symbol_references",
         "//loom/src/loom/analysis:symbol_value_constraints",
+        "//loom/src/loom/error:emitter",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/error:parameter",
         "//loom/src/loom/ir",
         "//loom/src/loom/ir:symbol_map",
         "//loom/src/loom/ops:op_defs",
@@ -217,6 +220,10 @@ loom_cc_library(
     deps = [
         ":symbol_policy",
         "//loom/src/loom/analysis:symbol_references",
+        "//loom/src/loom/error:emitter",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/error:parameter",
+        "//loom/src/loom/error:source",
         "//loom/src/loom/format/bytecode:index",
         "//loom/src/loom/format/bytecode:index_reader",
         "//loom/src/loom/format/text:parser",
@@ -255,11 +262,28 @@ loom_cc_test(
 )
 
 loom_cc_library(
+    name = "index_diagnostics",
+    srcs = ["index_diagnostics.c"],
+    hdrs = ["index_diagnostics.h"],
+    deps = [
+        ":module_index",
+        "//loom/src/loom/error:emitter",
+        "//loom/src/loom/error:source",
+        "//loom/src/loom/format/bytecode:indexed_source",
+        "//loom/src/loom/ir",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
     name = "planner",
     srcs = ["planner.c"],
     hdrs = ["planner.h"],
     deps = [
+        ":index_diagnostics",
         ":module_index",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/error:parameter",
         "//runtime/src/iree/base",
     ],
 )
@@ -279,9 +303,29 @@ loom_cc_library(
     name = "materialization_environment",
     hdrs = ["materialization_environment.h"],
     deps = [
+        ":index_diagnostics",
         ":module_index",
         "//loom/src/loom/error:diagnostic",
+        "//loom/src/loom/error:source",
         "//loom/src/loom/format:low_repr",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "source_snapshots",
+    srcs = ["source_snapshots.c"],
+    hdrs = ["source_snapshots.h"],
+    deps = [
+        ":materialization_environment",
+        ":module_index",
+        ":plan_projection",
+        "//loom/src/loom/error:emitter",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/error:parameter",
+        "//loom/src/loom/error:source",
+        "//loom/src/loom/ir",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
     ],
@@ -297,7 +341,9 @@ loom_cc_library(
         ":materialization_environment",
         ":plan_projection",
         ":planner",
+        ":source_snapshots",
         "//loom/src/loom/error:diagnostic",
+        "//loom/src/loom/error:source",
         "//loom/src/loom/format:low_repr",
         "//loom/src/loom/format/bytecode:reader",
         "//loom/src/loom/format/bytecode:selected_reader",
@@ -313,9 +359,12 @@ loom_cc_library(
     srcs = ["kernel_config_materializer.c"],
     hdrs = ["kernel_config_materializer.h"],
     deps = [
+        ":index_diagnostics",
         ":materialization_environment",
         ":plan_projection",
         ":planner",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/error:parameter",
         "//loom/src/loom/format/bytecode:function_projection_reader",
         "//loom/src/loom/format/bytecode:selected_reader",
         "//loom/src/loom/ir",
@@ -342,6 +391,7 @@ loom_cc_test(
         ":module_index",
         ":plan_materializer",
         ":planner",
+        "//loom/src/loom/error:error_defs",
         "//loom/src/loom/format/bytecode:reader",
         "//loom/src/loom/format/bytecode:writer",
         "//loom/src/loom/format/text:parser",
@@ -394,11 +444,15 @@ loom_cc_library(
     ],
     deps = [
         ":bytecode_template_contract",
+        ":index_diagnostics",
         ":module_index",
         ":plan_materializer",
         ":planner",
         "//loom/src/loom/analysis:symbol_facts",
         "//loom/src/loom/analysis:template_provider_catalog",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/error:parameter",
+        "//loom/src/loom/error:source",
         "//loom/src/loom/format/bytecode:function_projection_reader",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:func_symbol_facts",
@@ -426,6 +480,30 @@ loom_cc_library(
         "//loom/src/loom/transforms/symbol:template_selection",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "template_candidate_loader_test",
+    srcs = ["template_candidate_loader_test.cc"],
+    deps = [
+        ":index_materializer",
+        ":module_index",
+        ":plan_materializer",
+        ":planner",
+        ":template_candidate_loader",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/format/bytecode:writer",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/link/testdata/link_index",
+        "//loom/src/loom/ops:op_registry",
+        "//loom/src/loom/testing:module_ptr",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/io:stream",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 

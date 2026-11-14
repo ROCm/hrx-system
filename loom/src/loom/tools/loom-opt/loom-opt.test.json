@@ -317,7 +317,7 @@
       "stdout": {"empty": true},
       "stderr": {
         "contains": [
-          {"regex": "^\\{\"severity\":\"error\".*\"diagnostic_code\":\"CONFIG/INVALID\".*\\}$"}
+          {"regex": "^\\{\"severity\":\"error\".*\"error_id\":\"ERR_SYMBOL_008\".*\"source_location\":\\{[^}]*\"filename\":\"<stdin>\"[^}]*\"start_line\":1,\"start_column\":1.*\\}$"}
         ],
         "not_contains": ["stack:"]
       }
@@ -917,7 +917,7 @@
         {
           "path": "{tmp}/missing.loom",
           "contains": [
-            "\"NOT_FOUND\"",
+            "\"INVALID_ARGUMENT\"",
             "// RUN: loom-opt --verify=true --pipeline='@missing' %s"
           ]
         }

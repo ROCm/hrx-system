@@ -14,7 +14,7 @@
 #define LOOM_LINK_PLANNER_H_
 
 #include "iree/base/api.h"
-#include "loom/link/module_index.h"
+#include "loom/link/index_diagnostics.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -138,6 +138,8 @@ typedef struct loom_link_plan_options_t {
   // ordinary dependency candidates and are not selected merely because their
   // library is present.
   bool include_input_tests;
+  // Optional diagnostics and indexed exact-source lookup.
+  loom_link_diagnostic_environment_t diagnostics;
 } loom_link_plan_options_t;
 
 // One live symbol selection in a plan.
@@ -179,7 +181,8 @@ typedef struct loom_link_plan_facet_t {
 // Builds a link plan from |index|.
 //
 // The caller owns the returned plan and must release it with
-// loom_link_plan_free().
+// loom_link_plan_free(). Rejected selection emits diagnostics and returns OK
+// with a NULL plan; rejection is independent of the diagnostic callback.
 iree_status_t loom_link_plan_build(const loom_link_module_index_t* index,
                                    const loom_link_plan_options_t* options,
                                    iree_allocator_t allocator,

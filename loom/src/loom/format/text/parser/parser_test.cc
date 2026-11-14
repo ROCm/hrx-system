@@ -212,6 +212,40 @@ class ParserTest : public ::testing::Test {
   DiagnosticCapture capture_;
 };
 
+TEST_F(ParserTest, AttributeFragmentRetainsInputAndRejectsTrailingTokens) {
+  loom_module_t* module = ParseOk("");
+  const loom_attr_descriptor_t descriptor = {.attr_kind = LOOM_ATTR_ENCODING};
+  for (bool capture_errors : {false, true}) {
+    const loom_text_parse_options_t options = {
+        .diagnostic_sink =
+            capture_errors ? capture_.sink() : loom_diagnostic_sink_t{},
+    };
+    for (const char* text : {"#dense", "#dense trailing", "#unknown", ""}) {
+      SCOPED_TRACE(text);
+      capture_.Reset();
+      loom_attribute_t attr = {};
+      bool accepted = false;
+      IREE_EXPECT_OK(loom_text_parse_attribute(
+          iree_make_cstring_view(text), IREE_SV("layout.config"), module,
+          &descriptor, &options, &attr, &accepted));
+      const bool valid = std::strcmp(text, "#dense") == 0;
+      EXPECT_EQ(accepted, valid);
+      EXPECT_EQ(attr.kind, valid ? LOOM_ATTR_ENCODING : LOOM_ATTR_ABSENT);
+      if (capture_errors && !valid) {
+        ASSERT_FALSE(capture_.diagnostics.empty());
+        const auto& diagnostic = capture_.diagnostics.front();
+        EXPECT_EQ(diagnostic.origin.filename.size, strlen("layout.config"));
+        EXPECT_EQ(diagnostic.source_text, text);
+        EXPECT_EQ(diagnostic.origin_line, 1u);
+      } else {
+        EXPECT_TRUE(capture_.diagnostics.empty());
+      }
+      EXPECT_EQ(loom_module_block(module)->first_op, nullptr);
+    }
+  }
+  loom_module_free(module);
+}
+
 static loom_op_t* GetFirstFunctionOp(const loom_module_t* module) {
   if (!module || module->symbols.count == 0) {
     return nullptr;

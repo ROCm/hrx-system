@@ -1,0 +1,4 @@
+// RUN: verify
+
+// ERROR@+1: SYMBOL/008 {symbol_name="scale", value="0.5", predicate="eq"}
+config.def @scale = 0.5 : %value: f32 where [eq(%value, 1)]

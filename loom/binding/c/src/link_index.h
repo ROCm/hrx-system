@@ -48,6 +48,14 @@ LOOMC_API_PRIVATE loomc_status_t loomc_link_index_add_source_to_module_index(
     const loomc_link_index_source_options_t* options, loomc_result_t* result,
     iree_host_size_t* out_provider_ordinal);
 
+// Indexes a borrowed module using its exact source resolver. Diagnosed
+// rejection marks |result| failed and appends no provider; infrastructure
+// failures propagate.
+LOOMC_API_PRIVATE loomc_status_t loomc_link_index_add_module_to_module_index(
+    loom_link_module_index_t* module_index, const loomc_module_t* module,
+    const loomc_link_index_source_options_t* options, loomc_result_t* result,
+    iree_host_size_t* out_provider_ordinal);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif
