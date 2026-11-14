@@ -26,6 +26,7 @@ from urllib.parse import urlsplit
 
 SCHEMA_VERSION = 1
 MANIFEST_ENVIRONMENT_VARIABLE = "IREE_WINDOWS_CACHE_HANDOFF_MANIFEST"
+PYTHON_ENVIRONMENT_VARIABLE = "IREE_WINDOWS_CACHE_HANDOFF_PYTHON"
 RUNFILES_PATH_BEGIN = "__IREE_BAZEL_RUNFILE_PATH_BEGIN__"
 RUNFILES_PATH_END = "__IREE_BAZEL_RUNFILE_PATH_END__"
 HANDOFF_PATH_BEGIN = "__IREE_CACHE_HANDOFF_RUNFILE_BEGIN__"
@@ -882,6 +883,7 @@ def run_handoff_test(
         ):
             raise HandoffError("handoff test environment is malformed")
         child_environment = dict(os.environ)
+        child_environment.pop(PYTHON_ENVIRONMENT_VARIABLE, None)
         child_environment.update(
             {
                 name: _resolve_handoff_value(value, runfiles_root)

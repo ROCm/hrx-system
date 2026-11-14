@@ -4,6 +4,7 @@
 """Native Bazel test leaf for a CAS-backed Windows test manifest."""
 
 _MANIFEST_ENVIRONMENT_VARIABLE = "IREE_WINDOWS_CACHE_HANDOFF_MANIFEST"
+_PYTHON_ENVIRONMENT_VARIABLE = "IREE_WINDOWS_CACHE_HANDOFF_PYTHON"
 
 def _runfile_path(ctx, file):
     if file.short_path.startswith("../"):
@@ -18,7 +19,7 @@ def _windows_cache_handoff_test_impl(ctx):
         output = executable,
         content = (
             "@echo off\r\n" +
-            'python.exe "%%TEST_SRCDIR%%\\%s" run -- %%*\r\n' % runner_path +
+            '"%%%s%%" "%%TEST_SRCDIR%%\\%s" run -- %%*\r\n' % (_PYTHON_ENVIRONMENT_VARIABLE, runner_path) +
             "exit /b %ERRORLEVEL%\r\n"
         ),
         is_executable = True,
@@ -35,7 +36,7 @@ def _windows_cache_handoff_test_impl(ctx):
             environment = {
                 _MANIFEST_ENVIRONMENT_VARIABLE: ctx.file.manifest.short_path,
             },
-            inherited_environment = ctx.attr.env_inherit,
+            inherited_environment = ctx.attr.env_inherit + [_PYTHON_ENVIRONMENT_VARIABLE],
         ),
     ]
 

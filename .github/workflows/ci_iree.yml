@@ -1207,6 +1207,8 @@ jobs:
           $evidenceDir = $env:IREE_CACHE_HANDOFF_EVIDENCE
           $executionLog = Join-Path $evidenceDir 'consumer-execution.json'
           $profile = Join-Path $evidenceDir 'consumer.profile.gz'
+          $env:IREE_WINDOWS_CACHE_HANDOFF_PYTHON = `
+            (Get-Command python.exe -ErrorAction Stop).Source
           Push-Location $bundle
           try {
             bazel "--output_base=$env:IREE_CACHE_HANDOFF_OUTPUT_BASE" test `

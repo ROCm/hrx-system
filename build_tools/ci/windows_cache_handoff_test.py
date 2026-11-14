@@ -325,9 +325,13 @@ class WindowsCacheHandoffTest(unittest.TestCase):
         )
         manifest_path = output_dir / summary["tests"][0]["manifest"]
         completed = mock.Mock(returncode=0)
-        with mock.patch.object(
-            handoff.subprocess, "run", return_value=completed
-        ) as run:
+        with (
+            mock.patch.dict(
+                os.environ,
+                {handoff.PYTHON_ENVIRONMENT_VARIABLE: "C:/host/python.exe"},
+            ),
+            mock.patch.object(handoff.subprocess, "run", return_value=completed) as run,
+        ):
             self.assertEqual(
                 handoff.run_handoff_test(
                     manifest_path, ["--gtest_filter=Fixture.Selected"]
@@ -335,6 +339,9 @@ class WindowsCacheHandoffTest(unittest.TestCase):
                 0,
             )
         self.assertEqual(run.call_args.args[0][-1], "--gtest_filter=Fixture.Selected")
+        self.assertNotIn(
+            handoff.PYTHON_ENVIRONMENT_VARIABLE, run.call_args.kwargs["env"]
+        )
 
     def test_run_rejects_corrupt_cas_bytes(self):
         execution_root, target_metadata, provider_metadata = self._write_fixture()
