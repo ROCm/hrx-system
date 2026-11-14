@@ -47,6 +47,31 @@ iree_runtime_cc_library(
 )
 
 iree_runtime_cc_library(
+    name = "thread_trace",
+    srcs = ["thread_trace.c"],
+    hdrs = ["thread_trace.h"],
+    visibility = ["//runtime/src/iree/hal/driver/amd/gpu:__subpackages__"],
+    deps = [
+        ":commands",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/hal/driver/amd/gpu/target:identity",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "thread_trace_test",
+    srcs = ["thread_trace_test.cc"],
+    deps = [
+        ":thread_trace",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal/driver/amd/gpu/target:identity",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "launch",
     srcs = ["launch.c"],
     hdrs = ["launch.h"],
@@ -548,6 +573,7 @@ iree_runtime_cc_library(
         ":ring",
         ":scratch",
         ":submission",
+        ":thread_trace",
         ":transfer",
         "//libamdf:headers",
         "//runtime/src/iree/async",
