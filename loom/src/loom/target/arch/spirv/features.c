@@ -39,6 +39,42 @@ loom_spirv_feature_bits_t loom_spirv_known_feature_bits(void) {
   return LOOM_SPIRV_FEATURE_KNOWN_BITS;
 }
 
+loom_spirv_feature_bits_t loom_spirv_feature_bits_with_float_modes(
+    loom_spirv_feature_bits_t required, loom_spirv_feature_bits_t available) {
+  static const struct {
+    // Independently requested F16/F64 modes.
+    loom_spirv_feature_bits_t narrow_wide;
+    // The F32 mode, which can be independent of F16/F64.
+    loom_spirv_feature_bits_t single;
+    // A target-supported paired F16/F64 mode.
+    loom_spirv_feature_bits_t pair;
+    // A target that requires the same mode on all three widths.
+    loom_spirv_feature_bits_t all;
+  } groups[] = {
+      {LOOM_SPIRV_FEATURE_FLOAT16_DENORM_PRESERVE |
+           LOOM_SPIRV_FEATURE_FLOAT64_DENORM_PRESERVE,
+       LOOM_SPIRV_FEATURE_FLOAT32_DENORM_PRESERVE,
+       LOOM_SPIRV_FEATURE_FLOAT16_64_DENORM_PRESERVE,
+       LOOM_SPIRV_FEATURE_FLOAT_ALL_DENORM_PRESERVE},
+      {LOOM_SPIRV_FEATURE_FLOAT16_ROUNDING_RTE |
+           LOOM_SPIRV_FEATURE_FLOAT64_ROUNDING_RTE,
+       LOOM_SPIRV_FEATURE_FLOAT32_ROUNDING_RTE,
+       LOOM_SPIRV_FEATURE_FLOAT16_64_ROUNDING_RTE,
+       LOOM_SPIRV_FEATURE_FLOAT_ALL_ROUNDING_RTE},
+  };
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(groups); ++i) {
+    if ((required & groups[i].narrow_wide) && (available & groups[i].pair)) {
+      required |= groups[i].pair;
+    }
+    if ((required &
+         (groups[i].narrow_wide | groups[i].single | groups[i].pair)) &&
+        (available & groups[i].all)) {
+      required |= groups[i].pair | groups[i].single;
+    }
+  }
+  return required;
+}
+
 loom_spirv_feature_bits_t loom_spirv_feature_bits_with_dependencies(
     loom_spirv_feature_bits_t atom_bits) {
   loom_spirv_feature_bits_t closed_atom_bits = atom_bits;

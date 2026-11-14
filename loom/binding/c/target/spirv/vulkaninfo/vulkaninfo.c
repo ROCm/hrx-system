@@ -495,8 +495,10 @@ static loomc_status_t loomc_spirv_vulkaninfo_add_subgroup_features(
 
 static loomc_status_t loomc_spirv_vulkaninfo_read_float_control_independence(
     loomc_spirv_vulkaninfo_import_t* import, iree_string_view_t object,
-    iree_string_view_t key, loomc_target_fact_state_t* out_state) {
-  *out_state = LOOMC_TARGET_FACT_STATE_UNKNOWN;
+    iree_string_view_t key, loomc_target_fact_state_t* out_separable,
+    loomc_target_fact_state_t* out_all_independent) {
+  *out_separable = LOOMC_TARGET_FACT_STATE_UNKNOWN;
+  *out_all_independent = LOOMC_TARGET_FACT_STATE_UNKNOWN;
   iree_string_view_t independence = iree_string_view_empty();
   iree_status_t status =
       loomc_spirv_vulkaninfo_try_lookup(object, key, &independence);
@@ -535,9 +537,28 @@ static loomc_status_t loomc_spirv_vulkaninfo_read_float_control_independence(
                          (int)independence.size, independence.data,
                          (int)key.size, key.data));
   }
-  *out_state = independent ? LOOMC_TARGET_FACT_STATE_TRUE
-                           : LOOMC_TARGET_FACT_STATE_FALSE;
+  *out_separable = independent ? LOOMC_TARGET_FACT_STATE_TRUE
+                               : LOOMC_TARGET_FACT_STATE_FALSE;
+  *out_all_independent =
+      iree_string_view_equal(
+          independence, IREE_SV("VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_ALL")) ||
+              iree_string_view_equal(
+                  independence,
+                  IREE_SV("VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_ALL_KHR"))
+          ? LOOMC_TARGET_FACT_STATE_TRUE
+          : LOOMC_TARGET_FACT_STATE_FALSE;
   return loomc_ok_status();
+}
+
+// Missing independence cannot authorize a per-width mode even when its raw
+// property is true; a false raw property remains a definite rejection.
+static loomc_target_fact_state_t loomc_spirv_vulkaninfo_float_width_state(
+    loomc_target_fact_state_t width, loomc_target_fact_state_t independent,
+    loomc_target_fact_state_t paired) {
+  if (independent == LOOMC_TARGET_FACT_STATE_UNKNOWN) {
+    return loomc_spirv_vulkaninfo_and_fact_states(width, independent);
+  }
+  return independent == LOOMC_TARGET_FACT_STATE_TRUE ? width : paired;
 }
 
 static loomc_status_t loomc_spirv_vulkaninfo_add_float_control_features(
@@ -555,6 +576,10 @@ static loomc_status_t loomc_spirv_vulkaninfo_add_float_control_features(
   loomc_target_fact_state_t denorm_independence =
       LOOMC_TARGET_FACT_STATE_UNKNOWN;
   loomc_target_fact_state_t rounding_independence =
+      LOOMC_TARGET_FACT_STATE_UNKNOWN;
+  loomc_target_fact_state_t denorm_all_independent =
+      LOOMC_TARGET_FACT_STATE_UNKNOWN;
+  loomc_target_fact_state_t rounding_all_independent =
       LOOMC_TARGET_FACT_STATE_UNKNOWN;
   LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkaninfo_read_bool_feature(
       import, object, IREE_SV("shaderDenormPreserveFloat16"), &denorm16));
@@ -579,30 +604,83 @@ static loomc_status_t loomc_spirv_vulkaninfo_add_float_control_features(
       &preserve64));
   LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkaninfo_read_float_control_independence(
       import, object, IREE_SV("denormBehaviorIndependence"),
-      &denorm_independence));
+      &denorm_independence, &denorm_all_independent));
   LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkaninfo_read_float_control_independence(
       import, object, IREE_SV("roundingModeIndependence"),
-      &rounding_independence));
+      &rounding_independence, &rounding_all_independent));
 
+  const loomc_target_fact_state_t denorm_all =
+      denorm_independence == LOOMC_TARGET_FACT_STATE_FALSE
+          ? loomc_spirv_vulkaninfo_and_fact_states(
+                denorm32,
+                loomc_spirv_vulkaninfo_and_fact_states(denorm16, denorm64))
+          : (denorm_independence == LOOMC_TARGET_FACT_STATE_TRUE
+                 ? LOOMC_TARGET_FACT_STATE_FALSE
+                 : LOOMC_TARGET_FACT_STATE_UNKNOWN);
+  const loomc_target_fact_state_t denorm_pair =
+      denorm_independence == LOOMC_TARGET_FACT_STATE_FALSE
+          ? denorm_all
+          : loomc_spirv_vulkaninfo_and_fact_states(
+                denorm_independence,
+                loomc_spirv_vulkaninfo_and_fact_states(denorm16, denorm64));
+  LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkaninfo_add_feature_fact(
+      import, LOOMC_SPIRV_FEATURE_FLOAT_ALL_DENORM_PRESERVE, denorm_all,
+      provenance));
+  LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkaninfo_add_feature_fact(
+      import, LOOMC_SPIRV_FEATURE_FLOAT16_64_DENORM_PRESERVE, denorm_pair,
+      provenance));
   LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkaninfo_add_feature_fact(
       import, LOOMC_SPIRV_FEATURE_FLOAT32_DENORM_PRESERVE,
-      loomc_spirv_vulkaninfo_and_fact_states(denorm32, denorm_independence),
+      denorm_independence == LOOMC_TARGET_FACT_STATE_FALSE
+          ? denorm_all
+          : loomc_spirv_vulkaninfo_and_fact_states(denorm32,
+                                                   denorm_independence),
       provenance));
   LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkaninfo_add_feature_fact(
-      import, LOOMC_SPIRV_FEATURE_FLOAT16_64_DENORM_PRESERVE,
-      loomc_spirv_vulkaninfo_and_fact_states(
-          loomc_spirv_vulkaninfo_and_fact_states(denorm16, denorm64),
-          denorm_independence),
+      import, LOOMC_SPIRV_FEATURE_FLOAT16_DENORM_PRESERVE,
+      loomc_spirv_vulkaninfo_float_width_state(denorm16, denorm_all_independent,
+                                               denorm_pair),
       provenance));
   LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkaninfo_add_feature_fact(
-      import, LOOMC_SPIRV_FEATURE_FLOAT16_64_ROUNDING_RTE,
-      loomc_spirv_vulkaninfo_and_fact_states(
-          loomc_spirv_vulkaninfo_and_fact_states(rte16, rte64),
-          rounding_independence),
+      import, LOOMC_SPIRV_FEATURE_FLOAT64_DENORM_PRESERVE,
+      loomc_spirv_vulkaninfo_float_width_state(denorm64, denorm_all_independent,
+                                               denorm_pair),
+      provenance));
+  const loomc_target_fact_state_t rounding_all =
+      rounding_independence == LOOMC_TARGET_FACT_STATE_FALSE
+          ? loomc_spirv_vulkaninfo_and_fact_states(
+                rte32, loomc_spirv_vulkaninfo_and_fact_states(rte16, rte64))
+          : (rounding_independence == LOOMC_TARGET_FACT_STATE_TRUE
+                 ? LOOMC_TARGET_FACT_STATE_FALSE
+                 : LOOMC_TARGET_FACT_STATE_UNKNOWN);
+  const loomc_target_fact_state_t rounding_pair =
+      rounding_independence == LOOMC_TARGET_FACT_STATE_FALSE
+          ? rounding_all
+          : loomc_spirv_vulkaninfo_and_fact_states(
+                rounding_independence,
+                loomc_spirv_vulkaninfo_and_fact_states(rte16, rte64));
+  LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkaninfo_add_feature_fact(
+      import, LOOMC_SPIRV_FEATURE_FLOAT_ALL_ROUNDING_RTE, rounding_all,
+      provenance));
+  LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkaninfo_add_feature_fact(
+      import, LOOMC_SPIRV_FEATURE_FLOAT16_64_ROUNDING_RTE, rounding_pair,
       provenance));
   LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkaninfo_add_feature_fact(
       import, LOOMC_SPIRV_FEATURE_FLOAT32_ROUNDING_RTE,
-      loomc_spirv_vulkaninfo_and_fact_states(rte32, rounding_independence),
+      rounding_independence == LOOMC_TARGET_FACT_STATE_FALSE
+          ? rounding_all
+          : loomc_spirv_vulkaninfo_and_fact_states(rte32,
+                                                   rounding_independence),
+      provenance));
+  LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkaninfo_add_feature_fact(
+      import, LOOMC_SPIRV_FEATURE_FLOAT16_ROUNDING_RTE,
+      loomc_spirv_vulkaninfo_float_width_state(rte16, rounding_all_independent,
+                                               rounding_pair),
+      provenance));
+  LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkaninfo_add_feature_fact(
+      import, LOOMC_SPIRV_FEATURE_FLOAT64_ROUNDING_RTE,
+      loomc_spirv_vulkaninfo_float_width_state(rte64, rounding_all_independent,
+                                               rounding_pair),
       provenance));
   LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkaninfo_add_feature_fact(
       import, LOOMC_SPIRV_FEATURE_FLOAT16_SIGNED_ZERO_INF_NAN_PRESERVE,

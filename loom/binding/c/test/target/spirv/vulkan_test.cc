@@ -679,6 +679,60 @@ TEST(TargetSpirvVulkanTest, ImportsSelectableComputeSubgroups) {
   }
 }
 
+TEST(TargetSpirvVulkanTest, PreservesEveryLegalFloatingControlWidthGroup) {
+  auto environment = CreateSpirvTargetEnvironment();
+  // Masks use F16/F32/F64 in bits 0/1/2. Coupled groups are selectable only
+  // when every member supports the requested mode.
+  const VkShaderFloatControlsIndependence independence[] = {
+      VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_ALL,
+      VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_32_BIT_ONLY,
+      VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_NONE};
+  const uint32_t legal_widths[3][8] = {{0, 1, 2, 3, 4, 5, 6, 7},
+                                       {0, 0, 2, 2, 0, 5, 2, 7},
+                                       {0, 0, 0, 0, 0, 0, 0, 7}};
+  const loomc_spirv_feature_t denorm[] = {
+      LOOMC_SPIRV_FEATURE_FLOAT16_DENORM_PRESERVE,
+      LOOMC_SPIRV_FEATURE_FLOAT32_DENORM_PRESERVE,
+      LOOMC_SPIRV_FEATURE_FLOAT64_DENORM_PRESERVE};
+  const loomc_spirv_feature_t rounding[] = {
+      LOOMC_SPIRV_FEATURE_FLOAT16_ROUNDING_RTE,
+      LOOMC_SPIRV_FEATURE_FLOAT32_ROUNDING_RTE,
+      LOOMC_SPIRV_FEATURE_FLOAT64_ROUNDING_RTE};
+  for (uint32_t group = 0; group < 3; ++group) {
+    for (uint32_t mask = 0; mask < 8; ++mask) {
+      SCOPED_TRACE(::testing::Message() << group << ":" << mask);
+      MockVulkanDevice device;
+      device.denorm_behavior_independence = independence[group];
+      device.rounding_mode_independence = independence[group];
+      device.shader_denorm_preserve_float16 = (mask & 1) != 0;
+      device.shader_denorm_preserve_float32 = (mask & 2) != 0;
+      device.shader_denorm_preserve_float64 = (mask & 4) != 0;
+      device.shader_rounding_mode_rte_float16 = (mask & 1) == 0;
+      device.shader_rounding_mode_rte_float32 = (mask & 2) == 0;
+      device.shader_rounding_mode_rte_float64 = (mask & 4) == 0;
+      auto profile = CreateVulkanProfile(environment.get(), device);
+      for (uint32_t width = 0; width < 3; ++width) {
+        ExpectFeatureState(profile.get(), denorm[width],
+                           legal_widths[group][mask] & (1u << width)
+                               ? LOOMC_TARGET_FACT_STATE_TRUE
+                               : LOOMC_TARGET_FACT_STATE_FALSE);
+        ExpectFeatureState(profile.get(), rounding[width],
+                           legal_widths[group][mask ^ 7] & (1u << width)
+                               ? LOOMC_TARGET_FACT_STATE_TRUE
+                               : LOOMC_TARGET_FACT_STATE_FALSE);
+      }
+      ExpectFeatureState(
+          profile.get(), LOOMC_SPIRV_FEATURE_FLOAT_ALL_DENORM_PRESERVE,
+          group == 2 && mask == 7 ? LOOMC_TARGET_FACT_STATE_TRUE
+                                  : LOOMC_TARGET_FACT_STATE_FALSE);
+      ExpectFeatureState(
+          profile.get(), LOOMC_SPIRV_FEATURE_FLOAT_ALL_ROUNDING_RTE,
+          group == 2 && mask == 0 ? LOOMC_TARGET_FACT_STATE_TRUE
+                                  : LOOMC_TARGET_FACT_STATE_FALSE);
+    }
+  }
+}
+
 TEST(TargetSpirvVulkanTest, ImportsFloatControls2FromCoreOrExtension) {
   auto environment = CreateSpirvTargetEnvironment();
   for (bool core : {false, true}) {

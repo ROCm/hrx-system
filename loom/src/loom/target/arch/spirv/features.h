@@ -86,15 +86,17 @@ typedef enum loom_spirv_feature_atom_e {
   LOOM_SPIRV_FEATURE_ATOM_WORKGROUP_FLOAT64_ATOMIC_ADD = 30,
   // Core subgroup operations and subgroup memory scope.
   LOOM_SPIRV_FEATURE_ATOM_GROUP_NON_UNIFORM = 31,
-  // F32 DenormPreserve independent of other floating-point widths.
+  // F32 DenormPreserve with any required companion-width modes.
   LOOM_SPIRV_FEATURE_ATOM_FLOAT32_DENORM_PRESERVE = 32,
   // Subgroup ballot operations.
   LOOM_SPIRV_FEATURE_ATOM_GROUP_NON_UNIFORM_BALLOT = 33,
-  // F16/F64 DenormPreserve modes selectable together without changing F32.
+  // F16/F64 DenormPreserve modes selectable together, including F32 when
+  // required.
   LOOM_SPIRV_FEATURE_ATOM_FLOAT16_64_DENORM_PRESERVE = 34,
-  // F16/F64 RoundingModeRTE modes selectable together without changing F32.
+  // F16/F64 RoundingModeRTE modes selectable together, including F32 when
+  // required.
   LOOM_SPIRV_FEATURE_ATOM_FLOAT16_64_ROUNDING_RTE = 35,
-  // F32 RoundingModeRTE independent of other floating-point widths.
+  // F32 RoundingModeRTE with any required companion-width modes.
   LOOM_SPIRV_FEATURE_ATOM_FLOAT32_ROUNDING_RTE = 36,
   // F16 SignedZeroInfNanPreserve execution-mode support.
   LOOM_SPIRV_FEATURE_ATOM_FLOAT16_SIGNED_ZERO_INF_NAN_PRESERVE = 37,
@@ -132,8 +134,21 @@ typedef enum loom_spirv_feature_atom_e {
   LOOM_SPIRV_FEATURE_ATOM_FMA_FLOAT64 = 53,
   // Per-instruction floating-point semantics.
   LOOM_SPIRV_FEATURE_ATOM_FLOAT_CONTROLS2 = 54,
+  // F16 DenormPreserve with any required companion-width modes.
+  LOOM_SPIRV_FEATURE_ATOM_FLOAT16_DENORM_PRESERVE = 55,
+  // F64 DenormPreserve with any required companion-width modes.
+  LOOM_SPIRV_FEATURE_ATOM_FLOAT64_DENORM_PRESERVE = 56,
+  // F16 RoundingModeRTE with any required companion-width modes.
+  LOOM_SPIRV_FEATURE_ATOM_FLOAT16_ROUNDING_RTE = 57,
+  // F64 RoundingModeRTE with any required companion-width modes.
+  LOOM_SPIRV_FEATURE_ATOM_FLOAT64_ROUNDING_RTE = 58,
+  // DenormPreserve requires the mode on all floating-point widths.
+  LOOM_SPIRV_FEATURE_ATOM_FLOAT_ALL_DENORM_PRESERVE = 59,
+  // RoundingModeRTE requires the mode on all floating-point widths.
+  LOOM_SPIRV_FEATURE_ATOM_FLOAT_ALL_ROUNDING_RTE = 60,
+
   // Number of feature atom enum slots.
-  LOOM_SPIRV_FEATURE_ATOM_COUNT = 55,
+  LOOM_SPIRV_FEATURE_ATOM_COUNT = 61,
 } loom_spirv_feature_atom_t;
 
 // Bitset of loom_spirv_feature_atom_t values.
@@ -236,7 +251,7 @@ typedef enum loom_spirv_feature_bit_e {
 #define LOOM_SPIRV_FEATURE_GROUP_NON_UNIFORM \
   (UINT64_C(1) << LOOM_SPIRV_FEATURE_ATOM_GROUP_NON_UNIFORM)
 
-// Target enables independent F32 DenormPreserve execution mode.
+// Target supports F32 DenormPreserve with any required companion modes.
 #define LOOM_SPIRV_FEATURE_FLOAT32_DENORM_PRESERVE \
   (UINT64_C(1) << LOOM_SPIRV_FEATURE_ATOM_FLOAT32_DENORM_PRESERVE)
 
@@ -244,16 +259,16 @@ typedef enum loom_spirv_feature_bit_e {
 #define LOOM_SPIRV_FEATURE_GROUP_NON_UNIFORM_BALLOT \
   (UINT64_C(1) << LOOM_SPIRV_FEATURE_ATOM_GROUP_NON_UNIFORM_BALLOT)
 
-// Target can select F16/F64 DenormPreserve modes together without changing F32.
+// Target can select F16/F64 DenormPreserve modes together, including F32 when
+// required.
 #define LOOM_SPIRV_FEATURE_FLOAT16_64_DENORM_PRESERVE \
   (UINT64_C(1) << LOOM_SPIRV_FEATURE_ATOM_FLOAT16_64_DENORM_PRESERVE)
 
-// Target can select F16/F64 RoundingModeRTE modes together without changing
-// F32.
+// Target supports paired F16/F64 RoundingModeRTE with required companions.
 #define LOOM_SPIRV_FEATURE_FLOAT16_64_ROUNDING_RTE \
   (UINT64_C(1) << LOOM_SPIRV_FEATURE_ATOM_FLOAT16_64_ROUNDING_RTE)
 
-// Target enables independent F32 RoundingModeRTE execution mode.
+// Target supports F32 RoundingModeRTE with any required companion modes.
 #define LOOM_SPIRV_FEATURE_FLOAT32_ROUNDING_RTE \
   (UINT64_C(1) << LOOM_SPIRV_FEATURE_ATOM_FLOAT32_ROUNDING_RTE)
 
@@ -330,6 +345,30 @@ typedef enum loom_spirv_feature_bit_e {
 #define LOOM_SPIRV_FEATURE_FLOAT_CONTROLS2 \
   (UINT64_C(1) << LOOM_SPIRV_FEATURE_ATOM_FLOAT_CONTROLS2)
 
+// F16 DenormPreserve with any required companion-width modes.
+#define LOOM_SPIRV_FEATURE_FLOAT16_DENORM_PRESERVE \
+  (UINT64_C(1) << LOOM_SPIRV_FEATURE_ATOM_FLOAT16_DENORM_PRESERVE)
+
+// F64 DenormPreserve with any required companion-width modes.
+#define LOOM_SPIRV_FEATURE_FLOAT64_DENORM_PRESERVE \
+  (UINT64_C(1) << LOOM_SPIRV_FEATURE_ATOM_FLOAT64_DENORM_PRESERVE)
+
+// F16 RoundingModeRTE with any required companion-width modes.
+#define LOOM_SPIRV_FEATURE_FLOAT16_ROUNDING_RTE \
+  (UINT64_C(1) << LOOM_SPIRV_FEATURE_ATOM_FLOAT16_ROUNDING_RTE)
+
+// F64 RoundingModeRTE with any required companion-width modes.
+#define LOOM_SPIRV_FEATURE_FLOAT64_ROUNDING_RTE \
+  (UINT64_C(1) << LOOM_SPIRV_FEATURE_ATOM_FLOAT64_ROUNDING_RTE)
+
+// DenormPreserve requires the mode on all floating-point widths.
+#define LOOM_SPIRV_FEATURE_FLOAT_ALL_DENORM_PRESERVE \
+  (UINT64_C(1) << LOOM_SPIRV_FEATURE_ATOM_FLOAT_ALL_DENORM_PRESERVE)
+
+// RoundingModeRTE requires the mode on all floating-point widths.
+#define LOOM_SPIRV_FEATURE_FLOAT_ALL_ROUNDING_RTE \
+  (UINT64_C(1) << LOOM_SPIRV_FEATURE_ATOM_FLOAT_ALL_ROUNDING_RTE)
+
 // Feature bits known by the SPIR-V target package.
 #define LOOM_SPIRV_FEATURE_KNOWN_BITS                                         \
   (LOOM_SPIRV_FEATURE_VULKAN_SHADER |                                         \
@@ -380,7 +419,13 @@ typedef enum loom_spirv_feature_bit_e {
    LOOM_SPIRV_FEATURE_INTEGER_DOT_PRODUCT_INPUT4X8_BIT |                      \
    LOOM_SPIRV_FEATURE_INTEGER_DOT_PRODUCT_INPUT4X8_BIT_PACKED |               \
    LOOM_SPIRV_FEATURE_FMA_FLOAT16 | LOOM_SPIRV_FEATURE_FMA_FLOAT32 |          \
-   LOOM_SPIRV_FEATURE_FMA_FLOAT64 | LOOM_SPIRV_FEATURE_FLOAT_CONTROLS2)
+   LOOM_SPIRV_FEATURE_FMA_FLOAT64 | LOOM_SPIRV_FEATURE_FLOAT_CONTROLS2 |      \
+   LOOM_SPIRV_FEATURE_FLOAT16_DENORM_PRESERVE |                               \
+   LOOM_SPIRV_FEATURE_FLOAT64_DENORM_PRESERVE |                               \
+   LOOM_SPIRV_FEATURE_FLOAT16_ROUNDING_RTE |                                  \
+   LOOM_SPIRV_FEATURE_FLOAT64_ROUNDING_RTE |                                  \
+   LOOM_SPIRV_FEATURE_FLOAT_ALL_DENORM_PRESERVE |                             \
+   LOOM_SPIRV_FEATURE_FLOAT_ALL_ROUNDING_RTE)
 
 // Feature bits unconditionally required by Vulkan 1.3 BDA HAL modules.
 #define LOOM_SPIRV_FEATURE_MODULE_VULKAN_1_3_BDA_BASELINE \
@@ -482,6 +527,11 @@ iree_string_view_t loom_spirv_feature_atom_name(loom_spirv_feature_atom_t atom);
 
 // Returns the feature atoms currently modeled by this target package.
 loom_spirv_feature_bits_t loom_spirv_known_feature_bits(void);
+
+// Includes companion-width modes required by the target's floating environment.
+// Selection has already established that every requested mode is available.
+loom_spirv_feature_bits_t loom_spirv_feature_bits_with_float_modes(
+    loom_spirv_feature_bits_t required, loom_spirv_feature_bits_t available);
 
 // Includes the generated transitive dependencies of every selected atom.
 // Unknown bits are preserved; target admission owns validation.

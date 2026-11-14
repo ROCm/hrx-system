@@ -1396,16 +1396,24 @@ static iree_status_t loom_spirv_emit_entry_point(
       state, LOOM_SPIRV_FEATURE_FLOAT32_DENORM_PRESERVE,
       LOOM_SPIRV_EXECUTION_MODE_DENORM_PRESERVE, 32));
   IREE_RETURN_IF_ERROR(loom_spirv_emit_float_execution_mode(
-      state, LOOM_SPIRV_FEATURE_FLOAT16_64_DENORM_PRESERVE,
+      state,
+      LOOM_SPIRV_FEATURE_FLOAT16_64_DENORM_PRESERVE |
+          LOOM_SPIRV_FEATURE_FLOAT16_DENORM_PRESERVE,
       LOOM_SPIRV_EXECUTION_MODE_DENORM_PRESERVE, 16));
   IREE_RETURN_IF_ERROR(loom_spirv_emit_float_execution_mode(
-      state, LOOM_SPIRV_FEATURE_FLOAT16_64_DENORM_PRESERVE,
+      state,
+      LOOM_SPIRV_FEATURE_FLOAT16_64_DENORM_PRESERVE |
+          LOOM_SPIRV_FEATURE_FLOAT64_DENORM_PRESERVE,
       LOOM_SPIRV_EXECUTION_MODE_DENORM_PRESERVE, 64));
   IREE_RETURN_IF_ERROR(loom_spirv_emit_float_execution_mode(
-      state, LOOM_SPIRV_FEATURE_FLOAT16_64_ROUNDING_RTE,
+      state,
+      LOOM_SPIRV_FEATURE_FLOAT16_64_ROUNDING_RTE |
+          LOOM_SPIRV_FEATURE_FLOAT16_ROUNDING_RTE,
       LOOM_SPIRV_EXECUTION_MODE_ROUNDING_MODE_RTE, 16));
   IREE_RETURN_IF_ERROR(loom_spirv_emit_float_execution_mode(
-      state, LOOM_SPIRV_FEATURE_FLOAT16_64_ROUNDING_RTE,
+      state,
+      LOOM_SPIRV_FEATURE_FLOAT16_64_ROUNDING_RTE |
+          LOOM_SPIRV_FEATURE_FLOAT64_ROUNDING_RTE,
       LOOM_SPIRV_EXECUTION_MODE_ROUNDING_MODE_RTE, 64));
   IREE_RETURN_IF_ERROR(loom_spirv_emit_float_execution_mode(
       state, LOOM_SPIRV_FEATURE_FLOAT32_ROUNDING_RTE,
@@ -1578,6 +1586,10 @@ static iree_status_t loom_spirv_emit_function_contents(
   IREE_RETURN_IF_ERROR(loom_spirv_emit_function_declaration(state));
   IREE_RETURN_IF_ERROR(loom_spirv_emit_function_parameters(state, entry_block));
   IREE_RETURN_IF_ERROR(loom_spirv_emit_function_body(state));
+  state->required_feature_bits = loom_spirv_feature_bits_with_float_modes(
+      state->required_feature_bits,
+      loom_spirv_function_plan_target_bundle(state->function_plan)
+          ->config->contract_feature_bits);
   state->emission_plan->required_feature_bits = state->required_feature_bits;
   for (iree_host_size_t i = 0; i < LOOM_SPIRV_BUILTIN_VARIABLE_COUNT; ++i) {
     state->emission_plan->builtin_interface_variable_ids[i] =

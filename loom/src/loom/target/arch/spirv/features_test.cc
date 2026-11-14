@@ -100,6 +100,35 @@ TEST(SpirvFeaturesTest, KnownAtomsHaveDirectBitsAndDescriptors) {
             LOOM_SPIRV_FEATURE_VULKAN_SHADER);
 }
 
+TEST(SpirvFeaturesTest, ClosesOnlyRequiredFloatingWidthGroups) {
+  const auto half = LOOM_SPIRV_FEATURE_FLOAT16_DENORM_PRESERVE;
+  const auto single = LOOM_SPIRV_FEATURE_FLOAT32_DENORM_PRESERVE;
+  const auto wide = LOOM_SPIRV_FEATURE_FLOAT64_DENORM_PRESERVE;
+  const auto pair = LOOM_SPIRV_FEATURE_FLOAT16_64_DENORM_PRESERVE;
+  const auto all = LOOM_SPIRV_FEATURE_FLOAT_ALL_DENORM_PRESERVE;
+  const auto rte = LOOM_SPIRV_FEATURE_FLOAT16_ROUNDING_RTE;
+  const auto rte_pair = LOOM_SPIRV_FEATURE_FLOAT16_64_ROUNDING_RTE;
+  EXPECT_EQ(loom_spirv_feature_bits_with_float_modes(half, half), half);
+  EXPECT_EQ(loom_spirv_feature_bits_with_float_modes(wide, wide), wide);
+  EXPECT_EQ(loom_spirv_feature_bits_with_float_modes(half, half | wide | pair),
+            half | pair);
+  EXPECT_EQ(loom_spirv_feature_bits_with_float_modes(
+                single, single | half | wide | pair),
+            single);
+  const auto available = half | wide | single | pair | all | rte | rte_pair;
+  EXPECT_EQ(loom_spirv_feature_bits_with_float_modes(0, available), 0u);
+  EXPECT_EQ(loom_spirv_feature_bits_with_float_modes(single, available),
+            single | pair);
+  EXPECT_EQ(loom_spirv_feature_bits_with_float_modes(half, available),
+            half | single | pair);
+  EXPECT_EQ(loom_spirv_feature_bits_with_float_modes(rte, available),
+            rte | rte_pair);
+  EXPECT_EQ(loom_spirv_feature_bits_with_float_modes(
+                rte, available | LOOM_SPIRV_FEATURE_FLOAT_ALL_ROUNDING_RTE |
+                         LOOM_SPIRV_FEATURE_FLOAT32_ROUNDING_RTE),
+            rte | rte_pair | LOOM_SPIRV_FEATURE_FLOAT32_ROUNDING_RTE);
+}
+
 TEST(SpirvFeaturesTest, PreparesVulkanBdaProfile) {
   loom_spirv_feature_set_t feature_set;
   loom_spirv_feature_set_prepare(LOOM_SPIRV_FEATURE_PROFILE_VULKAN_1_3_BDA,
