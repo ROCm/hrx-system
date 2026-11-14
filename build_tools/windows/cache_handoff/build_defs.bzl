@@ -11,24 +11,21 @@ def _runfile_path(ctx, file):
     return ctx.workspace_name + "/" + file.short_path
 
 def _windows_cache_handoff_test_impl(ctx):
-    runner = ctx.attr._runner[DefaultInfo]
-    runner_executable = runner.files_to_run.executable
-    if runner_executable == None:
-        fail("cache handoff runner has no executable")
+    runner = ctx.file._runner
     executable = ctx.actions.declare_file(ctx.label.name + ".bat")
-    runner_path = _runfile_path(ctx, runner_executable).replace("/", "\\")
+    runner_path = _runfile_path(ctx, runner).replace("/", "\\")
     ctx.actions.write(
         output = executable,
         content = (
             "@echo off\r\n" +
-            '"%%TEST_SRCDIR%%\\%s" run -- %%*\r\n' % runner_path +
+            'python.exe "%%TEST_SRCDIR%%\\%s" run -- %%*\r\n' % runner_path +
             "exit /b %ERRORLEVEL%\r\n"
         ),
         is_executable = True,
     )
     runfiles = ctx.runfiles(
-        files = [ctx.file.manifest, runner_executable],
-    ).merge(runner.default_runfiles)
+        files = [ctx.file.manifest, runner],
+    )
     return [
         DefaultInfo(
             executable = executable,
@@ -54,9 +51,8 @@ windows_cache_handoff_test = rule(
             doc = "Verified CAS closure and source-test execution metadata.",
         ),
         "_runner": attr.label(
-            default = "//build_tools/ci:windows_cache_handoff",
-            executable = True,
-            cfg = "target",
+            allow_single_file = [".py"],
+            default = "//handoff:runner.py",
         ),
     },
     doc = "Runs one Bazel-selected test from a verified CAS closure.",

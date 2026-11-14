@@ -191,7 +191,14 @@ class WindowsCacheHandoffTest(unittest.TestCase):
         self.assertEqual(len(_CasHandler.blobs), 2)
         self.assertEqual(summary["compatible_test_count"], 1)
         self.assertEqual(summary["unique_blob_count"], 2)
+        self.assertEqual(
+            (output_dir / "MODULE.bazel").read_text(encoding="utf-8"),
+            'module(name = "hrx_windows_cache_handoff")\n',
+        )
+        self.assertTrue((output_dir / "handoff/build_defs.bzl").is_file())
+        self.assertTrue((output_dir / "handoff/runner.py").is_file())
         build_text = (output_dir / "example/BUILD.bazel").read_text(encoding="utf-8")
+        self.assertIn('load("//handoff:build_defs.bzl"', build_text)
         self.assertIn("windows_cache_handoff_test(", build_text)
         self.assertIn("name = 'test'", build_text)
         self.assertIn("exec_properties = {'pool': 'windows'}", build_text)

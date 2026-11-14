@@ -1198,33 +1198,33 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           "$PWD\.venv\Scripts" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
-      - name: Configure project graph
-        shell: powershell
-        run: |
-          python dev.py bazel configure --//runtime/config/hal:drivers=task
-          exit $LASTEXITCODE
-
       - name: Materialize CAS closure and run native test
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
-          $target = '//.iree/windows-cache-handoff/runtime/src/iree/base/...'
+          $bundle = Join-Path $env:GITHUB_WORKSPACE '.iree\windows-cache-handoff'
+          $target = '//runtime/src/iree/base/...'
           $evidenceDir = $env:IREE_CACHE_HANDOFF_EVIDENCE
           $executionLog = Join-Path $evidenceDir 'consumer-execution.json'
           $profile = Join-Path $evidenceDir 'consumer.profile.gz'
-          bazel "--output_base=$env:IREE_CACHE_HANDOFF_OUTPUT_BASE" test `
-            '--strategy=TestRunner=local' `
-            '--cache_test_results=no' `
-            "--profile=$profile" `
-            "--execution_log_json_file=$executionLog" `
-            '--test_output=all' `
-            $target
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $receipt = Join-Path $evidenceDir 'execution-receipt.json'
-          python build_tools/ci/windows_cache_handoff.py audit `
-            --execution-log=$executionLog `
-            --output=$receipt
-          exit $LASTEXITCODE
+          Push-Location $bundle
+          try {
+            bazel "--output_base=$env:IREE_CACHE_HANDOFF_OUTPUT_BASE" test `
+              '--strategy=TestRunner=local' `
+              '--cache_test_results=no' `
+              "--profile=$profile" `
+              "--execution_log_json_file=$executionLog" `
+              '--test_output=all' `
+              $target
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            $receipt = Join-Path $evidenceDir 'execution-receipt.json'
+            python handoff/runner.py audit `
+              --execution-log=$executionLog `
+              --output=$receipt
+            exit $LASTEXITCODE
+          } finally {
+            Pop-Location
+          }
 
       - name: Upload consumer evidence
         if: ${{ always() }}

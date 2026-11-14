@@ -604,7 +604,7 @@ def _emit_target_manifest(
 
 def _render_build_file(rules: list[dict[str, Any]]) -> str:
     lines = [
-        'load("//build_tools/windows/cache_handoff:build_defs.bzl", "windows_cache_handoff_test")',
+        'load("//handoff:build_defs.bzl", "windows_cache_handoff_test")',
         "",
     ]
     for attributes in rules:
@@ -613,6 +613,25 @@ def _render_build_file(rules: list[dict[str, Any]]) -> str:
             lines.append(f"    {name} = {pprint.pformat(value, sort_dicts=True)},")
         lines.extend([")", ""])
     return "\n".join(lines)
+
+
+def _emit_standalone_module(output_dir: Path) -> None:
+    """Writes the source-revision runner and its dependency-free Bazel module."""
+    output_dir.joinpath("MODULE.bazel").write_text(
+        'module(name = "hrx_windows_cache_handoff")\n', encoding="utf-8"
+    )
+    handoff_dir = output_dir / "handoff"
+    handoff_dir.mkdir(parents=True, exist_ok=True)
+    source_root = Path(__file__).resolve().parents[1]
+    shutil.copyfile(Path(__file__), handoff_dir / "runner.py")
+    shutil.copyfile(
+        source_root / "windows" / "cache_handoff" / "build_defs.bzl",
+        handoff_dir / "build_defs.bzl",
+    )
+    handoff_dir.joinpath("BUILD.bazel").write_text(
+        'exports_files(["runner.py"], visibility = ["//visibility:public"])\n',
+        encoding="utf-8",
+    )
 
 
 def emit_handoff_packages(
@@ -640,6 +659,7 @@ def emit_handoff_packages(
     test_summaries = []
     runfile_reference_count = 0
     output_dir.mkdir(parents=True, exist_ok=True)
+    _emit_standalone_module(output_dir)
     for label in sorted(configured_rules):
         provider_metadata = providers[label]
         compatible = provider_metadata.get("compatible")
