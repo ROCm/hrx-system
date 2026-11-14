@@ -318,14 +318,25 @@ class WindowsCacheHandoffTest(unittest.TestCase):
 
         observed = {}
 
-        def observe_run(command, *, env, **_kwargs):
-            observed["argument"] = Path(command[1].split("=", 1)[1]).read_bytes()
-            observed["environment"] = Path(env["AMDF_LIBRARY"]).read_bytes()
+        def observe_run(command, *, cwd, env, **_kwargs):
+            argument_path = command[1].split("=", 1)[1]
+            observed["argument_path"] = argument_path
+            observed["environment_path"] = env["AMDF_LIBRARY"]
+            observed["argument"] = (cwd / argument_path).read_bytes()
+            observed["environment"] = (cwd / env["AMDF_LIBRARY"]).read_bytes()
             return mock.Mock(returncode=0)
 
         with mock.patch.object(handoff.subprocess, "run", side_effect=observe_run):
             self.assertEqual(handoff.run_handoff_test(manifest_path), 0)
-        self.assertEqual(observed, {"argument": b"amdf", "environment": b"amdf"})
+        self.assertEqual(
+            observed,
+            {
+                "argument_path": rootpath,
+                "environment_path": rootpath,
+                "argument": b"amdf",
+                "environment": b"amdf",
+            },
+        )
 
     def test_run_materializes_verified_bytes_before_execution(self):
         execution_root, target_metadata, provider_metadata = self._write_fixture()
@@ -339,6 +350,19 @@ class WindowsCacheHandoffTest(unittest.TestCase):
         )
         manifest_path = output_dir / summary["tests"][0]["manifest"]
         self.assertEqual(handoff.run_handoff_test(manifest_path), 0)
+
+    def test_resolve_external_rootpath_from_main_workspace(self):
+        value = (
+            "--tool="
+            + handoff.HANDOFF_PATH_BEGIN
+            + "rules_python/python.exe"
+            + handoff.HANDOFF_PATH_END
+        )
+
+        self.assertEqual(
+            handoff._resolve_handoff_value(value, "_main"),
+            "--tool=../rules_python/python.exe",
+        )
 
     def test_prefetch_materializes_one_shared_hard_link_store(self):
         execution_root, target_metadata, provider_metadata = self._write_fixture()

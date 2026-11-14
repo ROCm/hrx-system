@@ -903,7 +903,8 @@ def prefetch_handoff_blobs(
         list(executor.map(fetch, entries))
 
 
-def _resolve_handoff_value(value: str, runfiles_root: Path) -> str:
+def _resolve_handoff_value(value: str, workspace: str) -> str:
+    """Resolves marked runfiles to the rootpath visible from a test workspace."""
     result = ""
     cursor = 0
     while cursor < len(value):
@@ -918,7 +919,12 @@ def _resolve_handoff_value(value: str, runfiles_root: Path) -> str:
             raise HandoffError("handoff runfile path marker is unterminated")
         logical_path = value[path_start:end]
         _validate_logical_path(logical_path)
-        result += str(runfiles_root / PurePosixPath(logical_path))
+        logical = PurePosixPath(logical_path)
+        if logical.parts[0] == workspace:
+            rootpath = PurePosixPath(*logical.parts[1:])
+        else:
+            rootpath = PurePosixPath("..") / logical
+        result += rootpath.as_posix()
         cursor = end + len(HANDOFF_PATH_END)
     return result
 
@@ -1076,7 +1082,7 @@ def run_handoff_test(
         child_environment.pop(PYTHON_ENVIRONMENT_VARIABLE, None)
         child_environment.update(
             {
-                name: _resolve_handoff_value(value, runfiles_root)
+                name: _resolve_handoff_value(value, workspace)
                 for name, value in environment.items()
             }
         )
@@ -1092,7 +1098,7 @@ def run_handoff_test(
         completed = subprocess.run(
             [
                 str(executable_path),
-                *(_resolve_handoff_value(value, runfiles_root) for value in arguments),
+                *(_resolve_handoff_value(value, workspace) for value in arguments),
                 *additional_arguments,
             ],
             cwd=workspace_root,

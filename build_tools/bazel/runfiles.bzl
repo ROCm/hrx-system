@@ -38,7 +38,6 @@ def _mark_runfiles_locations(argument):
     result = ""
     cursor = 0
     done = False
-    has_runfiles_paths = False
     for _ in range(len(argument) + 1):
         if not done:
             start = argument.find("$(", cursor)
@@ -59,48 +58,39 @@ def _mark_runfiles_locations(argument):
                     result += argument[cursor:start]
                     if is_runfiles_path:
                         result += RUNFILES_PATH_BEGIN + token + RUNFILES_PATH_END
-                        has_runfiles_paths = True
                     else:
                         result += token
                     cursor = end + 1
-    return struct(
-        argument = result,
-        has_runfiles_paths = has_runfiles_paths,
-    )
+    return result
 
 def create_runfiles_arguments_info(ctx, location_targets):
-    """Creates configured runfile argument metadata for an executable rule.
+    """Creates configured argument metadata for an executable rule.
 
     Args:
       ctx: Executable rule context whose args are being described.
       location_targets: Targets available to the rule's location expansion.
 
     Returns:
-      IreeRunfilesArgumentsInfo when an argument contains a runfile location,
-      otherwise None.
+      IreeRunfilesArgumentsInfo when the rule has arguments, otherwise None.
     """
     if not hasattr(ctx.attr, "args") or not ctx.attr.args:
         return None
 
     arguments = []
     marked_arguments = []
-    has_runfiles_paths = False
     for argument in ctx.attr.args:
-        marked = _mark_runfiles_locations(argument)
+        marked_argument = _mark_runfiles_locations(argument)
         configured_arguments = ctx.tokenize(
             ctx.expand_location(argument, targets = location_targets),
         )
         configured_marked_arguments = ctx.tokenize(
-            ctx.expand_location(marked.argument, targets = location_targets),
+            ctx.expand_location(marked_argument, targets = location_targets),
         )
         if len(configured_arguments) != len(configured_marked_arguments):
             fail("Runfile markers changed executable argument tokenization")
         arguments.extend(configured_arguments)
         marked_arguments.extend(configured_marked_arguments)
-        has_runfiles_paths = has_runfiles_paths or marked.has_runfiles_paths
 
-    if not has_runfiles_paths:
-        return None
     return IreeRunfilesArgumentsInfo(
         arguments = arguments,
         marked_arguments = marked_arguments,
