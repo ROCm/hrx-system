@@ -275,16 +275,6 @@ static loom_input_options_t loom_link_cli_input_options(void) {
   };
 }
 
-static iree_status_t loom_link_cli_check_result(const loomc_result_t* result,
-                                                const char* failure_message) {
-  bool succeeded = false;
-  IREE_RETURN_IF_ERROR(
-      loom_tooling_cli_print_loomc_result(stderr, result, &succeeded));
-  return succeeded ? iree_ok_status()
-                   : iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "%s",
-                                      failure_message);
-}
-
 static void loom_link_cli_index_deinitialize(loom_link_cli_index_t* index,
                                              iree_allocator_t allocator) {
   loomc_link_index_release(index->module_index);
@@ -303,7 +293,9 @@ static iree_status_t loom_link_cli_add_input(
     const loom_link_cli_input_t* input, loom_module_format_t requested_format,
     loomc_context_t* context, loomc_workspace_t* workspace,
     loomc_link_index_builder_t* builder, iree_arena_block_pool_t* block_pool,
-    iree_allocator_t allocator, loomc_link_index_source_slot_t* out_slot) {
+    iree_allocator_t allocator, loomc_link_index_source_slot_t* out_slot,
+    bool* out_accepted) {
+  *out_accepted = true;
   const iree_string_view_t filename =
       loom_tooling_file_path_is_stdio(input->path) ? IREE_SV("<stdin>")
                                                    : input->path;
@@ -361,9 +353,10 @@ static iree_status_t loom_link_cli_add_input(
           &module, &result);
     }
     if (iree_status_is_ok(status)) {
-      status = loom_link_cli_check_result(result, "input has source errors");
+      status =
+          loom_tooling_cli_print_loomc_result(stderr, result, out_accepted);
     }
-    if (iree_status_is_ok(status)) {
+    if (iree_status_is_ok(status) && *out_accepted) {
       status = iree_status_from_loomc(loomc_link_index_builder_add_module(
           builder, module, &provider_options, out_slot));
     }
@@ -475,7 +468,9 @@ static iree_status_t loom_link_cli_build_index(
     const loom_link_cli_input_t* inputs, iree_host_size_t input_count,
     loom_module_format_t input_format, loomc_context_t* context,
     loomc_workspace_t* workspace, iree_arena_block_pool_t* block_pool,
-    iree_allocator_t allocator, loom_link_cli_index_t* out_index) {
+    iree_allocator_t allocator, loom_link_cli_index_t* out_index,
+    bool* out_accepted) {
+  *out_accepted = true;
   *out_index = (loom_link_cli_index_t){0};
   loomc_link_index_builder_t* builder = NULL;
   IREE_RETURN_IF_ERROR(iree_status_from_loomc(loomc_link_index_builder_allocate(
@@ -497,34 +492,34 @@ static iree_status_t loom_link_cli_build_index(
         allocator, root_count, sizeof(*out_index->root_providers.values),
         (void**)&out_index->root_providers.values);
   }
-  for (iree_host_size_t i = 0; i < input_count && iree_status_is_ok(status);
-       ++i) {
+  for (iree_host_size_t i = 0;
+       i < input_count && iree_status_is_ok(status) && *out_accepted; ++i) {
     loomc_link_index_source_slot_t slot = {0};
-    status =
-        loom_link_cli_add_input(&inputs[i], input_format, context, workspace,
-                                builder, block_pool, allocator, &slot);
-    if (iree_status_is_ok(status) &&
+    status = loom_link_cli_add_input(&inputs[i], input_format, context,
+                                     workspace, builder, block_pool, allocator,
+                                     &slot, out_accepted);
+    if (iree_status_is_ok(status) && *out_accepted &&
         loom_link_cli_input_is_direct_dependency(&inputs[i])) {
       out_index->direct_providers.values[out_index->direct_providers.count++] =
           slot.ordinal;
     }
-    if (iree_status_is_ok(status) &&
+    if (iree_status_is_ok(status) && *out_accepted &&
         loom_link_cli_input_exports_are_roots(&inputs[i])) {
       out_index->root_providers.values[out_index->root_providers.count++] =
           slot.ordinal;
     }
   }
   loomc_result_t* result = NULL;
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && *out_accepted) {
     status = iree_status_from_loomc(loomc_link_index_builder_finish(
         builder, &out_index->module_index, &result));
   }
-  if (iree_status_is_ok(status)) {
-    status = loom_link_cli_check_result(result, "input indexing failed");
+  if (iree_status_is_ok(status) && *out_accepted) {
+    status = loom_tooling_cli_print_loomc_result(stderr, result, out_accepted);
   }
   loomc_result_release(result);
   loomc_link_index_builder_free(builder);
-  if (!iree_status_is_ok(status)) {
+  if (!iree_status_is_ok(status) || !*out_accepted) {
     loom_link_cli_index_deinitialize(out_index, allocator);
   }
   return status;
@@ -547,7 +542,8 @@ static iree_status_t loom_link_cli_write_report(
 static iree_status_t loom_link_cli_analyze_dependencies(
     const loom_link_cli_index_t* index, iree_string_view_t component_name,
     iree_string_view_t report_path, loomc_workspace_t* workspace,
-    iree_allocator_t allocator) {
+    iree_allocator_t allocator, bool* out_accepted) {
+  *out_accepted = false;
   const bool report_requested = !iree_string_view_is_empty(report_path);
   const loomc_link_dependency_analysis_options_t options = {
       .type = LOOMC_STRUCTURE_TYPE_LINK_DEPENDENCY_ANALYSIS_OPTIONS,
@@ -567,8 +563,7 @@ static iree_status_t loom_link_cli_analyze_dependencies(
                                         report_path, true, allocator);
   }
   if (iree_status_is_ok(status)) {
-    status =
-        loom_link_cli_check_result(result, "strict dependency analysis failed");
+    status = loom_tooling_cli_print_loomc_result(stderr, result, out_accepted);
   }
   loomc_result_release(result);
   return status;
@@ -846,6 +841,7 @@ int main(int argc, char** argv) {
   loom_link_cli_input_t* inputs = NULL;
   iree_host_size_t input_count = 0;
   loom_link_cli_index_t link_index = {0};
+  bool accepted = true;
 
   loom_module_format_t input_format = LOOM_MODULE_FORMAT_AUTO;
   loom_module_format_t output_format = LOOM_MODULE_FORMAT_TEXT;
@@ -948,9 +944,9 @@ int main(int argc, char** argv) {
   if (iree_status_is_ok(status)) {
     status = loom_link_cli_build_index(inputs, input_count, input_format,
                                        context, workspace, &block_pool,
-                                       allocator, &link_index);
+                                       allocator, &link_index, &accepted);
   }
-  if (iree_status_is_ok(status) && dependency_analysis_requested) {
+  if (iree_status_is_ok(status) && accepted && dependency_analysis_requested) {
     iree_string_view_t component_name = requested_dependency_component;
     if (iree_string_view_is_empty(component_name) && input_count &&
         inputs[0].input_class == LOOM_LINK_CLI_INPUT_PRIMARY) {
@@ -958,20 +954,21 @@ int main(int argc, char** argv) {
                            ? IREE_SV("<stdin>")
                            : inputs[0].path;
     }
-    status = loom_link_cli_analyze_dependencies(&link_index, component_name,
-                                                dependency_report_path,
-                                                workspace, allocator);
+    status = loom_link_cli_analyze_dependencies(
+        &link_index, component_name, dependency_report_path, workspace,
+        allocator, &accepted);
   }
-  if (iree_status_is_ok(status) && FLAG_list_symbols) {
+  if (iree_status_is_ok(status) && accepted && FLAG_list_symbols) {
     status = loom_link_cli_print_symbol_list(
         link_index.module_index, iree_make_cstring_view(FLAG_output),
         allocator);
   }
-  if (iree_status_is_ok(status) && !FLAG_list_symbols) {
+  if (iree_status_is_ok(status) && accepted && !FLAG_list_symbols) {
     status = iree_status_from_loomc(
         loomc_linker_create(context, NULL, compiler_allocator, &linker));
   }
-  if (iree_status_is_ok(status) && !FLAG_list_symbols && roots.count) {
+  if (iree_status_is_ok(status) && accepted && !FLAG_list_symbols &&
+      roots.count) {
     status = iree_allocator_malloc_array(
         allocator, roots.count, sizeof(*root_symbols), (void**)&root_symbols);
     if (iree_status_is_ok(status)) {
@@ -980,7 +977,7 @@ int main(int argc, char** argv) {
       }
     }
   }
-  if (iree_status_is_ok(status) && !FLAG_list_symbols) {
+  if (iree_status_is_ok(status) && accepted && !FLAG_list_symbols) {
     const loomc_link_options_t options = {
         .type = LOOMC_STRUCTURE_TYPE_LINK_OPTIONS,
         .structure_size = sizeof(options),
@@ -1006,9 +1003,9 @@ int main(int argc, char** argv) {
     status = iree_status_from_loomc(loomc_link_module(
         linker, workspace, &options, &linked_module, &result));
     if (iree_status_is_ok(status)) {
-      status = loom_link_cli_check_result(result, "linking failed");
+      status = loom_tooling_cli_print_loomc_result(stderr, result, &accepted);
     }
-    if (iree_status_is_ok(status) && FLAG_print_plan) {
+    if (iree_status_is_ok(status) && accepted && FLAG_print_plan) {
       status = loom_link_cli_write_report(loomc_result_artifact_at(result, 0),
                                           iree_make_cstring_view(FLAG_output),
                                           false, allocator);
@@ -1016,8 +1013,8 @@ int main(int argc, char** argv) {
     loomc_result_release(result);
     result = NULL;
   }
-  if (iree_status_is_ok(status) && linked_module && !FLAG_print_plan &&
-      FLAG_require_resolved_config) {
+  if (iree_status_is_ok(status) && accepted && linked_module &&
+      !FLAG_print_plan && FLAG_require_resolved_config) {
     const loomc_module_config_options_t options = {
         .type = LOOMC_STRUCTURE_TYPE_MODULE_CONFIG_OPTIONS,
         .structure_size = sizeof(options),
@@ -1026,13 +1023,13 @@ int main(int argc, char** argv) {
     status = iree_status_from_loomc(loomc_module_apply_config(
         linked_module, workspace, &options, compiler_allocator, &result));
     if (iree_status_is_ok(status)) {
-      status = loom_link_cli_check_result(result, "unresolved configuration");
+      status = loom_tooling_cli_print_loomc_result(stderr, result, &accepted);
     }
     loomc_result_release(result);
     result = NULL;
   }
-  if (iree_status_is_ok(status) && linked_module && !FLAG_print_plan &&
-      FLAG_verify) {
+  if (iree_status_is_ok(status) && accepted && linked_module &&
+      !FLAG_print_plan && FLAG_verify) {
     const loomc_module_verify_options_t options = {
         .type = LOOMC_STRUCTURE_TYPE_MODULE_VERIFY_OPTIONS,
         .structure_size = sizeof(options),
@@ -1042,21 +1039,20 @@ int main(int argc, char** argv) {
     status = iree_status_from_loomc(loomc_module_verify(
         linked_module, &options, compiler_allocator, &result));
     if (iree_status_is_ok(status)) {
-      status = loom_link_cli_check_result(result,
-                                          "linked module verification failed");
+      status = loom_tooling_cli_print_loomc_result(stderr, result, &accepted);
     }
     loomc_result_release(result);
     result = NULL;
   }
-  if (iree_status_is_ok(status) && linked_module && !FLAG_print_plan) {
+  if (iree_status_is_ok(status) && accepted && linked_module &&
+      !FLAG_print_plan) {
     if (FLAG_print_config_schema) {
       status = iree_status_from_loomc(loomc_module_query_config_schema(
           linked_module, compiler_allocator, &result));
       if (iree_status_is_ok(status)) {
-        status =
-            loom_link_cli_check_result(result, "config schema query failed");
+        status = loom_tooling_cli_print_loomc_result(stderr, result, &accepted);
       }
-      if (iree_status_is_ok(status)) {
+      if (iree_status_is_ok(status) && accepted) {
         status = loom_link_cli_write_report(loomc_result_artifact_at(result, 0),
                                             iree_make_cstring_view(FLAG_output),
                                             true, allocator);
@@ -1068,7 +1064,7 @@ int main(int argc, char** argv) {
     }
   }
 
-  int exit_code = 0;
+  int exit_code = accepted ? 0 : 1;
   if (!iree_status_is_ok(status)) {
     iree_status_fprint(stderr, status);
     iree_status_free(status);

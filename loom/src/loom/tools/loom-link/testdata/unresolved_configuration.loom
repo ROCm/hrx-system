@@ -1,0 +1,1 @@
+config.decl @limit : %value: index where [range(%value, 0, 64)]
