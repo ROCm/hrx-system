@@ -14,6 +14,7 @@
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/low/ops.h"
+#include "loom/ops/low/storage.h"
 #include "loom/ops/op_defs.h"
 #include "loom/target/arch/wasm/descriptors/descriptors.h"
 #include "loom/target/artifact_diagnostics.h"
@@ -149,6 +150,8 @@ typedef struct loom_wasm_emit_state_t {
   iree_diagnostic_emitter_t diagnostic_emitter;
   // False after rejection, independently of diagnostic-sink success.
   bool accepted;
+  // Next allocation-resolved structural copy group in source order.
+  uint32_t next_packet_move;
   // Mutable copy of the prepared local namespace.
   loom_wasm_local_layout_t locals;
   // Mutable body payload writer.
@@ -254,10 +257,10 @@ static void loom_wasm_value_ordinals_release(
   loom_module_value_ordinal_scratch_release(module);
 }
 
-// Returns the prepared local for a value. Unused structured-result destinations
-// intentionally have no local and retain the NONE sentinel.
-static uint32_t loom_wasm_try_local_index(const loom_wasm_emit_state_t* state,
-                                          loom_value_id_t value_id) {
+// Returns the planned register-unit span, including dead units. Unused
+// structured results have an empty span and need no destination writes.
+static loom_wasm_value_locals_t loom_wasm_value_locals(
+    const loom_wasm_emit_state_t* state, loom_value_id_t value_id) {
   const loom_value_ordinal_t value_ordinal =
       loom_module_value_ordinal_scratch_lookup(state->program->module,
                                                value_id);
@@ -266,13 +269,16 @@ static uint32_t loom_wasm_try_local_index(const loom_wasm_emit_state_t* state,
               "prepared Wasm value %u must be in the function value domain",
               (unsigned)value_id);
   IREE_ASSERT_EQ(state->function->value_ids[value_ordinal], value_id);
-  return state->function->local_indices_by_value_ordinal[value_ordinal];
+  return state->function->locals_by_value_ordinal[value_ordinal];
 }
 
-// Every emitted value read and instruction-result write has a prepared local.
+// Instruction packets and callable ABI values each occupy one register unit.
 static uint32_t loom_wasm_local_index(const loom_wasm_emit_state_t* state,
                                       loom_value_id_t value_id) {
-  const uint32_t local_index = loom_wasm_try_local_index(state, value_id);
+  const loom_wasm_value_locals_t locals =
+      loom_wasm_value_locals(state, value_id);
+  IREE_ASSERT_EQ(locals.count, 1);
+  const uint32_t local_index = state->function->local_indices[locals.start];
   IREE_ASSERT(local_index != LOOM_WASM_PROGRAM_INDEX_NONE,
               "prepared Wasm value %u must have a physical local",
               (unsigned)value_id);
@@ -680,13 +686,6 @@ static void loom_wasm_record_descriptor_flags(
   }
 }
 
-static iree_status_t loom_wasm_emit_low_transfer(loom_wasm_emit_state_t* state,
-                                                 const loom_op_t* op) {
-  IREE_RETURN_IF_ERROR(
-      loom_wasm_emit_local_get(state, loom_op_const_operands(op)[0]));
-  return loom_wasm_emit_local_set(state, loom_op_const_results(op)[0]);
-}
-
 static iree_status_t loom_wasm_emit_low_func_call(loom_wasm_emit_state_t* state,
                                                   const loom_op_t* op) {
   loom_value_slice_t operands = loom_low_func_call_operands(op);
@@ -784,39 +783,52 @@ static iree_status_t loom_wasm_emit_parallel_value_move_spans(
     loom_wasm_emit_state_t* state, const loom_wasm_value_move_span_t* spans,
     iree_host_size_t span_count) {
   // Wasm's operand stack acts as cycle scratch: push every original source in
-  // forward order and pop them into target locals in reverse order.
+  // forward order and pop them into target locals in reverse order. Expand all
+  // units before writing any of them, including across different SSA values.
+  const uint32_t* local_indices = state->function->local_indices;
   for (iree_host_size_t span_index = 0; span_index < span_count; ++span_index) {
     const loom_wasm_value_move_span_t* span = &spans[span_index];
     for (iree_host_size_t i = 0; i < span->value_count; ++i) {
-      const uint32_t target_local_index =
-          loom_wasm_try_local_index(state, span->target_values[i]);
-      if (target_local_index == LOOM_WASM_PROGRAM_INDEX_NONE) {
-        continue;
+      const loom_wasm_value_locals_t target =
+          loom_wasm_value_locals(state, span->target_values[i]);
+      const loom_wasm_value_locals_t source =
+          loom_wasm_value_locals(state, span->source_values[i]);
+      for (uint32_t unit = 0; unit < target.count; ++unit) {
+        const uint32_t target_local = local_indices[target.start + unit];
+        if (target_local == LOOM_WASM_PROGRAM_INDEX_NONE) {
+          continue;
+        }
+        const uint32_t source_local = local_indices[source.start + unit];
+        IREE_ASSERT(source_local != LOOM_WASM_PROGRAM_INDEX_NONE,
+                    "Wasm edge %u -> %u unit %u must have a live source",
+                    span->source_values[i], span->target_values[i], unit);
+        if (source_local == target_local) {
+          continue;
+        }
+        IREE_RETURN_IF_ERROR(
+            loom_wasm_emit_local_get_index(state, source_local));
       }
-      const uint32_t source_local_index =
-          loom_wasm_local_index(state, span->source_values[i]);
-      if (source_local_index == target_local_index) {
-        continue;
-      }
-      IREE_RETURN_IF_ERROR(
-          loom_wasm_emit_local_get_index(state, source_local_index));
     }
   }
   for (iree_host_size_t span_index = span_count; span_index > 0; --span_index) {
     const loom_wasm_value_move_span_t* span = &spans[span_index - 1];
     for (iree_host_size_t i = span->value_count; i > 0; --i) {
-      const uint32_t target_local_index =
-          loom_wasm_try_local_index(state, span->target_values[i - 1]);
-      if (target_local_index == LOOM_WASM_PROGRAM_INDEX_NONE) {
-        continue;
+      const loom_wasm_value_locals_t target =
+          loom_wasm_value_locals(state, span->target_values[i - 1]);
+      const loom_wasm_value_locals_t source =
+          loom_wasm_value_locals(state, span->source_values[i - 1]);
+      for (uint32_t unit = target.count; unit > 0; --unit) {
+        const uint32_t target_local = local_indices[target.start + unit - 1];
+        if (target_local == LOOM_WASM_PROGRAM_INDEX_NONE) {
+          continue;
+        }
+        const uint32_t source_local = local_indices[source.start + unit - 1];
+        if (source_local == target_local) {
+          continue;
+        }
+        IREE_RETURN_IF_ERROR(
+            loom_wasm_emit_local_set_index(state, target_local));
       }
-      const uint32_t source_local_index =
-          loom_wasm_local_index(state, span->source_values[i - 1]);
-      if (source_local_index == target_local_index) {
-        continue;
-      }
-      IREE_RETURN_IF_ERROR(
-          loom_wasm_emit_local_set_index(state, target_local_index));
     }
   }
   return iree_ok_status();
@@ -831,6 +843,23 @@ static iree_status_t loom_wasm_emit_value_moves(
       .value_count = value_count,
   };
   return loom_wasm_emit_parallel_value_move_spans(state, &span, 1);
+}
+
+static iree_status_t loom_wasm_emit_packet_moves(loom_wasm_emit_state_t* state,
+                                                 const loom_op_t* op) {
+  if (state->next_packet_move == state->function->packet_move_count ||
+      state->function->packet_moves[state->next_packet_move].op != op) {
+    return iree_ok_status();
+  }
+  const loom_wasm_packet_moves_t* group =
+      &state->function->packet_moves[state->next_packet_move++];
+  for (iree_host_size_t i = 0; i < group->count; ++i) {
+    const loom_wasm_local_move_t* move =
+        &state->function->local_moves[group->start + i];
+    IREE_RETURN_IF_ERROR(loom_wasm_emit_local_get_index(state, move->source));
+    IREE_RETURN_IF_ERROR(loom_wasm_emit_local_set_index(state, move->target));
+  }
+  return iree_ok_status();
 }
 
 static iree_status_t loom_wasm_emit_low_scf_yield_to_results(
@@ -1117,13 +1146,8 @@ static iree_status_t loom_wasm_emit_low_scf_while(loom_wasm_emit_state_t* state,
 
 static iree_status_t loom_wasm_emit_structural_op(loom_wasm_emit_state_t* state,
                                                   const loom_op_t* op) {
-  // Allocation has already proven that structural tuple projections and
-  // compositions forward the same Wasm locals without packet moves.
-  if (loom_low_slice_isa(op) || loom_low_concat_isa(op)) {
-    return iree_ok_status();
-  }
-  if (loom_low_copy_isa(op) || loom_low_move_isa(op)) {
-    return loom_wasm_emit_low_transfer(state, op);
+  if (loom_low_register_transfer_kind(op) != LOOM_LOW_REGISTER_TRANSFER_NONE) {
+    return loom_wasm_emit_packet_moves(state, op);
   }
   if (loom_low_func_call_isa(op)) {
     return loom_wasm_emit_low_func_call(state, op);

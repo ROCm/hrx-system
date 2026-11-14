@@ -272,3 +272,74 @@ check.scenario @dynamic_row_bank_values {
   }
   check.return
 }
+
+// Three packets rotate through a counted loop and through both regions of a
+// condition loop. The condition region rotates even on the terminal check.
+func.def @packet_rotation(%input: buffer, %output: buffer, %count: index) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c6 = index.constant 6 : index
+  %base = index.constant 0 : offset
+  %source = buffer.view %input[%base] : buffer -> view<12xi32>
+  %destination = buffer.view %output[%base] : buffer -> view<12xi32>
+  %initial = vector.load %source[0] : view<12xi32> -> vector<12xi32>
+  %nonnegative = index.max %count, %c0 : index
+  %end = index.min %nonnegative, %c6 : index
+  %counted = scf.for %iteration = [%c0 to %end step %c1](%state = %initial : vector<12xi32>) -> (vector<12xi32>) {
+    %first = vector.slice %state[0] : vector<12xi32> -> vector<4xi32>
+    %tail = vector.slice %state[4] : vector<12xi32> -> vector<8xi32>
+    %rotated = vector.concat<0> %tail, %first : vector<8xi32>, vector<4xi32> -> vector<12xi32>
+    scf.yield %rotated : vector<12xi32>
+  }
+  %remaining, %result = scf.while(%before_count = %end : index, %state = %counted : vector<12xi32>) -> (index, vector<12xi32>) {
+    %first = vector.slice %state[0] : vector<12xi32> -> vector<4xi32>
+    %tail = vector.slice %state[4] : vector<12xi32> -> vector<8xi32>
+    %forwarded = vector.concat<0> %tail, %first : vector<8xi32>, vector<4xi32> -> vector<12xi32>
+    %more = index.cmp sgt, %before_count, %c0 : index
+    scf.condition %more, %before_count, %forwarded : i1, index, vector<12xi32>
+  } do(%body_count: index, %body: vector<12xi32>) {
+    %next_count = index.sub %body_count, %c1 : index
+    scf.yield %next_count, %body : index, vector<12xi32>
+  }
+  vector.store %result, %destination[0] : vector<12xi32>, view<12xi32>
+  func.return
+}
+
+// Compute the source position directly instead of carrying a vector around
+// either recurrence. Full-buffer comparisons also observe output sentinels.
+func.def @packet_rotation_oracle(%input: buffer, %output: buffer, %count: index) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c4 = index.constant 4 : index
+  %c6 = index.constant 6 : index
+  %c12 = index.constant 12 : index
+  %base = index.constant 0 : offset
+  %source = buffer.view %input[%base] : buffer -> view<12xi32>
+  %destination = buffer.view %output[%base] : buffer -> view<12xi32>
+  %nonnegative = index.max %count, %c0 : index
+  %bounded = index.min %nonnegative, %c6 : index
+  %rotations = index.madd %bounded, %c2, %c1 : index
+  %distance = index.mul %rotations, %c4 : index
+  scf.for %position = [%c0 to %c12 step %c1] {
+    %shifted = index.add %position, %distance : index
+    %source_position = index.rem %shifted, %c12 : index
+    %value = view.load %source[%source_position] : view<12xi32> -> i32
+    view.store %value, %destination[%position] : i32, view<12xi32>
+  }
+  func.return
+}
+
+check.scenario @packet_rotation_values {
+  check.trial[8](%count: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%count] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-1000 to 1000) : tensor<12xi32>
+    %storage = check.generate.fill value(-777) : tensor<20xi32>
+    %output = check.tensor.view %storage offset(16) : tensor<20xi32> -> tensor<12xi32>
+    check.compare<@packet_rotation, @packet_rotation_oracle>(%input, %output, %count) : (tensor<12xi32>, tensor<12xi32>, index) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<12xi32>
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<20xi32>
+    }
+  }
+  check.return
+}

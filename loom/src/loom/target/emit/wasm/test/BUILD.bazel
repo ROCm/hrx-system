@@ -20,6 +20,7 @@ loom_check_test_suite(
         "memory_offsets.loom-test",
         "numeric.loom-test",
         "schedule_scopes.loom-test",
+        "tuple_transport.loom-test",
     ],
     data = [
         "@wasi_sdk//:llvm-objdump",
