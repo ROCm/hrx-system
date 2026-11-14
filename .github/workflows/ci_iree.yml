@@ -1071,15 +1071,11 @@ jobs:
       - name: Build and publish test closure
         run: |
           set -euo pipefail
-          target='//build_tools/windows:compiler_runtime_test'
-          source_path=build_tools/windows/compiler_runtime_test.cc
-          printf '\n// Windows cache handoff %s/%s\n' \
-            "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" >> "$source_path"
+          target='//runtime/src/iree/base/testing:dynamic_library_test'
 
           package_dir="$RUNNER_TEMP/windows-cache-handoff-package"
           evidence_dir="$package_dir/evidence"
           mkdir -p "$evidence_dir"
-          sha256sum "$source_path" | cut -d' ' -f1 > "$evidence_dir/source.sha256"
           cp .bazelrc.configured "$evidence_dir/configured.bazelrc"
           bazel --version > "$evidence_dir/bazel-version.txt"
           curl --fail --silent --show-error \
@@ -1211,7 +1207,7 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
-          $target = '//.iree/windows-cache-handoff:compiler_runtime_test'
+          $target = '//.iree/windows-cache-handoff:dynamic_library_test'
           $evidenceDir = $env:IREE_CACHE_HANDOFF_EVIDENCE
           $executionLog = Join-Path $evidenceDir 'consumer-execution.json'
           $profile = Join-Path $evidenceDir 'consumer.profile.gz'
