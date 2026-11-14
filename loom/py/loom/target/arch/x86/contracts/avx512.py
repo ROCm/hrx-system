@@ -12,6 +12,7 @@ from collections.abc import Sequence
 
 from loom.dialect.scalar import ALL_SCALAR_OPS
 from loom.dialect.vector import ALL_VECTOR_OPS
+from loom.dialect.view import ALL_VIEW_OPS
 from loom.target.arch.x86.contracts.avx512_predicate import (
     avx512_predicate_rules,
 )
@@ -47,7 +48,11 @@ from loom.target.arch.x86.contracts.integer_rotation import (
 from loom.target.arch.x86.contracts.lane_movement import (
     avx512_lane_movement_rules,
 )
-from loom.target.arch.x86.contracts.memory import x86_vector_memory_rules
+from loom.target.arch.x86.contracts.memory import (
+    x86_scalar_float_memory_rules,
+    x86_vector_memory_rules,
+)
+from loom.target.arch.x86.contracts.scalar_float import scalar_bit_transfer_rules
 from loom.target.arch.x86.contracts.shuffle import avx512_shuffle_rules
 from loom.target.arch.x86.contracts.vector_arithmetic import (
     avx512_vector_arithmetic_rules,
@@ -95,7 +100,8 @@ def _memory_rules() -> tuple[DescriptorRule, ...]:
     return x86_vector_memory_rules(
         _descriptor,
         descriptor_key_prefix="x86.avx512",
-        vector_bit_widths=(512,),
+        vector_bit_widths=(8, 16, 32, 64, 128, 256, 512),
+        priority=1,
         diagnostic=_SOURCE_MEMORY_DIAGNOSTIC,
     )
 
@@ -108,6 +114,15 @@ def _cases() -> Sequence[ContractCase]:
         family for family in AVX512_FLOAT_ROOT_FAMILIES if family.approximate
     )
     return (
+        *scalar_bit_transfer_rules(
+            _descriptor, descriptor_key_prefix="x86.avx512", priority=1
+        ),
+        *x86_scalar_float_memory_rules(
+            _descriptor,
+            descriptor_key_prefix="x86.avx512",
+            priority=1,
+            diagnostic=_SOURCE_MEMORY_DIAGNOSTIC,
+        ),
         *avx512_integer_float_rules(_descriptor),
         *float_rounding_rules(
             _descriptor,
@@ -167,6 +182,7 @@ def _cases() -> Sequence[ContractCase]:
 X86_AVX512_CONTRACT_DIALECT_OPS = {
     "scalar": ALL_SCALAR_OPS,
     "vector": ALL_VECTOR_OPS,
+    "view": ALL_VIEW_OPS,
 }
 
 X86_AVX512_CONTRACT_FRAGMENT = ContractFragment(

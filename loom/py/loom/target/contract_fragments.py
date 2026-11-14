@@ -164,6 +164,13 @@ CONTRACT_FRAGMENT_REGISTRATIONS = (
         aliases=("x86_scalar_read_memory",),
     ),
     ContractFragmentRegistration(
+        key="x86.vector.read_memory",
+        module_name="loom.target.arch.x86.contracts.vector_read_memory",
+        symbol_name="X86_VECTOR_READ_MEMORY_CONTRACT_FRAGMENT",
+        dialect_ops_symbol_name="X86_VECTOR_READ_MEMORY_CONTRACT_DIALECT_OPS",
+        aliases=("x86_vector_read_memory",),
+    ),
+    ContractFragmentRegistration(
         key="x86.avx2",
         module_name="loom.target.arch.x86.contracts.avx2",
         symbol_name="X86_AVX2_CONTRACT_FRAGMENT",

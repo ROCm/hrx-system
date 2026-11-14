@@ -1,0 +1,186 @@
+// RUN: emit source-low output=low
+
+// Scalar memory and GPR/XMM bit transfers reach the full SIMD bank without VL.
+x86.target<avx512> @target {features = [-avx512vl]}
+
+func.def target(@target) @scalar_bits(%source: buffer, %word: i32, %wide: i64) -> (i32, i64, f32, f64) {
+  %origin = index.constant 0 : offset
+  %dwords = buffer.view %source[%origin] : buffer -> view<1xf32>
+  %qwords = buffer.view %source[%origin] : buffer -> view<1xf64>
+  %dword = view.load %dwords[0] : view<1xf32> -> f32
+  %qword = view.load %qwords[0] : view<1xf64> -> f64
+  %word_bits = scalar.bitcast %dword : f32 to i32
+  %wide_bits = scalar.bitcast %qword : f64 to i64
+  %word_float = scalar.bitcast %word : i32 to f32
+  %wide_float = scalar.bitcast %wide : i64 to f64
+  view.store %word_float, %dwords[0] : f32, view<1xf32>
+  view.store %wide_float, %qwords[0] : f64, view<1xf64>
+  func.return %word_bits, %wide_bits, %word_float, %wide_float : i32, i64, f32, f64
+}
+
+// ----
+low.func.def target<x86.avx512_features.core>(@target) abi(object_function) abi_layout({signature = (buffer, i32, i64) -> (i32, i64, f32, f64)}) @scalar_bits(%source: reg<x86.gpr64>, %word: reg<x86.gpr32>, %wide: reg<x86.gpr64>) -> (reg<x86.gpr32>, reg<x86.gpr64>, reg<x86.xmm>, reg<x86.xmm>) asm {
+  %dword = avx512.vmovss.load.xmm %source {disp32 = 0}
+  %qword = avx512.vmovsd.load.xmm %source {disp32 = 0}
+  %word_bits = avx512.vmovd.gpr32.xmm %dword
+  %wide_bits = avx512.vmovq.gpr64.xmm %qword
+  %word_float = avx512.vmovd.xmm.gpr32 %word
+  %wide_float = avx512.vmovq.xmm.gpr64 %wide
+  avx512.vmovss.store.xmm %word_float, %source {disp32 = 0}
+  avx512.vmovsd.store.xmm %wide_float, %source {disp32 = 0}
+  return %word_bits, %wide_bits, %word_float, %wide_float
+}
+
+// ====
+
+// Narrow vector memory needs VL. Scalar payloads keep their exact footprints.
+x86.target<avx512> @target
+
+func.def target(@target) @vector_payloads(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %source = buffer.view %input[%origin] : buffer -> view<8xi32>
+  %destination = buffer.view %output[%origin] : buffer -> view<8xi32>
+  %xmm = vector.load %source[0] : view<8xi32> -> vector<4xi32>
+  %ymm = vector.load %source[0] : view<8xi32> -> vector<8xi32>
+  vector.store %xmm, %destination[0] : vector<4xi32>, view<8xi32>
+  vector.store %ymm, %destination[0] : vector<8xi32>, view<8xi32>
+  func.return
+}
+
+// ----
+low.func.def target<x86.avx512.core>(@target) abi(object_function) @vector_payloads(%input: reg<x86.gpr64>, %output: reg<x86.gpr64>) asm {
+  %xmm = avx512.vmovdqu32.load.xmm %input {disp32 = 0}
+  %ymm = avx512.vmovdqu32.load.ymm %input {disp32 = 0}
+  avx512.vmovdqu32.store.xmm %xmm, %output {disp32 = 0}
+  avx512.vmovdqu32.store.ymm %ymm, %output {disp32 = 0}
+  return
+}
+
+// ====
+
+// A feature-disabled profile keeps the VEX realization and its low-sixteen domain.
+x86.target<avx512> @target {features = [-avx512vl]}
+
+func.def target(@target) @vector_payloads_without_vl(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %source = buffer.view %input[%origin] : buffer -> view<8xi32>
+  %destination = buffer.view %output[%origin] : buffer -> view<8xi32>
+  %xmm = vector.load %source[0] : view<8xi32> -> vector<4xi32>
+  %ymm = vector.load %source[0] : view<8xi32> -> vector<8xi32>
+  vector.store %xmm, %destination[0] : vector<4xi32>, view<8xi32>
+  vector.store %ymm, %destination[0] : vector<8xi32>, view<8xi32>
+  func.return
+}
+
+// ----
+low.func.def target<x86.avx512_features.core>(@target) abi(object_function) @vector_payloads_without_vl(%input: reg<x86.gpr64>, %output: reg<x86.gpr64>) asm {
+  %xmm = vmovdqu32.load.xmm %input {disp32 = 0}
+  %ymm = vmovdqu32.load.ymm %input {disp32 = 0}
+  vmovdqu32.store.xmm %xmm, %output {disp32 = 0}
+  vmovdqu32.store.ymm %ymm, %output {disp32 = 0}
+  return
+}
+
+// ====
+
+// Partial carriers read and write only their authored byte and word payloads.
+x86.target<avx512> @target {features = [-avx512vl]}
+
+func.def target(@target) @partial_payloads(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %bytes = buffer.view %input[%origin] : buffer -> view<1xf8E5M2>
+  %words = buffer.view %input[%origin] : buffer -> view<1xbf16>
+  %output_bytes = buffer.view %output[%origin] : buffer -> view<1xf8E5M2>
+  %output_words = buffer.view %output[%origin] : buffer -> view<1xbf16>
+  %byte = vector.load %bytes[0] : view<1xf8E5M2> -> vector<1xf8E5M2>
+  %word = vector.load %words[0] : view<1xbf16> -> vector<1xbf16>
+  vector.store %byte, %output_bytes[0] : vector<1xf8E5M2>, view<1xf8E5M2>
+  vector.store %word, %output_words[0] : vector<1xbf16>, view<1xbf16>
+  func.return
+}
+
+// ----
+low.func.def target<x86.avx512_features.core>(@target) abi(object_function) @partial_payloads(%input: reg<x86.gpr64>, %output: reg<x86.gpr64>) asm {
+  %11 = movzx.load.u8.gpr32 %input {disp32 = 0}
+  %byte = avx512.vmovd.xmm.gpr32 %11
+  %13 = movzx.load.u16.gpr32 %input {disp32 = 0}
+  %word = avx512.vmovd.xmm.gpr32 %13
+  %15 = avx512.vmovd.gpr32.xmm %byte
+  mov.store.u8.gpr32 %15, %output {disp32 = 0}
+  %16 = avx512.vmovd.gpr32.xmm %word
+  mov.store.u16.gpr32 %16, %output {disp32 = 0}
+  return
+}
+
+// ====
+
+x86.target<avx512> @target
+
+func.def target(@target) @literal_payloads() -> (vector<4xi32>, vector<4xi64>) {
+  %c1 = scalar.constant 1 : i32
+  %c2 = scalar.constant 2 : i32
+  %c3 = scalar.constant 3 : i32
+  %c4 = scalar.constant 4 : i32
+  %c1_wide = scalar.constant 1 : i64
+  %c2_wide = scalar.constant 2 : i64
+  %c3_wide = scalar.constant 3 : i64
+  %c4_wide = scalar.constant 4 : i64
+  %xmm = vector.from_elements %c1, %c2, %c3, %c4 : vector<4xi32>
+  %ymm = vector.from_elements %c1_wide, %c2_wide, %c3_wide, %c4_wide : vector<4xi64>
+  func.return %xmm, %ymm : vector<4xi32>, vector<4xi64>
+}
+
+// ----
+low.func.def target<x86.avx512.core>(@target) abi(object_function) abi_layout({signature = () -> (vector<4xi32>, vector<4xi64>)}) @literal_payloads() -> (reg<x86.xmm>, reg<x86.ymm>) asm {
+  %xmm = avx512.vmovdqu64.rodata.xmm @__low_rodata_c251e68b
+  %ymm = avx512.vmovdqu64.rodata.ymm @__low_rodata_6d995dfb
+  return %xmm, %ymm
+}
+
+// ====
+
+x86.target<avx512> @target {features = [-avx512vl]}
+
+func.def target(@target) @literal_payloads_without_vl() -> (vector<4xi32>, vector<4xi64>) {
+  %c1 = scalar.constant 1 : i32
+  %c2 = scalar.constant 2 : i32
+  %c3 = scalar.constant 3 : i32
+  %c4 = scalar.constant 4 : i32
+  %c1_wide = scalar.constant 1 : i64
+  %c2_wide = scalar.constant 2 : i64
+  %c3_wide = scalar.constant 3 : i64
+  %c4_wide = scalar.constant 4 : i64
+  %xmm = vector.from_elements %c1, %c2, %c3, %c4 : vector<4xi32>
+  %ymm = vector.from_elements %c1_wide, %c2_wide, %c3_wide, %c4_wide : vector<4xi64>
+  func.return %xmm, %ymm : vector<4xi32>, vector<4xi64>
+}
+
+// ----
+low.func.def target<x86.avx512_features.core>(@target) abi(object_function) abi_layout({signature = () -> (vector<4xi32>, vector<4xi64>)}) @literal_payloads_without_vl() -> (reg<x86.xmm>, reg<x86.ymm>) asm {
+  %xmm = avx2.vmovdqu.rodata.xmm @__low_rodata_c251e68b
+  %ymm = avx2.vmovdqu.rodata.ymm @__low_rodata_6d995dfb
+  return %xmm, %ymm
+}
+
+// ====
+
+// Positive zero retains its dependency-breaking idiom; negative zero is payload.
+x86.target<avx512> @target {features = [-avx512vl]}
+
+func.def target(@target) @scalar_constants() -> (f32, f32, f64, f64) {
+  %positive_word = scalar.constant 0.0 : f32
+  %negative_word = scalar.constant -0.0 : f32
+  %positive_wide = scalar.constant 0.0 : f64
+  %negative_wide = scalar.constant -0.0 : f64
+  func.return %positive_word, %negative_word, %positive_wide, %negative_wide : f32, f32, f64, f64
+}
+
+// ----
+low.func.def target<x86.avx512_features.core>(@target) abi(object_function) abi_layout({signature = () -> (f32, f32, f64, f64)}) @scalar_constants() -> (reg<x86.xmm>, reg<x86.xmm>, reg<x86.xmm>, reg<x86.xmm>) asm {
+  %positive_word = vxorps.zero.xmm
+  %13 = mov.imm32 -2147483648
+  %negative_word = avx512.vmovd.xmm.gpr32 %13
+  %16 = mov.imm64 -9223372036854775808
+  %negative_wide = avx512.vmovq.xmm.gpr64 %16
+  return %positive_word, %negative_word, %positive_word, %negative_wide
+}

@@ -39,6 +39,12 @@ def test_half_conversion_covers_scalar_and_each_native_packet(evex: bool) -> Non
                 for guard in rule.guards
             )
         for emit in rule.emit:
+            if emit.descriptor.mnemonic == "vmovd":
+                prefix = "x86.avx512." if evex else "x86.avx2."
+                assert emit.descriptor.key.startswith(prefix)
+                for operand in emit.descriptor.operands:
+                    if operand.reg_alts[0].reg_class == "x86.xmm":
+                        assert operand.addressable_unit_count == (0 if evex else 16)
             if emit.descriptor.mnemonic == "vcvtps2ph":
                 assert emit.immediates == {"rounding": 0}
     lanes = (2, 4, 8, 16) if evex else (2, 4, 8)

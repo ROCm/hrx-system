@@ -1,0 +1,182 @@
+// RUN: emit source-low target=x86:avx2 output=low
+
+// Scalar byte and qword footprints replicate directly into native SIMD
+// carriers. A one-element source does not permit a full-vector memory read.
+func.def @scalar_footprints(%bytes: buffer, %qwords: buffer) -> (vector<32xi8>, vector<2xf64>) {
+  %origin = index.constant 0 : offset
+  %byte_view = buffer.view %bytes[%origin] : buffer -> view<1xi8>
+  %qword_view = buffer.view %qwords[%origin] : buffer -> view<1xf64>
+  %byte = view.load %byte_view[0] : view<1xi8> -> i8
+  %qword = view.load %qword_view[0] : view<1xf64> -> f64
+  %byte_lanes = vector.splat %byte : vector<32xi8>
+  %qword_lanes = vector.splat %qword : vector<2xf64>
+  func.return %byte_lanes, %qword_lanes : vector<32xi8>, vector<2xf64>
+}
+
+// ----
+low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = (buffer, buffer) -> (vector<32xi8>, vector<2xf64>)}) @scalar_footprints(%bytes: reg<x86.gpr64>, %qwords: reg<x86.gpr64>) -> (reg<x86.ymm>, reg<x86.xmm>) asm {
+  %byte_lanes = vpbroadcastb.load.ymm %bytes {disp32 = 0}
+  %qword_lanes = vpbroadcastq.load.xmm %qwords {disp32 = 0}
+  return %byte_lanes, %qword_lanes
+}
+
+// ====
+// RUN: emit source-low target=x86:avx512 output=low
+
+// Indexed addressing preserves the scalar element stride and the independent
+// displacement, while the destination can use all thirty-two SIMD registers.
+func.def @indexed_word(%input: buffer, %position0: index) -> (vector<32xi16>) {
+  %origin = index.constant 6 : offset
+  %position = index.assume %position0 [range(%position0, 0, 7)] : index
+  %source = buffer.view %input[%origin] : buffer -> view<8xi16>
+  %value = view.load %source[%position] : view<8xi16> -> i16
+  %result = vector.splat %value : vector<32xi16>
+  func.return %result : vector<32xi16>
+}
+
+// ----
+low.func.def target<x86.avx512.core> abi(object_function) abi_layout({signature = (buffer, index) -> (vector<32xi16>)}) @indexed_word(%input: reg<x86.gpr64>, %position: reg<x86.gpr64>) -> (reg<x86.zmm>) asm {
+  %result = vpbroadcastw.load.indexed.zmm %input, %position {disp32 = 6, scale = 2}
+  return %result
+}
+
+// ====
+// RUN: emit source-low target=x86:avx512 output=low
+
+func.def @floating_dword(%input: buffer) -> (vector<16xf32>) {
+  %origin = index.constant 0 : offset
+  %source = buffer.view %input[%origin] : buffer -> view<1xf32>
+  %value = view.load %source[0] : view<1xf32> -> f32
+  %result = vector.splat %value : vector<16xf32>
+  func.return %result : vector<16xf32>
+}
+
+// ----
+low.func.def target<x86.avx512.core> abi(object_function) abi_layout({signature = (buffer) -> (vector<16xf32>)}) @floating_dword(%input: reg<x86.gpr64>) -> (reg<x86.zmm>) asm {
+  %result = vpbroadcastd.load.zmm %input {disp32 = 0}
+  return %result
+}
+
+// ====
+// RUN: emit source-low target=x86:avx512 output=low
+
+// Partial carriers retain floating payload bits without a scalar conversion.
+func.def @partial_payloads(%bytes: buffer, %words: buffer) -> (vector<8xf8E5M2>, vector<4xbf16>) {
+  %origin = index.constant 0 : offset
+  %byte_view = buffer.view %bytes[%origin] : buffer -> view<1xf8E5M2>
+  %word_view = buffer.view %words[%origin] : buffer -> view<1xbf16>
+  %byte = view.load %byte_view[0] : view<1xf8E5M2> -> f8E5M2
+  %word = view.load %word_view[0] : view<1xbf16> -> bf16
+  %byte_lanes = vector.splat %byte : vector<8xf8E5M2>
+  %word_lanes = vector.splat %word : vector<4xbf16>
+  func.return %byte_lanes, %word_lanes : vector<8xf8E5M2>, vector<4xbf16>
+}
+
+// ----
+low.func.def target<x86.avx512.core> abi(object_function) abi_layout({signature = (buffer, buffer) -> (vector<8xf8E5M2>, vector<4xbf16>)}) @partial_payloads(%bytes: reg<x86.gpr64>, %words: reg<x86.gpr64>) -> (reg<x86.xmm>, reg<x86.xmm>) asm {
+  %byte_lanes = avx512.vpbroadcastb.load.xmm %bytes {disp32 = 0}
+  %word_lanes = avx512.vpbroadcastw.load.xmm %words {disp32 = 0}
+  return %byte_lanes, %word_lanes
+}
+
+// ====
+// RUN: emit source-low target=x86:avx2 output=low
+
+// The fused read remains before the aliasing store, even when the pure splat
+// is originally after it.
+func.def @snapshot_before_store(%input: buffer, %stored: f32) -> (vector<8xf32>) {
+  %origin = index.constant 0 : offset
+  %source = buffer.view %input[%origin] : buffer -> view<1xf32>
+  %value = view.load %source[0] : view<1xf32> -> f32
+  view.store %stored, %source[0] : f32, view<1xf32>
+  %result = vector.splat %value : vector<8xf32>
+  func.return %result : vector<8xf32>
+}
+
+// ----
+low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = (buffer, f32) -> (vector<8xf32>)}) @snapshot_before_store(%input: reg<x86.gpr64>, %stored: reg<x86.xmm>) -> (reg<x86.ymm>) asm {
+  %result = vpbroadcastd.load.ymm %input {disp32 = 0}
+  vmovss.store.xmm %stored, %input {disp32 = 0}
+  return %result
+}
+
+// ====
+// RUN: emit source-low target=x86:avx2 output=low
+
+// A second user retains the original scalar value without another memory read.
+func.def @shared_load(%input: buffer) -> (f32, vector<8xf32>) {
+  %origin = index.constant 0 : offset
+  %source = buffer.view %input[%origin] : buffer -> view<1xf32>
+  %value = view.load %source[0] : view<1xf32> -> f32
+  %result = vector.splat %value : vector<8xf32>
+  func.return %value, %result : f32, vector<8xf32>
+}
+
+// ----
+low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = (buffer) -> (f32, vector<8xf32>)}) @shared_load(%input: reg<x86.gpr64>) -> (reg<x86.xmm>, reg<x86.ymm>) asm {
+  %value = vmovss.load.xmm %input {disp32 = 0}
+  %result = vbroadcastss.ymm %value
+  return %value, %result
+}
+
+// ====
+// RUN: emit source-low target=x86:avx512 output=low
+
+// A volatile read remains one read, with its access contract attached.
+func.def @volatile_broadcast(%input: buffer) -> (vector<8xi64>) {
+  %origin = index.constant 0 : offset
+  %source = buffer.view %input[%origin] : buffer -> view<1xi64>
+  %value = view.load<volatile> %source[0] : view<1xi64> -> i64
+  %result = vector.splat %value : vector<8xi64>
+  func.return %result : vector<8xi64>
+}
+
+// ----
+low.func.def target<x86.avx512.core> abi(object_function) abi_layout({signature = (buffer) -> (vector<8xi64>)}) @volatile_broadcast(%input: reg<x86.gpr64>) -> (reg<x86.zmm>) asm {
+  %result = vpbroadcastq.load.zmm<volatile> %input {disp32 = 0}
+  return %result
+}
+
+// ====
+// RUN: emit source-low target=x86:avx2 output=low
+
+// Offsets outside disp32 keep their full address width before the scalar read.
+func.def @wide_offset(%input: buffer) -> (vector<8xf32>) {
+  %origin = index.constant 2147483648 : offset
+  %source = buffer.view %input[%origin] : buffer -> view<1xf32>
+  %value = view.load %source[0] : view<1xf32> -> f32
+  %result = vector.splat %value : vector<8xf32>
+  func.return %result : vector<8xf32>
+}
+
+// ----
+low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = (buffer) -> (vector<8xf32>)}) @wide_offset(%input: reg<x86.gpr64>) -> (reg<x86.ymm>) asm {
+  %8 = mov.imm64 2147483648
+  %result = vpbroadcastd.load.indexed.ymm %input, %8 {disp32 = 0, scale = 1}
+  return %result
+}
+
+// ====
+// RUN: emit source-low output=low
+
+// Disabling VL keeps the VEX narrow form, while a complete ZMM broadcast
+// remains available. The feature-qualified profile uses the same source rules.
+x86.target<avx512> @target {features = [-avx512vl]}
+
+func.def target(@target) @without_vl(%input: buffer, %wide_input: buffer) -> (vector<8xf32>, vector<16xf32>) {
+  %origin = index.constant 0 : offset
+  %source = buffer.view %input[%origin] : buffer -> view<1xf32>
+  %wide_source = buffer.view %wide_input[%origin] : buffer -> view<1xf32>
+  %value = view.load %source[0] : view<1xf32> -> f32
+  %wide_value = view.load %wide_source[0] : view<1xf32> -> f32
+  %result = vector.splat %value : vector<8xf32>
+  %wide_result = vector.splat %wide_value : vector<16xf32>
+  func.return %result, %wide_result : vector<8xf32>, vector<16xf32>
+}
+
+// ----
+low.func.def target<x86.avx512_features.core>(@target) abi(object_function) abi_layout({signature = (buffer, buffer) -> (vector<8xf32>, vector<16xf32>)}) @without_vl(%input: reg<x86.gpr64>, %wide_input: reg<x86.gpr64>) -> (reg<x86.ymm>, reg<x86.zmm>) asm {
+  %result = vpbroadcastd.load.ymm %input {disp32 = 0}
+  %wide_result = vpbroadcastd.load.zmm %wide_input {disp32 = 0}
+  return %result, %wide_result
+}

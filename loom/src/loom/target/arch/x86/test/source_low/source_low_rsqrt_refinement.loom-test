@@ -68,7 +68,7 @@ low.func.def target<x86.avx512.core>(@target) abi(object_function) abi_layout({s
   %50 = vsubpd.xmm %40, %49
   %51 = vmulpd.xmm %46, %50
   %52 = vpermilpd.xmm %value, 0
-  %53 = vmovq.gpr64.xmm %52
+  %53 = avx512.vmovq.gpr64.xmm %52
   %54 = mov.imm64 -4503599627370496
   %55 = copy %53 : reg<x86.gpr64> -> reg<x86.gpr64>
   %56 = add.gpr64 %55, %54

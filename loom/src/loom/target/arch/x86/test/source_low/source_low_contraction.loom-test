@@ -146,12 +146,12 @@ func.def target(@target) @encoded_i8_blocked_mma(%lhs_buffer: buffer, %rhs_buffe
 
 // ----
 low.func.def target<x86.avx512_features.core>(@target) abi(object_function) @encoded_i8_blocked_mma(%lhs_buffer: reg<x86.gpr64>, %rhs_buffer: reg<x86.gpr64>, %output_buffer: reg<x86.gpr64>, %bounded_origin: reg<x86.gpr64>) asm {
-  %lhs = vmovdqu32.load.indexed.ymm %lhs_buffer, %bounded_origin {disp32 = 0, scale = 1}
-  %rhs = vmovdqu32.load.indexed.ymm %rhs_buffer, %bounded_origin {disp32 = 0, scale = 1}
-  %init = vmovdqu32.load.indexed.ymm %output_buffer, %bounded_origin {disp32 = 0, scale = 4}
+  %lhs = avx512.vmovdqu32.load.indexed.ymm %lhs_buffer, %bounded_origin {disp32 = 0, scale = 1}
+  %rhs = avx512.vmovdqu32.load.indexed.ymm %rhs_buffer, %bounded_origin {disp32 = 0, scale = 1}
+  %init = avx512.vmovdqu32.load.indexed.ymm %output_buffer, %bounded_origin {disp32 = 0, scale = 4}
   %31 = copy %init : reg<x86.ymm> -> reg<x86.ymm>
   %dot = avx_vnni_int8.vpdpbssd.ymm %31, %lhs, %rhs
-  vmovdqu32.store.indexed.ymm %dot, %output_buffer, %bounded_origin {disp32 = 0, scale = 4}
+  avx512.vmovdqu32.store.indexed.ymm %dot, %output_buffer, %bounded_origin {disp32 = 0, scale = 4}
   return
 }
 

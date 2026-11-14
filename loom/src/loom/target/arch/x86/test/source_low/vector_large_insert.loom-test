@@ -378,7 +378,7 @@ low.func.def public target<x86.avx512.core>(@target) abi(object_function) abi_la
   %128 = vpand.xmm %119, %127
   %129 = vmovd.xmm.gpr32 %value
   %130 = vpbroadcastw.xmm %129
-  %131 = vmovsd.load.xmm %input {disp32 = 64}
+  %131 = avx512.vmovsd.load.xmm %input {disp32 = 64}
   %132 = vpblendvb.xmm %131, %130, %128
   %133 = copy %74 : reg<x86.gpr32> -> reg<x86.gpr32>
   %134 = cmp.select.imm.gpr64.gpr32 %position, %value, %133, 36, "eq"
@@ -387,7 +387,7 @@ low.func.def public target<x86.avx512.core>(@target) abi(object_function) abi_la
   %137 = copy %76 : reg<x86.gpr32> -> reg<x86.gpr32>
   %138 = cmp.select.imm.gpr64.gpr32 %position, %value, %137, 38, "eq"
   vmovdqu32.store %105, %output {disp32 = 0}
-  vmovsd.store.xmm %132, %output {disp32 = 64}
+  avx512.vmovsd.store.xmm %132, %output {disp32 = 64}
   mov.store.u16.gpr32 %134, %output {disp32 = 72}
   mov.store.u16.gpr32 %136, %output {disp32 = 74}
   mov.store.u16.gpr32 %138, %output {disp32 = 76}

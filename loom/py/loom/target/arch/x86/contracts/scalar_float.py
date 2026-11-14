@@ -91,13 +91,19 @@ def scalar_register_conversion_rule(
     )
 
 
-def _bf16_to_f32_rule(descriptor_lookup: _DescriptorLookup) -> DescriptorRule:
+def _bf16_to_f32_rule(
+    descriptor_lookup: _DescriptorLookup,
+    *,
+    descriptor_key_prefix: str,
+    priority: int,
+) -> DescriptorRule:
     shift = descriptor_lookup("x86.scalar.shl.imm.gpr32")
-    move = descriptor_lookup("x86.avx2.vmovd.xmm.gpr32")
+    move = descriptor_lookup(f"{descriptor_key_prefix}.vmovd.xmm.gpr32")
     # BF16 is the high half of the FP32 encoding. The shift discards unused
     # carrier bits and preserves subnormals without floating-point arithmetic.
     return DescriptorRule(
         source_op=scalar_conversion.scalar_extf,
+        priority=priority,
         descriptor=move,
         guards=(
             Guard.value_type("input", _BF16),
@@ -269,11 +275,69 @@ def _scalar_float_compare_rules(
     return tuple(rules)
 
 
+def scalar_bit_transfer_rules(
+    descriptor_lookup: _DescriptorLookup,
+    *,
+    descriptor_key_prefix: str,
+    priority: int = 0,
+) -> tuple[DescriptorRule, ...]:
+    """Shares exact scalar bit transport across VEX and EVEX register domains."""
+    return (
+        f32_scalar_constant_rule(
+            descriptor_lookup("x86.scalar.movimm.gpr32"),
+            descriptor_lookup(f"{descriptor_key_prefix}.vmovd.xmm.gpr32"),
+            priority=priority,
+        ),
+        f64_scalar_constant_rule(
+            descriptor_lookup("x86.scalar.movimm.gpr64"),
+            descriptor_lookup(f"{descriptor_key_prefix}.vmovq.xmm.gpr64"),
+            priority=priority,
+        ),
+        _bf16_to_f32_rule(
+            descriptor_lookup,
+            descriptor_key_prefix=descriptor_key_prefix,
+            priority=priority,
+        ),
+        scalar_register_conversion_rule(
+            scalar_conversion.scalar_bitcast,
+            _F32,
+            _I32,
+            f"{descriptor_key_prefix}.vmovd.gpr32.xmm",
+            descriptor_lookup,
+            priority=priority,
+        ),
+        scalar_register_conversion_rule(
+            scalar_conversion.scalar_bitcast,
+            _I32,
+            _F32,
+            f"{descriptor_key_prefix}.vmovd.xmm.gpr32",
+            descriptor_lookup,
+            priority=priority,
+        ),
+        scalar_register_conversion_rule(
+            scalar_conversion.scalar_bitcast,
+            _F64,
+            _I64,
+            f"{descriptor_key_prefix}.vmovq.gpr64.xmm",
+            descriptor_lookup,
+            priority=priority,
+        ),
+        scalar_register_conversion_rule(
+            scalar_conversion.scalar_bitcast,
+            _I64,
+            _F64,
+            f"{descriptor_key_prefix}.vmovq.xmm.gpr64",
+            descriptor_lookup,
+            priority=priority,
+        ),
+    )
+
+
 def avx2_scalar_float_rules(
     descriptor_lookup: _DescriptorLookup,
 ) -> tuple[ContractCase, ...]:
     return (
-        _bf16_to_f32_rule(descriptor_lookup),
+        *scalar_bit_transfer_rules(descriptor_lookup, descriptor_key_prefix="x86.avx2"),
         floating_scalar_zero_rule(
             _F32,
             descriptor_lookup("x86.avx2.vxorps.zero.xmm"),
@@ -281,46 +345,10 @@ def avx2_scalar_float_rules(
         floating_scalar_zero_rule(
             _F64,
             descriptor_lookup("x86.avx2.vxorps.zero.xmm"),
-        ),
-        f32_scalar_constant_rule(
-            descriptor_lookup("x86.scalar.movimm.gpr32"),
-            descriptor_lookup("x86.avx2.vmovd.xmm.gpr32"),
-        ),
-        f64_scalar_constant_rule(
-            descriptor_lookup("x86.scalar.movimm.gpr64"),
-            descriptor_lookup("x86.avx2.vmovq.xmm.gpr64"),
         ),
         *_scalar_float_compare_rules(descriptor_lookup),
         xmm_scalar_select_rule(_F32, descriptor_lookup),
         xmm_scalar_select_rule(_F64, descriptor_lookup),
-        scalar_register_conversion_rule(
-            scalar_conversion.scalar_bitcast,
-            _F32,
-            _I32,
-            "x86.avx2.vmovd.gpr32.xmm",
-            descriptor_lookup,
-        ),
-        scalar_register_conversion_rule(
-            scalar_conversion.scalar_bitcast,
-            _I32,
-            _F32,
-            "x86.avx2.vmovd.xmm.gpr32",
-            descriptor_lookup,
-        ),
-        scalar_register_conversion_rule(
-            scalar_conversion.scalar_bitcast,
-            _F64,
-            _I64,
-            "x86.avx2.vmovq.gpr64.xmm",
-            descriptor_lookup,
-        ),
-        scalar_register_conversion_rule(
-            scalar_conversion.scalar_bitcast,
-            _I64,
-            _F64,
-            "x86.avx2.vmovq.xmm.gpr64",
-            descriptor_lookup,
-        ),
         *binary_descriptor_rules(
             tuple(
                 DirectDescriptorCase(

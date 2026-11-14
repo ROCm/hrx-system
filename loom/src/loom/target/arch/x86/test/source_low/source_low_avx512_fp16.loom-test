@@ -221,9 +221,9 @@ low.func.def target<x86.avx512_features.core>(@target) abi(object_function) abi_
   %dot = vfmadd231sh.xmm %53, %54, %55
   %57 = vaddsh.xmm %scalar, %root
   %reduced = vaddsh.xmm %57, %54
-  %loaded = vmovss.load.xmm %input {disp32 = 0}
+  %loaded = avx512.vmovss.load.xmm %input {disp32 = 0}
   %result = vaddph.xmm %loaded, %root
-  vmovss.store.xmm %result, %output {disp32 = 4}
+  avx512.vmovss.store.xmm %result, %output {disp32 = 4}
   return %result, %extended, %dot, %reduced
 }
 
@@ -269,9 +269,9 @@ func.def target(@target) @low_xmm_fp16_memory(%input: buffer, %output: buffer) {
 
 // ----
 low.func.def target<x86.avx512_features.core>(@target) abi(object_function) @low_xmm_fp16_memory(%input: reg<x86.gpr64>, %output: reg<x86.gpr64>) asm {
-  %value = vmovsd.load.xmm %input {disp32 = 0}
+  %value = avx512.vmovsd.load.xmm %input {disp32 = 0}
   %doubled = vaddph.xmm %value, %value
-  vmovsd.store.xmm %doubled, %output {disp32 = 8}
+  avx512.vmovsd.store.xmm %doubled, %output {disp32 = 8}
   return
 }
 

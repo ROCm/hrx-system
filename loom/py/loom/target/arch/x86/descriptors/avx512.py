@@ -135,7 +135,8 @@ from .integer_float import (
 )
 from .integer_rotation import X86_AVX512_ROTATION_DESCRIPTORS
 from .integer_unary import integer_unary_descriptors
-from .memory import memory_descriptors
+from .memory import broadcast_memory_descriptors, simd_memory_descriptors
+from .register_transfer import register_transfer_descriptors
 from .scalar import X86_SCALAR_DESCRIPTOR_SET
 
 _REGISTER_SUFFIXES = {64: "xmm", 128: "xmm", 256: "ymm", 512: "zmm"}
@@ -590,6 +591,8 @@ X86_AVX512_CORE_DESCRIPTOR_SET = DescriptorSet(
     enum_domains=X86_SCALAR_DESCRIPTOR_SET.enum_domains,
     descriptors=(
         *X86_AVX2_DESCRIPTORS,
+        *broadcast_memory_descriptors(evex=True),
+        *register_transfer_descriptors(evex=True),
         *X86_AVX512_ROTATION_DESCRIPTORS,
         *integer_unary_descriptors(evex=True),
         *integer_float_descriptors(unsigned=True),
@@ -1038,23 +1041,30 @@ X86_AVX512_CORE_DESCRIPTOR_SET = DescriptorSet(
                 (128, 256, 512) if family in AVX512VL_UNIFORM_SHIFT_FAMILIES else (512,)
             )
         ),
-        _avx512_descriptor(
-            Descriptor(
-                key="x86.avx512.vmovdqu64.rodata.zmm",
-                mnemonic="vmovdqu64",
-                semantic_tag="memory.load.rodata.v512",
-                operands=(_zmm_result(),),
-                immediates=(_READ_ONLY_DATA_IMMEDIATE,),
-                asm_forms=_asm(
-                    mnemonic="avx512.vmovdqu64.rodata.zmm",
-                    results=("dst",),
-                    immediates=("data",),
+        *(
+            _avx512_descriptor(
+                Descriptor(
+                    key=f"x86.avx512.vmovdqu64.rodata.{suffix}",
+                    mnemonic="vmovdqu64",
+                    semantic_tag=f"memory.load.rodata.v{width}",
+                    operands=(_vector_result(width),),
+                    immediates=(_READ_ONLY_DATA_IMMEDIATE,),
+                    asm_forms=_asm(
+                        mnemonic=f"avx512.vmovdqu64.rodata.{suffix}",
+                        results=("dst",),
+                        immediates=("data",),
+                    ),
+                    schedule_class=schedule,
+                    flags=(DescriptorFlag.DEAD_REMOVABLE,),
                 ),
-                schedule_class=_SCHEDULE_MEMORY_LOAD_ZMM,
-                flags=(DescriptorFlag.DEAD_REMOVABLE,),
-            ),
-            native.VMOVDQU64,
-            scalar=False,
+                native.VMOVDQU64,
+                scalar=False,
+            )
+            for width, suffix, schedule in (
+                (128, "xmm", _SCHEDULE_MEMORY_LOAD_XMM),
+                (256, "ymm", _SCHEDULE_MEMORY_LOAD_YMM),
+                (512, "zmm", _SCHEDULE_MEMORY_LOAD_ZMM),
+            )
         ),
         *(
             _avx512_descriptor(
@@ -1249,22 +1259,7 @@ X86_AVX512_CORE_DESCRIPTOR_SET = DescriptorSet(
                 strict=True,
             )
         ),
-        *memory_descriptors(
-            key_prefix="x86.avx512",
-            load_mnemonic="vmovdqu32",
-            store_mnemonic="vmovdqu32",
-            register_class=_REG_ZMM,
-            register_suffix="zmm",
-            semantic_type="v512",
-            width_bits=512,
-            load_schedule_class=_SCHEDULE_MEMORY_LOAD_ZMM,
-            store_schedule_class=_SCHEDULE_MEMORY_STORE_ZMM,
-            assembly_suffix="",
-            vector_instructions=native.VECTOR_MEMORY,
-            vector_binder=lambda descriptor, instruction: _avx512_descriptor(
-                descriptor, instruction, scalar=False
-            ),
-        ),
+        *simd_memory_descriptors(evex=True),
         *(
             _predicate_conversion_descriptor(
                 element_bit_width,

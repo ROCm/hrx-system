@@ -30,6 +30,8 @@
 #include "loom/target/arch/x86/contracts/scalar_lower_rules.h"
 #include "loom/target/arch/x86/contracts/scalar_read_memory.h"
 #include "loom/target/arch/x86/contracts/scalar_read_memory_lower_rules.h"
+#include "loom/target/arch/x86/contracts/vector_read_memory.h"
+#include "loom/target/arch/x86/contracts/vector_read_memory_lower_rules.h"
 #include "loom/target/arch/x86/feature_bits.h"
 #include "loom/target/arch/x86/lower/contraction.h"
 #include "loom/target/arch/x86/lower/lower.h"

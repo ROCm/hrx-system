@@ -109,6 +109,9 @@ enum loom_x86_encoding_format_bits_e {
 // 32-bit embedded broadcast in ModRM.r/m. Bits 12..14 select the encoding
 // behavior and bit 15 marks the recipe. Selectors name allocated results and
 // inputs or the bounded ModRM opcode extensions used by immediate shift forms.
+// Memory middle selectors 13..15 instead select 2/4/8-byte scalar displacement
+// tuples with an unused VEX.vvvv field. Selector NONE uses byte displacement;
+// these scalar tuples do not set EVEX's embedded-broadcast bit.
 typedef enum loom_x86_vector_register_selector_e {
   LOOM_X86_VECTOR_REGISTER_RESULT = 0,
   LOOM_X86_VECTOR_REGISTER_INPUT_0 = 1,

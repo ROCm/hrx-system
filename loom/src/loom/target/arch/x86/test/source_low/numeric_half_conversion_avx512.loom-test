@@ -7,7 +7,7 @@ func.def @convert_f16_f32_1(%input: f16) -> (f32) {
 
 // ----
 low.func.def target<x86.avx512.core> abi(object_function) abi_layout({signature = (f16) -> (f32)}) @convert_f16_f32_1(%input: reg<x86.gpr32>) -> (reg<x86.xmm>) asm {
-  %5 = vmovd.xmm.gpr32 %input
+  %5 = avx512.vmovd.xmm.gpr32 %input
   %result = avx512.vcvtph2ps.xmm.xmm %5
   return %result
 }
@@ -74,7 +74,7 @@ func.def @convert_f32_f16_1(%input: f32) -> (f16) {
 // ----
 low.func.def target<x86.avx512.core> abi(object_function) abi_layout({signature = (f32) -> (f16)}) @convert_f32_f16_1(%input: reg<x86.xmm>) -> (reg<x86.gpr32>) asm {
   %5 = avx512.vcvtps2ph.xmm.xmm %input, 0
-  %result = vmovd.gpr32.xmm %5
+  %result = avx512.vmovd.gpr32.xmm %5
   return %result
 }
 
@@ -139,7 +139,7 @@ func.def @convert_f16_f64_1(%input: f16) -> (f64) {
 
 // ----
 low.func.def target<x86.avx512.core> abi(object_function) abi_layout({signature = (f16) -> (f64)}) @convert_f16_f64_1(%input: reg<x86.gpr32>) -> (reg<x86.xmm>) asm {
-  %7 = vmovd.xmm.gpr32 %input
+  %7 = avx512.vmovd.xmm.gpr32 %input
   %8 = avx512.vcvtph2ps.xmm.xmm %7
   %result = avx512.vcvtss2sd.xmm %8, %8
   return %result
@@ -212,8 +212,8 @@ func.def target(@target) @without_vector_length(%input_half: buffer, %input_floa
 
 // ----
 low.func.def target<x86.avx512_features.core>(@target) abi(object_function) @without_vector_length(%input_half: reg<x86.gpr64>, %input_float: reg<x86.gpr64>, %output_half: reg<x86.gpr64>, %output_float: reg<x86.gpr64>) asm {
-  %half = vmovss.load.xmm %input_half {disp32 = 0}
-  %float = vmovsd.load.xmm %input_float {disp32 = 0}
+  %half = avx512.vmovss.load.xmm %input_half {disp32 = 0}
+  %float = avx512.vmovsd.load.xmm %input_float {disp32 = 0}
   %29 = vpextrw.xmm %half, 0
   %30 = vmovd.xmm.gpr32 %29
   %31 = vcvtsh2ss.xmm %30, %30
@@ -227,7 +227,7 @@ low.func.def target<x86.avx512_features.core>(@target) abi(object_function) @wit
   %39 = vcvtss2sh.xmm %38, %38
   %40 = vmovd.gpr32.xmm %39
   %narrow = vpinsrw.xmm %37, %40, 1
-  vmovsd.store.xmm %wide, %output_float {disp32 = 0}
-  vmovss.store.xmm %narrow, %output_half {disp32 = 0}
+  avx512.vmovsd.store.xmm %wide, %output_float {disp32 = 0}
+  avx512.vmovss.store.xmm %narrow, %output_half {disp32 = 0}
   return
 }

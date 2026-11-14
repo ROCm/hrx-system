@@ -21,13 +21,16 @@ def half_conversion_rules(
     descriptor_lookup: DescriptorLookup, *, evex: bool
 ) -> tuple[DescriptorRule, ...]:
     feature = "avx512" if evex else "f16c"
+    transfer_prefix = "x86.avx512" if evex else "x86.avx2"
     rules = []
     for narrow in (False, True):
         mnemonic = "vcvtps2ph" if narrow else "vcvtph2ps"
         input_element, result_element = ("f32", "f16") if narrow else ("f16", "f32")
         descriptor = descriptor_lookup(f"x86.{feature}.{mnemonic}.xmm.xmm")
         move = descriptor_lookup(
-            "x86.avx2.vmovd.gpr32.xmm" if narrow else "x86.avx2.vmovd.xmm.gpr32"
+            f"{transfer_prefix}.vmovd.gpr32.xmm"
+            if narrow
+            else f"{transfer_prefix}.vmovd.xmm.gpr32"
         )
         conversion_emit = emit_descriptor_op(
             descriptor=descriptor,

@@ -74,15 +74,15 @@ func.def target(@target) @construct_dense_live_lanes(%v0: i32, %v1: i32, %v2: i3
 x86.target<avx512> @target
 
 low.func.def target<x86.avx512.core>(@target) abi(object_function) abi_layout({signature = () -> (vector<16xi8>, vector<8xi16>, vector<8xf32>, vector<8xi64>)}) @construct_exact_lanes() -> (reg<x86.xmm>, reg<x86.xmm>, reg<x86.ymm>, reg<x86.zmm>) asm {
-  %xmm_bytes = avx2.vmovdqu.rodata.xmm @__low_rodata_c4c062ff
-  %xmm_words = avx2.vmovdqu.rodata.xmm @__low_rodata_4a75d4f7
-  %ymm_dwords = avx2.vmovdqu.rodata.ymm @__low_rodata_d73f477f
+  %xmm_bytes = avx512.vmovdqu64.rodata.xmm @__low_rodata_c4c062ff
+  %xmm_words = avx512.vmovdqu64.rodata.xmm @__low_rodata_4a75d4f7
+  %ymm_dwords = avx512.vmovdqu64.rodata.ymm @__low_rodata_d73f477f
   %zmm_qwords = avx512.vmovdqu64.rodata.zmm @__low_rodata_f14fa1bf
   return %xmm_bytes, %xmm_words, %ymm_dwords, %zmm_qwords
 }
 
 low.func.def target<x86.avx512.core>(@target) abi(object_function) abi_layout({signature = () -> (vector<16xi8>)}) @reuse_exact_lanes() -> (reg<x86.xmm>) asm {
-  %result = avx2.vmovdqu.rodata.xmm @__low_rodata_c4c062ff
+  %result = avx512.vmovdqu64.rodata.xmm @__low_rodata_c4c062ff
   return %result
 }
 
@@ -104,17 +104,17 @@ low.func.def target<x86.avx512.core>(@target) abi(object_function) abi_layout({s
 }
 
 low.func.def target<x86.avx512.core>(@target) abi(object_function) abi_layout({signature = () -> (vector<16xf8E4M3>, vector<16xf8E5M2>, vector<8xf16>, vector<8xbf16>, vector<4xi32>, vector<2xf64>)}) @construct_exact_storage_lanes() -> (reg<x86.xmm>, reg<x86.xmm>, reg<x86.xmm>, reg<x86.xmm>, reg<x86.xmm>, reg<x86.xmm>) asm {
-  %e4 = avx2.vmovdqu.rodata.xmm @__low_rodata_5626d74f
-  %e5 = avx2.vmovdqu.rodata.xmm @__low_rodata_5362c38f
-  %f16 = avx2.vmovdqu.rodata.xmm @__low_rodata_3597da8f
-  %bf16 = avx2.vmovdqu.rodata.xmm @__low_rodata_184f736f
-  %i32 = avx2.vmovdqu.rodata.xmm @__low_rodata_9bdcd267
-  %f64 = avx2.vmovdqu.rodata.xmm @__low_rodata_f5738314
+  %e4 = avx512.vmovdqu64.rodata.xmm @__low_rodata_5626d74f
+  %e5 = avx512.vmovdqu64.rodata.xmm @__low_rodata_5362c38f
+  %f16 = avx512.vmovdqu64.rodata.xmm @__low_rodata_3597da8f
+  %bf16 = avx512.vmovdqu64.rodata.xmm @__low_rodata_184f736f
+  %i32 = avx512.vmovdqu64.rodata.xmm @__low_rodata_9bdcd267
+  %f64 = avx512.vmovdqu64.rodata.xmm @__low_rodata_f5738314
   return %e4, %e5, %f16, %bf16, %i32, %f64
 }
 
 low.func.def target<x86.avx512.core>(@target) abi(object_function) abi_layout({signature = (i32) -> (vector<8xi32>)}) @patch_exact_integer_lanes(%lane: reg<x86.gpr32>) -> (reg<x86.ymm>) asm {
-  %base = avx2.vmovdqu.rodata.ymm @__low_rodata_470935ef
+  %base = avx512.vmovdqu64.rodata.ymm @__low_rodata_470935ef
   %37 = vextractf128.xmm %base, 0
   %38 = vpinsrd.xmm %37, %lane, 3
   %result = vinsertf128.ymm.xmm %base, %38, 0
@@ -122,7 +122,7 @@ low.func.def target<x86.avx512.core>(@target) abi(object_function) abi_layout({s
 }
 
 low.func.def target<x86.avx512.core>(@target) abi(object_function) abi_layout({signature = (f32, f32) -> (vector<8xf32>)}) @patch_exact_float_lanes(%low: reg<x86.xmm>, %high: reg<x86.xmm>) -> (reg<x86.ymm>) asm {
-  %base = avx2.vmovdqu.rodata.ymm @__low_rodata_ab4bda1e
+  %base = avx512.vmovdqu64.rodata.ymm @__low_rodata_ab4bda1e
   %44 = vextractf128.xmm %base, 0
   %45 = vinsertps.xmm %44, %low, 16
   %with_low = vinsertf128.ymm.xmm %base, %45, 0
@@ -133,7 +133,7 @@ low.func.def target<x86.avx512.core>(@target) abi(object_function) abi_layout({s
 }
 
 low.func.def target<x86.avx512.core>(@target) abi(object_function) abi_layout({signature = (i32, i32) -> (vector<8xi32>)}) @replace_exact_lane_twice(%first: reg<x86.gpr32>, %last: reg<x86.gpr32>) -> (reg<x86.ymm>) asm {
-  %base = avx2.vmovdqu.rodata.ymm @__low_rodata_470935ef
+  %base = avx512.vmovdqu64.rodata.ymm @__low_rodata_470935ef
   %54 = vextractf128.xmm %base, 0
   %55 = vpinsrd.xmm %54, %last, 3
   %result = vinsertf128.ymm.xmm %base, %55, 0
