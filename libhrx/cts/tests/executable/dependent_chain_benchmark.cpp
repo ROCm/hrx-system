@@ -417,7 +417,7 @@ Runtime& GetRuntime() {
   return runtime;
 }
 
-template <typename Runtime, Submission Mode>
+template <typename Runtime, Submission Mode, bool IncludeCompletion>
 void Run(benchmark::State& state) {
   auto& runtime = GetRuntime<Runtime>();
   const Workload workload(state.range(0), state.range(1));
@@ -433,7 +433,13 @@ void Run(benchmark::State& state) {
       " memory=device-local");
   for (auto _ : state) {
     runtime.Launch(workload, Mode);
+    if constexpr (!IncludeCompletion) {
+      state.PauseTiming();
+    }
     runtime.Wait();
+    if constexpr (!IncludeCompletion) {
+      state.ResumeTiming();
+    }
   }
   runtime.Verify(workload);
   runtime.Reset();
@@ -444,20 +450,20 @@ void Run(benchmark::State& state) {
   state.SetItemsProcessed(state.iterations() * workload.depth);
 }
 
-template <Submission Mode>
+template <Submission Mode, bool IncludeCompletion>
 void DependentChain(benchmark::State& state) {
   const std::string runtime = FLAG_chain_runtime;
   if (runtime == "hrx") {
-    Run<HrxRuntime, Mode>(state);
+    Run<HrxRuntime, Mode, IncludeCompletion>(state);
   } else {
     Require(runtime == "hip", "unknown --chain_runtime");
-    Run<HipRuntime, Mode>(state);
+    Run<HipRuntime, Mode, IncludeCompletion>(state);
   }
 }
 
 void Cases(benchmark::Benchmark* benchmark) {
   for (int64_t count : {4096, 131072, 262144, 1048576, 2097152}) {
-    for (int64_t depth : {8, 1, 64}) {
+    for (int64_t depth : {8, 1, 32, 33, 64}) {
       benchmark->Args({count, depth});
     }
   }
@@ -465,14 +471,27 @@ void Cases(benchmark::Benchmark* benchmark) {
   benchmark->UseRealTime()->Unit(benchmark::kMicrosecond);
 }
 
-BENCHMARK_TEMPLATE(DependentChain, Submission::kFlushEach)
+BENCHMARK_TEMPLATE(DependentChain, Submission::kFlushEach, true)
     ->Name("DependentChain/StreamFlushEach")
     ->Apply(Cases);
-BENCHMARK_TEMPLATE(DependentChain, Submission::kFlushEnd)
+BENCHMARK_TEMPLATE(DependentChain, Submission::kFlushEnd, true)
     ->Name("DependentChain/StreamFlushEnd")
     ->Apply(Cases);
-BENCHMARK_TEMPLATE(DependentChain, Submission::kGraph)
+BENCHMARK_TEMPLATE(DependentChain, Submission::kGraph, true)
     ->Name("DependentChain/GraphReplay")
+    ->Apply(Cases);
+
+// Submission rows exclude the final completion wait. Each iteration retires
+// before the next begins, so memory reuse and queue occupancy match the
+// corresponding completed-chain row. Fixed iteration counts bound real work.
+BENCHMARK_TEMPLATE(DependentChain, Submission::kFlushEach, false)
+    ->Name("DependentChainSubmit/StreamFlushEach")
+    ->Apply(Cases);
+BENCHMARK_TEMPLATE(DependentChain, Submission::kFlushEnd, false)
+    ->Name("DependentChainSubmit/StreamFlushEnd")
+    ->Apply(Cases);
+BENCHMARK_TEMPLATE(DependentChain, Submission::kGraph, false)
+    ->Name("DependentChainSubmit/GraphReplay")
     ->Apply(Cases);
 
 }  // namespace
