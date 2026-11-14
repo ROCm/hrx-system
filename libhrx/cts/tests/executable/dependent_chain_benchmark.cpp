@@ -463,7 +463,7 @@ void DependentChain(benchmark::State& state) {
 
 void Cases(benchmark::Benchmark* benchmark) {
   for (int64_t count : {4096, 131072, 262144, 1048576, 2097152}) {
-    for (int64_t depth : {8, 1, 32, 33, 64}) {
+    for (int64_t depth : {8, 1, 32, 33, 64, 128, 129, 512}) {
       benchmark->Args({count, depth});
     }
   }
