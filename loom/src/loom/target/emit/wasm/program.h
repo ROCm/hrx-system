@@ -35,6 +35,32 @@ typedef struct loom_wasm_function_type_t {
   uint32_t result_count;
 } loom_wasm_function_type_t;
 
+// Physical locals for one value, in logical register-unit order.
+typedef struct loom_wasm_value_locals_t {
+  // First entry in the function's local-index array.
+  uint32_t start;
+  // Number of register units, or zero for a value without an assignment.
+  uint32_t count;
+} loom_wasm_value_locals_t;
+
+// One allocation-resolved sequential local copy.
+typedef struct loom_wasm_local_move_t {
+  // Local read before overwriting the destination.
+  uint32_t source;
+  // Local receiving the value.
+  uint32_t target;
+} loom_wasm_local_move_t;
+
+// Physical copies attached to one structural operation.
+typedef struct loom_wasm_packet_moves_t {
+  // Owning copy, move, slice, or concat in source order.
+  const loom_op_t* op;
+  // First entry in the function's local-move array.
+  iree_host_size_t start;
+  // Number of sequential copies, including allocation-resolved cycle scratch.
+  iree_host_size_t count;
+} loom_wasm_packet_moves_t;
+
 // One planned Low function ready for WebAssembly body emission.
 typedef struct loom_wasm_function_plan_t {
   // Structured Low function body walked by the WebAssembly writer.
@@ -43,10 +69,18 @@ typedef struct loom_wasm_function_plan_t {
   const loom_low_schedule_model_t* schedule_model;
   // Function-local value IDs indexed by planned value ordinal.
   const loom_value_id_t* value_ids;
-  // WebAssembly local index by planned value ordinal. Entries without a
-  // physical local contain LOOM_WASM_PROGRAM_INDEX_NONE.
-  const uint32_t* local_indices_by_value_ordinal;
-  // Number of entries in |value_ids| and |local_indices_by_value_ordinal|.
+  // Local-index spans by planned value ordinal.
+  const loom_wasm_value_locals_t* locals_by_value_ordinal;
+  // Physical local indices in register-unit order for each value. Dead units
+  // contain LOOM_WASM_PROGRAM_INDEX_NONE and never receive edge writes.
+  const uint32_t* local_indices;
+  // Nonempty structural copy groups in source order.
+  const loom_wasm_packet_moves_t* packet_moves;
+  // Number of structural copy groups.
+  uint32_t packet_move_count;
+  // Sequential local copies indexed by |packet_moves|.
+  const loom_wasm_local_move_t* local_moves;
+  // Number of entries in |value_ids| and |locals_by_value_ordinal|.
   loom_value_ordinal_t value_count;
   // Borrowed module symbol name.
   iree_string_view_t name;

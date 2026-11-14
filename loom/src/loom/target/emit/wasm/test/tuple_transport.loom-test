@@ -1,0 +1,274 @@
+// RUN: emit wasm-dis
+// REQUIRES: wasm-objdump
+
+wasm.target<simd128> @target
+
+// Parameters of the same register class have nonconsecutive ABI locals. Each
+// conditional result carries both units, including the second i64/f32/f64 unit.
+low.func.def public target<wasm.core.simd128>(@target) abi(wasm_function) @mixed_classes(%condition: reg<wasm.i32>, %a: reg<wasm.i64>, %b: reg<wasm.f32>, %c: reg<wasm.f64>, %d: reg<wasm.i64>, %e: reg<wasm.f32>, %f: reg<wasm.f64>) -> (reg<wasm.i64>, reg<wasm.i64>, reg<wasm.f32>, reg<wasm.f32>, reg<wasm.f64>, reg<wasm.f64>) asm {
+  %integers, %singles, %doubles = low.scf.if %condition -> (reg<wasm.i64 x2>, reg<wasm.f32 x2>, reg<wasm.f64 x2>) {
+    %ip = concat(%a, %d) : (reg<wasm.i64>, reg<wasm.i64>) -> reg<wasm.i64 x2>
+    %sp = concat(%b, %e) : (reg<wasm.f32>, reg<wasm.f32>) -> reg<wasm.f32 x2>
+    %dp = concat(%c, %f) : (reg<wasm.f64>, reg<wasm.f64>) -> reg<wasm.f64 x2>
+    low.scf.yield %ip, %sp, %dp : reg<wasm.i64 x2>, reg<wasm.f32 x2>, reg<wasm.f64 x2>
+  } else {
+    %ip = concat(%d, %a) : (reg<wasm.i64>, reg<wasm.i64>) -> reg<wasm.i64 x2>
+    %sp = concat(%e, %b) : (reg<wasm.f32>, reg<wasm.f32>) -> reg<wasm.f32 x2>
+    %dp = concat(%f, %c) : (reg<wasm.f64>, reg<wasm.f64>) -> reg<wasm.f64 x2>
+    low.scf.yield %ip, %sp, %dp : reg<wasm.i64 x2>, reg<wasm.f32 x2>, reg<wasm.f64 x2>
+  }
+  %i0 = slice %integers[0] : reg<wasm.i64 x2> -> reg<wasm.i64>
+  %i1 = slice %integers[1] : reg<wasm.i64 x2> -> reg<wasm.i64>
+  %s0 = slice %singles[0] : reg<wasm.f32 x2> -> reg<wasm.f32>
+  %s1 = slice %singles[1] : reg<wasm.f32 x2> -> reg<wasm.f32>
+  %d0 = slice %doubles[0] : reg<wasm.f64 x2> -> reg<wasm.f64>
+  %d1 = slice %doubles[1] : reg<wasm.f64 x2> -> reg<wasm.f64>
+  return %i0, %i1, %s0, %s1, %d0, %d1
+}
+
+// ----
+Disassembly of section CODE:
+
+<CODE>:
+        # 1 functions in section.
+
+<mixed_classes>:
+
+  local.get  0
+  if
+  else
+  local.get  4
+  local.get  1
+  local.get  5
+  local.get  2
+  local.get  6
+  local.get  3
+  local.set  6
+  local.set  3
+  local.set  5
+  local.set  2
+  local.set  4
+  local.set  1
+  end
+  local.get  1
+  local.get  4
+  local.get  2
+  local.get  5
+  local.get  3
+  local.get  6
+  return
+  end
+
+// ====
+
+// RUN: emit wasm-dis
+// REQUIRES: wasm-objdump
+
+wasm.target<simd128> @target
+
+// Two carried pairs exchange storage on the backedge. All four reads must
+// precede writes, including when zero trips selects the original pairs.
+low.func.def public target<wasm.core.simd128>(@target) abi(wasm_function) @for_pairs(%count: reg<wasm.i32>, %a: reg<wasm.i32>, %b: reg<wasm.i32>, %c: reg<wasm.i32>, %d: reg<wasm.i32>) -> (reg<wasm.i32>, reg<wasm.i32>, reg<wasm.i32>, reg<wasm.i32>) asm {
+  %zero = i32.const 0
+  %one = i32.const 1
+  %left = concat(%a, %b) : (reg<wasm.i32>, reg<wasm.i32>) -> reg<wasm.i32 x2>
+  %right = concat(%c, %d) : (reg<wasm.i32>, reg<wasm.i32>) -> reg<wasm.i32 x2>
+  %final_left, %final_right = low.scf.for unsigned [%zero to %count step %one] iter_args(%left: reg<wasm.i32 x2>, %right: reg<wasm.i32 x2>) -> (reg<wasm.i32 x2>, reg<wasm.i32 x2>) do(%iv: reg<wasm.i32>, %x: reg<wasm.i32 x2>, %y: reg<wasm.i32 x2>) {
+    low.scf.yield %y, %x : reg<wasm.i32 x2>, reg<wasm.i32 x2>
+  }
+  %r0 = slice %final_left[0] : reg<wasm.i32 x2> -> reg<wasm.i32>
+  %r1 = slice %final_left[1] : reg<wasm.i32 x2> -> reg<wasm.i32>
+  %r2 = slice %final_right[0] : reg<wasm.i32 x2> -> reg<wasm.i32>
+  %r3 = slice %final_right[1] : reg<wasm.i32 x2> -> reg<wasm.i32>
+  return %r0, %r1, %r2, %r3
+}
+
+// ----
+Disassembly of section CODE:
+
+<CODE>:
+        # 1 functions in section.
+
+<for_pairs>:
+        .local i32, i32, i32
+  i32.const  0
+  local.set  5
+  i32.const  1
+  local.set  6
+  local.get  0
+  local.get  6
+  i32.sub
+  local.get  5
+  local.get  6
+  local.get  0
+  local.get  5
+  i32.sub
+  i32.lt_u
+  f32.select
+  local.set  7
+  block
+  local.get  5
+  local.get  0
+  i32.lt_u
+  i32.eqz
+  if
+  local.get  1
+  local.get  2
+  local.get  3
+  local.get  4
+  local.set  2
+  local.set  1
+  local.set  4
+  local.set  3
+  br        1
+  end
+  loop
+  local.get  5
+  local.get  7
+  i32.lt_u
+  i32.eqz
+  if
+  br        2
+  end
+  local.get  3
+  local.get  4
+  local.get  1
+  local.get  2
+  local.set  4
+  local.set  3
+  local.set  2
+  local.set  1
+  local.get  5
+  local.get  6
+  i32.add
+  local.set  5
+  br        0
+  end
+  end
+  local.get  3
+  local.get  4
+  local.get  1
+  local.get  2
+  return
+  end
+
+// ====
+
+// RUN: emit wasm-dis
+// REQUIRES: wasm-objdump
+
+wasm.target<simd128> @target
+
+// The before region forwards a reordered packet tuple. The body rotates that
+// tuple again and takes one backedge, while the false condition exits directly.
+low.func.def public target<wasm.core.simd128>(@target) abi(wasm_function) @while_packets(%condition: reg<wasm.i32>, %a: reg<wasm.v128>, %b: reg<wasm.v128>, %c: reg<wasm.v128>) -> (reg<wasm.v128>, reg<wasm.v128>, reg<wasm.v128>) asm {
+  %zero = i32.const 0
+  %initial = concat(%a, %b, %c) : (reg<wasm.v128>, reg<wasm.v128>, reg<wasm.v128>) -> reg<wasm.v128 x3>
+  %result = low.scf.while(%again = %condition : reg<wasm.i32>, %state = %initial : reg<wasm.v128 x3>) -> (reg<wasm.v128 x3>) {
+    %first = slice %state[0] : reg<wasm.v128 x3> -> reg<wasm.v128>
+    %tail = slice %state[1] : reg<wasm.v128 x3> -> reg<wasm.v128 x2>
+    %forwarded = concat(%tail, %first) : (reg<wasm.v128 x2>, reg<wasm.v128>) -> reg<wasm.v128 x3>
+    low.scf.condition %again, %forwarded : reg<wasm.i32>, reg<wasm.v128 x3>
+  } do(%body: reg<wasm.v128 x3>) {
+    %first = slice %body[0] : reg<wasm.v128 x3> -> reg<wasm.v128>
+    %tail = slice %body[1] : reg<wasm.v128 x3> -> reg<wasm.v128 x2>
+    %next = concat(%tail, %first) : (reg<wasm.v128 x2>, reg<wasm.v128>) -> reg<wasm.v128 x3>
+    low.scf.yield %zero, %next : reg<wasm.i32>, reg<wasm.v128 x3>
+  }
+  %r0 = slice %result[0] : reg<wasm.v128 x3> -> reg<wasm.v128>
+  %r1 = slice %result[1] : reg<wasm.v128 x3> -> reg<wasm.v128>
+  %r2 = slice %result[2] : reg<wasm.v128 x3> -> reg<wasm.v128>
+  return %r0, %r1, %r2
+}
+
+// ----
+Disassembly of section CODE:
+
+<CODE>:
+        # 1 functions in section.
+
+<while_packets>:
+        .local i32, v128, v128, v128
+  i32.const  0
+  local.set  4
+  block
+  loop
+  local.get  1
+  local.set  5
+  local.get  0
+  i32.eqz
+  if
+  br        2
+  end
+  local.get  2
+  local.get  3
+  local.get  5
+  local.set  7
+  local.set  6
+  local.set  5
+  local.get  5
+  local.set  3
+  local.get  6
+  local.set  1
+  local.get  7
+  local.set  2
+  local.get  4
+  local.set  0
+  br        0
+  end
+  end
+  local.get  2
+  local.get  3
+  local.get  5
+  return
+  end
+
+// ====
+
+// RUN: emit wasm-dis
+// REQUIRES: wasm-objdump
+
+wasm.target<simd128> @target
+
+// Only the high unit of the conditional result is observed. The original
+// inputs remain live across the copy and branch, preventing destructive reuse.
+low.func.def public target<wasm.core.simd128>(@target) abi(wasm_function) @partial_copy(%condition: reg<wasm.i32>, %a: reg<wasm.f64>, %b: reg<wasm.f64>) -> (reg<wasm.f64>, reg<wasm.f64>) asm {
+  %pair = concat(%a, %b) : (reg<wasm.f64>, reg<wasm.f64>) -> reg<wasm.f64 x2>
+  %copied = copy %pair : reg<wasm.f64 x2> -> reg<wasm.f64 x2>
+  %selected = low.scf.if %condition -> (reg<wasm.f64 x2>) {
+    low.scf.yield %copied : reg<wasm.f64 x2>
+  } else {
+    %reversed = concat(%b, %a) : (reg<wasm.f64>, reg<wasm.f64>) -> reg<wasm.f64 x2>
+    low.scf.yield %reversed : reg<wasm.f64 x2>
+  }
+  %high = slice %selected[1] : reg<wasm.f64 x2> -> reg<wasm.f64>
+  %sum = f64.add %a, %b
+  return %high, %sum
+}
+
+// ----
+Disassembly of section CODE:
+
+<CODE>:
+        # 1 functions in section.
+
+<partial_copy>:
+        .local f64, f64
+  local.get  1
+  local.set  3
+  local.get  2
+  local.set  4
+  local.get  0
+  if
+  else
+  local.get  1
+  local.set  4
+  end
+  local.get  1
+  local.get  2
+  f64.add
+  local.set  1
+  local.get  4
+  local.get  1
+  return
+  end

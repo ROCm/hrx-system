@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "loom/codegen/low/allocation.h"
+#include "loom/codegen/low/allocation/live_range.h"
 #include "loom/codegen/low/diagnostics.h"
 #include "loom/codegen/low/function_model.h"
 #include "loom/error/error_catalog.h"
@@ -22,15 +23,6 @@
 #include "loom/target/artifact_diagnostics.h"
 #include "loom/target/function_version.h"
 #include "loom/target/registers.h"
-
-typedef struct loom_wasm_local_entry_t {
-  // Descriptor-set-local register class ID from allocation.
-  uint16_t descriptor_reg_class_id;
-  // Class-local target-id assignment base from allocation.
-  uint32_t location_base;
-  // Function-local WebAssembly index assigned by program planning.
-  uint32_t local_index;
-} loom_wasm_local_entry_t;
 
 typedef struct loom_wasm_program_build_t {
   // Module being planned.
@@ -243,12 +235,10 @@ static iree_status_t loom_wasm_program_build_function_allocation(
       (out_allocation->spill_count != 0 ||
        out_allocation->spill_plan_count != 0 ||
        out_allocation->edge_copy_count != 0 ||
-       out_allocation->edge_copy_group_count != 0 ||
-       out_allocation->packet_move_count != 0)) {
+       out_allocation->edge_copy_group_count != 0)) {
     return loom_target_artifact_emit_requirement(
         diagnostic_emitter, function_op, IREE_SV("Wasm"),
-        IREE_SV(
-            "structured allocation without spills or physical register moves"));
+        IREE_SV("structured allocation without spills or CFG edge moves"));
   }
   if (iree_status_is_ok(status)) {
     *out_accepted = true;
@@ -256,127 +246,212 @@ static iree_status_t loom_wasm_program_build_function_allocation(
   return status;
 }
 
-static loom_wasm_local_entry_t* loom_wasm_program_find_local_entry(
-    loom_wasm_local_entry_t* entries, iree_host_size_t entry_count,
-    uint16_t descriptor_reg_class_id, uint32_t location_base) {
-  for (iree_host_size_t i = 0; i < entry_count; ++i) {
-    loom_wasm_local_entry_t* entry = &entries[i];
-    if (entry->descriptor_reg_class_id == descriptor_reg_class_id &&
-        entry->location_base == location_base) {
-      return entry;
-    }
-  }
-  return NULL;
-}
-
-static void loom_wasm_program_set_value_local(
-    const loom_low_allocation_table_t* allocation,
-    uint32_t* local_indices_by_value_ordinal, loom_value_id_t value_id,
-    uint32_t local_index) {
-  const loom_value_ordinal_t value_ordinal =
-      loom_module_value_ordinal_scratch_lookup(allocation->module, value_id);
-  local_indices_by_value_ordinal[value_ordinal] = local_index;
-}
-
-static uint32_t loom_wasm_program_append_local_type(
-    loom_wasm_value_type_t* local_types, iree_host_size_t* local_count,
-    loom_wasm_value_type_t value_type) {
-  const uint32_t local_index = (uint32_t)*local_count;
-  local_types[(*local_count)++] = value_type;
-  return local_index;
-}
-
 static iree_status_t loom_wasm_program_project_function_allocation(
-    const loom_low_allocation_table_t* allocation,
+    const loom_low_allocation_table_t* allocation, uint32_t location_count,
     iree_arena_allocator_t* arena, loom_wasm_function_plan_t* function) {
   const loom_func_like_t function_like =
       loom_func_like_const_cast(allocation->module, allocation->function_op);
   uint16_t parameter_count = 0;
   const loom_value_id_t* parameter_ids =
       loom_func_like_arg_ids(function_like, &parameter_count);
-  const iree_host_size_t local_capacity =
-      parameter_count + allocation->assignment_count;
+  const iree_host_size_t class_count = allocation->physical_extents.count;
 
   loom_wasm_value_type_t* local_types = NULL;
-  loom_wasm_local_entry_t* local_entries = NULL;
-  if (local_capacity != 0) {
-    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        arena, local_capacity, sizeof(*local_types), (void**)&local_types));
-    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        arena, local_capacity, sizeof(*local_entries), (void**)&local_entries));
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate_array(arena, parameter_count + location_count,
+                                sizeof(*local_types), (void**)&local_types));
+  loom_wasm_value_locals_t* locals_by_value_ordinal = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, allocation->liveness.value_count, sizeof(*locals_by_value_ordinal),
+      (void**)&locals_by_value_ordinal));
+  memset(locals_by_value_ordinal, 0,
+         allocation->liveness.value_count * sizeof(*locals_by_value_ordinal));
+  uint32_t* local_indices = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, allocation->unit_point_count, sizeof(*local_indices),
+      (void**)&local_indices));
+  uint32_t packet_move_count = 0;
+  for (iree_host_size_t i = 0; i < allocation->packet_move_group_count; ++i) {
+    packet_move_count +=
+        allocation->packet_move_groups[i].move_group.moves.count != 0;
   }
+  loom_wasm_packet_moves_t* packet_moves = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, packet_move_count, sizeof(*packet_moves), (void**)&packet_moves));
+  loom_wasm_local_move_t* local_moves = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate_array(arena, allocation->packet_move_count,
+                                sizeof(*local_moves), (void**)&local_moves));
 
-  uint32_t* local_indices_by_value_ordinal = NULL;
-  if (allocation->liveness.value_count != 0) {
-    IREE_RETURN_IF_ERROR(
-        iree_arena_allocate_array(arena, allocation->liveness.value_count,
-                                  sizeof(*local_indices_by_value_ordinal),
-                                  (void**)&local_indices_by_value_ordinal));
-    for (iree_host_size_t i = 0; i < allocation->liveness.value_count; ++i) {
-      local_indices_by_value_ordinal[i] = LOOM_WASM_PROGRAM_INDEX_NONE;
-    }
+  // Allocation owns dense class extents and the per-value unit domain. Project
+  // them directly instead of searching previously encountered assignments.
+  // Parameter indices are fixed by the ABI, so a tuple's units may map to
+  // nonconsecutive locals when parameter classes are interleaved.
+  const iree_arena_checkpoint_t checkpoint = iree_arena_checkpoint_save(arena);
+  uint32_t* class_starts = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, class_count, sizeof(*class_starts), (void**)&class_starts));
+  uint32_t* locals_by_location = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, location_count,
+                                                 sizeof(*locals_by_location),
+                                                 (void**)&locals_by_location));
+  uint32_t class_start = 0;
+  for (iree_host_size_t i = 0; i < class_count; ++i) {
+    class_starts[i] = class_start;
+    class_start += allocation->physical_extents.ends_by_reg_class[i];
+  }
+  for (iree_host_size_t i = 0; i < location_count; ++i) {
+    locals_by_location[i] = LOOM_WASM_PROGRAM_INDEX_NONE;
   }
 
   loom_low_allocation_value_scratch_t value_scratch = {0};
   IREE_RETURN_IF_ERROR(
       loom_low_allocation_acquire_value_scratch(allocation, &value_scratch));
-  iree_host_size_t local_count = 0;
-  iree_host_size_t local_entry_count = 0;
   for (uint32_t i = 0; i < parameter_count; ++i) {
-    const loom_value_id_t value_id = parameter_ids[i];
-    const loom_wasm_value_type_t value_type = function->type.parameters[i];
-    const uint32_t local_index = loom_wasm_program_append_local_type(
-        local_types, &local_count, value_type);
+    local_types[i] = function->type.parameters[i];
     const loom_low_allocation_assignment_t* assignment =
-        loom_low_allocation_try_map_active_value_assignment(allocation,
-                                                            value_id, NULL);
+        loom_low_allocation_try_map_active_value_assignment(
+            allocation, parameter_ids[i], NULL);
     if (assignment != NULL) {
-      local_entries[local_entry_count++] = (loom_wasm_local_entry_t){
-          .descriptor_reg_class_id = assignment->descriptor_reg_class_id,
-          .location_base = assignment->location_base,
-          .local_index = local_index,
-      };
-      loom_wasm_program_set_value_local(
-          allocation, local_indices_by_value_ordinal, value_id, local_index);
+      locals_by_location[class_starts[assignment->descriptor_reg_class_id] +
+                         assignment->location_base] = i;
     }
   }
 
+  uint32_t local_count = parameter_count;
   for (iree_host_size_t i = 0; i < allocation->assignment_count; ++i) {
     const loom_low_allocation_assignment_t* assignment =
         &allocation->assignments[i];
+    const loom_value_ordinal_t value_ordinal =
+        loom_module_value_ordinal_scratch_lookup(allocation->module,
+                                                 assignment->value_id);
+    locals_by_value_ordinal[value_ordinal] = (loom_wasm_value_locals_t){
+        .start = assignment->unit_point_start,
+        .count = assignment->unit_count,
+    };
+    const uint32_t location_start =
+        class_starts[assignment->descriptor_reg_class_id] +
+        assignment->location_base;
     const loom_wasm_value_type_t value_type =
         loom_wasm_value_type_from_descriptor_register_class(
             assignment->descriptor_reg_class_id);
-    const loom_wasm_local_entry_t* existing =
-        loom_wasm_program_find_local_entry(local_entries, local_entry_count,
-                                           assignment->descriptor_reg_class_id,
-                                           assignment->location_base);
-    uint32_t local_index;
-    if (existing != NULL) {
-      local_index = existing->local_index;
-    } else {
-      local_index = loom_wasm_program_append_local_type(
-          local_types, &local_count, value_type);
-      local_entries[local_entry_count++] = (loom_wasm_local_entry_t){
-          .descriptor_reg_class_id = assignment->descriptor_reg_class_id,
-          .location_base = assignment->location_base,
-          .local_index = local_index,
+    for (uint32_t unit = 0; unit < assignment->unit_count; ++unit) {
+      const uint32_t start_point =
+          loom_low_allocation_live_range_assignment_unit_start_point(
+              allocation->unit_start_points, allocation->unit_point_count,
+              assignment, unit);
+      const uint32_t end_point =
+          loom_low_allocation_live_range_assignment_unit_end_point(
+              allocation->unit_end_points, allocation->unit_point_count,
+              assignment, unit);
+      uint32_t local_index = LOOM_WASM_PROGRAM_INDEX_NONE;
+      if (start_point < end_point) {
+        local_index = locals_by_location[location_start + unit];
+        if (local_index == LOOM_WASM_PROGRAM_INDEX_NONE) {
+          local_index = local_count++;
+          local_types[local_index] = value_type;
+          locals_by_location[location_start + unit] = local_index;
+        }
+      }
+      local_indices[assignment->unit_point_start + unit] = local_index;
+    }
+  }
+  // Decomposed concats carry references to their components instead of owning
+  // a contiguous live range. Placement retains both the dependency order and
+  // the captured source of each component; project those physical reads after
+  // all assignment homes have been mapped.
+  const loom_low_placement_table_t* placement = &allocation->placement;
+  for (iree_host_size_t i = placement->storage_value_order_count; i > 0; --i) {
+    const loom_value_ordinal_t value_ordinal =
+        placement->storage_value_order[i - 1];
+    const loom_wasm_value_locals_t result =
+        locals_by_value_ordinal[value_ordinal];
+    if (result.count == 0) {
+      continue;
+    }
+    const loom_low_placement_relation_range_t range =
+        loom_low_placement_relation_range_for_value_ordinal(placement,
+                                                            value_ordinal);
+    for (uint32_t j = 0; j < range.count; ++j) {
+      const uint32_t relation_index = range.start + j;
+      const loom_low_placement_relation_t* relation =
+          &placement->relations[relation_index];
+      if (relation->cause != LOOM_LOW_PLACEMENT_CAUSE_LOW_CONCAT) {
+        continue;
+      }
+      const loom_low_placement_concat_source_t source =
+          loom_low_placement_concat_source(placement, relation_index);
+      const loom_wasm_value_locals_t source_locals =
+          locals_by_value_ordinal[source.value_ordinal];
+      if (source_locals.count == 0) {
+        continue;
+      }
+      for (uint32_t unit = 0; unit < relation->unit_count; ++unit) {
+        uint32_t* result_local =
+            &local_indices[result.start + relation->result_unit_offset + unit];
+        if (*result_local == LOOM_WASM_PROGRAM_INDEX_NONE) {
+          *result_local =
+              local_indices[source_locals.start + source.unit_offset + unit];
+        }
+      }
+    }
+  }
+  // The shared allocator has already resolved packet-copy cycles and retained
+  // their scratch target IDs. Emission receives only the final local sequence.
+  uint32_t group_index = 0;
+  iree_host_size_t move_index = 0;
+  for (iree_host_size_t i = 0; i < allocation->packet_move_group_count; ++i) {
+    const loom_low_allocation_packet_move_group_t* group =
+        &allocation->packet_move_groups[i];
+    if (group->move_group.moves.count == 0) {
+      continue;
+    }
+    packet_moves[group_index++] = (loom_wasm_packet_moves_t){
+        .op = loom_liveness_operation_at(&allocation->liveness,
+                                         group->source_ordinal)
+                  ->op,
+        .start = move_index,
+        .count = group->move_group.moves.count,
+    };
+    for (iree_host_size_t j = 0; j < group->move_group.moves.count; ++j) {
+      const loom_low_move_t* move =
+          &allocation->moves[group->move_group.moves.start + j];
+      // Wasm's unbounded numeric target-ID classes require only ordinary
+      // copies, including cycle saves into fresh locals.
+      IREE_ASSERT_EQ(move->kind, LOOM_LOW_MOVE_KIND_COPY);
+      const uint32_t source_location =
+          class_starts[move->source.descriptor_reg_class_id] +
+          move->source.location;
+      const uint32_t target_location =
+          class_starts[move->destination.descriptor_reg_class_id] +
+          move->destination.location;
+      if (locals_by_location[target_location] == LOOM_WASM_PROGRAM_INDEX_NONE) {
+        locals_by_location[target_location] = local_count;
+        local_types[local_count++] =
+            loom_wasm_value_type_from_descriptor_register_class(
+                move->destination.descriptor_reg_class_id);
+      }
+      local_moves[move_index++] = (loom_wasm_local_move_t){
+          .source = locals_by_location[source_location],
+          .target = locals_by_location[target_location],
       };
     }
-    loom_wasm_program_set_value_local(allocation,
-                                      local_indices_by_value_ordinal,
-                                      assignment->value_id, local_index);
   }
   loom_low_allocation_release_value_scratch(&value_scratch);
+  iree_arena_checkpoint_restore(&checkpoint);
 
   function->schedule_model = allocation->target.schedule_model;
   function->value_ids = allocation->liveness.value_ids;
-  function->local_indices_by_value_ordinal = local_indices_by_value_ordinal;
+  function->locals_by_value_ordinal = locals_by_value_ordinal;
+  function->local_indices = local_indices;
+  function->packet_moves = packet_moves;
+  function->packet_move_count = packet_move_count;
+  function->local_moves = local_moves;
   function->value_count =
       (loom_value_ordinal_t)allocation->liveness.value_count;
   function->local_types = local_types;
   function->parameter_count = parameter_count;
-  function->local_count = (uint32_t)local_count;
+  function->local_count = local_count;
   return iree_ok_status();
 }
 
@@ -403,15 +478,19 @@ static iree_status_t loom_wasm_program_build_function(
   if (!signature_accepted) {
     return iree_ok_status();
   }
+  uint64_t location_count = 0;
+  for (iree_host_size_t i = 0; i < allocation.physical_extents.count; ++i) {
+    location_count += allocation.physical_extents.ends_by_reg_class[i];
+  }
   const uint64_t local_capacity =
-      (uint64_t)function->type.parameter_count + allocation.assignment_count;
+      function->type.parameter_count + location_count;
   if (local_capacity > UINT32_MAX) {
     return loom_target_artifact_emit_limit(
         diagnostic_emitter, function_op, IREE_SV("Wasm"),
         IREE_SV("local table capacity"), local_capacity, UINT32_MAX);
   }
   IREE_RETURN_IF_ERROR(loom_wasm_program_project_function_allocation(
-      &allocation, arena, function));
+      &allocation, (uint32_t)location_count, arena, function));
   function->type_index =
       loom_wasm_program_intern_function_type(build, &function->type);
   *out_accepted = true;
