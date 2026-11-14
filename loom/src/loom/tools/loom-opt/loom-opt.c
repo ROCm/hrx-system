@@ -94,21 +94,15 @@ static iree_status_t loom_opt_present_loomc_result(
   if (format == LOOM_OPT_DIAGNOSTIC_FORMAT_TEXT) {
     return loom_tooling_cli_print_loomc_result(stderr, result, out_succeeded);
   }
-  if (result == NULL) {
-    return iree_make_status(IREE_STATUS_INTERNAL,
-                            "compiler operation returned no result");
-  }
   loom_output_stream_t stream;
   loom_output_stream_for_file(stderr, &stream);
   for (loomc_host_size_t i = 0; i < loomc_result_diagnostic_count(result);
        ++i) {
     const loomc_diagnostic_t* diagnostic =
         loomc_result_diagnostic_at(result, i);
-    if (diagnostic != NULL) {
-      IREE_RETURN_IF_ERROR(
-          loom_tooling_cli_write_loomc_diagnostic_json(&stream, diagnostic));
-      IREE_RETURN_IF_ERROR(loom_output_stream_write_char(&stream, '\n'));
-    }
+    IREE_RETURN_IF_ERROR(
+        loom_tooling_cli_write_loomc_diagnostic_json(&stream, diagnostic));
+    IREE_RETURN_IF_ERROR(loom_output_stream_write_char(&stream, '\n'));
   }
   *out_succeeded = loomc_result_succeeded(result);
   return iree_ok_status();

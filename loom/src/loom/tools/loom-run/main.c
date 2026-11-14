@@ -346,17 +346,8 @@ static iree_status_t loom_run_select_kernel(const loomc_module_t* module,
     IREE_RETURN_IF_ERROR(iree_status_from_loomc(loomc_module_query_functions(
         module, &query_options, loomc_allocator_from_iree(allocator), 0, NULL,
         &function_count, &query_result)));
-    bool query_succeeded = false;
-    iree_status_t status = loom_tooling_cli_print_loomc_result(
-        stderr, query_result, &query_succeeded);
+    // Unfiltered enumeration of admitted functions has no semantic rejection.
     loomc_result_release(query_result);
-    if (!iree_status_is_ok(status)) {
-      return status;
-    }
-    if (!query_succeeded) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "module function query was rejected");
-    }
 
     loomc_module_function_t* functions = NULL;
     if (function_count != 0) {
@@ -364,19 +355,13 @@ static iree_status_t loom_run_select_kernel(const loomc_module_t* module,
           allocator, function_count, sizeof(*functions), (void**)&functions));
     }
     query_result = NULL;
-    status = iree_status_from_loomc(loomc_module_query_functions(
+    iree_status_t status = iree_status_from_loomc(loomc_module_query_functions(
         module, &query_options, loomc_allocator_from_iree(allocator),
         function_count, functions, &function_count, &query_result));
-    query_succeeded = false;
-    if (iree_status_is_ok(status)) {
-      status = loom_tooling_cli_print_loomc_result(stderr, query_result,
-                                                   &query_succeeded);
-    }
     loomc_result_release(query_result);
     iree_host_size_t kernel_count = 0;
     for (iree_host_size_t i = 0;
-         iree_status_is_ok(status) && query_succeeded && i < function_count;
-         ++i) {
+         iree_status_is_ok(status) && i < function_count; ++i) {
       if (loomc_module_function_kind_is_kernel(functions[i].kind)) {
         selected = functions[i];
         ++kernel_count;
@@ -385,10 +370,6 @@ static iree_status_t loom_run_select_kernel(const loomc_module_t* module,
     iree_allocator_free(allocator, functions);
     if (!iree_status_is_ok(status)) {
       return status;
-    }
-    if (!query_succeeded) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "module function query was rejected");
     }
     if (kernel_count != 1) {
       return iree_make_status(

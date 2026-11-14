@@ -23,15 +23,15 @@ static const char* loom_tooling_cli_diagnostic_severity_name(
   }
 }
 
-static iree_status_t loom_tooling_cli_print_loomc_source_range(
+static void loom_tooling_cli_print_loomc_source_range(
     FILE* file, const loomc_source_range_t* range) {
-  if (range == NULL || range->source == NULL) {
-    return iree_ok_status();
+  if (range->source == NULL) {
+    return;
   }
   const iree_string_view_t identifier =
       iree_string_view_from_loomc(loomc_source_identifier(range->source));
   if (iree_string_view_is_empty(identifier)) {
-    return iree_ok_status();
+    return;
   }
   fprintf(file, "%.*s", (int)identifier.size, identifier.data);
   if (range->start_line != 0) {
@@ -41,18 +41,16 @@ static iree_status_t loom_tooling_cli_print_loomc_source_range(
     }
   }
   fputs(": ", file);
-  return iree_ok_status();
 }
 
-static iree_status_t loom_tooling_cli_print_loomc_diagnostic(
+static void loom_tooling_cli_print_loomc_diagnostic(
     FILE* file, const loomc_diagnostic_t* diagnostic) {
   if (!loomc_string_view_is_empty(diagnostic->formatted_text)) {
     fwrite(diagnostic->formatted_text.data, 1, diagnostic->formatted_text.size,
            file);
-    return iree_ok_status();
+    return;
   }
-  IREE_RETURN_IF_ERROR(
-      loom_tooling_cli_print_loomc_source_range(file, &diagnostic->range));
+  loom_tooling_cli_print_loomc_source_range(file, &diagnostic->range);
   fprintf(file, "%s",
           loom_tooling_cli_diagnostic_severity_name(diagnostic->severity));
   if (!loomc_string_view_is_empty(diagnostic->code)) {
@@ -67,8 +65,7 @@ static iree_status_t loom_tooling_cli_print_loomc_diagnostic(
   for (loomc_host_size_t i = 0; i < diagnostic->related_location_count; ++i) {
     const loomc_diagnostic_related_location_t* related =
         &diagnostic->related_locations[i];
-    IREE_RETURN_IF_ERROR(
-        loom_tooling_cli_print_loomc_source_range(file, &related->range));
+    loom_tooling_cli_print_loomc_source_range(file, &related->range);
     fprintf(file, "note: %.*s\n", (int)related->label.size,
             related->label.data);
   }
@@ -78,24 +75,16 @@ static iree_status_t loom_tooling_cli_print_loomc_diagnostic(
         (size_t)diagnostic->related_location_omitted_count,
         diagnostic->related_location_omitted_count == 1 ? " was" : "s were");
   }
-  return iree_ok_status();
 }
 
 iree_status_t loom_tooling_cli_print_loomc_result(FILE* file,
                                                   const loomc_result_t* result,
                                                   bool* out_succeeded) {
-  if (result == NULL) {
-    return iree_make_status(IREE_STATUS_INTERNAL,
-                            "compiler operation returned no result");
-  }
   for (loomc_host_size_t i = 0; i < loomc_result_diagnostic_count(result);
        ++i) {
     const loomc_diagnostic_t* diagnostic =
         loomc_result_diagnostic_at(result, i);
-    if (diagnostic != NULL) {
-      IREE_RETURN_IF_ERROR(
-          loom_tooling_cli_print_loomc_diagnostic(file, diagnostic));
-    }
+    loom_tooling_cli_print_loomc_diagnostic(file, diagnostic);
   }
   if (ferror(file)) {
     return iree_make_status(IREE_STATUS_UNKNOWN,

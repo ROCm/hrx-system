@@ -83,28 +83,17 @@ static iree_status_t loom_benchmark_case_request_build(
   iree_arena_allocator_t plan_arena;
   iree_arena_initialize(&block_pool, &plan_arena);
 
-  iree_status_t status = iree_ok_status();
   const loomc_module_mutable_interop_view_t view =
       loomc_module_get_mutable_interop_view(adapted_module);
-  if (view.module == NULL) {
-    status = iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "case request source module has no exact-version native IR");
-  }
-
   loom_testbench_module_plan_t module_plan = {0};
-  if (iree_status_is_ok(status)) {
-    loom_testbench_plan_options_t plan_options = {0};
-    loom_testbench_plan_options_initialize(&plan_options);
-    status = loom_testbench_plan_module(view.module, &plan_options, &plan_arena,
-                                        &module_plan);
-  }
+  loom_testbench_plan_options_t plan_options = {0};
+  loom_testbench_plan_options_initialize(&plan_options);
+  iree_status_t status = loom_testbench_plan_module(view.module, &plan_options,
+                                                    &plan_arena, &module_plan);
   const loom_testbench_case_plan_t* case_plan = NULL;
-  if (iree_status_is_ok(status) &&
-      options->case_index >= module_plan.case_count) {
-    status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "case index exceeds the cloned module plan");
-  } else if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status)) {
+    // Cloning preserves the source-order case ordinals from benchmark planning.
+    IREE_ASSERT_LT(options->case_index, module_plan.case_count);
     capture->case_index = options->case_index;
     case_plan = &module_plan.cases[capture->case_index];
   }

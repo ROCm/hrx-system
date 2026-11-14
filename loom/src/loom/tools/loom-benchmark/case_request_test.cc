@@ -182,34 +182,5 @@ check.benchmark<@sampled> @wide {width = 8}
   loomc_module_release(module);
 }
 
-TEST_F(CaseRequestTest, RejectsUnknownCaseOrdinal) {
-  static const char kSource[] = R"(
-check.case @only {
-  check.return
-}
-)";
-
-  loomc_module_t* module = Parse(kSource);
-  ASSERT_NE(module, nullptr);
-  const loom_benchmark_case_request_options_t options = {
-      .workspace = workspace_,
-      .module = module,
-      .case_index = 1,
-      .case_sample = {},
-  };
-  loom_benchmark_case_request_capture_t capture = {};
-  loomc_result_t* result = nullptr;
-  iree_status_t status = loom_benchmark_case_request_capture(
-      &options, iree_allocator_system(), &capture, &result);
-  EXPECT_THAT(status,
-              iree::testing::status::StatusIs(iree::StatusCode::kOutOfRange));
-  EXPECT_EQ(result, nullptr);
-  EXPECT_EQ(capture.request_count, 0u);
-
-  iree_status_free(status);
-  loom_benchmark_case_request_capture_deinitialize(&capture);
-  loomc_module_release(module);
-}
-
 }  // namespace
 }  // namespace loom

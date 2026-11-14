@@ -18,7 +18,8 @@
 extern "C" {
 #endif
 
-// Prints every diagnostic in |result| and returns its operation outcome.
+// Prints every diagnostic in the non-null |result| and returns its operation
+// outcome through |out_succeeded|. The status reports output failure only.
 // Source identifiers are expected to carry their final logical identity from
 // admission through every later compiler operation.
 iree_status_t loom_tooling_cli_print_loomc_result(FILE* file,
