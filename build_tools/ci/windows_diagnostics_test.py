@@ -469,6 +469,35 @@ class WindowsDiagnosticsTest(unittest.TestCase):
             self.assertIn("error", records[str(missing)])
             self.assertTrue(all("error" in tool for tool in manifest["tools"]))
 
+    def test_integrity_policy_status_captures_application_control_evidence(self):
+        started_at = dt.datetime(2026, 11, 14, tzinfo=dt.UTC)
+        for output in (
+            "FAIL: //example:test (Exit -1058471934) (see test.log)",
+            "process exited with status 0xC0E90002",
+            "process exited with status 0xc0e90002",
+        ):
+            with self.subTest(output=output):
+                capture = mock.Mock()
+                diagnostics.capture_application_control(
+                    capture, Path("work"), output, started_at
+                )
+                self.assertEqual(
+                    [call.args[2] for call in capture.tool.call_args_list],
+                    ["code-integrity-events", "application-control-policies"],
+                )
+
+        for output in (
+            "FAIL: //example:test (Exit -10584719340)",
+            "process exited with status 0xC0E900020",
+            "process exited with status 1058471934",
+        ):
+            with self.subTest(output=output):
+                capture = mock.Mock()
+                diagnostics.capture_application_control(
+                    capture, Path("work"), output, started_at
+                )
+                capture.tool.assert_not_called()
+
     def test_policy_capture_failure_preserves_command_and_other_evidence(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

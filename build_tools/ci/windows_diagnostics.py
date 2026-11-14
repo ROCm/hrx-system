@@ -666,8 +666,11 @@ def symbol_tool(environment: Mapping[str, str], cache: Mapping[str, str]) -> str
 def capture_application_control(
     capture: Capture, cwd: Path, output: str, started_at: dt.datetime
 ) -> None:
+    # Bazel renders STATUS_SYSTEM_INTEGRITY_POLICY_VIOLATION (0xC0E90002) as
+    # the signed 32-bit process exit -1058471934.
     if not re.search(
         r"(?:error:\s*|\[WinError\s+)4551\b|"
+        r"\b0xC0E90002\b|(?<!\d)-1058471934(?!\d)|"
         r"An Application Control policy has blocked this file",
         output,
         re.IGNORECASE,
