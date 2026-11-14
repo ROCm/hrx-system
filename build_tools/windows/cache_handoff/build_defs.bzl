@@ -21,7 +21,7 @@ def _windows_cache_handoff_test_impl(ctx):
         output = executable,
         content = (
             "@echo off\r\n" +
-            '"%%TEST_SRCDIR%%\\%s" run\r\n' % runner_path +
+            '"%%TEST_SRCDIR%%\\%s" run -- %%*\r\n' % runner_path +
             "exit /b %ERRORLEVEL%\r\n"
         ),
         is_executable = True,

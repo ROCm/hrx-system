@@ -194,37 +194,96 @@ def _sha256(path: Path) -> tuple[str, int]:
     return hasher.hexdigest(), size
 
 
-def _load_json_object(path: Path) -> dict[str, Any]:
+def _load_json_values(path: Path) -> list[Any]:
     try:
-        value = json.loads(path.read_text(encoding="utf-8-sig"))
-    except (OSError, json.JSONDecodeError) as exc:
+        text = path.read_text(encoding="utf-8-sig")
+    except OSError as exc:
         raise HandoffError(f"failed to read {path}: {exc}") from exc
+    decoder = json.JSONDecoder()
+    values = []
+    position = 0
+    while position < len(text):
+        while position < len(text) and text[position].isspace():
+            position += 1
+        if position == len(text):
+            break
+        try:
+            value, position = decoder.raw_decode(text, position)
+        except json.JSONDecodeError as exc:
+            raise HandoffError(f"failed to read {path}: {exc}") from exc
+        values.append(value)
+    return values
+
+
+def _load_json_object(path: Path) -> dict[str, Any]:
+    values = _load_json_values(path)
+    if len(values) != 1:
+        raise HandoffError(f"{path} must contain exactly one JSON value")
+    value = values[0]
     if not isinstance(value, dict):
         raise HandoffError(f"{path} must contain a JSON object")
     return value
 
 
-def _configured_rule(path: Path) -> tuple[str, dict[str, dict[str, Any]]]:
+def _configured_rules(path: Path) -> dict[str, dict[str, dict[str, Any]]]:
     payload = _load_json_object(path)
     results = payload.get("results")
-    if not isinstance(results, list) or len(results) != 1:
-        raise HandoffError(f"{path} must describe exactly one configured target")
-    rule = results[0].get("target", {}).get("rule")
-    if not isinstance(rule, dict):
-        raise HandoffError(f"{path} does not describe a configured rule")
-    label = rule.get("name")
-    attributes = rule.get("attribute")
-    if not isinstance(label, str) or not isinstance(attributes, list):
-        raise HandoffError(f"{path} has malformed configured rule metadata")
-    return label, {
-        attribute["name"]: attribute
-        for attribute in attributes
-        if isinstance(attribute, dict) and isinstance(attribute.get("name"), str)
-    }
+    if not isinstance(results, list) or not results:
+        raise HandoffError(f"{path} must describe configured targets")
+    configured_rules = {}
+    for result in results:
+        rule = (
+            result.get("target", {}).get("rule") if isinstance(result, dict) else None
+        )
+        if not isinstance(rule, dict):
+            raise HandoffError(f"{path} does not describe configured rules")
+        label = rule.get("name")
+        attributes = rule.get("attribute")
+        if not isinstance(label, str) or not isinstance(attributes, list):
+            raise HandoffError(f"{path} has malformed configured rule metadata")
+        label = _normalize_main_repository_label(label)
+        if label in configured_rules:
+            raise HandoffError(f"{path} contains duplicate configured target {label}")
+        configured_rules[label] = {
+            attribute["name"]: attribute
+            for attribute in attributes
+            if isinstance(attribute, dict) and isinstance(attribute.get("name"), str)
+        }
+    return configured_rules
 
 
 def _normalize_main_repository_label(label: str) -> str:
     return label[2:] if label.startswith("@@//") else label
+
+
+def _main_repository_label_parts(label: str) -> tuple[str, str]:
+    label = _normalize_main_repository_label(label)
+    if not label.startswith("//"):
+        raise HandoffError(f"test target is not in the main repository: {label}")
+    body = label[2:]
+    package, separator, name = body.partition(":")
+    if not separator:
+        name = PurePosixPath(package).name
+    package_path = PurePosixPath(package)
+    name_path = PurePosixPath(name)
+    if (
+        (
+            package
+            and (
+                package_path.is_absolute()
+                or package_path.as_posix() != package
+                or ".." in package_path.parts
+            )
+        )
+        or not name
+        or name_path.is_absolute()
+        or name_path.as_posix() != name
+        or ".." in name_path.parts
+        or ":" in name
+        or "\\" in label
+    ):
+        raise HandoffError(f"invalid main-repository test label: {label}")
+    return package, name
 
 
 def _string_attribute(attributes: dict[str, dict[str, Any]], name: str) -> str:
@@ -330,14 +389,23 @@ def _convert_marked_value(
     return result
 
 
-def _manifest_entry(runfile: Runfile, cas: CasClient) -> dict[str, Any]:
+def _manifest_entry(
+    runfile: Runfile,
+    cas: CasClient,
+    uploaded_blobs: dict[str, int],
+) -> dict[str, Any]:
     if runfile.physical_path is None:
         return {"path": runfile.logical_path, "empty": True}
     path = runfile.physical_path.resolve(strict=True)
     if not path.is_file():
         raise HandoffError(f"runfile is not a regular file: {path}")
     digest, size = _sha256(path)
-    cas.put(path, digest, size)
+    prior_size = uploaded_blobs.get(digest)
+    if prior_size is None:
+        cas.put(path, digest, size)
+        uploaded_blobs[digest] = size
+    elif prior_size != size:
+        raise HandoffError(f"CAS digest {digest} has inconsistent byte lengths")
     return {
         "path": runfile.logical_path,
         "sha256": digest,
@@ -346,21 +414,34 @@ def _manifest_entry(runfile: Runfile, cas: CasClient) -> dict[str, Any]:
     }
 
 
-def emit_handoff_package(
+def _provider_metadata_by_label(path: Path) -> dict[str, dict[str, Any]]:
+    result = {}
+    for value in _load_json_values(path):
+        if not isinstance(value, dict):
+            raise HandoffError(f"{path} must contain JSON objects")
+        label = value.get("label")
+        if not isinstance(label, str):
+            raise HandoffError(f"{path} contains provider metadata without a label")
+        label = _normalize_main_repository_label(label)
+        if label in result:
+            raise HandoffError(
+                f"{path} contains duplicate provider metadata for {label}"
+            )
+        result[label] = value
+    if not result:
+        raise HandoffError(f"{path} must describe configured target providers")
+    return result
+
+
+def _emit_target_manifest(
     *,
-    target_metadata_path: Path,
-    provider_metadata_path: Path,
+    label: str,
+    attributes: dict[str, dict[str, Any]],
+    provider_metadata: dict[str, Any],
     execution_root: Path,
-    cas_url: str,
-    output_dir: Path,
-) -> dict[str, Any]:
-    label, attributes = _configured_rule(target_metadata_path)
-    provider_metadata = _load_json_object(provider_metadata_path)
-    provider_label = provider_metadata.get("label")
-    if not isinstance(provider_label, str) or _normalize_main_repository_label(
-        provider_label
-    ) != _normalize_main_repository_label(label):
-        raise HandoffError("configured rule and provider labels differ")
+    cas: CasClient,
+    uploaded_blobs: dict[str, int],
+) -> tuple[dict[str, Any], dict[str, Any]]:
     executable_value = provider_metadata.get("executable")
     if not isinstance(executable_value, str) or not executable_value:
         raise HandoffError("configured target has no executable")
@@ -436,9 +517,7 @@ def emit_handoff_package(
             physical_to_logical=physical_to_logical,
         )
 
-    cas = CasClient(cas_url)
-    entries = [_manifest_entry(runfile, cas) for runfile in runfiles]
-    target_name = label.rsplit(":", 1)[-1].replace("/", "_")
+    entries = [_manifest_entry(runfile, cas, uploaded_blobs) for runfile in runfiles]
     shard_count = _int_attribute(attributes, "shard_count")
     test_metadata = {
         "arguments": converted_arguments,
@@ -463,15 +542,7 @@ def emit_handoff_package(
         "test": test_metadata,
         "runfiles": entries,
     }
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-    manifest_name = target_name + ".json"
-    (output_dir / manifest_name).write_text(
-        json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-    )
     build_attributes: dict[str, Any] = {
-        "name": target_name,
-        "manifest": manifest_name,
         "env_inherit": inherited_environment,
         "size": test_metadata["size"],
         "timeout": test_metadata["timeout"],
@@ -482,16 +553,114 @@ def emit_handoff_package(
     }
     if "shard_count" in test_metadata:
         build_attributes["shard_count"] = test_metadata["shard_count"]
+    return manifest, build_attributes
+
+
+def _render_build_file(rules: list[dict[str, Any]]) -> str:
     lines = [
         'load("//build_tools/windows/cache_handoff:build_defs.bzl", "windows_cache_handoff_test")',
         "",
-        "windows_cache_handoff_test(",
     ]
-    for name, value in build_attributes.items():
-        lines.append(f"    {name} = {pprint.pformat(value, sort_dicts=True)},")
-    lines.extend([")", ""])
-    (output_dir / "BUILD.bazel").write_text("\n".join(lines), encoding="utf-8")
-    return manifest
+    for attributes in rules:
+        lines.append("windows_cache_handoff_test(")
+        for name, value in attributes.items():
+            lines.append(f"    {name} = {pprint.pformat(value, sort_dicts=True)},")
+        lines.extend([")", ""])
+    return "\n".join(lines)
+
+
+def emit_handoff_packages(
+    *,
+    target_metadata_path: Path,
+    provider_metadata_path: Path,
+    execution_root: Path,
+    cas_url: str,
+    output_dir: Path,
+) -> dict[str, Any]:
+    configured_rules = _configured_rules(target_metadata_path)
+    providers = _provider_metadata_by_label(provider_metadata_path)
+    if configured_rules.keys() != providers.keys():
+        missing_providers = sorted(configured_rules.keys() - providers.keys())
+        missing_rules = sorted(providers.keys() - configured_rules.keys())
+        raise HandoffError(
+            "configured rules and providers differ: "
+            f"missing providers={missing_providers}, missing rules={missing_rules}"
+        )
+
+    cas = CasClient(cas_url)
+    uploaded_blobs: dict[str, int] = {}
+    build_rules: dict[str, list[dict[str, Any]]] = {}
+    incompatible_labels = []
+    test_summaries = []
+    runfile_reference_count = 0
+    output_dir.mkdir(parents=True, exist_ok=True)
+    for label in sorted(configured_rules):
+        provider_metadata = providers[label]
+        compatible = provider_metadata.get("compatible")
+        if not isinstance(compatible, bool):
+            raise HandoffError(f"provider metadata for {label} has no compatibility")
+        if not compatible:
+            incompatible_labels.append(label)
+            continue
+        package, name = _main_repository_label_parts(label)
+        manifest, build_attributes = _emit_target_manifest(
+            label=label,
+            attributes=configured_rules[label],
+            provider_metadata=provider_metadata,
+            execution_root=execution_root,
+            cas=cas,
+            uploaded_blobs=uploaded_blobs,
+        )
+        package_dir = output_dir / PurePosixPath(package)
+        package_dir.mkdir(parents=True, exist_ok=True)
+        manifest_name = (
+            "handoff-" + hashlib.sha256(label.encode()).hexdigest()[:16] + ".json"
+        )
+        manifest_path = package_dir / manifest_name
+        manifest_path.write_text(
+            json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        build_rules.setdefault(package, []).append(
+            {
+                "name": name,
+                "manifest": manifest_name,
+                **build_attributes,
+            }
+        )
+        runfile_reference_count += len(manifest["runfiles"])
+        test_summaries.append(
+            {
+                "source_label": label,
+                "package": package,
+                "name": name,
+                "manifest": manifest_path.relative_to(output_dir).as_posix(),
+                "runfile_count": len(manifest["runfiles"]),
+            }
+        )
+
+    if not test_summaries:
+        raise HandoffError("configured selection contains no compatible tests")
+    for package, rules in build_rules.items():
+        package_dir = output_dir / PurePosixPath(package)
+        (package_dir / "BUILD.bazel").write_text(
+            _render_build_file(rules), encoding="utf-8"
+        )
+    summary = {
+        "schema_version": SCHEMA_VERSION,
+        "selected_test_count": len(configured_rules),
+        "compatible_test_count": len(test_summaries),
+        "incompatible_test_count": len(incompatible_labels),
+        "incompatible_labels": incompatible_labels,
+        "runfile_reference_count": runfile_reference_count,
+        "unique_blob_count": len(uploaded_blobs),
+        "unique_blob_bytes": sum(uploaded_blobs.values()),
+        "tests": test_summaries,
+    }
+    (output_dir / "handoff-summary.json").write_text(
+        json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    return summary
 
 
 def _resolve_handoff_value(value: str, runfiles_root: Path) -> str:
@@ -603,7 +772,9 @@ def _find_manifest_from_environment() -> Path:
     return matches[0]
 
 
-def run_handoff_test(manifest_path: Path) -> int:
+def run_handoff_test(
+    manifest_path: Path, additional_arguments: Iterable[str] = ()
+) -> int:
     manifest = _load_json_object(manifest_path)
     if manifest.get("schema_version") != SCHEMA_VERSION:
         raise HandoffError("unsupported handoff manifest schema")
@@ -664,6 +835,7 @@ def run_handoff_test(manifest_path: Path) -> int:
             [
                 str(executable_path),
                 *(_resolve_handoff_value(value, runfiles_root) for value in arguments),
+                *additional_arguments,
             ],
             cwd=workspace_root,
             env=child_environment,
@@ -674,24 +846,11 @@ def run_handoff_test(manifest_path: Path) -> int:
 
 def audit_consumer_execution(execution_log_path: Path, output_path: Path) -> None:
     """Proves that the native consumer did not compile or link test products."""
-    try:
-        text = execution_log_path.read_text(encoding="utf-8")
-    except OSError as exc:
-        raise HandoffError(f"failed to read {execution_log_path}: {exc}") from exc
-    decoder = json.JSONDecoder()
-    entries = []
-    position = 0
-    while position < len(text):
-        while position < len(text) and text[position].isspace():
-            position += 1
-        if position == len(text):
-            break
-        try:
-            entry, position = decoder.raw_decode(text, position)
-        except json.JSONDecodeError as exc:
-            raise HandoffError(f"invalid execution log: {exc}") from exc
-        if isinstance(entry, dict):
-            entries.append(entry)
+    entries = [
+        entry
+        for entry in _load_json_values(execution_log_path)
+        if isinstance(entry, dict)
+    ]
     forbidden = [
         entry
         for entry in entries
@@ -743,7 +902,10 @@ def _parse_arguments(argv: list[str]) -> argparse.Namespace:
     )
     audit_parser.add_argument("--execution-log", type=Path, required=True)
     audit_parser.add_argument("--output", type=Path, required=True)
-    subparsers.add_parser("run", help="Materialize and execute one handoff test")
+    run_parser = subparsers.add_parser(
+        "run", help="Materialize and execute one handoff test"
+    )
+    run_parser.add_argument("test_arguments", nargs=argparse.REMAINDER)
     return parser.parse_args(argv)
 
 
@@ -751,7 +913,7 @@ def main(argv: list[str] | None = None) -> int:
     arguments = _parse_arguments(sys.argv[1:] if argv is None else argv)
     try:
         if arguments.command == "emit":
-            emit_handoff_package(
+            emit_handoff_packages(
                 target_metadata_path=arguments.target_metadata,
                 provider_metadata_path=arguments.provider_metadata,
                 execution_root=arguments.execution_root.resolve(strict=True),
@@ -762,7 +924,10 @@ def main(argv: list[str] | None = None) -> int:
         if arguments.command == "audit":
             audit_consumer_execution(arguments.execution_log, arguments.output)
             return 0
-        return run_handoff_test(_find_manifest_from_environment())
+        test_arguments = arguments.test_arguments
+        if test_arguments[:1] == ["--"]:
+            test_arguments = test_arguments[1:]
+        return run_handoff_test(_find_manifest_from_environment(), test_arguments)
     except (HandoffError, OSError, ValueError) as exc:
         print(f"windows cache handoff: {exc}", file=sys.stderr)
         return 1

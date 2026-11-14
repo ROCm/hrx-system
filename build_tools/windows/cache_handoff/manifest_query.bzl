@@ -41,6 +41,7 @@ def format(target):
             for provider in argument_providers
             for argument in provider.arguments
         ],
+        "compatible": "IncompatiblePlatformProvider" not in all_providers,
         "environment": dict(run_environment.environment) if run_environment else {},
         "executable": executable.path if executable else None,
         "inherited_environment": sorted(run_environment.inherited_environment) if run_environment else [],

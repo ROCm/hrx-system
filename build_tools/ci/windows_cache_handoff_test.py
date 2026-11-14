@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import http.server
 import json
@@ -140,6 +141,7 @@ class WindowsCacheHandoffTest(unittest.TestCase):
                 {
                     "argument_provider_count": 0,
                     "arguments": [],
+                    "compatible": True,
                     "environment": {"FIXTURE_ENV": "present"},
                     "executable": executable.relative_to(execution_root).as_posix(),
                     "inherited_environment": ["PATH"],
@@ -155,12 +157,15 @@ class WindowsCacheHandoffTest(unittest.TestCase):
     def test_emit_uploads_exact_runfiles_and_preserves_test_metadata(self):
         execution_root, target_metadata, provider_metadata = self._write_fixture()
         output_dir = self.root / "package"
-        manifest = handoff.emit_handoff_package(
+        summary = handoff.emit_handoff_packages(
             target_metadata_path=target_metadata,
             provider_metadata_path=provider_metadata,
             execution_root=execution_root,
             cas_url=self.cas_url,
             output_dir=output_dir,
+        )
+        manifest = json.loads(
+            (output_dir / summary["tests"][0]["manifest"]).read_text(encoding="utf-8")
         )
         self.assertEqual(manifest["source_label"], "//example:test")
         self.assertEqual(manifest["executable"], "_main/bin/test.exe")
@@ -168,37 +173,141 @@ class WindowsCacheHandoffTest(unittest.TestCase):
         self.assertEqual(manifest["test"]["environment"], {"FIXTURE_ENV": "present"})
         self.assertEqual(manifest["test"]["inherited_environment"], ["PATH"])
         self.assertEqual(len(_CasHandler.blobs), 2)
-        build_text = (output_dir / "BUILD.bazel").read_text(encoding="utf-8")
+        self.assertEqual(summary["compatible_test_count"], 1)
+        self.assertEqual(summary["unique_blob_count"], 2)
+        build_text = (output_dir / "example/BUILD.bazel").read_text(encoding="utf-8")
         self.assertIn("windows_cache_handoff_test(", build_text)
+        self.assertIn("name = 'test'", build_text)
         self.assertIn("exec_properties = {'pool': 'windows'}", build_text)
         self.assertIn("tags = ['requires-windows']", build_text)
 
     def test_run_materializes_verified_bytes_before_execution(self):
         execution_root, target_metadata, provider_metadata = self._write_fixture()
         output_dir = self.root / "package"
-        handoff.emit_handoff_package(
+        summary = handoff.emit_handoff_packages(
             target_metadata_path=target_metadata,
             provider_metadata_path=provider_metadata,
             execution_root=execution_root,
             cas_url=self.cas_url,
             output_dir=output_dir,
         )
-        self.assertEqual(handoff.run_handoff_test(output_dir / "test.json"), 0)
+        manifest_path = output_dir / summary["tests"][0]["manifest"]
+        self.assertEqual(handoff.run_handoff_test(manifest_path), 0)
+
+    def test_emit_batches_packages_and_uploads_shared_blobs_once(self):
+        execution_root, target_metadata, provider_metadata = self._write_fixture()
+        second_executable = execution_root / "bazel-out/bin/second.exe"
+        if os.name == "nt":
+            second_executable.write_bytes(b"@echo off\r\nrem second\r\nexit /b 0\r\n")
+        else:
+            second_executable.write_bytes(b"#!/bin/sh\n# second\nexit 0\n")
+        second_executable.chmod(second_executable.stat().st_mode | stat.S_IXUSR)
+        repository_mapping = execution_root / "bazel-out/bin/test.exe.repo_mapping"
+        Path(str(second_executable) + ".runfiles_manifest").write_text(
+            f"_main/bin/second.exe {second_executable}\n"
+            f"_repo_mapping {repository_mapping}\n",
+            encoding="utf-8",
+        )
+
+        target_payload = json.loads(target_metadata.read_text(encoding="utf-8"))
+        first_result = target_payload["results"][0]
+        second_result = copy.deepcopy(first_result)
+        second_result["target"]["rule"]["name"] = "//other:second"
+        incompatible_result = copy.deepcopy(first_result)
+        incompatible_result["target"]["rule"]["name"] = "//other:incompatible"
+        target_payload["results"].extend([second_result, incompatible_result])
+        target_metadata.write_text(json.dumps(target_payload), encoding="utf-8")
+
+        first_provider = json.loads(provider_metadata.read_text(encoding="utf-8"))
+        second_provider = copy.deepcopy(first_provider)
+        second_provider.update(
+            {
+                "executable": second_executable.relative_to(execution_root).as_posix(),
+                "label": "@@//other:second",
+            }
+        )
+        incompatible_provider = copy.deepcopy(first_provider)
+        incompatible_provider.update(
+            {
+                "compatible": False,
+                "executable": None,
+                "label": "@@//other:incompatible",
+            }
+        )
+        provider_metadata.write_text(
+            "\n".join(
+                json.dumps(value)
+                for value in (
+                    first_provider,
+                    second_provider,
+                    incompatible_provider,
+                )
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        output_dir = self.root / "package"
+        summary = handoff.emit_handoff_packages(
+            target_metadata_path=target_metadata,
+            provider_metadata_path=provider_metadata,
+            execution_root=execution_root,
+            cas_url=self.cas_url,
+            output_dir=output_dir,
+        )
+
+        self.assertEqual(summary["selected_test_count"], 3)
+        self.assertEqual(summary["compatible_test_count"], 2)
+        self.assertEqual(summary["incompatible_test_count"], 1)
+        self.assertEqual(summary["incompatible_labels"], ["//other:incompatible"])
+        self.assertEqual(summary["runfile_reference_count"], 4)
+        self.assertEqual(summary["unique_blob_count"], 3)
+        self.assertEqual(len(_CasHandler.blobs), 3)
+        self.assertTrue((output_dir / "example/BUILD.bazel").is_file())
+        self.assertTrue((output_dir / "other/BUILD.bazel").is_file())
+        other_build = (output_dir / "other/BUILD.bazel").read_text(encoding="utf-8")
+        self.assertIn("name = 'second'", other_build)
+        self.assertNotIn("incompatible", other_build)
+
+    def test_run_forwards_bazel_test_arguments(self):
+        execution_root, target_metadata, provider_metadata = self._write_fixture()
+        output_dir = self.root / "package"
+        summary = handoff.emit_handoff_packages(
+            target_metadata_path=target_metadata,
+            provider_metadata_path=provider_metadata,
+            execution_root=execution_root,
+            cas_url=self.cas_url,
+            output_dir=output_dir,
+        )
+        manifest_path = output_dir / summary["tests"][0]["manifest"]
+        completed = mock.Mock(returncode=0)
+        with mock.patch.object(
+            handoff.subprocess, "run", return_value=completed
+        ) as run:
+            self.assertEqual(
+                handoff.run_handoff_test(
+                    manifest_path, ["--gtest_filter=Fixture.Selected"]
+                ),
+                0,
+            )
+        self.assertEqual(run.call_args.args[0][-1], "--gtest_filter=Fixture.Selected")
 
     def test_run_rejects_corrupt_cas_bytes(self):
         execution_root, target_metadata, provider_metadata = self._write_fixture()
         output_dir = self.root / "package"
-        manifest = handoff.emit_handoff_package(
+        summary = handoff.emit_handoff_packages(
             target_metadata_path=target_metadata,
             provider_metadata_path=provider_metadata,
             execution_root=execution_root,
             cas_url=self.cas_url,
             output_dir=output_dir,
         )
+        manifest_path = output_dir / summary["tests"][0]["manifest"]
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         digest = manifest["runfiles"][0]["sha256"]
         _CasHandler.blobs[digest] = b"corrupt"
         with self.assertRaisesRegex(handoff.HandoffError, "verified as"):
-            handoff.run_handoff_test(output_dir / "test.json")
+            handoff.run_handoff_test(manifest_path)
 
     def test_find_manifest_resolves_windows_runfiles_manifest(self):
         physical_manifest = self.root / "compiler_runtime_test.json"
