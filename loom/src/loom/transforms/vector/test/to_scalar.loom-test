@@ -1756,3 +1756,40 @@ CHECK: *view.atomic.rmw<addf, noftz>*
 CHECK-NOT: *vector.atomic.*
 CHECK-NOT: *view.atomic.reduce<addf>*
 CHECK-NOT: *view.atomic.rmw<addf>*
+
+// ====
+// RUN: pass vector-to-scalar,canonicalize,dce
+
+// The static ordinal is narrowed just like a dynamic index.cast. Only one
+// observed lane survives, making the exact modular offset visible.
+func.def @wrapped_coordinate_ordinal(%base: i8, %step: i8) -> (i8) {
+  %values = vector.iota %base step %step : vector<160xi8>
+  %lane = vector.extract %values[129] : vector<160xi8> -> i8
+  func.return %lane : i8
+}
+
+// ----
+func.def @wrapped_coordinate_ordinal(%base: i8, %step: i8) -> (i8) {
+  %5 = scalar.constant -127 : i8
+  %6 = scalar.muli %5, %step : i8
+  %lane = scalar.addi %base, %6 : i8
+  func.return %lane : i8
+}
+
+// ====
+// RUN: pass vector-to-scalar,canonicalize,dce
+
+func.def @wrapped_range_ordinal(%base: i8, %limit: i8, %step: i8) -> (i1) {
+  %values = vector.mask.range [%base to %limit step %step] : i8 -> vector<160xi1>
+  %lane = vector.extract %values[129] : vector<160xi1> -> i1
+  func.return %lane : i1
+}
+
+// ----
+func.def @wrapped_range_ordinal(%base: i8, %limit: i8, %step: i8) -> (i1) {
+  %6 = scalar.constant -127 : i8
+  %7 = scalar.muli %6, %step : i8
+  %8 = scalar.addi %base, %7 : i8
+  %lane = scalar.cmpi slt, %8, %limit : i8
+  func.return %lane : i1
+}

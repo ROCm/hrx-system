@@ -12,6 +12,7 @@
 #include "loom/transforms/kernel/target_legalization.h"
 #include "loom/transforms/math/legalize.h"
 #include "loom/transforms/scalar/target_legalization.h"
+#include "loom/transforms/vector/coordinate_legalization.h"
 #include "loom/transforms/vector/grouped_packet_legalization.h"
 #include "loom/transforms/vector/target_legalization.h"
 #include "loom/transforms/view/target_legalization.h"
@@ -27,6 +28,7 @@ iree_status_t loom_low_legalizer_registry_storage_initialize(
       loom_kernel_target_legalizer_provider(),
       loom_math_target_legalizer_provider(),
       loom_scalar_target_legalizer_provider(),
+      loom_vector_coordinate_legalizer_provider(),
       loom_vector_grouped_packet_legalizer_provider(),
       loom_vector_target_legalizer_provider(),
       loom_view_target_legalizer_provider(),

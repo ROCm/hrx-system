@@ -769,7 +769,7 @@ func.def target(@test_target) @empty_partial_reduction(%values: vector<0x3xi32>,
 }
 
 // ====
-// RUN: pass target-legalize{mode=complete},dce
+// RUN: pass target-legalize{mode=complete,policy=reference-only},dce
 
 test.target<low_core> @test_target
 
@@ -786,30 +786,40 @@ test.target<low_core> @test_target
 
 func.def target(@test_target) @narrow_range_mask_reference(%lower: i8, %upper: i8, %step: i8) {
   %4 = scalar.constant 0 : i8
-  %33 = scalar.extui %4 : i8 to i32
+  %58 = scalar.extui %4 : i8 to i32
+  %59 = scalar.extui %step : i8 to i32
+  %60 = scalar.muli %58, %59 : i32
+  %51 = scalar.extui %lower : i8 to i32
+  %53 = scalar.addi %51, %60 : i32
+  %56 = scalar.constant 255 : i32
+  %57 = scalar.andi %53, %56 : i32
+  %48 = scalar.constant 24 : i32
+  %49 = scalar.shli %57, %48 : i32
+  %50 = scalar.shrsi %49, %48 : i32
+  %43 = scalar.extui %upper : i8 to i32
+  %44 = scalar.constant 24 : i32
+  %45 = scalar.shli %43, %44 : i32
+  %46 = scalar.shrsi %45, %44 : i32
+  %42 = scalar.cmpi slt, %50, %46 : i32
+  %8 = scalar.constant 1 : i8
+  %33 = scalar.extui %8 : i8 to i32
   %34 = scalar.extui %step : i8 to i32
   %35 = scalar.muli %33, %34 : i32
-  %36 = scalar.trunci %35 : i32 to i8
-  %29 = scalar.extui %lower : i8 to i32
-  %30 = scalar.extui %36 : i8 to i32
-  %31 = scalar.addi %29, %30 : i32
-  %32 = scalar.trunci %31 : i32 to i8
-  %26 = scalar.extsi %32 : i8 to i32
-  %27 = scalar.extsi %upper : i8 to i32
-  %28 = scalar.cmpi slt, %26, %27 : i32
-  %8 = scalar.constant 1 : i8
-  %22 = scalar.extui %8 : i8 to i32
-  %23 = scalar.extui %step : i8 to i32
-  %24 = scalar.muli %22, %23 : i32
-  %25 = scalar.trunci %24 : i32 to i8
-  %18 = scalar.extui %lower : i8 to i32
-  %19 = scalar.extui %25 : i8 to i32
-  %20 = scalar.addi %18, %19 : i32
-  %21 = scalar.trunci %20 : i32 to i8
-  %15 = scalar.extsi %21 : i8 to i32
-  %16 = scalar.extsi %upper : i8 to i32
-  %17 = scalar.cmpi slt, %15, %16 : i32
-  %13 = vector.splat %28 : vector<2xi1>
+  %26 = scalar.extui %lower : i8 to i32
+  %38 = scalar.constant 255 : i32
+  %39 = scalar.andi %35, %38 : i32
+  %28 = scalar.addi %26, %39 : i32
+  %31 = scalar.constant 255 : i32
+  %32 = scalar.andi %28, %31 : i32
+  %23 = scalar.constant 24 : i32
+  %24 = scalar.shli %32, %23 : i32
+  %25 = scalar.shrsi %24, %23 : i32
+  %18 = scalar.extui %upper : i8 to i32
+  %19 = scalar.constant 24 : i32
+  %20 = scalar.shli %18, %19 : i32
+  %21 = scalar.shrsi %20, %19 : i32
+  %17 = scalar.cmpi slt, %25, %21 : i32
+  %13 = vector.splat %42 : vector<2xi1>
   %mask = vector.insert %17 into %13[1] : i1, vector<2xi1>
   test.use %mask : vector<2xi1>
   func.return

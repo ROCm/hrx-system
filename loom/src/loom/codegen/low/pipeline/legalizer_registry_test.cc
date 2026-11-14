@@ -144,8 +144,23 @@ TEST(LowLegalizerRegistryTest, TargetProvidersPrecedeGenericProviders) {
   ExpectReferenceProviders(registry, LOOM_OP_VECTOR_FPTOUI,
                            IREE_SV("conversion"), IREE_SV("vector"));
   ExpectReferenceProvider(registry, LOOM_OP_VECTOR_REDUCE, IREE_SV("vector"));
-  ExpectReferenceProvider(registry, LOOM_OP_VECTOR_MASK_RANGE,
-                          IREE_SV("vector"));
+  const loom_op_kind_t coordinate_kinds[] = {LOOM_OP_VECTOR_IOTA,
+                                             LOOM_OP_VECTOR_MASK_RANGE};
+  for (loom_op_kind_t kind : coordinate_kinds) {
+    const loom_target_legalizer_op_entry_t op_entry =
+        loom_target_legalizer_registry_lookup_kind(registry, kind);
+    ASSERT_EQ(op_entry.entry_count, 2u);
+    const loom_target_legalizer_entry_t* entries =
+        &registry->entries[op_entry.entry_start];
+    EXPECT_TRUE(iree_string_view_equal(entries[0].provider->name,
+                                       IREE_SV("vector-coordinate")));
+    EXPECT_EQ(entries[0].provider->strategy,
+              LOOM_TARGET_LEGALIZER_STRATEGY_TARGET);
+    EXPECT_TRUE(
+        iree_string_view_equal(entries[1].provider->name, IREE_SV("vector")));
+    EXPECT_EQ(entries[1].provider->strategy,
+              LOOM_TARGET_LEGALIZER_STRATEGY_REFERENCE);
+  }
   ExpectReferenceProvider(registry, LOOM_OP_VIEW_ATOMIC_RMW, IREE_SV("view"));
 
   const loom_target_legalizer_entry_t* narrow_binary =
