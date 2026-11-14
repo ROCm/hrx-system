@@ -2,7 +2,7 @@
 #include <loomcxx/index.h>
 
 loom::type::offset multiply_offsets(loom::type::offset lhs, loom::type::offset rhs) {
-  // ERROR@+1: PARSE/036 "invalid operands to binary expression ('::loom::type::offset' and '::loom::type::offset')"
+  // ERROR@+1: PARSE/036 "invalid operands to binary expression ('loom::type::offset' and 'loom::type::offset')"
   return lhs * rhs;
 }
 
@@ -10,7 +10,7 @@ loom::type::offset multiply_offsets(loom::type::offset lhs, loom::type::offset r
 #include <loomcxx/index.h>
 
 loom::type::offset divide_offsets(loom::type::offset lhs, loom::type::offset rhs) {
-  // ERROR@+1: PARSE/036 "invalid operands to binary expression ('::loom::type::offset' and '::loom::type::offset')"
+  // ERROR@+1: PARSE/036 "invalid operands to binary expression ('loom::type::offset' and 'loom::type::offset')"
   return lhs / rhs;
 }
 
@@ -18,7 +18,7 @@ loom::type::offset divide_offsets(loom::type::offset lhs, loom::type::offset rhs
 #include <loomcxx/index.h>
 
 loom::type::index mix_address_domains(loom::type::index logical, loom::type::offset physical) {
-  // ERROR@+1: PARSE/036 "invalid operands to binary expression ('::loom::type::index' and '::loom::type::offset')"
+  // ERROR@+1: PARSE/036 "invalid operands to binary expression ('loom::type::index' and 'loom::type::offset')"
   return logical + physical;
 }
 

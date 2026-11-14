@@ -25,13 +25,13 @@ func.def public @different(%value: i32) -> (i32) {
 }
 
 func.def @scale__const_object_(%value: i32) -> (i32) {
-  %10 = scalar.constant 32 : i32
-  %11 = scalar.muli %value, %10 : i32
+  %_elements = scalar.constant 32 : i32
+  %11 = scalar.muli %value, %_elements : i32
   func.return %11 : i32
 }
 
 func.def @scale__const_object__1(%value: i32) -> (i32) {
-  %14 = scalar.constant 64 : i32
-  %15 = scalar.muli %value, %14 : i32
+  %_elements = scalar.constant 64 : i32
+  %15 = scalar.muli %value, %_elements : i32
   func.return %15 : i32
 }

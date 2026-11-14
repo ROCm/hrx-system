@@ -11,21 +11,21 @@ static_assert(selected<0>() == 20);
 // ====
 // A mutable variable is not made a constant by its literal initializer.
 int entry() {
-  // ERROR@+1: PARSE/036 "condition of 'if constexpr' is not a constant expression"
+  // ERROR@+1: PARSE/036 "constexpr if condition is not a constant expression"
   if constexpr (int value = 1) return value;
   else return 0;
 }
 
 // ====
 int entry(int input) {
-  // ERROR@+1: PARSE/036 "condition of 'if constexpr' is not a constant expression"
+  // ERROR@+1: PARSE/036 "constexpr if condition is not a constant expression"
   if constexpr (const int value = input) return value;
   else return 0;
 }
 
 // ====
 int entry() {
-  // ERROR@+1: PARSE/036 "condition of 'if constexpr' is not a constant expression"
+  // ERROR@+1: PARSE/036 "constexpr if condition is not a constant expression"
   if constexpr (const volatile int value = 1) return value;
   else return 0;
 }
@@ -287,13 +287,13 @@ func.def public @discarded(%input: i32) -> (i32) {
 }
 
 func.def @selected_value_7(%input: i32) -> (i32) {
-  %12 = scalar.constant 7 : i32
-  %14 = scalar.addi %input, %12 : i32
-  func.return %14 : i32
+  %value = scalar.constant 7 : i32
+  %9 = scalar.addi %input, %value : i32
+  func.return %9 : i32
 }
 
 func.def @selected_value_0(%input: i32) -> (i32) {
-  %28 = scalar.constant 20 : i32
-  %29 = scalar.addi %input, %28 : i32
-  func.return %29 : i32
+  %16 = scalar.constant 20 : i32
+  %17 = scalar.addi %input, %16 : i32
+  func.return %17 : i32
 }

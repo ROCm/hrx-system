@@ -18,7 +18,8 @@ namespace loom::cxx_import {
 class Diagnostics;
 
 // One checked list initializes an array, independently of its library facade.
-// The original clauses retain the frontend's copy-initialization conversions.
+// The frontend's semantic argument slot retains copy-initialized elements
+// separately from the written clauses.
 struct InitializerList {
   // Arena-owned const-array construction; its extent can be zero.
   cxx::BracedInitListAST* backing;

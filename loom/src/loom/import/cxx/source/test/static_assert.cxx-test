@@ -86,6 +86,7 @@ static unsigned stage(unsigned value) {
   static_assert(Length % Radix == 0, "factorization");
   return value;
 }
+// REMARK@+1: PARSE/036 "in instantiation of function template specialization 'stage<400, 3>' requested here"
 unsigned entry(unsigned value) { return stage<400, 3>(value); }
 
 // ====

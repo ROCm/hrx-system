@@ -11,7 +11,7 @@ unsigned global_observation() { return observed; }
 
 // ====
 // A const volatile access still cannot write its observed object.
-// ERROR@+1: LOWERING/059 "mutation requires a non-const destination"
+// ERROR@+1: PARSE/036 "cannot assign to a non-modifiable lvalue of type 'const volatile unsigned int'"
 void constant_observation(const volatile unsigned* input) { *input = 7; }
 
 // ====

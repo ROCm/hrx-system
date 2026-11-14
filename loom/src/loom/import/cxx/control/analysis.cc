@@ -299,10 +299,11 @@ cxx::IdExpressionAST* address_identity(cxx::TranslationUnit& unit,
       continue;
     }
     if (auto* copy = cxx::ast_cast<cxx::ParenInitializerAST>(expression)) {
-      if (!copy->expressionList || copy->expressionList->next) {
+      auto* arguments = cxx::Initializer(copy).expressionList();
+      if (!arguments || arguments->next) {
         return nullptr;
       }
-      expression = copy->expressionList->value;
+      expression = arguments->value;
       continue;
     }
     break;
@@ -330,9 +331,10 @@ std::optional<std::intmax_t> address_constant(cxx::TranslationUnit& unit,
   cxx::List<cxx::ExpressionAST*>* arguments = nullptr;
   if (auto* construction =
           cxx::ast_cast<cxx::BracedTypeConstructionAST>(expression)) {
-    arguments = construction->bracedInitList
-                    ? construction->bracedInitList->expressionList
-                    : nullptr;
+    arguments =
+        construction->bracedInitList
+            ? cxx::Initializer(construction->bracedInitList).expressionList()
+            : nullptr;
   } else if (auto* construction =
                  cxx::ast_cast<cxx::TypeConstructionAST>(expression)) {
     arguments = construction->expressionList;
@@ -456,9 +458,7 @@ ControlFlow::ControlFlow(cxx::TranslationUnit& unit, Diagnostics& diagnostics,
     }
   }
   if (function_ && function_->isConstructor()) {
-    auto* definition = function_->declaration();
-    auto* function_body = definition ? definition->functionBody : nullptr;
-    constructor_initializers_ = cxx::ctor_initializers(function_body);
+    constructor_initializers_ = cxx::ctor_initializers(function_);
     for (auto* initializer : cxx::ListView{constructor_initializers_}) {
       accept(initializer);
     }
@@ -1105,7 +1105,11 @@ ExitFlow ControlFlow::iteration_exits(cxx::StatementAST* statement) const {
 
 bool ControlFlow::preVisit(cxx::AST* ast) {
   switch (ast->kind()) {
-    case cxx::ASTKind::ConstExpression:
+    case cxx::ASTKind::ConstExpression: {
+      auto* constant = cxx::ast_cast<cxx::ConstExpressionAST>(ast);
+      return constant->constValue &&
+             constant_contains_address(*constant->constValue);
+    }
     case cxx::ASTKind::SizeofExpression:
     case cxx::ASTKind::SizeofTypeExpression:
     case cxx::ASTKind::AlignofTypeExpression:
@@ -1541,7 +1545,7 @@ void ControlFlow::visit(cxx::ForStatementAST* ast) {
 
 void ControlFlow::visit(cxx::ForRangeStatementAST* ast) {
   if (!range_loops_) {
-    range_loops_ = std::make_unique<RangeLoops>(unit_);
+    range_loops_ = std::make_unique<RangeLoops>();
   }
   accept(range_loops_->expand(ast));
 }
@@ -2085,7 +2089,13 @@ void ControlFlow::visit(cxx::CallExpressionAST* ast) {
   if (!function) {
     cxx::ASTVisitor::visit(ast);
   } else {
-    accept(ast->baseExpression);
+    // A resolved function designator has no runtime value to evaluate. Visit
+    // only an explicit member receiver; template argument expressions belong
+    // to frontend substitution and must not become runtime reads or storage.
+    auto* designator = unwrap_expression(ast->baseExpression);
+    if (auto* member = cxx::ast_cast<cxx::MemberExpressionAST>(designator)) {
+      accept(member->baseExpression);
+    }
     auto parameters = function->parameters();
     auto* definition = function->resolvedDefinition();
     const bool has_definition =
@@ -2166,8 +2176,7 @@ void ControlFlow::visit(cxx::LambdaExpressionAST* ast) {
                               /*storage_receiver=*/false, capture);
     }
     if (unit_.typeTraits().is_lvalue_reference(field->type())) {
-      auto* referent =
-          cxx::Initializer(initializer).referenceExpression(unit_.typeTraits());
+      auto* referent = reference_initializer(unit_, initializer);
       if (!referent) {
         diagnostics_.reject(unit_, capture,
                             "lambda reference capture requires one "
@@ -2199,8 +2208,9 @@ void ControlFlow::visit(cxx::SubscriptExpressionAST* ast) {
   auto* saved_borrowed_expression = borrowed_pointer_expression_;
   cxx::ExpressionAST* borrowed_array = nullptr;
   const cxx::Type* borrowed_type = nullptr;
+  auto* index = subscript_index(ast);
   if (!ast->symbol) {
-    for (auto* operand : {ast->baseExpression, ast->indexExpression}) {
+    for (auto* operand : {ast->baseExpression, index}) {
       if (!unit_.typeTraits().is_pointer(operand->type) ||
           !array_borrow_origin(operand)) {
         continue;
@@ -2224,15 +2234,15 @@ void ControlFlow::visit(cxx::SubscriptExpressionAST* ast) {
   }
   auto traits = unit_.typeTraits();
   auto* base_type = traits.remove_reference(ast->baseExpression->type);
-  auto* index_type = traits.remove_reference(ast->indexExpression->type);
+  auto* index_type = traits.remove_reference(index->type);
   const bool array_first =
       traits.is_array(base_type) || borrowed_array == ast->baseExpression;
   if (!array_first && !traits.is_array(index_type) && !borrowed_array) {
     return;
   }
   ArraySubscript selection{
-      array_first ? ast->baseExpression : ast->indexExpression,
-      array_first ? ast->indexExpression : ast->baseExpression,
+      array_first ? ast->baseExpression : index,
+      array_first ? index : ast->baseExpression,
       borrowed_array ? borrowed_type : (array_first ? base_type : index_type),
       array_first, std::nullopt};
   auto* type = cxx::type_cast<cxx::BoundedArrayType>(
@@ -2278,7 +2288,8 @@ void ControlFlow::analyze_default_constructor(const cxx::Type* type,
     type = types_.unqualified(array->elementType());
   }
   auto* record = types_.record(type, owner);
-  if (!record || !constructor || cxx::isUserProvided(constructor) ||
+  if (!record || !constructor ||
+      unit_.typeTraits().is_user_provided(constructor) ||
       !same_function(constructor, record->source->defaultConstructor())) {
     return;
   }
@@ -2299,12 +2310,11 @@ void ControlFlow::analyze_default_constructor(const cxx::Type* type,
   // structured expressions still retain their mutation summaries.
   auto enclosing_owners = std::move(owners_);
   owners_.clear();
-  for (auto* initializer : cxx::ListView{cxx::ctor_initializers(body)}) {
+  for (auto* initializer : cxx::ListView{cxx::ctor_initializers(constructor)}) {
     auto* field = cxx::symbol_cast<cxx::FieldSymbol>(initializer->symbol);
     if (field && unit_.typeTraits().is_lvalue_reference(field->type())) {
       auto* source = cxx::memInitializerClause(unit_.arena(), initializer);
-      auto* referent =
-          cxx::Initializer(source).referenceExpression(unit_.typeTraits());
+      auto* referent = reference_initializer(unit_, source);
       if (!referent) {
         diagnostics_.reject(unit_, source,
                             "reference members require one initializer "
@@ -2364,19 +2374,19 @@ void ControlFlow::retain_call(cxx::CallExpressionAST* call,
   if (function->isImplicitObjectMemberFunction()) {
     auto* base = unwrap_expression(call->baseExpression);
     if (auto* member = cxx::ast_cast<cxx::MemberExpressionAST>(base)) {
+      auto selected = types_.member_object_selection(member, member);
+      auto* projection = selected.projection ? &*selected.projection : nullptr;
       retained.current_receiver =
-          !member->subobjectPath &&
-          is_current_object(unit_, member->baseExpression);
+          !projection && is_current_object(unit_, selected.object);
       retained.storage_receiver =
           member->accessOp == cxx::TokenKind::T_MINUS_GREATER;
       if (!retained.current_receiver) {
-        retained.receiver = retain_member_receiver(
-            member->baseExpression, member->subobjectPath, member);
+        retained.receiver = retain_member_receiver(selected.object, projection);
       }
     } else if (auto* id = cxx::ast_cast<cxx::IdExpressionAST>(base);
                id && id->subobjectPath) {
-      retained.receiver =
-          retain_member_receiver(nullptr, id->subobjectPath, id);
+      retained.receiver = retain_member_receiver(
+          nullptr, &types_.projection(id->subobjectPath, id));
     } else {
       retained.current_receiver = true;
     }
@@ -2390,10 +2400,14 @@ void ControlFlow::retain_call(cxx::SubscriptExpressionAST* call,
                               cxx::FunctionSymbol* function) {
   DirectCall retained = {function, call, {}, std::nullopt, false, false};
   auto parameters = function->parameters();
-  retained.arguments.push_back(retain_call_argument(
-      call->indexExpression,
-      parameters.empty() ? nullptr
-                         : candidate_pointer_object_type(parameters.front())));
+  size_t ordinal = 0;
+  for (auto* argument : cxx::ListView{call->expressionList}) {
+    retained.arguments.push_back(retain_call_argument(
+        argument, ordinal < parameters.size()
+                      ? candidate_pointer_object_type(parameters[ordinal])
+                      : nullptr));
+    ++ordinal;
+  }
   if (function->isImplicitObjectMemberFunction()) {
     retained.current_receiver = is_current_object(unit_, call->baseExpression);
     if (!retained.current_receiver) {
@@ -2508,7 +2522,7 @@ void ControlFlow::record_parameter_read(cxx::ExpressionAST* expression) {
     return;
   }
   if (auto* list = cxx::ast_cast<cxx::BracedInitListAST>(expression)) {
-    record_copy_read(list->type, list->expressionList);
+    record_copy_read(list->type, cxx::Initializer(list).expressionList());
     return;
   }
   if (value && receiver_partition_ && is_current_object(unit_, value)) {
@@ -2543,8 +2557,7 @@ bool ControlFlow::record_pointer_alias_read(cxx::ExpressionAST* expression) {
       return false;
     }
     pointer = member->baseExpression;
-    const auto selected =
-        types_.selection(field, member->subobjectPath, member);
+    const auto selected = types_.selection(member, member);
     projection = {selected.component_offset,
                   selected.partition->component_count};
   } else if (auto* dereference =
@@ -2624,18 +2637,26 @@ void ControlFlow::record_parameter_assignment(cxx::ExpressionAST* expression) {
 
 void ControlFlow::record_member_binding_read(cxx::ExpressionAST* expression) {
   cxx::Symbol* field;
-  cxx::List<cxx::Symbol*>* path;
+  cxx::Symbol* root = nullptr;
   if (auto* id = cxx::ast_cast<cxx::IdExpressionAST>(expression)) {
     field = id->symbol;
-    path = id->subobjectPath;
+    if (observes_pointer_captures_) {
+      root = id->subobjectPath ? id->subobjectPath->value : field;
+    }
   } else {
     auto* member = cxx::ast_cast<cxx::MemberExpressionAST>(expression);
+    if (member->vectorComponentKind != cxx::VectorComponentKind::kNone) {
+      return;
+    }
     field = member->symbol;
-    path = member->subobjectPath;
+    if (observes_pointer_captures_) {
+      auto* projection = types_.member_object_projection(member, member);
+      root = projection ? projection->root->source : field;
+    }
   }
   if (observes_pointer_captures_) {
-    if (auto captured = captured_object_member(
-            unit_, receiver_partition_->source, path ? path->value : field)) {
+    if (auto captured =
+            captured_object_member(unit_, receiver_partition_->source, root)) {
       construction_.read(captured->pointer_field, 0, SIZE_MAX);
       return;
     }
@@ -2685,22 +2706,20 @@ CallArgument ControlFlow::retain_call_argument(
   return argument;
 }
 
-CallArgument ControlFlow::retain_member_receiver(cxx::ExpressionAST* expression,
-                                                 cxx::List<cxx::Symbol*>* path,
-                                                 cxx::AST* owner) {
-  if (!path) {
+CallArgument ControlFlow::retain_member_receiver(
+    cxx::ExpressionAST* expression, const SubobjectProjection* projection) {
+  if (!projection) {
     return retain_call_argument(expression);
   }
-  const auto& selected = types_.projection(path, owner);
   if (!expression || is_current_object(unit_, expression)) {
     CallArgument argument{
         .source = expression,
-        .write_binding = selected.root->source,
+        .write_binding = projection->root->source,
     };
     append_identity(
-        {selected.root->source,
-         selected.component_offset - selected.root->component_offset,
-         selected.partition},
+        {projection->root->source,
+         projection->component_offset - projection->root->component_offset,
+         projection->partition},
         argument);
     return argument;
   }
@@ -2711,7 +2730,7 @@ CallArgument ControlFlow::retain_member_receiver(cxx::ExpressionAST* expression,
   };
   append_identity(
       origin, argument,
-      {selected.component_offset, selected.partition->component_count});
+      {projection->component_offset, projection->partition->component_count});
   return argument;
 }
 
@@ -2871,8 +2890,31 @@ void ControlFlow::collect_identity(cxx::ExpressionAST* expression,
     return;
   }
   if (auto* member = cxx::ast_cast<cxx::MemberExpressionAST>(expression)) {
+    if (member->vectorComponentKind != cxx::VectorComponentKind::kNone) {
+      collect_identity(member->baseExpression, argument, projection);
+      return;
+    }
     auto* field = cxx::symbol_cast<cxx::FieldSymbol>(member->symbol);
-    auto* root = member->subobjectPath ? member->subobjectPath->value : field;
+    if (field && member->accessOp == cxx::TokenKind::T_MINUS_GREATER) {
+      auto* base = cxx::ast_cast<cxx::IdExpressionAST>(
+          unwrap_expression(member->baseExpression));
+      if (base) {
+        auto found = pointer_aliases_.find(base->symbol);
+        if (found != pointer_aliases_.end() && found->second.transparent) {
+          const auto selected = types_.selection(member, member);
+          append_identity(
+              found->second.identity, argument,
+              compose_projection({selected.component_offset,
+                                  selected.partition->component_count},
+                                 projection));
+          return;
+        }
+      }
+      argument.inherent_storage = true;
+      return;
+    }
+    auto* object = types_.member_object_projection(member, member);
+    auto* root = object ? object->root->source : field;
     if (field && is_current_object(unit_, member->baseExpression) &&
         is_captured_object_field(root)) {
       argument.inherent_storage = true;
@@ -2882,30 +2924,8 @@ void ControlFlow::collect_identity(cxx::ExpressionAST* expression,
       argument.inherent_storage = true;
       return;
     }
-    if (field && member->accessOp == cxx::TokenKind::T_MINUS_GREATER) {
-      auto* base = cxx::ast_cast<cxx::IdExpressionAST>(
-          unwrap_expression(member->baseExpression));
-      if (base) {
-        auto found = pointer_aliases_.find(base->symbol);
-        if (found != pointer_aliases_.end() && found->second.transparent) {
-          const auto selected =
-              types_.selection(field, member->subobjectPath, member);
-          append_identity(
-              found->second.identity, argument,
-              compose_projection({selected.component_offset,
-                                  selected.partition->component_count},
-                                 projection));
-          return;
-        }
-      }
-    }
-    if (member->accessOp == cxx::TokenKind::T_MINUS_GREATER ||
-        storage_expressions_.contains(member)) {
+    if (storage_expressions_.contains(member)) {
       argument.inherent_storage = true;
-      return;
-    }
-    if (member->vectorComponentKind != cxx::VectorComponentKind::kNone) {
-      collect_identity(member->baseExpression, argument, projection);
       return;
     }
     if (is_current_object(unit_, member->baseExpression)) {
@@ -2917,8 +2937,7 @@ void ControlFlow::collect_identity(cxx::ExpressionAST* expression,
     if (auto destination = classify_destination(expression)) {
       append_destination(*destination);
     } else {
-      const auto selected =
-          types_.selection(member->symbol, member->subobjectPath, member);
+      const auto selected = types_.selection(member, member);
       collect_identity(member->baseExpression, argument,
                        compose_projection({selected.component_offset,
                                            selected.partition->component_count},
@@ -2932,8 +2951,9 @@ void ControlFlow::collect_identity(cxx::ExpressionAST* expression,
       argument.reference_calls.push_back({expression, projection});
       return;
     }
+    auto* index = subscript_index(subscript);
     auto* base_type = subscript->baseExpression->type;
-    auto* index_type = subscript->indexExpression->type;
+    auto* index_type = index->type;
     if (types_.native_vector(base_type)) {
       if (auto destination = retain_destination(expression)) {
         append_destination(*destination);
@@ -2946,7 +2966,7 @@ void ControlFlow::collect_identity(cxx::ExpressionAST* expression,
       if (auto destination = retain_destination(expression)) {
         append_destination(*destination);
       } else {
-        collect_identity(subscript->indexExpression, argument, projection);
+        collect_identity(index, argument, projection);
       }
       return;
     }
@@ -3048,6 +3068,9 @@ bool ControlFlow::require_address(cxx::Symbol* binding) {
 
 void ControlFlow::retain_automatic_storage(cxx::VariableSymbol* variable,
                                            cxx::ExpressionAST* initializer) {
+  if (variable->isStructuredBindingAlias()) {
+    return;
+  }
   auto traits = unit_.typeTraits();
   if (!traits.is_reference(variable->type()) &&
       ((!initializer && !types_.requires_value_transport(variable->type())) ||
@@ -3314,8 +3337,9 @@ void ControlFlow::retain_constructor_call(cxx::FunctionSymbol* constructor,
       .storage_receiver = storage_receiver,
   };
   auto parameters = constructor->parameters();
+  auto arguments = constructor_arguments(initializer);
   size_t ordinal = 0;
-  for (auto* argument : constructor_arguments(initializer)) {
+  for (auto* argument : arguments) {
     retained.arguments.push_back(retain_call_argument(
         argument, ordinal < parameters.size()
                       ? candidate_pointer_object_type(parameters[ordinal])
@@ -3413,10 +3437,11 @@ void ControlFlow::retain_automatic_destruction(cxx::Symbol* binding,
   if (!binding) {
     return;
   }
-  if (auto* variable = cxx::symbol_cast<cxx::VariableSymbol>(binding);
-      variable && (variable->isStatic() || variable->isExtern() ||
-                   variable->isThreadLocal())) {
-    return;
+  if (auto* variable = cxx::symbol_cast<cxx::VariableSymbol>(binding)) {
+    if (variable->isStructuredBindingAlias() || variable->isStatic() ||
+        variable->isExtern() || variable->isThreadLocal()) {
+      return;
+    }
   }
   auto selected =
       destruction_for(unit_, object_type ? object_type : binding->type());
@@ -3502,7 +3527,8 @@ void ControlFlow::select_constructor_receiver_storage() {
 void ControlFlow::retain_reference_initializers(cxx::VariableSymbol* variable,
                                                 cxx::ExpressionAST* initializer,
                                                 cxx::AST* owner) {
-  if (!initializer || unit_.typeTraits().is_reference(variable->type()) ||
+  if (!initializer || variable->isStructuredBindingAlias() ||
+      unit_.typeTraits().is_reference(variable->type()) ||
       !unit_.typeTraits().is_class(variable->type())) {
     return;
   }
@@ -4459,6 +4485,9 @@ void ControlFlow::finalize_callable_effects() {
 
 void ControlFlow::visit(cxx::InitDeclaratorAST* ast) {
   auto* variable = cxx::symbol_cast<cxx::VariableSymbol>(ast->symbol);
+  auto* initializer = variable && variable->initializer()
+                          ? variable->initializer()
+                          : ast->initializer;
   auto* saved_initializing_binding = initializing_binding_;
   initializing_binding_ = variable;
   auto* saved_borrowed_expression = borrowed_pointer_expression_;
@@ -4469,8 +4498,8 @@ void ControlFlow::visit(cxx::InitDeclaratorAST* ast) {
   }
   if (variable) {
     retain_reference_materializations_ |=
-        ast->initializer && unit_.typeTraits().is_reference(variable->type());
-    if (auto* conversion = constructor_conversion(ast->initializer);
+        initializer && unit_.typeTraits().is_reference(variable->type());
+    if (auto* conversion = constructor_conversion(initializer);
         conversion &&
         same_function(conversion->conversionFunction,
                       variable->constructor()) &&
@@ -4479,10 +4508,10 @@ void ControlFlow::visit(cxx::InitDeclaratorAST* ast) {
       bound_constructor_conversions_.insert(conversion);
     }
     auto traits = unit_.typeTraits();
-    if (ast->initializer &&
+    if (initializer &&
         traits.is_pointer(types_.unqualified_value(variable->type())) &&
         !traits.is_volatile(types_.unqualified_value(variable->type()))) {
-      auto* initialized = cxx::Initializer(ast->initializer).singleExpression();
+      auto* initialized = cxx::Initializer(initializer).singleExpression();
       auto* source = initialized ? unwrap_expression(initialized) : nullptr;
       auto* address = cxx::ast_cast<cxx::UnaryExpressionAST>(source);
       cxx::ExpressionAST* referent = nullptr;
@@ -4520,22 +4549,27 @@ void ControlFlow::visit(cxx::InitDeclaratorAST* ast) {
       }
     }
   }
-  cxx::ASTVisitor::visit(ast);
+  accept(ast->declarator);
+  accept(ast->requiresClause);
+  accept(initializer);
   initializing_binding_ = saved_initializing_binding;
   borrowed_pointer_expression_ = saved_borrowed_expression;
   retain_reference_materializations_ = saved_retain_reference_materializations;
   if (variable) {
+    auto traits = unit_.typeTraits();
+    auto* folded_constant = folded_variable_constant(variable);
+    const bool aliases_subobject = variable->isStructuredBindingAlias();
+    const bool reference_binding =
+        aliases_subobject || traits.is_reference(variable->type());
     const cxx::Type* automatic_object_type = nullptr;
-    if (!unit_.typeTraits().is_reference(variable->type()) &&
-        ast->initializer) {
-      record_parameter_read(ast->initializer);
+    if (!folded_constant && !reference_binding && initializer) {
+      record_parameter_read(initializer);
     }
-    if (unit_.typeTraits().is_reference(variable->type()) && ast->initializer) {
-      auto* referent = cxx::Initializer(ast->initializer)
-                           .referenceExpression(unit_.typeTraits());
+    if (reference_binding && initializer) {
+      auto* referent = reference_initializer(unit_, initializer);
       if (!referent) {
-        diagnostics_.reject(unit_, ast->initializer,
-                            "reference locals require one initializer "
+        diagnostics_.reject(unit_, initializer,
+                            "reference bindings require one initializer "
                             "expression");
       }
       auto* materialization = temporary_origins_.materialization(referent);
@@ -4561,14 +4595,19 @@ void ControlFlow::visit(cxx::InitDeclaratorAST* ast) {
           variable,
           ReferenceAlias{destination, std::move(identity), materialization});
       temporary_origins_.extend(referent);
-    } else {
-      temporary_origins_.extend_members(ast->initializer);
+    } else if (!folded_constant) {
+      temporary_origins_.extend_members(initializer);
     }
-    retain_reference_initializers(variable, ast->initializer, ast);
-    retain_constructor(variable, ast->initializer, ast);
-    retain_automatic_storage(variable, ast->initializer);
-    analyze_default_constructor(variable->type(), variable->constructor(), ast);
-    if (!ast->initializer && !storage_backed(variable)) {
+    if (!folded_constant) {
+      retain_reference_initializers(variable, initializer, ast);
+      retain_constructor(variable, initializer, ast);
+    }
+    retain_automatic_storage(variable, initializer);
+    if (!folded_constant) {
+      analyze_default_constructor(variable->type(), variable->constructor(),
+                                  ast);
+    }
+    if (!initializer && !storage_backed(variable)) {
       construction_.declare(
           variable, types_.partition(variable->type(), ast).component_count);
       if (default_constructor_initializes(variable->constructor())) {
@@ -4584,8 +4623,8 @@ void ControlFlow::visit(cxx::StructuredBindingDeclarationAST* ast) {
   // variable that owns it. The latter is the semantic declaration: visiting
   // both would count every initializer effect twice. Analyze the lowered
   // declaration sequence in its C++ initialization order instead.
-  accept(ast->hiddenVariable);
-  for (auto* binding : cxx::ListView{ast->bindingDeclaratorList}) {
+  accept(ast->binding.hiddenVariable);
+  for (auto* binding : cxx::ListView{ast->binding.bindingDeclaratorList}) {
     accept(binding);
   }
 }
@@ -4611,10 +4650,10 @@ void ControlFlow::visit(cxx::ImplicitCastExpressionAST* ast) {
   }
   if (is_class_adjustment(ast)) {
     if (unit_.typeTraits().is_pointer(ast->type)) {
-      diagnostics_.reject(
-          unit_, ast,
-          "class-pointer conversions require null-preserving buffer identity; "
-          "use a reference conversion for a live object");
+      // Pointer values already retain their allocation root and byte origin.
+      // Translation adjusts that origin while preserving null; no pointee
+      // value destination or object identity is required here.
+      return;
     }
     if (ast->castKind == cxx::ImplicitCastKind::kBaseToDerivedConversion) {
       require_identity(ast->expression);
@@ -4726,7 +4765,7 @@ void ControlFlow::retain_member_constructor(
 void ControlFlow::visit(cxx::ParenMemInitializerAST* ast) {
   auto* saved_initializing_binding = initializing_binding_;
   initializing_binding_ = ast->symbol;
-  cxx::ASTVisitor::visit(ast);
+  accept(cxx::memInitializerClause(unit_.arena(), ast));
   initializing_binding_ = saved_initializing_binding;
   retain_member_constructor(ast);
   if (construction_.parameter(ast->symbol)) {
@@ -4737,7 +4776,7 @@ void ControlFlow::visit(cxx::ParenMemInitializerAST* ast) {
 void ControlFlow::visit(cxx::BracedMemInitializerAST* ast) {
   auto* saved_initializing_binding = initializing_binding_;
   initializing_binding_ = ast->symbol;
-  cxx::ASTVisitor::visit(ast);
+  accept(cxx::memInitializerClause(unit_.arena(), ast));
   initializing_binding_ = saved_initializing_binding;
   retain_member_constructor(ast);
   if (construction_.parameter(ast->symbol)) {
@@ -4768,13 +4807,21 @@ void ControlFlow::visit(cxx::BracedInitListAST* ast) {
     accept(backing);
     return;
   }
-  cxx::ASTVisitor::visit(ast);
+  for (auto* element : cxx::ListView{cxx::Initializer(ast).expressionList()}) {
+    accept(element);
+  }
   if (!ast->implicitElement) {
     return;
   }
   accept(ast->implicitElement->initializer());
   analyze_default_constructor(ast->implicitElement->type(),
                               ast->implicitElement->constructor(), ast);
+}
+
+void ControlFlow::visit(cxx::ParenInitializerAST* ast) {
+  for (auto* element : cxx::ListView{cxx::Initializer(ast).expressionList()}) {
+    accept(element);
+  }
 }
 
 void ControlFlow::visit(cxx::TypeConstructionAST* ast) {
@@ -4796,7 +4843,8 @@ void ControlFlow::visit(cxx::BracedTypeConstructionAST* ast) {
     retain_constructor_call(ast->constructorSymbol, ast, CallArgument{},
                             /*storage_receiver=*/false, ast);
   } else if (ast->bracedInitList) {
-    record_copy_read(ast->type, ast->bracedInitList->expressionList);
+    record_copy_read(ast->type,
+                     cxx::Initializer(ast->bracedInitList).expressionList());
   }
   analyze_default_constructor(ast->type, ast->constructorSymbol, ast);
 }
@@ -4860,10 +4908,12 @@ void ControlFlow::record_implicit_object_call(cxx::CallExpressionAST* call,
     return;
   }
   if (auto* member = cxx::ast_cast<cxx::MemberExpressionAST>(base)) {
-    auto* receiver = member->baseExpression;
-    if (member->subobjectPath && is_current_object(unit_, receiver)) {
+    auto selected = types_.member_object_selection(member, member);
+    auto* receiver = selected.object;
+    auto* projection = selected.projection ? &*selected.projection : nullptr;
+    if (projection && is_current_object(unit_, receiver)) {
       if (types_.implicit_object_may_mutate(callee, call)) {
-        record(types_.projection(member->subobjectPath, member).root->source);
+        record(projection->root->source);
       }
       return;
     }
@@ -4958,8 +5008,9 @@ std::optional<Destination> ControlFlow::classify_destination(
     if (types_.native_vector(subscript->baseExpression->type)) {
       return classify_destination(subscript->baseExpression);
     }
-    if (types_.native_vector(subscript->indexExpression->type)) {
-      return classify_destination(subscript->indexExpression);
+    auto* index = subscript_index(subscript);
+    if (types_.native_vector(index->type)) {
+      return classify_destination(index);
     }
     if (auto* selection = array_subscript(subscript);
         selection && selection->constant_index) {
@@ -4997,14 +5048,15 @@ std::optional<Destination> ControlFlow::classify_destination(
     return std::nullopt;
   }
   if (is_current_object(unit_, member->baseExpression)) {
-    auto selected = types_.selection(field, member->subobjectPath, member);
+    auto* object = types_.member_object_projection(member, member);
+    auto selected = types_.selection(member, member);
     if (is_captured_object_field(selected.root->source)) {
       return std::nullopt;
     }
     return Destination{
         selected.root->source,
         selected.component_offset - selected.root->component_offset,
-        member->subobjectPath ? selected.partition : nullptr};
+        object ? selected.partition : nullptr};
   }
   if (member->accessOp != cxx::TokenKind::T_DOT) {
     return std::nullopt;
@@ -5019,7 +5071,7 @@ std::optional<Destination> ControlFlow::classify_destination(
     return std::nullopt;
   }
   if (target) {
-    auto slice = types_.selection(field, member->subobjectPath, member);
+    auto slice = types_.selection(member, member);
     target->component_offset += slice.component_offset;
     target->member = slice.partition;
   }
@@ -5072,7 +5124,7 @@ std::optional<Destination> ControlFlow::classify_materialized_destination(
   auto target = classify_materialized_destination(member->baseExpression,
                                                   materialization, owner);
   if (target) {
-    auto selected = types_.selection(field, member->subobjectPath, member);
+    auto selected = types_.selection(member, member);
     target->component_offset += selected.component_offset;
     target->member = selected.partition;
   }

@@ -32,12 +32,12 @@ unsigned read(const Record* record) { return *record->pointers[0]; }
 
 // ====
 struct Record { unsigned values[4]; };
-// ERROR@+1: LOWERING/059 "mutation requires a non-const destination"
+// ERROR@+1: PARSE/036 "cannot assign to a non-modifiable lvalue of type 'const unsigned int'"
 void write(const Record* record) { record->values[0] = 7; }
 
 // ====
 struct Record { unsigned values[4]; };
-// ERROR@+1: LOWERING/059 "mutation requires a non-const destination"
+// ERROR@+1: PARSE/036 "cannot assign to a non-modifiable lvalue of type 'const unsigned int'"
 void write(const Record* record) { auto* values = record->values; values[0] = 7; }
 
 // ====

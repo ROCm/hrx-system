@@ -152,7 +152,6 @@ static_assert(Outer().inner.value == 0);
 // ====
 struct Inner {
   unsigned divisor;
-  // WARNING@+1: PARSE/036 "invalid binary expression"
   unsigned quotient = 32 / divisor;
 };
 struct Outer { Inner inner; };

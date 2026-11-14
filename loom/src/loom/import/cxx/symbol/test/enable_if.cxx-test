@@ -97,7 +97,7 @@ func.def @select_round_21(%value: i32) -> (i32) {
 #include <type_traits>
 
 template <class Type>
-// REMARK@+1: PARSE/036 "candidate function not viable: substitution failure: no type named 'type' in '::std::enable_if<0, float>'"
+// REMARK@+1: PARSE/036 "candidate function not viable: substitution failure: no type named 'type' in 'std::enable_if<false, float>'"
 auto only_integer(Type value) -> std::enable_if_t<__is_integral(Type), Type> {
   return value;
 }
@@ -107,7 +107,7 @@ float rejected(float value) { return only_integer(value); }
 // ====
 #include <type_traits>
 
-// ERROR@+1: PARSE/036 "'type' is not a type"
+// ERROR@+1: PARSE/036 "lookup for 'type' finds no declaration"
 using Missing = std::enable_if<false>::type;
 
 // ====

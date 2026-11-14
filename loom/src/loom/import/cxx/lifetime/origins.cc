@@ -7,10 +7,13 @@
 #include "loom/import/cxx/lifetime/origins.h"
 
 #include <cxx/ast.h>
+#include <cxx/initialization.h>
 #include <cxx/symbols.h>
 #include <cxx/translation_unit.h>
 #include <cxx/type_traits.h>
 
+#include "loom/import/cxx/source/constants.h"
+#include "loom/import/cxx/source/expressions.h"
 #include "loom/import/cxx/value/types.h"
 
 namespace loom::cxx_import {
@@ -91,6 +94,14 @@ TemporaryOrigins::Facts TemporaryOrigins::classify(
           static_cast<cxx::DefaultInitializerExpressionAST*>(expression)
               ->expression,
           retain_materialization);
+    case cxx::ASTKind::ConstExpression: {
+      auto* constant = static_cast<cxx::ConstExpressionAST*>(expression);
+      if (constant->constValue &&
+          constant_contains_address(*constant->constValue)) {
+        return facts(constant->expression, retain_materialization);
+      }
+      break;
+    }
     case cxx::ASTKind::ImplicitCastExpression: {
       auto* cast = static_cast<cxx::ImplicitCastExpressionAST*>(expression);
       auto child = facts(cast->expression, retain_materialization);
@@ -152,9 +163,10 @@ TemporaryOrigins::Facts TemporaryOrigins::classify(
       if (subscript->symbol) {
         break;
       }
+      auto* index = subscript_index(subscript);
       auto* base = traits.is_array(subscript->baseExpression->type)
                        ? subscript->baseExpression
-                       : subscript->indexExpression;
+                       : index;
       if (!traits.is_array(base->type)) {
         return {};
       }
@@ -187,11 +199,16 @@ TemporaryOrigins::Facts TemporaryOrigins::classify(
     }
     case cxx::ASTKind::BracedInitList: {
       auto* list = static_cast<cxx::BracedInitListAST*>(expression);
-      members =
-          aggregate_members(list, list->expressionList, list->implicitElement,
-                            !list->isParenthesized);
+      members = aggregate_members(
+          list, cxx::Initializer(list).expressionList(), list->implicitElement,
+          !list->initialization.isParenthesizedAggregate);
       break;
     }
+    case cxx::ASTKind::ParenInitializer:
+      // Parenthesized initializer syntax does not itself construct a result,
+      // and parenthesized aggregate reference members do not extend their
+      // referents beyond the full expression.
+      return {};
     case cxx::ASTKind::BracedTypeConstruction: {
       auto* construction =
           static_cast<cxx::BracedTypeConstructionAST*>(expression);

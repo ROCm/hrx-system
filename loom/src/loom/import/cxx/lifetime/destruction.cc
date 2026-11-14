@@ -36,7 +36,7 @@ std::optional<Destruction> destruction_for(cxx::TranslationUnit& unit,
   auto* class_type = cxx::type_cast<cxx::ClassType>(type);
   IREE_ASSERT(class_type);
   auto* record = class_type->definition();
-  traits.requireCompleteClass(record);
+  traits.require_complete_class(record);
   record = class_type->definition();
   IREE_ASSERT(record && record->isComplete());
   auto* destructor = record->destructor();

@@ -31,19 +31,13 @@ std::optional<std::string_view> constant_string(
   if (!address || !*address) {
     return std::nullopt;
   }
-  for (auto* current = address->get(); current;
-       current = current->parent().get()) {
-    if (current->offset() != 0) {
-      return std::nullopt;
-    }
-    if (auto* literal = current->stringLiteral()) {
-      return literal->stringValue();
-    }
-    if (current->symbol()) {
-      return std::nullopt;
-    }
+  const auto& value = **address;
+  if (value.offset() != 0 || value.displacement() != 0 || value.root() ||
+      value.symbol() || !value.subobjectPath().empty()) {
+    return std::nullopt;
   }
-  return std::nullopt;
+  auto* literal = value.stringLiteral();
+  return literal ? std::optional(literal->stringValue()) : std::nullopt;
 }
 
 std::optional<std::string> constant_enum_name(

@@ -124,15 +124,7 @@ int entry(int value) {
 }
 // ----
 func.def public @entry(%value: i32) -> (i32) {
-  %2 = scalar.constant 1 : i32
-  %3 = scalar.constant 2.0 : f32
-  %tuple_count = func.call pure @Tuple__Tuple___All_1_value() : () -> (i32)
-  %5 = scalar.addi %value, %tuple_count : i32
-  func.return %5 : i32
-}
-
-func.def inline @Tuple__Tuple___All_1_value() -> (i32) {
-  %7 = scalar.constant 2 : i64
-  %8 = scalar.trunci %7 : i64 to i32
-  func.return %8 : i32
+  %tuple_count = scalar.constant 2 : i32
+  %3 = scalar.addi %value, %tuple_count : i32
+  func.return %3 : i32
 }

@@ -328,13 +328,14 @@ loom_value_id_t Vectors::constant(const cxx::ConstValue& value,
   const auto& list = *std::get<std::shared_ptr<cxx::InitializerList>>(value);
   auto* vector = types_.native_vector(source_type);
   auto output = types_.get(source_type, owner);
-  if (list.elements.size() > vector->elementCount()) {
+  if (list.size() > vector->elementCount()) {
     diagnostics_.reject(unit_, owner, "too many vector initializer lanes");
   }
   if (loom_scalar_type_is_integer(loom_type_element_type(output))) {
     std::vector<int64_t> values;
     values.reserve(vector->elementCount());
-    for (const auto& element : list.elements) {
+    for (size_t index = 0; index < list.size(); ++index) {
+      const auto& element = list.element(index);
       values.push_back(loom_attr_as_i64(scalars_.constant_attribute(
           std::get<0>(element), vector->elementType(), owner)));
     }
@@ -348,7 +349,8 @@ loom_value_id_t Vectors::constant(const cxx::ConstValue& value,
   bool can_encode_float_literals = true;
   std::vector<double> values;
   values.reserve(vector->elementCount());
-  for (const auto& element : list.elements) {
+  for (size_t index = 0; index < list.size(); ++index) {
+    const auto& element = list.element(index);
     const auto& value = std::get<0>(element);
     const auto* floating = std::get_if<cxx::ConstFloat>(&value);
     if (floating && floating->isNaN()) {
@@ -367,8 +369,9 @@ loom_value_id_t Vectors::constant(const cxx::ConstValue& value,
   }
 
   std::vector<loom_value_id_t> elements;
-  elements.reserve(list.elements.size());
-  for (const auto& [element, element_type] : list.elements) {
+  elements.reserve(list.size());
+  for (size_t index = 0; index < list.size(); ++index) {
+    const auto& [element, element_type] = list.element(index);
     elements.push_back(scalars_.constant(element, element_type, owner));
   }
   return construct(elements, source_type, owner);

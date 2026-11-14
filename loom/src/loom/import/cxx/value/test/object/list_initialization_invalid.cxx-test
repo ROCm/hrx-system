@@ -59,7 +59,7 @@ void entry(float value) {
 #include <initializer_list>
 void entry(int value) {
   std::initializer_list<int> values{value};
-  // ERROR@+1: LOWERING/059 "mutation requires a non-const destination"
+  // ERROR@+1: PARSE/036 "cannot assign to a non-modifiable lvalue of type 'const int'"
   *values.begin() = 2;
 }
 

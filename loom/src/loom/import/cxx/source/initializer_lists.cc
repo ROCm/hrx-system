@@ -8,6 +8,7 @@
 
 #include <cxx/ast.h>
 #include <cxx/control.h>
+#include <cxx/initialization.h>
 #include <cxx/symbols.h>
 #include <cxx/translation_unit.h>
 #include <cxx/types.h>
@@ -51,7 +52,7 @@ const InitializerList& InitializerLists::retain(
   auto* backing = cxx::BracedInitListAST::create(unit_.arena());
   backing->lbraceLoc = source->lbraceLoc;
   backing->rbraceLoc = source->rbraceLoc;
-  backing->expressionList = source->expressionList;
+  backing->expressionList = *cxx::initializerListSlot(unit_.arena(), source);
   backing->type =
       unit_.control()->getBoundedArrayType(traits.add_const(element), extent);
   backing->valueCategory = cxx::ValueCategory::kPrValue;

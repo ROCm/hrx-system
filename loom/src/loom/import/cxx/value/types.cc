@@ -40,6 +40,15 @@ bool has_mutable_subobject(const Partition& partition) {
              : false;
 }
 
+bool same_subobject_path(cxx::List<cxx::Symbol*>* left,
+                         cxx::List<cxx::Symbol*>* right) {
+  while (left && right && left->value == right->value) {
+    left = left->next;
+    right = right->next;
+  }
+  return !left && !right;
+}
+
 const cxx::Attribute* type_binding(cxx::ClassSymbol* source) {
   auto find = [](cxx::ClassSymbol* symbol) -> const cxx::Attribute* {
     if (!symbol || !symbol->attributes()) {
@@ -390,7 +399,7 @@ bool Types::requires_value_transport(const cxx::Type* input) {
     return found->second;
   }
   auto* source = record_type->definition();
-  traits.requireCompleteClass(source);
+  traits.require_complete_class(source);
   source = record_type->definition();
   bool required = type_binding(source) != nullptr;
   for (auto* base : source->baseClasses()) {
@@ -539,7 +548,7 @@ const BufferPartition* Types::buffer(const cxx::ClassType* input,
   }
   auto traits = unit_.typeTraits();
   if (source) {
-    traits.requireCompleteClass(source);
+    traits.require_complete_class(source);
     source = input->definition();
   }
   if (!source || !source->isComplete() || source->isUnion() ||
@@ -591,7 +600,7 @@ const AddressPartition* Types::address(const cxx::ClassType* input,
   }
   auto traits = unit_.typeTraits();
   if (source) {
-    traits.requireCompleteClass(source);
+    traits.require_complete_class(source);
     source = input->definition();
   }
   if (!source || !source->isComplete() || source->isUnion() ||
@@ -623,7 +632,7 @@ const OpaqueDialectPartition* Types::opaque_dialect(const cxx::ClassType* input,
   }
   auto traits = unit_.typeTraits();
   if (source) {
-    traits.requireCompleteClass(source);
+    traits.require_complete_class(source);
     source = input->definition();
   }
   if (traits.is_volatile(input) || !source || !source->isComplete() ||
@@ -667,7 +676,7 @@ const EncodingPartition* Types::encoding(const cxx::ClassType* input,
   }
   auto traits = unit_.typeTraits();
   if (source) {
-    traits.requireCompleteClass(source);
+    traits.require_complete_class(source);
     source = input->definition();
   }
   if (traits.is_volatile(input) || !source || !source->isComplete() ||
@@ -728,7 +737,7 @@ const PoolPartition* Types::pool(const cxx::ClassType* input, cxx::AST* owner) {
   }
   auto traits = unit_.typeTraits();
   if (source) {
-    traits.requireCompleteClass(source);
+    traits.require_complete_class(source);
     source = input->definition();
   }
   if (!source || !source->isComplete() || source->isUnion() ||
@@ -811,7 +820,7 @@ const TilePartition* Types::tile(const cxx::ClassType* input, cxx::AST* owner) {
   }
   auto traits = unit_.typeTraits();
   if (source) {
-    traits.requireCompleteClass(source);
+    traits.require_complete_class(source);
     source = input->definition();
   }
   if (!source || !source->isComplete() || source->isUnion() ||
@@ -905,7 +914,7 @@ const ChannelPartition* Types::channel(const cxx::ClassType* input,
   }
   auto traits = unit_.typeTraits();
   if (source) {
-    traits.requireCompleteClass(source);
+    traits.require_complete_class(source);
     source = input->definition();
   }
   if (!source || !source->isComplete() || source->isUnion() ||
@@ -975,7 +984,7 @@ const VectorPartition* Types::semantic_vector(const cxx::ClassType* input,
   }
   auto traits = unit_.typeTraits();
   if (source) {
-    traits.requireCompleteClass(source);
+    traits.require_complete_class(source);
     source = input->definition();
   }
   if (!source || !source->isComplete() || source->isUnion() ||
@@ -1044,7 +1053,7 @@ const ViewPartition* Types::view(const cxx::ClassType* input, cxx::AST* owner) {
   }
   auto traits = unit_.typeTraits();
   if (source) {
-    traits.requireCompleteClass(source);
+    traits.require_complete_class(source);
     source = input->definition();
   }
   if (traits.is_volatile(input) || !source || !source->isComplete() ||
@@ -1145,7 +1154,7 @@ const TensorPartition* Types::tensor(const cxx::ClassType* input,
   }
   auto traits = unit_.typeTraits();
   if (source) {
-    traits.requireCompleteClass(source);
+    traits.require_complete_class(source);
     source = input->definition();
   }
   if (!source || !source->isComplete() || source->isUnion() ||
@@ -1234,7 +1243,7 @@ const RecordPartition* Types::record(const cxx::Type* input, cxx::AST* owner) {
     return found->second.get();
   }
   if (source) {
-    traits.requireCompleteClass(source);
+    traits.require_complete_class(source);
     source = type->definition();
   }
   if (!source || !source->isComplete() || source->isUnion() ||
@@ -1325,35 +1334,15 @@ bool Types::record_constructor_requires_call(const cxx::Type* type,
     type = unqualified(array->elementType());
   }
   auto* admitted = record(type, owner);
-  return admitted && (cxx::isUserProvided(constructor) ||
+  return admitted && (unit_.typeTraits().is_user_provided(constructor) ||
                       (!same_function(constructor,
                                       admitted->source->defaultConstructor()) &&
                        !is_trivial_value_operation(constructor)));
 }
 
 bool Types::is_trivial_value_operation(cxx::FunctionSymbol* function) {
-  if (!function || cxx::isUserProvided(function)) {
-    return false;
-  }
-  auto* source = cxx::symbol_cast<cxx::ClassSymbol>(function->parent());
-  if (!source || !(source->isCopyConstructor(function) ||
-                   source->isMoveConstructor(function) ||
-                   source->isCopyAssignmentOperator(function) ||
-                   source->isMoveAssignmentOperator(function))) {
-    return false;
-  }
-  source = source->resolvedDefinition();
-  auto [entry, inserted] =
-      trivial_record_operations_.try_emplace(source, false);
-  if (inserted) {
-    // The class-wide fact covers every eligible cv-qualified overload and
-    // nested member. A single canonical copy/move trait cannot establish the
-    // behavior of the overload selected at this callsite. Mixed families use
-    // their synthesized bodies, including the individually trivial members.
-    entry->second =
-        unit_.typeTraits().has_trivial_value_operations(source->type());
-  }
-  return entry->second;
+  return unit_.typeTraits().is_trivial_special_member(function) &&
+         !function->isDestructor();
 }
 
 void Types::append_component_names(const Partition& partition,
@@ -1488,6 +1477,122 @@ SubobjectProjection Types::selection(cxx::Symbol* field,
     return {&leaf, leaf.partition, leaf.component_offset, leaf.byte_offset()};
   }
   auto result = projection(path, owner);
+  result.partition = leaf.partition;
+  result.component_offset += leaf.component_offset;
+  result.byte_offset += leaf.byte_offset();
+  return result;
+}
+
+Types::MemberObjectPath* Types::member_object_path(
+    cxx::MemberExpressionAST* member_expression) {
+  auto classes = member_object_classes(unit_, member_expression);
+  IREE_ASSERT(classes.has_value());
+  if (classes->object == classes->declaring) {
+    return nullptr;
+  }
+  if (member_object_paths_) {
+    auto object = member_object_paths_->find(classes->object);
+    if (object != member_object_paths_->end()) {
+      auto path = object->second.find(classes->declaring);
+      if (path != object->second.end()) {
+        return &path->second;
+      }
+    }
+  }
+
+  auto path = classes->object->subobjectPath(classes->declaring);
+  IREE_ASSERT(path.has_value() && !path->empty());
+  MemberObjectPath result{.symbols = std::move(*path)};
+  for (auto* step : result.symbols) {
+    result.byte_offset += source_subobject_offset(step);
+  }
+  if (!member_object_paths_) {
+    member_object_paths_ = std::make_unique<MemberObjectPathMap>();
+  }
+  auto& paths = (*member_object_paths_)[classes->object];
+  return &paths.emplace(classes->declaring, std::move(result)).first->second;
+}
+
+const SubobjectProjection* Types::member_object_projection(
+    cxx::MemberExpressionAST* member_expression, cxx::AST* owner) {
+  auto* path = member_object_path(member_expression);
+  if (!path) {
+    return nullptr;
+  }
+  if (path->projection) {
+    return &*path->projection;
+  }
+  const auto& root = member(path->symbols.front(), owner);
+  SubobjectProjection result{
+      .root = &root,
+      .partition = root.partition,
+      .component_offset = root.component_offset,
+      .byte_offset = path->byte_offset,
+  };
+  for (auto* step : std::span<cxx::Symbol* const>{path->symbols}.subspan(1)) {
+    const auto& selected = this->member(step, owner);
+    result.partition = selected.partition;
+    result.component_offset += selected.component_offset;
+  }
+  path->projection = result;
+  return &*path->projection;
+}
+
+MemberObjectSelection Types::member_object_selection(
+    cxx::MemberExpressionAST* member_expression, cxx::AST* owner) {
+  MemberObjectSelection result{.object = member_expression->baseExpression};
+  auto* adjusted = unwrap_object_identity(unit_, result.object);
+  auto* cast = cxx::ast_cast<cxx::ImplicitCastExpressionAST>(adjusted);
+  if (cast &&
+      cast->castKind == cxx::ImplicitCastKind::kDerivedToBaseConversion) {
+    result.object = cast->expression;
+    result.projection = projection(cast->subobjectPath, owner);
+  }
+  adjusted = unwrap_object_identity(unit_, result.object);
+  cast = cxx::ast_cast<cxx::ImplicitCastExpressionAST>(adjusted);
+  if (cast &&
+      cast->castKind == cxx::ImplicitCastKind::kBaseToDerivedConversion) {
+    auto* inner = cxx::ast_cast<cxx::ImplicitCastExpressionAST>(
+        unwrap_object_identity(unit_, cast->expression));
+    if (inner &&
+        inner->castKind == cxx::ImplicitCastKind::kDerivedToBaseConversion &&
+        cast->type == inner->expression->type &&
+        same_subobject_path(cast->subobjectPath, inner->subobjectPath)) {
+      // Template instantiation may preserve a selected member's original
+      // derived object by wrapping the frontend's base adjustment in its exact
+      // inverse. The pair is an identity; the member's declaring-class path
+      // below remains the one semantic projection.
+      result.object = inner->expression;
+    }
+  }
+  auto* implicit = member_object_projection(member_expression, owner);
+  if (!implicit) {
+    return result;
+  }
+  if (!result.projection) {
+    result.projection = *implicit;
+    return result;
+  }
+  result.projection->partition = implicit->partition;
+  result.projection->component_offset += implicit->component_offset;
+  result.projection->byte_offset += implicit->byte_offset;
+  return result;
+}
+
+uint64_t Types::member_object_offset(
+    cxx::MemberExpressionAST* member_expression) {
+  auto* path = member_object_path(member_expression);
+  return path ? path->byte_offset : 0;
+}
+
+SubobjectProjection Types::selection(cxx::MemberExpressionAST* expression,
+                                     cxx::AST* owner) {
+  const auto& leaf = member(expression->symbol, owner);
+  auto* object = member_object_projection(expression, owner);
+  if (!object) {
+    return {&leaf, leaf.partition, leaf.component_offset, leaf.byte_offset()};
+  }
+  auto result = *object;
   result.partition = leaf.partition;
   result.component_offset += leaf.component_offset;
   result.byte_offset += leaf.byte_offset();
@@ -1667,7 +1772,7 @@ void Types::require_record_storage(const cxx::ClassType* input,
   }
   auto traits = unit_.typeTraits();
   if (source) {
-    traits.requireCompleteClass(source);
+    traits.require_complete_class(source);
     source = input->definition();
   }
   if (type_binding(source)) {

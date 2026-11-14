@@ -155,7 +155,8 @@ struct DirectCall {
   cxx::FunctionSymbol* function;
   // Source call, operator, or construction construct owning diagnostics.
   cxx::AST* source;
-  // Explicit argument facts in parameter order.
+  // Fixed parameter and variadic argument facts in source evaluation order.
+  // Omitted default arguments are retained at their parameter positions.
   std::vector<CallArgument> arguments;
   // Implicit object facts, absent for non-members and current-object calls.
   std::optional<CallArgument> receiver;
@@ -562,6 +563,7 @@ class ControlFlow final : private cxx::ASTVisitor {
   void visit(cxx::BracedMemInitializerAST* ast) override;
   void visit(cxx::ConditionExpressionAST* ast) override;
   void visit(cxx::BracedInitListAST* ast) override;
+  void visit(cxx::ParenInitializerAST* ast) override;
   void visit(cxx::TypeConstructionAST* ast) override;
   void visit(cxx::BracedTypeConstructionAST* ast) override;
   static bool structured(cxx::AST* ast);
@@ -616,8 +618,7 @@ class ControlFlow final : private cxx::ASTVisitor {
   cxx::ExpressionAST* array_borrow_origin(cxx::ExpressionAST* expression) const;
   CallArgument retain_array_identity(cxx::ExpressionAST* expression);
   CallArgument retain_member_receiver(cxx::ExpressionAST* expression,
-                                      cxx::List<cxx::Symbol*>* path,
-                                      cxx::AST* owner);
+                                      const SubobjectProjection* projection);
   // Reference operands retain their source destinations and write effects
   // regardless of whether call syntax is ordinary, operator, or constructor.
   void retain_reference_arguments(DirectCall& call);

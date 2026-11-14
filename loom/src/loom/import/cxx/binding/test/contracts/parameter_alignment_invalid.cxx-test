@@ -120,6 +120,7 @@ template <unsigned Alignment>
 }
 LOOM_CHECK_CASE(instantiation_error) {
   const auto output = loom::check::fill<16, unsigned>(0u);
+  // REMARK@+1: PARSE/036 "in instantiation of function template specialization 'diagnosed<64>' requested here"
   loom::check::launch<diagnosed<64>>(output);
 }
 

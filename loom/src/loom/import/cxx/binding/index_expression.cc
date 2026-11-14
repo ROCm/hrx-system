@@ -8,6 +8,7 @@
 
 #include <cxx/ast.h>
 #include <cxx/ast_visitor.h>
+#include <cxx/initialization.h>
 #include <cxx/names.h>
 #include <cxx/symbols.h>
 #include <cxx/types.h>
@@ -166,9 +167,10 @@ cxx::ExpressionAST* unwrap_index_construction(Types& types,
   cxx::List<cxx::ExpressionAST*>* arguments = nullptr;
   if (auto* construction =
           cxx::ast_cast<cxx::BracedTypeConstructionAST>(source)) {
-    arguments = construction->bracedInitList
-                    ? construction->bracedInitList->expressionList
-                    : nullptr;
+    arguments =
+        construction->bracedInitList
+            ? cxx::Initializer(construction->bracedInitList).expressionList()
+            : nullptr;
   } else if (auto* construction =
                  cxx::ast_cast<cxx::TypeConstructionAST>(source)) {
     arguments = construction->expressionList;
@@ -184,7 +186,8 @@ cxx::List<cxx::ExpressionAST*>* index_elements(
     cxx::TranslationUnit& unit, Diagnostics& diagnostics,
     cxx::BracedTypeConstructionAST* construction, std::string_view purpose) {
   auto* aggregate = construction->bracedInitList;
-  auto* members = aggregate ? aggregate->expressionList : nullptr;
+  auto* members =
+      aggregate ? cxx::Initializer(aggregate).expressionList() : nullptr;
   if (!members) {
     return nullptr;
   }
@@ -199,7 +202,7 @@ cxx::List<cxx::ExpressionAST*>* index_elements(
         unit, construction,
         std::string(purpose) + " requires every index value to be explicit");
   }
-  return array->expressionList;
+  return cxx::Initializer(array).expressionList();
 }
 
 }  // namespace

@@ -26,7 +26,10 @@ std::vector<cxx::ExpressionAST*> constructor_arguments(
     arguments = construction->expressionList;
   } else if (auto* construction =
                  cxx::ast_cast<cxx::BracedTypeConstructionAST>(initializer)) {
-    arguments = construction->bracedInitList->expressionList;
+    auto* semantic = construction->initialization.expression
+                         ? construction->initialization.expression
+                         : construction->bracedInitList;
+    return cxx::Initializer(semantic).arguments();
   } else {
     return cxx::Initializer(initializer).arguments();
   }
@@ -35,6 +38,29 @@ std::vector<cxx::ExpressionAST*> constructor_arguments(
     result.push_back(argument);
   }
   return result;
+}
+
+std::vector<cxx::ExpressionAST*> complete_default_arguments(
+    cxx::TranslationUnit& unit, cxx::ScopeSymbol* scope,
+    cxx::FunctionSymbol* function, std::vector<cxx::ExpressionAST*> arguments,
+    cxx::SourceLocation location) {
+  if (arguments.size() >= function->parameters().size()) {
+    return arguments;
+  }
+  cxx::List<cxx::ExpressionAST*>* list = nullptr;
+  auto** tail = &list;
+  for (auto* argument : arguments) {
+    *tail = cxx::make_list_node(unit.arena(), argument);
+    tail = &(*tail)->next;
+  }
+  cxx::TypeChecker checker(&unit);
+  checker.setScope(scope);
+  checker.append_default_arguments(function, &list, location);
+  arguments.clear();
+  for (auto* argument : cxx::ListView{list}) {
+    arguments.push_back(argument);
+  }
+  return arguments;
 }
 
 std::optional<ArrayCopyInitialization> array_copy_initialization(
@@ -53,14 +79,10 @@ std::optional<ArrayCopyInitialization> array_copy_initialization(
   if (result.constructor->parameters().size() > 1) {
     // Selection belongs to array initialization in the frontend. Complete
     // only its omitted arguments, without repeating overload resolution.
-    auto* arguments = cxx::make_list_node(unit.arena(), expression);
-    cxx::TypeChecker checker(&unit);
-    checker.setScope(scope);
-    checker.append_default_arguments(result.constructor, &arguments,
-                                     owner->firstSourceLocation());
-    for (auto* argument : cxx::ListView{arguments->next}) {
-      result.default_arguments.push_back(argument);
-    }
+    auto arguments =
+        complete_default_arguments(unit, scope, result.constructor,
+                                   {expression}, owner->firstSourceLocation());
+    result.default_arguments.assign(arguments.begin() + 1, arguments.end());
   }
   return result;
 }
@@ -90,6 +112,54 @@ cxx::ExpressionAST* unwrap_expression(cxx::ExpressionAST* expression) {
     }
     return expression;
   }
+}
+
+cxx::ExpressionAST* reference_initializer(cxx::TranslationUnit& unit,
+                                          cxx::ExpressionAST* initializer) {
+  auto* clause = cxx::Initializer(initializer).clause();
+  if (auto* list = cxx::ast_cast<cxx::BracedInitListAST>(clause)) {
+    if (auto* element = cxx::listInitializedElement(unit.typeTraits(), list)) {
+      return element;
+    }
+    return list;
+  }
+  if (!cxx::ast_cast<cxx::ParenInitializerAST>(clause)) {
+    return clause;
+  }
+  auto arguments = cxx::Initializer(clause).arguments();
+  return arguments.size() == 1 ? arguments.front() : nullptr;
+}
+
+cxx::ExpressionAST* subscript_index(cxx::SubscriptExpressionAST* expression) {
+  return expression->expressionList->value;
+}
+
+std::optional<MemberObjectClasses> member_object_classes(
+    cxx::TranslationUnit& unit, cxx::MemberExpressionAST* expression) {
+  if (!expression->baseExpression || !expression->baseExpression->type ||
+      !expression->symbol) {
+    return std::nullopt;
+  }
+  auto* declaring =
+      cxx::symbol_cast<cxx::ClassSymbol>(expression->symbol->parent());
+  if (!declaring) {
+    return std::nullopt;
+  }
+  auto traits = unit.typeTraits();
+  auto* object_type = cxx::unaligned_type(traits.remove_cv(
+      traits.remove_reference(expression->baseExpression->type)));
+  if (expression->accessOp == cxx::TokenKind::T_MINUS_GREATER) {
+    object_type = traits.remove_pointer(object_type);
+  }
+  auto* object = cxx::type_cast<cxx::ClassType>(
+      cxx::unaligned_type(traits.remove_cv(object_type)));
+  if (!object) {
+    return std::nullopt;
+  }
+  return MemberObjectClasses{
+      .object = object->definition(),
+      .declaring = declaring->resolvedDefinition(),
+  };
 }
 
 cxx::ExpressionAST* explicit_reference_operand(cxx::TranslationUnit& unit,
@@ -316,6 +386,9 @@ const cxx::Type* implicit_object_type(cxx::TranslationUnit& unit,
 
 cxx::ConditionExpressionAST* condition_declaration(
     cxx::ExpressionAST* expression) {
+  if (auto* constant = cxx::ast_cast<cxx::ConstExpressionAST>(expression)) {
+    expression = constant->expression;
+  }
   return cxx::ast_cast<cxx::ConditionExpressionAST>(
       strip_implicit_casts(expression));
 }

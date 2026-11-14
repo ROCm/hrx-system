@@ -507,7 +507,7 @@ TEST_F(ImportTest, RejectedSourceDoesNotPoisonNextImport) {
 
 TEST_F(ImportTest, UnsupportedSwitchShapeHasDiagnosticInsteadOfInvalidModule) {
   IREE_ASSERT_OK(
-      Import(IREE_SV("int entry(int x) { switch (x) case 1: return x; }")));
+      Import(IREE_SV("void entry(int x) { switch (x) case 1: return; }")));
   EXPECT_EQ(module_, nullptr);
   EXPECT_EQ(diagnostic_count_, 1);
   EXPECT_EQ(diagnostic_filename_, "/app/source.cpp");

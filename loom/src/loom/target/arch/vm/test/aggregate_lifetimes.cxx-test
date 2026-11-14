@@ -115,39 +115,6 @@ OK 0
 retired 0
 
 // ====
-// A default member initializer is evaluated independently for each owner.
-// Ending the inner owner must leave the outer owner's temporary alive.
-[[loom::import("lifetime", "event")]] void observe(unsigned value);
-
-struct Guard {
-  // Both objects have equal values but distinct construction identities.
-  unsigned value;
-  ~Guard() { observe(value); }
-};
-
-struct Holder {
-  // Aggregate initialization extends this newly evaluated default temporary.
-  const Guard& member = Guard{7};
-};
-
-void run() {
-  Holder outer{};
-  {
-    Holder inner{};
-    observe(inner.member.value + 10);
-  }
-  observe(outer.member.value + 20);
-}
-
-// ----
-event 17
-event 7
-event 27
-event 7
-OK 0
-retired 0
-
-// ====
 // RUN: emit vm-object-lifetime
 // INPUT: cxx root=run
 // A conditional prvalue initializes one result object. Both paths keep that

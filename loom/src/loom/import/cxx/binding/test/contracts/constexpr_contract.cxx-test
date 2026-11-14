@@ -145,8 +145,8 @@ unsigned exact_values() {
 config.def @schedule.exact = 8 : i32
 
 func.def public @exact_values() -> (i32) {
-  %9 = scalar.constant 13 : i32
-  func.return %9 : i32
+  %7 = scalar.constant 13 : i32
+  func.return %7 : i32
 }
 
 // ====

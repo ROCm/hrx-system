@@ -10,58 +10,35 @@ using Long = unsigned __attribute__((ext_vector_type(4)));
   ++count;
   return value;
 }
-[[loom::noinline]] static void replace(unsigned& value) { value = 9u; }
-unsigned widths(bool choose, unsigned field) {
+// Extended-vector components are non-addressable designations: a conditional
+// can read their selected value, but cannot produce an ordinary C++ reference.
+unsigned widths(bool choose, unsigned observation) {
   Short first{1u, 2u};
   Long second{3u, 4u, 5u, 6u};
   unsigned count = 0;
-  unsigned& selected =
+  const unsigned selected =
       choose ? first[tick(1u, count)] : second[tick(3u, count)];
-  replace(selected);
-  if (field == 0u) {
-    return first[0] * 10u + first[1];
-  }
-  if (field == 1u) {
-    return second[0] * 1000u + second[1] * 100u + second[2] * 10u + second[3];
-  }
-  return count;
+  return observation == 0u ? selected : count;
 }
-unsigned nested(bool outer, bool inner, unsigned field) {
+unsigned nested(bool outer, bool inner, unsigned observation) {
   Short first{1u, 2u};
   Long second{3u, 4u, 5u, 6u}, third{7u, 8u, 1u, 2u};
   unsigned count = 0;
-  unsigned& selected =
+  const unsigned selected =
       outer ? (inner ? first[tick(1u, count)] : second[tick(3u, count)])
             : third[tick(2u, count)];
-  replace(selected);
-  if (field == 0u) {
-    return first[0] * 10u + first[1];
-  }
-  if (field == 1u) {
-    return second[0] * 1000u + second[1] * 100u + second[2] * 10u + second[3];
-  }
-  if (field == 2u) {
-    return third[0] * 1000u + third[1] * 100u + third[2] * 10u + third[3];
-  }
-  return count;
+  return observation == 0u ? selected : count;
 }
 unsigned same_vector(bool choose) {
   Long lanes{1u, 2u, 3u, 4u};
   unsigned first = 1u;
   unsigned long long second = 3u;
-  unsigned& selected = choose ? lanes[first] : lanes[second];
-  first = 0u;
-  second = 2u;
-  replace(selected);
-  return lanes[0] * 1000u + lanes[1] * 100u + lanes[2] * 10u + lanes[3];
+  return choose ? lanes[first] : lanes[second];
 }
 unsigned scalar_lane(bool choose) {
   unsigned scalar = 5u;
   Long lanes{1u, 2u, 3u, 4u};
-  unsigned& selected = choose ? scalar : lanes[3u];
-  replace(selected);
-  return scalar * 10000u + lanes[0] * 1000u + lanes[1] * 100u + lanes[2] * 10u +
-         lanes[3];
+  return choose ? scalar : lanes[3u];
 }
 unsigned memory_assignment(bool choose) {
   unsigned scalar = 5u;
@@ -73,8 +50,5 @@ unsigned memory_assignment(bool choose) {
 unsigned vector_base(bool choose) {
   Long first{1u, 2u, 3u, 4u}, second{5u, 6u, 7u, 8u};
   unsigned index = 1u;
-  unsigned& selected = (choose ? first : second)[index];
-  index = 0u;
-  replace(selected);
-  return first[0] * 1000u + first[1] * 100u + second[0] * 10u + second[1];
+  return (choose ? first : second)[index];
 }

@@ -19,10 +19,11 @@ namespace loom::cxx_import {
 
 class Diagnostics;
 
-// Returns a semantic Loom annotation attached to a resolved source symbol, or
-// null when the canonical declaration has no annotation with this spelling.
-inline const cxx::Attribute* annotation(cxx::Symbol* symbol,
-                                        std::string_view spelling) {
+// Returns a semantic attribute attached to a resolved source symbol, or null
+// when the canonical declaration has no attribute with this spelling.
+inline const cxx::Attribute* semantic_attribute(
+    cxx::Symbol* symbol, std::string_view attribute_namespace,
+    std::string_view spelling) {
   if (!symbol) {
     return nullptr;
   }
@@ -32,12 +33,19 @@ inline const cxx::Attribute* annotation(cxx::Symbol* symbol,
   }
   for (const auto& attribute : *attributes) {
     if (attribute.attributeNamespace && attribute.name &&
-        attribute.attributeNamespace->name() == "loom" &&
+        attribute.attributeNamespace->name() == attribute_namespace &&
         attribute.name->name() == spelling) {
       return &attribute;
     }
   }
   return nullptr;
+}
+
+// Returns a semantic Loom annotation attached to a resolved source symbol, or
+// null when the canonical declaration has no annotation with this spelling.
+inline const cxx::Attribute* annotation(cxx::Symbol* symbol,
+                                        std::string_view spelling) {
+  return semantic_attribute(symbol, "loom", spelling);
 }
 
 // Source positions with distinct binding owners. Namespace declarations,

@@ -9,6 +9,7 @@
 
 #include <cxx/ast_fwd.h>
 #include <cxx/literals_fwd.h>
+#include <cxx/source_location.h>
 #include <cxx/symbols_fwd.h>
 #include <cxx/types_fwd.h>
 
@@ -26,6 +27,34 @@ cxx::ExpressionAST* strip_implicit_casts(cxx::ExpressionAST* expression);
 // Returns the semantic expression beneath implicit conversions, redundant
 // parentheses, and frontend wrappers around selected member initializers.
 cxx::ExpressionAST* unwrap_expression(cxx::ExpressionAST* expression);
+
+// Returns the expression selected to initialize a reference. Same-type braced
+// initialization denotes its sole semantic element, while other braced forms
+// denote the materialized list object itself. Parenthesized initialization
+// requires exactly one argument.
+cxx::ExpressionAST* reference_initializer(cxx::TranslationUnit& unit,
+                                          cxx::ExpressionAST* initializer);
+
+// Returns the sole index of a checked builtin subscript. Overloaded
+// subscripts retain their complete argument list on the source node and do not
+// use this accessor.
+cxx::ExpressionAST* subscript_index(cxx::SubscriptExpressionAST* expression);
+
+// The frontend converts a member expression's base to its designating class
+// and leaves navigation from that class to the declaration owner implicit.
+// These identities expose that semantic boundary without reconstructing it
+// independently in each importer consumer.
+struct MemberObjectClasses {
+  // Class denoted by the frontend-converted base expression.
+  cxx::ClassSymbol* object;
+  // Class directly owning the selected field or member function.
+  cxx::ClassSymbol* declaring;
+};
+
+// Returns the object and declaring classes for a selected non-static member,
+// or null when the expression does not select a class member.
+std::optional<MemberObjectClasses> member_object_classes(
+    cxx::TranslationUnit& unit, cxx::MemberExpressionAST* expression);
 
 // Returns the operand of an explicit static cast to a reference, or
 // null when the expression is not that source category projection.
@@ -49,10 +78,19 @@ cxx::ImplicitCastExpressionAST* constructor_conversion(
 // Whether two resolved source functions denote the same canonical entity.
 bool same_function(cxx::FunctionSymbol* left, cxx::FunctionSymbol* right);
 
-// Explicit arguments of a selected constructor, including functional-cast
-// syntax. A construction expression is the call, not its own first argument.
+// Explicit semantic arguments of a selected constructor, including
+// functional-cast syntax and normalized list-constructor arguments. A
+// construction expression is the call, not its own first argument.
 std::vector<cxx::ExpressionAST*> constructor_arguments(
     cxx::ExpressionAST* initializer);
+
+// Completes an already selected callable's fixed parameters without repeating
+// overload resolution. Omitted default arguments are cloned into the caller's
+// semantic scope and retain their call-site full-expression wrappers.
+std::vector<cxx::ExpressionAST*> complete_default_arguments(
+    cxx::TranslationUnit& unit, cxx::ScopeSymbol* scope,
+    cxx::FunctionSymbol* function, std::vector<cxx::ExpressionAST*> arguments,
+    cxx::SourceLocation location);
 
 // A nontrivial array-member copy has one source array and a selected leaf
 // constructor. Default arguments are frontend-completed once, then evaluated

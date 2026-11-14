@@ -26,8 +26,6 @@ namespace {
 struct SubobjectPathCollector final : cxx::ASTVisitor {
   // Paths retained by resolved implicit-object member expressions.
   std::vector<std::vector<cxx::Symbol*>> implicit_paths;
-  // Paths retained by resolved member expressions.
-  std::vector<std::vector<cxx::Symbol*>> member_paths;
   // Paths retained by resolved derived-to-base conversions.
   std::vector<std::vector<cxx::Symbol*>> cast_paths;
   // Derived-to-base paths retained by inverse class conversions.
@@ -39,11 +37,6 @@ struct SubobjectPathCollector final : cxx::ASTVisitor {
       implicit_paths.emplace_back(
           cxx::ListView(identifier->subobjectPath).begin(),
           cxx::ListView(identifier->subobjectPath).end());
-    }
-    if (auto* member = cxx::ast_cast<cxx::MemberExpressionAST>(ast);
-        member && member->subobjectPath) {
-      member_paths.emplace_back(cxx::ListView(member->subobjectPath).begin(),
-                                cxx::ListView(member->subobjectPath).end());
     }
     if (auto* cast = cxx::ast_cast<cxx::ImplicitCastExpressionAST>(ast);
         cast && cast->subobjectPath) {
@@ -80,32 +73,53 @@ bool hasBasePath(const std::vector<std::vector<cxx::Symbol*>>& paths,
   return false;
 }
 
-TEST(ConstantArchiveTest, RejectsAutomaticInvocationStorage) {
+TEST(ConstantArchiveTest, PreservesAutomaticInvocationStorage) {
   loom_cxx_import_options_t options;
   loom_cxx_import_options_initialize(&options);
-  Source source(IREE_SV("constexpr unsigned value = 9;"),
-                IREE_SV("automatic_storage.cxx"), options);
+  std::vector<std::uint8_t> bytes;
+  {
+    Source source(IREE_SV("constexpr unsigned value = 9;"),
+                  IREE_SV("automatic_storage.cxx"), options);
+    auto symbols = source.unit().globalScope()->find("value");
+    ASSERT_FALSE(symbols.begin() == symbols.end());
+    auto* variable = cxx::symbol_cast<cxx::VariableSymbol>(*symbols.begin());
+    ASSERT_NE(variable, nullptr);
 
-  auto symbols = source.unit().globalScope()->find("value");
+    cxx::ConstValue slot{std::intmax_t{9}};
+    auto storage =
+        std::make_shared<cxx::ConstStorage>(variable->type(), std::move(slot));
+    auto address = std::make_shared<cxx::ConstAddress>(variable);
+    address->setStorage(std::move(storage));
+    variable->setConstValue(cxx::ConstValue{std::move(address)});
+
+    cxx::ArchiveWriter writer;
+    cxx::SemanticArchiveRoots roots;
+    roots.ast = source.unit().ast();
+    roots.globalScope = source.unit().globalScope();
+    cxx::SemanticEncoder encoder(&source.unit());
+    ASSERT_TRUE(encoder(roots, writer));
+    bytes = writer();
+  }
+
+  Source destination(IREE_SV(""), IREE_SV("restored.cxx"), options);
+  cxx::ArchiveReader reader;
+  ASSERT_TRUE(reader(bytes)) << reader.error();
+  cxx::SemanticArchiveRoots restored;
+  cxx::SemanticDecoder decoder(&destination.unit());
+  ASSERT_TRUE(decoder(reader, restored)) << decoder.error();
+  auto symbols = restored.globalScope->find("value");
   ASSERT_FALSE(symbols.begin() == symbols.end());
   auto* variable = cxx::symbol_cast<cxx::VariableSymbol>(*symbols.begin());
   ASSERT_NE(variable, nullptr);
-
-  cxx::ConstValue slot{std::intmax_t{9}};
-  auto storage = std::make_shared<cxx::ConstStorage>(&slot);
-  auto address = std::make_shared<cxx::ConstAddress>(variable);
-  address->setStorage(std::move(storage));
-  variable->setConstValue(cxx::ConstValue{std::move(address)});
-
-  cxx::ArchiveWriter writer;
-  cxx::SemanticArchiveRoots roots;
-  roots.ast = source.unit().ast();
-  roots.globalScope = source.unit().globalScope();
-  cxx::SemanticEncoder encoder(&source.unit());
-  EXPECT_FALSE(encoder(roots, writer));
-  ASSERT_EQ(encoder.errors().size(), 1u);
-  EXPECT_EQ(encoder.errors().front(),
-            "constant address refers to automatic invocation storage");
+  ASSERT_TRUE(variable->constValue());
+  auto address =
+      std::get<std::shared_ptr<cxx::ConstAddress>>(*variable->constValue());
+  ASSERT_NE(address, nullptr);
+  EXPECT_EQ(address->root(), variable);
+  ASSERT_NE(address->storage(), nullptr);
+  EXPECT_EQ(address->storage()->type(), variable->type());
+  EXPECT_EQ(std::get<cxx::ConstInt>(address->storage()->value()).toIntMax(), 9);
+  EXPECT_FALSE(address->storage()->lifetimeEnded());
 }
 
 TEST(ConstantArchiveTest, PreservesComplexAndIndeterminateValues) {
@@ -197,17 +211,16 @@ TEST(ConstantArchiveTest, PreservesTypedBitsAfterSourceDestruction) {
     auto* variable = cxx::symbol_cast<cxx::VariableSymbol>(*symbols.begin());
     ASSERT_NE(variable, nullptr);
     ASSERT_TRUE(variable->constValue());
-    auto copied = interpreter.cloneValue(*variable->constValue());
+    auto copied = cxx::cloneValue(*variable->constValue());
     if (auto* floating = std::get_if<cxx::ConstFloat>(&copied)) {
       EXPECT_EQ(floating->format(), cxx::ConstFloat::Format::kDouble);
       EXPECT_EQ(floating->bits(), 0x7ff0000012345678ULL);
     } else {
       auto elements = std::get<std::shared_ptr<cxx::InitializerList>>(copied);
-      ASSERT_EQ(elements->elements.size(), 2u);
-      auto first =
-          std::get<cxx::ConstFloat>(std::get<0>(elements->elements[0]));
+      ASSERT_EQ(elements->size(), 2u);
+      auto first = std::get<cxx::ConstFloat>(std::get<0>(elements->element(0)));
       auto second =
-          std::get<cxx::ConstFloat>(std::get<0>(elements->elements[1]));
+          std::get<cxx::ConstFloat>(std::get<0>(elements->element(1)));
       EXPECT_EQ(first.format(), cxx::ConstFloat::Format::kFloat16);
       EXPECT_EQ(second.format(), cxx::ConstFloat::Format::kFloat16);
       EXPECT_EQ(first.bits(), 0x8000u);
@@ -464,11 +477,14 @@ TEST(ConstantArchiveTest, ExecutesNestedConstructorsAfterSourceDestruction) {
   ASSERT_EQ(object->members().size(), 1u);
   auto rows = std::get<std::shared_ptr<cxx::InitializerList>>(
       object->members().front().value);
-  ASSERT_EQ(rows->elements.size(), 2u);
-  for (const auto& [row, row_type] : rows->elements) {
+  ASSERT_EQ(rows->size(), 2u);
+  for (size_t row_index = 0; row_index < rows->size(); ++row_index) {
+    const auto& [row, row_type] = rows->element(row_index);
     auto columns = std::get<std::shared_ptr<cxx::InitializerList>>(row);
-    ASSERT_EQ(columns->elements.size(), 2u);
-    for (const auto& [column, column_type] : columns->elements) {
+    ASSERT_EQ(columns->size(), 2u);
+    for (size_t column_index = 0; column_index < columns->size();
+         ++column_index) {
+      const auto& [column, column_type] = columns->element(column_index);
       auto format = std::get<std::shared_ptr<cxx::ConstObject>>(column);
       ASSERT_EQ(format->members().size(), 2u);
       EXPECT_EQ(interpreter.toInt(format->members()[0].value), 32);
@@ -614,15 +630,14 @@ TEST(ConstantArchiveTest, PreservesReferenceTemplateIdentity) {
     auto address =
         std::get<std::shared_ptr<cxx::ConstAddress>>(*variable->constValue());
     ASSERT_NE(address, nullptr);
-    EXPECT_EQ(address->rootSymbol(), *objects.begin());
+    EXPECT_EQ(address->root(), *objects.begin());
     EXPECT_EQ(address->offset(), offsets[index]);
     if (index < 2) {
-      EXPECT_FALSE(address->isArrayElement());
+      EXPECT_EQ(address->arrayType(), nullptr);
       EXPECT_EQ(address->symbol(), *objects.begin());
     } else {
-      EXPECT_TRUE(address->isArrayElement());
-      ASSERT_NE(address->parent(), nullptr);
-      EXPECT_EQ(address->parent()->symbol(), *objects.begin());
+      EXPECT_NE(address->arrayType(), nullptr);
+      EXPECT_EQ(address->symbol(), *objects.begin());
     }
 
     // The independent address constant must find the restored specialization,
@@ -703,7 +718,7 @@ TEST(ConstantArchiveTest, PreservesRootedSubobjectIdentity) {
     auto address =
         std::get<std::shared_ptr<cxx::ConstAddress>>(*variable->constValue());
     ASSERT_NE(address, nullptr);
-    ASSERT_NE(address->parent(), nullptr);
+    EXPECT_FALSE(address->subobjectPath().empty());
 
     const std::vector<cxx::TemplateArgument> arguments = {
         *variable->constValue()};
@@ -776,7 +791,6 @@ TEST(ConstantArchiveTest, PreservesSelectedSubobjectPaths) {
   restored_paths.accept(restored.ast);
   EXPECT_TRUE(hasBasePath(restored_paths.implicit_paths, {left, base}));
   EXPECT_TRUE(hasBasePath(restored_paths.implicit_paths, {right, base}));
-  EXPECT_TRUE(hasBasePath(restored_paths.member_paths, {left, base}));
   EXPECT_TRUE(hasBasePath(restored_paths.cast_paths, {left}));
   EXPECT_TRUE(hasBasePath(restored_paths.inverse_paths, {left, base}));
 
@@ -785,7 +799,6 @@ TEST(ConstantArchiveTest, PreservesSelectedSubobjectPaths) {
   cloned_paths.accept(cloned);
   EXPECT_TRUE(hasBasePath(cloned_paths.implicit_paths, {left, base}));
   EXPECT_TRUE(hasBasePath(cloned_paths.implicit_paths, {right, base}));
-  EXPECT_TRUE(hasBasePath(cloned_paths.member_paths, {left, base}));
   EXPECT_TRUE(hasBasePath(cloned_paths.cast_paths, {left}));
   EXPECT_TRUE(hasBasePath(cloned_paths.inverse_paths, {left, base}));
 }

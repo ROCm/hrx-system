@@ -9,6 +9,7 @@
 #include <cxx/ast.h>
 #include <cxx/ast_interpreter.h>
 #include <cxx/ast_visitor.h>
+#include <cxx/initialization.h>
 #include <cxx/literals.h>
 #include <cxx/names.h>
 #include <cxx/symbols.h>
@@ -133,6 +134,60 @@ class PureConstant final : private cxx::ASTVisitor {
 
 }  // namespace
 
+bool constant_contains_address(const cxx::ConstValue& value) {
+  if (std::holds_alternative<const cxx::StringLiteral*>(value) ||
+      std::holds_alternative<std::shared_ptr<cxx::ConstAddress>>(value) ||
+      std::holds_alternative<std::shared_ptr<cxx::ConstLabelAddress>>(value)) {
+    return true;
+  }
+  if (auto* object = std::get_if<std::shared_ptr<cxx::ConstObject>>(&value)) {
+    if (!*object) {
+      return false;
+    }
+    for (const auto& member : (*object)->members()) {
+      if (constant_contains_address(member.value)) {
+        return true;
+      }
+    }
+    return false;
+  }
+  if (auto* list = std::get_if<std::shared_ptr<cxx::InitializerList>>(&value)) {
+    if (!*list) {
+      return false;
+    }
+    for (const auto& element : (*list)->initializedElements()) {
+      if (constant_contains_address(std::get<0>(element))) {
+        return true;
+      }
+    }
+    return (*list)->hasFiller() &&
+           constant_contains_address(std::get<0>((*list)->filler()));
+  }
+  if (auto* complex = std::get_if<std::shared_ptr<cxx::ConstComplex>>(&value)) {
+    return *complex && (constant_contains_address((*complex)->real()) ||
+                        constant_contains_address((*complex)->imag()));
+  }
+  if (auto* meta = std::get_if<std::shared_ptr<cxx::Meta>>(&value)) {
+    if (!*meta) {
+      return false;
+    }
+    if (auto* expression = std::get_if<cxx::Meta::ConstExpr>(&(*meta)->value)) {
+      return constant_contains_address(expression->value);
+    }
+    return std::holds_alternative<std::shared_ptr<cxx::ConstAddress>>(
+        (*meta)->value);
+  }
+  return false;
+}
+
+const cxx::ConstValue* folded_variable_constant(cxx::VariableSymbol* variable) {
+  if (!variable || !variable->isConstexpr()) {
+    return nullptr;
+  }
+  const auto& value = variable->constValue();
+  return value && !constant_contains_address(*value) ? &*value : nullptr;
+}
+
 std::optional<ObjectRepresentation> object_representation(
     cxx::TranslationUnit& unit, const cxx::Type* type,
     const cxx::ConstValue& value, const cxx::StringLiteral* string) {
@@ -235,7 +290,8 @@ bool null_pointer_expression(cxx::TranslationUnit& unit,
     }
     if (auto* construction =
             cxx::ast_cast<cxx::BracedTypeConstructionAST>(expression)) {
-      auto* elements = construction->bracedInitList->expressionList;
+      auto* elements =
+          cxx::Initializer(construction->bracedInitList).expressionList();
       if (!elements) {
         return true;
       }

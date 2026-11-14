@@ -22,6 +22,7 @@
 #include "loom/ops/buffer/ops.h"
 #include "loom/ops/index/ops.h"
 #include "loom/ops/scalar/ops.h"
+#include "loom/ops/scf/ops.h"
 #include "loom/ops/vector/ops.h"
 #include "loom/ops/view/ops.h"
 
@@ -230,6 +231,26 @@ StorageProjection Storage::subobject(StorageProjection base,
   return {pointer, std::gcd(base.alignment, byte_offset), true};
 }
 
+Pointer Storage::subobject(Pointer base, uint64_t byte_offset,
+                           cxx::AST* owner) {
+  if (!byte_offset) {
+    return base;
+  }
+  auto source = locations_.get(owner);
+  auto offset_type = loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET);
+  auto displacement =
+      scalars_.integer(byte_offset, LOOM_SCALAR_TYPE_OFFSET, source);
+  loom_op_t* op;
+  check(loom_index_add_build(&builder_, base.byte_offset, displacement,
+                             offset_type, source, &op));
+  auto adjusted = loom_op_results(op)[0];
+  auto is_null = compare_null(base.root, true, owner);
+  auto origin = scalars_.integer(0, LOOM_SCALAR_TYPE_OFFSET, source);
+  check(loom_scf_select_build(&builder_, is_null, origin, adjusted, offset_type,
+                              source, &op));
+  return constrain_origin({base.root, loom_scf_select_result(op)}, owner);
+}
+
 StorageProjection Storage::enclosing(StorageProjection base,
                                      uint64_t byte_offset, cxx::AST* owner) {
   auto source = locations_.get(owner);
@@ -242,6 +263,25 @@ StorageProjection Storage::enclosing(StorageProjection base,
   auto pointer =
       constrain_origin({base.pointer.root, loom_op_results(op)[0]}, owner);
   return {pointer, std::gcd(base.alignment, byte_offset), true};
+}
+
+Pointer Storage::enclosing(Pointer base, uint64_t byte_offset,
+                           cxx::AST* owner) {
+  if (!byte_offset) {
+    return base;
+  }
+  auto source = locations_.get(owner);
+  auto offset_type = loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET);
+  auto displacement =
+      scalars_.integer(byte_offset, LOOM_SCALAR_TYPE_OFFSET, source);
+  auto is_null = compare_null(base.root, true, owner);
+  loom_op_t* op;
+  check(loom_scf_select_build(&builder_, is_null, displacement,
+                              base.byte_offset, offset_type, source, &op));
+  auto origin = loom_scf_select_result(op);
+  check(loom_index_sub_build(&builder_, origin, displacement, offset_type,
+                             source, &op));
+  return constrain_origin({base.root, loom_op_results(op)[0]}, owner);
 }
 
 StorageAccess Storage::dereference(StorageProjection base,

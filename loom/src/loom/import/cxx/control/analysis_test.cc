@@ -88,6 +88,78 @@ TEST(ControlFlowTest, LambdaConstructionVisitsCapturesButNotDeferredBody) {
   EXPECT_TRUE(analysis.written(body).empty());
 }
 
+TEST(ControlFlowTest, ConstructorDefaultsUseFrontendCheckedArguments) {
+  loom_cxx_import_options_t options;
+  loom_cxx_import_options_initialize(&options);
+  Source source(IREE_SV(R"(
+    static unsigned default_seed();
+    struct Value {
+      unsigned value;
+      Value(unsigned seed = default_seed()) : value(seed) {}
+    };
+    void entry() { Value value; }
+    static unsigned default_seed() { return 7u; }
+  )"),
+                IREE_SV("constructor_defaults.cpp"), options);
+  auto* function = definition(source);
+  ASSERT_NE(function, nullptr);
+  auto* body = cxx::ast_cast<cxx::CompoundStatementFunctionBodyAST>(
+                   function->functionBody)
+                   ->statement;
+  Types types(source.unit(), source.diagnostics());
+  ControlFlow analysis(source.unit(), source.diagnostics(), types, body,
+                       function->symbol);
+
+  auto calls = analysis.calls();
+  ASSERT_EQ(calls.size(), 2u);
+  EXPECT_EQ(cxx::to_string(calls[0].function->name()), "default_seed");
+  ASSERT_EQ(calls[1].arguments.size(), 1u);
+  EXPECT_EQ(cxx::to_string(calls[1].function->name()), "Value");
+  EXPECT_NE(calls[1].arguments[0].source, nullptr);
+}
+
+TEST(ControlFlowTest, DirectCallsDoNotVisitTemplateArgumentExpressions) {
+  loom_cxx_import_options_t options;
+  loom_cxx_import_options_initialize(&options);
+  Source source(IREE_SV(R"(
+    struct VirtualBase { unsigned value; };
+    struct Left : virtual VirtualBase {};
+    struct Right : virtual VirtualBase {};
+    struct Diamond : Left, Right {};
+    extern Diamond object;
+
+    template <const unsigned&> unsigned choose();
+    struct Caller {
+      template <const unsigned&> unsigned choose() const;
+    };
+    static Caller make_caller();
+
+    unsigned entry() {
+      return choose<object.Left::value>() +
+             make_caller().choose<object.Right::value>();
+    }
+
+    template <const unsigned&> unsigned choose() { return 1u; }
+    template <const unsigned&> unsigned Caller::choose() const { return 2u; }
+    static Caller make_caller() { return {}; }
+  )"),
+                IREE_SV("template_argument_runtime_boundary.cxx"), options);
+  auto* function = definition(source);
+  ASSERT_NE(function, nullptr);
+  auto* body = cxx::ast_cast<cxx::CompoundStatementFunctionBodyAST>(
+                   function->functionBody)
+                   ->statement;
+  Types types(source.unit(), source.diagnostics());
+  ControlFlow analysis(source.unit(), source.diagnostics(), types, body,
+                       function->symbol);
+
+  auto calls = analysis.calls();
+  ASSERT_EQ(calls.size(), 3u);
+  EXPECT_EQ(cxx::to_string(calls[0].function->name()), "choose");
+  EXPECT_EQ(cxx::to_string(calls[1].function->name()), "make_caller");
+  EXPECT_EQ(cxx::to_string(calls[2].function->name()), "choose");
+}
+
 // Comparison classification is independent of pointer comparison lowering:
 // the capture analysis consumes resolved value reads, not operator spelling.
 TEST(ControlFlowTest, DependentPointerComparisonsReadCapturedValues) {
@@ -715,7 +787,7 @@ TEST(ControlFlowTest, StructuredBindingsAnalyzeTheSynthesizedDeclarationOnce) {
   auto* declaration = cxx::ast_cast<cxx::StructuredBindingDeclarationAST>(
       statement->declaration);
   ASSERT_NE(declaration, nullptr);
-  ASSERT_NE(declaration->hiddenVariable, nullptr);
+  ASSERT_NE(declaration->binding.hiddenVariable, nullptr);
 
   Types types(source.unit(), source.diagnostics());
   ControlFlow analysis(source.unit(), source.diagnostics(), types, body,
@@ -724,8 +796,10 @@ TEST(ControlFlowTest, StructuredBindingsAnalyzeTheSynthesizedDeclarationOnce) {
   auto calls = analysis.calls();
   ASSERT_EQ(calls.size(), 1u);
   EXPECT_NE(calls.front().function, nullptr);
-  EXPECT_FALSE(analysis.storage_backed(declaration->hiddenVariable->symbol));
-  for (auto* binding : cxx::ListView{declaration->bindingDeclaratorList}) {
+  EXPECT_FALSE(
+      analysis.storage_backed(declaration->binding.hiddenVariable->symbol));
+  for (auto* binding :
+       cxx::ListView{declaration->binding.bindingDeclaratorList}) {
     EXPECT_FALSE(analysis.storage_backed(binding->symbol));
     EXPECT_FALSE(analysis.addressed(binding->symbol));
   }

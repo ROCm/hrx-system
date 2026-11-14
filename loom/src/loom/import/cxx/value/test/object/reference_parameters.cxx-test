@@ -1050,64 +1050,6 @@ func.def @update_separate(%first$6: i32, %second$7: i32) -> (i32, i32) {
 }
 
 // ====
-using AliasedUInt4 = unsigned __attribute__((vector_size(16)));
-
-static void update_alias_lanes(unsigned& first, unsigned& second) {
-  ++first;
-  second += first;
-}
-
-AliasedUInt4 overlapping_vector_lanes(AliasedUInt4 values) {
-  update_alias_lanes(values[0], values[1]);
-  return values;
-}
-
-// ----
-func.def public @overlapping_vector_lanes(%values$0: vector<4xi32>) -> (vector<4xi32>) {
-  %2 = index.constant 16 : offset
-  %values_storage = buffer.alloca<private> align(16) %2 : buffer
-  %values_storage_byte_offset = index.constant 0 : offset
-  %values_view = buffer.view %values_storage[%values_storage_byte_offset] : buffer -> view<4xi32>
-  vector.store %values$0, %values_view[0] : vector<4xi32>, view<4xi32>
-  %6 = scalar.constant 0 : i32
-  %7 = scalar.extsi %6 : i32 to i64
-  %8 = scalar.constant 4 : i64
-  %9 = scalar.muli %7, %8 : i64
-  %10 = index.cast %values_storage_byte_offset : offset to i64
-  %11 = scalar.addi %10, %9 : i64
-  %12 = scalar.assume %11 [range(%11, 0, 9223372036854775807)] : i64
-  %13 = index.cast %12 : i64 to offset
-  %14 = scalar.constant 1 : i32
-  %15 = scalar.extsi %14 : i32 to i64
-  %16 = scalar.constant 4 : i64
-  %17 = scalar.muli %15, %16 : i64
-  %18 = index.cast %values_storage_byte_offset : offset to i64
-  %19 = scalar.addi %18, %17 : i64
-  %20 = scalar.assume %19 [range(%19, 0, 9223372036854775807)] : i64
-  %21 = index.cast %20 : i64 to offset
-  func.call @update_alias_lanes(%values_storage, %13, %values_storage, %21) : (buffer, offset, buffer, offset)
-  %values$22 = vector.load %values_view[0] : view<4xi32> -> vector<4xi32>
-  func.return %values$22 : vector<4xi32>
-}
-
-func.def @update_alias_lanes(%first$23: buffer, %first_byte_offset: offset, %second: buffer, %second_byte_offset: offset) {
-  %27 = buffer.view %first$23[%first_byte_offset] : buffer -> view<1xi32>
-  %28 = view.load<root_in_bounds> %27[0] : view<1xi32> -> i32
-  %29 = scalar.constant 1 : i32
-  %30 = scalar.addi %28, %29 : i32
-  %31 = buffer.view %first$23[%first_byte_offset] : buffer -> view<1xi32>
-  view.store<root_in_bounds> %30, %31[0] : i32, view<1xi32>
-  %32 = buffer.view %first$23[%first_byte_offset] : buffer -> view<1xi32>
-  %first$33 = view.load<root_in_bounds> %32[0] : view<1xi32> -> i32
-  %34 = buffer.view %second[%second_byte_offset] : buffer -> view<1xi32>
-  %35 = view.load<root_in_bounds> %34[0] : view<1xi32> -> i32
-  %36 = scalar.addi %35, %first$33 : i32
-  %37 = buffer.view %second[%second_byte_offset] : buffer -> view<1xi32>
-  view.store<root_in_bounds> %36, %37[0] : i32, view<1xi32>
-  func.return
-}
-
-// ====
 static unsigned& exact_alias(unsigned& value) { return value; }
 
 static void update_nested_alias(unsigned& output, const unsigned& input) {
@@ -1441,56 +1383,49 @@ func.def @choose_overlapping_alias(%condition: i1, %first: buffer, %first_byte_o
 
 // ====
 // RUN: pass canonicalize,cse,dce
-// Two references to the same vector lane must observe the first mutation in
-// the second update; the remaining lanes retain their original values.
-using OverlappingUInt4 = unsigned __attribute__((vector_size(16)));
-
-static void update_overlapping_lanes(unsigned& first, unsigned& second) {
+// Two mutable references to the same scalar must observe the first mutation in
+// the second update; the remaining scalars retain their original values.
+static void update_overlapping_references(unsigned& first, unsigned& second) {
   ++first;
   second += first;
 }
 
-unsigned overlapping_vector_alias() {
-  OverlappingUInt4 values = {2u, 3u, 5u, 7u};
-  update_overlapping_lanes(values[0], values[0]);
-  return values[0] * 1000u + values[1] * 100u + values[2] * 10u + values[3];
+unsigned overlapping_mutable_references() {
+  unsigned first = 2u;
+  unsigned second = 3u;
+  unsigned third = 5u;
+  unsigned fourth = 7u;
+  update_overlapping_references(first, first);
+  return first * 1000u + second * 100u + third * 10u + fourth;
 }
 // ----
-func.def public @overlapping_vector_alias() -> (i32) {
-  %1 = index.constant 16 : offset
-  %values_storage = buffer.alloca<private> align(16) %1 : buffer
-  %values_storage_byte_offset = index.constant 0 : offset
-  %values_view = buffer.view %values_storage[%values_storage_byte_offset] : buffer -> view<4xi32>
-  %5 = vector.constanti [2, 3, 5, 7] : vector<4xi32>
-  vector.store %5, %values_view[0] : vector<4xi32>, view<4xi32>
-  func.call @update_overlapping_lanes(%values_storage, %values_storage_byte_offset, %values_storage, %values_storage_byte_offset) : (buffer, offset, buffer, offset)
-  %69 = view.load %values_view[0] : view<4xi32> -> i32
-  %26 = scalar.constant 1000 : i32
-  %27 = scalar.muli %69, %26 : i32
-  %68 = view.load %values_view[1] : view<4xi32> -> i32
-  %32 = scalar.constant 100 : i32
-  %33 = scalar.muli %68, %32 : i32
-  %34 = scalar.addi %27, %33 : i32
-  %67 = view.load %values_view[2] : view<4xi32> -> i32
-  %39 = scalar.constant 10 : i32
-  %40 = scalar.muli %67, %39 : i32
-  %41 = scalar.addi %34, %40 : i32
-  %66 = view.load %values_view[3] : view<4xi32> -> i32
-  %46 = scalar.addi %41, %66 : i32
-  func.return %46 : i32
+func.def public @overlapping_mutable_references() -> (i32) {
+  %1 = index.constant 4 : offset
+  %first_storage = buffer.alloca<private> align(4) %1 : buffer
+  %first_storage_byte_offset = index.constant 0 : offset
+  %first_view = buffer.view %first_storage[%first_storage_byte_offset] : buffer -> view<1xi32>
+  %5 = scalar.constant 2 : i32
+  view.store %5, %first_view[0] : i32, view<1xi32>
+  func.call @update_overlapping_references(%first_storage, %first_storage_byte_offset, %first_storage, %first_storage_byte_offset) : (buffer, offset, buffer, offset)
+  %first = view.load %first_view[0] : view<1xi32> -> i32
+  %10 = scalar.constant 1000 : i32
+  %11 = scalar.muli %first, %10 : i32
+  %36 = scalar.constant 357 : i32
+  %37 = scalar.addi %11, %36 : i32
+  func.return %37 : i32
 }
 
-func.def @update_overlapping_lanes(%first$47: buffer, %first_byte_offset: offset, %second: buffer, %second_byte_offset: offset) {
-  %51 = buffer.view %first$47[%first_byte_offset] : buffer -> view<1xi32>
-  %52 = view.load<root_in_bounds> %51[0] : view<1xi32> -> i32
-  %53 = scalar.constant 1 : i32
-  %54 = scalar.addi %52, %53 : i32
-  view.store<root_in_bounds> %54, %51[0] : i32, view<1xi32>
-  %first$57 = view.load<root_in_bounds> %51[0] : view<1xi32> -> i32
-  %58 = buffer.view %second[%second_byte_offset] : buffer -> view<1xi32>
-  %59 = view.load<root_in_bounds> %58[0] : view<1xi32> -> i32
-  %60 = scalar.addi %59, %first$57 : i32
-  view.store<root_in_bounds> %60, %58[0] : i32, view<1xi32>
+func.def @update_overlapping_references(%first$19: buffer, %first_byte_offset: offset, %second: buffer, %second_byte_offset: offset) {
+  %23 = buffer.view %first$19[%first_byte_offset] : buffer -> view<1xi32>
+  %24 = view.load<root_in_bounds> %23[0] : view<1xi32> -> i32
+  %25 = scalar.constant 1 : i32
+  %26 = scalar.addi %24, %25 : i32
+  view.store<root_in_bounds> %26, %23[0] : i32, view<1xi32>
+  %first$29 = view.load<root_in_bounds> %23[0] : view<1xi32> -> i32
+  %30 = buffer.view %second[%second_byte_offset] : buffer -> view<1xi32>
+  %31 = view.load<root_in_bounds> %30[0] : view<1xi32> -> i32
+  %32 = scalar.addi %31, %first$29 : i32
+  view.store<root_in_bounds> %32, %30[0] : i32, view<1xi32>
   func.return
 }
 

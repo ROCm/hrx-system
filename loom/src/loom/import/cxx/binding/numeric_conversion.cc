@@ -104,20 +104,18 @@ std::optional<cxx::ConstValue> NumericConversionConstantEvaluator::evaluate(
 
   const auto* input =
       std::get_if<std::shared_ptr<cxx::InitializerList>>(&arguments.front());
-  if (!input || !*input ||
-      (*input)->elements.size() != input_vector->elementCount()) {
+  if (!input || !*input || (*input)->size() != input_vector->elementCount()) {
     return std::nullopt;
   }
   auto output = std::make_shared<cxx::InitializerList>();
-  output->elements.reserve((*input)->elements.size());
-  for (const auto& [element, element_type] : (*input)->elements) {
+  for (size_t index = 0; index < (*input)->size(); ++index) {
+    const auto& [element, element_type] = (*input)->element(index);
     auto converted = interpreter.convertArithmetic(
         element, element_type, output_vector->elementType());
     if (!converted) {
       return std::nullopt;
     }
-    output->elements.emplace_back(std::move(*converted),
-                                  output_vector->elementType());
+    output->append(std::move(*converted), output_vector->elementType());
   }
   return cxx::ConstValue{std::move(output)};
 }

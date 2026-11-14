@@ -28,6 +28,16 @@ struct ObjectRepresentation {
   bool is_utf8;
 };
 
+// Whether a retained constant contains source storage identity at any depth.
+// Such a value cannot be flattened into ordinary Loom SSA constants; its
+// source expression must establish the referenced storage at runtime.
+bool constant_contains_address(const cxx::ConstValue& value);
+
+// Returns a constexpr variable's address-free frontend value when its
+// initializer can be materialized without any runtime evaluation. Constants
+// containing source storage identity retain their source initialization path.
+const cxx::ConstValue* folded_variable_constant(cxx::VariableSymbol* variable);
+
 // Serializes a fully initialized, trivially copyable, address-free object.
 // The optional string origin preserves text form without inferring it for
 // arbitrary character arrays or changing any source code units.

@@ -115,7 +115,7 @@ void for_each_subobject_initializer(cxx::TranslationUnit& unit,
                        "default record constructor has no source "
                        "initialization plan");
   }
-  for (auto* initializer : cxx::ListView{cxx::ctor_initializers(body)}) {
+  for (auto* initializer : cxx::ListView{cxx::ctor_initializers(constructor)}) {
     auto* field = initializer->symbol;
     auto* source = cxx::memInitializerClause(unit.arena(), initializer);
     callback(field, source, initializer);
@@ -123,8 +123,8 @@ void for_each_subobject_initializer(cxx::TranslationUnit& unit,
 }
 
 // Without a selected element constructor, a synthesized member clause wraps
-// the whole array default in parentheses. Keep its original list so each
-// element initializes in place and later clauses see the completed prefix.
+// the whole array default in parentheses. Keep its semantic argument list so
+// each element initializes in place and later clauses see the completed prefix.
 // Constructor arguments can also carry default wrappers, but apply separately
 // to every array element instead of initializing the complete array.
 cxx::ExpressionAST* array_initializer(cxx::ExpressionAST* initializer,
@@ -132,8 +132,11 @@ cxx::ExpressionAST* array_initializer(cxx::ExpressionAST* initializer,
   if (constructor) {
     return initializer;
   }
+  if (auto* list = cxx::Initializer(initializer).bracedInitList()) {
+    return list;
+  }
   auto* paren = cxx::ast_cast<cxx::ParenInitializerAST>(initializer);
-  auto* elements = paren ? paren->expressionList : nullptr;
+  auto* elements = paren ? cxx::Initializer(paren).expressionList() : nullptr;
   if (elements && !elements->next) {
     if (auto* clause = cxx::ast_cast<cxx::DefaultInitializerExpressionAST>(
             elements->value)) {
@@ -226,16 +229,16 @@ Value Initialization::value(const cxx::Type* type,
   } else if (auto* construction =
                  cxx::ast_cast<cxx::BracedTypeConstructionAST>(initializer)) {
     auto* list = construction->bracedInitList;
-    elements = list ? list->expressionList : nullptr;
+    elements = list ? cxx::Initializer(list).expressionList() : nullptr;
     implicit_element = list ? list->implicitElement : nullptr;
     constructor = construction->constructorSymbol;
     value_initialized = list && !elements;
   } else if (auto* list = cxx::ast_cast<cxx::BracedInitListAST>(initializer)) {
-    elements = list->expressionList;
+    elements = cxx::Initializer(list).expressionList();
     implicit_element = list->implicitElement;
   } else if (auto* list =
                  cxx::ast_cast<cxx::ParenInitializerAST>(initializer)) {
-    elements = list->expressionList;
+    elements = cxx::Initializer(list).expressionList();
     value_initialized = list->lparenLoc && !elements;
   } else if (initializer && !types_.record_constructor_requires_call(
                                 type, constructor, owner)) {
@@ -327,8 +330,7 @@ Value Initialization::closure(cxx::LambdaExpressionAST* expression) {
         is_reference && types_.pointer_reference_is_snapshot(field);
     cxx::ExpressionAST* referent = nullptr;
     if (is_reference) {
-      referent =
-          cxx::Initializer(initializer).referenceExpression(unit_.typeTraits());
+      referent = reference_initializer(unit_, initializer);
       if (!referent) {
         diagnostics_.reject(unit_, capture,
                             "lambda reference capture requires one "
@@ -425,7 +427,7 @@ Value Initialization::materialize_constant(const cxx::ConstValue& value,
       diagnostics_.reject(unit_, owner,
                           "constant array has no retained element values");
     }
-    if ((*retained)->elements.size() != array->source->size()) {
+    if ((*retained)->size() != array->source->size()) {
       diagnostics_.reject(unit_, owner,
                           "constant array element count does not match its "
                           "source type");
@@ -433,7 +435,8 @@ Value Initialization::materialize_constant(const cxx::ConstValue& value,
     std::vector<loom_value_id_t> components;
     components.reserve(array->component_count);
     const auto* element_type = array->source->elementType();
-    for (const auto& [element, retained_type] : (*retained)->elements) {
+    for (size_t index = 0; index < (*retained)->size(); ++index) {
+      const auto& [element, retained_type] = (*retained)->element(index);
       if (!retained_type ||
           !unit_.typeTraits().is_same(types_.unqualified(retained_type),
                                       types_.unqualified(element_type))) {
@@ -573,7 +576,7 @@ std::optional<loom_value_id_t> Initialization::constant_vector(
     if (!converted) {
       return std::nullopt;
     }
-    values->elements.emplace_back(std::move(*converted), vector->elementType());
+    values->append(std::move(*converted), vector->elementType());
   }
   return vectors_.constant(cxx::ConstValue{std::move(values)}, type, owner);
 }
@@ -660,20 +663,19 @@ loom_value_id_t Initialization::initialize_vector(
   }
 
   auto base = std::make_shared<cxx::InitializerList>();
-  base->elements.reserve(lane_count);
   for (size_t lane_index = 0; lane_index < lane_count; ++lane_index) {
     const bool literal_lane =
         lane_index < lanes.size() && lanes[lane_index].literal_encodable;
-    base->elements.emplace_back(literal_lane ? *lanes[lane_index].constant
-                                             : cxx::ConstValue{int64_t{0}},
-                                vector->elementType());
+    base->append(literal_lane ? *lanes[lane_index].constant
+                              : cxx::ConstValue{int64_t{0}},
+                 vector->elementType());
   }
-  const auto& first_value = std::get<0>(base->elements.front());
+  const auto& first_value = std::get<0>(base->element(0));
   const auto first_attribute =
       scalars_.constant_attribute(first_value, vector->elementType(), owner);
   bool uniform = true;
   for (size_t lane_index = 1; lane_index < lane_count; ++lane_index) {
-    const auto& value = std::get<0>(base->elements[lane_index]);
+    const auto& value = std::get<0>(base->element(lane_index));
     const auto attribute =
         scalars_.constant_attribute(value, vector->elementType(), owner);
     uniform &= loom_attribute_equal(&first_attribute, &attribute);
@@ -746,8 +748,7 @@ Value Initialization::default_record(const RecordPartition& record,
         }
         cxx::ExpressionAST* referent = nullptr;
         if (is_reference) {
-          referent =
-              cxx::Initializer(source).referenceExpression(unit_.typeTraits());
+          referent = reference_initializer(unit_, source);
           if (!referent) {
             diagnostics_.reject(unit_, source,
                                 "reference members require one initializer "
@@ -1040,7 +1041,8 @@ void Initialization::object(StorageProjection destination,
       if (auto* construction =
               cxx::ast_cast<cxx::BracedTypeConstructionAST>(clause)) {
         constructor = construction->constructorSymbol;
-        arguments = construction->bracedInitList->expressionList;
+        arguments =
+            cxx::Initializer(construction->bracedInitList).expressionList();
         implicit_element = construction->bracedInitList->implicitElement;
         list = true;
       } else if (auto* construction =
@@ -1220,8 +1222,7 @@ void Initialization::value_constructor_receiver(
     const auto* field_type = objects_.member_type(object_type, field);
     Value initialized;
     if (unit_.typeTraits().is_lvalue_reference(field_type)) {
-      auto* referent =
-          cxx::Initializer(source).referenceExpression(unit_.typeTraits());
+      auto* referent = reference_initializer(unit_, source);
       if (!referent) {
         diagnostics_.reject(unit_, source,
                             "reference members require one initializer "

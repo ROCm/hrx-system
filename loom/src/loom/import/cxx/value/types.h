@@ -13,6 +13,7 @@
 #include <array>
 #include <forward_list>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -83,6 +84,17 @@ struct SubobjectProjection {
   size_t component_offset;
   // Physical displacement from the complete object, excluding its own origin.
   uint64_t byte_offset;
+};
+
+// Complete implicit-object selection for one member call. The frontend may
+// expose the first class adjustment in the member's base expression while the
+// remaining path to the declaring class stays implicit on the member.
+struct MemberObjectSelection {
+  // Complete object expression beneath a derived-to-base adjustment.
+  cxx::ExpressionAST* object;
+  // Selected receiver subobject, absent when the member belongs directly to
+  // object. A base-to-derived cast remains in object and requires storage.
+  std::optional<SubobjectProjection> projection;
 };
 
 // A fixed source array transported as immutable element components inside an
@@ -417,8 +429,8 @@ class Types {
                                         cxx::FunctionSymbol* constructor,
                                         cxx::AST* owner);
   // Whether the selected copy/move special member has no source-level body
-  // effects. Retained once per source class; ordinary overloads are
-  // never replaced by component transport.
+  // effects. Ordinary overloads and destructors are never replaced by
+  // component transport.
   bool is_trivial_value_operation(cxx::FunctionSymbol* function);
   // Returns a fixed array's value schema, or null for a non-array type.
   const ArrayPartition* array(const cxx::Type* input, cxx::AST* owner);
@@ -434,6 +446,22 @@ class Types {
   // Includes the leaf field after a possibly empty frontend-selected path.
   SubobjectProjection selection(cxx::Symbol* field,
                                 cxx::List<cxx::Symbol*>* path, cxx::AST* owner);
+  // Returns the inherited-base or anonymous-member projection between a
+  // frontend-converted member base and the class declaring the member. Direct
+  // members require no object projection and return null.
+  const SubobjectProjection* member_object_projection(
+      cxx::MemberExpressionAST* member, cxx::AST* owner);
+  // Combines an explicit derived-to-base adjustment on the member base with
+  // the implicit path from that converted class to the declaration owner.
+  MemberObjectSelection member_object_selection(
+      cxx::MemberExpressionAST* member, cxx::AST* owner);
+  // Returns only the source-layout displacement between a member's converted
+  // object class and its declaring class. Physical storage access does not
+  // admit the enclosing classes as SSA record values.
+  uint64_t member_object_offset(cxx::MemberExpressionAST* member);
+  // Selects a member's leaf field after its implicit object projection.
+  SubobjectProjection selection(cxx::MemberExpressionAST* member,
+                                cxx::AST* owner);
   // Selects snapshot value transport for a pointer reference field whose
   // object identity is proven unobservable by whole-function analysis. The
   // source reference and pointer value share the same two-component partition;
@@ -521,6 +549,16 @@ class Types {
   void append_component_names(const Partition& partition,
                               std::string_view prefix,
                               std::vector<std::string>& output);
+  struct MemberObjectPath {
+    // Nonvirtual base declarations from the converted object to the class
+    // that declares the selected member.
+    std::vector<cxx::Symbol*> symbols;
+    // Complete physical displacement of symbols in source object layout.
+    uint64_t byte_offset = 0;
+    // Lazily admitted SSA partition path, absent for storage-only access.
+    std::optional<SubobjectProjection> projection;
+  };
+  MemberObjectPath* member_object_path(cxx::MemberExpressionAST* member);
 
   // Resolved source traits and configured memory layout.
   cxx::TranslationUnit& unit_;
@@ -531,8 +569,6 @@ class Types {
   // Stable source partitions, independent of every particular SSA binding.
   std::unordered_map<cxx::ClassSymbol*, std::unique_ptr<RecordPartition>>
       records_;
-  // Frontend special-member classification, retained at its first demand.
-  std::unordered_map<cxx::ClassSymbol*, bool> trivial_record_operations_;
   // Admitted typed buffer handles keyed by concrete source specialization.
   std::unordered_map<cxx::ClassSymbol*, std::unique_ptr<BufferPartition>>
       buffers_;
@@ -572,6 +608,14 @@ class Types {
   // A null partition retains a physical-only path; projection() completes the
   // value facts before exposing the entry to its SSA consumers.
   std::unique_ptr<ProjectionMap> projections_;
+  using MemberObjectPathMap = std::unordered_map<
+      cxx::ClassSymbol*,
+      std::unordered_map<cxx::ClassSymbol*, MemberObjectPath>>;
+  // Sparse paths keyed first by the converted object class and then by the
+  // selected member's declaring class. Physical access retains only layout;
+  // SSA consumers admit the semantic projection lazily. Direct members
+  // allocate nothing.
+  std::unique_ptr<MemberObjectPathMap> member_object_paths_;
   // Pointer reference fields whose source object identity is unobservable.
   std::unordered_set<cxx::FieldSymbol*> pointer_reference_snapshots_;
   // Completed memory admission; layouts remain owned by the source symbols.
