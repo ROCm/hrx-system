@@ -10,6 +10,7 @@
 #include <cstring>
 #include <memory>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "iree/hal/cts/util/test_base.h"
@@ -17,6 +18,7 @@
 #include "iree/hal/driver/amd/gpu/cts/testdata.h"
 #include "iree/hal/driver/amd/gpu/queue/aql/command_buffer.h"
 #include "iree/hal/driver/amd/gpu/queue/aql/publication.h"
+#include "iree/hal/driver/amd/gpu/queue/aql/queue.h"
 #include "iree/hal/driver/amd/gpu/queue/aql/state.h"
 #include "iree/hal/slab_pool.h"
 #include "iree/testing/status_matchers.h"
@@ -375,6 +377,112 @@ TEST_F(ArgumentPreparationTest, DirectRunsAcquireChangingHostInputs) {
       EXPECT_EQ(words[i * kBindingCount + 8], 8 * first + 28 + i);
     }
     IREE_ASSERT_OK(iree_hal_device_trim(device_));
+  }
+}
+
+TEST_F(ArgumentPreparationTest, RecordedCompletionJoinsEveryDispatch) {
+  enum class Ordering { kUnordered, kOrdered, kProfiled };
+  iree_hal_executable_function_t function;
+  IREE_ASSERT_OK(iree_hal_executable_lookup_function_by_name(
+      executable_, IREE_SV("many_bindings"), &function));
+  auto config = iree_hal_make_static_dispatch_config(1, 1, 1);
+  config.workgroup_size[0] = config.workgroup_size[1] =
+      config.workgroup_size[2] = 1;
+  const iree_hal_barrier_t dependency = {
+      .source_stage_mask = IREE_HAL_EXECUTION_STAGE_DISPATCH,
+      .target_stage_mask = IREE_HAL_EXECUTION_STAGE_DISPATCH,
+  };
+  const auto wait_idle = [this] {
+    // Join publication as well as native completion before observing the host
+    // reservation counter. The outer harness catches a stuck lifecycle.
+    while (!iree_hal_amd_gpu_aql_queue_is_idle(queues_[0])) {
+      std::this_thread::yield();
+    }
+  };
+  for (const auto mode : {IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
+                          IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT}) {
+    for (const auto ordering :
+         {Ordering::kUnordered, Ordering::kOrdered, Ordering::kProfiled}) {
+      for (uint32_t dispatch_count : {1u, 3u}) {
+        SCOPED_TRACE(mode);
+        SCOPED_TRACE(static_cast<int>(ordering));
+        SCOPED_TRACE(dispatch_count);
+        Ref<iree_hal_buffer_t> data;
+        IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+            pool_,
+            iree_hal_make_pool_reservation_request(
+                dispatch_count * 9 * sizeof(uint32_t), 8),
+            iree_infinite_timeout(), data.out()));
+        std::vector<uint32_t> words(dispatch_count * 9);
+        for (uint32_t i = 0; i < words.size(); ++i) {
+          words[i] = 100 + i;
+        }
+        IREE_ASSERT_OK(iree_hal_buffer_map_write(
+            data, 0, words.data(), words.size() * sizeof(uint32_t)));
+        Ref<iree_hal_command_buffer_t> recording;
+        const iree_hal_command_buffer_mode_t recording_mode =
+            mode | (ordering == Ordering::kProfiled
+                        ? IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_PROFILE_METADATA
+                        : 0);
+        IREE_ASSERT_OK(iree_hal_command_buffer_create(
+            iree_hal_queue_family(queues_[0]), recording_mode,
+            IREE_HAL_COMMAND_CATEGORY_DISPATCH, 0, recording.out()));
+        IREE_ASSERT_OK(iree_hal_command_buffer_begin(recording));
+        for (uint32_t i = 0; i < dispatch_count; ++i) {
+          if (i && ordering != Ordering::kUnordered) {
+            IREE_ASSERT_OK(
+                iree_hal_command_buffer_barrier(recording, &dependency));
+          }
+          std::array<iree_hal_buffer_ref_t, 9> bindings;
+          for (uint32_t j = 0; j < bindings.size(); ++j) {
+            bindings[j] = iree_hal_make_buffer_ref(
+                data, (i * bindings.size() + j) * sizeof(uint32_t),
+                sizeof(uint32_t));
+          }
+          IREE_ASSERT_OK(iree_hal_command_buffer_dispatch(
+              recording, executable_, function, config,
+              iree_make_const_byte_span(&i, sizeof(i)),
+              {bindings.size(), bindings.data()}, 0));
+        }
+        IREE_ASSERT_OK(iree_hal_command_buffer_end(recording));
+        const auto* program =
+            iree_hal_amd_gpu_aql_command_buffer_program(recording);
+        ASSERT_NE(program->host_template, nullptr);
+        ASSERT_EQ(program->block_count, 1u);
+        ASSERT_EQ(program->blocks[0].packet_count, dispatch_count);
+        Ref<iree_hal_semaphore_t> done;
+        CreateSemaphore(done.out());
+        ASSERT_FALSE(HasFatalFailure());
+        auto* semaphore = done.get();
+        uint64_t one = 1, two = 2;
+        wait_idle();
+        const uint64_t first_packet = NativeQueue(0)->producer.ring.reserved;
+        IREE_ASSERT_OK(iree_hal_queue_execute(
+            queues_[0], {}, {1, &semaphore, &one}, recording, {}, 0));
+        recording.reset();
+        IREE_ASSERT_OK(iree_hal_semaphore_wait(
+            done, one, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
+        wait_idle();
+        const bool dispatch_completion =
+            ordering != Ordering::kProfiled &&
+            (dispatch_count == 1 || ordering == Ordering::kOrdered);
+        EXPECT_EQ(NativeQueue(0)->producer.ring.reserved - first_packet,
+                  dispatch_count + !dispatch_completion);
+
+        // The recording above tests execution completion without a payload
+        // release. Publish a separate system boundary before observing writes.
+        IREE_ASSERT_OK(iree_hal_queue_barrier(queues_[0], {1, &semaphore, &one},
+                                              {1, &semaphore, &two}, nullptr,
+                                              0));
+        IREE_ASSERT_OK(iree_hal_semaphore_wait(
+            done, two, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
+        IREE_ASSERT_OK(iree_hal_buffer_map_read(
+            data, 0, words.data(), words.size() * sizeof(uint32_t)));
+        for (uint32_t i = 0; i < dispatch_count; ++i) {
+          EXPECT_EQ(words[i * 9 + 8], 8 * (100 + i * 9) + 28 + i);
+        }
+      }
+    }
   }
 }
 

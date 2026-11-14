@@ -16,8 +16,8 @@ extern "C" {
 #endif
 
 // One immutable native packet extent. Indirect producer/target and cooperative
-// reset/user pairs never cross a block boundary. The publisher reads this
-// descriptor, not packets.
+// reset/user pairs never cross a block boundary. This descriptor retains the
+// recording's layout for publication.
 typedef struct iree_hal_amd_gpu_aql_program_block_t {
   // Byte offset in the recording's packet section, aligned to a native packet.
   uint32_t offset;

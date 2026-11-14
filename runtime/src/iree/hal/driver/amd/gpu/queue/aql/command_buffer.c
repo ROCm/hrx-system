@@ -379,8 +379,8 @@ static iree_status_t iree_hal_amd_gpu_aql_command_end(
     iree_hal_amd_gpu_aql_command_buffer_t* buffer) {
   IREE_RETURN_IF_ERROR(
       iree_hal_amd_gpu_aql_command_drain_timestamps(buffer, 0));
-  // Each native chunk ends with an ordered completion packet. A trailing
-  // execution-only dependency needs no second packet before that boundary.
+  // Native completion joins each chunk. A trailing execution-only dependency
+  // needs no separate packet before that boundary.
   if (buffer->pending_barrier == IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED) {
     buffer->pending_barrier = 0;
   }

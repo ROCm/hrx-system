@@ -771,15 +771,33 @@ uint64_t iree_hal_amd_gpu_aql_execute_argument_alignment(
   return host_template ? iree_max(host_template->alignment, 8u) : 8;
 }
 
-// Publish one dispatch-only block without changing its sealed packet headers.
+// Publish one dispatch-only block. A dominating final dispatch can carry the
+// block's completion; its private CPU copy preserves the sealed template.
 static IREE_ATTRIBUTE_NOINLINE amdf_status_t
 iree_hal_amd_gpu_aql_publish_host_template(
     iree_hal_amd_gpu_aql_queue_t* queue,
     const iree_hal_amd_gpu_aql_command_program_t* program,
     iree_hal_amd_gpu_aql_program_block_t block, uint64_t packet_position,
-    const void* upload, uint64_t sample_address,
+    const void* upload, uint64_t completion_address, uint64_t sample_address,
     iree_hal_amd_gpu_aql_signal_t* samples) {
   const iree_hal_amd_gpu_aql_packet_t* packets = upload;
+  if (completion_address) {
+    amdf_status_t status = AMDF_STATUS_OK;
+    if (block.packet_count > 1) {
+      status = iree_hal_amd_gpu_aql_ring_write_packets(
+          &queue->producer.ring, &queue->storage, packet_position,
+          block.packet_count - 1, packets);
+    }
+    if (amdf_status_is_ok(status)) {
+      iree_hal_amd_gpu_aql_packet_t last = packets[block.packet_count - 1];
+      last.words[14] = (uint32_t)completion_address;
+      last.words[15] = (uint32_t)(completion_address >> 32);
+      status = iree_hal_amd_gpu_aql_write_packet(
+          &queue->producer.ring, &queue->storage,
+          packet_position + block.packet_count - 1, last);
+    }
+    return status;
+  }
   if (program->profile) {
     if (samples) {
       for (uint32_t i = 0; i < block.packet_count; ++i) {
@@ -899,7 +917,19 @@ iree_hal_amd_gpu_aql_publish_execute_prepared(
   const uint32_t prefix =
       host_template ? 0
                     : iree_hal_amd_gpu_aql_program_prefix_count(program_flags);
-  const uint32_t packet_count = waits + prefix + block.packet_count + 1;
+  const iree_hal_amd_gpu_aql_packet_t* host_packets =
+      host_template
+          ? (const void*)((const uint8_t*)(host_template + 1) + block.offset)
+          : NULL;
+  // An ordered final dispatch joins the complete pure block. Profiling owns
+  // dispatch completion operands independently and therefore keeps its join.
+  const bool dispatch_completion =
+      host_packets && !invocation->program->profile &&
+      block.packet_count == block.dispatches.count &&
+      (host_packets[block.packet_count - 1].words[0] &
+       IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED);
+  const uint32_t packet_count =
+      waits + prefix + block.packet_count + !dispatch_completion;
   iree_hal_amd_gpu_aql_ring_t* ring = &queue->producer.ring;
   if (ring->reserved - ring->consumed + packet_count > ring->capacity) {
     ring->consumed =
@@ -999,7 +1029,8 @@ iree_hal_amd_gpu_aql_publish_execute_prepared(
       if (block.packet_count == block.dispatches.count) {
         publication_status = iree_hal_amd_gpu_aql_publish_host_template(
             queue, invocation->program, block, packet_position, packets,
-            sample_address, samples);
+            dispatch_completion ? signal->device_address : 0, sample_address,
+            samples);
       } else {
         publication_status = iree_hal_amd_gpu_aql_program_emit_host(
             block.packet_count, packets, ring, &queue->storage, packet_position,
@@ -1015,8 +1046,10 @@ iree_hal_amd_gpu_aql_publish_execute_prepared(
   }
   packet_position += prefix + block.packet_count;
   const uint64_t signal_address = signal->device_address;
+  // A terminal dispatch may already have completed. Publishing the retirement
+  // count hands off capture ownership; no invocation or signal access follows.
   iree_hal_amd_gpu_aql_publish_retirement(queue, position);
-  if (amdf_status_is_ok(publication_status)) {
+  if (amdf_status_is_ok(publication_status) && !dispatch_completion) {
     publication_status = iree_hal_amd_gpu_aql_write_packet(
         ring, &queue->storage, packet_position,
         iree_hal_amd_gpu_aql_packet_barrier(
@@ -1024,7 +1057,6 @@ iree_hal_amd_gpu_aql_publish_execute_prepared(
                 IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED,
             0, NULL, signal_address));
   }
-  // No invocation access follows the terminal header: it may retire now.
   iree_hal_amd_gpu_aql_publish_notify(queue, publication_status,
                                       ring->reserved - 1);
   return terminal ? IREE_HAL_AMD_GPU_AQL_PUBLISH_DONE
