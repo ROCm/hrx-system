@@ -1222,6 +1222,66 @@ static iree_status_t loom_vector_static_shape_concat_rewrite(
   return iree_ok_status();
 }
 
+// Predicate concatenation can cross native comparison packets even when the
+// combined logical predicate has a carrier. Use byte lanes for the structural
+// join when the target has no direct predicate join. Signed extension preserves
+// normalized truth bits, and truncation restores the authored i1 values.
+// Wider predicates retain their packet partition: reconstructing them through
+// truncation would require splitting and rebuilding the same rejected join.
+static iree_status_t loom_vector_predicate_concat_rewrite(
+    loom_target_legalization_context_t* context, loom_op_t* op,
+    bool* out_rewritten) {
+  const loom_value_id_t result = loom_vector_concat_result(op);
+  const loom_type_t result_type =
+      loom_module_value_type(context->module, result);
+  if (loom_type_element_type(result_type) != LOOM_SCALAR_TYPE_I1 ||
+      !loom_target_legalization_has_source_vector_carrier(context, result_type,
+                                                          result)) {
+    return iree_ok_status();
+  }
+  loom_rewriter_t* rewriter = context->rewriter;
+  loom_builder_t* builder = &rewriter->builder;
+  const loom_value_slice_t inputs = loom_vector_concat_inputs(op);
+  loom_value_id_t* extended_inputs = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(context->arena, inputs.count,
+                                                 sizeof(*extended_inputs),
+                                                 (void**)&extended_inputs));
+  loom_builder_set_before(builder, op);
+  const loom_value_id_t checkpoint = loom_rewriter_value_checkpoint(rewriter);
+  for (iree_host_size_t i = 0; i < inputs.count; ++i) {
+    const loom_type_t input_type =
+        loom_module_value_type(context->module, inputs.values[i]);
+    loom_type_t byte_type = input_type;
+    byte_type.header = loom_type_make_header(
+        LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_I8, loom_type_rank(input_type),
+        loom_type_flags(input_type));
+    loom_op_t* extension = NULL;
+    IREE_RETURN_IF_ERROR(loom_vector_extsi_build(builder, inputs.values[i],
+                                                 input_type, byte_type,
+                                                 op->location, &extension));
+    extended_inputs[i] = loom_vector_extsi_result(extension);
+  }
+  loom_type_t byte_type = result_type;
+  byte_type.header = loom_type_make_header(
+      LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_I8, loom_type_rank(result_type),
+      loom_type_flags(result_type));
+  loom_op_t* concat = NULL;
+  IREE_RETURN_IF_ERROR(loom_vector_concat_build(
+      builder, loom_vector_concat_axis(op), extended_inputs, inputs.count,
+      byte_type, op->location, &concat));
+  loom_op_t* truncation = NULL;
+  IREE_RETURN_IF_ERROR(loom_vector_trunci_build(
+      builder, loom_vector_concat_result(concat), byte_type, result_type,
+      op->location, &truncation));
+  const loom_value_id_t replacement = loom_vector_trunci_result(truncation);
+  IREE_RETURN_IF_ERROR(loom_rewriter_preserve_result_names_on_new_values(
+      rewriter, op, &replacement, 1, checkpoint));
+  IREE_RETURN_IF_ERROR(
+      loom_rewriter_replace_all_uses_and_erase(rewriter, op, &replacement, 1));
+  *out_rewritten = true;
+  return iree_ok_status();
+}
+
 iree_status_t loom_vector_static_shape_rewrite_op(
     loom_target_legalization_context_t* context, loom_op_t* op,
     bool* out_rewritten) {
@@ -1234,9 +1294,14 @@ iree_status_t loom_vector_static_shape_rewrite_op(
     case LOOM_OP_VECTOR_BROADCAST:
       return loom_vector_static_shape_broadcast_rewrite(context, op,
                                                         out_rewritten);
-    case LOOM_OP_VECTOR_CONCAT:
-      return loom_vector_static_shape_concat_rewrite(context, op,
-                                                     out_rewritten);
+    case LOOM_OP_VECTOR_CONCAT: {
+      IREE_RETURN_IF_ERROR(
+          loom_vector_static_shape_concat_rewrite(context, op, out_rewritten));
+      if (*out_rewritten) {
+        return iree_ok_status();
+      }
+      return loom_vector_predicate_concat_rewrite(context, op, out_rewritten);
+    }
     case LOOM_OP_VECTOR_EXTRACT:
       return loom_vector_static_shape_extract_rewrite(context, op,
                                                       out_rewritten);

@@ -1,0 +1,39 @@
+// RUN: pass target=x86:avx2 target-legalize{mode=complete,policy=require-native},canonicalize,dce
+
+// Native comparisons can produce separate predicate packets whose combined
+// logical value also fits. The structural join uses normalized byte lanes.
+func.def @join_comparison_packets(%first: vector<8xi1>, %second: vector<8xi1>) -> (vector<16xi1>) {
+  %joined = vector.concat<0> %first, %second : vector<8xi1>, vector<8xi1> -> vector<16xi1>
+  func.return %joined : vector<16xi1>
+}
+
+// ----
+func.def @join_comparison_packets(%first: vector<8xi1>, %second: vector<8xi1>) -> (vector<16xi1>) {
+  %4 = vector.extsi %first : vector<8xi1> to vector<8xi8>
+  %5 = vector.extsi %second : vector<8xi1> to vector<8xi8>
+  %6 = vector.concat<0> %4, %5 : vector<8xi8>, vector<8xi8> -> vector<16xi8>
+  %joined = vector.trunci %6 : vector<16xi8> to vector<16xi1>
+  func.return %joined : vector<16xi1>
+}
+
+// ====
+
+// All variadic operands participate once, and their logical order survives
+// the canonical binary concat tree.
+func.def @join_four_packets(%a: vector<8xi1>, %b: vector<8xi1>, %c: vector<8xi1>, %d: vector<8xi1>) -> (vector<32xi1>) {
+  %joined = vector.concat<0> %a, %b, %c, %d : vector<8xi1>, vector<8xi1>, vector<8xi1>, vector<8xi1> -> vector<32xi1>
+  func.return %joined : vector<32xi1>
+}
+
+// ----
+func.def @join_four_packets(%a: vector<8xi1>, %b: vector<8xi1>, %c: vector<8xi1>, %d: vector<8xi1>) -> (vector<32xi1>) {
+  %6 = vector.extsi %a : vector<8xi1> to vector<8xi8>
+  %7 = vector.extsi %b : vector<8xi1> to vector<8xi8>
+  %8 = vector.extsi %c : vector<8xi1> to vector<8xi8>
+  %9 = vector.extsi %d : vector<8xi1> to vector<8xi8>
+  %12 = vector.concat<0> %6, %7 : vector<8xi8>, vector<8xi8> -> vector<16xi8>
+  %13 = vector.concat<0> %8, %9 : vector<8xi8>, vector<8xi8> -> vector<16xi8>
+  %14 = vector.concat<0> %12, %13 : vector<16xi8>, vector<16xi8> -> vector<32xi8>
+  %joined = vector.trunci %14 : vector<32xi8> to vector<32xi1>
+  func.return %joined : vector<32xi1>
+}

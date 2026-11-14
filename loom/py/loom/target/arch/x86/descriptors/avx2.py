@@ -479,6 +479,29 @@ _X86_AVX2_VECTOR_DESCRIPTORS = (
         for vector_bit_width, register_suffix in _VECTOR_REGISTER_SUFFIXES.items()
     ),
     *register_transfer_descriptors(evex=False),
+    *(
+        _vex_descriptor(
+            Descriptor(
+                key=f"x86.avx2.{instruction.descriptor_mnemonic}.gpr32.{suffix}",
+                mnemonic=instruction.descriptor_mnemonic,
+                semantic_tag=f"mask.compress.i{element_width}x{width // element_width}",
+                operands=(_gpr32_result(), _vector_operand(width, "source")),
+                asm_forms=_asm(
+                    mnemonic=f"{instruction.descriptor_mnemonic}.gpr32.{suffix}",
+                    results=("dst",),
+                    operands=("source",),
+                ),
+                schedule_class=_VECTOR_INTEGER_SCHEDULE_CLASSES[width],
+                flags=(DescriptorFlag.DEAD_REMOVABLE,),
+            ),
+            instruction,
+        )
+        for instruction, element_width, width, suffix in (
+            (native.VPMOVMSKB, 8, 128, "xmm"),
+            (native.VPMOVMSKB, 8, 256, "ymm"),
+            (native.VMOVMSKPS, 32, 256, "ymm"),
+        )
+    ),
     _vex_descriptor(
         Descriptor(
             key="x86.avx2.vblendvpd.xmm",
