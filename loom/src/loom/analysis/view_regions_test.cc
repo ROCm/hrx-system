@@ -273,12 +273,12 @@ class ViewRegionsTest : public ::testing::Test {
     return value;
   }
 
-  bool RootIsStable(loom_view_region_table_t* table, loom_value_id_t view) {
+  bool AccessIsStable(loom_view_region_table_t* table, loom_value_id_t view) {
     const loom_view_region_t* region = nullptr;
     IREE_CHECK_OK(loom_view_region_table_get(table, view, &region));
-    return loom_view_region_table_root_is_stable(table, region->root_value_id,
-                                                 region->alias_scope_id,
-                                                 region->memory_space);
+    return loom_view_region_table_access_is_stable(
+        table, region->root_value_id, region->alias_scope_id,
+        region->restrict_access, region->memory_space);
   }
 
   loom_type_t VectorType1D(int64_t extent) {
@@ -555,7 +555,7 @@ TEST_F(ViewRegionsTest, ProvesDisjointReadAndWriteViewsInOneSlab) {
   EXPECT_EQ(write_region->access_flags, LOOM_VIEW_ACCESS_WRITE);
   EXPECT_EQ(loom_view_region_table_root_access_flags(&table, buffer),
             LOOM_VIEW_ACCESS_READ | LOOM_VIEW_ACCESS_WRITE);
-  EXPECT_FALSE(RootIsStable(&table, loom_buffer_view_result(read_view_op)));
+  EXPECT_FALSE(AccessIsStable(&table, loom_buffer_view_result(read_view_op)));
 }
 
 TEST_F(ViewRegionsTest, UnknownEffectsPreventStorageStability) {
@@ -572,7 +572,7 @@ TEST_F(ViewRegionsTest, UnknownEffectsPreventStorageStability) {
   Analyze(&facts, &table);
   EXPECT_EQ(loom_view_region_table_root_access_flags(&table, buffer),
             LOOM_VIEW_ACCESS_READ);
-  EXPECT_FALSE(RootIsStable(&table, view));
+  EXPECT_FALSE(AccessIsStable(&table, view));
   EXPECT_TRUE(loom_view_region_table_reads_entry_contents(&table, before));
   EXPECT_FALSE(loom_view_region_table_reads_entry_contents(&table, after));
 }
@@ -706,7 +706,7 @@ TEST_P(GlobalStorageStabilityTest, LoadsDoNotInvalidateOtherStorage) {
   ComputeFacts(&facts);
   loom_view_region_table_t table = {};
   Analyze(&facts, &table);
-  EXPECT_EQ(RootIsStable(&table, view),
+  EXPECT_EQ(AccessIsStable(&table, view),
             GetParam() != GlobalStorageEffect::kVariableWrite);
 }
 
@@ -774,7 +774,8 @@ TEST_P(CallableStorageStabilityTest, RetainsReadsWithoutInventingWrites) {
   ComputeFacts(&facts);
   loom_view_region_table_t table = {};
   Analyze(&facts, &table);
-  EXPECT_EQ(RootIsStable(&table, view), effect == CallableStorageEffect::kRead);
+  EXPECT_EQ(AccessIsStable(&table, view),
+            effect == CallableStorageEffect::kRead);
   if (effect == CallableStorageEffect::kRead) {
     EXPECT_EQ(loom_view_region_table_root_access_flags(&table, buffer),
               LOOM_VIEW_ACCESS_READ);
@@ -804,7 +805,7 @@ TEST_F(ViewRegionsTest, UnmodeledFencePreventsStorageStability) {
   Analyze(&facts, &table);
   EXPECT_EQ(loom_view_region_table_root_access_flags(&table, buffer),
             LOOM_VIEW_ACCESS_READ);
-  EXPECT_FALSE(RootIsStable(&table, view));
+  EXPECT_FALSE(AccessIsStable(&table, view));
 }
 
 TEST_F(ViewRegionsTest, ChannelCapabilityAccessesRetainBackingRoot) {
@@ -858,10 +859,10 @@ TEST_F(ViewRegionsTest, ChannelCapabilityAccessesRetainBackingRoot) {
   EXPECT_EQ(loom_view_region_table_root_access_flags(
                 &table, loom_channel_accept_read(accept)),
             0);
-  EXPECT_FALSE(RootIsStable(&table, loom_buffer_view_result(storage)));
+  EXPECT_FALSE(AccessIsStable(&table, loom_buffer_view_result(storage)));
   // A standalone region cannot account for the other channel participant's
   // external writes. A disjoint payload allocation does not close that scope.
-  EXPECT_FALSE(RootIsStable(&table, external));
+  EXPECT_FALSE(AccessIsStable(&table, external));
 }
 
 TEST_F(ViewRegionsTest, RawByteWriteSharesTypedViewRoot) {
@@ -880,7 +881,7 @@ TEST_F(ViewRegionsTest, RawByteWriteSharesTypedViewRoot) {
   Analyze(&facts, &table);
   EXPECT_EQ(loom_view_region_table_root_access_flags(&table, buffer),
             LOOM_VIEW_ACCESS_READ | LOOM_VIEW_ACCESS_WRITE);
-  EXPECT_FALSE(RootIsStable(&table, view));
+  EXPECT_FALSE(AccessIsStable(&table, view));
 }
 
 TEST_F(ViewRegionsTest, ReadOnlyStorageRequiresAliasOrConstantProof) {
@@ -900,10 +901,13 @@ TEST_F(ViewRegionsTest, ReadOnlyStorageRequiresAliasOrConstantProof) {
   ComputeFacts(&facts);
   loom_view_region_table_t table = {};
   Analyze(&facts, &table);
-  EXPECT_TRUE(RootIsStable(&table, unique));
-  EXPECT_FALSE(RootIsStable(&table, unmarked));
-  EXPECT_TRUE(RootIsStable(&table, immutable));
-  EXPECT_FALSE(RootIsStable(&table, unread));
+  EXPECT_FALSE(
+      iree_any_bit_set(table.flags, LOOM_VIEW_REGION_TABLE_RESTRICT_ACCESS));
+  EXPECT_EQ(table.restrict_writes, nullptr);
+  EXPECT_TRUE(AccessIsStable(&table, unique));
+  EXPECT_FALSE(AccessIsStable(&table, unmarked));
+  EXPECT_TRUE(AccessIsStable(&table, immutable));
+  EXPECT_FALSE(AccessIsStable(&table, unread));
 }
 
 TEST_F(ViewRegionsTest, SchedulesPreserveTheirChildMemoryEffects) {
@@ -952,8 +956,8 @@ TEST_F(ViewRegionsTest, SchedulesPreserveTheirChildMemoryEffects) {
   ComputeFacts(&facts);
   loom_view_region_table_t table = {};
   Analyze(&facts, &table);
-  EXPECT_TRUE(RootIsStable(&table, input));
-  EXPECT_FALSE(RootIsStable(&table, observed_samples));
+  EXPECT_TRUE(AccessIsStable(&table, input));
+  EXPECT_FALSE(AccessIsStable(&table, observed_samples));
 }
 
 class AtomicStorageStabilityTest
@@ -1001,11 +1005,11 @@ TEST_P(AtomicStorageStabilityTest, AcquisitionInterferesWithSharedStorage) {
   ComputeFacts(&facts);
   loom_view_region_table_t table = {};
   Analyze(&facts, &table);
-  EXPECT_EQ(RootIsStable(&table, global), shared_stable);
-  EXPECT_EQ(RootIsStable(&table, workgroup), shared_stable);
-  EXPECT_TRUE(RootIsStable(&table, private_view));
-  EXPECT_TRUE(RootIsStable(&table, constant));
-  EXPECT_EQ(RootIsStable(&table, token),
+  EXPECT_EQ(AccessIsStable(&table, global), shared_stable);
+  EXPECT_EQ(AccessIsStable(&table, workgroup), shared_stable);
+  EXPECT_TRUE(AccessIsStable(&table, private_view));
+  EXPECT_TRUE(AccessIsStable(&table, constant));
+  EXPECT_EQ(AccessIsStable(&table, token),
             kind == LOOM_OP_VIEW_ATOMIC_LOAD && shared_stable);
 }
 
@@ -1066,7 +1070,7 @@ TEST_P(CompareExchangeStorageStabilityTest, AcquiringOrderingsInterfere) {
   ComputeFacts(&facts);
   loom_view_region_table_t table = {};
   Analyze(&facts, &table);
-  EXPECT_EQ(RootIsStable(&table, payload), stable);
+  EXPECT_EQ(AccessIsStable(&table, payload), stable);
 }
 
 INSTANTIATE_TEST_SUITE_P(
@@ -1106,8 +1110,8 @@ TEST_P(ThreadFenceStorageStabilityTest, OnlyAcquisitionImportsSharedWrites) {
   ComputeFacts(&facts);
   loom_view_region_table_t table = {};
   Analyze(&facts, &table);
-  EXPECT_EQ(RootIsStable(&table, global), shared_stable);
-  EXPECT_TRUE(RootIsStable(&table, private_view));
+  EXPECT_EQ(AccessIsStable(&table, global), shared_stable);
+  EXPECT_TRUE(AccessIsStable(&table, private_view));
   EXPECT_TRUE(loom_view_region_table_reads_entry_contents(&table, before));
   EXPECT_EQ(loom_view_region_table_reads_entry_contents(&table, after),
             shared_stable);
@@ -1140,8 +1144,8 @@ TEST_P(FenceStorageStabilityTest, InterferenceRespectsOrderingAndMemorySpace) {
   ComputeFacts(&facts);
   loom_view_region_table_t table = {};
   Analyze(&facts, &table);
-  EXPECT_EQ(RootIsStable(&table, global), global_stable);
-  EXPECT_EQ(RootIsStable(&table, workgroup), workgroup_stable);
+  EXPECT_EQ(AccessIsStable(&table, global), global_stable);
+  EXPECT_EQ(AccessIsStable(&table, workgroup), workgroup_stable);
 }
 
 INSTANTIATE_TEST_SUITE_P(
@@ -1175,7 +1179,7 @@ TEST_F(ViewRegionsTest, SubviewWriteSharesStorageRoot) {
   Analyze(&facts, &table);
   EXPECT_EQ(loom_view_region_table_root_access_flags(&table, buffer),
             LOOM_VIEW_ACCESS_READ | LOOM_VIEW_ACCESS_WRITE);
-  EXPECT_FALSE(RootIsStable(&table, view));
+  EXPECT_FALSE(AccessIsStable(&table, view));
 }
 
 TEST_F(ViewRegionsTest, WriteWithoutComparableAliasPreventsStorageStability) {
@@ -1193,7 +1197,7 @@ TEST_F(ViewRegionsTest, WriteWithoutComparableAliasPreventsStorageStability) {
   Analyze(&facts, &table);
   EXPECT_EQ(loom_view_region_table_root_access_flags(&table, buffer),
             LOOM_VIEW_ACCESS_READ);
-  EXPECT_FALSE(RootIsStable(&table, view));
+  EXPECT_FALSE(AccessIsStable(&table, view));
 }
 
 TEST_F(ViewRegionsTest, PrecomputesReusedMemoryIndexExpression) {
@@ -1586,6 +1590,81 @@ TEST_F(ViewRegionsTest, RestrictProvesAccessConflictsNotPhysicalDisjointness) {
       &table, regions[2], LOOM_VIEW_ACCESS_READ, regions[3],
       LOOM_VIEW_ACCESS_READ, &result));
   EXPECT_TRUE(result);
+}
+
+TEST_F(ViewRegionsTest, RestrictPathsStabilizeReadsAgainstOtherPathWrites) {
+  const loom_value_id_t buffers[] = {DefineBufferArg(), DefineBufferArg(),
+                                     DefineBufferArg()};
+  const loom_type_t types[] = {loom_type_buffer(), loom_type_buffer(),
+                               loom_type_buffer()};
+  loom_op_t* begin = nullptr;
+  IREE_ASSERT_OK(loom_buffer_restrict_begin_build(
+      &builder_, buffers, 2, buffers + 2, 1, types, IREE_ARRAYSIZE(types),
+      LOOM_LOCATION_UNKNOWN, &begin));
+  const loom_value_slice_t scoped = loom_buffer_restrict_begin_results(begin);
+  ASSERT_EQ(scoped.count, IREE_ARRAYSIZE(buffers));
+
+  const loom_value_id_t input = BuildView(scoped.values[0]);
+  const loom_value_id_t output = BuildView(scoped.values[1]);
+  const loom_value_id_t peer = BuildView(scoped.values[2]);
+  const loom_value_id_t unenrolled_noalias =
+      BuildReadOnlyView(BuildNoAliasBuffer(DefineBufferArg()));
+  loom_op_t* input_load = BuildVectorLoad(input);
+  BuildVectorLoad(peer);
+  const int64_t indices[] = {0};
+  loom_op_t* output_store = nullptr;
+  IREE_ASSERT_OK(loom_vector_store_build(
+      &builder_, 0, 0, loom_vector_load_result(input_load), output, nullptr, 0,
+      indices, IREE_ARRAYSIZE(indices), 0, 0, LOOM_LOCATION_UNKNOWN,
+      &output_store));
+  loom_op_t* peer_store = nullptr;
+  IREE_ASSERT_OK(loom_vector_store_build(
+      &builder_, 0, 0, loom_vector_load_result(input_load), peer, nullptr, 0,
+      indices, IREE_ARRAYSIZE(indices), 0, 0, LOOM_LOCATION_UNKNOWN,
+      &peer_store));
+
+  loom_value_fact_table_t facts = {};
+  ComputeFacts(&facts);
+  loom_view_region_table_t table = {};
+  Analyze(&facts, &table);
+  EXPECT_TRUE(
+      iree_any_bit_set(table.flags, LOOM_VIEW_REGION_TABLE_RESTRICT_ACCESS));
+  EXPECT_NE(table.restrict_writes, nullptr);
+  EXPECT_TRUE(AccessIsStable(&table, input));
+  EXPECT_FALSE(AccessIsStable(&table, peer));
+  EXPECT_FALSE(AccessIsStable(&table, output));
+  EXPECT_FALSE(AccessIsStable(&table, unenrolled_noalias));
+}
+
+TEST_F(ViewRegionsTest, RestrictStabilityRejectsUnenrolledWrites) {
+  const loom_value_id_t buffers[] = {DefineBufferArg(), DefineBufferArg()};
+  const loom_type_t types[] = {loom_type_buffer(), loom_type_buffer()};
+  loom_op_t* begin = nullptr;
+  IREE_ASSERT_OK(loom_buffer_restrict_begin_build(
+      &builder_, buffers, IREE_ARRAYSIZE(buffers), nullptr, 0, types,
+      IREE_ARRAYSIZE(types), LOOM_LOCATION_UNKNOWN, &begin));
+  const loom_value_slice_t scoped = loom_buffer_restrict_begin_results(begin);
+  ASSERT_EQ(scoped.count, IREE_ARRAYSIZE(buffers));
+
+  const loom_value_id_t input = BuildView(scoped.values[0]);
+  const loom_value_id_t output = BuildView(scoped.values[1]);
+  const loom_value_id_t external = BuildView(DefineBufferArg());
+  loom_op_t* input_load = BuildVectorLoad(input);
+  const int64_t indices[] = {0};
+  for (loom_value_id_t destination : {output, external}) {
+    loom_op_t* store = nullptr;
+    IREE_ASSERT_OK(loom_vector_store_build(
+        &builder_, 0, 0, loom_vector_load_result(input_load), destination,
+        nullptr, 0, indices, IREE_ARRAYSIZE(indices), 0, 0,
+        LOOM_LOCATION_UNKNOWN, &store));
+  }
+
+  loom_value_fact_table_t facts = {};
+  ComputeFacts(&facts);
+  loom_view_region_table_t table = {};
+  Analyze(&facts, &table);
+  EXPECT_NE(table.restrict_writes, nullptr);
+  EXPECT_FALSE(AccessIsStable(&table, input));
 }
 
 TEST_F(ViewRegionsTest, ProvesDistinctComparableRootsDisjoint) {

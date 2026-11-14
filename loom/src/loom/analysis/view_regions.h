@@ -176,6 +176,30 @@ typedef struct loom_view_region_t {
   loom_view_region_precision_flags_t precision_flags;
 } loom_view_region_t;
 
+// Write paths grouped by one active source restrict association. Allocated
+// only when analyzed writes carry restrict facts; ordinary functions pay no
+// per-value storage cost.
+typedef struct loom_view_restrict_write_summary_t {
+  // Overlapping memory spaces written through each nonzero restricted scope,
+  // indexed by the scope result's local value ordinal.
+  uint8_t* spaces_by_scope_ordinal;
+
+  // Overlapping memory spaces written through unqualified peers, indexed by
+  // the restrict domain result's local value ordinal.
+  uint8_t* unscoped_spaces_by_domain_ordinal;
+
+  // Sole restrict domain containing every described write that may alias each
+  // memory space. Zero means no described write; UINT32_MAX means mixed or
+  // unscoped writes outside any restrict domain.
+  uint32_t domain_ids_by_memory_space[LOOM_VALUE_FACT_MEMORY_SPACE_COUNT_];
+} loom_view_restrict_write_summary_t;
+
+enum loom_view_region_table_flag_bits_e {
+  // At least one analyzed reference carries a source restrict domain.
+  LOOM_VIEW_REGION_TABLE_RESTRICT_ACCESS = 1u << 0,
+};
+typedef uint8_t loom_view_region_table_flags_t;
+
 // Dense analysis table for one function-local value domain.
 typedef struct loom_view_region_table_t {
   // Borrowed symbolic expression context shared by all region construction.
@@ -206,8 +230,13 @@ typedef struct loom_view_region_table_t {
   } memory_space_refinements;
 
   // Memory spaces that may change through external acquisition, unknown
-  // effects, or writes without comparable storage identities.
+  // effects, or operations without described storage identities.
   uint32_t interference_memory_spaces;
+
+  // Memory spaces written through roots without comparable physical alias
+  // scopes. Restrict stability accounts for these writes by access domain;
+  // physical noalias and entry-content queries remain conservative.
+  uint32_t incomparable_write_memory_spaces;
 
   // Memory spaces potentially changed through channel or async-group progress.
   // Ordinary stability queries include this mask. A closed execution may
@@ -217,6 +246,18 @@ typedef struct loom_view_region_table_t {
   // Memory spaces written through scoped roots that can vary across executions.
   // Such writes may interfere with other varying roots despite local noalias.
   uint32_t varying_root_write_memory_spaces;
+
+  // Memory spaces touched by described writes, retained so a lazily created
+  // restrict summary conservatively accounts for earlier unscoped writes.
+  uint32_t described_write_memory_spaces;
+
+  // Retained-fact classifications controlling optional analysis work.
+  loom_view_region_table_flags_t flags;
+
+  // Restrict-domain write summary, or NULL when no described restricted write
+  // occurred. Its ordinal arrays are allocated together from the analysis
+  // arena.
+  loom_view_restrict_write_summary_t* restrict_writes;
 
   // Compact region storage indexed by region ID.
   loom_view_region_t* regions;
@@ -287,14 +328,16 @@ loom_view_root_use_flags_t loom_view_region_table_root_use_flags(
 // may import another participant's writes, and unknown effects or incomparable
 // written roots may alias it. Constant storage is immutable by contract.
 // Scoped noalias separates repeated accesses only when at least one root keeps
-// the same storage across executions. The analysis retains this correspondence
-// alongside the aggregate accesses; the query uses constant-time indexed facts.
-// |alias_scope_id| and |memory_space| are retained facts for the queried
-// access. Requires analyze to have completed; this query performs no IR
-// traversal.
-bool loom_view_region_table_root_is_stable(
+// the same storage across executions. Source restrict instead separates writes
+// by access path within one retained domain. The analysis retains both forms
+// alongside aggregate accesses; the query uses constant-time indexed facts.
+// |alias_scope_id|, |restrict_access|, and |memory_space| are retained facts
+// for the queried access. Requires analyze to have completed; this query
+// performs no IR traversal.
+bool loom_view_region_table_access_is_stable(
     const loom_view_region_table_t* table, loom_value_id_t root_value_id,
     loom_value_fact_alias_scope_id_t alias_scope_id,
+    loom_value_fact_restrict_access_t restrict_access,
     loom_value_fact_memory_space_t memory_space);
 
 // Proves that an ordinary load observes contents unchanged since the analyzed
