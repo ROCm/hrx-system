@@ -1096,7 +1096,6 @@ jobs:
             "${common_flags[@]}" \
             --remote_upload_local_results=true \
             --profile="$evidence_dir/producer.profile.gz" \
-            --execution_log_json_file="$evidence_dir/producer-execution.json" \
             "$target"
 
           bazel "--output_base=$IREE_CACHE_HANDOFF_OUTPUT_BASE" cquery \
