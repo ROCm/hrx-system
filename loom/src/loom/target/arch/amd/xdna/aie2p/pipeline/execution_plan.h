@@ -22,6 +22,8 @@ typedef struct loom_aie2p_native_control_source_t {
   // Sole owned endpoint, or UINT32_MAX for multiple/external destinations
   // or any route borrowing payload lanes.
   uint32_t destination;
+  // Packet identities already emitted by this physical sender.
+  uint32_t packet_mask;
 } loom_aie2p_native_control_source_t;
 
 // One physical route edge carrying the packet identity used during admission.
@@ -162,10 +164,11 @@ extern const loom_pipeline_entry_scope_type_t loom_aie2p_execution_plan_type;
 // Copies the physical portion of a completed selection into the caller's scope.
 // The source may borrow the producer's transient arrays. The target retains no
 // such references, and its already initialized common lifetime prefix remains
-// unchanged. Route capacity is compacted to the selected inventory; extending
-// routes later uses route_builder_clone with explicit additional capacity.
+// unchanged. Extra connection capacity reserves one receiver and a complete
+// physical route per added delivery, without recopying the selected inventory.
 iree_status_t loom_aie2p_execution_plan_copy_resources(
-    const loom_aie2p_execution_plan_t* source, iree_arena_allocator_t* arena,
+    const loom_aie2p_execution_plan_t* source,
+    iree_host_size_t added_connection_capacity, iree_arena_allocator_t* arena,
     loom_aie2p_execution_plan_t* target);
 
 #ifdef __cplusplus

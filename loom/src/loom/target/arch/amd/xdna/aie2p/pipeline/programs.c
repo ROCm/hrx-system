@@ -146,7 +146,7 @@ static iree_status_t loom_aie2p_native_retain_plan(
       .connections = context->connections,
   };
   IREE_RETURN_IF_ERROR(
-      loom_aie2p_execution_plan_copy_resources(&selected, arena, plan));
+      loom_aie2p_execution_plan_copy_resources(&selected, 0, arena, plan));
   context->plan = plan;
   return iree_ok_status();
 }

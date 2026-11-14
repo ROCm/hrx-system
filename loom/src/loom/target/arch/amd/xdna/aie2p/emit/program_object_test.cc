@@ -299,6 +299,77 @@ TEST(Aie2pProgramObjectTest, PreservesFirstIdentityAcrossInterleavedBodies) {
   iree_arena_block_pool_deinitialize(&block_pool);
 }
 
+TEST(Aie2pProgramObjectTest, SharesAndPacksWithinIndependentCodeGroups) {
+  const std::array<uint8_t, 14> code = {};
+  const iree_host_size_t lengths[] = {6, 2, 10, 10, 10, 14, 2};
+  const iree_host_size_t function_groups[] = {0, 0, 1, 1, 2, 1, 2};
+  const iree_string_view_t names[] = {
+      IREE_SV("entry"),  IREE_SV("shared"), IREE_SV("first"), IREE_SV("alias"),
+      IREE_SV("second"), IREE_SV("other"),  IREE_SV("local"),
+  };
+  loom_native_section_contribution_t sections[IREE_ARRAYSIZE(lengths)];
+  loom_native_object_symbol_t symbols[IREE_ARRAYSIZE(lengths)];
+  loom_aie2p_leaf_contribution_t contributions[IREE_ARRAYSIZE(lengths)];
+  const loom_native_object_fixup_t self = {
+      .section_contribution_index = 0,
+      .relocation_kind = LOOM_AIE2P_NATIVE_RELOCATION_KIND_CORE_BRANCH_ABSOLUTE,
+      .target_symbol_index = 0,
+  };
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(lengths); ++i) {
+    contributions[i] = MakeHelper(names[i], code.data(), lengths[i],
+                                  &sections[i], &symbols[i]);
+    contributions[i].object.fixups = &self;
+    contributions[i].object.fixup_count = 1;
+  }
+  iree_arena_block_pool_t pool;
+  iree_arena_block_pool_initialize(4096, iree_allocator_system(), &pool);
+  iree_arena_allocator_t arena;
+  iree_arena_initialize(&pool, &arena);
+  loom_aie2p_program_object_t program;
+  loom_aie2p_program_code_group_t groups[3];
+  IREE_ASSERT_OK(loom_aie2p_program_object_partition(
+      ContributionPointers(contributions, IREE_ARRAYSIZE(contributions)).data(),
+      IREE_ARRAYSIZE(contributions), nullptr, 0, function_groups,
+      IREE_ARRAYSIZE(groups), &arena, &arena, &program, groups));
+  const iree_host_size_t canonical[] = {0, 1, 2, 2, 4, 5, 6};
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(canonical); ++i) {
+    EXPECT_EQ(program.functions[i].canonical_index, canonical[i]);
+  }
+  EXPECT_EQ(program.contribution.object.section_count, 6u);
+  EXPECT_EQ(program.contribution.object.fixup_count, 6u);
+  EXPECT_EQ(program.contribution.realization.code.byte_length, 62u);
+  loom_native_section_contribution_assembly_t assembly;
+  IREE_ASSERT_OK(loom_native_assemble_section_contributions(
+      program.contribution.object.sections,
+      program.contribution.object.section_count, &arena, &assembly));
+  ASSERT_EQ(assembly.section_count, 3u);
+  const uint64_t group_lengths[] = {18, 26, 18};
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(groups); ++i) {
+    const auto section =
+        assembly.contribution_layouts[groups[i].section_contribution_index]
+            .section_index;
+    EXPECT_EQ(groups[i].code.byte_length, group_lengths[i]);
+    EXPECT_EQ(groups[i].code.minimum_alignment, 16u);
+    EXPECT_EQ(assembly.sections[section].contents.data_length,
+              group_lengths[i]);
+  }
+  // Both copies of equal code keep their own local relocation. The alias in
+  // group one shares its owner's body, while group two is independently placed.
+  const auto& object = program.contribution.object;
+  for (iree_host_size_t i = 0; i < object.fixup_count; ++i) {
+    const auto& fixup = object.fixups[i];
+    EXPECT_EQ(
+        fixup.section_contribution_index,
+        object.symbols[fixup.target_symbol_index].section_contribution_index);
+  }
+  EXPECT_EQ(object.symbols[2].section_contribution_index,
+            object.symbols[3].section_contribution_index);
+  EXPECT_NE(object.symbols[2].section_contribution_index,
+            object.symbols[4].section_contribution_index);
+  iree_arena_deinitialize(&arena);
+  iree_arena_block_pool_deinitialize(&pool);
+}
+
 TEST(Aie2pProgramObjectTest, BindsNestedCallsBeforeAndAfterBodySharing) {
   // Equal phase instructions call different math entries. The phases must
   // remain distinct even though the two math entries share their native body.

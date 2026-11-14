@@ -6,7 +6,7 @@
 
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/worker.h"
 
-#include "iree/base/internal/math.h"
+#include "loom/target/arch/amd/xdna/aie2p/pipeline/control_packet.h"
 
 iree_status_t loom_aie2p_worker_builder_initialize(
     loom_module_t* module, iree_arena_allocator_t* arena,
@@ -188,16 +188,12 @@ iree_status_t loom_aie2p_worker_lock(loom_aie2p_worker_builder_t* context,
                               NULL);
 }
 
-static uint32_t loom_aie2p_worker_odd_parity(uint32_t word) {
-  return word | ((iree_math_count_ones_u32(word) & 1u) ^ 1u) << 31;
-}
-
 iree_status_t loom_aie2p_worker_packet_write(
     loom_aie2p_worker_builder_t* context, loom_builder_t* builder,
     uint8_t packet_id, const loom_value_id_t* words, iree_host_size_t count) {
   loom_value_id_t header;
   IREE_RETURN_IF_ERROR(loom_aie2p_worker_constant(
-      context, builder, (int32_t)loom_aie2p_worker_odd_parity(packet_id),
+      context, builder, (int32_t)loom_aie2p_control_packet_parity(packet_id),
       &header));
   IREE_RETURN_IF_ERROR(loom_aie2p_worker_op(
       context, builder, AIE2P_CORE_DESCRIPTOR_REF_STREAM_WRITE_I32, &header, 1,
@@ -238,7 +234,7 @@ iree_status_t loom_aie2p_worker_control_write(
     iree_host_size_t count) {
   loom_value_id_t route, command;
   IREE_RETURN_IF_ERROR(loom_aie2p_worker_constant(
-      context, builder, (int32_t)loom_aie2p_worker_odd_parity(packet_id),
+      context, builder, (int32_t)loom_aie2p_control_packet_parity(packet_id),
       &route));
   IREE_RETURN_IF_ERROR(loom_aie2p_worker_constant(
       context, builder,
@@ -250,8 +246,7 @@ iree_status_t loom_aie2p_worker_control_write(
 
 uint32_t loom_aie2p_worker_control_write_command(uint32_t register_offset,
                                                  iree_host_size_t count) {
-  return loom_aie2p_worker_odd_parity(register_offset |
-                                      ((uint32_t)(count - 1) << 20));
+  return loom_aie2p_control_packet_write(register_offset, count);
 }
 
 iree_status_t loom_aie2p_worker_control_write_encoded(
@@ -260,7 +255,7 @@ iree_status_t loom_aie2p_worker_control_write_encoded(
     iree_host_size_t count) {
   loom_value_id_t route;
   IREE_RETURN_IF_ERROR(loom_aie2p_worker_constant(
-      context, builder, (int32_t)loom_aie2p_worker_odd_parity(packet_id),
+      context, builder, (int32_t)loom_aie2p_control_packet_parity(packet_id),
       &route));
   return loom_aie2p_worker_control_write_packet(context, builder, route,
                                                 command, words, count);
@@ -272,13 +267,11 @@ iree_status_t loom_aie2p_worker_control_read(
     iree_host_size_t count, loom_value_id_t* out_values) {
   loom_value_id_t route, command;
   IREE_RETURN_IF_ERROR(loom_aie2p_worker_constant(
-      context, builder, (int32_t)loom_aie2p_worker_odd_parity(packet_id),
+      context, builder, (int32_t)loom_aie2p_control_packet_parity(packet_id),
       &route));
   IREE_RETURN_IF_ERROR(loom_aie2p_worker_constant(
       context, builder,
-      (int32_t)loom_aie2p_worker_odd_parity(
-          register_offset | (uint32_t)(count - 1) << 20 | UINT32_C(1) << 22 |
-          (uint32_t)reply_id << 24),
+      (int32_t)loom_aie2p_control_packet_read(register_offset, count, reply_id),
       &command));
   IREE_RETURN_IF_ERROR(loom_aie2p_worker_op(
       context, builder, AIE2P_CORE_DESCRIPTOR_REF_STREAM_WRITE_I32, &route, 1,

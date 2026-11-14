@@ -347,13 +347,14 @@ class Aie2pProgramCompileTest : public ::testing::Test {
             requirements.direct_callees.values[i].symbol;
       }
       loom_aie2p_program_object_t program = {};
-      status = loom_aie2p_program_compile(
-          compiler, entry, requirements.return_count != 0,
-          loom_aie2p_program_helper_list_t{
-              .values = direct_helpers.data(),
-              .count = direct_helpers.size(),
-          },
-          &requirements.read_only_data, options, out_compiled, &program);
+      status = loom_aie2p_program_compile(compiler, entry,
+                                          requirements.return_count != 0,
+                                          loom_aie2p_program_helper_list_t{
+                                              .values = direct_helpers.data(),
+                                              .count = direct_helpers.size(),
+                                          },
+                                          &requirements.read_only_data, options,
+                                          nullptr, out_compiled, &program);
       *out_contribution = program.contribution;
     }
     iree_arena_deinitialize(&requirements_arena);

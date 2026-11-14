@@ -11,6 +11,7 @@
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/pass/types.h"
+#include "loom/target/arch/amd/xdna/aie2p/pipeline/code_transport.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/connectivity.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/native.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/payload.h"
@@ -120,6 +121,8 @@ TEST_F(ExecutionPlanTest, SourceRetirementPreservesRoutesAndPhysicalOwnership) {
   IREE_ASSERT_OK(loom_pipeline_entry_scope_create(
       &loom_aie2p_execution_plan_type, &lifetimes, 1, &source_arena_, &scope));
   std::vector<loom_aie2p_execution_tile_t> occupancy(tile_count);
+  occupancy[1] = {
+      .memory_length = 128, .descriptor_counts = {1, 0}, .mm2s_count = 1};
   occupancy[2] = {.memory_length = 2560,
                   .lock_count = 3,
                   .descriptor_counts = {2, 0},
@@ -136,7 +139,7 @@ TEST_F(ExecutionPlanTest, SourceRetirementPreservesRoutesAndPhysicalOwnership) {
   };
   auto* original = reinterpret_cast<loom_aie2p_execution_plan_t*>(scope);
   IREE_ASSERT_OK(loom_aie2p_execution_plan_copy_resources(
-      &selected, &source_arena_, original));
+      &selected, 0, &source_arena_, original));
   const loom_pipeline_entry_scope_t* cloned = nullptr;
   IREE_ASSERT_OK(
       loom_pipeline_entry_scope_clone(scope, &retained_arena_, &cloned));
@@ -163,6 +166,7 @@ TEST_F(ExecutionPlanTest, SourceRetirementPreservesRoutesAndPhysicalOwnership) {
   EXPECT_EQ(retained->tiles[2].mm2s_count, 1u);
   EXPECT_EQ(retained->tiles[2].s2mm_count, 1u);
   EXPECT_EQ(retained->control_sources[4].destination, 3u);
+  EXPECT_EQ(retained->control_sources[4].packet_mask, 1u << connection.packet);
   EXPECT_EQ(retained->control_destination_sources[3], 4u);
   for (size_t i = 0; i < retained->routing.route_count; ++i) {
     EXPECT_EQ(retained->routes[i].edge, &retained->routing.routes[i]);
@@ -181,6 +185,31 @@ TEST_F(ExecutionPlanTest, SourceRetirementPreservesRoutesAndPhysicalOwnership) {
   IREE_ASSERT_OK(loom_aie2p_native_connections_verify(
       &retained->routing, retained->switches, &retained->connections,
       &retained_arena_));
+
+  // Late code delivery consumes the retained physical ownership after source
+  // retirement. Payload multicast and the original control delivery survive.
+  loom_aie2p_code_transport_t code_transport;
+  IREE_ASSERT_OK(loom_aie2p_code_transport_initialize(
+      retained, 1, &retained_arena_, &code_transport));
+  loom_aie2p_code_transport_binding_t binding;
+  loom_aie2p_code_transport_bind(&code_transport, {0, 2}, 2, &binding,
+                                 &requirement);
+  ASSERT_TRUE(iree_string_view_is_empty(requirement));
+  EXPECT_EQ(binding.engine, 1u);
+  EXPECT_EQ(binding.first_descriptor, 24u);
+  EXPECT_EQ(binding.descriptor_count, 2u);
+  EXPECT_EQ(binding.queue_packet, 0u);
+  EXPECT_EQ(binding.reply_packet, 0u);
+  EXPECT_EQ(code_transport.plan.tiles[1].memory_length, 128u);
+  EXPECT_EQ(code_transport.plan.tiles[1].mm2s_count, 2u);
+  EXPECT_EQ(code_transport.plan.tiles[1].descriptor_counts[1], 2u);
+  EXPECT_EQ(code_transport.plan.connections.group_count, 5u);
+  EXPECT_EQ(code_transport.plan.connections.destination_count, 6u);
+  IREE_ASSERT_OK(loom_aie2p_code_transport_finish(
+      &code_transport, &retained_arena_, &requirement));
+  ASSERT_TRUE(iree_string_view_is_empty(requirement));
+  EXPECT_EQ(retained->tiles[1].mm2s_count, 1u);
+  EXPECT_EQ(retained->control_sources[4].packet_mask, 1u << connection.packet);
 
   loom_aie2p_array_route_builder_t extended;
   IREE_ASSERT_OK(loom_aie2p_array_route_builder_clone(

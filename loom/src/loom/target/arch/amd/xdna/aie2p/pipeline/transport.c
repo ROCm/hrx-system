@@ -102,6 +102,10 @@ bool loom_aie2p_native_select_ingress_descriptor(
 void loom_aie2p_native_route_label(loom_aie2p_native_context_t* context,
                                    iree_host_size_t first, uint8_t packet,
                                    uint32_t control_source) {
+  if (control_source != UINT32_MAX) {
+    context->control_sources[control_source].packet_mask |= UINT32_C(1)
+                                                            << packet;
+  }
   for (iree_host_size_t i = first; i < context->routing.route_count; ++i) {
     context->routes[i] =
         (loom_aie2p_native_route_t){.edge = &context->routing.routes[i],

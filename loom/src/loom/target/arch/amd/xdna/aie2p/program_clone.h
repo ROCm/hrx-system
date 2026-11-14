@@ -21,6 +21,10 @@ typedef struct loom_aie2p_program_clone_function_t {
   loom_symbol_ref_t entry;
   // Direct edges translated from the retained source inventory.
   loom_symbol_ref_array_t direct_callees;
+  // Calls projected in source order, including repeated calls to one helper.
+  // Valid until the caller changes the cloned call sequence. Pre-allocation
+  // rewrites use these sites without walking the private function again.
+  loom_low_call_boundary_index_t call_boundaries;
   // Whether any source exit returns to the caller.
   bool may_return;
   // Invocation target facts borrowed from the immutable source version.
@@ -46,6 +50,11 @@ typedef struct loom_aie2p_program_clone_t {
   loom_symbol_ref_t* symbols_by_source;
   // Lazily allocated cloned-function records indexed by source symbol ID.
   loom_aie2p_program_clone_function_t** functions_by_source;
+  // Reused sparse operation projection for the current body clone. Completed
+  // function records retain only target calls and never borrow this buffer.
+  loom_ir_remap_op_projection_t* call_projection;
+  // Allocated entries in call_projection, bounded by the largest cloned body.
+  iree_host_size_t call_projection_capacity;
   // Shared remap for target and immutable-data definitions without local SSA.
   // Its callback borrows this projection, whose address stays fixed after init.
   loom_ir_remap_t definition_remap;

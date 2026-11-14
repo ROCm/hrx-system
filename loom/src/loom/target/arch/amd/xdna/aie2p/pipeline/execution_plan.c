@@ -9,7 +9,8 @@
 #include <string.h>
 
 iree_status_t loom_aie2p_execution_plan_copy_resources(
-    const loom_aie2p_execution_plan_t* source, iree_arena_allocator_t* arena,
+    const loom_aie2p_execution_plan_t* source,
+    iree_host_size_t added_connection_capacity, iree_arena_allocator_t* arena,
     loom_aie2p_execution_plan_t* target) {
   const iree_host_size_t tile_count =
       (iree_host_size_t)source->routing.family->column_count *
@@ -17,14 +18,16 @@ iree_status_t loom_aie2p_execution_plan_copy_resources(
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       arena, tile_count, sizeof(*target->tiles), (void**)&target->tiles));
   memcpy(target->tiles, source->tiles, tile_count * sizeof(*target->tiles));
-  IREE_RETURN_IF_ERROR(loom_aie2p_array_route_builder_clone(
-      &source->routing,
+  const loom_xdna_array_family_t* family = source->routing.family;
+  const iree_host_size_t route_capacity =
       iree_max(source->routing.route_count,
-               source->routing.prefixes.node_count),
-      arena, &target->routing));
+               source->routing.prefixes.node_count) +
+      added_connection_capacity *
+          (2 * family->row_count + family->column_count + 2);
+  IREE_RETURN_IF_ERROR(loom_aie2p_array_route_builder_clone(
+      &source->routing, route_capacity, arena, &target->routing));
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      arena, source->routing.route_count, sizeof(*target->routes),
-      (void**)&target->routes));
+      arena, route_capacity, sizeof(*target->routes), (void**)&target->routes));
   for (iree_host_size_t i = 0; i < source->routing.route_count; ++i) {
     target->routes[i] = source->routes[i];
     target->routes[i].edge = &target->routing.routes[i];
@@ -61,12 +64,12 @@ iree_status_t loom_aie2p_execution_plan_copy_resources(
   }
   loom_aie2p_native_connection_t* groups = NULL;
   loom_aie2p_native_connection_endpoint_t* destinations = NULL;
-  IREE_RETURN_IF_ERROR(
-      iree_arena_allocate_array(arena, source->connections.group_count,
-                                sizeof(*groups), (void**)&groups));
-  IREE_RETURN_IF_ERROR(
-      iree_arena_allocate_array(arena, source->connections.destination_count,
-                                sizeof(*destinations), (void**)&destinations));
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, source->connections.group_count + added_connection_capacity,
+      sizeof(*groups), (void**)&groups));
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, source->connections.destination_count + added_connection_capacity,
+      sizeof(*destinations), (void**)&destinations));
   if (source->connections.group_count) {
     memcpy(groups, source->connections.groups,
            source->connections.group_count * sizeof(*groups));
@@ -88,7 +91,7 @@ static iree_status_t loom_aie2p_execution_plan_clone(
     const loom_pipeline_entry_scope_t* source, iree_arena_allocator_t* arena,
     loom_pipeline_entry_scope_t* target) {
   return loom_aie2p_execution_plan_copy_resources(
-      (const loom_aie2p_execution_plan_t*)source, arena,
+      (const loom_aie2p_execution_plan_t*)source, 0, arena,
       (loom_aie2p_execution_plan_t*)target);
 }
 

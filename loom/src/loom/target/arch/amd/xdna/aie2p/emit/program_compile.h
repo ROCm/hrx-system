@@ -46,6 +46,15 @@ typedef struct loom_aie2p_program_helper_list_t {
 // target versions, and descriptor registry remain fixed for this lifetime.
 typedef struct loom_aie2p_program_compiler_t loom_aie2p_program_compiler_t;
 
+typedef struct loom_aie2p_program_partition_t {
+  // Dense code group for each function in entry-then-helper order.
+  const iree_host_size_t* function_groups;
+  // Number of nonempty groups; group zero contains the entry.
+  iree_host_size_t group_count;
+  // Caller-owned output slots receiving exact native code requirements.
+  loom_aie2p_program_code_group_t* groups;
+} loom_aie2p_program_partition_t;
+
 // Allocates a compiler in |arena|, which also owns its retained helper objects,
 // compile reports, and complete program contributions. The module outlives the
 // compiler; |report_template| is borrowed only during allocation. Supplying a
@@ -56,6 +65,19 @@ iree_status_t loom_aie2p_program_compiler_allocate(
     loom_module_t* module, iree_arena_allocator_t* arena,
     const loom_target_compile_report_t* report_template,
     loom_aie2p_program_compiler_t** out_compiler);
+
+// Retains an already compiled helper in another private compilation workspace.
+// The projection owner establishes identical source semantics and unchanged
+// direct-callee contracts; changed callers compile normally, after loading
+// support has entered their IR. Direct callee arrays have corresponding order.
+// Native code and non-symbol report evidence borrow source_compiler's owner;
+// call-edge identities are projected into compiler's module. Both compilers
+// have the same report policy and the source owner outlives the target.
+iree_status_t loom_aie2p_program_compiler_reuse_helper(
+    loom_aie2p_program_compiler_t* compiler,
+    const loom_aie2p_program_helper_t* target,
+    const loom_aie2p_program_compiler_t* source_compiler,
+    const loom_aie2p_program_helper_t* source);
 
 // Compiles |entry_function_op| and its producer-retained acyclic,
 // module-internal helper closure into one detached program object. Exact code
@@ -71,11 +93,14 @@ iree_status_t loom_aie2p_program_compiler_allocate(
 // |program_data|. |may_return| comes from the entry's
 // retained requirements or its producer's nonreturning construction contract.
 // Only returning entries need to preserve their incoming link across calls.
+// A non-NULL partition composes independently relocatable native code groups
+// and receives their exact requirements; NULL preserves one resident section.
 iree_status_t loom_aie2p_program_compile(
     loom_aie2p_program_compiler_t* compiler, loom_op_t* entry_function_op,
     bool may_return, loom_aie2p_program_helper_list_t helpers,
     const loom_low_read_only_data_set_t* program_data,
-    const loom_aie2p_leaf_compile_options_t* entry_options, bool* out_compiled,
+    const loom_aie2p_leaf_compile_options_t* entry_options,
+    const loom_aie2p_program_partition_t* partition, bool* out_compiled,
     loom_aie2p_program_object_t* out_program);
 
 #ifdef __cplusplus

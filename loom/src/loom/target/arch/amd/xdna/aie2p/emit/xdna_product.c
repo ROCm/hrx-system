@@ -58,8 +58,12 @@ static iree_host_size_t loom_aie2p_xdna_intern_linked_section(
 }
 
 static bool loom_aie2p_xdna_section_requires_load(
-    const loom_native_section_t* section) {
-  return section->storage == LOOM_NATIVE_SECTION_STORAGE_CONTENTS &&
+    const loom_aie2p_linked_tile_t* tile, iree_host_size_t section_index) {
+  const loom_native_section_t* section =
+      &tile->assembly.sections[section_index];
+  return tile->section_placements[section_index].load ==
+             LOOM_AIE2P_SECTION_LOAD_INITIAL &&
+         section->storage == LOOM_NATIVE_SECTION_STORAGE_CONTENTS &&
          section->access != LOOM_NATIVE_SECTION_ACCESS_NONE &&
          section->contents.data_length != 0;
 }
@@ -475,7 +479,7 @@ static void loom_aie2p_xdna_emit_entry(
            section_index < linked->assembly.section_count; ++section_index) {
         const loom_native_section_t* section =
             &linked->assembly.sections[section_index];
-        if (!loom_aie2p_xdna_section_requires_load(section)) {
+        if (!loom_aie2p_xdna_section_requires_load(linked, section_index)) {
           continue;
         }
         const uint32_t payload_size =
@@ -754,7 +758,7 @@ iree_status_t loom_aie2p_xdna_product_finalize(
       uint64_t inline_byte_length = 0;
       for (iree_host_size_t k = 0; k < linked->assembly.section_count; ++k) {
         const loom_native_section_t* section = &linked->assembly.sections[k];
-        if (loom_aie2p_xdna_section_requires_load(section)) {
+        if (loom_aie2p_xdna_section_requires_load(linked, k)) {
           ++loadable_section_count;
           inline_byte_length +=
               iree_host_align(section->contents.data_length, 4);

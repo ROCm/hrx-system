@@ -46,6 +46,7 @@ loom_cc_library(
     srcs = ["worker.c"],
     hdrs = ["worker.h"],
     deps = [
+        ":execution_plan",
         "//loom/src/loom/codegen/low:builder",
         "//loom/src/loom/ir",
         "//loom/src/loom/ir:symbol_map",
@@ -142,15 +143,20 @@ loom_cc_test(
 loom_cc_library(
     name = "execution_plan",
     srcs = [
+        "code_transport.c",
         "connectivity.c",
+        "control_packet.c",
         "execution_plan.c",
         "switch.c",
     ],
     hdrs = [
+        "code_transport.h",
         "connectivity.h",
+        "control_packet.h",
         "execution_plan.h",
         "switch.h",
     ],
+    visibility = ["//loom/src/loom/target/arch/amd/xdna/aie2p:implementation"],
     deps = [
         "//loom/src/loom/analysis/pipeline:entries",
         "//loom/src/loom/target/arch/amd/xdna/aie2p/array:plan",

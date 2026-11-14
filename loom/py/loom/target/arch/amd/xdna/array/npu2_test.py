@@ -639,6 +639,25 @@ def test_validator_rejects_loopback_pairs_outside_dma_channels(
         )
 
 
+@pytest.mark.parametrize(
+    ("key", "address"), [("core", 0x3FF30), ("memory_tile", 0xB0F30)]
+)
+def test_tile_control_status_reports_all_transfer_errors(
+    key: str, address: int
+) -> None:
+    patterns = {pattern.key: pattern for pattern in NPU2_ARRAY_FAMILY.registers}
+    status = patterns[f"{key}.tile_control.status"]
+    assert status.base_offset == address
+    assert not status.dimensions
+    assert {field.name: field.mask for field in status.fields} == {
+        "first_header_parity_error": 1,
+        "second_header_parity_error": 2,
+        "slave_error": 4,
+        "tlast_error": 8,
+    }
+    assert all(field.access is RegisterAccess.READ_ONLY for field in status.fields)
+
+
 def test_register_patterns_cover_complete_seed_resource_families() -> None:
     family = NPU2_ARRAY_FAMILY
 
