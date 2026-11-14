@@ -42,6 +42,7 @@
 #include "libamdf/cts/gpu/kernels/program_atomic_kernels.h"
 #include "libamdf/cts/gpu/kernels/shader_event.h"
 #include "libamdf/cts/gpu/kernels/shader_event_kernels.h"
+#include "libamdf/cts/gpu/kernels/shader_event_resident_kernels.h"
 #include "libamdf/cts/gpu/kernels/transform.h"
 #include "libamdf/cts/gpu/kernels/transform_alternate_kernels.h"
 #include "libamdf/cts/gpu/kernels/transform_kernels.h"
@@ -89,15 +90,18 @@ TEST(KernelTest, ExecutionResourceProductsPreserveTheCallerContract) {
 
 TEST(KernelTest, ShaderEventProductsPreserveTheCallerContract) {
   namespace protocol = kernels::shader_event;
-  for (const auto& kernel : protocol::kKernels.variants) {
-    SCOPED_TRACE(kernel.target);
-    CheckArgumentLayout(
-        kernel, protocol::kArgumentByteOffsets, protocol::kArgumentByteLengths,
-        protocol::kArgumentValueKinds, sizeof(protocol::Arguments),
-        alignof(protocol::Arguments));
-    EXPECT_EQ(kernel.workgroup_size(), 1u);
-    EXPECT_EQ(kernel.group_segment_byte_length, 0u);
-    EXPECT_EQ(kernel.private_segment_byte_length, 0u);
+  for (const auto* kernel_set :
+       {&protocol::kKernels, &kernels::shader_event_resident::kKernels}) {
+    for (const auto& kernel : kernel_set->variants) {
+      SCOPED_TRACE(kernel.target);
+      CheckArgumentLayout(
+          kernel, protocol::kArgumentByteOffsets,
+          protocol::kArgumentByteLengths, protocol::kArgumentValueKinds,
+          sizeof(protocol::Arguments), alignof(protocol::Arguments));
+      EXPECT_EQ(kernel.workgroup_size(), 1u);
+      EXPECT_EQ(kernel.group_segment_byte_length, 0u);
+      EXPECT_EQ(kernel.private_segment_byte_length, 0u);
+    }
   }
 }
 

@@ -187,6 +187,18 @@ amdf_cts_gpu_kernel_set(
     targets = AMDF_CTS_GPU_KERNEL_TARGETS,
 )
 
+amdf_cts_gpu_kernel_set(
+    name = "shader_event_resident_kernels",
+    srcs = ["//libamdf/cts/gpu/kernels/shader_event:kernel.loom"],
+    entry_point = "shader_event_resident",
+    namespace = "kernels::shader_event_resident",
+    target_srcs = {
+        target: "//libamdf/cts/gpu/kernels/shader_event:" + _NATIVE_SOURCE_BY_CAPABILITY[LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_TARGET[target]]
+        for target in AMDF_CTS_GPU_KERNEL_TARGETS
+    },
+    targets = AMDF_CTS_GPU_KERNEL_TARGETS,
+)
+
 amdf_cc_library(
     name = "execution_resources",
     testonly = True,
@@ -644,6 +656,7 @@ amdf_cc_test(
         ":program_atomic_kernels",
         ":shader_event",
         ":shader_event_kernels",
+        ":shader_event_resident_kernels",
         ":transform",
         ":transform_alternate_kernels",
         ":transform_kernels",

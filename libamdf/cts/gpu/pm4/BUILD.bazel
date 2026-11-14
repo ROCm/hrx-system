@@ -120,6 +120,7 @@ amdf_cts_test_suite(
         "//libamdf/cts/gpu/kernels:private_roundtrip_kernels",
         "//libamdf/cts/gpu/kernels:shader_event",
         "//libamdf/cts/gpu/kernels:shader_event_kernels",
+        "//libamdf/cts/gpu/kernels:shader_event_resident_kernels",
         "//libamdf/cts/gpu/kernels:transform",
         "//libamdf/cts/gpu/kernels:transform_kernels",
         "//libamdf/cts/gpu/pm4/encoding:commands",
