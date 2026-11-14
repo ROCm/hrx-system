@@ -2291,6 +2291,9 @@ class Translator final : private Initialization::Evaluation {
     if (!field || !unit_.typeTraits().is_lvalue_reference(field->type())) {
       return std::nullopt;
     }
+    if (types_.reference_is_snapshot(field)) {
+      return std::nullopt;
+    }
     auto* referent = unit_.typeTraits().remove_reference(field->type());
     if (auto selected = current_receiver_selection(ast)) {
       auto value = selected_receiver_value(*selected, field->type(), ast);
@@ -6003,7 +6006,7 @@ class Translator final : private Initialization::Evaluation {
           field ? current_receiver_selection(id) : std::nullopt;
       if (receiver_field &&
           unit_.typeTraits().is_lvalue_reference(field->type())) {
-        if (!types_.pointer_reference_is_snapshot(field)) {
+        if (!types_.reference_is_snapshot(field)) {
           return name(load(ast), cxx::to_string(field->name()));
         }
         return name(
@@ -6105,7 +6108,7 @@ class Translator final : private Initialization::Evaluation {
       if (auto selected = current_receiver_selection(member)) {
         auto* field = static_cast<cxx::FieldSymbol*>(member->symbol);
         if (unit_.typeTraits().is_lvalue_reference(field->type()) &&
-            !types_.pointer_reference_is_snapshot(field)) {
+            !types_.reference_is_snapshot(field)) {
           return name(load(ast), cxx::to_string(field->name()));
         }
         return name(selected_receiver_value(*selected, field->type(), ast),
@@ -6149,7 +6152,7 @@ class Translator final : private Initialization::Evaluation {
           fail(ast, "record value access requires a non-static data member");
         }
         if (unit_.typeTraits().is_lvalue_reference(field->type()) &&
-            !types_.pointer_reference_is_snapshot(field)) {
+            !types_.reference_is_snapshot(field)) {
           return name(load(ast), cxx::to_string(field->name()));
         }
         if (auto destination = control_->destination(member);

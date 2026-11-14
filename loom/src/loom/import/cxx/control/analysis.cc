@@ -241,10 +241,11 @@ std::optional<ObjectInterval> project_interval(ObjectInterval interval,
       begin - projection.component_offset};
 }
 
-// Reference capture fields name pointer objects; the concrete call operator's
-// lvalue-to-rvalue conversions distinguish value reads from identity uses.
-cxx::FieldSymbol* pointer_reference_capture(cxx::TranslationUnit& unit,
-                                            cxx::Symbol* symbol) {
+// A pointer reference can use the existing two-component value partition. A
+// nonpointer reference is a candidate only after Types has selected value
+// transport before admitting the containing closure record.
+cxx::FieldSymbol* reference_capture(cxx::TranslationUnit& unit, Types& types,
+                                    cxx::Symbol* symbol) {
   auto* field = cxx::symbol_cast<cxx::FieldSymbol>(symbol);
   if (!field) {
     return nullptr;
@@ -256,7 +257,9 @@ cxx::FieldSymbol* pointer_reference_capture(cxx::TranslationUnit& unit,
   auto traits = unit.typeTraits();
   auto* referent = traits.remove_reference(field->type());
   return traits.is_lvalue_reference(field->type()) &&
-                 traits.is_pointer(referent) && !traits.is_volatile(referent)
+                 !traits.is_volatile(referent) &&
+                 (traits.is_pointer(referent) ||
+                  types.reference_is_snapshot(field))
              ? field
              : nullptr;
 }
@@ -425,7 +428,7 @@ ControlFlow::ControlFlow(cxx::TranslationUnit& unit, Diagnostics& diagnostics,
     auto* closure = cxx::symbol_cast<cxx::ClassSymbol>(function_->parent());
     if (closure && closure->isClosureType()) {
       auto* name = cxx::name_cast<cxx::OperatorId>(function_->name());
-      observes_pointer_captures_ =
+      observes_reference_captures_ =
           name && name->op() == cxx::TokenKind::T_LPAREN;
     }
     for (auto* parameter : function_->parameters()) {
@@ -873,7 +876,8 @@ bool ControlFlow::argument_requires_storage(const CallArgument& argument,
     auto* source_type = source_object_type(binding);
     if (traits.is_reference(source_type)) {
       auto* object_type = traits.remove_reference(source_type);
-      return cxx::symbol_cast<cxx::FieldSymbol>(binding) ||
+      auto* field = cxx::symbol_cast<cxx::FieldSymbol>(binding);
+      return (field && !types_.reference_is_snapshot(field)) ||
              storage_references_.contains(binding) ||
              traits.is_volatile(object_type) || traits.is_array(object_type);
     }
@@ -1151,8 +1155,8 @@ void ControlFlow::postVisit(cxx::AST* ast) {
            unit_.typeTraits().is_class(member->type))) {
         require_identity(member);
       }
-      if (observes_pointer_captures_ && expression != pointer_value_read_) {
-        retain_pointer_capture_identity(member->symbol);
+      if (observes_reference_captures_ && expression != capture_value_read_) {
+        retain_reference_capture_identity(member->symbol);
       }
       if (member->accessOp == cxx::TokenKind::T_DOT) {
         owner = object_owner(member->baseExpression);
@@ -1172,8 +1176,8 @@ void ControlFlow::postVisit(cxx::AST* ast) {
           found->second.transparent = false;
         }
       }
-      if (observes_pointer_captures_ && expression != pointer_value_read_) {
-        retain_pointer_capture_identity(id->symbol);
+      if (observes_reference_captures_ && expression != capture_value_read_) {
+        retain_reference_capture_identity(id->symbol);
       }
     } else if (auto* nested =
                    cxx::ast_cast<cxx::NestedExpressionAST>(expression)) {
@@ -2089,19 +2093,26 @@ void ControlFlow::visit(cxx::CallExpressionAST* ast) {
   if (!function) {
     cxx::ASTVisitor::visit(ast);
   } else {
-    // A resolved function designator has no runtime value to evaluate. Visit
-    // only an explicit member receiver; template argument expressions belong
-    // to frontend substitution and must not become runtime reads or storage.
-    auto* designator = unwrap_expression(ast->baseExpression);
-    if (auto* member = cxx::ast_cast<cxx::MemberExpressionAST>(designator)) {
-      accept(member->baseExpression);
-    }
-    auto parameters = function->parameters();
     auto* definition = function->resolvedDefinition();
     const bool has_definition =
         function->isDefined() || function->hasPendingBody() ||
         (definition &&
          (definition->isDefined() || definition->hasPendingBody()));
+    // A resolved function designator has no runtime value to evaluate. Visit
+    // only an explicit member receiver; template argument expressions belong
+    // to frontend substitution and must not become runtime reads or storage.
+    auto* designator = unwrap_expression(ast->baseExpression);
+    if (auto* member = cxx::ast_cast<cxx::MemberExpressionAST>(designator)) {
+      auto* saved_read = capture_value_read_;
+      if (has_definition) {
+        // The retained call edge decides whether the concrete member function
+        // needs receiver identity after all reached bodies are analyzed.
+        capture_value_read_ = unwrap_expression(member->baseExpression);
+      }
+      accept(member->baseExpression);
+      capture_value_read_ = saved_read;
+    }
+    auto parameters = function->parameters();
     size_t ordinal = 0;
     for (auto* argument : cxx::ListView{ast->expressionList}) {
       const cxx::Type* object_type =
@@ -2189,10 +2200,29 @@ void ControlFlow::visit(cxx::LambdaExpressionAST* ast) {
           !argument.inherent_storage && argument.reference_calls.empty() &&
           argument.write_binding == argument.identity_bindings.front() &&
           !cxx::symbol_cast<cxx::FieldSymbol>(argument.write_binding);
+      auto traits = unit_.typeTraits();
+      auto* referent_type = traits.remove_reference(field->type());
+      const bool pointer = traits.is_pointer(referent_type);
+      const bool value_transport_required =
+          !pointer && !traits.is_array(referent_type) &&
+          !traits.is_volatile(referent_type) &&
+          types_.requires_value_transport(referent_type);
       if (cxx::ast_cast<cxx::RefLambdaCaptureAST>(capture) &&
-          pointer_reference_capture(unit_, field) && direct_automatic) {
-        pointer_reference_facts().captures.push_back(
-            {.field = field, .referent = std::move(argument)});
+          direct_automatic &&
+          ((pointer && !traits.is_volatile(referent_type)) ||
+           value_transport_required)) {
+        if (value_transport_required) {
+          // The nested closure record must know its member partition before
+          // its call operator is analyzed. Unsafe candidates fail after the
+          // call graph reaches a fixed point; storage cannot represent them.
+          types_.select_reference_snapshot(field);
+        }
+        reference_capture_facts().captures.push_back({
+            .field = field,
+            .referent = std::move(argument),
+            .source = capture,
+            .value_transport_required = value_transport_required,
+        });
       } else {
         require_identity(argument);
       }
@@ -2640,7 +2670,7 @@ void ControlFlow::record_member_binding_read(cxx::ExpressionAST* expression) {
   cxx::Symbol* root = nullptr;
   if (auto* id = cxx::ast_cast<cxx::IdExpressionAST>(expression)) {
     field = id->symbol;
-    if (observes_pointer_captures_) {
+    if (observes_reference_captures_) {
       root = id->subobjectPath ? id->subobjectPath->value : field;
     }
   } else {
@@ -2649,12 +2679,12 @@ void ControlFlow::record_member_binding_read(cxx::ExpressionAST* expression) {
       return;
     }
     field = member->symbol;
-    if (observes_pointer_captures_) {
+    if (observes_reference_captures_) {
       auto* projection = types_.member_object_projection(member, member);
       root = projection ? projection->root->source : field;
     }
   }
-  if (observes_pointer_captures_) {
+  if (observes_reference_captures_) {
     if (auto captured =
             captured_object_member(unit_, receiver_partition_->source, root)) {
       construction_.read(captured->pointer_field, 0, SIZE_MAX);
@@ -3099,6 +3129,10 @@ bool ControlFlow::require_identity(const CallArgument& argument) {
       return;
     }
     if (traits.is_reference(source_object_type(binding))) {
+      if (auto* field = cxx::symbol_cast<cxx::FieldSymbol>(binding)) {
+        changed = retain_reference_capture_identity(field) || changed;
+        return;
+      }
       if (function_) {
         auto parameters = function_->parameters();
         if (std::ranges::find(parameters, binding) != parameters.end()) {
@@ -3152,9 +3186,13 @@ bool ControlFlow::record_scoped_write(cxx::Symbol* binding,
   if (!binding) {
     return false;
   }
-  bool changed =
-      pointer_reference_facts_ &&
-      pointer_reference_facts_->written_bindings.insert(binding).second;
+  bool changed = observes_reference_captures_ &&
+                 retain_reference_capture_identity(binding);
+  if (reference_capture_facts_) {
+    changed =
+        reference_capture_facts_->written_bindings.insert(binding).second ||
+        changed;
+  }
   for (auto* owner : owners) {
     auto& writes = writes_[owner];
     if (std::ranges::find(writes, binding) == writes.end()) {
@@ -3165,42 +3203,37 @@ bool ControlFlow::record_scoped_write(cxx::Symbol* binding,
   return changed;
 }
 
-ControlFlow::PointerReferenceFacts& ControlFlow::pointer_reference_facts() {
-  if (!pointer_reference_facts_) {
-    pointer_reference_facts_ = std::make_unique<PointerReferenceFacts>();
+ControlFlow::ReferenceCaptureFacts& ControlFlow::reference_capture_facts() {
+  if (!reference_capture_facts_) {
+    reference_capture_facts_ = std::make_unique<ReferenceCaptureFacts>();
     for (const auto& entry : writes_) {
-      pointer_reference_facts_->written_bindings.insert(entry.second.begin(),
+      reference_capture_facts_->written_bindings.insert(entry.second.begin(),
                                                         entry.second.end());
     }
   }
-  return *pointer_reference_facts_;
+  return *reference_capture_facts_;
 }
 
-void ControlFlow::retain_pointer_capture_identity(cxx::Symbol* symbol) {
-  auto* field = pointer_reference_capture(unit_, symbol);
+bool ControlFlow::retain_reference_capture_identity(cxx::Symbol* symbol) {
+  if (!observes_reference_captures_) {
+    return false;
+  }
+  auto* field = reference_capture(unit_, types_, symbol);
   if (field && function_->parent() == field->parent()) {
-    pointer_reference_facts().identity_captures.insert(field);
+    return types_.require_reference_capture_identity(field);
   }
+  return false;
 }
 
-void ControlFlow::collect_pointer_capture_identities(
-    std::unordered_set<cxx::FieldSymbol*>& identities) const {
-  if (pointer_reference_facts_) {
-    const auto& retained = pointer_reference_facts_->identity_captures;
-    identities.insert(retained.begin(), retained.end());
-  }
-}
-
-bool ControlFlow::resolve_pointer_reference_captures(
-    const std::unordered_set<cxx::FieldSymbol*>& identities) {
-  if (!pointer_reference_facts_) {
+bool ControlFlow::resolve_reference_captures() {
+  if (!reference_capture_facts_) {
     return false;
   }
   bool changed = false;
   auto binding_is_written = [&](cxx::Symbol* binding) {
-    return pointer_reference_facts_->written_bindings.contains(binding);
+    return reference_capture_facts_->written_bindings.contains(binding);
   };
-  for (auto& capture : pointer_reference_facts_->captures) {
+  for (auto& capture : reference_capture_facts_->captures) {
     if (capture.requires_storage) {
       continue;
     }
@@ -3212,9 +3245,15 @@ bool ControlFlow::resolve_pointer_reference_captures(
                              [&](const ObjectInterval& interval) {
                                return binding_is_written(interval.binding);
                              }));
-    if (!identities.contains(capture.field) && !written &&
-        !argument_requires_storage(referent)) {
+    if (!types_.reference_capture_requires_identity(capture.field) &&
+        !written && !argument_requires_storage(referent)) {
       continue;
+    }
+    if (capture.value_transport_required) {
+      diagnostics_.reject(
+          unit_, capture.source,
+          "lambda reference capture requires object identity, but its "
+          "referent can only be transported as a value");
     }
     capture.requires_storage = true;
     changed = require_identity(referent) || changed;
@@ -3222,14 +3261,13 @@ bool ControlFlow::resolve_pointer_reference_captures(
   return changed;
 }
 
-void ControlFlow::publish_pointer_reference_snapshots(Types& types) const {
-  if (!pointer_reference_facts_) {
+void ControlFlow::publish_reference_snapshots(Types& types) const {
+  if (!reference_capture_facts_) {
     return;
   }
-  for (const auto& capture : pointer_reference_facts_->captures) {
+  for (const auto& capture : reference_capture_facts_->captures) {
     if (!capture.requires_storage) {
-      types.select_pointer_reference_snapshot(capture.field,
-                                              capture.referent.source);
+      types.select_reference_snapshot(capture.field);
     }
   }
 }
@@ -4630,12 +4668,12 @@ void ControlFlow::visit(cxx::StructuredBindingDeclarationAST* ast) {
 }
 
 void ControlFlow::visit(cxx::ImplicitCastExpressionAST* ast) {
-  if (observes_pointer_captures_ && !ast->conversionFunction &&
+  if (observes_reference_captures_ && !ast->conversionFunction &&
       ast->castKind == cxx::ImplicitCastKind::kLValueToRValueConversion) {
-    auto* saved_read = pointer_value_read_;
-    pointer_value_read_ = unwrap_expression(ast->expression);
+    auto* saved_read = capture_value_read_;
+    capture_value_read_ = unwrap_expression(ast->expression);
     cxx::ASTVisitor::visit(ast);
-    pointer_value_read_ = saved_read;
+    capture_value_read_ = saved_read;
   } else {
     cxx::ASTVisitor::visit(ast);
   }

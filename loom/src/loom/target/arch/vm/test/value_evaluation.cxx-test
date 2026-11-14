@@ -663,3 +663,20 @@ event 1
 event 16
 OK 0
 retired 0
+
+// ====
+// A nested reference capture can invoke a pointer-bearing enclosing closure
+// without materializing that closure in private memory.
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+void run() {
+  unsigned values[2]{11, 22};
+  unsigned* data = values;
+  auto select = [&](unsigned index) { return data + index; };
+  auto observe = [&](unsigned index) { event(select(index)[0]); };
+  observe(1);
+}
+
+// ----
+event 22
+OK 0
+retired 0

@@ -433,13 +433,17 @@ std::span<const ValueProjection> Types::projections(const cxx::Type* input,
   if (admitted.kind == ValueKind::Record && admitted.component_count) {
     for (const auto& member :
          static_cast<const RecordPartition&>(admitted).members) {
-      // Reference members retain their binding as a pointer group. The
-      // referent's value is not a subobject of this record's partition.
       auto traits = unit_.typeTraits();
       if (traits.is_reference(member.type())) {
-        result.push_back(
-            {traits.add_pointer(traits.remove_reference(member.type())),
-             member.partition, member.component_offset});
+        auto* field = static_cast<cxx::FieldSymbol*>(member.source);
+        if (reference_is_snapshot(field)) {
+          append(reference_transport_type(field), member.component_offset);
+        } else {
+          // Ordinary reference members retain their binding as a pointer
+          // group. The referent is not a subobject of the record.
+          result.push_back({reference_transport_type(field), member.partition,
+                            member.component_offset});
+        }
       } else {
         append(member.type(), member.component_offset);
       }
@@ -1260,24 +1264,31 @@ const RecordPartition* Types::record(const cxx::Type* input, cxx::AST* owner) {
   result->is_aggregate = traits.is_aggregate(input);
   auto append = [&](cxx::Symbol* symbol) {
     auto* type = source_object_type(symbol);
-    const auto& member_partition = traits.is_lvalue_reference(type)
-                                       ? kPointerPartition
-                                       : partition(type, owner);
+    auto* field = cxx::symbol_cast<cxx::FieldSymbol>(symbol);
+    const bool snapshot = field && traits.is_lvalue_reference(type) &&
+                          reference_is_snapshot(field);
+    const Partition* member_partition = nullptr;
+    if (traits.is_lvalue_reference(type)) {
+      member_partition = snapshot
+                             ? &partition(traits.remove_reference(type), owner)
+                             : &kPointerPartition;
+    } else {
+      member_partition = &partition(type, owner);
+    }
     if (symbol->kind() == cxx::SymbolKind::kBaseClass &&
-        member_partition.kind != ValueKind::Record) {
+        member_partition->kind != ValueKind::Record) {
       diagnostics_.reject(unit_, owner,
                           "Loom semantic handles cannot be base subobjects");
     }
-    SubobjectPartition member{symbol, &member_partition,
+    SubobjectPartition member{symbol, member_partition,
                               result->component_count};
     result->members.push_back(member);
     members_.emplace(symbol, member);
-    append_component_names(member_partition, cxx::to_string(symbol->name()),
+    append_component_names(*member_partition, cxx::to_string(symbol->name()),
                            result->component_names);
-    result->component_count += member_partition.component_count;
-    auto* field = cxx::symbol_cast<cxx::FieldSymbol>(symbol);
+    result->component_count += member_partition->component_count;
     result->has_mutable_subobject |= (field && field->isMutable()) ||
-                                     has_mutable_subobject(member_partition);
+                                     has_mutable_subobject(*member_partition);
     if (!traits.is_reference(type)) {
       result->requires_binding |= requires_binding(type, owner);
     }
@@ -1599,18 +1610,39 @@ SubobjectProjection Types::selection(cxx::MemberExpressionAST* expression,
   return result;
 }
 
-void Types::select_pointer_reference_snapshot(cxx::FieldSymbol* field,
-                                              cxx::AST* owner) {
-  const auto& admitted = member(field, owner);
+void Types::select_reference_snapshot(cxx::FieldSymbol* field) {
   auto traits = unit_.typeTraits();
   IREE_ASSERT(traits.is_lvalue_reference(field->type()));
-  IREE_ASSERT(traits.is_pointer(traits.remove_reference(field->type())));
-  IREE_ASSERT_EQ(admitted.partition, &kPointerPartition);
-  pointer_reference_snapshots_.insert(field);
+  auto* referent = traits.remove_reference(field->type());
+  IREE_ASSERT(!traits.is_volatile(referent));
+  if (reference_snapshots_.contains(field)) {
+    return;
+  }
+  IREE_ASSERT(traits.is_pointer(referent) || !members_.contains(field));
+  reference_snapshots_.insert(field);
 }
 
-bool Types::pointer_reference_is_snapshot(cxx::FieldSymbol* field) const {
-  return pointer_reference_snapshots_.contains(field);
+bool Types::reference_is_snapshot(cxx::FieldSymbol* field) const {
+  return reference_snapshots_.contains(field);
+}
+
+const cxx::Type* Types::reference_transport_type(
+    cxx::FieldSymbol* field) const {
+  auto traits = unit_.typeTraits();
+  IREE_ASSERT(traits.is_lvalue_reference(field->type()));
+  auto* referent = traits.remove_reference(field->type());
+  return reference_is_snapshot(field) ? referent : traits.add_pointer(referent);
+}
+
+bool Types::require_reference_capture_identity(cxx::FieldSymbol* field) {
+  auto* closure = cxx::symbol_cast<cxx::ClassSymbol>(field->parent());
+  IREE_ASSERT(closure && closure->isClosureType());
+  IREE_ASSERT(unit_.typeTraits().is_lvalue_reference(field->type()));
+  return identity_reference_captures_.insert(field).second;
+}
+
+bool Types::reference_capture_requires_identity(cxx::FieldSymbol* field) const {
+  return identity_reference_captures_.contains(field);
 }
 
 loom_type_t Types::get(const cxx::Type* input, cxx::AST* ast) {
@@ -2031,11 +2063,8 @@ void Types::append_bound(const cxx::Type* input, cxx::AST* owner,
                                      member.partition->component_count);
         auto* member_type = member.type();
         if (unit_.typeTraits().is_lvalue_reference(member_type)) {
-          auto* referent = unit_.typeTraits().remove_reference(member_type);
-          member_type = pointer_reference_is_snapshot(
-                            static_cast<cxx::FieldSymbol*>(member.source))
-                            ? referent
-                            : unit_.typeTraits().add_pointer(referent);
+          member_type = reference_transport_type(
+              static_cast<cxx::FieldSymbol*>(member.source));
         }
         append_bound(member_type, owner, member_identities, storage, output);
       }

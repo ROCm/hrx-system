@@ -390,13 +390,10 @@ void Functions::analyze(Types& types) {
                      analyzed_calls);
   }
 
-  // Every reached specialization contributes its resolved capture uses once.
-  // The primary generic body does not yet contain the conversions that
-  // distinguish a pointer-value read from a reference to the pointer object.
-  std::unordered_set<cxx::FieldSymbol*> capture_identities;
+  // Constructor receiver storage is a local fact but must be selected before
+  // call propagation maps its identity demand back to callers.
   for (const auto& analyzed : analyzed_functions) {
     analyzed.second->select_constructor_receiver_storage();
-    analyzed.second->collect_pointer_capture_identities(capture_identities);
   }
 
   std::unordered_map<ControlFlow*, std::vector<size_t>> incident_calls;
@@ -441,16 +438,16 @@ void Functions::analyze(Types& types) {
   };
   propagate_calls();
 
-  // A pointer captured by reference can transport its current value only
-  // after every call edge has published writes and identity demand. Rejecting
-  // one candidate may itself add an address requirement that propagates to
-  // another caller, so alternate the sparse capture edges with the existing
-  // call worklist until both are stable.
+  // A reference capture can transport its current value only after every call
+  // edge has published writes and identity demand. Selecting storage for one
+  // candidate may itself add an address requirement that propagates to another
+  // caller, so alternate the sparse capture edges with the existing call
+  // worklist until both are stable.
   for (;;) {
     bool changed = false;
     for (const auto& analyzed : analyzed_functions) {
       auto* analysis = analyzed.second;
-      if (analysis->resolve_pointer_reference_captures(capture_identities)) {
+      if (analysis->resolve_reference_captures()) {
         changed = true;
         enqueue_incident(analysis);
       }
@@ -501,7 +498,7 @@ void Functions::analyze(Types& types) {
   indirect_parameters_.clear();
   receiver_projections_.clear();
   for (const auto& [canonical, analysis] : analyzed_functions) {
-    analysis->publish_pointer_reference_snapshots(types);
+    analysis->publish_reference_snapshots(types);
     analysis->finalize_callable_effects();
     auto* function = definition(canonical);
     if (!function) {
@@ -578,10 +575,10 @@ void Functions::analyze(Types& types) {
     auto visit_groups = [&](auto&& visit) {
       auto traits = unit_.typeTraits();
       for (const auto& member : receiver->members) {
-        auto* type =
-            traits.is_reference(member.type())
-                ? traits.add_pointer(traits.remove_reference(member.type()))
-                : types.unqualified(member.type());
+        auto* type = traits.is_reference(member.type())
+                         ? types.reference_transport_type(
+                               static_cast<cxx::FieldSymbol*>(member.source))
+                         : types.unqualified(member.type());
         const bool member_output =
             std::ranges::find(written, member.source) != written.end();
         for (const auto& group :

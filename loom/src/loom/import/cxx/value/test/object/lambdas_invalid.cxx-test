@@ -95,6 +95,44 @@ int dependent_init_reference(const int* input, int index) {
 }
 
 // ====
+// A pointer-bearing closure may travel as a stable value, but taking its
+// address observes the enclosing closure object's identity.
+// ERROR@+3: LOWERING/059 "lambda reference capture requires object identity, but its referent can only be transported as a value"
+int nested_closure_address(const int* input, int index) {
+  auto select = [&](int step) { return input + step; };
+  auto read = [&] {
+    auto* identity = &select;
+    return (*identity)(index)[0];
+  };
+  return read();
+}
+
+// ====
+// Mutating an enclosing pointer-bearing closure requires changes to reach the
+// original object rather than a stale value snapshot.
+// ERROR@+3: LOWERING/059 "lambda reference capture requires object identity, but its referent can only be transported as a value"
+int nested_mutable_closure(const int* input) {
+  auto next = [input, index = 0]() mutable { return input + index++; };
+  auto read = [&] { return next()[0]; };
+  return read();
+}
+
+// ====
+// A write discovered through a reference-parameter call reaches capture
+// selection through the ordinary call-graph fixed point.
+struct Cursor {
+  const int* data;
+  int index;
+};
+static int advance(Cursor& cursor) { return cursor.data[cursor.index++]; }
+int nested_transitive_write(const int* input) {
+  Cursor cursor{input, 0};
+  // ERROR@+1: LOWERING/059 "lambda reference capture requires object identity, but its referent can only be transported as a value"
+  auto read = [&] { return advance(cursor); };
+  return read();
+}
+
+// ====
 // A nested reference capture preserves the enclosing closure field's identity.
 // ERROR@+1: LOWERING/059 "stored pointers and references require an object storage representation"
 int dependent_nested_reference(const int* input, int index) {

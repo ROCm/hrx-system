@@ -462,16 +462,24 @@ class Types {
   // Selects a member's leaf field after its implicit object projection.
   SubobjectProjection selection(cxx::MemberExpressionAST* member,
                                 cxx::AST* owner);
-  // Selects snapshot value transport for a pointer reference field whose
-  // object identity is proven unobservable by whole-function analysis. The
-  // source reference and pointer value share the same two-component partition;
-  // this changes how construction and reads interpret those components, not
-  // the record ABI.
-  void select_pointer_reference_snapshot(cxx::FieldSymbol* field,
-                                         cxx::AST* owner);
-  // Whether this pointer reference field transports a stable referent snapshot
-  // instead of a pointer to the reference's source object.
-  bool pointer_reference_is_snapshot(cxx::FieldSymbol* field) const;
+  // Selects value transport for a reference field whose referent remains
+  // stable and whose identity is unobservable. Selection may precede record
+  // admission when the ordinary reference-storage representation cannot carry
+  // the referent at all.
+  void select_reference_snapshot(cxx::FieldSymbol* field);
+  // Whether this reference field transports the referent's value instead of a
+  // pointer to its source object.
+  bool reference_is_snapshot(cxx::FieldSymbol* field) const;
+  // Source type represented by this reference field's selected value
+  // partition: either the stable referent snapshot or an ordinary pointer to
+  // the source object.
+  const cxx::Type* reference_transport_type(cxx::FieldSymbol* field) const;
+  // Records that a concrete closure use observes this reference capture's
+  // source-object identity. Returns whether the shared fact was newly added.
+  bool require_reference_capture_identity(cxx::FieldSymbol* field);
+  // Whether any reached closure specialization observes this capture's source
+  // object identity.
+  bool reference_capture_requires_identity(cxx::FieldSymbol* field) const;
   // Admits a resolved constructor when the source partition represents a
   // trivial copy or move, or when an admitted record supplies the default
   // member-initialization plan. A null constructor requires no lifecycle
@@ -616,8 +624,12 @@ class Types {
   // SSA consumers admit the semantic projection lazily. Direct members
   // allocate nothing.
   std::unique_ptr<MemberObjectPathMap> member_object_paths_;
-  // Pointer reference fields whose source object identity is unobservable.
-  std::unordered_set<cxx::FieldSymbol*> pointer_reference_snapshots_;
+  // Reference fields selected to transport their referent value. A provisional
+  // selection that later observes identity is rejected before translation.
+  std::unordered_set<cxx::FieldSymbol*> reference_snapshots_;
+  // Reference capture fields whose source object identity is observed by a
+  // reached closure specialization.
+  std::unordered_set<cxx::FieldSymbol*> identity_reference_captures_;
   // Completed memory admission; layouts remain owned by the source symbols.
   std::unordered_set<cxx::ClassSymbol*> storage_records_;
   // Source representation classification, independent of SSA admission.
