@@ -47,3 +47,11 @@ func.def @positions(%lhs: buffer, %lhs_offset: offset, %rhs: buffer, %rhs_offset
   %unequal = buffer.compare.address ne, %lhs[%lhs_offset], %rhs[%rhs_offset]
   func.return %equal, %unequal : i1, i1
 }
+
+// ====
+
+func.def @scoped_restrict_access(%source: buffer, %target: view<16xf32>, %peer: view<16xf32>) -> (view<16xf32>) {
+  %source_scoped, %target_scoped, %peer_scoped = buffer.restrict.begin %source, %target peers %peer : buffer, view<16xf32>, view<16xf32>
+  %target_result = buffer.restrict.end %target_scoped : view<16xf32>
+  func.return %target_result : view<16xf32>
+}

@@ -710,6 +710,47 @@ loom_value_id_t Storage::assume_memory_space(
   return result;
 }
 
+std::vector<loom_value_id_t> Storage::begin_restrict_scope(
+    std::span<const loom_value_id_t> references, size_t restricted_count,
+    cxx::AST* owner) {
+  std::vector<loom_type_t> types;
+  types.reserve(references.size());
+  for (auto reference : references) {
+    types.push_back(loom_module_value_type(builder_.module, reference));
+  }
+  const auto restricted = references.first(restricted_count);
+  const auto peers = references.subspan(restricted_count);
+  loom_op_t* op;
+  check(loom_buffer_restrict_begin_build(
+      &builder_, restricted.data(), restricted.size(), peers.data(),
+      peers.size(), types.data(), types.size(), locations_.get(owner), &op));
+  std::vector<loom_value_id_t> results(loom_op_results(op),
+                                       loom_op_results(op) + types.size());
+  for (size_t index = 0; index < references.size(); ++index) {
+    inherit_root_facts(references[index], results[index]);
+  }
+  return results;
+}
+
+std::vector<loom_value_id_t> Storage::end_restrict_scope(
+    std::span<const loom_value_id_t> references, cxx::AST* owner) {
+  std::vector<loom_type_t> types;
+  types.reserve(references.size());
+  for (auto reference : references) {
+    types.push_back(loom_module_value_type(builder_.module, reference));
+  }
+  loom_op_t* op;
+  check(loom_buffer_restrict_end_build(
+      &builder_, references.data(), references.size(), types.data(),
+      types.size(), locations_.get(owner), &op));
+  std::vector<loom_value_id_t> results(loom_op_results(op),
+                                       loom_op_results(op) + references.size());
+  for (size_t index = 0; index < references.size(); ++index) {
+    inherit_root_facts(references[index], results[index]);
+  }
+  return results;
+}
+
 void Storage::inherit_root_facts(loom_value_id_t source,
                                  loom_value_id_t result) {
   if (auto facts = roots_.find(source); facts != roots_.end()) {

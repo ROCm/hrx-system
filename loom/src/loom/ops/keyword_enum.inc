@@ -100,3 +100,4 @@
   LOOM_KW_SOURCE_SIGNATURE = 91,  // "source_signature"
   LOOM_KW_MAX_DISTANCE = 92,  // "max_distance"
   LOOM_KW_SUBNORMAL = 93,  // "subnormal"
+  LOOM_KW_PEERS = 94,  // "peers"

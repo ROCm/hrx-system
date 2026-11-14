@@ -11,43 +11,58 @@ static Codes4 lookup_indexed(Codebook16 table, Bytes4 indices) {
           table[indices[3]]};
 }
 
-// Facts from the caller recover packed indices after helper inlining. This
-// reaches three byte permutes without a target intrinsic or operation binding.
+// Source restrict paths keep the uniform codebook stable across loop-carried
+// output writes. Facts from the caller then recover packed indices after
+// helper inlining, reaching three byte permutes without a target intrinsic.
 [[loom::kernel, loom::workgroup_size(32, 1, 1),
   loom::workgroup_count(1, 1, 1)]]
 void lookup(
-    [[loom::noalias]] const Bytes4* input,
-    [[loom::noalias, loom::assume_aligned(64)]] const Codebook16* codebook,
-    [[loom::noalias]] Codes4* output) {
+    const Bytes4* __restrict__ input,
+    [[loom::assume_aligned(64)]] const Codebook16* __restrict__ codebook,
+    Codes4* __restrict__ output) {
   unsigned position = loom::kernel::workitem::id.x;
-  Bytes4 indices = input[position] & 15;
-  output[position] = lookup_indexed(*codebook, indices);
+  for (unsigned packet = 0; packet < 2; ++packet) {
+    unsigned packet_position = position * 2 + packet;
+    Bytes4 indices = input[packet_position] & 15;
+    output[packet_position] = lookup_indexed(*codebook, indices);
+  }
 }
 
 // ----
 low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 3, resource_count = 3, resource_offsets = [0, 8, 16], resource_parameter_indices = [0, 1, 2], uses_kernarg_segment_ptr = true}) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @lookup() asm {
-  %position = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %workitem_id_x = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %codebook = resource<hal_binding> {extent = 16, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %output = resource<hal_binding> {index = 2, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %99 = v_mov_b32 252645135
-  %100 = v_lshlrev_b32_src0_inline %position, 2
-  %101 = global_load_b32_saddr %100, %input
-  %indices = v_and_b32 %101, %99
-  %103 = s_mov_b32 0
-  %104 = s_load_dwordx4 %codebook, %103
-  %105 = slice %104[0] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
-  %106 = slice %104[1] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
-  %107 = slice %104[2] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
-  %108 = slice %104[3] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
-  %109 = v_and_b32_lit %indices, 117901063
-  %110 = v_perm_b32 %106, %105, %109
-  %111 = v_perm_b32 %108, %107, %109
-  %112 = v_and_b32_lit %indices, 134744072
-  %113 = v_lshrrev_b32_src0_inline %112, 1
-  %114 = v_or_b32_lit %113, 50462976
-  %115 = v_perm_b32 %111, %110, %114
-  global_store_b32_saddr %100, %115, %output
+  %codebook_byte_offset = s_mov_b32 0
+  %119 = v_lshlrev_b32_src0_inline %workitem_id_x, 3
+  %120 = s_mov_b32 2
+  %121 = s_mov_b32 1
+  %122 = v_mov_b32 252645135
+  low.br ^_bb1(%codebook_byte_offset: reg<amdgpu.sgpr>, %119: reg<amdgpu.vgpr>)
+^_bb1(%packet: reg<amdgpu.sgpr>, %113: reg<amdgpu.vgpr>):
+  %123 = s_cmp_lt_u32 %packet, %120
+  low.cond_br %123, ^_bb2, ^_bb3 : reg<amdgpu.scc>
+^_bb2:
+  %124 = global_load_b32_saddr %113, %input
+  %indices = v_and_b32 %124, %122
+  %127 = s_load_dwordx4 %codebook, %codebook_byte_offset
+  %128 = slice %127[0] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %129 = slice %127[1] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %130 = slice %127[2] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %131 = slice %127[3] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %132 = v_and_b32_lit %indices, 117901063
+  %133 = v_perm_b32 %129, %128, %132
+  %134 = v_perm_b32 %131, %130, %132
+  %135 = v_and_b32_lit %indices, 134744072
+  %136 = v_lshrrev_b32_src0_inline %135, 1
+  %137 = v_or_b32_lit %136, 50462976
+  %138 = v_perm_b32 %134, %133, %137
+  global_store_b32_saddr %113, %138, %output
+  %139 = v_add_u32_src0_inline %113, 4
+  %140 = s_add_u32 %packet, %121
+  low.br ^_bb1(%140: reg<amdgpu.sgpr>, %139: reg<amdgpu.vgpr>)
+^_bb3:
   return
 }
 

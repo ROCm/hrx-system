@@ -1855,7 +1855,7 @@ static bool loom_vector_packet_footprints_match(
                  left->dynamic_indices.count * sizeof(loom_value_id_t)) == 0);
 }
 
-static bool loom_vector_packet_views_are_disjoint(
+static bool loom_vector_packet_views_are_nonconflicting(
     const loom_target_legalization_context_t* context, loom_value_id_t left,
     loom_value_id_t right) {
   loom_value_fact_view_reference_t left_reference = {0};
@@ -1872,6 +1872,10 @@ static bool loom_vector_packet_views_are_disjoint(
   }
   if (loom_value_fact_reference_origins_are_disjoint(left_reference.origin,
                                                      right_reference.origin)) {
+    return true;
+  }
+  if (loom_value_fact_restrict_accesses_are_independent(
+          left_reference.restrict_access, right_reference.restrict_access)) {
     return true;
   }
   if (left_reference.root_value_id == LOOM_VALUE_ID_INVALID ||
@@ -1906,9 +1910,9 @@ bool loom_vector_packet_store_can_interleave(
     IREE_ASSERT_TRUE(footprint_described);
     if (!loom_vector_packet_footprints_match(&load_footprint,
                                              store_footprint) &&
-        !loom_vector_packet_views_are_disjoint(packetization->context,
-                                               load_footprint.view,
-                                               store_footprint->view)) {
+        !loom_vector_packet_views_are_nonconflicting(packetization->context,
+                                                     load_footprint.view,
+                                                     store_footprint->view)) {
       return false;
     }
   }

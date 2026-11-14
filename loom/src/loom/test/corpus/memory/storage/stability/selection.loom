@@ -693,3 +693,56 @@ check.scenario @reconverged_storage_choice_values {
   }
   check.return
 }
+
+// Distinct restricted read paths may share storage when neither modifies it.
+// The output path writes after every pair of reads, exercising loop-carried
+// stability without converting the source contract into physical disjointness.
+kernel.def @restrict_shared_read_storage() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%left: buffer, %right: buffer, %output: buffer) {
+  %left_r, %right_r, %output_r = buffer.restrict.begin %left, %right, %output : buffer, buffer, buffer
+  %base = index.constant 0 : offset
+  %left_view = buffer.view %left_r[%base] : buffer -> view<4xi32>
+  %right_view = buffer.view %right_r[%base] : buffer -> view<4xi32>
+  %output_view = buffer.view %output_r[%base] : buffer -> view<4xi32>
+  %start = index.constant 0 : index
+  %end = index.constant 4 : index
+  %step = index.constant 1 : index
+  scf.for %i = [%start to %end step %step] {
+    %left_value = view.load %left_view[%i] : view<4xi32> -> i32
+    %right_value = view.load %right_view[%i] : view<4xi32> -> i32
+    %sum = scalar.addi %left_value, %right_value : i32
+    view.store %sum, %output_view[%i] : i32, view<4xi32>
+  }
+  kernel.return
+}
+
+func.def @restrict_shared_read_storage_oracle(%left: buffer, %right: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %left_view = buffer.view %left[%base] : buffer -> view<4xi32>
+  %right_view = buffer.view %right[%base] : buffer -> view<4xi32>
+  %output_view = buffer.view %output[%base] : buffer -> view<4xi32>
+  %start = index.constant 0 : index
+  %end = index.constant 4 : index
+  %step = index.constant 1 : index
+  scf.for %i = [%start to %end step %step] {
+    %left_value = view.load %left_view[%i] : view<4xi32> -> i32
+    %right_value = view.load %right_view[%i] : view<4xi32> -> i32
+    %sum = scalar.addi %left_value, %right_value : i32
+    view.store %sum, %output_view[%i] : i32, view<4xi32>
+  }
+  func.return
+}
+
+check.scenario @restrict_shared_read_storage_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %shared = check.generate.iota offset(-7) step(13) : tensor<4xi32>
+    %output = check.generate.fill value(-889275714) : tensor<4xi32>
+    check.compare<@restrict_shared_read_storage, @restrict_shared_read_storage_oracle>(%shared, %shared, %output) : (tensor<4xi32>, tensor<4xi32>, tensor<4xi32>) -> () {
+      check.expect.bitwise actual(%shared) expected(%shared) : tensor<4xi32>
+      check.expect.bitwise actual(%output) expected(%output) : tensor<4xi32>
+    }
+  }
+  check.return
+}

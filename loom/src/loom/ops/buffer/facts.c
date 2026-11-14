@@ -127,6 +127,12 @@ static iree_status_t loom_buffer_meet_reference_extension(
           lhs_reference.alias_scope_id == rhs_reference.alias_scope_id
               ? lhs_reference.alias_scope_id
               : LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE,
+      .restrict_access = lhs_reference.restrict_access.domain_id ==
+                                     rhs_reference.restrict_access.domain_id &&
+                                 lhs_reference.restrict_access.scope_id ==
+                                     rhs_reference.restrict_access.scope_id
+                             ? lhs_reference.restrict_access
+                             : (loom_value_fact_restrict_access_t){0},
       .nullability = lhs_reference.nullability == rhs_reference.nullability
                          ? lhs_reference.nullability
                          : LOOM_VALUE_FACT_REFERENCE_NULLABILITY_UNKNOWN,
@@ -465,6 +471,65 @@ iree_status_t loom_buffer_assume_noalias_facts(
   }
   for (uint16_t i = fact_count; i < results.count; ++i) {
     result_facts[i] = loom_value_facts_unknown();
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_buffer_refine_restrict_access(
+    loom_fact_context_t* context, const loom_module_t* module,
+    loom_value_id_t source, loom_value_facts_t source_facts,
+    loom_value_fact_restrict_access_t restrict_access,
+    loom_value_facts_t* out_facts) {
+  const loom_type_t type = loom_module_value_type(module, source);
+  if (loom_type_is_buffer(type)) {
+    loom_value_fact_buffer_reference_t reference =
+        loom_buffer_default_reference(source);
+    (void)loom_value_facts_query_buffer_reference(context, source_facts,
+                                                  &reference);
+    loom_buffer_resolve_reference_root(&reference, source);
+    reference.restrict_access = restrict_access;
+    return loom_value_facts_make_buffer_reference(context, reference,
+                                                  out_facts);
+  }
+  IREE_ASSERT(loom_type_is_view(type));
+  return loom_view_reference_refine_restrict_access(
+      context, source, source_facts, type, restrict_access, out_facts);
+}
+
+iree_status_t loom_buffer_restrict_begin_facts(
+    loom_fact_context_t* context, const loom_module_t* module,
+    const loom_op_t* op, const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts) {
+  const loom_value_slice_t restricted =
+      loom_buffer_restrict_begin_restricted(op);
+  const loom_value_slice_t results = loom_buffer_restrict_begin_results(op);
+  const uint32_t domain_id =
+      loom_value_fact_restrict_id_from_value(results.values[0]);
+  for (uint16_t i = 0; i < results.count; ++i) {
+    const loom_value_id_t operand = loom_op_const_operands(op)[i];
+    const loom_value_fact_restrict_access_t restrict_access = {
+        .domain_id = domain_id,
+        .scope_id =
+            i < restricted.count
+                ? loom_value_fact_restrict_id_from_value(results.values[i])
+                : 0,
+    };
+    IREE_RETURN_IF_ERROR(loom_buffer_refine_restrict_access(
+        context, module, operand, operand_facts[i], restrict_access,
+        &result_facts[i]));
+  }
+  return iree_ok_status();
+}
+
+iree_status_t loom_buffer_restrict_end_facts(
+    loom_fact_context_t* context, const loom_module_t* module,
+    const loom_op_t* op, const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts) {
+  const loom_value_slice_t references = loom_buffer_restrict_end_references(op);
+  for (uint16_t i = 0; i < references.count; ++i) {
+    IREE_RETURN_IF_ERROR(loom_buffer_refine_restrict_access(
+        context, module, references.values[i], operand_facts[i],
+        (loom_value_fact_restrict_access_t){0}, &result_facts[i]));
   }
   return iree_ok_status();
 }

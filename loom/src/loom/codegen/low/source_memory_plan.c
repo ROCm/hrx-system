@@ -1210,6 +1210,7 @@ static bool loom_low_source_memory_access_add_view_base_byte_offset(
   plan->root_minimum_alignment = loom_low_source_memory_clamp_alignment(
       view_region->root_minimum_alignment);
   plan->alias_scope_id = view_region->alias_scope_id;
+  plan->restrict_access = view_region->restrict_access;
   return true;
 }
 
@@ -1273,6 +1274,7 @@ static bool loom_low_source_memory_access_plan_from_components(
   out_plan->root_symbol = loom_symbol_ref_null();
   out_plan->root_minimum_alignment = 1;
   out_plan->alias_scope_id = LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE;
+  out_plan->restrict_access = (loom_value_fact_restrict_access_t){0};
   out_plan->dynamic_view_base_value_id = LOOM_VALUE_ID_INVALID;
   out_plan->dynamic_view_base_byte_facts = loom_value_facts_unknown();
   out_plan->minimum_alignment = 1;
@@ -1757,6 +1759,7 @@ static bool loom_low_source_memory_access_plan_build_byte_offset_impl(
       .root_minimum_alignment =
           loom_low_source_memory_clamp_alignment(reference.minimum_alignment),
       .alias_scope_id = reference.alias_scope_id,
+      .restrict_access = reference.restrict_access,
       .element_byte_count = 1,
       .vector_lane_count = 1,
       .vector_lane_byte_stride = 1,

@@ -546,62 +546,69 @@ static iree_status_t loom_kernel_synchronization_legality_check_cluster_request(
   return iree_ok_status();
 }
 
-static iree_status_t loom_kernel_synchronization_legality_endpoints_overlap(
+static iree_status_t loom_kernel_synchronization_legality_endpoints_conflict(
     loom_kernel_synchronization_legality_state_t* state,
     const loom_movement_endpoint_t* pending_endpoint,
-    const loom_view_region_t* access_region, bool* out_overlap) {
-  *out_overlap = false;
+    const loom_view_region_t* access_region,
+    loom_view_access_flags_t access_flags, bool* out_conflict) {
+  *out_conflict = false;
   if (pending_endpoint->kind != LOOM_MOVEMENT_ENDPOINT_VIEW || !access_region) {
-    *out_overlap = true;
+    *out_conflict = true;
     return iree_ok_status();
   }
   if (pending_endpoint->root_value_id == LOOM_VALUE_ID_INVALID ||
       access_region->root_value_id == LOOM_VALUE_ID_INVALID) {
-    *out_overlap = true;
+    *out_conflict = true;
     return iree_ok_status();
   }
   loom_view_region_t pending_region = {0};
   if (!loom_movement_endpoint_as_view_region(pending_endpoint,
                                              &pending_region)) {
-    *out_overlap = true;
+    *out_conflict = true;
     return iree_ok_status();
   }
-  bool no_overlap = false;
-  IREE_RETURN_IF_ERROR(loom_view_regions_prove_no_overlap(
-      &state->result->movement.view_regions, &pending_region, access_region,
-      &no_overlap));
-  *out_overlap = !no_overlap;
+  bool nonconflicting = false;
+  IREE_RETURN_IF_ERROR(loom_view_regions_prove_no_conflict(
+      &state->result->movement.view_regions, &pending_region,
+      pending_region.access_flags, access_region, access_flags,
+      &nonconflicting));
+  *out_conflict = !nonconflicting;
   return iree_ok_status();
 }
 
-static iree_status_t loom_kernel_synchronization_legality_pending_dest_overlaps(
+static iree_status_t
+loom_kernel_synchronization_legality_pending_dest_conflicts(
     loom_kernel_synchronization_legality_state_t* state,
     const loom_kernel_synchronization_legality_stream_t* stream,
-    const loom_view_region_t* access_region, bool* out_overlaps) {
-  *out_overlaps = false;
+    const loom_view_region_t* access_region,
+    loom_view_access_flags_t access_flags, bool* out_conflicts) {
+  *out_conflicts = false;
   for (iree_host_size_t i = stream->completed_endpoint_count;
        i < stream->endpoint_count; ++i) {
     const loom_kernel_synchronization_legality_endpoint_t* endpoint =
         &stream->endpoints[i];
 
-    bool overlaps = false;
-    IREE_RETURN_IF_ERROR(loom_kernel_synchronization_legality_endpoints_overlap(
-        state, &endpoint->request.dest, access_region, &overlaps));
-    if (!overlaps) {
+    bool conflicts = false;
+    IREE_RETURN_IF_ERROR(
+        loom_kernel_synchronization_legality_endpoints_conflict(
+            state, &endpoint->request.dest, access_region, access_flags,
+            &conflicts));
+    if (!conflicts) {
       continue;
     }
-    *out_overlaps = true;
+    *out_conflicts = true;
     return iree_ok_status();
   }
   return iree_ok_status();
 }
 
 static iree_status_t
-loom_kernel_synchronization_legality_pending_source_overlaps(
+loom_kernel_synchronization_legality_pending_source_conflicts(
     loom_kernel_synchronization_legality_state_t* state,
     const loom_kernel_synchronization_legality_stream_t* stream,
-    const loom_view_region_t* access_region, bool* out_overlaps) {
-  *out_overlaps = false;
+    const loom_view_region_t* access_region,
+    loom_view_access_flags_t access_flags, bool* out_conflicts) {
+  *out_conflicts = false;
   for (iree_host_size_t i = stream->completed_endpoint_count;
        i < stream->endpoint_count; ++i) {
     const loom_kernel_synchronization_legality_endpoint_t* endpoint =
@@ -610,13 +617,15 @@ loom_kernel_synchronization_legality_pending_source_overlaps(
       continue;
     }
 
-    bool overlaps = false;
-    IREE_RETURN_IF_ERROR(loom_kernel_synchronization_legality_endpoints_overlap(
-        state, &endpoint->request.source, access_region, &overlaps));
-    if (!overlaps) {
+    bool conflicts = false;
+    IREE_RETURN_IF_ERROR(
+        loom_kernel_synchronization_legality_endpoints_conflict(
+            state, &endpoint->request.source, access_region, access_flags,
+            &conflicts));
+    if (!conflicts) {
       continue;
     }
-    *out_overlaps = true;
+    *out_conflicts = true;
     return iree_ok_status();
   }
   return iree_ok_status();
@@ -628,11 +637,18 @@ loom_kernel_synchronization_legality_check_pending_dest_hazard(
     const loom_kernel_synchronization_legality_stream_t* stream,
     const loom_op_t* op, const loom_view_region_t* access_region,
     loom_operand_flags_t flags) {
-  bool overlaps = false;
+  bool conflicts = false;
+  loom_view_access_flags_t access_flags = 0;
+  if (iree_any_bit_set(flags, LOOM_OPERAND_READS)) {
+    access_flags |= LOOM_VIEW_ACCESS_READ;
+  }
+  if (iree_any_bit_set(flags, LOOM_OPERAND_WRITES)) {
+    access_flags |= LOOM_VIEW_ACCESS_WRITE;
+  }
   IREE_RETURN_IF_ERROR(
-      loom_kernel_synchronization_legality_pending_dest_overlaps(
-          state, stream, access_region, &overlaps));
-  if (overlaps) {
+      loom_kernel_synchronization_legality_pending_dest_conflicts(
+          state, stream, access_region, access_flags, &conflicts));
+  if (conflicts) {
     if (iree_any_bit_set(flags, LOOM_OPERAND_WRITES)) {
       return loom_kernel_synchronization_legality_fail(state, op,
                                                        LOOM_ERR_LOWERING_027);
@@ -654,11 +670,11 @@ loom_kernel_synchronization_legality_check_pending_source_hazard(
   if (!iree_any_bit_set(flags, LOOM_OPERAND_WRITES)) {
     return iree_ok_status();
   }
-  bool overlaps = false;
+  bool conflicts = false;
   IREE_RETURN_IF_ERROR(
-      loom_kernel_synchronization_legality_pending_source_overlaps(
-          state, stream, access_region, &overlaps));
-  if (overlaps) {
+      loom_kernel_synchronization_legality_pending_source_conflicts(
+          state, stream, access_region, LOOM_VIEW_ACCESS_WRITE, &conflicts));
+  if (conflicts) {
     return loom_kernel_synchronization_legality_fail(state, op,
                                                      LOOM_ERR_LOWERING_037);
   }
@@ -686,6 +702,7 @@ loom_kernel_synchronization_legality_resolve_reference_region(
         loom_value_fact_buffer_reference_resolve_root_value(reference,
                                                             value_id);
     buffer_region->alias_scope_id = reference.alias_scope_id;
+    buffer_region->restrict_access = reference.restrict_access;
     buffer_region->memory_space = reference.memory_space;
     buffer_region->nullability = reference.nullability;
     buffer_region->origin = reference.origin;
@@ -787,6 +804,7 @@ static iree_status_t loom_kernel_synchronization_legality_check_call(
       root_region = (loom_view_region_t){
           .root_value_id = argument_region->root_value_id,
           .alias_scope_id = argument_region->alias_scope_id,
+          .restrict_access = argument_region->restrict_access,
           .nullability = argument_region->nullability,
           .origin = argument_region->origin,
           .memory_space = argument_region->memory_space,
@@ -930,11 +948,11 @@ static iree_status_t loom_kernel_synchronization_legality_append_transfer(
     return loom_kernel_synchronization_legality_fail(state, producer_op,
                                                      LOOM_ERR_LOWERING_025);
   }
-  bool overlaps = false;
+  bool conflicts = false;
   IREE_RETURN_IF_ERROR(
-      loom_kernel_synchronization_legality_pending_dest_overlaps(
-          state, stream, &dest_region, &overlaps));
-  if (overlaps) {
+      loom_kernel_synchronization_legality_pending_dest_conflicts(
+          state, stream, &dest_region, LOOM_VIEW_ACCESS_WRITE, &conflicts));
+  if (conflicts) {
     return loom_kernel_synchronization_legality_fail(state, producer_op,
                                                      LOOM_ERR_LOWERING_026);
   }
