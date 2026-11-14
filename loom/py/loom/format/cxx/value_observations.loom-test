@@ -33,8 +33,6 @@ loom::type::index bounded(bool condition, loom::type::index value, loom::type::i
 // ====
 // Source-only physical-root proofs retain exact C++ spellings across scalar,
 // vector, and atomic memory families.
-// REQUIRES: loom-export-cxx
-// RUN: emit cxx roundtrip
 func.def public @scalar_access(%storage: buffer, %byte_offset: offset, %replacement: i32) -> (i32) {
   %view = buffer.view %storage[%byte_offset] : buffer -> view<1xi32>
   %old = view.load<root_in_bounds> %view[0] : view<1xi32> -> i32
@@ -98,5 +96,55 @@ unsigned atomic_access(loom::type::buffer<unsigned> storage, loom::type::offset 
   unsigned old = loom::view::atomic::rmw<loom::atomic::kind::addi, loom::atomic::ordering::acq_rel, loom::atomic::scope::device, loom::memory_access::root_in_bounds>(replacement, view, 0);
   loom::view::atomic::reduce<loom::atomic::kind::maxui, loom::atomic::ordering::relaxed, loom::atomic::scope::device, loom::memory_access::root_in_bounds>(old, view, 0);
   unsigned observed = loom::view::atomic::cmpxchg<loom::atomic::ordering::acq_rel, loom::atomic::ordering::acquire, loom::atomic::scope::device, loom::memory_access::root_in_bounds>(expected, replacement, view, 0);
+  return observed;
+}
+
+// ====
+// Mixed ordinary and volatile observations retain their individual modes;
+// neither the complete view nor the function becomes volatile.
+func.def public @observe(%values: view<4xi32>, %replacement: i32) -> (i32) {
+  %ordinary = view.load %values[0] : view<4xi32> -> i32
+  %discarded = view.load<volatile> %values[1] : view<4xi32> -> i32
+  %observed = view.load<volatile|root_in_bounds> %values[2] : view<4xi32> -> i32
+  view.store %replacement, %values[0] : i32, view<4xi32>
+  view.store<volatile> %ordinary, %values[1] : i32, view<4xi32>
+  view.store<volatile|root_in_bounds> %observed, %values[2] : i32, view<4xi32>
+  func.return %observed : i32
+}
+
+func.def public @observe_packet(%values: view<4xi32>, %replacement: vector<4xi32>) -> (vector<4xi32>) {
+  %observed = vector.load<volatile|root_in_bounds> %values[0] : view<4xi32> -> vector<4xi32>
+  vector.store<volatile> %replacement, %values[0] : vector<4xi32>, view<4xi32>
+  vector.store %observed, %values[0] : vector<4xi32>, view<4xi32>
+  func.return %observed : vector<4xi32>
+}
+
+// ----
+#include <loomcxx/vector.h>
+
+using UInt32x4 = unsigned __attribute__((ext_vector_type(4)));
+
+[[loom::symbol("observe")]]
+unsigned observe(loom::type::view<loom::type::shape<4>, unsigned> values, unsigned replacement);
+
+[[loom::symbol("observe_packet")]]
+UInt32x4 observe_packet(loom::type::view<loom::type::shape<4>, unsigned> values, UInt32x4 replacement);
+
+[[loom::symbol("observe")]]
+unsigned observe(loom::type::view<loom::type::shape<4>, unsigned> values, unsigned replacement) {
+  unsigned ordinary = loom::view::load(values, 0);
+  unsigned discarded = loom::view::load<loom::memory_access::volatile_>(values, 1);
+  unsigned observed = loom::view::load<loom::memory_access::volatile_ | loom::memory_access::root_in_bounds>(values, 2);
+  loom::view::store(replacement, values, 0);
+  loom::view::store<loom::memory_access::volatile_>(ordinary, values, 1);
+  loom::view::store<loom::memory_access::volatile_ | loom::memory_access::root_in_bounds>(observed, values, 2);
+  return observed;
+}
+
+[[loom::symbol("observe_packet")]]
+UInt32x4 observe_packet(loom::type::view<loom::type::shape<4>, unsigned> values, UInt32x4 replacement) {
+  UInt32x4 observed = loom::vector::load<UInt32x4, loom::memory_access::volatile_ | loom::memory_access::root_in_bounds>(values, {0});
+  loom::vector::store<loom::memory_access::volatile_>(replacement, values, {0});
+  loom::vector::store(observed, values, {0});
   return observed;
 }

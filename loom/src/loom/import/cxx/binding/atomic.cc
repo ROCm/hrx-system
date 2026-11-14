@@ -19,6 +19,7 @@
 #include <variant>
 
 #include "loom/import/cxx/binding/index_values.h"
+#include "loom/import/cxx/binding/memory_access.h"
 #include "loom/import/cxx/source/constants.h"
 #include "loom/import/cxx/source/error.h"
 #include "loom/ops/buffer/ops.h"
@@ -51,28 +52,6 @@ void read_selectors(cxx::TranslationUnit& unit, Diagnostics& diagnostics,
     }
     selectors[index] = static_cast<uint8_t>(number->toUIntMax());
   }
-}
-
-loom_memory_access_flags_t read_memory_access(cxx::TranslationUnit& unit,
-                                              Diagnostics& diagnostics,
-                                              cxx::FunctionSymbol* function,
-                                              size_t argument_index,
-                                              cxx::AST* owner) {
-  auto arguments = function->templateArguments();
-  if (argument_index >= arguments.size()) {
-    return 0;
-  }
-  auto value = cxx::template_argument_value(arguments[argument_index]);
-  if (!value) {
-    return 0;
-  }
-  auto* number = std::get_if<cxx::ConstInt>(&*value);
-  if (!number || number->isNegative() ||
-      (number->toUWide() != 0 &&
-       number->toUWide() != LOOM_MEMORY_ACCESS_FLAG_ROOT_IN_BOUNDS)) {
-    diagnostics.reject(unit, owner, "unknown memory access contract");
-  }
-  return static_cast<loom_memory_access_flags_t>(number->toUIntMax());
 }
 
 void require_ordering(cxx::TranslationUnit& unit, Diagnostics& diagnostics,
@@ -168,7 +147,8 @@ std::optional<AtomicIntrinsic> AtomicIntrinsic::resolve(
   read_selectors(unit, diagnostics, function, attribute, owner,
                  std::span(selectors).first(selector_count));
   const loom_memory_access_flags_t memory_flags =
-      read_memory_access(unit, diagnostics, function, selector_count, owner);
+      read_memory_access_flags(unit, diagnostics, function, selector_count,
+                               LOOM_MEMORY_ACCESS_FLAG_ROOT_IN_BOUNDS, owner);
   auto kind = LOOM_ATOMIC_KIND_XCHGI;
   auto ordering = LOOM_ATOMIC_ORDERING_RELAXED;
   auto failure_ordering = LOOM_ATOMIC_ORDERING_RELAXED;

@@ -3697,15 +3697,33 @@ Typed views use the same contract. A
 element qualifier through copies, helpers and subviews;
 `loom::view::load` returns an ordinary scalar and `loom::view::store` accepts
 one. A `const volatile` element permits observations but rejects stores.
-Volatile supplies observable accesses, without atomicity, synchronization or a
-cache-coherence guarantee. Volatile scalar and vector local declarations receive
-private storage even when their address is never taken. Volatile by-value
-parameters require separating the incoming SSA signature from the qualified
-parameter object and produce a source diagnostic. Stored pointer objects
-need an object representation for their buffer and byte origin, and automatic
-record values need aggregate memory copies; those declarations produce source
-diagnostics. Namespace-scope volatile objects require global-storage projection
-and cannot fold to their initializer.
+
+Scalar and unmasked vector accesses can also select volatility per operation,
+without qualifying other accesses through the same view:
+
+```cpp
+using Access = loom::memory_access;
+unsigned ordinary = loom::view::load(values, 0);
+unsigned observed = loom::view::load<Access::volatile_>(values, 0);
+loom::view::store<Access::volatile_ | Access::root_in_bounds>(observed, values, 1);
+```
+
+The selector combines with the view's element qualifier; it cannot remove
+volatility. `root_in_bounds` promises the complete physical access lies within
+its allocation root, while logical view bounds remain checked. C++ export uses
+these per-access selectors to preserve mixed ordinary and volatile observations,
+including discarded reads and repeated stores. Atomic accesses retain their
+separate ordering contract and reject the ordinary volatile selector.
+
+Volatile supplies observable accesses, without atomicity, synchronization, or a
+cache-coherence guarantee. Volatile scalar, vector, and top-level-qualified
+aggregate locals receive private storage even when their address is never taken.
+Qualified by-value parameters initialize that storage from the incoming SSA
+values. A top-level volatile aggregate initializes its scalar fields separately.
+Automatic records with directly volatile members still require a result-object
+storage contract and produce a source diagnostic. Volatile pointer objects need
+storage for their buffer and byte origin; namespace-scope volatile objects need
+global-storage projection. Neither can fold to an ordinary SSA initializer.
 
 `continue` skips the remaining body of the innermost `for`, `while`, or
 `do/while`. Updates before the exit survive; a `for` increment and a `do/while`

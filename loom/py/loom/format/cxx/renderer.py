@@ -181,10 +181,17 @@ class CxxRenderer(CxxFunctionRenderer):
     def _append_memory_access_contract(
         operation: Operation, selectors: list[str]
     ) -> tuple[str, ...]:
-        if operation.attributes.get("memory_flags") == "root_in_bounds":
-            selectors.append("loom::memory_access::root_in_bounds")
-            return ("memory_flags",)
-        return ()
+        flags = operation.attributes.get("memory_flags")
+        if not flags:
+            return ()
+        members = {"volatile": "volatile_", "root_in_bounds": "root_in_bounds"}
+        names = flags.split("|")
+        if any(name not in members for name in names):
+            return ()
+        selectors.append(
+            " | ".join(f"loom::memory_access::{members[name]}" for name in names)
+        )
+        return ("memory_flags",)
 
     def _emit_atomic_result(self, result: int, expression: str) -> None:
         if self.use_counts[result] == 0 and result not in self.assignment_targets:

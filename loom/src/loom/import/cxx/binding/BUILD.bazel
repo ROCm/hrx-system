@@ -77,6 +77,7 @@ loom_cc_library(
     cxx_standard = CXX_COMPILER_OPTIONS["cxx_standard"],
     deps = [
         ":index_values",
+        ":memory_access",
         "//loom/src/loom/import/cxx/source:constants",
         "//loom/src/loom/import/cxx/source:error",
         "//loom/src/loom/import/cxx/value:storage",
@@ -468,6 +469,19 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "memory_access",
+    srcs = ["memory_access.cc"],
+    hdrs = ["memory_access.h"],
+    cxx_features = CXX_COMPILER_OPTIONS["cxx_features"],
+    cxx_standard = CXX_COMPILER_OPTIONS["cxx_standard"],
+    deps = [
+        "//loom/src/loom/import/cxx/source:frontend",
+        "//loom/src/loom/ops:op_defs",
+        "//third_party:cxx_parser",
+    ],
+)
+
+loom_cc_library(
     name = "view",
     srcs = ["view.cc"],
     hdrs = ["view.h"],
@@ -475,6 +489,7 @@ loom_cc_library(
     cxx_standard = CXX_COMPILER_OPTIONS["cxx_standard"],
     deps = [
         ":index_values",
+        ":memory_access",
         "//loom/src/loom/import/cxx/source",
         "//loom/src/loom/import/cxx/source:error",
         "//loom/src/loom/import/cxx/value:representation",
@@ -537,6 +552,7 @@ loom_cc_library(
     cxx_standard = CXX_COMPILER_OPTIONS["cxx_standard"],
     deps = [
         ":index_values",
+        ":memory_access",
         "//loom/src/loom/import/cxx/source",
         "//loom/src/loom/import/cxx/source:error",
         "//loom/src/loom/import/cxx/value:representation",
