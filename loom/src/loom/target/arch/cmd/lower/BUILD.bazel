@@ -82,6 +82,7 @@ loom_cc_library(
         "//loom/src/loom/rewrite:remap",
         "//loom/src/loom/rewrite:rewriter",
         "//loom/src/loom/target:facts",
+        "//loom/src/loom/target:function_contract",
         "//loom/src/loom/transforms/kernel:kernel_class_materializer",
         "//loom/src/loom/util:dominance",
         "//loom/src/loom/util:fact_table",
