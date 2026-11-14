@@ -37,6 +37,28 @@ loom_cc_test(
     ],
 )
 
+loom_cc_test(
+    name = "packed_dot_test",
+    srcs = ["packed_dot_test.cc"],
+    deps = [
+        ":encoding",
+        "//loom/src/loom/target/arch/x86/descriptors:packed_dot_descriptors",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "permutation_test",
+    srcs = ["permutation_test.cc"],
+    deps = [
+        ":encoding",
+        "//loom/src/loom/target/arch/x86/descriptors:avx512_descriptors",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 loom_cc_library(
     name = "transport",
     srcs = ["transport.c"],

@@ -58,9 +58,11 @@ def test_every_owned_source_operation_has_a_closed_shape_matrix() -> None:
         vector.vector_insert.name: 61,
         vector.vector_shuffle.name: 30,
         vector.vector_concat.name: 66,
+        vector.vector_interleave.name: 20,
+        vector.vector_deinterleave.name: 20,
         scf.scf_select.name: 40,
     }
-    assert len(SPIRV_ORDINARY_VECTOR_CONTRACT_CASES) == 516
+    assert len(SPIRV_ORDINARY_VECTOR_CONTRACT_CASES) == 556
 
 
 def test_aliases_cover_singletons_uniform_carriers_and_identity_bit_layouts() -> None:
@@ -392,6 +394,89 @@ def test_native_concat_rules_cover_every_component_and_binary_partition() -> Non
                 else ValueRef.operand("inputs", element=1)
             ),
         }
+
+
+def test_native_interleave_rules_preserve_every_component_and_lane_route() -> None:
+    rules = tuple(
+        case
+        for case in SPIRV_ORDINARY_VECTOR_CONTRACT_CASES
+        if isinstance(case, DescriptorRule)
+        and case.source_op in (vector.vector_interleave, vector.vector_deinterleave)
+    )
+    actual = set()
+    for rule in rules:
+        patterns = {
+            guard.field: guard.type_pattern
+            for guard in rule.guards
+            if guard.kind is GuardKind.VALUE_TYPE
+        }
+        is_zip = rule.source_op is vector.vector_interleave
+        full = patterns["result" if is_zip else "source"]
+        half = patterns["even"]
+        assert patterns["odd"] == half
+        assert half.elements == full.elements
+        assert half.lanes * 2 == full.lanes
+        for source_type in full.elements:
+            key = (rule.source_op.name, source_type, full.lanes)
+            assert key not in actual
+            actual.add(key)
+        assert any(
+            guard.kind is GuardKind.I64_RANGE
+            and guard.field == "axis"
+            and guard.minimum == guard.maximum == 0
+            for guard in rule.guards
+        )
+        availability = [
+            guard
+            for guard in rule.guards
+            if guard.kind is GuardKind.DESCRIPTOR_AVAILABLE
+        ]
+        assert bool(availability) == bool(rule.descriptor.feature_mask_words)
+
+        inputs = (
+            {
+                "even": tuple(range(0, full.lanes, 2)),
+                "odd": tuple(range(1, full.lanes, 2)),
+            }
+            if is_zip
+            else {"source": tuple(range(full.lanes))}
+        )
+        outputs = {}
+        for emit in rule.emit:
+            operands = {
+                field: inputs[value.field] for field, value in emit.operands.items()
+            }
+            if emit.descriptor.key.startswith("spirv.op_composite_construct."):
+                value = operands["component0"] + operands["component1"]
+            elif emit.descriptor.key.startswith("spirv.op_composite_extract."):
+                value = (operands["composite"][emit.immediates["component_index"]],)
+            else:
+                assert emit.descriptor.key.startswith("spirv.op_vector_shuffle.")
+                source = operands["source0"] + operands["source1"]
+                value = tuple(
+                    source[emit.immediates[f"selector{i}"]]
+                    for i in range(full.lanes if is_zip else half.lanes)
+                )
+            result = emit.results["dst"]
+            assert result.kind is SourceValueKind.RESULT
+            assert result.field not in outputs
+            outputs[result.field] = value
+        assert outputs == (
+            {"result": tuple(range(full.lanes))}
+            if is_zip
+            else {
+                "even": tuple(range(0, full.lanes, 2)),
+                "odd": tuple(range(1, full.lanes, 2)),
+            }
+        )
+
+    assert actual == {
+        (operation.name, source_type, lanes)
+        for operation in (vector.vector_interleave, vector.vector_deinterleave)
+        for component in ORDINARY_VECTOR_COMPONENT_TYPES
+        for source_type in component.source_types
+        for lanes in (2, 4)
+    }
 
 
 def test_vector_contract_is_bound_into_the_shipping_fragment() -> None:

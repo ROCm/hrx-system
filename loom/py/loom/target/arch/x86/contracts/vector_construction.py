@@ -472,42 +472,21 @@ def _assemble_chunks(
 ) -> tuple[list[EmitDescriptorOp], ValueRef]:
     if len(chunks) == 1:
         return [], chunks[0]
-    zero = descriptor_lookup(
-        "x86.avx2.vxorps.zero.ymm"
+    low, high = chunks
+    descriptor = descriptor_lookup(
+        "x86.avx2.vinsertf128.concat.ymm"
         if result_bit_width == 256
-        else "x86.avx512.vxorps.zero.zmm"
+        else "x86.avx512.vinserti64x4.concat.zmm"
     )
-    insert = descriptor_lookup(
-        "x86.avx2.vinsertf128.ymm.xmm"
-        if result_bit_width == 256
-        else "x86.avx512.vinserti64x4.zmm.ymm"
-    )
-    empty = ValueRef.temporary(f"empty_{name}")
-    emits = [
+    result = ValueRef.temporary(name)
+    return [
         _op_emit(
-            descriptor=zero,
-            results={"dst": empty},
+            descriptor=descriptor,
+            operands={"low": low, "high": high},
+            results={"dst": result},
             result_types={"dst": DescriptorResultType()},
         )
-    ]
-    dest = empty
-    for lane, chunk in enumerate(chunks):
-        next_dest = (
-            ValueRef.temporary(name)
-            if lane + 1 == len(chunks)
-            else ValueRef.temporary(f"{name}_with_chunk{lane}")
-        )
-        emits.append(
-            _op_emit(
-                descriptor=insert,
-                operands={"dest": dest, "value": chunk},
-                results={"dst": next_dest},
-                result_types={"dst": DescriptorResultType()},
-                immediates={"lane": lane},
-            )
-        )
-        dest = next_dest
-    return emits, dest
+    ], result
 
 
 def _concat_rules(

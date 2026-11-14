@@ -41,6 +41,7 @@ loom_check_test_suite(
         "rounding_native_bytes.loom-test",
         "scalar_memory_native_bytes.loom-test",
         "unused_abi_inputs.loom-test",
+        "vector_halves.loom-test",
     ],
 )
 

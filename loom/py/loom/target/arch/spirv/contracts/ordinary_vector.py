@@ -503,6 +503,85 @@ def _shuffle_rule(
     )
 
 
+def _interleave_rule(vector_type: OrdinaryVectorType) -> DescriptorRule:
+    component_type = vector_type.component_type
+    half_pattern = Vector(
+        component_type.source_types, lanes=vector_type.lane_count // 2
+    )
+    even = ValueRef.operand("even")
+    odd = ValueRef.operand("odd")
+    if vector_type.lane_count == 2:
+        descriptor = _construct_descriptor(vector_type)
+        operands = {"component0": even, "component1": odd}
+        immediates = {}
+    else:
+        descriptor = _descriptor(
+            f"spirv.op_vector_shuffle.v2{component_type.suffix}.{vector_type.suffix}"
+        )
+        operands = {"source0": even, "source1": odd}
+        immediates = {f"selector{i}": lane for i, lane in enumerate((0, 2, 1, 3))}
+    return DescriptorRule(
+        source_op=vector.vector_interleave,
+        descriptor=descriptor,
+        guards=(
+            Guard.i64_range("axis", 0, 0),
+            Guard.value_type("even", half_pattern),
+            Guard.value_type("odd", half_pattern),
+            Guard.value_type("result", _vector_pattern(vector_type)),
+            *_feature_guards(descriptor),
+        ),
+        emit=(
+            _emit(
+                descriptor,
+                operands=operands,
+                results={"dst": ValueRef.result("result")},
+                immediates=immediates,
+            ),
+        ),
+    )
+
+
+def _deinterleave_rule(vector_type: OrdinaryVectorType) -> DescriptorRule:
+    component_type = vector_type.component_type
+    half_pattern = Vector(
+        component_type.source_types, lanes=vector_type.lane_count // 2
+    )
+    source = ValueRef.operand("source")
+    if vector_type.lane_count == 2:
+        descriptor = _extract_descriptor(vector_type)
+        operands = {"composite": source}
+        selectors = ({"component_index": 0}, {"component_index": 1})
+    else:
+        descriptor = _descriptor(
+            f"spirv.op_vector_shuffle.{vector_type.suffix}.v2{component_type.suffix}"
+        )
+        operands = {"source0": source, "source1": source}
+        selectors = (
+            {"selector0": 0, "selector1": 2},
+            {"selector0": 1, "selector1": 3},
+        )
+    return DescriptorRule(
+        source_op=vector.vector_deinterleave,
+        descriptor=descriptor,
+        guards=(
+            Guard.i64_range("axis", 0, 0),
+            Guard.value_type("source", _vector_pattern(vector_type)),
+            Guard.value_type("even", half_pattern),
+            Guard.value_type("odd", half_pattern),
+            *_feature_guards(descriptor),
+        ),
+        emit=tuple(
+            _emit(
+                descriptor,
+                operands=operands,
+                results={"dst": ValueRef.result(result)},
+                immediates=immediates,
+            )
+            for result, immediates in zip(("even", "odd"), selectors, strict=True)
+        ),
+    )
+
+
 def _concat_rule(
     component_type: OrdinaryVectorComponentType,
     source_type: str,
@@ -860,4 +939,10 @@ SPIRV_ORDINARY_VECTOR_CONTRACT_CASES: tuple[ContractCase, ...] = (
     *_constant_rules(),
     *_native_rules(),
     *_concat_rules(),
+    *(
+        rule(OrdinaryVectorType(component_type, lane_count))
+        for component_type in ORDINARY_VECTOR_COMPONENT_TYPES
+        for lane_count in (2, 4)
+        for rule in (_interleave_rule, _deinterleave_rule)
+    ),
 )

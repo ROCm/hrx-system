@@ -330,14 +330,14 @@ loom_cc_library(
     srcs = [
         "bitwise_legalization.c",
         "bitwise_legalization.h",
-        "grouped_dot_legalization.c",
+        "grouped_packet_legalization.c",
         "memory_legalization.c",
         "signed_unary_legalization.c",
         "signed_unary_legalization.h",
         "target_legalization.c",
     ],
     hdrs = [
-        "grouped_dot_legalization.h",
+        "grouped_packet_legalization.h",
         "memory_legalization.h",
         "target_legalization.h",
     ],

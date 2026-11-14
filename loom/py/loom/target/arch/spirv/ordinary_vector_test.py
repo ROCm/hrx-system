@@ -13,6 +13,7 @@ from loom.target.arch.spirv.ordinary_vector import (
     ORDINARY_VECTOR_COMPONENT_TYPES,
     ORDINARY_VECTOR_CONCAT_SHAPES,
     ORDINARY_VECTOR_CONCAT_SHUFFLE_INSTRUCTIONS,
+    ORDINARY_VECTOR_DEINTERLEAVE_SHUFFLE_INSTRUCTIONS,
     ORDINARY_VECTOR_INSTRUCTIONS,
     ORDINARY_VECTOR_SHUFFLE_INSTRUCTIONS,
     ORDINARY_VECTOR_SOURCE_SHUFFLE_INSTRUCTIONS,
@@ -109,7 +110,7 @@ def test_structural_instruction_matrix_is_closed_per_native_type() -> None:
         assert index_type.source_types == ("i32", "index")
 
 
-def test_shuffle_instruction_matrix_covers_source_and_concat_shapes() -> None:
+def test_shuffle_instruction_matrix_covers_source_concat_and_split_shapes() -> None:
     assert len(ORDINARY_VECTOR_SOURCE_SHUFFLE_INSTRUCTIONS) == len(
         ORDINARY_VECTOR_TYPES
     )
@@ -134,6 +135,17 @@ def test_shuffle_instruction_matrix_covers_source_and_concat_shapes() -> None:
         )
         for instruction in ORDINARY_VECTOR_CONCAT_SHUFFLE_INSTRUCTIONS
     } == {(2, 2, 3), (2, 2, 4), (2, 3, 4), (3, 2, 4)}
+    assert {
+        (
+            instruction.source0_type.component_type,
+            instruction.source0_type.lane_count,
+            instruction.source1_type.lane_count,
+            instruction.result_type.lane_count,
+        )
+        for instruction in ORDINARY_VECTOR_DEINTERLEAVE_SHUFFLE_INSTRUCTIONS
+    } == {
+        (component_type, 4, 4, 2) for component_type in ORDINARY_VECTOR_COMPONENT_TYPES
+    }
     assert len(
         {instruction.key for instruction in ORDINARY_VECTOR_SHUFFLE_INSTRUCTIONS}
     ) == len(ORDINARY_VECTOR_SHUFFLE_INSTRUCTIONS)

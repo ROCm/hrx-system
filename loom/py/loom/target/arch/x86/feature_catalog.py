@@ -119,4 +119,11 @@ X86_FEATURE_INFOS: tuple[X86FeatureInfo, ...] = (
         "LZCNT",
         "Scalar leading-zero-count instructions.",
     ),
+    X86FeatureInfo(
+        "avx512vbmi",
+        "AVX512VBMI",
+        "LOOM_X86_FEATURE_AVX512_VBMI",
+        "AVX512VBMI",
+        "AVX-512 full-register byte permutations.",
+    ),
 )

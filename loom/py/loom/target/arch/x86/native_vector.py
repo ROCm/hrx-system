@@ -12,6 +12,7 @@ from enum import Enum
 
 from loom.target.low_descriptors import ImmediateKind, OperandRole
 
+from .native_permutation import UNPACK_INSTRUCTIONS
 from .scalar_families import X86_SCALAR_VARIABLE_SHIFT_FAMILIES
 from .vector_encoding import (
     VectorEncoding,
@@ -1377,80 +1378,6 @@ VPCMPW = _instruction(
     _IMMEDIATES_4,
     _encoding(_EVEX, _MAP_3, 1, 1, 0x3F, (128, 256, 512)),
 )
-VPDPBSSD = _instruction(
-    "vpdpbssd",
-    _DESTRUCTIVE_NDS,
-    _OPERANDS_17,
-    _IMMEDIATES_0,
-    _encoding(_VEX, _MAP_2, 3, 0, 0x50, (128, 256)),
-)
-VPDPBSSDS = _instruction(
-    "vpdpbssds",
-    _DESTRUCTIVE_NDS,
-    _OPERANDS_17,
-    _IMMEDIATES_0,
-    _encoding(_VEX, _MAP_2, 3, 0, 0x51, (128, 256)),
-)
-VPDPBSUD = _instruction(
-    "vpdpbsud",
-    _DESTRUCTIVE_NDS,
-    _OPERANDS_17,
-    _IMMEDIATES_0,
-    _encoding(_VEX, _MAP_2, 2, 0, 0x50, (128, 256)),
-)
-VPDPBSUDS = _instruction(
-    "vpdpbsuds",
-    _DESTRUCTIVE_NDS,
-    _OPERANDS_17,
-    _IMMEDIATES_0,
-    _encoding(_VEX, _MAP_2, 2, 0, 0x51, (128, 256)),
-)
-VPDPBUSD = _instruction(
-    "vpdpbusd",
-    _DESTRUCTIVE_NDS,
-    _OPERANDS_17,
-    _IMMEDIATES_0,
-    _encoding(_VEX, _MAP_2, 1, 0, 0x50, (128, 256)),
-    _encoding(_EVEX, _MAP_2, 1, 0, 0x50, (128, 256, 512)),
-)
-VPDPBUSDS = _instruction(
-    "vpdpbusds",
-    _DESTRUCTIVE_NDS,
-    _OPERANDS_17,
-    _IMMEDIATES_0,
-    _encoding(_VEX, _MAP_2, 1, 0, 0x51, (128, 256)),
-    _encoding(_EVEX, _MAP_2, 1, 0, 0x51, (128, 256, 512)),
-)
-VPDPBUUD = _instruction(
-    "vpdpbuud",
-    _DESTRUCTIVE_NDS,
-    _OPERANDS_17,
-    _IMMEDIATES_0,
-    _encoding(_VEX, _MAP_2, 0, 0, 0x50, (128, 256)),
-)
-VPDPBUUDS = _instruction(
-    "vpdpbuuds",
-    _DESTRUCTIVE_NDS,
-    _OPERANDS_17,
-    _IMMEDIATES_0,
-    _encoding(_VEX, _MAP_2, 0, 0, 0x51, (128, 256)),
-)
-VPDPWSSD = _instruction(
-    "vpdpwssd",
-    _DESTRUCTIVE_NDS,
-    _OPERANDS_17,
-    _IMMEDIATES_0,
-    _encoding(_VEX, _MAP_2, 1, 0, 0x52, (128, 256)),
-    _encoding(_EVEX, _MAP_2, 1, 0, 0x52, (128, 256, 512)),
-)
-VPDPWSSDS = _instruction(
-    "vpdpwssds",
-    _DESTRUCTIVE_NDS,
-    _OPERANDS_17,
-    _IMMEDIATES_0,
-    _encoding(_VEX, _MAP_2, 1, 0, 0x53, (128, 256)),
-    _encoding(_EVEX, _MAP_2, 1, 0, 0x53, (128, 256, 512)),
-)
 VPERMD = _instruction(
     "vpermd",
     _NDS_SWAPPED_INPUTS,
@@ -1869,7 +1796,7 @@ VPSLLD = _instruction(
     _OPERANDS_13,
     _IMMEDIATES_5,
     _encoding(_VEX, _MAP_1, 1, 0, 0x72, (128, 256)),
-    _encoding(_EVEX, _MAP_1, 1, 0, 0x72, (512,)),
+    _encoding(_EVEX, _MAP_1, 1, 0, 0x72, (128, 256, 512)),
 )
 VPSLLD_COUNT = _instruction(
     "vpslld",
@@ -1884,7 +1811,7 @@ VPSLLQ = _instruction(
     _OPERANDS_13,
     _IMMEDIATES_5,
     _encoding(_VEX, _MAP_1, 1, 0, 0x73, (128, 256)),
-    _encoding(_EVEX, _MAP_1, 1, 1, 0x73, (512,)),
+    _encoding(_EVEX, _MAP_1, 1, 1, 0x73, (128, 256, 512)),
 )
 VPSLLQ_COUNT = _instruction(
     "vpsllq",
@@ -1921,7 +1848,7 @@ VPSLLW = _instruction(
     _SHIFT_IMMEDIATE_6,
     _OPERANDS_13,
     _IMMEDIATES_5,
-    _encoding(_EVEX, _MAP_1, 1, 0, 0x71, (512,)),
+    _encoding(_EVEX, _MAP_1, 1, 0, 0x71, (128, 256, 512)),
     _encoding(_VEX, _MAP_1, 1, 0, 0x71, (128, 256)),
 )
 VPSLLW_COUNT = _instruction(
@@ -1937,7 +1864,7 @@ VPSRAD = _instruction(
     _OPERANDS_13,
     _IMMEDIATES_5,
     _encoding(_VEX, _MAP_1, 1, 0, 0x72, (128, 256)),
-    _encoding(_EVEX, _MAP_1, 1, 0, 0x72, (512,)),
+    _encoding(_EVEX, _MAP_1, 1, 0, 0x72, (128, 256, 512)),
 )
 VPSRAD_COUNT = _instruction(
     "vpsrad",
@@ -1959,7 +1886,7 @@ VPSRAW = _instruction(
     _OPERANDS_13,
     _IMMEDIATES_5,
     _encoding(_VEX, _MAP_1, 1, 0, 0x71, (128, 256)),
-    _encoding(_EVEX, _MAP_1, 1, 0, 0x71, (512,)),
+    _encoding(_EVEX, _MAP_1, 1, 0, 0x71, (128, 256, 512)),
 )
 VPSRAW_COUNT = _instruction(
     "vpsraw",
@@ -1996,7 +1923,7 @@ VPSRLD = _instruction(
     _OPERANDS_13,
     _IMMEDIATES_5,
     _encoding(_VEX, _MAP_1, 1, 0, 0x72, (128, 256)),
-    _encoding(_EVEX, _MAP_1, 1, 0, 0x72, (512,)),
+    _encoding(_EVEX, _MAP_1, 1, 0, 0x72, (128, 256, 512)),
 )
 VPSRLD_COUNT = _instruction(
     "vpsrld",
@@ -2019,7 +1946,7 @@ VPSRLQ = _instruction(
     _OPERANDS_13,
     _IMMEDIATES_5,
     _encoding(_VEX, _MAP_1, 1, 0, 0x73, (128, 256)),
-    _encoding(_EVEX, _MAP_1, 1, 1, 0x73, (512,)),
+    _encoding(_EVEX, _MAP_1, 1, 1, 0x73, (128, 256, 512)),
 )
 VPSRLQ_COUNT = _instruction(
     "vpsrlq",
@@ -2056,7 +1983,7 @@ VPSRLW = _instruction(
     _SHIFT_IMMEDIATE_2,
     _OPERANDS_13,
     _IMMEDIATES_5,
-    _encoding(_EVEX, _MAP_1, 1, 0, 0x71, (512,)),
+    _encoding(_EVEX, _MAP_1, 1, 0, 0x71, (128, 256, 512)),
     _encoding(_VEX, _MAP_1, 1, 0, 0x71, (128, 256)),
 )
 VPSRLW_COUNT = _instruction(
@@ -2106,34 +2033,11 @@ VPTERNLOGD_ONES = _instruction(
     _encoding(_EVEX, _MAP_3, 1, 0, 0x25, (128, 256, 512)),
     fixed_immediate=0xFF,
 )
-VPUNPCKLBW = _instruction(
-    "vpunpcklbw",
-    _NDS,
-    _OPERANDS_16,
-    _IMMEDIATES_0,
-    _encoding(_VEX, _MAP_1, 1, 0, 0x60, (128,)),
-)
-VPUNPCKLDQ = _instruction(
-    "vpunpckldq",
-    _NDS,
-    _OPERANDS_16,
-    _IMMEDIATES_0,
-    _encoding(_VEX, _MAP_1, 1, 0, 0x62, (128,)),
-)
-VPUNPCKLQDQ = _instruction(
-    "vpunpcklqdq",
-    _NDS,
-    _OPERANDS_16,
-    _IMMEDIATES_0,
-    _encoding(_VEX, _MAP_1, 1, 0, 0x6C, (128,)),
-)
-VPUNPCKLWD = _instruction(
-    "vpunpcklwd",
-    _NDS,
-    _OPERANDS_16,
-    _IMMEDIATES_0,
-    _encoding(_VEX, _MAP_1, 1, 0, 0x61, (128,)),
-)
+VPUNPCKLBW = UNPACK_INSTRUCTIONS[8, False]
+VPUNPCKLWD = UNPACK_INSTRUCTIONS[16, False]
+VPUNPCKLDQ = UNPACK_INSTRUCTIONS[32, False]
+VPUNPCKLQDQ = UNPACK_INSTRUCTIONS[64, False]
+
 VPXOR = _instruction(
     "vpxor",
     _NDS,
@@ -2488,15 +2392,6 @@ PACKED_INTEGER_WIDEN = (
     (VPMOVSXDQ, VPMOVZXDQ),
 )
 PACKED_INTEGER_NARROW = (VPMOVWB, VPMOVDB, VPMOVQB, VPMOVDW, VPMOVQW, VPMOVQD)
-VNNI = (VPDPBUSD, VPDPBUSDS, VPDPWSSD, VPDPWSSDS)
-AVX_VNNI_INT8 = (
-    VPDPBSSD,
-    VPDPBSSDS,
-    VPDPBSUD,
-    VPDPBSUDS,
-    VPDPBUUD,
-    VPDPBUUDS,
-)
 VECTOR_MEMORY = (
     VMOVDQU32_LOAD,
     VMOVDQU32_INDEXED_LOAD,

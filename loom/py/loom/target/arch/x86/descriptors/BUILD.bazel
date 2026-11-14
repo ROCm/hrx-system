@@ -36,6 +36,8 @@ iree_py_library(
         "packed_dot.py",
         "register_transfer.py",
         "scalar.py",
+        "vector_halves.py",
+        "vector_permutation.py",
     ],
     deps = [
         "//loom/py/loom/target:low_descriptors",

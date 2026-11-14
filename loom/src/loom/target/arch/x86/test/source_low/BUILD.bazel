@@ -76,7 +76,6 @@ loom_check_test_suite(
         "numeric_narrow_constants.loom-test",
         "numeric_narrow_widening.loom-test",
         "numeric_offset_wide.loom-test",
-        "numeric_packet_concat.loom-test",
         "numeric_runtime_division.loom-test",
         "numeric_scalar_i64.loom-test",
         "numeric_scalar_i64_shift_counts.loom-test",

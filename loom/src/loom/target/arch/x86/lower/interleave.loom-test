@@ -1,0 +1,157 @@
+// RUN: emit source-low output=module
+
+x86.target<avx2> @target
+
+// Whole-packet joins use both unpack halves; reverse byte routing must compact
+// both 128-bit lanes. Returning inputs separately retains their live values.
+func.def target(@target) @word_zip(%even: vector<8xi16>, %odd: vector<8xi16>) -> (vector<16xi16>, vector<8xi16>) {
+  %result = vector.interleave<0> %even, %odd : vector<8xi16>, vector<8xi16> -> vector<16xi16>
+  func.return %result, %even : vector<16xi16>, vector<8xi16>
+}
+
+func.def target(@target) @byte_unzip(%source: vector<32xi8>) -> (vector<16xi8>, vector<16xi8>) {
+  %even, %odd = vector.deinterleave<0> %source : vector<32xi8> -> vector<16xi8>, vector<16xi8>
+  func.return %even, %odd : vector<16xi8>, vector<16xi8>
+}
+
+// ----
+x86.target<avx2> @target
+
+low.func.def target<x86.avx2.core>(@target) abi(object_function) abi_layout({signature = (vector<8xi16>, vector<8xi16>) -> (vector<16xi16>, vector<8xi16>)}) @word_zip(%even: reg<x86.xmm>, %odd: reg<x86.xmm>) -> (reg<x86.ymm>, reg<x86.xmm>) asm {
+  %4 = vpunpcklwd.xmm %even, %odd
+  %5 = vpunpckhwd.xmm %even, %odd
+  %result = vinsertf128.concat.ymm %4, %5
+  return %result, %even
+}
+
+low.func.def target<x86.avx2.core>(@target) abi(object_function) abi_layout({signature = (vector<32xi8>) -> (vector<16xi8>, vector<16xi8>)}) @byte_unzip(%source: reg<x86.ymm>) -> (reg<x86.xmm>, reg<x86.xmm>) asm {
+  %10 = avx2.vmovdqu.rodata.ymm @__low_rodata_4ed8f73f
+  %11 = vpshufb.ymm %source, %10
+  %12 = vpermq.ymm %11, 216
+  %even = copy %12 : reg<x86.ymm> -> reg<x86.xmm>
+  %odd = vextractf128.xmm %12, 1
+  return %even, %odd
+}
+
+global.rodata.def @__low_rodata_4ed8f73f = align(32) bytes("00020406080a0c0e01030507090b0d0f00020406080a0c0e01030507090b0d0f")
+
+// ====
+// RUN: emit source-low output=module
+
+x86.target<avx512> @target {features = [avx512vbmi]}
+
+// The same input occupies both tables. The result has a full-width native
+// carrier, and the original narrow input remains independently live.
+func.def target(@target) @repeat_bfloat(%source: vector<16xbf16>) -> (vector<32xbf16>, vector<16xbf16>) {
+  %result = vector.interleave<0> %source, %source : vector<16xbf16>, vector<16xbf16> -> vector<32xbf16>
+  func.return %result, %source : vector<32xbf16>, vector<16xbf16>
+}
+
+func.def target(@target) @byte_zip(%even: vector<32xf8E4M3>, %odd: vector<32xf8E4M3>) -> (vector<64xf8E4M3>) {
+  %result = vector.interleave<0> %even, %odd : vector<32xf8E4M3>, vector<32xf8E4M3> -> vector<64xf8E4M3>
+  func.return %result : vector<64xf8E4M3>
+}
+
+func.def target(@target) @word_unzip(%source: vector<32xbf16>) -> (vector<16xbf16>, vector<16xbf16>) {
+  %even, %odd = vector.deinterleave<0> %source : vector<32xbf16> -> vector<16xbf16>, vector<16xbf16>
+  func.return %even, %odd : vector<16xbf16>, vector<16xbf16>
+}
+
+func.def target(@target) @qword_unzip(%source: vector<8xf64>) -> (vector<4xf64>, vector<4xf64>) {
+  %even, %odd = vector.deinterleave<0> %source : vector<8xf64> -> vector<4xf64>, vector<4xf64>
+  func.return %even, %odd : vector<4xf64>, vector<4xf64>
+}
+
+// ----
+x86.target<avx512> @target {features = [avx512vbmi]}
+
+low.func.def target<x86.avx512_features.core>(@target) abi(object_function) abi_layout({signature = (vector<16xbf16>) -> (vector<32xbf16>, vector<16xbf16>)}) @repeat_bfloat(%source: reg<x86.ymm>) -> (reg<x86.zmm>, reg<x86.ymm>) asm {
+  %3 = avx512.vmovdqu64.rodata.zmm @__low_rodata_4cab361f
+  %4 = copy %source : reg<x86.ymm> -> reg<x86.zmm>
+  %5 = copy %source : reg<x86.ymm> -> reg<x86.zmm>
+  %result = vpermt2w.zmm %4, %3, %5
+  return %result, %source
+}
+
+low.func.def target<x86.avx512_features.core>(@target) abi(object_function) abi_layout({signature = (vector<32xf8E4M3>, vector<32xf8E4M3>) -> (vector<64xf8E4M3>)}) @byte_zip(%even: reg<x86.ymm>, %odd: reg<x86.ymm>) -> (reg<x86.zmm>) asm {
+  %10 = avx512.vmovdqu64.rodata.zmm @__low_rodata_33de031f
+  %11 = copy %even : reg<x86.ymm> -> reg<x86.zmm>
+  %12 = copy %odd : reg<x86.ymm> -> reg<x86.zmm>
+  %result = vpermt2b.zmm %11, %10, %12
+  return %result
+}
+
+low.func.def target<x86.avx512_features.core>(@target) abi(object_function) abi_layout({signature = (vector<32xbf16>) -> (vector<16xbf16>, vector<16xbf16>)}) @word_unzip(%source: reg<x86.zmm>) -> (reg<x86.ymm>, reg<x86.ymm>) asm {
+  %even = avx512.vpmovdw.ymm.zmm %source
+  %18 = avx512.vpsrld.zmm %source, 16
+  %odd = avx512.vpmovdw.ymm.zmm %18
+  return %even, %odd
+}
+
+low.func.def target<x86.avx512_features.core>(@target) abi(object_function) abi_layout({signature = (vector<8xf64>) -> (vector<4xf64>, vector<4xf64>)}) @qword_unzip(%source: reg<x86.zmm>) -> (reg<x86.ymm>, reg<x86.ymm>) asm {
+  %23 = avx512.vmovdqu64.rodata.zmm @__low_rodata_c35fdf1f
+  %24 = avx512.vpermq.zmm %source, %23
+  %even = copy %24 : reg<x86.zmm> -> reg<x86.ymm>
+  %odd = vextracti64x4.ymm %24, 1
+  return %even, %odd
+}
+
+global.rodata.def @__low_rodata_4cab361f = align(64) bytes("000020000100210002002200030023000400240005002500060026000700270008002800090029000a002a000b002b000c002c000d002d000e002e000f002f00")
+
+global.rodata.def @__low_rodata_33de031f = align(64) bytes("00400141024203430444054506460747084809490a4a0b4b0c4c0d4d0e4e0f4f10501151125213531454155516561757185819591a5a1b5b1c5c1d5d1e5e1f5f")
+
+global.rodata.def @__low_rodata_c35fdf1f = align(64) bytes("00000000000000000200000000000000040000000000000006000000000000000100000000000000030000000000000005000000000000000700000000000000")
+
+// ====
+// RUN: emit source-low output=module
+
+x86.target<avx512> @target {features = [-avx512vl, -avx512vbmi]}
+
+// Base AVX-512 retains a bounded byte composition without optional VBMI or VL.
+// Word permutations at full width remain native even when VL is disabled.
+func.def target(@target) @base_byte_zip(%even: vector<32xi8>, %odd: vector<32xi8>) -> (vector<64xi8>) {
+  %result = vector.interleave<0> %even, %odd : vector<32xi8>, vector<32xi8> -> vector<64xi8>
+  func.return %result : vector<64xi8>
+}
+
+func.def target(@target) @base_word_zip(%even: vector<16xf16>, %odd: vector<16xf16>) -> (vector<32xf16>) {
+  %result = vector.interleave<0> %even, %odd : vector<16xf16>, vector<16xf16> -> vector<32xf16>
+  func.return %result : vector<32xf16>
+}
+
+func.def target(@target) @base_dword_unzip(%source: vector<8xf32>) -> (vector<4xf32>, vector<4xf32>) {
+  %even, %odd = vector.deinterleave<0> %source : vector<8xf32> -> vector<4xf32>, vector<4xf32>
+  func.return %even, %odd : vector<4xf32>, vector<4xf32>
+}
+
+// ----
+x86.target<avx512> @target {features = [-avx512vl, -avx512vbmi]}
+
+low.func.def target<x86.avx512_features.core>(@target) abi(object_function) abi_layout({signature = (vector<32xi8>, vector<32xi8>) -> (vector<64xi8>)}) @base_byte_zip(%even: reg<x86.ymm>, %odd: reg<x86.ymm>) -> (reg<x86.zmm>) asm {
+  %3 = vpunpcklbw.ymm %even, %odd
+  %4 = vpunpckhbw.ymm %even, %odd
+  %5 = vinserti64x4.concat.zmm %3, %4
+  %result = vshufi64x2 %5, %5, 216
+  return %result
+}
+
+low.func.def target<x86.avx512_features.core>(@target) abi(object_function) abi_layout({signature = (vector<16xf16>, vector<16xf16>) -> (vector<32xf16>)}) @base_word_zip(%even: reg<x86.ymm>, %odd: reg<x86.ymm>) -> (reg<x86.zmm>) asm {
+  %10 = avx512.vmovdqu64.rodata.zmm @__low_rodata_4cab361f
+  %11 = copy %even : reg<x86.ymm> -> reg<x86.zmm>
+  %12 = copy %odd : reg<x86.ymm> -> reg<x86.zmm>
+  %result = vpermt2w.zmm %11, %10, %12
+  return %result
+}
+
+low.func.def target<x86.avx512_features.core>(@target) abi(object_function) abi_layout({signature = (vector<8xf32>) -> (vector<4xf32>, vector<4xf32>)}) @base_dword_unzip(%source: reg<x86.ymm>) -> (reg<x86.xmm>, reg<x86.xmm>) asm {
+  %17 = avx2.vmovdqu.rodata.ymm @__low_rodata_793bd6bf
+  %18 = vpshufb.ymm %source, %17
+  %19 = vpermq.ymm %18, 216
+  %even = copy %19 : reg<x86.ymm> -> reg<x86.xmm>
+  %odd = vextractf128.xmm %19, 1
+  return %even, %odd
+}
+
+global.rodata.def @__low_rodata_4cab361f = align(64) bytes("000020000100210002002200030023000400240005002500060026000700270008002800090029000a002a000b002b000c002c000d002d000e002e000f002f00")
+
+global.rodata.def @__low_rodata_793bd6bf = align(32) bytes("0001020308090a0b040506070c0d0e0f0001020308090a0b040506070c0d0e0f")

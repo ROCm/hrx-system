@@ -679,6 +679,7 @@ TEST_F(X86ProviderTest, ProjectsOptionalInstructionFeaturesIndependently) {
       {IREE_CPU_DATA0_X86_64_BMI2, LOOM_X86_FEATURE_BMI2},
       {IREE_CPU_DATA0_X86_64_POPCNT, LOOM_X86_FEATURE_POPCNT},
       {IREE_CPU_DATA0_X86_64_LZCNT, LOOM_X86_FEATURE_LZCNT},
+      {IREE_CPU_DATA0_X86_64_AVX512VBMI, LOOM_X86_FEATURE_AVX512_VBMI},
   };
   for (const auto& feature_case : cases) {
     iree_cpu_data_t cpu_data = {

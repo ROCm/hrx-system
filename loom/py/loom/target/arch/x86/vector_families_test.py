@@ -43,7 +43,12 @@ from loom.target.arch.x86.vector_families import (
     X86_VECTOR_INTEGER_NARROWING_FAMILIES,
     X86_VECTOR_INTEGER_WIDENING_FAMILIES,
 )
-from loom.target.low_descriptors import Constraint, ConstraintKind, DescriptorSet
+from loom.target.low_descriptors import (
+    Constraint,
+    ConstraintKind,
+    DescriptorSet,
+    InstructionClass,
+)
 
 
 def test_extended_evex_opcode_maps_preserve_legacy_encoding_ids() -> None:
@@ -495,13 +500,21 @@ def test_vector_splat_materializations_replay_their_source_chain() -> None:
     assert all(
         rematerializable in descriptor.constraints for descriptor in splat_descriptors
     )
+    assert all(
+        InstructionClass.REGISTER_MOVE in descriptor.instruction_classes
+        for descriptor in splat_descriptors
+    )
 
     descriptors_by_key = {descriptor.key: descriptor for descriptor in descriptors}
-    for key in (
-        "x86.avx2.vmovd.xmm.gpr32",
-        "x86.avx2.vmovq.xmm.gpr64",
-    ):
-        assert rematerializable in descriptors_by_key[key].constraints
+    for profile in ("avx2", "avx512"):
+        for mnemonic, scalar in (("vmovd", "gpr32"), ("vmovq", "gpr64")):
+            for destination, source in (("xmm", scalar), (scalar, "xmm")):
+                descriptor = descriptors_by_key[
+                    f"x86.{profile}.{mnemonic}.{destination}.{source}"
+                ]
+                assert InstructionClass.REGISTER_MOVE in descriptor.instruction_classes
+                if destination == "xmm":
+                    assert rematerializable in descriptor.constraints
 
 
 def test_avx512_predicate_descriptors_cover_every_core_width_and_element() -> None:

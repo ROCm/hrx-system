@@ -90,6 +90,14 @@ loom_check_test(
 )
 
 loom_check_test(
+    name = "interleave_packets",
+    src = "interleave_packets.loom-test",
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/arch:x86",
+    ]),
+)
+
+loom_check_test(
     name = "snapshot_rewrites",
     src = "snapshot_rewrites.loom-test",
     target_compatible_with = _SPIRV_ARCH_COMPATIBLE_WITH,

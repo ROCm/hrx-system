@@ -80,7 +80,6 @@ from .common import (
     _SCHEDULE_VECTOR_I32_YMM,
     _SHUFFLE_2X1_CONTROL_IMMEDIATE,
     _SHUFFLE_4X2_CONTROL_IMMEDIATE,
-    _TWO_LANE_IMMEDIATE,
     _asm,
     _gpr32_operand,
     _gpr32_result,
@@ -117,6 +116,8 @@ from .scalar import (
     X86_SCALAR_PREFIX_DESCRIPTORS,
     X86_SCALAR_SUFFIX_DESCRIPTORS,
 )
+from .vector_halves import vector_half_descriptors
+from .vector_permutation import unpack_descriptors
 
 _VECTOR_REGISTER_SUFFIXES = {128: "xmm", 256: "ymm"}
 _VECTOR_INTEGER_SCHEDULE_CLASSES = {
@@ -838,46 +839,7 @@ _X86_AVX2_VECTOR_DESCRIPTORS = (
         ),
         native.VPERMILPS,
     ),
-    _vex_descriptor(
-        Descriptor(
-            key="x86.avx2.vextractf128.xmm.ymm",
-            mnemonic="vextractf128",
-            semantic_tag="float.extract.f32x8.half",
-            operands=(_xmm_result(), _vector_operand(256, "source")),
-            immediates=(_TWO_LANE_IMMEDIATE,),
-            asm_forms=_asm(
-                mnemonic="vextractf128.xmm",
-                results=("dst",),
-                operands=("source",),
-                immediates=("lane",),
-            ),
-            schedule_class=_SCHEDULE_VECTOR_F32_XMM,
-            flags=(DescriptorFlag.DEAD_REMOVABLE,),
-        ),
-        native.VEXTRACTF128,
-    ),
-    _vex_descriptor(
-        Descriptor(
-            key="x86.avx2.vinsertf128.ymm.xmm",
-            mnemonic="vinsertf128",
-            semantic_tag="bits.insert.v128.v256",
-            operands=(
-                _vector_result(256),
-                _vector_operand(256, "dest"),
-                _xmm_operand("value"),
-            ),
-            immediates=(_TWO_LANE_IMMEDIATE,),
-            asm_forms=_asm(
-                mnemonic="vinsertf128.ymm.xmm",
-                results=("dst",),
-                operands=("dest", "value"),
-                immediates=("lane",),
-            ),
-            schedule_class=_SCHEDULE_VECTOR_I32_YMM,
-            flags=(DescriptorFlag.DEAD_REMOVABLE,),
-        ),
-        native.VINSERTF128,
-    ),
+    *vector_half_descriptors(256),
     _vex_descriptor(
         _vector_zero_descriptor(
             vector_bit_width=128,
@@ -1008,23 +970,7 @@ _X86_AVX2_VECTOR_DESCRIPTORS = (
         for result_element_bit_width in (family.result.bit_width,)
         for result_bit_width in AVX2_VECTOR_BIT_WIDTHS
     ),
-    *(
-        _vector_binary_descriptor(
-            vector_bit_width=128,
-            mnemonic=mnemonic,
-            semantic_tag=(
-                f"bits.interleave.low.i{element_bit_width}x{128 // element_bit_width}"
-            ),
-            schedule_class=_SCHEDULE_VECTOR_I32_XMM,
-            instruction=instruction,
-        )
-        for mnemonic, element_bit_width, instruction in (
-            ("vpunpcklbw", 8, native.VPUNPCKLBW),
-            ("vpunpcklwd", 16, native.VPUNPCKLWD),
-            ("vpunpckldq", 32, native.VPUNPCKLDQ),
-            ("vpunpcklqdq", 64, native.VPUNPCKLQDQ),
-        )
-    ),
+    *unpack_descriptors(evex=False),
     *(
         _vector_binary_descriptor(
             vector_bit_width=vector_bit_width,

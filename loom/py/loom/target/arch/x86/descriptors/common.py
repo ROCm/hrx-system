@@ -41,6 +41,7 @@ from loom.target.low_descriptors import (
     Immediate,
     ImmediateFlag,
     ImmediateKind,
+    InstructionClass,
     Operand,
     OperandAddressMapKind,
     OperandRole,
@@ -869,6 +870,7 @@ def _vector_splat_descriptor(
             operands=("value",),
         ),
         schedule_class=schedule_class,
+        instruction_classes=(InstructionClass.REGISTER_MOVE,),
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     )
 

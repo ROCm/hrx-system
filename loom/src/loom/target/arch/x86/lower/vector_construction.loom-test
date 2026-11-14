@@ -1,0 +1,70 @@
+// RUN: emit source-low @join_live target=x86:avx2 output=low
+
+// One fixed upper-half insertion reads two narrow inputs directly. Subsequent
+// stores keep both original packets observable.
+func.def @join_live(%low: buffer, %high: buffer, %mask: i8, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %low_view = buffer.view %low[%origin] : buffer -> view<16xi8>
+  %high_view = buffer.view %high[%origin] : buffer -> view<16xi8>
+  %destination = buffer.view %output[%origin] : buffer -> view<64xi8>
+  %left = vector.load %low_view[0] : view<16xi8> -> vector<16xi8>
+  %right = vector.load %high_view[0] : view<16xi8> -> vector<16xi8>
+  %joined = vector.concat<0> %left, %right : vector<16xi8>, vector<16xi8> -> vector<32xi8>
+  %masks = vector.splat %mask : vector<32xi8>
+  %mixed = vector.xori %joined, %masks : vector<32xi8>
+  vector.store %mixed, %destination[0] : vector<32xi8>, view<64xi8>
+  vector.store %left, %destination[32] : vector<16xi8>, view<64xi8>
+  vector.store %right, %destination[48] : vector<16xi8>, view<64xi8>
+  func.return
+}
+
+// ----
+low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = (buffer, buffer, i8, buffer) -> ()}) @join_live(%low: reg<x86.gpr64>, %high: reg<x86.gpr64>, %mask: reg<x86.gpr32>, %output: reg<x86.gpr64>) asm {
+  %left = vmovdqu32.load.xmm %low {disp32 = 0}
+  %right = vmovdqu32.load.xmm %high {disp32 = 0}
+  %joined = vinsertf128.concat.ymm %left, %right
+  %20 = vmovd.xmm.gpr32 %mask
+  %masks = vpbroadcastb.ymm %20
+  %mixed = vpxor.ymm %joined, %masks
+  vmovdqu32.store.ymm %mixed, %output {disp32 = 0}
+  vmovdqu32.store.xmm %left, %output {disp32 = 32}
+  vmovdqu32.store.xmm %right, %output {disp32 = 48}
+  return
+}
+
+// ====
+// RUN: emit source-low @join_nested target=x86:avx512 output=low
+
+// Nested assembly reuses a completed half, including both inputs of one join.
+func.def @join_nested(%low: buffer, %high: buffer, %mask: i8, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %low_view = buffer.view %low[%origin] : buffer -> view<16xi8>
+  %high_view = buffer.view %high[%origin] : buffer -> view<16xi8>
+  %destination = buffer.view %output[%origin] : buffer -> view<96xi8>
+  %left = vector.load %low_view[0] : view<16xi8> -> vector<16xi8>
+  %right = vector.load %high_view[0] : view<16xi8> -> vector<16xi8>
+  %joined = vector.concat<0> %left, %right : vector<16xi8>, vector<16xi8> -> vector<32xi8>
+  %repeated = vector.concat<0> %joined, %joined : vector<32xi8>, vector<32xi8> -> vector<64xi8>
+  %masks = vector.splat %mask : vector<64xi8>
+  %mixed = vector.xori %repeated, %masks : vector<64xi8>
+  vector.store %mixed, %destination[0] : vector<64xi8>, view<96xi8>
+  %low_masks = vector.splat %mask : vector<32xi8>
+  %low_mixed = vector.xori %joined, %low_masks : vector<32xi8>
+  vector.store %low_mixed, %destination[64] : vector<32xi8>, view<96xi8>
+  func.return
+}
+
+// ----
+low.func.def target<x86.avx512.core> abi(object_function) abi_layout({signature = (buffer, buffer, i8, buffer) -> ()}) @join_nested(%low: reg<x86.gpr64>, %high: reg<x86.gpr64>, %mask: reg<x86.gpr32>, %output: reg<x86.gpr64>) asm {
+  %left = avx512.vmovdqu32.load.xmm %low {disp32 = 0}
+  %right = avx512.vmovdqu32.load.xmm %high {disp32 = 0}
+  %joined = vinsertf128.concat.ymm %left, %right
+  %repeated = vinserti64x4.concat.zmm %joined, %joined
+  %masks = vpbroadcastb %mask
+  %mixed = vpxord %repeated, %masks
+  vmovdqu32.store %mixed, %output {disp32 = 0}
+  %low_masks = avx512.vpbroadcastb.ymm %mask
+  %low_mixed = vpxor.ymm %joined, %low_masks
+  avx512.vmovdqu32.store.ymm %low_mixed, %output {disp32 = 64}
+  return
+}

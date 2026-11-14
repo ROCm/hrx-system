@@ -11,7 +11,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from pathlib import Path
 
-from loom.target.arch.x86 import native_vector as native
+from loom.target.arch.x86.native_packed_dot import PACKED_DOT_INSTRUCTIONS
 from loom.target.arch.x86.packed_dot_data import (
     FAMILY_AVX10_2,
     FAMILY_AVX512_BF16,
@@ -22,10 +22,7 @@ from loom.target.arch.x86.packed_dot_data import (
     X86_PACKED_DOT_DESCRIPTORS,
     PackedDotDescriptor,
 )
-from loom.target.arch.x86.vector_encoding import (
-    VectorEncodingPrefix,
-    restrict_vex_registers,
-)
+from loom.target.arch.x86.vector_encoding import VectorEncodingPrefix
 from loom.target.low_descriptors import (
     Descriptor,
     DescriptorSet,
@@ -64,11 +61,13 @@ _PACKED_DOT_VECTOR_WIDTH_TO_SCHEDULE = {
     256: _SCHEDULE_VECTOR_DOT_YMM,
     512: _SCHEDULE_VECTOR_DOT_ZMM,
 }
-_VNNI_INSTRUCTIONS = {
-    instruction.descriptor_mnemonic: instruction for instruction in native.VNNI
-}
-_AVX_VNNI_INT8_INSTRUCTIONS = {
-    instruction.descriptor_mnemonic: instruction for instruction in native.AVX_VNNI_INT8
+_PACKED_DOT_PREFIXES = {
+    FAMILY_AVX512_VNNI: VectorEncodingPrefix.EVEX,
+    FAMILY_AVX512_BF16: VectorEncodingPrefix.EVEX,
+    FAMILY_AVX10_2: VectorEncodingPrefix.EVEX,
+    FAMILY_AVX_VNNI: VectorEncodingPrefix.VEX,
+    FAMILY_AVX_VNNI_INT8: VectorEncodingPrefix.VEX,
+    FAMILY_AVX_VNNI_INT16: VectorEncodingPrefix.VEX,
 }
 
 
@@ -159,30 +158,8 @@ def _packed_dot_target_descriptor(
         descriptor_data,
         qualify_asm_mnemonic=qualify_asm_mnemonic,
     )
-    if descriptor_data.family in (FAMILY_AVX512_VNNI, FAMILY_AVX_VNNI):
-        try:
-            instruction = _VNNI_INSTRUCTIONS[descriptor_data.mnemonic]
-        except KeyError as error:
-            raise ValueError(
-                f"{descriptor_data.key}: missing VNNI machine facts"
-            ) from error
-        prefix = (
-            VectorEncodingPrefix.EVEX
-            if descriptor_data.family == FAMILY_AVX512_VNNI
-            else VectorEncodingPrefix.VEX
-        )
-        descriptor = instruction.bind(descriptor, prefix)
-    elif descriptor_data.family == FAMILY_AVX_VNNI_INT8:
-        try:
-            instruction = _AVX_VNNI_INT8_INSTRUCTIONS[descriptor_data.mnemonic]
-        except KeyError as error:
-            raise ValueError(
-                f"{descriptor_data.key}: missing AVX-VNNI-INT8 machine facts"
-            ) from error
-        descriptor = instruction.bind(descriptor, VectorEncodingPrefix.VEX)
-    elif descriptor_data.family == FAMILY_AVX_VNNI_INT16:
-        descriptor = restrict_vex_registers(descriptor)
-    return descriptor
+    instruction = PACKED_DOT_INSTRUCTIONS[descriptor_data.mnemonic]
+    return instruction.bind(descriptor, _PACKED_DOT_PREFIXES[descriptor_data.family])
 
 
 def _descriptor_set(
