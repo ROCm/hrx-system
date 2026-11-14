@@ -1,0 +1,81 @@
+// RUN: pass target=spirv:vulkan1.3+bda+extended-types legalize-math
+
+// Nested activation recipes retain a logical accumulator for every constant.
+// The ordinary vector control keeps its ordinary lane interpretation.
+func.def @accumulator_and_vector(%input: vector<8xf32>) -> (vector<8xf32>, vector<8xf32>) {
+  %tile = index.constant 16 : index
+  %matrix = vector.fragment<init> %input shape [%tile, %tile] : vector<8xf32>
+  %activated = vector.siluf<afn> %matrix : vector<8xf32>
+  %ordinary = vector.logisticf %input : vector<8xf32>
+  func.return %activated, %ordinary : vector<8xf32>, vector<8xf32>
+}
+
+// ----
+func.def @accumulator_and_vector(%input: vector<8xf32>) -> (vector<8xf32>, vector<8xf32>) {
+  %tile = index.constant 16 : index
+  %matrix = vector.fragment<init> %input shape [%tile, %tile] : vector<8xf32>
+  %15 = vector.splatf -1.4426950408889634 : vector<8xf32>
+  %16 = vector.fragment<init> %15 shape [%tile, %tile] : vector<8xf32>
+  %17 = vector.splatf 1.0 : vector<8xf32>
+  %18 = vector.fragment<init> %17 shape [%tile, %tile] : vector<8xf32>
+  %19 = vector.mulf<afn> %matrix, %16 : vector<8xf32>
+  %20 = vector.exp2f<afn> %19 : vector<8xf32>
+  %21 = vector.addf<afn> %18, %20 : vector<8xf32>
+  %22 = vector.divf<arcp|afn> %18, %21 : vector<8xf32>
+  %activated = vector.mulf<afn> %matrix, %22 : vector<8xf32>
+  %7 = vector.splatf -1.4426950408889634 : vector<8xf32>
+  %8 = vector.splatf 1.0 : vector<8xf32>
+  %9 = vector.mulf %input, %7 : vector<8xf32>
+  %10 = vector.exp2f<afn> %9 : vector<8xf32>
+  %11 = vector.addf %8, %10 : vector<8xf32>
+  %ordinary = vector.divf<arcp|afn> %8, %11 : vector<8xf32>
+  func.return %activated, %ordinary : vector<8xf32>, vector<8xf32>
+}
+
+// ====
+
+// Operand role and dynamic leading block extent survive source-shaped math.
+func.def @blocked_rhs(%input: vector<16xf32>, %blocks: index, %rows: index, %columns: index) -> (vector<16xf32>) {
+  %matrix = vector.fragment<rhs> %input shape [blocks(%blocks), %rows, %columns] : vector<16xf32>
+  %result = vector.logisticf %matrix : vector<16xf32>
+  func.return %result : vector<16xf32>
+}
+
+// ----
+func.def @blocked_rhs(%input: vector<16xf32>, %blocks: index, %rows: index, %columns: index) -> (vector<16xf32>) {
+  %matrix = vector.fragment<rhs> %input shape [blocks(%blocks), %rows, %columns] : vector<16xf32>
+  %7 = vector.splatf -1.4426950408889634 : vector<16xf32>
+  %8 = vector.fragment<rhs> %7 shape [blocks(%blocks), %rows, %columns] : vector<16xf32>
+  %9 = vector.splatf 1.0 : vector<16xf32>
+  %10 = vector.fragment<rhs> %9 shape [blocks(%blocks), %rows, %columns] : vector<16xf32>
+  %11 = vector.mulf %matrix, %8 : vector<16xf32>
+  %12 = vector.exp2f<afn> %11 : vector<16xf32>
+  %13 = vector.addf %10, %12 : vector<16xf32>
+  %result = vector.divf<arcp|afn> %10, %13 : vector<16xf32>
+  func.return %result : vector<16xf32>
+}
+
+// ====
+
+// Widened evaluation changes component precision but retains logical shape.
+func.def @widened_lhs(%input: vector<4xf16>, %rows: index, %columns: index) -> (vector<4xf16>) {
+  %matrix = vector.fragment<lhs> %input shape [%rows, %columns] : vector<4xf16>
+  %result = vector.logisticf %matrix : vector<4xf16>
+  func.return %result : vector<4xf16>
+}
+
+// ----
+func.def @widened_lhs(%input: vector<4xf16>, %rows: index, %columns: index) -> (vector<4xf16>) {
+  %matrix = vector.fragment<lhs> %input shape [%rows, %columns] : vector<4xf16>
+  %6 = vector.extf %matrix : vector<4xf16> to vector<4xf32>
+  %7 = vector.splatf -1.4426950408889634 : vector<4xf32>
+  %8 = vector.fragment<lhs> %7 shape [%rows, %columns] : vector<4xf32>
+  %9 = vector.splatf 1.0 : vector<4xf32>
+  %10 = vector.fragment<lhs> %9 shape [%rows, %columns] : vector<4xf32>
+  %11 = vector.mulf %6, %8 : vector<4xf32>
+  %12 = vector.exp2f<afn> %11 : vector<4xf32>
+  %13 = vector.addf %10, %12 : vector<4xf32>
+  %14 = vector.divf<arcp|afn> %10, %13 : vector<4xf32>
+  %result = vector.fptrunc %14 : vector<4xf32> to vector<4xf16>
+  func.return %result : vector<4xf16>
+}
