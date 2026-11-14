@@ -163,6 +163,9 @@ typedef struct loom_movement_endpoint_t {
   // Comparable alias scope for disjointness proofs, or NONE.
   loom_value_fact_alias_scope_id_t alias_scope_id;
 
+  // Active source restrict domain and access-path association.
+  loom_value_fact_restrict_access_t restrict_access;
+
   // Known nullability of the storage root.
   loom_value_fact_reference_nullability_t nullability;
 

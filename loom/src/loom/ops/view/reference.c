@@ -70,6 +70,11 @@ static loom_value_fact_view_reference_t loom_view_join_reference_fields(
       .alias_scope_id = lhs.alias_scope_id == rhs.alias_scope_id
                             ? lhs.alias_scope_id
                             : LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE,
+      .restrict_access =
+          lhs.restrict_access.domain_id == rhs.restrict_access.domain_id &&
+                  lhs.restrict_access.scope_id == rhs.restrict_access.scope_id
+              ? lhs.restrict_access
+              : (loom_value_fact_restrict_access_t){0},
       .nullability = lhs.nullability == rhs.nullability
                          ? lhs.nullability
                          : LOOM_VALUE_FACT_REFERENCE_NULLABILITY_UNKNOWN,
@@ -657,6 +662,7 @@ iree_status_t loom_view_reference_make_buffer_view(
   view_reference.root_value_id = buffer_reference.root_value_id;
   view_reference.buffer_value_id = buffer_value_id;
   view_reference.alias_scope_id = buffer_reference.alias_scope_id;
+  view_reference.restrict_access = buffer_reference.restrict_access;
   view_reference.nullability = buffer_reference.nullability;
   view_reference.origin = buffer_reference.origin;
   return loom_value_facts_make_view_reference(context, view_reference, out);
@@ -677,6 +683,7 @@ iree_status_t loom_view_reference_make_unplaced_view(
       /*address_layout=*/NULL);
   view_reference.memory_space = buffer_reference.memory_space;
   view_reference.alias_scope_id = buffer_reference.alias_scope_id;
+  view_reference.restrict_access = buffer_reference.restrict_access;
   view_reference.nullability = buffer_reference.nullability;
   view_reference.origin = buffer_reference.origin;
   return loom_value_facts_make_view_reference(context, view_reference, out);
@@ -719,6 +726,7 @@ iree_status_t loom_view_reference_make_subview(
                                                         source_value_id);
   view_reference.buffer_value_id = source_reference.buffer_value_id;
   view_reference.alias_scope_id = source_reference.alias_scope_id;
+  view_reference.restrict_access = source_reference.restrict_access;
   view_reference.nullability = source_reference.nullability;
   view_reference.origin = source_reference.origin;
   return loom_value_facts_make_view_reference(context, view_reference, out);

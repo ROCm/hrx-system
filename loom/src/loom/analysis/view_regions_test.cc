@@ -1485,6 +1485,97 @@ TEST_F(ViewRegionsTest, AllocationFreshnessRelationships) {
   }
 }
 
+TEST_F(ViewRegionsTest, RestrictProvesAccessConflictsNotPhysicalDisjointness) {
+  loom_value_id_t inputs[] = {
+      DefineBufferArg(),
+      DefineBufferArg(),
+      DefineBufferArg(),
+      DefineBufferArg(),
+  };
+  const loom_type_t buffer_types[] = {
+      loom_type_buffer(),
+      loom_type_buffer(),
+      loom_type_buffer(),
+      loom_type_buffer(),
+  };
+  loom_op_t* begin_op = nullptr;
+  IREE_ASSERT_OK(loom_buffer_restrict_begin_build(
+      &builder_, inputs, 2, inputs + 2, 2, buffer_types,
+      IREE_ARRAYSIZE(buffer_types), LOOM_LOCATION_UNKNOWN, &begin_op));
+  const loom_value_slice_t scoped =
+      loom_buffer_restrict_begin_results(begin_op);
+  ASSERT_EQ(scoped.count, IREE_ARRAYSIZE(inputs));
+
+  loom_op_t* end_op = nullptr;
+  IREE_ASSERT_OK(
+      loom_buffer_restrict_end_build(&builder_, scoped.values, 1, buffer_types,
+                                     1, LOOM_LOCATION_UNKNOWN, &end_op));
+
+  const loom_value_id_t layout = BuildDenseLayout();
+  const loom_value_id_t zero =
+      loom_index_constant_result(BuildOffsetConstant(0));
+  loom_op_t* views[IREE_ARRAYSIZE(inputs) + 1] = {};
+  for (size_t i = 0; i < IREE_ARRAYSIZE(inputs); ++i) {
+    IREE_ASSERT_OK(loom_buffer_view_build(&builder_, scoped.values[i], zero,
+                                          ViewType1D(16, layout),
+                                          LOOM_LOCATION_UNKNOWN, &views[i]));
+  }
+  IREE_ASSERT_OK(loom_buffer_view_build(
+      &builder_, loom_buffer_restrict_end_results(end_op).values[0], zero,
+      ViewType1D(16, layout), LOOM_LOCATION_UNKNOWN,
+      &views[IREE_ARRAYSIZE(inputs)]));
+
+  loom_value_fact_table_t facts = {};
+  ComputeFacts(&facts);
+  loom_view_region_table_t table = {};
+  Analyze(&facts, &table);
+  const loom_view_region_t* regions[IREE_ARRAYSIZE(inputs) + 1] = {};
+  for (size_t i = 0; i < IREE_ARRAYSIZE(regions); ++i) {
+    IREE_ASSERT_OK(loom_view_region_table_get(
+        &table, loom_buffer_view_result(views[i]), &regions[i]));
+    ASSERT_NE(regions[i], nullptr);
+  }
+
+  const uint32_t domain =
+      loom_value_fact_restrict_id_from_value(scoped.values[0]);
+  EXPECT_EQ(regions[0]->restrict_access.domain_id, domain);
+  EXPECT_EQ(regions[1]->restrict_access.domain_id, domain);
+  EXPECT_EQ(regions[2]->restrict_access.domain_id, domain);
+  EXPECT_EQ(regions[0]->restrict_access.scope_id,
+            loom_value_fact_restrict_id_from_value(scoped.values[0]));
+  EXPECT_EQ(regions[1]->restrict_access.scope_id,
+            loom_value_fact_restrict_id_from_value(scoped.values[1]));
+  EXPECT_EQ(regions[2]->restrict_access.scope_id, 0u);
+  EXPECT_EQ(regions[4]->restrict_access.domain_id, 0u);
+  EXPECT_EQ(regions[4]->restrict_access.scope_id, 0u);
+
+  bool result = true;
+  IREE_ASSERT_OK(loom_view_regions_prove_no_overlap(&table, regions[0],
+                                                    regions[1], &result));
+  EXPECT_FALSE(result);
+
+  IREE_ASSERT_OK(loom_view_regions_prove_no_conflict(
+      &table, regions[0], LOOM_VIEW_ACCESS_WRITE, regions[1],
+      LOOM_VIEW_ACCESS_READ, &result));
+  EXPECT_TRUE(result);
+  IREE_ASSERT_OK(loom_view_regions_prove_no_conflict(
+      &table, regions[0], LOOM_VIEW_ACCESS_WRITE, regions[2],
+      LOOM_VIEW_ACCESS_READ, &result));
+  EXPECT_TRUE(result);
+  IREE_ASSERT_OK(loom_view_regions_prove_no_conflict(
+      &table, regions[2], LOOM_VIEW_ACCESS_WRITE, regions[3],
+      LOOM_VIEW_ACCESS_READ, &result));
+  EXPECT_FALSE(result);
+  IREE_ASSERT_OK(loom_view_regions_prove_no_conflict(
+      &table, regions[4], LOOM_VIEW_ACCESS_WRITE, regions[1],
+      LOOM_VIEW_ACCESS_READ, &result));
+  EXPECT_FALSE(result);
+  IREE_ASSERT_OK(loom_view_regions_prove_no_conflict(
+      &table, regions[2], LOOM_VIEW_ACCESS_READ, regions[3],
+      LOOM_VIEW_ACCESS_READ, &result));
+  EXPECT_TRUE(result);
+}
+
 TEST_F(ViewRegionsTest, ProvesDistinctComparableRootsDisjoint) {
   loom_value_id_t first_buffer = DefineBufferArg();
   loom_value_id_t second_buffer = DefineBufferArg();

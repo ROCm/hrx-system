@@ -278,11 +278,12 @@ static iree_status_t loom_aie2p_kernel_append_access(
   return iree_ok_status();
 }
 
-static bool loom_aie2p_kernel_bindings_are_disjoint(
+static bool loom_aie2p_kernel_bindings_are_nonconflicting(
     const loom_aie2p_kernel_realization_plan_t* plan, uint16_t left,
     uint16_t right) {
-  return loom_view_region_roots_are_disjoint(
-      &plan->bindings[left].root_region, &plan->bindings[right].root_region);
+  return loom_view_region_roots_are_nonconflicting(
+      &plan->bindings[left].root_region, plan->bindings[left].access,
+      &plan->bindings[right].root_region, plan->bindings[right].access);
 }
 
 static iree_status_t loom_aie2p_kernel_select_realization_mode(
@@ -298,12 +299,12 @@ static iree_status_t loom_aie2p_kernel_select_realization_mode(
                             LOOM_VIEW_ACCESS_WRITE)) {
         continue;
       }
-      if (!loom_aie2p_kernel_bindings_are_disjoint(plan, i, j)) {
+      if (!loom_aie2p_kernel_bindings_are_nonconflicting(plan, i, j)) {
         alias_sensitive = true;
       }
       if (iree_any_bit_set(plan->bindings[i].access, LOOM_VIEW_ACCESS_WRITE) &&
           iree_any_bit_set(plan->bindings[j].access, LOOM_VIEW_ACCESS_WRITE) &&
-          !loom_aie2p_kernel_bindings_are_disjoint(plan, i, j)) {
+          !loom_aie2p_kernel_bindings_are_nonconflicting(plan, i, j)) {
         plan->mode = LOOM_AIE2P_KERNEL_REALIZATION_COHERENT;
         return iree_ok_status();
       }
@@ -336,7 +337,7 @@ static iree_status_t loom_aie2p_kernel_select_realization_mode(
       }
       for (uint16_t k = 0; k < plan->binding_count; ++k) {
         if (k != binding->binding_index && written[k] &&
-            !loom_aie2p_kernel_bindings_are_disjoint(
+            !loom_aie2p_kernel_bindings_are_nonconflicting(
                 plan, binding->binding_index, k)) {
           plan->mode = LOOM_AIE2P_KERNEL_REALIZATION_COHERENT;
           return iree_ok_status();
@@ -424,6 +425,13 @@ static iree_status_t loom_aie2p_kernel_plan_bindings(
         if (binding->root_region.alias_scope_id != region->alias_scope_id) {
           binding->root_region.alias_scope_id =
               LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE;
+        }
+        if (binding->root_region.restrict_access.domain_id !=
+                region->restrict_access.domain_id ||
+            binding->root_region.restrict_access.scope_id !=
+                region->restrict_access.scope_id) {
+          binding->root_region.restrict_access =
+              (loom_value_fact_restrict_access_t){0};
         }
         if (binding->root_region.memory_space != region->memory_space) {
           binding->root_region.memory_space =

@@ -47,3 +47,11 @@ func.def @positions(%lhs: buffer, %lhs_offset: offset, %rhs: buffer, %rhs_offset
   %unequal = buffer.compare.address ne, %lhs[%lhs_offset], %rhs[%rhs_offset]
   func.return %equal, %unequal : i1, i1
 }
+
+// ====
+
+func.def @scoped_restrict_access(%source: buffer, %target: buffer, %peer: buffer) -> (buffer) {
+  %source_scoped, %target_scoped, %peer_scoped = buffer.restrict.begin %source, %target peers %peer : buffer, buffer, buffer
+  %target_result = buffer.restrict.end %target_scoped : buffer
+  func.return %target_result : buffer
+}

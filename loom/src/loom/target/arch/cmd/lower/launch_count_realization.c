@@ -401,6 +401,8 @@ static bool loom_cmd_launch_count_is_reference_projection(
   return loom_buffer_assume_alignment_isa(operation) ||
          loom_buffer_assume_memory_space_isa(operation) ||
          loom_buffer_assume_noalias_isa(operation) ||
+         loom_buffer_restrict_begin_isa(operation) ||
+         loom_buffer_restrict_end_isa(operation) ||
          loom_buffer_assume_same_root_isa(operation) ||
          loom_buffer_view_isa(operation) || loom_view_subview_isa(operation) ||
          loom_view_refine_isa(operation) || loom_view_bitcast_isa(operation);

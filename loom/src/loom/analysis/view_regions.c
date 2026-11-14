@@ -743,6 +743,7 @@ static iree_status_t loom_view_region_build_default(
       .base_view_value_id = value_id,
       .root_value_id = reference.root_value_id,
       .alias_scope_id = reference.alias_scope_id,
+      .restrict_access = reference.restrict_access,
       .nullability = reference.nullability,
       .origin = reference.origin,
       .begin_byte_offset = begin,
@@ -841,6 +842,7 @@ static iree_status_t loom_view_region_build_subview(
       table, &source_region->begin_byte_offset, &additional_offset, &begin));
   out_region->root_value_id = source_region->root_value_id;
   out_region->alias_scope_id = source_region->alias_scope_id;
+  out_region->restrict_access = source_region->restrict_access;
   out_region->nullability = source_region->nullability;
   out_region->origin = source_region->origin;
   out_region->base_view_value_id = source_region->base_view_value_id;
@@ -879,6 +881,7 @@ static iree_status_t loom_view_region_build_reinterpret(
   }
   out_region->root_value_id = source_region->root_value_id;
   out_region->alias_scope_id = source_region->alias_scope_id;
+  out_region->restrict_access = source_region->restrict_access;
   out_region->nullability = source_region->nullability;
   out_region->origin = source_region->origin;
   out_region->base_view_value_id = source_region->base_view_value_id;
@@ -1268,6 +1271,12 @@ static bool loom_view_region_is_view_only_buffer_operand(
   }
   if (loom_buffer_assume_noalias_isa(op)) {
     return operand_index < loom_buffer_assume_noalias_results(op).count;
+  }
+  if (loom_buffer_restrict_begin_isa(op)) {
+    return operand_index < loom_buffer_restrict_begin_results(op).count;
+  }
+  if (loom_buffer_restrict_end_isa(op)) {
+    return operand_index < loom_buffer_restrict_end_results(op).count;
   }
   return false;
 }
@@ -1964,6 +1973,18 @@ bool loom_view_region_roots_are_disjoint(
   return false;
 }
 
+bool loom_view_region_roots_are_nonconflicting(
+    const loom_view_region_t* left_region, loom_view_access_flags_t left_access,
+    const loom_view_region_t* right_region,
+    loom_view_access_flags_t right_access) {
+  if (!iree_any_bit_set(left_access | right_access, LOOM_VIEW_ACCESS_WRITE)) {
+    return true;
+  }
+  return loom_view_region_roots_are_disjoint(left_region, right_region) ||
+         loom_value_fact_restrict_accesses_are_independent(
+             left_region->restrict_access, right_region->restrict_access);
+}
+
 iree_status_t loom_view_regions_prove_no_overlap(
     loom_view_region_table_t* table, const loom_view_region_t* left_region,
     const loom_view_region_t* right_region, bool* out_no_overlap) {
@@ -2007,4 +2028,22 @@ iree_status_t loom_view_regions_prove_no_overlap(
             left_region->byte_length.constant - 1);
   }
   return iree_ok_status();
+}
+
+iree_status_t loom_view_regions_prove_no_conflict(
+    loom_view_region_table_t* table, const loom_view_region_t* left_region,
+    loom_view_access_flags_t left_access,
+    const loom_view_region_t* right_region,
+    loom_view_access_flags_t right_access, bool* out_no_conflict) {
+  *out_no_conflict = false;
+  if (!left_region || !right_region) {
+    return iree_ok_status();
+  }
+  if (loom_view_region_roots_are_nonconflicting(left_region, left_access,
+                                                right_region, right_access)) {
+    *out_no_conflict = true;
+    return iree_ok_status();
+  }
+  return loom_view_regions_prove_no_overlap(table, left_region, right_region,
+                                            out_no_conflict);
 }
