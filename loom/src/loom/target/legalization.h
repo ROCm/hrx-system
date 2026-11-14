@@ -214,7 +214,10 @@ typedef bool (*loom_target_legalizer_match_fn_t)(
     const loom_target_legalizer_entry_t* entry,
     const loom_target_legalization_context_t* context, const loom_op_t* op);
 
-// Provider-owned rule copied into a composed legalizer registry.
+// Provider-owned rule copied into a composed legalizer registry. Registries
+// contain rules from every configured target. Target-owned rules establish
+// applicability in their matcher or callback before inspecting target-local
+// data or rewriting; shared callbacks require a target-aware matcher.
 struct loom_target_legalizer_rule_t {
   // Entry-specific behavior flags.
   loom_target_legalizer_entry_flags_t flags;

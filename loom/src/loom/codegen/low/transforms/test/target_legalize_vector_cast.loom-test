@@ -140,3 +140,37 @@ func.def target(@test_target) @integer_to_standard_float(%flag: vector<1xi1>, %h
   %unsigned_halfword = vector.splat %36 : vector<1xf64>
   func.return %signed_flag, %unsigned_flag, %signed_halfword, %unsigned_halfword : vector<1xf32>, vector<1xf32>, vector<1xf64>, vector<1xf64>
 }
+
+// ====
+// RUN: pass target-legalize{mode=final,policy=require-native}
+
+// An unanswered contract stays available for later target lowering. A linked
+// target's private cast recipe must not scalarize another target's operation.
+test.target<low_core> @test_target
+
+func.def target(@test_target) @enter_address_domains(%words: vector<4xi32>) -> (vector<4xindex>, vector<4xoffset>) {
+  %coordinates = vector.index_cast %words : vector<4xi32> to vector<4xindex>
+  %offsets = vector.index_cast %words : vector<4xi32> to vector<4xoffset>
+  func.return %coordinates, %offsets : vector<4xindex>, vector<4xoffset>
+}
+
+func.def target(@test_target) @leave_address_domains(%coordinates: vector<4xindex>, %offsets: vector<4xoffset>) -> (vector<4xi32>, vector<4xi32>) {
+  %coordinate_words = vector.index_cast %coordinates : vector<4xindex> to vector<4xi32>
+  %offset_words = vector.index_cast %offsets : vector<4xoffset> to vector<4xi32>
+  func.return %coordinate_words, %offset_words : vector<4xi32>, vector<4xi32>
+}
+
+// ----
+test.target<low_core> @test_target
+
+func.def target(@test_target) @enter_address_domains(%words: vector<4xi32>) -> (vector<4xindex>, vector<4xoffset>) {
+  %coordinates = vector.index_cast %words : vector<4xi32> to vector<4xindex>
+  %offsets = vector.index_cast %words : vector<4xi32> to vector<4xoffset>
+  func.return %coordinates, %offsets : vector<4xindex>, vector<4xoffset>
+}
+
+func.def target(@test_target) @leave_address_domains(%coordinates: vector<4xindex>, %offsets: vector<4xoffset>) -> (vector<4xi32>, vector<4xi32>) {
+  %coordinate_words = vector.index_cast %coordinates : vector<4xindex> to vector<4xi32>
+  %offset_words = vector.index_cast %offsets : vector<4xoffset> to vector<4xi32>
+  func.return %coordinate_words, %offset_words : vector<4xi32>, vector<4xi32>
+}
