@@ -30,7 +30,6 @@ from loom.target.arch.x86.vector_families import (
     AVX512_SELECT_MNEMONICS,
     AVX512_UNIFORM_SHIFT_FAMILIES,
     AVX512VL_INTEGER_BINARY_FAMILIES,
-    AVX512VL_UNIFORM_SHIFT_FAMILIES,
     AVX512VL_VECTOR_BIT_WIDTHS,
     FLOAT_ELEMENTS,
     FLOAT_EXTREMA_MNEMONICS,
@@ -138,6 +137,7 @@ from .memory import broadcast_memory_descriptors, simd_memory_descriptors
 from .register_transfer import register_transfer_descriptors
 from .scalar import X86_SCALAR_DESCRIPTOR_SET
 from .vector_halves import vector_half_descriptors
+from .vector_permutation import two_source_permute_descriptors, unpack_descriptors
 
 _REGISTER_SUFFIXES = {64: "xmm", 128: "xmm", 256: "ymm", 512: "zmm"}
 
@@ -702,6 +702,8 @@ X86_AVX512_CORE_DESCRIPTOR_SET = DescriptorSet(
             scalar=False,
         ),
         *vector_half_descriptors(512),
+        *unpack_descriptors(evex=True),
+        *two_source_permute_descriptors(),
         *(
             _vector_narrow_descriptor(family, source_vector_bit_width, instruction)
             for family, instruction in zip(
@@ -996,9 +998,7 @@ X86_AVX512_CORE_DESCRIPTOR_SET = DescriptorSet(
                 native.AVX512_UNIFORM_SHIFT_IMMEDIATE,
                 strict=True,
             )
-            for width in (
-                (128, 256, 512) if family in AVX512VL_UNIFORM_SHIFT_FAMILIES else (512,)
-            )
+            for width in (128, 256, 512)
         ),
         *(
             _avx512_descriptor(

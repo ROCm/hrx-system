@@ -74,6 +74,7 @@ loom_corpus_test(
             "numeric/vector/float_extrema.loom",
             "numeric/vector/floating.loom",
             "numeric/vector/insertion.loom",
+            "numeric/vector/interleave.loom",
             "numeric/vector/integer_bitwise.loom",
             "numeric/vector/lanes.loom",
             "numeric/vector/refinement.loom",

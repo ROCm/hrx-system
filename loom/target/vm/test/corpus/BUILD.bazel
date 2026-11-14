@@ -203,6 +203,7 @@ loom_corpus_test(
             "numeric/vector/concatenation.loom",
             "numeric/vector/coordinates.loom",
             "numeric/vector/insertion.loom",
+            "numeric/vector/interleave.loom",
             "numeric/vector/lanes.loom",
             "numeric/vector/refinement.loom",
         ],

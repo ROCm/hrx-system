@@ -65,6 +65,7 @@ iree_py_library(
         "native_conversion.py",
         "native_integer_unary.py",
         "native_packed_dot.py",
+        "native_permutation.py",
         "native_vector.py",
         "vector_encoding.py",
     ],

@@ -11,3 +11,7 @@ x86.target<avx2> @zen5 {tune = znver5}
 x86.target<avx512> @zen6 {tune = znver6}
 
 x86.target<scalar> @omitted
+
+x86.target<avx512> @byte_permutation {features = [avx512vbmi]}
+
+x86.target<avx512> @base_permutation {features = [-avx512vbmi]}

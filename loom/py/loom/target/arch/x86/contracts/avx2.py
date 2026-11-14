@@ -42,6 +42,10 @@ from loom.target.arch.x86.contracts.integer_float import (
 from loom.target.arch.x86.contracts.integer_reduction import (
     avx2_integer_reduction_rules,
 )
+from loom.target.arch.x86.contracts.interleave import (
+    deinterleave_rules,
+    interleave_rules,
+)
 from loom.target.arch.x86.contracts.lane_movement import (
     avx2_lane_movement_rules,
 )
@@ -124,6 +128,8 @@ def _cases() -> Sequence[ContractCase]:
         *packed_bfloat_narrowing_rules(_descriptor, evex=False),
         *float_conversion_rules(_descriptor, evex=False),
         *avx2_vector_construction_rules(_descriptor),
+        *interleave_rules(_descriptor, evex=False),
+        *deinterleave_rules(_descriptor, evex=False),
         *vector_integer_widening_rules(
             _descriptor,
             descriptor_key_prefix="x86.avx2",

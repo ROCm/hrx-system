@@ -45,8 +45,10 @@ typedef uint64_t loom_x86_feature_bits_t;
 #define LOOM_X86_FEATURE_POPCNT (UINT64_C(1) << 12)
 // Target supports scalar leading-zero-count instructions.
 #define LOOM_X86_FEATURE_LZCNT (UINT64_C(1) << 13)
+// Target supports full-register byte permutations.
+#define LOOM_X86_FEATURE_AVX512_VBMI (UINT64_C(1) << 14)
 
 // All optional x86 features understood by target contracts.
-#define LOOM_X86_FEATURE_KNOWN_BITS ((UINT64_C(1) << 14) - 1)
+#define LOOM_X86_FEATURE_KNOWN_BITS ((UINT64_C(1) << 15) - 1)
 
 #endif  // LOOM_TARGET_ARCH_X86_FEATURE_BITS_H_

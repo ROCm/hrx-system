@@ -45,6 +45,10 @@ from loom.target.arch.x86.contracts.integer_reduction import (
 from loom.target.arch.x86.contracts.integer_rotation import (
     avx512_vector_rotation_rules,
 )
+from loom.target.arch.x86.contracts.interleave import (
+    deinterleave_rules,
+    interleave_rules,
+)
 from loom.target.arch.x86.contracts.lane_movement import (
     avx512_lane_movement_rules,
 )
@@ -138,6 +142,8 @@ def _cases() -> Sequence[ContractCase]:
         *packed_bfloat_narrowing_rules(_descriptor, evex=True),
         *half_conversion_rules(_descriptor, evex=True),
         *avx512_vector_construction_rules(_descriptor),
+        *interleave_rules(_descriptor, evex=True),
+        *deinterleave_rules(_descriptor, evex=True),
         *vector_integer_widening_rules(
             _descriptor,
             descriptor_key_prefix="x86.avx512",

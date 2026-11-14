@@ -131,3 +131,322 @@ check.scenario @irregular_byte_row_mask_values {
   }
   check.return
 }
+
+// The caller specializes packet lengths; input values remain runtime data.
+// Zip, repeated-input zip, and both unzip results have distinct observable uses.
+func.def inline @route_byte_packets(%count: index, %position: offset, %input: buffer, %other: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %c2 = index.constant 2 : index
+  %c4 = index.constant 4 : index
+  %c5 = index.constant 5 : index
+  %c6 = index.constant 6 : index
+  %c7 = index.constant 7 : index
+  %c8 = index.constant 8 : index
+  %full = index.mul %count, %c2 : index
+  %extent = index.mul %count, %c8 : index
+  %split_even = index.mul %count, %c4 : index
+  %split_odd = index.mul %count, %c5 : index
+  %saved_left = index.mul %count, %c6 : index
+  %saved_right = index.mul %count, %c7 : index
+  %left_view = buffer.view %input[%base] : buffer -> view<[%full]xi8>
+  %right_view = buffer.view %other[%base] : buffer -> view<[%full]xi8>
+  %destination = buffer.view %output[%position] : buffer -> view<[%extent]xi8>
+  %left = vector.load %left_view[0] : view<[%full]xi8> -> vector<[%count]xi8>
+  %right = vector.load %right_view[0] : view<[%full]xi8> -> vector<[%count]xi8>
+  %joined = vector.interleave<0> %left, %right : vector<[%count]xi8>, vector<[%count]xi8> -> vector<[%full]xi8>
+  %repeated = vector.interleave<0> %left, %left : vector<[%count]xi8>, vector<[%count]xi8> -> vector<[%full]xi8>
+  %mask = vector.splati 17 : vector<[%full]xi8>
+  %joined_masked = vector.xori %joined, %mask : vector<[%full]xi8>
+  %repeated_masked = vector.xori %repeated, %mask : vector<[%full]xi8>
+  vector.store %joined_masked, %destination[0] : vector<[%full]xi8>, view<[%extent]xi8>
+  vector.store %repeated_masked, %destination[%full] : vector<[%full]xi8>, view<[%extent]xi8>
+  %source = vector.load %left_view[0] : view<[%full]xi8> -> vector<[%full]xi8>
+  %even, %odd = vector.deinterleave<0> %source : vector<[%full]xi8> -> vector<[%count]xi8>, vector<[%count]xi8>
+  %even_mask = vector.splati 1 : vector<[%count]xi8>
+  %odd_mask = vector.splati -3 : vector<[%count]xi8>
+  %even_masked = vector.xori %even, %even_mask : vector<[%count]xi8>
+  %odd_masked = vector.xori %odd, %odd_mask : vector<[%count]xi8>
+  vector.store %even_masked, %destination[%split_even] : vector<[%count]xi8>, view<[%extent]xi8>
+  vector.store %odd_masked, %destination[%split_odd] : vector<[%count]xi8>, view<[%extent]xi8>
+  vector.store %left, %destination[%saved_left] : vector<[%count]xi8>, view<[%extent]xi8>
+  vector.store %right, %destination[%saved_right] : vector<[%count]xi8>, view<[%extent]xi8>
+  func.return
+}
+
+func.def inline @route_word_packets(%count: index, %position: offset, %input: buffer, %other: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %c2 = index.constant 2 : index
+  %c4 = index.constant 4 : index
+  %c5 = index.constant 5 : index
+  %c6 = index.constant 6 : index
+  %c7 = index.constant 7 : index
+  %c8 = index.constant 8 : index
+  %full = index.mul %count, %c2 : index
+  %extent = index.mul %count, %c8 : index
+  %split_even = index.mul %count, %c4 : index
+  %split_odd = index.mul %count, %c5 : index
+  %saved_left = index.mul %count, %c6 : index
+  %saved_right = index.mul %count, %c7 : index
+  %left_view = buffer.view %input[%base] : buffer -> view<[%full]xi16>
+  %right_view = buffer.view %other[%base] : buffer -> view<[%full]xi16>
+  %destination = buffer.view %output[%position] : buffer -> view<[%extent]xi16>
+  %left = vector.load %left_view[0] : view<[%full]xi16> -> vector<[%count]xi16>
+  %right = vector.load %right_view[0] : view<[%full]xi16> -> vector<[%count]xi16>
+  %joined = vector.interleave<0> %left, %right : vector<[%count]xi16>, vector<[%count]xi16> -> vector<[%full]xi16>
+  %repeated = vector.interleave<0> %left, %left : vector<[%count]xi16>, vector<[%count]xi16> -> vector<[%full]xi16>
+  %mask = vector.splati 17 : vector<[%full]xi16>
+  %joined_masked = vector.xori %joined, %mask : vector<[%full]xi16>
+  %repeated_masked = vector.xori %repeated, %mask : vector<[%full]xi16>
+  vector.store %joined_masked, %destination[0] : vector<[%full]xi16>, view<[%extent]xi16>
+  vector.store %repeated_masked, %destination[%full] : vector<[%full]xi16>, view<[%extent]xi16>
+  %source = vector.load %left_view[0] : view<[%full]xi16> -> vector<[%full]xi16>
+  %even, %odd = vector.deinterleave<0> %source : vector<[%full]xi16> -> vector<[%count]xi16>, vector<[%count]xi16>
+  %even_mask = vector.splati 1 : vector<[%count]xi16>
+  %odd_mask = vector.splati -3 : vector<[%count]xi16>
+  %even_masked = vector.xori %even, %even_mask : vector<[%count]xi16>
+  %odd_masked = vector.xori %odd, %odd_mask : vector<[%count]xi16>
+  vector.store %even_masked, %destination[%split_even] : vector<[%count]xi16>, view<[%extent]xi16>
+  vector.store %odd_masked, %destination[%split_odd] : vector<[%count]xi16>, view<[%extent]xi16>
+  vector.store %left, %destination[%saved_left] : vector<[%count]xi16>, view<[%extent]xi16>
+  vector.store %right, %destination[%saved_right] : vector<[%count]xi16>, view<[%extent]xi16>
+  func.return
+}
+
+func.def inline @route_dword_packets(%count: index, %position: offset, %input: buffer, %other: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %c2 = index.constant 2 : index
+  %c4 = index.constant 4 : index
+  %c5 = index.constant 5 : index
+  %c6 = index.constant 6 : index
+  %c7 = index.constant 7 : index
+  %c8 = index.constant 8 : index
+  %full = index.mul %count, %c2 : index
+  %extent = index.mul %count, %c8 : index
+  %split_even = index.mul %count, %c4 : index
+  %split_odd = index.mul %count, %c5 : index
+  %saved_left = index.mul %count, %c6 : index
+  %saved_right = index.mul %count, %c7 : index
+  %left_view = buffer.view %input[%base] : buffer -> view<[%full]xi32>
+  %right_view = buffer.view %other[%base] : buffer -> view<[%full]xi32>
+  %destination = buffer.view %output[%position] : buffer -> view<[%extent]xi32>
+  %left = vector.load %left_view[0] : view<[%full]xi32> -> vector<[%count]xi32>
+  %right = vector.load %right_view[0] : view<[%full]xi32> -> vector<[%count]xi32>
+  %joined = vector.interleave<0> %left, %right : vector<[%count]xi32>, vector<[%count]xi32> -> vector<[%full]xi32>
+  %repeated = vector.interleave<0> %left, %left : vector<[%count]xi32>, vector<[%count]xi32> -> vector<[%full]xi32>
+  %mask = vector.splati 17 : vector<[%full]xi32>
+  %joined_masked = vector.xori %joined, %mask : vector<[%full]xi32>
+  %repeated_masked = vector.xori %repeated, %mask : vector<[%full]xi32>
+  vector.store %joined_masked, %destination[0] : vector<[%full]xi32>, view<[%extent]xi32>
+  vector.store %repeated_masked, %destination[%full] : vector<[%full]xi32>, view<[%extent]xi32>
+  %source = vector.load %left_view[0] : view<[%full]xi32> -> vector<[%full]xi32>
+  %even, %odd = vector.deinterleave<0> %source : vector<[%full]xi32> -> vector<[%count]xi32>, vector<[%count]xi32>
+  %even_mask = vector.splati 1 : vector<[%count]xi32>
+  %odd_mask = vector.splati -3 : vector<[%count]xi32>
+  %even_masked = vector.xori %even, %even_mask : vector<[%count]xi32>
+  %odd_masked = vector.xori %odd, %odd_mask : vector<[%count]xi32>
+  vector.store %even_masked, %destination[%split_even] : vector<[%count]xi32>, view<[%extent]xi32>
+  vector.store %odd_masked, %destination[%split_odd] : vector<[%count]xi32>, view<[%extent]xi32>
+  vector.store %left, %destination[%saved_left] : vector<[%count]xi32>, view<[%extent]xi32>
+  vector.store %right, %destination[%saved_right] : vector<[%count]xi32>, view<[%extent]xi32>
+  func.return
+}
+
+func.def inline @route_qword_packets(%count: index, %position: offset, %input: buffer, %other: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %c2 = index.constant 2 : index
+  %c4 = index.constant 4 : index
+  %c5 = index.constant 5 : index
+  %c6 = index.constant 6 : index
+  %c7 = index.constant 7 : index
+  %c8 = index.constant 8 : index
+  %full = index.mul %count, %c2 : index
+  %extent = index.mul %count, %c8 : index
+  %split_even = index.mul %count, %c4 : index
+  %split_odd = index.mul %count, %c5 : index
+  %saved_left = index.mul %count, %c6 : index
+  %saved_right = index.mul %count, %c7 : index
+  %left_view = buffer.view %input[%base] : buffer -> view<[%full]xi64>
+  %right_view = buffer.view %other[%base] : buffer -> view<[%full]xi64>
+  %destination = buffer.view %output[%position] : buffer -> view<[%extent]xi64>
+  %left = vector.load %left_view[0] : view<[%full]xi64> -> vector<[%count]xi64>
+  %right = vector.load %right_view[0] : view<[%full]xi64> -> vector<[%count]xi64>
+  %joined = vector.interleave<0> %left, %right : vector<[%count]xi64>, vector<[%count]xi64> -> vector<[%full]xi64>
+  %repeated = vector.interleave<0> %left, %left : vector<[%count]xi64>, vector<[%count]xi64> -> vector<[%full]xi64>
+  %mask = vector.splati 17 : vector<[%full]xi64>
+  %joined_masked = vector.xori %joined, %mask : vector<[%full]xi64>
+  %repeated_masked = vector.xori %repeated, %mask : vector<[%full]xi64>
+  vector.store %joined_masked, %destination[0] : vector<[%full]xi64>, view<[%extent]xi64>
+  vector.store %repeated_masked, %destination[%full] : vector<[%full]xi64>, view<[%extent]xi64>
+  %source = vector.load %left_view[0] : view<[%full]xi64> -> vector<[%full]xi64>
+  %even, %odd = vector.deinterleave<0> %source : vector<[%full]xi64> -> vector<[%count]xi64>, vector<[%count]xi64>
+  %even_mask = vector.splati 1 : vector<[%count]xi64>
+  %odd_mask = vector.splati -3 : vector<[%count]xi64>
+  %even_masked = vector.xori %even, %even_mask : vector<[%count]xi64>
+  %odd_masked = vector.xori %odd, %odd_mask : vector<[%count]xi64>
+  vector.store %even_masked, %destination[%split_even] : vector<[%count]xi64>, view<[%extent]xi64>
+  vector.store %odd_masked, %destination[%split_odd] : vector<[%count]xi64>, view<[%extent]xi64>
+  vector.store %left, %destination[%saved_left] : vector<[%count]xi64>, view<[%extent]xi64>
+  vector.store %right, %destination[%saved_right] : vector<[%count]xi64>, view<[%extent]xi64>
+  func.return
+}
+
+// Byte addressing makes the oracle independent of typed vector interpretation,
+// packet grouping, and the zip/unzip lowering.
+func.def inline @route_packets_oracle(%count: index, %element_bytes: index, %position: offset, %input: buffer, %other: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c4 = index.constant 4 : index
+  %c5 = index.constant 5 : index
+  %c6 = index.constant 6 : index
+  %c7 = index.constant 7 : index
+  %c8 = index.constant 8 : index
+  %half_bytes = index.mul %count, %element_bytes : index
+  %full_bytes = index.mul %half_bytes, %c2 : index
+  %extent = index.mul %half_bytes, %c8 : index
+  %even_base = index.mul %half_bytes, %c4 : index
+  %odd_base = index.mul %half_bytes, %c5 : index
+  %left_base = index.mul %half_bytes, %c6 : index
+  %right_base = index.mul %half_bytes, %c7 : index
+  %zero_mask = scalar.constant 0 : i8
+  %zip_mask = scalar.constant 17 : i8
+  %even_mask = scalar.constant 1 : i8
+  %odd_low_mask = scalar.constant -3 : i8
+  %odd_high_mask = scalar.constant -1 : i8
+  %left_view = buffer.view %input[%base] : buffer -> view<64xi8>
+  %right_view = buffer.view %other[%base] : buffer -> view<64xi8>
+  %destination = buffer.view %output[%position] : buffer -> view<[%extent]xi8>
+  scf.for %i = [%begin to %half_bytes step %step] {
+    %lane = index.div %i, %element_bytes : index
+    %byte = index.rem %i, %element_bytes : index
+    %is_low_byte = index.cmp eq, %byte, %begin : index
+    %pair_lane = index.mul %lane, %c2 : index
+    %pair_base = index.mul %pair_lane, %element_bytes : index
+    %even_position = index.add %pair_base, %byte : index
+    %odd_position = index.add %even_position, %element_bytes : index
+    %repeat_even_position = index.add %even_position, %full_bytes : index
+    %repeat_odd_position = index.add %odd_position, %full_bytes : index
+    %split_even_position = index.add %even_base, %i : index
+    %split_odd_position = index.add %odd_base, %i : index
+    %saved_left_position = index.add %left_base, %i : index
+    %saved_right_position = index.add %right_base, %i : index
+    %left = view.load %left_view[%i] : view<64xi8> -> i8
+    %right = view.load %right_view[%i] : view<64xi8> -> i8
+    %mask = scf.select %is_low_byte, %zip_mask, %zero_mask : i8
+    %masked_left = scalar.xori %left, %mask : i8
+    %masked_right = scalar.xori %right, %mask : i8
+    view.store %masked_left, %destination[%even_position] : i8, view<[%extent]xi8>
+    view.store %masked_right, %destination[%odd_position] : i8, view<[%extent]xi8>
+    view.store %masked_left, %destination[%repeat_even_position] : i8, view<[%extent]xi8>
+    view.store %masked_left, %destination[%repeat_odd_position] : i8, view<[%extent]xi8>
+    %even = view.load %left_view[%even_position] : view<64xi8> -> i8
+    %odd = view.load %left_view[%odd_position] : view<64xi8> -> i8
+    %even_byte_mask = scf.select %is_low_byte, %even_mask, %zero_mask : i8
+    %odd_byte_mask = scf.select %is_low_byte, %odd_low_mask, %odd_high_mask : i8
+    %masked_even = scalar.xori %even, %even_byte_mask : i8
+    %masked_odd = scalar.xori %odd, %odd_byte_mask : i8
+    view.store %masked_even, %destination[%split_even_position] : i8, view<[%extent]xi8>
+    view.store %masked_odd, %destination[%split_odd_position] : i8, view<[%extent]xi8>
+    view.store %left, %destination[%saved_left_position] : i8, view<[%extent]xi8>
+    view.store %right, %destination[%saved_right_position] : i8, view<[%extent]xi8>
+  }
+  func.return
+}
+
+func.def @native_packet_routes(%input: buffer, %other: buffer, %output: buffer) {
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c4 = index.constant 4 : index
+  %c8 = index.constant 8 : index
+  %c16 = index.constant 16 : index
+  %c32 = index.constant 32 : index
+  %b0 = index.constant 0 : offset
+  %b1 = index.constant 8 : offset
+  %b2 = index.constant 72 : offset
+  %b3 = index.constant 200 : offset
+  %w0 = index.constant 456 : offset
+  %w1 = index.constant 472 : offset
+  %w2 = index.constant 536 : offset
+  %w3 = index.constant 664 : offset
+  %d0 = index.constant 920 : offset
+  %d1 = index.constant 952 : offset
+  %d2 = index.constant 1016 : offset
+  %d3 = index.constant 1144 : offset
+  %q0 = index.constant 1400 : offset
+  %q1 = index.constant 1464 : offset
+  %q2 = index.constant 1592 : offset
+  func.call @route_byte_packets(%c1, %b0, %input, %other, %output) : (index, offset, buffer, buffer, buffer)
+  func.call @route_byte_packets(%c8, %b1, %input, %other, %output) : (index, offset, buffer, buffer, buffer)
+  func.call @route_byte_packets(%c16, %b2, %input, %other, %output) : (index, offset, buffer, buffer, buffer)
+  func.call @route_byte_packets(%c32, %b3, %input, %other, %output) : (index, offset, buffer, buffer, buffer)
+  func.call @route_word_packets(%c1, %w0, %input, %other, %output) : (index, offset, buffer, buffer, buffer)
+  func.call @route_word_packets(%c4, %w1, %input, %other, %output) : (index, offset, buffer, buffer, buffer)
+  func.call @route_word_packets(%c8, %w2, %input, %other, %output) : (index, offset, buffer, buffer, buffer)
+  func.call @route_word_packets(%c16, %w3, %input, %other, %output) : (index, offset, buffer, buffer, buffer)
+  func.call @route_dword_packets(%c1, %d0, %input, %other, %output) : (index, offset, buffer, buffer, buffer)
+  func.call @route_dword_packets(%c2, %d1, %input, %other, %output) : (index, offset, buffer, buffer, buffer)
+  func.call @route_dword_packets(%c4, %d2, %input, %other, %output) : (index, offset, buffer, buffer, buffer)
+  func.call @route_dword_packets(%c8, %d3, %input, %other, %output) : (index, offset, buffer, buffer, buffer)
+  func.call @route_qword_packets(%c1, %q0, %input, %other, %output) : (index, offset, buffer, buffer, buffer)
+  func.call @route_qword_packets(%c2, %q1, %input, %other, %output) : (index, offset, buffer, buffer, buffer)
+  func.call @route_qword_packets(%c4, %q2, %input, %other, %output) : (index, offset, buffer, buffer, buffer)
+  func.return
+}
+
+func.def @native_packet_routes_oracle(%input: buffer, %other: buffer, %output: buffer) {
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c4 = index.constant 4 : index
+  %c8 = index.constant 8 : index
+  %c16 = index.constant 16 : index
+  %c32 = index.constant 32 : index
+  %b0 = index.constant 0 : offset
+  %b1 = index.constant 8 : offset
+  %b2 = index.constant 72 : offset
+  %b3 = index.constant 200 : offset
+  %w0 = index.constant 456 : offset
+  %w1 = index.constant 472 : offset
+  %w2 = index.constant 536 : offset
+  %w3 = index.constant 664 : offset
+  %d0 = index.constant 920 : offset
+  %d1 = index.constant 952 : offset
+  %d2 = index.constant 1016 : offset
+  %d3 = index.constant 1144 : offset
+  %q0 = index.constant 1400 : offset
+  %q1 = index.constant 1464 : offset
+  %q2 = index.constant 1592 : offset
+  func.call @route_packets_oracle(%c1, %c1, %b0, %input, %other, %output) : (index, index, offset, buffer, buffer, buffer)
+  func.call @route_packets_oracle(%c8, %c1, %b1, %input, %other, %output) : (index, index, offset, buffer, buffer, buffer)
+  func.call @route_packets_oracle(%c16, %c1, %b2, %input, %other, %output) : (index, index, offset, buffer, buffer, buffer)
+  func.call @route_packets_oracle(%c32, %c1, %b3, %input, %other, %output) : (index, index, offset, buffer, buffer, buffer)
+  func.call @route_packets_oracle(%c1, %c2, %w0, %input, %other, %output) : (index, index, offset, buffer, buffer, buffer)
+  func.call @route_packets_oracle(%c4, %c2, %w1, %input, %other, %output) : (index, index, offset, buffer, buffer, buffer)
+  func.call @route_packets_oracle(%c8, %c2, %w2, %input, %other, %output) : (index, index, offset, buffer, buffer, buffer)
+  func.call @route_packets_oracle(%c16, %c2, %w3, %input, %other, %output) : (index, index, offset, buffer, buffer, buffer)
+  func.call @route_packets_oracle(%c1, %c4, %d0, %input, %other, %output) : (index, index, offset, buffer, buffer, buffer)
+  func.call @route_packets_oracle(%c2, %c4, %d1, %input, %other, %output) : (index, index, offset, buffer, buffer, buffer)
+  func.call @route_packets_oracle(%c4, %c4, %d2, %input, %other, %output) : (index, index, offset, buffer, buffer, buffer)
+  func.call @route_packets_oracle(%c8, %c4, %d3, %input, %other, %output) : (index, index, offset, buffer, buffer, buffer)
+  func.call @route_packets_oracle(%c1, %c8, %q0, %input, %other, %output) : (index, index, offset, buffer, buffer, buffer)
+  func.call @route_packets_oracle(%c2, %c8, %q1, %input, %other, %output) : (index, index, offset, buffer, buffer, buffer)
+  func.call @route_packets_oracle(%c4, %c8, %q2, %input, %other, %output) : (index, index, offset, buffer, buffer, buffer)
+  func.return
+}
+
+check.scenario @native_packet_routes_values {
+  check.trial[4](%trial: index, %entropy: check.entropy) {
+    %left_seed = check.entropy.read %entropy[0] : check.entropy -> i64
+    %right_seed = check.entropy.read %entropy[1] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%left_seed) range(-128 to 127) : tensor<64xi8>
+    %other = check.generate.random.uniform seed(%right_seed) range(-128 to 127) : tensor<64xi8>
+    %storage = check.generate.fill value(91) : tensor<1880xi8>
+    %output = check.tensor.view %storage offset(16) : tensor<1880xi8> -> tensor<1848xi8>
+    check.compare<@native_packet_routes, @native_packet_routes_oracle>(%input, %other, %output) : (tensor<64xi8>, tensor<64xi8>, tensor<1848xi8>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<64xi8>
+      check.expect.bitwise actual(%other) expected(%other) : tensor<64xi8>
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<1880xi8>
+    }
+  }
+  check.return
+}
