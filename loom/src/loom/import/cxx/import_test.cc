@@ -1028,6 +1028,59 @@ TEST_F(KernelRefImportTest, KernelLaunchesFollowKernelArgumentFlattening) {
   expect_leaves(*fixed, {{1, 0, 8}});
 }
 
+// Hosted code branches on loom::target::is_device(); the device pass imports
+// only the device arm, so host-only calls never reach device code.
+TEST_F(KernelRefImportTest, HostedImportKeepsOnlyTheDeviceArmOfDeviceQueries) {
+  constexpr char kSource[] = R"cxx(
+#include <loomcxx/kernel.h>
+#include <loomcxx/target.h>
+
+// The driver's launch reference: the importer reads only the kernel argument.
+namespace offload::launch {
+struct info;
+template <auto Kernel>
+[[loom::kernel_ref]] extern const info kernel_ref;
+}  // namespace offload::launch
+
+extern "C" int printf(const char* format, ...);
+static loom::kernel::configuration launch_config(unsigned groups) {
+  return {{groups, 1, 1}, {64, 1, 1}};
+}
+template <class T>
+[[loom::kernel(launch_config)]]
+void run(T tag) { tag(); }
+inline float scaled(float value) {
+  if (loom::target::is_device()) {
+    return value * 2.0f;
+  } else {
+    printf("host %f\n", value);
+    return value;
+  }
+}
+struct Body {
+  float a;
+  float* y;
+  [[loom::inline]] void operator()() const {
+    if (!loom::target::is_device()) { printf("host\n"); }
+    y[0] = scaled(a);
+  }
+};
+const offload::launch::info* host() {
+  printf("%f\n", scaled(1.0f));
+  return &offload::launch::kernel_ref<&run<Body>>;
+}
+)cxx";
+  UseKernelRefs({kBodyReference});
+  IREE_ASSERT_OK(ImportUnit(iree_make_cstring_view(kSource)));
+  ASSERT_NE(module_, nullptr);
+  EXPECT_EQ(error_count_, 0);
+  const std::string printed = Print();
+  EXPECT_NE(printed.find("@_Z3runI4BodyEvT_"), std::string::npos) << printed;
+  EXPECT_NE(printed.find("scalar.mulf"), std::string::npos) << printed;
+  EXPECT_EQ(printed.find("printf"), std::string::npos) << printed;
+  EXPECT_EQ(printed.find("@host"), std::string::npos) << printed;
+}
+
 // A unit is parsed once and imported from its existing translation unit, as
 // a single-source driver does after generating host code from it.
 TEST_F(KernelRefImportTest, ParsedUnitImportsWithoutReparsing) {

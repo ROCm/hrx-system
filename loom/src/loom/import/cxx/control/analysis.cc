@@ -319,7 +319,123 @@ std::optional<bool> constant_truth(cxx::TranslationUnit& unit,
   return interpreter.toBool(*constant);
 }
 
+// Whether a device query appears in an expression, outside lambda bodies.
+class DeviceQueryFinder final : public cxx::ASTVisitor {
+ public:
+  static bool contains(cxx::ExpressionAST* expression) {
+    DeviceQueryFinder finder;
+    finder.accept(expression);
+    return finder.found_;
+  }
+
+  bool preVisit(cxx::AST*) override { return !found_; }
+
+  void visit(cxx::CallExpressionAST* ast) override {
+    if (is_device_query(ast)) {
+      found_ = true;
+      return;
+    }
+    cxx::ASTVisitor::visit(ast);
+  }
+
+  void visit(cxx::LambdaExpressionAST*) override {}
+
+ private:
+  bool found_ = false;
+};
+
+cxx::ExpressionAST* strip_condition_wrappers(cxx::ExpressionAST* expression) {
+  for (;;) {
+    if (auto* cast =
+            cxx::ast_cast<cxx::ImplicitCastExpressionAST>(expression)) {
+      expression = cast->expression;
+    } else if (auto* nested =
+                   cxx::ast_cast<cxx::NestedExpressionAST>(expression)) {
+      expression = nested->expression;
+    } else {
+      return expression;
+    }
+  }
+}
+
+// Folds a condition in which every device query is true. Built-in logical
+// operators short-circuit as in C++, so an operand they skip need not be
+// constant. Subexpressions without a device query use the frontend's
+// constant evaluator.
+std::optional<bool> device_condition(cxx::TranslationUnit& unit,
+                                     cxx::ExpressionAST* expression) {
+  expression = strip_condition_wrappers(expression);
+  if (!expression) {
+    return std::nullopt;
+  }
+  if (auto* call = cxx::ast_cast<cxx::CallExpressionAST>(expression);
+      call && is_device_query(call)) {
+    return true;
+  }
+  if (!DeviceQueryFinder::contains(expression)) {
+    cxx::ASTInterpreter interpreter(&unit);
+    auto value = interpreter.evaluate(expression);
+    return value ? interpreter.toBool(*value) : std::nullopt;
+  }
+  if (auto* unary = cxx::ast_cast<cxx::UnaryExpressionAST>(expression);
+      unary && !unary->symbol && unary->op == cxx::TokenKind::T_EXCLAIM) {
+    auto operand = device_condition(unit, unary->expression);
+    return operand ? std::optional<bool>(!*operand) : std::nullopt;
+  }
+  if (auto* binary = cxx::ast_cast<cxx::BinaryExpressionAST>(expression);
+      binary && !binary->symbol &&
+      (binary->op == cxx::TokenKind::T_AMP_AMP ||
+       binary->op == cxx::TokenKind::T_BAR_BAR)) {
+    const bool conjunction = binary->op == cxx::TokenKind::T_AMP_AMP;
+    auto left = device_condition(unit, binary->leftExpression);
+    if (!left) {
+      return std::nullopt;
+    }
+    // false && x and true || x never evaluate x.
+    if (*left != conjunction) {
+      return *left;
+    }
+    return device_condition(unit, binary->rightExpression);
+  }
+  if (auto* conditional =
+          cxx::ast_cast<cxx::ConditionalExpressionAST>(expression)) {
+    auto selector = device_condition(unit, conditional->condition);
+    if (!selector) {
+      return std::nullopt;
+    }
+    return device_condition(unit, *selector ? conditional->iftrueExpression
+                                            : conditional->iffalseExpression);
+  }
+  return std::nullopt;
+}
+
 }  // namespace
+
+bool is_device_query(cxx::CallExpressionAST* call) {
+  return call && annotated(direct_callee(call), "is_device");
+}
+
+bool contains_device_query(cxx::ExpressionAST* expression) {
+  return expression && DeviceQueryFinder::contains(expression);
+}
+
+std::optional<bool> selected_branch(cxx::TranslationUnit& unit,
+                                    cxx::IfStatementAST* branch) {
+  if (!branch) {
+    return std::nullopt;
+  }
+  if (branch->constexprValue.has_value()) {
+    return branch->constexprValue;
+  }
+  // A condition declaration names a variable both arms can use; it remains a
+  // runtime decision.
+  auto* condition = strip_condition_wrappers(branch->condition);
+  if (!condition || cxx::ast_cast<cxx::ConditionExpressionAST>(condition) ||
+      !DeviceQueryFinder::contains(condition)) {
+    return std::nullopt;
+  }
+  return device_condition(unit, condition);
+}
 
 ControlFlow::ControlFlow(cxx::TranslationUnit& unit, Diagnostics& diagnostics,
                          Types& types, const Imports& imports,
@@ -1353,9 +1469,8 @@ StatementExits ControlFlow::classify_exits(cxx::StatementAST* statement) const {
     }
     case Kind::IfStatement: {
       auto* branch = cxx::ast_cast<cxx::IfStatementAST>(statement);
-      if (branch->constexprValue.has_value()) {
-        return exits(*branch->constexprValue ? branch->statement
-                                             : branch->elseStatement);
+      if (auto selected = selected_branch(unit_, branch)) {
+        return exits(*selected ? branch->statement : branch->elseStatement);
       }
       return StatementExits::branch(exits(branch->statement),
                                     exits(branch->elseStatement));
@@ -1495,8 +1610,8 @@ void ControlFlow::visit(cxx::IfStatementAST* ast) {
   }
   accept(ast->initializer);
   accept(ast->condition);
-  if (ast->constexprValue.has_value()) {
-    accept(*ast->constexprValue ? ast->statement : ast->elseStatement);
+  if (auto selected = selected_branch(unit_, ast)) {
+    accept(*selected ? ast->statement : ast->elseStatement);
   } else {
     auto incoming = construction_.state();
     accept(ast->statement);
@@ -2199,6 +2314,10 @@ void ControlFlow::visit(cxx::CallExpressionAST* ast) {
       pointer_alias_use_ = saved_alias_use;
       ++ordinal;
     }
+  }
+  // A device query is the constant true; its host definition is not called.
+  if (is_device_query(ast)) {
+    return;
   }
   if (cxx::resolveBuiltinFunctionKind(
           cxx::ast_cast<cxx::IdExpressionAST>(ast->baseExpression)) ==

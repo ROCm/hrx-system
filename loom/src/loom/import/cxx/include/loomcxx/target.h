@@ -40,6 +40,19 @@ enum class feature : unsigned char {
   disabled,
 };
 
+// Whether the calling code runs on the device. Single-source code shares one
+// function between a host compiler and the Loom importer and branches on it:
+//
+//   if (loom::target::is_device()) { device-only code } else { host code }
+//
+// A host compiler sees this definition, so the condition is a constant false
+// and it emits only the host arm at every optimization level. The importer
+// folds every call to true and imports only the device arm; host-only code in
+// the other arm, such as I/O or host runtime calls, is never translated. A
+// condition stays a compile-time selection only when it is constant once the
+// call is folded; `if constexpr` keeps the host value on both sides.
+[[loom::is_device]] constexpr bool is_device() noexcept { return false; }
+
 namespace subgroup {
 
 // Reads the selected target's subgroup width in launch configuration code or

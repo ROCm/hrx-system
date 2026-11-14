@@ -1,0 +1,179 @@
+// RUN: roundtrip
+// A device query selects the device arm; the host arm calls a variadic
+// function that the importer cannot admit and is never translated.
+#include <loomcxx/target.h>
+extern "C" int printf(const char* format, ...);
+int entry(int value) {
+  if (loom::target::is_device()) {
+    return value + 1;
+  } else {
+    printf("host %d\n", value);
+    return value - 1;
+  }
+}
+// ----
+func.def public @entry(%value: i32) -> (i32) {
+  %2 = scalar.constant 1 : i32
+  %3 = scalar.addi %value, %2 : i32
+  func.return %3 : i32
+}
+
+// ====
+// A negated query discards a host-only arm with no else.
+#include <loomcxx/target.h>
+extern "C" int printf(const char* format, ...);
+int entry(int value) {
+  if (!loom::target::is_device()) {
+    printf("host %d\n", value);
+  }
+  return value * 2;
+}
+// ----
+func.def public @entry(%value: i32) -> (i32) {
+  %2 = scalar.constant 2 : i32
+  %3 = scalar.muli %value, %2 : i32
+  func.return %3 : i32
+}
+
+// ====
+// Paired guards: the device arm returns and the host arm is discarded.
+#include <loomcxx/target.h>
+extern "C" int printf(const char* format, ...);
+int entry(int value) {
+  if (loom::target::is_device()) { return value + 3; }
+  if (!loom::target::is_device()) { printf("host\n"); return value; }
+}
+// ----
+func.def public @entry(%value: i32) -> (i32) {
+  %2 = scalar.constant 3 : i32
+  %3 = scalar.addi %value, %2 : i32
+  func.return %3 : i32
+}
+
+// ====
+// Nested and else-if forms: only the runtime condition remains.
+#include <loomcxx/target.h>
+extern "C" int printf(const char* format, ...);
+int entry(int value) {
+  if (!loom::target::is_device()) {
+    printf("host\n");
+    return 0;
+  } else if (value > 3) {
+    if (loom::target::is_device()) return 1;
+    else printf("unreachable\n");
+  } else {
+    return 2;
+  }
+  return 3;
+}
+// ----
+func.def public @entry(%value: i32) -> (i32) {
+  %2 = scalar.constant 3 : i32
+  %3 = scalar.cmpi sgt, %value, %2 : i32
+  %4 = scf.if %3 -> (i32) {
+    %5 = scalar.constant 1 : i32
+    scf.yield %5 : i32
+  } else {
+    %6 = scalar.constant 2 : i32
+    scf.yield %6 : i32
+  }
+  func.return %4 : i32
+}
+
+// ====
+// Logical operators fold with short-circuit rules; a skipped operand may be
+// host-only.
+#include <loomcxx/target.h>
+extern "C" int printf(const char* format, ...);
+int entry(int value) {
+  if (!loom::target::is_device() && printf("host\n") > 0) return 0;
+  if (loom::target::is_device() || printf("host\n") > 0) value += 4;
+  if (loom::target::is_device() ? false : true) printf("host\n");
+  return value;
+}
+// ----
+func.def public @entry(%value$0: i32) -> (i32) {
+  %2 = scalar.constant 4 : i32
+  %value$3 = scalar.addi %value$0, %2 : i32
+  func.return %value$3 : i32
+}
+
+// ====
+// A condition with a runtime operand keeps both arms; the query is true.
+#include <loomcxx/target.h>
+int entry(int value) {
+  if (loom::target::is_device() && value > 0) return value;
+  return -value;
+}
+// ----
+func.def public @entry(%value: i32) -> (i32) {
+  %2 = scalar.constant 1 : i1
+  %3 = scf.if %2 -> (i1) {
+    %4 = scalar.constant 0 : i32
+    %5 = scalar.cmpi sgt, %value, %4 : i32
+    scf.yield %5 : i1
+  } else {
+    scf.yield %2 : i1
+  }
+  %6 = scf.if %3 -> (i32) {
+    scf.yield %value : i32
+  } else {
+    %7 = scalar.constant 0 : i32
+    %8 = scalar.subi %7, %value : i32
+    scf.yield %8 : i32
+  }
+  func.return %6 : i32
+}
+
+// ====
+// Outside a condition the query is the constant true.
+#include <loomcxx/target.h>
+int entry(int value) {
+  const bool device = loom::target::is_device();
+  return device ? value : -value;
+}
+// ----
+func.def public @entry(%value: i32) -> (i32) {
+  %device = scalar.constant 1 : i1
+  %3 = scf.if %device -> (i32) {
+    scf.yield %value : i32
+  } else {
+    %4 = scalar.constant 0 : i32
+    %5 = scalar.subi %4, %value : i32
+    scf.yield %5 : i32
+  }
+  func.return %3 : i32
+}
+
+// ====
+// A discarded host arm contributes no writes, so the loop keeps its schedule.
+#include <loomcxx/target.h>
+extern "C" int printf(const char* format, ...);
+unsigned entry(unsigned count) {
+  unsigned total = 0;
+  [[loom::unroll(2)]]
+  for (unsigned index = 0; index < count; ++index) {
+    if (!loom::target::is_device()) {
+      printf("%u\n", index);
+      continue;
+    }
+    total += index;
+  }
+  return total;
+}
+// ----
+func.def public @entry(%count: i32) -> (i32) {
+  %total$2 = scalar.constant 0 : i32
+  %index = scalar.constant 0 : i32
+  %4 = index.cast %index : i32 to offset
+  %5 = index.cast %count : i32 to offset
+  %6 = index.constant 1 : offset
+  %7 = scalar.constant 2 : i32
+  %8 = index.cast %7 : i32 to index
+  %total$11 = scf.for %index = [%4 to %5 step %6](%total$10 = %total$2 : i32) -> (i32) unroll(%8) {
+    %12 = index.cast %index : offset to i32
+    %total$13 = scalar.addi %total$10, %12 : i32
+    scf.yield %total$13 : i32
+  }
+  func.return %total$11 : i32
+}
