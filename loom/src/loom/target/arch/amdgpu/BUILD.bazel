@@ -81,6 +81,7 @@ loom_cc_library(
     name = "target_info_defs",
     hdrs = ["target_info_defs.h"],
     visibility = (
+        ["//loom/src/loom/target/arch/amdgpu/diagnostics:__pkg__"] +
         _AMDGPU_ANALYSIS_VISIBILITY +
         _AMDGPU_LOWER_VISIBILITY +
         _AMDGPU_MATRIX_VISIBILITY +

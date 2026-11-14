@@ -7,6 +7,7 @@
 #include "loom/target/arch/amdgpu/diagnostics/packet_diagnostics.h"
 
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
+#include "loom/target/arch/amdgpu/target_info_defs.h"
 
 static bool loom_amdgpu_packet_diagnostics_is_crosslane(
     const loom_low_descriptor_set_t* descriptor_set,
@@ -40,6 +41,12 @@ static iree_status_t loom_amdgpu_low_packet_diagnostic_try_packet(
   }
   const loom_low_schedule_table_t* schedule =
       loom_target_low_packet_diagnostics_schedule(context);
+  // Descriptor ordinals are local to a target family, while the diagnostic
+  // provider list includes every configured target.
+  if (schedule->target.descriptor_set->target_stable_id !=
+      LOOM_AMDGPU_TARGET_STABLE_ID) {
+    return iree_ok_status();
+  }
   if (!loom_amdgpu_packet_diagnostics_is_crosslane(
           schedule->target.descriptor_set, packet->descriptor)) {
     return iree_ok_status();
