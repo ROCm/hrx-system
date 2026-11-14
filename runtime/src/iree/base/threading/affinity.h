@@ -20,6 +20,7 @@
 #include <string.h>
 
 #include "iree/base/api.h"
+#include "iree/base/bitmap.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -99,6 +100,18 @@ static inline bool iree_thread_affinity_is_unspecified(
 // selected by the platform.
 IREE_API_EXPORT void iree_thread_affinity_set_group_any(
     uint32_t group, iree_thread_affinity_t* out_thread_affinity);
+
+// Captures the calling thread's effective Linux/Android processor affinity.
+// Bit indices are native logical processor IDs. The result preserves sparse IDs
+// and is not limited to cpu_set_t or to the number of task workers.
+//
+// The caller owns out_processor_mask->words and releases it with |allocator|.
+// Capture this at the application ownership boundary: querying a later pinned
+// worker does not recover the application's original CPU budget. This observes
+// thread affinity, not the enclosing cgroup's complete CPU allowance.
+// Platforms without this effective-affinity query return UNAVAILABLE.
+IREE_API_EXPORT iree_status_t iree_thread_affinity_query_current(
+    iree_allocator_t allocator, iree_bitmap_t* out_processor_mask);
 
 #ifdef __cplusplus
 }  // extern "C"

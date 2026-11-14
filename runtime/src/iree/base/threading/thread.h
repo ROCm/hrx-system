@@ -74,6 +74,13 @@ typedef struct iree_thread_create_params_t {
   // This may be changed later via iree_thread_request_affinity; see that for
   // more information.
   iree_thread_affinity_t initial_affinity;
+
+  // Optional CPU budget intersected with initial_affinity before entry runs.
+  // Bit indices are native Linux CPU IDs or Windows (group * 64 + processor)
+  // IDs. A zero bit_count leaves affinity unconstrained by an additional mask;
+  // a nonzero mask with no permitted CPUs fails creation. Storage is borrowed
+  // only through iree_thread_create, including for suspended threads.
+  iree_bitmap_t initial_processor_mask;
 } iree_thread_create_params_t;
 
 typedef int (*iree_thread_entry_t)(void* entry_arg);
@@ -134,15 +141,20 @@ IREE_API_EXPORT void iree_thread_override_end(
 // request updates whenever new large amounts of work are about to be performed.
 //
 // Returns an error if the platform cannot apply the requested affinity.
-// An unspecified affinity leaves the current placement unchanged.
+// An unspecified affinity without a processor mask leaves placement unchanged.
 // Linux and Windows restrict execution to the requested CPUs. NUMA-node
 // affinity selects eligible CPUs within that node; it does not bind memory.
+// A nonzero |processor_mask| bounds the requested affinity. With an unspecified
+// affinity the mask itself selects CPUs. Windows hard affinity remains within
+// one processor group; a mask alone spanning groups is rejected. Mask storage
+// is borrowed only through this call. Darwin does not support CPU masks.
 //
 // Darwin CPU IDs are advisory cache-affinity tags, not CPU bindings. On Apple
 // Silicon these tags have no effect; the SMT bit still selects background QoS
 // at creation. NUMA affinity is supported only for the sole memory domain (0).
 IREE_API_EXPORT iree_status_t iree_thread_request_affinity(
-    iree_thread_t* thread, iree_thread_affinity_t affinity);
+    iree_thread_t* thread, iree_thread_affinity_t affinity,
+    iree_bitmap_t processor_mask);
 
 // Resumes |thread| if it was created suspended.
 // This has no effect if the thread is not suspended.
