@@ -440,6 +440,7 @@ loom_cc_library(
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops/cfg",
         "//loom/src/loom/ops/index:cast",
+        "//loom/src/loom/util:adaptive_sort",
         "//loom/src/loom/util:dominance",
         "//loom/src/loom/util:fact_table",
         "//runtime/src/iree/base",
