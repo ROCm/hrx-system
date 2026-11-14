@@ -327,6 +327,7 @@ loom_cc_library(
         "//loom/src/loom/target:types",
         "//loom/src/loom/target/arch/spirv/descriptors",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/internal:arena",
     ],
 )

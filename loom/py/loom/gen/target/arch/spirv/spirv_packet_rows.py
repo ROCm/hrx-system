@@ -232,10 +232,6 @@ def _workgroup_pointer_value(scalar: StorageBufferScalar) -> str:
     return _value_type("LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP", scalar.scalar_enum)
 
 
-def _workgroup_array_pointer_value(scalar: StorageBufferScalar) -> str:
-    return _value_type("LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP_ARRAY", scalar.scalar_enum)
-
-
 def _offset64_value() -> str:
     return _value_type("LOOM_SPIRV_VALUE_CLASS_OFFSET64", "LOOM_SPIRV_SCALAR_TYPE_U64")
 
@@ -685,19 +681,21 @@ def _raw_storage_buffer_byte_rows() -> tuple[_PacketRow, ...]:
     )
 
 
-def _workgroup_rows() -> list[_PacketRow]:
+def _logical_storage_rows(space: str) -> list[_PacketRow]:
     rows: list[_PacketRow] = []
     for scalar in STORAGE_BUFFER_SCALARS:
         if scalar.byte_width & (scalar.byte_width - 1):
             raise ValueError(f"{scalar.suffix}: access-chain byte units must be a power of two")
+        pointer = _value_type(f"LOOM_SPIRV_VALUE_CLASS_PTR_{space.upper()}", scalar.scalar_enum)
+        array_pointer = _value_type(f"LOOM_SPIRV_VALUE_CLASS_PTR_{space.upper()}_ARRAY", scalar.scalar_enum)
         rows.append(
             _PacketRow(
-                f"spirv.op_access_chain.workgroup.{scalar.suffix}.byte_offset",
+                f"spirv.op_access_chain.{space}.{scalar.suffix}.byte_offset",
                 opcode="LOOM_SPIRV_OP_ACCESS_CHAIN",
                 form="LOOM_SPIRV_PACKET_FORM_ACCESS_CHAIN",
-                result_type=_workgroup_pointer_value(scalar),
+                result_type=pointer,
                 operand_types=(
-                    _workgroup_array_pointer_value(scalar),
+                    array_pointer,
                     _offset64_value(),
                 ),
                 coordinate_byte_shift=scalar.byte_width.bit_length() - 1,
@@ -705,12 +703,12 @@ def _workgroup_rows() -> list[_PacketRow]:
         )
         rows.append(
             _PacketRow(
-                f"spirv.op_access_chain.workgroup.{scalar.suffix}.element_index",
+                f"spirv.op_access_chain.{space}.{scalar.suffix}.element_index",
                 opcode="LOOM_SPIRV_OP_ACCESS_CHAIN",
                 form="LOOM_SPIRV_PACKET_FORM_ACCESS_CHAIN",
-                result_type=_workgroup_pointer_value(scalar),
+                result_type=pointer,
                 operand_types=(
-                    _workgroup_array_pointer_value(scalar),
+                    array_pointer,
                     _value_type(
                         "LOOM_SPIRV_VALUE_CLASS_SCALAR",
                         "LOOM_SPIRV_SCALAR_TYPE_S32",
@@ -720,21 +718,21 @@ def _workgroup_rows() -> list[_PacketRow]:
         )
         rows.append(
             _PacketRow(
-                f"spirv.op_load.workgroup.{scalar.suffix}",
+                f"spirv.op_load.{space}.{scalar.suffix}",
                 opcode="LOOM_SPIRV_OP_LOAD",
                 form="LOOM_SPIRV_PACKET_FORM_LOAD_ALIGNED",
                 result_type=_scalar_value(scalar),
-                operand_types=(_workgroup_pointer_value(scalar),),
+                operand_types=(pointer,),
                 memory_alignment=scalar.byte_width,
             )
         )
         rows.append(
             _PacketRow(
-                f"spirv.op_store.workgroup.{scalar.suffix}",
+                f"spirv.op_store.{space}.{scalar.suffix}",
                 opcode="LOOM_SPIRV_OP_STORE",
                 form="LOOM_SPIRV_PACKET_FORM_STORE_ALIGNED",
                 operand_types=(
-                    _workgroup_pointer_value(scalar),
+                    pointer,
                     _scalar_value(scalar),
                 ),
                 memory_alignment=scalar.byte_width,
@@ -1313,14 +1311,6 @@ def _select_rows() -> list[_PacketRow]:
     return rows
 
 
-_PACKETLESS_DESCRIPTOR_KEYS = frozenset(
-    {
-        # Deliberate low-verifier fixture for the missing-packet diagnostic.
-        "spirv.op_variable.function.ptr",
-    }
-)
-
-
 def _packet_rows() -> tuple[_PacketRow, ...]:
     return (
         *(_boolean_constant_row(row) for row in BOOLEAN_CONSTANTS),
@@ -1370,7 +1360,8 @@ def _packet_rows() -> tuple[_PacketRow, ...]:
         *_select_rows(),
         *_storage_buffer_rows(),
         *_raw_storage_buffer_byte_rows(),
-        *_workgroup_rows(),
+        *_logical_storage_rows("workgroup"),
+        *_logical_storage_rows("function"),
         *_atomic_rows(),
         *_float_atomic_rows(),
         *_control_barrier_rows(),
@@ -1387,20 +1378,12 @@ def _validate_rows(rows: tuple[_PacketRow, ...], descriptors: tuple[Descriptor, 
     if duplicate_row_keys:
         raise ValueError("SPIR-V packet descriptor keys must be unique: " + ", ".join(duplicate_row_keys))
 
-    unknown_packetless_keys = sorted(_PACKETLESS_DESCRIPTOR_KEYS - descriptor_keys)
-    if unknown_packetless_keys:
-        raise ValueError("SPIR-V packetless exceptions reference missing descriptors: " + ", ".join(unknown_packetless_keys))
-
     emitted_row_keys = set(row_keys)
     unknown_row_keys = sorted(emitted_row_keys - descriptor_keys)
     if unknown_row_keys:
         raise ValueError("SPIR-V packet rows reference missing descriptors: " + ", ".join(unknown_row_keys))
 
-    emitted_packetless_keys = sorted(emitted_row_keys & _PACKETLESS_DESCRIPTOR_KEYS)
-    if emitted_packetless_keys:
-        raise ValueError("SPIR-V packetless descriptors must not have packet rows: " + ", ".join(emitted_packetless_keys))
-
-    missing_row_keys = sorted(descriptor_keys - _PACKETLESS_DESCRIPTOR_KEYS - emitted_row_keys)
+    missing_row_keys = sorted(descriptor_keys - emitted_row_keys)
     if missing_row_keys:
         raise ValueError("SPIR-V descriptors are missing packet rows: " + ", ".join(missing_row_keys))
 

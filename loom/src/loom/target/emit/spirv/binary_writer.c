@@ -87,6 +87,22 @@ iree_status_t loom_spirv_binary_write_words(loom_spirv_binary_writer_t* writer,
   return iree_ok_status();
 }
 
+iree_status_t loom_spirv_binary_insert_words(loom_spirv_binary_writer_t* writer,
+                                             iree_host_size_t position,
+                                             const uint32_t* words,
+                                             iree_host_size_t word_count) {
+  if (word_count == 0) {
+    return iree_ok_status();
+  }
+  IREE_ASSERT_LE(position, writer->word_count);
+  IREE_RETURN_IF_ERROR(loom_spirv_binary_writer_reserve(writer, word_count));
+  memmove(writer->words + position + word_count, writer->words + position,
+          (writer->word_count - position) * sizeof(uint32_t));
+  memcpy(writer->words + position, words, word_count * sizeof(uint32_t));
+  writer->word_count += word_count;
+  return iree_ok_status();
+}
+
 static iree_status_t loom_spirv_binary_write_instruction_header(
     loom_spirv_binary_writer_t* writer, uint16_t opcode,
     iree_host_size_t operand_word_count) {

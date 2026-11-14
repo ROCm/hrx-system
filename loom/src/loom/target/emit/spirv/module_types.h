@@ -128,9 +128,9 @@ iree_status_t loom_spirv_emit_type_ptr_physical_storage_buffer_u64(
 iree_status_t loom_spirv_emit_type_ptr_physical_storage_buffer_scalar(
     loom_spirv_type_context_t* context, loom_spirv_scalar_type_t scalar_type,
     uint32_t* out_type_id);
-iree_status_t loom_spirv_emit_type_ptr_workgroup_scalar(
-    loom_spirv_type_context_t* context, loom_spirv_scalar_type_t scalar_type,
-    uint32_t* out_type_id);
+iree_status_t loom_spirv_emit_type_ptr_logical_scalar(
+    loom_spirv_type_context_t* context, uint32_t storage_class,
+    loom_spirv_scalar_type_t scalar_type, uint32_t* out_type_id);
 iree_status_t loom_spirv_emit_type_id_for_value_type(
     loom_spirv_type_context_t* context, loom_spirv_value_type_t type,
     uint32_t* out_type_id);

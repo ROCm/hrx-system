@@ -21,17 +21,11 @@
 extern "C" {
 #endif
 
-// Returns the typed Workgroup pointer register class for |scalar_type|, or
-// LOOM_LOW_REG_CLASS_NONE when the scalar is not represented by the logical
-// core descriptor set.
-uint16_t loom_spirv_ptr_workgroup_reg_class_id(
-    loom_spirv_scalar_type_t scalar_type);
-
-// Returns the typed Workgroup array pointer register class for |scalar_type|,
-// or LOOM_LOW_REG_CLASS_NONE when the scalar is not represented by the logical
-// core descriptor set.
-uint16_t loom_spirv_ptr_workgroup_array_reg_class_id(
-    loom_spirv_scalar_type_t scalar_type);
+// Returns the typed Function/Workgroup pointer register class, or NONE when
+// |value_class| is not a logical scalar/array pointer or |scalar_type| is
+// unknown.
+uint16_t loom_spirv_logical_pointer_reg_class_id(
+    loom_spirv_value_class_t value_class, loom_spirv_scalar_type_t scalar_type);
 
 // Maps a structural SPIR-V Low register type to its exact semantic value type.
 // Typed `spirv.id` values consume their public register payload; carrier-only

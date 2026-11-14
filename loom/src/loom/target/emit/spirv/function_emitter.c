@@ -14,6 +14,7 @@
 #include "loom/ops/low/ops.h"
 #include "loom/target/arch/spirv/descriptors/descriptors.h"
 #include "loom/target/arch/spirv/packet_rows.h"
+#include "loom/target/arch/spirv/scalar_types.h"
 #include "loom/target/emit/spirv/binary_format.h"
 #include "loom/target/emit/spirv/component_math.h"
 #include "loom/target/emit/spirv/function_atomic.h"
@@ -1276,9 +1277,15 @@ iree_status_t loom_spirv_emit_low_op(loom_spirv_emit_state_t* state,
   }
   if (loom_low_storage_address_isa(op)) {
     loom_spirv_module_value_ref_t value_ref = {0};
-    IREE_RETURN_IF_ERROR(loom_spirv_module_workgroup_storage_emit_address(
+    IREE_RETURN_IF_ERROR(loom_spirv_module_storage_emit_address(
         &state->value_table, op, state->type_context, state->builder,
-        &value_ref));
+        &state->function_variables, &value_ref));
+    const loom_spirv_feature_bits_t feature_bits =
+        loom_spirv_scalar_type_descriptor(value_ref.value_type.scalar_type)
+            ->required_feature_bits;
+    state->required_feature_bits |= feature_bits;
+    loom_spirv_module_builder_require_feature_bits(state->builder,
+                                                   feature_bits);
     return loom_spirv_emit_define_value(
         state, loom_low_storage_address_result(op), value_ref, true);
   }
@@ -1558,6 +1565,9 @@ static iree_status_t loom_spirv_emit_function_entry_block(
     loom_spirv_emit_state_t* state, const loom_block_t* block) {
   IREE_RETURN_IF_ERROR(
       loom_spirv_emit_label_id(state, loom_spirv_emit_allocate_id(state)));
+  state->function_variable_position =
+      loom_spirv_emit_section(state, LOOM_SPIRV_MODULE_SECTION_FUNCTION)
+          ->word_count;
   if (state->function_plan->is_entry) {
     loom_spirv_module_abi_context_t context =
         loom_spirv_emit_abi_context(state);
@@ -1606,6 +1616,10 @@ static iree_status_t loom_spirv_emit_function_contents(
   IREE_RETURN_IF_ERROR(loom_spirv_emit_function_declaration(state));
   IREE_RETURN_IF_ERROR(loom_spirv_emit_function_parameters(state, entry_block));
   IREE_RETURN_IF_ERROR(loom_spirv_emit_function_body(state));
+  IREE_RETURN_IF_ERROR(loom_spirv_binary_insert_words(
+      loom_spirv_emit_section(state, LOOM_SPIRV_MODULE_SECTION_FUNCTION),
+      state->function_variable_position, state->function_variables.words,
+      state->function_variables.word_count));
   state->required_feature_bits = loom_spirv_feature_bits_with_float_modes(
       state->required_feature_bits,
       loom_spirv_function_plan_target_bundle(state->function_plan)
@@ -1622,6 +1636,7 @@ static iree_status_t loom_spirv_emit_function_contents(
 
 static void loom_spirv_emit_function_state_deinitialize(
     loom_spirv_emit_state_t* state) {
+  loom_spirv_binary_writer_deinitialize(&state->function_variables);
   if (loom_local_value_domain_is_acquired(&state->value_domain)) {
     loom_local_value_domain_release(&state->value_domain);
   }
@@ -1643,6 +1658,8 @@ static iree_status_t loom_spirv_emit_function_state_initialize(
       .builder = context->builder,
       .type_context = context->type_context,
   };
+  loom_spirv_binary_writer_initialize(context->builder->allocator,
+                                      &out_state->function_variables);
 
   const loom_region_t* body = loom_low_function_const_body(low_function_op);
   iree_status_t status = loom_local_value_domain_acquire_for_region_tree(

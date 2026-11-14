@@ -104,8 +104,8 @@ low.func.def target<spirv.logical.core>(@target) @untyped_id_register(%value: re
 
 spirv.target<vulkan1_3> @target
 
-// ERROR@+1: SPIRV/005 {function_name="unsupported_register_type", value_name="value", actual_type="reg<spirv.ptr.function>"}
-low.func.def target<spirv.logical.core>(@target) @unsupported_register_type(%value: reg<spirv.ptr.function>) asm {
+// ERROR@+1: SPIRV/005 {function_name="unsupported_register_type", value_name="value", actual_type="reg<spirv.ptr.function.array.i32>"}
+low.func.def target<spirv.logical.core>(@target) @unsupported_register_type(%value: reg<spirv.ptr.function.array.i32>) asm {
   return
 }
 
@@ -176,18 +176,6 @@ spirv.target<vulkan1_3> @target
 low.func.def target<spirv.logical.core>(@target) @resource_requires_raw_bda_hal_abi() asm {
   // ERROR@+1: SPIRV/018 {function_name="resource_requires_raw_bda_hal_abi"}
   %input = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
-  return
-}
-
-// ====
-
-// RUN: verify
-
-spirv.target<vulkan1_3> @target
-
-low.func.def target<spirv.logical.core>(@target) @missing_packet_row() asm {
-  // ERROR@+1: SPIRV/012 {function_name="missing_packet_row", descriptor_key="spirv.op_variable.function.ptr"}
-  %ptr = OpVariable.function.ptr
   return
 }
 

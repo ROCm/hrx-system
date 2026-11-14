@@ -140,6 +140,7 @@ loom_cc_library(
     hdrs = ["module_storage.h"],
     deps = [
         ":binary_format",
+        ":binary_writer",
         ":module_builder",
         ":module_types",
         ":module_values",
@@ -187,6 +188,7 @@ loom_cc_library(
     hdrs = ["module_emitter.h"],
     deps = [
         ":binary_format",
+        ":binary_writer",
         ":module_abi",
         ":module_builder",
         ":module_instructions",
@@ -204,6 +206,7 @@ loom_cc_library(
         "//loom/src/loom/target:types",
         "//loom/src/loom/target/arch/spirv:features",
         "//loom/src/loom/target/arch/spirv:packet_rows",
+        "//loom/src/loom/target/arch/spirv:scalar_types",
         "//loom/src/loom/target/arch/spirv/descriptors:descriptors_ids",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",

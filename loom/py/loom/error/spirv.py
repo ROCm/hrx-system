@@ -131,22 +131,6 @@ ERR_SPIRV_011 = ErrorDef(
     ),
 )
 
-# ERR_SPIRV_012: SPIR-V descriptor has no binary packet row.
-ERR_SPIRV_012 = ErrorDef(
-    domain=ErrorDomain.SPIRV,
-    code=12,
-    severity=Severity.ERROR,
-    summary="SPIR-V descriptor has no binary packet row.",
-    message=(
-        "SPIR-V descriptor '{descriptor_key}' in '@{function_name}' has no "
-        "binary packet row for the selected target"
-    ),
-    params=(
-        ErrorParam("function_name", ParamKind.STRING),
-        ErrorParam("descriptor_key", ParamKind.STRING),
-    ),
-)
-
 # ERR_SPIRV_013: SPIR-V packet exact value type mismatch.
 ERR_SPIRV_013 = ErrorDef(
     domain=ErrorDomain.SPIRV,
@@ -698,6 +682,39 @@ ERR_SPIRV_043 = ErrorDef(
     ),
 )
 
+ERR_SPIRV_044 = ErrorDef(
+    domain=ErrorDomain.SPIRV,
+    code=44,
+    severity=Severity.ERROR,
+    summary="SPIR-V logical storage requires a disabled scalar feature.",
+    message=(
+        "SPIR-V storage type {actual_type} in '@{function_name}' requires "
+        "feature '{feature_name}', which is not enabled by the target profile"
+    ),
+    params=(
+        ErrorParam("function_name", ParamKind.STRING),
+        ErrorParam("actual_type", ParamKind.TYPE),
+        ErrorParam("feature_name", ParamKind.STRING),
+    ),
+    fix_hint="Select a target profile that enables the required scalar feature",
+)
+
+ERR_SPIRV_045 = ErrorDef(
+    domain=ErrorDomain.SPIRV,
+    code=45,
+    severity=Severity.ERROR,
+    summary="SPIR-V logical storage pointer crosses a control-flow merge.",
+    message=(
+        "SPIR-V logical storage pointer '{value_name}' in '@{function_name}' "
+        "cannot be selected or carried through a control-flow merge"
+    ),
+    params=(
+        ErrorParam("function_name", ParamKind.STRING),
+        ErrorParam("value_name", ParamKind.STRING),
+    ),
+    fix_hint="Carry an integer position and form the storage pointer at each access",
+)
+
 ALL_SPIRV_ERRORS: tuple[ErrorDef, ...] = (
     ERR_SPIRV_005,
     ERR_SPIRV_006,
@@ -706,7 +723,6 @@ ALL_SPIRV_ERRORS: tuple[ErrorDef, ...] = (
     ERR_SPIRV_009,
     ERR_SPIRV_010,
     ERR_SPIRV_011,
-    ERR_SPIRV_012,
     ERR_SPIRV_013,
     ERR_SPIRV_014,
     ERR_SPIRV_016,
@@ -735,4 +751,6 @@ ALL_SPIRV_ERRORS: tuple[ErrorDef, ...] = (
     ERR_SPIRV_041,
     ERR_SPIRV_042,
     ERR_SPIRV_043,
+    ERR_SPIRV_044,
+    ERR_SPIRV_045,
 )

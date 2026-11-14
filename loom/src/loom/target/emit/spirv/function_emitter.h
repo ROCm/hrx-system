@@ -21,6 +21,7 @@
 #include "loom/ir/ir.h"
 #include "loom/ir/local_value_domain.h"
 #include "loom/target/arch/spirv/packet_rows.h"
+#include "loom/target/emit/spirv/binary_writer.h"
 #include "loom/target/emit/spirv/module_abi.h"
 #include "loom/target/emit/spirv/module_builder.h"
 #include "loom/target/emit/spirv/module_types.h"
@@ -113,6 +114,11 @@ typedef struct loom_spirv_emit_state_t {
   loom_spirv_feature_bits_t required_feature_bits;
   // SPIR-V label ID of the currently open function-section block.
   uint32_t current_label_id;
+  // Function OpVariable declarations accumulated during ordinary body emission.
+  // Empty functions with no private storage allocate no word buffer.
+  loom_spirv_binary_writer_t function_variables;
+  // Function-section word position immediately following this entry's OpLabel.
+  iree_host_size_t function_variable_position;
   // Selected ABI plan for entry materialization.
   loom_spirv_module_abi_plan_t abi_plan;
   // Input variables referenced by this function's entry-point interface.

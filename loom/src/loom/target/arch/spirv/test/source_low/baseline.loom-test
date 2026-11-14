@@ -25,20 +25,6 @@ classes:
 
 spirv.target<vulkan1_3> @target
 
-low.func.def target<spirv.logical.core>(@target) @spirv_private_storage_address() asm {
-  // ERROR@+1: SPIRV/017 {function_name="spirv_private_storage_address", op_name="low.storage.reserve"}
-  %storage = storage {byte_alignment = 4, byte_length = 256} : low.storage<private>
-  // ERROR@+1: SPIRV/017 {function_name="spirv_private_storage_address", op_name="low.storage.address"}
-  %ptr = storage_address %storage : low.storage<private> -> reg<spirv.ptr.workgroup.array.i32>
-  return
-}
-
-// ====
-
-// RUN: verify
-
-spirv.target<vulkan1_3> @target
-
 low.func.def target<spirv.logical.core>(@target) @spirv_workgroup_storage_address_scalar_mismatch() asm {
   %storage = storage {byte_alignment = 4, byte_length = 16} : low.storage<workgroup>
   %i32_ptr = storage_address %storage : low.storage<workgroup> -> reg<spirv.ptr.workgroup.array.i32>

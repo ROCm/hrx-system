@@ -173,7 +173,6 @@ from loom.target.low_descriptors import (
 
 _REG_ID = "spirv.id"
 _REG_OFFSET64 = "spirv.offset64"
-_REG_PTR_FUNCTION = "spirv.ptr.function"
 _REG_PTR_STORAGE_BUFFER = "spirv.ptr.storage_buffer"
 
 _RESOURCE_ALU = "spirv.alu"
@@ -196,7 +195,6 @@ _ATOMIC_ACQUIRE_OR_WEAKER_ORDERING_ENUM = "spirv.atomic_ordering.acquire_or_weak
 
 _ID_ALT = (RegClassAlt(_REG_ID),)
 _OFFSET64_ALT = (RegClassAlt(_REG_OFFSET64),)
-_PTR_FUNCTION_ALT = (RegClassAlt(_REG_PTR_FUNCTION),)
 _PTR_STORAGE_BUFFER_ALT = (RegClassAlt(_REG_PTR_STORAGE_BUFFER),)
 
 _OFFSET64_VALUE_IMMEDIATE = Immediate(
@@ -318,47 +316,24 @@ def _offset64_operand(field_name: str) -> Operand:
     return Operand(field_name, OperandRole.OPERAND, _OFFSET64_ALT)
 
 
-def _ptr_function_result(field_name: str = "ptr") -> Operand:
-    return Operand(field_name, OperandRole.RESULT, _PTR_FUNCTION_ALT)
-
-
-def _ptr_workgroup_reg_class_name(scalar: StorageBufferScalar) -> str:
-    return f"spirv.ptr.workgroup.{scalar.suffix}"
-
-
-def _ptr_workgroup_array_reg_class_name(scalar: StorageBufferScalar) -> str:
-    return f"spirv.ptr.workgroup.array.{scalar.suffix}"
-
-
-def _ptr_workgroup_alt(scalar: StorageBufferScalar) -> tuple[RegClassAlt, ...]:
-    return (RegClassAlt(_ptr_workgroup_reg_class_name(scalar)),)
-
-
-def _ptr_workgroup_array_alt(
+def _logical_pointer_operand(
+    space: str,
     scalar: StorageBufferScalar,
-) -> tuple[RegClassAlt, ...]:
-    return (RegClassAlt(_ptr_workgroup_array_reg_class_name(scalar)),)
-
-
-def _ptr_workgroup_scalar_result(
-    scalar: StorageBufferScalar,
-    field_name: str = "ptr",
+    field_name: str,
+    role: OperandRole = OperandRole.RESOURCE,
+    *,
+    array: bool = False,
 ) -> Operand:
-    return Operand(field_name, OperandRole.RESULT, _ptr_workgroup_alt(scalar))
+    shape = "array." if array else ""
+    return Operand(
+        field_name, role, (RegClassAlt(f"spirv.ptr.{space}.{shape}{scalar.suffix}"),)
+    )
 
 
 def _ptr_workgroup_scalar_operand(
-    scalar: StorageBufferScalar,
-    field_name: str,
+    scalar: StorageBufferScalar, field_name: str
 ) -> Operand:
-    return Operand(field_name, OperandRole.RESOURCE, _ptr_workgroup_alt(scalar))
-
-
-def _ptr_workgroup_array_operand(
-    scalar: StorageBufferScalar,
-    field_name: str,
-) -> Operand:
-    return Operand(field_name, OperandRole.RESOURCE, _ptr_workgroup_array_alt(scalar))
+    return _logical_pointer_operand("workgroup", scalar, field_name)
 
 
 def _ptr_storage_buffer_result(field_name: str = "ptr") -> Operand:
@@ -901,13 +876,16 @@ def _storage_buffer_effect(
     )
 
 
-def _workgroup_effect(
+def _logical_storage_effect(
+    space: str,
     kind: EffectKind,
     scalar: StorageBufferScalar,
 ) -> Effect:
     return Effect(
         kind,
-        memory_space=MemorySpace.WORKGROUP,
+        memory_space=MemorySpace.WORKGROUP
+        if space == "workgroup"
+        else MemorySpace.STACK,
         flags=(EffectFlag.DEPENDENCY,),
         width_bits=scalar.byte_width * 8,
     )
@@ -1342,17 +1320,18 @@ def _raw_storage_buffer_byte_descriptors() -> tuple[Descriptor, ...]:
     )
 
 
-def _access_chain_workgroup_descriptor(
+def _access_chain_logical_descriptor(
+    space: str,
     scalar: StorageBufferScalar,
     coordinate: str,
 ) -> Descriptor:
     return Descriptor(
-        key=f"spirv.op_access_chain.workgroup.{scalar.suffix}.{coordinate}",
-        mnemonic=f"OpAccessChain.workgroup.{scalar.suffix}.{coordinate}",
-        semantic_tag=f"spirv.op_access_chain.workgroup.{scalar.suffix}.{coordinate}",
+        key=f"spirv.op_access_chain.{space}.{scalar.suffix}.{coordinate}",
+        mnemonic=f"OpAccessChain.{space}.{scalar.suffix}.{coordinate}",
+        semantic_tag=f"spirv.op_access_chain.{space}.{scalar.suffix}.{coordinate}",
         operands=(
-            _ptr_workgroup_scalar_result(scalar),
-            _ptr_workgroup_array_operand(scalar, "base"),
+            _logical_pointer_operand(space, scalar, "ptr", OperandRole.RESULT),
+            _logical_pointer_operand(space, scalar, "base", array=True),
             _offset64_operand(coordinate)
             if coordinate == "byte_offset"
             else _id_operand(coordinate),
@@ -1367,18 +1346,18 @@ def _access_chain_workgroup_descriptor(
     )
 
 
-def _load_workgroup_descriptor(scalar: StorageBufferScalar) -> Descriptor:
+def _load_logical_descriptor(space: str, scalar: StorageBufferScalar) -> Descriptor:
     result_value_type = (
         _scalar_result_value_type(scalar.source_type)
         if scalar.source_rule_enabled
         else None
     )
     return Descriptor(
-        key=f"spirv.op_load.workgroup.{scalar.suffix}",
-        mnemonic=f"OpLoad.workgroup.{scalar.suffix}",
-        semantic_tag=f"spirv.op_load.workgroup.{scalar.suffix}",
-        operands=(_id_result(), _ptr_workgroup_scalar_operand(scalar, "ptr")),
-        effects=(_workgroup_effect(EffectKind.READ, scalar),),
+        key=f"spirv.op_load.{space}.{scalar.suffix}",
+        mnemonic=f"OpLoad.{space}.{scalar.suffix}",
+        semantic_tag=f"spirv.op_load.{space}.{scalar.suffix}",
+        operands=(_id_result(), _logical_pointer_operand(space, scalar, "ptr")),
+        effects=(_logical_storage_effect(space, EffectKind.READ, scalar),),
         feature_mask_words=(scalar.register_feature_bits,)
         if scalar.register_feature_bits
         else (),
@@ -1392,16 +1371,16 @@ def _load_workgroup_descriptor(scalar: StorageBufferScalar) -> Descriptor:
     )
 
 
-def _store_workgroup_descriptor(scalar: StorageBufferScalar) -> Descriptor:
+def _store_logical_descriptor(space: str, scalar: StorageBufferScalar) -> Descriptor:
     return Descriptor(
-        key=f"spirv.op_store.workgroup.{scalar.suffix}",
-        mnemonic=f"OpStore.workgroup.{scalar.suffix}",
-        semantic_tag=f"spirv.op_store.workgroup.{scalar.suffix}",
+        key=f"spirv.op_store.{space}.{scalar.suffix}",
+        mnemonic=f"OpStore.{space}.{scalar.suffix}",
+        semantic_tag=f"spirv.op_store.{space}.{scalar.suffix}",
         operands=(
-            _ptr_workgroup_scalar_operand(scalar, "ptr"),
+            _logical_pointer_operand(space, scalar, "ptr"),
             _id_operand("value"),
         ),
-        effects=(_workgroup_effect(EffectKind.WRITE, scalar),),
+        effects=(_logical_storage_effect(space, EffectKind.WRITE, scalar),),
         feature_mask_words=(scalar.register_feature_bits,)
         if scalar.register_feature_bits
         else (),
@@ -1411,15 +1390,15 @@ def _store_workgroup_descriptor(scalar: StorageBufferScalar) -> Descriptor:
     )
 
 
-def _workgroup_descriptors() -> tuple[Descriptor, ...]:
+def _logical_storage_descriptors(space: str) -> tuple[Descriptor, ...]:
     descriptors: list[Descriptor] = []
     for scalar in STORAGE_BUFFER_SCALARS:
         descriptors.extend(
-            _access_chain_workgroup_descriptor(scalar, coordinate)
+            _access_chain_logical_descriptor(space, scalar, coordinate)
             for coordinate in ("element_index", "byte_offset")
         )
-        descriptors.append(_load_workgroup_descriptor(scalar))
-        descriptors.append(_store_workgroup_descriptor(scalar))
+        descriptors.append(_load_logical_descriptor(space, scalar))
+        descriptors.append(_store_logical_descriptor(space, scalar))
     return tuple(descriptors)
 
 
@@ -1928,26 +1907,17 @@ def _select_descriptors() -> tuple[Descriptor, ...]:
     return tuple(descriptors)
 
 
-def _ptr_workgroup_reg_classes() -> tuple[RegClass, ...]:
-    classes: list[RegClass] = []
-    for scalar in STORAGE_BUFFER_SCALARS:
-        classes.append(
-            RegClass(
-                _ptr_workgroup_array_reg_class_name(scalar),
-                32,
-                SpillSlotSpace.PRIVATE,
-                flags=(RegClassFlag.VIRTUAL_ONLY, RegClassFlag.UNSPILLABLE),
-            )
+def _logical_pointer_reg_classes(space: str) -> tuple[RegClass, ...]:
+    return tuple(
+        RegClass(
+            f"spirv.ptr.{space}.{shape}{scalar.suffix}",
+            32,
+            SpillSlotSpace.PRIVATE,
+            flags=(RegClassFlag.VIRTUAL_ONLY, RegClassFlag.UNSPILLABLE),
         )
-        classes.append(
-            RegClass(
-                _ptr_workgroup_reg_class_name(scalar),
-                32,
-                SpillSlotSpace.PRIVATE,
-                flags=(RegClassFlag.VIRTUAL_ONLY, RegClassFlag.UNSPILLABLE),
-            )
-        )
-    return tuple(classes)
+        for scalar in STORAGE_BUFFER_SCALARS
+        for shape in ("array.", "")
+    )
 
 
 SPIRV_LOGICAL_CORE_DESCRIPTOR_SET = DescriptorSet(
@@ -1978,18 +1948,13 @@ SPIRV_LOGICAL_CORE_DESCRIPTOR_SET = DescriptorSet(
             flags=(RegClassFlag.VIRTUAL_ONLY,),
         ),
         RegClass(
-            _REG_PTR_FUNCTION,
-            32,
-            SpillSlotSpace.PRIVATE,
-            flags=(RegClassFlag.VIRTUAL_ONLY,),
-        ),
-        RegClass(
             _REG_PTR_STORAGE_BUFFER,
             64,
             SpillSlotSpace.PRIVATE,
             flags=(RegClassFlag.VIRTUAL_ONLY,),
         ),
-        *_ptr_workgroup_reg_classes(),
+        *_logical_pointer_reg_classes("workgroup"),
+        *_logical_pointer_reg_classes("function"),
     ),
     resources=(
         Resource(_RESOURCE_ALU, capacity_per_cycle=1, kind=ResourceKind.SCALAR_ALU),
@@ -2206,20 +2171,12 @@ SPIRV_LOGICAL_CORE_DESCRIPTOR_SET = DescriptorSet(
         *_select_descriptors(),
         *_storage_buffer_descriptors(),
         *_raw_storage_buffer_byte_descriptors(),
-        *_workgroup_descriptors(),
+        *_logical_storage_descriptors("workgroup"),
+        *_logical_storage_descriptors("function"),
         *_atomic_descriptors(),
         *_float_atomic_descriptors(),
         *_control_barrier_descriptors(),
         *_cooperative_matrix_descriptors(),
-        Descriptor(
-            key="spirv.op_variable.function.ptr",
-            mnemonic="OpVariable.function.ptr",
-            semantic_tag="spirv.op_variable.function.ptr",
-            operands=(_ptr_function_result(),),
-            asm_forms=_asm(results=("ptr",)),
-            schedule_class=_SCHEDULE_VARIABLE,
-            instruction_classes=(InstructionClass.OTHER,),
-        ),
     ),
     enum_domains=(
         EnumDomain(

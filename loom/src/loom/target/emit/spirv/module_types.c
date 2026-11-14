@@ -753,15 +753,14 @@ iree_status_t loom_spirv_emit_type_ptr_physical_storage_buffer_scalar(
       /*pointer_array_stride=*/scalar_descriptor->bit_width / 8, out_type_id);
 }
 
-iree_status_t loom_spirv_emit_type_ptr_workgroup_scalar(
-    loom_spirv_type_context_t* context, loom_spirv_scalar_type_t scalar_type,
-    uint32_t* out_type_id) {
+iree_status_t loom_spirv_emit_type_ptr_logical_scalar(
+    loom_spirv_type_context_t* context, uint32_t storage_class,
+    loom_spirv_scalar_type_t scalar_type, uint32_t* out_type_id) {
   uint32_t scalar_type_id = 0;
   IREE_RETURN_IF_ERROR(
       loom_spirv_emit_type_scalar(context, scalar_type, &scalar_type_id));
-  return loom_spirv_emit_type_pointer(
-      context, LOOM_SPIRV_STORAGE_CLASS_WORKGROUP, scalar_type_id,
-      /*pointer_array_stride=*/0, out_type_id);
+  return loom_spirv_emit_type_pointer(context, storage_class, scalar_type_id,
+                                      /*pointer_array_stride=*/0, out_type_id);
 }
 
 static bool loom_spirv_integer_constant_key_equal(
@@ -916,12 +915,18 @@ iree_status_t loom_spirv_emit_type_id_for_value_type(
           context, type.scalar_type, out_type_id);
     }
     case LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP:
-      return loom_spirv_emit_type_ptr_workgroup_scalar(
-          context, type.scalar_type, out_type_id);
+    case LOOM_SPIRV_VALUE_CLASS_PTR_FUNCTION:
+      return loom_spirv_emit_type_ptr_logical_scalar(
+          context,
+          type.value_class == LOOM_SPIRV_VALUE_CLASS_PTR_FUNCTION
+              ? LOOM_SPIRV_STORAGE_CLASS_FUNCTION
+              : LOOM_SPIRV_STORAGE_CLASS_WORKGROUP,
+          type.scalar_type, out_type_id);
     case LOOM_SPIRV_VALUE_CLASS_COOPERATIVE_MATRIX:
       return loom_spirv_emit_type_cooperative_matrix(context, type,
                                                      out_type_id);
     case LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP_ARRAY:
+    case LOOM_SPIRV_VALUE_CLASS_PTR_FUNCTION_ARRAY:
       break;
     case LOOM_SPIRV_VALUE_CLASS_UNKNOWN:
       break;

@@ -359,7 +359,8 @@ static iree_status_t loom_spirv_resolve_workgroup_view_reg_class_from_layout(
       root_ordinal >= layout->scalar_type_count) {
     return iree_ok_status();
   }
-  *out_reg_class_id = loom_spirv_ptr_workgroup_array_reg_class_id(
+  *out_reg_class_id = loom_spirv_logical_pointer_reg_class_id(
+      LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP_ARRAY,
       layout->root_scalar_types[root_ordinal]);
   return iree_ok_status();
 }
