@@ -16,6 +16,7 @@
 #include "loom/error/error_catalog.h"
 #include "loom/format/text/printer.h"
 #include "loom/import/cxx/source/catalog.h"
+#include "loom/import/cxx/unit.h"
 #include "loom/ops/func/ops.h"
 #include "loom/ops/op_registry.h"
 #include "loom/target/test/descriptors.h"
@@ -69,6 +70,7 @@ class ImportTest : public ::testing::Test {
                                          const loom_diagnostic_t* diagnostic) {
     auto& self = *static_cast<ImportTest*>(user_data);
     ++self.diagnostic_count_;
+    if (diagnostic->severity == LOOM_DIAGNOSTIC_ERROR) ++self.error_count_;
     self.diagnostic_ref_ = loom_error_def_ref(diagnostic->error);
     auto filename = diagnostic->source_location.filename;
     self.diagnostic_filename_.assign(filename.data ? filename.data : "",
@@ -105,6 +107,8 @@ class ImportTest : public ::testing::Test {
   loom_cxx_preamble_t* preamble_ = nullptr;
   // Number of callbacks delivered by the source diagnostic boundary.
   int diagnostic_count_ = 0;
+  // Number of those callbacks with error severity.
+  int error_count_ = 0;
   // Structured identity of the most recently delivered diagnostic.
   loom_error_ref_t diagnostic_ref_ = LOOM_ERROR_REF_NONE;
   // Copied source identity retained after the frontend is destroyed.
@@ -725,6 +729,69 @@ TEST_F(ImportTest, TemplateFacadeNeedsOnlyOneHeader) {
   EXPECT_EQ(Print(), embedded);
   EXPECT_EQ(source_requests_.size(), 1u);
   EXPECT_EQ(source_requests_.at("/templates/loomcxx/template.h"), 1);
+}
+
+// A unit is parsed once and imported from its existing translation unit.
+TEST_F(ImportTest, ParsedUnitImportsWithoutReparsing) {
+  const auto before = loom::cxx_import::frontend_statistics();
+  loom_cxx_unit_t* unit = nullptr;
+  IREE_ASSERT_OK(loom_cxx_unit_parse(
+      IREE_SV("int first(int value) { return value + 1; }\n"
+              "int second(int value) { return value - 1; }\n"),
+      IREE_SV("/app/source.cpp"), &options_, iree_allocator_system(), &unit));
+  ASSERT_NE(unit, nullptr);
+  const auto parsed = loom::cxx_import::frontend_statistics();
+  EXPECT_EQ(parsed.preprocess_count - before.preprocess_count, 1u);
+  EXPECT_EQ(parsed.parse_count - before.parse_count, 1u);
+
+  // Consumers see the unit's frontend state.
+  EXPECT_NE(loom::cxx_import::unit_translation_unit(unit).ast(), nullptr);
+  EXPECT_FALSE(loom::cxx_import::unit_has_error(unit));
+
+  // Each import selects its own roots from the same translation unit.
+  for (const char* name : {"first", "second"}) {
+    loom_module_free(module_);
+    module_ = nullptr;
+    const iree_string_view_t root = iree_make_cstring_view(name);
+    options_.roots = &root;
+    options_.root_count = 1;
+    IREE_ASSERT_OK(loom_cxx_import_unit(unit, &context_, &pool_, &options_,
+                                        iree_allocator_system(), &module_));
+    ASSERT_NE(module_, nullptr);
+    EXPECT_EQ(error_count_, 0);
+    EXPECT_NE(Print().find(std::string("@") + name), std::string::npos);
+  }
+  EXPECT_EQ(loom::cxx_import::unit_statistics(unit).import_count, 2u);
+  const auto imported = loom::cxx_import::frontend_statistics();
+  EXPECT_EQ(imported.preprocess_count, parsed.preprocess_count);
+  EXPECT_EQ(imported.parse_count, parsed.parse_count);
+  loom_cxx_unit_free(unit);
+}
+
+TEST_F(ImportTest, ParsedUnitRejectsSourceErrorsOnce) {
+  loom_cxx_unit_t* unit = nullptr;
+  IREE_ASSERT_OK(loom_cxx_unit_parse(IREE_SV("int entry() { return x; }\n"),
+                                     IREE_SV("/app/source.cpp"), &options_,
+                                     iree_allocator_system(), &unit));
+  EXPECT_EQ(unit, nullptr);
+  EXPECT_GT(error_count_, 0);
+}
+
+TEST_F(ImportTest, ParsedUnitDiagnosticsFollowTheImportSink) {
+  // The parse sink belongs to the parse; an import reports through its own.
+  loom_cxx_unit_t* unit = nullptr;
+  IREE_ASSERT_OK(loom_cxx_unit_parse(IREE_SV("int counter = 0;\n"),
+                                     IREE_SV("/app/source.cpp"), &options_,
+                                     iree_allocator_system(), &unit));
+  ASSERT_NE(unit, nullptr);
+  EXPECT_EQ(diagnostic_count_, 0);
+  loom_cxx_unit_set_diagnostic_sink(unit, {});
+  // Mutable global storage is rejected when the unit is imported.
+  IREE_ASSERT_OK(loom_cxx_import_unit(unit, &context_, &pool_, &options_,
+                                      iree_allocator_system(), &module_));
+  EXPECT_EQ(module_, nullptr);
+  EXPECT_GT(error_count_, 0);
+  loom_cxx_unit_free(unit);
 }
 
 }  // namespace

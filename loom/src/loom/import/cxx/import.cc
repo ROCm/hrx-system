@@ -17,6 +17,7 @@
 #include "loom/import/cxx/source/error.h"
 #include "loom/import/cxx/source/source.h"
 #include "loom/import/cxx/translation/module.h"
+#include "loom/import/cxx/unit.h"
 #include "loom/verify/verify.h"
 
 namespace {
@@ -47,6 +48,128 @@ bool resolve_source_contents(void* user_data, const loom_module_t* module,
 
 }  // namespace
 
+struct loom_cxx_unit_t {
+  // Constant semantics borrowed by the translation unit; outlives |source|.
+  loom::cxx_import::NumericConversionConstantEvaluator constant_evaluator;
+  // The preprocessed and checked translation unit.
+  std::unique_ptr<loom::cxx_import::Source> source;
+  // Usage counts reported by loom::cxx_import::unit_statistics().
+  loom::cxx_import::UnitStatistics statistics;
+};
+
+namespace {
+
+// Converts importer exceptions to statuses at the public API boundary.
+template <typename Body>
+iree_status_t guard(Body&& body) {
+  using namespace loom::cxx_import;
+  try {
+    return body();
+  } catch (StatusError& error) {
+    return error.release();
+  } catch (const SourceRejected&) {
+    return iree_ok_status();
+  } catch (const std::bad_alloc&) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "C/C++ frontend allocation failed");
+  } catch (const std::exception& error) {
+    return iree_make_status(IREE_STATUS_INTERNAL, "C/C++ frontend failed: %s",
+                            error.what());
+  }
+}
+
+// Translates and verifies a parsed unit. Throws like translate().
+iree_status_t import_parsed(loom_cxx_unit_t* unit, iree_string_view_t filename,
+                            loom_context_t* context,
+                            iree_arena_block_pool_t* block_pool,
+                            const loom_cxx_import_options_t* options,
+                            iree_allocator_t host_allocator,
+                            loom_module_t** out_module) {
+  using namespace loom::cxx_import;
+  Source& parsed = *unit->source;
+  loom_module_t* raw_module = nullptr;
+  const iree_string_view_t module_name =
+      iree_string_view_is_empty(options->module_name) ? filename
+                                                      : options->module_name;
+  check(loom_module_allocate(context, module_name, block_pool, nullptr,
+                             host_allocator, &raw_module));
+  std::unique_ptr<loom_module_t, decltype(&loom_module_free)> module(
+      raw_module, loom_module_free);
+  translate(parsed.unit(), parsed.diagnostics(), module.get(), *options);
+  check(loom_callable_effect_inference_run(module.get()));
+  loom_verify_options_t verification_options = {
+      .sink = options->diagnostic_sink,
+      .source_resolver = {resolve_source_contents,
+                          &parsed.diagnostics().contents()},
+  };
+  loom_verify_result_t verification = {};
+  check(loom_verify_module(module.get(), &verification_options, &verification));
+  ++unit->statistics.import_count;
+  if (verification.error_count) {
+    // Verification diagnostics retain the original C/C++ source locations.
+    // Treat rejected external source like frontend admission failures: the
+    // diagnostic is the result and no partial module escapes the importer.
+    return iree_ok_status();
+  }
+  *out_module = module.release();
+  return iree_ok_status();
+}
+
+}  // namespace
+
+iree_status_t loom_cxx_unit_parse(iree_string_view_t source,
+                                  iree_string_view_t filename,
+                                  const loom_cxx_import_options_t* options,
+                                  iree_allocator_t host_allocator,
+                                  loom_cxx_unit_t** out_unit) {
+  IREE_ASSERT_ARGUMENT(out_unit);
+  *out_unit = nullptr;
+  loom_cxx_import_options_t defaults;
+  if (!options) {
+    loom_cxx_import_options_initialize(&defaults);
+    options = &defaults;
+  }
+  IREE_RETURN_IF_ERROR(loom_cxx_import_options_validate(options));
+  return guard([&]() -> iree_status_t {
+    auto unit = std::make_unique<loom_cxx_unit_t>();
+    unit->source = std::make_unique<loom::cxx_import::Source>(
+        source, filename, *options, &unit->constant_evaluator);
+    *out_unit = unit.release();
+    return iree_ok_status();
+  });
+}
+
+void loom_cxx_unit_free(loom_cxx_unit_t* unit) { delete unit; }
+
+void loom_cxx_unit_set_diagnostic_sink(loom_cxx_unit_t* unit,
+                                       loom_diagnostic_sink_t sink) {
+  IREE_ASSERT_ARGUMENT(unit);
+  unit->source->diagnostics().set_sink(sink);
+}
+
+iree_status_t loom_cxx_import_unit(loom_cxx_unit_t* unit,
+                                   loom_context_t* context,
+                                   iree_arena_block_pool_t* block_pool,
+                                   const loom_cxx_import_options_t* options,
+                                   iree_allocator_t host_allocator,
+                                   loom_module_t** out_module) {
+  IREE_ASSERT_ARGUMENT(unit);
+  IREE_ASSERT_ARGUMENT(out_module);
+  *out_module = nullptr;
+  loom_cxx_import_options_t defaults;
+  if (!options) {
+    loom_cxx_import_options_initialize(&defaults);
+    options = &defaults;
+  }
+  IREE_RETURN_IF_ERROR(loom_cxx_import_options_validate(options));
+  unit->source->diagnostics().set_sink(options->diagnostic_sink);
+  const auto filename = unit->source->contents().primary_filename();
+  return guard([&]() {
+    return import_parsed(unit, loom::cxx_import::view(filename), context,
+                         block_pool, options, host_allocator, out_module);
+  });
+}
+
 iree_status_t loom_cxx_import(iree_string_view_t source,
                               iree_string_view_t filename,
                               loom_context_t* context,
@@ -62,45 +185,31 @@ iree_status_t loom_cxx_import(iree_string_view_t source,
     options = &defaults;
   }
   IREE_RETURN_IF_ERROR(loom_cxx_import_options_validate(options));
-  using namespace loom::cxx_import;
-  try {
-    NumericConversionConstantEvaluator constant_evaluator;
-    Source parsed(source, filename, *options, &constant_evaluator);
-    loom_module_t* raw_module = nullptr;
-    const iree_string_view_t module_name =
-        iree_string_view_is_empty(options->module_name) ? filename
-                                                        : options->module_name;
-    check(loom_module_allocate(context, module_name, block_pool, nullptr,
-                               host_allocator, &raw_module));
-    std::unique_ptr<loom_module_t, decltype(&loom_module_free)> module(
-        raw_module, loom_module_free);
-    translate(parsed.unit(), parsed.diagnostics(), module.get(), *options);
-    check(loom_callable_effect_inference_run(module.get()));
-    loom_verify_options_t verification_options = {
-        .sink = options->diagnostic_sink,
-        .source_resolver = {resolve_source_contents,
-                            &parsed.diagnostics().contents()},
-    };
-    loom_verify_result_t verification = {};
-    check(
-        loom_verify_module(module.get(), &verification_options, &verification));
-    if (verification.error_count) {
-      // Verification diagnostics retain the original C/C++ source locations.
-      // Treat rejected external source like frontend admission failures: the
-      // diagnostic is the result and no partial module escapes the importer.
-      return iree_ok_status();
-    }
-    *out_module = module.release();
-    return iree_ok_status();
-  } catch (StatusError& error) {
-    return error.release();
-  } catch (const SourceRejected&) {
-    return iree_ok_status();
-  } catch (const std::bad_alloc&) {
-    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                            "C/C++ frontend allocation failed");
-  } catch (const std::exception& error) {
-    return iree_make_status(IREE_STATUS_INTERNAL, "C/C++ frontend failed: %s",
-                            error.what());
-  }
+  return guard([&]() {
+    loom_cxx_unit_t unit;
+    unit.source = std::make_unique<loom::cxx_import::Source>(
+        source, filename, *options, &unit.constant_evaluator);
+    return import_parsed(&unit, filename, context, block_pool, options,
+                         host_allocator, out_module);
+  });
 }
+
+namespace loom::cxx_import {
+
+cxx::TranslationUnit& unit_translation_unit(loom_cxx_unit_t* unit) {
+  return unit->source->unit();
+}
+
+const cxx::Toolchain& unit_toolchain(const loom_cxx_unit_t* unit) {
+  return unit->source->toolchain();
+}
+
+bool unit_has_error(const loom_cxx_unit_t* unit) {
+  return unit->source->diagnostics().has_error();
+}
+
+UnitStatistics unit_statistics(const loom_cxx_unit_t* unit) {
+  return unit->statistics;
+}
+
+}  // namespace loom::cxx_import
