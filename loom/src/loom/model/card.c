@@ -275,6 +275,64 @@ static iree_status_t loom_model_file(loom_model_card_t* card,
         loom_model_string_field(out_object, "path", true, &out_file->path));
     IREE_RETURN_IF_ERROR(loom_model_string_field(out_object, "format", false,
                                                  &out_file->format));
+    iree_string_view_t json = iree_string_view_empty();
+    IREE_RETURN_IF_ERROR(loom_model_value(
+        out_object, "transform", IREE_JSON_VALUE_TYPE_OBJECT, false, &json));
+    if (json.size) {
+      loom_model_json_object_t transform;
+      IREE_RETURN_IF_ERROR(loom_model_object(card, json, NULL, &transform));
+      iree_string_view_t kind;
+      IREE_RETURN_IF_ERROR(
+          loom_model_string_field(&transform, "kind", true, &kind));
+      if (iree_string_view_equal(kind, IREE_SV("i8-panel"))) {
+        if (card->selection.schema_version != 2) {
+          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                  "i8-panel requires model-card version 2");
+        }
+        IREE_RETURN_IF_ERROR(loom_model_check_fields(
+            &transform,
+            "kind version source layout cache output kernel_version"));
+        iree_string_view_t version, layout, kernel, output;
+        IREE_RETURN_IF_ERROR(loom_model_value(&transform, "version",
+                                              IREE_JSON_VALUE_TYPE_NUMBER, true,
+                                              &version));
+        IREE_RETURN_IF_ERROR(
+            loom_model_string_field(&transform, "layout", true, &layout));
+        IREE_RETURN_IF_ERROR(loom_model_string_field(
+            &transform, "kernel_version", true, &kernel));
+        IREE_RETURN_IF_ERROR(
+            loom_model_string_field(&transform, "output", true, &output));
+        if (!iree_string_view_equal(version, IREE_SV("1")) ||
+            !iree_string_view_equal(layout, IREE_SV("v2")) ||
+            !iree_string_view_equal(
+                kernel,
+                IREE_SV("resident-full-k-i8-i32-bf16-column-scale-v1")) ||
+            !iree_string_view_equal(out_file->format, IREE_SV("raw"))) {
+          return iree_make_status(
+              IREE_STATUS_INVALID_ARGUMENT,
+              "i8-panel requires version 1, layout v2, "
+              "resident-full-k-i8-i32-bf16-column-scale-v1 and raw storage");
+        }
+        if (iree_string_view_equal(output, IREE_SV("resident-halves"))) {
+          out_file->transform.output = LOOM_MODEL_TRANSFORM_I8_RESIDENT_HALVES;
+        } else if (iree_string_view_equal(output, IREE_SV("colscale"))) {
+          out_file->transform.output = LOOM_MODEL_TRANSFORM_I8_COLSCALE;
+        } else {
+          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                  "unsupported i8-panel output");
+        }
+        IREE_RETURN_IF_ERROR(loom_model_string_field(
+            &transform, "source", true, &out_file->transform.source));
+        IREE_RETURN_IF_ERROR(loom_model_string_field(
+            &transform, "cache", true, &out_file->transform.cache));
+        IREE_RETURN_IF_ERROR(loom_model_path(out_file->transform.source));
+        IREE_RETURN_IF_ERROR(loom_model_path(out_file->transform.cache));
+      } else if (!iree_string_view_equal(kind, IREE_SV("safetensors"))) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "unsupported parameter transform '%.*s'",
+                                (int)kind.size, kind.data);
+      }
+    }
   } else {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "model files require a path string or file object");
@@ -287,7 +345,7 @@ typedef struct loom_model_files_parse_t {
   loom_model_card_t* card;
   // Preallocated ordered output file array.
   loom_model_file_t* files;
-  // Parameter files may retain acquisition operations ignored by runtime IO.
+  // Parameter files may declare loader-owned transforms.
   bool parameter;
 } loom_model_files_parse_t;
 
@@ -536,6 +594,34 @@ static iree_status_t loom_model_config_append(
   return iree_ok_status();
 }
 
+static iree_status_t loom_model_device_placement(
+    const loom_model_json_object_t* programs, uint32_t schema_version,
+    loom_model_device_placement_list_t* out_placement) {
+  loom_model_json_object_t object;
+  IREE_RETURN_IF_ERROR(loom_model_object_field(programs, "device_placement",
+                                               false, NULL, &object));
+  if (loom_model_field(programs, IREE_SV("device_placement")) &&
+      schema_version != 2) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "device placement requires model schema version 2");
+  }
+  loom_model_device_placement_t* values = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      &programs->card->arena, object.count, sizeof(*values), (void**)&values));
+  for (iree_host_size_t i = 0; i < object.count; ++i) {
+    const loom_model_json_field_t* field = &object.fields[i];
+    if (field->type != IREE_JSON_VALUE_TYPE_STRING) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "device placement values must be device names");
+    }
+    values[i].root = field->key;
+    IREE_RETURN_IF_ERROR(
+        loom_model_string(programs->card, field->value, &values[i].device));
+  }
+  *out_placement = (loom_model_device_placement_list_t){object.count, values};
+  return iree_ok_status();
+}
+
 static iree_status_t loom_model_config(const loom_model_json_object_t* programs,
                                        const loom_model_json_object_t* variant,
                                        iree_string_view_t* out_config) {
@@ -752,17 +838,19 @@ static iree_status_t loom_model_select(loom_model_card_t* card,
       &root, "schema_version", IREE_JSON_VALUE_TYPE_NUMBER, true, &version));
   uint64_t schema_version = 0;
   IREE_RETURN_IF_ERROR(iree_json_parse_uint64(version, &schema_version));
-  if (schema_version != 1) {
-    return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                            "model schema version %" PRIu64
-                            " is unsupported; this host supports version 1",
-                            schema_version);
+  if (schema_version != 1 && schema_version != 2) {
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "model schema version %" PRIu64
+        " is unsupported; this host supports versions 1 and 2",
+        schema_version);
   }
   IREE_RETURN_IF_ERROR(loom_model_check_fields(
       &root,
       "$schema schema_version model origins programs services variants "
       "presets"));
   loom_model_selection_t* selection = &card->selection;
+  selection->schema_version = (uint32_t)schema_version;
   loom_model_json_object_t metadata;
   IREE_RETURN_IF_ERROR(loom_model_object_field(
       &root, "model", true, "id name description license origin implementation",
@@ -789,6 +877,38 @@ static iree_status_t loom_model_select(loom_model_card_t* card,
       "service variant programs partition options execution request workload "
       "memory components",
       &preset));
+  loom_model_json_object_t execution;
+  IREE_RETURN_IF_ERROR(
+      loom_model_object_field(&preset, "execution", false, NULL, &execution));
+  if (loom_model_field(&execution, IREE_SV("group_mode")) ||
+      loom_model_field(&execution, IREE_SV("plan_provider"))) {
+    if (schema_version != 2) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "group execution requires model schema version 2");
+    }
+    iree_string_view_t mode = iree_string_view_empty(),
+                       provider = iree_string_view_empty();
+    IREE_RETURN_IF_ERROR(
+        loom_model_string_field(&execution, "group_mode", false, &mode));
+    IREE_RETURN_IF_ERROR(
+        loom_model_string_field(&execution, "plan_provider", false, &provider));
+    if ((loom_model_field(&execution, IREE_SV("group_mode")) && !mode.size) ||
+        (mode.size && !iree_string_view_equal(mode, IREE_SV("single")) &&
+         !iree_string_view_equal(mode, IREE_SV("two_bank")))) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "group_mode must be single or two_bank");
+    }
+  }
+  if (loom_model_field(&execution, IREE_SV("plan_provider"))) {
+    iree_string_view_t provider = iree_string_view_empty();
+    IREE_RETURN_IF_ERROR(
+        loom_model_string_field(&execution, "plan_provider", true, &provider));
+    if (!provider.size) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "plan_provider must be nonempty");
+    }
+  }
   loom_model_selector_t defaults = {0};
   IREE_RETURN_IF_ERROR(
       loom_model_string_field(&preset, "service", false, &defaults.service));
@@ -889,9 +1009,20 @@ static iree_status_t loom_model_select(loom_model_card_t* card,
       loom_model_choose(&program_sets, programs_name, "program set",
                         &selection->selector.programs, &programs_json));
   loom_model_json_object_t programs;
-  IREE_RETURN_IF_ERROR(
-      loom_model_object(card, programs_json,
-                        "origin directory inputs libraries config", &programs));
+  IREE_RETURN_IF_ERROR(loom_model_object(
+      card, programs_json,
+      "origin directory inputs libraries config device_placement exchange_pool",
+      &programs));
+  IREE_RETURN_IF_ERROR(loom_model_device_placement(
+      &programs, selection->schema_version, &selection->device_placement));
+  IREE_RETURN_IF_ERROR(loom_model_string_field(
+      &programs, "exchange_pool", false, &selection->exchange_pool));
+  if (loom_model_field(&programs, IREE_SV("exchange_pool")) &&
+      (selection->schema_version < 2 || !selection->exchange_pool.size)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "exchange_pool requires schema version 2 and a name");
+  }
   IREE_RETURN_IF_ERROR(loom_model_string_field(&programs, "directory", false,
                                                &selection->directory));
   if (!selection->directory.size) {

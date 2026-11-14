@@ -131,6 +131,22 @@ INSTANTIATE_TEST_SUITE_P(NativeServices, CardConfigurationTest,
                                            "embedding", "decision", "speech",
                                            "recognition", "activity"));
 
+TEST_F(ConfigurationTest, GroupModesAreTypedPerDeployment) {
+  IREE_ASSERT_OK(
+      Parse(Text(R"(,"group_mode":"two_bank","plan_provider":"two_bank_v1")")));
+  EXPECT_EQ(model_.text.group_mode, LOOM_RUNTIME_GROUP_MODE_TWO_BANK);
+  EXPECT_EQ(String(model_.text.plan_provider), "two_bank_v1");
+  loom_serve_model_configuration_deinitialize(&model_);
+  IREE_ASSERT_OK(Parse(Text(R"(,"group_mode":"single")")));
+  EXPECT_EQ(model_.text.group_mode, LOOM_RUNTIME_GROUP_MODE_SINGLE);
+  loom_serve_model_configuration_deinitialize(&model_);
+  IREE_ASSERT_OK(Parse(Text(R"(,"group_mode":"two_\u0062ank")")));
+  EXPECT_EQ(model_.text.group_mode, LOOM_RUNTIME_GROUP_MODE_TWO_BANK);
+  loom_serve_model_configuration_deinitialize(&model_);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        Parse(Text(R"(,"group_mode":"auto")")));
+}
+
 TEST_F(ConfigurationTest,
        DirectCardSelectsNamedPresetAndPreservesDecodedIdentity) {
   IREE_ASSERT_OK(
@@ -150,6 +166,21 @@ TEST_F(ConfigurationTest, DeploymentOwnsItsPresetSelection) {
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         Load(Text(), IREE_SV("interactive")));
   EXPECT_EQ(model_.name.data, nullptr);
+}
+
+TEST_F(ConfigurationTest, CardDefaultPlacementSelectsPrimaryGroupDevice) {
+  auto json = Card("text");
+  json.replace(json.find("schema_version\":1") + 16, 1, "2");
+  json.insert(json.find("\"libraries\":[]") + 14,
+              R"(,"device_placement":{"*":"gpu","projection":"npu"})");
+  IREE_ASSERT_OK(Load(json));
+  json.assign(json.size(), 'x');
+  EXPECT_EQ(String(model_.device), "gpu");
+  iree_string_view_t names[] = {IREE_SV("npu"), IREE_SV("gpu")};
+  iree_host_size_t selected = IREE_HOST_SIZE_MAX;
+  IREE_ASSERT_OK(loom_serve_model_configuration_resolve_device(
+      &model_, {2, names}, &selected));
+  EXPECT_EQ(selected, 1u);
 }
 
 TEST_F(ConfigurationTest, DirectCardRetainsLazyImageContractAndDefaults) {

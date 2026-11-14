@@ -1,5 +1,17 @@
 config.def @fixture.card = false : i1
 
+// Admits draft depths for the draft-cache warm witness. Proposals and
+// verification remain unsupported.
+config.def @fixture.draft = false : i1
+
+// Declares the text_prefill_group_v1 leaves. The runner reserves the largest
+// workspace over every declared stage, so single-mode memory-policy tests turn
+// this off to keep the ordinary stage footprint.
+config.def @fixture.group = true : i1
+
+config.def @fixture.ffn = false : i1
+config.def @fixture.resident = false : i1
+
 func.decl import("input") @require(%condition: i32, %diagnostic: buffer)
 
 func.decl import("json") @members(%json: buffer) -> (buffer, i32, i64)
@@ -14,7 +26,7 @@ func.decl import("prepare") @parameter(%stage: i32, %binding: i32, %input: i32, 
 
 func.decl import("prepare") @source_scope(%scope: buffer) -> (i32)
 
-func.decl @fixture_storage(%maximum: i64, %span_capacity: i64, %context: i64, %pool: i64, %rows: i64, %pins: i64) -> (buffer, buffer, buffer, buffer, buffer)
+func.decl @fixture_storage(%maximum: i64, %span_capacity: i64, %context: i64, %pool: i64, %rows: i64, %pins: i64, %draft: i64, %ffn_flag: i64) -> (buffer, buffer, buffer, buffer, buffer)
 
 // One shared command handles every host token/span bucket. The cold program
 // owns storage geometry; the host owns physical page IDs and recurrent slots.
@@ -33,7 +45,10 @@ func.def public @prepare(%prefill: i64, %context: i64, %pool: i64, %rows: i64, %
   %packed = scalar.cmpi ne, %shape_count, %c0_i64 : i64
   %no_draft = scalar.cmpi eq, %draft_depth, %c0_i32 : i32
   %has_epochs = scalar.andi %pooled, %packed : i1
-  %supported_mode = scalar.andi %has_epochs, %no_draft : i1
+  %drafts = scalar.cmpi ne, %draft_depth, %c0_i32 : i32
+  %draft_enabled = config.get @fixture.draft : i1
+  %draft_supported = scalar.ori %no_draft, %draft_enabled : i1
+  %supported_mode = scalar.andi %has_epochs, %draft_supported : i1
   %fields, %type, %field_count = func.call @members(%options) : (buffer) -> (buffer, i32, i64)
   %object_type = scalar.constant 2 : i32
   %object = scalar.cmpi eq, %type, %object_type : i32
@@ -66,7 +81,7 @@ func.def public @prepare(%prefill: i64, %context: i64, %pool: i64, %rows: i64, %
   }
   func.call @parameter(%stage, %c0_i32, %c0_source, %checkpoint, %policy) : (i32, i32, i32, i32, buffer)
   func.call @parameter(%media_stage, %c0_i32, %c0_source, %checkpoint, %policy) : (i32, i32, i32, i32, buffer)
-  %state_bytes = index.constant 128 : offset
+  %state_bytes = index.constant 192 : offset
   %state = buffer.alloca<private> align(8) %state_bytes : buffer
   %state_view = buffer.view %state[%origin] : buffer -> view<2xi32>
   view.store %stage, %state_view[0] : i32, view<2xi32>
@@ -89,6 +104,124 @@ func.def public @prepare(%prefill: i64, %context: i64, %pool: i64, %rows: i64, %
   %spans_key = buffer.constant utf8("fixture.spans") : buffer
   func.call @config_i64(%stage, %spans_key, %span_capacity) : (i32, buffer, i64)
   func.call @config_i64(%media_stage, %spans_key, %span_capacity) : (i32, buffer, i64)
+  // Group leaves follow the ordinary stages and precede the draft stages.
+  %none = scalar.constant -1 : i32
+  %group = config.get @fixture.group : i1
+  %group_prefix, %group_residual = scf.if %group -> (i32, i32) {
+    %group_prefix_root = buffer.constant utf8("group_prefix") : buffer
+    %group_residual_root = buffer.constant utf8("group_residual") : buffer
+    %prefix_stage = func.call @stage(%group_prefix_root, %c0_i64) : (buffer, i64) -> (i32)
+    %residual_stage = func.call @stage(%group_residual_root, %c0_i64) : (buffer, i64) -> (i32)
+    func.call @config_i64(%prefix_stage, %context_key, %context) : (i32, buffer, i64)
+    func.call @config_i64(%residual_stage, %context_key, %context) : (i32, buffer, i64)
+    func.call @config_i64(%prefix_stage, %media_key, %c0_i64) : (i32, buffer, i64)
+    func.call @config_i64(%residual_stage, %media_key, %c0_i64) : (i32, buffer, i64)
+    func.call @config_i64(%prefix_stage, %spans_key, %span_capacity) : (i32, buffer, i64)
+    func.call @config_i64(%residual_stage, %spans_key, %span_capacity) : (i32, buffer, i64)
+    func.call @parameter(%prefix_stage, %c0_i32, %c0_source, %checkpoint, %policy) : (i32, i32, i32, i32, buffer)
+    scf.yield %prefix_stage, %residual_stage : i32, i32
+  } else {
+    scf.yield %none, %none : i32, i32
+  }
+  %ffn = config.get @fixture.ffn : i1
+  %resident = config.get @fixture.resident : i1
+  %resident64 = scalar.extui %resident : i1 to i64
+  %resident_key = buffer.constant utf8("fixture.resident") : buffer
+  %ffn_origin = index.constant 160 : offset
+  %ffn_state = buffer.view %state[%ffn_origin] : buffer -> view<6xi32>
+  %ffn_primary = scf.if %ffn -> (i32) {
+    %root = buffer.constant utf8("group_ffn_primary") : buffer
+    %leaf = func.call @stage(%root, %c0_i64) : (buffer, i64) -> (i32)
+    func.call @config_i64(%leaf, %spans_key, %span_capacity) : (i32, buffer, i64)
+    scf.yield %leaf : i32
+  } else {
+    scf.yield %none : i32
+  }
+  view.store %ffn_primary, %ffn_state[0] : i32, view<6xi32>
+  %ffn_secondary = scf.if %ffn -> (i32) {
+    %root = buffer.constant utf8("group_ffn_secondary") : buffer
+    %leaf = func.call @stage(%root, %c0_i64) : (buffer, i64) -> (i32)
+    func.call @config_i64(%leaf, %spans_key, %span_capacity) : (i32, buffer, i64)
+    scf.yield %leaf : i32
+  } else {
+    scf.yield %none : i32
+  }
+  view.store %ffn_secondary, %ffn_state[1] : i32, view<6xi32>
+  scf.if %ffn {
+    func.call @config_i64(%ffn_secondary, %resident_key, %resident64) : (i32, buffer, i64)
+  }
+  %ffn_merge = scf.if %ffn -> (i32) {
+    %root = buffer.constant utf8("group_ffn_merge") : buffer
+    %leaf = func.call @stage(%root, %c0_i64) : (buffer, i64) -> (i32)
+    func.call @config_i64(%leaf, %spans_key, %span_capacity) : (i32, buffer, i64)
+    scf.yield %leaf : i32
+  } else {
+    scf.yield %none : i32
+  }
+  view.store %ffn_merge, %ffn_state[2] : i32, view<6xi32>
+  %ffn_down_primary = scf.if %ffn -> (i32) {
+    %root = buffer.constant utf8("group_ffn_down_primary") : buffer
+    %leaf = func.call @stage(%root, %c0_i64) : (buffer, i64) -> (i32)
+    func.call @config_i64(%leaf, %spans_key, %span_capacity) : (i32, buffer, i64)
+    scf.yield %leaf : i32
+  } else {
+    scf.yield %none : i32
+  }
+  view.store %ffn_down_primary, %ffn_state[3] : i32, view<6xi32>
+  %ffn_down_secondary = scf.if %ffn -> (i32) {
+    %root = buffer.constant utf8("group_ffn_down_secondary") : buffer
+    %leaf = func.call @stage(%root, %c0_i64) : (buffer, i64) -> (i32)
+    func.call @config_i64(%leaf, %spans_key, %span_capacity) : (i32, buffer, i64)
+    scf.yield %leaf : i32
+  } else {
+    scf.yield %none : i32
+  }
+  view.store %ffn_down_secondary, %ffn_state[4] : i32, view<6xi32>
+  scf.if %ffn {
+    func.call @config_i64(%ffn_down_secondary, %resident_key, %resident64) : (i32, buffer, i64)
+  }
+  %ffn_down_merge = scf.if %ffn -> (i32) {
+    %root = buffer.constant utf8("group_ffn_down_merge") : buffer
+    %leaf = func.call @stage(%root, %c0_i64) : (buffer, i64) -> (i32)
+    func.call @config_i64(%leaf, %spans_key, %span_capacity) : (i32, buffer, i64)
+    scf.yield %leaf : i32
+  } else {
+    scf.yield %none : i32
+  }
+  view.store %ffn_down_merge, %ffn_state[5] : i32, view<6xi32>
+  // Draft stages follow every ordinary stage, so drafting keeps their IDs.
+  %warm, %group_warm = scf.if %drafts -> (i32, i32) {
+    %warm_root = buffer.constant utf8("draft_warm") : buffer
+    %group_warm_root = buffer.constant utf8("group_warm") : buffer
+    %warm_stage = func.call @stage(%warm_root, %c0_i64) : (buffer, i64) -> (i32)
+    %group_warm_stage = func.call @stage(%group_warm_root, %c0_i64) : (buffer, i64) -> (i32)
+    func.call @config_i64(%warm_stage, %context_key, %context) : (i32, buffer, i64)
+    func.call @config_i64(%group_warm_stage, %context_key, %context) : (i32, buffer, i64)
+    func.call @config_i64(%warm_stage, %media_key, %c0_i64) : (i32, buffer, i64)
+    func.call @config_i64(%group_warm_stage, %media_key, %c0_i64) : (i32, buffer, i64)
+    func.call @config_i64(%warm_stage, %spans_key, %span_capacity) : (i32, buffer, i64)
+    func.call @config_i64(%group_warm_stage, %spans_key, %span_capacity) : (i32, buffer, i64)
+    scf.yield %warm_stage, %group_warm_stage : i32, i32
+  } else {
+    scf.yield %none, %none : i32, i32
+  }
+  %draft_origin = index.constant 144 : offset
+  %draft_state = buffer.view %state[%draft_origin] : buffer -> view<4xi32>
+  %draft_flag = scalar.extui %drafts : i1 to i32
+  view.store %draft_flag, %draft_state[0] : i32, view<4xi32>
+  view.store %warm, %draft_state[1] : i32, view<4xi32>
+  view.store %group_warm, %draft_state[2] : i32, view<4xi32>
+  view.store %c0_i32, %draft_state[3] : i32, view<4xi32>
+  %group_origin = index.constant 128 : offset
+  %group_state = buffer.view %state[%group_origin] : buffer -> view<4xi32>
+  %shape_count32 = scalar.trunci %shape_count : i64 to i32
+  %group_shapes = scf.select %group, %shape_count32, %c0_i32 : i32
+  view.store %group_shapes, %group_state[0] : i32, view<4xi32>
+  view.store %group_prefix, %group_state[1] : i32, view<4xi32>
+  view.store %group_residual, %group_state[2] : i32, view<4xi32>
+  %ordinary_ffn_flag = scalar.extui %ffn : i1 to i32
+  %ffn_flag = scf.select %resident, %c2_i32, %ordinary_ffn_flag : i32
+  view.store %ffn_flag, %group_state[3] : i32, view<4xi32>
   %layout_origin = index.constant 88 : offset
   %layout = buffer.view %state[%layout_origin] : buffer -> view<5xi64>
   view.store %maximum, %layout[0] : i64, view<5xi64>
@@ -96,7 +229,9 @@ func.def public @prepare(%prefill: i64, %context: i64, %pool: i64, %rows: i64, %
   view.store %context, %layout[2] : i64, view<5xi64>
   view.store %pool, %layout[3] : i64, view<5xi64>
   view.store %pins, %layout[4] : i64, view<5xi64>
-  %allocations, %views, %origins, %draft, %geometry = func.call @fixture_storage(%maximum, %span_capacity, %context, %pool, %rows, %pins) : (i64, i64, i64, i64, i64, i64) -> (buffer, buffer, buffer, buffer, buffer)
+  %draft64 = scalar.extui %drafts : i1 to i64
+  %ffn64 = scalar.extui %ffn_flag : i32 to i64
+  %allocations, %views, %origins, %draft, %geometry = func.call @fixture_storage(%maximum, %span_capacity, %context, %pool, %rows, %pins, %draft64, %ffn64) : (i64, i64, i64, i64, i64, i64, i64, i64) -> (buffer, buffer, buffer, buffer, buffer)
   %terminal = buffer.constant utf8("#") : buffer
   func.return %effective, %c2_i32, %state, %terminal, %allocations, %views, %origins, %empty, %geometry : i64, i32, buffer, buffer, buffer, buffer, buffer, buffer, buffer
 }

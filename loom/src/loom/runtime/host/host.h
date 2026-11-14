@@ -10,6 +10,7 @@
 #include "iree/base/internal/arena.h"
 #include "iree/hal/api.h"
 #include "iree/task/executor.h"
+#include "loom/runtime/execution/plan.h"
 #include "loom/runtime/wake.h"
 #include "loomc/target.h"
 #include "loomc/task.h"
@@ -58,6 +59,18 @@ iree_status_t loom_runtime_host_create(
     iree_host_size_t worker_count,
     const loom_runtime_compiler_options_t* compiler_options,
     iree_allocator_t host_allocator, loom_runtime_host_t** out_host);
+
+// Registers a retained provider before the first lookup freezes this host's
+// registry. Duplicate IDs, invalid ABI, and late registration fail. Lookup
+// returns an independently retained provider; the caller releases its context.
+iree_status_t loom_runtime_host_register_plan_provider(
+    loom_runtime_host_t* host, iree_string_view_t id,
+    const loom_runtime_plan_provider_v1_t* provider);
+iree_status_t loom_runtime_host_lookup_plan_provider(
+    loom_runtime_host_t* host, iree_string_view_t id,
+    loom_runtime_plan_provider_v1_t* out_provider);
+// Migration defaults captured once at host startup, never during requests.
+bool loom_runtime_host_legacy_two_bank(const loom_runtime_host_t* host);
 
 // Releases I/O infrastructure and joins the final executor owner. This is an
 // outer application teardown operation, never a task or completion callback.

@@ -15,6 +15,8 @@
 #include "iree/testing/status_matchers.h"
 #include "loom/runtime/device/device.h"
 #include "loom/runtime/execution/execution.h"
+#include "loom/runtime/execution/execution_testing.h"
+#include "loom/runtime/execution/group.h"
 #include "loom/runtime/execution/queues.h"
 
 namespace {
@@ -194,6 +196,26 @@ class WorkspaceTest : public ::testing::TestWithParam<uint32_t> {
     return loom_runtime_execution_drain(independent_.execution);
   }
 
+  // Retires and frees a test-owned group on scope exit after opening the gate
+  // and joining accepted work, so a failed assertion cannot hang teardown.
+  auto JoinGroupOnExit(loom_runtime_execution_group_t** group) {
+    auto join = [this](loom_runtime_execution_group_t** group) {
+      if (!*group) {
+        return;
+      }
+      loom_runtime_execution_group_retire(*group);
+      iree_status_ignore(iree_hal_semaphore_signal(gate_, 2, nullptr));
+      const auto frontier =
+          loom_runtime_execution_frontier(producer_.execution);
+      iree_status_ignore(
+          loom_runtime_execution_wait(producer_.execution, frontier.values[0]));
+      loom_runtime_execution_group_free(*group);
+      *group = nullptr;
+    };
+    return std::unique_ptr<loom_runtime_execution_group_t*, decltype(join)>(
+        group, join);
+  }
+
   void Trim() {
     iree_device_size_t retained = 0;
     IREE_ASSERT_OK(loom_runtime_workspace_trim(workspace_, &retained));
@@ -238,6 +260,516 @@ class WorkspaceTest : public ::testing::TestWithParam<uint32_t> {
   // Upload payload owned until all producer work has retired.
   std::array<uint32_t, 16> input_ = {};
 };
+
+TEST_P(WorkspaceTest, GroupPreservesFeedbackBeforeOverwriteAndCopiesPayloads) {
+  IREE_ASSERT_OK(Allocate(producer_));
+  loom_runtime_execution_group_t* group = nullptr;
+  IREE_ASSERT_OK(loom_runtime_execution_group_create(
+      producer_.execution, 4, iree_allocator_system(), &group));
+  loom_runtime_group_submission_t submission;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_FAILED_PRECONDITION,
+      loom_runtime_execution_group_submit(group, &submission));
+  uint32_t input = 7;
+  std::array<uint32_t, 2> outputs = {};
+  for (unsigned i = 0; i < 2; ++i) {
+    input = i ? 9 : 7;
+    loom_runtime_group_node_t upload = {
+        .kind = LOOM_RUNTIME_GROUP_TRANSFER,
+        .transfer = {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
+                     .upload = {.source = &input,
+                                .target_buffer = producer_.buffer,
+                                .length = sizeof(input)}}};
+    IREE_ASSERT_OK(loom_runtime_execution_group_append(group, &upload));
+    loom_runtime_group_node_t download = {
+        .kind = LOOM_RUNTIME_GROUP_TRANSFER,
+        .transfer = {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
+                     .download = {.source_buffer = producer_.buffer,
+                                  .target = &outputs[i],
+                                  .length = sizeof(input)}}};
+    IREE_ASSERT_OK(loom_runtime_execution_group_append(group, &download));
+  }
+  input = 99;
+  loom_runtime_group_node_t overflow = {};
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                        loom_runtime_execution_group_append(group, &overflow));
+  IREE_ASSERT_OK(loom_runtime_execution_group_submit(group, &submission));
+  EXPECT_EQ(submission.accepted_count, 4u);
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_FAILED_PRECONDITION,
+      loom_runtime_execution_group_submit(group, &submission));
+  loom_runtime_execution_group_retire(group);
+  iree_hal_buffer_release(producer_.buffer);
+  producer_.buffer = nullptr;
+  IREE_ASSERT_OK(loom_runtime_execution_drain(producer_.execution));
+  EXPECT_EQ(outputs, (std::array<uint32_t, 2>{7, 9}));
+  loom_runtime_execution_group_free(group);
+}
+
+TEST_P(WorkspaceTest, GroupPayloadAllocationFailureDoesNotAppendOrSubmit) {
+  struct Allocator {
+    bool fail = false;
+    static iree_status_t Control(void* self, iree_allocator_command_t command,
+                                 const void* parameters, void** pointer) {
+      if (static_cast<Allocator*>(self)->fail &&
+          command != IREE_ALLOCATOR_COMMAND_FREE) {
+        return iree_status_from_code(IREE_STATUS_RESOURCE_EXHAUSTED);
+      }
+      auto system = iree_allocator_system();
+      return system.ctl(system.self, command, parameters, pointer);
+    }
+  } allocator;
+  IREE_ASSERT_OK(Allocate(producer_));
+  loom_runtime_execution_group_t* group = nullptr;
+  IREE_ASSERT_OK(loom_runtime_execution_group_create(
+      producer_.execution, 1, {&allocator, Allocator::Control}, &group));
+  uint32_t input = 1;
+  loom_runtime_group_node_t upload = {
+      .kind = LOOM_RUNTIME_GROUP_TRANSFER,
+      .transfer = {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
+                   .upload = {.source = &input,
+                              .target_buffer = producer_.buffer,
+                              .length = 4}}};
+  allocator.fail = true;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                        loom_runtime_execution_group_append(group, &upload));
+  loom_runtime_group_submission_t submission;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_FAILED_PRECONDITION,
+      loom_runtime_execution_group_submit(group, &submission));
+  EXPECT_EQ(submission.accepted_count, 0u);
+  allocator.fail = false;
+  IREE_ASSERT_OK(loom_runtime_execution_group_append(group, &upload));
+  loom_runtime_execution_group_free(group);
+}
+
+TEST_P(WorkspaceTest, GroupDiscardLeavesAcceptedFrontierUnchanged) {
+  IREE_ASSERT_OK(Allocate(producer_));
+  const auto before = loom_runtime_execution_frontier(producer_.execution);
+  loom_runtime_execution_group_t* group = nullptr;
+  IREE_ASSERT_OK(loom_runtime_execution_group_create(
+      producer_.execution, 1, iree_allocator_system(), &group));
+  uint32_t input = 17;
+  loom_runtime_group_node_t upload = {
+      .kind = LOOM_RUNTIME_GROUP_TRANSFER,
+      .transfer = {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
+                   .upload = {.source = &input,
+                              .target_buffer = producer_.buffer,
+                              .length = sizeof(input)}}};
+  IREE_ASSERT_OK(loom_runtime_execution_group_append(group, &upload));
+  loom_runtime_execution_group_free(group);
+  const auto after = loom_runtime_execution_frontier(producer_.execution);
+  EXPECT_EQ(before.values[0], after.values[0]);
+  EXPECT_EQ(before.values[1], after.values[1]);
+}
+
+TEST_P(WorkspaceTest, RejectedGroupNodePoisonsAndRetainsAcceptedPrefix) {
+  struct Allocator {
+    int live = 0;
+    static iree_status_t Control(void* self, iree_allocator_command_t command,
+                                 const void* parameters, void** pointer) {
+      auto* allocator = static_cast<Allocator*>(self);
+      const bool fresh =
+          command == IREE_ALLOCATOR_COMMAND_MALLOC ||
+          command == IREE_ALLOCATOR_COMMAND_CALLOC ||
+          (command == IREE_ALLOCATOR_COMMAND_REALLOC && !*pointer);
+      auto system = iree_allocator_system();
+      iree_status_t status =
+          system.ctl(system.self, command, parameters, pointer);
+      if (command == IREE_ALLOCATOR_COMMAND_FREE) {
+        --allocator->live;
+      } else if (fresh && iree_status_is_ok(status)) {
+        ++allocator->live;
+      }
+      return status;
+    }
+  } allocator;
+  IREE_ASSERT_OK(Allocate(producer_));
+  uint64_t gate_value = 1;
+  IREE_ASSERT_OK(loom_runtime_execution_barrier(producer_.execution,
+                                                {1, &gate_, &gate_value}));
+  // Every node passes append validation, which already covers what the HAL
+  // checks at enqueue. The third node is refused as a driver would refuse it
+  // after validation, once the first two nodes were accepted.
+  std::array<uint32_t, 4> storage = {};
+  iree_hal_buffer_t* rejected = nullptr;
+  IREE_ASSERT_OK(iree_hal_heap_buffer_wrap(
+      iree_hal_buffer_placement_undefined(),
+      IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
+      IREE_HAL_MEMORY_ACCESS_ALL,
+      IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER,
+      sizeof(storage), iree_make_byte_span(storage.data(), sizeof(storage)),
+      iree_hal_buffer_release_callback_null(), iree_allocator_system(),
+      &rejected));
+  loom_runtime_execution_group_t* group = nullptr;
+  auto join = JoinGroupOnExit(&group);
+  IREE_ASSERT_OK(loom_runtime_execution_group_create(
+      producer_.execution, 4, {&allocator, Allocator::Control}, &group));
+  uint32_t input = 23;
+  std::array<uint32_t, 2> outputs = {1, 1};
+  auto upload = [&](iree_hal_buffer_t* target) {
+    return loom_runtime_group_node_t{
+        .kind = LOOM_RUNTIME_GROUP_TRANSFER,
+        .transfer = {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
+                     .upload = {.source = &input,
+                                .target_buffer = target,
+                                .length = sizeof(input)}}};
+  };
+  auto download = [&](uint32_t* target) {
+    return loom_runtime_group_node_t{
+        .kind = LOOM_RUNTIME_GROUP_TRANSFER,
+        .transfer = {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
+                     .download = {.source_buffer = producer_.buffer,
+                                  .target = target,
+                                  .length = sizeof(*target)}}};
+  };
+  const loom_runtime_group_node_t nodes[] = {
+      upload(producer_.buffer), download(&outputs[0]), upload(rejected),
+      download(&outputs[1])};
+  for (const auto& node : nodes) {
+    IREE_ASSERT_OK(loom_runtime_execution_group_append(group, &node));
+  }
+  input = 99;
+  const auto before = loom_runtime_execution_frontier(producer_.execution);
+  IREE_ASSERT_OK(loom_runtime_execution_reject_group_node_for_testing(
+      producer_.execution, 2));
+  loom_runtime_group_submission_t submission;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INTERNAL,
+      loom_runtime_execution_group_submit(group, &submission));
+  EXPECT_EQ(submission.accepted_count, 2u);
+  EXPECT_EQ(submission.frontier.semaphores[0], before.semaphores[0]);
+  EXPECT_EQ(submission.frontier.values[0], before.values[0] + 2);
+  EXPECT_EQ(submission.frontier.values[1], before.values[1]);
+  const auto accepted = loom_runtime_execution_frontier(producer_.execution);
+  EXPECT_EQ(accepted.values[0], submission.frontier.values[0]);
+  EXPECT_EQ(accepted.values[1], submission.frontier.values[1]);
+
+  // No replay: every later numerical submission on this domain is refused.
+  uint64_t value = 0;
+  const iree_hal_transfer_operation_t transfer = nodes[0].transfer;
+  const iree_hal_transfer_operation_t feedback = nodes[1].transfer;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
+                        loom_runtime_execution_transfer(producer_.execution, 1,
+                                                        &transfer, &value));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
+                        loom_runtime_execution_feedback(producer_.execution, 1,
+                                                        &feedback, &value));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_FAILED_PRECONDITION,
+      loom_runtime_execution_execute(producer_.execution, nullptr, {}, &value));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
+                        loom_runtime_execution_dispatch(
+                            producer_.execution, nullptr, {}, {}, {}, &value));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
+                        loom_runtime_execution_barrier(producer_.execution,
+                                                       {0, nullptr, nullptr}));
+  const auto request =
+      iree_hal_make_pool_reservation_request(sizeof(producer_.output), 16);
+  iree_hal_buffer_t* extra = nullptr;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_FAILED_PRECONDITION,
+      loom_runtime_execution_alloca(producer_.execution, 1, &request, &extra));
+  EXPECT_EQ(extra, nullptr);
+  iree_hal_buffer_release(extra);
+  loom_runtime_execution_group_t* retry = nullptr;
+  IREE_ASSERT_OK(loom_runtime_execution_group_create(
+      producer_.execution, 1, iree_allocator_system(), &retry));
+  IREE_ASSERT_OK(loom_runtime_execution_group_append(retry, &nodes[0]));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_FAILED_PRECONDITION,
+      loom_runtime_execution_group_submit(retry, &submission));
+  EXPECT_EQ(submission.accepted_count, 0u);
+  loom_runtime_execution_group_free(retry);
+  const auto poisoned = loom_runtime_execution_frontier(producer_.execution);
+  EXPECT_EQ(poisoned.values[0], accepted.values[0]);
+  EXPECT_EQ(poisoned.values[1], accepted.values[1]);
+
+  // Device borrows drop at retirement; copied host payloads stay owned until
+  // the accepted prefix has actually retired.
+  const int payloads = allocator.live;
+  EXPECT_GT(payloads, 0);
+  loom_runtime_execution_group_retire(group);
+  iree_hal_buffer_release(rejected);
+  iree_hal_buffer_release(producer_.buffer);
+  producer_.buffer = nullptr;
+  EXPECT_EQ(allocator.live, payloads);
+  EXPECT_FALSE(loom_runtime_execution_is_retired(producer_.execution));
+  IREE_ASSERT_OK(iree_hal_semaphore_signal(gate_, 1, nullptr));
+  IREE_ASSERT_OK(loom_runtime_execution_drain(producer_.execution));
+  EXPECT_TRUE(loom_runtime_execution_is_retired(producer_.execution));
+  EXPECT_EQ(outputs, (std::array<uint32_t, 2>{23, 1}));
+  EXPECT_EQ(storage, (std::array<uint32_t, 4>{}));
+  loom_runtime_execution_group_free(group);
+  group = nullptr;
+  EXPECT_EQ(allocator.live, 0);
+}
+
+TEST_P(WorkspaceTest, GroupAppendRejectsQueueFaultsBeforeAnyAcceptance) {
+  IREE_ASSERT_OK(Allocate(producer_));
+  std::array<uint32_t, 4> storage = {};
+  iree_hal_buffer_t* storage_only = nullptr;
+  IREE_ASSERT_OK(iree_hal_heap_buffer_wrap(
+      iree_hal_buffer_placement_undefined(),
+      IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
+      IREE_HAL_MEMORY_ACCESS_ALL, IREE_HAL_BUFFER_USAGE_STORAGE,
+      sizeof(storage), iree_make_byte_span(storage.data(), sizeof(storage)),
+      iree_hal_buffer_release_callback_null(), iree_allocator_system(),
+      &storage_only));
+  std::unique_ptr<iree_hal_buffer_t, decltype(&iree_hal_buffer_release)>
+      storage_owner(storage_only, iree_hal_buffer_release);
+  loom_runtime_execution_group_t* group = nullptr;
+  IREE_ASSERT_OK(loom_runtime_execution_group_create(
+      producer_.execution, 2, iree_allocator_system(), &group));
+  std::unique_ptr<loom_runtime_execution_group_t,
+                  decltype(&loom_runtime_execution_group_free)>
+      group_owner(group, loom_runtime_execution_group_free);
+  uint32_t input = 5;
+  uint32_t output = 0;
+  const uint16_t half = 3;
+  const loom_runtime_group_node_t upload = {
+      .kind = LOOM_RUNTIME_GROUP_TRANSFER,
+      .transfer = {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
+                   .upload = {.source = &input,
+                              .target_buffer = producer_.buffer,
+                              .length = sizeof(input)}}};
+  IREE_ASSERT_OK(loom_runtime_execution_group_append(group, &upload));
+  const auto transfer = [](iree_hal_transfer_operation_t op) {
+    return loom_runtime_group_node_t{.kind = LOOM_RUNTIME_GROUP_TRANSFER,
+                                     .transfer = op};
+  };
+  // Usage bits missing for the transfer direction.
+  iree_hal_transfer_operation_t op = upload.transfer;
+  op.upload.target_buffer = storage_only;
+  auto node = transfer(op);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_PERMISSION_DENIED,
+                        loom_runtime_execution_group_append(group, &node));
+  op = {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
+        .download = {.source_buffer = storage_only,
+                     .target = &output,
+                     .length = sizeof(output)}};
+  node = transfer(op);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_PERMISSION_DENIED,
+                        loom_runtime_execution_group_append(group, &node));
+  // Fill alignment and flags.
+  op = {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL,
+        .fill = {.target_buffer = producer_.buffer,
+                 .target_offset = 2,
+                 .length = 8,
+                 .pattern = &input,
+                 .pattern_length = sizeof(input)}};
+  node = transfer(op);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_runtime_execution_group_append(group, &node));
+  op.fill.target_offset = 0;
+  op.fill.length = 6;
+  node = transfer(op);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_runtime_execution_group_append(group, &node));
+  op = {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL,
+        .fill = {.target_buffer = producer_.buffer,
+                 .length = 4,
+                 .pattern = &half,
+                 .pattern_length = sizeof(half),
+                 .flags = 1}};
+  node = transfer(op);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_runtime_execution_group_append(group, &node));
+  // Overlapping copy within one allocation and unsupported copy/update flags.
+  op = {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_COPY,
+        .copy = {.source_buffer = producer_.buffer,
+                 .target_buffer = producer_.buffer,
+                 .target_offset = 4,
+                 .length = 8}};
+  node = transfer(op);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_runtime_execution_group_append(group, &node));
+  op.copy.target_offset = 8;
+  op.copy.flags = 1;
+  node = transfer(op);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_runtime_execution_group_append(group, &node));
+  op = {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE,
+        .update = {.source_buffer = &input,
+                   .target_buffer = producer_.buffer,
+                   .length = sizeof(input),
+                   .flags = 1}};
+  node = transfer(op);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_runtime_execution_group_append(group, &node));
+
+  // Rejected nodes were never appended; the valid group runs and the domain
+  // stays usable.
+  op = {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_COPY,
+        .copy = {.source_buffer = producer_.buffer,
+                 .target_buffer = producer_.buffer,
+                 .target_offset = 8,
+                 .length = 8}};
+  node = transfer(op);
+  IREE_ASSERT_OK(loom_runtime_execution_group_append(group, &node));
+  const auto before = loom_runtime_execution_frontier(producer_.execution);
+  loom_runtime_group_submission_t submission;
+  IREE_ASSERT_OK(loom_runtime_execution_group_submit(group, &submission));
+  EXPECT_EQ(submission.accepted_count, 2u);
+  EXPECT_EQ(submission.frontier.values[0], before.values[0] + 2);
+  loom_runtime_execution_group_retire(group);
+  const iree_hal_transfer_operation_t readback = {
+      .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
+      .download = {.source_buffer = producer_.buffer,
+                   .source_offset = 8,
+                   .target = &output,
+                   .length = sizeof(output)}};
+  uint64_t value = 0;
+  IREE_ASSERT_OK(loom_runtime_execution_transfer(producer_.execution, 1,
+                                                 &readback, &value));
+  IREE_ASSERT_OK(loom_runtime_execution_wait(producer_.execution, value));
+  EXPECT_EQ(output, 5u);
+  EXPECT_EQ(storage, (std::array<uint32_t, 4>{}));
+}
+
+TEST_P(WorkspaceTest, LaneSubmissionReportsHalRejectionAfterAcceptance) {
+  // The lane primitive itself does not pre-validate; a node the HAL refuses
+  // still poisons the domain after its accepted prefix.
+  IREE_ASSERT_OK(Allocate(producer_));
+  std::array<uint32_t, 4> storage = {};
+  iree_hal_buffer_t* storage_only = nullptr;
+  IREE_ASSERT_OK(iree_hal_heap_buffer_wrap(
+      iree_hal_buffer_placement_undefined(),
+      IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
+      IREE_HAL_MEMORY_ACCESS_ALL, IREE_HAL_BUFFER_USAGE_STORAGE,
+      sizeof(storage), iree_make_byte_span(storage.data(), sizeof(storage)),
+      iree_hal_buffer_release_callback_null(), iree_allocator_system(),
+      &storage_only));
+  std::unique_ptr<iree_hal_buffer_t, decltype(&iree_hal_buffer_release)>
+      storage_owner(storage_only, iree_hal_buffer_release);
+  const uint32_t input = 3;
+  const loom_runtime_group_node_t nodes[] = {
+      {.kind = LOOM_RUNTIME_GROUP_TRANSFER,
+       .transfer = {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
+                    .upload = {.source = &input,
+                               .target_buffer = producer_.buffer,
+                               .length = sizeof(input)}}},
+      {.kind = LOOM_RUNTIME_GROUP_TRANSFER,
+       .transfer = {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
+                    .upload = {.source = &input,
+                               .target_buffer = storage_only,
+                               .length = sizeof(input)}}}};
+  const auto before = loom_runtime_execution_frontier(producer_.execution);
+  loom_runtime_group_submission_t submission;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_PERMISSION_DENIED,
+                        loom_runtime_execution_submit_group(
+                            producer_.execution, 2, nodes, &submission));
+  EXPECT_EQ(submission.accepted_count, 1u);
+  EXPECT_EQ(submission.frontier.values[0], before.values[0] + 1);
+  uint64_t value = 0;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_FAILED_PRECONDITION,
+      loom_runtime_execution_transfer(producer_.execution, 1,
+                                      &nodes[0].transfer, &value));
+  iree_hal_buffer_release(producer_.buffer);
+  producer_.buffer = nullptr;
+  IREE_ASSERT_OK(loom_runtime_execution_drain(producer_.execution));
+  EXPECT_EQ(storage, (std::array<uint32_t, 4>{}));
+}
+
+TEST_P(WorkspaceTest, GroupTimelineExhaustionRejectsBeforeAnyEnqueue) {
+  IREE_ASSERT_OK(loom_runtime_execution_advance_for_testing(
+      producer_.execution, IREE_HAL_SEMAPHORE_MAX_VALUE - 4));
+  IREE_ASSERT_OK(Allocate(producer_));
+  uint32_t first = 17;
+  const iree_hal_transfer_operation_t seed = {
+      .type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
+      .upload = {.source = &first,
+                 .target_buffer = producer_.buffer,
+                 .length = sizeof(first)}};
+  uint64_t value = 0;
+  IREE_ASSERT_OK(
+      loom_runtime_execution_transfer(producer_.execution, 1, &seed, &value));
+  ASSERT_EQ(value, IREE_HAL_SEMAPHORE_MAX_VALUE - 2);
+  uint32_t second = 41;
+  std::array<uint32_t, 3> outputs = {1, 1, 1};
+  auto upload = [&](uint32_t* source) {
+    return loom_runtime_group_node_t{
+        .kind = LOOM_RUNTIME_GROUP_TRANSFER,
+        .transfer = {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
+                     .upload = {.source = source,
+                                .target_buffer = producer_.buffer,
+                                .length = sizeof(*source)}}};
+  };
+  auto download = [&](uint32_t* target) {
+    return loom_runtime_group_node_t{
+        .kind = LOOM_RUNTIME_GROUP_TRANSFER,
+        .transfer = {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
+                     .download = {.source_buffer = producer_.buffer,
+                                  .target = target,
+                                  .length = sizeof(*target)}}};
+  };
+
+  // Three nodes do not fit the two remaining values: nothing is enqueued.
+  loom_runtime_execution_group_t* group = nullptr;
+  auto join = JoinGroupOnExit(&group);
+  IREE_ASSERT_OK(loom_runtime_execution_group_create(
+      producer_.execution, 3, iree_allocator_system(), &group));
+  for (const auto& node :
+       {upload(&second), download(&outputs[0]), download(&outputs[1])}) {
+    IREE_ASSERT_OK(loom_runtime_execution_group_append(group, &node));
+  }
+  const auto before = loom_runtime_execution_frontier(producer_.execution);
+  loom_runtime_group_submission_t submission;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_RESOURCE_EXHAUSTED,
+      loom_runtime_execution_group_submit(group, &submission));
+  EXPECT_EQ(submission.accepted_count, 0u);
+  EXPECT_EQ(submission.frontier.values[0], before.values[0]);
+  EXPECT_EQ(submission.frontier.values[1], before.values[1]);
+  auto after = loom_runtime_execution_frontier(producer_.execution);
+  EXPECT_EQ(after.values[0], before.values[0]);
+  EXPECT_EQ(after.values[1], before.values[1]);
+  loom_runtime_execution_group_free(group);
+  group = nullptr;
+
+  // The rejection did not poison the domain; a group that fits succeeds and
+  // observes the seeded contents, not the rejected upload.
+  IREE_ASSERT_OK(loom_runtime_execution_group_create(
+      producer_.execution, 2, iree_allocator_system(), &group));
+  for (const auto& node : {download(&outputs[0]), upload(&second)}) {
+    IREE_ASSERT_OK(loom_runtime_execution_group_append(group, &node));
+  }
+  IREE_ASSERT_OK(loom_runtime_execution_group_submit(group, &submission));
+  EXPECT_EQ(submission.accepted_count, 2u);
+  EXPECT_EQ(submission.frontier.values[0], IREE_HAL_SEMAPHORE_MAX_VALUE);
+  IREE_ASSERT_OK(loom_runtime_execution_wait(producer_.execution,
+                                             IREE_HAL_SEMAPHORE_MAX_VALUE));
+  EXPECT_EQ(outputs[0], first);
+  EXPECT_EQ(outputs[1], 1u);
+  loom_runtime_execution_group_retire(group);
+  loom_runtime_execution_group_free(group);
+  group = nullptr;
+
+  // Timeline values never recycle: the exhausted domain rejects further work
+  // with no prefix, while its independent feedback branch still works.
+  IREE_ASSERT_OK(loom_runtime_execution_group_create(
+      producer_.execution, 1, iree_allocator_system(), &group));
+  const auto overflow = upload(&first);
+  IREE_ASSERT_OK(loom_runtime_execution_group_append(group, &overflow));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_RESOURCE_EXHAUSTED,
+      loom_runtime_execution_group_submit(group, &submission));
+  EXPECT_EQ(submission.accepted_count, 0u);
+  loom_runtime_execution_group_free(group);
+  group = nullptr;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_RESOURCE_EXHAUSTED,
+      loom_runtime_execution_transfer(producer_.execution, 1, &seed, &value));
+  const iree_hal_transfer_operation_t readback = download(&outputs[2]).transfer;
+  IREE_ASSERT_OK(loom_runtime_execution_feedback(producer_.execution, 1,
+                                                 &readback, &value));
+  IREE_ASSERT_OK(
+      loom_runtime_execution_feedback_wait(producer_.execution, value));
+  EXPECT_EQ(outputs[2], second);
+  after = loom_runtime_execution_frontier(producer_.execution);
+  EXPECT_EQ(after.values[0], IREE_HAL_SEMAPHORE_MAX_VALUE);
+}
 
 TEST_P(WorkspaceTest, RejectedBatchPublishesNoPrefixOrTimelineEdge) {
   const iree_hal_pool_reservation_request_t requests[] = {
@@ -920,6 +1452,407 @@ TEST_P(WorkspaceTest, CaptureCompactionPreservesLiveRootsAcrossRingWrap) {
   EXPECT_EQ(retired.bytes_committed, 0u);
   EXPECT_EQ(retired.reserve_count, 34u);
   EXPECT_EQ(retired.release_count, 34u);
+}
+
+TEST_P(WorkspaceTest, MultiLaneOutputColumnsJoinBeforeConsumption) {
+  IREE_ASSERT_OK(Allocate(producer_));
+  IREE_ASSERT_OK(Allocate(consumer_));
+  loom_runtime_execution_group_t* raw_group = nullptr;
+  IREE_ASSERT_OK(loom_runtime_execution_group_create(
+      producer_.execution, 4, iree_allocator_system(), &raw_group));
+  auto cleanup = [this](loom_runtime_execution_group_t* group) {
+    loom_runtime_execution_group_retire(group);
+    for (auto* execution : {producer_.execution, consumer_.execution}) {
+      const auto frontier = loom_runtime_execution_frontier(execution);
+      IREE_EXPECT_OK(
+          loom_runtime_execution_wait(execution, frontier.values[0]));
+    }
+    loom_runtime_execution_group_free(group);
+  };
+  std::unique_ptr<loom_runtime_execution_group_t, decltype(cleanup)> group(
+      raw_group, cleanup);
+  const uint32_t gpu_value = 0x13579BDF;
+  const uint32_t npu_value = 0x2468ACE0;
+  const loom_runtime_group_node_t control = {
+      .kind = LOOM_RUNTIME_GROUP_TRANSFER,
+      .transfer = {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL,
+                   .fill = {.target_buffer = producer_.buffer,
+                            .length = sizeof(producer_.output),
+                            .pattern = &gpu_value,
+                            .pattern_length = sizeof(gpu_value)}}};
+  auto leading = control;
+  leading.transfer.fill.target_buffer = consumer_.buffer;
+  leading.transfer.fill.length = 7 * sizeof(uint32_t);
+  leading.transfer.fill.pattern = &npu_value;
+  uint32_t gpu_node = UINT32_MAX, npu_node = UINT32_MAX;
+  IREE_ASSERT_OK(loom_runtime_execution_group_append_after(
+      group.get(), nullptr, &control, 0, nullptr, &gpu_node));
+  IREE_ASSERT_OK(loom_runtime_execution_group_append_after(
+      group.get(), consumer_.execution, &leading, 0, nullptr, &npu_node));
+  const uint32_t predecessors[] = {gpu_node, npu_node};
+  const loom_runtime_group_node_t merge = {
+      .kind = LOOM_RUNTIME_GROUP_TRANSFER,
+      .transfer = {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_COPY,
+                   .copy = {.source_buffer = consumer_.buffer,
+                            .target_buffer = producer_.buffer,
+                            .length = 7 * sizeof(uint32_t)}}};
+  IREE_ASSERT_OK(loom_runtime_execution_group_append_after(
+      group.get(), nullptr, &merge, 2, predecessors, nullptr));
+  const loom_runtime_group_node_t download = {
+      .kind = LOOM_RUNTIME_GROUP_TRANSFER,
+      .transfer = {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
+                   .download = {.source_buffer = producer_.buffer,
+                                .target = producer_.output.data(),
+                                .length = sizeof(producer_.output)}}};
+  IREE_ASSERT_OK(loom_runtime_execution_group_append(group.get(), &download));
+  loom_runtime_group_submission_t submission = {};
+  IREE_ASSERT_OK(loom_runtime_execution_group_submit(group.get(), &submission));
+  EXPECT_EQ(submission.accepted_count, 4u);
+  EXPECT_EQ(submission.lane_count, 2u);
+  EXPECT_TRUE(submission.joined);
+  IREE_ASSERT_OK(loom_runtime_execution_wait(producer_.execution,
+                                             submission.frontier.values[0]));
+  for (size_t i = 0; i < producer_.output.size(); ++i) {
+    EXPECT_EQ(producer_.output[i], i < 7 ? npu_value : gpu_value);
+  }
+}
+
+TEST_P(WorkspaceTest, PayloadReadinessDoesNotRetireProducerOrJoinedStorage) {
+  IREE_ASSERT_OK(Allocate(producer_));
+  IREE_ASSERT_OK(Allocate(consumer_));
+  const auto allocated = loom_runtime_execution_frontier(consumer_.execution);
+  IREE_ASSERT_OK(
+      loom_runtime_execution_wait(consumer_.execution, allocated.values[0]));
+  const uint32_t pattern = 0x2468ACE0;
+  const iree_hal_transfer_operation_t seed = {
+      .type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL,
+      .fill = {.target_buffer = consumer_.buffer,
+               .length = sizeof(consumer_.output),
+               .pattern = &pattern,
+               .pattern_length = sizeof(pattern)}};
+  uint64_t value = 0;
+  IREE_ASSERT_OK(
+      loom_runtime_execution_transfer(producer_.execution, 1, &seed, &value));
+  IREE_ASSERT_OK(loom_runtime_execution_wait(producer_.execution, value));
+
+  // Gate 1 represents published payload; gate 2 represents the final ACK.
+  loom_runtime_execution_group_t* raw_group = nullptr;
+  IREE_ASSERT_OK(loom_runtime_execution_group_create(
+      producer_.execution, 3, iree_allocator_system(), &raw_group));
+  auto cleanup = [this](loom_runtime_execution_group_t* group) {
+    iree_status_ignore(iree_hal_semaphore_signal(gate_, 2, nullptr));
+    loom_runtime_execution_group_retire(group);
+    for (auto* execution : {producer_.execution, consumer_.execution}) {
+      const auto frontier = loom_runtime_execution_frontier(execution);
+      IREE_EXPECT_OK(iree_hal_semaphore_wait(frontier.semaphores[0],
+                                             frontier.values[0],
+                                             iree_make_timeout_ms(5000), 0));
+    }
+    loom_runtime_execution_group_free(group);
+  };
+  std::unique_ptr<loom_runtime_execution_group_t, decltype(cleanup)> group(
+      raw_group, cleanup);
+  const loom_runtime_group_node_t resident = {
+      .kind = LOOM_RUNTIME_GROUP_TRANSFER,
+      .transfer = {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
+                   .download = {.source_buffer = consumer_.buffer,
+                                .target = consumer_.output.data(),
+                                .length = sizeof(consumer_.output)}},
+      .payload_semaphore = gate_,
+      .payload_value = 1,
+      .wait_semaphore = gate_,
+      .wait_value = 2};
+  uint32_t resident_index = UINT32_MAX;
+  IREE_ASSERT_OK(loom_runtime_execution_group_append_after(
+      group.get(), consumer_.execution, &resident, 0, nullptr,
+      &resident_index));
+  const loom_runtime_group_edge_t edge = {resident_index,
+                                          LOOM_RUNTIME_GROUP_EDGE_PAYLOAD};
+  const loom_runtime_group_node_t merge = {
+      .kind = LOOM_RUNTIME_GROUP_TRANSFER,
+      .transfer = {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_COPY,
+                   .copy = {.source_buffer = consumer_.buffer,
+                            .target_buffer = producer_.buffer,
+                            .length = sizeof(producer_.output)}}};
+  IREE_ASSERT_OK(loom_runtime_execution_group_append_edges(
+      group.get(), nullptr, &merge, 1, &edge, nullptr));
+  const loom_runtime_group_node_t download = {
+      .kind = LOOM_RUNTIME_GROUP_TRANSFER,
+      .transfer = {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
+                   .download = {.source_buffer = producer_.buffer,
+                                .target = producer_.output.data(),
+                                .length = sizeof(producer_.output)}}};
+  IREE_ASSERT_OK(loom_runtime_execution_group_append(group.get(), &download));
+  loom_runtime_group_submission_t submission = {};
+  IREE_ASSERT_OK(loom_runtime_execution_group_submit(group.get(), &submission));
+  ASSERT_TRUE(submission.joined);
+  const uint64_t consumed = submission.frontier.values[0] - 1;
+  EXPECT_TRUE(iree_status_is_deadline_exceeded(
+      iree_hal_semaphore_wait(submission.frontier.semaphores[0], consumed,
+                              iree_immediate_timeout(), 0)));
+  IREE_ASSERT_OK(iree_hal_semaphore_signal(gate_, 1, nullptr));
+  IREE_ASSERT_OK(iree_hal_semaphore_wait(submission.frontier.semaphores[0],
+                                         consumed, iree_make_timeout_ms(5000),
+                                         0));
+  for (uint32_t actual : producer_.output) {
+    EXPECT_EQ(actual, pattern);
+  }
+  uint64_t observed = 0;
+  IREE_ASSERT_OK(
+      iree_hal_semaphore_query(submission.lanes[1].semaphores[0], &observed));
+  EXPECT_LT(observed, submission.lanes[1].values[0]);
+  IREE_ASSERT_OK(
+      iree_hal_semaphore_query(submission.frontier.semaphores[0], &observed));
+  EXPECT_EQ(observed, consumed);
+  EXPECT_FALSE(loom_runtime_execution_is_retired(consumer_.execution));
+  IREE_ASSERT_OK(iree_hal_semaphore_signal(gate_, 2, nullptr));
+  IREE_ASSERT_OK(iree_hal_semaphore_wait(submission.frontier.semaphores[0],
+                                         submission.frontier.values[0],
+                                         iree_make_timeout_ms(5000), 0));
+}
+
+TEST_P(WorkspaceTest, PayloadEdgeRejectsMissingTokenAndSameLane) {
+  IREE_ASSERT_OK(Allocate(producer_));
+  const uint32_t pattern = 7;
+  loom_runtime_group_node_t node = {
+      .kind = LOOM_RUNTIME_GROUP_TRANSFER,
+      .transfer = {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL,
+                   .fill = {.target_buffer = producer_.buffer,
+                            .length = sizeof(producer_.output),
+                            .pattern = &pattern,
+                            .pattern_length = sizeof(pattern)}}};
+  loom_runtime_execution_group_t* raw_group = nullptr;
+  IREE_ASSERT_OK(loom_runtime_execution_group_create(
+      producer_.execution, 3, iree_allocator_system(), &raw_group));
+  std::unique_ptr<loom_runtime_execution_group_t,
+                  decltype(&loom_runtime_execution_group_free)>
+      group(raw_group, loom_runtime_execution_group_free);
+  uint32_t index = UINT32_MAX;
+  IREE_ASSERT_OK(loom_runtime_execution_group_append_after(
+      group.get(), nullptr, &node, 0, nullptr, &index));
+  loom_runtime_group_edge_t edge = {index, LOOM_RUNTIME_GROUP_EDGE_PAYLOAD};
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      loom_runtime_execution_group_append_edges(
+          group.get(), consumer_.execution, &node, 1, &edge, nullptr));
+  node.payload_semaphore = gate_;
+  node.payload_value = 1;
+  IREE_ASSERT_OK(loom_runtime_execution_group_append_after(
+      group.get(), nullptr, &node, 0, nullptr, &index));
+  edge.predecessor = index;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_runtime_execution_group_append_edges(
+                            group.get(), nullptr, &node, 1, &edge, nullptr));
+}
+
+TEST_P(WorkspaceTest, PayloadEdgeRejectsTerminalTimelineAliasBeforeAcceptance) {
+  IREE_ASSERT_OK(Allocate(producer_));
+  const auto before = loom_runtime_execution_frontier(consumer_.execution);
+  const uint32_t pattern = 7;
+  const loom_runtime_group_node_t node = {
+      .kind = LOOM_RUNTIME_GROUP_TRANSFER,
+      .transfer = {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL,
+                   .fill = {.target_buffer = producer_.buffer,
+                            .length = sizeof(producer_.output),
+                            .pattern = &pattern,
+                            .pattern_length = sizeof(pattern)}},
+      .payload_semaphore = before.semaphores[0],
+      .payload_value = before.values[0] + 1};
+  loom_runtime_execution_group_t* raw_group = nullptr;
+  IREE_ASSERT_OK(loom_runtime_execution_group_create(
+      producer_.execution, 2, iree_allocator_system(), &raw_group));
+  std::unique_ptr<loom_runtime_execution_group_t,
+                  decltype(&loom_runtime_execution_group_free)>
+      group(raw_group, loom_runtime_execution_group_free);
+  uint32_t index = UINT32_MAX;
+  IREE_ASSERT_OK(loom_runtime_execution_group_append_after(
+      group.get(), consumer_.execution, &node, 0, nullptr, &index));
+  const loom_runtime_group_edge_t edge = {index,
+                                          LOOM_RUNTIME_GROUP_EDGE_PAYLOAD};
+  IREE_ASSERT_OK(loom_runtime_execution_group_append_edges(
+      group.get(), nullptr, &node, 1, &edge, nullptr));
+  loom_runtime_group_submission_t submission = {};
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      loom_runtime_execution_group_submit(group.get(), &submission));
+  EXPECT_EQ(submission.accepted_count, 0u);
+  EXPECT_EQ(loom_runtime_execution_frontier(consumer_.execution).values[0],
+            before.values[0]);
+}
+
+TEST_P(WorkspaceTest, RejectedPayloadConsumerPreservesProducerRetirement) {
+  IREE_ASSERT_OK(Allocate(producer_));
+  const uint32_t pattern = 7;
+  loom_runtime_group_node_t node = {
+      .kind = LOOM_RUNTIME_GROUP_TRANSFER,
+      .transfer = {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL,
+                   .fill = {.target_buffer = producer_.buffer,
+                            .length = sizeof(producer_.output),
+                            .pattern = &pattern,
+                            .pattern_length = sizeof(pattern)}},
+      .payload_semaphore = gate_,
+      .payload_value = 1,
+      .wait_semaphore = gate_,
+      .wait_value = 2};
+  loom_runtime_execution_group_t* raw_group = nullptr;
+  IREE_ASSERT_OK(loom_runtime_execution_group_create(
+      producer_.execution, 2, iree_allocator_system(), &raw_group));
+  auto cleanup = [this](loom_runtime_execution_group_t* group) {
+    iree_status_ignore(iree_hal_semaphore_signal(gate_, 2, nullptr));
+    loom_runtime_execution_group_retire(group);
+    const auto frontier = loom_runtime_execution_frontier(consumer_.execution);
+    IREE_EXPECT_OK(iree_hal_semaphore_wait(frontier.semaphores[0],
+                                           frontier.values[0],
+                                           iree_make_timeout_ms(5000), 0));
+    loom_runtime_execution_group_free(group);
+  };
+  std::unique_ptr<loom_runtime_execution_group_t, decltype(cleanup)> group(
+      raw_group, cleanup);
+  uint32_t index = UINT32_MAX;
+  IREE_ASSERT_OK(loom_runtime_execution_group_append_after(
+      group.get(), consumer_.execution, &node, 0, nullptr, &index));
+  const loom_runtime_group_edge_t edge = {index,
+                                          LOOM_RUNTIME_GROUP_EDGE_PAYLOAD};
+  node.wait_semaphore = nullptr;
+  node.wait_value = 0;
+  IREE_ASSERT_OK(loom_runtime_execution_group_append_edges(
+      group.get(), nullptr, &node, 1, &edge, nullptr));
+  IREE_ASSERT_OK(loom_runtime_execution_reject_group_node_for_testing(
+      producer_.execution, 1));
+  loom_runtime_group_submission_t submission = {};
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INTERNAL,
+      loom_runtime_execution_group_submit(group.get(), &submission));
+  ASSERT_EQ(submission.accepted_count, 1u);
+  EXPECT_FALSE(submission.joined);
+  uint64_t observed = 0;
+  IREE_ASSERT_OK(
+      iree_hal_semaphore_query(submission.lanes[1].semaphores[0], &observed));
+  EXPECT_LT(observed, submission.lanes[1].values[0]);
+}
+
+TEST_P(WorkspaceTest, MultiLanePartialAcceptancePoisonsEveryLane) {
+  IREE_ASSERT_OK(Allocate(producer_));
+  IREE_ASSERT_OK(Allocate(consumer_));
+  loom_runtime_execution_group_t* group = nullptr;
+  IREE_ASSERT_OK(loom_runtime_execution_group_create(
+      producer_.execution, 2, iree_allocator_system(), &group));
+  auto cleanup = [this](loom_runtime_execution_group_t* value) {
+    loom_runtime_execution_group_retire(value);
+    for (auto* execution : {producer_.execution, consumer_.execution}) {
+      const auto frontier = loom_runtime_execution_frontier(execution);
+      IREE_EXPECT_OK(
+          loom_runtime_execution_wait(execution, frontier.values[0]));
+    }
+    loom_runtime_execution_group_free(value);
+  };
+  std::unique_ptr<loom_runtime_execution_group_t, decltype(cleanup)> owner(
+      group, cleanup);
+  uint32_t pattern = 42;
+  loom_runtime_group_node_t fill = {
+      .kind = LOOM_RUNTIME_GROUP_TRANSFER,
+      .transfer = {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL,
+                   .fill = {.target_buffer = consumer_.buffer,
+                            .length = sizeof(consumer_.output),
+                            .pattern = &pattern,
+                            .pattern_length = sizeof(pattern)}}};
+  IREE_ASSERT_OK(loom_runtime_execution_group_append_on(
+      group, consumer_.execution, &fill));
+  fill.transfer.fill.target_buffer = producer_.buffer;
+  IREE_ASSERT_OK(loom_runtime_execution_group_append(group, &fill));
+  const auto before = loom_runtime_execution_frontier(consumer_.execution);
+  IREE_ASSERT_OK(loom_runtime_execution_reject_group_node_for_testing(
+      producer_.execution, 1));
+  loom_runtime_group_submission_t submission = {};
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INTERNAL,
+      loom_runtime_execution_group_submit(group, &submission));
+  EXPECT_EQ(submission.accepted_count, 1u);
+  EXPECT_EQ(submission.lane_count, 2u);
+  EXPECT_FALSE(submission.joined);
+  EXPECT_EQ(submission.lanes[1].values[0], before.values[0] + 1);
+  for (auto* execution : {producer_.execution, consumer_.execution}) {
+    uint64_t value = 0;
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_FAILED_PRECONDITION,
+        loom_runtime_execution_transfer(execution, 1, &fill.transfer, &value));
+  }
+}
+
+TEST_P(WorkspaceTest, MultiLanePreflightRejectsExhaustionBeforeAnyEnqueue) {
+  IREE_ASSERT_OK(Allocate(producer_));
+  IREE_ASSERT_OK(Allocate(consumer_));
+  auto frontier = loom_runtime_execution_frontier(consumer_.execution);
+  IREE_ASSERT_OK(
+      loom_runtime_execution_wait(consumer_.execution, frontier.values[0]));
+  IREE_ASSERT_OK(loom_runtime_execution_advance_for_testing(
+      consumer_.execution, IREE_HAL_SEMAPHORE_MAX_VALUE));
+  loom_runtime_execution_group_t* group = nullptr;
+  IREE_ASSERT_OK(loom_runtime_execution_group_create(
+      producer_.execution, 1, iree_allocator_system(), &group));
+  const uint32_t pattern = 42;
+  const loom_runtime_group_node_t fill = {
+      .kind = LOOM_RUNTIME_GROUP_TRANSFER,
+      .transfer = {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL,
+                   .fill = {.target_buffer = consumer_.buffer,
+                            .length = sizeof(consumer_.output),
+                            .pattern = &pattern,
+                            .pattern_length = sizeof(pattern)}}};
+  const uint32_t invalid = 0;
+  uint32_t index = 99;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_OUT_OF_RANGE,
+      loom_runtime_execution_group_append_after(group, consumer_.execution,
+                                                &fill, 1, &invalid, &index));
+  EXPECT_EQ(index, 99u);
+  IREE_ASSERT_OK(loom_runtime_execution_group_append_after(
+      group, consumer_.execution, &fill, 0, nullptr, &index));
+  EXPECT_EQ(index, 0u);
+  loom_runtime_group_submission_t submission = {};
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_RESOURCE_EXHAUSTED,
+      loom_runtime_execution_group_submit(group, &submission));
+  EXPECT_EQ(submission.accepted_count, 0u);
+  EXPECT_FALSE(submission.joined);
+  loom_runtime_execution_group_free(group);
+}
+
+TEST_P(WorkspaceTest, RejectedTerminalJoinPreservesForeignAcceptance) {
+  IREE_ASSERT_OK(Allocate(consumer_));
+  loom_runtime_execution_group_t* group = nullptr;
+  IREE_ASSERT_OK(loom_runtime_execution_group_create(
+      producer_.execution, 1, iree_allocator_system(), &group));
+  auto cleanup = [this](loom_runtime_execution_group_t* value) {
+    loom_runtime_execution_group_retire(value);
+    const auto frontier = loom_runtime_execution_frontier(consumer_.execution);
+    IREE_EXPECT_OK(
+        loom_runtime_execution_wait(consumer_.execution, frontier.values[0]));
+    loom_runtime_execution_group_free(value);
+  };
+  std::unique_ptr<loom_runtime_execution_group_t, decltype(cleanup)> owner(
+      group, cleanup);
+  const uint32_t pattern = 42;
+  const loom_runtime_group_node_t fill = {
+      .kind = LOOM_RUNTIME_GROUP_TRANSFER,
+      .transfer = {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL,
+                   .fill = {.target_buffer = consumer_.buffer,
+                            .length = sizeof(consumer_.output),
+                            .pattern = &pattern,
+                            .pattern_length = sizeof(pattern)}}};
+  IREE_ASSERT_OK(loom_runtime_execution_group_append_on(
+      group, consumer_.execution, &fill));
+  const auto before = loom_runtime_execution_frontier(producer_.execution);
+  IREE_ASSERT_OK(loom_runtime_execution_reject_group_node_for_testing(
+      producer_.execution, 1));
+  loom_runtime_group_submission_t submission = {};
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INTERNAL,
+      loom_runtime_execution_group_submit(group, &submission));
+  EXPECT_EQ(submission.accepted_count, 1u);
+  EXPECT_EQ(submission.lane_count, 2u);
+  EXPECT_FALSE(submission.joined);
+  EXPECT_EQ(submission.frontier.values[0], before.values[0]);
+  EXPECT_GT(submission.lanes[1].values[0], 0u);
 }
 
 INSTANTIATE_TEST_SUITE_P(Workers, WorkspaceTest, ::testing::Values(1, 4));

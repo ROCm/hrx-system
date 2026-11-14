@@ -341,3 +341,177 @@ IDs through the existing completion path; logits and RNG state stay on device.
 These observers do not decide admission, advancement or retirement. Unit tests
 exercise the pure packing and epoch contracts; actual source-model HTTP tests
 exercise retained continuation, cancellation, cache ownership and final output.
+
+## Two-bank groups
+
+A deployment can select `group_mode: "two_bank"` and the registered
+`plan_provider: "two_bank_v1"` in its text definition. Portable model cards
+put the same defaults in a schema-version-2 preset's `execution` object.
+`group_mode: "single"` preserves ordinary epochs. Missing group exports or an
+unknown provider fail preparation before the model becomes ready. Existing
+version-1 cards continue using their ordinary execution contract.
+
+The source implements [text_prefill_group_v1](prefill_group.h): a semantic
+stage table, group encoding and one final publication. Each layer's prefix
+publishes the shared causal state that B needs; bank-private residuals,
+packets, outputs and workspaces remain live through every declared consumer.
+The source reserves both positions while committed row state stays at the last
+successful boundary. Completion publishes both known-input counts together.
+There is no intermediate device wait or host completion of A.
+
+The builtin `sequential_v1` provider consumes the same source contract as a
+comparison baseline. Providers are explicitly registered on the host before
+model preparation and retained by each selected model. Preparation runs once;
+a pure selection callback receives absolute position, shapes and live token
+counts at each candidate chunk boundary and can choose ordinary packing. Group construction
+copies upload bytes and bindings; partial enqueue failure ends model execution
+and keeps accepted resources through actual queue retirement. Readiness failure
+alone never releases borrowed host payloads.
+
+Descriptor version 2 declares eight phases per shape and layer through the
+same group export. Prefix prepares activation input, primary and secondary FFN
+branches produce disjoint output columns, and FFN merge joins those columns
+before activation and down-input packing. Primary and secondary down branches
+join at down merge before residual/norm/capture. Secondary producers require
+their explicit merge stages. Optional phases use `UINT32_MAX`.
+An eight-phase shape may omit every stage to keep that shape on ordinary
+execution. Both banks must have complete grouped implementations before
+selection; a partially omitted shape is invalid.
+
+The builtin plan emits cross-lane predecessor edges for these branches and
+preserves the same-layer A-prefix to B-prefix state dependency. B's prefix
+and FFN branches are submitted ahead of A's merge, permitting overlap on
+independent lanes. Each bank reserves a separate aligned temporary region per
+lane. Persistent intermediate results belong in source-declared bank storage.
+Version 1 descriptors keep their existing three phases and ordered submission.
+
+Descriptor version 3 declares twelve phases: prefix, gate primary/secondary/
+consume, up primary/secondary/consume, activation, down primary/secondary/
+consume, and residual. Its trailing records name each resident producer's
+consumer and bank-relative request/response ranges. The model bridge publishes
+RUN before dispatch and signals independent readiness only after all sixteen
+payload generation words agree. The emitter waits on that readiness at the
+declared consumer, sends ACK after consumption, and waits for the producer's
+terminal retirement before downstream buffer reuse. Cancellation publishes
+ABORT and final ACK, fails readiness, and drops bridge mappings before model
+retirement observes the accepted native captures. Each live producer needs
+distinct control ranges. The shared pool must qualify uncached or host-coherent
+access for each resident consumer and persistent host mappings. A DMA producer
+can use its ordinary access route with explicit cache transitions; it need not
+advertise the consumer's uncached mapping property. Versions 1 and 2 keep their
+existing completion edges.
+
+Descriptor version 4 declares one continuous resident lifetime separately from
+the twelve-phase table. The trailer contains one record with the lifetime
+stage, generation count, and request/response offsets in bank A's features.
+Seven-resource GPU leaves receive that shared features root after their six
+ordinary resources. The source publishes generations and polls responses in
+device memory, consumes each payload, and publishes the final ACK. Serving
+submits the resident command once after packet uploads and joins its actual
+terminal after the final GPU leaf, before feedback or buffer reuse. The host
+bridge owns admission, timeout and cancellation; aborted groups cannot publish
+progress. Descriptor replacement preserves lifetime and exchange geometry.
+
+A thirteen-resource pair command binds bank A's six ordinary roots, bank B's
+six ordinary roots, and bank A's shared features root, in that order. It records
+both banks' GPU work in one command buffer. The emitter executes it at bank A's
+visit and reuses that node at bank B's visit; bank-local residual and drafter
+leaves retain their ordinary bindings. Command-private workspace follows the
+thirteen roots. This lets source programs express complete interleaved GPU
+schedules while the version-4 resident lifetime runs on its independent lane.
+The encoder may select other prepared stages in its descriptor before enqueue;
+serving validates that table again after encoding, retaining unchanged plans.
+
+The startup compatibility variable `LOOM_SERVE_TWO_BANK=1` applies only to a
+single startup deployment, when a provider ID declares group-capable source
+and no explicit group mode is set. Its value is captured at host creation and
+translated into the model's immutable selection after card resolution.
+Dynamic registration never inherits this compatibility choice. Requests never
+read environment variables. Native callers use the typed mode. Registration by shared-library symbol and preload interception
+are unsupported.
+
+Initial pairing covers two contiguous known-input spans of one row. Media,
+proposals, device-fed continuation and ready peer work use ordinary packing.
+Only B may select. Resource ABI 2 allows source-owned draft-cache warm stages;
+proposal/verification stages remain outside groups. The model source must
+include every warm/capture consumer before bank reuse.
+
+Native variant selection on a group model happens at a drained boundary: with
+no group or ordinary invocation in flight, the source plan export and provider
+preparation run again against the candidate's stages, outside the execution
+lock. Bank workspaces are replaced in one allocation transaction after the
+bank working-set check when the reflected requirement changes. The plan, leaf
+descriptors and workspaces are published only after the native rebinding
+succeeds; any earlier failure leaves the current selection usable. Resident
+growth re-exports the plan from the resized control state on its cold
+preparation path and publishes it with that state. Bank packet geometry is part
+of the compiled cohort, so a resize that would change it is rejected for every
+model by the source storage contract.
+
+Group nodes are checked against the lane's queues at append (usage, access,
+memory type, flags, fill alignment, copy overlap), so such faults reject the
+group before any node is accepted.
+
+This path uses one existing device and its queues. It changes scheduling and
+storage ownership without introducing approximate arithmetic or NPU transport.
+The shared tests run on CPU and AMDGPU leaves; real-model golden, DFlash and
+teacher-forced numerical qualification remain separate release checks.
+
+## Device placement
+
+Runtime model-card v2 program sets may map exact preparation-stage roots to
+logical names in the application's device inventory.
+
+```json
+{
+  "device_placement": {
+    "ffn_gate": "npu",
+    "ffn_up": "npu",
+    "*": "gpu"
+  }
+}
+```
+
+Place this object beside `inputs` and `libraries` in the selected program set.
+An exact root overrides `*`. A direct card uses `*` as its primary device when
+present; an explicit deployment device takes precedence. Omission uses the
+deployment's primary device.
+Every explicit root must occur in preparation and every device name must resolve
+in the owning group. Native callers may supply the equivalent
+`loom_serve_text_options_t.device_placement` table. Each command root and its
+reachable kernels compile on one device. A multi-device model retains separate
+catalogs, profiles, executable caches and execution timelines.
+
+For continuous hybrid execution, a v2 program set may also declare
+`"exchange_pool": "shared"`. The deployment explicitly binds its primary pool
+and configures the named exchange pool for both devices. GPU weights, state and
+private workspace use the primary pool; secondary parameter domains and the
+continuous handshake use the exchange pool. This permits cached GPU storage
+with an uncached shared exchange. Keep primary and secondary parameters in
+separate checkpoint scopes. Omitting this binding retains the single-pool
+contract. Missing pool names or unsupported access scopes fail before serving.
+
+The selected model pool must admit all consuming devices. A deployment pool can
+set `"uncached": true` to require uncached access from every participating
+device family (host execution families require host coherence). With
+`"uncached_devices": ["gpu"]`, that requirement applies only to the named
+nonempty subset of pool devices; other devices retain ordinary access with
+cache transitions. Persistent host mapping remains required. HAL qualifies
+the complete scope before allocating backing, and resident transport rejects a
+consumer without qualified live access. Fixed backing is needed when the joint
+scope cannot bind and unbind elastic slabs. Both ordinary VM
+stage execution and two-bank groups return a joined primary work value that
+covers foreign producers. Partial acceptance prevents replay and preserves
+all accepted consumers through model retirement. Code variants for multi-device
+models currently reject until per-lane variant compilation is implemented.
+
+Placed text stages retain the existing command parameter-reflection and
+six/twelve-resource group ABI requirements. A model provider must author
+compatible numerical roots, packing, panels and merge stages. Device placement
+alone does not convert a GPU FFN into an XDNA implementation. Resident polling
+services additionally require a jointly owned protocol and a bounded
+startup/abort/drain contract before serving can enable them.
+
+Parameter roots with compatible translated layouts share storage. Independently
+packed roots from the same checkpoint own separately accounted copies when no
+existing layout fits; subsequent matching roots reuse that placement.

@@ -95,7 +95,7 @@ iree_status_t loom_serve_text_control_initialize(
       control->host.bytes[TEXT_HOST_NEXT_RESULTS],
   };
   const loom_runtime_module_options_t options = {
-      .binding_capacity = 7,
+      .binding_capacity = TEXT_GROUP_PAIR_ARITY,
       .stages = {stage_count, stages},
       .feedback = {IREE_ARRAYSIZE(feedback), feedback},
   };

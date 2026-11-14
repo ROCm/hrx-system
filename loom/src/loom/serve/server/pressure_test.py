@@ -186,6 +186,14 @@ def check(server, source, directory, device, workers, memory_bytes, retention):
     header = b'{"bias":{"dtype":"I32","shape":[1],"data_offsets":[0,4]}}'
     header += b" " * (-len(header) % 8)
     weights.write_bytes(struct.pack("<Q", len(header)) + header + struct.pack("<I", 2))
+    # The byte budgets above model the ordinary stages only. The fixture's
+    # two-bank group leaves would add their workspace to every request's
+    # footprint; this single-mode policy test does not declare them.
+    prepare = directory / "prepare.loom"
+    switch = "config.def @fixture.group = "
+    text = (source / "prepare.loom").read_text()
+    assert text.count(switch + "true") == 1, "fixture group switch moved"
+    prepare.write_text(text.replace(switch + "true", switch + "false"))
     flags = []
     for name in ("alpha", "beta"):
         model = {
@@ -193,6 +201,7 @@ def check(server, source, directory, device, workers, memory_bytes, retention):
             "base_directory": str(source.resolve()),
             "definition": {
                 **json.loads((source / "model.json").read_text())["definition"],
+                "prepare": str(prepare.resolve()),
                 "weights": str(weights),
                 "tokenizer": str(source / "tokenizer.json"),
                 "rows": 2,

@@ -1,0 +1,324 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/bazel:python.bzl", "iree_py_binary", "iree_py_library", "iree_py_test")
+
+package(default_visibility = ["//visibility:public"])
+
+_RUNNER = "//loom/py/loom/tools:pytest_style_runner.py"
+
+iree_py_library(
+    name = "values",
+    srcs = ["values.py"],
+    imports = ["../.."],
+)
+
+iree_py_library(
+    name = "errors",
+    srcs = ["errors.py"],
+    imports = ["../.."],
+)
+
+iree_py_library(
+    name = "hub",
+    srcs = ["hub.py"],
+    imports = ["../.."],
+)
+
+iree_py_library(
+    name = "profile",
+    srcs = ["profile.py"],
+    deps = [
+        ":errors",
+        ":hub",
+        ":values",
+    ],
+)
+
+iree_py_library(
+    name = "hardware",
+    srcs = ["hardware.py"],
+    deps = [":values"],
+)
+
+iree_py_library(
+    name = "store",
+    srcs = ["store.py"],
+    deps = [":values"],
+)
+
+iree_py_library(
+    name = "deployment",
+    srcs = ["deployment.py"],
+    deps = [
+        ":errors",
+        ":profile",
+    ],
+)
+
+iree_py_library(
+    name = "install",
+    srcs = ["install.py"],
+    deps = [
+        ":errors",
+        ":store",
+        ":values",
+    ],
+)
+
+iree_py_library(
+    name = "metrics",
+    srcs = ["metrics.py"],
+)
+
+iree_py_library(
+    name = "client",
+    srcs = ["client.py"],
+    deps = [
+        ":errors",
+        ":values",
+    ],
+)
+
+iree_py_library(
+    name = "proxy",
+    srcs = ["proxy.py"],
+    deps = [
+        ":metrics",
+        ":store",
+    ],
+)
+
+iree_py_library(
+    name = "server",
+    srcs = ["server.py"],
+    deps = [
+        ":client",
+        ":deployment",
+        ":errors",
+        ":hardware",
+        ":metrics",
+        ":profile",
+        ":proxy",
+        ":store",
+        ":values",
+    ],
+)
+
+iree_py_library(
+    name = "workload",
+    srcs = ["workload.py"],
+)
+
+iree_py_library(
+    name = "bench",
+    srcs = ["bench.py"],
+    deps = [
+        ":client",
+        ":errors",
+        ":profile",
+        ":store",
+        ":values",
+        ":workload",
+    ],
+)
+
+iree_py_library(
+    name = "chat",
+    srcs = ["chat.py"],
+    deps = [
+        ":client",
+        ":profile",
+    ],
+)
+
+iree_py_library(
+    name = "launch",
+    srcs = ["__init__.py"],
+)
+
+iree_py_library(
+    name = "cli",
+    srcs = [
+        "__main__.py",
+        "cli.py",
+    ],
+    deps = [
+        ":bench",
+        ":chat",
+        ":client",
+        ":deployment",
+        ":errors",
+        ":hardware",
+        ":hub",
+        ":install",
+        ":launch",
+        ":profile",
+        ":server",
+        ":store",
+        ":values",
+    ],
+)
+
+iree_py_library(
+    name = "testing",
+    testonly = True,
+    srcs = ["testing.py"],
+)
+
+iree_py_binary(
+    name = "loom-launch",
+    srcs = ["__main__.py"],
+    main = "__main__.py",
+    deps = [":cli"],
+)
+
+iree_py_test(
+    name = "hub_test",
+    srcs = [
+        "hub_test.py",
+        _RUNNER,
+    ],
+    args = ["loom.launch.hub_test"],
+    main = "pytest_style_runner.py",
+    deps = [
+        ":errors",
+        ":hub",
+        ":profile",
+    ],
+)
+
+iree_py_test(
+    name = "profile_test",
+    srcs = [
+        "profile_test.py",
+        _RUNNER,
+    ],
+    args = ["loom.launch.profile_test"],
+    main = "pytest_style_runner.py",
+    deps = [
+        ":deployment",
+        ":errors",
+        ":hardware",
+        ":profile",
+    ],
+)
+
+iree_py_test(
+    name = "metrics_test",
+    srcs = [
+        "metrics_test.py",
+        _RUNNER,
+    ],
+    args = ["loom.launch.metrics_test"],
+    main = "pytest_style_runner.py",
+    deps = [":metrics"],
+)
+
+iree_py_test(
+    name = "store_test",
+    srcs = [
+        "store_test.py",
+        _RUNNER,
+    ],
+    args = ["loom.launch.store_test"],
+    main = "pytest_style_runner.py",
+    deps = [":store"],
+)
+
+iree_py_test(
+    name = "proxy_test",
+    srcs = [
+        "proxy_test.py",
+        _RUNNER,
+    ],
+    args = ["loom.launch.proxy_test"],
+    main = "pytest_style_runner.py",
+    deps = [
+        ":client",
+        ":proxy",
+        ":store",
+        ":testing",
+    ],
+)
+
+iree_py_test(
+    name = "bench_test",
+    srcs = [
+        "bench_test.py",
+        _RUNNER,
+    ],
+    args = ["loom.launch.bench_test"],
+    main = "pytest_style_runner.py",
+    deps = [
+        ":bench",
+        ":client",
+        ":profile",
+        ":testing",
+    ],
+)
+
+iree_py_test(
+    name = "chat_test",
+    srcs = [
+        "chat_test.py",
+        _RUNNER,
+    ],
+    args = ["loom.launch.chat_test"],
+    main = "pytest_style_runner.py",
+    deps = [
+        ":chat",
+        ":client",
+        ":profile",
+    ],
+)
+
+iree_py_test(
+    name = "install_test",
+    srcs = [
+        "install_test.py",
+        _RUNNER,
+    ],
+    args = ["loom.launch.install_test"],
+    main = "pytest_style_runner.py",
+    deps = [
+        ":errors",
+        ":install",
+        ":store",
+    ],
+)
+
+iree_py_test(
+    name = "server_test",
+    srcs = [
+        "server_test.py",
+        _RUNNER,
+    ],
+    args = ["loom.launch.server_test"],
+    main = "pytest_style_runner.py",
+    deps = [
+        ":client",
+        ":deployment",
+        ":profile",
+        ":server",
+        ":store",
+        ":testing",
+    ],
+)
+
+iree_py_test(
+    name = "cli_test",
+    srcs = [
+        "cli_test.py",
+        _RUNNER,
+    ],
+    args = ["loom.launch.cli_test"],
+    main = "pytest_style_runner.py",
+    deps = [
+        ":cli",
+        ":hardware",
+    ],
+)

@@ -113,6 +113,7 @@ nav:
       - Sharing Models:
           - Hugging Face: serving/sharing/hugging-face.md
       - Workflows:
+          - Launch a published profile: serving/workflows/launch-profiles.md
           - Fetch and serve a model: serving/workflows/fetch-and-serve.md
           - Serve source-defined models: serving/workflows/serve-models.md
           - Stream speech: serving/workflows/stream-speech.md

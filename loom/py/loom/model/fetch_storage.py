@@ -17,6 +17,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from pathlib import Path
 
+from .derived import is_loader_derived
 from .fetch_filesystem import publish_file
 from .fetch_hf import HuggingFace, hf_url_source
 from .fetch_progress import ByteProgress, Progress, ProgressEvent
@@ -262,6 +263,12 @@ class ContentCache:
         preserve_sources: bool,
         progress=None,
     ) -> AcquiredFile:
+        if is_loader_derived(transform):
+            # Planning excludes these outputs; acquisition never derives them.
+            raise FetchError(
+                f"{transform['kind']} outputs are derived at load by the native "
+                "runtime loader and are never acquired"
+            )
         progress = self.progress if progress is None else progress
         if self.cancelled.is_set():
             raise FetchError("model acquisition cancelled")

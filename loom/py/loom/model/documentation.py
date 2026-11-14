@@ -17,6 +17,7 @@ import sys
 from pathlib import Path
 from urllib.parse import quote, urljoin
 
+from loom.model.derived import is_loader_derived
 from loom.model.lock import FileIdentity, ModelLock
 from loom.model.manifest import ManifestError, ModelCard, ModelFile, Selection, _url
 from loom.model.memory import describe_memory
@@ -286,8 +287,17 @@ def render_markdown(
         uses, options = _uses(selection)
         for path, consumers in uses.items():
             file = selection.files[path]
-            source = _source(
-                file, document.get("origins", {}), lock, identities.get(path), card_url
+            source = (
+                "Derived at load by the native runtime loader from "
+                + _code(file.transform["source"])
+                if is_loader_derived(file.transform)
+                else _source(
+                    file,
+                    document.get("origins", {}),
+                    lock,
+                    identities.get(path),
+                    card_url,
+                )
             )
             lines.append(
                 "| "
@@ -328,6 +338,9 @@ def render_markdown(
             for path in uses:
                 identity = identities.get(path)
                 if identity is None:
+                    continue
+                if identity.size is None:
+                    lines.append(f"| {_code(path)} | derived at load | — |")
                     continue
                 lines.append(
                     f"| {_code(path)} | {identity.size} | {_code(identity.sha256)} |"

@@ -18,6 +18,7 @@ typedef struct loom_runtime_stage_set_entry_t {
   iree_host_size_t index;
   // Owned stage outcome, consumed at the final join in declaration order.
   iree_status_t status;
+  loom_runtime_jit_t* jit;
 } loom_runtime_stage_set_entry_t;
 
 struct loom_runtime_stage_set_job_t {
@@ -74,6 +75,24 @@ static void loom_runtime_stage_set_job_release(
   if (job->jit) {
     loom_runtime_jit_report_snapshot(job->jit, &stages->compilation);
   }
+  for (iree_host_size_t i = 0; i < stages->count; ++i) {
+    loom_runtime_jit_t* jit = job->entries[i].jit;
+    if (!jit) {
+      continue;
+    }
+    bool first = true;
+    for (iree_host_size_t j = 0; j < i; ++j) {
+      first &= job->entries[j].jit != jit;
+    }
+    if (first) {
+      loom_runtime_compilation_report_t report = {0};
+      loom_runtime_jit_report_snapshot(jit, &report);
+      loom_runtime_compilation_merge(&stages->compilation, &report);
+    }
+  }
+  for (iree_host_size_t i = 0; i < stages->count; ++i) {
+    loom_runtime_jit_release(job->entries[i].jit);
+  }
   loom_runtime_jit_release(job->jit);
   const loom_runtime_stage_set_completion_fn_t completion = job->completion;
   void* user_data = job->user_data;
@@ -112,17 +131,18 @@ static void loom_runtime_stage_set_submit(loom_runtime_stage_set_job_t* job) {
     const loom_runtime_preparation_stage_t* declaration =
         loom_runtime_preparation_stage(job->preparation, i);
     loom_runtime_stage_set_entry_t* entry = &job->entries[i];
+    loom_runtime_jit_t* jit = entry->jit ? entry->jit : job->jit;
     iree_atomic_ref_count_inc(&job->ref_count);
-    status = declaration->kind == LOOM_RUNTIME_PREPARATION_STAGE_DISPATCH
-                 ? loom_runtime_jit_compile_dispatch_async(
-                       job->jit, loom_runtime_jit_task_sink(job->jit),
-                       declaration->root, &declaration->config,
-                       loom_runtime_stage_set_compiled, entry)
-                 : loom_runtime_jit_compile_async(
-                       job->jit, loom_runtime_jit_task_sink(job->jit),
-                       declaration->root, &declaration->config,
-                       job->layout ? loom_runtime_stage_set_layout : NULL,
-                       loom_runtime_stage_set_compiled, entry);
+    status =
+        declaration->kind == LOOM_RUNTIME_PREPARATION_STAGE_DISPATCH
+            ? loom_runtime_jit_compile_dispatch_async(
+                  jit, loom_runtime_jit_task_sink(jit), declaration->root,
+                  &declaration->config, loom_runtime_stage_set_compiled, entry)
+            : loom_runtime_jit_compile_async(
+                  jit, loom_runtime_jit_task_sink(jit), declaration->root,
+                  &declaration->config,
+                  job->layout ? loom_runtime_stage_set_layout : NULL,
+                  loom_runtime_stage_set_compiled, entry);
     // The loop retains job even if callbacks finish inline. Rejection owns
     // this outcome and owes no callback; previously accepted stages still join.
     if (!iree_status_is_ok(status)) {
@@ -233,6 +253,32 @@ iree_status_t loom_runtime_stage_set_compile_catalog_async(
   job->jit = jit;
   job->layout = layout;
   loom_runtime_jit_retain(jit);
+  loom_runtime_stage_set_submit(job);
+  return iree_ok_status();
+}
+
+iree_status_t loom_runtime_stage_set_compile_placed_async(
+    loom_runtime_jit_t* const* catalogs,
+    const loom_runtime_preparation_t* preparation,
+    loom_runtime_stage_set_layout_fn_t layout,
+    loom_runtime_stage_set_completion_fn_t completion, void* user_data,
+    iree_allocator_t host_allocator) {
+  const iree_host_size_t count =
+      loom_runtime_preparation_stage_count(preparation);
+  for (iree_host_size_t i = 0; i < count; ++i) {
+    if (!catalogs || !catalogs[i]) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "every stage requires a device catalog");
+    }
+  }
+  loom_runtime_stage_set_job_t* job = NULL;
+  IREE_RETURN_IF_ERROR(loom_runtime_stage_set_job_create(
+      preparation, completion, user_data, host_allocator, &job));
+  job->layout = layout;
+  for (iree_host_size_t i = 0; i < count; ++i) {
+    job->entries[i].jit = catalogs[i];
+    loom_runtime_jit_retain(catalogs[i]);
+  }
   loom_runtime_stage_set_submit(job);
   return iree_ok_status();
 }

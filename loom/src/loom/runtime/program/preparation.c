@@ -617,6 +617,17 @@ static iree_status_t loom_runtime_preparation_append_source(
     IREE_RETURN_IF_ERROR(loom_runtime_preparation_copy_string(
         preparation, file.format, &copied->format));
   }
+  copied->transform.output = file.transform.output;
+  if (file.transform.output != LOOM_MODEL_TRANSFORM_NONE) {
+    IREE_RETURN_IF_ERROR(iree_file_path_join(
+        directory, file.transform.source,
+        iree_arena_allocator(&preparation->arena), &joined));
+    copied->transform.source = iree_make_cstring_view(joined);
+    IREE_RETURN_IF_ERROR(iree_file_path_join(
+        directory, file.transform.cache,
+        iree_arena_allocator(&preparation->arena), &joined));
+    copied->transform.cache = iree_make_cstring_view(joined);
+  }
   return iree_ok_status();
 }
 
@@ -726,7 +737,12 @@ bool loom_runtime_preparation_parameter_equal(
     }
     for (iree_host_size_t i = 0; i < a.count; ++i) {
       if (!iree_string_view_equal(a.values[i].path, b.values[i].path) ||
-          !iree_string_view_equal(a.values[i].format, b.values[i].format)) {
+          !iree_string_view_equal(a.values[i].format, b.values[i].format) ||
+          a.values[i].transform.output != b.values[i].transform.output ||
+          !iree_string_view_equal(a.values[i].transform.source,
+                                  b.values[i].transform.source) ||
+          !iree_string_view_equal(a.values[i].transform.cache,
+                                  b.values[i].transform.cache)) {
         return false;
       }
     }

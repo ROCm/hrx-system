@@ -10,6 +10,9 @@
 struct loom_runtime_pool_t {
   // Allocator owning this pool's metadata.
   iree_allocator_t host_allocator;
+  bool uncached;
+  iree_host_size_t live_family_count;
+  const iree_hal_queue_family_t** live_families;
   // Persistent buffers and their independently accounted elastic source.
   struct {
     // Owned allocator, native when fixed or TLSF when elastic.
@@ -185,15 +188,26 @@ iree_status_t loom_runtime_pool_allocate(
   IREE_RETURN_IF_ERROR(
       iree_allocator_malloc(host_allocator, sizeof(*pool), (void**)&pool));
   pool->host_allocator = host_allocator;
+  pool->uncached = options->uncached;
   const iree_hal_slab_pool_options_t storage_options = {
       .placement = placement,
       .trace_name = IREE_SVL("loom-serve-storage-backing"),
   };
-  iree_status_t status = iree_ok_status();
-  if (options->elastic) {
+  iree_status_t status = iree_allocator_malloc_array(
+      host_allocator, scope.family_count, sizeof(*pool->live_families),
+      (void**)&pool->live_families);
+  for (iree_host_size_t i = 0;
+       i < scope.family_count && iree_status_is_ok(status); ++i) {
+    if (iree_any_bit_set(scope.families[i].requirements,
+                         IREE_HAL_POOL_ACCESS_REQUIRE_UNCACHED |
+                             IREE_HAL_POOL_ACCESS_REQUIRE_COHERENT_WITH_HOST)) {
+      pool->live_families[pool->live_family_count++] = scope.families[i].family;
+    }
+  }
+  if (iree_status_is_ok(status) && options->elastic) {
     status = loom_runtime_pool_initialize_elastic(
         pool, group, scope, allocation_queue, options, placement);
-  } else {
+  } else if (iree_status_is_ok(status)) {
     status =
         iree_hal_slab_pool_create(group, scope, &storage_options,
                                   host_allocator, &pool->storage.allocator);
@@ -337,8 +351,23 @@ iree_status_t loom_runtime_pool_free(loom_runtime_pool_t* pool) {
   pool->virtual_pool = NULL;
   pool->storage.source = NULL;
   loom_runtime_memory_pool_free(pool->memory);
+  iree_allocator_free(pool->host_allocator, pool->live_families);
   iree_allocator_free(pool->host_allocator, pool);
   return iree_ok_status();
+}
+
+bool loom_runtime_pool_is_uncached(const loom_runtime_pool_t* pool) {
+  return pool->uncached;
+}
+
+bool loom_runtime_pool_has_live_access(const loom_runtime_pool_t* pool,
+                                       const iree_hal_queue_family_t* family) {
+  for (iree_host_size_t i = 0; i < pool->live_family_count; ++i) {
+    if (pool->live_families[i] == family) {
+      return true;
+    }
+  }
+  return false;
 }
 
 iree_hal_pool_t* loom_runtime_pool_storage(const loom_runtime_pool_t* pool) {

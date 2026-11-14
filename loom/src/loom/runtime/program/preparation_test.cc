@@ -206,6 +206,11 @@ TEST_F(PreparationTest, CheckpointIdentityIncludesEveryFileAndPolicy) {
       files[0], {files[1].path, IREE_SV("safetensors")}};
   peer_sources[0] = {2, reinterpreted};
   EXPECT_FALSE(loom_runtime_preparation_parameter_equal(&base, &peer));
+  loom_model_file_t transformed[] = {files[0], files[1]};
+  transformed[0].transform = {IREE_SV("source.gguf"), IREE_SV("cache"),
+                              LOOM_MODEL_TRANSFORM_I8_RESIDENT_HALVES};
+  peer_sources[0] = {2, transformed};
+  EXPECT_FALSE(loom_runtime_preparation_parameter_equal(&base, &peer));
   peer_sources[0] = sources[0];
   EXPECT_TRUE(loom_runtime_preparation_parameter_equal(&base, &peer));
   peer.source_count = 2;

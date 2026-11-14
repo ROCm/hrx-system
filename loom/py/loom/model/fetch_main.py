@@ -117,6 +117,14 @@ def _update_all_variants_lock(args, document, card, cache, snapshot):
         )
         for source in plan.sources.values():
             sys.stdout.write("  " + display_text(json.dumps(source.origin)) + "\n")
+        for output in plan.derived.values():
+            sys.stdout.write(
+                "  "
+                + display_text(
+                    f"{json.dumps(output.origin)} (derived at load from {output.source})"
+                )
+                + "\n"
+            )
     else:
         sys.stdout.write(display_text(str(plan.path)) + "\n")
     return 0
@@ -438,7 +446,14 @@ def main(argv: list[str] | None = None) -> int:
                 size = (
                     "unknown size" if file["size"] is None else f"{file['size']} bytes"
                 )
-                sys.stdout.write(f"  {display_text(file['path'])} ({size})\n")
+                if file.get("derived"):
+                    size = (
+                        "derived at load from " + file["derived"]["source"]
+                        if file["size"] is None
+                        else f"derived at load from {file['derived']['source']}; "
+                        f"expected {file['size']} bytes"
+                    )
+                sys.stdout.write(display_text(f"  {file['path']} ({size})") + "\n")
         else:
             sys.stdout.write(display_text(result["card"]) + "\n")
         return 0

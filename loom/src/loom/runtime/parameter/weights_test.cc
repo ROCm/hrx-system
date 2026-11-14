@@ -139,6 +139,40 @@ TEST_P(WeightsTest, ConfiguredPreparersAndSharedRootsPrepareEachTensorOnce) {
   Run(2, 93);
 }
 
+TEST_P(WeightsTest, IndependentlyPackedRootsRetainAndReuseTheirOwnLayout) {
+  IREE_ASSERT_OK(Compile(0, "packing_reference"));
+  IREE_ASSERT_OK(Compile(1, "repacked"));
+  IREE_ASSERT_OK(Compile(2, "repacked"));
+  IREE_ASSERT_OK(Load(1, 3));
+  EXPECT_NE(iree_hal_buffer_allocated_buffer(buffers_[0][0]),
+            iree_hal_buffer_allocated_buffer(buffers_[1][0]));
+  EXPECT_EQ(iree_hal_buffer_allocated_buffer(buffers_[1][0]),
+            iree_hal_buffer_allocated_buffer(buffers_[2][0]));
+  EXPECT_EQ(iree_hal_buffer_byte_offset(buffers_[1][0]),
+            iree_hal_buffer_byte_offset(buffers_[2][0]));
+  Run(0, 70);
+  Run(1, 70);
+  Run(2, 70);
+}
+
+TEST_P(WeightsTest, IndependentlyPackedRootsTranslateOnlyWithinAllocation) {
+  IREE_ASSERT_OK(Compile(0, "packing_reference"));
+  IREE_ASSERT_OK(Compile(1, "packing_subset"));
+  IREE_ASSERT_OK(Compile(2, "packing_subset"));
+  const loom_runtime_weight_root_t roots[] = {Root(0, 0), Root(1, 0, 0),
+                                              Root(2, 0)};
+  IREE_ASSERT_OK(LoadRoots(1, IREE_ARRAYSIZE(roots), roots, {path_.path()}));
+  EXPECT_EQ(iree_hal_buffer_allocated_buffer(buffers_[0][0]),
+            iree_hal_buffer_allocated_buffer(buffers_[1][0]));
+  EXPECT_GT(iree_hal_buffer_byte_offset(buffers_[1][0]),
+            iree_hal_buffer_byte_offset(buffers_[0][0]));
+  EXPECT_NE(iree_hal_buffer_allocated_buffer(buffers_[0][0]),
+            iree_hal_buffer_allocated_buffer(buffers_[2][0]));
+  Run(0, 70);
+  Run(1, 90);
+  Run(2, 90);
+}
+
 TEST_P(WeightsTest, SplitFilesPopulateOneSharedCheckpointDomain) {
   WriteCheckpoint(path_.path(), 0, 0, 1);
   WriteCheckpoint(adapter_path_.path(), 0, 1, 3);

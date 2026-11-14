@@ -69,6 +69,7 @@ def loom_python_wheel(name, version, catalog = "", testonly = False):
             "loom-compile-report = loom.tools.compile_report:main",
             "loom-export-cxx = loom.tools.export_cxx:main",
             "loom-fetch = loom.model.fetch_main:main",
+            "loom-launch = loom.launch.cli:main",
             "loom-lint = loom.tools.source_lint:main",
         ]},
         extra_distinfo_files = {

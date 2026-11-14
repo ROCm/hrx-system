@@ -140,4 +140,41 @@ TEST_F(ParameterSourcesTest, FailedExtensionDoesNotChangeThePrefix) {
   ExpectEntry(prefix_, 0, "same", 16);
 }
 
+TEST_F(ParameterSourcesTest,
+       TransformRejectsUnsupportedGeometryBeforeCachePublication) {
+  std::string bytes;
+  auto number = [&](uint64_t n, unsigned width) {
+    for (unsigned i = 0; i < width; ++i) {
+      bytes.push_back(static_cast<char>(n >> (8 * i)));
+    }
+  };
+  const std::string name = "blk.0.ffn_gate.weight";
+  number(0x46554747, 4);
+  number(3, 4);
+  number(1, 8);
+  number(0, 8);
+  number(name.size(), 8);
+  bytes += name;
+  number(2, 4);
+  number(4096, 8);
+  number(17408, 8);
+  number(12, 4);
+  number(0, 8);
+  std::ofstream file(first_.path(), std::ios::binary);
+  file.write(bytes.data(), bytes.size());
+  file.close();
+  loom_model_file_t path = {iree_make_cstring_view(missing_.path().c_str()),
+                            IREE_SV("raw")};
+  path.transform = {iree_make_cstring_view(first_.path().c_str()),
+                    IREE_SV("must-not-be-created"),
+                    LOOM_MODEL_TRANSFORM_I8_RESIDENT_HALVES};
+  loom_model_file_list_t files = {1, &path};
+  iree_status_t status = loom_runtime_parameter_sources_create(
+      nullptr, &namespace_, 1, &files, allocator_, &catalog_);
+  std::string diagnostic = iree::Status(std::move(status)).ToString();
+  EXPECT_NE(diagnostic.find("unsupported i8-panel geometry"), std::string::npos)
+      << diagnostic;
+  EXPECT_EQ(catalog_, nullptr);
+}
+
 }  // namespace

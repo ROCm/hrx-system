@@ -120,6 +120,7 @@ py_package(
         "//loom/py/loom/format/bytecode",
         "//loom/py/loom/format/text",
         "//loom/py/loom/importers:package",
+        "//loom/py/loom/launch:cli",
         "//loom/py/loom/model:documentation",
         "//loom/py/loom/model:fetch_cli",
         "//loom/py/loom/tools:compile_report",
