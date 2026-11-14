@@ -77,3 +77,19 @@ func.def @positions_require_byte_offsets(%lhs: buffer, %rhs: buffer, %position: 
   %equal = buffer.compare.address eq, %lhs[%position], %rhs[%origin]
   func.return %equal : i1
 }
+
+// ====
+
+func.def @restrict_requires_a_restricted_root(%peer: buffer) -> (buffer) {
+  // ERROR@+1: STRUCTURE/014 "restricted operand count" "0" "at least one restricted root"
+  %peer_scoped = buffer.restrict.begin peers %peer : buffer
+  func.return %peer_scoped : buffer
+}
+
+// ====
+
+func.def @restrict_preserves_value_arity(%source: buffer, %peer: buffer) -> (buffer) {
+  // ERROR@+1: STRUCTURE/013 "restricted and peer operands" "2" "results" "1"
+  %source_scoped = buffer.restrict.begin %source peers %peer : buffer
+  func.return %source_scoped : buffer
+}

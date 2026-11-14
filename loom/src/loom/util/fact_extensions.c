@@ -29,6 +29,9 @@ typedef enum loom_value_fact_extension_kind_e {
   LOOM_VALUE_FACT_EXTENSION_TYPE_PAYLOAD = 8,
 } loom_value_fact_extension_kind_t;
 
+static_assert(LOOM_VALUE_FACT_EXTENSION_TYPE_PAYLOAD < 16,
+              "fact extension kinds must fit in four bits");
+
 typedef struct loom_value_fact_raw_payload_t {
   // Type-domain-owned payload tag. This is interpreted only through the
   // value's type-owned fact domain, never as a process-global schema ID.
@@ -42,14 +45,15 @@ typedef struct loom_value_fact_raw_payload_t {
 } loom_value_fact_raw_payload_t;
 
 struct loom_value_fact_extension_entry_t {
-  // Content hash for the extension kind and payload.
-  uint32_t content_hash;
+  // Cached low hash bits for the extension kind and payload. Extension bucket
+  // counts are powers of two, so the omitted high bits cannot affect bucket
+  // selection until a table exceeds 2^28 buckets. Full payload equality still
+  // resolves every collision.
+  uint32_t content_hash : 28;
+  // Extension payload kind.
+  uint32_t kind : 4;
   // Collision-chain next extension ID, or zero for the end of the chain.
   loom_value_fact_extension_id_t next_id;
-  // Extension payload kind.
-  loom_value_fact_extension_kind_t kind;
-  // Reserved for alignment and future flags. Always zero.
-  uint32_t reserved;
 
   // Payload selected by kind.
   union {
@@ -142,6 +146,9 @@ static uint32_t loom_value_fact_hash_buffer_reference(
                   ((uint32_t)reference.root_symbol.symbol_id << 16));
   }
   hash = loom_structural_hash_mix_u32(hash, reference.alias_scope_id);
+  hash =
+      loom_structural_hash_mix_u32(hash, reference.restrict_access.domain_id);
+  hash = loom_structural_hash_mix_u32(hash, reference.restrict_access.scope_id);
   hash = loom_structural_hash_mix_u32(hash, reference.nullability);
   return loom_value_fact_hash_reference_origin(reference.origin, hash);
 }
@@ -158,6 +165,9 @@ static uint32_t loom_value_fact_hash_view_reference(
   hash = loom_structural_hash_mix_u32(hash, reference.root_value_id);
   hash = loom_structural_hash_mix_u32(hash, reference.buffer_value_id);
   hash = loom_structural_hash_mix_u32(hash, reference.alias_scope_id);
+  hash =
+      loom_structural_hash_mix_u32(hash, reference.restrict_access.domain_id);
+  hash = loom_structural_hash_mix_u32(hash, reference.restrict_access.scope_id);
   hash = loom_structural_hash_mix_u32(hash, reference.nullability);
   return loom_value_fact_hash_reference_origin(reference.origin, hash);
 }
@@ -183,6 +193,8 @@ static bool loom_value_fact_buffer_reference_equal(
           (lhs.root_symbol.module_id == rhs.root_symbol.module_id &&
            lhs.root_symbol.symbol_id == rhs.root_symbol.symbol_id)) &&
          lhs.alias_scope_id == rhs.alias_scope_id &&
+         lhs.restrict_access.domain_id == rhs.restrict_access.domain_id &&
+         lhs.restrict_access.scope_id == rhs.restrict_access.scope_id &&
          lhs.nullability == rhs.nullability &&
          loom_value_fact_reference_origin_equal(lhs.origin, rhs.origin);
 }
@@ -200,6 +212,8 @@ static bool loom_value_fact_view_reference_equal(
          lhs.root_value_id == rhs.root_value_id &&
          lhs.buffer_value_id == rhs.buffer_value_id &&
          lhs.alias_scope_id == rhs.alias_scope_id &&
+         lhs.restrict_access.domain_id == rhs.restrict_access.domain_id &&
+         lhs.restrict_access.scope_id == rhs.restrict_access.scope_id &&
          lhs.nullability == rhs.nullability &&
          loom_value_fact_reference_origin_equal(lhs.origin, rhs.origin);
 }
@@ -694,6 +708,8 @@ static bool loom_value_fact_table_buffer_reference_equal(
           (lhs.root_symbol.module_id == rhs.root_symbol.module_id &&
            lhs.root_symbol.symbol_id == rhs.root_symbol.symbol_id)) &&
          lhs.alias_scope_id == rhs.alias_scope_id &&
+         lhs.restrict_access.domain_id == rhs.restrict_access.domain_id &&
+         lhs.restrict_access.scope_id == rhs.restrict_access.scope_id &&
          lhs.nullability == rhs.nullability &&
          loom_value_fact_reference_origin_equal(lhs.origin, rhs.origin);
 }
@@ -715,6 +731,8 @@ static bool loom_value_fact_table_view_reference_equal(
          lhs.root_value_id == rhs.root_value_id &&
          lhs.buffer_value_id == rhs.buffer_value_id &&
          lhs.alias_scope_id == rhs.alias_scope_id &&
+         lhs.restrict_access.domain_id == rhs.restrict_access.domain_id &&
+         lhs.restrict_access.scope_id == rhs.restrict_access.scope_id &&
          lhs.nullability == rhs.nullability &&
          loom_value_fact_reference_origin_equal(lhs.origin, rhs.origin);
 }

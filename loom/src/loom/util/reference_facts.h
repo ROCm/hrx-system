@@ -76,6 +76,33 @@ typedef loom_value_id_t loom_value_fact_alias_scope_id_t;
 #define LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE \
   ((loom_value_fact_alias_scope_id_t)LOOM_VALUE_ID_INVALID)
 
+// One invocation- or lexical-scope source restrict association. Zero is the
+// conservative absence value for both identities. IDs are one-based SSA result
+// identities so zero-initialized facts carry no access independence promise.
+typedef struct loom_value_fact_restrict_access_t {
+  // Shared access-domain identity, or zero outside a restrict scope.
+  uint32_t domain_id;
+  // Restricted path identity, or zero for an enrolled unqualified peer.
+  uint32_t scope_id;
+} loom_value_fact_restrict_access_t;
+
+static_assert(sizeof(loom_value_fact_restrict_access_t) == 8,
+              "restrict access facts must remain eight bytes");
+
+// Encodes a valid SSA result as a nonzero restrict identity. INVALID maps to
+// the conservative absence value.
+static inline uint32_t loom_value_fact_restrict_id_from_value(
+    loom_value_id_t value_id) {
+  return value_id == LOOM_VALUE_ID_INVALID ? 0 : value_id + 1u;
+}
+
+// Returns whether distinct source access paths in one restrict domain cannot
+// overlap in a defined execution involving a write. This does not inspect
+// access kinds and never proves physical storage disjointness.
+bool loom_value_fact_restrict_accesses_are_independent(
+    loom_value_fact_restrict_access_t lhs,
+    loom_value_fact_restrict_access_t rhs);
+
 // Buffer value is an opaque storage root.
 typedef struct loom_value_fact_buffer_reference_t {
   // Conservative byte extent facts for the root storage allocation.
@@ -105,6 +132,9 @@ typedef struct loom_value_fact_buffer_reference_t {
   // Comparable alias scope for disjointness proofs, or NONE.
   loom_value_fact_alias_scope_id_t alias_scope_id;
 
+  // Active source restrict domain and access-path association.
+  loom_value_fact_restrict_access_t restrict_access;
+
   // Known nullability for the storage root.
   loom_value_fact_reference_nullability_t nullability;
 
@@ -112,7 +142,7 @@ typedef struct loom_value_fact_buffer_reference_t {
   loom_value_fact_reference_origin_t origin;
 } loom_value_fact_buffer_reference_t;
 
-static_assert(sizeof(loom_value_fact_buffer_reference_t) == 72,
+static_assert(sizeof(loom_value_fact_buffer_reference_t) == 80,
               "buffer reference facts must remain compact");
 
 // Resolves the concrete storage root for |reference_value_id|. Buffer fact
@@ -157,6 +187,9 @@ typedef struct loom_value_fact_view_reference_t {
   // Comparable alias scope for disjointness proofs, or NONE.
   loom_value_fact_alias_scope_id_t alias_scope_id;
 
+  // Active source restrict domain and access-path association.
+  loom_value_fact_restrict_access_t restrict_access;
+
   // Static addressed element byte count, or -1 for sub-byte/unknown elements.
   int16_t static_element_byte_count;
 
@@ -167,7 +200,7 @@ typedef struct loom_value_fact_view_reference_t {
   uint8_t nullability;
 } loom_value_fact_view_reference_t;
 
-static_assert(sizeof(loom_value_fact_view_reference_t) == 104,
+static_assert(sizeof(loom_value_fact_view_reference_t) == 112,
               "view reference facts must remain compact");
 
 // Resolves the storage root of a view, including joins of distinct roots.

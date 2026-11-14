@@ -38,3 +38,11 @@ bool loom_value_fact_reference_origins_are_disjoint(
          lhs.function_symbol_id == rhs.function_symbol_id &&
          lhs.region_index == rhs.region_index;
 }
+
+bool loom_value_fact_restrict_accesses_are_independent(
+    loom_value_fact_restrict_access_t lhs,
+    loom_value_fact_restrict_access_t rhs) {
+  return lhs.domain_id != 0 && lhs.domain_id == rhs.domain_id &&
+         (lhs.scope_id != 0 || rhs.scope_id != 0) &&
+         lhs.scope_id != rhs.scope_id;
+}

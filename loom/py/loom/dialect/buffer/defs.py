@@ -574,6 +574,88 @@ buffer_assume_noalias = Op(
 )
 
 # ============================================================================
+# buffer.restrict.begin/end — scoped source access independence
+# ============================================================================
+
+buffer_restrict_begin = Op(
+    name="buffer.restrict.begin",
+    group=buffer_ops,
+    doc=(
+        "Begin a source-language restrict access scope. Restricted roots name "
+        "independent access paths; peers name the other incoming storage paths "
+        "covered by the same scope. The results preserve physical storage "
+        "identity and differ only in access-provenance facts. A restrict scope "
+        "may prove that overlapping accesses do not occur in a defined program "
+        "only when at least one access writes. It does not prove that roots are "
+        "physically disjoint, and shared read-only storage remains valid. "
+        "buffer.restrict.end removes the scope from values that leave it."
+    ),
+    operands=[
+        Operand(
+            "restricted",
+            BUFFER,
+            doc="Roots accessed through distinct restricted paths.",
+            variadic=True,
+        ),
+        Operand(
+            "peers",
+            BUFFER,
+            doc="Other incoming roots covered by the same access scope.",
+            variadic=True,
+        ),
+    ],
+    results=[
+        Result(
+            "results",
+            BUFFER,
+            doc="Same roots carrying the active access-scope association.",
+            variadic=True,
+        )
+    ],
+    traits=[PURE, FACT_IDENTITY],
+    verify="loom_buffer_restrict_begin_verify",
+    facts="loom_buffer_restrict_begin_facts",
+    format=[
+        Refs("restricted"),
+        OptionalGroup([kw("peers"), Refs("peers")], anchor="peers"),
+        COLON,
+        TypesOf("results"),
+    ],
+    examples=[
+        "%source_r = buffer.restrict.begin %source : buffer",
+        ("%source_r, %output_r, %scratch_peer = buffer.restrict.begin %source, %output peers %scratch : buffer, buffer, buffer"),
+    ],
+)
+
+buffer_restrict_end = Op(
+    name="buffer.restrict.end",
+    group=buffer_ops,
+    doc=(
+        "End source-language restrict access scopes carried by buffer roots. "
+        "The results preserve every physical storage fact while removing the "
+        "scoped access association, preventing it from escaping a lexical or "
+        "invocation boundary."
+    ),
+    operands=[Operand("buffers", BUFFER, doc="Buffer roots leaving their access scopes.", variadic=True)],
+    results=[
+        Result(
+            "results",
+            BUFFER,
+            doc="Same roots without restrict access associations.",
+            variadic=True,
+        )
+    ],
+    constraints=[VariadicValuesMatch("buffers", "results")],
+    traits=[PURE, FACT_IDENTITY],
+    facts="loom_buffer_restrict_end_facts",
+    format=[Refs("buffers"), COLON, TypesOf("results")],
+    examples=[
+        "%returned = buffer.restrict.end %scoped : buffer",
+        "%lhs_out, %rhs_out = buffer.restrict.end %lhs, %rhs : buffer, buffer",
+    ],
+)
+
+# ============================================================================
 # buffer.assume.same_root — refine a buffer root to share another root identity
 # ============================================================================
 
@@ -932,4 +1014,6 @@ ALL_BUFFER_OPS: tuple[Op, ...] = (
     buffer_compare_null,
     buffer_compare_address,
     buffer_distance,
+    buffer_restrict_begin,
+    buffer_restrict_end,
 )

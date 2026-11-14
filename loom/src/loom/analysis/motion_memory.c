@@ -302,6 +302,8 @@ static int loom_motion_memory_compare_roots(const loom_view_region_t* lhs,
   }
   LOOM_COMPARE_ROOT_FIELD(root_value_id)
   LOOM_COMPARE_ROOT_FIELD(alias_scope_id)
+  LOOM_COMPARE_ROOT_FIELD(restrict_access.domain_id)
+  LOOM_COMPARE_ROOT_FIELD(restrict_access.scope_id)
   LOOM_COMPARE_ROOT_FIELD(memory_space)
   LOOM_COMPARE_ROOT_FIELD(origin.function_symbol_id)
   LOOM_COMPARE_ROOT_FIELD(origin.region_index)
@@ -533,7 +535,9 @@ static iree_status_t loom_motion_memory_check_group(
   }
   const loom_view_region_t* representative =
       &memory->movement->view_regions.regions[group->view_region];
-  if (loom_view_region_roots_are_disjoint(read, representative)) {
+  if (loom_view_region_roots_are_nonconflicting(read, LOOM_VIEW_ACCESS_READ,
+                                                representative,
+                                                LOOM_VIEW_ACCESS_WRITE)) {
     return iree_ok_status();
   }
   if (read->root_value_id != LOOM_VALUE_ID_INVALID &&
@@ -569,10 +573,11 @@ static iree_status_t loom_motion_memory_check_group(
     written.end_byte_offset = footprint->end;
     loom_symbolic_expr_constant(footprint->static_byte_length,
                                 &written.byte_length);
-    bool disjoint = false;
-    IREE_RETURN_IF_ERROR(loom_view_regions_prove_no_overlap(
-        &memory->movement->view_regions, read, &written, &disjoint));
-    if (!disjoint) {
+    bool nonconflicting = false;
+    IREE_RETURN_IF_ERROR(loom_view_regions_prove_no_conflict(
+        &memory->movement->view_regions, read, LOOM_VIEW_ACCESS_READ, &written,
+        LOOM_VIEW_ACCESS_WRITE, &nonconflicting));
+    if (!nonconflicting) {
       result->rejection_bits =
           LOOM_MOTION_LOOP_HOIST_REJECTION_OVERLAPPING_WRITE;
       result->blocking_op = write->operation;

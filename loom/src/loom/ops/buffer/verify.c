@@ -261,6 +261,29 @@ iree_status_t loom_buffer_assume_alignment_verify(
       IREE_SV("positive power-of-two byte alignment"));
 }
 
+iree_status_t loom_buffer_restrict_begin_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter) {
+  const loom_value_slice_t restricted =
+      loom_buffer_restrict_begin_restricted(op);
+  if (restricted.count == 0) {
+    return loom_buffer_emit_attribute_value_constraint(
+        emitter, op, IREE_SV("restricted operand count"), 0,
+        IREE_SV("at least one restricted root"));
+  }
+  if (op->operand_count == op->result_count) {
+    return iree_ok_status();
+  }
+  const loom_diagnostic_param_t params[] = {
+      loom_param_string(IREE_SV("restricted and peer operands")),
+      loom_param_u32(op->operand_count),
+      loom_param_string(IREE_SV("results")),
+      loom_param_u32(op->result_count),
+  };
+  return loom_buffer_emit(emitter, op, LOOM_ERR_STRUCTURE_013, params,
+                          IREE_ARRAYSIZE(params));
+}
+
 iree_status_t loom_buffer_view_verify(const loom_module_t* module,
                                       const loom_op_t* op,
                                       iree_diagnostic_emitter_t emitter) {

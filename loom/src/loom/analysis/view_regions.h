@@ -125,6 +125,9 @@ typedef struct loom_view_region_t {
   // root identities are only addressing provenance.
   loom_value_fact_alias_scope_id_t alias_scope_id;
 
+  // Active source restrict domain and access-path association.
+  loom_value_fact_restrict_access_t restrict_access;
+
   // Known nullability of the underlying storage root.
   loom_value_fact_reference_nullability_t nullability;
 
@@ -326,6 +329,15 @@ loom_view_region_comparable_alias_scope(const loom_view_region_t* region) {
 bool loom_view_region_roots_are_disjoint(const loom_view_region_t* left,
                                          const loom_view_region_t* right);
 
+// Proves that two ordinary memory accesses cannot conflict using only retained
+// root facts. Read-only pairs never conflict. A pair involving a write is
+// nonconflicting when the roots are physically disjoint or when their source
+// restrict associations admit no defined overlapping execution. This query
+// does not model volatile, atomic, or explicit ordering semantics.
+bool loom_view_region_roots_are_nonconflicting(
+    const loom_view_region_t* left, loom_view_access_flags_t left_access,
+    const loom_view_region_t* right, loom_view_access_flags_t right_access);
+
 // Attempts to prove that two view regions cannot overlap. Same-root regions
 // use symbolic byte intervals. Distinct roots are disjoint when their concrete
 // memory spaces cannot alias or both carry comparable and different alias
@@ -336,6 +348,16 @@ bool loom_view_region_roots_are_disjoint(const loom_view_region_t* left,
 iree_status_t loom_view_regions_prove_no_overlap(
     loom_view_region_table_t* table, const loom_view_region_t* left_region,
     const loom_view_region_t* right_region, bool* out_no_overlap);
+
+// Attempts to prove that two ordinary memory accesses cannot conflict. This
+// extends physical non-overlap with source restrict access independence and
+// requires exact access kinds from the consumer. It does not discharge
+// volatile, atomic, or explicit ordering constraints.
+iree_status_t loom_view_regions_prove_no_conflict(
+    loom_view_region_table_t* table, const loom_view_region_t* left_region,
+    loom_view_access_flags_t left_access,
+    const loom_view_region_t* right_region,
+    loom_view_access_flags_t right_access, bool* out_no_conflict);
 
 #ifdef __cplusplus
 }  // extern "C"
