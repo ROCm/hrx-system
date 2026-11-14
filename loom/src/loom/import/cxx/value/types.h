@@ -509,8 +509,9 @@ class Types {
                     std::span<const loom_value_id_t> identities,
                     BoundTypeStorage& storage,
                     std::vector<loom_type_t>& output);
-  // Removes top-level cv-qualification and typedef alignment sugar while
-  // retaining any reference wrapper.
+  // Removes top-level source qualifiers and typedef alignment sugar while
+  // retaining any reference wrapper. Restrict remains an access-path contract
+  // consumed before structural type admission, not part of a High value type.
   const cxx::Type* unqualified(const cxx::Type* type);
   // Returns the unqualified object type denoted by a value or reference.
   const cxx::Type* unqualified_value(const cxx::Type* type);

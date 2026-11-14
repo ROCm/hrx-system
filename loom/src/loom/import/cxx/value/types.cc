@@ -306,12 +306,14 @@ loom_value_id_t TensorPartition::tensor_value(
 }
 
 const cxx::Type* Types::unqualified(const cxx::Type* type) {
-  return cxx::unaligned_type(unit_.typeTraits().remove_cv(type));
+  auto traits = unit_.typeTraits();
+  return cxx::unaligned_type(traits.remove_restrict(traits.remove_cv(type)));
 }
 
 const cxx::Type* Types::unqualified_value(const cxx::Type* type) {
   auto traits = unit_.typeTraits();
-  return cxx::unaligned_type(traits.remove_cv(traits.remove_reference(type)));
+  type = traits.remove_reference(type);
+  return cxx::unaligned_type(traits.remove_restrict(traits.remove_cv(type)));
 }
 
 const cxx::VectorType* Types::native_vector(const cxx::Type* type) {
@@ -1277,6 +1279,11 @@ const RecordPartition* Types::record(const cxx::Type* input, cxx::AST* owner) {
   auto append = [&](cxx::Symbol* symbol) {
     auto* type = source_object_type(symbol);
     auto* field = cxx::symbol_cast<cxx::FieldSymbol>(symbol);
+    if (field && traits.is_restrict(type)) {
+      diagnostics_.reject(
+          unit_, owner,
+          "restrict-qualified fields require an object-member access scope");
+    }
     const bool snapshot = field && traits.is_lvalue_reference(type) &&
                           reference_is_snapshot(field);
     const Partition* member_partition = nullptr;
