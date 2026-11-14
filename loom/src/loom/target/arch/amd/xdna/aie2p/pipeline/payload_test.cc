@@ -316,10 +316,16 @@ class MulticastPayloadTest
         ASSERT_TRUE(valid);
       }
     }
-    bool valid = false;
-    IREE_ASSERT_OK(
-        loom_aie2p_native_switches_build(&context_, nullptr, &valid));
-    ASSERT_TRUE(valid);
+    const loom_aie2p_native_switch_input_t input = {
+        .routing = &context_.routing,
+        .routes = context_.routes,
+        .control_sources = context_.control_sources,
+        .control_destination_sources = context_.control_destination_sources,
+    };
+    iree_string_view_t requirement = iree_string_view_empty();
+    IREE_ASSERT_OK(loom_aie2p_native_switches_build(
+        &input, &arena_, &context_.switches, &requirement));
+    ASSERT_TRUE(iree_string_view_is_empty(requirement));
     EXPECT_TRUE(diagnostics_.emissions.empty());
     switches_.resize(tiles_.size());
     for (auto* sw = context_.switches; sw; sw = sw->next) {

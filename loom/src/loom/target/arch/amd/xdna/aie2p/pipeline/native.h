@@ -859,9 +859,16 @@ typedef struct loom_aie2p_native_context_t {
   struct loom_aie2p_native_control_connection_t* control_connections;
   // Number of requested deliveries in the independent connection inventory.
   iree_host_size_t control_connection_count;
+  // Completed payload/control intent, independent of lowering and routing.
+  loom_aie2p_native_connections_t connections;
   // Typed ordinary helper emitter.
   loom_aie2p_worker_builder_t code;
 } loom_aie2p_native_context_t;
+
+// Projects formed payload classes and control requests into one immutable
+// physical delivery inventory. Called once after all routes are admitted.
+iree_status_t loom_aie2p_native_connections_build(
+    loom_aie2p_native_context_t* context);
 
 iree_status_t loom_aie2p_native_reject(
     const loom_aie2p_native_context_t* context, const loom_op_t* op,

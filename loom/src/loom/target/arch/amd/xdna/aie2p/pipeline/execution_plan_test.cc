@@ -13,6 +13,7 @@
 #include "loom/pass/types.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/connectivity.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/native.h"
+#include "loom/target/arch/amd/xdna/aie2p/pipeline/payload.h"
 
 namespace {
 
@@ -49,7 +50,7 @@ TEST_F(ExecutionPlanTest, SourceRetirementPreservesRoutesAndPhysicalOwnership) {
   loom_aie2p_native_context_t context = {
       .pass = &pass, .family = family, .tiles = tiles.data()};
   IREE_ASSERT_OK(loom_aie2p_array_route_builder_initialize(
-      family, 16, &source_arena_, &context.routing));
+      family, 64, &source_arena_, &context.routing));
   std::vector<loom_aie2p_native_control_source_t> sources(tile_count * 2);
   std::vector<uint32_t> destinations(tile_count * 2, UINT32_MAX);
   loom_aie2p_native_control_connection_t connection = {
@@ -63,14 +64,48 @@ TEST_F(ExecutionPlanTest, SourceRetirementPreservesRoutesAndPhysicalOwnership) {
       &context.routing, 0, &sources[4].tree, connection.source.coordinate,
       connection.source.port, 0, connection.destination.coordinate,
       connection.destination.port, 0, true));
+  const size_t control_route_count = context.routing.route_count;
+  loom_aie2p_native_payload_endpoint_t receivers[] = {
+      {&tiles[2], 1}, {&tiles[family->row_count + 2], 0}};
+  loom_aie2p_native_payload_source_t payload_source = {
+      .endpoint = {&tiles[1], 0}, .class_count = 1, .framed = true};
+  loom_aie2p_native_payload_class_t payload = {
+      .source = &payload_source,
+      .destinations = receivers,
+      .destination_count = IREE_ARRAYSIZE(receivers),
+      .packet = 9,
+      .routed = true};
+  payload_source.classes = &payload;
+  for (const auto& receiver : receivers) {
+    ASSERT_TRUE(loom_aie2p_array_route_workers(
+        &context.routing, 1, &payload_source.tree,
+        payload_source.endpoint.tile->coordinate, 0, receiver.tile->coordinate,
+        receiver.engine, true));
+  }
+  context.payload_sources = &payload_source;
+  context.control_connections = &connection;
+  context.control_connection_count = 1;
   std::vector<loom_aie2p_native_route_t> routes(context.routing.route_count);
   context.routes = routes.data();
   context.control_sources = sources.data();
   context.control_destination_sources = destinations.data();
   loom_aie2p_native_route_label(&context, 0, connection.packet, 4);
-  bool valid = false;
-  IREE_ASSERT_OK(loom_aie2p_native_switches_build(&context, nullptr, &valid));
-  ASSERT_TRUE(valid);
+  loom_aie2p_native_route_label(&context, control_route_count, payload.packet,
+                                UINT32_MAX);
+  const loom_aie2p_native_switch_input_t input = {
+      .routing = &context.routing,
+      .routes = context.routes,
+      .control_sources = context.control_sources,
+      .control_destination_sources = context.control_destination_sources,
+  };
+  iree_string_view_t requirement = iree_string_view_empty();
+  IREE_ASSERT_OK(loom_aie2p_native_switches_build(
+      &input, &source_arena_, &context.switches, &requirement));
+  ASSERT_TRUE(iree_string_view_is_empty(requirement));
+  IREE_ASSERT_OK(loom_aie2p_native_connections_build(&context));
+  IREE_ASSERT_OK(loom_aie2p_native_connections_verify(
+      &context.routing, context.switches, &context.connections,
+      &source_arena_));
 
   constexpr auto none = IREE_HOST_SIZE_MAX;
   const loom_pipeline_lifetime_t nodes[] = {
@@ -97,8 +132,7 @@ TEST_F(ExecutionPlanTest, SourceRetirementPreservesRoutesAndPhysicalOwnership) {
       .control_sources = sources.data(),
       .control_destination_sources = destinations.data(),
       .switches = context.switches,
-      .connections = &connection,
-      .connection_count = 1,
+      .connections = context.connections,
   };
   auto* original = reinterpret_cast<loom_aie2p_execution_plan_t*>(scope);
   IREE_ASSERT_OK(loom_aie2p_execution_plan_copy_resources(
@@ -112,6 +146,9 @@ TEST_F(ExecutionPlanTest, SourceRetirementPreservesRoutesAndPhysicalOwnership) {
   EXPECT_NE(retained->routing.routes, original->routing.routes);
   EXPECT_NE(retained->switches->banks[0].words,
             original->switches->banks[0].words);
+  EXPECT_NE(retained->connections.groups, original->connections.groups);
+  EXPECT_NE(retained->connections.destinations,
+            original->connections.destinations);
   iree_arena_reset(&source_arena_);
   tiles.clear();
   routes.clear();
@@ -129,19 +166,21 @@ TEST_F(ExecutionPlanTest, SourceRetirementPreservesRoutesAndPhysicalOwnership) {
   EXPECT_EQ(retained->control_destination_sources[3], 4u);
   for (size_t i = 0; i < retained->routing.route_count; ++i) {
     EXPECT_EQ(retained->routes[i].edge, &retained->routing.routes[i]);
-    EXPECT_EQ(retained->routes[i].control_source, 4u);
+    EXPECT_EQ(retained->routes[i].control_source,
+              i < control_route_count ? 4u : UINT32_MAX);
   }
-  loom_aie2p_native_connectivity_t* connectivity = nullptr;
-  IREE_ASSERT_OK(loom_aie2p_native_connectivity_allocate(
-      family, retained->switches, retained->routing.routes,
-      retained->routing.route_count, &retained_arena_, &connectivity));
-  ASSERT_EQ(retained->connection_count, 1u);
-  const auto& intended = retained->connections[0];
-  EXPECT_EQ(loom_aie2p_native_connectivity_check(connectivity, intended.source,
-                                                 intended.packet,
-                                                 &intended.destination, 1, true)
-                .failure,
-            LOOM_AIE2P_NATIVE_CONNECTIVITY_NONE);
+  ASSERT_EQ(retained->connections.group_count, 2u);
+  ASSERT_EQ(retained->connections.destination_count, 3u);
+  const auto& payload_intent = retained->connections.groups[0];
+  EXPECT_FALSE(payload_intent.retain_header);
+  EXPECT_EQ(payload_intent.packet, 9u);
+  EXPECT_EQ(payload_intent.destination_count, 2u);
+  const auto& intended = retained->connections.groups[1];
+  EXPECT_TRUE(intended.retain_header);
+  EXPECT_EQ(intended.destination_count, 1u);
+  IREE_ASSERT_OK(loom_aie2p_native_connections_verify(
+      &retained->routing, retained->switches, &retained->connections,
+      &retained_arena_));
 
   loom_aie2p_array_route_builder_t extended;
   IREE_ASSERT_OK(loom_aie2p_array_route_builder_clone(
@@ -152,6 +191,49 @@ TEST_F(ExecutionPlanTest, SourceRetirementPreservesRoutesAndPhysicalOwnership) {
       &extended, 1, &sender, intended.source.coordinate, intended.source.port,
       0, {0, 0}, LOOM_XDNA_STREAM_PORT_TILE_CONTROL, 0, true));
   EXPECT_GT(extended.route_count, retained->routing.route_count);
+
+  // A later control destination changes the private circuit into a multicast
+  // route. Rebuild and audit the complete switch selection using only retained
+  // facts, including the untouched payload destinations.
+  std::vector<loom_aie2p_native_route_t> extended_routes(extended.route_count);
+  for (size_t i = 0; i < extended.route_count; ++i) {
+    extended_routes[i] =
+        i < retained->routing.route_count
+            ? retained->routes[i]
+            : loom_aie2p_native_route_t{nullptr, intended.packet, 4};
+    extended_routes[i].edge = &extended.routes[i];
+  }
+  std::vector<loom_aie2p_native_control_source_t> extended_sources(
+      retained->control_sources, retained->control_sources + tile_count * 2);
+  extended_sources[4].destination = UINT32_MAX;
+  const loom_aie2p_native_switch_input_t extended_input = {
+      .routing = &extended,
+      .routes = extended_routes.data(),
+      .control_sources = extended_sources.data(),
+      .control_destination_sources = retained->control_destination_sources,
+  };
+  loom_aie2p_native_switch_t* extended_switches = nullptr;
+  IREE_ASSERT_OK(loom_aie2p_native_switches_build(
+      &extended_input, &retained_arena_, &extended_switches, &requirement));
+  ASSERT_TRUE(iree_string_view_is_empty(requirement));
+  std::vector<loom_aie2p_native_connection_t> extended_groups(
+      retained->connections.groups,
+      retained->connections.groups + retained->connections.group_count);
+  std::vector<loom_aie2p_native_connection_endpoint_t> extended_destinations(
+      retained->connections.destinations,
+      retained->connections.destinations +
+          retained->connections.destination_count);
+  ++extended_groups[1].destination_count;
+  extended_destinations.push_back(
+      {{0, 0}, LOOM_XDNA_STREAM_PORT_TILE_CONTROL, 0});
+  const loom_aie2p_native_connections_t extended_connections = {
+      .groups = extended_groups.data(),
+      .group_count = extended_groups.size(),
+      .destinations = extended_destinations.data(),
+      .destination_count = extended_destinations.size(),
+  };
+  IREE_ASSERT_OK(loom_aie2p_native_connections_verify(
+      &extended, extended_switches, &extended_connections, &retained_arena_));
 }
 
 }  // namespace

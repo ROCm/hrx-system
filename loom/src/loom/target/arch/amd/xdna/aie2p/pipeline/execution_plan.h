@@ -85,6 +85,36 @@ typedef struct loom_aie2p_native_control_connection_t {
   uint8_t packet;
 } loom_aie2p_native_control_connection_t;
 
+// Complete delivery contract for one physical sender and packet class.
+// All destinations consume the same framing; payload receivers remove the
+// header while control receivers retain it.
+typedef struct loom_aie2p_native_connection_t {
+  // Physical sender, including its direction-local DMA engine when applicable.
+  loom_aie2p_native_connection_endpoint_t source;
+  // Five-bit packet identity, or UINT8_MAX for an unframed circuit.
+  uint8_t packet;
+  // Receivers consume the packet header instead of stripping it at the switch.
+  bool retain_header;
+  // First receiver in the owning inventory's flat destination array.
+  iree_host_size_t destination_offset;
+  // Number of receivers in the complete multicast destination set.
+  iree_host_size_t destination_count;
+} loom_aie2p_native_connection_t;
+
+// Source-independent intended deliveries, produced once before switch auditing.
+// Flat destination storage keeps independent ownership copies
+// allocation-bounded.
+typedef struct loom_aie2p_native_connections_t {
+  // Distinct sender/packet deliveries, including both payload and control.
+  const loom_aie2p_native_connection_t* groups;
+  // Number of complete delivery groups.
+  iree_host_size_t group_count;
+  // Concatenated destination sets referenced by group offsets.
+  const loom_aie2p_native_connection_endpoint_t* destinations;
+  // Number of endpoints in destinations.
+  iree_host_size_t destination_count;
+} loom_aie2p_native_connections_t;
+
 // Allocated physical extents after source program construction. Counts describe
 // occupied prefixes; lifetime-specific descriptor reuse remains in the source
 // selection and does not make those prefixes available to independent work.
@@ -122,10 +152,8 @@ typedef struct loom_aie2p_execution_plan_t {
   uint32_t* control_destination_sources;
   // Admitted switch register banks in first-use order.
   loom_aie2p_native_switch_t* switches;
-  // Requested deliveries, independent of the selected routing implementation.
-  loom_aie2p_native_control_connection_t* connections;
-  // Number of requested deliveries in connections.
-  iree_host_size_t connection_count;
+  // Complete payload/control intent, independent of selected switch paths.
+  loom_aie2p_native_connections_t connections;
 } loom_aie2p_execution_plan_t;
 
 // Concrete common-scope representation with owned physical resource copying.

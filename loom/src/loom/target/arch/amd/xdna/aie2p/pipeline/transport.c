@@ -1353,11 +1353,31 @@ iree_status_t loom_aie2p_native_select_transfers(
   }
   if (iree_status_is_ok(status) && valid) {
     loom_aie2p_native_commit_sharing(context);
-    status = loom_aie2p_native_switches_build(context, realization->function.op,
-                                              out_valid);
+    const loom_aie2p_native_switch_input_t input = {
+        .routing = &context->routing,
+        .routes = context->routes,
+        .control_sources = context->control_sources,
+        .control_destination_sources = context->control_destination_sources,
+    };
+    iree_string_view_t requirement = iree_string_view_empty();
+    status = loom_aie2p_native_switches_build(&input, arena, &context->switches,
+                                              &requirement);
+    if (iree_status_is_ok(status)) {
+      if (iree_string_view_is_empty(requirement)) {
+        *out_valid = true;
+      } else {
+        status = loom_aie2p_native_reject(context, realization->function.op,
+                                          requirement);
+      }
+    }
   }
   if (iree_status_is_ok(status) && *out_valid) {
-    status = loom_aie2p_native_connections_verify(context);
+    status = loom_aie2p_native_connections_build(context);
+  }
+  if (iree_status_is_ok(status) && *out_valid) {
+    status = loom_aie2p_native_connections_verify(
+        &context->routing, context->switches, &context->connections,
+        context->pass->arena);
   }
   return status;
 }

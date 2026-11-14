@@ -19,7 +19,6 @@
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/sharing.h"
 #include "loom/target/arch/amd/xdna/array/facts.h"
 #include "loom/target/arch/amd/xdna/array/registers.h"
-#include "loom/testing/diagnostic_matchers.h"
 
 namespace {
 
@@ -32,7 +31,6 @@ class Aie2pSwitchTest : public ::testing::TestWithParam<loom_xdna_tile_kind_t> {
     iree_arena_block_pool_initialize(4096, iree_allocator_system(), &pool_);
     iree_arena_initialize(&pool_, &arena_);
     pass_.arena = &arena_;
-    pass_.diagnostic_emitter = diagnostics_.emitter();
     context_.pass = &pass_;
     context_.family = loom_xdna_npu2_array_family();
     tiles_.resize(context_.family->column_count * context_.family->row_count);
@@ -74,10 +72,15 @@ class Aie2pSwitchTest : public ::testing::TestWithParam<loom_xdna_tile_kind_t> {
 
   void Build(bool expected_valid, size_t expected_switches = 1) {
     context_.routes = routes_.data();
-    bool valid = false;
-    IREE_ASSERT_OK(
-        loom_aie2p_native_switches_build(&context_, nullptr, &valid));
-    ASSERT_EQ(valid, expected_valid);
+    const loom_aie2p_native_switch_input_t input = {
+        .routing = &context_.routing,
+        .routes = context_.routes,
+        .control_sources = context_.control_sources,
+        .control_destination_sources = context_.control_destination_sources,
+    };
+    IREE_ASSERT_OK(loom_aie2p_native_switches_build(
+        &input, &arena_, &context_.switches, &requirement_));
+    ASSERT_EQ(iree_string_view_is_empty(requirement_), expected_valid);
     if (expected_valid) {
       ASSERT_NE(context_.switches, nullptr);
       size_t switch_count = 0;
@@ -86,9 +89,8 @@ class Aie2pSwitchTest : public ::testing::TestWithParam<loom_xdna_tile_kind_t> {
         ++switch_count;
       }
       EXPECT_EQ(switch_count, expected_switches);
-      EXPECT_TRUE(diagnostics_.emissions.empty());
     } else {
-      ASSERT_EQ(diagnostics_.emissions.size(), 1u);
+      EXPECT_EQ(context_.switches, nullptr);
     }
   }
 
@@ -155,9 +157,9 @@ class Aie2pSwitchTest : public ::testing::TestWithParam<loom_xdna_tile_kind_t> {
   iree_arena_block_pool_t pool_ = {};
   // Allocation lifetime shared by routing and switch admission.
   iree_arena_allocator_t arena_ = {};
-  // Real diagnostic sink for target-resource rejection.
-  loom::testing::DiagnosticEmissionCapture diagnostics_;
-  // Pass services consumed by native switch admission.
+  // Resource requirement returned to the owning source diagnostic boundary.
+  iree_string_view_t requirement_ = {};
+  // Allocation service used when constructing retained connection groups.
   loom_pass_t pass_ = {};
   // Physical route and retained switch owners.
   loom_aie2p_native_context_t context_ = {};
@@ -202,7 +204,10 @@ class Aie2pControlSwitchTest : public Aie2pSwitchTest {
     if (expected_valid) {
       // Check complete destination sets and retained framing independently of
       // the selected edges, including mixed circuit/packet paths.
-      IREE_ASSERT_OK(loom_aie2p_native_connections_verify(&context_));
+      IREE_ASSERT_OK(loom_aie2p_native_connections_build(&context_));
+      IREE_ASSERT_OK(loom_aie2p_native_connections_verify(
+          &context_.routing, context_.switches, &context_.connections,
+          &arena_));
     }
   }
 
@@ -620,9 +625,9 @@ TEST_P(Aie2pSwitchTest, SevenIndependentComponentsRejectTheRoutePlan) {
   // command endpoint. Six independent input components and the shared join
   // need seven arbiters; no input can become a transparent circuit.
   ASSERT_NO_FATAL_FAILURE(Build(false));
-  EXPECT_EQ(diagnostics_.emissions.front().string_params,
-            std::vector<std::string>{
-                "available packet filters and independent multicast arbiters"});
+  EXPECT_TRUE(iree_string_view_equal(
+      requirement_,
+      IREE_SV("available packet filters and independent multicast arbiters")));
 }
 
 TEST_P(Aie2pSwitchTest, PrivateMulticastPreservesAllFramedPacketClasses) {
@@ -742,9 +747,9 @@ TEST_P(Aie2pSwitchTest, FiveIrreducibleFiltersRejectTheRoutePlan) {
   }
   AddRoute(source, 1, LOOM_XDNA_STREAM_PORT_NORTH, 0, 0);
   ASSERT_NO_FATAL_FAILURE(Build(false));
-  EXPECT_EQ(diagnostics_.emissions.front().string_params,
-            std::vector<std::string>{
-                "available packet filters and independent multicast arbiters"});
+  EXPECT_TRUE(iree_string_view_equal(
+      requirement_,
+      IREE_SV("available packet filters and independent multicast arbiters")));
 }
 
 TEST_P(Aie2pSwitchTest, MinimumCoverCanReconsiderAnEarlierMask) {
@@ -829,9 +834,9 @@ TEST_P(Aie2pSwitchTest, ConnectedDestinationSetsMustFitOneArbiter) {
     }
   }
   ASSERT_NO_FATAL_FAILURE(Build(false));
-  EXPECT_EQ(diagnostics_.emissions.front().string_params,
-            std::vector<std::string>{
-                "available packet filters and independent multicast arbiters"});
+  EXPECT_TRUE(iree_string_view_equal(
+      requirement_,
+      IREE_SV("available packet filters and independent multicast arbiters")));
 }
 
 INSTANTIATE_TEST_SUITE_P(TileKinds, Aie2pSwitchTest,

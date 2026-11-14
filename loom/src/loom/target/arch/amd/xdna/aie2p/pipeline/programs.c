@@ -143,8 +143,7 @@ static iree_status_t loom_aie2p_native_retain_plan(
       .control_sources = context->control_sources,
       .control_destination_sources = context->control_destination_sources,
       .switches = context->switches,
-      .connections = context->control_connections,
-      .connection_count = context->control_connection_count,
+      .connections = context->connections,
   };
   IREE_RETURN_IF_ERROR(
       loom_aie2p_execution_plan_copy_resources(&selected, arena, plan));

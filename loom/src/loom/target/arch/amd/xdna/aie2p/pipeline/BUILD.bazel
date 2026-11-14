@@ -16,11 +16,11 @@ loom_cc_test(
     name = "connectivity_test",
     srcs = ["connectivity_test.cc"],
     deps = [
+        ":execution_plan",
         ":native",
         "//loom/src/loom/pass:types",
         "//loom/src/loom/target/arch/amd/xdna/aie2p/array:plan",
         "//loom/src/loom/target/arch/amd/xdna/array:facts",
-        "//loom/src/loom/testing:diagnostic_matchers",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
@@ -141,12 +141,23 @@ loom_cc_test(
 
 loom_cc_library(
     name = "execution_plan",
-    srcs = ["execution_plan.c"],
-    hdrs = ["execution_plan.h"],
+    srcs = [
+        "connectivity.c",
+        "execution_plan.c",
+        "switch.c",
+    ],
+    hdrs = [
+        "connectivity.h",
+        "execution_plan.h",
+        "switch.h",
+    ],
     deps = [
         "//loom/src/loom/analysis/pipeline:entries",
         "//loom/src/loom/target/arch/amd/xdna/aie2p/array:plan",
+        "//loom/src/loom/target/arch/amd/xdna/array:registers",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base:core_headers",
+        "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/internal:arena",
     ],
 )
@@ -158,7 +169,7 @@ loom_cc_library(
         "channels.c",
         "collective.c",
         "configuration.c",
-        "connectivity.c",
+        "connections.c",
         "credits.c",
         "distribution.c",
         "dma.c",
@@ -176,12 +187,10 @@ loom_cc_library(
         "sharing.c",
         "sram.c",
         "storage.c",
-        "switch.c",
         "transport.c",
     ],
     hdrs = [
         "channel_state.h",
-        "connectivity.h",
         "credits.h",
         "distribution.h",
         "dma_queues.h",
@@ -195,7 +204,6 @@ loom_cc_library(
         "sharing.h",
         "sram.h",
         "storage.h",
-        "switch.h",
     ],
     deps = [
         ":dma_plan",
@@ -245,7 +253,6 @@ loom_cc_library(
         "//loom/src/loom/util:adaptive_sort",
         "//loom/src/loom/util:fact_table",
         "//runtime/src/iree/base",
-        "//runtime/src/iree/base:core_headers",
         "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/internal:arena",
     ],
@@ -296,6 +303,7 @@ loom_cc_test(
     name = "payload_test",
     srcs = ["payload_test.cc"],
     deps = [
+        ":execution_plan",
         ":native",
         "//loom/src/loom/target/arch/amd/xdna/aie2p/array:plan",
         "//loom/src/loom/target/arch/amd/xdna/array:facts",
@@ -366,12 +374,12 @@ loom_cc_test(
     name = "switch_test",
     srcs = ["switch_test.cc"],
     deps = [
+        ":execution_plan",
         ":native",
         "//loom/src/loom/pass:types",
         "//loom/src/loom/target/arch/amd/xdna/aie2p/array:plan",
         "//loom/src/loom/target/arch/amd/xdna/array:facts",
         "//loom/src/loom/target/arch/amd/xdna/array:registers",
-        "//loom/src/loom/testing:diagnostic_matchers",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",

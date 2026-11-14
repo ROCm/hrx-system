@@ -59,12 +59,28 @@ iree_status_t loom_aie2p_execution_plan_copy_resources(
     *tail = copy;
     tail = &copy->next;
   }
-  target->connection_count = source->connection_count;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      arena, source->connection_count, sizeof(*target->connections),
-      (void**)&target->connections));
-  memcpy(target->connections, source->connections,
-         source->connection_count * sizeof(*target->connections));
+  loom_aie2p_native_connection_t* groups = NULL;
+  loom_aie2p_native_connection_endpoint_t* destinations = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate_array(arena, source->connections.group_count,
+                                sizeof(*groups), (void**)&groups));
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate_array(arena, source->connections.destination_count,
+                                sizeof(*destinations), (void**)&destinations));
+  if (source->connections.group_count) {
+    memcpy(groups, source->connections.groups,
+           source->connections.group_count * sizeof(*groups));
+  }
+  if (source->connections.destination_count) {
+    memcpy(destinations, source->connections.destinations,
+           source->connections.destination_count * sizeof(*destinations));
+  }
+  target->connections = (loom_aie2p_native_connections_t){
+      .groups = groups,
+      .group_count = source->connections.group_count,
+      .destinations = destinations,
+      .destination_count = source->connections.destination_count,
+  };
   return iree_ok_status();
 }
 

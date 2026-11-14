@@ -15,7 +15,6 @@
 #include "iree/testing/status_matchers.h"
 #include "loom/pass/types.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/native.h"
-#include "loom/testing/diagnostic_matchers.h"
 
 namespace {
 
@@ -27,7 +26,6 @@ class ConnectivityTest : public ::testing::Test {
     iree_arena_block_pool_initialize(4096, iree_allocator_system(), &pool_);
     iree_arena_initialize(&pool_, &arena_);
     pass_.arena = &arena_;
-    pass_.diagnostic_emitter = diagnostics_.emitter();
     context_.pass = &pass_;
     context_.family = loom_xdna_npu2_array_family();
     tiles_.resize(context_.family->column_count * context_.family->row_count);
@@ -65,11 +63,16 @@ class ConnectivityTest : public ::testing::Test {
   }
 
   void Build() {
-    bool valid = false;
-    IREE_ASSERT_OK(
-        loom_aie2p_native_switches_build(&context_, nullptr, &valid));
-    ASSERT_TRUE(valid);
-    ASSERT_TRUE(diagnostics_.emissions.empty());
+    const loom_aie2p_native_switch_input_t input = {
+        .routing = &context_.routing,
+        .routes = context_.routes,
+        .control_sources = context_.control_sources,
+        .control_destination_sources = context_.control_destination_sources,
+    };
+    iree_string_view_t requirement = iree_string_view_empty();
+    IREE_ASSERT_OK(loom_aie2p_native_switches_build(
+        &input, &arena_, &context_.switches, &requirement));
+    ASSERT_TRUE(iree_string_view_is_empty(requirement));
     IREE_ASSERT_OK(loom_aie2p_native_connectivity_allocate(
         context_.family, context_.switches, context_.routing.routes,
         context_.routing.route_count, &arena_, &connectivity_));
@@ -83,12 +86,10 @@ class ConnectivityTest : public ::testing::Test {
         destinations.size(), retain_header);
   }
 
-  // Arena and diagnostic services used by real routing and switch admission.
+  // Arena services used by real routing and switch admission.
   iree_arena_block_pool_t pool_ = {};
   // All selected plans and the audit share the test's allocation lifetime.
   iree_arena_allocator_t arena_ = {};
-  // Resource rejection remains visible when building the physical network.
-  loom::testing::DiagnosticEmissionCapture diagnostics_;
   // Compiler services required by native selection.
   loom_pass_t pass_ = {};
   // Valid physical plans consumed by the production switch emitter.
@@ -221,8 +222,10 @@ TEST_F(ConnectivityTest, CompleteAuditGroupsIntentAndReleasesScratch) {
   ASSERT_NO_FATAL_FAILURE(Build());
   context_.control_connections = connections;
   context_.control_connection_count = IREE_ARRAYSIZE(connections);
+  IREE_ASSERT_OK(loom_aie2p_native_connections_build(&context_));
   const auto retained_bytes = arena_.used_allocation_size;
-  IREE_ASSERT_OK(loom_aie2p_native_connections_verify(&context_));
+  IREE_ASSERT_OK(loom_aie2p_native_connections_verify(
+      &context_.routing, context_.switches, &context_.connections, &arena_));
   EXPECT_EQ(arena_.used_allocation_size, retained_bytes);
 }
 

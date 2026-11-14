@@ -56,12 +56,15 @@ loom_aie2p_native_connectivity_result_t loom_aie2p_native_connectivity_check(
     const loom_aie2p_native_connection_endpoint_t* destinations,
     iree_host_size_t destination_count, bool retain_header);
 
-// Audits every completed native transport before configuration emission.
+// Audits completed physical transport against retained payload/control intent.
 // Temporary scratch is released before returning. Allocation can fail; a
 // connection mismatch terminates as a compiler invariant failure, never as
 // unsupported user IR or a recoverable route-selection result.
 iree_status_t loom_aie2p_native_connections_verify(
-    const struct loom_aie2p_native_context_t* context);
+    const loom_aie2p_array_route_builder_t* routing,
+    const loom_aie2p_native_switch_t* switches,
+    const loom_aie2p_native_connections_t* connections,
+    iree_arena_allocator_t* arena);
 
 #ifdef __cplusplus
 }  // extern "C"
