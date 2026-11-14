@@ -409,6 +409,7 @@ ControlFlow::ControlFlow(cxx::TranslationUnit& unit, Diagnostics& diagnostics,
       temporary_origins_(unit, types) {
   if (function_) {
     if (auto* object_type = implicit_object_type(unit_, function_)) {
+      receiver_requires_storage_ = types_.has_volatile_subobject(object_type);
       receiver_partition_ = types_.record(types_.unqualified(object_type),
                                           function_->declaration());
       for (const auto& member : receiver_partition_->members) {

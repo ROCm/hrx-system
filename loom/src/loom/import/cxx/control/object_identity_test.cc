@@ -69,6 +69,7 @@ TEST(ObjectIdentityTest, DirectInitializationSharesIdentityButCopyDoesNot) {
     void entry(unsigned input) {
       Object original{input};
       Object copied = original;
+      Object loaded{original.value};
       Object direct = Object{input};
     }
   )"),
@@ -82,6 +83,7 @@ TEST(ObjectIdentityTest, DirectInitializationSharesIdentityButCopyDoesNot) {
   auto* direct = sites.binding("direct");
   EXPECT_TRUE(identities.require_storage(original));
   EXPECT_FALSE(identities.requires_storage(copied));
+  EXPECT_FALSE(identities.requires_storage(sites.binding("loaded")));
   EXPECT_FALSE(identities.requires_storage(direct));
   auto* initializer =
       cxx::Initializer(direct->initializer()).singleExpression();

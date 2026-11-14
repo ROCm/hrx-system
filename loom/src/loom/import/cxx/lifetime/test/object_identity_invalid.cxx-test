@@ -28,3 +28,25 @@ unsigned entry(unsigned value) {
   // ERROR@+1: LOWERING/059 "nontrivial object transport requires a source function definition"
   return external(value).value;
 }
+
+// ====
+// A bodyless declaration cannot invent volatile result-transport accesses.
+struct Observed { volatile unsigned value; };
+// ERROR@+1: LOWERING/059 "volatile object transport requires a source function definition"
+Observed external(unsigned);
+unsigned entry(unsigned value) { return external(value).value; }
+
+// ====
+struct Observed { volatile unsigned value; };
+// ERROR@+1: LOWERING/059 "volatile object transport requires a source function definition"
+unsigned external(Observed);
+unsigned entry(unsigned value) { return external(Observed{value}); }
+
+// ====
+// Owning a volatile field does not make reference carriers byte-addressable.
+struct Mixed { volatile unsigned value; unsigned* pointer; };
+unsigned entry(unsigned* input) {
+  // ERROR@+1: LOWERING/059 "stored pointers and references require an object storage representation"
+  Mixed object{7, input};
+  return object.value;
+}

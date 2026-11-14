@@ -74,3 +74,67 @@ static Identity__Identity_storage_result Identity__Identity_storage(loom::type::
   loom::type::offset observed_byte_offset = this_byte_offset + loom::type::offset{0};
   return {loom::buffer::cast<unsigned char>(this_value), observed_byte_offset};
 }
+
+// ====
+// Export keeps constructor, observation, and destructor effects on one object.
+struct Observed {
+  volatile unsigned value;
+  Observed(unsigned input) : value(input) {}
+  ~Observed() { value = 0; }
+};
+[[loom::noinline]] static Observed make(unsigned input) { return Observed(input); }
+unsigned observe(unsigned input) {
+  Observed object = make(input);
+  return object.value;
+}
+
+// ----
+#include <loomcxx/predicate.h>
+#include <loomcxx/view.h>
+
+[[loom::symbol("observe")]]
+unsigned observe(unsigned input);
+
+[[loom::symbol("make"), loom::noinline]]
+static void make(loom::type::buffer<unsigned char> result, loom::type::offset result_byte_offset, unsigned input);
+
+[[loom::symbol("Observed___Observed_storage"), loom::inline]]
+static void Observed___Observed_storage(loom::type::buffer<unsigned> this_value, loom::type::offset this_byte_offset);
+
+[[loom::symbol("Observed__Observed_storage"), loom::inline]]
+static void Observed__Observed_storage(loom::type::buffer<unsigned> this_value, loom::type::offset this_byte_offset, unsigned input);
+
+[[loom::symbol("observe")]]
+unsigned observe(unsigned input) {
+  auto* object_storage = loom::buffer::alloca<loom::memory_space::private_, 4>(loom::type::offset{4});
+  auto object_view = loom::buffer::view<4>(reinterpret_cast<const unsigned char*>(object_storage), {});
+  make(loom::buffer::root(object_storage), loom::type::offset{0}, input);
+  loom::type::offset value_byte_offset = loom::type::offset{0} + loom::type::offset{0};
+  loom::assume(loom::predicate::range(value_byte_offset, 0, 0));
+  auto value_view = loom::buffer::view<1>(reinterpret_cast<const unsigned*>(reinterpret_cast<const unsigned char*>(object_storage) + static_cast<unsigned long long>(value_byte_offset)), {});
+  unsigned value = loom::view::load<loom::memory_access::volatile_>(value_view, 0);
+  Observed___Observed_storage(loom::buffer::cast<unsigned>(loom::buffer::root(object_storage)), loom::type::offset{0});
+  return value;
+}
+
+[[loom::symbol("make"), loom::noinline]]
+static void make(loom::type::buffer<unsigned char> result, loom::type::offset result_byte_offset, unsigned input) {
+  Observed__Observed_storage(loom::buffer::cast<unsigned>(result), result_byte_offset, input);
+  return;
+}
+
+[[loom::symbol("Observed___Observed_storage"), loom::inline]]
+static void Observed___Observed_storage(loom::type::buffer<unsigned> this_value, loom::type::offset this_byte_offset) {
+  loom::type::offset this_value_byte_offset = this_byte_offset + loom::type::offset{0};
+  auto this_value_view = loom::buffer::view<1>(this_value, this_value_byte_offset, {});
+  loom::view::store<loom::memory_access::volatile_ | loom::memory_access::root_in_bounds>(0u, this_value_view, 0);
+  return;
+}
+
+[[loom::symbol("Observed__Observed_storage"), loom::inline]]
+static void Observed__Observed_storage(loom::type::buffer<unsigned> this_value, loom::type::offset this_byte_offset, unsigned input) {
+  loom::type::offset this_value_byte_offset = this_byte_offset + loom::type::offset{0};
+  auto this_value_view = loom::buffer::view<1>(this_value, this_value_byte_offset, {});
+  loom::view::store<loom::memory_access::volatile_ | loom::memory_access::root_in_bounds>(input, this_value_view, 0);
+  return;
+}

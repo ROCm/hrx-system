@@ -401,7 +401,7 @@ class Types {
   int64_t storage_size(const cxx::Type* input, cxx::AST* owner);
   // Admits a source value and returns its stable, identity-free partition.
   // Leaf carriers are static; admitted records are owned by this Types object.
-  // Volatile objects cannot use SSA-only transport without addressable storage.
+  // Qualifiers affect access and ownership, not this representation schema.
   const Partition& partition(const cxx::Type* input, cxx::AST* owner);
   // Observation semantics of an access through this cv-qualified object type.
   // Pointers pass their pointee type; the pointer binding's own qualifiers do
@@ -414,6 +414,9 @@ class Types {
   // Whether this source type contains handles without a native byte-storage
   // representation. Native objects retain their ordinary storage semantics.
   bool requires_value_transport(const cxx::Type* input);
+  // Whether this object or an owned subobject is volatile. References and
+  // pointers do not inherit the properties of the objects they designate.
+  bool has_volatile_subobject(const cxx::Type* input);
   // Cached independently constructible groups, in source declaration order.
   std::span<const ValueProjection> projections(const cxx::Type* input,
                                                cxx::AST* owner);
@@ -533,6 +536,13 @@ class Types {
                          cxx::AST* owner);
 
  private:
+  struct ObjectProperties {
+    // Whether any owned component lacks a native byte-storage representation.
+    bool value_transport = false;
+    // Whether an owned subobject has observable volatile accesses.
+    bool volatile_subobject = false;
+  };
+  ObjectProperties object_properties(const cxx::Type* input);
   void require_record_storage(const cxx::ClassType* input, cxx::AST* owner);
   const Partition* special(const cxx::Type* input, cxx::AST* owner);
   const BufferPartition* buffer(const cxx::ClassType* input, cxx::AST* owner);
@@ -633,7 +643,7 @@ class Types {
   // Completed memory admission; layouts remain owned by the source symbols.
   std::unordered_set<cxx::ClassSymbol*> storage_records_;
   // Source representation classification, independent of SSA admission.
-  std::unordered_map<const cxx::Type*, bool> value_transport_;
+  std::unordered_map<const cxx::Type*, ObjectProperties> object_properties_;
   // Flattened construction groups computed once by source type admission.
   std::unordered_map<const cxx::Type*, std::vector<ValueProjection>>
       construction_groups_;

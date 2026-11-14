@@ -475,10 +475,14 @@ void Functions::analyze(Types& types) {
       const bool reference = unit_.typeTraits().is_reference(parameter->type());
       auto* borrowed_object_type =
           analysis->borrowed_pointer_object_type(parameter);
+      // Top-level cv qualifies this body's parameter object. Owned subobject
+      // qualification also constrains transport across the call boundary.
       if (!reference && unit_.typeTraits().is_class(parameter->type()) &&
           analysis->addressed(parameter) &&
           (!exported_.contains(function) ||
-           unit_.typeTraits().is_non_trivial_for_calls(parameter->type()))) {
+           unit_.typeTraits().is_non_trivial_for_calls(parameter->type()) ||
+           types.has_volatile_subobject(
+               types.unqualified(parameter->type())))) {
         analysis->configure_parameter(parameter,
                                       Construction::ParameterMode::Storage);
         continue;
@@ -527,7 +531,9 @@ void Functions::analyze(Types& types) {
       if (unit_.typeTraits().is_class(parameter->type()) &&
           analysis->addressed(parameter) &&
           (!exported_.contains(function) ||
-           unit_.typeTraits().is_non_trivial_for_calls(parameter->type()))) {
+           unit_.typeTraits().is_non_trivial_for_calls(parameter->type()) ||
+           types.has_volatile_subobject(
+               types.unqualified(parameter->type())))) {
         indirect_parameters.push_back({
             .ordinal = ordinal,
             .object_type = parameter->type(),
@@ -590,7 +596,8 @@ void Functions::analyze(Types& types) {
     const bool result_storage =
         analysis->result_requires_storage() &&
         (!exported_.contains(function) ||
-         unit_.typeTraits().is_non_trivial_for_calls(signature->returnType()));
+         unit_.typeTraits().is_non_trivial_for_calls(signature->returnType()) ||
+         types.has_volatile_subobject(signature->returnType()));
     if (result_storage ||
         std::ranges::any_of(indirect_parameters, [](const auto& parameter) {
           return parameter.owned;
@@ -1614,6 +1621,13 @@ BoundSignature Functions::bind_callable_signature(
     const bool is_indirect =
         indirect_parameter_index < indirect_parameters.size() &&
         indirect_parameters[indirect_parameter_index].ordinal == ordinal;
+    if (unit_.typeTraits().is_class(parameter->type()) &&
+        external_.contains(symbol->canonical()) &&
+        types.has_volatile_subobject(types.unqualified(parameter->type()))) {
+      diagnostics_.reject(unit_, source,
+                          "volatile object transport requires a source "
+                          "function definition");
+    }
     auto* value_type =
         !is_indirect ? types.unqualified(parameter->type())
         : indirect_parameters[indirect_parameter_index].abi ==
@@ -1638,6 +1652,13 @@ BoundSignature Functions::bind_callable_signature(
   size_t ordinary_result_count = 0;
   if (has_ordinary_result) {
     const cxx::Type* result_type = signature->returnType();
+    if (unit_.typeTraits().is_class(result_type) &&
+        external_.contains(symbol->canonical()) &&
+        types.has_volatile_subobject(result_type)) {
+      diagnostics_.reject(unit_, source,
+                          "volatile object transport requires a source "
+                          "function definition");
+    }
     if (returns_projected_reference) {
       result_type = unit_.control()->getUnsignedIntType();
     } else if (returns_reference) {

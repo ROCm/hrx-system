@@ -43,6 +43,7 @@ loom_check_test_suite(
         "volatile.cxx-test",
         "volatile_composition.cxx-test",
         "volatile_invalid.cxx-test",
+        "volatile_objects.cxx-test",
         "volatile_views.cxx-test",
     ],
     target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),

@@ -127,8 +127,11 @@ void ObjectIdentity::retain(cxx::ExpressionAST* expression) {
     }
     case cxx::ASTKind::ImplicitCastExpression: {
       auto* cast = static_cast<cxx::ImplicitCastExpressionAST*>(expression);
-      if (!cast->conversionFunction ||
-          (cast->conversionFunction->isConstructor() &&
+      if ((!cast->conversionFunction &&
+           (cast->valueCategory != cxx::ValueCategory::kPrValue ||
+            cast->expression->valueCategory == cxx::ValueCategory::kPrValue)) ||
+          (cast->conversionFunction &&
+           cast->conversionFunction->isConstructor() &&
            cast->expression->valueCategory == cxx::ValueCategory::kPrValue &&
            traits.remove_cv(cast->expression->type) ==
                traits.remove_cv(cast->type))) {
@@ -157,6 +160,9 @@ void ObjectIdentity::retain(cxx::ExpressionAST* expression) {
     return;
   }
   add(expression);
+  if (types_.has_volatile_subobject(expression->type)) {
+    require_storage(expression);
+  }
   if (auto* conditional =
           cxx::ast_cast<cxx::ConditionalExpressionAST>(expression)) {
     join(expression, conditional->iftrueExpression);
@@ -187,7 +193,7 @@ void ObjectIdentity::bind(cxx::Symbol* binding, cxx::ExpressionAST* initializer,
           types_.unqualified(source_object_type(binding))) {
     join(binding, source);
   }
-  if (storage) {
+  if (storage || types_.has_volatile_subobject(source_object_type(binding))) {
     require_storage(binding);
   }
 }
@@ -195,6 +201,11 @@ void ObjectIdentity::bind(cxx::Symbol* binding, cxx::ExpressionAST* initializer,
 void ObjectIdentity::returned(cxx::FunctionSymbol* function,
                               cxx::ExpressionAST* expression) {
   add(function);
+  const auto* signature =
+      static_cast<const cxx::FunctionType*>(function->type());
+  if (types_.has_volatile_subobject(signature->returnType())) {
+    require_storage(function);
+  }
   if (expression && expression->valueCategory == cxx::ValueCategory::kPrValue) {
     join(function, expression);
   }

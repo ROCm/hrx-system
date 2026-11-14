@@ -2698,10 +2698,40 @@ storage when no identity escapes.
 Automatic objects and by-value parameters run their destructors at normal
 source lifetime boundaries. Full-expression temporaries retire after the
 expression, and copied or moved closure captures belong to the resulting
-closure. Guaranteed copy elision transfers the completed object into its
-result without another constructor or destructor. Exported C++ retains the
+closure. Guaranteed copy elision constructs directly in the result object
+without an extra constructor or destructor. Exported C++ retains the
 resulting calls, effects, and cleanup, independently of the original class
 spelling.
+
+An internal helper returning an object whose address is observed constructs it
+directly in the caller's destination. Forwarding that result or selecting it
+with a conditional preserves the same object. A by-value parameter is constructed
+by the caller and destroyed by the callee. These rules hold across retained
+calls as well as inlined calls:
+
+```cpp
+struct Identity {
+  unsigned value;
+  Identity(unsigned input, unsigned*& observed) : value(input) { observed = &value; }
+  ~Identity() { value = 0; }
+};
+[[loom::noinline]] static Identity make(unsigned input, unsigned*& observed) {
+  return Identity(input, observed);
+}
+bool same_object(unsigned input) {
+  unsigned* observed = nullptr;
+  Identity object = make(input, observed);
+  return observed == &object.value;  // Always true.
+}
+```
+
+The imported helper takes the destination buffer and byte offset. Its caller
+owns the result's cleanup. Ordinary value-only records remain SSA values,
+including records with destructors that do not observe identity. Actual lvalue
+copies still create separate objects and execute their selected copy operations.
+Identity-sensitive object signatures require internal ordinary function
+definitions; exported or bodyless signatures receive a source diagnostic.
+Export to C++ preserves destination-taking calls and explicit cleanup.
 
 Each temporary has its own lifetime even when its initial value equals another
 object's value. Calls that update a temporary through a reference preserve that
@@ -3628,7 +3658,9 @@ typed pointer storage. The importer emits `buffer.alloca<private>` at the
 object's declaration, using its source size and alignment, and initializes it
 with a store preserving its access qualifiers. A declaration without an
 initializer leaves storage uninitialized for an output-only helper to write.
-Addressed by-value parameters receive a private copy of their incoming value.
+Addressed scalar parameters receive private storage initialized from their
+incoming value. Internal object parameters that require identity are constructed
+directly in caller-owned storage and destroyed by the callee.
 Pointers retain the same buffer and byte origin
 through copies and borrowed helper returns. Automatic objects retain their C++
 lifetimes; returning a pointer does not extend the pointee's lifetime. Taking an
@@ -3718,10 +3750,27 @@ separate ordering contract and reject the ordinary volatile selector.
 Volatile supplies observable accesses, without atomicity, synchronization, or a
 cache-coherence guarantee. Volatile scalar, vector, and top-level-qualified
 aggregate locals receive private storage even when their address is never taken.
-Qualified by-value parameters initialize that storage from the incoming SSA
-values. A top-level volatile aggregate initializes its scalar fields separately.
-Automatic records with directly volatile members still require a result-object
-storage contract and produce a source diagnostic. Volatile pointer objects need
+Top-level-qualified by-value parameters initialize that storage from the incoming
+value. Owned volatile members, including nested records, bases, arrays, and native
+vectors, keep their access qualifiers. Internal helper results and by-value
+object parameters construct directly in their final storage, so transporting an
+object adds no volatile reads or writes. Actual copies and assignments retain
+their source accesses. A destructor observes the same object that was constructed.
+
+```cpp
+struct Observed {
+  volatile unsigned value;
+  Observed(unsigned input) : value(input) {}
+  ~Observed() { value = 0; }
+};
+static Observed make(unsigned input) { return Observed(input); }
+unsigned observe(unsigned input) {
+  Observed object = make(input);  // One volatile initialization store.
+  return object.value;           // One volatile read; cleanup then stores zero.
+}
+```
+
+Volatile pointer objects need
 storage for their buffer and byte origin; namespace-scope volatile objects need
 global-storage projection. Neither can fold to an ordinary SSA initializer.
 
