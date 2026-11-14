@@ -16,9 +16,12 @@
 #include "loom/pass/value_facts.h"
 #include "loom/rewrite/rewriter.h"
 #include "loom/target/function_version.h"
+#include "loom/transforms/cfg/return_frontier.h"
 #include "loom/util/fact_cfg.h"
 
 #define LOOM_CFG_CONVERGE_STATISTICS(V, statistics_type)                  \
+  V(statistics_type, return_frontiers_joined, "return-frontiers-joined",  \
+    "Number of divergent normal-return frontiers joined.")                \
   V(statistics_type, decisions_factored, "decisions-factored",            \
     "Number of overlapping decisions factored through a predicate join.") \
   V(statistics_type, loop_exit_frontiers_isolated,                        \
@@ -1235,7 +1238,8 @@ static iree_status_t loom_cfg_converge_once(
 iree_status_t loom_cfg_converge_run(loom_pass_t* pass, loom_module_t* module,
                                     loom_func_like_t function) {
   loom_region_t* body = loom_func_like_body(function);
-  if (!body || body->block_count < 4) {
+  if (!body || body->block_count < 3 ||
+      loom_func_like_repr_contract(function) != LOOM_STRING_ID_INVALID) {
     return iree_ok_status();
   }
   loom_rewriter_t rewriter = {0};
@@ -1260,6 +1264,12 @@ iree_status_t loom_cfg_converge_run(loom_pass_t* pass, loom_module_t* module,
           rewriter.fact_table, module, body, &facts);
     }
     if (iree_status_is_ok(status)) {
+      status = loom_cfg_converge_returns(&rewriter, function, facts, &changed);
+      if (iree_status_is_ok(status) && changed) {
+        ++loom_cfg_converge_statistics(pass)->return_frontiers_joined;
+      }
+    }
+    if (iree_status_is_ok(status) && !changed) {
       status = loom_cfg_converge_isolate_loop_exit_frontiers(
           pass, module, body, &rewriter, &arena, facts, &changed);
     }
