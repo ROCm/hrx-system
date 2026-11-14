@@ -2055,11 +2055,14 @@ class Translator final : private Initialization::Evaluation,
     }
   }
 
-  // Source-selected branches are transparent to every statement/exit path.
-  // Their initializers still execute once; a discarded arm contributes no IR.
+  // Source-selected branches (`if constexpr`, or a condition that is constant
+  // once device queries are true) are transparent to every statement/exit
+  // path. Their initializers still execute once; a discarded arm contributes
+  // no IR.
   cxx::StatementAST* selected_statement(cxx::StatementAST* ast) {
     while (auto* branch = cxx::ast_cast<cxx::IfStatementAST>(ast)) {
-      if (!branch->constexprValue.has_value()) {
+      auto selected = selected_branch(unit_, branch);
+      if (!selected) {
         break;
       }
       if (branch->initializer) {
@@ -2068,7 +2071,7 @@ class Translator final : private Initialization::Evaluation,
       auto mark = begin_full_expression();
       initialize_condition(branch->condition);
       finish_full_expression(mark);
-      ast = *branch->constexprValue ? branch->statement : branch->elseStatement;
+      ast = *selected ? branch->statement : branch->elseStatement;
       if (ast) {
         if (auto contract = fastmath_.statement(ast)) {
           lexical_fastmath_flags_ = *contract;
@@ -6058,7 +6061,10 @@ class Translator final : private Initialization::Evaluation,
     }
     auto source = locations_.get(ast);
     if (auto* expression = cxx::ast_cast<cxx::ConstExpressionAST>(ast)) {
-      if (constant_contains_address(*expression->constValue)) {
+      // A device query's frontend constant is its host value; imported code
+      // translates the query itself.
+      if (constant_contains_address(*expression->constValue) ||
+          contains_device_query(expression->expression)) {
         return this->expression(expression->expression);
       }
       // Preserve an existing source binding selected by constant evaluation.
@@ -6349,10 +6355,13 @@ class Translator final : private Initialization::Evaluation,
         if (unit_.typeTraits().is_array(variable->type())) {
           return immutable_object(variable, id).pointer;
         }
+        // The frontend's constant for a variable initialized from a device
+        // query holds the host value; imported code reads the device value.
         if (variable->constValue() &&
             !unit_.typeTraits().is_volatile(variable->type()) &&
             (variable->isConstexpr() ||
-             unit_.typeTraits().is_const(variable->type()))) {
+             unit_.typeTraits().is_const(variable->type())) &&
+            !contains_device_query(variable->initializer())) {
           cxx::ASTInterpreter interpreter(&unit_);
           if (auto value = interpreter.evaluate(ast)) {
             auto result = constant(*value, ast);
@@ -6756,6 +6765,10 @@ class Translator final : private Initialization::Evaluation,
       return load(ast);
     }
     if (auto* call = cxx::ast_cast<cxx::CallExpressionAST>(ast)) {
+      // Imported code always runs on the device.
+      if (is_device_query(call)) {
+        return scalars_.integer(1, LOOM_SCALAR_TYPE_I1, source);
+      }
       if (auto constant = fold_constant_reference_call(ast, call)) {
         return *constant;
       }
@@ -8352,7 +8365,7 @@ class Translator final : private Initialization::Evaluation,
       }
     }
     if (auto* call = cxx::ast_cast<cxx::CallExpressionAST>(ast)) {
-      if (builtin(call)) {
+      if (builtin(call) || is_device_query(call)) {
         return;
       }
       auto* id = cxx::ast_cast<cxx::IdExpressionAST>(call->baseExpression);

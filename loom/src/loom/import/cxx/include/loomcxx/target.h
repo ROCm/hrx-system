@@ -40,6 +40,29 @@ enum class feature : unsigned char {
   disabled,
 };
 
+// Whether the calling code runs on the device. Single-source code shares one
+// function between a host compiler and the Loom importer and branches on it:
+//
+//   if (loom::target::is_device()) { device-only code } else { host code }
+//
+// A host compiler sees this definition, so the condition folds to false and
+// it emits only the host arm at every optimization level. The importer folds
+// every call to true and imports only the device arm; host-only code in the
+// other arm, such as I/O or host runtime calls, is never translated.
+//
+// The call is not a constant expression. A unit is analyzed once, for the
+// host, so a required constant expression (`if constexpr`, a template
+// argument, `static_assert`, a constexpr variable) could only hold the host
+// value in device code as well. Such a use, direct or through a constexpr
+// function, is a compile error instead: constant evaluation reaches
+// __builtin_unreachable(), which no run-time call does.
+[[loom::is_device]] constexpr bool is_device() noexcept {
+  if (__builtin_is_constant_evaluated()) {
+    __builtin_unreachable();
+  }
+  return false;
+}
+
 namespace subgroup {
 
 // Reads the selected target's subgroup width in launch configuration code or

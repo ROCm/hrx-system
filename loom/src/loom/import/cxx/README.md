@@ -1513,6 +1513,41 @@ in the preheader and after each body/increment, preserving side effects and
 Discarded template arms are not instantiated. Outside templates, both arms
 remain subject to C++ source checking even though only one is imported.
 
+## Host and device branches
+
+Single-source code that a host compiler also builds branches on
+`loom::target::is_device()` from `<loomcxx/target.h>`. The host compiler sees
+a definition whose run-time value is `false` and emits only the host arm. The
+importer folds every call to a function annotated `[[loom::is_device]]` to
+`true`. When an ordinary `if` condition is then constant, the importer selects
+its arm exactly as it selects an `if constexpr` arm: the discarded arm is
+neither analyzed nor translated, so it may hold host-only code such as I/O,
+variadic calls or host runtime APIs.
+
+```cpp
+#include <loomcxx/target.h>
+
+float scale(float value) {
+  if (loom::target::is_device()) {
+    return value * 2.0f;
+  } else {
+    std::printf("host\n");
+    return value;
+  }
+}
+```
+
+Negation and the built-in `&&`, `||` and `?:` operators fold with C++
+short-circuit rules, so `!is_device()` selects the other arm and
+`is_device() || runtime()` never evaluates `runtime()`. A condition that keeps
+a run-time operand imports both arms. Other uses of the call import as the
+constant `true`.
+
+The call is not a constant expression. A unit is analyzed once, for the host,
+so `if constexpr`, a template argument, `static_assert` or a constexpr variable
+could only hold the host value in device code too. Using the query there,
+directly or through a constexpr function, is a compile error.
+
 ## Kernels launched from host code
 
 An offload driver that compiles one translation unit for both host and device
