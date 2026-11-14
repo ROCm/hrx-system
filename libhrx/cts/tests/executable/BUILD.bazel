@@ -45,6 +45,22 @@ iree_hal_amd_gpu_cts_testdata(
     target_compatible_with = _LOOM_CTS_COMPATIBILITY,
 )
 
+hrx_cts_test(
+    name = "stream_visibility",
+    srcs = ["stream_visibility_test.cpp"],
+    env = {"HRX_CTS_DEVICE": "gpu:0"},
+    resource_group = AMD_GPU_CTS_RESOURCE_GROUP,
+    tags = AMD_GPU_CTS_TAGS,
+    target_compatible_with = _LOOM_CTS_COMPATIBILITY,
+    deps = [
+        ":dependent_chain_testdata",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal/cts/util:registry",
+        "//runtime/src/iree/hal/driver/amd/gpu/cts:testdata",
+        "//runtime/src/iree/hal/driver/amd/gpu/target:identity",
+    ],
+)
+
 hrx_cc_benchmark(
     name = "dependent_chain_benchmark",
     srcs = ["dependent_chain_benchmark.cpp"],
