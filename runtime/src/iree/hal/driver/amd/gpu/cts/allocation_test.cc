@@ -834,8 +834,8 @@ TEST_P(GpuNativeRecordingProgressTest,
        SealingAndExecutionCompleteWhileAllocationIsHeld) {
   using iree::hal::cts::Ref;
   const uint32_t pattern = 0x1234CAFE;
-  // Exceed the CPU template's native packet budget to exercise resident
-  // allocation independently of the kernel argument byte count.
+  // Captured update payloads require resident storage independently of the
+  // packet count, so sealing exercises native allocation on this caller.
   constexpr uint32_t kFillCount = 129;
   const auto request = iree_hal_make_pool_reservation_request(4096, 4);
   uint64_t one = 1, two = 2;
@@ -858,9 +858,9 @@ TEST_P(GpuNativeRecordingProgressTest,
         IREE_HAL_COMMAND_CATEGORY_TRANSFER, 0, recording.out()));
     IREE_ASSERT_OK(iree_hal_command_buffer_begin(recording));
     for (uint32_t i = 0; i < kFillCount; ++i) {
-      IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer(
-          recording, iree_hal_make_buffer_ref(output, i * 4, 4), &pattern,
-          sizeof(pattern), 0));
+      IREE_ASSERT_OK(iree_hal_command_buffer_update_buffer(
+          recording, &pattern, 0, iree_hal_make_buffer_ref(output, i * 4, 4),
+          0));
     }
     const iree_hal_barrier_t release = {
         .source_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
@@ -917,7 +917,8 @@ TEST_P(GpuNativeRecordingProgressTest,
                                        &request, output.out()));
   Wait(semaphores_[0]);
   // Retain a shared source and copy to disjoint invocation destinations. The
-  // packet count requires resident storage, whose clone allocation is gated.
+  // first word comes from a captured host update, which requires resident
+  // storage independently of packet count. Its clone allocation is gated.
   constexpr uint32_t kCopyCount = 129;
   constexpr uint32_t kCopyLength = kCopyCount * sizeof(uint32_t);
   const uint32_t pattern = 0x1234CAFE;
@@ -931,7 +932,9 @@ TEST_P(GpuNativeRecordingProgressTest,
       iree_hal_queue_family(queues_[0]), IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
       IREE_HAL_COMMAND_CATEGORY_TRANSFER, 1, recording.out()));
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(recording));
-  for (uint32_t i = 0; i < kCopyCount; ++i) {
+  IREE_ASSERT_OK(iree_hal_command_buffer_update_buffer(
+      recording, &pattern, 0, iree_hal_make_indirect_buffer_ref(0, 0, 4), 0));
+  for (uint32_t i = 1; i < kCopyCount; ++i) {
     IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer(
         recording, iree_hal_make_buffer_ref(output, i * 4, 4),
         iree_hal_make_indirect_buffer_ref(0, i * 4, 4), 0));

@@ -116,7 +116,9 @@ TEST_P(GpuExecutionResourcesTest, SelectedQueuesExecuteDirectAndResidentWork) {
 
   Ref<iree_hal_pool_t> pool;
   IREE_ASSERT_OK(iree::hal::cts::CreateQueueSlabPool(
-      group_, family, IREE_HAL_BUFFER_USAGE_STORAGE,
+      group_, family,
+      IREE_HAL_BUFFER_USAGE_STORAGE |
+          IREE_HAL_BUFFER_USAGE_DISPATCH_INDIRECT_PARAMETERS,
       {IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE,
        IREE_HAL_MAPPING_MODE_SCOPED},
       iree_allocator_system(), pool.out()));
@@ -127,6 +129,13 @@ TEST_P(GpuExecutionResourcesTest, SelectedQueuesExecuteDirectAndResidentWork) {
   std::array<uint32_t, 32> values = {};
   IREE_ASSERT_OK(
       iree_hal_buffer_map_write(output, 0, values.data(), sizeof(values)));
+  Ref<iree_hal_buffer_t> counts;
+  IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+      pool, iree_hal_make_pool_reservation_request(12, 4),
+      iree_infinite_timeout(), counts.out()));
+  const std::array<uint32_t, 3> workgroup_count = {1, 1, 1};
+  IREE_ASSERT_OK(iree_hal_buffer_map_write(counts, 0, workgroup_count.data(),
+                                           sizeof(workgroup_count)));
 
   Ref<iree_hal_command_buffer_t> recording;
   IREE_ASSERT_OK(iree_hal_command_buffer_create(
@@ -157,15 +166,18 @@ TEST_P(GpuExecutionResourcesTest, SelectedQueuesExecuteDirectAndResidentWork) {
       iree_make_const_byte_span(&increment, sizeof(increment));
   const auto indirect =
       iree_hal_make_indirect_buffer_ref(0, 0, sizeof(uint32_t));
-  // Cross the bounded CPU-template limit to exercise device-side preparation
-  // and publication on the selected resources as well as user dispatches.
+  // Device-supplied geometry exercises native preparation and publication on
+  // the selected resources independently of the recording's size.
+  auto indirect_config = config;
+  indirect_config.workgroup_count_ref = iree_hal_make_buffer_ref(counts, 0, 12);
   constexpr uint32_t kDispatchCount = 64;
   for (uint32_t i = 0; i < kDispatchCount; ++i) {
     if (i) {
       IREE_ASSERT_OK(iree_hal_command_buffer_barrier(recording, &dependency));
     }
     IREE_ASSERT_OK(iree_hal_command_buffer_dispatch(
-        recording, executable, function, config, constants, {1, &indirect}, 0));
+        recording, executable, function, indirect_config, constants,
+        {1, &indirect}, IREE_HAL_DISPATCH_FLAG_DYNAMIC_INDIRECT_PARAMETERS));
   }
   const iree_hal_barrier_t release = {
       .source_stage_mask = IREE_HAL_EXECUTION_STAGE_DISPATCH,

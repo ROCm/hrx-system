@@ -199,6 +199,62 @@ scheduling policy; matching this policy, device identity, CPU locality, and powe
 settings is necessary when comparing backends. ASAN runs qualify correctness,
 not performance.
 
+## Dependent resident-kernel measurements
+
+`//libhrx/cts/tests/executable:dependent_chain_benchmark` measures an ordered
+producer/consumer chain with a resident working set. Each dispatch reads two
+values per element and writes one value; the neighboring read crosses workgroup
+boundaries. An immutable input and two alternating outputs occupy 48 KiB through
+24 MiB. Chain lengths include 1, 8, 32, 33, 64, 128, 129, and 512 dispatches,
+covering short sequences, command-preparation crossovers, and longer recordings
+that batch many small operations.
+
+The kernel is authored in Loom. HRX and HIP load the same generated code object,
+so the comparison isolates runtime behavior for this program. An independent
+CPU recurrence checks the entire output before and after timing. Allocation,
+upload, graph construction, and final readback are outside the timed region;
+intermediate results stay on the device. This approximates the dependency and
+working-set shape of small stencil or simulation kernels without reproducing a
+particular application's equations.
+
+| Mode | HRX submission | HIP comparison |
+|------|----------------|----------------|
+| `StreamFlushEach` | Flush each dispatch, wait after the whole chain | Ordinary ordered launches |
+| `StreamFlushEnd` | Record the chain, flush once, then wait | Ordinary ordered launches |
+| `GraphReplay` | Replay a previously instantiated chain | Replay a previously captured chain |
+
+HIP eagerly submits ordinary launches, so both stream rows use the same HIP
+program. HRX's per-dispatch flush also publishes a timeline point after each
+operation; this row exposes that cost. `DependentChain` includes final
+completion. `DependentChainSubmit` excludes the final wait while still retiring
+every iteration before the next reuses storage. Times are per chain; divide by
+`dispatches` for a per-dispatch figure. `resident_bytes` counts the three
+allocations, and `logical_bytes` counts shader reads and writes across the chain,
+not measured HBM or bus traffic.
+
+`--chain_runtime=hrx|hip` selects the runtime. HRX takes an exact
+`--chain_device` URI; HIP takes an explicit `--chain_hip_library` DSO and
+`--chain_hip_device` ordinal. Both runs must select the same physical GPU. The
+output label records the architecture and device selection. By default, both
+paths poll their public stream-query API before joining completion.
+`--chain_active_wait=false` uses blocking completion instead.
+
+For example, after building the target with `--config=opt`, run the executable
+under the qualified runner's measurement lease with:
+
+```text
+--chain_runtime=hrx --chain_device=amdgpu://0
+--benchmark_filter=StreamFlushEnd/elements:131072/dispatches:64/
+--benchmark_min_time=100x --benchmark_repetitions=5
+```
+
+The HIP counterpart uses `--chain_runtime=hip`,
+`--chain_hip_library=/path/to/libamdhip64.so`, and the corresponding device
+ordinal. Keep the filter, completion policy, and fixed iteration count identical,
+and interleave the runtime comparisons. The generated benchmark smoke test runs
+one small case from each mode through HRX and checks its output; comparing HIP
+requires explicitly selecting the implementation DSO.
+
 ## Download measurements
 
 `//libhrx/cts/tests/hip:hip_transfer_benchmark` compares device-to-host copies into
