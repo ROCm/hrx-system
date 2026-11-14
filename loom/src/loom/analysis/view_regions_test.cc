@@ -1486,53 +1486,65 @@ TEST_F(ViewRegionsTest, AllocationFreshnessRelationships) {
 }
 
 TEST_F(ViewRegionsTest, RestrictProvesAccessConflictsNotPhysicalDisjointness) {
-  loom_value_id_t inputs[] = {
+  loom_value_id_t buffers[] = {
       DefineBufferArg(),
       DefineBufferArg(),
       DefineBufferArg(),
       DefineBufferArg(),
   };
-  const loom_type_t buffer_types[] = {
+  const loom_value_id_t layout = BuildDenseLayout();
+  const loom_value_id_t zero =
+      loom_index_constant_result(BuildOffsetConstant(0));
+  loom_op_t* restricted_view_op = nullptr;
+  IREE_ASSERT_OK(loom_buffer_view_build(
+      &builder_, buffers[1], zero, ViewType1D(16, layout),
+      LOOM_LOCATION_UNKNOWN, &restricted_view_op));
+  loom_op_t* peer_view_op = nullptr;
+  IREE_ASSERT_OK(loom_buffer_view_build(&builder_, buffers[2], zero,
+                                        ViewType1D(16, layout),
+                                        LOOM_LOCATION_UNKNOWN, &peer_view_op));
+  const loom_value_id_t references[] = {
+      buffers[0], loom_buffer_view_result(restricted_view_op),
+      loom_buffer_view_result(peer_view_op), buffers[3]};
+  const loom_type_t reference_types[] = {
       loom_type_buffer(),
-      loom_type_buffer(),
-      loom_type_buffer(),
+      loom_module_value_type(module_, references[1]),
+      loom_module_value_type(module_, references[2]),
       loom_type_buffer(),
   };
   loom_op_t* begin_op = nullptr;
   IREE_ASSERT_OK(loom_buffer_restrict_begin_build(
-      &builder_, inputs, 2, inputs + 2, 2, buffer_types,
-      IREE_ARRAYSIZE(buffer_types), LOOM_LOCATION_UNKNOWN, &begin_op));
+      &builder_, references, 2, references + 2, 2, reference_types,
+      IREE_ARRAYSIZE(reference_types), LOOM_LOCATION_UNKNOWN, &begin_op));
   const loom_value_slice_t scoped =
       loom_buffer_restrict_begin_results(begin_op);
-  ASSERT_EQ(scoped.count, IREE_ARRAYSIZE(inputs));
+  ASSERT_EQ(scoped.count, IREE_ARRAYSIZE(references));
 
   loom_op_t* end_op = nullptr;
-  IREE_ASSERT_OK(
-      loom_buffer_restrict_end_build(&builder_, scoped.values, 1, buffer_types,
-                                     1, LOOM_LOCATION_UNKNOWN, &end_op));
+  IREE_ASSERT_OK(loom_buffer_restrict_end_build(
+      &builder_, scoped.values + 1, 1, reference_types + 1, 1,
+      LOOM_LOCATION_UNKNOWN, &end_op));
 
-  const loom_value_id_t layout = BuildDenseLayout();
-  const loom_value_id_t zero =
-      loom_index_constant_result(BuildOffsetConstant(0));
-  loom_op_t* views[IREE_ARRAYSIZE(inputs) + 1] = {};
-  for (size_t i = 0; i < IREE_ARRAYSIZE(inputs); ++i) {
-    IREE_ASSERT_OK(loom_buffer_view_build(&builder_, scoped.values[i], zero,
-                                          ViewType1D(16, layout),
-                                          LOOM_LOCATION_UNKNOWN, &views[i]));
-  }
+  loom_op_t* scoped_buffer_view_op = nullptr;
   IREE_ASSERT_OK(loom_buffer_view_build(
-      &builder_, loom_buffer_restrict_end_results(end_op).values[0], zero,
-      ViewType1D(16, layout), LOOM_LOCATION_UNKNOWN,
-      &views[IREE_ARRAYSIZE(inputs)]));
+      &builder_, scoped.values[0], zero, ViewType1D(16, layout),
+      LOOM_LOCATION_UNKNOWN, &scoped_buffer_view_op));
+  loom_op_t* peer_buffer_view_op = nullptr;
+  IREE_ASSERT_OK(loom_buffer_view_build(
+      &builder_, scoped.values[3], zero, ViewType1D(16, layout),
+      LOOM_LOCATION_UNKNOWN, &peer_buffer_view_op));
+  const loom_value_id_t views[] = {
+      loom_buffer_view_result(scoped_buffer_view_op), scoped.values[1],
+      scoped.values[2], loom_buffer_view_result(peer_buffer_view_op),
+      loom_buffer_restrict_end_results(end_op).values[0]};
 
   loom_value_fact_table_t facts = {};
   ComputeFacts(&facts);
   loom_view_region_table_t table = {};
   Analyze(&facts, &table);
-  const loom_view_region_t* regions[IREE_ARRAYSIZE(inputs) + 1] = {};
+  const loom_view_region_t* regions[IREE_ARRAYSIZE(views)] = {};
   for (size_t i = 0; i < IREE_ARRAYSIZE(regions); ++i) {
-    IREE_ASSERT_OK(loom_view_region_table_get(
-        &table, loom_buffer_view_result(views[i]), &regions[i]));
+    IREE_ASSERT_OK(loom_view_region_table_get(&table, views[i], &regions[i]));
     ASSERT_NE(regions[i], nullptr);
   }
 

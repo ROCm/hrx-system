@@ -29,6 +29,14 @@ extern "C" {
 // drops changing ranges independently of stable origin and footprint facts.
 extern const loom_value_fact_domain_t loom_view_fact_domain;
 
+// Refines one typed view with a source restrict association while preserving
+// its physical root, byte coordinates, footprint, and storage properties.
+// A zero association removes an active scope at its source boundary.
+iree_status_t loom_view_reference_refine_restrict_access(
+    loom_fact_context_t* context, loom_value_id_t source_value_id,
+    loom_value_facts_t source_facts, loom_type_t source_type,
+    loom_value_fact_restrict_access_t restrict_access, loom_value_facts_t* out);
+
 // Summarizes an arbitrary record selected along a storage view's leading axis.
 // The remaining axes describe one record. Selection preserves the allocation
 // identity and memory space while its base ranges across every storage slot.

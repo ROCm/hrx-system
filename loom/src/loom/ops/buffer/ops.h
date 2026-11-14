@@ -491,7 +491,7 @@ iree_status_t loom_buffer_distance_build(
     loom_op_t** out_op);
 iree_status_t loom_buffer_distance_canonicalize(loom_op_t* op, loom_rewriter_t* rewriter);
 
-// LOOM_OP_BUFFER_RESTRICT_BEGIN: Begin a source-language restrict access scope. Restricted roots name independent access paths; peers name the other incoming storage paths covered by the same scope. The results preserve physical storage identity and differ only in access-provenance facts. A restrict scope may prove that overlapping accesses do not occur in a defined program only when at least one access writes. It does not prove that roots are physically disjoint, and shared read-only storage remains valid. buffer.restrict.end removes the scope from values that leave it.
+// LOOM_OP_BUFFER_RESTRICT_BEGIN: Begin a source-language restrict access scope over buffer roots and typed views. Restricted references name independent access paths; peers name the other incoming storage paths covered by the same scope. The results preserve physical storage identity and differ only in access-provenance facts. A restrict scope may prove that overlapping accesses do not occur in a defined program only when at least one access writes. It does not prove that roots are physically disjoint, and shared read-only storage remains valid. buffer.restrict.end removes the scope from values that leave it.
 // %source_r = buffer.restrict.begin %source : buffer
 LOOM_DEFINE_ISA(loom_buffer_restrict_begin_isa, LOOM_OP_BUFFER_RESTRICT_BEGIN)
 LOOM_DEFINE_SEGMENTED_OPERANDS(loom_buffer_restrict_begin_restricted, 0)
@@ -516,15 +516,15 @@ iree_status_t loom_buffer_restrict_begin_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
 
-// LOOM_OP_BUFFER_RESTRICT_END: End source-language restrict access scopes carried by buffer roots. The results preserve every physical storage fact while removing the scoped access association, preventing it from escaping a lexical or invocation boundary.
+// LOOM_OP_BUFFER_RESTRICT_END: End source-language restrict access scopes carried by buffer roots or typed views. The results preserve every physical storage fact while removing the scoped access association, preventing it from escaping a lexical or invocation boundary.
 // %returned = buffer.restrict.end %scoped : buffer
 LOOM_DEFINE_ISA(loom_buffer_restrict_end_isa, LOOM_OP_BUFFER_RESTRICT_END)
-LOOM_DEFINE_VARIADIC_OPERANDS(loom_buffer_restrict_end_buffers, 0)
+LOOM_DEFINE_VARIADIC_OPERANDS(loom_buffer_restrict_end_references, 0)
 LOOM_DEFINE_VARIADIC_RESULTS(loom_buffer_restrict_end_results, 0)
 iree_status_t loom_buffer_restrict_end_build(
     loom_builder_t* builder,
-    const loom_value_id_t* buffers,
-    iree_host_size_t buffers_count,
+    const loom_value_id_t* references,
+    iree_host_size_t references_count,
     const loom_type_t* result_types,
     iree_host_size_t result_count,
     loom_location_id_t location,
@@ -534,6 +534,9 @@ iree_status_t loom_buffer_restrict_end_facts(
     const loom_module_t* module, const loom_op_t* op,
     const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts);
+iree_status_t loom_buffer_restrict_end_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter);
 
 // Returns the vtable array for the buffer dialect.
 const loom_op_vtable_t* const* loom_buffer_dialect_vtables(
