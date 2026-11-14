@@ -6,8 +6,10 @@
 
 #include "iree/base/threading/thread.h"
 
+#include <cerrno>
 #include <chrono>
 #include <cstring>
+#include <string>
 #include <thread>
 
 #include "iree/base/internal/atomics.h"
@@ -19,6 +21,7 @@
 
 #if defined(IREE_PLATFORM_LINUX)
 #include <sched.h>
+#include <unistd.h>
 #endif  // IREE_PLATFORM_LINUX
 
 namespace {
@@ -325,6 +328,81 @@ TEST(ThreadTest, InvalidAllocatorClearsOutput) {
 }
 
 #if defined(IREE_PLATFORM_LINUX)
+TEST(ThreadTest, RejectedAffinityReportsTargetThread) {
+  // A missing CPU is rejected by the real kernel without requiring a cgroup
+  // mutation or changing the test thread's own placement.
+  constexpr int rejected_cpu = CPU_SETSIZE - 2;
+  ASSERT_EQ(0, access("/sys/devices/system/cpu", F_OK));
+  for (int cpu = rejected_cpu; cpu < CPU_SETSIZE; ++cpu) {
+    const std::string path =
+        "/sys/devices/system/cpu/cpu" + std::to_string(cpu);
+    if (access(path.c_str(), F_OK) == 0) {
+      GTEST_SKIP() << "CPU " << cpu << " exists on this system";
+    }
+    ASSERT_EQ(ENOENT, errno);
+  }
+
+  cpu_set_t inherited;
+  ASSERT_EQ(0, sched_getaffinity(0, sizeof(inherited), &inherited));
+  int selected_cpu = 0;
+  while (selected_cpu < CPU_SETSIZE && !CPU_ISSET(selected_cpu, &inherited)) {
+    ++selected_cpu;
+  }
+  ASSERT_LT(selected_cpu, CPU_SETSIZE);
+  iree_thread_create_params_t params = {
+      .name = IREE_SV("affinity-test"),
+      .create_suspended = true,
+      .initial_affinity =
+          {
+              .id_assigned = 1,
+              .id = static_cast<uint32_t>(selected_cpu),
+          },
+  };
+  bool called = false;
+  const iree_thread_entry_t entry = +[](void* arg) -> int {
+    *static_cast<bool*>(arg) = true;
+    return 0;
+  };
+  iree_thread_t* thread = nullptr;
+  IREE_ASSERT_OK(iree_thread_create(entry, &called, params,
+                                    iree_allocator_system(), &thread));
+
+  iree_thread_affinity_t rejected = {
+      .id_assigned = 1,
+      .id = rejected_cpu,
+      .smt = 1,
+  };
+  iree_status_t status = iree_thread_request_affinity(thread, rejected);
+  EXPECT_EQ(IREE_STATUS_INVALID_ARGUMENT, iree_status_code(status));
+#if IREE_STATUS_FEATURES & IREE_STATUS_FEATURE_ANNOTATIONS
+  const std::string message = iree::Status::ToString(status);
+  EXPECT_THAT(message, ::testing::HasSubstr("thread 'affinity-test'"));
+  EXPECT_THAT(message, ::testing::HasSubstr(
+                           "requested CPUs [" + std::to_string(rejected_cpu) +
+                           "-" + std::to_string(rejected_cpu + 1) + "]"));
+  EXPECT_THAT(message, ::testing::HasSubstr(
+                           "observed thread affinity after rejection [" +
+                           std::to_string(selected_cpu) + "]"));
+  EXPECT_THAT(message, ::testing::HasSubstr("errno " + std::to_string(EINVAL)));
+#endif  // IREE_STATUS_FEATURE_ANNOTATIONS
+  iree_status_free(status);
+  EXPECT_FALSE(called);
+  iree_thread_resume(thread);
+  iree_thread_release(thread);
+  EXPECT_TRUE(called);
+
+  // The same native rejection during startup must retire the suspended native
+  // thread without ever admitting the user's entry routine.
+  called = false;
+  params.create_suspended = false;
+  params.initial_affinity = rejected;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        iree_thread_create(entry, &called, params,
+                                           iree_allocator_system(), &thread));
+  EXPECT_EQ(nullptr, thread);
+  EXPECT_FALSE(called);
+}
+
 TEST(ThreadTest, CpuAffinityBeforeEntry) {
   cpu_set_t allowed;
   ASSERT_EQ(0, sched_getaffinity(0, sizeof(allowed), &allowed));
