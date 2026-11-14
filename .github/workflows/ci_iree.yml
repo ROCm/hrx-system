@@ -1086,6 +1086,7 @@ jobs:
             --config=windows-x86_64
             --config=windows-clang-cl
             --config=rocm-ci-cache
+            --@bazel_tools//tools/test:incompatible_use_default_test_toolchain=false
             --build_runfile_links
             --remote_download_outputs=all
             --remote_verify_downloads
