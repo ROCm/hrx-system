@@ -6,6 +6,7 @@
 
 #include "iree/tooling/device_profiling.h"
 
+#include <inttypes.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -81,6 +82,13 @@ IREE_FLAG(
     "active. 0 disables periodic flushing. The selected HAL backend must\n"
     "support safe in-flight profiling snapshots for the requested data.\n"
     "Sink failures are reported when profiling ends.");
+IREE_FLAG(
+    bool, device_profiling_allow_partial, false,
+    "Lets each device in a multi-device group keep the largest subset of\n"
+    "--device_profiling_mode families it implements instead of failing the\n"
+    "whole group when one device reports a family as unimplemented. A device\n"
+    "that implements none of the requested families is left unprofiled. Each\n"
+    "reduction is reported on stderr.");
 IREE_FLAG(
     bool, print_device_statistics, false,
     "Enables a lightweight HAL profiling session and prints aggregate device\n"
@@ -427,6 +435,72 @@ static void iree_hal_profiling_from_flags_release_devices(
   iree_allocator_free(profiling->host_allocator, profiling->devices);
 }
 
+// Retries |device| with the largest subset of the requested data families it
+// implements. Drivers validate families before touching the sink, so rejected
+// attempts leave no session behind; the first accepted subset is final.
+// Subsets are tried in decreasing size, so the result is a maximum-size subset.
+// Consumes |unimplemented_status|. An empty subset leaves the device
+// unprofiled and returns OK with |out_options->data_families| cleared.
+static iree_status_t iree_hal_profiling_from_flags_begin_partial(
+    iree_hal_device_t* device, iree_host_size_t device_index,
+    const iree_hal_device_profiling_options_t* options,
+    iree_status_t unimplemented_status,
+    iree_hal_device_profiling_options_t* out_options) {
+  uint64_t family_bits[64];
+  uint32_t family_count = 0;
+  for (uint32_t bit = 0; bit < 64; ++bit) {
+    if (options->data_families & (1ull << bit)) {
+      family_bits[family_count++] = 1ull << bit;
+    }
+  }
+  if (family_count == 0 || family_count > 16) {
+    return unimplemented_status;
+  }
+  const uint32_t subset_count = 1u << family_count;
+  for (uint32_t kept = family_count - 1; kept > 0; --kept) {
+    for (uint32_t subset = subset_count - 1; subset > 0; --subset) {
+      uint32_t ones = 0;
+      uint64_t families = 0;
+      for (uint32_t j = 0; j < family_count; ++j) {
+        if (subset & (1u << j)) {
+          ++ones;
+          families |= family_bits[j];
+        }
+      }
+      if (ones != kept) {
+        continue;
+      }
+      *out_options = *options;
+      out_options->data_families = families;
+      iree_status_t status = iree_hal_device_profiling_begin(device, out_options);
+      if (iree_status_is_ok(status)) {
+        iree_status_ignore(unimplemented_status);
+        fprintf(stderr,
+                "device_profiling: device %" PRIhsz
+                " keeps data families 0x%" PRIx64 " of requested 0x%" PRIx64
+                " (--device_profiling_allow_partial)\n",
+                device_index, (uint64_t)families,
+                (uint64_t)options->data_families);
+        return iree_ok_status();
+      }
+      if (!iree_status_is_unimplemented(status)) {
+        iree_status_ignore(unimplemented_status);
+        return status;
+      }
+      iree_status_ignore(status);
+    }
+  }
+  iree_status_ignore(unimplemented_status);
+  *out_options = *options;
+  out_options->data_families = IREE_HAL_DEVICE_PROFILING_DATA_NONE;
+  fprintf(stderr,
+          "device_profiling: device %" PRIhsz
+          " implements none of the requested data families 0x%" PRIx64
+          "; left unprofiled (--device_profiling_allow_partial)\n",
+          device_index, (uint64_t)options->data_families);
+  return iree_ok_status();
+}
+
 static iree_status_t iree_hal_begin_device_list_profiling_from_flags(
     iree_host_size_t device_count, iree_hal_device_t* const* devices,
     iree_allocator_t host_allocator,
@@ -574,12 +648,20 @@ static iree_status_t iree_hal_begin_device_list_profiling_from_flags(
     options.sink = sink;
     for (iree_host_size_t i = 0; i < device_count && iree_status_is_ok(status);
          ++i) {
-      status = iree_hal_device_profiling_begin(profiling->devices[i], &options);
+      iree_hal_device_profiling_options_t device_options = options;
+      status = iree_hal_device_profiling_begin(profiling->devices[i],
+                                               &device_options);
+      if (FLAG_device_profiling_allow_partial &&
+          iree_status_is_unimplemented(status)) {
+        status = iree_hal_profiling_from_flags_begin_partial(
+            profiling->devices[i], i, &options, status, &device_options);
+      }
       profiling->profile_active[i] =
           iree_status_is_ok(status) &&
-          (options.data_families != IREE_HAL_DEVICE_PROFILING_DATA_NONE ||
+          (device_options.data_families !=
+               IREE_HAL_DEVICE_PROFILING_DATA_NONE ||
            iree_hal_device_profiling_options_requests_lightweight_statistics(
-               &options));
+               &device_options));
     }
   }
   if (iree_status_is_ok(status)) {
