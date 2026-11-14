@@ -1,0 +1,760 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+"""Moves Bazel-selected Windows test runfiles through a shared CAS."""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import http.client
+import json
+import os
+import pprint
+import shutil
+import stat
+import subprocess
+import sys
+import tempfile
+from dataclasses import dataclass
+from pathlib import Path, PurePosixPath
+from typing import Any, Iterable
+from urllib.parse import urlsplit
+
+SCHEMA_VERSION = 1
+MANIFEST_ENVIRONMENT_VARIABLE = "IREE_WINDOWS_CACHE_HANDOFF_MANIFEST"
+RUNFILES_PATH_BEGIN = "__IREE_BAZEL_RUNFILE_PATH_BEGIN__"
+RUNFILES_PATH_END = "__IREE_BAZEL_RUNFILE_PATH_END__"
+HANDOFF_PATH_BEGIN = "__IREE_CACHE_HANDOFF_RUNFILE_BEGIN__"
+HANDOFF_PATH_END = "__IREE_CACHE_HANDOFF_RUNFILE_END__"
+
+
+class HandoffError(RuntimeError):
+    """Raised when the handoff contract cannot be represented or verified."""
+
+
+@dataclass(frozen=True)
+class Runfile:
+    logical_path: str
+    physical_path: Path | None
+
+
+class CasClient:
+    """Streams immutable blobs to and from bazel-remote's HTTP CAS surface."""
+
+    def __init__(self, base_url: str, *, timeout_seconds: int = 60):
+        parsed = urlsplit(base_url)
+        if parsed.scheme not in ("http", "https") or not parsed.hostname:
+            raise HandoffError(f"invalid CAS base URL: {base_url!r}")
+        if parsed.query or parsed.fragment:
+            raise HandoffError("CAS base URL cannot contain a query or fragment")
+        self._parsed = parsed
+        self._timeout_seconds = timeout_seconds
+        self.base_url = base_url.rstrip("/")
+
+    def _connection(self) -> http.client.HTTPConnection:
+        connection_type = (
+            http.client.HTTPSConnection
+            if self._parsed.scheme == "https"
+            else http.client.HTTPConnection
+        )
+        return connection_type(
+            self._parsed.hostname,
+            self._parsed.port,
+            timeout=self._timeout_seconds,
+        )
+
+    def _path(self, digest: str) -> str:
+        prefix = self._parsed.path.rstrip("/")
+        return f"{prefix}/cas/{digest}"
+
+    def put(self, source: Path, digest: str, size: int) -> None:
+        connection = self._connection()
+        try:
+            connection.putrequest("PUT", self._path(digest))
+            connection.putheader("Content-Length", str(size))
+            connection.putheader("Content-Type", "application/octet-stream")
+            connection.endheaders()
+            with source.open("rb") as stream:
+                while chunk := stream.read(1024 * 1024):
+                    connection.send(chunk)
+            response = connection.getresponse()
+            body = response.read(4096)
+            if response.status not in (200, 201, 204):
+                raise HandoffError(
+                    f"CAS PUT {digest} failed with HTTP {response.status}: "
+                    f"{body.decode(errors='replace')}"
+                )
+        finally:
+            connection.close()
+
+    def get(self, destination: Path, digest: str, size: int) -> None:
+        connection = self._connection()
+        temporary_path = destination.with_name(destination.name + ".partial")
+        hasher = hashlib.sha256()
+        written = 0
+        try:
+            connection.request(
+                "GET",
+                self._path(digest),
+                headers={"Accept-Encoding": "identity"},
+            )
+            response = connection.getresponse()
+            if response.status != 200:
+                body = response.read(4096)
+                raise HandoffError(
+                    f"CAS GET {digest} failed with HTTP {response.status}: "
+                    f"{body.decode(errors='replace')}"
+                )
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            with temporary_path.open("wb") as stream:
+                while chunk := response.read(1024 * 1024):
+                    written += len(chunk)
+                    if written > size:
+                        raise HandoffError(
+                            f"CAS blob {digest} exceeded declared size {size}"
+                        )
+                    hasher.update(chunk)
+                    stream.write(chunk)
+            actual_digest = hasher.hexdigest()
+            if written != size or actual_digest != digest:
+                raise HandoffError(
+                    f"CAS blob {digest} verified as {actual_digest}/{written}, "
+                    f"expected {digest}/{size}"
+                )
+            temporary_path.replace(destination)
+        finally:
+            connection.close()
+            temporary_path.unlink(missing_ok=True)
+
+
+def _decode_runfiles_value(value: str) -> str:
+    return value.replace(r"\s", " ").replace(r"\n", "\n").replace(r"\b", "\\")
+
+
+def parse_runfiles_manifest(path: Path) -> list[Runfile]:
+    """Parses Bazel's escaped two-column runfiles manifest format."""
+    runfiles = []
+    logical_paths = set()
+    casefolded_paths: dict[str, str] = {}
+    with path.open(encoding="utf-8", newline="\n") as stream:
+        for line_number, line in enumerate(stream, 1):
+            line = line.rstrip("\r\n")
+            escaped = line.startswith(" ")
+            logical_path, separator, physical_path = line[escaped:].partition(" ")
+            if not separator:
+                raise HandoffError(
+                    f"{path}:{line_number}: invalid runfiles manifest entry"
+                )
+            if escaped:
+                logical_path = _decode_runfiles_value(logical_path)
+                physical_path = _decode_runfiles_value(physical_path)
+            _validate_logical_path(logical_path)
+            if logical_path in logical_paths:
+                raise HandoffError(f"duplicate runfile path {logical_path!r}")
+            logical_paths.add(logical_path)
+            casefolded = logical_path.casefold()
+            other_path = casefolded_paths.get(casefolded)
+            if other_path is not None:
+                raise HandoffError(
+                    f"case-colliding runfile paths {other_path!r} and {logical_path!r}"
+                )
+            casefolded_paths[casefolded] = logical_path
+            runfiles.append(
+                Runfile(
+                    logical_path=logical_path,
+                    physical_path=Path(physical_path) if physical_path else None,
+                )
+            )
+    return runfiles
+
+
+def _validate_logical_path(value: str) -> None:
+    path = PurePosixPath(value)
+    if (
+        not value
+        or path.is_absolute()
+        or path.as_posix() != value
+        or ".." in path.parts
+        or "\\" in value
+    ):
+        raise HandoffError(f"invalid logical runfile path: {value!r}")
+
+
+def _sha256(path: Path) -> tuple[str, int]:
+    hasher = hashlib.sha256()
+    size = 0
+    with path.open("rb") as stream:
+        while chunk := stream.read(1024 * 1024):
+            hasher.update(chunk)
+            size += len(chunk)
+    return hasher.hexdigest(), size
+
+
+def _load_json_object(path: Path) -> dict[str, Any]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8-sig"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise HandoffError(f"failed to read {path}: {exc}") from exc
+    if not isinstance(value, dict):
+        raise HandoffError(f"{path} must contain a JSON object")
+    return value
+
+
+def _configured_rule(path: Path) -> tuple[str, dict[str, dict[str, Any]]]:
+    payload = _load_json_object(path)
+    results = payload.get("results")
+    if not isinstance(results, list) or len(results) != 1:
+        raise HandoffError(f"{path} must describe exactly one configured target")
+    rule = results[0].get("target", {}).get("rule")
+    if not isinstance(rule, dict):
+        raise HandoffError(f"{path} does not describe a configured rule")
+    label = rule.get("name")
+    attributes = rule.get("attribute")
+    if not isinstance(label, str) or not isinstance(attributes, list):
+        raise HandoffError(f"{path} has malformed configured rule metadata")
+    return label, {
+        attribute["name"]: attribute
+        for attribute in attributes
+        if isinstance(attribute, dict) and isinstance(attribute.get("name"), str)
+    }
+
+
+def _normalize_main_repository_label(label: str) -> str:
+    return label[2:] if label.startswith("@@//") else label
+
+
+def _string_attribute(attributes: dict[str, dict[str, Any]], name: str) -> str:
+    value = attributes.get(name, {}).get("stringValue", "")
+    if not isinstance(value, str):
+        raise HandoffError(f"configured attribute {name} is not a string")
+    return value
+
+
+def _string_list_attribute(
+    attributes: dict[str, dict[str, Any]], name: str
+) -> list[str]:
+    value = attributes.get(name, {}).get("stringListValue", [])
+    if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
+        raise HandoffError(f"configured attribute {name} is not a string list")
+    return value
+
+
+def _string_dict_attribute(
+    attributes: dict[str, dict[str, Any]], name: str
+) -> dict[str, str]:
+    entries = attributes.get(name, {}).get("stringDictValue", [])
+    if not isinstance(entries, list):
+        raise HandoffError(f"configured attribute {name} is not a string dictionary")
+    result = {}
+    for entry in entries:
+        if (
+            not isinstance(entry, dict)
+            or not isinstance(entry.get("key"), str)
+            or not isinstance(entry.get("value"), str)
+        ):
+            raise HandoffError(f"configured attribute {name} is malformed")
+        result[entry["key"]] = entry["value"]
+    return result
+
+
+def _bool_attribute(attributes: dict[str, dict[str, Any]], name: str) -> bool:
+    value = attributes.get(name, {}).get("booleanValue", False)
+    if not isinstance(value, bool):
+        raise HandoffError(f"configured attribute {name} is not boolean")
+    return value
+
+
+def _int_attribute(attributes: dict[str, dict[str, Any]], name: str) -> int:
+    value = attributes.get(name, {}).get("intValue", 0)
+    if not isinstance(value, int):
+        raise HandoffError(f"configured attribute {name} is not an integer")
+    return value
+
+
+def _physical_to_logical(runfiles: Iterable[Runfile]) -> dict[Path, list[str]]:
+    result: dict[Path, list[str]] = {}
+    for runfile in runfiles:
+        if runfile.physical_path is None:
+            continue
+        path = runfile.physical_path.resolve(strict=True)
+        result.setdefault(path, []).append(runfile.logical_path)
+    return result
+
+
+def _logical_path_for_physical(
+    value: str,
+    *,
+    execution_root: Path,
+    physical_to_logical: dict[Path, list[str]],
+) -> str:
+    path = Path(value)
+    if not path.is_absolute():
+        path = execution_root / path
+    logical_paths = physical_to_logical.get(path.resolve(strict=True), [])
+    if len(logical_paths) != 1:
+        raise HandoffError(
+            f"configured runfile path {value!r} maps to {len(logical_paths)} logical paths"
+        )
+    return logical_paths[0]
+
+
+def _convert_marked_value(
+    value: str,
+    *,
+    execution_root: Path,
+    physical_to_logical: dict[Path, list[str]],
+) -> str:
+    result = ""
+    cursor = 0
+    while cursor < len(value):
+        start = value.find(RUNFILES_PATH_BEGIN, cursor)
+        if start < 0:
+            result += value[cursor:]
+            break
+        result += value[cursor:start]
+        path_start = start + len(RUNFILES_PATH_BEGIN)
+        end = value.find(RUNFILES_PATH_END, path_start)
+        if end < 0:
+            raise HandoffError("configured runfile path marker is unterminated")
+        logical_path = _logical_path_for_physical(
+            value[path_start:end],
+            execution_root=execution_root,
+            physical_to_logical=physical_to_logical,
+        )
+        result += HANDOFF_PATH_BEGIN + logical_path + HANDOFF_PATH_END
+        cursor = end + len(RUNFILES_PATH_END)
+    return result
+
+
+def _manifest_entry(runfile: Runfile, cas: CasClient) -> dict[str, Any]:
+    if runfile.physical_path is None:
+        return {"path": runfile.logical_path, "empty": True}
+    path = runfile.physical_path.resolve(strict=True)
+    if not path.is_file():
+        raise HandoffError(f"runfile is not a regular file: {path}")
+    digest, size = _sha256(path)
+    cas.put(path, digest, size)
+    return {
+        "path": runfile.logical_path,
+        "sha256": digest,
+        "size": size,
+        "executable": os.access(path, os.X_OK),
+    }
+
+
+def emit_handoff_package(
+    *,
+    target_metadata_path: Path,
+    provider_metadata_path: Path,
+    execution_root: Path,
+    cas_url: str,
+    output_dir: Path,
+) -> dict[str, Any]:
+    label, attributes = _configured_rule(target_metadata_path)
+    provider_metadata = _load_json_object(provider_metadata_path)
+    provider_label = provider_metadata.get("label")
+    if not isinstance(provider_label, str) or _normalize_main_repository_label(
+        provider_label
+    ) != _normalize_main_repository_label(label):
+        raise HandoffError("configured rule and provider labels differ")
+    executable_value = provider_metadata.get("executable")
+    if not isinstance(executable_value, str) or not executable_value:
+        raise HandoffError("configured target has no executable")
+    executable_path = Path(executable_value)
+    if not executable_path.is_absolute():
+        executable_path = execution_root / executable_path
+    executable_path = executable_path.resolve(strict=True)
+    runfiles_manifest_path = Path(str(executable_path) + ".runfiles_manifest")
+    if not runfiles_manifest_path.is_file():
+        raise HandoffError(
+            f"Bazel runfiles manifest is missing: {runfiles_manifest_path}"
+        )
+    runfiles = parse_runfiles_manifest(runfiles_manifest_path)
+    physical_to_logical = _physical_to_logical(runfiles)
+    executable_logical_path = _logical_path_for_physical(
+        str(executable_path),
+        execution_root=execution_root,
+        physical_to_logical=physical_to_logical,
+    )
+
+    argument_provider_count = provider_metadata.get("argument_provider_count")
+    if argument_provider_count not in (0, 1):
+        raise HandoffError("configured target has ambiguous argument providers")
+    if argument_provider_count:
+        arguments = provider_metadata.get("arguments")
+        marked_arguments = provider_metadata.get("marked_arguments")
+        if (
+            not isinstance(arguments, list)
+            or not isinstance(marked_arguments, list)
+            or len(arguments) != len(marked_arguments)
+        ):
+            raise HandoffError("configured argument provider is malformed")
+        converted_arguments = [
+            _convert_marked_value(
+                value,
+                execution_root=execution_root,
+                physical_to_logical=physical_to_logical,
+            )
+            for value in marked_arguments
+        ]
+        if [
+            value.replace(RUNFILES_PATH_BEGIN, "").replace(RUNFILES_PATH_END, "")
+            for value in marked_arguments
+        ] != arguments:
+            raise HandoffError("configured argument markers do not match arguments")
+    else:
+        converted_arguments = _string_list_attribute(attributes, "args")
+
+    environment = provider_metadata.get("environment")
+    marked_environment = provider_metadata.get("marked_environment")
+    inherited_environment = provider_metadata.get("inherited_environment")
+    if not isinstance(environment, dict) or any(
+        not isinstance(key, str) or not isinstance(value, str)
+        for key, value in environment.items()
+    ):
+        raise HandoffError("configured run environment is malformed")
+    if not isinstance(marked_environment, dict) or any(
+        not isinstance(key, str) or not isinstance(value, str)
+        for key, value in marked_environment.items()
+    ):
+        raise HandoffError("configured marked environment is malformed")
+    if not isinstance(inherited_environment, list) or any(
+        not isinstance(value, str) for value in inherited_environment
+    ):
+        raise HandoffError("configured inherited environment is malformed")
+    environment = dict(environment)
+    for name, marked_value in marked_environment.items():
+        if name not in environment:
+            raise HandoffError(f"marked environment variable {name} is not configured")
+        environment[name] = _convert_marked_value(
+            marked_value,
+            execution_root=execution_root,
+            physical_to_logical=physical_to_logical,
+        )
+
+    cas = CasClient(cas_url)
+    entries = [_manifest_entry(runfile, cas) for runfile in runfiles]
+    target_name = label.rsplit(":", 1)[-1].replace("/", "_")
+    shard_count = _int_attribute(attributes, "shard_count")
+    test_metadata = {
+        "arguments": converted_arguments,
+        "environment": environment,
+        "inherited_environment": inherited_environment,
+        "size": _string_attribute(attributes, "size"),
+        "timeout": _string_attribute(attributes, "timeout"),
+        "flaky": _bool_attribute(attributes, "flaky"),
+        "local": _bool_attribute(attributes, "local"),
+        "tags": _string_list_attribute(attributes, "tags"),
+        "exec_properties": _string_dict_attribute(attributes, "exec_properties"),
+    }
+    if shard_count >= 0:
+        test_metadata["shard_count"] = shard_count
+    workspace = executable_logical_path.split("/", 1)[0]
+    manifest = {
+        "schema_version": SCHEMA_VERSION,
+        "source_label": label,
+        "cas_url": cas.base_url,
+        "workspace": workspace,
+        "executable": executable_logical_path,
+        "test": test_metadata,
+        "runfiles": entries,
+    }
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    manifest_name = target_name + ".json"
+    (output_dir / manifest_name).write_text(
+        json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    build_attributes: dict[str, Any] = {
+        "name": target_name,
+        "manifest": manifest_name,
+        "env_inherit": inherited_environment,
+        "size": test_metadata["size"],
+        "timeout": test_metadata["timeout"],
+        "flaky": test_metadata["flaky"],
+        "local": test_metadata["local"],
+        "tags": test_metadata["tags"],
+        "exec_properties": test_metadata["exec_properties"],
+    }
+    if "shard_count" in test_metadata:
+        build_attributes["shard_count"] = test_metadata["shard_count"]
+    lines = [
+        'load("//build_tools/windows/cache_handoff:build_defs.bzl", "windows_cache_handoff_test")',
+        "",
+        "windows_cache_handoff_test(",
+    ]
+    for name, value in build_attributes.items():
+        lines.append(f"    {name} = {pprint.pformat(value, sort_dicts=True)},")
+    lines.extend([")", ""])
+    (output_dir / "BUILD.bazel").write_text("\n".join(lines), encoding="utf-8")
+    return manifest
+
+
+def _resolve_handoff_value(value: str, runfiles_root: Path) -> str:
+    result = ""
+    cursor = 0
+    while cursor < len(value):
+        start = value.find(HANDOFF_PATH_BEGIN, cursor)
+        if start < 0:
+            result += value[cursor:]
+            break
+        result += value[cursor:start]
+        path_start = start + len(HANDOFF_PATH_BEGIN)
+        end = value.find(HANDOFF_PATH_END, path_start)
+        if end < 0:
+            raise HandoffError("handoff runfile path marker is unterminated")
+        logical_path = value[path_start:end]
+        _validate_logical_path(logical_path)
+        result += str(runfiles_root / PurePosixPath(logical_path))
+        cursor = end + len(HANDOFF_PATH_END)
+    return result
+
+
+def _encode_runfiles_value(value: str) -> str:
+    return value.replace("\\", r"\b").replace("\n", r"\n").replace(" ", r"\s")
+
+
+def _write_runfiles_manifest(
+    path: Path, entries: list[dict[str, Any]], root: Path
+) -> None:
+    lines = []
+    for entry in entries:
+        logical_path = entry["path"]
+        physical_path = str(root / PurePosixPath(logical_path))
+        if any(
+            character in logical_path + physical_path for character in (" ", "\n", "\\")
+        ):
+            lines.append(
+                " "
+                + _encode_runfiles_value(logical_path)
+                + " "
+                + _encode_runfiles_value(physical_path)
+            )
+        else:
+            lines.append(f"{logical_path} {physical_path}")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _materialize_runfiles(manifest: dict[str, Any], root: Path) -> None:
+    cas_url = manifest.get("cas_url")
+    entries = manifest.get("runfiles")
+    if not isinstance(cas_url, str) or not isinstance(entries, list):
+        raise HandoffError("handoff manifest has malformed CAS metadata")
+    cas = CasClient(cas_url)
+    content_root = root / ".cas"
+    for entry in entries:
+        if not isinstance(entry, dict) or not isinstance(entry.get("path"), str):
+            raise HandoffError("handoff manifest has a malformed runfile")
+        logical_path = entry["path"]
+        _validate_logical_path(logical_path)
+        destination = root / PurePosixPath(logical_path)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        if entry.get("empty") is True:
+            destination.touch()
+            continue
+        digest = entry.get("sha256")
+        size = entry.get("size")
+        if (
+            not isinstance(digest, str)
+            or len(digest) != 64
+            or not isinstance(size, int)
+            or size < 0
+        ):
+            raise HandoffError(f"runfile {logical_path!r} has invalid CAS metadata")
+        content_path = content_root / digest
+        if not content_path.exists():
+            cas.get(content_path, digest, size)
+        shutil.copyfile(content_path, destination)
+        if entry.get("executable") is True:
+            destination.chmod(destination.stat().st_mode | stat.S_IXUSR)
+
+
+def _find_manifest_from_environment() -> Path:
+    value = os.environ.get(MANIFEST_ENVIRONMENT_VARIABLE)
+    if not value:
+        raise HandoffError(f"{MANIFEST_ENVIRONMENT_VARIABLE} is not set")
+    path = Path(value)
+    if path.is_absolute() and path.is_file():
+        return path
+    candidates = [Path.cwd() / path]
+    test_srcdir = os.environ.get("TEST_SRCDIR")
+    test_workspace = os.environ.get("TEST_WORKSPACE")
+    if test_srcdir and test_workspace:
+        candidates.append(Path(test_srcdir) / test_workspace / path)
+    matches = [candidate for candidate in candidates if candidate.is_file()]
+    if len(matches) != 1:
+        raise HandoffError(f"cannot resolve {MANIFEST_ENVIRONMENT_VARIABLE}={value!r}")
+    return matches[0]
+
+
+def run_handoff_test(manifest_path: Path) -> int:
+    manifest = _load_json_object(manifest_path)
+    if manifest.get("schema_version") != SCHEMA_VERSION:
+        raise HandoffError("unsupported handoff manifest schema")
+    test = manifest.get("test")
+    entries = manifest.get("runfiles")
+    executable = manifest.get("executable")
+    workspace = manifest.get("workspace")
+    if (
+        not isinstance(test, dict)
+        or not isinstance(entries, list)
+        or not isinstance(executable, str)
+        or not isinstance(workspace, str)
+    ):
+        raise HandoffError("handoff manifest is malformed")
+    _validate_logical_path(executable)
+    _validate_logical_path(workspace)
+    test_tmpdir = Path(os.environ.get("TEST_TMPDIR", tempfile.gettempdir()))
+    with tempfile.TemporaryDirectory(
+        prefix="iree-windows-cache-handoff-", dir=test_tmpdir
+    ) as temp_dir:
+        runfiles_root = Path(temp_dir) / "runfiles"
+        runfiles_root.mkdir()
+        _materialize_runfiles(manifest, runfiles_root)
+        subject_manifest = Path(temp_dir) / "MANIFEST"
+        _write_runfiles_manifest(subject_manifest, entries, runfiles_root)
+        executable_path = runfiles_root / PurePosixPath(executable)
+        workspace_root = runfiles_root / PurePosixPath(workspace)
+        if not executable_path.is_file() or not workspace_root.is_dir():
+            raise HandoffError("materialized test executable or workspace is missing")
+        arguments = test.get("arguments")
+        environment = test.get("environment")
+        if not isinstance(arguments, list) or any(
+            not isinstance(value, str) for value in arguments
+        ):
+            raise HandoffError("handoff test arguments are malformed")
+        if not isinstance(environment, dict) or any(
+            not isinstance(key, str) or not isinstance(value, str)
+            for key, value in environment.items()
+        ):
+            raise HandoffError("handoff test environment is malformed")
+        child_environment = dict(os.environ)
+        child_environment.update(
+            {
+                name: _resolve_handoff_value(value, runfiles_root)
+                for name, value in environment.items()
+            }
+        )
+        child_environment.update(
+            {
+                "RUNFILES_DIR": str(runfiles_root),
+                "RUNFILES_MANIFEST_FILE": str(subject_manifest),
+                "RUNFILES_MANIFEST_ONLY": "1" if os.name == "nt" else "0",
+                "TEST_SRCDIR": str(runfiles_root),
+                "TEST_WORKSPACE": workspace,
+            }
+        )
+        completed = subprocess.run(
+            [
+                str(executable_path),
+                *(_resolve_handoff_value(value, runfiles_root) for value in arguments),
+            ],
+            cwd=workspace_root,
+            env=child_environment,
+            check=False,
+        )
+        return completed.returncode
+
+
+def audit_consumer_execution(execution_log_path: Path, output_path: Path) -> None:
+    """Proves that the native consumer did not compile or link test products."""
+    try:
+        text = execution_log_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise HandoffError(f"failed to read {execution_log_path}: {exc}") from exc
+    decoder = json.JSONDecoder()
+    entries = []
+    position = 0
+    while position < len(text):
+        while position < len(text) and text[position].isspace():
+            position += 1
+        if position == len(text):
+            break
+        try:
+            entry, position = decoder.raw_decode(text, position)
+        except json.JSONDecodeError as exc:
+            raise HandoffError(f"invalid execution log: {exc}") from exc
+        if isinstance(entry, dict):
+            entries.append(entry)
+    forbidden = [
+        entry
+        for entry in entries
+        if entry.get("mnemonic") in ("CppCompile", "CppLink", "CppArchive")
+    ]
+    if forbidden:
+        details = [
+            {
+                "mnemonic": entry.get("mnemonic"),
+                "target": entry.get("targetLabel"),
+                "runner": entry.get("runner"),
+            }
+            for entry in forbidden
+        ]
+        raise HandoffError(
+            "native consumer executed C/C++ build actions: "
+            + json.dumps(details, sort_keys=True)
+        )
+    receipt = {
+        "entry_count": len(entries),
+        "mnemonics": sorted(
+            {
+                entry.get("mnemonic")
+                for entry in entries
+                if isinstance(entry.get("mnemonic"), str)
+            }
+        ),
+        "native_cpp_action_count": 0,
+    }
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(
+        json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+
+
+def _parse_arguments(argv: list[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    subparsers = parser.add_subparsers(dest="command", required=True)
+    emit_parser = subparsers.add_parser(
+        "emit", help="Upload runfiles and emit a Bazel test package"
+    )
+    emit_parser.add_argument("--target-metadata", type=Path, required=True)
+    emit_parser.add_argument("--provider-metadata", type=Path, required=True)
+    emit_parser.add_argument("--execution-root", type=Path, required=True)
+    emit_parser.add_argument("--cas-url", required=True)
+    emit_parser.add_argument("--output-dir", type=Path, required=True)
+    audit_parser = subparsers.add_parser(
+        "audit", help="Verify that the native consumer ran no C/C++ build actions"
+    )
+    audit_parser.add_argument("--execution-log", type=Path, required=True)
+    audit_parser.add_argument("--output", type=Path, required=True)
+    subparsers.add_parser("run", help="Materialize and execute one handoff test")
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> int:
+    arguments = _parse_arguments(sys.argv[1:] if argv is None else argv)
+    try:
+        if arguments.command == "emit":
+            emit_handoff_package(
+                target_metadata_path=arguments.target_metadata,
+                provider_metadata_path=arguments.provider_metadata,
+                execution_root=arguments.execution_root.resolve(strict=True),
+                cas_url=arguments.cas_url,
+                output_dir=arguments.output_dir,
+            )
+            return 0
+        if arguments.command == "audit":
+            audit_consumer_execution(arguments.execution_log, arguments.output)
+            return 0
+        return run_handoff_test(_find_manifest_from_environment())
+    except (HandoffError, OSError, ValueError) as exc:
+        print(f"windows cache handoff: {exc}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

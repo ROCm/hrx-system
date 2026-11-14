@@ -1250,9 +1250,11 @@ jobs:
           retention-days: 7
 
   windows_cache_handoff_producer:
-    name: Bazel / Windows x86-64 (via Linux) / Remote Cache Producer
+    name: Bazel / Windows x86-64 (via Linux) / CAS Test Producer
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.windows_cache_probe == 'handoff' }}
-    runs-on: az-linux-scale-rocm-default-prod
+    runs-on:
+      group: therock-ci-az-prod-2
+      labels: az-linux-scale-rocm-default-prod
     timeout-minutes: 30
     defaults:
       run:
@@ -1324,7 +1326,7 @@ jobs:
       - name: Configure matching project graph
         run: python3 dev.py bazel configure --//runtime/config/hal:drivers=task
 
-      - name: Populate shared cache
+      - name: Build and publish test closure
         run: |
           set -euo pipefail
           target='//build_tools/windows:compiler_runtime_test'
@@ -1332,8 +1334,8 @@ jobs:
           printf '\n// Windows cache handoff %s/%s\n' \
             "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" >> "$source_path"
 
-          artifact_dir="$RUNNER_TEMP/windows-cache-handoff"
-          evidence_dir="$artifact_dir/evidence"
+          package_dir="$RUNNER_TEMP/windows-cache-handoff-package"
+          evidence_dir="$package_dir/evidence"
           mkdir -p "$evidence_dir"
           sha256sum "$source_path" | cut -d' ' -f1 > "$evidence_dir/source.sha256"
           cp .bazelrc.configured "$evidence_dir/configured.bazelrc"
@@ -1346,14 +1348,7 @@ jobs:
             --config=windows-x86_64
             --config=windows-clang-cl
             --config=rocm-ci-cache
-            --cpu=x64_windows
-            --host_cpu=k8
-            --host_platform=//build_tools/windows/cache_handoff:linux_x86_64
-            --action_env=PATH=/bin:/usr/bin:/usr/local/bin
-            --host_action_env=PATH=/bin:/usr/bin:/usr/local/bin
-            --extra_toolchains=//build_tools/windows/cache_handoff:linux_x86_64_host_cc,//build_tools/windows/cache_handoff:windows_x86_64_clang_cl
-            --extra_execution_platforms=//build_tools/windows/cache_handoff:linux_x86_64,//build_tools/windows:windows_x86_64
-            --@bazel_tools//tools/test:incompatible_use_default_test_toolchain=true
+            --build_runfile_links
             --remote_download_outputs=all
             --remote_verify_downloads
             --noremote_cache_async
@@ -1365,44 +1360,42 @@ jobs:
             --execution_log_json_file="$evidence_dir/producer-execution.json" \
             "$target"
 
-          query_file="$evidence_dir/cpp-actions.aquery"
-          printf '%s\n' \
-            'mnemonic("CppCompile|CppLink", //build_tools/windows:compiler_runtime_test)' \
-            > "$query_file"
-          bazel "--output_base=$IREE_CACHE_HANDOFF_OUTPUT_BASE" aquery \
-            "${common_flags[@]}" --output=text --query_file="$query_file" \
-            > "$evidence_dir/producer-aquery.txt"
-          grep '^  ActionKey:' "$evidence_dir/producer-aquery.txt" \
-            > "$evidence_dir/producer-action-keys.txt"
-          test "$(wc -l < "$evidence_dir/producer-action-keys.txt")" -eq 2
+          bazel "--output_base=$IREE_CACHE_HANDOFF_OUTPUT_BASE" cquery \
+            "${common_flags[@]}" --output=jsonproto "$target" \
+            > "$evidence_dir/target.json"
+          bazel "--output_base=$IREE_CACHE_HANDOFF_OUTPUT_BASE" cquery \
+            "${common_flags[@]}" --output=starlark \
+            --starlark:file=build_tools/windows/cache_handoff/manifest_query.bzl \
+            "$target" > "$evidence_dir/providers.json"
+          execution_root="$(
+            bazel "--output_base=$IREE_CACHE_HANDOFF_OUTPUT_BASE" info execution_root
+          )"
+          python build_tools/ci/windows_cache_handoff.py emit \
+            --target-metadata="$evidence_dir/target.json" \
+            --provider-metadata="$evidence_dir/providers.json" \
+            --execution-root="$execution_root" \
+            --cas-url=http://bazelremote-svc.bazelremote-ns.svc.cluster.local:8080 \
+            --output-dir="$package_dir"
+          du --human-readable --summarize "$package_dir"
 
-          output_base="$(bazel "--output_base=$IREE_CACHE_HANDOFF_OUTPUT_BASE" info output_base)"
-          toolchain_repo="$output_base/external/+windows_toolchain_repository+iree_windows_toolchain"
-          test -f "$toolchain_repo/BUILD.bazel"
-          mkdir -p "$artifact_dir/toolchain"
-          cp --archive --dereference "$toolchain_repo/." "$artifact_dir/toolchain/"
-          host_toolchain_repo="$output_base/external/rules_cc++cc_configure_extension+local_config_cc"
-          test -f "$host_toolchain_repo/BUILD"
-          mkdir -p "$artifact_dir/host-toolchain"
-          cp --archive --dereference "$host_toolchain_repo/." "$artifact_dir/host-toolchain/"
-          du --human-readable --summarize "$artifact_dir/toolchain"
-
-      # The dereferenced repository is a one-run diagnostic bootstrap. Remote
-      # action-cache hits cannot bootstrap external source repositories.
-      - name: Upload producer closure
+      # Product bytes stay in bazel-remote. This artifact contains only the
+      # Bazel-generated test leaf, verified digest manifest, and probe evidence.
+      - name: Upload test manifest
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: windows-cache-handoff-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/windows-cache-handoff/
+          path: ${{ runner.temp }}/windows-cache-handoff-package/
           if-no-files-found: error
-          compression-level: 1
-          retention-days: 1
+          compression-level: 0
+          retention-days: 7
 
   windows_cache_handoff_consumer:
-    name: Bazel / Windows x86-64 / Remote Cache Handoff
+    name: Bazel / Windows x86-64 / Native CAS Test
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.windows_cache_probe == 'handoff' }}
     needs: windows_cache_handoff_producer
-    runs-on: azure-windows-scale-rocm
+    runs-on:
+      group: therock-ci-az-prod-2
+      labels: az-windows-scale-rocm-default-prod
     timeout-minutes: 30
     env:
       HRX_ARTIFACT_SET: core
@@ -1434,11 +1427,8 @@ jobs:
             HRX_DOWNLOAD_CACHE_DIR = Join-Path $root 'downloads'
             HRX_OUTPUT_DIR = $root
             HRX_ROCM_ROOT = Join-Path $env:SystemDrive 'r'
-            IREE_CACHE_HANDOFF_ARTIFACT_ROOT = Join-Path $root 'producer'
             IREE_CACHE_HANDOFF_EVIDENCE = Join-Path $root 'consumer-evidence'
-            IREE_CACHE_HANDOFF_EXECROOT_BACKING = Join-Path $root 'execroot'
             IREE_CACHE_HANDOFF_OUTPUT_BASE = $outputBase.Replace('\', '/')
-            IREE_CACHE_HANDOFF_REPOSITORY_CACHE = (Join-Path $root 'repository-cache').Replace('\', '/')
             PIP_CACHE_DIR = Join-Path $root 'pip-cache'
           }
           New-Item -ItemType Directory -Path $root -Force | Out-Null
@@ -1456,103 +1446,36 @@ jobs:
           python build_tools/ci/ci_core_windows.py fetch-rocm
           exit $LASTEXITCODE
 
-      - name: Download producer closure
+      - name: Download test manifest
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: windows-cache-handoff-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ env.IREE_CACHE_HANDOFF_ARTIFACT_ROOT }}
+          path: ${{ github.workspace }}/.iree/windows-cache-handoff
 
       - name: Install Bazel host tools
         shell: powershell
         run: |
-          $outputBase = $env:IREE_CACHE_HANDOFF_OUTPUT_BASE.Replace('/', '\')
-          $execroot = Join-Path $outputBase 'execroot'
-          New-Item -ItemType Directory -Path $outputBase -Force | Out-Null
-          New-Item -ItemType Directory -Path $env:IREE_CACHE_HANDOFF_EXECROOT_BACKING -Force | Out-Null
-          if (Test-Path -LiteralPath $execroot) {
-            throw "Cache-handoff execroot already exists: $execroot"
-          }
-          New-Item -ItemType Junction -Path $execroot `
-            -Target $env:IREE_CACHE_HANDOFF_EXECROOT_BACKING | Out-Null
-          "common --repository_cache=$env:IREE_CACHE_HANDOFF_REPOSITORY_CACHE" |
-            Out-File -FilePath .bazelrc.local -Encoding ascii -Append
           python dev.py bazel setup --venv
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           "$PWD\.venv\Scripts" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
-      - name: Configure matching project graph
+      - name: Configure project graph
         shell: powershell
         run: |
           python dev.py bazel configure --//runtime/config/hal:drivers=task
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $producerConfig = Join-Path $env:IREE_CACHE_HANDOFF_ARTIFACT_ROOT 'evidence\configured.bazelrc'
-          $producerText = (Get-Content -Raw -LiteralPath $producerConfig).Replace("`r`n", "`n")
-          $consumerText = (Get-Content -Raw -LiteralPath .bazelrc.configured).Replace("`r`n", "`n")
-          if ($producerText -ne $consumerText) {
-            throw 'Producer and consumer project configurations differ.'
-          }
+          exit $LASTEXITCODE
 
-      - name: Consume cached image and run native test
+      - name: Materialize CAS closure and run native test
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
-          $target = '//build_tools/windows:compiler_runtime_test'
-          $sourcePath = 'build_tools/windows/compiler_runtime_test.cc'
-          [IO.File]::AppendAllText(
-            (Resolve-Path $sourcePath),
-            "`n// Windows cache handoff $env:GITHUB_RUN_ID/$env:GITHUB_RUN_ATTEMPT`n",
-            [Text.UTF8Encoding]::new($false))
-          $sourceHash = (Get-FileHash -LiteralPath $sourcePath -Algorithm SHA256).Hash.ToLowerInvariant()
-          $expectedSourceHash = (Get-Content -Raw (Join-Path $env:IREE_CACHE_HANDOFF_ARTIFACT_ROOT 'evidence\source.sha256')).Trim()
-          if ($sourceHash -ne $expectedSourceHash) {
-            throw "Producer and consumer source bytes differ: $sourceHash != $expectedSourceHash"
-          }
-
-          $toolchainRoot = (Resolve-Path (Join-Path $env:IREE_CACHE_HANDOFF_ARTIFACT_ROOT 'toolchain')).Path.Replace('\', '/')
-          $hostToolchainRoot = (Resolve-Path (Join-Path $env:IREE_CACHE_HANDOFF_ARTIFACT_ROOT 'host-toolchain')).Path.Replace('\', '/')
+          $target = '//.iree/windows-cache-handoff:compiler_runtime_test'
           $evidenceDir = $env:IREE_CACHE_HANDOFF_EVIDENCE
-          $commonFlags = @(
-            '--config=windows-x86_64',
-            '--config=windows-clang-cl',
-            '--config=rocm-ci-cache',
-            '--cpu=x64_windows',
-            '--host_cpu=k8',
-            '--host_platform=//build_tools/windows/cache_handoff:linux_x86_64',
-            '--action_env=PATH=/bin:/usr/bin:/usr/local/bin',
-            '--host_action_env=PATH=/bin:/usr/bin:/usr/local/bin',
-            "--override_repository=iree_windows_toolchain=$toolchainRoot",
-            "--override_repository=local_config_cc=$hostToolchainRoot",
-            '--extra_toolchains=//build_tools/windows/cache_handoff:linux_x86_64_host_cc,//build_tools/windows/cache_handoff:windows_x86_64_clang_cl',
-            '--extra_execution_platforms=//build_tools/windows/cache_handoff:linux_x86_64,//build_tools/windows:windows_x86_64',
-            '--@bazel_tools//tools/test:incompatible_use_default_test_toolchain=true',
-            '--remote_download_outputs=all',
-            '--remote_verify_downloads',
-            '--noremote_cache_async'
-          )
-          $queryFile = Join-Path $env:IREE_CACHE_HANDOFF_ARTIFACT_ROOT 'evidence\cpp-actions.aquery'
-          $consumerAquery = Join-Path $evidenceDir 'consumer-aquery.txt'
-          bazel "--output_base=$env:IREE_CACHE_HANDOFF_OUTPUT_BASE" aquery `
-            @commonFlags '--output=text' "--query_file=$queryFile" |
-              Out-File -LiteralPath $consumerAquery -Encoding utf8
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $producerKeys = @(
-            Get-Content -LiteralPath (Join-Path $env:IREE_CACHE_HANDOFF_ARTIFACT_ROOT 'evidence\producer-action-keys.txt')
-          )
-          $consumerKeys = @(
-            Select-String -LiteralPath $consumerAquery -Pattern '^  ActionKey:' |
-              ForEach-Object { $_.Line }
-          )
-          if ($producerKeys.Count -ne 2 -or $consumerKeys.Count -ne 2 -or
-              (Compare-Object $producerKeys $consumerKeys)) {
-            throw "Producer and consumer configured C++ action keys differ.`nProducer: $producerKeys`nConsumer: $consumerKeys"
-          }
-
           $executionLog = Join-Path $evidenceDir 'consumer-execution.json'
           $profile = Join-Path $evidenceDir 'consumer.profile.gz'
           bazel "--output_base=$env:IREE_CACHE_HANDOFF_OUTPUT_BASE" test `
-            @commonFlags `
-            '--remote_upload_local_results=false' `
-            '--experimental_remote_require_cached' `
+            '--config=windows-x86_64' `
+            '--config=windows-clang-cl' `
             '--strategy=TestRunner=local' `
             '--cache_test_results=no' `
             "--profile=$profile" `
@@ -1560,55 +1483,11 @@ jobs:
             '--test_output=all' `
             $target
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-          $receipt = Join-Path $evidenceDir 'cache-hit-receipt.json'
-          @'
-          import json
-          import sys
-          from pathlib import Path
-
-          text = Path(sys.argv[1]).read_text(encoding="utf-8")
-          decoder = json.JSONDecoder()
-          entries = []
-          position = 0
-          while position < len(text):
-              while position < len(text) and text[position].isspace():
-                  position += 1
-              if position == len(text):
-                  break
-              entry, position = decoder.raw_decode(text, position)
-              entries.append(entry)
-          build_entries = [
-              entry
-              for entry in entries
-              if entry.get("mnemonic") in ("CppCompile", "CppLink")
-          ]
-          if len(build_entries) != 2:
-              raise SystemExit(
-                  f"Expected two C++ cache entries, found {len(build_entries)}."
-              )
-          non_remote_hits = [
-              entry
-              for entry in build_entries
-              if entry.get("runner") != "remote cache hit"
-          ]
-          if non_remote_hits:
-              raise SystemExit(
-                  "C++ actions did not come from the remote cache: "
-                  + json.dumps(non_remote_hits, indent=2)
-              )
-          receipt = [
-              {
-                  key: entry.get(key)
-                  for key in ("mnemonic", "targetLabel", "runner", "cacheHit", "digest")
-              }
-              for entry in build_entries
-          ]
-          Path(sys.argv[2]).write_text(
-              json.dumps(receipt, indent=2) + "\n", encoding="utf-8"
-          )
-          '@ | python - $executionLog $receipt
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $receipt = Join-Path $evidenceDir 'execution-receipt.json'
+          python build_tools/ci/windows_cache_handoff.py audit `
+            --execution-log=$executionLog `
+            --output=$receipt
+          exit $LASTEXITCODE
 
       - name: Upload consumer evidence
         if: ${{ always() }}
