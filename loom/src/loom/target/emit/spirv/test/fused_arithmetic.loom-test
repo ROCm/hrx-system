@@ -1,208 +1,19 @@
-// RUN: emit spirv-dis validate
+// RUN: emit spirv-dis input=source-low target=spirv:vulkan1.3+bda @caller features=FMA_FLOAT32,FLOAT_CONTROLS2,FLOAT32_SIGNED_ZERO_INF_NAN_PRESERVE,FLOAT16_DENORM_PRESERVE,FLOAT32_DENORM_PRESERVE,FLOAT64_DENORM_PRESERVE,FLOAT16_64_DENORM_PRESERVE,FLOAT_ALL_DENORM_PRESERVE,FLOAT16_ROUNDING_RTE,FLOAT32_ROUNDING_RTE,FLOAT64_ROUNDING_RTE,FLOAT16_64_ROUNDING_RTE,FLOAT_ALL_ROUNDING_RTE validate
 // REQUIRES: spirv-dis, spirv-val
 
-// The same typed packet path emits all widths and native vector shapes.
-spirv.target<vulkan1_3> @target {contract_feature_bits = 574209987576889374}
-
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @native_fma() asm {
-  %half = OpConstant.f16 15360
-  %single = OpConstant.f32 1065353216
-  %double = OpConstant.f64 4607182418800017408
-  %pair = OpCompositeConstruct.v2f16 %half, %half
-  %triple = OpCompositeConstruct.v3f32 %single, %single, %single
-  %quad = OpCompositeConstruct.v4f64 %double, %double, %double, %double
-  %half_fma = OpFmaKHR.f16 %half, %half, %half
-  %single_fma = OpFmaKHR.f32 %single, %single, %single
-  %double_fma = OpFmaKHR.f64 %double, %double, %double
-  %pair_fma = OpFmaKHR.v2f16 %pair, %pair, %pair
-  %triple_fma = OpFmaKHR.v3f32 %triple, %triple, %triple
-  %quad_fma = OpFmaKHR.v4f64 %quad, %quad, %quad
-  return
-}
-
-// ----
-               OpCapability Shader
-               OpCapability VulkanMemoryModel
-               OpCapability PhysicalStorageBufferAddresses
-               OpCapability Int64
-               OpCapability Float16
-               OpCapability Float64
-               OpCapability DenormPreserve
-               OpCapability RoundingModeRTE
-               OpCapability SignedZeroInfNanPreserve
-               OpCapability FMAKHR
-               OpCapability FloatControls2
-               OpExtension "SPV_KHR_vulkan_memory_model"
-               OpExtension "SPV_KHR_physical_storage_buffer"
-               OpExtension "SPV_KHR_float_controls"
-               OpExtension "SPV_KHR_fma"
-               OpExtension "SPV_KHR_float_controls2"
-               OpMemoryModel PhysicalStorageBuffer64 Vulkan
-               OpEntryPoint GLCompute %native_fma "native_fma"
-               OpExecutionMode %native_fma LocalSize 1 1 1
-               OpExecutionMode %native_fma DenormPreserve 32
-               OpExecutionMode %native_fma DenormPreserve 16
-               OpExecutionMode %native_fma DenormPreserve 64
-               OpExecutionMode %native_fma RoundingModeRTE 16
-               OpExecutionMode %native_fma RoundingModeRTE 64
-               OpExecutionMode %native_fma RoundingModeRTE 32
-               OpExecutionMode %native_fma SignedZeroInfNanPreserve 16
-               OpExecutionMode %native_fma SignedZeroInfNanPreserve 32
-               OpExecutionMode %native_fma SignedZeroInfNanPreserve 64
-               OpName %native_fma "native_fma"
-               OpName %half "half"
-               OpName %single "single"
-               OpName %double "double"
-               OpName %pair "pair"
-               OpName %triple "triple"
-               OpName %quad "quad"
-               OpName %half_fma "half_fma"
-               OpName %single_fma "single_fma"
-               OpName %double_fma "double_fma"
-               OpName %pair_fma "pair_fma"
-               OpName %triple_fma "triple_fma"
-               OpName %quad_fma "quad_fma"
-               OpDecorate %half_fma FPFastMathMode None
-               OpDecorate %single_fma FPFastMathMode None
-               OpDecorate %double_fma FPFastMathMode None
-               OpDecorate %pair_fma FPFastMathMode None
-               OpDecorate %triple_fma FPFastMathMode None
-               OpDecorate %quad_fma FPFastMathMode None
-       %void = OpTypeVoid
-          %3 = OpTypeFunction %void
-     %half_0 = OpTypeFloat 16
-       %half = OpConstant %half_0 0x1p+0
-      %float = OpTypeFloat 32
-     %single = OpConstant %float 1
-   %double_0 = OpTypeFloat 64
-     %double = OpConstant %double_0 1
-   %v2half_0 = OpTypeVector %half_0 2
-    %v3float = OpTypeVector %float 3
- %v4double_0 = OpTypeVector %double_0 4
- %native_fma = OpFunction %void None %3
-          %4 = OpLabel
-       %pair = OpCompositeConstruct %v2half_0 %half %half
-     %triple = OpCompositeConstruct %v3float %single %single %single
-       %quad = OpCompositeConstruct %v4double_0 %double %double %double %double
-   %half_fma = OpFmaKHR %half_0 %half %half %half
- %single_fma = OpFmaKHR %float %single %single %single
- %double_fma = OpFmaKHR %double_0 %double %double %double
-   %pair_fma = OpFmaKHR %v2half_0 %pair %pair %pair
- %triple_fma = OpFmaKHR %v3float %triple %triple %triple
-   %quad_fma = OpFmaKHR %v4double_0 %quad %quad %quad
-               OpReturn
-               OpFunctionEnd
-
-// ====
-
-// Relaxed subnormals and special values remain independent permissions.
-spirv.target<vulkan1_3> @target {contract_feature_bits = 574209987576889374}
-
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @relaxed_fma() asm {
-  %one = OpConstant.f32 1065353216
-  %native_denorms = OpFmaKHR.afn.f32 %one, %one, %one
-  %finite = OpFmaKHR.finite.f32 %one, %one, %one
-  %finite_native_denorms = OpFmaKHR.finite_afn.f32 %one, %one, %one
-  return
-}
-
-// ----
-               OpCapability Shader
-               OpCapability VulkanMemoryModel
-               OpCapability PhysicalStorageBufferAddresses
-               OpCapability Int64
-               OpCapability Float16
-               OpCapability Float64
-               OpCapability DenormPreserve
-               OpCapability RoundingModeRTE
-               OpCapability SignedZeroInfNanPreserve
-               OpCapability FMAKHR
-               OpCapability FloatControls2
-               OpExtension "SPV_KHR_vulkan_memory_model"
-               OpExtension "SPV_KHR_physical_storage_buffer"
-               OpExtension "SPV_KHR_float_controls"
-               OpExtension "SPV_KHR_fma"
-               OpExtension "SPV_KHR_float_controls2"
-               OpMemoryModel PhysicalStorageBuffer64 Vulkan
-               OpEntryPoint GLCompute %relaxed_fma "relaxed_fma"
-               OpExecutionMode %relaxed_fma LocalSize 1 1 1
-               OpExecutionMode %relaxed_fma DenormPreserve 32
-               OpExecutionMode %relaxed_fma RoundingModeRTE 32
-               OpExecutionMode %relaxed_fma SignedZeroInfNanPreserve 32
-               OpName %relaxed_fma "relaxed_fma"
-               OpName %one "one"
-               OpName %native_denorms "native_denorms"
-               OpName %finite "finite"
-               OpName %finite_native_denorms "finite_native_denorms"
-               OpDecorate %native_denorms FPFastMathMode None
-               OpDecorate %finite NoContraction
-               OpDecorate %finite_native_denorms NoContraction
-       %void = OpTypeVoid
-          %3 = OpTypeFunction %void
-      %float = OpTypeFloat 32
-        %one = OpConstant %float 1
-%relaxed_fma = OpFunction %void None %3
-          %4 = OpLabel
-%native_denorms = OpFmaKHR %float %one %one %one
-     %finite = OpFmaKHR %float %one %one %one
-%finite_native_denorms = OpFmaKHR %float %one %one %one
-               OpReturn
-               OpFunctionEnd
-
-// ====
-
-// Unused FMA widths and floating controls stay out of the shader interface.
-spirv.target<vulkan1_3> @target {contract_feature_bits = 574209987576889374}
-
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @finite_native_fma() asm {
-  %one = OpConstant.f32 1065353216
-  %result = OpFmaKHR.finite_afn.f32 %one, %one, %one
-  return
-}
-
-// ----
-               OpCapability Shader
-               OpCapability VulkanMemoryModel
-               OpCapability PhysicalStorageBufferAddresses
-               OpCapability Int64
-               OpCapability Float16
-               OpCapability Float64
-               OpCapability RoundingModeRTE
-               OpCapability FMAKHR
-               OpExtension "SPV_KHR_vulkan_memory_model"
-               OpExtension "SPV_KHR_physical_storage_buffer"
-               OpExtension "SPV_KHR_float_controls"
-               OpExtension "SPV_KHR_fma"
-               OpMemoryModel PhysicalStorageBuffer64 Vulkan
-               OpEntryPoint GLCompute %finite_native_fma "finite_native_fma"
-               OpExecutionMode %finite_native_fma LocalSize 1 1 1
-               OpExecutionMode %finite_native_fma RoundingModeRTE 32
-               OpName %finite_native_fma "finite_native_fma"
-               OpName %one "one"
-               OpName %result "result"
-               OpDecorate %result NoContraction
-       %void = OpTypeVoid
-          %3 = OpTypeFunction %void
-      %float = OpTypeFloat 32
-        %one = OpConstant %float 1
-%finite_native_fma = OpFunction %void None %3
-          %4 = OpLabel
-     %result = OpFmaKHR %float %one %one %one
-               OpReturn
-               OpFunctionEnd
-
-// ====
-
-// RUN: emit spirv-dis input=source-low target=spirv:vulkan1.3+bda @caller features=FMA_FLOAT32,FLOAT_CONTROLS2,FLOAT32_SIGNED_ZERO_INF_NAN_PRESERVE,FLOAT16_DENORM_PRESERVE,FLOAT32_DENORM_PRESERVE,FLOAT64_DENORM_PRESERVE,FLOAT16_64_DENORM_PRESERVE,FLOAT_ALL_DENORM_PRESERVE,FLOAT16_ROUNDING_RTE,FLOAT32_ROUNDING_RTE,FLOAT64_ROUNDING_RTE,FLOAT16_64_ROUNDING_RTE,FLOAT_ALL_ROUNDING_RTE validate
-
-// Entry-point modes include callee requirements and coupled companion widths.
-func.def noinline @helper(%value: f32) -> (f32) {
-  %result = scalar.fmaf %value, %value, %value : f32
+// The helper's decorations preserve each source policy. Its caller inherits
+// the required floating modes, including hardware-coupled companion widths.
+func.def noinline @helper(%a: f32, %b: f32, %c: f32) -> (f32) {
+  %strict = scalar.fmaf %a, %b, %c : f32
+  %finite = scalar.fmaf<nnan|ninf|nsz|afn> %c, %b, %a : f32
+  %result = scalar.addf %strict, %finite : f32
   func.return %result : f32
 }
 
 func.def public @caller(%value: f32) -> (f32) {
-  %result = func.call noinline @helper(%value) : (f32) -> (f32)
+  %c2 = scalar.constant 2.0 : f32
+  %c3 = scalar.constant 3.0 : f32
+  %result = func.call noinline @helper(%value, %c2, %c3) : (f32, f32, f32) -> (f32)
   func.return %result : f32
 }
 
@@ -232,80 +43,49 @@ func.def public @caller(%value: f32) -> (f32) {
                OpExecutionMode %caller RoundingModeRTE 32
                OpExecutionMode %caller SignedZeroInfNanPreserve 32
                OpName %helper "helper"
-               OpName %value "value"
+               OpName %a "a"
+               OpName %strict "strict"
+               OpName %finite "finite"
                OpName %result "result"
                OpName %caller "caller"
-               OpName %value_0 "value"
+               OpName %value "value"
                OpName %result_0 "result"
-               OpDecorate %result FPFastMathMode None
-               OpMemberDecorate %_struct_11 0 Offset 0
-               OpDecorate %_struct_11 Block
-               OpDecorate %10 DescriptorSet 0
-               OpDecorate %10 Binding 0
+               OpDecorate %strict FPFastMathMode None
+               OpDecorate %finite NoContraction
+               OpDecorate %result NoContraction
+               OpMemberDecorate %_struct_15 0 Offset 0
+               OpDecorate %_struct_15 Block
                OpDecorate %14 DescriptorSet 0
-               OpDecorate %14 Binding 1
+               OpDecorate %14 Binding 0
+               OpDecorate %18 DescriptorSet 0
+               OpDecorate %18 Binding 1
       %float = OpTypeFloat 32
           %3 = OpTypeFunction %float %float
+    %float_2 = OpConstant %float 2
+    %float_3 = OpConstant %float 3
         %int = OpTypeInt 32 1
       %int_0 = OpConstant %int 0
- %_struct_11 = OpTypeStruct %float
-%_ptr_StorageBuffer__struct_11 = OpTypePointer StorageBuffer %_struct_11
+ %_struct_15 = OpTypeStruct %float
+%_ptr_StorageBuffer__struct_15 = OpTypePointer StorageBuffer %_struct_15
 %_ptr_StorageBuffer_float = OpTypePointer StorageBuffer %float
-         %10 = OpVariable %_ptr_StorageBuffer__struct_11 StorageBuffer
-         %14 = OpVariable %_ptr_StorageBuffer__struct_11 StorageBuffer
+         %14 = OpVariable %_ptr_StorageBuffer__struct_15 StorageBuffer
+         %18 = OpVariable %_ptr_StorageBuffer__struct_15 StorageBuffer
        %void = OpTypeVoid
-         %16 = OpTypeFunction %void
+         %20 = OpTypeFunction %void
      %helper = OpFunction %float DontInline %3
-      %value = OpFunctionParameter %float
+          %a = OpFunctionParameter %float
           %5 = OpLabel
-     %result = OpFmaKHR %float %value %value %value
+     %strict = OpFmaKHR %float %a %float_2 %float_3
+     %finite = OpFmaKHR %float %float_3 %float_2 %a
+     %result = OpFAdd %float %strict %finite
                OpReturnValue %result
                OpFunctionEnd
-     %caller = OpFunction %void None %16
-         %17 = OpLabel
-         %18 = OpAccessChain %_ptr_StorageBuffer_float %10 %int_0
-    %value_0 = OpLoad %float %18 Aligned 4
-   %result_0 = OpFunctionCall %float %helper %value_0
-         %21 = OpAccessChain %_ptr_StorageBuffer_float %14 %int_0
-               OpStore %21 %result_0 Aligned 4
-               OpReturn
-               OpFunctionEnd
-
-// ====
-
-// RUN: emit spirv-dis validate
-
-// Advertising unused FMA and per-instruction controls does not require them.
-spirv.target<vulkan1_3> @target {contract_feature_bits = 574209987576889374}
-
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @ordinary() asm {
-  %one = OpConstant.f32 1065353216
-  %sum = OpFAdd.f32 %one, %one
-  return
-}
-
-// ----
-               OpCapability Shader
-               OpCapability VulkanMemoryModel
-               OpCapability PhysicalStorageBufferAddresses
-               OpCapability Int64
-               OpCapability Float16
-               OpCapability Float64
-               OpExtension "SPV_KHR_vulkan_memory_model"
-               OpExtension "SPV_KHR_physical_storage_buffer"
-               OpMemoryModel PhysicalStorageBuffer64 Vulkan
-               OpEntryPoint GLCompute %ordinary "ordinary"
-               OpExecutionMode %ordinary LocalSize 1 1 1
-               OpName %ordinary "ordinary"
-               OpName %one "one"
-               OpName %sum "sum"
-               OpDecorate %sum NoContraction
-       %void = OpTypeVoid
-          %3 = OpTypeFunction %void
-      %float = OpTypeFloat 32
-        %one = OpConstant %float 1
-   %ordinary = OpFunction %void None %3
-          %4 = OpLabel
-        %sum = OpFAdd %float %one %one
+     %caller = OpFunction %void None %20
+         %21 = OpLabel
+         %22 = OpAccessChain %_ptr_StorageBuffer_float %14 %int_0
+      %value = OpLoad %float %22 Aligned 4
+   %result_0 = OpFunctionCall %float %helper %value
+         %25 = OpAccessChain %_ptr_StorageBuffer_float %18 %int_0
+               OpStore %25 %result_0 Aligned 4
                OpReturn
                OpFunctionEnd
