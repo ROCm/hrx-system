@@ -7,7 +7,6 @@
 // --8<-- [start:source]
 #include <loomcxx/check.h>
 #include <loomcxx/kernel.h>
-#include <loomcxx/scalar.h>
 
 static loom::kernel::configuration configure_saxpy(unsigned element_count) {
   return {{(element_count + 255) / 256, 1, 1}, {256, 1, 1}};
@@ -20,8 +19,8 @@ void saxpy_f32(unsigned element_count, float alpha,
       loom::kernel::workgroup::id.x * loom::kernel::workgroup::size.x +
       loom::kernel::workitem::id.x;
   if (element_index < element_count) {
-    y[element_index] =
-        loom::scalar::fmaf(alpha, x[element_index], y[element_index]);
+    [[loom::fastmath("contract")]] y[element_index] =
+        alpha * x[element_index] + y[element_index];
   }
 }
 

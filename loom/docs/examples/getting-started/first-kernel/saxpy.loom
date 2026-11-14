@@ -19,7 +19,8 @@ kernel.def export("saxpy_f32") @saxpy_f32(%element_count: index) {
   scf.if %in_bounds {
     %x_value = view.load %x_view[%element_index] : view<[%element_count]xf32> -> f32
     %y_value = view.load %y_view[%element_index] : view<[%element_count]xf32> -> f32
-    %result = scalar.fmaf %alpha, %x_value, %y_value : f32
+    %scaled = scalar.mulf<contract> %alpha, %x_value : f32
+    %result = scalar.addf<contract> %scaled, %y_value : f32
     view.store %result, %y_view[%element_index] : f32, view<[%element_count]xf32>
   }
   kernel.return

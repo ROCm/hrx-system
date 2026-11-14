@@ -23,6 +23,9 @@ This page assumes the Loom tools are on `PATH` and that `--device=amdgpu` is
 available. [Acquiring Loom](acquiring-loom.md) describes SDK installation
 and source-build setup.
 
+The example also runs on Vulkan devices, including NVIDIA GPUs. Use
+`--device=vulkan` in the execution and benchmark commands below.
+
 ## Create one source file
 
 Save the following as `saxpy.loom`:
@@ -34,8 +37,11 @@ Save the following as `saxpy.loom`:
 The [`kernel.def`](../reference/dialects/kernel/ops/def.md) has two regions. The
 first maps `%element_count` to a physical launch using 256 work-items per
 workgroup. The second is the device body. Each work-item computes one element
-index, guards the partial final workgroup, loads `x` and `y`, performs the fused
-multiply-add, and stores the result back to `y`.
+index, guards the partial final workgroup, loads `x` and `y`, computes
+`alpha * x + y`, and stores the result back to `y`. The `contract` permission
+allows the target to fuse the multiply and add when supported. This example
+accepts either rounding behavior; an explicit `scalar.fmaf` instead requires
+a single-rounded result.
 
 `%element_count` appears in both signatures for different reasons. The value
 before `launch` is workload input used by the host-side launch calculation. The
