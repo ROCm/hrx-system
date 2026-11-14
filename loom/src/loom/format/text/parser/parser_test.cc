@@ -7,6 +7,7 @@
 #include "loom/format/text/parser/parser.h"
 
 #include <cmath>
+#include <cstdint>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -1679,6 +1680,24 @@ TEST_F(ParserTest, AttrDictSpecialFloatValuesRoundTrip) {
                       "pos_inf = inf} : f32"),
             std::string::npos)
       << "special float values should round-trip canonically: " << text;
+
+  loom_module_t* module = ParseOk(text.c_str());
+  ASSERT_NE(module, nullptr);
+  loom_op_t* attrs_op = loom_block_op(loom_module_block(module), 1);
+  ASSERT_TRUE(loom_test_attrs_isa(attrs_op));
+  const loom_attribute_t dict = loom_test_attrs_dict_attr(attrs_op);
+  ASSERT_EQ(dict.kind, LOOM_ATTR_DICT);
+  ASSERT_EQ(dict.count, 3u);
+  const loom_named_attr_t& nan_entry = dict.dict_entries[0];
+  EXPECT_TRUE(iree_string_view_equal(
+      loom_string_table_get(&module->strings, nan_entry.name_id),
+      IREE_SV("nan_value")));
+  ASSERT_EQ(nan_entry.value.kind, LOOM_ATTR_F64);
+  std::uint64_t nan_bits = 0;
+  const double nan_value = loom_attr_as_f64(nan_entry.value);
+  std::memcpy(&nan_bits, &nan_value, sizeof(nan_bits));
+  EXPECT_EQ(nan_bits, UINT64_C(0x7FF8000000000000));
+  loom_module_free(module);
 }
 
 TEST_F(ParserTest, OperandDictUnsortedKeysRoundTripInCanonicalOrder) {

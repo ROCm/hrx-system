@@ -6,6 +6,9 @@
 
 #include "loom/transforms/math/evaluation.h"
 
+#include <math.h>
+
+#include "iree/math/float_bits.h"
 #include "loom/ir/attribute.h"
 #include "loom/ir/module.h"
 #include "loom/ops/scalar/ops.h"
@@ -584,6 +587,11 @@ iree_status_t loom_math_evaluation_export(
 iree_status_t loom_math_evaluation_build_constant(
     loom_math_evaluation_t* evaluation, double value,
     loom_math_evaluation_value_t* out_value) {
+  if (isnan(value)) {
+    // Semantic math recipes promise a canonical arithmetic NaN, not the host
+    // compiler's implementation-defined NAN sign or payload.
+    value = iree_math_f64_canonical_nan();
+  }
   loom_op_t* op = NULL;
   IREE_RETURN_IF_ERROR(evaluation->lane_ops->constantf(
       &evaluation->rewriter->builder, value, evaluation->value_type,

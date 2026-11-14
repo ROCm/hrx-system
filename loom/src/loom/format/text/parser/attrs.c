@@ -10,6 +10,7 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "iree/math/float_bits.h"
 #include "loom/error/error_catalog.h"
 #include "loom/format/text/parser/diagnostics.h"
 #include "loom/format/text/parser/regions.h"
@@ -23,7 +24,9 @@ static bool loom_parse_special_f64_spelling(iree_string_view_t text,
                                             double* out_value) {
   if (iree_string_view_equal(text, IREE_SV("nan")) ||
       iree_string_view_equal(text, IREE_SV("-nan"))) {
-    *out_value = NAN;
+    // Textual NaNs have no payload or sign contract. Keep their IR storage
+    // independent of the host compiler's NAN macro representation.
+    *out_value = iree_math_f64_canonical_nan();
     return true;
   }
   if (iree_string_view_equal(text, IREE_SV("inf"))) {

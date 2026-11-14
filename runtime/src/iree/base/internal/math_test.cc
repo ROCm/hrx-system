@@ -17,6 +17,12 @@
 
 namespace {
 
+static double Float64FromBits(uint64_t bits) {
+  double value = 0.0;
+  std::memcpy(&value, &bits, sizeof(value));
+  return value;
+}
+
 //==============================================================================
 // Bitwise rotation (aka circular shifts)
 //==============================================================================
@@ -503,6 +509,8 @@ TEST(FloatNarrowingTest, F64RoundsEveryFiniteIntervalOnce) {
 }
 
 TEST(FloatNarrowingTest, F64PreservesSpecialAndBoundaryPolicies) {
+  const double positive_nan = Float64FromBits(UINT64_C(0x7FF8000000000000));
+  const double negative_nan = Float64FromBits(UINT64_C(0xFFF8000000000000));
   EXPECT_EQ(0x7C00, iree_math_f64_to_f16(65520.0));
   EXPECT_EQ(0x7BFF, iree_math_f64_to_f16(std::nextafter(65520.0, 0.0)));
   EXPECT_EQ(0x7F80, iree_math_f64_to_bf16(0x1.ffp127));
@@ -511,10 +519,14 @@ TEST(FloatNarrowingTest, F64PreservesSpecialAndBoundaryPolicies) {
   EXPECT_EQ(0x7B, iree_math_f64_to_f8e5m2(std::nextafter(61440.0, 0.0)));
   EXPECT_EQ(0x7E, iree_math_f64_to_f8e4m3fn(DBL_MAX));
   EXPECT_EQ(0xFE, iree_math_f64_to_f8e4m3fn(-INFINITY));
-  EXPECT_EQ(0x7F, iree_math_f64_to_f8e4m3fn(NAN));
-  EXPECT_EQ(0x7F, iree_math_f64_to_f8e5m2(NAN));
-  EXPECT_EQ(0x7FFF, iree_math_f64_to_bf16(NAN));
-  EXPECT_EQ(0x7FFF, iree_math_f64_to_f16(NAN));
+  EXPECT_EQ(0x7F, iree_math_f64_to_f8e4m3fn(positive_nan));
+  EXPECT_EQ(0x7F, iree_math_f64_to_f8e5m2(positive_nan));
+  EXPECT_EQ(0x7FFF, iree_math_f64_to_bf16(positive_nan));
+  EXPECT_EQ(0x7FFF, iree_math_f64_to_f16(positive_nan));
+  EXPECT_EQ(0xFF, iree_math_f64_to_f8e4m3fn(negative_nan));
+  EXPECT_EQ(0xFF, iree_math_f64_to_f8e5m2(negative_nan));
+  EXPECT_EQ(0xFFFF, iree_math_f64_to_bf16(negative_nan));
+  EXPECT_EQ(0xFFFF, iree_math_f64_to_f16(negative_nan));
   EXPECT_EQ(0x00, iree_math_f64_to_f8e4m3fn(DBL_MIN));
   EXPECT_EQ(0x80, iree_math_f64_to_f8e5m2(-DBL_MIN));
   EXPECT_EQ(0x0000, iree_math_f64_to_bf16(0.0));

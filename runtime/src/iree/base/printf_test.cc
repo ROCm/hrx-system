@@ -18,6 +18,12 @@
 
 namespace {
 
+static double Float64FromBits(uint64_t bits) {
+  double value = 0.0;
+  std::memcpy(&value, &bits, sizeof(value));
+  return value;
+}
+
 // Helper: format with iree_vsnprintf and return as std::string.
 // Uses va_list to avoid -Wformat-security on non-literal format strings.
 static std::string FormatV(const char* format, ...) {
@@ -457,11 +463,14 @@ TEST(Printf, FloatGeneralUppercase) {
 //===----------------------------------------------------------------------===//
 
 TEST(Printf, FloatNaN) {
-  EXPECT_EQ(Format("%f", NAN), "nan");
-  EXPECT_EQ(Format("%F", NAN), "NAN");
-  EXPECT_EQ(Format("%e", NAN), "nan");
-  EXPECT_EQ(Format("%g", NAN), "nan");
-  EXPECT_EQ(Format("%10f", NAN), "       nan");
+  const double positive_nan = Float64FromBits(UINT64_C(0x7FF8000000000000));
+  const double negative_nan = Float64FromBits(UINT64_C(0xFFF8000000000000));
+  EXPECT_EQ(Format("%f", positive_nan), "nan");
+  EXPECT_EQ(Format("%F", positive_nan), "NAN");
+  EXPECT_EQ(Format("%e", positive_nan), "nan");
+  EXPECT_EQ(Format("%g", positive_nan), "nan");
+  EXPECT_EQ(Format("%10f", positive_nan), "       nan");
+  EXPECT_EQ(Format("%f", negative_nan), "-nan");
 }
 
 TEST(Printf, FloatInf) {

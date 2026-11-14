@@ -87,6 +87,7 @@ loom_cc_library(
         "//loom/src/loom/target:legalization",
         "//loom/src/loom/util:numeric_format",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/math",
     ],
 )
 

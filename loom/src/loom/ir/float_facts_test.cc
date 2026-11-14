@@ -9,6 +9,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <initializer_list>
 #include <limits>
 
 #include "iree/base/internal/fpu_state.h"
@@ -37,6 +38,12 @@ static uint64_t DoubleBits(double value) {
   uint64_t bits = 0;
   std::memcpy(&bits, &value, sizeof(bits));
   return bits;
+}
+
+static double DoubleFromBits(uint64_t bits) {
+  double value = 0.0;
+  std::memcpy(&value, &bits, sizeof(value));
+  return value;
 }
 
 static double RoundToScalarType(loom_scalar_type_t scalar_type, double value) {
@@ -409,6 +416,25 @@ TEST(FloatFacts, NonfiniteValuesDoNotConstrainFiniteDestinationFormats) {
   EXPECT_TRUE(loom_value_facts_is_nan(raw_nan));
   EXPECT_FALSE(loom_value_facts_is_finite(raw_nan));
   EXPECT_FALSE(loom_value_facts_is_exact(raw_nan));
+}
+
+TEST(FloatFacts, ExactNaNsUseCanonicalPositiveQuietPayload) {
+  const double negative_payload_nan =
+      DoubleFromBits(UINT64_C(0xFFF8000000000042));
+  for (const loom_scalar_type_t type : {
+           LOOM_SCALAR_TYPE_F8E4M3,
+           LOOM_SCALAR_TYPE_F8E5M2,
+           LOOM_SCALAR_TYPE_F16,
+           LOOM_SCALAR_TYPE_BF16,
+           LOOM_SCALAR_TYPE_F32,
+           LOOM_SCALAR_TYPE_F64,
+       }) {
+    SCOPED_TRACE(loom_scalar_type_name(type));
+    const loom_value_facts_t facts =
+        loom_value_facts_exact_float(type, negative_payload_nan);
+    EXPECT_EQ(DoubleBits(ExactFloatValue(type, facts)),
+              UINT64_C(0x7FF8000000000000));
+  }
 }
 
 TEST(FloatFacts, NonfiniteAlternativesPreserveFiniteRepresentability) {
