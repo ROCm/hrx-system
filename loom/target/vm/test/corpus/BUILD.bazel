@@ -201,6 +201,8 @@ loom_corpus_test(
             "numeric/integer/bit_count.loom",
             "numeric/integer/division.loom",
             "numeric/integer/widening.loom",
+            "numeric/predicate/bitstream.loom",
+            "numeric/predicate/vector_logic.loom",
             "numeric/vector/concatenation.loom",
             "numeric/vector/coordinates.loom",
             "numeric/vector/insertion.loom",

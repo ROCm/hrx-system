@@ -232,3 +232,144 @@ check.scenario @wide_coordinate_values {
   }
   check.return
 }
+
+// Seventeen lanes cross both SIMD-width and scalar-tail boundaries. Each
+// coordinate domain also produces its own signed range mask; narrow arithmetic
+// wraps before comparison, so the true lanes need not form a prefix.
+func.def @coordinate_tails(%base: i64, %step: i64, %values: buffer, %masks: buffer, %ordinal_bytes: buffer) {
+  %origin = index.constant 0 : offset
+  %output = buffer.view %values[%origin] : buffer -> view<85xi64>
+  %mask_output = buffer.view %masks[%origin] : buffer -> view<85xi8>
+  %byte_output = buffer.view %ordinal_bytes[%origin] : buffer -> view<160xi8>
+  %byte_base = scalar.trunci %base : i64 to i8
+  %byte_step = scalar.trunci %step : i64 to i8
+  // The last packet starts beyond the signed byte ordinal domain.
+  %wide_bytes = vector.iota %byte_base step %byte_step : vector<160xi8>
+  vector.store %wide_bytes, %byte_output[0] : vector<160xi8>, view<160xi8>
+  %short_base = scalar.trunci %base : i64 to i16
+  %short_step = scalar.trunci %step : i64 to i16
+  %word_base = scalar.trunci %base : i64 to i32
+  %word_step = scalar.trunci %step : i64 to i32
+  %byte_limit = scalar.constant 0 : i8
+  %short_limit = scalar.constant 0 : i16
+  %word_limit = scalar.constant 0 : i32
+  %long_limit = scalar.constant 0 : i64
+  %bytes = vector.iota %byte_base step %byte_step : vector<17xi8>
+  %shorts = vector.iota %short_base step %short_step : vector<17xi16>
+  %words = vector.iota %word_base step %word_step : vector<17xi32>
+  %longs = vector.iota %base step %step : vector<17xi64>
+  %byte_values = vector.extsi %bytes : vector<17xi8> to vector<17xi64>
+  %short_values = vector.extsi %shorts : vector<17xi16> to vector<17xi64>
+  %word_values = vector.extsi %words : vector<17xi32> to vector<17xi64>
+  vector.store %byte_values, %output[0] : vector<17xi64>, view<85xi64>
+  vector.store %short_values, %output[17] : vector<17xi64>, view<85xi64>
+  vector.store %word_values, %output[34] : vector<17xi64>, view<85xi64>
+  vector.store %longs, %output[51] : vector<17xi64>, view<85xi64>
+  %byte_mask = vector.mask.range [%byte_base to %byte_limit step %byte_step] : i8 -> vector<17xi1>
+  %short_mask = vector.mask.range [%short_base to %short_limit step %short_step] : i16 -> vector<17xi1>
+  %word_mask = vector.mask.range [%word_base to %word_limit step %word_step] : i32 -> vector<17xi1>
+  %long_mask = vector.mask.range [%base to %long_limit step %step] : i64 -> vector<17xi1>
+  %byte_bits = vector.extui %byte_mask : vector<17xi1> to vector<17xi8>
+  %short_bits = vector.extui %short_mask : vector<17xi1> to vector<17xi8>
+  %word_bits = vector.extui %word_mask : vector<17xi1> to vector<17xi8>
+  %long_bits = vector.extui %long_mask : vector<17xi1> to vector<17xi8>
+  vector.store %byte_bits, %mask_output[0] : vector<17xi8>, view<85xi8>
+  vector.store %short_bits, %mask_output[17] : vector<17xi8>, view<85xi8>
+  vector.store %word_bits, %mask_output[34] : vector<17xi8>, view<85xi8>
+  vector.store %long_bits, %mask_output[51] : vector<17xi8>, view<85xi8>
+  %low_byte = scalar.constant 255 : i64
+  %index_base_bits = scalar.andi %base, %low_byte : i64
+  %index_step_bits = scalar.andi %step, %low_byte : i64
+  %index_base = index.cast %index_base_bits : i64 to index
+  %index_step = index.cast %index_step_bits : i64 to index
+  %limit = index.constant 2048 : index
+  %indices = vector.iota %index_base step %index_step : vector<17xindex>
+  %index_values = vector.index_cast %indices : vector<17xindex> to vector<17xi64>
+  %index_mask = vector.mask.range [%index_base to %limit step %index_step] : index -> vector<17xi1>
+  %index_bits = vector.extui %index_mask : vector<17xi1> to vector<17xi8>
+  vector.store %index_values, %output[68] : vector<17xi64>, view<85xi64>
+  vector.store %index_bits, %mask_output[68] : vector<17xi8>, view<85xi8>
+  func.return
+}
+
+func.def @coordinate_tails_oracle(%base: i64, %step: i64, %values: buffer, %masks: buffer, %ordinal_bytes: buffer) {
+  %origin = index.constant 0 : offset
+  %output = buffer.view %values[%origin] : buffer -> view<85xi64>
+  %mask_output = buffer.view %masks[%origin] : buffer -> view<85xi8>
+  %byte_output = buffer.view %ordinal_bytes[%origin] : buffer -> view<160xi8>
+  %sign_boundary = scalar.constant 0 : i64
+  %low_byte = scalar.constant 255 : i64
+  %index_base = scalar.andi %base, %low_byte : i64
+  %index_step = scalar.andi %step, %low_byte : i64
+  %limit = scalar.constant 2048 : i64
+  %begin = index.constant 0 : index
+  %end = index.constant 17 : index
+  %increment = index.constant 1 : index
+  %short_offset = index.constant 17 : index
+  %word_offset = index.constant 34 : index
+  %long_offset = index.constant 51 : index
+  %index_offset = index.constant 68 : index
+  %last, %last_index = scf.for %lane = [%begin to %end step %increment](%current = %base : i64, %position = %index_base : i64) -> (i64, i64) {
+    %byte = scalar.trunci %current : i64 to i8
+    %short = scalar.trunci %current : i64 to i16
+    %word = scalar.trunci %current : i64 to i32
+    %byte_value = scalar.extsi %byte : i8 to i64
+    %short_value = scalar.extsi %short : i16 to i64
+    %word_value = scalar.extsi %word : i32 to i64
+    %byte_mask = scalar.cmpi slt, %byte_value, %sign_boundary : i64
+    %short_mask = scalar.cmpi slt, %short_value, %sign_boundary : i64
+    %word_mask = scalar.cmpi slt, %word_value, %sign_boundary : i64
+    %long_mask = scalar.cmpi slt, %current, %sign_boundary : i64
+    %index_mask = scalar.cmpi slt, %position, %limit : i64
+    %byte_bit = scalar.extui %byte_mask : i1 to i8
+    %short_bit = scalar.extui %short_mask : i1 to i8
+    %word_bit = scalar.extui %word_mask : i1 to i8
+    %long_bit = scalar.extui %long_mask : i1 to i8
+    %index_bit = scalar.extui %index_mask : i1 to i8
+    %short_position = index.add %lane, %short_offset : index
+    %word_position = index.add %lane, %word_offset : index
+    %long_position = index.add %lane, %long_offset : index
+    %index_position = index.add %lane, %index_offset : index
+    view.store %byte_value, %output[%lane] : i64, view<85xi64>
+    view.store %short_value, %output[%short_position] : i64, view<85xi64>
+    view.store %word_value, %output[%word_position] : i64, view<85xi64>
+    view.store %current, %output[%long_position] : i64, view<85xi64>
+    view.store %position, %output[%index_position] : i64, view<85xi64>
+    view.store %byte_bit, %mask_output[%lane] : i8, view<85xi8>
+    view.store %short_bit, %mask_output[%short_position] : i8, view<85xi8>
+    view.store %word_bit, %mask_output[%word_position] : i8, view<85xi8>
+    view.store %long_bit, %mask_output[%long_position] : i8, view<85xi8>
+    view.store %index_bit, %mask_output[%index_position] : i8, view<85xi8>
+    %next = scalar.addi %current, %step : i64
+    %next_index = scalar.addi %position, %index_step : i64
+    scf.yield %next, %next_index : i64, i64
+  }
+  %byte_end = index.constant 160 : index
+  %last_byte = scf.for %lane = [%begin to %byte_end step %increment](%current = %base : i64) -> (i64) {
+    %byte = scalar.trunci %current : i64 to i8
+    view.store %byte, %byte_output[%lane] : i8, view<160xi8>
+    %next = scalar.addi %current, %step : i64
+    scf.yield %next : i64
+  }
+  func.return
+}
+
+check.scenario @coordinate_tail_values {
+  check.trial[9](%trial: index, %entropy: check.entropy) {
+    %entropy_bits = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %base = check.generate<@coordinate_base>(%trial, %entropy_bits) : (index, i64) -> (i64)
+    %step = check.generate<@coordinate_step>(%trial) : (index) -> (i64)
+    %values_storage = check.generate.fill value(23) : tensor<89xi64>
+    %masks_storage = check.generate.fill value(23) : tensor<89xi8>
+    %bytes_storage = check.generate.fill value(23) : tensor<164xi8>
+    %values = check.tensor.view %values_storage offset(16) : tensor<89xi64> -> tensor<85xi64>
+    %masks = check.tensor.view %masks_storage offset(2) : tensor<89xi8> -> tensor<85xi8>
+    %bytes = check.tensor.view %bytes_storage offset(2) : tensor<164xi8> -> tensor<160xi8>
+    check.compare<@coordinate_tails, @coordinate_tails_oracle>(%base, %step, %values, %masks, %bytes) : (i64, i64, tensor<85xi64>, tensor<85xi8>, tensor<160xi8>) -> () {
+      check.expect.bitwise actual(%values_storage) expected(%values_storage) : tensor<89xi64>
+      check.expect.bitwise actual(%masks_storage) expected(%masks_storage) : tensor<89xi8>
+      check.expect.bitwise actual(%bytes_storage) expected(%bytes_storage) : tensor<164xi8>
+    }
+  }
+  check.return
+}

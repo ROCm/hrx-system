@@ -43,6 +43,7 @@ iree_py_library(
         "memory.py",
         "packed_dot.py",
         "predicate.py",
+        "predicate_bitstream.py",
         "rule_builders.py",
         "scalar.py",
         "scalar_float.py",
@@ -69,6 +70,21 @@ iree_py_library(
         "//loom/py/loom/target/arch/x86/descriptors",
         "//loom/py/loom/target/contracts",
         "//loom/py/loom/target/emit:float_narrowing",
+    ],
+)
+
+iree_py_test(
+    name = "predicate_bitstream_test",
+    srcs = [
+        "predicate_bitstream_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = ["loom.target.arch.x86.contracts.predicate_bitstream_test"],
+    main = "pytest_style_runner.py",
+    deps = [
+        ":contracts",
+        "//loom/py/loom/dialect/vector",
+        "//loom/py/loom/target/contracts",
     ],
 )
 

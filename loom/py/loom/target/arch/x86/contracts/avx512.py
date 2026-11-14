@@ -56,6 +56,9 @@ from loom.target.arch.x86.contracts.memory import (
     x86_scalar_float_memory_rules,
     x86_vector_memory_rules,
 )
+from loom.target.arch.x86.contracts.predicate_bitstream import (
+    avx512_predicate_bitpack_rules,
+)
 from loom.target.arch.x86.contracts.scalar_float import scalar_bit_transfer_rules
 from loom.target.arch.x86.contracts.shuffle import avx512_shuffle_rules
 from loom.target.arch.x86.contracts.vector_arithmetic import (
@@ -154,6 +157,7 @@ def _cases() -> Sequence[ContractCase]:
         *avx512_vector_integer_count_rules(_descriptor),
         *avx512_vector_rotation_rules(_descriptor),
         *avx512_predicate_rules(_descriptor),
+        *avx512_predicate_bitpack_rules(_descriptor),
         *avx512_vector_arithmetic_rules(_descriptor),
         *scalar_float_root_rules(
             _descriptor,

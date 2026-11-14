@@ -117,6 +117,36 @@ func.def @predicate_select(%trial: index, %output: buffer) {
   func.return
 }
 
+// Select scalar bits independently of the vector boolean implementation.
+func.def @predicate_select_oracle(%trial: index, %output: buffer) {
+  %case = index.cast %trial : index to i32
+  %c0 = scalar.constant 0 : i32
+  %c1 = scalar.constant 1 : i32
+  %c4 = scalar.constant 4 : i32
+  %c8 = scalar.constant 8 : i32
+  %true_bits = scalar.shrui %case, %c4 : i32
+  %false_bits = scalar.shrui %case, %c8 : i32
+  %begin = index.constant 0 : index
+  %end = index.constant 4 : index
+  %step = index.constant 1 : index
+  %packed = scf.for %lane = [%begin to %end step %step](%packed = %c0 : i32) -> (i32) {
+    %position = index.cast %lane : index to i32
+    %condition_shifted = scalar.shrui %case, %position : i32
+    %condition_bit = scalar.andi %condition_shifted, %c1 : i32
+    %condition = scalar.cmpi ne, %condition_bit, %c0 : i32
+    %source = scf.select %condition, %true_bits, %false_bits : i32
+    %shifted = scalar.shrui %source, %position : i32
+    %bit = scalar.andi %shifted, %c1 : i32
+    %field = scalar.shli %bit, %position : i32
+    %next = scalar.ori %packed, %field : i32
+    scf.yield %next : i32
+  }
+  %base = index.constant 0 : offset
+  %result = buffer.view %output[%base] : buffer -> view<2xi32>
+  view.store %packed, %result[0] : i32, view<2xi32>
+  func.return
+}
+
 check.scenario @predicate_select_values {
   check.trial[4096](%trial: index, %entropy: check.entropy) {
     %storage = check.generate.fill value(-123) : tensor<10xi32>
@@ -124,7 +154,7 @@ check.scenario @predicate_select_values {
     %prefix = check.tensor.view %storage offset(0) : tensor<10xi32> -> tensor<4xi32>
     %suffix = check.tensor.view %storage offset(24) : tensor<10xi32> -> tensor<4xi32>
     %guard = check.generate.fill value(-123) : tensor<4xi32>
-    check.compare<@predicate_select>(%trial, %output) : (index, tensor<2xi32>) -> () {
+    check.compare<@predicate_select, @predicate_select_oracle>(%trial, %output) : (index, tensor<2xi32>) -> () {
       check.expect.bitwise actual(%output) expected(%output) : tensor<2xi32>
       check.expect.bitwise actual(%prefix) expected(%guard) : tensor<4xi32>
       check.expect.bitwise actual(%suffix) expected(%guard) : tensor<4xi32>
@@ -254,6 +284,115 @@ check.scenario @predicate_bitstream_roundtrip_values {
     %output = check.tensor.view %storage offset(16) : tensor<25xi32> -> tensor<17xi32>
     check.compare<@predicate_bitstream_roundtrip, @predicate_bitstream_roundtrip_oracle>(%trial, %output) : (index, tensor<17xi32>) -> () {
       check.expect.bitwise actual(%storage) expected(%storage) : tensor<25xi32>
+    }
+  }
+  check.return
+}
+
+// Sizes cross scalar, partial-packet, native-mask, and oversized boundaries.
+func.def inline @select_predicate_packet(%count: index, %input: buffer, %output: buffer, %origin: offset) {
+  %base = index.constant 0 : offset
+  %true_origin = index.constant 128 : offset
+  %false_origin = index.constant 256 : offset
+  %conditions = buffer.view %input[%base] : buffer -> view<128xi8>
+  %true_values = buffer.view %input[%true_origin] : buffer -> view<128xi8>
+  %false_values = buffer.view %input[%false_origin] : buffer -> view<128xi8>
+  %condition_words = vector.load %conditions[0] : view<128xi8> -> vector<[%count]xi8>
+  %true_words = vector.load %true_values[0] : view<128xi8> -> vector<[%count]xi8>
+  %false_words = vector.load %false_values[0] : view<128xi8> -> vector<[%count]xi8>
+  %threshold = vector.splati 0 : vector<[%count]xi8>
+  %condition = vector.cmpi sgt, %condition_words, %threshold : vector<[%count]xi8> -> vector<[%count]xi1>
+  %true_value = vector.cmpi sgt, %true_words, %threshold : vector<[%count]xi8> -> vector<[%count]xi1>
+  %false_value = vector.cmpi sgt, %false_words, %threshold : vector<[%count]xi8> -> vector<[%count]xi1>
+  %selected = vector.select %condition, %true_value, %false_value : vector<[%count]xi1>
+  %bytes = vector.extui %selected : vector<[%count]xi1> to vector<[%count]xi8>
+  %destination = buffer.view %output[%origin] : buffer -> view<[%count]xi8>
+  vector.store %bytes, %destination[0] : vector<[%count]xi8>, view<[%count]xi8>
+  func.return
+}
+
+func.def inline @select_predicate_packet_oracle(%count: index, %input: buffer, %output: buffer, %origin: offset) {
+  %base = index.constant 0 : offset
+  %true_origin = index.constant 128 : offset
+  %false_origin = index.constant 256 : offset
+  %conditions = buffer.view %input[%base] : buffer -> view<128xi8>
+  %true_values = buffer.view %input[%true_origin] : buffer -> view<128xi8>
+  %false_values = buffer.view %input[%false_origin] : buffer -> view<128xi8>
+  %destination = buffer.view %output[%origin] : buffer -> view<[%count]xi8>
+  %threshold = scalar.constant 0 : i8
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  scf.for %lane = [%begin to %count step %step] {
+    %condition_word = view.load %conditions[%lane] : view<128xi8> -> i8
+    %true_word = view.load %true_values[%lane] : view<128xi8> -> i8
+    %false_word = view.load %false_values[%lane] : view<128xi8> -> i8
+    %condition = scalar.cmpi sgt, %condition_word, %threshold : i8
+    %selected = scf.select %condition, %true_word, %false_word : i8
+    %predicate = scalar.cmpi sgt, %selected, %threshold : i8
+    %byte = scalar.extui %predicate : i1 to i8
+    view.store %byte, %destination[%lane] : i8, view<[%count]xi8>
+  }
+  func.return
+}
+
+func.def @predicate_select_widths(%input: buffer, %output: buffer) {
+  %count1 = index.constant 1 : index
+  %origin1 = index.constant 0 : offset
+  func.call @select_predicate_packet(%count1, %input, %output, %origin1) : (index, buffer, buffer, offset)
+  %count3 = index.constant 3 : index
+  %origin3 = index.constant 1 : offset
+  func.call @select_predicate_packet(%count3, %input, %output, %origin3) : (index, buffer, buffer, offset)
+  %count8 = index.constant 8 : index
+  %origin8 = index.constant 4 : offset
+  func.call @select_predicate_packet(%count8, %input, %output, %origin8) : (index, buffer, buffer, offset)
+  %count16 = index.constant 16 : index
+  %origin16 = index.constant 12 : offset
+  func.call @select_predicate_packet(%count16, %input, %output, %origin16) : (index, buffer, buffer, offset)
+  %count32 = index.constant 32 : index
+  %origin32 = index.constant 28 : offset
+  func.call @select_predicate_packet(%count32, %input, %output, %origin32) : (index, buffer, buffer, offset)
+  %count64 = index.constant 64 : index
+  %origin64 = index.constant 60 : offset
+  func.call @select_predicate_packet(%count64, %input, %output, %origin64) : (index, buffer, buffer, offset)
+  %count128 = index.constant 128 : index
+  %origin128 = index.constant 124 : offset
+  func.call @select_predicate_packet(%count128, %input, %output, %origin128) : (index, buffer, buffer, offset)
+  func.return
+}
+
+func.def @predicate_select_widths_oracle(%input: buffer, %output: buffer) {
+  %count1 = index.constant 1 : index
+  %origin1 = index.constant 0 : offset
+  func.call @select_predicate_packet_oracle(%count1, %input, %output, %origin1) : (index, buffer, buffer, offset)
+  %count3 = index.constant 3 : index
+  %origin3 = index.constant 1 : offset
+  func.call @select_predicate_packet_oracle(%count3, %input, %output, %origin3) : (index, buffer, buffer, offset)
+  %count8 = index.constant 8 : index
+  %origin8 = index.constant 4 : offset
+  func.call @select_predicate_packet_oracle(%count8, %input, %output, %origin8) : (index, buffer, buffer, offset)
+  %count16 = index.constant 16 : index
+  %origin16 = index.constant 12 : offset
+  func.call @select_predicate_packet_oracle(%count16, %input, %output, %origin16) : (index, buffer, buffer, offset)
+  %count32 = index.constant 32 : index
+  %origin32 = index.constant 28 : offset
+  func.call @select_predicate_packet_oracle(%count32, %input, %output, %origin32) : (index, buffer, buffer, offset)
+  %count64 = index.constant 64 : index
+  %origin64 = index.constant 60 : offset
+  func.call @select_predicate_packet_oracle(%count64, %input, %output, %origin64) : (index, buffer, buffer, offset)
+  %count128 = index.constant 128 : index
+  %origin128 = index.constant 124 : offset
+  func.call @select_predicate_packet_oracle(%count128, %input, %output, %origin128) : (index, buffer, buffer, offset)
+  func.return
+}
+
+check.scenario @predicate_select_packet_values {
+  check.trial[32](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-1 to 1) : tensor<384xi8>
+    %storage = check.generate.fill value(90) : tensor<268xi8>
+    %output = check.tensor.view %storage offset(8) : tensor<268xi8> -> tensor<252xi8>
+    check.compare<@predicate_select_widths, @predicate_select_widths_oracle>(%input, %output) : (tensor<384xi8>, tensor<252xi8>) -> () {
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<268xi8>
     }
   }
   check.return

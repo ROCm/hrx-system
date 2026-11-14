@@ -307,7 +307,7 @@ CHECK: COMPILE-REPORT: target_legalization[*] function=cast_reference_domains so
 CHECK: COMPILE-REPORT: target_legalization[*] function=cast_reference_domains source_op=vector.extui mode=eager policy=reference-only action=deferred outcome=deferred contract=unhandled legalizer=vector strategy=reference * scalarized=false *
 
 // ====
-// RUN: with-checks compile-report target-legalize{mode=complete}
+// RUN: with-checks compile-report target-legalize{mode=complete,policy=reference-only}
 
 test.target<low_core> @test_target
 

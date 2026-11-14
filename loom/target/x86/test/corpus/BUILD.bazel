@@ -68,6 +68,8 @@ loom_corpus_test(
             "numeric/integer/scalar_observations.loom",
             "numeric/integer/signed_unary.loom",
             "numeric/integer/widening.loom",
+            "numeric/predicate/bitstream.loom",
+            "numeric/predicate/vector_logic.loom",
             "numeric/vector/concatenation.loom",
             "numeric/vector/constants.loom",
             "numeric/vector/conversion.loom",

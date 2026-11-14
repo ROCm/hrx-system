@@ -1,0 +1,196 @@
+// RUN: pass target-legalize{mode=eager,policy=require-native},canonicalize,dce
+
+x86.target<avx2> @target
+
+func.def target(@target) @wide_words(%base: i32, %step: i32, %output: view<16xi32>) {
+  %values = vector.iota %base step %step : vector<16xi32>
+  vector.store %values, %output[0] : vector<16xi32>, view<16xi32>
+  func.return
+}
+
+// ----
+x86.target<avx2> @target
+
+func.def target(@target) @wide_words(%base: i32, %step: i32, %output: view<16xi32>) {
+  %4 = vector.iota %base step %step : vector<8xi32>
+  %10 = scalar.constant 3 : i32
+  %11 = scalar.shli %step, %10 : i32
+  %7 = scalar.addi %base, %11 : i32
+  %8 = vector.iota %7 step %step : vector<8xi32>
+  vector.store %4, %output[0] : vector<8xi32>, view<16xi32>
+  vector.store %8, %output[8] : vector<8xi32>, view<16xi32>
+  func.return
+}
+
+// ====
+// RUN: pass target-legalize{mode=eager,policy=require-native},canonicalize,dce
+
+x86.target<avx2> @target
+
+func.def target(@target) @word_tail(%base: i32, %output: view<10xi32>) {
+  %step = scalar.constant 1 : i32
+  %values = vector.iota %base step %step : vector<10xi32>
+  vector.store %values, %output[0] : vector<10xi32>, view<10xi32>
+  func.return
+}
+
+// ----
+x86.target<avx2> @target
+
+func.def target(@target) @word_tail(%base: i32, %output: view<10xi32>) {
+  %step = scalar.constant 1 : i32
+  %4 = vector.iota %base step %step : vector<8xi32>
+  %10 = scalar.constant 8 : i32
+  %7 = scalar.addi %base, %10 : i32
+  %8 = vector.iota %7 step %step : vector<2xi32>
+  vector.store %4, %output[0] : vector<8xi32>, view<10xi32>
+  vector.store %8, %output[8] : vector<2xi32>, view<10xi32>
+  func.return
+}
+
+// ====
+// RUN: pass target-legalize{mode=eager,policy=require-native},canonicalize,dce
+
+x86.target<avx2> @target
+
+func.def target(@target) @ranked_longs(%base: i64, %step: i64, %output: view<2x3xi64>) {
+  %values = vector.iota %base step %step : vector<2x3xi64>
+  vector.store %values, %output[0, 0] : vector<2x3xi64>, view<2x3xi64>
+  func.return
+}
+
+// ----
+x86.target<avx2> @target
+
+func.def target(@target) @ranked_longs(%base: i64, %step: i64, %output: view<2x3xi64>) {
+  %4 = vector.iota %base step %step : vector<4xi64>
+  %11 = scalar.constant 2 : i64
+  %12 = scalar.shli %step, %11 : i64
+  %7 = scalar.addi %base, %12 : i64
+  %8 = vector.iota %7 step %step : vector<2xi64>
+  %9 = vector.concat<0> %4, %8 : vector<4xi64>, vector<2xi64> -> vector<6xi64>
+  %values = vector.bitcast %9 : vector<6xi64> to vector<2x3xi64>
+  vector.store %values, %output[0, 0] : vector<2x3xi64>, view<2x3xi64>
+  func.return
+}
+
+// ====
+// RUN: pass target-legalize{mode=eager,policy=require-native},canonicalize,dce
+
+x86.target<avx2> @target
+
+func.def target(@target) @ranked_native(%base: i32, %step: i32, %output: view<2x4xi32>) {
+  %values = vector.iota %base step %step : vector<2x4xi32>
+  vector.store %values, %output[0, 0] : vector<2x4xi32>, view<2x4xi32>
+  func.return
+}
+
+// ----
+x86.target<avx2> @target
+
+func.def target(@target) @ranked_native(%base: i32, %step: i32, %output: view<2x4xi32>) {
+  %4 = vector.iota %base step %step : vector<8xi32>
+  %values = vector.bitcast %4 : vector<8xi32> to vector<2x4xi32>
+  vector.store %values, %output[0, 0] : vector<2x4xi32>, view<2x4xi32>
+  func.return
+}
+
+// ====
+// RUN: pass target-legalize{mode=eager,policy=require-native},canonicalize,dce
+
+x86.target<avx2> @target
+
+func.def target(@target) @wrapped_offsets(%base: i8, %step: i8, %output: view<160xi8>) {
+  %values = vector.iota %base step %step : vector<160xi8>
+  vector.store %values, %output[0] : vector<160xi8>, view<160xi8>
+  func.return
+}
+
+// ----
+x86.target<avx2> @target
+
+func.def target(@target) @wrapped_offsets(%base: i8, %step: i8, %output: view<160xi8>) {
+  %4 = vector.iota %base step %step : vector<32xi8>
+  %26 = scalar.constant 5 : i8
+  %27 = scalar.shli %step, %26 : i8
+  %7 = scalar.addi %base, %27 : i8
+  %8 = vector.iota %7 step %step : vector<32xi8>
+  %24 = scalar.constant 6 : i8
+  %25 = scalar.shli %step, %24 : i8
+  %11 = scalar.addi %base, %25 : i8
+  %12 = vector.iota %11 step %step : vector<32xi8>
+  %13 = scalar.constant 96 : i8
+  %14 = scalar.muli %13, %step : i8
+  %15 = scalar.addi %base, %14 : i8
+  %16 = vector.iota %15 step %step : vector<32xi8>
+  %22 = scalar.constant 7 : i8
+  %23 = scalar.shli %step, %22 : i8
+  %19 = scalar.addi %base, %23 : i8
+  %20 = vector.iota %19 step %step : vector<32xi8>
+  vector.store %4, %output[0] : vector<32xi8>, view<160xi8>
+  vector.store %8, %output[32] : vector<32xi8>, view<160xi8>
+  vector.store %12, %output[64] : vector<32xi8>, view<160xi8>
+  vector.store %16, %output[96] : vector<32xi8>, view<160xi8>
+  vector.store %20, %output[128] : vector<32xi8>, view<160xi8>
+  func.return
+}
+
+// ====
+// RUN: pass target-legalize{mode=eager,policy=require-native},canonicalize,dce
+
+x86.target<avx2> @target
+
+func.def target(@target) @native_control(%base: i32, %step: i32) -> (vector<8xi32>) {
+  %values = vector.iota %base step %step : vector<8xi32>
+  func.return %values : vector<8xi32>
+}
+
+// ----
+x86.target<avx2> @target
+
+func.def target(@target) @native_control(%base: i32, %step: i32) -> (vector<8xi32>) {
+  %values = vector.iota %base step %step : vector<8xi32>
+  func.return %values : vector<8xi32>
+}
+
+// ====
+// RUN: pass target-legalize{mode=eager,policy=require-native},canonicalize,dce
+
+x86.target<avx2> @target
+
+func.def target(@target) @wrapping_mask(%base: i8, %limit: i8, %step: i8) -> (vector<16xi1>) {
+  %mask = vector.mask.range [%base to %limit step %step] : i8 -> vector<16xi1>
+  func.return %mask : vector<16xi1>
+}
+
+// ----
+x86.target<avx2> @target
+
+func.def target(@target) @wrapping_mask(%base: i8, %limit: i8, %step: i8) -> (vector<16xi1>) {
+  %5 = vector.iota %base step %step : vector<16xi8>
+  %6 = vector.splat %limit : vector<16xi8>
+  %mask = vector.cmpi slt, %5, %6 : vector<16xi8> -> vector<16xi1>
+  func.return %mask : vector<16xi1>
+}
+
+// ====
+// RUN: pass target-legalize{mode=eager,policy=require-native},canonicalize,dce
+
+x86.target<avx2> @target
+
+func.def target(@target) @index_mask(%base: index, %limit: index, %step: index) -> (vector<8xi1>) {
+  %mask = vector.mask.range [%base to %limit step %step] : index -> vector<8xi1>
+  func.return %mask : vector<8xi1>
+}
+
+// ----
+x86.target<avx2> @target
+
+func.def target(@target) @index_mask(%base: index, %limit: index, %step: index) -> (vector<8xi1>) {
+  %5 = vector.iota %base step %step : vector<8xindex>
+  %6 = vector.index_cast %5 : vector<8xindex> to vector<8xi64>
+  %7 = index.cast %limit : index to i64
+  %8 = vector.splat %7 : vector<8xi64>
+  %mask = vector.cmpi slt, %6, %8 : vector<8xi64> -> vector<8xi1>
+  func.return %mask : vector<8xi1>
+}

@@ -10,6 +10,7 @@
 #include <string.h>
 
 #include "iree/base/internal/arena.h"
+#include "iree/base/internal/math.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ir/scalar_type.h"
@@ -595,10 +596,23 @@ static uint32_t loom_vector_bitstream_packet_scalar_bit_count(
   return plan->packet_bit_count;
 }
 
+static bool loom_vector_bitstream_can_partition(uint16_t packet_lane_mask,
+                                                uint32_t lane_count) {
+  // Packet sizes are powers of two. Greedy packet selection is exact when
+  // the domain is a multiple of its smallest admitted packet; a one-lane
+  // vector carrier is unnecessary when no scalar-sized tail exists.
+  if (packet_lane_mask == 0) {
+    return false;
+  }
+  const uint32_t minimum_lane_count =
+      iree_math_count_trailing_zeros_u32(packet_lane_mask);
+  return (lane_count & (minimum_lane_count - 1u)) == 0;
+}
+
 static bool loom_vector_bitstream_source_partition_is_usable(
     const loom_target_legalization_context_t* context,
     loom_value_fact_vector_partition_t partition, loom_type_t source_type,
-    uint32_t source_lane_count) {
+    uint32_t source_lane_count, uint16_t packet_lane_mask) {
   if (partition.count == 0 || partition.lane_count != source_lane_count) {
     return false;
   }
@@ -607,7 +621,9 @@ static bool loom_vector_bitstream_source_partition_is_usable(
   for (uint32_t i = 0; i < partition.count; ++i) {
     const loom_value_fact_vector_partition_component_t component =
         partition.components[i];
-    if (component.lane_count == 0) {
+    if (component.lane_count == 0 ||
+        !loom_vector_bitstream_can_partition(packet_lane_mask,
+                                             component.lane_count)) {
       return false;
     }
     const loom_type_t component_type =
@@ -637,19 +653,21 @@ static loom_value_fact_vector_partition_t
 loom_vector_bitstream_source_partition_select(
     const loom_target_legalization_context_t* context,
     loom_value_fact_vector_partition_t partition, loom_type_t source_type,
-    uint32_t source_lane_count) {
+    uint32_t source_lane_count, uint16_t packet_lane_mask) {
   if (partition.snapshot_count != 0) {
     loom_value_fact_vector_partition_t snapshot = partition;
     snapshot.components = partition.snapshot_components;
     snapshot.count = partition.snapshot_count;
     snapshot.regular_lane_count = partition.snapshot_lane_count;
     if (loom_vector_bitstream_source_partition_is_usable(
-            context, snapshot, source_type, source_lane_count)) {
+            context, snapshot, source_type, source_lane_count,
+            packet_lane_mask)) {
       return snapshot;
     }
   }
   if (loom_vector_bitstream_source_partition_is_usable(
-          context, partition, source_type, source_lane_count)) {
+          context, partition, source_type, source_lane_count,
+          packet_lane_mask)) {
     return partition;
   }
   return (loom_value_fact_vector_partition_t){0};
@@ -1022,8 +1040,10 @@ static iree_status_t loom_vector_bitstream_plan(
       loom_vector_bitstream_packet_lane_mask(
           context, storage_element, storage_work_element,
           storage_work_element_bit_count, packet_bit_count);
-  if (!iree_all_bits_set(logical_packet_lane_mask, (uint16_t)(1u << 1)) ||
-      !iree_all_bits_set(storage_packet_lane_mask, (uint16_t)(1u << 1))) {
+  if (!loom_vector_bitstream_can_partition(logical_packet_lane_mask,
+                                           logical_lane_count) ||
+      !loom_vector_bitstream_can_partition(storage_packet_lane_mask,
+                                           storage_lane_count)) {
     return iree_ok_status();
   }
   const uint32_t source_lane_count =
@@ -1033,7 +1053,8 @@ static iree_status_t loom_vector_bitstream_plan(
           context,
           loom_value_fact_table_query_vector_partition(context->fact_table,
                                                        source),
-          source_type, source_lane_count);
+          source_type, source_lane_count,
+          is_bitpack ? logical_packet_lane_mask : storage_packet_lane_mask);
   if (source_partition.count == 0 &&
       !loom_target_legalization_has_bitstream_packet_carrier(context,
                                                              source_type)) {

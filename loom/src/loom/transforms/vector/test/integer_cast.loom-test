@@ -97,3 +97,210 @@ func.def target(@target) @empty_casts(%source: vector<0xi32>) -> (vector<0xi64>)
   %result = vector.empty : vector<0xi64>
   func.return %result : vector<0xi64>
 }
+
+// ====
+// RUN: pass vector-to-scalar,dce
+
+// Scalar lane construction consumes the cast proof before canonicalization.
+func.def @boolean_transport(%first: vector<2xi1>, %second: vector<2xi1>) -> (vector<4xi1>) {
+  %first_bytes = vector.extsi %first : vector<2xi1> to vector<2xi8>
+  %second_bytes = vector.extsi %second : vector<2xi1> to vector<2xi8>
+  %joined = vector.concat<0> %first_bytes, %second_bytes : vector<2xi8>, vector<2xi8> -> vector<4xi8>
+  %result = vector.trunci %joined : vector<4xi8> to vector<4xi1>
+  func.return %result : vector<4xi1>
+}
+
+// ----
+func.def @boolean_transport(%first: vector<2xi1>, %second: vector<2xi1>) -> (vector<4xi1>) {
+  %7 = vector.extract %first[0] : vector<2xi1> -> i1
+  %9 = vector.extract %first[1] : vector<2xi1> -> i1
+  %11 = vector.extract %second[0] : vector<2xi1> -> i1
+  %13 = vector.extract %second[1] : vector<2xi1> -> i1
+  %result = vector.from_elements %7, %9, %11, %13 : vector<4xi1>
+  func.return %result : vector<4xi1>
+}
+
+// ====
+// RUN: pass vector-to-scalar,dce
+
+// The wide value remains available to its independent consumer.
+func.def @signed_byte_transport(%values: vector<2xi8>) -> (vector<2xi64>, vector<2xi8>) {
+  %words = vector.extsi %values : vector<2xi8> to vector<2xi32>
+  %wide = vector.extsi %words : vector<2xi32> to vector<2xi64>
+  %result = vector.trunci %wide : vector<2xi64> to vector<2xi8>
+  func.return %wide, %result : vector<2xi64>, vector<2xi8>
+}
+
+// ----
+func.def @signed_byte_transport(%values: vector<2xi8>) -> (vector<2xi64>, vector<2xi8>) {
+  %13 = vector.extract %values[0] : vector<2xi8> -> i8
+  %14 = scalar.extsi %13 : i8 to i32
+  %15 = scalar.extsi %14 : i32 to i64
+  %16 = vector.extract %values[1] : vector<2xi8> -> i8
+  %17 = scalar.extsi %16 : i8 to i32
+  %18 = scalar.extsi %17 : i32 to i64
+  %wide = vector.from_elements %15, %18 : vector<2xi64>
+  %6 = vector.extract %values[0] : vector<2xi8> -> i8
+  %9 = vector.extract %values[1] : vector<2xi8> -> i8
+  %result = vector.from_elements %6, %9 : vector<2xi8>
+  func.return %wide, %result : vector<2xi64>, vector<2xi8>
+}
+
+// ====
+// RUN: pass vector-to-scalar,dce
+
+func.def @unsigned_word_transport(%values: vector<2xi16>) -> (vector<2xi16>) {
+  %words = vector.extui %values : vector<2xi16> to vector<2xi32>
+  %wide = vector.extui %words : vector<2xi32> to vector<2xi64>
+  %result = vector.trunci %wide : vector<2xi64> to vector<2xi16>
+  func.return %result : vector<2xi16>
+}
+
+// ----
+func.def @unsigned_word_transport(%values: vector<2xi16>) -> (vector<2xi16>) {
+  %5 = vector.extract %values[0] : vector<2xi16> -> i16
+  %8 = vector.extract %values[1] : vector<2xi16> -> i16
+  %result = vector.from_elements %5, %8 : vector<2xi16>
+  func.return %result : vector<2xi16>
+}
+
+// ====
+// RUN: pass vector-to-scalar,dce
+
+func.def @long_transport(%values: vector<2xi32>) -> (vector<2xi32>, vector<2xi32>) {
+  %signed = vector.extsi %values : vector<2xi32> to vector<2xi64>
+  %unsigned = vector.extui %values : vector<2xi32> to vector<2xi64>
+  %first = vector.trunci %signed : vector<2xi64> to vector<2xi32>
+  %second = vector.trunci %unsigned : vector<2xi64> to vector<2xi32>
+  func.return %first, %second : vector<2xi32>, vector<2xi32>
+}
+
+// ----
+func.def @long_transport(%values: vector<2xi32>) -> (vector<2xi32>, vector<2xi32>) {
+  %12 = vector.extract %values[0] : vector<2xi32> -> i32
+  %14 = vector.extract %values[1] : vector<2xi32> -> i32
+  %first = vector.from_elements %12, %14 : vector<2xi32>
+  %7 = vector.extract %values[0] : vector<2xi32> -> i32
+  %9 = vector.extract %values[1] : vector<2xi32> -> i32
+  %second = vector.from_elements %7, %9 : vector<2xi32>
+  func.return %first, %second : vector<2xi32>, vector<2xi32>
+}
+
+// ====
+// RUN: pass vector-to-scalar,dce
+
+// Bits discarded before extension cannot be recovered from the payload root.
+func.def @lossy_transport(%values: vector<2xi16>) -> (vector<2xi16>) {
+  %bytes = vector.trunci %values : vector<2xi16> to vector<2xi8>
+  %wide = vector.extui %bytes : vector<2xi8> to vector<2xi32>
+  %result = vector.trunci %wide : vector<2xi32> to vector<2xi16>
+  func.return %result : vector<2xi16>
+}
+
+// ----
+func.def @lossy_transport(%values: vector<2xi16>) -> (vector<2xi16>) {
+  %5 = vector.extract %values[0] : vector<2xi16> -> i16
+  %6 = scalar.trunci %5 : i16 to i8
+  %7 = scalar.extui %6 : i8 to i32
+  %8 = scalar.trunci %7 : i32 to i16
+  %9 = vector.extract %values[1] : vector<2xi16> -> i16
+  %10 = scalar.trunci %9 : i16 to i8
+  %11 = scalar.extui %10 : i8 to i32
+  %12 = scalar.trunci %11 : i32 to i16
+  %result = vector.from_elements %8, %12 : vector<2xi16>
+  func.return %result : vector<2xi16>
+}
+
+// ====
+// RUN: pass vector-to-scalar,dce
+
+func.def @ranked_transport(%values: vector<2x2xi8>) -> (vector<2x2xi8>) {
+  %wide = vector.extsi %values : vector<2x2xi8> to vector<2x2xi64>
+  %result = vector.trunci %wide : vector<2x2xi64> to vector<2x2xi8>
+  func.return %result : vector<2x2xi8>
+}
+
+// ----
+func.def @ranked_transport(%values: vector<2x2xi8>) -> (vector<2x2xi8>) {
+  %4 = vector.extract %values[0, 0] : vector<2x2xi8> -> i8
+  %6 = vector.extract %values[0, 1] : vector<2x2xi8> -> i8
+  %8 = vector.extract %values[1, 0] : vector<2x2xi8> -> i8
+  %10 = vector.extract %values[1, 1] : vector<2x2xi8> -> i8
+  %result = vector.from_elements %4, %6, %8, %10 : vector<2x2xi8>
+  func.return %result : vector<2x2xi8>
+}
+
+// ====
+// RUN: pass vector-to-scalar,dce
+
+func.def @dynamic_transport(%count: index, %values: vector<[%count]xi1>) -> (vector<[%count]xi1>) {
+  %wide = vector.extsi %values : vector<[%count]xi1> to vector<[%count]xi8>
+  %result = vector.trunci %wide : vector<[%count]xi8> to vector<[%count]xi1>
+  func.return %result : vector<[%count]xi1>
+}
+
+// ----
+func.def @dynamic_transport(%count: index, %values: vector<[%count]xi1>) -> (vector<[%count]xi1>) {
+  %5 = vector.splati 0 : vector<[%count]xi1>
+  %6 = index.constant 0 : index
+  %7 = index.constant 1 : index
+  %result = scf.for %8 = [%6 to %count step %7](%9 = %5 : vector<[%count]xi1>) -> (vector<[%count]xi1>) {
+    %11 = vector.extract %values[%8] : vector<[%count]xi1> -> i1
+    %13 = vector.insert %11 into %9[%8] : i1, vector<[%count]xi1>
+    scf.yield %13 : vector<[%count]xi1>
+  }
+  func.return %result : vector<[%count]xi1>
+}
+
+// ====
+// RUN: pass vector-memory-to-scalar,dce
+
+// Masked reads consume the original predicate lanes without routing their
+// conditions through a redundant sign-extension/truncation pair.
+func.def @masked_transport(%input: view<4xi32>, %first: vector<2xi1>, %second: vector<2xi1>) -> (vector<4xi32>) {
+  %first_bytes = vector.extsi %first : vector<2xi1> to vector<2xi8>
+  %second_bytes = vector.extsi %second : vector<2xi1> to vector<2xi8>
+  %joined = vector.concat<0> %first_bytes, %second_bytes : vector<2xi8>, vector<2xi8> -> vector<4xi8>
+  %mask = vector.trunci %joined : vector<4xi8> to vector<4xi1>
+  %passthrough = vector.splati 0 : vector<4xi32>
+  %result = vector.load.mask %input[0], %mask, %passthrough : view<4xi32>, vector<4xi1>, vector<4xi32>
+  func.return %result : vector<4xi32>
+}
+
+// ----
+func.def @masked_transport(%input: view<4xi32>, %first: vector<2xi1>, %second: vector<2xi1>) -> (vector<4xi32>) {
+  %10 = vector.extract %first[0] : vector<2xi1> -> i1
+  %12 = scf.if %10 -> (i32) {
+    %13 = view.load %input[0] : view<4xi32> -> i32
+    scf.yield %13 : i32
+  } else {
+    %14 = scalar.constant 0 : i32
+    scf.yield %14 : i32
+  }
+  %15 = vector.extract %first[1] : vector<2xi1> -> i1
+  %17 = scf.if %15 -> (i32) {
+    %18 = view.load %input[1] : view<4xi32> -> i32
+    scf.yield %18 : i32
+  } else {
+    %19 = scalar.constant 0 : i32
+    scf.yield %19 : i32
+  }
+  %20 = vector.extract %second[0] : vector<2xi1> -> i1
+  %22 = scf.if %20 -> (i32) {
+    %23 = view.load %input[2] : view<4xi32> -> i32
+    scf.yield %23 : i32
+  } else {
+    %24 = scalar.constant 0 : i32
+    scf.yield %24 : i32
+  }
+  %25 = vector.extract %second[1] : vector<2xi1> -> i1
+  %27 = scf.if %25 -> (i32) {
+    %28 = view.load %input[3] : view<4xi32> -> i32
+    scf.yield %28 : i32
+  } else {
+    %29 = scalar.constant 0 : i32
+    scf.yield %29 : i32
+  }
+  %result = vector.from_elements %12, %17, %22, %27 : vector<4xi32>
+  func.return %result : vector<4xi32>
+}

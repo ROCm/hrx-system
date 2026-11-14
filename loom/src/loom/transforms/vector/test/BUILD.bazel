@@ -73,6 +73,22 @@ loom_check_test(
 )
 
 loom_check_test(
+    name = "coordinate_packets",
+    src = "coordinate_packets.loom-test",
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/arch:x86",
+    ]),
+)
+
+loom_check_test(
+    name = "predicate_concat",
+    src = "predicate_concat.loom-test",
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/arch:x86",
+    ]),
+)
+
+loom_check_test(
     name = "packet_windows",
     src = "packet_windows.loom-test",
     target_compatible_with = loom_config_compatible_with([

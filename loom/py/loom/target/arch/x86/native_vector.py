@@ -960,6 +960,20 @@ VMOVSD_STORE_SOURCE = _instruction(
     _encoding(_VEX, _MAP_1, 3, 0, 0x11, (128,)),
     _encoding(_EVEX, _MAP_1, 3, 1, 0x11, (128,)),
 )
+VMOVMSKPS = _instruction(
+    "vmovmskps",
+    _UNARY,
+    _OPERANDS_2,
+    _IMMEDIATES_0,
+    _encoding(_VEX, _MAP_1, 0, 0, 0x50, (128, 256)),
+)
+VPMOVMSKB = _instruction(
+    "vpmovmskb",
+    _UNARY,
+    _OPERANDS_2,
+    _IMMEDIATES_0,
+    _encoding(_VEX, _MAP_1, 1, 0, 0xD7, (128, 256)),
+)
 VMOVQ_TO_GPR64 = _instruction(
     "vmovq",
     _REVERSE_UNARY,

@@ -1,0 +1,280 @@
+// Packs predicates at native, partial, and multi-packet widths. The complete
+// byte stream, including surrounding storage, is compared with scalar logic.
+func.def inline @pack_bytes(%count: index, %input: buffer, %output: buffer, %origin: offset) {
+  %base = index.constant 0 : offset
+  %bits_per_byte = index.constant 8 : index
+  %byte_count = index.div %count, %bits_per_byte : index
+  %source = buffer.view %input[%base] : buffer -> view<128xi8>
+  %destination = buffer.view %output[%origin] : buffer -> view<[%byte_count]xi8>
+  %values = vector.load %source[0] : view<128xi8> -> vector<[%count]xi8>
+  %threshold = vector.splati 0 : vector<[%count]xi8>
+  %predicates = vector.cmpi sgt, %values, %threshold : vector<[%count]xi8> -> vector<[%count]xi1>
+  %packed = vector.bitpack<1> %predicates : vector<[%count]xi1> -> vector<[%byte_count]xi8>
+  vector.store %packed, %destination[0] : vector<[%byte_count]xi8>, view<[%byte_count]xi8>
+  func.return
+}
+
+func.def inline @pack_bytes_oracle(%count: index, %input: buffer, %output: buffer, %origin: offset) {
+  %base = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %bits_per_byte = index.constant 8 : index
+  %byte_count = index.div %count, %bits_per_byte : index
+  %threshold = scalar.constant 0 : i8
+  %initial_bits = scalar.constant 0 : i32
+  %source = buffer.view %input[%base] : buffer -> view<128xi8>
+  %destination = buffer.view %output[%origin] : buffer -> view<[%byte_count]xi8>
+  scf.for %byte = [%begin to %byte_count step %step] {
+    %start = index.mul %byte, %bits_per_byte : index
+    %packed = scf.for %bit = [%begin to %bits_per_byte step %step](%packed = %initial_bits : i32) -> (i32) {
+      %lane = index.add %start, %bit : index
+      %value = view.load %source[%lane] : view<128xi8> -> i8
+      %predicate = scalar.cmpi sgt, %value, %threshold : i8
+      %word = scalar.extui %predicate : i1 to i32
+      %shift = index.cast %bit : index to i32
+      %field = scalar.shli %word, %shift : i32
+      %next = scalar.ori %packed, %field : i32
+      scf.yield %next : i32
+    }
+    %byte_value = scalar.trunci %packed : i32 to i8
+    view.store %byte_value, %destination[%byte] : i8, view<[%byte_count]xi8>
+  }
+  func.return
+}
+
+func.def @pack_predicate_streams(%input: buffer, %output: buffer) {
+  %n8 = index.constant 8 : index
+  %n16 = index.constant 16 : index
+  %n24 = index.constant 24 : index
+  %n32 = index.constant 32 : index
+  %n64 = index.constant 64 : index
+  %n128 = index.constant 128 : index
+  %o0 = index.constant 0 : offset
+  %o1 = index.constant 1 : offset
+  %o3 = index.constant 3 : offset
+  %o6 = index.constant 6 : offset
+  %o10 = index.constant 10 : offset
+  %o18 = index.constant 18 : offset
+  func.call @pack_bytes(%n8, %input, %output, %o0) : (index, buffer, buffer, offset)
+  func.call @pack_bytes(%n16, %input, %output, %o1) : (index, buffer, buffer, offset)
+  func.call @pack_bytes(%n24, %input, %output, %o3) : (index, buffer, buffer, offset)
+  func.call @pack_bytes(%n32, %input, %output, %o6) : (index, buffer, buffer, offset)
+  func.call @pack_bytes(%n64, %input, %output, %o10) : (index, buffer, buffer, offset)
+  func.call @pack_bytes(%n128, %input, %output, %o18) : (index, buffer, buffer, offset)
+  func.return
+}
+
+func.def @pack_predicate_streams_oracle(%input: buffer, %output: buffer) {
+  %n8 = index.constant 8 : index
+  %n16 = index.constant 16 : index
+  %n24 = index.constant 24 : index
+  %n32 = index.constant 32 : index
+  %n64 = index.constant 64 : index
+  %n128 = index.constant 128 : index
+  %o0 = index.constant 0 : offset
+  %o1 = index.constant 1 : offset
+  %o3 = index.constant 3 : offset
+  %o6 = index.constant 6 : offset
+  %o10 = index.constant 10 : offset
+  %o18 = index.constant 18 : offset
+  func.call @pack_bytes_oracle(%n8, %input, %output, %o0) : (index, buffer, buffer, offset)
+  func.call @pack_bytes_oracle(%n16, %input, %output, %o1) : (index, buffer, buffer, offset)
+  func.call @pack_bytes_oracle(%n24, %input, %output, %o3) : (index, buffer, buffer, offset)
+  func.call @pack_bytes_oracle(%n32, %input, %output, %o6) : (index, buffer, buffer, offset)
+  func.call @pack_bytes_oracle(%n64, %input, %output, %o10) : (index, buffer, buffer, offset)
+  func.call @pack_bytes_oracle(%n128, %input, %output, %o18) : (index, buffer, buffer, offset)
+  func.return
+}
+
+check.scenario @predicate_pack_widths {
+  check.trial[64](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-1 to 1) : tensor<128xi8>
+    %storage = check.generate.fill value(90) : tensor<50xi8>
+    %output = check.tensor.view %storage offset(8) : tensor<50xi8> -> tensor<34xi8>
+    check.compare<@pack_predicate_streams, @pack_predicate_streams_oracle>(%input, %output) : (tensor<128xi8>, tensor<34xi8>) -> () {
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<50xi8>
+    }
+  }
+  check.return
+}
+
+// One runtime predicate feeds every storage width and remains live for a
+// separate selection. The qword observes bit 63; the selected bytes expose
+// destruction or reinterpretation of the original predicate value.
+func.def @pack_predicate_storage(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %word_origin = index.constant 8 : offset
+  %dword_origin = index.constant 16 : offset
+  %qword_origin = index.constant 24 : offset
+  %selected_origin = index.constant 32 : offset
+  %source = buffer.view %input[%base] : buffer -> view<64xi8>
+  %values = vector.load %source[0] : view<64xi8> -> vector<64xi8>
+  %threshold = vector.splati 0 : vector<64xi8>
+  %predicates = vector.cmpi sgt, %values, %threshold : vector<64xi8> -> vector<64xi1>
+  %bytes = vector.bitpack<1> %predicates : vector<64xi1> -> vector<8xi8>
+  %words = vector.bitpack<1> %predicates : vector<64xi1> -> vector<4xi16>
+  %dwords = vector.bitpack<1> %predicates : vector<64xi1> -> vector<2xi32>
+  %qword = vector.bitpack<1> %predicates : vector<64xi1> -> vector<1xi64>
+  %byte_output = buffer.view %output[%base] : buffer -> view<8xi8>
+  %word_output = buffer.view %output[%word_origin] : buffer -> view<4xi16>
+  %dword_output = buffer.view %output[%dword_origin] : buffer -> view<2xi32>
+  %qword_output = buffer.view %output[%qword_origin] : buffer -> view<1xi64>
+  vector.store %bytes, %byte_output[0] : vector<8xi8>, view<8xi8>
+  vector.store %words, %word_output[0] : vector<4xi16>, view<4xi16>
+  vector.store %dwords, %dword_output[0] : vector<2xi32>, view<2xi32>
+  vector.store %qword, %qword_output[0] : vector<1xi64>, view<1xi64>
+  %positive = vector.splati 37 : vector<64xi8>
+  %negative = vector.splati -29 : vector<64xi8>
+  %selected = vector.select %predicates, %positive, %negative : vector<64xi8>
+  %selected_output = buffer.view %output[%selected_origin] : buffer -> view<64xi8>
+  vector.store %selected, %selected_output[0] : vector<64xi8>, view<64xi8>
+  func.return
+}
+
+func.def @pack_predicate_storage_oracle(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %word_origin = index.constant 8 : offset
+  %dword_origin = index.constant 16 : offset
+  %qword_origin = index.constant 24 : offset
+  %selected_origin = index.constant 32 : offset
+  %begin = index.constant 0 : index
+  %end = index.constant 64 : index
+  %step = index.constant 1 : index
+  func.call @pack_bytes_oracle(%end, %input, %output, %base) : (index, buffer, buffer, offset)
+  func.call @pack_bytes_oracle(%end, %input, %output, %word_origin) : (index, buffer, buffer, offset)
+  func.call @pack_bytes_oracle(%end, %input, %output, %dword_origin) : (index, buffer, buffer, offset)
+  func.call @pack_bytes_oracle(%end, %input, %output, %qword_origin) : (index, buffer, buffer, offset)
+  %threshold = scalar.constant 0 : i8
+  %positive = scalar.constant 37 : i8
+  %negative = scalar.constant -29 : i8
+  %source = buffer.view %input[%base] : buffer -> view<64xi8>
+  %destination = buffer.view %output[%selected_origin] : buffer -> view<64xi8>
+  scf.for %lane = [%begin to %end step %step] {
+    %value = view.load %source[%lane] : view<64xi8> -> i8
+    %predicate = scalar.cmpi sgt, %value, %threshold : i8
+    %selected = scf.select %predicate, %positive, %negative : i8
+    view.store %selected, %destination[%lane] : i8, view<64xi8>
+  }
+  func.return
+}
+
+check.scenario @predicate_pack_storage {
+  check.trial[64](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-1 to 1) : tensor<128xi8>
+    %storage = check.generate.fill value(90) : tensor<112xi8>
+    %output = check.tensor.view %storage offset(8) : tensor<112xi8> -> tensor<96xi8>
+    check.compare<@pack_predicate_storage, @pack_predicate_storage_oracle>(%input, %output) : (tensor<128xi8>, tensor<96xi8>) -> () {
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<112xi8>
+    }
+  }
+  check.return
+}
+
+// A word comparison spans both AVX2 halves. Every lane becomes the sole set
+// bit once, exposing duplication or reordering during word-to-byte compaction.
+func.def @pack_word_predicate(%lane: index, %input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %source = buffer.view %input[%base] : buffer -> view<16xi16>
+  %values = vector.load %source[0] : view<16xi16> -> vector<16xi16>
+  %selected = index.cast %lane : index to i16
+  %selected_lanes = vector.splat %selected : vector<16xi16>
+  %predicate = vector.cmpi eq, %values, %selected_lanes : vector<16xi16> -> vector<16xi1>
+  %packed = vector.bitpack<1> %predicate : vector<16xi1> -> vector<1xi16>
+  %destination = buffer.view %output[%base] : buffer -> view<1xi16>
+  vector.store %packed, %destination[0] : vector<1xi16>, view<1xi16>
+  func.return
+}
+
+func.def @pack_word_predicate_oracle(%lane: index, %input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %lowest_bit = scalar.constant 1 : i16
+  %shift = index.cast %lane : index to i16
+  %bit = scalar.shli %lowest_bit, %shift : i16
+  %destination = buffer.view %output[%base] : buffer -> view<1xi16>
+  view.store %bit, %destination[0] : i16, view<1xi16>
+  func.return
+}
+
+check.scenario @predicate_word_compaction {
+  check.trial[16](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(0) step(1) : tensor<16xi16>
+    %storage = check.generate.fill value(90) : tensor<9xi16>
+    %output = check.tensor.view %storage offset(8) : tensor<9xi16> -> tensor<1xi16>
+    check.compare<@pack_word_predicate, @pack_word_predicate_oracle>(%trial, %input, %output) : (index, tensor<16xi16>, tensor<1xi16>) -> () {
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<9xi16>
+    }
+  }
+  check.return
+}
+
+// The same concatenated predicate drives packed output and masked memory.
+// Distinct payload and passthrough lanes expose reordered or inverted masks.
+func.def @packed_predicate_memory(%input: buffer, %payload: buffer, %previous: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %source = buffer.view %input[%base] : buffer -> view<16xi32>
+  %data = buffer.view %payload[%base] : buffer -> view<16xi32>
+  %old = buffer.view %previous[%base] : buffer -> view<16xi32>
+  %result = buffer.view %output[%base] : buffer -> view<17xi32>
+  %first = vector.load %source[0] : view<16xi32> -> vector<8xi32>
+  %second = vector.load %source[8] : view<16xi32> -> vector<8xi32>
+  %c0 = vector.splati 0 : vector<8xi32>
+  %first_mask = vector.cmpi sgt, %first, %c0 : vector<8xi32> -> vector<8xi1>
+  %second_mask = vector.cmpi sgt, %second, %c0 : vector<8xi32> -> vector<8xi1>
+  %mask = vector.concat<0> %first_mask, %second_mask : vector<8xi1>, vector<8xi1> -> vector<16xi1>
+  %packed = vector.bitpack<1> %mask : vector<16xi1> -> vector<1xi16>
+  %bits = vector.extract %packed[0] : vector<1xi16> -> i16
+  %word = scalar.extui %bits : i16 to i32
+  view.store %word, %result[16] : i32, view<17xi32>
+  %passthrough = vector.load %old[0] : view<16xi32> -> vector<16xi32>
+  %loaded = vector.load.mask %data[0], %mask, %passthrough : view<16xi32>, vector<16xi1>, vector<16xi32>
+  vector.store %loaded, %result[0] : vector<16xi32>, view<17xi32>
+  func.return
+}
+
+func.def @packed_predicate_memory_oracle(%input: buffer, %payload: buffer, %previous: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %source = buffer.view %input[%base] : buffer -> view<16xi32>
+  %data = buffer.view %payload[%base] : buffer -> view<16xi32>
+  %old = buffer.view %previous[%base] : buffer -> view<16xi32>
+  %result = buffer.view %output[%base] : buffer -> view<17xi32>
+  %begin = index.constant 0 : index
+  %end = index.constant 16 : index
+  %step = index.constant 1 : index
+  %c0 = scalar.constant 0 : i32
+  %c1 = scalar.constant 1 : i32
+  %bits = scf.for %lane = [%begin to %end step %step](%prior = %c0 : i32) -> (i32) {
+    %value = view.load %source[%lane] : view<16xi32> -> i32
+    %active = scalar.cmpi sgt, %value, %c0 : i32
+    %loaded = scf.if %active -> (i32) {
+      %payload_value = view.load %data[%lane] : view<16xi32> -> i32
+      scf.yield %payload_value : i32
+    } else {
+      %previous_value = view.load %old[%lane] : view<16xi32> -> i32
+      scf.yield %previous_value : i32
+    }
+    view.store %loaded, %result[%lane] : i32, view<17xi32>
+    %selected = scf.select %active, %c1, %c0 : i32
+    %shift = index.cast %lane : index to i32
+    %bit = scalar.shli %selected, %shift : i32
+    %next = scalar.ori %prior, %bit : i32
+    scf.yield %next : i32
+  }
+  view.store %bits, %result[16] : i32, view<17xi32>
+  func.return
+}
+
+check.scenario @predicate_packing_with_masked_memory {
+  check.trial[32](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-1 to 1) : tensor<16xi32>
+    %payload = check.generate.iota offset(13) step(17) : tensor<16xi32>
+    %previous = check.generate.iota offset(-37) step(3) : tensor<16xi32>
+    %output = check.generate.fill value(91) : tensor<17xi32>
+    check.compare<@packed_predicate_memory, @packed_predicate_memory_oracle>(%input, %payload, %previous, %output) : (tensor<16xi32>, tensor<16xi32>, tensor<16xi32>, tensor<17xi32>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<17xi32>
+    }
+  }
+  check.return
+}

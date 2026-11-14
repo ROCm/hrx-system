@@ -173,6 +173,7 @@ loom_cc_library(
         "//loom/src/loom/rewrite:rewriter",
         "//loom/src/loom/target:function_version",
         "//loom/src/loom/target:math_policy",
+        "//loom/src/loom/util:fact_table",
         "//loom/src/loom/util:numeric_format",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
@@ -192,6 +193,7 @@ loom_cc_library(
         "//loom/src/loom/target:legalization",
         "//loom/src/loom/util:fact_table",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/internal:arena",
     ],
 )
@@ -330,6 +332,7 @@ loom_cc_library(
     srcs = [
         "bitwise_legalization.c",
         "bitwise_legalization.h",
+        "coordinate_legalization.c",
         "grouped_packet_legalization.c",
         "memory_legalization.c",
         "signed_unary_legalization.c",
@@ -337,6 +340,7 @@ loom_cc_library(
         "target_legalization.c",
     ],
     hdrs = [
+        "coordinate_legalization.h",
         "grouped_packet_legalization.h",
         "memory_legalization.h",
         "target_legalization.h",
@@ -349,6 +353,7 @@ loom_cc_library(
         ":reduction_legalization",
         ":to_scalar",
         "//loom/src/loom/ir",
+        "//loom/src/loom/ops/index",
         "//loom/src/loom/ops/kernel",
         "//loom/src/loom/ops/scalar",
         "//loom/src/loom/ops/scf",

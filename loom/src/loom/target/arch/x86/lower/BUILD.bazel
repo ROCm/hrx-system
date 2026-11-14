@@ -80,6 +80,13 @@ loom_cc_library(
 )
 
 loom_check_test_suite(
+    name = "predicate_bitstream_test",
+    srcs = ["predicate_bitstream.loom-test"],
+    tags = ["hostonly"],
+    target_compatible_with = loom_config_compatible_with(["//loom/config/emit:x86_elf"]),
+)
+
+loom_check_test_suite(
     name = "memory_broadcast_test",
     srcs = ["memory_broadcast.loom-test"],
     tags = ["hostonly"],
