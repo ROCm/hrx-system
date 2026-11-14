@@ -1346,6 +1346,11 @@ jobs:
             --config=windows-x86_64
             --config=windows-clang-cl
             --config=rocm-ci-cache
+            --cpu=x64_windows
+            --host_cpu=k8
+            --host_platform=//build_tools/windows/cache_handoff:linux_x86_64
+            --action_env=PATH=/bin:/usr/bin:/usr/local/bin
+            --host_action_env=PATH=/bin:/usr/bin:/usr/local/bin
             --extra_toolchains=//build_tools/windows/cache_handoff:linux_x86_64_host_cc,//build_tools/windows/cache_handoff:windows_x86_64_clang_cl
             --extra_execution_platforms=//build_tools/windows/cache_handoff:linux_x86_64,//build_tools/windows:windows_x86_64
             --@bazel_tools//tools/test:incompatible_use_default_test_toolchain=true
@@ -1510,6 +1515,11 @@ jobs:
             '--config=windows-x86_64',
             '--config=windows-clang-cl',
             '--config=rocm-ci-cache',
+            '--cpu=x64_windows',
+            '--host_cpu=k8',
+            '--host_platform=//build_tools/windows/cache_handoff:linux_x86_64',
+            '--action_env=PATH=/bin:/usr/bin:/usr/local/bin',
+            '--host_action_env=PATH=/bin:/usr/bin:/usr/local/bin',
             "--override_repository=iree_windows_toolchain=$toolchainRoot",
             "--override_repository=local_config_cc=$hostToolchainRoot",
             '--extra_toolchains=//build_tools/windows/cache_handoff:linux_x86_64_host_cc,//build_tools/windows/cache_handoff:windows_x86_64_clang_cl',
