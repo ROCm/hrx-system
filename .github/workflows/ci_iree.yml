@@ -1507,6 +1507,7 @@ jobs:
             '--config=rocm-ci-cache',
             "--override_repository=iree_windows_toolchain=$toolchainRoot",
             '--extra_toolchains=//build_tools/windows/cache_handoff:windows_x86_64_clang_cl',
+            '--extra_toolchains=@bazel_tools//tools/launcher:1_prebuilt_launcher_maker',
             '--extra_execution_platforms=//build_tools/windows/cache_handoff:linux_x86_64,//build_tools/windows:windows_x86_64',
             '--@bazel_tools//tools/test:incompatible_use_default_test_toolchain=true',
             '--remote_download_outputs=all',
