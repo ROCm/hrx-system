@@ -1087,7 +1087,6 @@ jobs:
             --config=windows-clang-cl
             --config=rocm-ci-cache
             --@bazel_tools//tools/test:incompatible_use_default_test_toolchain=false
-            --build_runfile_links
             --remote_download_outputs=all
             --remote_verify_downloads
             --noremote_cache_async

@@ -344,6 +344,42 @@ def _physical_to_logical(runfiles: Iterable[Runfile]) -> dict[Path, list[str]]:
     return result
 
 
+def _provider_runfiles(
+    provider_metadata: dict[str, Any], execution_root: Path
+) -> list[Runfile]:
+    entries = provider_metadata.get("runfiles")
+    if not isinstance(entries, list):
+        raise HandoffError("configured target has malformed runfiles metadata")
+    runfiles = []
+    logical_paths = set()
+    casefolded_paths: dict[str, str] = {}
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise HandoffError("configured target has malformed runfiles metadata")
+        logical_path = entry.get("logical_path")
+        physical_value = entry.get("physical_path")
+        if not isinstance(logical_path, str) or not isinstance(physical_value, str):
+            raise HandoffError("configured target has malformed runfiles metadata")
+        _validate_logical_path(logical_path)
+        if logical_path in logical_paths:
+            raise HandoffError(f"duplicate runfile path {logical_path!r}")
+        logical_paths.add(logical_path)
+        casefolded = logical_path.casefold()
+        other_path = casefolded_paths.get(casefolded)
+        if other_path is not None:
+            raise HandoffError(
+                f"case-colliding runfile paths {other_path!r} and {logical_path!r}"
+            )
+        casefolded_paths[casefolded] = logical_path
+        physical_path = None
+        if physical_value:
+            physical_path = Path(physical_value)
+            if not physical_path.is_absolute():
+                physical_path = execution_root / physical_path
+        runfiles.append(Runfile(logical_path, physical_path))
+    return runfiles
+
+
 def _logical_path_for_physical(
     value: str,
     *,
@@ -449,12 +485,10 @@ def _emit_target_manifest(
     if not executable_path.is_absolute():
         executable_path = execution_root / executable_path
     executable_path = executable_path.resolve(strict=True)
-    runfiles_manifest_path = Path(str(executable_path) + ".runfiles_manifest")
-    if not runfiles_manifest_path.is_file():
-        raise HandoffError(
-            f"Bazel runfiles manifest is missing: {runfiles_manifest_path}"
-        )
-    runfiles = parse_runfiles_manifest(runfiles_manifest_path)
+    executable_provider_count = provider_metadata.get("executable_provider_count")
+    if executable_provider_count not in (0, 1):
+        raise HandoffError("configured target has ambiguous executable providers")
+    runfiles = _provider_runfiles(provider_metadata, execution_root)
     physical_to_logical = _physical_to_logical(runfiles)
     executable_logical_path = _logical_path_for_physical(
         str(executable_path),

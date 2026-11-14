@@ -144,10 +144,25 @@ class WindowsCacheHandoffTest(unittest.TestCase):
                     "compatible": True,
                     "environment": {"FIXTURE_ENV": "present"},
                     "executable": executable.relative_to(execution_root).as_posix(),
+                    "executable_provider_count": 0,
                     "inherited_environment": ["PATH"],
                     "label": "@@//example:test",
                     "marked_arguments": [],
                     "marked_environment": {},
+                    "runfiles": [
+                        {
+                            "logical_path": "_main/bin/test.exe",
+                            "physical_path": executable.relative_to(
+                                execution_root
+                            ).as_posix(),
+                        },
+                        {
+                            "logical_path": "_repo_mapping",
+                            "physical_path": repository_mapping.relative_to(
+                                execution_root
+                            ).as_posix(),
+                        },
+                    ],
                 }
             ),
             encoding="utf-8",
@@ -224,6 +239,20 @@ class WindowsCacheHandoffTest(unittest.TestCase):
             {
                 "executable": second_executable.relative_to(execution_root).as_posix(),
                 "label": "@@//other:second",
+                "runfiles": [
+                    {
+                        "logical_path": "_main/bin/second.exe",
+                        "physical_path": second_executable.relative_to(
+                            execution_root
+                        ).as_posix(),
+                    },
+                    {
+                        "logical_path": "_repo_mapping",
+                        "physical_path": repository_mapping.relative_to(
+                            execution_root
+                        ).as_posix(),
+                    },
+                ],
             }
         )
         incompatible_provider = copy.deepcopy(first_provider)

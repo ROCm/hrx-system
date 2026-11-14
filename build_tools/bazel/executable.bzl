@@ -89,6 +89,7 @@ IreeExecutableInfo = provider(
         "env": "Environment variables expanded against the wrapper runfiles.",
         "output": "Executable produced by the wrapper.",
         "src": "Wrapped executable label.",
+        "src_output": "Configured executable file wrapped by this target.",
     },
 )
 
@@ -278,6 +279,7 @@ def _executable_alias_providers(ctx, output, runfiles, launch_environment):
             env = {},
             output = output,
             src = source.label,
+            src_output = ctx.executable.src,
         ),
     ]
     environment = {}
@@ -374,6 +376,7 @@ def _iree_executable_test_impl(ctx):
             env = expanded_env,
             output = output,
             src = source.label,
+            src_output = ctx.executable.src,
         ),
         testing.TestEnvironment(
             environment = test_environment,
