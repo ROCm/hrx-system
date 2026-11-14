@@ -383,21 +383,52 @@ def _provider_runfiles(
     return runfiles
 
 
-def _logical_path_for_physical(
+def _logical_path_for_marked_runfile(
     value: str,
     *,
     execution_root: Path,
     physical_to_logical: dict[Path, list[str]],
+    logical_paths: set[str],
 ) -> str:
+    # $(rootpath) expands to a path relative to the runfiles workspace, while
+    # $(location) normally expands to an execution-root path. The provider
+    # marker proves that either form names a declared runfile, but deliberately
+    # does not bake the original Make variable into the configured value.
+    # Resolve an exact runfiles spelling first, then fall back to the physical
+    # execution-root identity used by location expansions.
+    logical_candidates = []
+    if not Path(value).is_absolute() and "\\" not in value:
+        if value.startswith("../"):
+            logical_candidates.append(value[3:])
+        else:
+            logical_candidates.extend([value, "_main/" + value])
+    matching_logical_paths = {
+        candidate for candidate in logical_candidates if candidate in logical_paths
+    }
+    if len(matching_logical_paths) == 1:
+        return matching_logical_paths.pop()
+    if len(matching_logical_paths) > 1:
+        raise HandoffError(
+            f"configured runfile path {value!r} maps to multiple logical paths: "
+            f"{sorted(matching_logical_paths)}"
+        )
+
     path = Path(value)
     if not path.is_absolute():
         path = execution_root / path
-    logical_paths = physical_to_logical.get(path.resolve(strict=True), [])
-    if len(logical_paths) != 1:
+    try:
+        resolved_path = path.resolve(strict=True)
+    except FileNotFoundError:
+        resolved_path = None
+    physical_matches = (
+        physical_to_logical.get(resolved_path, []) if resolved_path is not None else []
+    )
+    if len(physical_matches) != 1:
         raise HandoffError(
-            f"configured runfile path {value!r} maps to {len(logical_paths)} logical paths"
+            f"configured runfile path {value!r} maps to "
+            f"{len(physical_matches)} logical paths"
         )
-    return logical_paths[0]
+    return physical_matches[0]
 
 
 def _convert_marked_value(
@@ -405,6 +436,7 @@ def _convert_marked_value(
     *,
     execution_root: Path,
     physical_to_logical: dict[Path, list[str]],
+    logical_paths: set[str],
 ) -> str:
     result = ""
     cursor = 0
@@ -418,10 +450,11 @@ def _convert_marked_value(
         end = value.find(RUNFILES_PATH_END, path_start)
         if end < 0:
             raise HandoffError("configured runfile path marker is unterminated")
-        logical_path = _logical_path_for_physical(
+        logical_path = _logical_path_for_marked_runfile(
             value[path_start:end],
             execution_root=execution_root,
             physical_to_logical=physical_to_logical,
+            logical_paths=logical_paths,
         )
         result += HANDOFF_PATH_BEGIN + logical_path + HANDOFF_PATH_END
         cursor = end + len(RUNFILES_PATH_END)
@@ -493,6 +526,7 @@ def _emit_target_manifest(
         raise HandoffError("configured target has ambiguous executable providers")
     runfiles = _provider_runfiles(provider_metadata, execution_root)
     physical_to_logical = _physical_to_logical(runfiles)
+    logical_paths = {runfile.logical_path for runfile in runfiles}
     executable_logical_path = provider_metadata.get("executable_logical_path")
     if not isinstance(executable_logical_path, str):
         raise HandoffError("configured target has no logical executable path")
@@ -528,6 +562,7 @@ def _emit_target_manifest(
                 value,
                 execution_root=execution_root,
                 physical_to_logical=physical_to_logical,
+                logical_paths=logical_paths,
             )
             for value in marked_arguments
         ]
@@ -564,6 +599,7 @@ def _emit_target_manifest(
             marked_value,
             execution_root=execution_root,
             physical_to_logical=physical_to_logical,
+            logical_paths=logical_paths,
         )
 
     entries = [_manifest_entry(runfile, cas, uploaded_blobs) for runfile in runfiles]
@@ -679,14 +715,17 @@ def emit_handoff_packages(
             non_native_labels.append(label)
             continue
         package, name = _main_repository_label_parts(label)
-        manifest, build_attributes = _emit_target_manifest(
-            label=label,
-            attributes=configured_rules[label],
-            provider_metadata=provider_metadata,
-            execution_root=execution_root,
-            cas=cas,
-            uploaded_blobs=uploaded_blobs,
-        )
+        try:
+            manifest, build_attributes = _emit_target_manifest(
+                label=label,
+                attributes=configured_rules[label],
+                provider_metadata=provider_metadata,
+                execution_root=execution_root,
+                cas=cas,
+                uploaded_blobs=uploaded_blobs,
+            )
+        except (HandoffError, OSError) as exc:
+            raise HandoffError(f"failed to emit {label}: {exc}") from exc
         package_dir = output_dir / PurePosixPath(package)
         package_dir.mkdir(parents=True, exist_ok=True)
         manifest_name = (

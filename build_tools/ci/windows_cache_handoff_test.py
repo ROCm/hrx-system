@@ -209,6 +209,64 @@ class WindowsCacheHandoffTest(unittest.TestCase):
         self.assertIn("exec_properties = {'pool': 'windows'}", build_text)
         self.assertIn("tags = ['requires-windows']", build_text)
 
+    def test_emit_resolves_rootpath_arguments_against_exact_runfiles(self):
+        execution_root, target_metadata, provider_metadata = self._write_fixture()
+        library = execution_root / "bazel-out/bin/libamdf/amdf.dll"
+        library.parent.mkdir(parents=True)
+        library.write_bytes(b"amdf")
+        provider = json.loads(provider_metadata.read_text(encoding="utf-8"))
+        rootpath = "libamdf/amdf.dll"
+        marked_rootpath = (
+            handoff.RUNFILES_PATH_BEGIN + rootpath + handoff.RUNFILES_PATH_END
+        )
+        provider.update(
+            {
+                "argument_provider_count": 1,
+                "arguments": ["--amdf_library=" + rootpath],
+                "environment": {"AMDF_LIBRARY": rootpath},
+                "marked_arguments": ["--amdf_library=" + marked_rootpath],
+                "marked_environment": {"AMDF_LIBRARY": marked_rootpath},
+            }
+        )
+        provider["runfiles"].append(
+            {
+                "logical_path": "_main/" + rootpath,
+                "physical_path": library.relative_to(execution_root).as_posix(),
+            }
+        )
+        provider_metadata.write_text(json.dumps(provider), encoding="utf-8")
+
+        output_dir = self.root / "package"
+        summary = handoff.emit_handoff_packages(
+            target_metadata_path=target_metadata,
+            provider_metadata_path=provider_metadata,
+            execution_root=execution_root,
+            cas_url=self.cas_url,
+            output_dir=output_dir,
+        )
+        manifest_path = output_dir / summary["tests"][0]["manifest"]
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        handoff_path = (
+            handoff.HANDOFF_PATH_BEGIN + "_main/" + rootpath + handoff.HANDOFF_PATH_END
+        )
+        self.assertEqual(
+            manifest["test"]["arguments"], ["--amdf_library=" + handoff_path]
+        )
+        self.assertEqual(
+            manifest["test"]["environment"], {"AMDF_LIBRARY": handoff_path}
+        )
+
+        observed = {}
+
+        def observe_run(command, *, env, **_kwargs):
+            observed["argument"] = Path(command[1].split("=", 1)[1]).read_bytes()
+            observed["environment"] = Path(env["AMDF_LIBRARY"]).read_bytes()
+            return mock.Mock(returncode=0)
+
+        with mock.patch.object(handoff.subprocess, "run", side_effect=observe_run):
+            self.assertEqual(handoff.run_handoff_test(manifest_path), 0)
+        self.assertEqual(observed, {"argument": b"amdf", "environment": b"amdf"})
+
     def test_run_materializes_verified_bytes_before_execution(self):
         execution_root, target_metadata, provider_metadata = self._write_fixture()
         output_dir = self.root / "package"
