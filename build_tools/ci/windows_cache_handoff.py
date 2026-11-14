@@ -585,7 +585,19 @@ def _find_manifest_from_environment() -> Path:
     test_workspace = os.environ.get("TEST_WORKSPACE")
     if test_srcdir and test_workspace:
         candidates.append(Path(test_srcdir) / test_workspace / path)
-    matches = [candidate for candidate in candidates if candidate.is_file()]
+    runfiles_manifest = os.environ.get("RUNFILES_MANIFEST_FILE")
+    if runfiles_manifest and test_workspace:
+        logical_path = f"{test_workspace}/{path.as_posix()}"
+        _validate_logical_path(logical_path)
+        candidates.extend(
+            runfile.physical_path
+            for runfile in parse_runfiles_manifest(Path(runfiles_manifest))
+            if runfile.logical_path == logical_path
+            and runfile.physical_path is not None
+        )
+    matches = list(
+        dict.fromkeys(candidate for candidate in candidates if candidate.is_file())
+    )
     if len(matches) != 1:
         raise HandoffError(f"cannot resolve {MANIFEST_ENVIRONMENT_VARIABLE}={value!r}")
     return matches[0]

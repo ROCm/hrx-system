@@ -15,6 +15,7 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from build_tools.ci import windows_cache_handoff as handoff
 
@@ -198,6 +199,29 @@ class WindowsCacheHandoffTest(unittest.TestCase):
         _CasHandler.blobs[digest] = b"corrupt"
         with self.assertRaisesRegex(handoff.HandoffError, "verified as"):
             handoff.run_handoff_test(output_dir / "test.json")
+
+    def test_find_manifest_resolves_windows_runfiles_manifest(self):
+        physical_manifest = self.root / "compiler_runtime_test.json"
+        physical_manifest.write_text("{}", encoding="utf-8")
+        runfiles_manifest = self.root / "runner.runfiles_manifest"
+        runfiles_manifest.write_text(
+            f"_main/generated/compiler_runtime_test.json {physical_manifest}\n",
+            encoding="utf-8",
+        )
+        with mock.patch.dict(
+            os.environ,
+            {
+                handoff.MANIFEST_ENVIRONMENT_VARIABLE: (
+                    "generated/compiler_runtime_test.json"
+                ),
+                "RUNFILES_MANIFEST_FILE": str(runfiles_manifest),
+                "TEST_SRCDIR": str(self.root / "unmaterialized-runfiles"),
+                "TEST_WORKSPACE": "_main",
+            },
+        ):
+            self.assertEqual(
+                handoff._find_manifest_from_environment(), physical_manifest
+            )
 
     def test_parse_runfiles_manifest_decodes_escaped_values(self):
         physical = self.root / "file with space"
