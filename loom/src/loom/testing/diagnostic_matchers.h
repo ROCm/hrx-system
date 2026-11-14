@@ -142,6 +142,9 @@ struct CapturedDiagnostic {
   loom_diagnostic_severity_t severity = LOOM_DIAGNOSTIC_ERROR;
   loom_emitter_t emitter = LOOM_EMITTER_COUNT_;
 
+  // Export context copied independently of message parameters.
+  std::string export_name;
+
   loom_source_range_t origin = {};
   loom_source_range_t source_location = {};
   uint32_t origin_line = 0;
@@ -209,6 +212,7 @@ struct DiagnosticCapture {
     entry.error = diagnostic->error;
     entry.severity = diagnostic->severity;
     entry.emitter = diagnostic->emitter;
+    entry.export_name = CopyStringView(diagnostic->export_name);
 
     CopySourceRange(diagnostic->origin, &entry.origin_filename_storage,
                     &entry.origin_source_storage, &entry.origin);

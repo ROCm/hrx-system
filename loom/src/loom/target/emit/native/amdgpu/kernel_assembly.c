@@ -299,8 +299,9 @@ iree_status_t loom_amdgpu_emit_kernel_program_assembly(
     const loom_amdgpu_kernel_record_t* record,
     const loom_amdgpu_kernel_program_assembly_function_t* functions,
     iree_host_size_t function_count, iree_string_builder_t* builder,
-    iree_arena_allocator_t* scratch_arena, iree_diagnostic_emitter_t emitter,
-    bool* out_accepted) {
+    iree_arena_allocator_t* scratch_arena,
+    iree_diagnostic_emitter_t entry_emitter,
+    iree_diagnostic_emitter_t artifact_emitter, bool* out_accepted) {
   IREE_ASSERT_NE(functions, NULL);
   IREE_ASSERT_GT(function_count, 0);
   IREE_ASSERT(iree_string_view_is_empty(functions[0].symbol));
@@ -313,7 +314,7 @@ iree_status_t loom_amdgpu_emit_kernel_program_assembly(
       record, code_object_target_id, builder));
   IREE_RETURN_IF_ERROR(loom_amdgpu_emit_assembly_fragment(
       functions[0].schedule, functions[0].allocation,
-      &functions[0].fragment_options, builder, scratch_arena, emitter,
+      &functions[0].fragment_options, builder, scratch_arena, entry_emitter,
       out_accepted));
   if (!*out_accepted) {
     return iree_ok_status();
@@ -330,7 +331,7 @@ iree_status_t loom_amdgpu_emit_kernel_program_assembly(
         (int)function->symbol.size, function->symbol.data));
     IREE_RETURN_IF_ERROR(loom_amdgpu_emit_assembly_fragment(
         function->schedule, function->allocation, &function->fragment_options,
-        builder, scratch_arena, emitter, out_accepted));
+        builder, scratch_arena, artifact_emitter, out_accepted));
     if (!*out_accepted) {
       break;
     }

@@ -690,8 +690,9 @@ static iree_status_t loom_amdgpu_hal_kernel_library_build_kernel(
             ? loom_amdgpu_program_emission_build(
                   &compilation, artifact_emission, data_symbols, &native_plan,
                   emission_flags, include_artifact_functions_in_listing,
-                  target_listing, table_arena, emitter, &emission_accepted,
-                  &emission_result)
+                  target_listing, table_arena, emitter,
+                  loom_target_entry_emitter(diagnostic_emitter),
+                  &emission_accepted, &emission_result)
             : loom_amdgpu_kernel_emission_build(
                   &entry_compilation->frame, &native_plan, data_symbols,
                   emission_flags, target_listing, table_arena, emitter,

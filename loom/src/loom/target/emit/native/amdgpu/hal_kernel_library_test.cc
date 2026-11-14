@@ -2158,7 +2158,7 @@ TEST_F(AmdgpuHalKernelLibraryTest,
 }
 
 TEST_F(AmdgpuHalKernelLibraryTest, AssemblyRejectionRequiresNoDiagnosticSink) {
-  static const char kSource[] =
+  static const char kEntrySource[] =
       "amdgpu.target<gfx1201> @target\n"
       "low.kernel.def target<amdgpu.rdna4.core>(@target) "
       "workgroup_size(32, 1, 1) @entry() asm {\n"
@@ -2168,32 +2168,61 @@ TEST_F(AmdgpuHalKernelLibraryTest, AssemblyRejectionRequiresNoDiagnosticSink) {
       "  %value = flat_load_dword %address {th = 7}\n"
       "  return\n"
       "}\n";
-  for (bool capture_diagnostics : {false, true}) {
-    loom_module_t* module = nullptr;
-    ASSERT_NO_FATAL_FAILURE(
-        ParseSource(iree_make_cstring_view(kSource), &module));
-    DiagnosticCapture capture;
-    loom_amdgpu_hal_kernel_library_t library = {};
-    loom_amdgpu_hal_kernel_library_options_t options = {
-        .diagnostic_sink =
-            capture_diagnostics ? capture.sink() : loom_diagnostic_sink_t{},
-        .max_errors = 20,
-        .capture_target_listing = true,
-    };
-    bool emitted = true;
-    IREE_ASSERT_OK(loom_amdgpu_compile_hal_kernel_library(
-        module, &options, iree_allocator_system(), &emitted, &library));
-    EXPECT_FALSE(emitted);
-    EXPECT_EQ(library.hsaco_data, nullptr);
-    EXPECT_EQ(library.target_listing_data, nullptr);
-    if (capture_diagnostics) {
-      ASSERT_EQ(capture.diagnostics.size(), 1u);
-      const CapturedDiagnostic& diagnostic = capture.diagnostics.front();
-      EXPECT_EQ(diagnostic.error, LOOM_ERR_BACKEND_063);
-      EXPECT_EQ(GetStringParam(diagnostic, 1), "th");
-      EXPECT_EQ(diagnostic.origin_line, 5u);
+  static const char kHelperSource[] =
+      "amdgpu.target<gfx1201> @target\n"
+      "low.func.def target<amdgpu.rdna4.core>(@target) @helper() asm {\n"
+      "  %zero = v_mov_b32 0\n"
+      "  %address = concat(%zero, %zero) : (reg<amdgpu.vgpr>, "
+      "reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>\n"
+      "  %value = flat_load_dword %address {th = 7}\n"
+      "  return\n"
+      "}\n"
+      "low.kernel.def target<amdgpu.rdna4.core>(@target) "
+      "workgroup_size(32, 1, 1) @first() asm {\n"
+      "  low.func.call noinline @helper() : ()\n"
+      "  return\n"
+      "}\n"
+      "low.kernel.def target<amdgpu.rdna4.core>(@target) "
+      "workgroup_size(32, 1, 1) @second() asm {\n"
+      "  low.func.call noinline @helper() : ()\n"
+      "  return\n"
+      "}\n";
+  const struct {
+    // Source rejected only when its optional assembly listing is requested.
+    const char* source;
+    // Shared helper failures have no individual export owner.
+    const char* export_name;
+  } cases[] = {{kEntrySource, "entry"}, {kHelperSource, ""}};
+  for (const auto& test_case : cases) {
+    SCOPED_TRACE(test_case.source);
+    for (bool capture_diagnostics : {false, true}) {
+      loom_module_t* module = nullptr;
+      ASSERT_NO_FATAL_FAILURE(
+          ParseSource(iree_make_cstring_view(test_case.source), &module));
+      DiagnosticCapture capture;
+      loom_amdgpu_hal_kernel_library_t library = {};
+      loom_amdgpu_hal_kernel_library_options_t options = {
+          .diagnostic_sink =
+              capture_diagnostics ? capture.sink() : loom_diagnostic_sink_t{},
+          .max_errors = 20,
+          .capture_target_listing = true,
+      };
+      bool emitted = true;
+      IREE_ASSERT_OK(loom_amdgpu_compile_hal_kernel_library(
+          module, &options, iree_allocator_system(), &emitted, &library));
+      EXPECT_FALSE(emitted);
+      EXPECT_EQ(library.hsaco_data, nullptr);
+      EXPECT_EQ(library.target_listing_data, nullptr);
+      if (capture_diagnostics) {
+        ASSERT_EQ(capture.diagnostics.size(), 1u);
+        const CapturedDiagnostic& diagnostic = capture.diagnostics.front();
+        EXPECT_EQ(diagnostic.error, LOOM_ERR_BACKEND_063);
+        EXPECT_EQ(GetStringParam(diagnostic, 1), "th");
+        EXPECT_EQ(diagnostic.origin_line, 5u);
+        EXPECT_EQ(diagnostic.export_name, test_case.export_name);
+      }
+      loom_module_free(module);
     }
-    loom_module_free(module);
   }
 }
 
@@ -2239,8 +2268,8 @@ TEST_F(AmdgpuHalKernelLibraryTest, RejectsArtifactWithOrWithoutDiagnosticSink) {
       "amdgpu.target<gfx1100> @target\n"
       "low.kernel.def target<amdgpu.rdna3.core>(@target) "
       "workgroup_size(64, 1, 1) @entry() {\n"
-      "  %zero = low.op<amdgpu.s_mov_b32>() {imm32 = 0} : "
-      "() -> reg<amdgpu.sgpr>\n"
+      "  %zero = low.const<amdgpu.s_mov_b32> {imm32 = 0} : "
+      "reg<amdgpu.sgpr>\n"
       "  %address = low.concat(%zero, %zero) : "
       "(reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>\n"
       "  %descriptor = low.op<amdgpu.hal.buffer_descriptor>(%address) "

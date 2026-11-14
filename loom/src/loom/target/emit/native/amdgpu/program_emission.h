@@ -54,6 +54,9 @@ iree_status_t loom_amdgpu_program_artifact_emission_build(
 // after this entry. Exactly one retained-call entry in a combined target
 // listing should set it. Body instruction counts continue to describe the
 // complete entry closure even though helper machine text is stored once.
+// |emitter| carries this entry's export scope; |artifact_emitter| retains the
+// module scope for shared helper listings without attributing them to the
+// entry.
 iree_status_t loom_amdgpu_program_emission_build(
     const loom_amdgpu_program_compilation_t* compilation,
     const loom_amdgpu_program_artifact_emission_t* artifact_emission,
@@ -62,7 +65,8 @@ iree_status_t loom_amdgpu_program_emission_build(
     loom_amdgpu_kernel_emission_flags_t flags,
     bool include_artifact_functions_in_listing,
     iree_string_builder_t* target_listing, iree_arena_allocator_t* table_arena,
-    iree_diagnostic_emitter_t emitter, bool* out_accepted,
+    iree_diagnostic_emitter_t emitter,
+    iree_diagnostic_emitter_t artifact_emitter, bool* out_accepted,
     loom_amdgpu_kernel_emission_result_t* out_result);
 
 #ifdef __cplusplus

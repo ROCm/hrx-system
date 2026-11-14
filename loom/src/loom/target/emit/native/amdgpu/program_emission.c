@@ -197,7 +197,7 @@ static iree_status_t loom_amdgpu_program_emission_append_listing(
     const loom_amdgpu_encoded_instruction_stream_t* entry_stream,
     bool include_artifact_functions, iree_string_builder_t* target_listing,
     iree_arena_allocator_t* scratch_arena, iree_diagnostic_emitter_t emitter,
-    bool* out_accepted) {
+    iree_diagnostic_emitter_t artifact_emitter, bool* out_accepted) {
   *out_accepted = true;
   if (target_listing == NULL) {
     return iree_ok_status();
@@ -246,7 +246,7 @@ static iree_status_t loom_amdgpu_program_emission_append_listing(
   }
   return loom_amdgpu_emit_kernel_program_assembly(
       &entry_plan->record, functions, function_count, target_listing,
-      scratch_arena, emitter, out_accepted);
+      scratch_arena, emitter, artifact_emitter, out_accepted);
 }
 
 static iree_status_t loom_amdgpu_program_emission_build_internal(
@@ -258,7 +258,8 @@ static iree_status_t loom_amdgpu_program_emission_build_internal(
     bool include_artifact_functions_in_listing,
     iree_string_builder_t* target_listing, iree_arena_allocator_t* table_arena,
     iree_arena_allocator_t* scratch_arena, iree_diagnostic_emitter_t emitter,
-    bool* out_accepted, loom_amdgpu_kernel_emission_result_t* out_result) {
+    iree_diagnostic_emitter_t artifact_emitter, bool* out_accepted,
+    loom_amdgpu_kernel_emission_result_t* out_result) {
   IREE_ASSERT(compilation->has_retained_calls);
   const loom_amdgpu_program_artifact_root_t* root = compilation->artifact_root;
   IREE_ASSERT_NE(root, NULL);
@@ -308,7 +309,7 @@ static iree_status_t loom_amdgpu_program_emission_build_internal(
   IREE_RETURN_IF_ERROR(loom_amdgpu_program_emission_append_listing(
       compilation, artifact_emission, entry_plan, &entry_stream,
       include_artifact_functions_in_listing, target_listing, scratch_arena,
-      emitter, &assembly_accepted));
+      emitter, artifact_emitter, &assembly_accepted));
   if (!assembly_accepted) {
     return iree_ok_status();
   }
@@ -346,7 +347,8 @@ iree_status_t loom_amdgpu_program_emission_build(
     loom_amdgpu_kernel_emission_flags_t flags,
     bool include_artifact_functions_in_listing,
     iree_string_builder_t* target_listing, iree_arena_allocator_t* table_arena,
-    iree_diagnostic_emitter_t emitter, bool* out_accepted,
+    iree_diagnostic_emitter_t emitter,
+    iree_diagnostic_emitter_t artifact_emitter, bool* out_accepted,
     loom_amdgpu_kernel_emission_result_t* out_result) {
   *out_accepted = false;
   *out_result = (loom_amdgpu_kernel_emission_result_t){0};
@@ -355,7 +357,7 @@ iree_status_t loom_amdgpu_program_emission_build(
   const iree_status_t status = loom_amdgpu_program_emission_build_internal(
       compilation, artifact_emission, data_symbols, entry_plan, flags,
       include_artifact_functions_in_listing, target_listing, table_arena,
-      &scratch_arena, emitter, out_accepted, out_result);
+      &scratch_arena, emitter, artifact_emitter, out_accepted, out_result);
   iree_arena_deinitialize(&scratch_arena);
   return status;
 }
