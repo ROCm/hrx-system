@@ -20,10 +20,30 @@ extern "C" {
 typedef struct iree_hal_amd_gpu_program_t iree_hal_amd_gpu_program_t;
 typedef struct iree_hal_amd_gpu_program_growth_t
     iree_hal_amd_gpu_program_growth_t;
-typedef struct iree_hal_amd_gpu_program_constant_page_t
-    iree_hal_amd_gpu_program_constant_page_t;
+typedef struct iree_hal_amd_gpu_program_range_page_t
+    iree_hal_amd_gpu_program_range_page_t;
 typedef struct iree_hal_amd_gpu_program_visit_t
     iree_hal_amd_gpu_program_visit_t;
+
+// Independently owned ranges sharing one qualified native placement policy.
+// Each usage owns separate pages; only the allocation mechanism is shared.
+typedef struct iree_hal_amd_gpu_program_range_pool_t {
+  // Borrowed device owning native acquisition and deferred release.
+  iree_hal_amd_gpu_context_t* context;
+  // Owns CPU page descriptors and bitmaps.
+  iree_allocator_t host_allocator;
+  // Stable qualified placement, owned by the containing program pool.
+  const iree_hal_amd_fabric_memory_options_t* options;
+  // Serializes native growth while allowing metadata returns to proceed.
+  iree_slim_mutex_t growth_mutex;
+  // Protects the available-page list and range ownership.
+  iree_slim_mutex_t mutex;
+  // Pages with available ranges, including empty pages retained until trim.
+  // Protected by mutex.
+  iree_hal_amd_gpu_program_range_page_t* pages;
+  // Outstanding ranges, protected by mutex.
+  uint32_t count;
+} iree_hal_amd_gpu_program_range_pool_t;
 
 // Device-owned native program storage. Recorders acquire backing and register
 // sealed programs on their callers. Invocation growth and retired releases use
@@ -53,19 +73,12 @@ typedef struct iree_hal_amd_gpu_program_pool_t {
     // Joins a removed program's final traversal access outside the mutex.
     iree_notification_t notification;
   } registry;
-  // Shared immutable storage, independent of writable program instances.
-  struct {
-    // Coalesces cold page growth without blocking metadata returns.
-    iree_slim_mutex_t growth_mutex;
-    // Protects ranges independently of the cold program registry.
-    iree_slim_mutex_t mutex;
-    // Pages with available ranges, protected by mutex.
-    iree_hal_amd_gpu_program_constant_page_t* pages;
-    // At most one empty page retained until explicit trim, under mutex.
-    iree_hal_amd_gpu_program_constant_page_t* spare;
-    // Outstanding ranges, protected by mutex.
-    uint32_t count;
-  } constants;
+  // Immutable ABI storage, with no command or initialization payloads.
+  iree_hal_amd_gpu_program_range_pool_t constants;
+  // Initial resident command images and their invocation-private data.
+  iree_hal_amd_gpu_program_range_pool_t recordings;
+  // Cached host staging when resident command images have no host mapping.
+  iree_hal_amd_gpu_program_range_pool_t uploads;
 } iree_hal_amd_gpu_program_pool_t;
 
 // Captures placement for one native device and the caller's required access.
@@ -88,38 +101,39 @@ void iree_hal_amd_gpu_program_pool_deinitialize(
 iree_status_t iree_hal_amd_gpu_program_pool_reserve_queues(
     iree_hal_amd_gpu_program_pool_t* pool, uint32_t queue_count);
 
-// One independently owned immutable range. Its command-program owner keeps
-// the range alive through all native readers; release requires no frontier or
-// queue wait because the final reader has already retired.
-typedef struct iree_hal_amd_gpu_program_constant_t {
+// One independently owned native range. Its owner retains the range through
+// every native reader and writer; release requires no frontier or queue wait
+// because all uses have already retired.
+typedef struct iree_hal_amd_gpu_program_range_t {
   // Borrowed page retained by this range until release.
-  iree_hal_amd_gpu_program_constant_page_t* page;
-  // Aligned byte offset within the page.
+  iree_hal_amd_gpu_program_range_page_t* page;
+  // First reserved byte, including any alignment and cache-boundary padding.
   uint64_t offset;
-  // Reserved extent rounded to the page's bitmap unit, in bytes.
+  // Reserved extent, including every publication boundary line, in bytes.
   uint64_t byte_length;
-} iree_hal_amd_gpu_program_constant_t;
+} iree_hal_amd_gpu_program_range_t;
 
-// Acquires a range from qualified CPU-writable resident storage. The caller
-// has already selected this placement and supplies positive trusted geometry.
-// Native-page growth occurs on this recording caller, outside metadata locks.
-// The returned view is write-only; publish before exposing its device address.
-// Failure leaves out_constant empty.
-iree_status_t iree_hal_amd_gpu_program_constant_allocate(
-    iree_hal_amd_gpu_program_pool_t* pool, uint32_t byte_length,
-    uint32_t alignment, iree_hal_amd_gpu_program_constant_t* out_constant,
+// Acquires a range using its pool's qualified placement and positive trusted
+// geometry.
+// Native-page growth occurs on the recording caller, outside metadata locks.
+// A returned host view is write-only and must be published before native use.
+// Unmapped storage returns an empty view and requires device initialization.
+// Failure leaves out_range empty.
+iree_status_t iree_hal_amd_gpu_program_range_allocate(
+    iree_hal_amd_gpu_program_range_pool_t* pool, uint64_t byte_length,
+    uint32_t alignment, iree_hal_amd_gpu_program_range_t* out_range,
     iree_byte_span_t* out_contents, uint64_t* out_address);
 
-// Publishes the initialized range using its qualified native host mapping.
+// Publishes a range with a returned host view using its qualified mapping.
 // Failure leaves ownership with the caller, with no accepted native reader.
-iree_status_t iree_hal_amd_gpu_program_constant_publish(
-    const iree_hal_amd_gpu_program_constant_t* constant);
+iree_status_t iree_hal_amd_gpu_program_range_publish(
+    const iree_hal_amd_gpu_program_range_t* range);
 
-// Returns a retired range using host metadata only. An excess empty page's
-// presecured release goes to the existing native allocation domain. The empty
-// descriptor is accepted and the consumed descriptor is cleared.
-void iree_hal_amd_gpu_program_constant_release(
-    iree_hal_amd_gpu_program_constant_t* constant);
+// Returns a retired range using host metadata only. Native capacity remains
+// available until explicit trim. The empty descriptor is accepted and the
+// consumed descriptor is cleared.
+void iree_hal_amd_gpu_program_range_release(
+    iree_hal_amd_gpu_program_range_t* range);
 
 // One independently writable native program placement. Pool ownership keeps
 // the backing alive; invocation leases cover every native command/data reader.
@@ -142,10 +156,19 @@ typedef struct iree_hal_amd_gpu_program_instance_t {
   bool reserved;
   // A same-FIFO predecessor may still read private data before host retirement.
   bool join_previous;
-  // Cold native ownership, following the compact invocation metadata.
-  iree_hal_amd_fabric_memory_t memory;
-  // Presecured native release, independent of the containing command buffer.
-  iree_hal_amd_gpu_memory_release_t release;
+  // Initial instances own a page range; clones own an asynchronous native
+  // allocation. The owning program's initial pointer selects the variant.
+  union {
+    // Range retained through every reader of the initial instance.
+    iree_hal_amd_gpu_program_range_t range;
+    // Cold native clone ownership, following compact invocation metadata.
+    struct {
+      // Independently allocated backing used only by this clone.
+      iree_hal_amd_fabric_memory_t memory;
+      // Presecured native release, independent of the command buffer.
+      iree_hal_amd_gpu_memory_release_t release;
+    } allocation;
+  } storage;
   // Device allocator owning this instance through native release completion.
   iree_allocator_t host_allocator;
 } iree_hal_amd_gpu_program_instance_t;

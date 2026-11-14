@@ -101,7 +101,7 @@ typedef struct iree_hal_amd_gpu_aql_command_program_t {
   // Optional CPU-owned native template, owned instead of resident storage.
   iree_hal_amd_gpu_aql_host_template_t* host_template;
   // Immutable device-local arguments retained through every native reader.
-  iree_hal_amd_gpu_program_constant_t constants;
+  iree_hal_amd_gpu_program_range_t constants;
 } iree_hal_amd_gpu_aql_command_program_t;
 
 // Seals native templates and private arguments. maximum_packet_count is

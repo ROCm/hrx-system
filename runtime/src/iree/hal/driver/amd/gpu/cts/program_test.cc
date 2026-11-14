@@ -9,9 +9,11 @@
 #include <array>
 #include <cstring>
 #include <future>
+#include <thread>
 #include <vector>
 
 #include "iree/base/internal/atomics.h"
+#include "iree/base/internal/memory_copy.h"
 #include "iree/hal/driver/amd/gpu/cts/test_device.h"
 #include "iree/hal/driver/amd/gpu/queue/fixup.h"
 #include "iree/hal/driver/amd/gpu/queue/pm4/barrier.h"
@@ -203,9 +205,10 @@ class GpuProgramTest : public GpuNativeTest {
     IREE_ASSERT_OK(iree_hal_amd_gpu_program_initialize(
         &pool_.storage, 256, static_cast<uint32_t>(words.size() * 4),
         static_cast<uint32_t>(fixups.size()), &program_));
-    std::memcpy(program_.contents.data, words.data(), words.size() * 4);
-    std::memcpy(program_.contents.data + program_.fixup_offset, fixups.data(),
-                fixups.size() * sizeof(fixups[0]));
+    iree_memcpy_write_only(program_.contents.data, words.data(),
+                           words.size() * 4);
+    iree_memcpy_write_only(program_.contents.data + program_.fixup_offset,
+                           fixups.data(), fixups.size() * sizeof(fixups[0]));
     IREE_ASSERT_OK(iree_hal_amd_gpu_program_seal(&program_));
   }
 
@@ -443,6 +446,25 @@ TEST_F(GpuProgramTest, PipelinedFixupsCloneAndCausalReuse) {
   iree_hal_amd_gpu_program_cancel(&program_, reservation);
   iree_hal_amd_gpu_program_instance_t* first = nullptr;
   ASSERT_NO_FATAL_FAILURE(Submit(0, 0, 0x12345678, frontier, &first));
+  // The GPU has fixed up this resident program and entered its gated IB.
+  // Record, publish, retire, and reuse neighboring ranges while that native
+  // reader remains live. Returning a range cannot recycle the active page.
+  while (!iree_atomic_load(&gates[9], iree_memory_order_acquire)) {
+    std::this_thread::yield();
+  }
+  for (uint32_t length : {16u, 80u, 129u, 16u}) {
+    iree_hal_amd_gpu_program_t neighbor = {};
+    IREE_ASSERT_OK(iree_hal_amd_gpu_program_initialize(&pool_.storage, 64,
+                                                       length, 0, &neighbor));
+    EXPECT_EQ(neighbor.initial->storage.range.page,
+              program_.initial->storage.range.page);
+    const std::array<uint8_t, 144> bytes = {};
+    iree_memcpy_write_only(neighbor.contents.data, bytes.data(), length);
+    auto status = iree_hal_amd_gpu_program_seal(&neighbor);
+    iree_hal_amd_gpu_program_deinitialize(&neighbor);
+    IREE_ASSERT_OK(status);
+    EXPECT_EQ(program_.instances[0], first);
+  }
   frontier[0] = 2;
   iree_hal_amd_gpu_program_instance_t* same = nullptr;
   ASSERT_NO_FATAL_FAILURE(Submit(0, 1, 0xFEDCBA00, frontier, &same));
@@ -461,7 +483,7 @@ TEST_F(GpuProgramTest, PipelinedFixupsCloneAndCausalReuse) {
   iree_hal_amd_gpu_program_instance_t* joined = nullptr;
   ASSERT_NO_FATAL_FAILURE(Submit(2, 3, 0xABCDE000, frontier, 2, &joined));
   EXPECT_EQ(clone, joined);
-  iree_hal_amd_gpu_program_trim(&program_);
+  iree_hal_amd_gpu_program_pool_trim(&pool_.storage);
   EXPECT_EQ(program_.instances[1], clone);
   ASSERT_NO_FATAL_FAILURE(Wait(2, 3));
   ASSERT_NO_FATAL_FAILURE(Wait(1, 2));
