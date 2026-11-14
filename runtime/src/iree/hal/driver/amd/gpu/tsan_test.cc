@@ -7,6 +7,7 @@
 #include "iree/hal/driver/amd/gpu/tsan.h"
 
 #include <atomic>
+#include <cerrno>
 #include <functional>
 #include <semaphore>
 #include <thread>
@@ -65,18 +66,55 @@ class TsanPlacementTest : public ::testing::TestWithParam<bool> {
   struct Scope {
     // Availability of the native CPU-to-device publication path.
     amdf_status_t publication_status = AMDF_STATUS_OK;
+    // Result of the native backing construction attempt.
+    amdf_status_t allocation_status = AMDF_STATUS_OK;
+    // Storage and owner class reported for failure attribution.
+    amdf_memory_scope_kind_t kind = AMDF_MEMORY_SCOPE_KIND_SYSTEM;
+    // Immutable physical storage capacity in bytes.
+    uint64_t capacity = 0;
+    // Physical endpoint identity for local storage.
+    amdf_endpoint_id_t endpoint_id = {};
+    // Whether exact cold native capacity observation is supported.
+    bool observable = false;
+    // Current physical storage capacity in bytes.
+    uint64_t observed_capacity = 0;
+    // Current native allocation headroom in bytes.
+    uint64_t available = 0;
+    // Total native capacity observations.
+    uint32_t observation_count = 0;
     // Backing owned from native creation until destruction.
     std::vector<uint8_t> bytes;
-    // Total physical allocation count.
+    // Total physical allocation attempts.
     uint32_t allocation_count = 0;
   };
 
   void SetUp() override {
-    api_.memory_scope_query_info = [](amdf_memory_scope_t*,
+    local_.kind = AMDF_MEMORY_SCOPE_KIND_LOCAL;
+    local_.capacity = UINT64_C(192) * 1024 * 1024 * 1024;
+    local_.endpoint_id = {{0x000000b8000000e2, 0x12345678}};
+    local_.observable = true;
+    local_.observed_capacity = local_.capacity;
+    local_.available = UINT64_C(7) * 1024 * 1024 * 1024;
+    system_.capacity = UINT64_C(512) * 1024 * 1024 * 1024;
+    api_.memory_scope_query_info = [](amdf_memory_scope_t* scope,
                                       amdf_memory_scope_info_t* out) {
+      const auto& storage = *reinterpret_cast<Scope*>(scope);
       out->memory_profile_count = 1;
+      out->kind = storage.kind;
+      out->capacity_byte_length = storage.capacity;
+      out->physical_endpoint_id = storage.endpoint_id;
+      out->flags =
+          storage.observable ? AMDF_MEMORY_SCOPE_FLAG_AVAILABLE_BYTES : 0;
       return AMDF_STATUS_OK;
     };
+    api_.memory_scope_sample_observation =
+        [](amdf_memory_scope_t* scope, amdf_memory_scope_observation_t* out) {
+          auto& storage = *reinterpret_cast<Scope*>(scope);
+          ++storage.observation_count;
+          out->capacity_byte_length = storage.observed_capacity;
+          out->available_byte_length = storage.available;
+          return AMDF_STATUS_OK;
+        };
     api_.memory_scope_query_device_profile =
         [](amdf_memory_scope_t*, uint32_t, uint32_t,
            const amdf_memory_device_access_t*, amdf_memory_profile_t* out,
@@ -109,8 +147,11 @@ class TsanPlacementTest : public ::testing::TestWithParam<bool> {
                             amdf_memory_t** out, amdf_memory_release_info_t*) {
       auto* storage = reinterpret_cast<Scope*>(scope);
       EXPECT_EQ(storage->publication_status, AMDF_STATUS_OK);
-      storage->bytes.resize(info->byte_length, 0xcc);
       ++storage->allocation_count;
+      if (!amdf_status_is_ok(storage->allocation_status)) {
+        return storage->allocation_status;
+      }
+      storage->bytes.resize(info->byte_length, 0xcc);
       *out = reinterpret_cast<amdf_memory_t*>(scope);
       return AMDF_STATUS_OK;
     };
@@ -197,8 +238,45 @@ TEST_P(TsanPlacementTest, QualifiesPublicationBeforeAllocatingShadow) {
       iree_hal_amd_gpu_tsan_initialize(&context_, 5, &options, &tsan_));
   EXPECT_EQ(local_.allocation_count, GetParam() ? 1u : 0u);
   EXPECT_EQ(system_.allocation_count, GetParam() ? 0u : 1u);
+  EXPECT_EQ(local_.observation_count, 0u);
+  EXPECT_EQ(system_.observation_count, 0u);
   EXPECT_EQ(tsan_.config.shadow_base, 0x10000u);
   EXPECT_EQ(tsan_.config.shadow_size, 256u);
+}
+
+TEST_P(TsanPlacementTest, AllocationFailureReportsSelectedScopeAndHeadroom) {
+  Scope* selected = &local_;
+  if (!GetParam()) {
+    local_.publication_status =
+        amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
+    selected = &system_;
+  }
+  selected->allocation_status =
+      amdf_make_status(AMDF_STATUS_DOMAIN_ERRNO, ENOMEM);
+  const iree_hal_amd_gpu_tsan_options_t options = {.shadow_size = 256};
+  iree::Status status(
+      iree_hal_amd_gpu_tsan_initialize(&context_, 5, &options, &tsan_));
+  EXPECT_EQ(status.code(), iree::StatusCode::kResourceExhausted);
+  const std::string text = status.ToString();
+  EXPECT_THAT(text, ::testing::HasSubstr("byte_length=256"));
+  EXPECT_THAT(text, ::testing::HasSubstr("minimum_alignment=64"));
+  EXPECT_THAT(text, ::testing::HasSubstr("profile_ordinal=0"));
+  EXPECT_THAT(text,
+              ::testing::HasSubstr(GetParam() ? "kind=local" : "kind=system"));
+  EXPECT_THAT(text,
+              ::testing::HasSubstr(
+                  GetParam() ? "endpoint=000000b8000000e20000000012345678"
+                             : "endpoint=00000000000000000000000000000000"));
+  if (GetParam()) {
+    EXPECT_THAT(text, ::testing::HasSubstr(
+                          "capacity=206158430208 available=7516192768"));
+    EXPECT_EQ(local_.observation_count, 1u);
+  } else {
+    EXPECT_THAT(text, ::testing::HasSubstr(
+                          "AMD allocation scope observation: unavailable"));
+    EXPECT_EQ(system_.observation_count, 0u);
+  }
+  EXPECT_EQ(selected->allocation_count, 1u);
 }
 
 class TsanRegistryTest : public TsanPlacementTest {
@@ -292,6 +370,35 @@ class TsanRegistryTest : public TsanPlacementTest {
   // Actual registry outlives every stack-owned image's resource destruction.
   iree_hal_amd_gpu_tsan_registry_t registry_ = {};
 };
+
+TEST_P(TsanRegistryTest, AllocationFailureReportsQueueCoordinate) {
+  if (!GetParam()) {
+    local_.publication_status =
+        amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
+    system_.allocation_status =
+        amdf_make_status(AMDF_STATUS_DOMAIN_ERRNO, ENOMEM);
+  } else {
+    local_.allocation_status =
+        amdf_make_status(AMDF_STATUS_DOMAIN_ERRNO, ENOMEM);
+  }
+  registry_.provisioned_count = 4;
+  context_.endpoint_info.id = {{0x00000080000000e2, 0xabcdef}};
+  context_.endpoint_info.native_identity.type =
+      AMDF_ENDPOINT_NATIVE_IDENTITY_TYPE_LINUX_DEVICE;
+  context_.endpoint_info.native_identity.value.linux_device = {226, 128};
+  context_.target_info.unique_id = 0x123456789abcdef0;
+  iree::Status status(iree_hal_amd_gpu_tsan_registry_add_queue(&registry_, 3));
+  EXPECT_EQ(status.code(), iree::StatusCode::kResourceExhausted);
+  const std::string text = status.ToString();
+  EXPECT_THAT(
+      text, ::testing::HasSubstr("endpoint=00000080000000e20000000000abcdef"));
+  EXPECT_THAT(text, ::testing::HasSubstr("queue_ordinal=3"));
+  EXPECT_THAT(text, ::testing::HasSubstr("provisioned_queue_count=4"));
+  EXPECT_THAT(text, ::testing::HasSubstr("byte_length=256"));
+  EXPECT_THAT(text, ::testing::HasSubstr("gpu_unique_id=123456789abcdef0"));
+  EXPECT_THAT(
+      text, ::testing::HasSubstr("GPU native identity: linux_device:226:128"));
+}
 
 TEST_P(TsanRegistryTest, FailedImagePreparationRollsBackOnlyNewMembership) {
   Image first, second, rejected;

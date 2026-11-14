@@ -119,6 +119,14 @@ struct NativeQueue {
   static amdf_status_t AMDF_CALL Inactivate(amdf_kernel_queue_t* queue) {
     return From(queue)->Call("inactivate");
   }
+  static amdf_status_t AMDF_CALL QueryScope(amdf_memory_scope_t* scope,
+                                            amdf_memory_scope_info_t* info) {
+    auto* self = reinterpret_cast<NativeQueue*>(scope);
+    info->kind = AMDF_MEMORY_SCOPE_KIND_SYSTEM;
+    info->memory_profile_count = 1;
+    info->capacity_byte_length = sizeof(self->words);
+    return AMDF_STATUS_OK;
+  }
   static amdf_status_t AMDF_CALL Allocate(
       amdf_memory_scope_t* scope, const amdf_memory_create_info_t* info,
       amdf_memory_t** memory, amdf_memory_release_info_t* out_release_info) {
@@ -184,6 +192,7 @@ class KernelStorageTest : public ::testing::Test {
     api_.kernel_queue_request_notification = NativeQueue::Arm;
     api_.kernel_queue_wait = NativeQueue::Wait;
     api_.kernel_queue_destroy = NativeQueue::Destroy;
+    api_.memory_scope_query_info = NativeQueue::QueryScope;
     api_.memory_create = NativeQueue::Allocate;
     api_.memory_query_info = NativeQueue::MemoryInfo;
     api_.memory_query_address = NativeQueue::Address;
@@ -210,6 +219,9 @@ class KernelStorageTest : public ::testing::Test {
     IREE_ASSERT_OK(
         iree_hal_amd_gpu_context_prepare_memory(&context_, UINT32_MAX));
     options_.scope = reinterpret_cast<amdf_memory_scope_t*>(&native_);
+    options_.profile.memory_class = AMDF_MEMORY_CLASS_SYSTEM;
+    options_.profile.roles =
+        AMDF_MEMORY_PROFILE_ROLE_CREATE | AMDF_MEMORY_PROFILE_ROLE_HOST_MAP;
     options_.profile.allocation.byte_length_granularity = 64;
     options_.profile.allocation.maximum_byte_length = sizeof(native_.words);
     options_.host_access =

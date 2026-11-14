@@ -64,6 +64,7 @@ struct CacheOperation {
 
 struct FakeNative {
   FakeNative() {
+    api.memory_scope_query_info = MemoryScopeQueryInfo;
     api.memory_create = MemoryCreate;
     api.memory_import = MemoryImport;
     api.memory_export = MemoryExport;
@@ -78,6 +79,15 @@ struct FakeNative {
 
   amdf_memory_scope_t* scope() {
     return reinterpret_cast<amdf_memory_scope_t*>(this);
+  }
+
+  static amdf_status_t AMDF_CALL MemoryScopeQueryInfo(
+      amdf_memory_scope_t* scope, amdf_memory_scope_info_t* out_info) {
+    EXPECT_NE(scope, nullptr);
+    out_info->kind = AMDF_MEMORY_SCOPE_KIND_SYSTEM;
+    out_info->memory_profile_count = 2;
+    out_info->capacity_byte_length = 4096;
+    return AMDF_STATUS_OK;
   }
 
   static amdf_status_t AMDF_CALL MemoryCreate(
@@ -394,6 +404,7 @@ class SlabProviderTest : public ::testing::Test {
     iree_hal_amd_fabric_slab_provider_options_t options = {};
     options.memory.scope = native_.scope();
     options.memory.profile.ordinal = 7;
+    options.memory.profile.memory_class = AMDF_MEMORY_CLASS_SYSTEM;
     options.memory.profile.roles =
         AMDF_MEMORY_PROFILE_ROLE_CREATE | AMDF_MEMORY_PROFILE_ROLE_HOST_MAP;
     options.memory.profile.supported_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE;

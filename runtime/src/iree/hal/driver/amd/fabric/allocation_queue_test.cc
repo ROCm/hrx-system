@@ -27,6 +27,7 @@ struct NativeMemory;
 // below use the production allocation queue and native memory preparation.
 struct NativeAllocator {
   NativeAllocator() {
+    api.memory_scope_query_info = QueryScope;
     api.memory_create = Allocate;
     api.memory_query_info = Query;
     api.memory_destroy = Free;
@@ -35,6 +36,7 @@ struct NativeAllocator {
     api.host_mapping_destroy = Unmap;
     options.scope = reinterpret_cast<amdf_memory_scope_t*>(this);
     options.profile.ordinal = 7;
+    options.profile.memory_class = AMDF_MEMORY_CLASS_SYSTEM;
     options.profile.roles = AMDF_MEMORY_PROFILE_ROLE_CREATE;
     options.profile.allocation.byte_length_granularity = 64;
     options.profile.allocation.native_byte_length_granularity = 64;
@@ -42,6 +44,8 @@ struct NativeAllocator {
     options.profile.allocation.maximum_byte_length = 4096;
   }
 
+  static amdf_status_t AMDF_CALL QueryScope(amdf_memory_scope_t* scope,
+                                            amdf_memory_scope_info_t* out_info);
   static amdf_status_t AMDF_CALL Allocate(
       amdf_memory_scope_t* scope, const amdf_memory_create_info_t* info,
       amdf_memory_t** out_memory, amdf_memory_release_info_t* out_release_info);
@@ -79,6 +83,15 @@ struct NativeAllocator {
   // Explicit permission to complete the held native allocation.
   std::shared_future<void> resume;
 };
+
+amdf_status_t AMDF_CALL NativeAllocator::QueryScope(
+    amdf_memory_scope_t* scope, amdf_memory_scope_info_t* out_info) {
+  EXPECT_NE(scope, nullptr);
+  out_info->kind = AMDF_MEMORY_SCOPE_KIND_SYSTEM;
+  out_info->memory_profile_count = 1;
+  out_info->capacity_byte_length = 4096;
+  return AMDF_STATUS_OK;
+}
 
 struct NativeMemory {
   // Dependency owner, borrowed through native destruction.

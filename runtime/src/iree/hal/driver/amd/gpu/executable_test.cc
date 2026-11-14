@@ -77,6 +77,7 @@ struct NativeMemory {
   } cleanup;
 
   NativeMemory() {
+    api.memory_scope_query_info = QueryScope;
     api.memory_create = Create;
     api.memory_query_info = QueryInfo;
     api.memory_query_access_info = QueryAccess;
@@ -95,6 +96,13 @@ struct NativeMemory {
     return ++calls == fail_at
                ? amdf_make_api_status(AMDF_STATUS_CODE_RESOURCE_EXHAUSTED)
                : AMDF_STATUS_OK;
+  }
+  static amdf_status_t AMDF_CALL QueryScope(amdf_memory_scope_t*,
+                                            amdf_memory_scope_info_t* info) {
+    info->kind = AMDF_MEMORY_SCOPE_KIND_LOCAL;
+    info->memory_profile_count = 1;
+    info->capacity_byte_length = UINT64_MAX;
+    return AMDF_STATUS_OK;
   }
   static amdf_status_t AMDF_CALL
   Create(amdf_memory_scope_t* scope, const amdf_memory_create_info_t* info,
@@ -387,6 +395,9 @@ class ExecutableTest : public ::testing::TestWithParam<
                                   AMDF_MEMORY_ACCESS_WRITE |
                                   AMDF_MEMORY_ACCESS_EXECUTE;
     memory_.scope = native_.scope();
+    memory_.profile.memory_class = AMDF_MEMORY_CLASS_LOCAL;
+    memory_.profile.roles =
+        AMDF_MEMORY_PROFILE_ROLE_CREATE | AMDF_MEMORY_PROFILE_ROLE_HOST_MAP;
     memory_.profile.allocation.byte_length_granularity = 4096;
     memory_.profile.allocation.minimum_alignment = 4096;
     memory_.profile.allocation.maximum_byte_length = UINT64_MAX;

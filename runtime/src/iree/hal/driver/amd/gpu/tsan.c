@@ -264,6 +264,36 @@ iree_status_t iree_hal_amd_gpu_tsan_registry_add_queue(
     iree_allocator_free(registry->host_allocator, shadow);
   }
   iree_slim_mutex_unlock(&registry->queues_mutex);
+  if (!iree_status_is_ok(status)) {
+    const amdf_endpoint_id_t* endpoint_id =
+        &registry->context->endpoint_info.id;
+    status = iree_status_annotate_f(
+        status,
+        "GPU TSAN shadow: device=%s endpoint=%016" PRIx64 "%016" PRIx64
+        " gpu_unique_id=%016" PRIx64
+        " queue_ordinal=%u provisioned_queue_count=%u byte_length=%" PRIu64,
+        registry->context->endpoint_info.name, endpoint_id->words[0],
+        endpoint_id->words[1], registry->context->target_info.unique_id,
+        ordinal, registry->provisioned_count, registry->options.shadow_size);
+    const amdf_endpoint_native_identity_t* native_identity =
+        &registry->context->endpoint_info.native_identity;
+    if (native_identity->type ==
+        AMDF_ENDPOINT_NATIVE_IDENTITY_TYPE_LINUX_DEVICE) {
+      status = iree_status_annotate_f(
+          status, "GPU native identity: linux_device:%u:%u",
+          native_identity->value.linux_device.major,
+          native_identity->value.linux_device.minor);
+    } else if (native_identity->type ==
+               AMDF_ENDPOINT_NATIVE_IDENTITY_TYPE_WINDOWS_ADAPTER) {
+      status = iree_status_annotate_f(
+          status, "GPU native identity: windows_adapter:%016" PRIx64 ":%u",
+          native_identity->value.windows_adapter.luid,
+          native_identity->value.windows_adapter.physical_adapter_index);
+    } else {
+      status =
+          iree_status_annotate_f(status, "GPU native identity: unavailable");
+    }
+  }
   return status;
 }
 
