@@ -208,12 +208,12 @@ low.func.def public target<x86.avx512.core>(@avx512) abi(object_function) @trunc
   %98 = avx512.vpmovqw.xmm.zmm %94
   %99 = avx512.vpmovqb.xmm.zmm %93
   %100 = avx512.vpmovqb.xmm.zmm %94
-  vmovdqu32.store.ymm %95, %output32 {disp32 = 0}
-  vmovdqu32.store.ymm %96, %output32 {disp32 = 32}
-  vmovdqu32.store.xmm %97, %output16 {disp32 = 0}
-  vmovdqu32.store.xmm %98, %output16 {disp32 = 16}
-  vmovsd.store.xmm %99, %output8 {disp32 = 0}
-  vmovsd.store.xmm %100, %output8 {disp32 = 8}
+  avx512.vmovdqu32.store.ymm %95, %output32 {disp32 = 0}
+  avx512.vmovdqu32.store.ymm %96, %output32 {disp32 = 32}
+  avx512.vmovdqu32.store.xmm %97, %output16 {disp32 = 0}
+  avx512.vmovdqu32.store.xmm %98, %output16 {disp32 = 16}
+  avx512.vmovsd.store.xmm %99, %output8 {disp32 = 0}
+  avx512.vmovsd.store.xmm %100, %output8 {disp32 = 8}
   return
 }
 

@@ -331,6 +331,7 @@ def _exact_lane_vector_rules(
     *,
     load_descriptor_prefix: str,
     vector_bit_widths: tuple[int, ...],
+    priority: int = 0,
 ) -> tuple[DescriptorRule, ...]:
     rules: list[DescriptorRule] = []
     for family in X86_VECTOR_STORAGE_FAMILIES:
@@ -342,6 +343,7 @@ def _exact_lane_vector_rules(
             rules.append(
                 DescriptorRule(
                     source_op=vector.vector_from_elements,
+                    priority=priority,
                     descriptor=descriptor,
                     guards=(
                         Guard.operand_segment_count("elements", lane_count),
@@ -1415,7 +1417,8 @@ def avx512_vector_construction_rules(
         *_exact_lane_vector_rules(
             descriptor_lookup,
             load_descriptor_prefix="x86.avx512.vmovdqu64.rodata",
-            vector_bit_widths=AVX512_VECTOR_BIT_WIDTHS,
+            vector_bit_widths=(128, 256, 512),
+            priority=1,
         ),
         *_vector_bitcast_alias_rules(AVX512_VECTOR_BIT_WIDTHS),
         *(

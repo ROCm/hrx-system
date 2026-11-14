@@ -9,7 +9,7 @@ func.def @widen_bfloat(%input: bf16) -> (f32) {
 low.func.def target<x86.avx512.core> abi(object_function) abi_layout({signature = (bf16) -> (f32)}) @widen_bfloat(%input: reg<x86.gpr32>) -> (reg<x86.xmm>) asm {
   %5 = copy %input : reg<x86.gpr32> -> reg<x86.gpr32>
   %6 = shl.imm.gpr32 %5 {shift = 16}
-  %wide = vmovd.xmm.gpr32 %6
+  %wide = avx512.vmovd.xmm.gpr32 %6
   return %wide
 }
 
@@ -28,7 +28,7 @@ low.func.def target<x86.avx512.core> abi(object_function) abi_layout({signature 
   %value = movzx.load.u16.gpr32 %input {disp32 = 0}
   %9 = copy %value : reg<x86.gpr32> -> reg<x86.gpr32>
   %10 = shl.imm.gpr32 %9 {shift = 16}
-  %wide = vmovd.xmm.gpr32 %10
+  %wide = avx512.vmovd.xmm.gpr32 %10
   return %wide
 }
 
@@ -53,7 +53,7 @@ low.func.def target<x86.avx512.core> abi(object_function) abi_layout({signature 
   %value = movzx.load.indexed.u16.gpr32 %input, %17 {disp32 = 0, scale = 1}
   %19 = copy %value : reg<x86.gpr32> -> reg<x86.gpr32>
   %20 = shl.imm.gpr32 %19 {shift = 16}
-  %wide = vmovd.xmm.gpr32 %20
+  %wide = avx512.vmovd.xmm.gpr32 %20
   return %wide
 }
 
@@ -72,15 +72,15 @@ func.def @bfloat_pair_sum(%input: buffer) -> (f32) {
 
 // ----
 low.func.def target<x86.avx512.core> abi(object_function) abi_layout({signature = (buffer) -> (f32)}) @bfloat_pair_sum(%input: reg<x86.gpr64>) -> (reg<x86.xmm>) asm {
-  %14 = vmovss.load.xmm %input {disp32 = 0}
+  %14 = avx512.vmovss.load.xmm %input {disp32 = 0}
   %first = vpextrw.xmm %14, 0
   %second = vpextrw.xmm %14, 1
   %17 = copy %first : reg<x86.gpr32> -> reg<x86.gpr32>
   %18 = shl.imm.gpr32 %17 {shift = 16}
-  %first_wide = vmovd.xmm.gpr32 %18
+  %first_wide = avx512.vmovd.xmm.gpr32 %18
   %20 = copy %second : reg<x86.gpr32> -> reg<x86.gpr32>
   %21 = shl.imm.gpr32 %20 {shift = 16}
-  %second_wide = vmovd.xmm.gpr32 %21
+  %second_wide = avx512.vmovd.xmm.gpr32 %21
   %sum = vaddss.xmm %first_wide, %second_wide
   return %sum
 }
@@ -106,9 +106,9 @@ low.func.def target<x86.avx512.core> abi(object_function) abi_layout({signature 
   %after = movzx.load.u16.gpr32<volatile> %input {disp32 = 0}
   %16 = copy %before : reg<x86.gpr32> -> reg<x86.gpr32>
   %17 = shl.imm.gpr32 %16 {shift = 16}
-  %before_wide = vmovd.xmm.gpr32 %17
+  %before_wide = avx512.vmovd.xmm.gpr32 %17
   %19 = copy %after : reg<x86.gpr32> -> reg<x86.gpr32>
   %20 = shl.imm.gpr32 %19 {shift = 16}
-  %after_wide = vmovd.xmm.gpr32 %20
+  %after_wide = avx512.vmovd.xmm.gpr32 %20
   return %before_wide, %after_wide
 }

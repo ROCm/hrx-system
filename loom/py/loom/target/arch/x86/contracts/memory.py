@@ -875,6 +875,8 @@ def x86_scalar_float_memory_rules(
     descriptor_lookup: _DescriptorLookup,
     *,
     diagnostic: GuardDiagnostic,
+    descriptor_key_prefix: str = "x86.avx2",
+    priority: int = 0,
 ) -> tuple[DescriptorRule, ...]:
     """Transfers scalar F32/F64 directly between memory and XMM carriers."""
 
@@ -890,12 +892,13 @@ def x86_scalar_float_memory_rules(
                 (view.view_load, SourceMemoryOperation.LOAD),
                 (view.view_store, SourceMemoryOperation.STORE),
             ),
-            descriptor_key_prefix=f"x86.avx2.{mnemonic}",
+            descriptor_key_prefix=f"{descriptor_key_prefix}.{mnemonic}",
             register_suffix="xmm",
             value_type=Scalar(element_type),
             element_byte_count=element_byte_count,
             lane_count=1,
             diagnostic=diagnostic,
+            priority=priority,
         )
     )
 
@@ -907,6 +910,7 @@ def x86_low_xmm_vector_memory_rules(
     element_byte_count: int,
     lane_count: int,
     diagnostic: GuardDiagnostic,
+    descriptor_key_prefix: str = "x86.avx2",
     priority: int = 0,
 ) -> tuple[DescriptorRule, ...]:
     """Transfers one subregister logical vector through the low bits of XMM."""
@@ -930,8 +934,8 @@ def x86_low_xmm_vector_memory_rules(
             diagnostic=diagnostic,
             transport=_MemoryValueTransport(
                 memory_type=memory_type,
-                load=descriptor_lookup("x86.avx2.vmovd.xmm.gpr32"),
-                store=descriptor_lookup("x86.avx2.vmovd.gpr32.xmm"),
+                load=descriptor_lookup(f"{descriptor_key_prefix}.vmovd.xmm.gpr32"),
+                store=descriptor_lookup(f"{descriptor_key_prefix}.vmovd.gpr32.xmm"),
             ),
             priority=priority,
         )
@@ -942,7 +946,9 @@ def x86_low_xmm_vector_memory_rules(
             (vector.vector_store, SourceMemoryOperation.STORE),
         ),
         descriptor_key_prefix=(
-            "x86.avx2.vmovss" if payload_byte_count == 4 else "x86.avx2.vmovsd"
+            f"{descriptor_key_prefix}.vmovss"
+            if payload_byte_count == 4
+            else f"{descriptor_key_prefix}.vmovsd"
         ),
         register_suffix="xmm",
         value_type=value_type,
@@ -1035,6 +1041,7 @@ def x86_vector_memory_rules(
     descriptor_key_prefix: str,
     vector_bit_widths: Sequence[int],
     diagnostic: GuardDiagnostic,
+    priority: int = 0,
 ) -> tuple[DescriptorRule, ...]:
     """Builds exact source-memory rules for x86 vector carriers."""
 
@@ -1057,6 +1064,8 @@ def x86_vector_memory_rules(
                         element_byte_count=element_byte_count,
                         lane_count=lane_count,
                         diagnostic=diagnostic,
+                        descriptor_key_prefix=descriptor_key_prefix,
+                        priority=priority,
                     )
                 )
                 continue
@@ -1073,6 +1082,7 @@ def x86_vector_memory_rules(
                     element_byte_count=element_byte_count,
                     lane_count=lane_count,
                     diagnostic=diagnostic,
+                    priority=priority,
                 )
             )
     return tuple(rules)

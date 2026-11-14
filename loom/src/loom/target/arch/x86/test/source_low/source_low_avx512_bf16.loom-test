@@ -149,7 +149,7 @@ func.def target(@target) @narrow_two_loads(%input: buffer, %position0: index) ->
 
 // ----
 low.func.def target<x86.avx512_features.core>(@target) abi(object_function) abi_layout({signature = (buffer, index) -> (vector<16xbf16>)}) @narrow_two_loads(%input: reg<x86.gpr64>, %position: reg<x86.gpr64>) -> (reg<x86.ymm>) asm {
-  %high = vmovdqu32.load.ymm %input {disp32 = 0}
+  %high = avx512.vmovdqu32.load.ymm %input {disp32 = 0}
   %result = avx512_bf16.vcvtne2ps2bf16.load.indexed.ymm %high, %input, %position {disp32 = 0, scale = 4}
   return %result
 }
@@ -174,7 +174,7 @@ func.def target(@target) @narrow_two_loads_delayed(%input: buffer, %position0: i
 
 // ----
 low.func.def target<x86.avx512_features.core>(@target) abi(object_function) abi_layout({signature = (buffer, index) -> (vector<16xbf16>)}) @narrow_two_loads_delayed(%input: reg<x86.gpr64>, %position: reg<x86.gpr64>) -> (reg<x86.ymm>) asm {
-  %high = vmovdqu32.load.ymm %input {disp32 = 0}
+  %high = avx512.vmovdqu32.load.ymm %input {disp32 = 0}
   %result = avx512_bf16.vcvtne2ps2bf16.load.indexed.ymm %high, %input, %position {disp32 = 0, scale = 4}
   return %result
 }
@@ -200,9 +200,9 @@ func.def target(@target) @narrow_two_loads_across_write(%input: buffer, %positio
 
 // ----
 low.func.def target<x86.avx512_features.core>(@target) abi(object_function) abi_layout({signature = (buffer, index, vector<8xf32>) -> (vector<16xbf16>)}) @narrow_two_loads_across_write(%input: reg<x86.gpr64>, %position: reg<x86.gpr64>, %replacement: reg<x86.ymm>) -> (reg<x86.ymm>) asm {
-  %low = vmovdqu32.load.indexed.ymm %input, %position {disp32 = 0, scale = 4}
-  vmovdqu32.store.indexed.ymm %replacement, %input, %position {disp32 = 0, scale = 4}
-  %high = vmovdqu32.load.ymm %input {disp32 = 0}
+  %low = avx512.vmovdqu32.load.indexed.ymm %input, %position {disp32 = 0, scale = 4}
+  avx512.vmovdqu32.store.indexed.ymm %replacement, %input, %position {disp32 = 0, scale = 4}
+  %high = avx512.vmovdqu32.load.ymm %input {disp32 = 0}
   %result = avx512_bf16.vcvtne2ps2bf16.ymm %high, %low
   return %result
 }

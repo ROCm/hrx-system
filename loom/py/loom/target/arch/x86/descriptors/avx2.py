@@ -39,8 +39,6 @@ from loom.target.arch.x86.vector_families import (
     VectorLaneFamily,
 )
 from loom.target.low_descriptors import (
-    Constraint,
-    ConstraintKind,
     Descriptor,
     DescriptorFlag,
     DescriptorSet,
@@ -112,7 +110,8 @@ from .integer_float import (
     vector_integer_float_descriptors,
 )
 from .integer_unary import integer_unary_descriptors
-from .memory import broadcast_memory_descriptors, memory_descriptors
+from .memory import broadcast_memory_descriptors, simd_memory_descriptors
+from .register_transfer import register_transfer_descriptors
 from .scalar import (
     X86_SCALAR_DESCRIPTOR_SET,
     X86_SCALAR_PREFIX_DESCRIPTORS,
@@ -478,72 +477,7 @@ _X86_AVX2_VECTOR_DESCRIPTORS = (
         )
         for vector_bit_width, register_suffix in _VECTOR_REGISTER_SUFFIXES.items()
     ),
-    _vex_descriptor(
-        Descriptor(
-            key="x86.avx2.vmovd.gpr32.xmm",
-            mnemonic="vmovd",
-            semantic_tag="bits.move.xmm.gpr32",
-            operands=(_gpr32_result(), _xmm_operand("input")),
-            asm_forms=_asm(
-                mnemonic="vmovd.gpr32.xmm",
-                results=("dst",),
-                operands=("input",),
-            ),
-            schedule_class=_SCHEDULE_VECTOR_I32_XMM,
-            flags=(DescriptorFlag.DEAD_REMOVABLE,),
-        ),
-        native.VMOVD_TO_GPR32,
-    ),
-    _vex_descriptor(
-        Descriptor(
-            key="x86.avx2.vmovd.xmm.gpr32",
-            mnemonic="vmovd",
-            semantic_tag="bits.move.gpr32.xmm",
-            operands=(_xmm_result(), _gpr32_operand("input")),
-            constraints=(Constraint(ConstraintKind.REMATERIALIZABLE, 0, 1),),
-            asm_forms=_asm(
-                mnemonic="vmovd.xmm.gpr32",
-                results=("dst",),
-                operands=("input",),
-            ),
-            schedule_class=_SCHEDULE_VECTOR_I32_XMM,
-            flags=(DescriptorFlag.DEAD_REMOVABLE,),
-        ),
-        native.VMOVD_FROM_GPR32,
-    ),
-    _vex_descriptor(
-        Descriptor(
-            key="x86.avx2.vmovq.gpr64.xmm",
-            mnemonic="vmovq",
-            semantic_tag="bits.move.xmm.gpr64",
-            operands=(_gpr64_result(), _xmm_operand("input")),
-            asm_forms=_asm(
-                mnemonic="vmovq.gpr64.xmm",
-                results=("dst",),
-                operands=("input",),
-            ),
-            schedule_class=_SCHEDULE_VECTOR_I32_XMM,
-            flags=(DescriptorFlag.DEAD_REMOVABLE,),
-        ),
-        native.VMOVQ_TO_GPR64,
-    ),
-    _vex_descriptor(
-        Descriptor(
-            key="x86.avx2.vmovq.xmm.gpr64",
-            mnemonic="vmovq",
-            semantic_tag="bits.move.gpr64.xmm",
-            operands=(_xmm_result(), _gpr64_operand("input")),
-            constraints=(Constraint(ConstraintKind.REMATERIALIZABLE, 0, 1),),
-            asm_forms=_asm(
-                mnemonic="vmovq.xmm.gpr64",
-                results=("dst",),
-                operands=("input",),
-            ),
-            schedule_class=_SCHEDULE_VECTOR_I32_XMM,
-            flags=(DescriptorFlag.DEAD_REMOVABLE,),
-        ),
-        native.VMOVQ_FROM_GPR64,
-    ),
+    *register_transfer_descriptors(evex=False),
     _vex_descriptor(
         Descriptor(
             key="x86.avx2.vblendvpd.xmm",
@@ -1337,62 +1271,7 @@ _X86_AVX2_VECTOR_DESCRIPTORS = (
         )
         for mnemonic in (AVX2_SCALAR_FLOAT_FMA_MNEMONICS[element.name],)
     ),
-    *memory_descriptors(
-        key_prefix="x86.avx2",
-        load_mnemonic="vmovdqu32",
-        store_mnemonic="vmovdqu32",
-        register_class=_REG_XMM,
-        register_suffix="xmm",
-        semantic_type="v128",
-        width_bits=128,
-        load_schedule_class=_SCHEDULE_MEMORY_LOAD_XMM,
-        store_schedule_class=_SCHEDULE_MEMORY_STORE_XMM,
-        assembly_suffix=".xmm",
-        vector_instructions=native.VECTOR_MEMORY,
-        vector_binder=_vex_descriptor,
-    ),
-    *memory_descriptors(
-        key_prefix="x86.avx2",
-        load_mnemonic="vmovss",
-        store_mnemonic="vmovss",
-        register_class=_REG_XMM,
-        register_suffix="xmm",
-        semantic_type="v32",
-        width_bits=32,
-        load_schedule_class=_SCHEDULE_MEMORY_LOAD_XMM,
-        store_schedule_class=_SCHEDULE_MEMORY_STORE_XMM,
-        assembly_suffix=".xmm",
-        vector_instructions=native.XMM_DWORD_MEMORY,
-        vector_binder=_vex_descriptor,
-    ),
-    *memory_descriptors(
-        key_prefix="x86.avx2",
-        load_mnemonic="vmovsd",
-        store_mnemonic="vmovsd",
-        register_class=_REG_XMM,
-        register_suffix="xmm",
-        semantic_type="v64",
-        width_bits=64,
-        load_schedule_class=_SCHEDULE_MEMORY_LOAD_XMM,
-        store_schedule_class=_SCHEDULE_MEMORY_STORE_XMM,
-        assembly_suffix=".xmm",
-        vector_instructions=native.XMM_QWORD_MEMORY,
-        vector_binder=_vex_descriptor,
-    ),
-    *memory_descriptors(
-        key_prefix="x86.avx2",
-        load_mnemonic="vmovdqu32",
-        store_mnemonic="vmovdqu32",
-        register_class=_REG_YMM,
-        register_suffix="ymm",
-        semantic_type="v256",
-        width_bits=256,
-        load_schedule_class=_SCHEDULE_MEMORY_LOAD_YMM,
-        store_schedule_class=_SCHEDULE_MEMORY_STORE_YMM,
-        assembly_suffix=".ymm",
-        vector_instructions=native.VECTOR_MEMORY,
-        vector_binder=_vex_descriptor,
-    ),
+    *simd_memory_descriptors(evex=False),
 )
 
 X86_AVX2_VECTOR_DESCRIPTORS = _X86_AVX2_VECTOR_DESCRIPTORS

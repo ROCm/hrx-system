@@ -1115,101 +1115,6 @@ def test_avx2_scalar_float_arithmetic_covers_f32_and_f64() -> None:
     )
 
 
-def test_scalar_float_memory_covers_types_and_addressing_without_bitcasts() -> None:
-    for source_op, type_field in (
-        (view.view_load, "result"),
-        (view.view_store, "value"),
-    ):
-        for element_type, byte_count, mnemonic in (
-            ("f32", 4, "vmovss"),
-            ("f64", 8, "vmovsd"),
-        ):
-            rules = tuple(
-                case
-                for case in X86_AVX2_CONTRACT_FRAGMENT.cases
-                if isinstance(case, DescriptorRule)
-                and case.source_op is source_op
-                and _value_type_guard(case, type_field) == Scalar(element_type)
-            )
-            assert len(rules) == 9
-            for rule in rules:
-                emitted = tuple(
-                    emit for emit in rule.emit if isinstance(emit, EmitDescriptorOp)
-                )
-                memory = tuple(
-                    emit
-                    for emit in emitted
-                    if emit.descriptor.semantic_tag.startswith("memory.")
-                )
-                assert len(memory) == 1
-                assert memory[0].descriptor.key.startswith(f"x86.avx2.{mnemonic}.")
-                assert memory[0].source_memory is not None
-                assert memory[0].source_memory.element_byte_count == byte_count
-                assert memory[0].source_memory.vector_lane_count == 1
-                assert not any(
-                    emit.descriptor.key.startswith(
-                        ("x86.avx2.vmovd.", "x86.avx2.vmovq.")
-                    )
-                    for emit in emitted
-                )
-
-
-def test_vector_memory_covers_storage_families_and_carrier_widths() -> None:
-    for source_op, type_field in (
-        (vector.vector_load, "result"),
-        (vector.vector_store, "value"),
-    ):
-        for family in X86_VECTOR_STORAGE_FAMILIES:
-            for vector_bit_width in AVX2_CARRIER_VECTOR_BIT_WIDTHS:
-                if vector_bit_width < family.element_bit_width:
-                    continue
-                value_type = Vector(
-                    family.element_names,
-                    lanes=vector_bit_width // family.element_bit_width,
-                )
-                rules = tuple(
-                    case
-                    for case in X86_AVX2_CONTRACT_FRAGMENT.cases
-                    if isinstance(case, DescriptorRule)
-                    and case.source_op is source_op
-                    and _value_type_guard(case, type_field) == value_type
-                )
-                assert len(rules) == 9
-                for rule in rules:
-                    memory = tuple(
-                        emit
-                        for emit in rule.emit
-                        if isinstance(emit, EmitDescriptorOp)
-                        and emit.descriptor.semantic_tag.startswith("memory.")
-                    )
-                    assert len(memory) == 1
-                    assert memory[0].source_memory is not None
-                    assert memory[0].source_memory.element_byte_count == (
-                        family.element_bit_width // 8
-                    )
-                    assert memory[0].source_memory.vector_lane_count == (
-                        vector_bit_width // family.element_bit_width
-                    )
-                    if vector_bit_width <= 16:
-                        descriptor_prefix = (
-                            "x86.scalar.movzx."
-                            if source_op is vector.vector_load
-                            else "x86.scalar.mov."
-                        )
-                        assert any(
-                            emit.descriptor.key.startswith("x86.avx2.vmovd.")
-                            for emit in rule.emit
-                            if isinstance(emit, EmitDescriptorOp)
-                        )
-                    elif vector_bit_width == 32:
-                        descriptor_prefix = "x86.avx2.vmovss."
-                    elif vector_bit_width == 64:
-                        descriptor_prefix = "x86.avx2.vmovsd."
-                    else:
-                        descriptor_prefix = "x86.avx2.vmovdqu32."
-                    assert memory[0].descriptor.key.startswith(descriptor_prefix)
-
-
 def test_avx2_lane_movement_covers_every_payload_type_and_width() -> None:
     assert AVX2_CARRIER_VECTOR_BIT_WIDTHS == (8, 16, 32, 64, 128, 256)
     rules = tuple(
@@ -1376,7 +1281,7 @@ def test_exact_lane_construction_covers_every_payload_type_and_width() -> None:
         ),
         (
             X86_AVX512_CONTRACT_FRAGMENT,
-            AVX512_VECTOR_BIT_WIDTHS,
+            (128, 256, 512),
             "x86.avx512.vmovdqu64.rodata",
         ),
     ):

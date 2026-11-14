@@ -109,6 +109,154 @@ TEST(EncodingTest, VectorRegisterPrefixesAndBehaviors) {
                        {0x62, 0x61, 0x7e, 0x48, 0x7f, 0x3e});
 }
 
+TEST(EncodingTest, ScalarBitTransfersReachFullSimdBank) {
+  // Complete instruction bytes from an independent assembler.
+  loom_x86_encoding_operands_t operands;
+  // vmovd r15d, xmm31.
+  operands = {.result = 15, .inputs = {31}};
+  ExpectVectorEncoding(0x8041, 0x257e, operands,
+                       {0x62, 0x41, 0x7d, 0x08, 0x7e, 0xff});
+  // vmovd xmm31, r15d.
+  operands = {.result = 31, .inputs = {15}};
+  ExpectVectorEncoding(0x8140, 0x256e, operands,
+                       {0x62, 0x41, 0x7d, 0x08, 0x6e, 0xff});
+  // vmovq r15, xmm31.
+  operands = {.result = 15, .inputs = {31}};
+  ExpectVectorEncoding(0x8041, 0x357e, operands,
+                       {0x62, 0x41, 0xfd, 0x08, 0x7e, 0xff});
+  // vmovq xmm31, r15.
+  operands = {.result = 31, .inputs = {15}};
+  ExpectVectorEncoding(0x8140, 0x356e, operands,
+                       {0x62, 0x41, 0xfd, 0x08, 0x6e, 0xff});
+}
+
+TEST(EncodingTest, ScalarMemoryTransfersUseElementDisplacementTuples) {
+  // Complete instruction bytes from an independent assembler.
+  loom_x86_encoding_operands_t operands;
+  // vmovss [r13 + 5], xmm31.
+  operands = {.immediate = 5, .inputs = {31, 13, 14}};
+  ExpectVectorEncoding(
+      0xd2e1, 0x2911, operands,
+      {0x62, 0x41, 0x7e, 0x08, 0x11, 0xbd, 0x05, 0x00, 0x00, 0x00});
+  // vmovss xmm31, [r13 + 5].
+  operands = {.immediate = 5, .result = 31, .inputs = {13, 14}};
+  ExpectVectorEncoding(
+      0xc1e0, 0x2910, operands,
+      {0x62, 0x41, 0x7e, 0x08, 0x10, 0xbd, 0x05, 0x00, 0x00, 0x00});
+  // vmovss [r13 + r14*4 + 508], xmm31.
+  operands = {
+      .immediate = 508,
+      .inputs = {31, 13, 14},
+      .secondary = 2,
+      .has_index = true,
+  };
+  ExpectVectorEncoding(0xd2e1, 0x2911, operands,
+                       {0x62, 0x01, 0x7e, 0x08, 0x11, 0x7c, 0xb5, 0x7f});
+  // vmovss xmm31, [r13 + r14*4 + 508].
+  operands = {
+      .immediate = 508,
+      .result = 31,
+      .inputs = {13, 14},
+      .secondary = 2,
+      .has_index = true,
+  };
+  ExpectVectorEncoding(0xc1e0, 0x2910, operands,
+                       {0x62, 0x01, 0x7e, 0x08, 0x10, 0x7c, 0xb5, 0x7f});
+  // vmovsd [r13 + 9], xmm31.
+  operands = {.immediate = 9, .inputs = {31, 13, 14}};
+  ExpectVectorEncoding(
+      0xd2f1, 0x3d11, operands,
+      {0x62, 0x41, 0xff, 0x08, 0x11, 0xbd, 0x09, 0x00, 0x00, 0x00});
+  // vmovsd xmm31, [r13 + 9].
+  operands = {.immediate = 9, .result = 31, .inputs = {13, 14}};
+  ExpectVectorEncoding(
+      0xc1f0, 0x3d10, operands,
+      {0x62, 0x41, 0xff, 0x08, 0x10, 0xbd, 0x09, 0x00, 0x00, 0x00});
+  // vmovsd [r13 + r14*4 + 1016], xmm31.
+  operands = {
+      .immediate = 1016,
+      .inputs = {31, 13, 14},
+      .secondary = 2,
+      .has_index = true,
+  };
+  ExpectVectorEncoding(0xd2f1, 0x3d11, operands,
+                       {0x62, 0x01, 0xff, 0x08, 0x11, 0x7c, 0xb5, 0x7f});
+  // vmovsd xmm31, [r13 + r14*4 + 1016].
+  operands = {
+      .immediate = 1016,
+      .result = 31,
+      .inputs = {13, 14},
+      .secondary = 2,
+      .has_index = true,
+  };
+  ExpectVectorEncoding(0xc1f0, 0x3d10, operands,
+                       {0x62, 0x01, 0xff, 0x08, 0x10, 0x7c, 0xb5, 0x7f});
+}
+
+TEST(EncodingTest, NarrowVectorMemoryTransfersUseFullDisplacementTuples) {
+  // Complete instruction bytes from an independent assembler.
+  loom_x86_encoding_operands_t operands;
+  // vmovdqu32 [r13 + r14*4 + 2032], xmm31.
+  operands = {
+      .immediate = 2032,
+      .inputs = {31, 13, 14},
+      .secondary = 2,
+      .has_index = true,
+  };
+  ExpectVectorEncoding(0xd2c1, 0x297f, operands,
+                       {0x62, 0x01, 0x7e, 0x08, 0x7f, 0x7c, 0xb5, 0x7f});
+  // vmovdqu32 xmm31, [r13 + r14*4 + 2032].
+  operands = {
+      .immediate = 2032,
+      .result = 31,
+      .inputs = {13, 14},
+      .secondary = 2,
+      .has_index = true,
+  };
+  ExpectVectorEncoding(0xc1c0, 0x296f, operands,
+                       {0x62, 0x01, 0x7e, 0x08, 0x6f, 0x7c, 0xb5, 0x7f});
+  // vmovdqu32 [r13 + r14*4 + 4064], ymm31.
+  operands = {
+      .immediate = 4064,
+      .inputs = {31, 13, 14},
+      .secondary = 2,
+      .has_index = true,
+  };
+  ExpectVectorEncoding(0xd2c1, 0x697f, operands,
+                       {0x62, 0x01, 0x7e, 0x28, 0x7f, 0x7c, 0xb5, 0x7f});
+  // vmovdqu32 ymm31, [r13 + r14*4 + 4064].
+  operands = {
+      .immediate = 4064,
+      .result = 31,
+      .inputs = {13, 14},
+      .secondary = 2,
+      .has_index = true,
+  };
+  ExpectVectorEncoding(0xc1c0, 0x696f, operands,
+                       {0x62, 0x01, 0x7e, 0x28, 0x6f, 0x7c, 0xb5, 0x7f});
+}
+
+TEST(EncodingTest, ReadOnlyPayloadsReachFullSimdBank) {
+  // Literal-pool relocations are applied by the object writer. The encoder
+  // reserves a zero displacement, matching the independent assembler.
+  loom_x86_encoding_operands_t operands;
+  // vmovdqu64 xmm31, [rip + 0].
+  operands = {.result = 31};
+  ExpectVectorEncoding(
+      0xe440, 0x396f, operands,
+      {0x62, 0x61, 0xfe, 0x08, 0x6f, 0x3d, 0x00, 0x00, 0x00, 0x00});
+  // vmovdqu64 ymm31, [rip + 0].
+  operands = {.result = 31};
+  ExpectVectorEncoding(
+      0xe440, 0x796f, operands,
+      {0x62, 0x61, 0xfe, 0x28, 0x6f, 0x3d, 0x00, 0x00, 0x00, 0x00});
+  // vmovdqu64 zmm31, [rip + 0].
+  operands = {.result = 31};
+  ExpectVectorEncoding(
+      0xe440, 0xb96f, operands,
+      {0x62, 0x61, 0xfe, 0x48, 0x6f, 0x3d, 0x00, 0x00, 0x00, 0x00});
+}
+
 TEST(EncodingTest, ScalarMemoryBroadcastDisplacementTuples) {
   // Independent assembler bytes for zmm31,[r13+r14*4+disp]. Every element
   // size covers zero, both compressed boundaries, and the adjacent full disp32.

@@ -816,6 +816,7 @@ VMOVD_TO_GPR32 = _instruction(
     _OPERANDS_2,
     _IMMEDIATES_0,
     _encoding(_VEX, _MAP_1, 1, 0, 0x7E, (128,)),
+    _encoding(_EVEX, _MAP_1, 1, 0, 0x7E, (128,)),
 )
 VMOVD_FROM_GPR32 = _instruction(
     "vmovd",
@@ -823,6 +824,7 @@ VMOVD_FROM_GPR32 = _instruction(
     _OPERANDS_9,
     _IMMEDIATES_0,
     _encoding(_VEX, _MAP_1, 1, 0, 0x6E, (128,)),
+    _encoding(_EVEX, _MAP_1, 1, 0, 0x6E, (128,)),
 )
 VMOVDDUP = _instruction(
     "vmovddup",
@@ -837,7 +839,7 @@ VMOVDQU32_INDEXED_LOAD = _instruction(
     _OPERANDS_19,
     _IMMEDIATES_2,
     _encoding(_VEX, _MAP_1, 2, 0, 0x6F, (128, 256)),
-    _encoding(_EVEX, _MAP_1, 2, 0, 0x6F, (512,)),
+    _encoding(_EVEX, _MAP_1, 2, 0, 0x6F, (128, 256, 512)),
 )
 VMOVDQU32_LOAD = _instruction(
     "vmovdqu32",
@@ -845,7 +847,7 @@ VMOVDQU32_LOAD = _instruction(
     _OPERANDS_18,
     _IMMEDIATES_3,
     _encoding(_VEX, _MAP_1, 2, 0, 0x6F, (128, 256)),
-    _encoding(_EVEX, _MAP_1, 2, 0, 0x6F, (512,)),
+    _encoding(_EVEX, _MAP_1, 2, 0, 0x6F, (128, 256, 512)),
 )
 VMOVDQU32_INDEXED_STORE_SOURCE = _instruction(
     "vmovdqu32",
@@ -853,7 +855,7 @@ VMOVDQU32_INDEXED_STORE_SOURCE = _instruction(
     _OPERANDS_1,
     _IMMEDIATES_2,
     _encoding(_VEX, _MAP_1, 2, 0, 0x7F, (128, 256)),
-    _encoding(_EVEX, _MAP_1, 2, 0, 0x7F, (512,)),
+    _encoding(_EVEX, _MAP_1, 2, 0, 0x7F, (128, 256, 512)),
 )
 VMOVDQU32_STORE_SOURCE = _instruction(
     "vmovdqu32",
@@ -861,7 +863,7 @@ VMOVDQU32_STORE_SOURCE = _instruction(
     _OPERANDS_0,
     _IMMEDIATES_3,
     _encoding(_VEX, _MAP_1, 2, 0, 0x7F, (128, 256)),
-    _encoding(_EVEX, _MAP_1, 2, 0, 0x7F, (512,)),
+    _encoding(_EVEX, _MAP_1, 2, 0, 0x7F, (128, 256, 512)),
 )
 VMOVDQU = _instruction(
     "vmovdqu",
@@ -875,63 +877,87 @@ VMOVDQU64 = _instruction(
     _RIP_RELATIVE_LOAD,
     _OPERANDS_20,
     _IMMEDIATES_1,
-    _encoding(_EVEX, _MAP_1, 2, 1, 0x6F, (512,)),
+    _encoding(_EVEX, _MAP_1, 2, 1, 0x6F, (128, 256, 512)),
 )
 VMOVSS_INDEXED_LOAD = _instruction(
     "vmovss",
-    _INDEXED_LOAD,
+    vector_encoding_recipe(
+        _R.RESULT, _R.NONE, _R.INPUT_0, _B.LOAD, scalar_memory_bit_width=32
+    ),
     _OPERANDS_19,
     _IMMEDIATES_2,
     _encoding(_VEX, _MAP_1, 2, 0, 0x10, (128,)),
+    _encoding(_EVEX, _MAP_1, 2, 0, 0x10, (128,)),
 )
 VMOVSS_LOAD = _instruction(
     "vmovss",
-    _LOAD,
+    vector_encoding_recipe(
+        _R.RESULT, _R.NONE, _R.INPUT_0, _B.LOAD, scalar_memory_bit_width=32
+    ),
     _OPERANDS_18,
     _IMMEDIATES_3,
     _encoding(_VEX, _MAP_1, 2, 0, 0x10, (128,)),
+    _encoding(_EVEX, _MAP_1, 2, 0, 0x10, (128,)),
 )
 VMOVSS_INDEXED_STORE_SOURCE = _instruction(
     "vmovss",
-    _INDEXED_STORE,
+    vector_encoding_recipe(
+        _R.INPUT_0, _R.NONE, _R.INPUT_1, _B.STORE, scalar_memory_bit_width=32
+    ),
     _OPERANDS_1,
     _IMMEDIATES_2,
     _encoding(_VEX, _MAP_1, 2, 0, 0x11, (128,)),
+    _encoding(_EVEX, _MAP_1, 2, 0, 0x11, (128,)),
 )
 VMOVSS_STORE_SOURCE = _instruction(
     "vmovss",
-    _STORE,
+    vector_encoding_recipe(
+        _R.INPUT_0, _R.NONE, _R.INPUT_1, _B.STORE, scalar_memory_bit_width=32
+    ),
     _OPERANDS_0,
     _IMMEDIATES_3,
     _encoding(_VEX, _MAP_1, 2, 0, 0x11, (128,)),
+    _encoding(_EVEX, _MAP_1, 2, 0, 0x11, (128,)),
 )
 VMOVSD_INDEXED_LOAD = _instruction(
     "vmovsd",
-    _INDEXED_LOAD,
+    vector_encoding_recipe(
+        _R.RESULT, _R.NONE, _R.INPUT_0, _B.LOAD, scalar_memory_bit_width=64
+    ),
     _OPERANDS_19,
     _IMMEDIATES_2,
     _encoding(_VEX, _MAP_1, 3, 0, 0x10, (128,)),
+    _encoding(_EVEX, _MAP_1, 3, 1, 0x10, (128,)),
 )
 VMOVSD_LOAD = _instruction(
     "vmovsd",
-    _LOAD,
+    vector_encoding_recipe(
+        _R.RESULT, _R.NONE, _R.INPUT_0, _B.LOAD, scalar_memory_bit_width=64
+    ),
     _OPERANDS_18,
     _IMMEDIATES_3,
     _encoding(_VEX, _MAP_1, 3, 0, 0x10, (128,)),
+    _encoding(_EVEX, _MAP_1, 3, 1, 0x10, (128,)),
 )
 VMOVSD_INDEXED_STORE_SOURCE = _instruction(
     "vmovsd",
-    _INDEXED_STORE,
+    vector_encoding_recipe(
+        _R.INPUT_0, _R.NONE, _R.INPUT_1, _B.STORE, scalar_memory_bit_width=64
+    ),
     _OPERANDS_1,
     _IMMEDIATES_2,
     _encoding(_VEX, _MAP_1, 3, 0, 0x11, (128,)),
+    _encoding(_EVEX, _MAP_1, 3, 1, 0x11, (128,)),
 )
 VMOVSD_STORE_SOURCE = _instruction(
     "vmovsd",
-    _STORE,
+    vector_encoding_recipe(
+        _R.INPUT_0, _R.NONE, _R.INPUT_1, _B.STORE, scalar_memory_bit_width=64
+    ),
     _OPERANDS_0,
     _IMMEDIATES_3,
     _encoding(_VEX, _MAP_1, 3, 0, 0x11, (128,)),
+    _encoding(_EVEX, _MAP_1, 3, 1, 0x11, (128,)),
 )
 VMOVQ_TO_GPR64 = _instruction(
     "vmovq",
@@ -939,6 +965,7 @@ VMOVQ_TO_GPR64 = _instruction(
     _OPERANDS_4,
     _IMMEDIATES_0,
     _encoding(_VEX, _MAP_1, 1, 1, 0x7E, (128,)),
+    _encoding(_EVEX, _MAP_1, 1, 1, 0x7E, (128,)),
 )
 VMOVQ_FROM_GPR64 = _instruction(
     "vmovq",
@@ -946,6 +973,7 @@ VMOVQ_FROM_GPR64 = _instruction(
     _OPERANDS_10,
     _IMMEDIATES_0,
     _encoding(_VEX, _MAP_1, 1, 1, 0x6E, (128,)),
+    _encoding(_EVEX, _MAP_1, 1, 1, 0x6E, (128,)),
 )
 VMULPD = _instruction(
     "vmulpd",

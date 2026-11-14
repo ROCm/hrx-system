@@ -22,7 +22,7 @@ func.def @widen_bf16_f64_1(%input: bf16) -> (f64) {
 low.func.def target<x86.avx512.core> abi(object_function) abi_layout({signature = (bf16) -> (f64)}) @widen_bf16_f64_1(%input: reg<x86.gpr32>) -> (reg<x86.xmm>) asm {
   %7 = copy %input : reg<x86.gpr32> -> reg<x86.gpr32>
   %8 = shl.imm.gpr32 %7 {shift = 16}
-  %9 = vmovd.xmm.gpr32 %8
+  %9 = avx512.vmovd.xmm.gpr32 %8
   %result = avx512.vcvtss2sd.xmm %9, %9
   return %result
 }
@@ -237,7 +237,7 @@ low.func.def target<x86.avx512.core> abi(object_function) @narrow_f64_f32_16_mem
   %16 = avx512.vcvtpd2ps.ymm.zmm %15
   %17 = vmovdqu32.load %input {disp32 = 64}
   %18 = avx512.vcvtpd2ps.ymm.zmm %17
-  vmovdqu32.store.ymm %16, %output {disp32 = 0}
-  vmovdqu32.store.ymm %18, %output {disp32 = 32}
+  avx512.vmovdqu32.store.ymm %16, %output {disp32 = 0}
+  avx512.vmovdqu32.store.ymm %18, %output {disp32 = 32}
   return
 }

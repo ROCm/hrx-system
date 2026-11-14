@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import replace
+from functools import partial
 
 from loom.target.arch.x86 import native_vector as native
 from loom.target.arch.x86.vector_encoding import VectorMachineInstruction
@@ -33,6 +34,9 @@ from .common import (
     _SCHEDULE_MEMORY_LOAD_XMM,
     _SCHEDULE_MEMORY_LOAD_YMM,
     _SCHEDULE_MEMORY_LOAD_ZMM,
+    _SCHEDULE_MEMORY_STORE_XMM,
+    _SCHEDULE_MEMORY_STORE_YMM,
+    _SCHEDULE_MEMORY_STORE_ZMM,
     _asm,
     _avx512_descriptor,
     _gpr64_resource,
@@ -212,6 +216,7 @@ def memory_descriptors(
     load_schedule_class: str,
     store_schedule_class: str,
     assembly_suffix: str,
+    assembly_prefix: str = "",
     encoding_ids: tuple[int, int] | None = None,
     vector_instructions: tuple[VectorMachineInstruction, ...] | None = None,
     vector_binder: Callable[[Descriptor, VectorMachineInstruction], Descriptor]
@@ -244,6 +249,17 @@ def memory_descriptors(
             encoding_id=encoding_ids[1] if encoding_ids is not None else None,
         ),
     ]
+    if assembly_prefix:
+        descriptors = [
+            replace(
+                row,
+                asm_forms=tuple(
+                    replace(form, mnemonic=assembly_prefix + form.mnemonic)
+                    for form in row.asm_forms
+                ),
+            )
+            for row in descriptors
+        ]
     if vector_instructions is None:
         if vector_binder is not None:
             raise ValueError("vector binder requires native instruction facts")
@@ -256,6 +272,41 @@ def memory_descriptors(
             descriptors, vector_instructions, strict=True
         )
     )
+
+
+def simd_memory_descriptors(*, evex: bool) -> tuple[Descriptor, ...]:
+    """Exact-width scalar and vector transfers for one native SIMD domain."""
+    descriptors = []
+    for width in (128, 32, 64, 256, 512) if evex else (128, 32, 64, 256):
+        suffix, load_schedule, store_schedule = {
+            128: ("xmm", _SCHEDULE_MEMORY_LOAD_XMM, _SCHEDULE_MEMORY_STORE_XMM),
+            256: ("ymm", _SCHEDULE_MEMORY_LOAD_YMM, _SCHEDULE_MEMORY_STORE_YMM),
+            512: ("zmm", _SCHEDULE_MEMORY_LOAD_ZMM, _SCHEDULE_MEMORY_STORE_ZMM),
+        }[max(128, width)]
+        mnemonic, instructions = {
+            32: ("vmovss", native.XMM_DWORD_MEMORY),
+            64: ("vmovsd", native.XMM_QWORD_MEMORY),
+        }.get(width, ("vmovdqu32", native.VECTOR_MEMORY))
+        descriptors.extend(
+            memory_descriptors(
+                key_prefix="x86.avx512" if evex else "x86.avx2",
+                load_mnemonic=mnemonic,
+                store_mnemonic=mnemonic,
+                register_class=f"x86.{suffix}",
+                register_suffix=suffix,
+                semantic_type=f"v{width}",
+                width_bits=width,
+                load_schedule_class=load_schedule,
+                store_schedule_class=store_schedule,
+                assembly_suffix="" if width == 512 else f".{suffix}",
+                assembly_prefix="avx512." if evex and width < 512 else "",
+                vector_instructions=instructions,
+                vector_binder=partial(_avx512_descriptor, scalar=width < 128)
+                if evex
+                else _vex_descriptor,
+            )
+        )
+    return tuple(descriptors)
 
 
 def read_memory_binary_descriptors(

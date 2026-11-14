@@ -257,14 +257,14 @@ low.func.def public target<x86.avx2.core>(@avx2) abi(object_function) @widen_loa
 }
 
 low.func.def public target<x86.avx512.core>(@avx512) abi(object_function) @widen_loaded_vectors_avx512(%input: reg<x86.gpr64>, %output32: reg<x86.gpr64>, %output64: reg<x86.gpr64>) asm {
-  %86 = vmovdqu32.load.xmm %input {disp32 = 0}
-  %87 = vmovdqu32.load.xmm %input {disp32 = 16}
+  %86 = avx512.vmovdqu32.load.xmm %input {disp32 = 0}
+  %87 = avx512.vmovdqu32.load.xmm %input {disp32 = 16}
   %88 = vpmovsxwd.ymm %86
   %89 = vpmovsxwd.ymm %87
   %90 = avx512.vpmovzxwq.zmm.xmm %86
   %91 = avx512.vpmovzxwq.zmm.xmm %87
-  vmovdqu32.store.ymm %88, %output32 {disp32 = 0}
-  vmovdqu32.store.ymm %89, %output32 {disp32 = 32}
+  avx512.vmovdqu32.store.ymm %88, %output32 {disp32 = 0}
+  avx512.vmovdqu32.store.ymm %89, %output32 {disp32 = 32}
   vmovdqu32.store %90, %output64 {disp32 = 0}
   vmovdqu32.store %91, %output64 {disp32 = 64}
   return

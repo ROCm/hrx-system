@@ -98,7 +98,7 @@ func.def target(@target) @without_vector_length(%input: buffer, %output: buffer)
 
 // ----
 low.func.def target<x86.avx512_features.core>(@target) abi(object_function) @without_vector_length(%input: reg<x86.gpr64>, %output: reg<x86.gpr64>) asm {
-  %half = vmovss.load.xmm %input {disp32 = 0}
+  %half = avx512.vmovss.load.xmm %input {disp32 = 0}
   %15 = vpextrw.xmm %half, 0
   %16 = vmovd.xmm.gpr32 %15
   %17 = vrndscalesh.xmm %16, %16, 9
@@ -107,7 +107,7 @@ low.func.def target<x86.avx512_features.core>(@target) abi(object_function) @wit
   %20 = vrndscalesh.xmm %19, %19, 9
   %21 = vmovd.gpr32.xmm %20
   %floor_half = vpinsrw.xmm %17, %21, 1
-  vmovss.store.xmm %floor_half, %output {disp32 = 0}
+  avx512.vmovss.store.xmm %floor_half, %output {disp32 = 0}
   return
 }
 

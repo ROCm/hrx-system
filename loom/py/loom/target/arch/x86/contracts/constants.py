@@ -310,7 +310,7 @@ def floating_scalar_zero_rule(
                 form=DescriptorEmitForm.OP,
             ),
         ),
-        priority=1,
+        priority=2,
     )
 
 
@@ -379,6 +379,8 @@ def floating_storage_scalar_constant_rule(
 def f32_scalar_constant_rule(
     move_descriptor: Descriptor,
     bitcast_descriptor: Descriptor,
+    *,
+    priority: int = 0,
 ) -> DescriptorRule:
     """Constructs an f32 scalar from its exact bit pattern."""
     return floating_scalar_constant_bits_rule(
@@ -388,12 +390,15 @@ def f32_scalar_constant_rule(
         ValueProject.float_as_f32_i32("result"),
         move_descriptor,
         bitcast_descriptor,
+        priority=priority,
     )
 
 
 def f64_scalar_constant_rule(
     move_descriptor: Descriptor,
     bitcast_descriptor: Descriptor,
+    *,
+    priority: int = 0,
 ) -> DescriptorRule:
     """Constructs an f64 scalar from its exact bit pattern."""
     return floating_scalar_constant_bits_rule(
@@ -403,6 +408,7 @@ def f64_scalar_constant_rule(
         ValueProject.float_as_f64_i64("result"),
         move_descriptor,
         bitcast_descriptor,
+        priority=priority,
     )
 
 
