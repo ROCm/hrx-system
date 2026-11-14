@@ -76,9 +76,9 @@ func.def public noinline @early_initializer(%done: i1, %value: f32) -> (vector<4
 
 // Direct source-to-Low has the same contract even when target legalization
 // and boundary projection have not run.
-func.def public noinline @make_initializer(%value: f32) -> (vector<4xf32>) {
+func.def public noinline @make_initializer() -> (vector<4xf32>) {
   %dimension = index.constant 16 : index
-  %values = vector.splat %value : vector<4xf32>
+  %values = vector.splatf 0.0 : vector<4xf32>
   %initial = vector.fragment<init> %values shape [%dimension, %dimension] : vector<4xf32>
   // ERROR@+1: SPIRV/033 {op_name="func.return", callee_name="make_initializer", source_type="vector<4xf32>"}
   func.return %initial : vector<4xf32>

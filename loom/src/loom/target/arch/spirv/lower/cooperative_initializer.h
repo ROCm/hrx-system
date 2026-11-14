@@ -15,6 +15,11 @@
 extern "C" {
 #endif
 
+// Returns whether the fragment describes one matrix with native component bits,
+// without encoded scale, sparse, or packed payload interpretation.
+bool loom_spirv_cooperative_initializer_has_native_payload(
+    const loom_value_fact_table_t* facts, const loom_op_t* source_op);
+
 // Proves native component interpretation, one logical matrix block, and
 // subgroup-uniform value and participation for a vector.fragment constructor.
 iree_status_t loom_spirv_can_materialize_cooperative_initializer_component(

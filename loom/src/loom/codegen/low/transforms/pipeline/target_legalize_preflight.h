@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// Source assumption validation performed before target legalizer dispatch.
+// Source boundary validation performed before target materialization.
 
 #ifndef LOOM_CODEGEN_LOW_TRANSFORMS_PIPELINE_TARGET_LEGALIZE_PREFLIGHT_H_
 #define LOOM_CODEGEN_LOW_TRANSFORMS_PIPELINE_TARGET_LEGALIZE_PREFLIGHT_H_
@@ -26,7 +26,7 @@ typedef struct loom_low_target_legalize_preflight_t {
   loom_func_like_t function;
   // Selected target bundle used to render diagnostic context.
   const loom_target_bundle_t* target_bundle;
-  // Structured sink receiving assumption conflict diagnostics.
+  // Structured sink receiving source boundary diagnostics.
   iree_diagnostic_emitter_t emitter;
   // Maximum number of diagnostics emitted, or zero for no limit.
   uint32_t max_errors;

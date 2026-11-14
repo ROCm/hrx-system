@@ -242,8 +242,8 @@ kernel.def @varying_initializer() {
   %lane_i32 = index.cast %lane : index to i32
   %scalar = scalar.sitofp %lane_i32 : i32 to f32
   %values = vector.splat %scalar : vector<4xf32>
+  // ERROR@+1: SPIRV/043 {function_name="varying_initializer", input_type="vector<4xf32>"}
   %init = vector.fragment<init> %values shape [%size, %size] : vector<4xf32>
-  // ERROR@+1: SPIRV/013 {function_name="varying_initializer", descriptor_key="spirv.op_cooperative_matrix_mul_add_khr.f16.m16n16k16.f32.subgroup", field_kind="operand", field_index="2", value_name="init", expected_value_type="cooperative_matrix", actual_value_type="v4f32"}
   %result = vector.mma %lhs, %rhs, %init : vector<4xf16>, vector<4xf16>, vector<4xf32>
   vector.fragment.store<result> %result, %view[0, 0] shape [%size, %size] : vector<4xf32>, view<16x16xf32>
   kernel.return
@@ -271,6 +271,7 @@ kernel.def @divergent_initializer() {
   %writer = index.cmp eq, %thread, %first_lane : index
   %value = scf.if %writer -> (vector<4xf32>) {
     %then_values = vector.splatf 1.0 : vector<4xf32>
+    // ERROR@+1: SPIRV/043 {function_name="divergent_initializer", input_type="vector<4xf32>"}
     %fragment = vector.fragment<init> %then_values shape [%size, %size] : vector<4xf32>
     scf.yield %fragment : vector<4xf32>
   } else {
@@ -278,7 +279,6 @@ kernel.def @divergent_initializer() {
     %fragment = vector.fragment<init> %else_values shape [%size, %size] : vector<4xf32>
     scf.yield %fragment : vector<4xf32>
   }
-  // ERROR@+1: SPIRV/013 {function_name="divergent_initializer", descriptor_key="spirv.op_cooperative_matrix_mul_add_khr.f16.m16n16k16.f32.subgroup", field_kind="operand", field_index="2", value_name="value", expected_value_type="cooperative_matrix", actual_value_type="v4f32"}
   %result = vector.mma %lhs, %rhs, %value : vector<4xf16>, vector<4xf16>, vector<4xf32>
   vector.fragment.store<result> %result, %view[0, 0] shape [%size, %size] : vector<4xf32>, view<16x16xf32>
   kernel.return
@@ -304,8 +304,8 @@ kernel.def @multiple_blocks() {
   %rhs = vector.fragment<rhs> %b_values shape [%size, %size] : vector<4xf16>
   %blocks = index.constant 2 : index
   %values = vector.splatf 7.0 : vector<4xf32>
+  // ERROR@+1: SPIRV/043 {function_name="multiple_blocks", input_type="vector<4xf32>"}
   %init = vector.fragment<init> %values shape [blocks(%blocks), %size, %size] : vector<4xf32>
-  // ERROR@+1: TARGET/039 {matrix_constraint="fragment_shape"}
   %result = vector.mma %lhs, %rhs, %init : vector<4xf16>, vector<4xf16>, vector<4xf32>
   vector.fragment.store<result> %result, %view[0, 0] shape [%size, %size] : vector<4xf32>, view<16x16xf32>
   kernel.return
@@ -331,8 +331,8 @@ kernel.def @packed_initializer() {
   %rhs = vector.fragment<rhs> %b_values shape [%size, %size] : vector<4xf16>
   %schema = encoding.define #encoding.f32<payload_elements=4, payload_registers=4> : encoding<schema>
   %values = vector.splatf 7.0 : vector<4xf32>
+  // ERROR@+1: SPIRV/043 {function_name="packed_initializer", input_type="vector<4xf32>"}
   %init = vector.fragment<init> %values shape [%size, %size] using {schema = %schema : encoding<schema>} : vector<4xf32>
-  // ERROR@+1: TARGET/039 {matrix_constraint="fragment_schema"}
   %result = vector.mma %lhs, %rhs, %init : vector<4xf16>, vector<4xf16>, vector<4xf32>
   vector.fragment.store<result> %result, %view[0, 0] shape [%size, %size] : vector<4xf32>, view<16x16xf32>
   kernel.return
@@ -358,8 +358,8 @@ kernel.def @scaled_initializer() {
   %rhs = vector.fragment<rhs> %b_values shape [%size, %size] : vector<4xf16>
   %schema = encoding.define #encoding.operand<affine=scale_only, element_format=f32, payload_elements=4, payload_registers=4, scale_format=f32, scale_group_elements=4, scale_operands=1, scale_topology=block_1d> : encoding<schema>
   %values = vector.splatf 7.0 : vector<4xf32>
+  // ERROR@+1: SPIRV/043 {function_name="scaled_initializer", input_type="vector<4xf32>"}
   %init = vector.fragment<init> %values shape [%size, %size] using {scale = %values : vector<4xf32>, schema = %schema : encoding<schema>} : vector<4xf32>
-  // ERROR@+1: SPIRV/013 {function_name="scaled_initializer", descriptor_key="spirv.op_cooperative_matrix_mul_add_khr.f16.m16n16k16.f32.subgroup", field_kind="operand", field_index="2", value_name="init", expected_value_type="cooperative_matrix", actual_value_type="v4f32"}
   %result = vector.mma %lhs, %rhs, %init : vector<4xf16>, vector<4xf16>, vector<4xf32>
   vector.fragment.store<result> %result, %view[0, 0] shape [%size, %size] : vector<4xf32>, view<16x16xf32>
   kernel.return
@@ -386,8 +386,8 @@ kernel.def @sparse_initializer() {
   %schema = encoding.define #encoding.operand<element_format=f32, payload_elements=4, payload_registers=4, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
   %metadata = vector.splati 0 : vector<4xi32>
   %values = vector.splatf 7.0 : vector<4xf32>
+  // ERROR@+1: SPIRV/043 {function_name="sparse_initializer", input_type="vector<4xf32>"}
   %init = vector.fragment<init> %values shape [%size, %size] using {schema = %schema : encoding<schema>, sparsity = %metadata : vector<4xi32>} : vector<4xf32>
-  // ERROR@+1: SPIRV/013 {function_name="sparse_initializer", descriptor_key="spirv.op_cooperative_matrix_mul_add_khr.f16.m16n16k16.f32.subgroup", field_kind="operand", field_index="2", value_name="init", expected_value_type="cooperative_matrix", actual_value_type="v4f32"}
   %result = vector.mma %lhs, %rhs, %init : vector<4xf16>, vector<4xf16>, vector<4xf32>
   vector.fragment.store<result> %result, %view[0, 0] shape [%size, %size] : vector<4xf32>, view<16x16xf32>
   kernel.return

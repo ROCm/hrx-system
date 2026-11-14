@@ -185,6 +185,19 @@ static bool loom_spirv_source_vector_carrier_supported(
              source_type);
 }
 
+static iree_status_t loom_spirv_query_cooperative_contract(
+    void* user_data,
+    const loom_target_contract_query_environment_t* environment,
+    const loom_op_t* source_op,
+    loom_target_contract_query_result_t* out_result) {
+  if (loom_vector_fragment_isa(source_op)) {
+    return loom_spirv_query_cooperative_fragment(environment, source_op,
+                                                 out_result);
+  }
+  return loom_spirv_query_cooperative_arithmetic(user_data, environment,
+                                                 source_op, out_result);
+}
+
 static iree_status_t loom_spirv_map_type(void* user_data,
                                          loom_low_lower_context_t* context,
                                          const loom_op_t* source_op,
@@ -609,12 +622,12 @@ static const loom_low_lower_policy_t kSpirvLowLowerPolicy = {
     .preselect_op = {.fn = loom_spirv_preselect_op, .user_data = NULL},
     .query_op_contract =
         {
-            .fn = loom_spirv_query_cooperative_arithmetic,
+            .fn = loom_spirv_query_cooperative_contract,
             .first_op_kind = LOOM_OP_VECTOR_ADDF,
-            .op_kind_count = LOOM_OP_VECTOR_NEGI - LOOM_OP_VECTOR_ADDF + 1,
+            .op_kind_count = LOOM_OP_VECTOR_FRAGMENT - LOOM_OP_VECTOR_ADDF + 1,
             .first_terminal_rejection_op_kind = LOOM_OP_VECTOR_ADDF,
             .terminal_rejection_op_kind_count =
-                LOOM_OP_VECTOR_NEGI - LOOM_OP_VECTOR_ADDF + 1,
+                LOOM_OP_VECTOR_FRAGMENT - LOOM_OP_VECTOR_ADDF + 1,
         },
     .describe_plan = {.fn = loom_spirv_describe_plan, .user_data = NULL},
     .mark_plan_storage_demands =
