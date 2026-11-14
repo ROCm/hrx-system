@@ -7,7 +7,9 @@
 #ifndef LOOM_SERVE_SERVICE_TEXT_MODEL_INSTANCE_H_
 #define LOOM_SERVE_SERVICE_TEXT_MODEL_INSTANCE_H_
 
+#include "loom/serve/service/text/bank.h"
 #include "loom/serve/service/text/control.h"
+#include "loom/serve/service/text/group_exchange.h"
 #include "loom/serve/service/text/media_epoch.h"
 #include "loom/serve/service/text/model.h"
 #include "loom/serve/service/text/source.h"
@@ -39,6 +41,7 @@ struct loom_serve_text_model_t {
   loom_runtime_device_t* device_owner;
   // Borrowed storage and residency owner, independent of execution placement.
   loom_runtime_pool_t* pool;
+  loom_runtime_pool_t* exchange_pool;
   // Native execution device borrowed from device_owner.
   iree_hal_device_t* device;
   // Semaphore namespace borrowed from device_owner.
@@ -53,6 +56,12 @@ struct loom_serve_text_model_t {
   iree_hal_command_buffer_mode_t command_mode;
   // Load-owned source index and compiler, released after preparation retires.
   loom_runtime_jit_t* jit;
+  struct {
+    iree_host_size_t count;
+    struct loom_serve_text_lane_t* lanes;
+    uint32_t* stages;
+    loom_runtime_jit_t** catalogs;
+  } placement;
   // Checkpoint domains owning stable parameter reservations across all stages.
   loom_serve_text_parameters_t parameters;
   // Owned physical parameter group, outliving borrowing invocation residencies.
@@ -105,7 +114,34 @@ struct loom_serve_text_model_t {
     loom_serve_text_epoch_flags_t flags;
     // Exact mixed-input host plan and packet records; empty for text-only.
     loom_serve_text_media_epoch_t media;
+
   } invocation;
+  // Immutable configuration and retained source-aware provider for this model.
+  bool two_bank;
+  loom_runtime_plan_provider_v1_t plan_provider;
+  loom_runtime_execution_plan_t* execution_plan;
+  loom_serve_text_bank_t banks[2];
+  struct {
+    iree_vm_function_t describe;
+    iree_vm_function_t encode;
+    iree_vm_function_t publish;
+    // Retained descriptors of a selected native variant; NULL uses the
+    // original stage_bindings.
+    loom_runtime_stage_t* stages;
+    // Allocation request backing each bank's private workspace.
+    iree_hal_pool_reservation_request_t workspace;
+    loom_runtime_execution_group_t* pending;
+    // Source descriptor v3 resident producer/consumer and exchange ranges.
+    struct loom_serve_text_resident_binding_t* transport;
+    iree_host_size_t transport_count;
+    bool continuous;
+    loom_serve_text_group_exchange_t* exchange;
+    iree_hal_buffer_t* shared_storage;
+    iree_host_size_t row_index;
+    uint32_t known_count;
+    bool selects;
+    bool active;
+  } prefill_group;
 };
 
 struct loom_serve_text_row_t {

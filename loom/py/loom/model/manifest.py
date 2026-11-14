@@ -232,12 +232,42 @@ def _origin(value: Any, roots: dict, path: str, *, group: bool = False) -> None:
 
 
 def _transform(value: Any, path: str) -> dict:
+    if isinstance(value, dict) and value.get("kind") == "i8-panel":
+        _object(
+            value,
+            path,
+            (
+                "kind",
+                "version",
+                "source",
+                "layout",
+                "cache",
+                "output",
+                "kernel_version",
+            ),
+        )
+        if type(value["version"]) is not int or value["version"] != 1:
+            _fail(path, "supported i8-panel transform version: 1")
+        if value["layout"] != "v2" or value["output"] not in (
+            "resident-halves",
+            "colscale",
+        ):
+            _fail(
+                path,
+                "i8-panel requires layout v2 and resident-halves or colscale output",
+            )
+        _path(value["source"], path + ".source")
+        _path(value["cache"], path + ".cache", directory=True)
+        _string(value["kernel_version"], path + ".kernel_version")
+        return copy.deepcopy(value)
+    if isinstance(value, dict) and value.get("kind") != "safetensors":
+        _fail(
+            path + ".kind",
+            f"unsupported transform {value.get('kind')!r}; loom-fetch acquires "
+            "'safetensors' and the native runtime loader derives 'i8-panel'",
+        )
     _object(value, path, ("kind", "version"), ("alignment", "tensors"))
-    if (
-        value["kind"] != "safetensors"
-        or type(value["version"]) is not int
-        or value["version"] != 1
-    ):
+    if type(value["version"]) is not int or value["version"] != 1:
         _fail(path, "supported transform: safetensors version 1")
     alignment = value.get("alignment", 8)
     if (
@@ -273,11 +303,13 @@ def _file(
         record,
         path,
         ("path",),
-        ("origin", "format", "options", "data")
-        if provider
-        else ("origin", "format", "transform")
-        if parameter
-        else ("origin", "format"),
+        (
+            ("origin", "format", "options", "data")
+            if provider
+            else (
+                ("origin", "format", "transform") if parameter else ("origin", "format")
+            )
+        ),
     )
     _path(record["path"], path + ".path")
     if "format" in record:
@@ -286,10 +318,15 @@ def _file(
         _origin(record["origin"], roots, path + ".origin")
     if "transform" in record:
         record["transform"] = _transform(record["transform"], path + ".transform")
-        if record.get("format") != "safetensors":
+        formats = (
+            ("raw", "safetensors")
+            if record["transform"]["kind"] == "i8-panel"
+            else ("safetensors",)
+        )
+        if record.get("format") not in formats:
             _fail(
                 path + ".format",
-                "safetensors transform requires explicit format 'safetensors'",
+                "transform requires explicit format " + " or ".join(formats),
             )
     if provider:
         _strings(record.get("options", []), path + ".options")
@@ -398,8 +435,11 @@ class ModelCard:
 
     def _validate(self) -> None:
         doc = _mapping(self._document, "$")
-        if type(doc.get("schema_version")) is not int or doc["schema_version"] != 1:
-            _fail("$.schema_version", "unsupported model-card version; supported: 1")
+        if type(doc.get("schema_version")) is not int or doc["schema_version"] not in (
+            1,
+            2,
+        ):
+            _fail("$.schema_version", "unsupported model-card version; supported: 1, 2")
         _object(
             doc,
             "$",
@@ -442,12 +482,24 @@ class ModelCard:
                 program,
                 path,
                 ("inputs", "libraries"),
-                ("directory", "origin", "config"),
+                ("directory", "origin", "config", "device_placement", "exchange_pool"),
             )
             _path(program.get("directory", "."), path + ".directory", directory=True)
             if "origin" in program:
                 _origin(program["origin"], origins, path + ".origin", group=True)
             _config(program.get("config", {}), path + ".config")
+            if "exchange_pool" in program:
+                if doc["schema_version"] != 2:
+                    _fail(path + ".exchange_pool", "requires model schema version 2")
+                _string(program["exchange_pool"], path + ".exchange_pool")
+            if "device_placement" in program:
+                if doc["schema_version"] != 2:
+                    _fail(path + ".device_placement", "requires model schema version 2")
+                placement = _mapping(
+                    program["device_placement"], path + ".device_placement", empty=True
+                )
+                for root, device in placement.items():
+                    _string(device, path + ".device_placement." + root)
             seen = set()
             for role in ("inputs", "libraries"):
                 if not isinstance(program[role], list):
@@ -516,6 +568,19 @@ class ModelCard:
                 for key in ("options", "execution"):
                     _mapping(
                         component.get(key, {}), component_path + "." + key, empty=True
+                    )
+            execution = preset.get("execution", {})
+            if "group_mode" in execution or "plan_provider" in execution:
+                if doc["schema_version"] != 2:
+                    _fail(
+                        path + ".execution",
+                        "group execution requires model-card version 2",
+                    )
+                if execution.get("group_mode", "single") not in ("single", "two_bank"):
+                    _fail(path + ".execution.group_mode", "expected single or two_bank")
+                if "plan_provider" in execution:
+                    _string(
+                        execution["plan_provider"], path + ".execution.plan_provider"
                     )
             if "partition" in preset:
                 _string(preset["partition"], path + ".partition")
@@ -588,12 +653,19 @@ class ModelCard:
                                 scope_path + ".files", "expected a nonempty shard array"
                             )
                         for index, item in enumerate(parameter["files"]):
-                            _file(
+                            file = _file(
                                 item,
                                 origins,
                                 f"{scope_path}.files[{index}]",
                                 parameter=True,
                             )
+                            if (
+                                doc["schema_version"] != 2
+                                and file.get("transform", {}).get("kind") == "i8-panel"
+                            ):
+                                _fail(
+                                    scope_path, "i8-panel requires model-card version 2"
+                                )
                     for identity, tokenizer in _mapping(
                         variant_service.get("tokenizers", {}),
                         current + ".tokenizers",

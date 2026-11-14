@@ -113,6 +113,54 @@ TEST_F(CardTest, NamedPartitionOwnsItsCompleteClosure) {
             "second.irpa");
 }
 
+TEST_F(CardTest, VersionTwoDevicePlacementOwnsDecodedNames) {
+  std::string json = Replace("\"schema_version\": 1", "\"schema_version\": 2");
+  const auto position = json.find("\"directory\": \"program\",");
+  json.insert(
+      position,
+      R"("device_placement":{"ffn_gate":"xdna","*":"amdgpu"},"exchange_pool":"shared",)");
+  IREE_ASSERT_OK(Parse(json));
+  json.assign(json.size(), 'x');
+  const auto placement = loom_model_card_selection(card_)->device_placement;
+  ASSERT_EQ(placement.count, 2u);
+  EXPECT_EQ(String(placement.values[0].root), "ffn_gate");
+  EXPECT_EQ(String(placement.values[0].device), "xdna");
+  EXPECT_EQ(String(placement.values[1].root), "*");
+  EXPECT_EQ(String(placement.values[1].device), "amdgpu");
+  EXPECT_EQ(String(loom_model_card_selection(card_)->exchange_pool), "shared");
+}
+
+TEST_F(CardTest, ExchangePoolRejectsV1AndInvalidNames) {
+  for (const char* value : {"0", "null", "false", "[]", "{}", "\"\""}) {
+    std::string json =
+        Replace("\"schema_version\": 1", "\"schema_version\": 2");
+    json.insert(json.find("\"directory\": \"program\","),
+                std::string("\"exchange_pool\":") + value + ",");
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT, Parse(json));
+  }
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      Parse(
+          Replace("\"directory\": \"program\",",
+                  "\"exchange_pool\":\"shared\",\"directory\":\"program\",")));
+}
+
+TEST_F(CardTest, DevicePlacementRejectsV1AndMalformedMappings) {
+  for (const char* mapping : {R"({"ffn":0})", R"({"ffn":""})",
+                              R"({"ffn":"npu","ffn":"gpu"})", R"([])"}) {
+    std::string json =
+        Replace("\"schema_version\": 1", "\"schema_version\": 2");
+    const auto position = json.find("\"directory\": \"program\",");
+    json.insert(position, std::string("\"device_placement\":") + mapping + ",");
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT, Parse(json));
+    EXPECT_EQ(card_, nullptr);
+  }
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      Parse(Replace("\"directory\": \"program\",",
+                    "\"device_placement\":{},\"directory\":\"program\",")));
+}
+
 TEST_F(CardTest, PartitionChoiceIsExplicitAndNeverFiltersAnUnpartitionedModel) {
   loom_model_selector_t selector = {.variant = IREE_SV("small")};
   IREE_ASSERT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
@@ -296,8 +344,28 @@ TEST_F(CardTest, UnknownRevisionFailsBeforeInterpretingNewFields) {
   IREE_ASSERT_STATUS_IS(
       IREE_STATUS_UNIMPLEMENTED,
       Parse(Replace("\"schema_version\": 1",
-                    "\"schema_version\": 2, \"future_field\": {}")));
+                    "\"schema_version\": 3, \"future_field\": {}")));
   EXPECT_EQ(card_, nullptr);
+}
+
+TEST_F(CardTest, VersionTwoGroupsKeepVersionOneClosure) {
+  auto json = Replace("\"schema_version\": 1", "\"schema_version\": 2");
+  auto offset = json.find("\"execution\": {\"rows\": 2}");
+  json.replace(offset, std::string("\"execution\": {\"rows\": 2}").size(),
+               "\"execution\": {\"rows\": 2, \"group_mode\":\"two_bank\", "
+               "\"plan_provider\":\"two_bank_v1\"}");
+  IREE_ASSERT_OK(Parse(json));
+  EXPECT_EQ(loom_model_card_selection(card_)->schema_version, 2u);
+  EXPECT_NE(
+      String(loom_model_card_selection(card_)->execution).find("two_bank"),
+      std::string::npos);
+}
+
+TEST_F(CardTest, VersionOneRejectsGroupDefaults) {
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      Parse(Replace("\"execution\": {\"rows\": 2}",
+                    "\"execution\": {\"group_mode\":\"two_bank\"}")));
 }
 
 TEST_F(CardTest, CanonicalOptionsBelongToTheSelectedService) {
@@ -351,6 +419,38 @@ TEST_F(CardTest, PlainJsonAndScalarConfigurationAreRequired) {
   IREE_ASSERT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         Parse(Replace("\"config\": {\"width\": 4",
                                       "\"config_typo\": {\"width\": 4")));
+}
+
+TEST_F(CardTest, RetainsLoaderTransformAndRejectsUnknownRecipes) {
+  std::string file =
+      R"json({"path":"cache/key/panels_gu.i8","format":"raw","transform":{"kind":"i8-panel","version":1,"source":"parameter/model.gguf","layout":"v2","cache":"cache","output":"resident-halves","kernel_version":"resident-full-k-i8-i32-bf16-column-scale-v1"}})json";
+  auto make = [&](const std::string& f) {
+    std::string json =
+        Replace("\"schema_version\": 1", "\"schema_version\": 2");
+    const std::string old = "\"weight/a.safetensors\"";
+    json.replace(json.find(old), old.size(), f);
+    return json;
+  };
+  IREE_ASSERT_OK(Parse(make(file)));
+  const auto* selection = loom_model_card_selection(card_);
+  const auto* parameter =
+      loom_model_selection_parameter(selection, IREE_SV("model"));
+  ASSERT_NE(parameter, nullptr);
+  const auto& transform = parameter->files.values[0].transform;
+  EXPECT_EQ(String(transform.source), "parameter/model.gguf");
+  EXPECT_EQ(String(transform.cache), "cache");
+  EXPECT_EQ(transform.output, LOOM_MODEL_TRANSFORM_I8_RESIDENT_HALVES);
+  for (const auto& change :
+       {std::pair<std::string, std::string>{"\"v2\"", "\"v3\""},
+        {"\"version\":1", "\"version\":2"},
+        {"parameter/model.gguf", "../model.gguf"},
+        {"resident-halves", "other"},
+        {"resident-full-k-i8-i32-bf16-column-scale-v1", "other"},
+        {"\"raw\"", "\"safetensors\""}}) {
+    std::string bad = file;
+    bad.replace(bad.find(change.first), change.first.size(), change.second);
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT, Parse(make(bad)));
+  }
 }
 
 }  // namespace

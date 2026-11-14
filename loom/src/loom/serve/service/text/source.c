@@ -356,11 +356,19 @@ iree_status_t loom_serve_text_source_compile_control(
       IREE_SVL("capture_epoch"),  IREE_SVL("request_defaults"),
       IREE_SVL("prepare_request")};
   const bool encodes = options->mode == LOOM_SERVE_TEXT_MODE_ENCODE;
+  const iree_string_view_t group_roots[] = {
+      IREE_SVL("text_prefill_group_plan_v1"),
+      IREE_SVL("text_encode_prefill_group_v1"),
+      IREE_SVL("text_publish_prefill_group_v1")};
+  const iree_string_view_list_t additional =
+      options->group_mode == LOOM_RUNTIME_GROUP_MODE_TWO_BANK
+          ? (iree_string_view_list_t){IREE_ARRAYSIZE(group_roots), group_roots}
+          : (iree_string_view_list_t){0};
   return loom_runtime_program_compile_service_cached(
       jit, source->environment, &options->sources, options->sources.control,
       encodes ? IREE_ARRAYSIZE(encoding_roots)
               : IREE_ARRAYSIZE(generation_roots),
-      encodes ? encoding_roots : generation_roots, (iree_string_view_list_t){0},
+      encodes ? encoding_roots : generation_roots, additional,
       source->host_allocator, &source->module);
 }
 

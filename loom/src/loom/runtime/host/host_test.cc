@@ -10,6 +10,7 @@
 #include <cstring>
 #include <mutex>
 #include <thread>
+#include <vector>
 
 #include "iree/base/internal/arena.h"
 #include "iree/base/threading/numa.h"
@@ -22,6 +23,51 @@ namespace {
 TEST(HostTest, NullLifetimeOperations) {
   loom_runtime_host_retain(nullptr);
   loom_runtime_host_release(nullptr);
+}
+
+TEST(HostTest, PlanRegistryRetainsContextsAndFreezesBeforeConcurrentLookup) {
+  loom_runtime_host_t* host = nullptr;
+  IREE_ASSERT_OK(
+      loom_runtime_host_create(1, nullptr, iree_allocator_system(), &host));
+  std::atomic<int> references{0};
+  auto provider = *loom_runtime_two_bank_plan_provider();
+  provider.self = &references;
+  provider.retain = [](void* p) { ++*static_cast<std::atomic<int>*>(p); };
+  provider.release = [](void* p) { --*static_cast<std::atomic<int>*>(p); };
+  IREE_ASSERT_OK(loom_runtime_host_register_plan_provider(
+      host, IREE_SV("custom"), &provider));
+  EXPECT_EQ(references.load(), 1);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_ALREADY_EXISTS,
+                        loom_runtime_host_register_plan_provider(
+                            host, IREE_SV("custom"), &provider));
+  std::vector<std::thread> readers;
+  std::atomic<int> successes{0};
+  for (unsigned i = 0; i < 8; ++i) {
+    readers.emplace_back([&] {
+      loom_runtime_plan_provider_v1_t selected = {};
+      auto status = loom_runtime_host_lookup_plan_provider(
+          host, IREE_SV("custom"), &selected);
+      if (iree_status_is_ok(status)) {
+        ++successes;
+        selected.release(selected.self);
+      }
+      iree_status_ignore(status);
+    });
+  }
+  for (auto& reader : readers) {
+    reader.join();
+  }
+  EXPECT_EQ(successes.load(), 8);
+  EXPECT_EQ(references.load(), 1);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
+                        loom_runtime_host_register_plan_provider(
+                            host, IREE_SV("late"), &provider));
+  loom_runtime_plan_provider_v1_t missing = {};
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_NOT_FOUND,
+                        loom_runtime_host_lookup_plan_provider(
+                            host, IREE_SV("missing"), &missing));
+  loom_runtime_host_release(host);
+  EXPECT_EQ(references.load(), 0);
 }
 
 TEST(HostTest, CompilerAdapterUsesApplicationExecutor) {

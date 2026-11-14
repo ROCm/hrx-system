@@ -25,6 +25,7 @@
 #include "iree/testing/status_matchers.h"
 #include "iree/testing/temp_file.h"
 #include "loom/runtime/telemetry/stream.h"
+#include "loom/runtime/testing/application.h"
 #include "loom/runtime/testing/stalled_stderr.h"
 #include "loom/serve/server/model_registration.h"
 #include "loom/serve/server/router.h"
@@ -65,6 +66,10 @@ class SourceTextServiceTest : public ::testing::Test {
 
   // Dedicated group suites select additional independent device owners.
   virtual iree_host_size_t DeviceCount() const { return 1; }
+
+  virtual loom_runtime_pool_backing_t PoolBacking() const {
+    return loom_runtime_test_application_options_default().backing;
+  }
 
   virtual loom_serve_http_server_options_t ServerOptions() const {
     return loom_serve_http_server_options_default();

@@ -8,6 +8,7 @@
 #define LOOM_SERVE_SERVER_CONFIGURATION_H_
 
 #include "loom/runtime/device/pool.h"
+#include "loom/runtime/execution/plan.h"
 #include "loom/runtime/program/sources.h"
 #include "loom/runtime/program/variant_pool.h"
 #include "loom/service/kind.h"
@@ -37,6 +38,8 @@ typedef struct loom_serve_finite_component_configuration_t {
 } loom_serve_finite_component_configuration_t;
 
 typedef struct loom_serve_text_configuration_t {
+  loom_runtime_group_mode_t group_mode;
+  iree_string_view_t plan_provider;
   // Owned checkpoint file path.
   iree_string_view_t weights;
   // Owned tokenizer JSON file path; empty for known-token sequence models.
@@ -131,6 +134,9 @@ typedef struct loom_serve_model_configuration_t {
   // Idle source-selected request executables for finite vector/image
   // deployments.
   loom_runtime_variant_cache_options_t specialization_cache;
+  // Startup-only migration choice; not an authored field or HTTP default.
+  // Cold card resolution preserves it until typed text registration.
+  bool legacy_two_bank;
   // Register metadata without preparing the model until admission opens.
   bool start_drained;
   // Only the member selected by kind is initialized and owned.

@@ -109,6 +109,46 @@ TEST_F(DeviceConfigurationTest, UriConvenienceCreatesOneExplicitPool) {
   loom_serve_device_configuration_deinitialize(&convenience);
 }
 
+TEST_F(DeviceConfigurationTest, UncachedExchangeIsExplicitAndStrictlyTyped) {
+  IREE_ASSERT_OK(ParsePool(R"("devices":["gpu"],"uncached":true)"));
+  EXPECT_TRUE(configuration_.pools[0].options.uncached);
+  IREE_ASSERT_OK(ParsePool(R"("devices":["gpu"],"uncached":false)"));
+  EXPECT_FALSE(configuration_.pools[0].options.uncached);
+  for (const auto* value : {"0", "null", "\"true\"", "[]", "{}"}) {
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_INVALID_ARGUMENT,
+        ParsePool(std::string(R"("devices":["gpu"],"uncached":)") + value));
+    ExpectEmpty();
+  }
+}
+
+TEST_F(DeviceConfigurationTest, LiveAccessCanSelectASubsetOfPoolDevices) {
+  const std::string prefix = R"({"devices":{"gpu":{"uri":"task"},
+    "npu":{"uri":"xdna://0"}},"pools":{"shared":{
+    "devices":["gpu","npu"],)";
+  IREE_ASSERT_OK(
+      Parse(prefix + R"("uncached":true,"uncached_devices":["gpu"]}}})"));
+  EXPECT_TRUE(configuration_.pools[0].options.uncached);
+  EXPECT_EQ(configuration_.pools[0].options.uncached_device_mask, 1u);
+  for (const char* fields :
+       {R"("uncached_devices":["gpu"])",
+        R"("uncached":false,"uncached_devices":["gpu"])",
+        R"("uncached":true,"uncached_devices":[])",
+        R"("uncached":true,"uncached_devices":["missing"])",
+        R"("uncached":true,"uncached_devices":["gpu","gpu"])",
+        R"("uncached":true,"uncached_devices":true)"}) {
+    SCOPED_TRACE(fields);
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                          Parse(prefix + fields + "}}}"));
+    ExpectEmpty();
+  }
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      Parse(R"({"devices":{"gpu":{"uri":"task"},"npu":{"uri":"task"}},
+        "pools":{"shared":{"devices":["gpu"],"uncached":true,
+        "uncached_devices":["npu"]}}})"));
+}
+
 TEST_F(DeviceConfigurationTest,
        WaitModeAppliesToEveryDeviceWithoutChangingUris) {
   IREE_ASSERT_OK(Parse(R"({

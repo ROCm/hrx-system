@@ -18,6 +18,14 @@ extern "C" {
 // group and allocation queue outlive the pool and all of its consumers.
 typedef struct loom_runtime_pool_t loom_runtime_pool_t;
 
+// True when the pool requests persistent host access for live exchange.
+bool loom_runtime_pool_is_uncached(const loom_runtime_pool_t* pool);
+
+// True when this family's qualified access requires uncached or host-coherent
+// memory. Other participants can use ordinary DMA with cache transitions.
+bool loom_runtime_pool_has_live_access(const loom_runtime_pool_t* pool,
+                                       const iree_hal_queue_family_t* family);
+
 typedef enum loom_runtime_pool_backing_e {
   // Ordinary fixed allocations, including device address sanitizer use.
   LOOM_RUNTIME_POOL_BACKING_FIXED = 0,
@@ -69,6 +77,12 @@ typedef struct loom_runtime_pool_options_t {
   iree_hal_asan_pool_options_t asan;
   // Required backing domain for both ordinary and elastic physical sources.
   loom_runtime_pool_placement_t placement;
+  // Require persistent public host maps and uncached/coherent access for the
+  // selected devices, qualified by HAL before allocating storage.
+  bool uncached;
+  // Devices requiring uncached/coherent access; zero applies to all members.
+  // Other members retain ordinary access and explicit cache transitions.
+  uint64_t uncached_device_mask;
 } loom_runtime_pool_options_t;
 
 // Qualifies the complete simultaneous access scope before publishing an owner.

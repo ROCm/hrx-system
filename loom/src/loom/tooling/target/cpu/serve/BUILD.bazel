@@ -1330,8 +1330,31 @@ loom_cc_test(
 )
 
 loom_cc_test(
-    name = "source_text_device_group_test",
+    name = "source_text_group_elastic_test",
     data = TEXT_SOURCES,
+    env = {
+        "LOOM_SERVE_TEST_MODEL_SOURCE": "$(rootpath //loom/src/loom/serve/fixture/text:prepare.loom)",
+    },
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/execute:x86_task_hal",
+    ]) + select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":test_compiler",
+        ":test_device",
+        "//loom/src/loom/serve/service/text:group_elastic_tests",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "source_text_device_group_test",
+    data = TEXT_SOURCES + [
+        "//loom/src/loom/serve/fixture/text:native.card.json",
+        "//loom/src/loom/serve/fixture/text:service.loom",
+    ],
     env = {
         "LOOM_SERVE_TEST_MODEL_SOURCE": "$(rootpath //loom/src/loom/serve/fixture/text:prepare.loom)",
     },
@@ -1655,7 +1678,7 @@ loom_cc_test(
     ],
     args = [
         "--weight_sources=$(rootpath //loom/src/loom/runtime/parameter/testdata/weights:stages.loom)",
-        "--gtest_filter=Streaming/*:Backing/WeightPackingTest.InvocationWorkingSet*:Pressure/*",
+        "--gtest_filter=Streaming/*:Backing/WeightPackingTest.InvocationWorkingSet*:Backing/WeightsTest.IndependentlyPackedRoots*:Pressure/*",
         "--executable_sources=$(rootpath //loom/src/loom/service/testdata/executables:prepare.loom)",
     ],
     data = [

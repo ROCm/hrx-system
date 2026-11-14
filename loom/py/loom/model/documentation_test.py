@@ -12,7 +12,13 @@ import pytest
 
 from loom.model import ManifestError, ModelCard
 from loom.model.documentation import main, render_markdown
-from loom.model.lock import FileIdentity, ModelLock, file_key, lock_files
+from loom.model.lock import (
+    DerivedIdentity,
+    FileIdentity,
+    ModelLock,
+    file_key,
+    lock_files,
+)
 
 
 def _card():
@@ -450,3 +456,66 @@ def test_original_voice_documentation_names_roles_formats_and_exact_origins():
         in rendered
     )
     assert '"content_type": "audio/wav"' in rendered
+
+
+def test_loader_derived_parameters_name_their_source_instead_of_a_link():
+    document = {
+        "schema_version": 2,
+        "model": {"id": "fixture/panels", "name": "Panels"},
+        "programs": {"p": {"inputs": ["code.loom"], "libraries": []}},
+        "services": {"chat": {"kind": "text", "version": 1}},
+        "variants": {
+            "gguf": {
+                "services": {
+                    "chat": {
+                        "programs": ["p"],
+                        "parameters": {
+                            "model": {"files": ["model.gguf"]},
+                            "npu": {
+                                "files": [
+                                    {
+                                        "path": "cache/"
+                                        + "d" * 64
+                                        + "/colscale_gu.f32",
+                                        "format": "raw",
+                                        "transform": {
+                                            "kind": "i8-panel",
+                                            "version": 1,
+                                            "source": "model.gguf",
+                                            "layout": "v2",
+                                            "cache": "cache",
+                                            "output": "colscale",
+                                            "kernel_version": "resident-full-k-i8-"
+                                            "i32-bf16-column-scale-v1",
+                                        },
+                                    }
+                                ]
+                            },
+                        },
+                    }
+                }
+            }
+        },
+    }
+    card = ModelCard(document)
+    lock = ModelLock(
+        ModelLock.snapshot(
+            {},
+            [FileIdentity("model.gguf", 4, "e" * 64)]
+            + [
+                DerivedIdentity(file.origin, file.transform)
+                for file in card.select().files.values()
+                if file.transform
+            ],
+            scope="assets",
+        )
+    )
+    text = render_markdown(
+        card, lock=lock, card_url="https://example.com/panels/model.json"
+    )
+    assert (
+        "Derived at load by the native runtime loader from <code>model.gguf</code>"
+        in text
+    )
+    assert "https://example.com/panels/cache/" not in text
+    assert "| derived at load | — |" in text

@@ -50,8 +50,14 @@ loom_cc_library(
 
 loom_cc_library(
     name = "execution",
-    srcs = ["execution.c"],
-    hdrs = ["execution.h"],
+    srcs = [
+        "execution.c",
+        "group.c",
+    ],
+    hdrs = [
+        "execution.h",
+        "group.h",
+    ],
     visibility = ["//visibility:public"],
     deps = [
         ":queues",
@@ -61,6 +67,14 @@ loom_cc_library(
         "//runtime/src/iree/base/threading",
         "//runtime/src/iree/hal",
     ],
+)
+
+loom_cc_library(
+    name = "execution_testing",
+    testonly = True,
+    hdrs = ["execution_testing.h"],
+    visibility = ["//visibility:public"],
+    deps = [":execution"],
 )
 
 loom_cc_library(
@@ -93,6 +107,7 @@ loom_cc_test(
     ]),
     deps = [
         ":execution",
+        ":execution_testing",
         ":queues",
         ":workspace",
         "//loom/src/loom/runtime/device",
@@ -134,6 +149,24 @@ loom_cc_library(
         "//runtime/src/iree/testing:gtest",
     ],
     alwayslink = True,
+)
+
+loom_cc_library(
+    name = "plan",
+    srcs = ["plan.c"],
+    hdrs = ["plan.h"],
+    visibility = ["//visibility:public"],
+    deps = ["//runtime/src/iree/base"],
+)
+
+loom_cc_test(
+    name = "plan_test",
+    srcs = ["plan_test.cc"],
+    deps = [
+        ":plan",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
 )
 
 loom_cc_library(

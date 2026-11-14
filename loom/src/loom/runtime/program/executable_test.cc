@@ -167,6 +167,126 @@ TEST_P(ExecutableTest, DirectInputsShareCodeAndPreserveLaunchGeometry) {
   CheckImageReuse(true);
 }
 
+TEST_P(ExecutableTest, GroupDirectDispatchMatchesOrdinaryDirectDispatch) {
+  const loomc_config_binding_t bindings[] = {
+      {loomc_make_cstring_view("increment.groups"),
+       loomc_make_cstring_view("2")},
+      {loomc_make_cstring_view("increment.groups"),
+       loomc_make_cstring_view("4")},
+  };
+  const loomc_config_options_t configs[] = {
+      {&bindings[0], 1, {}, LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED},
+      {&bindings[1], 1, {}, LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED},
+  };
+  loom_runtime_test_compilation_t jobs[2];
+  for (size_t i = 0; i < 2; ++i) {
+    jobs[i].jit = jit_;
+    jobs[i].direct_dispatch = true;
+    jobs[i].root = IREE_SV("increment_groups");
+    jobs[i].config = &configs[i];
+    jobs[i].Start(
+        loom_runtime_host_executor(loom_runtime_device_host(device_owner_)));
+  }
+  for (size_t i = 0; i < 2; ++i) {
+    loom_runtime_jit_stage_t* stage = nullptr;
+    auto status = jobs[i].Await(&stage);
+    if (iree_status_is_ok(status)) {
+      dispatches_[i] = loom_runtime_jit_stage_dispatch(stage);
+      ASSERT_NE(dispatches_[i], nullptr);
+      loom_runtime_dispatch_retain(dispatches_[i]);
+    }
+    loom_runtime_jit_stage_free(stage);
+    IREE_ASSERT_OK(status);
+  }
+  IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+      loom_runtime_pool_storage(storage_owner_),
+      iree_hal_make_pool_reservation_request(sizeof(input_), 0),
+      iree_infinite_timeout(), &buffer_));
+  const iree_hal_buffer_binding_t binding = {buffer_, 0, sizeof(input_)};
+  const std::array<int32_t, 8> expected = {114, 114, 107, 107,
+                                           100, 100, 100, 100};
+
+  // Ordinary direct dispatch, outside any group.
+  const iree_hal_transfer_operation_t upload = {
+      .type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
+      .upload = {input_.data(), buffer_, 0, sizeof(input_)},
+  };
+  uint64_t completion = 0;
+  IREE_ASSERT_OK(
+      loom_runtime_execution_transfer(execution_, 1, &upload, &completion));
+  for (size_t i = 0; i < 2; ++i) {
+    iree_hal_buffer_ref_t scratch;
+    IREE_ASSERT_OK(loom_runtime_dispatch_issue(
+        dispatches_[i], execution_, {1, &binding}, &scratch, &completion));
+  }
+  const iree_hal_transfer_operation_t download = {
+      .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
+      .download = {buffer_, 0, output_.data(), sizeof(output_)},
+  };
+  IREE_ASSERT_OK(
+      loom_runtime_execution_feedback(execution_, 1, &download, &completion));
+  IREE_ASSERT_OK(loom_runtime_execution_feedback_wait(execution_, completion));
+  EXPECT_EQ(output_, expected);
+
+  // The same launches as owned group nodes: upload, two direct dispatches and
+  // an in-order download, with copied binding refs and payload.
+  std::array<int32_t, 8> input = input_;
+  std::array<int32_t, 8> grouped = {};
+  loom_runtime_execution_group_t* group = nullptr;
+  IREE_ASSERT_OK(loom_runtime_execution_group_create(execution_, 4,
+                                                     host_allocator_, &group));
+  const loom_runtime_group_node_t first = {
+      .kind = LOOM_RUNTIME_GROUP_TRANSFER,
+      .transfer = {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
+                   .upload = {input.data(), buffer_, 0, sizeof(input)}}};
+  iree_status_t status = loom_runtime_execution_group_append(group, &first);
+  for (size_t i = 0; i < 2 && iree_status_is_ok(status); ++i) {
+    iree_hal_buffer_ref_t scratch;
+    const loom_runtime_group_node_t node = loom_runtime_dispatch_group_node(
+        dispatches_[i], {1, &binding}, &scratch);
+    EXPECT_EQ(node.kind, LOOM_RUNTIME_GROUP_DISPATCH);
+    EXPECT_EQ(node.refs.count, 1u);
+    status = loom_runtime_execution_group_append(group, &node);
+  }
+  const loom_runtime_group_node_t last = {
+      .kind = LOOM_RUNTIME_GROUP_TRANSFER,
+      .transfer = {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
+                   .download = {buffer_, 0, grouped.data(), sizeof(grouped)}}};
+  if (iree_status_is_ok(status)) {
+    status = loom_runtime_execution_group_append(group, &last);
+  }
+  input.fill(0);
+  loom_runtime_group_submission_t submission = {};
+  if (iree_status_is_ok(status)) {
+    status = loom_runtime_execution_group_submit(group, &submission);
+  }
+  EXPECT_EQ(submission.accepted_count, iree_status_is_ok(status) ? 4u : 0u);
+  if (iree_status_is_ok(status)) {
+    status =
+        loom_runtime_execution_wait(execution_, submission.frontier.values[0]);
+  }
+  loom_runtime_execution_group_retire(group);
+  if (iree_status_is_ok(status)) {
+    status = loom_runtime_execution_drain(execution_);
+  }
+  loom_runtime_execution_group_free(group);
+  IREE_ASSERT_OK(status);
+  EXPECT_EQ(grouped, expected);
+
+  // Ordinary direct dispatch remains usable after the group retires.
+  output_.fill(0);
+  IREE_ASSERT_OK(
+      loom_runtime_execution_transfer(execution_, 1, &upload, &completion));
+  iree_hal_buffer_ref_t scratch;
+  IREE_ASSERT_OK(loom_runtime_dispatch_issue(
+      dispatches_[1], execution_, {1, &binding}, &scratch, &completion));
+  IREE_ASSERT_OK(
+      loom_runtime_execution_feedback(execution_, 1, &download, &completion));
+  IREE_ASSERT_OK(loom_runtime_execution_feedback_wait(execution_, completion));
+  EXPECT_EQ(output_,
+            (std::array<int32_t, 8>{107, 107, 107, 107, 100, 100, 100, 100}));
+}
+
 TEST_P(ExecutableTest, FailedImageLoadsAreNotRetainedAndCanRetireCache) {
   auto* host = loom_runtime_device_host(device_owner_);
   iree_host_size_t provider_count = 0;

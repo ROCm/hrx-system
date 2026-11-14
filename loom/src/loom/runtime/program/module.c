@@ -10,6 +10,7 @@
 #include <stdlib.h>
 
 #include "iree/vm/reflection.h"
+#include "loom/runtime/execution/group.h"
 
 typedef struct loom_runtime_module_t {
   // Native module prefix owning all declaration storage below.
@@ -59,6 +60,7 @@ void loom_runtime_module_clear_stages(iree_vm_module_t* base) {
   for (iree_host_size_t i = 0; i < module->stage_count; ++i) {
     iree_hal_command_buffer_release(module->stages[i].command_buffer);
     loom_runtime_dispatch_release(module->stages[i].dispatch);
+    loom_runtime_execution_release(module->stages[i].execution);
   }
   iree_allocator_free(module->host_allocator, module->stages);
   module->stages = NULL;
@@ -135,7 +137,35 @@ static iree_status_t loom_runtime_module_execute(
   if (iree_status_is_ok(status)) {
     const iree_hal_buffer_binding_table_t table = {
         stage->binding_count + has_workspace, bindings};
-    if (stage->dispatch) {
+    if (stage->execution && stage->execution != module->execution) {
+      loom_runtime_execution_group_t* group = NULL;
+      status = loom_runtime_execution_group_create(
+          module->execution, 1, module->host_allocator, &group);
+      iree_hal_buffer_ref_t* refs =
+          (iree_hal_buffer_ref_t*)((uint8_t*)params->execution.process_storage +
+                                   module->descriptor.process_storage_size -
+                                   stage->binding_count * sizeof(*refs));
+      loom_runtime_group_node_t node = {
+          .kind = LOOM_RUNTIME_GROUP_EXECUTE,
+          .command_buffer = stage->command_buffer,
+          .bindings = table,
+      };
+      if (stage->dispatch && iree_status_is_ok(status)) {
+        node = loom_runtime_dispatch_group_node(stage->dispatch, table, refs);
+      }
+      if (iree_status_is_ok(status)) {
+        status = loom_runtime_execution_group_append_on(group, stage->execution,
+                                                        &node);
+      }
+      loom_runtime_group_submission_t submission = {0};
+      if (iree_status_is_ok(status)) {
+        status = loom_runtime_execution_group_submit(group, &submission);
+      }
+      if (iree_status_is_ok(status)) {
+        *out_value = submission.frontier.values[0];
+      }
+      loom_runtime_execution_group_free(group);
+    } else if (stage->dispatch) {
       iree_hal_buffer_ref_t* scratch =
           (iree_hal_buffer_ref_t*)((uint8_t*)params->execution.process_storage +
                                    module->descriptor.process_storage_size -
@@ -149,9 +179,12 @@ static iree_status_t loom_runtime_module_execute(
     }
   }
   if (workspace) {
-    status =
-        iree_status_join(status, loom_runtime_execution_dealloca(
-                                     module->execution, workspace, out_value));
+    if (iree_status_is_ok(status) || !stage->execution ||
+        stage->execution == module->execution) {
+      status = iree_status_join(
+          status, loom_runtime_execution_dealloca(module->execution, workspace,
+                                                  out_value));
+    }
     iree_hal_buffer_release(workspace);
   }
   return status;
@@ -318,6 +351,7 @@ iree_status_t loom_runtime_module_bind_stages(
       replacement[i] = stages[i];
       iree_hal_command_buffer_retain(stages[i].command_buffer);
       loom_runtime_dispatch_retain(stages[i].dispatch);
+      loom_runtime_execution_retain(stages[i].execution);
     }
     loom_runtime_module_clear_stages(base);
     module->stages = replacement;
@@ -389,6 +423,7 @@ iree_status_t loom_runtime_module_create(const iree_hal_vm_types_t* types,
     for (iree_host_size_t i = 0; i < options.stages.count; ++i) {
       iree_hal_command_buffer_retain(module->stages[i].command_buffer);
       loom_runtime_dispatch_retain(module->stages[i].dispatch);
+      loom_runtime_execution_retain(module->stages[i].execution);
     }
     module->stage_count = options.stages.count;
     status = iree_allocator_malloc(host_allocator, export_count * 16,

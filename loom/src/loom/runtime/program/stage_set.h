@@ -67,6 +67,18 @@ iree_status_t loom_runtime_stage_set_compile_catalog_async(
     loom_runtime_stage_set_completion_fn_t completion, void* user_data,
     iree_allocator_t host_allocator);
 
+// Compiles each declaration on its resolved device catalog. catalogs has one
+// non-NULL entry per preparation stage and is borrowed only during this call.
+// Each catalog retains its exact profile, artifact domain and executable
+// loader. Command roots are single-device compilation units. The completion
+// joins every accepted compilation and reports all distinct catalog evidence.
+iree_status_t loom_runtime_stage_set_compile_placed_async(
+    loom_runtime_jit_t* const* catalogs,
+    const loom_runtime_preparation_t* preparation,
+    loom_runtime_stage_set_layout_fn_t layout,
+    loom_runtime_stage_set_completion_fn_t completion, void* user_data,
+    iree_allocator_t host_allocator);
+
 void loom_runtime_stage_set_free(loom_runtime_stage_set_t* stages);
 
 #ifdef __cplusplus

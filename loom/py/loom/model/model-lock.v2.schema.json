@@ -31,20 +31,33 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["origin", "size", "sha256"],
+        "required": ["origin"],
         "properties": {
           "origin": {"$ref": "model-card.v1.schema.json#/$defs/fileOrigin"},
           "size": {"type": "integer", "minimum": 0, "maximum": 18446744073709551615},
           "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
           "resolved": {"$ref": "#/$defs/resolved"},
-          "transform": {"$ref": "model-card.v1.schema.json#/$defs/transform"}
+          "transform": {"$ref": "model-card.v2.schema.json#/$defs/transform"},
+          "derived": {"$ref": "#/$defs/derived"}
         },
-        "if": {"properties": {"origin": {"type": "object", "required": ["kind"], "properties": {"kind": {"const": "hf"}}}}},
-        "then": {"required": ["resolved"]},
-        "else": {"not": {"required": ["resolved"]}},
+        "allOf": [
+          {
+            "if": {"properties": {"origin": {"type": "object", "required": ["kind"], "properties": {"kind": {"const": "hf"}}}}},
+            "then": {"required": ["resolved"]},
+            "else": {"not": {"required": ["resolved"]}}
+          },
+          {
+            "if": {"required": ["transform"], "properties": {"transform": {"properties": {"kind": {"const": "i8-panel"}}}}},
+            "then": {
+              "required": ["transform"],
+              "dependentRequired": {"size": ["sha256"], "sha256": ["size"]}
+            },
+            "else": {"required": ["size", "sha256"], "not": {"required": ["derived"]}}
+          }
+        ],
         "additionalProperties": false
       },
-      "description": "One record per logical origin and optional transform. Aliased roots carry their repository resolution once. Updates replace the exact requested output set."
+      "description": "One record per logical origin and optional transform. Aliased roots carry their repository resolution once. Updates replace the exact requested output set. A loader-derived output (transform kind i8-panel) is never acquired: its origin is its installation path, size and SHA-256 are optional publisher observations, and derived names its source origin and the loader's recipe identifiers."
     }
   },
   "additionalProperties": false,
@@ -53,6 +66,16 @@
       "type": "object",
       "required": ["revision"],
       "properties": {"revision": {"type": "string", "pattern": "^[0-9a-f]{40}$"}},
+      "additionalProperties": false
+    },
+    "derived": {
+      "type": "object",
+      "required": ["source", "layout_version", "recipe_version"],
+      "properties": {
+        "source": {"$ref": "model-card.v1.schema.json#/$defs/fileOrigin"},
+        "layout_version": {"type": "string", "minLength": 1},
+        "recipe_version": {"type": "string", "minLength": 1}
+      },
       "additionalProperties": false
     }
   }

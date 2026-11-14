@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from threading import Event
 
+from .derived import derived_files, is_loader_derived, parameter_label
 from .manifest import (
     ManifestError,
     ModelFile,
@@ -123,6 +124,64 @@ class FileIdentity:
         return result
 
 
+@dataclass(frozen=True)
+class DerivedIdentity:
+    """A loader-derived output: committed recipe and source, optional bytes."""
+
+    # Destination path; acquisition never transfers derived bytes.
+    origin: str | dict
+    # Card transform implemented by the native runtime loader.
+    transform: dict
+    # Source origin and loader recipe identifiers; None in records without them.
+    derived: dict | None = None
+    # Expected payload bytes when a publisher observed them, otherwise None.
+    size: int | None = None
+    # Lowercase SHA-256 of those payload bytes, present exactly with size.
+    sha256: str | None = None
+
+    def document(self) -> dict:
+        result = {"origin": copy.deepcopy(self.origin)}
+        if self.size is not None:
+            result["size"] = self.size
+            result["sha256"] = self.sha256
+        result["transform"] = copy.deepcopy(self.transform)
+        if self.derived is not None:
+            result["derived"] = copy.deepcopy(self.derived)
+        return result
+
+
+def _byte_identity(record: dict, path: str) -> tuple[int, str]:
+    if type(record["size"]) is not int or not 0 <= record["size"] < 2**64:
+        raise ManifestError(f"{path}.size: expected an unsigned 64-bit byte count")
+    digest = _string(record["sha256"], path + ".sha256")
+    if not re.fullmatch(r"[0-9a-f]{64}", digest):
+        raise ManifestError(f"{path}.sha256: expected a lowercase SHA-256 digest")
+    return record["size"], digest
+
+
+def _derived_identity(record: dict, origins: dict, path: str) -> DerivedIdentity:
+    _object(record, path, ("origin", "transform"), ("size", "sha256", "derived"))
+    transform = _transform(record["transform"], path + ".transform")
+    _origin(record["origin"], origins, path + ".origin")
+    size = digest = None
+    if "size" in record or "sha256" in record:
+        _object(record, path, ("origin", "transform", "size", "sha256"), ("derived",))
+        size, digest = _byte_identity(record, path)
+    derived = None
+    if "derived" in record:
+        derived = _object(
+            record["derived"],
+            path + ".derived",
+            ("source", "layout_version", "recipe_version"),
+        )
+        _origin(derived["source"], origins, path + ".derived.source")
+        for key in ("layout_version", "recipe_version"):
+            _string(derived[key], f"{path}.derived.{key}")
+    return DerivedIdentity(
+        record["origin"], transform, copy.deepcopy(derived), size, digest
+    )
+
+
 class ModelLock:
     """Explicit asset or complete coverage; selection never expands the lock."""
 
@@ -165,9 +224,16 @@ class ModelLock:
                 )
         if not isinstance(doc["files"], list):
             raise ManifestError("lock.files: expected an array")
-        self.files: dict[str, FileIdentity] = {}
+        self.files: dict[str, FileIdentity | DerivedIdentity] = {}
         for index, record in enumerate(doc["files"]):
             path = f"lock.files[{index}]"
+            if isinstance(record, dict) and is_loader_derived(record.get("transform")):
+                identity = _derived_identity(record, requested_origins, path)
+                key = file_key(identity.origin, identity.transform)
+                if key in self.files:
+                    raise ManifestError(f"{path}: duplicate logical output")
+                self.files[key] = identity
+                continue
             _object(
                 record, path, ("origin", "size", "sha256"), ("resolved", "transform")
             )
@@ -177,15 +243,7 @@ class ModelLock:
                 else None
             )
             _origin(record["origin"], requested_origins, path + ".origin")
-            if type(record["size"]) is not int or not 0 <= record["size"] < 2**64:
-                raise ManifestError(
-                    f"{path}.size: expected an unsigned 64-bit byte count"
-                )
-            digest = _string(record["sha256"], path + ".sha256")
-            if not re.fullmatch(r"[0-9a-f]{64}", digest):
-                raise ManifestError(
-                    f"{path}.sha256: expected a lowercase SHA-256 digest"
-                )
+            _, digest = _byte_identity(record, path)
             repository_file = (
                 isinstance(record["origin"], dict)
                 and record["origin"].get("kind") == "hf"
@@ -213,11 +271,29 @@ class ModelLock:
     def parse(cls, source: str) -> ModelLock:
         return cls(parse_json(source))
 
-    def cover(self, selection: Selection) -> dict[str, FileIdentity]:
-        """Checks complete coverage within scope before reading source payloads."""
+    def cover(self, selection: Selection) -> dict[str, FileIdentity | DerivedIdentity]:
+        """Checks complete coverage within scope before reading source payloads.
+
+        A loader-derived output is covered by its recipe record. Its source must
+        be committed too, because the loader keys its cache by the source bytes.
+        """
         roots = selection.document.get("origins", {})
+        files = lock_files(selection, self.scope)
+        derived = {
+            name: output
+            for name, output in derived_files(selection).items()
+            if name in files
+        }
+        for name, output in derived.items():
+            source = selection.files[output.source]
+            if file_key(source.origin, source.transform) not in self.files:
+                raise ManifestError(
+                    f"lock does not cover {parameter_label(selection, output.source)}, "
+                    f"the source the native loader derives {name!r} from; "
+                    "use --update-lock or --no-lock"
+                )
         covered = {}
-        for name, file in lock_files(selection, self.scope).items():
+        for name, file in files.items():
             if isinstance(file.origin, str) and file.origin.startswith("@"):
                 alias = file.origin[1:].split("/", 1)[0]
                 if (
@@ -233,12 +309,23 @@ class ModelLock:
                 raise ManifestError(
                     f"lock does not cover {name!r}; use --update-lock or --no-lock"
                 )
+            if name in derived:
+                expected = derived[name].facts()
+                if identity.derived is not None and identity.derived != expected:
+                    raise ManifestError(
+                        f"lock records derivation {identity.derived} for {name!r}, "
+                        f"but the native loader derives {expected}; "
+                        "use --update-lock"
+                    )
             covered[name] = identity
         return covered
 
     @staticmethod
     def snapshot(
-        origins: dict, identities: list[FileIdentity], *, scope: str = "all"
+        origins: dict,
+        identities: list[FileIdentity | DerivedIdentity],
+        *,
+        scope: str = "all",
     ) -> dict:
         """Writes exactly this verified set, with no historical accumulation."""
         if scope not in ("assets", "all"):
@@ -252,8 +339,12 @@ class ModelLock:
                     "selected sources have conflicting content identities"
                 )
             files[key] = identity
-            if isinstance(identity.origin, str) and identity.origin.startswith("@"):
-                used_origins.add(identity.origin[1:].split("/", 1)[0])
+            references = [identity.origin]
+            if isinstance(identity, DerivedIdentity) and identity.derived is not None:
+                references.append(identity.derived["source"])
+            for origin in references:
+                if isinstance(origin, str) and origin.startswith("@"):
+                    used_origins.add(origin[1:].split("/", 1)[0])
         return {
             "schema_version": 2,
             "scope": scope,
