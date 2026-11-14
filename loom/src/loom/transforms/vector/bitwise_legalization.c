@@ -235,6 +235,15 @@ iree_status_t loom_vector_legalize_rotation(
   return iree_ok_status();
 }
 
+bool loom_vector_match_predicate_select(
+    const loom_target_legalizer_entry_t* entry,
+    const loom_target_legalization_context_t* context, const loom_op_t* op) {
+  (void)entry;
+  return loom_type_element_type(loom_module_value_type(
+             context->module, loom_vector_select_result(op))) ==
+         LOOM_SCALAR_TYPE_I1;
+}
+
 iree_status_t loom_vector_legalize_predicate_select(
     const loom_target_legalizer_entry_t* entry,
     loom_target_legalization_context_t* context, loom_op_t* op,
@@ -245,9 +254,6 @@ iree_status_t loom_vector_legalize_predicate_select(
   };
   const loom_type_t type =
       loom_module_value_type(context->module, loom_vector_select_result(op));
-  if (loom_type_element_type(type) != LOOM_SCALAR_TYPE_I1) {
-    return iree_ok_status();
-  }
   loom_rewriter_t* rewriter = context->rewriter;
   loom_builder_t* builder = &rewriter->builder;
   loom_builder_set_before(builder, op);

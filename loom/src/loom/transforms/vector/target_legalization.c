@@ -2078,6 +2078,7 @@ static const loom_target_legalizer_rule_t kVectorLegalizerRules[] = {
     {
         .root_kind = LOOM_OP_VECTOR_SELECT,
         .flags = LOOM_TARGET_LEGALIZER_ENTRY_FLAG_REQUIRE_CONTRACT_REJECTION,
+        .match = loom_vector_match_predicate_select,
         .legalize = loom_vector_legalize_predicate_select,
     },
     {
