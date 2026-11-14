@@ -14,7 +14,22 @@ package(
 
 loom_check_test_suite(
     name = "compiler_test",
-    srcs = ["automatic_destruction.cxx-test"],
+    srcs = [
+        "automatic_destruction.cxx-test",
+        "object_identity.cxx-test",
+        "object_identity_invalid.cxx-test",
+    ],
+    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
+)
+
+loom_check_test(
+    name = "object_identity_export_test",
+    src = "object_identity_export.cxx-test",
+    data = ["//loom/py/loom/tools:loom-export-cxx"],
+    env = {
+        "LOOM_EXPORT_CXX": "$(rootpath //loom/py/loom/tools:loom-export-cxx)",
+    },
+    tags = ["skip-bazel_to_cmake"],
     target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
 )
 

@@ -1018,7 +1018,9 @@ void Initialization::object(StorageProjection destination,
     // A same-type prvalue constructs this destination directly. Evaluating it
     // as a detached value first would hide already initialized subobjects from
     // later clauses that name the destination.
-    auto* clause = source.singleExpression();
+    // The converted clause owns its result object. singleExpression() strips
+    // implicit conversions, including user-defined conversion calls.
+    auto* clause = source.clause();
     if (clause && clause->valueCategory == cxx::ValueCategory::kPrValue &&
         types_.unqualified(clause->type) == types_.unqualified(type)) {
       if (auto* nested = cxx::ast_cast<cxx::NestedExpressionAST>(clause)) {
@@ -1035,6 +1037,9 @@ void Initialization::object(StorageProjection destination,
         evaluation_.effect(binary->leftExpression);
         object(destination, type, binary->rightExpression, constructor, owner,
                retained);
+        return;
+      }
+      if (evaluation_.call_result(destination, clause)) {
         return;
       }
       cxx::List<cxx::ExpressionAST*>* arguments = nullptr;

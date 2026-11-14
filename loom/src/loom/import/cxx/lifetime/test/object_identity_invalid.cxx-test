@@ -1,0 +1,30 @@
+// RUN: verify
+// Exported object signatures cannot depend on a private source call graph.
+void observe(const void*);
+struct Identity { unsigned value; ~Identity() { observe(&value); } };
+// ERROR@+1: LOWERING/059 "identity-sensitive object signatures require an internal ordinary function definition"
+Identity exported_result(unsigned value) { return {value}; }
+
+// ====
+void observe(const void*);
+struct Identity { unsigned value; ~Identity() { observe(&value); } };
+// ERROR@+1: LOWERING/059 "identity-sensitive object signatures require an internal ordinary function definition"
+unsigned exported_parameter(Identity object) { return object.value; }
+
+// ====
+// A predicate cannot read a mutable object through its transport pointer.
+#include <loomcxx/predicate.h>
+void observe(const void*);
+struct Identity { unsigned value; ~Identity() { observe(&value); } };
+static unsigned inspect(Identity object)
+    // ERROR@+1: LOWERING/059 "callable predicates cannot select a value stored inside an identity-sensitive object"
+    [[loom::where(loom::predicate::gt(object.value, 0u))]] { return object.value; }
+unsigned entry(unsigned value) { return inspect(Identity{value}); }
+
+// ====
+struct Identity { unsigned value; ~Identity() {} };
+Identity external(unsigned);
+unsigned entry(unsigned value) {
+  // ERROR@+1: LOWERING/059 "nontrivial object transport requires a source function definition"
+  return external(value).value;
+}

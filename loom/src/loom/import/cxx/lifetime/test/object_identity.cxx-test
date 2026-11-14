@@ -1,0 +1,407 @@
+// RUN: pass canonicalize,cse,dce
+// The caller owns the return destination; both forwarding calls construct the
+// same object, and only its final lexical owner destroys it.
+struct Identity {
+  unsigned value;
+  Identity(unsigned input, unsigned*& observed) : value(input) { observed = &value; }
+  ~Identity() { value = 0; }
+};
+[[loom::noinline]] static Identity make(unsigned value, unsigned*& observed) { return Identity(value, observed); }
+[[loom::noinline]] static Identity forward(unsigned value, unsigned*& observed) { return make(value, observed); }
+bool returned_identity(unsigned value) {
+  unsigned* observed = nullptr;
+  Identity object = forward(value, observed);
+  return observed == &object.value;
+}
+// ----
+func.def public @returned_identity(%value: i32) -> (i1) {
+  %4 = index.constant 4 : offset
+  %object_storage = buffer.alloca<private> align(4) %4 : buffer
+  %object_storage_byte_offset = index.constant 0 : offset
+  %observed, %observed_byte_offset = func.call @forward(%object_storage, %object_storage_byte_offset, %value) : (buffer, offset, i32) -> (buffer, offset)
+  %12 = buffer.compare.address eq, %observed[%observed_byte_offset], %object_storage[%object_storage_byte_offset]
+  func.call @Identity___Identity_storage(%object_storage, %object_storage_byte_offset) : (buffer, offset)
+  func.return %12 : i1
+}
+
+func.def noinline @forward(%result: buffer, %result_byte_offset: offset, %value: i32) -> (buffer, offset) {
+  %observed, %observed_byte_offset = func.call @make(%result, %result_byte_offset, %value) : (buffer, offset, i32) -> (buffer, offset)
+  func.return %observed, %observed_byte_offset : buffer, offset
+}
+
+func.def inline @Identity___Identity_storage(%this: buffer, %this_byte_offset: offset) {
+  %22 = scalar.constant 0 : i32
+  %25 = buffer.view %this[%this_byte_offset] : buffer -> view<1xi32>
+  view.store<root_in_bounds> %22, %25[0] : i32, view<1xi32>
+  func.return
+}
+
+func.def noinline @make(%result: buffer, %result_byte_offset: offset, %value: i32) -> (buffer, offset) {
+  %observed, %observed_byte_offset = func.call @Identity__Identity_storage(%result, %result_byte_offset, %value) : (buffer, offset, i32) -> (buffer, offset)
+  func.return %observed, %observed_byte_offset : buffer, offset
+}
+
+func.def inline @Identity__Identity_storage(%this: buffer, %this_byte_offset: offset, %input: i32) -> (buffer, offset) {
+  %40 = buffer.view %this[%this_byte_offset] : buffer -> view<1xi32>
+  view.store<root_in_bounds> %input, %40[0] : i32, view<1xi32>
+  func.return %this, %this_byte_offset : buffer, offset
+}
+
+// ====
+// A prvalue argument is constructed by the caller and destroyed by the callee.
+// Ordinary scalar reference writeback remains independent of object ownership.
+struct Identity {
+  unsigned value;
+  Identity(unsigned input, unsigned*& observed) : value(input) { observed = &value; }
+  ~Identity() { value = 0; }
+};
+[[loom::noinline]] static bool consume(Identity object, unsigned*& observed, unsigned& count) {
+  ++count;
+  return observed == &object.value;
+}
+bool parameter_identity(unsigned value) {
+  unsigned* observed = nullptr;
+  unsigned count = 0;
+  bool same = consume(Identity(value, observed), observed, count);
+  return same && count == 1;
+}
+// ----
+func.def public @parameter_identity(%value: i32) -> (i1) {
+  %count$4 = scalar.constant 0 : i32
+  %5 = index.constant 4 : offset
+  %6 = buffer.alloca<private> align(4) %5 : buffer
+  %7 = index.constant 0 : offset
+  %observed, %observed_byte_offset = func.call @Identity__Identity_storage(%6, %7, %value) : (buffer, offset, i32) -> (buffer, offset)
+  %same, %count$12 = func.call @consume(%6, %7, %observed, %observed_byte_offset, %count$4) : (buffer, offset, buffer, offset, i32) -> (i1, i32)
+  %14 = scalar.constant 1 : i32
+  %15 = scalar.cmpi eq, %count$12, %14 : i32
+  %45 = scalar.constant false : i1
+  %46 = scf.select %same, %15, %45 : i1
+  func.return %46 : i1
+}
+
+func.def noinline @consume(%object: buffer, %object_byte_offset: offset, %observed: buffer, %observed_byte_offset: offset, %count$20: i32) -> (i1, i32) {
+  %23 = scalar.constant 1 : i32
+  %count$24 = scalar.addi %count$20, %23 : i32
+  %27 = buffer.compare.address eq, %observed[%observed_byte_offset], %object[%object_byte_offset]
+  func.call @Identity___Identity_storage(%object, %object_byte_offset) : (buffer, offset)
+  func.return %27, %count$24 : i1, i32
+}
+
+func.def inline @Identity__Identity_storage(%this: buffer, %this_byte_offset: offset, %input: i32) -> (buffer, offset) {
+  %35 = buffer.view %this[%this_byte_offset] : buffer -> view<1xi32>
+  view.store<root_in_bounds> %input, %35[0] : i32, view<1xi32>
+  func.return %this, %this_byte_offset : buffer, offset
+}
+
+func.def inline @Identity___Identity_storage(%this: buffer, %this_byte_offset: offset) {
+  %40 = scalar.constant 0 : i32
+  %43 = buffer.view %this[%this_byte_offset] : buffer -> view<1xi32>
+  view.store<root_in_bounds> %40, %43[0] : i32, view<1xi32>
+  func.return
+}
+
+// ====
+// A conditional and an aggregate's nested member construct into the selected
+// complete destination rather than copying a branch-local result object.
+struct Identity {
+  unsigned value;
+  Identity(unsigned input, unsigned*& observed) : value(input) { observed = &value; }
+  ~Identity() { value = 0; }
+};
+struct Outer { Identity inner; unsigned tail; };
+[[loom::noinline]] static Identity make(unsigned value, unsigned*& observed) { return Identity(value, observed); }
+static Outer choose(bool condition, unsigned value, unsigned*& observed) {
+  return {condition ? make(value, observed) : make(value + 1, observed), 3};
+}
+bool nested_identity(bool condition, unsigned value) {
+  unsigned* observed = nullptr;
+  Outer object = choose(condition, value, observed);
+  return observed == &object.inner.value;
+}
+// ----
+func.def public @nested_identity(%condition: i1, %value: i32) -> (i1) {
+  %5 = index.constant 8 : offset
+  %object_storage = buffer.alloca<private> align(4) %5 : buffer
+  %object_storage_byte_offset = index.constant 0 : offset
+  %observed, %observed_byte_offset = func.call @choose(%object_storage, %object_storage_byte_offset, %condition, %value) : (buffer, offset, i1, i32) -> (buffer, offset)
+  %15 = buffer.compare.address eq, %observed[%observed_byte_offset], %object_storage[%object_storage_byte_offset]
+  func.call @Outer___Outer_storage(%object_storage, %object_storage_byte_offset) : (buffer, offset)
+  func.return %15 : i1
+}
+
+func.def @choose(%result: buffer, %result_byte_offset: offset, %condition: i1, %value: i32) -> (buffer, offset) {
+  %observed, %observed_byte_offset = scf.if %condition -> (buffer, offset) {
+    %observed, %observed_byte_offset = func.call @make(%result, %result_byte_offset, %value) : (buffer, offset, i32) -> (buffer, offset)
+    scf.yield %observed, %observed_byte_offset : buffer, offset
+  } else {
+    %28 = scalar.constant 1 : i32
+    %29 = scalar.addi %value, %28 : i32
+    %observed, %observed_byte_offset = func.call @make(%result, %result_byte_offset, %29) : (buffer, offset, i32) -> (buffer, offset)
+    scf.yield %observed, %observed_byte_offset : buffer, offset
+  }
+  %32 = index.constant 4 : offset
+  %33 = index.add %result_byte_offset, %32 : offset
+  %34 = scalar.constant 3 : i32
+  %35 = buffer.view %result[%33] : buffer -> view<1xi32>
+  view.store<root_in_bounds> %34, %35[0] : i32, view<1xi32>
+  func.return %observed, %observed_byte_offset : buffer, offset
+}
+
+func.def inline @Outer___Outer_storage(%this: buffer, %this_byte_offset: offset) {
+  func.call @Identity___Identity_storage(%this, %this_byte_offset) : (buffer, offset)
+  func.return
+}
+
+func.def noinline @make(%result: buffer, %result_byte_offset: offset, %value: i32) -> (buffer, offset) {
+  %observed, %observed_byte_offset = func.call @Identity__Identity_storage(%result, %result_byte_offset, %value) : (buffer, offset, i32) -> (buffer, offset)
+  func.return %observed, %observed_byte_offset : buffer, offset
+}
+
+func.def inline @Identity___Identity_storage(%this: buffer, %this_byte_offset: offset) {
+  %49 = scalar.constant 0 : i32
+  %52 = buffer.view %this[%this_byte_offset] : buffer -> view<1xi32>
+  view.store<root_in_bounds> %49, %52[0] : i32, view<1xi32>
+  func.return
+}
+
+func.def inline @Identity__Identity_storage(%this: buffer, %this_byte_offset: offset, %input: i32) -> (buffer, offset) {
+  %60 = buffer.view %this[%this_byte_offset] : buffer -> view<1xi32>
+  view.store<root_in_bounds> %input, %60[0] : i32, view<1xi32>
+  func.return %this, %this_byte_offset : buffer, offset
+}
+
+// ====
+// A destructor can be the first observer of object identity. Each temporary
+// cleanup receives its own construction destination, including discarded ones.
+void observe(const void* object);
+struct Identity {
+  unsigned value;
+  ~Identity() { observe(&value); }
+};
+[[loom::noinline]] static Identity make(unsigned value) { return {value}; }
+void discarded_identity(unsigned value) { make(value); make(value + 1); }
+// ----
+func.def public @discarded_identity(%value: i32) {
+  %1 = index.constant 4 : offset
+  %2 = buffer.alloca<private> align(4) %1 : buffer
+  %3 = index.constant 0 : offset
+  func.call @make(%2, %3, %value) : (buffer, offset, i32)
+  func.call @Identity___Identity_storage(%2, %3) : (buffer, offset)
+  %6 = buffer.alloca<private> align(4) %1 : buffer
+  %9 = scalar.constant 1 : i32
+  %10 = scalar.addi %value, %9 : i32
+  func.call @make(%6, %3, %10) : (buffer, offset, i32)
+  func.call @Identity___Identity_storage(%6, %3) : (buffer, offset)
+  func.return
+}
+
+func.def noinline @make(%result: buffer, %result_byte_offset: offset, %value: i32) {
+  %16 = buffer.view %result[%result_byte_offset] : buffer -> view<1xi32>
+  view.store<root_in_bounds> %value, %16[0] : i32, view<1xi32>
+  func.return
+}
+
+func.def inline @Identity___Identity_storage(%this: buffer, %this_byte_offset: offset) {
+  func.call @observe(%this, %this_byte_offset) : (buffer, offset)
+  func.return
+}
+
+func.decl @observe(%21: buffer, %22: offset)
+
+// ====
+// Nontrivial lifetime alone does not force storage or a destination parameter.
+struct Value { unsigned value; ~Value() {} };
+[[loom::noinline]] static Value make(unsigned input) { return {input}; }
+unsigned value_only(unsigned input) { return make(input).value; }
+// ----
+func.def public @value_only(%input: i32) -> (i32) {
+  %2 = func.call pure @make(%input) : (i32) -> (i32)
+  func.return %2 : i32
+}
+
+func.def noinline @make(%input: i32) -> (i32) {
+  func.return %input : i32
+}
+
+func.def inline @Value___Value_value() {
+  func.return
+}
+
+// ====
+// Member, conversion, and overloaded-subscript results use the same destination
+// contract even though their implicit receiver precedes explicit arguments.
+void observe(const void*);
+struct Identity {
+  unsigned value;
+  ~Identity() { observe(&value); }
+};
+struct Factory {
+  unsigned value;
+  [[loom::noinline]] Identity operator[](unsigned input) const { Identity result{value + input}; return result; }
+  [[loom::noinline]] operator Identity() const { return {value}; }
+};
+static const unsigned* address(const Identity& value) { return &value.value; }
+bool overloaded_identity(unsigned input) {
+  Factory factory{input};
+  const Identity& first = factory[3];
+  const Identity& second = factory;
+  return address(first) == &first.value && address(second) == &second.value;
+}
+// ----
+func.def public @overloaded_identity(%input: i32) -> (i1) {
+  %2 = index.constant 4 : offset
+  %3 = buffer.alloca<private> align(4) %2 : buffer
+  %4 = index.constant 0 : offset
+  %6 = scalar.constant 3 : i32
+  func.call @Factory__operator_subscript_value(%3, %4, %input, %6) : (buffer, offset, i32, i32)
+  %8 = buffer.alloca<private> align(4) %2 : buffer
+  func.call @Factory__operator___Identity_value(%8, %4, %input) : (buffer, offset, i32)
+  %11, %12 = func.call pure @address(%3, %4) : (buffer, offset) -> (buffer, offset)
+  %15 = buffer.compare.address eq, %11[%12], %3[%4]
+  %16 = scf.if %15 -> (i1) {
+    %17, %18 = func.call pure @address(%8, %4) : (buffer, offset) -> (buffer, offset)
+    %21 = buffer.compare.address eq, %17[%18], %8[%4]
+    scf.yield %21 : i1
+  } else {
+    %62 = scalar.constant false : i1
+    scf.yield %62 : i1
+  }
+  func.call @Identity___Identity_storage(%8, %4) : (buffer, offset)
+  func.call @Identity___Identity_storage(%3, %4) : (buffer, offset)
+  func.return %16 : i1
+}
+
+func.def noinline @Factory__operator_subscript_value(%result: buffer, %result_byte_offset: offset, %this_value: i32, %input: i32) {
+  %26 = index.constant 4 : offset
+  %result_storage = buffer.alloca<private> align(4) %26 : buffer
+  %result_storage_byte_offset = index.constant 0 : offset
+  %32 = scalar.addi %this_value, %input : i32
+  %34 = buffer.view %result_storage[%result_storage_byte_offset] : buffer -> view<1xi32>
+  view.store %32, %34[0] : i32, view<1xi32>
+  %result_value = view.load %34[0] : view<1xi32> -> i32
+  %42 = buffer.view %result[%result_byte_offset] : buffer -> view<1xi32>
+  view.store<root_in_bounds> %result_value, %42[0] : i32, view<1xi32>
+  func.call @Identity___Identity_storage(%result_storage, %result_storage_byte_offset) : (buffer, offset)
+  func.return
+}
+
+func.def noinline @Factory__operator___Identity_value(%result: buffer, %result_byte_offset: offset, %this_value: i32) {
+  %48 = buffer.view %result[%result_byte_offset] : buffer -> view<1xi32>
+  view.store<root_in_bounds> %this_value, %48[0] : i32, view<1xi32>
+  func.return
+}
+
+func.def @address(%value: buffer, %value_byte_offset: offset) -> (buffer, offset) {
+  func.return %value, %value_byte_offset : buffer, offset
+}
+
+func.def inline @Identity___Identity_storage(%this: buffer, %this_byte_offset: offset) {
+  func.call @observe(%this, %this_byte_offset) : (buffer, offset)
+  func.return
+}
+
+func.decl @observe(%59: buffer, %60: offset)
+
+// ====
+// Destination transport leaves scalar predicates at their source positions.
+#include <loomcxx/predicate.h>
+struct Identity {
+  unsigned value;
+  ~Identity() { value = 0; }
+};
+static Identity make(unsigned input) [[loom::where(loom::predicate::gt(input, 0u))]] { return {input}; }
+static const unsigned* address(const Identity& value) { return &value.value; }
+unsigned constrained(unsigned input) {
+  Identity object = make(input);
+  return *address(object);
+}
+// ----
+func.def public @constrained(%input: i32) -> (i32) {
+  %2 = index.constant 4 : offset
+  %object_storage = buffer.alloca<private> align(4) %2 : buffer
+  %object_storage_byte_offset = index.constant 0 : offset
+  func.call @make(%object_storage, %object_storage_byte_offset, %input) : (buffer, offset, i32)
+  %6, %7 = func.call pure @address(%object_storage, %object_storage_byte_offset) : (buffer, offset) -> (buffer, offset)
+  %8 = buffer.view %6[%7] : buffer -> view<1xi32>
+  %9 = view.load<root_in_bounds> %8[0] : view<1xi32> -> i32
+  func.call @Identity___Identity_storage(%object_storage, %object_storage_byte_offset) : (buffer, offset)
+  func.return %9 : i32
+}
+
+func.def @make(%result: buffer, %result_byte_offset: offset, %input: i32) where [gt(%input, 0)] {
+  %15 = buffer.view %result[%result_byte_offset] : buffer -> view<1xi32>
+  view.store<root_in_bounds> %input, %15[0] : i32, view<1xi32>
+  func.return
+}
+
+func.def @address(%value: buffer, %value_byte_offset: offset) -> (buffer, offset) {
+  func.return %value, %value_byte_offset : buffer, offset
+}
+
+func.def inline @Identity___Identity_storage(%this: buffer, %this_byte_offset: offset) {
+  %24 = scalar.constant 0 : i32
+  %27 = buffer.view %this[%this_byte_offset] : buffer -> view<1xi32>
+  view.store<root_in_bounds> %24, %27[0] : i32, view<1xi32>
+  func.return
+}
+
+// ====
+// An lvalue argument performs its actual copy construction in parameter
+// storage. Its source object and the owned parameter are destroyed separately.
+void copied(const void* source, const void* destination);
+void destroyed(const void* object);
+struct Identity {
+  unsigned value;
+  Identity(unsigned input) : value(input) {}
+  Identity(const Identity& other) : value(other.value) { copied(&other.value, this); }
+  ~Identity() { destroyed(this); }
+};
+[[loom::noinline]] static unsigned consume(Identity object) { return object.value; }
+unsigned copy_parameter(unsigned input) {
+  Identity original(input);
+  return consume(original);
+}
+// ----
+func.def public @copy_parameter(%input: i32) -> (i32) {
+  %2 = index.constant 4 : offset
+  %original_storage = buffer.alloca<private> align(4) %2 : buffer
+  %original_storage_byte_offset = index.constant 0 : offset
+  func.call @Identity__Identity_storage(%original_storage, %original_storage_byte_offset, %input) : (buffer, offset, i32)
+  %7 = buffer.alloca<private> align(4) %2 : buffer
+  func.call @Identity__Identity_storage_1(%7, %original_storage_byte_offset, %original_storage, %original_storage_byte_offset) : (buffer, offset, buffer, offset)
+  %10 = func.call @consume(%7, %original_storage_byte_offset) : (buffer, offset) -> (i32)
+  func.call @Identity___Identity_storage(%original_storage, %original_storage_byte_offset) : (buffer, offset)
+  func.return %10 : i32
+}
+
+func.def inline @Identity__Identity_storage(%this: buffer, %this_byte_offset: offset, %input: i32) {
+  %16 = buffer.view %this[%this_byte_offset] : buffer -> view<1xi32>
+  view.store<root_in_bounds> %input, %16[0] : i32, view<1xi32>
+  func.return
+}
+
+func.def noinline @consume(%object: buffer, %object_byte_offset: offset) -> (i32) {
+  %22 = buffer.view %object[%object_byte_offset] : buffer -> view<1xi32>
+  %value = view.load<root_in_bounds> %22[0] : view<1xi32> -> i32
+  func.call @Identity___Identity_storage(%object, %object_byte_offset) : (buffer, offset)
+  func.return %value : i32
+}
+
+func.def inline @Identity__Identity_storage_1(%this: buffer, %this_byte_offset: offset, %other: buffer, %other_byte_offset: offset) {
+  %32 = buffer.view %other[%other_byte_offset] : buffer -> view<1xi32>
+  %other_value = view.load<root_in_bounds> %32[0] : view<1xi32> -> i32
+  %34 = buffer.view %this[%this_byte_offset] : buffer -> view<1xi32>
+  view.store<root_in_bounds> %other_value, %34[0] : i32, view<1xi32>
+  func.call @copied(%other, %other_byte_offset, %this, %this_byte_offset) : (buffer, offset, buffer, offset)
+  func.return
+}
+
+func.def inline @Identity___Identity_storage(%this: buffer, %this_byte_offset: offset) {
+  func.call @destroyed(%this, %this_byte_offset) : (buffer, offset)
+  func.return
+}
+
+func.decl @copied(%39: buffer, %40: offset, %41: buffer, %42: offset)
+
+func.decl @destroyed(%43: buffer, %44: offset)

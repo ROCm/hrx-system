@@ -297,7 +297,13 @@ std::vector<loom_predicate_t> FunctionContracts::bind(
           "function predicates cannot retain a value-changing implicit "
           "conversion; use a type-matched predicate helper");
     }
-    return identities[component_offset];
+    auto identity = identities[component_offset];
+    if (identity == LOOM_VALUE_ID_INVALID) {
+      diagnostics_.reject(unit_, value.source,
+                          "callable predicates cannot select a value stored "
+                          "inside an identity-sensitive object");
+    }
+    return identity;
   };
 
   std::vector<loom_predicate_t> predicates;

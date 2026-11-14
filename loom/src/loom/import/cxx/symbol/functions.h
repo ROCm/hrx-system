@@ -123,6 +123,9 @@ struct IndirectParameter {
   bool mutable_access;
   // Sparse source contract, absent when the complete existing ABI is needed.
   std::unique_ptr<const ParameterProjection> projection;
+  // A by-value object constructed by the caller and destroyed by the callee.
+  // Its storage ABI preserves construction identity without a value writeback.
+  bool owned = false;
 };
 
 // Admitted definition ready for recursive body construction. The source owns
@@ -240,6 +243,8 @@ class Functions {
       cxx::FunctionSymbol* symbol) const;
   // Whether calls must transport the implicit object as durable storage.
   bool receiver_requires_storage(cxx::FunctionSymbol* symbol) const;
+  // Whether this internal callable constructs its result in caller storage.
+  bool result_requires_storage(cxx::FunctionSymbol* symbol) const;
   // Whether a reference result is exactly the current object.
   bool returns_current_receiver_reference(cxx::FunctionSymbol* symbol) const;
   // Exact source parameter aliased by every reference result, when one exists.
@@ -378,6 +383,8 @@ class Functions {
   std::unordered_set<cxx::FunctionSymbol*> exported_;
   // Reached bodyless declarations whose names must remain stable for linking.
   std::unordered_set<cxx::FunctionSymbol*> external_;
+  // Internal owned results constructed directly in a caller-provided object.
+  std::unordered_set<cxx::FunctionSymbol*> storage_results_;
   // Nonempty indirect-parameter ABIs indexed by canonical declaration identity.
   std::unordered_map<cxx::FunctionSymbol*, std::vector<IndirectParameter>>
       indirect_parameters_;

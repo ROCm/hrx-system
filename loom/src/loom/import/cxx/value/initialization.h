@@ -84,6 +84,10 @@ class Initialization {
                                     const cxx::Type* type,
                                     cxx::ConditionalExpressionAST* expression,
                                     bool retained) = 0;
+    // Constructs an identity-sensitive call result in its final destination.
+    // Returns false when the initializer has ordinary value transport.
+    virtual bool call_result(StorageProjection destination,
+                             cxx::ExpressionAST* expression) = 0;
     // Invokes one selected constructor with the exact destination object
     // and explicit source arguments. The constructor definition owns member
     // initialization followed by ordinary body translation.
