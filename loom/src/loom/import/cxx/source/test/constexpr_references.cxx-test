@@ -70,3 +70,40 @@ func.def public @entry(%output: buffer, %output_byte_offset: offset) {
   view.store<root_in_bounds> %2, %11[0] : i32, view<1xi32>
   func.return
 }
+
+// ====
+// Anonymous paths keep the original storage for scalar references and record
+// assignment, including when the anonymous member has a nonzero byte offset.
+// INPUT: cxx root=anonymous_member_result
+struct Representation { unsigned count; unsigned stride; };
+struct Descriptor {
+  unsigned prefix;
+  struct {
+    Representation representation;
+    unsigned bias;
+  };
+  constexpr Descriptor() : prefix(91), representation{0, 0}, bias(0) {}
+  constexpr unsigned& offset() { return bias; }
+  constexpr void reset(unsigned value) {
+    representation = Representation{value, value + 4};
+    bias = 5;
+  }
+};
+constexpr unsigned evaluate() {
+  Descriptor original;
+  unsigned& bias = original.offset();
+  original.reset(3);
+  bias += 2;
+  Descriptor copy = original;
+  copy.reset(9);
+  return original.representation.count * original.representation.stride + original.bias + (original.prefix == 91 && &bias == &original.bias ? 100u : 0u);
+}
+constexpr unsigned result = evaluate();
+static_assert(result == 128);
+unsigned anonymous_member_result() { return result; }
+
+// ----
+func.def public @anonymous_member_result() -> (i32) {
+  %result = scalar.constant 128 : i32
+  func.return %result : i32
+}
