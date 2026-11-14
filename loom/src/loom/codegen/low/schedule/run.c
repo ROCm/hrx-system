@@ -4,6 +4,8 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include "loom/codegen/low/schedule/run.h"
+
 #include <inttypes.h>
 #include <string.h>
 
@@ -17,7 +19,6 @@
 #include "loom/codegen/low/schedule/completion_wait.h"
 #include "loom/codegen/low/schedule/context.h"
 #include "loom/codegen/low/schedule/descriptor_rows.h"
-#include "loom/codegen/low/schedule/diagnostics.h"
 #include "loom/codegen/low/schedule/graph.h"
 #include "loom/codegen/low/schedule/memory_completion.h"
 #include "loom/codegen/low/schedule/pressure.h"
@@ -1739,6 +1740,7 @@ static iree_status_t loom_low_schedule_build(
       .function_op = model->context.function_op,
       .target = model->context.target,
       .error_count = model->context.error_count,
+      .failure = {.state_value_id = LOOM_VALUE_ID_INVALID},
   };
   if (model->context.error_count != 0) {
     return iree_ok_status();
@@ -1773,6 +1775,7 @@ static iree_status_t loom_low_schedule_build(
       .storage_origins = model->context.storage_origins,
       .cfg_graph = &model->cfg_graph,
       .liveness_dataflow = &model->liveness_dataflow,
+      .failure = {.state_value_id = LOOM_VALUE_ID_INVALID},
   };
   loom_low_schedule_dependency_graph_initialize(&state.dependencies);
   IREE_ASSERT(state.body != NULL);
@@ -1977,10 +1980,6 @@ static iree_status_t loom_low_schedule_build(
         loom_low_schedule_dependency_graph_move(&state.dependencies, graph);
         out_table->dependency_graph = graph;
       }
-    }
-    if (iree_status_is_ok(status)) {
-      status = loom_low_schedule_diagnostics_emit(
-          out_table, options->diagnostic_flags, options->emitter);
     }
   }
   return status;

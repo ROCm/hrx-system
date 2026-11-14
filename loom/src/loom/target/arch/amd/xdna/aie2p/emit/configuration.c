@@ -12,6 +12,7 @@
 #include "loom/codegen/low/diagnostics.h"
 #include "loom/codegen/low/function_model.h"
 #include "loom/codegen/low/packet.h"
+#include "loom/codegen/low/schedule/diagnostics.h"
 #include "loom/codegen/low/schedule/run.h"
 #include "loom/ops/low/ops.h"
 #include "loom/target/arch/amd/xdna/aie2p/array/abi_layout.h"
@@ -144,6 +145,10 @@ static iree_status_t loom_aie2p_configuration_schedule(
     };
     status = loom_low_schedule_function(&model, &options,
                                         request->scratch_arena, out_schedule);
+    if (iree_status_is_ok(status)) {
+      status = loom_low_schedule_diagnostics_emit(out_schedule, 0,
+                                                  request->diagnostic_emitter);
+    }
   }
   loom_low_function_model_deinitialize(&model);
   emitter->error_count += out_schedule->error_count;

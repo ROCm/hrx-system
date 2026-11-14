@@ -9,6 +9,7 @@
 #include "loom/codegen/low/descriptors.h"
 #include "loom/codegen/low/function_model.h"
 #include "loom/codegen/low/schedule/dependencies.h"
+#include "loom/codegen/low/schedule/diagnostics.h"
 #include "loom/codegen/low/schedule/run.h"
 #include "loom/codegen/low/storage_transport.h"
 #include "loom/tools/loom-check/diagnostics.h"
@@ -980,6 +981,10 @@ static iree_status_t loom_check_test_low_schedule_build(
   if (iree_status_is_ok(status) && model.context.error_count == 0) {
     status = loom_low_schedule_function(&model, &schedule_options,
                                         request->case_arena, out_schedule);
+  }
+  if (iree_status_is_ok(status) && model.context.error_count == 0) {
+    status = loom_low_schedule_diagnostics_emit(
+        out_schedule, options->schedule_diagnostic_flags, emitter);
   }
   if (iree_status_is_ok(status) && model.context.error_count == 0 &&
       out_schedule->error_count == 0 &&
