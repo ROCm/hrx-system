@@ -83,6 +83,7 @@
 #include "loom/target/arch/amdgpu/lower/value/vector_conversion.h"
 #include "loom/target/arch/amdgpu/lower/value/vector_transform.h"
 #include "loom/target/arch/amdgpu/lower/workgroup.h"
+#include "loom/target/arch/amdgpu/target_info_defs.h"
 #include "loom/target/contract.h"
 
 typedef struct loom_amdgpu_lower_dispatch_row_t
@@ -218,7 +219,8 @@ typedef struct loom_amdgpu_lower_dispatch_row_t {
   loom_amdgpu_lower_select_fn_t select;
   // Optional source-to-low plan emission entrypoint.
   loom_amdgpu_lower_emit_fn_t emit;
-  // Optional target-low legality provider entrypoint.
+  // Optional target-low legality callback; dispatch guarantees an AMDGPU
+  // target.
   loom_amdgpu_lower_verify_fn_t verify;
 } loom_amdgpu_lower_dispatch_row_t;
 static_assert(sizeof(loom_amdgpu_lower_dispatch_row_t) == 32,
@@ -1940,6 +1942,10 @@ static iree_status_t loom_amdgpu_low_legality_try_verify_op(
     loom_target_low_legality_context_t* context, const loom_op_t* op,
     bool* out_handled) {
   *out_handled = false;
+  if (loom_target_low_legality_descriptor_set(context)->target_stable_id !=
+      LOOM_AMDGPU_TARGET_STABLE_ID) {
+    return iree_ok_status();
+  }
   const loom_amdgpu_lower_dispatch_row_t* row =
       loom_amdgpu_find_lower_dispatch_row(op->kind);
   if (row == NULL || row->verify == NULL) {

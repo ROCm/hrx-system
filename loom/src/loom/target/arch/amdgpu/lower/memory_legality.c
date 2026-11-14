@@ -60,9 +60,6 @@ iree_status_t loom_amdgpu_low_legality_verify_memory(
     loom_target_low_legality_context_t* context, const loom_op_t* op,
     bool* out_handled) {
   const loom_target_bundle_t* bundle = loom_target_low_legality_bundle(context);
-  if (!loom_amdgpu_low_legality_context_is_amdgpu(context)) {
-    return iree_ok_status();
-  }
 
   const loom_module_t* module = loom_target_low_legality_module(context);
   const loom_low_descriptor_set_t* descriptor_set =

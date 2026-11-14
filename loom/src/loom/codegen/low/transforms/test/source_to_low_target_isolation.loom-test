@@ -1,0 +1,72 @@
+// RUN: pass source-to-low
+
+// Linked target providers must not accept or diagnose another target's ops.
+test.target<low_core> @test_target
+
+func.def target(@test_target) @access_requires_target_support(%input: buffer) {
+  %base = index.constant 0 : offset
+  %view = buffer.view %input[%base] : buffer -> view<2xi32>
+  // ERROR@+1: TARGET/001 {op_name="sanitizer.assert.access"}
+  sanitizer.assert.access<read> %view[0] : view<2xi32>
+  func.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+func.def target(@test_target) @repeated_access_requires_target_support(%input: buffer) {
+  %base = index.constant 0 : offset
+  %view = buffer.view %input[%base] : buffer -> view<2xi32>
+  // ERROR@+1: TARGET/001 {op_name="sanitizer.assert.accesses"}
+  sanitizer.assert.accesses<read> %view[0] {static_count = 2, static_extents = [1], static_strides = [1]} : view<2xi32>
+  func.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+func.def target(@test_target) @race_access_requires_target_support(%input: buffer) {
+  %base = index.constant 0 : offset
+  %view = buffer.view %input[%base] : buffer -> view<2xi32>
+  // ERROR@+1: TARGET/032 {op_name="sanitizer.race.access", op_constraint="target_contract.sanitizer_race.provider_required"}
+  sanitizer.race.access<read> %view[0] : view<2xi32>
+  func.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+func.def target(@test_target) @race_fragment_access_requires_target_support(%fragment: vector<4xi32>, %input: buffer) {
+  %base = index.constant 0 : offset
+  %view = buffer.view %input[%base] : buffer -> view<4x4xi32>
+  %extent = index.constant 4 : index
+  // ERROR@+1: TARGET/032 {op_name="sanitizer.race.fragment_access", op_constraint="target_contract.sanitizer_race.provider_required"}
+  sanitizer.race.fragment_access<read> %fragment, %view[0, 0] shape [%extent, %extent] {role = lhs} : vector<4xi32>, view<4x4xi32>
+  func.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+func.def target(@test_target) @race_sync_requires_target_support() {
+  // ERROR@+1: TARGET/032 {op_name="sanitizer.race.sync", op_constraint="target_contract.sanitizer_race.provider_required"}
+  sanitizer.race.sync<workgroup> scope(workgroup) ordering(acq_rel)
+  func.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+kernel.def target(@test_target) @assert_requires_target_support() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%predicate: i1) {
+  // ERROR@+1: TARGET/001 {op_name="kernel.assert"}
+  kernel.assert %predicate : i1
+  kernel.return
+}

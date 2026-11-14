@@ -741,9 +741,6 @@ iree_status_t loom_amdgpu_low_legality_verify_kernel_subgroup_active_mask(
     const loom_target_low_legality_provider_t* provider,
     loom_target_low_legality_context_t* context, const loom_op_t* op,
     bool* out_handled) {
-  if (!loom_amdgpu_low_legality_context_is_amdgpu(context)) {
-    return iree_ok_status();
-  }
   *out_handled = true;
 
   uint32_t wavefront_size = 0;
@@ -769,9 +766,6 @@ iree_status_t loom_amdgpu_low_legality_verify_kernel_subgroup_ballot(
     const loom_target_low_legality_provider_t* provider,
     loom_target_low_legality_context_t* context, const loom_op_t* op,
     bool* out_handled) {
-  if (!loom_amdgpu_low_legality_context_is_amdgpu(context)) {
-    return iree_ok_status();
-  }
   *out_handled = true;
 
   uint32_t wavefront_size = 0;
@@ -799,9 +793,6 @@ iree_status_t loom_amdgpu_low_legality_verify_kernel_subgroup_vote_any(
     const loom_target_low_legality_provider_t* provider,
     loom_target_low_legality_context_t* context, const loom_op_t* op,
     bool* out_handled) {
-  if (!loom_amdgpu_low_legality_context_is_amdgpu(context)) {
-    return iree_ok_status();
-  }
   *out_handled = true;
 
   return loom_amdgpu_low_legality_verify_subgroup_vote(
@@ -813,9 +804,6 @@ iree_status_t loom_amdgpu_low_legality_verify_kernel_subgroup_vote_all(
     const loom_target_low_legality_provider_t* provider,
     loom_target_low_legality_context_t* context, const loom_op_t* op,
     bool* out_handled) {
-  if (!loom_amdgpu_low_legality_context_is_amdgpu(context)) {
-    return iree_ok_status();
-  }
   *out_handled = true;
 
   return loom_amdgpu_low_legality_verify_subgroup_vote(

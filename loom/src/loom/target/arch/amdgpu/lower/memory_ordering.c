@@ -293,9 +293,6 @@ iree_status_t loom_amdgpu_low_legality_verify_memory_fence(
     const loom_target_low_legality_provider_t* provider,
     loom_target_low_legality_context_t* context, const loom_op_t* op,
     bool* out_handled) {
-  if (!loom_amdgpu_low_legality_context_is_amdgpu(context)) {
-    return iree_ok_status();
-  }
   *out_handled = true;
   if (!loom_amdgpu_memory_ordering_available(
           loom_target_low_legality_descriptor_set(context))) {

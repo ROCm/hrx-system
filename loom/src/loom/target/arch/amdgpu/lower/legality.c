@@ -10,7 +10,6 @@
 #include "loom/target/arch/amdgpu/error_catalog.h"
 #include "loom/target/arch/amdgpu/lower/emit.h"
 #include "loom/target/arch/amdgpu/lower/topology.h"
-#include "loom/target/arch/amdgpu/target_info_defs.h"
 
 static iree_string_view_t loom_amdgpu_nonempty(iree_string_view_t value,
                                                iree_string_view_t placeholder) {
@@ -103,10 +102,4 @@ iree_status_t loom_amdgpu_low_legality_verify_full_wave_direct_subgroup_width(
   return loom_amdgpu_low_legality_verify_direct_subgroup_width(
       context, op, *out_wavefront_size, *out_wavefront_size,
       direct_width_constraint_key);
-}
-
-bool loom_amdgpu_low_legality_context_is_amdgpu(
-    loom_target_low_legality_context_t* context) {
-  return loom_target_low_legality_descriptor_set(context)->target_stable_id ==
-         LOOM_AMDGPU_TARGET_STABLE_ID;
 }

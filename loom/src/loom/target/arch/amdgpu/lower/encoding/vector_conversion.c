@@ -407,9 +407,6 @@ iree_status_t loom_amdgpu_low_legality_verify_vector_decode(
     bool* out_handled) {
   (void)provider;
   *out_handled = false;
-  if (!loom_amdgpu_low_legality_context_is_amdgpu(context)) {
-    return iree_ok_status();
-  }
   if (loom_amdgpu_vector_decode_can_lower_as_fp4_conversion(
           loom_target_low_legality_module(context),
           loom_target_low_legality_fact_table(context),
@@ -429,9 +426,6 @@ iree_status_t loom_amdgpu_low_legality_verify_vector_encode(
     bool* out_handled) {
   (void)provider;
   *out_handled = false;
-  if (!loom_amdgpu_low_legality_context_is_amdgpu(context)) {
-    return iree_ok_status();
-  }
   loom_amdgpu_fp8_encode_plan_t plan = {0};
   *out_handled = loom_amdgpu_select_vector_encode_fp8_plan(
       loom_target_low_legality_module(context),

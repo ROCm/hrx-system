@@ -324,9 +324,6 @@ iree_status_t loom_amdgpu_low_legality_verify_kernel_split_barrier(
     loom_target_low_legality_context_t* context, const loom_op_t* op,
     bool* out_handled) {
   (void)provider;
-  if (!loom_amdgpu_low_legality_context_is_amdgpu(context)) {
-    return iree_ok_status();
-  }
   *out_handled = true;
   const loom_low_descriptor_set_t* descriptor_set =
       loom_target_low_legality_descriptor_set(context);
@@ -359,9 +356,6 @@ iree_status_t loom_amdgpu_low_legality_verify_kernel_barrier(
     loom_target_low_legality_context_t* context, const loom_op_t* op,
     bool* out_handled) {
   const loom_target_bundle_t* bundle = loom_target_low_legality_bundle(context);
-  if (!loom_amdgpu_low_legality_context_is_amdgpu(context)) {
-    return iree_ok_status();
-  }
   *out_handled = true;
   const loom_low_descriptor_set_t* descriptor_set =
       loom_target_low_legality_descriptor_set(context);
@@ -410,9 +404,6 @@ iree_status_t loom_amdgpu_low_legality_verify_kernel_collective(
     const loom_target_low_legality_provider_t* provider,
     loom_target_low_legality_context_t* context, const loom_op_t* op,
     bool* out_handled) {
-  if (!loom_amdgpu_low_legality_context_is_amdgpu(context)) {
-    return iree_ok_status();
-  }
   *out_handled = true;
 
   return loom_amdgpu_low_legality_reject(context, op,

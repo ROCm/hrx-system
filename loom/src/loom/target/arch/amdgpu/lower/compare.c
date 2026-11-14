@@ -808,9 +808,6 @@ iree_status_t loom_amdgpu_low_legality_verify_clampf(
     bool* out_handled) {
   (void)provider;
   *out_handled = false;
-  if (!loom_amdgpu_low_legality_context_is_amdgpu(context)) {
-    return iree_ok_status();
-  }
 
   loom_amdgpu_clampf_plan_t plan = {0};
   *out_handled = loom_amdgpu_match_clampf_fallback(
