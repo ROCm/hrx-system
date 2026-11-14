@@ -546,12 +546,18 @@ iree_status_t loom_low_lower_control_plan_build(
     return iree_ok_status();
   }
   iree_arena_reset(&scratch_arena);
-  for (uint16_t i = 0;
-       i < body->block_count && iree_status_is_ok(status) &&
+  // Prepare enclosing branches before branches in their dominated regions.
+  // Target plans compose edge interpositions incrementally, so planning in
+  // source storage order could let a nested branch claim an exit before its
+  // enclosing branch establishes the shared continuation.
+  const uint16_t* block_order = context->lowering->source_plan.block_order;
+  for (uint16_t position = 0;
+       position < body->block_count && iree_status_is_ok(status) &&
        !loom_low_lower_context_diagnostic_limit_reached(context);
-       ++i) {
+       ++position) {
+    const uint16_t block_index = block_order ? block_order[position] : position;
     const loom_op_t* terminator =
-        loom_block_const_last_op(loom_region_block(body, i));
+        loom_block_const_last_op(loom_region_block(body, block_index));
     if (terminator == NULL) {
       continue;
     }
