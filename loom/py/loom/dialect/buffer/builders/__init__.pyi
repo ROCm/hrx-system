@@ -220,3 +220,16 @@ class BufferBuilder(DialectBuilder):
         result_names: Sequence[str] | None = ...,
         location_id: int | None = ...,
     ) -> ValueRef: ...
+    def distance(
+        self,
+        *,
+        lhs: ValueRef,
+        lhs_offset: ValueRef,
+        rhs: ValueRef,
+        rhs_offset: ValueRef,
+        results: list[Type | TiedResultSpec],
+        name: str | None = ...,
+        names: Sequence[str] | None = ...,
+        result_names: Sequence[str] | None = ...,
+        location_id: int | None = ...,
+    ) -> ValueRef: ...

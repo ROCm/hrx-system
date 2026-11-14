@@ -57,6 +57,7 @@ static iree_status_t loom_global_load_rodata_facts(
       .root_value_id = result_id,
       .root_symbol = symbol,
       .has_root_symbol = true,
+      .root_is_byte_origin = true,
       .alias_scope_id = LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE,
       .nullability = LOOM_VALUE_FACT_REFERENCE_NULLABILITY_NON_NULL,
   };

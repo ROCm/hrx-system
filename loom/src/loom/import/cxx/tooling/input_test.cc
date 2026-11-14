@@ -362,8 +362,8 @@ TEST_F(InputTest, HeaderErrorsCannotSatisfyMainFileAnnotations) {
   iree::testing::TempFilePath header("loom_input_error", ".h");
   const std::string header_filename =
       std::filesystem::path(header.path()).generic_string();
-  IREE_ASSERT_OK(Write(header.path(),
-                       "long distance(int* a, int* b) { return a - b; }\n"));
+  IREE_ASSERT_OK(
+      Write(header.path(), "bool before(int* a, int* b) { return a < b; }\n"));
   const std::string source =
       "// RUN: verify\n// ERROR: LOWERING/059\n"
       "#include \"" +

@@ -59,6 +59,7 @@ iree_py_test(
     srcs = [
         "buffer_access_test.py",
         "context_test.py",
+        "expressions_test.py",
         "naming_test.py",
         "printer_test.py",
         "registry_test.py",
@@ -70,6 +71,7 @@ iree_py_test(
     args = [
         "loom.format.cxx.buffer_access_test",
         "loom.format.cxx.context_test",
+        "loom.format.cxx.expressions_test",
         "loom.format.cxx.naming_test",
         "loom.format.cxx.registry_test",
         "loom.format.cxx.renderer_test",
@@ -184,6 +186,33 @@ iree_py_test(
     data = [
         "refinement.cxx",
         "refinement_checks.cxx",
+        "//loom/src/loom/tools/loom-import-cxx",
+        "//loom/src/loom/tools/loom-test",
+    ],
+    main = "source_roundtrip_execution_test.py",
+    tags = ["skip-bazel_to_cmake"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/import:cxx",
+        "//loom/config/execute:vm_iree_vm",
+    ]),
+    deps = [":cxx"],
+)
+
+iree_py_test(
+    name = "pointer_distance_execution_test",
+    size = "small",
+    srcs = ["source_roundtrip_execution_test.py"],
+    args = [
+        "$(rootpath //loom/src/loom/tools/loom-import-cxx)",
+        "$(rootpath //loom/src/loom/tools/loom-test)",
+        "$(rootpath pointer_distance.cxx)",
+        "$(rootpath pointer_distance_checks.cxx)",
+        "2",
+        "8",
+    ],
+    data = [
+        "pointer_distance.cxx",
+        "pointer_distance_checks.cxx",
         "//loom/src/loom/tools/loom-import-cxx",
         "//loom/src/loom/tools/loom-test",
     ],

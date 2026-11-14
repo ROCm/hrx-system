@@ -745,6 +745,23 @@ ERR_LOWERING_072 = ErrorDef(
 )
 
 
+ERR_LOWERING_073 = ErrorDef(
+    domain=ErrorDomain.LOWERING,
+    code=73,
+    severity=Severity.ERROR,
+    summary="Pointer subtraction requires a proven common buffer root.",
+    message=(
+        "pointer subtraction requires both positions to derive from the same "
+        "buffer root; their common byte origin could not be proven"
+    ),
+    params=(),
+    fix_hint=(
+        "Derive both positions from one buffer and preserve their root-relative "
+        "offsets through subviews and helper calls"
+    ),
+)
+
+
 ALL_LOWERING_ERRORS: tuple[ErrorDef, ...] = (
     ERR_LOWERING_022,
     ERR_LOWERING_023,
@@ -786,4 +803,5 @@ ALL_LOWERING_ERRORS: tuple[ErrorDef, ...] = (
     ERR_LOWERING_070,
     ERR_LOWERING_071,
     ERR_LOWERING_072,
+    ERR_LOWERING_073,
 )

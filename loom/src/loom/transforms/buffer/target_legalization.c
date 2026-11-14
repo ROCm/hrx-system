@@ -1099,6 +1099,14 @@ static iree_status_t loom_buffer_legalize(
       .action = LOOM_TARGET_LEGALIZER_ACTION_NO_COMMENT,
   };
   switch (op->kind) {
+    case LOOM_OP_BUFFER_DISTANCE: {
+      IREE_RETURN_IF_ERROR(
+          loom_buffer_distance_canonicalize(op, context->rewriter));
+      out_result->action = iree_any_bit_set(op->flags, LOOM_OP_FLAG_DEAD)
+                               ? LOOM_TARGET_LEGALIZER_ACTION_REWRITTEN
+                               : LOOM_TARGET_LEGALIZER_ACTION_DEFER;
+      return iree_ok_status();
+    }
     case LOOM_OP_BUFFER_PACK:
       return loom_buffer_legalize_pack(context, op, out_result);
     case LOOM_OP_BUFFER_COPY:
@@ -1112,6 +1120,10 @@ static iree_status_t loom_buffer_legalize(
 }
 
 static const loom_target_legalizer_rule_t kBufferLegalizerRules[] = {
+    {
+        .root_kind = LOOM_OP_BUFFER_DISTANCE,
+        .legalize = loom_buffer_legalize,
+    },
     {
         .root_kind = LOOM_OP_BUFFER_PACK,
         .legalize = loom_buffer_legalize,

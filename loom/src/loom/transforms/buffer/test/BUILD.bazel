@@ -18,6 +18,7 @@ loom_check_test_suite(
     srcs = [
         "compare.loom-test",
         "copy.loom-test",
+        "distance.loom-test",
         "fill.loom-test",
         "materialize.loom-test",
         "vm_literals.loom-test",

@@ -804,6 +804,9 @@ static iree_status_t loom_target_low_legality_reject_source_only_op(
       iree_any_bit_set(context->options->structural_legality_flags,
                        LOOM_TARGET_LOW_STRUCTURAL_LEGALITY_ALLOW_SOURCE_SCF);
   switch (op->kind) {
+    case LOOM_OP_BUFFER_DISTANCE:
+      return loom_target_low_legality_emit(context, op, LOOM_ERR_LOWERING_073,
+                                           NULL, 0);
     case LOOM_OP_SCF_IF:
     case LOOM_OP_SCF_FOR:
     case LOOM_OP_SCF_WHILE:

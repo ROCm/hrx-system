@@ -31,6 +31,8 @@ loom_check_test_suite(
         "opaque_pointers.cxx-test",
         "opaque_pointers_invalid.cxx-test",
         "packed_memory.cxx-test",
+        "pointer_distance.cxx-test",
+        "pointer_distance_invalid.cxx-test",
         "pointer_equality.cxx-test",
         "pointer_origins.cxx-test",
         "pointer_updates.cxx-test",

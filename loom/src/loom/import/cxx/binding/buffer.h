@@ -67,6 +67,7 @@ class BufferIntrinsic {
     CompareNull,
     CompareAddressEqual,
     CompareAddressUnequal,
+    Distance,
   };
 
   BufferIntrinsic(Operation operation,
@@ -105,11 +106,15 @@ class BufferIntrinsic {
         memory_space_(memory_space) {}
   BufferIntrinsic(Operation operation, const BufferPartition* result_buffer)
       : operation_(operation), result_buffer_(result_buffer) {}
+  explicit BufferIntrinsic(loom_scalar_type_t result_scalar)
+      : operation_(Operation::Distance), result_scalar_(result_scalar) {}
 
   // Buffer operation selected by the source declaration.
   Operation operation_;
   // Literal payload form selected by the source binding, never inferred.
   bool is_utf8_ = false;
+  // Integer result width selected by a byte-distance declaration.
+  loom_scalar_type_t result_scalar_ = LOOM_SCALAR_TYPE_NONE;
 
   // Source object type named by T and by the result pointee.
   const cxx::Type* element_type_ = nullptr;

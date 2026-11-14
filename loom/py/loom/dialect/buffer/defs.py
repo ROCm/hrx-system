@@ -43,6 +43,7 @@ from loom.dsl import (
     FACT_IDENTITY,
     I1,
     I32,
+    INTEGER,
     MEMORY_FENCE,
     OFFSET,
     POOL,
@@ -207,6 +208,52 @@ buffer_compare_address = Op(
         "%done = buffer.compare.address eq, %cursor[%position], %end[%limit]",
         "%more = buffer.compare.address ne, %cursor[%position], %end[%limit]",
     ],
+)
+
+# ============================================================================
+# buffer.distance — signed displacement within one buffer root
+# ============================================================================
+
+buffer_distance = Op(
+    name="buffer.distance",
+    group=buffer_ops,
+    phase=OpPhase.SOURCE_STRUCTURE,
+    doc=(
+        "Return lhs_offset minus rhs_offset as a signed byte distance. Both "
+        "positions must derive from the same buffer byte origin, proven before "
+        "target lowering; otherwise compilation fails. Sharing an allocation "
+        "without a common byte origin is insufficient. Nonnull positions must "
+        "be live and in bounds or one-past. Two null positions at offset zero "
+        "have distance zero. Offset values lie in [0, INT64_MAX], so their "
+        "signed difference fits i64 and must also fit the signed result type. "
+        "No address or payload bytes are observed."
+    ),
+    operands=[
+        Operand("lhs", BUFFER, doc="Left storage root."),
+        Operand("lhs_offset", OFFSET, doc="Left root-relative byte position."),
+        Operand("rhs", BUFFER, doc="Right storage root."),
+        Operand("rhs_offset", OFFSET, doc="Right root-relative byte position."),
+    ],
+    results=[Result("result", INTEGER, doc="Signed left-minus-right byte distance.")],
+    traits=[PURE],
+    ownership_effects=[Borrow("lhs"), Borrow("rhs")],
+    canonicalize="loom_buffer_distance_canonicalize",
+    format=[
+        Ref("lhs"),
+        GLUE,
+        LBRACKET,
+        Ref("lhs_offset"),
+        RBRACKET,
+        COMMA,
+        Ref("rhs"),
+        GLUE,
+        LBRACKET,
+        Ref("rhs_offset"),
+        RBRACKET,
+        COLON,
+        TypeOf("result"),
+    ],
+    examples=["%bytes = buffer.distance %buffer[%end], %buffer[%begin] : i64"],
 )
 
 # ============================================================================
@@ -858,6 +905,7 @@ buffer_duplicate = value_duplication_op(
     "buffer.duplicate",
     group=buffer_ops,
     carrier=BUFFER,
+    facts="loom_buffer_duplicate_facts",
     doc=("Create another local owner of a buffer root. The duplicate identifies the same opaque storage and may lower to the same physical carrier, but remains a distinct SSA ownership identity."),
     examples=["%copy = buffer.duplicate %source : buffer"],
 )
@@ -883,4 +931,5 @@ ALL_BUFFER_OPS: tuple[Op, ...] = (
     buffer_null,
     buffer_compare_null,
     buffer_compare_address,
+    buffer_distance,
 )

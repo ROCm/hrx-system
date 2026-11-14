@@ -41,7 +41,8 @@ enum {
   LOOM_OP_BUFFER_NULL = LOOM_OP_KIND(LOOM_DIALECT_BUFFER, 17),
   LOOM_OP_BUFFER_COMPARE_NULL = LOOM_OP_KIND(LOOM_DIALECT_BUFFER, 18),
   LOOM_OP_BUFFER_COMPARE_ADDRESS = LOOM_OP_KIND(LOOM_DIALECT_BUFFER, 19),
-  LOOM_OP_BUFFER_COUNT_ = 20,
+  LOOM_OP_BUFFER_DISTANCE = LOOM_OP_KIND(LOOM_DIALECT_BUFFER, 20),
+  LOOM_OP_BUFFER_COUNT_ = 21,
 };
 
 // Equality predicates for opaque buffer positions.
@@ -407,7 +408,7 @@ iree_status_t loom_buffer_duplicate_build(
     iree_host_size_t result_count,
     loom_location_id_t location,
     loom_op_t** out_op);
-iree_status_t loom_value_duplication_facts(
+iree_status_t loom_buffer_duplicate_facts(
     loom_fact_context_t* context,
     const loom_module_t* module, const loom_op_t* op,
     const loom_value_facts_t* operand_facts,
@@ -468,6 +469,25 @@ iree_status_t loom_buffer_compare_address_facts(
     const loom_module_t* module, const loom_op_t* op,
     const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts);
+
+// LOOM_OP_BUFFER_DISTANCE: Return lhs_offset minus rhs_offset as a signed byte distance. Both positions must derive from the same buffer byte origin, proven before target lowering; otherwise compilation fails. Sharing an allocation without a common byte origin is insufficient. Nonnull positions must be live and in bounds or one-past. Two null positions at offset zero have distance zero. Offset values lie in [0, INT64_MAX], so their signed difference fits i64 and must also fit the signed result type. No address or payload bytes are observed.
+// %bytes = buffer.distance %buffer[%end], %buffer[%begin] : i64
+LOOM_DEFINE_ISA(loom_buffer_distance_isa, LOOM_OP_BUFFER_DISTANCE)
+LOOM_DEFINE_OPERAND(loom_buffer_distance_lhs, 0)
+LOOM_DEFINE_OPERAND(loom_buffer_distance_lhs_offset, 1)
+LOOM_DEFINE_OPERAND(loom_buffer_distance_rhs, 2)
+LOOM_DEFINE_OPERAND(loom_buffer_distance_rhs_offset, 3)
+LOOM_DEFINE_RESULT(loom_buffer_distance_result, 0)
+iree_status_t loom_buffer_distance_build(
+    loom_builder_t* builder,
+    loom_value_id_t lhs,
+    loom_value_id_t lhs_offset,
+    loom_value_id_t rhs,
+    loom_value_id_t rhs_offset,
+    loom_type_t result_type,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+iree_status_t loom_buffer_distance_canonicalize(loom_op_t* op, loom_rewriter_t* rewriter);
 
 // Returns the vtable array for the buffer dialect.
 const loom_op_vtable_t* const* loom_buffer_dialect_vtables(

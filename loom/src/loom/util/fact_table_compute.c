@@ -38,6 +38,7 @@ static iree_status_t loom_value_fact_table_seed_buffer_arg(
       .minimum_alignment = 1,
       .memory_space = memory_space,
       .root_value_id = value_id,
+      .root_is_byte_origin = true,
       .alias_scope_id = LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE,
       .nullability = LOOM_VALUE_FACT_REFERENCE_NULLABILITY_UNKNOWN,
       .origin = origin,

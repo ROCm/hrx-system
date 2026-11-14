@@ -52,6 +52,7 @@ iree_status_t loom_value_facts_rebase_reference(
   loom_value_fact_buffer_reference_t buffer;
   if (loom_value_facts_query_buffer_reference(context, *inout_facts, &buffer)) {
     buffer.root_value_id = receiving_value;
+    buffer.root_is_byte_origin = true;
     buffer.alias_scope_id = LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE;
     buffer.origin = receiving_origin;
     IREE_RETURN_IF_ERROR(

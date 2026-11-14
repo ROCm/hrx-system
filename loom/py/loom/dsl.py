@@ -7345,6 +7345,7 @@ def value_duplication_op(
     category: OpCategory | None = None,
     traits: list[Trait] | tuple[Trait, ...] = (),
     lifetime_effects_only: bool = False,
+    facts: str = "loom_value_duplication_facts",
     examples: list[str] | tuple[str, ...] = (),
 ) -> Op:
     """Declare one dialect-owned closed-tuple ownership duplication op."""
@@ -7370,7 +7371,7 @@ def value_duplication_op(
                 carrier=carrier,
             )
         ],
-        facts="loom_value_duplication_facts",
+        facts=facts,
         phase=OpPhase.EXECUTABLE,
         category=category,
         format=[Refs("sources"), COLON, TypesOf("duplicates")],

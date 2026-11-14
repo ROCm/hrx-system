@@ -6261,7 +6261,13 @@ class Translator final : private Initialization::Evaluation {
                                           equal, ast);
         }
         if (left.is_pointer() && right.is_pointer()) {
-          fail(ast, "pointer ordering and subtraction are not supported");
+          if (binary->op == cxx::TokenKind::T_MINUS) {
+            return storage_.distance(
+                left.pointer(), right.pointer(),
+                unit_.typeTraits().remove_pointer(binary->leftExpression->type),
+                ast->type, ast);
+          }
+          fail(ast, "ordered pointer comparisons are not supported");
         }
         if (left.is_pointer() && !right.is_pointer()) {
           return storage_

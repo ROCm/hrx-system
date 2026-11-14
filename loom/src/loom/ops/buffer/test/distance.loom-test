@@ -1,0 +1,110 @@
+// RUN: pass canonicalize,cse,dce
+
+// Signed subtraction must happen after leaving the unsigned offset domain.
+func.def @dynamic(%root: buffer, %left: offset, %right: offset) -> (i64) {
+  %aligned = buffer.assume.alignment %root {minimum_alignment = 16} : buffer
+  %private = buffer.assume.memory_space<private> %aligned : buffer
+  %distance = buffer.distance %private[%left], %root[%right] : i64
+  func.return %distance : i64
+}
+
+func.def @signed_endpoints(%root: buffer) -> (i64, i64, i32, i16, i8, i1) {
+  %start = index.constant 0 : offset
+  %end = index.constant 12 : offset
+  %positive = buffer.distance %root[%end], %root[%start] : i64
+  %negative = buffer.distance %root[%start], %root[%end] : i64
+  %word = buffer.distance %root[%start], %root[%end] : i32
+  %half = buffer.distance %root[%start], %root[%end] : i16
+  %byte = buffer.distance %root[%start], %root[%end] : i8
+  %zero = buffer.distance %root[%end], %root[%end] : i1
+  func.return %positive, %negative, %word, %half, %byte, %zero : i64, i64, i32, i16, i8, i1
+}
+
+func.def @null_endpoints() -> (i64) {
+  %left = buffer.null : buffer
+  %right = buffer.null : buffer
+  %origin = index.constant 0 : offset
+  %distance = buffer.distance %left[%origin], %right[%origin] : i64
+  func.return %distance : i64
+}
+
+// A shared allocation promise does not supply the origins of its two spans.
+func.def @allocation_only(%left: buffer, %right: buffer, %position: offset) -> (i64) {
+  %shared = buffer.assume.same_root %left, %right : buffer
+  %distance = buffer.distance %shared[%position], %right[%position] : i64
+  func.return %distance : i64
+}
+
+func.def @joined_origin(%root: buffer, %choose: i1, %left: offset, %right: offset) -> (i64) {
+  %aligned = buffer.assume.alignment %root {minimum_alignment = 16} : buffer
+  %copy = buffer.duplicate %root : buffer
+  %selected = scf.select %choose, %aligned, %copy : buffer
+  %distance = buffer.distance %selected[%left], %root[%right] : i64
+  func.return %distance : i64
+}
+
+func.def @wide_endpoints(%root: buffer) -> (i64, i64) {
+  %start = index.constant 0 : offset
+  %end = index.constant 9223372036854775807 : offset
+  %positive = buffer.distance %root[%end], %root[%start] : i64
+  %negative = buffer.distance %root[%start], %root[%end] : i64
+  func.return %positive, %negative : i64, i64
+}
+
+// Both positions share whichever root was selected at runtime.
+func.def @copied_dynamic_root(%first: buffer, %second: buffer, %choose: i1, %left: offset, %right: offset) -> (i64) {
+  %selected = scf.select %choose, %first, %second : buffer
+  %copy = buffer.duplicate %selected : buffer
+  %aligned = buffer.assume.alignment %copy {minimum_alignment = 1} : buffer
+  %distance = buffer.distance %aligned[%left], %selected[%right] : i64
+  func.return %distance : i64
+}
+
+// ----
+func.def @dynamic(%root: buffer, %left: offset, %right: offset) -> (i64) {
+  %59 = index.cast %left : offset to i64
+  %60 = index.cast %right : offset to i64
+  %distance = scalar.subi %59, %60 : i64
+  func.return %distance : i64
+}
+
+func.def @signed_endpoints(%root: buffer) -> (i64, i64, i32, i16, i8, i1) {
+  %positive = scalar.constant 12 : i64
+  %negative = scalar.constant -12 : i64
+  %word = scalar.constant -12 : i32
+  %half = scalar.constant -12 : i16
+  %byte = scalar.constant -12 : i8
+  %zero = scalar.constant false : i1
+  func.return %positive, %negative, %word, %half, %byte, %zero : i64, i64, i32, i16, i8, i1
+}
+
+func.def @null_endpoints() -> (i64) {
+  %distance = scalar.constant 0 : i64
+  func.return %distance : i64
+}
+
+func.def @allocation_only(%left: buffer, %right: buffer, %position: offset) -> (i64) {
+  %shared = buffer.assume.same_root %left, %right : buffer
+  %distance = buffer.distance %shared[%position], %right[%position] : i64
+  func.return %distance : i64
+}
+
+func.def @joined_origin(%root: buffer, %choose: i1, %left: offset, %right: offset) -> (i64) {
+  %94 = index.cast %left : offset to i64
+  %95 = index.cast %right : offset to i64
+  %distance = scalar.subi %94, %95 : i64
+  func.return %distance : i64
+}
+
+func.def @wide_endpoints(%root: buffer) -> (i64, i64) {
+  %positive = scalar.constant 9223372036854775807 : i64
+  %negative = scalar.constant -9223372036854775807 : i64
+  func.return %positive, %negative : i64, i64
+}
+
+func.def @copied_dynamic_root(%first: buffer, %second: buffer, %choose: i1, %left: offset, %right: offset) -> (i64) {
+  %105 = index.cast %left : offset to i64
+  %106 = index.cast %right : offset to i64
+  %distance = scalar.subi %105, %106 : i64
+  func.return %distance : i64
+}

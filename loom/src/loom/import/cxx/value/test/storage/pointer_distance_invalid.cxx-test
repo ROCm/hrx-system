@@ -1,0 +1,47 @@
+// RUN: pass inline-callables,canonicalize,cse,dce,target-legalize{mode=final}
+
+struct [[loom::target("test.target")]] Target { const char* kind; };
+constexpr Target target{"low_core"};
+[[loom::target(target)]] auto independent(const char* first, const char* last) {
+  // ERROR@+1: LOWERING/073 "same buffer root"
+  return last - first;
+}
+
+// ====
+
+struct [[loom::target("test.target")]] Target { const char* kind; };
+constexpr Target target{"low_core"};
+[[loom::target(target)]] auto mixed(const char* first, const char* other, bool choose) {
+  const char* selected = choose ? first : other;
+  // ERROR@+1: LOWERING/073 "common byte origin could not be proven"
+  return selected - first;
+}
+
+// ====
+
+// Deliberately retaining a generic two-root helper leaves its proof unresolved.
+struct [[loom::target("test.target")]] Target { const char* kind; };
+constexpr Target target{"low_core"};
+[[loom::target(target), loom::noinline]] auto distance(const char* first, const char* last) {
+  // ERROR@+1: LOWERING/073 "same buffer root"
+  return last - first;
+}
+[[loom::target(target)]] auto caller(const char* data) { return distance(data, data); }
+
+// ====
+
+#include <loomcxx/buffer.h>
+#include <loomcxx/index.h>
+using Buffer = loom::type::buffer<int>;
+using Offset = loom::type::offset;
+// ERROR@+1: LOWERING/059 "buffer.distance requires two typed buffer and offset pairs and an integer result"
+[[loom::op("buffer.distance")]] float wrong_result(Buffer, Offset, Buffer, Offset);
+float entry(Buffer source, Offset position) { return wrong_result(source, position, source, position); }
+
+// ====
+
+#include <loomcxx/buffer.h>
+using Buffer = loom::type::buffer<int>;
+// ERROR@+1: LOWERING/059 "buffer.distance requires two typed buffer and offset pairs and an integer result"
+[[loom::op("buffer.distance")]] long long wrong_offset(Buffer, int, Buffer, int);
+long long entry(Buffer source) { return wrong_offset(source, 0, source, 0); }

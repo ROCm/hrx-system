@@ -305,7 +305,7 @@ class CxxRenderer(CxxFunctionRenderer):
                 f"loom::buffer::compare::null({argument})",
             )
             return ()
-        if name == "buffer.compare.address":
+        if name in {"buffer.compare.address", "buffer.distance"}:
             resolved = self._resolved(operation)
             arguments = []
             for side in ("lhs", "rhs"):
@@ -316,6 +316,14 @@ class CxxRenderer(CxxFunctionRenderer):
                         self.expression(resolved.value_id(f"{side}_offset")),
                     )
                 )
+            if name == "buffer.distance":
+                result = resolved.value_id("result")
+                self._declare(
+                    result,
+                    f"loom::buffer::distance<{self.cpp_type(result)}>("
+                    f"{', '.join(arguments)})",
+                )
+                return ()
             predicate = resolved.attr("predicate")
             self._declare(
                 resolved.value_id("result"),

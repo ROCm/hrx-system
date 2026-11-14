@@ -40,6 +40,6 @@ bool entry(loom::type::buffer<int> left, loom::type::buffer<int> right) {
 
 // ====
 bool ordered(const int* left, const int* right) {
-  // ERROR@+1: LOWERING/059 "ordering and subtraction are not supported"
+  // ERROR@+1: LOWERING/059 "ordered pointer comparisons are not supported"
   return left < right;
 }
