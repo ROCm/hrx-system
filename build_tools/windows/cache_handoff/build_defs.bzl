@@ -5,6 +5,7 @@
 
 _MANIFEST_ENVIRONMENT_VARIABLE = "IREE_WINDOWS_CACHE_HANDOFF_MANIFEST"
 _PYTHON_ENVIRONMENT_VARIABLE = "IREE_WINDOWS_CACHE_HANDOFF_PYTHON"
+_CAS_DIRECTORY_ENVIRONMENT_VARIABLE = "IREE_WINDOWS_CACHE_HANDOFF_CAS_DIR"
 
 def _windows_cache_handoff_test_impl(ctx):
     runner = ctx.actions.declare_file(ctx.label.name + ".runner.py")
@@ -36,7 +37,10 @@ def _windows_cache_handoff_test_impl(ctx):
             environment = {
                 _MANIFEST_ENVIRONMENT_VARIABLE: ctx.file.manifest.short_path,
             },
-            inherited_environment = ctx.attr.env_inherit + [_PYTHON_ENVIRONMENT_VARIABLE],
+            inherited_environment = ctx.attr.env_inherit + [
+                _CAS_DIRECTORY_ENVIRONMENT_VARIABLE,
+                _PYTHON_ENVIRONMENT_VARIABLE,
+            ],
         ),
     ]
 

@@ -1183,8 +1183,10 @@ jobs:
           $environment = [ordered]@{
             HRX_DOWNLOAD_CACHE_DIR = Join-Path $root 'downloads'
             HRX_OUTPUT_DIR = $root
+            IREE_WINDOWS_CACHE_HANDOFF_CAS_DIR = Join-Path $root 'cas'
             IREE_CACHE_HANDOFF_EVIDENCE = Join-Path $root 'consumer-evidence'
             IREE_CACHE_HANDOFF_OUTPUT_BASE = $outputBase.Replace('\', '/')
+            IREE_CACHE_HANDOFF_TEST_TMPDIR = Join-Path $root 'test-tmp'
             PIP_CACHE_DIR = Join-Path $root 'pip-cache'
           }
           New-Item -ItemType Directory -Path $root -Force | Out-Null
@@ -1216,15 +1218,22 @@ jobs:
           $evidenceDir = $env:IREE_CACHE_HANDOFF_EVIDENCE
           $executionLog = Join-Path $evidenceDir 'consumer-execution.json'
           $profile = Join-Path $evidenceDir 'consumer.profile.gz'
+          New-Item -ItemType Directory `
+            -Path $env:IREE_CACHE_HANDOFF_TEST_TMPDIR -Force | Out-Null
           $env:IREE_WINDOWS_CACHE_HANDOFF_PYTHON = `
             (Get-Command python.exe -ErrorAction Stop).Source
           Push-Location $bundle
           try {
+            python handoff/runner.py prefetch `
+              --summary=handoff-summary.json `
+              --output-dir=$env:IREE_WINDOWS_CACHE_HANDOFF_CAS_DIR
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
             bazel "--output_base=$env:IREE_CACHE_HANDOFF_OUTPUT_BASE" test `
               '--strategy=TestRunner=local' `
               '--cache_test_results=no' `
               "--profile=$profile" `
               "--execution_log_json_file=$executionLog" `
+              "--test_tmpdir=$env:IREE_CACHE_HANDOFF_TEST_TMPDIR" `
               '--test_output=all' `
               $target
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

@@ -191,6 +191,11 @@ class WindowsCacheHandoffTest(unittest.TestCase):
         self.assertEqual(len(_CasHandler.blobs), 2)
         self.assertEqual(summary["compatible_test_count"], 1)
         self.assertEqual(summary["unique_blob_count"], 2)
+        self.assertEqual(summary["cas_url"], self.cas_url)
+        self.assertEqual(
+            {(entry["sha256"], entry["size"]) for entry in summary["blobs"]},
+            {(digest, len(content)) for digest, content in _CasHandler.blobs.items()},
+        )
         self.assertEqual(
             (output_dir / "MODULE.bazel").read_text(encoding="utf-8"),
             'module(name = "hrx_windows_cache_handoff")\n',
@@ -216,6 +221,55 @@ class WindowsCacheHandoffTest(unittest.TestCase):
         )
         manifest_path = output_dir / summary["tests"][0]["manifest"]
         self.assertEqual(handoff.run_handoff_test(manifest_path), 0)
+
+    def test_prefetch_materializes_one_shared_hard_link_store(self):
+        execution_root, target_metadata, provider_metadata = self._write_fixture()
+        output_dir = self.root / "package"
+        summary = handoff.emit_handoff_packages(
+            target_metadata_path=target_metadata,
+            provider_metadata_path=provider_metadata,
+            execution_root=execution_root,
+            cas_url=self.cas_url,
+            output_dir=output_dir,
+        )
+        content_root = self.root / "content"
+        handoff.prefetch_handoff_blobs(
+            output_dir / "handoff-summary.json", content_root, jobs=2
+        )
+        self.assertEqual(
+            {path.name for path in content_root.iterdir()},
+            {entry["sha256"] for entry in summary["blobs"]},
+        )
+
+        manifest_path = output_dir / summary["tests"][0]["manifest"]
+        with (
+            mock.patch.dict(
+                os.environ,
+                {handoff.CAS_DIRECTORY_ENVIRONMENT_VARIABLE: str(content_root)},
+            ),
+            mock.patch.object(handoff.os, "link", wraps=handoff.os.link) as hard_link,
+        ):
+            self.assertEqual(handoff.run_handoff_test(manifest_path), 0)
+        self.assertEqual(hard_link.call_count, len(summary["blobs"]))
+
+    def test_prefetch_rejects_corrupt_existing_content(self):
+        execution_root, target_metadata, provider_metadata = self._write_fixture()
+        output_dir = self.root / "package"
+        summary = handoff.emit_handoff_packages(
+            target_metadata_path=target_metadata,
+            provider_metadata_path=provider_metadata,
+            execution_root=execution_root,
+            cas_url=self.cas_url,
+            output_dir=output_dir,
+        )
+        content_root = self.root / "content"
+        content_root.mkdir()
+        first_blob = summary["blobs"][0]
+        (content_root / first_blob["sha256"]).write_bytes(b"corrupt")
+        with self.assertRaisesRegex(handoff.HandoffError, "verified as"):
+            handoff.prefetch_handoff_blobs(
+                output_dir / "handoff-summary.json", content_root
+            )
 
     def test_emit_batches_packages_and_uploads_shared_blobs_once(self):
         execution_root, target_metadata, provider_metadata = self._write_fixture()

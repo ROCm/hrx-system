@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import hashlib
 import http.client
 import json
@@ -27,6 +28,7 @@ from urllib.parse import urlsplit
 SCHEMA_VERSION = 1
 MANIFEST_ENVIRONMENT_VARIABLE = "IREE_WINDOWS_CACHE_HANDOFF_MANIFEST"
 PYTHON_ENVIRONMENT_VARIABLE = "IREE_WINDOWS_CACHE_HANDOFF_PYTHON"
+CAS_DIRECTORY_ENVIRONMENT_VARIABLE = "IREE_WINDOWS_CACHE_HANDOFF_CAS_DIR"
 RUNFILES_PATH_BEGIN = "__IREE_BAZEL_RUNFILE_PATH_BEGIN__"
 RUNFILES_PATH_END = "__IREE_BAZEL_RUNFILE_PATH_END__"
 HANDOFF_PATH_BEGIN = "__IREE_CACHE_HANDOFF_RUNFILE_BEGIN__"
@@ -715,6 +717,11 @@ def emit_handoff_packages(
         )
     summary = {
         "schema_version": SCHEMA_VERSION,
+        "cas_url": cas.base_url,
+        "blobs": [
+            {"sha256": digest, "size": size}
+            for digest, size in sorted(uploaded_blobs.items())
+        ],
         "selected_test_count": len(configured_rules),
         "compatible_test_count": len(test_summaries),
         "incompatible_test_count": len(incompatible_labels),
@@ -728,6 +735,58 @@ def emit_handoff_packages(
         json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
     return summary
+
+
+def prefetch_handoff_blobs(
+    summary_path: Path, content_root: Path, *, jobs: int = 8
+) -> None:
+    """Materializes and verifies one shared content store for a test batch."""
+    summary = _load_json_object(summary_path)
+    cas_url = summary.get("cas_url")
+    blobs = summary.get("blobs")
+    if summary.get("schema_version") != SCHEMA_VERSION:
+        raise HandoffError("unsupported handoff summary schema")
+    if not isinstance(cas_url, str) or not isinstance(blobs, list):
+        raise HandoffError("handoff summary has malformed CAS metadata")
+    if jobs < 1:
+        raise HandoffError("prefetch jobs must be positive")
+    entries = []
+    digests = set()
+    for entry in blobs:
+        if not isinstance(entry, dict):
+            raise HandoffError("handoff summary has a malformed blob")
+        digest = entry.get("sha256")
+        size = entry.get("size")
+        if (
+            not isinstance(digest, str)
+            or len(digest) != 64
+            or not isinstance(size, int)
+            or size < 0
+        ):
+            raise HandoffError("handoff summary has invalid blob metadata")
+        if digest in digests:
+            raise HandoffError(f"handoff summary repeats CAS blob {digest}")
+        digests.add(digest)
+        entries.append((digest, size))
+
+    content_root.mkdir(parents=True, exist_ok=True)
+    cas = CasClient(cas_url)
+
+    def fetch(entry: tuple[str, int]) -> None:
+        digest, size = entry
+        destination = content_root / digest
+        if destination.exists():
+            actual_digest, actual_size = _sha256(destination)
+            if actual_digest != digest or actual_size != size:
+                raise HandoffError(
+                    f"prefetched CAS blob {digest} verified as "
+                    f"{actual_digest}/{actual_size}, expected {digest}/{size}"
+                )
+            return
+        cas.get(destination, digest, size)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as executor:
+        list(executor.map(fetch, entries))
 
 
 def _resolve_handoff_value(value: str, runfiles_root: Path) -> str:
@@ -780,8 +839,12 @@ def _materialize_runfiles(manifest: dict[str, Any], root: Path) -> None:
     entries = manifest.get("runfiles")
     if not isinstance(cas_url, str) or not isinstance(entries, list):
         raise HandoffError("handoff manifest has malformed CAS metadata")
+    shared_content_root_value = os.environ.get(CAS_DIRECTORY_ENVIRONMENT_VARIABLE)
+    shared_content_root = (
+        Path(shared_content_root_value) if shared_content_root_value else None
+    )
     cas = CasClient(cas_url)
-    content_root = root / ".cas"
+    content_root = shared_content_root or root / ".cas"
     for entry in entries:
         if not isinstance(entry, dict) or not isinstance(entry.get("path"), str):
             raise HandoffError("handoff manifest has a malformed runfile")
@@ -802,9 +865,23 @@ def _materialize_runfiles(manifest: dict[str, Any], root: Path) -> None:
         ):
             raise HandoffError(f"runfile {logical_path!r} has invalid CAS metadata")
         content_path = content_root / digest
-        if not content_path.exists():
+        if shared_content_root is not None:
+            if not content_path.is_file() or content_path.stat().st_size != size:
+                raise HandoffError(
+                    f"CAS blob {digest} was not prefetched into {content_root}"
+                )
+        elif not content_path.exists():
             cas.get(content_path, digest, size)
-        shutil.copyfile(content_path, destination)
+        if shared_content_root is not None:
+            try:
+                os.link(content_path, destination)
+            except OSError as exc:
+                raise HandoffError(
+                    f"cannot hard-link prefetched CAS blob {digest} into "
+                    f"the test runfiles tree: {exc}"
+                ) from exc
+        else:
+            shutil.copyfile(content_path, destination)
         if entry.get("executable") is True:
             destination.chmod(destination.stat().st_mode | stat.S_IXUSR)
 
@@ -970,6 +1047,12 @@ def _parse_arguments(argv: list[str]) -> argparse.Namespace:
     )
     audit_parser.add_argument("--execution-log", type=Path, required=True)
     audit_parser.add_argument("--output", type=Path, required=True)
+    prefetch_parser = subparsers.add_parser(
+        "prefetch", help="Materialize and verify the shared CAS content store"
+    )
+    prefetch_parser.add_argument("--summary", type=Path, required=True)
+    prefetch_parser.add_argument("--output-dir", type=Path, required=True)
+    prefetch_parser.add_argument("--jobs", type=int, default=8)
     run_parser = subparsers.add_parser(
         "run", help="Materialize and execute one handoff test"
     )
@@ -991,6 +1074,13 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if arguments.command == "audit":
             audit_consumer_execution(arguments.execution_log, arguments.output)
+            return 0
+        if arguments.command == "prefetch":
+            prefetch_handoff_blobs(
+                arguments.summary,
+                arguments.output_dir,
+                jobs=arguments.jobs,
+            )
             return 0
         test_arguments = arguments.test_arguments
         if test_arguments[:1] == ["--"]:
