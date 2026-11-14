@@ -178,18 +178,13 @@ static iree_status_t loom_amdgpu_program_emission_build_call_fixups(
     IREE_ASSERT_NE(callable, NULL);
     loom_amdgpu_hsaco_call_fixup_t* target = &call_fixups[i];
     target->target_function_ordinal = callable->helper_ordinal;
-    if (!iree_checked_add_u64(entry_byte_offset, source->base_pc_byte_offset,
-                              &target->base_pc_byte_offset) ||
-        !iree_checked_add_u64(entry_byte_offset,
-                              source->low_literal_byte_offset,
-                              &target->low_literal_byte_offset) ||
-        !iree_checked_add_u64(entry_byte_offset,
-                              source->high_literal_byte_offset,
-                              &target->high_literal_byte_offset)) {
-      return iree_make_status(
-          IREE_STATUS_OUT_OF_RANGE,
-          "AMDGPU retained-program call fixup offset overflowed");
-    }
+    // Entry composition already admitted the combined prefix and body extent.
+    target->base_pc_byte_offset =
+        entry_byte_offset + source->base_pc_byte_offset;
+    target->low_literal_byte_offset =
+        entry_byte_offset + source->low_literal_byte_offset;
+    target->high_literal_byte_offset =
+        entry_byte_offset + source->high_literal_byte_offset;
   }
   *out_call_fixups = call_fixups;
   return iree_ok_status();
