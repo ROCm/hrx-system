@@ -896,28 +896,27 @@ def _resolve_handoff_value(value: str, runfiles_root: Path) -> str:
     return result
 
 
-def _encode_runfiles_value(value: str) -> str:
-    return value.replace("\\", r"\b").replace("\n", r"\n").replace(" ", r"\s")
-
-
 def _write_runfiles_manifest(
     path: Path, entries: list[dict[str, Any]], root: Path
 ) -> None:
+    """Writes the legacy manifest format consumed by Bazel's Windows launcher."""
     lines = []
     for entry in entries:
         logical_path = entry["path"]
         physical_path = str(root / PurePosixPath(logical_path))
-        if any(
-            character in logical_path + physical_path for character in (" ", "\n", "\\")
-        ):
-            lines.append(
-                " "
-                + _encode_runfiles_value(logical_path)
-                + " "
-                + _encode_runfiles_value(physical_path)
+        if " " in logical_path or "\n" in logical_path or "\r" in logical_path:
+            raise HandoffError(
+                "Bazel's native Windows launcher cannot represent runfile path "
+                f"{logical_path!r} in its manifest"
             )
-        else:
-            lines.append(f"{logical_path} {physical_path}")
+        if "\n" in physical_path or "\r" in physical_path:
+            raise HandoffError(
+                "Bazel's native Windows launcher cannot represent physical path "
+                f"{physical_path!r} in its manifest"
+            )
+        # Bazel's native Windows launcher splits each line at its first space.
+        # Backslashes and subsequent spaces in the physical path are literal.
+        lines.append(f"{logical_path} {physical_path}")
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 

@@ -371,6 +371,33 @@ class WindowsCacheHandoffTest(unittest.TestCase):
                 output_dir / "handoff-summary.json", content_root
             )
 
+    def test_subject_manifest_matches_native_windows_launcher_format(self):
+        manifest = self.root / "MANIFEST"
+        runfiles_root = self.root / "runfiles tree"
+        entries = [{"path": "_main/bin/test.exe"}]
+
+        handoff._write_runfiles_manifest(manifest, entries, runfiles_root)
+
+        line = manifest.read_text(encoding="utf-8").rstrip("\n")
+        logical_path, separator, physical_path = line.partition(" ")
+        self.assertEqual(separator, " ")
+        self.assertEqual(logical_path, "_main/bin/test.exe")
+        self.assertEqual(
+            physical_path,
+            str(runfiles_root / "_main/bin/test.exe"),
+        )
+        self.assertNotIn(r"\s", line)
+
+    def test_subject_manifest_rejects_unrepresentable_logical_path(self):
+        with self.assertRaisesRegex(
+            handoff.HandoffError, "cannot represent runfile path"
+        ):
+            handoff._write_runfiles_manifest(
+                self.root / "MANIFEST",
+                [{"path": "_main/path with space"}],
+                self.root / "runfiles",
+            )
+
     def test_emit_batches_packages_and_uploads_shared_blobs_once(self):
         execution_root, target_metadata, provider_metadata = self._write_fixture()
         second_executable = execution_root / "bazel-out/bin/second.exe"
