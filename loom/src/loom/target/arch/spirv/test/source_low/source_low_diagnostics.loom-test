@@ -547,7 +547,7 @@ spirv.target<vulkan1_3> @target
 
 // Required single-rounding FMA cannot become separate multiply and add.
 func.def target(@target) @explicit_fma_requires_fused_instruction(%a: f32, %b: f32, %c: f32) -> (f32) {
-  // ERROR@+1: TARGET/001 {op_name="scalar.fmaf"}
+  // ERROR@+1: TARGET/003 {op_name="scalar.fmaf", subject_role="descriptor", subject_name="spirv.op_fma.f32", constraint_key="descriptor_available"}
   %result = scalar.fmaf %a, %b, %c : f32
   func.return %result : f32
 }

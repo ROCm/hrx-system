@@ -282,7 +282,7 @@ _ALL_PROFILE_XFAILS = {
     "numeric/conversion/float8_dequantization.loom:@e8m0_mxfp4_bf16": "TARGET/002",
     "numeric/conversion/float8_dequantization.loom:@e8m0_mxfp4_wide_bf16": "TARGET/002",
     "numeric/predicate/extract.loom:@predicate_extract": "TARGET/003",
-    "numeric/vector/broadcast_arithmetic.loom:@broadcast_fma": "TARGET/001",
+    "numeric/vector/broadcast_arithmetic.loom:@broadcast_fma": "TARGET/003",
 }
 
 _EXTENDED_TYPES_XFAILS = {
@@ -304,8 +304,8 @@ _EXTENDED_TYPES_XFAILS = {
     "memory/storage/workgroup.loom:@workgroup_packet_exchange": "TARGET/003",
     "memory/view/strided_vectors.loom:@strided_vector_address_spaces": "TARGET/003",
     "numeric/conversion/float8_dequantization.loom:@float8_dequantization": "TARGET/002",
-    "numeric/vector/broadcast_arithmetic.loom:@broadcast_arithmetic_bf16": "TARGET/001",
-    "numeric/vector/broadcast_arithmetic.loom:@broadcast_arithmetic_f16": "TARGET/001",
+    "numeric/vector/broadcast_arithmetic.loom:@broadcast_arithmetic_bf16": "TARGET/002",
+    "numeric/vector/broadcast_arithmetic.loom:@broadcast_arithmetic_f16": "TARGET/003",
 }
 
 _NO_EXTENDED_TYPES_XFAILS = {
@@ -464,7 +464,7 @@ _SPIRV_EXECUTION_XFAILS = {
     # Native fragment loads require 16-byte alignment; this source proves four.
     "control/branch/guards.loom:@selected_fragment_scale_values": "TARGET/050",
     "control/branch/structured.loom:@structured_branch_values": "TARGET/001",
-    "control/loop/vector_recurrence.loom:@wide_conditional_accumulation_values": "TARGET/001",
+    "control/loop/vector_recurrence.loom:@wide_conditional_accumulation_values": "TARGET/003",
     "function/buffer/arguments.loom:@buffer_argument_values": "TARGET/001",
     "function/buffer/arguments.loom:@buffer_extent_values": "TARGET/001",
     "function/buffer/call_overflow.loom:@buffer_overflow_values": "LOWERING/044",
@@ -548,27 +548,27 @@ _SPIRV_EXECUTION_XFAILS = {
     "numeric/float/roots.loom:@cube_root_values": "LOWERING/036",
     "numeric/float/roots.loom:@root_f64_values": "LOWERING/036",
     "numeric/float/roots.loom:@root_values": "LOWERING/036",
-    "numeric/float/scalar_f32.loom:@scalar_f32_denormal_fma_values": "TARGET/001",
+    "numeric/float/scalar_f32.loom:@scalar_f32_denormal_fma_values": "TARGET/003",
     "numeric/float/scalar_f32.loom:@scalar_f32_denormal_values": "EXPECT/002",
     "numeric/float/scalar_f32.loom:@scalar_f32_values": "LOWERING/036",
-    "numeric/float/scalar_float64.loom:@scalar_float64_fma_random_values": "TARGET/001",
-    "numeric/float/scalar_float64.loom:@scalar_float64_fma_special_values": "TARGET/001",
-    "numeric/float/selectors.loom:@selector_f32_values": "TARGET/001",
-    "numeric/float/selectors.loom:@selector_f64_values": "TARGET/001",
+    "numeric/float/scalar_float64.loom:@scalar_float64_fma_random_values": "TARGET/003",
+    "numeric/float/scalar_float64.loom:@scalar_float64_fma_special_values": "TARGET/003",
+    "numeric/float/selectors.loom:@selector_f32_values": "TARGET/003",
+    "numeric/float/selectors.loom:@selector_f64_values": "TARGET/003",
     "numeric/float/trigonometry.loom:@ordinary_trigonometry": "LOWERING/036",
     "numeric/float/turns.loom:@turn_values": "LOWERING/036",
     "numeric/integer/bitfield.loom:@bitfield_values": "TARGET/003",
     "numeric/matrix/nvfp4.loom:@nvfp4_matrix_values": "TARGET/002",
-    # BF16-capable profiles reach the missing FMA contract; other devices reject
+    # BF16-capable profiles reject unsupported BF16 FMA; other devices reject
     # the narrow carrier before arithmetic selection.
-    "numeric/vector/broadcast_arithmetic.loom:@broadcast_arithmetic_bf16_values": "TARGET/001,TARGET/003",
-    "numeric/vector/broadcast_arithmetic.loom:@broadcast_arithmetic_f16_values": "TARGET/001",
-    "numeric/vector/broadcast_arithmetic.loom:@broadcast_fma_values": "TARGET/001",
-    "numeric/vector/f32.loom:@vector_bf16_origin_fma_values": "TARGET/001",
-    "numeric/vector/f32.loom:@vector_compensated_integer_product_values": "TARGET/001",
+    "numeric/vector/broadcast_arithmetic.loom:@broadcast_arithmetic_bf16_values": "TARGET/002,TARGET/003",
+    "numeric/vector/broadcast_arithmetic.loom:@broadcast_arithmetic_f16_values": "TARGET/003",
+    "numeric/vector/broadcast_arithmetic.loom:@broadcast_fma_values": "TARGET/003",
+    "numeric/vector/f32.loom:@vector_bf16_origin_fma_values": "TARGET/003",
+    "numeric/vector/f32.loom:@vector_compensated_integer_product_values": "TARGET/003",
     "numeric/vector/f32.loom:@vector_f32_square_root_values": "LOWERING/036",
-    "numeric/vector/floating.loom:@bfloat_lookup_arithmetic_values": "TARGET/001",
-    "numeric/vector/reductions.loom:@vector_bfloat_dot_reduction_values": "TARGET/001",
+    "numeric/vector/floating.loom:@bfloat_lookup_arithmetic_values": "TARGET/003",
+    "numeric/vector/reductions.loom:@vector_bfloat_dot_reduction_values": "TARGET/003",
 }
 
 # The hardware-discovered profile selects descriptors from the physical device.

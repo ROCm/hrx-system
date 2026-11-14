@@ -1,0 +1,107 @@
+// RUN: emit spirv-low target=spirv:vulkan1.3+bda features=FMA_FLOAT32,FLOAT32_ROUNDING_RTE
+
+// Finite values with native subnormal behavior need no FloatControls2 support.
+func.def @finite_native(%a: f32, %b: f32, %c: f32) -> (f32) {
+  %result = scalar.fmaf<nnan|ninf|nsz|afn> %a, %b, %c : f32
+  func.return %result : f32
+}
+
+// ----
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @finite_native(%a: reg<spirv.id : f32>, %b: reg<spirv.id : f32>, %c: reg<spirv.id : f32>) -> (reg<spirv.id : f32>) asm {
+  %result = OpFmaKHR.finite_afn.f32 %a, %b, %c
+  return %result
+}
+
+// ====
+
+// RUN: emit spirv-low target=spirv:vulkan1.3+bda features=FMA_FLOAT32,FLOAT32_ROUNDING_RTE,FLOAT_CONTROLS2,FLOAT32_SIGNED_ZERO_INF_NAN_PRESERVE
+
+// AFN removes only the denormal-preservation requirement.
+func.def @native_denorms(%a: f32, %b: f32, %c: f32) -> (f32) {
+  %result = scalar.fmaf<afn> %a, %b, %c : f32
+  func.return %result : f32
+}
+
+// ----
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @native_denorms(%a: reg<spirv.id : f32>, %b: reg<spirv.id : f32>, %c: reg<spirv.id : f32>) -> (reg<spirv.id : f32>) asm {
+  %result = OpFmaKHR.afn.f32 %a, %b, %c
+  return %result
+}
+
+// ====
+
+// RUN: emit spirv-low target=spirv:vulkan1.3+bda features=FMA_FLOAT32,FLOAT32_ROUNDING_RTE,FLOAT32_DENORM_PRESERVE
+
+func.def @finite_preserve_denorms(%a: f32, %b: f32, %c: f32) -> (f32) {
+  %result = scalar.fmaf<nnan|ninf|nsz> %a, %b, %c : f32
+  func.return %result : f32
+}
+
+// ----
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @finite_preserve_denorms(%a: reg<spirv.id : f32>, %b: reg<spirv.id : f32>, %c: reg<spirv.id : f32>) -> (reg<spirv.id : f32>) asm {
+  %result = OpFmaKHR.finite.f32 %a, %b, %c
+  return %result
+}
+
+// ====
+
+// RUN: emit spirv-low target=spirv:vulkan1.3+bda features=FMA_FLOAT32,FLOAT32_ROUNDING_RTE,FLOAT_CONTROLS2,FLOAT32_SIGNED_ZERO_INF_NAN_PRESERVE
+
+// A native fused instruction alone cannot preserve subnormal results.
+func.def @missing_denorms(%a: f32, %b: f32, %c: f32) -> (f32) {
+  // ERROR@+1: TARGET/003 {subject_role="descriptor", subject_name="spirv.op_fma.f32", constraint_key="descriptor_available"}
+  %result = scalar.fmaf %a, %b, %c : f32
+  func.return %result : f32
+}
+
+// ====
+
+// RUN: emit spirv-low target=spirv:vulkan1.3+bda features=FMA_FLOAT32,FLOAT32_ROUNDING_RTE,FLOAT32_DENORM_PRESERVE,FLOAT32_SIGNED_ZERO_INF_NAN_PRESERVE
+
+// Legacy SignedZeroInfNanPreserve does not apply to OpFmaKHR.
+func.def @missing_instruction_controls(%a: f32, %b: f32, %c: f32) -> (f32) {
+  // ERROR@+1: TARGET/003 {subject_role="descriptor", subject_name="spirv.op_fma.f32", constraint_key="descriptor_available"}
+  %result = scalar.fmaf %a, %b, %c : f32
+  func.return %result : f32
+}
+
+// ====
+
+// RUN: emit spirv-low target=spirv:vulkan1.3+bda features=FMA_FLOAT32
+
+func.def @missing_rounding(%a: f32, %b: f32, %c: f32) -> (f32) {
+  // ERROR@+1: TARGET/003 {subject_role="descriptor", subject_name="spirv.op_fma.finite_afn.f32", constraint_key="descriptor_available"}
+  %result = scalar.fmaf<nnan|ninf|nsz|afn> %a, %b, %c : f32
+  func.return %result : f32
+}
+
+// ====
+
+// RUN: emit spirv-low target=spirv:vulkan1.3+bda features=FLOAT64,FMA_FLOAT64,FLOAT32_ROUNDING_RTE
+
+func.def @missing_width(%a: f32, %b: f32, %c: f32) -> (f32) {
+  // ERROR@+1: TARGET/003 {subject_role="descriptor", subject_name="spirv.op_fma.finite_afn.f32", constraint_key="descriptor_available"}
+  %result = scalar.fmaf<nnan|ninf|nsz|afn> %a, %b, %c : f32
+  func.return %result : f32
+}
+
+// ====
+
+// RUN: emit spirv-low target=spirv:vulkan1.3+bda+extended-types features=BFLOAT16_TYPE_KHR,FMA_FLOAT32,FLOAT32_ROUNDING_RTE
+
+// Widening an FMA and then narrowing it can double-round BF16 and FP8 results.
+func.def @bfloat(%a: bf16, %b: bf16, %c: bf16) -> (bf16) {
+  // ERROR@+1: TARGET/002
+  %result = scalar.fmaf %a, %b, %c : bf16
+  func.return %result : bf16
+}
+
+// ====
+
+// RUN: emit spirv-low target=spirv:vulkan1.3+bda+extended-types features=FMA_FLOAT16,FLOAT16_ROUNDING_RTE
+
+func.def @float8(%a: f8E5M2, %b: f8E5M2, %c: f8E5M2) -> (f8E5M2) {
+  // ERROR@+1: TARGET/002
+  %result = scalar.fmaf<nnan|ninf|nsz|afn> %a, %b, %c : f8E5M2
+  func.return %result : f8E5M2
+}

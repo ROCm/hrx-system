@@ -1,0 +1,115 @@
+// RUN: emit spirv-low target=spirv:vulkan1.3+bda+extended-types control-flow=structured-low features=FMA_FLOAT16,FMA_FLOAT32,FMA_FLOAT64,FLOAT_CONTROLS2,FLOAT16_ROUNDING_RTE,FLOAT32_ROUNDING_RTE,FLOAT64_ROUNDING_RTE,FLOAT16_DENORM_PRESERVE,FLOAT32_DENORM_PRESERVE,FLOAT64_DENORM_PRESERVE,FLOAT16_SIGNED_ZERO_INF_NAN_PRESERVE,FLOAT32_SIGNED_ZERO_INF_NAN_PRESERVE,FLOAT64_SIGNED_ZERO_INF_NAN_PRESERVE
+
+// Every source permission combination selects one native instruction. AFN only
+// relaxes subnormal handling; finite also requires NNAN, NINF, and NSZ together.
+func.def @policies(%a: f32, %b: f32, %c: f32) -> (f32, f32, f32, f32) {
+  %strict = scalar.fmaf %a, %b, %c : f32
+  %native_denorms = scalar.fmaf<afn> %a, %b, %c : f32
+  %finite = scalar.fmaf<nnan|ninf|nsz> %a, %b, %c : f32
+  %finite_native_denorms = scalar.fmaf<nnan|ninf|nsz|afn> %a, %b, %c : f32
+  func.return %strict, %native_denorms, %finite, %finite_native_denorms : f32, f32, f32, f32
+}
+
+// ----
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @policies(%a: reg<spirv.id : f32>, %b: reg<spirv.id : f32>, %c: reg<spirv.id : f32>) -> (reg<spirv.id : f32>, reg<spirv.id : f32>, reg<spirv.id : f32>, reg<spirv.id : f32>) asm {
+  %strict = OpFmaKHR.f32 %a, %b, %c
+  %native_denorms = OpFmaKHR.afn.f32 %a, %b, %c
+  %finite = OpFmaKHR.finite.f32 %a, %b, %c
+  %finite_native_denorms = OpFmaKHR.finite_afn.f32 %a, %b, %c
+  return %strict, %native_denorms, %finite, %finite_native_denorms
+}
+
+// ====
+
+func.def @half(%a: f16, %b: f16, %c: f16) -> (f16) {
+  %result = scalar.fmaf %a, %b, %c : f16
+  func.return %result : f16
+}
+
+// ----
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @half(%a: reg<spirv.id : f16>, %b: reg<spirv.id : f16>, %c: reg<spirv.id : f16>) -> (reg<spirv.id : f16>) asm {
+  %result = OpFmaKHR.f16 %a, %b, %c
+  return %result
+}
+
+// ====
+
+func.def @double(%a: f64, %b: f64, %c: f64) -> (f64) {
+  %result = scalar.fmaf %a, %b, %c : f64
+  func.return %result : f64
+}
+
+// ----
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @double(%a: reg<spirv.id : f64>, %b: reg<spirv.id : f64>, %c: reg<spirv.id : f64>) -> (reg<spirv.id : f64>) asm {
+  %result = OpFmaKHR.f64 %a, %b, %c
+  return %result
+}
+
+// ====
+
+// Five loaded lanes require a native vector packet and a scalar tail.
+kernel.def @wide() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %byte_offset = index.constant 0 : offset
+  %input_view = buffer.view %input[%byte_offset] : buffer -> view<5xf32>
+  %output_view = buffer.view %output[%byte_offset] : buffer -> view<5xf32>
+  %value = vector.load %input_view[0] : view<5xf32> -> vector<5xf32>
+  %result = vector.fmaf %value, %value, %value : vector<5xf32>
+  vector.store %result, %output_view[0] : vector<5xf32>, view<5xf32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<spirv.logical.core> abi_layout({signature = (buffer, buffer) -> ()}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @wide() asm {
+  %input = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %output = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %25 = OpConstant.offset64 0
+  %26 = OpPtrAccessChain.storage_buffer.f32.byte_offset %input, %25
+  %27 = OpLoad.storage_buffer.f32 %26
+  %28 = OpConstant.offset64 4
+  %29 = OpPtrAccessChain.storage_buffer.f32.byte_offset %input, %28
+  %30 = OpLoad.storage_buffer.f32 %29
+  %31 = OpConstant.offset64 8
+  %32 = OpPtrAccessChain.storage_buffer.f32.byte_offset %input, %31
+  %33 = OpLoad.storage_buffer.f32 %32
+  %34 = OpConstant.offset64 12
+  %35 = OpPtrAccessChain.storage_buffer.f32.byte_offset %input, %34
+  %36 = OpLoad.storage_buffer.f32 %35
+  %37 = OpCompositeConstruct.v4f32 %27, %30, %33, %36
+  %38 = OpConstant.offset64 16
+  %39 = OpPtrAccessChain.storage_buffer.f32.byte_offset %input, %38
+  %40 = OpLoad.storage_buffer.f32 %39
+  %41 = OpFmaKHR.v4f32 %37, %37, %37
+  %42 = OpFmaKHR.f32 %40, %40, %40
+  %43 = OpCompositeExtract.v4f32.f32 %41, 0
+  %44 = OpCompositeExtract.v4f32.f32 %41, 1
+  %45 = OpCompositeExtract.v4f32.f32 %41, 2
+  %46 = OpCompositeExtract.v4f32.f32 %41, 3
+  %48 = OpPtrAccessChain.storage_buffer.f32.byte_offset %output, %25
+  OpStore.storage_buffer.f32 %48, %43
+  %50 = OpPtrAccessChain.storage_buffer.f32.byte_offset %output, %28
+  OpStore.storage_buffer.f32 %50, %44
+  %52 = OpPtrAccessChain.storage_buffer.f32.byte_offset %output, %31
+  OpStore.storage_buffer.f32 %52, %45
+  %54 = OpPtrAccessChain.storage_buffer.f32.byte_offset %output, %34
+  OpStore.storage_buffer.f32 %54, %46
+  %56 = OpPtrAccessChain.storage_buffer.f32.byte_offset %output, %38
+  OpStore.storage_buffer.f32 %56, %42
+  return
+}
+
+// ====
+
+// Partial exceptional-value permissions still need per-instruction controls.
+func.def @partial_permissions(%a: f32, %b: f32, %c: f32) -> (f32) {
+  %result = scalar.fmaf<nnan|ninf> %a, %b, %c : f32
+  func.return %result : f32
+}
+
+// ----
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @partial_permissions(%a: reg<spirv.id : f32>, %b: reg<spirv.id : f32>, %c: reg<spirv.id : f32>) -> (reg<spirv.id : f32>) asm {
+  %result = OpFmaKHR.f32 %a, %b, %c
+  return %result
+}

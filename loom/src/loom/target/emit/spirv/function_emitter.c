@@ -319,11 +319,19 @@ static iree_status_t loom_spirv_emit_boolean_constant_packet(
       loom_spirv_packet_row_result_type(row));
 }
 
-// Strict arithmetic and conversion chains preserve destination rounding:
-// Vulkan otherwise permits transformations that remove intermediate precision.
-static iree_status_t loom_spirv_emit_rounding_decoration(
+// Per-instruction controls preserve special values and destination rounding.
+// NoContraction and FPFastMathMode are mutually exclusive in SPIR-V.
+static iree_status_t loom_spirv_emit_arithmetic_decoration(
     loom_spirv_emit_state_t* state, const loom_low_descriptor_packet_t* packet,
     const loom_spirv_packet_row_t* row, uint32_t result_id) {
+  if (iree_any_bit_set(row->flags, LOOM_SPIRV_PACKET_FLAG_FP_FAST_MATH_NONE)) {
+    const uint32_t operands[] = {result_id,
+                                 LOOM_SPIRV_DECORATION_FP_FAST_MATH_MODE,
+                                 LOOM_SPIRV_FP_FAST_MATH_MODE_NONE};
+    return loom_spirv_binary_write_instruction(
+        loom_spirv_emit_section(state, LOOM_SPIRV_MODULE_SECTION_ANNOTATION),
+        LOOM_SPIRV_OP_DECORATE, operands, IREE_ARRAYSIZE(operands));
+  }
   if (!iree_any_bit_set(row->flags, LOOM_SPIRV_PACKET_FLAG_NO_CONTRACTION)) {
     return iree_ok_status();
   }
@@ -355,7 +363,7 @@ static iree_status_t loom_spirv_emit_binary_lhs_type_packet(
       operands[1].id,
   };
   IREE_RETURN_IF_ERROR(
-      loom_spirv_emit_rounding_decoration(state, packet, row, result_id));
+      loom_spirv_emit_arithmetic_decoration(state, packet, row, result_id));
   IREE_RETURN_IF_ERROR(loom_spirv_binary_write_instruction(
       loom_spirv_emit_section(state, LOOM_SPIRV_MODULE_SECTION_FUNCTION),
       row->opcode, instruction_operands, IREE_ARRAYSIZE(instruction_operands)));
@@ -384,7 +392,7 @@ static iree_status_t loom_spirv_emit_unary_typed_packet(
       operands[0].id,
   };
   IREE_RETURN_IF_ERROR(
-      loom_spirv_emit_rounding_decoration(state, packet, row, result_id));
+      loom_spirv_emit_arithmetic_decoration(state, packet, row, result_id));
   IREE_RETURN_IF_ERROR(loom_spirv_binary_write_instruction(
       loom_spirv_emit_section(state, LOOM_SPIRV_MODULE_SECTION_FUNCTION),
       row->opcode, instruction_operands, IREE_ARRAYSIZE(instruction_operands)));
@@ -415,6 +423,8 @@ static iree_status_t loom_spirv_emit_typed_packet(
   for (uint8_t i = 0; i < row->operand_count; ++i) {
     instruction_operands[2 + i] = operands[i].id;
   }
+  IREE_RETURN_IF_ERROR(
+      loom_spirv_emit_arithmetic_decoration(state, packet, row, result_id));
   IREE_RETURN_IF_ERROR(loom_spirv_binary_write_instruction(
       loom_spirv_emit_section(state, LOOM_SPIRV_MODULE_SECTION_FUNCTION),
       row->opcode, instruction_operands, 2 + row->operand_count));
