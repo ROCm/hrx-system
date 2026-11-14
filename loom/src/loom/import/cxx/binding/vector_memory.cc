@@ -6,7 +6,6 @@
 
 #include "loom/import/cxx/binding/vector_memory.h"
 
-#include <cxx/const_value.h>
 #include <cxx/names.h>
 #include <cxx/symbols.h>
 #include <cxx/types.h>
@@ -17,6 +16,7 @@
 #include <string_view>
 
 #include "loom/import/cxx/binding/index_values.h"
+#include "loom/import/cxx/binding/memory_access.h"
 #include "loom/import/cxx/source/error.h"
 #include "loom/ops/vector/ops.h"
 
@@ -87,28 +87,6 @@ loom_value_id_t view_component(Value value) {
   return value.components().back();
 }
 
-loom_memory_access_flags_t memory_access_flags(cxx::TranslationUnit& unit,
-                                               Diagnostics& diagnostics,
-                                               cxx::FunctionSymbol* function,
-                                               size_t argument_index,
-                                               cxx::AST* owner) {
-  auto arguments = function->templateArguments();
-  if (argument_index >= arguments.size()) {
-    return 0;
-  }
-  auto value = cxx::template_argument_value(arguments[argument_index]);
-  if (!value) {
-    return 0;
-  }
-  auto* number = std::get_if<cxx::ConstInt>(&*value);
-  if (!number || number->isNegative() ||
-      (number->toUWide() != 0 &&
-       number->toUWide() != LOOM_MEMORY_ACCESS_FLAG_ROOT_IN_BOUNDS)) {
-    diagnostics.reject(unit, owner, "unknown memory access contract");
-  }
-  return static_cast<loom_memory_access_flags_t>(number->toUIntMax());
-}
-
 }  // namespace
 
 std::optional<VectorMemoryIntrinsic::Operation>
@@ -171,9 +149,11 @@ std::optional<VectorMemoryIntrinsic> VectorMemoryIntrinsic::resolve(
   auto parameters = signature->parameterTypes();
   VectorMemoryIntrinsic result(*operation);
   if (*operation == Operation::Load || *operation == Operation::Store) {
-    result.memory_flags_ =
-        memory_access_flags(unit, diagnostics, function,
-                            *operation == Operation::Load ? 1 : 0, owner);
+    result.memory_flags_ = read_memory_access_flags(
+        unit, diagnostics, function, *operation == Operation::Load ? 1 : 0,
+        LOOM_MEMORY_ACCESS_FLAG_VOLATILE |
+            LOOM_MEMORY_ACCESS_FLAG_ROOT_IN_BOUNDS,
+        owner);
   }
   size_t view_index;
   size_t origin_index;

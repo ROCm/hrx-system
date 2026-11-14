@@ -1,0 +1,100 @@
+// RUN: pass canonicalize,cse,dce
+// Access flags apply to each observation, not to every use of a shared view.
+#include <loomcxx/vector.h>
+using loom::memory_access;
+using Words = unsigned __attribute__((ext_vector_type(4)));
+using View = loom::type::view<loom::type::shape<4>, unsigned>;
+constexpr auto observed_root = memory_access::volatile_ | memory_access::root_in_bounds;
+
+unsigned scalar_access(View values, unsigned replacement) {
+  unsigned ordinary = loom::view::load(values, 0);
+  unsigned rooted = loom::view::load<memory_access::root_in_bounds>(values, 1);
+  loom::view::load<memory_access::volatile_>(values, 2);
+  unsigned observed = loom::view::load<memory_access::volatile_>(values, 2);
+  unsigned both = loom::view::load<observed_root>(values, 3);
+  loom::view::store(replacement, values, 0);
+  loom::view::store<memory_access::root_in_bounds>(replacement, values, 1);
+  loom::view::store<memory_access::volatile_>(replacement, values, 2);
+  loom::view::store<observed_root>(replacement, values, 3);
+  loom::view::store<observed_root>(replacement, values, 3);
+  return ordinary + rooted + observed + both;
+}
+
+Words vector_access(View values, Words replacement) {
+  Words ordinary = loom::vector::load<Words>(values, {0});
+  Words rooted = loom::vector::load<Words, memory_access::root_in_bounds>(values, {0});
+  loom::vector::load<Words, memory_access::volatile_>(values, {0});
+  Words observed = loom::vector::load<Words, memory_access::volatile_>(values, {0});
+  Words both = loom::vector::load<Words, observed_root>(values, {0});
+  loom::vector::store(replacement, values, {0});
+  loom::vector::store<memory_access::root_in_bounds>(replacement, values, {0});
+  loom::vector::store<memory_access::volatile_>(replacement, values, {0});
+  loom::vector::store<observed_root>(replacement, values, {0});
+  loom::vector::store<observed_root>(replacement, values, {0});
+  return ordinary + rooted + observed + both;
+}
+
+// ----
+func.def public @scalar_access(%values: view<4xi32>, %replacement: i32) -> (i32) {
+  %81 = index.constant 0 : index
+  %ordinary = view.load %values[%81] : view<4xi32> -> i32
+  %80 = index.constant 1 : index
+  %rooted = view.load<root_in_bounds> %values[%80] : view<4xi32> -> i32
+  %79 = index.constant 2 : index
+  %11 = view.load<volatile> %values[%79] : view<4xi32> -> i32
+  %observed = view.load<volatile> %values[%79] : view<4xi32> -> i32
+  %77 = index.constant 3 : index
+  %both = view.load<volatile|root_in_bounds> %values[%77] : view<4xi32> -> i32
+  view.store %replacement, %values[%81] : i32, view<4xi32>
+  view.store<root_in_bounds> %replacement, %values[%80] : i32, view<4xi32>
+  view.store<volatile> %replacement, %values[%79] : i32, view<4xi32>
+  view.store<volatile|root_in_bounds> %replacement, %values[%77] : i32, view<4xi32>
+  view.store<volatile|root_in_bounds> %replacement, %values[%77] : i32, view<4xi32>
+  %28 = scalar.addi %ordinary, %rooted : i32
+  %29 = scalar.addi %28, %observed : i32
+  %30 = scalar.addi %29, %both : i32
+  func.return %30 : i32
+}
+
+func.def public @vector_access(%values: view<4xi32>, %replacement: vector<4xi32>) -> (vector<4xi32>) {
+  %91 = index.constant 0 : index
+  %ordinary = vector.load %values[%91] : view<4xi32> -> vector<4xi32>
+  %rooted = vector.load<root_in_bounds> %values[%91] : view<4xi32> -> vector<4xi32>
+  %45 = vector.load<volatile> %values[%91] : view<4xi32> -> vector<4xi32>
+  %observed = vector.load<volatile> %values[%91] : view<4xi32> -> vector<4xi32>
+  %both = vector.load<volatile|root_in_bounds> %values[%91] : view<4xi32> -> vector<4xi32>
+  vector.store %replacement, %values[%91] : vector<4xi32>, view<4xi32>
+  vector.store<root_in_bounds> %replacement, %values[%91] : vector<4xi32>, view<4xi32>
+  vector.store<volatile> %replacement, %values[%91] : vector<4xi32>, view<4xi32>
+  vector.store<volatile|root_in_bounds> %replacement, %values[%91] : vector<4xi32>, view<4xi32>
+  vector.store<volatile|root_in_bounds> %replacement, %values[%91] : vector<4xi32>, view<4xi32>
+  %69 = vector.addi %ordinary, %rooted : vector<4xi32>
+  %70 = vector.addi %69, %observed : vector<4xi32>
+  %71 = vector.addi %70, %both : vector<4xi32>
+  func.return %71 : vector<4xi32>
+}
+
+// ====
+// Static rank and dynamic extents do not alter observation semantics.
+#include <loomcxx/vector.h>
+namespace loomt = loom::type;
+using Shape = loomt::shape<loomt::dynamic, 4>;
+using Vector = loomt::vector<Shape, float>;
+using View = loomt::view<Shape, volatile float>;
+
+void dynamic_access(View values, loomt::index rows) {
+  auto first = loom::vector::load<Vector>(values, {0, 0}, {rows});
+  loom::vector::store(first, values, {0, 0});
+  auto second = loom::vector::load<Vector, loom::memory_access::root_in_bounds>(values, {0, 0}, {rows});
+  loom::vector::store<loom::memory_access::root_in_bounds>(second, values, {0, 0});
+}
+
+// ----
+func.def public @dynamic_access(%values_dim0: index, %values: view<[%values_dim0]x4xf32>, %rows: index) {
+  %36 = index.constant 0 : index
+  %first = vector.load<volatile> %values[%36, %36] : view<[%values_dim0]x4xf32> -> vector<[%rows]x4xf32>
+  vector.store<volatile> %first, %values[%36, %36] : vector<[%rows]x4xf32>, view<[%values_dim0]x4xf32>
+  %second = vector.load<volatile|root_in_bounds> %values[%36, %36] : view<[%values_dim0]x4xf32> -> vector<[%rows]x4xf32>
+  vector.store<volatile|root_in_bounds> %second, %values[%36, %36] : vector<[%rows]x4xf32>, view<[%values_dim0]x4xf32>
+  func.return
+}

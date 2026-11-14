@@ -1,4 +1,14 @@
 // RUN: verify
+// Atomic observations have their own ordering contract; ordinary volatile
+// flags are not valid atomic modifiers.
+#include <loomcxx/atomic.h>
+using namespace loom::atomic;
+unsigned entry(unsigned* pointer) {
+  // ERROR@+1: LOWERING/059 "unsupported memory access flags"
+  return loom::view::atomic::load<ordering::relaxed, scope::device, loom::memory_access::volatile_>(pointer);
+}
+
+// ====
 #include <loomcxx/atomic.h>
 using namespace loom::atomic;
 unsigned entry(unsigned* pointer) {

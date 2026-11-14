@@ -76,13 +76,22 @@ enum class memory_space {
   generic = 7,
 };
 
-// Source-level proof attached to one memory access. Ordinary accesses carry no
-// additional physical-root promise. root_in_bounds states that the complete
-// access lies within its allocation root; logical view bounds remain checked.
+// Semantic modifiers attached to one memory access, independently of other
+// accesses through the same view. Flags compose with operator|.
 enum class memory_access {
   none = 0,
+  // Preserve each access and its order relative to other volatile accesses.
+  // Does not provide atomicity, synchronization, or cache coherence.
+  volatile_ = 1,
+  // The complete access lies within its allocation root. Logical view bounds
+  // remain checked.
   root_in_bounds = 8,
 };
+
+static constexpr memory_access operator|(memory_access lhs, memory_access rhs) {
+  return static_cast<memory_access>(static_cast<unsigned>(lhs) |
+                                    static_cast<unsigned>(rhs));
+}
 
 namespace buffer {
 

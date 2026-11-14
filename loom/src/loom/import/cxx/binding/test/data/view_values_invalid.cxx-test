@@ -1,4 +1,20 @@
 // RUN: verify
+// Unknown bits cannot silently erase a memory observation contract.
+#include <loomcxx/view.h>
+unsigned invalid(loom::type::view<loom::type::shape<1>, unsigned> source) {
+  // ERROR@+1: LOWERING/059 "unsupported memory access flags"
+  return loom::view::load<static_cast<loom::memory_access>(-1)>(source, 0);
+}
+
+// ====
+#include <loomcxx/vector.h>
+using Words = unsigned __attribute__((ext_vector_type(4)));
+void invalid(Words value, loom::type::view<loom::type::shape<4>, unsigned> destination) {
+  // ERROR@+1: LOWERING/059 "unsupported memory access flags"
+  loom::vector::store<static_cast<loom::memory_access>(2)>(value, destination, {0});
+}
+
+// ====
 // A buffer view requires an encoding with the same logical rank.
 #include <loomcxx/view.h>
 using ResultLayout = loom::type::encoding<loom::encoding::role::layout, 2>;

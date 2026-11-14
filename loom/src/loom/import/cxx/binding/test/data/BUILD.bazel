@@ -21,6 +21,7 @@ loom_check_test_suite(
         "encoding_schemas.cxx-test",
         "encoding_schemas_invalid.cxx-test",
         "index_views.cxx-test",
+        "memory_access.cxx-test",
         "observations.cxx-test",
         "paged_online_softmax_loop_f32.cxx-test",
         "refinement.cxx-test",

@@ -6,7 +6,6 @@
 
 #include "loom/import/cxx/binding/view.h"
 
-#include <cxx/const_value.h>
 #include <cxx/names.h>
 #include <cxx/symbols.h>
 #include <cxx/types.h>
@@ -20,6 +19,7 @@
 
 #include "iree/base/api.h"
 #include "loom/import/cxx/binding/index_values.h"
+#include "loom/import/cxx/binding/memory_access.h"
 #include "loom/import/cxx/source/error.h"
 #include "loom/import/cxx/value/storage.h"
 #include "loom/ops/buffer/ops.h"
@@ -65,28 +65,6 @@ const ViewPartition& require_view(cxx::TranslationUnit& unit,
     diagnostics.reject(unit, owner, "view operation requires a view value");
   }
   return static_cast<const ViewPartition&>(partition);
-}
-
-loom_memory_access_flags_t memory_access_flags(cxx::TranslationUnit& unit,
-                                               Diagnostics& diagnostics,
-                                               cxx::FunctionSymbol* function,
-                                               size_t argument_index,
-                                               cxx::AST* owner) {
-  auto arguments = function->templateArguments();
-  if (argument_index >= arguments.size()) {
-    return 0;
-  }
-  auto value = cxx::template_argument_value(arguments[argument_index]);
-  if (!value) {
-    return 0;
-  }
-  auto* number = std::get_if<cxx::ConstInt>(&*value);
-  if (!number || number->isNegative() ||
-      (number->toUWide() != 0 &&
-       number->toUWide() != LOOM_MEMORY_ACCESS_FLAG_ROOT_IN_BOUNDS)) {
-    diagnostics.reject(unit, owner, "unknown memory access contract");
-  }
-  return static_cast<loom_memory_access_flags_t>(number->toUIntMax());
 }
 
 size_t dynamic_extent_count(const ViewPartition& view) {
@@ -237,7 +215,10 @@ std::optional<ViewIntrinsic> ViewIntrinsic::resolve(
   ViewIntrinsic result(*selected);
   if (*selected == Operation::Load || *selected == Operation::Store) {
     result.memory_flags_ =
-        memory_access_flags(unit, diagnostics, function, 0, owner);
+        read_memory_access_flags(unit, diagnostics, function, 0,
+                                 LOOM_MEMORY_ACCESS_FLAG_VOLATILE |
+                                     LOOM_MEMORY_ACCESS_FLAG_ROOT_IN_BOUNDS,
+                                 owner);
   }
   switch (*selected) {
     case Operation::LayoutDense: {
