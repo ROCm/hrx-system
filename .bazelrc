@@ -42,6 +42,11 @@ common:locked --lockfile_mode=error
 # unreachable from developer machines and is not selected by release workflows.
 build:rocm-ci-cache --remote_cache=grpc://bazelremote-svc.bazelremote-ns.svc.cluster.local:9092
 
+# Local action outputs may be consumed immediately by dependent actions. Finish
+# publishing them before reporting action completion so cache reads never
+# overlap execution of a just-linked Windows image.
+build:rocm-ci-cache --noremote_cache_async
+
 # Cached build actions may cross CI runs, but every test invocation must still
 # execute against the hardware and process environment assigned to that job.
 test:rocm-ci-cache --cache_test_results=no
