@@ -291,6 +291,13 @@ def test_target_refs_header_is_constant_fragment() -> None:
     assert "LOOM_AMDGPU_DESCRIPTOR_REF_V_MOV_B32" in source
 
 
+def test_target_refs_header_retains_unselected_control_schemas() -> None:
+    source = amdgpu_target_refs._emit_tables_header((_descriptor_set(*_valid_contract_descriptors()),))
+    assert source.count("#define loom_amdgpu_s_set_vgpr_msb_mode(attributes)") == 1
+    assert "#define LOOM_AMDGPU_WAITCNT_VMCNT_IMMEDIATE_SLOT UINT16_C(0)" in source
+    assert "#define LOOM_AMDGPU_WAITCNT_LGKMCNT_IMMEDIATE_SLOT UINT16_C(1)" in source
+
+
 def test_native_immediate_slots_follow_descriptor_order() -> None:
     descriptor = _descriptor(
         "amdgpu.s_waitcnt",
@@ -299,14 +306,14 @@ def test_native_immediate_slots_follow_descriptor_order() -> None:
             Immediate("vmcnt", ImmediateKind.UNSIGNED),
         ),
     )
-    slots = amdgpu_target_refs._native_immediate_slots((_descriptor_set(descriptor),))
+    slots = amdgpu_target_refs._native_immediate_slots(((descriptor.key, descriptor.immediates),))
     assert slots["LOOM_AMDGPU_WAITCNT_VMCNT_IMMEDIATE_SLOT"] == 1
     assert slots["LOOM_AMDGPU_WAITCNT_LGKMCNT_IMMEDIATE_SLOT"] == 0
 
     with _raises_value_error("inconsistent descriptor slots across targets"):
-        amdgpu_target_refs._native_immediate_slots((_descriptor_set(descriptor), _descriptor_set(replace(descriptor, immediates=descriptor.immediates[::-1]))))
+        amdgpu_target_refs._native_immediate_slots(((descriptor.key, descriptor.immediates), (descriptor.key, descriptor.immediates[::-1])))
     with _raises_value_error("missing immediate 'vmcnt'"):
-        amdgpu_target_refs._native_immediate_slots((_descriptor_set(replace(descriptor, immediates=descriptor.immediates[:1])),))
+        amdgpu_target_refs._native_immediate_slots(((descriptor.key, descriptor.immediates[:1]),))
 
 
 def test_target_ref_tables_use_prebuilt_descriptor_sets() -> None:

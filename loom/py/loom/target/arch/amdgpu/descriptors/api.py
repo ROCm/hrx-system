@@ -763,6 +763,24 @@ def amdgpu_descriptor_ref_keys() -> tuple[str, ...]:
     return tuple(sorted(keys))
 
 
+@cache
+def amdgpu_descriptor_ref_immediates() -> tuple[tuple[str, tuple[Immediate, ...]], ...]:
+    """Returns declared immediate schemas without materializing ISA data.
+
+    Common compiler readers cover every family even in target-restricted builds.
+    Distinct schemas for the same key remain separate so the generator can
+    admit only fields whose positions agree across variants.
+    """
+
+    schemas: dict[tuple[str, tuple[Immediate, ...]], None] = {}
+    for builder in _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS.values():
+        for descriptor in (*builder.base.descriptors, *builder.extra_descriptors):
+            schemas[(descriptor.key, descriptor.immediates)] = None
+        for overlay in builder.overlay_rows():
+            schemas[(overlay.descriptor_key, overlay.immediates)] = None
+    return tuple(schemas)
+
+
 def amdgpu_descriptor_id_keys() -> tuple[str, ...]:
     """Returns descriptor keys that still need stable-ID compatibility refs."""
 
@@ -2012,6 +2030,7 @@ __all__ = (
     "amdgpu_core_descriptor_set_instruction_names_by_isa_key",
     "amdgpu_core_descriptor_set_overlay_rows",
     "amdgpu_descriptor_id_keys",
+    "amdgpu_descriptor_ref_immediates",
     "amdgpu_descriptor_ref_keys",
     "amdgpu_immediate_encoding_id_items",
     "build_amdgpu_core_descriptor_set",

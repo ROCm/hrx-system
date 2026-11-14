@@ -32,6 +32,7 @@ from loom.gen.target.low import attr_indices  # noqa: E402
 from loom.target.arch.amdgpu.descriptors import (  # noqa: E402
     amdgpu_common_reg_class_ids,
     amdgpu_core_descriptor_set_instruction_names_by_isa_key,
+    amdgpu_descriptor_ref_immediates,
     amdgpu_descriptor_ref_keys,
     amdgpu_immediate_encoding_id_items,
     build_amdgpu_core_descriptor_sets_from_specs,
@@ -844,31 +845,33 @@ def _materialize_descriptor_ref_tables(
     return descriptor_set_tables
 
 
-def _native_immediate_slots(descriptor_sets: Sequence[DescriptorSet]) -> dict[str, int]:
+def _native_immediate_slots(descriptor_immediates: Sequence[tuple[str, tuple[Immediate, ...]]]) -> dict[str, int]:
     fields = {
         "amdgpu.s_waitcnt": ("WAITCNT", ("vmcnt", "lgkmcnt")),
         "amdgpu.s_mov_b64.symbol": ("SYMBOL_ADDRESS", ("symbol", "byte_offset")),
     }
     slots: dict[str, int] = {}
-    for descriptor_set in descriptor_sets:
-        for descriptor in descriptor_set.descriptors:
-            if descriptor.key not in fields:
-                continue
-            prefix, names = fields[descriptor.key]
-            ordinals = {immediate.field_name: index for index, immediate in enumerate(descriptor.immediates)}
-            for name in names:
-                if name not in ordinals:
-                    raise ValueError(f"AMDGPU native assembly descriptor '{descriptor.key}' is missing immediate '{name}'")
-                constant = f"LOOM_AMDGPU_{prefix}_{name.upper()}_IMMEDIATE_SLOT"
-                ordinal = ordinals[name]
-                if constant in slots and slots[constant] != ordinal:
-                    raise ValueError(f"AMDGPU native assembly immediate '{descriptor.key}.{name}' has inconsistent descriptor slots across targets")
-                slots[constant] = ordinal
+    for key, immediates in descriptor_immediates:
+        if key not in fields:
+            continue
+        prefix, names = fields[key]
+        ordinals = {immediate.field_name: index for index, immediate in enumerate(immediates)}
+        for name in names:
+            if name not in ordinals:
+                raise ValueError(f"AMDGPU native assembly descriptor '{key}' is missing immediate '{name}'")
+            constant = f"LOOM_AMDGPU_{prefix}_{name.upper()}_IMMEDIATE_SLOT"
+            ordinal = ordinals[name]
+            if constant in slots and slots[constant] != ordinal:
+                raise ValueError(f"AMDGPU native assembly immediate '{key}.{name}' has inconsistent descriptor slots across targets")
+            slots[constant] = ordinal
     return slots
 
 
 def _emit_tables_header(descriptor_sets: Sequence[DescriptorSet]) -> str:
     descriptor_ref_keys = amdgpu_descriptor_ref_keys()
+    # Shared readers need the complete declared schema, while selected ISA
+    # materializations additionally constrain the positions they can expose.
+    descriptor_immediates = (*amdgpu_descriptor_ref_immediates(), *((descriptor.key, descriptor.immediates) for descriptor_set in descriptor_sets for descriptor in descriptor_set.descriptors))
     lines = [
         "// Copyright 2026 The IREE Authors",
         "//",
@@ -893,7 +896,7 @@ def _emit_tables_header(descriptor_sets: Sequence[DescriptorSet]) -> str:
         f"#define LOOM_AMDGPU_REL32_BYTE_OFFSET_IMMEDIATE_SLOT {_u16_literal(_REL32_BYTE_OFFSET_IMMEDIATE_SLOT)}",
         "",
     ]
-    lines.extend(f"#define {name} {_u16_literal(index)}" for name, index in _native_immediate_slots(descriptor_sets).items())
+    lines.extend(f"#define {name} {_u16_literal(index)}" for name, index in _native_immediate_slots(descriptor_immediates).items())
     lines.append("")
     lines.extend(f"#define {_descriptor_ref_constant_name(key)} {_u16_literal(index)}" for index, key in enumerate(descriptor_ref_keys))
     lines.append("")
@@ -901,7 +904,7 @@ def _emit_tables_header(descriptor_sets: Sequence[DescriptorSet]) -> str:
     lines.extend(
         attr_indices.emit_attr_accessors(
             "LOOM_AMDGPU",
-            (descriptor for descriptor_set in descriptor_sets for descriptor in descriptor_set.descriptors if descriptor.key in descriptor_ref_key_set),
+            ((key, immediates) for key, immediates in descriptor_immediates if key in descriptor_ref_key_set),
             target_key="amdgpu",
         )
     )

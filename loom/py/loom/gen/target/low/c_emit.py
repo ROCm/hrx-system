@@ -157,7 +157,7 @@ def emit_header_for_spec(
     if header_spec.target_key is not None:
         lines.append(f"#define {header_spec.c_enum_prefix}_TARGET_ID UINT64_C(0x{descriptor_stable_id(header_spec.target_key):016x})")
     lines.append("")
-    lines.extend(attr_indices.emit_attr_accessors(header_spec.c_enum_prefix, header_spec.descriptors, target_key=header_spec.target_key))
+    lines.extend(attr_indices.emit_attr_accessors(header_spec.c_enum_prefix, ((descriptor.key, descriptor.immediates) for descriptor in header_spec.descriptors), target_key=header_spec.target_key))
     missing_reg_classes = [reg_class.name for reg_class in header_spec.reg_classes if reg_class.name not in compiled.reg_class_ids]
     if missing_reg_classes:
         raise ValueError(f"descriptor set header '{header_spec.key}' references reg classes missing from storage set '{compiled.spec.key}': {', '.join(missing_reg_classes)}")
