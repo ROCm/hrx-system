@@ -83,7 +83,7 @@ class WindowsCacheHandoffTest(unittest.TestCase):
         _CasHandler.blobs.clear()
         _CasHandler.puts.clear()
         _CasHandler.heads.clear()
-        self.temp_dir = tempfile.TemporaryDirectory()
+        self.temp_dir = tempfile.TemporaryDirectory(dir=os.environ.get("TEST_TMPDIR"))
         self.root = Path(self.temp_dir.name)
 
     def tearDown(self):
@@ -350,7 +350,20 @@ class WindowsCacheHandoffTest(unittest.TestCase):
             output_dir=output_dir,
         )
         manifest_path = output_dir / summary["tests"][0]["manifest"]
-        self.assertEqual(handoff.run_handoff_test(manifest_path), 0)
+        observed = {}
+
+        def observe_run(command, **_kwargs):
+            observed["executable"] = Path(command[0]).read_bytes()
+            return mock.Mock(returncode=0)
+
+        with mock.patch.object(handoff.subprocess, "run", side_effect=observe_run):
+            self.assertEqual(handoff.run_handoff_test(manifest_path), 0)
+        self.assertEqual(
+            observed["executable"],
+            b"@echo off\r\nexit /b 0\r\n"
+            if os.name == "nt"
+            else b"#!/bin/sh\nexit 0\n",
+        )
 
     def test_resolve_external_rootpath_from_main_workspace(self):
         value = (
@@ -391,6 +404,9 @@ class WindowsCacheHandoffTest(unittest.TestCase):
                 {handoff.CAS_DIRECTORY_ENVIRONMENT_VARIABLE: str(content_root)},
             ),
             mock.patch.object(handoff.os, "link", wraps=handoff.os.link) as hard_link,
+            mock.patch.object(
+                handoff.subprocess, "run", return_value=mock.Mock(returncode=0)
+            ),
         ):
             self.assertEqual(handoff.run_handoff_test(manifest_path), 0)
         self.assertEqual(hard_link.call_count, len(summary["blobs"]))
