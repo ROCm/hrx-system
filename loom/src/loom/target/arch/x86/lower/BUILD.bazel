@@ -99,3 +99,10 @@ loom_check_test_suite(
     tags = ["hostonly"],
     target_compatible_with = loom_config_compatible_with(["//loom/config/emit:x86_elf"]),
 )
+
+loom_check_test_suite(
+    name = "vector_construction_test",
+    srcs = ["vector_construction.loom-test"],
+    tags = ["hostonly"],
+    target_compatible_with = loom_config_compatible_with(["//loom/config/emit:x86_elf"]),
+)

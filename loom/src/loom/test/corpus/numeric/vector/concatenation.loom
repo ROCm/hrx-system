@@ -71,3 +71,87 @@ check.scenario @packet_concatenation_values {
   }
   check.return
 }
+
+// Both inputs survive nested joins, including a repeated input in either width.
+func.def @join_live_packets(%low: buffer, %high: buffer, %mask_bits: i64, %output: buffer) {
+  %mask = scalar.trunci %mask_bits : i64 to i8
+  %origin = index.constant 0 : offset
+  %low_view = buffer.view %low[%origin] : buffer -> view<16xi8>
+  %high_view = buffer.view %high[%origin] : buffer -> view<16xi8>
+  %destination = buffer.view %output[%origin] : buffer -> view<256xi8>
+  %left = vector.load %low_view[0] : view<16xi8> -> vector<16xi8>
+  %right = vector.load %high_view[0] : view<16xi8> -> vector<16xi8>
+  %mask32 = vector.splat %mask : vector<32xi8>
+  %mask64 = vector.splat %mask : vector<64xi8>
+  %joined = vector.concat<0> %left, %right : vector<16xi8>, vector<16xi8> -> vector<32xi8>
+  %reversed = vector.concat<0> %right, %left : vector<16xi8>, vector<16xi8> -> vector<32xi8>
+  %wide = vector.concat<0> %joined, %reversed : vector<32xi8>, vector<32xi8> -> vector<64xi8>
+  %mixed_wide = vector.xori %wide, %mask64 : vector<64xi8>
+  vector.store %mixed_wide, %destination[0] : vector<64xi8>, view<256xi8>
+  %repeated = vector.concat<0> %joined, %joined : vector<32xi8>, vector<32xi8> -> vector<64xi8>
+  %mixed_repeated = vector.xori %repeated, %mask64 : vector<64xi8>
+  vector.store %mixed_repeated, %destination[64] : vector<64xi8>, view<256xi8>
+  %reused = vector.concat<0> %reversed, %joined : vector<32xi8>, vector<32xi8> -> vector<64xi8>
+  %mixed_reused = vector.xori %reused, %mask64 : vector<64xi8>
+  vector.store %mixed_reused, %destination[128] : vector<64xi8>, view<256xi8>
+  %duplicate = vector.concat<0> %left, %left : vector<16xi8>, vector<16xi8> -> vector<32xi8>
+  %mixed_duplicate = vector.xori %duplicate, %mask32 : vector<32xi8>
+  vector.store %mixed_duplicate, %destination[192] : vector<32xi8>, view<256xi8>
+  vector.store %left, %destination[224] : vector<16xi8>, view<256xi8>
+  vector.store %right, %destination[240] : vector<16xi8>, view<256xi8>
+  func.return
+}
+
+// Scalar byte copies independently describe every destination interval.
+func.def @join_live_packets_oracle(%low: buffer, %high: buffer, %mask_bits: i64, %output: buffer) {
+  %mask = scalar.trunci %mask_bits : i64 to i8
+  %origin = index.constant 0 : offset
+  %low_view = buffer.view %low[%origin] : buffer -> view<16xi8>
+  %high_view = buffer.view %high[%origin] : buffer -> view<16xi8>
+  %destination = buffer.view %output[%origin] : buffer -> view<16x16xi8>
+  %begin = index.constant 0 : index
+  %end = index.constant 16 : index
+  %step = index.constant 1 : index
+  scf.for %lane = [%begin to %end step %step] {
+    %raw_left = view.load %low_view[%lane] : view<16xi8> -> i8
+    %raw_right = view.load %high_view[%lane] : view<16xi8> -> i8
+    %left = scalar.xori %raw_left, %mask : i8
+    %right = scalar.xori %raw_right, %mask : i8
+    view.store %left, %destination[0, %lane] : i8, view<16x16xi8>
+    view.store %right, %destination[1, %lane] : i8, view<16x16xi8>
+    view.store %right, %destination[2, %lane] : i8, view<16x16xi8>
+    view.store %left, %destination[3, %lane] : i8, view<16x16xi8>
+    view.store %left, %destination[4, %lane] : i8, view<16x16xi8>
+    view.store %right, %destination[5, %lane] : i8, view<16x16xi8>
+    view.store %left, %destination[6, %lane] : i8, view<16x16xi8>
+    view.store %right, %destination[7, %lane] : i8, view<16x16xi8>
+    view.store %right, %destination[8, %lane] : i8, view<16x16xi8>
+    view.store %left, %destination[9, %lane] : i8, view<16x16xi8>
+    view.store %left, %destination[10, %lane] : i8, view<16x16xi8>
+    view.store %right, %destination[11, %lane] : i8, view<16x16xi8>
+    view.store %left, %destination[12, %lane] : i8, view<16x16xi8>
+    view.store %left, %destination[13, %lane] : i8, view<16x16xi8>
+    view.store %raw_left, %destination[14, %lane] : i8, view<16x16xi8>
+    view.store %raw_right, %destination[15, %lane] : i8, view<16x16xi8>
+  }
+  func.return
+}
+
+check.scenario @live_packet_concatenation_values {
+  check.trial[8](%trial: index, %entropy: check.entropy) {
+    %seed0 = check.entropy.read %entropy[0] : check.entropy -> i64
+    %seed1 = check.entropy.read %entropy[1] : check.entropy -> i64
+    %low = check.generate.random.uniform seed(%seed0) range(-128 to 127) : tensor<16xi8>
+    %high = check.generate.random.uniform seed(%seed1) range(-128 to 127) : tensor<16xi8>
+    %expected_low = check.generate.random.uniform seed(%seed0) range(-128 to 127) : tensor<16xi8>
+    %expected_high = check.generate.random.uniform seed(%seed1) range(-128 to 127) : tensor<16xi8>
+    %storage = check.generate.fill value(85) : tensor<288xi8>
+    %output = check.tensor.view %storage offset(16) : tensor<288xi8> -> tensor<256xi8>
+    check.compare<@join_live_packets, @join_live_packets_oracle>(%low, %high, %seed0, %output) : (tensor<16xi8>, tensor<16xi8>, i64, tensor<256xi8>) -> () {
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<288xi8>
+      check.expect.bitwise actual(%low) expected(%expected_low) : tensor<16xi8>
+      check.expect.bitwise actual(%high) expected(%expected_high) : tensor<16xi8>
+    }
+  }
+  check.return
+}

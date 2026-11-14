@@ -1,0 +1,25 @@
+// RUN: emit x86-native-bytes @concatenate_xmm
+x86.target<avx2> @target
+
+// The descriptor reads only the low half of the encoded first source. The
+// native instruction supplies the fixed upper-half immediate without a copy.
+low.func.def target<x86.avx2.core>(@target) @concatenate_xmm(%low: reg<x86.xmm>, %high: reg<x86.xmm>) -> (reg<x86.ymm>) asm {
+  %joined = vinsertf128.concat.ymm %low, %high
+  return %joined
+}
+
+// ----
+code: c4 e3 7d 18 c1 01 c3
+
+// ====
+// RUN: emit x86-native-bytes @concatenate_ymm
+x86.target<avx512> @target {features = [-avx512vl]}
+
+// Two YMM inputs use a full-width EVEX encoding, which does not require VL.
+low.func.def target<x86.avx512_features.core>(@target) @concatenate_ymm(%low: reg<x86.ymm>, %high: reg<x86.ymm>) -> (reg<x86.zmm>) asm {
+  %joined = vinserti64x4.concat.zmm %low, %high
+  return %joined
+}
+
+// ----
+code: 62 f3 fd 48 3a c1 01 c3

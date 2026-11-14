@@ -94,7 +94,6 @@ from .common import (
     _SCHEDULE_VECTOR_I32_XMM,
     _SCHEDULE_VECTOR_I32_YMM,
     _SCHEDULE_VECTOR_I32_ZMM,
-    _TWO_LANE_IMMEDIATE,
     _asm,
     _avx512_descriptor,
     _gpr32_operand,
@@ -138,6 +137,7 @@ from .integer_unary import integer_unary_descriptors
 from .memory import broadcast_memory_descriptors, simd_memory_descriptors
 from .register_transfer import register_transfer_descriptors
 from .scalar import X86_SCALAR_DESCRIPTOR_SET
+from .vector_halves import vector_half_descriptors
 
 _REGISTER_SUFFIXES = {64: "xmm", 128: "xmm", 256: "ymm", 512: "zmm"}
 
@@ -701,48 +701,7 @@ X86_AVX512_CORE_DESCRIPTOR_SET = DescriptorSet(
             native.VINSERTF32X4,
             scalar=False,
         ),
-        _avx512_descriptor(
-            Descriptor(
-                key="x86.avx512.vextracti64x4.ymm.zmm",
-                mnemonic="vextracti64x4",
-                semantic_tag="bits.extract.256.zmm",
-                operands=(_vector_result(256), _zmm_operand("source")),
-                immediates=(_TWO_LANE_IMMEDIATE,),
-                asm_forms=_asm(
-                    mnemonic="vextracti64x4.ymm",
-                    results=("dst",),
-                    operands=("source",),
-                    immediates=("lane",),
-                ),
-                schedule_class=_SCHEDULE_VECTOR_I32_ZMM,
-                flags=(DescriptorFlag.DEAD_REMOVABLE,),
-            ),
-            native.VEXTRACTI64X4,
-            scalar=False,
-        ),
-        _avx512_descriptor(
-            Descriptor(
-                key="x86.avx512.vinserti64x4.zmm.ymm",
-                mnemonic="vinserti64x4",
-                semantic_tag="bits.insert.256.zmm",
-                operands=(
-                    _zmm_result(),
-                    _zmm_operand("dest"),
-                    _vector_operand(256, "value"),
-                ),
-                immediates=(_TWO_LANE_IMMEDIATE,),
-                asm_forms=_asm(
-                    mnemonic="vinserti64x4.zmm.ymm",
-                    results=("dst",),
-                    operands=("dest", "value"),
-                    immediates=("lane",),
-                ),
-                schedule_class=_SCHEDULE_VECTOR_I32_ZMM,
-                flags=(DescriptorFlag.DEAD_REMOVABLE,),
-            ),
-            native.VINSERTI64X4,
-            scalar=False,
-        ),
+        *vector_half_descriptors(512),
         *(
             _vector_narrow_descriptor(family, source_vector_bit_width, instruction)
             for family, instruction in zip(

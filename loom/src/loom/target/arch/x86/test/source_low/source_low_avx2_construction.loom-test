@@ -114,39 +114,6 @@ low.func.def target<x86.avx2.core>(@target) abi(object_function) abi_layout({sig
 
 // ====
 
-// The unit-step i8 path adds a packed ordinal seed directly instead of paying
-// for the general byte multiplication composition.
-x86.target<avx2> @target
-
-func.def target(@target) @i8x32_unit_iota(%base: i8) -> (vector<32xi8>) {
-  %step = scalar.constant 1 : i8
-  %result = vector.iota %base step %step : vector<32xi8>
-  func.return %result : vector<32xi8>
-}
-
-// ----
-low.func.def target<x86.avx2.core>(@target) abi(object_function) abi_layout({signature = (i8) -> (vector<32xi8>)}) @i8x32_unit_iota(%base: reg<x86.gpr32>) -> (reg<x86.ymm>) asm {
-  %6 = mov.imm64 506097522914230528
-  %7 = vmovq.xmm.gpr64 %6
-  %8 = mov.imm64 1084818905618843912
-  %9 = vmovq.xmm.gpr64 %8
-  %10 = vpunpcklqdq.xmm %7, %9
-  %11 = mov.imm64 1663540288323457296
-  %12 = vmovq.xmm.gpr64 %11
-  %13 = mov.imm64 2242261671028070680
-  %14 = vmovq.xmm.gpr64 %13
-  %15 = vpunpcklqdq.xmm %12, %14
-  %16 = vxorps.zero.ymm
-  %17 = vinsertf128.ymm.xmm %16, %10, 0
-  %18 = vinsertf128.ymm.xmm %17, %15, 1
-  %19 = vmovd.xmm.gpr32 %base
-  %20 = vpbroadcastb.ymm %19
-  %result = vpaddb.ymm %20, %18
-  return %result
-}
-
-// ====
-
 // General integer iotas share packed ordinal seeds. Native word/dword
 // multiplication and composed byte/qword scaling cover every AVX2 width.
 x86.target<avx2> @target

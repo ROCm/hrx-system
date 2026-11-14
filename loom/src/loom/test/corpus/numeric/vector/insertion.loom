@@ -442,3 +442,140 @@ check.scenario @dynamic_tail_positions {
   }
   check.return
 }
+
+// Runtime positions span full packets and irregular tails. Narrow payloads
+// retain their exact bits outside the replaced position.
+func.def @wide_tail_insert(%bytes: buffer, %words: buffer, %byte_output: buffer, %word_output: buffer, %position_input: index, %replacement: i64) {
+  %origin = index.constant 0 : offset
+  %payload_count = index.constant 39 : index
+  %position_mask = index.constant 127 : index
+  %bounded_position = index.andi %position_input, %position_mask : index
+  %payload_position = index.rem %bounded_position, %payload_count : index
+  %float_source = buffer.view %bytes[%origin] : buffer -> view<39xf8E4M3>
+  %word_source = buffer.view %words[%origin] : buffer -> view<39xi16>
+  %float_destination = buffer.view %byte_output[%origin] : buffer -> view<39xf8E4M3>
+  %word_destination = buffer.view %word_output[%origin] : buffer -> view<39xi16>
+  %byte_replacement = scalar.trunci %replacement : i64 to i8
+  %float_replacement = scalar.bitcast %byte_replacement : i8 to f8E4M3
+  %word_replacement = scalar.trunci %replacement : i64 to i16
+  %floats = vector.load %float_source[0] : view<39xf8E4M3> -> vector<39xf8E4M3>
+  %float_result = vector.insert %float_replacement into %floats[%payload_position] : f8E4M3, vector<39xf8E4M3>
+  vector.store %float_result, %float_destination[0] : vector<39xf8E4M3>, view<39xf8E4M3>
+  %word_values = vector.load %word_source[0] : view<39xi16> -> vector<39xi16>
+  %word_result = vector.insert %word_replacement into %word_values[%payload_position] : i16, vector<39xi16>
+  vector.store %word_result, %word_destination[0] : vector<39xi16>, view<39xi16>
+  func.return
+}
+
+func.def @wide_tail_insert_oracle(%bytes: buffer, %words: buffer, %byte_output: buffer, %word_output: buffer, %position_input: index, %replacement: i64) {
+  %origin = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %payload_count = index.constant 39 : index
+  %step = index.constant 1 : index
+  %position_mask = index.constant 127 : index
+  %bounded_position = index.andi %position_input, %position_mask : index
+  %payload_position = index.rem %bounded_position, %payload_count : index
+  %byte_source = buffer.view %bytes[%origin] : buffer -> view<39xi8>
+  %word_source = buffer.view %words[%origin] : buffer -> view<39xi16>
+  %byte_destination = buffer.view %byte_output[%origin] : buffer -> view<39xi8>
+  %word_destination = buffer.view %word_output[%origin] : buffer -> view<39xi16>
+  %byte_replacement = scalar.trunci %replacement : i64 to i8
+  %word_replacement = scalar.trunci %replacement : i64 to i16
+  scf.for %lane = [%begin to %payload_count step %step] {
+    %is_replaced = index.cmp eq, %lane, %payload_position : index
+    %byte_value = view.load %byte_source[%lane] : view<39xi8> -> i8
+    %word_value = view.load %word_source[%lane] : view<39xi16> -> i16
+    %byte_result = scf.select %is_replaced, %byte_replacement, %byte_value : i8
+    %word_result = scf.select %is_replaced, %word_replacement, %word_value : i16
+    view.store %byte_result, %byte_destination[%lane] : i8, view<39xi8>
+    view.store %word_result, %word_destination[%lane] : i16, view<39xi16>
+  }
+  func.return
+}
+
+// Inserting a predicate changes one mask position while preserving all others.
+func.def @wide_predicate_insert(%bytes: buffer, %output: buffer, %position_input: index, %replacement: i64) {
+  %origin = index.constant 0 : offset
+  %predicate_count = index.constant 40 : index
+  %position_mask = index.constant 127 : index
+  %bounded_position = index.andi %position_input, %position_mask : index
+  %position = index.rem %bounded_position, %predicate_count : index
+  %source = buffer.view %bytes[%origin] : buffer -> view<40xi8>
+  %destination = buffer.view %output[%origin] : buffer -> view<40xi8>
+  %predicate_replacement = scalar.trunci %replacement : i64 to i1
+  %byte_values = vector.load %source[0] : view<40xi8> -> vector<40xi8>
+  %clear_values = vector.splati 0 : vector<40xi8>
+  %predicates = vector.cmpi ne, %byte_values, %clear_values : vector<40xi8> -> vector<40xi1>
+  %updated = vector.insert %predicate_replacement into %predicates[%position] : i1, vector<40xi1>
+  %result = vector.select %updated, %byte_values, %clear_values : vector<40xi8>
+  vector.store %result, %destination[0] : vector<40xi8>, view<40xi8>
+  func.return
+}
+
+func.def @wide_predicate_insert_oracle(%bytes: buffer, %output: buffer, %position_input: index, %replacement: i64) {
+  %origin = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %predicate_count = index.constant 40 : index
+  %step = index.constant 1 : index
+  %position_mask = index.constant 127 : index
+  %bounded_position = index.andi %position_input, %position_mask : index
+  %position = index.rem %bounded_position, %predicate_count : index
+  %source = buffer.view %bytes[%origin] : buffer -> view<40xi8>
+  %destination = buffer.view %output[%origin] : buffer -> view<40xi8>
+  %predicate_replacement = scalar.trunci %replacement : i64 to i1
+  %clear = scalar.constant 0 : i8
+  scf.for %lane = [%begin to %predicate_count step %step] {
+    %is_replaced = index.cmp eq, %lane, %position : index
+    %value = view.load %source[%lane] : view<40xi8> -> i8
+    %predicate = scalar.cmpi ne, %value, %clear : i8
+    %selected = scf.select %is_replaced, %predicate_replacement, %predicate : i1
+    %result = scf.select %selected, %value, %clear : i8
+    view.store %result, %destination[%lane] : i8, view<40xi8>
+  }
+  func.return
+}
+
+// Each position observes both replacement predicate values across two sweeps.
+func.def @wide_predicate_replacement(%trial: index, %entropy: i64) -> (i64) {
+  %width = index.constant 40 : index
+  %sweep = index.div %trial, %width : index
+  %predicate = index.cast %sweep : index to i64
+  %mask = scalar.constant -2 : i64
+  %payload = scalar.andi %entropy, %mask : i64
+  %replacement = scalar.ori %payload, %predicate : i64
+  func.return %replacement : i64
+}
+
+check.scenario @wide_tail_insertion_values {
+  check.trial[39](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %bytes = check.generate.random.uniform seed(%seed) range(-128 to 127) : tensor<39xi8>
+    %words = check.generate.random.uniform seed(%seed) range(-32768 to 32767) : tensor<39xi16>
+    %byte_storage = check.generate.fill value(37) : tensor<41xi8>
+    %word_storage = check.generate.fill value(37) : tensor<41xi16>
+    %byte_output = check.tensor.view %byte_storage offset(1) : tensor<41xi8> -> tensor<39xi8>
+    %word_output = check.tensor.view %word_storage offset(2) : tensor<41xi16> -> tensor<39xi16>
+    check.compare<@wide_tail_insert, @wide_tail_insert_oracle>(%bytes, %words, %byte_output, %word_output, %trial, %seed) : (tensor<39xi8>, tensor<39xi16>, tensor<39xi8>, tensor<39xi16>, index, i64) -> () {
+      check.expect.bitwise actual(%bytes) expected(%bytes) : tensor<39xi8>
+      check.expect.bitwise actual(%words) expected(%words) : tensor<39xi16>
+      check.expect.bitwise actual(%byte_storage) expected(%byte_storage) : tensor<41xi8>
+      check.expect.bitwise actual(%word_storage) expected(%word_storage) : tensor<41xi16>
+    }
+  }
+  check.return
+}
+
+check.scenario @wide_predicate_insertion_values {
+  check.trial[80](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %replacement = check.generate<@wide_predicate_replacement>(%trial, %seed) : (index, i64) -> (i64)
+    %bytes = check.generate.random.uniform seed(%seed) range(0 to 3) : tensor<40xi8>
+    %storage = check.generate.fill value(37) : tensor<42xi8>
+    %output = check.tensor.view %storage offset(1) : tensor<42xi8> -> tensor<40xi8>
+    check.compare<@wide_predicate_insert, @wide_predicate_insert_oracle>(%bytes, %output, %trial, %replacement) : (tensor<40xi8>, tensor<40xi8>, index, i64) -> () {
+      check.expect.bitwise actual(%bytes) expected(%bytes) : tensor<40xi8>
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<42xi8>
+    }
+  }
+  check.return
+}

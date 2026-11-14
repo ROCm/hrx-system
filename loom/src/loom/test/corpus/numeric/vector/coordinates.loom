@@ -154,3 +154,81 @@ check.scenario @runtime_coordinate_values {
   }
   check.return
 }
+
+// Wide byte ordinals exercise nested packet construction. Runtime steps also
+// exercise widening, multiplication, and truncation before reassembly.
+func.def @wide_coordinates(%base: i64, %step: i64, %bytes: buffer, %shorts: buffer) {
+  %origin = index.constant 0 : offset
+  %byte_output = buffer.view %bytes[%origin] : buffer -> view<192xi8>
+  %short_output = buffer.view %shorts[%origin] : buffer -> view<32xi16>
+  %byte_base = scalar.trunci %base : i64 to i8
+  %byte_step = scalar.trunci %step : i64 to i8
+  %short_base = scalar.trunci %base : i64 to i16
+  %short_step = scalar.trunci %step : i64 to i16
+  %unit_step = scalar.constant 1 : i8
+  %bytes32 = vector.iota %byte_base step %byte_step : vector<32xi8>
+  %bytes64 = vector.iota %byte_base step %byte_step : vector<64xi8>
+  %unit64 = vector.iota %byte_base step %unit_step : vector<64xi8>
+  %unit32 = vector.iota %byte_base step %unit_step : vector<32xi8>
+  %short_values = vector.iota %short_base step %short_step : vector<32xi16>
+  vector.store %bytes32, %byte_output[0] : vector<32xi8>, view<192xi8>
+  vector.store %bytes64, %byte_output[32] : vector<64xi8>, view<192xi8>
+  vector.store %unit64, %byte_output[96] : vector<64xi8>, view<192xi8>
+  vector.store %unit32, %byte_output[160] : vector<32xi8>, view<192xi8>
+  vector.store %short_values, %short_output[0] : vector<32xi16>, view<32xi16>
+  func.return
+}
+
+func.def @wide_coordinates_oracle(%base: i64, %step: i64, %bytes: buffer, %shorts: buffer) {
+  %origin = index.constant 0 : offset
+  %byte_output = buffer.view %bytes[%origin] : buffer -> view<192xi8>
+  %short_output = buffer.view %shorts[%origin] : buffer -> view<32xi16>
+  %begin = index.constant 0 : index
+  %end32 = index.constant 32 : index
+  %end64 = index.constant 64 : index
+  %offset96 = index.constant 96 : index
+  %offset160 = index.constant 160 : index
+  %increment = index.constant 1 : index
+  %unit_step = scalar.constant 1 : i64
+  %last32, %last_unit32 = scf.for %lane = [%begin to %end32 step %increment](%current = %base : i64, %unit = %base : i64) -> (i64, i64) {
+    %value = scalar.trunci %current : i64 to i8
+    %unit_value = scalar.trunci %unit : i64 to i8
+    %short_value = scalar.trunci %current : i64 to i16
+    %unit_position = index.add %lane, %offset160 : index
+    view.store %value, %byte_output[%lane] : i8, view<192xi8>
+    view.store %unit_value, %byte_output[%unit_position] : i8, view<192xi8>
+    view.store %short_value, %short_output[%lane] : i16, view<32xi16>
+    %next = scalar.addi %current, %step : i64
+    %next_unit = scalar.addi %unit, %unit_step : i64
+    scf.yield %next, %next_unit : i64, i64
+  }
+  %last64, %last_unit64 = scf.for %lane = [%begin to %end64 step %increment](%current = %base : i64, %unit = %base : i64) -> (i64, i64) {
+    %value = scalar.trunci %current : i64 to i8
+    %unit_value = scalar.trunci %unit : i64 to i8
+    %position = index.add %lane, %end32 : index
+    %unit_position = index.add %lane, %offset96 : index
+    view.store %value, %byte_output[%position] : i8, view<192xi8>
+    view.store %unit_value, %byte_output[%unit_position] : i8, view<192xi8>
+    %next = scalar.addi %current, %step : i64
+    %next_unit = scalar.addi %unit, %unit_step : i64
+    scf.yield %next, %next_unit : i64, i64
+  }
+  func.return
+}
+
+check.scenario @wide_coordinate_values {
+  check.trial[9](%trial: index, %entropy: check.entropy) {
+    %entropy_bits = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %base = check.generate<@coordinate_base>(%trial, %entropy_bits) : (index, i64) -> (i64)
+    %step = check.generate<@coordinate_step>(%trial) : (index) -> (i64)
+    %bytes_storage = check.generate.fill value(23) : tensor<224xi8>
+    %shorts_storage = check.generate.fill value(23) : tensor<48xi16>
+    %bytes = check.tensor.view %bytes_storage offset(16) : tensor<224xi8> -> tensor<192xi8>
+    %shorts = check.tensor.view %shorts_storage offset(16) : tensor<48xi16> -> tensor<32xi16>
+    check.compare<@wide_coordinates, @wide_coordinates_oracle>(%base, %step, %bytes, %shorts) : (i64, i64, tensor<192xi8>, tensor<32xi16>) -> () {
+      check.expect.bitwise actual(%bytes_storage) expected(%bytes_storage) : tensor<224xi8>
+      check.expect.bitwise actual(%shorts_storage) expected(%shorts_storage) : tensor<48xi16>
+    }
+  }
+  check.return
+}
