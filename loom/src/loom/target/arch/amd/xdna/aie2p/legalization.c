@@ -25,11 +25,6 @@
 #include "loom/transforms/vector/target_legalization.h"
 #include "loom/transforms/vector/to_scalar.h"
 
-static bool loom_aie2p_legalizer_descriptor_set_is_core(
-    const loom_low_descriptor_set_t* descriptor_set) {
-  return descriptor_set == loom_aie2p_core_descriptor_set();
-}
-
 // Multidimensional memory survives eager legalization for shared view
 // normalization. Final legalization first normalizes its logical vector shape
 // so native packet selection sees the contiguous lanes before scalar fallback.
@@ -54,8 +49,7 @@ static bool loom_aie2p_match_scalar_multiply_add(
     const loom_target_legalization_context_t* context, const loom_op_t* op) {
   (void)entry;
   loom_scalar_multiply_add_match_t match = {0};
-  return loom_aie2p_legalizer_descriptor_set_is_core(context->descriptor_set) &&
-         loom_scalar_match_multiply_add(context->module, op, &match);
+  return loom_scalar_match_multiply_add(context->module, op, &match);
 }
 
 static iree_status_t loom_aie2p_legalize_scalar_multiply_add(
@@ -87,9 +81,6 @@ static iree_status_t loom_aie2p_legalize_vector_literal_patches(
   *out_result = (loom_target_legalizer_result_t){
       .action = LOOM_TARGET_LEGALIZER_ACTION_NO_COMMENT,
   };
-  if (!loom_aie2p_legalizer_descriptor_set_is_core(context->descriptor_set)) {
-    return iree_ok_status();
-  }
   if (context->mode != LOOM_TARGET_LEGALIZATION_MODE_FINAL) {
     return iree_ok_status();
   }
@@ -115,8 +106,7 @@ static iree_status_t loom_aie2p_legalize_linear_vector_shape(
   *out_result = (loom_target_legalizer_result_t){
       .action = LOOM_TARGET_LEGALIZER_ACTION_NO_COMMENT,
   };
-  if (!loom_aie2p_legalizer_descriptor_set_is_core(context->descriptor_set) ||
-      !loom_target_legalization_op_has_source_vector_carriers(context, op)) {
+  if (!loom_target_legalization_op_has_source_vector_carriers(context, op)) {
     return iree_ok_status();
   }
 
@@ -142,9 +132,6 @@ static iree_status_t loom_aie2p_legalize_vector_to_scalar(
   *out_result = (loom_target_legalizer_result_t){
       .action = LOOM_TARGET_LEGALIZER_ACTION_NO_COMMENT,
   };
-  if (!loom_aie2p_legalizer_descriptor_set_is_core(context->descriptor_set)) {
-    return iree_ok_status();
-  }
   if (!loom_target_legalization_op_has_source_vector_carriers(context, op)) {
     return iree_ok_status();
   }
@@ -166,9 +153,6 @@ static iree_status_t loom_aie2p_legalize_static_vector_shape_or_scalarize(
   *out_result = (loom_target_legalizer_result_t){
       .action = LOOM_TARGET_LEGALIZER_ACTION_NO_COMMENT,
   };
-  if (!loom_aie2p_legalizer_descriptor_set_is_core(context->descriptor_set)) {
-    return iree_ok_status();
-  }
   if (!loom_target_legalization_op_has_source_vector_carriers(context, op)) {
     return iree_ok_status();
   }
@@ -197,8 +181,7 @@ static iree_status_t loom_aie2p_legalize_static_vector_broadcast(
   *out_result = (loom_target_legalizer_result_t){
       .action = LOOM_TARGET_LEGALIZER_ACTION_NO_COMMENT,
   };
-  if (!loom_aie2p_legalizer_descriptor_set_is_core(context->descriptor_set) ||
-      !loom_target_legalization_op_has_source_vector_carriers(context, op)) {
+  if (!loom_target_legalization_op_has_source_vector_carriers(context, op)) {
     return iree_ok_status();
   }
 
@@ -224,9 +207,6 @@ static iree_status_t loom_aie2p_legalize_vector_insert(
   *out_result = (loom_target_legalizer_result_t){
       .action = LOOM_TARGET_LEGALIZER_ACTION_NO_COMMENT,
   };
-  if (!loom_aie2p_legalizer_descriptor_set_is_core(context->descriptor_set)) {
-    return iree_ok_status();
-  }
   if (!loom_target_legalization_op_has_source_vector_carriers(context, op)) {
     return iree_ok_status();
   }
@@ -282,9 +262,6 @@ static iree_status_t loom_aie2p_legalize_vector_shuffle(
   *out_result = (loom_target_legalizer_result_t){
       .action = LOOM_TARGET_LEGALIZER_ACTION_NO_COMMENT,
   };
-  if (!loom_aie2p_legalizer_descriptor_set_is_core(context->descriptor_set)) {
-    return iree_ok_status();
-  }
   if (!loom_aie2p_match_i8_4x4_transpose_shuffle(context->module, op)) {
     const loom_type_t source_type =
         loom_module_value_type(context->module, loom_vector_shuffle_source(op));
@@ -338,9 +315,6 @@ static iree_status_t loom_aie2p_legalize_vector_select(
   *out_result = (loom_target_legalizer_result_t){
       .action = LOOM_TARGET_LEGALIZER_ACTION_NO_COMMENT,
   };
-  if (!loom_aie2p_legalizer_descriptor_set_is_core(context->descriptor_set)) {
-    return iree_ok_status();
-  }
 
   const loom_type_t result_type =
       loom_module_value_type(context->module, loom_vector_select_result(op));
@@ -368,9 +342,6 @@ static iree_status_t loom_aie2p_legalize_vector_concat(
   *out_result = (loom_target_legalizer_result_t){
       .action = LOOM_TARGET_LEGALIZER_ACTION_NO_COMMENT,
   };
-  if (!loom_aie2p_legalizer_descriptor_set_is_core(context->descriptor_set)) {
-    return iree_ok_status();
-  }
 
   // AIE2P contracts describe binary carrier transitions. Normalize static
   // variadic inputs through the shared adjacent-pair canonicalizer before
@@ -392,9 +363,6 @@ static iree_status_t loom_aie2p_legalize_table_lookup(
   *out_result = (loom_target_legalizer_result_t){
       .action = LOOM_TARGET_LEGALIZER_ACTION_NO_COMMENT,
   };
-  if (!loom_aie2p_legalizer_descriptor_set_is_core(context->descriptor_set)) {
-    return iree_ok_status();
-  }
 
   bool rewritten = false;
   IREE_RETURN_IF_ERROR(loom_aie2p_table_lookup_rewrite(
@@ -422,9 +390,6 @@ static iree_status_t loom_aie2p_legalize_table_quantize(
   *out_result = (loom_target_legalizer_result_t){
       .action = LOOM_TARGET_LEGALIZER_ACTION_NO_COMMENT,
   };
-  if (!loom_aie2p_legalizer_descriptor_set_is_core(context->descriptor_set)) {
-    return iree_ok_status();
-  }
   const loom_type_t input_type = loom_module_value_type(
       context->module, loom_vector_table_quantize_input(op));
   const loom_type_t result_type = loom_module_value_type(
@@ -465,9 +430,6 @@ static iree_status_t loom_aie2p_legalize_vector_load(
   *out_result = (loom_target_legalizer_result_t){
       .action = LOOM_TARGET_LEGALIZER_ACTION_NO_COMMENT,
   };
-  if (!loom_aie2p_legalizer_descriptor_set_is_core(context->descriptor_set)) {
-    return iree_ok_status();
-  }
 
   const loom_type_t result_type =
       loom_module_value_type(context->module, loom_vector_load_result(op));
@@ -506,9 +468,6 @@ static iree_status_t loom_aie2p_legalize_vector_gather(
   *out_result = (loom_target_legalizer_result_t){
       .action = LOOM_TARGET_LEGALIZER_ACTION_NO_COMMENT,
   };
-  if (!loom_aie2p_legalizer_descriptor_set_is_core(context->descriptor_set)) {
-    return iree_ok_status();
-  }
 
   loom_low_source_memory_access_plan_t access = {0};
   loom_low_source_memory_access_diagnostic_t diagnostic = {0};
@@ -533,9 +492,6 @@ static iree_status_t loom_aie2p_legalize_vector_store(
   *out_result = (loom_target_legalizer_result_t){
       .action = LOOM_TARGET_LEGALIZER_ACTION_NO_COMMENT,
   };
-  if (!loom_aie2p_legalizer_descriptor_set_is_core(context->descriptor_set)) {
-    return iree_ok_status();
-  }
 
   const loom_type_t value_type =
       loom_module_value_type(context->module, loom_vector_store_value(op));
@@ -592,9 +548,6 @@ static iree_status_t loom_aie2p_legalize_vector_reduce(
   *out_result = (loom_target_legalizer_result_t){
       .action = LOOM_TARGET_LEGALIZER_ACTION_NO_COMMENT,
   };
-  if (!loom_aie2p_legalizer_descriptor_set_is_core(context->descriptor_set)) {
-    return iree_ok_status();
-  }
 
   loom_vector_packet_reduce_result_t packet_result =
       LOOM_VECTOR_PACKET_REDUCE_RESULT_NONE;
@@ -626,9 +579,6 @@ static iree_status_t loom_aie2p_legalize_vector_reduce_axes(
   *out_result = (loom_target_legalizer_result_t){
       .action = LOOM_TARGET_LEGALIZER_ACTION_NO_COMMENT,
   };
-  if (!loom_aie2p_legalizer_descriptor_set_is_core(context->descriptor_set)) {
-    return iree_ok_status();
-  }
   if (context->source_function_has_unsupported_vector_carrier ||
       !loom_target_legalization_op_has_source_vector_carriers(context, op)) {
     return iree_ok_status();
@@ -805,6 +755,7 @@ static const loom_target_legalizer_rule_t kAie2pLegalizerRules[] = {
 const loom_target_legalizer_provider_t
     loom_aie2p_target_legalizer_provider_storage = {
         .name = IREE_SVL("aie2p"),
+        .scope = {.descriptor_set_stable_id = AIE2P_CORE_DESCRIPTOR_SET_ID},
         .strategy = LOOM_TARGET_LEGALIZER_STRATEGY_TARGET,
         .rules = kAie2pLegalizerRules,
         .rule_count = IREE_ARRAYSIZE(kAie2pLegalizerRules),

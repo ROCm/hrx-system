@@ -289,6 +289,7 @@ static const loom_target_legalizer_rule_t kIndexLegalizerRules[] = {
 
 static const loom_target_legalizer_provider_t kIndexLegalizerProvider = {
     .name = IREE_SVL("index"),
+    .scope = LOOM_LOW_DESCRIPTOR_SCOPE_SHARED,
     .strategy = LOOM_TARGET_LEGALIZER_STRATEGY_REFERENCE,
     .rules = kIndexLegalizerRules,
     .rule_count = IREE_ARRAYSIZE(kIndexLegalizerRules),

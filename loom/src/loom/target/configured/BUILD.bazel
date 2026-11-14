@@ -258,6 +258,7 @@ loom_cc_test(
     copts = _CONFIGURED_COMPILER_COPTS,
     deps = [
         ":compiler_provider_set",
+        "//loom/src/loom/codegen/low:descriptor_scope",
         "//loom/src/loom/target:provider",
         "//loom/src/loom/target:selection",
         "//runtime/src/iree/testing:gtest",

@@ -53,6 +53,7 @@ static const loom_target_legalizer_rule_t kReferenceRules[] = {
 
 static const loom_target_legalizer_provider_t kTargetProvider = {
     .name = IREE_SVL("target"),
+    .scope = {.target_stable_id = 1},
     .strategy = LOOM_TARGET_LEGALIZER_STRATEGY_TARGET,
     .rules = kTargetRules,
     .rule_count = IREE_ARRAYSIZE(kTargetRules),
@@ -60,6 +61,7 @@ static const loom_target_legalizer_provider_t kTargetProvider = {
 
 static const loom_target_legalizer_provider_t kReferenceProvider = {
     .name = IREE_SVL("reference"),
+    .scope = LOOM_LOW_DESCRIPTOR_SCOPE_SHARED,
     .strategy = LOOM_TARGET_LEGALIZER_STRATEGY_REFERENCE,
     .rules = kReferenceRules,
     .rule_count = IREE_ARRAYSIZE(kReferenceRules),
@@ -87,21 +89,23 @@ TEST(TargetLegalizerRegistryTest, ComposesOrderedProviderListsIntoOneSlab) {
       loom_target_legalizer_registry_storage_registry(&storage);
 
   ASSERT_EQ(registry->entry_count, 3u);
+  EXPECT_EQ(registry->entries[0].provider, &kTargetProvider);
+  EXPECT_EQ(registry->entries[1].provider, &kReferenceProvider);
   const loom_target_legalizer_op_entry_t scalar_entry =
       loom_target_legalizer_registry_lookup_kind(
           registry, LOOM_OP_KIND(LOOM_DIALECT_SCALAR, 3));
   ASSERT_EQ(scalar_entry.entry_count, 2u);
   const loom_target_legalizer_entry_t* scalar_entries =
       &registry->entries[scalar_entry.entry_start];
-  EXPECT_TRUE(iree_string_view_equal(scalar_entries[0].provider_name,
+  EXPECT_TRUE(iree_string_view_equal(scalar_entries[0].provider->name,
                                      IREE_SV("target")));
-  EXPECT_EQ(scalar_entries[0].provider_strategy,
+  EXPECT_EQ(scalar_entries[0].provider->strategy,
             LOOM_TARGET_LEGALIZER_STRATEGY_TARGET);
   EXPECT_EQ(scalar_entries[0].first_operand_element_types, 0);
   EXPECT_EQ(scalar_entries[0].match, &TargetMatch);
-  EXPECT_TRUE(iree_string_view_equal(scalar_entries[1].provider_name,
+  EXPECT_TRUE(iree_string_view_equal(scalar_entries[1].provider->name,
                                      IREE_SV("reference")));
-  EXPECT_EQ(scalar_entries[1].provider_strategy,
+  EXPECT_EQ(scalar_entries[1].provider->strategy,
             LOOM_TARGET_LEGALIZER_STRATEGY_REFERENCE);
   EXPECT_EQ(scalar_entries[1].first_operand_element_types,
             LOOM_SCALAR_TYPE_SET_I8 | LOOM_SCALAR_TYPE_SET_I16);

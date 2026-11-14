@@ -117,8 +117,7 @@ bool loom_spirv_match_call_boundary(
     const loom_target_legalizer_entry_t* entry,
     const loom_target_legalization_context_t* context, const loom_op_t* op) {
   (void)entry;
-  if (context->mode != LOOM_TARGET_LEGALIZATION_MODE_FINAL ||
-      !loom_spirv_call_boundary_applies(context->descriptor_set)) {
+  if (context->mode != LOOM_TARGET_LEGALIZATION_MODE_FINAL) {
     return false;
   }
   loom_symbol_ref_t callee = loom_symbol_ref_null();

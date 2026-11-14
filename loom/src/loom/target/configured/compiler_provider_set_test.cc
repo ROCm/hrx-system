@@ -8,6 +8,7 @@
 
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/codegen/low/descriptor_scope.h"
 #include "loom/target/selection.h"
 
 #ifndef LOOM_CONFIG_COMPILER_HAVE_X86
@@ -53,6 +54,13 @@ TEST(ConfiguredCompilerProviderSetTest, ComposesSelectedTargetCompilers) {
   loom_target_environment_t environment;
   IREE_ASSERT_OK(
       loom_target_environment_initialize(compiler_provider_set, &environment));
+  const loom_target_legalizer_provider_list_t legalizers =
+      loom_target_environment_legalizer_provider_list(&environment);
+  for (iree_host_size_t i = 0; i < legalizers.count; ++i) {
+    const loom_target_legalizer_provider_t* provider = legalizers.values[i];
+    EXPECT_TRUE(loom_low_descriptor_scope_is_valid(provider->scope))
+        << std::string(provider->name.data, provider->name.size);
+  }
   EXPECT_EQ(loom_target_environment_lookup_emitter(&environment,
                                                    IREE_SV("x86-elf")) != NULL,
             static_cast<bool>(LOOM_CONFIG_COMPILER_HAVE_X86));

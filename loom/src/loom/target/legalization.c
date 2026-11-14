@@ -24,6 +24,9 @@ static iree_status_t loom_target_legalizer_registry_count_rows(
          provider_index < provider_list->count; ++provider_index) {
       const loom_target_legalizer_provider_t* provider =
           provider_list->values[provider_index];
+      // An omitted scope would silently disable this provider. Linked-table
+      // tests qualify the declaration for release builds.
+      IREE_ASSERT(loom_low_descriptor_scope_is_valid(provider->scope));
       if (provider->rule_count == 0) {
         continue;
       }
@@ -165,8 +168,7 @@ static void loom_target_legalizer_registry_fill_entries(
             .root_kind = source_rule->root_kind,
             .first_operand_element_types =
                 source_rule->first_operand_element_types,
-            .provider_name = provider->name,
-            .provider_strategy = provider->strategy,
+            .provider = provider,
             .match = source_rule->match,
             .legalize = source_rule->legalize,
         };

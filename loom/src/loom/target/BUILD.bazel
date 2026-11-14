@@ -580,6 +580,7 @@ loom_cc_library(
         ":contract",
         ":facts",
         ":types",
+        "//loom/src/loom/codegen/low:descriptor_scope",
         "//loom/src/loom/ir",
         "//loom/src/loom/pass:types",
         "//loom/src/loom/rewrite:rewriter",

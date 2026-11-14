@@ -2078,6 +2078,7 @@ static const loom_target_legalizer_rule_t kScalarLegalizerRules[] = {
 
 static const loom_target_legalizer_provider_t kScalarLegalizerProvider = {
     .name = IREE_SVL("scalar"),
+    .scope = LOOM_LOW_DESCRIPTOR_SCOPE_SHARED,
     .strategy = LOOM_TARGET_LEGALIZER_STRATEGY_REFERENCE,
     .rules = kScalarLegalizerRules,
     .rule_count = IREE_ARRAYSIZE(kScalarLegalizerRules),

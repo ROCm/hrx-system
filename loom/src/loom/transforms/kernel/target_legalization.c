@@ -1515,6 +1515,7 @@ static const loom_target_legalizer_rule_t kKernelLegalizerRules[] = {
 
 static const loom_target_legalizer_provider_t kKernelLegalizerProvider = {
     .name = IREE_SVL("kernel"),
+    .scope = LOOM_LOW_DESCRIPTOR_SCOPE_SHARED,
     .strategy = LOOM_TARGET_LEGALIZER_STRATEGY_REFERENCE,
     .rules = kKernelLegalizerRules,
     .rule_count = IREE_ARRAYSIZE(kKernelLegalizerRules),

@@ -23,13 +23,6 @@
 #include "loom/transforms/vector/target_legalization.h"
 #include "loom/transforms/vector/to_scalar.h"
 
-static bool loom_spirv_legalizer_descriptor_set_is_spirv(
-    const loom_low_descriptor_set_t* descriptor_set) {
-  return descriptor_set != NULL &&
-         descriptor_set->target_stable_id ==
-             loom_spirv_logical_core_descriptor_set()->target_stable_id;
-}
-
 static loom_type_t loom_spirv_subgroup_packet_type(
     loom_scalar_type_t element_type, uint32_t lane_count) {
   return loom_type_shaped_1d(LOOM_TYPE_VECTOR, element_type,
@@ -67,9 +60,6 @@ static iree_status_t loom_spirv_legalize_subgroup_payload(
   *out_result = (loom_target_legalizer_result_t){
       .action = LOOM_TARGET_LEGALIZER_ACTION_NO_COMMENT,
   };
-  if (!loom_spirv_legalizer_descriptor_set_is_spirv(context->descriptor_set)) {
-    return iree_ok_status();
-  }
   const loom_value_id_t source = loom_op_operands(op)[0];
   const loom_type_t source_type =
       loom_module_value_type(context->module, source);
@@ -231,9 +221,6 @@ static iree_status_t loom_spirv_legalize_vector_to_scalar(
   *out_result = (loom_target_legalizer_result_t){
       .action = LOOM_TARGET_LEGALIZER_ACTION_NO_COMMENT,
   };
-  if (!loom_spirv_legalizer_descriptor_set_is_spirv(context->descriptor_set)) {
-    return iree_ok_status();
-  }
 
   bool rewritten = false;
   // Capture every lane at the source operation. For reads, delaying this
@@ -265,9 +252,6 @@ static iree_status_t loom_spirv_legalize_vector_store(
   *out_result = (loom_target_legalizer_result_t){
       .action = LOOM_TARGET_LEGALIZER_ACTION_NO_COMMENT,
   };
-  if (!loom_spirv_legalizer_descriptor_set_is_spirv(context->descriptor_set)) {
-    return iree_ok_status();
-  }
 
   bool rewritten = false;
   IREE_RETURN_IF_ERROR(loom_vector_packet_legalize_store(
@@ -294,9 +278,6 @@ static iree_status_t loom_spirv_legalize_vector_concat(
   *out_result = (loom_target_legalizer_result_t){
       .action = LOOM_TARGET_LEGALIZER_ACTION_NO_COMMENT,
   };
-  if (!loom_spirv_legalizer_descriptor_set_is_spirv(context->descriptor_set)) {
-    return iree_ok_status();
-  }
 
   // Binary concat descriptors cover native ordinary vectors. Leave wider and
   // otherwise unsupported source vectors intact for the fallback legalizer.
@@ -324,9 +305,6 @@ static iree_status_t loom_spirv_legalize_vector_slice(
   *out_result = (loom_target_legalizer_result_t){
       .action = LOOM_TARGET_LEGALIZER_ACTION_NO_COMMENT,
   };
-  if (!loom_spirv_legalizer_descriptor_set_is_spirv(context->descriptor_set)) {
-    return iree_ok_status();
-  }
 
   bool rewritten = false;
   IREE_RETURN_IF_ERROR(
@@ -355,9 +333,6 @@ static iree_status_t loom_spirv_legalize_float8_to_bfloat_extension(
   *out_result = (loom_target_legalizer_result_t){
       .action = LOOM_TARGET_LEGALIZER_ACTION_NO_COMMENT,
   };
-  if (!loom_spirv_legalizer_descriptor_set_is_spirv(context->descriptor_set)) {
-    return iree_ok_status();
-  }
   (void)entry;
   IREE_RETURN_IF_ERROR(loom_scalar_rewrite_float8_extension(context, op));
   out_result->action = LOOM_TARGET_LEGALIZER_ACTION_REWRITTEN;
@@ -372,9 +347,6 @@ static iree_status_t loom_spirv_legalize_vector_insert(
   *out_result = (loom_target_legalizer_result_t){
       .action = LOOM_TARGET_LEGALIZER_ACTION_NO_COMMENT,
   };
-  if (!loom_spirv_legalizer_descriptor_set_is_spirv(context->descriptor_set)) {
-    return iree_ok_status();
-  }
   bool rewritten = false;
   IREE_RETURN_IF_ERROR(loom_vector_packet_legalize_insert(
       context, op, context->vector_packet_policy, NULL, &rewritten));
@@ -396,9 +368,6 @@ static iree_status_t loom_spirv_legalize_bfloat_collective(
   *out_result = (loom_target_legalizer_result_t){
       .action = LOOM_TARGET_LEGALIZER_ACTION_NO_COMMENT,
   };
-  if (!loom_spirv_legalizer_descriptor_set_is_spirv(context->descriptor_set)) {
-    return iree_ok_status();
-  }
   loom_combining_kind_t kind;
   if (loom_kernel_workgroup_reduce_isa(op)) {
     kind = loom_kernel_workgroup_reduce_kind(op);
@@ -598,6 +567,7 @@ static const loom_target_legalizer_rule_t kSpirvLegalizerRules[] = {
 const loom_target_legalizer_provider_t
     loom_spirv_target_legalizer_provider_storage = {
         .name = IREE_SVL("spirv"),
+        .scope = {.target_stable_id = SPIRV_LOGICAL_CORE_TARGET_ID},
         .strategy = LOOM_TARGET_LEGALIZER_STRATEGY_TARGET,
         .rules = kSpirvLegalizerRules,
         .rule_count = IREE_ARRAYSIZE(kSpirvLegalizerRules),

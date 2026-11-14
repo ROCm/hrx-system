@@ -1144,6 +1144,7 @@ static const loom_target_legalizer_rule_t kBufferLegalizerRules[] = {
 
 static const loom_target_legalizer_provider_t kBufferLegalizerProvider = {
     .name = IREE_SVL("buffer"),
+    .scope = LOOM_LOW_DESCRIPTOR_SCOPE_SHARED,
     .strategy = LOOM_TARGET_LEGALIZER_STRATEGY_REFERENCE,
     .rules = kBufferLegalizerRules,
     .rule_count = IREE_ARRAYSIZE(kBufferLegalizerRules),

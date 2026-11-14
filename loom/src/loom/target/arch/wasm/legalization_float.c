@@ -12,16 +12,8 @@
 #include "loom/ops/scf/ops.h"
 #include "loom/ops/vector/combining.h"
 #include "loom/ops/vector/ops.h"
-#include "loom/target/arch/wasm/descriptors/descriptors.h"
 #include "loom/transforms/vector/target_legalization.h"
 #include "loom/util/numeric_format.h"
-
-static bool loom_wasm_float_legalizer_supports_descriptor_set(
-    const loom_low_descriptor_set_t* descriptor_set) {
-  return descriptor_set != NULL &&
-         descriptor_set->target_stable_id ==
-             loom_wasm_core_simd128_descriptor_set()->target_stable_id;
-}
 
 static bool loom_wasm_scalar_extremum_is_relaxed(const loom_op_t* op) {
   const uint8_t required_flags =
@@ -323,9 +315,7 @@ iree_status_t loom_wasm_legalize_vector_cmpf(
   *out_result = (loom_target_legalizer_result_t){
       .action = LOOM_TARGET_LEGALIZER_ACTION_NO_COMMENT,
   };
-  if (!loom_wasm_float_legalizer_supports_descriptor_set(
-          context->descriptor_set) ||
-      !loom_target_legalization_op_has_source_vector_carriers(context, op)) {
+  if (!loom_target_legalization_op_has_source_vector_carriers(context, op)) {
     return iree_ok_status();
   }
 
@@ -373,10 +363,6 @@ iree_status_t loom_wasm_legalize_scalar_float_extrema(
   *out_result = (loom_target_legalizer_result_t){
       .action = LOOM_TARGET_LEGALIZER_ACTION_NO_COMMENT,
   };
-  if (!loom_wasm_float_legalizer_supports_descriptor_set(
-          context->descriptor_set)) {
-    return iree_ok_status();
-  }
   bool rewritten = false;
   IREE_RETURN_IF_ERROR(loom_wasm_rewrite_scalar_relaxed_extremum(
       context->rewriter, op, &rewritten));
@@ -394,9 +380,7 @@ iree_status_t loom_wasm_legalize_vector_float_extrema(
   *out_result = (loom_target_legalizer_result_t){
       .action = LOOM_TARGET_LEGALIZER_ACTION_NO_COMMENT,
   };
-  if (!loom_wasm_float_legalizer_supports_descriptor_set(
-          context->descriptor_set) ||
-      !loom_target_legalization_op_has_source_vector_carriers(context, op)) {
+  if (!loom_target_legalization_op_has_source_vector_carriers(context, op)) {
     return iree_ok_status();
   }
   bool rewritten = false;

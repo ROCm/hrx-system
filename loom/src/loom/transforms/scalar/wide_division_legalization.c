@@ -1181,6 +1181,7 @@ static const loom_target_legalizer_rule_t kWideDivisionLegalizerRules[] = {
 const loom_target_legalizer_provider_t
     loom_scalar_wide_division_legalizer_provider_storage = {
         .name = IREE_SVL("wide-integer-division"),
+        .scope = LOOM_LOW_DESCRIPTOR_SCOPE_SHARED,
         .strategy = LOOM_TARGET_LEGALIZER_STRATEGY_REFERENCE,
         .rules = kWideDivisionLegalizerRules,
         .rule_count = IREE_ARRAYSIZE(kWideDivisionLegalizerRules),

@@ -19,12 +19,6 @@
 #include "loom/transforms/vector/target_legalization.h"
 #include "loom/transforms/vector/to_scalar.h"
 
-static bool loom_x86_legalizer_descriptor_set_is_x86(
-    const loom_low_descriptor_set_t* descriptor_set) {
-  return descriptor_set != NULL &&
-         descriptor_set->target_stable_id == LOOM_X86_TARGET_STABLE_ID;
-}
-
 static bool loom_x86_descriptor_features_available(
     const loom_target_legalization_context_t* context,
     const loom_low_descriptor_t* descriptor) {
@@ -48,20 +42,6 @@ static bool loom_x86_descriptor_features_available(
 // selection can retain an immutable vector load before sparse lane updates.
 // Other targets continue to the shared construction selector when this
 // provider is linked into an all-target compiler.
-static iree_status_t loom_x86_legalize_vector_literal_base(
-    const loom_target_legalizer_entry_t* entry,
-    loom_target_legalization_context_t* context, loom_op_t* op,
-    loom_target_legalizer_result_t* out_result) {
-  *out_result = (loom_target_legalizer_result_t){
-      .action = LOOM_TARGET_LEGALIZER_ACTION_NO_COMMENT,
-  };
-  if (!loom_x86_legalizer_descriptor_set_is_x86(context->descriptor_set)) {
-    return iree_ok_status();
-  }
-  return loom_vector_legalize_literal_base_elements(entry, context, op,
-                                                    out_result);
-}
-
 static bool loom_x86_match_vector_float8_extension(
     const loom_target_legalizer_entry_t* entry,
     const loom_target_legalization_context_t* context, const loom_op_t* op) {
@@ -93,9 +73,6 @@ static iree_status_t loom_x86_legalize_float8_to_bfloat_extension(
   *out_result = (loom_target_legalizer_result_t){
       .action = LOOM_TARGET_LEGALIZER_ACTION_NO_COMMENT,
   };
-  if (!loom_x86_legalizer_descriptor_set_is_x86(context->descriptor_set)) {
-    return iree_ok_status();
-  }
   IREE_RETURN_IF_ERROR(loom_scalar_rewrite_float8_extension(context, op));
   out_result->action = LOOM_TARGET_LEGALIZER_ACTION_REWRITTEN;
   return iree_ok_status();
@@ -109,9 +86,6 @@ static iree_status_t loom_x86_legalize_vector_conversion(
   *out_result = (loom_target_legalizer_result_t){
       .action = LOOM_TARGET_LEGALIZER_ACTION_NO_COMMENT,
   };
-  if (!loom_x86_legalizer_descriptor_set_is_x86(context->descriptor_set)) {
-    return iree_ok_status();
-  }
 
   // A legal query can retain an unavailable primary descriptor so Low
   // verification reports its precise missing features. Scalarize only that
@@ -146,9 +120,6 @@ static iree_status_t loom_x86_legalize_vector_divrem(
   *out_result = (loom_target_legalizer_result_t){
       .action = LOOM_TARGET_LEGALIZER_ACTION_NO_COMMENT,
   };
-  if (!loom_x86_legalizer_descriptor_set_is_x86(context->descriptor_set)) {
-    return iree_ok_status();
-  }
 
   // Preserve the quotient/remainder tuple while converting unsupported vector
   // carriers to scalar lanes. Each lane can then select the paired native
@@ -170,8 +141,7 @@ static iree_status_t loom_x86_legalize_vector_packets(
   *out_result = (loom_target_legalizer_result_t){
       .action = LOOM_TARGET_LEGALIZER_ACTION_NO_COMMENT,
   };
-  if (!loom_x86_legalizer_descriptor_set_is_x86(context->descriptor_set) ||
-      context->source_function_has_unsupported_vector_carrier ||
+  if (context->source_function_has_unsupported_vector_carrier ||
       context->vector_packet_policy == NULL) {
     return iree_ok_status();
   }
@@ -247,11 +217,11 @@ static const loom_target_legalizer_rule_t kX86LegalizerRules[] = {
     },
     {
         .root_kind = LOOM_OP_VECTOR_CONSTANTI,
-        .legalize = loom_x86_legalize_vector_literal_base,
+        .legalize = loom_vector_legalize_literal_base_elements,
     },
     {
         .root_kind = LOOM_OP_VECTOR_CONSTANTF,
-        .legalize = loom_x86_legalize_vector_literal_base,
+        .legalize = loom_vector_legalize_literal_base_elements,
     },
     {
         .root_kind = LOOM_OP_VECTOR_LOAD,
@@ -324,6 +294,7 @@ static const loom_target_legalizer_rule_t kX86LegalizerRules[] = {
 const loom_target_legalizer_provider_t
     loom_x86_target_legalizer_provider_storage = {
         .name = IREE_SVL("x86"),
+        .scope = {.target_stable_id = LOOM_X86_TARGET_STABLE_ID},
         .strategy = LOOM_TARGET_LEGALIZER_STRATEGY_TARGET,
         .rules = kX86LegalizerRules,
         .rule_count = IREE_ARRAYSIZE(kX86LegalizerRules),

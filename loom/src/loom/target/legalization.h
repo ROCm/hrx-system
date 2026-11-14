@@ -19,6 +19,7 @@
 
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
+#include "loom/codegen/low/descriptor_scope.h"
 #include "loom/ir/ir.h"
 #include "loom/pass/types.h"
 #include "loom/rewrite/rewriter.h"
@@ -214,10 +215,8 @@ typedef bool (*loom_target_legalizer_match_fn_t)(
     const loom_target_legalizer_entry_t* entry,
     const loom_target_legalization_context_t* context, const loom_op_t* op);
 
-// Provider-owned rule copied into a composed legalizer registry. Registries
-// contain rules from every configured target. Target-owned rules establish
-// applicability in their matcher or callback before inspecting target-local
-// data or rewriting; shared callbacks require a target-aware matcher.
+// Provider-owned rule copied into a composed legalizer registry. Dispatch
+// enforces the provider's descriptor scope before matching or rewriting.
 struct loom_target_legalizer_rule_t {
   // Entry-specific behavior flags.
   loom_target_legalizer_entry_flags_t flags;
@@ -227,8 +226,8 @@ struct loom_target_legalizer_rule_t {
   // A constrained rule's root kind must have at least one operand. Dispatch
   // checks this domain before querying the target contract or applying policy.
   loom_scalar_type_set_t first_operand_element_types;
-  // Optional target-owned applicability predicate evaluated before querying
-  // the target contract. NULL applies to every matching root and type.
+  // Optional type/feature/phase predicate evaluated within the provider scope
+  // before querying the target contract. NULL accepts every matching root/type.
   loom_target_legalizer_match_fn_t match;
   // Rewriter callback for root_kind.
   loom_target_legalizer_fn_t legalize;
@@ -243,10 +242,8 @@ struct loom_target_legalizer_entry_t {
   // Operand-zero type domain copied from the provider rule; zero is
   // unrestricted.
   loom_scalar_type_set_t first_operand_element_types;
-  // Stable provider name attached while composing the dense registry.
-  iree_string_view_t provider_name;
-  // Rewrite strategy attached while composing the dense registry.
-  loom_target_legalizer_strategy_t provider_strategy;
+  // Borrowed immutable registration owning scope, strategy, and report name.
+  const loom_target_legalizer_provider_t* provider;
   // Optional target-owned applicability predicate copied from the rule.
   loom_target_legalizer_match_fn_t match;
   // Rewriter callback for root_kind.
@@ -256,6 +253,8 @@ struct loom_target_legalizer_entry_t {
 struct loom_target_legalizer_provider_t {
   // Stable provider name for cold reports and diagnostics.
   iree_string_view_t name;
+  // Required descriptor scope enforced before any matcher or rewrite callback.
+  loom_low_descriptor_scope_t scope;
   // Strategy shared by legalizer rows from this provider.
   loom_target_legalizer_strategy_t strategy;
   // Legalizer rules contributed by this provider.
@@ -338,7 +337,7 @@ typedef struct loom_target_legalizer_registry_t {
 
 // Owned storage for a composed target legalizer registry.
 //
-// Provider-owned names and callbacks remain borrowed from their defining
+// Provider registrations and callbacks remain borrowed from their defining
 // compiler packages. The allocation contains only the dense dispatch tables
 // and copied entry records required to query them efficiently.
 typedef struct loom_target_legalizer_registry_storage_t {

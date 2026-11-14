@@ -88,6 +88,23 @@ loom_cc_test(
 )
 
 loom_cc_library(
+    name = "descriptor_scope",
+    hdrs = ["descriptor_scope.h"],
+    deps = [":descriptors"],
+)
+
+loom_cc_test(
+    name = "descriptor_scope_test",
+    srcs = ["descriptor_scope_test.cc"],
+    deps = [
+        ":descriptor_scope",
+        ":descriptors",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
     name = "read_retention",
     hdrs = ["read_retention.h"],
     deps = [":descriptors"],

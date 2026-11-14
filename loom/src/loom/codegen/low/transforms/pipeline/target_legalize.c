@@ -501,6 +501,10 @@ static iree_status_t loom_low_target_legalize_record_report_source_op(
 static bool loom_low_target_legalize_entry_matches(
     const loom_low_target_legalize_function_state_t* state,
     const loom_target_legalizer_entry_t* entry, const loom_op_t* op) {
+  if (!loom_low_descriptor_scope_matches(
+          entry->provider->scope, state->legalization_context.descriptor_set)) {
+    return false;
+  }
   if (entry->first_operand_element_types) {
     const loom_type_t operand_type =
         loom_module_value_type(state->module, loom_op_operands(op)[0]);
@@ -625,7 +629,7 @@ static iree_status_t loom_low_target_legalize_retain_report_decision(
   }
   const loom_target_compile_report_legalizer_strategy_t legalizer_strategy =
       legalizer_entry ? loom_low_target_legalize_report_legalizer_strategy(
-                            legalizer_entry->provider_strategy)
+                            legalizer_entry->provider->strategy)
                       : LOOM_TARGET_COMPILE_REPORT_LEGALIZER_STRATEGY_NONE;
   decision->action = action;
   decision->strategy = legalizer_strategy;
@@ -641,9 +645,9 @@ static iree_status_t loom_low_target_legalize_retain_report_decision(
   const loom_target_bundle_t* bundle =
       loom_low_source_selection_target_bundle(state->selection);
   const loom_target_config_t* config = bundle ? bundle->config : NULL;
-  const iree_string_view_t legalizer_name = legalizer_entry
-                                                ? legalizer_entry->provider_name
-                                                : iree_string_view_empty();
+  const iree_string_view_t legalizer_name =
+      legalizer_entry ? legalizer_entry->provider->name
+                      : iree_string_view_empty();
   const loom_target_compile_report_legalization_row_t row = {
       .function_name = loom_low_target_legalize_function_name(state),
       .source_op_name = source_op_name,
@@ -761,7 +765,7 @@ static bool loom_low_target_legalize_op_has_reference_legalizer(
     if (i != 0 && !loom_low_target_legalize_entry_matches(state, entry, op)) {
       continue;
     }
-    if (entry->provider_strategy == LOOM_TARGET_LEGALIZER_STRATEGY_REFERENCE) {
+    if (entry->provider->strategy == LOOM_TARGET_LEGALIZER_STRATEGY_REFERENCE) {
       return true;
     }
   }
@@ -779,7 +783,7 @@ static bool loom_low_target_legalize_op_has_legal_rewrite_entry(
     }
     if (state->legalization_context.policy ==
             LOOM_TARGET_LEGALIZATION_POLICY_REFERENCE_ONLY &&
-        entry->provider_strategy == LOOM_TARGET_LEGALIZER_STRATEGY_TARGET) {
+        entry->provider->strategy == LOOM_TARGET_LEGALIZER_STRATEGY_TARGET) {
       continue;
     }
     if (iree_any_bit_set(entry->flags,
@@ -809,10 +813,10 @@ static bool loom_low_target_legalize_should_skip_entry(
     const loom_target_contract_query_result_t* query_result) {
   if (state->legalization_context.policy ==
       LOOM_TARGET_LEGALIZATION_POLICY_REFERENCE_ONLY) {
-    return entry->provider_strategy == LOOM_TARGET_LEGALIZER_STRATEGY_TARGET;
+    return entry->provider->strategy == LOOM_TARGET_LEGALIZER_STRATEGY_TARGET;
   }
-  // An opted-in legal rewrite may decline an op for another target. That does
-  // not make ordinary fallback entries eligible to rewrite an accepted op.
+  // An opted-in legal rewrite may decline this operand shape. That does not
+  // make ordinary fallback entries eligible to rewrite an accepted op.
   if (query_result->outcome == LOOM_TARGET_CONTRACT_QUERY_LEGAL) {
     return !iree_any_bit_set(entry->flags,
                              LOOM_TARGET_LEGALIZER_ENTRY_FLAG_REWRITE_LEGAL);
@@ -837,7 +841,7 @@ static bool loom_low_target_legalize_should_reject_reference_entry(
     const loom_target_legalizer_entry_t* entry) {
   return state->legalization_context.policy ==
              LOOM_TARGET_LEGALIZATION_POLICY_REQUIRE_NATIVE &&
-         entry->provider_strategy == LOOM_TARGET_LEGALIZER_STRATEGY_REFERENCE;
+         entry->provider->strategy == LOOM_TARGET_LEGALIZER_STRATEGY_REFERENCE;
 }
 
 static loom_target_legalizer_result_t
@@ -858,7 +862,7 @@ static bool loom_low_target_legalize_should_record_final_rejection(
   return state->legalization_context.mode ==
              LOOM_TARGET_LEGALIZATION_MODE_FINAL &&
          state->pass_state->verify_source_legality &&
-         entry->provider_strategy == LOOM_TARGET_LEGALIZER_STRATEGY_REFERENCE;
+         entry->provider->strategy == LOOM_TARGET_LEGALIZER_STRATEGY_REFERENCE;
 }
 
 static iree_status_t loom_low_target_legalize_record_final_rejection(
@@ -1120,9 +1124,13 @@ static iree_status_t loom_low_target_legalize_report_packet_rewrite(
         erased_op_count);
     return iree_ok_status();
   }
+  static const loom_target_legalizer_provider_t packet_provider = {
+      .name = IREE_SVL("vector-packet"),
+      .scope = LOOM_LOW_DESCRIPTOR_SCOPE_SHARED,
+      .strategy = LOOM_TARGET_LEGALIZER_STRATEGY_TARGET,
+  };
   static const loom_target_legalizer_entry_t packet_legalizer_entry = {
-      .provider_name = IREE_SVL("vector-packet"),
-      .provider_strategy = LOOM_TARGET_LEGALIZER_STRATEGY_TARGET,
+      .provider = &packet_provider,
   };
   const bool report_wants_rows =
       loom_low_target_legalize_report_wants_rows(state);
@@ -1147,7 +1155,7 @@ loom_low_target_legalize_reference_entry_has_terminal_input(
   *out_has_terminal_input = false;
   const loom_low_lower_op_contract_query_t* target_query =
       &state->selection->policy->query_op_contract;
-  if (entry->provider_strategy != LOOM_TARGET_LEGALIZER_STRATEGY_REFERENCE ||
+  if (entry->provider->strategy != LOOM_TARGET_LEGALIZER_STRATEGY_REFERENCE ||
       target_query->fn == NULL) {
     return iree_ok_status();
   }
