@@ -20,6 +20,7 @@
 #include "loom/target/arch/amd/xdna/aie2p/array/resident.h"
 #include "loom/target/arch/amd/xdna/aie2p/emit/array_report.h"
 #include "loom/target/arch/amd/xdna/aie2p/emit/configuration.h"
+#include "loom/target/arch/amd/xdna/aie2p/emit/program_capacity.h"
 #include "loom/target/arch/amd/xdna/aie2p/emit/program_compile.h"
 #include "loom/target/arch/amd/xdna/aie2p/emit/tile_link.h"
 #include "loom/target/arch/amd/xdna/aie2p/emit/xdna_product.h"
@@ -444,6 +445,7 @@ static iree_status_t loom_aie2p_xdna_plan_tile_link(
 
 static iree_status_t loom_aie2p_xdna_compile_resident_tiles(
     const loom_aie2p_xdna_artifact_request_t* request,
+    const loom_module_t* resident_module,
     loom_aie2p_program_compiler_t* compiler,
     const loom_aie2p_array_plan_t* plan,
     const loom_aie2p_array_resident_program_set_t* resident_program_set,
@@ -504,6 +506,7 @@ static iree_status_t loom_aie2p_xdna_compile_resident_tiles(
       }
     }
     bool program_compiled = false;
+    loom_aie2p_program_object_t program = {0};
     iree_status_t status = loom_aie2p_program_compile(
         compiler, resident->function_op, /*may_return=*/false,
         (loom_aie2p_program_helper_list_t){
@@ -511,7 +514,14 @@ static iree_status_t loom_aie2p_xdna_compile_resident_tiles(
             .count = resident->helper_count,
         },
         &resident->program_data, &worker_compile_options, &program_compiled,
-        contribution);
+        &program);
+    if (iree_status_is_ok(status) && program_compiled) {
+      *contribution = program.contribution;
+      status = loom_aie2p_program_capacity_admit(
+          resident_module, resident->function_op,
+          contribution->realization.code.byte_length,
+          request->diagnostic_emitter, &program_compiled);
+    }
     if (worker_report_ptr != NULL) {
       iree_status_t report_status =
           program_compiled ? loom_target_compile_report_record_entry_report(
@@ -681,8 +691,8 @@ static iree_status_t loom_aie2p_xdna_compile_resident_entries(
     loom_aie2p_xdna_tile_t* tiles = NULL;
     bool tiles_compiled = false;
     IREE_RETURN_IF_ERROR(loom_aie2p_xdna_compile_resident_tiles(
-        request, compiler, &array_plans[i], resident_program_set, &tiles,
-        &tiles_compiled));
+        request, resident_module, compiler, &array_plans[i],
+        resident_program_set, &tiles, &tiles_compiled));
     if (!tiles_compiled) {
       return iree_ok_status();
     }

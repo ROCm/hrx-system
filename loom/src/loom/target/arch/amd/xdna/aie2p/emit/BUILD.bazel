@@ -353,7 +353,6 @@ loom_cc_library(
     deps = [
         ":callable_compile",
         ":leaf_compile",
-        ":program_capacity",
         ":program_object",
         "//loom/src/loom/codegen/low:read_only_data",
         "//loom/src/loom/ir",
@@ -445,6 +444,7 @@ loom_cc_library(
     deps = [
         ":configuration_storage",
         ":leaf_compile",
+        ":program_capacity",
         ":program_compile",
         ":tile_link",
         ":xdna_product",

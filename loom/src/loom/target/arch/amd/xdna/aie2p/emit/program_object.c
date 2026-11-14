@@ -148,19 +148,19 @@ static int loom_aie2p_program_object_compare_helpers(
 }
 
 static bool loom_aie2p_program_object_helper_less(
-    const loom_aie2p_leaf_contribution_t* contributions,
+    const loom_aie2p_leaf_contribution_t* const* contributions,
     const iree_host_size_t* lhs, const iree_host_size_t* rhs) {
   const int comparison = loom_aie2p_program_object_compare_helpers(
-      &contributions[*lhs], &contributions[*rhs]);
+      contributions[*lhs], contributions[*rhs]);
   // Equivalent bodies retain their first input as the canonical contribution,
   // independently of the sort's ordering of otherwise equal elements.
   return comparison != 0 ? comparison < 0 : *lhs < *rhs;
 }
 
-LOOM_DEFINE_ADAPTIVE_SORT_WITH_CONTEXT(loom_aie2p_program_object_sort_helpers,
-                                       iree_host_size_t,
-                                       const loom_aie2p_leaf_contribution_t*,
-                                       loom_aie2p_program_object_helper_less)
+LOOM_DEFINE_ADAPTIVE_SORT_WITH_CONTEXT(
+    loom_aie2p_program_object_sort_helpers, iree_host_size_t,
+    const loom_aie2p_leaf_contribution_t* const*,
+    loom_aie2p_program_object_helper_less)
 
 typedef struct loom_aie2p_program_object_placement_t {
   // Input-to-output section indices, including shared code and data sections.
@@ -217,17 +217,17 @@ static uint32_t loom_aie2p_program_object_data_ordinal(
 // largest such padding last therefore minimizes the complete program length
 // while preserving the relative order of every other helper.
 static iree_host_size_t loom_aie2p_program_object_select_tail(
-    const loom_aie2p_leaf_contribution_t* contributions,
-    const iree_host_size_t* canonical_indices,
+    const loom_aie2p_leaf_contribution_t* const* contributions,
+    const loom_aie2p_program_function_t* functions,
     iree_host_size_t contribution_count, uint64_t code_alignment) {
   iree_host_size_t tail_index = 0;
   uint64_t maximum_padding = 0;
   for (iree_host_size_t i = 1; i < contribution_count; ++i) {
-    if (canonical_indices[i] != i) {
+    if (functions[i].canonical_index != i) {
       continue;
     }
     const loom_native_section_contribution_t* code =
-        &contributions[i].object.sections[0];
+        &contributions[i]->object.sections[0];
     const uint64_t alignment =
         iree_max((uint64_t)1, code->contribution_alignment);
     IREE_ASSERT_EQ(alignment, code_alignment,
@@ -253,14 +253,14 @@ static iree_host_size_t loom_aie2p_program_object_layout_index(
 }
 
 iree_status_t loom_aie2p_program_object_merge(
-    const loom_aie2p_leaf_contribution_t* contributions,
+    const loom_aie2p_leaf_contribution_t* const* contributions,
     iree_host_size_t contribution_count, const loom_aie2p_program_data_t* data,
     iree_host_size_t data_count, iree_arena_allocator_t* arena,
     iree_arena_allocator_t* scratch_arena,
     loom_aie2p_program_object_t* out_program) {
   *out_program = (loom_aie2p_program_object_t){0};
 
-  const loom_aie2p_leaf_contribution_t* entry = &contributions[0];
+  const loom_aie2p_leaf_contribution_t* entry = contributions[0];
   const loom_native_object_symbol_t* entry_symbol =
       &entry->object.symbols[entry->realization.entry_symbol_index];
   const iree_string_view_t code_section_name =
@@ -272,20 +272,22 @@ iree_status_t loom_aie2p_program_object_merge(
                    .contribution_alignment);
 
   iree_host_size_t* helper_order = NULL;
-  iree_host_size_t* canonical_indices = NULL;
+  loom_aie2p_program_function_t* functions = NULL;
   loom_aie2p_program_object_placement_t* placements = NULL;
   IREE_RETURN_IF_ERROR(
       iree_arena_allocate_array(scratch_arena, contribution_count,
                                 sizeof(*helper_order), (void**)&helper_order));
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      scratch_arena, contribution_count, sizeof(*canonical_indices),
-      (void**)&canonical_indices));
+      arena, contribution_count, sizeof(*functions), (void**)&functions));
   IREE_RETURN_IF_ERROR(
       iree_arena_allocate_array(scratch_arena, contribution_count,
                                 sizeof(*placements), (void**)&placements));
   for (iree_host_size_t i = 0; i < contribution_count; ++i) {
     helper_order[i] = i;
-    canonical_indices[i] = i;
+    functions[i] = (loom_aie2p_program_function_t){
+        .contribution = contributions[i],
+        .canonical_index = i,
+    };
   }
   // Sorting places equivalent helpers together without comparing every pair.
   // Only the index projection moves; physical layout retains input order.
@@ -295,8 +297,8 @@ iree_status_t loom_aie2p_program_object_merge(
     const iree_host_size_t current = helper_order[i];
     const iree_host_size_t previous = helper_order[i - 1];
     if (loom_aie2p_program_object_compare_helpers(
-            &contributions[current], &contributions[previous]) == 0) {
-      canonical_indices[current] = canonical_indices[previous];
+            contributions[current], contributions[previous]) == 0) {
+      functions[current].canonical_index = functions[previous].canonical_index;
     }
   }
 
@@ -305,9 +307,11 @@ iree_status_t loom_aie2p_program_object_merge(
   iree_host_size_t symbol_count = 0;
   iree_host_size_t fixup_count = 0;
   for (iree_host_size_t i = 0; i < contribution_count; ++i) {
-    const loom_native_object_contribution_t* object = &contributions[i].object;
+    const loom_native_object_contribution_t* object = &contributions[i]->object;
     placements[i].symbol_start = symbol_count;
-    const bool unique_code = canonical_indices[i] == i;
+    functions[i].entry_symbol_index =
+        symbol_count + contributions[i]->realization.entry_symbol_index;
+    const bool unique_code = functions[i].canonical_index == i;
     code_count += unique_code;
     if (!iree_host_size_checked_add(input_section_count, object->section_count,
                                     &input_section_count) ||
@@ -334,7 +338,7 @@ iree_status_t loom_aie2p_program_object_merge(
       (void**)&section_indices));
   for (iree_host_size_t i = 0; i < contribution_count; ++i) {
     placements[i].sections = section_indices;
-    section_indices += contributions[i].object.section_count;
+    section_indices += contributions[i]->object.section_count;
   }
   uint32_t* data_name_order = NULL;
   if (data_count > 4) {
@@ -348,9 +352,8 @@ iree_status_t loom_aie2p_program_object_merge(
   }
 
   const iree_host_size_t tail_contribution_index =
-      loom_aie2p_program_object_select_tail(contributions, canonical_indices,
-                                            contribution_count,
-                                            entry_code_alignment);
+      loom_aie2p_program_object_select_tail(
+          contributions, functions, contribution_count, entry_code_alignment);
   loom_native_section_contribution_t* sections = NULL;
   loom_native_object_symbol_t* symbols = NULL;
   loom_native_object_fixup_t* fixups = NULL;
@@ -369,11 +372,11 @@ iree_status_t loom_aie2p_program_object_merge(
     const iree_host_size_t contribution_index =
         loom_aie2p_program_object_layout_index(layout_index, contribution_count,
                                                tail_contribution_index);
-    if (canonical_indices[contribution_index] != contribution_index) {
+    if (functions[contribution_index].canonical_index != contribution_index) {
       continue;
     }
     const loom_aie2p_leaf_contribution_t* contribution =
-        &contributions[contribution_index];
+        contributions[contribution_index];
     placements[contribution_index].sections[0] = code_index;
     loom_native_section_contribution_t* code = &sections[code_index++];
     *code = contribution->object.sections[0];
@@ -413,8 +416,9 @@ iree_status_t loom_aie2p_program_object_merge(
   // symbols or relocations. Function-local conflict lists are intentionally
   // replaced by the complete producer inventory, including cross-helper edges.
   for (iree_host_size_t i = 0; i < contribution_count; ++i) {
-    const loom_aie2p_leaf_contribution_t* contribution = &contributions[i];
-    placements[i].sections[0] = placements[canonical_indices[i]].sections[0];
+    const loom_aie2p_leaf_contribution_t* contribution = contributions[i];
+    placements[i].sections[0] =
+        placements[functions[i].canonical_index].sections[0];
     for (iree_host_size_t j = 0;
          j < contribution->realization.read_only_data_count; ++j) {
       const loom_aie2p_leaf_read_only_data_domain_t* local =
@@ -456,10 +460,10 @@ iree_status_t loom_aie2p_program_object_merge(
        ++layout_index) {
     const iree_host_size_t i = loom_aie2p_program_object_layout_index(
         layout_index, contribution_count, tail_contribution_index);
-    if (canonical_indices[i] != i) {
+    if (functions[i].canonical_index != i) {
       continue;
     }
-    const loom_native_object_contribution_t* object = &contributions[i].object;
+    const loom_native_object_contribution_t* object = &contributions[i]->object;
     for (iree_host_size_t j = 0; j < object->fixup_count; ++j) {
       loom_native_object_fixup_t* fixup = &fixups[fixup_start++];
       *fixup = object->fixups[j];
@@ -471,7 +475,7 @@ iree_status_t loom_aie2p_program_object_merge(
   loom_aie2p_register_unit_set_t register_writes = {0};
   loom_aie2p_leaf_capability_flags_t capability_flags = 0;
   for (iree_host_size_t i = 0; i < contribution_count; ++i) {
-    const loom_aie2p_leaf_contribution_t* contribution = &contributions[i];
+    const loom_aie2p_leaf_contribution_t* contribution = contributions[i];
     for (iree_host_size_t j = 0; j < contribution->object.symbol_count; ++j) {
       loom_native_object_symbol_t* symbol =
           &symbols[placements[i].symbol_start + j];
@@ -493,14 +497,15 @@ iree_status_t loom_aie2p_program_object_merge(
   iree_host_size_t* function_order = helper_order;
   for (iree_host_size_t i = 0; i < contribution_count; ++i) {
     function_order[i] = placements[i].symbol_start +
-                        contributions[i].realization.entry_symbol_index;
+                        contributions[i]->realization.entry_symbol_index;
   }
   loom_aie2p_program_object_sort_functions(symbols, function_order,
                                            contribution_count);
   loom_aie2p_program_object_resolve_calls(
       symbols, function_order, contribution_count, fixups, fixup_count);
 
-  out_program->canonical_indices = canonical_indices;
+  out_program->functions = functions;
+  out_program->function_count = contribution_count;
   out_program->contribution = *entry;
   out_program->contribution.object = (loom_native_object_contribution_t){
       .sections = sections,

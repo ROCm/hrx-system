@@ -27,13 +27,28 @@ typedef struct loom_aie2p_program_data_t {
   iree_host_size_t bank_conflict_count;
 } loom_aie2p_program_data_t;
 
+// One logical function's identity in a detached complete program.
+typedef struct loom_aie2p_program_function_t {
+  // Detached function before merging, including its original local relocations.
+  // Its owner outlives this program; native helper caches can share this
+  // result.
+  const loom_aie2p_leaf_contribution_t* contribution;
+  // Entry symbol in the merged native object, including aliases of shared code.
+  iree_host_size_t entry_symbol_index;
+  // First equivalent function in this inventory. The program entry is unique.
+  iree_host_size_t canonical_index;
+} loom_aie2p_program_function_t;
+
 // Physical program and the logical-to-physical identity established by merging.
 typedef struct loom_aie2p_program_object_t {
   // Complete tile contribution, with sections and relocations owned by |arena|.
   loom_aie2p_leaf_contribution_t contribution;
-  // First equivalent contribution for each input, owned by |scratch_arena|.
-  // The entry maps to itself; a helper maps to itself when its body is unique.
-  const iree_host_size_t* canonical_indices;
+  // Arena-owned functions in entry-then-helper input order. Logical identities
+  // remain distinct when native bodies share a section, so execution lifetimes
+  // can be projected without treating code equivalence as simultaneous use.
+  const loom_aie2p_program_function_t* functions;
+  // Number of logical functions, including the program entry.
+  iree_host_size_t function_count;
 } loom_aie2p_program_object_t;
 
 // Joins an entry contribution followed by its reachable helper contributions.
@@ -52,14 +67,16 @@ typedef struct loom_aie2p_program_object_t {
 // |data| lists the complete program's unique definitions and bank constraints;
 // each definition contributes one section even when multiple functions use it.
 // Names borrow the source module only for this call. The result copies conflict
-// ordinals and uses the contributions' detached symbol names and contents.
+// ordinals and retains the detached input contributions, which remain immutable
+// and outlive the result.
 // The entry continues to own all imports and mutable storage. The result
 // retains its exact combined code requirement even when it exceeds one core's
-// program memory; program compilation owns target capacity admission after
-// composition. Temporary layout and canonical identity use |scratch_arena| and
-// need survive only through composition of the program report.
+// program memory; physical placement owns target capacity admission after
+// composition. The result retains function-to-symbol and canonical identity
+// without borrowing source IR or temporary layout storage. Scratch indexes
+// need survive only through this call.
 iree_status_t loom_aie2p_program_object_merge(
-    const loom_aie2p_leaf_contribution_t* contributions,
+    const loom_aie2p_leaf_contribution_t* const* contributions,
     iree_host_size_t contribution_count, const loom_aie2p_program_data_t* data,
     iree_host_size_t data_count, iree_arena_allocator_t* arena,
     iree_arena_allocator_t* scratch_arena,

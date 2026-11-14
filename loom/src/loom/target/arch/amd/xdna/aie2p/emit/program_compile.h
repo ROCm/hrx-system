@@ -11,6 +11,7 @@
 
 #include "loom/codegen/low/read_only_data.h"
 #include "loom/target/arch/amd/xdna/aie2p/emit/leaf_compile.h"
+#include "loom/target/arch/amd/xdna/aie2p/emit/program_object.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -57,7 +58,9 @@ iree_status_t loom_aie2p_program_compiler_allocate(
     loom_aie2p_program_compiler_t** out_compiler);
 
 // Compiles |entry_function_op| and its producer-retained acyclic,
-// module-internal helper closure into one tile contribution.
+// module-internal helper closure into one detached program object. Exact code
+// size and logical function identities survive compilation; the physical
+// placement owner admits capacity and determines which code stays resident.
 // Helpers use scalar and pointer register ABI values, may reference immutable
 // data, and have passed source admission for imports and authored storage.
 // Compiler-generated frames borrow the entry-owned stack, whose capacity
@@ -73,7 +76,7 @@ iree_status_t loom_aie2p_program_compile(
     bool may_return, loom_aie2p_program_helper_list_t helpers,
     const loom_low_read_only_data_set_t* program_data,
     const loom_aie2p_leaf_compile_options_t* entry_options, bool* out_compiled,
-    loom_aie2p_leaf_contribution_t* out_contribution);
+    loom_aie2p_program_object_t* out_program);
 
 #ifdef __cplusplus
 }  // extern "C"

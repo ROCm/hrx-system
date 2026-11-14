@@ -19,6 +19,7 @@
 #include "loom/target/arch/amd/xdna/aie2p/descriptors/configuration_descriptors.h"
 #include "loom/target/arch/amd/xdna/aie2p/emit/configuration_report.h"
 #include "loom/target/arch/amd/xdna/aie2p/emit/configuration_storage.h"
+#include "loom/target/arch/amd/xdna/aie2p/emit/program_capacity.h"
 #include "loom/target/arch/amd/xdna/aie2p/emit/program_compile.h"
 #include "loom/target/arch/amd/xdna/error_catalog.h"
 #include "loom/target/reporting/low.h"
@@ -235,18 +236,18 @@ static iree_status_t loom_aie2p_configuration_compile_worker(
     loom_aie2p_program_compiler_t* compiler,
     loom_aie2p_configuration_worker_set_t* worker_set,
     const loom_aie2p_program_source_function_t* source,
-    loom_aie2p_leaf_contribution_t** out_worker) {
+    loom_aie2p_program_object_t** out_worker) {
   const loom_aie2p_xdna_artifact_request_t* request = emitter->request;
   const loom_symbol_ref_t symbol = source->symbol;
-  loom_aie2p_leaf_contribution_t* worker =
-      worker_set->contributions_by_symbol[symbol.symbol_id];
+  loom_aie2p_program_object_t* worker =
+      worker_set->programs_by_symbol[symbol.symbol_id];
   if (!worker) {
     const iree_string_view_t name = loom_string_table_get(
         &request->module->strings,
         request->module->symbols.entries[symbol.symbol_id].name_id);
     IREE_RETURN_IF_ERROR(iree_arena_allocate(request->scratch_arena,
                                              sizeof(*worker), (void**)&worker));
-    *worker = (loom_aie2p_leaf_contribution_t){0};
+    *worker = (loom_aie2p_program_object_t){0};
     const loom_aie2p_program_clone_function_t* cloned =
         worker_set->clone.functions_by_source[symbol.symbol_id];
     loom_op_t* function =
@@ -301,6 +302,12 @@ static iree_status_t loom_aie2p_configuration_compile_worker(
             .count = source->helpers.count,
         },
         &program_data, &options, &compiled, worker);
+    if (iree_status_is_ok(status) && compiled) {
+      status = loom_aie2p_program_capacity_admit(
+          request->module, source->function_op,
+          worker->contribution.realization.code.byte_length,
+          request->diagnostic_emitter, &compiled);
+    }
     if (report_ptr) {
       iree_status_t report_status =
           compiled ? loom_target_compile_report_record_entry_report(
@@ -316,12 +323,13 @@ static iree_status_t loom_aie2p_configuration_compile_worker(
       ++emitter->error_count;
       return iree_ok_status();
     }
-    worker_set->contributions_by_symbol[symbol.symbol_id] = worker;
+    worker_set->programs_by_symbol[symbol.symbol_id] = worker;
   }
   if (emitter->report &&
       !emitter->reported_workers_by_symbol[symbol.symbol_id]) {
     loom_aie2p_configuration_report_program(
-        emitter->report, (uint32_t)worker->realization.code.byte_length);
+        emitter->report,
+        (uint32_t)worker->contribution.realization.code.byte_length);
     emitter->reported_workers_by_symbol[symbol.symbol_id] = true;
   }
   *out_worker = worker;
@@ -996,14 +1004,14 @@ iree_status_t loom_aie2p_configuration_plan_materialize(
   const loom_aie2p_xdna_artifact_request_t* request = plan->request;
   loom_aie2p_xdna_tile_t* tiles = NULL;
   if (plan->entry->tile_count != 0) {
-    if (worker_set->contributions_by_symbol == NULL) {
+    if (worker_set->programs_by_symbol == NULL) {
       IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
           request->scratch_arena, request->module->symbols.count,
-          sizeof(*worker_set->contributions_by_symbol),
-          (void**)&worker_set->contributions_by_symbol));
-      memset(worker_set->contributions_by_symbol, 0,
+          sizeof(*worker_set->programs_by_symbol),
+          (void**)&worker_set->programs_by_symbol));
+      memset(worker_set->programs_by_symbol, 0,
              request->module->symbols.count *
-                 sizeof(*worker_set->contributions_by_symbol));
+                 sizeof(*worker_set->programs_by_symbol));
     }
     if (plan->report != NULL) {
       IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
@@ -1020,12 +1028,13 @@ iree_status_t loom_aie2p_configuration_plan_materialize(
   }
   for (iree_host_size_t i = 0; i < plan->entry->tile_count; ++i) {
     const loom_aie2p_configuration_load_t* load = &plan->loads[i];
-    loom_aie2p_leaf_contribution_t* worker = NULL;
+    loom_aie2p_program_object_t* program = NULL;
     IREE_RETURN_IF_ERROR(loom_aie2p_configuration_compile_worker(
-        plan, compiler, worker_set, load->source, &worker));
+        plan, compiler, worker_set, load->source, &program));
     if (plan->error_count) {
       return iree_ok_status();
     }
+    const loom_aie2p_leaf_contribution_t* worker = &program->contribution;
     const loom_native_object_symbol_t* entry_symbol =
         &worker->object.symbols[worker->realization.entry_symbol_index];
     tiles[i] = (loom_aie2p_xdna_tile_t){
