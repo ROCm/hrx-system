@@ -10,7 +10,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "loom/tooling/cli/loomc_result.h"
 #include "loom/tooling/io/file.h"
 #include "loom/tooling/testbench/source_report.h"
 #include "loom/tools/loom-benchmark/case_request.h"
@@ -345,15 +344,9 @@ static iree_status_t loom_benchmark_resolve_request_roots(
           options->context, options->workspace, request,
           loomc_allocator_from_iree(options->host_allocator), out_module,
           root_names, &result));
-  if (iree_status_is_ok(status) && !loomc_result_succeeded(result)) {
-    bool succeeded = false;
-    status = loom_tooling_cli_print_loomc_result(stderr, result, &succeeded);
-    if (iree_status_is_ok(status)) {
-      status = iree_make_status(
-          IREE_STATUS_INTERNAL,
-          "canonical compile request failed exact-root deserialization");
-    }
-  }
+  // Capture produced these immutable bytes with this context's serializer.
+  // Successful deserialization must initialize every projected root name.
+  IREE_ASSERT(!iree_status_is_ok(status) || loomc_result_succeeded(result));
   loomc_result_release(result);
   if (!iree_status_is_ok(status)) {
     loomc_module_release(*out_module);
@@ -962,17 +955,6 @@ iree_status_t loom_benchmark_export_compile_requests(
   IREE_ASSERT_ARGUMENT(options->event_sink);
   IREE_ASSERT_ARGUMENT(out_result);
   *out_result = (loom_benchmark_compile_request_export_result_t){0};
-  if (!options->artifact_bundle->enabled) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "canonical compile request export requires an artifact bundle");
-  }
-  if (iree_string_view_is_empty(options->target)) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "canonical compile request export requires an explicit target");
-  }
-
   loom_benchmark_compile_sample_ref_t* sample_refs = NULL;
   iree_host_size_t sample_ref_count = 0;
   loom_benchmark_compile_capture_t* captures = NULL;

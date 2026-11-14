@@ -464,7 +464,7 @@ iree_status_t loom_benchmark_run_file(
     status = loom_tooling_cli_prepare_loomc_pass_program(
         compiler_context, module, benchmark_options->pipeline,
         IREE_SV("loom-benchmark pipeline"), allocator, &pass_program, &result);
-    if (iree_status_is_ok(status) && pass_program == NULL &&
+    if (iree_status_is_ok(status) && result == NULL && pass_program == NULL &&
         benchmark_options->compile_only) {
       const loomc_target_pipeline_options_t target_pipeline_options = {
           .type = LOOMC_STRUCTURE_TYPE_TARGET_PIPELINE_OPTIONS,

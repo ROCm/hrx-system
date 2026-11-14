@@ -273,6 +273,30 @@
       ]
     },
     {
+      "name": "a rejected pipeline does not publish compile requests",
+      "run": {
+        "tool": "loom-benchmark",
+        "args": [
+          "{srcdir}/../testdata/compile_requests.loom",
+          "--compile-only",
+          "--pipeline=not-a-pass",
+          "--target=amdgpu:gfx1100",
+          "--artifact-bundle-dir={tmp}/rejected-pipeline"
+        ]
+      },
+      "exit": 1,
+      "files": [
+        {
+          "path": "{tmp}/rejected-pipeline/compile_requests/manifest.json",
+          "exists": false
+        },
+        {
+          "path": "{tmp}/rejected-pipeline/compile_requests/capture0000-r0000.loombc",
+          "exists": false
+        }
+      ]
+    },
+    {
       "name": "captures selected benchmark samples as portable compile requests",
       "steps": [
         {
