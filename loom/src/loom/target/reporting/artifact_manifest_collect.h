@@ -9,6 +9,7 @@
 #ifndef LOOM_TARGET_ARTIFACT_MANIFEST_COLLECT_H_
 #define LOOM_TARGET_ARTIFACT_MANIFEST_COLLECT_H_
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #include "iree/base/api.h"
@@ -37,10 +38,22 @@ typedef iree_status_t(
     iree_arena_allocator_t* arena,
     loom_target_artifact_manifest_target_t* inout_target);
 
+typedef iree_status_t(
+    IREE_API_PTR* loom_target_artifact_manifest_project_interface_fn_t)(
+    const loom_module_t* module, const loom_target_entry_t* entry,
+    bool include_parameters, iree_arena_allocator_t* arena,
+    loom_target_artifact_manifest_interface_t* inout_interface);
+
 // Family-owned projection of structured target facts into manifest fields.
 typedef struct loom_target_artifact_manifest_target_projection_t {
   // Projects target-family identity from |entry| into |inout_target|.
   loom_target_artifact_manifest_project_target_fn_t project;
+  // Optional. Projects the native argument layout the family's lowering
+  // decided for |entry| into |inout_interface|: the argument segment byte
+  // length and, when |include_parameters| is set, one parameter row per
+  // authored parameter carrying its kind, ABI byte offset, payload byte
+  // length and alignment. Rows replace the signature-derived rows.
+  loom_target_artifact_manifest_project_interface_fn_t project_interface;
 } loom_target_artifact_manifest_target_projection_t;
 
 typedef struct loom_target_artifact_manifest_collect_options_t {
