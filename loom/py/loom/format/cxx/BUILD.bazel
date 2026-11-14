@@ -125,6 +125,16 @@ iree_py_test(
 )
 
 iree_py_test(
+    name = "memory_access_test",
+    size = "small",
+    srcs = ["memory_access_test.py"],
+    args = ["$(rootpath //loom/src/loom/tools/loom-import-cxx)"],
+    data = ["//loom/src/loom/tools/loom-import-cxx"],
+    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
+    deps = [":cxx"],
+)
+
+iree_py_test(
     name = "predicate_conversions_test",
     size = "small",
     srcs = ["predicate_conversions_test.py"],
