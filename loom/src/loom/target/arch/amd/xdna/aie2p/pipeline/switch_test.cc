@@ -224,7 +224,7 @@ class Aie2pControlSwitchTest : public Aie2pSwitchTest {
       if (i == 0) {
         IREE_ASSERT_OK(loom_aie2p_array_route_sharing_initialize(
             &context_.routing, first, context_.routing.route_count - first,
-            {0, 1}, &arena_, &delivery->sharing));
+            {0, 1}, &delivery->sharing));
       }
     }
     deliveries_.resize(tiles_.size());

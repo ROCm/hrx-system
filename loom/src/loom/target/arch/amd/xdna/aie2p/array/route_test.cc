@@ -606,7 +606,7 @@ TEST(Aie2pRouteTest, ReceiverGrantSharesOnlyItsPayloadSuffix) {
   }
   loom_aie2p_array_route_sharing_t sharing;
   IREE_ASSERT_OK(loom_aie2p_array_route_sharing_initialize(
-      &routing, 0, carrier_count, {0, 1}, &arena, &sharing));
+      &routing, 0, carrier_count, {0, 1}, &sharing));
   const loom_xdna_tile_coordinate_t control_sources[] = {{0, 4}, {1, 5}};
   for (uint32_t i = 0; i < IREE_ARRAYSIZE(control_sources); ++i) {
     const uint32_t source = 4 + i;
@@ -660,7 +660,7 @@ TEST(Aie2pRouteTest, AvailableControlLaneKeepsPayloadUnshared) {
                                              {0, 1}, 0, false));
   loom_aie2p_array_route_sharing_t sharing;
   IREE_ASSERT_OK(loom_aie2p_array_route_sharing_initialize(
-      &routing, 0, routing.route_count, {0, 1}, &arena, &sharing));
+      &routing, 0, routing.route_count, {0, 1}, &sharing));
   const size_t first = routing.route_count;
   ASSERT_TRUE(loom_aie2p_array_route_control(&routing, 1, &trees[1], {0, 2},
                                              {0, 1}, &sharing));
@@ -693,7 +693,7 @@ TEST(Aie2pRouteTest, GrantedControlContinuesBeyondPayloadReceiver) {
     }
     loom_aie2p_array_route_sharing_t sharing;
     IREE_ASSERT_OK(loom_aie2p_array_route_sharing_initialize(
-        &routing, 0, carrier_count, {0, 1}, &arena, &sharing));
+        &routing, 0, carrier_count, {0, 1}, &sharing));
     for (uint32_t i = 0; i < 2; ++i) {
       const uint16_t row = (i == 0) == shim_first ? 0 : 1;
       const size_t first = routing.route_count;
@@ -761,7 +761,7 @@ TEST(Aie2pRouteTest, GrantedControlRequiresFreeContinuationBeyondReceiver) {
   }
   loom_aie2p_array_route_sharing_t sharing;
   IREE_ASSERT_OK(loom_aie2p_array_route_sharing_initialize(
-      &routing, 0, carrier_count, {0, 1}, &arena, &sharing));
+      &routing, 0, carrier_count, {0, 1}, &sharing));
   ASSERT_TRUE(loom_aie2p_array_route_stream(
       &routing, 4, &trees[4], {0, 1}, LOOM_XDNA_STREAM_PORT_TILE_CONTROL, 0,
       {0, 0}, LOOM_XDNA_STREAM_PORT_TILE_CONTROL, 0, true));
@@ -776,7 +776,7 @@ TEST(Aie2pRouteTest, GrantedControlRequiresFreeContinuationBeyondReceiver) {
   iree_arena_block_pool_deinitialize(&blocks);
 }
 
-TEST(Aie2pRouteTest, SharingIdentitySurvivesRecordRelocation) {
+TEST(Aie2pRouteTest, SharingIdentitySurvivesOwnerRetirement) {
   iree_arena_block_pool_t blocks;
   iree_arena_block_pool_initialize(4096, iree_allocator_system(), &blocks);
   iree_arena_allocator_t arena;
@@ -796,7 +796,7 @@ TEST(Aie2pRouteTest, SharingIdentitySurvivesRecordRelocation) {
   }
   loom_aie2p_array_route_sharing_t sharing;
   IREE_ASSERT_OK(loom_aie2p_array_route_sharing_initialize(
-      &routing, 0, carrier_count, {0, 1}, &arena, &sharing));
+      &routing, 0, carrier_count, {0, 1}, &sharing));
   ASSERT_TRUE(loom_aie2p_array_route_control(&routing, 4, &trees[4], {0, 2},
                                              {0, 1}, &sharing));
   ASSERT_TRUE(sharing.used);
@@ -804,8 +804,18 @@ TEST(Aie2pRouteTest, SharingIdentitySurvivesRecordRelocation) {
   // Reusing the old record for a new domain cannot acquire the old prefix.
   // Domain identity belongs to the routing owner, not this record's address.
   IREE_ASSERT_OK(loom_aie2p_array_route_sharing_initialize(
-      &routing, 0, carrier_count, {0, 1}, &arena, &sharing));
+      &routing, 0, carrier_count, {0, 1}, &sharing));
   EXPECT_NE(sharing.domain, retained.domain);
+  iree_arena_allocator_t retained_arena;
+  iree_arena_initialize(&blocks, &retained_arena);
+  loom_aie2p_array_route_builder_t cloned;
+  IREE_ASSERT_OK(loom_aie2p_array_route_builder_clone(
+      &routing, 64, &retained_arena, &cloned));
+  EXPECT_NE(cloned.routes, routing.routes);
+  EXPECT_NE(cloned.prefixes.nodes, routing.prefixes.nodes);
+  EXPECT_NE(cloned.domains, routing.domains);
+  routing = cloned;
+  iree_arena_deinitialize(&arena);
   const size_t first = routing.route_count;
   EXPECT_FALSE(loom_aie2p_array_route_control(&routing, 5, &trees[4], {0, 2},
                                               {0, 0}, &sharing));
@@ -820,11 +830,11 @@ TEST(Aie2pRouteTest, SharingIdentitySurvivesRecordRelocation) {
   EXPECT_EQ(terminal.coordinate.row, 0);
   EXPECT_EQ(terminal.source_channel, 0);
   EXPECT_EQ(terminal.destination_port, LOOM_XDNA_STREAM_PORT_TILE_CONTROL);
-  iree_arena_deinitialize(&arena);
+  iree_arena_deinitialize(&retained_arena);
   iree_arena_block_pool_deinitialize(&blocks);
 }
 
-TEST(Aie2pRouteTest, MulticastIdentitySurvivesRecordRelocation) {
+TEST(Aie2pRouteTest, MulticastIdentitySurvivesOwnerRetirement) {
   iree_arena_block_pool_t blocks;
   iree_arena_block_pool_initialize(4096, iree_allocator_system(), &blocks);
   iree_arena_allocator_t arena;
@@ -834,13 +844,20 @@ TEST(Aie2pRouteTest, MulticastIdentitySurvivesRecordRelocation) {
   IREE_ASSERT_OK(loom_aie2p_array_route_builder_initialize(
       loom_xdna_npu2_array_family(), 64, &arena, &routing));
   loom_aie2p_array_route_multicast_t multicast;
-  IREE_ASSERT_OK(loom_aie2p_array_route_multicast_initialize(&routing, &arena,
-                                                             &multicast));
+  IREE_ASSERT_OK(
+      loom_aie2p_array_route_multicast_initialize(&routing, &multicast));
   ASSERT_TRUE(loom_aie2p_array_route_multicast(&routing, 0, &source, {0, 1}, 0,
                                                {1, 2}, 0, &multicast));
   auto retained = multicast;
-  IREE_ASSERT_OK(loom_aie2p_array_route_multicast_initialize(&routing, &arena,
-                                                             &multicast));
+  iree_arena_allocator_t retained_arena;
+  iree_arena_initialize(&blocks, &retained_arena);
+  loom_aie2p_array_route_builder_t cloned;
+  IREE_ASSERT_OK(loom_aie2p_array_route_builder_clone(
+      &routing, 64, &retained_arena, &cloned));
+  routing = cloned;
+  iree_arena_deinitialize(&arena);
+  IREE_ASSERT_OK(
+      loom_aie2p_array_route_multicast_initialize(&routing, &multicast));
   EXPECT_NE(multicast.domain, retained.domain);
   const size_t first = routing.route_count;
   EXPECT_FALSE(loom_aie2p_array_route_multicast(&routing, 1, &source, {0, 1}, 0,
@@ -851,6 +868,34 @@ TEST(Aie2pRouteTest, MulticastIdentitySurvivesRecordRelocation) {
   EXPECT_EQ(routing.routes[routing.route_count - 1].coordinate.row, 3);
   EXPECT_EQ(routing.routes[routing.route_count - 1].destination_port,
             LOOM_XDNA_STREAM_PORT_DMA);
+  iree_arena_deinitialize(&retained_arena);
+  iree_arena_block_pool_deinitialize(&blocks);
+}
+
+TEST(Aie2pRouteTest, EmptyOwnerCanBeClonedAndExtended) {
+  iree_arena_block_pool_t blocks;
+  iree_arena_block_pool_initialize(4096, iree_allocator_system(), &blocks);
+  iree_arena_allocator_t arena;
+  iree_arena_initialize(&blocks, &arena);
+  loom_aie2p_array_route_builder_t source;
+  IREE_ASSERT_OK(loom_aie2p_array_route_builder_initialize(
+      loom_xdna_npu2_array_family(), 0, &arena, &source));
+  loom_aie2p_array_route_builder_t empty;
+  IREE_ASSERT_OK(
+      loom_aie2p_array_route_builder_clone(&source, 0, &arena, &empty));
+  EXPECT_EQ(empty.route_count, 0u);
+  EXPECT_EQ(empty.routes, nullptr);
+  loom_aie2p_array_route_builder_t extended;
+  IREE_ASSERT_OK(
+      loom_aie2p_array_route_builder_clone(&empty, 8, &arena, &extended));
+  loom_aie2p_array_route_tree_t tree = {};
+  ASSERT_TRUE(loom_aie2p_array_route_stream(
+      &extended, 0, &tree, {0, 2}, LOOM_XDNA_STREAM_PORT_CORE, 0, {0, 2},
+      LOOM_XDNA_STREAM_PORT_TILE_CONTROL, 0, true));
+  EXPECT_EQ(extended.route_count, 1u);
+  EXPECT_EQ(extended.routes[0].source_port, LOOM_XDNA_STREAM_PORT_CORE);
+  EXPECT_EQ(extended.routes[0].destination_port,
+            LOOM_XDNA_STREAM_PORT_TILE_CONTROL);
   iree_arena_deinitialize(&arena);
   iree_arena_block_pool_deinitialize(&blocks);
 }

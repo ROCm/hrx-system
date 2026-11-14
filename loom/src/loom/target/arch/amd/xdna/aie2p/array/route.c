@@ -16,6 +16,11 @@ typedef enum loom_aie2p_array_route_direction_e {
   LOOM_AIE2P_ARRAY_ROUTE_DIRECTION_COUNT = 4,
 } loom_aie2p_array_route_direction_t;
 
+typedef struct loom_aie2p_array_route_domain_t {
+  // Owned lane masks in north/south/west/east order, indexed by tile.
+  uint32_t* links;
+} loom_aie2p_array_route_domain_t;
+
 // One physical arrival in a canonical source's prefix tree. Separate sources
 // own distinct lanes except within an explicitly admitted packet domain.
 // Each source retains its complete filter path through shared lanes.
@@ -60,7 +65,8 @@ iree_status_t loom_aie2p_array_route_builder_initialize(
     const loom_xdna_array_family_t* family, iree_host_size_t route_capacity,
     iree_arena_allocator_t* arena,
     loom_aie2p_array_route_builder_t* out_builder) {
-  *out_builder = (loom_aie2p_array_route_builder_t){.family = family};
+  *out_builder =
+      (loom_aie2p_array_route_builder_t){.arena = arena, .family = family};
   if (route_capacity == 0) {
     return iree_ok_status();
   }
@@ -92,6 +98,65 @@ iree_status_t loom_aie2p_array_route_builder_initialize(
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       arena, family->column_count + 2 * family->row_count - 3,
       sizeof(*out_builder->steps), (void**)&out_builder->steps));
+  return iree_ok_status();
+}
+
+static iree_status_t loom_aie2p_array_route_domain_create(
+    loom_aie2p_array_route_builder_t* builder, iree_host_size_t* out_domain) {
+  IREE_RETURN_IF_ERROR(iree_arena_grow_array(
+      builder->arena, builder->domain_count, builder->domain_count + 1,
+      sizeof(*builder->domains), &builder->domain_capacity,
+      (void**)&builder->domains));
+  const iree_host_size_t count =
+      loom_xdna_array_physical_tile_count(builder->family) *
+      LOOM_AIE2P_ARRAY_ROUTE_DIRECTION_COUNT;
+  uint32_t* links = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      builder->arena, count, sizeof(*links), (void**)&links));
+  memset(links, 0, count * sizeof(*links));
+  builder->domains[builder->domain_count].links = links;
+  *out_domain = ++builder->domain_count;
+  return iree_ok_status();
+}
+
+iree_status_t loom_aie2p_array_route_builder_clone(
+    const loom_aie2p_array_route_builder_t* source,
+    iree_host_size_t route_capacity, iree_arena_allocator_t* arena,
+    loom_aie2p_array_route_builder_t* out_builder) {
+  IREE_ASSERT(route_capacity >= source->route_count &&
+              route_capacity >= source->prefixes.node_count);
+  IREE_RETURN_IF_ERROR(loom_aie2p_array_route_builder_initialize(
+      source->family, route_capacity, arena, out_builder));
+  out_builder->route_count = source->route_count;
+  out_builder->prefixes.node_count = source->prefixes.node_count;
+  if (source->route_count) {
+    memcpy(out_builder->routes, source->routes,
+           source->route_count * sizeof(*source->routes));
+    memcpy(out_builder->prefixes.nodes, source->prefixes.nodes,
+           source->prefixes.node_count * sizeof(*source->prefixes.nodes));
+    const iree_host_size_t tile_count =
+        loom_xdna_array_physical_tile_count(source->family);
+    memcpy(out_builder->tile_route_counts, source->tile_route_counts,
+           tile_count * sizeof(*source->tile_route_counts));
+    memcpy(
+        out_builder->link_channels.northbound, source->link_channels.northbound,
+        tile_count * LOOM_AIE2P_ARRAY_ROUTE_DIRECTION_COUNT * sizeof(uint32_t));
+  }
+  out_builder->domain_count = source->domain_count;
+  out_builder->domain_capacity = source->domain_count;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, source->domain_count, sizeof(*out_builder->domains),
+      (void**)&out_builder->domains));
+  const iree_host_size_t link_count =
+      loom_xdna_array_physical_tile_count(source->family) *
+      LOOM_AIE2P_ARRAY_ROUTE_DIRECTION_COUNT;
+  for (iree_host_size_t i = 0; i < source->domain_count; ++i) {
+    IREE_RETURN_IF_ERROR(
+        iree_arena_allocate_array(arena, link_count, sizeof(uint32_t),
+                                  (void**)&out_builder->domains[i].links));
+    memcpy(out_builder->domains[i].links, source->domains[i].links,
+           link_count * sizeof(uint32_t));
+  }
   return iree_ok_status();
 }
 
@@ -297,9 +362,8 @@ static bool loom_aie2p_array_plan_route(
   const iree_host_size_t sharing_owner = sharing     ? sharing->domain
                                          : multicast ? multicast->domain
                                                      : 0;
-  uint32_t* sharing_links = sharing     ? sharing->links
-                            : multicast ? multicast->links
-                                        : NULL;
+  uint32_t* sharing_links =
+      sharing_owner ? builder->domains[sharing_owner - 1].links : NULL;
   // Existing multicast prefixes retain their physical arrival and lane. Only
   // the unreserved suffix participates in lane selection.
   while (builder->prefixes.nodes[node_index].coordinate.column !=
@@ -592,18 +656,9 @@ bool loom_aie2p_array_route_stream(loom_aie2p_array_route_builder_t* builder,
 }
 
 iree_status_t loom_aie2p_array_route_multicast_initialize(
-    loom_aie2p_array_route_builder_t* builder, iree_arena_allocator_t* arena,
+    loom_aie2p_array_route_builder_t* builder,
     loom_aie2p_array_route_multicast_t* out_multicast) {
-  *out_multicast =
-      (loom_aie2p_array_route_multicast_t){.domain = ++builder->domain_count};
-  const iree_host_size_t count =
-      loom_xdna_array_physical_tile_count(builder->family) *
-      LOOM_AIE2P_ARRAY_ROUTE_DIRECTION_COUNT;
-  IREE_RETURN_IF_ERROR(
-      iree_arena_allocate_array(arena, count, sizeof(*out_multicast->links),
-                                (void**)&out_multicast->links));
-  memset(out_multicast->links, 0, count * sizeof(*out_multicast->links));
-  return iree_ok_status();
+  return loom_aie2p_array_route_domain_create(builder, &out_multicast->domain);
 }
 
 bool loom_aie2p_array_route_multicast(
@@ -627,18 +682,13 @@ bool loom_aie2p_array_route_multicast(
 iree_status_t loom_aie2p_array_route_sharing_initialize(
     loom_aie2p_array_route_builder_t* builder, iree_host_size_t first,
     iree_host_size_t count, loom_xdna_tile_coordinate_t destination,
-    iree_arena_allocator_t* arena,
     loom_aie2p_array_route_sharing_t* out_sharing) {
-  *out_sharing = (loom_aie2p_array_route_sharing_t){
-      .domain = ++builder->domain_count, .destination = destination};
+  *out_sharing = (loom_aie2p_array_route_sharing_t){.destination = destination};
+  IREE_RETURN_IF_ERROR(
+      loom_aie2p_array_route_domain_create(builder, &out_sharing->domain));
+  uint32_t* links = builder->domains[out_sharing->domain - 1].links;
   const iree_host_size_t tile_count =
       loom_xdna_array_physical_tile_count(builder->family);
-  const iree_host_size_t link_count =
-      tile_count * LOOM_AIE2P_ARRAY_ROUTE_DIRECTION_COUNT;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, link_count,
-                                                 sizeof(*out_sharing->links),
-                                                 (void**)&out_sharing->links));
-  memset(out_sharing->links, 0, link_count * sizeof(*out_sharing->links));
   for (iree_host_size_t i = first; i < first + count; ++i) {
     const loom_aie2p_array_route_plan_t* edge = &builder->routes[i];
     loom_aie2p_array_route_direction_t direction;
@@ -667,8 +717,8 @@ iree_status_t loom_aie2p_array_route_sharing_initialize(
       default:
         continue;
     }
-    out_sharing->links[direction * tile_count + index] |=
-        UINT32_C(1) << edge->destination_channel;
+    links[direction * tile_count + index] |= UINT32_C(1)
+                                             << edge->destination_channel;
   }
   return iree_ok_status();
 }

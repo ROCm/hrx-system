@@ -211,7 +211,7 @@ static iree_status_t loom_aie2p_native_share_payloads(
        group = group->next_group) {
     if (group->member_count > 1) {
       IREE_RETURN_IF_ERROR(loom_aie2p_array_route_multicast_initialize(
-          &context->routing, context->pass->arena, &group->routes));
+          &context->routing, &group->routes));
     }
   }
   for (loom_aie2p_native_payload_multicast_t* multicast = inventory->multicasts;

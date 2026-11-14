@@ -34,9 +34,6 @@ typedef struct loom_aie2p_array_route_sharing_t {
   iree_host_size_t domain;
   // Final payload receiver; control can continue beyond this tile.
   loom_xdna_tile_coordinate_t destination;
-  // Borrowable payload and control-continuation lane masks in
-  // north/south/west/east order, indexed by tile.
-  uint32_t* links;
   // At least one control route actually borrows this payload path.
   bool used;
 } loom_aie2p_array_route_sharing_t;
@@ -48,13 +45,12 @@ typedef struct loom_aie2p_array_route_sharing_t {
 typedef struct loom_aie2p_array_route_multicast_t {
   // Builder-local nonzero identity of this serialized packet domain.
   iree_host_size_t domain;
-  // Shared lane masks in north/south/west/east order, indexed by tile. The
-  // northbound mask remains empty: private classes use those source prefixes.
-  uint32_t* links;
 } loom_aie2p_array_route_multicast_t;
 
 // Mutable stream-network allocation state for one physical array plan.
 typedef struct loom_aie2p_array_route_builder_t {
+  // Owner of route inventories and every sharing domain's lane masks.
+  iree_arena_allocator_t* arena;
   // Immutable array-family topology and stream-port capacities.
   const loom_xdna_array_family_t* family;
   // Preallocated route records populated in traversal order.
@@ -63,6 +59,10 @@ typedef struct loom_aie2p_array_route_builder_t {
   iree_host_size_t route_count;
   // Number of sharing identities assigned independently of contract storage.
   iree_host_size_t domain_count;
+  // Owned lane masks indexed by nonzero domain identity minus one.
+  struct loom_aie2p_array_route_domain_t* domains;
+  // Allocated capacity of the domain inventory.
+  iree_host_size_t domain_capacity;
   // Populated route count per column-major tile, bounding switch admission
   // storage without rescanning the complete array's routes.
   iree_host_size_t* tile_route_counts;
@@ -94,6 +94,16 @@ typedef struct loom_aie2p_array_route_builder_t {
 iree_status_t loom_aie2p_array_route_builder_initialize(
     const loom_xdna_array_family_t* family, iree_host_size_t route_capacity,
     iree_arena_allocator_t* arena,
+    loom_aie2p_array_route_builder_t* out_builder);
+
+// Copies selected routes, occupied lanes, sender prefixes, and sharing domains
+// into an independent owner. Source and sharing handles retain their indexed
+// identities in the copy. No route selection or source traversal is repeated;
+// temporary suffix-planning storage starts empty. route_capacity covers both
+// the retained inventory and any subsequent extension selected by the caller.
+iree_status_t loom_aie2p_array_route_builder_clone(
+    const loom_aie2p_array_route_builder_t* source,
+    iree_host_size_t route_capacity, iree_arena_allocator_t* arena,
     loom_aie2p_array_route_builder_t* out_builder);
 
 // Connects one shim memory-to-stream DMA channel to a worker
@@ -147,7 +157,7 @@ bool loom_aie2p_array_route_stream(loom_aie2p_array_route_builder_t* builder,
 
 // Initializes a shared packet domain without reserving any physical lanes.
 iree_status_t loom_aie2p_array_route_multicast_initialize(
-    loom_aie2p_array_route_builder_t* builder, iree_arena_allocator_t* arena,
+    loom_aie2p_array_route_builder_t* builder,
     loom_aie2p_array_route_multicast_t* out_multicast);
 
 // Routes one SRAM-to-core branch in a serialized multicast domain. Cross-column
@@ -167,7 +177,6 @@ bool loom_aie2p_array_route_multicast(
 iree_status_t loom_aie2p_array_route_sharing_initialize(
     loom_aie2p_array_route_builder_t* builder, iree_host_size_t first,
     iree_host_size_t count, loom_xdna_tile_coordinate_t destination,
-    iree_arena_allocator_t* arena,
     loom_aie2p_array_route_sharing_t* out_sharing);
 
 // Routes core control packets through a granted payload's receiver. Free lanes
