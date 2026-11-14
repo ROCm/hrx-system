@@ -200,12 +200,10 @@ TEST(ControlFlowTest, DependentPointerComparisonsReadCapturedValues) {
                              function->symbol);
     ControlFlow invocation(source.unit(), source.diagnostics(), types,
                            concrete_body->statement, concrete);
-    std::unordered_set<cxx::FieldSymbol*> identities;
-    invocation.collect_pointer_capture_identities(identities);
-    EXPECT_TRUE(identities.empty());
-    EXPECT_FALSE(construction.resolve_pointer_reference_captures(identities));
-    construction.publish_pointer_reference_snapshots(types);
-    EXPECT_TRUE(types.pointer_reference_is_snapshot(field));
+    EXPECT_FALSE(types.reference_capture_requires_identity(field));
+    EXPECT_FALSE(construction.resolve_reference_captures());
+    construction.publish_reference_snapshots(types);
+    EXPECT_TRUE(types.reference_is_snapshot(field));
   }
 }
 

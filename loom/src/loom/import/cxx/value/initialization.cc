@@ -326,8 +326,8 @@ Value Initialization::closure(cxx::LambdaExpressionAST* expression) {
     types_.member(field, capture);
     const bool is_reference =
         unit_.typeTraits().is_lvalue_reference(field->type());
-    const bool pointer_snapshot =
-        is_reference && types_.pointer_reference_is_snapshot(field);
+    const bool reference_snapshot =
+        is_reference && types_.reference_is_snapshot(field);
     cxx::ExpressionAST* referent = nullptr;
     if (is_reference) {
       referent = reference_initializer(unit_, initializer);
@@ -339,14 +339,14 @@ Value Initialization::closure(cxx::LambdaExpressionAST* expression) {
     }
     auto initialized =
         referent
-            ? pointer_snapshot
+            ? reference_snapshot
                   ? evaluation_.convert(
                         referent,
                         unit_.typeTraits().remove_reference(field->type()),
                         capture)
                   : evaluation_.reference(referent, capture)
             : value(field->type(), initializer, field->constructor(), capture);
-    if (!is_reference || pointer_snapshot) {
+    if (!is_reference || reference_snapshot) {
       evaluation_.adopt(initializer);
     }
     if (!captures.emplace(field, initialized).second) {

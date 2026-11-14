@@ -266,6 +266,50 @@ func.def @operator_call_value(%this_left: i32, %this_right: i32, %input: i32) ->
 }
 
 // ====
+// A nested reference capture transports the enclosing closure's complete SSA
+// value when that closure cannot be represented in physical object storage.
+// The inner call consumes the same ordinary value-receiver ABI as an explicit
+// by-value capture; no pointer-bearing closure object is allocated.
+float nested_value_reference(float* data) {
+  auto ptr = [&](long long offset) { return data + offset; };
+  auto read = [&](long long offset) { return ptr(offset)[0]; };
+  return read(0);
+}
+
+// ----
+func.def public @nested_value_reference(%data: buffer, %data_byte_offset: offset) -> (f32) {
+  %3 = scalar.constant 0 : i32
+  %4 = scalar.extsi %3 : i32 to i64
+  %5 = func.call readonly @operator_call_value(%data, %data_byte_offset, %4) : (buffer, offset, i64) -> (f32)
+  func.return %5 : f32
+}
+
+func.def @operator_call_value(%this_ptr_data: buffer, %this_ptr_data_byte_offset: offset, %offset: i64) -> (f32) {
+  %10, %11 = func.call pure @operator_call_value_1(%this_ptr_data, %this_ptr_data_byte_offset, %offset) : (buffer, offset, i64) -> (buffer, offset)
+  %12 = scalar.constant 0 : i32
+  %13 = scalar.extsi %12 : i32 to i64
+  %14 = scalar.constant 4 : i64
+  %15 = scalar.muli %13, %14 : i64
+  %16 = index.cast %11 : offset to i64
+  %17 = scalar.addi %16, %15 : i64
+  %18 = scalar.assume %17 [range(%17, 0, 9223372036854775807)] : i64
+  %19 = index.cast %18 : i64 to offset
+  %20 = buffer.view %10[%19] : buffer -> view<1xf32>
+  %21 = view.load<root_in_bounds> %20[0] : view<1xf32> -> f32
+  func.return %21 : f32
+}
+
+func.def @operator_call_value_1(%this_data: buffer, %this_data_byte_offset: offset, %offset: i64) -> (buffer, offset) {
+  %27 = scalar.constant 4 : i64
+  %28 = scalar.muli %offset, %27 : i64
+  %29 = index.cast %this_data_byte_offset : offset to i64
+  %30 = scalar.addi %29, %28 : i64
+  %31 = scalar.assume %30 [range(%30, 0, 9223372036854775807)] : i64
+  %32 = index.cast %31 : i64 to offset
+  func.return %this_data, %32 : buffer, offset
+}
+
+// ====
 // A forwarding-reference specialization transports the closure value into the
 // first helper. Recursive calls reference-collapse the named parameter to an
 // lvalue reference while preserving the same captured owner identity. A stable
