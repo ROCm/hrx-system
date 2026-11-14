@@ -659,6 +659,7 @@ def emit_handoff_packages(
     uploaded_blobs: dict[str, int] = {}
     build_rules: dict[str, list[dict[str, Any]]] = {}
     incompatible_labels = []
+    non_native_labels = []
     test_summaries = []
     runfile_reference_count = 0
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -670,6 +671,12 @@ def emit_handoff_packages(
             raise HandoffError(f"provider metadata for {label} has no compatibility")
         if not compatible:
             incompatible_labels.append(label)
+            continue
+        executable_value = provider_metadata.get("executable")
+        if not isinstance(
+            executable_value, str
+        ) or not executable_value.lower().endswith(".exe"):
+            non_native_labels.append(label)
             continue
         package, name = _main_repository_label_parts(label)
         manifest, build_attributes = _emit_target_manifest(
@@ -726,6 +733,8 @@ def emit_handoff_packages(
         "compatible_test_count": len(test_summaries),
         "incompatible_test_count": len(incompatible_labels),
         "incompatible_labels": incompatible_labels,
+        "non_native_test_count": len(non_native_labels),
+        "non_native_labels": non_native_labels,
         "runfile_reference_count": runfile_reference_count,
         "unique_blob_count": len(uploaded_blobs),
         "unique_blob_bytes": sum(uploaded_blobs.values()),

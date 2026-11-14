@@ -1026,7 +1026,7 @@ jobs:
             echo "AR=${output_dir}/rocm-root/lib/llvm/bin/llvm-ar"
             echo "CC=${output_dir}/rocm-root/lib/llvm/bin/clang"
             echo "CXX=${output_dir}/rocm-root/lib/llvm/bin/clang++"
-            echo "HRX_ARTIFACT_SET=llvm"
+            echo "HRX_ARTIFACT_SET=core"
             echo "HRX_DOWNLOAD_CACHE_DIR=${output_dir}/downloads"
             echo "HRX_OUTPUT_DIR=${output_dir}"
             echo "HRX_PYTHON=${output_dir}/python/bin/python3"
@@ -1073,20 +1073,31 @@ jobs:
           {
             echo 'build --config=windows-x86_64'
             echo 'build --config=windows-msvc'
+            echo 'build --config=rocm-ci-cache'
+            echo 'build --remote_upload_local_results=true'
+            echo 'build --remote_verify_downloads'
+            echo 'build --noremote_cache_async'
           } >> .bazelrc.local
           echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
 
-      - name: Configure matching project graph
-        run: python3 dev.py bazel configure --//runtime/config/hal:drivers=task
-
-      - name: Build and publish test closure
+      - name: Build repository and publish native test closure
         run: |
           set -euo pipefail
-          selection='tests(//runtime/src/iree/base/...)'
 
           package_dir="$RUNNER_TEMP/windows-cache-handoff-package"
           evidence_dir="$package_dir/evidence"
           mkdir -p "$evidence_dir"
+          selection_query="$evidence_dir/test-selection.query"
+          cat > "$selection_query" <<'EOF'
+          let all_tests = tests(//...) in
+            (($all_tests except attr(tags, '(^|, |\[)manual(,|\]|$)', $all_tests))
+              except kind('py_.* rule', $all_tests))
+            except attr(tags, 'iree-run-requirement=', $all_tests)
+          EOF
+          python3 build_tools/devtools/ci.py \
+            iree-bazel-repository-build \
+            --keep-going \
+            --bazel-profile-dir="$evidence_dir/profiles"
           cp .bazelrc.configured "$evidence_dir/configured.bazelrc"
           bazel --version > "$evidence_dir/bazel-version.txt"
           curl --fail --silent --show-error \
@@ -1094,7 +1105,6 @@ jobs:
             > "$evidence_dir/cache-status.json"
 
           common_flags=(
-            --config=rocm-ci-cache
             --@bazel_tools//tools/test:incompatible_use_default_test_toolchain=false
             --remote_download_outputs=all
             --remote_verify_downloads
@@ -1104,7 +1114,7 @@ jobs:
           target_patterns="$evidence_dir/target-patterns.txt"
           target_query="$evidence_dir/target-query.txt"
           bazel "--output_base=$IREE_CACHE_HANDOFF_OUTPUT_BASE" query \
-            --output=label "$selection" > "$target_patterns"
+            --output=label --query_file="$selection_query" > "$target_patterns"
           {
             echo 'set('
             sed 's/^/  /' "$target_patterns"
@@ -1144,7 +1154,7 @@ jobs:
           name: windows-cache-handoff-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/windows-cache-handoff-package/
           if-no-files-found: error
-          compression-level: 0
+          compression-level: 6
           retention-days: 7
 
   windows_cache_handoff_consumer:
@@ -1180,7 +1190,16 @@ jobs:
           $runKey = "$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
           $root = Join-Path $drive.Root "hrx\cache-handoff\$runKey"
           $outputBase = Join-Path $env:SystemDrive "hc\$runKey\consumer"
+          $computerSystem = Get-CimInstance Win32_ComputerSystem -ErrorAction Stop
+          $bazelJobs = [Math]::Min(
+            40,
+            [int]$computerSystem.NumberOfLogicalProcessors
+          )
+          if ($bazelJobs -lt 1) {
+            throw 'Windows host did not report any logical processors.'
+          }
           $environment = [ordered]@{
+            IREE_CACHE_HANDOFF_BAZEL_JOBS = $bazelJobs
             HRX_DOWNLOAD_CACHE_DIR = Join-Path $root 'downloads'
             HRX_OUTPUT_DIR = $root
             IREE_WINDOWS_CACHE_HANDOFF_CAS_DIR = Join-Path $root 'cas'
@@ -1195,6 +1214,7 @@ jobs:
             "$($entry.Key)=$($entry.Value)" |
               Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           }
+          Write-Output "Windows CAS test jobs=$($environment.IREE_CACHE_HANDOFF_BAZEL_JOBS)"
 
       - name: Download test manifest
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -1218,6 +1238,7 @@ jobs:
           $evidenceDir = $env:IREE_CACHE_HANDOFF_EVIDENCE
           $executionLog = Join-Path $evidenceDir 'consumer-execution.json'
           $profile = Join-Path $evidenceDir 'consumer.profile.gz'
+          $testJobs = [Math]::Min(20, [int]$env:IREE_CACHE_HANDOFF_BAZEL_JOBS)
           New-Item -ItemType Directory `
             -Path $env:IREE_CACHE_HANDOFF_TEST_TMPDIR -Force | Out-Null
           $env:IREE_WINDOWS_CACHE_HANDOFF_PYTHON = `
@@ -1231,10 +1252,12 @@ jobs:
             bazel "--output_base=$env:IREE_CACHE_HANDOFF_OUTPUT_BASE" test `
               '--strategy=TestRunner=local' `
               '--cache_test_results=no' `
+              "--jobs=$env:IREE_CACHE_HANDOFF_BAZEL_JOBS" `
+              "--local_test_jobs=$testJobs" `
               "--profile=$profile" `
               "--execution_log_json_file=$executionLog" `
               "--test_tmpdir=$env:IREE_CACHE_HANDOFF_TEST_TMPDIR" `
-              '--test_output=all' `
+              '--test_output=errors' `
               $target
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
             $receipt = Join-Path $evidenceDir 'execution-receipt.json'

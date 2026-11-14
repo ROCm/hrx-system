@@ -292,7 +292,11 @@ class WindowsCacheHandoffTest(unittest.TestCase):
         second_result["target"]["rule"]["name"] = "//other:second"
         incompatible_result = copy.deepcopy(first_result)
         incompatible_result["target"]["rule"]["name"] = "//other:incompatible"
-        target_payload["results"].extend([second_result, incompatible_result])
+        non_native_result = copy.deepcopy(first_result)
+        non_native_result["target"]["rule"]["name"] = "//other:script"
+        target_payload["results"].extend(
+            [second_result, incompatible_result, non_native_result]
+        )
         target_metadata.write_text(json.dumps(target_payload), encoding="utf-8")
 
         first_provider = json.loads(provider_metadata.read_text(encoding="utf-8"))
@@ -332,6 +336,15 @@ class WindowsCacheHandoffTest(unittest.TestCase):
                 "label": "@@//other:incompatible",
             }
         )
+        non_native_provider = copy.deepcopy(first_provider)
+        non_native_provider.update(
+            {
+                "executable": "bazel-out/bin/script.py",
+                "executable_logical_path": "_main/bin/script.py",
+                "label": "@@//other:script",
+                "runfiles": [],
+            }
+        )
         provider_metadata.write_text(
             "\n".join(
                 json.dumps(value)
@@ -339,6 +352,7 @@ class WindowsCacheHandoffTest(unittest.TestCase):
                     first_provider,
                     second_provider,
                     incompatible_provider,
+                    non_native_provider,
                 )
             )
             + "\n",
@@ -354,10 +368,12 @@ class WindowsCacheHandoffTest(unittest.TestCase):
             output_dir=output_dir,
         )
 
-        self.assertEqual(summary["selected_test_count"], 3)
+        self.assertEqual(summary["selected_test_count"], 4)
         self.assertEqual(summary["compatible_test_count"], 2)
         self.assertEqual(summary["incompatible_test_count"], 1)
         self.assertEqual(summary["incompatible_labels"], ["//other:incompatible"])
+        self.assertEqual(summary["non_native_test_count"], 1)
+        self.assertEqual(summary["non_native_labels"], ["//other:script"])
         self.assertEqual(summary["runfile_reference_count"], 5)
         self.assertEqual(summary["unique_blob_count"], 3)
         self.assertEqual(len(_CasHandler.blobs), 3)
@@ -366,6 +382,7 @@ class WindowsCacheHandoffTest(unittest.TestCase):
         other_build = (output_dir / "other/BUILD.bazel").read_text(encoding="utf-8")
         self.assertIn("name = 'second'", other_build)
         self.assertNotIn("incompatible", other_build)
+        self.assertNotIn("script", other_build)
 
     def test_run_forwards_bazel_test_arguments(self):
         execution_root, target_metadata, provider_metadata = self._write_fixture()
