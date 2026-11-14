@@ -84,3 +84,35 @@ func.def @paired_powers(%choose: i1) -> (i1, i1, i1, i1, i1) {
   %rp = scalar.constant false : i1
   func.return %pp, %zp, %sp, %up, %rp : i1, i1, i1, i1, i1
 }
+
+// ====
+
+// Per-lane and uniform summaries share the scalar signed-quotient contract.
+// Negative dividends retain truncation toward zero and signed remainders.
+func.def @signed_constants() -> (i8, i8, i16, i16, i64) {
+  %bytes = vector.constanti [-17, 17] : vector<2xi8>
+  %positive_divisors = vector.splati 5 : vector<2xi8>
+  %quotients = vector.divsi %bytes, %positive_divisors : vector<2xi8>
+  %negative_positive = vector.extract %quotients[0] : vector<2xi8> -> i8
+  %positive_positive = vector.extract %quotients[1] : vector<2xi8> -> i8
+  %halves = vector.constanti [17, -17] : vector<2xi16>
+  %negative_divisors = vector.splati -5 : vector<2xi16>
+  %paired, %remainders = vector.divremsi %halves, %negative_divisors : vector<2xi16>
+  %positive_negative = vector.extract %paired[0] : vector<2xi16> -> i16
+  %negative_remainder = vector.extract %remainders[1] : vector<2xi16> -> i16
+  %wide = vector.splati -12 : vector<8xi64>
+  %strides = vector.splati 4 : vector<8xi64>
+  %uniform = vector.divsi %wide, %strides : vector<8xi64>
+  %distance = vector.extract %uniform[7] : vector<8xi64> -> i64
+  func.return %negative_positive, %positive_positive, %positive_negative, %negative_remainder, %distance : i8, i8, i16, i16, i64
+}
+
+// ----
+func.def @signed_constants() -> (i8, i8, i16, i16, i64) {
+  %negative_positive = scalar.constant -3 : i8
+  %positive_positive = scalar.constant 3 : i8
+  %positive_negative = scalar.constant -3 : i16
+  %negative_remainder = scalar.constant -2 : i16
+  %distance = scalar.constant -3 : i64
+  func.return %negative_positive, %positive_positive, %positive_negative, %negative_remainder, %distance : i8, i8, i16, i16, i64
+}

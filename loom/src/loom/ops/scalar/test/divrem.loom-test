@@ -82,3 +82,38 @@ func.def @paired_powers(%choose: i1) -> (i1, i1, i1, i1) {
   %urp = scalar.constant false : i1
   func.return %sp, %up, %srp, %urp : i1, i1, i1, i1
 }
+
+// ====
+
+// Exact quotients round toward zero for every sign pair and carrier. A paired
+// quotient keeps the same facts as standalone division and remainder.
+func.def @signed_constants() -> (i8, i16, i16, i32, i64, i64, i64) {
+  %negative_byte = scalar.constant -17 : i8
+  %divisor_byte = scalar.constant 5 : i8
+  %negative_positive = scalar.divsi %negative_byte, %divisor_byte : i8
+  %positive_half = scalar.constant 17 : i16
+  %divisor_half = scalar.constant -5 : i16
+  %positive_negative, %remainder = scalar.divremsi %positive_half, %divisor_half : i16
+  %negative_word = scalar.constant -17 : i32
+  %divisor_word = scalar.constant -5 : i32
+  %negative_negative = scalar.divsi %negative_word, %divisor_word : i32
+  %minimum = scalar.constant -9223372036854775808 : i64
+  %maximum = scalar.constant 9223372036854775807 : i64
+  %divisor_wide = scalar.constant 3 : i64
+  %third = scalar.divsi %minimum, %divisor_wide : i64
+  %zero = scalar.divsi %maximum, %minimum : i64
+  %one = scalar.divsi %minimum, %minimum : i64
+  func.return %negative_positive, %positive_negative, %remainder, %negative_negative, %third, %zero, %one : i8, i16, i16, i32, i64, i64, i64
+}
+
+// ----
+func.def @signed_constants() -> (i8, i16, i16, i32, i64, i64, i64) {
+  %negative_positive = scalar.constant -3 : i8
+  %positive_negative = scalar.constant -3 : i16
+  %remainder = scalar.constant 2 : i16
+  %negative_negative = scalar.constant 3 : i32
+  %third = scalar.constant -3074457345618258602 : i64
+  %zero = scalar.constant 0 : i64
+  %one = scalar.constant 1 : i64
+  func.return %negative_positive, %positive_negative, %remainder, %negative_negative, %third, %zero, %one : i8, i16, i16, i32, i64, i64, i64
+}

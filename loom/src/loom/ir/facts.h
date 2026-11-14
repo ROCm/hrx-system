@@ -943,8 +943,11 @@ void loom_value_facts_muli(const loom_value_facts_t* lhs,
 void loom_value_facts_divui(const loom_value_facts_t* lhs,
                             const loom_value_facts_t* rhs, int32_t bit_count,
                             loom_value_facts_t* out);
+// Signed division rounding toward zero in a verified width in [1, 64].
+// Inputs are already in their signed carrier, except i1 uses Boolean [0, 1].
+// Exact zero divisors and unrepresentable quotients produce unknown facts.
 void loom_value_facts_divsi(const loom_value_facts_t* lhs,
-                            const loom_value_facts_t* rhs,
+                            const loom_value_facts_t* rhs, int32_t bit_count,
                             loom_value_facts_t* out);
 // Unsigned remainder with the same width and representation contract as
 // divui.

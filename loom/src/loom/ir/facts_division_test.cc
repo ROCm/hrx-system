@@ -264,6 +264,82 @@ TEST(UnsignedDivisionTransfer, IdentityExcludesZeroOverlapAndWrapping) {
       loom_value_facts_make(0, 255, 1), loom_value_facts_exact_i64(257), 8));
 }
 
+TEST(SignedDivisionTransfer, ExactQuotientsAcrossWidthsAndAliases) {
+  for (int32_t bit_count = 1; bit_count <= 64; ++bit_count) {
+    const auto domain =
+        bit_count == 1
+            ? loom_value_facts_make(0, 1, 1)
+            : loom_value_facts_make_signed_bit_count_range(bit_count);
+    const int64_t values[] = {domain.range_lo,
+                              domain.range_lo + 1,
+                              domain.range_lo / 2,
+                              -17,
+                              -7,
+                              -4,
+                              -3,
+                              -1,
+                              0,
+                              1,
+                              3,
+                              4,
+                              7,
+                              17,
+                              domain.range_hi / 2,
+                              domain.range_hi - 1,
+                              domain.range_hi};
+    for (int64_t dividend : values) {
+      for (int64_t divisor : values) {
+        if (dividend < domain.range_lo || dividend > domain.range_hi ||
+            divisor < domain.range_lo || divisor > domain.range_hi) {
+          continue;
+        }
+        int64_t quotient = 0;
+        const bool valid =
+            testing::EvaluateQuotient(LOOM_VALUE_FACTS_QUOTIENT_DIVSI,
+                                      bit_count, dividend, divisor, &quotient);
+        for (int output_index = 0; output_index < 3; ++output_index) {
+          SCOPED_TRACE(::testing::Message()
+                       << "width=" << bit_count << " dividend=" << dividend
+                       << " divisor=" << divisor << " output=" << output_index);
+          loom_value_facts_t operands[] = {loom_value_facts_exact_i64(dividend),
+                                           loom_value_facts_exact_i64(divisor),
+                                           loom_value_facts_unknown()};
+          loom_value_facts_divsi(&operands[0], &operands[1], bit_count,
+                                 &operands[output_index]);
+          const auto result = operands[output_index];
+          if (valid) {
+            EXPECT_TRUE(loom_value_facts_equal(
+                result, loom_value_facts_exact_i64(quotient)));
+          } else {
+            EXPECT_FALSE(loom_value_facts_is_exact(result));
+            EXPECT_EQ(result.range_lo, INT64_MIN);
+            EXPECT_EQ(result.range_hi, INT64_MAX);
+          }
+        }
+      }
+    }
+  }
+}
+
+TEST(SignedDivisionTransfer, ExhaustiveByteQuotients) {
+  for (int64_t dividend = -128; dividend <= 127; ++dividend) {
+    for (int64_t divisor = -128; divisor <= 127; ++divisor) {
+      SCOPED_TRACE(::testing::Message()
+                   << "dividend=" << dividend << " divisor=" << divisor);
+      const auto lhs = loom_value_facts_exact_i64(dividend);
+      const auto rhs = loom_value_facts_exact_i64(divisor);
+      loom_value_facts_t result;
+      loom_value_facts_divsi(&lhs, &rhs, 8, &result);
+      if (divisor == 0 || (dividend == -128 && divisor == -1)) {
+        EXPECT_FALSE(loom_value_facts_is_exact(result));
+      } else {
+        EXPECT_TRUE(loom_value_facts_equal(
+            result, loom_value_facts_exact_i64(dividend / divisor)));
+      }
+    }
+  }
+}
+
 TEST(RemsiTransfer, ExactMinimumOverflowPair) {
   loom_value_facts_t dividend = loom_value_facts_exact_i64(INT64_MIN);
   loom_value_facts_t divisor = loom_value_facts_exact_i64(-1);
@@ -458,7 +534,7 @@ TEST(DivisionTransfer, PositivePowersAcrossCarriersAndAliases) {
               loom_value_facts_divui(&operands[0], &operands[1], bit_count,
                                      &operands[output_index]);
             } else {
-              loom_value_facts_divsi(&operands[0], &operands[1],
+              loom_value_facts_divsi(&operands[0], &operands[1], bit_count,
                                      &operands[output_index]);
             }
             EXPECT_EQ(loom_value_facts_is_power_of_two(operands[output_index]),
@@ -485,7 +561,7 @@ TEST(DivisionTransfer, PositivePowersAcrossCarriersAndAliases) {
   auto powers = loom_value_facts_make(4, 16, 1);
   powers.flags |= LOOM_VALUE_FACT_POWER_OF_TWO;
   loom_value_facts_t result;
-  loom_value_facts_divsi(&powers, &unknown_power, &result);
+  loom_value_facts_divsi(&powers, &unknown_power, 8, &result);
   EXPECT_FALSE(loom_value_facts_is_power_of_two(result));
   loom_value_facts_divui(&powers, &unknown_power, 8, &result);
   EXPECT_FALSE(loom_value_facts_is_power_of_two(result));

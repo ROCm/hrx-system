@@ -4108,8 +4108,7 @@ iree_status_t loom_vector_subborrowui_facts(
 
 LOOM_VECTOR_MODULAR_BINARY_FACTS(loom_vector_muli_facts, loom_value_facts_muli,
                                  loom_value_facts_muli_modular)
-LOOM_VECTOR_INTEGER_BINARY_FACTS(loom_vector_divsi_facts,
-                                 loom_value_facts_divsi)
+LOOM_VECTOR_WIDTH_BINARY_FACTS(loom_vector_divsi_facts, loom_value_facts_divsi)
 LOOM_VECTOR_WIDTH_BINARY_FACTS(loom_vector_divui_facts, loom_value_facts_divui)
 LOOM_VECTOR_INTEGER_BINARY_FACTS(loom_vector_remsi_facts,
                                  loom_value_facts_remsi)
@@ -4122,7 +4121,7 @@ iree_status_t loom_vector_divremsi_facts(
   IREE_RETURN_IF_ERROR(loom_vector_integer_binary_summary_facts(
       context,
       loom_scalar_type_bitwidth(loom_vector_result_element_type(module, op)),
-      operand_facts, &result_facts[0], loom_vector_divsi_facts_element));
+      operand_facts, &result_facts[0], loom_value_facts_divsi));
   return loom_vector_integer_binary_summary_facts(
       context,
       loom_scalar_type_bitwidth(loom_vector_result_element_type(module, op)),
