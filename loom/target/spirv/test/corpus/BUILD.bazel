@@ -282,6 +282,7 @@ _ALL_PROFILE_XFAILS = {
     "memory/view/subview.loom:@subview_atomic_origins": "TARGET/003",
     "numeric/conversion/float8_dequantization.loom:@e8m0_mxfp4_bf16": "TARGET/002",
     "numeric/conversion/float8_dequantization.loom:@e8m0_mxfp4_wide_bf16": "TARGET/002",
+    "numeric/matrix/epilogue.loom:@matrix_epilogue": "TARGET/039",
     "numeric/predicate/extract.loom:@predicate_extract": "TARGET/003",
     "numeric/vector/broadcast_arithmetic.loom:@broadcast_fma": "TARGET/003",
 }
@@ -458,6 +459,7 @@ _ALL_ROOTS_XFAIL = [
     "memory/atomic/workgroup/observations.loom",
     "memory/atomic/workgroup/panel_stream.loom",
     "memory/storage/private.loom",
+    "numeric/matrix/epilogue.loom",
 ]
 
 _SPIRV_EXECUTION_XFAILS = {

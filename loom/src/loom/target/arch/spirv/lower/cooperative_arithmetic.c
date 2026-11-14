@@ -17,9 +17,9 @@
 typedef struct loom_spirv_cooperative_arithmetic_row_t {
   // Native matrix type, independent of the source vector's opaque lane count.
   loom_spirv_value_type_t type;
-  // Descriptor ordinals plus one for the eleven KHR arithmetic operations;
+  // Descriptor ordinals plus one for native arithmetic and component math;
   // zero denotes an operation incompatible with this component type.
-  uint32_t descriptors[11];
+  uint32_t descriptors[25];
 } loom_spirv_cooperative_arithmetic_row_t;
 
 #include "loom/target/arch/spirv/lower/cooperative_arithmetic_rows.inl"
@@ -89,6 +89,15 @@ iree_status_t loom_spirv_query_cooperative_arithmetic(
   }
   if (environment->vector_lane_projection.source_lane_count != 0) {
     out_result->outcome = LOOM_TARGET_CONTRACT_QUERY_UNSUPPORTED;
+    return iree_ok_status();
+  }
+  if (!iree_all_bits_set(source_op->instance_flags,
+                         kCooperativeArithmeticRequiredFlags[slot - 1])) {
+    IREE_RETURN_IF_ERROR(loom_spirv_matrix_contract_query_reject(
+        environment, source_op,
+        IREE_SV("cooperative_matrix.arithmetic_permissions"), 0, 0, 0,
+        out_result));
+    out_result->outcome = LOOM_TARGET_CONTRACT_QUERY_TERMINAL_REJECTION;
     return iree_ok_status();
   }
   const loom_low_descriptor_t* descriptor =

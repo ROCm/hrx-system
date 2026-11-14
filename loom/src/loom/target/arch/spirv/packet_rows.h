@@ -174,6 +174,8 @@ typedef union loom_spirv_packet_payload_t {
     loom_spirv_extended_instruction_set_t instruction_set;
     // Instruction enumerant defined by the selected instruction set.
     uint32_t instruction;
+    // Dense component helper ordinal plus one; zero denotes direct OpExtInst.
+    uint16_t component_function;
   } extended_instruction;
 } loom_spirv_packet_payload_t;
 
@@ -206,6 +208,10 @@ static_assert(sizeof(loom_spirv_packet_row_t) == 16,
 
 // Generated native literals interned across all packet rows.
 extern const loom_spirv_packet_payload_t loom_spirv_packet_payloads[];
+
+// Number of distinct typed component helpers available to a module. Their
+// function-ID cache is allocated only when one is used.
+extern const uint16_t loom_spirv_component_math_function_count;
 
 // Generated value types interned across all packet rows.
 extern const loom_spirv_value_type_t loom_spirv_packet_value_types[];

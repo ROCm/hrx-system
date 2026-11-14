@@ -1,0 +1,160 @@
+// RUN: emit spirv-dis target=spirv:vulkan1.3+bda+hal features=COOPERATIVE_MATRIX_KHR,FLOAT32_DENORM_PRESERVE validate
+// REQUIRES: spirv-dis, spirv-val
+
+// Unary and binary maps keep opaque matrix types across the call boundary.
+// Repeated use and separate entries share the typed helper.
+low.kernel.def target<spirv.logical.core> workgroup_size(32, 1, 1) @component_math() asm {
+  %one = OpConstant.f32 1065353216
+  %two = OpConstant.f32 1073741824
+  %a = OpCompositeConstruct.cooperative.f32.16x16.accumulator %one : reg<spirv.id : spirv.cooperative_matrix<16x16xf32, subgroup, matrix_accumulator>>
+  %b = OpCompositeConstruct.cooperative.f32.16x16.accumulator %two : reg<spirv.id : spirv.cooperative_matrix<16x16xf32, subgroup, matrix_accumulator>>
+  %exponential = OpExtInst.GLSL.std.450.Exp2.cooperative.f32.16x16.accumulator %a : reg<spirv.id : spirv.cooperative_matrix<16x16xf32, subgroup, matrix_accumulator>>
+  %minimum = OpExtInst.GLSL.std.450.NMin.cooperative.f32.16x16.accumulator %exponential, %b : reg<spirv.id : spirv.cooperative_matrix<16x16xf32, subgroup, matrix_accumulator>>
+  %repeated = OpExtInst.GLSL.std.450.Exp2.cooperative.f32.16x16.accumulator %minimum : reg<spirv.id : spirv.cooperative_matrix<16x16xf32, subgroup, matrix_accumulator>>
+  return
+}
+
+low.kernel.def target<spirv.logical.core> workgroup_size(32, 1, 1) @second_entry() asm {
+  %one = OpConstant.f32 1065353216
+  %a = OpCompositeConstruct.cooperative.f32.16x16.accumulator %one : reg<spirv.id : spirv.cooperative_matrix<16x16xf32, subgroup, matrix_accumulator>>
+  %exponential = OpExtInst.GLSL.std.450.Exp2.cooperative.f32.16x16.accumulator %a : reg<spirv.id : spirv.cooperative_matrix<16x16xf32, subgroup, matrix_accumulator>>
+  return
+}
+
+// ----
+               OpCapability Shader
+               OpCapability VulkanMemoryModel
+               OpCapability PhysicalStorageBufferAddresses
+               OpCapability Int64
+               OpCapability CooperativeMatrixKHR
+               OpCapability DenormPreserve
+               OpExtension "SPV_KHR_vulkan_memory_model"
+               OpExtension "SPV_KHR_physical_storage_buffer"
+               OpExtension "SPV_KHR_cooperative_matrix"
+               OpExtension "SPV_KHR_float_controls"
+         %17 = OpExtInstImport "GLSL.std.450"
+               OpMemoryModel PhysicalStorageBuffer64 Vulkan
+               OpEntryPoint GLCompute %component_math "component_math"
+               OpEntryPoint GLCompute %second_entry "second_entry"
+               OpExecutionMode %component_math LocalSize 32 1 1
+               OpExecutionMode %component_math DenormPreserve 32
+               OpExecutionMode %second_entry LocalSize 32 1 1
+               OpName %component_math "component_math"
+               OpName %one "one"
+               OpName %two "two"
+               OpName %a "a"
+               OpName %b "b"
+               OpName %exponential "exponential"
+               OpName %minimum "minimum"
+               OpName %repeated "repeated"
+               OpName %second_entry "second_entry"
+               OpName %one_0 "one"
+               OpName %a_0 "a"
+               OpName %exponential_0 "exponential"
+               OpModuleProcessed "iree.vulkan.bda.v1[component_math].root=0,32"
+               OpModuleProcessed "iree.vulkan.bda.v1[component_math].constant_offset=32"
+               OpModuleProcessed "iree.vulkan.bda.v1[component_math].constant_length=0"
+               OpModuleProcessed "iree.vulkan.bda.v1[component_math].bindings=0"
+               OpModuleProcessed "iree.vulkan.bda.v1[second_entry].root=0,32"
+               OpModuleProcessed "iree.vulkan.bda.v1[second_entry].constant_offset=32"
+               OpModuleProcessed "iree.vulkan.bda.v1[second_entry].constant_length=0"
+               OpModuleProcessed "iree.vulkan.bda.v1[second_entry].bindings=0"
+               OpDecorate %_struct_69 Block
+               OpMemberDecorate %_struct_69 0 Offset 0
+               OpMemberDecorate %_struct_69 1 Offset 8
+               OpMemberDecorate %_struct_69 2 Offset 16
+               OpMemberDecorate %_struct_69 3 Offset 20
+               OpMemberDecorate %_struct_69 4 Offset 24
+               OpMemberDecorate %_struct_69 5 Offset 28
+       %void = OpTypeVoid
+          %4 = OpTypeFunction %void
+      %float = OpTypeFloat 32
+        %one = OpConstant %float 1
+        %two = OpConstant %float 2
+       %uint = OpTypeInt 32 0
+     %uint_3 = OpConstant %uint 3
+    %uint_16 = OpConstant %uint 16
+     %uint_2 = OpConstant %uint 2
+         %13 = OpTypeCooperativeMatrixKHR %float %uint_3 %uint_16 %uint_16 %uint_2
+%_ptr_Function_13 = OpTypePointer Function %13
+%_ptr_Function_float = OpTypePointer Function %float
+         %21 = OpTypeFunction %13 %13
+       %bool = OpTypeBool
+     %uint_0 = OpConstant %uint 0
+     %uint_1 = OpConstant %uint 1
+         %42 = OpTypeFunction %13 %13 %13
+      %one_0 = OpConstant %float 1
+      %ulong = OpTypeInt 64 0
+ %_struct_69 = OpTypeStruct %ulong %ulong %uint %uint %uint %uint
+%_ptr_PushConstant__struct_69 = OpTypePointer PushConstant %_struct_69
+          %2 = OpVariable %_ptr_PushConstant__struct_69 PushConstant
+%component_math = OpFunction %void None %4
+          %5 = OpLabel
+          %a = OpCompositeConstruct %13 %one
+          %b = OpCompositeConstruct %13 %two
+%exponential = OpFunctionCall %13 %18 %a
+    %minimum = OpFunctionCall %13 %41 %exponential %b
+   %repeated = OpFunctionCall %13 %18 %minimum
+               OpReturn
+               OpFunctionEnd
+%second_entry = OpFunction %void None %4
+         %64 = OpLabel
+        %a_0 = OpCompositeConstruct %13 %one_0
+%exponential_0 = OpFunctionCall %13 %18 %a_0
+               OpReturn
+               OpFunctionEnd
+         %18 = OpFunction %13 Inline %21
+         %25 = OpFunctionParameter %13
+         %26 = OpLabel
+         %27 = OpVariable %_ptr_Function_13 Function
+               OpStore %27 %25
+         %28 = OpCooperativeMatrixLengthKHR %uint %13
+               OpBranch %29
+         %29 = OpLabel
+         %33 = OpPhi %uint %uint_0 %26 %34 %31
+         %35 = OpULessThan %bool %33 %28
+               OpLoopMerge %32 %31 Unroll
+               OpBranchConditional %35 %30 %32
+         %30 = OpLabel
+         %37 = OpAccessChain %_ptr_Function_float %27 %33
+         %38 = OpLoad %float %37
+         %36 = OpExtInst %float %17 Exp2 %38
+               OpStore %37 %36
+               OpBranch %31
+         %31 = OpLabel
+         %34 = OpIAdd %uint %33 %uint_1
+               OpBranch %29
+         %32 = OpLabel
+         %39 = OpLoad %13 %27
+               OpReturnValue %39
+               OpFunctionEnd
+         %41 = OpFunction %13 Inline %42
+         %43 = OpFunctionParameter %13
+         %44 = OpFunctionParameter %13
+         %45 = OpLabel
+         %46 = OpVariable %_ptr_Function_13 Function
+         %47 = OpVariable %_ptr_Function_13 Function
+               OpStore %46 %43
+               OpStore %47 %44
+         %48 = OpCooperativeMatrixLengthKHR %uint %13
+               OpBranch %49
+         %49 = OpLabel
+         %53 = OpPhi %uint %uint_0 %45 %54 %51
+         %55 = OpULessThan %bool %53 %48
+               OpLoopMerge %52 %51 Unroll
+               OpBranchConditional %55 %50 %52
+         %50 = OpLabel
+         %57 = OpAccessChain %_ptr_Function_float %46 %53
+         %58 = OpLoad %float %57
+         %59 = OpAccessChain %_ptr_Function_float %47 %53
+         %60 = OpLoad %float %59
+         %56 = OpExtInst %float %17 NMin %58 %60
+               OpStore %57 %56
+               OpBranch %51
+         %51 = OpLabel
+         %54 = OpIAdd %uint %53 %uint_1
+               OpBranch %49
+         %52 = OpLabel
+         %61 = OpLoad %13 %46
+               OpReturnValue %61
+               OpFunctionEnd

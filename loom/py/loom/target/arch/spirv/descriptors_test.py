@@ -30,7 +30,10 @@ from loom.target.arch.spirv.cooperative_matrix import (
     cooperative_matrix_memory_variants,
 )
 from loom.target.arch.spirv.descriptors import SPIRV_LOGICAL_CORE_DESCRIPTOR_SET
-from loom.target.arch.spirv.extended_math import EXTENDED_MATH_INSTRUCTIONS
+from loom.target.arch.spirv.extended_math import (
+    COOPERATIVE_MATRIX_MATH_INSTRUCTIONS,
+    EXTENDED_MATH_INSTRUCTIONS,
+)
 from loom.target.arch.spirv.features import feature_bits_value
 from loom.target.arch.spirv.ordinary_vector import (
     ORDINARY_VECTOR_INSTRUCTIONS,
@@ -404,6 +407,7 @@ def _extended_math_result_recipes() -> dict[str, AsmResultValueType]:
 
 def _cooperative_matrix_result_keys() -> list[str]:
     keys = [matrix_type.constructor_key for matrix_type in COOPERATIVE_MATRIX_TYPES]
+    keys.extend(row.descriptor_key for row in COOPERATIVE_MATRIX_MATH_INSTRUCTIONS)
     keys.extend(
         matrix_type.arithmetic_key(operation)
         for matrix_type in COOPERATIVE_MATRIX_TYPES

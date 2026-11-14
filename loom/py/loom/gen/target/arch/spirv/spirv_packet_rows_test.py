@@ -44,12 +44,16 @@ from loom.target.arch.spirv.cooperative_matrix import (
     cooperative_matrix_memory_variants,
 )
 from loom.target.arch.spirv.descriptors import SPIRV_LOGICAL_CORE_DESCRIPTOR_SET
-from loom.target.arch.spirv.extended_math import EXTENDED_MATH_INSTRUCTIONS
+from loom.target.arch.spirv.extended_math import (
+    COOPERATIVE_MATRIX_MATH_INSTRUCTIONS,
+    EXTENDED_MATH_INSTRUCTIONS,
+)
 from loom.target.arch.spirv.ordinary_vector import (
     ORDINARY_VECTOR_INSTRUCTIONS,
     ORDINARY_VECTOR_SHUFFLE_INSTRUCTIONS,
     ORDINARY_VECTOR_TYPES,
     OrdinaryVectorComponentKind,
+    OrdinaryVectorComponentType,
     OrdinaryVectorInstruction,
     OrdinaryVectorInstructionType,
     OrdinaryVectorType,
@@ -949,6 +953,38 @@ def test_cooperative_arithmetic_preserves_native_component_shape_and_use() -> No
             assert row.contraction_controlled == controls_contraction
             assert row.no_contraction == controls_contraction
             assert row.immediate_count == int(controls_contraction)
+
+
+def test_component_math_reuses_scalar_semantics_for_every_native_matrix_type() -> None:
+    rows = {row.descriptor_key: row for row in _packet_rows()}
+    descriptors = {row.key: row for row in SPIRV_LOGICAL_CORE_DESCRIPTOR_SET.descriptors}
+    scalar_instructions = {(row.operation.source_op_key, row.value_type.source_types[0]): row for row in EXTENDED_MATH_INSTRUCTIONS if isinstance(row.value_type, OrdinaryVectorComponentType)}
+    helpers = set()
+    for instruction in COOPERATIVE_MATRIX_MATH_INSTRUCTIONS:
+        matrix = instruction.value_type
+        scalar = scalar_instructions[instruction.operation.source_op_key, matrix.scalar.source_type]
+        assert instruction.operation == scalar.operation
+        row = rows[instruction.descriptor_key]
+        scalar_row = rows[scalar.descriptor_key]
+        assert row.extended_instruction == scalar_row.extended_instruction
+        assert row.extended_instruction_set == scalar_row.extended_instruction_set
+        assert row.operand_types == (row.result_type,) * len(scalar.operation.operand_names)
+        assert f".scalar_type = {matrix.scalar.scalar_enum}" in row.result_type
+        assert f".use = {matrix.use_c_expression}" in row.result_type
+        assert descriptors[instruction.descriptor_key].feature_mask_words == (matrix.feature_bits | scalar.feature_bits,)
+        assert row.component_function not in helpers
+        helpers.add(row.component_function)
+    assert helpers == set(range(1, len(COOPERATIVE_MATRIX_MATH_INSTRUCTIONS) + 1))
+
+
+def test_component_math_rejects_mixed_carriers_at_generation() -> None:
+    rows = _packet_rows()
+    instruction = COOPERATIVE_MATRIX_MATH_INSTRUCTIONS[0]
+    row = next(row for row in rows if row.descriptor_key == instruction.descriptor_key)
+    ordinary = next(row for row in rows if row.descriptor_key == "spirv.op_ext_inst.glsl_std_450.exp2f.f32")
+    invalid = replace(row, operand_types=(ordinary.result_type,))
+    with pytest.raises(ValueError, match="same-typed matrix operands"):
+        _validate_rows(tuple(invalid if entry is row else entry for entry in rows), SPIRV_LOGICAL_CORE_DESCRIPTOR_SET.descriptors)
 
 
 def test_generation_emits_complete_ordinary_vector_float_comparisons() -> None:

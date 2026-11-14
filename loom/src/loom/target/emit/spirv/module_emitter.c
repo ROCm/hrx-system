@@ -27,6 +27,8 @@ typedef struct loom_spirv_emit_module_state_t {
   loom_spirv_module_shared_bda_root_t shared_bda_root;
   // Shared Input variables for invocation and subgroup builtins.
   uint32_t builtin_variable_ids[LOOM_SPIRV_BUILTIN_VARIABLE_COUNT];
+  // Module-arena helper IDs, indexed by typed descriptor and allocated on use.
+  uint32_t* component_math_function_ids;
 } loom_spirv_emit_module_state_t;
 
 static void loom_spirv_emit_module_state_initialize(
@@ -87,6 +89,7 @@ static iree_status_t loom_spirv_emit_function_into_module(
       .type_context = &state->type_context,
       .shared_bda_root = &state->shared_bda_root,
       .builtin_variable_ids = state->builtin_variable_ids,
+      .component_math_function_ids = &state->component_math_function_ids,
   };
   return loom_spirv_emit_low_function(&context, emission_plan);
 }
