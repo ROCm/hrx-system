@@ -100,10 +100,8 @@ func.def public @reverse(%value: i32) -> (i64) {
   %103 = index.constant 8 : offset
   %45 = buffer.view %values_begin_[%103] : buffer -> view<1xi32>
   view.store %43, %45[0] : i32, view<1xi32>
-  %102 = scalar.constant -12 : i64
-  %66 = scalar.constant 4 : i64
-  %67 = scalar.divsi %102, %66 : i64
-  func.return %67 : i64
+  %102 = scalar.constant -3 : i64
+  func.return %102 : i64
 }
 
 func.def public @empty() -> (i64) {

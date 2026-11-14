@@ -171,13 +171,29 @@ void loom_value_facts_remui(const loom_value_facts_t* lhs,
 }
 
 void loom_value_facts_divsi(const loom_value_facts_t* lhs,
-                            const loom_value_facts_t* rhs,
+                            const loom_value_facts_t* rhs, int32_t bit_count,
                             loom_value_facts_t* out) {
   const loom_value_facts_t lhs_facts = *lhs;
   const loom_value_facts_t rhs_facts = *rhs;
   int64_t lhs_lo = lhs_facts.range_lo, lhs_hi = lhs_facts.range_hi;
   int64_t rhs_lo = rhs_facts.range_lo, rhs_hi = rhs_facts.range_hi;
   int64_t lhs_divisor = lhs_facts.known_divisor;
+
+  if (lhs_lo == lhs_hi && rhs_lo == rhs_hi) {
+    // Boolean facts store the one-bit signed minimum and -1 as raw 1.
+    const int64_t minimum = bit_count == 1 ? 1
+                            : bit_count == 64
+                                ? INT64_MIN
+                                : -(INT64_C(1) << (bit_count - 1));
+    const int64_t minus_one = bit_count == 1 ? 1 : -1;
+    if (rhs_lo == 0 || (lhs_lo == minimum && rhs_lo == minus_one)) {
+      *out = loom_value_facts_unknown();
+      loom_value_facts_propagate_binary_distribution(lhs_facts, rhs_facts, out);
+    } else {
+      *out = loom_value_facts_exact_i64(lhs_lo / rhs_lo);
+    }
+    return;
+  }
 
   // Compute divisor first (independent of range sign).
   int64_t divisor = 1;
