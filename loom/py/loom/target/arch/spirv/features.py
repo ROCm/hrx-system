@@ -13,6 +13,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 
 SPIRV_VERSION_1_0 = 0x00010000
+SPIRV_VERSION_1_2 = 0x00010200
 SPIRV_VERSION_1_3 = 0x00010300
 
 ADDRESSING_MODEL_UNSPECIFIED = "LOOM_SPIRV_ADDRESSING_MODEL_UNSPECIFIED"
@@ -610,6 +611,16 @@ FEATURE_ATOMS = (
             opcodes=("LOOM_SPIRV_OP_FMA_KHR",),
         )
         for width in (16, 32, 64)
+    ),
+    FeatureAtom(
+        key="float_controls2",
+        c_suffix="FLOAT_CONTROLS2",
+        name="spirv.float_controls2",
+        doc="Per-instruction floating-point semantics.",
+        required=("vulkan_shader",),
+        minimum_spirv_version=SPIRV_VERSION_1_2,
+        extensions=("SPV_KHR_float_controls2",),
+        capabilities=("LOOM_SPIRV_CAPABILITY_FLOAT_CONTROLS2",),
     ),
 )
 

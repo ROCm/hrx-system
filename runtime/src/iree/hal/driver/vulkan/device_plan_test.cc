@@ -131,6 +131,16 @@ class PhysicalDeviceSnapshotBuilder {
     };
   }
 
+  void SetShaderFloatControls2(bool available, bool core) {
+    snapshot_.properties2.properties.apiVersion =
+        core ? VK_API_VERSION_1_4 : VK_API_VERSION_1_3;
+    if (!core) {
+      snapshot_.available_extensions |=
+          IREE_HAL_VULKAN_DEVICE_EXTENSION_KHR_SHADER_FLOAT_CONTROLS2;
+    }
+    snapshot_.shader_float_controls2_features.shaderFloatControls2 = available;
+  }
+
   void EnableShaderBfloat16Features() {
     EnableShaderBfloat16Extension();
     snapshot_.shader_bfloat16_features.sType =
@@ -701,6 +711,66 @@ TEST(DevicePlanTest, OwnedCreateEnablesOnlyAdvertisedFmaWidths) {
     EXPECT_EQ(copied_plan.enabled_features13.pNext,
               widths ? &copied_plan.enabled_shader_fma_features : nullptr);
     EXPECT_EQ(copied_plan.enabled_shader_fma_features.pNext, nullptr);
+  }
+}
+
+TEST(DevicePlanTest, FloatControls2UsesCoreOrEnabledExtension) {
+  for (bool core : {false, true}) {
+    for (bool available : {false, true}) {
+      SCOPED_TRACE(::testing::Message() << core << ":" << available);
+      PhysicalDeviceSnapshotBuilder builder;
+      builder.AddQueueFamily(VK_QUEUE_COMPUTE_BIT, 1);
+      builder.SetShaderFloatControls2(available, core);
+      auto options = DefaultDeviceOptions();
+      ScopedDevicePlan plan;
+      IREE_ASSERT_OK(iree_hal_vulkan_device_plan_initialize_for_create(
+          builder.snapshot(), &options, IREE_HAL_VULKAN_REQUEST_FLAG_NONE,
+          NoFeatures(), &plan));
+      EXPECT_EQ(
+          plan.enabled_shader_float_controls2_features.shaderFloatControls2 !=
+              VK_FALSE,
+          available);
+      EXPECT_EQ(PlanContainsExtension(
+                    plan, VK_KHR_SHADER_FLOAT_CONTROLS_2_EXTENSION_NAME),
+                !core);
+      iree_hal_vulkan_device_plan_t moved = plan;
+      VkDeviceCreateInfo create_info;
+      iree_hal_vulkan_device_plan_make_create_info(&moved, &create_info);
+      EXPECT_EQ(
+          moved.enabled_features13.pNext,
+          available ? &moved.enabled_shader_float_controls2_features : nullptr);
+
+      auto params = DefaultExternalParams();
+      params.compute_queue_set.queue_family_index = 0;
+      params.compute_queue_set.queue_indices = 1;
+      params.enabled_features.general |=
+          IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_FLOAT_CONTROLS2;
+      ScopedDevicePlan wrapped;
+      auto status = iree_hal_vulkan_device_plan_initialize_for_wrap(
+          builder.snapshot(), &options, &params, &wrapped);
+      if (core && available) {
+        IREE_EXPECT_OK(status);
+      } else {
+        IREE_EXPECT_STATUS_IS(StatusCode::kFailedPrecondition, status);
+      }
+      if (!core && available) {
+        params.enabled_extensions |=
+            IREE_HAL_VULKAN_DEVICE_EXTENSION_KHR_SHADER_FLOAT_CONTROLS2;
+        ScopedDevicePlan enabled;
+        IREE_EXPECT_OK(iree_hal_vulkan_device_plan_initialize_for_wrap(
+            builder.snapshot(), &options, &params, &enabled));
+      }
+      if (!available) {
+        ScopedDevicePlan required;
+        IREE_EXPECT_STATUS_IS(
+            StatusCode::kUnavailable,
+            iree_hal_vulkan_device_plan_initialize_for_create(
+                builder.snapshot(), &options, IREE_HAL_VULKAN_REQUEST_FLAG_NONE,
+                GeneralFeatures(
+                    IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_FLOAT_CONTROLS2),
+                &required));
+      }
+    }
   }
 }
 

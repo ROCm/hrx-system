@@ -64,6 +64,7 @@ TEST(ApiTest, RecognizesOptionalDeviceExtensionNames) {
   const char* extension_names[] = {
       VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME,
       VK_KHR_SHADER_FMA_EXTENSION_NAME,
+      VK_KHR_SHADER_FLOAT_CONTROLS_2_EXTENSION_NAME,
       IREE_HAL_VULKAN_KHR_SHADER_BFLOAT16_EXTENSION_NAME,
       VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME,
       VK_EXT_SHADER_ATOMIC_FLOAT_2_EXTENSION_NAME,
@@ -79,6 +80,8 @@ TEST(ApiTest, RecognizesOptionalDeviceExtensionNames) {
       extensions, IREE_HAL_VULKAN_DEVICE_EXTENSION_KHR_SHADER_BFLOAT16));
   EXPECT_TRUE(iree_all_bits_set(
       extensions, IREE_HAL_VULKAN_DEVICE_EXTENSION_KHR_SHADER_FMA));
+  EXPECT_TRUE(iree_all_bits_set(
+      extensions, IREE_HAL_VULKAN_DEVICE_EXTENSION_KHR_SHADER_FLOAT_CONTROLS2));
   EXPECT_TRUE(iree_all_bits_set(
       extensions, IREE_HAL_VULKAN_DEVICE_EXTENSION_KHR_PUSH_DESCRIPTOR));
   EXPECT_TRUE(iree_all_bits_set(
@@ -102,6 +105,7 @@ TEST(ApiTest, RecognizesAllPublicDeviceExtensionNames) {
       VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME,
       VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME,
       VK_KHR_SHADER_FMA_EXTENSION_NAME,
+      VK_KHR_SHADER_FLOAT_CONTROLS_2_EXTENSION_NAME,
       IREE_HAL_VULKAN_KHR_SHADER_BFLOAT16_EXTENSION_NAME,
       VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME,
       VK_EXT_SHADER_ATOMIC_FLOAT_2_EXTENSION_NAME,
@@ -132,6 +136,8 @@ TEST(ApiTest, RecognizesAllPublicDeviceExtensionNames) {
       extensions, IREE_HAL_VULKAN_DEVICE_EXTENSION_KHR_SHADER_BFLOAT16));
   EXPECT_TRUE(iree_all_bits_set(
       extensions, IREE_HAL_VULKAN_DEVICE_EXTENSION_KHR_SHADER_FMA));
+  EXPECT_TRUE(iree_all_bits_set(
+      extensions, IREE_HAL_VULKAN_DEVICE_EXTENSION_KHR_SHADER_FLOAT_CONTROLS2));
   EXPECT_TRUE(iree_all_bits_set(
       extensions, IREE_HAL_VULKAN_DEVICE_EXTENSION_EXT_SHADER_ATOMIC_FLOAT));
   EXPECT_TRUE(iree_all_bits_set(
@@ -230,6 +236,8 @@ TEST(ApiTest, OptionalDeviceExtensionsIncludeSupportedStrategies) {
                              VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME));
   EXPECT_TRUE(
       ContainsString(count, values.data(), VK_KHR_SHADER_FMA_EXTENSION_NAME));
+  EXPECT_TRUE(ContainsString(count, values.data(),
+                             VK_KHR_SHADER_FLOAT_CONTROLS_2_EXTENSION_NAME));
   EXPECT_TRUE(
       ContainsString(count, values.data(),
                      IREE_HAL_VULKAN_KHR_SHADER_BFLOAT16_EXTENSION_NAME));

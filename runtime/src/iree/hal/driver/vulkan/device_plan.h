@@ -149,6 +149,10 @@ typedef struct iree_hal_vulkan_device_plan_t {
   // Per-width fused arithmetic enabled during VkDevice creation.
   VkPhysicalDeviceShaderFmaFeaturesKHR enabled_shader_fma_features;
 
+  // Per-instruction floating-point controls enabled during VkDevice creation.
+  VkPhysicalDeviceShaderFloatControls2Features
+      enabled_shader_float_controls2_features;
+
   // VK_EXT_shader_atomic_float features enabled during VkDevice creation.
   VkPhysicalDeviceShaderAtomicFloatFeaturesEXT
       enabled_shader_atomic_float_features;

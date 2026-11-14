@@ -193,9 +193,32 @@ TEST(TargetSpirvVulkaninfoTest, ImportsFusedArithmeticWidthsIndependently) {
       ImportVulkaninfoProfile(environment.get(), absent_source.get(), nullptr);
   for (auto feature :
        {LOOMC_SPIRV_FEATURE_FMA_FLOAT16, LOOMC_SPIRV_FEATURE_FMA_FLOAT32,
-        LOOMC_SPIRV_FEATURE_FMA_FLOAT64}) {
+        LOOMC_SPIRV_FEATURE_FMA_FLOAT64, LOOMC_SPIRV_FEATURE_FLOAT_CONTROLS2}) {
     ExpectFeatureState(absent_profile.get(), feature,
                        LOOMC_TARGET_FACT_STATE_UNKNOWN);
+  }
+}
+
+TEST(TargetSpirvVulkaninfoTest, ImportsFloatControls2CoreAndExtensionNames) {
+  auto environment = CreateSpirvTargetEnvironment();
+  for (const char* name : {"VkPhysicalDeviceVulkan14Features",
+                           "VkPhysicalDeviceShaderFloatControls2Features",
+                           "VkPhysicalDeviceShaderFloatControls2FeaturesKHR"}) {
+    for (bool enabled : {false, true}) {
+      SCOPED_TRACE(::testing::Message() << name << ":" << enabled);
+      const std::string json =
+          std::string(R"json({"devices":[{"properties":{"apiVersion":4210688},
+            "extended_features":{")json") +
+          name +
+          "\":{\"shaderFloatControls2\":" + (enabled ? "true" : "false") +
+          "}}}]}";
+      auto source = CreateJsonSource("float-controls.json", json.c_str());
+      auto profile =
+          ImportVulkaninfoProfile(environment.get(), source.get(), nullptr);
+      ExpectFeatureState(profile.get(), LOOMC_SPIRV_FEATURE_FLOAT_CONTROLS2,
+                         enabled ? LOOMC_TARGET_FACT_STATE_TRUE
+                                 : LOOMC_TARGET_FACT_STATE_FALSE);
+    }
   }
 }
 

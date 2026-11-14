@@ -1305,6 +1305,22 @@ static loomc_status_t loomc_spirv_vulkaninfo_import_features_from_structs(
       IREE_SV("VkPhysicalDeviceShaderAtomicFloat2FeaturesEXT"),
       &atomic_float2_features));
 
+  static const char* const float_controls2_structs[] = {
+      "VkPhysicalDeviceVulkan14Features",
+      "VkPhysicalDeviceShaderFloatControls2Features",
+      "VkPhysicalDeviceShaderFloatControls2FeaturesKHR",
+  };
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(float_controls2_structs);
+       ++i) {
+    iree_string_view_t feature_struct = iree_string_view_empty();
+    LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkaninfo_lookup_feature_struct(
+        import, features, extended_features,
+        iree_make_cstring_view(float_controls2_structs[i]), &feature_struct));
+    LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkaninfo_add_bool_feature(
+        import, feature_struct, IREE_SV("shaderFloatControls2"),
+        LOOMC_SPIRV_FEATURE_FLOAT_CONTROLS2,
+        loomc_make_cstring_view("vulkaninfo:shaderFloatControls2")));
+  }
   iree_string_view_t fma_features = iree_string_view_empty();
   LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkaninfo_lookup_feature_struct(
       import, features, extended_features,

@@ -251,8 +251,11 @@ typedef enum loomc_spirv_feature_e {
   /// Correctly rounded 64-bit fused multiply-add.
   LOOMC_SPIRV_FEATURE_FMA_FLOAT64 = 53,
 
+  /// Per-instruction floating-point semantics.
+  LOOMC_SPIRV_FEATURE_FLOAT_CONTROLS2 = 54,
+
   /// Number of public SPIR-V feature identifiers.
-  LOOMC_SPIRV_FEATURE_COUNT = 54,
+  LOOMC_SPIRV_FEATURE_COUNT = 55,
 } loomc_spirv_feature_t;
 
 /// Bitset of `loomc_spirv_feature_t` values.

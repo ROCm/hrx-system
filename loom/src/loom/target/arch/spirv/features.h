@@ -130,8 +130,10 @@ typedef enum loom_spirv_feature_atom_e {
   LOOM_SPIRV_FEATURE_ATOM_FMA_FLOAT32 = 52,
   // Correctly rounded 64-bit fused multiply-add.
   LOOM_SPIRV_FEATURE_ATOM_FMA_FLOAT64 = 53,
+  // Per-instruction floating-point semantics.
+  LOOM_SPIRV_FEATURE_ATOM_FLOAT_CONTROLS2 = 54,
   // Number of feature atom enum slots.
-  LOOM_SPIRV_FEATURE_ATOM_COUNT = 54,
+  LOOM_SPIRV_FEATURE_ATOM_COUNT = 55,
 } loom_spirv_feature_atom_t;
 
 // Bitset of loom_spirv_feature_atom_t values.
@@ -324,6 +326,10 @@ typedef enum loom_spirv_feature_bit_e {
 #define LOOM_SPIRV_FEATURE_FMA_FLOAT64 \
   (UINT64_C(1) << LOOM_SPIRV_FEATURE_ATOM_FMA_FLOAT64)
 
+// Target enables per-instruction floating-point semantics.
+#define LOOM_SPIRV_FEATURE_FLOAT_CONTROLS2 \
+  (UINT64_C(1) << LOOM_SPIRV_FEATURE_ATOM_FLOAT_CONTROLS2)
+
 // Feature bits known by the SPIR-V target package.
 #define LOOM_SPIRV_FEATURE_KNOWN_BITS                                         \
   (LOOM_SPIRV_FEATURE_VULKAN_SHADER |                                         \
@@ -374,7 +380,7 @@ typedef enum loom_spirv_feature_bit_e {
    LOOM_SPIRV_FEATURE_INTEGER_DOT_PRODUCT_INPUT4X8_BIT |                      \
    LOOM_SPIRV_FEATURE_INTEGER_DOT_PRODUCT_INPUT4X8_BIT_PACKED |               \
    LOOM_SPIRV_FEATURE_FMA_FLOAT16 | LOOM_SPIRV_FEATURE_FMA_FLOAT32 |          \
-   LOOM_SPIRV_FEATURE_FMA_FLOAT64)
+   LOOM_SPIRV_FEATURE_FMA_FLOAT64 | LOOM_SPIRV_FEATURE_FLOAT_CONTROLS2)
 
 // Feature bits unconditionally required by Vulkan 1.3 BDA HAL modules.
 #define LOOM_SPIRV_FEATURE_MODULE_VULKAN_1_3_BDA_BASELINE \
@@ -387,9 +393,9 @@ typedef enum loom_spirv_feature_bit_e {
    LOOM_SPIRV_FEATURE_GROUP_NON_UNIFORM)
 
 // Maximum number of OpExtension rows emitted by all modeled atoms.
-#define LOOM_SPIRV_FEATURE_MAX_EXTENSION_COUNT 12
+#define LOOM_SPIRV_FEATURE_MAX_EXTENSION_COUNT 13
 // Maximum number of OpCapability rows emitted by all modeled atoms.
-#define LOOM_SPIRV_FEATURE_MAX_CAPABILITY_COUNT 36
+#define LOOM_SPIRV_FEATURE_MAX_CAPABILITY_COUNT 37
 // Maximum number of opcode rows exposed by all modeled atoms.
 #define LOOM_SPIRV_FEATURE_MAX_OPCODE_COUNT 38
 // Maximum number of storage-class rows exposed by all modeled atoms.

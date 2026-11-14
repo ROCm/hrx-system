@@ -549,22 +549,23 @@ TEST(LoomcSpirvIreeHalTargetTest, DisablesBrokenAmdFloat64ToFloat16Conversion) {
   EXPECT_EQ(feature_state, LOOMC_TARGET_FACT_STATE_FALSE);
 }
 
-TEST(LoomcSpirvIreeHalTargetTest, ImportsFusedArithmeticByEnabledWidth) {
+TEST(LoomcSpirvIreeHalTargetTest, ImportsEnabledArithmeticFeatures) {
   const iree_hal_vulkan_general_features_t enabled_flags[] = {
       IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_FMA_FLOAT16,
       IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_FMA_FLOAT32,
-      IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_FMA_FLOAT64};
-  const loomc_spirv_feature_t features[] = {LOOMC_SPIRV_FEATURE_FMA_FLOAT16,
-                                            LOOMC_SPIRV_FEATURE_FMA_FLOAT32,
-                                            LOOMC_SPIRV_FEATURE_FMA_FLOAT64};
+      IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_FMA_FLOAT64,
+      IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_FLOAT_CONTROLS2};
+  const loomc_spirv_feature_t features[] = {
+      LOOMC_SPIRV_FEATURE_FMA_FLOAT16, LOOMC_SPIRV_FEATURE_FMA_FLOAT32,
+      LOOMC_SPIRV_FEATURE_FMA_FLOAT64, LOOMC_SPIRV_FEATURE_FLOAT_CONTROLS2};
   auto environment = CreateSpirvTargetEnvironment();
-  for (uint32_t width_mask = 0; width_mask < 8; ++width_mask) {
-    SCOPED_TRACE(width_mask);
+  for (uint32_t feature_mask = 0; feature_mask < 16; ++feature_mask) {
+    SCOPED_TRACE(feature_mask);
     auto enabled = RequiredVulkanFeatures();
     enabled.general |= IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_FLOAT16 |
                        IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_FLOAT64;
-    for (uint32_t i = 0; i < 3; ++i) {
-      if (width_mask & (1u << i)) {
+    for (uint32_t i = 0; i < IREE_ARRAYSIZE(features); ++i) {
+      if (feature_mask & (1u << i)) {
         enabled.general |= enabled_flags[i];
       }
     }
@@ -578,11 +579,11 @@ TEST(LoomcSpirvIreeHalTargetTest, ImportsFusedArithmeticByEnabledWidth) {
     ResultPtr result_ptr(result);
     ExpectSucceededResult(result);
     ASSERT_NE(profile.get(), nullptr);
-    for (uint32_t i = 0; i < 3; ++i) {
+    for (uint32_t i = 0; i < IREE_ARRAYSIZE(features); ++i) {
       loomc_target_fact_state_t state = LOOMC_TARGET_FACT_STATE_UNKNOWN;
       LOOMC_EXPECT_OK(loomc_spirv_target_profile_query_feature(
           profile.get(), features[i], &state));
-      EXPECT_EQ(state, (width_mask & (1u << i))
+      EXPECT_EQ(state, (feature_mask & (1u << i))
                            ? LOOMC_TARGET_FACT_STATE_TRUE
                            : LOOMC_TARGET_FACT_STATE_FALSE);
     }
