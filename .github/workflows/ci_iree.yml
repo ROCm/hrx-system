@@ -1279,6 +1279,9 @@ jobs:
         run: |
           output_dir="${GITHUB_WORKSPACE}/build/cache-handoff"
           {
+            echo "AR=${output_dir}/rocm-root/lib/llvm/bin/llvm-ar"
+            echo "CC=${output_dir}/rocm-root/lib/llvm/bin/clang"
+            echo "CXX=${output_dir}/rocm-root/lib/llvm/bin/clang++"
             echo "HRX_ARTIFACT_SET=llvm"
             echo "HRX_DOWNLOAD_CACHE_DIR=${output_dir}/downloads"
             echo "HRX_OUTPUT_DIR=${output_dir}"
