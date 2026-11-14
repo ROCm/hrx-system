@@ -247,3 +247,79 @@ test.target<low_core> @target
 func.def target(@target) @empty_fields(%source: vector<0xi64>) -> (vector<0xi64>, vector<0xi64>) {
   func.return %source, %source : vector<0xi64>, vector<0xi64>
 }
+
+// ====
+
+// Rejected predicate selection composes boolean operations without widening.
+test.target<low_core> @target
+
+func.def target(@target) @predicate_payload(%condition: vector<4xi1>, %true_value: vector<4xi1>, %false_value: vector<4xi1>) -> (vector<4xi1>) {
+  %selected = vector.select %condition, %true_value, %false_value : vector<4xi1>
+  func.return %selected : vector<4xi1>
+}
+
+// ----
+test.target<low_core> @target
+
+func.def target(@target) @predicate_payload(%condition: vector<4xi1>, %true_value: vector<4xi1>, %false_value: vector<4xi1>) -> (vector<4xi1>) {
+  %5 = vector.xori %true_value, %false_value : vector<4xi1>
+  %6 = vector.andi %5, %condition : vector<4xi1>
+  %selected = vector.xori %false_value, %6 : vector<4xi1>
+  func.return %selected : vector<4xi1>
+}
+
+// ====
+
+// The same identity preserves ranked predicate payloads.
+test.target<low_core> @target
+
+func.def target(@target) @predicate_rows(%condition: vector<2x2xi1>, %true_value: vector<2x2xi1>, %false_value: vector<2x2xi1>) -> (vector<2x2xi1>) {
+  %selected = vector.select %condition, %true_value, %false_value : vector<2x2xi1>
+  func.return %selected : vector<2x2xi1>
+}
+
+// ----
+test.target<low_core> @target
+
+func.def target(@target) @predicate_rows(%condition: vector<2x2xi1>, %true_value: vector<2x2xi1>, %false_value: vector<2x2xi1>) -> (vector<2x2xi1>) {
+  %5 = vector.xori %true_value, %false_value : vector<2x2xi1>
+  %6 = vector.andi %5, %condition : vector<2x2xi1>
+  %selected = vector.xori %false_value, %6 : vector<2x2xi1>
+  func.return %selected : vector<2x2xi1>
+}
+
+// ====
+
+// An accepted native payload retains its select contract.
+test.target<low_core> @target
+
+func.def target(@target) @native_word_payload(%condition: vector<4xi1>, %true_value: vector<4xi32>, %false_value: vector<4xi32>) -> (vector<4xi32>) {
+  %selected = vector.select %condition, %true_value, %false_value : vector<4xi32>
+  func.return %selected : vector<4xi32>
+}
+
+// ----
+test.target<low_core> @target
+
+func.def target(@target) @native_word_payload(%condition: vector<4xi1>, %true_value: vector<4xi32>, %false_value: vector<4xi32>) -> (vector<4xi32>) {
+  %selected = vector.select %condition, %true_value, %false_value : vector<4xi32>
+  func.return %selected : vector<4xi32>
+}
+
+// ====
+
+// A rejected nonboolean payload is outside the predicate recipe.
+test.target<low_core> @target
+
+func.def target(@target) @rejected_integer_payload(%condition: vector<2xi1>, %true_value: vector<2xi64>, %false_value: vector<2xi64>) -> (vector<2xi64>) {
+  %selected = vector.select %condition, %true_value, %false_value : vector<2xi64>
+  func.return %selected : vector<2xi64>
+}
+
+// ----
+test.target<low_core> @target
+
+func.def target(@target) @rejected_integer_payload(%condition: vector<2xi1>, %true_value: vector<2xi64>, %false_value: vector<2xi64>) -> (vector<2xi64>) {
+  %selected = vector.select %condition, %true_value, %false_value : vector<2xi64>
+  func.return %selected : vector<2xi64>
+}

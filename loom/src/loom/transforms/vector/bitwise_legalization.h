@@ -30,6 +30,13 @@ iree_status_t loom_vector_legalize_rotation(
     loom_target_legalization_context_t* context, loom_op_t* op,
     loom_target_legalizer_result_t* out_result);
 
+// Selects predicate payloads through boolean operations after native contract
+// rejection. Preserves the logical shape and existing predicate carriers.
+iree_status_t loom_vector_legalize_predicate_select(
+    const loom_target_legalizer_entry_t* entry,
+    loom_target_legalization_context_t* context, loom_op_t* op,
+    loom_target_legalizer_result_t* out_result);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif
