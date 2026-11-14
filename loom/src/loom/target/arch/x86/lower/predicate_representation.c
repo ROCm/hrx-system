@@ -18,6 +18,7 @@ typedef enum loom_x86_predicate_representation_action_e {
   LOOM_X86_PREDICATE_REPRESENTATION_ACTION_EXTEND_INPUT = 5,
   LOOM_X86_PREDICATE_REPRESENTATION_ACTION_TRUNCATE_RESULT = 6,
   LOOM_X86_PREDICATE_REPRESENTATION_ACTION_SLICE = 7,
+  LOOM_X86_PREDICATE_REPRESENTATION_ACTION_PACK = 8,
 } loom_x86_predicate_representation_action_t;
 
 typedef enum loom_x86_predicate_profile_e {
@@ -522,6 +523,48 @@ static void loom_x86_predicate_observe_truncate(
                                                   candidate_count);
 }
 
+static void loom_x86_predicate_observe_pack(
+    const loom_x86_predicate_representation_policy_t* policy,
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_low_lower_representation_recorder_t* recorder) {
+  const loom_value_id_t source = loom_vector_bitpack_source(source_op);
+  uint32_t lane_count = 0;
+  if (!loom_x86_predicate_type(
+          loom_module_value_type(loom_low_lower_context_module(context),
+                                 source),
+          policy->maximum_lane_count, &lane_count)) {
+    return;
+  }
+  loom_low_representation_candidate_t
+      candidates[LOOM_X86_PREDICATE_MAX_CANDIDATE_COUNT];
+  const iree_host_size_t candidate_count = loom_x86_predicate_candidates(
+      policy, lane_count, LOOM_LOW_REPRESENTATION_ID_NONE, candidates);
+  for (iree_host_size_t i = 0; i < candidate_count; ++i) {
+    // Mask extraction and transfer to the packed integer vector take two
+    // instructions. SIMD words need ordered byte compaction on AVX2; AVX-512
+    // SIMD forms first compress to a native mask.
+    loom_low_representation_cost_t cost = {.runtime = 2, .code_size = 10};
+    if (policy->profile == LOOM_X86_PREDICATE_PROFILE_AVX512) {
+      if (candidates[i].representation !=
+          LOOM_X86_PREDICATE_REPRESENTATION_MASK) {
+        cost.runtime += 1;
+        cost.code_size += 6;
+      }
+    } else if (candidates[i].representation ==
+               LOOM_X86_PREDICATE_REPRESENTATION_SIMD16) {
+      const loom_low_representation_cost_t conversion =
+          loom_x86_avx2_predicate_conversion_cost(
+              lane_count, LOOM_X86_PREDICATE_REPRESENTATION_SIMD16,
+              LOOM_X86_PREDICATE_REPRESENTATION_SIMD8);
+      cost.runtime += conversion.runtime;
+      cost.code_size += conversion.code_size;
+    }
+    candidates[i].cost = cost;
+  }
+  loom_low_lower_representation_record_costs(recorder, source, candidates,
+                                             candidate_count);
+}
+
 static void loom_x86_predicate_observe_select(
     const loom_x86_predicate_representation_policy_t* policy,
     loom_low_lower_context_t* context, const loom_op_t* source_op,
@@ -663,6 +706,10 @@ static void loom_x86_predicate_observe_boundary(
     case LOOM_X86_PREDICATE_REPRESENTATION_ACTION_TRUNCATE_RESULT:
       loom_x86_predicate_observe_truncate(policy, context, source_op, recorder);
       return;
+    case LOOM_X86_PREDICATE_REPRESENTATION_ACTION_PACK:
+      loom_x86_predicate_observe_pack(policy, context, source_op, recorder);
+      loom_low_lower_representation_claim_operand(recorder, 0);
+      return;
   }
   IREE_ASSERT_UNREACHABLE("unknown x86 predicate representation action");
 }
@@ -750,6 +797,8 @@ static const loom_low_lower_representation_boundary_t
         {LOOM_OP_VECTOR_TRUNCI,
          LOOM_X86_PREDICATE_REPRESENTATION_ACTION_TRUNCATE_RESULT,
          LOOM_LOW_LOWER_REPRESENTATION_BOUNDARY_FLAG_RESULTS},
+        {LOOM_OP_VECTOR_BITPACK, LOOM_X86_PREDICATE_REPRESENTATION_ACTION_PACK,
+         LOOM_LOW_LOWER_REPRESENTATION_BOUNDARY_FLAG_OPERANDS},
 };
 static const loom_low_lower_representation_boundary_span_t
     kX86PredicateRepresentationBoundarySpans[] = {
@@ -776,7 +825,9 @@ static_assert((loom_op_kind_t)LOOM_OP_VECTOR_SPLATI <
                   (loom_op_kind_t)LOOM_OP_VECTOR_EXTSI <
                       (loom_op_kind_t)LOOM_OP_VECTOR_EXTUI &&
                   (loom_op_kind_t)LOOM_OP_VECTOR_EXTUI <
-                      (loom_op_kind_t)LOOM_OP_VECTOR_TRUNCI,
+                      (loom_op_kind_t)LOOM_OP_VECTOR_TRUNCI &&
+                  (loom_op_kind_t)LOOM_OP_VECTOR_TRUNCI <
+                      (loom_op_kind_t)LOOM_OP_VECTOR_BITPACK,
               "x86 predicate representation boundaries must remain ordered");
 
 static const loom_x86_predicate_representation_policy_t

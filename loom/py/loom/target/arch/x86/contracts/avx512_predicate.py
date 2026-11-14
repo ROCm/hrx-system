@@ -163,7 +163,7 @@ def _operation_representation_bit_widths(
     return (None,)
 
 
-def _all_operation_representation_bit_widths(
+def avx512_predicate_representation_bit_widths(
     lane_count: int,
 ) -> tuple[int | None, ...]:
     """Returns the native mask and every legal SIMD representation."""
@@ -1179,7 +1179,7 @@ def avx512_fp16_compare_rules(
                 compare=compare,
                 priority=1,
             )
-            for result_vector_bit_width in _all_operation_representation_bit_widths(
+            for result_vector_bit_width in avx512_predicate_representation_bit_widths(
                 lane_count
             )
         )
@@ -1335,7 +1335,7 @@ def avx512_fp16_select_rules(
         for vector_bit_width in AVX512_FP16_VECTOR_BIT_WIDTHS
         if vector_bit_width < 128
         for lane_count in (FP16_ELEMENT.lane_count(vector_bit_width),)
-        for condition_vector_bit_width in _all_operation_representation_bit_widths(
+        for condition_vector_bit_width in avx512_predicate_representation_bit_widths(
             lane_count
         )
     )

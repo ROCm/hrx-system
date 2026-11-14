@@ -171,9 +171,12 @@ bool loom_vector_packet_shape_has_source_carriers(
     const loom_target_legalization_context_t* context, loom_type_t vector_type,
     const loom_vector_packet_shape_t* shape);
 
-// Returns target-native lane candidates for a shape-preserving decomposable
-// operation. |out_producer_closure_candidate_bits| identifies the subset whose
-// target contract requires packet-local producer provenance.
+// Returns target-native lane candidates for an operation whose vector operands
+// and results share a logical lane count. Scalar operands remain unchanged.
+// Both complete packets and the tail require legal contracts and carriers.
+// |out_producer_closure_candidate_bits| identifies the subset whose target
+// contract requires packet-local producer provenance. The caller owns the
+// semantic decomposition (elementwise or adjusted coordinate construction).
 iree_status_t loom_vector_packet_component_candidate_bits(
     loom_target_legalization_context_t* context, const loom_op_t* op,
     uint32_t source_lane_count, uint64_t* out_candidate_bits,

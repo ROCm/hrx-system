@@ -1,0 +1,34 @@
+// RUN: emit x86-native-bytes @byte_mask
+x86.target<avx2> @target
+
+low.func.def target<x86.avx2.core>(@target) @byte_mask(%source: reg<x86.xmm>) -> (reg<x86.gpr32>) asm {
+  %bits = vpmovmskb.gpr32.xmm %source
+  return %bits
+}
+
+// ----
+code: c5 f9 d7 c0 c3
+
+// ====
+// RUN: emit x86-native-bytes @wide_byte_mask
+x86.target<avx2> @target
+
+low.func.def target<x86.avx2.core>(@target) @wide_byte_mask(%source: reg<x86.ymm>) -> (reg<x86.gpr32>) asm {
+  %bits = vpmovmskb.gpr32.ymm %source
+  return %bits
+}
+
+// ----
+code: c5 fd d7 c0 c5 f8 77 c3
+
+// ====
+// RUN: emit x86-native-bytes @dword_mask
+x86.target<avx2> @target
+
+low.func.def target<x86.avx2.core>(@target) @dword_mask(%source: reg<x86.ymm>) -> (reg<x86.gpr32>) asm {
+  %bits = vmovmskps.gpr32.ymm %source
+  return %bits
+}
+
+// ----
+code: c5 fc 50 c0 c5 f8 77 c3

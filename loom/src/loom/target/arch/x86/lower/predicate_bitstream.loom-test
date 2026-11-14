@@ -1,0 +1,150 @@
+// RUN: emit source-low target=x86:avx2 output=low
+
+// The compare's dword representation reaches sign-bit extraction directly.
+func.def @pack_dword_comparison(%lhs: vector<8xi32>, %rhs: vector<8xi32>) -> (vector<1xi8>) {
+  %predicate = vector.cmpi eq, %lhs, %rhs : vector<8xi32> -> vector<8xi1>
+  %bits = vector.bitpack<1> %predicate : vector<8xi1> -> vector<1xi8>
+  func.return %bits : vector<1xi8>
+}
+
+// ----
+low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = (vector<8xi32>, vector<8xi32>) -> (vector<1xi8>)}) @pack_dword_comparison(%lhs: reg<x86.ymm>, %rhs: reg<x86.ymm>) -> (reg<x86.xmm>) asm {
+  %predicate = vpcmpeqd.ymm %lhs, %rhs
+  %9 = vmovmskps.gpr32.ymm %predicate
+  %bits = vmovd.xmm.gpr32 %9
+  return %bits
+}
+
+// ====
+// RUN: emit source-low target=x86:avx2 output=low
+
+// The callable word carrier stays live while packing compacts its lanes.
+func.def @pack_live_words(%predicate: vector<8xi1>) -> (vector<1xi8>, vector<8xi1>) {
+  %bits = vector.bitpack<1> %predicate : vector<8xi1> -> vector<1xi8>
+  func.return %bits, %predicate : vector<1xi8>, vector<8xi1>
+}
+
+// ----
+low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = (vector<8xi1>) -> (vector<1xi8>, vector<8xi1>)}) @pack_live_words(%predicate: reg<x86.xmm>) -> (reg<x86.xmm>, reg<x86.xmm>) asm {
+  %7 = vpacksswb.xmm %predicate, %predicate
+  %8 = vpmovmskb.gpr32.xmm %7
+  %bits = vmovd.xmm.gpr32 %8
+  return %bits, %predicate
+}
+
+// ====
+// RUN: emit source-low target=x86:avx2 output=low
+
+// Compaction joins the low and high halves in lane order before extraction.
+func.def @pack_word_comparison(%lhs: vector<16xi16>, %rhs: vector<16xi16>) -> (vector<1xi16>) {
+  %predicate = vector.cmpi ne, %lhs, %rhs : vector<16xi16> -> vector<16xi1>
+  %bits = vector.bitpack<1> %predicate : vector<16xi1> -> vector<1xi16>
+  func.return %bits : vector<1xi16>
+}
+
+// ----
+low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = (vector<16xi16>, vector<16xi16>) -> (vector<1xi16>)}) @pack_word_comparison(%lhs: reg<x86.ymm>, %rhs: reg<x86.ymm>) -> (reg<x86.xmm>) asm {
+  %8 = vpcmpeqw.ymm %lhs, %rhs
+  %9 = vpcmpeqd.ones.ymm
+  %10 = vpxor.ymm %8, %9
+  %11 = vextractf128.xmm %10, 0
+  %12 = vextractf128.xmm %10, 1
+  %predicate = vpacksswb.xmm %11, %12
+  %14 = vpmovmskb.gpr32.xmm %predicate
+  %bits = vmovd.xmm.gpr32 %14
+  return %bits
+}
+
+// ====
+// RUN: emit source-low target=x86:avx512 output=low
+
+// The mask remains in a K register through comparison, logic, and packing.
+func.def @pack_native_mask(%lhs: vector<16xi32>, %rhs: vector<16xi32>) -> (vector<1xi16>) {
+  %equal = vector.cmpi eq, %lhs, %rhs : vector<16xi32> -> vector<16xi1>
+  %positive = vector.cmpi sgt, %lhs, %rhs : vector<16xi32> -> vector<16xi1>
+  %chosen = vector.ori %equal, %positive : vector<16xi1>
+  %bits = vector.bitpack<1> %chosen : vector<16xi1> -> vector<1xi16>
+  func.return %bits : vector<1xi16>
+}
+
+// ----
+low.func.def target<x86.avx512.core> abi(object_function) abi_layout({signature = (vector<16xi32>, vector<16xi32>) -> (vector<1xi16>)}) @pack_native_mask(%lhs: reg<x86.zmm>, %rhs: reg<x86.zmm>) -> (reg<x86.xmm>) asm {
+  %equal = vpcmpd %lhs, %rhs, 0
+  %positive = vpcmpd %lhs, %rhs, 6
+  %chosen = korq %equal, %positive
+  %13 = avx512.kmovq.gpr64.k %chosen
+  %bits = vmovq.xmm.gpr64 %13
+  return %bits
+}
+
+// ====
+// RUN: emit source-low target=x86:avx512 output=low
+
+// The high predicate bits survive the full mask-to-qword transfer.
+func.def @pack_full_mask(%lhs: vector<64xi8>, %rhs: vector<64xi8>) -> (vector<1xi64>) {
+  %predicate = vector.cmpi ne, %lhs, %rhs : vector<64xi8> -> vector<64xi1>
+  %bits = vector.bitpack<1> %predicate : vector<64xi1> -> vector<1xi64>
+  func.return %bits : vector<1xi64>
+}
+
+// ----
+low.func.def target<x86.avx512.core> abi(object_function) abi_layout({signature = (vector<64xi8>, vector<64xi8>) -> (vector<1xi64>)}) @pack_full_mask(%lhs: reg<x86.zmm>, %rhs: reg<x86.zmm>) -> (reg<x86.xmm>) asm {
+  %predicate = vpcmpb %lhs, %rhs, 4
+  %9 = avx512.kmovq.gpr64.k %predicate
+  %bits = vmovq.xmm.gpr64 %9
+  return %bits
+}
+
+// ====
+// RUN: emit source-low target=x86:avx2 output=low
+
+// Predicate payload selection stays in the comparison representation through
+// packing, with independently computed condition, true, and false masks.
+func.def @pack_selected_predicates(%a: vector<8xi32>, %b: vector<8xi32>, %c: vector<8xi32>) -> (vector<1xi8>) {
+  %condition = vector.cmpi eq, %a, %b : vector<8xi32> -> vector<8xi1>
+  %true_value = vector.cmpi sgt, %b, %c : vector<8xi32> -> vector<8xi1>
+  %false_value = vector.cmpi slt, %a, %c : vector<8xi32> -> vector<8xi1>
+  %selected = vector.select %condition, %true_value, %false_value : vector<8xi1>
+  %bits = vector.bitpack<1> %selected : vector<8xi1> -> vector<1xi8>
+  func.return %bits : vector<1xi8>
+}
+
+// ----
+low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = (vector<8xi32>, vector<8xi32>, vector<8xi32>) -> (vector<1xi8>)}) @pack_selected_predicates(%a: reg<x86.ymm>, %b: reg<x86.ymm>, %c: reg<x86.ymm>) -> (reg<x86.xmm>) asm {
+  %condition = vpcmpeqd.ymm %a, %b
+  %true_value = vpcmpgtd.ymm %b, %c
+  %false_value = vpcmpgtd.ymm %c, %a
+  %19 = vpxor.ymm %true_value, %false_value
+  %20 = vpand.ymm %19, %condition
+  %selected = vpxor.ymm %false_value, %20
+  %22 = vmovmskps.gpr32.ymm %selected
+  %bits = vmovd.xmm.gpr32 %22
+  return %bits
+}
+
+// ====
+// RUN: emit source-low target=x86:avx512 output=low
+
+// Predicate payload selection stays in the comparison representation through
+// packing, with independently computed condition, true, and false masks.
+func.def @pack_selected_predicates(%a: vector<16xi32>, %b: vector<16xi32>, %c: vector<16xi32>) -> (vector<1xi16>) {
+  %condition = vector.cmpi eq, %a, %b : vector<16xi32> -> vector<16xi1>
+  %true_value = vector.cmpi sgt, %b, %c : vector<16xi32> -> vector<16xi1>
+  %false_value = vector.cmpi slt, %a, %c : vector<16xi32> -> vector<16xi1>
+  %selected = vector.select %condition, %true_value, %false_value : vector<16xi1>
+  %bits = vector.bitpack<1> %selected : vector<16xi1> -> vector<1xi16>
+  func.return %bits : vector<1xi16>
+}
+
+// ----
+low.func.def target<x86.avx512.core> abi(object_function) abi_layout({signature = (vector<16xi32>, vector<16xi32>, vector<16xi32>) -> (vector<1xi16>)}) @pack_selected_predicates(%a: reg<x86.zmm>, %b: reg<x86.zmm>, %c: reg<x86.zmm>) -> (reg<x86.xmm>) asm {
+  %condition = vpcmpd %a, %b, 0
+  %true_value = vpcmpd %b, %c, 6
+  %false_value = vpcmpd %a, %c, 1
+  %19 = kxorq %true_value, %false_value
+  %20 = kandq %19, %condition
+  %selected = kxorq %false_value, %20
+  %22 = avx512.kmovq.gpr64.k %selected
+  %bits = vmovq.xmm.gpr64 %22
+  return %bits
+}

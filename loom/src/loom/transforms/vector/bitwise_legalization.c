@@ -234,3 +234,52 @@ iree_status_t loom_vector_legalize_rotation(
   };
   return iree_ok_status();
 }
+
+bool loom_vector_match_predicate_select(
+    const loom_target_legalizer_entry_t* entry,
+    const loom_target_legalization_context_t* context, const loom_op_t* op) {
+  (void)entry;
+  return loom_type_element_type(loom_module_value_type(
+             context->module, loom_vector_select_result(op))) ==
+         LOOM_SCALAR_TYPE_I1;
+}
+
+iree_status_t loom_vector_legalize_predicate_select(
+    const loom_target_legalizer_entry_t* entry,
+    loom_target_legalization_context_t* context, loom_op_t* op,
+    loom_target_legalizer_result_t* out_result) {
+  (void)entry;
+  *out_result = (loom_target_legalizer_result_t){
+      .action = LOOM_TARGET_LEGALIZER_ACTION_NO_COMMENT,
+  };
+  const loom_type_t type =
+      loom_module_value_type(context->module, loom_vector_select_result(op));
+  loom_rewriter_t* rewriter = context->rewriter;
+  loom_builder_t* builder = &rewriter->builder;
+  loom_builder_set_before(builder, op);
+  const loom_value_id_t checkpoint = loom_rewriter_value_checkpoint(rewriter);
+  const loom_value_id_t false_value = loom_vector_select_false_value(op);
+
+  // Only lanes selected by the condition toggle from the false payload to the
+  // true payload. The identity holds for every predicate representation.
+  loom_op_t* difference = NULL;
+  IREE_RETURN_IF_ERROR(
+      loom_vector_xori_build(builder, loom_vector_select_true_value(op),
+                             false_value, type, op->location, &difference));
+  loom_op_t* masked_difference = NULL;
+  IREE_RETURN_IF_ERROR(
+      loom_vector_andi_build(builder, loom_vector_xori_result(difference),
+                             loom_vector_select_condition(op), type,
+                             op->location, &masked_difference));
+  loom_op_t* selected = NULL;
+  IREE_RETURN_IF_ERROR(loom_vector_xori_build(
+      builder, false_value, loom_vector_andi_result(masked_difference), type,
+      op->location, &selected));
+  const loom_value_id_t replacement = loom_vector_xori_result(selected);
+  IREE_RETURN_IF_ERROR(loom_rewriter_preserve_result_names_on_new_values(
+      rewriter, op, &replacement, 1, checkpoint));
+  IREE_RETURN_IF_ERROR(
+      loom_rewriter_replace_all_uses_and_erase(rewriter, op, &replacement, 1));
+  out_result->action = LOOM_TARGET_LEGALIZER_ACTION_REWRITTEN;
+  return iree_ok_status();
+}

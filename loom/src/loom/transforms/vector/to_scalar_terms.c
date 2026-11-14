@@ -547,6 +547,15 @@ iree_status_t loom_vector_to_scalar_ordinal_for_lane(
   }
   int64_t ordinal = loom_vector_to_scalar_linear_ordinal_static(
       state->vector_type, indices.static_indices);
+  // Static and dynamic ordinals have the same narrowing semantics. Coordinate
+  // arithmetic wraps in its payload type even when a lane ordinal exceeds
+  // that type's signed domain.
+  const int32_t bit_width =
+      loom_scalar_type_bitwidth(loom_type_element_type(result_type));
+  if (bit_width < 64) {
+    const int64_t sign = (int64_t)1 << (bit_width - 1);
+    ordinal = ((ordinal & (sign * 2 - 1)) ^ sign) - sign;
+  }
   return loom_vector_to_scalar_build_scalar_constant(
       &state->rewriter->builder, result_type, state->location, ordinal,
       out_ordinal);

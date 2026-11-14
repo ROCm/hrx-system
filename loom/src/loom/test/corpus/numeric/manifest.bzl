@@ -80,6 +80,7 @@ NUMERIC_CORPUS = loom_corpus_manifest(
         "integer/widening.loom",
         "matrix/epilogue.loom",
         "matrix/nvfp4.loom",
+        "predicate/bitstream.loom",
         "predicate/extension.loom",
         "predicate/extract.loom",
         "predicate/lanes.loom",
