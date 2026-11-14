@@ -23,6 +23,8 @@ from build_tools.ci import windows_cache_handoff as handoff
 
 class _CasHandler(http.server.BaseHTTPRequestHandler):
     blobs: dict[str, bytes] = {}
+    puts: list[str] = []
+    heads: list[str] = []
 
     def do_PUT(self):
         digest = self.path.rsplit("/", 1)[-1]
@@ -31,7 +33,19 @@ class _CasHandler(http.server.BaseHTTPRequestHandler):
             self.send_error(400)
             return
         self.blobs[digest] = content
+        self.puts.append(digest)
         self.send_response(200)
+        self.end_headers()
+
+    def do_HEAD(self):
+        digest = self.path.rsplit("/", 1)[-1]
+        self.heads.append(digest)
+        content = self.blobs.get(digest)
+        if content is None:
+            self.send_error(404)
+            return
+        self.send_response(200)
+        self.send_header("Content-Length", str(len(content)))
         self.end_headers()
 
     def do_GET(self):
@@ -67,6 +81,8 @@ class WindowsCacheHandoffTest(unittest.TestCase):
 
     def setUp(self):
         _CasHandler.blobs.clear()
+        _CasHandler.puts.clear()
+        _CasHandler.heads.clear()
         self.temp_dir = tempfile.TemporaryDirectory()
         self.root = Path(self.temp_dir.name)
 
@@ -189,6 +205,8 @@ class WindowsCacheHandoffTest(unittest.TestCase):
         self.assertEqual(manifest["test"]["environment"], {"FIXTURE_ENV": "present"})
         self.assertEqual(manifest["test"]["inherited_environment"], ["PATH"])
         self.assertEqual(len(_CasHandler.blobs), 2)
+        self.assertCountEqual(_CasHandler.heads, _CasHandler.blobs)
+        self.assertCountEqual(_CasHandler.puts, _CasHandler.blobs)
         self.assertEqual(summary["compatible_test_count"], 1)
         self.assertEqual(summary["unique_blob_count"], 2)
         self.assertEqual(summary["cas_url"], self.cas_url)
@@ -208,6 +226,30 @@ class WindowsCacheHandoffTest(unittest.TestCase):
         self.assertIn("name = 'test'", build_text)
         self.assertIn("exec_properties = {'pool': 'windows'}", build_text)
         self.assertIn("tags = ['requires-windows']", build_text)
+
+    def test_emit_reuses_blobs_already_owned_by_the_cas(self):
+        execution_root, target_metadata, provider_metadata = self._write_fixture()
+        first_output_dir = self.root / "first-package"
+        handoff.emit_handoff_packages(
+            target_metadata_path=target_metadata,
+            provider_metadata_path=provider_metadata,
+            execution_root=execution_root,
+            cas_url=self.cas_url,
+            output_dir=first_output_dir,
+        )
+        first_puts = list(_CasHandler.puts)
+
+        second_output_dir = self.root / "second-package"
+        handoff.emit_handoff_packages(
+            target_metadata_path=target_metadata,
+            provider_metadata_path=provider_metadata,
+            execution_root=execution_root,
+            cas_url=self.cas_url,
+            output_dir=second_output_dir,
+        )
+
+        self.assertEqual(_CasHandler.puts, first_puts)
+        self.assertEqual(len(_CasHandler.heads), 2 * len(_CasHandler.blobs))
 
     def test_emit_resolves_rootpath_arguments_against_exact_runfiles(self):
         execution_root, target_metadata, provider_metadata = self._write_fixture()

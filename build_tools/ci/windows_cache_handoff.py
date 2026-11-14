@@ -45,6 +45,12 @@ class Runfile:
     physical_path: Path | None
 
 
+@dataclass(frozen=True)
+class BlobSource:
+    path: Path
+    size: int
+
+
 class CasClient:
     """Streams immutable blobs to and from bazel-remote's HTTP CAS surface."""
 
@@ -91,6 +97,28 @@ class CasClient:
                     f"CAS PUT {digest} failed with HTTP {response.status}: "
                     f"{body.decode(errors='replace')}"
                 )
+        finally:
+            connection.close()
+
+    def contains(self, digest: str, size: int) -> bool:
+        connection = self._connection()
+        try:
+            connection.request("HEAD", self._path(digest))
+            response = connection.getresponse()
+            if response.status == 404:
+                return False
+            if response.status != 200:
+                body = response.read(4096)
+                raise HandoffError(
+                    f"CAS HEAD {digest} failed with HTTP {response.status}: "
+                    f"{body.decode(errors='replace')}"
+                )
+            content_length = response.getheader("Content-Length")
+            if content_length is not None and int(content_length) != size:
+                raise HandoffError(
+                    f"CAS blob {digest} has length {content_length}, expected {size}"
+                )
+            return True
         finally:
             connection.close()
 
@@ -463,8 +491,7 @@ def _convert_marked_value(
 
 def _manifest_entry(
     runfile: Runfile,
-    cas: CasClient,
-    uploaded_blobs: dict[str, int],
+    blobs: dict[str, BlobSource],
 ) -> dict[str, Any]:
     if runfile.physical_path is None:
         return {"path": runfile.logical_path, "empty": True}
@@ -472,11 +499,10 @@ def _manifest_entry(
     if not path.is_file():
         raise HandoffError(f"runfile is not a regular file: {path}")
     digest, size = _sha256(path)
-    prior_size = uploaded_blobs.get(digest)
-    if prior_size is None:
-        cas.put(path, digest, size)
-        uploaded_blobs[digest] = size
-    elif prior_size != size:
+    prior_source = blobs.get(digest)
+    if prior_source is None:
+        blobs[digest] = BlobSource(path=path, size=size)
+    elif prior_source.size != size:
         raise HandoffError(f"CAS digest {digest} has inconsistent byte lengths")
     return {
         "path": runfile.logical_path,
@@ -511,8 +537,8 @@ def _emit_target_manifest(
     attributes: dict[str, dict[str, Any]],
     provider_metadata: dict[str, Any],
     execution_root: Path,
-    cas: CasClient,
-    uploaded_blobs: dict[str, int],
+    cas_url: str,
+    blobs: dict[str, BlobSource],
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     executable_value = provider_metadata.get("executable")
     if not isinstance(executable_value, str) or not executable_value:
@@ -602,7 +628,7 @@ def _emit_target_manifest(
             logical_paths=logical_paths,
         )
 
-    entries = [_manifest_entry(runfile, cas, uploaded_blobs) for runfile in runfiles]
+    entries = [_manifest_entry(runfile, blobs) for runfile in runfiles]
     shard_count = _int_attribute(attributes, "shard_count")
     test_metadata = {
         "arguments": converted_arguments,
@@ -621,7 +647,7 @@ def _emit_target_manifest(
     manifest = {
         "schema_version": SCHEMA_VERSION,
         "source_label": label,
-        "cas_url": cas.base_url,
+        "cas_url": cas_url,
         "workspace": workspace,
         "executable": executable_logical_path,
         "test": test_metadata,
@@ -639,6 +665,18 @@ def _emit_target_manifest(
     if "shard_count" in test_metadata:
         build_attributes["shard_count"] = test_metadata["shard_count"]
     return manifest, build_attributes
+
+
+def _publish_blobs(cas: CasClient, blobs: dict[str, BlobSource], jobs: int = 8) -> None:
+    """Ensures each unique product blob exists in the shared CAS."""
+
+    def publish(entry: tuple[str, BlobSource]) -> None:
+        digest, source = entry
+        if not cas.contains(digest, source.size):
+            cas.put(source.path, digest, source.size)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as executor:
+        list(executor.map(publish, blobs.items()))
 
 
 def _render_build_file(rules: list[dict[str, Any]]) -> str:
@@ -692,7 +730,7 @@ def emit_handoff_packages(
         )
 
     cas = CasClient(cas_url)
-    uploaded_blobs: dict[str, int] = {}
+    blobs: dict[str, BlobSource] = {}
     build_rules: dict[str, list[dict[str, Any]]] = {}
     incompatible_labels = []
     non_native_labels = []
@@ -721,8 +759,8 @@ def emit_handoff_packages(
                 attributes=configured_rules[label],
                 provider_metadata=provider_metadata,
                 execution_root=execution_root,
-                cas=cas,
-                uploaded_blobs=uploaded_blobs,
+                cas_url=cas.base_url,
+                blobs=blobs,
             )
         except (HandoffError, OSError) as exc:
             raise HandoffError(f"failed to emit {label}: {exc}") from exc
@@ -761,12 +799,13 @@ def emit_handoff_packages(
         (package_dir / "BUILD.bazel").write_text(
             _render_build_file(rules), encoding="utf-8"
         )
+    _publish_blobs(cas, blobs)
     summary = {
         "schema_version": SCHEMA_VERSION,
         "cas_url": cas.base_url,
         "blobs": [
-            {"sha256": digest, "size": size}
-            for digest, size in sorted(uploaded_blobs.items())
+            {"sha256": digest, "size": source.size}
+            for digest, source in sorted(blobs.items())
         ],
         "selected_test_count": len(configured_rules),
         "compatible_test_count": len(test_summaries),
@@ -775,8 +814,8 @@ def emit_handoff_packages(
         "non_native_test_count": len(non_native_labels),
         "non_native_labels": non_native_labels,
         "runfile_reference_count": runfile_reference_count,
-        "unique_blob_count": len(uploaded_blobs),
-        "unique_blob_bytes": sum(uploaded_blobs.values()),
+        "unique_blob_count": len(blobs),
+        "unique_blob_bytes": sum(source.size for source in blobs.values()),
         "tests": test_summaries,
     }
     (output_dir / "handoff-summary.json").write_text(
