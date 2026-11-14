@@ -1032,7 +1032,6 @@ jobs:
             echo "HRX_PYTHON=${output_dir}/python/bin/python3"
             echo "HRX_RELEASE_TYPE=nightly"
             echo "HRX_ROCM_ROOT=${output_dir}/rocm-root"
-            echo "IREE_CACHE_HANDOFF_OUTPUT_BASE=${RUNNER_TEMP}/b"
             echo "LLVM_ROOT=${output_dir}/rocm-root/lib/llvm"
             echo "MSVC_WINE_ROOT=${output_dir}/msvc-wine"
             echo "PIP_CACHE_DIR=${output_dir}/caches/pip"
@@ -1071,12 +1070,10 @@ jobs:
         run: |
           python3 dev.py bazel setup --venv
           {
+            # Keep Wine-visible generated paths below MSVC's path limits.
+            echo "startup --output_base=${RUNNER_TEMP}/b"
             echo 'build --config=windows-x86_64'
             echo 'build --config=windows-msvc'
-            echo 'build --config=rocm-ci-cache'
-            echo 'build --remote_upload_local_results=true'
-            echo 'build --remote_verify_downloads'
-            echo 'build --noremote_cache_async'
           } >> .bazelrc.local
           echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
 
@@ -1106,37 +1103,26 @@ jobs:
 
           common_flags=(
             --@bazel_tools//tools/test:incompatible_use_default_test_toolchain=false
-            --remote_download_outputs=all
-            --remote_verify_downloads
-            --noremote_cache_async
             --skip_incompatible_explicit_targets
           )
           target_patterns="$evidence_dir/target-patterns.txt"
           target_query="$evidence_dir/target-query.txt"
-          bazel "--output_base=$IREE_CACHE_HANDOFF_OUTPUT_BASE" query \
+          bazel query \
             --output=label --query_file="$selection_query" > "$target_patterns"
           {
             echo 'set('
             sed 's/^/  /' "$target_patterns"
             echo ')'
           } > "$target_query"
-          bazel "--output_base=$IREE_CACHE_HANDOFF_OUTPUT_BASE" build \
-            "${common_flags[@]}" \
-            --remote_upload_local_results=true \
-            --profile="$evidence_dir/producer.profile.gz" \
-            --target_pattern_file="$target_patterns"
-
-          bazel "--output_base=$IREE_CACHE_HANDOFF_OUTPUT_BASE" cquery \
+          bazel cquery \
             "${common_flags[@]}" --output=jsonproto \
             --query_file="$target_query" \
             > "$evidence_dir/target.json"
-          bazel "--output_base=$IREE_CACHE_HANDOFF_OUTPUT_BASE" cquery \
+          bazel cquery \
             "${common_flags[@]}" --output=starlark \
             --starlark:file=build_tools/windows/cache_handoff/manifest_query.bzl \
             --query_file="$target_query" > "$evidence_dir/providers.json"
-          execution_root="$(
-            bazel "--output_base=$IREE_CACHE_HANDOFF_OUTPUT_BASE" info execution_root
-          )"
+          execution_root="$(bazel info execution_root)"
           python build_tools/ci/windows_cache_handoff.py emit \
             --target-metadata="$evidence_dir/target.json" \
             --provider-metadata="$evidence_dir/providers.json" \
