@@ -23,6 +23,8 @@ class GridStorageTest : public ::testing::Test {
         .type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE,
         .structure_size = sizeof(options_.profile),
         .ordinal = 7,
+        .memory_class = AMDF_MEMORY_CLASS_LOCAL,
+        .roles = AMDF_MEMORY_PROFILE_ROLE_CREATE,
         .allocation =
             {
                 .maximum_byte_length = 4096,
@@ -33,6 +35,13 @@ class GridStorageTest : public ::testing::Test {
     options_.access_count = 1;
     options_.accesses = &access_;
     options_.required_flags = AMDF_MEMORY_FLAG_DEVICE_LOCAL;
+    api_.memory_scope_query_info = [](amdf_memory_scope_t*,
+                                      amdf_memory_scope_info_t* out_info) {
+      out_info->kind = AMDF_MEMORY_SCOPE_KIND_LOCAL;
+      out_info->memory_profile_count = 8;
+      out_info->capacity_byte_length = 4096;
+      return AMDF_STATUS_OK;
+    };
     api_.memory_scope_query_device_profile =
         [](amdf_memory_scope_t* scope, uint32_t ordinal, uint32_t access_count,
            const amdf_memory_device_access_t* accesses,

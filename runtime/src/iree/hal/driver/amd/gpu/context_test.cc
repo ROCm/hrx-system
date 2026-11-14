@@ -515,6 +515,14 @@ struct NativeBacking {
   };
 
   static amdf_status_t AMDF_CALL
+  QueryScope(amdf_memory_scope_t*, amdf_memory_scope_info_t* out_info) {
+    out_info->kind = AMDF_MEMORY_SCOPE_KIND_SYSTEM;
+    out_info->memory_profile_count = 1;
+    out_info->capacity_byte_length = 4096;
+    return AMDF_STATUS_OK;
+  }
+
+  static amdf_status_t AMDF_CALL
   Allocate(amdf_memory_scope_t* scope, const amdf_memory_create_info_t* info,
            amdf_memory_t** out_memory,
            amdf_memory_release_info_t* out_release_info) {
@@ -584,10 +592,12 @@ class ContextMemoryTest : public ContextTest {
   void SetUp() override {
     ContextTest::SetUp();
     native_backing_.native = &native_;
+    api_.memory_scope_query_info = NativeBacking::QueryScope;
     api_.memory_create = NativeBacking::Allocate;
     api_.memory_query_info = NativeBacking::Query;
     api_.memory_destroy = NativeBacking::Free;
     options_.scope = reinterpret_cast<amdf_memory_scope_t*>(&native_backing_);
+    options_.profile.memory_class = AMDF_MEMORY_CLASS_SYSTEM;
     options_.profile.roles = AMDF_MEMORY_PROFILE_ROLE_CREATE;
     options_.profile.allocation.byte_length_granularity = 64;
     options_.profile.allocation.minimum_alignment = 64;

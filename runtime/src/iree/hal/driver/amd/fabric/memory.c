@@ -428,6 +428,80 @@ iree_status_t iree_hal_amd_fabric_memory_allocation_size(
   return iree_ok_status();
 }
 
+static const char* iree_hal_amd_fabric_memory_scope_kind_string(
+    amdf_memory_scope_kind_t kind) {
+  switch (kind) {
+    case AMDF_MEMORY_SCOPE_KIND_SYSTEM:
+      return "system";
+    case AMDF_MEMORY_SCOPE_KIND_LOCAL:
+      return "local";
+    case AMDF_MEMORY_SCOPE_KIND_PRIVATE:
+      return "private";
+    default:
+      return "unknown";
+  }
+}
+
+// Captures allocation coordinates only after native construction fails. Scope
+// observations are advisory but distinguish physical-capacity pressure from
+// failures elsewhere in native construction without perturbing successful
+// allocations or retrying the rejected request.
+static iree_status_t iree_hal_amd_fabric_memory_annotate_create_failure(
+    const amdf_api_t* api, const iree_hal_amd_fabric_memory_options_t* options,
+    const amdf_memory_create_info_t* create_info, iree_status_t status) {
+  status = iree_status_annotate_f(
+      status,
+      "AMD allocation request: byte_length=%" PRIu64
+      " minimum_alignment=%" PRIu64
+      " profile_ordinal=%u profile_class=%u profile_roles=0x%016" PRIx64
+      " required_flags=0x%016" PRIx64
+      " host_access=0x%08x access_count=%u placement_kind=%u"
+      " placement_node=%u",
+      create_info->byte_length, create_info->minimum_alignment,
+      create_info->memory_profile_ordinal, options->profile.memory_class,
+      options->profile.roles, create_info->required_flags, options->host_access,
+      create_info->access_count, create_info->placement.kind,
+      create_info->placement.node);
+  amdf_memory_scope_info_t scope_info = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_SCOPE_INFO,
+      .structure_size = sizeof(scope_info),
+  };
+  const amdf_status_t scope_status =
+      api->memory_scope_query_info(options->scope, &scope_info);
+  if (!amdf_status_is_ok(scope_status)) {
+    return iree_status_join(
+        status,
+        IREE_HAL_AMD_STATUS_FROM_AMDF(scope_status, "memory_scope_query_info"));
+  }
+  status = iree_status_annotate_f(
+      status,
+      "AMD allocation scope: kind=%s capacity=%" PRIu64 " endpoint=%016" PRIx64
+      "%016" PRIx64 " flags=0x%08x",
+      iree_hal_amd_fabric_memory_scope_kind_string(scope_info.kind),
+      scope_info.capacity_byte_length, scope_info.physical_endpoint_id.words[0],
+      scope_info.physical_endpoint_id.words[1], scope_info.flags);
+  if (!(scope_info.flags & AMDF_MEMORY_SCOPE_FLAG_AVAILABLE_BYTES)) {
+    return iree_status_annotate_f(
+        status, "AMD allocation scope observation: unavailable");
+  }
+  amdf_memory_scope_observation_t observation = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_SCOPE_OBSERVATION,
+      .structure_size = sizeof(observation),
+  };
+  const amdf_status_t observation_status =
+      api->memory_scope_sample_observation(options->scope, &observation);
+  if (!amdf_status_is_ok(observation_status)) {
+    return iree_status_join(
+        status, IREE_HAL_AMD_STATUS_FROM_AMDF(
+                    observation_status, "memory_scope_sample_observation"));
+  }
+  return iree_status_annotate_f(
+      status,
+      "AMD allocation scope observation: capacity=%" PRIu64
+      " available=%" PRIu64,
+      observation.capacity_byte_length, observation.available_byte_length);
+}
+
 iree_status_t iree_hal_amd_fabric_memory_allocate(
     const amdf_api_t* api, const iree_hal_amd_fabric_memory_options_t* options,
     uint64_t byte_length, uint64_t alignment,
@@ -458,14 +532,18 @@ iree_status_t iree_hal_amd_fabric_memory_allocate(
   iree_hal_amd_fabric_memory_t memory = {0};
   amdf_memory_release_info_t release_info = {0};
   IREE_TRACE_ZONE_BEGIN_NAMED(z_create, "amdf_memory_create");
-  iree_status_t status = IREE_HAL_AMD_STATUS_FROM_AMDF(
-      api->memory_create(options->scope, &create_info, &memory.handle,
-                         &release_info),
-      "memory_create");
+  const amdf_status_t create_status = api->memory_create(
+      options->scope, &create_info, &memory.handle, &release_info);
+  iree_status_t status =
+      IREE_HAL_AMD_STATUS_FROM_AMDF(create_status, "memory_create");
   IREE_TRACE_ZONE_END(z_create);
   if (!amdf_status_is_ok(release_info.status)) {
     iree_hal_amd_report_failure(event_sink, IREE_SV("amd"), release_info.status,
                                 "memory_create cleanup");
+  }
+  if (!iree_status_is_ok(status)) {
+    status = iree_hal_amd_fabric_memory_annotate_create_failure(
+        api, options, &create_info, status);
   }
   if (iree_status_is_ok(status)) {
     status = iree_hal_amd_fabric_memory_prepare(api, options, &memory);

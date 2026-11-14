@@ -85,6 +85,13 @@ class GrowthTest : public ::testing::Test {
   };
 
   void SetUp() override {
+    api_.memory_scope_query_info = [](amdf_memory_scope_t*,
+                                      amdf_memory_scope_info_t* info) {
+      info->kind = AMDF_MEMORY_SCOPE_KIND_SYSTEM;
+      info->memory_profile_count = 4;
+      info->capacity_byte_length = UINT32_MAX;
+      return AMDF_STATUS_OK;
+    };
     api_.memory_create = [](amdf_memory_scope_t* scope,
                             const amdf_memory_create_info_t* info,
                             amdf_memory_t** out_memory,
@@ -174,6 +181,9 @@ class GrowthTest : public ::testing::Test {
     memory_.scope = reinterpret_cast<amdf_memory_scope_t*>(this);
     memory_.host_access =
         AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE;
+    memory_.profile.memory_class = AMDF_MEMORY_CLASS_SYSTEM;
+    memory_.profile.roles =
+        AMDF_MEMORY_PROFILE_ROLE_CREATE | AMDF_MEMORY_PROFILE_ROLE_HOST_MAP;
     memory_.profile.allocation.minimum_alignment = 8;
     memory_.profile.allocation.byte_length_granularity = 8;
     memory_.profile.allocation.maximum_byte_length = UINT32_MAX;
@@ -579,6 +589,7 @@ class ProgramGrowthTest : public GrowthTest {
                                       amdf_memory_scope_info_t* info) {
       info->kind = AMDF_MEMORY_SCOPE_KIND_SYSTEM;
       info->memory_profile_count = 1;
+      info->capacity_byte_length = UINT32_MAX;
       return AMDF_STATUS_OK;
     };
     api_.memory_scope_query_device_profile =
