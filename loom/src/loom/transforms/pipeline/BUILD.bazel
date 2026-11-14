@@ -239,6 +239,7 @@ loom_cc_test(
     deps = [
         ":control",
         ":worker_materialization",
+        "//loom/src/loom/analysis/pipeline:entries",
         "//loom/src/loom/analysis/pipeline:execution",
         "//loom/src/loom/analysis/pipeline:invocations",
         "//loom/src/loom/analysis/pipeline:resources",

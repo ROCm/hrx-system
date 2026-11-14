@@ -1087,7 +1087,7 @@ TEST_F(TargetFunctionVersionProjectionTest,
   };
   loom_pipeline_entry_scope_t* scopes[2];
   for (size_t i = 0; i < IREE_ARRAYSIZE(scopes); ++i) {
-    IREE_ASSERT_OK(loom_pipeline_entry_scope_create(
+    IREE_ASSERT_OK(loom_pipeline_entry_scope_allocate(
         i == 0 ? &resource_type : &loom_pipeline_entry_scope_type, &lifetimes,
         IREE_ARRAYSIZE(owners), &version_arena_, &scopes[i]));
   }

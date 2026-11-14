@@ -73,7 +73,7 @@ typedef struct loom_pipeline_entry_binding_t {
 // Allocates a concrete scope and copies the producer's indexed lifetime facts.
 // The caller initializes its concrete fields before publishing the scope to
 // consumers. All fields and referenced storage belong to the compilation arena.
-iree_status_t loom_pipeline_entry_scope_create(
+iree_status_t loom_pipeline_entry_scope_allocate(
     const loom_pipeline_entry_scope_type_t* type,
     const loom_pipeline_lifetimes_t* lifetimes, iree_host_size_t owner_count,
     iree_arena_allocator_t* arena, loom_pipeline_entry_scope_t** out_scope);

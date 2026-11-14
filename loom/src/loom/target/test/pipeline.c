@@ -243,7 +243,7 @@ static iree_status_t loom_test_pipeline_programs(
                .user_data = state}};
   loom_pipeline_control_function_t* functions = NULL;
   loom_pipeline_entry_scope_t* scope = NULL;
-  IREE_RETURN_IF_ERROR(loom_pipeline_entry_scope_create(
+  IREE_RETURN_IF_ERROR(loom_pipeline_entry_scope_allocate(
       &loom_pipeline_entry_scope_type, &realization->invocations.lifetimes,
       realization->invocations.count,
       realization->version_owner ? realization->version_owner->arena

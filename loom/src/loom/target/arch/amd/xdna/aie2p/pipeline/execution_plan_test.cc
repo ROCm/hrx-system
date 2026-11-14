@@ -118,7 +118,7 @@ TEST_F(ExecutionPlanTest, SourceRetirementPreservesRoutesAndPhysicalOwnership) {
       .nodes = nodes, .count = IREE_ARRAYSIZE(nodes), .owners = owners};
   IREE_ASSERT_OK(loom_pipeline_lifetimes_index(&source_arena_, &lifetimes));
   loom_pipeline_entry_scope_t* scope = nullptr;
-  IREE_ASSERT_OK(loom_pipeline_entry_scope_create(
+  IREE_ASSERT_OK(loom_pipeline_entry_scope_allocate(
       &loom_aie2p_execution_plan_type, &lifetimes, 1, &source_arena_, &scope));
   std::vector<loom_aie2p_execution_tile_t> occupancy(tile_count);
   occupancy[1] = {

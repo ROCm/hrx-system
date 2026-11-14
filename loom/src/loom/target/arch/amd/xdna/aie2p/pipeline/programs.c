@@ -182,7 +182,7 @@ iree_status_t loom_aie2p_native_emit_programs(
                                             ? realization->version_owner->arena
                                             : rewriter->arena;
   loom_pipeline_entry_scope_t* scope = NULL;
-  IREE_RETURN_IF_ERROR(loom_pipeline_entry_scope_create(
+  IREE_RETURN_IF_ERROR(loom_pipeline_entry_scope_allocate(
       &loom_aie2p_execution_plan_type, &realization->invocations.lifetimes,
       realization->invocations.count, owner_arena, &scope));
   const loom_type_t frame_type = loom_type_buffer();

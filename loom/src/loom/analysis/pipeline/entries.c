@@ -12,7 +12,7 @@ const loom_pipeline_entry_scope_type_t loom_pipeline_entry_scope_type = {
     .size = sizeof(loom_pipeline_entry_scope_t),
 };
 
-iree_status_t loom_pipeline_entry_scope_create(
+iree_status_t loom_pipeline_entry_scope_allocate(
     const loom_pipeline_entry_scope_type_t* type,
     const loom_pipeline_lifetimes_t* lifetimes, iree_host_size_t owner_count,
     iree_arena_allocator_t* arena, loom_pipeline_entry_scope_t** out_scope) {
@@ -49,7 +49,7 @@ iree_status_t loom_pipeline_entry_scope_clone(
     const loom_pipeline_entry_scope_t** out_scope) {
   *out_scope = NULL;
   loom_pipeline_entry_scope_t* scope = NULL;
-  IREE_RETURN_IF_ERROR(loom_pipeline_entry_scope_create(
+  IREE_RETURN_IF_ERROR(loom_pipeline_entry_scope_allocate(
       source->type, &source->lifetimes, source->owner_count, arena, &scope));
   if (source->type->clone) {
     IREE_RETURN_IF_ERROR(source->type->clone(source, arena, scope));
