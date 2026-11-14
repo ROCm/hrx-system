@@ -1,0 +1,39 @@
+// Copyright 2026 The HRX Authors
+// SPDX-License-Identifier: Apache-2.0
+
+// Two coalesced reads and one write per element. The neighbor crosses a
+// workgroup boundary, so the next dispatch must observe the whole producer.
+// The benchmark supplies power-of-two lengths divisible by the group width.
+kernel.def export("dependent_chain") @dependent_chain(%groups_x: index) {
+  %one = index.constant 1 : index
+  %width = index.constant 256 : index
+  kernel.launch.config workgroups(%groups_x, %one, %one) workgroup_size(%width, %one, %one) : index
+} launch(%input: buffer, %output: buffer, %count: i32, %step: i32) {
+  %group = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %width = kernel.workgroup.size<x> : index
+  %position_input = index.madd %group, %width, %lane : index
+  %length = index.cast %count : i32 to index
+  %position = index.assume %position_input [range(%position_input, 0, 2097151), lt(%position_input, %length)] : index
+  %origin = index.constant 0 : offset
+  %input_view = buffer.view %input[%origin] : buffer -> view<[%length]xi32>
+  %output_view = buffer.view %output[%origin] : buffer -> view<[%length]xi32>
+  %one = scalar.constant 1 : i32
+  %thirty_one = scalar.constant 31 : i32
+  %distance = scalar.constant 257 : i32
+  %mask = scalar.subi %count, %one : i32
+  %position_i32 = index.cast %position : index to i32
+  %shifted = scalar.addi %position_i32, %distance : i32
+  %neighbor_i32 = scalar.andi %shifted, %mask : i32
+  %neighbor_input = index.cast %neighbor_i32 : i32 to index
+  %neighbor = index.assume %neighbor_input [range(%neighbor_input, 0, 2097151), lt(%neighbor_input, %length)] : index
+  %value = view.load %input_view[%position] : view<[%length]xi32> -> i32
+  %adjacent = view.load %input_view[%neighbor] : view<[%length]xi32> -> i32
+  %left = scalar.shli %adjacent, %one : i32
+  %right = scalar.shrui %adjacent, %thirty_one : i32
+  %rotated = scalar.ori %left, %right : i32
+  %mixed = scalar.xori %value, %rotated : i32
+  %result = scalar.addi %mixed, %step : i32
+  view.store %result, %output_view[%position] : i32, view<[%length]xi32>
+  kernel.return
+}

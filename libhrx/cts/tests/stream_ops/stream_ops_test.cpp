@@ -75,12 +75,10 @@ TEST_CASE_METHOD(HrxTestFixture, "Stream copy buffer", "[stream_ops][copy]") {
       stream, 512, HRX_MEMORY_TYPE_HOST_LOCAL | HRX_MEMORY_TYPE_DEVICE_VISIBLE,
       HRX_BUFFER_USAGE_DEFAULT | HRX_BUFFER_USAGE_MAPPING_SCOPED, &dst));
 
-  // Fill source and flush (intra-CB RAW hazard requires separate submission).
+  // Stream ordering makes the fill visible to the copy in the same recording.
   uint32_t pattern = 0x12345678;
   REQUIRE_OK(
       hrx().stream_fill_buffer(stream, src, 0, 512, &pattern, sizeof(pattern)));
-  REQUIRE_OK(hrx().stream_flush(stream));
-  REQUIRE_OK(hrx().stream_synchronize(stream));
 
   // Copy src -> dst.
   REQUIRE_OK(hrx().stream_copy_buffer(stream, src, 0, dst, 0, 512));

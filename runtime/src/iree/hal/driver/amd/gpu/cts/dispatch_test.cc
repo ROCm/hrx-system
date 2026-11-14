@@ -788,7 +788,7 @@ TEST_P(GpuNativeDispatchTest,
 }
 
 TEST_P(GpuNativeDispatchTest,
-       ResidentProgramsRetainBindingsAcrossChunksAndQueues) {
+       RecordedProgramsRetainBindingsAcrossChunksAndQueues) {
   options_.queue.ring_byte_length = 4096;
   options_.queue.argument_capacity = 8;
   options_.queue.retirement_capacity = 4;
@@ -936,47 +936,34 @@ TEST_P(GpuNativeDispatchTest,
     IREE_ASSERT_OK(iree_hal_command_buffer_end(recording));
     if (command_type() == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL) {
       auto* program = iree_hal_amd_gpu_aql_command_buffer_program(recording);
-      EXPECT_EQ(program->host_template != nullptr, count <= 32);
-      EXPECT_EQ(program->resident.pool == nullptr, count <= 32);
-      if (program->host_template) {
-        const iree_hal_amd_gpu_aql_function_t* native_function = nullptr;
-        IREE_ASSERT_OK(iree_hal_amd_gpu_executable_lookup_aql_for_queue(
-            executable, function, 0, &native_function));
-        const auto* layout = native_function->base.kernarg;
-        const uint64_t expected_bytes =
-            (count - 1) *
-                iree_align_uint64(layout->byte_length, layout->alignment) +
-            layout->byte_length;
-        // Packet preparation and dense CPU fixup values consume no GPU bytes.
-        const iree_hal_amd_gpu_aql_command_invocation_t invocation = {
-            .program = program,
-        };
-        EXPECT_EQ(iree_hal_amd_gpu_aql_execute_argument_length(&invocation),
-                  expected_bytes);
-        EXPECT_EQ(program->host_template->data_offset, count * 64u);
-      } else {
-        iree_hal_amd_gpu_aql_command_invocation_t invocation = {
-            .program = program,
-        };
-        EXPECT_EQ(iree_hal_amd_gpu_aql_execute_argument_length(&invocation),
-                  sizeof(iree_hal_amd_gpu_aql_program_arguments_t));
-        invocation.block_ordinal = 1;
-        EXPECT_EQ(iree_hal_amd_gpu_aql_execute_argument_length(&invocation),
-                  sizeof(iree_hal_amd_gpu_aql_materialize_arguments_t));
-      }
+      ASSERT_NE(program->host_template, nullptr);
+      EXPECT_EQ(program->resident.pool, nullptr);
+      const iree_hal_amd_gpu_aql_function_t* native_function = nullptr;
+      IREE_ASSERT_OK(iree_hal_amd_gpu_executable_lookup_aql_for_queue(
+          executable, function, 0, &native_function));
+      const auto* layout = native_function->base.kernarg;
+      const uint64_t expected_bytes =
+          (program->blocks[0].packet_count - 1) *
+              iree_align_uint64(layout->byte_length, layout->alignment) +
+          layout->byte_length;
+      // Packet preparation and dense CPU fixup values consume no GPU bytes.
+      const iree_hal_amd_gpu_aql_command_invocation_t invocation = {
+          .program = program,
+      };
+      EXPECT_EQ(iree_hal_amd_gpu_aql_execute_argument_length(&invocation),
+                expected_bytes);
+      EXPECT_EQ(program->host_template->data_offset, count * 64u);
       uint32_t dispatch_index = 0;
       for (uint32_t i = 0; i < program->block_count; ++i) {
         const auto& block = program->blocks[i];
         const auto* packets =
             reinterpret_cast<const iree_hal_amd_gpu_aql_packet_t*>(
-                (program->host_template ? reinterpret_cast<const uint8_t*>(
-                                              program->host_template + 1)
-                                        : program->resident.contents.data) +
+                reinterpret_cast<const uint8_t*>(program->host_template + 1) +
                 block.offset);
         for (uint32_t j = 0; j < block.packet_count; ++j, ++dispatch_index) {
           const uint32_t acquire_scope =
-              dispatch_index == 0 ? IREE_HAL_AMD_GPU_AQL_HEADER_ACQUIRE_SYSTEM
-                                  : IREE_HAL_AMD_GPU_AQL_HEADER_ACQUIRE_AGENT;
+              j == 0 ? IREE_HAL_AMD_GPU_AQL_HEADER_ACQUIRE_SYSTEM
+                     : IREE_HAL_AMD_GPU_AQL_HEADER_ACQUIRE_AGENT;
           const uint32_t release_scope =
               dispatch_index + 1 == count
                   ? IREE_HAL_AMD_GPU_AQL_HEADER_RELEASE_SYSTEM
@@ -1623,26 +1610,21 @@ TEST_P(GpuNativeDispatchTest, FixedArgumentsSurviveQueuedReplayAndTrim) {
       if (dispatch_count == 1) {
         immutable_arguments = program->constants.page != nullptr;
       }
-      if (dispatch_count <= (immutable_arguments ? 128u : 32u)) {
-        ASSERT_NE(program->host_template, nullptr);
-        ASSERT_EQ(program->resident.pool, nullptr);
-        ASSERT_EQ(program->constants.page != nullptr, immutable_arguments);
-        if (immutable_arguments) {
-          EXPECT_EQ(program->host_template->fixup_count, 0u);
-          EXPECT_EQ(program->host_template->byte_length, dispatch_count * 64);
-          iree_hal_amd_gpu_aql_command_invocation_t invocation;
-          IREE_ASSERT_OK(iree_hal_amd_gpu_aql_command_invocation_initialize(
-              recording, {}, nullptr, 0, &invocation));
-          EXPECT_EQ(iree_hal_amd_gpu_aql_execute_argument_length(&invocation),
-                    0u);
-          iree_hal_amd_gpu_aql_command_invocation_deinitialize(&invocation);
-        }
-      } else {
-        ASSERT_EQ(program->host_template, nullptr);
-        ASSERT_GT(program->resident.fixup_count, 0u);
-        if (dispatch_count == 257) {
-          ASSERT_GT(program->block_count, 1u);
-        }
+      ASSERT_NE(program->host_template, nullptr);
+      ASSERT_EQ(program->resident.pool, nullptr);
+      ASSERT_EQ(program->constants.page != nullptr, immutable_arguments);
+      if (dispatch_count == 257) {
+        ASSERT_GT(program->block_count, 1u);
+      }
+      if (immutable_arguments) {
+        EXPECT_EQ(program->host_template->fixup_count, 0u);
+        EXPECT_EQ(program->host_template->byte_length, dispatch_count * 64);
+        iree_hal_amd_gpu_aql_command_invocation_t invocation;
+        IREE_ASSERT_OK(iree_hal_amd_gpu_aql_command_invocation_initialize(
+            recording, {}, nullptr, 0, &invocation));
+        EXPECT_EQ(iree_hal_amd_gpu_aql_execute_argument_length(&invocation),
+                  0u);
+        iree_hal_amd_gpu_aql_command_invocation_deinitialize(&invocation);
       }
     }
     if (command_type() == AMDF_QUEUE_COMMAND_TYPE_GPU_PM4) {

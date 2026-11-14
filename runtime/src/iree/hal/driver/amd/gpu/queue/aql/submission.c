@@ -274,6 +274,14 @@ iree_status_t iree_hal_amd_gpu_aql_submission_execute(
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "AQL binding capture overflows");
   }
+  const iree_hal_amd_gpu_aql_command_program_t* program =
+      iree_hal_amd_gpu_aql_command_buffer_program(command_buffer);
+  if (program->host_template && program->host_template->fixup_count &&
+      !iree_host_size_checked_mul_add(payload_length, program->value_count,
+                                      sizeof(uint64_t), &payload_length)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "AQL input capture overflows");
+  }
   iree_hal_amd_gpu_aql_submission_t* submission = NULL;
   void* payload = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_submission_acquire(
