@@ -189,9 +189,10 @@ static iree_status_t loom_scf_unroll_build_movement_scopes(
       if (iree_all_bits_set(scopes[effect],
                             LOOM_SCF_UNROLL_SCOPE_INVARIANT_ROOT |
                                 LOOM_SCF_UNROLL_SCOPE_INVARIANT_RANGE) &&
-          loom_view_region_table_root_is_stable(
+          loom_view_region_table_access_is_stable(
               &movement->view_regions, source->root_value_id,
-              source->alias_scope_id, source->memory_space)) {
+              source->alias_scope_id, source->restrict_access,
+              source->memory_space)) {
         varying = false;
       }
     }

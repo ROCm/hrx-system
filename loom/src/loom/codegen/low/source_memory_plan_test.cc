@@ -233,6 +233,11 @@ TEST_F(SourceMemoryPlanTest, MaterializedCarrierKeepsStorageProvenance) {
       .root_value_id = root,
       .buffer_value_id = LOOM_VALUE_ID_INVALID,
       .alias_scope_id = 7,
+      .restrict_access =
+          {
+              .domain_id = loom_value_fact_restrict_id_from_value(root),
+              .scope_id = loom_value_fact_restrict_id_from_value(carrier),
+          },
       .static_element_byte_count = 4,
       .memory_space = LOOM_VALUE_FACT_MEMORY_SPACE_GLOBAL,
   };
@@ -251,6 +256,10 @@ TEST_F(SourceMemoryPlanTest, MaterializedCarrierKeepsStorageProvenance) {
     ASSERT_NE(plan.materialized_base_region, nullptr);
     EXPECT_EQ(plan.root_value_id, root);
     EXPECT_EQ(plan.alias_scope_id, reference.alias_scope_id);
+    EXPECT_EQ(plan.restrict_access.domain_id,
+              reference.restrict_access.domain_id);
+    EXPECT_EQ(plan.restrict_access.scope_id,
+              reference.restrict_access.scope_id);
     EXPECT_EQ(loom_low_source_memory_access_address_value_id(&plan), carrier);
     EXPECT_EQ(plan.static_byte_offset, indices[i] * 4);
     EXPECT_EQ(plan.dynamic_term_count, 0);

@@ -95,20 +95,37 @@ iree_status_t loom_view_region_table_initialize(
     const loom_value_facts_t facts =
         loom_value_fact_table_lookup(fact_table, value_id);
     loom_value_id_t root = LOOM_VALUE_ID_INVALID;
+    loom_value_fact_restrict_access_t restrict_access = {0};
     loom_value_fact_buffer_reference_t buffer;
     loom_value_fact_view_reference_t view;
     if (loom_value_facts_query_buffer_reference(&fact_table->context, facts,
                                                 &buffer)) {
       root =
           loom_value_fact_buffer_reference_resolve_root_value(buffer, value_id);
+      restrict_access = buffer.restrict_access;
     } else if (loom_value_facts_query_view_reference(&fact_table->context,
                                                      facts, &view)) {
       root = view.root_value_id;
+      restrict_access = view.restrict_access;
     }
     if (root != LOOM_VALUE_ID_INVALID) {
       loom_value_ordinal_t root_ordinal;
       IREE_RETURN_IF_ERROR(loom_local_value_domain_register_value(
           value_domain, root, &root_ordinal));
+    }
+    if (restrict_access.domain_id != 0) {
+      out_table->flags |= LOOM_VIEW_REGION_TABLE_RESTRICT_ACCESS;
+      loom_value_ordinal_t domain_ordinal;
+      IREE_RETURN_IF_ERROR(loom_local_value_domain_register_value(
+          value_domain, (loom_value_id_t)(restrict_access.domain_id - 1u),
+          &domain_ordinal));
+    }
+    if (restrict_access.scope_id != 0 &&
+        restrict_access.scope_id != restrict_access.domain_id) {
+      loom_value_ordinal_t scope_ordinal;
+      IREE_RETURN_IF_ERROR(loom_local_value_domain_register_value(
+          value_domain, (loom_value_id_t)(restrict_access.scope_id - 1u),
+          &scope_ordinal));
     }
   }
   const iree_host_size_t value_count = value_domain->value_count;
@@ -1327,9 +1344,73 @@ static void loom_view_region_analyze_buffer_type_uses(
   }
 }
 
-static void loom_view_region_add_root_access(
+static iree_status_t loom_view_region_prepare_restrict_writes(
+    loom_view_region_table_t* table) {
+  if (table->restrict_writes) {
+    return iree_ok_status();
+  }
+  const iree_host_size_t value_count = table->value_domain->value_count;
+  const iree_host_size_t storage_size =
+      sizeof(*table->restrict_writes) + 2u * value_count;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate(table->expression_context->arena,
+                                           storage_size,
+                                           (void**)&table->restrict_writes));
+  memset(table->restrict_writes, 0, storage_size);
+  table->restrict_writes->spaces_by_scope_ordinal =
+      (uint8_t*)(table->restrict_writes + 1);
+  table->restrict_writes->unscoped_spaces_by_domain_ordinal =
+      table->restrict_writes->spaces_by_scope_ordinal + value_count;
+  for (uint32_t i = 0; i < LOOM_VALUE_FACT_MEMORY_SPACE_COUNT_; ++i) {
+    if (table->described_write_memory_spaces & (1u << i)) {
+      table->restrict_writes->domain_ids_by_memory_space[i] = UINT32_MAX;
+    }
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_view_region_record_restrict_write(
+    loom_view_region_table_t* table,
+    loom_value_fact_restrict_access_t restrict_access, uint32_t write_spaces) {
+  if (restrict_access.domain_id != 0) {
+    IREE_RETURN_IF_ERROR(loom_view_region_prepare_restrict_writes(table));
+    for (uint32_t i = 0; i < LOOM_VALUE_FACT_MEMORY_SPACE_COUNT_; ++i) {
+      if (!(write_spaces & (1u << i))) {
+        continue;
+      }
+      uint32_t* domain_id =
+          &table->restrict_writes->domain_ids_by_memory_space[i];
+      if (*domain_id == 0) {
+        *domain_id = restrict_access.domain_id;
+      } else if (*domain_id != restrict_access.domain_id) {
+        *domain_id = UINT32_MAX;
+      }
+    }
+    const uint32_t identity_id = restrict_access.scope_id != 0
+                                     ? restrict_access.scope_id
+                                     : restrict_access.domain_id;
+    const loom_value_ordinal_t identity_ordinal =
+        loom_local_value_domain_ordinal(table->value_domain,
+                                        (loom_value_id_t)(identity_id - 1u));
+    uint8_t* spaces =
+        restrict_access.scope_id != 0
+            ? table->restrict_writes->spaces_by_scope_ordinal
+            : table->restrict_writes->unscoped_spaces_by_domain_ordinal;
+    spaces[identity_ordinal] |= (uint8_t)write_spaces;
+  } else if (table->restrict_writes) {
+    for (uint32_t i = 0; i < LOOM_VALUE_FACT_MEMORY_SPACE_COUNT_; ++i) {
+      if (write_spaces & (1u << i)) {
+        table->restrict_writes->domain_ids_by_memory_space[i] = UINT32_MAX;
+      }
+    }
+  }
+  table->described_write_memory_spaces |= write_spaces;
+  return iree_ok_status();
+}
+
+static iree_status_t loom_view_region_add_root_access(
     loom_view_region_table_t* table, loom_value_id_t root_value_id,
     loom_value_fact_alias_scope_id_t alias_scope_id,
+    loom_value_fact_restrict_access_t restrict_access,
     loom_value_fact_memory_space_t memory_space, loom_view_access_flags_t flags,
     uint32_t* prior_write_spaces) {
   const loom_value_ordinal_t ordinal =
@@ -1338,17 +1419,22 @@ static void loom_view_region_add_root_access(
     table->storage_flags_by_value_ordinal[ordinal] |= flags;
   }
   if (!iree_any_bit_set(flags, LOOM_VIEW_ACCESS_WRITE)) {
-    return;
+    return iree_ok_status();
   }
   const uint32_t write_spaces =
       loom_view_region_overlapping_memory_spaces(memory_space);
+  if (iree_any_bit_set(table->flags, LOOM_VIEW_REGION_TABLE_RESTRICT_ACCESS)) {
+    IREE_RETURN_IF_ERROR(loom_view_region_record_restrict_write(
+        table, restrict_access, write_spaces));
+  }
   *prior_write_spaces |= write_spaces;
   if (ordinal == LOOM_VALUE_ORDINAL_INVALID ||
       alias_scope_id == LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE) {
-    table->interference_memory_spaces |= write_spaces;
+    table->incomparable_write_memory_spaces |= write_spaces;
   } else if (!loom_view_region_value_is_invariant(table, root_value_id)) {
     table->varying_root_write_memory_spaces |= write_spaces;
   }
+  return iree_ok_status();
 }
 
 static iree_status_t loom_view_region_analyze_operand_access(
@@ -1358,9 +1444,10 @@ static iree_status_t loom_view_region_analyze_operand_access(
   IREE_RETURN_IF_ERROR(loom_view_region_table_get(table, operand, &region));
   if (region) {
     table->regions[region->region_id].access_flags |= flags;
-    loom_view_region_add_root_access(
+    IREE_RETURN_IF_ERROR(loom_view_region_add_root_access(
         table, region->root_value_id, region->alias_scope_id,
-        region->memory_space, flags, prior_write_spaces);
+        region->restrict_access, region->memory_space, flags,
+        prior_write_spaces));
   } else {
     // Opaque storage capabilities can carry either buffer or view references.
     // Their effects belong to the backing allocation, just like typed views.
@@ -1379,13 +1466,14 @@ static iree_status_t loom_view_region_analyze_operand_access(
       reference.root_value_id =
           loom_value_fact_view_reference_resolve_root_value(view, operand);
       reference.alias_scope_id = view.alias_scope_id;
+      reference.restrict_access = view.restrict_access;
       reference.memory_space = view.memory_space;
     }
-    loom_view_region_add_root_access(
+    IREE_RETURN_IF_ERROR(loom_view_region_add_root_access(
         table,
         loom_value_fact_buffer_reference_resolve_root_value(reference, operand),
-        reference.alias_scope_id, reference.memory_space, flags,
-        prior_write_spaces);
+        reference.alias_scope_id, reference.restrict_access,
+        reference.memory_space, flags, prior_write_spaces));
   }
   return iree_ok_status();
 }
@@ -1495,6 +1583,7 @@ static void loom_view_region_classify_entry_read(
   }
   const uint32_t clobbered_spaces = prior_write_spaces |
                                     table->interference_memory_spaces |
+                                    table->incomparable_write_memory_spaces |
                                     table->communication_memory_spaces;
   const loom_memory_access_t access = {.op = op, .op_vtable = vtable};
   if (iree_any_bit_set(loom_memory_access_flags(access),
@@ -1543,10 +1632,12 @@ static bool loom_view_region_repeated_op_is_invariant(
     const loom_view_region_t* source = NULL;
     loom_value_id_t root;
     loom_value_fact_alias_scope_id_t alias_scope;
+    loom_value_fact_restrict_access_t restrict_access;
     loom_value_fact_memory_space_t memory_space;
     if (loom_view_region_table_try_lookup(table, source_value, &source)) {
       root = source->root_value_id;
       alias_scope = source->alias_scope_id;
+      restrict_access = source->restrict_access;
       memory_space = source->memory_space;
     } else {
       loom_value_fact_buffer_reference_t reference;
@@ -1558,13 +1649,14 @@ static bool loom_view_region_repeated_op_is_invariant(
       root = loom_value_fact_buffer_reference_resolve_root_value(reference,
                                                                  source_value);
       alias_scope = reference.alias_scope_id;
+      restrict_access = reference.restrict_access;
       memory_space = reference.memory_space;
     }
     // Access aggregation is complete. A fixed root can use same-execution
     // noalias against every written root, including roots that still vary.
     if (!loom_view_region_value_is_invariant(table, root) ||
-        !loom_view_region_table_root_is_stable(table, root, alias_scope,
-                                               memory_space)) {
+        !loom_view_region_table_access_is_stable(
+            table, root, alias_scope, restrict_access, memory_space)) {
       return false;
     }
   }
@@ -1911,9 +2003,10 @@ bool loom_view_region_table_reads_entry_contents(
                           LOOM_VIEW_STORAGE_READS_ENTRY_CONTENTS);
 }
 
-bool loom_view_region_table_root_is_stable(
+bool loom_view_region_table_access_is_stable(
     const loom_view_region_table_t* table, loom_value_id_t root_value_id,
     loom_value_fact_alias_scope_id_t alias_scope_id,
+    loom_value_fact_restrict_access_t restrict_access,
     loom_value_fact_memory_space_t memory_space) {
   const loom_value_ordinal_t ordinal =
       loom_local_value_domain_try_ordinal(table->value_domain, root_value_id);
@@ -1924,14 +2017,36 @@ bool loom_view_region_table_root_is_stable(
       iree_any_bit_set(flags, LOOM_VIEW_ACCESS_WRITE)) {
     return false;
   }
-  return memory_space == LOOM_VALUE_FACT_MEMORY_SPACE_CONSTANT ||
-         (alias_scope_id != LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE &&
-          !((table->interference_memory_spaces |
-             table->communication_memory_spaces) &
-            (1u << memory_space)) &&
-          (ordinal >= table->value_domain->definition_count ||
-           iree_any_bit_set(flags, LOOM_VIEW_STORAGE_INVARIANT) ||
-           !(table->varying_root_write_memory_spaces & (1u << memory_space))));
+  if (memory_space == LOOM_VALUE_FACT_MEMORY_SPACE_CONSTANT) {
+    return true;
+  }
+  const uint32_t memory_space_bit = 1u << memory_space;
+  if ((table->interference_memory_spaces | table->communication_memory_spaces) &
+      memory_space_bit) {
+    return false;
+  }
+  if (alias_scope_id != LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE &&
+      !(table->incomparable_write_memory_spaces & memory_space_bit) &&
+      (ordinal >= table->value_domain->definition_count ||
+       iree_any_bit_set(flags, LOOM_VIEW_STORAGE_INVARIANT) ||
+       !(table->varying_root_write_memory_spaces & memory_space_bit))) {
+    return true;
+  }
+  if (restrict_access.domain_id == 0 || !table->restrict_writes ||
+      table->restrict_writes->domain_ids_by_memory_space[memory_space] !=
+          restrict_access.domain_id) {
+    return false;
+  }
+  const uint32_t identity_id = restrict_access.scope_id != 0
+                                   ? restrict_access.scope_id
+                                   : restrict_access.domain_id;
+  const loom_value_ordinal_t identity_ordinal = loom_local_value_domain_ordinal(
+      table->value_domain, (loom_value_id_t)(identity_id - 1u));
+  const uint8_t* write_spaces =
+      restrict_access.scope_id != 0
+          ? table->restrict_writes->spaces_by_scope_ordinal
+          : table->restrict_writes->unscoped_spaces_by_domain_ordinal;
+  return !(write_spaces[identity_ordinal] & memory_space_bit);
 }
 
 bool loom_view_memory_spaces_are_disjoint(
