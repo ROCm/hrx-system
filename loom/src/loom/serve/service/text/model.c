@@ -1343,14 +1343,15 @@ iree_status_t loom_serve_text_model_submit_epoch(
                               "epoch exceeds request completion reservation");
     }
   }
+  const iree_host_size_t next_packet_capacity =
+      continuation ? model->shapes[continuation->shape_index].token_capacity
+                   : 0;
   loom_serve_text_media_epoch_t media = {0};
   if (has_media_input) {
     IREE_RETURN_IF_ERROR(loom_serve_text_media_epoch_initialize(
         span_count, spans, shape.token_capacity,
         continuation ? continuation->span_count : 0,
-        continuation ? continuation->spans : NULL,
-        continuation ? model->shapes[continuation->shape_index].token_capacity
-                     : 0,
+        continuation ? continuation->spans : NULL, next_packet_capacity,
         model->host_allocator, &media));
   }
   iree_status_t status = iree_ok_status();
@@ -1422,9 +1423,8 @@ iree_status_t loom_serve_text_model_submit_epoch(
       iree_vm_variant_from_i32((int32_t)input_count),
       iree_vm_variant_from_i32((int32_t)invocation_media->first_feature_count),
       iree_vm_variant_from_i32((int32_t)invocation_media->next_feature_count),
-      iree_vm_variant_from_i32(
-          (int32_t)invocation_media->first_packet_capacity),
-      iree_vm_variant_from_i32((int32_t)invocation_media->next_packet_capacity),
+      iree_vm_variant_from_i32((int32_t)shape.token_capacity),
+      iree_vm_variant_from_i32((int32_t)next_packet_capacity),
       iree_vm_variant_from_i32(model->source.eos_token),
       iree_vm_buffer_variant_from_ptr_borrowed(
           &model->source.vm_types,

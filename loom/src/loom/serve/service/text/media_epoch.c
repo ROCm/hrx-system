@@ -231,8 +231,6 @@ iree_status_t loom_serve_text_media_epoch_initialize(
       .host_allocator = host_allocator,
       .first_feature_count = first_feature_count,
       .next_feature_count = (uint32_t)feature_count - first_feature_count,
-      .first_packet_capacity = (uint32_t)first_packet_capacity,
-      .next_packet_capacity = (uint32_t)next_packet_capacity,
       .device_length = (uint32_t)packet_length,
   };
   iree_status_t status = iree_vm_buffer_create(

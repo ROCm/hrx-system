@@ -616,8 +616,9 @@ func.def public @encode_epoch(%control_state: buffer, %plan: buffer, %inputs: bu
   %c0 = scalar.constant 0 : i32
   view.store %first_count, %header[0] : i32, view<4xi32>
   view.store %eos, %header[1] : i32, view<4xi32>
-  view.store %c0, %header[2] : i32, view<4xi32>
-  view.store %c0, %header[3] : i32, view<4xi32>
+  // Retain prepared geometry independently of the live plan's token counts.
+  view.store %first_packet_capacity, %header[2] : i32, view<4xi32>
+  view.store %next_packet_capacity, %header[3] : i32, view<4xi32>
   buffer.copy %plan[%origin], %metadata[%header_bytes], %plan_bytes
   %media_count = scalar.addi %first_media_count, %next_media_count : i32
   %has_media = scalar.cmpi ne, %media_count, %c0 : i32
