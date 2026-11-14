@@ -13,9 +13,12 @@
 #include "loom/ops/cfg/ops.h"
 #include "loom/ops/channel/ops.h"
 #include "loom/ops/func/ops.h"
+#include "loom/ops/index/carrier.h"
 #include "loom/ops/pipeline/ops.h"
+#include "loom/ops/special_values.h"
 #include "loom/rewrite/materialize.h"
 #include "loom/util/adaptive_sort.h"
+#include "loom/util/predicate_facts.h"
 
 typedef enum loom_pipeline_control_site_kind_e {
   LOOM_PIPELINE_CONTROL_STRAND,
@@ -445,6 +448,87 @@ static iree_status_t loom_pipeline_control_collective(
   return loom_rewriter_erase(rewriter, operations[0]);
 }
 
+// A projected controller has the same captured values as its construction.
+// Preserve its admitted constants and numeric preconditions before removing
+// unused formals; native calls cannot rely on later inlining to recover them.
+static iree_status_t loom_pipeline_control_materialize_arguments(
+    loom_rewriter_t* rewriter, const loom_pipeline_invocation_t* invocation,
+    const loom_value_id_t* source_arguments, uint16_t argument_count,
+    loom_op_t* function) {
+  loom_module_t* module = rewriter->module;
+  loom_block_t* entry = loom_region_entry_block(loom_func_def_body(function));
+  loom_builder_set_before(&rewriter->builder, entry->first_op);
+  const loom_op_t* const* captures = invocation->arguments.literal_captures;
+  loom_ir_remap_t literals;
+  if (captures) {
+    IREE_RETURN_IF_ERROR(loom_ir_remap_initialize(
+        module, module, rewriter->arena, NULL, &literals));
+  }
+  loom_predicate_t* predicates = NULL;
+  iree_host_size_t predicate_count = 0;
+  iree_host_size_t predicate_capacity = 0;
+  for (uint16_t i = 0; i < argument_count; ++i) {
+    const loom_value_id_t argument = entry->arg_ids[i];
+    if (!loom_module_value_has_uses(module, argument)) {
+      continue;
+    }
+    const loom_type_t type = loom_module_value_type(module, argument);
+    const loom_value_facts_t facts =
+        loom_value_fact_table_lookup(invocation->facts, source_arguments[i]);
+    // A body value cannot replace an identity used by the signature's types.
+    // Such an argument retains its ABI slot and receives a precondition below.
+    if (!loom_module_value_has_type_uses(module, argument)) {
+      loom_value_id_t constant = LOOM_VALUE_ID_INVALID;
+      if (loom_value_facts_can_materialize_constant(facts, type)) {
+        IREE_RETURN_IF_ERROR(loom_constant_build(
+            &rewriter->builder, facts, type, function->location, &constant));
+      } else if (captures && captures[i]) {
+        loom_op_t* literal = NULL;
+        IREE_RETURN_IF_ERROR(loom_ir_clone_op(&rewriter->builder, captures[i],
+                                              &literals, &literal));
+        constant = loom_op_results(literal)[0];
+      }
+      if (constant != LOOM_VALUE_ID_INVALID) {
+        IREE_RETURN_IF_ERROR(
+            loom_rewriter_replace_all_uses_with(rewriter, argument, constant));
+        continue;
+      }
+    }
+    int64_t domain_low = 0, domain_high = 0;
+    if (!loom_type_is_scalar(type) ||
+        !loom_value_facts_scalar_type_domain(loom_type_element_type(type),
+                                             &domain_low, &domain_high)) {
+      continue;
+    }
+    loom_predicate_t refinements[LOOM_VALUE_FACT_INTEGER_REFINEMENT_CAPACITY];
+    const uint16_t count = loom_value_facts_export_integer_refinements(
+        argument,
+        loom_index_integer_carrier_domain_facts(&invocation->facts->context,
+                                                loom_type_element_type(type)),
+        facts, refinements, IREE_ARRAYSIZE(refinements));
+    if (count) {
+      IREE_RETURN_IF_ERROR(iree_arena_grow_array(
+          &module->arena, predicate_count, predicate_count + count,
+          sizeof(*predicates), &predicate_capacity, (void**)&predicates));
+      memcpy(predicates + predicate_count, refinements,
+             count * sizeof(*refinements));
+      predicate_count += count;
+    }
+  }
+  if (predicate_count > UINT16_MAX) {
+    return iree_make_status(
+        IREE_STATUS_RESOURCE_EXHAUSTED,
+        "pipeline argument refinements exceed the predicate limit");
+  }
+  if (predicate_count) {
+    return loom_rewriter_set_attr(
+        rewriter, function,
+        loom_func_like_cast(module, function).vtable->predicates_attr_index,
+        loom_attr_predicate_list(predicates, (uint16_t)predicate_count));
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_pipeline_control_project(
     loom_rewriter_t* rewriter, const loom_pipeline_realization_t* realization,
     const loom_pipeline_execution_t* execution,
@@ -662,6 +746,8 @@ static iree_status_t loom_pipeline_control_project(
       }
     }
   }
+  IREE_RETURN_IF_ERROR(loom_pipeline_control_materialize_arguments(
+      rewriter, invocation, source_arguments, source_count, function));
   const loom_func_like_t callable = loom_func_like_cast(module, function);
   IREE_RETURN_IF_ERROR(loom_rewriter_seed_function(rewriter, callable));
   loom_op_t* dead = NULL;

@@ -264,7 +264,8 @@ class PipelineRealizationTest : public ::testing::Test {
         .worker = Worker,
         .programs = Programs,
         .entry = Entry,
-        .user_data = this};
+        .user_data = this,
+    };
     IREE_ASSERT_OK(loom_pipeline_realize_invocations(
         &pass_, module_, &invocations_, source_workers_, &snapshot_,
         &callback));
