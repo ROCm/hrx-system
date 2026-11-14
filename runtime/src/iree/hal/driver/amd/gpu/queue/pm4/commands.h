@@ -214,6 +214,52 @@ uint32_t* iree_hal_amd_gpu_pm4_emit_write(uint32_t* words,
                                           uint32_t value_count,
                                           const uint32_t* values);
 
+// Emits 2 + value_count DWORDs of SET_UCONFIG_REG to consecutive user-config
+// registers. first_register is a register byte address in the UCONFIG bank,
+// [0x30000, 0x40000). Values are copied now. User-config state is device-wide,
+// not queue context: the owner serializes every writer of the register and
+// restores what it changed.
+uint32_t* iree_hal_amd_gpu_pm4_emit_uconfig_registers(uint32_t* words,
+                                                      uint32_t first_register,
+                                                      uint32_t value_count,
+                                                      const uint32_t* values);
+
+// Emits six DWORDs of confirmed COPY_DATA from one 32-bit register to an
+// aligned DWORD destination through TC/L2. The register is a byte address read
+// through the performance-register source, which also serves the thread-trace
+// and perfmon result registers. The read observes the instance selected by the
+// target's index register. A register MEC cannot read stalls the queue; the
+// caller admits only registers qualified for this path.
+uint32_t* iree_hal_amd_gpu_pm4_emit_copy_register32(uint32_t* words,
+                                                    uint32_t register_address,
+                                                    uint64_t target_address);
+
+// Emits two DWORDs of EVENT_WRITE with event index zero. event_type is the
+// target's VGT event number; index-specific events such as CS_PARTIAL_FLUSH
+// keep their dedicated writers.
+uint32_t* iree_hal_amd_gpu_pm4_emit_event(uint32_t* words, uint32_t event_type);
+
+// Emits seven DWORDs of MEC WAIT_REG_MEM polling a register byte address in
+// register space, without ACE offload. The reference is already restricted to
+// the mask. An unsatisfied condition holds the queue with no timeout, so the
+// caller only waits on conditions the hardware is certain to reach.
+uint32_t* iree_hal_amd_gpu_pm4_emit_wait_register32(
+    uint32_t* words, uint32_t register_address, uint32_t reference,
+    uint32_t mask, iree_hal_amd_gpu_pm4_comparison_t comparison);
+
+// Emits three DWORDs selecting one shader engine, array zero, with instance
+// broadcast, through the target's graphics index register. Later per-engine
+// register accesses on this queue address that engine until restored.
+uint32_t* iree_hal_amd_gpu_pm4_emit_engine_select(uint32_t* words,
+                                                  uint32_t index_register,
+                                                  uint32_t shader_engine);
+
+// Emits three DWORDs restoring engine, array and instance broadcast through
+// the target's graphics index register. Every select is paired with this
+// restore before the publication ends.
+uint32_t* iree_hal_amd_gpu_pm4_emit_engine_broadcast(uint32_t* words,
+                                                     uint32_t index_register);
+
 // Emits a NOP occupying 2..16385 DWORDs, initializing the entire extent.
 // Recording and ring owners choose padding and account for it before calling
 // the writer.

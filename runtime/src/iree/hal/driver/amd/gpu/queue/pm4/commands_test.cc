@@ -256,6 +256,47 @@ TEST_F(CommandsTest, WriteCapturesOneOrSeveralWords) {
           0x00100200, 0x10, 0x00005678, 0x12345678, 0x9abcdef0, 0, 0xffffffff});
 }
 
+TEST_F(CommandsTest, UserConfigRegistersUseTheirOwnBankOffset) {
+  const uint32_t token_mask = 0x003f0683;
+  auto* end = iree_hal_amd_gpu_pm4_emit_uconfig_registers(words(), 0x367b8, 1,
+                                                          &token_mask);
+  const uint32_t size_and_base[] = {0x00010008, 0x12345678};
+  end = iree_hal_amd_gpu_pm4_emit_uconfig_registers(end, 0x367a0, 2,
+                                                    size_and_base);
+  Expect(end, {0xc0017900, 0x000019ee, 0x003f0683, 0xc0027900, 0x000019e8,
+               0x00010008, 0x12345678});
+}
+
+TEST_F(CommandsTest, RegisterCopyReadsThePerformanceSourceWithConfirmation) {
+  auto* end = iree_hal_amd_gpu_pm4_emit_copy_register32(
+      words(), 0x367d0, UINT64_C(0x0000009a12345678));
+  Expect(end, {0xc0044000, 0x00100204, 0x0000d9f4, 0x00000000, 0x12345678,
+               0x0000009a});
+}
+
+TEST_F(CommandsTest, EventCarriesTypeWithIndexZero) {
+  auto* end = iree_hal_amd_gpu_pm4_emit_event(words(), 55);
+  Expect(end, {0xc0004600, 0x00000037});
+}
+
+TEST_F(CommandsTest, RegisterWaitPollsRegisterSpaceWithoutOffload) {
+  auto* end = iree_hal_amd_gpu_pm4_emit_wait_register32(
+      words(), 0x367d0, 0, 0x00fff000,
+      IREE_HAL_AMD_GPU_PM4_COMPARISON_NOT_EQUAL);
+  end = iree_hal_amd_gpu_pm4_emit_wait_register32(
+      end, 0x367d0, 0, 0x02000000, IREE_HAL_AMD_GPU_PM4_COMPARISON_EQUAL);
+  Expect(end, {0xc0053c00, 0x00000004, 0x0000d9f4, 0x00000000, 0x00000000,
+               0x00fff000, 0x00000004, 0xc0053c00, 0x00000003, 0x0000d9f4,
+               0x00000000, 0x00000000, 0x02000000, 0x00000004});
+}
+
+TEST_F(CommandsTest, EngineSelectIsPairedWithFullBroadcast) {
+  auto* end = iree_hal_amd_gpu_pm4_emit_engine_select(words(), 0x30800, 1);
+  end = iree_hal_amd_gpu_pm4_emit_engine_broadcast(end, 0x30800);
+  Expect(end, {0xc0017900, 0x00000200, 0x40010000, 0xc0017900, 0x00000200,
+               0xe0000000});
+}
+
 TEST_F(CommandsTest, NopInitializesExactPaddingExtent) {
   auto* end = iree_hal_amd_gpu_pm4_emit_nop(words(), 2);
   end = iree_hal_amd_gpu_pm4_emit_nop(end, 8);
