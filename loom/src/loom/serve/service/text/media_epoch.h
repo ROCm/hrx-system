@@ -53,10 +53,6 @@ typedef struct loom_serve_text_media_epoch_t {
   uint32_t first_feature_count;
   // Number of projected rows in the continuation.
   uint32_t next_feature_count;
-  // Source-declared first-epoch input capacity.
-  uint32_t first_packet_capacity;
-  // Source-declared continuation input capacity.
-  uint32_t next_packet_capacity;
   // Exact device packet extent, including aligned gathered rows.
   uint32_t device_length;
   // Temporary enqueue state, borrowing result owners only during submit.

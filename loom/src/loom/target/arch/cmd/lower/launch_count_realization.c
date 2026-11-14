@@ -191,7 +191,7 @@ typedef struct loom_cmd_launch_count_cluster_t {
   // Target shared by every generated count tuple.
   loom_symbol_ref_t target;
 
-  // Shared consumer block used to admit ordinary clustered configurations.
+  // First consumer's block, used by the same-scope admission fast path.
   loom_block_t* block;
 
   // First residual consumer in the cluster.
@@ -235,7 +235,7 @@ typedef struct loom_cmd_launch_count_cluster_t {
   // An intervening ordering boundary forbids hoisting new observations.
   bool has_observation_barrier;
 
-  // Whether the consumer's execution scope prevents later joins.
+  // Whether the producer's unordered execution scope prevents later joins.
   bool closed;
 } loom_cmd_launch_count_cluster_t;
 
@@ -654,8 +654,28 @@ static bool loom_cmd_launch_count_has_serial_parent(const loom_op_t* dispatch) {
   return loom_command_composition_is_serial(dispatch->parent_op);
 }
 
+static bool loom_cmd_launch_count_producer_precedes_consumer(
+    const loom_cmd_launch_count_cluster_t* cluster, const loom_op_t* consumer,
+    const loom_dominance_info_t* dominance) {
+  if (cluster->closed) {
+    return false;
+  }
+  if (loom_cmd_launch_count_has_serial_parent(consumer) &&
+      consumer->parent_block == cluster->block) {
+    return true;
+  }
+  return loom_cmd_launch_count_has_serial_parent(cluster->producer_before) &&
+         loom_dominates_op(dominance, cluster->producer_before, consumer);
+}
+
 static void loom_cmd_launch_count_record_intervening_barriers(
     loom_cmd_launch_count_cluster_t* cluster, const loom_op_t* right) {
+  if (cluster->frontier->parent_block != right->parent_block) {
+    // A saved observation remains available to nested consumers. A new read
+    // cannot move through the intervening composition without a motion proof.
+    cluster->has_observation_barrier = true;
+    return;
+  }
   for (const loom_op_t* operation = cluster->frontier->next_op;
        !cluster->has_observation_barrier && operation != right;
        operation = operation->next_op) {
@@ -1046,7 +1066,7 @@ static iree_status_t loom_cmd_launch_count_cluster_commit_demand(
   };
   cluster->frontier = dispatch;
   loom_cmd_launch_count_cluster_record_possible_writes(root, cluster, dispatch);
-  if (!loom_cmd_launch_count_has_serial_parent(dispatch)) {
+  if (!loom_cmd_launch_count_has_serial_parent(cluster->producer_before)) {
     cluster->closed = true;
   }
   return iree_ok_status();
@@ -1592,10 +1612,8 @@ static iree_status_t loom_cmd_launch_count_plan_root(
       if (!cluster_active) {
         continue;
       }
-      const bool can_cross =
-          !cluster.closed &&
-          loom_cmd_launch_count_has_serial_parent(dispatch) &&
-          dispatch->parent_block == cluster.block;
+      const bool can_cross = loom_cmd_launch_count_producer_precedes_consumer(
+          &cluster, dispatch, &dominance);
       if (!can_cross) {
         status = loom_cmd_launch_count_flush_cluster(
             &cluster, &cluster_checkpoint, &cluster_active, plan_arena,
@@ -1630,9 +1648,9 @@ static iree_status_t loom_cmd_launch_count_plan_root(
 
     const loom_symbol_ref_t target =
         loom_cmd_launch_count_dispatch_target(module, dispatch);
-    bool can_join = cluster_active && !cluster.closed &&
-                    loom_cmd_launch_count_has_serial_parent(dispatch) &&
-                    dispatch->parent_block == cluster.block;
+    bool can_join =
+        cluster_active && loom_cmd_launch_count_producer_precedes_consumer(
+                              &cluster, dispatch, &dominance);
     if (can_join) {
       status = loom_cmd_launch_count_targets_are_equivalent(
           module, symbol_facts, target, cluster.target, &can_join);

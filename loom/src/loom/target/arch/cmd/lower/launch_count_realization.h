@@ -51,16 +51,18 @@ typedef struct loom_cmd_launch_count_realization_t {
 // Realizes residual direct dispatch counts as generated device producers.
 //
 // |root_ops| names normalized command roots and may contain duplicates. Exact
-// counts remain direct. Compatible residual deterministic read-only closures
-// in one ordered command block with equivalent target facts share a 1x1x1
-// kernel that writes one transient array of XYZ tuples. The producer normally
-// precedes the cluster's first consumer, and each consumer retains its authored
-// position with an indirect view of its tuple. Consumers reuse sampled SSA
-// values across writes. New reads may cross writes only when canonical alias
-// scopes or allocation origins prove disjointness. A residual consumer outside
-// an ordered block is realized as a singleton nested serial
-// command. The generated source products remain owned by |out_realization|
-// until deinitialization.
+// counts remain direct. Compatible deterministic read-only closures with
+// equivalent target facts share a 1x1x1 kernel that writes one transient array
+// of XYZ tuples. The producer normally precedes the cluster's first consumer,
+// and each consumer retains its authored position with an indirect view of its
+// tuple. Consumers reuse sampled SSA values across writes. New reads may cross
+// writes only when canonical alias scopes or allocation origins prove
+// disjointness. A producer in an ordered scope also supplies dominated
+// consumers in nested concurrent regions without changing their ordering.
+// Crossing composition scopes stops admission of new later observations;
+// existing sampled values remain reusable. A producer confined to an unordered
+// scope gets a singleton nested serial command. The generated source products
+// remain owned by |out_realization| until deinitialization.
 //
 // Captured reads must preserve their source observation. Root-local motion
 // analysis proves movement to the originating consumer before clustering may

@@ -560,6 +560,13 @@ layout and carries it through control-state growth. Submitted device work uses
 its already-captured inputs; publication does not change those inputs or the
 completed feedback banks.
 
+`encode_epoch` receives the selected first-epoch and continuation token
+capacities as `first_packet_capacity` and `next_packet_capacity`. These are
+the prepared shapes, independent of live token counts and whether the inputs
+contain media. The continuation capacity is zero when no continuation is
+submitted. Source can use these values to lay out packets and associate
+captured state with the prepared programs that consume it.
+
 `encode_epoch` writes metadata and input packets, then returns
 `(output_count, transfer_plan, byte_offset, byte_length)`. The plan view contains
 little-endian u64 records
