@@ -191,20 +191,45 @@ kernel.def @return_convergence() {
   %unit = index.constant 1 : index
   %width = index.constant 64 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
-} launch(%scales: buffer, %columns: index, %values: buffer, %results: buffer) {
+} launch(%stages: buffer, %scales: buffer, %columns: index, %values: buffer, %results: buffer) {
   %base = index.constant 0 : offset
   %row = kernel.workitem.id<x> : index
+  %stage_view = buffer.view %stages[%base] : buffer -> view<64xi32>
   %scale_view = buffer.view %scales[%base] : buffer -> view<64xf32>
   %value_view = buffer.view %values[%base] : buffer -> view<64x4xf32>
   %result_view = buffer.view %results[%base] : buffer -> view<64xf32>
+  %stage = view.load %stage_view[%row] : view<64xi32> -> i32
+  %c0 = scalar.constant 0 : i32
+  %active = scalar.cmpi ne, %stage, %c0 : i32
+  cfg.cond_br %active, ^apply, ^done
+^apply:
   %scale = view.load %scale_view[%row] : view<64xf32> -> f32
   %result = func.call @rescale_row(%value_view, %row, %columns, %scale) : (view<64x4xf32>, index, index, f32) -> (f32)
+  %rejected_result = scalar.constant 0.0 : f32
+  %rejected = scalar.cmpf ole, %result, %rejected_result : f32
+  cfg.br ^select
+^select:
+  cfg.cond_br %rejected, ^rejected, ^accepted
+^rejected:
+  view.store %rejected_result, %result_view[%row] : f32, view<64xf32>
+  cfg.br ^done
+^accepted:
+  %c1 = scalar.constant 1 : i32
+  %first = scalar.cmpi eq, %stage, %c1 : i32
+  cfg.cond_br %first, ^first, ^later
+^first:
   view.store %result, %result_view[%row] : f32, view<64xf32>
+  cfg.br ^done
+^later:
+  %later_result = scalar.constant 1.0 : f32
+  view.store %later_result, %result_view[%row] : f32, view<64xf32>
+  cfg.br ^done
+^done:
   kernel.return
 }
 
 // Calculate the result and write eligibility independently of early exits.
-func.def @return_convergence_oracle(%scales: buffer, %column_count: index, %values: buffer, %results: buffer) {
+func.def @return_convergence_oracle(%stages: buffer, %scales: buffer, %column_count: index, %values: buffer, %results: buffer) {
   %columns = index.assume %column_count [range(%column_count, 0, 4)] : index
   %base = index.constant 0 : offset
   %begin = index.constant 0 : index
@@ -213,29 +238,40 @@ func.def @return_convergence_oracle(%scales: buffer, %column_count: index, %valu
   %initial = scalar.constant 0.0 : f32
   %identity = scalar.constant 1.0 : f32
   %bias = scalar.constant 42.0 : f32
+  %c0 = scalar.constant 0 : i32
+  %c1 = scalar.constant 1 : i32
+  %stage_view = buffer.view %stages[%base] : buffer -> view<64xi32>
   %scale_view = buffer.view %scales[%base] : buffer -> view<64xf32>
   %value_view = buffer.view %values[%base] : buffer -> view<64x4xf32>
   %result_view = buffer.view %results[%base] : buffer -> view<64xf32>
   scf.for %row = [%begin to %rows step %step] {
-    %scale = view.load %scale_view[%row] : view<64xf32> -> f32
-    %maximum = scf.for %column = [%begin to %columns step %step](%maximum = %initial : f32) -> (f32) {
-      %value = view.load %value_view[%row, %column] : view<64x4xf32> -> f32
-      %next = scalar.maximumf %maximum, %value : f32
-      scf.yield %next : f32
-    }
-    %rejected = scalar.negf %maximum : f32
-    %success = scalar.addf %bias, %scale : f32
-    %invalid = scalar.cmpf ole, %scale, %initial : f32
-    %result = scf.select %invalid, %rejected, %success : f32
-    view.store %result, %result_view[%row] : f32, view<64xf32>
-    %positive = scalar.cmpf ogt, %scale, %initial : f32
-    %different = scalar.cmpf une, %scale, %identity : f32
-    %write = scalar.andi %positive, %different : i1
-    scf.if %write {
-      scf.for %column = [%begin to %columns step %step] {
+    %stage = view.load %stage_view[%row] : view<64xi32> -> i32
+    %active = scalar.cmpi ne, %stage, %c0 : i32
+    scf.if %active {
+      %scale = view.load %scale_view[%row] : view<64xf32> -> f32
+      %maximum = scf.for %column = [%begin to %columns step %step](%maximum = %initial : f32) -> (f32) {
         %value = view.load %value_view[%row, %column] : view<64x4xf32> -> f32
-        %scaled = scalar.mulf %value, %scale : f32
-        view.store %scaled, %value_view[%row, %column] : f32, view<64x4xf32>
+        %next = scalar.maximumf %maximum, %value : f32
+        scf.yield %next : f32
+      }
+      %rejected = scalar.negf %maximum : f32
+      %success = scalar.addf %bias, %scale : f32
+      %invalid = scalar.cmpf ole, %scale, %initial : f32
+      %result = scf.select %invalid, %rejected, %success : f32
+      %first = scalar.cmpi eq, %stage, %c1 : i32
+      %later_result = scalar.constant 1.0 : f32
+      %accepted = scf.select %first, %result, %later_result : f32
+      %selected = scf.select %invalid, %initial, %accepted : f32
+      view.store %selected, %result_view[%row] : f32, view<64xf32>
+      %positive = scalar.cmpf ogt, %scale, %initial : f32
+      %different = scalar.cmpf une, %scale, %identity : f32
+      %write = scalar.andi %positive, %different : i1
+      scf.if %write {
+        scf.for %column = [%begin to %columns step %step] {
+          %value = view.load %value_view[%row, %column] : view<64x4xf32> -> f32
+          %scaled = scalar.mulf %value, %scale : f32
+          view.store %scaled, %value_view[%row, %column] : f32, view<64x4xf32>
+        }
       }
     }
   }
@@ -243,59 +279,83 @@ func.def @return_convergence_oracle(%scales: buffer, %column_count: index, %valu
 }
 
 check.scenario @return_convergence_values {
+  // The outer stage guard keeps every lane inactive.
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %stages = check.generate.fill value(0) : tensor<64xi32>
+    %scales = check.generate.iota offset(-31.0) step(1.0) : tensor<64xf32>
+    %columns = check.literal value(4) : index
+    %storage = check.generate.iota offset(-8.0) step(0.5) : tensor<288xf32>
+    %values = check.tensor.view %storage offset(64) : tensor<288xf32> -> tensor<256xf32>
+    %result_storage = check.generate.fill value(-123.0) : tensor<96xf32>
+    %results = check.tensor.view %result_storage offset(64) : tensor<96xf32> -> tensor<64xf32>
+    check.compare<@return_convergence, @return_convergence_oracle>(%stages, %scales, %columns, %values, %results) : (tensor<64xi32>, tensor<64xf32>, index, tensor<256xf32>, tensor<64xf32>) -> () {
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<288xf32>
+      check.expect.bitwise actual(%result_storage) expected(%result_storage) : tensor<96xf32>
+      check.expect.bitwise actual(%stages) expected(%stages) : tensor<64xi32>
+      check.expect.bitwise actual(%scales) expected(%scales) : tensor<64xf32>
+    }
+  }
   // Empty scans and rescale loops.
   check.trial[1](%trial: index, %entropy: check.entropy) {
+    %stages = check.generate.fill value(1) : tensor<64xi32>
     %scales = check.generate.iota offset(-31.0) step(1.0) : tensor<64xf32>
     %columns = check.literal value(0) : index
     %storage = check.generate.iota offset(-8.0) step(0.5) : tensor<288xf32>
     %values = check.tensor.view %storage offset(64) : tensor<288xf32> -> tensor<256xf32>
     %result_storage = check.generate.fill value(-123.0) : tensor<96xf32>
     %results = check.tensor.view %result_storage offset(64) : tensor<96xf32> -> tensor<64xf32>
-    check.compare<@return_convergence, @return_convergence_oracle>(%scales, %columns, %values, %results) : (tensor<64xf32>, index, tensor<256xf32>, tensor<64xf32>) -> () {
+    check.compare<@return_convergence, @return_convergence_oracle>(%stages, %scales, %columns, %values, %results) : (tensor<64xi32>, tensor<64xf32>, index, tensor<256xf32>, tensor<64xf32>) -> () {
       check.expect.bitwise actual(%storage) expected(%storage) : tensor<288xf32>
       check.expect.bitwise actual(%result_storage) expected(%result_storage) : tensor<96xf32>
+      check.expect.bitwise actual(%stages) expected(%stages) : tensor<64xi32>
       check.expect.bitwise actual(%scales) expected(%scales) : tensor<64xf32>
     }
   }
   // All lanes skip rescaling.
   check.trial[1](%trial: index, %entropy: check.entropy) {
+    %stages = check.generate.iota offset(0) step(1) : tensor<64xi32>
     %scales = check.generate.fill value(1.0) : tensor<64xf32>
     %columns = check.literal value(4) : index
     %storage = check.generate.iota offset(-8.0) step(0.5) : tensor<288xf32>
     %values = check.tensor.view %storage offset(64) : tensor<288xf32> -> tensor<256xf32>
     %result_storage = check.generate.fill value(-123.0) : tensor<96xf32>
     %results = check.tensor.view %result_storage offset(64) : tensor<96xf32> -> tensor<64xf32>
-    check.compare<@return_convergence, @return_convergence_oracle>(%scales, %columns, %values, %results) : (tensor<64xf32>, index, tensor<256xf32>, tensor<64xf32>) -> () {
+    check.compare<@return_convergence, @return_convergence_oracle>(%stages, %scales, %columns, %values, %results) : (tensor<64xi32>, tensor<64xf32>, index, tensor<256xf32>, tensor<64xf32>) -> () {
       check.expect.bitwise actual(%storage) expected(%storage) : tensor<288xf32>
       check.expect.bitwise actual(%result_storage) expected(%result_storage) : tensor<96xf32>
+      check.expect.bitwise actual(%stages) expected(%stages) : tensor<64xi32>
       check.expect.bitwise actual(%scales) expected(%scales) : tensor<64xf32>
     }
   }
   // All lanes return early.
   check.trial[1](%trial: index, %entropy: check.entropy) {
+    %stages = check.generate.fill value(1) : tensor<64xi32>
     %scales = check.generate.fill value(0.0) : tensor<64xf32>
     %columns = check.literal value(4) : index
     %storage = check.generate.iota offset(-8.0) step(0.5) : tensor<288xf32>
     %values = check.tensor.view %storage offset(64) : tensor<288xf32> -> tensor<256xf32>
     %result_storage = check.generate.fill value(-123.0) : tensor<96xf32>
     %results = check.tensor.view %result_storage offset(64) : tensor<96xf32> -> tensor<64xf32>
-    check.compare<@return_convergence, @return_convergence_oracle>(%scales, %columns, %values, %results) : (tensor<64xf32>, index, tensor<256xf32>, tensor<64xf32>) -> () {
+    check.compare<@return_convergence, @return_convergence_oracle>(%stages, %scales, %columns, %values, %results) : (tensor<64xi32>, tensor<64xf32>, index, tensor<256xf32>, tensor<64xf32>) -> () {
       check.expect.bitwise actual(%storage) expected(%storage) : tensor<288xf32>
       check.expect.bitwise actual(%result_storage) expected(%result_storage) : tensor<96xf32>
+      check.expect.bitwise actual(%stages) expected(%stages) : tensor<64xi32>
       check.expect.bitwise actual(%scales) expected(%scales) : tensor<64xf32>
     }
   }
   // Mixed early exits across both waves.
   check.trial[1](%trial: index, %entropy: check.entropy) {
+    %stages = check.generate.iota offset(-31) step(1) : tensor<64xi32>
     %scales = check.generate.iota offset(-31.0) step(1.0) : tensor<64xf32>
     %columns = check.literal value(3) : index
     %storage = check.generate.iota offset(-8.0) step(0.5) : tensor<288xf32>
     %values = check.tensor.view %storage offset(64) : tensor<288xf32> -> tensor<256xf32>
     %result_storage = check.generate.fill value(-123.0) : tensor<96xf32>
     %results = check.tensor.view %result_storage offset(64) : tensor<96xf32> -> tensor<64xf32>
-    check.compare<@return_convergence, @return_convergence_oracle>(%scales, %columns, %values, %results) : (tensor<64xf32>, index, tensor<256xf32>, tensor<64xf32>) -> () {
+    check.compare<@return_convergence, @return_convergence_oracle>(%stages, %scales, %columns, %values, %results) : (tensor<64xi32>, tensor<64xf32>, index, tensor<256xf32>, tensor<64xf32>) -> () {
       check.expect.bitwise actual(%storage) expected(%storage) : tensor<288xf32>
       check.expect.bitwise actual(%result_storage) expected(%result_storage) : tensor<96xf32>
+      check.expect.bitwise actual(%stages) expected(%stages) : tensor<64xi32>
       check.expect.bitwise actual(%scales) expected(%scales) : tensor<64xf32>
     }
   }

@@ -93,6 +93,12 @@ class LowLowerSourcePlanTest : public ::testing::Test {
       bool reject = false;
     } control;
     struct {
+      // Source blocks received by the target branch planner in callback order.
+      const loom_block_t* source_blocks[3] = {};
+      // Number of branch-planning callbacks observed.
+      unsigned count = 0;
+    } control_order;
+    struct {
       // Conditional source terminator requesting target-created resume closure.
       const loom_op_t* terminator = nullptr;
       // Source block resumed through the target-created edge.
@@ -246,6 +252,19 @@ class LowLowerSourcePlanTest : public ::testing::Test {
     if (retained.count == 1) {
       EXPECT_EQ(retained.values[0], carriers.value);
     }
+    return iree_ok_status();
+  }
+
+  static iree_status_t ObserveControlOrder(
+      void* user_data, loom_low_lower_context_t* context,
+      const loom_op_t* source_op, iree_arena_allocator_t* scratch_arena) {
+    (void)context;
+    (void)scratch_arena;
+    auto& order = static_cast<PlanObserver*>(user_data)->control_order;
+    if (order.count < IREE_ARRAYSIZE(order.source_blocks)) {
+      order.source_blocks[order.count] = source_op->parent_block;
+    }
+    ++order.count;
     return iree_ok_status();
   }
 
@@ -754,35 +773,44 @@ TEST_F(LowLowerSourcePlanTest, ExecutesExpandedControlAfterFactStorageRetires) {
             loom_region_const_block(body, 3));
 }
 
-TEST_F(LowLowerSourcePlanTest, RetainsPhysicalOrderAfterAnalysisRetires) {
+TEST_F(LowLowerSourcePlanTest, UsesDominanceOrderAfterAnalysisRetires) {
   AddForwardingBlock();
-  policy_.prepare_branch = {};
+  policy_.prepare_branch = {ObserveControlOrder, &observer_};
   loom_region_t* source_body = loom_func_like_body(function_);
   loom_block_t* entry = loom_region_entry_block(source_body);
   loom_block_t* exit = loom_region_block(source_body, 1);
-  loom_block_t* dead = nullptr;
+  loom_block_t* nested = nullptr;
   loom_block_t* forwarding = nullptr;
-  IREE_ASSERT_OK(loom_region_append_block(module_, source_body, &dead));
+  loom_block_t* unreachable = nullptr;
+  IREE_ASSERT_OK(loom_region_append_block(module_, source_body, &nested));
   IREE_ASSERT_OK(loom_region_append_block(module_, source_body, &forwarding));
+  IREE_ASSERT_OK(loom_region_append_block(module_, source_body, &unreachable));
 
-  // Source storage is entry, exit, dead, forwarding. Reachable control is
-  // entry -> forwarding -> exit; dead must remain after that chain.
+  // Source storage is entry, exit, nested, forwarding, unreachable. Reachable
+  // control is entry -> forwarding -> nested -> exit. Planning and emission
+  // must consume that producer-owned dominance order before the final block.
   loom_builder_t builder;
   loom_builder_initialize(module_, &module_->arena, entry, &builder);
   loom_op_t* original_branch = entry->last_op;
   const loom_value_id_t result = loom_cfg_br_args(original_branch).values[0];
   const loom_type_t type = loom_module_value_type(module_, result);
-  loom_value_id_t argument = LOOM_VALUE_ID_INVALID;
+  loom_value_id_t forwarding_argument = LOOM_VALUE_ID_INVALID;
+  IREE_ASSERT_OK(loom_builder_define_block_arg(&builder, forwarding, type,
+                                               &forwarding_argument));
+  loom_value_id_t nested_argument = LOOM_VALUE_ID_INVALID;
   IREE_ASSERT_OK(
-      loom_builder_define_block_arg(&builder, forwarding, type, &argument));
+      loom_builder_define_block_arg(&builder, nested, type, &nested_argument));
   IREE_ASSERT_OK(loom_op_erase(module_, original_branch));
   loom_op_t* branch = nullptr;
   IREE_ASSERT_OK(loom_cfg_br_build(&builder, forwarding, &result, 1,
                                    LOOM_LOCATION_UNKNOWN, &branch));
   loom_builder_set_block(&builder, forwarding);
-  IREE_ASSERT_OK(loom_cfg_br_build(&builder, exit, &argument, 1,
+  IREE_ASSERT_OK(loom_cfg_br_build(&builder, nested, &forwarding_argument, 1,
                                    LOOM_LOCATION_UNKNOWN, &branch));
-  loom_builder_set_block(&builder, dead);
+  loom_builder_set_block(&builder, nested);
+  IREE_ASSERT_OK(loom_cfg_br_build(&builder, exit, &nested_argument, 1,
+                                   LOOM_LOCATION_UNKNOWN, &branch));
+  loom_builder_set_block(&builder, unreachable);
   const loom_value_id_t input = loom_block_arg_id(entry, 0);
   loom_op_t* return_op = nullptr;
   IREE_ASSERT_OK(loom_func_return_build(&builder, &input, 1,
@@ -798,10 +826,14 @@ TEST_F(LowLowerSourcePlanTest, RetainsPhysicalOrderAfterAnalysisRetires) {
       loom_low_lower_function(module_, function_, &options_, &result_));
   ASSERT_EQ(result_.error_count, 0u);
   ASSERT_NE(result_.low_func_op, nullptr);
+  ASSERT_EQ(observer_.control_order.count, 3u);
+  EXPECT_EQ(observer_.control_order.source_blocks[0], entry);
+  EXPECT_EQ(observer_.control_order.source_blocks[1], forwarding);
+  EXPECT_EQ(observer_.control_order.source_blocks[2], nested);
   const loom_region_t* body =
       loom_func_like_body(loom_func_like_cast(module_, result_.low_func_op));
-  ASSERT_EQ(body->block_count, 4u);
-  for (uint16_t i = 0; i < 2; ++i) {
+  ASSERT_EQ(body->block_count, 5u);
+  for (uint16_t i = 0; i < 3; ++i) {
     const loom_block_t* block = loom_region_const_block(body, i);
     const loom_block_t* next = loom_region_const_block(body, i + 1);
     const loom_op_t* terminator = loom_block_const_last_op(block);
@@ -814,15 +846,15 @@ TEST_F(LowLowerSourcePlanTest, RetainsPhysicalOrderAfterAnalysisRetires) {
                 loom_block_arg_id(block, 0));
     }
   }
-  const loom_block_t* low_exit = loom_region_const_block(body, 2);
+  const loom_block_t* low_exit = loom_region_const_block(body, 3);
   const loom_op_t* low_return = loom_block_const_last_op(low_exit);
   ASSERT_TRUE(loom_low_return_isa(low_return));
   EXPECT_EQ(loom_low_return_values(low_return).values[0],
             loom_block_arg_id(low_exit, 0));
-  const loom_op_t* dead_return =
-      loom_block_const_last_op(loom_region_const_block(body, 3));
-  ASSERT_TRUE(loom_low_return_isa(dead_return));
-  EXPECT_EQ(loom_low_return_values(dead_return).values[0],
+  const loom_op_t* unreachable_return =
+      loom_block_const_last_op(loom_region_const_block(body, 4));
+  ASSERT_TRUE(loom_low_return_isa(unreachable_return));
+  EXPECT_EQ(loom_low_return_values(unreachable_return).values[0],
             loom_block_arg_id(loom_region_const_entry_block(body), 0));
 }
 
