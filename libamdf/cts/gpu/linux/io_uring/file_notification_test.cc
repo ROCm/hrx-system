@@ -6,6 +6,7 @@
 
 #include "libamdf/cts/gpu/kernels/file_notification.h"
 
+#include <algorithm>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -36,13 +37,16 @@ class GpuFileNotificationTest : public GpuEventTest<GpuFileIoFixture> {
     if (stop_address_) {
       GpuStoreRelease<uint32_t>(stop_address_, 1);
     }
-    GpuEventTest<GpuFileIoFixture>::TearDown();
+    ASSERT_NO_FATAL_FAILURE(GpuEventTest<GpuFileIoFixture>::TearDown());
+    ASSERT_TRUE(payload_.Release(api_));
   }
 
   void Run(FileMode mode, Outcome outcome);
 
   // Borrowed coherent control word, retained until queue-first teardown.
   uintptr_t stop_address_ = 0;
+  // File-eligible backing retained through both GPU and native I/O retirement.
+  GpuMemory payload_;
 };
 
 void GpuFileNotificationTest::Run(FileMode mode, Outcome outcome) {
@@ -64,9 +68,57 @@ void GpuFileNotificationTest::Run(FileMode mode, Outcome outcome) {
   if (IsSkipped()) {
     return;
   }
-  GpuMemory* payload = nullptr;
-  ASSERT_NO_FATAL_FAILURE(
-      CreateRegisteredPages(3 * page_byte_length_, kGuard, &payload));
+  const amdf_memory_device_access_t access = {
+      device_,
+      {
+          .access = AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE,
+          .flags =
+              AMDF_MEMORY_FLAG_HOST_COHERENT | AMDF_MEMORY_FLAG_DEVICE_ADDRESS,
+      },
+  };
+  const amdf_memory_create_info_t creation = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO,
+      .structure_size = sizeof(creation),
+      .memory_profile_ordinal = FindMemoryProfileOrdinal(
+          system_scope_,
+          AMDF_MEMORY_PROFILE_ROLE_CREATE | AMDF_MEMORY_PROFILE_ROLE_HOST_MAP,
+          AMDF_MEMORY_FLAG_HOST_VISIBLE | AMDF_MEMORY_FLAG_HOST_FILE_IO,
+          access.requirements),
+      .access_count = 1,
+      .required_flags =
+          AMDF_MEMORY_FLAG_HOST_VISIBLE | AMDF_MEMORY_FLAG_HOST_FILE_IO,
+      .byte_length = 3 * page_byte_length_,
+      .minimum_alignment = page_byte_length_,
+      .accesses = &access,
+  };
+  ASSERT_NE(creation.memory_profile_ordinal,
+            AMDF_MEMORY_PROFILE_ORDINAL_UNKNOWN);
+  ASSERT_NO_FATAL_FAILURE(payload_.Initialize(api_, system_scope_, creation));
+  GpuMemory* payload = &payload_;
+  std::fill_n(static_cast<uint32_t*>(payload->host.pointer), 3 * word_count,
+              kGuard);
+  ASSERT_NE(payload->host.features & AMDF_HOST_MAPPING_FEATURE_FILE_IO, 0u);
+  auto file_site = payload->HostSite();
+  file_site.kind = AMDF_MEMORY_SITE_KIND_FILE_IO;
+  amdf_memory_site_t program_site = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_SITE,
+      .structure_size = sizeof(program_site),
+      .kind = AMDF_MEMORY_SITE_KIND_PROGRAM,
+  };
+  program_site.value.program.memory = payload->memory;
+  amdf_memory_pair_info_t pair = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_PAIR_INFO,
+      .structure_size = sizeof(pair),
+  };
+  ASSERT_EQ(api_->memory_query_pair_info(&file_site, &program_site, &pair),
+            AMDF_STATUS_OK);
+  ASSERT_NE(pair.flags & AMDF_MEMORY_PAIR_FLAG_SHARED_BACKING_REACHABLE, 0u);
+  ASSERT_EQ(pair.release.kind, AMDF_CACHE_TRANSITION_KIND_NONE);
+  // CQ publication supplies completion; the resident shader supplies this
+  // acquire before reading the payload. A later queue barrier cannot do it.
+  ASSERT_EQ(pair.acquire.kind, AMDF_CACHE_TRANSITION_KIND_GLOBAL);
+  ASSERT_EQ(pair.acquire.executor, AMDF_CACHE_TRANSITION_EXECUTOR_PROGRAM);
+  ASSERT_EQ(pair.acquire.operation, AMDF_CACHE_OPERATION_ACQUIRE_FROM_SYSTEM);
   ASSERT_NO_FATAL_FAILURE(CreateRing(payload, FileIoPath::kDeviceWait, 1, 2));
   if (IsSkipped()) {
     return;

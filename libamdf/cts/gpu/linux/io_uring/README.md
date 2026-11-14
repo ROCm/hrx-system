@@ -38,6 +38,12 @@ bit shares the generation's release publication so completion cannot be
 observed through an independently visible flag. Native queue retirement follows
 that publication before releasing the event, registrations, or caller pages.
 
+The payload uses an owned `HOST_FILE_IO` allocation with an explicit GPU access.
+Its concrete `FILE_IO`-to-`PROGRAM` pair qualifies the system acquire performed
+inside the shader after CQ publication. A queue acquire after the dispatch
+cannot make data visible to a consumer still running inside it. The payload
+owner outlives both GPU execution and the ring's native file-buffer references.
+
 Buffered and direct reads share this protocol. EOF preserves the untouched
 payload and transcript, and a host stop before admission retires the resident
 publisher without submitting its SQE. The same stop word releases the shader
