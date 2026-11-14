@@ -45,6 +45,7 @@ loom_check_test_suite(
         "source_to_low_source_graph.loom-test",
         "source_to_low_storage_demands.loom-test",
         "source_to_low_structured_control.loom-test",
+        "source_to_low_target_isolation.loom-test",
         "target_legalize.loom-test",
         "target_legalize_atomic_float.loom-test",
         "target_legalize_atomic_integer.loom-test",

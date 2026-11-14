@@ -1895,9 +1895,6 @@ iree_status_t loom_amdgpu_low_legality_verify_kernel_preamble(
     bool* out_handled) {
   *out_handled = false;
   const loom_target_bundle_t* bundle = loom_target_low_legality_bundle(context);
-  if (!loom_amdgpu_low_legality_context_is_amdgpu(context)) {
-    return iree_ok_status();
-  }
 
   const loom_amdgpu_preamble_query_row_t* row =
       loom_amdgpu_preamble_query_row(op->kind);

@@ -108,8 +108,9 @@ struct loom_target_low_legality_provider_t {
   iree_string_view_t name;
   // Built-in source dialect ids this provider can answer.
   loom_target_low_legality_builtin_dialect_bits_t builtin_dialect_bits;
-  // Attempts to verify one source op. Sets |out_handled| false when the op does
-  // not belong to this provider.
+  // Attempts to verify one source op. Providers from all configured targets can
+  // be present; sets |out_handled| false when the context's descriptor target
+  // or the source op does not belong to this provider.
   loom_target_low_legality_try_op_fn_t try_verify_op;
 };
 

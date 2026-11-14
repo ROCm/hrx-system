@@ -576,9 +576,6 @@ iree_status_t loom_amdgpu_low_legality_verify_address_compare(
     loom_target_low_legality_context_t* context, const loom_op_t* op,
     bool* out_handled) {
   (void)provider;
-  if (!loom_amdgpu_low_legality_context_is_amdgpu(context)) {
-    return iree_ok_status();
-  }
 
   const loom_module_t* module = loom_target_low_legality_module(context);
   if (!loom_amdgpu_address_comparison_needs_pair(
@@ -613,9 +610,6 @@ iree_status_t loom_amdgpu_low_legality_verify_scalar_cmpi_i64(
     loom_target_low_legality_context_t* context, const loom_op_t* op,
     bool* out_handled) {
   (void)provider;
-  if (!loom_amdgpu_low_legality_context_is_amdgpu(context)) {
-    return iree_ok_status();
-  }
 
   const loom_module_t* module = loom_target_low_legality_module(context);
   if (!loom_amdgpu_scalar_cmpi_has_i64_operands(module, op)) {
@@ -1505,9 +1499,6 @@ iree_status_t loom_amdgpu_low_legality_verify_address_i64_alu(
     loom_target_low_legality_context_t* context, const loom_op_t* op,
     bool* out_handled) {
   (void)provider;
-  if (!loom_amdgpu_low_legality_context_is_amdgpu(context)) {
-    return iree_ok_status();
-  }
   loom_amdgpu_address_i64_alu_kind_t operation_kind =
       LOOM_AMDGPU_ADDRESS_I64_ALU_KIND_NONE;
   loom_value_id_t lhs = LOOM_VALUE_ID_INVALID;
@@ -1805,9 +1796,6 @@ iree_status_t loom_amdgpu_low_legality_verify_scalar_i64_alu(
     loom_target_low_legality_context_t* context, const loom_op_t* op,
     bool* out_handled) {
   (void)provider;
-  if (!loom_amdgpu_low_legality_context_is_amdgpu(context)) {
-    return iree_ok_status();
-  }
   loom_amdgpu_scalar_i64_alu_kind_t kind = LOOM_AMDGPU_SCALAR_I64_ALU_KIND_NONE;
   loom_value_id_t lhs = LOOM_VALUE_ID_INVALID;
   loom_value_id_t rhs = LOOM_VALUE_ID_INVALID;
@@ -1859,9 +1847,6 @@ iree_status_t loom_amdgpu_low_legality_verify_scalar_i64_ctpop(
     loom_target_low_legality_context_t* context, const loom_op_t* op,
     bool* out_handled) {
   (void)provider;
-  if (!loom_amdgpu_low_legality_context_is_amdgpu(context)) {
-    return iree_ok_status();
-  }
 
   const loom_value_id_t result = loom_scalar_ctpopi_result(op);
   const loom_module_t* module = loom_target_low_legality_module(context);

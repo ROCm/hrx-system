@@ -2083,9 +2083,6 @@ iree_status_t loom_amdgpu_low_legality_verify_fragment_memory(
     bool* out_handled) {
   (void)provider;
   const loom_target_bundle_t* bundle = loom_target_low_legality_bundle(context);
-  if (!loom_amdgpu_low_legality_context_is_amdgpu(context)) {
-    return iree_ok_status();
-  }
   *out_handled = true;
 
   loom_low_source_memory_operation_kind_t operation_kind =

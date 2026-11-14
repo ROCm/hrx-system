@@ -572,9 +572,6 @@ iree_status_t loom_amdgpu_low_legality_verify_vector_iota(
     loom_target_low_legality_context_t* context, const loom_op_t* op,
     bool* out_handled) {
   (void)provider;
-  if (!loom_amdgpu_low_legality_context_is_amdgpu(context)) {
-    return iree_ok_status();
-  }
   *out_handled = true;
 
   const loom_module_t* module = loom_target_low_legality_module(context);
@@ -599,9 +596,6 @@ iree_status_t loom_amdgpu_low_legality_verify_vector_from_elements(
     bool* out_handled) {
   (void)provider;
   *out_handled = false;
-  if (!loom_amdgpu_low_legality_context_is_amdgpu(context)) {
-    return iree_ok_status();
-  }
   const loom_module_t* module = loom_target_low_legality_module(context);
   if (!loom_amdgpu_value_only_feeds_vector_atomic_offsets(
           module, loom_vector_from_elements_result(op))) {

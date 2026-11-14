@@ -75,10 +75,6 @@ iree_status_t loom_amdgpu_low_legality_verify_full_wave_direct_subgroup_width(
     iree_string_view_t direct_width_constraint_key,
     uint32_t* out_wavefront_size);
 
-// Returns true when source-to-low legality is evaluating an AMDGPU target.
-bool loom_amdgpu_low_legality_context_is_amdgpu(
-    loom_target_low_legality_context_t* context);
-
 #ifdef __cplusplus
 }  // extern "C"
 #endif

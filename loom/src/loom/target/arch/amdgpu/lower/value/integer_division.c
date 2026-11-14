@@ -260,9 +260,6 @@ iree_status_t loom_amdgpu_low_legality_verify_wide_division(
     loom_target_low_legality_context_t* context, const loom_op_t* op,
     bool* out_handled) {
   (void)provider;
-  if (!loom_amdgpu_low_legality_context_is_amdgpu(context)) {
-    return iree_ok_status();
-  }
 
   const loom_module_t* module = loom_target_low_legality_module(context);
   const loom_value_fact_table_t* fact_table =
