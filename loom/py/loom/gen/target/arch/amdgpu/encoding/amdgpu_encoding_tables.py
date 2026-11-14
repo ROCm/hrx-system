@@ -563,6 +563,9 @@ def _compile_formats(
                 AMDGPU_ENCODING_FIELD_IDS[field.name]
             except KeyError as exc:
                 raise ValueError(f"AMDGPU encoding '{encoding.name}' references unmapped field '{field.name}'") from exc
+            for bit_range in field.ranges:
+                if bit_range.bit_offset < 0 or bit_range.bit_count < 0 or bit_range.bit_offset + bit_range.bit_count > encoding.bit_count:
+                    raise ValueError(f"AMDGPU encoding '{encoding.name}' field '{field.name}' bit range exceeds its {encoding.bit_count}-bit packet")
             range_start = len(compiled_ranges)
             field_ranges, value_bit_count = _compile_field_ranges(field.ranges)
             if value_bit_count > 64:
@@ -1054,9 +1057,7 @@ def _emit_source(
                 "    {",
                 f"        .bit_offset = {bit_range.bit_offset},",
                 f"        .bit_count = {bit_range.bit_count},",
-                f"        .source_bit_offset = {source_bit_offset},",
-                f"        .padding_bit_count = {bit_range.padding_bit_count},",
-                f"        .padding_value = {bit_range.padding_value},",
+                f"        .source_bit_offset = {source_bit_offset + bit_range.padding_bit_count},",
                 "    },",
             ]
         )
@@ -1074,8 +1075,6 @@ def _emit_source(
                 f"        .field_id = {AMDGPU_ENCODING_FIELD_IDS[field.field.name]},",
                 f"        .range_start = {field.range_start},",
                 f"        .range_count = {field.range_count},",
-                f"        .value_bit_count = {field.value_bit_count},",
-                f"        .flags = {1 if field.field.is_conditional else 0},",
                 "    },",
             ]
         )
@@ -1088,7 +1087,6 @@ def _emit_source(
     )
     for entry in compiled_formats:
         identifier_words = _split_words(entry.encoding.identifier_values[0], entry.word_count)
-        identifier_mask_words = _split_words(entry.encoding.identifier_mask, entry.word_count)
         lines.extend(
             [
                 "    {",
@@ -1098,7 +1096,6 @@ def _emit_source(
                 f"        .field_start = {entry.field_start},",
                 f"        .field_count = {entry.field_count},",
                 f"        .identifier_words = {_emit_word_array(identifier_words)},",
-                f"        .identifier_mask_words = {_emit_word_array(identifier_mask_words)},",
                 "    },",
             ]
         )

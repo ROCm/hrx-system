@@ -6,49 +6,26 @@
 
 #include "loom/target/emit/native/amdgpu/storage_layout.h"
 
-static iree_status_t loom_amdgpu_storage_layout_segment_size_ptr(
-    loom_amdgpu_storage_layout_segment_sizes_t* sizes,
-    loom_storage_space_t storage_space, uint64_t** out_segment_size) {
-  *out_segment_size = NULL;
-  switch (storage_space) {
-    case LOOM_STORAGE_SPACE_WORKGROUP:
-      *out_segment_size = &sizes->group_segment_fixed_size;
-      return iree_ok_status();
-    case LOOM_STORAGE_SPACE_PRIVATE:
-    case LOOM_STORAGE_SPACE_SCRATCH:
-      *out_segment_size = &sizes->private_segment_fixed_size;
-      return iree_ok_status();
-    case LOOM_STORAGE_SPACE_STACK:
-      return iree_make_status(
-          IREE_STATUS_FAILED_PRECONDITION,
-          "AMDGPU stack storage must be rejected before native storage layout");
-    default:
-      IREE_ASSERT_UNREACHABLE(
-          "verified storage reservation must have a valid storage space");
-      IREE_BUILTIN_UNREACHABLE();
-  }
-}
+#include "loom/codegen/low/diagnostics.h"
+#include "loom/error/error_catalog.h"
+#include "loom/error/parameter.h"
 
-iree_status_t loom_amdgpu_storage_layout_project_reservation(
+bool loom_amdgpu_storage_layout_try_project_reservation(
     const loom_low_storage_layout_reservation_t* source_reservation,
     loom_amdgpu_storage_layout_segment_sizes_t* sizes,
     loom_amdgpu_storage_layout_reservation_t* out_reservation) {
-  uint64_t* segment_size = NULL;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_storage_layout_segment_size_ptr(
-      sizes, source_reservation->space, &segment_size));
+  uint64_t* segment_size =
+      source_reservation->space == LOOM_STORAGE_SPACE_WORKGROUP
+          ? &sizes->group_segment_fixed_size
+          : &sizes->private_segment_fixed_size;
 
   uint64_t aligned_segment_size = 0;
-  if (!iree_checked_align_u64(*segment_size, source_reservation->byte_alignment,
-                              &aligned_segment_size)) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "AMDGPU storage layout alignment overflows");
-  }
   uint64_t next_segment_size = 0;
-  if (!iree_checked_add_u64(aligned_segment_size, source_reservation->byte_size,
+  if (!iree_checked_align_u64(*segment_size, source_reservation->byte_alignment,
+                              &aligned_segment_size) ||
+      !iree_checked_add_u64(aligned_segment_size, source_reservation->byte_size,
                             &next_segment_size)) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "AMDGPU storage layout fixed segment size overflows");
+    return false;
   }
 
   *out_reservation = (loom_amdgpu_storage_layout_reservation_t){
@@ -58,22 +35,36 @@ iree_status_t loom_amdgpu_storage_layout_project_reservation(
       .byte_alignment = source_reservation->byte_alignment,
   };
   *segment_size = next_segment_size;
-  return iree_ok_status();
+  return true;
 }
 
-static iree_status_t loom_amdgpu_storage_layout_project_record(
-    const loom_low_storage_layout_record_t* source_record,
-    loom_amdgpu_storage_layout_segment_sizes_t* sizes,
-    loom_amdgpu_storage_layout_record_t* out_record) {
-  out_record->storage_value_id = source_record->storage_value_id;
-  return loom_amdgpu_storage_layout_project_reservation(
-      &source_record->reservation, sizes, &out_record->reservation);
+iree_status_t loom_amdgpu_storage_layout_emit_overflow(
+    const loom_module_t* module, const loom_op_t* function_op,
+    loom_value_id_t value_id, loom_storage_space_t space,
+    iree_diagnostic_emitter_t emitter) {
+  const loom_diagnostic_param_t params[] = {
+      loom_param_string(loom_low_diagnostic_function_name(module, function_op)),
+      loom_param_string(space == LOOM_STORAGE_SPACE_WORKGROUP
+                            ? IREE_SV("AMDGPU workgroup")
+                            : IREE_SV("AMDGPU private/scratch")),
+  };
+  const loom_diagnostic_emission_t emission = {
+      .op = loom_low_diagnostic_value_origin_op(module, value_id, function_op),
+      .error = LOOM_ERR_TARGET_096,
+      .params = params,
+      .param_count = IREE_ARRAYSIZE(params),
+  };
+  return iree_diagnostic_emit(emitter, &emission);
 }
 
 iree_status_t loom_amdgpu_storage_layout_build(
+    const loom_module_t* module, const loom_op_t* function_op,
     const loom_low_storage_layout_t* source_layout,
     loom_amdgpu_storage_layout_segment_sizes_t segment_prefix,
-    iree_arena_allocator_t* arena, loom_amdgpu_storage_layout_t* out_layout) {
+    iree_arena_allocator_t* arena, iree_diagnostic_emitter_t emitter,
+    bool* out_accepted, loom_amdgpu_storage_layout_t* out_layout) {
+  *out_accepted = true;
+  *out_layout = (loom_amdgpu_storage_layout_t){0};
   loom_amdgpu_storage_layout_record_t* records = NULL;
   if (source_layout->record_count != 0) {
     IREE_RETURN_IF_ERROR(
@@ -81,9 +72,24 @@ iree_status_t loom_amdgpu_storage_layout_build(
                                   sizeof(*records), (void**)&records));
   }
   loom_amdgpu_storage_layout_segment_sizes_t sizes = segment_prefix;
-  for (iree_host_size_t i = 0; i < source_layout->record_count; ++i) {
-    IREE_RETURN_IF_ERROR(loom_amdgpu_storage_layout_project_record(
-        &source_layout->records[i], &sizes, &records[i]));
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0; i < source_layout->record_count &&
+                               *out_accepted && iree_status_is_ok(status);
+       ++i) {
+    const loom_low_storage_layout_record_t* source_record =
+        &source_layout->records[i];
+    records[i].storage_value_id = source_record->storage_value_id;
+    if (!loom_amdgpu_storage_layout_try_project_reservation(
+            &source_record->reservation, &sizes, &records[i].reservation)) {
+      *out_accepted = false;
+      status = loom_amdgpu_storage_layout_emit_overflow(
+          module, function_op, source_record->storage_value_id,
+          source_record->reservation.space, emitter);
+    }
+  }
+  IREE_RETURN_IF_ERROR(status);
+  if (!*out_accepted) {
+    return iree_ok_status();
   }
   *out_layout = (loom_amdgpu_storage_layout_t){
       .segment_sizes = sizes,

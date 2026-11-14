@@ -15,6 +15,7 @@ loom_check_test_suite(
     name = "test",
     srcs = [
         "call_policy.loom-test",
+        "condition_diagnostics.loom-test",
         "execution_choices.loom-test",
         "hal_abi_layout.loom-test",
         "hal_abi_live_ins.loom-test",

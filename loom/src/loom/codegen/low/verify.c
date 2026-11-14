@@ -438,7 +438,7 @@ static const loom_named_attr_t* loom_low_verify_find_named_attr(
   return NULL;
 }
 
-static iree_status_t loom_low_verify_descriptor_immediate_name(
+static void loom_low_verify_descriptor_immediate_name(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_descriptor_t* descriptor,
     uint16_t descriptor_immediate_index,
@@ -446,17 +446,6 @@ static iree_status_t loom_low_verify_descriptor_immediate_name(
     iree_string_view_t* out_immediate_name) {
   const loom_low_descriptor_layout_t* descriptor_layout =
       loom_low_descriptor_layout(descriptor_set, descriptor);
-  if (descriptor_layout->immediate_start > descriptor_set->immediate_count ||
-      descriptor_immediate_index >= descriptor_set->immediate_count -
-                                        descriptor_layout->immediate_start) {
-    const uint64_t immediate_row =
-        (uint64_t)descriptor_layout->immediate_start +
-        descriptor_immediate_index;
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "low descriptor immediate row %" PRIu64
-                            " is out of range",
-                            immediate_row);
-  }
   const uint32_t immediate_row =
       descriptor_layout->immediate_start + descriptor_immediate_index;
   const loom_low_immediate_t* immediate =
@@ -464,29 +453,25 @@ static iree_status_t loom_low_verify_descriptor_immediate_name(
   *out_immediate_name = loom_low_descriptor_set_string(
       descriptor_set, immediate->field_name_string_ref);
   *out_immediate = immediate;
-  return iree_ok_status();
 }
 
-static iree_status_t loom_low_verify_descriptor_has_immediate_name(
+static bool loom_low_verify_descriptor_has_immediate_name(
     const loom_low_descriptor_set_t* descriptor_set,
-    const loom_low_descriptor_t* descriptor, iree_string_view_t attr_name,
-    bool* out_has_immediate) {
-  *out_has_immediate = false;
+    const loom_low_descriptor_t* descriptor, iree_string_view_t attr_name) {
   for (uint16_t i = 0;
        i <
        loom_low_descriptor_layout(descriptor_set, descriptor)->immediate_count;
        ++i) {
     const loom_low_immediate_t* immediate = NULL;
     iree_string_view_t immediate_name = iree_string_view_empty();
-    IREE_RETURN_IF_ERROR(loom_low_verify_descriptor_immediate_name(
-        descriptor_set, descriptor, i, &immediate, &immediate_name));
+    loom_low_verify_descriptor_immediate_name(descriptor_set, descriptor, i,
+                                              &immediate, &immediate_name);
     (void)immediate;
     if (iree_string_view_equal(attr_name, immediate_name)) {
-      *out_has_immediate = true;
-      return iree_ok_status();
+      return true;
     }
   }
-  return iree_ok_status();
+  return false;
 }
 
 static iree_status_t loom_low_verify_format_signed_range(
@@ -652,10 +637,8 @@ static iree_status_t loom_low_verify_i64_immediate_range(
           expected_range);
     }
     default:
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "low immediate '%.*s' has unsupported kind %u",
-                              (int)immediate_name.size, immediate_name.data,
-                              (unsigned)immediate->kind);
+      IREE_ASSERT_UNREACHABLE("invalid generated immediate kind");
+      IREE_BUILTIN_UNREACHABLE();
   }
 }
 
@@ -822,10 +805,8 @@ static iree_status_t loom_low_verify_descriptor_immediate_attr(
           domain_name);
     }
     default:
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "low immediate '%.*s' has unsupported kind %u",
-                              (int)immediate_name.size, immediate_name.data,
-                              (unsigned)immediate->kind);
+      IREE_ASSERT_UNREACHABLE("invalid generated immediate kind");
+      IREE_BUILTIN_UNREACHABLE();
   }
 }
 
@@ -848,8 +829,8 @@ static iree_status_t loom_low_verify_descriptor_immediates(
        ++i) {
     const loom_low_immediate_t* immediate = NULL;
     iree_string_view_t immediate_name = iree_string_view_empty();
-    IREE_RETURN_IF_ERROR(loom_low_verify_descriptor_immediate_name(
-        descriptor_set, descriptor, i, &immediate, &immediate_name));
+    loom_low_verify_descriptor_immediate_name(descriptor_set, descriptor, i,
+                                              &immediate, &immediate_name);
     const loom_named_attr_t* attr =
         loom_low_verify_find_named_attr(module, attrs, immediate_name);
     if (!attr) {
@@ -872,10 +853,8 @@ static iree_status_t loom_low_verify_descriptor_immediates(
     const loom_named_attr_t* attr = &attrs.entries[i];
     iree_string_view_t attr_name =
         loom_low_verify_string_or_empty(module, attr->name_id);
-    bool has_immediate = false;
-    IREE_RETURN_IF_ERROR(loom_low_verify_descriptor_has_immediate_name(
-        descriptor_set, descriptor, attr_name, &has_immediate));
-    if (has_immediate) {
+    if (loom_low_verify_descriptor_has_immediate_name(descriptor_set,
+                                                      descriptor, attr_name)) {
       continue;
     }
     IREE_RETURN_IF_ERROR(loom_low_verify_emit_unexpected_immediate_attr(
@@ -897,26 +876,19 @@ static bool loom_low_verify_constraint_requires_matching_types(
          kind == LOOM_LOW_CONSTRAINT_KIND_SAME_REGISTER_VALUE_TYPE;
 }
 
-static iree_status_t loom_low_verify_descriptor_packet_operand_field(
+static void loom_low_verify_descriptor_packet_operand_field(
     loom_low_function_verify_state_t* function_state, const loom_op_t* op,
     uint16_t packet_operand_index, loom_low_packet_field_t* out_field) {
   const loom_module_t* module = function_state->state->module;
-  if (packet_operand_index >= op->operand_count) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "low packet operand index %" PRIu16
-                            " exceeds op operand count %" PRIu16,
-                            packet_operand_index, op->operand_count);
-  }
   const loom_value_id_t value_id =
       loom_op_const_operands(op)[packet_operand_index];
   out_field->field_ref = loom_diagnostic_field_ref(
       LOOM_DIAGNOSTIC_FIELD_OPERAND, packet_operand_index);
   out_field->value_id = value_id;
   out_field->type = loom_module_value_type(module, value_id);
-  return iree_ok_status();
 }
 
-static iree_status_t loom_low_verify_descriptor_packet_field(
+static void loom_low_verify_descriptor_packet_field(
     loom_low_function_verify_state_t* function_state, const loom_op_t* op,
     const loom_low_descriptor_t* descriptor, uint16_t descriptor_operand_index,
     loom_low_packet_field_t* out_field) {
@@ -924,21 +896,7 @@ static iree_status_t loom_low_verify_descriptor_packet_field(
   const loom_low_descriptor_set_t* descriptor_set =
       function_state->target->descriptor_set;
   memset(out_field, 0, sizeof(*out_field));
-  if (descriptor_operand_index >= descriptor->operand_count) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "low descriptor operand index %" PRIu16
-                            " exceeds descriptor operand count %" PRIu16,
-                            descriptor_operand_index,
-                            descriptor->operand_count);
-  }
 
-  const uint32_t operand_row =
-      descriptor->operand_start + descriptor_operand_index;
-  if (operand_row >= descriptor_set->operand_index_count) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "low descriptor operand row %" PRIu32 " is out of range", operand_row);
-  }
   const loom_low_operand_t* descriptor_operand = loom_low_descriptor_operand(
       descriptor_set, descriptor, descriptor_operand_index);
   out_field->field_name = loom_low_descriptor_set_string(
@@ -946,28 +904,15 @@ static iree_status_t loom_low_verify_descriptor_packet_field(
 
   if (descriptor_operand_index < descriptor->result_count) {
     const uint16_t result_index = descriptor_operand->source_value_index;
-    if (result_index >= op->result_count) {
-      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "low packet result index %" PRIu16
-                              " exceeds op result count %" PRIu16,
-                              result_index, op->result_count);
-    }
     const loom_value_id_t value_id = loom_op_const_results(op)[result_index];
     out_field->field_ref =
         loom_diagnostic_field_ref(LOOM_DIAGNOSTIC_FIELD_RESULT, result_index);
     out_field->value_id = value_id;
     out_field->type = loom_module_value_type(module, value_id);
-    return iree_ok_status();
+    return;
   }
 
-  if (descriptor_operand->role == LOOM_LOW_OPERAND_ROLE_IMPLICIT) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "low descriptor constraint references implicit "
-                            "operand row %" PRIu16,
-                            descriptor_operand_index);
-  }
-
-  return loom_low_verify_descriptor_packet_operand_field(
+  loom_low_verify_descriptor_packet_operand_field(
       function_state, op, descriptor_operand->source_value_index, out_field);
 }
 
@@ -1350,13 +1295,6 @@ static iree_status_t loom_low_verify_descriptor_register_field(
   const loom_module_t* module = function_state->state->module;
   const loom_low_descriptor_set_t* descriptor_set =
       function_state->target->descriptor_set;
-  const uint32_t operand_row =
-      descriptor->operand_start + descriptor_operand_index;
-  if (operand_row >= descriptor_set->operand_index_count) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "low descriptor operand row %" PRIu32 " is out of range", operand_row);
-  }
   const loom_low_operand_t* descriptor_operand = loom_low_descriptor_operand(
       descriptor_set, descriptor, descriptor_operand_index);
 
@@ -1411,13 +1349,6 @@ static iree_status_t loom_low_verify_descriptor_registers(
     if (!is_result) {
       const loom_low_descriptor_set_t* descriptor_set =
           function_state->target->descriptor_set;
-      const uint32_t operand_row = descriptor->operand_start + i;
-      if (operand_row >= descriptor_set->operand_index_count) {
-        return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                                "low descriptor operand row %" PRIu32
-                                " is out of range",
-                                operand_row);
-      }
       const loom_low_operand_t* descriptor_operand =
           loom_low_descriptor_operand(descriptor_set, descriptor, i);
       if (descriptor_operand->role == LOOM_LOW_OPERAND_ROLE_IMPLICIT) {
@@ -1459,12 +1390,6 @@ static iree_status_t loom_low_verify_descriptor_constraints(
       loom_low_descriptor_layout(descriptor_set, descriptor);
   for (uint16_t i = 0; i < descriptor_layout->constraint_count; ++i) {
     const uint32_t constraint_row = descriptor_layout->constraint_start + i;
-    if (constraint_row >= descriptor_set->constraint_count) {
-      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "low descriptor constraint row %" PRIu32
-                              " is out of range",
-                              constraint_row);
-    }
     const loom_low_constraint_t* constraint =
         &descriptor_set->constraints[constraint_row];
     if (!loom_low_verify_constraint_requires_matching_types(constraint->kind)) {
@@ -1474,21 +1399,15 @@ static iree_status_t loom_low_verify_descriptor_constraints(
         constraint->lhs_operand_index == diagnosed_register_value_type_lhs) {
       continue;
     }
-    if (constraint->rhs_operand_index == LOOM_LOW_ID_NONE) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "low descriptor binary constraint kind %u has no "
-                              "rhs operand",
-                              (unsigned)constraint->kind);
-    }
 
     loom_low_packet_field_t lhs_field;
-    IREE_RETURN_IF_ERROR(loom_low_verify_descriptor_packet_field(
-        function_state, op, descriptor, constraint->lhs_operand_index,
-        &lhs_field));
+    loom_low_verify_descriptor_packet_field(function_state, op, descriptor,
+                                            constraint->lhs_operand_index,
+                                            &lhs_field);
     loom_low_packet_field_t rhs_field;
-    IREE_RETURN_IF_ERROR(loom_low_verify_descriptor_packet_field(
-        function_state, op, descriptor, constraint->rhs_operand_index,
-        &rhs_field));
+    loom_low_verify_descriptor_packet_field(function_state, op, descriptor,
+                                            constraint->rhs_operand_index,
+                                            &rhs_field);
     loom_type_t lhs_type = lhs_field.type;
     loom_type_t rhs_type = rhs_field.type;
     if (constraint->kind == LOOM_LOW_CONSTRAINT_KIND_SAME_REGISTER_VALUE_TYPE) {
@@ -1586,8 +1505,8 @@ static iree_status_t loom_low_verify_descriptor_register_parts(
         .field_name = loom_low_descriptor_set_string(
             descriptor_set, descriptor_operand->field_name_string_ref),
     };
-    IREE_RETURN_IF_ERROR(loom_low_verify_descriptor_packet_operand_field(
-        function_state, op, descriptor_operand->source_value_index, &field));
+    loom_low_verify_descriptor_packet_operand_field(
+        function_state, op, descriptor_operand->source_value_index, &field);
     const loom_low_register_part_mask_t required_mask =
         loom_low_verify_descriptor_operand_part_mask(
             function_state, descriptor_operand, field.type);
@@ -1616,8 +1535,8 @@ static iree_status_t loom_low_verify_descriptor_register_parts(
                  ->minimum_packet_operand_count;
          packet_operand_index < op->operand_count; ++packet_operand_index) {
       loom_low_packet_field_t field = {.field_name = field_name};
-      IREE_RETURN_IF_ERROR(loom_low_verify_descriptor_packet_operand_field(
-          function_state, op, packet_operand_index, &field));
+      loom_low_verify_descriptor_packet_operand_field(
+          function_state, op, packet_operand_index, &field);
       const loom_low_register_part_mask_t required_mask =
           loom_low_verify_descriptor_operand_part_mask(
               function_state, descriptor_operand, field.type);
@@ -1639,8 +1558,8 @@ static iree_status_t loom_low_verify_descriptor_register_parts(
 
   for (uint16_t i = 0; i < descriptor->result_count; ++i) {
     loom_low_packet_field_t field;
-    IREE_RETURN_IF_ERROR(loom_low_verify_descriptor_packet_field(
-        function_state, op, descriptor, i, &field));
+    loom_low_verify_descriptor_packet_field(function_state, op, descriptor, i,
+                                            &field);
     const loom_low_operand_t* descriptor_operand =
         loom_low_descriptor_operand(descriptor_set, descriptor, i);
     loom_low_register_part_mask_t result_mask =
@@ -1651,8 +1570,8 @@ static iree_status_t loom_low_verify_descriptor_register_parts(
     if (loom_low_verify_descriptor_tied_operand_index(
             descriptor_set, descriptor, i, &tied_operand_index)) {
       loom_low_packet_field_t tied_field;
-      IREE_RETURN_IF_ERROR(loom_low_verify_descriptor_packet_field(
-          function_state, op, descriptor, tied_operand_index, &tied_field));
+      loom_low_verify_descriptor_packet_field(function_state, op, descriptor,
+                                              tied_operand_index, &tied_field);
       IREE_RETURN_IF_ERROR(loom_low_register_parts_continue(
           &function_state->register_parts, field.value_id, tied_field.value_id,
           result_mask,
@@ -1952,14 +1871,6 @@ static iree_status_t loom_low_verify_packet(
         actual_op_name, expected_op_name));
     return loom_low_verify_define_full_register_results(function_state, op);
   }
-  if (descriptor->result_count > descriptor->operand_count) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "low descriptor '%.*s' has %" PRIu16
-                            " results but only %" PRIu16 " operand rows",
-                            (int)descriptor_key.size, descriptor_key.data,
-                            descriptor->result_count,
-                            descriptor->operand_count);
-  }
 
   const uint32_t expected_result_count = descriptor->result_count;
   const uint32_t minimum_operand_count =
@@ -2195,13 +2106,8 @@ static iree_status_t loom_low_verify_walk_op(void* user_data, loom_op_t* op,
   if (packet_kind != LOOM_LOW_DESCRIPTOR_PACKET_NONE) {
     const uint32_t descriptor_ordinal =
         loom_low_descriptor_packet_ordinal(op, packet_kind);
-    if (!loom_low_descriptor_set_has_descriptor(
-            function_state->target->descriptor_set, descriptor_ordinal)) {
-      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "Low packet descriptor ordinal %" PRIu32
-                              " is outside the active representation contract",
-                              descriptor_ordinal);
-    }
+    IREE_ASSERT(loom_low_descriptor_set_has_descriptor(
+        function_state->target->descriptor_set, descriptor_ordinal));
   }
   loom_low_descriptor_packet_initialize(function_state->target->descriptor_set,
                                         op, &packet);

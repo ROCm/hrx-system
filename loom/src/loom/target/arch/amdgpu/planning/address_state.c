@@ -6,14 +6,14 @@
 
 #include "loom/target/arch/amdgpu/planning/address_state.h"
 
-#include <inttypes.h>
-
 #include "loom/codegen/low/descriptors.h"
 #include "loom/codegen/low/packet.h"
-#include "loom/ir/module.h"
+#include "loom/error/parameter.h"
 #include "loom/ops/low/ops.h"
 #include "loom/target/arch/amdgpu/encoding/encoding.h"
+#include "loom/target/arch/amdgpu/error_catalog.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
+#include "loom/target/artifact_diagnostics.h"
 
 static void loom_amdgpu_address_state_insert_slot_bank(
     loom_amdgpu_vgpr_msb_slot_t slot, uint32_t bank,
@@ -68,40 +68,6 @@ loom_amdgpu_address_state_requirement_for_packet(
   return requirement;
 }
 
-static iree_status_t loom_amdgpu_address_state_read_mode_immediate(
-    const loom_low_schedule_table_t* schedule,
-    const loom_low_schedule_node_t* node, uint16_t* out_mode_immediate) {
-  *out_mode_immediate = 0;
-  const loom_op_t* op = node->op;
-  if (!loom_low_op_isa(op)) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "AMDGPU s_set_vgpr_msb packet is not a low.op");
-  }
-  const loom_string_id_t mode_name_id =
-      loom_module_lookup_string(schedule->module, IREE_SV("mode"));
-  const loom_named_attr_slice_t attrs = loom_low_op_attrs(op);
-  const loom_named_attr_t* attr = NULL;
-  for (iree_host_size_t i = 0; i < attrs.count; ++i) {
-    if (attrs.entries[i].name_id == mode_name_id) {
-      attr = &attrs.entries[i];
-      break;
-    }
-  }
-  if (attr == NULL || attr->value.kind != LOOM_ATTR_I64) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "AMDGPU s_set_vgpr_msb packet is missing an i64 "
-                            "mode immediate");
-  }
-  if (attr->value.i64 < 0 || attr->value.i64 > UINT16_MAX) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "AMDGPU s_set_vgpr_msb mode immediate %" PRId64
-                            " is not a u16",
-                            attr->value.i64);
-  }
-  *out_mode_immediate = (uint16_t)attr->value.i64;
-  return iree_ok_status();
-}
-
 static void loom_amdgpu_address_state_append_transition(
     loom_amdgpu_address_state_transition_t* transitions,
     iree_host_size_t* transition_count, const loom_low_schedule_node_t* node,
@@ -117,7 +83,9 @@ static void loom_amdgpu_address_state_append_transition(
 iree_status_t loom_amdgpu_address_state_plan_build(
     const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,
-    iree_arena_allocator_t* arena, loom_amdgpu_address_state_plan_t* out_plan) {
+    iree_arena_allocator_t* arena, iree_diagnostic_emitter_t emitter,
+    bool* out_accepted, loom_amdgpu_address_state_plan_t* out_plan) {
+  *out_accepted = true;
   *out_plan = (loom_amdgpu_address_state_plan_t){
       .schedule = schedule,
       .allocation = allocation,
@@ -146,14 +114,19 @@ iree_status_t loom_amdgpu_address_state_plan_build(
   }
   iree_host_size_t transition_count = 0;
 
-  for (iree_host_size_t block_index = 0; block_index < schedule->block_count;
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t block_index = 0;
+       block_index < schedule->block_count && *out_accepted &&
+       iree_status_is_ok(status);
        ++block_index) {
     const loom_low_schedule_block_t* block = &schedule->blocks[block_index];
     uint8_t current_mode = 0;
     const loom_low_schedule_node_t* terminator = NULL;
     uint32_t terminator_node_index = LOOM_LOW_SCHEDULE_NODE_NONE;
     for (uint32_t scheduled_ordinal = 0;
-         scheduled_ordinal < block->scheduled_node_count; ++scheduled_ordinal) {
+         scheduled_ordinal < block->scheduled_node_count && *out_accepted &&
+         iree_status_is_ok(status);
+         ++scheduled_ordinal) {
       const loom_low_packet_view_t packet = loom_low_packet_at_block_ordinal(
           schedule, (uint32_t)block_index, scheduled_ordinal);
       const uint32_t node_index = packet.node_index;
@@ -163,16 +136,24 @@ iree_status_t loom_amdgpu_address_state_plan_build(
         terminator_node_index = node_index;
       }
       if (node->descriptor == set_vgpr_msb_descriptor) {
-        uint16_t mode_immediate = 0;
-        IREE_RETURN_IF_ERROR(loom_amdgpu_address_state_read_mode_immediate(
-            schedule, node, &mode_immediate));
+        const uint16_t mode_immediate = (uint16_t)loom_attr_as_i64(
+            loom_amdgpu_s_set_vgpr_msb_mode(loom_low_packet_attrs(&packet)));
         if ((uint8_t)(mode_immediate >> 8) != current_mode) {
-          return iree_make_status(
-              IREE_STATUS_FAILED_PRECONDITION,
-              "AMDGPU authored s_set_vgpr_msb previous mode does not match "
-              "the scheduled address state");
+          *out_accepted = false;
+          const loom_diagnostic_param_t params[] = {
+              loom_param_u32(mode_immediate >> 8),
+              loom_param_u32(current_mode),
+          };
+          const loom_diagnostic_emission_t emission = {
+              .op = node->op,
+              .error = LOOM_ERR_AMDGPU_062,
+              .params = params,
+              .param_count = IREE_ARRAYSIZE(params),
+          };
+          status = iree_diagnostic_emit(emitter, &emission);
+        } else {
+          current_mode = (uint8_t)mode_immediate;
         }
-        current_mode = (uint8_t)(mode_immediate & 0xFFu);
         continue;
       }
 
@@ -183,10 +164,12 @@ iree_status_t loom_amdgpu_address_state_plan_build(
         continue;
       }
       if (iree_any_bit_set(node->traits, LOOM_TRAIT_TERMINATOR)) {
-        return iree_make_status(
-            IREE_STATUS_FAILED_PRECONDITION,
-            "AMDGPU target-state terminator cannot restore MODE after its "
-            "own operands");
+        *out_accepted = false;
+        status = loom_target_artifact_emit_requirement(
+            emitter, node->op, IREE_SV("AMDGPU"),
+            IREE_SV(
+                "terminator operands must use the default VGPR address mode"));
+        continue;
       }
       const uint8_t new_mode =
           (uint8_t)((current_mode & ~requirement.mask) |
@@ -196,22 +179,17 @@ iree_status_t loom_amdgpu_address_state_plan_build(
           new_mode);
       current_mode = new_mode;
     }
-    if (current_mode == 0) {
+    if (!*out_accepted || !iree_status_is_ok(status) || current_mode == 0) {
       continue;
-    }
-    if (terminator == NULL ||
-        terminator->scheduled_ordinal + 1 != block->scheduled_node_count) {
-      return iree_make_status(
-          IREE_STATUS_FAILED_PRECONDITION,
-          "AMDGPU address-state block must end in a scheduled terminator to "
-          "restore MODE");
     }
     loom_amdgpu_address_state_append_transition(
         transitions, &transition_count, terminator, terminator_node_index,
         current_mode, /*new_mode=*/0);
   }
 
-  out_plan->transitions = transitions;
-  out_plan->transition_count = transition_count;
-  return iree_ok_status();
+  if (*out_accepted && iree_status_is_ok(status)) {
+    out_plan->transitions = transitions;
+    out_plan->transition_count = transition_count;
+  }
+  return status;
 }

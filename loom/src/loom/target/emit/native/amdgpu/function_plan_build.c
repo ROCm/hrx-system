@@ -28,11 +28,13 @@ iree_status_t loom_amdgpu_function_plan_build(
   }
 
   IREE_RETURN_IF_ERROR(loom_amdgpu_storage_layout_build(
+      frame->schedule.module, frame->schedule.function_op,
       &frame->schedule.requirements.storage_layout, segment_prefix, arena,
-      &out_plan->storage_layout));
-  IREE_RETURN_IF_ERROR(loom_amdgpu_packet_plan_build(
-      &frame->schedule, &frame->allocation, packet_options, arena,
-      /*out_vopd_rejections=*/NULL, &out_plan->packet_plan));
-  *out_accepted = true;
-  return iree_ok_status();
+      emitter, out_accepted, &out_plan->storage_layout));
+  if (!*out_accepted) {
+    return iree_ok_status();
+  }
+  return loom_amdgpu_packet_plan_build(
+      &frame->schedule, &frame->allocation, packet_options, arena, emitter,
+      out_accepted, /*out_vopd_rejections=*/NULL, &out_plan->packet_plan);
 }

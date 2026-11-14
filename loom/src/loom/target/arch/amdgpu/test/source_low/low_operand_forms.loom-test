@@ -865,9 +865,9 @@ low.func.def target<amdgpu.rdna3.core>(@target) @copy_exact_words(%unknown: reg<
 // The form consumes the join's retained fact, not the source constant's identity.
 amdgpu.target<gfx1100> @target
 
-low.func.def target<amdgpu.rdna3.core>(@target) @copy_joined_constant(%condition: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm {
+low.func.def target<amdgpu.rdna3.core>(@target) @copy_joined_constant(%condition: reg<amdgpu.scc>) -> (reg<amdgpu.vgpr>) asm {
   %value = s_mov_b32 255
-  low.cond_br %condition, ^left, ^right : reg<amdgpu.sgpr>
+  low.cond_br %condition, ^left, ^right : reg<amdgpu.scc>
 ^left:
   low.br ^join(%value: reg<amdgpu.sgpr>)
 ^right:
@@ -880,9 +880,9 @@ low.func.def target<amdgpu.rdna3.core>(@target) @copy_joined_constant(%condition
 // ----
 amdgpu.target<gfx1100> @target
 
-low.func.def target<amdgpu.rdna3.core>(@target) @copy_joined_constant(%condition: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm {
+low.func.def target<amdgpu.rdna3.core>(@target) @copy_joined_constant(%condition: reg<amdgpu.scc>) -> (reg<amdgpu.vgpr>) asm {
   %value = s_mov_b32 255
-  low.cond_br %condition, ^left, ^right : reg<amdgpu.sgpr>
+  low.cond_br %condition, ^left, ^right : reg<amdgpu.scc>
 ^left:
   low.br ^join(%value: reg<amdgpu.sgpr>)
 ^right:
@@ -924,9 +924,9 @@ low.func.def target<amdgpu.cdna3.core>(@target) @copy_exact_words(%unknown: reg<
 // The form consumes the join's retained fact, not the source constant's identity.
 amdgpu.target<gfx942> @target
 
-low.func.def target<amdgpu.cdna3.core>(@target) @copy_joined_constant(%condition: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm {
+low.func.def target<amdgpu.cdna3.core>(@target) @copy_joined_constant(%condition: reg<amdgpu.scc>) -> (reg<amdgpu.vgpr>) asm {
   %value = s_mov_b32 255
-  low.cond_br %condition, ^left, ^right : reg<amdgpu.sgpr>
+  low.cond_br %condition, ^left, ^right : reg<amdgpu.scc>
 ^left:
   low.br ^join(%value: reg<amdgpu.sgpr>)
 ^right:
@@ -939,9 +939,9 @@ low.func.def target<amdgpu.cdna3.core>(@target) @copy_joined_constant(%condition
 // ----
 amdgpu.target<gfx942> @target
 
-low.func.def target<amdgpu.cdna3.core>(@target) @copy_joined_constant(%condition: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm {
+low.func.def target<amdgpu.cdna3.core>(@target) @copy_joined_constant(%condition: reg<amdgpu.scc>) -> (reg<amdgpu.vgpr>) asm {
   %value = s_mov_b32 255
-  low.cond_br %condition, ^left, ^right : reg<amdgpu.sgpr>
+  low.cond_br %condition, ^left, ^right : reg<amdgpu.scc>
 ^left:
   low.br ^join(%value: reg<amdgpu.sgpr>)
 ^right:

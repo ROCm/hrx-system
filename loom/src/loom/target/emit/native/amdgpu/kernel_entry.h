@@ -49,6 +49,8 @@ iree_status_t loom_amdgpu_kernel_entry_envelope_build(
 
 // Prepends |envelope| to |body_text| and displaces all body-relative fixups.
 // Empty envelopes return the original body storage and fixup array directly.
+// The entry builder and native encoder own the input storage and fixup bounds.
+// Only combined-storage capacity and allocation can fail here.
 iree_status_t loom_amdgpu_kernel_entry_prepend_text(
     const loom_amdgpu_kernel_entry_envelope_t* envelope,
     iree_const_byte_span_t body_text,

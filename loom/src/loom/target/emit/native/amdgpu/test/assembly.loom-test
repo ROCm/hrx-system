@@ -129,6 +129,12 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_s_delay_alu() asm {
   s_delay_alu {delay = 1241}
   s_delay_alu {delay = 518}
   s_delay_alu {delay = 533}
+  s_delay_alu {delay = 8}
+  s_delay_alu {delay = 12}
+  s_delay_alu {delay = 96}
+  s_delay_alu {delay = 1024}
+  s_delay_alu {delay = 1536}
+  s_delay_alu {delay = 2047}
   return
 }
 
@@ -139,6 +145,12 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_s_delay_alu() asm {
   s_delay_alu instid0(SALU_CYCLE_1) | instskip(SKIP_4) | instid1(SALU_CYCLE_1)
   s_delay_alu instid0(TRANS32_DEP_2) | instid1(VALU_DEP_4)
   s_delay_alu instid0(TRANS32_DEP_1) | instskip(NEXT) | instid1(VALU_DEP_4)
+  s_delay_alu 0x008
+  s_delay_alu 0x00c
+  s_delay_alu 0x060
+  s_delay_alu 0x400
+  s_delay_alu 0x600
+  s_delay_alu 0x7ff
   s_endpgm
 
 // ====

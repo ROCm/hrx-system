@@ -233,12 +233,8 @@ typedef struct loom_amdgpu_encoding_bit_range_t {
   uint8_t bit_offset;
   // Number of encoded bits copied into the target packet.
   uint8_t bit_count;
-  // Source value bit offset before optional padding for this range.
+  // Source value bit offset of the encoded bits, excluding source padding.
   uint8_t source_bit_offset;
-  // Number of source padding bits that must match padding_value.
-  uint8_t padding_bit_count;
-  // Required value for the low padding bits in this range.
-  uint64_t padding_value;
 } loom_amdgpu_encoding_bit_range_t;
 
 typedef struct loom_amdgpu_encoding_field_layout_t {
@@ -248,10 +244,6 @@ typedef struct loom_amdgpu_encoding_field_layout_t {
   uint16_t range_start;
   // Number of bit-range rows for this field.
   uint8_t range_count;
-  // Number of low source bits consumed by this field including padding.
-  uint8_t value_bit_count;
-  // Target-owned field flags; bit 0 marks a conditional XML field.
-  uint16_t flags;
 } loom_amdgpu_encoding_field_layout_t;
 
 typedef struct loom_amdgpu_encoding_format_layout_t {
@@ -267,8 +259,6 @@ typedef struct loom_amdgpu_encoding_format_layout_t {
   uint16_t field_count;
   // Base identifier words loaded before fields are overlaid.
   uint32_t identifier_words[LOOM_AMDGPU_ENCODING_MAX_WORD_COUNT];
-  // Identifier-mask words from the vendor XML.
-  uint32_t identifier_mask_words[LOOM_AMDGPU_ENCODING_MAX_WORD_COUNT];
 } loom_amdgpu_encoding_format_layout_t;
 
 typedef struct loom_amdgpu_encoding_inline_f32_source_t {
@@ -450,111 +440,112 @@ loom_amdgpu_encoding_table_for_descriptor_set_ordinal(
 // the XML-derived encoding layout. When |opcode| is
 // LOOM_AMDGPU_ENCODING_OPCODE_NONE, no implicit OP field is written and callers
 // must supply any opcode-like fields explicitly. Field values are architectural
-// numbers; XML padding bits are validated before encoded ranges are extracted.
-iree_status_t loom_amdgpu_encoding_pack(
+// numbers admitted by the descriptor, operand address-map, and packet plans.
+// Generated format/field membership, widths, and source padding are trusted.
+// Packing has no allocation, IO, or recoverable failure path.
+void loom_amdgpu_encoding_pack(
     const loom_amdgpu_encoding_table_t* table, uint16_t encoding_format,
     uint16_t opcode, const loom_amdgpu_encoding_field_value_t* field_values,
     iree_host_size_t field_value_count,
     loom_amdgpu_encoding_packet_t* out_packet);
 
 // Packs a SOPP packet with its 16-bit immediate field.
-iree_status_t loom_amdgpu_encoding_pack_sopp_simm16(
+void loom_amdgpu_encoding_pack_sopp_simm16(
     const loom_amdgpu_encoding_table_t* table, uint16_t opcode,
     uint16_t immediate, loom_amdgpu_encoding_packet_t* out_packet);
 
 // Packs a 32-bit SGPR-to-SGPR s_mov_b32 packet using the target table's SOP1
 // layout.
-iree_status_t loom_amdgpu_encoding_pack_s_mov_b32_sgpr(
+void loom_amdgpu_encoding_pack_s_mov_b32_sgpr(
     const loom_amdgpu_encoding_table_t* table, uint16_t sdst, uint16_t ssrc0,
     loom_amdgpu_encoding_packet_t* out_packet);
 
 // Packs a 32-bit immediate-to-SGPR s_mov_b32 packet using an inline scalar
 // source when possible and a literal SOP1 form otherwise.
-iree_status_t loom_amdgpu_encoding_pack_s_mov_b32_u32(
+void loom_amdgpu_encoding_pack_s_mov_b32_u32(
     const loom_amdgpu_encoding_table_t* table, uint16_t sdst, uint32_t imm32,
     loom_amdgpu_encoding_packet_t* out_packet);
 
 // Packs a 64-bit EXEC-to-SGPR move.
-iree_status_t loom_amdgpu_encoding_pack_s_mov_b64_from_exec(
+void loom_amdgpu_encoding_pack_s_mov_b64_from_exec(
     const loom_amdgpu_encoding_table_t* table, uint16_t sdst,
     loom_amdgpu_encoding_packet_t* out_packet);
 
 // Packs a 64-bit SGPR-to-EXEC move.
-iree_status_t loom_amdgpu_encoding_pack_s_mov_b64_to_exec(
+void loom_amdgpu_encoding_pack_s_mov_b64_to_exec(
     const loom_amdgpu_encoding_table_t* table, uint16_t ssrc0,
     loom_amdgpu_encoding_packet_t* out_packet);
 
 // Packs an s_getpc_b64 packet writing one aligned SGPR pair.
-iree_status_t loom_amdgpu_encoding_pack_s_getpc_b64(
+void loom_amdgpu_encoding_pack_s_getpc_b64(
     const loom_amdgpu_encoding_table_t* table, uint16_t sdst,
     loom_amdgpu_encoding_packet_t* out_packet);
 
 // Packs an s_swappc_b64 direct-call packet.
-iree_status_t loom_amdgpu_encoding_pack_s_swappc_b64(
+void loom_amdgpu_encoding_pack_s_swappc_b64(
     const loom_amdgpu_encoding_table_t* table, uint16_t sdst, uint16_t ssrc0,
     loom_amdgpu_encoding_packet_t* out_packet);
 
 // Packs an s_setpc_b64 direct-return packet.
-iree_status_t loom_amdgpu_encoding_pack_s_setpc_b64(
+void loom_amdgpu_encoding_pack_s_setpc_b64(
     const loom_amdgpu_encoding_table_t* table, uint16_t ssrc0,
     loom_amdgpu_encoding_packet_t* out_packet);
 
 // Packs an s_add_u32 with a mandatory 32-bit literal source. The literal form
 // is retained even when |imm32| is inline-encodable so callers may patch it
 // after final text layout.
-iree_status_t loom_amdgpu_encoding_pack_s_add_u32_literal(
+void loom_amdgpu_encoding_pack_s_add_u32_literal(
     const loom_amdgpu_encoding_table_t* table, uint16_t sdst, uint16_t ssrc0,
     uint32_t imm32, loom_amdgpu_encoding_packet_t* out_packet);
 
 // Packs an s_addc_u32 with a mandatory 32-bit literal source.
-iree_status_t loom_amdgpu_encoding_pack_s_addc_u32_literal(
+void loom_amdgpu_encoding_pack_s_addc_u32_literal(
     const loom_amdgpu_encoding_table_t* table, uint16_t sdst, uint16_t ssrc0,
     uint32_t imm32, loom_amdgpu_encoding_packet_t* out_packet);
 
 // Packs a 32-bit VGPR-to-VGPR v_mov_b32 packet using the target table's VOP1
 // layout.
-iree_status_t loom_amdgpu_encoding_pack_v_mov_b32_vgpr(
+void loom_amdgpu_encoding_pack_v_mov_b32_vgpr(
     const loom_amdgpu_encoding_table_t* table, uint16_t vdst, uint16_t vsrc0,
     loom_amdgpu_encoding_packet_t* out_packet);
 
 // Packs a full-word VGPR exchange using the selected target's VOP1 layout.
 // Both register selectors name a read and a write in the same instruction.
-iree_status_t loom_amdgpu_encoding_pack_v_swap_b32(
+void loom_amdgpu_encoding_pack_v_swap_b32(
     const loom_amdgpu_encoding_table_t* table, uint16_t vdst, uint16_t vsrc0,
     loom_amdgpu_encoding_packet_t* out_packet);
 
 // Packs a 32-bit SGPR-to-VGPR v_mov_b32 packet using the target table's VOP1
 // layout.
-iree_status_t loom_amdgpu_encoding_pack_v_mov_b32_sgpr(
+void loom_amdgpu_encoding_pack_v_mov_b32_sgpr(
     const loom_amdgpu_encoding_table_t* table, uint16_t vdst, uint16_t ssrc0,
     loom_amdgpu_encoding_packet_t* out_packet);
 
 // Packs a 32-bit immediate-to-VGPR v_mov_b32 packet using an inline vector
 // source when possible and a literal VOP1 form otherwise.
-iree_status_t loom_amdgpu_encoding_pack_v_mov_b32_u32(
+void loom_amdgpu_encoding_pack_v_mov_b32_u32(
     const loom_amdgpu_encoding_table_t* table, uint16_t vdst, uint32_t imm32,
     loom_amdgpu_encoding_packet_t* out_packet);
 
 // Packs a native v_nop packet that contributes one vector issue slot.
-iree_status_t loom_amdgpu_encoding_pack_v_nop(
-    const loom_amdgpu_encoding_table_t* table,
-    loom_amdgpu_encoding_packet_t* out_packet);
+void loom_amdgpu_encoding_pack_v_nop(const loom_amdgpu_encoding_table_t* table,
+                                     loom_amdgpu_encoding_packet_t* out_packet);
 
 // Packs a 32-bit VOP2 packet whose first source is an immediate and second
 // source is a VGPR. The immediate uses an inline source when possible and a
 // literal VOP2 form otherwise.
-iree_status_t loom_amdgpu_encoding_pack_vop2_u32_vgpr(
+void loom_amdgpu_encoding_pack_vop2_u32_vgpr(
     const loom_amdgpu_encoding_table_t* table, uint16_t opcode, uint16_t vdst,
     uint32_t imm32, uint16_t vsrc1, loom_amdgpu_encoding_packet_t* out_packet);
 
 // Packs a 64-bit VOPDXY packet without a literal payload.
-iree_status_t loom_amdgpu_encoding_pack_vopdxy(
+void loom_amdgpu_encoding_pack_vopdxy(
     const loom_amdgpu_encoding_table_t* table,
     const loom_amdgpu_encoding_vopdxy_fields_t* fields,
     loom_amdgpu_encoding_packet_t* out_packet);
 
 // Packs a 96-bit VOPDXY packet with one shared 32-bit literal payload.
-iree_status_t loom_amdgpu_encoding_pack_vopdxy_literal(
+void loom_amdgpu_encoding_pack_vopdxy_literal(
     const loom_amdgpu_encoding_table_t* table,
     const loom_amdgpu_encoding_vopdxy_fields_t* fields, uint32_t literal_u32,
     loom_amdgpu_encoding_packet_t* out_packet);

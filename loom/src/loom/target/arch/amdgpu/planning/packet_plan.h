@@ -59,13 +59,15 @@ typedef struct loom_amdgpu_packet_plan_t {
 // Builds the target-owned AMDGPU packet plan for an addressability-accepted
 // emission frame. |out_vopd_rejections| may be NULL unless detailed VOPD
 // diagnostics are required. The caller must keep |schedule|, |allocation|,
-// and |arena| immutable/alive for as long as either output is used.
+// and |arena| immutable/alive for as long as either output is used. Program
+// rejection emits through |emitter| and sets |out_accepted| false; statuses
+// carry infrastructure failures.
 iree_status_t loom_amdgpu_packet_plan_build(
     const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,
     const loom_amdgpu_packet_plan_options_t* options,
-    iree_arena_allocator_t* arena,
-    loom_amdgpu_vopd_rejection_table_t* out_vopd_rejections,
+    iree_arena_allocator_t* arena, iree_diagnostic_emitter_t emitter,
+    bool* out_accepted, loom_amdgpu_vopd_rejection_table_t* out_vopd_rejections,
     loom_amdgpu_packet_plan_t* out_plan);
 
 #ifdef __cplusplus

@@ -33,10 +33,13 @@ iree_status_t loom_amdgpu_kernel_emission_build(
               ? LOOM_AMDGPU_ENCODE_INSTRUCTION_STREAM_FLAG_CAPTURE_NATIVE_INSERTIONS
               : LOOM_AMDGPU_ENCODE_INSTRUCTION_STREAM_FLAG_NONE,
   };
-  IREE_RETURN_IF_ERROR(
-      loom_amdgpu_encode_instruction_stream_result_with_options(
-          &frame->schedule, &frame->allocation, &encode_options, table_arena,
-          &stream));
+  bool encoded = false;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_encode_instruction_stream(
+      &frame->schedule, &frame->allocation, &encode_options, table_arena,
+      emitter, &encoded, &stream));
+  if (!encoded) {
+    return iree_ok_status();
+  }
 
   const loom_amdgpu_kernel_entry_envelope_t* entry_envelope =
       record->entry_envelope;
@@ -59,9 +62,14 @@ iree_status_t loom_amdgpu_kernel_emission_build(
       IREE_RETURN_IF_ERROR(
           iree_string_builder_append_cstring(target_listing, "\n\n"));
     }
+    bool assembly_accepted = false;
     IREE_RETURN_IF_ERROR(loom_amdgpu_emit_kernel_assembly(
         &frame->schedule, &frame->allocation, record, packet_plan,
-        &stream.layout, target_listing, table_arena));
+        &stream.layout, target_listing, table_arena, emitter,
+        &assembly_accepted));
+    if (!assembly_accepted) {
+      return iree_ok_status();
+    }
   }
 
   *out_result = (loom_amdgpu_kernel_emission_result_t){

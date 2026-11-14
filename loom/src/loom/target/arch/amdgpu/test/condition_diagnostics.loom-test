@@ -1,0 +1,40 @@
+// RUN: verify
+
+// Final branches consume the architectural predicate, never a scalar truth
+// value or lane mask retained by structured control lowering.
+amdgpu.target<gfx1100> @target
+
+low.func.def public target<amdgpu.rdna3.core>(@target) @vector_condition(%condition: reg<amdgpu.vgpr>) asm {
+  // ERROR@+1: TYPE/003 {export="vector_condition", operand_name="condition", actual_type="reg<amdgpu.vgpr>", expected_constraint="a single amdgpu.scc register"}
+  low.cond_br %condition, ^yes, ^no : reg<amdgpu.vgpr>
+^yes:
+  return
+^no:
+  return
+}
+
+// ====
+
+amdgpu.target<gfx90a> @target
+
+low.func.def public target<amdgpu.cdna2.core>(@target) @scalar_is_not_predicate(%condition: reg<amdgpu.sgpr>) asm {
+  // ERROR@+1: TYPE/003 {export="scalar_is_not_predicate", operand_name="condition", actual_type="reg<amdgpu.sgpr>"}
+  low.cond_br %condition, ^yes, ^no : reg<amdgpu.sgpr>
+^yes:
+  return
+^no:
+  return
+}
+
+// ====
+
+amdgpu.target<gfx942> @target
+
+low.func.def public target<amdgpu.cdna3.core>(@target) @one_predicate(%condition: reg<amdgpu.scc x2>) asm {
+  // ERROR@+1: TYPE/003 {export="one_predicate", operand_name="condition", actual_type="reg<amdgpu.scc x2>"}
+  low.cond_br %condition, ^yes, ^no : reg<amdgpu.scc x2>
+^yes:
+  return
+^no:
+  return
+}

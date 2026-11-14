@@ -46,25 +46,32 @@ typedef struct loom_amdgpu_kernel_program_assembly_function_t {
 // The output is assembler input containing a text function body and an AMDHSA
 // kernel descriptor. It deliberately remains text: assembling, disassembling,
 // loading, and launching are tool/runtime adapter responsibilities.
-// |scratch_arena| receives transient formatting storage.
+// |scratch_arena| receives transient formatting storage. Unsupported syntax
+// emits through |emitter| and sets |out_accepted| to false.
 iree_status_t loom_amdgpu_emit_kernel_assembly(
     const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,
     const loom_amdgpu_kernel_record_t* record,
     const struct loom_amdgpu_packet_plan_t* packet_plan,
     const struct loom_amdgpu_instruction_layout_t* instruction_layout,
-    iree_string_builder_t* builder, iree_arena_allocator_t* scratch_arena);
+    iree_string_builder_t* builder, iree_arena_allocator_t* scratch_arena,
+    iree_diagnostic_emitter_t emitter, bool* out_accepted);
 
 // Emits a kernel entry and its module-local helper bodies as one program.
 //
 // |functions[0]| is the loader-visible entry body. Remaining rows are private
 // helper definitions in final text order. Direct-call spellings in the entry
-// therefore resolve to labels emitted by the same listing.
+// therefore resolve to labels emitted by the same listing. Any rejected body
+// sets |out_accepted| to false independently of diagnostic callback presence.
+// Entry diagnostics use |entry_emitter|; shared helper diagnostics use the
+// module-scoped |artifact_emitter| regardless of which entry prints them.
 iree_status_t loom_amdgpu_emit_kernel_program_assembly(
     const loom_amdgpu_kernel_record_t* record,
     const loom_amdgpu_kernel_program_assembly_function_t* functions,
     iree_host_size_t function_count, iree_string_builder_t* builder,
-    iree_arena_allocator_t* scratch_arena);
+    iree_arena_allocator_t* scratch_arena,
+    iree_diagnostic_emitter_t entry_emitter,
+    iree_diagnostic_emitter_t artifact_emitter, bool* out_accepted);
 
 #ifdef __cplusplus
 }  // extern "C"

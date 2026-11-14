@@ -120,3 +120,99 @@ low.kernel.def target<amdgpu.cdna3.core>(@target) workgroup_size(64, 1, 1) @entr
   %address = s_mov_b64_symbol {symbol = @data}
   return
 }
+
+// ====
+
+amdgpu.target<gfx90a> @target
+
+global.rodata.def @data = bytes("00")
+
+low.kernel.def target<amdgpu.cdna2.core>(@target) workgroup_size(64, 1, 1) @entry() asm {
+  %zero = s_mov_b32 0
+  // ERROR@+1: AMDGPU/061 {export="entry", expected_component="the low 32 bits", actual_component="an ordinary value"}
+  %address, %carry = s_add_u32_rhs_symbol_rel32_lo %zero {symbol = @data}
+  return
+}
+
+// ====
+
+amdgpu.target<gfx942> @target
+
+global.rodata.def @data = bytes("00")
+
+low.kernel.def target<amdgpu.cdna3.core>(@target) workgroup_size(64, 1, 1) @entry() asm {
+  %pc = s_getpc_b64
+  %high = slice %pc[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  // ERROR@+1: AMDGPU/061 {export="entry", expected_component="the low 32 bits", actual_component="the high 32 bits"}
+  %address, %carry = s_add_u32_rhs_symbol_rel32_lo %high {symbol = @data}
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+
+global.rodata.def @data = bytes("00")
+
+low.kernel.def target<amdgpu.rdna3.core>(@target) workgroup_size(64, 1, 1) @entry() asm {
+  %pc = s_getpc_b64
+  %low = slice %pc[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %zero = s_mov_b32 0
+  %unused, %carry = s_add_u32_rhs_symbol_rel32_lo %low {symbol = @data}
+  // ERROR@+1: AMDGPU/061 {export="entry", expected_component="the high 32 bits", actual_component="an ordinary value"}
+  %address, %carry_out = s_addc_u32_rhs_symbol_rel32_hi %zero, %carry {symbol = @data}
+  return
+}
+
+// ====
+
+amdgpu.target<gfx942> @target
+
+global.rodata.def @data = bytes("00")
+
+low.kernel.def target<amdgpu.cdna3.core>(@target) workgroup_size(64, 1, 1) @entry() asm {
+  %pc = s_getpc_b64
+  %low = slice %pc[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %unused, %carry = s_add_u32_rhs_symbol_rel32_lo %low {symbol = @data}
+  // ERROR@+1: AMDGPU/061 {export="entry", expected_component="the high 32 bits", actual_component="the low 32 bits"}
+  %address, %carry_out = s_addc_u32_rhs_symbol_rel32_hi %low, %carry {symbol = @data}
+  return
+}
+
+// ====
+
+// Shared helper rejection retains its own source, without an arbitrary export.
+amdgpu.target<gfx1100> @target
+
+global.rodata.def @data = bytes("00")
+
+low.func.def target<amdgpu.rdna3.core>(@target) @helper() asm {
+  %zero = s_mov_b32 0
+  // ERROR@+1: AMDGPU/061 {expected_component="the low 32 bits"}
+  %address, %carry = s_add_u32_rhs_symbol_rel32_lo %zero {symbol = @data}
+  return
+}
+
+low.kernel.def target<amdgpu.rdna3.core>(@target) workgroup_size(64, 1, 1) @entry() asm {
+  low.func.call noinline @helper() : ()
+  return
+}
+
+// ====
+
+// Retained-call roots carry the same source/export context as leaf roots.
+amdgpu.target<gfx942> @target
+
+global.rodata.def @data = bytes("00")
+
+low.func.def target<amdgpu.cdna3.core>(@target) @helper() asm {
+  return
+}
+
+low.kernel.def target<amdgpu.cdna3.core>(@target) workgroup_size(64, 1, 1) @entry() asm {
+  low.func.call noinline @helper() : ()
+  %zero = s_mov_b32 0
+  // ERROR@+1: AMDGPU/061 {export="entry", expected_component="the low 32 bits"}
+  %address, %carry = s_add_u32_rhs_symbol_rel32_lo %zero {symbol = @data}
+  return
+}

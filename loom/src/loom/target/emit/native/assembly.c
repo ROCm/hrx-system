@@ -8,17 +8,10 @@
 
 #include <inttypes.h>
 
+#include "loom/error/error_catalog.h"
+#include "loom/error/parameter.h"
 #include "loom/ir/context.h"
 #include "loom/ops/low/ops.h"
-
-iree_string_view_t loom_native_assembly_module_string(
-    const loom_module_t* module, loom_string_id_t string_id) {
-  if (module == NULL || string_id == LOOM_STRING_ID_INVALID ||
-      string_id >= module->strings.count) {
-    return iree_string_view_empty();
-  }
-  return loom_string_table_get(&module->strings, string_id);
-}
 
 iree_string_view_t loom_native_assembly_descriptor_string(
     const loom_low_descriptor_set_t* descriptor_set,
@@ -26,89 +19,39 @@ iree_string_view_t loom_native_assembly_descriptor_string(
   return loom_low_descriptor_set_string(descriptor_set, string_ref);
 }
 
-const loom_named_attr_t* loom_native_assembly_find_attr(
-    const loom_module_t* module, loom_named_attr_slice_t attrs,
-    iree_string_view_t name) {
-  for (iree_host_size_t i = 0; i < attrs.count; ++i) {
-    const loom_named_attr_t* attr = &attrs.entries[i];
-    if (iree_string_view_equal(
-            loom_native_assembly_module_string(module, attr->name_id), name)) {
-      return attr;
-    }
-  }
-  return NULL;
-}
-
-iree_status_t loom_native_assembly_read_i64_attr(const loom_module_t* module,
-                                                 loom_named_attr_slice_t attrs,
-                                                 iree_string_view_t name,
-                                                 int64_t* out_value) {
-  const loom_named_attr_t* attr =
-      loom_native_assembly_find_attr(module, attrs, name);
-  if (attr == NULL) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "native assembly requires attribute '%.*s'",
-                            (int)name.size, name.data);
-  }
-  if (attr->value.kind != LOOM_ATTR_I64) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "native assembly attribute '%.*s' must be i64",
-                            (int)name.size, name.data);
-  }
-  *out_value = loom_attr_as_i64(attr->value);
-  return iree_ok_status();
-}
-
 iree_status_t loom_native_assembly_append_block_label(
     const loom_low_schedule_table_t* schedule, const loom_block_t* block,
     iree_string_builder_t* builder) {
   const uint32_t block_index = loom_low_packet_block_index(schedule, block);
-  if (block_index == LOOM_LOW_PACKET_INDEX_NONE) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "native assembly block is outside the scheduled "
-                            "function");
-  }
   return iree_string_builder_append_format(builder, ".Lbb%" PRIu32,
                                            block_index);
 }
 
-iree_status_t loom_native_assembly_make_unsupported_structural_packet_status(
-    iree_string_view_t target_name,
+iree_status_t loom_native_assembly_emit_unsupported_operation(
+    iree_string_view_t format,
     const loom_native_assembly_packet_context_t* context) {
   const loom_op_t* op = context->packet->node->op;
-  const loom_op_vtable_t* vtable =
-      loom_op_vtable(context->schedule->module, op);
-  iree_string_view_t op_name =
-      vtable ? loom_op_vtable_name(vtable) : IREE_SV("<unknown>");
-  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                          "%.*s assembly emitter does not support structural "
-                          "op %.*s",
-                          (int)target_name.size, target_name.data,
-                          (int)op_name.size, op_name.data);
-}
-
-static iree_status_t loom_native_assembly_append_with_callback(
-    const loom_native_assembly_append_packet_callback_t* callback,
-    iree_string_view_t op_name,
-    const loom_native_assembly_packet_context_t* context) {
-  if (callback->fn == NULL) {
-    return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                            "native assembly emitter does not support %.*s",
-                            (int)op_name.size, op_name.data);
-  }
-  return callback->fn(callback->user_data, context);
-}
-
-static iree_status_t loom_native_assembly_append_structural_packet(
-    const loom_native_assembly_format_options_t* options,
-    const loom_native_assembly_packet_context_t* context) {
-  const loom_op_t* op = context->packet->node->op;
-  const loom_op_vtable_t* vtable =
-      loom_op_vtable(context->schedule->module, op);
-  iree_string_view_t op_name =
-      vtable ? loom_op_vtable_name(vtable) : IREE_SV("<unknown>");
-  return loom_native_assembly_append_with_callback(
-      &options->append_structural_packet, op_name, context);
+  const loom_low_descriptor_set_t* descriptor_set =
+      context->schedule->target.descriptor_set;
+  const iree_string_view_t name =
+      context->packet->descriptor != NULL
+          ? loom_low_descriptor_set_string(
+                descriptor_set,
+                loom_low_descriptor_key_string_ref(descriptor_set,
+                                                   context->packet->descriptor))
+          : loom_op_name(context->schedule->module, op);
+  const loom_diagnostic_param_t params[] = {
+      loom_param_string(format),
+      loom_param_string(name),
+  };
+  const loom_diagnostic_emission_t emission = {
+      .op = op,
+      .error = LOOM_ERR_BACKEND_062,
+      .params = params,
+      .param_count = IREE_ARRAYSIZE(params),
+  };
+  *context->accepted = false;
+  return iree_diagnostic_emit(context->emitter, &emission);
 }
 
 static iree_status_t loom_native_assembly_append_packet(
@@ -118,7 +61,8 @@ static iree_status_t loom_native_assembly_append_packet(
     return options->append_descriptor_packet.fn(
         options->append_descriptor_packet.user_data, context);
   }
-  return loom_native_assembly_append_structural_packet(options, context);
+  return options->append_structural_packet.fn(
+      options->append_structural_packet.user_data, context);
 }
 
 static void loom_native_assembly_truncate_builder(
@@ -178,14 +122,15 @@ static iree_status_t loom_native_assembly_append_block(
     const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,
     const loom_native_assembly_format_options_t* options,
-    iree_string_builder_t* builder, iree_host_size_t block_index) {
+    iree_string_builder_t* builder, iree_host_size_t block_index,
+    iree_diagnostic_emitter_t emitter, bool* accepted) {
   const loom_low_schedule_block_t* block = &schedule->blocks[block_index];
   if (loom_native_assembly_should_print_block_label(schedule, block_index)) {
     IREE_RETURN_IF_ERROR(loom_native_assembly_append_block_label(
         schedule, block->block, builder));
     IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, ":\n"));
   }
-  for (uint32_t i = 0; i < block->scheduled_node_count; ++i) {
+  for (uint32_t i = 0; i < block->scheduled_node_count && *accepted; ++i) {
     const iree_host_size_t packet_index =
         (iree_host_size_t)block->scheduled_node_start + i;
     const loom_low_packet_view_t packet =
@@ -200,12 +145,14 @@ static iree_status_t loom_native_assembly_append_block(
         .allocation = allocation,
         .packet = &packet,
         .builder = builder,
+        .emitter = emitter,
+        .accepted = accepted,
     };
     if (options->append_before_packet.fn != NULL) {
       IREE_RETURN_IF_ERROR(options->append_before_packet.fn(
           options->append_before_packet.user_data, &context));
     }
-    if (!packet_is_visible) {
+    if (!*accepted || !packet_is_visible) {
       continue;
     }
     const iree_host_size_t line_start = iree_string_builder_size(builder);
@@ -225,14 +172,21 @@ iree_status_t loom_native_assembly_format_fragment(
     const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,
     const loom_native_assembly_format_options_t* options,
-    iree_string_builder_t* builder, iree_arena_allocator_t* scratch_arena) {
-  (void)scratch_arena;
+    iree_string_builder_t* builder, iree_diagnostic_emitter_t emitter,
+    bool* out_accepted) {
+  *out_accepted = true;
+  const iree_host_size_t fragment_start = iree_string_builder_size(builder);
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t block_index = 0;
-       block_index < schedule->block_count && iree_status_is_ok(status);
+       block_index < schedule->block_count && *out_accepted &&
+       iree_status_is_ok(status);
        ++block_index) {
     status = loom_native_assembly_append_block(schedule, allocation, options,
-                                               builder, block_index);
+                                               builder, block_index, emitter,
+                                               out_accepted);
+  }
+  if (!*out_accepted) {
+    loom_native_assembly_truncate_builder(builder, fragment_start);
   }
   return status;
 }

@@ -54,6 +54,7 @@ from loom.target.arch.amdgpu.descriptors import (
     _REG_PART_SGPR_LOW16,
     _REG_PART_VGPR_HIGH16,
     _REG_PART_VGPR_LOW16,
+    _REG_SCC,
     _REG_SGPR,
     _REG_VCC,
     _REG_VGPR,
@@ -145,6 +146,7 @@ from loom.target.arch.amdgpu.descriptors import (
 from loom.target.arch.amdgpu.descriptors.api import (
     _AMDGPU_CORE_DESCRIPTOR_SET_BUILDER_FLAG_GFX125X,
     _order_descriptor_sets_for_shared_ordinals,
+    _validate_native_asm_values,
     _with_storage_lease_rows,
     amdgpu_core_descriptor_set_instruction_encoding_names_by_isa_key,
     amdgpu_core_descriptor_set_instruction_names,
@@ -919,6 +921,75 @@ def test_descriptor_encoding_formats_accept_target_supplements() -> None:
     )
     _validate_descriptor_encoding_formats(
         "rdna4", _isa_spec("ENC_VOP3"), _descriptor_set(descriptor)
+    )
+
+
+def test_encoded_register_fields_require_numeric_register_classes() -> None:
+    descriptor = replace(
+        _descriptor("amdgpu.test", "test"),
+        operands=(
+            Operand(
+                "state",
+                OperandRole.RESULT,
+                (RegClassAlt(_REG_SCC),),
+                encoding_field_id=amdgpu_encoding_field_id("SDST"),
+            ),
+        ),
+    )
+    _expect_value_error_contains(
+        "requires an SGPR, VGPR, or AGPR",
+        lambda: _validate_descriptor_encoding_formats(
+            "cdna3", _isa_spec("ENC_SOP1"), _descriptor_set(descriptor)
+        ),
+    )
+
+
+def test_native_asm_visible_registers_require_a_spelling() -> None:
+    descriptor = replace(
+        _descriptor("amdgpu.test", "test"),
+        operands=(Operand("state", OperandRole.RESULT, (RegClassAlt(_REG_SCC),)),),
+    )
+    _expect_value_error_contains(
+        "has no native register spelling",
+        lambda: _validate_native_asm_values(_descriptor_set(descriptor)),
+    )
+    implicit = replace(descriptor.operands[0], flags=(OperandFlag.IMPLICIT,))
+    _validate_native_asm_values(
+        _descriptor_set(replace(descriptor, operands=(implicit,)))
+    )
+    form = replace(
+        _s_set_vgpr_msb_descriptor().asm_forms[0],
+        native_assembly_values=(
+            NativeAsmValue(NativeAsmValueKind.RESULT, field_name="state"),
+        ),
+    )
+    _expect_value_error_contains(
+        "has no native register spelling",
+        lambda: _validate_native_asm_values(
+            _descriptor_set(
+                replace(descriptor, operands=(implicit,), asm_forms=(form,))
+            )
+        ),
+    )
+
+
+def test_native_asm_target_formats_are_known() -> None:
+    descriptor = _s_set_vgpr_msb_descriptor()
+    form = replace(
+        descriptor.asm_forms[0],
+        native_assembly_values=(
+            NativeAsmValue(
+                NativeAsmValueKind.IMMEDIATE_TARGET_FORMAT,
+                field_name="mode",
+                target_format_id=65535,
+            ),
+        ),
+    )
+    _expect_value_error_contains(
+        "uses unknown immediate format 65535",
+        lambda: _validate_native_asm_values(
+            _descriptor_set(replace(descriptor, asm_forms=(form,)))
+        ),
     )
 
 

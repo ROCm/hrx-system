@@ -141,12 +141,15 @@ typedef struct loom_low_spill_materialization_traffic_plan_t {
 // Selects target traffic recipes from one immutable generic materialization
 // plan before any storage or traffic IR is created. The returned plan and its
 // payload are owned by |arena| and consumed during the same materialization.
+// Program rejection emits through |emitter| and sets |out_accepted| to false;
+// statuses carry infrastructure failures. No IR is mutated on rejection.
 typedef iree_status_t (*loom_low_spill_materialization_plan_traffic_fn_t)(
     void* user_data, const loom_low_allocation_table_t* table,
     const loom_low_allocation_spill_plan_t* spill_plans,
     iree_host_size_t spill_plan_count,
     const loom_low_spill_materialization_plan_t* materialization_plan,
-    iree_arena_allocator_t* arena,
+    iree_arena_allocator_t* arena, iree_diagnostic_emitter_t emitter,
+    bool* out_accepted,
     loom_low_spill_materialization_traffic_plan_t* out_plan);
 
 typedef struct loom_low_allocation_materialization_options_t {

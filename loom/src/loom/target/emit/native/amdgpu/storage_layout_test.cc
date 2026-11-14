@@ -9,9 +9,11 @@
 #include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/error/error_catalog.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/low/ops.h"
+#include "loom/testing/diagnostic_matchers.h"
 
 namespace loom {
 namespace {
@@ -123,8 +125,12 @@ class AmdgpuStorageLayoutTest : public ::testing::Test {
     loom_low_storage_layout_t source_layout = {};
     IREE_RETURN_IF_ERROR(loom_low_storage_layout_builder_finish(
         &source_layout_builder_, &layout_arena_, &source_layout));
-    return loom_amdgpu_storage_layout_build(&source_layout, segment_prefix,
-                                            &layout_arena_, out_layout);
+    bool accepted = false;
+    iree_status_t status = loom_amdgpu_storage_layout_build(
+        module_, function_op_, &source_layout, segment_prefix, &layout_arena_,
+        /*emitter=*/{}, &accepted, out_layout);
+    EXPECT_TRUE(accepted);
+    return status;
   }
 
   void ExpectReservation(const loom_amdgpu_storage_layout_t& layout,
@@ -176,12 +182,39 @@ TEST_F(AmdgpuStorageLayoutTest,
       .byte_alignment = 32,
   };
   loom_amdgpu_storage_layout_reservation_t projected = {};
-  IREE_ASSERT_OK(loom_amdgpu_storage_layout_project_reservation(
+  ASSERT_TRUE(loom_amdgpu_storage_layout_try_project_reservation(
       &planned, &layout.segment_sizes, &projected));
   EXPECT_EQ(projected.byte_offset, 32u);
   EXPECT_EQ(projected.byte_size, 8u);
   EXPECT_EQ(projected.byte_alignment, 32u);
   EXPECT_EQ(layout.segment_sizes.private_segment_fixed_size, 40u);
+}
+
+TEST_F(AmdgpuStorageLayoutTest, MergedSegmentsRejectOverflowWithoutASink) {
+  Reserve(LOOM_STORAGE_SPACE_PRIVATE, INT64_MAX, 1);
+  Reserve(LOOM_STORAGE_SPACE_SCRATCH, INT64_MAX, 1);
+  const loom_value_id_t overflowing = Reserve(LOOM_STORAGE_SPACE_PRIVATE, 3, 1);
+  loom_low_storage_layout_t source_layout = {};
+  IREE_ASSERT_OK(loom_low_storage_layout_builder_finish(
+      &source_layout_builder_, &layout_arena_, &source_layout));
+  for (bool capture_diagnostics : {false, true}) {
+    testing::DiagnosticEmissionCapture capture;
+    bool accepted = true;
+    loom_amdgpu_storage_layout_t layout = {};
+    IREE_ASSERT_OK(loom_amdgpu_storage_layout_build(
+        module_, function_op_, &source_layout, {}, &layout_arena_,
+        capture_diagnostics ? capture.emitter() : iree_diagnostic_emitter_t{},
+        &accepted, &layout));
+    EXPECT_FALSE(accepted);
+    EXPECT_EQ(layout.record_count, 0u);
+    EXPECT_EQ(layout.records, nullptr);
+    if (capture_diagnostics) {
+      ASSERT_EQ(capture.emissions.size(), 1u);
+      EXPECT_EQ(capture.emissions[0].error, LOOM_ERR_TARGET_096);
+      EXPECT_EQ(loom_low_storage_reserve_storage(capture.emissions[0].op),
+                overflowing);
+    }
+  }
 }
 
 TEST_F(AmdgpuStorageLayoutTest, ResolvesViewsAgainstProjectedOffsets) {
@@ -250,14 +283,6 @@ TEST_F(AmdgpuStorageLayoutTest, RetainsPrefixWithoutLocalStorage) {
   EXPECT_EQ(layout.record_count, 0u);
   EXPECT_EQ(layout.segment_sizes.group_segment_fixed_size, 16u);
   EXPECT_EQ(layout.segment_sizes.private_segment_fixed_size, 48u);
-}
-
-TEST_F(AmdgpuStorageLayoutTest, RejectsStackStorage) {
-  Reserve(LOOM_STORAGE_SPACE_STACK, 8, 4);
-
-  loom_amdgpu_storage_layout_t layout = {};
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
-                        BuildLayout({}, &layout));
 }
 
 }  // namespace

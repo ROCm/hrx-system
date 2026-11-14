@@ -878,9 +878,13 @@ class PacketPlanFixture {
 
     analysis_ = AnalyzeFrame(frame_);
     if (component == PlanComponent::kWait) {
+      bool accepted = false;
       AbortOnError(loom_amdgpu_address_state_plan_build(
           &frame_.schedule, &frame_.allocation, &frame_arena_,
-          &address_state_));
+          /*emitter=*/{}, &accepted, &address_state_));
+      if (!accepted) {
+        std::abort();
+      }
     }
   }
 
@@ -954,10 +958,14 @@ static PlanMetrics BuildReferencePlan(PacketPlanFixture& fixture,
         fixture.transient_arena()->used_allocation_size;
   } else {
     loom_amdgpu_packet_plan_t plan = {};
+    bool accepted = false;
     AbortOnError(loom_amdgpu_packet_plan_build(
         &fixture.frame().schedule, &fixture.frame().allocation,
         /*options=*/nullptr, fixture.plan_arena(),
-        /*out_vopd_rejections=*/nullptr, &plan));
+        /*emitter=*/{}, &accepted, /*out_vopd_rejections=*/nullptr, &plan));
+    if (!accepted) {
+      std::abort();
+    }
     metrics.wait_action_count = plan.wait_plan.action_count;
     metrics.hazard_record_count = plan.wait_plan.hazard_plan.record_count +
                                   plan.wait_states.hazard_plan.record_count;
@@ -1051,10 +1059,14 @@ static void BenchmarkPlan(benchmark::State& state, const FixtureSpec& spec,
       benchmark::DoNotOptimize(plan);
     } else {
       loom_amdgpu_packet_plan_t plan = {};
+      bool accepted = false;
       AbortOnError(loom_amdgpu_packet_plan_build(
           &fixture.frame().schedule, &fixture.frame().allocation,
           /*options=*/nullptr, fixture.plan_arena(),
-          /*out_vopd_rejections=*/nullptr, &plan));
+          /*emitter=*/{}, &accepted, /*out_vopd_rejections=*/nullptr, &plan));
+      if (!accepted) {
+        std::abort();
+      }
       benchmark::DoNotOptimize(plan);
     }
   }

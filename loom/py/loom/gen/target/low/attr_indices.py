@@ -11,14 +11,14 @@ from __future__ import annotations
 from collections.abc import Iterable
 
 from loom.gen.target.low import c_spelling
-from loom.target.low_descriptors import Descriptor, ImmediateFlag, target_relative_name
+from loom.target.low_descriptors import Immediate, ImmediateFlag, target_relative_name
 
 
-def _descriptor_attr_indices(descriptor: Descriptor) -> dict[tuple[str, bool], int]:
+def _immediate_attr_indices(immediates: tuple[Immediate, ...]) -> dict[tuple[str, bool], int]:
     indices: dict[tuple[str, bool], int] = {}
-    for index, immediate in enumerate(sorted(descriptor.immediates, key=lambda value: value.field_name)):
+    for index, immediate in enumerate(sorted(immediates, key=lambda value: value.field_name)):
         optional = ImmediateFlag.DEFAULT_VALUE in immediate.flags
-        if optional and index + 1 != len(descriptor.immediates):
+        if optional and index + 1 != len(immediates):
             # A later field makes presence at this index ambiguous. A trailing
             # optional field is present exactly when dictionary count > index.
             break
@@ -28,24 +28,25 @@ def _descriptor_attr_indices(descriptor: Descriptor) -> dict[tuple[str, bool], i
 
 def emit_attr_accessors(
     c_enum_prefix: str,
-    descriptors: Iterable[Descriptor],
+    descriptor_immediates: Iterable[tuple[str, tuple[Immediate, ...]]],
     *,
     target_key: str | None,
 ) -> list[str]:
     """Emits dictionary readers shared by descriptor variants.
 
-    A target's common header can pass multiple variants of the same descriptor.
+    A target's common header can pass multiple schemas for the same descriptor,
+    independently of the descriptor data selected for a particular build.
     Only fields with a fixed, identical position in every variant are exposed.
     A trailing optional field returns ABSENT when omitted. Storage positions
     remain implementation details of the named readers.
     """
 
     descriptor_indices: dict[str, dict[tuple[str, bool], int]] = {}
-    for descriptor in descriptors:
-        indices = _descriptor_attr_indices(descriptor)
-        if descriptor.key in descriptor_indices:
-            indices = {name: index for name, index in descriptor_indices[descriptor.key].items() if indices.get(name) == index}
-        descriptor_indices[descriptor.key] = indices
+    for key, immediates in descriptor_immediates:
+        indices = _immediate_attr_indices(immediates)
+        if key in descriptor_indices:
+            indices = {name: index for name, index in descriptor_indices[key].items() if indices.get(name) == index}
+        descriptor_indices[key] = indices
 
     lines: list[str] = []
     accessor_fields: dict[str, tuple[str, str]] = {}

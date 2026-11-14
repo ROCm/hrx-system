@@ -1,0 +1,26 @@
+// RUN: emit amdgpu-assembly @entry
+amdgpu.target<gfx1201> @target
+
+low.func.def schedule(locked) target<amdgpu.rdna4.core>(@target) @entry(%address: reg<amdgpu.vgpr x2>, %value: reg<amdgpu.vgpr>) asm {
+  // ERROR@+1: BACKEND/063 {format="AMDGPU assembly", field_name="th", value="7"}
+  %loaded = flat_load_dword %address {th = 7}
+  return
+}
+
+// ====
+amdgpu.target<gfx1201> @target
+
+low.func.def schedule(locked) target<amdgpu.rdna4.core>(@target) @entry(%address: reg<amdgpu.vgpr x2>, %value: reg<amdgpu.vgpr>) asm {
+  // ERROR@+1: BACKEND/063 {format="AMDGPU assembly", field_name="th", value="5"}
+  %loaded = flat_atomic_add_u32_rtn %address, %value {th = 5}
+  return
+}
+
+// ====
+amdgpu.target<gfx1201> @target
+
+low.func.def schedule(locked) target<amdgpu.rdna4.core>(@target) @entry(%address: reg<amdgpu.vgpr x2>, %value: reg<amdgpu.vgpr>) asm {
+  // ERROR@+1: BACKEND/063 {format="AMDGPU assembly", field_name="th", value="7"}
+  %loaded = flat_atomic_add_u32_rtn %address, %value {th = 7}
+  return
+}

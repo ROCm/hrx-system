@@ -1,0 +1,18 @@
+// RUN: emit amdgpu-assembly @entry
+amdgpu.target<gfx1250> @target
+
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @entry() asm {
+  // ERROR@+1: AMDGPU/062 {previous_mode="1", scheduled_mode="0"}
+  s_set_vgpr_msb 256
+  return
+}
+
+// ====
+amdgpu.target<gfx1250> @target
+
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @entry() asm {
+  s_set_vgpr_msb 1
+  // ERROR@+1: AMDGPU/062 {previous_mode="2", scheduled_mode="1"}
+  s_set_vgpr_msb 512
+  return
+}

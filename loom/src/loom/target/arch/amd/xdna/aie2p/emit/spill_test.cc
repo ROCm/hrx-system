@@ -134,8 +134,11 @@ class Aie2pSpillTest : public ::testing::TestWithParam<uint64_t> {
     };
     loom_aie2p_stack_layout_t layout = {.arena = &arena_};
     loom_low_spill_materialization_traffic_plan_t plan = {};
+    bool accepted = false;
     IREE_ASSERT_OK(loom_aie2p_spill_plan(&layout, &table, &spill, 1,
-                                         &materialization, &arena_, &plan));
+                                         &materialization, &arena_,
+                                         /*emitter=*/{}, &accepted, &plan));
+    ASSERT_TRUE(accepted);
     const uint64_t depth =
         (GetParam() + 4 + bytes + alignment - 1) & ~(uint64_t)(alignment - 1);
     EXPECT_EQ(layout.byte_length, depth);
@@ -311,8 +314,11 @@ TEST_P(Aie2pSpillTest, PreservesTupleWordsAndNarrowOffsetsAtEncodingBoundary) {
   };
   loom_aie2p_stack_layout_t layout = {.arena = &arena_};
   loom_low_spill_materialization_traffic_plan_t plan = {};
+  bool accepted = false;
   IREE_ASSERT_OK(loom_aie2p_spill_plan(&layout, &table, &spill, 1,
-                                       &materialization, &arena_, &plan));
+                                       &materialization, &arena_,
+                                       /*emitter=*/{}, &accepted, &plan));
+  ASSERT_TRUE(accepted);
   EXPECT_EQ(layout.byte_length, GetParam() + 8);
   for (size_t action = 0; action < 3; ++action) {
     SCOPED_TRACE(action);

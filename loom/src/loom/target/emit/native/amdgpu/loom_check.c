@@ -169,39 +169,57 @@ static iree_status_t loom_amdgpu_loom_check_parse_emit_options(
 
 static iree_status_t loom_amdgpu_loom_check_emit_assembly(
     const loom_low_emission_frame_t* frame, iree_string_builder_t* builder,
-    iree_arena_allocator_t* arena) {
+    iree_arena_allocator_t* arena, iree_diagnostic_emitter_t emitter) {
+  bool accepted = false;
   loom_amdgpu_packet_plan_t packet_plan = {0};
   IREE_RETURN_IF_ERROR(loom_amdgpu_packet_plan_build(
-      &frame->schedule, &frame->allocation, /*options=*/NULL, arena,
-      /*out_vopd_rejections=*/NULL, &packet_plan));
+      &frame->schedule, &frame->allocation, /*options=*/NULL, arena, emitter,
+      &accepted, /*out_vopd_rejections=*/NULL, &packet_plan));
+  if (!accepted) {
+    return iree_ok_status();
+  }
   const loom_amdgpu_encode_instruction_stream_options_t encoding_options = {
       .packet_plan = &packet_plan,
   };
   loom_amdgpu_encoded_instruction_stream_t stream = {0};
-  IREE_RETURN_IF_ERROR(
-      loom_amdgpu_encode_instruction_stream_result_with_options(
-          &frame->schedule, &frame->allocation, &encoding_options, arena,
-          &stream));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_encode_instruction_stream(
+      &frame->schedule, &frame->allocation, &encoding_options, arena, emitter,
+      &accepted, &stream));
+  if (!accepted) {
+    return iree_ok_status();
+  }
   const loom_amdgpu_assembly_fragment_options_t assembly_options = {
       .packet_plan = &packet_plan,
       .instruction_layout = &stream.layout,
   };
-  return loom_amdgpu_emit_assembly_fragment_with_options(
-      &frame->schedule, &frame->allocation, &assembly_options, builder, arena);
+  return loom_amdgpu_emit_assembly_fragment(
+      &frame->schedule, &frame->allocation, &assembly_options, builder, arena,
+      emitter, &accepted);
 }
 
 static iree_status_t loom_amdgpu_loom_check_encode_native(
     const loom_low_emission_frame_t* frame, iree_arena_allocator_t* arena,
+    iree_diagnostic_emitter_t emitter, bool* out_accepted,
     iree_const_byte_span_t* out_text) {
+  *out_accepted = false;
+  *out_text = iree_const_byte_span_empty();
+  bool accepted = false;
   loom_amdgpu_packet_plan_t packet_plan = {0};
   IREE_RETURN_IF_ERROR(loom_amdgpu_packet_plan_build(
-      &frame->schedule, &frame->allocation, /*options=*/NULL, arena,
-      /*out_vopd_rejections=*/NULL, &packet_plan));
+      &frame->schedule, &frame->allocation, /*options=*/NULL, arena, emitter,
+      &accepted, /*out_vopd_rejections=*/NULL, &packet_plan));
+  if (!accepted) {
+    return iree_ok_status();
+  }
   const loom_amdgpu_encode_instruction_stream_options_t encoding_options = {
       .packet_plan = &packet_plan,
   };
-  return loom_amdgpu_encode_instruction_stream_with_options(
-      &frame->schedule, &frame->allocation, &encoding_options, arena, out_text);
+  loom_amdgpu_encoded_instruction_stream_t stream = {0};
+  IREE_RETURN_IF_ERROR(loom_amdgpu_encode_instruction_stream(
+      &frame->schedule, &frame->allocation, &encoding_options, arena, emitter,
+      out_accepted, &stream));
+  *out_text = stream.text;
+  return iree_ok_status();
 }
 
 static iree_status_t loom_amdgpu_loom_check_format_native_words(
@@ -218,44 +236,60 @@ static iree_status_t loom_amdgpu_loom_check_format_native_words(
 
 static iree_status_t loom_amdgpu_loom_check_emit_wait_state_plan_json(
     const loom_low_emission_frame_t* frame, iree_string_builder_t* builder,
-    iree_arena_allocator_t* arena) {
+    iree_arena_allocator_t* arena, iree_diagnostic_emitter_t emitter) {
+  bool accepted = false;
   loom_amdgpu_packet_plan_t packet_plan = {0};
   IREE_RETURN_IF_ERROR(loom_amdgpu_packet_plan_build(
-      &frame->schedule, &frame->allocation, /*options=*/NULL, arena,
-      /*out_vopd_rejections=*/NULL, &packet_plan));
+      &frame->schedule, &frame->allocation, /*options=*/NULL, arena, emitter,
+      &accepted, /*out_vopd_rejections=*/NULL, &packet_plan));
+  if (!accepted) {
+    return iree_ok_status();
+  }
   return loom_amdgpu_wait_state_plan_format_json(&packet_plan.wait_states,
                                                  builder);
 }
 
 static iree_status_t loom_amdgpu_loom_check_emit_wait_state_plan(
     const loom_low_emission_frame_t* frame, iree_string_builder_t* builder,
-    iree_arena_allocator_t* arena) {
+    iree_arena_allocator_t* arena, iree_diagnostic_emitter_t emitter) {
+  bool accepted = false;
   loom_amdgpu_packet_plan_t packet_plan = {0};
   IREE_RETURN_IF_ERROR(loom_amdgpu_packet_plan_build(
-      &frame->schedule, &frame->allocation, /*options=*/NULL, arena,
-      /*out_vopd_rejections=*/NULL, &packet_plan));
+      &frame->schedule, &frame->allocation, /*options=*/NULL, arena, emitter,
+      &accepted, /*out_vopd_rejections=*/NULL, &packet_plan));
+  if (!accepted) {
+    return iree_ok_status();
+  }
   return loom_amdgpu_wait_state_plan_format_text(&packet_plan.wait_states,
                                                  builder);
 }
 
 static iree_status_t loom_amdgpu_loom_check_emit_wait_counter_plan_json(
     const loom_low_emission_frame_t* frame, iree_string_builder_t* builder,
-    iree_arena_allocator_t* arena) {
+    iree_arena_allocator_t* arena, iree_diagnostic_emitter_t emitter) {
+  bool accepted = false;
   loom_amdgpu_packet_plan_t packet_plan = {0};
   IREE_RETURN_IF_ERROR(loom_amdgpu_packet_plan_build(
-      &frame->schedule, &frame->allocation, /*options=*/NULL, arena,
-      /*out_vopd_rejections=*/NULL, &packet_plan));
+      &frame->schedule, &frame->allocation, /*options=*/NULL, arena, emitter,
+      &accepted, /*out_vopd_rejections=*/NULL, &packet_plan));
+  if (!accepted) {
+    return iree_ok_status();
+  }
   return loom_amdgpu_wait_plan_format_json(&packet_plan.wait_plan, builder);
 }
 
 static iree_status_t loom_amdgpu_loom_check_emit_vopd_plan_json(
     const loom_low_emission_frame_t* frame, iree_string_builder_t* builder,
-    iree_arena_allocator_t* arena) {
+    iree_arena_allocator_t* arena, iree_diagnostic_emitter_t emitter) {
+  bool accepted = false;
   loom_amdgpu_packet_plan_t packet_plan = {0};
   loom_amdgpu_vopd_rejection_table_t rejections = {0};
   IREE_RETURN_IF_ERROR(loom_amdgpu_packet_plan_build(
-      &frame->schedule, &frame->allocation, /*options=*/NULL, arena,
-      &rejections, &packet_plan));
+      &frame->schedule, &frame->allocation, /*options=*/NULL, arena, emitter,
+      &accepted, &rejections, &packet_plan));
+  if (!accepted) {
+    return iree_ok_status();
+  }
   return loom_amdgpu_vopd_plan_format_json(&packet_plan.vopd_plan, &rejections,
                                            builder);
 }
@@ -299,25 +333,12 @@ static iree_status_t loom_amdgpu_loom_check_build_schedule_models(
     const loom_check_emit_provider_request_t* request,
     const loom_check_test_native_module_t* native_module,
     loom_symbol_fact_table_t* symbol_facts,
-    iree_string_view_t function_symbol_name,
+    iree_string_view_t function_symbol_name, iree_diagnostic_emitter_t emitter,
     loom_low_schedule_pair_affinity_list_t* out_affinities,
     loom_low_schedule_structural_state_read_list_t* out_state_reads,
     loom_low_schedule_structural_model_t* out_storage_address_model) {
   *out_affinities = loom_low_schedule_pair_affinity_list_empty();
   *out_state_reads = loom_low_schedule_structural_state_read_list_empty();
-  loom_check_test_native_diagnostic_emitter_capture_t diagnostic_capture = {
-      .context = native_module->diagnostic_context,
-      .module = native_module->module,
-      .source_resolver = native_module->source_resolver,
-      .emitter = LOOM_EMITTER_PASS,
-  };
-  iree_diagnostic_emitter_t emitter = {0};
-  if (request->diagnostic_collector != NULL) {
-    emitter = (iree_diagnostic_emitter_t){
-        .fn = loom_check_test_native_diagnostic_emitter_capture_emit,
-        .user_data = &diagnostic_capture,
-    };
-  }
   loom_op_t* low_function = NULL;
   IREE_RETURN_IF_ERROR(loom_check_low_emit_find_low_function_def(
       native_module->module, function_symbol_name, request->test_case,
@@ -351,6 +372,19 @@ static iree_status_t loom_amdgpu_loom_check_emit_provider_execute(
     const loom_check_emit_provider_request_t* request,
     const loom_check_test_native_module_t* native_module) {
   (void)provider;
+  loom_check_test_native_diagnostic_emitter_capture_t diagnostic_capture = {
+      .context = native_module->diagnostic_context,
+      .module = native_module->module,
+      .source_resolver = native_module->source_resolver,
+      .emitter = LOOM_EMITTER_PASS,
+  };
+  iree_diagnostic_emitter_t emitter = {0};
+  if (request->diagnostic_collector != NULL) {
+    emitter = (iree_diagnostic_emitter_t){
+        .fn = loom_check_test_native_diagnostic_emitter_capture_emit,
+        .user_data = &diagnostic_capture,
+    };
+  }
   loom_amdgpu_loom_check_emit_options_t options;
   IREE_RETURN_IF_ERROR(
       loom_amdgpu_loom_check_parse_emit_options(request, &options));
@@ -384,7 +418,7 @@ static iree_status_t loom_amdgpu_loom_check_emit_provider_execute(
   loom_low_schedule_structural_model_t storage_address_model = {0};
   IREE_RETURN_IF_ERROR(loom_amdgpu_loom_check_build_schedule_models(
       request, native_module, &symbol_facts, options.function_symbol_name,
-      &schedule_pair_affinities, &schedule_state_reads,
+      emitter, &schedule_pair_affinities, &schedule_state_reads,
       &storage_address_model));
   if (request->diagnostic_collector != NULL &&
       loom_check_diagnostic_collector_has_error(
@@ -421,14 +455,19 @@ static iree_status_t loom_amdgpu_loom_check_emit_provider_execute(
   }
   if (iree_string_view_equal(request->target_name, IREE_SV("amdgpu-native"))) {
     iree_const_byte_span_t text = iree_const_byte_span_empty();
+    bool accepted = false;
     return loom_amdgpu_loom_check_encode_native(&frame, request->case_arena,
-                                                &text);
+                                                emitter, &accepted, &text);
   }
   if (iree_string_view_equal(request->target_name,
                              IREE_SV("amdgpu-native-words"))) {
     iree_const_byte_span_t text = iree_const_byte_span_empty();
+    bool accepted = false;
     IREE_RETURN_IF_ERROR(loom_amdgpu_loom_check_encode_native(
-        &frame, request->case_arena, &text));
+        &frame, request->case_arena, emitter, &accepted, &text));
+    if (!accepted) {
+      return iree_ok_status();
+    }
     return loom_amdgpu_loom_check_format_native_words(
         text, &request->result->actual_output);
   }
@@ -445,25 +484,25 @@ static iree_status_t loom_amdgpu_loom_check_emit_provider_execute(
   if (iree_string_view_equal(request->target_name,
                              IREE_SV("amdgpu-wait-state-plan-json"))) {
     return loom_amdgpu_loom_check_emit_wait_state_plan_json(
-        &frame, &request->result->actual_output, request->case_arena);
+        &frame, &request->result->actual_output, request->case_arena, emitter);
   }
   if (iree_string_view_equal(request->target_name,
                              IREE_SV("amdgpu-wait-state-plan"))) {
     return loom_amdgpu_loom_check_emit_wait_state_plan(
-        &frame, &request->result->actual_output, request->case_arena);
+        &frame, &request->result->actual_output, request->case_arena, emitter);
   }
   if (iree_string_view_equal(request->target_name,
                              IREE_SV("amdgpu-wait-counter-plan-json"))) {
     return loom_amdgpu_loom_check_emit_wait_counter_plan_json(
-        &frame, &request->result->actual_output, request->case_arena);
+        &frame, &request->result->actual_output, request->case_arena, emitter);
   }
   if (iree_string_view_equal(request->target_name,
                              IREE_SV("amdgpu-vopd-plan-json"))) {
     return loom_amdgpu_loom_check_emit_vopd_plan_json(
-        &frame, &request->result->actual_output, request->case_arena);
+        &frame, &request->result->actual_output, request->case_arena, emitter);
   }
   return loom_amdgpu_loom_check_emit_assembly(
-      &frame, &request->result->actual_output, request->case_arena);
+      &frame, &request->result->actual_output, request->case_arena, emitter);
 }
 
 static iree_status_t loom_amdgpu_loom_check_emit_provider_append_names(

@@ -15,9 +15,9 @@
 #define LOOM_TARGET_EMIT_NATIVE_ASSEMBLY_H_
 
 #include "iree/base/api.h"
-#include "iree/base/internal/arena.h"
 #include "iree/base/string_builder.h"
 #include "loom/codegen/low/packet.h"
+#include "loom/error/emitter.h"
 #include "loom/ops/op_defs.h"
 
 #ifdef __cplusplus
@@ -33,6 +33,10 @@ typedef struct loom_native_assembly_packet_context_t {
   const loom_low_packet_view_t* packet;
   // Text destination for the fragment.
   iree_string_builder_t* builder;
+  // Source-aware diagnostic sink supplied by the artifact owner.
+  iree_diagnostic_emitter_t emitter;
+  // Shared fragment acceptance, independent of diagnostic callbacks.
+  bool* accepted;
 } loom_native_assembly_packet_context_t;
 
 typedef iree_status_t (*loom_native_assembly_append_packet_fn_t)(
@@ -61,44 +65,31 @@ typedef struct loom_native_assembly_format_options_t {
 // Formats a scheduled and allocated low.func.def as a native assembly fragment.
 // The output is target-owned assembly text, not a complete object/kernel ABI
 // envelope. Unsupported structural packets fail loud through the target-owned
-// structural formatter instead of being printed as comments or pseudo-ops.
+// structural formatter. Rejection clears the appended fragment and sets
+// |out_accepted| to false; statuses report output or diagnostic sink failures.
 iree_status_t loom_native_assembly_format_fragment(
     const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,
     const loom_native_assembly_format_options_t* options,
-    iree_string_builder_t* builder, iree_arena_allocator_t* scratch_arena);
+    iree_string_builder_t* builder, iree_diagnostic_emitter_t emitter,
+    bool* out_accepted);
 
 // Appends the canonical local block label for |block|, such as ".Lbb0".
 iree_status_t loom_native_assembly_append_block_label(
     const loom_low_schedule_table_t* schedule, const loom_block_t* block,
     iree_string_builder_t* builder);
 
-// Returns an unsupported-structural-packet status naming |target_name| and the
-// current packet op.
-iree_status_t loom_native_assembly_make_unsupported_structural_packet_status(
-    iree_string_view_t target_name,
+// Rejects an operation without a representation in the requested output format.
+// The packet retains the original source location and the caller's export
+// scope.
+iree_status_t loom_native_assembly_emit_unsupported_operation(
+    iree_string_view_t format,
     const loom_native_assembly_packet_context_t* context);
-
-// Returns the interned module string for |string_id|, or the empty string when
-// |string_id| is invalid.
-iree_string_view_t loom_native_assembly_module_string(
-    const loom_module_t* module, loom_string_id_t string_id);
 
 // Returns a verified string from |descriptor_set|.
 iree_string_view_t loom_native_assembly_descriptor_string(
     const loom_low_descriptor_set_t* descriptor_set,
     loom_string_ref_t string_ref);
-
-// Finds a named attribute by textual key in |attrs|.
-const loom_named_attr_t* loom_native_assembly_find_attr(
-    const loom_module_t* module, loom_named_attr_slice_t attrs,
-    iree_string_view_t name);
-
-// Reads a required I64 attribute from |attrs|.
-iree_status_t loom_native_assembly_read_i64_attr(const loom_module_t* module,
-                                                 loom_named_attr_slice_t attrs,
-                                                 iree_string_view_t name,
-                                                 int64_t* out_value);
 
 #ifdef __cplusplus
 }  // extern "C"

@@ -739,8 +739,10 @@ iree_status_t loom_amdgpu_plan_spill_materialization_traffic(
     const loom_low_allocation_spill_plan_t* spill_plans,
     iree_host_size_t spill_plan_count,
     const loom_low_spill_materialization_plan_t* materialization_plan,
-    iree_arena_allocator_t* arena,
+    iree_arena_allocator_t* arena, iree_diagnostic_emitter_t emitter,
+    bool* out_accepted,
     loom_low_spill_materialization_traffic_plan_t* out_plan) {
+  *out_accepted = true;
   const loom_amdgpu_storage_layout_segment_sizes_t* segment_prefix = user_data;
   *out_plan = (loom_low_spill_materialization_traffic_plan_t){0};
 
@@ -752,11 +754,24 @@ iree_status_t loom_amdgpu_plan_spill_materialization_traffic(
       table->module, table->target.descriptor_set, &plan->emission_context));
 
   loom_amdgpu_storage_layout_segment_sizes_t segment_sizes = *segment_prefix;
-  for (iree_host_size_t i = 0; i < table->storage_layout.record_count; ++i) {
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0; i < table->storage_layout.record_count &&
+                               *out_accepted && iree_status_is_ok(status);
+       ++i) {
+    const loom_low_storage_layout_record_t* record =
+        &table->storage_layout.records[i];
     loom_amdgpu_storage_layout_reservation_t projected_reservation = {0};
-    IREE_RETURN_IF_ERROR(loom_amdgpu_storage_layout_project_reservation(
-        &table->storage_layout.records[i].reservation, &segment_sizes,
-        &projected_reservation));
+    if (!loom_amdgpu_storage_layout_try_project_reservation(
+            &record->reservation, &segment_sizes, &projected_reservation)) {
+      *out_accepted = false;
+      status = loom_amdgpu_storage_layout_emit_overflow(
+          table->module, table->function_op, record->storage_value_id,
+          record->reservation.space, emitter);
+    }
+  }
+  IREE_RETURN_IF_ERROR(status);
+  if (!*out_accepted) {
+    return iree_ok_status();
   }
 
   loom_amdgpu_storage_layout_reservation_t* storage_reservations = NULL;
@@ -765,7 +780,9 @@ iree_status_t loom_amdgpu_plan_spill_materialization_traffic(
         arena, spill_plan_count, sizeof(*storage_reservations),
         (void**)&storage_reservations));
   }
-  for (iree_host_size_t i = 0; i < spill_plan_count; ++i) {
+  for (iree_host_size_t i = 0;
+       i < spill_plan_count && *out_accepted && iree_status_is_ok(status);
+       ++i) {
     if (!loom_low_spill_materialization_record_has_traffic(
             &materialization_plan->records[i])) {
       continue;
@@ -786,8 +803,17 @@ iree_status_t loom_amdgpu_plan_spill_materialization_traffic(
         .byte_size = spill_plan->byte_size,
         .byte_alignment = spill_plan->byte_alignment,
     };
-    IREE_RETURN_IF_ERROR(loom_amdgpu_storage_layout_project_reservation(
-        &source_reservation, &segment_sizes, &storage_reservations[i]));
+    if (!loom_amdgpu_storage_layout_try_project_reservation(
+            &source_reservation, &segment_sizes, &storage_reservations[i])) {
+      *out_accepted = false;
+      status = loom_amdgpu_storage_layout_emit_overflow(
+          table->module, table->function_op, spill_plan->value_id,
+          source_reservation.space, emitter);
+    }
+  }
+  IREE_RETURN_IF_ERROR(status);
+  if (!*out_accepted) {
+    return iree_ok_status();
   }
 
   loom_amdgpu_spill_recipe_t* recipes = NULL;
@@ -985,10 +1011,11 @@ static iree_status_t loom_amdgpu_spill_lowering_collect_ops(
 // Spill lowering precedes schedule construction. Build its private storage
 // projection only after spill discovery proves that rewriting is required.
 static iree_status_t loom_amdgpu_spill_lowering_build_storage_layout(
-    const loom_module_t* module, const loom_region_t* body,
+    const loom_module_t* module, const loom_op_t* function_op,
+    const loom_region_t* body,
     loom_amdgpu_storage_layout_segment_sizes_t segment_prefix,
-    iree_arena_allocator_t* arena,
-    loom_amdgpu_storage_layout_t* out_storage_layout) {
+    iree_arena_allocator_t* arena, iree_diagnostic_emitter_t emitter,
+    bool* out_accepted, loom_amdgpu_storage_layout_t* out_storage_layout) {
   loom_low_storage_layout_builder_t builder;
   loom_low_storage_layout_builder_initialize(&builder);
   const loom_block_t* block = NULL;
@@ -1005,8 +1032,9 @@ static iree_status_t loom_amdgpu_spill_lowering_build_storage_layout(
   loom_low_storage_layout_t source_layout;
   IREE_RETURN_IF_ERROR(
       loom_low_storage_layout_builder_finish(&builder, arena, &source_layout));
-  return loom_amdgpu_storage_layout_build(&source_layout, segment_prefix, arena,
-                                          out_storage_layout);
+  return loom_amdgpu_storage_layout_build(module, function_op, &source_layout,
+                                          segment_prefix, arena, emitter,
+                                          out_accepted, out_storage_layout);
 }
 
 static iree_status_t loom_amdgpu_spill_lowering_initialize_context(
@@ -1025,9 +1053,14 @@ static iree_status_t loom_amdgpu_spill_lowering_initialize_context(
   };
   IREE_RETURN_IF_ERROR(loom_amdgpu_spill_lowering_initialize_emission_context(
       module, descriptor_set, &out_context->emission));
-  return loom_amdgpu_spill_lowering_build_storage_layout(
-      module, body, segment_prefix, scratch_arena,
-      &out_context->storage_layout);
+  bool accepted = false;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_spill_lowering_build_storage_layout(
+      module, function_op, body, segment_prefix, scratch_arena, emitter,
+      &accepted, &out_context->storage_layout));
+  if (!accepted) {
+    ++result->error_count;
+  }
+  return iree_ok_status();
 }
 
 iree_status_t loom_amdgpu_lower_spill_traffic(
@@ -1051,6 +1084,9 @@ iree_status_t loom_amdgpu_lower_spill_traffic(
   IREE_RETURN_IF_ERROR(loom_amdgpu_spill_lowering_initialize_context(
       module, function_op, body, descriptor_set, segment_prefix, emitter,
       out_result, scratch_arena, &context));
+  if (out_result->error_count != 0) {
+    return iree_ok_status();
+  }
 
   loom_rewriter_t rewriter = {0};
   loom_rewriter_initialize(&rewriter, module, scratch_arena);

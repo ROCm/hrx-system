@@ -100,23 +100,24 @@ def test_descriptor_view_readers_use_the_view_namespace():
 
 def test_common_readers_require_agreement_across_descriptor_variants():
     variants = (_descriptor("alpha", "zeta"), _descriptor("alpha", "middle", "zeta"))
-    lines = attr_indices.emit_attr_accessors("TEST", variants, target_key="test")
+    lines = attr_indices.emit_attr_accessors("TEST", ((descriptor.key, descriptor.immediates) for descriptor in variants), target_key="test")
     header = "\n".join(lines)
     assert _reader("loom_test_const_i32_alpha", 0) in header
     assert "loom_test_const_i32_middle" not in header
     assert "loom_test_const_i32_zeta" not in header
 
-    missing = attr_indices.emit_attr_accessors("TEST", (*variants, _descriptor()), target_key="test")
+    missing = attr_indices.emit_attr_accessors("TEST", ((descriptor.key, descriptor.immediates) for descriptor in (*variants, _descriptor())), target_key="test")
     assert missing == []
 
     required = _descriptor("alpha")
     optional = replace(required, immediates=(replace(required.immediates[0], flags=(ImmediateFlag.DEFAULT_VALUE,)),))
-    assert attr_indices.emit_attr_accessors("TEST", (required, optional), target_key="test") == []
+    assert attr_indices.emit_attr_accessors("TEST", ((descriptor.key, descriptor.immediates) for descriptor in (required, optional)), target_key="test") == []
 
 
 def test_attr_names_reject_c_identifier_collisions():
+    descriptor = _descriptor("same.name", "same_name")
     with pytest.raises(ValueError, match="collides between"):
-        attr_indices.emit_attr_accessors("TEST", (_descriptor("same.name", "same_name"),), target_key="test")
+        attr_indices.emit_attr_accessors("TEST", ((descriptor.key, descriptor.immediates),), target_key="test")
 
 
 def test_attr_reader_macros_preserve_optional_presence():

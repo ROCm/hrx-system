@@ -128,6 +128,24 @@ def _validate_descriptor_encoding_formats(
         amdgpu_encoding_format_id(format_name) for format_name in supported_format_names
     }
     for descriptor in descriptor_set.descriptors:
+        encoded_fields: set[int] = set()
+        for operand in descriptor.operands:
+            if (
+                not operand.encoding_field_id
+                or operand.encoding_field_id in encoded_fields
+            ):
+                continue
+            encoded_fields.add(operand.encoding_field_id)
+            if any(
+                alternative.reg_class is not None
+                and alternative.reg_class not in (_REG_SGPR, _REG_VGPR, _REG_AGPR)
+                for alternative in operand.reg_alts
+            ):
+                raise ValueError(
+                    f"AMDGPU descriptor '{descriptor.key}' encoded operand "
+                    f"'{operand.field_name}' requires an SGPR, VGPR, or AGPR; "
+                    f"got {tuple(alt.reg_class for alt in operand.reg_alts)}"
+                )
         format_id = descriptor.encoding_format_id
         if (
             format_id == AMDGPU_ENCODING_FORMAT_NONE
@@ -274,12 +292,56 @@ _NAMED_NATIVE_ASM_IMMEDIATE_FORMAT_IDS = frozenset(
 
 def _validate_native_asm_values(descriptor_set: DescriptorSet) -> None:
     for descriptor in descriptor_set.descriptors:
+        printed_fields = {
+            value.field_name
+            for form in descriptor.asm_forms
+            for value in form.native_assembly_values
+            if value.kind
+            in (
+                NativeAsmValueKind.RESULT,
+                NativeAsmValueKind.OPERAND,
+                NativeAsmValueKind.NEGATED_OPERAND,
+                NativeAsmValueKind.REGISTER_PART,
+            )
+        }
+        for operand in descriptor.operands:
+            if (
+                operand.role is OperandRole.IMPLICIT
+                or OperandFlag.IMPLICIT in operand.flags
+            ) and operand.field_name not in printed_fields:
+                continue
+            if any(
+                alternative.reg_class is not None
+                and alternative.reg_class
+                not in (_REG_SGPR, _REG_VGPR, _REG_AGPR, _REG_M0, _REG_VCC)
+                for alternative in operand.reg_alts
+            ):
+                raise ValueError(
+                    f"AMDGPU descriptor '{descriptor.key}' visible operand "
+                    f"'{operand.field_name}' has no native register spelling"
+                )
         immediate_by_name = {
             immediate.field_name: immediate for immediate in descriptor.immediates
         }
         for form in descriptor.asm_forms:
             saw_named_modifier = False
             for value in form.native_assembly_values:
+                if (
+                    value.kind is NativeAsmValueKind.IMMEDIATE_TARGET_FORMAT
+                    and value.target_format_id
+                    not in (
+                        AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_DELAY_ALU,
+                        AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_SCALE_SEL,
+                        AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_DPP_CTRL,
+                        AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_DPP_BANK_MASK,
+                        AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_DPP8,
+                        *_NAMED_NATIVE_ASM_IMMEDIATE_FORMAT_IDS,
+                    )
+                ):
+                    raise ValueError(
+                        f"AMDGPU descriptor '{descriptor.key}' native asm "
+                        f"uses unknown immediate format {value.target_format_id}"
+                    )
                 is_named_modifier = (
                     value.kind is NativeAsmValueKind.MODIFIER_LITERAL
                     or (
@@ -699,6 +761,24 @@ def amdgpu_descriptor_ref_keys() -> tuple[str, ...]:
     for builder in _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS.values():
         keys.update(descriptor.key for descriptor in builder.extra_descriptors)
     return tuple(sorted(keys))
+
+
+@cache
+def amdgpu_descriptor_ref_immediates() -> tuple[tuple[str, tuple[Immediate, ...]], ...]:
+    """Returns declared immediate schemas without materializing ISA data.
+
+    Common compiler readers cover every family even in target-restricted builds.
+    Distinct schemas for the same key remain separate so the generator can
+    admit only fields whose positions agree across variants.
+    """
+
+    schemas: dict[tuple[str, tuple[Immediate, ...]], None] = {}
+    for builder in _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS.values():
+        for descriptor in (*builder.base.descriptors, *builder.extra_descriptors):
+            schemas[(descriptor.key, descriptor.immediates)] = None
+        for overlay in builder.overlay_rows():
+            schemas[(overlay.descriptor_key, overlay.immediates)] = None
+    return tuple(schemas)
 
 
 def amdgpu_descriptor_id_keys() -> tuple[str, ...]:
@@ -1950,6 +2030,7 @@ __all__ = (
     "amdgpu_core_descriptor_set_instruction_names_by_isa_key",
     "amdgpu_core_descriptor_set_overlay_rows",
     "amdgpu_descriptor_id_keys",
+    "amdgpu_descriptor_ref_immediates",
     "amdgpu_descriptor_ref_keys",
     "amdgpu_immediate_encoding_id_items",
     "build_amdgpu_core_descriptor_set",

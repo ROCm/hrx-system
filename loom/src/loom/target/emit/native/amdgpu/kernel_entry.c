@@ -114,22 +114,6 @@ iree_status_t loom_amdgpu_kernel_entry_prepend_text(
     const loom_amdgpu_hsaco_text_fixup_t** out_fixups) {
   *out_text = iree_const_byte_span_empty();
   *out_fixups = NULL;
-  if (envelope == NULL) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "AMDGPU kernel entry envelope is required");
-  }
-  if (body_text.data_length != 0 && body_text.data == NULL) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "AMDGPU kernel body has no text storage");
-  }
-  if (body_fixup_count != 0 && body_fixups == NULL) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "AMDGPU kernel body has no text fixup storage");
-  }
-  if (envelope->text.data_length != 0 && envelope->text.data == NULL) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "AMDGPU kernel entry has no text storage");
-  }
   if (envelope->text.data_length == 0) {
     *out_text = body_text;
     *out_fixups = body_fixups;
@@ -154,18 +138,11 @@ iree_status_t loom_amdgpu_kernel_entry_prepend_text(
   if (body_fixup_count != 0) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
         arena, body_fixup_count, sizeof(fixups[0]), (void**)&fixups));
+    // Encoded body-relative offsets fit the combined text admitted above.
     for (iree_host_size_t i = 0; i < body_fixup_count; ++i) {
       fixups[i] = body_fixups[i];
-      if (!iree_checked_add_u64(fixups[i].literal_byte_offset,
-                                envelope->text.data_length,
-                                &fixups[i].literal_byte_offset) ||
-          !iree_checked_add_u64(fixups[i].base_pc_byte_offset,
-                                envelope->text.data_length,
-                                &fixups[i].base_pc_byte_offset)) {
-        return iree_make_status(
-            IREE_STATUS_OUT_OF_RANGE,
-            "AMDGPU kernel entry text fixup offset overflowed");
-      }
+      fixups[i].literal_byte_offset += envelope->text.data_length;
+      fixups[i].base_pc_byte_offset += envelope->text.data_length;
     }
   }
 

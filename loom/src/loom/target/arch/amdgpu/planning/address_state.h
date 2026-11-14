@@ -13,6 +13,7 @@
 #include "iree/base/internal/arena.h"
 #include "loom/codegen/low/allocation.h"
 #include "loom/codegen/low/packet.h"
+#include "loom/error/emitter.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -64,11 +65,14 @@ loom_amdgpu_address_state_requirement_for_packet(
 // Builds concrete S_SET_VGPR_MSB insertions for an addressability-accepted
 // emission frame in scheduled order. Generated transitions are a
 // post-allocation packet overlay: they do not mutate low IR, reschedule the
-// function, or invalidate the allocation that selected them.
+// function, or invalidate the allocation that selected them. Authored state
+// mismatches emit at the packet and reject independently of callback presence.
+// Statuses carry only infrastructure failures.
 iree_status_t loom_amdgpu_address_state_plan_build(
     const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,
-    iree_arena_allocator_t* arena, loom_amdgpu_address_state_plan_t* out_plan);
+    iree_arena_allocator_t* arena, iree_diagnostic_emitter_t emitter,
+    bool* out_accepted, loom_amdgpu_address_state_plan_t* out_plan);
 
 #ifdef __cplusplus
 }  // extern "C"

@@ -1337,6 +1337,39 @@ ERR_AMDGPU_060 = ErrorDef(
     fix_hint="Use the selected processor's workitem live-in form",
 )
 
+# ERR_AMDGPU_061: PC-relative relocation uses an incompatible PC component.
+ERR_AMDGPU_061 = ErrorDef(
+    domain=ErrorDomain.AMDGPU,
+    code=61,
+    severity=Severity.ERROR,
+    summary="PC-relative relocation uses an incompatible PC component.",
+    message=(
+        "PC-relative relocation requires {expected_component} of s_getpc_b64; "
+        "s{register_index} holds {actual_component}"
+    ),
+    params=(
+        ErrorParam("expected_component", ParamKind.STRING),
+        ErrorParam("actual_component", ParamKind.STRING),
+        ErrorParam("register_index", ParamKind.U32),
+    ),
+    fix_hint="Use the corresponding captured PC half in the relocation block",
+)
+
+ERR_AMDGPU_062 = ErrorDef(
+    domain=ErrorDomain.AMDGPU,
+    code=62,
+    severity=Severity.ERROR,
+    summary="Authored VGPR address transition disagrees with scheduled state.",
+    message=(
+        "s_set_vgpr_msb declares previous mode {previous_mode}, but the "
+        "scheduled VGPR address mode is {scheduled_mode}"
+    ),
+    params=(
+        ErrorParam("previous_mode", ParamKind.U32),
+        ErrorParam("scheduled_mode", ParamKind.U32),
+    ),
+)
+
 ALL_AMDGPU_ERRORS = (
     ERR_AMDGPU_001,
     ERR_AMDGPU_006,
@@ -1394,4 +1427,6 @@ ALL_AMDGPU_ERRORS = (
     ERR_AMDGPU_058,
     ERR_AMDGPU_059,
     ERR_AMDGPU_060,
+    ERR_AMDGPU_061,
+    ERR_AMDGPU_062,
 )
