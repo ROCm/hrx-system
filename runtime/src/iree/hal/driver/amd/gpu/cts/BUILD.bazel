@@ -91,6 +91,7 @@ iree_runtime_cc_library(
     srcs = ["testdata.cc"],
     hdrs = ["testdata.h"],
     visibility = [
+        "//libhrx/cts/tests/executable:__pkg__",
         "//libhrx/cts/tests/hip:__pkg__",
         "//runtime/src/iree/hal/driver/amd/cts:__pkg__",
     ],

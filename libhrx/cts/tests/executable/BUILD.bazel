@@ -13,6 +13,9 @@ load(
     "AMD_GPU_CTS_RESOURCE_GROUP",
     "AMD_GPU_CTS_TAGS",
 )
+load("//loom/build_tools/amdgpu:target_config.bzl", "LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITIES")
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
+load("//runtime/src/iree/hal/driver/amd/gpu/cts:testdata.bzl", "iree_hal_amd_gpu_cts_testdata")
 
 package(
     default_visibility = ["//visibility:private"],
@@ -21,6 +24,46 @@ package(
 )
 
 _AMDGPU_CTS_COMPATIBILITY = select(AMDGPU_CTS_COMPATIBILITY_CONDITIONS)
+
+_LOOM_CTS_COMPATIBILITY = _AMDGPU_CTS_COMPATIBILITY + loom_config_compatible_with([
+    "//loom/config/emit:amdgpu_elf",
+]) + select(dict([
+    (
+        "//loom/config/arch/amdgpu:" + capability,
+        [],
+    )
+    for capability in LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITIES
+] + [(
+    "//conditions:default",
+    ["@platforms//:incompatible"],
+)]))
+
+iree_hal_amd_gpu_cts_testdata(
+    name = "dependent_chain_testdata",
+    srcs = ["dependent_chain.loom"],
+    backend_names = ["hrx_dependent_chain"],
+    target_compatible_with = _LOOM_CTS_COMPATIBILITY,
+)
+
+hrx_cc_benchmark(
+    name = "dependent_chain_benchmark",
+    srcs = ["dependent_chain_benchmark.cpp"],
+    resource_group = AMD_GPU_CTS_RESOURCE_GROUP,
+    tags = AMD_GPU_CTS_TAGS,
+    target_compatible_with = _LOOM_CTS_COMPATIBILITY,
+    deps = [
+        ":dependent_chain_testdata",
+        "//libhrx/cts/core:loader",
+        "//libhrx/src/binding/hip:launch_params",
+        "//libhrx/src/libhrx:hrx_static",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/tooling:flags",
+        "//runtime/src/iree/hal/cts/util:registry",
+        "//runtime/src/iree/hal/driver/amd/gpu/cts:testdata",
+        "//runtime/src/iree/hal/driver/amd/gpu/target:identity",
+        "//runtime/src/iree/testing:benchmark_main",
+    ],
+)
 
 iree_amdgpu_binary_variants_embed_data(
     name = "amdgpu_executable_test_kernels",
