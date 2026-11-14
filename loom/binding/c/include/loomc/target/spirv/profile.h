@@ -242,8 +242,17 @@ typedef enum loomc_spirv_feature_e {
   /// Integer dots admit four bytes packed in an i32.
   LOOMC_SPIRV_FEATURE_INTEGER_DOT_PRODUCT_INPUT4X8_BIT_PACKED = 50,
 
+  /// Correctly rounded 16-bit fused multiply-add.
+  LOOMC_SPIRV_FEATURE_FMA_FLOAT16 = 51,
+
+  /// Correctly rounded 32-bit fused multiply-add.
+  LOOMC_SPIRV_FEATURE_FMA_FLOAT32 = 52,
+
+  /// Correctly rounded 64-bit fused multiply-add.
+  LOOMC_SPIRV_FEATURE_FMA_FLOAT64 = 53,
+
   /// Number of public SPIR-V feature identifiers.
-  LOOMC_SPIRV_FEATURE_COUNT = 51,
+  LOOMC_SPIRV_FEATURE_COUNT = 54,
 } loomc_spirv_feature_t;
 
 /// Bitset of `loomc_spirv_feature_t` values.

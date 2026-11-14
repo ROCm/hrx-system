@@ -6,10 +6,9 @@
 
 // Complete SPIR-V ISA wire constants used by target-local code.
 //
-// Values mirror the Khronos-generated SPIR-V 1.6 header vendored at
-// third_party/spirv_cross/spirv.h. Keep SPIR-V numeric vocabulary
-// centralized here instead of adding partial opcode/capability enums in
-// individual emitter or feature-selection files.
+// Values mirror the pinned Khronos SPIRV-Headers grammar. Keep numeric
+// vocabulary centralized here instead of adding partial opcode/capability enums
+// in individual emitter or feature-selection files.
 
 #ifndef LOOM_TARGET_ARCH_SPIRV_ISA_H_
 #define LOOM_TARGET_ARCH_SPIRV_ISA_H_
@@ -1244,6 +1243,7 @@ typedef enum loom_spirv_capability_e {
   LOOM_SPIRV_CAPABILITY_BIT_INSTRUCTIONS = 6025,
   LOOM_SPIRV_CAPABILITY_GROUP_NON_UNIFORM_ROTATE_KHR = 6026,
   LOOM_SPIRV_CAPABILITY_FLOAT_CONTROLS2 = 6029,
+  LOOM_SPIRV_CAPABILITY_FMAKHR = 6030,
   LOOM_SPIRV_CAPABILITY_ATOMIC_FLOAT32_ADD_EXT = 6033,
   LOOM_SPIRV_CAPABILITY_ATOMIC_FLOAT64_ADD_EXT = 6034,
   LOOM_SPIRV_CAPABILITY_LONG_COMPOSITES_INTEL = 6089,
@@ -1998,6 +1998,7 @@ typedef enum loom_spirv_op_e {
   LOOM_SPIRV_OP_UNTYPED_IN_BOUNDS_PTR_ACCESS_CHAIN_KHR = 4424,
   LOOM_SPIRV_OP_UNTYPED_ARRAY_LENGTH_KHR = 4425,
   LOOM_SPIRV_OP_UNTYPED_PREFETCH_KHR = 4426,
+  LOOM_SPIRV_OP_FMA_KHR = 4427,
   LOOM_SPIRV_OP_SUBGROUP_ALL_KHR = 4428,
   LOOM_SPIRV_OP_SUBGROUP_ANY_KHR = 4429,
   LOOM_SPIRV_OP_SUBGROUP_ALL_EQUAL_KHR = 4430,

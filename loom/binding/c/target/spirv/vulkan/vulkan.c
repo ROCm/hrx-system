@@ -79,6 +79,9 @@ typedef struct loomc_spirv_vulkan_extensions_t {
   // VK_KHR_shader_atomic_int64 is supported.
   bool shader_atomic_int64_khr;
 
+  // VK_KHR_shader_fma is supported.
+  bool shader_fma_khr;
+
   // VK_KHR_shader_float_controls is supported.
   bool shader_float_controls_khr;
 
@@ -329,6 +332,9 @@ static void loomc_spirv_vulkan_record_extension(
   } else if (loomc_spirv_vulkan_extension_name_equal(
                  extension, VK_KHR_SHADER_FLOAT_CONTROLS_EXTENSION_NAME)) {
     out_extensions->shader_float_controls_khr = true;
+  } else if (loomc_spirv_vulkan_extension_name_equal(
+                 extension, VK_KHR_SHADER_FMA_EXTENSION_NAME)) {
+    out_extensions->shader_fma_khr = true;
   } else if (loomc_spirv_vulkan_extension_name_equal(
                  extension, VK_KHR_VULKAN_MEMORY_MODEL_EXTENSION_NAME)) {
     out_extensions->vulkan_memory_model_khr = true;
@@ -684,7 +690,14 @@ static loomc_status_t loomc_spirv_vulkan_query_features(
           VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_FLOAT_2_FEATURES_EXT,
   };
 
+  VkPhysicalDeviceShaderFmaFeaturesKHR fma_features = {
+      .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FMA_FEATURES_KHR,
+  };
+
   void* feature_chain = NULL;
+  if (extensions->shader_fma_khr) {
+    loomc_spirv_vulkan_link_out_struct(&feature_chain, &fma_features);
+  }
   if (api_version >= VK_API_VERSION_1_3 ||
       extensions->subgroup_size_control_ext) {
     loomc_spirv_vulkan_link_out_struct(&feature_chain,
@@ -782,6 +795,18 @@ static loomc_status_t loomc_spirv_vulkan_query_features(
   LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkan_add_feature_fact(
       facts, LOOMC_SPIRV_FEATURE_VULKAN_SHADER, LOOMC_TARGET_FACT_STATE_TRUE,
       loomc_make_cstring_view("vulkan:physicalDevice")));
+  LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkan_add_bool_feature(
+      facts, extensions->shader_fma_khr && fma_features.shaderFmaFloat16,
+      LOOMC_SPIRV_FEATURE_FMA_FLOAT16,
+      loomc_make_cstring_view("vulkan:shaderFmaFloat16")));
+  LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkan_add_bool_feature(
+      facts, extensions->shader_fma_khr && fma_features.shaderFmaFloat32,
+      LOOMC_SPIRV_FEATURE_FMA_FLOAT32,
+      loomc_make_cstring_view("vulkan:shaderFmaFloat32")));
+  LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkan_add_bool_feature(
+      facts, extensions->shader_fma_khr && fma_features.shaderFmaFloat64,
+      LOOMC_SPIRV_FEATURE_FMA_FLOAT64,
+      loomc_make_cstring_view("vulkan:shaderFmaFloat64")));
   LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkan_add_bool_feature(
       facts, features2.features.shaderFloat64, LOOMC_SPIRV_FEATURE_FLOAT64,
       loomc_make_cstring_view("vulkan:shaderFloat64")));

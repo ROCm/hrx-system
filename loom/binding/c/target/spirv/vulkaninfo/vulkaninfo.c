@@ -1305,6 +1305,23 @@ static loomc_status_t loomc_spirv_vulkaninfo_import_features_from_structs(
       IREE_SV("VkPhysicalDeviceShaderAtomicFloat2FeaturesEXT"),
       &atomic_float2_features));
 
+  iree_string_view_t fma_features = iree_string_view_empty();
+  LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkaninfo_lookup_feature_struct(
+      import, features, extended_features,
+      IREE_SV("VkPhysicalDeviceShaderFmaFeaturesKHR"), &fma_features));
+  LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkaninfo_add_bool_feature(
+      import, fma_features, IREE_SV("shaderFmaFloat16"),
+      LOOMC_SPIRV_FEATURE_FMA_FLOAT16,
+      loomc_make_cstring_view("vulkaninfo:shaderFmaFloat16")));
+  LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkaninfo_add_bool_feature(
+      import, fma_features, IREE_SV("shaderFmaFloat32"),
+      LOOMC_SPIRV_FEATURE_FMA_FLOAT32,
+      loomc_make_cstring_view("vulkaninfo:shaderFmaFloat32")));
+  LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkaninfo_add_bool_feature(
+      import, fma_features, IREE_SV("shaderFmaFloat64"),
+      LOOMC_SPIRV_FEATURE_FMA_FLOAT64,
+      loomc_make_cstring_view("vulkaninfo:shaderFmaFloat64")));
+
   LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkaninfo_add_bool_feature(
       import, core_features, IREE_SV("shaderFloat64"),
       LOOMC_SPIRV_FEATURE_FLOAT64,

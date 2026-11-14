@@ -90,6 +90,10 @@ struct MockVulkanDevice {
   VkBool32 shader_shared_float64_atomics = VK_FALSE;
   VkBool32 shader_buffer_float64_atomic_add = VK_FALSE;
   VkBool32 shader_shared_float64_atomic_add = VK_FALSE;
+  // Widths of correctly rounded fused arithmetic reported by the device.
+  VkPhysicalDeviceShaderFmaFeaturesKHR shader_fma = {};
+  // Whether the FMA feature struct may be queried.
+  bool reports_shader_fma_extension = false;
   VkBool32 cooperative_matrix = VK_TRUE;
   bool reports_shader_float16_int8_extension = false;
   // Whether the pre-Vulkan-1.2 extended subgroup type feature is advertised.
@@ -336,6 +340,17 @@ void VKAPI_PTR MockGetPhysicalDeviceFeatures2(
             g_mock_vulkan_device->shader_shared_float16_atomic_add;
         break;
       }
+      case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FMA_FEATURES_KHR: {
+        auto* fma =
+            reinterpret_cast<VkPhysicalDeviceShaderFmaFeaturesKHR*>(out);
+        fma->shaderFmaFloat16 =
+            g_mock_vulkan_device->shader_fma.shaderFmaFloat16;
+        fma->shaderFmaFloat32 =
+            g_mock_vulkan_device->shader_fma.shaderFmaFloat32;
+        fma->shaderFmaFloat64 =
+            g_mock_vulkan_device->shader_fma.shaderFmaFloat64;
+        break;
+      }
 #if defined(VK_KHR_cooperative_matrix)
       case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_FEATURES_KHR:
         reinterpret_cast<VkPhysicalDeviceCooperativeMatrixFeaturesKHR*>(out)
@@ -350,6 +365,9 @@ void VKAPI_PTR MockGetPhysicalDeviceFeatures2(
 
 uint32_t MockDeviceExtensionCount(const MockVulkanDevice& device) {
   uint32_t extension_count = 0;
+  if (device.reports_shader_fma_extension) {
+    ++extension_count;
+  }
   if (device.reports_subgroup_size_control_extension) {
     ++extension_count;
   }
@@ -466,6 +484,11 @@ VkResult VKAPI_PTR MockEnumerateDeviceExtensionProperties(
     MaybeWriteExtensionProperty(properties, capacity, &written_count,
                                 VK_KHR_SHADER_ATOMIC_INT64_EXTENSION_NAME,
                                 VK_KHR_SHADER_ATOMIC_INT64_SPEC_VERSION);
+  }
+  if (device.reports_shader_fma_extension) {
+    MaybeWriteExtensionProperty(properties, capacity, &written_count,
+                                VK_KHR_SHADER_FMA_EXTENSION_NAME,
+                                VK_KHR_SHADER_FMA_SPEC_VERSION);
   }
   if (device.reports_shader_float_controls_extension) {
     MaybeWriteExtensionProperty(properties, capacity, &written_count,
@@ -628,6 +651,30 @@ TEST(TargetSpirvVulkanTest, ImportsSelectableComputeSubgroups) {
         EXPECT_EQ(value.state, selectable ? LOOMC_TARGET_FACT_STATE_TRUE
                                           : LOOMC_TARGET_FACT_STATE_UNKNOWN);
         EXPECT_EQ(value.value, selectable ? 32u : 0u);
+      }
+    }
+  }
+}
+
+TEST(TargetSpirvVulkanTest, ImportsFusedArithmeticByAdvertisedWidth) {
+  const loomc_spirv_feature_t features[] = {LOOMC_SPIRV_FEATURE_FMA_FLOAT16,
+                                            LOOMC_SPIRV_FEATURE_FMA_FLOAT32,
+                                            LOOMC_SPIRV_FEATURE_FMA_FLOAT64};
+  auto environment = CreateSpirvTargetEnvironment();
+  for (bool advertised : {false, true}) {
+    for (uint32_t width_mask = 0; width_mask < 8; ++width_mask) {
+      SCOPED_TRACE(::testing::Message() << advertised << ":" << width_mask);
+      MockVulkanDevice device;
+      device.reports_shader_fma_extension = advertised;
+      device.shader_fma.shaderFmaFloat16 = (width_mask & 1) != 0;
+      device.shader_fma.shaderFmaFloat32 = (width_mask & 2) != 0;
+      device.shader_fma.shaderFmaFloat64 = (width_mask & 4) != 0;
+      auto profile = CreateVulkanProfile(environment.get(), device);
+      for (uint32_t i = 0; i < 3; ++i) {
+        ExpectFeatureState(profile.get(), features[i],
+                           advertised && (width_mask & (1u << i))
+                               ? LOOMC_TARGET_FACT_STATE_TRUE
+                               : LOOMC_TARGET_FACT_STATE_FALSE);
       }
     }
   }

@@ -164,6 +164,41 @@ void ExpectEnvironmentValue(const loomc_target_profile_t* profile,
   EXPECT_EQ(value.value, expected_value);
 }
 
+TEST(TargetSpirvVulkaninfoTest, ImportsFusedArithmeticWidthsIndependently) {
+  auto environment = CreateSpirvTargetEnvironment();
+  auto source = CreateJsonSource("fma-device.json", R"json({
+    "devices": [{
+      "properties": { "apiVersion": 4206592 },
+      "features": { "shaderFloat64": true },
+      "extended_features": {
+        "VkPhysicalDeviceVulkan12Features": { "shaderFloat16": true },
+        "VkPhysicalDeviceShaderFmaFeaturesKHR": {
+          "shaderFmaFloat16": true,
+          "shaderFmaFloat32": false,
+          "shaderFmaFloat64": true
+        }
+      }
+    }]
+  })json");
+  auto profile =
+      ImportVulkaninfoProfile(environment.get(), source.get(), nullptr);
+  ExpectFeatureState(profile.get(), LOOMC_SPIRV_FEATURE_FMA_FLOAT16,
+                     LOOMC_TARGET_FACT_STATE_TRUE);
+  ExpectFeatureState(profile.get(), LOOMC_SPIRV_FEATURE_FMA_FLOAT32,
+                     LOOMC_TARGET_FACT_STATE_FALSE);
+  ExpectFeatureState(profile.get(), LOOMC_SPIRV_FEATURE_FMA_FLOAT64,
+                     LOOMC_TARGET_FACT_STATE_TRUE);
+  auto absent_source = CreateJsonSource("older-device.json", kRawDevicesJson);
+  auto absent_profile =
+      ImportVulkaninfoProfile(environment.get(), absent_source.get(), nullptr);
+  for (auto feature :
+       {LOOMC_SPIRV_FEATURE_FMA_FLOAT16, LOOMC_SPIRV_FEATURE_FMA_FLOAT32,
+        LOOMC_SPIRV_FEATURE_FMA_FLOAT64}) {
+    ExpectFeatureState(absent_profile.get(), feature,
+                       LOOMC_TARGET_FACT_STATE_UNKNOWN);
+  }
+}
+
 TEST(TargetSpirvVulkaninfoTest, ImportsGpuinfoProfileWrapper) {
   TargetEnvironmentPtr target_environment = CreateSpirvTargetEnvironment();
   const std::string json = R"json({

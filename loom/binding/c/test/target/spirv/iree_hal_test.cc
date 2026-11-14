@@ -549,6 +549,46 @@ TEST(LoomcSpirvIreeHalTargetTest, DisablesBrokenAmdFloat64ToFloat16Conversion) {
   EXPECT_EQ(feature_state, LOOMC_TARGET_FACT_STATE_FALSE);
 }
 
+TEST(LoomcSpirvIreeHalTargetTest, ImportsFusedArithmeticByEnabledWidth) {
+  const iree_hal_vulkan_general_features_t enabled_flags[] = {
+      IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_FMA_FLOAT16,
+      IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_FMA_FLOAT32,
+      IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_FMA_FLOAT64};
+  const loomc_spirv_feature_t features[] = {LOOMC_SPIRV_FEATURE_FMA_FLOAT16,
+                                            LOOMC_SPIRV_FEATURE_FMA_FLOAT32,
+                                            LOOMC_SPIRV_FEATURE_FMA_FLOAT64};
+  auto environment = CreateSpirvTargetEnvironment();
+  for (uint32_t width_mask = 0; width_mask < 8; ++width_mask) {
+    SCOPED_TRACE(width_mask);
+    auto enabled = RequiredVulkanFeatures();
+    enabled.general |= IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_FLOAT16 |
+                       IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_FLOAT64;
+    for (uint32_t i = 0; i < 3; ++i) {
+      if (width_mask & (1u << i)) {
+        enabled.general |= enabled_flags[i];
+      }
+    }
+    DeviceSpecPtr device_spec;
+    IREE_ASSERT_OK(CreateVulkanDeviceSpec(enabled, kCompleteDeviceSpecFlags,
+                                          &device_spec));
+    FakeHalDevice device = {};
+    InitializeFakeDevice(device_spec.get(), &device);
+    loomc_result_t* result = nullptr;
+    auto profile = SelectTargetFromHal(environment.get(), &device, &result);
+    ResultPtr result_ptr(result);
+    ExpectSucceededResult(result);
+    ASSERT_NE(profile.get(), nullptr);
+    for (uint32_t i = 0; i < 3; ++i) {
+      loomc_target_fact_state_t state = LOOMC_TARGET_FACT_STATE_UNKNOWN;
+      LOOMC_EXPECT_OK(loomc_spirv_target_profile_query_feature(
+          profile.get(), features[i], &state));
+      EXPECT_EQ(state, (width_mask & (1u << i))
+                           ? LOOMC_TARGET_FACT_STATE_TRUE
+                           : LOOMC_TARGET_FACT_STATE_FALSE);
+    }
+  }
+}
+
 TEST(LoomcSpirvIreeHalTargetTest, PreservesExtendedCompilerFeatureFamily) {
   iree_hal_vulkan_features_t enabled_features = RequiredVulkanFeatures();
   enabled_features.general |=
@@ -1002,12 +1042,14 @@ TEST(LoomcSpirvIreeHalTargetTest, ForcedProfilesCheckTheCompleteFeatureFamily) {
       case LOOMC_SPIRV_FEATURE_BFLOAT16_DOT_PRODUCT_KHR:
         require(LOOMC_SPIRV_FEATURE_BFLOAT16_TYPE_KHR);
         break;
+      case LOOMC_SPIRV_FEATURE_FMA_FLOAT16:
       case LOOMC_SPIRV_FEATURE_STORAGE_BUFFER_FLOAT16_ATOMICS:
       case LOOMC_SPIRV_FEATURE_WORKGROUP_FLOAT16_ATOMICS:
       case LOOMC_SPIRV_FEATURE_STORAGE_BUFFER_FLOAT16_ATOMIC_ADD:
       case LOOMC_SPIRV_FEATURE_WORKGROUP_FLOAT16_ATOMIC_ADD:
         require(LOOMC_SPIRV_FEATURE_FLOAT16);
         break;
+      case LOOMC_SPIRV_FEATURE_FMA_FLOAT64:
       case LOOMC_SPIRV_FEATURE_STORAGE_BUFFER_FLOAT64_ATOMICS:
       case LOOMC_SPIRV_FEATURE_WORKGROUP_FLOAT64_ATOMICS:
       case LOOMC_SPIRV_FEATURE_STORAGE_BUFFER_FLOAT64_ATOMIC_ADD:

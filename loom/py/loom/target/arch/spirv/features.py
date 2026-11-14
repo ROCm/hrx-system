@@ -595,6 +595,22 @@ FEATURE_ATOMS = (
             ),
         )
     ),
+    *(
+        FeatureAtom(
+            key=f"fma_float{width}",
+            c_suffix=f"FMA_FLOAT{width}",
+            name=f"spirv.fma.float{width}",
+            doc=f"Correctly rounded {width}-bit fused multiply-add.",
+            required=("vulkan_shader",)
+            if width == 32
+            else ("vulkan_shader", f"float{width}"),
+            minimum_spirv_version=SPIRV_VERSION_1_0,
+            extensions=("SPV_KHR_fma",),
+            capabilities=("LOOM_SPIRV_CAPABILITY_FMAKHR",),
+            opcodes=("LOOM_SPIRV_OP_FMA_KHR",),
+        )
+        for width in (16, 32, 64)
+    ),
 )
 
 FEATURE_PROFILES = (

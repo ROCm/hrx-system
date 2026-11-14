@@ -908,6 +908,9 @@ TEST(TargetSpirvProfileTest, CreatesPresetProfileAndQueriesRows) {
 TEST(TargetSpirvProfileTest, AcceptsEveryExtendedCompilerFeature) {
   TargetEnvironmentPtr target_environment = CreateSpirvTargetEnvironment();
   const loomc_spirv_feature_t features[] = {
+      LOOMC_SPIRV_FEATURE_FMA_FLOAT16,
+      LOOMC_SPIRV_FEATURE_FMA_FLOAT32,
+      LOOMC_SPIRV_FEATURE_FMA_FLOAT64,
       LOOMC_SPIRV_FEATURE_FLOAT16,
       LOOMC_SPIRV_FEATURE_FLOAT64,
       LOOMC_SPIRV_FEATURE_VULKAN_MEMORY_MODEL_DEVICE_SCOPE,
