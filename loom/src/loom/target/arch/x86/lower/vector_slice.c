@@ -412,7 +412,8 @@ iree_status_t loom_x86_query_vector_slice_contract(
     const loom_op_t* source_op,
     loom_target_contract_query_result_t* out_result) {
   *out_result = loom_target_contract_query_result_empty();
-  if (environment->vector_lane_projection.source_lane_count != 0) {
+  if (!loom_vector_slice_isa(source_op) ||
+      environment->vector_lane_projection.source_lane_count != 0) {
     return iree_ok_status();
   }
   loom_x86_vector_slice_shape_t shape;
@@ -421,6 +422,10 @@ iree_status_t loom_x86_query_vector_slice_contract(
           loom_x86_vector_slice_descriptors(environment->descriptor_set),
           &shape)) {
     out_result->outcome = LOOM_TARGET_CONTRACT_QUERY_LEGAL;
+  } else {
+    // This provider owns native register windows. Rejected shapes require
+    // shared packet legalization instead of passing as an unanswered query.
+    out_result->outcome = LOOM_TARGET_CONTRACT_QUERY_UNSUPPORTED;
   }
   return iree_ok_status();
 }

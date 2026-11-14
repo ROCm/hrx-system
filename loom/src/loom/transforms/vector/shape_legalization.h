@@ -25,7 +25,9 @@ extern "C" {
 // extract and one splat. Returns without rewriting dynamic shapes or expansions
 // above the static operation bound.
 // Rank-one slices and scalar extracts project directly into retained regular
-// vector components when the selected range fits one component.
+// vector components when the selected range fits one component. Spanning
+// slices use native fragments or equal aligned pieces of those retained
+// components and a balanced concat tree, subject to the same operation bound.
 iree_status_t loom_vector_static_shape_rewrite_op(
     loom_target_legalization_context_t* context, loom_op_t* op,
     bool* out_rewritten);

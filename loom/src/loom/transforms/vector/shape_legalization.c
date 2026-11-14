@@ -8,6 +8,7 @@
 
 #include <stdint.h>
 
+#include "iree/base/internal/math.h"
 #include "loom/analysis/motion.h"
 #include "loom/ir/module.h"
 #include "loom/ops/index/ops.h"
@@ -15,6 +16,8 @@
 #include "loom/ops/vector/memory.h"
 #include "loom/ops/vector/ops.h"
 #include "loom/ops/view/ops.h"
+#include "loom/transforms/vector/packet_materialization.h"
+#include "loom/util/fact_vector_partition.h"
 
 // Bounds static structural expansion. Broadcast planning counts every new
 // slice, extract, and splat together with its flatten, concat, and restore
@@ -635,6 +638,56 @@ static uint64_t loom_vector_static_shape_slice_source_offset(
   return source_offset;
 }
 
+// Split a spanning window at a common lane boundary so every slice consumes
+// one retained packet. Equal pieces also keep the concat tree regular; a
+// suffix/prefix split can introduce unsupported intermediate vector widths.
+static iree_status_t loom_vector_static_shape_partition_slice_rewrite(
+    loom_target_legalization_context_t* context, loom_op_t* op,
+    bool* out_rewritten) {
+  const loom_value_id_t source = loom_vector_slice_source(op);
+  const loom_type_t result_type =
+      loom_module_value_type(context->module, loom_vector_slice_result(op));
+  uint64_t result_count = 0;
+  if (loom_vector_slice_offsets(op).count != 0 ||
+      loom_type_rank(result_type) != 1 || result_type.encoding_id != 0 ||
+      !loom_type_static_element_count(result_type, &result_count) ||
+      result_count == 0) {
+    return iree_ok_status();
+  }
+  const loom_value_fact_vector_partition_t partition =
+      loom_value_fact_table_query_vector_partition(context->fact_table, source);
+  if (partition.snapshot_lane_count == 0) {
+    return iree_ok_status();
+  }
+  // An unanswered contract can still have native structural lowering. Only
+  // decompose an explicitly rejected window; native packed alignment can be
+  // substantially cheaper than rebuilding individual lane fragments.
+  if (context->contract_query_result == NULL ||
+      context->contract_query_result->outcome !=
+          LOOM_TARGET_CONTRACT_QUERY_UNSUPPORTED) {
+    return iree_ok_status();
+  }
+  const uint64_t offset = loom_vector_slice_static_offsets(op).i64_array[0];
+  const uint64_t piece_lane_count = iree_math_gcd_u64(
+      result_count, iree_math_gcd_u64(offset, partition.snapshot_lane_count));
+  const uint64_t piece_count = result_count / piece_lane_count;
+  if (piece_count <= 1 || piece_count > LOOM_VECTOR_STATIC_SHAPE_OP_LIMIT / 2) {
+    return iree_ok_status();
+  }
+  loom_rewriter_t* rewriter = context->rewriter;
+  loom_builder_set_before(&rewriter->builder, op);
+  const loom_value_id_t checkpoint = loom_rewriter_value_checkpoint(rewriter);
+  loom_value_id_t replacement = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_vector_packet_materialize_partition_slice(
+      context, partition, offset, result_type, op->location, &replacement));
+  IREE_RETURN_IF_ERROR(loom_rewriter_preserve_result_names_on_new_values(
+      rewriter, op, &replacement, 1, checkpoint));
+  IREE_RETURN_IF_ERROR(
+      loom_rewriter_replace_all_uses_and_erase(rewriter, op, &replacement, 1));
+  *out_rewritten = true;
+  return iree_ok_status();
+}
+
 static iree_status_t loom_vector_static_shape_slice_rewrite(
     loom_target_legalization_context_t* context, loom_op_t* op,
     bool* out_rewritten) {
@@ -648,6 +701,10 @@ static iree_status_t loom_vector_static_shape_slice_rewrite(
   const loom_value_slice_t dynamic_offsets = loom_vector_slice_offsets(op);
   uint64_t source_count = 0;
   uint64_t result_count = 0;
+  if (rank == 1) {
+    return loom_vector_static_shape_partition_slice_rewrite(context, op,
+                                                            out_rewritten);
+  }
   if (rank <= 1 ||
       !loom_type_static_element_count(source_type, &source_count) ||
       !loom_type_static_element_count(result_type, &result_count) ||

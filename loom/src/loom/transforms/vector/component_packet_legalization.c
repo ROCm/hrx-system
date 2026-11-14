@@ -1269,14 +1269,33 @@ static iree_status_t loom_vector_component_select(
   if (iree_any_bit_set(
           policy->flags,
           LOOM_TARGET_VECTOR_PACKET_POLICY_FLAG_DYNAMIC_WINDOW_REPLAY)) {
-    // A rejected dynamic window owns the source-width producer graph. Eagerly
-    // materializing an escaping aggregate here would force the later window to
-    // index an SSA packet tuple at runtime. Native target window contracts keep
-    // their ordinary component behavior.
+    // A rejected dynamic window owns its producer graph and consumer packets.
+    // Materializing either side independently loses that shared packet width:
+    // producers become an escaping tuple, while consumers reassemble transient
+    // carriers before converting them. Native windows keep ordinary components.
     member_index = component->first_member_index;
     while (member_index != LOOM_VECTOR_COMPONENT_INDEX_INVALID) {
       const loom_vector_component_record_t* record =
           &plan->records[member_index];
+      for (uint16_t i = 0; i < record->op->operand_count; ++i) {
+        const loom_value_t* operand = loom_module_value(
+            plan->context->module, loom_op_const_operands(record->op)[i]);
+        if (loom_value_is_block_arg(operand)) {
+          continue;
+        }
+        const loom_op_t* producer = loom_value_def_op(operand);
+        if (producer == NULL || !loom_vector_slice_isa(producer)) {
+          continue;
+        }
+        bool dynamic_window_owns_consumer_chain = false;
+        IREE_RETURN_IF_ERROR(
+            loom_vector_packet_dynamic_window_owns_consumer_chain(
+                plan->context, policy, producer,
+                &dynamic_window_owns_consumer_chain));
+        if (dynamic_window_owns_consumer_chain) {
+          return iree_ok_status();
+        }
+      }
       const loom_value_id_t result = loom_op_const_results(record->op)[0];
       const loom_value_t* result_value =
           loom_module_value(plan->context->module, result);

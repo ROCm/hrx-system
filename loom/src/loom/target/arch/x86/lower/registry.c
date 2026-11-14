@@ -744,7 +744,9 @@ static const loom_target_vector_packet_policy_t kX86Avx2VectorPacketPolicy = {
     .native_lane_counts = kX86Avx2VectorPacketLaneCounts,
     .index_bit_count = 64u,
     .offset_bit_count = 64u,
-    .flags = LOOM_TARGET_VECTOR_PACKET_POLICY_FLAG_MEMORY_ROOT_COMPONENTS |
+    .flags = LOOM_TARGET_VECTOR_PACKET_POLICY_FLAG_DYNAMIC_WINDOW_REPLAY |
+             LOOM_TARGET_VECTOR_PACKET_POLICY_FLAG_DYNAMIC_SNAPSHOT_SELECTION |
+             LOOM_TARGET_VECTOR_PACKET_POLICY_FLAG_MEMORY_ROOT_COMPONENTS |
              LOOM_TARGET_VECTOR_PACKET_POLICY_FLAG_BOUNDARY_PROJECTION,
     .structural_lane_limits = kX86Avx2VectorPacketStructuralLaneLimits,
     .maximum_unpacketized_bit_count = 256u,
@@ -783,7 +785,9 @@ static const loom_target_vector_packet_policy_t kX86Avx512VectorPacketPolicy = {
     .native_lane_counts = kX86Avx512VectorPacketLaneCounts,
     .index_bit_count = 64u,
     .offset_bit_count = 64u,
-    .flags = LOOM_TARGET_VECTOR_PACKET_POLICY_FLAG_MEMORY_ROOT_COMPONENTS |
+    .flags = LOOM_TARGET_VECTOR_PACKET_POLICY_FLAG_DYNAMIC_WINDOW_REPLAY |
+             LOOM_TARGET_VECTOR_PACKET_POLICY_FLAG_DYNAMIC_SNAPSHOT_SELECTION |
+             LOOM_TARGET_VECTOR_PACKET_POLICY_FLAG_MEMORY_ROOT_COMPONENTS |
              LOOM_TARGET_VECTOR_PACKET_POLICY_FLAG_BOUNDARY_PROJECTION,
     .structural_lane_limits = kX86Avx512VectorPacketStructuralLaneLimits,
     .maximum_unpacketized_bit_count = 512u,

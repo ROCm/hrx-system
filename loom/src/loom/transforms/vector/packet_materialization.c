@@ -274,6 +274,89 @@ static void loom_vector_packet_reset_value(
   };
 }
 
+iree_status_t loom_vector_packet_materialize_partition_slice(
+    loom_target_legalization_context_t* context,
+    loom_value_fact_vector_partition_t partition, uint32_t lane_offset,
+    loom_type_t result_type, loom_location_id_t location,
+    loom_value_id_t* out_result) {
+  const uint32_t lane_count = loom_type_dim_static_size_at(result_type, 0);
+  const uint32_t packet_lane_count = partition.snapshot_lane_count;
+  const uint32_t packet_offset = lane_offset % packet_lane_count;
+  const uint32_t first_lane_count =
+      iree_min(lane_count, packet_lane_count - packet_offset);
+  const uint32_t last_lane_count =
+      (lane_count - first_lane_count) % packet_lane_count;
+  const bool native_fragments =
+      first_lane_count == lane_count ||
+      (loom_target_legalization_has_source_vector_carrier(
+           context, loom_vector_packet_type(result_type, first_lane_count),
+           LOOM_VALUE_ID_INVALID) &&
+       (last_lane_count == 0 ||
+        loom_target_legalization_has_source_vector_carrier(
+            context, loom_vector_packet_type(result_type, last_lane_count),
+            LOOM_VALUE_ID_INVALID)));
+  const uint32_t piece_lane_count =
+      native_fragments
+          ? lane_count
+          : iree_math_gcd_u64(
+                lane_count, iree_math_gcd_u64(lane_offset, packet_lane_count));
+  const uint32_t piece_count =
+      native_fragments
+          ? 1u + (lane_count - first_lane_count + packet_lane_count - 1u) /
+                     packet_lane_count
+          : lane_count / piece_lane_count;
+  loom_value_id_t local_pieces[2];
+  loom_value_id_t* pieces = local_pieces;
+  if (piece_count > IREE_ARRAYSIZE(local_pieces)) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        context->arena, piece_count, sizeof(*pieces), (void**)&pieces));
+  }
+  loom_builder_t* builder = &context->rewriter->builder;
+  uint32_t offset = lane_offset;
+  for (uint32_t i = 0; i < piece_count; ++i) {
+    const loom_value_fact_vector_partition_component_t component =
+        partition.snapshot_components[offset / packet_lane_count];
+    const int64_t component_offset = offset % packet_lane_count;
+    const uint32_t fragment_lane_count =
+        native_fragments ? iree_min(lane_offset + lane_count - offset,
+                                    component.lane_count - component_offset)
+                         : piece_lane_count;
+    offset += fragment_lane_count;
+    pieces[i] = component.value;
+    if (component_offset == 0 && component.lane_count == fragment_lane_count) {
+      continue;
+    }
+    loom_op_t* slice = NULL;
+    IREE_RETURN_IF_ERROR(loom_vector_slice_build(
+        builder, component.value, NULL, 0, &component_offset, 1,
+        loom_vector_packet_type(result_type, fragment_lane_count), location,
+        &slice));
+    pieces[i] = loom_vector_slice_result(slice);
+  }
+  // Reuse native suffix/prefix carriers where possible. Equal aligned pieces
+  // cover targets whose carrier vocabulary cannot represent those fragments.
+  for (uint32_t count = piece_count; count > 1; count = (count + 1u) / 2u) {
+    for (uint32_t i = 0; i < count / 2u; ++i) {
+      const uint32_t joined_lane_count =
+          loom_type_dim_static_size_at(
+              loom_module_value_type(context->module, pieces[2u * i]), 0) +
+          loom_type_dim_static_size_at(
+              loom_module_value_type(context->module, pieces[2u * i + 1u]), 0);
+      loom_op_t* concat = NULL;
+      IREE_RETURN_IF_ERROR(loom_vector_concat_build(
+          builder, 0, &pieces[2u * i], 2,
+          loom_vector_packet_type(result_type, joined_lane_count), location,
+          &concat));
+      pieces[i] = loom_vector_concat_result(concat);
+    }
+    if (count % 2u != 0) {
+      pieces[count / 2u] = pieces[count - 1u];
+    }
+  }
+  *out_result = pieces[0];
+  return iree_ok_status();
+}
+
 static iree_status_t loom_vector_packet_materialize_snapshot(
     loom_vector_packetization_t* packetization,
     const loom_vector_packet_slice_t* slice,
@@ -284,59 +367,12 @@ static iree_status_t loom_vector_packet_materialize_snapshot(
       packetization->context->module, packetized_value->source);
   const loom_op_t* snapshot_op = loom_value_def_op(snapshot_value);
   IREE_ASSERT(snapshot_op != NULL);
-  const loom_value_fact_vector_partition_t partition =
-      packetized_value->source_partition;
-  const uint32_t snapshot_packet_lane_count = partition.snapshot_lane_count;
-  uint32_t packet_index =
-      slice->static_lane_offset / snapshot_packet_lane_count;
-  uint32_t packet_lane_offset =
-      slice->static_lane_offset % snapshot_packet_lane_count;
-  const loom_type_t packet_type =
-      loom_vector_packet_type(packetized_value->source_type, slice->lane_count);
-  IREE_ASSERT_LE(slice->lane_count, snapshot_packet_lane_count);
-
-  // The selected packet width never exceeds the regular snapshot width, so a
-  // static packet is either contained in one component or joins the suffix and
-  // prefix of two adjacent components.
-  loom_value_id_t fragments[2] = {0};
-  uint32_t fragment_count = 0;
-  uint32_t remaining_lane_count = slice->lane_count;
-  while (remaining_lane_count != 0) {
-    IREE_ASSERT_LT(packet_index, partition.snapshot_count);
-    IREE_ASSERT_LT(fragment_count, IREE_ARRAYSIZE(fragments));
-    const loom_value_fact_vector_partition_component_t component =
-        partition.snapshot_components[packet_index];
-    IREE_ASSERT_LT(packet_lane_offset, component.lane_count);
-    const uint32_t fragment_lane_count = iree_min(
-        remaining_lane_count, component.lane_count - packet_lane_offset);
-    loom_value_id_t fragment = component.value;
-    if (packet_lane_offset != 0 ||
-        fragment_lane_count != component.lane_count) {
-      const int64_t static_offset = packet_lane_offset;
-      loom_op_t* fragment_op = NULL;
-      IREE_RETURN_IF_ERROR(loom_vector_slice_build(
-          &packetization->context->rewriter->builder, component.value,
-          /*offsets=*/NULL, /*offsets_count=*/0, &static_offset,
-          /*static_offsets_count=*/1,
-          loom_vector_packet_type(packetized_value->source_type,
-                                  fragment_lane_count),
-          snapshot_op->location, &fragment_op));
-      fragment = loom_vector_slice_result(fragment_op);
-    }
-    fragments[fragment_count++] = fragment;
-    remaining_lane_count -= fragment_lane_count;
-    ++packet_index;
-    packet_lane_offset = 0;
-  }
-
-  loom_value_id_t packet = fragments[0];
-  if (fragment_count > 1) {
-    loom_op_t* concat_op = NULL;
-    IREE_RETURN_IF_ERROR(loom_vector_concat_build(
-        &packetization->context->rewriter->builder, /*axis=*/0, fragments,
-        fragment_count, packet_type, snapshot_op->location, &concat_op));
-    packet = loom_vector_concat_result(concat_op);
-  }
+  loom_value_id_t packet = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_vector_packet_materialize_partition_slice(
+      packetization->context, packetized_value->source_partition,
+      slice->static_lane_offset,
+      loom_vector_packet_type(packetized_value->source_type, slice->lane_count),
+      snapshot_op->location, &packet));
   packetized_value->packet.vector = packet;
   if (slice->lane_count == 1u) {
     const int64_t static_index = 0;
@@ -618,6 +654,31 @@ bool loom_vector_packet_dynamic_materialization_operation_count(
   return true;
 }
 
+static iree_status_t loom_vector_packet_extract_single_lane(
+    loom_vector_packetization_t* packetization,
+    loom_vector_packet_value_t packet, loom_location_id_t location,
+    loom_value_id_t* out_scalar) {
+  if (packet.scalar != LOOM_VALUE_ID_INVALID) {
+    *out_scalar = packet.scalar;
+    return iree_ok_status();
+  }
+  const loom_value_t* packet_value =
+      loom_module_value(packetization->context->module, packet.vector);
+
+  const int64_t static_index = 0;
+  const loom_type_t packet_type = packet_value->type;
+  const loom_type_t scalar_type =
+      loom_type_scalar(loom_type_element_type(packet_type));
+  loom_op_t* extract_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_vector_extract_build(
+      &packetization->context->rewriter->builder, packet.vector,
+      /*indices=*/NULL,
+      /*indices_count=*/0, &static_index, /*static_indices_count=*/1,
+      scalar_type, location, &extract_op));
+  *out_scalar = loom_vector_extract_result(extract_op);
+  return iree_ok_status();
+}
+
 static iree_status_t loom_vector_packet_materialize_captured(
     loom_vector_packetization_t* packetization,
     const loom_vector_packet_slice_t* slice,
@@ -638,6 +699,12 @@ static iree_status_t loom_vector_packet_materialize_captured(
       offsets, offset_count, &static_offset, /*static_offsets_count=*/1,
       packet_type, packetization->captured_value_location, &slice_op));
   packetized_value->packet.vector = loom_vector_slice_result(slice_op);
+  if (slice->lane_count == 1u) {
+    IREE_RETURN_IF_ERROR(loom_vector_packet_extract_single_lane(
+        packetization, packetized_value->packet,
+        packetization->captured_value_location,
+        &packetized_value->packet.scalar));
+  }
   return iree_ok_status();
 }
 
@@ -715,31 +782,6 @@ iree_status_t loom_vector_packet_materialize(
   *out_value = loom_vector_packet_find(packetization, source);
   IREE_ASSERT(*out_value != NULL);
   IREE_ASSERT((*out_value)->packet.vector != LOOM_VALUE_ID_INVALID);
-  return iree_ok_status();
-}
-
-static iree_status_t loom_vector_packet_extract_single_lane(
-    loom_vector_packetization_t* packetization,
-    loom_vector_packet_value_t packet, loom_location_id_t location,
-    loom_value_id_t* out_scalar) {
-  if (packet.scalar != LOOM_VALUE_ID_INVALID) {
-    *out_scalar = packet.scalar;
-    return iree_ok_status();
-  }
-  const loom_value_t* packet_value =
-      loom_module_value(packetization->context->module, packet.vector);
-
-  const int64_t static_index = 0;
-  const loom_type_t packet_type = packet_value->type;
-  const loom_type_t scalar_type =
-      loom_type_scalar(loom_type_element_type(packet_type));
-  loom_op_t* extract_op = NULL;
-  IREE_RETURN_IF_ERROR(loom_vector_extract_build(
-      &packetization->context->rewriter->builder, packet.vector,
-      /*indices=*/NULL,
-      /*indices_count=*/0, &static_index, /*static_indices_count=*/1,
-      scalar_type, location, &extract_op));
-  *out_scalar = loom_vector_extract_result(extract_op);
   return iree_ok_status();
 }
 

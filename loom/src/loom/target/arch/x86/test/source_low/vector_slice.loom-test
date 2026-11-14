@@ -204,14 +204,3 @@ low.func.def target<x86.avx512_features.core>(@target) abi(object_function) abi_
   %result = vpblendmd %condition, %true_value, %false_value
   return %result
 }
-
-// ====
-// RUN: emit source-low output=low
-
-x86.target<avx2> @target
-
-func.def target(@target) @dynamic_slice_is_not_a_register_window(%source: vector<8xf32>, %position: index) -> (vector<4xf32>) {
-  // ERROR@+1: TARGET/032 {op_name="vector.slice", op_constraint="target_contract.register_permutation.provider_required"}
-  %result = vector.slice %source[%position] : vector<8xf32> -> vector<4xf32>
-  func.return %result : vector<4xf32>
-}
