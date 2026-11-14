@@ -117,6 +117,20 @@ class PhysicalDeviceSnapshotBuilder {
         IREE_HAL_VULKAN_DEVICE_EXTENSION_EXT_MEMORY_BUDGET;
   }
 
+  void SetShaderFmaFeatures(uint32_t widths, bool extension_available = true) {
+    if (extension_available) {
+      snapshot_.available_extensions |=
+          IREE_HAL_VULKAN_DEVICE_EXTENSION_KHR_SHADER_FMA;
+    }
+    snapshot_.shader_fma_features = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FMA_FEATURES_KHR,
+        .pNext = nullptr,
+        .shaderFmaFloat16 = (widths & 1) != 0,
+        .shaderFmaFloat32 = (widths & 2) != 0,
+        .shaderFmaFloat64 = (widths & 4) != 0,
+    };
+  }
+
   void EnableShaderBfloat16Features() {
     EnableShaderBfloat16Extension();
     snapshot_.shader_bfloat16_features.sType =
@@ -639,6 +653,106 @@ TEST(DevicePlanTest, OwnedCreateEnablesMemoryBudgetWhenAvailable) {
                         IREE_HAL_VULKAN_DEVICE_EXTENSION_EXT_MEMORY_BUDGET));
   EXPECT_TRUE(PlanContainsExtension(
       plan, IREE_HAL_VULKAN_EXT_MEMORY_BUDGET_EXTENSION_NAME));
+}
+
+// Each width is independently advertised and enabled by Vulkan.
+static constexpr iree_hal_vulkan_general_features_t kFmaFeatures[] = {
+    IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_FMA_FLOAT16,
+    IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_FMA_FLOAT32,
+    IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_FMA_FLOAT64,
+};
+
+TEST(DevicePlanTest, OwnedCreateEnablesOnlyAdvertisedFmaWidths) {
+  for (uint32_t widths = 0; widths < 8; ++widths) {
+    SCOPED_TRACE(widths);
+    PhysicalDeviceSnapshotBuilder builder;
+    builder.AddQueueFamily(VK_QUEUE_COMPUTE_BIT, 1);
+    builder.SetShaderFmaFeatures(widths);
+    auto options = DefaultDeviceOptions();
+    ScopedDevicePlan plan;
+    IREE_ASSERT_OK(iree_hal_vulkan_device_plan_initialize_for_create(
+        builder.snapshot(), &options, IREE_HAL_VULKAN_REQUEST_FLAG_NONE,
+        NoFeatures(), &plan));
+    EXPECT_TRUE(PlanContainsExtension(plan, VK_KHR_SHADER_FMA_EXTENSION_NAME));
+    const VkBool32 enabled[] = {
+        plan.enabled_shader_fma_features.shaderFmaFloat16,
+        plan.enabled_shader_fma_features.shaderFmaFloat32,
+        plan.enabled_shader_fma_features.shaderFmaFloat64,
+    };
+    for (uint32_t i = 0; i < IREE_ARRAYSIZE(kFmaFeatures); ++i) {
+      const bool available = (widths & (1u << i)) != 0;
+      EXPECT_EQ(enabled[i] != VK_FALSE, available);
+      EXPECT_EQ(
+          iree_all_bits_set(plan.enabled_features.general, kFmaFeatures[i]),
+          available);
+      if (!available) {
+        ScopedDevicePlan required;
+        IREE_EXPECT_STATUS_IS(
+            StatusCode::kUnavailable,
+            iree_hal_vulkan_device_plan_initialize_for_create(
+                builder.snapshot(), &options, IREE_HAL_VULKAN_REQUEST_FLAG_NONE,
+                GeneralFeatures(kFmaFeatures[i]), &required));
+      }
+    }
+    // Rebuilding the native chain after a plan move must point into its owner.
+    iree_hal_vulkan_device_plan_t copied_plan = plan;
+    VkDeviceCreateInfo create_info;
+    iree_hal_vulkan_device_plan_make_create_info(&copied_plan, &create_info);
+    EXPECT_EQ(copied_plan.enabled_features13.pNext,
+              widths ? &copied_plan.enabled_shader_fma_features : nullptr);
+    EXPECT_EQ(copied_plan.enabled_shader_fma_features.pNext, nullptr);
+  }
+}
+
+TEST(DevicePlanTest, FmaRequiresAdvertisedAndEnabledExtension) {
+  for (uint32_t i = 0; i < IREE_ARRAYSIZE(kFmaFeatures); ++i) {
+    SCOPED_TRACE(i);
+    for (bool extension_available : {false, true}) {
+      PhysicalDeviceSnapshotBuilder builder;
+      builder.AddQueueFamily(VK_QUEUE_COMPUTE_BIT, 1);
+      builder.SetShaderFmaFeatures(1u << i, extension_available);
+      auto options = DefaultDeviceOptions();
+      if (!extension_available) {
+        ScopedDevicePlan required;
+        IREE_EXPECT_STATUS_IS(
+            StatusCode::kUnavailable,
+            iree_hal_vulkan_device_plan_initialize_for_create(
+                builder.snapshot(), &options, IREE_HAL_VULKAN_REQUEST_FLAG_NONE,
+                GeneralFeatures(kFmaFeatures[i]), &required));
+      }
+      auto params = DefaultExternalParams();
+      params.compute_queue_set.queue_family_index = 0;
+      params.compute_queue_set.queue_indices = 1;
+      params.enabled_features.general |= kFmaFeatures[i];
+      ScopedDevicePlan missing_extension;
+      IREE_EXPECT_STATUS_IS(
+          StatusCode::kFailedPrecondition,
+          iree_hal_vulkan_device_plan_initialize_for_wrap(
+              builder.snapshot(), &options, &params, &missing_extension));
+      if (!extension_available) {
+        continue;
+      }
+      params.enabled_extensions |=
+          IREE_HAL_VULKAN_DEVICE_EXTENSION_KHR_SHADER_FMA;
+      ScopedDevicePlan enabled;
+      IREE_ASSERT_OK(iree_hal_vulkan_device_plan_initialize_for_wrap(
+          builder.snapshot(), &options, &params, &enabled));
+      EXPECT_TRUE(
+          iree_all_bits_set(enabled.enabled_features.general, kFmaFeatures[i]));
+      params.enabled_features.general &= ~kFmaFeatures[i];
+      ScopedDevicePlan disabled;
+      IREE_ASSERT_OK(iree_hal_vulkan_device_plan_initialize_for_wrap(
+          builder.snapshot(), &options, &params, &disabled));
+      EXPECT_FALSE(
+          iree_any_bit_set(disabled.enabled_features.general, kFmaFeatures[i]));
+      params.enabled_features.general |= kFmaFeatures[(i + 1) % 3];
+      ScopedDevicePlan unsupported_width;
+      IREE_EXPECT_STATUS_IS(
+          StatusCode::kFailedPrecondition,
+          iree_hal_vulkan_device_plan_initialize_for_wrap(
+              builder.snapshot(), &options, &params, &unsupported_width));
+    }
+  }
 }
 
 TEST(DevicePlanTest, OwnedCreateEnablesShaderBfloat16WhenAvailable) {

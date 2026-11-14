@@ -166,6 +166,9 @@ typedef struct iree_hal_vulkan_physical_device_snapshot_t {
   // VK_KHR_shader_bfloat16 feature bits, if the extension is available.
   VkPhysicalDeviceShaderBfloat16FeaturesKHR shader_bfloat16_features;
 
+  // Per-width fused arithmetic, if VK_KHR_shader_fma is available.
+  VkPhysicalDeviceShaderFmaFeaturesKHR shader_fma_features;
+
   // VK_EXT_shader_atomic_float feature bits, if the extension is available.
   VkPhysicalDeviceShaderAtomicFloatFeaturesEXT shader_atomic_float_features;
 

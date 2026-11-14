@@ -291,6 +291,10 @@ static iree_status_t iree_hal_vulkan_device_plan_select_extensions(
       iree_hal_vulkan_device_plan_enable_extension_if_available(
           snapshot, IREE_HAL_VULKAN_DEVICE_EXTENSION_EXT_SHADER_ATOMIC_FLOAT,
           VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME, plan));
+  IREE_RETURN_IF_ERROR(
+      iree_hal_vulkan_device_plan_enable_extension_if_available(
+          snapshot, IREE_HAL_VULKAN_DEVICE_EXTENSION_KHR_SHADER_FMA,
+          VK_KHR_SHADER_FMA_EXTENSION_NAME, plan));
   if (!iree_all_bits_set(
           plan->enabled_extensions,
           IREE_HAL_VULKAN_DEVICE_EXTENSION_EXT_SHADER_ATOMIC_FLOAT)) {
@@ -817,6 +821,10 @@ iree_status_t iree_hal_vulkan_device_plan_initialize_for_create(
           .sType =
               VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_BFLOAT16_FEATURES_KHR,
       };
+  out_plan->enabled_shader_fma_features =
+      (VkPhysicalDeviceShaderFmaFeaturesKHR){
+          .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FMA_FEATURES_KHR,
+      };
   iree_hal_vulkan_device_plan_initialize_shader_atomic_features(snapshot,
                                                                 out_plan);
   out_plan->enabled_features2 = (VkPhysicalDeviceFeatures2){
@@ -1016,6 +1024,40 @@ iree_status_t iree_hal_vulkan_device_plan_initialize_for_create(
           ? VK_TRUE
           : VK_FALSE;
 
+  const bool shader_fma_available =
+      iree_hal_vulkan_physical_device_has_extension(
+          snapshot, IREE_HAL_VULKAN_DEVICE_EXTENSION_KHR_SHADER_FMA);
+  IREE_RETURN_IF_ERROR(
+      iree_hal_vulkan_device_plan_select_reported_general_feature(
+          required_features.general,
+          IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_FMA_FLOAT16,
+          shader_fma_available &&
+              snapshot->shader_fma_features.shaderFmaFloat16,
+          "shaderFmaFloat16", &out_plan->enabled_features.general));
+  out_plan->enabled_shader_fma_features.shaderFmaFloat16 =
+      iree_all_bits_set(out_plan->enabled_features.general,
+                        IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_FMA_FLOAT16);
+  IREE_RETURN_IF_ERROR(
+      iree_hal_vulkan_device_plan_select_reported_general_feature(
+          required_features.general,
+          IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_FMA_FLOAT32,
+          shader_fma_available &&
+              snapshot->shader_fma_features.shaderFmaFloat32,
+          "shaderFmaFloat32", &out_plan->enabled_features.general));
+  out_plan->enabled_shader_fma_features.shaderFmaFloat32 =
+      iree_all_bits_set(out_plan->enabled_features.general,
+                        IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_FMA_FLOAT32);
+  IREE_RETURN_IF_ERROR(
+      iree_hal_vulkan_device_plan_select_reported_general_feature(
+          required_features.general,
+          IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_FMA_FLOAT64,
+          shader_fma_available &&
+              snapshot->shader_fma_features.shaderFmaFloat64,
+          "shaderFmaFloat64", &out_plan->enabled_features.general));
+  out_plan->enabled_shader_fma_features.shaderFmaFloat64 =
+      iree_all_bits_set(out_plan->enabled_features.general,
+                        IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_FMA_FLOAT64);
+
   return iree_hal_vulkan_device_plan_initialize_owned_queues(snapshot,
                                                              out_plan);
 }
@@ -1104,6 +1146,30 @@ static iree_status_t iree_hal_vulkan_verify_external_enabled_features(
         "external Vulkan VkDevice enabled cooperativeMatrix but the physical "
         "device did not report it");
   }
+  const bool shader_fma_available =
+      iree_hal_vulkan_physical_device_has_extension(
+          snapshot, IREE_HAL_VULKAN_DEVICE_EXTENSION_KHR_SHADER_FMA);
+  IREE_RETURN_IF_ERROR(
+      iree_hal_vulkan_device_plan_verify_external_reported_general_feature(
+          enabled_features.general,
+          IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_FMA_FLOAT16,
+          shader_fma_available &&
+              snapshot->shader_fma_features.shaderFmaFloat16,
+          "shaderFmaFloat16"));
+  IREE_RETURN_IF_ERROR(
+      iree_hal_vulkan_device_plan_verify_external_reported_general_feature(
+          enabled_features.general,
+          IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_FMA_FLOAT32,
+          shader_fma_available &&
+              snapshot->shader_fma_features.shaderFmaFloat32,
+          "shaderFmaFloat32"));
+  IREE_RETURN_IF_ERROR(
+      iree_hal_vulkan_device_plan_verify_external_reported_general_feature(
+          enabled_features.general,
+          IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_FMA_FLOAT64,
+          shader_fma_available &&
+              snapshot->shader_fma_features.shaderFmaFloat64,
+          "shaderFmaFloat64"));
   const bool shader_bfloat16_extension_available =
       iree_hal_vulkan_physical_device_has_extension(
           snapshot, IREE_HAL_VULKAN_DEVICE_EXTENSION_KHR_SHADER_BFLOAT16);
@@ -1250,6 +1316,19 @@ static iree_status_t iree_hal_vulkan_verify_external_device_contract(
         IREE_STATUS_FAILED_PRECONDITION,
         "external Vulkan VkDevice enabled cooperativeMatrix without reporting "
         "VK_KHR_cooperative_matrix as enabled");
+  }
+  const iree_hal_vulkan_general_features_t shader_fma_features =
+      IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_FMA_FLOAT16 |
+      IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_FMA_FLOAT32 |
+      IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_FMA_FLOAT64;
+  if (iree_any_bit_set(external_device_params->enabled_features.general,
+                       shader_fma_features) &&
+      !iree_all_bits_set(external_device_params->enabled_extensions,
+                         IREE_HAL_VULKAN_DEVICE_EXTENSION_KHR_SHADER_FMA)) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "external Vulkan VkDevice enabled shaderFma features without "
+        "reporting VK_KHR_shader_fma as enabled");
   }
   const iree_hal_vulkan_general_features_t shader_bfloat16_features =
       IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_BFLOAT16_TYPE |
@@ -1519,6 +1598,12 @@ static void iree_hal_vulkan_device_plan_refresh_feature_chain(
   if (plan->enabled_cooperative_matrix_features.cooperativeMatrix) {
     plan->enabled_cooperative_matrix_features.pNext = feature_chain;
     feature_chain = &plan->enabled_cooperative_matrix_features;
+  }
+  if (plan->enabled_shader_fma_features.shaderFmaFloat16 ||
+      plan->enabled_shader_fma_features.shaderFmaFloat32 ||
+      plan->enabled_shader_fma_features.shaderFmaFloat64) {
+    plan->enabled_shader_fma_features.pNext = feature_chain;
+    feature_chain = &plan->enabled_shader_fma_features;
   }
   if (plan->enabled_shader_bfloat16_features.shaderBFloat16Type ||
       plan->enabled_shader_bfloat16_features.shaderBFloat16DotProduct ||

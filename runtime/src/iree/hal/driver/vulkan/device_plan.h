@@ -146,6 +146,9 @@ typedef struct iree_hal_vulkan_device_plan_t {
   // VK_KHR_shader_bfloat16 features enabled during VkDevice creation.
   VkPhysicalDeviceShaderBfloat16FeaturesKHR enabled_shader_bfloat16_features;
 
+  // Per-width fused arithmetic enabled during VkDevice creation.
+  VkPhysicalDeviceShaderFmaFeaturesKHR enabled_shader_fma_features;
+
   // VK_EXT_shader_atomic_float features enabled during VkDevice creation.
   VkPhysicalDeviceShaderAtomicFloatFeaturesEXT
       enabled_shader_atomic_float_features;
