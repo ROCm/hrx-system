@@ -10,7 +10,7 @@ files through `// ====` sections and retain exact expectations maintained with
 | Record copies, returned values, and member aliases | `array_records` |
 | Mixed record loop state, nested selections, and output component origins | `record_values`, `records`, `records_invalid` |
 | Nested arrays, narrow fields, booleans, and vector components | `array_records`, `record_arrays` |
-| References, selected aliases, and mutation across calls | `reference_accessors`, `reference_parameters*`, `reference_selection` |
+| References, selected aliases, and mutation across calls | `reference_accessors`, `reference_parameters*`, `reference_selection`, `reference_transport` |
 | Value/storage receivers, member effects, and receiver aliases | `member_functions*`, `operators` |
 | Constructor delegation, default targets, moves, and destination identity | `record_constructors` |
 | Source layout, pointer-to-array strides, and qualified access | `record_arrays`, `record_memory` |

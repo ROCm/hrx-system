@@ -871,18 +871,18 @@ unsigned reference_member_access(unsigned input) {
 // ----
 func.def public @reference_member_access(%input: i32) -> (i32) {
   %29 = scalar.constant 7 : i32
-  %94 = scalar.addi %input, %29 : i32
+  %100 = scalar.addi %input, %29 : i32
   %33 = scalar.constant 1000 : i32
-  %184 = scalar.muli %input, %33 : i32
+  %183 = scalar.muli %input, %33 : i32
   %40 = scalar.constant 100 : i32
-  %41 = scalar.muli %94, %40 : i32
-  %186 = scalar.addi %184, %41 : i32
+  %41 = scalar.muli %100, %40 : i32
+  %185 = scalar.addi %183, %41 : i32
   %56 = scalar.constant 10 : i32
-  %57 = scalar.muli %94, %56 : i32
-  %188 = scalar.addi %186, %57 : i32
-  %190 = scalar.constant 16004 : i32
-  %191 = scalar.addi %188, %190 : i32
-  func.return %191 : i32
+  %57 = scalar.muli %100, %56 : i32
+  %187 = scalar.addi %185, %57 : i32
+  %189 = scalar.constant 16004 : i32
+  %190 = scalar.addi %187, %189 : i32
+  func.return %190 : i32
 }
 
 // ====
