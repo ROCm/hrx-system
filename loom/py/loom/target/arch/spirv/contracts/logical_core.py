@@ -91,6 +91,9 @@ from loom.target.arch.spirv.contracts.memory import (
     WORKGROUP_MEMORY_SPACES as _WORKGROUP_MEMORY_SPACES,
 )
 from loom.target.arch.spirv.contracts.memory import (
+    WRITABLE_STORAGE_BUFFER_MEMORY_SPACES as _WRITABLE_STORAGE_BUFFER_MEMORY_SPACES,
+)
+from loom.target.arch.spirv.contracts.memory import (
     source_memory_address_feature_guards as _source_memory_address_feature_guards,
 )
 from loom.target.arch.spirv.contracts.memory import (
@@ -119,6 +122,10 @@ from loom.target.arch.spirv.contracts.ordinary_vector_alu import (
 )
 from loom.target.arch.spirv.contracts.packed_memory import packed_storage_buffer_rules
 from loom.target.arch.spirv.contracts.predicate import integer_to_boolean_rule
+from loom.target.arch.spirv.contracts.private_storage import (
+    PRIVATE_STORAGE_MATERIALIZERS,
+    private_storage_rules,
+)
 from loom.target.arch.spirv.contracts.reference_fallback import (
     SPIRV_REFERENCE_FALLBACK_CONTRACT_CASES,
 )
@@ -808,6 +815,7 @@ def _raw_storage_buffer_byte_load_rule() -> DescriptorRule:
         source_op=buffer.buffer_load_i8_u,
         descriptor=load_descriptor,
         guards=(
+            Guard.value_memory_space("source", _STORAGE_BUFFER_MEMORY_SPACES),
             Guard.value_type("byte_offset", _OFFSET),
             Guard.value_type("result", _I32),
             *_feature_guards(load_descriptor),
@@ -856,6 +864,7 @@ def _raw_storage_buffer_byte_store_rule() -> DescriptorRule:
         source_op=buffer.buffer_store_i8,
         descriptor=store_descriptor,
         guards=(
+            Guard.value_memory_space("target", _WRITABLE_STORAGE_BUFFER_MEMORY_SPACES),
             Guard.value_type("value", _I32),
             Guard.value_type("byte_offset", _OFFSET),
             *_feature_guards(store_descriptor),
@@ -1469,6 +1478,7 @@ SPIRV_LOGICAL_CORE_CONTRACT_FRAGMENT = ContractFragment(
     descriptor_set=SPIRV_LOGICAL_CORE_DESCRIPTOR_SET,
     public_header="loom/target/arch/spirv/contracts/logical_core.h",
     materializers=(
+        *PRIVATE_STORAGE_MATERIALIZERS,
         COOPERATIVE_INITIALIZER_MATERIALIZER,
         NATIVE_INDEX_MATERIALIZER,
         NATIVE_INDEX_ARITHMETIC_MATERIALIZER,
@@ -1507,6 +1517,7 @@ SPIRV_LOGICAL_CORE_CONTRACT_FRAGMENT = ContractFragment(
         _select_rule(Vector("bf16", lanes=1), "spirv.op_select.i32"),
         *SPIRV_ORDINARY_VECTOR_ALU_CONTRACT_CASES,
         *_compare_rules(),
+        *private_storage_rules(),
         *_select_rules(),
         *(
             RecipeRule(

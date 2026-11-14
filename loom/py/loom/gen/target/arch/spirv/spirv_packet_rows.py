@@ -1138,24 +1138,29 @@ def _coordinate_binary_rows() -> list[_PacketRow]:
 
 
 def _coordinate_unary_rows() -> list[_PacketRow]:
-    i32_value = _value_type(
-        "LOOM_SPIRV_VALUE_CLASS_SCALAR",
-        "LOOM_SPIRV_SCALAR_TYPE_S32",
-    )
     return [
-        _PacketRow(
-            "spirv.op_copy_object.i32",
-            opcode="LOOM_SPIRV_OP_COPY_OBJECT",
-            form="LOOM_SPIRV_PACKET_FORM_UNARY_TYPED",
-            result_type=i32_value,
-            operand_types=(i32_value,),
+        *(
+            _PacketRow(
+                f"spirv.op_copy_object.{scalar.suffix}",
+                opcode="LOOM_SPIRV_OP_COPY_OBJECT",
+                form="LOOM_SPIRV_PACKET_FORM_UNARY_TYPED",
+                result_type=_alu_scalar_value(scalar),
+                operand_types=(_alu_scalar_value(scalar),),
+            )
+            for scalar in SCALAR_SELECT_TYPES
         ),
-        _PacketRow(
-            "spirv.op_copy_object.storage_buffer",
-            opcode="LOOM_SPIRV_OP_COPY_OBJECT",
-            form="LOOM_SPIRV_PACKET_FORM_UNARY_TYPED",
-            result_type=_storage_buffer_address_value(),
-            operand_types=(_storage_buffer_address_value(),),
+        *(
+            _PacketRow(
+                f"spirv.op_copy_object.{suffix}",
+                opcode="LOOM_SPIRV_OP_COPY_OBJECT",
+                form="LOOM_SPIRV_PACKET_FORM_UNARY_TYPED",
+                result_type=value_type,
+                operand_types=(value_type,),
+            )
+            for suffix, value_type in (
+                ("offset64", _offset64_value()),
+                ("storage_buffer", _storage_buffer_address_value()),
+            )
         ),
     ]
 

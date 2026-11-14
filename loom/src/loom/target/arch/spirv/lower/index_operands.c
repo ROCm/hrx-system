@@ -11,6 +11,7 @@
 #include "loom/ir/module.h"
 #include "loom/target/arch/spirv/descriptors/descriptors.h"
 #include "loom/target/arch/spirv/lower/index.h"
+#include "loom/target/arch/spirv/lower/private_storage.h"
 #include "loom/target/arch/spirv/registers.h"
 #include "loom/target/registers.h"
 #include "loom/util/fact_table.h"
@@ -36,6 +37,17 @@ iree_status_t loom_spirv_prepare_control_operand(
       SPIRV_LOGICAL_CORE_DESCRIPTOR_REF_OP_BITCAST_OFFSET64_I64;
   static const uint32_t kZeroExtend =
       SPIRV_LOGICAL_CORE_DESCRIPTOR_REF_OP_U_CONVERT_U32_U64;
+  static const uint32_t kPrivateNull =
+      SPIRV_LOGICAL_CORE_DESCRIPTOR_REF_OP_CONSTANT_OFFSET64;
+  if (loom_type_is_buffer(loom_module_value_type(
+          loom_low_lower_context_module(context), source_value)) &&
+      loom_low_register_type_class_id(required_type) ==
+          SPIRV_LOGICAL_CORE_REG_CLASS_ID_OFFSET64) {
+    IREE_ASSERT(loom_spirv_value_is_null(
+        loom_low_lower_context_fact_table(context), source_value));
+    *out_plan = &kPrivateNull;
+    return iree_ok_status();
+  }
   const bool actual_wide = loom_spirv_index_type_is_wide(actual_type);
   const bool required_wide = loom_spirv_index_type_is_wide(required_type);
   if (loom_low_register_type_class_id(actual_type) ==
@@ -84,6 +96,10 @@ iree_status_t loom_spirv_emit_control_operand(
   if (plan == NULL) {
     *out_value = low_value;
     return iree_ok_status();
+  }
+  if (*(const uint32_t*)plan ==
+      SPIRV_LOGICAL_CORE_DESCRIPTOR_REF_OP_CONSTANT_OFFSET64) {
+    return loom_spirv_emit_private_null(context, source_op, out_value);
   }
   if (*(const uint32_t*)plan ==
       SPIRV_LOGICAL_CORE_DESCRIPTOR_REF_OP_U_CONVERT_U32_U64) {

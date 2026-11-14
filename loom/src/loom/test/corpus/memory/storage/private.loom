@@ -178,3 +178,205 @@ check.scenario @private_selected_address_values {
   }
   check.return
 }
+
+// Volatile word accesses keep the physical objects observable. A runtime loop
+// rotates their identities, then a byte write modifies one selected word.
+kernel.def @private_rotating_aliases() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer, %control: i32) {
+  %origin = index.constant 0 : offset
+  %extent = index.constant 4 : offset
+  %first = buffer.alloca<private> align(4) %extent : buffer
+  %second = buffer.alloca<private> align(4) %extent : buffer
+  %inputs = buffer.view %input[%origin] : buffer -> view<2xi32>
+  %first_value = view.load %inputs[0] : view<2xi32> -> i32
+  %second_value = view.load %inputs[1] : view<2xi32> -> i32
+  %first_view = buffer.view %first[%origin] : buffer -> view<1xi32>
+  %second_view = buffer.view %second[%origin] : buffer -> view<1xi32>
+  view.store<volatile> %first_value, %first_view[0] : i32, view<1xi32>
+  view.store<volatile> %second_value, %second_view[0] : i32, view<1xi32>
+  %bounded = scalar.assume %control [range(%control, 0, 15)] : i32
+  %end = index.cast %bounded : i32 to index
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %selected, %other = scf.for %iteration = [%begin to %end step %step](%current = %first : buffer, %next = %second : buffer) -> (buffer, buffer) {
+    scf.yield %next, %current : buffer, buffer
+  }
+  %byte_mask = scalar.constant 3 : i32
+  %byte_index = scalar.andi %bounded, %byte_mask : i32
+  %byte_offset = index.cast %byte_index : i32 to offset
+  %tag = scalar.constant 165 : i32
+  buffer.store.i8 %tag, %selected[%byte_offset]
+  %selected_view = buffer.view %selected[%origin] : buffer -> view<1xi32>
+  %other_view = buffer.view %other[%origin] : buffer -> view<1xi32>
+  %updated = view.load<volatile> %selected_view[0] : view<1xi32> -> i32
+  %unchanged = view.load<volatile> %other_view[0] : view<1xi32> -> i32
+  %results = buffer.view %output[%origin] : buffer -> view<2xi32>
+  view.store %updated, %results[0] : i32, view<2xi32>
+  view.store %unchanged, %results[1] : i32, view<2xi32>
+  kernel.return
+}
+
+func.def @private_rotating_aliases_oracle(%input: buffer, %output: buffer, %control: i32) {
+  %origin = index.constant 0 : offset
+  %inputs = buffer.view %input[%origin] : buffer -> view<2xi32>
+  %parity_mask = scalar.constant 1 : i32
+  %byte_index_mask = scalar.constant 3 : i32
+  %bits_per_byte = scalar.constant 8 : i32
+  %all_bits = scalar.constant -1 : i32
+  %byte_mask = scalar.constant 255 : i32
+  %tag = scalar.constant 165 : i32
+  %parity = scalar.andi %control, %parity_mask : i32
+  %other_parity = scalar.xori %parity, %parity_mask : i32
+  %selected = index.cast %parity : i32 to index
+  %other = index.cast %other_parity : i32 to index
+  %original = view.load %inputs[%selected] : view<2xi32> -> i32
+  %unchanged = view.load %inputs[%other] : view<2xi32> -> i32
+  %byte_index = scalar.andi %control, %byte_index_mask : i32
+  %shift = scalar.muli %byte_index, %bits_per_byte : i32
+  %mask = scalar.shli %byte_mask, %shift : i32
+  %keep = scalar.xori %mask, %all_bits : i32
+  %preserved = scalar.andi %original, %keep : i32
+  %replacement = scalar.shli %tag, %shift : i32
+  %updated = scalar.ori %preserved, %replacement : i32
+  %results = buffer.view %output[%origin] : buffer -> view<2xi32>
+  view.store %updated, %results[0] : i32, view<2xi32>
+  view.store %unchanged, %results[1] : i32, view<2xi32>
+  func.return
+}
+
+check.scenario @private_rotating_alias_values {
+  check.trial[16](%trial: index, %entropy: check.entropy) {
+    %control = check.generate<@private_selection_mask>(%trial) : (index) -> (i32)
+    %input = check.generate.iota offset(305419896) step(-2004318072) : tensor<2xi32>
+    %output = check.generate.fill value(-1) : tensor<2xi32>
+    check.compare<@private_rotating_aliases, @private_rotating_aliases_oracle>(%input, %output, %control) : (tensor<2xi32>, tensor<2xi32>, i32) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<2xi32>
+      check.expect.bitwise actual(%input) expected(%input) : tensor<2xi32>
+    }
+  }
+  check.return
+}
+
+// Every scalar payload crosses byte-aligned private storage in an ordinary
+// vector packet. Volatile transfers keep the addressable representation live;
+// the oracle copies bytes without using any private or floating-point storage.
+kernel.def @private_payloads() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %byte_count = index.constant 265 : offset
+  %storage = buffer.alloca<private> align(8) %byte_count : buffer
+  %i8_origin = index.constant 0 : offset
+  %i8_local = index.constant 1 : offset
+  %i8_input = buffer.view %input[%i8_origin] : buffer -> view<8xi8>
+  %i8_output = buffer.view %output[%i8_origin] : buffer -> view<8xi8>
+  %i8_private = buffer.view %storage[%i8_local] : buffer -> view<8xi8>
+  %i8_packet = vector.load %i8_input[0] : view<8xi8> -> vector<8xi8>
+  vector.store<volatile> %i8_packet, %i8_private[0] : vector<8xi8>, view<8xi8>
+  %i8_observed = vector.load<volatile> %i8_private[0] : view<8xi8> -> vector<8xi8>
+  vector.store %i8_observed, %i8_output[0] : vector<8xi8>, view<8xi8>
+  %f8E4M3_origin = index.constant 8 : offset
+  %f8E4M3_local = index.constant 9 : offset
+  %f8E4M3_input = buffer.view %input[%f8E4M3_origin] : buffer -> view<8xf8E4M3>
+  %f8E4M3_output = buffer.view %output[%f8E4M3_origin] : buffer -> view<8xf8E4M3>
+  %f8E4M3_private = buffer.view %storage[%f8E4M3_local] : buffer -> view<8xf8E4M3>
+  %f8E4M3_packet = vector.load %f8E4M3_input[0] : view<8xf8E4M3> -> vector<8xf8E4M3>
+  vector.store<volatile> %f8E4M3_packet, %f8E4M3_private[0] : vector<8xf8E4M3>, view<8xf8E4M3>
+  %f8E4M3_observed = vector.load<volatile> %f8E4M3_private[0] : view<8xf8E4M3> -> vector<8xf8E4M3>
+  vector.store %f8E4M3_observed, %f8E4M3_output[0] : vector<8xf8E4M3>, view<8xf8E4M3>
+  %f8E5M2_origin = index.constant 16 : offset
+  %f8E5M2_local = index.constant 17 : offset
+  %f8E5M2_input = buffer.view %input[%f8E5M2_origin] : buffer -> view<8xf8E5M2>
+  %f8E5M2_output = buffer.view %output[%f8E5M2_origin] : buffer -> view<8xf8E5M2>
+  %f8E5M2_private = buffer.view %storage[%f8E5M2_local] : buffer -> view<8xf8E5M2>
+  %f8E5M2_packet = vector.load %f8E5M2_input[0] : view<8xf8E5M2> -> vector<8xf8E5M2>
+  vector.store<volatile> %f8E5M2_packet, %f8E5M2_private[0] : vector<8xf8E5M2>, view<8xf8E5M2>
+  %f8E5M2_observed = vector.load<volatile> %f8E5M2_private[0] : view<8xf8E5M2> -> vector<8xf8E5M2>
+  vector.store %f8E5M2_observed, %f8E5M2_output[0] : vector<8xf8E5M2>, view<8xf8E5M2>
+  %i16_origin = index.constant 24 : offset
+  %i16_local = index.constant 25 : offset
+  %i16_input = buffer.view %input[%i16_origin] : buffer -> view<8xi16>
+  %i16_output = buffer.view %output[%i16_origin] : buffer -> view<8xi16>
+  %i16_private = buffer.view %storage[%i16_local] : buffer -> view<8xi16>
+  %i16_packet = vector.load %i16_input[0] : view<8xi16> -> vector<8xi16>
+  vector.store<volatile> %i16_packet, %i16_private[0] : vector<8xi16>, view<8xi16>
+  %i16_observed = vector.load<volatile> %i16_private[0] : view<8xi16> -> vector<8xi16>
+  vector.store %i16_observed, %i16_output[0] : vector<8xi16>, view<8xi16>
+  %f16_origin = index.constant 40 : offset
+  %f16_local = index.constant 41 : offset
+  %f16_input = buffer.view %input[%f16_origin] : buffer -> view<8xf16>
+  %f16_output = buffer.view %output[%f16_origin] : buffer -> view<8xf16>
+  %f16_private = buffer.view %storage[%f16_local] : buffer -> view<8xf16>
+  %f16_packet = vector.load %f16_input[0] : view<8xf16> -> vector<8xf16>
+  vector.store<volatile> %f16_packet, %f16_private[0] : vector<8xf16>, view<8xf16>
+  %f16_observed = vector.load<volatile> %f16_private[0] : view<8xf16> -> vector<8xf16>
+  vector.store %f16_observed, %f16_output[0] : vector<8xf16>, view<8xf16>
+  %bf16_origin = index.constant 56 : offset
+  %bf16_local = index.constant 57 : offset
+  %bf16_input = buffer.view %input[%bf16_origin] : buffer -> view<8xbf16>
+  %bf16_output = buffer.view %output[%bf16_origin] : buffer -> view<8xbf16>
+  %bf16_private = buffer.view %storage[%bf16_local] : buffer -> view<8xbf16>
+  %bf16_packet = vector.load %bf16_input[0] : view<8xbf16> -> vector<8xbf16>
+  vector.store<volatile> %bf16_packet, %bf16_private[0] : vector<8xbf16>, view<8xbf16>
+  %bf16_observed = vector.load<volatile> %bf16_private[0] : view<8xbf16> -> vector<8xbf16>
+  vector.store %bf16_observed, %bf16_output[0] : vector<8xbf16>, view<8xbf16>
+  %i32_origin = index.constant 72 : offset
+  %i32_local = index.constant 73 : offset
+  %i32_input = buffer.view %input[%i32_origin] : buffer -> view<8xi32>
+  %i32_output = buffer.view %output[%i32_origin] : buffer -> view<8xi32>
+  %i32_private = buffer.view %storage[%i32_local] : buffer -> view<8xi32>
+  %i32_packet = vector.load %i32_input[0] : view<8xi32> -> vector<8xi32>
+  vector.store<volatile> %i32_packet, %i32_private[0] : vector<8xi32>, view<8xi32>
+  %i32_observed = vector.load<volatile> %i32_private[0] : view<8xi32> -> vector<8xi32>
+  vector.store %i32_observed, %i32_output[0] : vector<8xi32>, view<8xi32>
+  %f32_origin = index.constant 104 : offset
+  %f32_local = index.constant 105 : offset
+  %f32_input = buffer.view %input[%f32_origin] : buffer -> view<8xf32>
+  %f32_output = buffer.view %output[%f32_origin] : buffer -> view<8xf32>
+  %f32_private = buffer.view %storage[%f32_local] : buffer -> view<8xf32>
+  %f32_packet = vector.load %f32_input[0] : view<8xf32> -> vector<8xf32>
+  vector.store<volatile> %f32_packet, %f32_private[0] : vector<8xf32>, view<8xf32>
+  %f32_observed = vector.load<volatile> %f32_private[0] : view<8xf32> -> vector<8xf32>
+  vector.store %f32_observed, %f32_output[0] : vector<8xf32>, view<8xf32>
+  %i64_origin = index.constant 136 : offset
+  %i64_local = index.constant 137 : offset
+  %i64_input = buffer.view %input[%i64_origin] : buffer -> view<8xi64>
+  %i64_output = buffer.view %output[%i64_origin] : buffer -> view<8xi64>
+  %i64_private = buffer.view %storage[%i64_local] : buffer -> view<8xi64>
+  %i64_packet = vector.load %i64_input[0] : view<8xi64> -> vector<8xi64>
+  vector.store<volatile> %i64_packet, %i64_private[0] : vector<8xi64>, view<8xi64>
+  %i64_observed = vector.load<volatile> %i64_private[0] : view<8xi64> -> vector<8xi64>
+  vector.store %i64_observed, %i64_output[0] : vector<8xi64>, view<8xi64>
+  %f64_origin = index.constant 200 : offset
+  %f64_local = index.constant 201 : offset
+  %f64_input = buffer.view %input[%f64_origin] : buffer -> view<8xf64>
+  %f64_output = buffer.view %output[%f64_origin] : buffer -> view<8xf64>
+  %f64_private = buffer.view %storage[%f64_local] : buffer -> view<8xf64>
+  %f64_packet = vector.load %f64_input[0] : view<8xf64> -> vector<8xf64>
+  vector.store<volatile> %f64_packet, %f64_private[0] : vector<8xf64>, view<8xf64>
+  %f64_observed = vector.load<volatile> %f64_private[0] : view<8xf64> -> vector<8xf64>
+  vector.store %f64_observed, %f64_output[0] : vector<8xf64>, view<8xf64>
+  kernel.return
+}
+
+func.def @private_payloads_oracle(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %extent = index.constant 264 : offset
+  buffer.copy %input[%origin], %output[%origin], %extent
+  func.return
+}
+
+check.scenario @private_payload_bits {
+  check.trial[4](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-128 to 127) : tensor<264xi8>
+    %output = check.generate.fill value(85) : tensor<264xi8>
+    check.compare<@private_payloads, @private_payloads_oracle>(%input, %output) : (tensor<264xi8>, tensor<264xi8>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<264xi8>
+      check.expect.bitwise actual(%output) expected(%output) : tensor<264xi8>
+    }
+  }
+  check.return
+}

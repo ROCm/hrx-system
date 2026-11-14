@@ -115,10 +115,19 @@ bool loom_low_representation_plan_solve(
     loom_low_representation_plan_t* plan,
     loom_low_representation_conflict_t* out_conflict);
 
+// Returns the representative source ordinal of a solved component, or INVALID
+// for a value that did not participate. Equal identities share one selected
+// representation; unequal identities may independently select the same one.
+// The solve phase flattens component membership, so this query is O(1).
+loom_value_ordinal_t loom_low_representation_plan_component(
+    const loom_low_representation_plan_t* plan,
+    loom_value_ordinal_t value_ordinal);
+
 // Returns the selected representation for |value_ordinal|, or false when the
 // value did not participate or its component had no constraints.
 bool loom_low_representation_plan_lookup(
-    loom_low_representation_plan_t* plan, loom_value_ordinal_t value_ordinal,
+    const loom_low_representation_plan_t* plan,
+    loom_value_ordinal_t value_ordinal,
     loom_low_representation_id_t* out_representation);
 
 #ifdef __cplusplus

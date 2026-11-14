@@ -1,0 +1,115 @@
+// RUN: emit spirv-low target=spirv:vulkan1.3+bda+hal features=INT8
+
+// A word and a byte alias one private object. A separate word object retains
+// word cells; byte aliasing must not widen it or change its representation.
+kernel.def @private_aliases() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%output: buffer, %value: i32) {
+  %origin = index.constant 0 : offset
+  %extent = index.constant 4 : offset
+  %object = buffer.alloca<private> align(4) %extent : buffer
+  %other = buffer.alloca<private> align(4) %extent : buffer
+  %word = buffer.view %object[%origin] : buffer -> view<1xi32>
+  %other_word = buffer.view %other[%origin] : buffer -> view<1xi32>
+  view.store<volatile> %value, %word[0] : i32, view<1xi32>
+  view.store<volatile> %value, %other_word[0] : i32, view<1xi32>
+  %byte = buffer.load.i8.u %object[%origin]
+  %loaded = view.load<volatile> %other_word[0] : view<1xi32> -> i32
+  %results = buffer.view %output[%origin] : buffer -> view<2xi32>
+  view.store %byte, %results[0] : i32, view<2xi32>
+  view.store %loaded, %results[1] : i32, view<2xi32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<spirv.logical.core> abi_layout({signature = (buffer, i32) -> ()}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @private_aliases(%value: reg<spirv.id : i32>) asm {
+  %output = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %14 = storage {byte_alignment = 4, byte_length = 4} : low.storage<private>
+  %15 = storage_address %14 : low.storage<private> -> reg<spirv.ptr.function.array.i8>
+  %16 = storage {byte_alignment = 4, byte_length = 4} : low.storage<private>
+  %17 = storage_address %16 : low.storage<private> -> reg<spirv.ptr.function.array.i32>
+  %object = OpConstant.offset64 68719476736
+  %other = OpConstant.offset64 137438953472
+  %20 = OpConstant.offset64 0
+  %21 = OpIAdd.offset64 %object, %20
+  %23 = OpISub.offset64 %21, %object
+  %24 = OpAccessChain.function.i8.byte_offset %15, %23
+  %25 = OpSConvert.i32.i8 %value : reg<spirv.id>
+  OpStore.function.i8<volatile> %24, %25
+  %26 = OpConstant.offset64 1
+  %27 = OpIAdd.offset64 %23, %26
+  %28 = OpAccessChain.function.i8.byte_offset %15, %27
+  %29 = OpConstant.i32 8 : reg<spirv.id>
+  %30 = OpShiftRightLogical %value, %29 : reg<spirv.id>
+  %31 = OpSConvert.i32.i8 %30 : reg<spirv.id>
+  OpStore.function.i8<volatile> %28, %31
+  %32 = OpConstant.offset64 2
+  %33 = OpIAdd.offset64 %23, %32
+  %34 = OpAccessChain.function.i8.byte_offset %15, %33
+  %35 = OpConstant.i32 16 : reg<spirv.id>
+  %36 = OpShiftRightLogical %value, %35 : reg<spirv.id>
+  %37 = OpSConvert.i32.i8 %36 : reg<spirv.id>
+  OpStore.function.i8<volatile> %34, %37
+  %38 = OpConstant.offset64 3
+  %39 = OpIAdd.offset64 %23, %38
+  %40 = OpAccessChain.function.i8.byte_offset %15, %39
+  %41 = OpConstant.i32 24 : reg<spirv.id>
+  %42 = OpShiftRightLogical %value, %41 : reg<spirv.id>
+  %43 = OpSConvert.i32.i8 %42 : reg<spirv.id>
+  OpStore.function.i8<volatile> %40, %43
+  %45 = OpIAdd.offset64 %other, %20
+  %47 = OpISub.offset64 %45, %other
+  %48 = OpAccessChain.function.i32.byte_offset %17, %47
+  OpStore.function.i32<volatile> %48, %value
+  %54 = OpLoad.function.i8 %24 : reg<spirv.id>
+  %55 = OpSConvert.i8.i32 %54 : reg<spirv.id>
+  %56 = OpConstant.i32 255 : reg<spirv.id>
+  %57 = OpBitwiseAnd %55, %56 : reg<spirv.id>
+  %byte = OpCopyObject.i32 %57
+  %64 = OpLoad.function.i32<volatile> %48 : reg<spirv.id>
+  %loaded = OpCopyObject.i32 %64
+  %67 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output, %20
+  OpStore.storage_buffer.i32 %67, %byte
+  %68 = OpConstant.offset64 4
+  %69 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output, %68
+  OpStore.storage_buffer.i32 %69, %loaded
+  return
+}
+
+// ====
+// RUN: emit spirv-low target=spirv:vulkan1.3+bda+hal
+
+// Word cells require no Int8 or Int16. Even a volatile store/load stays native.
+kernel.def @word_cells() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%output: buffer, %value: i32) {
+  %origin = index.constant 0 : offset
+  %extent = index.constant 4 : offset
+  %object = buffer.alloca<private> align(4) %extent : buffer
+  %word = buffer.view %object[%origin] : buffer -> view<1xi32>
+  view.store<volatile> %value, %word[0] : i32, view<1xi32>
+  %observed = view.load<volatile> %word[0] : view<1xi32> -> i32
+  %result = buffer.view %output[%origin] : buffer -> view<1xi32>
+  view.store %observed, %result[0] : i32, view<1xi32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<spirv.logical.core> abi_layout({signature = (buffer, i32) -> ()}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @word_cells(%value: reg<spirv.id : i32>) asm {
+  %output = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %11 = storage {byte_alignment = 4, byte_length = 4} : low.storage<private>
+  %12 = storage_address %11 : low.storage<private> -> reg<spirv.ptr.function.array.i32>
+  %object = OpConstant.offset64 68719476736
+  %14 = OpConstant.offset64 0
+  %15 = OpIAdd.offset64 %object, %14
+  %17 = OpISub.offset64 %15, %object
+  %18 = OpAccessChain.function.i32.byte_offset %12, %17
+  OpStore.function.i32<volatile> %18, %value
+  %24 = OpLoad.function.i32<volatile> %18 : reg<spirv.id>
+  %observed = OpCopyObject.i32 %24
+  %27 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output, %14
+  OpStore.storage_buffer.i32 %27, %observed
+  return
+}

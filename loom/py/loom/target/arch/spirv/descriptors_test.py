@@ -549,7 +549,7 @@ def test_result_asm_recipes_cover_every_spirv_descriptor_family() -> None:
     assert carrier_only_keys.isdisjoint(extended_math_recipes)
     expected_recipes.update(extended_math_recipes)
 
-    add_scalar_recipe("spirv.op_copy_object.i32", "i32")
+    add_carrier_only("spirv.op_copy_object.offset64")
     add_scalar_recipe("spirv.op_imul_add.i32", "i32")
     for opcode in ("iadd", "isub", "imul"):
         add_carrier_only(f"spirv.op_{opcode}.offset64")
@@ -612,8 +612,10 @@ def test_result_asm_recipes_cover_every_spirv_descriptor_family() -> None:
 
     for scalar in SCALAR_ALU_TYPES:
         add_scalar_recipe(f"spirv.op_select.{scalar.suffix}", scalar.source_type)
+        add_scalar_recipe(f"spirv.op_copy_object.{scalar.suffix}", scalar.source_type)
     for scalar in UNSIGNED_INTEGER_SCALAR_ALU_TYPES:
         add_carrier_only(f"spirv.op_select.{scalar.suffix}")
+        add_carrier_only(f"spirv.op_copy_object.{scalar.suffix}")
     add_scalar_recipe("spirv.op_select.bf16", BFLOAT16_CONSTANT_TYPE.source_type)
     add_scalar_recipe("spirv.op_select.bool", "i1")
     add_carrier_only("spirv.op_select.offset64")

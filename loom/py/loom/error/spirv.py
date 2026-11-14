@@ -715,6 +715,23 @@ ERR_SPIRV_045 = ErrorDef(
     fix_hint="Carry an integer position and form the storage pointer at each access",
 )
 
+ERR_SPIRV_046 = ErrorDef(
+    domain=ErrorDomain.SPIRV,
+    code=46,
+    severity=Severity.ERROR,
+    summary="SPIR-V reference joins incompatible storage domains.",
+    message=(
+        "SPIR-V cannot merge invocation-private storage with another storage "
+        "domain in '@{function_name}'; Function and other storage-class pointers "
+        "have different representations"
+    ),
+    params=(ErrorParam("function_name", ParamKind.STRING),),
+    fix_hint=(
+        "Keep private and external memory accesses in their respective "
+        "control-flow arms"
+    ),
+)
+
 ALL_SPIRV_ERRORS: tuple[ErrorDef, ...] = (
     ERR_SPIRV_005,
     ERR_SPIRV_006,
@@ -753,4 +770,5 @@ ALL_SPIRV_ERRORS: tuple[ErrorDef, ...] = (
     ERR_SPIRV_043,
     ERR_SPIRV_044,
     ERR_SPIRV_045,
+    ERR_SPIRV_046,
 )

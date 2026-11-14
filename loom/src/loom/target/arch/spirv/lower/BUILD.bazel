@@ -48,6 +48,7 @@ loom_cc_library(
         "cooperative_arithmetic.c",
         "matrix.c",
         "registry.c",
+        "representation.c",
         "workgroup.c",
         "workgroup_layout.c",
         "workgroup_reduce.c",
@@ -57,6 +58,7 @@ loom_cc_library(
         "cooperative_arithmetic.h",
         "lower.h",
         "matrix.h",
+        "representation.h",
         "workgroup.h",
         "workgroup_layout.h",
         "workgroup_reduce.h",
@@ -71,6 +73,7 @@ loom_cc_library(
     deps = [
         ":cooperative_initializer",
         ":index",
+        ":private_storage",
         "//loom/src/loom/analysis:contract_vector",
         "//loom/src/loom/analysis:source_storage_packing",
         "//loom/src/loom/analysis:storage_interference",
@@ -78,6 +81,7 @@ loom_cc_library(
         "//loom/src/loom/codegen/low:descriptors",
         "//loom/src/loom/codegen/low:source_memory_plan",
         "//loom/src/loom/codegen/low/lower",
+        "//loom/src/loom/codegen/low/lower:representation_observer",
         "//loom/src/loom/error:error_defs",
         "//loom/src/loom/ir",
         "//loom/src/loom/ir:facts",
@@ -85,8 +89,10 @@ loom_cc_library(
         "//loom/src/loom/ops:combining",
         "//loom/src/loom/ops/buffer",
         "//loom/src/loom/ops/func",
+        "//loom/src/loom/ops/index",
         "//loom/src/loom/ops/kernel",
         "//loom/src/loom/ops/low",
+        "//loom/src/loom/ops/scf",
         "//loom/src/loom/ops/vector",
         "//loom/src/loom/ops/view",
         "//loom/src/loom/target:registers",
@@ -120,17 +126,41 @@ loom_cc_library(
     ],
     visibility = ["//loom/src/loom/target/arch/spirv/contracts:__pkg__"],
     deps = [
+        ":private_storage",
         "//loom/src/loom/codegen/low/lower",
         "//loom/src/loom/codegen/low/lower:representation_observer",
         "//loom/src/loom/ir",
         "//loom/src/loom/ir:facts",
-        "//loom/src/loom/ops/index",
-        "//loom/src/loom/ops/scf",
         "//loom/src/loom/target:registers",
         "//loom/src/loom/target/arch/spirv:registers",
         "//loom/src/loom/target/arch/spirv/descriptors",
         "//loom/src/loom/util:fact_table",
         "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "private_storage",
+    srcs = ["private_storage.c"],
+    hdrs = ["private_storage.h"],
+    visibility = ["//loom/src/loom/target/arch/spirv/contracts:__pkg__"],
+    deps = [
+        "//loom/src/loom/analysis:storage_layout",
+        "//loom/src/loom/codegen/low:representation_plan",
+        "//loom/src/loom/codegen/low/lower",
+        "//loom/src/loom/codegen/low/lower:representation_observer",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ir:facts",
+        "//loom/src/loom/ops/buffer",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/target/arch/spirv:error_defs",
+        "//loom/src/loom/target/arch/spirv:features",
+        "//loom/src/loom/target/arch/spirv:registers",
+        "//loom/src/loom/target/arch/spirv/descriptors",
+        "//loom/src/loom/util:fact_table",
+        "//loom/src/loom/util:ordinal_map",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
     ],
 )
 
@@ -147,6 +177,16 @@ loom_cc_library(
         "//loom/src/loom/util:fact_table",
         "//runtime/src/iree/base",
     ],
+)
+
+loom_check_test_suite(
+    name = "private_storage_tests",
+    srcs = [
+        "private_storage_diagnostics.loom-test",
+        "private_storage_test.loom-test",
+    ],
+    tags = ["hostonly"],
+    target_compatible_with = loom_config_compatible_with(["//loom/config/emit:spirv_binary"]),
 )
 
 loom_check_test_suite(

@@ -1,0 +1,39 @@
+// RUN: emit spirv-low target=spirv:vulkan1.3+bda+hal
+
+// A physical device address and an invocation-private position cannot share a
+// carrier. Null is different: it adapts to the private representation at use.
+kernel.def @mixed_storage() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer, %condition: i1) {
+  %extent = index.constant 4 : offset
+  %origin = index.constant 0 : offset
+  %local = buffer.alloca<private> align(4) %extent : buffer
+  // ERROR@+1: SPIRV/046 {function_name="mixed_storage"}
+  %selected = scf.select %condition, %local, %input : buffer
+  %source = buffer.view %selected[%origin] : buffer -> view<1xi32>
+  %value = view.load<volatile> %source[0] : view<1xi32> -> i32
+  %results = buffer.view %output[%origin] : buffer -> view<1xi32>
+  view.store %value, %results[0] : i32, view<1xi32>
+  kernel.return
+}
+
+// ====
+// RUN: emit spirv-low target=spirv:vulkan1.3+bda+hal features=STORAGE_BUFFER_8BIT_ACCESS
+
+// StorageBuffer8BitAccess alone does not permit byte cells in Function storage.
+kernel.def @byte_cells_require_int8() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%output: buffer, %value: i32) {
+  %extent = index.constant 4 : offset
+  %origin = index.constant 0 : offset
+  %local = buffer.alloca<private> align(4) %extent : buffer
+  %word = buffer.view %local[%origin] : buffer -> view<1xi32>
+  view.store<volatile> %value, %word[0] : i32, view<1xi32>
+  // ERROR@+1: TARGET/003 {subject_name="spirv.op_access_chain.function.i8.byte_offset", constraint_key="descriptor_available"}
+  %observed = buffer.load.i8.u %local[%origin]
+  %results = buffer.view %output[%origin] : buffer -> view<1xi32>
+  view.store %observed, %results[0] : i32, view<1xi32>
+  kernel.return
+}

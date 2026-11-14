@@ -325,7 +325,7 @@ bool loom_low_representation_plan_solve(
   }
   plan->solved = true;
   for (uint32_t i = 0; i < plan->node_count; ++i) {
-    if (plan->nodes[i].parent != i) {
+    if (loom_low_representation_plan_find_root(plan, i) != i) {
       continue;
     }
     if (!loom_low_representation_plan_solve_component(&plan->nodes[i],
@@ -336,8 +336,21 @@ bool loom_low_representation_plan_solve(
   return true;
 }
 
+loom_value_ordinal_t loom_low_representation_plan_component(
+    const loom_low_representation_plan_t* plan,
+    loom_value_ordinal_t value_ordinal) {
+  IREE_ASSERT(plan->solved);
+  if (plan->node_ordinals == NULL ||
+      plan->node_ordinals[value_ordinal] == UINT32_MAX) {
+    return LOOM_VALUE_ORDINAL_INVALID;
+  }
+  const uint32_t node = plan->node_ordinals[value_ordinal];
+  return plan->nodes[plan->nodes[node].parent].value_ordinal;
+}
+
 bool loom_low_representation_plan_lookup(
-    loom_low_representation_plan_t* plan, loom_value_ordinal_t value_ordinal,
+    const loom_low_representation_plan_t* plan,
+    loom_value_ordinal_t value_ordinal,
     loom_low_representation_id_t* out_representation) {
   IREE_ASSERT_ARGUMENT(plan);
   IREE_ASSERT(plan->solved);
@@ -351,8 +364,7 @@ bool loom_low_representation_plan_lookup(
   if (node_ordinal == UINT32_MAX) {
     return false;
   }
-  const uint32_t root_ordinal =
-      loom_low_representation_plan_find_root(plan, node_ordinal);
+  const uint32_t root_ordinal = plan->nodes[node_ordinal].parent;
   const loom_low_representation_id_t representation =
       plan->nodes[root_ordinal].selected_representation;
   if (representation == LOOM_LOW_REPRESENTATION_ID_NONE) {

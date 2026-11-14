@@ -515,29 +515,35 @@ def _builtin_scalar_index_descriptors() -> tuple[Descriptor, ...]:
 
 
 def _carrier_copy_descriptors() -> tuple[Descriptor, ...]:
-    return tuple(
+    return (
+        *(
+            _unary_typed_descriptor(
+                key=f"spirv.op_copy_object.{scalar.suffix}",
+                mnemonic=f"OpCopyObject.{scalar.suffix}",
+                semantic_tag=f"spirv.op_copy_object.{scalar.suffix}",
+                operands=(_id_result(), _id_operand("input")),
+                result_value_type=_scalar_alu_result_value_type(scalar),
+                feature_bits=scalar.feature_bits,
+            )
+            for scalar in SCALAR_SELECT_TYPES
+        ),
         _unary_typed_descriptor(
-            key=f"spirv.op_copy_object.{suffix}",
-            mnemonic=f"OpCopyObject.{suffix}",
-            semantic_tag=f"spirv.op_copy_object.{suffix}",
-            operands=operands,
-            result_value_type=result_value_type,
-        )
-        for suffix, operands, result_value_type in (
-            (
-                "i32",
-                (_id_result(), _id_operand("input")),
-                _scalar_result_value_type("i32"),
+            key="spirv.op_copy_object.offset64",
+            mnemonic="OpCopyObject.offset64",
+            semantic_tag="spirv.op_copy_object.offset64",
+            operands=(_offset64_result(), _offset64_operand("input")),
+            result_value_type=None,
+        ),
+        _unary_typed_descriptor(
+            key="spirv.op_copy_object.storage_buffer",
+            mnemonic="OpCopyObject.storage_buffer",
+            semantic_tag="spirv.op_copy_object.storage_buffer",
+            operands=(
+                _ptr_storage_buffer_result("dst"),
+                _ptr_storage_buffer_operand("input"),
             ),
-            (
-                "storage_buffer",
-                (
-                    _ptr_storage_buffer_result("dst"),
-                    _ptr_storage_buffer_operand("input"),
-                ),
-                None,
-            ),
-        )
+            result_value_type=None,
+        ),
     )
 
 
