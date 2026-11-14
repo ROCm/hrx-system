@@ -1360,7 +1360,7 @@ jobs:
             --execution_log_json_file="$evidence_dir/producer-execution.json" \
             "$target"
 
-          query='mnemonic("CppCompile|CppLink", //build_tools/windows:compiler_runtime_test)'
+          query='mnemonic(CppCompile, //build_tools/windows:compiler_runtime_test) union mnemonic(CppLink, //build_tools/windows:compiler_runtime_test)'
           bazel "--output_base=$IREE_CACHE_HANDOFF_OUTPUT_BASE" aquery \
             "${common_flags[@]}" --output=text "$query" \
             > "$evidence_dir/producer-aquery.txt"
@@ -1510,7 +1510,7 @@ jobs:
             '--remote_verify_downloads',
             '--noremote_cache_async'
           )
-          $query = 'mnemonic("CppCompile|CppLink", //build_tools/windows:compiler_runtime_test)'
+          $query = 'mnemonic(CppCompile, //build_tools/windows:compiler_runtime_test) union mnemonic(CppLink, //build_tools/windows:compiler_runtime_test)'
           $consumerAquery = Join-Path $evidenceDir 'consumer-aquery.txt'
           bazel "--output_base=$env:IREE_CACHE_HANDOFF_OUTPUT_BASE" aquery `
             @commonFlags '--output=text' $query | Out-File -LiteralPath $consumerAquery -Encoding utf8
