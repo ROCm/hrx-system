@@ -122,7 +122,7 @@ iree_status_t loom_spirv_query_cooperative_arithmetic(
         environment, source_op,
         missing_features ? IREE_SV("cooperative_matrix.arithmetic_features")
                          : IREE_SV("cooperative_matrix.arithmetic_types"),
-        0, 0, (uint32_t)missing_features, out_result));
+        0, 0, missing_features, out_result));
     out_result->outcome = LOOM_TARGET_CONTRACT_QUERY_TERMINAL_REJECTION;
     return iree_ok_status();
   }

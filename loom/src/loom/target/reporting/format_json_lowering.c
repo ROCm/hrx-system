@@ -2155,7 +2155,7 @@ static iree_status_t loom_target_compile_report_format_legalization_row_json(
       row->source_rejection_detail));
   IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
       &object, IREE_SV("target_rejection_bits"), row->target_rejection_bits));
-  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
       &object, IREE_SV("missing_feature_bits"), row->missing_feature_bits));
   IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
       &object, IREE_SV("missing_fact_bits"), row->missing_fact_bits));

@@ -1466,7 +1466,7 @@ static iree_status_t loom_target_compile_report_format_legalization_rows(
       IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
           builder,
           " source_rejections=0x%08" PRIx32 " source_rejection_detail=%" PRIu32
-          " target_rejections=0x%08" PRIx32 " missing_features=0x%08" PRIx32
+          " target_rejections=0x%08" PRIx32 " missing_features=0x%08" PRIx64
           " missing_facts=0x%08" PRIx32 " created_ops=%" PRIu64
           " erased_ops=%" PRIu64 "\n",
           row->source_rejection_bits, row->source_rejection_detail,

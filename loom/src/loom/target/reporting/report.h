@@ -1915,10 +1915,10 @@ typedef struct loom_target_compile_report_legalization_row_t {
   uint32_t source_rejection_detail;
   // Compact target-owned rejection flags.
   uint32_t target_rejection_bits;
-  // Target feature bits missing from the selected bundle.
-  uint32_t missing_feature_bits;
   // Value fact categories missing for the selected rule.
   uint32_t missing_fact_bits;
+  // Target feature bits missing from the selected bundle.
+  uint64_t missing_feature_bits;
   // Operations created by the deciding rewrite and generated descendants.
   uint64_t created_op_count;
   // Operations erased by the deciding rewrite and generated descendants.

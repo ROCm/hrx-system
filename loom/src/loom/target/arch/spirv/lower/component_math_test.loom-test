@@ -66,3 +66,28 @@ kernel.def @strict_sine() {
   vector.fragment.store<result> %result, %out[0, 0] shape [%tile, %tile] : vector<8xf32>, view<16x16xf32>
   kernel.return
 }
+
+// ====
+
+// RUN: with-checks compile-report target=spirv:vulkan1.3+bda+hal target-legalize
+
+// Missing controls above bit 31 survive the production query and report path.
+kernel.def @half_minimum_report() {
+  %unit = index.constant 1 : index
+  %width = target.subgroup.size : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%first: buffer, %second: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %tile = index.constant 16 : index
+  %first_view = buffer.view %first[%origin] : buffer -> view<16x16xf16>
+  %second_view = buffer.view %second[%origin] : buffer -> view<16x16xf16>
+  %output_view = buffer.view %output[%origin] : buffer -> view<16x16xf16>
+  %a = vector.fragment.load<init> %first_view[0, 0] shape [%tile, %tile] : view<16x16xf16> -> vector<8xf16>
+  %b = vector.fragment.load<init> %second_view[0, 0] shape [%tile, %tile] : view<16x16xf16> -> vector<8xf16>
+  %minimum = vector.minnumf<nnan|ninf|nsz> %a, %b : vector<8xf16>
+  vector.fragment.store<result> %minimum, %output_view[0, 0] shape [%tile, %tile] : vector<8xf16>, view<16x16xf16>
+  kernel.return
+}
+
+// ----
+CHECK: COMPILE-REPORT: target_legalization[*] * source_op=vector.minnumf * missing_features=0x80000000000808 *

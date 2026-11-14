@@ -565,7 +565,7 @@ iree_status_t loom_low_lower_descriptor_matrix_reject(
     const loom_target_contract_descriptor_matrix_rule_t* rule,
     const loom_op_t* source_op, iree_string_view_t constraint,
     loom_contract_rejection_bits_t source_rejection_bits,
-    uint32_t target_rejection_bits, uint32_t missing_feature_bits,
+    uint32_t target_rejection_bits, uint64_t missing_feature_bits,
     loom_target_contract_query_result_t* out_result);
 
 typedef struct loom_low_lower_selected_plan_view_t {

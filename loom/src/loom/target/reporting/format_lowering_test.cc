@@ -658,8 +658,8 @@ TEST(CompileReportFormatTest, FormatsMathAndTargetLegalization) {
       .source_rejection_bits = 0x1,
       .source_rejection_detail = kTestSourceRejectionDetail,
       .target_rejection_bits = 0x2,
-      .missing_feature_bits = 0x4,
       .missing_fact_bits = 0x8,
+      .missing_feature_bits = UINT64_C(0x80000000000004),
       .created_op_count = 6,
       .erased_op_count = 1,
   };
@@ -693,6 +693,9 @@ TEST(CompileReportFormatTest, FormatsMathAndTargetLegalization) {
                             0),
       IREE_STRING_VIEW_NPOS);
   EXPECT_NE(iree_string_view_find(text, IREE_SV(" scalarized=true"), 0),
+            IREE_STRING_VIEW_NPOS);
+  EXPECT_NE(iree_string_view_find(
+                text, IREE_SV(" missing_features=0x80000000000004"), 0),
             IREE_STRING_VIEW_NPOS);
   EXPECT_NE(iree_string_view_find(
                 text, IREE_SV("descriptor_key=test.legalized.descriptor"), 0),
@@ -735,6 +738,8 @@ TEST(CompileReportFormatTest, FormatsMathAndTargetLegalization) {
                           IREE_SV("test.legalized.descriptor"));
   ExpectObjectUint64Equals(legalization_row, IREE_SV("source_rejection_detail"),
                            4);
+  ExpectObjectUint64Equals(legalization_row, IREE_SV("missing_feature_bits"),
+                           UINT64_C(0x80000000000004));
   ExpectObjectUint64Equals(legalization_row, IREE_SV("created_op_count"), 6);
 
   iree_string_builder_deinitialize(&builder);

@@ -672,8 +672,8 @@ static iree_status_t loom_low_target_legalize_retain_report_decision(
       .source_rejection_bits = query_result->source_rejection_bits,
       .source_rejection_detail = query_result->source_rejection_detail,
       .target_rejection_bits = query_result->target_rejection_bits,
-      .missing_feature_bits = query_result->missing_feature_bits,
       .missing_fact_bits = query_result->missing_fact_bits,
+      .missing_feature_bits = query_result->missing_feature_bits,
       .created_op_count = decision->created_op_count,
       .erased_op_count = decision->erased_op_count,
   };

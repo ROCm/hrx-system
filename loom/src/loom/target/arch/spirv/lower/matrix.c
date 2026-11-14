@@ -416,7 +416,7 @@ iree_status_t loom_spirv_matrix_contract_query_reject(
     const loom_target_contract_query_environment_t* environment,
     const loom_op_t* source_op, iree_string_view_t matrix_constraint,
     uint32_t source_rejection_bits, uint32_t target_rejection_bits,
-    uint32_t missing_feature_bits,
+    uint64_t missing_feature_bits,
     loom_target_contract_query_result_t* out_result) {
   loom_target_contract_rejection_t* rejection = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate(
@@ -568,10 +568,10 @@ iree_status_t loom_spirv_descriptor_matrix_query(
       loom_spirv_cooperative_matrix_property_select(&property_set, &query,
                                                     &diagnostic);
   if (property == NULL) {
-    const uint32_t missing_feature_bits =
+    const uint64_t missing_feature_bits =
         iree_any_bit_set(diagnostic.rejection_flags,
                          LOOM_SPIRV_COOPERATIVE_REJECTION_FEATURE)
-            ? (uint32_t)loom_spirv_feature_atom_bit(diagnostic.feature_atom)
+            ? loom_spirv_feature_atom_bit(diagnostic.feature_atom)
             : 0;
     return loom_spirv_matrix_contract_query_reject(
         environment, source_op,

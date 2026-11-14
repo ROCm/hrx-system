@@ -56,7 +56,7 @@ iree_status_t loom_spirv_matrix_contract_query_reject(
     const loom_target_contract_query_environment_t* environment,
     const loom_op_t* source_op, iree_string_view_t matrix_constraint,
     uint32_t source_rejection_bits, uint32_t target_rejection_bits,
-    uint32_t missing_feature_bits,
+    uint64_t missing_feature_bits,
     loom_target_contract_query_result_t* out_result);
 
 // Supplies SPIR-V options for shared descriptor-matrix source adapters.

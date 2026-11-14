@@ -304,6 +304,9 @@ typedef struct loom_target_contract_query_result_t {
   uint16_t diagnostic_index;
   // Number of guards matched before the selected rejected guard.
   uint16_t matched_guard_count;
+  // Exact source-to-native transform selected with a descriptor-matrix row.
+  loom_target_contract_descriptor_matrix_transform_flags_t
+      selected_descriptor_matrix_transform_flags;
   // Low descriptor row selected by the accepted rule, or NULL.
   const loom_low_descriptor_t* selected_descriptor;
   // Matrix-fragment lane/register layout selected with the source contract, or
@@ -318,13 +321,10 @@ typedef struct loom_target_contract_query_result_t {
   uint32_t source_rejection_detail;
   // Compact target-owned rejection flags.
   uint32_t target_rejection_bits;
-  // Target feature bits missing from the selected bundle.
-  uint32_t missing_feature_bits;
   // Value fact categories missing for the selected rule.
   uint32_t missing_fact_bits;
-  // Exact source-to-native transform selected with a descriptor-matrix row.
-  loom_target_contract_descriptor_matrix_transform_flags_t
-      selected_descriptor_matrix_transform_flags;
+  // Target feature bits missing from the selected bundle.
+  uint64_t missing_feature_bits;
   // Optional rejection payload. Usually points into rodata or a scoped arena.
   const loom_target_contract_rejection_t* rejection;
 } loom_target_contract_query_result_t;
@@ -567,15 +567,15 @@ loom_target_contract_query_result_empty(void) {
       /*.rule_index=*/UINT16_MAX,
       /*.diagnostic_index=*/UINT16_MAX,
       /*.matched_guard_count=*/0,
+      /*.selected_descriptor_matrix_transform_flags=*/0,
       /*.selected_descriptor=*/NULL,
       /*.selected_matrix_fragment_layout=*/NULL,
       /*.selected_native_contraction_facts=*/NULL,
       /*.source_rejection_bits=*/0,
       /*.source_rejection_detail=*/0,
       /*.target_rejection_bits=*/0,
-      /*.missing_feature_bits=*/0,
       /*.missing_fact_bits=*/0,
-      /*.selected_descriptor_matrix_transform_flags=*/0,
+      /*.missing_feature_bits=*/0,
       /*.rejection=*/NULL,
   };
 }
