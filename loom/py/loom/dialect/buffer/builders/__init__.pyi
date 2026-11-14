@@ -247,7 +247,7 @@ class BufferBuilder(DialectBuilder):
     def end(
         self,
         *,
-        buffers: list[ValueRef] = ...,
+        references: list[ValueRef] = ...,
         results: list[Type | TiedResultSpec],
         name: str | None = ...,
         names: Sequence[str] | None = ...,

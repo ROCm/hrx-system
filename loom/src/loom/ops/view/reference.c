@@ -600,6 +600,21 @@ static loom_value_fact_view_reference_t loom_view_default_view_reference(
   };
 }
 
+iree_status_t loom_view_reference_refine_restrict_access(
+    loom_fact_context_t* context, loom_value_id_t source_value_id,
+    loom_value_facts_t source_facts, loom_type_t source_type,
+    loom_value_fact_restrict_access_t restrict_access,
+    loom_value_facts_t* out) {
+  loom_value_fact_view_reference_t reference =
+      loom_view_default_view_reference(source_value_id, source_type);
+  (void)loom_value_facts_query_view_reference(context, source_facts,
+                                              &reference);
+  reference.root_value_id = loom_value_fact_view_reference_resolve_root_value(
+      reference, source_value_id);
+  reference.restrict_access = restrict_access;
+  return loom_value_facts_make_view_reference(context, reference, out);
+}
+
 iree_status_t loom_view_reference_make_record(loom_fact_context_t* context,
                                               const loom_module_t* module,
                                               loom_value_id_t storage_value_id,
