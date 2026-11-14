@@ -269,10 +269,17 @@ def classify_failure(
             summary="cold speech retained-memory accounting observed zero pending bytes",
         )
 
-    if (
-        "Windows" in str(job.get("name", ""))
-        and "An Application Control policy has blocked this file" in log
-        and re.search(r"(?:error:\s*|\[WinError\s+)4551\b", log, re.IGNORECASE)
+    # Bazel renders STATUS_SYSTEM_INTEGRITY_POLICY_VIOLATION (0xC0E90002) as
+    # the signed 32-bit process exit -1058471934.
+    application_control_status = re.search(
+        r"\b0xC0E90002\b|(?<!\d)-1058471934(?!\d)", log, re.IGNORECASE
+    )
+    if "Windows" in str(job.get("name", "")) and (
+        application_control_status
+        or (
+            "An Application Control policy has blocked this file" in log
+            and re.search(r"(?:error:\s*|\[WinError\s+)4551\b", log, re.IGNORECASE)
+        )
     ):
         return _tracked_finding(
             open_issues=open_issues,

@@ -195,24 +195,44 @@ class GitHubActionsTriageTest(unittest.TestCase):
                 self.assertEqual(confirmed.issue, issue)
 
     def test_windows_application_control_precedes_reported_test_failure(self):
-        log = (
+        logs = (
             "FAIL: //loom/example:test (see log)\n"
             "CreateProcessW failed (error: 4551)\n"
-            "An Application Control policy has blocked this file."
+            "An Application Control policy has blocked this file.",
+            "FAIL: //libamdf/example:test (Exit -1058471934) (see test.log)",
+            "process exited with status 0xc0e90002",
         )
-        input_job = job(job_name="Bazel / Windows x86-64 / Clang CL / Fastbuild")
-        unconfirmed = self.classify(log, input_job=input_job)
-        self.assertEqual(unconfirmed.category, triage.REPOSITORY)
-        self.assertEqual(unconfirmed.issue, "hrx-vvf9c")
+        input_job = job(
+            job_name="Bazel / Windows x86-64 / Clang CL / Fastbuild",
+            failed_step="Build and test native AMD devices",
+        )
+        for log in logs:
+            with self.subTest(log=log):
+                unconfirmed = self.classify(log, input_job=input_job)
+                self.assertEqual(unconfirmed.category, triage.REPOSITORY)
+                self.assertEqual(unconfirmed.issue, "hrx-vvf9c")
 
-        confirmed = self.classify(
-            log,
-            input_job=input_job,
-            open_issues=frozenset({"hrx-vvf9c"}),
-        )
-        self.assertEqual(confirmed.category, triage.INFRASTRUCTURE)
-        self.assertEqual(confirmed.code, "windows_application_control_denial")
-        self.assertEqual(confirmed.issue, "hrx-vvf9c")
+                confirmed = self.classify(
+                    log,
+                    input_job=input_job,
+                    open_issues=frozenset({"hrx-vvf9c"}),
+                )
+                self.assertEqual(confirmed.category, triage.INFRASTRUCTURE)
+                self.assertEqual(confirmed.code, "windows_application_control_denial")
+                self.assertEqual(confirmed.issue, "hrx-vvf9c")
+
+        for log in (
+            "FAIL: //example:test (Exit -10584719340)",
+            "process exited with status 0xC0E900020",
+            "process exited with status 1058471934",
+        ):
+            with self.subTest(log=log):
+                finding = self.classify(
+                    log,
+                    input_job=input_job,
+                    open_issues=frozenset({"hrx-vvf9c"}),
+                )
+                self.assertNotEqual(finding.code, "windows_application_control_denial")
 
     def test_windows_bazel_dns_failure_requires_owning_issue_and_boundary(self):
         log = (
