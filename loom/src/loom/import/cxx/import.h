@@ -40,7 +40,7 @@ typedef struct loom_cxx_unit_t loom_cxx_unit_t;
 
 // Preprocesses and checks one translation unit with the source configuration
 // in |options|: standard, triple, data model, include paths, defines, source
-// provider, preamble and the NO_BUILTIN_INCLUDES flag. Diagnostics
+// provider, preamble and the HOSTED and NO_BUILTIN_INCLUDES flags. Diagnostics
 // go to options->diagnostic_sink. On success the caller owns *out_unit and
 // frees it with loom_cxx_unit_free(). Source rejection emits diagnostics and
 // returns OK with *out_unit=NULL. Borrowed option storage and the source

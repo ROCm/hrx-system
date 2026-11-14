@@ -8246,6 +8246,10 @@ class Translator final : private Initialization::Evaluation,
   }
 
   void effect(cxx::ExpressionAST* ast) override {
+    if (!ast->type) {
+      // Only an expression the frontend could not type has none.
+      fail(ast, "expression has no resolved C++ type");
+    }
     if (control_->object_requires_storage(ast) &&
         ast->valueCategory == cxx::ValueCategory::kPrValue &&
         unit_.typeTraits().is_class(ast->type)) {

@@ -34,6 +34,12 @@ IREE_STATIC_ASSERT_ENUM_EQ(
     LOOMC_CXX_IMPORT_FLAG_NO_BUILTIN_INCLUDES,
     LOOM_CXX_IMPORT_FLAG_NO_BUILTIN_INCLUDES,
     "public no-builtin-includes flag matches the native importer");
+IREE_STATIC_ASSERT_ENUM_EQ(LOOMC_CXX_IMPORT_FLAG_HOSTED,
+                           LOOM_CXX_IMPORT_FLAG_HOSTED,
+                           "public hosted flag matches the native importer");
+IREE_STATIC_ASSERT_ENUM_EQ(
+    LOOMC_CXX_IMPORT_FLAG_EXCEPTIONS, LOOM_CXX_IMPORT_FLAG_EXCEPTIONS,
+    "public exceptions flag matches the native importer");
 
 enum {
   LOOMC_CXX_SOURCE_PATH_BLOCK_SIZE = 8 * 1024,

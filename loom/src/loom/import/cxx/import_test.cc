@@ -794,4 +794,113 @@ TEST_F(ImportTest, ParsedUnitDiagnosticsFollowTheImportSink) {
   loom_cxx_unit_free(unit);
 }
 
+TEST_F(ImportTest, HostedFlagSelectsTheHostedProfile) {
+  const auto source = IREE_SV(
+      "#ifndef __linux__\n#error not hosted\n#endif\n"
+      "int entry(int value) { return value; }\n");
+  IREE_ASSERT_OK(Import(source));
+  EXPECT_EQ(module_, nullptr);
+  EXPECT_GT(error_count_, 0);
+
+  error_count_ = 0;
+  options_.flags |= LOOM_CXX_IMPORT_FLAG_HOSTED;
+  options_.triple = IREE_SV("x86_64-linux-gnu");
+  IREE_ASSERT_OK(Import(source));
+  ASSERT_NE(module_, nullptr);
+  EXPECT_EQ(error_count_, 0);
+}
+
+TEST_F(ImportTest, HostedProfileDisablesExceptions) {
+  const auto source = IREE_SV(
+      "#if defined(__cpp_exceptions) || defined(__EXCEPTIONS)\n"
+      "#error exceptions enabled\n#endif\n"
+      "int entry(int value) { return value; }\n");
+  options_.flags |= LOOM_CXX_IMPORT_FLAG_HOSTED;
+  options_.triple = IREE_SV("x86_64-linux-gnu");
+  IREE_ASSERT_OK(Import(source));
+  ASSERT_NE(module_, nullptr);
+  EXPECT_EQ(error_count_, 0);
+}
+
+TEST_F(ImportTest, ExceptionsFlagEnablesHostedExceptions) {
+  // A driver whose host compile uses exceptions parses the unit with them.
+  const auto source = IREE_SV(
+      "#if !defined(__cpp_exceptions) || !defined(__EXCEPTIONS)\n"
+      "#error exceptions disabled\n#endif\n"
+      "int entry(int value) { return value; }\n");
+  options_.flags |=
+      LOOM_CXX_IMPORT_FLAG_HOSTED | LOOM_CXX_IMPORT_FLAG_EXCEPTIONS;
+  options_.triple = IREE_SV("x86_64-linux-gnu");
+  IREE_ASSERT_OK(Import(source));
+  ASSERT_NE(module_, nullptr);
+  EXPECT_EQ(error_count_, 0);
+}
+
+TEST_F(ImportTest, ExceptionsFlagRequiresHosted) {
+  options_.flags |= LOOM_CXX_IMPORT_FLAG_EXCEPTIONS;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        Import(IREE_SV("int entry() { return 0; }\n")));
+  EXPECT_EQ(module_, nullptr);
+}
+
+TEST_F(ImportTest, HostedProfileDefaultsToCxx20) {
+  // Hosted import reads the platform's C++ library headers, which parse at
+  // C++20; an explicit standard still applies.
+  const auto source = IREE_SV(
+      "static_assert(__cplusplus == 202002L);\n"
+      "int entry(int value) { return value; }\n");
+  options_.flags |= LOOM_CXX_IMPORT_FLAG_HOSTED;
+  options_.triple = IREE_SV("x86_64-linux-gnu");
+  options_.standard = iree_string_view_empty();
+  IREE_ASSERT_OK(Import(source));
+  ASSERT_NE(module_, nullptr);
+  EXPECT_EQ(error_count_, 0);
+  options_.standard = IREE_SV("c++26");
+  IREE_ASSERT_OK(Import(source));
+  EXPECT_EQ(module_, nullptr);
+  EXPECT_GT(error_count_, 0);
+}
+
+TEST_F(ImportTest, HostedProfileRequiresALinuxTriple) {
+  options_.flags |= LOOM_CXX_IMPORT_FLAG_HOSTED;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        Import(IREE_SV("int entry() { return 0; }\n")));
+  EXPECT_EQ(module_, nullptr);
+}
+
+TEST_F(ImportTest, HostedProfileDoesNotMarkTheDevicePass) {
+  // Hosted source sees exactly the host compile's macros, so it cannot branch
+  // on the pass with the preprocessor.
+  const auto source = IREE_SV(
+      "#ifdef __loom__\n#error device pass is marked\n#endif\n"
+      "int entry(int value) { return value; }\n");
+  options_.flags |= LOOM_CXX_IMPORT_FLAG_HOSTED;
+  options_.triple = IREE_SV("x86_64-linux-gnu");
+  IREE_ASSERT_OK(Import(source));
+  ASSERT_NE(module_, nullptr);
+  EXPECT_EQ(error_count_, 0);
+}
+
+TEST_F(ImportTest, HostedProfileUsesTheHostLayout) {
+  // x86-64 Linux: 16-byte long double with a 64-bit significand, in both the
+  // layout and the macros, as in a host compile for the same triple.
+  const auto source = IREE_SV(
+      "static_assert(sizeof(long double) == 16);\n"
+      "static_assert(__SIZEOF_LONG_DOUBLE__ == 16);\n"
+      "static_assert(__LDBL_MANT_DIG__ == 64);\n"
+      "int entry(int value) { return value; }\n");
+  options_.flags |= LOOM_CXX_IMPORT_FLAG_HOSTED;
+  options_.triple = IREE_SV("x86_64-linux-gnu");
+  IREE_ASSERT_OK(Import(source));
+  ASSERT_NE(module_, nullptr);
+  EXPECT_EQ(error_count_, 0);
+}
+
+TEST_F(ImportTest, RejectsUnknownImportFlags) {
+  options_.flags = LOOM_CXX_IMPORT_FLAG_ALL + 1;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        Import(IREE_SV("int entry() { return 0; }\n")));
+  EXPECT_EQ(module_, nullptr);
+}
+
 }  // namespace

@@ -7,6 +7,7 @@
 #include "loom/import/cxx/source/frontend.h"
 
 #include <cxx/ast.h>
+#include <cxx/gcc_linux_toolchain.h>
 #include <cxx/memory_layout.h>
 #include <cxx/preprocessor.h>
 #include <cxx/triple.h>
@@ -30,7 +31,7 @@ class SourceToolchain final : public cxx::Toolchain {
   SourceToolchain(cxx::Preprocessor* preprocessor,
                   const loom_cxx_import_options_t& options)
       : cxx::Toolchain(preprocessor, cxx::Triple{string(options.triple)}) {
-    auto spelling = options.standard.size ? string(options.standard) : "c++26";
+    auto spelling = string(loom_cxx_import_options_standard(&options));
     auto* standard = cxx::findLanguageStandard(spelling);
     if (!standard) {
       throw StatusError(iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -95,6 +96,49 @@ class SourceToolchain final : public cxx::Toolchain {
   }
 };
 
+// Hosted single-source profile (LOOM_CXX_IMPORT_FLAG_HOSTED): the device pass
+// parses the same headers as a host compile for options.triple, so it uses
+// cxx's own Linux toolchain for that triple. Predefined macros, the memory
+// layout (including long double) and the target architecture seen by
+// __has_builtin then match the host compile. Include paths come from the
+// options rather than toolchain discovery. Loom does not import exceptions,
+// so they are disabled unless the driver's host compile enables them
+// (LOOM_CXX_IMPORT_FLAG_EXCEPTIONS). Nothing marks the device pass: hosted
+// source sees the same macros as the host compile.
+std::unique_ptr<cxx::Toolchain> make_hosted_toolchain(
+    cxx::Preprocessor* preprocessor, const loom_cxx_import_options_t& options) {
+  cxx::Triple triple{string(options.triple)};
+  if (triple.os() != cxx::TripleOS::kLinux ||
+      (triple.arch() != cxx::TripleArch::kX86_64 &&
+       triple.arch() != cxx::TripleArch::kAArch64)) {
+    throw StatusError(iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "hosted import requires an x86_64 or aarch64 Linux triple, got '%s'",
+        string(options.triple).c_str()));
+  }
+  if (options.data_model != LOOM_CXX_DATA_MODEL_LP64) {
+    throw StatusError(iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "hosted import takes its data model from the triple; use lp64"));
+  }
+  auto spelling = string(loom_cxx_import_options_standard(&options));
+  auto* standard = cxx::findLanguageStandard(spelling);
+  if (!standard) {
+    throw StatusError(iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                       "unsupported C/C++ standard '%s'",
+                                       spelling.c_str()));
+  }
+  auto toolchain =
+      std::make_unique<cxx::GCCLinuxToolchain>(preprocessor, triple);
+  toolchain->setLanguage(standard->language);
+  toolchain->setExceptionsEnabled(
+      (options.flags & LOOM_CXX_IMPORT_FLAG_EXCEPTIONS) != 0);
+  toolchain->initMemoryLayout();
+  toolchain->setLanguageStandard(standard);
+  toolchain->addPredefinedMacros();
+  return toolchain;
+}
+
 }  // namespace
 
 Frontend::Frontend(iree_string_view_t filename,
@@ -105,7 +149,11 @@ Frontend::Frontend(iree_string_view_t filename,
   auto* preprocessor = unit_.preprocessor();
   contents_.bind(preprocessor, string(filename));
   diagnostics_.bind(&unit_, &contents_);
-  toolchain_ = std::make_unique<SourceToolchain>(preprocessor, options);
+  if (options.flags & LOOM_CXX_IMPORT_FLAG_HOSTED) {
+    toolchain_ = make_hosted_toolchain(preprocessor, options);
+  } else {
+    toolchain_ = std::make_unique<SourceToolchain>(preprocessor, options);
+  }
   for (size_t i = 0; i < options.include_path_count; ++i) {
     preprocessor->addUserIncludePath(string(options.include_paths[i]));
   }
@@ -165,15 +213,22 @@ void Frontend::preprocess(iree_string_view_t source, bool preamble_only) {
   diagnostics_.finish();
 }
 
+cxx::ParserConfiguration Frontend::parser_configuration() const {
+  // Exception support follows the profile, as in a compiler driver: the
+  // hosted profile parses and generates host code without exceptions.
+  return {.analysisMode = cxx::ParserAnalysisMode::kFull,
+          .exceptionsEnabled = toolchain_->exceptionsEnabled()};
+}
+
 void Frontend::parse() {
-  unit_.parse({.analysisMode = cxx::ParserAnalysisMode::kFull});
   parse_count.fetch_add(1, std::memory_order_relaxed);
+  unit_.parse(parser_configuration());
   diagnostics_.finish();
 }
 
 void Frontend::resume() {
-  unit_.resume({.analysisMode = cxx::ParserAnalysisMode::kFull});
   parse_count.fetch_add(1, std::memory_order_relaxed);
+  unit_.resume(parser_configuration());
   diagnostics_.finish();
 }
 

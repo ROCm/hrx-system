@@ -45,6 +45,8 @@ class Frontend {
   SourceContents& contents() { return contents_; }
 
  private:
+  // Parser configuration shared by cold and resumed parses.
+  cxx::ParserConfiguration parser_configuration() const;
   // Outlives diagnostics and the frontend source store that borrow it.
   SourceContents contents_;
   // Outlives the frontend that can deliver diagnostics during teardown.

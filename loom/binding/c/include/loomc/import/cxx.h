@@ -49,6 +49,13 @@ typedef enum loomc_cxx_fp_model_e {
 typedef enum loomc_cxx_import_flag_bits_e {
   /// Omit the embedded system include root; use caller paths/providers only.
   LOOMC_CXX_IMPORT_FLAG_NO_BUILTIN_INCLUDES = 1u << 0,
+  /// Hosted single-source profile: the unit is a host compile for the triple
+  /// (Linux/glibc/libc++ predefines, exceptions disabled unless EXCEPTIONS).
+  LOOMC_CXX_IMPORT_FLAG_HOSTED = 1u << 1,
+  /// Hosted profile only: parse with C++ exceptions enabled, as a host compile
+  /// with -fexceptions. Device import still rejects exception handling in the
+  /// code it translates.
+  LOOMC_CXX_IMPORT_FLAG_EXCEPTIONS = 1u << 2,
 } loomc_cxx_import_flag_bits_t;
 /// Bitmask of loomc_cxx_import_flag_bits_t values.
 typedef uint32_t loomc_cxx_import_flags_t;
@@ -143,7 +150,8 @@ typedef struct loomc_cxx_import_options_t {
   loomc_host_size_t structure_size;
   /// Reserved extension chain. Must be NULL.
   const void* next;
-  /// Frontend standard spelling, such as c23 or c++26. Empty selects c++26.
+  /// Frontend standard spelling, such as c23 or c++26. Empty selects c++26,
+  /// or c++20 for hosted import.
   loomc_string_view_t standard;
   /// Source ABI triple, independent of output target selection.
   loomc_string_view_t triple;
@@ -282,7 +290,7 @@ typedef struct loomc_cxx_unit_t loomc_cxx_unit_t;
 /// and supplies the main file's path for quoted include lookup.
 /// @param options Source configuration, or NULL for defaults: standard,
 /// triple, data model, include paths, defines, source provider, path mapper,
-/// preamble, and the NO_BUILTIN_INCLUDES flag.
+/// preamble, and the HOSTED and NO_BUILTIN_INCLUDES flags.
 /// @param allocator Host allocator owning the result.
 /// @param out_unit Receives one owned unit after successful admission.
 /// @param out_result Receives one owned result with retained diagnostics.

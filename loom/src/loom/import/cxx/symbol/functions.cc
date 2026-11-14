@@ -11,6 +11,7 @@
 #include <cxx/ast_rewriter.h>
 #include <cxx/attributes.h>
 #include <cxx/const_int.h>
+#include <cxx/const_value.h>
 #include <cxx/control.h>
 #include <cxx/decl.h>
 #include <cxx/literals.h>
@@ -901,7 +902,14 @@ void Functions::collect(cxx::List<cxx::DeclarationAST*>* declarations,
 void Functions::collect(cxx::DeclarationAST* declaration,
                         DeclarationScope scope,
                         std::vector<cxx::FunctionSymbol*>& definitions) {
+  if (!declaration) {
+    return;
+  }
   if (auto* function = cxx::ast_cast<cxx::FunctionDefinitionAST>(declaration)) {
+    // A definition the frontend could not declare has no symbol.
+    if (!function->symbol) {
+      return;
+    }
     admit_declaration(function->symbol, function->attributeList, function,
                       scope);
     if (scope == DeclarationScope::Namespace &&
@@ -929,6 +937,9 @@ void Functions::collect(cxx::DeclarationAST* declaration,
       if (auto* simple =
               cxx::ast_cast<cxx::SimpleDeclarationAST>(pattern->declaration)) {
         for (auto* declarator : cxx::ListView{simple->initDeclaratorList}) {
+          if (!declarator) {
+            continue;
+          }
           if (auto* function =
                   cxx::symbol_cast<cxx::FunctionSymbol>(declarator->symbol)) {
             intrinsic_declarations_.push_back(
@@ -937,7 +948,8 @@ void Functions::collect(cxx::DeclarationAST* declaration,
           }
         }
       } else if (auto* function = cxx::ast_cast<cxx::FunctionDefinitionAST>(
-                     pattern->declaration)) {
+                     pattern->declaration);
+                 function && function->symbol) {
         intrinsic_declarations_.push_back(
             {function->symbol, function->attributeList, function});
         launches_.declaration(function->symbol, function->attributeList,
@@ -950,6 +962,9 @@ void Functions::collect(cxx::DeclarationAST* declaration,
   } else if (auto* alias =
                  cxx::ast_cast<cxx::AliasDeclarationAST>(declaration)) {
     admit_declaration(nullptr, alias->attributeList, alias, scope);
+    if (!alias->typeId) {
+      return;
+    }
     reject_misplaced_binding_attributes(unit_, diagnostics_,
                                         alias->typeId->attributeList);
     reject_misplaced_binding_declarator(unit_, diagnostics_,
@@ -987,6 +1002,9 @@ void Functions::collect(cxx::DeclarationAST* declaration,
       }
     }
     for (auto* declarator : cxx::ListView{simple->initDeclaratorList}) {
+      if (!declarator) {
+        continue;
+      }
       auto* function =
           cxx::symbol_cast<cxx::FunctionSymbol>(declarator->symbol);
       bool is_module_metadata = admit_declaration(

@@ -35,6 +35,14 @@ typedef enum loom_cxx_fp_model_e {
 typedef enum loom_cxx_import_flag_bits_e {
   // Omit the embedded system include root and use explicit source paths only.
   LOOM_CXX_IMPORT_FLAG_NO_BUILTIN_INCLUDES = 1u << 0,
+  // Hosted single-source profile: the unit is a host compile for the triple
+  // (Linux/glibc/libc++ predefines, exceptions disabled unless EXCEPTIONS).
+  LOOM_CXX_IMPORT_FLAG_HOSTED = 1u << 1,
+  // Hosted profile only: parse with C++ exceptions enabled, as a host compile
+  // with -fexceptions. Device import still rejects exception handling in the
+  // code it translates.
+  LOOM_CXX_IMPORT_FLAG_EXCEPTIONS = 1u << 2,
+  LOOM_CXX_IMPORT_FLAG_ALL = (1u << 3) - 1,
 } loom_cxx_import_flag_bits_t;
 typedef uint32_t loom_cxx_import_flags_t;
 
@@ -88,7 +96,8 @@ typedef struct loom_cxx_import_options_t {
   // Borrowed descriptor environment for embedded Low assembly. Empty permits
   // ordinary source import but rejects assembly literals requiring a contract.
   loom_text_low_asm_environment_t low_asm_environment;
-  // Frontend standard spelling, such as c23 or c++26. Empty selects c++26.
+  // Frontend standard spelling, such as c23 or c++26. Empty selects c++26,
+  // or c++20 for hosted import.
   iree_string_view_t standard;
   // Source ABI triple for the frontend's type layout, not an output target.
   iree_string_view_t triple;
@@ -132,6 +141,11 @@ bool loom_cxx_fp_model_parse(iree_string_view_t value,
                              loom_cxx_fp_model_t* out_model);
 
 void loom_cxx_import_options_initialize(loom_cxx_import_options_t* options);
+
+// The language standard an import parses with: |options->standard|, or when
+// it is empty, c++20 for hosted import and c++26 otherwise.
+iree_string_view_t loom_cxx_import_options_standard(
+    const loom_cxx_import_options_t* options);
 
 // Validates enum, flag and borrowed-array invariants at a public API boundary.
 iree_status_t loom_cxx_import_options_validate(
