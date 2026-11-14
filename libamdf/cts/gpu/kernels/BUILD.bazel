@@ -39,6 +39,7 @@ exports_files([
     "file_gather.loom",
     "file_latency.cxx",
     "file_latency.loom",
+    "file_notification.loom",
     "file_staged.loom",
     "geometry_ids.loom",
     "immutable_data.loom",
@@ -203,6 +204,24 @@ amdf_cc_library(
     name = "execution_resources",
     testonly = True,
     hdrs = ["execution_resources.h"],
+)
+
+amdf_cc_library(
+    name = "file_notification",
+    testonly = True,
+    hdrs = ["file_notification.h"],
+)
+
+amdf_cts_gpu_kernel_set(
+    name = "file_notification_kernels",
+    srcs = ["file_notification.loom"],
+    entry_point = "file_notification",
+    namespace = "kernels::file_notification",
+    target_srcs = {
+        target: "//libamdf/cts/gpu/kernels/shader_event:" + _NATIVE_SOURCE_BY_CAPABILITY[LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_TARGET[target]]
+        for target in AMDF_CTS_GPU_KERNEL_TARGETS
+    },
+    targets = AMDF_CTS_GPU_KERNEL_TARGETS,
 )
 
 amdf_cts_gpu_kernel_set(
@@ -635,6 +654,8 @@ amdf_cc_test(
         ":device_sdma_upload_kernels",
         ":execution_resources",
         ":execution_resources_kernels",
+        ":file_notification",
+        ":file_notification_kernels",
         ":file_staged",
         ":file_staged_read_kernels",
         ":file_staged_reader_kernels",
