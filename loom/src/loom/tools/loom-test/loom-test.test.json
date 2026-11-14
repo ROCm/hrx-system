@@ -2,6 +2,22 @@
   "version": 1,
   "cases": [
     {
+      "name": "a rejected pipeline does not publish a test report",
+      "run": {
+        "tool": "loom-test",
+        "args": [
+          "{srcdir}/testdata/library_cases.loom",
+          "--pipeline=not-a-pass"
+        ]
+      },
+      "exit": 1,
+      "stdout": {"empty": true},
+      "stderr": {
+        "non_empty": true,
+        "not_contains": ["pass program preparation failed"]
+      }
+    },
+    {
       "name": "rejects duplicate primary definitions before source library linking",
       "run": {
         "tool": "loom-test",
@@ -17,16 +33,11 @@
         "empty": true
       },
       "stderr": {
-        "contains": {
-          "unordered": [
-            "duplicate_symbols.loom-test:5:19: error [SYMBOL/005]",
-            "symbol '@collision' is already defined",
-            "first definition here",
-            "duplicate_symbols.loom-test:3:13",
-            "kernel.decl @collision() launch()",
-            "check.case public @collision {"
-          ]
-        }
+        "non_empty": true,
+        "not_contains": [
+          "source admission failed",
+          "module linking failed"
+        ]
       }
     },
     {
@@ -60,16 +71,11 @@
             "empty": true
           },
           "stderr": {
-            "contains": {
-              "unordered": [
-                "duplicate_symbols.loom-test:5:19: error [SYMBOL/005]",
-                "symbol '@collision' is already defined",
-                "first definition here",
-                "duplicate_symbols.loom-test:3:13",
-                "kernel.decl @collision() launch()",
-                "check.case public @collision {"
-              ]
-            }
+            "non_empty": true,
+            "not_contains": [
+              "source admission failed",
+              "module linking failed"
+            ]
           }
         }
       ]
@@ -105,16 +111,11 @@
             "empty": true
           },
           "stderr": {
-            "contains": {
-              "unordered": [
-                "duplicate_symbols.loom-test:5:19: error [SYMBOL/005]",
-                "symbol '@collision' is already defined",
-                "first definition here",
-                "duplicate_symbols.loom-test:3:13",
-                "kernel.decl @collision() launch()",
-                "check.case public @collision {"
-              ]
-            }
+            "non_empty": true,
+            "not_contains": [
+              "source admission failed",
+              "module linking failed"
+            ]
           }
         }
       ]

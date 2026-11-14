@@ -61,15 +61,6 @@ static loomc_source_format_t loom_format_source_format(
   }
 }
 
-static iree_status_t loom_format_check_result(const loomc_result_t* result) {
-  bool succeeded = false;
-  IREE_RETURN_IF_ERROR(
-      loom_tooling_cli_print_loomc_result(stderr, result, &succeeded));
-  return succeeded ? iree_ok_status()
-                   : iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                      "invalid input module");
-}
-
 static iree_status_t loom_format_convert_source(
     iree_const_byte_span_t input, iree_string_view_t filename,
     loom_module_format_t input_format, loom_module_format_t output_format,
@@ -91,17 +82,18 @@ static iree_status_t loom_format_convert_source(
       loomc_source_create(&source_options, compiler_allocator, &source)));
   loomc_module_t* module = NULL;
   loomc_result_t* result = NULL;
+  bool accepted = false;
   iree_status_t status =
       iree_status_from_loomc(loomc_module_deserialize_from_source(
           context, workspace, source, NULL, compiler_allocator, &module,
           &result));
   loomc_source_release(source);
   if (iree_status_is_ok(status)) {
-    status = loom_format_check_result(result);
+    status = loom_tooling_cli_print_loomc_result(stderr, result, &accepted);
   }
   loomc_result_release(result);
   result = NULL;
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && accepted) {
     const loomc_module_verify_options_t verify_options = {
         .type = LOOMC_STRUCTURE_TYPE_MODULE_VERIFY_OPTIONS,
         .structure_size = sizeof(verify_options),
@@ -111,10 +103,10 @@ static iree_status_t loom_format_convert_source(
     status = iree_status_from_loomc(loomc_module_verify(
         module, &verify_options, compiler_allocator, &result));
   }
-  if (iree_status_is_ok(status)) {
-    status = loom_format_check_result(result);
+  if (iree_status_is_ok(status) && accepted) {
+    status = loom_tooling_cli_print_loomc_result(stderr, result, &accepted);
   }
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && accepted) {
     const loomc_module_serialize_options_t serialize_options = {
         .type = LOOMC_STRUCTURE_TYPE_MODULE_SERIALIZE_OPTIONS,
         .structure_size = sizeof(serialize_options),
@@ -170,8 +162,9 @@ static iree_status_t loom_format_process_input(
     loom_format_action_t action, loom_module_format_t input_format,
     loom_module_format_t output_format, loomc_context_t* context,
     loomc_workspace_t* workspace, iree_arena_block_pool_t* block_pool,
-    iree_allocator_t allocator, bool* out_changed) {
+    iree_allocator_t allocator, bool* out_changed, bool* out_accepted) {
   *out_changed = false;
+  *out_accepted = false;
 
   const iree_string_view_t filename =
       loom_tooling_file_path_is_stdio(input_path)
@@ -204,18 +197,20 @@ static iree_status_t loom_format_process_input(
     status = loom_test_file_format(
         loom_tooling_file_contents_string_view(contents), filename, context,
         workspace, block_pool, allocator, &formatted_source);
+    *out_accepted = iree_status_is_ok(status);
     output = iree_string_builder_view(&formatted_source);
   } else if (iree_status_is_ok(status)) {
     status = loom_format_convert_source(
         contents->const_buffer, filename, resolved_input_format, output_format,
         context, workspace, allocator, &output_source);
-    if (iree_status_is_ok(status)) {
+    if (iree_status_is_ok(status) && output_source != NULL) {
+      *out_accepted = true;
       const loomc_byte_span_t bytes = loomc_source_contents(output_source);
       output =
           iree_make_string_view((const char*)bytes.data, bytes.data_length);
     }
   }
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && *out_accepted) {
     switch (action) {
       case LOOM_FORMAT_ACTION_CONVERT:
         status = loom_tooling_write_output_file(output_path, output, allocator);
@@ -421,12 +416,18 @@ int main(int argc, char** argv) {
           argc < 2 ? iree_string_view_empty()
                    : iree_make_cstring_view(argv[i + 1]);
       bool changed = false;
+      bool accepted = false;
       iree_status_t input_status = loom_format_process_input(
           input_path, iree_make_cstring_view(FLAG_output), action, input_format,
-          output_format, context, workspace, &block_pool, allocator, &changed);
+          output_format, context, workspace, &block_pool, allocator, &changed,
+          &accepted);
       if (!iree_status_is_ok(input_status)) {
         iree_status_fprint(stderr, input_status);
         iree_status_free(input_status);
+        ++failure_count;
+        continue;
+      }
+      if (!accepted) {
         ++failure_count;
         continue;
       }

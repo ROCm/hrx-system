@@ -13,7 +13,12 @@
       },
       "exit": {"nonzero": true},
       "stdout": {"empty": true},
-      "stderr": {"non_empty": true},
+      "stderr": {
+        "non_empty": true,
+        "not_contains": [
+          "invalid input module"
+        ]
+      },
       "files": [{"path": "{tmp}/duplicate.loombc", "exists": false}]
     },
     {
