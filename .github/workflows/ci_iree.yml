@@ -1234,7 +1234,7 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $bundle = Join-Path $env:GITHUB_WORKSPACE '.iree\windows-cache-handoff'
-          $target = '//runtime/src/iree/base/...'
+          $target = '//...'
           $evidenceDir = $env:IREE_CACHE_HANDOFF_EVIDENCE
           $executionLog = Join-Path $evidenceDir 'consumer-execution.json'
           $profile = Join-Path $evidenceDir 'consumer.profile.gz'
