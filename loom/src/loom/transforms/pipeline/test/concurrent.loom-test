@@ -137,27 +137,27 @@ func.decl @__test_phase_join(%22: index)
 
 func.decl @__test_phase_enter(%23: index)
 
-func.def inline @__pipeline_engine_0(%24: index) {
+func.def noinline @__pipeline_engine_0(%24: index) {
   func.call @__pipeline_worker_3(%24) : (index)
   func.return
 }
 
-func.def inline @__pipeline_engine_1(%27: index) {
+func.def noinline @__pipeline_engine_1(%27: index) {
   func.call @__pipeline_worker_2(%27) : (index)
   func.return
 }
 
-func.def inline @__pipeline_engine_2(%30: index) {
+func.def noinline @__pipeline_engine_2(%30: index) {
   func.call @__pipeline_worker_1(%30) : (index)
   func.return
 }
 
-func.def inline @__pipeline_engine_3(%33: index) {
+func.def noinline @__pipeline_engine_3(%33: index) {
   func.call @__pipeline_worker_0(%33) : (index)
   func.return
 }
 
-func.def inline @__pipeline_engine_4(%36: index) {
+func.def noinline @__pipeline_engine_4(%36: index) {
   %40 = index.constant 0 : index
   func.call @__test_phase_enter(%40) : (index)
   func.call @__pipeline_engine_3(%36) : (index)
@@ -171,7 +171,7 @@ func.def inline @__pipeline_engine_4(%36: index) {
   func.return
 }
 
-func.def inline @__pipeline_engine_5(%42: index) {
+func.def noinline @__pipeline_engine_5(%42: index) {
   %44 = index.constant 1 : index
   func.call @__test_phase_enter(%44) : (index)
   func.call @__pipeline_engine_1(%42) : (index)

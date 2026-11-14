@@ -234,6 +234,7 @@ static iree_status_t loom_test_pipeline_programs(
         NULL, 0, LOOM_LOCATION_UNKNOWN, &declaration));
   }
   const loom_pipeline_control_options_t options = {
+      .retain_phase_calls = true,
       .worker_engines = state->engines,
       .diagnostic_emitter = state->pass->diagnostic_emitter,
       .emit = {.boundary = loom_test_pipeline_boundary,

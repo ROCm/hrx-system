@@ -140,6 +140,7 @@ iree_status_t loom_aie2p_native_emit_programs(
   context->code.realization = realization;
   const loom_type_t frame_type = loom_type_buffer();
   const loom_pipeline_control_options_t options = {
+      .retain_phase_calls = true,
       .worker_engines = context->core_engines,
       .preparation_engines = preparation_engines,
       .boundary_workers = context->distribution_controllers,

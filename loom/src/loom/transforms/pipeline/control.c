@@ -472,9 +472,13 @@ static iree_status_t loom_pipeline_control_project(
   }
   loom_builder_enter_region(&rewriter->builder, NULL, module->body);
   loom_op_t* function = NULL;
+  const loom_inline_policy_t inline_policy =
+      options->retain_phase_calls && invocation->schedule != NULL
+          ? LOOM_INLINE_POLICY_NOINLINE
+          : LOOM_INLINE_POLICY_INLINE;
   IREE_RETURN_IF_ERROR(loom_func_def_build(
       &rewriter->builder, LOOM_FUNC_DEF_BUILD_FLAG_HAS_INLINE_POLICY, 0, 0, 0,
-      0, 0, 0, LOOM_INLINE_POLICY_INLINE, loom_symbol_ref_null(),
+      0, 0, 0, inline_policy, loom_symbol_ref_null(),
       loom_attr_absent(), 0, loom_named_attr_slice_empty(),
       LOOM_STRING_ID_INVALID, loom_named_attr_slice_empty(), symbol, types,
       total_count, /*signature_flags=*/iree_const_byte_span_empty(), NULL, 0,

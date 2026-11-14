@@ -61,14 +61,14 @@ func.decl @__test_phase_join(%46: index)
 
 func.decl @__test_phase_enter(%47: index)
 
-func.def inline @__pipeline_engine_0(%48: buffer, %50: index) {
+func.def noinline @__pipeline_engine_0(%48: buffer, %50: index) {
   cfg.br ^_bb1
 ^_bb1:
   func.call @__pipeline_worker_1(%48, %50) : (buffer, index)
   func.return
 }
 
-func.def inline @__pipeline_engine_1(%54: buffer, %56: index) {
+func.def noinline @__pipeline_engine_1(%54: buffer, %56: index) {
   cfg.br ^_bb1
 ^_bb1:
   func.call @__pipeline_worker_0(%54, %56) : (buffer, index)
