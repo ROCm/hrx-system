@@ -121,6 +121,11 @@ extern "C" {
 #define IREE_HAL_PROFILE_CONTENT_TYPE_EXECUTABLE_TRACES \
   IREE_SV("application/vnd.iree.hal.profile.executable-traces")
 
+// Content type for packed iree_hal_profile_executable_trace_capture_record_t
+// records.
+#define IREE_HAL_PROFILE_CONTENT_TYPE_EXECUTABLE_TRACE_CAPTURES \
+  IREE_SV("application/vnd.iree.hal.profile.executable-trace-captures")
+
 //===----------------------------------------------------------------------===//
 // Profile time domains
 //===----------------------------------------------------------------------===//
@@ -1986,6 +1991,90 @@ iree_hal_profile_executable_trace_record_default(void) {
   return record;
 }
 
+// Bitfield specifying properties of one executable trace capture record.
+typedef uint32_t iree_hal_profile_executable_trace_capture_flags_t;
+enum iree_hal_profile_executable_trace_capture_flag_bits_t {
+  IREE_HAL_PROFILE_EXECUTABLE_TRACE_CAPTURE_FLAG_NONE = 0u,
+
+  // The producer held a stable device power state for the whole trace. Traces
+  // taken without one lose more data at high trace volume.
+  IREE_HAL_PROFILE_EXECUTABLE_TRACE_CAPTURE_FLAG_STABLE_POWER_STATE = 1u << 0,
+
+  // The hardware reported that the trace finished on this partition.
+  IREE_HAL_PROFILE_EXECUTABLE_TRACE_CAPTURE_FLAG_FINISHED = 1u << 1,
+
+  // The trace buffer filled; execution after that point is not recorded.
+  IREE_HAL_PROFILE_EXECUTABLE_TRACE_CAPTURE_FLAG_BUFFER_FULL = 1u << 2,
+
+  // The hardware reported a trace buffer write error.
+  IREE_HAL_PROFILE_EXECUTABLE_TRACE_CAPTURE_FLAG_WRITE_ERROR = 1u << 3,
+
+  // The trace covers every dispatch of one command-buffer execution instead of
+  // one dispatch. The trace record then names the submission and command
+  // buffer, not a dispatch event.
+  IREE_HAL_PROFILE_EXECUTABLE_TRACE_CAPTURE_FLAG_COMMAND_BUFFER_SCOPE = 1u << 4,
+
+  // The producer could not read back the written extent, so no trace bytes
+  // were emitted for this partition.
+  IREE_HAL_PROFILE_EXECUTABLE_TRACE_CAPTURE_FLAG_UNCOLLECTED = 1u << 5,
+};
+
+// How one executable trace partition was captured.
+//
+// Executable traces sample: the hardware records one execution lane of one
+// compute unit per shader engine. This record states what was selected and how
+// much of it survived, so consumers can present the trace as a sample with a
+// known selection rather than as complete coverage. One record accompanies
+// each trace partition and joins it by |trace_id| and |shader_engine|; it is
+// emitted even when the partition produced no trace bytes.
+typedef struct iree_hal_profile_executable_trace_capture_record_t {
+  // Size of this record in bytes for forward-compatible parsing.
+  uint32_t record_length;
+  // Flags describing how the capture ended.
+  iree_hal_profile_executable_trace_capture_flags_t flags;
+  // Trace identifier shared with the executable trace record.
+  uint64_t trace_id;
+  // Shader engine or producer-defined trace partition ordinal.
+  uint32_t shader_engine;
+  // Session-local physical device ordinal associated with this trace.
+  uint32_t physical_device_ordinal;
+  // Shader engines traced together under |trace_id|, one bit per engine.
+  uint32_t shader_engine_mask;
+  // Compute unit traced on this engine: the workgroup processor index on AMD
+  // gfx10 and later.
+  uint32_t target_compute_unit;
+  // Execution lane traced within the compute unit: a SIMD index on AMD gfx10
+  // and later.
+  uint32_t simd_select;
+  // Dispatches executed inside the traced range.
+  uint32_t dispatch_count;
+  // Byte length of the trace buffer programmed for this engine.
+  uint64_t buffer_byte_length;
+  // Bytes the hardware wrote; equals the trace record's data length.
+  uint64_t written_byte_length;
+  // Hardware count of trace tokens dropped for lack of bandwidth.
+  uint64_t dropped_count;
+  // Raw hardware trace status after the trace stopped.
+  uint32_t hardware_status;
+  // Raw hardware token selection the trace was taken with.
+  uint32_t token_mask;
+  // Upper bound on traced operations in this session.
+  uint32_t trace_limit;
+  // Matching operations that ran untraced because this trace still held the
+  // producer's trace resources, from its start until it was flushed.
+  uint32_t skipped_count;
+} iree_hal_profile_executable_trace_capture_record_t;
+
+// Returns a default executable trace capture record.
+static inline iree_hal_profile_executable_trace_capture_record_t
+iree_hal_profile_executable_trace_capture_record_default(void) {
+  iree_hal_profile_executable_trace_capture_record_t record;
+  memset(&record, 0, sizeof(record));
+  record.record_length = sizeof(record);
+  record.physical_device_ordinal = UINT32_MAX;
+  return record;
+}
+
 #define IREE_HAL_PROFILE_ASSERT_RECORD_LAYOUT(record_type, byte_length)     \
   static_assert(sizeof(record_type) == (byte_length),                       \
                 #record_type " size is part of the profile binary format"); \
@@ -2041,6 +2130,8 @@ IREE_HAL_PROFILE_ASSERT_RECORD_LAYOUT(
     iree_hal_profile_device_metric_sample_record_t, 64);
 IREE_HAL_PROFILE_ASSERT_RECORD_LAYOUT(
     iree_hal_profile_executable_trace_record_t, 88);
+IREE_HAL_PROFILE_ASSERT_RECORD_LAYOUT(
+    iree_hal_profile_executable_trace_capture_record_t, 80);
 
 IREE_HAL_PROFILE_ASSERT_FIELD_OFFSET(
     iree_hal_profile_executable_code_object_record_t, data_length, 24);

@@ -232,6 +232,38 @@ typedef struct iree_hal_profile_counter_set_selection_t {
   const iree_string_view_t* counter_names;
 } iree_hal_profile_counter_set_selection_t;
 
+// Caller-provided executable trace selection.
+//
+// Executable traces sample hardware execution: a producer typically records
+// one execution lane of one compute unit per shader engine, so a trace covers
+// a small fraction of a dispatch's waves. A zero field selects the producer's
+// default. Producers that cannot honor a nonzero field fail
+// iree_hal_device_profiling_begin instead of tracing something else.
+typedef struct iree_hal_profile_executable_trace_options_t {
+  // Compute unit traced on each selected shader engine. On AMD gfx10 and later
+  // this is the workgroup processor index.
+  uint32_t target_compute_unit;
+
+  // Execution lane traced within the compute unit: a SIMD index on AMD gfx10
+  // and later.
+  uint32_t simd_select;
+
+  // Shader engines that receive a trace buffer, one bit per engine. Zero
+  // selects every engine of the device.
+  uint32_t shader_engine_mask;
+
+  // Upper bound on traced operations in this session. Zero selects the
+  // producer's default bound. Operations matching the capture filter beyond
+  // the bound, or arriving while an earlier trace has not been flushed, run
+  // untraced.
+  uint32_t max_trace_count;
+
+  // Byte length of each shader engine's trace buffer. Zero selects the
+  // producer's default. A full buffer truncates the trace; the producer
+  // reports that with a TRUNCATED chunk.
+  uint64_t buffer_byte_length;
+} iree_hal_profile_executable_trace_options_t;
+
 // Controls profiling options.
 //
 // All pointer and string-view fields are borrowed and only need to remain valid
@@ -266,6 +298,10 @@ typedef struct iree_hal_device_profiling_options_t {
   // are target-default and best-effort; selections with explicit counter names
   // are strict.
   const iree_hal_profile_counter_set_selection_t* counter_sets;
+
+  // Executable trace selection, used only when requesting executable traces.
+  // A zero-initialized value selects every producer default.
+  iree_hal_profile_executable_trace_options_t executable_traces;
 } iree_hal_device_profiling_options_t;
 
 // Opaque storage backing cloned profiling options.

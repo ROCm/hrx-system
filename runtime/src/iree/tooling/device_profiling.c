@@ -83,6 +83,30 @@ IREE_FLAG(
     "support safe in-flight profiling snapshots for the requested data.\n"
     "Sink failures are reported when profiling ends.");
 IREE_FLAG(
+    int64_t, device_profiling_trace_target_cu, 0,
+    "Compute unit traced on each shader engine by\n"
+    "--device_profiling_mode=executable-traces: the workgroup processor index\n"
+    "on AMD gfx10 and later (rocprofv3 --att-target-cu). A trace samples one\n"
+    "execution lane of this unit, not every wave of a dispatch.");
+IREE_FLAG(int64_t, device_profiling_trace_simd_select, 0,
+          "Execution lane traced within the target compute unit: a SIMD index "
+          "on AMD\n"
+          "gfx10 and later (rocprofv3 --att-simd-select).");
+IREE_FLAG(
+    int64_t, device_profiling_trace_shader_engine_mask, 0,
+    "Shader engines that receive an executable trace buffer, one bit per\n"
+    "engine. 0 selects every engine (rocprofv3 --att-shader-engine-mask).");
+IREE_FLAG(
+    int64_t, device_profiling_trace_buffer_size, 0,
+    "Byte length of each shader engine's executable trace buffer. 0 selects\n"
+    "the driver default. A full buffer truncates the trace (rocprofv3\n"
+    "--att-buffer-size).");
+IREE_FLAG(
+    int64_t, device_profiling_trace_max_traces, 0,
+    "Upper bound on operations traced by\n"
+    "--device_profiling_mode=executable-traces. 0 selects the driver default.\n"
+    "Use --device_profiling_filter_* to choose which operations are traced.");
+IREE_FLAG(
     bool, device_profiling_allow_partial, false,
     "Lets each device in a multi-device group keep the largest subset of\n"
     "--device_profiling_mode families it implements instead of failing the\n"
@@ -183,6 +207,49 @@ static iree_status_t iree_hal_profile_capture_filter_from_flags(
       FLAG_device_profiling_filter_queue,
       IREE_HAL_PROFILE_CAPTURE_FILTER_FLAG_QUEUE_ORDINAL,
       "device_profiling_filter_queue", out_filter, &out_filter->queue_ordinal));
+  return iree_ok_status();
+}
+
+static iree_status_t iree_hal_profile_executable_trace_options_from_flags(
+    iree_hal_device_profiling_data_families_t data_families,
+    iree_hal_profile_executable_trace_options_t* out_options) {
+  memset(out_options, 0, sizeof(*out_options));
+  const int64_t values[] = {
+      FLAG_device_profiling_trace_target_cu,
+      FLAG_device_profiling_trace_simd_select,
+      FLAG_device_profiling_trace_shader_engine_mask,
+      FLAG_device_profiling_trace_max_traces,
+  };
+  bool any = FLAG_device_profiling_trace_buffer_size != 0;
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(values); ++i) {
+    if (values[i] < 0 || values[i] > UINT32_MAX) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "--device_profiling_trace_* values must fit "
+                              "uint32_t");
+    }
+    any |= values[i] != 0;
+  }
+  if (FLAG_device_profiling_trace_buffer_size < 0) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "--device_profiling_trace_buffer_size must be non-negative");
+  }
+  if (any &&
+      !iree_any_bit_set(data_families,
+                        IREE_HAL_DEVICE_PROFILING_DATA_EXECUTABLE_TRACES)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "--device_profiling_trace_* requires "
+                            "--device_profiling_mode=executable-traces");
+  }
+  out_options->target_compute_unit =
+      (uint32_t)FLAG_device_profiling_trace_target_cu;
+  out_options->simd_select = (uint32_t)FLAG_device_profiling_trace_simd_select;
+  out_options->shader_engine_mask =
+      (uint32_t)FLAG_device_profiling_trace_shader_engine_mask;
+  out_options->max_trace_count =
+      (uint32_t)FLAG_device_profiling_trace_max_traces;
+  out_options->buffer_byte_length =
+      (uint64_t)FLAG_device_profiling_trace_buffer_size;
   return iree_ok_status();
 }
 
@@ -576,6 +643,8 @@ static iree_status_t iree_hal_begin_device_list_profiling_from_flags(
 
   IREE_RETURN_IF_ERROR(
       iree_hal_profile_capture_filter_from_flags(&options.capture_filter));
+  IREE_RETURN_IF_ERROR(iree_hal_profile_executable_trace_options_from_flags(
+      options.data_families, &options.executable_traces));
   iree_hal_profile_counter_set_selection_t counter_set = {0};
   if (counter_names.count != 0) {
     counter_set.counter_name_count = counter_names.count;
