@@ -163,3 +163,13 @@ amdf_status_t amdf_windows_query_endpoint_info(const amdf_kmt_api_t* api,
   }
   return status;
 }
+
+bool amdf_windows_endpoint_is_executable_amd(const amdf_endpoint_info_t* info) {
+  // Display-only adapters, such as the Remote Desktop indirect display adapter,
+  // report the PCI IDs of the GPU they present on. That GPU is enumerated
+  // separately as its own render adapter.
+  const uint32_t executable_flags = AMDF_ENDPOINT_TYPE_FLAG_RENDER_SUPPORTED |
+                                    AMDF_ENDPOINT_TYPE_FLAG_COMPUTE_ONLY;
+  return amdf_pci_is_amd(&info->pci) &&
+         (info->type_flags & executable_flags) != 0;
+}

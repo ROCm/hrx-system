@@ -142,7 +142,6 @@ amdf_cc_library(
         ":endpoint_properties",
         ":kmt_api",
         "//libamdf/src:allocator",
-        "//libamdf/src:pci",
     ],
 )
 

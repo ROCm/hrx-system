@@ -26,6 +26,12 @@ constexpr D3DKMT_HANDLE kAmdAdapter = 1;
 constexpr LONG kAmdAdapterLuidHigh = static_cast<LONG>(0x87654321u);
 constexpr D3DKMT_HANDLE kOtherAdapter = 2;
 
+D3DKMT_ADAPTERTYPE MakeRenderAdapterType() {
+  D3DKMT_ADAPTERTYPE type = {};
+  type.RenderSupported = 1;
+  return type;
+}
+
 amdf_endpoint_summary_t MakeSentinelSummary() {
   amdf_endpoint_summary_t summary;
   std::memset(&summary, 0xA5, sizeof(summary));
@@ -89,8 +95,8 @@ struct FakeKmt {
   uint32_t amd_device_id = 0x1000u;
   // PCI revision used for endpoint classification.
   uint32_t amd_revision_id = 1;
-  // Native adapter capability distinguishing compute-only AMD endpoints.
-  bool amd_compute_only = false;
+  // Native Windows capability flags reported for the AMD adapter.
+  D3DKMT_ADAPTERTYPE amd_adapter_type = MakeRenderAdapterType();
   // Number of calls in the native two-call snapshot protocol.
   uint32_t enumeration_call_count = 0;
   // Native release fault and consumption evidence.
@@ -124,8 +130,14 @@ FakeOpenAdapterFromLuid(D3DKMT_OPENADAPTERFROMLUID* open_adapter) {
 
 NTSTATUS APIENTRY FakeEnumerateAdapters(D3DKMT_ENUMADAPTERS3* enumeration) {
   ++current_fake->enumeration_call_count;
+  const D3DKMT_ADAPTERTYPE& adapter_type = current_fake->amd_adapter_type;
+  const bool is_compute_only = adapter_type.ComputeOnly != 0;
+  const bool is_display_only = adapter_type.DisplaySupported != 0 &&
+                               adapter_type.RenderSupported == 0 &&
+                               adapter_type.ComputeOnly == 0;
   const bool include_amd_adapter =
-      !current_fake->amd_compute_only || enumeration->Filter.IncludeComputeOnly;
+      (!is_compute_only || enumeration->Filter.IncludeComputeOnly) &&
+      (!is_display_only || enumeration->Filter.IncludeDisplayOnly);
   const uint32_t adapter_count = include_amd_adapter ? 2 : 1;
   if (current_fake->enumeration_call_count == 1) {
     if (current_fake->failure_point == FailurePoint::kFirstEnumeration) {
@@ -190,10 +202,8 @@ NTSTATUS APIENTRY FakeQueryAdapterInfo(const D3DKMT_QUERYADAPTERINFO* query) {
         return kFailure;
       }
       auto* type = static_cast<D3DKMT_ADAPTERTYPE*>(query->pPrivateDriverData);
-      type->Value = 0;
-      type->ComputeOnly =
-          query->hAdapter == kAmdAdapter && current_fake->amd_compute_only;
-      type->RenderSupported = !type->ComputeOnly;
+      *type = query->hAdapter == kAmdAdapter ? current_fake->amd_adapter_type
+                                             : MakeRenderAdapterType();
       return kSuccess;
     }
     case KMTQAITYPE_DRIVER_DESCRIPTION: {
@@ -350,7 +360,8 @@ TEST_F(EndpointSnapshotTest, ClassifiesKnownXdnaEndpoint) {
   fake_.amd_vendor_id = 0x1022u;
   fake_.amd_device_id = 0x17F0u;
   fake_.amd_revision_id = 0x10u;
-  fake_.amd_compute_only = true;
+  fake_.amd_adapter_type = {};
+  fake_.amd_adapter_type.ComputeOnly = 1;
   amdf_endpoint_summary_t summary = {};
   uint32_t endpoint_count = 0;
 
@@ -366,7 +377,8 @@ TEST_F(EndpointSnapshotTest, ClassifiesUnrecognizedComputeOnlyIdentity) {
   fake_.amd_vendor_id = 0x1022u;
   fake_.amd_device_id = 0xABCDu;
   fake_.amd_revision_id = 0x12u;
-  fake_.amd_compute_only = true;
+  fake_.amd_adapter_type = {};
+  fake_.amd_adapter_type.ComputeOnly = 1;
   amdf_endpoint_summary_t summary = {};
   uint32_t endpoint_count = 0;
 
@@ -390,6 +402,100 @@ TEST_F(EndpointSnapshotTest, LeavesNonComputeAmdIdentityUnclassified) {
   EXPECT_TRUE(amdf_status_is_ok(status));
   ASSERT_EQ(endpoint_count, 1u);
   EXPECT_EQ(summary.engine_kind, AMDF_ENGINE_KIND_UNKNOWN);
+}
+
+TEST_F(EndpointSnapshotTest,
+       RequiresRenderOrComputeCapabilityForEnumerationAndOpen) {
+  const amdf_endpoint_id_t endpoint_id = EnumerateAmdEndpointId();
+
+  D3DKMT_ADAPTERTYPE no_capabilities = {};
+  D3DKMT_ADAPTERTYPE display_only = {};
+  display_only.DisplaySupported = 1;
+  D3DKMT_ADAPTERTYPE indirect_display = display_only;
+  indirect_display.IndirectDisplayDevice = 1;
+  D3DKMT_ADAPTERTYPE software_display = display_only;
+  software_display.SoftwareDevice = 1;
+  D3DKMT_ADAPTERTYPE render = MakeRenderAdapterType();
+  D3DKMT_ADAPTERTYPE display_and_render = render;
+  display_and_render.DisplaySupported = 1;
+  D3DKMT_ADAPTERTYPE hybrid_discrete = display_and_render;
+  hybrid_discrete.HybridDiscrete = 1;
+  D3DKMT_ADAPTERTYPE hybrid_integrated = display_and_render;
+  hybrid_integrated.HybridIntegrated = 1;
+  D3DKMT_ADAPTERTYPE paravirtualized = render;
+  paravirtualized.Paravirtualized = 1;
+  D3DKMT_ADAPTERTYPE compute_only = {};
+  compute_only.ComputeOnly = 1;
+
+  struct Case {
+    // Diagnostic name for the native adapter shape.
+    const char* name;
+    // Exact capability record returned by KMTQAITYPE_ADAPTERTYPE.
+    D3DKMT_ADAPTERTYPE adapter_type;
+    // Number of selectable libamdf endpoints represented by the adapter.
+    uint32_t expected_endpoint_count;
+    // Public capability flags expected for a selectable endpoint.
+    amdf_endpoint_type_flags_t expected_type_flags;
+  };
+  const Case cases[] = {
+      {"no capabilities", no_capabilities, 0, 0},
+      {"display only", display_only, 0, 0},
+      {"indirect display", indirect_display, 0, 0},
+      {"software display", software_display, 0, 0},
+      {"headless render", render, 1, AMDF_ENDPOINT_TYPE_FLAG_RENDER_SUPPORTED},
+      {"display and render", display_and_render, 1,
+       AMDF_ENDPOINT_TYPE_FLAG_DISPLAY_SUPPORTED |
+           AMDF_ENDPOINT_TYPE_FLAG_RENDER_SUPPORTED},
+      {"hybrid discrete", hybrid_discrete, 1,
+       AMDF_ENDPOINT_TYPE_FLAG_DISPLAY_SUPPORTED |
+           AMDF_ENDPOINT_TYPE_FLAG_RENDER_SUPPORTED},
+      {"hybrid integrated", hybrid_integrated, 1,
+       AMDF_ENDPOINT_TYPE_FLAG_DISPLAY_SUPPORTED |
+           AMDF_ENDPOINT_TYPE_FLAG_RENDER_SUPPORTED},
+      {"paravirtualized render", paravirtualized, 1,
+       AMDF_ENDPOINT_TYPE_FLAG_RENDER_SUPPORTED},
+      {"compute only", compute_only, 1, AMDF_ENDPOINT_TYPE_FLAG_COMPUTE_ONLY},
+  };
+
+  for (const Case& value : cases) {
+    SCOPED_TRACE(value.name);
+    fake_.amd_adapter_type = value.adapter_type;
+    fake_.enumeration_call_count = 0;
+    fake_.close.call_count = 0;
+
+    amdf_endpoint_summary_t summary = MakeSentinelSummary();
+    uint32_t endpoint_count = 123;
+    ASSERT_EQ(amdf_platform_endpoint_enumerate(platform_instance_, 1, &summary,
+                                               &endpoint_count),
+              AMDF_STATUS_OK);
+    ASSERT_EQ(endpoint_count, value.expected_endpoint_count);
+    EXPECT_EQ(fake_.enumeration_call_count, 2u);
+    // Both adapters must reach the snapshot: the production filter explicitly
+    // asks Windows for compute-only and display-only adapters, then libamdf
+    // applies its own endpoint admission contract.
+    EXPECT_EQ(fake_.close.call_count, 2u);
+    if (endpoint_count != 0) {
+      EXPECT_EQ(summary.type_flags, value.expected_type_flags);
+    }
+
+    fake_.close.call_count = 0;
+    amdf_platform_endpoint_t* endpoint =
+        reinterpret_cast<amdf_platform_endpoint_t*>(uintptr_t{1});
+    amdf_endpoint_info_t info = {};
+    const amdf_status_t open_status = amdf_platform_endpoint_open(
+        platform_instance_, &endpoint_id, &endpoint, &info);
+    if (value.expected_endpoint_count != 0) {
+      ASSERT_EQ(open_status, AMDF_STATUS_OK);
+      ASSERT_NE(endpoint, nullptr);
+      EXPECT_EQ(info.type_flags, value.expected_type_flags);
+      EXPECT_EQ(amdf_platform_endpoint_close(endpoint), AMDF_STATUS_OK);
+    } else {
+      EXPECT_EQ(amdf_status_domain(open_status), AMDF_STATUS_DOMAIN_API);
+      EXPECT_EQ(amdf_status_code(open_status), AMDF_STATUS_CODE_NOT_FOUND);
+      EXPECT_EQ(reinterpret_cast<uintptr_t>(endpoint), uintptr_t{1});
+    }
+    EXPECT_EQ(fake_.close.call_count, 1u);
+  }
 }
 
 TEST_F(EndpointSnapshotTest, CountsWithoutOutputStorage) {
