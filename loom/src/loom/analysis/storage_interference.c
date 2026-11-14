@@ -699,6 +699,125 @@ static iree_status_t loom_storage_interference_prove_cfg_reuse_cuts(
   return iree_ok_status();
 }
 
+typedef struct loom_storage_interference_structured_root_t {
+  // Definition point of the repeated workgroup allocation.
+  uint32_t allocation_point;
+  // First point of the outermost block executing this allocation at most once.
+  uint32_t reentry_point;
+} loom_storage_interference_structured_root_t;
+
+typedef struct loom_storage_interference_structured_barrier_t {
+  // First point in the barrier's block, including its nested operations.
+  uint32_t start_point;
+  // End of that block; during construction, links earlier barriers in it.
+  uint32_t end_point;
+} loom_storage_interference_structured_barrier_t;
+
+typedef struct loom_storage_interference_structured_frame_t {
+  // Block represented by this active lexical frame.
+  const loom_block_t* block;
+  // First operation point in this block.
+  uint32_t start_point;
+  // Inherited single-execution boundary, or this block's own first point.
+  uint32_t reentry_point;
+  // Most recent barrier in this block, or UINT32_MAX when absent.
+  uint32_t last_barrier;
+} loom_storage_interference_structured_frame_t;
+
+// Retains lexical cut bounds from the existing liveness order. Conditional
+// alternatives execute at most once per containing block; other region owners
+// and CFG regions introduce a boundary that an enclosing cut cannot cross.
+// The source-preorder parent indices make this linear in operations, with only
+// depth-proportional traversal scratch and records for roots and barriers.
+static iree_status_t loom_storage_interference_build_structured_cuts(
+    const loom_storage_interference_t* analysis,
+    const loom_liveness_analysis_t* liveness, const loom_value_ordinal_t* roots,
+    iree_host_size_t root_count, iree_arena_allocator_t* arena,
+    loom_storage_interference_structured_root_t** out_roots,
+    loom_storage_interference_structured_barrier_t** out_barriers) {
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, root_count, sizeof(**out_roots), (void**)out_roots));
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate_array(arena, analysis->workgroup_barrier_count,
+                                sizeof(**out_barriers), (void**)out_barriers));
+  loom_storage_interference_structured_frame_t inline_frames[8];
+  loom_storage_interference_structured_frame_t* frames = inline_frames;
+  iree_host_size_t frame_count = 0;
+  iree_host_size_t frame_capacity = IREE_ARRAYSIZE(inline_frames);
+  iree_host_size_t root_index = 0;
+  iree_host_size_t barrier_index = 0;
+  for (uint32_t i = 0; i < liveness->operation_count; ++i) {
+    const loom_liveness_operation_point_t* point =
+        loom_liveness_operation_at(liveness, i);
+    const loom_block_t* block = point->op->parent_block;
+    if (point->op == block->first_op) {
+      const loom_op_t* parent =
+          point->parent_operation_index != UINT32_MAX
+              ? loom_liveness_operation_at(liveness,
+                                           point->parent_operation_index)
+                    ->op
+              : NULL;
+      const loom_block_t* parent_block = parent ? parent->parent_block : NULL;
+      while (frame_count && frames[frame_count - 1].block != parent_block) {
+        --frame_count;
+      }
+      uint32_t reentry_point = point->start_point;
+      if (frame_count && block->parent_region->block_count == 1 &&
+          !iree_any_bit_set(block->parent_region->flags,
+                            LOOM_REGION_INSTANCE_FLAG_CFG) &&
+          loom_region_branch_isa(
+              loom_region_branch_cast(analysis->module, (loom_op_t*)parent))) {
+        reentry_point = frames[frame_count - 1].reentry_point;
+      }
+      IREE_RETURN_IF_ERROR(iree_arena_grow_array(
+          arena, frame_count, frame_count + 1, sizeof(*frames), &frame_capacity,
+          (void**)&frames));
+      frames[frame_count++] = (loom_storage_interference_structured_frame_t){
+          .block = block,
+          .start_point = point->start_point,
+          .reentry_point = reentry_point,
+          .last_barrier = UINT32_MAX,
+      };
+    } else {
+      while (frames[frame_count - 1].block != block) {
+        --frame_count;
+      }
+    }
+    loom_storage_interference_structured_frame_t* frame =
+        &frames[frame_count - 1];
+    if (root_index < root_count && loom_buffer_alloca_isa(point->op) &&
+        loom_buffer_alloca_result(point->op) ==
+            analysis->value_domain->value_ids[roots[root_index]]) {
+      (*out_roots)[root_index++] =
+          (loom_storage_interference_structured_root_t){
+              .allocation_point = point->start_point,
+              .reentry_point = frame->reentry_point,
+          };
+    }
+    if (barrier_index < analysis->workgroup_barrier_count &&
+        point->op == analysis->workgroup_barriers[barrier_index].op) {
+      (*out_barriers)[barrier_index] =
+          (loom_storage_interference_structured_barrier_t){
+              .start_point = frame->start_point,
+              .end_point = frame->last_barrier,
+          };
+      frame->last_barrier = (uint32_t)barrier_index++;
+    }
+    if (point->op == block->last_op) {
+      uint32_t pending = frame->last_barrier;
+      while (pending != UINT32_MAX) {
+        loom_storage_interference_structured_barrier_t* barrier =
+            &(*out_barriers)[pending];
+        pending = barrier->end_point;
+        barrier->end_point = point->end_point;
+      }
+    }
+  }
+  IREE_ASSERT_EQ(root_index, root_count);
+  IREE_ASSERT_EQ(barrier_index, analysis->workgroup_barrier_count);
+  return iree_ok_status();
+}
+
 static iree_status_t loom_storage_interference_prove_single_instances(
     loom_storage_interference_t* analysis,
     loom_storage_interference_lifetime_scratch_t* lifetime) {
@@ -736,6 +855,7 @@ static iree_status_t loom_storage_interference_prove_single_instances(
       &lifetime->arena, workgroup_root_count, sizeof(*workgroup_roots),
       (void**)&workgroup_roots));
   iree_host_size_t root_index = 0;
+  bool has_conditional_root = false;
   for (loom_value_ordinal_t i = 0; workgroup_root_count != 0 && i < value_count;
        ++i) {
     const loom_storage_interference_entry_t* entry = &analysis->entries[i];
@@ -745,6 +865,10 @@ static iree_status_t loom_storage_interference_prove_single_instances(
         entry->memory_space == LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP &&
         entry->footprint.operation_count != 0) {
       workgroup_roots[root_index++] = i;
+      const loom_op_t* allocation = loom_value_def_op(loom_module_value(
+          analysis->module, analysis->value_domain->value_ids[i]));
+      has_conditional_root |= loom_region_branch_isa(
+          loom_region_branch_cast(analysis->module, allocation->parent_op));
     }
   }
   const loom_value_fact_cfg_region_t* cfg =
@@ -757,6 +881,13 @@ static iree_status_t loom_storage_interference_prove_single_instances(
   IREE_RETURN_IF_ERROR(loom_liveness_analyze_local_value_domain(
       analysis->value_domain, loom_liveness_order_empty(), &lifetime->arena,
       &liveness));
+  loom_storage_interference_structured_root_t* structured_roots = NULL;
+  loom_storage_interference_structured_barrier_t* structured_barriers = NULL;
+  if (has_conditional_root && analysis->workgroup_barrier_count) {
+    IREE_RETURN_IF_ERROR(loom_storage_interference_build_structured_cuts(
+        analysis, &liveness, workgroup_roots, workgroup_root_count,
+        &lifetime->arena, &structured_roots, &structured_barriers));
+  }
   iree_host_size_t segment_count = lifetime->async_access_count;
   for (loom_value_ordinal_t i = 0; i < value_count; ++i) {
     if (analysis->memberships[i]) {
@@ -851,8 +982,20 @@ static iree_status_t loom_storage_interference_prove_single_instances(
               point->op->block_ordinal <
               analysis->entries[root].footprint.first_access_ordinal;
         }
-        if (allocation_block == barrier_block &&
-            (live_counts[root] == 0 || is_leading_cut)) {
+        bool is_enclosing_cut = false;
+        if (structured_roots && allocation_block != barrier_block &&
+            live_counts[root] == 0) {
+          const loom_storage_interference_structured_root_t root_scope =
+              structured_roots[j];
+          const loom_storage_interference_structured_barrier_t barrier_scope =
+              structured_barriers[barrier_index - 1];
+          is_enclosing_cut =
+              root_scope.reentry_point <= barrier_scope.start_point &&
+              barrier_scope.start_point <= root_scope.allocation_point &&
+              root_scope.allocation_point < barrier_scope.end_point;
+        }
+        if (is_enclosing_cut || (allocation_block == barrier_block &&
+                                 (live_counts[root] == 0 || is_leading_cut))) {
           analysis->entries[root].flags |=
               LOOM_STORAGE_INTERFERENCE_ENTRY_WORKGROUP_CUT;
         }

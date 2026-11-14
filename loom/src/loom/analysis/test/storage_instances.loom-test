@@ -740,3 +740,320 @@ func.def @test(%limit: index) {
 
 // ----
 storage: accessed=yes single_instance=unproven
+
+// ====
+
+// Every access is inside the condition; the enclosing loop ends at a
+// workgroup rendezvous before any invocation can reuse the same slot.
+kernel.def @test() {
+  %unit = index.constant 1 : index
+  %threads = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
+} launch() {
+  %value = scalar.constant 7 : i32
+  %origin = index.constant 0 : offset
+  %bytes = index.constant 128 : offset
+  %begin = index.constant 0 : index
+  %end = index.constant 8 : index
+  %step = index.constant 1 : index
+  %group = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %selected = index.cmp eq, %group, %begin : index
+  scf.for %iteration = [%begin to %end step %step] {
+    scf.if %selected {
+      %storage = buffer.alloca<workgroup> align(4) %bytes : buffer
+      %slot = buffer.view %storage[%origin] : buffer -> view<32xi32>
+      view.store %value, %slot[%lane] : i32, view<32xi32>
+      kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+      %loaded = view.load %slot[0] : view<32xi32> -> i32
+    }
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  }
+  kernel.return
+}
+
+// ----
+storage: accessed=yes single_instance=yes
+
+// ====
+
+// A leading cut also separates instances under nested conditional alternatives.
+kernel.def @test() {
+  %unit = index.constant 1 : index
+  %threads = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
+} launch() {
+  %value = scalar.constant 7 : i32
+  %origin = index.constant 0 : offset
+  %bytes = index.constant 128 : offset
+  %begin = index.constant 0 : index
+  %end = index.constant 8 : index
+  %step = index.constant 1 : index
+  %group = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %selected = index.cmp eq, %group, %begin : index
+  scf.for %iteration = [%begin to %end step %step] {
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+    scf.switch %group {
+      case 0 {
+        scf.if %selected {
+          %storage = buffer.alloca<workgroup> align(4) %bytes : buffer
+          %slot = buffer.view %storage[%origin] : buffer -> view<32xi32>
+          view.store %value, %slot[%lane] : i32, view<32xi32>
+          kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+          %loaded = view.load %slot[0] : view<32xi32> -> i32
+        }
+      }
+      default {
+      }
+    }
+  }
+  kernel.return
+}
+
+// ----
+storage: accessed=yes single_instance=yes
+
+// ====
+
+// The retiring barrier can be in an intermediate uniform conditional block.
+kernel.def @test() {
+  %unit = index.constant 1 : index
+  %threads = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
+} launch() {
+  %value = scalar.constant 7 : i32
+  %origin = index.constant 0 : offset
+  %bytes = index.constant 128 : offset
+  %begin = index.constant 0 : index
+  %end = index.constant 8 : index
+  %step = index.constant 1 : index
+  %group = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %selected = index.cmp eq, %group, %begin : index
+  scf.for %iteration = [%begin to %end step %step] {
+    scf.if %selected {
+      scf.if %selected {
+        %storage = buffer.alloca<workgroup> align(4) %bytes : buffer
+        %slot = buffer.view %storage[%origin] : buffer -> view<32xi32>
+        view.store %value, %slot[%lane] : i32, view<32xi32>
+        kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+        %loaded = view.load %slot[0] : view<32xi32> -> i32
+      }
+      kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+    }
+  }
+  kernel.return
+}
+
+// ----
+storage: accessed=yes single_instance=yes
+
+// ====
+
+// An outer-loop barrier does not separate the inner loop's repeated accesses.
+kernel.def @test() {
+  %unit = index.constant 1 : index
+  %threads = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
+} launch() {
+  %value = scalar.constant 7 : i32
+  %origin = index.constant 0 : offset
+  %bytes = index.constant 128 : offset
+  %begin = index.constant 0 : index
+  %end = index.constant 8 : index
+  %step = index.constant 1 : index
+  %group = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %selected = index.cmp eq, %group, %begin : index
+  scf.for %outer = [%begin to %end step %step] {
+    scf.for %inner = [%begin to %end step %step] {
+      scf.if %selected {
+        %storage = buffer.alloca<workgroup> align(4) %bytes : buffer
+        %slot = buffer.view %storage[%origin] : buffer -> view<32xi32>
+        view.store %value, %slot[%lane] : i32, view<32xi32>
+        kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+        %loaded = view.load %slot[0] : view<32xi32> -> i32
+      }
+    }
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  }
+  kernel.return
+}
+
+// ----
+storage: accessed=yes single_instance=unproven
+
+// ====
+
+// A sibling alternative's barrier is uniform but is not on the reuse path.
+kernel.def @test() {
+  %unit = index.constant 1 : index
+  %threads = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
+} launch() {
+  %value = scalar.constant 7 : i32
+  %origin = index.constant 0 : offset
+  %bytes = index.constant 128 : offset
+  %begin = index.constant 0 : index
+  %end = index.constant 8 : index
+  %step = index.constant 1 : index
+  %group = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %selected = index.cmp eq, %group, %begin : index
+  scf.for %iteration = [%begin to %end step %step] {
+    scf.if %selected {
+      %storage = buffer.alloca<workgroup> align(4) %bytes : buffer
+      %slot = buffer.view %storage[%origin] : buffer -> view<32xi32>
+      view.store %value, %slot[%lane] : i32, view<32xi32>
+      kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+      %loaded = view.load %slot[0] : view<32xi32> -> i32
+    } else {
+      kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+    }
+  }
+  kernel.return
+}
+
+// ----
+storage: accessed=yes single_instance=unproven
+
+// ====
+
+// An enclosing barrier under lane-dependent control is not a workgroup cut.
+kernel.def @test() {
+  %unit = index.constant 1 : index
+  %threads = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
+} launch() {
+  %value = scalar.constant 7 : i32
+  %origin = index.constant 0 : offset
+  %bytes = index.constant 128 : offset
+  %begin = index.constant 0 : index
+  %end = index.constant 8 : index
+  %step = index.constant 1 : index
+  %group = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %selected = index.cmp eq, %group, %begin : index
+  %leader = index.cmp eq, %lane, %begin : index
+  scf.for %iteration = [%begin to %end step %step] {
+    scf.if %leader {
+      scf.if %selected {
+        %storage = buffer.alloca<workgroup> align(4) %bytes : buffer
+        %slot = buffer.view %storage[%origin] : buffer -> view<32xi32>
+        view.store %value, %slot[%lane] : i32, view<32xi32>
+      }
+      kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+    }
+  }
+  kernel.return
+}
+
+// ----
+storage: accessed=yes single_instance=unproven
+
+// ====
+
+// A view escaping the condition remains live across the enclosing rendezvous.
+kernel.def @test() {
+  %unit = index.constant 1 : index
+  %threads = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
+} launch(%fallback: view<32xi32>) {
+  %value = scalar.constant 7 : i32
+  %origin = index.constant 0 : offset
+  %bytes = index.constant 128 : offset
+  %begin = index.constant 0 : index
+  %end = index.constant 8 : index
+  %step = index.constant 1 : index
+  %group = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %selected = index.cmp eq, %group, %begin : index
+  scf.for %iteration = [%begin to %end step %step] {
+    %escaped = scf.if %selected -> (view<32xi32>) {
+      %storage = buffer.alloca<workgroup> align(4) %bytes : buffer
+      %slot = buffer.view %storage[%origin] : buffer -> view<32xi32>
+      view.store %value, %slot[%lane] : i32, view<32xi32>
+      scf.yield %slot : view<32xi32>
+    } else {
+      scf.yield %fallback : view<32xi32>
+    }
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+    %loaded = view.load %escaped[0] : view<32xi32> -> i32
+  }
+  kernel.return
+}
+
+// ----
+storage: accessed=yes single_instance=unproven
+
+// ====
+
+// Completed asynchronous accesses can retire at the enclosing rendezvous.
+kernel.def @test() {
+  %unit = index.constant 1 : index
+  %threads = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
+} launch(%input: buffer) {
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %origin = index.constant 0 : offset
+  %source = buffer.view %global[%origin] : buffer -> view<32xi32>
+  %bytes = index.constant 128 : offset
+  %begin = index.constant 0 : index
+  %end = index.constant 8 : index
+  %step = index.constant 1 : index
+  %group = kernel.workgroup.id<x> : index
+  %selected = index.cmp eq, %group, %begin : index
+  scf.for %iteration = [%begin to %end step %step] {
+    scf.if %selected {
+      %storage = buffer.alloca<workgroup> align(4) %bytes : buffer
+      %slot = buffer.view %storage[%origin] : buffer -> view<32xi32>
+      %copy = kernel.async.copy %source to %slot {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<32xi32> to view<32xi32> -> kernel.async.token
+      %pending = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+      kernel.async.wait %pending {newer_groups = 0} : kernel.async.group
+    }
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  }
+  kernel.return
+}
+
+// ----
+storage: accessed=yes single_instance=yes
+
+// ====
+
+// The condition region of a while loop has its own repeated execution boundary.
+kernel.def @test() {
+  %unit = index.constant 1 : index
+  %threads = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
+} launch() {
+  %value = scalar.constant 7 : i32
+  %origin = index.constant 0 : offset
+  %bytes = index.constant 128 : offset
+  %begin = index.constant 0 : index
+  %end = index.constant 8 : index
+  %step = index.constant 1 : index
+  %group = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %selected = index.cmp eq, %group, %begin : index
+  %result = scf.while(%iteration = %begin : index) -> (index) {
+    scf.if %selected {
+      %storage = buffer.alloca<workgroup> align(4) %bytes : buffer
+      %slot = buffer.view %storage[%origin] : buffer -> view<32xi32>
+      view.store %value, %slot[%lane] : i32, view<32xi32>
+      kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+      %loaded = view.load %slot[0] : view<32xi32> -> i32
+    }
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+    %more = index.cmp ult, %iteration, %end : index
+    scf.condition %more, %iteration : i1, index
+  } do(%current: index) {
+    %next = index.add %current, %step : index
+    scf.yield %next : index
+  }
+  kernel.return
+}
+
+// ----
+storage: accessed=yes single_instance=yes
