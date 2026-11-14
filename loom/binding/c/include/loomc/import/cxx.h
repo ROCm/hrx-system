@@ -266,6 +266,75 @@ LOOMC_API_EXPORT loomc_status_t loomc_module_import_cxx(
     loomc_allocator_t allocator, loomc_module_t** out_module,
     loomc_result_t** out_result);
 
+/// One preprocessed and type-checked C/C++ translation unit.
+///
+/// A unit lets several consumers share one parse of a source: a single-source
+/// compiler driver generates host code from the unit's frontend state
+/// (loom/import/cxx/unit.h, through the native interop of a statically linked
+/// tool) and imports its device code with loomc_module_import_cxx_unit. A unit
+/// is mutable: consumers may complete template instantiations in it.
+typedef struct loomc_cxx_unit_t loomc_cxx_unit_t;
+
+/// Preprocesses and checks one C/C++ translation unit without importing it.
+///
+/// @param context Immutable context defining diagnostic source retention.
+/// @param source Source with UNKNOWN format. Its identifier labels diagnostics
+/// and supplies the main file's path for quoted include lookup.
+/// @param options Source configuration, or NULL for defaults: standard,
+/// triple, data model, include paths, defines, source provider, path mapper,
+/// preamble, and the NO_BUILTIN_INCLUDES flag.
+/// @param allocator Host allocator owning the result.
+/// @param out_unit Receives one owned unit after successful admission.
+/// @param out_result Receives one owned result with retained diagnostics.
+/// @return OK for successful parsing or diagnosed source rejection. Rejection
+/// returns a failed result and NULL unit. Infrastructure/API failures return
+/// non-OK status and NULL outputs.
+///
+/// @ownership
+/// Release outputs with loomc_cxx_unit_release and loomc_result_release.
+///
+/// @lifetime
+/// Source/include bytes, options, and callback state may be released on return:
+/// the source provider is consulted only while preprocessing.
+///
+/// @thread_safety
+/// A unit is used by one thread at a time.
+LOOMC_API_EXPORT loomc_status_t loomc_cxx_unit_parse(
+    loomc_context_t* context, const loomc_source_t* source,
+    const loomc_cxx_import_options_t* options, loomc_allocator_t allocator,
+    loomc_cxx_unit_t** out_unit, loomc_result_t** out_result);
+
+/// Destroys `unit` and its frontend state. Passing NULL is allowed.
+///
+/// @param unit Unit to destroy, or NULL.
+LOOMC_API_EXPORT void loomc_cxx_unit_release(loomc_cxx_unit_t* unit);
+
+/// Imports a parsed C/C++ translation unit into a verified High IR module,
+/// without cleanup passes, as loomc_module_import_cxx does after parsing.
+///
+/// @param context Immutable context containing the core dialects.
+/// @param workspace Workspace backing the returned module's arena storage.
+/// @param unit Unit from loomc_cxx_unit_parse. It is not reparsed.
+/// @param options Import policy, or NULL for defaults: roots, floating-point
+/// model and path mapper. Source configuration
+/// fields were fixed when the unit was parsed and are ignored.
+/// @param allocator Host allocator for public handles and temporary adapters.
+/// @param out_module Receives one owned module on successful translation.
+/// @param out_result Receives one owned result with retained diagnostics.
+/// @return OK for successful import or diagnosed rejection, as
+/// loomc_module_import_cxx. A unit can be imported again.
+///
+/// @ownership
+/// Release outputs with loomc_module_release and loomc_result_release.
+///
+/// @thread_safety
+/// Requires exclusive access to the unit and the workspace.
+LOOMC_API_EXPORT loomc_status_t loomc_module_import_cxx_unit(
+    loomc_context_t* context, loomc_workspace_t* workspace,
+    loomc_cxx_unit_t* unit, const loomc_cxx_import_options_t* options,
+    loomc_allocator_t allocator, loomc_module_t** out_module,
+    loomc_result_t** out_result);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif
