@@ -6,6 +6,7 @@
 
 #include "loom/transforms/vector/packet_legalization.h"
 
+#include "iree/base/internal/math.h"
 #include "loom/ir/module.h"
 #include "loom/ir/scalar_type.h"
 #include "loom/ops/index/ops.h"
@@ -211,9 +212,6 @@ static bool loom_vector_packet_dynamic_window_constrain_chunk_lane_count(
     uint32_t consumer_count,
     const loom_vector_packet_consumer_materializer_t* materializer,
     uint32_t* inout_chunk_lane_count) {
-  if (consumer_count == 0) {
-    return true;
-  }
   for (uint32_t candidate_lane_count = *inout_chunk_lane_count;
        candidate_lane_count > 0; --candidate_lane_count) {
     const uint32_t tail_lane_count = result_lane_count % candidate_lane_count;
@@ -349,20 +347,40 @@ static bool loom_vector_packet_dynamic_snapshot_selection_is_bounded(
   const iree_host_size_t candidate_count = domain->lane_offset_count;
   const iree_host_size_t group_count =
       consumer_branch_count == 0 ? 1u : consumer_branch_count;
-  iree_host_size_t snapshot_count = 0;
+  iree_host_size_t snapshot_overhead = 0;
   for (uint32_t i = 0; i < packetization->value_count; ++i) {
-    snapshot_count += packetization->values[i].source_mode ==
-                      LOOM_VECTOR_PACKET_SOURCE_MODE_SNAPSHOT;
+    const loom_vector_packetized_value_t* value = &packetization->values[i];
+    iree_host_size_t overhead = 0;
+    if (value->source_mode == LOOM_VECTOR_PACKET_SOURCE_MODE_SNAPSHOT) {
+      // The common divisor covers every origin, packet boundary, and tail.
+      // Each aligned fragment needs at most one slice and one concat; the
+      // final concat slot also covers a single-lane scalar projection.
+      const uint32_t piece_lane_count = iree_math_gcd_u64(
+          value->source_partition.snapshot_lane_count,
+          iree_math_gcd_u64(
+              result_shape->chunk_lane_count,
+              iree_math_gcd_u64(result_shape->lane_count,
+                                iree_math_gcd_u64(domain->first_lane_offset,
+                                                  domain->lane_offset_step))));
+      const iree_host_size_t piece_count =
+          iree_min(result_shape->lane_count, result_shape->chunk_lane_count) /
+          piece_lane_count;
+      overhead = piece_count * 2u - 1u;
+    } else if (value->source_mode == LOOM_VECTOR_PACKET_SOURCE_MODE_CAPTURED) {
+      // A captured single-lane packet also exposes its scalar value.
+      overhead = 1;
+    }
+    if (!iree_host_size_checked_add(snapshot_overhead, overhead,
+                                    &snapshot_overhead)) {
+      return false;
+    }
   }
 
   // Every candidate materializes the selected producer graph once per result
-  // packet. A snapshot value can require two slices, one concat, and one scalar
-  // projection; other selected values require at most one operation.
+  // packet, including aligned snapshot fragments and consumer conversions.
   iree_host_size_t operations_per_candidate = packetization->value_count;
-  iree_host_size_t snapshot_overhead = 0;
   iree_host_size_t consumer_operations = 0;
-  if (!iree_host_size_checked_mul(snapshot_count, 3u, &snapshot_overhead) ||
-      !iree_host_size_checked_add(operations_per_candidate, snapshot_overhead,
+  if (!iree_host_size_checked_add(operations_per_candidate, snapshot_overhead,
                                   &operations_per_candidate) ||
       !iree_host_size_checked_mul(
           consumer_count,
@@ -894,14 +912,13 @@ iree_status_t loom_vector_packet_legalize_dynamic_slice(
   }
   const uint32_t selected_tail_lane_count =
       result_lane_count % source_shape.chunk_lane_count;
-  if (consumer_count != 0 &&
-      (!loom_vector_packet_dynamic_window_consumers_support_packet(
+  if (!loom_vector_packet_dynamic_window_consumers_support_packet(
+          context, source_type, consumers, consumer_count,
+          consumer_materializer, source_shape.chunk_lane_count) ||
+      (selected_tail_lane_count != 0 &&
+       !loom_vector_packet_dynamic_window_consumers_support_packet(
            context, source_type, consumers, consumer_count,
-           consumer_materializer, source_shape.chunk_lane_count) ||
-       (selected_tail_lane_count != 0 &&
-        !loom_vector_packet_dynamic_window_consumers_support_packet(
-            context, source_type, consumers, consumer_count,
-            consumer_materializer, selected_tail_lane_count)))) {
+           consumer_materializer, selected_tail_lane_count))) {
     return iree_ok_status();
   }
   const loom_vector_packet_shape_t result_shape = {

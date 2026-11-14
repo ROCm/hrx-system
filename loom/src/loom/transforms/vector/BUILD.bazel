@@ -252,13 +252,13 @@ loom_cc_library(
         "packet_legalization.c",
         "packet_load.c",
         "packet_materialization.c",
-        "packet_materialization.h",
         "packet_plan.c",
     ],
     hdrs = [
         "packet_insert_legalization.h",
         "packet_legalization.h",
         "packet_load.h",
+        "packet_materialization.h",
         "packet_plan.h",
     ],
     deps = [
@@ -311,6 +311,7 @@ loom_cc_library(
     srcs = ["shape_legalization.c"],
     hdrs = ["shape_legalization.h"],
     deps = [
+        ":packet_legalization",
         "//loom/src/loom/analysis:motion",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/index",
@@ -318,7 +319,9 @@ loom_cc_library(
         "//loom/src/loom/ops/view",
         "//loom/src/loom/rewrite:rewriter",
         "//loom/src/loom/target:legalization",
+        "//loom/src/loom/util:fact_table",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
     ],
 )
 

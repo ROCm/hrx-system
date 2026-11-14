@@ -41,6 +41,17 @@ bool loom_vector_packet_dynamic_lane_domain(
     loom_value_facts_t offset_facts,
     loom_vector_packet_dynamic_lane_domain_t* out_domain);
 
+// Builds a static rank-one window from a retained regular snapshot. Contained
+// windows use one component; spanning windows use native fragments or equal
+// aligned pieces with a balanced concat tree. The caller owns the expansion
+// budget and establishes the nonempty range within the partition and its
+// result type.
+iree_status_t loom_vector_packet_materialize_partition_slice(
+    loom_target_legalization_context_t* context,
+    loom_value_fact_vector_partition_t partition, uint32_t lane_offset,
+    loom_type_t result_type, loom_location_id_t location,
+    loom_value_id_t* out_result);
+
 iree_status_t loom_vector_packet_preserve_memory_loads(
     loom_vector_packetization_t* packetization,
     const loom_vector_packet_shape_t* shape, bool* out_rewritten);

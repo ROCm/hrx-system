@@ -1,0 +1,222 @@
+// RUN: pass target=x86:avx2 target-legalize{mode=complete,policy=require-native},canonicalize,dce,target-legalize{mode=complete,policy=require-native},canonicalize,dce
+
+// A structural merge has not yet been projected to flat target carriers.
+// Linearization must preserve its alias instead of rebuilding shaped scalar
+// extracts and cycling back through the same linearization.
+func.def @shaped_merge(%first: vector<4xi32>, %second: vector<4xi32>, %condition: i1, %row: index, %column: index) -> (i32) {
+  %merged = scf.if %condition -> (vector<2x2xi32>) {
+    %shaped = vector.bitcast %first : vector<4xi32> to vector<2x2xi32>
+    scf.yield %shaped : vector<2x2xi32>
+  } else {
+    %shaped = vector.bitcast %second : vector<4xi32> to vector<2x2xi32>
+    scf.yield %shaped : vector<2x2xi32>
+  }
+  %value = vector.extract %merged[%row, %column] : vector<2x2xi32> -> i32
+  func.return %value : i32
+}
+
+// ----
+func.def @shaped_merge(%first: vector<4xi32>, %second: vector<4xi32>, %condition: i1, %row: index, %column: index) -> (i32) {
+  %16 = scf.select %condition, %first, %second : vector<4xi32>
+  %10 = index.constant 2 : index
+  %11 = index.madd %row, %10, %column : index
+  %value = vector.extract %16[%11] : vector<4xi32> -> i32
+  func.return %value : i32
+}
+
+// ====
+
+// This native-width result straddles two native packets. Its four equal
+// fragments avoid introducing a vector<12xi16> intermediate with no carrier.
+func.def @spanning_window(%first: vector<16xi16>, %second: vector<16xi16>) -> (vector<16xi16>) {
+  %source = vector.concat<0> %first, %second : vector<16xi16>, vector<16xi16> -> vector<32xi16>
+  %window = vector.slice %source[12] : vector<32xi16> -> vector<16xi16>
+  func.return %window : vector<16xi16>
+}
+
+// ----
+func.def @spanning_window(%first: vector<16xi16>, %second: vector<16xi16>) -> (vector<16xi16>) {
+  %5 = vector.slice %first[12] : vector<16xi16> -> vector<4xi16>
+  %6 = vector.slice %second[0] : vector<16xi16> -> vector<4xi16>
+  %7 = vector.slice %second[4] : vector<16xi16> -> vector<4xi16>
+  %8 = vector.slice %second[8] : vector<16xi16> -> vector<4xi16>
+  %9 = vector.concat<0> %5, %6 : vector<4xi16>, vector<4xi16> -> vector<8xi16>
+  %10 = vector.concat<0> %7, %8 : vector<4xi16>, vector<4xi16> -> vector<8xi16>
+  %window = vector.concat<0> %9, %10 : vector<8xi16>, vector<8xi16> -> vector<16xi16>
+  func.return %window : vector<16xi16>
+}
+
+// ====
+
+// The last packet may be shorter than the regular stride. Both selected
+// fragments retain the exact source packet and local lane offsets.
+func.def @partial_tail(%first: vector<8xi32>, %tail: vector<4xi32>) -> (vector<4xi32>) {
+  %source = vector.concat<0> %first, %tail : vector<8xi32>, vector<4xi32> -> vector<12xi32>
+  %window = vector.slice %source[6] : vector<12xi32> -> vector<4xi32>
+  func.return %window : vector<4xi32>
+}
+
+// ----
+func.def @partial_tail(%first: vector<8xi32>, %tail: vector<4xi32>) -> (vector<4xi32>) {
+  %5 = vector.slice %first[6] : vector<8xi32> -> vector<2xi32>
+  %6 = vector.slice %tail[0] : vector<4xi32> -> vector<2xi32>
+  %window = vector.concat<0> %5, %6 : vector<2xi32>, vector<2xi32> -> vector<4xi32>
+  func.return %window : vector<4xi32>
+}
+
+// ====
+
+// An unaligned byte window requires single-lane fragments, including the
+// final lane of the first packet. The concat tree preserves their lane order.
+func.def @byte_window(%first: vector<32xi8>, %second: vector<32xi8>) -> (vector<4xi8>) {
+  %source = vector.concat<0> %first, %second : vector<32xi8>, vector<32xi8> -> vector<64xi8>
+  %window = vector.slice %source[31] : vector<64xi8> -> vector<4xi8>
+  func.return %window : vector<4xi8>
+}
+
+// ----
+func.def @byte_window(%first: vector<32xi8>, %second: vector<32xi8>) -> (vector<4xi8>) {
+  %5 = vector.slice %first[31] : vector<32xi8> -> vector<1xi8>
+  %6 = vector.slice %second[0] : vector<32xi8> -> vector<1xi8>
+  %7 = vector.slice %second[1] : vector<32xi8> -> vector<1xi8>
+  %8 = vector.slice %second[2] : vector<32xi8> -> vector<1xi8>
+  %9 = vector.concat<0> %5, %6 : vector<1xi8>, vector<1xi8> -> vector<2xi8>
+  %10 = vector.concat<0> %7, %8 : vector<1xi8>, vector<1xi8> -> vector<2xi8>
+  %window = vector.concat<0> %9, %10 : vector<2xi8>, vector<2xi8> -> vector<4xi8>
+  func.return %window : vector<4xi8>
+}
+
+// ====
+
+// Whole components need no slices. Wide lanes use the same partition geometry.
+func.def @whole_packets(%first: vector<2xi64>, %second: vector<2xi64>, %third: vector<2xi64>) -> (vector<4xi64>) {
+  %source = vector.concat<0> %first, %second, %third : vector<2xi64>, vector<2xi64>, vector<2xi64> -> vector<6xi64>
+  %window = vector.slice %source[2] : vector<6xi64> -> vector<4xi64>
+  func.return %window : vector<4xi64>
+}
+
+// ----
+func.def @whole_packets(%first: vector<2xi64>, %second: vector<2xi64>, %third: vector<2xi64>) -> (vector<4xi64>) {
+  %window = vector.concat<0> %second, %third : vector<2xi64>, vector<2xi64> -> vector<4xi64>
+  func.return %window : vector<4xi64>
+}
+
+// ====
+
+// Floating-point payloads are transported unchanged, without numeric casts.
+func.def @float_window(%first: vector<8xf32>, %second: vector<8xf32>) -> (vector<4xf32>) {
+  %source = vector.concat<0> %first, %second : vector<8xf32>, vector<8xf32> -> vector<16xf32>
+  %window = vector.slice %source[6] : vector<16xf32> -> vector<4xf32>
+  func.return %window : vector<4xf32>
+}
+
+// ----
+func.def @float_window(%first: vector<8xf32>, %second: vector<8xf32>) -> (vector<4xf32>) {
+  %5 = vector.slice %first[6] : vector<8xf32> -> vector<2xf32>
+  %6 = vector.slice %second[0] : vector<8xf32> -> vector<2xf32>
+  %window = vector.concat<0> %5, %6 : vector<2xf32>, vector<2xf32> -> vector<4xf32>
+  func.return %window : vector<4xf32>
+}
+
+// ====
+
+// A captured register window has a two-lane packet and a single-lane tail.
+// The tail must expose a scalar before runtime selection, without rereading
+// storage or constructing a three-byte physical carrier.
+func.def @captured_tail(%source: vector<16xi8>, %position: index, %output_buffer: buffer) {
+  %base = index.constant 0 : offset
+  %output = buffer.view %output_buffer[%base] : buffer -> view<3xi8>
+  %bounded = index.assume %position [range(%position, 0, 1)] : index
+  %window = vector.slice %source[%bounded] : vector<16xi8> -> vector<3xi8>
+  vector.store %window, %output[0] : vector<3xi8>, view<3xi8>
+  func.return
+}
+
+// ----
+func.def @captured_tail(%source: vector<16xi8>, %position: index, %output_buffer: buffer) {
+  %base = index.constant 0 : offset
+  %output = buffer.view %output_buffer[%base] : buffer -> view<3xi8>
+  %bounded = index.assume %position [range(%position, 0, 1)] : index
+  %7 = index.constant 1 : index
+  %8 = index.cmp eq, %bounded, %7 : index
+  %9 = vector.slice %source[0] : vector<16xi8> -> vector<2xi8>
+  %10 = vector.slice %source[1] : vector<16xi8> -> vector<2xi8>
+  %11 = scf.select %8, %10, %9 : vector<2xi8>
+  %20 = vector.extract %source[2] : vector<16xi8> -> i8
+  %19 = vector.extract %source[3] : vector<16xi8> -> i8
+  %16 = scf.select %8, %19, %20 : i8
+  vector.store %11, %output[0] : vector<2xi8>, view<3xi8>
+  view.store %16, %output[2] : i8, view<3xi8>
+  func.return
+}
+
+// ====
+
+// Window selection owns the predicate conversion as well as its producer.
+// Independently packetizing the conversion would reassemble mask banks that
+// have no native concat before forming the compact byte payload.
+func.def @predicate_payload(%input_buffer: buffer, %position: index, %output_buffer: buffer) {
+  %base = index.constant 0 : offset
+  %input = buffer.view %input_buffer[%base] : buffer -> view<48xi32>
+  %output = buffer.view %output_buffer[%base] : buffer -> view<40xi8>
+  %bounded = index.assume %position [range(%position, 0, 8)] : index
+  %source = vector.load %input[0] : view<48xi32> -> vector<48xi32>
+  %c0 = vector.splati 0 : vector<48xi32>
+  %predicates = vector.cmpi ne, %source, %c0 : vector<48xi32> -> vector<48xi1>
+  %window = vector.slice %predicates[%bounded] : vector<48xi1> -> vector<40xi1>
+  %payload = vector.extui %window : vector<40xi1> to vector<40xi8>
+  vector.store %payload, %output[0] : vector<40xi8>, view<40xi8>
+  func.return
+}
+
+// ----
+func.def @predicate_payload(%input_buffer: buffer, %position: index, %output_buffer: buffer) {
+  %base = index.constant 0 : offset
+  %input = buffer.view %input_buffer[%base] : buffer -> view<48xi32>
+  %output = buffer.view %output_buffer[%base] : buffer -> view<40xi8>
+  %bounded = index.assume %position [range(%position, 0, 8)] : index
+  %12 = vector.load %input[%bounded] : view<48xi32> -> vector<8xi32>
+  %13 = vector.splati 0 : vector<8xi32>
+  %14 = vector.cmpi ne, %12, %13 : vector<8xi32> -> vector<8xi1>
+  %15 = vector.splati 1 : vector<8xi8>
+  %16 = vector.splati 0 : vector<8xi8>
+  %17 = vector.select %14, %15, %16 : vector<8xi8>
+  %18 = index.constant 8 : index
+  %19 = index.add %bounded, %18 : index
+  %20 = vector.load %input[%19] : view<48xi32> -> vector<8xi32>
+  %21 = vector.splati 0 : vector<8xi32>
+  %22 = vector.cmpi ne, %20, %21 : vector<8xi32> -> vector<8xi1>
+  %23 = vector.splati 1 : vector<8xi8>
+  %24 = vector.splati 0 : vector<8xi8>
+  %25 = vector.select %22, %23, %24 : vector<8xi8>
+  %26 = index.constant 16 : index
+  %27 = index.add %bounded, %26 : index
+  %28 = vector.load %input[%27] : view<48xi32> -> vector<8xi32>
+  %29 = vector.splati 0 : vector<8xi32>
+  %30 = vector.cmpi ne, %28, %29 : vector<8xi32> -> vector<8xi1>
+  %31 = vector.splati 1 : vector<8xi8>
+  %32 = vector.splati 0 : vector<8xi8>
+  %33 = vector.select %30, %31, %32 : vector<8xi8>
+  %34 = index.constant 24 : index
+  %35 = index.add %bounded, %34 : index
+  %36 = vector.load %input[%35] : view<48xi32> -> vector<8xi32>
+  %37 = vector.splati 0 : vector<8xi32>
+  %38 = vector.cmpi ne, %36, %37 : vector<8xi32> -> vector<8xi1>
+  %39 = vector.splati 1 : vector<8xi8>
+  %40 = vector.splati 0 : vector<8xi8>
+  %41 = vector.select %38, %39, %40 : vector<8xi8>
+  %42 = index.constant 32 : index
+  %43 = index.add %bounded, %42 : index
+  %44 = vector.load %input[%43] : view<48xi32> -> vector<8xi32>
+  %45 = vector.splati 0 : vector<8xi32>
+  %46 = vector.cmpi ne, %44, %45 : vector<8xi32> -> vector<8xi1>
+  %47 = vector.splati 1 : vector<8xi8>
+  %48 = vector.splati 0 : vector<8xi8>
+  %49 = vector.select %46, %47, %48 : vector<8xi8>
+  vector.store %17, %output[0] : vector<8xi8>, view<40xi8>
+  vector.store %25, %output[8] : vector<8xi8>, view<40xi8>
+  vector.store %33, %output[16] : vector<8xi8>, view<40xi8>
+  vector.store %41, %output[24] : vector<8xi8>, view<40xi8>
+  vector.store %49, %output[32] : vector<8xi8>, view<40xi8>
+  func.return
+}

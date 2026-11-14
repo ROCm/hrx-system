@@ -362,10 +362,42 @@ static iree_status_t loom_vector_legalize_predicate_truncation(
   return iree_ok_status();
 }
 
+static bool loom_vector_legalize_retains_shape_alias(
+    const loom_target_legalization_context_t* context, const loom_op_t* op) {
+  if (op == NULL || !loom_vector_bitcast_isa(op) ||
+      context->policy == LOOM_TARGET_LEGALIZATION_POLICY_REFERENCE_ONLY ||
+      context->vector_packet_policy == NULL ||
+      context->vector_packet_policy->native_lane_count_count == 0 ||
+      !iree_any_bit_set(
+          context->vector_packet_policy->flags,
+          LOOM_TARGET_VECTOR_PACKET_POLICY_FLAG_BOUNDARY_PROJECTION)) {
+    return false;
+  }
+  const loom_type_t source_type =
+      loom_module_value_type(context->module, loom_vector_bitcast_input(op));
+  const loom_type_t result_type =
+      loom_module_value_type(context->module, loom_vector_bitcast_result(op));
+  return loom_type_is_all_static(source_type) &&
+         loom_type_is_all_static(result_type) && source_type.encoding_id == 0 &&
+         result_type.encoding_id == 0 &&
+         loom_type_element_type(source_type) ==
+             loom_type_element_type(result_type);
+}
+
 static iree_status_t loom_vector_legalize_cast(
     const loom_target_legalizer_entry_t* entry,
     loom_target_legalization_context_t* context, loom_op_t* op,
     loom_target_legalizer_result_t* out_result) {
+  // Native packet targets retain shape aliases until boundary projection owns
+  // their carriers. Expanding a reshape as lane computation rebuilds an
+  // aggregate needing the same projection and can reverse access linearization.
+  // Scalar-only targets still consume the complete reference lane program.
+  if (loom_vector_legalize_retains_shape_alias(context, op)) {
+    *out_result = (loom_target_legalizer_result_t){
+        .action = LOOM_TARGET_LEGALIZER_ACTION_NO_COMMENT,
+    };
+    return iree_ok_status();
+  }
   if (loom_vector_trunci_isa(op) || loom_vector_extui_isa(op) ||
       loom_vector_extsi_isa(op)) {
     bool composed = false;
@@ -1214,7 +1246,16 @@ static iree_status_t loom_vector_legalize_extract(
           context, source_op, context->vector_packet_policy, &rewritten));
     }
   }
-  if (!rewritten) {
+  // Keep the flat access normal form through a structural alias.
+  // Rematerializing its source coordinates would recreate the shaped extract
+  // that legalization just flattened. Retained partitions above still project
+  // captured packets.
+  if (!rewritten &&
+      (loom_type_rank(loom_module_value_type(
+           context->module, loom_vector_extract_source(op))) != 1 ||
+       !loom_vector_legalize_retains_shape_alias(
+           context, loom_rewriter_value_defining_op(
+                        context->rewriter, loom_vector_extract_source(op))))) {
     IREE_RETURN_IF_ERROR(loom_vector_extract_to_scalar_rewrite_op(
         context->pass, context->rewriter, op, &rewritten));
   }

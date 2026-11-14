@@ -13,7 +13,9 @@
 #include "loom/target/arch/x86/records/target_records.h"
 #include "loom/target/arch/x86/vector_insert.h"
 #include "loom/transforms/scalar/target_legalization.h"
+#include "loom/transforms/vector/cast_packet_legalization.h"
 #include "loom/transforms/vector/packet_legalization.h"
+#include "loom/transforms/vector/shape_legalization.h"
 #include "loom/transforms/vector/target_legalization.h"
 #include "loom/transforms/vector/to_scalar.h"
 
@@ -176,6 +178,14 @@ static iree_status_t loom_x86_legalize_vector_packets(
 
   bool rewritten = false;
   switch (op->kind) {
+    case LOOM_OP_VECTOR_BROADCAST:
+    case LOOM_OP_VECTOR_CONCAT:
+    case LOOM_OP_VECTOR_SELECT:
+    case LOOM_OP_VECTOR_TABLE_LOOKUP: {
+      IREE_RETURN_IF_ERROR(
+          loom_vector_static_shape_rewrite_op(context, op, &rewritten));
+      break;
+    }
     case LOOM_OP_VECTOR_LOAD: {
       IREE_RETURN_IF_ERROR(loom_vector_packet_legalize_load(
           context, op, context->vector_packet_policy, &rewritten));
@@ -188,7 +198,25 @@ static iree_status_t loom_x86_legalize_vector_packets(
     }
     case LOOM_OP_VECTOR_INSERT: {
       IREE_RETURN_IF_ERROR(
-          loom_x86_vector_insert_legalize(context, op, &rewritten));
+          loom_vector_static_shape_rewrite_op(context, op, &rewritten));
+      if (!rewritten) {
+        IREE_RETURN_IF_ERROR(
+            loom_x86_vector_insert_legalize(context, op, &rewritten));
+      }
+      break;
+    }
+    case LOOM_OP_VECTOR_EXTRACT:
+    case LOOM_OP_VECTOR_SLICE: {
+      IREE_RETURN_IF_ERROR(
+          loom_vector_static_shape_rewrite_op(context, op, &rewritten));
+      if (!rewritten && loom_vector_slice_isa(op) &&
+          loom_vector_slice_offsets(op).count != 0) {
+        const loom_vector_packet_consumer_materializer_t materializer =
+            loom_vector_predicate_extension_packet_materializer();
+        IREE_RETURN_IF_ERROR(loom_vector_packet_legalize_dynamic_slice(
+            context, op, context->vector_packet_policy, &materializer,
+            &rewritten));
+      }
       break;
     }
     default:
@@ -201,6 +229,22 @@ static iree_status_t loom_x86_legalize_vector_packets(
 }
 
 static const loom_target_legalizer_rule_t kX86LegalizerRules[] = {
+    {
+        .root_kind = LOOM_OP_VECTOR_BROADCAST,
+        .legalize = loom_x86_legalize_vector_packets,
+    },
+    {
+        .root_kind = LOOM_OP_VECTOR_CONCAT,
+        .legalize = loom_x86_legalize_vector_packets,
+    },
+    {
+        .root_kind = LOOM_OP_VECTOR_SELECT,
+        .legalize = loom_x86_legalize_vector_packets,
+    },
+    {
+        .root_kind = LOOM_OP_VECTOR_TABLE_LOOKUP,
+        .legalize = loom_x86_legalize_vector_packets,
+    },
     {
         .root_kind = LOOM_OP_VECTOR_CONSTANTI,
         .legalize = loom_x86_legalize_vector_literal_base,
@@ -218,6 +262,14 @@ static const loom_target_legalizer_rule_t kX86LegalizerRules[] = {
         // oversized producer graph without materializing its logical result.
         .flags = LOOM_TARGET_LEGALIZER_ENTRY_FLAG_REWRITE_LEGAL,
         .root_kind = LOOM_OP_VECTOR_STORE,
+        .legalize = loom_x86_legalize_vector_packets,
+    },
+    {
+        .root_kind = LOOM_OP_VECTOR_EXTRACT,
+        .legalize = loom_x86_legalize_vector_packets,
+    },
+    {
+        .root_kind = LOOM_OP_VECTOR_SLICE,
         .legalize = loom_x86_legalize_vector_packets,
     },
     {
