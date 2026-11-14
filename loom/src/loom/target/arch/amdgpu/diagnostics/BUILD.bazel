@@ -23,6 +23,7 @@ loom_cc_library(
     deps = [
         "//loom/src/loom/codegen/low:packet",
         "//loom/src/loom/target:low_packet_diagnostics",
+        "//loom/src/loom/target/arch/amdgpu:target_info_defs",
         "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
         "//runtime/src/iree/base",
     ],

@@ -1307,6 +1307,7 @@ static const loom_target_legalizer_rule_t kAmdgpuLegalizerRules[] = {
     },
     {
         .root_kind = LOOM_OP_VECTOR_INDEX_CAST,
+        .match = loom_amdgpu_match_target,
         .legalize = loom_vector_legalize_index_cast,
     },
     {

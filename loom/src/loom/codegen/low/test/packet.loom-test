@@ -40,7 +40,8 @@ low.func.def target<test.low.core>(@test_target) @structural_storage_location() 
 // ====
 
 // Each fixed-register definition is consumed before the next overwrites it.
-// RUN: emit low-packet-json @singleton strategy=source
+// Linked target diagnostic providers must leave these neutral packets alone.
+// RUN: emit low-packet-json @singleton strategy=source diagnostics=packets
 
 test.target<low_core> @test_target
 
