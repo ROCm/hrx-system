@@ -225,6 +225,35 @@ def _vex_memory_load_instructions(
     )
 
 
+def broadcast_memory_instructions(
+    element_bit_width: int,
+) -> tuple[VectorMachineInstruction, VectorMachineInstruction]:
+    """Native scalar-memory broadcasts, independent of payload interpretation."""
+    mnemonic, opcode = {
+        8: ("vpbroadcastb", 0x78),
+        16: ("vpbroadcastw", 0x79),
+        32: ("vpbroadcastd", 0x58),
+        64: ("vpbroadcastq", 0x59),
+    }[element_bit_width]
+    recipe = vector_encoding_recipe(
+        _R.RESULT,
+        _R.NONE,
+        _R.INPUT_0,
+        _B.LOAD,
+        scalar_memory_bit_width=element_bit_width,
+    )
+    encodings = (
+        _encoding(_VEX, _MAP_2, 1, 0, opcode, (128, 256)),
+        _encoding(
+            _EVEX, _MAP_2, 1, int(element_bit_width == 64), opcode, (128, 256, 512)
+        ),
+    )
+    return (
+        _instruction(mnemonic, recipe, _OPERANDS_18, _IMMEDIATES_3, *encodings),
+        _instruction(mnemonic, recipe, _OPERANDS_19, _IMMEDIATES_2, *encodings),
+    )
+
+
 def avx512_bf16_conversion_instruction(
     *,
     source_count: int,

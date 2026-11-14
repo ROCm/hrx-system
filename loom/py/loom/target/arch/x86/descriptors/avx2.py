@@ -112,7 +112,7 @@ from .integer_float import (
     vector_integer_float_descriptors,
 )
 from .integer_unary import integer_unary_descriptors
-from .memory import memory_descriptors
+from .memory import broadcast_memory_descriptors, memory_descriptors
 from .scalar import (
     X86_SCALAR_DESCRIPTOR_SET,
     X86_SCALAR_PREFIX_DESCRIPTORS,
@@ -1400,6 +1400,7 @@ X86_AVX2_VECTOR_DESCRIPTORS = _X86_AVX2_VECTOR_DESCRIPTORS
 X86_AVX2_DESCRIPTORS = (
     *X86_SCALAR_PREFIX_DESCRIPTORS,
     *X86_AVX2_VECTOR_DESCRIPTORS,
+    *broadcast_memory_descriptors(evex=False),
     *integer_float_descriptors(unsigned=False),
     *vector_integer_float_descriptors(
         AVX2_INTEGER_FLOAT_I32_FORMS, unsigned=False, evex=False

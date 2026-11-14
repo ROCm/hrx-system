@@ -135,7 +135,7 @@ from .integer_float import (
 )
 from .integer_rotation import X86_AVX512_ROTATION_DESCRIPTORS
 from .integer_unary import integer_unary_descriptors
-from .memory import memory_descriptors
+from .memory import broadcast_memory_descriptors, memory_descriptors
 from .scalar import X86_SCALAR_DESCRIPTOR_SET
 
 _REGISTER_SUFFIXES = {64: "xmm", 128: "xmm", 256: "ymm", 512: "zmm"}
@@ -590,6 +590,7 @@ X86_AVX512_CORE_DESCRIPTOR_SET = DescriptorSet(
     enum_domains=X86_SCALAR_DESCRIPTOR_SET.enum_domains,
     descriptors=(
         *X86_AVX2_DESCRIPTORS,
+        *broadcast_memory_descriptors(evex=True),
         *X86_AVX512_ROTATION_DESCRIPTORS,
         *integer_unary_descriptors(evex=True),
         *integer_float_descriptors(unsigned=True),

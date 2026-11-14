@@ -9,8 +9,11 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import replace
 
+from loom.target.arch.x86 import native_vector as native
 from loom.target.arch.x86.vector_encoding import VectorMachineInstruction
+from loom.target.arch.x86.vector_families import X86_VECTOR_STORAGE_FAMILIES
 from loom.target.low_descriptors import (
     Descriptor,
     DescriptorFlag,
@@ -27,8 +30,13 @@ from .common import (
     _ADDRESS_SCALE_IMMEDIATE,
     _DISP32_IMMEDIATE,
     _GPR_DESTRUCTIVE_LHS_CONSTRAINTS,
+    _SCHEDULE_MEMORY_LOAD_XMM,
+    _SCHEDULE_MEMORY_LOAD_YMM,
+    _SCHEDULE_MEMORY_LOAD_ZMM,
     _asm,
+    _avx512_descriptor,
     _gpr64_resource,
+    _vex_descriptor,
 )
 from .encoding import Flag, Form, encoding
 
@@ -147,6 +155,49 @@ def memory_load_descriptors(
         assembly_suffix=assembly_suffix,
         encoding_id=encoding_id,
     )
+
+
+def broadcast_memory_descriptors(*, evex: bool) -> tuple[Descriptor, ...]:
+    """Bit-preserving scalar loads replicated into complete SIMD carriers."""
+    descriptors = []
+    for family in X86_VECTOR_STORAGE_FAMILIES:
+        instructions = native.broadcast_memory_instructions(family.element_bit_width)
+        mnemonic = instructions[0].descriptor_mnemonic
+        for width, suffix, schedule in (
+            (128, "xmm", _SCHEDULE_MEMORY_LOAD_XMM),
+            (256, "ymm", _SCHEDULE_MEMORY_LOAD_YMM),
+            *(((512, "zmm", _SCHEDULE_MEMORY_LOAD_ZMM),) if evex else ()),
+        ):
+            rows = _memory_transfer_descriptors(
+                key_prefix="x86.avx512" if evex else "x86.avx2",
+                operation="load",
+                mnemonic=mnemonic,
+                register_class=f"x86.{suffix}",
+                register_suffix=suffix,
+                semantic_type=f"broadcast.i{family.element_bit_width}.v{width}",
+                width_bits=family.element_bit_width,
+                schedule_class=schedule,
+                assembly_suffix=f".{suffix}",
+                encoding_id=None,
+            )
+            if evex and width < 512:
+                rows = tuple(
+                    replace(
+                        row,
+                        asm_forms=tuple(
+                            replace(form, mnemonic=f"avx512.{form.mnemonic}")
+                            for form in row.asm_forms
+                        ),
+                    )
+                    for row in rows
+                )
+            descriptors.extend(
+                _avx512_descriptor(row, instruction, scalar=False)
+                if evex
+                else _vex_descriptor(row, instruction)
+                for row, instruction in zip(rows, instructions, strict=True)
+            )
+    return tuple(descriptors)
 
 
 def memory_descriptors(

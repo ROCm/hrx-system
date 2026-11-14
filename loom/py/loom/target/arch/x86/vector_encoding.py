@@ -108,10 +108,26 @@ def vector_encoding_recipe(
     full_vector_tuple: bool = False,
     broadcast32: bool = False,
     zero_mask: bool = False,
+    scalar_memory_bit_width: int | None = None,
 ) -> int:
     """Packs the direct operand selectors consumed by the native encoder."""
+    if scalar_memory_bit_width is not None:
+        if (
+            scalar_memory_bit_width not in (8, 16, 32, 64)
+            or behavior not in _MEMORY_BEHAVIORS
+            or middle != VectorRegisterSelector.NONE
+            or full_vector_tuple
+            or broadcast32
+        ):
+            raise ValueError("invalid scalar memory tuple recipe")
+        # Memory selectors 13..15 retain an implicit unused vvvv field and
+        # select element-sized compressed displacement. A byte is unscaled.
+        middle = {8: 4, 16: 13, 32: 14, 64: 15}[scalar_memory_bit_width]
     if full_vector_tuple:
-        if behavior not in _MEMORY_BEHAVIORS or int(middle) & 8:
+        if (
+            behavior not in _MEMORY_BEHAVIORS
+            or int(middle) > VectorRegisterSelector.NONE
+        ):
             raise ValueError("invalid full-vector memory tuple recipe")
         middle = int(middle) | 8
     if broadcast32:
@@ -148,13 +164,20 @@ def validate_vector_encoding_recipe(encoding_format_id: int) -> None:
     ]
     if behavior in _MASK_BEHAVIORS:
         selectors[0] &= 7
-    if behavior in _MEMORY_BEHAVIORS:
+    scalar_memory_tuple = behavior in _MEMORY_BEHAVIORS and selectors[1] >= 13
+    if scalar_memory_tuple:
+        selectors[1] = VectorRegisterSelector.NONE
+    elif behavior in _MEMORY_BEHAVIORS:
         selectors[1] &= 7
     if behavior in _LOAD_BEHAVIORS:
         selectors[2] &= 7
-    full_vector_tuple = bool((encoding_format_id >> 4) & 8)
+    full_vector_tuple = not scalar_memory_tuple and bool((encoding_format_id >> 4) & 8)
     broadcast32 = bool((encoding_format_id >> 8) & 8)
-    if behavior in _LOAD_BEHAVIORS and full_vector_tuple and broadcast32:
+    if (
+        behavior in _LOAD_BEHAVIORS
+        and (full_vector_tuple or scalar_memory_tuple)
+        and broadcast32
+    ):
         raise ValueError("vector memory recipe has conflicting tuple modes")
     try:
         for selector in selectors:

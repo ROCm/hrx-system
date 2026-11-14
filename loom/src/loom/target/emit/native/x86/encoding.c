@@ -203,6 +203,8 @@ enum loom_x86_vector_encoding_flag_bits_e {
   LOOM_X86_VECTOR_ENCODING_FLAG_BROADCAST_32 = 1u << 3,
   LOOM_X86_VECTOR_ENCODING_FLAG_FULL_VECTOR_TUPLE = 1u << 4,
   LOOM_X86_VECTOR_ENCODING_FLAG_EVEX = 1u << 5,
+  // Two-bit log2 byte size for fixed scalar displacement tuples.
+  LOOM_X86_VECTOR_ENCODING_SCALAR_TUPLE_SHIFT = 6,
 };
 typedef uint32_t loom_x86_vector_encoding_flags_t;
 
@@ -271,7 +273,8 @@ static void loom_x86_encode_vector_memory(
     loom_x86_vector_encoding_flags_t flags) {
   int32_t encoded_displacement = displacement;
   bool compressed = false;
-  int32_t tuple_scale = 0;
+  int32_t tuple_scale =
+      1 << ((flags >> LOOM_X86_VECTOR_ENCODING_SCALAR_TUPLE_SHIFT) & 3);
   if (iree_any_bit_set(flags,
                        LOOM_X86_VECTOR_ENCODING_FLAG_FULL_VECTOR_TUPLE)) {
     tuple_scale = 16 << vector_length;
@@ -282,7 +285,7 @@ static void loom_x86_encode_vector_memory(
   const bool evex = iree_any_bit_set(flags, LOOM_X86_VECTOR_ENCODING_FLAG_EVEX);
   const bool has_index =
       iree_any_bit_set(flags, LOOM_X86_VECTOR_ENCODING_FLAG_INDEXED);
-  if (evex && tuple_scale) {
+  if (evex) {
     if (displacement % tuple_scale == 0) {
       const int32_t quotient = displacement / tuple_scale;
       if (quotient >= INT8_MIN && quotient <= INT8_MAX) {
@@ -295,8 +298,7 @@ static void loom_x86_encode_vector_memory(
   if (displacement == 0 && (base & 7) != 5) {
     displacement_length = 0;
   } else if (encoded_displacement >= INT8_MIN &&
-             encoded_displacement <= INT8_MAX &&
-             (!evex || !tuple_scale || compressed)) {
+             encoded_displacement <= INT8_MAX && (!evex || compressed)) {
     displacement_length = 1;
   }
   const uint8_t mode = displacement_length == 0   ? 0
@@ -335,7 +337,11 @@ static void loom_x86_encode_vector_instruction(
     flags |= LOOM_X86_VECTOR_ENCODING_FLAG_ZERO_MASK;
     reg_selector &= 7;
   }
-  if (memory && (middle_selector & 8)) {
+  if (memory && middle_selector >= 13) {
+    flags |= (uint32_t)(middle_selector - 12)
+             << LOOM_X86_VECTOR_ENCODING_SCALAR_TUPLE_SHIFT;
+    middle_selector = LOOM_X86_VECTOR_REGISTER_NONE;
+  } else if (memory && (middle_selector & 8)) {
     flags |= LOOM_X86_VECTOR_ENCODING_FLAG_FULL_VECTOR_TUPLE;
     middle_selector &= 7;
   }
