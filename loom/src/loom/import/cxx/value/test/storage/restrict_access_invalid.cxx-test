@@ -1,0 +1,45 @@
+// RUN: verify
+// Local restrict lifetimes need a lexical scope rather than the callable-entry
+// scope used by incoming pointer and reference paths.
+int local_pointer(int* input) {
+  // ERROR@+1: LOWERING/059 "restrict-qualified local bindings require a lexical access scope"
+  int* __restrict__ local = input;
+  return local[0];
+}
+
+// ====
+static int local_reference_impl(int& input) {
+  // ERROR@+1: LOWERING/059 "restrict-qualified local bindings require a lexical access scope"
+  int& __restrict__ local = input;
+  return local;
+}
+
+int local_reference(int* input) { return local_reference_impl(*input); }
+
+// ====
+// Persisted field qualifiers need a scope tied to the containing object.
+struct RestrictedField {
+  int* __restrict__ pointer;
+};
+
+// ERROR@+1: LOWERING/059 "restrict-qualified fields require an object-member access scope"
+int field_pointer(RestrictedField value) {
+  return value.pointer[0];
+}
+
+// ====
+// Namespace storage does not have a callable-entry restrict lifetime.
+// ERROR@+1: LOWERING/059 "restrict-qualified global bindings require a lexical access scope"
+extern int* __restrict__ global_pointer;
+
+int global_access() {
+  return global_pointer[0];
+}
+
+// ====
+// ERROR@+1: LOWERING/059 "address-taken restrict-qualified parameters require a stored pointer representation"
+int addressed_parameter(int* __restrict__ pointer) {
+  int* __restrict__* address = &pointer;
+  (void)address;
+  return pointer[0];
+}

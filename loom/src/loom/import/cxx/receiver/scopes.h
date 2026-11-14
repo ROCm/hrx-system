@@ -63,6 +63,9 @@ class ReceiverScopes {
   // Marks a subobject's source lifetime as begun. A value member can still
   // have pending payload components after default initialization.
   void mark_complete(cxx::Symbol* subobject);
+  // Replaces the root refinement carried by the current storage receiver.
+  // The source object, byte origin, layout, and completion state are retained.
+  void replace_current_storage_root(loom_value_id_t root);
 
  private:
   struct Owner {
