@@ -744,8 +744,15 @@ uint64_t iree_hal_amd_gpu_aql_execute_argument_length(
   const iree_hal_amd_gpu_aql_host_template_t* host_template =
       invocation->program->host_template;
   if (host_template) {
+    if (!host_template->fixup_count) {
+      return 0;
+    }
+    const iree_hal_amd_gpu_aql_program_block_t block =
+        invocation->program->blocks[invocation->block_ordinal];
     return iree_align_uint64(
-        host_template->command_data_offset - host_template->data_offset, 4);
+        (block.data.offset & (host_template->alignment - 1)) +
+            block.data.length,
+        4);
   }
   uint64_t length = invocation->block_ordinal
                         ? sizeof(iree_hal_amd_gpu_aql_materialize_arguments_t)
@@ -764,16 +771,15 @@ uint64_t iree_hal_amd_gpu_aql_execute_argument_alignment(
   return host_template ? iree_max(host_template->alignment, 8u) : 8;
 }
 
-// Keep bounded host patch/copy loops outside the resident publication path.
+// Publish one dispatch-only block without changing its sealed packet headers.
 static IREE_ATTRIBUTE_NOINLINE amdf_status_t
 iree_hal_amd_gpu_aql_publish_host_template(
     iree_hal_amd_gpu_aql_queue_t* queue,
     const iree_hal_amd_gpu_aql_command_program_t* program,
-    uint64_t packet_position, const void* upload, uint64_t sample_address,
+    iree_hal_amd_gpu_aql_program_block_t block, uint64_t packet_position,
+    const void* upload, uint64_t sample_address,
     iree_hal_amd_gpu_aql_signal_t* samples) {
-  const iree_hal_amd_gpu_aql_program_block_t block = program->blocks[0];
-  const iree_hal_amd_gpu_aql_packet_t* packets =
-      (const void*)((const uint8_t*)upload + block.offset);
+  const iree_hal_amd_gpu_aql_packet_t* packets = upload;
   if (program->profile) {
     if (samples) {
       for (uint32_t i = 0; i < block.packet_count; ++i) {
@@ -904,13 +910,15 @@ iree_hal_amd_gpu_aql_publish_execute_prepared(
   }
   iree_hal_amd_gpu_byte_storage_t* arguments = queue->producer.arguments;
   void* upload = arguments->memory.contents.data + argument_offset;
-  const void* packets = host_contents
-                            ? host_contents
-                            : (host_template ? host_template + 1 : NULL);
+  const void* packets =
+      host_contents
+          ? host_contents
+          : (host_template ? (const uint8_t*)(host_template + 1) + block.offset
+                           : NULL);
   const uint64_t command_offset =
       (position & (queue->options.retirement_capacity - 1)) *
       IREE_HAL_AMD_GPU_AQL_INDIRECT_COMMAND_BYTE_STRIDE;
-  if (first && (argument_length || host_contents)) {
+  if ((first || host_template) && (argument_length || host_contents)) {
     *out_status = iree_hal_amd_gpu_aql_command_invocation_write(
         invocation, queue->options.queue_ordinal, queue->grid.address,
         arguments->address + argument_offset, upload,
@@ -987,10 +995,10 @@ iree_hal_amd_gpu_aql_publish_execute_prepared(
   // publish() changes initialization state, so native prelude emission must
   // consume the pre-publication facts captured above.
   if (amdf_status_is_ok(publication_status)) {
-    if (IREE_UNLIKELY(host_template)) {
+    if (host_template) {
       if (block.packet_count == block.dispatches.count) {
         publication_status = iree_hal_amd_gpu_aql_publish_host_template(
-            queue, invocation->program, packet_position, packets,
+            queue, invocation->program, block, packet_position, packets,
             sample_address, samples);
       } else {
         publication_status = iree_hal_amd_gpu_aql_program_emit_host(

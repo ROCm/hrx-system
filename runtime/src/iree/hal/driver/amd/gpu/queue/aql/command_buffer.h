@@ -19,9 +19,9 @@ extern "C" {
 // reset/user pairs never cross a block boundary. The publisher reads this
 // descriptor, not packets.
 typedef struct iree_hal_amd_gpu_aql_program_block_t {
-  // Byte offset from resident instance zero, aligned to a native packet.
+  // Byte offset in the recording's packet section, aligned to a native packet.
   uint32_t offset;
-  // Complete 64-byte packets copied by one materializer launch.
+  // Complete 64-byte packets published together.
   uint32_t packet_count;
   // Immutable dispatch subrange for independently retiring profile samples.
   struct {
@@ -30,23 +30,33 @@ typedef struct iree_hal_amd_gpu_aql_program_block_t {
     // Public dispatches in this block, excluding builtin kernels.
     uint32_t count;
   } dispatches;
+  // Exact ABI subrange in the recording's private-data section.
+  struct {
+    // First byte before this block's ABI alignment padding.
+    uint32_t offset;
+    // Bytes owned by this block, including alignment between arguments.
+    uint32_t length;
+  } data;
+  // Contiguous relocations recorded by this block's operations.
+  struct {
+    // First entry in the sealed fixup table.
+    uint32_t first;
+    // Entries targeting this block's packets and ABI bytes.
+    uint32_t count;
+  } fixups;
 } iree_hal_amd_gpu_aql_program_block_t;
 
-// Bounds on CPU-prepared native packet work, independent of ABI byte count.
 enum {
-  IREE_HAL_AMD_GPU_AQL_HOST_TEMPLATE_MAX_PACKET_BYTES = 8192,
-  // Cold fixup scratch for caching reusable immutable arguments.
-  IREE_HAL_AMD_GPU_AQL_HOST_TEMPLATE_MAX_FIXUPS = 256,
   // Retirement-owned native IB capacity for direct and bounded recorded work.
   IREE_HAL_AMD_GPU_AQL_INDIRECT_COMMAND_BYTE_STRIDE = 256,
 };
 
 // CPU-owned native packet template and private data. The bytes and fixup
-// table follow in the same allocation. Packet work is bounded independently
-// of argument size. Reusable immutable arguments may instead have a fixed
-// device placement baked into the packets.
+// table follow in the same allocation. Publication prepares one native block
+// at a time. Reusable immutable arguments may instead have a fixed device
+// placement baked into the packets.
 typedef struct iree_hal_amd_gpu_aql_host_template_t {
-  // CPU workspace for the complete private copy and dense resolved values.
+  // CPU workspace for the largest independently published native block.
   iree_host_size_t preparation_byte_length;
   // Complete host packet/private-data extent. Zero-fixup templates are read
   // directly; mutable templates are prepared in publisher-owned CPU storage.
@@ -69,7 +79,7 @@ typedef struct iree_hal_amd_gpu_aql_command_program_t {
   iree_atomic_ref_count_t ref_count;
   // Allocator owning this program and its immutable block/template metadata.
   iree_allocator_t host_allocator;
-  // Native ownership for resident recordings; zero for bounded host templates.
+  // Native ownership for resident recordings; zero for host templates.
   iree_hal_amd_gpu_program_t resident;
   // Immutable indexed native blocks, owned by this program.
   iree_hal_amd_gpu_aql_program_block_t* blocks;
@@ -78,7 +88,7 @@ typedef struct iree_hal_amd_gpu_aql_command_program_t {
   // Number of complete blocks; zero is an empty recording.
   uint32_t block_count;
   // Unique inputs including instance base at zero and an optional final
-  // command-data base for bounded host preparation.
+  // command-data base for host preparation.
   uint32_t value_count;
   // Public dispatches, independent of internal materializer/fixup dispatches.
   uint32_t dispatch_count;
@@ -88,7 +98,7 @@ typedef struct iree_hal_amd_gpu_aql_command_program_t {
   iree_hal_queue_feature_flags_t required_features;
   // Native IBs need 48-bit addresses and system publication of GPU fixups.
   bool has_control;
-  // Optional bounded native template, owned instead of resident storage.
+  // Optional CPU-owned native template, owned instead of resident storage.
   iree_hal_amd_gpu_aql_host_template_t* host_template;
   // Immutable device-local arguments retained through every native reader.
   iree_hal_amd_gpu_program_constant_t constants;
@@ -128,8 +138,10 @@ typedef struct iree_hal_amd_gpu_aql_command_invocation_t {
   iree_hal_amd_gpu_aql_command_program_t* program;
   // Copied/qualified public table in submission-owned storage.
   iree_hal_amd_gpu_command_binding_t* bindings;
+  // Invocation-owned dense input values, resolved before the first host chunk.
+  uint64_t* values;
   // Exclusive unpublished resident instance, then causally reusable after final
-  // publication. NULL for a bounded host template.
+  // publication. NULL for a host template.
   iree_hal_amd_gpu_program_instance_t* instance;
   // Next unpublished block; only the publisher accesses this cursor.
   uint32_t block_ordinal;
@@ -139,9 +151,10 @@ typedef struct iree_hal_amd_gpu_aql_command_invocation_t {
   bool borrow_bindings;
 } iree_hal_amd_gpu_aql_command_invocation_t;
 
-// Captures validated table entries in binding_count slots. A failure leaves a
-// deinitializable retained prefix. The caller owns the initial suffix
-// reference.
+// Captures validated table entries in binding_count slots. Mutable host
+// templates also retain value_count uint64_t slots immediately after them.
+// A failure leaves a deinitializable retained prefix. The caller owns the
+// initial suffix reference.
 iree_status_t iree_hal_amd_gpu_aql_command_invocation_initialize(
     iree_hal_command_buffer_t* command_buffer,
     iree_hal_buffer_binding_table_t bindings, void* storage,
@@ -154,16 +167,17 @@ iree_status_t iree_hal_amd_gpu_aql_command_invocation_initialize(
 void iree_hal_amd_gpu_aql_command_invocation_deinitialize(
     iree_hal_amd_gpu_aql_command_invocation_t* invocation);
 
-// Resolves unique input values once after upload address commitment. A bounded
-// host template is patched in host_contents; its actual ABI and native commands
-// are copied to their separate mappings. Resident programs write their separate
-// dense value table. values is NULL when the resident instance needs no fixups.
-// cooperative_address comes from the current queue, including after trim.
-// stream_arguments selects the achieved native LOCAL publication protocol;
-// upload then owns a DWORD-rounded extent and every byte uses an NT store.
-// host_contents has preparation_byte_length bytes for a mutable host template
-// and is NULL for a resident program. Its caller keeps it through publication.
-// The publisher borrows zero-fixup host templates directly and omits this call.
+// Resolves unique input values once after upload address commitment. The
+// current host block is patched in host_contents; its actual ABI and native
+// commands are copied to their separate mappings. Resident programs write their
+// separate dense value table. values is NULL when the resident instance needs
+// no fixups. cooperative_address comes from the current queue, including after
+// trim. stream_arguments selects the achieved native LOCAL publication
+// protocol; upload then owns a DWORD-rounded extent and every byte uses an NT
+// store. host_contents has preparation_byte_length bytes for a mutable host
+// template and is NULL for a resident program. Its caller keeps it through
+// publication. The publisher borrows zero-fixup host templates directly and
+// omits this call.
 iree_status_t iree_hal_amd_gpu_aql_command_invocation_write(
     const iree_hal_amd_gpu_aql_command_invocation_t* invocation,
     uint32_t queue_ordinal, uint64_t cooperative_address,

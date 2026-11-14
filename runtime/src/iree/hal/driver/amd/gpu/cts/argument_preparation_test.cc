@@ -379,7 +379,10 @@ TEST_F(ArgumentPreparationTest, DirectRunsAcquireChangingHostInputs) {
 }
 
 TEST_F(ArgumentPreparationTest, ReplaysCaptureDenseBindingValuesAcrossQueues) {
-  constexpr uint32_t kDispatchCount = 32;
+  // The 128-packet ring publishes at most 64 packets per native block. Distinct
+  // bindings in every dispatch force captured values to survive interleaved
+  // chunks, including the final partial block.
+  constexpr uint32_t kDispatchCount = 129;
   constexpr uint32_t kBindingCount = kDispatchCount * 9;
   constexpr uint32_t kInvocationCount = 4;
   Ref<iree_hal_buffer_t> output;
@@ -427,9 +430,9 @@ TEST_F(ArgumentPreparationTest, ReplaysCaptureDenseBindingValuesAcrossQueues) {
   EXPECT_EQ(program->resident.pool, nullptr);
   EXPECT_EQ(program->value_count, kBindingCount + 1);
   EXPECT_GT(program->host_template->fixup_count, 256u);
-  EXPECT_GE(program->host_template->preparation_byte_length,
-            program->host_template->byte_length +
-                program->value_count * sizeof(uint64_t));
+  ASSERT_EQ(program->block_count, 3u);
+  EXPECT_LT(program->host_template->preparation_byte_length,
+            program->host_template->byte_length);
   std::array<Ref<iree_hal_semaphore_t>, kInvocationCount> done;
   for (auto& semaphore : done) {
     CreateSemaphore(semaphore.out());
