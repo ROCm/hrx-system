@@ -177,6 +177,10 @@ typedef struct loomc_cxx_import_options_t {
   const loomc_cxx_define_t* defines;
   /// Number of macro definitions.
   loomc_host_size_t define_count;
+  /// Macro names removed, in order, after the definitions.
+  const loomc_string_view_t* undefines;
+  /// Number of removed macro names.
+  loomc_host_size_t undefine_count;
   /// Qualified source function names to export. Empty exports visible concrete
   /// definitions; reached helpers remain private when roots are explicit.
   const loomc_string_view_t* roots;

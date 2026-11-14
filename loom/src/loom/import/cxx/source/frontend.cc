@@ -168,6 +168,9 @@ Frontend::Frontend(iree_string_view_t filename,
     preprocessor->defineMacro(string(options.defines[i].name),
                               string(options.defines[i].value));
   }
+  for (size_t i = 0; i < options.undefine_count; ++i) {
+    preprocessor->undefMacro(string(options.undefines[i]));
+  }
 }
 
 void Frontend::preprocess(iree_string_view_t source, bool preamble_only) {

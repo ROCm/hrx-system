@@ -123,6 +123,10 @@ typedef struct loom_cxx_import_options_t {
   const loom_cxx_define_t* defines;
   // Number of macro definitions.
   iree_host_size_t define_count;
+  // Macro names removed, in order, after the definitions.
+  const iree_string_view_t* undefines;
+  // Number of removed macro names.
+  iree_host_size_t undefine_count;
   // Qualified source function names to export. Empty exports visible concrete
   // definitions. Reachable helpers are retained as private functions.
   const iree_string_view_t* roots;

@@ -56,6 +56,7 @@ iree_status_t loom_cxx_import_options_validate(
   if ((!options->include_paths && options->include_path_count) ||
       (!options->system_include_paths && options->system_include_path_count) ||
       (!options->defines && options->define_count) ||
+      (!options->undefines && options->undefine_count) ||
       (!options->roots && options->root_count)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "nonempty import option arrays require storage");

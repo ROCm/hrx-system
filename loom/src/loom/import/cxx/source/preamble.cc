@@ -61,6 +61,10 @@ class FrontendIdentity {
       defines_.emplace_back(copy_string(options.defines[i].name),
                             copy_string(options.defines[i].value));
     }
+    undefines_.reserve(options.undefine_count);
+    for (iree_host_size_t i = 0; i < options.undefine_count; ++i) {
+      undefines_.push_back(copy_string(options.undefines[i]));
+    }
   }
 
   bool matches(const loom_cxx_import_options_t& options) const {
@@ -75,7 +79,8 @@ class FrontendIdentity {
         builtin_includes != builtin_includes_ ||
         options.include_path_count != include_paths_.size() ||
         options.system_include_path_count != system_include_paths_.size() ||
-        options.define_count != defines_.size()) {
+        options.define_count != defines_.size() ||
+        options.undefine_count != undefines_.size()) {
       return false;
     }
     for (iree_host_size_t i = 0; i < options.include_path_count; ++i) {
@@ -92,6 +97,11 @@ class FrontendIdentity {
     for (iree_host_size_t i = 0; i < options.define_count; ++i) {
       if (string_view(options.defines[i].name) != defines_[i].first ||
           string_view(options.defines[i].value) != defines_[i].second) {
+        return false;
+      }
+    }
+    for (iree_host_size_t i = 0; i < options.undefine_count; ++i) {
+      if (string_view(options.undefines[i]) != undefines_[i]) {
         return false;
       }
     }
@@ -116,6 +126,10 @@ class FrontendIdentity {
     for (const auto& [name, value] : defines_) {
       append_part(options, name);
       append_part(options, value);
+    }
+    options.push_back('|');
+    for (const auto& name : undefines_) {
+      append_part(options, name);
     }
     return {
         .serializationAbi = cxx::precompiledHeaderSerializationAbi(),
@@ -142,6 +156,8 @@ class FrontendIdentity {
   std::vector<std::string> system_include_paths_;
   // Ordered preprocessor definitions and replacement text.
   std::vector<std::pair<std::string, std::string>> defines_;
+  // Ordered macro names removed after the definitions.
+  std::vector<std::string> undefines_;
 };
 
 bool is_spliced_newline(std::string_view source, size_t newline) {
