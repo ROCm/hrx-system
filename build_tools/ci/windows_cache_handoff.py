@@ -490,11 +490,23 @@ def _emit_target_manifest(
         raise HandoffError("configured target has ambiguous executable providers")
     runfiles = _provider_runfiles(provider_metadata, execution_root)
     physical_to_logical = _physical_to_logical(runfiles)
-    executable_logical_path = _logical_path_for_physical(
-        str(executable_path),
-        execution_root=execution_root,
-        physical_to_logical=physical_to_logical,
-    )
+    executable_logical_path = provider_metadata.get("executable_logical_path")
+    if not isinstance(executable_logical_path, str):
+        raise HandoffError("configured target has no logical executable path")
+    _validate_logical_path(executable_logical_path)
+    executable_runfiles = [
+        runfile
+        for runfile in runfiles
+        if runfile.logical_path == executable_logical_path
+    ]
+    if (
+        len(executable_runfiles) != 1
+        or executable_runfiles[0].physical_path is None
+        or executable_runfiles[0].physical_path.resolve(strict=True) != executable_path
+    ):
+        raise HandoffError(
+            f"configured executable {executable_logical_path!r} does not match its runfile"
+        )
 
     argument_provider_count = provider_metadata.get("argument_provider_count")
     if argument_provider_count not in (0, 1):

@@ -144,6 +144,7 @@ class WindowsCacheHandoffTest(unittest.TestCase):
                     "compatible": True,
                     "environment": {"FIXTURE_ENV": "present"},
                     "executable": executable.relative_to(execution_root).as_posix(),
+                    "executable_logical_path": "_main/bin/test.exe",
                     "executable_provider_count": 0,
                     "inherited_environment": ["PATH"],
                     "label": "@@//example:test",
@@ -238,10 +239,17 @@ class WindowsCacheHandoffTest(unittest.TestCase):
         second_provider.update(
             {
                 "executable": second_executable.relative_to(execution_root).as_posix(),
+                "executable_logical_path": "_main/bin/second.exe",
                 "label": "@@//other:second",
                 "runfiles": [
                     {
                         "logical_path": "_main/bin/second.exe",
+                        "physical_path": second_executable.relative_to(
+                            execution_root
+                        ).as_posix(),
+                    },
+                    {
+                        "logical_path": "_main/bin/second_wrapper.exe",
                         "physical_path": second_executable.relative_to(
                             execution_root
                         ).as_posix(),
@@ -289,7 +297,7 @@ class WindowsCacheHandoffTest(unittest.TestCase):
         self.assertEqual(summary["compatible_test_count"], 2)
         self.assertEqual(summary["incompatible_test_count"], 1)
         self.assertEqual(summary["incompatible_labels"], ["//other:incompatible"])
-        self.assertEqual(summary["runfile_reference_count"], 4)
+        self.assertEqual(summary["runfile_reference_count"], 5)
         self.assertEqual(summary["unique_blob_count"], 3)
         self.assertEqual(len(_CasHandler.blobs), 3)
         self.assertTrue((output_dir / "example/BUILD.bazel").is_file())

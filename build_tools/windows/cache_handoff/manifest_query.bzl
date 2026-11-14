@@ -87,6 +87,7 @@ def format(target):
         "compatible": "IncompatiblePlatformProvider" not in all_providers,
         "environment": dict(run_environment.environment) if run_environment else {},
         "executable": selected_executable.path if selected_executable else None,
+        "executable_logical_path": _runfile_path(selected_executable) if selected_executable else None,
         "executable_provider_count": len(executable_providers),
         "inherited_environment": sorted(run_environment.inherited_environment) if run_environment else [],
         "label": str(target.label),
