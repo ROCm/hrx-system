@@ -598,6 +598,7 @@ jobs:
             command: iree-bazel-repository-integration
             host_toolchain: clang-cl
             platform_coverage: true
+            remote_cache: true
             runner: azure-windows-scale-rocm
             target_selector: gfx11-generic
           - name: Clang CL / Fastbuild / Shared Tools
