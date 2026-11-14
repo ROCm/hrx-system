@@ -97,8 +97,7 @@ iree_status_t loom_aie2p_native_prepare_sharing(
   }
   iree_arena_allocator_t* arena = context->pass->arena;
   const iree_host_size_t tile_count =
-      (iree_host_size_t)context->family->column_count *
-      context->family->row_count;
+      loom_xdna_array_physical_tile_count(context->family);
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, tile_count,
                                                  sizeof(*context->deliveries),
                                                  (void**)&context->deliveries));
@@ -172,8 +171,7 @@ void loom_aie2p_native_commit_sharing(loom_aie2p_native_context_t* context) {
     return;
   }
   const iree_host_size_t tile_count =
-      (iree_host_size_t)context->family->column_count *
-      context->family->row_count;
+      loom_xdna_array_physical_tile_count(context->family);
   // Control selection reserves this payload identity across every shared
   // domain; the remaining IDs name distinct control or credit destinations.
   const uint8_t payload_packet = LOOM_AIE2P_NATIVE_DELIVERY_PACKET_ID;

@@ -723,8 +723,8 @@ static iree_status_t loom_aie2p_configuration_phase_emit(
           continue;
         }
         loom_aie2p_configuration_memory_t* memory =
-            &emitter->memories[coordinate.column * emitter->family->row_count +
-                               coordinate.row];
+            &emitter->memories[loom_xdna_array_physical_tile_index(
+                emitter->family, coordinate)];
         if (memory->count == memory->capacity) {
           IREE_RETURN_IF_ERROR(iree_arena_grow_array(
               arena, memory->count, memory->count + 1, sizeof(*memory->ranges),
@@ -820,7 +820,8 @@ static iree_status_t loom_aie2p_configuration_phase_emit(
            ++column) {
         for (uint16_t row = 0; row < emitter->family->row_count; ++row) {
           const loom_aie2p_configuration_memory_t* memory =
-              &emitter->memories[column * emitter->family->row_count + row];
+              &emitter->memories[loom_xdna_array_physical_tile_index(
+                  emitter->family, (loom_xdna_tile_coordinate_t){column, row})];
           IREE_RETURN_IF_ERROR(loom_aie2p_configuration_report_reservations(
               emitter->report, (loom_xdna_tile_coordinate_t){column, row},
               memory->ranges, memory->count));
@@ -1028,8 +1029,7 @@ iree_status_t loom_aie2p_configuration_plan_materialize(
         .contribution = worker,
     };
     const iree_host_size_t memory_index =
-        load->coordinate.column * plan->family->row_count +
-        load->coordinate.row;
+        loom_xdna_array_physical_tile_index(plan->family, load->coordinate);
     IREE_RETURN_IF_ERROR(loom_aie2p_configuration_link(
         plan, load->op, &plan->memories[memory_index], &tiles[i]));
     if (plan->error_count) {

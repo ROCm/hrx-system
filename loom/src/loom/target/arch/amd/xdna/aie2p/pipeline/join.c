@@ -67,7 +67,7 @@ iree_status_t loom_aie2p_join_plan_build(const loom_xdna_array_family_t* family,
   *out_plan = (loom_aie2p_join_plan_t){0};
   *out_valid = false;
   const iree_host_size_t tile_count =
-      (iree_host_size_t)family->column_count * family->row_count;
+      loom_xdna_array_physical_tile_count(family);
   iree_host_size_t node_count = 0, root = IREE_HOST_SIZE_MAX;
   for (iree_host_size_t i = 0; i < tile_count; ++i) {
     if (participants[i]) {

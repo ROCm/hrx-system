@@ -45,7 +45,9 @@ static loom_aie2p_native_tile_t* loom_aie2p_native_find_shim_queue(
         continue;
       }
       loom_aie2p_native_tile_t* tile =
-          &context->tiles[column * context->family->row_count];
+          &context->tiles[loom_xdna_array_physical_tile_index(
+              context->family,
+              (loom_xdna_tile_coordinate_t){(uint16_t)column, 0})];
       const uint8_t count = receive ? tile->s2mm_count : tile->mm2s_count;
       if (count >= tile->facts->dma.channel_count_per_direction) {
         continue;
@@ -177,8 +179,7 @@ iree_status_t loom_aie2p_native_assign_dma_queues(
     }
   }
   const iree_host_size_t tile_count =
-      (iree_host_size_t)context->family->column_count *
-      context->family->row_count;
+      loom_xdna_array_physical_tile_count(context->family);
   const loom_pipeline_lifetime_extent_t* extents;
   IREE_RETURN_IF_ERROR(
       loom_pipeline_lifetime_layout(lifetimes, requests, count, tile_count * 2,
@@ -214,7 +215,8 @@ iree_status_t loom_aie2p_native_assign_dma_queues(
     loom_aie2p_native_shim_queue_t* next = overflow;
     for (uint16_t column = 0; column < context->family->column_count;
          ++column) {
-      const iree_host_size_t tile_index = column * context->family->row_count;
+      const iree_host_size_t tile_index = loom_xdna_array_physical_tile_index(
+          context->family, (loom_xdna_tile_coordinate_t){column, 0});
       const uint8_t capacity =
           context->tiles[tile_index].facts->dma.channel_count_per_direction;
       for (unsigned direction = 0; direction < 2; ++direction) {
@@ -263,7 +265,8 @@ iree_status_t loom_aie2p_native_assign_dma_queues(
             ->count);
     for (uint16_t column = 0; column < context->family->column_count;
          ++column) {
-      const iree_host_size_t tile_index = column * context->family->row_count;
+      const iree_host_size_t tile_index = loom_xdna_array_physical_tile_index(
+          context->family, (loom_xdna_tile_coordinate_t){column, 0});
       const uint8_t capacity =
           context->tiles[tile_index].facts->dma.channel_count_per_direction;
       for (unsigned direction = 0; direction < 2; ++direction) {

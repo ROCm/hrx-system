@@ -6,6 +6,7 @@
 
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/connectivity.h"
 
+#include "iree/base/checked_math.h"
 #include "iree/base/internal/math.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/native.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/payload.h"
@@ -61,9 +62,8 @@ struct loom_aie2p_native_connectivity_t {
 static loom_aie2p_native_connectivity_tile_t* loom_aie2p_connectivity_tile(
     loom_aie2p_native_connectivity_t* connectivity,
     loom_xdna_tile_coordinate_t coordinate) {
-  return &connectivity
-              ->tiles[coordinate.column * connectivity->family->row_count +
-                      coordinate.row];
+  return &connectivity->tiles[loom_xdna_array_physical_tile_index(
+      connectivity->family, coordinate)];
 }
 
 iree_status_t loom_aie2p_native_connectivity_allocate(
@@ -76,16 +76,23 @@ iree_status_t loom_aie2p_native_connectivity_allocate(
   IREE_RETURN_IF_ERROR(
       iree_arena_allocate(arena, sizeof(*connectivity), (void**)&connectivity));
   *connectivity = (loom_aie2p_native_connectivity_t){
-      .family = family, .tile_count = family->column_count * family->row_count};
+      .family = family,
+      .tile_count = loom_xdna_array_physical_tile_count(family)};
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       arena, connectivity->tile_count, sizeof(*connectivity->tiles),
       (void**)&connectivity->tiles));
   memset(connectivity->tiles, 0,
          connectivity->tile_count * sizeof(*connectivity->tiles));
+  iree_host_size_t arrival_capacity = 0;
+  if (!iree_host_size_checked_mul(connectivity->tile_count,
+                                  LOOM_AIE2P_CONNECTIVITY_ARRIVALS_PER_TILE,
+                                  &arrival_capacity)) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "connectivity arrival capacity overflow");
+  }
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      arena,
-      connectivity->tile_count * LOOM_AIE2P_CONNECTIVITY_ARRIVALS_PER_TILE,
-      sizeof(*connectivity->arrivals), (void**)&connectivity->arrivals));
+      arena, arrival_capacity, sizeof(*connectivity->arrivals),
+      (void**)&connectivity->arrivals));
   for (uint16_t column = 0; column < family->column_count; ++column) {
     for (uint16_t row = 0; row < family->row_count; ++row) {
       const loom_xdna_tile_coordinate_t coordinate = {column, row};
@@ -451,7 +458,12 @@ static iree_status_t loom_aie2p_native_connections_verify_impl(
   }
   // Group retained control requests by physical sender and packet identity.
   // Destination membership comes from request ownership, never route edges.
-  const iree_host_size_t group_count = connectivity->tile_count * 2 * 32;
+  iree_host_size_t group_count = 0;
+  if (!iree_host_size_checked_mul(connectivity->tile_count, 2 * 32,
+                                  &group_count)) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "connectivity control group capacity overflow");
+  }
   iree_host_size_t* first;
   iree_host_size_t* next;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
@@ -462,9 +474,8 @@ static iree_status_t loom_aie2p_native_connections_verify_impl(
   for (iree_host_size_t i = 0; i < context->control_connection_count; ++i) {
     const loom_aie2p_native_control_connection_t* request =
         &context->control_connections[i];
-    const iree_host_size_t tile =
-        request->source.coordinate.column * context->family->row_count +
-        request->source.coordinate.row;
+    const iree_host_size_t tile = loom_xdna_array_physical_tile_index(
+        context->family, request->source.coordinate);
     const iree_host_size_t group =
         (tile * 2 +
          (request->source.port == LOOM_XDNA_STREAM_PORT_TILE_CONTROL)) *

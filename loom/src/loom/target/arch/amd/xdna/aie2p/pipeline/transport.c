@@ -79,7 +79,10 @@ bool loom_aie2p_native_select_ingress_descriptor(
     uint32_t repetitions, uint32_t period, loom_aie2p_native_worker_t* worker) {
   const loom_xdna_dma_facts_t* dma =
       &context
-           ->tiles[worker->tile->coordinate.column * context->family->row_count]
+           ->tiles[loom_xdna_array_physical_tile_index(
+               context->family,
+               (loom_xdna_tile_coordinate_t){worker->tile->coordinate.column,
+                                             0})]
            .facts->dma;
   loom_storage_geometry_t record;
   if (!loom_storage_geometry_query(&source->facts.context, context->code.module,
@@ -120,8 +123,9 @@ static loom_aie2p_native_delivery_t* loom_aie2p_native_route_delivery(
                                             LOOM_XDNA_TILE_KIND_MEMORY)
                 ->first_row
           : destination.row;
-  return context->deliveries[destination.column * context->family->row_count +
-                             sharing_row];
+  return context->deliveries[loom_xdna_array_physical_tile_index(
+      context->family,
+      (loom_xdna_tile_coordinate_t){destination.column, sharing_row})];
 }
 
 bool loom_aie2p_native_packet_route(loom_aie2p_native_context_t* context,
@@ -140,7 +144,7 @@ bool loom_aie2p_native_packet_route(loom_aie2p_native_context_t* context,
   const iree_host_size_t first = context->routing.route_count;
   const uint32_t index = (*next_source)++;
   const iree_host_size_t tile =
-      source.column * context->family->row_count + source.row;
+      loom_xdna_array_physical_tile_index(context->family, source);
   const uint32_t source_index =
       tile * 2 + (source_port == LOOM_XDNA_STREAM_PORT_TILE_CONTROL);
   loom_aie2p_native_control_source_t* control =
@@ -148,8 +152,7 @@ bool loom_aie2p_native_packet_route(loom_aie2p_native_context_t* context,
   const uint32_t destination_index =
       destination_port == LOOM_XDNA_STREAM_PORT_CORE ||
               destination_port == LOOM_XDNA_STREAM_PORT_TILE_CONTROL
-          ? (destination.column * context->family->row_count +
-             destination.row) *
+          ? loom_xdna_array_physical_tile_index(context->family, destination) *
                     2 +
                 (destination_port == LOOM_XDNA_STREAM_PORT_TILE_CONTROL)
           : UINT32_MAX;
@@ -230,8 +233,7 @@ iree_status_t loom_aie2p_native_select_control_route(
       &context->workers[context->execution
                             .workers[context->core_engines[worker_index]]];
   const iree_host_size_t tile_count =
-      (iree_host_size_t)context->family->column_count *
-      context->family->row_count;
+      loom_xdna_array_physical_tile_count(context->family);
   if (!owner->control_packets) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate(
         context->pass->arena, tile_count * 2, (void**)&owner->control_packets));
@@ -525,8 +527,7 @@ static iree_status_t loom_aie2p_native_form_worker_transfers(
   iree_arena_allocator_t* arena = context->pass->arena;
   loom_module_t* module = context->code.module;
   const iree_host_size_t tile_count =
-      (iree_host_size_t)context->family->column_count *
-      context->family->row_count;
+      loom_xdna_array_physical_tile_count(context->family);
   const loom_block_t* entry =
       loom_region_entry_block(loom_func_like_body(realization->function));
   const loom_pipeline_worker_t* source = &realization->workers[i];
@@ -1126,8 +1127,7 @@ iree_status_t loom_aie2p_native_select_transfers(
                                                  sizeof(*context->routes),
                                                  (void**)&context->routes));
   const iree_host_size_t control_source_count =
-      (iree_host_size_t)context->family->column_count *
-      context->family->row_count * 2;
+      loom_xdna_array_physical_tile_count(context->family) * 2;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       arena, control_source_count, sizeof(*context->control_sources),
       (void**)&context->control_sources));
@@ -1315,7 +1315,7 @@ iree_status_t loom_aie2p_native_select_transfers(
   }
   for (iree_host_size_t i = 0;
        context->deliveries && iree_status_is_ok(status) && valid &&
-       i < context->family->column_count * context->family->row_count;
+       i < loom_xdna_array_physical_tile_count(context->family);
        ++i) {
     loom_aie2p_native_delivery_t* delivery = context->deliveries[i];
     if (!delivery || !delivery->sharing.used) {

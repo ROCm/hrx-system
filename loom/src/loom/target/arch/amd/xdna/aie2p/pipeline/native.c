@@ -34,7 +34,7 @@ static iree_status_t loom_aie2p_native_inventory(
     loom_aie2p_native_context_t* context) {
   const loom_xdna_array_family_t* family = context->family;
   const iree_host_size_t tile_count =
-      (iree_host_size_t)family->column_count * family->row_count;
+      loom_xdna_array_physical_tile_count(family);
   iree_arena_allocator_t* arena = context->pass->arena;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       arena, tile_count, sizeof(*context->tiles), (void**)&context->tiles));
@@ -55,7 +55,8 @@ static iree_status_t loom_aie2p_native_inventory(
   for (uint16_t column = 0; column < family->column_count; ++column) {
     for (uint16_t row = 0; row < family->row_count; ++row) {
       loom_aie2p_native_tile_t* tile =
-          &context->tiles[column * family->row_count + row];
+          &context->tiles[loom_xdna_array_physical_tile_index(
+              family, (loom_xdna_tile_coordinate_t){column, row})];
       *tile = (loom_aie2p_native_tile_t){.coordinate = {column, row},
                                          .pool_index = UINT32_MAX};
       tile->facts = loom_xdna_array_tile_facts(family, tile->coordinate);
@@ -500,7 +501,10 @@ static bool loom_aie2p_native_can_repeat(
       &context->pool_tiles[channel->pool_index]->facts->dma;
   const loom_xdna_dma_facts_t* shim_dma =
       &context
-           ->tiles[worker->tile->coordinate.column * context->family->row_count]
+           ->tiles[loom_xdna_array_physical_tile_index(
+               context->family,
+               (loom_xdna_tile_coordinate_t){worker->tile->coordinate.column,
+                                             0})]
            .facts->dma;
   if (channel->replay.record_count &&
       ((uint64_t)request->transferred_byte_count !=
@@ -574,9 +578,11 @@ static iree_status_t loom_aie2p_native_select(
           context, source->source->declaration,
           IREE_SV("a single placed compute tile per strand"));
     }
+    const loom_xdna_tile_coordinate_t coordinate = {
+        (uint16_t)source->axes[0].origin, (uint16_t)source->axes[1].origin};
     loom_aie2p_native_tile_t* tile =
-        &context->tiles[source->axes[0].origin * context->family->row_count +
-                        source->axes[1].origin];
+        &context->tiles[loom_xdna_array_physical_tile_index(context->family,
+                                                            coordinate)];
     if (tile->facts->kind != LOOM_XDNA_TILE_KIND_COMPUTE) {
       return loom_aie2p_native_reject(
           context, source->source->declaration,
@@ -792,8 +798,7 @@ static iree_status_t loom_aie2p_native_select(
   loom_pipeline_execution_conflict_t conflict;
   IREE_RETURN_IF_ERROR(loom_pipeline_execution_build(
       &realization->invocations, core_engines,
-      (iree_host_size_t)context->family->column_count *
-          context->family->row_count,
+      loom_xdna_array_physical_tile_count(context->family),
       context->pass->arena, &context->execution, &conflict));
   if (conflict.second_worker != IREE_HOST_SIZE_MAX) {
     return loom_aie2p_native_reject(

@@ -111,8 +111,7 @@ static iree_status_t loom_aie2p_native_switch_initialize(
   const uint32_t slave_count =
       word_counts[LOOM_AIE2P_NATIVE_SWITCH_BANK_SLAVES];
   const iree_host_size_t tile_index =
-      tile->coordinate.column * context->family->row_count +
-      tile->coordinate.row;
+      loom_xdna_array_physical_tile_index(context->family, tile->coordinate);
   const iree_host_size_t group_capacity = iree_min(
       context->routing.tile_route_counts[tile_index], slave_count * 32);
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
@@ -428,8 +427,7 @@ iree_status_t loom_aie2p_native_switches_build(
     loom_aie2p_native_context_t* context, const loom_op_t* entry,
     bool* out_valid) {
   const iree_host_size_t tile_count =
-      (iree_host_size_t)context->family->column_count *
-      context->family->row_count;
+      loom_xdna_array_physical_tile_count(context->family);
   loom_aie2p_native_switch_admission_t* switches;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       context->pass->arena, tile_count, sizeof(*switches), (void**)&switches));
@@ -442,8 +440,7 @@ iree_status_t loom_aie2p_native_switches_build(
       continue;
     }
     const iree_host_size_t tile_index =
-        edge->coordinate.column * context->family->row_count +
-        edge->coordinate.row;
+        loom_xdna_array_physical_tile_index(context->family, edge->coordinate);
     const loom_aie2p_native_tile_t* tile = &context->tiles[tile_index];
     const loom_xdna_tile_kind_t kind = tile->facts->kind;
     loom_aie2p_native_switch_admission_t* state = &switches[tile_index];

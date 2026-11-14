@@ -10,6 +10,19 @@
 
 namespace {
 
+TEST(XdnaArrayFactsTest, FlattensFullWidthPhysicalGeometry) {
+  loom_xdna_array_family_t family = {
+      .column_count = UINT16_MAX,
+      .row_count = UINT16_MAX,
+  };
+
+  EXPECT_EQ(loom_xdna_array_physical_tile_count(&family),
+            (iree_host_size_t)UINT32_C(0xFFFE0001));
+  EXPECT_EQ(loom_xdna_array_physical_tile_index(
+                &family, {UINT16_MAX - 1, UINT16_MAX - 1}),
+            (iree_host_size_t)UINT32_C(0xFFFE0000));
+}
+
 TEST(XdnaArrayFactsTest, ExposesCompleteNpu2Topology) {
   const loom_xdna_array_family_t* family = loom_xdna_npu2_array_family();
   EXPECT_STREQ(family->key, "amd.xdna.npu2");
