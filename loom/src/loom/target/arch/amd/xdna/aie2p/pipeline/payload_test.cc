@@ -140,18 +140,18 @@ TEST_F(PayloadTest, SourceOwnsPrefixesIndependentlyOfRouteLabels) {
   loom_aie2p_native_route_t routes[16] = {};
   context_.routes = routes;
   uint32_t next_source = 1000;
-  loom_aie2p_array_route_node_t* root = nullptr;
+  iree_host_size_t root = 0;
   for (size_t i = 0; i < 2; ++i) {
     bool valid = false;
     IREE_ASSERT_OK(loom_aie2p_native_route_payload(
         &context_, paths_[i].payload, nullptr, &next_source, &valid));
     ASSERT_TRUE(valid);
     EXPECT_EQ(next_source, 1001 + i);
-    EXPECT_NE(paths_[i].payload->source->tree.root, nullptr);
+    EXPECT_NE(paths_[i].payload->source->tree.root_index, 0u);
     if (i == 0) {
-      root = paths_[i].payload->source->tree.root;
+      root = paths_[i].payload->source->tree.root_index;
     }
-    EXPECT_EQ(paths_[i].payload->source->tree.root, root);
+    EXPECT_EQ(paths_[i].payload->source->tree.root_index, root);
   }
   const auto& terminal = routes[context_.routing.route_count - 1];
   EXPECT_EQ(terminal.edge->coordinate.row, 3);

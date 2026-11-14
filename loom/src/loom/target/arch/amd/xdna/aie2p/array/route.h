@@ -20,8 +20,9 @@ extern "C" {
 // Prefix ownership belongs to one physical sender, independently of destination
 // route labels. Zero-initialize before use and retain through all its branches.
 typedef struct loom_aie2p_array_route_tree_t {
-  // First physical arrival, owned by the routing builder's stable node store.
-  struct loom_aie2p_array_route_node_t* root;
+  // One-based first arrival in the builder's prefix inventory; zero is empty.
+  // Identity survives relocation of both the source handle and node storage.
+  iree_host_size_t root_index;
 } loom_aie2p_array_route_tree_t;
 
 // A unicast path whose producer admits each complete payload only after its
@@ -29,6 +30,8 @@ typedef struct loom_aie2p_array_route_tree_t {
 // its links without waiting behind a payload dependent on future computation.
 // The owner frames payloads with IDs disjoint from the sharing control stream.
 typedef struct loom_aie2p_array_route_sharing_t {
+  // Builder-local nonzero identity shared by this contract's borrowed lanes.
+  iree_host_size_t domain;
   // Final payload receiver; control can continue beyond this tile.
   loom_xdna_tile_coordinate_t destination;
   // Borrowable payload and control-continuation lane masks in
@@ -43,6 +46,8 @@ typedef struct loom_aie2p_array_route_sharing_t {
 // northbound source prefixes remain private to preserve other packet classes.
 // The caller proves exclusion and assigns identities before routing any member.
 typedef struct loom_aie2p_array_route_multicast_t {
+  // Builder-local nonzero identity of this serialized packet domain.
+  iree_host_size_t domain;
   // Shared lane masks in north/south/west/east order, indexed by tile. The
   // northbound mask remains empty: private classes use those source prefixes.
   uint32_t* links;
@@ -56,6 +61,8 @@ typedef struct loom_aie2p_array_route_builder_t {
   loom_aie2p_array_route_plan_t* routes;
   // Number of populated route records.
   iree_host_size_t route_count;
+  // Number of sharing identities assigned independently of contract storage.
+  iree_host_size_t domain_count;
   // Populated route count per column-major tile, bounding switch admission
   // storage without rescanning the complete array's routes.
   iree_host_size_t* tile_route_counts;
@@ -140,8 +147,7 @@ bool loom_aie2p_array_route_stream(loom_aie2p_array_route_builder_t* builder,
 
 // Initializes a shared packet domain without reserving any physical lanes.
 iree_status_t loom_aie2p_array_route_multicast_initialize(
-    const loom_aie2p_array_route_builder_t* builder,
-    iree_arena_allocator_t* arena,
+    loom_aie2p_array_route_builder_t* builder, iree_arena_allocator_t* arena,
     loom_aie2p_array_route_multicast_t* out_multicast);
 
 // Routes one SRAM-to-core branch in a serialized multicast domain. Cross-column
@@ -159,7 +165,7 @@ bool loom_aie2p_array_route_multicast(
 // The exact edge interval comes from its route construction, not a search.
 // Admission and packet framing remain the caller's responsibility.
 iree_status_t loom_aie2p_array_route_sharing_initialize(
-    const loom_aie2p_array_route_builder_t* builder, iree_host_size_t first,
+    loom_aie2p_array_route_builder_t* builder, iree_host_size_t first,
     iree_host_size_t count, loom_xdna_tile_coordinate_t destination,
     iree_arena_allocator_t* arena,
     loom_aie2p_array_route_sharing_t* out_sharing);

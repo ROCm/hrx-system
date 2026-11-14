@@ -156,7 +156,7 @@ bool loom_aie2p_native_packet_route(loom_aie2p_native_context_t* context,
                     2 +
                 (destination_port == LOOM_XDNA_STREAM_PORT_TILE_CONTROL)
           : UINT32_MAX;
-  if (!control->tree.root) {
+  if (!control->tree.root_index) {
     control->destination = destination_index;
   } else if (control->destination != destination_index) {
     control->destination = UINT32_MAX;
