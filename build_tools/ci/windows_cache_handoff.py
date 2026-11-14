@@ -51,6 +51,12 @@ class BlobSource:
     size: int
 
 
+@dataclass(frozen=True)
+class ConfiguredRule:
+    rule_class: str
+    attributes: dict[str, dict[str, Any]]
+
+
 class CasClient:
     """Streams immutable blobs to and from bazel-remote's HTTP CAS surface."""
 
@@ -256,7 +262,7 @@ def _load_json_object(path: Path) -> dict[str, Any]:
     return value
 
 
-def _configured_rules(path: Path) -> dict[str, dict[str, dict[str, Any]]]:
+def _configured_rules(path: Path) -> dict[str, ConfiguredRule]:
     payload = _load_json_object(path)
     results = payload.get("results")
     if not isinstance(results, list) or not results:
@@ -269,17 +275,26 @@ def _configured_rules(path: Path) -> dict[str, dict[str, dict[str, Any]]]:
         if not isinstance(rule, dict):
             raise HandoffError(f"{path} does not describe configured rules")
         label = rule.get("name")
+        rule_class = rule.get("ruleClass")
         attributes = rule.get("attribute")
-        if not isinstance(label, str) or not isinstance(attributes, list):
+        if (
+            not isinstance(label, str)
+            or not isinstance(rule_class, str)
+            or not isinstance(attributes, list)
+        ):
             raise HandoffError(f"{path} has malformed configured rule metadata")
         label = _normalize_main_repository_label(label)
         if label in configured_rules:
             raise HandoffError(f"{path} contains duplicate configured target {label}")
-        configured_rules[label] = {
-            attribute["name"]: attribute
-            for attribute in attributes
-            if isinstance(attribute, dict) and isinstance(attribute.get("name"), str)
-        }
+        configured_rules[label] = ConfiguredRule(
+            rule_class=rule_class,
+            attributes={
+                attribute["name"]: attribute
+                for attribute in attributes
+                if isinstance(attribute, dict)
+                and isinstance(attribute.get("name"), str)
+            },
+        )
     return configured_rules
 
 
@@ -757,17 +772,39 @@ def emit_handoff_packages(
     build_rules: dict[str, list[dict[str, Any]]] = {}
     incompatible_labels = []
     non_native_labels = []
+    host_environment_labels = []
     test_summaries = []
     runfile_reference_count = 0
     output_dir.mkdir(parents=True, exist_ok=True)
     _emit_standalone_module(output_dir)
     for label in sorted(configured_rules):
+        configured_rule = configured_rules[label]
         provider_metadata = providers[label]
         compatible = provider_metadata.get("compatible")
         if not isinstance(compatible, bool):
             raise HandoffError(f"provider metadata for {label} has no compatibility")
         if not compatible:
             incompatible_labels.append(label)
+            continue
+        # A cross-compiled sh_test .exe is Bazel's Bash launcher, while any
+        # tools in its runfiles belong to the Linux execution configuration.
+        # Only rules whose configured executable is the Windows product belong
+        # in this native handoff.
+        if configured_rule.rule_class not in ("cc_test", "_iree_executable_test"):
+            non_native_labels.append(label)
+            continue
+        inherited_environment = provider_metadata.get("inherited_environment")
+        if not isinstance(inherited_environment, list) or any(
+            not isinstance(value, str) for value in inherited_environment
+        ):
+            raise HandoffError(
+                f"provider metadata for {label} has malformed inherited environment"
+            )
+        # An inherited variable names a consumer-host prerequisite outside the
+        # digest closure. Keep such tests in their owning host lane until that
+        # prerequisite has an explicit transferable representation.
+        if inherited_environment:
+            host_environment_labels.append(label)
             continue
         executable_value = provider_metadata.get("executable")
         if not isinstance(
@@ -779,7 +816,7 @@ def emit_handoff_packages(
         try:
             manifest, build_attributes = _emit_target_manifest(
                 label=label,
-                attributes=configured_rules[label],
+                attributes=configured_rule.attributes,
                 provider_metadata=provider_metadata,
                 execution_root=execution_root,
                 cas_url=cas.base_url,
@@ -840,6 +877,8 @@ def emit_handoff_packages(
         "incompatible_labels": incompatible_labels,
         "non_native_test_count": len(non_native_labels),
         "non_native_labels": non_native_labels,
+        "host_environment_test_count": len(host_environment_labels),
+        "host_environment_labels": host_environment_labels,
         "runfile_reference_count": runfile_reference_count,
         "unique_blob_count": len(blobs),
         "unique_blob_bytes": sum(source.size for source in blobs.values()),

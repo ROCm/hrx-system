@@ -113,6 +113,7 @@ class WindowsCacheHandoffTest(unittest.TestCase):
                             "target": {
                                 "rule": {
                                     "name": "//example:test",
+                                    "ruleClass": "cc_test",
                                     "attribute": [
                                         {
                                             "name": "args",
@@ -162,7 +163,7 @@ class WindowsCacheHandoffTest(unittest.TestCase):
                     "executable": executable.relative_to(execution_root).as_posix(),
                     "executable_logical_path": "_main/bin/test.exe",
                     "executable_provider_count": 0,
-                    "inherited_environment": ["PATH"],
+                    "inherited_environment": [],
                     "label": "@@//example:test",
                     "marked_arguments": [],
                     "marked_environment": {},
@@ -203,7 +204,7 @@ class WindowsCacheHandoffTest(unittest.TestCase):
         self.assertEqual(manifest["executable"], "_main/bin/test.exe")
         self.assertEqual(manifest["test"]["arguments"], ["--plain"])
         self.assertEqual(manifest["test"]["environment"], {"FIXTURE_ENV": "present"})
-        self.assertEqual(manifest["test"]["inherited_environment"], ["PATH"])
+        self.assertEqual(manifest["test"]["inherited_environment"], [])
         self.assertEqual(len(_CasHandler.blobs), 2)
         self.assertCountEqual(
             _CasHandler.heads,
@@ -463,8 +464,20 @@ class WindowsCacheHandoffTest(unittest.TestCase):
         incompatible_result["target"]["rule"]["name"] = "//other:incompatible"
         non_native_result = copy.deepcopy(first_result)
         non_native_result["target"]["rule"]["name"] = "//other:script"
+        shell_result = copy.deepcopy(first_result)
+        shell_result["target"]["rule"].update(
+            {"name": "//other:shell", "ruleClass": "sh_test"}
+        )
+        host_environment_result = copy.deepcopy(first_result)
+        host_environment_result["target"]["rule"]["name"] = "//other:host_env"
         target_payload["results"].extend(
-            [second_result, incompatible_result, non_native_result]
+            [
+                second_result,
+                incompatible_result,
+                non_native_result,
+                shell_result,
+                host_environment_result,
+            ]
         )
         target_metadata.write_text(json.dumps(target_payload), encoding="utf-8")
 
@@ -514,6 +527,15 @@ class WindowsCacheHandoffTest(unittest.TestCase):
                 "runfiles": [],
             }
         )
+        shell_provider = copy.deepcopy(first_provider)
+        shell_provider["label"] = "@@//other:shell"
+        host_environment_provider = copy.deepcopy(first_provider)
+        host_environment_provider.update(
+            {
+                "inherited_environment": ["PATH"],
+                "label": "@@//other:host_env",
+            }
+        )
         provider_metadata.write_text(
             "\n".join(
                 json.dumps(value)
@@ -522,6 +544,8 @@ class WindowsCacheHandoffTest(unittest.TestCase):
                     second_provider,
                     incompatible_provider,
                     non_native_provider,
+                    shell_provider,
+                    host_environment_provider,
                 )
             )
             + "\n",
@@ -537,12 +561,16 @@ class WindowsCacheHandoffTest(unittest.TestCase):
             output_dir=output_dir,
         )
 
-        self.assertEqual(summary["selected_test_count"], 4)
+        self.assertEqual(summary["selected_test_count"], 6)
         self.assertEqual(summary["compatible_test_count"], 2)
         self.assertEqual(summary["incompatible_test_count"], 1)
         self.assertEqual(summary["incompatible_labels"], ["//other:incompatible"])
-        self.assertEqual(summary["non_native_test_count"], 1)
-        self.assertEqual(summary["non_native_labels"], ["//other:script"])
+        self.assertEqual(summary["non_native_test_count"], 2)
+        self.assertEqual(
+            summary["non_native_labels"], ["//other:script", "//other:shell"]
+        )
+        self.assertEqual(summary["host_environment_test_count"], 1)
+        self.assertEqual(summary["host_environment_labels"], ["//other:host_env"])
         self.assertEqual(summary["runfile_reference_count"], 5)
         self.assertEqual(summary["unique_blob_count"], 3)
         self.assertEqual(len(_CasHandler.blobs), 3)
@@ -552,6 +580,8 @@ class WindowsCacheHandoffTest(unittest.TestCase):
         self.assertIn("name = 'second'", other_build)
         self.assertNotIn("incompatible", other_build)
         self.assertNotIn("script", other_build)
+        self.assertNotIn("shell", other_build)
+        self.assertNotIn("host_env", other_build)
 
     def test_run_forwards_bazel_test_arguments(self):
         execution_root, target_metadata, provider_metadata = self._write_fixture()

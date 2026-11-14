@@ -1088,9 +1088,10 @@ jobs:
           cat > "$selection_query" <<'EOF'
           let repository_targets = //... in
           let all_tests = tests($repository_targets) intersect $repository_targets in
-            (($all_tests except attr(tags, '(^|, |\[)manual(,|\]|$)', $all_tests))
-              except kind('py_.* rule', $all_tests))
-            except attr(tags, 'iree-run-requirement=', $all_tests)
+          let native_tests = kind('(cc_test|_iree_executable_test) rule', $all_tests) in
+            ($native_tests
+              except attr(tags, '(^|, |\[)manual(,|\]|$)', $native_tests))
+            except attr(tags, 'iree-run-requirement=', $native_tests)
           EOF
           python3 build_tools/devtools/ci.py \
             iree-bazel-repository-build \
