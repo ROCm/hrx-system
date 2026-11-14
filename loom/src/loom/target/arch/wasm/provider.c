@@ -319,9 +319,13 @@ static iree_status_t loom_wasm_legalize_vector_insert(
     return iree_ok_status();
   }
   bool rewritten = false;
-  IREE_RETURN_IF_ERROR(loom_vector_packet_legalize_insert(
-      context, op, context->vector_packet_policy,
-      /*insert_materializer=*/NULL, &rewritten));
+  IREE_RETURN_IF_ERROR(
+      loom_vector_static_shape_rewrite_op(context, op, &rewritten));
+  if (!rewritten) {
+    IREE_RETURN_IF_ERROR(loom_vector_packet_legalize_insert(
+        context, op, context->vector_packet_policy,
+        /*insert_materializer=*/NULL, &rewritten));
+  }
   if (rewritten) {
     out_result->action = LOOM_TARGET_LEGALIZER_ACTION_REWRITTEN;
   }

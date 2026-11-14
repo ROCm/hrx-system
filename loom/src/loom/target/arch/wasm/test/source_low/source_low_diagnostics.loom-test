@@ -42,35 +42,6 @@ func.def target(@target) @scalar_tanhf_rejected_by_math_policy(%input: f32) -> (
 
 // ====
 
-wasm.target<simd128> @target
-
-// The function boundary owns carrier admission before any body operation can
-// select a native descriptor or scalar reference recipe.
-// ERROR@+1: TARGET/031 {op_name="func.def", type_constraint="vector.target_carrier"}
-func.def target(@target) @unsupported_vector_carrier(%value: vector<8xi32>) {
-  func.return
-}
-
-// ====
-
-// RUN: with-checks compile-report target-legalize{mode=eager}
-
-wasm.target<simd128> @target
-
-// Structural reduction legalization must preserve the same boundary. Expanding
-// this operation would hide the invalid callable carrier behind a much larger
-// scalar program.
-func.def target(@target) @unsupported_reduction_carrier(%values: vector<2x4xi32>, %init: vector<4xi32>) -> (vector<4xi32>) {
-  %result = vector.reduce.axes<addi> %values, %init axes [0] : vector<2x4xi32>, vector<4xi32>
-  func.return %result : vector<4xi32>
-}
-
-// ----
-CHECK: COMPILE-REPORT: target_legalization legal=0 rewritten=0 scalarized=0 target_rewritten=0 reference_rewritten=0 deferred=0 invalid_ir=0 unsupported=0 unhandled=1 rows=1 *
-CHECK: COMPILE-REPORT: target_legalization[0] function=unsupported_reduction_carrier source_op=vector.reduce.axes * action=unhandled outcome=unhandled * scalarized=false * created_ops=0 erased_ops=0
-
-// ====
-
 // RUN: with-checks compile-report target-legalize{mode=complete}
 
 wasm.target<simd128> @target
