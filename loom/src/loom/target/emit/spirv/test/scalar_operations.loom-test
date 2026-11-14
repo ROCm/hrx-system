@@ -139,12 +139,10 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @spirv_
 // ====
 
 
-// RUN: emit spirv-dis validate
+// RUN: emit spirv-dis target=spirv:vulkan1.3+bda+hal features=INT8,INT16,FLOAT16,STORAGE_BUFFER_8BIT_ACCESS,STORAGE_BUFFER_16BIT_ACCESS,FLOAT16_DENORM_PRESERVE,FLOAT16_ROUNDING_RTE,FLOAT16_SIGNED_ZERO_INF_NAN_PRESERVE,FLOAT32_SIGNED_ZERO_INF_NAN_PRESERVE validate
 // REQUIRES: spirv-dis, spirv-val
 
-spirv.target<vulkan1_3> @hal_target {abi = hal_kernel, contract_feature_bits = 463856501246}
-
-low.kernel.def target<spirv.logical.core>(@hal_target) workgroup_size(1, 1, 1) @spirv_raw_bda_scalar_conversions(%byte_offset: reg<spirv.offset64>) asm {
+low.kernel.def target<spirv.logical.core> workgroup_size(1, 1, 1) @spirv_raw_bda_scalar_conversions(%byte_offset: reg<spirv.offset64>) asm {
   %input_i8 = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
   %output_ext_i32 = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
   %output_sitofp_f32 = resource<hal_binding> {index = 2, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
@@ -200,9 +198,9 @@ low.kernel.def target<spirv.logical.core>(@hal_target) workgroup_size(1, 1, 1) @
                OpCapability Int16
                OpCapability StorageBuffer8BitAccess
                OpCapability StorageBuffer16BitAccess
+               OpCapability SignedZeroInfNanPreserve
                OpCapability DenormPreserve
                OpCapability RoundingModeRTE
-               OpCapability SignedZeroInfNanPreserve
                OpExtension "SPV_KHR_physical_storage_buffer"
                OpExtension "SPV_KHR_8bit_storage"
                OpExtension "SPV_KHR_16bit_storage"
@@ -211,9 +209,7 @@ low.kernel.def target<spirv.logical.core>(@hal_target) workgroup_size(1, 1, 1) @
                OpEntryPoint GLCompute %spirv_raw_bda_scalar_conversions "spirv_raw_bda_scalar_conversions"
                OpExecutionMode %spirv_raw_bda_scalar_conversions LocalSize 1 1 1
                OpExecutionMode %spirv_raw_bda_scalar_conversions DenormPreserve 16
-               OpExecutionMode %spirv_raw_bda_scalar_conversions DenormPreserve 64
                OpExecutionMode %spirv_raw_bda_scalar_conversions RoundingModeRTE 16
-               OpExecutionMode %spirv_raw_bda_scalar_conversions RoundingModeRTE 64
                OpExecutionMode %spirv_raw_bda_scalar_conversions SignedZeroInfNanPreserve 16
                OpExecutionMode %spirv_raw_bda_scalar_conversions SignedZeroInfNanPreserve 32
                OpName %spirv_raw_bda_scalar_conversions "spirv_raw_bda_scalar_conversions"

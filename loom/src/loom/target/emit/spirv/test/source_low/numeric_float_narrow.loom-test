@@ -1,9 +1,7 @@
-// RUN: emit spirv-dis input=source-low validate
+// RUN: emit spirv-dis input=source-low @narrow_to_single target=spirv:vulkan1.3+bda features=FLOAT64,FLOAT32_DENORM_PRESERVE,FLOAT32_ROUNDING_RTE,FLOAT32_SIGNED_ZERO_INF_NAN_PRESERVE,FLOAT64_SIGNED_ZERO_INF_NAN_PRESERVE validate
 // REQUIRES: spirv-dis, spirv-val
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 1086626759166}
-
-func.def target(@target) @narrow_to_single(%input: f64) -> (f32) {
+func.def @narrow_to_single(%input: f64) -> (f32) {
   %result = scalar.fptrunc %input : f64 to f32
   func.return %result : f32
 }
@@ -13,19 +11,12 @@ func.def target(@target) @narrow_to_single(%input: f64) -> (f32) {
                OpCapability VulkanMemoryModel
                OpCapability PhysicalStorageBufferAddresses
                OpCapability Int64
-               OpCapability Float16
                OpCapability Float64
-               OpCapability Int8
-               OpCapability Int16
-               OpCapability StorageBuffer8BitAccess
-               OpCapability StorageBuffer16BitAccess
                OpCapability DenormPreserve
                OpCapability RoundingModeRTE
                OpCapability SignedZeroInfNanPreserve
                OpExtension "SPV_KHR_vulkan_memory_model"
                OpExtension "SPV_KHR_physical_storage_buffer"
-               OpExtension "SPV_KHR_8bit_storage"
-               OpExtension "SPV_KHR_16bit_storage"
                OpExtension "SPV_KHR_float_controls"
                OpMemoryModel PhysicalStorageBuffer64 Vulkan
                OpEntryPoint GLCompute %narrow_to_single "narrow_to_single"
@@ -72,9 +63,9 @@ func.def target(@target) @narrow_to_single(%input: f64) -> (f32) {
 
 // ====
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 2186138386942}
+// RUN: emit spirv-dis input=source-low @narrow_to_half target=spirv:vulkan1.3+bda features=FLOAT16,FLOAT64,FLOAT64_TO_FLOAT16_CONVERSION,FLOAT16_DENORM_PRESERVE,FLOAT16_ROUNDING_RTE,FLOAT16_SIGNED_ZERO_INF_NAN_PRESERVE,FLOAT32_SIGNED_ZERO_INF_NAN_PRESERVE,FLOAT64_SIGNED_ZERO_INF_NAN_PRESERVE validate
 
-func.def target(@target) @narrow_to_half(%double: f64, %single: f32) -> (f16, f16) {
+func.def @narrow_to_half(%double: f64, %single: f32) -> (f16, f16) {
   %double_result = scalar.fptrunc %double : f64 to f16
   %single_result = scalar.fptrunc %single : f32 to f16
   func.return %double_result, %single_result : f16, f16
@@ -87,25 +78,17 @@ func.def target(@target) @narrow_to_half(%double: f64, %single: f32) -> (f16, f1
                OpCapability Int64
                OpCapability Float16
                OpCapability Float64
-               OpCapability Int8
-               OpCapability Int16
-               OpCapability StorageBuffer8BitAccess
-               OpCapability StorageBuffer16BitAccess
+               OpCapability SignedZeroInfNanPreserve
                OpCapability DenormPreserve
                OpCapability RoundingModeRTE
-               OpCapability SignedZeroInfNanPreserve
                OpExtension "SPV_KHR_vulkan_memory_model"
                OpExtension "SPV_KHR_physical_storage_buffer"
-               OpExtension "SPV_KHR_8bit_storage"
-               OpExtension "SPV_KHR_16bit_storage"
                OpExtension "SPV_KHR_float_controls"
                OpMemoryModel PhysicalStorageBuffer64 Vulkan
                OpEntryPoint GLCompute %narrow_to_half "narrow_to_half"
                OpExecutionMode %narrow_to_half LocalSize 1 1 1
                OpExecutionMode %narrow_to_half DenormPreserve 16
-               OpExecutionMode %narrow_to_half DenormPreserve 64
                OpExecutionMode %narrow_to_half RoundingModeRTE 16
-               OpExecutionMode %narrow_to_half RoundingModeRTE 64
                OpExecutionMode %narrow_to_half SignedZeroInfNanPreserve 16
                OpExecutionMode %narrow_to_half SignedZeroInfNanPreserve 32
                OpExecutionMode %narrow_to_half SignedZeroInfNanPreserve 64

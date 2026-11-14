@@ -1,0 +1,33 @@
+// RUN: emit spirv-low target=spirv:vulkan1.3+bda features=FLOAT16,FLOAT16_DENORM_PRESERVE,FLOAT16_ROUNDING_RTE,FLOAT16_SIGNED_ZERO_INF_NAN_PRESERVE,FLOAT32_SIGNED_ZERO_INF_NAN_PRESERVE,-FLOAT16_64_DENORM_PRESERVE,-FLOAT16_64_ROUNDING_RTE,-FLOAT64_DENORM_PRESERVE
+
+// Half arithmetic and conversions need no promise about unused F64 modes.
+func.def @half_controls(%a: f16, %b: f16, %wide: f32) -> (f16, f16, f32) {
+  %minimum = scalar.minnumf<nnan|ninf|nsz> %a, %b : f16
+  %narrowed = scalar.fptrunc %wide : f32 to f16
+  %extended = scalar.extf %a : f16 to f32
+  func.return %minimum, %narrowed, %extended : f16, f16, f32
+}
+
+// ----
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @half_controls(%a: reg<spirv.id : f16>, %b: reg<spirv.id : f16>, %wide: reg<spirv.id : f32>) -> (reg<spirv.id : f16>, reg<spirv.id : f16>, reg<spirv.id : f32>) asm {
+  %minimum = OpExtInst.GLSL.std.450.NMin.f16 %a, %b
+  %narrowed = OpFConvert.f32.f16 %wide
+  %extended = OpFConvert.f16.f32 %a
+  return %minimum, %narrowed, %extended
+}
+
+// ====
+
+// RUN: emit spirv-low target=spirv:vulkan1.3+bda features=FLOAT64,FLOAT64_DENORM_PRESERVE,-FLOAT16_64_DENORM_PRESERVE,-FLOAT16_DENORM_PRESERVE
+
+// The converse is independent too: native F64 extrema do not require F16.
+func.def @wide_controls(%a: f64, %b: f64) -> (f64) {
+  %maximum = scalar.maxnumf<nnan|ninf|nsz> %a, %b : f64
+  func.return %maximum : f64
+}
+
+// ----
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @wide_controls(%a: reg<spirv.id : f64>, %b: reg<spirv.id : f64>) -> (reg<spirv.id : f64>) asm {
+  %maximum = OpExtInst.GLSL.std.450.NMax.f64 %a, %b
+  return %maximum
+}

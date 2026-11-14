@@ -90,20 +90,7 @@ def _bit_width(scalar: ScalarAluType) -> int:
 def _float_narrowing_feature_atoms(
     source_width: int, result_width: int
 ) -> tuple[str, ...]:
-    if result_width == 32:
-        behavior_atoms = (
-            "float32_denorm_preserve",
-            "float32_rounding_rte",
-        )
-    elif result_width == 16:
-        # Vulkan devices may expose F32 controls independently while coupling
-        # the F16 and F64 execution modes. The profile records that coupled
-        # promise as one feature per behavior.
-        behavior_atoms = (
-            "float16_64_denorm_preserve",
-            "float16_64_rounding_rte",
-        )
-    else:
+    if result_width not in (16, 32):
         raise ValueError(f"unsupported native float narrowing width {result_width}")
 
     # Vulkan assumes NSZ, NotInf, and NotNaN when an entry point omits
@@ -112,7 +99,8 @@ def _float_narrowing_feature_atoms(
     # widths even though rounding and destination-denormal behavior are
     # selected by the result format.
     atoms = (
-        *behavior_atoms,
+        f"float{result_width}_denorm_preserve",
+        f"float{result_width}_rounding_rte",
         f"float{result_width}_signed_zero_inf_nan_preserve",
         f"float{source_width}_signed_zero_inf_nan_preserve",
     )
@@ -161,9 +149,7 @@ def _float_width_conversions() -> tuple[ScalarConversion, ...]:
                 # also need the promise that preserves zeros and nonfinite
                 # values. Portable bit-pattern recipes cover other profiles.
                 feature_atoms = (
-                    "float32_denorm_preserve"
-                    if source_width == 32
-                    else "float16_64_denorm_preserve",
+                    f"float{source_width}_denorm_preserve",
                     f"float{source_width}_signed_zero_inf_nan_preserve",
                     f"float{result_width}_signed_zero_inf_nan_preserve",
                 )

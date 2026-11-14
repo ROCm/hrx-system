@@ -45,13 +45,7 @@ class ExtendedMathOperation:
     def feature_bits(self, bit_width: int) -> int:
         if not self.preserve_denormals:
             return 0
-        return feature_bits_value(
-            (
-                "float32_denorm_preserve"
-                if bit_width == 32
-                else "float16_64_denorm_preserve",
-            )
-        )
+        return feature_bits_value((f"float{bit_width}_denorm_preserve",))
 
 
 @dataclass(frozen=True, slots=True)

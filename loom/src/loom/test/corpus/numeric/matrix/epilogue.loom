@@ -82,3 +82,57 @@ check.scenario @matrix_epilogue_values {
   }
   check.return
 }
+
+// Finite half subnormals expose both component mapping and denormal-mode demand.
+kernel.def @matrix_half_minimum() {
+  %unit = index.constant 1 : index
+  %width = target.subgroup.size : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%first: buffer, %second: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %tile = index.constant 16 : index
+  %elements = index.constant 256 : index
+  %width = target.subgroup.size : index
+  %lanes = index.div %elements, %width : index
+  %first_aligned = buffer.assume.alignment %first {minimum_alignment = 16} : buffer
+  %second_aligned = buffer.assume.alignment %second {minimum_alignment = 16} : buffer
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 16} : buffer
+  %first_view = buffer.view %first_aligned[%base] : buffer -> view<16x16xf16>
+  %second_view = buffer.view %second_aligned[%base] : buffer -> view<16x16xf16>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<16x16xf16>
+  %a = vector.fragment.load<init> %first_view[0, 0] shape [%tile, %tile] : view<16x16xf16> -> vector<[%lanes]xf16>
+  %b = vector.fragment.load<init> %second_view[0, 0] shape [%tile, %tile] : view<16x16xf16> -> vector<[%lanes]xf16>
+  %minimum = vector.minnumf<nnan|ninf|nsz> %a, %b : vector<[%lanes]xf16>
+  vector.fragment.store<result> %minimum, %output_view[0, 0] shape [%tile, %tile] : vector<[%lanes]xf16>, view<16x16xf16>
+  kernel.return
+}
+
+func.def @matrix_half_minimum_oracle(%first: buffer, %second: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %end = index.constant 256 : index
+  %step = index.constant 1 : index
+  %first_view = buffer.view %first[%base] : buffer -> view<256xf16>
+  %second_view = buffer.view %second[%base] : buffer -> view<256xf16>
+  %output_view = buffer.view %output[%base] : buffer -> view<256xf16>
+  scf.for %position = [%begin to %end step %step] {
+    %a = view.load %first_view[%position] : view<256xf16> -> f16
+    %b = view.load %second_view[%position] : view<256xf16> -> f16
+    %less = scalar.cmpf olt, %a, %b : f16
+    %minimum = scf.select %less, %a, %b : f16
+    view.store %minimum, %output_view[%position] : f16, view<256xf16>
+  }
+  func.return
+}
+
+check.scenario @matrix_half_subnormal_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %first = check.generate.iota offset(5.9604644775390625e-08) step(5.9604644775390625e-08) : tensor<16x16xf16>
+    %second = check.generate.iota offset(1.52587890625e-05) step(-5.9604644775390625e-08) : tensor<16x16xf16>
+    %output = check.generate.fill value(-1.0) : tensor<16x16xf16>
+    check.compare<@matrix_half_minimum, @matrix_half_minimum_oracle>(%first, %second, %output) : (tensor<16x16xf16>, tensor<16x16xf16>, tensor<16x16xf16>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<16x16xf16>
+    }
+  }
+  check.return
+}

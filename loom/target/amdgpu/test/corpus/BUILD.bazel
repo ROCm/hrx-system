@@ -150,25 +150,52 @@ _NO_KERNEL_ARTIFACT_EXCLUDES = {
     for source in _NO_DEVICE_SUBJECTS + _ADAPTER_ONLY_SCENARIOS
 }
 
+_COMPILE_XFAILS = {
+    "//loom/target/amdgpu:all": {
+        "kernel/subgroup/transport.loom:@subgroup_transport_address_5": "TARGET/002,AMDGPU/023",
+    },
+    "//loom/target/amdgpu:without_bf16_fma": {
+        "numeric/vector/broadcast_arithmetic.loom:@broadcast_arithmetic_bf16": "TARGET/003",
+    },
+}
+
+# Packed half results need coordinate retention across component arithmetic.
+_COMPILE_XFAILS.update({
+    "//loom/target/amdgpu:" + target: {
+        "numeric/matrix/epilogue.loom:@matrix_half_minimum": "AMDGPU/023",
+    }
+    for target in [
+        "gfx90a",
+        "gfx940",
+        "gfx941",
+        "gfx942",
+        "gfx950",
+        "gfx9-4-generic",
+        "gfx1100",
+        "gfx1101",
+        "gfx1102",
+        "gfx1103",
+        "gfx1150",
+        "gfx1151",
+        "gfx1152",
+        "gfx1153",
+        "gfx11-generic",
+    ]
+})
+
 loom_corpus_build(
     name = "all",
     catalog = LOOM_CORPUS,
     excludes = {"//loom/target/amdgpu:all": _NO_KERNEL_ARTIFACT_EXCLUDES},
     profiles = ["//loom/target/amdgpu:all"],
-    xfails = {
-        "//loom/target/amdgpu:all": {
-            "kernel/subgroup/transport.loom:@subgroup_transport_address_5": "TARGET/002,AMDGPU/023",
-        },
-        "//loom/target/amdgpu:without_bf16_fma": {
-            "numeric/vector/broadcast_arithmetic.loom:@broadcast_arithmetic_bf16": "TARGET/003",
-        },
-    },
+    xfails = _COMPILE_XFAILS,
 )
 
 loom_corpus_test(
     name = "scenario_execution",
     allowed_failures = {
         AMD_GPU_HARDWARE_PROFILE.name: {
+            "numeric/matrix/epilogue.loom:@matrix_half_subnormal_values": "AMDGPU/023",
             "numeric/vector/packed/dot.loom:@packed_mixed_nibble_dot_values": "TARGET/003",
         },
     },
