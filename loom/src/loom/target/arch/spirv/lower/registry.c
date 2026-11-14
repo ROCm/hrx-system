@@ -17,6 +17,8 @@
 #include "loom/target/arch/spirv/lower/index_operands.h"
 #include "loom/target/arch/spirv/lower/lower.h"
 #include "loom/target/arch/spirv/lower/matrix.h"
+#include "loom/target/arch/spirv/lower/private_storage.h"
+#include "loom/target/arch/spirv/lower/representation.h"
 #include "loom/target/arch/spirv/lower/workgroup.h"
 #include "loom/target/arch/spirv/lower/workgroup_layout.h"
 #include "loom/target/arch/spirv/lower/workgroup_reduce.h"
@@ -249,6 +251,13 @@ static iree_status_t loom_spirv_map_value(void* user_data,
   if (loom_type_equal(source_type, loom_type_scalar(LOOM_SCALAR_TYPE_INDEX))) {
     return loom_spirv_map_index_value(context, source_value_id, out_low_type);
   }
+  if ((loom_type_is_buffer(source_type) || loom_type_is_view(source_type)) &&
+      loom_spirv_value_is_private(loom_low_lower_context_module(context),
+                                  loom_low_lower_context_fact_table(context),
+                                  source_value_id)) {
+    return loom_spirv_make_register_type(
+        context, SPIRV_LOGICAL_CORE_REG_CLASS_ID_OFFSET64, out_low_type);
+  }
   if (loom_type_is_view(source_type)) {
     bool is_workgroup = false;
     uint16_t register_class_id = LOOM_LOW_REG_CLASS_NONE;
@@ -303,6 +312,17 @@ static iree_status_t loom_spirv_map_contract_value(
   if (loom_type_equal(source_type, loom_type_scalar(LOOM_SCALAR_TYPE_INDEX))) {
     *out_mapped_value = loom_low_lower_rule_mapped_value_register(
         SPIRV_LOGICAL_CORE_REG_CLASS_ID_ID, LOOM_LOW_REPRESENTATION_ID_NONE, 1);
+    return iree_ok_status();
+  }
+  if ((loom_type_is_buffer(source_type) || loom_type_is_view(source_type)) &&
+      loom_spirv_value_is_private(environment->module, environment->fact_table,
+                                  source_value_id)) {
+    loom_low_representation_id_t representation =
+        LOOM_LOW_REPRESENTATION_ID_NONE;
+    IREE_RETURN_IF_ERROR(loom_low_lower_representation_query_lookup(
+        environment, source_value_id, &representation));
+    *out_mapped_value = loom_low_lower_rule_mapped_value_register(
+        SPIRV_LOGICAL_CORE_REG_CLASS_ID_OFFSET64, representation, 1);
     return iree_ok_status();
   }
   if (!loom_type_is_view(source_type)) {
@@ -457,6 +477,11 @@ static iree_status_t loom_spirv_preselect_op(void* user_data,
                                              loom_low_lower_plan_t* out_plan) {
   (void)user_data;
   IREE_RETURN_IF_ERROR(
+      loom_spirv_select_private_alloca(context, source_op, out_plan));
+  if (!loom_low_lower_plan_is_empty(*out_plan)) {
+    return iree_ok_status();
+  }
+  IREE_RETURN_IF_ERROR(
       loom_spirv_select_cooperative_arithmetic(context, source_op, out_plan));
   if (!loom_low_lower_plan_is_empty(*out_plan)) {
     return iree_ok_status();
@@ -484,6 +509,9 @@ static iree_status_t loom_spirv_emit_op(void* user_data,
                                         const loom_op_t* source_op,
                                         loom_low_lower_plan_t plan) {
   (void)user_data;
+  if (loom_spirv_private_alloca_plan_isa(plan)) {
+    return loom_spirv_emit_private_alloca(context, source_op, plan);
+  }
   if (loom_spirv_cooperative_arithmetic_plan_isa(plan)) {
     return loom_spirv_emit_cooperative_arithmetic(context, source_op, plan);
   }
@@ -535,6 +563,7 @@ static iree_status_t loom_spirv_describe_plan(
 static iree_status_t loom_spirv_emit_entry_setup(
     void* user_data, loom_low_lower_context_t* context) {
   (void)user_data;
+  IREE_RETURN_IF_ERROR(loom_spirv_emit_private_storage(context));
   return loom_spirv_workgroup_layout_emit_storage_roots(context);
 }
 
@@ -548,6 +577,9 @@ static void loom_spirv_mark_plan_storage_demands(
     void* user_data, loom_low_lower_context_t* context,
     const loom_op_t* source_op, loom_low_lower_plan_t plan) {
   (void)user_data;
+  if (loom_spirv_private_alloca_plan_isa(plan)) {
+    return;
+  }
   if (loom_spirv_cooperative_arithmetic_plan_isa(plan) ||
       loom_kernel_workgroup_reduce_isa(source_op)) {
     for (uint16_t i = 0; i < source_op->operand_count; ++i) {
@@ -573,6 +605,7 @@ static const loom_low_lower_policy_t kSpirvLowLowerPolicy = {
     // i32 is common to every profile; narrower/wider integer arithmetic has
     // independent optional feature requirements.
     .bulk_memory_policy = {.memory_spaces =
+                               (1u << LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE) |
                                (1u << LOOM_VALUE_FACT_MEMORY_SPACE_UNKNOWN) |
                                (1u << LOOM_VALUE_FACT_MEMORY_SPACE_GLOBAL) |
                                (1u << LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP) |
@@ -593,11 +626,11 @@ static const loom_low_lower_policy_t kSpirvLowLowerPolicy = {
     .map_abi_layout = {.fn = loom_spirv_map_abi_layout, .user_data = NULL},
     .map_type = {.fn = loom_spirv_map_type, .user_data = NULL},
     .map_value = {.fn = loom_spirv_map_value, .user_data = NULL},
-    .join_result_type = loom_spirv_join_index_type,
-    .control_operand = {.accepts = loom_spirv_index_control_operand_accepts,
+    .join_result_type = loom_spirv_join_carrier_type,
+    .control_operand = {.accepts = loom_spirv_control_operand_accepts,
                         .prepare = loom_spirv_prepare_control_operand,
                         .emit = loom_spirv_emit_control_operand},
-    .source_plan_observer = &loom_spirv_index_representation_observer,
+    .source_plan_observer = &loom_spirv_representation_observer,
     .map_contract_value = {.fn = loom_spirv_map_contract_value,
                            .user_data = NULL},
     .map_argument = {.fn = loom_spirv_map_argument, .user_data = NULL},

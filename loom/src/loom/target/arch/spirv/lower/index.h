@@ -19,10 +19,6 @@ enum {
   LOOM_SPIRV_INDEX_REPRESENTATION_WIDE = 2,
 };
 
-// Constrains source index values and preserves width across source relations.
-extern const loom_low_lower_source_plan_observer_t
-    loom_spirv_index_representation_observer;
-
 // Maps the retained coordinate carrier to its typed SPIR-V ID payload.
 iree_status_t loom_spirv_map_index_value(loom_low_lower_context_t* context,
                                          loom_value_id_t value,

@@ -31,205 +31,78 @@ bool loom_spirv_value_type_from_low_register_type(
                                                  out_value_type);
 }
 
-uint16_t loom_spirv_ptr_workgroup_reg_class_id(
-    loom_spirv_scalar_type_t scalar_type) {
-  switch (scalar_type) {
-    case LOOM_SPIRV_SCALAR_TYPE_F16:
-      return SPIRV_LOGICAL_CORE_REG_CLASS_ID_PTR_WORKGROUP_F16;
-    case LOOM_SPIRV_SCALAR_TYPE_F32:
-      return SPIRV_LOGICAL_CORE_REG_CLASS_ID_PTR_WORKGROUP_F32;
-    case LOOM_SPIRV_SCALAR_TYPE_F64:
-      return SPIRV_LOGICAL_CORE_REG_CLASS_ID_PTR_WORKGROUP_F64;
-    case LOOM_SPIRV_SCALAR_TYPE_BF16:
-      return SPIRV_LOGICAL_CORE_REG_CLASS_ID_PTR_WORKGROUP_BF16;
-    case LOOM_SPIRV_SCALAR_TYPE_S8:
-      return SPIRV_LOGICAL_CORE_REG_CLASS_ID_PTR_WORKGROUP_I8;
-    case LOOM_SPIRV_SCALAR_TYPE_S16:
-      return SPIRV_LOGICAL_CORE_REG_CLASS_ID_PTR_WORKGROUP_I16;
-    case LOOM_SPIRV_SCALAR_TYPE_S32:
-      return SPIRV_LOGICAL_CORE_REG_CLASS_ID_PTR_WORKGROUP_I32;
-    case LOOM_SPIRV_SCALAR_TYPE_S64:
-      return SPIRV_LOGICAL_CORE_REG_CLASS_ID_PTR_WORKGROUP_I64;
-    case LOOM_SPIRV_SCALAR_TYPE_U8:
-      return SPIRV_LOGICAL_CORE_REG_CLASS_ID_PTR_WORKGROUP_U8;
-    case LOOM_SPIRV_SCALAR_TYPE_U16:
-      return SPIRV_LOGICAL_CORE_REG_CLASS_ID_PTR_WORKGROUP_U16;
-    case LOOM_SPIRV_SCALAR_TYPE_U32:
-      return SPIRV_LOGICAL_CORE_REG_CLASS_ID_PTR_WORKGROUP_U32;
-    case LOOM_SPIRV_SCALAR_TYPE_U64:
-      return SPIRV_LOGICAL_CORE_REG_CLASS_ID_PTR_WORKGROUP_U64;
-    case LOOM_SPIRV_SCALAR_TYPE_UNKNOWN:
-      return LOOM_LOW_REG_CLASS_NONE;
-  }
-  return LOOM_LOW_REG_CLASS_NONE;
-}
+// One scalar vocabulary feeds both pointer directions and both storage classes.
+#define LOOM_SPIRV_LOGICAL_SCALARS(M, space) \
+  M(space, F16, F16)                         \
+  M(space, F32, F32)                         \
+  M(space, F64, F64)                         \
+  M(space, BF16, BF16)                       \
+  M(space, I8, S8)                           \
+  M(space, I16, S16)                         \
+  M(space, I32, S32)                         \
+  M(space, I64, S64)                         \
+  M(space, U8, U8)                           \
+  M(space, U16, U16)                         \
+  M(space, U32, U32)                         \
+  M(space, U64, U64)
 
-uint16_t loom_spirv_ptr_workgroup_array_reg_class_id(
+#define LOOM_SPIRV_POINTER_REGISTER(space, suffix, scalar) \
+  [LOOM_SPIRV_SCALAR_TYPE_##scalar] =                      \
+      SPIRV_LOGICAL_CORE_REG_CLASS_ID_PTR_##space##_##suffix,
+
+uint16_t loom_spirv_logical_pointer_reg_class_id(
+    loom_spirv_value_class_t value_class,
     loom_spirv_scalar_type_t scalar_type) {
-  switch (scalar_type) {
-    case LOOM_SPIRV_SCALAR_TYPE_F16:
-      return SPIRV_LOGICAL_CORE_REG_CLASS_ID_PTR_WORKGROUP_ARRAY_F16;
-    case LOOM_SPIRV_SCALAR_TYPE_F32:
-      return SPIRV_LOGICAL_CORE_REG_CLASS_ID_PTR_WORKGROUP_ARRAY_F32;
-    case LOOM_SPIRV_SCALAR_TYPE_F64:
-      return SPIRV_LOGICAL_CORE_REG_CLASS_ID_PTR_WORKGROUP_ARRAY_F64;
-    case LOOM_SPIRV_SCALAR_TYPE_BF16:
-      return SPIRV_LOGICAL_CORE_REG_CLASS_ID_PTR_WORKGROUP_ARRAY_BF16;
-    case LOOM_SPIRV_SCALAR_TYPE_S8:
-      return SPIRV_LOGICAL_CORE_REG_CLASS_ID_PTR_WORKGROUP_ARRAY_I8;
-    case LOOM_SPIRV_SCALAR_TYPE_S16:
-      return SPIRV_LOGICAL_CORE_REG_CLASS_ID_PTR_WORKGROUP_ARRAY_I16;
-    case LOOM_SPIRV_SCALAR_TYPE_S32:
-      return SPIRV_LOGICAL_CORE_REG_CLASS_ID_PTR_WORKGROUP_ARRAY_I32;
-    case LOOM_SPIRV_SCALAR_TYPE_S64:
-      return SPIRV_LOGICAL_CORE_REG_CLASS_ID_PTR_WORKGROUP_ARRAY_I64;
-    case LOOM_SPIRV_SCALAR_TYPE_U8:
-      return SPIRV_LOGICAL_CORE_REG_CLASS_ID_PTR_WORKGROUP_ARRAY_U8;
-    case LOOM_SPIRV_SCALAR_TYPE_U16:
-      return SPIRV_LOGICAL_CORE_REG_CLASS_ID_PTR_WORKGROUP_ARRAY_U16;
-    case LOOM_SPIRV_SCALAR_TYPE_U32:
-      return SPIRV_LOGICAL_CORE_REG_CLASS_ID_PTR_WORKGROUP_ARRAY_U32;
-    case LOOM_SPIRV_SCALAR_TYPE_U64:
-      return SPIRV_LOGICAL_CORE_REG_CLASS_ID_PTR_WORKGROUP_ARRAY_U64;
-    case LOOM_SPIRV_SCALAR_TYPE_UNKNOWN:
-      return LOOM_LOW_REG_CLASS_NONE;
+  static const uint16_t kClasses[][LOOM_SPIRV_SCALAR_TYPE_U64 + 1] = {
+      [LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP -
+       LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP] =
+          {[LOOM_SPIRV_SCALAR_TYPE_UNKNOWN] = LOOM_LOW_REG_CLASS_NONE,
+           LOOM_SPIRV_LOGICAL_SCALARS(LOOM_SPIRV_POINTER_REGISTER, WORKGROUP)},
+      [LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP_ARRAY -
+       LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP] =
+          {[LOOM_SPIRV_SCALAR_TYPE_UNKNOWN] = LOOM_LOW_REG_CLASS_NONE,
+           LOOM_SPIRV_LOGICAL_SCALARS(LOOM_SPIRV_POINTER_REGISTER,
+                                      WORKGROUP_ARRAY)},
+      [LOOM_SPIRV_VALUE_CLASS_PTR_FUNCTION -
+       LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP] =
+          {[LOOM_SPIRV_SCALAR_TYPE_UNKNOWN] = LOOM_LOW_REG_CLASS_NONE,
+           LOOM_SPIRV_LOGICAL_SCALARS(LOOM_SPIRV_POINTER_REGISTER, FUNCTION)},
+      [LOOM_SPIRV_VALUE_CLASS_PTR_FUNCTION_ARRAY -
+       LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP] =
+          {[LOOM_SPIRV_SCALAR_TYPE_UNKNOWN] = LOOM_LOW_REG_CLASS_NONE,
+           LOOM_SPIRV_LOGICAL_SCALARS(LOOM_SPIRV_POINTER_REGISTER,
+                                      FUNCTION_ARRAY)},
+  };
+  if ((unsigned)scalar_type > LOOM_SPIRV_SCALAR_TYPE_U64 ||
+      (value_class != LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP &&
+       value_class != LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP_ARRAY &&
+       value_class != LOOM_SPIRV_VALUE_CLASS_PTR_FUNCTION &&
+       value_class != LOOM_SPIRV_VALUE_CLASS_PTR_FUNCTION_ARRAY)) {
+    return LOOM_LOW_REG_CLASS_NONE;
   }
-  return LOOM_LOW_REG_CLASS_NONE;
+  return kClasses[value_class - LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP]
+                 [scalar_type];
 }
+#undef LOOM_SPIRV_POINTER_REGISTER
+
+#define LOOM_SPIRV_POINTER_VALUE_TYPE(space, suffix, scalar)               \
+  [SPIRV_LOGICAL_CORE_REG_CLASS_ID_PTR_##space##_##                        \
+      suffix] = {.value_class = LOOM_SPIRV_VALUE_CLASS_PTR_##space,        \
+                 .scalar_type = LOOM_SPIRV_SCALAR_TYPE_##scalar},          \
+ [SPIRV_LOGICAL_CORE_REG_CLASS_ID_PTR_##space##_ARRAY_##                   \
+     suffix] = {.value_class = LOOM_SPIRV_VALUE_CLASS_PTR_##space##_ARRAY, \
+                .scalar_type = LOOM_SPIRV_SCALAR_TYPE_##scalar},
 
 bool loom_spirv_value_type_from_reg_class_id(
     uint16_t reg_class_id, loom_spirv_value_type_t* out_value_type) {
   static const loom_spirv_value_type_t kRegValueTypes[] = {
       [SPIRV_LOGICAL_CORE_REG_CLASS_ID_OFFSET64] =
-          {
-              .value_class = LOOM_SPIRV_VALUE_CLASS_OFFSET64,
-              .scalar_type = LOOM_SPIRV_SCALAR_TYPE_U64,
-          },
+          {.value_class = LOOM_SPIRV_VALUE_CLASS_OFFSET64,
+           .scalar_type = LOOM_SPIRV_SCALAR_TYPE_U64},
       [SPIRV_LOGICAL_CORE_REG_CLASS_ID_PTR_STORAGE_BUFFER] =
-          {
-              .value_class = LOOM_SPIRV_VALUE_CLASS_STORAGE_BUFFER_ADDRESS,
-          },
-      [SPIRV_LOGICAL_CORE_REG_CLASS_ID_PTR_WORKGROUP_ARRAY_F16] =
-          {
-              .value_class = LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP_ARRAY,
-              .scalar_type = LOOM_SPIRV_SCALAR_TYPE_F16,
-          },
-      [SPIRV_LOGICAL_CORE_REG_CLASS_ID_PTR_WORKGROUP_F16] =
-          {
-              .value_class = LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP,
-              .scalar_type = LOOM_SPIRV_SCALAR_TYPE_F16,
-          },
-      [SPIRV_LOGICAL_CORE_REG_CLASS_ID_PTR_WORKGROUP_ARRAY_F32] =
-          {
-              .value_class = LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP_ARRAY,
-              .scalar_type = LOOM_SPIRV_SCALAR_TYPE_F32,
-          },
-      [SPIRV_LOGICAL_CORE_REG_CLASS_ID_PTR_WORKGROUP_F32] =
-          {
-              .value_class = LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP,
-              .scalar_type = LOOM_SPIRV_SCALAR_TYPE_F32,
-          },
-      [SPIRV_LOGICAL_CORE_REG_CLASS_ID_PTR_WORKGROUP_ARRAY_F64] =
-          {
-              .value_class = LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP_ARRAY,
-              .scalar_type = LOOM_SPIRV_SCALAR_TYPE_F64,
-          },
-      [SPIRV_LOGICAL_CORE_REG_CLASS_ID_PTR_WORKGROUP_F64] =
-          {
-              .value_class = LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP,
-              .scalar_type = LOOM_SPIRV_SCALAR_TYPE_F64,
-          },
-      [SPIRV_LOGICAL_CORE_REG_CLASS_ID_PTR_WORKGROUP_ARRAY_BF16] =
-          {
-              .value_class = LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP_ARRAY,
-              .scalar_type = LOOM_SPIRV_SCALAR_TYPE_BF16,
-          },
-      [SPIRV_LOGICAL_CORE_REG_CLASS_ID_PTR_WORKGROUP_BF16] =
-          {
-              .value_class = LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP,
-              .scalar_type = LOOM_SPIRV_SCALAR_TYPE_BF16,
-          },
-      [SPIRV_LOGICAL_CORE_REG_CLASS_ID_PTR_WORKGROUP_ARRAY_I8] =
-          {
-              .value_class = LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP_ARRAY,
-              .scalar_type = LOOM_SPIRV_SCALAR_TYPE_S8,
-          },
-      [SPIRV_LOGICAL_CORE_REG_CLASS_ID_PTR_WORKGROUP_I8] =
-          {
-              .value_class = LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP,
-              .scalar_type = LOOM_SPIRV_SCALAR_TYPE_S8,
-          },
-      [SPIRV_LOGICAL_CORE_REG_CLASS_ID_PTR_WORKGROUP_ARRAY_I16] =
-          {
-              .value_class = LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP_ARRAY,
-              .scalar_type = LOOM_SPIRV_SCALAR_TYPE_S16,
-          },
-      [SPIRV_LOGICAL_CORE_REG_CLASS_ID_PTR_WORKGROUP_I16] =
-          {
-              .value_class = LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP,
-              .scalar_type = LOOM_SPIRV_SCALAR_TYPE_S16,
-          },
-      [SPIRV_LOGICAL_CORE_REG_CLASS_ID_PTR_WORKGROUP_ARRAY_I32] =
-          {
-              .value_class = LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP_ARRAY,
-              .scalar_type = LOOM_SPIRV_SCALAR_TYPE_S32,
-          },
-      [SPIRV_LOGICAL_CORE_REG_CLASS_ID_PTR_WORKGROUP_I32] =
-          {
-              .value_class = LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP,
-              .scalar_type = LOOM_SPIRV_SCALAR_TYPE_S32,
-          },
-      [SPIRV_LOGICAL_CORE_REG_CLASS_ID_PTR_WORKGROUP_ARRAY_I64] =
-          {
-              .value_class = LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP_ARRAY,
-              .scalar_type = LOOM_SPIRV_SCALAR_TYPE_S64,
-          },
-      [SPIRV_LOGICAL_CORE_REG_CLASS_ID_PTR_WORKGROUP_I64] =
-          {
-              .value_class = LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP,
-              .scalar_type = LOOM_SPIRV_SCALAR_TYPE_S64,
-          },
-      [SPIRV_LOGICAL_CORE_REG_CLASS_ID_PTR_WORKGROUP_ARRAY_U8] =
-          {
-              .value_class = LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP_ARRAY,
-              .scalar_type = LOOM_SPIRV_SCALAR_TYPE_U8,
-          },
-      [SPIRV_LOGICAL_CORE_REG_CLASS_ID_PTR_WORKGROUP_U8] =
-          {
-              .value_class = LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP,
-              .scalar_type = LOOM_SPIRV_SCALAR_TYPE_U8,
-          },
-      [SPIRV_LOGICAL_CORE_REG_CLASS_ID_PTR_WORKGROUP_ARRAY_U16] =
-          {
-              .value_class = LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP_ARRAY,
-              .scalar_type = LOOM_SPIRV_SCALAR_TYPE_U16,
-          },
-      [SPIRV_LOGICAL_CORE_REG_CLASS_ID_PTR_WORKGROUP_U16] =
-          {
-              .value_class = LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP,
-              .scalar_type = LOOM_SPIRV_SCALAR_TYPE_U16,
-          },
-      [SPIRV_LOGICAL_CORE_REG_CLASS_ID_PTR_WORKGROUP_ARRAY_U32] =
-          {
-              .value_class = LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP_ARRAY,
-              .scalar_type = LOOM_SPIRV_SCALAR_TYPE_U32,
-          },
-      [SPIRV_LOGICAL_CORE_REG_CLASS_ID_PTR_WORKGROUP_U32] =
-          {
-              .value_class = LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP,
-              .scalar_type = LOOM_SPIRV_SCALAR_TYPE_U32,
-          },
-      [SPIRV_LOGICAL_CORE_REG_CLASS_ID_PTR_WORKGROUP_ARRAY_U64] =
-          {
-              .value_class = LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP_ARRAY,
-              .scalar_type = LOOM_SPIRV_SCALAR_TYPE_U64,
-          },
-      [SPIRV_LOGICAL_CORE_REG_CLASS_ID_PTR_WORKGROUP_U64] =
-          {
-              .value_class = LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP,
-              .scalar_type = LOOM_SPIRV_SCALAR_TYPE_U64,
-          },
-  };
+          {.value_class = LOOM_SPIRV_VALUE_CLASS_STORAGE_BUFFER_ADDRESS},
+      LOOM_SPIRV_LOGICAL_SCALARS(LOOM_SPIRV_POINTER_VALUE_TYPE, WORKGROUP)
+          LOOM_SPIRV_LOGICAL_SCALARS(LOOM_SPIRV_POINTER_VALUE_TYPE, FUNCTION)};
   *out_value_type = (loom_spirv_value_type_t){0};
   if (reg_class_id >= IREE_ARRAYSIZE(kRegValueTypes) ||
       kRegValueTypes[reg_class_id].value_class ==
@@ -239,3 +112,5 @@ bool loom_spirv_value_type_from_reg_class_id(
   *out_value_type = kRegValueTypes[reg_class_id];
   return true;
 }
+#undef LOOM_SPIRV_POINTER_VALUE_TYPE
+#undef LOOM_SPIRV_LOGICAL_SCALARS

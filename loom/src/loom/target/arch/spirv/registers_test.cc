@@ -80,7 +80,7 @@ TEST(SpirvRegistersTest, LogicalIdsAndPointerValuesUseSeparateWidths) {
             LOOM_LOW_SPILL_SLOT_SPACE_PRIVATE);
 
   const loom_low_reg_class_t* function_ptr_class =
-      LookupRegisterClass(descriptor_set, IREE_SV("spirv.ptr.function"));
+      LookupRegisterClass(descriptor_set, IREE_SV("spirv.ptr.function.i32"));
   ASSERT_NE(function_ptr_class, nullptr);
   EXPECT_EQ(function_ptr_class->alloc_unit_bits, 32);
   EXPECT_TRUE(iree_all_bits_set(function_ptr_class->flags,
@@ -98,45 +98,44 @@ TEST(SpirvRegistersTest, LogicalIdsAndPointerValuesUseSeparateWidths) {
             LOOM_LOW_SPILL_SLOT_SPACE_PRIVATE);
 }
 
-TEST(SpirvRegistersTest, TypedWorkgroupPointersCarryScalarValueTypes) {
-  const loom_low_descriptor_set_t* descriptor_set =
-      loom_spirv_logical_core_descriptor_set();
-  ASSERT_NE(descriptor_set, nullptr);
-
-  const uint16_t workgroup_array_class_id =
-      loom_spirv_ptr_workgroup_array_reg_class_id(LOOM_SPIRV_SCALAR_TYPE_S32);
-  EXPECT_NE(workgroup_array_class_id, LOOM_LOW_REG_CLASS_NONE);
-  const loom_low_reg_class_t* workgroup_array_class = LookupRegisterClass(
-      descriptor_set, IREE_SV("spirv.ptr.workgroup.array.i32"));
-  ASSERT_NE(workgroup_array_class, nullptr);
-  EXPECT_EQ(workgroup_array_class->alloc_unit_bits, 32);
-  EXPECT_TRUE(iree_all_bits_set(workgroup_array_class->flags,
-                                LOOM_LOW_REG_CLASS_FLAG_VIRTUAL_ONLY));
-  EXPECT_TRUE(iree_all_bits_set(workgroup_array_class->flags,
-                                LOOM_LOW_REG_CLASS_FLAG_UNSPILLABLE));
-
-  loom_spirv_value_type_t value_type = {};
-  ASSERT_TRUE(loom_spirv_value_type_from_reg_class_id(workgroup_array_class_id,
-                                                      &value_type));
-  EXPECT_EQ(value_type.value_class, LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP_ARRAY);
-  EXPECT_EQ(value_type.scalar_type, LOOM_SPIRV_SCALAR_TYPE_S32);
-
-  const uint16_t workgroup_scalar_class_id =
-      loom_spirv_ptr_workgroup_reg_class_id(LOOM_SPIRV_SCALAR_TYPE_S32);
-  EXPECT_NE(workgroup_scalar_class_id, LOOM_LOW_REG_CLASS_NONE);
-  const loom_low_reg_class_t* workgroup_scalar_class =
-      LookupRegisterClass(descriptor_set, IREE_SV("spirv.ptr.workgroup.i32"));
-  ASSERT_NE(workgroup_scalar_class, nullptr);
-  EXPECT_EQ(workgroup_scalar_class->alloc_unit_bits, 32);
-  EXPECT_TRUE(iree_all_bits_set(workgroup_scalar_class->flags,
-                                LOOM_LOW_REG_CLASS_FLAG_VIRTUAL_ONLY));
-  EXPECT_TRUE(iree_all_bits_set(workgroup_scalar_class->flags,
-                                LOOM_LOW_REG_CLASS_FLAG_UNSPILLABLE));
-
-  ASSERT_TRUE(loom_spirv_value_type_from_reg_class_id(workgroup_scalar_class_id,
-                                                      &value_type));
-  EXPECT_EQ(value_type.value_class, LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP);
-  EXPECT_EQ(value_type.scalar_type, LOOM_SPIRV_SCALAR_TYPE_S32);
+TEST(SpirvRegistersTest, LogicalPointersPreserveStorageClassAndScalarType) {
+  const auto* descriptor_set = loom_spirv_logical_core_descriptor_set();
+  const loom_spirv_value_class_t value_classes[] = {
+      LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP,
+      LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP_ARRAY,
+      LOOM_SPIRV_VALUE_CLASS_PTR_FUNCTION,
+      LOOM_SPIRV_VALUE_CLASS_PTR_FUNCTION_ARRAY,
+  };
+  const loom_spirv_scalar_type_t scalar_types[] = {
+      LOOM_SPIRV_SCALAR_TYPE_F16, LOOM_SPIRV_SCALAR_TYPE_BF16,
+      LOOM_SPIRV_SCALAR_TYPE_F32, LOOM_SPIRV_SCALAR_TYPE_F64,
+      LOOM_SPIRV_SCALAR_TYPE_S8,  LOOM_SPIRV_SCALAR_TYPE_U8,
+      LOOM_SPIRV_SCALAR_TYPE_S16, LOOM_SPIRV_SCALAR_TYPE_U16,
+      LOOM_SPIRV_SCALAR_TYPE_S32, LOOM_SPIRV_SCALAR_TYPE_U32,
+      LOOM_SPIRV_SCALAR_TYPE_S64, LOOM_SPIRV_SCALAR_TYPE_U64,
+  };
+  for (auto value_class : value_classes) {
+    EXPECT_EQ(loom_spirv_logical_pointer_reg_class_id(
+                  value_class, LOOM_SPIRV_SCALAR_TYPE_UNKNOWN),
+              LOOM_LOW_REG_CLASS_NONE);
+    for (auto scalar_type : scalar_types) {
+      const uint16_t class_id =
+          loom_spirv_logical_pointer_reg_class_id(value_class, scalar_type);
+      ASSERT_NE(class_id, LOOM_LOW_REG_CLASS_NONE);
+      const auto& register_class = descriptor_set->reg_classes[class_id];
+      EXPECT_EQ(register_class.alloc_unit_bits, 32);
+      EXPECT_TRUE(iree_all_bits_set(register_class.flags,
+                                    LOOM_LOW_REG_CLASS_FLAG_VIRTUAL_ONLY |
+                                        LOOM_LOW_REG_CLASS_FLAG_UNSPILLABLE));
+      loom_spirv_value_type_t decoded = {};
+      ASSERT_TRUE(loom_spirv_value_type_from_reg_class_id(class_id, &decoded));
+      EXPECT_EQ(decoded.value_class, value_class);
+      EXPECT_EQ(decoded.scalar_type, scalar_type);
+    }
+  }
+  EXPECT_EQ(loom_spirv_logical_pointer_reg_class_id(
+                LOOM_SPIRV_VALUE_CLASS_SCALAR, LOOM_SPIRV_SCALAR_TYPE_S32),
+            LOOM_LOW_REG_CLASS_NONE);
 }
 
 TEST(SpirvRegistersTest, StructuralIdPayloadsCoverCanonicalScalarTypes) {

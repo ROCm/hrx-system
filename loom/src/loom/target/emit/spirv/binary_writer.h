@@ -54,6 +54,13 @@ iree_status_t loom_spirv_binary_write_words(loom_spirv_binary_writer_t* writer,
                                             const uint32_t* words,
                                             iree_host_size_t word_count);
 
+// Inserts a disjoint word span at an established instruction boundary. The
+// caller batches insertions so each affected function body moves only once.
+iree_status_t loom_spirv_binary_insert_words(loom_spirv_binary_writer_t* writer,
+                                             iree_host_size_t position,
+                                             const uint32_t* words,
+                                             iree_host_size_t word_count);
+
 // Appends a SPIR-V instruction header and raw word operands. |operand_count|
 // excludes the instruction header word. The producer must admit the 16-bit
 // instruction word count before calling this allocation-only writer.

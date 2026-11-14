@@ -549,7 +549,7 @@ def test_result_asm_recipes_cover_every_spirv_descriptor_family() -> None:
     assert carrier_only_keys.isdisjoint(extended_math_recipes)
     expected_recipes.update(extended_math_recipes)
 
-    add_scalar_recipe("spirv.op_copy_object.i32", "i32")
+    add_carrier_only("spirv.op_copy_object.offset64")
     add_scalar_recipe("spirv.op_imul_add.i32", "i32")
     for opcode in ("iadd", "isub", "imul"):
         add_carrier_only(f"spirv.op_{opcode}.offset64")
@@ -612,8 +612,10 @@ def test_result_asm_recipes_cover_every_spirv_descriptor_family() -> None:
 
     for scalar in SCALAR_ALU_TYPES:
         add_scalar_recipe(f"spirv.op_select.{scalar.suffix}", scalar.source_type)
+        add_scalar_recipe(f"spirv.op_copy_object.{scalar.suffix}", scalar.source_type)
     for scalar in UNSIGNED_INTEGER_SCALAR_ALU_TYPES:
         add_carrier_only(f"spirv.op_select.{scalar.suffix}")
+        add_carrier_only(f"spirv.op_copy_object.{scalar.suffix}")
     add_scalar_recipe("spirv.op_select.bf16", BFLOAT16_CONSTANT_TYPE.source_type)
     add_scalar_recipe("spirv.op_select.bool", "i1")
     add_carrier_only("spirv.op_select.offset64")
@@ -628,11 +630,12 @@ def test_result_asm_recipes_cover_every_spirv_descriptor_family() -> None:
         add_carrier_only(
             f"spirv.op_ptr_access_chain.storage_buffer.{scalar.suffix}.byte_offset"
         )
-        add_carrier_only(
-            f"spirv.op_access_chain.workgroup.{scalar.suffix}.element_index"
+        carrier_only_keys.update(
+            f"spirv.op_access_chain.{space}.{scalar.suffix}.{coordinate}"
+            for space in ("workgroup", "function")
+            for coordinate in ("element_index", "byte_offset")
         )
-        add_carrier_only(f"spirv.op_access_chain.workgroup.{scalar.suffix}.byte_offset")
-        for memory_space in ("storage_buffer", "workgroup"):
+        for memory_space in ("storage_buffer", "workgroup", "function"):
             load_key = f"spirv.op_load.{memory_space}.{scalar.suffix}"
             if scalar.source_rule_enabled:
                 add_scalar_recipe(load_key, scalar.source_type)
@@ -654,7 +657,6 @@ def test_result_asm_recipes_cover_every_spirv_descriptor_family() -> None:
 
     for key in _cooperative_matrix_result_keys():
         add_carrier_only(key)
-    add_carrier_only("spirv.op_variable.function.ptr")
 
     actual_forms = {
         descriptor.key: descriptor.asm_forms[0]
@@ -728,3 +730,33 @@ def test_workgroup_matrix_memory_needs_no_storage_buffer_features() -> None:
                 assert memory_effect.kind == (
                     EffectKind.READ if operation == "load" else EffectKind.WRITE
                 )
+
+
+def test_logical_storage_family_uses_register_features_and_precise_effects() -> None:
+    descriptors = {
+        row.key: row for row in SPIRV_LOGICAL_CORE_DESCRIPTOR_SET.descriptors
+    }
+    for space, memory_space in (
+        ("workgroup", MemorySpace.WORKGROUP),
+        ("function", MemorySpace.STACK),
+    ):
+        for scalar in STORAGE_BUFFER_SCALARS:
+            expected_features = (
+                (scalar.register_feature_bits,) if scalar.register_feature_bits else ()
+            )
+            for coordinate in ("element_index", "byte_offset"):
+                row = descriptors[
+                    f"spirv.op_access_chain.{space}.{scalar.suffix}.{coordinate}"
+                ]
+                assert row.feature_mask_words == expected_features
+                assert not row.effects
+            for operation, kind in (
+                ("load", EffectKind.READ),
+                ("store", EffectKind.WRITE),
+            ):
+                row = descriptors[f"spirv.op_{operation}.{space}.{scalar.suffix}"]
+                assert row.feature_mask_words == expected_features
+                assert len(row.effects) == 1
+                assert row.effects[0].memory_space is memory_space
+                assert row.effects[0].kind is kind
+                assert row.effects[0].width_bits == scalar.byte_width * 8

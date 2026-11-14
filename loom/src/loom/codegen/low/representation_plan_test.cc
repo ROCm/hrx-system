@@ -226,4 +226,31 @@ TEST_F(RepresentationPlanTest, KeepsIndependentComponentsIndependent) {
   EXPECT_EQ(representation, 20u);
 }
 
+TEST_F(RepresentationPlanTest, RetainsComponentIdentityAcrossLateUnions) {
+  auto plan = MakePlan(7);
+  const auto candidate = Candidate(10, 0);
+  IREE_ASSERT_OK(loom_low_representation_plan_union(&plan, 0, 1));
+  IREE_ASSERT_OK(loom_low_representation_plan_union(&plan, 2, 3));
+  IREE_ASSERT_OK(loom_low_representation_plan_union(&plan, 0, 2));
+  IREE_ASSERT_OK(
+      loom_low_representation_plan_constrain(&plan, 3, &candidate, 1));
+  IREE_ASSERT_OK(
+      loom_low_representation_plan_constrain(&plan, 4, &candidate, 1));
+  IREE_ASSERT_OK(loom_low_representation_plan_union(&plan, 5, 5));
+  ASSERT_TRUE(loom_low_representation_plan_solve(&plan, nullptr));
+
+  const auto component = loom_low_representation_plan_component(&plan, 0);
+  for (loom_value_ordinal_t value = 0; value < 4; ++value) {
+    EXPECT_EQ(loom_low_representation_plan_component(&plan, value), component);
+    loom_low_representation_id_t representation = 0;
+    EXPECT_TRUE(
+        loom_low_representation_plan_lookup(&plan, value, &representation));
+    EXPECT_EQ(representation, 10u);
+  }
+  EXPECT_NE(loom_low_representation_plan_component(&plan, 4), component);
+  EXPECT_EQ(loom_low_representation_plan_component(&plan, 5), 5u);
+  EXPECT_EQ(loom_low_representation_plan_component(&plan, 6),
+            LOOM_VALUE_ORDINAL_INVALID);
+}
+
 }  // namespace

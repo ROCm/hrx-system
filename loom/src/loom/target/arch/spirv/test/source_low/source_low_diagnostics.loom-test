@@ -285,20 +285,6 @@ func.def target(@target) @workgroup_i32_rejects_unaligned_byte_offset(%byte_offs
 
 spirv.target<vulkan1_3> @target
 
-func.def target(@target) @private_i32_reports_memory_space() -> (i32) {
-  %byte_length = index.constant 4 : offset
-  %base = index.constant 0 : offset
-  %storage = buffer.alloca<private> align(4) %byte_length : buffer
-  %view = buffer.view %storage[%base] : buffer -> view<1xi32>
-  // ERROR@+1: TARGET/003 {subject_role="source-memory", subject_name="access", constraint_key="source_memory.memory_space"}
-  %loaded = view.load %view[0] : view<1xi32> -> i32
-  func.return %loaded : i32
-}
-
-// ====
-
-spirv.target<vulkan1_3> @target
-
 func.def target(@target) @int8_operation_requires_target_feature(%lhs: i8, %rhs: i8) -> (i8) {
   // ERROR@+3: TARGET/003 {subject_role="descriptor", subject_name="spirv.op_u_convert.u8.u32", constraint_key="descriptor_available"}
   // ERROR@+2: TARGET/003 {subject_role="descriptor", subject_name="spirv.op_u_convert.u8.u32", constraint_key="descriptor_available"}

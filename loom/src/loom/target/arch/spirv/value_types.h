@@ -45,6 +45,10 @@ typedef enum loom_spirv_value_class_e {
   LOOM_SPIRV_VALUE_CLASS_VECTOR = 9,
   // Ordinary Boolean vector SSA ID with a lane count.
   LOOM_SPIRV_VALUE_CLASS_BOOL_VECTOR = 10,
+  // Invocation-local Function pointer with a concrete scalar pointee type.
+  LOOM_SPIRV_VALUE_CLASS_PTR_FUNCTION = 11,
+  // Function array pointer whose extent is owned by its storage reservation.
+  LOOM_SPIRV_VALUE_CLASS_PTR_FUNCTION_ARRAY = 12,
 } loom_spirv_value_class_t;
 
 typedef struct loom_spirv_value_type_t {
@@ -74,7 +78,7 @@ typedef struct loom_spirv_value_type_t {
   };
 } loom_spirv_value_type_t;
 
-static_assert(LOOM_SPIRV_VALUE_CLASS_BOOL_VECTOR <= UINT8_MAX,
+static_assert(LOOM_SPIRV_VALUE_CLASS_PTR_FUNCTION_ARRAY <= UINT8_MAX,
               "SPIR-V value classes must fit the compact value type");
 static_assert(LOOM_SPIRV_SCALAR_TYPE_U64 <= UINT8_MAX,
               "SPIR-V scalar types must fit the compact value type");
@@ -103,6 +107,8 @@ static inline bool loom_spirv_value_type_equal(loom_spirv_value_type_t lhs,
     case LOOM_SPIRV_VALUE_CLASS_SCALAR:
     case LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP:
     case LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP_ARRAY:
+    case LOOM_SPIRV_VALUE_CLASS_PTR_FUNCTION:
+    case LOOM_SPIRV_VALUE_CLASS_PTR_FUNCTION_ARRAY:
       return lhs.scalar_type == rhs.scalar_type;
     case LOOM_SPIRV_VALUE_CLASS_VECTOR:
     case LOOM_SPIRV_VALUE_CLASS_PTR_PHYSICAL_STORAGE_BUFFER:

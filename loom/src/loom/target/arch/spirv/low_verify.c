@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "iree/base/internal/arena.h"
+#include "iree/base/internal/math.h"
 #include "loom/codegen/low/diagnostics.h"
 #include "loom/error/parameter.h"
 #include "loom/ir/context.h"
@@ -207,6 +208,10 @@ static iree_string_view_t loom_spirv_low_value_type_format(
       return IREE_SV("ptr.workgroup.array");
     case LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP:
       return IREE_SV("ptr.workgroup");
+    case LOOM_SPIRV_VALUE_CLASS_PTR_FUNCTION:
+      return IREE_SV("ptr.function");
+    case LOOM_SPIRV_VALUE_CLASS_PTR_FUNCTION_ARRAY:
+      return IREE_SV("ptr.function.array");
     case LOOM_SPIRV_VALUE_CLASS_COOPERATIVE_MATRIX:
       return IREE_SV("cooperative_matrix");
   }
@@ -319,11 +324,14 @@ static iree_status_t loom_spirv_low_decode_boundary_value_type(
     loom_low_verify_context_t* context, loom_spirv_low_verify_state_t* state,
     loom_value_id_t value_id, loom_spirv_value_type_t* out_value_type) {
   const loom_type_t low_type = loom_module_value_type(state->module, value_id);
-  // Workgroup array pointers carry a storage-reservation extent, not a complete
-  // boundary type. Only element pointers may cross a function boundary.
+  // Array pointers carry reservation extents, not complete boundary types.
+  // Function pointers remain local; source storage-bearing calls are inlined.
   if (loom_spirv_value_type_from_low_register_type(low_type, out_value_type) &&
       out_value_type->value_class !=
-          LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP_ARRAY) {
+          LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP_ARRAY &&
+      out_value_type->value_class != LOOM_SPIRV_VALUE_CLASS_PTR_FUNCTION &&
+      out_value_type->value_class !=
+          LOOM_SPIRV_VALUE_CLASS_PTR_FUNCTION_ARRAY) {
     return iree_ok_status();
   }
   IREE_RETURN_IF_ERROR(loom_spirv_low_emit_unsupported_register_type(
@@ -416,6 +424,8 @@ static bool loom_spirv_low_direct_constant_word_count(
     case LOOM_SPIRV_VALUE_CLASS_PTR_PHYSICAL_STORAGE_BUFFER:
     case LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP:
     case LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP_ARRAY:
+    case LOOM_SPIRV_VALUE_CLASS_PTR_FUNCTION:
+    case LOOM_SPIRV_VALUE_CLASS_PTR_FUNCTION_ARRAY:
     case LOOM_SPIRV_VALUE_CLASS_COOPERATIVE_MATRIX:
     case LOOM_SPIRV_VALUE_CLASS_UNKNOWN:
       return false;
@@ -786,20 +796,6 @@ static iree_status_t loom_spirv_low_verify_resource(
                                                 result_type, state->arena);
 }
 
-static iree_status_t loom_spirv_low_emit_missing_packet_row(
-    loom_low_verify_context_t* context, loom_spirv_low_verify_state_t* state,
-    const loom_low_descriptor_packet_t* packet) {
-  const iree_string_view_t descriptor_key =
-      loom_low_descriptor_packet_diagnostic_key(state->target->descriptor_set,
-                                                packet);
-  loom_diagnostic_param_t params[] = {
-      loom_param_string(state->function_name),
-      loom_param_string(descriptor_key),
-  };
-  return loom_spirv_low_emit(context, packet->op, LOOM_ERR_SPIRV_012, params,
-                             IREE_ARRAYSIZE(params));
-}
-
 static iree_status_t loom_spirv_low_emit_packet_type_mismatch(
     loom_low_verify_context_t* context, loom_spirv_low_verify_state_t* state,
     const loom_low_descriptor_packet_t* packet, iree_string_view_t field_kind,
@@ -868,9 +864,6 @@ static iree_status_t loom_spirv_low_verify_packet(
     const loom_low_descriptor_packet_t* packet) {
   const loom_spirv_packet_row_t* row =
       loom_spirv_packet_row_for_descriptor_ordinal(packet->descriptor_ordinal);
-  if (row == NULL || row->form == LOOM_SPIRV_PACKET_FORM_UNSUPPORTED) {
-    return loom_spirv_low_emit_missing_packet_row(context, state, packet);
-  }
   const uint16_t expected_result_count =
       row->result_type_ref != LOOM_SPIRV_PACKET_VALUE_TYPE_REF_UNKNOWN;
   if (packet->op->operand_count != row->operand_count ||
@@ -1011,6 +1004,23 @@ static iree_status_t loom_spirv_low_define_or_verify_value_type_tracked(
     loom_value_id_t target_value_id, loom_spirv_value_type_t source_type,
     bool* out_matched) {
   *out_matched = true;
+  switch (source_type.value_class) {
+    case LOOM_SPIRV_VALUE_CLASS_PTR_FUNCTION:
+    case LOOM_SPIRV_VALUE_CLASS_PTR_FUNCTION_ARRAY:
+    case LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP:
+    case LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP_ARRAY: {
+      *out_matched = false;
+      const loom_diagnostic_param_t params[] = {
+          loom_param_string(state->function_name),
+          loom_param_string(
+              loom_low_diagnostic_value_name(state->module, source_value_id)),
+      };
+      return loom_spirv_low_emit(context, op, LOOM_ERR_SPIRV_045, params,
+                                 IREE_ARRAYSIZE(params));
+    }
+    default:
+      break;
+  }
   loom_spirv_value_type_t target_type = {0};
   if (loom_spirv_low_value_type_table_lookup(&state->value_types,
                                              target_value_id, &target_type)) {
@@ -1308,15 +1318,17 @@ static iree_status_t loom_spirv_low_verify_scf_yield(
   return loom_spirv_low_emit_unsupported_structural_op(context, state, op);
 }
 
-static bool loom_spirv_low_value_is_workgroup_storage(
+static bool loom_spirv_low_value_is_logical_storage(
     const loom_spirv_low_verify_state_t* state, loom_value_id_t value_id) {
   const loom_type_t storage_type =
       loom_module_value_type(state->module, value_id);
   return loom_type_is_storage(storage_type) &&
-         loom_type_storage_space(storage_type) == LOOM_STORAGE_SPACE_WORKGROUP;
+         (loom_type_storage_space(storage_type) ==
+              LOOM_STORAGE_SPACE_WORKGROUP ||
+          loom_type_storage_space(storage_type) == LOOM_STORAGE_SPACE_PRIVATE);
 }
 
-static const loom_op_t* loom_spirv_low_workgroup_storage_reserve_op(
+static const loom_op_t* loom_spirv_low_storage_reserve_op(
     const loom_spirv_low_verify_state_t* state, loom_value_id_t storage) {
   const loom_value_t* value = loom_module_value(state->module, storage);
   if (value == NULL || loom_value_is_block_arg(value)) {
@@ -1346,7 +1358,7 @@ static iree_status_t loom_spirv_low_verify_storage_reserve(
     loom_low_verify_context_t* context, loom_spirv_low_verify_state_t* state,
     const loom_op_t* op) {
   const loom_value_id_t storage = loom_low_storage_reserve_storage(op);
-  if (!loom_spirv_low_value_is_workgroup_storage(state, storage)) {
+  if (!loom_spirv_low_value_is_logical_storage(state, storage)) {
     return loom_spirv_low_emit_unsupported_structural_op(context, state, op);
   }
   if (loom_low_storage_reserve_byte_length(op) <= 0 ||
@@ -1361,11 +1373,11 @@ static iree_status_t loom_spirv_low_verify_storage_address(
     const loom_op_t* op) {
   const loom_value_id_t storage = loom_low_storage_address_storage(op);
   if (loom_low_storage_address_offset(op) != 0 ||
-      !loom_spirv_low_value_is_workgroup_storage(state, storage)) {
+      !loom_spirv_low_value_is_logical_storage(state, storage)) {
     return loom_spirv_low_emit_unsupported_structural_op(context, state, op);
   }
   const loom_op_t* reserve_op =
-      loom_spirv_low_workgroup_storage_reserve_op(state, storage);
+      loom_spirv_low_storage_reserve_op(state, storage);
   if (reserve_op == NULL) {
     return loom_spirv_low_emit_unsupported_structural_op(context, state, op);
   }
@@ -1377,10 +1389,32 @@ static iree_status_t loom_spirv_low_verify_storage_address(
         context, state, op, result,
         loom_module_value_type(state->module, result));
   }
-  if (result_type.value_class != LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP_ARRAY) {
+  const loom_spirv_value_class_t required_class =
+      loom_type_storage_space(loom_module_value_type(state->module, storage)) ==
+              LOOM_STORAGE_SPACE_PRIVATE
+          ? LOOM_SPIRV_VALUE_CLASS_PTR_FUNCTION_ARRAY
+          : LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP_ARRAY;
+  if (result_type.value_class != required_class) {
     return loom_spirv_low_emit_unsupported_register_type(
         context, state, op, result,
         loom_module_value_type(state->module, result));
+  }
+  const loom_spirv_scalar_type_descriptor_t* scalar_descriptor =
+      loom_spirv_scalar_type_descriptor(result_type.scalar_type);
+  if (state->target->target_facts != NULL &&
+      !iree_all_bits_set(state->target->feature_bits,
+                         scalar_descriptor->required_feature_bits)) {
+    const uint64_t missing_bits =
+        scalar_descriptor->required_feature_bits & ~state->target->feature_bits;
+    const loom_diagnostic_param_t params[] = {
+        loom_param_string(state->function_name),
+        loom_param_type(loom_module_value_type(state->module, result)),
+        loom_param_string(loom_spirv_feature_atom_name(
+            (loom_spirv_feature_atom_t)iree_math_count_trailing_zeros_u64(
+                missing_bits))),
+    };
+    return loom_spirv_low_emit(context, op, LOOM_ERR_SPIRV_044, params,
+                               IREE_ARRAYSIZE(params));
   }
   int64_t element_byte_count = 0;
   if (!loom_spirv_low_scalar_element_byte_count(result_type.scalar_type,

@@ -1,0 +1,46 @@
+// RUN: verify
+
+spirv.target<vulkan1_3> @target
+
+low.func.def target<spirv.logical.core>(@target) @byte_feature() asm {
+  %storage = storage {byte_alignment = 1, byte_length = 4} : low.storage<private>
+  // ERROR@+1: SPIRV/044 {function_name="byte_feature", actual_type="reg<spirv.ptr.function.array.i8>", feature_name="spirv.int8"}
+  %base = storage_address %storage : low.storage<private> -> reg<spirv.ptr.function.array.i8>
+  return
+}
+
+// ====
+
+low.func.def target<spirv.logical.core> @wrong_storage_class() asm {
+  %storage = storage {byte_alignment = 4, byte_length = 4} : low.storage<private>
+  // ERROR@+1: SPIRV/005 {value_name="base", actual_type="reg<spirv.ptr.workgroup.array.i32>"}
+  %base = storage_address %storage : low.storage<private> -> reg<spirv.ptr.workgroup.array.i32>
+  return
+}
+
+// ====
+
+// Byte extents and alignment must describe complete, aligned typed elements.
+low.func.def target<spirv.logical.core> @partial_element() asm {
+  %storage = storage {byte_alignment = 4, byte_length = 3} : low.storage<private>
+  // ERROR@+1: SPIRV/017
+  %base = storage_address %storage : low.storage<private> -> reg<spirv.ptr.function.array.i32>
+  return
+}
+
+// ====
+
+low.func.def target<spirv.logical.core> @private_pointer_merge(%condition: reg<spirv.id : i1>) asm {
+  %storage = storage {byte_alignment = 4, byte_length = 4} : low.storage<private>
+  %base = storage_address %storage : low.storage<private> -> reg<spirv.ptr.function.array.i32>
+  %zero = OpConstant.i32 0
+  %ptr = OpAccessChain.function.i32.element_index %base, %zero
+  %selected = low.scf.if %condition -> (reg<spirv.ptr.function.i32>) {
+    // ERROR@+1: SPIRV/045 {value_name="ptr"}
+    low.scf.yield %ptr : reg<spirv.ptr.function.i32>
+  } else {
+    // ERROR@+1: SPIRV/045 {value_name="ptr"}
+    low.scf.yield %ptr : reg<spirv.ptr.function.i32>
+  }
+  return
+}

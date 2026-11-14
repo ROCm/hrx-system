@@ -12,7 +12,6 @@ from dataclasses import replace
 import pytest
 
 from loom.gen.target.arch.spirv.spirv_packet_rows import (
-    _PACKETLESS_DESCRIPTOR_KEYS,
     _descriptor_ref_constant_name,
     _interned_payloads,
     _interned_value_types,
@@ -266,23 +265,6 @@ def test_validation_rejects_descriptors_without_packet_rows() -> None:
     )
 
 
-def test_validation_preserves_the_deliberate_packetless_descriptor() -> None:
-    assert _PACKETLESS_DESCRIPTOR_KEYS == frozenset({"spirv.op_variable.function.ptr"})
-    rows = _packet_rows()
-    rows_with_packetless_descriptor = (
-        replace(
-            rows[0],
-            descriptor_key="spirv.op_variable.function.ptr",
-        ),
-        *rows[1:],
-    )
-
-    _expect_row_validation_error(
-        rows_with_packetless_descriptor,
-        "SPIR-V packetless descriptors must not have packet rows: spirv.op_variable.function.ptr",
-    )
-
-
 def test_validation_rejects_rows_exceeding_packet_operand_maximum() -> None:
     rows = _packet_rows()
     rows_with_five_operands = (
@@ -464,15 +446,21 @@ def test_generation_offsets_storage_buffer_address_before_pointer_conversion() -
     assert "LOOM_SPIRV_VALUE_CLASS_STORAGE_BUFFER_ADDRESS" in access_row.operand_types[0]
 
 
-def test_workgroup_byte_coordinates_preserve_width_until_element_conversion() -> None:
+@pytest.mark.parametrize("space", ["workgroup", "function"])
+def test_logical_byte_coordinates_preserve_width_until_element_conversion(space: str) -> None:
     for scalar in STORAGE_BUFFER_SCALARS:
-        byte_row = _packet_row(f"spirv.op_access_chain.workgroup.{scalar.suffix}.byte_offset")
-        index_row = _packet_row(f"spirv.op_access_chain.workgroup.{scalar.suffix}.element_index")
+        byte_row = _packet_row(f"spirv.op_access_chain.{space}.{scalar.suffix}.byte_offset")
+        index_row = _packet_row(f"spirv.op_access_chain.{space}.{scalar.suffix}.element_index")
         assert byte_row.result_type == index_row.result_type
         assert byte_row.operand_types[0] == index_row.operand_types[0]
+        assert f"LOOM_SPIRV_VALUE_CLASS_PTR_{space.upper()}_ARRAY" in byte_row.operand_types[0]
         assert "LOOM_SPIRV_VALUE_CLASS_OFFSET64" in byte_row.operand_types[1]
         assert 1 << byte_row.coordinate_byte_shift == scalar.byte_width
         assert index_row.coordinate_byte_shift == 0
+        load = _packet_row(f"spirv.op_load.{space}.{scalar.suffix}")
+        store = _packet_row(f"spirv.op_store.{space}.{scalar.suffix}")
+        assert load.operand_types[0] == byte_row.result_type
+        assert store.operand_types == (byte_row.result_type, load.result_type)
 
 
 def test_generation_emits_coordinate_arithmetic_packet_rows() -> None:

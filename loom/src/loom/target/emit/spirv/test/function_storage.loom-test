@@ -1,0 +1,323 @@
+// RUN: emit spirv-dis validate
+// REQUIRES: spirv-dis, spirv-val
+
+spirv.target<vulkan1_3> @target {abi = hal_kernel}
+
+// Function variables precede entry-argument loads and nested executable code.
+// Each function owns its declarations; emitting the second cannot move or
+// attach its variables to the first function.
+low.kernel.def target<spirv.logical.core>(@target) workgroup_size(1, 1, 1) @word_storage(%input: reg<spirv.id : i32>) asm {
+  %zero = OpConstant.i32 0
+  %positive = OpSGreaterThan %input, %zero
+  low.scf.if %positive {
+    %storage = storage {byte_alignment = 4, byte_length = 8} : low.storage<private>
+    %base = storage_address %storage : low.storage<private> -> reg<spirv.ptr.function.array.i32>
+    %ptr = OpAccessChain.function.i32.element_index %base, %zero
+    OpStore.function.i32 %ptr, %input
+    %loaded = OpLoad.function.i32 %ptr
+  }
+  return
+}
+
+low.kernel.def target<spirv.logical.core>(@target) workgroup_size(1, 1, 1) @float_storage() asm {
+  %storage = storage {byte_alignment = 4, byte_length = 8} : low.storage<private>
+  %base = storage_address %storage : low.storage<private> -> reg<spirv.ptr.function.array.f32>
+  %offset = OpConstant.offset64 4
+  %value = OpConstant.f32 1080033280
+  %ptr = OpAccessChain.function.f32.byte_offset %base, %offset
+  OpStore.function.f32 %ptr, %value
+  %loaded = OpLoad.function.f32 %ptr
+  return
+}
+
+// ----
+               OpCapability Shader
+               OpCapability PhysicalStorageBufferAddresses
+               OpCapability Int64
+               OpExtension "SPV_KHR_physical_storage_buffer"
+               OpMemoryModel PhysicalStorageBuffer64 GLSL450
+               OpEntryPoint GLCompute %word_storage "word_storage"
+               OpEntryPoint GLCompute %float_storage "float_storage"
+               OpExecutionMode %word_storage LocalSize 1 1 1
+               OpExecutionMode %float_storage LocalSize 1 1 1
+               OpName %word_storage "word_storage"
+               OpName %input "input"
+               OpName %zero "zero"
+               OpName %positive "positive"
+               OpName %base "base"
+               OpName %ptr "ptr"
+               OpName %loaded "loaded"
+               OpName %float_storage "float_storage"
+               OpName %base_0 "base"
+               OpName %offset "offset"
+               OpName %value "value"
+               OpName %ptr_0 "ptr"
+               OpName %loaded_0 "loaded"
+               OpModuleProcessed "iree.vulkan.bda.v1[word_storage].root=0,32"
+               OpModuleProcessed "iree.vulkan.bda.v1[word_storage].constant_offset=32"
+               OpModuleProcessed "iree.vulkan.bda.v1[word_storage].constant_length=4"
+               OpModuleProcessed "iree.vulkan.bda.v1[word_storage].bindings=0"
+               OpModuleProcessed "iree.vulkan.bda.v1[float_storage].root=0,32"
+               OpModuleProcessed "iree.vulkan.bda.v1[float_storage].constant_offset=32"
+               OpModuleProcessed "iree.vulkan.bda.v1[float_storage].constant_length=0"
+               OpModuleProcessed "iree.vulkan.bda.v1[float_storage].bindings=0"
+               OpDecorate %_arr_uint_uint_1 ArrayStride 4
+               OpDecorate %_struct_42 Block
+               OpMemberDecorate %_struct_42 0 Offset 0
+               OpMemberDecorate %_struct_42 1 Offset 8
+               OpMemberDecorate %_struct_42 2 Offset 16
+               OpMemberDecorate %_struct_42 3 Offset 20
+               OpMemberDecorate %_struct_42 4 Offset 24
+               OpMemberDecorate %_struct_42 5 Offset 28
+               OpMemberDecorate %_struct_42 6 Offset 32
+       %void = OpTypeVoid
+          %4 = OpTypeFunction %void
+        %int = OpTypeInt 32 1
+       %uint = OpTypeInt 32 0
+%_ptr_PushConstant_uint = OpTypePointer PushConstant %uint
+      %int_6 = OpConstant %int 6
+      %int_0 = OpConstant %int 0
+       %zero = OpConstant %int 0
+       %bool = OpTypeBool
+     %uint_2 = OpConstant %uint 2
+%_arr_int_uint_2 = OpTypeArray %int %uint_2
+%_ptr_Function__arr_int_uint_2 = OpTypePointer Function %_arr_int_uint_2
+%_ptr_Function_int = OpTypePointer Function %int
+      %float = OpTypeFloat 32
+%_arr_float_uint_2 = OpTypeArray %float %uint_2
+%_ptr_Function__arr_float_uint_2 = OpTypePointer Function %_arr_float_uint_2
+      %ulong = OpTypeInt 64 0
+     %offset = OpConstant %ulong 4
+      %value = OpConstant %float 3.5
+    %ulong_2 = OpConstant %ulong 2
+%_ptr_Function_float = OpTypePointer Function %float
+     %uint_1 = OpConstant %uint 1
+%_arr_uint_uint_1 = OpTypeArray %uint %uint_1
+ %_struct_42 = OpTypeStruct %ulong %ulong %uint %uint %uint %uint %_arr_uint_uint_1
+%_ptr_PushConstant__struct_42 = OpTypePointer PushConstant %_struct_42
+          %2 = OpVariable %_ptr_PushConstant__struct_42 PushConstant
+%word_storage = OpFunction %void None %4
+          %5 = OpLabel
+       %base = OpVariable %_ptr_Function__arr_int_uint_2 Function
+         %11 = OpAccessChain %_ptr_PushConstant_uint %2 %int_6 %int_0
+         %12 = OpLoad %uint %11 Aligned 4
+      %input = OpBitcast %int %12
+   %positive = OpSGreaterThan %bool %input %zero
+               OpSelectionMerge %18 None
+               OpBranchConditional %positive %17 %18
+         %17 = OpLabel
+        %ptr = OpAccessChain %_ptr_Function_int %base %zero
+               OpStore %ptr %input Aligned 4
+     %loaded = OpLoad %int %ptr Aligned 4
+               OpBranch %18
+         %18 = OpLabel
+               OpReturn
+               OpFunctionEnd
+%float_storage = OpFunction %void None %4
+         %27 = OpLabel
+     %base_0 = OpVariable %_ptr_Function__arr_float_uint_2 Function
+         %36 = OpShiftRightLogical %ulong %offset %ulong_2
+      %ptr_0 = OpAccessChain %_ptr_Function_float %base_0 %36
+               OpStore %ptr_0 %value Aligned 4
+   %loaded_0 = OpLoad %float %ptr_0 Aligned 4
+               OpReturn
+               OpFunctionEnd
+
+// ====
+
+// RUN: emit spirv-dis target=spirv:vulkan1.3+bda+hal features=INT8 validate
+// REQUIRES: spirv-dis, spirv-val
+
+// Int8 alone permits Function bytes; StorageBuffer8BitAccess is unnecessary.
+low.kernel.def target<spirv.logical.core> workgroup_size(1, 1, 1) @byte_storage() asm {
+  %storage = storage {byte_alignment = 1, byte_length = 3} : low.storage<private>
+  %base = storage_address %storage : low.storage<private> -> reg<spirv.ptr.function.array.i8>
+  %offset = OpConstant.offset64 2
+  %value = OpConstant.i8 127
+  %ptr = OpAccessChain.function.i8.byte_offset %base, %offset
+  OpStore.function.i8 %ptr, %value
+  %loaded = OpLoad.function.i8 %ptr
+  return
+}
+
+// ----
+               OpCapability Shader
+               OpCapability PhysicalStorageBufferAddresses
+               OpCapability Int64
+               OpCapability Int8
+               OpExtension "SPV_KHR_physical_storage_buffer"
+               OpMemoryModel PhysicalStorageBuffer64 GLSL450
+               OpEntryPoint GLCompute %byte_storage "byte_storage"
+               OpExecutionMode %byte_storage LocalSize 1 1 1
+               OpName %byte_storage "byte_storage"
+               OpName %base "base"
+               OpName %offset "offset"
+               OpName %value "value"
+               OpName %ptr "ptr"
+               OpName %loaded "loaded"
+               OpModuleProcessed "iree.vulkan.bda.v1[byte_storage].root=0,32"
+               OpModuleProcessed "iree.vulkan.bda.v1[byte_storage].constant_offset=32"
+               OpModuleProcessed "iree.vulkan.bda.v1[byte_storage].constant_length=0"
+               OpModuleProcessed "iree.vulkan.bda.v1[byte_storage].bindings=0"
+               OpDecorate %_struct_18 Block
+               OpMemberDecorate %_struct_18 0 Offset 0
+               OpMemberDecorate %_struct_18 1 Offset 8
+               OpMemberDecorate %_struct_18 2 Offset 16
+               OpMemberDecorate %_struct_18 3 Offset 20
+               OpMemberDecorate %_struct_18 4 Offset 24
+               OpMemberDecorate %_struct_18 5 Offset 28
+       %void = OpTypeVoid
+          %4 = OpTypeFunction %void
+       %char = OpTypeInt 8 1
+       %uint = OpTypeInt 32 0
+     %uint_3 = OpConstant %uint 3
+%_arr_char_uint_3 = OpTypeArray %char %uint_3
+%_ptr_Function__arr_char_uint_3 = OpTypePointer Function %_arr_char_uint_3
+      %ulong = OpTypeInt 64 0
+     %offset = OpConstant %ulong 2
+      %value = OpConstant %char 127
+%_ptr_Function_char = OpTypePointer Function %char
+ %_struct_18 = OpTypeStruct %ulong %ulong %uint %uint %uint %uint
+%_ptr_PushConstant__struct_18 = OpTypePointer PushConstant %_struct_18
+          %2 = OpVariable %_ptr_PushConstant__struct_18 PushConstant
+%byte_storage = OpFunction %void None %4
+          %5 = OpLabel
+       %base = OpVariable %_ptr_Function__arr_char_uint_3 Function
+        %ptr = OpAccessChain %_ptr_Function_char %base %offset
+               OpStore %ptr %value Aligned 1
+     %loaded = OpLoad %char %ptr Aligned 1
+               OpReturn
+               OpFunctionEnd
+
+
+// ====
+
+// RUN: emit spirv-dis target=spirv:vulkan1.3+bda+hal features=INT8,INT16,FLOAT16,FLOAT64,BFLOAT16_TYPE_KHR validate
+// REQUIRES: spirv-dis, spirv-val
+
+// Storage declarations alone require their scalar capabilities. No arithmetic
+// or memory packet can supply those requirements on this path.
+low.kernel.def target<spirv.logical.core> workgroup_size(1, 1, 1) @typed_declarations() asm {
+  %storage_i8 = storage {byte_alignment = 1, byte_length = 1} : low.storage<private>
+  %base_i8 = storage_address %storage_i8 : low.storage<private> -> reg<spirv.ptr.function.array.i8>
+  %storage_u8 = storage {byte_alignment = 1, byte_length = 1} : low.storage<private>
+  %base_u8 = storage_address %storage_u8 : low.storage<private> -> reg<spirv.ptr.function.array.u8>
+  %storage_i16 = storage {byte_alignment = 2, byte_length = 2} : low.storage<private>
+  %base_i16 = storage_address %storage_i16 : low.storage<private> -> reg<spirv.ptr.function.array.i16>
+  %storage_u16 = storage {byte_alignment = 2, byte_length = 2} : low.storage<private>
+  %base_u16 = storage_address %storage_u16 : low.storage<private> -> reg<spirv.ptr.function.array.u16>
+  %storage_i32 = storage {byte_alignment = 4, byte_length = 4} : low.storage<private>
+  %base_i32 = storage_address %storage_i32 : low.storage<private> -> reg<spirv.ptr.function.array.i32>
+  %storage_u32 = storage {byte_alignment = 4, byte_length = 4} : low.storage<private>
+  %base_u32 = storage_address %storage_u32 : low.storage<private> -> reg<spirv.ptr.function.array.u32>
+  %storage_i64 = storage {byte_alignment = 8, byte_length = 8} : low.storage<private>
+  %base_i64 = storage_address %storage_i64 : low.storage<private> -> reg<spirv.ptr.function.array.i64>
+  %storage_u64 = storage {byte_alignment = 8, byte_length = 8} : low.storage<private>
+  %base_u64 = storage_address %storage_u64 : low.storage<private> -> reg<spirv.ptr.function.array.u64>
+  %storage_f16 = storage {byte_alignment = 2, byte_length = 2} : low.storage<private>
+  %base_f16 = storage_address %storage_f16 : low.storage<private> -> reg<spirv.ptr.function.array.f16>
+  %storage_bf16 = storage {byte_alignment = 2, byte_length = 2} : low.storage<private>
+  %base_bf16 = storage_address %storage_bf16 : low.storage<private> -> reg<spirv.ptr.function.array.bf16>
+  %storage_f32 = storage {byte_alignment = 4, byte_length = 4} : low.storage<private>
+  %base_f32 = storage_address %storage_f32 : low.storage<private> -> reg<spirv.ptr.function.array.f32>
+  %storage_f64 = storage {byte_alignment = 8, byte_length = 8} : low.storage<private>
+  %base_f64 = storage_address %storage_f64 : low.storage<private> -> reg<spirv.ptr.function.array.f64>
+  return
+}
+
+// ----
+               OpCapability Shader
+               OpCapability PhysicalStorageBufferAddresses
+               OpCapability Int64
+               OpCapability Float16
+               OpCapability Float64
+               OpCapability Int8
+               OpCapability Int16
+               OpCapability BFloat16TypeKHR
+               OpExtension "SPV_KHR_physical_storage_buffer"
+               OpExtension "SPV_KHR_bfloat16"
+               OpMemoryModel PhysicalStorageBuffer64 GLSL450
+               OpEntryPoint GLCompute %typed_declarations "typed_declarations"
+               OpExecutionMode %typed_declarations LocalSize 1 1 1
+               OpName %typed_declarations "typed_declarations"
+               OpName %base_i8 "base_i8"
+               OpName %base_u8 "base_u8"
+               OpName %base_i16 "base_i16"
+               OpName %base_u16 "base_u16"
+               OpName %base_i32 "base_i32"
+               OpName %base_u32 "base_u32"
+               OpName %base_i64 "base_i64"
+               OpName %base_u64 "base_u64"
+               OpName %base_f16 "base_f16"
+               OpName %base_bf16 "base_bf16"
+               OpName %base_f32 "base_f32"
+               OpName %base_f64 "base_f64"
+               OpModuleProcessed "iree.vulkan.bda.v1[typed_declarations].root=0,32"
+               OpModuleProcessed "iree.vulkan.bda.v1[typed_declarations].constant_offset=32"
+               OpModuleProcessed "iree.vulkan.bda.v1[typed_declarations].constant_length=0"
+               OpModuleProcessed "iree.vulkan.bda.v1[typed_declarations].bindings=0"
+               OpDecorate %_struct_55 Block
+               OpMemberDecorate %_struct_55 0 Offset 0
+               OpMemberDecorate %_struct_55 1 Offset 8
+               OpMemberDecorate %_struct_55 2 Offset 16
+               OpMemberDecorate %_struct_55 3 Offset 20
+               OpMemberDecorate %_struct_55 4 Offset 24
+               OpMemberDecorate %_struct_55 5 Offset 28
+       %void = OpTypeVoid
+          %4 = OpTypeFunction %void
+       %char = OpTypeInt 8 1
+       %uint = OpTypeInt 32 0
+     %uint_1 = OpConstant %uint 1
+%_arr_char_uint_1 = OpTypeArray %char %uint_1
+%_ptr_Function__arr_char_uint_1 = OpTypePointer Function %_arr_char_uint_1
+      %uchar = OpTypeInt 8 0
+%_arr_uchar_uint_1 = OpTypeArray %uchar %uint_1
+%_ptr_Function__arr_uchar_uint_1 = OpTypePointer Function %_arr_uchar_uint_1
+      %short = OpTypeInt 16 1
+%_arr_short_uint_1 = OpTypeArray %short %uint_1
+%_ptr_Function__arr_short_uint_1 = OpTypePointer Function %_arr_short_uint_1
+     %ushort = OpTypeInt 16 0
+%_arr_ushort_uint_1 = OpTypeArray %ushort %uint_1
+%_ptr_Function__arr_ushort_uint_1 = OpTypePointer Function %_arr_ushort_uint_1
+        %int = OpTypeInt 32 1
+%_arr_int_uint_1 = OpTypeArray %int %uint_1
+%_ptr_Function__arr_int_uint_1 = OpTypePointer Function %_arr_int_uint_1
+%_arr_uint_uint_1 = OpTypeArray %uint %uint_1
+%_ptr_Function__arr_uint_uint_1 = OpTypePointer Function %_arr_uint_uint_1
+       %long = OpTypeInt 64 1
+%_arr_long_uint_1 = OpTypeArray %long %uint_1
+%_ptr_Function__arr_long_uint_1 = OpTypePointer Function %_arr_long_uint_1
+      %ulong = OpTypeInt 64 0
+%_arr_ulong_uint_1 = OpTypeArray %ulong %uint_1
+%_ptr_Function__arr_ulong_uint_1 = OpTypePointer Function %_arr_ulong_uint_1
+       %half = OpTypeFloat 16
+%_arr_half_uint_1 = OpTypeArray %half %uint_1
+%_ptr_Function__arr_half_uint_1 = OpTypePointer Function %_arr_half_uint_1
+   %bfloat16 = OpTypeFloat 16 BFloat16KHR
+%_arr_bfloat16_uint_1 = OpTypeArray %bfloat16 %uint_1
+%_ptr_Function__arr_bfloat16_uint_1 = OpTypePointer Function %_arr_bfloat16_uint_1
+      %float = OpTypeFloat 32
+%_arr_float_uint_1 = OpTypeArray %float %uint_1
+%_ptr_Function__arr_float_uint_1 = OpTypePointer Function %_arr_float_uint_1
+     %double = OpTypeFloat 64
+%_arr_double_uint_1 = OpTypeArray %double %uint_1
+%_ptr_Function__arr_double_uint_1 = OpTypePointer Function %_arr_double_uint_1
+ %_struct_55 = OpTypeStruct %ulong %ulong %uint %uint %uint %uint
+%_ptr_PushConstant__struct_55 = OpTypePointer PushConstant %_struct_55
+          %2 = OpVariable %_ptr_PushConstant__struct_55 PushConstant
+%typed_declarations = OpFunction %void None %4
+          %5 = OpLabel
+    %base_i8 = OpVariable %_ptr_Function__arr_char_uint_1 Function
+    %base_u8 = OpVariable %_ptr_Function__arr_uchar_uint_1 Function
+   %base_i16 = OpVariable %_ptr_Function__arr_short_uint_1 Function
+   %base_u16 = OpVariable %_ptr_Function__arr_ushort_uint_1 Function
+   %base_i32 = OpVariable %_ptr_Function__arr_int_uint_1 Function
+   %base_u32 = OpVariable %_ptr_Function__arr_uint_uint_1 Function
+   %base_i64 = OpVariable %_ptr_Function__arr_long_uint_1 Function
+   %base_u64 = OpVariable %_ptr_Function__arr_ulong_uint_1 Function
+   %base_f16 = OpVariable %_ptr_Function__arr_half_uint_1 Function
+  %base_bf16 = OpVariable %_ptr_Function__arr_bfloat16_uint_1 Function
+   %base_f32 = OpVariable %_ptr_Function__arr_float_uint_1 Function
+   %base_f64 = OpVariable %_ptr_Function__arr_double_uint_1 Function
+               OpReturn
+               OpFunctionEnd
