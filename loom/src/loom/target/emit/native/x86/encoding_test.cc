@@ -111,8 +111,8 @@ TEST(EncodingTest, VectorRegisterPrefixesAndBehaviors) {
 
 TEST(EncodingTest, ScalarMemoryBroadcastDisplacementTuples) {
   // Independent assembler bytes for zmm31,[r13+r14*4+disp]. Every element
-  // size covers zero, both compressed boundaries, the adjacent full disp32,
-  // and a displacement that is not a multiple of the element size.
+  // size covers zero, both compressed boundaries, and the adjacent full disp32.
+  // Larger elements additionally cover unaligned offsets.
   struct Case {
     // Packed native operand recipe.
     uint16_t recipe;

@@ -657,3 +657,144 @@ check.scenario @matrix_lane_transpose_bits {
   }
   check.return
 }
+
+// Broadcasting reads only the final scalar in the input buffer. Each output
+// occupies its own 64-byte record; unwritten lanes retain the guard bytes.
+// Integer and floating payloads cover partial, 128-, 256-, and 512-bit vectors.
+func.def @broadcast_payloads(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %o64 = index.constant 64 : offset
+  %o128 = index.constant 128 : offset
+  %o192 = index.constant 192 : offset
+  %o256 = index.constant 256 : offset
+  %o320 = index.constant 320 : offset
+  %o384 = index.constant 384 : offset
+  %o448 = index.constant 448 : offset
+  %o512 = index.constant 512 : offset
+  %o576 = index.constant 576 : offset
+  %bytes = buffer.view %input[%base] : buffer -> view<8xi8>
+  %e4s = buffer.view %input[%base] : buffer -> view<8xf8E4M3>
+  %e5s = buffer.view %input[%base] : buffer -> view<8xf8E5M2>
+  %words = buffer.view %input[%base] : buffer -> view<4xi16>
+  %halves = buffer.view %input[%base] : buffer -> view<4xf16>
+  %bfloats = buffer.view %input[%base] : buffer -> view<4xbf16>
+  %dwords = buffer.view %input[%base] : buffer -> view<2xi32>
+  %singles = buffer.view %input[%base] : buffer -> view<2xf32>
+  %qwords = buffer.view %input[%base] : buffer -> view<1xi64>
+  %doubles = buffer.view %input[%base] : buffer -> view<1xf64>
+  %byte_output = buffer.view %output[%base] : buffer -> view<64xi8>
+  %e4_output = buffer.view %output[%o64] : buffer -> view<8xf8E4M3>
+  %e5_output = buffer.view %output[%o128] : buffer -> view<32xf8E5M2>
+  %word_output = buffer.view %output[%o192] : buffer -> view<16xi16>
+  %half_output = buffer.view %output[%o256] : buffer -> view<4xf16>
+  %bfloat_output = buffer.view %output[%o320] : buffer -> view<32xbf16>
+  %dword_output = buffer.view %output[%o384] : buffer -> view<4xi32>
+  %single_output = buffer.view %output[%o448] : buffer -> view<16xf32>
+  %qword_output = buffer.view %output[%o512] : buffer -> view<4xi64>
+  %double_output = buffer.view %output[%o576] : buffer -> view<2xf64>
+  %byte = view.load %bytes[7] : view<8xi8> -> i8
+  %byte_lanes = vector.splat %byte : vector<64xi8>
+  vector.store %byte_lanes, %byte_output[0] : vector<64xi8>, view<64xi8>
+  %e4 = view.load %e4s[7] : view<8xf8E4M3> -> f8E4M3
+  %e4_lanes = vector.splat %e4 : vector<8xf8E4M3>
+  vector.store %e4_lanes, %e4_output[0] : vector<8xf8E4M3>, view<8xf8E4M3>
+  %e5 = view.load %e5s[7] : view<8xf8E5M2> -> f8E5M2
+  %e5_lanes = vector.splat %e5 : vector<32xf8E5M2>
+  vector.store %e5_lanes, %e5_output[0] : vector<32xf8E5M2>, view<32xf8E5M2>
+  %word = view.load %words[3] : view<4xi16> -> i16
+  %word_lanes = vector.splat %word : vector<16xi16>
+  vector.store %word_lanes, %word_output[0] : vector<16xi16>, view<16xi16>
+  %half = view.load %halves[3] : view<4xf16> -> f16
+  %half_lanes = vector.splat %half : vector<4xf16>
+  vector.store %half_lanes, %half_output[0] : vector<4xf16>, view<4xf16>
+  %bfloat = view.load %bfloats[3] : view<4xbf16> -> bf16
+  %bfloat_lanes = vector.splat %bfloat : vector<32xbf16>
+  vector.store %bfloat_lanes, %bfloat_output[0] : vector<32xbf16>, view<32xbf16>
+  %dword = view.load %dwords[1] : view<2xi32> -> i32
+  %dword_lanes = vector.splat %dword : vector<4xi32>
+  vector.store %dword_lanes, %dword_output[0] : vector<4xi32>, view<4xi32>
+  %single = view.load %singles[1] : view<2xf32> -> f32
+  %single_lanes = vector.splat %single : vector<16xf32>
+  vector.store %single_lanes, %single_output[0] : vector<16xf32>, view<16xf32>
+  %qword = view.load %qwords[0] : view<1xi64> -> i64
+  %qword_lanes = vector.splat %qword : vector<4xi64>
+  vector.store %qword_lanes, %qword_output[0] : vector<4xi64>, view<4xi64>
+  %double = view.load %doubles[0] : view<1xf64> -> f64
+  %double_lanes = vector.splat %double : vector<2xf64>
+  vector.store %double_lanes, %double_output[0] : vector<2xf64>, view<2xf64>
+  func.return
+}
+
+// The oracle repeats individual bytes, independent of floating-point values,
+// vector construction, or the subject's typed memory reads.
+func.def @repeat_final_element_bytes(%input: buffer, %output: buffer, %origin: offset, %element_bytes: index, %output_bytes: index) {
+  %base = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %input_bytes = index.constant 8 : index
+  %source_begin = index.sub %input_bytes, %element_bytes : index
+  %source = buffer.view %input[%base] : buffer -> view<8xi8>
+  %destination = buffer.view %output[%origin] : buffer -> view<[%output_bytes]xi8>
+  scf.for %i = [%begin to %output_bytes step %step] {
+    %byte_in_element = index.rem %i, %element_bytes : index
+    %source_position = index.add %source_begin, %byte_in_element : index
+    %byte = view.load %source[%source_position] : view<8xi8> -> i8
+    view.store %byte, %destination[%i] : i8, view<[%output_bytes]xi8>
+  }
+  func.return
+}
+
+func.def @broadcast_payloads_oracle(%input: buffer, %output: buffer) {
+  %o0 = index.constant 0 : offset
+  %o64 = index.constant 64 : offset
+  %o128 = index.constant 128 : offset
+  %o192 = index.constant 192 : offset
+  %o256 = index.constant 256 : offset
+  %o320 = index.constant 320 : offset
+  %o384 = index.constant 384 : offset
+  %o448 = index.constant 448 : offset
+  %o512 = index.constant 512 : offset
+  %o576 = index.constant 576 : offset
+  %byte = index.constant 1 : index
+  %word = index.constant 2 : index
+  %dword = index.constant 4 : index
+  %qword = index.constant 8 : index
+  %bytes16 = index.constant 16 : index
+  %bytes32 = index.constant 32 : index
+  %bytes64 = index.constant 64 : index
+  func.call @repeat_final_element_bytes(%input, %output, %o0, %byte, %bytes64) : (buffer, buffer, offset, index, index)
+  func.call @repeat_final_element_bytes(%input, %output, %o64, %byte, %qword) : (buffer, buffer, offset, index, index)
+  func.call @repeat_final_element_bytes(%input, %output, %o128, %byte, %bytes32) : (buffer, buffer, offset, index, index)
+  func.call @repeat_final_element_bytes(%input, %output, %o192, %word, %bytes32) : (buffer, buffer, offset, index, index)
+  func.call @repeat_final_element_bytes(%input, %output, %o256, %word, %qword) : (buffer, buffer, offset, index, index)
+  func.call @repeat_final_element_bytes(%input, %output, %o320, %word, %bytes64) : (buffer, buffer, offset, index, index)
+  func.call @repeat_final_element_bytes(%input, %output, %o384, %dword, %bytes16) : (buffer, buffer, offset, index, index)
+  func.call @repeat_final_element_bytes(%input, %output, %o448, %dword, %bytes64) : (buffer, buffer, offset, index, index)
+  func.call @repeat_final_element_bytes(%input, %output, %o512, %qword, %bytes32) : (buffer, buffer, offset, index, index)
+  func.call @repeat_final_element_bytes(%input, %output, %o576, %qword, %bytes16) : (buffer, buffer, offset, index, index)
+  func.return
+}
+
+check.scenario @broadcast_payload_bits {
+  // All-one floating payloads include NaNs in every supported format.
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.fill value(-1) : tensor<8xi8>
+    %storage = check.generate.fill value(91) : tensor<656xi8>
+    %output = check.tensor.view %storage offset(8) : tensor<656xi8> -> tensor<640xi8>
+    check.compare<@broadcast_payloads, @broadcast_payloads_oracle>(%input, %output) : (tensor<8xi8>, tensor<640xi8>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<8xi8>
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<656xi8>
+    }
+  }
+  check.trial[8](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-128 to 127) : tensor<8xi8>
+    %storage = check.generate.fill value(91) : tensor<656xi8>
+    %output = check.tensor.view %storage offset(8) : tensor<656xi8> -> tensor<640xi8>
+    check.compare<@broadcast_payloads, @broadcast_payloads_oracle>(%input, %output) : (tensor<8xi8>, tensor<640xi8>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<8xi8>
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<656xi8>
+    }
+  }
+  check.return
+}
