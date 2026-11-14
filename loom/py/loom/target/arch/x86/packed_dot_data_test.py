@@ -6,14 +6,120 @@
 
 from __future__ import annotations
 
+from loom.target.arch.x86.descriptors import X86_PACKED_DOT_DESCRIPTOR_SET
+from loom.target.arch.x86.feature_bits import (
+    FEATURE_AVX10_2,
+    FEATURE_AVX512_BF16,
+    FEATURE_AVX512_VL,
+    FEATURE_AVX512_VNNI,
+    FEATURE_AVX_VNNI,
+    FEATURE_AVX_VNNI_INT8,
+    FEATURE_AVX_VNNI_INT16,
+)
 from loom.target.arch.x86.packed_dot_data import (
     X86_PACKED_DOT_DESCRIPTORS,
     PackedDotDescriptor,
     packed_dot_native_contraction_facts,
     packed_dot_native_layout,
 )
+from loom.target.low_descriptors import ConstraintKind, OperandAddressMapKind
 from loom.target.native_contraction_layout import ContractionShape
 from loom.target.native_coordinate_projection import coordinate_projection_plan
+
+
+def test_complete_native_families_preserve_features_and_accumulator_ties() -> None:
+    families = (
+        ("avx_vnni", FEATURE_AVX_VNNI, False, ("vpdpbusd", "vpdpwssd")),
+        ("avx512_vnni", FEATURE_AVX512_VNNI, True, ("vpdpbusd", "vpdpwssd")),
+        (
+            "avx_vnni_int8",
+            FEATURE_AVX_VNNI_INT8,
+            False,
+            ("vpdpbssd", "vpdpbsud", "vpdpbuud"),
+        ),
+        (
+            "avx_vnni_int16",
+            FEATURE_AVX_VNNI_INT16,
+            False,
+            ("vpdpwsud", "vpdpwusd", "vpdpwuud"),
+        ),
+        (
+            "avx10_2",
+            FEATURE_AVX10_2,
+            True,
+            (
+                "vpdpbssd",
+                "vpdpbsud",
+                "vpdpbuud",
+                "vpdpwsud",
+                "vpdpwusd",
+                "vpdpwuud",
+                "vdpphps",
+            ),
+        ),
+        ("avx512_bf16", FEATURE_AVX512_BF16, True, ("vdpbf16ps",)),
+    )
+    semantics = {row.key: row for row in X86_PACKED_DOT_DESCRIPTORS}
+    descriptors = {row.key: row for row in X86_PACKED_DOT_DESCRIPTOR_SET.descriptors}
+    expected_keys = set()
+    for family, feature, evex, mnemonics in families:
+        for mnemonic in mnemonics:
+            if mnemonic.startswith("vpdp"):
+                bits = 8 if mnemonic[4] == "b" else 16
+                inputs = tuple(
+                    f"LOOM_X86_PACKED_DOT_NUMERIC_{'I' if sign == 's' else 'U'}{bits}"
+                    for sign in mnemonic[5:7]
+                )
+                accumulator = "LOOM_X86_PACKED_DOT_NUMERIC_I32"
+            else:
+                numeric = "BF16" if mnemonic == "vdpbf16ps" else "F16"
+                inputs = (f"LOOM_X86_PACKED_DOT_NUMERIC_{numeric}",) * 2
+                accumulator = "LOOM_X86_PACKED_DOT_NUMERIC_F32"
+            for saturating in (
+                (False, True) if mnemonic.startswith("vpdp") else (False,)
+            ):
+                for width, suffix in ((128, "xmm"), (256, "ymm"), (512, "zmm")):
+                    if width == 512 and not evex:
+                        continue
+                    key = f"x86.{family}.{mnemonic}{'s' if saturating else ''}.{suffix}"
+                    expected_keys.add(key)
+                    semantic, descriptor = semantics[key], descriptors[key]
+                    assert (
+                        semantic.lhs_numeric_type,
+                        semantic.rhs_numeric_type,
+                    ) == inputs, key
+                    assert semantic.accumulator_numeric_type == accumulator, key
+                    assert semantic.result_numeric_type == accumulator, key
+                    required = feature
+                    if family.startswith("avx512_") and width < 512:
+                        required |= FEATURE_AVX512_VL
+                    assert semantic.required_feature_bits == required, key
+                    assert semantic.flags == int(saturating), key
+                    assert descriptor.feature_mask_words == (required,), key
+                    assert descriptor.encoding_format_id == 0x8320, key
+                    assert descriptor.encoding_id != 0, key
+                    assert tuple(
+                        (
+                            constraint.kind,
+                            constraint.lhs_operand_index,
+                            constraint.rhs_operand_index,
+                        )
+                        for constraint in descriptor.constraints
+                    ) == (
+                        (ConstraintKind.TIED, 0, 1),
+                        (ConstraintKind.DESTRUCTIVE, 0, 1),
+                    ), key
+                    for operand in descriptor.operands:
+                        assert operand.addressable_unit_count == (0 if evex else 16), (
+                            key
+                        )
+                        assert operand.address_map_kind is (
+                            OperandAddressMapKind.DIRECT
+                            if evex
+                            else OperandAddressMapKind.LOW_SUBSET
+                        ), key
+    assert set(semantics) == expected_keys
+    assert set(descriptors) == expected_keys
 
 
 def _descriptor(key: str) -> PackedDotDescriptor:

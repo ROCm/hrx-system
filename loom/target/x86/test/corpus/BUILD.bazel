@@ -93,7 +93,6 @@ loom_corpus_test(
             "numeric/float/logarithm.loom:@ordinary_logarithm_values": "LOWERING/036",
             "numeric/float/roots.loom:@cube_root_values": "LOWERING/036",
             "numeric/float/turns.loom:@turn_values": "LOWERING/036",
-            "numeric/vector/floating.loom:@bfloat_lookup_arithmetic_values": "X86/005",
             "numeric/vector/floating.loom:@vector_scale_f16_values": "LOWERING/036",
             "numeric/vector/lanes.loom:@partial_concat_payloads": "TARGET/002",
         },

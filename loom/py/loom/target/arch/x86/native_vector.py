@@ -1377,80 +1377,6 @@ VPCMPW = _instruction(
     _IMMEDIATES_4,
     _encoding(_EVEX, _MAP_3, 1, 1, 0x3F, (128, 256, 512)),
 )
-VPDPBSSD = _instruction(
-    "vpdpbssd",
-    _DESTRUCTIVE_NDS,
-    _OPERANDS_17,
-    _IMMEDIATES_0,
-    _encoding(_VEX, _MAP_2, 3, 0, 0x50, (128, 256)),
-)
-VPDPBSSDS = _instruction(
-    "vpdpbssds",
-    _DESTRUCTIVE_NDS,
-    _OPERANDS_17,
-    _IMMEDIATES_0,
-    _encoding(_VEX, _MAP_2, 3, 0, 0x51, (128, 256)),
-)
-VPDPBSUD = _instruction(
-    "vpdpbsud",
-    _DESTRUCTIVE_NDS,
-    _OPERANDS_17,
-    _IMMEDIATES_0,
-    _encoding(_VEX, _MAP_2, 2, 0, 0x50, (128, 256)),
-)
-VPDPBSUDS = _instruction(
-    "vpdpbsuds",
-    _DESTRUCTIVE_NDS,
-    _OPERANDS_17,
-    _IMMEDIATES_0,
-    _encoding(_VEX, _MAP_2, 2, 0, 0x51, (128, 256)),
-)
-VPDPBUSD = _instruction(
-    "vpdpbusd",
-    _DESTRUCTIVE_NDS,
-    _OPERANDS_17,
-    _IMMEDIATES_0,
-    _encoding(_VEX, _MAP_2, 1, 0, 0x50, (128, 256)),
-    _encoding(_EVEX, _MAP_2, 1, 0, 0x50, (128, 256, 512)),
-)
-VPDPBUSDS = _instruction(
-    "vpdpbusds",
-    _DESTRUCTIVE_NDS,
-    _OPERANDS_17,
-    _IMMEDIATES_0,
-    _encoding(_VEX, _MAP_2, 1, 0, 0x51, (128, 256)),
-    _encoding(_EVEX, _MAP_2, 1, 0, 0x51, (128, 256, 512)),
-)
-VPDPBUUD = _instruction(
-    "vpdpbuud",
-    _DESTRUCTIVE_NDS,
-    _OPERANDS_17,
-    _IMMEDIATES_0,
-    _encoding(_VEX, _MAP_2, 0, 0, 0x50, (128, 256)),
-)
-VPDPBUUDS = _instruction(
-    "vpdpbuuds",
-    _DESTRUCTIVE_NDS,
-    _OPERANDS_17,
-    _IMMEDIATES_0,
-    _encoding(_VEX, _MAP_2, 0, 0, 0x51, (128, 256)),
-)
-VPDPWSSD = _instruction(
-    "vpdpwssd",
-    _DESTRUCTIVE_NDS,
-    _OPERANDS_17,
-    _IMMEDIATES_0,
-    _encoding(_VEX, _MAP_2, 1, 0, 0x52, (128, 256)),
-    _encoding(_EVEX, _MAP_2, 1, 0, 0x52, (128, 256, 512)),
-)
-VPDPWSSDS = _instruction(
-    "vpdpwssds",
-    _DESTRUCTIVE_NDS,
-    _OPERANDS_17,
-    _IMMEDIATES_0,
-    _encoding(_VEX, _MAP_2, 1, 0, 0x53, (128, 256)),
-    _encoding(_EVEX, _MAP_2, 1, 0, 0x53, (128, 256, 512)),
-)
 VPERMD = _instruction(
     "vpermd",
     _NDS_SWAPPED_INPUTS,
@@ -2488,15 +2414,6 @@ PACKED_INTEGER_WIDEN = (
     (VPMOVSXDQ, VPMOVZXDQ),
 )
 PACKED_INTEGER_NARROW = (VPMOVWB, VPMOVDB, VPMOVQB, VPMOVDW, VPMOVQW, VPMOVQD)
-VNNI = (VPDPBUSD, VPDPBUSDS, VPDPWSSD, VPDPWSSDS)
-AVX_VNNI_INT8 = (
-    VPDPBSSD,
-    VPDPBSSDS,
-    VPDPBSUD,
-    VPDPBSUDS,
-    VPDPBUUD,
-    VPDPBUUDS,
-)
 VECTOR_MEMORY = (
     VMOVDQU32_LOAD,
     VMOVDQU32_INDEXED_LOAD,

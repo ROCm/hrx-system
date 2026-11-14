@@ -570,3 +570,97 @@ check.scenario @bfloat_lookup_arithmetic_values {
   }
   check.return
 }
+
+// Independent dots at three packet widths retain lane order and a runtime
+// accumulator. The wider packets reuse the same inputs, so every lane has a
+// corresponding scalar observation without forcing a particular instruction.
+func.def @bfloat_pair_packets(%lhs_buffer: buffer, %rhs_buffer: buffer, %initial_buffer: buffer, %output_buffer: buffer) {
+  %base = index.constant 0 : offset
+  %lhs = buffer.view %lhs_buffer[%base] : buffer -> view<32xbf16>
+  %rhs = buffer.view %rhs_buffer[%base] : buffer -> view<32xbf16>
+  %initial = buffer.view %initial_buffer[%base] : buffer -> view<16xf32>
+  %output = buffer.view %output_buffer[%base] : buffer -> view<28xf32>
+  %lhs8 = vector.load %lhs[0] : view<32xbf16> -> vector<8xbf16>
+  %rhs8 = vector.load %rhs[0] : view<32xbf16> -> vector<8xbf16>
+  %initial4 = vector.load %initial[0] : view<16xf32> -> vector<4xf32>
+  %pairs4 = vector.dot2f %lhs8, %rhs8, %initial4 : vector<8xbf16>, vector<8xbf16>, vector<4xf32>
+  vector.store %pairs4, %output[0] : vector<4xf32>, view<28xf32>
+  %lhs16 = vector.load %lhs[0] : view<32xbf16> -> vector<16xbf16>
+  %rhs16 = vector.load %rhs[0] : view<32xbf16> -> vector<16xbf16>
+  %initial8 = vector.load %initial[0] : view<16xf32> -> vector<8xf32>
+  %pairs8 = vector.dot2f %lhs16, %rhs16, %initial8 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  vector.store %pairs8, %output[4] : vector<8xf32>, view<28xf32>
+  %lhs32 = vector.load %lhs[0] : view<32xbf16> -> vector<32xbf16>
+  %rhs32 = vector.load %rhs[0] : view<32xbf16> -> vector<32xbf16>
+  %initial16 = vector.load %initial[0] : view<16xf32> -> vector<16xf32>
+  %pairs16 = vector.dot2f %lhs32, %rhs32, %initial16 : vector<32xbf16>, vector<32xbf16>, vector<16xf32>
+  vector.store %pairs16, %output[12] : vector<16xf32>, view<28xf32>
+  func.return
+}
+
+func.def @bfloat_pair_packets_oracle(%lhs_buffer: buffer, %rhs_buffer: buffer, %initial_buffer: buffer, %output_buffer: buffer) {
+  %base = index.constant 0 : offset
+  %lhs = buffer.view %lhs_buffer[%base] : buffer -> view<32xbf16>
+  %rhs = buffer.view %rhs_buffer[%base] : buffer -> view<32xbf16>
+  %initial = buffer.view %initial_buffer[%base] : buffer -> view<16xf32>
+  %output = buffer.view %output_buffer[%base] : buffer -> view<28xf32>
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c4 = index.constant 4 : index
+  %c12 = index.constant 12 : index
+  %end = index.constant 28 : index
+  scf.for %position = [%c0 to %end step %c1] {
+    %first = index.cmp ult, %position, %c4 : index
+    %second = index.cmp ult, %position, %c12 : index
+    %later_begin = scf.select %second, %c4, %c12 : index
+    %begin = scf.select %first, %c0, %later_begin : index
+    %lane = index.sub %position, %begin : index
+    %even = index.mul %lane, %c2 : index
+    %odd = index.add %even, %c1 : index
+    %lhs_even = view.load %lhs[%even] : view<32xbf16> -> bf16
+    %rhs_even = view.load %rhs[%even] : view<32xbf16> -> bf16
+    %lhs_odd = view.load %lhs[%odd] : view<32xbf16> -> bf16
+    %rhs_odd = view.load %rhs[%odd] : view<32xbf16> -> bf16
+    %a = scalar.extf %lhs_even : bf16 to f64
+    %b = scalar.extf %rhs_even : bf16 to f64
+    %c = scalar.extf %lhs_odd : bf16 to f64
+    %d = scalar.extf %rhs_odd : bf16 to f64
+    %initial32 = view.load %initial[%lane] : view<16xf32> -> f32
+    %accumulator = scalar.extf %initial32 : f32 to f64
+    %product0 = scalar.mulf %a, %b : f64
+    %product1 = scalar.mulf %c, %d : f64
+    %products = scalar.addf %product0, %product1 : f64
+    %sum = scalar.addf %products, %accumulator : f64
+    %rounded = scalar.fptrunc %sum : f64 to f32
+    view.store %rounded, %output[%position] : f32, view<28xf32>
+  }
+  func.return
+}
+
+check.scenario @bfloat_pair_packet_values {
+  check.trial[16](%trial: index, %entropy: check.entropy) {
+    %seed0 = check.entropy.read %entropy[0] : check.entropy -> i64
+    %seed1 = check.entropy.read %entropy[1] : check.entropy -> i64
+    %seed2 = check.entropy.read %entropy[2] : check.entropy -> i64
+    %lhs = check.generate.random.uniform seed(%seed0) range(-1.0 to 1.0) : tensor<32xbf16>
+    %rhs = check.generate.random.uniform seed(%seed1) range(-1.0 to 1.0) : tensor<32xbf16>
+    %initial = check.generate.random.uniform seed(%seed2) range(-1.0 to 1.0) : tensor<16xf32>
+    %storage = check.generate.fill value(-51.0) : tensor<32xf32>
+    %output = check.tensor.view %storage offset(8) : tensor<32xf32> -> tensor<28xf32>
+    %prefix = check.tensor.view %storage offset(0) : tensor<32xf32> -> tensor<2xf32>
+    %suffix = check.tensor.view %storage offset(120) : tensor<32xf32> -> tensor<2xf32>
+    check.compare<@bfloat_pair_packets, @bfloat_pair_packets_oracle>(%lhs, %rhs, %initial, %output) : (tensor<32xbf16>, tensor<32xbf16>, tensor<16xf32>, tensor<28xf32>) -> () {
+      // Products and the initial value have magnitude at most one. Four f32
+      // ULPs at the maximum intermediate magnitude of three admit native dot
+      // rounding independently of the scalar f64 reference's rounding order.
+      check.expect.approximate actual(%output) expected(%output) atol(9.5367431640625e-07) rtol(0.0) nan(same) : tensor<28xf32>, tensor<28xf32>
+      check.expect.bitwise actual(%prefix) expected(%prefix) : tensor<2xf32>
+      check.expect.bitwise actual(%suffix) expected(%suffix) : tensor<2xf32>
+      check.expect.bitwise actual(%lhs) expected(%lhs) : tensor<32xbf16>
+      check.expect.bitwise actual(%rhs) expected(%rhs) : tensor<32xbf16>
+      check.expect.bitwise actual(%initial) expected(%initial) : tensor<16xf32>
+    }
+  }
+  check.return
+}

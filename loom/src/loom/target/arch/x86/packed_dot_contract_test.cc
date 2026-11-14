@@ -97,6 +97,35 @@ TEST(PackedDotContractTest, EverySemanticDescriptorProjectsUniquely) {
   EXPECT_EQ(loom_x86_packed_dot_descriptor_at(count), nullptr);
 }
 
+TEST(PackedDotContractTest, EveryVariantRequiresAllOfItsFeatureBits) {
+  for (iree_host_size_t i = 0; i < loom_x86_packed_dot_descriptor_count();
+       ++i) {
+    const auto* descriptor = loom_x86_packed_dot_descriptor_at(i);
+    SCOPED_TRACE(i);
+    loom_x86_packed_dot_match_request_t request = {
+        .family = descriptor->family,
+        .shape = descriptor->shape,
+        .lhs_numeric_type = descriptor->lhs_numeric_type,
+        .rhs_numeric_type = descriptor->rhs_numeric_type,
+        .accumulator_numeric_type = descriptor->accumulator_numeric_type,
+        .result_numeric_type = descriptor->result_numeric_type,
+        .feature_bits = descriptor->required_feature_bits,
+        .semantic_flags = descriptor->flags,
+    };
+    EXPECT_EQ(loom_x86_packed_dot_select(&request, nullptr), descriptor);
+    uint64_t remaining = descriptor->required_feature_bits;
+    while (remaining) {
+      const uint64_t bit = remaining & (~remaining + 1);
+      request.feature_bits = descriptor->required_feature_bits & ~bit;
+      loom_x86_packed_dot_match_diagnostic_t diagnostic = {};
+      EXPECT_EQ(loom_x86_packed_dot_select(&request, &diagnostic), nullptr);
+      EXPECT_EQ(diagnostic.rejection_bits,
+                LOOM_X86_PACKED_DOT_REJECTION_FEATURES);
+      remaining &= ~bit;
+    }
+  }
+}
+
 TEST(PackedDotContractTest, ResolvesGeneratedLowDescriptorReferences) {
   const loom_x86_packed_dot_descriptor_t* semantic_descriptor =
       FindDescriptor("x86.avx512_bf16.vdpbf16ps.ymm");
