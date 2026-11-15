@@ -1,0 +1,73 @@
+// RUN: emit spirv-dis target=spirv:vulkan1.3+bda features=WORKGROUP_MEMORY_EXPLICIT_LAYOUT_KHR validate
+// REQUIRES: spirv-dis, spirv-val
+
+// SPIR-V 1.4 includes both Workgroup and StorageBuffer variables in the entry
+// interface. The scalar argument and result use separate descriptor variables.
+low.func.def public target<spirv.logical.core> abi(shader_entry_point) @shared_roundtrip(%value: reg<spirv.id : i32>) -> (reg<spirv.id : i32>) asm {
+  %storage = storage {byte_alignment = 16, byte_length = 16} : low.storage<workgroup>
+  %base = storage_address %storage : low.storage<workgroup> -> reg<spirv.ptr.workgroup.array.i32>
+  %index = OpConstant.i32 0
+  %ptr = OpAccessChain.workgroup.i32.element_index %base, %index
+  OpStore.workgroup.i32 %ptr, %value
+  %loaded = OpLoad.workgroup.i32 %ptr
+  return %loaded
+}
+
+// ----
+               OpCapability Shader
+               OpCapability VulkanMemoryModel
+               OpCapability PhysicalStorageBufferAddresses
+               OpCapability Int64
+               OpCapability WorkgroupMemoryExplicitLayoutKHR
+               OpExtension "SPV_KHR_vulkan_memory_model"
+               OpExtension "SPV_KHR_physical_storage_buffer"
+               OpExtension "SPV_KHR_workgroup_memory_explicit_layout"
+               OpMemoryModel PhysicalStorageBuffer64 Vulkan
+               OpEntryPoint GLCompute %shared_roundtrip "shared_roundtrip" %26 %4 %8
+               OpExecutionMode %shared_roundtrip LocalSize 1 1 1
+               OpName %shared_roundtrip "shared_roundtrip"
+               OpName %value "value"
+               OpName %base "base"
+               OpName %index "index"
+               OpName %ptr "ptr"
+               OpName %loaded "loaded"
+               OpMemberDecorate %_struct_5 0 Offset 0
+               OpDecorate %_struct_5 Block
+               OpDecorate %4 DescriptorSet 0
+               OpDecorate %4 Binding 0
+               OpDecorate %8 DescriptorSet 0
+               OpDecorate %8 Binding 1
+               OpDecorate %_arr_int_uint_4 ArrayStride 4
+               OpMemberDecorate %_struct_24 0 Offset 0
+               OpDecorate %_struct_24 Block
+        %int = OpTypeInt 32 1
+      %int_0 = OpConstant %int 0
+  %_struct_5 = OpTypeStruct %int
+%_ptr_StorageBuffer__struct_5 = OpTypePointer StorageBuffer %_struct_5
+%_ptr_StorageBuffer_int = OpTypePointer StorageBuffer %int
+          %4 = OpVariable %_ptr_StorageBuffer__struct_5 StorageBuffer
+          %8 = OpVariable %_ptr_StorageBuffer__struct_5 StorageBuffer
+       %void = OpTypeVoid
+         %10 = OpTypeFunction %void
+       %uint = OpTypeInt 32 0
+     %uint_4 = OpConstant %uint 4
+%_arr_int_uint_4 = OpTypeArray %int %uint_4
+%_ptr_Workgroup__arr_int_uint_4 = OpTypePointer Workgroup %_arr_int_uint_4
+      %index = OpConstant %int 0
+%_ptr_Workgroup_int = OpTypePointer Workgroup %int
+ %_struct_24 = OpTypeStruct %_arr_int_uint_4
+%_ptr_Workgroup__struct_24 = OpTypePointer Workgroup %_struct_24
+         %26 = OpVariable %_ptr_Workgroup__struct_24 Workgroup
+     %uint_0 = OpConstant %uint 0
+%shared_roundtrip = OpFunction %void None %10
+         %11 = OpLabel
+       %base = OpAccessChain %_ptr_Workgroup__arr_int_uint_4 %26 %uint_0
+         %12 = OpAccessChain %_ptr_StorageBuffer_int %4 %int_0
+      %value = OpLoad %int %12 Aligned 4
+        %ptr = OpAccessChain %_ptr_Workgroup_int %base %index
+               OpStore %ptr %value Aligned 4
+     %loaded = OpLoad %int %ptr Aligned 4
+         %23 = OpAccessChain %_ptr_StorageBuffer_int %8 %int_0
+               OpStore %23 %loaded Aligned 4
+               OpReturn
+               OpFunctionEnd

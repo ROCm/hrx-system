@@ -363,8 +363,11 @@ static void loom_spirv_program_select_roots(
     const loom_function_version_t* version =
         loom_target_function_version_snapshot_handle_at(
             &build->function_versions, symbol_id);
-    if (version != NULL &&
-        iree_any_bit_set(version->flags, LOOM_FUNCTION_VERSION_FLAG_RETAIN)) {
+    if ((version != NULL &&
+         iree_any_bit_set(version->flags, LOOM_FUNCTION_VERSION_FLAG_RETAIN)) ||
+        (version == NULL &&
+         iree_any_bit_set(symbol->flags,
+                          LOOM_SYMBOL_FLAG_PUBLIC | LOOM_SYMBOL_FLAG_RETAIN))) {
       loom_spirv_program_add_root(build, symbol->defining_op,
                                   /*selected_target_facts=*/NULL, root_symbols,
                                   out_root_count);

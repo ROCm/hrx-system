@@ -32,6 +32,8 @@ enum loom_target_projection_value_bits_e {
   // String attr projected into a stable target-contract identity alongside
   // its human-readable spelling.
   LOOM_TARGET_PROJECTION_VALUE_CONTRACT_SET = 5,
+  // I64 payload copied bit-for-bit into a uint64_t feature mask.
+  LOOM_TARGET_PROJECTION_VALUE_BITS64 = 6,
 };
 typedef uint8_t loom_target_projection_value_kind_t;
 

@@ -15,6 +15,7 @@ from dataclasses import dataclass
 SPIRV_VERSION_1_0 = 0x00010000
 SPIRV_VERSION_1_2 = 0x00010200
 SPIRV_VERSION_1_3 = 0x00010300
+SPIRV_VERSION_1_4 = 0x00010400
 
 ADDRESSING_MODEL_UNSPECIFIED = "LOOM_SPIRV_ADDRESSING_MODEL_UNSPECIFIED"
 MEMORY_MODEL_UNSPECIFIED = "LOOM_SPIRV_MEMORY_MODEL_UNSPECIFIED"
@@ -687,6 +688,40 @@ FEATURE_ATOMS = (
         minimum_spirv_version=SPIRV_VERSION_1_3,
         extensions=("SPV_KHR_float_controls",),
         capabilities=("LOOM_SPIRV_CAPABILITY_ROUNDING_MODE_RTE",),
+    ),
+    FeatureAtom(
+        key="workgroup_memory_explicit_layout_khr",
+        c_suffix="WORKGROUP_MEMORY_EXPLICIT_LAYOUT_KHR",
+        name="spirv.workgroup_memory_explicit_layout_khr",
+        doc="Explicit byte layout of Workgroup storage.",
+        required=("vulkan_shader",),
+        minimum_spirv_version=SPIRV_VERSION_1_4,
+        extensions=("SPV_KHR_workgroup_memory_explicit_layout",),
+        capabilities=("LOOM_SPIRV_CAPABILITY_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_KHR",),
+    ),
+    FeatureAtom(
+        key="workgroup_memory_explicit_layout_8bit_access_khr",
+        c_suffix="WORKGROUP_MEMORY_EXPLICIT_LAYOUT_8BIT_ACCESS_KHR",
+        name="spirv.workgroup_memory_explicit_layout_8bit_access_khr",
+        doc="8-bit storage in explicitly laid out Workgroup blocks.",
+        required=("workgroup_memory_explicit_layout_khr",),
+        minimum_spirv_version=SPIRV_VERSION_1_4,
+        extensions=("SPV_KHR_workgroup_memory_explicit_layout",),
+        capabilities=(
+            "LOOM_SPIRV_CAPABILITY_WORKGROUP_MEMORY_EXPLICIT_LAYOUT8_BIT_ACCESS_KHR",
+        ),
+    ),
+    FeatureAtom(
+        key="workgroup_memory_explicit_layout_16bit_access_khr",
+        c_suffix="WORKGROUP_MEMORY_EXPLICIT_LAYOUT_16BIT_ACCESS_KHR",
+        name="spirv.workgroup_memory_explicit_layout_16bit_access_khr",
+        doc="16-bit storage in explicitly laid out Workgroup blocks.",
+        required=("workgroup_memory_explicit_layout_khr",),
+        minimum_spirv_version=SPIRV_VERSION_1_4,
+        extensions=("SPV_KHR_workgroup_memory_explicit_layout",),
+        capabilities=(
+            "LOOM_SPIRV_CAPABILITY_WORKGROUP_MEMORY_EXPLICIT_LAYOUT16_BIT_ACCESS_KHR",
+        ),
     ),
 )
 

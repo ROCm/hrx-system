@@ -35,8 +35,9 @@ typedef struct loom_spirv_compile_options_t {
   // Optional compiler-owned function versions participating in planning.
   const loom_function_version_list_t* function_versions;
   // Optional compiler-owned selected entry table in emission order. Every
-  // entry carries target facts. NULL plans every compatible SPIR-V Low
-  // function in source module order.
+  // entry carries target facts. NULL selects retained function versions or
+  // public/retained definitions, falling back to all definitions when neither
+  // root contract is present. Reachable helpers remain internal functions.
   const loom_spirv_compile_entry_t* entries;
   // Number of entries in |entries|. Zero selects from the module.
   iree_host_size_t entry_count;

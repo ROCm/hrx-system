@@ -269,8 +269,15 @@ typedef enum loomc_spirv_feature_e {
   /// RoundingModeRTE requires the mode on all floating-point widths.
   LOOMC_SPIRV_FEATURE_FLOAT_ALL_ROUNDING_RTE = 60,
 
+  /// Explicit byte layout of Workgroup storage.
+  LOOMC_SPIRV_FEATURE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_KHR = 61,
+  /// 8-bit storage in explicitly laid out Workgroup blocks.
+  LOOMC_SPIRV_FEATURE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_8BIT_ACCESS_KHR = 62,
+  /// 16-bit storage in explicitly laid out Workgroup blocks.
+  LOOMC_SPIRV_FEATURE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_16BIT_ACCESS_KHR = 63,
+
   /// Number of public SPIR-V feature identifiers.
-  LOOMC_SPIRV_FEATURE_COUNT = 61,
+  LOOMC_SPIRV_FEATURE_COUNT = 64,
 } loomc_spirv_feature_t;
 
 /// Bitset of `loomc_spirv_feature_t` values.

@@ -95,7 +95,10 @@ static loom_spirv_feature_bits_t loom_spirv_module_builder_base_feature_bits(
       LOOM_SPIRV_FEATURE_FLOAT16_ROUNDING_RTE |
       LOOM_SPIRV_FEATURE_FLOAT64_ROUNDING_RTE |
       LOOM_SPIRV_FEATURE_FLOAT_ALL_DENORM_PRESERVE |
-      LOOM_SPIRV_FEATURE_FLOAT_ALL_ROUNDING_RTE;
+      LOOM_SPIRV_FEATURE_FLOAT_ALL_ROUNDING_RTE |
+      LOOM_SPIRV_FEATURE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_KHR |
+      LOOM_SPIRV_FEATURE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_8BIT_ACCESS_KHR |
+      LOOM_SPIRV_FEATURE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_16BIT_ACCESS_KHR;
   return (loom_spirv_feature_bits_t)target->config->contract_feature_bits &
          ~demand_driven_feature_bits;
 }
@@ -262,14 +265,10 @@ iree_status_t loom_spirv_module_builder_emit_string(
       suffix_operand_count);
 }
 
-iree_status_t loom_spirv_module_builder_finalize(
+iree_status_t loom_spirv_module_builder_prepare(
     loom_spirv_module_builder_t* builder,
-    iree_diagnostic_emitter_t diagnostic_emitter, bool* out_accepted,
-    loom_spirv_module_binary_t* out_module) {
+    iree_diagnostic_emitter_t diagnostic_emitter, bool* out_accepted) {
   IREE_ASSERT_ARGUMENT(builder);
-  IREE_ASSERT_ARGUMENT(out_module);
-
-  *out_module = (loom_spirv_module_binary_t){0};
   *out_accepted = false;
   loom_spirv_feature_set_prepare(builder->required_feature_bits,
                                  &builder->feature_set);
@@ -279,8 +278,14 @@ iree_status_t loom_spirv_module_builder_finalize(
         diagnostic_emitter, NULL, IREE_SV("SPIR-V"),
         IREE_SV("the Vulkan shader feature"));
   }
-  IREE_RETURN_IF_ERROR(
-      loom_spirv_module_builder_emit_feature_preamble(builder));
+  *out_accepted = true;
+  return loom_spirv_module_builder_emit_feature_preamble(builder);
+}
+
+iree_status_t loom_spirv_module_builder_finalize(
+    loom_spirv_module_builder_t* builder,
+    loom_spirv_module_binary_t* out_module) {
+  *out_module = (loom_spirv_module_binary_t){0};
 
   loom_spirv_binary_writer_t module_writer;
   loom_spirv_binary_writer_initialize(builder->allocator, &module_writer);
@@ -294,7 +299,6 @@ iree_status_t loom_spirv_module_builder_finalize(
                                            builder->sections[i].word_count);
   }
   if (iree_status_is_ok(status)) {
-    *out_accepted = true;
     loom_spirv_binary_writer_steal_words(&module_writer, &out_module->words,
                                          &out_module->word_count);
   }

@@ -106,8 +106,22 @@ static iree_status_t loom_spirv_emit_module_state_finalize(
       .shared_bda_root = &state->shared_bda_root,
   };
   IREE_RETURN_IF_ERROR(loom_spirv_module_abi_emit_shared_bda_root(&context));
-  return loom_spirv_module_builder_finalize(&state->builder, diagnostic_emitter,
-                                            out_accepted, out_module);
+  bool interfaces_accepted = false;
+  IREE_RETURN_IF_ERROR(loom_spirv_module_builder_prepare(
+      &state->builder, diagnostic_emitter, &interfaces_accepted));
+  if (!interfaces_accepted) {
+    return iree_ok_status();
+  }
+  IREE_RETURN_IF_ERROR(loom_spirv_emit_entry_interfaces(
+      state->program, state->emission_plans, &state->builder,
+      state->scratch_arena, diagnostic_emitter, &interfaces_accepted));
+  if (!interfaces_accepted) {
+    return iree_ok_status();
+  }
+  IREE_RETURN_IF_ERROR(
+      loom_spirv_module_builder_finalize(&state->builder, out_module));
+  *out_accepted = true;
+  return iree_ok_status();
 }
 
 iree_status_t loom_spirv_program_emit_binary(

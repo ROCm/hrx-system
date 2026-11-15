@@ -146,11 +146,15 @@ iree_status_t loom_spirv_module_builder_emit_string(
     iree_diagnostic_emitter_t diagnostic_emitter, const loom_op_t* source_op,
     bool* accepted);
 
-// Finalizes all sections into one SPIR-V binary module. The resulting module
-// owns its storage and must be deinitialized by the caller.
+// Freezes feature requirements and emits the module preamble. Subsequent
+// entry-interface emission consumes |feature_set| and adds no requirements.
+iree_status_t loom_spirv_module_builder_prepare(
+    loom_spirv_module_builder_t* builder,
+    iree_diagnostic_emitter_t diagnostic_emitter, bool* out_accepted);
+
+// Serializes prepared sections into an allocator-owned SPIR-V binary module.
 iree_status_t loom_spirv_module_builder_finalize(
     loom_spirv_module_builder_t* builder,
-    iree_diagnostic_emitter_t diagnostic_emitter, bool* out_accepted,
     loom_spirv_module_binary_t* out_module);
 
 #ifdef __cplusplus

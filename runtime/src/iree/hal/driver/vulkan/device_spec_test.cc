@@ -42,6 +42,10 @@ static iree_hal_vulkan_device_spec_t MakeTestSpec() {
 
 TEST(DeviceSpecTest, EncodesAndDecodesPayload) {
   iree_hal_vulkan_device_spec_t source = MakeTestSpec();
+  source.enabled_features.general |=
+      IREE_HAL_VULKAN_FEATURE_ENABLE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT |
+      IREE_HAL_VULKAN_FEATURE_ENABLE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_8BIT_ACCESS |
+      IREE_HAL_VULKAN_FEATURE_ENABLE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_16BIT_ACCESS;
   iree_hal_vulkan_cooperative_matrix_property_t source_property = {
       .m_size = 16,
       .n_size = 8,

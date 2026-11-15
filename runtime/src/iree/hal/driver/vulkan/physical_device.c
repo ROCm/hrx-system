@@ -219,6 +219,12 @@ iree_hal_vulkan_available_device_extensions_from_list(
     available_extensions |=
         IREE_HAL_VULKAN_DEVICE_EXTENSION_KHR_SHADER_FLOAT_CONTROLS2;
   }
+  if (iree_hal_vulkan_extension_list_contains(
+          extension_count, extensions,
+          VK_KHR_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_EXTENSION_NAME)) {
+    available_extensions |=
+        IREE_HAL_VULKAN_DEVICE_EXTENSION_KHR_WORKGROUP_MEMORY_EXPLICIT_LAYOUT;
+  }
   return available_extensions;
 }
 
@@ -354,6 +360,29 @@ static void iree_hal_vulkan_query_shader_bfloat16_features(
   VkPhysicalDeviceFeatures2 features2 = {
       .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
       .pNext = &snapshot->shader_bfloat16_features,
+  };
+  IREE_LEAK_CHECK_DISABLE_PUSH();
+  iree_vkGetPhysicalDeviceFeatures2(IREE_VULKAN_INSTANCE(&instance->syms),
+                                    handle, &features2);
+  IREE_LEAK_CHECK_DISABLE_POP();
+}
+
+static void iree_hal_vulkan_query_workgroup_memory_features(
+    const iree_hal_vulkan_instance_t* instance, VkPhysicalDevice handle,
+    iree_hal_vulkan_physical_device_snapshot_t* snapshot) {
+  if (!iree_hal_vulkan_physical_device_has_extension(
+          snapshot,
+          IREE_HAL_VULKAN_DEVICE_EXTENSION_KHR_WORKGROUP_MEMORY_EXPLICIT_LAYOUT)) {
+    return;
+  }
+  snapshot->workgroup_memory_features =
+      (VkPhysicalDeviceWorkgroupMemoryExplicitLayoutFeaturesKHR){
+          .sType =
+              VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_FEATURES_KHR,
+      };
+  VkPhysicalDeviceFeatures2 features2 = {
+      .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
+      .pNext = &snapshot->workgroup_memory_features,
   };
   IREE_LEAK_CHECK_DISABLE_PUSH();
   iree_vkGetPhysicalDeviceFeatures2(IREE_VULKAN_INSTANCE(&instance->syms),
@@ -938,6 +967,8 @@ iree_status_t iree_hal_vulkan_physical_device_snapshot_initialize(
                                                    out_snapshot);
   }
   if (iree_status_is_ok(status)) {
+    iree_hal_vulkan_query_workgroup_memory_features(instance, handle,
+                                                    out_snapshot);
     iree_hal_vulkan_query_shader_arithmetic_features(instance, handle,
                                                      out_snapshot);
   }

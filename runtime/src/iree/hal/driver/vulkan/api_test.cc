@@ -37,9 +37,25 @@ TEST(ApiTest, ValidatesFeatureFamilies) {
 TEST(ApiTest, RejectsUnknownGeneralFeatureBits) {
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         iree_hal_vulkan_features_validate({
-                            .general = UINT32_C(1) << 31,
+                            .general = UINT64_C(1) << 63,
                             .atomics = 0,
                         }));
+}
+
+TEST(ApiTest, NarrowWorkgroupAccessRequiresExplicitLayout) {
+  for (
+      auto narrow :
+      {IREE_HAL_VULKAN_FEATURE_ENABLE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_8BIT_ACCESS,
+       IREE_HAL_VULKAN_FEATURE_ENABLE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_16BIT_ACCESS}) {
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_INVALID_ARGUMENT,
+        iree_hal_vulkan_features_validate({.general = narrow}));
+    IREE_ASSERT_OK(iree_hal_vulkan_features_validate({
+        .general =
+            narrow |
+            IREE_HAL_VULKAN_FEATURE_ENABLE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT,
+    }));
+  }
 }
 
 TEST(ApiTest, RejectsUnknownShaderAtomicFeatureBits) {
@@ -65,6 +81,7 @@ TEST(ApiTest, RecognizesOptionalDeviceExtensionNames) {
       VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME,
       VK_KHR_SHADER_FMA_EXTENSION_NAME,
       VK_KHR_SHADER_FLOAT_CONTROLS_2_EXTENSION_NAME,
+      VK_KHR_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_EXTENSION_NAME,
       IREE_HAL_VULKAN_KHR_SHADER_BFLOAT16_EXTENSION_NAME,
       VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME,
       VK_EXT_SHADER_ATOMIC_FLOAT_2_EXTENSION_NAME,
@@ -82,6 +99,9 @@ TEST(ApiTest, RecognizesOptionalDeviceExtensionNames) {
       extensions, IREE_HAL_VULKAN_DEVICE_EXTENSION_KHR_SHADER_FMA));
   EXPECT_TRUE(iree_all_bits_set(
       extensions, IREE_HAL_VULKAN_DEVICE_EXTENSION_KHR_SHADER_FLOAT_CONTROLS2));
+  EXPECT_TRUE(iree_all_bits_set(
+      extensions,
+      IREE_HAL_VULKAN_DEVICE_EXTENSION_KHR_WORKGROUP_MEMORY_EXPLICIT_LAYOUT));
   EXPECT_TRUE(iree_all_bits_set(
       extensions, IREE_HAL_VULKAN_DEVICE_EXTENSION_KHR_PUSH_DESCRIPTOR));
   EXPECT_TRUE(iree_all_bits_set(
@@ -106,6 +126,7 @@ TEST(ApiTest, RecognizesAllPublicDeviceExtensionNames) {
       VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME,
       VK_KHR_SHADER_FMA_EXTENSION_NAME,
       VK_KHR_SHADER_FLOAT_CONTROLS_2_EXTENSION_NAME,
+      VK_KHR_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_EXTENSION_NAME,
       IREE_HAL_VULKAN_KHR_SHADER_BFLOAT16_EXTENSION_NAME,
       VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME,
       VK_EXT_SHADER_ATOMIC_FLOAT_2_EXTENSION_NAME,
@@ -138,6 +159,9 @@ TEST(ApiTest, RecognizesAllPublicDeviceExtensionNames) {
       extensions, IREE_HAL_VULKAN_DEVICE_EXTENSION_KHR_SHADER_FMA));
   EXPECT_TRUE(iree_all_bits_set(
       extensions, IREE_HAL_VULKAN_DEVICE_EXTENSION_KHR_SHADER_FLOAT_CONTROLS2));
+  EXPECT_TRUE(iree_all_bits_set(
+      extensions,
+      IREE_HAL_VULKAN_DEVICE_EXTENSION_KHR_WORKGROUP_MEMORY_EXPLICIT_LAYOUT));
   EXPECT_TRUE(iree_all_bits_set(
       extensions, IREE_HAL_VULKAN_DEVICE_EXTENSION_EXT_SHADER_ATOMIC_FLOAT));
   EXPECT_TRUE(iree_all_bits_set(

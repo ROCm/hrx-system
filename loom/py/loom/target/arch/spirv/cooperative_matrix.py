@@ -196,9 +196,16 @@ class CooperativeMatrixMemory:
     @property
     def feature_bits(self) -> int:
         if self.space == "workgroup":
+            layout_atoms = ("workgroup_memory_explicit_layout_khr",)
+            if self.carrier.byte_width in (1, 2):
+                layout_atoms += (
+                    "workgroup_memory_explicit_layout_"
+                    f"{self.carrier.byte_width * 8}bit_access_khr",
+                )
             return (
                 self.component.register_feature_bits
                 | self.carrier.register_feature_bits
+                | feature_bits_value(layout_atoms)
             )
         return self.component.feature_bits
 

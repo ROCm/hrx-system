@@ -22,8 +22,10 @@
 #include "loom/ir/local_value_domain.h"
 #include "loom/target/arch/spirv/packet_rows.h"
 #include "loom/target/emit/spirv/binary_writer.h"
+#include "loom/target/emit/spirv/entry_interface.h"
 #include "loom/target/emit/spirv/module_abi.h"
 #include "loom/target/emit/spirv/module_builder.h"
+#include "loom/target/emit/spirv/module_storage.h"
 #include "loom/target/emit/spirv/module_types.h"
 #include "loom/target/emit/spirv/module_values.h"
 #include "loom/target/emit/spirv/program.h"
@@ -50,8 +52,13 @@ typedef struct loom_spirv_function_emission_plan_t {
   loom_spirv_feature_bits_t required_feature_bits;
   // Transitive Input variables used by this function and called helpers.
   uint32_t builtin_interface_variable_ids[LOOM_SPIRV_BUILTIN_VARIABLE_COUNT];
+  // Transitive non-Input/Output globals, retained for SPIR-V 1.4 interfaces.
+  loom_spirv_entry_interface_t entry_interface;
   // True after this function body and its transitive requirements are emitted.
   bool emission_complete;
+  // Transitive Workgroup variables outside explicit-layout blocks. An entry
+  // cannot mix these with a Block-decorated Workgroup allocation.
+  bool uses_implicit_workgroup;
 } loom_spirv_function_emission_plan_t;
 
 // Module-owned resources shared by each function emitted into one module.
@@ -114,8 +121,10 @@ typedef struct loom_spirv_emit_state_t {
   loom_spirv_feature_bits_t required_feature_bits;
   // SPIR-V label ID of the currently open function-section block.
   uint32_t current_label_id;
-  // Function OpVariable declarations accumulated during ordinary body emission.
-  // Empty functions with no private storage allocate no word buffer.
+  // Storage declarations and placements captured during body emission.
+  loom_spirv_module_storage_t storage;
+  // Entry prefix: private OpVariables followed by static storage addresses.
+  // Functions without logical storage allocate no word buffer.
   loom_spirv_binary_writer_t function_variables;
   // Function-section word position immediately following this entry's OpLabel.
   iree_host_size_t function_variable_position;
@@ -175,6 +184,13 @@ iree_status_t loom_spirv_emit_low_op(loom_spirv_emit_state_t* state,
 // Emits a verified low.return for the current entry or internal function.
 iree_status_t loom_spirv_emit_return(loom_spirv_emit_state_t* state,
                                      const loom_op_t* op);
+
+// Emits entry declarations after all functions have fixed the module version.
+iree_status_t loom_spirv_emit_entry_interfaces(
+    const loom_spirv_program_plan_t* program,
+    const loom_spirv_function_emission_plan_t* emission_plans,
+    loom_spirv_module_builder_t* builder, iree_arena_allocator_t* arena,
+    iree_diagnostic_emitter_t emitter, bool* accepted);
 
 // Emits one target-low function into |context->builder|.
 //

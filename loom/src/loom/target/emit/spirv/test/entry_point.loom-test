@@ -10,7 +10,7 @@ low.func.def public target<test.low.core>(@native) @native_identity(%value: reg<
   return %value
 }
 
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @empty_entry() asm {
+low.func.def public target<spirv.logical.core>(@target) abi(shader_entry_point) @empty_entry() asm {
   low.schedule.fence
   return
 }

@@ -1,0 +1,69 @@
+// Cooperative matrix reads must observe the same aligned shared bytes as
+// ordinary vector stores after a workgroup reduction and publication barrier.
+// Coordinate-distinct input detects shifted rows, columns, and lost elements.
+kernel.def @matrix_publication() {
+  %unit = index.constant 1 : index
+  %width = index.constant 256 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%input: buffer, %scales: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %bytes = index.constant 9216 : offset
+  %c4 = index.constant 4 : index
+  %c16 = index.constant 16 : index
+  %item_id = kernel.workitem.id<x> : index
+  %item = index.assume %item_id [range(%item_id, 0, 255)] : index
+  %subgroup = kernel.subgroup.id : index
+  %subgroup_count = kernel.subgroup.count : index
+  %subgroup_width = target.subgroup.size : index
+  %tile_elements = index.constant 256 : index
+  %fragment_lanes = index.div %tile_elements, %subgroup_width : index
+  %stage_row = index.div %item, %c4 : index
+  %quarter = index.rem %item, %c4 : index
+  %stage_column = index.mul %quarter, %c16 : index
+  %source = buffer.view %input[%base] : buffer -> view<64x64xf16>
+  %aligned_output = buffer.assume.alignment %output {minimum_alignment = 16} : buffer
+  %destination = buffer.view %aligned_output[%base] : buffer -> view<64x64xf16>
+  %storage = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %stage = buffer.view %storage[%base] : buffer -> view<64x72xf16>
+  %scale_view = buffer.view %scales[%base] : buffer -> view<256xf32>
+  %scale = view.load %scale_view[%item] : view<256xf32> -> f32
+  %total = kernel.workgroup.reduce<maxnumf> %scale : f32
+  %none = scalar.constant 0.0 : f32
+  %live = scalar.cmpf one, %total, %none : f32
+  scf.if %live {
+    %values = vector.load %source[%stage_row, %stage_column] : view<64x64xf16> -> vector<16xf16>
+    vector.store %values, %stage[%stage_row, %stage_column] : vector<16xf16>, view<64x72xf16>
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+    scf.for %tile = [%subgroup to %c16 step %subgroup_count] {
+      %row_group = index.div %tile, %c4 : index
+      %column_group = index.rem %tile, %c4 : index
+      %row = index.mul %row_group, %c16 : index
+      %column = index.mul %column_group, %c16 : index
+      %fragment = vector.fragment.load<lhs> %stage[%row, %column] shape [%c16, %c16] : view<64x72xf16> -> vector<[%fragment_lanes]xf16>
+      vector.fragment.store<lhs> %fragment, %destination[%row, %column] shape [%c16, %c16] : vector<[%fragment_lanes]xf16>, view<64x64xf16>
+    }
+  }
+  kernel.return
+}
+
+// The oracle copies the logical bytes without shared storage or fragments.
+func.def @matrix_publication_expected(%input: buffer, %scales: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %length = index.constant 8192 : offset
+  buffer.copy %input[%base], %output[%base], %length
+  func.return
+}
+
+check.scenario @matrix_publication_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(-1024.0) step(0.5) : tensor<64x64xf16>
+    %scales = check.generate.fill value(2.0) : tensor<256xf32>
+    %output = check.generate.fill value(-777.0) : tensor<64x64xf16>
+    check.compare<@matrix_publication, @matrix_publication_expected>(%input, %scales, %output) : (tensor<64x64xf16>, tensor<256xf32>, tensor<64x64xf16>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<64x64xf16>
+      check.expect.bitwise actual(%scales) expected(%scales) : tensor<256xf32>
+      check.expect.bitwise actual(%output) expected(%output) : tensor<64x64xf16>
+    }
+  }
+  check.return
+}

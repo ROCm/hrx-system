@@ -74,6 +74,15 @@ typedef struct loomc_spirv_iree_hal_feature_row_t {
 static const loomc_spirv_iree_hal_feature_row_t
     kLoomcSpirvIreeHalFeatureRows[] = {
         LOOMC_SPIRV_IREE_HAL_GENERAL_FEATURE_ROW(
+            IREE_HAL_VULKAN_FEATURE_ENABLE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT,
+            WORKGROUP_MEMORY_EXPLICIT_LAYOUT_KHR, "workgroup_memory_explicit_layout_khr"),
+        LOOMC_SPIRV_IREE_HAL_GENERAL_FEATURE_ROW(
+            IREE_HAL_VULKAN_FEATURE_ENABLE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_8BIT_ACCESS,
+            WORKGROUP_MEMORY_EXPLICIT_LAYOUT_8BIT_ACCESS_KHR, "workgroup_memory_explicit_layout_8bit_access_khr"),
+        LOOMC_SPIRV_IREE_HAL_GENERAL_FEATURE_ROW(
+            IREE_HAL_VULKAN_FEATURE_ENABLE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_16BIT_ACCESS,
+            WORKGROUP_MEMORY_EXPLICIT_LAYOUT_16BIT_ACCESS_KHR, "workgroup_memory_explicit_layout_16bit_access_khr"),
+        LOOMC_SPIRV_IREE_HAL_GENERAL_FEATURE_ROW(
             IREE_HAL_VULKAN_FEATURE_ENABLE_COOPERATIVE_MATRIX,
             COOPERATIVE_MATRIX_KHR, "cooperative_matrix_khr"),
         LOOMC_SPIRV_IREE_HAL_GENERAL_FEATURE_ROW(

@@ -22,8 +22,11 @@ iree_status_t FinalizeModule(loom_spirv_module_builder_t* builder,
                              loom_spirv_module_binary_t* module) {
   bool accepted = false;
   iree_status_t status =
-      loom_spirv_module_builder_finalize(builder, {}, &accepted, module);
+      loom_spirv_module_builder_prepare(builder, {}, &accepted);
   EXPECT_TRUE(accepted);
+  if (iree_status_is_ok(status) && accepted) {
+    status = loom_spirv_module_builder_finalize(builder, module);
+  }
   return status;
 }
 
@@ -723,6 +726,27 @@ TEST(SpirvModuleBuilderTest, EmitsArithmeticCapabilitiesOnlyWhenRequired) {
       loom_spirv_module_binary_deinitialize(&module, iree_allocator_system());
     }
   }
+}
+
+TEST(SpirvModuleBuilderTest, UnusedWorkgroupLayoutKeepsBaselineVersion) {
+  loom_target_config_t config =
+      *loom_spirv_low_target_bundle_extended_types.config;
+  config.contract_feature_bits |=
+      LOOM_SPIRV_FEATURE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_KHR |
+      LOOM_SPIRV_FEATURE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_8BIT_ACCESS_KHR |
+      LOOM_SPIRV_FEATURE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_16BIT_ACCESS_KHR;
+  loom_target_bundle_t target = loom_spirv_low_target_bundle_extended_types;
+  target.config = &config;
+  loom_spirv_module_builder_t builder;
+  loom_spirv_module_builder_initialize(&target, iree_allocator_system(),
+                                       &builder);
+  loom_spirv_module_binary_t module;
+  IREE_ASSERT_OK(FinalizeModule(&builder, &module));
+  EXPECT_EQ(module.words[1], 0x00010300u);
+  EXPECT_FALSE(HasExtension(ParseInstructions(module),
+                            "SPV_KHR_workgroup_memory_explicit_layout"));
+  loom_spirv_module_binary_deinitialize(&module, iree_allocator_system());
+  loom_spirv_module_builder_deinitialize(&builder);
 }
 
 }  // namespace

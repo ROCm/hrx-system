@@ -299,6 +299,11 @@ static iree_status_t iree_hal_vulkan_device_plan_select_extensions(
       iree_hal_vulkan_device_plan_enable_extension_if_available(
           snapshot, IREE_HAL_VULKAN_DEVICE_EXTENSION_KHR_SHADER_FLOAT_CONTROLS2,
           VK_KHR_SHADER_FLOAT_CONTROLS_2_EXTENSION_NAME, plan));
+  IREE_RETURN_IF_ERROR(
+      iree_hal_vulkan_device_plan_enable_extension_if_available(
+          snapshot,
+          IREE_HAL_VULKAN_DEVICE_EXTENSION_KHR_WORKGROUP_MEMORY_EXPLICIT_LAYOUT,
+          VK_KHR_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_EXTENSION_NAME, plan));
   if (!iree_all_bits_set(
           plan->enabled_extensions,
           IREE_HAL_VULKAN_DEVICE_EXTENSION_EXT_SHADER_ATOMIC_FLOAT)) {
@@ -976,6 +981,50 @@ iree_status_t iree_hal_vulkan_device_plan_initialize_for_create(
           IREE_HAL_VULKAN_FEATURE_ENABLE_VULKAN_MEMORY_MODEL_DEVICE_SCOPE,
           out_plan->enabled_features12.vulkanMemoryModelDeviceScope,
           "vulkanMemoryModelDeviceScope", &out_plan->enabled_features.general));
+  const bool workgroup_layout_available =
+      iree_hal_vulkan_physical_device_has_extension(
+          snapshot,
+          IREE_HAL_VULKAN_DEVICE_EXTENSION_KHR_WORKGROUP_MEMORY_EXPLICIT_LAYOUT) &&
+      snapshot->workgroup_memory_features.workgroupMemoryExplicitLayout;
+  out_plan->enabled_workgroup_memory_features =
+      (VkPhysicalDeviceWorkgroupMemoryExplicitLayoutFeaturesKHR){
+          .sType =
+              VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_FEATURES_KHR,
+      };
+  IREE_RETURN_IF_ERROR(
+      iree_hal_vulkan_device_plan_select_reported_general_feature(
+          required_features.general,
+          IREE_HAL_VULKAN_FEATURE_ENABLE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT,
+          workgroup_layout_available, "workgroupMemoryExplicitLayout",
+          &out_plan->enabled_features.general));
+  out_plan->enabled_workgroup_memory_features.workgroupMemoryExplicitLayout =
+      iree_all_bits_set(
+          out_plan->enabled_features.general,
+          IREE_HAL_VULKAN_FEATURE_ENABLE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT);
+  IREE_RETURN_IF_ERROR(iree_hal_vulkan_device_plan_select_reported_general_feature(
+      required_features.general,
+      IREE_HAL_VULKAN_FEATURE_ENABLE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_8BIT_ACCESS,
+      workgroup_layout_available &&
+          snapshot->workgroup_memory_features
+              .workgroupMemoryExplicitLayout8BitAccess,
+      "workgroupMemoryExplicitLayout8BitAccess",
+      &out_plan->enabled_features.general));
+  out_plan->enabled_workgroup_memory_features
+      .workgroupMemoryExplicitLayout8BitAccess = iree_all_bits_set(
+      out_plan->enabled_features.general,
+      IREE_HAL_VULKAN_FEATURE_ENABLE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_8BIT_ACCESS);
+  IREE_RETURN_IF_ERROR(iree_hal_vulkan_device_plan_select_reported_general_feature(
+      required_features.general,
+      IREE_HAL_VULKAN_FEATURE_ENABLE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_16BIT_ACCESS,
+      workgroup_layout_available &&
+          snapshot->workgroup_memory_features
+              .workgroupMemoryExplicitLayout16BitAccess,
+      "workgroupMemoryExplicitLayout16BitAccess",
+      &out_plan->enabled_features.general));
+  out_plan->enabled_workgroup_memory_features
+      .workgroupMemoryExplicitLayout16BitAccess = iree_all_bits_set(
+      out_plan->enabled_features.general,
+      IREE_HAL_VULKAN_FEATURE_ENABLE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_16BIT_ACCESS);
   const bool cooperative_matrix_available =
       iree_hal_vulkan_physical_device_has_extension(
           snapshot, IREE_HAL_VULKAN_DEVICE_EXTENSION_KHR_COOPERATIVE_MATRIX) &&
@@ -1196,6 +1245,32 @@ static iree_status_t iree_hal_vulkan_verify_external_enabled_features(
           shader_fma_available &&
               snapshot->shader_fma_features.shaderFmaFloat64,
           "shaderFmaFloat64"));
+  const bool workgroup_layout_available =
+      iree_hal_vulkan_physical_device_has_extension(
+          snapshot,
+          IREE_HAL_VULKAN_DEVICE_EXTENSION_KHR_WORKGROUP_MEMORY_EXPLICIT_LAYOUT) &&
+      snapshot->workgroup_memory_features.workgroupMemoryExplicitLayout;
+  IREE_RETURN_IF_ERROR(
+      iree_hal_vulkan_device_plan_verify_external_reported_general_feature(
+          enabled_features.general,
+          IREE_HAL_VULKAN_FEATURE_ENABLE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT,
+          workgroup_layout_available, "workgroupMemoryExplicitLayout"));
+  IREE_RETURN_IF_ERROR(
+      iree_hal_vulkan_device_plan_verify_external_reported_general_feature(
+          enabled_features.general,
+          IREE_HAL_VULKAN_FEATURE_ENABLE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_8BIT_ACCESS,
+          workgroup_layout_available &&
+              snapshot->workgroup_memory_features
+                  .workgroupMemoryExplicitLayout8BitAccess,
+          "workgroupMemoryExplicitLayout8BitAccess"));
+  IREE_RETURN_IF_ERROR(
+      iree_hal_vulkan_device_plan_verify_external_reported_general_feature(
+          enabled_features.general,
+          IREE_HAL_VULKAN_FEATURE_ENABLE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_16BIT_ACCESS,
+          workgroup_layout_available &&
+              snapshot->workgroup_memory_features
+                  .workgroupMemoryExplicitLayout16BitAccess,
+          "workgroupMemoryExplicitLayout16BitAccess"));
   const bool shader_bfloat16_extension_available =
       iree_hal_vulkan_physical_device_has_extension(
           snapshot, IREE_HAL_VULKAN_DEVICE_EXTENSION_KHR_SHADER_BFLOAT16);
@@ -1354,6 +1429,17 @@ static iree_status_t iree_hal_vulkan_verify_external_device_contract(
         IREE_STATUS_FAILED_PRECONDITION,
         "external Vulkan VkDevice enabled cooperativeMatrix without reporting "
         "VK_KHR_cooperative_matrix as enabled");
+  }
+  if (iree_any_bit_set(
+          external_device_params->enabled_features.general,
+          IREE_HAL_VULKAN_FEATURE_ENABLE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT) &&
+      !iree_all_bits_set(
+          external_device_params->enabled_extensions,
+          IREE_HAL_VULKAN_DEVICE_EXTENSION_KHR_WORKGROUP_MEMORY_EXPLICIT_LAYOUT)) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "external Vulkan VkDevice enabled workgroupMemoryExplicitLayout "
+        "without reporting VK_KHR_workgroup_memory_explicit_layout as enabled");
   }
   const iree_hal_vulkan_general_features_t shader_fma_features =
       IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_FMA_FLOAT16 |
@@ -1633,6 +1719,10 @@ iree_status_t iree_hal_vulkan_device_plan_initialize_for_wrap(
 static void iree_hal_vulkan_device_plan_refresh_feature_chain(
     iree_hal_vulkan_device_plan_t* plan) {
   void* feature_chain = NULL;
+  if (plan->enabled_workgroup_memory_features.workgroupMemoryExplicitLayout) {
+    plan->enabled_workgroup_memory_features.pNext = feature_chain;
+    feature_chain = &plan->enabled_workgroup_memory_features;
+  }
   if (plan->enabled_shader_float_controls2_features.shaderFloatControls2) {
     plan->enabled_shader_float_controls2_features.pNext = feature_chain;
     feature_chain = &plan->enabled_shader_float_controls2_features;

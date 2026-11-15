@@ -85,6 +85,7 @@ static iree_status_t loom_target_verify_projection(
     const loom_target_projection_t* projection,
     iree_diagnostic_emitter_t emitter) {
   switch (projection->value_kind) {
+    case LOOM_TARGET_PROJECTION_VALUE_BITS64:
     case LOOM_TARGET_PROJECTION_VALUE_ENUM_U8:
     case LOOM_TARGET_PROJECTION_VALUE_STRING_VIEW:
     case LOOM_TARGET_PROJECTION_VALUE_CONTRACT_SET:

@@ -305,7 +305,7 @@ _TARGET_PROJECTION_FIELDS: dict[str, tuple[str, str]] = {
     "export_symbol": ("LOOM_TARGET_PROJECTION_VALUE_STRING_VIEW", "export_plan.export_symbol"),
     "linkage": ("LOOM_TARGET_PROJECTION_VALUE_ENUM_U8", "export_plan.linkage"),
     "contract_set_key": ("LOOM_TARGET_PROJECTION_VALUE_CONTRACT_SET", "config.contract_set"),
-    "contract_feature_bits": ("LOOM_TARGET_PROJECTION_VALUE_I64_TO_U64", "config.contract_feature_bits"),
+    "contract_feature_bits": ("LOOM_TARGET_PROJECTION_VALUE_BITS64", "config.contract_feature_bits"),
 }
 
 
