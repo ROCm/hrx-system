@@ -17,6 +17,7 @@
 #include "loom/target/arch/spirv/value_types.h"
 #include "loom/transforms/kernel/target_legalization.h"
 #include "loom/transforms/scalar/target_legalization.h"
+#include "loom/transforms/vector/cast_packet_legalization.h"
 #include "loom/transforms/vector/packet_insert_legalization.h"
 #include "loom/transforms/vector/packet_legalization.h"
 #include "loom/transforms/vector/shape_legalization.h"
@@ -235,13 +236,20 @@ static iree_status_t loom_spirv_legalize_vector_to_scalar(
   return iree_ok_status();
 }
 
-static bool loom_spirv_type_has_ordinary_vector_carrier(loom_type_t type) {
-  loom_spirv_value_type_t value_type = {0};
-  if (!loom_spirv_value_type_from_loom_type(type, &value_type)) {
-    return false;
+static iree_status_t loom_spirv_legalize_vector_bitcast(
+    const loom_target_legalizer_entry_t* entry,
+    loom_target_legalization_context_t* context, loom_op_t* op,
+    loom_target_legalizer_result_t* out_result) {
+  bool rewritten = false;
+  IREE_RETURN_IF_ERROR(loom_vector_packet_legalize_bitcast(
+      context, op, context->vector_packet_policy, &rewritten));
+  if (rewritten) {
+    *out_result = (loom_target_legalizer_result_t){
+        .action = LOOM_TARGET_LEGALIZER_ACTION_REWRITTEN,
+    };
+    return iree_ok_status();
   }
-  return value_type.value_class == LOOM_SPIRV_VALUE_CLASS_VECTOR ||
-         value_type.value_class == LOOM_SPIRV_VALUE_CLASS_BOOL_VECTOR;
+  return loom_spirv_legalize_vector_to_scalar(entry, context, op, out_result);
 }
 
 static iree_status_t loom_spirv_legalize_vector_store(
@@ -259,7 +267,8 @@ static iree_status_t loom_spirv_legalize_vector_store(
   if (!rewritten && context->mode == LOOM_TARGET_LEGALIZATION_MODE_FINAL) {
     const loom_type_t value_type =
         loom_module_value_type(context->module, loom_vector_store_value(op));
-    if (loom_spirv_type_has_ordinary_vector_carrier(value_type)) {
+    if (loom_target_legalization_has_source_vector_carrier(
+            context, value_type, loom_vector_store_value(op))) {
       IREE_RETURN_IF_ERROR(loom_vector_store_captured_to_scalar_rewrite_op(
           context->pass, context->rewriter, op, &rewritten));
     }
@@ -555,7 +564,7 @@ static const loom_target_legalizer_rule_t kSpirvLegalizerRules[] = {
     {
         .root_kind = LOOM_OP_VECTOR_BITCAST,
         .flags = LOOM_TARGET_LEGALIZER_ENTRY_FLAG_REQUIRE_CONTRACT_REJECTION,
-        .legalize = loom_spirv_legalize_vector_to_scalar,
+        .legalize = loom_spirv_legalize_vector_bitcast,
     },
     {
         .root_kind = LOOM_OP_VECTOR_FPTRUNC,

@@ -15,11 +15,11 @@
 extern "C" {
 #endif
 
-// Packetizes a static rank-one, equal-lane vector.bitcast operation whose
-// carrier exceeds the target contract. A target legalizer invokes this only
-// when equal-width packet bitcasts are storage aliases. Explicit contract
-// rejections remain authoritative; an unhandled packet is admitted only when
-// both packet carriers have complete target mappings. Returns false through
+// Packetizes a static rank-one vector.bitcast operation whose carrier exceeds
+// the target contract. Each packet preserves the source/result bit count and
+// is admitted by a projected contract query. Equal-width bitcasts may also
+// alias storage when both packet carriers have complete target mappings;
+// explicit contract rejections remain authoritative. Returns false through
 // |out_rewritten| when no exact, bounded packet schema is admitted.
 iree_status_t loom_vector_packet_legalize_bitcast(
     loom_target_legalization_context_t* context, loom_op_t* op,

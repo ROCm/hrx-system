@@ -274,6 +274,13 @@ loom_check_test_suite(
 )
 
 loom_check_test_suite(
+    name = "packet_bitcast_tests",
+    srcs = ["packet_bitcasts.loom-test"],
+    tags = ["hostonly"],
+    target_compatible_with = loom_config_compatible_with(["//loom/config/emit:spirv_binary"]),
+)
+
+loom_check_test_suite(
     name = "interleave_tests",
     srcs = ["interleave.loom-test"],
     tags = ["hostonly"],
