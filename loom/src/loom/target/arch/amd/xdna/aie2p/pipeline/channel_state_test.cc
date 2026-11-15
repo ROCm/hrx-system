@@ -331,6 +331,11 @@ class ChannelStateTest : public ::testing::Test {
     ASSERT_TRUE(valid);
   }
 
+  void SelectCursorFrames() {
+    IREE_ASSERT_OK(
+        loom_aie2p_native_select_cursor_frames(&context_, &realization_));
+  }
+
   // Module and retained-plan allocation backing.
   iree_arena_block_pool_t blocks_;
   // Per-test retained state.
@@ -382,12 +387,44 @@ TEST_F(ChannelStateTest, EntryResetsOnlyOwnedFrameCellsOnTheirEngine) {
                                 true);
   loom_aie2p_native_cursor_bind(&channels_[3].cursor.reader, 3, 0, 2, true,
                                 false);
+  SelectCursorFrames();
+  EXPECT_EQ(context_.cursor_frame_byte_lengths[0], 0u);
+  EXPECT_EQ(context_.cursor_frame_byte_lengths[1], 12u);
   EXPECT_EQ(ResetOffsets(0, 1), (std::vector<int64_t>{0}));
-  EXPECT_EQ(ResetOffsets(1, 1), (std::vector<int64_t>{8, 20}));
+  EXPECT_EQ(ResetOffsets(1, 1), (std::vector<int64_t>{4, 8}));
   EXPECT_TRUE(ResetOffsets(1, 0).empty());
   EXPECT_TRUE(ResetOffsets(2, 1).empty());
   // Reentry initializes the same cells, without touching the borrowed root.
-  EXPECT_EQ(ResetOffsets(1, 1), (std::vector<int64_t>{8, 20}));
+  EXPECT_EQ(ResetOffsets(1, 1), (std::vector<int64_t>{4, 8}));
+}
+
+TEST_F(ChannelStateTest, FramesContainOnlyTheirEnginesPersistentCursors) {
+  loom_aie2p_native_cursor_bind(&channels_[0].cursor.reader, 3, 0, 1, true,
+                                true);
+  loom_aie2p_native_cursor_bind(&channels_[0].cursor.writer, 3, 1, 1, true,
+                                true);
+  loom_aie2p_native_cursor_bind(&channels_[1].cursor.reader, 3, 0, 1, true,
+                                true);
+  // A worker-local cursor remains SSA, even though it advances.
+  loom_aie2p_native_cursor_bind(&channels_[1].cursor.writer, 3, 1, 2, true,
+                                false);
+  // Single-slot protocols require no cursor, including across child calls.
+  loom_aie2p_native_cursor_bind(&channels_[2].cursor.reader, 1, 0, 2, true,
+                                true);
+  // Autonomous DMA retains its own iterator, not a core frame cell.
+  engines_[2] = IREE_HOST_SIZE_MAX;
+  loom_aie2p_native_cursor_bind(&channels_[2].cursor.writer, 3, 2, 1, true,
+                                true);
+  SelectCursorFrames();
+  EXPECT_EQ(context_.cursor_frame_byte_lengths[0], 4u);
+  EXPECT_EQ(context_.cursor_frame_byte_lengths[1], 8u);
+  EXPECT_EQ(channels_[0].cursor.reader.frame_byte_offset, 0u);
+  EXPECT_EQ(channels_[0].cursor.writer.frame_byte_offset, 0u);
+  EXPECT_EQ(channels_[1].cursor.reader.frame_byte_offset, 4u);
+  EXPECT_EQ(ResetOffsets(0, 0), (std::vector<int64_t>{0}));
+  EXPECT_EQ(ResetOffsets(0, 1), (std::vector<int64_t>{0}));
+  EXPECT_EQ(ResetOffsets(1, 1), (std::vector<int64_t>{4}));
+  EXPECT_TRUE(ResetOffsets(1, 0).empty());
 }
 
 TEST_F(ChannelStateTest, SharedLocalCursorSurvivesWorkerReturns) {
@@ -398,7 +435,10 @@ TEST_F(ChannelStateTest, SharedLocalCursorSurvivesWorkerReturns) {
   loom_aie2p_native_cursor_bind(cursor, 3, 2, 1, true, false);
   EXPECT_TRUE(loom_aie2p_native_cursor_persistent(&realization_.invocations, 3,
                                                   cursor));
-  EXPECT_EQ(ResetOffsets(2, 1), (std::vector<int64_t>{24}));
+  SelectCursorFrames();
+  EXPECT_EQ(context_.cursor_frame_byte_lengths[0], 0u);
+  EXPECT_EQ(context_.cursor_frame_byte_lengths[1], 4u);
+  EXPECT_EQ(ResetOffsets(2, 1), (std::vector<int64_t>{0}));
 }
 
 TEST_F(ChannelStateTest,

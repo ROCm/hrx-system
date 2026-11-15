@@ -41,6 +41,9 @@ typedef struct loom_aie2p_native_cursor_t {
   // Admissions within the channel's lifetime can select different slots,
   // including admissions from prior invocations of an importing worker.
   bool advances;
+  // Byte offset in the owning core's frame when this cursor is persistent.
+  // Autonomous cursors and worker-local SSA cursors have no frame cell.
+  iree_host_size_t frame_byte_offset;
 } loom_aie2p_native_cursor_t;
 
 // Physical FIFO state. Addresses select storage; identity selects the protocol.
@@ -814,6 +817,8 @@ typedef struct loom_aie2p_native_context_t {
   loom_pipeline_execution_t distribution_execution;
   // Physical core engine per worker; autonomous work has IREE_HOST_SIZE_MAX.
   const iree_host_size_t* core_engines;
+  // Exact persistent cursor storage per core engine, indexed like execution.
+  const iree_host_size_t* cursor_frame_byte_lengths;
   // Distribution path per worker; other execution has IREE_HOST_SIZE_MAX.
   const iree_host_size_t* distribution_engines;
   // Proposed transport-worker equalities from shared physical FIFO cursors.

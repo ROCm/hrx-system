@@ -55,6 +55,13 @@ bool loom_aie2p_native_cursor_persistent(
     const loom_pipeline_invocations_t* invocations, iree_host_size_t channel,
     const loom_aie2p_native_cursor_t* cursor);
 
+// Packs only persistent instruction-owned cursors into each core's frame.
+// Ordinary and collective cursor ownership is final before this selection.
+// Every cell retains its channel construction lifetime across child calls.
+iree_status_t loom_aie2p_native_select_cursor_frames(
+    loom_aie2p_native_context_t* context,
+    const loom_pipeline_realization_t* realization);
+
 // A verified read/write capability selects protocol ownership independently of
 // whether a transfer reads or writes the record's payload bytes.
 const loom_aie2p_native_cursor_t* loom_aie2p_native_record_cursor(
@@ -103,14 +110,12 @@ iree_status_t loom_aie2p_native_initialize_endpoints(
     loom_aie2p_native_context_t* context, loom_builder_t* builder,
     iree_host_size_t engine, const loom_pipeline_invocation_t* invocation);
 
-// Forms one scalar cursor cell in an invocation-private frame. Channel ordinal
-// and direction give a stable identity across child calls. Ordinary private
-// storage promotion carries these cells through the resulting control graph.
-iree_status_t loom_aie2p_native_cursor_view(loom_builder_t* builder,
-                                            loom_value_id_t frame,
-                                            iree_host_size_t channel,
-                                            bool writer,
-                                            loom_value_id_t* out_view);
+// Forms the selected scalar cell in its owning engine's private frame. The
+// channel cursor retains its identity across child calls. Ordinary private
+// storage promotion carries the cell through the resulting control graph.
+iree_status_t loom_aie2p_native_cursor_view(
+    loom_builder_t* builder, loom_value_id_t frame,
+    const loom_aie2p_native_cursor_t* cursor, loom_value_id_t* out_view);
 
 #ifdef __cplusplus
 }  // extern "C"

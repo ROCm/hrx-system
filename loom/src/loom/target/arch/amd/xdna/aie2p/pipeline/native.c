@@ -964,6 +964,8 @@ static iree_status_t loom_aie2p_native_select(
   if (!*out_valid) {
     return iree_ok_status();
   }
+  IREE_RETURN_IF_ERROR(
+      loom_aie2p_native_select_cursor_frames(context, realization));
   return loom_pipeline_resources_check_capacity(
       &realization->resources, realization->function.op,
       context->pass->diagnostic_emitter, out_valid);

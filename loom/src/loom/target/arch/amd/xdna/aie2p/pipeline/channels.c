@@ -643,8 +643,7 @@ iree_status_t loom_aie2p_native_emit_worker(
             code->module, buffer_type, &worker->cursor_state_argument));
       }
       IREE_RETURN_IF_ERROR(loom_aie2p_native_cursor_view(
-          &rewriter->builder, worker->cursor_state_argument,
-          channel - context->channels, direction != 0,
+          &rewriter->builder, worker->cursor_state_argument, cursor,
           &state_views[state_count]));
       const int64_t zero = 0;
       loom_op_t *load = NULL, *cast = NULL;

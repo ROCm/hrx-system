@@ -275,8 +275,8 @@ iree_status_t loom_aie2p_native_collective_begin(
   if (collective->channel->cursor.reader.advances) {
     loom_value_id_t cursor_view;
     IREE_RETURN_IF_ERROR(loom_aie2p_native_cursor_view(
-        builder, state_arguments[0], collective->channel - context->channels,
-        false, &cursor_view));
+        builder, state_arguments[0], &collective->channel->cursor.reader,
+        &cursor_view));
     const int64_t zero = 0;
     const loom_type_t scalar_type = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
     const loom_type_t offset_type = loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET);

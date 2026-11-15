@@ -101,20 +101,49 @@ bool loom_aie2p_native_cursor_persistent(
               invocations->workers[cursor->worker].invocation);
 }
 
+iree_status_t loom_aie2p_native_select_cursor_frames(
+    loom_aie2p_native_context_t* context,
+    const loom_pipeline_realization_t* realization) {
+  iree_host_size_t* byte_lengths = NULL;
+  const iree_host_size_t engine_count = context->execution.engine_count;
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate_array(context->pass->arena, engine_count,
+                                sizeof(*byte_lengths), (void**)&byte_lengths));
+  memset(byte_lengths, 0, engine_count * sizeof(*byte_lengths));
+  context->cursor_frame_byte_lengths = byte_lengths;
+  const loom_pipeline_invocations_t* invocations = &realization->invocations;
+  for (iree_host_size_t i = 0; i < invocations->channel_count; ++i) {
+    loom_aie2p_native_channel_t* channel = &context->channels[i];
+    for (uint32_t direction = 0; direction < 2; ++direction) {
+      loom_aie2p_native_cursor_t* cursor =
+          direction ? &channel->cursor.writer : &channel->cursor.reader;
+      if (cursor->worker == UINT32_MAX ||
+          !loom_aie2p_native_cursor_persistent(invocations, i, cursor)) {
+        continue;
+      }
+      const iree_host_size_t engine = context->core_engines[cursor->worker];
+      if (engine == IREE_HOST_SIZE_MAX) {
+        continue;
+      }
+      cursor->frame_byte_offset = byte_lengths[engine];
+      byte_lengths[engine] += sizeof(uint32_t);
+    }
+  }
+  return iree_ok_status();
+}
+
 const loom_aie2p_native_cursor_t* loom_aie2p_native_record_cursor(
     const loom_aie2p_native_channel_t* channel, loom_type_t capability) {
   return loom_read_type_isa(capability) ? &channel->cursor.reader
                                         : &channel->cursor.writer;
 }
 
-iree_status_t loom_aie2p_native_cursor_view(loom_builder_t* builder,
-                                            loom_value_id_t frame,
-                                            iree_host_size_t channel,
-                                            bool writer,
-                                            loom_value_id_t* out_view) {
+iree_status_t loom_aie2p_native_cursor_view(
+    loom_builder_t* builder, loom_value_id_t frame,
+    const loom_aie2p_native_cursor_t* cursor, loom_value_id_t* out_view) {
   loom_op_t* offset = NULL;
   IREE_RETURN_IF_ERROR(loom_index_constant_build(
-      builder, loom_attr_i64((channel * 2 + writer) * sizeof(uint32_t)),
+      builder, loom_attr_i64(cursor->frame_byte_offset),
       loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET), LOOM_LOCATION_UNKNOWN,
       &offset));
   loom_op_t* view = NULL;
@@ -158,8 +187,8 @@ iree_status_t loom_aie2p_native_initialize_cursors(
             LOOM_LOCATION_UNKNOWN, &zero));
       }
       loom_value_id_t view = LOOM_VALUE_ID_INVALID;
-      IREE_RETURN_IF_ERROR(loom_aie2p_native_cursor_view(
-          builder, frame, i, direction != 0, &view));
+      IREE_RETURN_IF_ERROR(
+          loom_aie2p_native_cursor_view(builder, frame, cursor, &view));
       const int64_t index = 0;
       loom_op_t* store = NULL;
       IREE_RETURN_IF_ERROR(loom_view_store_build(
