@@ -547,3 +547,31 @@ func.def @loop_window(%initial: vector<4xi32>, %count: index) -> (vector<4xi32>)
   }
   func.return %result : vector<4xi32>
 }
+
+// ====
+
+// Row updates keep a larger aggregate partitioned, so later plane extracts
+// do not retain oversized prefix/suffix carriers.
+func.def @updated_planes(%first: vector<8xf32>, %last: vector<8xf32>) -> (vector<4x8xf32>, vector<4x8xf32>) {
+  %seed = vector.splatf 1.0 : vector<2x4x8xf32>
+  %head = vector.insert %first into %seed[0, 0] : vector<8xf32>, vector<2x4x8xf32>
+  %updated = vector.insert %last into %head[1, 3] : vector<8xf32>, vector<2x4x8xf32>
+  %first_plane = vector.extract %updated[0] : vector<2x4x8xf32> -> vector<4x8xf32>
+  %last_plane = vector.extract %updated[1] : vector<2x4x8xf32> -> vector<4x8xf32>
+  func.return %first_plane, %last_plane : vector<4x8xf32>, vector<4x8xf32>
+}
+
+// ----
+func.def @updated_planes(%first: vector<8xf32>, %last: vector<8xf32>) -> (vector<4x8xf32>, vector<4x8xf32>) {
+  %53 = vector.splatf 1.0 : vector<8xf32>
+  %52 = vector.splatf 1.0 : vector<8xf32>
+  %44 = vector.concat<0> %first, %53 : vector<8xf32>, vector<8xf32> -> vector<16xf32>
+  %51 = vector.splatf 1.0 : vector<16xf32>
+  %48 = vector.concat<0> %44, %51 : vector<16xf32>, vector<16xf32> -> vector<32xf32>
+  %43 = vector.splatf 1.0 : vector<16xf32>
+  %39 = vector.concat<0> %52, %last : vector<8xf32>, vector<8xf32> -> vector<16xf32>
+  %41 = vector.concat<0> %43, %39 : vector<16xf32>, vector<16xf32> -> vector<32xf32>
+  %first_plane = vector.bitcast %48 : vector<32xf32> to vector<4x8xf32>
+  %last_plane = vector.bitcast %41 : vector<32xf32> to vector<4x8xf32>
+  func.return %first_plane, %last_plane : vector<4x8xf32>, vector<4x8xf32>
+}

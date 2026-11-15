@@ -24,6 +24,10 @@ extern "C" {
 // permits moving it to the slice. Rank-one singleton broadcasts become one
 // extract and one splat. Returns without rewriting dynamic shapes or expansions
 // above the static operation bound.
+// Static tail insertions retain equal rows when the destination requires
+// packets, avoiding oversized prefix/suffix carriers. Native-size aggregates
+// keep the compact splice, and dynamic insertions retain their bounded choice
+// between row selection and scalar-lane insertion.
 // Rank-one slices and scalar extracts project directly into retained regular
 // vector components when the selected range fits one component. Spanning
 // slices use native fragments or equal aligned pieces of those retained

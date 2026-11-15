@@ -876,12 +876,12 @@ static iree_status_t loom_vector_static_shape_build_dynamic_tail_lane_insert(
   return iree_ok_status();
 }
 
-static iree_status_t loom_vector_static_shape_build_dynamic_tail_row_select(
+static iree_status_t loom_vector_static_shape_build_tail_rows(
     loom_target_legalization_context_t* context, loom_value_id_t flat_value,
     loom_type_t flat_value_type, loom_value_id_t flat_dest,
     loom_type_t flat_dest_type, loom_value_id_t row_ordinal,
-    uint64_t value_count, uint64_t row_count, loom_location_id_t location,
-    loom_value_id_t* out_flat_result) {
+    int64_t static_row_ordinal, uint64_t value_count, uint64_t row_count,
+    loom_location_id_t location, loom_value_id_t* out_flat_result) {
   if (row_count == 1) {
     *out_flat_result = flat_value;
     return iree_ok_status();
@@ -898,11 +898,20 @@ static iree_status_t loom_vector_static_shape_build_dynamic_tail_row_select(
                                                  sizeof(*rows), (void**)&rows));
   loom_builder_t* builder = &context->rewriter->builder;
   for (uint64_t row = 0; row < row_count; ++row) {
+    if (row_ordinal == LOOM_VALUE_ID_INVALID &&
+        row == (uint64_t)static_row_ordinal) {
+      rows[row] = flat_value;
+      continue;
+    }
     const int64_t row_offset = (int64_t)(row * value_count);
     loom_op_t* row_slice_op = NULL;
     IREE_RETURN_IF_ERROR(
         loom_vector_slice_build(builder, flat_dest, NULL, 0, &row_offset, 1,
                                 flat_value_type, location, &row_slice_op));
+    if (row_ordinal == LOOM_VALUE_ID_INVALID) {
+      rows[row] = loom_vector_slice_result(row_slice_op);
+      continue;
+    }
 
     loom_op_t* expected_ordinal_op = NULL;
     IREE_RETURN_IF_ERROR(
@@ -1004,6 +1013,22 @@ static iree_status_t loom_vector_static_shape_insert_rewrite(
           &dynamic_sentinel, 1, flat_dest_type, op->location, &insert_op));
     }
     flat_result = loom_vector_insert_result(insert_op);
+  } else if (dynamic_prefix_ordinal == LOOM_VALUE_ID_INVALID &&
+             row_count <= LOOM_VECTOR_STATIC_SHAPE_OP_LIMIT - 4u &&
+             loom_target_vector_packet_policy_requires_packets(
+                 context->vector_packet_policy, flat_dest_type)) {
+    // Keep a large aggregate in equal rows. A prefix/suffix splice would
+    // introduce irregular carriers that can exceed the target's register
+    // limit, obscuring the native pieces from subsequent projections.
+    loom_value_id_t flat_value = LOOM_VALUE_ID_INVALID;
+    IREE_RETURN_IF_ERROR(loom_vector_static_shape_flatten_value(
+        &rewriter->builder, value, value_type, value_count, op->location,
+        &flat_value));
+    IREE_RETURN_IF_ERROR(loom_vector_static_shape_build_tail_rows(
+        context, flat_value,
+        loom_vector_static_shape_flat_type(value_type, value_count), flat_dest,
+        flat_dest_type, LOOM_VALUE_ID_INVALID, static_prefix_ordinal,
+        value_count, row_count, op->location, &flat_result));
   } else if (dynamic_prefix_ordinal == LOOM_VALUE_ID_INVALID) {
     // A static tail insertion covers one contiguous row-major range. Retain
     // the untouched prefix and suffix as slices around the flattened value.
@@ -1055,11 +1080,10 @@ static iree_status_t loom_vector_static_shape_insert_rewrite(
     const loom_type_t flat_value_type =
         loom_vector_static_shape_flat_type(value_type, value_count);
     if (use_dynamic_row_select) {
-      IREE_RETURN_IF_ERROR(
-          loom_vector_static_shape_build_dynamic_tail_row_select(
-              context, flat_value, flat_value_type, flat_dest, flat_dest_type,
-              dynamic_prefix_ordinal, value_count, row_count, op->location,
-              &flat_result));
+      IREE_RETURN_IF_ERROR(loom_vector_static_shape_build_tail_rows(
+          context, flat_value, flat_value_type, flat_dest, flat_dest_type,
+          dynamic_prefix_ordinal, 0, value_count, row_count, op->location,
+          &flat_result));
     } else {
       IREE_RETURN_IF_ERROR(
           loom_vector_static_shape_build_dynamic_tail_lane_insert(

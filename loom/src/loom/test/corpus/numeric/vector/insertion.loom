@@ -887,3 +887,65 @@ check.scenario @payload_row_insertion_values {
   }
   check.return
 }
+
+// Updates name individual rows, while the final observations select complete
+// planes. The aggregate exceeds one native carrier and every row stays distinct.
+func.def @nested_row_updates(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %planes = index.constant 2 : index
+  %columns = index.constant 4 : index
+  %source = buffer.view %input[%origin] : buffer -> view<2x4x8xf32>
+  %destination = buffer.view %output[%origin] : buffer -> view<2x32xf32>
+  %initial = vector.splatf 0.0 : vector<2x4x8xf32>
+  %result = scf.for %column = [%begin to %columns step %step](%bank = %initial : vector<2x4x8xf32>) -> (vector<2x4x8xf32>) unroll schedule(linear) {
+    %after = scf.for %row = [%begin to %planes step %step](%rows = %bank : vector<2x4x8xf32>) -> (vector<2x4x8xf32>) unroll schedule(linear) {
+      %increment = vector.load %source[%row, %column, 0] : view<2x4x8xf32> -> vector<8xf32>
+      %old = vector.extract %rows[%row, %column] : vector<2x4x8xf32> -> vector<8xf32>
+      %next = vector.addf %old, %increment : vector<8xf32>
+      %updated = vector.insert %next into %rows[%row, %column] : vector<8xf32>, vector<2x4x8xf32>
+      scf.yield %updated : vector<2x4x8xf32>
+    }
+    scf.yield %after : vector<2x4x8xf32>
+  }
+  %first = vector.extract %result[0] : vector<2x4x8xf32> -> vector<4x8xf32>
+  %second = vector.extract %result[1] : vector<2x4x8xf32> -> vector<4x8xf32>
+  %first_flat = vector.bitcast %first : vector<4x8xf32> to vector<32xf32>
+  %second_flat = vector.bitcast %second : vector<4x8xf32> to vector<32xf32>
+  vector.store %second_flat, %destination[0, 0] : vector<32xf32>, view<2x32xf32>
+  vector.store %first_flat, %destination[1, 0] : vector<32xf32>, view<2x32xf32>
+  func.return
+}
+
+func.def @nested_row_updates_oracle(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %end = index.constant 64 : index
+  %step = index.constant 1 : index
+  %plane_bit = index.constant 32 : index
+  %initial_value = scalar.constant 0.0 : f32
+  %source = buffer.view %input[%origin] : buffer -> view<64xf32>
+  %destination = buffer.view %output[%origin] : buffer -> view<64xf32>
+  scf.for %position = [%begin to %end step %step] {
+    %source_position = index.xori %position, %plane_bit : index
+    %value = view.load %source[%source_position] : view<64xf32> -> f32
+    %sum = scalar.addf %initial_value, %value : f32
+    view.store %sum, %destination[%position] : f32, view<64xf32>
+  }
+  func.return
+}
+
+check.scenario @nested_row_update_values {
+  check.trial[4](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-256.0 to 256.0) : tensor<64xf32>
+    %storage = check.generate.fill value(-1024.0) : tensor<68xf32>
+    %output = check.tensor.view %storage offset(8) : tensor<68xf32> -> tensor<64xf32>
+    check.compare<@nested_row_updates, @nested_row_updates_oracle>(%input, %output) : (tensor<64xf32>, tensor<64xf32>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<64xf32>
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<68xf32>
+    }
+  }
+  check.return
+}

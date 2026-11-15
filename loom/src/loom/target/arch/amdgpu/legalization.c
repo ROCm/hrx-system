@@ -392,10 +392,15 @@ static iree_status_t loom_amdgpu_legalize_static_vector_shape(
   bool rewritten = false;
   loom_type_t carrier_type = loom_type_none();
   loom_amdgpu_vector_storage_t carrier_storage = {0};
-  // Rectangular slices and row insertions can preserve native packets within
-  // a larger aggregate. The shared rewrite bounds expansion; packet
-  // legalization retains ownership of the resulting rank-one windows.
-  if (loom_vector_slice_isa(op) || loom_vector_insert_isa(op) ||
+  // Tail extracts, rectangular slices, and row insertions can preserve native
+  // packets within a larger aggregate. The shared rewrite bounds expansion;
+  // packet legalization retains ownership of the resulting rank-one windows.
+  const bool is_tail_extract =
+      loom_vector_extract_isa(op) &&
+      loom_type_is_vector(loom_module_value_type(
+          context->module, loom_vector_extract_result(op)));
+  if (is_tail_extract || loom_vector_slice_isa(op) ||
+      loom_vector_insert_isa(op) ||
       (loom_amdgpu_static_shape_carrier_type(context->module, op,
                                              &carrier_type) &&
        loom_amdgpu_type_vector_storage(carrier_type, &carrier_storage) &&
