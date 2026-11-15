@@ -24,7 +24,9 @@ namespace {
 using SetId = loom_condition_relation_set_id_t;
 
 struct CollectState {
+  // Ordered members reported before iteration stops.
   std::vector<uint32_t>* values;
+  // Maximum number of members accepted by the visitor.
   size_t limit;
 };
 
@@ -502,6 +504,88 @@ TEST_F(ConditionRelationSetTest, PublicationPreservesRelativeLeafPositions) {
         loom_condition_relation_set_index_contains(&index, roots[2], value),
         lower || upper);
   }
+}
+
+TEST_F(ConditionRelationSetTest, SparseDomainUsesFullWidthValueIds) {
+  constexpr uint32_t kValueCount = UINT32_MAX - 1024;
+  auto* builder = AllocateBuilder(kValueCount);
+  const std::vector<uint32_t> values = {kValueCount - 1, 65, 64, 63, 0, 1, 0,
+                                        kValueCount - 2};
+  SetId root = 0;
+  IREE_ASSERT_OK(loom_condition_relation_set_builder_intern(
+      builder, values.data(), values.size(), &root));
+  SetId without_first = 0;
+  IREE_ASSERT_OK(loom_condition_relation_set_builder_difference(
+      builder, root, loom_condition_relation_set_builder_singleton(builder, 0),
+      &without_first));
+  std::array<SetId, 2> roots = {root, without_first};
+  loom_condition_relation_set_index_t index;
+  IREE_ASSERT_OK(loom_condition_relation_set_builder_publish(
+      builder, roots.data(), roots.size(), &retained_arena_, &index));
+  // Sparse construction depends on the tree depth and populated members,
+  // rather than allocating a bitmap spanning this nearly 32-bit domain.
+  EXPECT_LT(scratch_arena_.used_allocation_size, 65536u);
+  ReleaseScratch();
+  for (uint32_t value : values) {
+    EXPECT_TRUE(
+        loom_condition_relation_set_index_contains(&index, roots[0], value));
+    EXPECT_EQ(
+        loom_condition_relation_set_index_contains(&index, roots[1], value),
+        value != 0);
+  }
+  for (uint32_t value :
+       {2u, 62u, 66u, 128u, kValueCount - 3, kValueCount, UINT32_MAX}) {
+    EXPECT_FALSE(
+        loom_condition_relation_set_index_contains(&index, roots[0], value));
+  }
+  std::vector<uint32_t> actual;
+  CollectState state = {&actual, SIZE_MAX};
+  EXPECT_TRUE(loom_condition_relation_set_index_for_each_while(
+      &index, roots[0], CollectValue, &state));
+  EXPECT_EQ(actual, (std::vector<uint32_t>{0, 1, 63, 64, 65, kValueCount - 2,
+                                           kValueCount - 1}));
+}
+
+TEST_F(ConditionRelationSetTest, FailedPublicationPreservesConstructionRoots) {
+  auto* builder = AllocateBuilder(4096);
+  std::vector<uint8_t> members(4096);
+  for (uint32_t value : {1u, 3u, 65u, 2049u, 2051u}) {
+    members[value] = 1;
+  }
+  const SetId construction_root = Intern(builder, members);
+  std::array<SetId, 3> roots = {
+      construction_root,
+      loom_condition_relation_set_builder_singleton(builder, 32),
+      LOOM_CONDITION_RELATION_SET_EMPTY};
+  const auto original_roots = roots;
+  iree_arena_block_pool_t failed_pool;
+  iree_arena_block_pool_initialize(
+      32768,
+      iree_allocator_t{
+          nullptr,
+          [](void*, iree_allocator_command_t, const void*, void**) {
+            return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED);
+          }},
+      &failed_pool);
+  iree_arena_allocator_t failed_arena;
+  iree_arena_initialize(&failed_pool, &failed_arena);
+  loom_condition_relation_set_index_t index;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_RESOURCE_EXHAUSTED,
+      loom_condition_relation_set_builder_publish(
+          builder, roots.data(), roots.size(), &failed_arena, &index));
+  EXPECT_EQ(roots, original_roots);
+  EXPECT_EQ(index.nodes, nullptr);
+  EXPECT_EQ(index.node_count, 0u);
+  iree_arena_deinitialize(&failed_arena);
+  iree_arena_block_pool_deinitialize(&failed_pool);
+
+  IREE_ASSERT_OK(loom_condition_relation_set_builder_publish(
+      builder, roots.data(), roots.size(), &retained_arena_, &index));
+  ReleaseScratch();
+  ExpectIndexMembers(index, roots[0], members);
+  EXPECT_TRUE(loom_condition_relation_set_index_contains(&index, roots[1], 32));
+  EXPECT_EQ(roots[2], LOOM_CONDITION_RELATION_SET_EMPTY);
 }
 
 }  // namespace

@@ -7,9 +7,9 @@
 // Compact finite sets used by condition-relation propagation.
 //
 // Domains of at most 32 values encode membership directly in the set ID.
-// Larger domains use interned dense bitmaps in caller-owned scratch, then
-// publish selected roots into an immutable shared DAG in a longer-lived arena.
-// Consumers retain no dense bitmaps or construction hash tables.
+// Larger domains build immutable shared trees in caller-owned scratch, reusing
+// unchanged subtrees during set algebra. Publication copies only reachable
+// nodes into a longer-lived arena and drops construction indexes.
 
 #ifndef LOOM_ANALYSIS_CONDITION_RELATION_SET_H_
 #define LOOM_ANALYSIS_CONDITION_RELATION_SET_H_
@@ -53,8 +53,8 @@ typedef bool (*loom_condition_relation_set_visit_fn_t)(void* user_data,
                                                        uint32_t value);
 
 // Allocates a set builder in |scratch_arena|. The arena owns the builder, every
-// interned bitmap, and all publication scratch. |value_count| must leave room
-// in the 32-bit ID space for at least one non-singleton node.
+// interned tree node, and all publication scratch. |value_count| must leave
+// room in the 32-bit ID space for at least one non-singleton node.
 iree_status_t loom_condition_relation_set_builder_allocate(
     uint32_t value_count, iree_arena_allocator_t* scratch_arena,
     loom_condition_relation_set_builder_t** out_builder);
