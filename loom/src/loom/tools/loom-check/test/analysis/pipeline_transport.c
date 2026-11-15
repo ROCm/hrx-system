@@ -167,7 +167,9 @@ static iree_status_t loom_check_test_pipeline_transport_print(
       transport->batch_count, transport->stream_count));
   if (transport->batch_count > 1) {
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-        output, "  prefix_cycles=%" PRIu64 "\n", transport->prefix_cycles));
+        output, "  prefix_cycles=%" PRIu64 " batch_order=%s\n",
+        transport->prefix_cycles,
+        transport->batches_in_order ? "sequential" : "interleaved"));
   }
   if (transport->copy_stream) {
     const loom_pipeline_transport_copy_stream_t* stream =

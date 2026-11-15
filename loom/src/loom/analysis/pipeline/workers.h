@@ -231,9 +231,11 @@ typedef struct loom_pipeline_transport_t {
   // a complete run of the final batch. Every copy consumes one blocking read
   // admission; zero when that ordered, non-retained shape is not established.
   uint64_t prefix_cycles;
-  // Exact copy spans indexed by natural loop, retained for nonuniform programs.
+  // Exact copy spans indexed by natural loop, retained for nonuniform programs
+  // and for ordering between several batches.
   const loom_pipeline_transport_loop_t* copy_loops;
-  // Number of copy-loop spans; zero when uniform replay or straight-line.
+  // Number of copy-loop spans; zero for a single uniform batch or
+  // straight-line.
   iree_host_size_t copy_loop_count;
   // Number of uniform repetitions of the whole borrowed-movement sequence, or
   // zero when sites have different loop scopes or execution counts. A
@@ -247,6 +249,10 @@ typedef struct loom_pipeline_transport_t {
   // External source roots cannot change during this closed execution. This
   // proof includes every strand's effects and scoped alias contracts.
   bool sources_stable;
+  // Concatenating each batch's complete dynamic visits preserves copy order.
+  // Otherwise a repeated loop interleaves batches; physical sharing must use
+  // the retained stream or prefix-cycle order instead of whole-batch repeats.
+  bool batches_in_order;
 } loom_pipeline_transport_t;
 
 // Finite interpretation of one retained lifetime or independent-record cycle.

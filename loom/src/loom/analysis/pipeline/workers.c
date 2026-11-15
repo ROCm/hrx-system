@@ -493,6 +493,38 @@ static iree_status_t loom_pipeline_transport_copy_loops(
   return iree_ok_status();
 }
 
+// A repeated loop crossing a batch boundary cannot be represented by executing
+// all visits to one batch before the next. Copy spans and batch ownership are
+// already structural facts; no dynamic visits or source control are traversed.
+static bool loom_pipeline_transport_batches_in_order(
+    const loom_pipeline_transport_batch_t* batches, iree_host_size_t count,
+    const loom_pipeline_transport_loop_t* loops, iree_host_size_t loop_count) {
+  if (count < 2) {
+    return true;
+  }
+  for (iree_host_size_t i = 0; i < loop_count; ++i) {
+    const loom_pipeline_transport_loop_t* loop = &loops[i];
+    if (!loop->begin || loop->iterations < 2) {
+      continue;
+    }
+    // Batches partition the copy table in increasing structural order.
+    iree_host_size_t begin = 0, end = count;
+    while (begin + 1 < end) {
+      const iree_host_size_t middle = begin + (end - begin) / 2;
+      if (batches[middle].copies <= loop->begin) {
+        begin = middle;
+      } else {
+        end = middle;
+      }
+    }
+    const loom_pipeline_transport_batch_t* first = &batches[begin];
+    if (loop->end > first->copies + first->copy_count) {
+      return false;
+    }
+  }
+  return true;
+}
+
 static iree_status_t loom_pipeline_transport_cursor_initialize(
     const loom_pipeline_transport_t* transport,
     const loom_pipeline_transport_copy_t* copies, iree_host_size_t copy_count,
@@ -966,7 +998,8 @@ static iree_status_t loom_pipeline_worker_transport(
   }
   const loom_pipeline_transport_loop_t* copy_loops = NULL;
   iree_host_size_t copy_loop_count = 0;
-  if ((copy_stream || nonuniform_copies) && structure->loops.loop_count) {
+  if ((copy_stream || nonuniform_copies || batch_count > 1) &&
+      structure->loops.loop_count) {
     IREE_RETURN_IF_ERROR(loom_pipeline_transport_copy_loops(
         &structure->loops, worker->loop_trip_counts, copies, copy_count, arena,
         &copy_loops));
@@ -987,7 +1020,9 @@ static iree_status_t loom_pipeline_worker_transport(
       .copy_loops = copy_loops,
       .copy_loop_count = copy_loop_count,
       .repetitions = repetitions,
-      .induction = induction};
+      .induction = induction,
+      .batches_in_order = loom_pipeline_transport_batches_in_order(
+          batches, batch_count, copy_loops, copy_loop_count)};
   if (stream_count) {
     IREE_RETURN_IF_ERROR(
         loom_pipeline_transport_input(arena, structure, blocks, worker));

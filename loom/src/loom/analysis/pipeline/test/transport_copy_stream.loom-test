@@ -56,7 +56,7 @@ pipeline.def<kernel> public @stream() run(%input: buffer, %left_output: buffer, 
 
 // ----
 worker 0: transport=channel-copy execution_counts=exact batches=2 streams=0
-  prefix_cycles=0
+  prefix_cycles=0 batch_order=interleaved
   copy_stream: source=%source records=4 repetitions=3
     copy_order: %left_read->%left %left_read->%left %right_read->%right %right_read->%right
   batch 0: records=1 replays=1
@@ -112,7 +112,7 @@ pipeline.def<kernel> public @stream() run(%input: buffer, %left_output: buffer, 
 
 // ----
 worker 0: transport=channel-copy execution_counts=exact batches=3 streams=0
-  prefix_cycles=0
+  prefix_cycles=0 batch_order=sequential
   copy_stream: source=%source records=4 repetitions=1
     copy_order: %prefix->%right %read->%left %read->%right %read->%left %read->%right %last->%left
   batch 0: records=1 replays=1
@@ -157,7 +157,7 @@ pipeline.def<kernel> public @stream() run(%input: buffer, %left_output: buffer, 
 
 // ----
 worker 0: transport=channel-copy execution_counts=exact batches=2 streams=0
-  prefix_cycles=1
+  prefix_cycles=1 batch_order=sequential
   batch 0: records=1 replays=1
     record 0: admission=%first source=%source admissions=1 transfers=1 final_release=no destinations=%left,%right
   batch 1: records=1 replays=1

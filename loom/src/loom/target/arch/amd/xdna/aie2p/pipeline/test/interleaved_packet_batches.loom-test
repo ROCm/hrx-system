@@ -1,0 +1,87 @@
+// RUN: emit source-low @interleaved target=amd.xdna.aie2p:amd.xdna.strix.17f0_10 output=low
+
+// The producer publishes A, B, A, B. Each input has one slot, so a shared
+// sender that submits A twice before B cannot progress. Fanout needs packet
+// transport, which cannot use the circuit path's prefix refill mechanism.
+func.def inline @consume(%source: channel<tile<16xi32>>, %output: buffer, %origin: offset) {
+  %begin = index.constant 0 : index
+  %end = index.constant 4 : index
+  %step = index.constant 1 : index
+  %stride = index.constant 64 : offset
+  scf.for %record = [%begin to %end step %step] {
+    %read, %payload = channel.acquire %source : channel<tile<16xi32>> -> (read<tile<16xi32>>, view<16xi32>)
+    %relative = index.scale %record, %stride : index, offset -> offset
+    %address = index.add %origin, %relative : offset
+    %destination = buffer.view %output[%address] : buffer -> view<16xi32>
+    %copy = kernel.async.copy %payload to %destination {cache_scope = workgroup, cache_temporal = regular, direction = workgroup_to_global} : view<16xi32> to view<16xi32> -> kernel.async.token
+    %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+    kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+    channel.release %read : read<tile<16xi32>>
+  }
+  func.return
+}
+
+pipeline.def<kernel> public @interleaved() run(%output_arg: buffer) {
+  %output = buffer.assume.alignment %output_arg {minimum_alignment = 64} : buffer
+  %source_pool = pipeline.memory<workgroup>[0, 2] : pool
+  %left_pool = pipeline.memory<workgroup>[0, 3] : pool
+  %right_pool = pipeline.memory<workgroup>[0, 4] : pool
+  %origin = index.constant 0 : offset
+  %right_origin = index.constant 256 : offset
+  %record_bytes = index.constant 64 : offset
+  %capacity = index.constant 1 : index
+  %begin = index.constant 0 : index
+  %end = index.constant 2 : index
+  %step = index.constant 1 : index
+  %first_memory = buffer.alloca<workgroup> pool(%source_pool) align(64) %record_bytes : buffer
+  %second_memory = buffer.alloca<workgroup> pool(%source_pool) align(64) %record_bytes : buffer
+  %left_memory = buffer.alloca<workgroup> pool(%left_pool) align(64) %record_bytes : buffer
+  %right_memory = buffer.alloca<workgroup> pool(%right_pool) align(64) %record_bytes : buffer
+  %first_slots = buffer.view %first_memory[%origin] : buffer -> view<1x16xi32>
+  %second_slots = buffer.view %second_memory[%origin] : buffer -> view<1x16xi32>
+  %left_slots = buffer.view %left_memory[%origin] : buffer -> view<1x16xi32>
+  %right_slots = buffer.view %right_memory[%origin] : buffer -> view<1x16xi32>
+  %first = channel.bind<fifo> %first_slots, %capacity : view<1x16xi32>, index -> channel<tile<16xi32>>
+  %second = channel.bind<fifo> %second_slots, %capacity : view<1x16xi32>, index -> channel<tile<16xi32>>
+  %left = channel.bind<fifo> %left_slots, %capacity : view<1x16xi32>, index -> channel<tile<16xi32>>
+  %right = channel.bind<fifo> %right_slots, %capacity : view<1x16xi32>, index -> channel<tile<16xi32>>
+  pipeline.serial {
+    pipeline.concurrent {
+      pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+        scf.for %record = [%begin to %end step %step] {
+          %write_a, %payload_a = channel.reserve %first : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
+          %values_a = vector.splati 7 : vector<16xi32>
+          vector.store %values_a, %payload_a[0] : vector<16xi32>, view<16xi32>
+          channel.publish %write_a : write<tile<16xi32>>
+          %write_b, %payload_b = channel.reserve %second : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
+          %values_b = vector.splati 9 : vector<16xi32>
+          vector.store %values_b, %payload_b[0] : vector<16xi32>, view<16xi32>
+          channel.publish %write_b : write<tile<16xi32>>
+        }
+      }
+      pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+        scf.for %record = [%begin to %end step %step] {
+          // ERROR@+1: XDNA/051 {requirement="ordered cross-channel copies within a shared DMA queue; whole-batch repeats cannot replace interleaved loop visits"}
+          %read_a, %source_a = channel.acquire %first : channel<tile<16xi32>> -> (read<tile<16xi32>>, view<16xi32>)
+          %left_a, %right_a = channel.fanout %read_a : read<tile<16xi32>> -> (read<tile<16xi32>>, read<tile<16xi32>>)
+          %write_left_a, %target_left_a = channel.reserve %left : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
+          channel.copy %left_a -> %write_left_a : read<tile<16xi32>>, write<tile<16xi32>>
+          %write_right_a, %target_right_a = channel.reserve %right : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
+          channel.copy %right_a -> %write_right_a : read<tile<16xi32>>, write<tile<16xi32>>
+          %read_b, %source_b = channel.acquire %second : channel<tile<16xi32>> -> (read<tile<16xi32>>, view<16xi32>)
+          %left_b, %right_b = channel.fanout %read_b : read<tile<16xi32>> -> (read<tile<16xi32>>, read<tile<16xi32>>)
+          %write_left_b, %target_left_b = channel.reserve %left : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
+          channel.copy %left_b -> %write_left_b : read<tile<16xi32>>, write<tile<16xi32>>
+          %write_right_b, %target_right_b = channel.reserve %right : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
+          channel.copy %right_b -> %write_right_b : read<tile<16xi32>>, write<tile<16xi32>>
+        }
+      }
+      pipeline.strand workers([0, 3], [1, 1], [1, 1]) {
+        func.call @consume(%left, %output, %origin) : (channel<tile<16xi32>>, buffer, offset)
+      }
+      pipeline.strand workers([0, 4], [1, 1], [1, 1]) {
+        func.call @consume(%right, %output, %right_origin) : (channel<tile<16xi32>>, buffer, offset)
+      }
+    }
+  }
+}

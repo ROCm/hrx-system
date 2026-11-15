@@ -993,6 +993,13 @@ iree_status_t loom_aie2p_native_form_worker_distributions(
         context, realization, &source->transport, &windows));
   }
   plan->windows = windows;
+  if (ordered && !streaming && phase_count > 1 &&
+      !source->transport.batches_in_order && !windows) {
+    return loom_aie2p_native_reject(
+        context, source->transport.batches[0].records->admission->op,
+        IREE_SV("ordered cross-channel copies within a shared DMA queue; "
+                "whole-batch repeats cannot replace interleaved loop visits"));
+  }
   loom_aie2p_native_distribution_t* first_phase = NULL;
   for (iree_host_size_t i = 0; i < phase_count; ++i) {
     const loom_pipeline_transport_batch_t* batch =
