@@ -46,7 +46,7 @@ TEST(MaintenanceTest, InvalidConfigurationAcceptsNoAsynchronousWork) {
 TEST(MaintenanceTest, OneTimerUsesTheShortestEnabledPoolPolicy) {
   loom_runtime_host_t* host = nullptr;
   IREE_ASSERT_OK(
-      loom_runtime_host_create(1, nullptr, iree_allocator_system(), &host));
+      loom_runtime_host_create(1, {}, nullptr, iree_allocator_system(), &host));
   const loom_runtime_device_options_t options = {
       .driver = loom_runtime_host_task_driver(host),
       .uri = IREE_SV("task"),

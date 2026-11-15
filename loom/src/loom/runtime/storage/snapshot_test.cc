@@ -32,8 +32,8 @@ constexpr size_t kRangeCount = 70;
 class SnapshotEnvironment : public ::testing::Environment {
  public:
   void SetUp() override {
-    IREE_ASSERT_OK(
-        loom_runtime_host_create(1, nullptr, iree_allocator_system(), &host));
+    IREE_ASSERT_OK(loom_runtime_host_create(1, {}, nullptr,
+                                            iree_allocator_system(), &host));
     IREE_ASSERT_OK(loom_runtime_test_driver_acquire(host, &driver));
   }
 

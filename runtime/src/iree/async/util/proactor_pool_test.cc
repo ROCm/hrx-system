@@ -52,6 +52,7 @@ struct TestRunnerState {
 static iree_status_t TestRunnerCreate(void* user_data,
                                       iree_async_proactor_t* proactor,
                                       uint32_t node_id,
+                                      iree_bitmap_t processor_mask,
                                       iree_allocator_t allocator,
                                       void** out_runner) {
   (void)proactor;
@@ -226,6 +227,17 @@ TEST_F(ProactorPoolTest, CreateZeroNodesFails) {
                         iree_async_proactor_pool_create(
                             0, /*node_ids=*/nullptr, default_options(),
                             iree_allocator_system(), &pool));
+  EXPECT_EQ(pool, nullptr);
+}
+
+TEST_F(ProactorPoolTest, BudgetWithoutStorageFailsBeforeCreation) {
+  auto options = default_options();
+  options.proactor_options.worker_processor_mask.bit_count = 64;
+  iree_async_proactor_pool_t* pool = nullptr;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_async_proactor_pool_create(1, nullptr, options,
+                                      iree_allocator_system(), &pool));
   EXPECT_EQ(pool, nullptr);
 }
 

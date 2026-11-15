@@ -1252,8 +1252,8 @@ class FileDetachGate {
         .user_data = this,
         .create =
             +[](void* user_data, iree_async_proactor_t* proactor,
-                uint32_t node_id, iree_allocator_t allocator,
-                void** out_runner) {
+                uint32_t node_id, iree_bitmap_t processor_mask,
+                iree_allocator_t allocator, void** out_runner) {
               auto* self = static_cast<FileDetachGate*>(user_data);
               self->native_ = proactor->vtable;
               self->forwarding_.vtable = *proactor->vtable;
@@ -1261,7 +1261,8 @@ class FileDetachGate {
               self->forwarding_.vtable.detach_buffer = Detach;
               proactor->vtable = &self->forwarding_.vtable;
               return self->runner_.create(self->runner_.user_data, proactor,
-                                          node_id, allocator, out_runner);
+                                          node_id, processor_mask, allocator,
+                                          out_runner);
             },
         .request_stop =
             +[](void* user_data, void* runner) {

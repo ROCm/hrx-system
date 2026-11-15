@@ -436,6 +436,11 @@ typedef struct iree_async_proactor_options_t {
   // Creation fails if a worker cannot apply it. Zero leaves worker placement
   // unspecified. The caller separately controls the polling thread's affinity.
   iree_thread_affinity_t worker_affinity;
+
+  // Optional CPU budget bounding backend-owned worker affinity. Native CPU IDs
+  // follow iree_thread_create_params_t. Storage is borrowed through creation;
+  // a zero bit_count adds no constraint. Poll runners receive their own budget.
+  iree_bitmap_t worker_processor_mask;
 } iree_async_proactor_options_t;
 
 // Returns default proactor options.

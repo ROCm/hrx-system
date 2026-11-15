@@ -324,7 +324,7 @@ TEST_F(TokenizerLoadTest, CancelledOwnerStillTakesAcceptedConstruction) {
 void TokenizerLoadTest::CheckSingleWorker() {
   loom_runtime_host_t* host = nullptr;
   IREE_ASSERT_OK(
-      loom_runtime_host_create(1, nullptr, iree_allocator_system(), &host));
+      loom_runtime_host_create(1, {}, nullptr, iree_allocator_system(), &host));
   struct loom_runtime_test_tokenizer_load_parent_t {
     // Intrusive shared-worker task.
     loomc_task_t task;

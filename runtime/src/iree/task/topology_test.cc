@@ -7,6 +7,11 @@
 #include "iree/task/topology.h"
 
 #include <cstddef>
+#include <vector>
+
+#if defined(IREE_PLATFORM_WINDOWS)
+#include <windows.h>
+#endif
 
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -144,9 +149,32 @@ TEST(TopologyTest, FromPhysicalCores) {
   iree_task_topology_initialize(&topology);
   IREE_ASSERT_OK(iree_task_topology_initialize_from_physical_cores(
       IREE_TASK_TOPOLOGY_NODE_ID_ANY, IREE_TASK_TOPOLOGY_PERFORMANCE_LEVEL_ANY,
-      IREE_TASK_TOPOLOGY_DISTRIBUTION_SCATTER, kMaxGroupCount, &topology));
+      IREE_TASK_TOPOLOGY_DISTRIBUTION_SCATTER, kMaxGroupCount, {}, &topology));
   EnsureTopologyValid(kMaxGroupCount, &topology);
   iree_task_topology_deinitialize(&topology);
 }
+
+#if defined(IREE_PLATFORM_WINDOWS)
+TEST(TopologyTest, PhysicalCoreBudgetUsesNativeGroupAndProcessor) {
+  PROCESSOR_NUMBER processor;
+  GetCurrentProcessorNumberEx(&processor);
+  const iree_host_size_t processor_id =
+      static_cast<iree_host_size_t>(processor.Group) * 64 + processor.Number;
+  std::vector<uint64_t> words(iree_bitmap_calculate_words(processor_id + 1));
+  iree_bitmap_t budget = {.bit_count = processor_id + 1, .words = words.data()};
+  iree_bitmap_set(budget, processor_id);
+  iree_task_topology_t topology;
+  IREE_ASSERT_OK(iree_task_topology_initialize_from_physical_cores(
+      IREE_TASK_TOPOLOGY_NODE_ID_ANY, IREE_TASK_TOPOLOGY_PERFORMANCE_LEVEL_ANY,
+      IREE_TASK_TOPOLOGY_DISTRIBUTION_SCATTER, 4, budget, &topology));
+  ASSERT_EQ(topology.group_count, 1u);
+  const auto& affinity = topology.groups[0].ideal_thread_affinity;
+  EXPECT_TRUE(affinity.id_assigned);
+  EXPECT_EQ(affinity.group, processor.Group);
+  EXPECT_EQ(affinity.id, processor.Number);
+  EXPECT_FALSE(affinity.smt);
+  iree_task_topology_deinitialize(&topology);
+}
+#endif  // IREE_PLATFORM_WINDOWS
 
 }  // namespace

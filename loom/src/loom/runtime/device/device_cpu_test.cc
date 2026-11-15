@@ -16,7 +16,7 @@ class CpuDeviceTest : public ::testing::TestWithParam<uint32_t> {
  protected:
   void SetUp() override {
     iree_notification_initialize(&notification_);
-    IREE_ASSERT_OK(loom_runtime_host_create(GetParam(), nullptr,
+    IREE_ASSERT_OK(loom_runtime_host_create(GetParam(), {}, nullptr,
                                             iree_allocator_system(), &host_));
   }
 

@@ -21,8 +21,8 @@ class ExecutionWaitTest : public ::testing::Test {
  protected:
   void SetUp() override {
     iree_notification_initialize(&notification_);
-    IREE_ASSERT_OK(
-        loom_runtime_host_create(1, nullptr, iree_allocator_system(), &host_));
+    IREE_ASSERT_OK(loom_runtime_host_create(1, {}, nullptr,
+                                            iree_allocator_system(), &host_));
     iree_async_proactor_t* proactor = nullptr;
     IREE_ASSERT_OK(iree_async_proactor_pool_get(
         loom_runtime_host_proactor_pool(host_), 0, &proactor));

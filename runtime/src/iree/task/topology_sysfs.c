@@ -9,7 +9,7 @@
 // Documentation:
 // https://docs.kernel.org/admin-guide/abi-stable-files.html#abi-file-stable-sysfs-devices-system-cpu
 
-// Must define _GNU_SOURCE before includes to get CPU_* macros from sched.h.
+// Must define _GNU_SOURCE before includes for Linux syscall declarations.
 #define _GNU_SOURCE
 
 #include "iree/base/internal/math.h"
@@ -21,7 +21,6 @@
 
 #include <errno.h>
 #include <fcntl.h>
-#include <sched.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -86,21 +85,11 @@ static uint32_t iree_sysfs_query_processor_count(void) {
   return 0;  // Unknown.
 }
 
-// Queries the CPU set currently available to the calling thread.
-// Returns false if the platform query fails, in which case callers should not
-// constrain sysfs topology discovery to an affinity mask.
-static bool iree_sysfs_query_current_affinity(cpu_set_t* out_cpu_set) {
-  CPU_ZERO(out_cpu_set);
-  return sched_getaffinity(/*pid=*/0, sizeof(*out_cpu_set), out_cpu_set) == 0;
-}
-
-// Returns true if |processor| is currently available to the calling thread.
-static bool iree_sysfs_is_processor_available(
-    uint32_t processor, const cpu_set_t* current_affinity) {
-  if (!current_affinity) {
-    return true;
-  }
-  return processor < CPU_SETSIZE && CPU_ISSET(processor, current_affinity);
+// Returns true if |processor| belongs to the selected application CPU budget.
+static bool iree_sysfs_is_processor_available(uint32_t processor,
+                                              iree_bitmap_t processor_mask) {
+  return processor < processor_mask.bit_count &&
+         iree_bitmap_test(processor_mask, processor);
 }
 
 // Reads the core ID for a specific logical processor.
@@ -794,12 +783,53 @@ iree_status_t iree_task_topology_initialize_from_physical_cores(
     iree_task_topology_node_id_t node_id,
     iree_task_topology_performance_level_t performance_level,
     iree_task_topology_distribution_t distribution,
-    iree_host_size_t max_core_count, iree_task_topology_t* out_topology) {
+    iree_host_size_t max_core_count, iree_bitmap_t processor_mask,
+    iree_task_topology_t* out_topology) {
+  iree_task_topology_initialize(out_topology);
+  if (processor_mask.bit_count && !processor_mask.words) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "processor budget has no bitmap storage");
+  }
+  iree_bitmap_t captured_mask = {0};
+  if (!processor_mask.bit_count) {
+    IREE_RETURN_IF_ERROR(iree_thread_affinity_query_current(
+        iree_allocator_system(), &captured_mask));
+    processor_mask = captured_mask;
+  }
+  if (iree_bitmap_none_set(processor_mask)) {
+    iree_allocator_free(iree_allocator_system(), captured_mask.words);
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "processor budget contains no CPUs");
+  }
+
   uint32_t processor_count = iree_sysfs_query_processor_count();
   if (processor_count == 0) {
-    // Fallback to single-group topology.
-    iree_task_topology_initialize_from_group_count(1, out_topology);
+    // Without physical topology, keep the single-worker policy while honoring
+    // the CPU identity that the application budget still supplies.
+    iree_task_topology_initialize_from_group_count(iree_min(max_core_count, 1),
+                                                   out_topology);
+    if (out_topology->group_count) {
+      const uint32_t processor =
+          (uint32_t)iree_bitmap_find_first_set(processor_mask, 0);
+      out_topology->groups[0].processor_index = processor;
+      out_topology->groups[0].ideal_thread_affinity.id_assigned = 1;
+      out_topology->groups[0].ideal_thread_affinity.id = processor;
+    }
+    iree_allocator_free(iree_allocator_system(), captured_mask.words);
     return iree_ok_status();
+  }
+
+  // Ignore budget capacity beyond the machine's possible CPU IDs. Padding and
+  // sparse IDs must not bias the randomized start toward the first real CPU.
+  processor_mask.bit_count =
+      iree_min(processor_mask.bit_count, processor_count);
+  const iree_host_size_t available_cpu_count =
+      iree_bitmap_count(processor_mask);
+  if (!available_cpu_count) {
+    iree_allocator_free(iree_allocator_system(), captured_mask.words);
+    return iree_make_status(
+        IREE_STATUS_UNAVAILABLE,
+        "processor budget contains no CPUs in the topology");
   }
 
   max_core_count = iree_min(max_core_count, IREE_TASK_TOPOLOGY_MAX_GROUP_COUNT);
@@ -824,17 +854,6 @@ iree_status_t iree_task_topology_initialize_from_physical_cores(
   IREE_TRACE_ZONE_BEGIN(z0);
   IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, (int64_t)max_core_count);
 
-  iree_task_topology_initialize(out_topology);
-
-  // Sysfs describes the host machine, not necessarily the processor set this
-  // process is allowed to run on. Constrain topology discovery with the current
-  // affinity mask so cgroups, cpusets, taskset, and qemu-user test runners do
-  // not create worker groups that can never execute.
-  cpu_set_t current_affinity;
-  const cpu_set_t* current_affinity_ptr =
-      iree_sysfs_query_current_affinity(&current_affinity) ? &current_affinity
-                                                           : NULL;
-
   // Find unique cores by enumerating processors and grouping by core_id.
   // We build a simple map of core_id -> first processor in that core.
   // Randomize the base so independent pools, including those created by the
@@ -845,18 +864,16 @@ iree_status_t iree_task_topology_initialize_from_physical_cores(
       (uint64_t)iree_time_now() ^ (uint64_t)(uintptr_t)out_topology,
       &placement_prng);
   const uint64_t placement = iree_prng_splitmix64_next(&placement_prng);
-  uint32_t first_cpu = placement % processor_count;
-  if (current_affinity_ptr) {
-    // Choose an allowed processor directly: starting inside an excluded gap
-    // would bias every such draw toward the first processor after that gap.
-    uint32_t remaining = placement % CPU_COUNT(current_affinity_ptr);
-    for (first_cpu = 0; first_cpu < processor_count; ++first_cpu) {
-      if (iree_sysfs_is_processor_available(first_cpu, current_affinity_ptr)) {
-        if (remaining == 0) {
-          break;
-        }
-        --remaining;
+  // Choose an allowed processor directly: starting inside an excluded gap
+  // would bias every such draw toward the first processor after that gap.
+  uint32_t first_cpu = 0;
+  iree_host_size_t remaining = placement % available_cpu_count;
+  for (; first_cpu < processor_count; ++first_cpu) {
+    if (iree_sysfs_is_processor_available(first_cpu, processor_mask)) {
+      if (remaining == 0) {
+        break;
       }
+      --remaining;
     }
   }
   uint32_t core_map[IREE_TASK_TOPOLOGY_MAX_GROUP_COUNT];
@@ -864,7 +881,7 @@ iree_status_t iree_task_topology_initialize_from_physical_cores(
   for (uint32_t ordinal = 0;
        ordinal < processor_count && core_count < max_core_count; ++ordinal) {
     const uint32_t cpu = (first_cpu + ordinal) % processor_count;
-    if (!iree_sysfs_is_processor_available(cpu, current_affinity_ptr)) {
+    if (!iree_sysfs_is_processor_available(cpu, processor_mask)) {
       continue;
     }
 
@@ -997,6 +1014,12 @@ iree_status_t iree_task_topology_initialize_from_physical_cores(
 
   iree_status_t status =
       iree_task_topology_fixup_constructive_sharing_masks(out_topology);
+  if (iree_status_is_ok(status) && max_core_count && !core_count) {
+    status = iree_make_status(IREE_STATUS_UNAVAILABLE,
+                              "no physical cores satisfy the processor budget "
+                              "and topology filters");
+  }
+  iree_allocator_free(iree_allocator_system(), captured_mask.words);
   IREE_TRACE_ZONE_END(z0);
   return status;
 }

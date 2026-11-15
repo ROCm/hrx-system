@@ -25,8 +25,8 @@ class RelocationTest : public ::testing::Test {
   void SetUp() override {
     loom_runtime_retirement_initialize(&retirement);
     loom_runtime_host_t* host = nullptr;
-    IREE_ASSERT_OK(
-        loom_runtime_host_create(1, nullptr, iree_allocator_system(), &host));
+    IREE_ASSERT_OK(loom_runtime_host_create(1, {}, nullptr,
+                                            iree_allocator_system(), &host));
     iree_hal_driver_t* driver = nullptr;
     IREE_ASSERT_OK(loom_runtime_test_driver_acquire(host, &driver));
     const loom_runtime_device_options_t options = {
