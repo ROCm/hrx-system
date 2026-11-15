@@ -1369,8 +1369,8 @@ iree_status_t loom_aie2p_native_select_worker_distributions(
   return iree_ok_status();
 }
 
-// The controller and distributor retain the same sequence of complete FIFO
-// turns. Bind those existing ownership events once; emission uses the selected
+// The controller and distributor retain the same ordered packet batches.
+// Bind those existing ownership events once; emission uses the selected
 // phase directly and never searches source code or infers cross-worker order.
 iree_status_t loom_aie2p_native_bind_distribution_phases(
     loom_aie2p_native_context_t* context,
@@ -1406,6 +1406,7 @@ iree_status_t loom_aie2p_native_bind_distribution_phases(
     if (!invocation->ordinal || !next[i]) {
       continue;
     }
+    const loom_aie2p_native_distribution_t* first = next[i]->distribution;
     for (const loom_aie2p_native_distribution_phase_t* phase = next[i]; phase;
          phase = phase->next) {
       loom_aie2p_native_distribution_t* distribution = phase->distribution;
@@ -1417,8 +1418,13 @@ iree_status_t loom_aie2p_native_bind_distribution_phases(
         const bool sender = j == 0;
         loom_aie2p_native_distribution_endpoint_t* endpoint =
             sender ? &distribution->sender : &distribution->receivers[j - 1];
-        uint32_t cursor = sender ? endpoint->channel->cursor.writer.worker
-                                 : endpoint->channel->cursor.reader.worker;
+        // One issuer owns each physical queue across all ordered geometries.
+        // Their logical producers/readers may differ, but letting those cores
+        // enqueue independently loses the shared path's descriptor order.
+        const loom_aie2p_native_distribution_endpoint_t* owner =
+            sender ? &first->sender : &first->receivers[j - 1];
+        uint32_t cursor = sender ? owner->channel->cursor.writer.worker
+                                 : owner->channel->cursor.reader.worker;
         if (cursor != UINT32_MAX && context->workers[cursor].input) {
           cursor = context->workers[cursor].input->controller;
         }

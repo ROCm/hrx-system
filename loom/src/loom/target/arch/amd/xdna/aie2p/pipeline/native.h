@@ -597,9 +597,10 @@ typedef struct loom_aie2p_native_retirement_t {
   loom_symbol_ref_t function;
 } loom_aie2p_native_retirement_t;
 
-// A finite child endpoint controlled by its producer or consuming core. The
-// child boundary queues it before local work and observes idle after all local
-// async waits, when the core's scalar reply stream is drained.
+// A finite child endpoint controlled by one participating core. Ordered
+// geometries sharing a queue keep its first producer or consuming core as the
+// sole command issuer. The child boundary queues it before local work and
+// observes idle after all local async waits, with scalar replies drained.
 typedef struct loom_aie2p_native_distribution_command_t {
   // Next endpoint controlled by this worker occurrence.
   struct loom_aie2p_native_distribution_command_t* next;

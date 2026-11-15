@@ -55,7 +55,9 @@ iree_status_t loom_aie2p_native_select_worker_distributions(
     const loom_pipeline_realization_t* realization,
     iree_host_size_t worker_index, uint32_t* next_source, bool* out_valid);
 
-// Binds controller publications to their retained ownership intervals.
+// Binds controller publications to their retained ownership intervals. Ordered
+// child geometries sharing a physical queue retain one command issuer even
+// when their logical producers or consumers differ.
 iree_status_t loom_aie2p_native_bind_distribution_phases(
     loom_aie2p_native_context_t* context,
     const loom_pipeline_realization_t* realization, bool* out_valid);
