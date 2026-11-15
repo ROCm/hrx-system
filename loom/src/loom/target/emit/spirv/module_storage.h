@@ -16,6 +16,7 @@
 #include "iree/base/api.h"
 #include "loom/ir/ir.h"
 #include "loom/target/emit/spirv/binary_writer.h"
+#include "loom/target/emit/spirv/entry_interface.h"
 #include "loom/target/emit/spirv/module_builder.h"
 #include "loom/target/emit/spirv/module_types.h"
 #include "loom/target/emit/spirv/module_values.h"
@@ -30,6 +31,7 @@ iree_status_t loom_spirv_module_storage_emit_address(
     loom_spirv_type_context_t* type_context,
     loom_spirv_module_builder_t* builder,
     loom_spirv_binary_writer_t* function_variables,
+    loom_spirv_entry_interface_t* entry_interface, uint32_t function_id,
     loom_spirv_module_value_ref_t* out_value_ref);
 
 #ifdef __cplusplus

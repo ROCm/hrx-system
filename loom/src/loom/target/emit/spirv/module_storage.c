@@ -60,6 +60,7 @@ static iree_status_t loom_spirv_module_storage_emit_variable(
     loom_spirv_type_context_t* type_context,
     loom_spirv_module_builder_t* builder,
     loom_spirv_binary_writer_t* function_variables,
+    loom_spirv_entry_interface_t* entry_interface, uint32_t function_id,
     loom_spirv_module_value_ref_t* out_value_ref) {
   const uint32_t storage_class =
       value_type.value_class == LOOM_SPIRV_VALUE_CLASS_PTR_FUNCTION_ARRAY
@@ -82,6 +83,11 @@ static iree_status_t loom_spirv_module_storage_emit_variable(
           : loom_spirv_module_builder_section(
                 builder, LOOM_SPIRV_MODULE_SECTION_DECLARATION),
       LOOM_SPIRV_OP_VARIABLE, operands, IREE_ARRAYSIZE(operands)));
+  if (storage_class == LOOM_SPIRV_STORAGE_CLASS_WORKGROUP) {
+    IREE_RETURN_IF_ERROR(loom_spirv_entry_interface_declare(
+        entry_interface, function_id, variable_id,
+        type_context->scratch_arena));
+  }
   *out_value_ref = (loom_spirv_module_value_ref_t){
       .id = variable_id,
       .type_id = array_pointer_type_id,
@@ -95,6 +101,7 @@ iree_status_t loom_spirv_module_storage_emit_address(
     loom_spirv_type_context_t* type_context,
     loom_spirv_module_builder_t* builder,
     loom_spirv_binary_writer_t* function_variables,
+    loom_spirv_entry_interface_t* entry_interface, uint32_t function_id,
     loom_spirv_module_value_ref_t* out_value_ref) {
   IREE_ASSERT_ARGUMENT(value_table);
   IREE_ASSERT_ARGUMENT(op);
@@ -136,7 +143,7 @@ iree_status_t loom_spirv_module_storage_emit_address(
 
   IREE_RETURN_IF_ERROR(loom_spirv_module_storage_emit_variable(
       reserve_op, value_type, type_context, builder, function_variables,
-      out_value_ref));
+      entry_interface, function_id, out_value_ref));
   loom_spirv_module_value_table_define(value_table, storage, *out_value_ref);
   return iree_ok_status();
 }

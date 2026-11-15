@@ -1139,7 +1139,7 @@ loom_spirv_emit_lookup_function(loom_spirv_emit_state_t* state,
   return &state->context->emission_plans[function_index];
 }
 
-static void loom_spirv_emit_merge_function_requirements(
+static iree_status_t loom_spirv_emit_merge_function_requirements(
     loom_spirv_emit_state_t* state,
     const loom_spirv_function_emission_plan_t* callee) {
   IREE_ASSERT(callee->emission_complete,
@@ -1154,6 +1154,9 @@ static void loom_spirv_emit_merge_function_requirements(
                 state->builtin_interface_variable_ids[i] == variable_id);
     state->builtin_interface_variable_ids[i] = variable_id;
   }
+  return loom_spirv_entry_interface_include(
+      &state->emission_plan->entry_interface, state->function_id,
+      &callee->entry_interface, state->scratch_arena);
 }
 
 static iree_status_t loom_spirv_emit_low_func_call(
@@ -1183,7 +1186,8 @@ static iree_status_t loom_spirv_emit_low_func_call(
   IREE_RETURN_IF_ERROR(loom_spirv_binary_write_instruction(
       loom_spirv_emit_section(state, LOOM_SPIRV_MODULE_SECTION_FUNCTION),
       LOOM_SPIRV_OP_FUNCTION_CALL, operands, operand_count));
-  loom_spirv_emit_merge_function_requirements(state, callee);
+  IREE_RETURN_IF_ERROR(
+      loom_spirv_emit_merge_function_requirements(state, callee));
 
   const loom_value_slice_t results = loom_low_func_call_results(op);
   if (results.count == 0) {
@@ -1279,7 +1283,8 @@ iree_status_t loom_spirv_emit_low_op(loom_spirv_emit_state_t* state,
     loom_spirv_module_value_ref_t value_ref = {0};
     IREE_RETURN_IF_ERROR(loom_spirv_module_storage_emit_address(
         &state->value_table, op, state->type_context, state->builder,
-        &state->function_variables, &value_ref));
+        &state->function_variables, &state->emission_plan->entry_interface,
+        state->function_id, &value_ref));
     const loom_spirv_feature_bits_t feature_bits =
         loom_spirv_scalar_type_descriptor(value_ref.value_type.scalar_type)
             ->required_feature_bits;
@@ -1375,30 +1380,29 @@ static iree_status_t loom_spirv_emit_float_execution_mode(
       LOOM_SPIRV_OP_EXECUTION_MODE, operands, IREE_ARRAYSIZE(operands));
 }
 
-static iree_status_t loom_spirv_emit_entry_point(
+static iree_status_t loom_spirv_emit_entry_metadata(
     loom_spirv_emit_state_t* state) {
   const iree_string_view_t entry_name = loom_spirv_emit_export_name(state);
   loom_spirv_module_abi_context_t context = loom_spirv_emit_abi_context(state);
   IREE_RETURN_IF_ERROR(loom_spirv_module_abi_emit_entry_metadata(
       &context, &state->abi_plan, entry_name));
-  const uint32_t prefix_operands[] = {
-      LOOM_SPIRV_EXECUTION_MODEL_GL_COMPUTE,
-      state->function_id,
-  };
-  uint32_t interface_operands[LOOM_SPIRV_BUILTIN_VARIABLE_COUNT] = {0};
-  iree_host_size_t interface_operand_count = 0;
-  for (iree_host_size_t i = 0; i < LOOM_SPIRV_BUILTIN_VARIABLE_COUNT; ++i) {
-    if (state->builtin_interface_variable_ids[i] != 0) {
-      interface_operands[interface_operand_count++] =
-          state->builtin_interface_variable_ids[i];
+  if (state->abi_plan.kind == LOOM_SPIRV_MODULE_ABI_PLAN_SHADER_ENTRY) {
+    const loom_spirv_module_abi_slot_t* slots[] = {state->abi_plan.args,
+                                                   state->abi_plan.results};
+    const iree_host_size_t counts[] = {state->abi_plan.arg_count,
+                                       state->abi_plan.result_count};
+    for (iree_host_size_t group = 0; group < IREE_ARRAYSIZE(slots); ++group) {
+      for (iree_host_size_t i = 0; i < counts[group]; ++i) {
+        IREE_RETURN_IF_ERROR(loom_spirv_entry_interface_declare(
+            &state->emission_plan->entry_interface, state->function_id,
+            slots[group][i].variable_id, state->scratch_arena));
+      }
     }
+  } else if (state->abi_plan.bda_root.variable_id != 0) {
+    IREE_RETURN_IF_ERROR(loom_spirv_entry_interface_declare(
+        &state->emission_plan->entry_interface, state->function_id,
+        state->abi_plan.bda_root.variable_id, state->scratch_arena));
   }
-  IREE_RETURN_IF_ERROR(loom_spirv_module_builder_emit_string(
-      state->builder, LOOM_SPIRV_MODULE_SECTION_ENTRY_POINT,
-      LOOM_SPIRV_OP_ENTRY_POINT, prefix_operands,
-      IREE_ARRAYSIZE(prefix_operands), entry_name, interface_operands,
-      interface_operand_count, state->context->diagnostic_emitter,
-      state->function_op, state->context->accepted));
   uint32_t workgroup_size_x = 1;
   uint32_t workgroup_size_y = 1;
   uint32_t workgroup_size_z = 1;
@@ -1630,7 +1634,7 @@ static iree_status_t loom_spirv_emit_function_contents(
         state->builtin_interface_variable_ids[i];
   }
   state->emission_plan->emission_complete = true;
-  return state->function_plan->is_entry ? loom_spirv_emit_entry_point(state)
+  return state->function_plan->is_entry ? loom_spirv_emit_entry_metadata(state)
                                         : iree_ok_status();
 }
 
@@ -1686,4 +1690,63 @@ iree_status_t loom_spirv_emit_low_function(
   }
   loom_spirv_emit_function_state_deinitialize(&function_state);
   return status;
+}
+
+iree_status_t loom_spirv_emit_entry_interfaces(
+    const loom_spirv_program_plan_t* program,
+    const loom_spirv_function_emission_plan_t* emission_plans,
+    loom_spirv_module_builder_t* builder, iree_arena_allocator_t* arena,
+    iree_diagnostic_emitter_t emitter, bool* accepted) {
+  const bool all_globals =
+      builder->feature_set.minimum_spirv_version >= UINT32_C(0x00010400);
+  uint32_t inline_operands[16];
+  uint32_t* overflow_operands = NULL;
+  iree_host_size_t capacity = 0;
+  for (iree_host_size_t i = 0; i < program->function_count && *accepted; ++i) {
+    const loom_spirv_function_emission_plan_t* plan = &emission_plans[i];
+    if (!plan->function->is_entry) {
+      continue;
+    }
+    const iree_host_size_t count_bound =
+        LOOM_SPIRV_BUILTIN_VARIABLE_COUNT +
+        (all_globals ? plan->entry_interface.count : 0);
+    uint32_t* operands = inline_operands;
+    if (count_bound > IREE_ARRAYSIZE(inline_operands)) {
+      IREE_RETURN_IF_ERROR(iree_arena_grow_array(
+          arena, 0, count_bound, sizeof(*overflow_operands), &capacity,
+          (void**)&overflow_operands));
+      operands = overflow_operands;
+    }
+    iree_host_size_t count = 0;
+    for (iree_host_size_t j = 0; j < LOOM_SPIRV_BUILTIN_VARIABLE_COUNT; ++j) {
+      if (plan->builtin_interface_variable_ids[j]) {
+        operands[count++] = plan->builtin_interface_variable_ids[j];
+      }
+    }
+    if (all_globals) {
+      for (iree_host_size_t j = 0; j < plan->entry_interface.count; ++j) {
+        operands[count++] = plan->entry_interface.variables[j]->id;
+      }
+    }
+    iree_string_view_t entry_name =
+        loom_spirv_function_plan_target_bundle(plan->function)
+            ->export_plan->export_symbol;
+    if (iree_string_view_is_empty(entry_name)) {
+      entry_name = loom_spirv_emit_symbol_name(program->module,
+                                               plan->function->symbol_ref);
+    }
+    const uint32_t prefix[] = {LOOM_SPIRV_EXECUTION_MODEL_GL_COMPUTE,
+                               plan->function_id};
+    loom_diagnostic_export_scope_t scope = {
+        .export_name =
+            loom_target_facts_export_name(plan->function->target_facts),
+        .target = emitter,
+    };
+    IREE_RETURN_IF_ERROR(loom_spirv_module_builder_emit_string(
+        builder, LOOM_SPIRV_MODULE_SECTION_ENTRY_POINT,
+        LOOM_SPIRV_OP_ENTRY_POINT, prefix, IREE_ARRAYSIZE(prefix), entry_name,
+        operands, count, loom_diagnostic_export_scope_emitter(&scope),
+        plan->function->function_op, accepted));
+  }
+  return iree_ok_status();
 }

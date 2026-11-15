@@ -154,13 +154,12 @@ static iree_status_t loom_spirv_loom_check_parse_emit_request(
                             "unknown spirv-dis option '%.*s'", (int)token.size,
                             token.data);
   }
-  if ((!iree_string_view_is_empty(out_request->function_name) ||
-       !iree_string_view_is_empty(out_request->features) ||
+  if ((!iree_string_view_is_empty(out_request->features) ||
        !iree_string_view_is_empty(out_request->limits)) &&
       !iree_any_bit_set(parse_options,
                         LOOM_SPIRV_LOOM_CHECK_PARSE_OPTION_TARGET)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "spirv-dis @function, features, or limits requires "
+                            "spirv-dis features or limits requires "
                             "target=family:selector");
   }
   if (!out_request->lower_source_to_low &&

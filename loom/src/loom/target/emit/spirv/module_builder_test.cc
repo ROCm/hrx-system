@@ -22,8 +22,11 @@ iree_status_t FinalizeModule(loom_spirv_module_builder_t* builder,
                              loom_spirv_module_binary_t* module) {
   bool accepted = false;
   iree_status_t status =
-      loom_spirv_module_builder_finalize(builder, {}, &accepted, module);
+      loom_spirv_module_builder_prepare(builder, {}, &accepted);
   EXPECT_TRUE(accepted);
+  if (iree_status_is_ok(status) && accepted) {
+    status = loom_spirv_module_builder_finalize(builder, module);
+  }
   return status;
 }
 
