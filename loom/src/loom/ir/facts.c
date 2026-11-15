@@ -795,14 +795,68 @@ void loom_value_facts_refine_divisible_range(loom_value_facts_t* facts) {
       return;
     }
   }
-  // The lattice has no empty set. Contradictory predicates retain their
-  // conservative interval instead of manufacturing an exact value.
-  if (lower > upper) {
+  // The lattice has no empty set. A rounded endpoint also cannot collide with
+  // the opposite unbounded sentinel: [INT64_MAX, +inf] would look exact.
+  if (lower > upper || lower == INT64_MAX || upper == INT64_MIN) {
     return;
   }
   facts->range_lo = lower;
   facts->range_hi = upper;
   facts->flags |= loom_value_facts_compute_flags(lower, upper);
+}
+
+void loom_value_facts_refine_predicate_range(loom_value_facts_t* facts) {
+  if (loom_value_facts_is_float(*facts)) {
+    return;
+  }
+  if (facts->flags & LOOM_VALUE_FACT_POWER_OF_TWO) {
+    const uint64_t divisor = (uint64_t)facts->known_divisor;
+    if ((divisor & (divisor - 1)) || facts->range_hi < 1) {
+      return;
+    }
+    // A positive power of two is divisible by another positive integer only
+    // when that divisor is a power of two no larger than the value.
+    const uint64_t lower = iree_math_round_up_to_pow2_u64((uint64_t)iree_max(
+        facts->known_divisor, iree_max(facts->range_lo, INT64_C(1))));
+    int64_t upper = facts->range_hi;
+    // The unbounded sentinel also covers the upper half of unsigned offsets.
+    // Without a finite bound, the signed payload cannot cap their powers.
+    if (upper != INT64_MAX) {
+      upper = INT64_C(1) << (63 - iree_math_count_leading_zeros_u64(
+                                      (uint64_t)upper));
+    }
+    if (lower > (uint64_t)upper) {
+      return;
+    }
+    facts->range_lo = (int64_t)lower;
+    facts->range_hi = upper;
+    facts->flags |=
+        loom_value_facts_compute_flags(facts->range_lo, facts->range_hi);
+    return;
+  }
+  const int64_t previous_lower = facts->range_lo;
+  const int64_t previous_upper = facts->range_hi;
+  const uint32_t previous_flags = facts->flags;
+  loom_value_facts_refine_divisible_range(facts);
+  if (!(facts->flags & LOOM_VALUE_FACT_NON_ZERO)) {
+    return;
+  }
+  if (facts->range_lo == 0 && facts->range_hi == 0) {
+    // Divisibility may leave only zero, which an independent predicate
+    // excludes.
+    facts->range_lo = previous_lower;
+    facts->range_hi = previous_upper;
+    facts->flags = previous_flags;
+    return;
+  }
+  if (facts->range_lo == 0 && facts->range_hi >= facts->known_divisor &&
+      facts->known_divisor < INT64_MAX) {
+    facts->range_lo = facts->known_divisor;
+  } else if (facts->range_hi == 0 && facts->range_lo <= -facts->known_divisor) {
+    facts->range_hi = -facts->known_divisor;
+  }
+  facts->flags |=
+      loom_value_facts_compute_flags(facts->range_lo, facts->range_hi);
 }
 
 //===----------------------------------------------------------------------===//
@@ -1255,7 +1309,8 @@ void loom_value_facts_apply_predicate(loom_value_facts_t* facts,
       break;
   }
 
-  loom_value_facts_refine_divisible_range(facts);
+  facts->flags |= preserved_predicate_flags;
+  loom_value_facts_refine_predicate_range(facts);
   loom_value_facts_recompute_flags(facts);
   facts->flags |= preserved_predicate_flags;
 }
