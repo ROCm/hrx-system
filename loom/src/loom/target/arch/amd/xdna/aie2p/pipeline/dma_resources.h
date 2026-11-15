@@ -55,6 +55,8 @@ loom_aie2p_native_dma_completion_t* loom_aie2p_native_reusable_completion(
 // Admits the required task geometry before any optional address variants.
 // Physical inventory tails belong to resource_owner, which may cover several
 // serialized worker occurrences. Runtime addressing never changes this order.
+// After an occurrence retires, its descriptor storage can serve another path
+// in the same physical bank; entry restoration installs the complete geometry.
 iree_status_t loom_aie2p_native_select_task_descriptors(
     loom_aie2p_native_context_t* context, loom_aie2p_native_worker_t* worker,
     loom_aie2p_native_worker_t* resource_owner,

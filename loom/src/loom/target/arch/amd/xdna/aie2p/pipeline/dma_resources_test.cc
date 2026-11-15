@@ -287,13 +287,14 @@ class DmaAddressVariantsTest
 
   void AddTask(uint32_t address, uint32_t count = 1, bool local_dynamic = false,
                bool external_dynamic = false, uint32_t binding = 0,
-               uint32_t words = 1) {
+               uint32_t words = 1,
+               loom_aie2p_native_dma_path_t* path = nullptr) {
     tasks_.emplace_back();
     auto& record = tasks_.back();
     const uint32_t position = static_cast<uint32_t>(tasks_.size() - 1) * 8;
     record.completion.parent_block = &block_;
     record.completion.block_ordinal = position + count;
-    record.task.path = &path_;
+    record.task.path = path ? path : &path_;
     record.task.first_transfer = record.transfers;
     record.task.last_transfer = &record.transfers[count - 1];
     record.task.transfer_count = count;
@@ -476,6 +477,77 @@ TEST_P(DmaAddressVariantsTest, SerialReentryRestoresShortAndLongChains) {
       }
     }
   }
+}
+
+TEST_P(DmaAddressVariantsTest, RetiredPathsSharePhysicalDescriptorStorage) {
+  LeaveDescriptors(1);
+  AddTask(0, 1, false, false, 0, 1);
+  loom_aie2p_native_dma_path_t other = path_;
+  other.local_engine ^= std::get<0>(GetParam()) ? 2 : 1;
+  other.ingress = !path_.ingress;
+  other.completion_tokens = std::get<0>(GetParam()) ? 2 : other.ingress ? 0 : 1;
+  worker_index_ = 1;
+  AddTask(16, 1, false, false, 1, 3, &other);
+  worker_index_ = 2;
+  AddTask(0, 1, false, false, 0, 1);
+  Refine();
+  const auto* first = tasks_[0].task.local_descriptor;
+  const auto* middle = tasks_[1].task.local_descriptor;
+  ASSERT_NE(first->storage, nullptr);
+  EXPECT_EQ(first->storage, middle->storage);
+  EXPECT_EQ(first->sequence.descriptor, middle->sequence.descriptor);
+  EXPECT_EQ(first, tasks_[2].task.local_descriptor);
+  EXPECT_EQ(first->path, &path_);
+  EXPECT_EQ(middle->path, &other);
+  EXPECT_NE(loom_aie2p_native_descriptor_word(first, 0, 0),
+            loom_aie2p_native_descriptor_word(middle, 0, 0));
+  EXPECT_TRUE(first->storage->changed_words[0] & 1u);
+  if (!std::get<0>(GetParam())) {
+    const uint8_t lock_word = local_.memory_layout->lock_word;
+    EXPECT_NE(loom_aie2p_native_descriptor_word(first, 0, lock_word),
+              loom_aie2p_native_descriptor_word(middle, 0, lock_word));
+    EXPECT_TRUE(first->storage->changed_words[0] & (1u << lock_word));
+  }
+  for (size_t i = 0; i < 3; ++i) {
+    const auto* initializer = workers_[i].dma_initializers;
+    ASSERT_NE(initializer, nullptr);
+    EXPECT_EQ(initializer->descriptor, tasks_[i].task.local_descriptor);
+  }
+}
+
+TEST_P(DmaAddressVariantsTest, QueueParitySeparatesOnlyMemoryTileBanks) {
+  LeaveDescriptors(1);
+  AddTask(0, 1, false, false, 0, 1);
+  loom_aie2p_native_dma_path_t other = path_;
+  other.local_engine ^= 1;
+  worker_index_ = 1;
+  AddTask(16, 1, false, false, 1, 3, &other);
+  Refine();
+  const auto* first = tasks_[0].task.local_descriptor;
+  const auto* second = tasks_[1].task.local_descriptor;
+  if (std::get<0>(GetParam())) {
+    EXPECT_EQ(first->storage, nullptr);
+    EXPECT_EQ(second->storage, nullptr);
+    EXPECT_NE(first->sequence.descriptor, second->sequence.descriptor);
+  } else {
+    ASSERT_NE(first->storage, nullptr);
+    EXPECT_EQ(first->storage, second->storage);
+    EXPECT_EQ(first->sequence.descriptor, second->sequence.descriptor);
+  }
+}
+
+TEST_P(DmaAddressVariantsTest, OneEntryKeepsDifferentPathsDistinct) {
+  LeaveDescriptors(2);
+  AddTask(0, 1, false, false, 0, 1);
+  loom_aie2p_native_dma_path_t other = path_;
+  other.local_engine ^= std::get<0>(GetParam()) ? 2 : 1;
+  AddTask(16, 1, false, false, 1, 3, &other);
+  Refine();
+  const auto* first = tasks_[0].task.local_descriptor;
+  const auto* second = tasks_[1].task.local_descriptor;
+  EXPECT_EQ(first->storage, nullptr);
+  EXPECT_EQ(second->storage, nullptr);
+  EXPECT_NE(first->sequence.descriptor, second->sequence.descriptor);
 }
 
 TEST_P(DmaAddressVariantsTest, OneEntryKeepsItsDifferentGeometriesDistinct) {

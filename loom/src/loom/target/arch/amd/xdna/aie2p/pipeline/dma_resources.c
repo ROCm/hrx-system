@@ -263,14 +263,23 @@ static iree_status_t loom_aie2p_native_allocate_task_descriptor(
       const loom_aie2p_native_dma_descriptor_t* active =
           storage ? storage->active : candidate;
       if (candidate->shim != shim || (storage && storage->first != candidate) ||
-          (shim ? candidate->path->shim != task->path->shim
-                : candidate->path != task->path) ||
           candidate->sequence.descriptor_count < task->transfer_count ||
           active->last_transfer->worker_index == next->worker_index ||
           (active->completion &&
            !loom_aie2p_native_transfer_retired(
                active->completion->last_transfer, next->worker_index,
                next->source->request.op))) {
+        continue;
+      }
+      // Complete entry restoration replaces path-specific address apertures
+      // and completion fields. Retired slots belong to the physical bank,
+      // independently of the queue or direction that previously used them.
+      uint16_t candidate_base, candidate_count;
+      uint16_t* candidate_bank = loom_aie2p_native_descriptor_bank(
+          shim ? candidate->path->shim : candidate->path->local,
+          shim ? candidate->path->shim_engine : candidate->path->local_engine,
+          &candidate_base, &candidate_count);
+      if (candidate_bank != next_descriptor) {
         continue;
       }
       shared = candidate;
