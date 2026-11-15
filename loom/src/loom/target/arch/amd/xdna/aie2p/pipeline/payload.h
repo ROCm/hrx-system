@@ -22,7 +22,8 @@ typedef struct loom_aie2p_native_payload_endpoint_t {
 
 // One immutable destination set on a physical DMA sender.
 typedef struct loom_aie2p_native_payload_class_t {
-  // Next class in stable first-use order.
+  // Next class in decreasing maximum destination distance; endpoint order
+  // breaks distance ties, and identical first endpoints retain insertion order.
   struct loom_aie2p_native_payload_class_t* next;
   // Physical sender whose framing and packet namespace this class uses.
   struct loom_aie2p_native_payload_source_t* source;
@@ -74,8 +75,10 @@ iree_status_t loom_aie2p_native_form_payloads(
     loom_aie2p_native_context_t* context,
     const loom_pipeline_realization_t* realization, bool* out_valid);
 
-// Realizes a class once, sharing the physical sender's route tree across all
-// transport families and preserving its packet identity along every edge.
+// Realizes the sender's complete destination inventory once, longest paths
+// first. All classes share its physical prefix, including classes requested
+// later by another transport family. Each class retains its own route interval
+// and packet identity; subsequent requests consume those retained routes.
 iree_status_t loom_aie2p_native_route_payload(
     loom_aie2p_native_context_t* context,
     loom_aie2p_native_payload_class_t* payload, const loom_op_t* op,

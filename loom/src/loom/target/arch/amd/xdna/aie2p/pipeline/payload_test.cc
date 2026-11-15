@@ -13,6 +13,7 @@
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/target/arch/amd/xdna/aie2p/array/route.h"
+#include "loom/target/arch/amd/xdna/aie2p/pipeline/connectivity.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/dma_queues.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/input.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/switch.h"
@@ -146,17 +147,21 @@ TEST_F(PayloadTest, SourceOwnsPrefixesIndependentlyOfRouteLabels) {
     IREE_ASSERT_OK(loom_aie2p_native_route_payload(
         &context_, paths_[i].payload, nullptr, &next_source, &valid));
     ASSERT_TRUE(valid);
-    EXPECT_EQ(next_source, 1001 + i);
+    EXPECT_EQ(next_source, 1002);
     EXPECT_NE(paths_[i].payload->source->tree.root_index, 0u);
     if (i == 0) {
       root = paths_[i].payload->source->tree.root_index;
     }
     EXPECT_EQ(paths_[i].payload->source->tree.root_index, root);
   }
-  const auto& terminal = routes[context_.routing.route_count - 1];
-  EXPECT_EQ(terminal.edge->coordinate.row, 3);
-  EXPECT_TRUE(terminal.edge->dma_destination);
-  EXPECT_EQ(terminal.packet, 1);
+  for (size_t i = 0; i < 2; ++i) {
+    const auto* payload = paths_[i].payload;
+    const auto& terminal =
+        routes[payload->route_first + payload->route_count - 1];
+    EXPECT_EQ(terminal.edge->coordinate.row, 2 + i);
+    EXPECT_TRUE(terminal.edge->dma_destination);
+    EXPECT_EQ(terminal.packet, i);
+  }
 }
 
 TEST_F(PayloadTest, PhasedInputAndOrdinaryIngressUseTheSamePhysicalClass) {
@@ -178,6 +183,63 @@ TEST_F(PayloadTest, PhasedInputAndOrdinaryIngressUseTheSamePhysicalClass) {
   EXPECT_TRUE(phase.payload->source->framed);
   EXPECT_EQ(phase.payload->source->class_count, 1);
   EXPECT_FALSE(phase.payload->distribution_only);
+}
+
+TEST_F(PayloadTest, LaterPassthroughConstrainsAnEarlierShortIngress) {
+  loom::testing::DiagnosticEmissionCapture diagnostics;
+  pass_.diagnostic_emitter = diagnostics.emitter();
+  Ordinary(0, 1, true);
+  Ordinary(1, 3, true);
+  Form();
+  IREE_ASSERT_OK(loom_aie2p_array_route_builder_initialize(
+      context_.family, 32, &arena_, &context_.routing));
+  loom_aie2p_native_route_t routes[32] = {};
+  context_.routes = routes;
+  // The SRAM sender occupies north lane zero. A shim packet terminating in
+  // SRAM may arrive on south lane zero, but that lane cannot subsequently
+  // pass through: the SRAM switch pairs south/north passthrough lanes.
+  loom_aie2p_array_route_tree_t sram = {};
+  ASSERT_TRUE(loom_aie2p_array_route_stream(
+      &context_.routing, 0, &sram, {0, 1}, LOOM_XDNA_STREAM_PORT_DMA, 0, {0, 3},
+      LOOM_XDNA_STREAM_PORT_DMA, 1, true));
+  loom_aie2p_native_route_label(&context_, 0, 7, UINT32_MAX);
+  uint32_t next_source = 1;
+  for (size_t i = 0; i < 2; ++i) {
+    bool valid = false;
+    IREE_ASSERT_OK(loom_aie2p_native_route_payload(
+        &context_, paths_[i].payload, nullptr, &next_source, &valid));
+    ASSERT_TRUE(valid);
+  }
+  const loom_aie2p_native_switch_input_t input = {.routing = &context_.routing,
+                                                  .routes = context_.routes};
+  iree_string_view_t requirement = iree_string_view_empty();
+  IREE_ASSERT_OK(loom_aie2p_native_switches_build(
+      &input, &arena_, &context_.switches, &requirement));
+  ASSERT_TRUE(iree_string_view_is_empty(requirement));
+  loom_aie2p_native_connectivity_t* connectivity = nullptr;
+  IREE_ASSERT_OK(loom_aie2p_native_connectivity_allocate(
+      context_.family, context_.switches, context_.routing.routes,
+      context_.routing.route_count, &arena_, &connectivity));
+  const loom_aie2p_native_connection_endpoint_t shim = {
+      {0, 0}, LOOM_XDNA_STREAM_PORT_DMA, 0};
+  for (size_t i = 0; i < 2; ++i) {
+    const loom_aie2p_native_connection_endpoint_t destination = {
+        paths_[i].local->coordinate, LOOM_XDNA_STREAM_PORT_DMA, 0};
+    EXPECT_EQ(loom_aie2p_native_connectivity_check(connectivity, shim,
+                                                   paths_[i].payload->packet,
+                                                   &destination, 1, false)
+                  .failure,
+              LOOM_AIE2P_NATIVE_CONNECTIVITY_NONE);
+  }
+  const loom_aie2p_native_connection_endpoint_t sender = {
+      {0, 1}, LOOM_XDNA_STREAM_PORT_DMA, 0};
+  const loom_aie2p_native_connection_endpoint_t consumer = {
+      {0, 3}, LOOM_XDNA_STREAM_PORT_DMA, 1};
+  EXPECT_EQ(loom_aie2p_native_connectivity_check(connectivity, sender, 7,
+                                                 &consumer, 1, false)
+                .failure,
+            LOOM_AIE2P_NATIVE_CONNECTIVITY_NONE);
+  EXPECT_TRUE(diagnostics.emissions.empty());
 }
 
 TEST_F(PayloadTest, MulticastClassesIgnoreDestinationEnumerationOrder) {

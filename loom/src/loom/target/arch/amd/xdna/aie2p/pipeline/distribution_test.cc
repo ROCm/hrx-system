@@ -558,8 +558,16 @@ TEST_P(DistributionPathTest, PacketItinerariesRetainNewDestinationClasses) {
   ASSERT_NE(Select(0), nullptr);
   const auto first_routes = context_.routing.route_count;
   EXPECT_GT(first_routes, 0u);
+  // Selecting the sender admits its complete class inventory. The later
+  // itinerary consumes those routes without extending an already fixed prefix.
+  EXPECT_TRUE(second->path->payloads[0]->routed);
+  EXPECT_TRUE(second->path->payloads[1]->routed);
+  EXPECT_GT(second->path->payloads[0]->route_count, 0u);
+  EXPECT_GT(second->path->payloads[1]->route_count, 0u);
+  EXPECT_NE(second->path->payloads[0]->packet,
+            second->path->payloads[1]->packet);
   ASSERT_NE(Select(2), nullptr);
-  EXPECT_GT(context_.routing.route_count, first_routes);
+  EXPECT_EQ(context_.routing.route_count, first_routes);
   EXPECT_EQ(first->sender.sequence.descriptor_count, 1);
   EXPECT_EQ(second->sender.sequence.descriptor_count, 2);
 }
